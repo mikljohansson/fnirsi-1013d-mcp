@@ -215,3 +215,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   0x1532: #VER proto=1.4, caps 0x7C03 unchanged, census 1000 PINGs 0/0, 100 x 64 KiB 0 failed, 0.99 MB/s. Observation on 0.2.8 and 0.2.9: the
   first TEST_PATTERN (492 B) right after a FEL load timed out once (5 s) and was fine on every rerun; not seen on 0.2.6/0.2.7; watching.
   Owner's menu checks on the compacted layout pending. Card holds 0.2.7.
+- Firmware 0.2.10 (commit 6d4adfe, sha256 9d332251..., pinned backups/fw-0.2.10-9d332251.bin): MCP chip rendered once and blitted idempotently
+  (the 0.2.7 flicker was the refresh's own clear-then-draw every 100 ms), "Roll mode on/off" label on the acquisition-menu toggle, back-pressure
+  issue parked in firmware/AGENTS.md. Loaded hands-free; census 1000 PINGs 0/0, 100 x 64 KiB 0 failed, 1.00 MB/s; first TEST_PATTERN after boot
+  fine this time (26 ms). Owner's chip/menu checks pending; card holds 0.2.7.
