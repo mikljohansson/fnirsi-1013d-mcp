@@ -27,3 +27,7 @@ __pycache__/
 .vscode/
 *.swp
 Thumbs.db
+
+# FPGA bitstream images stay on disk; only the provenance README is tracked
+fpga/al3/bitstreams/*
+!fpga/al3/bitstreams/README.md
