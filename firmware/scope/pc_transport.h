@@ -74,6 +74,11 @@ void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
 //Event log (fw 0.2.12, GET_EVENT_LOG): the last PC_EVLOG_SIZE USB / link events with their ms time
 #define PC_EVLOG_SIZE         128   //fw 0.2.15 (64 before)
 #define PC_EVSNAP_SIZE        16    //events frozen at a bus reset (fw 0.2.15)
+#define PC_EVBUS_SIZE         16    //fw 0.2.24: last bus-level events, a ring the EP0 / DTR chatter cannot evict
+//Types copied into it: 1-4 (reset, suspend, resume, disconnect), 7, 8, 12, 13, 15-18
+#define PC_EVBUS_TYPES        ((1u << 1) | (1u << 2) | (1u << 3) | (1u << 4) | (1u << 7) | (1u << 8) | (1u << 12) |\
+                               (1u << 13) | (1u << 15) | (1u << 16) | (1u << 17) | (1u << 18))
+#define PC_SETUP_REPEAT_MS    1000  //fw 0.2.24: a setup identical to the last logged one is logged at most once per second
 #define PC_EVT_BUS_RESET      1
 #define PC_EVT_SUSPEND        2
 #define PC_EVT_RESUME         3

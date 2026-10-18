@@ -73,6 +73,10 @@ static volatile uint32 pc_evsnap_n;
 static volatile uint32 pc_evsnap_ms;
 static volatile uint8  pc_evsnap_frozen;
 
+//Bus-level events only (fw 0.2.24, PC_EVBUS_TYPES)
+static pc_evlog_entry  pc_evbus[PC_EVBUS_SIZE];
+static volatile uint32 pc_evbus_n;
+
 static void pc_evlog_add(uint8 type, uint8 a, uint16 b)
 {
   pc_evlog_entry *en = &pc_evlog[pc_evlog_n & (PC_EVLOG_SIZE - 1)];
@@ -95,6 +99,9 @@ static void pc_evlog_add(uint8 type, uint8 a, uint16 b)
   en->a    = a;
   en->b    = b;
   pc_evlog_n++;
+
+  if((type < 32) && (PC_EVBUS_TYPES & (1u << type)))
+    pc_evbus[pc_evbus_n++ & (PC_EVBUS_SIZE - 1)] = *en;
 }
 static volatile uint8  pc_ep2_configured;    //SET_CONFIGURATION set up EP2 since the last bus reset
 
@@ -552,8 +559,18 @@ void pc_usb_isr_configured(void)
 
 void pc_usb_isr_setup(uint32 d0, uint32 d1)
 {
+  static uint32 last_key, last_ms;
+  uint32 key = d0 & 0x00FFFFFF, now = pc_hal_ms();
+
   (void)d1;
   pc_usb_ev[PC_USB_EV_SETUP]++;
+
+  //fw 0.2.24: pyserial repeats GET_LINE_CODING about five times per open; counter 39 still counts every setup
+  if(pc_evlog_n && (key == last_key) && ((now - last_ms) < PC_SETUP_REPEAT_MS))
+    return;
+
+  last_key = key;
+  last_ms  = now;
   pc_evlog_add(PC_EVT_SETUP, (uint8)(d0 >> 8), (uint16)(((d0 & 0xFF) << 8) | ((d0 >> 16) & 0xFF)));
 }
 
@@ -593,6 +610,27 @@ uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total)
 
 //The reset snapshot (entries as above), *reset_ms = when it was taken; returns its size, -1 when none is frozen.
 //Only rearm re-arms it (fw 0.2.18: a plain read kept nothing frozen if the host read the log at every session open)
+uint32_t pc_hal_event_bus(uint8_t *dst, uint32_t *total)
+{
+  uint32 cpsr = pc_irq_save();
+  uint32 n = pc_evbus_n, k = (n < PC_EVBUS_SIZE) ? n : PC_EVBUS_SIZE, i;
+
+  for(i=0;i<k;i++)
+  {
+    const pc_evlog_entry *en = &pc_evbus[(n - k + i) & (PC_EVBUS_SIZE - 1)];
+    uint8_t *p = dst + 8 * i;
+
+    p[0] = (uint8_t)en->ms; p[1] = (uint8_t)(en->ms >> 8); p[2] = (uint8_t)(en->ms >> 16); p[3] = (uint8_t)(en->ms >> 24);
+    p[4] = en->type;
+    p[5] = en->a;
+    p[6] = (uint8_t)en->b; p[7] = (uint8_t)(en->b >> 8);
+  }
+
+  *total = n;
+  pc_irq_restore(cpsr);
+  return k;
+}
+
 int32_t pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms, int rearm)
 {
   uint32 cpsr = pc_irq_save();

@@ -202,6 +202,7 @@ uint32_t pc_hal_boot_splash_ms(void);
 void     pc_hal_restart_info(uint32_t *v);           //fw 0.2.17: ms spent on the boot splash step + 1 (0 = not run)
 uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total);
 int32_t  pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms, int rearm);   //-1 = none frozen; rearm clears it
+uint32_t pc_hal_event_bus(uint8_t *dst, uint32_t *total);      //fw 0.2.24: bus-level ring (<= 16 entries), *total since boot
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // SD card (MAIN context only: the driver is not reentrant). Return 0 or the negative driver error.

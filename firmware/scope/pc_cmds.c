@@ -733,7 +733,8 @@ static int h_get_event_log(pc_session *s, const uint8_t *req, uint32_t len, uint
 
   int32_t  m;
   uint32_t reset_ms;
-  uint8_t *snap;
+  uint8_t *snap, *bus;
+  uint32_t k, bus_total;
 
   (void)len;
 
@@ -751,7 +752,14 @@ static int h_get_event_log(pc_session *s, const uint8_t *req, uint32_t len, uint
   pc_put_u16(snap, (uint16_t)((m > 0) ? m : 0));
   pc_put_u16(snap + 2, (uint16_t)(m >= 0));
   pc_put_u32(snap + 4, (m >= 0) ? reset_ms : 0);
-  *rl = 12 + 8 * n + 8 + 8 * ((m > 0) ? m : 0);
+
+  //fw 0.2.24: bus-level ring tail (u16 k, u16 0, u32 bus events since boot, k entries oldest first)
+  bus = snap + 8 + 8 * ((m > 0) ? m : 0);
+  k = pc_hal_event_bus(bus + 8, &bus_total);
+  pc_put_u16(bus, (uint16_t)k);
+  pc_put_u16(bus + 2, 0);
+  pc_put_u32(bus + 4, bus_total);
+  *rl = (uint32_t)(bus + 8 + 8 * k - resp);
   return PC_OK;
 }
 

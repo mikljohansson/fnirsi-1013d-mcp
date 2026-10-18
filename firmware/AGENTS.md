@@ -406,7 +406,7 @@ the snapshot after this read; other bits E_BAD_ARG detail 0). Response: u16 n (<
 u32 total events since boot, u32 now (ms, same clock as uptime_ms), n entries oldest first (u32 ms, u8 type, u8 a,
 u16 b). Since 0.2.15 a snapshot tail follows: u16 m (<= 16), u16 frozen (1 = a bus reset froze it), u32 reset ms, m
 entries (the events before the first bus reset since the snapshot was armed). 0.2.15-0.2.17 re-armed at every read;
-0.2.18+ only with flag bit 0. Types (pc_transport.h): 1 bus reset, 2 suspend, 3 resume, 4 disconnect, 5 EP0 setup
+0.2.18+ only with flag bit 0. 0.2.24+ appends the bus-level ring: u16 k (<= 16), u16 0, u32 total, k entries (types 1-4, 7, 8, 12, 13, 15-18 only); identical EP0 setups are logged at most once per second. Types (pc_transport.h): 1 bus reset, 2 suspend, 3 resume, 4 disconnect, 5 EP0 setup
 (a = bRequest, b = bmRequestType << 8 | wValue low), 6 EP0 packet not 8 bytes (b = COUNT0), 7 SET_CONFIGURATION,
 8 CLEAR_FEATURE(HALT) (a = endpoint), 9 DTR (a = new DTR), 10 RX ring full, 11 RX release, 12 TX flushed, 13 TX
 aborted, 14 retired since 0.2.21 (0.2.12-0.2.20: flags found by the tick, a = INTUSB, b = INTTX << 8 | INTRX; at most one per 100 ms; 0.2.20: low 7 bits each as read, bit 15 EP0 condition, bit 7 EP2 OUT condition), 15 restart
