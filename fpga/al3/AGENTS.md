@@ -10,9 +10,21 @@ State on 2026-10-18:
   to that bitstream in about 15 s.
 - `src/` now holds our design, version word **0x1533**: the external trigger on the calibration pin (roadmap item 2;
   commits 526c969, 4601dec, 2839258). It is built (`out/FPGA-ext-trigger.bin`, sha256 `a9656703...1216`), meets
-  timing and passes the iverilog testbench. It is **not flashed**. Firmware support exists in fw 0.2.9 (commit bebf901,
-  not benched): 0x153x decodes as AL3, caps EXT_TRIGGER, 0x28 in GET_STATUS byte 42. Next are the flash and the
-  bench checks in `README.md` "Changes", with that firmware loaded first.
+  timing and passes the iverilog testbench.
+- Bench status of 0x1533:
+  - Pinned copy: `backups/al3_ext-trigger_0x1533_a9656703.bin`.
+  - **Not flashed.** It needs fw 0.2.9 or later on the MCU first. 0.2.9 (commit bebf901) decodes 0x153x as AL3,
+    sets caps EXT_TRIGGER and reports 0x28 in GET_STATUS byte 42.
+  - Flashing waits for the owner at the bench with the FT2232D programmer, following "Flashing this unit" below.
+    The verified stock dump `backups/2026-10-18_fpga-25q80-stock.bin` must be at hand; never flash without it.
+- Calibration pin: the owner's DMM confirmed -1.23 / +1.87 V on the post against the probe ground (2026-10-18). That
+  matches VRF1, the probe ground, sitting about +1.24 V above FPGA/USB ground (`README.md` "Changes" section 2).
+- Pending with the owner: bench tests 1 to 4 of that section.
+  1. EXT referenced to USB ground.
+  2. EXT on the probe ground, without and with a series LED.
+  3. Ground-loop check.
+  4. Open post.
+  Then the EXT-to-CH1 skew at 200, 10 and 1 MSa/s, and `docs/hardware-status.md` updated after each step.
 
 ## What is here
 
