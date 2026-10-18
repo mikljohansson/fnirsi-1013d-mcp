@@ -47,6 +47,7 @@ fnirsi1013d-sim --variant al3 --port 5555 --signal decay:tau=80us
 | `--trigger-align-offset N` | offset of the latched `trigger_addr` against the crossing word (test T5) |
 | `--time-scale X` | scales modelled acquisition time; 0 completes captures instantly |
 | `--seed N` | reproducible noise and phases |
+| `--fail-responses-over BYTES` | never send larger responses, like firmware 0.1.0 on the unit (over 5 KiB failed, T2) |
 
 Signal specs are `kind:key=value,...` with SI units, at the BNC in volts:
 
@@ -90,6 +91,10 @@ count when the `#VER` probe answers `#OK,FNIRSI-1013D-AI,...`.
 | `FNIRSI_MCP_GEN_MAX_DUTY` | 50 | generator duty ceiling, percent |
 | `FNIRSI_MCP_DATA_DIR` | `mcp/data` | `.npz` output, one folder per day |
 | `FNIRSI_MCP_AUDIT_LOG` | `mcp/logs/audit.jsonl` | JSONL log of every tier 1+ call (empty string disables) |
+| `FNIRSI_MCP_MAX_RESPONSE` | device limit | largest response payload requested at once (`--max-response`); READ_RAW, READ_TRACE and READ_SCREEN are split, and device averaging falls back to the host when its result would not fit |
+
+Until the firmware's large-response bug (T2, docs/hardware-status.md) is fixed, run against the real scope with
+`--max-response 4096`.
 
 ### Claude Code
 

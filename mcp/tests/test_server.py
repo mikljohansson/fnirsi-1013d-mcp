@@ -447,3 +447,17 @@ async def test_errors_are_actionable(client):
     assert "outside the capture" in msg
     msg = await client.fails("scope_averaged_capture", n=2, window=["0", "-1us"])
     assert "after start" in msg
+
+
+async def test_response_cap_keeps_tools_working(sim_factory, tmp_path):
+    """Firmware 0.1.0 dropped responses over 5 KiB; with max_response the server splits reads and device
+    averaging falls back to the host when its result would not fit."""
+    srv = sim_factory(signal="decay:tau=80us,amp=0.3", fail_responses_over=5120)
+    async with client_for(srv, tmp_path, max_response=5120) as c:
+        await setup_decay(c)
+        r = await c.call("scope_capture", channels=["CH1", "CH2"])
+        assert r["n_samples"] == 16000
+        r = await c.call("scope_decay_fit", edge_channel="CH2", t_start="5us", t_end="400us", n_avg=8)
+        assert abs(r["tau"] - 80e-6) / 80e-6 < 0.03
+        r = await c.call("scope_averaged_capture", n=4, reject_clipped=False, on_device=True)
+        assert r["averaging"] == "host" and any("does not fit" in x for x in r["caveats"])

@@ -245,6 +245,8 @@ class SimConfig:
     fw_version: str = "0.1.0-sim"
     serial: str = "SIM00001"
     ui_capture_period_s: float = 0.05
+    #: drop (never send) responses with a larger payload, like firmware 0.1.0 on hardware (> 5 KiB failed)
+    fail_responses_over: int | None = None
 
 
 class Deferred:
@@ -1407,6 +1409,10 @@ class SimServer:
                 pass
 
     def _send(self, client: socket.socket, resp: P.Frame) -> None:
+        lim = self.device.cfg.fail_responses_over
+        if lim is not None and len(resp.payload) > lim:
+            log.info("dropping %d-byte response (fail_responses_over=%d)", len(resp.payload), lim)
+            return
         if self.drop_next:
             self.drop_next -= 1
             return
@@ -1438,7 +1444,7 @@ def build_config(args: argparse.Namespace) -> SimConfig:
     return SimConfig(variant=args.variant, signals=(ch1, ch2), noise_lsb=args.noise,
                      hw_read_lag=args.hw_read_lag, fw_read_lag=args.fw_read_lag, true_order=args.true_order,
                      trigger_align_offset=args.trigger_align_offset, time_scale=args.time_scale,
-                     seed=args.seed)
+                     seed=args.seed, fail_responses_over=args.fail_responses_over)
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -1459,6 +1465,8 @@ def make_parser() -> argparse.ArgumentParser:
     ap.add_argument("--time-scale", type=float, default=1.0,
                     help="scale modelled acquisition time (0 = instant captures)")
     ap.add_argument("--seed", type=int)
+    ap.add_argument("--fail-responses-over", type=int, metavar="BYTES",
+                    help="never send responses with a larger payload (reproduces the 5 KiB firmware bug)")
     ap.add_argument("-v", "--verbose", action="store_true")
     return ap
 

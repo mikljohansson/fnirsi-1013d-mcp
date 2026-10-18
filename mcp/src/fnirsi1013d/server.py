@@ -75,6 +75,8 @@ class ServerConfig:
     token_ttl_s: float = 120.0
     keepalive_s: float = 5.0
     inline_max_points: int = 2000
+    #: cap on one response payload; larger reads are split (None = the device's max_response_payload)
+    max_response: int | None = None
 
     @classmethod
     def from_env(cls, **override: Any) -> "ServerConfig":
@@ -85,6 +87,8 @@ class ServerConfig:
         cfg.enable_raw = e.get("FNIRSI_MCP_ENABLE_RAW", "0") not in ("0", "", "false", "False")
         cfg.gen_max_hz = float(e.get("FNIRSI_MCP_GEN_MAX_HZ", cfg.gen_max_hz))
         cfg.gen_max_duty = float(e.get("FNIRSI_MCP_GEN_MAX_DUTY", cfg.gen_max_duty))
+        if e.get("FNIRSI_MCP_MAX_RESPONSE"):
+            cfg.max_response = int(e["FNIRSI_MCP_MAX_RESPONSE"])
         if "FNIRSI_MCP_DATA_DIR" in e:
             cfg.data_dir = Path(e["FNIRSI_MCP_DATA_DIR"])
         if "FNIRSI_MCP_AUDIT_LOG" in e:
@@ -156,7 +160,7 @@ class Session:
     def get_scope(self) -> Scope:
         if self.scope is None:
             try:
-                self.scope = Scope.connect(self.cfg.port)
+                self.scope = Scope.connect(self.cfg.port, max_response=self.cfg.max_response)
             except TransportError as e:
                 raise ToolError(f"cannot connect to the scope at {self.cfg.port!r}: {e}") from e
         return self.scope
@@ -1094,13 +1098,17 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             pre = trig.pretrigger_samples
             a, cnt = _sample_window(s, w)
             prof = s.profile()
+            dev_fits = 16 + 2 * cnt * len(chans) <= s.response_limit
             use_dev = (prof.has(P.Caps.DEVICE_AVERAGE) and align == "hardware" and on_device is not False
-                       and not reject_clipped)
+                       and not reject_clipped and dev_fits)
             if on_device and not prof.has(P.Caps.DEVICE_AVERAGE):
                 notes.append("on_device requested but the firmware has no ACQUIRE_AVG; averaged on the host")
             if on_device and align != "hardware":
                 notes.append("on_device averaging supports hardware alignment only; averaged on the host")
-            if on_device and reject_clipped and align == "hardware" and prof.has(P.Caps.DEVICE_AVERAGE):
+            if on_device and not dev_fits:
+                notes.append("on_device: the averaged window does not fit one response; averaged on the host")
+            if on_device and reject_clipped and align == "hardware" and prof.has(P.Caps.DEVICE_AVERAGE) and \
+                    dev_fits:
                 use_dev = True
                 notes.append("on_device: clipped captures cannot be rejected on the device")
             t0 = time.monotonic()
@@ -1897,6 +1905,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--enable-raw", action="store_true", default=None, help="allow tier 4 (raw FPGA, FEL)")
     ap.add_argument("--data-dir", type=Path, help="where .npz files go (env FNIRSI_MCP_DATA_DIR)")
     ap.add_argument("--audit-log", type=Path, help="JSONL audit log (env FNIRSI_MCP_AUDIT_LOG)")
+    ap.add_argument("--max-response", type=int, help="largest response payload requested in one frame; larger "
+                    "reads are split (env FNIRSI_MCP_MAX_RESPONSE)")
     ap.add_argument("--sim", metavar="SIM_ARGS", help="start an in-process simulator and connect to it, e.g. "
                     "--sim \"--variant al3 --signal decay:tau=80us\" (overrides --port; for development)")
     ap.add_argument("--transport", choices=("stdio", "streamable-http"), default="stdio")
@@ -1905,7 +1915,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO if a.verbose else logging.WARNING, stream=sys.stderr,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     cfg = ServerConfig.from_env(port=a.port, max_tier=a.max_tier, enable_raw=a.enable_raw, data_dir=a.data_dir,
-                                audit_log=a.audit_log)
+                                audit_log=a.audit_log, max_response=a.max_response)
     preload_native_modules()
     sim = None
     if a.sim is not None:

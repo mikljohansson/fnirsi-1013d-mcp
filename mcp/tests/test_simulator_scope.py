@@ -9,7 +9,7 @@ import pytest
 
 from fnirsi1013d import protocol as P
 from fnirsi1013d.scope import Scope, compensate, interleave
-from fnirsi1013d.transport import DeviceError
+from fnirsi1013d.transport import DeviceError, TransportError
 
 
 def remote_scope(srv) -> Scope:
@@ -328,3 +328,29 @@ def test_helpers():
     assert list(interleave(a, b, 0)) == [2, 1, 4, 3, 6, 5]
     assert list(interleave(a, b, 1)) == [1, 2, 3, 4, 5, 6]
     assert list(compensate(np.array([0, 250, 128], dtype=np.uint8), 10)) == [10, 255, 138]
+
+
+def test_chunked_reads_match_single_reads(sim_factory):
+    """With a 5 KiB response cap (firmware 0.1.0 on hardware) READ_RAW, READ_TRACE and READ_SCREEN are split
+    and give the same data; the simulator drops anything larger, as the real firmware did."""
+    srv = sim_factory(fail_responses_over=5120)
+    small = Scope.connect(srv.url, max_response=5120)
+    try:
+        small.take_remote(watchdog_s=0)
+        small.set_trigger(mode=0, pretrigger_samples=1000, total_samples=16000)
+        cap = small.capture(["CH1", "CH2"], 1.0, keep_raw=True)
+        assert cap.n == 16000
+        srv.device.cfg.fail_responses_over = None
+        ref = small.read_raw(0x0F, count=8000)
+        srv.device.cfg.fail_responses_over = 5120
+        for c in range(4):
+            raw = (cap.channels["CH1"] if c < 2 else cap.channels["CH2"])
+            assert np.array_equal(raw.raw_a if c % 2 == 0 else raw.raw_b, ref[1][c])
+        hdr, tr = small.read_trace(["CH1", "CH2"])
+        assert hdr.count == 16000 and tr[0][1].size == 16000 and tr[1][1].size == 16000
+        assert small.read_screen().shape == (480, 800)
+        # unchunked: the 32 KiB response is dropped and the request times out
+        with pytest.raises(TransportError):
+            small.t.request(P.Cmd.READ_RAW, P.ReadRawReq(0x0F, 1, 0, 0, 0, 8000).pack(), timeout=0.2, retries=0)
+    finally:
+        small.close()

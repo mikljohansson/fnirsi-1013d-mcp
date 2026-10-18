@@ -145,8 +145,12 @@ class Scope:
     """Synchronous, thread-safe client. All methods map 1:1 to protocol commands except the convenience
     methods ``capture``, ``read_capture`` and ``acquire_average``."""
 
-    def __init__(self, transport: Transport):
+    def __init__(self, transport: Transport, max_response: int | None = None):
+        """``max_response`` caps the payload size requested in one response; larger READ_RAW, READ_TRACE and
+        READ_SCREEN reads are split. Useful while a firmware build cannot send large responses
+        (docs/hardware-status.md 2026-10-18: responses over 5 KiB failed)."""
         self.t = transport
+        self.max_response = max_response
         self.lock = threading.RLock()
         self._info: P.InfoResp | None = None
         self._chan: dict[int, P.ChannelConfig] = {}
@@ -158,8 +162,8 @@ class Scope:
     # --- lifecycle ---------------------------------------------------------------------------------------
 
     @classmethod
-    def connect(cls, url: str = "auto", **kw: Any) -> "Scope":
-        s = cls(_connect(url, **kw))
+    def connect(cls, url: str = "auto", max_response: int | None = None, **kw: Any) -> "Scope":
+        s = cls(_connect(url, **kw), max_response=max_response)
         s.identify()
         return s
 
@@ -214,6 +218,11 @@ class Scope:
         except ValueError:
             variant = "unknown"
         return Profile(i, variant, P.caps_names(i.caps))
+
+    @property
+    def response_limit(self) -> int:
+        lim = self.info.max_response_payload or P.MAX_RESPONSE_PAYLOAD
+        return min(lim, self.max_response) if self.max_response else lim
 
     def ping(self, data: bytes = b"ping") -> bytes:
         return self._req(P.Cmd.PING, data)
@@ -384,41 +393,72 @@ class Scope:
     def read_raw(self, core_mask: int = 0x0F, *, addr_mode: int = 1, address: int = 0, count: int | None = None,
                  layout: int = 0, allow_not_done: bool = False) -> tuple[P.ReadRawHeader, dict[int, np.ndarray]]:
         """READ_RAW. Returns the header and, for layout 0, {core_bit_index: uint8 array}; for layout 1,
-        {channel_index: interleaved uint8 array}."""
+        {channel_index: interleaved uint8 array}. Split into several requests when the response would exceed
+        ``response_limit``; the returned header then describes the whole read."""
         if count is None:
             count = self.get_trigger().total_words
-        req = P.ReadRawReq(core_mask, addr_mode, layout, P.ReadRawReq.ALLOW_NOT_DONE if allow_not_done else 0,
-                           address, count)
-        data = self._req(P.Cmd.READ_RAW, req.pack(), timeout=3.0)
-        hdr = P.ReadRawHeader.unpack(data)
-        body = np.frombuffer(data, dtype=np.uint8, offset=16)
-        out: dict[int, np.ndarray] = {}
-        if layout == 0:
-            cores = [c for c in range(4) if core_mask & (1 << c)]
-            for i, c in enumerate(cores):
-                out[c] = body[i * hdr.count:(i + 1) * hdr.count]
-        else:
-            chans = [ch for ch in (0, 1) if core_mask & (3 << (2 * ch))]
-            for i, ch in enumerate(chans):
-                out[ch] = body[i * 2 * hdr.count:(i + 1) * 2 * hdr.count]
-        return hdr, out
+        ncores = bin(core_mask & 0x0F).count("1") or 1
+        per = max(1, (self.response_limit - 16) // ncores)
+        parts: list[dict[int, np.ndarray]] = []
+        first: P.ReadRawHeader | None = None
+        done = 0
+        while done < count:
+            n = min(per, count - done)
+            req = P.ReadRawReq(core_mask, addr_mode, layout, P.ReadRawReq.ALLOW_NOT_DONE if allow_not_done else 0,
+                               address + done, n)
+            data = self._req(P.Cmd.READ_RAW, req.pack(), timeout=3.0)
+            hdr = P.ReadRawHeader.unpack(data)
+            first = first or hdr
+            body = np.frombuffer(data, dtype=np.uint8, offset=16)
+            out: dict[int, np.ndarray] = {}
+            if layout == 0:
+                cores = [c for c in range(4) if core_mask & (1 << c)]
+                for i, c in enumerate(cores):
+                    out[c] = body[i * hdr.count:(i + 1) * hdr.count]
+            else:
+                chans = [ch for ch in (0, 1) if core_mask & (3 << (2 * ch))]
+                for i, ch in enumerate(chans):
+                    out[ch] = body[i * 2 * hdr.count:(i + 1) * 2 * hdr.count]
+            parts.append(out)
+            done += n
+        assert first is not None
+        if len(parts) == 1:
+            return first, parts[0]
+        first.count = count
+        return first, {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
 
     def read_trace(self, channels: Iterable[int | str] = ("CH1",), start: int = 0, count: int = 0,
                    reread: bool = False, no_invert: bool = False) -> tuple[P.ReadTraceHeader,
                                                                           dict[int, tuple[P.TraceChannelMeta, np.ndarray]]]:
+        """READ_TRACE, split into several requests when needed (count 0 = to the end)."""
         mask = 0
         for ch in channels:
             mask |= 1 << channel_index(ch)
-        flags = (P.ReadTraceReq.REREAD if reread else 0) | (P.ReadTraceReq.NO_INVERT if no_invert else 0)
-        data = self._req(P.Cmd.READ_TRACE, P.ReadTraceReq(mask, flags, start, count).pack(), timeout=3.0)
-        hdr = P.ReadTraceHeader.unpack(data)
         chans = [c for c in (0, 1) if mask & (1 << c)]
-        metas = [P.TraceChannelMeta.unpack(data[32 + 16 * i: 48 + 16 * i]) for i in range(len(chans))]
-        off = 32 + 16 * len(chans)
-        out = {}
-        for i, c in enumerate(chans):
-            out[c] = (metas[i], np.frombuffer(data, np.uint8, hdr.count, off + i * hdr.count))
-        return hdr, out
+        flags = (P.ReadTraceReq.REREAD if reread else 0) | (P.ReadTraceReq.NO_INVERT if no_invert else 0)
+        per = max(1, (self.response_limit - 32 - 16 * len(chans)) // len(chans))
+        hdr0: P.ReadTraceHeader | None = None
+        metas: list[P.TraceChannelMeta] = []
+        pieces: dict[int, list[np.ndarray]] = {c: [] for c in chans}
+        pos = start
+        while True:
+            n = per if count == 0 else min(per, count - (pos - start))
+            data = self._req(P.Cmd.READ_TRACE, P.ReadTraceReq(mask, flags, pos, n).pack(), timeout=3.0)
+            hdr = P.ReadTraceHeader.unpack(data)
+            if hdr0 is None:
+                hdr0 = hdr
+                metas = [P.TraceChannelMeta.unpack(data[32 + 16 * i: 48 + 16 * i]) for i in range(len(chans))]
+                flags &= ~P.ReadTraceReq.REREAD  # rebuild once, then keep reading the same trace
+            off = 32 + 16 * len(chans)
+            for i, c in enumerate(chans):
+                pieces[c].append(np.frombuffer(data, np.uint8, hdr.count, off + i * hdr.count))
+            pos += hdr.count
+            end = hdr.sample_count if count == 0 else min(hdr.sample_count, start + count)
+            if pos >= end or hdr.count == 0 or hdr.capture_id != hdr0.capture_id:
+                break
+        assert hdr0 is not None
+        hdr0.count = pos - start
+        return hdr0, {c: (metas[i], np.concatenate(pieces[c])) for i, c in enumerate(chans)}
 
     def read_live(self, core: int, count: int = 64) -> np.ndarray:
         return np.frombuffer(self._req(P.Cmd.READ_LIVE, P.ReadLiveReq(core, count).pack()), np.uint8)
@@ -428,8 +468,10 @@ class Scope:
         rows = []
         h = self.info.screen_height or 480
         row = 0
+        width = self.info.screen_width or 800
+        per = max(1, min(40, (self.response_limit - 8) // (2 * width)))
         while row < h:
-            n = min(40, h - row)
+            n = min(per, h - row)
             data = self._req(P.Cmd.READ_SCREEN, P.ReadScreenReq(row, n).pack(), timeout=3.0)
             hdr = P.ReadScreenHeader.unpack(data)
             rows.append(np.frombuffer(data, "<u2", hdr.nrows * hdr.width, 8).reshape(hdr.nrows, hdr.width))
