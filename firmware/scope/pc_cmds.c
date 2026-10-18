@@ -541,7 +541,7 @@ static int h_test_pattern(pc_session *s, const uint8_t *req, uint32_t len, uint8
     return pc_error(s, PC_E_BAD_ARG, 0, "length");
 
   if(req[4] > 3)
-    return pc_error(s, PC_E_BAD_ARG, 1, "pattern");
+    return pc_error(s, PC_E_BAD_ARG, 4, "pattern");
 
   pc_test_pattern(resp, n, req[4]);                                                  //BENCH: T1, T2
   *rl = n;
@@ -556,7 +556,7 @@ static int h_get_channel(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   (void)s; (void)len;
 
   if(req[0] > 1)
-    return pc_error(s, PC_E_BAD_ARG, 0xFF, "channel");
+    return pc_error(s, PC_E_BAD_ARG, 0, "channel");
 
   *rl = pc_channel_body(req[0], resp);
   return PC_OK;
@@ -671,10 +671,10 @@ static int h_set_timebase(pc_session *s, const uint8_t *req, uint32_t len, uint8
   {
     //Indices 0..10 are long/roll timebases: not in v1
     if(value <= 10)
-      return pc_error(s, PC_E_UNSUPPORTED, 1, "roll timebase");
+      return pc_error(s, PC_E_UNSUPPORTED, 4, "roll timebase");
 
     if((value > 34) || pc_hal_timebase_lookup((uint8_t)value, &t.samplerate, &t.divider))
-      return pc_error(s, PC_E_BAD_ARG, 1, "index 11..34");
+      return pc_error(s, PC_E_BAD_ARG, 4, "index 11..34");
 
     t.timeperdiv = (uint8_t)value;
     pc_hal_timebase_write(&t, 0);
@@ -717,7 +717,7 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   (void)len;
 
   if(mask & ~0x00FF)
-    return pc_error(s, PC_E_BAD_ARG, 15, "mask");
+    return pc_error(s, PC_E_BAD_ARG, 0xFE, "mask");
 
   pc_hal_trigger_read(&t);
 
@@ -1025,13 +1025,13 @@ static int h_read_trace(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
   }
 
   if(start > samples)
-    return pc_error(s, PC_E_BAD_ARG, 2, "start");
+    return pc_error(s, PC_E_BAD_ARG, 4, "start");
 
   if(count == 0)
     count = samples - start;
 
   if(count > samples - start)
-    return pc_error(s, PC_E_BAD_ARG, 3, "count");
+    return pc_error(s, PC_E_BAD_ARG, 8, "count");
 
   for(i=0;i<2;i++)
     if(chm & (1 << i))
@@ -1168,7 +1168,7 @@ static int h_get_cal(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
   (void)s; (void)len;
 
   if(req[0] > 1)
-    return pc_error(s, PC_E_BAD_ARG, 0xFF, "channel");
+    return pc_error(s, PC_E_BAD_ARG, 0, "channel");
 
   pc_hal_channel_read(req[0], &c);
 

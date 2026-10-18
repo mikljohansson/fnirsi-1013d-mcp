@@ -682,6 +682,8 @@ static void test_trace(void)
   pc_put_u32(p + 4, 4001);
   r = req(PC_CMD_READ_TRACE, p, 12);
   T_EQ(r.h.status, PC_E_BAD_ARG);
+  T_EQ(pc_get_u16(r.p), 4);                                     //detail = byte offset of start
+  T_TRUE(r.len > 2); T_MEM(r.p + 2, "start", 5);                //error text follows the detail
 }
 
 static void test_generator(void)
