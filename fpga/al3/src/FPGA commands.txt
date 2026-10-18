@@ -1,8 +1,11 @@
 // Copy of Atlan4's "FPGA commands.txt" (D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\), updated
 // for fpga/al3/src/zaklad.v of fnirsi-1013d-mcp. Changes against Atlan4's file:
-//  - 0x06 returns 0x15 0x33 (0x1533; Atlan4's 0x1532 AL3 design returns 0x15 0x32, his file still shows 0x14).
+//  - 0x06 returns 0x15 0x34 (0x1534; 0x1533 = EXT trigger only; Atlan4's 0x1532 AL3 design returns 0x15 0x32,
+//    his file still shows 0x14).
 //  - 0x15 takes data[1:0]: 0 = CH1, 1 = CH2, 2 = EXT (calibration pin P133), 3 = reserved (acts as EXT).
 //  - 0x28 (new read): external trigger status.
+//  - 0x53, 0x54, 0x55 (new writes), 0x29 (new read): decimation filter (0x1534). With 0x53 = 0 (power-on)
+//    the design behaves exactly as 0x1533.
 //  - 0x0B, 0x0C, 0x1F high bytes: zaklad.v takes io_mcu_data[5:0] into [12:8] (bit 5 is dropped by the
 //    13-bit register); this file showed [4:0].
 // Multi-byte values are high byte first. Details: fpga/al3/README.md, section "Changes".
@@ -20,7 +23,7 @@
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h33;       //0x1533 = AL3 with external trigger
+                    o_mcu_data <= 8'h34;       //0x1534 = AL3 with external trigger and decimation filter
             
             //When sampling finishes the writing is disabled. Enabled again with a reset.
             8'h0A: //Reading of the sampling done state
@@ -42,6 +45,9 @@
 		  4'h1:
 		    sample_read_offset[7:0] <= io_mcu_data;
             
+            //0x20..0x23 read one byte of the 32-bit memory word and advance the read address by one word.
+            //With K >= 1 (0x53) the word is { CH2[15:0], CH1[15:0] }: 0x20 = CH1 low byte, 0x21 = CH1 high byte,
+            //0x22 = CH2 low byte, 0x23 = CH2 high byte.
             8'h20: //Reading of the sample data for channel 1 ADC 1 from memory
               o_mcu_data <= o_adc1A_d;
         
@@ -71,6 +77,15 @@
                     //bit0 ext_level:      EXT pin level after the synchroniser and the majority filter
                     //bit1 gen_out_enable: 1 = the generator drives the pin (cmd 0x50), EXT then reads it back
                     //bit2 ext_activity:   an EXT edge (either direction) since the last sampling reset (cmd 0x01 = 1)
+
+            8'h29: //Reading of the decimation geometry (0x1534 and later), 2 bytes
+                  4'h0:
+                    o_mcu_data <= { dec_on, 2'b0, dec_neg_b, dec_neg_a, dec_swap, dec_order };
+                    //bit7 = 1: 16-bit samples, one per channel per memory word (K >= 1)
+                    //bit4/bit3 = B/A cores captured on the falling write clock edge, bit2 = core order swap,
+                    //bits 1..0 = K (0x53)
+                  4'h1:
+                    o_mcu_data <= { 2'b0, dec_shift };   //output shift (0x54)
 
             8'h41: //Reading of the touch panel address needs loading of high byte first
                   4'h0:
@@ -208,5 +223,27 @@
                     clk_out_duty[15:8] <= io_mcu_data;
                   4'h3:
                     clk_out_duty[7:0] <= io_mcu_data;               
+
+//---------------------------------------------------------------------------------------
+// Decimation filter (0x1534). Details: fpga/al3/README.md "Changes" section 3.
+// N = 2 * (floor(divider / 2) + 1), divider from 0x0D; output rate 200 MSa/s / N (odd divider: as K = 0).
+// With K >= 1 the ADCs always run at 200 MSa/s and the filter output (gain N^K) is stored as
+// min(65535, y >> shift). Exact while 255 * N^K < 2^48 (K = 3: N <= 10334).
+// 0x0B, 0x0C, 0x0E and 0x14 count memory words = output samples. Latency pin to memory: 12 write clocks.
+
+            8'h53: //Decimation filter configuration, 1 byte
+                    dec_order <= io_mcu_data[1:0];  //K: 0 = sample skipping (0x1533), 1 = boxcar, 2 = CIC2, 3 = CIC3
+                    dec_swap  <= io_mcu_data[2];    //0 = core B is the earlier sample of a pair (firmware interleave)
+                    dec_neg_a <= io_mcu_data[3];    //1 = capture the A cores on the falling write clock edge
+                    dec_neg_b <= io_mcu_data[4];    //1 = capture the B cores on the falling write clock edge
+
+            8'h54: //Decimation filter output shift, 1 byte
+                    dec_shift <= io_mcu_data[5:0];  //recommended max(0, bitlen(255 * N^K) - 16)
+
+            8'h55: //Loading two bytes of the 16-bit trigger level high byte first (used when K >= 1, 0x17 is ignored)
+                  4'h0:
+                    trigger_level16[15:8] <= io_mcu_data;
+                  4'h1:
+                    trigger_level16[7:0] <= io_mcu_data;
 
 //=======================================================================================

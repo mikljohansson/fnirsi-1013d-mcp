@@ -2,11 +2,15 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
-// fnirsi-1013d-mcp changes (version word 0x1533, see fpga/al3/README.md "Changes"):
-//  - External trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
+// fnirsi-1013d-mcp changes (version word 0x1534, see fpga/al3/README.md "Changes"):
+//  - 0x1533: external trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
 //    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
-//  - Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
+//    Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
 //    bit2 = EXT edge seen since the last sampling reset (command 0x01).
+//  - 0x1534: decimation filter (command 0x53 order K, 0x54 output shift, 0x55 16-bit trigger
+//    level, read 0x29 geometry). K = 0 is the 0x1533 sample skipping, unchanged. K = 1..3 run
+//    the ADCs at 200 MSa/s and store a CIC of order K (K = 1 is a boxcar sum) decimated by
+//    N = 2 * (floor(divider / 2) + 1) as 16-bit samples, one per channel per memory word.
 //-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
@@ -80,6 +84,110 @@ module freq_generator_dds_pwm(
     always @(posedge clk_in) begin
         phase_acc <= phase_acc + phase_inc;
         clk_out   <= (phase_acc < duty_threshold);
+    end
+
+endmodule
+
+//-------------------------------------------------------------------------------------
+//Decimation filter for one channel (0x1534), clocked by the full-rate sample write clock
+//(100 MHz, one sample pair = cores A and B per clock).
+//A CIC of order K (1 to 3) decimating by N = 2P is computed as the polyphase prefilter
+//(1 + z^-1)^K at 200 MSa/s, evaluated once per pair, followed by a CIC of order K that
+//decimates the 100 MSa/s pair stream by P (noble identity). K = 1 is the boxcar sum of
+//N consecutive samples. Gain N^K, output = min(65535, y >> shift).
+//Integrators and combs are 48-bit modulo arithmetic; the output is exact while
+//255 * N^K < 2^48. Nothing is reset: the filter runs continuously across captures.
+//sv[0] .. sv[5] is the shared valid chain: sv[0] samples the last integrator once per P pairs.
+//For K < 3 the unused integrator and comb stages are plain registers, so the pipeline (and
+//the latency, 12 write clocks from the pin capture to the memory write) is the same for all K.
+//Each core's pins are captured on the rising edge of the write clock (pa/pb, IOB registers) or,
+//with neg_a / neg_b, on the falling edge half a write clock later (na/nb), for the bench to
+//centre the capture in each core's data-valid window.
+
+module decim_chan
+(
+  input  wire        clk,
+  input  wire [7:0]  in_a,        //ADC core A
+  input  wire [7:0]  in_b,        //ADC core B
+  input  wire [1:0]  order,       //K, 1..3 (0 behaves as 1; its output is not used)
+  input  wire        swap,        //0: core B is the earlier sample of a pair, 1: core A
+  input  wire        neg_a,       //1: capture core A on the falling edge of clk
+  input  wire        neg_b,       //1: capture core B on the falling edge of clk
+  input  wire [5:0]  shift,
+  input  wire [5:0]  sv,          //valid chain s0 .. s5
+  output reg  [15:0] out = 0
+);
+localparam W = 48;
+
+reg [7:0] pa = 0, pb = 0;         //pins on the rising edge
+reg [7:0] na = 0, nb = 0;         //pins on the falling edge (half a clock after pa/pb)
+reg [7:0] qa = 0, qb = 0;         //captured pair
+reg [7:0] pe = 0, pl = 0;         //previous pair (earlier, later)
+reg [10:0] f = 0;                 //prefilter output, at most 8 * 255
+reg [W-1:0] i1 = 0, i2 = 0, i3 = 0;
+reg [W-1:0] d0 = 0, d0p = 0, c1 = 0, c1p = 0, c2 = 0, c2p = 0, c3 = 0;
+reg [W-1:0] sh = 0;
+
+wire [7:0] xe = swap ? qa : qb;   //earlier sample of the pair
+wire [7:0] xl = swap ? qb : qa;   //later sample of the pair
+
+wire k2  = (order == 2'd2);
+wire k3  = (order == 2'd3);
+wire k23 = order[1];              //K = 2 or 3
+
+//(1+z^-1)^1: xl + xe; ^2: xl + 2 xe + pl; ^3: xl + 3 xe + 3 pl + pe
+wire [9:0] t_xe = k3 ? ({2'b0, xe} + {1'b0, xe, 1'b0}) : k2 ? {1'b0, xe, 1'b0} : {2'b0, xe};
+wire [9:0] t_pl = k3 ? ({2'b0, pl} + {1'b0, pl, 1'b0}) : k2 ? {2'b0, pl} : 10'd0;
+wire [7:0] t_pe = k3 ? pe : 8'd0;
+
+wire [W-1:0] fine = sh >> shift[2:0];
+
+  always @(negedge clk)
+    begin
+      na <= in_a;
+      nb <= in_b;
+    end
+
+  always @(posedge clk)
+    begin
+      pa <= in_a;
+      pb <= in_b;
+      qa <= neg_a ? na : pa;
+      qb <= neg_b ? nb : pb;
+      pe <= xe;
+      pl <= xl;
+      f  <= {3'b0, xl} + {1'b0, t_xe} + {1'b0, t_pl} + {3'b0, t_pe};
+
+      i1 <= i1 + f;
+      i2 <= (k23 ? i2 : {W{1'b0}}) + i1;    //K = 1: i2 = i1 one clock later
+      i3 <= (k3  ? i3 : {W{1'b0}}) + i2;    //K < 3: i3 = i2 one clock later
+
+      if(sv[0])
+        d0 <= i3;
+
+      if(sv[1])
+        begin
+          c1  <= d0 - d0p;
+          d0p <= d0;
+        end
+
+      if(sv[2])
+        begin
+          c2  <= c1 - (k23 ? c1p : {W{1'b0}});
+          c1p <= c1;
+        end
+
+      if(sv[3])
+        begin
+          c3  <= c2 - (k3 ? c2p : {W{1'b0}});
+          c2p <= c2;
+        end
+
+      if(sv[4])
+        sh <= c3 >> {shift[5:3], 3'b000};
+
+      if(sv[5])
+        out <= (|fine[W-1:16]) ? 16'hFFFF : fine[15:0];
     end
 
 endmodule
@@ -238,6 +346,21 @@ module fnirsi_1013D
 
   reg [12:0] trigger_address = 0;         //The trigger read address is captured on the trigger signal and can be read on command 0x14
 
+  //Decimation filter (0x1534)
+  reg [1:0]  dec_order = 0;                //Command 0x53 bits 1..0: 0 = sample skipping (0x1533), 1 = boxcar, 2 = CIC2, 3 = CIC3
+  reg        dec_swap = 0;                 //Command 0x53 bit 2: 1 = core A is the earlier sample of a pair
+  reg        dec_neg_a = 0;                //Command 0x53 bit 3: capture the A cores on the falling write clock edge
+  reg        dec_neg_b = 0;                //Command 0x53 bit 4: capture the B cores on the falling write clock edge
+  reg [5:0]  dec_shift = 0;                //Command 0x54: output = min(65535, filter >> dec_shift)
+  reg [15:0] trigger_level16 = 0;          //Command 0x55: trigger level on the 16-bit samples (K >= 1)
+
+  wire dec_on = (dec_order != 2'd0);
+
+  wire [15:0] dec_out1;                    //Decimated 16-bit samples
+  wire [15:0] dec_out2;
+  wire        swc_adv;                     //Capture logic advances on this write clock edge
+  reg         swc_adv_q = 1;               //The last write clock edge advanced the capture logic (wrote a sample)
+
   reg adc1_encA = 0;                       //Clock signals for the ADC's
   reg adc1_encB = 0;
   reg adc2_encA = 0;
@@ -318,7 +441,9 @@ freq_generator_dds_pwm u_freq
   //Rising edge of sample_write_clock (it toggles on the falling edge of clk_200MHz)
   wire swc_rise = sample_write_clock & ~swc_prev;
 
-  wire ext_trigger_detect = ext_pending & swc_rise;
+  //With the decimation filter on, only after an edge that wrote an output sample
+  //(swc_adv_q is constant 1 with K = 0; one LUT4 like the 0x1533 term)
+  wire ext_trigger_detect = ext_pending & swc_rise & swc_adv_q;
 
   always @(posedge clk_200MHz)
     begin
@@ -403,10 +528,10 @@ freq_generator_dds_pwm u_freq
 
   sample_memory samples
   (
-    .dia   ({ i_adc2B_d, i_adc2A_d, i_adc1B_d, i_adc1A_d }),
+    .dia   (dec_on ? { dec_out2, dec_out1 } : { i_adc2B_d, i_adc2A_d, i_adc1B_d, i_adc1A_d }),
     .addra (sample_write_address),
     .clka  (sample_write_clock),
-    .cea   (sample_write_enable),
+    .cea   (sample_write_enable & swc_adv),
 
     .dob   ({ o_adc2B_d, o_adc2A_d, o_adc1B_d, o_adc1A_d }),
     .addrb (sample_read_address),
@@ -450,7 +575,71 @@ freq_generator_dds_pwm u_freq
 
   //To allow the sample clock to range from 100MHz down to very low rates the plus one is needed.
   //Without it the maximum output would be 50MHz.
-  assign sample_clock_enable = sample_rate_divider < (sample_rate_counter);
+  //With the decimation filter on, the ADCs and the write clock always run at full rate
+  //(divider forced to 0 on the static side of the compare, off the timed counter path).
+  wire [31:0] sample_rate_divider_eff = dec_on ? 32'd0 : sample_rate_divider;
+
+  assign sample_clock_enable = sample_rate_divider_eff < (sample_rate_counter);
+
+//-------------------------------------------------------------------------------------
+//Decimation filter control and data path (0x1534)
+//dec_pc counts P = floor(divider / 2) + 1 write clocks per output sample. dec_sv is the
+//valid chain through the filter pipeline; dec_sv[6] (dec_wr) marks the write clock edge on
+//which the output sample is written to memory and the capture logic advances (swc_adv).
+//With K = 0 swc_adv is constant 1, so every capture register behaves as in 0x1533.
+
+  reg [30:0] dec_pc = 0;
+  reg [6:0]  dec_sv = 0;
+
+  wire [30:0] dec_ph = sample_rate_divider[31:1];
+  wire dec_wr  = dec_sv[6];
+  assign swc_adv = ~dec_on | dec_wr;
+
+  always @(posedge sample_write_clock)
+    begin
+      if((dec_pc == 0) || (dec_pc > dec_ph))
+        dec_pc <= dec_ph;
+      else
+        dec_pc <= dec_pc - 1;
+
+      dec_sv      <= { dec_sv[5:0], (dec_pc == 0) };
+      swc_adv_q   <= swc_adv;
+    end
+
+  decim_chan dec_ch1
+  (
+    .clk   (sample_write_clock),
+    .in_a  (i_adc1A_d),
+    .in_b  (i_adc1B_d),
+    .order (dec_order),
+    .swap  (dec_swap),
+    .neg_a (dec_neg_a),
+    .neg_b (dec_neg_b),
+    .shift (dec_shift),
+    .sv    (dec_sv[5:0]),
+    .out   (dec_out1)
+  );
+
+  decim_chan dec_ch2
+  (
+    .clk   (sample_write_clock),
+    .in_a  (i_adc2A_d),
+    .in_b  (i_adc2B_d),
+    .order (dec_order),
+    .swap  (dec_swap),
+    .neg_a (dec_neg_a),
+    .neg_b (dec_neg_b),
+    .shift (dec_shift),
+    .sv    (dec_sv[5:0]),
+    .out   (dec_out2)
+  );
+
+  //Trigger on the 16-bit sample that is written on this edge (channel per 0x15): the result
+  //of sample >= trigger_level16 goes into the 8-bit trigger_data register as 0xFF or 0x00 and
+  //the 8-bit compare runs against 0x80, so the timed trigger path keeps its 0x1533 structure.
+  wire [15:0] dec_trig_sample = trigger_channel ? dec_out2 : dec_out1;
+  wire        dec_trig_ge     = dec_trig_sample >= trigger_level16;
+  wire [7:0]  trigger_level_eff = dec_on ? 8'h80 : trigger_level;
 
 //-------------------------------------------------------------------------------------
 //Sampling write address counter
@@ -460,7 +649,7 @@ freq_generator_dds_pwm u_freq
     begin
       if(sample_system_reset == 1)
         sample_write_address <= 0;
-      else
+      else if(swc_adv)
         sample_write_address <= sample_write_address + 1;
     end
 
@@ -475,7 +664,7 @@ freq_generator_dds_pwm u_freq
     begin
       if(sample_system_reset == 1)
         time_base_cnt <= 0;
-      else
+      else if(swc_adv)
         time_base_cnt <= time_base_cnt + 1;
     end
 
@@ -489,7 +678,7 @@ freq_generator_dds_pwm u_freq
     begin
       if(sample_system_reset == 1)
         sample_write_enable <= 1;                //Enable the writing on reset
-      else if(sampling_enable == 0)
+      else if((sampling_enable == 0) && swc_adv)
         sample_write_enable <= 0;                //Disable it when enough samples have been gathered
     end
 
@@ -519,9 +708,10 @@ assign sampling_enable = ~(
 //Sampling triggered detect
 
 // Previous states
-  assign prev_less_equal_lev = trigger_previous < trigger_level;
-  assign cur_greater_equal_lev = trigger_data >= trigger_level;
-  assign cur_less_equal_lev = trigger_data < trigger_level;
+//With the decimation filter on, trigger_data holds 0xFF / 0x00 and the level is 0x80
+  assign prev_less_equal_lev = trigger_previous < trigger_level_eff;
+  assign cur_greater_equal_lev = trigger_data >= trigger_level_eff;
+  assign cur_less_equal_lev = trigger_data < trigger_level_eff;
 
 // Enable signals
   assign trigger_rise_enable = (~trigger_edge & prev_less_equal_lev) | trigger_detect_enable;
@@ -552,13 +742,13 @@ assign sampling_enable = ~(
          trigger_previous <= 0;
          trigger_data     <= 0;
        end 
-    else
+    else if(swc_adv)
        begin
          //sample from the previous cycle
          trigger_previous <= trigger_data;
 
-         //current sample
-	     trigger_data <= trigger_channel ? i_adc2A_d : i_adc1A_d;
+         //current sample (decimation filter on: 16-bit compare result, see dec_trig_ge)
+	     trigger_data <= dec_on ? {8{dec_trig_ge}} : trigger_channel ? i_adc2A_d : i_adc1A_d;
        end
   end
 
@@ -570,7 +760,7 @@ assign sampling_enable = ~(
       if(sample_system_reset == 1)
         sampling_half_way <= 0;
       else
-        sampling_half_way <= (sample_write_address >= pretrigger_samples) || sampling_half_way;
+        sampling_half_way <= swc_adv ? ((sample_write_address >= pretrigger_samples) || sampling_half_way) : sampling_half_way;
     end
 
 //-------------------------------------------------------------------------------------
@@ -580,7 +770,7 @@ assign sampling_enable = ~(
     begin
       if(sample_system_reset == 1)
         trigger_read_address <= pretrigger_samples;   //Starting point in memory
-      else if((sampling_half_way == 1)&&(sampling_enable == 1))
+      else if((sampling_half_way == 1)&&(sampling_enable == 1)&&swc_adv)
         trigger_read_address <= trigger_read_address + 1;
     end
 
@@ -592,7 +782,7 @@ assign sampling_enable = ~(
       if(sample_system_reset == 1)
         trigger_address <= 0;
         
-     else if(sampling_triggered == 0)
+     else if((sampling_triggered == 0) && swc_adv)
        begin
         if (~trigger_mode && time_base_timeout) trigger_address <= pretrigger_samples;
         else trigger_address <= trigger_read_address;
@@ -651,8 +841,8 @@ assign sampling_enable = ~(
       else if((((mcu_command == 8'h0B) | (mcu_command == 8'h0C) | (mcu_command == 8'h0D) | (mcu_command == 8'h0E) 
               | (mcu_command == 8'h1B) | (mcu_command == 8'h1F)
               | (mcu_command == 8'h32) | (mcu_command == 8'h35) | (mcu_command == 8'h38) | (mcu_command == 8'h3C)
-              | (mcu_command == 8'h51) | (mcu_command == 8'h52)) & i_mcu_rws) |
-              (((mcu_command == 8'h06) | (mcu_command == 8'h14) | (mcu_command == 8'h41)) & ~i_mcu_rws))
+              | (mcu_command == 8'h51) | (mcu_command == 8'h52) | (mcu_command == 8'h55)) & i_mcu_rws) |
+              (((mcu_command == 8'h06) | (mcu_command == 8'h14) | (mcu_command == 8'h29) | (mcu_command == 8'h41)) & ~i_mcu_rws))
         mcu_state <= mcu_state + 1;
     end
 
@@ -888,6 +1078,30 @@ assign sampling_enable = ~(
                 endcase
               end
 
+            //Decimation filter order and core order (0x1534)
+            8'h53:
+              begin
+                dec_order <= io_mcu_data[1:0];
+                dec_swap  <= io_mcu_data[2];
+                dec_neg_a <= io_mcu_data[3];
+                dec_neg_b <= io_mcu_data[4];
+              end
+
+            //Decimation filter output shift
+            8'h54:
+              dec_shift <= io_mcu_data[5:0];
+
+            //Loading of the two bytes of the 16-bit trigger level high byte first
+            8'h55:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    trigger_level16[15:8] <= io_mcu_data;
+                  4'h1:
+                    trigger_level16[7:0] <= io_mcu_data;
+                endcase
+              end
+
           endcase
         end
     end
@@ -912,7 +1126,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h33;
+                    o_mcu_data <= 8'h34;
                 endcase
               end
 
@@ -974,6 +1188,19 @@ assign sampling_enable = ~(
             //bit0 = filtered EXT pin level, bit1 = generator drives the pin, bit2 = EXT edge since the last reset
             8'h28:
               o_mcu_data <= { 5'b0, ext_activity, gen_out_enable, ext_level };
+
+            //Reading of the decimation geometry, two bytes
+            //byte 0: bit7 = 16-bit samples (K >= 1), bit4/bit3 = B/A cores on the falling edge,
+            //bit2 = core order swap, bits 1..0 = K; byte 1: shift
+            8'h29:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    o_mcu_data <= { dec_on, 2'b0, dec_neg_b, dec_neg_a, dec_swap, dec_order };
+                  4'h1:
+                    o_mcu_data <= { 2'b0, dec_shift };
+                endcase
+              end
 
             //Reading of the touch panel address needs loading of high byte first
             8'h41:
