@@ -27,7 +27,7 @@ context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/p
 | `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points -> least-squares fit of zero, 1/gain, PWM slope per channel/range/core; JSON file), `ChannelScale`/`channel_scale` (raw, compensated, mean and trigger-level conversions; firmware formula fallback), `import_t8` + CLI for the lead's `backups/t8_*.json`. |
 | `units.py` | `parse_quantity("100us")`, `fmt_si`. |
 
-Tests in `tests/` (233, incl. `test_calibration`, `test_sdcard`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
+Tests in `tests/` (237, incl. `test_ext_trigger`, incl. `test_calibration`, `test_sdcard`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
 (resend, resync, #RESET, 1.1/1.2 fields, timeouts, paused responses), `test_serial_link` (no-reconfigure rule,
 fake pyserial), `test_simulator_scope`, `test_shared_mode` (1.3 semantics through `Scope`), `test_firmware_match`
 (protocol.md section 14 items), `test_server` (every tool in-process, collaborative restarts, legacy fallback),
@@ -104,7 +104,7 @@ the device parses nothing else, not even `#RESET`; a DTR 0->1 or USB reset drops
 
 ## Simulator fidelity
 
-Mirrors: variants stock/al3/ef2/ep4 (version word, ring, max samples, fixed vs programmable geometry, generator,
+Mirrors: variants stock/al3/ef2/ep4 and al3x (0x1533, EXT trigger on the calibration pin: caps EXT_TRIGGER, source 2, `--ext` signal or CH2's, logic threshold 1.65 V, 22 ns latency, E_STATE when EXT and the generator would share the pin; wire values assumed = protocol 8.3, pending fw-gen2) (version word, ring, max samples, fixed vs programmable geometry, generator,
 stock fresh-window), the ring (4 cores, core B offset +3/-2 codes compensated by GET_CAL), trigger on core A
 with 2-dt quantisation, pretrigger arming, modular capture_start, auto timeout, FORCE (as auto timeout),
 read_lag (`--hw-read-lag`/`--fw-read-lag`), A/B order (`--true-order`), trigger alignment offset, LOCAL/REMOTE

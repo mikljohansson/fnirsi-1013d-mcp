@@ -126,8 +126,9 @@ STATIC_PROFILE: dict[str, str] = {
                             "timing mismatch gives an image at fs/2 - f",
     "memory_per_channel": "stock FPGA 0x1432: 3000 samples (fixed 50 % trigger); Atlan4 AL3 0x1532: up to "
                           "16382; EF2 0x1632 / EP4 0x1732: up to 12286",
-    "trigger": "edge on core A of CH1 or CH2, 8-bit level, quantised to 2 / fs; no hold-off; no external input "
-               "on current bitstreams",
+    "trigger": "edge on core A of CH1 or CH2, 8-bit level, quantised to 2 / fs; no hold-off. EXT (3.3 V logic on "
+               "the calibration pin, shared with the generator) only on bitstream 0x1533+ with caps EXT_TRIGGER; "
+               "EXT latency 20-25 ns from the pin, pulses >= 10 ns",
     "ranges_1x": "5 V, 2.5 V, 1 V, 500 mV, 200 mV, 100 mV per div (relays), 50 mV per div (software zoom of "
                  "100 mV, same ~3.4 mV per code)",
     "full_scale": "about 256 codes = ~8.8 divisions; e.g. ~0.88 V at 100 mV/div [U]",
@@ -150,6 +151,11 @@ STANDING_CAVEATS = [
 
 #: T8 square-wave check (backups/t8sq_CH1.json): bench DC reads right, the calibration output does not swing 0..3.3 V
 CAL_OUTPUT_NOTE = ("The calibration output is a frequency/duty/timing reference, not a voltage reference: on the owner's unit it is a ~3.1 Vpp square wave whose low level sits about -1.2 V below ground at the probe (its output network is capacitively coupled or biased; T8 2026-10-18), not 0..3.3 V.")
+
+EXT_NOTE = ("EXT triggers on the calibration pin: 3.3 V logic only, never more than 3.3 V on that pin; the level is "
+            "ignored (logic threshold); the trigger point lags the pin by 20-25 ns (4-5 samples at 200 MS/s, under one "
+            "sample at <= 10 MS/s); pulses shorter than ~10 ns are rejected. The pin is also the generator output: EXT "
+            "and scope_generator are mutually exclusive.")
 
 DESC_SHARED = ("The scope is shared with the person at it (collaborative firmware): either side may change "
                "settings, the last change wins and the screen shows the host's captures.")
@@ -733,7 +739,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                              "max_total_samples": i.max_total_samples, "min_total_samples": i.min_total_samples,
                              "programmable_trigger_position": p.programmable, "generator": p.has_generator,
                              "device_averaging": p.has(P.Caps.DEVICE_AVERAGE), "force": p.has(P.Caps.FORCE_TRIGGER),
-                             "screenshot": p.has(P.Caps.SCREENSHOT), "caps": p.caps},
+                             "screenshot": p.has(P.Caps.SCREENSHOT), "ext_trigger": p.has(P.Caps.EXT_TRIGGER),
+                             "caps": p.caps},
                     "unverified": unverified, "caveats": STANDING_CAVEATS}
         return await run("scope_profile", 0, {}, go)
 
@@ -1019,8 +1026,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
 
     @register(1, title="Set the trigger and capture geometry", idempotent=True)
     async def scope_set_trigger(
-        source: Annotated[Literal["CH1", "CH2", "EXT"] | None, Field(description="trigger channel; EXT fails "
-                                                                                 "closed until an FPGA provides it")] = None,
+        source: Annotated[Literal["CH1", "CH2", "EXT"] | None, Field(description="trigger channel; EXT = the "
+                          "calibration pin as a 3.3 V logic input (bitstream 0x1533+, caps EXT_TRIGGER, generator off; "
+                          "level ignored)")] = None,
         edge: Annotated[Literal["rising", "falling"] | None, Field(description="trigger edge")] = None,
         level: Annotated[float | str | None, Field(description="trigger level in volts at the probe tip, "
                                                                "converted to a raw core-A code")] = None,
@@ -1057,15 +1065,20 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             cav = list(notes)
             src = None if source is None else ("CH1", "CH2", "EXT").index(source)
             if src == 2 and not prof.has(P.Caps.EXT_TRIGGER):
-                raise ValueError("source 'EXT' needs an FPGA bitstream with an external trigger input; none of "
-                                 "the current ones has it. Trigger on CH2 instead.")
+                raise ValueError("source 'EXT' needs an FPGA bitstream with an external trigger input (0x1533 or "
+                                 f"later; this one is 0x{prof.info.fpga_version:04X}). Trigger on CH2 instead.")
+            if src == 2 and prof.has_generator and s.get_gen().enable:
+                raise ValueError("source 'EXT' uses the calibration pin, which is driving the generator now: switch "
+                                 "it off with scope_generator(enabled=false) first")
             eff_src = cur.source if src is None else src
+            if eff_src == 2:
+                cav.append(EXT_NOTE)
+                if level is not None or level_code is not None:
+                    cav.append("level is ignored for EXT (3.3 V logic input)")
             code = level_code
-            if level is not None:
+            if level is not None and eff_src <= 1:
                 if level_code is not None:
                     raise ValueError("give level or level_code, not both")
-                if eff_src > 1:
-                    raise ValueError("level in volts needs source CH1 or CH2")
                 v = parse_quantity(level, "V")
                 cfg = s.get_channel(eff_src, cached=False)
                 raw = round(s.scale(eff_src, cfg).raw_a_for_volts(v))
@@ -1978,6 +1991,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             if duty_percent is not None and duty_percent > cfg.gen_max_duty:
                 raise ValueError(f"duty {duty_percent}% above the configured ceiling {cfg.gen_max_duty}% "
                                  "(FNIRSI_MCP_GEN_MAX_DUTY, protects a TX stage driven from the pin)")
+            if enabled and P.Caps.EXT_TRIGGER & s.profile().info.caps and s.get_trigger(cached=False).source == 2:
+                raise ToolError("scope_generator: the calibration pin is the EXT trigger input now; set the trigger "
+                                "source to CH1 or CH2 first (EXT and the generator share the pin)")
             if enabled:
                 cur = s.get_gen()
                 fs = f if f is not None else cur.frequency_hz

@@ -196,7 +196,9 @@ class FpgaVariant(enum.IntEnum):
     EP4 = 4
 
 
-FPGA_VERSION_WORDS = {0x1432: FpgaVariant.STOCK, 0x1532: FpgaVariant.AL3, 0x1632: FpgaVariant.EF2,
+#: 0x1533: AL3 with the external trigger on the calibration pin (fpga/al3, fpga-gen2; caps EXT_TRIGGER)
+FPGA_VERSION_WORDS = {0x1432: FpgaVariant.STOCK, 0x1532: FpgaVariant.AL3, 0x1533: FpgaVariant.AL3,
+                      0x1632: FpgaVariant.EF2,
                       0x1732: FpgaVariant.EP4}
 VARIANT_NAMES = {FpgaVariant.UNKNOWN: "unknown", FpgaVariant.STOCK: "stock", FpgaVariant.AL3: "al3",
                  FpgaVariant.EF2: "ef2", FpgaVariant.EP4: "ep4"}

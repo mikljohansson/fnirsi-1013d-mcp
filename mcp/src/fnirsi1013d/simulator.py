@@ -66,11 +66,18 @@ class VariantSpec:
     #: stock FPGA: words before/after the trigger that are fresh after a capture (acqprobe, 7.5)
     fresh_before: int = 0
     fresh_after: int = 0
+    #: bitstream 0x1533: trigger source 2 = EXT on the calibration pin (shared with the generator)
+    ext_trigger: bool = False
 
+
+#: EXT trigger path latency from the pin (fpga-gen2 simulation: 20-25 ns)
+EXT_LATENCY_S = 22e-9
+EXT_THRESHOLD_V = 1.65
 
 VARIANTS = {
     "stock": VariantSpec("stock", 0x1432, P.FpgaVariant.STOCK, 4096, 3000, False, False, 910, 2000),
     "al3": VariantSpec("al3", 0x1532, P.FpgaVariant.AL3, 8192, 16382, True, True),
+    "al3x": VariantSpec("al3x", 0x1533, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True),
     "ef2": VariantSpec("ef2", 0x1632, P.FpgaVariant.EF2, 6144, 12286, True, True),
     "ep4": VariantSpec("ep4", 0x1732, P.FpgaVariant.EP4, 6144, 12286, True, True),
 }
@@ -258,6 +265,8 @@ class SimConfig:
     zero_error: tuple[tuple[float, float], tuple[float, float]] = ((0.0, 0.0), (0.0, 0.0))
     #: true codes per offset-PWM count (None: the firmware formula -100 / dc_shift_value)
     offset_slope: float | None = None
+    #: signal on the calibration pin used as EXT trigger input (variant al3x); None: CH2's signal
+    ext_signal: Signal | None = None
     #: drop (never send) responses with a larger payload, like firmware 0.1.0 on hardware (> 5 KiB failed)
     fail_responses_over: int | None = None
 
@@ -434,6 +443,8 @@ class Device:
             c |= P.Caps.PROG_TRIGGER_POS
         if self.spec.generator:
             c |= P.Caps.GENERATOR_DDS
+        if self.spec.ext_trigger:
+            c |= P.Caps.EXT_TRIGGER
         return int(c) & ~self.cfg.caps_clear
 
     # --- time ---------------------------------------------------------------------------------------
@@ -523,6 +534,13 @@ class Device:
             out[core] = self._codes(ch, tt, ab, settings, None if nz is None else nz[core])
         return out
 
+    def _ext_words(self, t0: float, k0: int, n: int, dt: float, settings: Settings) -> np.ndarray:
+        """EXT input per write clock as codes 0 / 255: the pin's logic level, seen EXT_LATENCY_S late."""
+        sig = self.cfg.ext_signal or self.cfg.signals[1]
+        k = np.arange(k0, k0 + n, dtype=np.float64)
+        t = t0 + 2 * k * dt + dt - EXT_LATENCY_S
+        return np.where(sig.eval(t, settings.gen) > EXT_THRESHOLD_V, 255, 0).astype(np.uint8)
+
     def _find_trigger(self, a: np.ndarray, prev: int | None, trig: TriggerState) -> int:
         """Index in a of the first crossing (current sample) or -1. prev: sample before a[0]."""
         if prev is None:
@@ -559,6 +577,9 @@ class Device:
         seed = self.pyrng.randrange(1 << 62)
         tr = settings.trigger
         src = 0 if tr.source == 0 else 2
+        ext = tr.source == 2
+        if ext:  # logic level of the pin, compared at mid-scale; the edge polarity as configured
+            tr = replace(tr, level=128)
         kt = -1
         auto = tr.mode == 0
         limit = auto_to if auto else (1 << 21)
@@ -569,9 +590,11 @@ class Device:
             # first chunk includes the word before Pw so a crossing exactly at Pw is seen
             while k < Pw + limit:
                 n = min(chunk, Pw + limit - k)
-                tw = self._words(t0, k - 1 if prev is None else k, n + (1 if prev is None else 0), dt, settings,
-                                 seed)
-                a = tw[src]
+                k0, nn = (k - 1 if prev is None else k), n + (1 if prev is None else 0)
+                if ext:
+                    a = self._ext_words(t0, k0, nn, dt, settings)
+                else:
+                    a = self._words(t0, k0, nn, dt, settings, seed)[src]
                 idx = self._find_trigger(a, prev, tr)
                 if idx >= 0:
                     kt = (k - 1 if prev is None else k) + idx
@@ -1187,6 +1210,8 @@ class Device:
                 raise _DevErr(P.Status.E_UNSUPPORTED, 0, "EXT trigger needs an FPGA with EXT_TRIGGER")
             if r.source > 2:
                 raise _DevErr(P.Status.E_BAD_ARG, 0, f"source {r.source}")
+            if r.source == 2 and self.spec.generator and self.settings.gen.enable:
+                raise _DevErr(P.Status.E_STATE, 0, "generator on: the calibration pin cannot be the EXT input")
             new.source = r.source
         if r.mask & M.M_EDGE:
             if r.edge > 1:
@@ -1474,6 +1499,9 @@ class Device:
             g.duty_threshold = r.duty if r.duty_mode == 1 else P.gen_threshold(r.duty)
         if r.mask & P.SetGenReq.M_ENABLE:
             g.enable = 1 if r.enable else 0
+        if g.enable and self.settings.trigger.source == 2:
+            raise _DevErr(P.Status.E_STATE, 0, "the calibration pin is the EXT trigger input; trigger on CH1/CH2 "
+                                               "first")
         self.settings.gen = g
         return self._ok(req, self.gen().pack())
 
@@ -1931,7 +1959,8 @@ def build_config(args: argparse.Namespace) -> SimConfig:
                      hw_read_lag=args.hw_read_lag, fw_read_lag=args.fw_read_lag, true_order=args.true_order,
                      trigger_align_offset=args.trigger_align_offset, time_scale=args.time_scale,
                      seed=args.seed, fail_responses_over=args.fail_responses_over, caps_override=args.caps,
-                     legacy=args.legacy, ui_capture_period_s=args.ui_period)
+                     legacy=args.legacy, ui_capture_period_s=args.ui_period,
+                     ext_signal=parse_signal(args.ext) if args.ext else None)
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -1955,6 +1984,7 @@ def make_parser() -> argparse.ArgumentParser:
     ap.add_argument("--caps", type=lambda x: int(x, 0), metavar="MASK",
                     help="capability mask override, e.g. 0x1803 = firmware 0.1.0 on AL3 (no device averaging, "
                          "screenshot, FORCE, DEBUG_FPGA); default: everything the simulator implements")
+    ap.add_argument("--ext", help="signal on the calibration pin for the EXT trigger (variant al3x), default CH2's")
     ap.add_argument("--legacy", action="store_true",
                     help="firmware without collaborative mode (protocol 1.2, exclusive LOCAL/REMOTE)")
     ap.add_argument("--ui-period", type=parse_quantity, default=0.05, metavar="S",

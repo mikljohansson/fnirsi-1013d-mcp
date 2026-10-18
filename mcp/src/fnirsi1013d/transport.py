@@ -558,7 +558,17 @@ class Transport:
                  check: bool = True) -> P.Frame:
         """Run a deferred request (WAIT, ACQUIRE_AVG). While it is pending, ``cancel()`` is polled; when it
         returns true a STOP control request is sent (``on_cancel`` may send something else) and the deferred
-        response, normally ``E_ABORTED``, is collected."""
+        response, normally ``E_ABORTED``, is collected. ``cancel`` is latched: once it has returned true it
+        counts as true, so a one-shot callback cannot fall through to the same-seq resend below (a resent WAIT
+        after the abort is answered OK by a device whose acquisition is no longer ARMED)."""
+        fired = False
+
+        def cancelled() -> bool:
+            nonlocal fired
+            if not fired and cancel is not None and cancel():
+                fired = True
+            return fired
+
         with self._lock:
             if self._deferred_seq is not None:
                 raise TransportError("a deferred request is already pending")
@@ -569,15 +579,15 @@ class Transport:
             try:
                 self._send(frame)
                 deadline = time.monotonic() + timeout
-                resp = self._await(seq, deadline, cancel)
+                resp = self._await(seq, deadline, cancelled if cancel is not None else None)
                 for _ in range(self.retries):
                     if resp is None or resp.status not in RESEND_STATUSES:
                         break
                     # the device saw a corrupted request (nothing was executed): resend the same frame
                     self.stats.retries += 1
                     self._send(frame)
-                    resp = self._await(seq, deadline, cancel)
-                if resp is None and cancel is not None and cancel():
+                    resp = self._await(seq, deadline, cancelled if cancel is not None else None)
+                if resp is None and cancelled():
                     if on_cancel:
                         on_cancel()
                     else:

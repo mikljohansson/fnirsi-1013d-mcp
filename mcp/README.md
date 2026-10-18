@@ -39,6 +39,7 @@ fnirsi1013d-sim --variant al3 --port 5555 --signal decay:tau=80us
 | Option | Meaning |
 |---|---|
 | `--variant stock\|al3\|ef2\|ep4` | FPGA version word 0x1432 / 0x1532 / 0x1632 / 0x1732 with its ring size, memory limit, fixed or programmable geometry, generator |
+| `--variant al3x`, `--ext SIGNAL` | AL3 with the external trigger (0x1533): trigger source EXT on the calibration pin, fed by `--ext` (default: CH2's signal), 3.3 V logic, 22 ns latency |
 | `--signal SPEC` | CH1 signal; CH2 defaults to the matching TX gate (decay) or a sync square (sine/square) |
 | `--ch1 SPEC`, `--ch2 SPEC` | per-channel signals |
 | `--noise L` | Gaussian noise per ADC core, LSB rms (default 1.0, about 2 LSB as on the real unit) |

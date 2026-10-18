@@ -1,0 +1,88 @@
+"""EXT trigger on the calibration pin (FPGA 0x1533, caps EXT_TRIGGER; wire values pending fw-gen2 confirmation)."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from fnirsi1013d import analysis as A
+from fnirsi1013d import protocol as P
+from fnirsi1013d.scope import Scope
+from fnirsi1013d.simulator import parse_signal
+
+from test_server import client_for
+
+GATE = "gate:period=200us,width=50us,high=3.3"
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+def ext_sim(sim_factory, **kw):
+    srv = sim_factory(variant="al3x", signal=GATE, **kw)
+    srv.device.cfg.ext_signal = parse_signal(GATE)  # the same TX gate on CH1 and on the pin
+    return srv
+
+
+def test_caps_and_variant(sim_factory):
+    with Scope.connect(ext_sim(sim_factory).url) as s:
+        assert s.info.fpga_version == 0x1533 and s.profile().variant == "al3"
+        assert s.info.caps & P.Caps.EXT_TRIGGER
+    with Scope.connect(sim_factory().url) as s:
+        assert not s.info.caps & P.Caps.EXT_TRIGGER
+        with pytest.raises(Exception) as e:
+            s.set_trigger(source=2)
+        assert getattr(e.value, "status", None) == P.Status.E_UNSUPPORTED
+
+
+def test_ext_trigger_point_lags_the_pin(sim_factory):
+    """t = 0 is the EXT trigger; the pin edge (seen on CH1) is 20-25 ns earlier: 4-5 samples at 200 MS/s, plus
+    up to 2 samples of trigger quantisation."""
+    srv = ext_sim(sim_factory, noise_lsb=0.3)
+    with Scope.connect(srv.url) as s:
+        s.set_channel(0, range_index=1)
+        s.set_timebase(divider=0)
+        s.set_trigger(source=2, edge=0, mode=1, pretrigger_samples=200, total_samples=1000)
+        offsets = []
+        for _ in range(8):
+            cap = s.capture(["CH1"], 1.0)
+            assert cap is not None and cap.triggered
+            v = cap.channels["CH1"].volts
+            x = A.find_edge_near(v, 1.65, "rising", cap.pretrigger_samples, 12)
+            assert x is not None
+            offsets.append(x - cap.pretrigger_samples)
+        assert -7.5 <= min(offsets) and max(offsets) <= -3.0, offsets
+
+
+@pytest.mark.anyio
+async def test_ext_and_generator_are_exclusive(sim_factory, tmp_path):
+    async with client_for(ext_sim(sim_factory), tmp_path) as c:
+        prof = await c.call("scope_profile")
+        assert prof["live"]["ext_trigger"] is True and "0x1533" in prof["static"]["trigger"]
+        r = await c.call("scope_set_trigger", source="EXT", edge="rising", level=1.0, mode="normal")
+        assert r["applied"]["source"] == "EXT" and r["applied"]["level_volts"] is None
+        assert any("3.3 V logic" in x for x in r["caveats"]) and any("level is ignored" in x for x in r["caveats"])
+        assert "EXT trigger input" in await c.fails("scope_generator", enabled=True, frequency="1kHz",
+                                                     duty_percent=50)
+        await c.call("scope_set_trigger", source="CH1")
+        tok = (await c.call("scope_generator", enabled=True, frequency="1kHz", duty_percent=50))["token"]
+        await c.call("scope_generator", enabled=True, frequency="1kHz", duty_percent=50, confirm_token=tok)
+        assert "switch it off" in await c.fails("scope_set_trigger", source="EXT")
+        await c.call("scope_generator", enabled=False)
+        r = await c.call("scope_set_trigger", source="EXT")
+        assert r["applied"]["source"] == "EXT"
+        cap = await c.call("scope_capture", channels=["CH1"])
+        assert cap["trigger"] == "fired"
+    async with client_for(sim_factory(), tmp_path) as c:
+        assert "0x1532" in await c.fails("scope_set_trigger", source="EXT")
+
+
+def test_device_refuses_gen_while_ext(sim_factory):
+    with Scope.connect(ext_sim(sim_factory).url) as s:
+        s.set_trigger(source=2)
+        with pytest.raises(Exception) as e:
+            s.set_gen(enable=True, freq_hz=1000, duty=0.5)
+        assert getattr(e.value, "status", None) == P.Status.E_STATE
+        assert np.isfinite(s.get_trigger(cached=False).source)
