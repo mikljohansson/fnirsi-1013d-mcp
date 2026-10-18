@@ -1,19 +1,40 @@
 #!/bin/bash
-# Headless TD build of fpga/al3/src (UNTESTED here; adapted from Donwulff's AL3_1014D/build.sh).
-# Needs TD 5.0.x Linux with a valid license/Anlogic.lic and the two stub GTK2 libs (see README.md).
-# Usage: TD_HOME=~/tools/anlogic-td/TD_5.0.3_28716_NL TD_SHIM=~/tools/anlogic-td/shim ./build.sh [builddir]
+# Headless TD build of fpga/al3/src (Atlan4's AL3A10 project, unchanged).
+# Adapted from Donwulff's AL3_1014D/build.sh. Setup: td/td_install.sh, see TD_SETUP.md.
+# Usage (in WSL): ./build.sh [workdir]
+#   TD_HOME, TD_SHIM default to the td_install.sh locations under ~/anlogic.
+#   The build runs in a WSL-local workdir (default ~/al3-build; /mnt/d is slow) and the
+#   bitstreams, reports and log are copied to fpga/al3/build/ (gitignored).
 set -e
-: "${TD_HOME:?set TD_HOME to the TD install dir}"
-: "${TD_SHIM:?set TD_SHIM to the dir holding the stub libgtk-x11/libgdk-x11 .so files}"
+TD_HOME=${TD_HOME:-$HOME/anlogic/TD_4.6.8_SP1_116866_NL}
+FLOW=${FLOW:-atlan}   # atlan = build.tcl (replay of Atlan4 GUI flow), donwulff = build_donwulff.tcl
+TD_SHIM=${TD_SHIM:-$HOME/anlogic/shim}
 HERE=$(cd "$(dirname "$0")" && pwd)
-BUILD=${1:-$HERE/build}
-mkdir -p "$BUILD"
-cat "$HERE/src/al_ip/pll.v" "$HERE/src/al_ip/sample_memory.v" "$HERE/src/zaklad.v" > "$BUILD/all.v"
-cp "$HERE/src/zaklad.adc" "$HERE/src/zaklad.sdc" "$BUILD/"
-sed "s|@TD@|$TD_HOME|" "$HERE/build.tcl" > "$BUILD/flow.tcl"
-cd "$BUILD"
+WORK=${1:-$HOME/al3-build}
+OUT=$HERE/build
+[ -x "$TD_HOME/bin/td" ] || { echo "no TD at $TD_HOME (run td/td_install.sh)"; exit 1; }
+rm -rf "$WORK"; mkdir -p "$WORK" "$OUT"
+cp -r "$HERE/src/." "$WORK/"
+cat "$HERE/src/al_ip/pll.v" "$HERE/src/al_ip/sample_memory.v" "$HERE/src/zaklad.v" > "$WORK/all.v"
+TCL=$HERE/build.tcl; [ "$FLOW" = donwulff ] && TCL=$HERE/build_donwulff.tcl
+UCODE=$(grep -o '<UCode>[01]*</UCode>' "$HERE/src/FPGA.al" | tr -dc 01)
+[ ${#UCODE} -eq 8 ] || { echo "no 8-bit <UCode> in src/FPGA.al"; exit 1; }
+sed -e "s|@TD@|$TD_HOME|" -e "s|@UCODE@|$UCODE|" "$TCL" > "$WORK/flow.tcl"
+cd "$WORK"
+T0=$(date +%s)
 # "sh: Bad fd number" lines are TD shelling bashisms at dash; cosmetic.
-LD_LIBRARY_PATH="$TD_SHIM:$TD_HOME/lib" "$TD_HOME/bin/td" flow.tcl > build.log 2>&1 || {
-  echo "BUILD FAILED:"; grep -iE 'ERROR' build.log | grep -v 'Bad fd' | head -20; exit 1; }
-grep -A8 'Timing group' timing.rpt | head -11
-ls -la FPGA.bit FPGA.bin
+set +e
+LD_LIBRARY_PATH="$TD_SHIM:$TD_HOME/lib" "$TD_HOME/bin/td" flow.tcl > build.log 2>&1
+RC=$?
+set -e
+T1=$(date +%s)
+echo "td exit $RC, wall clock $((T1-T0)) s" | tee -a build.log
+cp -f build.log *.rpt *.area *.timing *.tsm FPGA.bit FPGA.bin "$OUT/" 2>/dev/null || true
+if [ $RC -ne 0 ] || [ ! -s FPGA.bin ]; then
+  echo "BUILD FAILED:"; grep -iE 'ERROR' build.log | grep -v 'Bad fd' | head -20; exit 1
+fi
+grep -iE 'ERROR' build.log | grep -v 'Bad fd' | head -10 || true
+cat FPGA_phy.tsm 2>/dev/null | head -40 || grep -A8 'Timing group' timing.rpt | head -11 || true
+ls -l FPGA.bit FPGA.bin
+sha256sum FPGA.bit FPGA.bin
+echo "outputs copied to $OUT"

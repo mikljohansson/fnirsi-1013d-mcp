@@ -1,7 +1,7 @@
 # fpga/al3 - Anlogic AL3A10LG144C7 project
 
-Status 2026-10-18: sources and toolchain survey only. **Nothing has been built or flashed from this folder yet.**
-No Anlogic TD is installed on this machine (checked `C:\`, `D:\`, WSL home).
+Status 2026-10-18: **TD 4.6.8 SP1 runs headless in WSL and rebuilds `src/` byte-identical to Atlan4's shipped
+`.bin`** (see "Rebuild results" at the end, setup in `TD_SETUP.md`). Nothing has been flashed from this folder.
 
 ## Contents
 
@@ -10,7 +10,11 @@ No Anlogic TD is installed on this machine (checked `C:\`, `D:\`, WSL home).
 | `src/` | Atlan4's AL3 TD project, sources only: `zaklad.v` (top `fnirsi_1013D`, version 0x1532), `zaklad.adc`, `zaklad.sdc`, `FPGA.al`, `al_ip/` (PLL and sample-memory IP: `.v`, `.ipc`, sim models). Copied unmodified from `D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\FPGA AL3\FPGA AL3S10\`. Build outputs (`*.db`, `*.area`, `*.timing`, `*.bit`, `*.bin`) were left out. |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the **stock** FNIRSI design (version 0x1432), TD 5.0.28716 project. Sources only (`source/`, `al_ip/`, `Original_1013D.al`); his prebuilt `.bit` was left out. Licence GPL-3.0 (`LICENSE-GPL3`, repo `pecostm32/Anlogic_AL3-10_Analyzing`). |
 | `bitstreams/` | Prebuilt images, on disk only, with provenance and sha256 in `bitstreams/README.md`. Git ignores everything there except that README. |
-| `build.sh`, `build.tcl` | Headless TD flow for `src/`, adapted from Donwulff. **Untested.** |
+| `build.sh`, `build.tcl` | Headless TD 4.6.8 flow for `src/` (replay of Atlan4's GUI command sequence). Verified, see "Rebuild results". |
+| `build_donwulff.tcl` | Donwulff's `read_verilog`/`map`/`pack` flow for TD 5.x (`FLOW=donwulff`). Crashes in `report_io` on 4.6.8. |
+| `td/` | `td_install.sh` (headless install), `td_fetch.sh` (Sipeed captcha download helper), `compare_bin.py`. |
+| `TD_SETUP.md` | Replayable install and build steps with hashes. |
+| `license/` | Personal `Anlogic.lic`, gitignored. |
 
 `src/FPGA.al` was written by TD 4.6.116866 and sets no effort options. I found no licence file in Atlan4's tree, so treat
 `src/` as upstream material that stays attributed to him.
@@ -105,7 +109,7 @@ same-size 282,898-byte `.bin`. Expect the `.bit` to differ by a few bytes, and t
 
 Open question to settle with Anlogic: whether the licence covers AL3 devices, and for how long.
 
-## Headless build flow (untested)
+## Headless build flow (TD 5.0.3 draft; the working 4.6.8 flow is in TD_SETUP.md)
 
 One-time setup in WSL Ubuntu (`wsl -d Ubuntu`), following Donwulff's recipe in `D:\src\FNIRSI_1014D_Firmware\FPGA_NOTES.md`:
 
@@ -206,3 +210,37 @@ Atlan4's EF2 variant uses a different pin map and is not in this folder.
 - `https://github.com/mmicko/prjtang` (`devices.json`, README), `https://github.com/YosysHQ/nextpnr` (himbaechel list), `https://github.com/YosysHQ/yosys` (`techlibs/anlogic`)
 - `https://trabucayre.github.io/openFPGALoader/vendors/anlogic.html` and `src/part.hpp` in `trabucayre/openFPGALoader`
 - Local: `research/notes/fpga-verilog-analysis.md`, `research/notes/repo-donwulff.md`, `D:\src\FNIRSI_1014D_Firmware\FPGA_NOTES.md` (TD rebuild sections), `D:\src\FNIRSI_1014D_Firmware\fpga\AL3_1014D\build.sh` and `build.tcl`
+
+## Rebuild results (2026-10-18, TD 4.6.8 SP1 V4.6.116866, WSL Ubuntu 24.04)
+
+Command: `wsl -d Ubuntu -- bash /mnt/d/src/fnirsi-1013d-ai/fpga/al3/build.sh`. Sources unchanged.
+Synthesis, place and route, timing analysis and bitgen all succeed. Wall clock is 11 to 16 s for the whole flow.
+
+| Output | Bytes | sha256 | vs Atlan4's shipped file |
+|---|---|---|---|
+| `build/FPGA.bin` | 282,898 | `0d4c829c231b3bbe18c6dd6e815523b6e168f787561376aae502db6c1f370fd2` | **Byte-identical** to `bitstreams/atlan4-FPGA-0x1532.bin` |
+| `build/FPGA.bit` | 285,341 | changes per build (date line) | Same size; differs only in the 6 bytes of the ASCII `# Date:` header line |
+
+Header words: 32 bytes of 0xFF, then `cc55aa33 f0000006 18006c31` (AL3A10 id), user-code packet
+`c1000006 00560000` (UCode `01010110` from `FPGA.al`). The byte pair 0x15 0x32 does not occur literally in
+either `.bin`; the version constant is encoded in LUT contents, not stored as a plain word.
+The build is deterministic. Three replay builds gave identical configuration frames, so no placement seed is
+needed. The only input that changed the output was the bitgen user code.
+
+Utilisation and timing (report corner TT 1.10 V 85 C, `zaklad.sdc` unchanged):
+
+| | This rebuild | `fpga-verilog-analysis.md` section 10 (AL3) | Donwulff TD 5.0.3 defaults |
+|---|---|---|---|
+| LUT / reg / LE | 623 / 476 / 661 | 620 / 471 / 658 | 602 / 458 / - |
+| BRAM9K | 32 / 48 | 32 / 48 | 32 |
+| Pads, output regs in IOB | 60, 14 | 60, 14 | 60, 1 |
+| `clk_200MHz` min period | 4.485 ns (223.0 MHz), 0 errors, TNS 0 | 6.234 ns (160.4 MHz), 38 errors, TNS -21.1 | 277.9 MHz, TNS 0 |
+| `clkc[0]` (alias of clk_200MHz) | 8.485 ns, 52 errors, TNS -140.9 | 10.234 ns, 71 errors, TNS -172.9 | - |
+| `clkc[1]` (`clk_ADC`, 90 degrees) | 8.014 ns, 6 errors, TNS -15.8 | 9.671 ns, 6 errors, TNS -26.0 | 144.5 MHz, -3.71 |
+
+The section 10 numbers come from the reports in Atlan4's folder, and those are stale. His `FPGA_phy.timing` is dated
+2026-01-09, while his `.bin`/`.bit` are dated 2026-02-14. Our rebuild reproduces the shipped `.bin` exactly,
+so the table's first column is the true report for the shipped bitstream. The structural `clkc[1]` violation
+(enable crossing into the 90-degree clock) is present in every build.
+
+Not done: nothing was flashed, `zaklad.v` was not changed, and the CPLD release zip was not installed.
