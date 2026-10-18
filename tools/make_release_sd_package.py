@@ -222,6 +222,15 @@ def cmd_build(args):
 
 
 def cmd_reference(args):
+    present = 0
+    for name, (size, digest, ref_name) in EXPECTED.items():
+        path = os.path.join(args.dest, ref_name)
+        if os.path.isfile(path) and os.path.getsize(path) == size:
+            with open(path, "rb") as f:
+                present += sha256(f.read()) == digest
+    if present == len(EXPECTED) and not (args.local or args.url):
+        print("%s: reference files present, sha256 verified, nothing to download" % args.dest)
+        return 0
     atlan = get_atlan_files(args.local, args.url)
     for name, data in atlan.items():
         path = os.path.join(args.dest, EXPECTED[name][2])
