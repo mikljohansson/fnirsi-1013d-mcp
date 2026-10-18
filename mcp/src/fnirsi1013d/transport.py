@@ -138,15 +138,31 @@ class TcpLink:
             pass
 
 
+#: Fixed pyserial read timeout. The port is never reconfigured after opening (see SerialLink).
+SERIAL_POLL_S = 0.02
+
+
 class SerialLink:
-    """USB CDC ACM via pyserial. Baud rate is ignored by the device; DTR must be asserted (section 3.1)."""
+    """USB CDC ACM via pyserial. Baud rate is ignored by the device; DTR must be asserted (section 3.1).
+
+    Two Windows (usbser.sys) rules, both measured on the owner's unit with firmware 0.1.0 (2026-10-18):
+
+    - The port settings, including pyserial's ``timeout``, are set once at open and never changed. Every change
+      calls SetCommState, and usbser.sys then sends CDC line-coding control requests (GET_LINE_CODING
+      ``a1 21 00 00 00 00 07 00``). The firmware let those 8 setup bytes leak into a bulk IN response that was in
+      flight, corrupting large responses (bad payload CRC at a 1 KiB boundary).
+    - Reads ask only for what is waiting (``in_waiting``), or 1 byte with the short fixed timeout. One large
+      pending ``read(65536)`` sometimes never completed for 40..65-packet responses, although the data was
+      buffered.
+    """
 
     def __init__(self, port: str):
         import serial  # imported lazily so the simulator/tests do not need a serial stack
 
         self._serial_mod = serial
         try:
-            self._ser = serial.Serial(port=None, baudrate=115200, timeout=0.05, write_timeout=WRITE_TIMEOUT_S)
+            self._ser = serial.Serial(port=None, baudrate=115200, timeout=SERIAL_POLL_S,
+                                      write_timeout=WRITE_TIMEOUT_S, rtscts=False, dsrdtr=False, xonxoff=False)
             self._ser.port = port
             self._ser.dtr = True
             self._ser.rts = True
@@ -169,10 +185,19 @@ class SerialLink:
             raise TransportError(f"write to {self._desc} failed: {e}") from e
 
     def read(self, max_bytes: int, timeout: float) -> bytes:
+        """Return the bytes available within ``timeout`` (possibly none). Never reconfigures the port."""
+        deadline = time.monotonic() + max(timeout, 0.0)
         try:
-            self._ser.timeout = max(timeout, 0.0)
-            n = self._ser.in_waiting
-            return self._ser.read(min(max(n, 1), max_bytes))
+            while True:
+                n = self._ser.in_waiting
+                if n:
+                    return self._ser.read(min(n, max_bytes))
+                first = self._ser.read(1)  # waits at most SERIAL_POLL_S
+                if first:
+                    n = self._ser.in_waiting
+                    return first + (self._ser.read(min(n, max_bytes - 1)) if n and max_bytes > 1 else b"")
+                if time.monotonic() >= deadline:
+                    return b""
         except self._serial_mod.SerialException as e:
             raise TransportError(f"read from {self._desc} failed: {e}") from e
 

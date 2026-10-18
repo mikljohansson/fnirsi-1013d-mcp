@@ -94,9 +94,6 @@ count when the `#VER` probe answers `#OK,FNIRSI-1013D-AI,...`.
 | `FNIRSI_MCP_AUDIT_LOG` | `mcp/logs/audit.jsonl` | JSONL log of every tier 1+ call (empty string disables) |
 | `FNIRSI_MCP_MAX_RESPONSE` | device limit | largest response payload requested at once (`--max-response`); READ_RAW, READ_TRACE and READ_SCREEN are split, and device averaging falls back to the host when its result would not fit |
 
-Until the firmware's large-response bug (T2, docs/hardware-status.md) is fixed, run against the real scope with
-`--max-response 4096`.
-
 ### Claude Code
 
 The repository's [`.mcp.json`](../.mcp.json) registers `fnirsi1013d-sim`, the server with an in-process AL3
@@ -212,7 +209,17 @@ Choices made only on the host or in the simulator, not covered by section 14:
 To make the simulator report what the real firmware reports today, use `--caps 0x1803` (AL3, no ACQUIRE_AVG,
 READ_SCREEN, READ_LIVE, FORCE or DEBUG_FPGA).
 
-## Windows note
+## Windows notes
+
+The serial link sets every port parameter once at open and never again. On Windows each pyserial setting
+change (even `timeout`) calls SetCommState, and usbser.sys then sends CDC line-coding control requests. With
+firmware 0.1.0 those 8 setup bytes (`a1 21 00 00 00 00 07 00`) leaked into an in-flight bulk response and broke
+large responses. Reads ask only for `in_waiting` bytes, because one large pending `read(65536)` sometimes never
+completed. Measured on COM10 with TEST_PATTERN, 50 runs per size with normal retries: no failures from 492 B to
+64 KiB, median 39 ms at 492 B and 65 ms at 64 KiB, about 1 % of requests retried (device-side E_BAD_CRC or a lost
+response). `tests/test_serial_link.py` guards the no-reconfigure rule. `--max-response` stays available but is
+not needed.
+
 
 The server imports scipy and pyserial before the stdio transport starts (`preload_native_modules`). Loading a
 DLL later from the event loop deadlocks on Windows against the stdio reader thread's pending read on stdin.
