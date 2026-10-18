@@ -46,6 +46,9 @@ sits on VRF1, +1.24 V; see fpga/al3/README.md "Changes" 2), and the host-capture
 
 ## 4. On-scope averaging and FFT (firmware)
 
+Defaults decision (owner, 2026-10-18 evening): the default acquisition mode becomes CIC + compensation FIR (FPGA 0x1535, after 0x1534
+is benched); until then Off. Other defaults: memory depth 3000, spectrum 2048 points / Hann / 10 dB/div with Auto on entry, phosphor off,
+generator off at boot, trigger CH1 rising auto, collaborative USB on, a discreet hint to run base calibration when v2 data is absent.
 Owner's order (2026-10-18 evening): spectrum analyser first, then digital phosphor, then Bode; the 3D waterfall is dropped; on-device
 features have priority, host (MCP) analysis tools on exported captures are welcome alongside. FPGA decimation filter (boxcar/CIC, 16-bit
 samples, version 0x1534) in work by fpga-gen3 as the foundation for clean spectra and higher resolution at slow time bases.
