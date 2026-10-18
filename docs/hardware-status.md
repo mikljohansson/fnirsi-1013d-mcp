@@ -35,14 +35,14 @@ Hash entries use sha256 of files in `backups/` (gitignored).
 - [ ] W25Q32 backed up, sha256 recorded, compared with reference dumps
 - [ ] SD card imaged (full image plus sectors 0-2047 and 708, 709, 710), sha256 recorded
 - [ ] Backups copied to a second drive
-- [ ] Current firmware version noted
-- [ ] Current bootloader version noted (or "none, stock")
-- [ ] FPGA version word noted
+- [x] Current firmware version noted
+- [x] Current bootloader version noted (or "none, stock")
+- [x] FPGA version word noted
 - [ ] Lead's go received for Tier 1
 - [x] Tier 1 SD card prepared with `make_sd_image.py` (bootloader v0.8, updater, scope; boot mode 4), written to a spare card
-- [ ] Tier 1 step 5.3.3 done: open firmware booted with stock FPGA
+- [x] Tier 1 step 5.3.3 done: open firmware booted with stock FPGA
 - [ ] AL3 bitstream (0x1532) written and verified by read-back
-- [ ] FEL path tested (usbipd attach, `sunxi-fel version`)
+- [x] FEL path tested (usbipd attach, `sunxi-fel version`)
 
 ## Backup register
 
@@ -71,3 +71,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   standard display config @710 with boot mode 4 (menu, scope preselected); sectors 708/709 blank (calibrate on first boot). Image: `backups/sdcard/card-1.00o5-stockfpga.img`
   sha256 83a1ff773c766f1c04586996b6a22dd601828162e9806f573a912ab62442f012. Read-back identical. FAT32 partition from sector 8192, label FNIRSI.
   Not yet booted on the scope.
+- First boot of the tier-1 card OK: BOOT fw v0.8 banner, boot menu, scope v1.00o5 runs with stock FPGA; diagnostics shows FPGA 0x1432.
+  Standard display config correct (no shift, touch OK). Base calibration done; input-divider calibration done against bench supply + DMM
+  (first attempt failed with probes on 10x: the routine needs 1x). Updater's USB mass-storage mode gave "Cannot recognize device" on Windows (unresolved, cable suspected).
+- FEL verified: boot menu -> FEL, usbipd bind --hardware-id 1f3a:efe8, attach busid 9-3 to WSL, `sunxi-fel version` -> AWUSBFEX soc=00001663(F1C100s) ver=0001.
