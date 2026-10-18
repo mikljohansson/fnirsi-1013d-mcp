@@ -25,6 +25,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   enable, 0x29 bits 5/6, S = ... + 1, (N/2)^K maths, latency/settle formulas, Filter box FIR option, SET_DECIM flags
   bit 3, GET_DECIM, caps bit 16, protocol 1.11. Confirm with fpga-gen4 that the output rate stays 200 MHz / N.
 - [>] **Default filter = CIC2 now** (owner leaning yes after the 0x1534 bench; CIC + FIR once 0x1535 is benched).
+- [ ] **USB suspend/resume handling** (10-18 22:48, fw 0.2.43 FEL-loaded, PHY fix present): after an idle period with the port closed the
+  device logged suspend -> bus_reset -> set_config and the host's first write hit Windows error 22 (device failed before the open); the
+  reconnect a second later worked. usb_resumes has been 0 on every build while usb_suspends count: the device never sees or handles the
+  resume, so the host resets the port instead. Investigate MUSB suspend/resume (INTRUSB resume enable, POWER.SuspendM/Resume, PHY state
+  during suspend, clocks), make resume work, and bench with the soak tool in idle-closed-port mode (open, close, wait 2-5 min, open).
 - [ ] **MMU + D-cache** (big lever: FFT 4096 points 10.9 ms uncached; flat 1:1 map with the framebuffer/DMA regions
   uncached; measure pass time and FFT_BENCH before/after). Separate agent, careful bench.
 - [ ] **Dead-code purge** (owner dropped the byte-identical rule 10-18): PC_PROTOCOL always on, hidden-option masks
