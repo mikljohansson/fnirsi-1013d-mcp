@@ -40,6 +40,8 @@ static volatile uint8  pc_dtr;
 
 //Link counters for GET_LINK_STATS (order = pc_hal_link_stats, docs/protocol.md section 14)
 static volatile uint32 pc_ts[PC_TSTAT_COUNT];
+static volatile uint32 pc_usb_ev[PC_USB_EV_COUNT];
+static volatile uint8  pc_ep2_configured;    //SET_CONFIGURATION set up EP2 since the last bus reset
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // IRQ masking (CPSR I bit), nests safely
@@ -357,11 +359,46 @@ void pc_usb_isr_link(void)
     *USBC_REG_RXCSR |= USBC_BP_RXCSR_D_FLUSH_FIFO;
   *USBC_REG_EPIND = epind;                         //SET_CONFIGURATION re-enables the EP2 RX interrupt
 
+  //A packet held back by a full ring was just flushed: the EP2 OUT interrupt must not stay masked. A RESUME keeps the
+  //configuration (no SET_CONFIGURATION follows), so nothing else would unmask it (0.1.x-0.2.4 relied on the poll sweep)
+  if(pc_rx_stalled)
+    *USBC_REG_INTRXE |= USBC_INTRX_FLAG_EP2;
+
   pc_rx_out    = pc_rx_in;
   pc_rx_stalled = 0;
   pc_dtr       = 0;
   pc_ts[PC_TS_LINK_RESETS]++;
   pc_link_events |= PC_LINK_RESET;
+}
+
+void pc_usb_isr_event(uint8 ev)
+{
+  if(ev < PC_USB_EV_COUNT)
+    pc_usb_ev[ev]++;
+
+  if(ev == PC_USB_EV_BUS_RESET)
+    pc_ep2_configured = 0;
+}
+
+void pc_usb_isr_resume(void)
+{
+  pc_usb_isr_event(PC_USB_EV_RESUME);
+
+  if(pc_ep2_configured)
+    *USBC_REG_INTRXE |= USBC_INTRX_FLAG_EP2;
+}
+
+void pc_hal_usb_events(uint32_t *v)
+{
+  uint32 i;
+
+  for(i=0;i<PC_USB_EV_COUNT;i++)
+    v[i] = pc_usb_ev[i];
+}
+
+void pc_usb_isr_configured(void)
+{
+  pc_ep2_configured = 1;
 }
 
 void pc_usb_isr_ep_cleared(uint8 ep)

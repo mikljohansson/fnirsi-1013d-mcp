@@ -59,6 +59,17 @@ void pc_usb_isr_tx(void);                   //EP2 IN packet sent
 void pc_usb_isr_link(void);                 //bus reset, suspend or disconnect
 void pc_usb_isr_ep_cleared(uint8 ep);       //CLEAR_FEATURE(ENDPOINT_HALT) flushed this endpoint's FIFO (0x02 / 0x82)
 void pc_usb_dtr(uint8 dtr);                 //SET_CONTROL_LINE_STATE
+void pc_usb_isr_event(uint8 ev);            //PC_USB_EV_*: counted for GET_LINK_STATS (fw 0.2.5)
+void pc_usb_isr_resume(void);               //RESUME: the configuration is kept, re-enable the EP2 OUT interrupt
+void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
+
+#define PC_USB_EV_BUS_RESET   0
+#define PC_USB_EV_SUSPEND     1
+#define PC_USB_EV_RESUME      2
+#define PC_USB_EV_DISCONNECT  3
+#define PC_USB_EV_SETUP       4             //EP0 setup packets
+#define PC_USB_EV_BAD_SETUP   5             //EP0 packets that were not 8 bytes (stalled)
+#define PC_USB_EV_COUNT       6
 
 //1 when no response byte is left in the staging buffer or the endpoint FIFO (ENTER_FEL waits for this)
 int  pc_transport_tx_drained(void);

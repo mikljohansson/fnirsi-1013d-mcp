@@ -182,6 +182,10 @@ void     pc_hal_tx_abort(void);                  //drop the frame in flight and 
 #define PC_TSTAT_COUNT    11
 void     pc_hal_link_stats(uint32_t *v);         //PC_TSTAT_COUNT values
 
+//USB device events (fw 0.2.5): bus resets, suspends, resumes, disconnects, EP0 setups, malformed EP0 setups
+#define PC_USBEV_COUNT    6
+void     pc_hal_usb_events(uint32_t *v);
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // SD card (MAIN context only: the driver is not reentrant). Return 0 or the negative driver error.
 

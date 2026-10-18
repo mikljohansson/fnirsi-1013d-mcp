@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.4 (protocol 1.3: shared control, SD sector commands; 0.2.3: chip above RUN/STOP and
+State on 2026-10-18, fw 0.2.5 (protocol 1.3: shared control, SD sector commands; 0.2.5: USB event counters; 0.2.3: chip above RUN/STOP and
 steady, one-step SET_TIMEBASE). 0.2.1 passed the protocol-level
 shared-control acceptance on the bench (owner's visual checks pending); 0.2.2 adds SD_* and two startup counters,
 built and host-tested, not benched. Read `CLAUDE.md` (repo root) first, then
@@ -189,6 +189,16 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
   counters (rx_swept, link_resets, rx_packets vs requests sent). Acceptance: 0 E_BAD_CRC, 0 no response in 2000
   PINGs + 100 x 64 KiB. Ideas not yet tried: unload EP2 OUT with 32-bit reads only (pad the ring position to 4),
   read RXCOUNT twice, check RXCSR DataError/Overrun on bad packets, try the FIFO on Linux to separate host effects.
+- USB "Error state" incident (0.2.2, lead): port closed, scope idle ~10 min, then Windows showed the device present but
+  in an error state (CreateFile failed); a cable replug recovered it. Not reproduced, cause unknown. Code reading:
+  the suspend path calls pc_usb_isr_link, which flushed a held-back OUT packet but left EP2 OUT masked in INTRXE
+  (only SET_CONFIGURATION unmasks it, and a resume sends none), so RX fell back to the 2 ms sweep: fixed in 0.2.5
+  (unmask in the link hook and on RESUME when configured). That would not make Windows fail the device, though.
+  Other candidates not verified: Windows selective suspend of the idle CDC device followed by a failed resume or
+  reset-resume; the 1.00o5 bus-reset handler writes TXCSR/RXCSR = 0 and the TX FLUSH bit with EPIND 0 (on CSR0 that
+  bit is DataEnd). 0.2.5 counts bus resets, suspends, resumes, disconnects and EP0 setups (GET_LINK_STATS 35-40):
+  read them before and after a reproduction (port closed 10+ min). Host-side check: disable "Allow the computer to
+  turn off this device" for the port / USB selective suspend and see whether it still happens.
 - pass_max_ms showed 1515 after boot in 0.1.2: that was the boot interval, excluded since 0.1.4.
 - Latency: PING ~1 ms (ISR poll); non-safe commands wait one UI pass (35-75 ms; 1.2 REMOTE was ~0.2-0.6 ms).
 - Upstream: 32 GCC 13 warnings (unused variables, implicit `usb_CDC_in_ep_callback` in menu.c), menu debug helpers

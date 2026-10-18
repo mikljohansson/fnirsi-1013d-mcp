@@ -405,6 +405,8 @@ void     pc_hal_tx_abort(void)   { mock.tx_busy = 0; mock.tx_aborts++; }
 void     pc_hal_enter_fel(void)  { mock.fel_entries++; }
 void     pc_hal_link_stats(uint32_t *v) { uint32_t i; for(i=0;i<PC_TSTAT_COUNT;i++) v[i] = 1000 + i; }
 
+void     pc_hal_usb_events(uint32_t *v) { uint32_t i; for(i=0;i<PC_USBEV_COUNT;i++) v[i] = 2000 + i; }
+
 uint32_t pc_hal_sd_sectors(void) { return mock.sd_sectors; }
 
 int pc_hal_sd_read(uint32_t sector, uint32_t count, uint8_t *dst)

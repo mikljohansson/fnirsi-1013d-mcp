@@ -649,10 +649,11 @@ static int h_get_battery(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //responses_dropped, timeouts, junk_bytes), session (8: responses, duplicates, tx_aborts, disp_main, disp_busy,
 //disp_isr, held, isr_skipped), startup (fw 0.2.0: ms from session init to the first MAIN poll, duration of the first
 //main-loop pass; fw 0.2.2: first MAIN poll -> first UI conversion started, -> first UI capture processed; fw 0.2.4:
-//-> first pass after battery check, acquisition, touch handler, RTC. The last six are ms + 1, 0 = not reached)
+//-> first pass after battery check, acquisition, touch handler, RTC. The last six are ms + 1, 0 = not reached),
+//USB events (fw 0.2.5: bus resets, suspends, resumes, disconnects, EP0 setups, malformed EP0 setups)
 static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
-  uint32_t v[PC_TSTAT_COUNT + 24];
+  uint32_t v[PC_TSTAT_COUNT + 24 + PC_USBEV_COUNT];
   const pc_parser_stats *ps = &s->parser.stats;
   uint32_t n = PC_TSTAT_COUNT, i;
 
@@ -665,6 +666,8 @@ static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uin
   v[n++] = s->disp_busy;   v[n++] = s->disp_isr;       v[n++] = s->held;       v[n++] = s->isr_skipped;
   v[n++] = s->first_poll_ms; v[n++] = s->first_pass_ms; v[n++] = s->first_arm_ms; v[n++] = s->first_done_ms;
   v[n++] = s->first_mark[0]; v[n++] = s->first_mark[1]; v[n++] = s->first_mark[2]; v[n++] = s->first_mark[3];
+  pc_hal_usb_events(v + n);
+  n += PC_USBEV_COUNT;
 
   pc_put_u16(resp, (uint16_t)n);
   pc_put_u16(resp + 2, 0);

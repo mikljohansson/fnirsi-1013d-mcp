@@ -896,7 +896,8 @@ void usb_device_CDC_irq_handler(void)
         *USBC_REG_RXCSR |= USBC_BP_RXCSR_D_FLUSH_FIFO;
 
 #if PC_PROTOCOL
-    //Bus reset: REMOTE ends (exit_reason 5), buffers are dropped                  BENCH: plan 11.3 step 3 (cable pull)
+    //Bus reset: buffers are dropped, the event is counted (GET_LINK_STATS)
+    pc_usb_isr_event(PC_USB_EV_BUS_RESET);
     pc_usb_isr_link();
 #endif
 
@@ -913,6 +914,10 @@ void usb_device_CDC_irq_handler(void)
     //Back to connected state
     usb_connect = 1;
     usb_ep0_state = EP0_IDLE;
+
+#if PC_PROTOCOL
+    pc_usb_isr_resume();
+#endif
   }
 
   //Check on a SUSPEND interrupt
@@ -926,6 +931,7 @@ void usb_device_CDC_irq_handler(void)
     usb_ep0_state = EP0_IDLE;
 
 #if PC_PROTOCOL
+    pc_usb_isr_event(PC_USB_EV_SUSPEND);
     pc_usb_isr_link();
 #endif
   }
@@ -941,6 +947,7 @@ void usb_device_CDC_irq_handler(void)
     usb_ep0_state = EP0_IDLE;
 
 #if PC_PROTOCOL
+    pc_usb_isr_event(PC_USB_EV_DISCONNECT);
     pc_usb_isr_link();
 #endif
     
@@ -1037,6 +1044,9 @@ void usb_device_CDC_irq_handler(void)
               //Using a union for alignment to 32 bits
               usb_setup_packet.data[0] = *USBC_REG_EPFIFO0;
               usb_setup_packet.data[1] = *USBC_REG_EPFIFO0;
+#if PC_PROTOCOL
+              pc_usb_isr_event(PC_USB_EV_SETUP);
+#endif
               
               //Signal packet has been serviced
               *USBC_REG_CSR0 = USBC_BP_CSR0_D_SERVICED_RX_PKT_READY;
@@ -1243,6 +1253,9 @@ void usb_device_CDC_irq_handler(void)
                       //Enable the endpoint interrupts
                       *USBC_REG_INTRXE |= USBC_INTRX_FLAG_EP2;
                       *USBC_REG_INTTXE |= USBC_INTTX_FLAG_EP2;
+#if PC_PROTOCOL
+                      pc_usb_isr_configured();
+#endif
   
                       //Switch back to EP0
                       *USBC_REG_EPIND = 0;
@@ -1389,6 +1402,9 @@ void usb_device_CDC_irq_handler(void)
             else
             {
               //Signal packet has been serviced and stall the end point
+#if PC_PROTOCOL
+              pc_usb_isr_event(PC_USB_EV_BAD_SETUP);
+#endif
               *USBC_REG_CSR0 = USBC_BP_CSR0_D_SERVICED_RX_PKT_READY | USBC_BP_CSR0_D_SEND_STALL;
             }
           }
