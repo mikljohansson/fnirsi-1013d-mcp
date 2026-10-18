@@ -297,3 +297,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   **0.2.20 persisted to the card** (backup of 750.. taken by the tool first; restore with `fnirsi1013d-flash --restore <backup>` if the owner's
   visual checks of the 0.2.13+ UI changes fail). Pending owner checks on 0.2.20: System settings menu without the empty bottom row, battery
   indicator steady while charging, no boot message, generator/trigger menus and chip unchanged. fw-gen3 retired (handoff 47b2387); no agent active.
+- **FPGA flash written with the external-trigger bitstream 0x1533** (19:16-19:17): probe JEDEC ef 40 14; pre-write dump
+  backups/20261018-191620-pre-ext-trigger.bin and the tool's own backups/20261018-191640-pre-write.bin both sha256 8a9d3559... (= Atlan
+  0x1532 padded, so the rollback image is confirmed); wrote backups/al3_ext-trigger_0x1533_padded_96159a87.bin (0xFF-padded 1 MiB of
+  fpga/al3/out/FPGA-ext-trigger.bin a9656703...), 68 sectors erased, 1080 pages programmed, read-back verified, independent verify OK
+  (sha256 96159a87...). Scope on battery, USB unplugged, Sipeed FT2232D on J2. Power cycle and #VER fpga=0x1533 check pending.
