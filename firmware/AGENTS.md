@@ -218,7 +218,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.35 | 36149d1 | b1be459d | owner's UX: tap left/right on the plot = zoom out/in, drag = pan, Auto and Reset replace Span/Start; FFT length capped at 4096, default 2048; density with per-cell age (no band) and intensity ramp | built, host-tested |
 | 0.2.36 | 8e1a946 | 6060514b | view axis capped at 25 MHz (PC_SPECTRUM_FMAX_HZ) | built |
 | 0.2.37 | 0f3e743 | 9fde228a | dB conversion in ARM assembly (3 accesses per bin, byte-identical to C) | built, host-tested incl. qemu |
-| 0.2.38 | PENDING | | pass time under the acquisition menu's Memory header | built, host-tested |
+| 0.2.38 | 6ce82d9 | a6f50f6c | pass time under the acquisition menu's Memory header | built, host-tested |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
