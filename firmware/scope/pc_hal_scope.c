@@ -646,8 +646,57 @@ uint32_t pc_hal_settings_fingerprint(void)
   return pc_crc32(b, n);
 }
 
-//The chip into the current draw buffer (the UI's own top-bar drawing calls this through PC_TOPBAR_DRAWN)
+//The chip as final pixels, rendered once (into a top-bar corner of displaybuffertmp, which the UI only uses below
+//y 46), then copied as one blit: every pixel is written once with its final value, so redrawing it over itself can
+//not flicker (0.2.3-0.2.7 cleared the slot and drew the chip every 100 ms, directly on the screen).
+static uint16 pc_chip_px[PC_CHIP_H][PC_CHIP_W];
+static uint8  pc_chip_ready;
+
+static void pc_draw_chip_into(int state);
+
+static void pc_chip_render(void)
+{
+  DISPLAYDATA save;
+  uint32 y, x;
+
+  save = displaydata;
+  display_set_screen_buffer(displaybuffertmp);
+  pc_draw_chip_into(1);
+
+  for(y=0;y<PC_CHIP_H;y++)
+    for(x=0;x<PC_CHIP_W;x++)
+      pc_chip_px[y][x] = displaybuffertmp[(PC_CHIP_Y + y) * SCREEN_WIDTH + PC_CHIP_X + x];
+
+  displaydata = save;
+  pc_chip_ready = 1;
+}
+
+static void pc_chip_blit(uint16 *dst)
+{
+  uint32 y, x;
+
+  if(!pc_chip_ready)
+    pc_chip_render();
+
+  for(y=0;y<PC_CHIP_H;y++)
+    for(x=0;x<PC_CHIP_W;x++)
+      dst[(PC_CHIP_Y + y) * SCREEN_WIDTH + PC_CHIP_X + x] = pc_chip_px[y][x];
+}
+
+//State 1: the blit, into the current draw buffer. State 0: clear the slot (once, on the transition)
 static void pc_draw_chip(int state)
+{
+  if(state)
+  {
+    pc_chip_blit(displaydata.screenbuffer);
+    return;
+  }
+
+  pc_draw_chip_into(0);
+}
+
+//Drawing primitives behind the blit (used once for the render, and for the clear)
+static void pc_draw_chip_into(int state)
 {
   uint16 fg = displaydata.fg_color;
   PFONTDATA font = displaydata.font;
@@ -676,10 +725,19 @@ static void pc_draw_chip(int state)
 
 void pc_hal_indicator(int state)
 {
+  static uint8 shown;
   DISPLAYDATA save;
 
   pc_draw_begin(&save);
-  pc_draw_chip(state);
+
+  //Clear the whole clock slot only on a transition; while on, every call is the same blit
+  if(!state || !shown)
+    pc_draw_chip(0);
+
+  if(state)
+    pc_draw_chip(1);
+
+  shown = state ? 1 : 0;
   pc_draw_end(&save);
 }
 
@@ -994,6 +1052,28 @@ void pc_glue_ui_mask(int menu)
   }
 
   displaydata.fg_color = fg;
+}
+
+//Acquisition menu: Atlan's "ACQ / Long mode" box names the mode a tap switches to, which reads like an option
+//(owner, 0.2.8). Redraw it as a state toggle in the menu's style (Average / Long memory): green with black text when
+//the long (roll) time base is on, light grey with white text when off. Called after both 1.00o5 draw sites.
+void pc_glue_roll_label(void)
+{
+  uint16 fg = displaydata.fg_color;
+  PFONTDATA font = displaydata.font;
+  int on = scopesettings.long_mode != 0;
+
+  if(!pc_ready)
+    return;
+
+  display_set_fg_color(on ? GREEN_COLOR : LIGHTGREY_COLOR);
+  display_fill_rounded_rect(ACQ_MENU_XPOS + 8, ACQ_MENU_YPOS + 163, 90, 40, 3);
+  display_set_font(&font_2);
+  display_set_fg_color(on ? BLACK_COLOR : WHITE_COLOR);
+  display_text(ACQ_MENU_XPOS + 26, ACQ_MENU_YPOS + 168, "Roll mode");
+  display_text(ACQ_MENU_XPOS + (on ? 46 : 44), ACQ_MENU_YPOS + 182, on ? "on" : "off");
+  displaydata.fg_color = fg;
+  displaydata.font     = font;
 }
 
 //Settings saved by an earlier firmware (or another unit) may select what this hardware cannot do

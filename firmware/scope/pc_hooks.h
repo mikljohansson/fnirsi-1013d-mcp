@@ -53,6 +53,7 @@ char *pc_glue_version(int form);      //0 "v0.2.7", 1 "fw 0.2.7", 2 full identit
 void pc_glue_topbar_drawn(void);      //the top bar / RUN-STOP chip was (re)drawn: put the MCP chip back with it
 void pc_glue_diag_drawn(void);        //diagnostics screen drawn: identity line
 void pc_glue_ext_selected(void);      //EXT trigger chosen in the trigger menu
+void pc_glue_roll_label(void);        //acquisition menu: the long (roll) time base box as a state toggle
 void pc_glue_ui_mask(int menu);       //PC_MASK_*: paint over what it does not support (current draw buffer)
 void pc_glue_ui_capture_start(void);  //fpga_do_conversion started a conversion
 void pc_glue_ui_capture_addr(uint32 addr); //0x14 read of the finished UI capture
@@ -72,6 +73,7 @@ void pc_glue_ui_capture(void);        //UI finished reading a capture
 #define PC_TOPBAR_DRAWN()       pc_glue_topbar_drawn()
 #define PC_DIAG_DRAWN()         pc_glue_diag_drawn()
 #define PC_EXT_SELECTED()       pc_glue_ext_selected()
+#define PC_ROLL_LABEL()         pc_glue_roll_label()
 
 #else
 
@@ -89,6 +91,7 @@ void pc_glue_ui_capture(void);        //UI finished reading a capture
 #define PC_TOPBAR_DRAWN()       do { } while(0)
 #define PC_DIAG_DRAWN()         do { } while(0)
 #define PC_EXT_SELECTED()       do { } while(0)
+#define PC_ROLL_LABEL()         do { } while(0)
 
 #endif
 

@@ -5323,6 +5323,7 @@ void scope_open_acquisition_menu(void)
     display_text(ACQ_MENU_XPOS + 43, ACQ_MENU_YPOS +  168, "ACQ");
     display_text(ACQ_MENU_XPOS + 20, ACQ_MENU_YPOS +  182, "Short mode");
   }
+  PC_ROLL_LABEL();
   /*
   if (scopesettings.long_memory)
   //Set black color for the text
@@ -5526,6 +5527,7 @@ void scope_acquisition_ACQ_mode_select(void)
         display_text(ACQ_MENU_XPOS + 20, ACQ_MENU_YPOS +  182, "Short mode");
         scopesettings.long_mode = 1;
         }
+    PC_ROLL_LABEL();
           
     //if((scopesettings.runstate))
     //{

@@ -1,6 +1,7 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.9 (protocol 1.4: shared control, SD sector commands, EXT trigger for FPGA 0x1533
+State on 2026-10-18, fw 0.2.10 (0.2.10: MCP chip drawn as one idempotent blit, acquisition "Roll mode on/off" toggle
+label; protocol 1.4: shared control, SD sector commands, EXT trigger for FPGA 0x1533
 (protocol section 14 row 41, needs bench with fpga-gen2's bitstream); 0.2.8: generator and trigger menus compacted; 0.2.7: SD_STAGE from the timer poll,
 RX back-pressure counters, our version on screen, chip drawn with the top bar, temperature only with an RTC; 0.2.6:
 menus hide what the hardware lacks, README "Hidden menu options"; 0.2.5: USB event counters; 0.2.3: chip above RUN/STOP and
@@ -145,8 +146,11 @@ Plan: `docs/plans/collaborative-mode.md`; wire format agreed with the MCP agent 
   the parser takes no new event (so `#RESET` comes after the hold); link reset / DTR up drop the hold. The done hook
   counts a conversion once (`ui_started`), because 1.00o5 re-processes a finished conversion every pass while the
   gate holds (conversion_done stays set).
-- MCP chip (`pc_ui_service`, `pc_hal_indicator`): 0.2.3 steady green, 38 x 17 at x 127 y 3, directly above the
-  RUN/STOP chip, in the RTC clock's slot (the main-loop RTC draw is gated by PC_RTC_ALLOWED while the chip shows);
+- MCP chip (`pc_ui_service`, `pc_hal_indicator`): rendered once into a pixel array (via the top-bar corner of
+  displaybuffertmp), then drawn as one blit of final pixel values, so the 100 ms refresh and the PC_TOPBAR_DRAWN hooks
+  cannot flicker (0.2.3-0.2.9 cleared the slot and redrew it every 100 ms on the screen; owner saw flicker while the
+  main loop ran). The slot is cleared only on on/off transitions. 0.2.3 steady green, 38 x 17 at x 127 y 3, directly
+  above the RUN/STOP chip, in the RTC clock's slot (the main-loop RTC draw is gated by PC_RTC_ALLOWED while the chip shows);
   on while DTR or a frame in the last 2 s, redrawn every 100 ms. Owner rejected the 0.2.1 spot (x 697 y 22 under the
   battery) and the pulse.
 - SET_TIMEBASE mode 0 (0.2.3): sets index + rate + short mode, FPGA, then one scope_preset_values +
@@ -195,13 +199,13 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
   counters (rx_swept, link_resets, rx_packets vs requests sent). Acceptance: 0 E_BAD_CRC, 0 no response in 2000
   PINGs + 100 x 64 KiB. Ideas not yet tried: unload EP2 OUT with 32-bit reads only (pad the ring position to 4),
   read RXCOUNT twice, check RXCSR DataError/Overrun on bad packets, try the FIFO on Linux to separate host effects.
-- RX corruption under back-pressure (bench 0.2.3 SD persist): rx_stalls 307,837, hdr_crc 660, duplicates 658, then
-  the host's WriteFile failed (error 22) and the device re-enumerated. Not explained by code reading: only the ring
-  code unloads EP2 OUT, the stall path clamps the count before the room check, and the release path always has
-  room for one packet. The stall count is far above the packet count, so something re-enters the stall branch
-  without new data: 0.2.7 counts the branches (GET_LINK_STATS 41-46). The hdr_crc/duplicate pairing looks like host
-  retries of requests that had been executed (each SD_STAGE waited a UI pass, each SD_WRITE up to 4 s). 0.2.7
-  serves SD_STAGE from the timer poll, which removes the back-pressure regime; hosts should write <= 32 sectors.
+- RX corruption under back-pressure (parked 2026-10-18, known issue): bench 0.2.3 SD persist had rx_stalls 307,837,
+  hdr_crc 660, duplicates 658, then a host WriteFile error 22 and a re-enumeration. Not explained by code reading
+  (only the ring code unloads EP2 OUT; the stall path clamps the count before the room check; a release always has
+  room for one packet; the stall count far exceeds the packet count). Since 0.2.7 SD_STAGE is served from the timer
+  poll and the flash tool writes 32 sectors per SD_WRITE: 0.2.7 persist 5.3 s, rx_stalls 0, hdr_crc 0, duplicates 0,
+  and the branch counters (GET_LINK_STATS 41-46) never fired. No shipped host flow reaches back-pressure any more.
+  Repro idea if it matters again: a host that floods 492-byte PINGs without reading responses, then read 41-46.
 - Startup (closed 2026-10-18): 1515 ms from session init to the first MAIN poll is the 1.00o5 splash
   (`load_picture("scope.bmp")`); kept by decision, documented in README section 4 ("Boot"). The first pass is 31 ms.
 - USB "Error state" incident (0.2.2, lead): port closed, scope idle ~10 min, then Windows showed the device present but

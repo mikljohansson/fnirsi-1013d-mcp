@@ -398,6 +398,11 @@ hooks `PC_UI_HAS` / `PC_UI_MASK` that are empty with `PC_PROTOCOL=0`):
 | Time & Date settings (RTC submenu) | system settings | no DS3231 answers at boot | the clock, file stamps and FAT times would read garbage |
 | Temperature (diagnostics screen) | diagnostics | no DS3231 answers at boot | it is the DS3231's temperature register; without the module it read "99" |
 
+Relabelled (fw 0.2.10): the acquisition menu's "ACQ / Long mode" box (it named the mode a tap switches to) is drawn
+as a state toggle, "Roll mode" + "on" / "off", green when the long (roll) time base is on, like Average and Long
+memory. It stays: roll mode works on this hardware. The empty bottom row of System settings (Time & Date hidden
+without an RTC) is accepted by the owner as is.
+
 Version display (fw 0.2.7): the main-screen corner and the restore screen show `v<fw>`, the diagnostics screen shows
 `fw <fw>` in place of 1.00o5 and a full identity line along its top edge (`FNIRSI-1013D-AI fw .., proto 1.3, base
 Atlan4 1.00o5, git <hash>, built <date>`), all from PC_FW_VERSION / PC_PROTO_* / PC_FW_BUILD (the same as `#VER` and
