@@ -87,6 +87,7 @@ def test_timeout_classes_follow_remote_state(legacy_transport):
     transport.request(P.Cmd.SET_REMOTE, P.SetRemoteReq(1, 0, 0).pack())
     assert transport.remote
     assert pol.for_cmd(P.Cmd.SET_TIMEBASE, True) == 0.3 and pol.for_cmd(P.Cmd.READ_RAW, True) == 0.5
+    assert pol.for_cmd(P.Cmd.READ_RAW, False, shared=True) == 2.5  # 1.3 RUN-mode READ_RAW hold (<= 1 s)
     transport.request(P.Cmd.SET_REMOTE, P.SetRemoteReq(0, 0, 0).pack())
     assert not transport.remote
 

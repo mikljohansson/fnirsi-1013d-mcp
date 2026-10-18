@@ -80,6 +80,8 @@ class ServerConfig:
     legacy_idle_release_s: float = 60.0
     #: collaborative firmware: restarts of a long run after settings changes at the scope before giving up
     max_restarts: int = 5
+    #: collaborative firmware reports ui_busy 2 (STARTING) until its first main-loop pass; wait this long
+    starting_wait_s: float = 10.0
     inline_max_points: int = 2000
     #: cap on one response payload; larger reads are split (None = the device's max_response_payload)
     max_response: int | None = None
@@ -232,8 +234,13 @@ class Session:
         s = self.get_scope()
         self.last_tool = time.monotonic()
         st = s.status()
+        deadline = time.monotonic() + self.cfg.starting_wait_s
+        while st.ui_busy == P.UiBusy.STARTING and time.monotonic() < deadline:
+            time.sleep(0.25)  # USB is up before the main loop's first pass (about 5 s after a FEL load)
+            st = s.status()
         if st.ui_busy == P.UiBusy.STARTING:
-            raise ToolError("the scope is still starting (first UI pass not finished); retry in a second")
+            raise ToolError(f"the scope is still starting after {self.cfg.starting_wait_s:g} s (first UI pass not "
+                            "finished); check the screen and retry")
         if st.ui_busy:
             raise ToolError("scope UI is in a modal screen (menu, calibration or USB storage); close it on the "
                             "scope and retry")
@@ -781,13 +788,15 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
 
     @register(0, title="Screenshot", read_only=True)
     async def scope_screenshot() -> Image:
-        """PNG image of the scope's 800x480 screen (useful to show the human what the scope displays in LOCAL
-        mode). Takes about 0.1-0.3 s. Needs the SCREENSHOT capability. Pixel format RGB565 is unverified (T9):
-        if colours look wrong, say so."""
+        """PNG image of the scope's 800x480 screen. Only on firmware that reports the SCREENSHOT capability
+        (check scope_info caps first): firmware 0.1.x and the current builds do not have READ_SCREEN, and this
+        tool then fails at once with "no SCREENSHOT capability". Takes about 0.1-0.3 s. Pixel format RGB565 is
+        unverified (T9): if colours look wrong, say so."""
         def go() -> bytes:
             s = sess.get_scope()
             if not s.profile().has(P.Caps.SCREENSHOT):
-                raise ToolError("scope_screenshot: this firmware build has no SCREENSHOT capability")
+                raise ToolError("scope_screenshot: this firmware build has no SCREENSHOT capability (READ_SCREEN is "
+                                "not built in); use scope_fetch_waveform to see what the scope shows")
             return _png_from_rgb565(s.read_screen())
         data = await run("scope_screenshot", 0, {}, go)
         return Image(data=data, format="png")

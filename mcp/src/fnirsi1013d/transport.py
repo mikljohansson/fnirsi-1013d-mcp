@@ -63,12 +63,16 @@ class TimeoutPolicy:
     main_local: float = 1.0
     bulk_remote: float = 0.5
     bulk_local: float = 1.5
+    #: protocol 1.3: in RUN a READ_RAW is held up to 1000 ms until the UI capture in flight is DONE, then sent
+    bulk_shared: float = 2.5
     text: float = 0.1
 
-    def for_cmd(self, cmd: int, remote: bool) -> float:
+    def for_cmd(self, cmd: int, remote: bool, shared: bool = False) -> float:
         if cmd in FAST_CMDS:
             return self.fast
         if cmd in BULK_CMDS:
+            if shared:
+                return self.bulk_shared
             return self.bulk_remote if remote else self.bulk_local
         return self.main_remote if remote else self.main_local
 
@@ -382,6 +386,8 @@ class Transport:
         self.timeouts = timeouts or TimeoutPolicy()
         #: REMOTE as last reported by the device (status-shaped responses); selects the timeout class
         self.remote = False
+        #: protocol 1.3 collaborative firmware (status-shaped answers with control SHARED)
+        self.shared = False
         self.stats = LinkStats()
         self._parser = P.FrameParser()
         self._lock = threading.RLock()
@@ -513,7 +519,7 @@ class Transport:
         elif self.response_timeout is not None:
             tmo = self.response_timeout
         else:
-            tmo = self.timeouts.for_cmd(cmd, self.remote)
+            tmo = self.timeouts.for_cmd(cmd, self.remote, self.shared)
         n_try = 1 + (self.retries if retries is None else retries)
         self._outstanding[seq] = cmd
         try:
@@ -536,6 +542,7 @@ class Transport:
     def _note_status(self, resp: P.Frame) -> None:
         if resp.status == P.Status.OK and resp.cmd in _STATUS_BODY_CMDS and resp.payload:
             self.remote = resp.payload[0] == P.Control.REMOTE
+            self.shared = resp.payload[0] == P.Control.SHARED
         elif resp.status == P.Status.E_NOT_REMOTE:
             self.remote = False
 

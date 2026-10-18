@@ -572,3 +572,23 @@ async def test_response_cap_keeps_tools_working(sim_factory, tmp_path):
         assert abs(r["tau"] - 80e-6) / 80e-6 < 0.03
         r = await c.call("scope_averaged_capture", n=4, reject_clipped=False, on_device=True)
         assert r["averaging"] == "host" and any("does not fit" in x for x in r["caveats"])
+
+
+async def test_waits_while_the_scope_is_starting(sim_factory, tmp_path):
+    import threading
+    srv = sim_factory()
+    srv.device.ui_busy = 2  # 1.3 STARTING: USB up, first main-loop pass not done
+    threading.Timer(0.6, lambda: setattr(srv.device, "ui_busy", 0)).start()
+    async with client_for(srv, tmp_path) as c:
+        r = await c.call("scope_set_timebase", divider=9)
+        assert r["applied"]["divider"] == 9
+    srv.device.ui_busy = 2
+    async with client_for(srv, tmp_path, starting_wait_s=0.3) as c:
+        assert "still starting" in await c.fails("scope_set_timebase", divider=19)
+
+
+async def test_screenshot_without_cap_says_so(sim_factory, tmp_path):
+    async with client_for(sim_factory(caps_override=0x1C03), tmp_path) as c:
+        desc = next(t for t in (await c.session.list_tools()).tools if t.name == "scope_screenshot").description
+        assert "SCREENSHOT capability" in desc.split(".")[0] + desc
+        assert "READ_SCREEN is not built in" in await c.fails("scope_screenshot")

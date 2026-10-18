@@ -210,3 +210,9 @@ def test_status_before_the_first_capture(sim_factory):
         assert e.value.status == P.Status.E_STATE and e.value.detail == 0
         with pytest.raises(DeviceError):
             s.capture_info()
+
+
+def test_transport_uses_the_shared_bulk_timeout(sim, scope):
+    scope.status()
+    assert scope.t.shared and not scope.t.remote
+    assert scope.t.timeouts.for_cmd(P.Cmd.READ_RAW, scope.t.remote, scope.t.shared) == 2.5

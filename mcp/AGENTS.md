@@ -23,7 +23,7 @@ context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/p
 | `vectors.py` | Checks/extends `../docs/protocol-vectors.json` (`--check`, `--merge`). |
 | `units.py` | `parse_quantity("100us")`, `fmt_si`. |
 
-Tests in `tests/` (193): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
+Tests in `tests/` (197): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
 (resend, resync, #RESET, 1.1/1.2 fields, timeouts, paused responses), `test_serial_link` (no-reconfigure rule,
 fake pyserial), `test_simulator_scope`, `test_shared_mode` (1.3 semantics through `Scope`), `test_firmware_match`
 (protocol.md section 14 items), `test_server` (every tool in-process, collaborative restarts, legacy fallback),
@@ -70,8 +70,9 @@ wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/mcp && ~/.venvs/fnirsi1
    corrupted request; nothing executed), for normal and deferred requests. Idempotency comes from the device's
    duplicate cache (only OK responses <= 256 B; a retried READ_RAW simply re-executes, it is read-only).
 6. **Timeout classes** (`TimeoutPolicy`): 100 ms for PING/GET_INFO/GET_STATUS/GET_BATTERY/GET_LINK_STATS and
-   text lines (timer-IRQ answered); main-loop commands 300 ms REMOTE / 1 s LOCAL; bulk reads 0.5 / 1.5 s; WAIT
-   has its own deadline. REMOTE is tracked from status-shaped answers. `response_timeout=` overrides.
+   text lines (timer-IRQ answered); main-loop commands 300 ms REMOTE / 1 s LOCAL; bulk reads 0.5 / 1.5 s, and
+   2.5 s on 1.3 firmware (READ_RAW is held up to 1 s in RUN until the UI capture in flight is DONE); WAIT
+   has its own deadline. REMOTE / SHARED is tracked from status-shaped answers. `response_timeout=` overrides.
 7. **Host partial-frame timeout is 2 s**, not the device's 100 ms (a paused large response must survive).
 8. One request in flight; only control requests (GET_STATUS, STOP, SET_REMOTE, PING) while a deferred one is
    pending, and only from the `deferred(cancel=...)` callback (single reader).
@@ -130,7 +131,8 @@ Signals: `sine`, `square`, `decay` (PI: period, width, tau, amp, tau2/amp2, flyb
 4 raw (`scope_raw_fpga`, `scope_enter_fel`, only with `FNIRSI_MCP_ENABLE_RAW=1`). `FNIRSI_MCP_MAX_TIER` limits
 registration. Tier 3/4: a call without `confirm_token` returns `{confirmation_required, token, summary}`; the
 token is bound to a hash of the exact arguments, single-use, 120 s. Disabling the generator needs no token.
-Collaborative firmware: `Session.ensure_control` only checks ui_busy (1 modal, 2 starting); long runs pin a
+Collaborative firmware: `Session.ensure_control` only checks ui_busy (1 modal: error; 2 starting: waits up to
+`starting_wait_s` 10 s, ~5 s after a FEL load); long runs pin a
 `capture_context` and restart on another settings_seq (`restarts` in the result, `max_restarts` 5); `scope_capture`
 says the scope is in STOP; `scope_acquisition_control(action='run')` = SET_ACQ_STATE RUN. Legacy firmware: tier 1+
 calls auto-acquire REMOTE and say so in `caveats`, a user tap makes the next call fail with "scope released by user",
