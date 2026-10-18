@@ -313,3 +313,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   4 bench passes, 400 x 64 KiB, 0 failed, no resets, event log only DTR edges. Weakens the EXT/0x28 theory: the 0.2.20 drops came after a
   COLD boot from the card with USB plugged in later (six suspend events in one ms at plug-in), every clean run was a FEL load with USB attached.
   **0.2.21 persisted to the card** (backup sd_750-1522_20261018-192445.bin = 0.2.20 image) for a cold-boot test with the owner.
+- **Cold-boot test, 0.2.21 from the card on 0x1533** (power cycle, USB plugged ~10 s later, bench immediately): passes 1-2 clean, pass 3
+  "100 x 64 KiB: 91 failed", pass 4 died; no restart (uptime 137 s). Event log: repeating tx_abort (2 s no progress, 6-64 KiB left) +
+  tx_flush every ~3 s from 117.8 s, rx_full/rx_release near the end => the bulk IN pipe stopped being serviced by the host mid-response.
+  With 0.2.20 after the previous cold boot the host cleared a HALT on EP 0x82 and reset the port. Every FEL-loaded run today was clean
+  (0.2.11/0.2.19/0.2.20/0.2.21, two 30-min soaks, >1500 x 64 KiB). Hypothesis (fw-gen4 task, 0.2.22): the SD-boot path inherits USB
+  controller state from Atlan's bootloader and 1.00o5's usb_device_init never soft-resets the controller / data toggles; the FEL path does
+  not. This may also explain today's early drops (0.2.2 idle, 0.2.3 persist were cold-booted card images).
