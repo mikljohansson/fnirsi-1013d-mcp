@@ -474,3 +474,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   GET_CAL both channels: 248 bytes, version 1, flags 4 (fw-cal expected flags 0 before calibration; to be explained). Pass times before
   calibration: 44 ms at 20 MSa/s, 45 ms at 1 MSa/s, 58 ms at ~10 kSa/s (max 79-80). Next: owner runs Base calibration with probes and USB
   unplugged. fw-gen6 spawned (worktree) on the 0.2.44 batch: 0x1535 FIR support, spectrum strip overdraw fix, CIC2 default.
+- **Base calibration v2 run by the owner ("Calibration successful").** GET_CAL: version 2, flags 0x07 on both channels. CH1 with the
+  generator off (pin pulled down, i.e. ~-1.24 V vs probe ground, NOT a shorted input): corrected trace odd/even (core A/B) means differ by
+  -0.05 at 1 MSa/s and -0.06 at 10 kSa/s (raw spread +5.95), -0.23 at 20 MSa/s, but -1.49 at 200 MSa/s (raw +4.51); filtered modes read
+  94.65 vs gated legacy 93.0 (1.65-code step remains at this level). Legacy 1 MSa/s with the 1 kHz square: Nyquist spur -34.7 dBV against a
+  -61 dBV floor (was -27 vs -50): 8 dB better but still 26 dB above the floor. Interpretation (inference): the zero correction works where
+  the level is near the calibration point; the residual spur with a +/-1.5 V square and the full-rate/filtered offsets at -1.24 V point at a
+  per-core GAIN mismatch (and a class-dependent gain), which a zero-only model cannot remove. Pass time 30 ms at every rate (was 44-58):
+  the readout loop is faster. Next: shorted-input measurements (true 0 V) and a per-core gain term.
