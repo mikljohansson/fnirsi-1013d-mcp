@@ -122,3 +122,72 @@ verified against an Anlogic document (none exists in the research trees).
 4. **If the owner still wants iteration without clipping:** the faster route is JTAG SRAM loading of test bitstreams (no
    flash write, so no brick risk). That needs an Anlogic-compatible JTAG adapter and is a separate question.
 5. **Ask the owner** which tool showed the "FPGA flash" option. If it is not Atlan's updater, send its name or a screenshot.
+
+## Datasheet check (AL3A10LG144.pdf)
+
+Checked 2026-10-18 from a text extract of the owner's download (untrusted file, copied to scratch, read with `pdftotext`).
+Page numbers below are PDF pages (printed page number + 1). [D] = stated in the datasheet, [I] = my inference.
+
+**1. What the document is.** [D] Anlogic "AL3 series FPGA datasheet", DS001 v1.3, September 2017, Chinese, 84 pages (PDF p.1,
+revision table p.84). It is the family datasheet, not an LG144-only document. It covers AL3A6, A10, A15, A55 and A130. The
+TQFP144 (20x20, 0.5 mm) pin list for AL3A6/AL3A10 is on p.70-72, package listed on p.7, ordering code (LG = lead-free LQFP,
+144 pins) on p.82. No user guide, no configuration application note.
+
+**2. Configuration modes and pins (p.51-58, p.69).**
+- [D] Seven modes chosen by MSEL[2:0]: slave serial 111, master serial 000, slave parallel x8 110, master SPI fast 001
+  (read 0x0B), master SPI standard 010 (read 0x03), master parallel x8 011, JTAG (any, interrupts the others). The 1013D uses
+  master SPI (MSPI). CCLK from the internal oscillator, 2 to 64 MHz, picked by a bitstream-software option (p.54); table 3-15
+  (p.68) says 2.5 to 66 MHz. Power-up CCLK is a low default.
+- [D] Anlogic names: CCLK (pin 12), SPICSN (pin 8, also named BUSY), D1/MOSI (pin 6), D0/DIN/MISO (pin 13), CSON/DOUT (pin
+  101), INITN (9), PROGRAMN (14), DONE (92), MSEL0/1/2 (94/96/97), CSN (21), TDI/TCK/TMS/TDO (15/16/18/20).
+- [D] Table 2-8-1 (p.51) labels MSEL, PROGRAMN, INITN, DONE, **CCLK**, CSN and the JTAG pins "dedicated". D[7:0],
+  D1/MOSI, D0/MISO, SPICSN and CSON/DOUT are "multiplexed", and the text (p.51) says multiplexed pins may be used as ordinary
+  I/O after configuration. The pin table writes these as `IO,D1,MOSI,...`, `IO,SPICSN,BUSY,...`, `IO,D0,...`. CCLK is
+  written without the `IO,` prefix (`CCLK, DIFFIO_L7p`), and pin definition table 4-1 (p.69) lists it under dedicated
+  configuration pins, direction I/O.
+- [D] No enabling option is described. There is no mention of a TD or bitstream setting for releasing the multiplexed pins.
+  [I] They are presumably free by default once DONE is high. [D] The text and tables disagree on the JTAG pins (p.51
+  table "dedicated", p.52 list "multiplexed"); p.69 calls them dedicated. Treat them as dedicated.
+- [I] CCLK is therefore dedicated. The `DIFFIO_L7p` suffix shows the pad has a bank-1 location, but the datasheet does not say
+  it can be used as a user output.
+
+**3. Multi-boot, remote update, flash access from user logic.** [D] None of these appears. A search of the text for
+multi-boot, fallback, remote, reconfiguration and IPROG-style terms finds nothing. Reconfiguration is only a low pulse on
+PROGRAMN (p.53) or a JTAG instruction. There is no user-logic SPI-flash primitive. Pin 103 is named `USRCLK` and the
+feature list names "BSCAN"; neither is explained. [I] Multi-boot, if it exists, is outside this document.
+
+**4. Resources (AL3A10, table 1-1 p.6; packages p.7).**
+
+| Item | AL3A10 |
+|---|---|
+| LUTs / FFs | 10,368 / 8,640 |
+| Distributed RAM | 69,120 bits |
+| Block RAM | 48 x EMB9K + 2 x EMB32K = 507,904 bits |
+| Multipliers | 3 x M18x18 (simple 18x18/9x9; the full DSP with ALU is AL3A55/130 only) |
+| PLLs / global clocks | 2 / 16 |
+| I/O banks | 8 |
+| User I/O | 91 on TQFP144 (32 LVDS pairs); 184 max (BGA256) |
+| Config SRAM | 2,198,020 bits (about 275 KB) |
+| IDCODE | **not in the datasheet**; 0x18006C31 stays sourced from prjtang |
+| Flash limits | bitstream "1.5 to 26 Mbit, flash 2 to 32 Mbit or larger" (p.52); reads 0x03 and 0x0B only |
+
+[I] The 25Q80 (8 Mbit) is large enough, and the 283 KB image fits with room for the 3x staging layout in section 4(b).
+
+**5. LVCMOS33 thresholds and overvoltage (p.60-63).**
+- [D] LVTTL33/LVCMOS33: VIL max 0.8 V, VIH min 1.9 V, VIH max VCCIO+0.3 V, VIL min -0.3 V (table 3-8, p.63). VCCIO 3.135 to
+  3.465 V. Optional Schmitt input, hysteresis 250 mV (small) or 450 mV (large) at 3.3 V (p.62).
+- [D] Absolute maximum input voltage 3.75 V; recommended maximum 3.6 V (p.59, p.60). Overshoot above the absolute maximum is
+  tolerated only for under 20 ns and under 100 mA. Only clamp figure: "PCI-clamp diode current" 25 mA max (p.60).
+- [D] Input leakage +-10 uA; up to 150 uA when VI lies between VCCIO-0.5 V and VIH max. Weak pull-up/down 35 to 250 uA (p.62).
+- [I] The pull-down on the calibration pin is then about 13 to 94 kOhm at 3.3 V.
+- [I] A 3.3 V CMOS source through 1 kOhm into a 3.3 V bank is inside the specification. The datasheet does not say the
+  standard pad has an always-on clamp, so do not rely on the 1 kOhm plus clamp to absorb higher voltages. Keep the source at
+  or below 3.6 V.
+
+**Conclusion for the bridge idea: not possible as designed, on this evidence.** The FPGA must drive CCLK to clock the config
+flash, and the datasheet lists CCLK as dedicated with no release option. The data and chip-select pins (MOSI, MISO, SPICSN)
+could be released, but without CCLK that does not help. No multi-boot or flash-access primitive exists to work around it.
+It becomes possible only if TD lets a user signal be assigned to pin 12 as an output. [I] A quick test would settle it:
+assign a signal to pin 12 in the `.adc` file and see whether place-and-route accepts it, then probe the pin on the bench.
+Until that works, keep the external programmer route in section 5, and treat the MCU-to-flash rewire as Atlan's separate
+route. Re-check once the Tang Dynasty manual is available; this datasheet predates TD 4.6.

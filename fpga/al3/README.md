@@ -470,3 +470,25 @@ descriptions, `docs/agent-measurement-guide.md`) should say:
 - reference the EXT source to the scope's USB ground, or shift it down about 1.2 V (series LED) when it shares the probe
   ground;
 - never link the probe ground and USB ground, because the traces shift.
+
+## Device facts from the datasheet
+
+Source: Anlogic "AL3 series FPGA datasheet" DS001 v1.3 (Sept 2017, Chinese, owner's download `AL3A10LG144.pdf`, 84 pages).
+Page numbers are PDF pages. Details and the configuration-pin analysis: `docs/fpga-flash-from-mcu.md`, "Datasheet check".
+
+| Item | AL3A10 (TQFP144 `LG144`) |
+|---|---|
+| LUTs / FFs | 10,368 / 8,640 (p.6) |
+| Distributed RAM | 69,120 bits |
+| Block RAM | 48 x EMB9K + 2 x EMB32K = 507,904 bits (our design uses 32 of the 48 EMB9K) |
+| Multipliers | 3 x M18x18 (simple multiplier only, no full DSP) |
+| PLLs / global clocks / I/O banks | 2 / 16 / 8 |
+| User I/O on TQFP144 | 91, with 32 LVDS pairs (p.7); the 184 figure in table 1-1 is the BGA256 |
+| IDCODE | not given in the datasheet; 0x18006C31 comes from prjtang and the owner's JTAG read |
+| LVCMOS33 / LVTTL33 input | VIL max 0.8 V, VIH min 1.9 V, up to VCCIO+0.3 V (p.63); optional hysteresis 250 or 450 mV (p.62) |
+| Overvoltage | absolute maximum input 3.75 V, recommended maximum 3.6 V; clamp figure only "PCI-clamp 25 mA" (p.59-60) |
+| Weak pull-up / pull-down | 35 to 250 uA, so about 13 to 94 kOhm at 3.3 V [inference] (p.62) |
+| Configuration | MSPI (MSEL 001 fast 0x0B, 010 standard 0x03), CCLK 2 to 64 MHz selectable in the bitstream; CCLK is a dedicated pin (pin 12), MOSI (6), MISO (13), SPICSN (8) are reusable as user I/O after configuration (p.51-54, p.69-70) |
+
+The external-trigger notes in "Changes" section 2 say the VIH/VIL values were not checked in an AL3 datasheet. They now are:
+the table above confirms 1.9 V / 0.8 V for LVCMOS33, and the 1 kOhm series path is within the input ratings for a 3.3 V source.
