@@ -1463,8 +1463,12 @@ static void test_event_log(void)
   setup(0x1532);
   r = req_ctx(PC_CMD_GET_EVENT_LOG, 0, 0, PC_CTX_ISR);
   T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 3); T_EQ(pc_get_u32(r.p + 4), 77); T_EQ(pc_get_u32(r.p + 8), mock.now);
-  T_EQ(r.len, 12 + 3 * 8); T_EQ(pc_get_u32(r.p + 12), 100); T_EQ(r.p[12 + 4], 1); T_EQ(r.p[12 + 8 + 4], 2);
+  T_EQ(r.len, 12 + 3 * 8 + 8 + 2 * 8); T_EQ(pc_get_u32(r.p + 12), 100); T_EQ(r.p[12 + 4], 1); T_EQ(r.p[12 + 8 + 4], 2);
   T_EQ(r.p[12 + 5], 0xA0); T_EQ(pc_get_u16(r.p + 12 + 6), 0x1234);
+
+  //0.2.15: the reset snapshot after the entries
+  T_EQ(pc_get_u16(r.p + 36), 2); T_EQ(pc_get_u16(r.p + 38), 1); T_EQ(pc_get_u32(r.p + 40), 95);
+  T_EQ(pc_get_u32(r.p + 44), 90); T_EQ(r.p[48], 5); T_EQ(r.p[52 + 4], 1);
 }
 
 static void test_fel_reset_stall(void)

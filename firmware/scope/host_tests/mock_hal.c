@@ -433,6 +433,17 @@ uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total)
   return k;
 }
 
+int32_t pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms)
+{
+  memset(dst, 0, 16);
+  pc_put_u32(dst, 90);
+  dst[4] = 5;
+  pc_put_u32(dst + 8, 95);
+  dst[12] = 1;
+  *reset_ms = 95;
+  return 2;
+}
+
 uint32_t pc_hal_sd_sectors(void) { return mock.sd_sectors; }
 
 int pc_hal_sd_read(uint32_t sector, uint32_t count, uint8_t *dst)

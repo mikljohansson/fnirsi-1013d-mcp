@@ -719,19 +719,31 @@ static int h_get_bad_frame(pc_session *s, const uint8_t *req, uint32_t len, uint
 }
 
 //GET_EVENT_LOG (protocol 1.5): u16 n, u16 0, u32 total events since boot, u32 now (ms), then n entries of 8 bytes
-//oldest first: u32 ms, u8 type (PC_EVT_* in pc_transport.h, docs/protocol.md section 14), u8 a, u16 b
+//oldest first: u32 ms, u8 type (PC_EVT_* in pc_transport.h, docs/protocol.md section 14), u8 a, u16 b. fw 0.2.15
+//appends the reset snapshot: u16 m, u16 frozen (1 = a bus reset froze it since the previous read), u32 reset ms, then
+//m entries (the events right before that reset)
 static int h_get_event_log(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   uint32_t total, n;
 
   (void)s; (void)req; (void)len;
 
-  n = pc_hal_event_log(resp + 12, 64, &total);
+  int32_t  m;
+  uint32_t reset_ms;
+  uint8_t *snap;
+
+  n = pc_hal_event_log(resp + 12, 128, &total);
   pc_put_u16(resp, (uint16_t)n);
   pc_put_u16(resp + 2, 0);
   pc_put_u32(resp + 4, total);
   pc_put_u32(resp + 8, pc_hal_ms());
-  *rl = 12 + 8 * n;
+
+  snap = resp + 12 + 8 * n;
+  m = pc_hal_event_snapshot(snap + 8, &reset_ms);
+  pc_put_u16(snap, (uint16_t)((m > 0) ? m : 0));
+  pc_put_u16(snap + 2, (uint16_t)(m >= 0));
+  pc_put_u32(snap + 4, (m >= 0) ? reset_ms : 0);
+  *rl = 12 + 8 * n + 8 + 8 * ((m > 0) ? m : 0);
   return PC_OK;
 }
 

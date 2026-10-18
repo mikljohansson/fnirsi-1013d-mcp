@@ -68,9 +68,30 @@ static volatile uint32 pc_usb_irq_polled;       //timer polls that found USB fla
 static volatile uint8  pc_usb_in_poll;          //the CDC handler runs from the timer poll
 static volatile uint32 pc_usb_isr_runs;         //real USB interrupts (the handler not called from the poll)
 
+//The events before the first bus reset since the host last read the log, frozen there (fw 0.2.15): Windows retries
+//its port reset, and anything may flood the ring afterwards, but the lead-up to the original fault survives
+static pc_evlog_entry  pc_evsnap[PC_EVSNAP_SIZE];
+static volatile uint32 pc_evsnap_n;
+static volatile uint32 pc_evsnap_ms;
+static volatile uint8  pc_evsnap_frozen;
+static uint32          pc_polled_log_ms;        //last time a type 14 event was logged (at most one per 100 ms)
+
 static void pc_evlog_add(uint8 type, uint8 a, uint16 b)
 {
   pc_evlog_entry *en = &pc_evlog[pc_evlog_n & (PC_EVLOG_SIZE - 1)];
+
+  if((type == PC_EVT_BUS_RESET) && !pc_evsnap_frozen)
+  {
+    uint32 k = (pc_evlog_n < PC_EVSNAP_SIZE) ? pc_evlog_n : PC_EVSNAP_SIZE;
+    uint32 i;
+
+    for(i=0;i<k;i++)
+      pc_evsnap[i] = pc_evlog[(pc_evlog_n - k + i) & (PC_EVLOG_SIZE - 1)];
+
+    pc_evsnap_n      = k;
+    pc_evsnap_ms     = pc_hal_ms();
+    pc_evsnap_frozen = 1;
+  }
 
   en->ms   = pc_hal_ms();
   en->type = type;
@@ -496,10 +517,21 @@ void pc_usb_isr_flags(uint32 usb, uint32 tx, uint32 rx)
   if(!pc_usb_in_poll)
     pc_usb_isr_runs++;
 
+  //The SOF flag latches every frame even with its interrupt disabled: it alone is not a lost interrupt (0.2.12 soak:
+  //~1000 type 14 events per second flushed the ring)
+  usb &= ~(uint32)USBC_BP_INTUSB_SOF;
+
   if(pc_usb_in_poll && (usb | tx | rx))
   {
+    uint32 now = pc_hal_ms();
+
     pc_usb_irq_polled++;
-    pc_evlog_add(PC_EVT_IRQ_POLLED, (uint8)usb, (uint16)(((tx & 0xFF) << 8) | (rx & 0xFF)));
+
+    if((now - pc_polled_log_ms) >= 100)
+    {
+      pc_polled_log_ms = now;
+      pc_evlog_add(PC_EVT_IRQ_POLLED, (uint8)usb, (uint16)(((tx & 0xFF) << 8) | (rx & 0xFF)));
+    }
   }
 }
 
@@ -565,6 +597,31 @@ uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total)
   }
 
   *total = n;
+  pc_irq_restore(cpsr);
+  return k;
+}
+
+//The reset snapshot (entries as above), *reset_ms = when it was taken; returns its size, -1 when none was frozen since
+//the previous read. A read re-arms it.
+int32_t pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms)
+{
+  uint32 cpsr = pc_irq_save();
+  int32  k = pc_evsnap_frozen ? (int32)pc_evsnap_n : -1;
+  int32  i;
+
+  for(i=0;i<k;i++)
+  {
+    const pc_evlog_entry *en = &pc_evsnap[i];
+    uint8_t *p = dst + 8 * i;
+
+    p[0] = (uint8_t)en->ms; p[1] = (uint8_t)(en->ms >> 8); p[2] = (uint8_t)(en->ms >> 16); p[3] = (uint8_t)(en->ms >> 24);
+    p[4] = en->type;
+    p[5] = en->a;
+    p[6] = (uint8_t)en->b; p[7] = (uint8_t)(en->b >> 8);
+  }
+
+  *reset_ms        = pc_evsnap_ms;
+  pc_evsnap_frozen = 0;
   pc_irq_restore(cpsr);
   return k;
 }

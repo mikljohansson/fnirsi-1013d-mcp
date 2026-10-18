@@ -72,7 +72,8 @@ void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
 #define PC_USB_EV_COUNT       6
 
 //Event log (fw 0.2.12, GET_EVENT_LOG): the last PC_EVLOG_SIZE USB / link events with their ms time
-#define PC_EVLOG_SIZE         64
+#define PC_EVLOG_SIZE         128   //fw 0.2.15 (64 before)
+#define PC_EVSNAP_SIZE        16    //events frozen at a bus reset (fw 0.2.15)
 #define PC_EVT_BUS_RESET      1
 #define PC_EVT_SUSPEND        2
 #define PC_EVT_RESUME         3

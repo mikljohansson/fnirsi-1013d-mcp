@@ -196,6 +196,7 @@ void     pc_hal_rx_debug(uint32_t *v);
 //u8 type, u8 a, u16 b; oldest first), returns the number of entries, *total = events logged since boot
 uint32_t pc_hal_usb_irq_polled(void);
 uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total);
+int32_t  pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms);   //fw 0.2.15, -1 = none since the last read
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // SD card (MAIN context only: the driver is not reentrant). Return 0 or the negative driver error.

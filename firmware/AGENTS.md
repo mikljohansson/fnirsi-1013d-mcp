@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.14 (0.2.14: the USB IRQ fallback serves only after two quiet ticks; 0.2.13: System settings compacted without an RTC, battery level filtered; 0.2.12: USB IRQ fallback in the timer poll, GET_EVENT_LOG, protocol 1.5; 0.2.11: a request sent right after the port is opened is no longer dropped; 0.2.10: MCP chip drawn as one idempotent blit, acquisition "Roll mode on/off" toggle
+State on 2026-10-18, fw 0.2.15 (0.2.15: event log 128 entries, SOF ignored, reset snapshot; 0.2.14: the USB IRQ fallback serves only after two quiet ticks; 0.2.13: System settings compacted without an RTC, battery level filtered; 0.2.12: USB IRQ fallback in the timer poll, GET_EVENT_LOG, protocol 1.5; 0.2.11: a request sent right after the port is opened is no longer dropped; 0.2.10: MCP chip drawn as one idempotent blit, acquisition "Roll mode on/off" toggle
 label; protocol 1.4: shared control, SD sector commands, EXT trigger for FPGA 0x1533
 (protocol section 14 row 41, needs bench with fpga-gen2's bitstream); 0.2.8: generator and trigger menus compacted; 0.2.7: SD_STAGE from the timer poll,
 RX back-pressure counters, our version on screen, chip drawn with the top bar, temperature only with an RTC; 0.2.6:
@@ -224,6 +224,10 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
   first), plus one 64 KiB loss / tx_abort right after boot (not reproduced, no mechanism found: main-loop TX code
   masks IRQs and the two handlers never nest). 0.2.14 serves the flags only after two consecutive ticks without a real
   USB interrupt, so the fallback never runs during traffic and counter 47 counts lost-interrupt candidates only.
+  0.2.12 soak (10 Hz GET_STATUS, selective suspend off): two drops 7 s apart, the first with three suspend+reset
+  pairs (Windows retrying), the event log useless: ~1000 type-14 events/s, all INTUSB = 0x08 (the SOF flag latches
+  every frame even with its interrupt off). 0.2.15: SOF ignored for counter 47 and type 14, type 14 rate-limited to
+  10/s, ring 128, and the 16 events before the first bus reset since the last read are frozen (GET_EVENT_LOG tail).
 - USB "Error state" incident (0.2.2, lead): port closed, scope idle ~10 min, then Windows showed the device present but
   in an error state (CreateFile failed); a cable replug recovered it. Not reproduced, cause unknown. Code reading:
   the suspend path calls pc_usb_isr_link, which flushed a held-back OUT packet but left EP2 OUT masked in INTRXE
