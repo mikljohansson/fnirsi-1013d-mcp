@@ -1,8 +1,9 @@
 # firmware/ handoff for agents
 
-**Current state (fw-gen6, 2026-10-18): latest build fw 0.2.44** (protocol 1.11: FPGA 0x1535 FIR support, spectrum
-strip repaint fix, Filter default CIC2, USB suspend as a state), see the ladder (section 8) and **section 22**; section
-20 (spectrum analyser, auto trigger mode) and 21 (calibration v2) still hold. The USB drop story: 0.2.25 PHYCTL fix closed the cold-boot drops; the reopen-after-idle reset is open (section 22). Sections 9-17 below are
+**Current state (fw-cal2, 2026-10-19): latest build fw 0.2.45** (protocol 1.12: calibration data v3, a gain per ADC
+core and clock class from a gain step at the calibration post), see the ladder (section 8) and **section 23**; section
+22 (0.2.44: FIR, spectrum repaint, Filter default, USB suspend), 20 (spectrum analyser, auto trigger mode) and 21
+(calibration v2; its zero model and zero step still hold) still apply. The USB drop story: 0.2.25 PHYCTL fix closed the cold-boot drops; the reopen-after-idle reset is open (section 22). Sections 9-17 below are
 older generations' notes, kept for history. Read the root `AGENTS.md` first, then this file. Details live in `firmware/README.md` (build, SD layout, FEL, memory budget, boot, bring-up
 checklist), `docs/protocol.md` (the spec; section 14 lists every deviation and addition, rows 28-42 are this
 generation's) and `docs/hardware-status.md` (bench log, newest at the bottom). This file does not repeat them.
@@ -30,8 +31,8 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
   pc_hooks.h               the hook macros used in 1.00o5 files; empty with PC_PROTOCOL=0
   pc_decim.c/.h            decimation filter maths for FPGA 0x1534 (N, K fallback, S, L16, Q24 scale, settle). Pure C,
                            host-buildable (section 19)
-  adc_cal.c/.h             calibration data v2: per-core zero model, sector 708 block, correction maths. Pure C,
-                           host-buildable (section 21)
+  adc_cal.c/.h             calibration data v3: per-core zero and gain model, sector 708 block, correction maths,
+                           zero and gain step checks. Pure C, host-buildable (sections 21, 23)
   host_tests/              test_protocol.c, test_rx_ring.c, test_session.c (+ mock_hal.c FPGA/transport model), vector_check.c,
                            check_vectors.py, gen_vectors.py, bench_link.py (pyserial, bench only)
 firmware/tools/            mksunxi.py, make_sd_image.py, fetch_gcc10.sh, spiflash tools (not this agent's)
@@ -228,6 +229,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.42 | cebb982 | b23f5fc8 | deterministic Auto (probe 50 MSa/s, period search, derive from f0 / f_hi, confirm, refine once), warnings with consequence + action, "MSa/s" units, no Avg tag in the header | built, host-tested |
 | 0.2.43 | 80ab45d | 7d2ea871 | calibration data v2: per-core zeros (full / gated clock), dithered correction, GET_CAL 248 bytes (protocol 1.10, row 48, section 21) | built, host-tested; bench list README 6.2 |
 | 0.2.44 | e0ee6f3 | 08f9a5ed | FPGA 0x1535 FIR (protocol 1.11, row 49), spectrum view not repainted by scope_preset_values, Filter default CIC2 (PC_DECIM_DEFAULT), USB suspend as a state + resume logging (row 50), generator Freq row no longer hits the removed Wave row; includes main's fw-cal 64 full-rate conversions | built, host-tested (section 22) |
+| 0.2.45 | df61557 | 32f259b4 | calibration data v3: gain per core and clock class from a gain step at the calibration post, per-class offset slopes, block v3 (304 bytes), GET_CAL 256 bytes (protocol 1.12, row 51, section 23) | built, host-tested; bench list README 6.3 |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -839,3 +841,46 @@ Commits 2e0cd10 (FIR), 9591d83 (repaint), e09b25a (default), 45b9b9a (USB suspen
   Average, Filter / Long memory slot) and channel (FFT row gated by PC_CH_COMPACT) menus: nothing else stale.
 - mcp/ needs: GET_DECIM byte 1 bit 3 / 0x29 bits 6-5 / caps bit 16 decoding, SET_DECIM fir flag, and the new event
   field meanings of types 1-4.
+
+## 23. Calibration data v3: per-core, per-class gain (fw-cal2, fw 0.2.45, protocol 1.12)
+
+Branch `fw-cal2` from main 854ed2a: 3aa3431 (protocol row 51, spec first), c8f17bf (adc_cal v3, readout, 16-bit path,
+GET_CAL, diagnostics, vectors, host tests), f5fdf72 (gain step prompt), df61557 (0.2.45, CHANGELOG), 510f54c (README
+6.3), then this handoff. Image from df61557: `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the fw-cal2 worktree,
+sha256 32f259b4f4ea9ad435b64af41a2d90516b96461b1c9d2b126ea1957228dce5fa (not pinned in backups/ yet; the image embeds
+the git hash, so a rebuild after the merge differs). Nothing benched. Design, assumptions, cost and the bench
+procedure: README 6.3; wire: protocol row 51.
+
+**What was decided and why**
+- Gain source: the calibration post, not the voltage calibration. The post needs a probe, so it cannot run inside the
+  zero step (probes unplugged); it is a second step right after it, with its own prompt (calibrationopen 10). No known
+  voltage is needed: only relative gains are measured, the gated mean of both cores stays the reference that
+  `input_calibration` is fitted on. The voltage-calibration fallback of section 21 was not built (it needs a
+  variable source and six steps; the post needs only the probes).
+- The PWM-slope ratio is no gain estimator (gated slopes A/B 0.989 vs signal 1.004 on the bench): the offset slopes
+  are measured per class for the offset term only.
+- Range: the gains are measured on one range (2 for a x1 probe, 5 for x10, picked from a probe of both levels) and
+  used on all. Assumption, bench step 7 of README 6.3 checks it. If it fails, store gains per range (the block has
+  80 bytes left: 512 - 432).
+- Centring: the post's levels are asymmetric (-35 / +53 codes at range 2); the PWM moves them symmetric about the 0 V
+  code so even-order INL (core A's gated bow) cancels in the span. Host test: 0.07 % vs 0.53 % gain error.
+- Readout: (raw x gain + off + top 16 dither bits) >> 16; the 1.00o5 v1 arithmetic is the special case gain 65536,
+  off = comp << 16 (dither never carries). Rail rule rewritten on both cores' corrected limits (clip_lo / clip_hi),
+  identical to 1.00o5 with unity gains. 16-bit readouts run the loop at unity (the feed carries gain16 and corr16).
+- v2 blocks are not read (no conversion): the owner re-runs the base calibration.
+
+**Host tests**: test_adc_cal 8590 checks: block, correction identities (v1 exact, unity-gain v3 = v2), every gain
+check, and a model of the owner's CH1 from the gain bench (v2 reproduces A - B 0.91 code at +-1 V full rate and the
+1.1 % class gap; v3 leaves A - B under 0.03 and both classes plus CIC2 within 0.05 code of the gated codes per volt).
+test_session 68933 / 68931 (GET_CAL 256 bytes, flags, gains, offsets, block offsets), vectors `adc_cal_v3`
+(check_vectors.py against `acal_pack`); the v2 `adc_cal` section stays because mcp/tests/test_cal_v2.py reads it.
+Warnings: GCC 13 32, GCC 10 37, PC_DEBUG 32, PC_PROTOCOL=0 33, identical lists to 854ed2a.
+
+**Not done / open**
+- mcp/ (mcp-gen3): GET_CAL 1.12 parse (256 bytes; 72 = 3; bytes 92..111 gain_a, gain_b, off_a, off_b, gain16; block
+  at 112 with i16 slope[class][core][range], u8 noise, gains Q15, gain_range / flags / lever), the volts model with
+  the gains (READ_RAW: code = T + G (raw - z); WIDE: x gain16 / 65536), the simulator, then retire the v2 vectors
+  section and test_cal_v2.py's use of it.
+- The 16-bit trigger level ignores corr16 and gain16 (as in v2): a 1 % level error at full rate, cosmetic.
+- No gain step on the stock bitstream (fixed 1 kHz on the post); the gains stay unity there.
+- Bench of everything: README 6.3 steps 1-10.
