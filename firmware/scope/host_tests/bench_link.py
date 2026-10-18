@@ -178,7 +178,9 @@ def main():
              'restarts restart_exc_type restart_exc_lr restart_exc_spsr restart_exc_sp '
              'restart_reset_lr restart_reset_sp restart_reset_cpsr '
              # fw 0.2.20: ticks that found the real USB IRQ pending where the old fallback served; retired since 0.2.21
-             'usb_irq_races').split()
+             'usb_irq_races '
+             # fw 0.2.48+: fault status (DFSR / IFSR) and fault address (FAR) of the restart's abort
+             'restart_fault_status restart_fault_addr').split()
     st, body, _ = L.request(0x0007)
     if st == 0 and body:
         n = struct.unpack_from('<H', body)[0]
