@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Reference model for the 0x1534 decimation filter (fpga/al3/src/zaklad.v, decim_chan).
+"""Reference model for the 0x1534 decimation filter and the 0x1535 compensation FIR
+(fpga/al3/src/zaklad.v, decim_chan and fir_chan).
 
 The model is written independently of the RTL structure: it computes each stored sample as a
 direct-form FIR over the 200 MSa/s sample stream, with the impulse response
@@ -12,11 +13,29 @@ Usage:
   cic_model.py check <edges.log>   check every logged memory write (tb_decim.v output)
   cic_model.py table               gain / resolution / alias / droop table (README section 3)
 
+FIR segments (0x1535, configuration marker field 8 = 1): the CIC above decimates by N/2
+(impulse response boxcar(N/2)^K, gain (N/2)^K, then min(65535, y >> shift) per CIC sample),
+and a 15-tap FIR over consecutive CIC samples (taps from fir_design.py, coeffs K 15 0.5)
+decimates by 2: out = clamp(0..65535, (sum + 2^16) >> 17).
+
 Sample order: for each write clock edge the tb logs the four ADC buses. Core B is the earlier
 sample of a pair (firmware convention, fpga_read_sample_data) unless the swap bit is set.
 """
 import math
+import os
 import sys
+
+FIR_T = 15                       # 0x1535 FIR taps
+FIR_ALPHA = 0.5                  # passband edge / (fo/2): flat to fo/4
+EXP_LAT = 12                     # pin capture to memory write (write clocks), CIC path
+EXP_LAT_FIR = 25                 # same with the FIR
+
+
+def fir_taps(k):
+    """The 15 quantised taps of fir_design.py for K (the RTL table must equal these)."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import fir_design
+    return [int(v) for v in fir_design.quantise(fir_design.design(k, FIR_T, FIR_ALPHA, "B"))]
 
 
 def impulse(n, k):
@@ -49,7 +68,8 @@ def parse(path):
                 continue
             if t[0] == "C":
                 cur = {"k": int(t[1]), "div": int(t[2]), "swap": int(t[3]), "shift": int(t[4]),
-                       "nega": int(t[5]), "negb": int(t[6]), "e": []}
+                       "nega": int(t[5]), "negb": int(t[6]), "fir": int(t[7]) if len(t) > 7 else 0,
+                       "e": []}
                 segs.append(cur)
             elif t[0] == "E" and cur is not None:
                 cur["e"].append(tuple(int(v) for v in t[1:]))
@@ -63,10 +83,20 @@ def check(path):
         return 1
     fails = 0
     total = 0
+    taps = {}
     for s in segs:
-        k, sw, sh = s["k"], s["swap"], s["shift"]
+        k, sw, sh, fir = s["k"], s["swap"], s["shift"], s["fir"]
         p, n = decimation(s["div"])
-        h = impulse(n, k)
+        if fir:
+            if p % 2 or p < 8:
+                print(f"K {k} N {n}: FIR segment with N not a multiple of 4 or below 16 -> FAIL")
+                fails += 1
+                continue
+            if k not in taps:
+                taps[k] = fir_taps(k)
+            h = impulse(n // 2, k)
+        else:
+            h = impulse(n, k)
         e = s["e"]
         # contiguous edge numbers
         for a, b in zip(e, e[1:]):
@@ -94,19 +124,32 @@ def check(path):
             print(f"K {k} N {n}: write spacing {spacing}, expected {p}")
             fails += 1
 
-        def expect(ch, j):
+        def cic(ch, j, m):
             idx = 2 * j + 1                       # later sample of pair j
             if idx - (len(h) - 1) < 0:
                 return None
             x = xs[ch]
-            y = sum(h[m] * x[idx - m] for m in range(len(h)))
-            if k == 1:                              # boxcar: plain arithmetic sum of N samples
-                assert y == sum(x[idx - n + 1: idx + 1])
+            y = sum(h[i] * x[idx - i] for i in range(len(h)))
+            if k == 1:                              # boxcar: plain arithmetic sum of m samples
+                assert y == sum(x[idx - m + 1: idx + 1])
             return min(65535, y >> sh)
 
+        def expect(ch, j):
+            if not fir:
+                return cic(ch, j, n)
+            # FIR over the CIC samples at pairs j, j - P/2, ..., j - 14 P/2 (newest first)
+            acc = 0
+            for t in range(FIR_T):
+                c = cic(ch, j - t * (p // 2), n // 2)
+                if c is None:
+                    return None
+                acc += taps[k][t] * c
+            return max(0, min(65535, (acc + (1 << 16)) >> 17))
+
         # find the latency (write edge - last pair used) that explains every checkable write
+        exp_lat = EXP_LAT_FIR if fir else EXP_LAT
         best = None
-        for lat in [12] + [v for v in range(0, 32) if v != 12]:
+        for lat in [exp_lat] + [v for v in range(0, 64) if v != exp_lat]:
             ok = cnt = 0
             for w in writes:
                 j = w - lat
@@ -123,15 +166,16 @@ def check(path):
                 best = (lat, cnt)
                 break
         sat = sum(1 for w in writes if (e[w][7] & 0xFFFF) == 0xFFFF)
+        zero = sum(1 for w in writes if (e[w][7] & 0xFFFF) == 0) if fir else 0
+        mode = "FIR" if fir else "CIC"
         if best is None:
-            print(f"K {k} N {n} swap {sw} shift {sh}: no latency matches all writes -> FAIL")
+            print(f"{mode} K {k} N {n} swap {sw} shift {sh}: no latency matches all writes -> FAIL")
             fails += 1
         else:
             lat, cnt = best
-            exp_lat = 12                            # pin capture (rising edge) to memory write, all K and N
             st = "ok" if lat == exp_lat else f"FAIL (expected {exp_lat})"
-            print(f"K {k} N {n:5d} swap {sw} neg {na}{nb} shift {sh:2d}: {cnt:4d} writes match, latency {lat} write clocks {st}"
-                  f"{', ' + str(sat) + ' saturated' if sat else ''}")
+            print(f"{mode} K {k} N {n:5d} swap {sw} neg {na}{nb} shift {sh:2d}: {cnt:4d} writes match, latency {lat} write clocks {st}"
+                  f"{', ' + str(sat) + ' saturated' if sat else ''}{', ' + str(zero) + ' clamped at 0' if zero else ''}")
             if lat != exp_lat:
                 fails += 1
             total += cnt

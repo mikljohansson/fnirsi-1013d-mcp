@@ -1,5 +1,5 @@
 // Testbench for the external trigger on the calibration pin (fpga/al3/src/zaklad.v, 0x1533 feature;
-// the design is now 0x1534, decimation off by default, see tb_decim.v).
+// the design is now 0x1535, decimation off by default, see tb_decim.v).
 // Run with fpga/al3/tb/run.sh (iverilog). Two instances share every input:
 //   dut = src/zaklad.v (module fnirsi_1013D)
 //   refd = Atlan4's 0x1532 zaklad.v from git, modules renamed with a _ref suffix by run.sh
@@ -363,7 +363,7 @@ module tb;
     // Version word and status read
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h1534, "cmd 0x06 reads 0x1534");
+    check(rd16_d == 16'h1535, "cmd 0x06 reads 0x1535");
     check(rd16_r == 16'h1532, "reference cmd 0x06 reads 0x1532");
 
     //-------------------------------------------------------------------------------

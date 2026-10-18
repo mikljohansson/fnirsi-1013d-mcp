@@ -1,4 +1,4 @@
-// Testbench for the decimation filter (fpga/al3/src/zaklad.v, version 0x1534).
+// Testbench for the decimation filter (fpga/al3/src/zaklad.v, version 0x1534, 0x1535 with the FIR off).
 // Run with fpga/al3/tb/run.sh (iverilog); the decimated outputs are checked by cic_model.py.
 // Two instances share every input:
 //   dut  = src/zaklad.v (module fnirsi_1013D)
@@ -349,9 +349,10 @@ module tb;
       eq_on = 1; bus_cmp_on = 1;
       for (it = 0; it < iterations; it = it + 1) begin
         rnd = $random(seed);
-        // new 0x1534 commands with K = 0: must not change anything
+        // new 0x1534/0x1535 commands with K = 0: must not change anything
         wr1(8'h53, {5'd0, rnd[7], 2'b00});
         wr1(8'h54, $random(seed));
+        wr1(8'h56, $random(seed));
         wr2(8'h55, $random(seed));
         wr1(8'h15, {6'd0, rnd[9:8]});                     // CH1, CH2, EXT, EXT
         wr1(8'h16, {7'd0, rnd[1]});
@@ -454,13 +455,14 @@ module tb;
 
     // Generator off and pin released for the rest of the run (EXT tests drive the pin)
     wr1(8'h50, 8'h00);
+    wr1(8'h56, 8'h00);                                    // FIR off for the 0x1534 checks below
     ext_en = 0;
 
     //-------------------------------------------------------------------------------
     // Version word and geometry register
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h1534, "cmd 0x06 reads 0x1534");
+    check(rd16_d == 16'h1535, "cmd 0x06 reads 0x1535");
     check(rd16_r == 16'h1533, "reference cmd 0x06 reads 0x1533");
     wr1(8'h53, 8'h00); wr1(8'h54, 8'h00);
     rd2(8'h29);
