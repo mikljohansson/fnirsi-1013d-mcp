@@ -13,7 +13,11 @@
 // Build identity (overridden from the Makefile)
 
 #ifndef PC_FW_VERSION
-#define PC_FW_VERSION     "0.1.4"
+#if PC_FIFO_MAP == 1
+#define PC_FW_VERSION     "0.1.5-m1"   //alternative USB FIFO layout (pc_transport.h)
+#else
+#define PC_FW_VERSION     "0.1.5"
+#endif
 #endif
 
 #ifndef PC_FW_BUILD
@@ -190,6 +194,12 @@ typedef struct
   uint32_t   disp_isr;
   uint32_t   held;              //polls that left a request queued for the main loop
   uint32_t   isr_skipped;       //timer-tick polls skipped because another poll was running
+
+  //Last request with a payload CRC error, exactly as received (header + payload + CRC), for GET_BAD_FRAME
+  uint32_t   bad_count;
+  uint32_t   bad_len;
+  uint32_t   bad_rx_bytes;      //transport rx_bytes when it completed: locates it in the byte stream
+  uint8_t    bad[PC_HDR_SIZE + PC_MAX_REQUEST_PAYLOAD + PC_CRC_SIZE];
 } pc_session;
 
 //----------------------------------------------------------------------------------------------------------------------------------

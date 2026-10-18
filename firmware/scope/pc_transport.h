@@ -21,16 +21,35 @@
 //  EP2 OUT  bytes   64 ..  575  512 B, single buffered (requests are <= 512 B; the ISR empties it at once)
 //  EP2 IN   bytes  576 .. 1599  2 x 512 B, double buffered (bulk IN throughput)
 //  EP1 IN   bytes 1600 .. 1663  64 B single (8-byte notification endpoint, never loaded)
+//PC_FIFO_MAP selects the layout (make PC_FIFO_MAP=n) so the bench can check whether request corruption follows the
+//OUT FIFO's position (fw 0.1.3 census: ~4% E_BAD_CRC with map 0, none with OUT at 0 in 0.1.2).
+#ifndef PC_FIFO_MAP
+#define PC_FIFO_MAP 0
+#endif
+
+#if PC_FIFO_MAP == 1
+//  EP0 0-63 | EP1 IN 64-127 | EP2 IN 512-1535 (DPB) | EP2 OUT 1536-2047: OUT as far from EP0 as possible
+#define PC_EP2_RXFIFOAD   192
+#define PC_EP2_TXFIFOAD   64
+#define PC_EP1_TXFIFOAD   8
+#else
+//  map 0: the table above
 #define PC_EP2_RXFIFOAD   8
-#define PC_EP2_RXFIFOSZ   6
 #define PC_EP2_TXFIFOAD   72
-#define PC_EP2_TXFIFOSZ   (USBC_BP_TXFIFOSZ_DPB | 6)
 #define PC_EP1_TXFIFOAD   200
+#endif
+#define PC_EP2_RXFIFOSZ   6
+#define PC_EP2_TXFIFOSZ   (USBC_BP_TXFIFOSZ_DPB | 6)
 #define PC_EP1_TXFIFOSZ   3
 
-//Compile-time layout check (bytes): no overlap, everything inside 2048
-typedef char pc_fifo_layout_check[((PC_EP2_RXFIFOAD * 8 >= 64) && (PC_EP2_TXFIFOAD * 8 >= PC_EP2_RXFIFOAD * 8 + 512) &&
-                                   (PC_EP1_TXFIFOAD * 8 >= PC_EP2_TXFIFOAD * 8 + 1024) && (PC_EP1_TXFIFOAD * 8 + 64 <= 2048)) ? 1 : -1];
+//Compile-time layout check (byte ranges, EP0 = 0-63): pairwise disjoint and inside 2048
+#define PC_FB(u)          ((u) * 8)
+#define PC_DISJ(a, la, b, lb) ((PC_FB(a) + (la) <= PC_FB(b)) || (PC_FB(b) + (lb) <= PC_FB(a)))
+typedef char pc_fifo_layout_check[(PC_DISJ(0, 64, PC_EP2_RXFIFOAD, 512) && PC_DISJ(0, 64, PC_EP2_TXFIFOAD, 1024) &&
+                                   PC_DISJ(0, 64, PC_EP1_TXFIFOAD, 64) && PC_DISJ(PC_EP2_RXFIFOAD, 512, PC_EP2_TXFIFOAD, 1024) &&
+                                   PC_DISJ(PC_EP2_RXFIFOAD, 512, PC_EP1_TXFIFOAD, 64) && PC_DISJ(PC_EP2_TXFIFOAD, 1024, PC_EP1_TXFIFOAD, 64) &&
+                                   (PC_FB(PC_EP2_RXFIFOAD) + 512 <= 2048) && (PC_FB(PC_EP2_TXFIFOAD) + 1024 <= 2048) &&
+                                   (PC_FB(PC_EP1_TXFIFOAD) + 64 <= 2048)) ? 1 : -1];
 
 //Called from usb_device_init(): CDC (re)start or MSC switch. Drops all buffered data, flags a link reset.
 void pc_transport_reset(void);

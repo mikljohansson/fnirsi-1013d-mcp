@@ -64,16 +64,18 @@ SRCS := \
 #   PC_PROTOCOL=0  hooks compile to nothing, image identical to upstream
 #   PC_DEBUG=1     DEBUG_FPGA + FORCE (bench builds only)
 #   PC_FORCE_CDC=1 CDC at boot even when the saved USB setting says MSC
+#   PC_FIFO_MAP=n  USB endpoint FIFO layout (pc_transport.h), 0 default, 1 OUT FIFO at 1536
 PC_PROTOCOL  ?= 1
 PC_DEBUG     ?= 0
 PC_FORCE_CDC ?= 1
+PC_FIFO_MAP  ?= 0
 ifeq ($(PC_PROTOCOL),1)
 SRCS += pc_protocol.c pc_cmds.c pc_transport.c pc_hal_scope.c
 PC_FW_BUILD := $(shell git rev-parse --short=8 HEAD 2>/dev/null)
 ifeq ($(PC_FW_BUILD),)
 PC_FW_BUILD := 00000000
 endif
-PC_DEFS := -DPC_PROTOCOL=1 -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FW_BUILD=0x$(PC_FW_BUILD)u
+PC_DEFS := -DPC_PROTOCOL=1 -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FW_BUILD=0x$(PC_FW_BUILD)u -DPC_FIFO_MAP=$(PC_FIFO_MAP)
 else
 PC_DEFS := -DPC_PROTOCOL=0
 endif

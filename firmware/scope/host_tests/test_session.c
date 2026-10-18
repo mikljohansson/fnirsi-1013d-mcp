@@ -904,6 +904,14 @@ static void test_transport_window(void)
     d = decode(&mock_resps[0]);
     T_TRUE(d.ok); T_EQ(d.h.status, PC_E_BAD_CRC); T_EQ(d.h.seq, 4242); T_EQ(d.h.cmd, PC_CMD_PING);
 
+    //GET_BAD_FRAME returns the damaged request byte for byte
+    {
+      resp_t b = req(PC_CMD_GET_BAD_FRAME, 0, 0);
+      T_EQ(b.h.status, 0); T_EQ(pc_get_u32(b.p), 1); T_EQ(pc_get_u16(b.p + 8), n);
+      T_MEM(b.p + 12, f, n);
+      mock_clear_resps();
+    }
+
     //Header CRC error: no answer at all
     mock_clear_resps();
     n = pc_frame_finish(f, PC_CMD_PING, 4243, 0, 0, 0);

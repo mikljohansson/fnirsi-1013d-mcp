@@ -48,6 +48,7 @@
 #define PC_CMD_GET_BATTERY        0x0005
 #define PC_CMD_TEST_PATTERN       0x0006
 #define PC_CMD_GET_LINK_STATS     0x0007     //1.2: link counters (firmware 0.1.4)
+#define PC_CMD_GET_BAD_FRAME      0x0008     //1.2: last request that failed its payload CRC, as received
 #define PC_CMD_GET_CHANNEL        0x0100
 #define PC_CMD_SET_CHANNEL        0x0101
 #define PC_CMD_GET_TIMEBASE       0x0102

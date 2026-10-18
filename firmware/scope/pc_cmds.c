@@ -568,6 +568,20 @@ static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uin
   return PC_OK;
 }
 
+//GET_BAD_FRAME (protocol 1.2): u32 bad_count, u32 rx_bytes at completion, u16 len, u16 reserved, then len bytes
+static int h_get_bad_frame(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  (void)req; (void)len;
+
+  pc_put_u32(resp, s->bad_count);
+  pc_put_u32(resp + 4, s->bad_rx_bytes);
+  pc_put_u16(resp + 8, (uint16_t)s->bad_len);
+  pc_put_u16(resp + 10, 0);
+  memcpy(resp + 12, s->bad, s->bad_len);
+  *rl = 12 + s->bad_len;
+  return PC_OK;
+}
+
 static int h_test_pattern(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   uint32_t n = pc_get_u32(req);
@@ -1310,6 +1324,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_GET_BATTERY,  F_LOCAL | F_BUSY | F_BASIC,             0, h_get_battery },
   { PC_CMD_TEST_PATTERN, F_LOCAL | F_BASIC,                      0, h_test_pattern },
   { PC_CMD_GET_LINK_STATS, F_LOCAL | F_BUSY | F_CONTROL | F_BASIC, 0, h_get_link_stats },
+  { PC_CMD_GET_BAD_FRAME, F_LOCAL | F_BUSY | F_CONTROL | F_BASIC, 0, h_get_bad_frame },
   { PC_CMD_GET_CHANNEL,  F_LOCAL,                                0, h_get_channel },
   { PC_CMD_SET_CHANNEL,  F_REMOTE,                               0, h_set_channel },
   { PC_CMD_GET_TIMEBASE, F_LOCAL,                                0, h_get_timebase },
@@ -1490,6 +1505,17 @@ static int pc_dispatch(pc_session *s, int ctx)
       return pc_ascii(s, ctx, s->pending_ev);
 
     case PC_EV_BAD_CRC:
+    {
+      uint32_t ts[PC_TSTAT_COUNT];
+
+      //Keep the damaged request for GET_BAD_FRAME (the host diffs it against what it sent)
+      pc_hal_link_stats(ts);
+      memcpy(s->bad, s->parser.hdr_raw, PC_HDR_SIZE);
+      memcpy(s->bad + PC_HDR_SIZE, s->parser.payload, h->len + PC_CRC_SIZE);
+      s->bad_len      = PC_HDR_SIZE + h->len + PC_CRC_SIZE;
+      s->bad_rx_bytes = ts[PC_TS_RX_BYTES];
+      s->bad_count++;
+    }
       pc_send(s, h->cmd, h->seq, pc_error(s, PC_E_BAD_CRC, 0, "payload crc"), 0);
       return 1;
 
