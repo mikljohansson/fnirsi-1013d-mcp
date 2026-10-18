@@ -1397,7 +1397,10 @@ LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     "boot_splash_ms",
     # fw 0.2.19 (57 counters): restart record since the last cold boot / ENTER_FEL (the lead maps PCs with the ELF)
     "restarts", "restart_exc_type", "restart_exc_lr", "restart_exc_spsr", "restart_exc_sp", "restart_reset_lr",
-    "restart_reset_sp", "restart_reset_cpsr")
+    "restart_reset_sp", "restart_reset_cpsr",
+    # fw 0.2.20 (58 counters): ticks where the quiet-tick gate would have served USB flags but the USB IRQ was
+    # pending at the INTC (the tick racing the real handler; served by the real ISR instead)
+    "usb_irq_races")
 
 #: restart_exc_type / event 15 a (fw 0.2.19)
 RESTART_EXC_TYPES = {0: "jump to entry", 1: "undefined", 2: "SWI", 3: "prefetch abort", 4: "data abort",
