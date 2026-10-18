@@ -1,7 +1,7 @@
 # firmware/ handoff for agents
 
-Handoff fw-gen2 -> fw-gen3, 2026-10-18 (kept current by fw-gen3). Latest build: **fw 0.2.20** (protocol 1.5, new USB tick fallback, section 11), not benched yet; 0.2.19 is on the bench. The SD card
-and the bench run **0.2.11**, which stays there until the self-restart below is fixed. Read the root `AGENTS.md`
+Handoff fw-gen3 -> fw-gen4, 2026-10-18. Latest build: **fw 0.2.20** (protocol 1.5, race-free USB tick fallback,
+section 11), 8 bench passes clean, 30-minute capture soak running at handoff. The SD card runs **0.2.11**, which stays there until the self-restart below is fixed. Read the root `AGENTS.md`
 first, then this file. Details live in `firmware/README.md` (build, SD layout, FEL, memory budget, boot, bring-up
 checklist), `docs/protocol.md` (the spec; section 14 lists every deviation and addition, rows 28-42 are this
 generation's) and `docs/hardware-status.md` (bench log, newest at the bottom). This file does not repeat them.
@@ -102,8 +102,8 @@ the screen during tests (menus are modal and defer commands). The power-off ISR 
   fallback, counter tx_kicked). ZLP after frames that are an exact multiple of 512.
 - RX: single-buffered OUT; the ISR copies packets into the ring; when the ring lacks 512 B free it leaves RxPktRdy
   set and masks EP2 in INTRXE (controller NAKs). Polls sweep the FIFO and take a packet still waiting 2 ms after it
-  was first seen (counter rx_swept): 1.00o5's `irq_handler` clears INTC pending by writing 0 after reading it,
-  which can drop an interrupt.
+  was first seen (counter rx_swept). The sweep was added for interrupts thought lost by 1.00o5's write of 0 to INTC
+  pending; the 0.2.20 bench found no such loss (section 11), so it is a safety net only.
 - INDEX (EPIND) discipline: every non-USB-ISR path that touches indexed endpoint registers masks IRQs (CPSR I) and
   saves/restores EPIND (`pc_irq_save`). USB ISR paths set EPIND explicitly; IRQs do not nest.
 - 1.00o5's bus-reset handler flushes CSRs with EPIND = 0 (not EP2); `pc_usb_isr_link` flushes EP2 itself.
@@ -323,10 +323,18 @@ Keep the ELF of every later bench image next to its .bin: a rebuild moves addres
   the flags itself and runs the body only for a flag other than SOF. 0.2.16 bench: 300 x 64 KiB clean, counter 47 =
   16 in about 7 min, every hit INTRX EP2 after 2-3 ms without any USB interrupt: real lost interrupts, so EP0 can lose
   them the same way.
-- **Races, not losses (inference).** The 0.2.16 hits were all EP2 OUT, never EP0 or EP2 IN, although a 64 KiB
-  response raises ~128 TX interrupts per RX packet. The gate opens after every idle gap of 2 ms or more; the first
-  event after a gap is the host's next request; if its interrupt pends in the same dispatch as a tick, the timer
-  handler (IRQ 13) runs before USB (26) and the old tick took the packet. 0.2.19 bench: 54 in 90 s.
+- **Races, not losses (measured on 0.2.20).** Mechanism: the old gate opened after every gap of 2 ms or more
+  without a USB interrupt. When the next USB interrupt pended in the same dispatch as a timer tick (or both pended
+  inside an IRQ-masked section such as the PIO fill in pc_tx_fill), the timer handler (IRQ 13) ran before USB (26)
+  and the old tick took the event the real ISR was about to serve. Which endpoint shows up depends on the traffic:
+  0.2.16 status polling gave only EP2 OUT; the 0.2.19 capture soak (4 KiB TEST_PATTERN every 50 ms, 30 min) gave
+  +2011 hits (1.1/s), of the 139 logged 128 EP2 IN (INTTX 0x04), 10 EP2 OUT, 1 EP0, after a 50 ms gap the first event
+  is often the TX interrupt of a freshly submitted response. fw-gen3's earlier "only EP2 OUT, so not random losses"
+  argument was specific to that traffic; the conclusion rests on the 0.2.20 measurement below, not on it.
+  0.2.20, 8 bench passes, about 90 s: counter 47 = 0, counter 57 = 59, rx_swept 0, i.e. every former "lost interrupt"
+  in that sample was a tick that coincided with a pending real USB IRQ. Conclusion: no evidence that 1.00o5's
+  dispatcher loses interrupts; the 0.2.12-0.2.19 fallback only ever served events the real ISR was about to serve.
+  Still to confirm: counter 47 over the 30-minute 0.2.20 capture soak and longer idle/open-close sessions (EP0).
 - **0.2.20 fallback** (`pc_usb_poll_irq`). Never reads the flag registers to decide. It skips any tick at which the
   USB IRQ is pending (`pc_irq_dispatch_pend0`, stored by `irq_handler` under PC_PROTOCOL, or INTC_PEND_REG0 bit 26),
   and counts those ticks where the old gate would have served as counter 57 (races). Otherwise it checks endpoint
@@ -336,7 +344,14 @@ Keep the ELF of every later bench image next to its .bin: a rebuild moves addres
   are read (clearing them lets a stuck line drop), the body runs with them plus the synthesized EP0 / EP2 OUT flags,
   counter 47 counts it, type 14 logs the flags as read plus bit 15 (EP0 condition) / bit 7 (EP2 OUT condition). A
   lost bus reset or suspend is still invisible (only in INTUSB). EP2 IN keeps the pump kick; the 2 ms RX sweep stays.
-  Expect counter 47 near 0 and counter 57 near the old 0.6/s if the races explanation is right.
+  Bench: counter 47 = 0 and counter 57 = 59 in ~90 s, as predicted.
+- **Keep or remove the fallback (decision for fw-gen4 and the lead).** If counter 47 stays 0 over the 0.2.20 soak and
+  some long sessions, the fallback has no observed purpose. fw-gen3 recommends keeping 0.2.20's version as a safety
+  net: it acts only on endpoint state stuck for 1 ms or more with no USB IRQ pending, so it cannot race the ISR, and
+  it costs a few register reads per tick. Keep counter 57 as a diagnostic either way (it is computed before any
+  service decision). Removing it (PC_USB_TICK_FALLBACK=0 by default) is equally defensible and simplest; then also
+  drop the race counter or keep it computed in the tick alone. The RX sweep and the TX pump kick are separate safety
+  nets and are not affected by this decision.
 - **Open: about two suspend + bus-reset pairs per session.** 0.2.16 counted usb_bus_resets 12 and suspends 10 over 6
   sessions with no drop seen by the host (link_resets 22 = 12 + 10). A host port reset shows as suspend, then bus
   reset. Unknown whether Windows silently recovers a failed control transfer, resets on port open, or something
@@ -448,12 +463,15 @@ compact menus rather than painting over gaps.
 
 ## 17. TODO, in priority order
 
-1. Fix the self-restart (section 9): get a 0.2.19 record from repeated bench_link runs, map it with the ELF, compare
-   with the 0.2.11 baseline soak, fix, bench, then let the lead persist the fixed image. State at fw-gen3's ~300k-token
-   mark: the 0.2.11 baseline soak was clean; 0.2.19 passed 8 bench passes, and a 30-minute capture soak was running.
-   Planned next on the bench: 0.2.20 load, 8 passes, counter 47 vs counter 57, then a 30-minute capture soak, and the
-   nofb variants for A/B. On a restart, run `map_addr.py <that image's ELF> --restart v49..v56` (section 10) and
-   check first for the IRQ-mode signature of the vector-overwrite suspect (section 9). Nothing else is in flight; the
+1. Self-restart (section 9), state at fw-gen3's retirement: one confirmed case (0.2.16), none since. Clean: 0.2.11
+   30-minute soak; 0.2.19 8 bench passes + 30-minute capture soak (35,579 requests); 0.2.20 8 bench passes. The 0.2.20
+   capture soak was running. Interpretation (fw-gen3): the 0.2.12-0.2.19 tick body ran in timer context on live
+   traffic about 1/s, always while the real ISR was about to run; 0.2.20 no longer does that. That correlates with
+   the only restart, but **no mechanism is proven**: by code reading the tick-served body does what the real ISR does
+   (section 9). So 0.2.20 removes the most likely trigger without a proven root cause. Keep the restart record in every
+   image; on any restart run `map_addr.py <that image's ELF> --restart v49..v56` (section 10) and check first for the
+   IRQ-mode signature of the vector-overwrite suspect (section 9). If 0.2.20 stays clean over the soak and further
+   sessions, it is the candidate to persist (lead's call), and the fallback decision in section 11 follows. The
    type-14 condition bits are in protocol section 14 row 42 (the host shows them raw).
 2. Read the 0.2.18+ frozen snapshot after sessions to explain the two suspend+reset pairs per session (section 11).
 3. Owner verdicts on 0.2.13+ System settings and battery, 0.2.17+ quiet boot; EXT trigger bench with 0x1533.
