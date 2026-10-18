@@ -105,7 +105,8 @@ conventions and prioritised TODO lists.
 
 - Firmware: `firmware/` (C, bare-metal F1C100s, GCC in WSL/Linux; `make`, host tests, bench script).
 - MCP server and simulator: `mcp/` (Python, FastMCP, pytest).
-- FPGA: `fpga/al3/` (Verilog, Anlogic TD headless flow).
+- FPGA: `fpga/al3/` (Verilog, Anlogic TD headless flow). TD 4.6.8 and a free licence come from anlogic.com after
+  registering (Service Support -> Tools & Materials Download -> Software Tools; details in `fpga/al3/README.md`).
 - Docs: `docs/protocol.md` (wire protocol), `docs/mcp-tools.md`, `docs/plans/`, `docs/hardware-status.md`
   (bench log), `research/notes/` (the reverse-engineering digests this started from).
 

@@ -25,6 +25,11 @@ Status 2026-10-18: **TD 4.6.8 SP1 runs headless in WSL and rebuilds `src/` byte-
 
 What I verified online (2026-10-18):
 
+- **Verified route (owner, 2026-10-18, took a few minutes):** create an account at anlogic.com, then
+  Service Support -> Tools & Materials Download -> Software Tools -> **Licence** (download `license.zip`, it contains
+  `Anlogic.lic`, valid about a year, `HOST_ID=ANY`), and Software Tools -> **TD Linux -> TD_4.6 ->
+  `TD_4.6.8_SP1_116866_NL.zip`** (the exact version Atlan4's project was made with; the newer 5.x/6.x builds sat
+  behind a manual approval). Put `Anlogic.lic` in `fpga/al3/license/` (gitignored) and run `td/td_install.sh`.
 - `anlogic.com/en/support/tools-downloads` lists TD for Windows and Linux in versions 4.6, 5.6, 6.0 and 6.2.
   Downloads need an account with a completed profile. The page says to email `web@anlogic.com` with your
   requirements and registered phone number to request permissions. A "License" category exists, but I could not see
