@@ -628,18 +628,29 @@ class Scope:
         return P.Gen.unpack(self._req(P.Cmd.GET_GEN))
 
     def set_gen(self, *, enable: bool | None = None, freq_hz: float | None = None,
-                duty: float | None = None) -> P.Gen:
-        """duty as a fraction 0..1. The firmware writes duty, then frequency, then enable."""
+                duty: float | None = None, phase_inc: int | None = None, threshold: int | None = None) -> P.Gen:
+        """duty as a fraction 0..1. ``phase_inc`` / ``threshold``: the raw DDS words (freq_mode / duty_mode 1, section
+        8.6) instead of freq_hz / duty. The firmware writes duty, then frequency, then enable."""
         r = P.SetGenReq()
         if enable is not None:
             r.mask |= P.SetGenReq.M_ENABLE
             r.enable = int(enable)
+        if freq_hz is not None and phase_inc is not None:
+            raise ValueError("give freq_hz or phase_inc, not both")
+        if duty is not None and threshold is not None:
+            raise ValueError("give duty or threshold, not both")
         if freq_hz is not None:
             r.mask |= P.SetGenReq.M_FREQ
             r.freq = int(round(freq_hz * 1000))
+        elif phase_inc is not None:
+            r.mask |= P.SetGenReq.M_FREQ
+            r.freq_mode, r.freq = 1, int(phase_inc)
         if duty is not None:
             r.mask |= P.SetGenReq.M_DUTY
             r.duty = int(round(duty * 10000))
+        elif threshold is not None:
+            r.mask |= P.SetGenReq.M_DUTY
+            r.duty_mode, r.duty = 1, int(threshold)
         return P.Gen.unpack(self._req(P.Cmd.SET_GEN, r.pack()))
 
     # --- acquisition -------------------------------------------------------------------------------------

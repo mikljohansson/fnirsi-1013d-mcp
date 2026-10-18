@@ -3,6 +3,7 @@ runner end to end."""
 
 from __future__ import annotations
 
+import json
 import math
 
 import numpy as np
@@ -79,3 +80,217 @@ def test_dut_signals_parse_eval_and_generator_off():
     assert np.all(s_out.eval(t, off) == -1.24)  # pin tri-stated: the DUT rests at its ground
     with pytest.raises(ValueError, match="dut_in"):
         parse_signal("bode:r=1")
+
+
+# --- the sweep runner (H2 / H3) ---------------------------------------------------------------------------
+
+from fnirsi1013d import bode as B  # noqa: E402
+from fnirsi1013d.scope import Scope  # noqa: E402
+
+RC_IN, RC_OUT = "dut_in:r=1.6k,c=10n", "dut_out:r=1.6k,c=10n"
+#: a 99.5 kHz corner, swept above 24 kHz where the simulator's 12.5 MSa/s captures are cheap
+FAST_IN, FAST_OUT = "dut_in:r=1.6k,c=1n", "dut_out:r=1.6k,c=1n"
+FAST = (1000.0, 1.6e3, 0.0, 1e-9)
+
+
+def _fast(f):
+    return _h(f, FAST)
+
+
+def _sim(sim_factory, ch1=RC_IN, ch2=RC_OUT, **kw):
+    kw.setdefault("variant", "al3f")
+    srv = sim_factory(**kw)
+    srv.device.cfg.signals = (parse_signal(ch1), parse_signal(ch2))
+    return srv
+
+
+def _run(s, plans, thru=None, **kw):
+    kw.setdefault("sleep", lambda x: None)
+    kw.setdefault("busy_retry_s", 0.0)
+    return B.BodeRunner(s, **kw).run(plans, thru)
+
+
+def _errors(res, expect=_h):
+    out = []
+    for p in res.points:
+        he = expect(p.plan.f_actual)
+        out.append((p.plan.f_actual, p.mag_db - B.db(abs(he)), math.degrees(np.angle(p.h / he))))
+    return out
+
+
+def _state(s):
+    return (s.get_channel(0, cached=False), s.get_channel(1, cached=False), s.get_timebase(cached=False),
+            s.get_trigger(cached=False), s.get_gen(), s.get_decim().filter, s.get_decim().flags)
+
+
+def test_rc_sweep_end_to_end_auto_range(sim_factory):
+    """The design's bench RC (1.6 kOhm, 10 nF) through the simulator's 16-bit CIC3 + FIR path, CH2 down-ranging
+    with the splice: within 0.02 dB / 0.2 deg of the analytic response to 1 MHz (bench acceptance 0.2 dB / 1 deg to
+    100 kHz), markers on the analytic values, every setting given back."""
+    srv = _sim(sim_factory, noise_lsb=1.0)
+    with Scope.connect(srv.url) as s:
+        s.set_gen(enable=True, freq_hz=1234.0, duty=0.3)
+        before = _state(s)
+        plans = B.plan_sweep(1e3, 1e6, 10)
+        res = _run(s, plans)
+        assert _state(s) == before
+    assert len(res.points) == 10 and res.stopped_early is None
+    for f, e_db, e_deg in _errors(res):
+        assert abs(e_db) < 0.02 and abs(e_deg) < 0.2, (f, e_db, e_deg)
+    assert res.range_switches >= 2 and {p.ch2_range for p in res.points} >= {3, 5}
+    assert [p.ch1_range for p in res.points] == [3] * 10
+    assert sum("spliced" in p.flags for p in res.points) == len(res.splices) == res.range_switches
+    assert all(abs(sp["factor_db"]) < 0.02 for sp in res.splices)
+    assert all(p.filter_effective == "cic3+fir" and p.fir for p in res.points)
+    assert not any(set(p.flags) & B.BAD_FLAGS for p in res.points), [p.flags for p in res.points]
+    mk = res.summary()
+    fc = 1 / (2 * math.pi * 1.6e3 * 10e-9)
+    assert mk["shape"] == "low-pass" and mk["minus_3db_hz"][0] == pytest.approx(1.0075 * fc, rel=0.01)
+    assert mk["phase_crossings_hz"]["-45"] == pytest.approx(fc, rel=0.01)
+    assert res.meta["start_ranges"] == {"CH1": 3, "CH2": 3}
+
+
+def test_thru_calibration_removes_a_channel_mismatch(sim_factory, tmp_path):
+    """CH2 reads 3 % low and 20 ns late (probe / front-end mismatch): the thru sweep (both probes on the DUT input)
+    measures it and the DUT sweep divided by it is the RC again."""
+    mismatch = ",gain=0.97,delay=20ns"
+    srv = _sim(sim_factory, ch1=FAST_IN, ch2=FAST_IN + mismatch, noise_lsb=0.5)
+    plans = B.plan_sweep(30e3, 1e6, 6)
+    with Scope.connect(srv.url) as s:
+        thru_res = _run(s, plans)
+        thru_res.role = "thru"
+        k = 0.97 * np.exp(-2j * math.pi * np.array([p.plan.f_actual for p in thru_res.points]) * 20e-9)
+        assert np.allclose([p.h for p in thru_res.points], k, rtol=2e-3, atol=0)
+        cal = B.ThruCal.load(B.ThruCal.from_sweep(thru_res, "t", (1.0, 1.0)).save(tmp_path / "t.json"))
+        srv.device.cfg.signals = (parse_signal(FAST_IN), parse_signal(FAST_OUT + mismatch))
+        raw = _run(s, plans, background=False)
+        res = _run(s, plans, thru=cal)
+        other = _run(s, B.plan_sweep(31e3, 32e3, 2), thru=cal, background=False)
+    assert res.thru_cal == "t"
+    for f, e_db, e_deg in _errors(raw, _fast):
+        assert e_db == pytest.approx(B.db(0.97), abs=0.03)
+        assert e_deg == pytest.approx(-360 * f * 20e-9, abs=0.2)
+    for f, e_db, e_deg in _errors(res, _fast):
+        assert abs(e_db) < 0.03 and abs(e_deg) < 0.2, (f, e_db, e_deg)
+    # CH2 went to more sensitive ranges on the DUT than on the thru: noted, still divided out
+    assert any("cal_range" in p.flags for p in res.points) and not any("no_cal" in p.flags for p in res.points)
+    assert all("no_cal" in p.flags for p in other.points)
+
+
+def test_fixed_ch2_range_and_clipping(sim_factory):
+    srv = _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, noise_lsb=0.5)
+    plans = B.plan_sweep(30e3, 2e6, 5)
+    with Scope.connect(srv.url) as s:
+        s.set_channel(1, range_index=5)  # 100 mV/div: the passband clips
+        res = _run(s, plans, ch2_range="fixed", background=False)
+        assert s.get_channel(1, cached=False).range == 5
+        res2 = _run(s, plans, ch2_range="0.5V", background=False)
+    assert res.range_switches == 0 and {p.ch2_range for p in res.points} == {5}
+    assert "clipped" in res.points[0].flags and "clipped" not in res.points[-1].flags
+    assert B.markers(res.points)["flagged_points"] >= 1
+    assert {p.ch2_range for p in res2.points} == {3} and res2.ch2_mode == "fixed"
+    assert not any("clipped" in p.flags for p in res2.points)
+    n_clip = sum("clipped" in p.flags for p in res.points)
+    assert any(c.startswith(f"{n_clip} point(s) clipped") for c in B.result_caveats(res))
+
+
+def test_floor_sweep_flags_near_floor(sim_factory):
+    """CH2 on the DUT ground (here: no signal): every point sits on the background, flagged and left out of the
+    markers."""
+    srv = _sim(sim_factory, ch1=FAST_IN, ch2="zero", noise_lsb=1.0)
+    with Scope.connect(srv.url) as s:
+        res = _run(s, B.plan_sweep(30e3, 300e3, 4))
+    assert all("near_floor" in p.flags or "low_snr" in p.flags for p in res.points)
+    assert all(p.background_v is not None for p in res.points)
+    assert res.summary()["valid_points"] == 0 and max(p.mag_db for p in res.points) < -50
+
+
+def test_legacy_and_low_frequency_points(sim_factory):
+    """Above 1.5 MHz the plan uses 200 MSa/s (8-bit, legacy); at 20 Hz the CIC3 limit makes the firmware run CIC2
+    (N 32768). Both still measure the RC (a lighter one, 160 Ohm / 100 pF, so 2-5 MHz stays in the passband)."""
+    srv = _sim(sim_factory, ch1="dut_in:r=160,c=100p", ch2="dut_out:r=160,c=100p", noise_lsb=0.5)
+    with Scope.connect(srv.url) as s:
+        res = _run(s, B.plan_sweep(2e6, 5e6, 2), background=False)
+        lo = _run(s, [B.plan_point(20.0)], background=False)
+
+    def rc(f):
+        return 1 / (1 + 2j * math.pi * f * 160 * 100e-12)
+
+    for f, e_db, e_deg in _errors(res, rc):
+        assert abs(e_db) < 0.05 and abs(e_deg) < 0.5, (f, e_db, e_deg)
+    assert {p.filter_effective for p in res.points} == {"legacy"} and {p.plan.n for p in res.points} == {1}
+    assert lo.points[0].filter_effective == "cic2+fir" and lo.points[0].plan.n == 32768
+    assert abs(lo.points[0].mag_db) < 0.01
+
+
+def test_busy_scope_stops_with_a_partial_table(sim_factory):
+    srv = _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, noise_lsb=0.5)
+    plans = B.plan_sweep(30e3, 300e3, 6)
+
+    def progress(i, n, text):
+        if i == 3:
+            srv.device.ui_busy = True  # the person opened a menu on the scope
+
+    with Scope.connect(srv.url) as s:
+        res = _run(s, plans, progress=progress)
+        srv.device.ui_busy = False
+    assert len(res.points) == 3 and "E_BUSY" in res.stopped_early
+    assert any("could not restore" in c for c in res.caveats)
+
+
+def test_runner_refuses_without_the_filter_and_restores_ext(sim_factory):
+    with Scope.connect(_sim(sim_factory, variant="al3x").url) as s:
+        with pytest.raises(B.BodeError, match="decimation filter"):
+            _run(s, B.plan_sweep(1e3, 10e3, 2))
+    srv = _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, noise_lsb=0.5)
+    with Scope.connect(srv.url) as s:
+        s.set_trigger(source=2)  # EXT on the calibration pin: the generator is off
+        res = _run(s, B.plan_sweep(50e3, 200e3, 2), background=False)
+        assert s.get_trigger(cached=False).source == 2 and not s.get_gen().enable
+    assert any("EXT" in c for c in res.caveats) and len(res.points) == 2
+
+
+def test_cli_plan_only_and_sweep(sim_factory, tmp_path, capsys):
+    assert B.main(["--plan-only", "--start", "1kHz", "--stop", "10kHz", "--points", "3"]) == 0
+    out = capsys.readouterr().out
+    assert "50048" in out and "3 points, estimated" in out
+    srv = _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, noise_lsb=0.5)
+    assert B.main(["--port", srv.url, "--start", "50kHz", "--stop", "500kHz", "--points", "3"]) == 2  # no --yes
+    assert B.main(["--port", srv.url, "--start", "10Hz", "--stop", "100kHz", "--points", "50",
+                   "--max-duration", "5", "--yes"]) == 2
+    csv_p, json_p, thru_p = tmp_path / "r.csv", tmp_path / "r.json", tmp_path / "thru.json"
+    assert B.main(["--port", srv.url, "--start", "50kHz", "--stop", "500kHz", "--points", "3", "--yes",
+                   "--no-background", "--thru", "measure", "--thru-out", str(thru_p)]) == 0
+    assert B.ThruCal.load(thru_p).name == "thru"
+    assert B.main(["--port", srv.url, "--start", "50kHz", "--stop", "500kHz", "--points", "3", "--yes",
+                   "--no-background", "--thru", str(thru_p), "--csv", str(csv_p), "--json", str(json_p),
+                   "--settle", "fast"]) == 0
+    out = capsys.readouterr().out
+    assert "csv:" in out and len(csv_p.read_text().splitlines()) == 4
+    j = json.loads(json_p.read_text())
+    assert j["thru_cal"] == "thru" and j["settle_periods"] == 3 and len(j["table"]) == 3
+
+
+def test_resonance_steps_ch2_up_and_back_down(sim_factory):
+    """A series RLC (1 mH, 10 nF, 95 Ohm) from a 10 Ohm source: Q about 3, the output about 10 dB above the input at
+    50 kHz. CH2 starts on the range the 25 kHz pre-scan picks, clips towards the peak, steps up (splicing on the
+    previous point), and steps down again past it; H stays on the analytic curve and the markers find f0 and Q."""
+    net = "r=95,l=1m,c=10n,rs=10"
+    srv = _sim(sim_factory, ch1=f"dut_in:{net}", ch2=f"dut_out:{net}", noise_lsb=0.5)
+    with Scope.connect(srv.url) as s:
+        res = _run(s, B.plan_sweep(25e3, 150e3, 16), background=False)
+    rlc = (10.0, 95.0, 1e-3, 10e-9)
+    for f, e_db, e_deg in _errors(res, lambda f: _h(f, rlc)):
+        assert abs(e_db) < 0.05 and abs(e_deg) < 0.3, (f, e_db, e_deg)
+    ups = [sp for sp in res.splices if sp["to_range"] < sp["from_range"]]
+    downs = [sp for sp in res.splices if sp["to_range"] > sp["from_range"]]
+    assert ups and downs and ups[0]["f_hz"] < downs[-1]["f_hz"]
+    assert not any("clipped" in p.flags for p in res.points)  # every clipped capture was repeated
+    mk = res.summary()
+    f = np.geomspace(20e3, 200e3, 20001)
+    mag = np.abs(_h(f, rlc))
+    assert mk["shape"] == "resonant"
+    assert mk["peak"]["f_hz"] == pytest.approx(f[np.argmax(mag)], rel=0.01)
+    assert mk["peak"]["mag_db"] == pytest.approx(B.db(mag.max()), abs=0.1)
+    band = f[mag >= mag.max() / math.sqrt(2)]
+    assert mk["peak"]["q"] == pytest.approx(f[np.argmax(mag)] / (band[-1] - band[0]), rel=0.05)

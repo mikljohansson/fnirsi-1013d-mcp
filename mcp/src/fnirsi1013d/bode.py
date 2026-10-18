@@ -23,13 +23,17 @@ Pieces, from pure to hardware:
 
 from __future__ import annotations
 
+import argparse
 import csv
+import datetime as _dt
 import json
 import math
-from dataclasses import dataclass, field
+import sys
+import time
+from dataclasses import asdict, dataclass, field
 from fractions import Fraction
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterable
 
 import numpy as np
 
@@ -692,6 +696,579 @@ class ThruCal:
             p.flags.append("cal_flagged")
 
 
-__all__ = ["BodeError", "Measurement", "PointPlan", "PointResult", "SweepResult", "ThruCal", "CONNECTION_TEXT",
-           "SETTLE_PRESETS", "estimate_duration", "markers", "measure_pair", "parse_settle", "plan_point", "plan_sweep",
-           "plan_vectors", "residual_noise", "tone"]
+# ---------------------------------------------------------------------------------------------------------
+# Hardware runner
+
+
+@dataclass
+class _Saved:
+    channels: list[P.ChannelConfig]
+    timebase: P.Timebase
+    trigger: P.Trigger
+    gen: P.Gen
+    decim: P.DecimState | None
+    run: bool
+
+
+class BodeRunner:
+    """Runs sweeps on a ``Scope`` (collaborative or legacy firmware; the caller takes control first). One instance
+    per sweep. ``sleep`` and ``relay_wait`` (called before every range change, e.g. the MCP server's relay rate
+    limit) are injectable for tests; ``progress(done, total, text)`` is called after every point."""
+
+    def __init__(self, scope: Any, *, settle: str | float = "normal", ch2_range: str | float | int = "auto",
+                 background: bool = True, max_switches: int = MAX_RANGE_SWITCHES, splice: bool = True,
+                 sleep: Callable[[float], None] = time.sleep, relay_wait: Callable[[], Any] | None = None,
+                 progress: Callable[[int, int, str], None] | None = None, busy_retry_s: float = 1.0):
+        self.s = scope
+        self.settle_periods = parse_settle(settle)
+        self.ch2_mode, self.ch2_vpd = self._parse_ch2(ch2_range)
+        self.background = background
+        self.max_switches = max_switches
+        self.splice_on = splice
+        self.sleep = sleep
+        self.relay_wait = relay_wait
+        self.progress = progress
+        self.busy_retry_s = busy_retry_s
+        self.range = [0, 0]
+        self.switches = 0
+        self.k_splice = 1 + 0j
+        self.splices: list[dict[str, Any]] = []
+        self.caveats: list[str] = []
+        self._bg: dict[tuple[int, int], np.ndarray] = {}
+        self._cur_n: int | None = None
+        self._cur_total: int | None = None
+        self._dcsv = [1000, 1000]
+        self._gen_on = False
+        self._user_ch2_range = 3
+        #: CH2 ranges a down-range step clipped on (the prediction failed there): not tried again
+        self._bad_down: set[int] = set()
+        #: the generator went off or on: the DUT's DC state changed, the next point gets the first-point settle
+        self._disturbed = True
+
+    @staticmethod
+    def _parse_ch2(v: str | float | int) -> tuple[str, float | None]:
+        """'auto', 'fixed' (CH2's current range) or a V/div at the probe tip (the nearest hardware range)."""
+        if isinstance(v, str):
+            s = v.strip().lower()
+            if s in ("auto", "fixed"):
+                return s, None
+            from .units import parse_quantity
+
+            vpd = parse_quantity(s, "V")
+        else:
+            vpd = float(v)
+        if not vpd > 0:
+            raise ValueError(f"ch2_range {v!r}: use 'auto', 'fixed' or a V/div > 0")
+        return "fixed", vpd
+
+    def _fixed_ch2_range(self) -> int:
+        if self.ch2_vpd is None:
+            return self._user_ch2_range
+        probe = self.s.get_channel(1).probe_factor
+        return int(np.argmin([abs(math.log(self.ch2_vpd / (x * probe))) for x in P.RANGE_VOLTS_PER_DIV[:6]]))
+
+    # --- settings -------------------------------------------------------------------------------------------
+
+    def _save(self) -> _Saved:
+        s = self.s
+        st = s.status()
+        dec = s.get_decim() if s.info.caps & P.Caps.DECIM else None
+        return _Saved([s.get_channel(0, cached=False), s.get_channel(1, cached=False)], s.get_timebase(cached=False),
+                      s.get_trigger(cached=False), s.get_gen(), dec,
+                      bool(s.shared and st.run_state == P.RunState.RUN))
+
+    def _restore(self, sv: _Saved) -> list[str]:
+        s, errs = self.s, []
+
+        def step(what: str, fn: Callable[[], Any]) -> None:
+            try:
+                fn()
+            except Exception as e:  # noqa: BLE001 - restore as much as possible, report the rest
+                errs.append(f"{what}: {e}")
+
+        step("generator", lambda: s.set_gen(enable=bool(sv.gen.enable), phase_inc=sv.gen.phase_inc,
+                                            threshold=sv.gen.duty_threshold))
+        if sv.decim is not None:
+            step("filter", lambda: s.set_decim(sv.decim.filter, sv.decim.flags))
+        for c, cfg in enumerate(sv.channels):
+            if cfg.range != self.range[c]:
+                self._relay()
+            step(f"CH{c + 1}", lambda c=c, cfg=cfg: s.set_channel(
+                c, enable=bool(cfg.enable), range_index=cfg.range, coupling=cfg.coupling, dcoffset=cfg.dcoffset,
+                invert=bool(cfg.invert), probe_index=cfg.probe_index))
+        tb = sv.timebase
+        if tb.timeperdiv_index != 0xFF:
+            step("time base", lambda: s.set_timebase(ui_index=tb.timeperdiv_index))
+        else:
+            step("time base", lambda: s.set_timebase(divider=tb.divider))
+        tr = sv.trigger
+        step("trigger", lambda: s.set_trigger(source=tr.source, edge=tr.edge, level=tr.level, mode=tr.mode,
+                                              pretrigger_samples=tr.pretrigger_samples,
+                                              total_samples=tr.total_samples, holdoff=tr.holdoff or None))
+        if sv.run:
+            step("RUN", lambda: s.set_acq_state(True))
+        return errs
+
+    def _relay(self) -> None:
+        if self.relay_wait is not None:
+            self.relay_wait()
+
+    def _set_range(self, c: int, r: int, v_dc: float | None) -> None:
+        """Switch channel c to hardware range r and centre its offset on the DC level v_dc (volts at the tip)."""
+        s = self.s
+        if r != self.range[c]:
+            self._relay()
+        cfg = s.set_channel(c, range_index=r, dcoffset=0)
+        self.range[c] = r
+        if v_dc is not None:
+            self._centre_on(c, cfg, v_dc)
+        self.sleep(RELAY_SETTLE_S)
+
+    def _centre_on(self, c: int, cfg: P.ChannelConfig, v_dc: float) -> None:
+        """dcoffset so that v_dc sits at code 128: zero code = 128 - dcoffset x 100 / dc_shift_value."""
+        vpl = self.s.scale(c, cfg).volts_per_lsb
+        codes = v_dc / vpl
+        self._shift_offset(c, cfg, codes)
+
+    def _shift_offset(self, c: int, cfg: P.ChannelConfig, codes: float) -> None:
+        """Move the trace down by ``codes`` (positive = the record's mean is that far above 128)."""
+        d = cfg.dcoffset + int(round(codes * self._dcsv[c] / 100.0))
+        lo, hi = -cfg.center_cal, 2000 - cfg.center_cal
+        d = max(lo, min(hi, d))
+        if d != cfg.dcoffset:
+            self.s.set_channel(c, dcoffset=d)
+            self.sleep(RELAY_SETTLE_S)  # the offset PWM's filter in the front end
+
+    def _prepare(self, plans: list[PointPlan]) -> None:
+        s = self.s
+        caps = s.info.caps
+        if not caps & P.Caps.DECIM:
+            raise BodeError("the Bode sweep needs the decimation filter (FPGA 0x1534+, caps DECIM): without it the "
+                            "slower rates skip samples and alias the stimulus harmonics")
+        if not caps & P.Caps.GENERATOR_DDS:
+            raise BodeError("the Bode sweep needs the programmable generator (AL3 bitstream)")
+        if caps & P.Caps.EXT_TRIGGER and s.get_trigger(cached=False).source == 2:
+            self.caveats.append("the trigger source was EXT (the calibration pin): set to CH1 for the sweep and "
+                                "restored afterwards (which switches the generator off again)")
+        for c in (0, 1):
+            self._dcsv[c] = s.get_cal(c).dc_shift_value or 1000
+        filt = "cic3+fir" if caps & P.Caps.FIR else "cic3"
+        if not caps & P.Caps.FIR:
+            self.caveats.append("no compensation FIR on this bitstream (0x1534): CIC3 only; the droop cancels in "
+                                "the ratio but the alias rejection is lower")
+        # filter first with a short total (SET_DECIM refuses a filter while the total is over 8190)
+        s.set_trigger(source=0, edge=0, level=128, mode=0, pretrigger_samples=0,
+                      total_samples=plans[0].total_samples)
+        s.set_decim(filt)
+        for c in (0, 1):
+            s.set_channel(c, enable=True, coupling=0)
+
+    def _set_rate(self, pp: PointPlan) -> None:
+        s = self.s
+        if pp.n != self._cur_n:
+            s.set_timebase(divider=pp.divider)
+            self._cur_n = pp.n
+        if pp.total_samples != self._cur_total:
+            s.set_trigger(pretrigger_samples=0, total_samples=pp.total_samples)
+            self._cur_total = pp.total_samples
+
+    def _gen(self, on: bool, pp: PointPlan | None = None) -> None:
+        if pp is not None:
+            self.s.set_gen(enable=on, phase_inc=pp.phase_inc, threshold=1 << 31)
+        else:
+            self.s.set_gen(enable=on)
+        if on != self._gen_on:
+            self._disturbed = True
+        self._gen_on = on
+
+    def _capture(self, pp: PointPlan) -> Any:
+        from .transport import DeviceError
+
+        tries = 0
+        while True:
+            try:
+                cap = self.s.capture(["CH1", "CH2"], timeout_s=2 * pp.record_s + 1.0)
+            except DeviceError as e:
+                if e.status == P.Status.E_BUSY and tries == 0:
+                    tries += 1
+                    self.sleep(self.busy_retry_s)
+                    continue
+                raise
+            if cap is None:
+                raise BodeError(f"no capture at {pp.f_actual:.6g} Hz (no trigger and no auto time-out)")
+            return cap
+
+    def _measure(self, pp: PointPlan, settle_periods: float) -> Measurement:
+        self.sleep(pp.settle_s(settle_periods) + pp.filter_settle_s())
+        cap = self._capture(pp)
+        c1, c2 = cap.channels["CH1"], cap.channels["CH2"]
+        dec = cap.decim
+        filt = "legacy"
+        if dec is not None and dec.k:
+            filt = P.DECIM_FILTERS[dec.k] + ("+fir" if dec.fir else "")
+        return measure_pair(c1.volts, c2.volts, pp, vpl1=c1.volts_per_lsb, vpl2=c2.volts_per_lsb,
+                            clipped1=c1.clipped, clipped2=c2.clipped, codes1=c1.codes, codes2=c2.codes,
+                            filter_effective=filt, fir=bool(dec is not None and dec.fir))
+
+    def _point_settle(self) -> float:
+        k = FIRST_POINT_SETTLE_FACTOR if self._disturbed else 1
+        self._disturbed = False
+        return self.settle_periods * k
+
+    def _recentre_if_needed(self, ms: Measurement) -> bool:
+        """Re-centre a channel whose record mean is far from code 128 (the offset formula's slope differs from the
+        real PWM slope on some units). True when something moved."""
+        moved = False
+        for c, centre in ((0, ms.centre1), (1, ms.centre2)):
+            if abs(centre - 128.0) > CENTRE_TOLERANCE_CODES:
+                cfg = self.s.get_channel(c, cached=False)
+                self._shift_offset(c, cfg, centre - 128.0)
+                moved = True
+        return moved
+
+    def _prescan(self, pp: PointPlan) -> None:
+        """Ranges from a capture at the first frequency on range 1 (+-11 V at x1): CH1 the most sensitive range that
+        keeps the peak inside 85 % of full scale, CH2 the same in auto mode or the fixed range; both centred."""
+        s = self.s
+        for c in (0, 1):
+            self._set_range(c, 1, 0.0)
+        self._set_rate(pp)
+        self._gen(True, pp)
+        ms = self._measure(pp, self.settle_periods * FIRST_POINT_SETTLE_FACTOR)
+        self._disturbed = False
+        v_dc = (ms.mean1, ms.mean2)
+        targets = []
+        for c in (0, 1):
+            cfg = s.get_channel(c)
+            vpl = s.scale(c, cfg).volts_per_lsb
+            v_pk = max((ms.ac1, ms.ac2)[c], 1.0) * vpl  # peak distance from the record mean, volts
+            if c == 1 and self.ch2_mode == "fixed":
+                r = self._fixed_ch2_range()
+            else:
+                r = 1
+                for cand in range(1, 6):
+                    vpl_c = vpl * P.RANGE_VOLTS_PER_DIV[cand] / P.RANGE_VOLTS_PER_DIV[1]
+                    if v_pk / vpl_c <= FULL_SCALE_FRACTION * 128:
+                        r = cand
+            targets.append(r)
+        for c in (0, 1):
+            self._set_range(c, targets[c], v_dc[c])
+        # verify: a clip steps back one range, an off-centre record re-centres
+        for _ in range(4):
+            ms = self._measure(pp, self.settle_periods)
+            changed = False
+            for c, clipped in ((0, ms.clipped1), (1, ms.clipped2)):
+                if clipped and self.range[c] > 0 and not (c == 1 and self.ch2_mode == "fixed"):
+                    self._set_range(c, self.range[c] - 1, (ms.mean1, ms.mean2)[c])
+                    changed = True
+            if not changed:
+                changed = self._recentre_if_needed(ms)
+            if not changed:
+                break
+
+    def _background(self, pp: PointPlan, plans: list[PointPlan]) -> None:
+        """Generator off, one capture at this rate and CH2 range: the CH2 level in every bin the sweep will use at
+        this rate (offset-PWM ripple, hum, pickup). Recorded per (N, CH2 range)."""
+        key = (pp.n, self.range[1])
+        if not self.background or key in self._bg:
+            return
+        group = [q for q in plans if q.n == pp.n]
+        rec = max(q.total_samples for q in group)
+        self._gen(False)
+        if rec != self._cur_total:
+            self.s.set_trigger(pretrigger_samples=0, total_samples=rec)
+            self._cur_total = rec
+        self.sleep(pp.filter_settle_s() + MIN_SETTLE_S)
+        cap = self._capture(pp)
+        self._bg[key] = np.asarray(cap.channels["CH2"].volts, np.float64)
+
+    def _bg_level(self, pp: PointPlan, ch2_range: int) -> float | None:
+        v = self._bg.get((pp.n, ch2_range))
+        if v is None:
+            return None
+        return abs(tone(v[: pp.record], pp.f_actual, pp.sample_rate, pp.window))
+
+    def _point(self, pp: PointPlan, plans: list[PointPlan]) -> tuple[Measurement, int]:
+        self._background(pp, plans)
+        self._set_rate(pp)
+        self._gen(True, pp)
+        ms = self._measure(pp, self._point_settle())
+        retries = 0
+        if self._recentre_if_needed(ms):
+            ms = self._measure(pp, self._point_settle())
+            retries += 1
+        if ms.unsettled:
+            ms = self._measure(pp, 2 * self.settle_periods)
+            retries += 1
+        return ms, retries
+
+    def _result(self, pp: PointPlan, ms: Measurement, retries: int) -> PointResult:
+        s = self.s
+        h = ms.h * self.k_splice
+        flags = []
+        if ms.clipped1:
+            flags.append("ch1_clipped")
+        if ms.clipped2:
+            flags.append("clipped")
+        if ms.codes1 < CH1_LOW_CODES:
+            flags.append("ch1_low")
+        if ms.codes2 < CH2_SMALL_CODES:
+            flags.append("ch2_small")
+        if ms.snr2_db < LOW_SNR_DB:
+            flags.append("low_snr")
+        if ms.leak_db > LEAK_LIMIT_DB:
+            flags.append("incoherent")
+        if ms.unsettled:
+            flags.append("unsettled")
+        if pp.fir_expected and s.info.caps & P.Caps.FIR and not ms.fir:
+            flags.append("fir_off")
+        bg = self._bg_level(pp, self.range[1])
+        if bg is not None and abs(ms.x2) < bg * 10 ** (NEAR_FLOOR_DB / 20):
+            flags.append("near_floor")
+        cfg1, cfg2 = s.get_channel(0), s.get_channel(1)
+        return PointResult(pp, h, h, ms.x1, ms.x2 * self.k_splice, self.range[0], self.range[1],
+                           P.RANGE_VOLTS_PER_DIV[self.range[0]] * cfg1.probe_factor,
+                           P.RANGE_VOLTS_PER_DIV[self.range[1]] * cfg2.probe_factor, ms.snr2_db, ms.leak_db,
+                           ms.codes1, ms.codes2, ms.filter_effective, ms.fir, flags, bg, self.k_splice, retries)
+
+    def _auto_range(self, pp: PointPlan, ms: Measurement, res: PointResult,
+                    prev: tuple[PointPlan, PointResult] | None) -> Measurement | None:
+        """CH2 ranging (design 3.5). A clip steps CH2 up one range (repeated while it still clips and the budget
+        lasts), splices on the previous point measured on the new range, and returns the repeated measurement of
+        this point (the clipped one is discarded). A small CH2 (the predicted peak on the next more sensitive range
+        under 60 % of full scale) steps down after this point; the point is measured on both ranges and the ratio
+        scales every later point onto the sweep's first range ('spliced')."""
+        if self.ch2_mode != "auto":
+            return None
+        r = self.range[1]
+        if ms.clipped2:
+            new = None
+            while (new is None or new.clipped2) and self.range[1] > 0 and self.switches < self.max_switches:
+                r = self.range[1]
+                self._switch(r - 1, (new or ms).mean2)
+                if prev is not None and self.splice_on:
+                    ppp, pres = prev
+                    self._set_rate(ppp)
+                    self._gen(True, ppp)
+                    again = self._measure(ppp, self._point_settle())
+                    if not (again.clipped1 or again.clipped2) and again.h:
+                        self._record_splice(ppp, r, r - 1, pres.h_raw / again.h)
+                        if "spliced" not in pres.flags:
+                            pres.flags.append("spliced")
+                    self._set_rate(pp)
+                    self._gen(True, pp)
+                new = self._measure(pp, self._point_settle())
+            return new
+        if r >= 5 or self.switches >= self.max_switches or r + 1 in self._bad_down:
+            return None
+        ratio = P.RANGE_VOLTS_PER_DIV[r] / P.RANGE_VOLTS_PER_DIV[r + 1]
+        if ms.ac2 * ratio > DOWNRANGE_FRACTION * 128:
+            return None
+        self._switch(r + 1, ms.mean2)
+        again = self._measure(pp, self._point_settle())
+        if again.clipped2:
+            self._switch(r, ms.mean2)  # the prediction failed: back, and do not try that range again
+            self._bad_down.add(r + 1)
+            return None
+        if self.splice_on and again.h:
+            self._record_splice(pp, r, r + 1, res.h_raw / again.h)
+            res.flags.append("spliced")
+        return None
+
+    def _record_splice(self, pp: PointPlan, r_old: int, r_new: int, k: complex) -> None:
+        self.k_splice = complex(k)
+        self.splices.append({"f_hz": pp.f_actual, "from_range": r_old, "to_range": r_new,
+                             "factor_db": round(db(abs(k)), 4), "factor_deg": round(math.degrees(np.angle(k)), 3)})
+
+    def _switch(self, r: int, v_dc: float) -> None:
+        self._set_range(1, r, v_dc)
+        self.switches += 1
+
+    # --- the sweep ------------------------------------------------------------------------------------------
+
+    def run(self, plans: list[PointPlan], thru: ThruCal | None = None, role: str = "measure") -> SweepResult:
+        if not plans:
+            raise ValueError("empty frequency plan")
+        t0 = time.monotonic()
+        started = _dt.datetime.now().isoformat(timespec="seconds")
+        res = SweepResult([], self.settle_periods, self.ch2_mode, thru.name if thru else None, role, started,
+                          estimate_s=estimate_duration(plans, self.settle_periods, self.background,
+                                                       self.ch2_mode == "auto"))
+        saved = self._save()
+        self._user_ch2_range = saved.channels[1].range if saved.channels[1].range < 6 else 5
+        from .transport import DeviceError
+
+        try:
+            self._prepare(plans)
+            self._prescan(plans[0])
+            start_ranges = tuple(self.range)
+            prev: tuple[PointPlan, PointResult] | None = None
+            for i, pp in enumerate(plans):
+                try:
+                    ms, retries = self._point(pp, plans)
+                    pr = self._result(pp, ms, retries)
+                    res.points.append(pr)
+                    again = self._auto_range(pp, ms, pr, prev)
+                    if again is not None:  # the point was clipped and repeated on a less sensitive range
+                        res.points.pop()
+                        pr = self._result(pp, again, retries + 1)
+                        res.points.append(pr)
+                except DeviceError as e:
+                    if e.status == P.Status.E_BUSY:
+                        res.stopped_early = (f"the scope answered E_BUSY twice at {pp.f_actual:.6g} Hz (a menu is "
+                                             f"open on the scope?); {len(res.points)} of {len(plans)} points measured")
+                        break
+                    raise
+                prev = (pp, pr)
+                if self.progress is not None:
+                    self.progress(i + 1, len(plans), f"{pp.f_actual:.6g} Hz {pr.mag_db:.2f} dB")
+            res.meta["start_ranges"] = {"CH1": start_ranges[0], "CH2": start_ranges[1]}
+        finally:
+            errs = self._restore(saved)
+            if errs:
+                res.caveats.append("could not restore every setting: " + "; ".join(errs))
+        if thru is not None:
+            for p in res.points:
+                thru.apply(p)
+        res.duration_s = time.monotonic() - t0
+        res.range_switches = self.switches
+        res.splices = self.splices
+        res.caveats = self.caveats + res.caveats
+        res.meta.update({"plan": plan_summary(plans), "background": self.background,
+                         "probes": [saved.channels[0].probe_factor, saved.channels[1].probe_factor]})
+        return res
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Caveats an engineer needs with the numbers
+
+
+def result_caveats(res: SweepResult) -> list[str]:
+    out = []
+    flagged: dict[str, int] = {}
+    for p in res.points:
+        for f in p.flags:
+            flagged[f] = flagged.get(f, 0) + 1
+    text = {
+        "clipped": "CH2 clipped (set ch2_range='auto' or a larger V/div)",
+        "ch1_clipped": "CH1 clipped",
+        "ch1_low": f"CH1 fundamental below {CH1_LOW_CODES:g} codes: the DUT input loads the 1 kOhm source",
+        "ch2_small": f"CH2 below {CH2_SMALL_CODES:g} codes peak: the ADC's linearity limits these to about +-1 dB / "
+                     "+-6 deg",
+        "near_floor": f"CH2 less than {NEAR_FLOOR_DB:g} dB above the generator-off background in its bin (crosstalk, "
+                      "offset-PWM ripple, pickup): treat as an upper bound",
+        "low_snr": f"CH2 less than {LOW_SNR_DB:g} dB above the record's noise",
+        "unsettled": "the two record halves disagreed after a retry with twice the settle time: use "
+                     "settle='resonant' (or 'high_q')",
+        "incoherent": "energy beside the fundamental on CH1: the stimulus is not locked to the sample clock or the "
+                      "input is not the generator",
+        "fir_off": "the compensation FIR did not engage where the plan expected it",
+        "no_cal": "the thru calibration has no point with this frequency plan (rerun it with the same start, stop "
+                  "and points)",
+        "cal_range": "taken on other ranges than the thru calibration (the per-range gain error, ~1-2 %, is not "
+                     "removed)",
+        "cal_flagged": "the thru calibration's point was itself flagged",
+    }
+    for f, n in sorted(flagged.items()):
+        if f in text:
+            out.append(f"{n} point(s) {f}: {text[f]}")
+    if res.splices:
+        out.append(f"CH2 changed range {len(res.splices)} time(s); each later point is scaled onto the first range "
+                   "by the ratio measured at the switch point (flag 'spliced')")
+    if res.thru_cal is None and res.role == "measure":
+        out.append("no thru calibration applied: CH1 / CH2 gain (1-2 %), skew and probe mismatch are in the result "
+                   "(run thru_cal='measure' with both probes on the DUT input once)")
+    out.append("H = CH2 / CH1 at the DUT input node, independent of the 1 kOhm source; a filter specified for a "
+               "50 / 600 Ohm source shows its V2 / V1, not the insertion response")
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------------
+# CLI
+
+
+def _fmt_row(r: dict[str, Any]) -> str:
+    fl = ",".join(r["flags"])
+    return (f"{r['f_actual']:>12.4f} {r['mag_db']:>9.3f} {r['phase_deg']:>9.2f} {r['ch2_volts_per_div']:>7g} "
+            f"{r['sample_rate']:>11.6g} {r['filter']:>9} {fl}")
+
+
+def main(argv: Iterable[str] | None = None) -> int:
+    from .units import parse_quantity
+
+    ap = argparse.ArgumentParser(prog="fnirsi1013d-bode", description=(
+        "Host-driven Bode sweep on the FNIRSI 1013D (generator on the calibration post, CH1 = DUT input, CH2 = DUT "
+        "output). Drives the calibration pin: needs --yes. " + CONNECTION_TEXT))
+    ap.add_argument("--port", default="auto", help="serial port, tcp://host:port (simulator) or auto")
+    ap.add_argument("--start", default="100Hz")
+    ap.add_argument("--stop", default="1MHz")
+    ap.add_argument("--points", type=int, default=50)
+    ap.add_argument("--settle", default="normal", help=f"{', '.join(SETTLE_PRESETS)} or periods")
+    ap.add_argument("--ch2-range", default="auto", help="auto, fixed (the current CH2 range) or a V/div")
+    ap.add_argument("--no-background", action="store_true", help="skip the generator-off floor captures")
+    ap.add_argument("--thru", default=None, help="'measure' to record a thru calibration, or a calibration file")
+    ap.add_argument("--thru-out", default=None, help="where --thru measure saves the calibration (JSON)")
+    ap.add_argument("--csv", default=None)
+    ap.add_argument("--json", default=None)
+    ap.add_argument("--plan-only", action="store_true", help="print the frequency plan and the estimate, no scope")
+    ap.add_argument("--max-duration", type=float, default=120.0, help="refuse sweeps estimated longer (s)")
+    ap.add_argument("--yes", action="store_true", help="confirm: the calibration pin outputs a 3.3 V square wave")
+    ap.add_argument("--write-vectors", metavar="PATH", help="write the planner vectors (JSON) and exit")
+    a = ap.parse_args(list(argv) if argv is not None else None)
+    if a.write_vectors:
+        Path(a.write_vectors).write_bytes((json.dumps(plan_vectors(), indent=1) + "\n").encode())
+        print("wrote", a.write_vectors)
+        return 0
+    plans = plan_sweep(parse_quantity(a.start, "Hz"), parse_quantity(a.stop, "Hz"), a.points)
+    settle = parse_settle(a.settle)
+    est = estimate_duration(plans, settle, not a.no_background, a.ch2_range == "auto")
+    if a.plan_only:
+        print(f"{'f_req':>12} {'f_actual':>12} {'M':>9} {'N':>6} {'p/q':>9} {'L':>5} {'settle_s':>9}")
+        for pp in plans:
+            print(f"{pp.f_requested:>12.4f} {pp.f_actual:>12.4f} {pp.m:>9} {pp.n:>6} {f'{pp.p}/{pp.q}':>9} "
+                  f"{pp.record:>5} {pp.settle_s(settle):>9.4f}")
+        print(f"{len(plans)} points, estimated {est:.1f} s")
+        return 0
+    if est > a.max_duration:
+        print(f"estimated {est:.0f} s > --max-duration {a.max_duration:g} s; raise it or narrow the sweep",
+              file=sys.stderr)
+        return 2
+    if not a.yes:
+        print("this drives the calibration pin (3.3 V square wave into the DUT); rerun with --yes", file=sys.stderr)
+        return 2
+    from .scope import Scope
+
+    thru = None
+    if a.thru and a.thru != "measure":
+        thru = ThruCal.load(a.thru)
+    with Scope.connect(a.port) as s:
+        s.ensure_control()
+        try:
+            r = BodeRunner(s, settle=settle, ch2_range=a.ch2_range, background=not a.no_background,
+                           progress=lambda i, n, t: print(f"  {i}/{n} {t}", file=sys.stderr))
+            res = r.run(plans, thru, role="thru" if a.thru == "measure" else "measure")
+        finally:
+            s.end_control(keep_settings=True)
+    print(f"{'f_hz':>12} {'mag_db':>9} {'phase':>9} {'ch2V/d':>7} {'rate':>11} {'filter':>9} flags")
+    for row in res.table():
+        print(_fmt_row(row))
+    print(json.dumps(res.summary(), indent=1, default=str))
+    for c in res.caveats + result_caveats(res):
+        print("caveat:", c)
+    if a.thru == "measure":
+        out = a.thru_out or f"thru_{_dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        print("thru calibration saved:", ThruCal.from_sweep(res, Path(out).stem, tuple(res.meta["probes"])).save(out))
+    if a.csv:
+        print("csv:", res.write_csv(a.csv))
+    if a.json:
+        print("json:", res.write_json(a.json))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
+__all__ = ["BodeError", "BodeRunner", "Measurement", "PointPlan", "PointResult", "SweepResult", "ThruCal",
+           "CONNECTION_TEXT", "SETTLE_PRESETS", "asdict", "estimate_duration", "markers", "measure_pair",
+           "parse_settle", "plan_point", "plan_sweep", "plan_vectors", "residual_noise", "result_caveats", "tone"]

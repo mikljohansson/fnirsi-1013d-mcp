@@ -23,6 +23,7 @@ fnirsi1013d-flash = "fnirsi1013d.flash:main"
 fnirsi1013d-bench = "fnirsi1013d.bench:main"
 fnirsi1013d-sd = "fnirsi1013d.sdcli:main"
 fnirsi1013d-soak = "fnirsi1013d.soak:main"
+fnirsi1013d-bode = "fnirsi1013d.bode:main"
 
 [build-system]
 requires = ["hatchling"]
