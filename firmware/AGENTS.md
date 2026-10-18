@@ -56,7 +56,6 @@ in long WSL command lines and Windows Python heredocs halve backslashes: put mul
 |---|---|
 | `make` | GCC 13.2.1, protocol on: `build/fnirsi_1013d.bin` |
 | `make gcc10` | Atlan's GCC 10.3.1 (`~/opt/gcc10`, from `tools/fetch_gcc10.sh`): `build-gcc10-pc/`. The bench uses this one |
-| `make gcc10-nofb` | same with PC_USB_TICK_FALLBACK=0 (no USB tick fallback, version `-nofb`): `build-gcc10-pc-nofb/` |
 | `make check-reference` | PC_PROTOCOL=0 with GCC 10 + Atlan's build_time.h, `cmp` against Atlan's binary: must print IDENTICAL |
 | `make PC_DEBUG=1 BUILD=build-dbg` | adds DEBUG_FPGA + FORCE (caps 0x120) for bench tests T3/T7 |
 | `make PC_FIFO_MAP=1 ...` | alternative USB FIFO layout (version string `-m1`) |
@@ -196,15 +195,17 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 
 | 0.2.19 A/B pair | 02288b8 | c30ff516 / 3d1f3c88 | same code as 0.2.19; `make gcc10-nofb` (PC_USB_TICK_FALLBACK=0) builds `0.2.19-nofb` without the tick fallback (#VER shows the suffix) | for the restart A/B; both ELFs kept as backups/fw-0.2.19-c30ff516.elf and backups/fw-0.2.19-nofb-3d1f3c88.elf |
 | 0.2.20 | 7f1c0c0 | e1517803 | tick fallback checks endpoint state (served only when seen on two consecutive ticks, no USB ISR between), skips while the USB IRQ is pending, counter 57 = races (n = 58), type 14 b condition bits | built, host-tested; ELF backups/fw-0.2.20-e1517803.elf |
-| 0.2.20-nofb | 7f1c0c0 | c7210b74 | same without the tick fallback (`make gcc10-nofb`) | built; ELF backups/fw-0.2.20-nofb-c7210b74.elf |
+| 0.2.20-nofb | 7f1c0c0 | c7210b74 | same without the tick fallback (`make gcc10-nofb`, target removed in 0.2.21) | built; ELF backups/fw-0.2.20-nofb-c7210b74.elf |
+| 0.2.21 | 1a893a9 | 6be6f9e8 | USB tick fallback removed (single 1.00o5 CDC handler again, no INTC pending capture); counters 47 and 57 retired (always 0, n stays 58); type 14 no longer emitted | built, host-tested; ELF backups/fw-0.2.21-6be6f9e8.elf |
 
-All of 0.2.12-0.2.19 contain the tick fallback, except 0.2.19-nofb; 0.2.11 does not. Full 0.2.19 sha256:
+All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
 build hash and build time; use the pair together. Full sha256: 0.2.19 (02288b8)
 c30ff5168bf227e0bf80038d037845e7a5d1e883fe00473f5f9f99a7f9b780fc, 0.2.19-nofb
 3d1f3c889a206621bc6546c0a7df227365e76589d5b41c05341183e4cb161cd9. 0.2.20 (7f1c0c0)
 e1517803e6bc9a8b595a3a2797924db4269e256b7ff34207136b6b4a12fbdc8e, 0.2.20-nofb
-c7210b749cc55482155a2211fec422f674efa3a22faa3d378bf5a60d33bbc318.
+c7210b749cc55482155a2211fec422f674efa3a22faa3d378bf5a60d33bbc318. 0.2.21 (1a893a9)
+6be6f9e81673c19bf88a812fe598b844426167cb14c3f73ca4d0b9c7bdbcdd04.
 
 ## 9. Open crash: self-restart from RAM (one confirmed case, 0.2.16)
 
@@ -302,6 +303,11 @@ Keep the ELF of every later bench image next to its .bin: a rebuild moves addres
 
 ## 11. USB: lost interrupts, the tick fallback, SOF, port resets
 
+**Closed: the tick fallback was removed in 0.2.21; the dispatcher does not lose interrupts, verified 2026-10-18**
+(0.2.20 bench and 30-minute soak: counter 47 = 0, counter 57 = 2176). Counters 47 and 57 are retired slots (always 0),
+event type 14 is retired, `make gcc10-nofb` is gone. The 2 ms RX sweep and the TX pump kick stay. The bullets below
+are the history of 0.2.12-0.2.20, kept for reading old logs.
+
 - **Lost interrupts.** 1.00o5's `irq_handler` reads INTC pending and then writes 0 to it, so an interrupt raised
   between the read and the write could be lost. **Unverified as a loss mechanism**: the F1C200s manual (3.5.6.4)
   calls the bits "Pending/Clear" without saying whether 0 or 1 clears or whether they follow the source level; the
@@ -389,6 +395,7 @@ Authoritative text: protocol section 14 rows 28 and 38.
 | 49 | 0.2.17-0.2.18 | 48 boot splash ms + 1 |
 | 57 | 0.2.19 | 49-56 restart record (section 10) |
 | 58 | 0.2.20 | 57 USB IRQ races (section 11) |
+| 58 | 0.2.21+ | same layout; 47 and 57 retired, always 0 |
 
 **GET_EVENT_LOG 0x0009** (protocol 1.5, any poll context). Request: empty, or since 0.2.18 u8 flags (bit 0 = re-arm
 the snapshot after this read; other bits E_BAD_ARG detail 0). Response: u16 n (<= 128; 64 before 0.2.15), u16 0,
@@ -398,7 +405,7 @@ entries (the events before the first bus reset since the snapshot was armed). 0.
 0.2.18+ only with flag bit 0. Types (pc_transport.h): 1 bus reset, 2 suspend, 3 resume, 4 disconnect, 5 EP0 setup
 (a = bRequest, b = bmRequestType << 8 | wValue low), 6 EP0 packet not 8 bytes (b = COUNT0), 7 SET_CONFIGURATION,
 8 CLEAR_FEATURE(HALT) (a = endpoint), 9 DTR (a = new DTR), 10 RX ring full, 11 RX release, 12 TX flushed, 13 TX
-aborted, 14 flags found by the tick (a = INTUSB, b = INTTX << 8 | INTRX; at most one per 100 ms; 0.2.20: low 7 bits each as read, bit 15 EP0 condition, bit 7 EP2 OUT condition), 15 restart
+aborted, 14 retired since 0.2.21 (0.2.12-0.2.20: flags found by the tick, a = INTUSB, b = INTTX << 8 | INTRX; at most one per 100 ms; 0.2.20: low 7 bits each as read, bit 15 EP0 condition, bit 7 EP2 OUT condition), 15 restart
 (0.2.19, section 10).
 
 ## 13. Boot, splash and SD package
@@ -470,9 +477,9 @@ compact menus rather than painting over gaps.
    the only restart, but **no mechanism is proven**: by code reading the tick-served body does what the real ISR does
    (section 9). So 0.2.20 removes the most likely trigger without a proven root cause. Keep the restart record in every
    image; on any restart run `map_addr.py <that image's ELF> --restart v49..v56` (section 10) and check first for the
-   IRQ-mode signature of the vector-overwrite suspect (section 9). If 0.2.20 stays clean over the soak and further
-   sessions, it is the candidate to persist (lead's call), and the fallback decision in section 11 follows. The
-   type-14 condition bits are in protocol section 14 row 42 (the host shows them raw).
+   IRQ-mode signature of the vector-overwrite suspect (section 9). The 0.2.20 soak was clean (counter 47 = 0,
+   57 = 2176), so 0.2.21 (fw-gen4) removed the fallback outright: the race that correlates with the only restart can
+   no longer happen. 0.2.21 needs its own bench passes and soak before it replaces 0.2.20 as the persist candidate.
 2. Read the 0.2.18+ frozen snapshot after sessions to explain the two suspend+reset pairs per session (section 11).
 3. Owner verdicts on 0.2.13+ System settings and battery, 0.2.17+ quiet boot; EXT trigger bench with 0x1533.
 4. Bench tests T3-T8 and T10 (section 7), then clear the UNVERIFIED caps and set FORCE_TRIGGER in release builds.
