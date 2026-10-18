@@ -89,3 +89,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   T2 FAILED: 65536 B response -> Windows error 31 (device not functioning), device re-enumerated, stale pattern bytes drained afterwards;
   threshold: <=5120 B payload ok (33 ms), >=6144 B -> 40 s timeout then latched E_BUSY/ui_busy=1 (main loop alive, capture_id advancing). Handed to fw-usb agent.
   PING round trip 33-53 ms = one UI main-loop pass per request; too slow for readouts, raised with the agent.
+  Re-test with scope untouched: 4096/6144/8192/16384 B OK (~60 ms each); 40..65-packet responses (20460..33260 B) never start (0 bytes in 15 s),
+  a subsequent PING releases 4096 B once; 66 packets OK after 5 s, 70 packets OK in 66 ms. Earlier 6144 B failures were caused by the owner using menus
+  (modal loops defer non-safe commands: expected). Firmware agent instrumenting the TX pump.
