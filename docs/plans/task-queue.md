@@ -74,6 +74,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   first, then down-ranging; bench first on an RC low-pass R 1.6 kOhm / C 10 nF (fc 9.95 kHz) with DUT ground on the USB shell.
 - [ ] **Bode analyser, device steps D1-D5** after the host version proves the numbers: display mode with magnitude/phase panes,
   BODE_CTRL / READ_BODE. Owner decision: entry from the generator menu (the main menu has no eighth row).
+- [ ] **docs/protocol.md tidy** (docs-gen1 findings): row 32 says GET_STATUS bytes 42-43 are zero while rows 41/45 define ext_flags and
+  display_mode there (add a "superseded" note); row 49 calls CIC+FIR the eventual default while CIC2 is the default since 0.2.44; row 51
+  says x1 or x10 probes for the gain step while README 6.3 says x1 (fw-cal2: range 2 for x1, range 5 for x10, so both are supported:
+  align the README). Next firmware agent.
 - [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s): deterministic test with
   GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
 - [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md
@@ -82,6 +86,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## MCP / host
 
+- [ ] **scope_status docstring** (docs-gen1): mcp/src/fnirsi1013d/server.py scope_status still says display_mode is "scope, or spectrum";
+  the enum has five values. mcp-gen4 to fix with its next commit.
 - [ ] **Version bump to 0.3.0** in mcp/pyproject.toml and firmware PC_FW_VERSION, CHANGELOG section, release notes
   (mcp-gen3 item 4) when the owner gives the go for v0.3.0.
 - [x] **Alias residual model check** (fpga-gen4): the 100 kHz residual is the DDS generator's own spur. The DDS clock is 50 MHz, so a
@@ -103,7 +109,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Dispatched
 
-- docs-gen1 (Sonnet, docs only, started 10-19 01:30): README / guides / protocol / flashing-releasing / AGENTS.md consistency pass for 0.2.48.
+- docs-gen1 (done 01:50): README cb47f8f, guide/skill 4ed5f53, protocol 8d750bb, releasing/hardware-prep aa84507, AGENTS.md 9004569.
+- docs-gen2 (Sonnet, started 10-19 01:55): CHANGELOG backfill 0.2.8-0.2.44 from git history and the firmware/AGENTS.md handoffs.
 - fw-gen7 (done 01:40, about 400k tokens, retired): purge batch merged into main (a86cd6c); the merged main build is numbered 0.2.48.
 - fw-mmu (done 01:10, about 330k tokens, retired): fw 0.2.48 MMU + D-cache merged; images pinned backups/fw-0.2.48_*.bin (MMU and nommu).
 - bode-design (done 01:05): docs/plans/bode-design.md committed fe5780b.
