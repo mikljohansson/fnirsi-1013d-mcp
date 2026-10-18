@@ -1,5 +1,5 @@
 #!/bin/bash
-# Simulate fpga/al3/src/zaklad.v with iverilog (in WSL). Four steps, all must pass:
+# Simulate fpga/al3/src/zaklad.v with iverilog (in WSL). Five steps, all must pass:
 #   1. tb_ext_trigger.v against Atlan4's original (REF_REV, default a947e78 = 0x1532): CH1/CH2
 #      equivalence and the external trigger.
 #   2. tb_decim.v against our 0x1533 (REF1533_REV, default 2839258): K = 0 equivalence including
@@ -8,7 +8,10 @@
 #   4. tb_fir.v against our 0x1534 (REF1534_REV, default 6d4c8ad): FIR off / not eligible
 #      equivalence with K = 0..3, then FIR captures (logged and checked by cic_model.py), trigger
 #      position, EXT, the EXT data lag and the time-out with the FIR (0x1535).
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir runs one testbench.
+#   5. tb_long.v: decim_chan and fir_chan free-running for up to 100k outputs per configuration with a
+#      periodic input: periodic, wrap-independent (random 48-bit start state), bounded, correct mean.
+#      LONG_SCALE (percent, default 100) scales the output counts.
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -54,6 +57,11 @@ if [ "$ONLY" = all ] || [ "$ONLY" = fir ]; then
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_fir.log" || RC=1
   python3 -I "$HERE/cic_model.py" check "$WORK/fir_edges.log" | tee "$WORK/model_fir.log"
   grep -q -- '-> PASS' "$WORK/model_fir.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = long ]; then
+  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_long.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_long.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_long.vvp" +seed=$SEED +scale=${LONG_SCALE:-100} | tee "$WORK/sim_long.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_long.log" || RC=1
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
 [ $RC -eq 0 ] && echo "ALL PASS (seed $SEED)" || echo "SOMETHING FAILED (seed $SEED)"

@@ -823,6 +823,17 @@ Deterministic: two builds in different work dirs gave the same hash. Header word
 - EXT data lag, 18 cases (table above). Auto time-out with the FIR counts output samples.
 - Phase 4: FIR off, one full-memory capture to resynchronise the memory, then 15 more random captures with
   0 mismatches.
+- Step 5, `tb_long.v` (about 5 minutes, `LONG_SCALE` percent to shorten): `decim_chan` and `fir_chan` free-running with a
+  copy of the top-level strobe logic and an exactly periodic input (DC + tone + a noise table repeated every period).
+  - Eight configurations, CIC and FIR, from N = 2 to the largest exact N. The bench case CIC3 at N = 200 runs
+    100,000 outputs.
+  - A second copy starts from random 48-bit state, with the first integrator just below 2^48 so that it wraps
+    during the run.
+  - Checks: the output repeats exactly every period, both copies agree, there is no saturation or clamp, and the
+    period mean equals mean input times gain within 1 LSB16 (worst deviation seen: 0.8 LSB16).
+  - A 47-bit wrap in one integrator and a saturating integrator are both caught. This was the 2026-10-18 check for
+    the "wagging" CIC3 spectrum on the bench: no filter-state drift. That effect was the square's harmonic leakage
+    and the DDS pattern tone (`tb/square_alias.py`).
 
 **Mutation runs** (`DUT=<file> ONLY=fir tb/run.sh 3`, each with its own `SIM_WORK`). All 13 fail as they should:
 
