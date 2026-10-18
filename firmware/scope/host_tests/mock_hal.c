@@ -305,7 +305,7 @@ int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t
     //16-bit layout (as pc_glue_decim_read): one sample per word, low byte core A, high byte core B
     if(mock.decim_cur.k)
     {
-      int32_t comp2 = mock.ch[ch].adc_a_comp + mock.ch[ch].adc_b_comp;
+      int32_t corr16 = (mock.ch[ch].adc_a_comp + mock.ch[ch].adc_b_comp) * 8;
 
       for(k=0;k<total_samples;k++)
       {
@@ -313,7 +313,7 @@ int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t
         uint16_t v = (uint16_t)(mock.ring[2 * ch][a] | (mock.ring[2 * ch + 1][a] << 8));
 
         mock.trace16[ch][k] = v;
-        mock.trace[ch][k]   = (uint8_t)pc_decim_to_code(v, mock.decim_cur.scale_q24, comp2);
+        mock.trace[ch][k]   = (uint8_t)pc_decim_to_code(v, mock.decim_cur.scale_q24, corr16);
       }
 
       mock.trace16_n[ch] = total_samples;

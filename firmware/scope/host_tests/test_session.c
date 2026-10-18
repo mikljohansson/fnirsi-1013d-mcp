@@ -1880,9 +1880,9 @@ static void test_decim_math(void)
       //Constant inputs at full and mid scale give 255 and 128
       T_EQ(pc_decim_to_code((uint16_t)((g * 255) >> c.shift), c.scale_q24, 0), 255);
       T_EQ(pc_decim_to_code((uint16_t)((g * 128) >> c.shift), c.scale_q24, 0), 128);
-      //Compensation: the mean of both cores, clamped at the rails
-      T_EQ(pc_decim_to_code((uint16_t)((g * 128) >> c.shift), c.scale_q24, 2 * 3), 131);
-      T_EQ(pc_decim_to_code(0, c.scale_q24, -4), 0);
+      //Zero correction (1/16 code), clamped at the rails
+      T_EQ(pc_decim_to_code((uint16_t)((g * 128) >> c.shift), c.scale_q24, 3 * 16), 131);
+      T_EQ(pc_decim_to_code(0, c.scale_q24, -2 * 16), 0);
 
       //Rate: 200 MSa/s / N equals the legacy 200 / (D + 1) for these odd dividers; settle (K + 2) periods
       T_EQ(pc_decim_rate(&c, div[i]), 200000000u / (div[i] + 1));
@@ -2016,7 +2016,7 @@ static void test_decim_protocol(void)
   {
     uint32_t a = (5292 + 10) % 8192;
     uint16_t v = (uint16_t)(mock.ring[0][a] | (mock.ring[1][a] << 8));
-    T_EQ(r.p[48], pc_decim_to_code(v, mock.decim_cur.scale_q24, mock.ch[0].adc_a_comp + mock.ch[0].adc_b_comp));
+    T_EQ(r.p[48], pc_decim_to_code(v, mock.decim_cur.scale_q24, (mock.ch[0].adc_a_comp + mock.ch[0].adc_b_comp) * 8));
   }
 
   //READ_RAW layout 2: u16 little-endian words of a channel (both cores required)
