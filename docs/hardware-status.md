@@ -168,3 +168,7 @@ Newest entries at the bottom. Format: date, who, what, result.
 - Firmware 0.2.2 (commit dc49ad0, sha256 0f74b49c..., SD sector commands, caps 0x7C03) loaded hands-free. Startup counters: first poll 2 ms,
   first pass 1515 ms, first conversion +30 ms, first capture processed ~0 ms -> the 1.5 s is in draw/touch/RTC init of the first pass.
   SD commands not yet benched (host CLI in progress).
+- USB incident on 0.2.2: after ~10 min idle with the host port closed, the device stayed enumerated but in a Windows Error state (CreateFile failed);
+  scope UI normal; cable replug recovered it. Reported to fw-gen2 (suspend/resume or DTR-down path suspected).
+- Firmware 0.2.3 (commit baee5b5, sha256 bbcb1d7b...): MCP chip above RUN/STOP (replaces the RTC clock slot while shown), steady, SET_TIMEBASE
+  single-step apply. Loaded hands-free; visual verdict pending. Owner note: generator menu SINE/TRGL options have no effect on the 1013D (no DAC) -> hide.
