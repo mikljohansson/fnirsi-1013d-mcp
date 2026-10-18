@@ -46,6 +46,10 @@ sits on VRF1, +1.24 V; see fpga/al3/README.md "Changes" 2), and the host-capture
 
 ## 4. On-scope averaging and FFT (firmware)
 
+Detailed design and step plan for the FFT/spectrum analyser, Bode plots and digital phosphor: `docs/plans/dpos350p-features.md`
+(2026-10-18). Note from that study: kiss_fft is not vendored in firmware/scope (only in Atlan's extracted tree, float-based); a small
+purpose-written Q15 FFT is proposed instead.
+
 - ACQUIRE_AVG (cap exists, not built): N captures accumulated on the scope with edge alignment, returned as
   16-bit means; useful for the detector loop at 9 captures/s.
 - FFT: fixed-point radix-2 (kiss_fft is already vendored in Atlan's tree: `kiss_fft*.c` from v0.025y1) on
