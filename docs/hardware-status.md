@@ -353,3 +353,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   on 0x1533: 3 bench passes, 300 x 64 KiB, 0 failed. Post-init log (type 19): POWER/FADDR 0x700e, INTUSBE/CCU 0x270f, ISCR 0x3f00,
   USBPHY_CFG 0x0003, PHY tuning read-back after the writes 0x00e9 (= the packed written value), before the writes 0x0068 (defaults), PHYCTL
   0x2b80. So the tuning writes now reach the PHY; in every earlier image they did not. Persisted to the card for the cold-boot soak.
+- **Cold boot with the cable in, 0.2.25 from the card** (power cycle 20:08): type 16 pre-init state all 0x0000 (as on every cold boot), type 19
+  post-init state identical to the FEL path (0x700e/0x270f/0x3f00/0x0003/0x00e9/0x0068/0x2b80): the PHY tuning now reaches the PHY on the
+  cold path (RES45 calibration on, disconnect threshold 3; before 0.2.25 every cold boot ran the PHY at its defaults). First bench pass clean.
+  30-minute capture-mode soak started 20:09 on the cold-booted scope (decisive comparison: 0.2.21/0.2.23 cold boots failed within 5 min).
