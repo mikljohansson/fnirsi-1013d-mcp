@@ -243,8 +243,11 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
 
 ## 10. TODO, in priority order
 
-1. Bench 0.2.7: chip without flicker, diagnostics identity line / no temperature, an SD persist with GET_LINK_STATS
-   41-46 read afterwards (back-pressure branch counters), hidden-menu visual check (0.2.6, owner).
+1. Bench state (2026-10-18): 0.2.10 benched by the lead (census clean, first request OK, chip/Roll/menus with the
+   owner); 0.2.11 (first request after a port open) built, not benched: check with open + TEST_PATTERN as the very
+   first request + close, ~20 times. Pending owner verdicts: chip stable while free-running (0.2.10), "Roll mode"
+   label (0.2.10), compacted generator/trigger menus (0.2.8). Pending EXT bench: 0.2.9+ with fpga-gen2's 0x1533
+   (caps 0x0008, trigger menu EXT, GET_STATUS byte 42, latency measurement). Persist path verified on 0.2.7 (5.3 s).
 2. Bench the SD commands (0.2.2, protocol section 14 row 40): SD_INFO VERIFY on the owner's card (sector 750 must
    show eGON.EXE, check 1), SD_READ_SECTORS of 16 / 80 / 750 against backups/, then persist an image with
    SD_STAGE + SD_WRITE_SECTORS from 750 (back up 750..2047 first), SD_INFO VERIFY, power-cycle boot. Host tool:
