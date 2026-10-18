@@ -2061,7 +2061,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--data-dir", type=Path, help="where .npz files go (env FNIRSI_MCP_DATA_DIR)")
     ap.add_argument("--audit-log", type=Path, help="JSONL audit log (env FNIRSI_MCP_AUDIT_LOG)")
     ap.add_argument("--max-response", type=int, help="largest response payload requested in one frame; larger "
-                    "reads are split. Default 8192 on Windows serial ports (provisional), else the device limit; "
+                    "reads are split. Default: the device limit; "
                     "0 = always the device limit (env FNIRSI_MCP_MAX_RESPONSE)")
     ap.add_argument("--sim", metavar="SIM_ARGS", help="start an in-process simulator and connect to it, e.g. "
                     "--sim \"--variant al3 --signal decay:tau=80us\" (overrides --port; for development)")

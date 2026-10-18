@@ -75,8 +75,9 @@ wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/mcp && ~/.venvs/fnirsi1
 7. **Host partial-frame timeout is 2 s**, not the device's 100 ms (a paused large response must survive).
 8. One request in flight; only control requests (GET_STATUS, STOP, SET_REMOTE, PING) while a deferred one is
    pending, and only from the `deferred(cancel=...)` callback (single reader).
-9. **Windows response cap**: `Scope.connect` defaults `max_response` to 8192 on Windows serial ports
-   (`WINDOWS_SERIAL_MAX_RESPONSE`); 0 = device limit. Provisional, see TODO 1.
+9. **No response cap by default** (the 8 KiB Windows cap was dropped 2026-10-18 after the fw 0.1.6/0.1.7 census:
+   2000 PINGs + 100 x 64 KiB, retries off, 0 errors). `--max-response` / `FNIRSI_MCP_MAX_RESPONSE` stays as an
+   optional override; the split-read paths are kept and tested with small caps.
 10. Server: import DLL-loading modules (scipy, pyserial) before `mcp.run` (Windows stdio deadlock otherwise).
 
 ## Protocol vectors contract
@@ -184,8 +185,7 @@ reload: announce "about to reload with <image> for <reason>", wait for the lead'
 
 ## TODO (priority order)
 
-1. Drop the Windows 8 KiB cap (`WINDOWS_SERIAL_MAX_RESPONSE`, README "Windows notes") once the firmware RX fix
-   lands and the lead confirms a clean census at 20460 / 32748 / 65536 x20.
+1. (done) Windows 8 KiB cap dropped.
 2. fw 0.1.6 (697e1f6) fixes the 2 KiB RX ring-wrap loss (packets straddling the ring end were read from the
    FIFO in two access runs). Re-run the 304-request LOCAL repro (PING x100 + TEST_PATTERN 495/4096/20460/32748/
    65536 x40, retries=0): expect zero lost requests. Add GET_BAD_FRAME (0x0008, protocol 1.2, item 29: u32
@@ -204,7 +204,6 @@ reload: announce "about to reload with <image> for <reason>", wait for the lead'
    implements them; check payload layouts against the firmware first).
 7. MCP progress for long averaged runs works in-process; verify with Claude Code over stdio.
 8. Collaborative mode on hardware (fw 0.2.0): run the plan's bench acceptance list (docs/plans/collaborative-
-   mode.md) through the tools; check the RUN-mode READ_RAW hold against chunked reads (with the 8 KiB Windows cap a
-   full read is 5 chunks: expect `RUN was paused` notes until TODO 1); measure the per-request cost in shared mode
+   mode.md) through the tools; check the RUN-mode READ_RAW hold (a full 4-core read is now one response); measure the per-request cost in shared mode
    (every main-loop command waits for a UI pass) and, if averaging is slow, consider a host ARM loop without
    GET_CAPTURE_INFO (already: only when the WAIT seq matches) or ACQUIRE_AVG.

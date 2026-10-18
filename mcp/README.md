@@ -97,7 +97,7 @@ count when the `#VER` probe answers `#OK,FNIRSI-1013D-AI,...`.
 | `FNIRSI_MCP_DATA_DIR` | `mcp/data` | `.npz` output, one folder per day |
 | `FNIRSI_MCP_AUDIT_LOG` | `mcp/logs/audit.jsonl` | JSONL log of every tier 1+ call (empty string disables) |
 | `FNIRSI_MCP_LEGACY_IDLE_RELEASE_S` | 60 | legacy firmware only: release REMOTE (keeping the host settings) after this many seconds without a tool call; 0 = hold until exit |
-| `FNIRSI_MCP_MAX_RESPONSE` | 8192 on Windows serial, else device limit | largest response payload requested at once (`--max-response`); READ_RAW, READ_TRACE and READ_SCREEN are split, and device averaging falls back to the host when its result would not fit |
+| `FNIRSI_MCP_MAX_RESPONSE` | device limit | largest response payload requested at once (`--max-response`); READ_RAW, READ_TRACE and READ_SCREEN are split, and device averaging falls back to the host when its result would not fit |
 
 ### Claude Code
 
@@ -279,9 +279,6 @@ for 0.1.0 (AL3, no ACQUIRE_AVG, READ_SCREEN, READ_LIVE, FORCE or DEBUG_FPGA).
   their 8 setup bytes (`a1 21 00 00 00 00 07 00`) appeared inside in-flight bulk responses; the firmware agent
   traced this to the inherited USB FIFO layout (EP2 TX FIFO outside the 2 KiB FIFO RAM, aliased onto RX), fixed in
   0.1.1. Reads ask only for `in_waiting` bytes. `tests/test_serial_link.py` guards both rules.
-- **Provisional cap**: on Windows serial ports a single response is limited to 8192 bytes by default (larger reads
-  are split). On 0.1.0 a 16 KiB READ_RAW chunk still timed out intermittently, 8 KiB worked throughout. The cap is
-  to be re-measured on 0.1.1 and dropped if 64 KiB is clean; `--max-response 0` uses the device limit now.
 - The server imports scipy and pyserial before the stdio transport starts (`preload_native_modules`): loading a DLL
   later from the event loop deadlocks on Windows against the stdio reader thread's pending read on stdin.
   `tests/test_stdio.py` guards this.
