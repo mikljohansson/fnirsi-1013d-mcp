@@ -191,6 +191,10 @@ Every protocol change sits behind `#if PC_PROTOCOL`.
   clock class, and `scope_calibration_info` shows them.
 - Added: protocol 1.11 compensation FIR (caab0eb). The `+fir` filter choices drive it, and event types 1-4
   carry the USB suspend fields. `fnirsi1013d-soak --mode reopen` runs the suspend / resume bench.
+- Changed: protocol 1.12 calibration v3 (62da1e0). The volts model applies the scope's per-core, per-class
+  zeros and gains on every read path, and `scope_calibration_info` shows the gains. Calibration v2 is refused.
+- Added: protocol 1.13 display modes (8b6a736). `scope_status` names the waterfall, density and phosphor views,
+  and the capture tools add a caveat while the phosphor view is on.
 
 ### Tooling, FPGA and documentation
 
