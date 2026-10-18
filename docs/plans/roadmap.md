@@ -20,6 +20,12 @@ the bench steps the owner must be present for. Items are small enough for one ag
 
 ## 2. External trigger (FPGA + firmware + MCP)
 
+Status 2026-10-18 evening: DONE on the bench. FPGA 0x1533 flashed (fpga/al3, backups/al3_ext-trigger_0x1533_a9656703.bin), firmware 0.2.9+
+(trigger menu EXT, SET_TRIGGER source 2, generator interlock, GET_STATUS EXT flags), MCP scope_set_trigger(source="EXT"). Loopback via the
+generator: 10/10 triggered, -50 ns at 20 MS/s. Open: a test with an external 3.3 V source referenced to the USB ground (the probe ground
+sits on VRF1, +1.24 V; see fpga/al3/README.md "Changes" 2), and the host-capture trigger-position variance at decimated rates.
+
+
 - FPGA (fpga/al3, Anlogic TD headless): make the calibration pin an input when `gen_out_enable=0` (it is
   already hi-Z then), add a trigger source "EXT" (command 0x15 value 2), edge select, 2-stage synchroniser;
   keep version word 0x15xx with a new minor nibble so firmware can detect it; keep 0x1532 behaviour otherwise.
