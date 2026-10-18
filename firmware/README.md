@@ -981,7 +981,9 @@ full-rate zeros (Z_k = zero[FULL][k][r] / 16 + slope term). Corrected y' = y + N
 units (>> S) the constant is N^K (T - (Z_A + Z_B) / 2) / 2^S. The firmware applies it after the conversion, in codes:
 `corr16 = round(T16 - (zf16_A + zf16_B) / 2)`, `code = clamp(round(out x 2^S / N^K + corr16 / 16))`
 (`pc_decim_to_code`, Q24), then takes comp_k off so the 8-bit loop's per-core add cancels (no dither on 16-bit
-readouts). WIDE READ_TRACE stays raw; GET_CAL gives corr16 for the host.
+readouts). WIDE READ_TRACE stays raw; GET_CAL gives corr16 for the host. The spectrum view's 16-bit FFT
+(fw-gen5, `fx_fft_run_u16`) subtracts 0 V in stored units, (16 T - corr16) x 2^20 / scale_q24, with the corr16 of
+the record's readout.
 
 **Cost in the readout loop** (`fpga_read_adc_data`, GCC 10 -O3, objdump of main vs this branch): the per-sample
 `dcoffset x 100 / dc_shift_value` (two uncached struct loads and an `__aeabi_idiv` call) and the per-sample load of
