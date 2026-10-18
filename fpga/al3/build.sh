@@ -1,8 +1,10 @@
 #!/bin/bash
-# Headless TD build of fpga/al3/src (Atlan4's AL3A10 project, unchanged).
+# Headless TD build of fpga/al3/src (Atlan4's AL3A10 project plus our changes, see README.md "Changes").
 # Adapted from Donwulff's AL3_1014D/build.sh. Setup: td/td_install.sh, see TD_SETUP.md.
 # Usage (in WSL): ./build.sh [workdir]
 #   TD_HOME, TD_SHIM default to the td_install.sh locations under ~/anlogic.
+#   SRC_REV=<git rev> builds fpga/al3/src as it was at that commit instead of the working tree,
+#   e.g. SRC_REV=a947e78 rebuilds Atlan4's unmodified 0x1532 design (FPGA.bin sha256 0d4c829c...).
 #   The build runs in a WSL-local workdir (default ~/al3-build; /mnt/d is slow) and the
 #   bitstreams, reports and log are copied to fpga/al3/build/ (gitignored).
 set -e
@@ -14,10 +16,16 @@ WORK=${1:-$HOME/al3-build}
 OUT=$HERE/build
 [ -x "$TD_HOME/bin/td" ] || { echo "no TD at $TD_HOME (run td/td_install.sh)"; exit 1; }
 rm -rf "$WORK"; mkdir -p "$WORK" "$OUT"
-cp -r "$HERE/src/." "$WORK/"
-cat "$HERE/src/al_ip/pll.v" "$HERE/src/al_ip/sample_memory.v" "$HERE/src/zaklad.v" > "$WORK/all.v"
+if [ -n "$SRC_REV" ]; then
+  REPO=$(cd "$HERE/../.." && pwd)
+  git -c safe.directory='*' -C "$REPO" archive "$SRC_REV" fpga/al3/src | tar -x -C "$WORK" --strip-components=3
+  echo "sources: fpga/al3/src at $SRC_REV"
+else
+  cp -r "$HERE/src/." "$WORK/"
+fi
+cat "$WORK/al_ip/pll.v" "$WORK/al_ip/sample_memory.v" "$WORK/zaklad.v" > "$WORK/all.v"
 TCL=$HERE/build.tcl; [ "$FLOW" = donwulff ] && TCL=$HERE/build_donwulff.tcl
-UCODE=$(grep -o '<UCode>[01]*</UCode>' "$HERE/src/FPGA.al" | tr -dc 01)
+UCODE=$(grep -o '<UCode>[01]*</UCode>' "$WORK/FPGA.al" | tr -dc 01)
 [ ${#UCODE} -eq 8 ] || { echo "no 8-bit <UCode> in src/FPGA.al"; exit 1; }
 sed -e "s|@TD@|$TD_HOME|" -e "s|@UCODE@|$UCODE|" "$TCL" > "$WORK/flow.tcl"
 cd "$WORK"
