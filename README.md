@@ -33,8 +33,8 @@ What you get over stock and over Atlan4's firmware:
   in seconds, and can persist it to the SD card over the protocol. No card handling, no buttons.
 - **Link robustness fixes** found on the bench: USB FIFO layout (the inherited layout aliased the control
   endpoint), receive-ring wrap corruption, host serial driver quirks on Windows.
-- **Reproducible builds**: with Atlan4's exact compiler the firmware builds byte-identical to his release
-  when the protocol is compiled out, so every change is attributable.
+- **Verified lineage**: the port of Atlan4's v1.00o5 source was proven by rebuilding his released binary byte for
+  byte (git history up to 2026-10-18); from there on the firmware is simplified freely, with the credits intact.
 - **FPGA toolchain**: a headless Anlogic TD flow that rebuilds the AL3 bitstream byte-identical, ready for
   the next FPGA work (external trigger, deeper memory).
 
@@ -128,8 +128,7 @@ thread and elsewhere that fit this hardware, in rough priority:
 
 ## Contributing
 
-Issues and pull requests are welcome, from humans and from agents. Keep `PC_PROTOCOL=0` byte-identical to
-Atlan4's image, add host tests for protocol changes, update the relevant `AGENTS.md`, and never flash a
+Issues and pull requests are welcome, from humans and from agents. Add host tests for protocol changes, update the relevant `AGENTS.md`, and never flash a
 device without a verified backup. Bench results belong in `docs/hardware-status.md`.
 
 ## Credits

@@ -1,7 +1,7 @@
 name: Firmware build and host tests
 description: >
   Installs the apt arm-none-eabi toolchain and Atlan4's GCC 10.3.1 (cached), fetches Atlan4's v1.00o5
-  reference image (cached, sha256-verified), then runs make check-reference, make gcc10, make (GCC 13),
+  reference image (cached, sha256-verified), then runs make gcc10, make (GCC 13),
   the PC_DEBUG build and the host tests. Leaves the release image and its sha256 in dist-firmware/.
   Used by ci.yml (and through it by release.yml). Needs an ubuntu runner and a checkout of the repo.
 
@@ -60,13 +60,6 @@ runs:
     - name: Fetch and verify Atlan's v1.00o5 reference files (sha256)
       shell: bash
       run: python3 -I tools/make_release_sd_package.py reference --dest firmware/reference
-
-    - name: make check-reference (GCC 10, PC_PROTOCOL=0, must be IDENTICAL)
-      shell: bash
-      working-directory: firmware/scope
-      run: |
-        make -j"$(nproc)" check-reference 2>&1 | tee "$RUNNER_TEMP/check-reference.log"
-        grep -q '^IDENTICAL to ' "$RUNNER_TEMP/check-reference.log"
 
     - name: make gcc10 (GCC 10, protocol on; the release image)
       shell: bash

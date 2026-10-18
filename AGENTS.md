@@ -75,8 +75,10 @@ Reference checkouts (read-only, outside this repo, never build inside them):
   python3. Run builds from WSL with the repo at `/mnt/d/src/fnirsi-1013d-ai`. Root in WSL is available
   without a password via `wsl -d Ubuntu -u root` for installing packages.
 - Firmware: `cd firmware/scope && make -j` produces `build/fnirsi_1013d.bin` (eGON.EXE image for SD sector
-  750 / FEL). apt toolchain is GCC 13.2.1; Atlan used GCC 10.3.1 and `make check-reference` (after
-  `firmware/tools/fetch_gcc10.sh`) rebuilds byte-identical to Atlan's v1.00o5 binary. SD layout, image
+  750 / FEL). apt toolchain is GCC 13.2.1; release images use GCC 10.3.1 (`firmware/tools/fetch_gcc10.sh`, `make gcc10`).
+  Provenance note: until 2026-10-18 evening a `PC_PROTOCOL=0` build was kept byte-identical to Atlan's v1.00o5 binary
+  (verified, see git history and the CI logs up to that date); the owner dropped that rule to allow simplification and
+  dead-code removal. The lineage is documented in README "Credits" and in git history. SD layout, image
   format, `make_sd_image.py` and FEL commands: `firmware/README.md`.
 - Compiler flags are inherited from Atlan4 (`-mcpu=arm926ej-s -O3 -nostdlib`, custom `mem*.s`, tiny malloc,
   no libc). Keep it that way; do not introduce libc or floating point in acquisition paths.
@@ -110,7 +112,7 @@ Measurement sessions through the `fnirsi1013d` MCP server (setup: `mcp/README.md
 ## CI and releases
 
 GitHub Actions run `.github/workflows/ci.yml` on every push and pull request to main. It covers
-`make check-reference` (must print IDENTICAL), the GCC 10, GCC 13 and PC_DEBUG builds, host tests, the
+the GCC 10, GCC 13 and PC_DEBUG builds, host tests, the
 mcp ruff and pytest runs on Linux and Windows, and both protocol-vector checkers. Keep those commands
 green locally before pushing. A `vX.Y.Z` tag runs `release.yml`. The tag must equal `PC_FW_VERSION`
 and the mcp version, and `CHANGELOG.md` needs a matching section. Atlan4's binary-only bootloader and

@@ -357,3 +357,13 @@ Newest entries at the bottom. Format: date, who, what, result.
   post-init state identical to the FEL path (0x700e/0x270f/0x3f00/0x0003/0x00e9/0x0068/0x2b80): the PHY tuning now reaches the PHY on the
   cold path (RES45 calibration on, disconnect threshold 3; before 0.2.25 every cold boot ran the PHY at its defaults). First bench pass clean.
   30-minute capture-mode soak started 20:09 on the cold-booted scope (decisive comparison: 0.2.21/0.2.23 cold boots failed within 5 min).
+- **Cold-boot soak, 0.2.25 from the card (20:07-20:37, capture mode, 4 KiB every 50 ms): 35,728 requests, 0 failures, 0 drops, 0 restarts,
+  counters delta none.** Every earlier cold boot (0.2.20/0.2.21/0.2.23) failed within 5 minutes; the PHYCTL register fix (0x01C13404 instead
+  of 0x01C13410, RES45 calibration on, disconnect threshold 3) is accepted as the cause and the fix of the day-long USB drop story.
+- Owner decision: the byte-identical reference-build rule is dropped (lineage stays in git history and the credits); CI step removed; a
+  dead-code purge is scheduled after the spectrum (fw-gen5) and decimation (fw-decim) work lands.
+- Firmware 0.2.27 (fw-gen5, commits efc5170/13d4185, sha256 29db9cd4..., pinned; includes 0.2.26 = channel-menu FFT switch removed, rows
+  moved up) FEL-loaded on 0x1533: bench clean. FFT_BENCH (Hann, CH1 buffer, CP15 0x0005107c: MMU off, so the D-cache is ineffective):
+  DDR 1024/2048/4096/16384 points = 5.3 / 11.4 / 24.3 / 108.7 ms (+0.6/1.3/2.5/10.1 ms dB conversion); on-chip SRAM 1024/2048/4096 =
+  4.0 / 8.5 / 18.1 ms. About 4x slower than the uncached estimate; 2048-4096 points still fit a UI pass. Enabling the MMU with a flat map
+  (framebuffer uncached) would turn the D-cache on and is the obvious speed-up for everything (later item). Card keeps 0.2.25.
