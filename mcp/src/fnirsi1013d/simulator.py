@@ -1724,6 +1724,10 @@ class SimServer:
         self.lose_next = 0
         #: if set, ``lose_next`` only applies to requests with this cmd
         self.lose_cmd: int | None = None
+        #: test hook: {cmd: n} drop the USB link (close the connection) when the n-th request of cmd arrives,
+        #: without executing it (bench 2026-10-18: the scope fell off USB during --persist)
+        self.drop_link_on: dict[int, int] = {}
+        self._drop_link = False
 
     @property
     def url(self) -> str:
@@ -1798,9 +1802,10 @@ class SimServer:
                         continue
                     for ev in parser.feed(chunk):
                         self._event(client, ev)
-                if self.device.fel_requested:
+                if self.device.fel_requested or self._drop_link:
+                    log.info("closing the link (%s)", "ENTER_FEL" if self.device.fel_requested else "drop hook")
                     self.device.fel_requested = False
-                    log.info("ENTER_FEL: closing the link")
+                    self._drop_link = False
                     self._close_client(client)
                     client = None
                     continue
@@ -1837,6 +1842,14 @@ class SimServer:
                 return
             if ev.proto_major != P.PROTO_MAJOR:
                 L["version_errors"] += 1
+            if self._drop_link:
+                return
+            if ev.cmd in self.drop_link_on:
+                self.drop_link_on[ev.cmd] -= 1
+                if self.drop_link_on[ev.cmd] <= 0:
+                    del self.drop_link_on[ev.cmd]
+                    self._drop_link = True
+                    return
             if self.lose_next and self.lose_cmd in (None, ev.cmd):
                 self.lose_next -= 1
                 return

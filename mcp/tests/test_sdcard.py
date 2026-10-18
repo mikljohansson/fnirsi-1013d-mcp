@@ -152,11 +152,11 @@ def test_full_flow_then_persist(sim, tmp_path):
 def test_persist_mismatch_then_restore(sim, tmp_path):
     card = sim.device.sd
     old = card.read(750, 600)
-    card.fail_next_write = 1
+    card.fail_next_write = 4  # every try of the first piece reads back wrong
     f, lines = persister(sim, tmp_path, make_egon_image(100 * 1024, fill=0x33, version=SIM_FW))
     assert f.run_all() == 7
     failed = [ln for ln in lines if "FAILED" in ln]
-    assert len(failed) == 1 and "E_IO" in failed[0]
+    assert len(failed) == 1 and "E_IO" in failed[0] and "PARTIAL IMAGE" in failed[0] and "--restore" in failed[0]
     backup = next((tmp_path / "backups").glob("sd_750-1350_*.bin"))
     r, lines2 = persister(sim, tmp_path, b"", restore=backup)
     assert r.run_all() == 0, "\n".join(lines2)
@@ -241,3 +241,45 @@ def test_scope_sd_info_tool(sim_factory, tmp_path):
         async with client_for(sim_factory(legacy=True), tmp_path) as c:
             assert "SD_SECTORS" in await c.fails("scope_sd_info")
     anyio.run(main)
+
+
+def test_one_mismatch_is_resent_and_reported(sim, tmp_path):
+    sim.device.sd.fail_next_write = 1
+    image = make_egon_image(150 * 1024, fill=0x44, version=SIM_FW)
+    f, lines = persister(sim, tmp_path, image)
+    assert f.run_all() == 0, "\n".join(lines)
+    assert any("resends: piece 0: 1" in ln for ln in lines) and not any("FAILED" in ln for ln in lines)
+    assert sim.device.sd.read(750, len(image) // 512) == image
+
+
+def test_usb_drop_mid_write_resumes(sim, tmp_path):
+    """Bench 2026-10-18: the scope fell off USB at 256 KiB of 379 KiB and re-enumerated a few seconds later."""
+    image = make_egon_image(379 * 1024, fill=0x55, version=SIM_FW)
+    n_stage_per_piece = -(-P.SD_STAGE_BYTES // P.SD_STAGE_MAX_CHUNK)
+    sim.drop_link_on = {P.Cmd.SD_STAGE: 4 * n_stage_per_piece + 3}  # during the 5th piece
+    f, lines = persister(sim, tmp_path, image, stage_delay_ms=0.0)
+    assert f.run_all() == 0, "\n".join(lines)
+    text = "\n".join(lines)
+    assert "link lost" in text and "reconnected; resuming" in text and "resends: piece 4: 1" in text
+    assert "FAILED" not in text
+    assert sim.device.sd.read(750, len(image) // 512) == image
+    assert [w[0] for w in sim.device.sd.writes] == [750 + 128 * k for k in range(6)]  # nothing written twice
+
+
+def test_usb_drop_port_never_returns(sim, tmp_path):
+    image = make_egon_image(200 * 1024, fill=0x66, version=SIM_FW)
+    sim.drop_link_on = {P.Cmd.SD_WRITE_SECTORS: 2}
+    real = F.Flasher._sd_session
+    calls = {"n": 0}
+
+    def no_port(self):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise F.FlashError("cannot open the port", 7)
+        return real(self)
+    f, lines = persister(sim, tmp_path, image, port_return_s=0.01)
+    f._sd_session = no_port.__get__(f)
+    assert f.run_all() == 7
+    failed = [ln for ln in lines if "FAILED" in ln]
+    assert len(failed) == 1 and "did not come back" in failed[0] and "PARTIAL IMAGE" in failed[0]
+    assert "do not power-cycle" in failed[0]

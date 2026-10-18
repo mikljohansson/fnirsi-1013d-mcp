@@ -168,3 +168,15 @@ def test_capture_info_roundtrip_and_views():
     cfg = back.channel_config(0)
     assert cfg.range == 4 and cfg.hw_range == 4 and cfg.probe_factor == 10.0
     assert back.settings_key()["CH2.coupling"] == 1
+
+
+def test_link_stats_fw_0_2_4_sample():
+    """Lead's raw GET_LINK_STATS on fw 0.2.4: 36 u32 words, word 0 = the count (35), counters follow."""
+    import struct as st
+    words = [35, 10, 1145, 0, 0, 7, 0, 0, 0, 2, 2, 1, 5, 0, 0, 0, 0, 0, 0, 1026, 4, 0, 0, 0, 1, 6, 0, 14, 1515, 31, 1,
+             48, 1, 31, 32, 32]
+    d = P.parse_link_stats(st.pack(f"<{len(words)}I", *words))
+    assert len(d) == 35 and d["rx_packets"] == 10 and d["rx_bytes"] == 1145 and d["tx_packets"] == 7
+    assert d["first_poll_ms"] == 1515 and d["first_pass_ms"] == 31  # counters 27 and 28
+    assert d["first_conversion_ms"] == 1 and d["first_after_rtc_ms"] == 32
+    assert list(P.parse_link_stats(P.pack_link_stats({}))) == list(P.LINK_STATS_NAMES)  # 31-counter layout

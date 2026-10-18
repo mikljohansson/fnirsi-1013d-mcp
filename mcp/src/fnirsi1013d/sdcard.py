@@ -37,9 +37,11 @@ class Backup:
 
 
 class SdCard:
-    def __init__(self, t: Transport, say: Callable[[str], None] = print):
+    def __init__(self, t: Transport, say: Callable[[str], None] = print, stage_delay_s: float = 0.0):
         self.t = t
         self.say = say
+        #: pause between SD_STAGE requests (each already waits for its answer); bench throttle
+        self.stage_delay_s = stage_delay_s
 
     def info(self, verify: bool = False) -> P.SdInfo:
         r = self.t.request(P.Cmd.SD_INFO, bytes([P.SD_FLAG_VERIFY if verify else 0, 0, 0, 0]),
@@ -79,6 +81,8 @@ class SdCard:
             raise ValueError("stage holds 64 KiB")
         for off in range(0, len(data), P.SD_STAGE_MAX_CHUNK):
             chunk = data[off: off + P.SD_STAGE_MAX_CHUNK]
+            if off and self.stage_delay_s:
+                time.sleep(self.stage_delay_s)
             r = self.t.request(P.Cmd.SD_STAGE, P.SdStageHeader(off, len(chunk)).pack() + chunk)
             h = P.SdStageResp.unpack(r.payload)
             if (h.offset, h.length, h.crc32) != (off, len(chunk), P.crc32_iso_hdlc(chunk)):
@@ -101,6 +105,11 @@ class SdCard:
             self.write_staged(sector + off // 512, piece, flags)
             if progress:
                 progress(off + len(piece), len(data))
+
+    def write_piece(self, sector: int, piece: bytes, flags: int = 0) -> None:
+        """One <= 64 KiB piece: stage it, then write it (both checked)."""
+        self.stage(piece)
+        self.write_staged(sector, piece, flags)
 
     def verify(self, sector: int, data: bytes) -> None:
         """Read the sectors back with SD_READ_SECTORS and compare (independent of the write's own read-back)."""

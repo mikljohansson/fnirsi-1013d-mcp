@@ -1361,14 +1361,28 @@ def pack_link_stats(counters: dict[str, int]) -> bytes:
     return struct.pack(f"<HH{len(vals)}I", len(vals), 0, *vals)
 
 
+#: fw 0.2.4 (35 counters): 29..34 are "ms + 1 after the first main-loop poll, 0 = not reached"; in 0.2.2-0.2.3
+#: (31 counters) 29/30 were first_arm_ms / first_done_ms ("ms | 1")
+LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
+    "first_conversion_ms", "first_capture_ms", "first_after_battery_ms", "first_after_acquisition_ms",
+    "first_after_touch_ms", "first_after_rtc_ms")
+
+
+def link_stats_names(n: int) -> tuple[str, ...]:
+    """Counter names for a GET_LINK_STATS answer with ``n`` counters (the layout depends on the firmware)."""
+    return LINK_STATS_NAMES_35 if n >= 35 else LINK_STATS_NAMES
+
+
 def parse_link_stats(payload: bytes) -> dict[str, int]:
-    """u16 n, u16 0, n x u32. Unknown extra counters are named ``c<index>``."""
+    """u16 n, u16 0, then n x u32 (counter i at byte 4 + 4i; word 0 is the count, not a counter). Names follow the
+    layout of the firmware that sent ``n`` counters; unknown extra counters are named ``c<index>``."""
     if len(payload) < 4:
         return {}
     (n,) = struct.unpack_from("<H", payload)
     n = min(n, (len(payload) - 4) // 4)
     vals = struct.unpack_from(f"<{n}I", payload, 4)
-    return {(LINK_STATS_NAMES[i] if i < len(LINK_STATS_NAMES) else f"c{i}"): v for i, v in enumerate(vals)}
+    names = link_stats_names(n)
+    return {(names[i] if i < len(names) else f"c{i}"): v for i, v in enumerate(vals)}
 
 
 #: Request sizes of v1.0 for fixed-size requests. Shorter requests get E_BAD_LEN, longer ones are accepted

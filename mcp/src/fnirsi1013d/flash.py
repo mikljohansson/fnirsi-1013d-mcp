@@ -125,7 +125,8 @@ class Flasher:
                  sunxi_fel: str = "sunxi-fel", windows: bool | None = None, runner: Runner = run_cmd,
                  out: Callable[[str], None] = print, transport_factory: Callable[[str], Transport] | None = None,
                  sleep: Callable[[float], None] = time.sleep, persist: bool = False, persist_only: bool = False,
-                 restore: Path | None = None, backup_dir: Path | None = None, force: bool = False):
+                 restore: Path | None = None, backup_dir: Path | None = None, force: bool = False,
+                 stage_delay_ms: float = 0.0, port_return_s: float = 15.0, piece_attempts: int = 4):
         self.port = port
         self.image = Path(image)
         self.sha256 = sha256.lower() if sha256 else None
@@ -144,6 +145,11 @@ class Flasher:
         self.restore_file = Path(restore) if restore else None
         self.backup_dir = Path(backup_dir) if backup_dir else REPO / "backups" / "sdcard"
         self.force = force
+        self.stage_delay_s = stage_delay_ms / 1000.0
+        #: how long to wait for the serial port to come back after a USB drop during a card write
+        self.port_return_s = port_return_s
+        #: tries per 64 KiB piece (first try + resends after drops or E_IO)
+        self.piece_attempts = piece_attempts
         self.running_fw: str | None = None
         self.t0 = time.monotonic()
 
@@ -349,7 +355,56 @@ class Flasher:
             raise FlashError(f"firmware {info.fw_version_str} has no SD sector commands (cap SD_SECTORS, fw >= 0.2.2); "
                              "load such an image first (without --persist) or write the card with make_sd_image.py", 7)
         self.step(f"SD access through fw {info.fw_version_str} on {port}")
-        return t, SdCard(t, self.say)
+        return t, SdCard(t, self.say, self.stage_delay_s)
+
+    def _reconnect_sd(self) -> tuple[Transport, SdCard]:
+        """After a USB drop: wait for the port to come back (it re-enumerates by itself), then a new session."""
+        deadline = time.monotonic() + self.port_return_s
+        last = ""
+        while True:
+            try:
+                return self._sd_session()
+            except FlashError as e:
+                last = str(e)
+                if "no SD sector commands" in last:
+                    raise
+            if time.monotonic() >= deadline:
+                raise FlashError(f"the serial port did not come back within {self.port_return_s:g} s ({last})", 7)
+            self.sleep(0.5)
+
+    def _write_resuming(self, t: Transport, sd: SdCard, sector: int, image: bytes, partial_msg: str
+                        ) -> tuple[Transport, SdCard, dict[int, int]]:
+        """Write ``image`` in 128-sector pieces. A piece that fails (USB drop, E_IO, a CRC refusal) is resent,
+        after reconnecting when the link dropped; pieces before it are verified by the card's read-back CRC.
+        Returns the (possibly new) session and {piece index: resends}."""
+        pieces = [(sector + off // 512, image[off: off + P.SD_STAGE_BYTES])
+                  for off in range(0, len(image), P.SD_STAGE_BYTES)]
+        resends: dict[int, int] = {}
+        i = 0
+        while i < len(pieces):
+            sec, piece = pieces[i]
+            try:
+                sd.write_piece(sec, piece)
+            except (TransportError, DeviceError, SdError) as e:
+                n = resends.get(i, 0) + 1
+                resends[i] = n
+                if n >= self.piece_attempts:
+                    raise FlashError(f"piece {i} (sectors {sec}..{sec + len(piece) // 512 - 1}) failed "
+                                     f"{n} times, last: {e}. {partial_msg}", 7) from e
+                self.step(f"piece {i} (sector {sec}) not confirmed ({e}); resend {n}")
+                if isinstance(e, TransportError):
+                    t.close()
+                    self.step(f"link lost: waiting up to {self.port_return_s:g} s for the port to come back")
+                    try:
+                        t, sd = self._reconnect_sd()
+                    except FlashError as e2:
+                        raise FlashError(f"{e2}. {partial_msg}", 7) from e
+                    self.step("reconnected; resuming from the first unconfirmed piece")
+                continue
+            done = sec - sector + len(piece) // 512
+            self.step(f"written {done * 512}/{len(image)} B")
+            i += 1
+        return t, sd, resends
 
     def persist_image(self) -> None:
         data = self.image.read_bytes()
@@ -392,23 +447,32 @@ class Flasher:
             bk = sd.backup(IMAGE_SECTOR, end - IMAGE_SECTOR, bpath)
             self.step(f"backup of sectors {IMAGE_SECTOR}..{end - 1} verified in {time.monotonic() - t1:.2f} s: "
                       f"{bk.path} sha256 {bk.sha256}")
+            partial = (f"THE CARD MAY HOLD A PARTIAL IMAGE at sector {IMAGE_SECTOR}: do not power-cycle the scope "
+                       f"before repairing it (rerun this command, or fnirsi1013d-flash --restore {bpath})")
             t1 = time.monotonic()
-            sd.write(IMAGE_SECTOR, image, progress=lambda done, total: self.step(f"written {done}/{total} B"))
+            t, sd, resends = self._write_resuming(t, sd, IMAGE_SECTOR, image, partial)
             t_write = time.monotonic() - t1
             t1 = time.monotonic()
-            sd.verify(IMAGE_SECTOR, image)
-            self.step(f"write {t_write:.2f} s ({length / max(t_write, 1e-6) / 1024:.0f} KiB/s), SD_READ compare "
-                      f"{time.monotonic() - t1:.2f} s: identical")
-            v = sd.info(verify=True).header(IMAGE_SECTOR)
+            try:
+                sd.verify(IMAGE_SECTOR, image)
+            except (SdError, TransportError, DeviceError) as e:
+                raise FlashError(f"SD_READ compare after the write failed: {e}. {partial}", 7) from e
+            rs = ", ".join(f"piece {k}: {v}" for k, v in sorted(resends.items())) or "none"
+            self.step(f"write {t_write:.2f} s ({length / max(t_write, 1e-6) / 1024:.0f} KiB/s), resends: {rs}; "
+                      f"SD_READ compare of all {n} sectors {time.monotonic() - t1:.2f} s: identical")
+            try:
+                v = sd.info(verify=True).header(IMAGE_SECTOR)
+            except (SdError, TransportError, DeviceError) as e:
+                raise FlashError(f"SD_INFO VERIFY after the write failed: {e}. The SD_READ compare was identical, "
+                                 "so the image is probably complete; rerun to confirm before a power cycle", 7) from e
             if v is None or v.magic != P.SD_EGON_EXE or v.check != P.SD_CHECK_OK or v.length != length:
-                raise FlashError(f"SD_INFO VERIFY of sector {IMAGE_SECTOR} failed ({v}); the card may not boot this "
-                                 f"image. Restore with: fnirsi1013d-flash --restore {bpath}", 7)
+                raise FlashError(f"SD_INFO VERIFY of sector {IMAGE_SECTOR} failed ({v}). {partial}", 7)
             self.step(f"sector {IMAGE_SECTOR} verified on the card: eGON.EXE, length {length}, checksum "
                       f"0x{checksum:08X}, total {time.monotonic() - t0:.2f} s. The next power cycle boots it "
                       "(boot-mode byte and sectors 16-79 untouched)")
         except (SdError, TransportError, DeviceError) as e:
-            raise FlashError(f"persisting to the SD card failed: {e}. The backup (if made) is in {self.backup_dir}", 7) \
-                from e
+            raise FlashError(f"persisting to the SD card failed before the write: {e}. Nothing was written; backups "
+                             f"(if made) are in {self.backup_dir}", 7) from e
         finally:
             t.close()
 
@@ -482,12 +546,16 @@ def main(argv: list[str] | None = None) -> None:
                     "firmware (no FEL)")
     ap.add_argument("--restore", type=Path, metavar="BACKUP", help="write a --persist backup file back to the card")
     ap.add_argument("--backup-dir", type=Path, help="where SD backups go (default: <repo>/backups/sdcard)")
+    ap.add_argument("--stage-delay-ms", type=float, default=0.0, help="pause between SD_STAGE pieces (bench throttle)")
+    ap.add_argument("--port-return", type=float, default=15.0, help="seconds to wait for the port after a USB drop "
+                    "during a card write before giving up")
     ap.add_argument("--force", action="store_true", help="persist even if the image's version differs from the "
                     "running firmware's #VER")
     a = ap.parse_args(argv)
     f = Flasher(port=a.port, image=a.image, no_fel=a.no_fel, sha256=a.sha256, distro=a.distro, sunxi_fel=a.sunxi_fel,
                 fel_timeout=a.fel_timeout, port_timeout=a.port_timeout, persist=a.persist,
-                persist_only=a.persist_only, restore=a.restore, backup_dir=a.backup_dir, force=a.force)
+                persist_only=a.persist_only, restore=a.restore, backup_dir=a.backup_dir, force=a.force,
+                stage_delay_ms=a.stage_delay_ms, port_return_s=a.port_return)
     sys.exit(f.run_all())
 
 
