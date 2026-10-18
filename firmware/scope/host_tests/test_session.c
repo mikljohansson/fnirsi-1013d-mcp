@@ -867,18 +867,26 @@ static void test_busy_context(void)
   pc_poll(&S, PC_CTX_MAIN);
   r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
   T_EQ(r.p[3], PC_UI_STARTING);
-  mock.now += 1200;                                              //a slow first pass: 0x05 wait ...
+  mock.now += 30;                                                //a slow first pass: battery ...
+  pc_ui_pass_mark(&S, 0);
+  mock.now += 1170;                                              //... 0x05 wait ...
   pc_ui_capture_start(&S);
   mock.now += 300;                                               //... capture ...
   pc_ui_capture_addr(&S, 1);
   pc_ui_capture_done(&S);
-  mock.now += 3300;                                              //... drawing
+  pc_ui_pass_mark(&S, 1);
+  mock.now += 3300;                                              //... touch
+  pc_ui_pass_mark(&S, 2);
+  pc_ui_pass_mark(&S, 3);
   pc_poll(&S, PC_CTX_MAIN);
+  pc_ui_pass_mark(&S, 3);                                        //second pass: not recorded
   r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
   T_EQ(r.p[3], PC_UI_IDLE);
   r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
-  T_EQ(pc_get_u16(r.p), 31); T_EQ(pc_get_u32(r.p + 4 + 4 * 28), 4800);       //duration of the first pass
-  T_EQ(pc_get_u32(r.p + 4 + 4 * 29), 1200 | 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 30), 1500 | 1);
+  T_EQ(pc_get_u16(r.p), 35); T_EQ(pc_get_u32(r.p + 4 + 4 * 28), 4800);       //duration of the first pass
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 29), 1200 + 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 30), 1500 + 1);
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 31), 30 + 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 32), 1500 + 1);
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 33), 4800 + 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 34), 4800 + 1);
 }
 
 static void test_isr_context(void)
@@ -1407,7 +1415,7 @@ static void test_fel_reset_stall(void)
   //GET_LINK_STATS: 11 transport + 8 parser + 8 session + 2 startup counters, answered from every context
   setup(0x1532);
   r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
-  T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 31); T_EQ(r.len, 4 + 31 * 4);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 35); T_EQ(r.len, 4 + 35 * 4);
   T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 4 + 4 * 10), 1010);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 11), S.parser.stats.frames);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 24), 0);                         //disp_isr counted after this response

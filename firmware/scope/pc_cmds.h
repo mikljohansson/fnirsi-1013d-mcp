@@ -16,9 +16,9 @@
 
 #ifndef PC_FW_VERSION
 #if PC_FIFO_MAP == 1
-#define PC_FW_VERSION     "0.2.3-m1"   //alternative USB FIFO layout (pc_transport.h)
+#define PC_FW_VERSION     "0.2.4-m1"   //alternative USB FIFO layout (pc_transport.h)
 #else
-#define PC_FW_VERSION     "0.2.3"
+#define PC_FW_VERSION     "0.2.4"
 #endif
 #endif
 
@@ -173,8 +173,9 @@ typedef struct
   uint32_t   first_poll_ms;     //boot -> first MAIN poll, first pass duration (GET_LINK_STATS)
   uint32_t   first_pass_ms;
   uint32_t   first_poll_at;     //pc_hal_ms of the first MAIN poll
-  uint32_t   first_arm_ms;      //first MAIN poll -> first UI conversion started (0x05 wait done), 0 = not yet
-  uint32_t   first_done_ms;     //first MAIN poll -> first UI capture read and processed, 0 = not yet
+  uint32_t   first_arm_ms;      //first MAIN poll -> first UI conversion started (0x05 wait done), ms + 1, 0 = not yet
+  uint32_t   first_done_ms;     //first MAIN poll -> first UI capture read and processed, ms + 1, 0 = not yet
+  uint32_t   first_mark[4];     //first MAIN poll -> first pass after battery, acquisition, touch, RTC; ms + 1
 
   //Shared settings tracking
   uint32_t   settings_fp;
@@ -285,6 +286,7 @@ int      pc_ui_arm_allowed(pc_session *s);                //0 while a READ_RAW w
 void     pc_ui_capture_start(pc_session *s);              //fpga_do_conversion started a conversion
 void     pc_ui_capture_addr(pc_session *s, uint16_t addr);//0x14 read of the finished UI capture
 void     pc_ui_capture_done(pc_session *s);               //the UI read and processed it
+void     pc_ui_pass_mark(pc_session *s, int n);            //main loop stage n (0..3) reached, kept for the first pass
 
 //Exposed for tests
 void     pc_variant_from_version(uint16_t version, pc_variant *v);

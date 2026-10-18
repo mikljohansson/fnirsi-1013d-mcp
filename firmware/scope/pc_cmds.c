@@ -292,6 +292,12 @@ static void pc_capture_finish(pc_session *s, pc_capture *c, uint16_t trigger_add
 }
 
 //UI hooks. They run in main-loop code outside pc_poll; in_poll keeps the timer-tick poll out meanwhile.
+void pc_ui_pass_mark(pc_session *s, int n)
+{
+  if((s->main_polls == 1) && (n >= 0) && (n < 4) && !s->first_mark[n])
+    s->first_mark[n] = (pc_hal_ms() - s->first_poll_at) + 1;
+}
+
 int pc_ui_arm_allowed(pc_session *s)
 {
   return !s->ui_hold;
@@ -310,7 +316,7 @@ void pc_ui_capture_start(pc_session *s)
   s->ui_started = 1;
 
   if(!s->first_arm_ms && s->main_polls)
-    s->first_arm_ms = (pc_hal_ms() - s->first_poll_at) | 1u;     //| 1: 0 means "not yet"
+    s->first_arm_ms = (pc_hal_ms() - s->first_poll_at) + 1;      //+ 1: 0 means "not yet"
 
   pc_hal_trigger_read(&t);
   pc_capture_latch(s, &s->cap_next, (t.ui_mode == 1) ? PC_ORIGIN_UI_SINGLE : PC_ORIGIN_UI_RUN, t.pretrigger, t.total);
@@ -341,7 +347,7 @@ void pc_ui_capture_done(pc_session *s)
   pc_capture_finish(s, &s->cap_next, s->ui_addr, s->ui_trig);
 
   if(!s->first_done_ms && s->main_polls)
-    s->first_done_ms = (pc_hal_ms() - s->first_poll_at) | 1u;
+    s->first_done_ms = (pc_hal_ms() - s->first_poll_at) + 1;
   s->in_poll    = ip;
 }
 
@@ -642,10 +648,11 @@ static int h_get_battery(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //transport PC_TS_* (11), parser stats (8: frames, hdr_crc_errors, payload_crc_errors, oversize, version_errors,
 //responses_dropped, timeouts, junk_bytes), session (8: responses, duplicates, tx_aborts, disp_main, disp_busy,
 //disp_isr, held, isr_skipped), startup (fw 0.2.0: ms from session init to the first MAIN poll, duration of the first
-//main-loop pass; fw 0.2.2: first MAIN poll -> first UI conversion started, -> first UI capture processed)
+//main-loop pass; fw 0.2.2: first MAIN poll -> first UI conversion started, -> first UI capture processed; fw 0.2.4:
+//-> first pass after battery check, acquisition, touch handler, RTC. The last six are ms + 1, 0 = not reached)
 static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
-  uint32_t v[PC_TSTAT_COUNT + 20];
+  uint32_t v[PC_TSTAT_COUNT + 24];
   const pc_parser_stats *ps = &s->parser.stats;
   uint32_t n = PC_TSTAT_COUNT, i;
 
@@ -657,6 +664,7 @@ static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uin
   v[n++] = s->responses;   v[n++] = s->duplicates;     v[n++] = s->tx_aborts;  v[n++] = s->disp_main;
   v[n++] = s->disp_busy;   v[n++] = s->disp_isr;       v[n++] = s->held;       v[n++] = s->isr_skipped;
   v[n++] = s->first_poll_ms; v[n++] = s->first_pass_ms; v[n++] = s->first_arm_ms; v[n++] = s->first_done_ms;
+  v[n++] = s->first_mark[0]; v[n++] = s->first_mark[1]; v[n++] = s->first_mark[2]; v[n++] = s->first_mark[3];
 
   pc_put_u16(resp, (uint16_t)n);
   pc_put_u16(resp + 2, 0);

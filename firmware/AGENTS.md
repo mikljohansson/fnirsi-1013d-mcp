@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.3 (protocol 1.3: shared control, SD sector commands; 0.2.3: chip above RUN/STOP and
+State on 2026-10-18, fw 0.2.4 (protocol 1.3: shared control, SD sector commands; 0.2.3: chip above RUN/STOP and
 steady, one-step SET_TIMEBASE). 0.2.1 passed the protocol-level
 shared-control acceptance on the bench (owner's visual checks pending); 0.2.2 adds SD_* and two startup counters,
 built and host-tested, not benched. Read `CLAUDE.md` (repo root) first, then
@@ -173,7 +173,11 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
   census 2000 PINGs 0 E_BAD_CRC 0 no response, 100 x 64 KiB 0 failed, hdr_crc 0, payload_crc 0. The 0.1.5 census had
   77 E_BAD_CRC + 9 no response, every diff starting exactly at a 2 KiB boundary of rx_bytes. 0.1.7 adds
   pc_rx_ring.h + the all-phase host test (no behaviour change). PC_FIFO_MAP=1 can go.
-- Startup: bench 0.2.1 counters 27/28 = 3 ms to the first MAIN poll, 1516 ms first UI pass (the earlier "5 s"
+- Startup, 0.2.2 bench: counters 27-30 reported as 2, 1515, 30, 1 (the first capture "processed" before the first
+  conversion started, which program order rules out: probably an index or decoding slip, raw list requested).
+  0.2.4 adds first-pass marks 31-34 (after battery, acquisition, touch, RTC; ms + 1). Suspects for the ~1.5 s: the
+  touch handler's first scan, the RTC block (only with the RTC enabled), the first full draw. Earlier:
+  bench 0.2.1 counters 27/28 = 3 ms to the first MAIN poll, 1516 ms first UI pass (the earlier "5 s"
   included the host's startup grace). Nothing slow runs between usb_device_init and the loop. 0.2.2 adds counters
   29/30: first MAIN poll -> first UI conversion started (after its 0x05 wait), -> first UI capture processed. Read
   them to split the pass into battery/0x05 wait, capture, and drawing/touch/RTC; then trim the slow part (or let the

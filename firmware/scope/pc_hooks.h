@@ -15,6 +15,7 @@ void pc_glue_poll_isr(void);          //1 ms timer interrupt: safe commands and 
 void pc_glue_ui_service(void);        //main loop, after the MAIN poll: MCP indicator
 int  pc_glue_ui_arm_allowed(void);    //0 while a host READ_RAW waits for the UI capture in flight
 int  pc_glue_rtc_allowed(void);       //0 while the MCP chip occupies the RTC clock slot
+void pc_glue_pass_mark(int n);        //main loop stage reached (first-pass timing, GET_LINK_STATS)
 void pc_glue_ui_capture_start(void);  //fpga_do_conversion started a conversion
 void pc_glue_ui_capture_addr(uint32 addr); //0x14 read of the finished UI capture
 void pc_glue_ui_capture(void);        //UI finished reading a capture
@@ -26,6 +27,7 @@ void pc_glue_ui_capture(void);        //UI finished reading a capture
 #define PC_UI_CAPTURE_ADDR(a)   pc_glue_ui_capture_addr(a)
 #define PC_UI_ARM_ALLOWED()     && pc_glue_ui_arm_allowed()
 #define PC_RTC_ALLOWED()        && pc_glue_rtc_allowed()
+#define PC_PASS_MARK(n)         pc_glue_pass_mark(n)
 
 #else
 
@@ -36,6 +38,7 @@ void pc_glue_ui_capture(void);        //UI finished reading a capture
 #define PC_UI_CAPTURE_ADDR(a)   do { } while(0)
 #define PC_UI_ARM_ALLOWED()
 #define PC_RTC_ALLOWED()
+#define PC_PASS_MARK(n)         do { } while(0)
 
 #endif
 

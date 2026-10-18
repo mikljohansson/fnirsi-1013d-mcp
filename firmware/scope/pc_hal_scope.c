@@ -786,6 +786,12 @@ void pc_glue_ui_service(void)
     pc_ui_service(&pc_sess);
 }
 
+void pc_glue_pass_mark(int n)
+{
+  if(pc_ready)
+    pc_ui_pass_mark(&pc_sess, n);
+}
+
 //The RTC clock shares the chip's slot: not drawn while the chip shows
 int pc_glue_rtc_allowed(void)
 {

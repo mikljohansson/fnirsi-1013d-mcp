@@ -268,6 +268,7 @@ int main(void)
     
     //Monitor the battery status
     battery_check_status();
+    PC_PASS_MARK(0);
     
     //Handle the touch panel input
     //touch_handler();
@@ -352,6 +353,8 @@ int main(void)
     
     //--------------------------------------------------------------------------
     
+    PC_PASS_MARK(1);
+
     //Check developer mode and show DEV_mode on the screen
     if (dev_mode)
     {
@@ -373,6 +376,7 @@ int main(void)
     
     //Handle the touch panel input
     touch_handler();
+    PC_PASS_MARK(2);
     
     //--------------------------------------------------------------------------    
     
@@ -392,6 +396,7 @@ int main(void)
       display_set_font(&font_2);
       display_text(TIME_TEXT_XPOS, TIME_TEXT_YPOS, buffertime);
     }
+    PC_PASS_MARK(3);
     
     //--------------------------------------------------------------------------
   }//end While(1);
