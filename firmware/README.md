@@ -320,7 +320,7 @@ notes" section of `docs/protocol.md`.
 | `PC_PROTOCOL` | 1 | 0 builds Atlan's v1.00o5 unchanged: every hook compiles to nothing |
 | `PC_DEBUG` | 0 | 1 adds DEBUG_FPGA and FORCE, sets caps DEBUG_RAW and FORCE_TRIGGER. Bench builds only |
 | `PC_FORCE_CDC` | 1 | CDC at boot even if the saved "USB CH340 mode" setting says MSC |
-| `PC_FIFO_MAP` | 0 | USB endpoint FIFO layout (`pc_transport.h`). 1 moves EP2 OUT to bytes 1536-2047, fw version gets `-m1` |
+| `PC_FIFO_MAP` | 0 | USB endpoint FIFO layout (`pc_transport.h`). 1 = the fw 0.1.3-0.1.5 layout, fw version gets `-m1` |
 
 ```
 make                          # GCC 13, protocol on: build/fnirsi_1013d.bin
@@ -458,7 +458,7 @@ sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
    ModemManager ignore rule from plan section 10. The device is high-speed only: use a USB 2.0 HS
    port or hub, not a full-speed VM pass-through.
 3. **Text probe.** In a terminal, `#VER` + Enter must answer
-   `#OK,FNIRSI-1013D-AI,fw=0.1.5,proto=1.2,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
+   `#OK,FNIRSI-1013D-AI,fw=0.1.6,proto=1.2,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
 4. **Identify, LOCAL.** PING with random 0..492 byte payloads, 10,000 times. GET_INFO must report
    variant 2, ring 8192, max total 16382, caps 0x1C03 (PROG_TRIGGER_POS, GENERATOR_DDS, ENTER_FEL and
    the two UNVERIFIED bits; `PC_DEBUG=1` adds 0x120). Run GET_STATUS, GET_BATTERY,

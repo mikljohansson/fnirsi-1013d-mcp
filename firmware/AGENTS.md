@@ -74,8 +74,12 @@ the screen during tests (menus are modal and defer commands). The power-off ISR 
   note). FIFOADD is in 8-byte units; FIFOSZ = 2^(n+3), DPB doubles it. 1.00o5's CDC map (OUT at 0 on EP0, EP1 at
   2048, IN at 4096 aliasing onto 0) produced: setup bytes inside IN data, IN data overwriting waiting requests,
   stalls. MSC's map (OUT 0, IN 1024) is unchanged upstream code.
-- Map 0 (default): EP0 0-63, EP2 OUT 64-575 single, EP2 IN 576-1599 DPB, EP1 1600-1663.
-  Map 1: EP0 0-63, EP1 64-127, EP2 IN 512-1535 DPB, EP2 OUT 1536-2047. Compile-time disjointness check.
+- Map 0 (default since 0.1.6, size-aligned): EP0 0-63, EP1 64-127, EP2 OUT 512-1023 single, EP2 IN 1024-2047 DPB.
+  Map 1: the 0.1.3-0.1.5 layout (OUT 64-575, IN 576-1599, EP1 1600-1663). Compile-time disjointness check. The
+  guide requires only 8-byte granularity for FIFO addresses.
+- One FIFO access width per packet ("all the transfers associated with one packet must be of the same width"):
+  OUT packets are read in one `usb_read_from_fifo` call into an aligned bounce buffer, then copied into the ring.
+  Splitting the read at the ring end corrupted one request per 2 KiB received (0.1.2-0.1.5).
 - Double-buffered IN: every TxPktRdy clear raises the TX interrupt, including the immediate clear after the first
   load. The pump loads at most 2 packets per call; it runs from the EP2 TX ISR and from every poll (missed-IRQ
   fallback, counter tx_kicked). ZLP after frames that are an exact multiple of 512.
@@ -133,7 +137,8 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
 
 ## 8. Known issues (numbers from the bench, 2026-10-18)
 
-- Request corruption (open, top priority): fw 0.1.3, Windows, no retries, idle scope: PING x1000 LOCAL 42
+- Request corruption: root cause found in 0.1.6 (RX ring-wrap split FIFO read, see section 4); acceptance census
+  still to be run on 0.1.6. History: fw 0.1.3, Windows, no retries, idle scope: PING x1000 LOCAL 42
   E_BAD_CRC + 4 no response, REMOTE 40 + 5; 64 KiB x100: 1 (LOCAL) / 8 (REMOTE) no response. 0.1.2 (OUT FIFO at
   0) had 0 E_BAD_CRC but ~2% no response. Responses are always clean. 0.1.5 adds GET_BAD_FRAME, the RX sweep,
   GET_LINK_STATS and PC_FIFO_MAP=1. Next step: `bench_link.py COM10 --census 2000` on map 0 and map 1, read the
@@ -161,8 +166,8 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
 
 ## 10. TODO, in priority order
 
-1. Close the request-corruption issue (section 8) with the 0.1.5 census on both FIFO maps; then make the winner
-   the default and drop the other map.
+1. Run the acceptance census on 0.1.6 (`bench_link.py COM10 --census 2000`: 0 E_BAD_CRC, 0 no response in
+   2000 PINGs + 100 x 64 KiB, GET_BAD_FRAME count 0). If it passes, drop PC_FIFO_MAP=1.
 2. SD_INFO / SD_READ_SECTORS / SD_WRITE_SECTORS (owner's ask: persist a FEL-loaded image to sector 750 without
    removing the card). Design agreed with the lead, not started:
    - REMOTE only, hardware-changing tier; MAIN context (SD access is not reentrant; the power-off ISR also writes

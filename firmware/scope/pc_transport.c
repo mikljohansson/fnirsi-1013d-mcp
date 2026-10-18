@@ -11,6 +11,7 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "types.h"
+#include <string.h>
 #include "usb_interface.h"
 #include "pc_transport.h"
 #include "pc_protocol.h"
@@ -21,6 +22,7 @@
 #define PC_TX_STAGE_SIZE  ((PC_MAX_RESPONSE_FRAME + 3) & ~3u)
 
 static uint8  pc_rx_ring[PC_RX_RING_SIZE] __attribute__((aligned(4)));
+static uint8  pc_rx_bounce[PC_USB_PACKET] __attribute__((aligned(4)));   //one OUT packet, read in one go
 static volatile uint32 pc_rx_in;            //free running, written by the ISR
 static volatile uint32 pc_rx_out;           //free running, written by the main loop
 static volatile uint8  pc_rx_stalled;       //a packet is waiting in the FIFO, EP2 RX interrupt masked
@@ -78,16 +80,25 @@ static uint32 pc_rx_drain_fifo(void)
       return packets;
     }
 
+    //The whole packet in ONE FIFO read into an aligned buffer, then into the ring. MUSBMHDRC guide: "all the transfers
+    //associated with one packet must be of the same width". The old split read at the ring end (32-bit reads
+    //restarted after 8/16-bit ones) corrupted the packet straddling the wrap: one bad request per 2 KiB received
+    //(fw 0.1.2-0.1.5 bench census).
+    if(count > sizeof(pc_rx_bounce))
+      count = sizeof(pc_rx_bounce);
+
+    usb_read_from_fifo((void *)USBC_REG_EPFIFO2, pc_rx_bounce, count);
+
     pos   = pc_rx_in & (PC_RX_RING_SIZE - 1);
     first = PC_RX_RING_SIZE - pos;
 
     if(first > count)
       first = count;
 
-    usb_read_from_fifo((void *)USBC_REG_EPFIFO2, &pc_rx_ring[pos], first);
+    memcpy(&pc_rx_ring[pos], pc_rx_bounce, first);
 
     if(count > first)
-      usb_read_from_fifo((void *)USBC_REG_EPFIFO2, &pc_rx_ring[0], count - first);
+      memcpy(&pc_rx_ring[0], pc_rx_bounce + first, count - first);
 
     pc_rx_in += count;
     pc_ts[PC_TS_RX_PACKETS]++;

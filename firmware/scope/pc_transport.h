@@ -17,26 +17,25 @@
 //(MUSBMHDRC programmer's guide, dynamic FIFO note). FIFOADD is in 8-byte units, FIFOSZ = 2^(n+3) bytes, DPB doubles
 //it. 1.00o5's CDC layout put EP2 OUT on top of EP0 at 0, EP1 at byte 2048 and the EP2 TX FIFO at byte 4096, both
 //outside the RAM (aliasing onto 0): control requests overwrote bulk data and IN packets overwrote waiting requests.
-//  EP0      bytes    0 ..   63  fixed
-//  EP2 OUT  bytes   64 ..  575  512 B, single buffered (requests are <= 512 B; the ISR empties it at once)
-//  EP2 IN   bytes  576 .. 1599  2 x 512 B, double buffered (bulk IN throughput)
-//  EP1 IN   bytes 1600 .. 1663  64 B single (8-byte notification endpoint, never loaded)
-//PC_FIFO_MAP selects the layout (make PC_FIFO_MAP=n) so the bench can check whether request corruption follows the
-//OUT FIFO's position (fw 0.1.3 census: ~4% E_BAD_CRC with map 0, none with OUT at 0 in 0.1.2).
+//  map 0 (default):  EP0 0-63 fixed | EP1 IN 64-127 | EP2 OUT 512-1023 single | EP2 IN 1024-2047 2 x 512 DPB
+//  map 1:            EP2 OUT 64-575 | EP2 IN 576-1599 DPB | EP1 1600-1663 (fw 0.1.3-0.1.5 default)
+//PC_FIFO_MAP selects the layout (make PC_FIFO_MAP=n). The 0.1.3-0.1.5 request corruption was the RX ring-wrap FIFO
+//read in pc_transport.c, not the layout.
 #ifndef PC_FIFO_MAP
 #define PC_FIFO_MAP 0
 #endif
 
 #if PC_FIFO_MAP == 1
-//  EP0 0-63 | EP1 IN 64-127 | EP2 IN 512-1535 (DPB) | EP2 OUT 1536-2047: OUT as far from EP0 as possible
-#define PC_EP2_RXFIFOAD   192
-#define PC_EP2_TXFIFOAD   64
-#define PC_EP1_TXFIFOAD   8
-#else
-//  map 0: the table above
+//  map 1 = the fw 0.1.3-0.1.5 default, kept for comparison: EP2 OUT 64-575, EP2 IN 576-1599 (DPB), EP1 1600-1663
 #define PC_EP2_RXFIFOAD   8
 #define PC_EP2_TXFIFOAD   72
 #define PC_EP1_TXFIFOAD   200
+#else
+//  map 0 (fw 0.1.6): size-aligned like 1.00o5 MSC and pcprogrammer's ch340 code. EP0 0-63 | EP1 IN 64-127 |
+//  EP2 OUT 512-1023 single | EP2 IN 1024-2047 (2 x 512, DPB). The guide only requires 8-byte granularity.
+#define PC_EP2_RXFIFOAD   64
+#define PC_EP2_TXFIFOAD   128
+#define PC_EP1_TXFIFOAD   8
 #endif
 #define PC_EP2_RXFIFOSZ   6
 #define PC_EP2_TXFIFOSZ   (USBC_BP_TXFIFOSZ_DPB | 6)

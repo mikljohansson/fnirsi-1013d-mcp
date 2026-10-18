@@ -935,7 +935,12 @@ differs from or fills a gap in sections 1-13. Hosts written against this documen
   the RAM, aliasing onto 0): control requests landed in bulk IN data (seen: GET_LINE_CODING setup bytes inside a
   TEST_PATTERN response) and IN packets overwrote waiting requests (seen: E_BAD_CRC on correct requests). Now: EP0
   0-63, EP2 OUT 64-575 (single buffered), EP2 IN 576-1599 (2 x 512, double buffered), EP1 IN 1600-1663, checked at
-  compile time. v0.1.1-0.1.2 still had EP2 OUT at 0. The MSC layout (OUT at 0, IN at 1024) is unchanged 1.00o5 code.
+  compile time. v0.1.1-0.1.2 still had EP2 OUT at 0. v0.1.6 default (size-aligned like the MSC layout): EP0 0-63,
+  EP1 64-127, EP2 OUT 512-1023, EP2 IN 1024-2047 (`PC_FIFO_MAP=1` keeps the 0.1.3 map).
+- RX packet read (v0.1.6): each OUT packet is read from the FIFO in one call into an aligned 512-byte buffer and
+  then copied into the ring. Up to 0.1.5 a packet straddling the ring end was read in two parts, restarting 32-bit
+  FIFO reads after 8/16-bit ones, which the MUSBMHDRC guide forbids ("all the transfers associated with one packet
+  must be of the same width"): one corrupted or lost request per 2 KiB received (~4% in the bench census). The MSC layout (OUT at 0, IN at 1024) is unchanged 1.00o5 code.
 - The TX pump is driven by the EP2 TX interrupt and, as a fallback, from every poll (main loop, BUSY polls and the 1 ms
   timer poll), so a missed interrupt costs at most 1 ms.
 - RX sweep (v0.1.4): every poll checks the EP2 OUT FIFO; a packet still waiting 2 ms after it was first seen (its
