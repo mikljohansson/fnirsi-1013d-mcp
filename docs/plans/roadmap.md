@@ -59,7 +59,7 @@ purpose-written Q15 FFT is proposed instead.
   up to 4096 points, a spectrum view in the UI and READ_FFT over the protocol.
 - Bench: compare against the host FFT; CPU time per frame (pass_ms).
 
-## 5. Calibration in firmware
+## 5. Calibration in firmware (in work: fw-cal, worktree branch fw-cal, started 2026-10-18 evening)
 
 Visible symptom (2026-10-18, spectrum view): a spur at the Nyquist bin (fs/2), ~18 dB above the noise floor on CH1, because the two
 interleaved ADC cores differ in zero (A 130.9 vs B 125.6 codes on the owner's unit) and the sample-skipping decimation alternates cores.
