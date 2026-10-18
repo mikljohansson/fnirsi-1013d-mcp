@@ -1,6 +1,8 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.1 (protocol 1.3, shared control; 0.2.1 clips a READ_TRACE count past the end), built and host-tested, not yet benched. Read `CLAUDE.md` (repo root) first, then
+State on 2026-10-18, fw 0.2.2 (protocol 1.3: shared control, SD sector commands). 0.2.1 passed the protocol-level
+shared-control acceptance on the bench (owner's visual checks pending); 0.2.2 adds SD_* and two startup counters,
+built and host-tested, not benched. Read `CLAUDE.md` (repo root) first, then
 this file. For details, this file links to `firmware/README.md` (build, SD layout, FEL, memory budget, bring-up
 checklist), `docs/protocol.md` (the spec; section 14 lists every deviation from it) and
 `docs/plans/firmware-usb-protocol.md` (the original plan). It does not repeat them.
@@ -165,11 +167,11 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
   census 2000 PINGs 0 E_BAD_CRC 0 no response, 100 x 64 KiB 0 failed, hdr_crc 0, payload_crc 0. The 0.1.5 census had
   77 E_BAD_CRC + 9 no response, every diff starting exactly at a 2 KiB boundary of rx_bytes. 0.1.7 adds
   pc_rx_ring.h + the all-phase host test (no behaviour change). PC_FIFO_MAP=1 can go.
-- Startup: after a FEL load GET_STATUS showed no completed main-loop pass ~1 s after enumeration and the first MAIN
-  command waited ~5 s (lead, 0.1.6). Cause not found: nothing slow runs between usb_device_init and the loop, so the
-  first UI pass is slow (first conversion's 0x05 wait or the touch scan suspected). 0.2.0 reports `ui_busy` = 2
-  STARTING until the second MAIN poll and GET_LINK_STATS counters 27/28 (init -> first poll, first pass ms): read them
-  on the bench to locate it. History: fw 0.1.3, Windows, no retries, idle scope: PING x1000 LOCAL 42
+- Startup: bench 0.2.1 counters 27/28 = 3 ms to the first MAIN poll, 1516 ms first UI pass (the earlier "5 s"
+  included the host's startup grace). Nothing slow runs between usb_device_init and the loop. 0.2.2 adds counters
+  29/30: first MAIN poll -> first UI conversion started (after its 0x05 wait), -> first UI capture processed. Read
+  them to split the pass into battery/0x05 wait, capture, and drawing/touch/RTC; then trim the slow part (or let the
+  first pass skip it). Until then hosts see `ui_busy` = 2 STARTING. History: fw 0.1.3, Windows, no retries, idle scope: PING x1000 LOCAL 42
   E_BAD_CRC + 4 no response, REMOTE 40 + 5; 64 KiB x100: 1 (LOCAL) / 8 (REMOTE) no response. 0.1.2 (OUT FIFO at
   0) had 0 E_BAD_CRC but ~2% no response. Responses are always clean. 0.1.5 adds GET_BAD_FRAME, the RX sweep,
   GET_LINK_STATS and PC_FIFO_MAP=1. Next step: `bench_link.py COM10 --census 2000` on map 0 and map 1, read the
@@ -198,8 +200,15 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
 ## 10. TODO, in priority order
 
 1. Bench the shared-control acceptance on 0.2.0 (README section 5 step 6) and read the startup counters.
-2. SD_INFO / SD_READ_SECTORS / SD_WRITE_SECTORS (owner's ask: persist a FEL-loaded image to sector 750 without
-   removing the card). Design agreed with the lead, not started:
+2. Bench the SD commands (0.2.2, protocol section 14 row 40): SD_INFO VERIFY on the owner's card (sector 750 must
+   show eGON.EXE, check 1), SD_READ_SECTORS of 16 / 80 / 750 against backups/, then persist an image with
+   SD_STAGE + SD_WRITE_SECTORS from 750 (back up 750..2047 first), SD_INFO VERIFY, power-cycle boot. Host tool:
+   mcp/ (not this agent's). Design as built (the original notes below are kept for reference):
+   - SD_STAGE fills a 64 KiB staging buffer (484 B per request); SD_WRITE_SECTORS commits up to 128 sectors with
+     magic 'SDWR' and the stage CRC-32, reads back, compares, answers the CRC on the card. Window [16, min(first
+     partition, 2048)); no valid MBR = writes off; 16-79 need flag BOOT, 708-710 flag CONFIG. Power-key EINT held off
+     during writes (IRQs stay on: the SD driver times out on timer0 ticks). New error E_IO 13.
+   Original design notes:
    - hardware-changing tier (1.3: no REMOTE; refuse while a capture runs or require STOP); MAIN context (SD access is not reentrant; the power-off ISR also writes
      SD, so mask the power interrupt or check `viewactive` around the write).
    - Allowed range: sectors 16..2047 and below the first partition start read from the MBR at runtime; refuse

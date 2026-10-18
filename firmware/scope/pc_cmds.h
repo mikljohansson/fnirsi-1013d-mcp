@@ -16,9 +16,9 @@
 
 #ifndef PC_FW_VERSION
 #if PC_FIFO_MAP == 1
-#define PC_FW_VERSION     "0.2.1-m1"   //alternative USB FIFO layout (pc_transport.h)
+#define PC_FW_VERSION     "0.2.2-m1"   //alternative USB FIFO layout (pc_transport.h)
 #else
-#define PC_FW_VERSION     "0.2.1"
+#define PC_FW_VERSION     "0.2.2"
 #endif
 #endif
 
@@ -91,6 +91,18 @@
 //ENTER_FEL magic, 'FEL_' little-endian (P-8.8)
 #define PC_FEL_MAGIC      0x4C45465Fu
 
+//SD sector commands (protocol 1.3, section 14 row 40)
+#define PC_SD_WRITE_MAGIC 0x52574453u   //'SDWR' little-endian, required by SD_WRITE_SECTORS
+#define PC_SD_MAX_COUNT   128           //sectors per SD_READ_SECTORS / SD_WRITE_SECTORS (64 KiB)
+#define PC_SD_FIRST       16            //writes never below the boot area (MBR at 0)
+#define PC_SD_BOOT_END    80            //16..79 bootloader: needs SD_WF_BOOT
+#define PC_SD_CFG_FIRST   708           //708 calibration, 709 settings, 710 display/boot byte: need SD_WF_CONFIG
+#define PC_SD_CFG_LAST    710
+#define PC_SD_LIMIT       2048          //never at or above, whatever the partition table says
+#define PC_SD_VERIFY_MAX  2048          //eGON images longer than this many sectors are not checksummed
+#define PC_SD_WF_CONFIG   0x01
+#define PC_SD_WF_BOOT     0x02
+
 //Relay settling time after a range or coupling change (P-8.3)
 #define PC_SETTLE_MS      50
 
@@ -161,6 +173,9 @@ typedef struct
   uint32_t   init_ms;
   uint32_t   first_poll_ms;     //boot -> first MAIN poll, first pass duration (GET_LINK_STATS)
   uint32_t   first_pass_ms;
+  uint32_t   first_poll_at;     //pc_hal_ms of the first MAIN poll
+  uint32_t   first_arm_ms;      //first MAIN poll -> first UI conversion started (0x05 wait done), 0 = not yet
+  uint32_t   first_done_ms;     //first MAIN poll -> first UI capture read and processed, 0 = not yet
 
   //Shared settings tracking
   uint32_t   settings_fp;
@@ -239,6 +254,10 @@ typedef struct
   uint16_t   pass_max_ms;       //maximum since the previous GET_STATUS
 
   uint8_t    fel_pending;       //ENTER_FEL answered: jump once the response has left
+
+  //SD write staging buffer (HAL owned)
+  uint8_t   *sd_stage;
+  uint32_t   sd_stage_cap;
 
   //Dispatch counters (GET_LINK_STATS)
   uint32_t   main_polls;

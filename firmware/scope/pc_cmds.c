@@ -156,8 +156,8 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
   //Reboot into the boot ROM's FEL mode: touches no FPGA, works on every known bitstream          BENCH: plan 11.3 step 1
   v->caps |= PC_CAP_ENTER_FEL;
 
-  //Protocol 1.3: shared control with the UI, no LOCAL/REMOTE
-  v->caps |= PC_CAP_SHARED_MODE;
+  //Protocol 1.3: shared control with the UI, no LOCAL/REMOTE; SD sector access (no FPGA involved)
+  v->caps |= PC_CAP_SHARED_MODE | PC_CAP_SD_SECTORS;
 
 #if PC_DEBUG
   v->caps |= PC_CAP_DEBUG_RAW;
@@ -309,6 +309,9 @@ void pc_ui_capture_start(pc_session *s)
   s->ring_valid = 0;
   s->ui_started = 1;
 
+  if(!s->first_arm_ms && s->main_polls)
+    s->first_arm_ms = (pc_hal_ms() - s->first_poll_at) | 1u;     //| 1: 0 means "not yet"
+
   pc_hal_trigger_read(&t);
   pc_capture_latch(s, &s->cap_next, (t.ui_mode == 1) ? PC_ORIGIN_UI_SINGLE : PC_ORIGIN_UI_RUN, t.pretrigger, t.total);
   s->in_poll = ip;
@@ -336,6 +339,9 @@ void pc_ui_capture_done(pc_session *s)
   s->in_poll    = 1;
   s->ui_started = 0;
   pc_capture_finish(s, &s->cap_next, s->ui_addr, s->ui_trig);
+
+  if(!s->first_done_ms && s->main_polls)
+    s->first_done_ms = (pc_hal_ms() - s->first_poll_at) | 1u;
   s->in_poll    = ip;
 }
 
@@ -635,11 +641,11 @@ static int h_get_battery(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //GET_LINK_STATS (protocol 1.2): u16 count, u16 reserved, then count u32 counters since boot:
 //transport PC_TS_* (11), parser stats (8: frames, hdr_crc_errors, payload_crc_errors, oversize, version_errors,
 //responses_dropped, timeouts, junk_bytes), session (8: responses, duplicates, tx_aborts, disp_main, disp_busy,
-//disp_isr, held, isr_skipped), startup (2, fw 0.2.0: ms from session init to the first MAIN poll, duration of the first
-//main-loop pass)
+//disp_isr, held, isr_skipped), startup (fw 0.2.0: ms from session init to the first MAIN poll, duration of the first
+//main-loop pass; fw 0.2.2: first MAIN poll -> first UI conversion started, -> first UI capture processed)
 static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
-  uint32_t v[PC_TSTAT_COUNT + 18];
+  uint32_t v[PC_TSTAT_COUNT + 20];
   const pc_parser_stats *ps = &s->parser.stats;
   uint32_t n = PC_TSTAT_COUNT, i;
 
@@ -650,7 +656,7 @@ static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uin
   v[n++] = ps->version_errors; v[n++] = ps->responses_dropped; v[n++] = ps->timeouts; v[n++] = ps->junk_bytes;
   v[n++] = s->responses;   v[n++] = s->duplicates;     v[n++] = s->tx_aborts;  v[n++] = s->disp_main;
   v[n++] = s->disp_busy;   v[n++] = s->disp_isr;       v[n++] = s->held;       v[n++] = s->isr_skipped;
-  v[n++] = s->first_poll_ms; v[n++] = s->first_pass_ms;
+  v[n++] = s->first_poll_ms; v[n++] = s->first_pass_ms; v[n++] = s->first_arm_ms; v[n++] = s->first_done_ms;
 
   pc_put_u16(resp, (uint16_t)n);
   pc_put_u16(resp + 2, 0);
@@ -1483,6 +1489,226 @@ static int h_enter_fel(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
   return PC_OK;
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// SD card sectors (protocol 1.3, section 14 row 40): persist a FEL-loaded image to sector 750 without removing the card
+
+//First partition start from the MBR (entry 0 at 0x1BE, LBA at +8), 0 when there is no valid table
+static uint32_t pc_sd_part_start(uint8_t *scratch)
+{
+  uint32_t lba;
+
+  if(pc_hal_sd_read(0, 1, scratch) != 0)
+    return 0;
+
+  if((scratch[510] != 0x55) || (scratch[511] != 0xAA) || (scratch[0x1BE + 4] == 0))
+    return 0;
+
+  lba = pc_get_u32(scratch + 0x1BE + 8);
+  return lba;
+}
+
+//Writes go to [PC_SD_FIRST, end): below the first partition and below PC_SD_LIMIT. 0 = no writes (no valid MBR).
+static uint32_t pc_sd_write_end(uint32_t part_start)
+{
+  if(part_start == 0)
+    return 0;
+
+  return (part_start < PC_SD_LIMIT) ? part_start : PC_SD_LIMIT;
+}
+
+//eGON header at a sector: magic, stored length and checksum; with check, the checksum of `length` bytes on the card
+static void pc_sd_egon(uint32_t sector, int check, uint32_t card, uint8_t *scratch, uint8_t *out)
+{
+  uint32_t length, stored, sum = 0, done = 0, n, i;
+  uint8_t  status = 0, result = 0;
+
+  memset(out, 0, 16);
+  pc_put_u32(out, sector);
+
+  if(pc_hal_sd_read(sector, 1, scratch) != 0)
+    return;
+
+  if(!memcmp(scratch + 4, "eGON.BT0", 8))
+    status = 1;
+  else if(!memcmp(scratch + 4, "eGON.EXE", 8))
+    status = 2;
+
+  stored = pc_get_u32(scratch + 12);
+  length = pc_get_u32(scratch + 16);
+
+  if(status && check)
+  {
+    //Sum of u32 words over length bytes with the checksum field read as the stamp (firmware/tools/mksunxi.py)
+    if((length < 512) || (length % 512) || ((length / 512) > PC_SD_VERIFY_MAX) || (sector + length / 512 > card))
+      result = 3;
+    else
+    {
+      while(done < length / 512)
+      {
+        n = length / 512 - done;
+
+        if(n > PC_SD_MAX_COUNT)
+          n = PC_SD_MAX_COUNT;
+
+        if(pc_hal_sd_read(sector + done, n, scratch) != 0)
+        {
+          result = 3;
+          break;
+        }
+
+        if(done == 0)
+          pc_put_u32(scratch + 12, 0x5F0A6C39u);
+
+        for(i=0;i<n * 512;i+=4)
+          sum += pc_get_u32(scratch + i);
+
+        done += n;
+      }
+
+      if(result == 0)
+        result = (sum == stored) ? 1 : 2;
+    }
+  }
+
+  out[4] = status;
+  out[5] = result;
+  pc_put_u32(out + 8,  length);
+  pc_put_u32(out + 12, stored);
+}
+
+//SD_INFO: u8 flags (bit 0 VERIFY: recompute the eGON checksums), 3 reserved
+static int h_sd_info(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  static const uint32_t images[3] = { 16, 80, 750 };
+  uint8_t *scratch = resp + 64;                        //64 KiB inside the TX staging buffer, after the answer
+  uint32_t card = pc_hal_sd_sectors(), part, i;
+
+  (void)len;
+
+  if(req[0] & ~0x01)
+    return pc_error(s, PC_E_BAD_ARG, 0, "flags");
+
+  if(card == 0)
+    return pc_error(s, PC_E_IO, 0, "no card");
+
+  part = pc_sd_part_start(scratch);
+
+  memset(resp, 0, 64);
+  pc_put_u32(resp,      card);
+  pc_put_u32(resp + 4,  part);
+  pc_put_u32(resp + 8,  pc_sd_write_end(part));
+  pc_put_u32(resp + 12, s->sd_stage_cap);
+
+  for(i=0;i<3;i++)
+    pc_sd_egon(images[i], req[0] & 0x01, card, scratch, resp + 16 + 16 * i);
+
+  *rl = 64;
+  return PC_OK;
+}
+
+//SD_READ_SECTORS: u32 sector, u16 count (1..128), u16 reserved
+static int h_sd_read(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint32_t sector = pc_get_u32(req);
+  uint32_t count  = pc_get_u16(req + 4);
+  uint32_t card   = pc_hal_sd_sectors();
+  int      r;
+
+  (void)len;
+
+  if(card == 0)                                        return pc_error(s, PC_E_IO, 0, "no card");
+  if((count == 0) || (count > PC_SD_MAX_COUNT))        return pc_error(s, PC_E_BAD_ARG, 4, "count 1..128");
+  if((sector >= card) || (count > card - sector))      return pc_error(s, PC_E_BAD_ARG, 0, "beyond the card");
+  if(16 + count * 512 > s->tx_cap - PC_HDR_SIZE - PC_CRC_SIZE) return pc_error(s, PC_E_OVERFLOW, 0, "response too large");
+
+  r = pc_hal_sd_read(sector, count, resp + 16);
+
+  if(r != 0)
+    return pc_error(s, PC_E_IO, (uint16_t)(-r), "read");
+
+  pc_put_u32(resp,      sector);
+  pc_put_u16(resp + 4,  (uint16_t)count);
+  pc_put_u16(resp + 6,  0);
+  pc_put_u32(resp + 8,  pc_crc32(resp + 16, count * 512));
+  pc_put_u32(resp + 12, 0);
+  *rl = 16 + count * 512;
+  return PC_OK;
+}
+
+//SD_STAGE: u32 offset, u16 length, u16 reserved, then length bytes (length = payload - 8). Answers the CRC-32 of them.
+static int h_sd_stage(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint32_t off = pc_get_u32(req);
+  uint32_t n   = pc_get_u16(req + 4);
+
+  if((len < 8) || (n != len - 8))                       return pc_error(s, PC_E_BAD_LEN, 4, "length != payload - 8");
+  if((off > s->sd_stage_cap) || (n > s->sd_stage_cap - off)) return pc_error(s, PC_E_BAD_ARG, 0, "beyond the stage");
+
+  memcpy(s->sd_stage + off, req + 8, n);
+
+  pc_put_u32(resp,     off);
+  pc_put_u16(resp + 4, (uint16_t)n);
+  pc_put_u16(resp + 6, 0);
+  pc_put_u32(resp + 8, pc_crc32(req + 8, n));
+  *rl = 12;
+  return PC_OK;
+}
+
+//SD_WRITE_SECTORS: u32 sector, u16 count (1..128), u8 flags (bit0 CONFIG 708-710, bit1 BOOT 16-79), u8 reserved,
+//u32 crc32 of stage[0, count x 512), u32 magic 'SDWR'. Writes, reads back, compares; answers the CRC-32 on the card.
+static int h_sd_write(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint32_t sector = pc_get_u32(req);
+  uint32_t count  = pc_get_u16(req + 4);
+  uint8_t  flags  = req[6];
+  uint32_t crc    = pc_get_u32(req + 8);
+  uint32_t card   = pc_hal_sd_sectors();
+  uint8_t *back   = resp + 16;                         //read-back lands in the TX staging buffer
+  uint32_t end, last;
+  int      r;
+
+  (void)len;
+
+  if(pc_get_u32(req + 12) != PC_SD_WRITE_MAGIC)        return pc_error(s, PC_E_BAD_ARG, 12, "magic");
+  if(flags & ~(PC_SD_WF_CONFIG | PC_SD_WF_BOOT))       return pc_error(s, PC_E_BAD_ARG, 6, "flags");
+  if((count == 0) || (count > PC_SD_MAX_COUNT) || (count * 512 > s->sd_stage_cap))
+                                                       return pc_error(s, PC_E_BAD_ARG, 4, "count 1..128");
+  if(card == 0)                                        return pc_error(s, PC_E_IO, 0, "no card");
+
+  end  = pc_sd_write_end(pc_sd_part_start(back));
+  last = sector + count - 1;
+
+  if(end == 0)                                         return pc_error(s, PC_E_STATE, 0, "no partition table: writes off");
+  if((sector < PC_SD_FIRST) || (last >= end) || (last >= card) || (last < sector))
+                                                       return pc_error(s, PC_E_BAD_ARG, 0, "outside the write window");
+  if((sector < PC_SD_BOOT_END) && !(flags & PC_SD_WF_BOOT))
+                                                       return pc_error(s, PC_E_BAD_ARG, 0, "16..79 bootloader: flag BOOT");
+  if((sector <= PC_SD_CFG_LAST) && (last >= PC_SD_CFG_FIRST) && !(flags & PC_SD_WF_CONFIG))
+                                                       return pc_error(s, PC_E_BAD_ARG, 0, "708..710 config: flag CONFIG");
+  if(pc_crc32(s->sd_stage, count * 512) != crc)        return pc_error(s, PC_E_BAD_ARG, 8, "stage crc");
+
+  r = pc_hal_sd_write(sector, count, s->sd_stage);
+
+  if(r != 0)
+    return pc_error(s, PC_E_IO, (uint16_t)(-r), "write");
+
+  r = pc_hal_sd_read(sector, count, back);
+
+  if(r != 0)
+    return pc_error(s, PC_E_IO, (uint16_t)(-r), "read back");
+
+  if(memcmp(back, s->sd_stage, count * 512))
+    return pc_error(s, PC_E_IO, 0xFFFF, "verify");
+
+  pc_put_u32(resp,     sector);
+  pc_put_u16(resp + 4, (uint16_t)count);
+  pc_put_u16(resp + 6, 0);
+  pc_put_u32(resp + 8, pc_crc32(back, count * 512));
+  pc_put_u32(resp + 12, 0);
+  *rl = 16;
+  return PC_OK;
+}
+
 #if PC_DEBUG
 static int h_debug_fpga(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
@@ -1568,6 +1794,10 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_ACQUIRE_AVG,  0,                            PC_CAP_DEVICE_AVERAGE, NULL },
   { PC_CMD_SET_ACQ_STATE, F_CONTROL,                   0, h_set_acq_state },
   { PC_CMD_GET_CAPTURE_INFO, F_BUSY | F_CONTROL,       0, h_get_capture_info },
+  { PC_CMD_SD_INFO,      F_BASIC,                      PC_CAP_SD_SECTORS, h_sd_info },
+  { PC_CMD_SD_READ_SECTORS, F_BASIC,                   PC_CAP_SD_SECTORS, h_sd_read },
+  { PC_CMD_SD_STAGE,     F_BASIC,                      PC_CAP_SD_SECTORS, h_sd_stage },
+  { PC_CMD_SD_WRITE_SECTORS, F_BASIC,                  PC_CAP_SD_SECTORS, h_sd_write },
   { PC_CMD_GET_GEN,      0,                            0, h_get_gen },
   { PC_CMD_SET_GEN,      0,                            PC_CAP_GENERATOR_DDS, h_set_gen },
   { PC_CMD_GET_CAL,      0,                            0, h_get_cal },
@@ -1952,6 +2182,7 @@ void pc_session_init(pc_session *s)
   memset(s, 0, sizeof(*s));
   pc_parser_init(&s->parser);
   s->tx = pc_hal_tx_buffer(&s->tx_cap);
+  s->sd_stage = pc_hal_sd_stage(&s->sd_stage_cap);
   pc_variant_from_version(pc_hal_fpga_version(), &s->var);
   s->acq_state    = PC_ACQ_IDLE;
   s->last_main_ms = pc_hal_ms();
@@ -1992,7 +2223,10 @@ void pc_poll(pc_session *s, int ctx)
     //The first interval runs from pc_session_init through the rest of boot (logo, USB start): not a loop pass.
     //Both startup intervals are kept for GET_LINK_STATS (bench: first commands waited ~5 s after a FEL load).
     if(s->main_polls == 0)
+    {
       s->first_poll_ms = pass;
+      s->first_poll_at = now;
+    }
     else if(s->main_polls == 1)
       s->first_pass_ms = pass;
 

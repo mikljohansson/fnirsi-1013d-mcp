@@ -183,6 +183,14 @@ void     pc_hal_tx_abort(void);                  //drop the frame in flight and 
 void     pc_hal_link_stats(uint32_t *v);         //PC_TSTAT_COUNT values
 
 //----------------------------------------------------------------------------------------------------------------------------------
+// SD card (MAIN context only: the driver is not reentrant). Return 0 or the negative driver error.
+
+uint32_t pc_hal_sd_sectors(void);                                                      //card size in 512-byte sectors, 0 = no card
+int      pc_hal_sd_read(uint32_t sector, uint32_t count, uint8_t *dst);               //dst 4-byte aligned
+int      pc_hal_sd_write(uint32_t sector, uint32_t count, const uint8_t *src);        //power-key interrupt held off meanwhile
+uint8_t *pc_hal_sd_stage(uint32_t *capacity);                                          //write staging buffer, 4-byte aligned
+
+//----------------------------------------------------------------------------------------------------------------------------------
 // FEL [UI]: wait until the last response left, detach USB, quiesce IRQs, jump to the boot ROM FEL entry. No return on
 // the target.
 void     pc_hal_enter_fel(void);

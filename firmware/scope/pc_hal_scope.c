@@ -22,6 +22,7 @@
 #include "ccu_control.h"
 #include "interrupt.h"
 #include "pc_transport.h"
+#include "sd_card_interface.h"
 
 #include "pc_hal.h"
 #include "pc_cmds.h"
@@ -44,6 +45,14 @@ static uint8         pc_ready;
 static uint16        pc_fpga_word;
 
 extern DISPLAYDATA   displaydata;           //display_lib.c: current buffer, colours, font
+extern uint32        cardsectors;           //sd_card_interface.c: card size from the CSD, 0 = no card
+
+//SD_STAGE / SD_WRITE_SECTORS staging buffer (protocol section 14 row 40)
+static uint8         pc_sd_stage_buf[65536] __attribute__((aligned(4)));
+
+//Power-key interrupt enable (PE11, power_interrupt_init): held off while the protocol writes SD sectors, so the
+//power-off settings save cannot interleave with a write in progress (the SD driver is not reentrant)
+#define PC_POWER_EINT_BIT 0x00000800
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Drawing from the protocol (MAIN context, between UI passes). The UI loop keeps its own drawing state in displaydata
@@ -620,6 +629,38 @@ void pc_hal_indicator(int state)
   }
 
   pc_draw_end(&save);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// SD card (MAIN context). The driver's timeouts use timer0 ticks, so IRQs stay on.
+
+uint32_t pc_hal_sd_sectors(void)
+{
+  return cardsectors;
+}
+
+int pc_hal_sd_read(uint32_t sector, uint32_t count, uint8_t *dst)
+{
+  return (int)sd_card_read(sector, count, dst);
+}
+
+int pc_hal_sd_write(uint32_t sector, uint32_t count, const uint8_t *src)
+{
+  uint32 enabled = *EINT_PE_ENB_REG & PC_POWER_EINT_BIT;
+  int32  r;
+
+  *EINT_PE_ENB_REG &= ~PC_POWER_EINT_BIT;
+  r = sd_card_write(sector, count, (uint8 *)src);
+
+  //A power-key edge meanwhile stays pending and fires here; the save then runs after this write   BENCH: SD
+  *EINT_PE_ENB_REG |= enabled;
+  return (int)r;
+}
+
+uint8_t *pc_hal_sd_stage(uint32_t *capacity)
+{
+  *capacity = sizeof(pc_sd_stage_buf);
+  return pc_sd_stage_buf;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

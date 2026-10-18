@@ -10,6 +10,7 @@
 #include "pc_protocol.h"
 
 #define MOCK_RING_MAX 8192
+#define MOCK_SD_SECTORS 4096                //2 MiB card model, partition at 2048 unless a test changes the MBR
 
 typedef struct
 {
@@ -60,6 +61,13 @@ typedef struct
   int      indicator;             //last pc_hal_indicator state
   uint32_t indicator_draws;
 
+  //SD card
+  uint8_t  *sd;                     //MOCK_SD_SECTORS x 512
+  uint32_t  sd_sectors;             //reported size (0 = no card)
+  uint32_t  sd_reads, sd_writes;
+  int       sd_fail_write;          //driver error to return from writes (0 = ok)
+  int       sd_corrupt;             //1: writes flip a bit (verify must catch it)
+
   //Battery
   uint8_t  batt_level, batt_charging, batt_raw;
 
@@ -81,6 +89,7 @@ extern mock_state mock;
 void mock_reset(uint16_t fpga_version);
 void mock_rx_push(const uint8_t *data, uint32_t len);
 void mock_tx_release(void);
+void mock_sd_image(uint32_t sector, const char *magic, uint32_t sectors);   //eGON header + valid checksum
 
 //Captured responses (most recent last)
 #define MOCK_MAX_RESP 32

@@ -13,6 +13,8 @@ mock_resp  mock_resps[MOCK_MAX_RESP];
 uint32_t   mock_nresps;
 
 static uint8_t mock_tx[PC_MAX_RESPONSE_FRAME + 16] __attribute__((aligned(4)));
+static uint8_t mock_sd[MOCK_SD_SECTORS * 512] __attribute__((aligned(4)));
+static uint8_t mock_stage[65536] __attribute__((aligned(4)));
 
 //1.00o5 tables (variables.c): time_per_div_sample_rate[35] and sample_rate_settings[0..17]
 static const uint8_t tpd_sr[35] = { 28,27,26,25,24,23,22,21,20,19,18, 17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0,0,0,0,0,0,0 };
@@ -92,6 +94,34 @@ void mock_reset(uint16_t fpga_version)
   mock.ui_run = 1; mock.last_run_set = -1; mock.indicator = -1;
 
   fill_ring();
+
+  //SD: MBR with one partition at 2048, eGON images at 16 (BT0) and 750 (EXE) with valid checksums
+  memset(mock_sd, 0, sizeof(mock_sd));
+  mock.sd = mock_sd;
+  mock.sd_sectors = MOCK_SD_SECTORS;
+  mock_sd[510] = 0x55; mock_sd[511] = 0xAA;
+  mock_sd[0x1BE + 4] = 0x0C;
+  pc_put_u32(mock_sd + 0x1BE + 8, 2048);
+  mock_sd_image(16, "eGON.BT0", 8);
+  mock_sd_image(750, "eGON.EXE", 750);
+}
+
+void mock_sd_image(uint32_t sector, const char *magic, uint32_t sectors)
+{
+  uint8_t *p = mock_sd + sector * 512;
+  uint32_t i, sum = 0;
+
+  for(i=0;i<sectors * 512;i++)
+    p[i] = (uint8_t)(i * 13 + sector);
+
+  memcpy(p + 4, magic, 8);
+  pc_put_u32(p + 16, sectors * 512);
+  pc_put_u32(p + 12, 0x5F0A6C39u);
+
+  for(i=0;i<sectors * 512;i+=4)
+    sum += pc_get_u32(p + i);
+
+  pc_put_u32(p + 12, sum);
 }
 
 void mock_rx_push(const uint8_t *data, uint32_t len)
@@ -374,3 +404,40 @@ uint32_t pc_hal_tx_idle_ms(void) { return mock.tx_busy ? (mock.now - mock.tx_sin
 void     pc_hal_tx_abort(void)   { mock.tx_busy = 0; mock.tx_aborts++; }
 void     pc_hal_enter_fel(void)  { mock.fel_entries++; }
 void     pc_hal_link_stats(uint32_t *v) { uint32_t i; for(i=0;i<PC_TSTAT_COUNT;i++) v[i] = 1000 + i; }
+
+uint32_t pc_hal_sd_sectors(void) { return mock.sd_sectors; }
+
+int pc_hal_sd_read(uint32_t sector, uint32_t count, uint8_t *dst)
+{
+  assert(((uintptr_t)dst & 3) == 0);
+
+  if(sector + count > MOCK_SD_SECTORS)
+    return -4;
+
+  memcpy(dst, mock_sd + sector * 512, count * 512);
+  mock.sd_reads++;
+  return 0;
+}
+
+int pc_hal_sd_write(uint32_t sector, uint32_t count, const uint8_t *src)
+{
+  if(mock.sd_fail_write)
+    return mock.sd_fail_write;
+
+  if(sector + count > MOCK_SD_SECTORS)
+    return -4;
+
+  memcpy(mock_sd + sector * 512, src, count * 512);
+
+  if(mock.sd_corrupt)
+    mock_sd[sector * 512 + 100] ^= 0x10;
+
+  mock.sd_writes++;
+  return 0;
+}
+
+uint8_t *pc_hal_sd_stage(uint32_t *capacity)
+{
+  *capacity = sizeof(mock_stage);
+  return mock_stage;
+}

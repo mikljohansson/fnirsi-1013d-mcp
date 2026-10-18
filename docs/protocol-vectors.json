@@ -39,6 +39,10 @@
   "ACQUIRE_AVG": 519,
   "SET_ACQ_STATE": 520,
   "GET_CAPTURE_INFO": 521,
+  "SD_INFO": 1280,
+  "SD_READ_SECTORS": 1281,
+  "SD_STAGE": 1282,
+  "SD_WRITE_SECTORS": 1283,
   "GET_GEN": 768,
   "SET_GEN": 769,
   "GET_CAL": 1024,
@@ -672,13 +676,117 @@
    ]
   },
   {
+   "name": "req_sd_info",
+   "description": "1.3: card, partition, write window, eGON headers, VERIFY checksums",
+   "hex": "a51301000005220000000400000088760100000079b8f899",
+   "frames": [
+    {
+     "cmd": 1280,
+     "seq": 34,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "01000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 1280,
+     "seq": 34,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "01000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_sd_read_sectors",
+   "description": "1.3: sectors 750..877",
+   "hex": "a5130100010523000000080000002c11ee02000080000000284fbe89",
+   "frames": [
+    {
+     "cmd": 1281,
+     "seq": 35,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "ee02000080000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 1281,
+     "seq": 35,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "ee02000080000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_sd_stage",
+   "description": "1.3: 4 bytes at stage offset 512",
+   "hex": "a51301000205240000000c0000000aad000200000400000065474f4e7dd25b38",
+   "frames": [
+    {
+     "cmd": 1282,
+     "seq": 36,
+     "status": 0,
+     "flags": 0,
+     "len": 12,
+     "payload": "000200000400000065474f4e"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 1282,
+     "seq": 36,
+     "status": 0,
+     "flags": 0,
+     "len": 12,
+     "payload": "000200000400000065474f4e",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_sd_write_sectors",
+   "description": "1.3: stage[0, 64 KiB) to sector 750, stage crc32 0x1C291CA3 (example value), magic 'SDWR'",
+   "hex": "a51301000305250000001000000009d1ee02000080000000a31c291c534457524f457fbe",
+   "frames": [
+    {
+     "cmd": 1283,
+     "seq": 37,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "ee02000080000000a31c291c53445752"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 1283,
+     "seq": 37,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "ee02000080000000a31c291c53445752",
+     "event": "frame"
+    }
+   ]
+  },
+  {
    "name": "req_get_gen",
    "description": "",
-   "hex": "a513010000032200000000000000f1e6",
+   "hex": "a5130100000326000000000000009ce9",
    "frames": [
     {
      "cmd": 768,
-     "seq": 34,
+     "seq": 38,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -688,7 +796,7 @@
    "device_events": [
     {
      "cmd": 768,
-     "seq": 34,
+     "seq": 38,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -700,11 +808,11 @@
   {
    "name": "req_set_gen",
    "description": "enable, 10 kHz (10,000,000 mHz), 50.00 %",
-   "hex": "a513010001032300000014000000311f0701000080969800000000008813000000000000303ee14d",
+   "hex": "a5130100010327000000140000005c100701000080969800000000008813000000000000303ee14d",
    "frames": [
     {
      "cmd": 769,
-     "seq": 35,
+     "seq": 39,
      "status": 0,
      "flags": 0,
      "len": 20,
@@ -714,7 +822,7 @@
    "device_events": [
     {
      "cmd": 769,
-     "seq": 35,
+     "seq": 39,
      "status": 0,
      "flags": 0,
      "len": 20,
@@ -726,11 +834,11 @@
   {
    "name": "req_get_cal",
    "description": "CH1",
-   "hex": "a51301000004240000000100000025a1008def02d2",
+   "hex": "a51301000004280000000100000092b0008def02d2",
    "frames": [
     {
      "cmd": 1024,
-     "seq": 36,
+     "seq": 40,
      "status": 0,
      "flags": 0,
      "len": 1,
@@ -740,7 +848,7 @@
    "device_events": [
     {
      "cmd": 1024,
-     "seq": 36,
+     "seq": 40,
      "status": 0,
      "flags": 0,
      "len": 1,
@@ -752,11 +860,11 @@
   {
    "name": "req_read_screen",
    "description": "rows 0..39",
-   "hex": "a513010001042500000004000000f63500002800b671197c",
+   "hex": "a513010001042900000004000000412400002800b671197c",
    "frames": [
     {
      "cmd": 1025,
-     "seq": 37,
+     "seq": 41,
      "status": 0,
      "flags": 0,
      "len": 4,
@@ -766,7 +874,7 @@
    "device_events": [
     {
      "cmd": 1025,
-     "seq": 37,
+     "seq": 41,
      "status": 0,
      "flags": 0,
      "len": 4,
@@ -778,11 +886,11 @@
   {
    "name": "req_debug_fpga",
    "description": "write command 0x06, read 2 bytes (FPGA version)",
-   "hex": "a5130100000f2600000005000000c9e0010106030295f75082",
+   "hex": "a5130100000f2a000000050000007ef1010106030295f75082",
    "frames": [
     {
      "cmd": 3840,
-     "seq": 38,
+     "seq": 42,
      "status": 0,
      "flags": 0,
      "len": 5,
@@ -792,7 +900,7 @@
    "device_events": [
     {
      "cmd": 3840,
-     "seq": 38,
+     "seq": 42,
      "status": 0,
      "flags": 0,
      "len": 5,
@@ -804,11 +912,11 @@
   {
    "name": "req_enter_fel",
    "description": "magic 'FEL_' little-endian",
-   "hex": "a5130100010f2700000004000000ebbe5f46454c61875934",
+   "hex": "a5130100010f2b000000040000005caf5f46454c61875934",
    "frames": [
     {
      "cmd": 3841,
-     "seq": 39,
+     "seq": 43,
      "status": 0,
      "flags": 0,
      "len": 4,
@@ -818,7 +926,7 @@
    "device_events": [
     {
      "cmd": 3841,
-     "seq": 39,
+     "seq": 43,
      "status": 0,
      "flags": 0,
      "len": 4,

@@ -431,8 +431,8 @@ next pass (35-75 ms in RUN). GET_CAPTURE_INFO is answered from the timer interru
 (protocol 1.1) reports that pass time at offset 28 (last) and 30 (max since the previous GET_STATUS).
 In RUN a READ_RAW waits up to 1 s for the UI capture in flight (protocol section 14, row 35).
 
-Link counters: GET_LINK_STATS (0x0007, protocol 1.2) returns 29 u32 counters since boot (transport,
-parser, dispatch and, since 0.2.0, the two startup intervals; list in `docs/protocol.md` section 14). `host_tests/bench_link.py` prints them.
+Link counters: GET_LINK_STATS (0x0007, protocol 1.2) returns 31 u32 counters since boot (transport,
+parser, dispatch and, since 0.2.0, four startup intervals; list in `docs/protocol.md` section 14). `host_tests/bench_link.py` prints them.
 `rx_swept` counts request packets whose USB interrupt never arrived and that a poll picked up
 instead; `link_resets` counts bus reset / suspend / disconnect events (each drops buffered data).
 
@@ -445,7 +445,7 @@ save stores "USB CH340 mode" = on.
 
 The owner's 25Q80 now holds Atlan's AL3 bitstream (0x1532, variant 2; written and read back
 2026-10-18, power-cycle check of the diagnostics screen pending). The expected values below are
-for 0x1532. The stock bitstream (0x1432, variant 1) gives `fpga=0x1432`, ring 4096, caps 0x3C00,
+for 0x1532. The stock bitstream (0x1432, variant 1) gives `fpga=0x1432`, ring 4096, caps 0x7C00,
 and E_UNSUPPORTED for the generator and for geometry other than 1500/3000. The owner also saw
 "Cannot recognize device" from the updater's MSC mode on Windows (cable suspected): rule that out
 with a known-good cable before step 2.
@@ -463,10 +463,10 @@ sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
    ModemManager ignore rule from plan section 10. The device is high-speed only: use a USB 2.0 HS
    port or hub, not a full-speed VM pass-through.
 3. **Text probe.** In a terminal, `#VER` + Enter must answer
-   `#OK,FNIRSI-1013D-AI,fw=0.2.0,proto=1.3,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
+   `#OK,FNIRSI-1013D-AI,fw=0.2.2,proto=1.3,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
 4. **Identify.** PING with random 0..492 byte payloads, 10,000 times. GET_INFO must report
-   variant 2, ring 8192, max total 16382, caps 0x3C03 (PROG_TRIGGER_POS, GENERATOR_DDS, ENTER_FEL,
-   SHARED_MODE and the two UNVERIFIED bits; `PC_DEBUG=1` adds 0x120). Run GET_STATUS, GET_BATTERY,
+   variant 2, ring 8192, max total 16382, caps 0x7C03 (PROG_TRIGGER_POS, GENERATOR_DDS, ENTER_FEL,
+   SHARED_MODE, SD_SECTORS and the two UNVERIFIED bits; `PC_DEBUG=1` adds 0x120). Run GET_STATUS, GET_BATTERY,
    and GET_CHANNEL / TIMEBASE / TRIGGER / CAL, and compare with the screen. The UI keeps running, and
    the green MCP chip shows at the top right while the port is open. Open a menu: GET_STATUS must
    answer with `ui_busy` = 1, and SET_CHANNEL must give E_BUSY.

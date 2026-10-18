@@ -867,12 +867,18 @@ static void test_busy_context(void)
   pc_poll(&S, PC_CTX_MAIN);
   r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
   T_EQ(r.p[3], PC_UI_STARTING);
-  mock.now += 4800;                                              //a slow first pass
+  mock.now += 1200;                                              //a slow first pass: 0x05 wait ...
+  pc_ui_capture_start(&S);
+  mock.now += 300;                                               //... capture ...
+  pc_ui_capture_addr(&S, 1);
+  pc_ui_capture_done(&S);
+  mock.now += 3300;                                              //... drawing
   pc_poll(&S, PC_CTX_MAIN);
   r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
   T_EQ(r.p[3], PC_UI_IDLE);
   r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
-  T_EQ(pc_get_u16(r.p), 29); T_EQ(pc_get_u32(r.p + 4 + 4 * 28), 4800);       //duration of the first pass
+  T_EQ(pc_get_u16(r.p), 31); T_EQ(pc_get_u32(r.p + 4 + 4 * 28), 4800);       //duration of the first pass
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 29), 1200 | 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 30), 1500 | 1);
 }
 
 static void test_isr_context(void)
@@ -1197,6 +1203,137 @@ static void test_indicator(void)
   T_EQ(mock.indicator, 0);
 }
 
+//SD sector commands: info, read, stage + write with every safety limit
+static void sd_stage_all(const uint8_t *data, uint32_t n)
+{
+  uint8_t p[8 + 480];
+  uint32_t off;
+  resp_t r;
+
+  for(off=0;off<n;off+=480)
+  {
+    uint32_t k = (n - off > 480) ? 480 : n - off;
+
+    pc_put_u32(p, off); pc_put_u16(p + 4, (uint16_t)k); pc_put_u16(p + 6, 0);
+    memcpy(p + 8, data + off, k);
+    r = req(PC_CMD_SD_STAGE, p, 8 + k);
+    T_EQ(r.h.status, 0);
+    if(pc_get_u32(r.p + 8) != pc_crc32(data + off, k)) { T_TRUE(0); break; }
+  }
+}
+
+static resp_t sd_write(uint32_t sector, uint16_t count, uint8_t flags, uint32_t crc, uint32_t magic)
+{
+  uint8_t p[16];
+
+  memset(p, 0, 16);
+  pc_put_u32(p, sector); pc_put_u16(p + 4, count); p[6] = flags; pc_put_u32(p + 8, crc); pc_put_u32(p + 12, magic);
+  return req(PC_CMD_SD_WRITE_SECTORS, p, 16);
+}
+
+static void test_sd(void)
+{
+  static uint8_t img[128 * 512];
+  uint8_t p[16];
+  resp_t r;
+  uint32_t i, crc;
+
+  setup(0x1532);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SD_SECTORS, PC_CAP_SD_SECTORS);
+
+  //SD_INFO: card, partition, write window, stage size, the three eGON headers
+  r = req(PC_CMD_SD_INFO, "\x01", 1);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 64);
+  T_EQ(pc_get_u32(r.p), MOCK_SD_SECTORS); T_EQ(pc_get_u32(r.p + 4), 2048); T_EQ(pc_get_u32(r.p + 8), 2048);
+  T_EQ(pc_get_u32(r.p + 12), 65536);
+  T_EQ(pc_get_u32(r.p + 16), 16);  T_EQ(r.p[20], 1); T_EQ(r.p[21], 1); T_EQ(pc_get_u32(r.p + 24), 8 * 512);
+  T_EQ(pc_get_u32(r.p + 32), 80);  T_EQ(r.p[36], 0); T_EQ(r.p[37], 0);
+  T_EQ(pc_get_u32(r.p + 48), 750); T_EQ(r.p[52], 2); T_EQ(r.p[53], 1); T_EQ(pc_get_u32(r.p + 56), 750 * 512);
+  mock.sd[750 * 512 + 9000] ^= 1;                               //damaged image: checksum bad
+  r = req(PC_CMD_SD_INFO, "\x01", 1);
+  T_EQ(r.p[53], 2);
+  r = req(PC_CMD_SD_INFO, "\x00", 1);
+  T_EQ(r.p[53], 0); T_EQ(r.p[52], 2);                           //not checked without VERIFY
+  r = req(PC_CMD_SD_INFO, "\x02", 1);
+  T_EQ(r.h.status, PC_E_BAD_ARG);
+
+  //SD_READ_SECTORS
+  memset(p, 0, 16); pc_put_u32(p, 750); pc_put_u16(p + 4, 128);
+  r = req(PC_CMD_SD_READ_SECTORS, p, 8);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 16 + 128 * 512);
+  T_MEM(r.p + 16, mock.sd + 750 * 512, 128 * 512);
+  T_EQ(pc_get_u32(r.p + 8), pc_crc32(mock.sd + 750 * 512, 128 * 512));
+  pc_put_u16(p + 4, 129);
+  r = req(PC_CMD_SD_READ_SECTORS, p, 8);      T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
+  pc_put_u32(p, MOCK_SD_SECTORS - 1); pc_put_u16(p + 4, 2);
+  r = req(PC_CMD_SD_READ_SECTORS, p, 8);      T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
+
+  //Stage 128 sectors and write them to 750: read back equal, CRC answered
+  for(i=0;i<sizeof(img);i++) img[i] = (uint8_t)(i * 7 + 3);
+  sd_stage_all(img, sizeof(img));
+  crc = pc_crc32(img, sizeof(img));
+  r = sd_write(750, 128, 0, crc, PC_SD_WRITE_MAGIC);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p + 8), crc);
+  T_MEM(mock.sd + 750 * 512, img, sizeof(img));
+
+  //Stage limits
+  {
+    uint8_t s[12];
+    pc_put_u32(s, 65536 - 2); pc_put_u16(s + 4, 4); pc_put_u16(s + 6, 0); memset(s + 8, 0, 4);
+    r = req(PC_CMD_SD_STAGE, s, 12);          T_EQ(r.h.status, PC_E_BAD_ARG);
+    pc_put_u32(s, 0); pc_put_u16(s + 4, 3);
+    r = req(PC_CMD_SD_STAGE, s, 12);          T_EQ(r.h.status, PC_E_BAD_LEN);
+  }
+
+  //Every refusal leaves the card untouched
+  {
+    uint32_t w = mock.sd_writes;
+    r = sd_write(750, 1, 0, pc_crc32(img, 512), 0x12345678);      T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 12);
+    r = sd_write(750, 1, 0, crc, PC_SD_WRITE_MAGIC);              T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 8);   //stage crc
+    r = sd_write(709, 1, 0, pc_crc32(img, 512), PC_SD_WRITE_MAGIC); T_EQ(r.h.status, PC_E_BAD_ARG);                         //config
+    r = sd_write(700, 16, 0, pc_crc32(img, 8192), PC_SD_WRITE_MAGIC); T_EQ(r.h.status, PC_E_BAD_ARG);                       //spans 708
+    r = sd_write(16, 1, 0, pc_crc32(img, 512), PC_SD_WRITE_MAGIC);  T_EQ(r.h.status, PC_E_BAD_ARG);                         //bootloader
+    r = sd_write(15, 1, PC_SD_WF_BOOT, pc_crc32(img, 512), PC_SD_WRITE_MAGIC); T_EQ(r.h.status, PC_E_BAD_ARG);              //below 16
+    r = sd_write(2047, 2, 0, pc_crc32(img, 1024), PC_SD_WRITE_MAGIC); T_EQ(r.h.status, PC_E_BAD_ARG);                       //partition
+    r = sd_write(800, 0, 0, 0, PC_SD_WRITE_MAGIC);                  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
+    r = sd_write(800, 1, 0x04, pc_crc32(img, 512), PC_SD_WRITE_MAGIC); T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 6);
+    T_EQ(mock.sd_writes, w);
+  }
+
+  //With the flags the protected areas can be written
+  r = sd_write(709, 1, PC_SD_WF_CONFIG, pc_crc32(img, 512), PC_SD_WRITE_MAGIC);   T_EQ(r.h.status, 0);
+  r = sd_write(16, 1, PC_SD_WF_BOOT, pc_crc32(img, 512), PC_SD_WRITE_MAGIC);      T_EQ(r.h.status, 0);
+  r = sd_write(2047, 1, 0, pc_crc32(img, 512), PC_SD_WRITE_MAGIC);                T_EQ(r.h.status, 0);
+
+  //A partition below 2048 moves the window down
+  pc_put_u32(mock.sd + 0x1BE + 8, 1500);
+  r = req(PC_CMD_SD_INFO, "\0", 1);           T_EQ(pc_get_u32(r.p + 8), 1500);
+  r = sd_write(1499, 2, 0, pc_crc32(img, 1024), PC_SD_WRITE_MAGIC);               T_EQ(r.h.status, PC_E_BAD_ARG);
+  r = sd_write(1499, 1, 0, pc_crc32(img, 512), PC_SD_WRITE_MAGIC);                T_EQ(r.h.status, 0);
+
+  //No partition table: writes off
+  mock.sd[510] = 0;
+  r = req(PC_CMD_SD_INFO, "\0", 1);           T_EQ(pc_get_u32(r.p + 4), 0); T_EQ(pc_get_u32(r.p + 8), 0);
+  r = sd_write(800, 1, 0, pc_crc32(img, 512), PC_SD_WRITE_MAGIC);                 T_EQ(r.h.status, PC_E_STATE);
+  mock.sd[510] = 0x55;
+
+  //Driver error and verify mismatch
+  mock.sd_fail_write = -2;
+  r = sd_write(800, 1, 0, pc_crc32(img, 512), PC_SD_WRITE_MAGIC);                 T_EQ(r.h.status, PC_E_IO); T_EQ(pc_get_u16(r.p), 2);
+  mock.sd_fail_write = 0; mock.sd_corrupt = 1;
+  r = sd_write(800, 1, 0, pc_crc32(img, 512), PC_SD_WRITE_MAGIC);                 T_EQ(r.h.status, PC_E_IO); T_EQ(pc_get_u16(r.p), 0xFFFF);
+  mock.sd_corrupt = 0;
+
+  //No card
+  mock.sd_sectors = 0;
+  r = req(PC_CMD_SD_INFO, "\0", 1);           T_EQ(r.h.status, PC_E_IO);
+
+  //Unknown bitstream: fails closed like everything with a capability
+  setup(0x9999);
+  r = req(PC_CMD_SD_INFO, "\0", 1);           T_EQ(r.h.status, PC_E_UNSUPPORTED);
+}
+
 static void test_fel_reset_stall(void)
 {
   uint8_t p[4];
@@ -1272,7 +1409,7 @@ static void test_fel_reset_stall(void)
   //GET_LINK_STATS: 11 transport + 8 parser + 8 session + 2 startup counters, answered from every context
   setup(0x1532);
   r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
-  T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 29); T_EQ(r.len, 4 + 29 * 4);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 31); T_EQ(r.len, 4 + 31 * 4);
   T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 4 + 4 * 10), 1010);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 11), S.parser.stats.frames);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 24), 0);                         //disp_isr counted after this response
@@ -1324,6 +1461,7 @@ int main(void)
   test_ui_capture();
   test_read_raw_hold();
   test_indicator();
+  test_sd();
   test_fel_reset_stall();
   mock_clear_resps();
   return t_report("test_session");
