@@ -887,3 +887,54 @@ a5 13 01 01 01 01 04 00 06 00 00 00 00 00 d8 e1
 ```
 
 These vectors go into `mcp/tests/` and into the firmware's host-side parser test.
+
+## 14. Implementation notes (firmware v0.1.0)
+
+Where the firmware in `firmware/scope/` (pc_protocol.c, pc_cmds.c, pc_transport.c, pc_hal_scope.c)
+differs from or fills a gap in sections 1-13. Hosts written against this document need only the
+"host-visible" items. Shared test vectors: `docs/protocol-vectors.json`.
+
+### Host-visible
+
+| # | Topic | Firmware behaviour | Why |
+|---|---|---|---|
+| 1 | Oversize request (len > 492, valid header CRC) | E_BAD_LEN is sent at the header; then exactly len + 4 bytes are discarded (a huge len ends with the 100 ms silence timeout) instead of hunting through them | hunting turned payload bytes into false `#` lines; the header CRC vouches for len |
+| 2 | Request with the RESPONSE flag | dropped silently, no answer | a device never receives responses; avoids loops with echoing hosts |
+| 3 | Short request payloads | zero-extended (section 5 compatibility rule); E_BAD_LEN only for oversize frames and malformed DEBUG_FPGA op lists | 5 says shorter payloads read missing fields as zero |
+| 4 | Error `detail` | SET_CHANNEL / SET_TRIGGER / SET_GEN: the mask bit number of the field (0xFE = mask, 0xFF = channel). Every other command: the byte offset of the field in the request | 8.3 numbers SET_* fields by mask bit; offsets are unambiguous elsewhere |
+| 5 | Duplicate cache (4.3) | only OK responses with payload <= 256 bytes are cached, keyed by (cmd, seq); cleared on DTR edges and USB reset | an error must not be replayed: a retry after E_BUSY must run again |
+| 6 | WAIT in IDLE or ABORTED | answers at once with the current status (8.4 only says DONE) | nothing can complete |
+| 7 | ARM while ARMED or TRIGGERED | E_STATE; STOP first | 6.2 diagram re-arms only from DONE/ABORTED/IDLE |
+| 8 | Unknown FPGA variant | PING, GET_INFO, GET_STATUS, GET_BATTERY, TEST_PATTERN and `#VER` work; everything else E_UNSUPPORTED (5.1 lists PING/INFO/STATUS) | battery and the link test touch no FPGA |
+| 9 | LOCAL_BUSY | detected as "no main-loop pass for 250 ms". BUSY polls run in the touch-panel scan (all modal menu loops, MSC screen) and in the calibration/auto-setup spin loops. A request that needs the main loop waits there up to 250 ms, then gets E_BUSY. A very slow normal UI pass (> 250 ms) can also give E_BUSY: retry | menus are modal loops in 1.00o5 with no common hook |
+| 10 | GET_STATUS flags bits 0-2 in LOCAL | always 0: the firmware never touches the FPGA while the UI owns it | 6.1 single owner |
+| 11 | KEEP_SETTINGS | SET_REMOTE release uses the flag of the release request; every other exit (tap, watchdog, DTR, USB, `#LOCAL`, power-off) uses the flag given at acquire. Kept settings are re-pushed through the UI settings, so a raw divider, a raw trigger level and raw DDS words are replaced by what the UI settings express | the UI settings cannot hold raw values |
+| 12 | TEST_PATTERN 3 | xorshift32: state = length; before bytes 4k..4k+3 the state steps once (x ^= x << 13; x ^= x >> 17; x ^= x << 5); the 4 bytes are the new state little-endian | 8.2 named the generator only |
+| 13 | GET_GEN | stock bitstream: enable 1, phase/threshold 0, freq 1,000,000 mHz, duty 5000 bp [U duty]. LOCAL on Atlan4: phase/threshold from the UI's Hz and % with the 1.00o5 integer formulas | no DDS registers on stock |
+| 14 | SET_GEN conversions | phase_inc = round(f_mHz x 2^22 / 5^11), threshold = round(bp x (2^32 - 1) / 10000); `freq_mhz_actual` = round(phase_inc x 5^11 / 2^22) | exact form of the 8.6 formulas in 64 bits (50e9 = 2^10 x 5^11) |
+| 15 | CHANNEL_CONFIG `range` | `samplevoltperdiv` (what the hardware does); SET_CHANNEL range sets display and sample V/div equal. uv_per_lsb_q8 uses input_calibration[range] and mul_factor[1x][range] | 8.3 |
+| 16 | SET_CHANNEL offset | the resulting PWM value (centre + dcoffset) must be 0..2000 whenever offset or range is in the mask, else E_BAD_ARG detail 3 | the PWM period is 2000 counts |
+| 17 | READ_TRACE | REMOTE needs a DONE capture (E_STATE otherwise); channels are built on demand and the build is reused per capture. `sw_trigger_index` is -1 unless 20 <= pretrigger and pretrigger + 64 <= total (the 1.00o5 search window) | |
+| 18 | Not built in v0.1.0 | READ_LIVE, ACQUIRE_AVG, READ_SCREEN, ENTER_FEL: caps 0, E_UNSUPPORTED. DEBUG_FPGA and FORCE exist only in `PC_DEBUG=1` builds, which set DEBUG_RAW and FORCE_TRIGGER (FORCE before test T7) | phase 2/3 of the plan; fail closed |
+| 19 | USB identity | VID:PID 0x1209:0x0001 (pid.codes test PID, development only), bcdDevice 0x0100, manufacturer `fnirsi-1013d-ai`, product `FNIRSI 1013D`, serial `1013D-0001` on every unit (GET_INFO `serial` is the same string) | per-unit serial and a real PID are plan phase 3 |
+| 20 | `min_total_samples` | 80 as specified; not checked against the FPGA. The 1.00o5 UI never goes below 3000 | [U] |
+| 21 | `#LOCAL` | releases with the acquire-time KEEP_SETTINGS flag; ASCII lines count as traffic for the watchdog | |
+
+### Firmware-internal
+
+- ARM writes 0x0F = 0, then 0x1A = the configured mode (FORCE leaves it in auto), then the 0x01 reset with a
+  bounded 0x05 wait (2,000,000 reads), then 0x0B / 0x0C (programmable variants) and 0x0E (all variants) in reset,
+  then releases. At DONE the firmware writes 0x0F = 1, as `fpga_done_conversion` does in trigger mode, and
+  latches 0x14.
+- READ_RAW never relies on the FPGA read pointer wrapping: a read that crosses the ring end is split, and each
+  part writes 0x1F again (with `read_lag`) followed by one dummy strobe.
+- The UI's own acquisition is unchanged: the 1.00o5 `T + 7441` pointer shortcut and the unbounded 0x05 wait stay
+  in the LOCAL path (the wait now services USB every 65,536 polls). The modular formula and the bounded wait are
+  used only in REMOTE. 0x1732 (EP4) is recognised by the protocol only; `fpgasettings.fw_FPGA` keeps the 1.00o5
+  value so the UI behaves as before on every bitstream.
+- There is one TX staging buffer. A deferred WAIT result is built when the buffer is free, so the plan's second
+  64-byte buffer is not needed. The order of a STOP response and the aborted WAIT is: STOP first.
+- `PC_FORCE_CDC=1` (default) sets the "USB CH340 mode" setting to CDC at boot, and that value is saved with the
+  settings on power-off.
+- Module names follow the brief: `pc_protocol.c` (the plan's `pc_proto.c`), `pc_cmds.c`, `pc_hal.h`,
+  `pc_transport.c`, plus `pc_hal_scope.c` (target HAL and glue) and `pc_hooks.h`.

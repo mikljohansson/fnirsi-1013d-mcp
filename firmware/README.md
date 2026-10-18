@@ -33,7 +33,8 @@ Outputs in `firmware/scope/build/`:
 | `fnirsi_1013d_sdpackage.bin` | `make package`: SD package (bootloader+updater+scope from sector 16) | `fnirsi_1013d.bin` |
 
 Targets: `make`, `make clean`, `make V=1`, `make package`, `make fel`, `make info`
-(`objdump -h`), `make check-reference`. Parallel builds and `-MMD -MP` dependency tracking work.
+(`objdump -h`), `make check-reference`, `make gcc10`. Parallel builds and `-MMD -MP` dependency
+tracking work. `make` builds the USB control protocol in by default; section 5 has its options.
 `SOURCE_DATE_EPOCH=<unix time>` pins `build_time.h` to that time in UTC. Without it the
 file uses the current local time, like upstream. `CROSS_COMPILE=` selects another toolchain and
 `EXTRA_CFLAGS=` adds flags.
@@ -76,7 +77,9 @@ bug, and GCC 14 makes it an error by default.
 
 ### Verification against Atlan's binary
 
-- **Byte-identical with Atlan's toolchain.** `make check-reference` builds with GCC 10.3.1 from
+- **Byte-identical with Atlan's toolchain.** `make check-reference` builds with `PC_PROTOCOL=0`
+  (section 5), so it also proves that the protocol hooks leave the base untouched when disabled.
+  It builds with GCC 10.3.1 from
   `tools/fetch_gcc10.sh`. That script unpacks the jammy `.deb`s into `~/opt/gcc10` without
   installing them: binutils 2.38 and newlib 3.3 headers. It uses Atlan's `build_time.h`
   (2026-02-13 18:59:33), and the result `cmp`s **identical** to
@@ -279,5 +282,136 @@ xfel exec 0x80000000
   build of sunxi-fel or xfel. Do not mix the two approaches on the same device, because a bound
   usbipd device is not visible to Windows tools.
 
-None of the FEL steps have been run against the owner's unit yet. They are prepared commands, and
-the hardware steps are done by the owner.
+FEL entry from the boot menu and `sunxi-fel version` through usbipd were verified on the owner's
+unit on 2026-10-18 (`docs/hardware-status.md`). Loading a scope image over FEL has not been run
+yet. Hardware steps are done by the owner.
+
+## 5. PC control protocol (USB CDC)
+
+The scope speaks the binary protocol of `docs/protocol.md` on its USB port. The integration plan is
+`docs/plans/firmware-usb-protocol.md`. Deviations from the spec are listed in the "Implementation
+notes" section of `docs/protocol.md`.
+
+### Build options
+
+| make variable | default | effect |
+|---|---|---|
+| `PC_PROTOCOL` | 1 | 0 builds Atlan's v1.00o5 unchanged: every hook compiles to nothing |
+| `PC_DEBUG` | 0 | 1 adds DEBUG_FPGA and FORCE, sets caps DEBUG_RAW and FORCE_TRIGGER. Bench builds only |
+| `PC_FORCE_CDC` | 1 | CDC at boot even if the saved "USB CH340 mode" setting says MSC |
+
+```
+make                          # GCC 13, protocol on: build/fnirsi_1013d.bin
+make gcc10                    # same with Atlan's GCC 10.3.1: build-gcc10-pc/fnirsi_1013d.bin
+make PC_DEBUG=1 BUILD=build-dbg
+make check-reference          # PC_PROTOCOL=0 with GCC 10.3.1, must print IDENTICAL
+make -C host_tests test       # host gcc: frame layer, vectors, session tests (scope/host_tests)
+```
+
+`make check-reference` always builds `PC_PROTOCOL=0` and compares with Atlan's binary. A GCC 13
+`PC_PROTOCOL=0` build is also identical to a GCC 13 build of the tree before the protocol. Neither
+compiler gives a new warning with the protocol on, in release or `PC_DEBUG` builds.
+
+Files:
+
+| file | role | host build |
+|---|---|---|
+| `scope/pc_protocol.c/.h` | frame parser and encoder, CRCs, ASCII probe lines | yes |
+| `scope/pc_cmds.c/.h` | dispatcher, handlers, LOCAL/REMOTE and acquisition state machines | yes, via `pc_hal.h` |
+| `scope/pc_hal.h` | the only interface `pc_cmds.c` uses to reach the scope | |
+| `scope/pc_hal_scope.c` | `pc_hal.h` on the 1.00o5 settings and `fpga_control.c`, firmware glue | no |
+| `scope/pc_transport.c/.h` | USB RX ring, TX pump, ZLP, link events | no |
+| `scope/pc_hooks.h` | the hooks in the 1.00o5 files, empty with `PC_PROTOCOL=0` | |
+| `scope/host_tests/` | `test_protocol`, `test_session` (mock FPGA), `check_vectors.py` | |
+| `../docs/protocol-vectors.json` | shared frame vectors (`gen_vectors.py`; the MCP server merges its own) | |
+
+Hooks in the 1.00o5 code, all under `#if PC_PROTOCOL`:
+
+- `fnirsi_1013d_scope.c`: `pc_glue_init()` before `usb_device_init()`. The main loop calls
+  `pc_poll(MAIN)` first and skips the UI loop while the host owns the scope.
+- `scope_functions.c`: a BUSY poll in the 12 calibration and auto-setup conversion spin loops, and
+  a capture counter after the UI readout.
+- `touchpanel.c`: a BUSY poll in `tp_i2c_read_status()`. Every modal menu loop and the MSC screen
+  scan the touch panel, so the link answers PING, GET_INFO, GET_STATUS and GET_BATTERY there.
+- `fpga_control.c`: a BUSY poll every 65,536 polls of the 0x05 ready wait. The UI wait stays
+  unbounded, so LOCAL acquisition behaves exactly as 1.00o5.
+- `power_and_battery.c`: the power-off ISR restores the UI snapshot before it saves settings.
+- `usb_interface.c`, `cdc_class.c`: the transport hooks and the new USB identity
+  (VID:PID 0x1209:0x0001 pid.codes test PID, product `FNIRSI 1013D`, serial `1013D-0001`). The
+  text debug path is gone, so the debug helpers in `menu.c` print nothing. MSC is unchanged.
+- `variables.h`: the trace buffers are rounded up to 4096 words (16,384 bytes per channel).
+
+### Memory budget
+
+All new buffers are static in `.bss`, in DDR after the image. The linker script has one 32 MB
+region from 0x7FFFFFE0, with `.text`, `.data` (with `.rodata`) and `.bss` placed in that order.
+`start.s` puts the mode stacks at 0x81FB5000-0x82000000. Addresses below are from the GCC 13 build
+of 5879cf2. They move with code size.
+
+| item | size | address |
+|---|---|---|
+| `pc_tx_stage`, TX staging buffer: 16 + 66,560 + 4 bytes, rounded to 4 | 66,580 B | 0x8057F50C |
+| `pc_rx_ring`, RX ring | 2,048 B | 0x8057ED04 |
+| `pc_shadow_scope` + `pc_shadow_fpga`, UI snapshot | 2,740 + 28 B | 0x8058F924 |
+| `pc_sess`, parser, duplicate cache, state | 1,676 B | 0x805903F4 |
+| CRC-32 table, dispatch table (`.data`) | 1,024 + 312 B | in the image |
+| `usb_tx` 32 KiB text ring | removed | |
+| trace buffers, 2 x 16,380 to 16,384 B | +8 B | |
+
+| | `PC_PROTOCOL=0` | `PC_PROTOCOL=1` |
+|---|---|---|
+| image (GCC 13 / GCC 10) | 348,672 / 346,112 B | 378,880 / 376,320 B |
+| end of `.bss` (GCC 13) | 0x8057F738 | 0x80590A81 |
+| free DDR up to the stacks at 0x81FB5000 | 26.2 MiB | 26.1 MiB |
+
+The next fixed DDR user above `.bss` is the bootloader's copy of SD sector 710 at 0x81BFFC00,
+22.4 MiB above the new end of `.bss`. The image needs 740 SD sectors from sector 750, so it ends
+at sector 1489, well below the FAT partition start at 2048 or later.
+
+### First hardware bring-up checklist
+
+Order is by risk: each step is gated on the previous one. Load over FEL only, as in section 4A:
+the image runs from DDR and the scope image on the SD card is untouched. One write still happens:
+the power-off ISR saves settings to sector 709, as 1.00o5 always does. With `PC_FORCE_CDC=1` that
+save stores "USB CH340 mode" = on. The owner's unit has the stock bitstream (0x1432, variant 1),
+so steps 1-8 apply to it. The generator and programmable geometry need the Atlan AL3 bitstream.
+
+```
+make gcc10                                             # conservative compiler first
+sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
+```
+
+1. **No host.** The scope boots to the normal UI with no banner. Touch, menus, run/stop and
+   calibration work. The USB menu still switches to MSC, the PC sees the SD card, and leaving the
+   menu returns to CDC.
+2. **Enumeration.** Windows Device Manager shows a COM port `USB\VID_1209&PID_0001` with usbser.sys
+   and no driver install. On Linux, `lsusb` shows `1209:0001` and `/dev/ttyACM0` appears; add the
+   ModemManager ignore rule from plan section 10. The device is high-speed only: use a USB 2.0 HS
+   port or hub, not a full-speed VM pass-through.
+3. **Text probe.** In a terminal, `#VER` + Enter must answer
+   `#OK,FNIRSI-1013D-AI,fw=0.1.0,proto=1.0,fpga=0x1432`. `#FOO` must answer `#ERR,UNKNOWN`.
+4. **Identify, LOCAL.** PING with random 0..492 byte payloads, 10,000 times. GET_INFO must report
+   variant 1, ring 4096, caps 0x1800 (only the two UNVERIFIED bits). Run GET_STATUS, GET_BATTERY,
+   and GET_CHANNEL / TIMEBASE / TRIGGER / CAL, and compare with the screen. The UI keeps running.
+   Open a menu: GET_STATUS must answer with `ui_busy` = 1, and SET_REMOTE must give E_BUSY.
+5. **Link tests T1, T2.** TEST_PATTERN lengths 492, 495, 496, 1008 and 4076, 1000 times each,
+   with no timeouts (ZLP). Then 65,536 bytes x 200: record MB/s in `docs/hardware-status.md`.
+6. **REMOTE without hardware changes.** SET_REMOTE acquire must show the red banner. Then try every
+   exit: release, tap on the banner, watchdog (5 s, no traffic), closing the port (DTR), cable
+   pull, `#LOCAL`. Each must restore the UI with the user's settings. Power off while REMOTE, then
+   boot again (stock or this image): the settings must be the user's.
+7. **Readout, stock bitstream.** Use auto trigger mode with the 1 kHz calibration signal on CH1.
+   Run ARM, WAIT, READ_RAW (all cores, `addr_mode` 1, 1500 words): repeated reads of one capture
+   must be byte-identical. Compare READ_TRACE with the screen. With a `PC_DEBUG=1` image, run T3
+   (`read_lag`), T5 (trigger alignment), T6 (0x18 after an auto timeout) and T10 (B-only edges).
+8. **Hardware-changing commands.** SET_CHANNEL across all ranges and both couplings: relays click,
+   and the read-back equals the request. Then the offset, SET_TIMEBASE (index and raw), and
+   SET_TRIGGER. Release and check that the UI shows the user's settings again. Run T8 with a known
+   DC voltage on each range.
+9. **Atlan AL3 bitstream (0x1532), only after it is flashed and verified.** Programmable geometry
+   up to 16,382 samples, SET_GEN on the calibration pin (`self_test_loopback`), T4 (interleave
+   order), and T7 (FORCE, `PC_DEBUG=1`). Only after T3, T4 and T7 pass may the firmware clear the
+   UNVERIFIED bits or set FORCE_TRIGGER in a release build.
+
+`BENCH: Tn` comments in `pc_cmds.c`, `pc_hal_scope.c`, `pc_transport.c` and `usb_interface.c` mark
+the code each test confirms.
