@@ -24,8 +24,9 @@ MAGIC0 = 0xA5
 MAGIC1 = 0x13
 PROTO_MAJOR = 1
 #: 1.1: GET_STATUS pass_ms / pass_max_ms (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4); 1.3: collaborative (shared)
-#: mode: SHARED_MODE cap, GET_STATUS settings/run fields, SET_ACQ_STATE, GET_CAPTURE_INFO
-PROTO_MINOR = 3
+#: mode: SHARED_MODE cap, GET_STATUS settings/run fields, SET_ACQ_STATE, GET_CAPTURE_INFO; 1.4 (fw 0.2.9): EXT
+#: trigger (source 2 on 0x1533+ bitstreams), GET_STATUS ext_flags, GET_CAPTURE_INFO flag bit 5
+PROTO_MINOR = 4
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -231,6 +232,14 @@ class CaptureOrigin(enum.IntEnum):
 #: capture_settings_seq of a capture whose settings changed while it ran (and before the first capture);
 #: settings_seq itself never takes this value (protocol 1.3)
 SEQ_INVALID = 0xFFFFFFFF
+
+
+class ExtFlags(enum.IntFlag):
+    """GET_STATUS ext_flags (protocol 1.4, byte 42), refreshed at every main-loop poll from FPGA cmd 0x28."""
+
+    LEVEL = 1 << 0  # live level of the EXT pin
+    GENERATOR = 1 << 1  # the generator drives the pin
+    EDGE_SEEN = 1 << 2  # an EXT edge since the last sampling reset (every arm clears it)
 
 
 class UiBusy(enum.IntEnum):
@@ -702,7 +711,7 @@ class StatusResp(Payload):
               ("trigger_addr", "H"), ("capture_start_word", "H"), ("ms_since_arm", "I"), ("uptime_ms", "I"),
               ("watchdog_remaining_s", "H"), ("battery_level", "B"), ("exit_reason", "B"), ("reserved", "I"),
               ("pass_ms", "H"), ("pass_max_ms", "H"), ("settings_seq", "I"), ("capture_settings_seq", "I"),
-              ("run_state", "B"), ("capture_origin", "B"), ("reserved2", "H")]
+              ("run_state", "B"), ("capture_origin", "B"), ("ext_flags", "B"), ("reserved2", "B")]
     control: int = 0
     acq_state: int = 0
     flags: int = 0
@@ -727,6 +736,8 @@ class StatusResp(Payload):
     run_state: int = 0
     #: 1.3: CaptureOrigin of ``capture_id``
     capture_origin: int = 0
+    #: 1.4: ExtFlags (0 unless caps EXT_TRIGGER)
+    ext_flags: int = 0
     reserved2: int = 0
 
     @property
@@ -772,6 +783,8 @@ class CaptureInfoHeader(Payload):
     F_OVERLOAD_CH2: ClassVar[int] = 0x08
     #: a setting changed while the capture ran (settings_seq is then SEQ_INVALID)
     F_SETTINGS_CHANGED: ClassVar[int] = 0x10
+    #: 1.4: an EXT edge was seen during this capture
+    F_EXT_EDGE: ClassVar[int] = 0x20
 
 
 @dataclass

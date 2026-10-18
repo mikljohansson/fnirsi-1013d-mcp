@@ -596,6 +596,9 @@ def _capture_result(sess: Session, cap: Capture, kind: str) -> dict[str, Any]:
         out["settings_seq"] = cap.settings_seq
     if cap.capture_info is not None:
         out["capture_settings"] = _capture_settings_summary(cap)
+        h = cap.capture_info.header
+        if h.trig_source == 2:
+            out["ext_edge_seen"] = bool(h.flags & h.F_EXT_EDGE)
     out["caveats"] = list(cap.notes) + _capture_caveats(cap, freq) + STANDING_CAVEATS
     return out
 
@@ -756,13 +759,20 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             b = s.battery()
             flags = [f.name for f in P.StatusFlags if st.flags & f]
             extra: dict[str, Any] = {}
+            if s.profile().has(P.Caps.EXT_TRIGGER):
+                extra_ext = {"ext": {"level": "high" if st.ext_flags & P.ExtFlags.LEVEL else "low",
+                                     "generator_drives_pin": bool(st.ext_flags & P.ExtFlags.GENERATOR),
+                                     "edge_seen_since_arm": bool(st.ext_flags & P.ExtFlags.EDGE_SEEN)}}
+            else:
+                extra_ext = {}
             if st.shared:
                 extra = {"mode": "collaborative", "run_state": P.RunState(st.run_state).name,
                          "settings_seq": st.settings_seq, "capture_settings_seq": st.capture_settings_seq,
                          "capture_origin": P.CaptureOrigin(st.capture_origin).name.lower()}
             else:
                 extra = {"mode": "exclusive (legacy firmware)"}
-            return {"ok": True, **extra, "control": _control_name(st), "acq_state": P.AcqState(st.acq_state).name,
+            return {"ok": True, **extra, **extra_ext, "control": _control_name(st),
+                    "acq_state": P.AcqState(st.acq_state).name,
                     "flags": flags, "ui_busy": bool(st.ui_busy), "capture_id": st.capture_id,
                     "trigger_addr": st.trigger_addr, "capture_start_word": st.capture_start_word,
                     "ms_since_arm": st.ms_since_arm, "uptime_s": st.uptime_ms / 1000,
@@ -1067,9 +1077,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             if src == 2 and not prof.has(P.Caps.EXT_TRIGGER):
                 raise ValueError("source 'EXT' needs an FPGA bitstream with an external trigger input (0x1533 or "
                                  f"later; this one is 0x{prof.info.fpga_version:04X}). Trigger on CH2 instead.")
-            if src == 2 and prof.has_generator and s.get_gen().enable:
-                raise ValueError("source 'EXT' uses the calibration pin, which is driving the generator now: switch "
-                                 "it off with scope_generator(enabled=false) first")
+            gen_was_on = src == 2 and prof.has_generator and bool(s.get_gen().enable)
             eff_src = cur.source if src is None else src
             if eff_src == 2:
                 cav.append(EXT_NOTE)
@@ -1119,6 +1127,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                           mode=None if mode is None else P.TRIG_MODES.index(mode), pretrigger_samples=pre,
                           total_samples=total, auto_timeout=ato)
             summ = _trigger_summary(s)
+            if src == 2 and gen_was_on:
+                cav.append("the generator was switched off: the calibration pin is now the EXT trigger input")
             if mode == "single":
                 cav.append("host captures never re-arm on their own: 'single' behaves like 'normal' for them")
             cav += ["level is an 8-bit code compared to core A only; edges faster than 2 / fs may be missed",

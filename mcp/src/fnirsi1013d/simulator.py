@@ -603,6 +603,9 @@ class Device:
                 k += n
         res: dict = {"t0": t0, "dt": dt, "divider": settings.divider, "Pw": Pw, "Tw": Tw,
                      "settings": settings.copy(), "seq": self.settings_seq}
+        if self.spec.ext_trigger:  # did the pin toggle during the capture window (GET_CAPTURE_INFO bit 5)?
+            e = self._ext_words(t0, Pw, Tw + Pw, dt, settings)
+            res["ext_edge"] = bool(np.any(np.diff(e.astype(np.int16)) != 0))
         if kt >= 0:
             end = kt + (Tw - Pw)
             k_first = end - R
@@ -681,6 +684,7 @@ class Device:
         if self.capture_settings_changed:
             self.capture_settings_seq = P.SEQ_INVALID
         self.capture_origin = int(origin)
+        self.capture_ext_edge = bool(pc.get("ext_edge", False))
         if origin == P.CaptureOrigin.HOST:
             self.acq_state = P.AcqState.DONE
             self._pending_capture = None
@@ -894,7 +898,16 @@ class Device:
             uptime_ms=int((now - self.t_boot) * 1000) & 0xFFFFFFFF, watchdog_remaining_s=0xFFFF, battery_level=18,
             exit_reason=0, pass_ms=self.pass_ms, pass_max_ms=self.pass_max_ms, settings_seq=self.settings_seq,
             capture_settings_seq=self.capture_settings_seq if self.capture_id else P.SEQ_INVALID,
-            run_state=int(self.run_state), capture_origin=self.capture_origin if self.capture_id else 0)
+            run_state=int(self.run_state), capture_origin=self.capture_origin if self.capture_id else 0,
+            ext_flags=self._ext_flags(now))
+
+    def _ext_flags(self, now: float) -> int:
+        if not self.caps & P.Caps.EXT_TRIGGER:
+            return 0
+        sig = self.cfg.ext_signal or self.cfg.signals[1]
+        level = float(sig.eval(np.array([now - self.t_boot]), self.settings.gen)[0]) > EXT_THRESHOLD_V
+        return (int(P.ExtFlags.LEVEL) if level else 0) | (int(P.ExtFlags.GENERATOR) if self.settings.gen.enable else 0) \
+            | (int(P.ExtFlags.EDGE_SEEN) if getattr(self, "capture_ext_edge", False) and self.ring_valid else 0)
 
     def status_bytes(self) -> bytes:
         """GET_STATUS body as this firmware sends it: 32 bytes in the legacy (protocol 1.2) model, 44 in 1.3."""
@@ -912,7 +925,8 @@ class Device:
              (P.CaptureInfoHeader.F_AUTO_TIMEOUT if self.auto_timeout_flag else 0) | \
              (P.CaptureInfoHeader.F_OVERLOAD_CH1 if self.overload[0] else 0) | \
              (P.CaptureInfoHeader.F_OVERLOAD_CH2 if self.overload[1] else 0) | \
-             (P.CaptureInfoHeader.F_SETTINGS_CHANGED if getattr(self, "capture_settings_changed", False) else 0)
+             (P.CaptureInfoHeader.F_SETTINGS_CHANGED if getattr(self, "capture_settings_changed", False) else 0) | \
+             (P.CaptureInfoHeader.F_EXT_EDGE if getattr(self, "capture_ext_edge", False) else 0)
         tr = s.trigger
         h = P.CaptureInfoHeader(self.capture_id & 0xFFFFFFFF, self.capture_settings_seq, self.capture_origin, fl,
                                 self.trigger_addr, self.capture_start_word, self.capture_divider, s.tpd_index,
@@ -1210,8 +1224,8 @@ class Device:
                 raise _DevErr(P.Status.E_UNSUPPORTED, 0, "EXT trigger needs an FPGA with EXT_TRIGGER")
             if r.source > 2:
                 raise _DevErr(P.Status.E_BAD_ARG, 0, f"source {r.source}")
-            if r.source == 2 and self.spec.generator and self.settings.gen.enable:
-                raise _DevErr(P.Status.E_STATE, 0, "generator on: the calibration pin cannot be the EXT input")
+            if r.source == 2 and self.spec.generator:
+                self.settings.gen.enable = 0  # fw 0.2.9: selecting EXT switches the generator off
             new.source = r.source
         if r.mask & M.M_EDGE:
             if r.edge > 1:
@@ -1499,9 +1513,8 @@ class Device:
             g.duty_threshold = r.duty if r.duty_mode == 1 else P.gen_threshold(r.duty)
         if r.mask & P.SetGenReq.M_ENABLE:
             g.enable = 1 if r.enable else 0
-        if g.enable and self.settings.trigger.source == 2:
-            raise _DevErr(P.Status.E_STATE, 0, "the calibration pin is the EXT trigger input; trigger on CH1/CH2 "
-                                               "first")
+        if r.mask & P.SetGenReq.M_ENABLE and r.enable and self.settings.trigger.source == 2:
+            raise _DevErr(P.Status.E_STATE, 0, "EXT trigger uses the pin")
         self.settings.gen = g
         return self._ok(req, self.gen().pack())
 

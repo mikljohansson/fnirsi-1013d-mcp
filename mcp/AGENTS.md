@@ -104,7 +104,7 @@ the device parses nothing else, not even `#RESET`; a DTR 0->1 or USB reset drops
 
 ## Simulator fidelity
 
-Mirrors: variants stock/al3/ef2/ep4 and al3x (0x1533, EXT trigger on the calibration pin: caps EXT_TRIGGER, source 2, `--ext` signal or CH2's, logic threshold 1.65 V, 22 ns latency, E_STATE when EXT and the generator would share the pin; wire values assumed = protocol 8.3, pending fw-gen2) (version word, ring, max samples, fixed vs programmable geometry, generator,
+Mirrors: variants stock/al3/ef2/ep4 and al3x (0x1533, EXT trigger on the calibration pin: caps EXT_TRIGGER, source 2, `--ext` signal or CH2's, logic threshold 1.65 V, 22 ns latency, protocol 1.4 / fw 0.2.9 as in protocol.md section 14 row 41: selecting EXT switches the generator off, SET_GEN enable while EXT = E_STATE, GET_STATUS ext_flags (byte 42: level, generator, edge since arm), GET_CAPTURE_INFO flag bit 5 EXT edge; the tools report `ext` in scope_status and `ext_edge_seen` on EXT captures) (version word, ring, max samples, fixed vs programmable geometry, generator,
 stock fresh-window), the ring (4 cores, core B offset +3/-2 codes compensated by GET_CAL), trigger on core A
 with 2-dt quantisation, pretrigger arming, modular capture_start, auto timeout, FORCE (as auto timeout),
 read_lag (`--hw-read-lag`/`--fw-read-lag`), A/B order (`--true-order`), trigger alignment offset, LOCAL/REMOTE

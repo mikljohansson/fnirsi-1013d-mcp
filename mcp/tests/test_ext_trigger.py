@@ -69,12 +69,14 @@ async def test_ext_and_generator_are_exclusive(sim_factory, tmp_path):
         await c.call("scope_set_trigger", source="CH1")
         tok = (await c.call("scope_generator", enabled=True, frequency="1kHz", duty_percent=50))["token"]
         await c.call("scope_generator", enabled=True, frequency="1kHz", duty_percent=50, confirm_token=tok)
-        assert "switch it off" in await c.fails("scope_set_trigger", source="EXT")
-        await c.call("scope_generator", enabled=False)
-        r = await c.call("scope_set_trigger", source="EXT")
-        assert r["applied"]["source"] == "EXT"
+        assert (await c.call("scope_status"))["ext"]["generator_drives_pin"] is True
+        r = await c.call("scope_set_trigger", source="EXT")  # fw 0.2.9: selecting EXT switches the generator off
+        assert r["applied"]["source"] == "EXT" and any("generator was switched off" in x for x in r["caveats"])
+        st = await c.call("scope_status")
+        assert st["ext"]["generator_drives_pin"] is False and c.srv.device.settings.gen.enable == 0
         cap = await c.call("scope_capture", channels=["CH1"])
-        assert cap["trigger"] == "fired"
+        assert cap["trigger"] == "fired" and cap["ext_edge_seen"] is True
+        assert (await c.call("scope_status"))["ext"]["edge_seen_since_arm"] is True
     async with client_for(sim_factory(), tmp_path) as c:
         assert "0x1532" in await c.fails("scope_set_trigger", source="EXT")
 
