@@ -1,17 +1,12 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.19 (0.2.19: restart record + exceptions restart, see Known issues; 0.2.18: event-log snapshot re-armed only on request; 0.2.17: quiet boot without scope.bmp; 0.2.16: the tick runs nothing for SOF; CDC handler split into entry + body under
-PC_PROTOCOL; 0.2.15: event log 128 entries, SOF ignored, reset snapshot; 0.2.14: the USB IRQ fallback serves only after two quiet ticks; 0.2.13: System settings compacted without an RTC, battery level filtered; 0.2.12: USB IRQ fallback in the timer poll, GET_EVENT_LOG, protocol 1.5; 0.2.11: a request sent right after the port is opened is no longer dropped; 0.2.10: MCP chip drawn as one idempotent blit, acquisition "Roll mode on/off" toggle
-label; protocol 1.4: shared control, SD sector commands, EXT trigger for FPGA 0x1533
-(protocol section 14 row 41, needs bench with fpga-gen2's bitstream); 0.2.8: generator and trigger menus compacted; 0.2.7: SD_STAGE from the timer poll,
-RX back-pressure counters, our version on screen, chip drawn with the top bar, temperature only with an RTC; 0.2.6:
-menus hide what the hardware lacks, README "Hidden menu options"; 0.2.5: USB event counters; 0.2.3: chip above RUN/STOP and
-steady, one-step SET_TIMEBASE). 0.2.1 passed the protocol-level
-shared-control acceptance on the bench (owner's visual checks pending); 0.2.2 adds SD_* and two startup counters,
-built and host-tested, not benched. Read `CLAUDE.md` (repo root) first, then
-this file. For details, this file links to `firmware/README.md` (build, SD layout, FEL, memory budget, bring-up
-checklist), `docs/protocol.md` (the spec; section 14 lists every deviation from it) and
-`docs/plans/firmware-usb-protocol.md` (the original plan). It does not repeat them.
+Handoff fw-gen2 -> fw-gen3, 2026-10-18. Latest build: **fw 0.2.19** (protocol 1.5), not benched yet. The SD card
+and the bench run **0.2.11**, which stays there until the self-restart below is fixed. Read the root `AGENTS.md`
+first, then this file. Details live in `firmware/README.md` (build, SD layout, FEL, memory budget, boot, bring-up
+checklist), `docs/protocol.md` (the spec; section 14 lists every deviation and addition, rows 28-42 are this
+generation's) and `docs/hardware-status.md` (bench log, newest at the bottom). This file does not repeat them.
+
+**First job for fw-gen3:** the open crash in section 9. Everything else in section 17 waits for it.
 
 ## 1. Tree
 
@@ -47,7 +42,9 @@ their touch conditions): `fnirsi_1013d_scope.c`
 `touchpanel.c` (BUSY poll in `tp_i2c_read_status`), `fpga_control.c` (BUSY poll in the 0x05 wait,
 PC_UI_CAPTURE_START at the end of `fpga_do_conversion`), `power_and_battery.c` (PC_POWER_OFF, empty since 0.2.0),
 `timer.c` (1 ms ISR poll), `usb_interface.c`, `cdc_class.c/.h` (transport hooks, FIFO map, USB identity),
-`variables.h` (trace buffers rounded up to 4096 words). List with reasons: README section 5.
+`variables.h` (trace buffers rounded up to 4096 words), and since 0.2.19 `start.s` (restart record, section 10; the Makefile
+now passes $(PC_DEFS) to the assembler). Later UI work also touched `menu.c`, `statemachine.c`, `power_and_battery.c`
+(battery filter) and `fpga_control.c` (AL3 family version rule). List with reasons: README section 5.
 
 ## 2. Build and test
 
@@ -62,7 +59,7 @@ in long WSL command lines and Windows Python heredocs halve backslashes: put mul
 | `make check-reference` | PC_PROTOCOL=0 with GCC 10 + Atlan's build_time.h, `cmp` against Atlan's binary: must print IDENTICAL |
 | `make PC_DEBUG=1 BUILD=build-dbg` | adds DEBUG_FPGA + FORCE (caps 0x120) for bench tests T3/T7 |
 | `make PC_FIFO_MAP=1 ...` | alternative USB FIFO layout (version string `-m1`) |
-| `make -C host_tests test` | host gcc: test_protocol, test_session (release + PC_DEBUG), check_vectors.py |
+| `make -C host_tests test` | host gcc: test_protocol, test_rx_ring (all 2048 ring phases), test_session + mock_hal (release + PC_DEBUG; 762 / 760 checks on 0.2.19), check_vectors.py (79 vectors). None of them models usb_interface.c, the IRQ dispatcher or the timer-tick USB path |
 | `python host_tests/bench_link.py COM10 [--census 2000] [--fel]` | on the bench PC, needs pyserial |
 
 "IDENTICAL to reference" means: with PC_PROTOCOL=0 every hook compiles away and the image is byte-identical to
@@ -80,7 +77,7 @@ PC_PROTOCOL=0 vs 1 builds; new files are also clean with -Wextra).
 4. The scope enumerates as COM10 on Windows (VID:PID 1209:0001, serial 1013D-0001), or attach it to WSL as
    /dev/ttyACM0 for Linux cdc_acm.
 
-The SD card keeps Atlan's v1.00o5 package (boot mode 4). One serial user at a time; ask the owner to keep hands off
+The SD card boots our 0.2.11 from sector 750 (persisted with SD_STAGE + SD_WRITE_SECTORS, see section 13). One serial user at a time; ask the owner to keep hands off
 the screen during tests (menus are modal and defer commands). The power-off ISR still writes settings to sector 709
 (1.00o5 behaviour); with PC_FORCE_CDC=1 that save stores "USB CH340 mode" = on.
 
@@ -109,7 +106,8 @@ the screen during tests (menus are modal and defer commands). The power-off ISR 
 - INDEX (EPIND) discipline: every non-USB-ISR path that touches indexed endpoint registers masks IRQs (CPSR I) and
   saves/restores EPIND (`pc_irq_save`). USB ISR paths set EPIND explicitly; IRQs do not nest.
 - 1.00o5's bus-reset handler flushes CSRs with EPIND = 0 (not EP2); `pc_usb_isr_link` flushes EP2 itself.
-- SOF interrupt is not enabled in protocol builds.
+- SOF interrupt is not enabled in protocol builds, but the SOF flag (INTUSB bit 3) still latches every frame. Any code
+  that reads INTUSB outside the real ISR must ignore it (0.2.12-0.2.15 did not, see section 11).
 - DTR: pyserial asserts DTR on open. DTR 1->0 flushes TX (1.2 also released REMOTE); DTR 0->1 flushes
   a leftover frame. Windows usbser sends GET_LINE_CODING when the app calls SetCommState (pyserial reconfigure),
   also mid-transfer. Windows-side reads of 20-33 KiB stalled in the host stack (fixed in mcp/); Linux cdc_acm
@@ -178,132 +176,232 @@ T5 trigger_addr alignment, T6 0x18 after auto timeout, T7 FORCE via 0x1A=0 (PC_D
 reference on every range, T9 RGB565 framebuffer (READ_SCREEN not built), T10 stock trigger core (needs the stock
 bitstream restored from backups/). Procedures: protocol section 12, README section 5 checklist.
 
-## 8. Known issues (numbers from the bench, 2026-10-18)
+## 8. Version ladder (bench-relevant images)
 
-- Request corruption: fixed in 0.1.6 (RX ring-wrap split FIFO read, see section 4) and confirmed on the bench: 0.1.6
-  census 2000 PINGs 0 E_BAD_CRC 0 no response, 100 x 64 KiB 0 failed, hdr_crc 0, payload_crc 0. The 0.1.5 census had
-  77 E_BAD_CRC + 9 no response, every diff starting exactly at a 2 KiB boundary of rx_bytes. 0.1.7 adds
-  pc_rx_ring.h + the all-phase host test (no behaviour change). PC_FIFO_MAP=1 can go.
-- Startup, 0.2.2 bench: counters 27-30 reported as 2, 1515, 30, 1 (the first capture "processed" before the first
-  conversion started, which program order rules out: probably an index or decoding slip, raw list requested).
-  0.2.4 adds first-pass marks 31-34 (after battery, acquisition, touch, RTC; ms + 1). Suspects for the ~1.5 s: the
-  touch handler's first scan, the RTC block (only with the RTC enabled), the first full draw. Earlier:
-  bench 0.2.1 counters 27/28 = 3 ms to the first MAIN poll, 1516 ms first UI pass (the earlier "5 s"
-  included the host's startup grace). Nothing slow runs between usb_device_init and the loop. 0.2.2 adds counters
-  29/30: first MAIN poll -> first UI conversion started (after its 0x05 wait), -> first UI capture processed. Read
-  them to split the pass into battery/0x05 wait, capture, and drawing/touch/RTC; then trim the slow part (or let the
-  first pass skip it). Until then hosts see `ui_busy` = 2 STARTING. History: fw 0.1.3, Windows, no retries, idle scope: PING x1000 LOCAL 42
-  E_BAD_CRC + 4 no response, REMOTE 40 + 5; 64 KiB x100: 1 (LOCAL) / 8 (REMOTE) no response. 0.1.2 (OUT FIFO at
-  0) had 0 E_BAD_CRC but ~2% no response. Responses are always clean. 0.1.5 adds GET_BAD_FRAME, the RX sweep,
-  GET_LINK_STATS and PC_FIFO_MAP=1. Next step: `bench_link.py COM10 --census 2000` on map 0 and map 1, read the
-  diffs (which byte offsets, what content: EP0 setup bytes `a1 21 ...`? shifted data? constant pattern?) and the
-  counters (rx_swept, link_resets, rx_packets vs requests sent). Acceptance: 0 E_BAD_CRC, 0 no response in 2000
-  PINGs + 100 x 64 KiB. Ideas not yet tried: unload EP2 OUT with 32-bit reads only (pad the ring position to 4),
-  read RXCOUNT twice, check RXCSR DataError/Overrun on bad packets, try the FIFO on Linux to separate host effects.
-- RX corruption under back-pressure (parked 2026-10-18, known issue): bench 0.2.3 SD persist had rx_stalls 307,837,
-  hdr_crc 660, duplicates 658, then a host WriteFile error 22 and a re-enumeration. Not explained by code reading
-  (only the ring code unloads EP2 OUT; the stall path clamps the count before the room check; a release always has
-  room for one packet; the stall count far exceeds the packet count). Since 0.2.7 SD_STAGE is served from the timer
-  poll and the flash tool writes 32 sectors per SD_WRITE: 0.2.7 persist 5.3 s, rx_stalls 0, hdr_crc 0, duplicates 0,
-  and the branch counters (GET_LINK_STATS 41-46) never fired. No shipped host flow reaches back-pressure any more.
-  Repro idea if it matters again: a host that floods 492-byte PINGs without reading responses, then read 41-46.
-- First request after opening the port (fixed in 0.2.11): the DTR-up link event was taken only in the MAIN poll and
-  reset the parser including a complete pending request; the timer poll had already parsed the host's first
-  main-loop request (TEST_PATTERN after a FEL load, bench 0.2.8/0.2.9), so it vanished without an answer and without
-  a counter. Link events are now taken in every poll context, and DTR-up keeps a pending request. Test:
-  test_dtr_up_keeps_request.
-- Startup (closed 2026-10-18): 1515 ms from session init to the first MAIN poll is the 1.00o5 splash
-  (`load_picture("scope.bmp")`); kept by decision, documented in README section 4 ("Boot"). The first pass is 31 ms.
-- Restart from RAM (0.2.16 bench, open): uptime 175 s after 7+ min of running, #VER unchanged, three bench runs died
-  after "#VER OK". Not a watchdog or power reset (that boots the card's 0.2.11): a jump to 0 (low vector 0 =
-  ldr pc, _jump_reset) or 0x80000000 (eGON branch to _reset), i.e. a NULL function call or a corrupt return address;
-  1.00o5's exception vectors only spin (b .), so an exception would have hung, not restarted. No IRQ nesting: nothing
-  re-enables IRQs inside a handler (pc_irq_save/restore keep the I bit), the IRQ entry reloads SP at the top of the
-  IRQ stack (100 KB). 0.2.19 records the reset-entry LR/SP/CPSR and every exception (type, LR, SPSR, SP) at
-  0x81A00000 (free DDR: BSS ends at 0x805A5030, the bootloader's sector-710 copy is at 0x81BFFC00), restarts on
-  exceptions, and reports them: GET_LINK_STATS 49-56, event type 15. ENTER_FEL clears the record. Makefile: start.s
-  now gets $(PC_DEFS).
-- USB drops (Windows error 22, device re-enumerates): 0.2.2 idle with the port closed, 0.2.3 during an SD write,
-  0.2.11 during 10 Hz GET_STATUS polling (counters: one extra suspend + one extra bus reset = one host port reset;
-  no stalls, CRC errors or aborts). Prime suspect (not proven): a lost USB interrupt. 1.00o5's irq_handler clears
-  INTC pending by writing 0 after reading it; EP2 OUT has the sweep and EP2 IN the pump kick as fallbacks, EP0 had
-  none, so a lost EP0 interrupt leaves a control transfer unanswered until the host fails the device. 0.2.12 runs
-  the CDC handler from every timer tick (flags stay latched until read), counts the hits (GET_LINK_STATS 47) and
-  logs the last 64 USB/link events (GET_EVENT_LOG). Next drop: read counter 47 and the log right after it.
-  0.2.12 bench: counter 47 = 46,033 in 3 min (the tick won the dispatch race against the real USB IRQ, timer handler
-  first), plus one 64 KiB loss / tx_abort right after boot (not reproduced, no mechanism found: main-loop TX code
-  masks IRQs and the two handlers never nest). 0.2.14 serves the flags only after two consecutive ticks without a real
-  USB interrupt, so the fallback never runs during traffic and counter 47 counts lost-interrupt candidates only.
-  0.2.12 soak (10 Hz GET_STATUS, selective suspend off): two drops 7 s apart, the first with three suspend+reset
-  pairs (Windows retrying), the event log useless: ~1000 type-14 events/s, all INTUSB = 0x08 (the SOF flag latches
-  every frame even with its interrupt off). 0.2.15: SOF ignored for counter 47 and type 14, type 14 rate-limited to
-  10/s, ring 128, and the 16 events before the first bus reset since the last read are frozen (GET_EVENT_LOG tail).
-  0.2.14 bench: counter 47 still 11.8k in 2 min (SOF; the real ISR never runs for it, so the quiet gate passed) and
-  a second 64 KiB census loss (1/100 on 0.2.12 and 0.2.14, 0 in ~800 on 0.2.6-0.2.11): the tick-run handler is the
-  suspect. 0.2.16: usb_device_CDC_irq_handler (1.00o5) is split under PC_PROTOCOL into the entry (reads the flags)
-  and usb_device_CDC_irq_body(flags); the tick reads the flags itself and calls the body only for non-SOF flags.
-  Retest: 64 KiB x 300 should be 0 failed and counter 47 0 in a clean session.
-  0.2.16 bench: 300 x 64 KiB 0 failed (the tick-run handler was the 64 KiB regression), counter 47 = 16 in ~7 min,
-  every hit INTRX EP2 after 2-3 ms without any USB interrupt: real lost interrupts (no main-loop code masks IRQs for
-  more than microseconds), so the fallback does its job and EP0 can lose interrupts the same way. usb_bus_resets 12
-  / suspends 10 over 6 sessions with no drop seen by the host (link_resets 22 = 12 + 10, consistent): the resets had
-  been evicted from the 128-entry ring, and the snapshot was re-armed by reads; 0.2.18 keeps it frozen until a read
-  with flag bit 0. Open: why Windows resets the port about twice per session (silent recoveries?).
-- USB "Error state" incident (0.2.2, lead): port closed, scope idle ~10 min, then Windows showed the device present but
-  in an error state (CreateFile failed); a cable replug recovered it. Not reproduced, cause unknown. Code reading:
-  the suspend path calls pc_usb_isr_link, which flushed a held-back OUT packet but left EP2 OUT masked in INTRXE
-  (only SET_CONFIGURATION unmasks it, and a resume sends none), so RX fell back to the 2 ms sweep: fixed in 0.2.5
-  (unmask in the link hook and on RESUME when configured). That would not make Windows fail the device, though.
-  Other candidates not verified: Windows selective suspend of the idle CDC device followed by a failed resume or
-  reset-resume; the 1.00o5 bus-reset handler writes TXCSR/RXCSR = 0 and the TX FLUSH bit with EPIND 0 (on CSR0 that
-  bit is DataEnd). 0.2.5 counts bus resets, suspends, resumes, disconnects and EP0 setups (GET_LINK_STATS 35-40):
-  read them before and after a reproduction (port closed 10+ min). Host-side check: disable "Allow the computer to
-  turn off this device" for the port / USB selective suspend and see whether it still happens.
-- pass_max_ms showed 1515 after boot in 0.1.2: that was the boot interval, excluded since 0.1.4.
-- Latency: PING ~1 ms (ISR poll); non-safe commands wait one UI pass (35-75 ms; 1.2 REMOTE was ~0.2-0.6 ms).
-- Upstream: 32 GCC 13 warnings (unused variables, implicit `usb_CDC_in_ep_callback` in menu.c), menu debug helpers
-  print nothing in protocol builds, 1.00o5 UI pointer math off by one in the wrapped case (left as is for LOCAL).
-- ENTER_FEL works on the bench (hands-free loop proven). It does not save settings.
+Every bench image is pinned as `backups/fw-<version>-<sha256 prefix>.bin` (gitignored). Older images (0.1.4-0.2.10)
+are pinned the same way; their history is in `git log -- firmware` and docs/hardware-status.md.
 
-## 9. Conventions
+| fw | commit | sha256 | change | bench result |
+|---|---|---|---|---|
+| 0.2.11 | 1594918 | af4b7f30 | a request sent right after the port opens is kept (DTR-up no longer resets a pending request) | accepted: census clean, 20/20 open-then-request; **on the SD card**; one USB drop during 10 Hz polling |
+| 0.2.12 | e797f25 | c9270dd3 | timer tick runs the whole CDC IRQ handler (lost-IRQ fallback), counter 47, GET_EVENT_LOG, protocol 1.5 | counter 47 = 46k in 3 min (race with the real IRQ), 1/100 64 KiB lost, soak: 2 drops, and it **restarted** (event-log `now` 326 s after ~520 s) |
+| 0.2.13 | 7ebda04 | 691d0d28 | System settings compacted without a DS3231; battery level averaged with hysteresis while charging | not benched alone; owner verdicts pending |
+| 0.2.14 | d6a6b37 | aa4a142c | fallback only after two quiet ticks; EXT ground note | counter 47 = 11.8k in 2 min (SOF defeats the gate), 1/100 64 KiB lost |
+| 0.2.15 | c4989e5 | b0cec01f | SOF ignored for counter 47 / type 14, event log 128, frozen pre-reset snapshot | superseded unbenched, not pinned |
+| 0.2.16 | 079f648 | 5f25b9e7 | CDC handler split into entry + body; the tick reads the flags and runs the body only for non-SOF flags | 300 x 64 KiB clean, counter 47 = 16 in 7 min (real lost RX IRQs), **self-restarts** under bench traffic |
+| 0.2.17 | 0c13045 | 02aa445a | quiet boot: no "Failed to open file" box without scope.bmp, counter 48 | built, host-tested; owner verdict pending |
+| 0.2.18 | 50c9802 | ed117dc5 | event-log snapshot re-armed only with request flag bit 0 | built, host-tested, not benched |
+| 0.2.19 | 55d5c5b | 9b94c9a8 | restart record at 0x81A00000, exception vectors record and restart, counters 49-56, event type 15 | built, host-tested, disassembly checked; **ELF kept at backups/fw-0.2.19-9b94c9a8.elf** |
 
-- No libc (`-nostdlib`): no strcmp/printf; memcpy/memset/memcmp/memmove come from the .s files. No `double` or
-  float in acquisition or protocol paths (soft float). 64-bit integer math is fine (libgcc).
-- PC_PROTOCOL=0 must stay byte-identical (`make check-reference`). Hardware behaviour in LOCAL must not change.
-- Small commits, one topic each, touching only firmware/ (and docs/protocol.md section 14 for deviations),
-  message ending with the Co-Authored-By line. Python edits from Windows: open files with `newline=''` (and
-  `encoding='latin-1'` for the 1.00o5 sources, which contain non-ASCII comments) or line endings/encoding break.
-- Bump `PC_FW_VERSION` (pc_cmds.h) for every image handed to the bench; additions to the protocol bump
-  `PC_PROTO_MINOR` (pc_protocol.h) and get a row in protocol section 14; tell the MCP agent.
-- Report every bench image with path + sha256 (`build-gcc10-pc/fnirsi_1013d.bin`).
+All of 0.2.12-0.2.19 contain the tick fallback; 0.2.11 does not. Full 0.2.19 sha256:
+9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4.
 
-## 10. TODO, in priority order
+## 9. Open crash: self-restart from RAM (seen on 0.2.12 and 0.2.16)
 
-1. Bench state (2026-10-18): 0.2.10 benched by the lead (census clean, first request OK, chip/Roll/menus with the
-   owner); 0.2.11 (first request after a port open) benched and accepted: census clean, open + TEST_PATTERN first +
-   close 0/20 failures (the fnirsi1013d transport's open sequence also passed 0/20 on 0.2.10, so only the host test
-   discriminates; bench_link's minimal open is what hit the race). Pending owner verdicts: chip stable while free-running (0.2.10), "Roll mode"
-   label (0.2.10), compacted generator/trigger menus (0.2.8). Pending EXT bench: 0.2.9+ with fpga-gen2's 0x1533
-   (caps 0x0008, trigger menu EXT, GET_STATUS byte 42, latency measurement). Persist path verified on 0.2.7 (5.3 s).
-2. Bench the SD commands (0.2.2, protocol section 14 row 40): SD_INFO VERIFY on the owner's card (sector 750 must
-   show eGON.EXE, check 1), SD_READ_SECTORS of 16 / 80 / 750 against backups/, then persist an image with
-   SD_STAGE + SD_WRITE_SECTORS from 750 (back up 750..2047 first), SD_INFO VERIFY, power-cycle boot. Host tool:
-   mcp/ (not this agent's). Design as built (the original notes below are kept for reference):
-   - SD_STAGE fills a 64 KiB staging buffer (484 B per request); SD_WRITE_SECTORS commits up to 128 sectors with
-     magic 'SDWR' and the stage CRC-32, reads back, compares, answers the CRC on the card. Window [16, min(first
-     partition, 2048)); no valid MBR = writes off; 16-79 need flag BOOT, 708-710 flag CONFIG. Power-key EINT held off
-     during writes (IRQs stay on: the SD driver times out on timer0 ticks). New error E_IO 13.
-   Original design notes:
-   - hardware-changing tier (1.3: no REMOTE; refuse while a capture runs or require STOP); MAIN context (SD access is not reentrant; the power-off ISR also writes
-     SD, so mask the power interrupt or check `viewactive` around the write).
-   - Allowed range: sectors 16..2047 and below the first partition start read from the MBR at runtime; refuse
-     708-710 (calibration, settings, display/boot byte) unless an explicit flag targets them.
-   - Payload: u32 sector, u16 count, data (count x 512, at most 492 B per request frame, so sectors go in pieces:
-     either a 512-byte staging sector assembled from offsets, or raise the request frame limit for this command).
-     Read-back verify after every write, answer the CRC-32 of what is on the card.
-   - SD_INFO: card size, partition start, eGON header (magic, length, checksum) at sectors 16, 80 and 750.
-   - Driver: `sd_card_read`/`sd_card_write` in sd_card_interface.c (used by close_open_menus for sector 710).
-3. Bench tests T3-T8 and T10, then clear the UNVERIFIED caps / set FORCE_TRIGGER in release builds.
-4. Phase 2/3 commands: READ_LIVE, READ_SCREEN (T9), ACQUIRE_AVG (128 KiB accumulators), full-speed fallback.
-5. Per-unit USB serial (SID/eFuse) and a real pid.codes PID before anyone else flashes this.
-6. Optional: composite CDC + MSC (needs TinyUSB-style rework; see plan section 9).
+Symptom (lead, 0.2.16): under repeated full bench_link runs the device restarts itself. GET_STATUS uptime_ms read
+175 s after 7+ minutes of running, `#VER` still 0.2.16, three bench runs died right after "#VER OK". 0.2.12 showed
+the same signature: GET_EVENT_LOG `now` 326 s after about 520 s. A watchdog or power reset would boot the card's
+0.2.11, so this is a jump back into the loaded image: to address 0 (low vector 0 is `ldr pc, _jump_reset`) or to
+0x80000000 (eGON branch to `_reset`). Up to 0.2.18 the exception vectors spun (`b .`), so an exception would have
+hung, not restarted: the cause is a NULL function call, a corrupt return address or a stack overwrite (inference).
+
+Ruled out by code reading (fw-gen2; verify if in doubt):
+- The 1.00o5 dispatcher `irq_handler` (interrupt.c) checks for a NULL handler, so a stray pending IRQ does not call 0.
+- IRQs never nest: nothing re-enables IRQs inside a handler (`pc_irq_save/restore` keep the I bit), and the IRQ entry
+  in start.s reloads SP at the top of the 100 KB IRQ stack.
+- 1.00o5's own CDC send paths (`usb_CDC_in_ep_callback`, PC_interface.c) are no-ops under PC_PROTOCOL.
+- Requests are zero-extended into `s->req` before dispatch, so short payloads cannot read stale bytes.
+
+Suspects, in the lead's order, with where to look:
+1. **Tick path runs the USB handler outside the USB ISR.** `pc_usb_poll_irq` (pc_transport.c, about line 535) is
+   called from the timer glue in pc_hal_scope.c (about line 1257, right before `pc_poll(PC_CTX_ISR)`). After two
+   quiet ticks it reads INTUSB/INTTX/INTRX and calls `usb_device_CDC_irq_body` (usb_interface.c, split from
+   `usb_device_CDC_irq_handler` under PC_PROTOCOL) in timer-IRQ context with `pc_usb_in_poll` = 1. Check what the body
+   can do there that the real ISR never does: EP0 setup handling with a stale `usb_setup_packet`, the bus reset and
+   SET_CONFIGURATION paths, EP1/EP2 callbacks, every function pointer it calls. Only 0.2.12+ have this path, so the
+   30-minute 0.2.11 baseline soak the lead is running is the discriminator. Quick experiment: 0.2.19 with
+   `pc_usb_poll_irq` returning at once, under the same bench_link loop.
+2. **MUSB Index register (EPIND).** The body writes EPIND without restoring it (usb_interface.c, the
+   `*USBC_REG_EPIND = ...` lines around 413, 481, 649, 697, 708, 723; the real ISR does the same). Main-loop and
+   BUSY-context transport code masks IRQs and saves/restores EPIND (pc_transport.c, the `epind` blocks around lines
+   200-438), so by reading no unprotected user exists. Re-check with a grep for `USBC_REG_EPIND`, the indexed CSR
+   registers and RXCOUNT over every file, including 1.00o5's menu.c debug helpers and mass_storage_class.c.
+3. **Event ring and snapshot indexing.** `pc_evlog_add` (pc_transport.c, about line 78) indexes with
+   `& (PC_EVLOG_SIZE - 1)` (128) and freezes up to `PC_EVSNAP_SIZE` (16) entries; `pc_hal_event_log` (about line
+   592) and `pc_hal_event_snapshot` copy them; `h_get_event_log` (pc_cmds.c, about line 729) writes
+   12 + 8 x 128 + 8 + 8 x 16 = 1172 bytes into the TX staging buffer. Sizes must stay powers of two. `pc_evlog_add`
+   runs from the USB ISR, the timer ISR and main-loop code: every main-loop caller must hold IRQs off
+   (`pc_usb_log_restart` does; check the others, e.g. the DTR, TX flush/abort and RX release paths).
+
+Other places worth a look if those come up empty: the TX pump called from both the tick and the EP2 TX ISR on the
+same staging state, the deferred and held request paths (READ_RAW hold), `pc_hal_indicator`'s blit (`pc_chip_px`
+bounds), and IRQ stack depth (USB body + `pc_poll(PC_CTX_ISR)` + a handler in one tick).
+
+Build variants for experiments: `make gcc10` (bench), `make`, `make PC_DEBUG=1 BUILD=build-dbg`,
+`make PC_FIFO_MAP=1`, `make check-reference`. fw-gen2's script built all five plus sha256 in one go; recreate it as
+a script file (section 2 on quoting).
+
+## 10. Reboot-reason record (0.2.19)
+
+As built, in `start.s` under `#if PC_PROTOCOL`:
+- At `_reset` it stores LR, SP and CPSR as found to 0x81A00000 + 8 / 12 / 16. After a jump to 0 or 0x80000000, LR
+  points just past the culprit call (or holds the stale LR of a corrupt `bx lr` / `pop {pc}`). The CPSR mode bits
+  give the context: 0x12 IRQ (tick or USB ISR), 0x13 SVC (main loop).
+- Every exception vector sets r11 = type (1 undefined instruction, 2 SWI, 3 prefetch abort, 4 data abort, 5 reserved
+  vector, 6 FIQ) and branches to `pc_exception_common`. That stores type, LR, SPSR and SP of the exception mode plus
+  the magic 0x45584321 at +20..+36, then branches to `_reset`. Fault PC = LR - 8 for a data abort, LR - 4 for an
+  undefined instruction or prefetch abort.
+
+Record layout, u32 words at 0x81A00000 (free DDR: .bss ends at 0x805A5030, the bootloader's sector-710 copy sits at
+0x81BFFC00): [0] alive magic 0x4C495645, [1] restart count, [2] reset LR, [3] reset SP, [4] reset CPSR,
+[5] exception type, [6] exception LR, [7] SPSR, [8] exception SP, [9] exception magic.
+
+`pc_restart_check` (pc_hal_scope.c, about line 1147, first call in `pc_glue_init`) counts a restart when the alive
+magic of the previous run is present, copies the fields (exception fields only with the exception magic), clears [9]
+and sets the alive magic. `pc_glue_init` then logs event type 15 (a = exception type, 0 = plain jump to the entry;
+b = low 16 bits of the exception LR, or of the reset LR). ENTER_FEL (`pc_restart_clear`) zeroes [0] and [1], so a
+deliberate FEL reload does not count. Host side: GET_LINK_STATS 49-56 (`restarts`, `restart_exc_type`,
+`restart_exc_lr`, `restart_exc_spsr`, `restart_exc_sp`, `restart_reset_lr`, `restart_reset_sp`,
+`restart_reset_cpsr`), named in host_tests/bench_link.py and in mcp/.
+
+Caveat (inference): DDR keeps its contents through a short power cycle and through a boot-menu FEL load, so a
+`restarts` of 1 right after either may be false; the reset LR and CPSR then point into the bootloader or FEL path,
+not into the image. Mapping an address to code:
+
+```
+wsl -d Ubuntu -- arm-none-eabi-addr2line -f -e /mnt/d/src/fnirsi-1013d-ai/backups/fw-0.2.19-9b94c9a8.elf 0x800xxxxx
+wsl -d Ubuntu -- bash -lc "arm-none-eabi-objdump -d /mnt/d/src/fnirsi-1013d-ai/backups/fw-0.2.19-9b94c9a8.elf > /tmp/fw.dis"
+```
+
+Keep the ELF of every later bench image next to its .bin: a rebuild moves addresses.
+
+## 11. USB: lost interrupts, the tick fallback, SOF, port resets
+
+- **Lost interrupts.** 1.00o5's `irq_handler` reads INTC pending and then writes 0 to it, so an interrupt raised
+  between the read and the write is lost. It also dispatches in IRQ-number order, so the timer handler runs before
+  the USB handler when both are pending. The MUSB keeps its INTUSB/INTTX/INTRX flags latched until they are read, so
+  a lost USB interrupt leaves its flags waiting. EP2 OUT had the 2 ms RX sweep and EP2 IN the pump kick as fallbacks;
+  EP0 had none, so a lost EP0 interrupt leaves a control transfer unanswered until Windows fails the device (prime
+  suspect for the error-22 drops, not proven).
+- **The fallback** (`pc_usb_poll_irq`, 0.2.12+). 0.2.12 ran the whole handler on every tick and won the dispatch race
+  against the real IRQ during traffic (counter 47 = 46,033 in 3 min). 0.2.14 added the **quiet-tick gate**: serve
+  only after two consecutive ticks without a real USB ISR run (`pc_usb_isr_flags` counts runs). A flag the real
+  interrupt is about to serve makes it run before the second quiet tick.
+- **SOF.** The SOF flag (INTUSB bit 3) latches every frame although its interrupt is off, so the gate passed and the
+  handler ran 300-500 times per second (0.2.14: counter 47 = 11.8k in 2 min; event log flooded with type 14, all
+  INTUSB = 0x08). 0.2.12 and 0.2.14 each lost one 64 KiB census response, attributed to the tick-run handler. 0.2.15
+  ignored SOF for the counter and the log; 0.2.16 split the 1.00o5 handler into entry (`usb_device_CDC_irq_handler`,
+  reads the flags, calls `pc_usb_isr_flags`) and body (`usb_device_CDC_irq_body(usb, tx, rx)`), and the tick reads
+  the flags itself and runs the body only for a flag other than SOF. 0.2.16 bench: 300 x 64 KiB clean, counter 47 =
+  16 in about 7 min, every hit INTRX EP2 after 2-3 ms without any USB interrupt: real lost interrupts, so EP0 can lose
+  them the same way.
+- **Open: about two suspend + bus-reset pairs per session.** 0.2.16 counted usb_bus_resets 12 and suspends 10 over 6
+  sessions with no drop seen by the host (link_resets 22 = 12 + 10). A host port reset shows as suspend, then bus
+  reset. Unknown whether Windows silently recovers a failed control transfer, resets on port open, or something
+  else. The 0.2.18 frozen snapshot (re-armed only on request) is the tool: read GET_EVENT_LOG without flag bit 0
+  right after a session, look at the 16 events before the first reset.
+- **Drops seen** (Windows WriteFile error 22, device re-enumerates): 0.2.2 idle with the port closed, 0.2.3 during an
+  SD write under back-pressure, 0.2.11 during 10 Hz GET_STATUS polling, 0.2.12 soak (two drops 7 s apart, the first
+  with three suspend+reset pairs). The owner turned Windows USB selective suspend off before the 0.2.12 soak.
+- **"Error state" incident** (0.2.2, port closed ~10 min, device present but CreateFile failed, cable replug
+  recovered): not reproduced. 0.2.5 fixed EP2 OUT staying masked in INTRXE after suspend/resume. Other candidates
+  (selective suspend + failed resume; 1.00o5's bus-reset handler writing CSRs with EPIND 0) unverified.
+
+## 12. Diagnostics wire reference
+
+**GET_LINK_STATS 0x0007** answers u16 n, u16 0, then n u32 counters since boot. Decode by n (word 0 is the count).
+Authoritative text: protocol section 14 rows 28 and 38.
+
+| n | firmware | indexes added |
+|---|---|---|
+| 27 | 0.1.4-0.1.7 | 0-26: rx_packets, rx_bytes, rx_stalls, rx_swept, tx_packets, tx_zlps, tx_kicked, tx_flushes, link_resets, dtr_up, dtr_down, frames, hdr_crc, payload_crc, oversize, version, resp_dropped, rx_timeouts, junk_bytes, responses, duplicates, tx_aborts, disp_main, disp_busy, disp_isr, held, isr_skipped |
+| 29 | 0.2.0-0.2.1 | 27 init to first main poll (ms), 28 first pass (ms) |
+| 31 | 0.2.2-0.2.3 | 29 first conversion, 30 first capture (ms + 1 since 0.2.4) |
+| 35 | 0.2.4 | 31-34 first-pass marks: after battery, acquisition, touch, RTC |
+| 41 | 0.2.5-0.2.6 | 35-40 bus resets, suspends, resumes, disconnects, EP0 setups, EP0 bad setups |
+| 47 | 0.2.7-0.2.11 | 41-46 RX ISR stalls, releases, re-stalls, empty releases, RXCOUNT max, RXCOUNT > 512 |
+| 48 | 0.2.12-0.2.16 | 47 usb_irq_polled (meaningful only from 0.2.16) |
+| 49 | 0.2.17-0.2.18 | 48 boot splash ms + 1 |
+| 57 | 0.2.19 | 49-56 restart record (section 10) |
+
+**GET_EVENT_LOG 0x0009** (protocol 1.5, any poll context). Request: empty, or since 0.2.18 u8 flags (bit 0 = re-arm
+the snapshot after this read; other bits E_BAD_ARG detail 0). Response: u16 n (<= 128; 64 before 0.2.15), u16 0,
+u32 total events since boot, u32 now (ms, same clock as uptime_ms), n entries oldest first (u32 ms, u8 type, u8 a,
+u16 b). Since 0.2.15 a snapshot tail follows: u16 m (<= 16), u16 frozen (1 = a bus reset froze it), u32 reset ms, m
+entries (the events before the first bus reset since the snapshot was armed). 0.2.15-0.2.17 re-armed at every read;
+0.2.18+ only with flag bit 0. Types (pc_transport.h): 1 bus reset, 2 suspend, 3 resume, 4 disconnect, 5 EP0 setup
+(a = bRequest, b = bmRequestType << 8 | wValue low), 6 EP0 packet not 8 bytes (b = COUNT0), 7 SET_CONFIGURATION,
+8 CLEAR_FEATURE(HALT) (a = endpoint), 9 DTR (a = new DTR), 10 RX ring full, 11 RX release, 12 TX flushed, 13 TX
+aborted, 14 flags found by the tick (a = INTUSB, b = INTTX << 8 | INTRX; at most one per 100 ms), 15 restart
+(0.2.19, section 10).
+
+## 13. Boot, splash and SD package
+
+- Boot gap: about 1.5 s from session init to the first main-loop poll (counter 27 = 1515-1517 ms up to 0.2.16), first
+  pass 31 ms. Almost all of it is 1.00o5's splash step `load_picture("scope.bmp")`. Without the file (the normal
+  case) it showed "Failed to open file" for 700 ms: the brief error the owner saw at every boot.
+- 0.2.17 (quiet boot): `pc_glue_boot_splash` probes the file silently with `f_open` and skips the splash without a
+  message; with the file present it shows as in 1.00o5 (3 s). Counter 48 = ms spent + 1. Owner verdict pending.
+- `scope.bmp` must be the scope's own screenshot format: 800x480 RGB565 BMP, 768,070 bytes, 1.00o5's 70-byte header.
+  It adds about 4 s per boot, so the release package leaves it out. The FAT partition needs nothing at boot; picture
+  and waveform folders are created on the first save. README section 4 ("Boot", "SD card FAT partition").
+- Image placement: 740 sectors from 750, ends at 1489, below the FAT partition at 2048+. Persist path
+  (SD_STAGE + SD_WRITE_SECTORS, 32 sectors per write, SD_STAGE served from the timer poll since 0.2.7): 0.2.7 5.3 s,
+  0.2.11 5.7 s with read-back identical and the header verified. SD command design: protocol section 14 row 40;
+  writes need a valid MBR, window [16, min(first partition, 2048)), flag BOOT for 16-79 and CONFIG for 708-710,
+  power-key EINT masked during writes.
+
+## 14. Owner's UI verdicts
+
+Accepted: MCP chip (38 x 17 at x 127 y 3, above RUN/STOP, steady, one idempotent blit, stable while free-running on
+0.2.11), compacted generator and trigger menus (0.2.8), acquisition "Roll mode on/off" box (0.2.10), menus hiding
+what the hardware lacks (0.2.6), battery indicator stable on 0.2.11
+(battery likely full). Pending on 0.2.13+: System settings without the empty row (compacted when no DS3231 answers),
+battery hysteresis while charging from a lower level. Pending on 0.2.17+: quiet boot. Pending with fpga-gen2's 0x1533
+bitstream: EXT trigger (caps bit 3, trigger menu EXT, GET_STATUS byte 42). Owner policy: hide unsupported options;
+compact menus rather than painting over gaps.
+
+## 15. Other known issues and closed items
+
+- Request corruption (closed, 0.1.6): split-width FIFO read at the RX ring wrap, section 4; test_rx_ring covers it.
+- RX corruption under back-pressure (parked): 0.2.3 SD persist had rx_stalls 307,837, hdr_crc 660, duplicates 658,
+  then an error-22 drop. Not explained by code reading. No shipped host flow reaches back-pressure since 0.2.7
+  (counters 41-46 never fired). Repro idea: flood 492-byte PINGs without reading responses, then read 41-46.
+- First request after a port open (closed, 0.2.11): link events are taken in every poll context and DTR-up keeps a
+  pending request. Test: test_dtr_up_keeps_request.
+- Startup gap (closed): section 13.
+- Latency: PING about 1 ms (timer poll); non-safe commands wait one UI pass (35-75 ms).
+- Upstream: the 1.00o5 warnings (32-37 depending on the compiler) stay; menu debug helpers print nothing in protocol builds; 1.00o5
+  UI pointer math off by one in the wrapped case (left as is).
+- ENTER_FEL works hands-free on the bench. It does not save settings, and it clears the restart record.
+
+## 16. Conventions and bench rules
+
+- No libc (`-nostdlib`): memcpy/memset/memcmp/memmove come from the .s files. No `double` or float in acquisition or
+  protocol paths. 64-bit integer math is fine (libgcc).
+- PC_PROTOCOL=0 must stay byte-identical to Atlan's image: `make check-reference` prints IDENTICAL before every
+  commit that touches a 1.00o5 file, and every such change goes under `#if PC_PROTOCOL` or a pc_hooks.h macro.
+- No new warnings under GCC 13 or GCC 10 (compare sorted, line-number-free warning lists against PC_PROTOCOL=0).
+- Small commits, one topic each, touching only firmware/ (plus docs/protocol.md section 14 and
+  docs/protocol-vectors.json for wire changes), message ending with the Co-Authored-By line.
+- Edits from Windows: put Python edit scripts in a file and run them with absolute paths; open files with
+  `newline=''` and `encoding='latin-1'` for the 1.00o5 sources. Their blank lines carry trailing spaces, so anchor
+  edits on non-blank lines (the Write tool strips them).
+- Bump `PC_FW_VERSION` (pc_cmds.h) for every image handed to the bench; protocol additions bump `PC_PROTO_MINOR`
+  (pc_protocol.h), get a row in protocol section 14 and a message to mcp-gen2 (owns mcp/ and the simulator).
+- Report every bench image with path, commit hash copied from git output, and sha256 of
+  `build-gcc10-pc/fnirsi_1013d.bin`; pin the .bin and the ELF in backups/.
+- Bench: the agent never touches hardware. The coordinator (team-lead) owns COM10, FEL loads and SD writes. Never
+  flash anything without a verified backup; the stock firmware must stay bootable. Only the coordinator persists an
+  image to the card; 0.2.11 stays there until the crash is fixed.
+
+## 17. TODO, in priority order
+
+1. Fix the self-restart (section 9): get a 0.2.19 record from repeated bench_link runs, map it with the ELF, compare
+   with the 0.2.11 baseline soak, fix, bench, then let the lead persist the fixed image.
+2. Read the 0.2.18+ frozen snapshot after sessions to explain the two suspend+reset pairs per session (section 11).
+3. Owner verdicts on 0.2.13+ System settings and battery, 0.2.17+ quiet boot; EXT trigger bench with 0x1533.
+4. Bench tests T3-T8 and T10 (section 7), then clear the UNVERIFIED caps and set FORCE_TRIGGER in release builds.
+5. Phase 2/3 commands: READ_LIVE, READ_SCREEN (T9), ACQUIRE_AVG (128 KiB accumulators), full-speed fallback.
+6. Per-unit USB serial (SID/eFuse) and a real pid.codes PID before anyone else flashes this.
+7. Optional: composite CDC + MSC (needs a TinyUSB-style rework; plan section 9).
