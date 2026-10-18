@@ -172,3 +172,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   scope UI normal; cable replug recovered it. Reported to fw-gen2 (suspend/resume or DTR-down path suspected).
 - Firmware 0.2.3 (commit baee5b5, sha256 bbcb1d7b...): MCP chip above RUN/STOP (replaces the RTC clock slot while shown), steady, SET_TIMEBASE
   single-step apply. Loaded hands-free; visual verdict pending. Owner note: generator menu SINE/TRGL options have no effect on the 1013D (no DAC) -> hide.
+- Owner's verdict on 0.2.3: SET_TIMEBASE clean; MCP chip placed right and gone on disconnect, but blinks off momentarily on top-bar redraws (fix requested).
+- SD persist bench (0.2.3): SD_INFO VERIFY OK; SD_READ 757 sectors 0.53 s; first `flash --persist-only` FAILED at 262144/387584 B (host WriteFile error 22,
+  device dropped off USB and re-enumerated; card left with a partial image at 750), second run succeeded: 34 s (11 KiB/s), SD_READ compare identical,
+  header verified; card now holds 0.2.3. Counters showed hdr_crc 660 / duplicates 658 under rx_stalls 307837 => request corruption under RX
+  back-pressure + SD_STAGE bound to UI passes (~5.8 s per 64 KiB). Both with fw-gen2.
