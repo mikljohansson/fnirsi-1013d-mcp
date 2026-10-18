@@ -507,3 +507,22 @@ Newest entries at the bottom. Format: date, who, what, result.
 - Owner: the diagnostics view shows the v2 calibration data. fw-cal (~500k tokens) is writing its handoff; fw-cal2 will build v3 (per-core,
   per-class gain from the voltage-calibration steps; the PWM-slope ratio predicted the sign but only half the magnitude of the measured gated
   gain mismatch).
+- **Gain bench, CH1 at -1.0045 V DC (DMM -1.005/-1.004), range 2, dcoffset 0, 4 captures averaged (backups/gain_bench_neg1V.json
+  incl. the GET_CAL dumps, script scratchpad gain_bench.py), fw 0.2.43, scope on all day:** firmware READ_TRACE A/B: 200 MSa/s 99.49/100.07
+  (-0.58), 1 MSa/s 98.76/99.41 (-0.65), 10 kSa/s 98.73/99.46 (-0.73), CIC2 99.88; raw A/B: 200 MSa/s 103.06/100.14, gated 101.88/96.85.
+  Host volts: 200 MSa/s -0.973, 1 MSa/s -0.997, 10 kSa/s -0.997, CIC2 -0.970.
+  **Combined with the +1.0045 V point (endpoint gains over 2.009 V):**
+  - Full-rate class: A 28.62 codes/V, B 27.71 codes/V, **A/B = 1.033** (same 3.1-3.4 % at both polarities): a genuine core gain
+    mismatch. Both cores' +/-1 V midpoints land within 0.12 code of the shorted-input raw zero, so the full-rate transfer is linear.
+  - Gated class: A 28.54, B 28.42 codes/V, **A/B = 1.004**: the cores match in gain. The "1.7 % B higher" from the +1 V point alone was a
+    zero error: core A's +/-1 V midpoint sits 0.53 code below its shorted-input raw zero (B: +0.08), i.e. about 0.5 LSB of relative
+    INL/bow in core A at the slowed clock (AD9288 INL spec order), which a linear gain cannot remove. The firmware trace A-B difference is
+    -0.4 at +1 V and -0.65 at -1 V (same sign both ends), consistent with that bow and not with a gain term.
+  - Class gain: full-rate mean 28.17 codes/V vs gated 28.48 (full 1.1 % lower). CIC2 spans 28.02 codes/V, i.e. the CIC path carries the
+    full-rate class gain (its 8-bit mean of both cores) as expected from its full-speed encode clock.
+  - Host volts model (single uv_per_lsb, calibrated at the gated rate): 0.3-0.8 % low at gated rates, 2.7-3.5 % low at 200 MSa/s and in
+    CIC2. **Conclusion for v3:** one gain per core and class is enough (no split above/below zero); the full-rate class needs it
+    (3.3 % A/B, 1.1 % class), the gated class barely (0.4 %); the residual 0.5-code bow at gated rates is INL and stays.
+- mcp-gen3's GET_CAL v2 host decoder verified against the live scope: both channels report version 2, flags block_loaded, bound,
+  current_divider_gated; stored full-class zeros 129.3-130.8 codes, gated 127.9-128.1, slopes -0.259..-0.266 codes/count; a shared-mode
+  capture through the v2 volts path read CH2 (shorted, range 6) at +1.4 mV and CH1 at the -1 V reference.
