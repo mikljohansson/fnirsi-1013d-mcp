@@ -192,7 +192,7 @@ static void pc_leave_remote(pc_session *s, uint8_t reason, int keep, int link_up
     pc_drop_deferred(s);
 
   //2./3. restore the UI snapshot unless kept, push everything to the FPGA, redraw
-  pc_hal_remote_exit(keep);                                                          //BENCH: T8 (UI comes back intact)
+  pc_hal_remote_exit(keep);                                                          //BENCH: plan 11.3 step 3 (UI comes back intact)
 
   s->control      = PC_LOCAL;
   s->acq_state    = PC_ACQ_IDLE;
@@ -505,7 +505,7 @@ static int h_set_remote(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
 
     if(s->control != PC_REMOTE)
     {
-      //We are in the MAIN context at the top of the loop: no UI transaction is open    BENCH: T8 (snapshot/restore)
+      //We are in the MAIN context at the top of the loop: no UI transaction is open    BENCH: plan 11.3 step 3
       pc_hal_remote_enter();
       s->control   = PC_REMOTE;
       s->acq_state = PC_ACQ_IDLE;
@@ -1276,7 +1276,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_GET_GEN,      F_LOCAL,                                0, h_get_gen },
   { PC_CMD_SET_GEN,      F_REMOTE,                               PC_CAP_GENERATOR_DDS, h_set_gen },
   { PC_CMD_GET_CAL,      F_LOCAL,                                0, h_get_cal },
-  { PC_CMD_READ_SCREEN,  F_LOCAL,                                PC_CAP_SCREENSHOT, NULL },
+  { PC_CMD_READ_SCREEN,  F_LOCAL,                                PC_CAP_SCREENSHOT, NULL },   //BENCH: T9 before it gets a handler
   { PC_CMD_DEBUG_FPGA,   F_REMOTE,                               PC_CAP_DEBUG_RAW, h_debug_fpga },
   { PC_CMD_ENTER_FEL,    F_LOCAL,                                PC_CAP_ENTER_FEL, NULL },
 };
@@ -1348,9 +1348,21 @@ static void pc_send_text(pc_session *s, const char *text)
 
 static const char pc_hex[] = "0123456789abcdef";
 
+//No libc on the scope (-nostdlib): no strcmp
+static int pc_streq(const char *a, const char *b)
+{
+  while(*a && (*a == *b))
+  {
+    a++;
+    b++;
+  }
+
+  return *a == *b;
+}
+
 static int pc_ascii(pc_session *s, int ctx, int ev)
 {
-  if((ev == PC_EV_ASCII) && (strcmp(s->parser.line, "VER") == 0))
+  if((ev == PC_EV_ASCII) && pc_streq(s->parser.line, "VER"))
   {
     char buf[80];
     const char *a = "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.0,fpga=0x";
@@ -1365,7 +1377,7 @@ static int pc_ascii(pc_session *s, int ctx, int ev)
     return 1;
   }
 
-  if((ev == PC_EV_ASCII) && (strcmp(s->parser.line, "LOCAL") == 0))
+  if((ev == PC_EV_ASCII) && pc_streq(s->parser.line, "LOCAL"))
   {
     //Releasing touches the UI and the FPGA: wait for the MAIN context
     if((s->control == PC_REMOTE) && (ctx != PC_CTX_MAIN))

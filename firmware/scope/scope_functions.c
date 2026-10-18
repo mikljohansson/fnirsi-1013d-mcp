@@ -14,6 +14,7 @@
 #include "DS3231.h"
 
 #include "usb_interface.h"
+#include "pc_hooks.h"
 #include "variables.h"
 
 #include "sin_cos_math.h"
@@ -869,6 +870,9 @@ void scope_acquire_trace_data(void)
     //scope_process_trigger(scopesettings.nofsamples); 
     scope_process_trigger(fpgasettings.settriggerpoint); //1500
     //disp_have_trigger = 0;
+
+    //PC protocol: count UI captures (GET_STATUS capture_id, READ_TRACE in LOCAL)
+    PC_UI_CAPTURE_DONE();
     
     //flag data displayed, 1-for next conversion ready
     scopesettings.display_data_done = 1; 
@@ -1151,7 +1155,7 @@ uint32 scope_do_channel_calibration(void)
       //Start the conversion
       fpga_do_conversion();
       //Wait until conversion done or touch panel active
-      while (fpga_done_conversion() == 0);
+      while (fpga_done_conversion() == 0) PC_BUSY_POLL();
 
       //Get the data from a sample run
       fpga_read_sample_data(&calibrationsettings, 100);
@@ -1169,7 +1173,7 @@ uint32 scope_do_channel_calibration(void)
       //Start the conversion
       fpga_do_conversion();
       //Wait until conversion done or touch panel active
-      while (fpga_done_conversion() == 0);
+      while (fpga_done_conversion() == 0) PC_BUSY_POLL();
 
       //Get the data from a sample run
       fpga_read_sample_data(&calibrationsettings, 100);
@@ -1221,7 +1225,7 @@ uint32 scope_do_channel_calibration(void)
     //Start the conversion
     fpga_do_conversion();
     //Wait until conversion done or touch panel active
-    while (fpga_done_conversion() == 0);
+    while (fpga_done_conversion() == 0) PC_BUSY_POLL();
 
     //Get the data from a sample run
     fpga_read_sample_data(&calibrationsettings, 100);
@@ -1457,7 +1461,7 @@ void scope_input_calibration(void)
     //Start the conversion
     fpga_do_conversion();
     //Wait until conversion done or touch panel active
-    while (fpga_done_conversion() == 0);
+    while (fpga_done_conversion() == 0) PC_BUSY_POLL();
   
     //Get the data from a sample run
     fpga_read_sample_data(&scopesettings.channel1, 100);
@@ -1686,7 +1690,7 @@ void scope_do_auto_setup_old(void)
         //Start the conversion
         fpga_do_conversion();
         //Wait until conversion done or touch panel active
-        while (fpga_done_conversion() == 0);
+        while (fpga_done_conversion() == 0) PC_BUSY_POLL();
     
         //Get the data from a sample run
         fpga_read_sample_data(settings, 5);//100
@@ -1719,7 +1723,7 @@ void scope_do_auto_setup_old(void)
   //Start the conversion
   fpga_do_conversion();
   //Wait until conversion done or touch panel active
-  while (fpga_done_conversion() == 0);
+  while (fpga_done_conversion() == 0) PC_BUSY_POLL();
   
   //Get the data from a sample run
   fpga_read_sample_data(settings, 5);//100
@@ -1799,7 +1803,7 @@ void scope_do_auto_setup_old(void)
     //Start the conversion
     fpga_do_conversion();
     //Wait until conversion done or touch panel active
-    while (fpga_done_conversion() == 0);
+    while (fpga_done_conversion() == 0) PC_BUSY_POLL();
     //---------------- CH1 ---------------------------------------------------
     //Get the data from a sample run
     fpga_read_sample_data(&scopesettings.channel1, 5);//100
@@ -1869,7 +1873,7 @@ void scope_do_auto_setup_old(void)
   //Start the conversion
   fpga_do_conversion();
   //Wait until conversion done or touch panel active
-  while (fpga_done_conversion() == 0);
+  while (fpga_done_conversion() == 0) PC_BUSY_POLL();
   
   //--------------------------- CH1 --------------------------------------------
   
@@ -2189,7 +2193,7 @@ void scope_do_auto_setup_new(void)
     //Start the conversion
     fpga_do_conversion();
     //Wait until conversion done or touch panel active
-    while (fpga_done_conversion() == 0);
+    while (fpga_done_conversion() == 0) PC_BUSY_POLL();
     //---------------- CH1 ---------------------------------------------------
     //Get the data from a sample run
     fpga_read_sample_data(&scopesettings.channel1, 5);//100
@@ -2251,7 +2255,7 @@ void scope_do_auto_setup_new(void)
   //Start the conversion
   fpga_do_conversion();
   //Wait until conversion done or touch panel active
-  while (fpga_done_conversion() == 0);
+  while (fpga_done_conversion() == 0) PC_BUSY_POLL();
   
   //--------------------------- CH1 --------------------------------------------
   
@@ -2461,7 +2465,7 @@ void scope_do_auto_setup_new(void)
         //Start the conversion
         fpga_do_conversion();
         //Wait until conversion done or touch panel active
-        while (fpga_done_conversion() == 0);
+        while (fpga_done_conversion() == 0) PC_BUSY_POLL();
     
         //Get the data from a sample run
         fpga_read_sample_data(settings, 100);//100
@@ -2524,7 +2528,7 @@ void scope_do_auto_setup_new(void)
   //Start the conversion
   fpga_do_conversion();
   //Wait until conversion done or touch panel active
-  while (fpga_done_conversion() == 0);
+  while (fpga_done_conversion() == 0) PC_BUSY_POLL();
     
   //Get the data from a sample run
   fpga_read_sample_data(settings, 100);//100

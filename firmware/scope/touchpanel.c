@@ -13,6 +13,7 @@
 
 #include "variables.h"
 #include "touchpanel.h"
+#include "pc_hooks.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -182,6 +183,10 @@ void tp_i2c_read_status(void)
 {
   uint8  status;
   uint8  data[4];
+
+  //Every modal UI loop (menus, MSC screen, calibration waits via fpga_done_conversion) scans the touch panel, so this
+  //keeps the PC link answering PING / GET_INFO / GET_STATUS / GET_BATTERY while the main loop is not running.
+  PC_BUSY_POLL();
 
   //Read the status of the touch panel
   tp_i2c_read_data(TP_DEVICE_ADDR, TP_STATUS_REG, &status, 1);

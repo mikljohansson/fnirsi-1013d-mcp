@@ -4,6 +4,7 @@
 #include "touchpanel.h"
 #include "timer.h"
 #include "variables.h"
+#include "pc_hooks.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -633,7 +634,21 @@ void fpga_do_conversion(void)
   fpga_write_cmd(0x05);
   
   //Wait for the flag to become 1
+#if PC_PROTOCOL
+  {
+    //Same unbounded wait as 1.00o5 (UI behaviour unchanged), but keep the USB link answering if the FPGA hangs.
+    //The BUSY poll never touches the FPGA bus, so it is safe between these reads.
+    uint32 polls = 0;
+
+    while((fpga_read_byte() & 1) == 0)
+    {
+      if((++polls & 0xFFFF) == 0)
+        PC_BUSY_POLL();
+    }
+  }
+#else
   while((fpga_read_byte() & 1) == 0);
+#endif
   
   //Test again to make sure it was no glitch?????
   //while((fpga_read_byte() & 1) == 0);

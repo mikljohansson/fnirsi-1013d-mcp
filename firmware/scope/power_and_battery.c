@@ -7,6 +7,7 @@
 #include "interrupt.h"
 #include "variables.h"
 #include "scope_functions.h"
+#include "pc_hooks.h"
 
 //--------------------------------------------------------------------------------------
 
@@ -93,6 +94,9 @@ void power_interrupt_init(void)
 
 void power_interrupt_handler(void)
 {
+  //While the host owns the scope, put the user's settings back before they are saved (plan 6.4)   BENCH: plan 11.3 step 3 (power-off in REMOTE)
+  PC_POWER_OFF();
+
   //Need to check if it is ok to save settings.
   //Only when in normal view mode, so need a flag to signal picture or waveform viewing
   //And a flag to signal actual setting has been changed???

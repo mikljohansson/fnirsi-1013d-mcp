@@ -381,7 +381,12 @@
 // Sampling system
 
 #define MAX_SAMPLE_BUFFER_SIZE            16382//3000//4095
+#if PC_PROTOCOL
+//Round up: 16382 / 4 = 4095 words is 2 bytes short of a 16382-sample readout (Donwulff fix, plan section 4)
+#define UINT32_SAMPLE_BUFFER_SIZE         ((MAX_SAMPLE_BUFFER_SIZE + 3) / 4)
+#else
 #define UINT32_SAMPLE_BUFFER_SIZE         (MAX_SAMPLE_BUFFER_SIZE / 4)
+#endif
 
 #define SAMPLE_COUNT                      MAX_SAMPLE_BUFFER_SIZE //samplecount  10000
 #define SAMPLES_PER_ADC                   (SAMPLE_COUNT / 2)        //nofsamples 5000

@@ -25,6 +25,7 @@
 #include "usb_interface.h"
 #include "cdc_class.h"
 #include "PC_interface.h"
+#include "pc_hooks.h"
 
 #include "arm32.h"
 
@@ -118,6 +119,10 @@ int main(void)
 
   //Load configuration data from FLASH
   scope_load_configuration_data();
+#if PC_PROTOCOL
+  //PC control protocol session (selects CDC mode, caches the FPGA version)
+  pc_glue_init();
+#endif
   //if (dev_mode)
   //Setup the USB interface
   usb_device_init();
@@ -249,9 +254,21 @@ int main(void)
   //Monitor the battery, process and display trace data and handle user input until power is switched off
   while(1)
   {
+#if PC_PROTOCOL
+    //PC control protocol: parse requests, run handlers (docs/plans/firmware-usb-protocol.md 5.3)
+    pc_glue_poll_main();
+
+    //While the host owns the scope the UI loop (acquisition, drawing, touch) does not run
+    if(pc_glue_remote())
+    {
+      pc_glue_remote_service();
+      continue;
+    }
+#endif
+
     //Handle the touch panel input
     //touch_handler();
-    
+
     //usb_ch340_send_text("CH340 mode ready\r\n");
     
     //Monitor the battery status
