@@ -181,3 +181,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   poll = 1515 ms, first UI pass = 31 ms (earlier readings were off by one). The startup delay is in the init path before the main loop, not in the UI pass.
 - Firmware 0.2.5 (commit 5086f7d, sha256 faefbdb3...): EP2 OUT interrupt re-enabled after suspend/reset/disconnect; USB event counters 35..40.
   Loaded hands-free; baseline resets 1 / suspends 1 / resumes 0 / disconnects 0 / EP0 setups 40. Idle-fault reproduction (11 min port closed): no fault, reopen OK, no suspend/reset/disconnect events counted; not reproduced on 0.2.5.
+- Firmware 0.2.6 (commit 68f7868, sha256 ef77935c..., pinned backups/fw-0.2.6-ef77935c.bin): unsupported menu items hidden (generator
+  Wave/Ampl/Offset/Phase, Long memory, EXT trigger, Hold off, Time & Date when no DS3231 answers; depth clamped per bitstream). Loaded hands-free
+  (0.2.5 -> FEL -> 0.2.6 in 6.5 s). Census 2000 PINGs 0/0, 100 x 64 KiB 0 failed, PING median 1.00 ms, LOCAL throughput 0.99 MB/s (unchanged).
+  Startup counters: 1517 ms init -> first poll, first pass 31 ms, v29..v34 = 1/49/1/31/32/32. USB events at boot: 1 reset, 1 suspend, 0 resumes,
+  0 disconnects, 39 EP0 setups. Card still holds 0.2.3. Visual checks of the hidden items pending the owner.
