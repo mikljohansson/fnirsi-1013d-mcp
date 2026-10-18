@@ -1205,7 +1205,29 @@ static uint32 spec_find_peak(const SPECVIEW *v, const int16 *db)
 
 static void spec_auto_step(void);
 
+//Re-entry guard: Auto and the span gestures change the time base from inside a draw, and the time base write redraws
+//the view (scope_preset_values). The nested call only claims the trace area; the outer one draws.
+static uint8 spec_drawing;
+
+static int spectrum_display_body(void);
+
 int spectrum_display(void)
+{
+  int r;
+
+  if(!spec.active || !spectrum_available())
+    return 0;
+
+  if(spec_drawing)
+    return 1;
+
+  spec_drawing = 1;
+  r = spectrum_display_body();
+  spec_drawing = 0;
+  return r;
+}
+
+static int spectrum_display_body(void)
 {
   int     log2n, ch, fresh, hch;
   uint32  divider, peak[2] = { 0, 0 }, key;
@@ -1214,9 +1236,6 @@ int spectrum_display(void)
   int     written;
   uint64  bin_mhz;
   SPECVIEW v;
-
-  if(!spec.active || !spectrum_available())
-    return 0;
 
   spec_fix_channel();
 
@@ -1370,12 +1389,13 @@ static void spec_tb_set(int i)
   if(pc_hal_timebase_lookup((uint8)i, &t.samplerate, &t.divider))
     return;
 
-  pc_hal_timebase_write(&t, 0);
-
-  //Wait for a record at the new rate (anything finishing now was armed before the change)
+  //Wait for a record at the new rate (anything finishing now was armed before the change). Set before the write: its
+  //redraw (scope_preset_values -> spectrum_display) then shows the new axis without the old spectra
   spec.wait = 1;
   spec.fresh = 0;
   spec.have[0] = spec.have[1] = 0;
+
+  pc_hal_timebase_write(&t, 0);
 }
 
 //Sample rate in mHz of a time base index, ignoring the decimation filter's even-divider rounding

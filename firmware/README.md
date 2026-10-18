@@ -680,6 +680,17 @@ on-chip SRAM, 4096 points 10.9 ms (+ about 1-2.5 ms dB conversion). Since 0.2.33
 (0x1000-0x7008, the space FFT_BENCH borrows; nothing else uses it at run time, all stacks are in DDR). Drawing: one
 728 x 432 clear (memset bursts since 0.2.32) and blit per pass, as 1.00o5's trace view.
 
+Redraws in the spectrum view (fw 0.2.44): the only 1.00o5 routine that paints the scope view outside
+`scope_display_trace_data` is `scope_preset_values` (host SET_TIMEBASE, the UI time base change, RUN in roll mode, the
+spectrum's own span / Auto steps through `pc_hal_timebase_write`). It cleared the trace area and painted grid, cursors and
+pointers over the spectrum, strip included, until the next pass. It now starts with `PC_SPECTRUM_DISPLAY()`: in the
+spectrum view it redraws the spectrum and returns (trace buffers kept). `spectrum_display` has a re-entry guard (a time
+base change from inside a draw redraws through the same path), and `spec_tb_set` sets its wait state before the write, so
+that redraw shows the new axis without the old spectra. Audit of the other host-driven redraws (SET_CHANNEL, SET_TRIGGER,
+SET_GEN, RUN/STOP, the MCP chip): they draw only top-bar buttons (y < 46) and never touch the trace area or the right
+column. Not host-testable (scope_functions.c and spectrum.c drawing are target-only); bench: spectrum view on, then
+SET_TIMEBASE / SET_TRIGGER / SET_GEN in a loop from the host and span taps: the strip must never show grid or pointers.
+
 ### Firmware auto trigger mode (fw 0.2.41)
 
 The FPGA's auto time-out (0x0E) counts samples, i.e. one record length: 0.3 ms at 10 MS/s with 3000 samples, so a
