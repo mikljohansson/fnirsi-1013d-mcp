@@ -928,9 +928,12 @@ differs from or fills a gap in sections 1-13. Hosts written against this documen
 
 ### Firmware-internal
 
-- USB FIFO RAM layout (v0.1.1). The F1C100s USB FIFO RAM is 2048 bytes. The 1.00o5 CDC layout placed EP1 at byte
-  2048 and the EP2 TX FIFO at byte 4096, outside it (aliasing onto the EP2 RX FIFO). Now: EP2 OUT 0-511 (single
-  buffered), EP2 IN 512-1535 (2 x 512, double buffered), EP1 IN 1536-1599. The MSC layout was already inside 2 KiB.
+- USB FIFO RAM layout (v0.1.3). The F1C100s USB FIFO RAM is 2048 bytes, and the EP0 FIFO is fixed at bytes 0-63
+  (MUSBMHDRC guide). The 1.00o5 CDC layout put EP2 OUT at 0 (on top of EP0), EP1 at 2048 and EP2 IN at 4096 (outside
+  the RAM, aliasing onto 0): control requests landed in bulk IN data (seen: GET_LINE_CODING setup bytes inside a
+  TEST_PATTERN response) and IN packets overwrote waiting requests (seen: E_BAD_CRC on correct requests). Now: EP0
+  0-63, EP2 OUT 64-575 (single buffered), EP2 IN 576-1599 (2 x 512, double buffered), EP1 IN 1600-1663, checked at
+  compile time. v0.1.1-0.1.2 still had EP2 OUT at 0. The MSC layout (OUT at 0, IN at 1024) is unchanged 1.00o5 code.
 - The TX pump is driven by the EP2 TX interrupt and, as a fallback, from every poll (main loop, BUSY polls and the 1 ms
   timer poll), so a missed interrupt costs at most 1 ms.
 - Poll contexts (v0.1.2): MAIN (top of the main loop; everything), BUSY (touch-panel scans and UI spin loops; the safe

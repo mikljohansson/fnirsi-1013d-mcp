@@ -341,7 +341,8 @@ Hooks in the 1.00o5 code, all under `#if PC_PROTOCOL`:
   unbounded, so LOCAL acquisition behaves exactly as 1.00o5.
 - `power_and_battery.c`: the power-off ISR restores the UI snapshot before it saves settings.
 - `usb_interface.c`, `cdc_class.c`: the transport hooks, an endpoint FIFO layout that fits the
-  F1C100s's 2 KiB USB FIFO RAM (`pc_transport.h`; 1.00o5 put the CDC TX FIFO at byte 4096), and the new USB identity
+  F1C100s's 2 KiB USB FIFO RAM and keeps clear of the fixed EP0 FIFO at 0-63 (`pc_transport.h`; 1.00o5
+  put the CDC OUT FIFO on EP0 and the IN FIFO at byte 4096), and the new USB identity
   (VID:PID 0x1209:0x0001 pid.codes test PID, product `FNIRSI 1013D`, serial `1013D-0001`). The
   text debug path is gone, so the debug helpers in `menu.c` print nothing. MSC is unchanged.
 - `variables.h`: the trace buffers are rounded up to 4096 words (16,384 bytes per channel).
@@ -430,7 +431,7 @@ sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
    ModemManager ignore rule from plan section 10. The device is high-speed only: use a USB 2.0 HS
    port or hub, not a full-speed VM pass-through.
 3. **Text probe.** In a terminal, `#VER` + Enter must answer
-   `#OK,FNIRSI-1013D-AI,fw=0.1.2,proto=1.1,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
+   `#OK,FNIRSI-1013D-AI,fw=0.1.3,proto=1.1,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
 4. **Identify, LOCAL.** PING with random 0..492 byte payloads, 10,000 times. GET_INFO must report
    variant 2, ring 8192, max total 16382, caps 0x1C03 (PROG_TRIGGER_POS, GENERATOR_DDS, ENTER_FEL and
    the two UNVERIFIED bits; `PC_DEBUG=1` adds 0x120). Run GET_STATUS, GET_BATTERY,

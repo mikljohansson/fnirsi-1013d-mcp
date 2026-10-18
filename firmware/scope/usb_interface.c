@@ -1198,7 +1198,11 @@ void usb_device_CDC_irq_handler(void)
                       //*USBC_REG_RXFIFOSZ = USBC_BP_RXFIFOSZ_DPB | fifo_n;
     
                       //The base address of the first FIFO is set to zero
+#if PC_PROTOCOL
+                      *USBC_REG_RXFIFOAD = PC_EP2_RXFIFOAD;  // above the fixed 64-byte EP0 FIFO
+#else
                       *USBC_REG_RXFIFOAD = 0; // RX on address 0
+#endif
                       
                       // vypočítaj základ pre TX FIFO (RX zaberie rx_fifo_bytes)
                       // register očakáva adresu v jednotkách 8B (?) - ak používaš bytes, zachovaj pôvodné konvencie v driveri

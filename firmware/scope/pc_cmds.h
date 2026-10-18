@@ -13,7 +13,7 @@
 // Build identity (overridden from the Makefile)
 
 #ifndef PC_FW_VERSION
-#define PC_FW_VERSION     "0.1.2"
+#define PC_FW_VERSION     "0.1.3"
 #endif
 
 #ifndef PC_FW_BUILD
