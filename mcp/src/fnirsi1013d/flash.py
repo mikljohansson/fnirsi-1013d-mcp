@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from . import protocol as P
-from .sdcard import IMAGE_SECTOR, SdCard, SdError, check_image
+from .sdcard import IMAGE_SECTOR, SdCard, SdError, check_image, image_version
 from .transport import (PIDCODES_TEST_PIDS, PIDCODES_VID, DeviceError, Transport, TransportError, list_candidates,
                         open_link, parse_ver)
 
@@ -125,7 +125,7 @@ class Flasher:
                  sunxi_fel: str = "sunxi-fel", windows: bool | None = None, runner: Runner = run_cmd,
                  out: Callable[[str], None] = print, transport_factory: Callable[[str], Transport] | None = None,
                  sleep: Callable[[float], None] = time.sleep, persist: bool = False, persist_only: bool = False,
-                 restore: Path | None = None, backup_dir: Path | None = None):
+                 restore: Path | None = None, backup_dir: Path | None = None, force: bool = False):
         self.port = port
         self.image = Path(image)
         self.sha256 = sha256.lower() if sha256 else None
@@ -142,7 +142,9 @@ class Flasher:
         self.persist = persist or persist_only
         self.persist_only = persist_only
         self.restore_file = Path(restore) if restore else None
-        self.backup_dir = Path(backup_dir) if backup_dir else REPO / "backups"
+        self.backup_dir = Path(backup_dir) if backup_dir else REPO / "backups" / "sdcard"
+        self.force = force
+        self.running_fw: str | None = None
         self.t0 = time.monotonic()
 
     # --- helpers ---------------------------------------------------------------------------------------
@@ -323,7 +325,8 @@ class Flasher:
                     if ver and ver.startswith("#OK"):
                         v = parse_ver(ver)
                         self.step(f"scope back on {port}: {ver}")
-                        return v.get("fw", "")
+                        self.running_fw = v.get("fw", "")
+                        return self.running_fw
                 except TransportError:
                     pass
                 finally:
@@ -357,8 +360,17 @@ class Flasher:
         except SdError as e:
             raise FlashError(f"{self.image}: {e}", 2) from e
         image = data[:length] if len(data) >= length else data + b"\0" * (length - len(data))
+        img_ver = image_version(data)
         t, sd = self._sd_session()
         try:
+            ver = t.ascii("#VER", timeout=0.3) or ""
+            running = parse_ver(ver).get("fw", "") if ver.startswith("#OK") else ""
+            self.step(f"running firmware {running or '?'}, image reports {img_ver or '?'}")
+            if (not running or running != img_ver) and not self.force:
+                raise FlashError(f"the image reports firmware {img_ver or 'unknown'} but the scope runs "
+                                 f"{running or 'unknown'} (#VER): persist only an image that is running and tested. "
+                                 "Load it first (without --persist-only), or pass --force", 7)
+            t0 = time.monotonic()
             info = sd.info()
             n = length // 512
             self.step(f"card {info.card_sectors} sectors, partition at {info.part_start}, write window "
@@ -368,19 +380,32 @@ class Flasher:
             if IMAGE_SECTOR + n > info.write_end:
                 raise FlashError(f"the image ({n} sectors) does not fit below sector {info.write_end}", 7)
             old = info.header(IMAGE_SECTOR)
+            old_n = 0
             if old is not None and old.magic:
                 self.step(f"sector {IMAGE_SECTOR} now holds eGON magic {old.magic}, length {old.length}")
+                old_n = (old.length + 511) // 512
+            # back up what the write covers, and the whole old image if it is longer
+            end = min(info.write_end, IMAGE_SECTOR + max(n, old_n))
             stamp = time.strftime("%Y%m%d-%H%M%S")
-            bpath = self.backup_dir / f"sd_{IMAGE_SECTOR}-{info.write_end}_{stamp}.bin"
-            bk = sd.backup(IMAGE_SECTOR, info.write_end - IMAGE_SECTOR, bpath)
-            self.step(f"backup of sectors {IMAGE_SECTOR}..{info.write_end - 1} verified: {bk.path} sha256 {bk.sha256}")
+            bpath = self.backup_dir / f"sd_{IMAGE_SECTOR}-{end}_{stamp}.bin"
+            t1 = time.monotonic()
+            bk = sd.backup(IMAGE_SECTOR, end - IMAGE_SECTOR, bpath)
+            self.step(f"backup of sectors {IMAGE_SECTOR}..{end - 1} verified in {time.monotonic() - t1:.2f} s: "
+                      f"{bk.path} sha256 {bk.sha256}")
+            t1 = time.monotonic()
             sd.write(IMAGE_SECTOR, image, progress=lambda done, total: self.step(f"written {done}/{total} B"))
+            t_write = time.monotonic() - t1
+            t1 = time.monotonic()
+            sd.verify(IMAGE_SECTOR, image)
+            self.step(f"write {t_write:.2f} s ({length / max(t_write, 1e-6) / 1024:.0f} KiB/s), SD_READ compare "
+                      f"{time.monotonic() - t1:.2f} s: identical")
             v = sd.info(verify=True).header(IMAGE_SECTOR)
             if v is None or v.magic != P.SD_EGON_EXE or v.check != P.SD_CHECK_OK or v.length != length:
                 raise FlashError(f"SD_INFO VERIFY of sector {IMAGE_SECTOR} failed ({v}); the card may not boot this "
                                  f"image. Restore with: fnirsi1013d-flash --restore {bpath}", 7)
             self.step(f"sector {IMAGE_SECTOR} verified on the card: eGON.EXE, length {length}, checksum "
-                      f"0x{checksum:08X}. The next power cycle boots it (boot-mode byte and sectors 16-79 untouched)")
+                      f"0x{checksum:08X}, total {time.monotonic() - t0:.2f} s. The next power cycle boots it "
+                      "(boot-mode byte and sectors 16-79 untouched)")
         except (SdError, TransportError, DeviceError) as e:
             raise FlashError(f"persisting to the SD card failed: {e}. The backup (if made) is in {self.backup_dir}", 7) \
                 from e
@@ -456,11 +481,13 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--persist-only", action="store_true", help="only write the image to the card through the running "
                     "firmware (no FEL)")
     ap.add_argument("--restore", type=Path, metavar="BACKUP", help="write a --persist backup file back to the card")
-    ap.add_argument("--backup-dir", type=Path, help="where SD backups go (default: <repo>/backups)")
+    ap.add_argument("--backup-dir", type=Path, help="where SD backups go (default: <repo>/backups/sdcard)")
+    ap.add_argument("--force", action="store_true", help="persist even if the image's version differs from the "
+                    "running firmware's #VER")
     a = ap.parse_args(argv)
     f = Flasher(port=a.port, image=a.image, no_fel=a.no_fel, sha256=a.sha256, distro=a.distro, sunxi_fel=a.sunxi_fel,
                 fel_timeout=a.fel_timeout, port_timeout=a.port_timeout, persist=a.persist,
-                persist_only=a.persist_only, restore=a.restore, backup_dir=a.backup_dir)
+                persist_only=a.persist_only, restore=a.restore, backup_dir=a.backup_dir, force=a.force)
     sys.exit(f.run_all())
 
 

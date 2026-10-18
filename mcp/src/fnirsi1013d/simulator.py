@@ -262,12 +262,16 @@ class SimConfig:
     fail_responses_over: int | None = None
 
 
-def make_egon_image(size: int, kind: bytes = b"eGON.EXE", fill: int = 0) -> bytes:
-    """A minimal eGON image: branch, magic, checksum and 512-aligned length (mksunxi.py rule), then a pattern."""
+def make_egon_image(size: int, kind: bytes = b"eGON.EXE", fill: int = 0, version: str | None = None) -> bytes:
+    """A minimal eGON image: branch, magic, checksum and 512-aligned length (mksunxi.py rule), then a pattern.
+    ``version``: embed the firmware's ``#VER`` literal (what fnirsi1013d-flash --persist compares)."""
     size = (size + 511) // 512 * 512
     buf = bytearray(((fill + i * 7) & 0xFF for i in range(size)))
     buf[0:4] = b"\x06\x00\x00\xea"
     buf[4:12] = kind
+    if version is not None:
+        lit = f"#OK,FNIRSI-1013D-AI,fw={version},proto=1.3,fpga=0x".encode() + b"\0"
+        buf[64: 64 + len(lit)] = lit
     struct.pack_into("<I", buf, 16, size)
     struct.pack_into("<I", buf, 12, P.egon_checksum(bytes(buf), size))
     return bytes(buf)

@@ -135,6 +135,7 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_capture_and_fft` | 1 | averaged amplitude spectrum, peaks in dBV and dBc, noise floor, THD |
 | `scope_decay_fit` | 1 | edge-aligned average, then `exp`, `exp+offset`, `exp2` or `power` fit after the TX edge; tau, R^2, sample points |
 | `scope_set_channel` | 2 | range, coupling, offset, probe, invert; relay changes limited to 5 per second |
+| `scope_sd_info` | 0 | SD card size, partition, write window, eGON headers at 16/80/750 (optionally checksum-verified); fw >= 0.2.2 |
 | `scope_calibration_info` | 0 | scaling in effect per channel, calibration file and its fitted zero / slope / gain per range and core |
 | `scope_calibrate_volts` | 2 | a known DC voltage on every range: fits 0 V code, volts per code and offset slope per range and ADC core, saves the calibration file |
 | `scope_generator` | 3 | calibration-pin square wave; confirmation token to enable |
@@ -194,17 +195,33 @@ the USB protocol, without removing the card:
 ```
 fnirsi1013d-flash --image <bin> --sha256 <hash> --persist   # RAM load as above, then write sector 750
 fnirsi1013d-flash --image <bin> --persist-only              # write the card through the running firmware
-fnirsi1013d-flash --restore backups/sd_750-2048_<time>.bin  # put a backup back
+fnirsi1013d-flash --restore backups/sdcard/sd_750-<end>_<time>.bin  # put a backup back
 ```
 
 `--persist` refuses images whose eGON header length or checksum is wrong (run `firmware/tools/mksunxi.py`), cards
-without a partition table and images that do not fit below `write_end` (min(partition start, 2048)). It first
-backs up sectors 750..write_end to `backups/sd_750-<end>_<time>.bin` (read twice and compared, saved, re-read) and
-prints its sha256. It then writes 64 KiB pieces: the 484-byte staging chunks, the stage CRC the firmware checks
-before writing, and the CRC the firmware reads back from the card are all checked. At the end, SD_INFO VERIFY
-recomputes the eGON checksum on the card. Only sector 750 onwards is touched: the bootloader (16-79), the
+without a partition table, images that do not fit below `write_end` (min(partition start, 2048)), and images
+whose version (the `#VER` literal in the binary) differs from what the running firmware answers to `#VER`
+(persist what is running and tested; `--force` overrides). It first backs up sectors 750..750+n (n = the larger
+of the new and the old image) to `backups/sdcard/sd_750-<end>_<time>.bin` (read twice and compared, saved,
+re-read) and prints its sha256. It then writes 128-sector (64 KiB) pieces: the 484-byte staging chunks, the stage
+CRC the firmware checks before writing, and the CRC the firmware reads back from the card are all checked. Then
+it reads the image back with SD_READ_SECTORS and compares, and SD_INFO VERIFY recomputes the eGON checksum on the
+card. Each phase prints its duration. Only sector 750 onwards is touched: the bootloader (16-79), the
 calibration, settings and boot-mode sectors (708-710) need explicit firmware flags the tool never sets. Failures
 exit with code 7 and name the backup to restore.
+
+### SD card from the bench: `fnirsi1013d-sd`
+
+```
+fnirsi1013d-sd info [--verify]                        # card, partition, write window, eGON headers 16/80/750
+fnirsi1013d-sd read 750 128 -o sectors.bin            # CRC-checked reads
+fnirsi1013d-sd write file.bin --sector 1000 --dry-run # the firmware's window and flag rules, nothing written
+fnirsi1013d-sd write file.bin --sector 1000 --yes     # type "WRITE <n>@<sector>" to confirm; backup first
+```
+
+`--boot` allows sectors 16-79, `--config` 708-710. Writes back up the target range to `backups/sdcard/`, write
+128-sector pieces with CRC checks and read everything back. The MCP server only has the read-only
+`scope_sd_info`; writing the card is never an agent tool.
 
 ## Bench link check: `fnirsi1013d-bench`
 

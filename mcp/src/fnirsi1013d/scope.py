@@ -471,6 +471,46 @@ class Scope:
         self._trig = P.Trigger.unpack(self._req(P.Cmd.SET_TRIGGER, r.pack()))
         return self._trig
 
+    # --- SD card (fw >= 0.2.2, cap SD_SECTORS) -------------------------------------------------------------
+
+    def sd_card(self):
+        from .sdcard import SdCard
+
+        if not self.info.caps & P.Caps.SD_SECTORS:
+            raise DeviceError(P.Cmd.SD_INFO, P.Status.E_UNSUPPORTED, 0, "capability SD_SECTORS not reported "
+                              "(firmware >= 0.2.2)")
+        return SdCard(self.t)
+
+    def sd_info(self, verify: bool = False) -> P.SdInfo:
+        """SD_INFO: card size, partition start, write window, eGON headers at 16, 80, 750 (VERIFY: checksums)."""
+        with self.lock:
+            return self.sd_card().info(verify)
+
+    def sd_read(self, sector: int, count: int) -> bytes:
+        """SD_READ_SECTORS in pieces of 128, each CRC-checked."""
+        with self.lock:
+            return self.sd_card().read(sector, count)
+
+    def sd_write(self, image: bytes, start_sector: int, flags: int = 0, dry_run: bool = False,
+                 progress: Callable[[int, int], None] | None = None):
+        """Write ``image`` from ``start_sector``: stage 64 KiB, SD_WRITE 128 sectors (stage CRC and the card's
+        read-back CRC checked), repeat, then read everything back and compare. ``dry_run``: only SD_INFO and the
+        firmware's window/flag rules, nothing written. Returns a WritePlan (``refusals`` when it cannot be
+        written, ``timings`` per phase). Takes no backup: callers do (fnirsi1013d-flash / fnirsi1013d-sd)."""
+        from .sdcard import plan_write, timed
+
+        with self.lock:
+            sd = self.sd_card()
+            info = sd.info()
+            plan = plan_write(info, start_sector, len(image), flags)
+            if dry_run or not plan.ok:
+                return plan
+            with timed(plan.timings, "write"):
+                sd.write(start_sector, image, flags, progress)
+            with timed(plan.timings, "read_compare"):
+                sd.verify(start_sector, image)
+            return plan
+
     def scale(self, ch: int | str, cfg: P.ChannelConfig | None = None) -> ChannelScale:
         """Code <-> volt conversion for a channel with ``cfg`` (default: the current settings), per ADC core: the
         per-unit calibration when it covers the range, else the firmware's uv_per_lsb / zero_code."""

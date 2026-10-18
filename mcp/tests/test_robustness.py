@@ -59,16 +59,17 @@ def test_reset_line_inside_partial_frame(sim):
 
 def test_reset_drops_pending_wait_keeps_remote(sim_factory):
     srv = sim_factory(signal="zero", legacy=True)
-    t = connect(srv.url)
+    # generous timeouts: under a loaded test run a 100 ms GET_STATUS retry would make its first answer "stale"
+    t = connect(srv.url, response_timeout=2.0)
     try:
         t.request(P.Cmd.SET_REMOTE, P.SetRemoteReq(1, 0, 0).pack())
         t.request(P.Cmd.SET_TRIGGER, P.SetTriggerReq(P.SetTriggerReq.M_MODE | P.SetTriggerReq.M_LEVEL, level=250,
                                                      mode=1).pack())
         t.request(P.Cmd.ARM, b"\0" * 4)
-        t.link.write(P.Frame(P.Cmd.WAIT, 0x7777, struct.pack("<I", 300)).encode())
+        t.link.write(P.Frame(P.Cmd.WAIT, 0x7777, struct.pack("<I", 1500)).encode())
         time.sleep(0.05)
-        assert t.ascii("#RESET") == "#OK"
-        time.sleep(0.4)  # the dropped WAIT never answers
+        assert t.ascii("#RESET", timeout=1.0) == "#OK"
+        time.sleep(0.4)  # the WAIT (1.5 s) would still be pending had #RESET not dropped it
         st = P.StatusResp.unpack(t.request(P.Cmd.GET_STATUS).payload)
         assert st.control == P.Control.REMOTE and not st.flags & P.StatusFlags.DEFERRED_PENDING
         assert t.stats.stale_responses == 0

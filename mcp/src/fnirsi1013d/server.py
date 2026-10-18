@@ -843,6 +843,33 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             return out
         return await run("scope_calibration_info", 0, {}, go)
 
+    @register(0, title="SD card info", read_only=True)
+    async def scope_sd_info(
+        verify: Annotated[bool, Field(description="recompute the eGON checksums of the images on the card (reads "
+                                                  "them; a few hundred ms)")] = False,
+    ) -> dict[str, Any]:
+        """The scope's SD card through the USB protocol (firmware >= 0.2.2, capability SD_SECTORS): size, partition
+        start, the firmware's write window, and the eGON boot headers at sectors 16 (bootloader), 80 and 750 (the
+        scope image): magic, length, stored checksum and, with verify, whether it matches. Read-only. There is no
+        SD write tool: persisting firmware is a bench action (fnirsi1013d-flash --persist, fnirsi1013d-sd)."""
+        def go() -> dict[str, Any]:
+            s = sess.get_scope()
+            if not s.profile().has(P.Caps.SD_SECTORS):
+                raise ToolError("scope_sd_info: this firmware has no SD sector commands (capability SD_SECTORS, "
+                                "firmware >= 0.2.2)")
+            info = s.sd_info(verify)
+            names = {0: "none", 1: "eGON.BT0", 2: "eGON.EXE"}
+            checks = {0: "not checked", 1: "ok", 2: "bad", 3: "length invalid"}
+            return {"ok": True, "card_sectors": info.card_sectors, "card_mib": _r6(info.card_sectors / 2048),
+                    "partition_start": info.part_start or None,
+                    "write_window": [16, info.write_end] if info.write_end else None,
+                    "headers": [{"sector": h.sector, "magic": names.get(h.magic, h.magic),
+                                 "length": h.length if h.magic else None,
+                                 "checksum": f"0x{h.checksum:08X}" if h.magic else None,
+                                 "check": checks.get(h.check, h.check)} for h in info.headers],
+                    "caveats": ["read-only; writing the card is done with fnirsi1013d-flash --persist on the bench"]}
+        return await run("scope_sd_info", 0, {"verify": verify}, go)
+
     @register(0, title="Screenshot", read_only=True)
     async def scope_screenshot() -> Image:
         """PNG image of the scope's 800x480 screen. Only on firmware that reports the SCREENSHOT capability

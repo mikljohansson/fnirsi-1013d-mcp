@@ -9,7 +9,9 @@ Backups come first (repo rule: never write without a verified backup).
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+import re
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -91,7 +93,7 @@ class SdCard:
             raise SdError(f"SD_WRITE {sector}+{count}: read-back CRC 0x{h.crc32:08X} != 0x{req.crc32:08X}")
 
     def write(self, sector: int, data: bytes, flags: int = 0, progress: Callable[[int, int], None] | None = None) -> None:
-        """Write ``data`` (padded to 512) from ``sector`` in 64 KiB pieces: stage, write, check."""
+        """Write ``data`` (padded to 512) from ``sector`` in 128-sector (64 KiB) pieces: stage, write, check."""
         data = bytes(data) + b"\0" * (-len(data) % 512)
         for off in range(0, len(data), P.SD_STAGE_BYTES):
             piece = data[off: off + P.SD_STAGE_BYTES]
@@ -99,6 +101,66 @@ class SdCard:
             self.write_staged(sector + off // 512, piece, flags)
             if progress:
                 progress(off + len(piece), len(data))
+
+    def verify(self, sector: int, data: bytes) -> None:
+        """Read the sectors back with SD_READ_SECTORS and compare (independent of the write's own read-back)."""
+        data = bytes(data) + b"\0" * (-len(data) % 512)
+        back = self.read(sector, len(data) // 512)
+        if back != data:
+            bad = next(i for i in range(len(data)) if back[i] != data[i])
+            raise SdError(f"SD_READ compare failed at byte {bad} (sector {sector + bad // 512})")
+
+
+@dataclass
+class WritePlan:
+    """What a write would do (``Scope.sd_write(..., dry_run=True)``)."""
+
+    sector: int
+    sectors: int
+    flags: int
+    pieces: list[tuple[int, int]] = field(default_factory=list)
+    refusals: list[str] = field(default_factory=list)
+    timings: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        return not self.refusals
+
+
+def plan_write(info: P.SdInfo, sector: int, nbytes: int, flags: int = 0) -> WritePlan:
+    """The host-side image of the firmware's checks (section 14 row 40), so a dry run can say what would fail."""
+    n = (nbytes + 511) // 512
+    plan = WritePlan(sector, n, flags, [(sector + k, min(P.SD_MAX_SECTORS, n - k))
+                                       for k in range(0, n, P.SD_MAX_SECTORS)])
+    last = sector + n - 1
+    if not info.write_end:
+        plan.refusals.append("the card has no valid partition table: the firmware refuses writes")
+    elif sector < 16 or last >= info.write_end:
+        plan.refusals.append(f"sectors {sector}..{last} are outside the write window [16, {info.write_end})")
+    if sector < 80 and not flags & P.SD_WR_BOOT:
+        plan.refusals.append("sectors 16-79 (bootloader) need the BOOT flag")
+    if sector <= 710 and last >= 708 and not flags & P.SD_WR_CONFIG:
+        plan.refusals.append("sectors 708-710 (calibration, settings, boot mode) need the CONFIG flag")
+    return plan
+
+
+def timed(timings: dict[str, float], name: str):
+    class _T:
+        def __enter__(self):
+            self.t0 = time.monotonic()
+
+        def __exit__(self, *a):
+            timings[name] = round(time.monotonic() - self.t0, 3)
+    return _T()
+
+
+_VER_RX = re.compile(rb"#OK,FNIRSI-1013D-AI,fw=([^,\x00]*),proto=([0-9.]+)")
+
+
+def image_version(data: bytes) -> str | None:
+    """Firmware version an image reports in ``#VER`` (its literal is in the binary), or None."""
+    m = _VER_RX.search(data)
+    return m.group(1).decode("ascii", "replace") if m else None
 
 
 def check_image(data: bytes) -> tuple[int, int]:

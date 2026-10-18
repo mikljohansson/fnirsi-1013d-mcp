@@ -19,14 +19,15 @@ context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/p
 | `analysis.py` | Stats, crossings, frequency/duty, rise/fall, delay, preview, Welford `Averager`, fractional shift, edge finding, FFT (windows, peaks, THD), decay fits (`exp`, `exp+offset`, `exp2`, `power`), clip blanking, sample points. |
 | `simulator.py` | `Device` (protocol state machine + FPGA/ring model) and `SimServer` (TCP, one host at a time, test hooks). CLI `fnirsi1013d-sim`. |
 | `server.py` | FastMCP server (`fnirsi1013d-mcp`): `Session` (connection, lock, tokens, relay limit, audit, .npz, `ensure_control`, legacy idle release), 20 tools, `_averaged` restart loop (`_SettingsChanged`), `--sim` in-process simulator, `preload_native_modules`. |
-| `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 fresh attempts, 1 s apart; between them a look for the FEL device 1f3a:efe8, which means the OK was lost but the scope rebooted: continue; `#VER` check if all unanswered) -> usbipd -> sunxi-fel RAM load -> wait for `#VER`. Any failure: one `FAILED:` line, non-zero exit. `--persist` / `--persist-only` write the image to SD sector 750 after a verified backup of 750..write_end; `--restore <backup>`; persist failures exit 7. |
-| `sdcard.py` | SD sector access (fw >= 0.2.2): `SdCard` info/read/backup (double read + file re-read)/stage/write (stage CRC, read-back CRC), `check_image` (eGON length + checksum). Used by `flash.py --persist`. |
+| `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 fresh attempts, 1 s apart; between them a look for the FEL device 1f3a:efe8, which means the OK was lost but the scope rebooted: continue; `#VER` check if all unanswered) -> usbipd -> sunxi-fel RAM load -> wait for `#VER`. Any failure: one `FAILED:` line, non-zero exit. `--persist` / `--persist-only` write the image to SD sector 750: image version must equal the running `#VER` (`--force`), verified backup of 750..750+max(new, old) to `../backups/sdcard/`, 128-sector pieces, SD_READ compare, SD_INFO VERIFY, timings; `--restore <backup>`; persist failures exit 7. |
+| `sdcard.py` | SD sector access (fw >= 0.2.2): `SdCard` info/read/backup (double read + file re-read)/stage/write (stage CRC, read-back CRC)/verify (SD_READ compare), `plan_write` (the firmware's window/flag rules for dry runs), `check_image` (eGON length + checksum), `image_version` (the `#VER` literal in a binary). `Scope.sd_info/sd_read/sd_write(dry_run=)` wrap it. Used by `flash.py --persist`. |
+| `sdcli.py` | `fnirsi1013d-sd` bench CLI: info / read / write (`--dry-run`, `--yes` + typed `WRITE <n>@<sector>`, backup first). |
 | `bench.py` | `fnirsi1013d-bench`: runs `../firmware/scope/host_tests/bench_link.py` (link checks + census; `--fel` not exposed). |
 | `vectors.py` | Checks/extends `../docs/protocol-vectors.json` (`--check`, `--merge`). |
 | `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points -> least-squares fit of zero, 1/gain, PWM slope per channel/range/core; JSON file), `ChannelScale`/`channel_scale` (raw, compensated, mean and trigger-level conversions; firmware formula fallback), `import_t8` + CLI for the lead's `backups/t8_*.json`. |
 | `units.py` | `parse_quantity("100us")`, `fmt_si`. |
 
-Tests in `tests/` (224, incl. `test_calibration`, `test_sdcard`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
+Tests in `tests/` (228, incl. `test_calibration`, `test_sdcard`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
 (resend, resync, #RESET, 1.1/1.2 fields, timeouts, paused responses), `test_serial_link` (no-reconfigure rule,
 fake pyserial), `test_simulator_scope`, `test_shared_mode` (1.3 semantics through `Scope`), `test_firmware_match`
 (protocol.md section 14 items), `test_server` (every tool in-process, collaborative restarts, legacy fallback),
@@ -47,6 +48,7 @@ wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/mcp && ~/.venvs/fnirsi1
 .venv/Scripts/fnirsi1013d-flash --image <bin> --sha256 <hash>       # reload: only with the lead's ack
 .venv/Scripts/fnirsi1013d-flash --image <bin> --sha256 <hash> --persist  # + write SD sector 750: only with the lead's ack
 .venv/Scripts/fnirsi1013d-bench --port COM10 --census 2000          # LOCAL-safe link census
+.venv/Scripts/fnirsi1013d-sd info --verify                          # read-only; `write` only with the lead's ack
 .venv/Scripts/ruff check --select F,E9,B023 --line-length 120 src tests
 ```
 
@@ -55,7 +57,10 @@ wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/mcp && ~/.venvs/fnirsi1
 - Repo-root `../.mcp.json` registers `fnirsi1013d-sim` (server with in-process AL3 simulator, PI decay on CH1,
   TX gate on CH2). For the real scope: `claude mcp add fnirsi1013d -- <venv>/Scripts/fnirsi1013d-mcp.exe --port COM10`.
 - MCP SDK pinned `mcp>=1.12,<2` (2.x renamed FastMCP). Files are LF; Python on Windows writes CRLF in text mode,
-  so write with `write_bytes(... .encode())` or `newline="\n"`. Bash heredocs in this harness sometimes mangle
+  so write with `write_bytes(... .encode())` or `newline="\n"`. Reinstalling the venv fails while a console
+  script (e.g. `fnirsi1013d-flash.exe` or `fnirsi1013d-mcp.exe` of the owner's session) is running, and uv may
+  already have removed other .exe files: rerun the install once it is free; `python -m fnirsi1013d.<module>`
+  works meanwhile. Bash heredocs in this harness sometimes mangle
   backslashes and quotes: write patch scripts with the Write tool and run them.
 
 ## Transport rules (learned on hardware; keep them)
@@ -137,7 +142,7 @@ Signals: `sine`, `square`, `decay` (PI: period, width, tau, amp, tau2/amp2, flyb
 
 ## MCP tools and safety
 
-22 tools (`scope_calibrate_volts`, `scope_calibration_info` added), `scope_` prefix, list with tiers in `README.md`
+23 tools (`scope_calibrate_volts`, `scope_calibration_info`, `scope_sd_info` added; no SD write tool by design), `scope_` prefix, list with tiers in `README.md`
 (`scope_remote_session` was retired with collaborative mode). Tiers: 0 read-only, 1 acquisition, 2 relays
 (`scope_set_channel`, 5 changes/s), 3 calibration-pin output (`scope_generator`, `scope_self_test_loopback`),
 4 raw (`scope_raw_fpga`, `scope_enter_fel`, only with `FNIRSI_MCP_ENABLE_RAW=1`). `FNIRSI_MCP_MAX_TIER` limits

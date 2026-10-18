@@ -21,6 +21,7 @@ fnirsi1013d-mcp = "fnirsi1013d.server:main"
 fnirsi1013d-sim = "fnirsi1013d.simulator:main"
 fnirsi1013d-flash = "fnirsi1013d.flash:main"
 fnirsi1013d-bench = "fnirsi1013d.bench:main"
+fnirsi1013d-sd = "fnirsi1013d.sdcli:main"
 
 [build-system]
 requires = ["hatchling"]

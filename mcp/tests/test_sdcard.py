@@ -15,6 +15,8 @@ from fnirsi1013d.transport import DeviceError, Transport, open_link
 
 from test_flash import FakeHost
 
+SIM_FW = "0.1.4-sim"  # SimConfig.fw_version
+
 
 def test_sd_info_read_and_stage(sim, transport):
     sd = SdCard(transport)
@@ -125,20 +127,21 @@ def persister(srv, tmp_path, image: bytes, **kw):
 
 def test_persist_only_writes_backs_up_and_verifies(sim, tmp_path):
     card = sim.device.sd
-    old = card.read(750, 2048 - 750)
-    image = make_egon_image(200 * 1024, fill=0x11)
+    old = card.read(750, 600)  # the old image is 300 KiB, longer than the new one
+    image = make_egon_image(200 * 1024, fill=0x11, version=SIM_FW)
     f, lines = persister(sim, tmp_path, image)
     assert f.run_all() == 0, "\n".join(lines)
     assert card.read(750, len(image) // 512) == image
     assert [w for w in card.writes] == [(750 + 128 * k, 128) for k in range(3)] + [(750 + 384, 16)]
-    backups = list((tmp_path / "backups").glob("sd_750-2048_*.bin"))
+    backups = list((tmp_path / "backups").glob("sd_750-1350_*.bin"))
     assert len(backups) == 1 and backups[0].read_bytes() == old
     text = "\n".join(lines)
     assert hashlib.sha256(old).hexdigest() in text and "verified on the card" in text and "FAILED" not in text
+    assert "SD_READ compare" in text and "KiB/s" in text and "running firmware 0.1.4-sim, image reports 0.1.4-sim" in text
 
 
 def test_full_flow_then_persist(sim, tmp_path):
-    image = make_egon_image(64 * 1024 + 512, fill=0x22)
+    image = make_egon_image(64 * 1024 + 512, fill=0x22, version=SIM_FW)
     f, lines = persister(sim, tmp_path, image, persist_only=False, persist=True)
     assert f.run_all() == 0, "\n".join(lines)
     text = "\n".join(lines)
@@ -148,16 +151,16 @@ def test_full_flow_then_persist(sim, tmp_path):
 
 def test_persist_mismatch_then_restore(sim, tmp_path):
     card = sim.device.sd
-    old = card.read(750, 2048 - 750)
+    old = card.read(750, 600)
     card.fail_next_write = 1
-    f, lines = persister(sim, tmp_path, make_egon_image(100 * 1024, fill=0x33))
+    f, lines = persister(sim, tmp_path, make_egon_image(100 * 1024, fill=0x33, version=SIM_FW))
     assert f.run_all() == 7
     failed = [ln for ln in lines if "FAILED" in ln]
     assert len(failed) == 1 and "E_IO" in failed[0]
-    backup = next((tmp_path / "backups").glob("sd_750-2048_*.bin"))
+    backup = next((tmp_path / "backups").glob("sd_750-1350_*.bin"))
     r, lines2 = persister(sim, tmp_path, b"", restore=backup)
     assert r.run_all() == 0, "\n".join(lines2)
-    assert card.read(750, 2048 - 750) == old and any("restore verified" in ln for ln in lines2)
+    assert card.read(750, 600) == old and any("restore verified" in ln for ln in lines2)
 
 
 def test_persist_refusals(sim_factory, tmp_path):
@@ -167,11 +170,74 @@ def test_persist_refusals(sim_factory, tmp_path):
     f, lines = persister(srv, tmp_path, bytes(bad))
     assert f.run_all() == 2 and any("checksum" in ln for ln in lines) and srv.device.sd.writes == []
     legacy = sim_factory(legacy=True)
-    f, lines = persister(legacy, tmp_path, make_egon_image(4096))
+    f, lines = persister(legacy, tmp_path, make_egon_image(4096, version=SIM_FW))
     assert f.run_all() == 7 and any("no SD sector commands" in ln for ln in lines)
-    big = make_egon_image(700 * 1024)  # 1400 sectors: 750 + 1400 > 2048
+    big = make_egon_image(700 * 1024, version=SIM_FW)  # 1400 sectors: 750 + 1400 > 2048
     f, lines = persister(srv, tmp_path, big)
     assert f.run_all() == 7 and any("does not fit" in ln for ln in lines) and srv.device.sd.writes == []
     assert not list((tmp_path / "backups").glob("*.bin"))  # nothing backed up for refused runs
     r, lines = persister(srv, tmp_path, b"", restore=Path(tmp_path / "x.bin"))
     assert r.run_all() == 2
+
+
+def test_persist_refuses_a_different_firmware_version_unless_forced(sim, tmp_path):
+    image = make_egon_image(8 * 1024, version="0.9.9")
+    f, lines = persister(sim, tmp_path, image)
+    assert f.run_all() == 7 and any("reports firmware 0.9.9 but the scope runs 0.1.4-sim" in ln for ln in lines)
+    assert sim.device.sd.writes == []
+    f, lines = persister(sim, tmp_path, image, force=True)
+    assert f.run_all() == 0, "\n".join(lines)
+    assert sim.device.sd.read(750, 16) == image
+
+
+def test_scope_sd_api_and_dry_run(sim, scope):
+    info = scope.sd_info()
+    assert info.write_end == 2048
+    plan = scope.sd_write(bytes(1000), 750, dry_run=True)
+    assert plan.ok and plan.sectors == 2 and sim.device.sd.writes == []
+    plan = scope.sd_write(bytes(512), 709, dry_run=True)
+    assert not plan.ok and "CONFIG" in plan.refusals[0]
+    plan = scope.sd_write(bytes(512), 20, dry_run=True)
+    assert any("BOOT" in r for r in plan.refusals)
+    data = bytes(range(256)) * 600  # 300 sectors: three pieces
+    plan = scope.sd_write(data, 900)
+    assert [p for p in plan.pieces] == [(900, 128), (1028, 128), (1156, 44)] and "read_compare" in plan.timings
+    assert scope.sd_read(900, 300) == data + bytes(-len(data) % 512)
+
+
+def test_sd_cli(sim, tmp_path):
+    from fnirsi1013d import sdcli
+    from fnirsi1013d.scope import Scope
+    out: list[str] = []
+    kw = dict(scope_factory=lambda url: Scope.connect(url), out=out.append, backup_dir=tmp_path / "bk")
+    assert sdcli.run(["--port", sim.url, "info", "--verify"], **kw) == 0
+    assert any("sector 750: eGON.EXE" in ln and "checksum ok" in ln for ln in out)
+    assert sdcli.run(["--port", sim.url, "read", "750", "2", "-o", str(tmp_path / "r.bin")], **kw) == 0
+    assert (tmp_path / "r.bin").read_bytes() == sim.device.sd.read(750, 2)
+    f = tmp_path / "w.bin"
+    f.write_bytes(bytes([7]) * 1500)
+    assert sdcli.run(["--port", sim.url, "write", str(f), "--sector", "1000"], **kw) == 2  # no --yes
+    assert sdcli.run(["--port", sim.url, "write", str(f), "--sector", "1000", "--dry-run"], **kw) == 0
+    assert sdcli.run(["--port", sim.url, "write", str(f), "--sector", "1000", "--yes"], confirm=lambda p: "no",
+                     **{k: v for k, v in kw.items()}) == 2
+    assert sim.device.sd.writes == []
+    assert sdcli.run(["--port", sim.url, "write", str(f), "--sector", "1000", "--yes"], confirm=lambda p: "WRITE 3@1000",
+                     **kw) == 0
+    assert sim.device.sd.read(1000, 3)[:1500] == f.read_bytes() and list((tmp_path / "bk").glob("sd_1000-1003_*.bin"))
+    assert sdcli.run(["--port", sim.url, "write", str(f), "--sector", "40", "--yes"], confirm=lambda p: "x", **kw) == 7
+    assert "BOOT" in out[-1] and out[-1].startswith("FAILED")
+
+
+def test_scope_sd_info_tool(sim_factory, tmp_path):
+    import anyio
+
+    from test_server import client_for
+
+    async def main():
+        async with client_for(sim_factory(), tmp_path) as c:
+            r = await c.call("scope_sd_info", verify=True)
+            assert r["write_window"] == [16, 2048] and r["headers"][2]["magic"] == "eGON.EXE"
+            assert r["headers"][2]["check"] == "ok"
+        async with client_for(sim_factory(legacy=True), tmp_path) as c:
+            assert "SD_SECTORS" in await c.fails("scope_sd_info")
+    anyio.run(main)
