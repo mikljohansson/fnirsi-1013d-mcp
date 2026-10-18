@@ -428,3 +428,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   2.7, mean 86.44); at 20 MS/s and every slower rate A ~87.0 / B ~81.5 (spread 5.5, mean 84.2). Filtered modes (ADCs always at full rate)
   read 86.3-86.6 = the full-rate mean. Legacy mode gates the ADC encode clocks to the sample rate (zaklad.v), so below 200 MS/s the AD9288
   cores run far below their rated minimum and core B's zero shifts by -3.6 codes. Two zero sets per core (full-rate, gated) cover it.
+- Firmware 0.2.37 (fw-gen5, commits 0f3e743/fd8c7db, sha256 9fde228a..., pinned): dB conversion in ARM assembly. Loaded on 0x1534, census
+  clean. FFT_BENCH dB column: 1024 0.32 ms (was 0.70), 2048 0.72 (1.33), 4096 1.44 (2.72), 16384 5.63 (11.06); run columns unchanged
+  (4096 points 10.96 ms DDR, 2048 2.30 ms SRAM). Owner checks of 0.2.35-0.2.37 features pending (gestures, Auto/Reset, density, Filter box,
+  25 MHz stop label).
