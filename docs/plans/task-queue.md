@@ -36,6 +36,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   replaced by removal (FFT switch, generator Wave/Ampl/Offset/Phase, Long memory, hold-off, 1014D remnants), unused files,
   check-reference target and reference downloads removed from the Makefile/CI/docs. Do after the spectrum/calibration
   work lands to avoid conflicts.
+- [ ] **Calibration v3: per-core, per-class gain** (fw-cal2, after fw-gen6's 0.2.44 merges): design in firmware/AGENTS.md section 21;
+  include 3bfc892 (64 full-rate conversions); block v3 376 bytes; owner re-runs base calibration; bench with 0 V, 1.0045 V and a second
+  voltage point (-1 V or 2 V) per class.
+- [ ] **CH2 range-5 zero drift check** (fw-cal hypothesis): CH2 raw at ranges 4/5 vs the stored zeros now; re-calibrate after 10 minutes
+  warm-up and re-measure range 6 immediately and 10 minutes later. If it drifts, document a warm-up recommendation (Atlan: 5 min).
 - [ ] **Calibration v2 bench** (when fw-cal delivers): shorted inputs, per-core means equal within 0.3 codes after
   correction at full-rate and gated rates, T8-style PWM sweep, Nyquist spur gone in legacy mode, volts at 1.000 V /
   0.010 V match the host model within 1 %; owner reruns base calibration.

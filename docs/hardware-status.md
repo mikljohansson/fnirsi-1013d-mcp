@@ -504,3 +504,6 @@ Newest entries at the bottom. Format: date, who, what, result.
 - fw-cal on the CH2 range-6 question: the correction is applied but tiny by construction; CH2's range-5 zero drifted ~0.7 codes since the
   calibration (warm-up/drift suspected; Atlan recommends 5 minutes warm-up); the CH1 full-rate residual is 25 kHz offset-PWM ripple
   (fixed by averaging 64 conversions at full rate, commit 3bfc892 on fw-cal, unbuilt).
+- Owner: the diagnostics view shows the v2 calibration data. fw-cal (~500k tokens) is writing its handoff; fw-cal2 will build v3 (per-core,
+  per-class gain from the voltage-calibration steps; the PWM-slope ratio predicted the sign but only half the magnitude of the measured gated
+  gain mismatch).
