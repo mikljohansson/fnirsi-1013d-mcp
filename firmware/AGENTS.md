@@ -449,7 +449,12 @@ compact menus rather than painting over gaps.
 ## 17. TODO, in priority order
 
 1. Fix the self-restart (section 9): get a 0.2.19 record from repeated bench_link runs, map it with the ELF, compare
-   with the 0.2.11 baseline soak, fix, bench, then let the lead persist the fixed image.
+   with the 0.2.11 baseline soak, fix, bench, then let the lead persist the fixed image. State at fw-gen3's ~300k-token
+   mark: the 0.2.11 baseline soak was clean; 0.2.19 passed 8 bench passes, and a 30-minute capture soak was running.
+   Planned next on the bench: 0.2.20 load, 8 passes, counter 47 vs counter 57, then a 30-minute capture soak, and the
+   nofb variants for A/B. On a restart, run `map_addr.py <that image's ELF> --restart v49..v56` (section 10) and
+   check first for the IRQ-mode signature of the vector-overwrite suspect (section 9). Nothing else is in flight; the
+   type-14 condition bits are in protocol section 14 row 42 (the host shows them raw).
 2. Read the 0.2.18+ frozen snapshot after sessions to explain the two suspend+reset pairs per session (section 11).
 3. Owner verdicts on 0.2.13+ System settings and battery, 0.2.17+ quiet boot; EXT trigger bench with 0x1533.
 4. Bench tests T3-T8 and T10 (section 7), then clear the UNVERIFIED caps and set FORCE_TRIGGER in release builds.
