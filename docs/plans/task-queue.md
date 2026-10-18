@@ -30,7 +30,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   reconnect a second later worked. usb_resumes has been 0 on every build while usb_suspends count: the device never sees or handles the
   resume, so the host resets the port instead. Investigate MUSB suspend/resume (INTRUSB resume enable, POWER.SuspendM/Resume, PHY state
   during suspend, clocks), make resume work, and bench with the soak tool in idle-closed-port mode (open, close, wait 2-5 min, open).
-- [ ] **MMU + D-cache** (big lever: FFT 4096 points 10.9 ms uncached; flat 1:1 map with the framebuffer/DMA regions
+- [ ] **MMU + D-cache** (fw-mmu: built as 0.2.48 on branch fw-mmu, bench sequence firmware/AGENTS.md section 26; big lever: FFT 4096 points 10.9 ms uncached; flat 1:1 map with the framebuffer/DMA regions
   uncached; measure pass time and FFT_BENCH before/after). Separate agent, careful bench.
 - [ ] **Dead-code purge** (owner dropped the byte-identical rule 10-18): PC_PROTOCOL always on, hidden-option masks
   replaced by removal (FFT switch, generator Wave/Ampl/Offset/Phase, Long memory, hold-off, 1014D remnants), unused files,
