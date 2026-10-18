@@ -576,3 +576,9 @@ Newest entries at the bottom. Format: date, who, what, result.
 - The overnight logger stays on 0.2.44 (its zero readings depend on the v2 block, which 0.2.45+ ignore). Rounds 0-7 (23:16-00:27):
   every reopen after 10 minutes with the port closed succeeded; gated CH1 128.0/127.9-128.2 steady, CH2 129.1-129.3 steady; full-rate
   CH1 127.4-127.7 / 128.0-128.4 (ripple noise of the 8-conversion zeros), CH2 128.8-129.1 / 129.6-129.9.
+- fw-mmu delivered fw 0.2.48 (MMU on with a flat 1:1 map, D-cache write-back on DDR and SRAM A, framebuffer pages write-through,
+  peripherals and the restart-record MB uncached, cache clean + MMU off before FEL/reset, fault status/address in GET_LINK_STATS counters
+  58/59; design docs/plans/mmu-dcache.md, bench sequence firmware/AGENTS.md section 26). Merged 1cdded0, built on main: pinned
+  backups/fw-0.2.48_2d067686.bin (MMU on) and backups/fw-0.2.48-nommu_9a2152d3.bin (A/B image, #VER says 0.2.48-nommu). Host tests 8/8
+  files 0 failures, vectors OK, mcp 310 passed. **Not loaded tonight**: a hang would need a power cycle; the first MMU boot is the morning's
+  first step with the owner at the scope (expected FFT_BENCH CP15 word 0x0005107D and DDR FFT rows 2-4x faster).
