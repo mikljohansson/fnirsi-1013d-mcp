@@ -22,7 +22,7 @@
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
                                         //1.7: spectrum view, READ_SPECTRUM, GET_STATUS display_mode (fw 0.2.28);
                                         //1.9: decimation filter (FPGA 0x1534, fw 0.2.30);
-                                        //1.10: calibration data v2, GET_CAL 248 bytes (fw 0.2.42)
+                                        //1.10: calibration data v2, GET_CAL 248 bytes (fw 0.2.43)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
