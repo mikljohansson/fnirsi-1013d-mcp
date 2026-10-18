@@ -588,3 +588,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   is fw 0.2.48 (both batches). Clean rebuild on main: backups/fw-0.2.48_14b2dc0f.bin (MMU on) and backups/fw-0.2.48-nommu_1cce7858.bin
   (the earlier 2d067686 / 9a2152d3 pins, without the purge, deleted). Host tests 8/8 files 0 failures, vectors OK. The identity line now
   reads "git d3a22472 of 2026-10-18 23:12:47 UTC"; an image built elsewhere from the same commit must hash identically (CI prints it).
+- Boot test of fw-0.2.48-nommu_1cce7858 at 01:17 (between logger rounds, 0.2.44 reloaded after): #VER fw=0.2.48-nommu proto=1.13,
+  census 300 PINGs 0 failures 0.95 ms, GET_INFO 76 bytes with the commit hash d3a22472 at byte 52, GET_LINK_STATS 244 bytes (60 counters),
+  pass_ms 35, host capture of both channels OK. The purge batch boots and answers; the MMU image is still untested (morning, owner present).
