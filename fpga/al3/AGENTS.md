@@ -269,7 +269,59 @@ Decimation filter (0x1534), open items:
 - Mutation runs made for 0x1534 (`DUT=` override): the list is in commit 65417a8. A tenth (K = 2 comb bypass
   broken) was still running at hand-over.
 - Next design: 0x1535, a CIC compensation FIR as the intended default mode (owner direction). Study only, no RTL yet:
-  `tb/fir_design.py report` and `README.md` section 4. 0x1534 stays frozen until it is benched.
+  `tb/fir_design.py report` and `README.md` section 4. 0x1534 is accepted by the coordinator (2026-10-18) and is
+  being flashed with fw 0.2.33.
+
+## Handoff to fpga-gen4: 0x1535 (written by fpga-gen3, 2026-10-18)
+
+Brief from team-lead (accepted):
+- CIC decimating by N/2, then a 15-tap symmetric FIR decimating by 2, flat to fo/4.
+- One M18x18 per channel.
+- Engages at N >= 16 with N a multiple of 4; otherwise the 0x1534 path is used.
+- A FIR enable/profile bit in a new command (free writes 0x56 and up) plus its read-back (0x29 byte 0 bits 6..5 are
+  free, or a new read 0x2A).
+- K = 0..3 semantics unchanged when the bit is 0. Version word 0x1535.
+- Document the group delay and the shift + 1 rule in the latency section. Testbench against the Python model,
+  including mutations.
+
+Design notes:
+- **Taps.** `python3 -I tb/fir_design.py coeffs K 15 0.5` prints the 15 quantised taps per K. They are 18-bit signed and
+  sum to 2^17, centre tap about 62k to 69k. A symmetric pre-add needs 8 multiply-accumulates per output sample.
+- **CIC by N/2.** The pair-stream CIC decimates by P/2, so P must be even; that is where "N multiple of 4" comes from.
+  - The simplest change is a second strobe in `decim_chan`: `dec_pc` counts P/2 when the FIR is on.
+  - The comb, shift and saturation stages then produce CIC samples at 2 fo, and the FIR consumes pairs of them.
+  - `dec_wr` (the memory write and `swc_adv`) must then fire once per FIR output, every P write clocks as before.
+    The capture logic needs no change.
+- **FIR input.** Use the 16-bit CIC output after the shift. The firmware picks S = rec_shift(K, N/2) + 1 for headroom,
+  because the step overshoot is 6 to 9 %.
+- **Accumulator.** 18 x 18 products into about 40 bits. Output = acc >> 17, clamped to 0..65535.
+- **Multiplier timing.** There are N/2 >= 8 write clocks per output, so one multiplier per channel is enough. Check how
+  TD 4.6.8 infers the M18x18 from `a * b` (signed). Register the inputs and outputs (DSP pipeline) to meet 100 MHz.
+  The `#dsp` line in `FPGA_phy.area` shows whether it was inferred.
+- **Delay line.** 15 x 16 bit per channel in registers (about 240 FF) is fine. A BRAM is not needed at T = 15.
+- **Latency.** In write clocks it is no longer constant: it now includes the FIR. Measure it with `cic_model.py` (extend
+  it with the FIR stage and the CIC by N/2) and report it as for 0x1534: pin to memory write in write clocks, plus the
+  filter group delay. The FIR adds (T - 1)/4 = 3.5 output samples.
+
+Testbench notes (things that cost time in 0x1534):
+- `tb/run.sh` compares K = 0 against git `REF1533_REV`. For 0x1535 keep that, and add a K >= 1, FIR-off comparison
+  against 0x1534 (rev 6d4c8ad) if it is cheap: the `decim_chan` rename in `mkref` is already there.
+- `tb_ext_trigger.v` checks the version word (now 0x1534). `tb_decim.v` checks 0x06 and 0x29 values; update both.
+- `cic_model.py` finds the latency by search and asserts 12. A fully saturated segment matches every latency, so keep
+  shifts that do not saturate everything.
+- After K >= 1, the reference and dut write-clock and encode toggle phases differ. `tb_decim.v` copies them before its
+  last equivalence phase; keep that.
+- Mutations: `DUT=<file> tb/run.sh 3` with `SIM_WORK` set to a separate directory. Some broken designs hang a capture
+  until the 400 ms sim timeout, which takes minutes.
+
+Tool gotchas:
+- Git Bash mangles `/mnt/...` arguments and breaks heredocs that contain some quote patterns. Run WSL from PowerShell
+  (`wsl -d Ubuntu -- bash /mnt/c/.../script.sh`) and write scripts with the Write tool.
+- Line endings: `README.md` and `tb/tb_ext_trigger.v` are CRLF (`README.md` has 22 LF lines from b146da5);
+  `zaklad.v`, `AGENTS.md` and the other tb files are LF. Python `open(...).read()` then `write(newline='')` silently
+  converts CRLF files to LF.
+- `PACKREG = ON` in `zaklad.adc` had no effect on the ADC pins, which feed registers on both clock edges.
+- The timing report lists only 3 endpoints. For more, re-run `report_timing -ep_num N` on `~/al3-build/FPGA_pr.db`.
 
 Also open: the structural `clkc[1]` violation (retime `sample_clock_enable`), symmetric IOB packing on the four
 encode outputs, and the 32-bit sample-rate counter as critical path (down-counter with registered terminal count).
