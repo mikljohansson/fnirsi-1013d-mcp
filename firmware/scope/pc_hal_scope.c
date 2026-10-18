@@ -1397,8 +1397,9 @@ void pc_glue_roll_label(void)
   display_fill_rounded_rect(ACQ_MENU_XPOS + 8, ACQ_MENU_YPOS + 163, 90, 40, 3);
   display_set_font(&font_2);
   display_set_fg_color(on ? BLACK_COLOR : WHITE_COLOR);
-  display_text(ACQ_MENU_XPOS + 26, ACQ_MENU_YPOS + 168, "Roll mode");
-  display_text(ACQ_MENU_XPOS + (on ? 46 : 44), ACQ_MENU_YPOS + 182, on ? "on" : "off");
+  //fw 0.2.40 (owner): the label only, the colour shows the state, as the Average box ("Average" / "mode")
+  display_text(ACQ_MENU_XPOS + 41, ACQ_MENU_YPOS + 168, "Roll");
+  display_text(ACQ_MENU_XPOS + 38, ACQ_MENU_YPOS + 182, "mode");
   displaydata.fg_color = fg;
   displaydata.font     = font;
 }

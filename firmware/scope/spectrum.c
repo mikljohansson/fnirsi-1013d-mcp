@@ -144,13 +144,12 @@ uint32 spectrum_bench(uint8 *out, uint32 reps)
 
 #define PLOT_X                6
 #define PLOT_W                720
-#define PLOT_Y                80
-#define PLOT_H                336
+#define PLOT_Y                66
+#define PLOT_H                344
 #define PLOT_XDIV             10
 #define PLOT_YDIV             8
 #define INFO_Y1               50
-#define INFO_Y2               64
-#define FLABEL_Y              419
+#define FLABEL_Y              413
 #define STRIP_Y               436
 #define STRIP_H               44
 
@@ -180,13 +179,14 @@ typedef struct
   uint8  view;          //VIEW_*
   uint8  wait;          //the time base changed: ignore the trace buffers until a new capture
   uint8  autostage;     //Auto in progress: 1 at the full-axis rate, 2 at the chosen rate
+  uint8  avg;           //trace averaging: 0 off, 1..3 over 4 / 16 / 64 captures, 4 max-hold
 } SPECSTATE;
 
 #define VIEW_SPECTRUM         0
 #define VIEW_WATERFALL        1
 #define VIEW_DENSITY          2
 
-static SPECSTATE spec = { 0, 0, 11, FX_WIN_HANN, 1, 0, 0, 0, 0, 0, 0, { 0, 0 }, 0, VIEW_SPECTRUM, 0, 0 };
+static SPECSTATE spec = { 0, 0, 11, FX_WIN_HANN, 1, 0, 0, 0, 0, 0, 0, { 0, 0 }, 0, VIEW_SPECTRUM, 0, 0, 1 };
 
 //What the last FFT used, per channel (READ_SPECTRUM reports these)
 typedef struct
@@ -203,7 +203,14 @@ typedef struct
 
 static FX_FFT    spec_plan;
 static SPECFRAME spec_frame[2];
-static int16     spec_db[2][(FX_FFT_N_MAX / 2) + 1];    //centi-dBV
+static int16     spec_db[2][(FX_FFT_N_MAX / 2) + 1];    //centi-dBV as shown (averaged or held)
+static int16     spec_raw[2][(FX_FFT_N_MAX / 2) + 1];   //centi-dBV of the latest record (the history views use it)
+
+//Trace averaging (fw 0.2.40): exponential average of the dB levels, x16 fixed point, over a growing count up to
+//4 / 16 / 64 captures, or the maximum per bin (max-hold). Restarts whenever a bin's meaning changes (key).
+static const uint8 spec_avg_n[] = { 1, 4, 16, 64, 0 };
+static int32     spec_acc[2][(FX_FFT_N_MAX / 2) + 1];
+static uint32    spec_navg[2], spec_avg_key[2];
 
 //History of the waterfall and density views (section "Waterfall and density views" below)
 #define HIST_H                PLOT_H        //rows of waterfall history = levels of the density view
@@ -361,6 +368,7 @@ static void spec_fix_channel(void)
 
 static void spec_compute(void)
 {
+  int    fresh = spec.fresh;
   int    log2n = spec_log2n();
   uint32 half = 1u << (log2n - 1);
   int    ch;
@@ -417,7 +425,7 @@ static void spec_compute(void)
       f->wide = 0;
     }
 
-    fx_fft_cdb(&spec_plan, 0, half + 1, g, spec_db[ch]);
+    fx_fft_cdb(&spec_plan, 0, half + 1, g, spec_raw[ch]);
 
     f->log2n     = log2n;
     f->window    = spec.window;
@@ -426,6 +434,49 @@ static void spec_compute(void)
     f->fs_mhz    = spec_fs_mhz(f->divider, &dc);
     f->k         = dc.k;
     f->gain_cdb  = g;
+
+    //Averaging / max-hold into spec_db: a new record adds to it, a recompute of the same record does not
+    {
+      uint32 key = 2166136261u, k2, n;
+      uint32 parts[7];
+
+      parts[0] = log2n; parts[1] = spec.window; parts[2] = (uint32)f->fs_mhz; parts[3] = f->k | (f->wide << 4);
+      parts[4] = (uint32)g; parts[5] = spec.avg; parts[6] = s->V_A;
+      for(k2 = 0; k2 < 7; k2++)
+        key = (key ^ parts[k2]) * 16777619u;
+
+      if(key != spec_avg_key[ch])
+      {
+        spec_avg_key[ch] = key;
+        spec_navg[ch] = 0;
+      }
+
+      if(!spec_navg[ch] || fresh)
+      {
+        n = spec_avg_n[spec.avg];
+        if(spec_navg[ch] < 0xFFFF)
+          spec_navg[ch]++;
+
+        for(k2 = 0; k2 <= half; k2++)
+        {
+          int32 x = (int32)spec_raw[ch][k2] * 16;
+
+          if(spec_navg[ch] == 1)
+            spec_acc[ch][k2] = x;
+          else if(!n)
+          {
+            if(x > spec_acc[ch][k2])
+              spec_acc[ch][k2] = x;
+          }
+          else
+            spec_acc[ch][k2] += (x - spec_acc[ch][k2]) / (int32)((spec_navg[ch] < n) ? spec_navg[ch] : n);
+        }
+      }
+
+      for(k2 = 0; k2 <= half; k2++)
+        spec_db[ch][k2] = (int16)((spec_acc[ch][k2] + ((spec_acc[ch][k2] < 0) ? -8 : 8)) / 16);
+    }
+
     spec.have[ch] = 1;
   }
 
@@ -601,65 +652,105 @@ static uint32 spec_draw_trace(const SPECVIEW *v, const int16 *db, uint32 color)
   return peak;
 }
 
-static void spec_draw_peak(uint32 y, int ch, uint32 peak, uint64 bin_mhz)
+//Text at x, returns the x after it
+static uint32 spec_text_at(uint32 x, uint32 y, const char *t)
 {
-  char t[48], *p;
-
-  if(!peak)
-    return;
-
-  display_set_font(&font_2);
-  display_set_fg_color(ch ? CHANNEL2_COLOR : CHANNEL1_COLOR);
-  p = fmt_str(t, ch ? "CH2 peak " : "CH1 peak ");
-  p = fmt_freq(p, bin_mhz * peak);
-  p = fmt_str(p, "  ");
-  p = fmt_c1(p, spec_db[ch][peak]);
-  fmt_str(p, spec_frame[ch].unit_amps ? " dBA" : " dBV");
-  text_right(PLOT_X + PLOT_W, y, t);
+  display_text(x, y, (int8 *)t);
+  return x + text_width(t);
 }
 
-static void spec_draw_info(int log2n, uint64 fs_mhz, int k, uint32 n, uint64 bin_mhz)
+//The peak marker glyph (font_2 has no triangle): 7 px wide, in the current colour; returns its advance
+static uint32 spec_glyph_marker(uint32 x, uint32 y)
 {
-  char t[96], *p;
+  uint32 r;
+
+  for(r = 0; r < 4; r++)
+    display_draw_horz_line(y + 5 + r, x + 3 - r, x + 3 + r);
+
+  return 10;
+}
+
+static const char *spec_avg_names[] = { "", "Avg 4", "Avg 16", "Avg 64", "Max" };
+
+//The one header line (owner, fw 0.2.40), left to right: per shown channel its peak "CH1 ^ 977 Hz  +2.7 dBV" in the
+//channel colour, then "RBW 732 Hz", the averaging ("Avg 4" / "Max", hidden when off), the decimation filter tag
+//("CIC3", no N) and, in the waterfall, the time its rows span. Nothing that repeats a strip field (fs is the time base,
+//N the FFT length field).
+static void spec_draw_header(const uint32 *peak, int hch, int k, uint64 bin_mhz)
+{
+  char   t[48], *p;
+  uint32 x = PLOT_X;
+  int    ch;
 
   display_set_font(&font_2);
-  display_set_fg_color(WHITE_COLOR);
 
-  p = fmt_str(t, "fs ");
-  p = fmt_freq_units(p, fs_mhz, 1);
-  p = fmt_str(p, "   N ");
-  p = fmt_uint(p, 1u << log2n);
-  p = fmt_str(p, "   RBW ");
-  p = fmt_freq(p, (bin_mhz * fx_enbw_milli(spec.window) + 500) / 1000);
+  for(ch = 0; ch < 2; ch++)
+  {
+    if(!spec.have[ch] || !peak[ch] || ((spec.view != VIEW_SPECTRUM) && (ch != hch)))
+      continue;
+
+    display_set_fg_color(ch ? CHANNEL2_COLOR : CHANNEL1_COLOR);
+    x = spec_text_at(x, INFO_Y1, ch ? "CH2 " : "CH1 ");
+    x += spec_glyph_marker(x, INFO_Y1);
+    p = fmt_freq(t, bin_mhz * peak[ch]);
+    p = fmt_str(p, "  ");
+    p = fmt_c1(p, spec_db[ch][peak[ch]]);
+    fmt_str(p, spec_frame[ch].unit_amps ? " dBA" : " dBV");
+    x = spec_text_at(x, INFO_Y1, t) + 18;
+  }
+
+  display_set_fg_color(0x00C0C0C0);
+  p = fmt_str(t, "RBW ");
+  fmt_freq(p, (bin_mhz * fx_enbw_milli(spec.window) + 500) / 1000);
+  x = spec_text_at(x, INFO_Y1, t) + 18;
+
+  if(spec.avg)
+    x = spec_text_at(x, INFO_Y1, spec_avg_names[spec.avg]) + 12;
+
+  if(k)
+  {
+    static const char *names[] = { "", "boxcar", "CIC2", "CIC3" };
+
+    x = spec_text_at(x, INFO_Y1, names[k & 3]) + 12;
+  }
 
   //Waterfall: the time the visible rows span, oldest at the bottom
   if((spec.view == VIEW_WATERFALL) && (wf_count > 1))
   {
     uint32 oldest = (wf_head + HIST_H - wf_count) % HIST_H;
 
-    p = fmt_str(p, "   rows ");
-    p = fmt_uint(p, wf_count);
-    p = fmt_str(p, " = ");
-    p = fmt_c1(p, (int32)((timer0ticks - wf_ms[oldest]) / 10));
-    p = fmt_str(p, " s");
+    p = fmt_c1(t, (int32)((timer0ticks - wf_ms[oldest]) / 10));
+    fmt_str(p, " s of rows");
+    spec_text_at(x + 6, INFO_Y1, t);
   }
+}
 
-  if(k)
-  {
-    static const char *names[] = { "", "   boxcar", "   CIC2", "   CIC3" };
+//Warnings, only while they apply, centred over the top of the plot in the warning colour: overrange of a shown
+//channel, no anti-alias filter (decimated without the 0x1534 filter), stopped while a history view cannot fill
+static void spec_draw_warnings(int k, uint64 fs_mhz, int hch)
+{
+  char   t[128], *p = t;
+  int    ch;
 
-    p = fmt_str(p, names[k & 3]);
-  }
-  display_text(PLOT_X, INFO_Y1, (int8 *)t);
+  *p = 0;
+  for(ch = 0; ch < 2; ch++)
+    if(spec_ch(ch)->enable && spec_ch(ch)->ADoverload &&
+       ((spec.view == VIEW_SPECTRUM) ? ((spec.channel == SPEC_CH_BOTH) || (spec.channel == ch)) : (ch == hch)))
+      p = fmt_str(p, ch ? "CH2 overrange   " : "CH1 overrange   ");
 
-  //Decimation: plain sample skipping folds everything above fs/2 into the plot; the 0x1534 filter's order is the
-  //short tag on the first line (owner: no N on the screen, READ_SPECTRUM has it)
-  (void)n;
   if(!k && (fs_mhz < 200000000000ull))
-  {
-    display_set_fg_color(ORANGE_COLOR);
-    display_text(PLOT_X, INFO_Y2, (int8 *)"no anti-alias filter: signals above fs/2 fold back");
-  }
+    p = fmt_str(p, "no anti-alias filter below 200 MS/s   ");
+
+  if(!scopesettings.runstate && ((spec.view != VIEW_SPECTRUM) || (!spec.have[0] && !spec.have[1])))
+    p = fmt_str(p, "Stopped: RUN fills the view   ");
+
+  if(p == t)
+    return;
+
+  p[-3] = 0;                                 //no trailing gap
+  display_set_font(&font_2);
+  display_set_fg_color(ORANGE_COLOR);
+  text_center(PLOT_X + PLOT_W / 2, PLOT_Y + 3, t);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -789,7 +880,7 @@ static void spec_hist_add(const SPECVIEW *v)
   if(!spec_pal_ok)
     spec_palette();
 
-  spec_columns(v, spec_db[ch], spec_col);
+  spec_columns(v, spec_raw[ch], spec_col);
 
   if(spec.view == VIEW_WATERFALL)
   {
@@ -900,7 +991,7 @@ static void spec_draw_legend(const SPECVIEW *v, int ch)
   if(!spec_pal_ok)
     spec_palette();
 
-  for(y = INFO_Y2 + 2; y < INFO_Y2 + 11; y++)
+  for(y = INFO_Y1 + 2; y < INFO_Y1 + 11; y++)
     for(x = 0; x < 128; x++)
       displaybuffertmp[y * 800 + x0 + x] = (spec.view == VIEW_DENSITY) ? dens_pal[40 + ((2 * x * 215) >> 8)] : spec_pal[2 * x];
 
@@ -909,18 +1000,18 @@ static void spec_draw_legend(const SPECVIEW *v, int ch)
   {
     display_set_font(&font_2);
     display_set_fg_color(0x00A0A0A0);
-    text_right(x0 - 4, INFO_Y2, "rare or old");
-    display_text(x0 + 132, INFO_Y2, (int8 *)"frequent");
+    text_right(x0 - 4, INFO_Y1, "rare or old");
+    display_text(x0 + 132, INFO_Y1, (int8 *)"frequent");
     return;
   }
 
   display_set_font(&font_2);
   display_set_fg_color(0x00A0A0A0);
   fmt_int(t, (v->top - PLOT_YDIV * v->cdb_per_div) / 100);
-  text_right(x0 - 4, INFO_Y2, t);
+  text_right(x0 - 4, INFO_Y1, t);
   p = fmt_int(t, v->top / 100);
   fmt_str(p, spec_frame[ch].unit_amps ? " dBA" : " dBV");
-  display_text(x0 + 132, INFO_Y2, (int8 *)t);
+  display_text(x0 + 132, INFO_Y1, (int8 *)t);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -931,14 +1022,15 @@ static void spec_draw_legend(const SPECVIEW *v, int ch)
 #define F_WINDOW    2
 #define F_SCALE     3
 #define F_REF       4
-#define F_AUTO      5
-#define F_RESET     6
-#define F_VIEW      7
-#define F_EXIT      8
-#define F_COUNT     9
+#define F_AVG       5
+#define F_AUTO      6
+#define F_RESET     7
+#define F_VIEW      8
+#define F_EXIT      9
+#define F_COUNT     10
 
-static const char *spec_field_label[F_COUNT] = { "Channel", "FFT length", "Window", "Scale", "Ref level", "", "", "View", "" };
-static const uint8 spec_field_twoway[F_COUNT] = { 0, 0, 0, 0, 1, 0, 0, 0, 0 };
+static const char *spec_field_label[F_COUNT] = { "Channel", "FFT length", "Window", "Scale", "Ref level", "Average", "", "", "View", "" };
+static const uint8 spec_field_twoway[F_COUNT] = { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0 };
 
 #define FIELD_W     (PLOT_W / F_COUNT)
 
@@ -971,6 +1063,10 @@ static void spec_field_value(int f, char *t, int log2n, uint64 bin_mhz)
     case F_REF:
       p = fmt_int(t, spec.ref);
       fmt_str(p, spec_frame[spec.channel == 1].unit_amps ? " dBA" : " dBV");
+      break;
+
+    case F_AVG:
+      fmt_str(t, spec.avg ? ((spec.avg == 4) ? "Max hold" : spec_avg_names[spec.avg] + 4) : "Off");
       break;
 
     case F_AUTO:
@@ -1157,12 +1253,11 @@ int spectrum_display(void)
   }
 
   spec_draw_freq_labels(&v, bin_mhz);
-  spec_draw_info(log2n, fs_mhz, dc.k, dc.n, bin_mhz);
+  spec_draw_warnings(dc.k, fs_mhz, hch);
 
-  if((!spec.have[0] && !spec.have[1]) || ((spec.view == VIEW_WATERFALL) && !wf_count))
+  if(((!spec.have[0] && !spec.have[1]) || ((spec.view == VIEW_WATERFALL) && !wf_count)) && scopesettings.runstate)
   {
     const char *msg = !(spec_ch_on(0) || spec_ch_on(1)) ? "No channel enabled" :
-                      !scopesettings.runstate ? "Stopped: RUN fills the view with new captures" :
                       spec.autostage ? "Auto: measuring the signal" :
                       spec.wait ? "Waiting for a capture at the new sample rate" : "Waiting for a capture";
 
@@ -1178,16 +1273,14 @@ int spectrum_display(void)
       if(spec.have[ch])
         peak[ch] = spec_draw_trace(&v, spec_db[ch], ch ? CHANNEL2_COLOR : CHANNEL1_COLOR);
 
-    if(spec.have[0])
-      spec_draw_peak(INFO_Y1, 0, peak[0], bin_mhz);
-    if(spec.have[1])
-      spec_draw_peak(spec.have[0] ? INFO_Y2 : INFO_Y1, 1, peak[1], bin_mhz);
   }
   else if(spec.have[hch])
   {
-    spec_draw_peak(INFO_Y1, hch, spec_find_peak(&v, spec_db[hch]), bin_mhz);
+    peak[hch] = spec_find_peak(&v, spec_db[hch]);
     spec_draw_legend(&v, hch);
   }
+
+  spec_draw_header(peak, hch, dc.k, bin_mhz);
 
   spec_draw_strip(log2n, bin_mhz);
 
@@ -1377,6 +1470,7 @@ static void spec_defaults(void)
   spec.zoom   = 0;
   spec.start  = 0;
   spec.view   = VIEW_SPECTRUM;
+  spec.avg    = 1;
   spec.autostage = 0;
   spec.recompute = 1;
 }
@@ -1580,12 +1674,13 @@ uint16 spectrum_settings_word(int i)
   if(i == 0)
     return (uint16)(0x5E00 | ((spec.window & 3) << 6) | ((spec.scale & 3) << 4) | ((spec.log2n - 8) & 15));
 
-  return (uint16)spec.ref;
+  return (uint16)(((spec.avg & 7) << 12) | ((uint16)spec.ref & 0x0FFF));
 }
 
 void spectrum_settings_restore(uint16 w0, uint16 w1)
 {
-  int16 ref = (int16)w1;
+  int16 ref = (int16)(w1 << 4) >> 4;        //12-bit ref; bits 12-14 averaging (fw 0.2.40)
+  uint32 avg = (w1 >> 12) & 7;
 
   if((w0 & 0xFF00) != 0x5E00)
     return;
@@ -1598,6 +1693,9 @@ void spectrum_settings_restore(uint16 w0, uint16 w1)
     spec.log2n  = (w0 & 15) + 8;
     spec.ref    = ref;
   }
+
+  if(avg <= 4)
+    spec.avg = (uint8)avg;
 }
 
 static void spec_step_field(int f, int up)
@@ -1634,6 +1732,11 @@ static void spec_step_field(int f, int up)
       spec.ref += up ? spec_scales[spec.scale] : -spec_scales[spec.scale];
       if(spec.ref < REF_MIN) spec.ref = REF_MIN;
       if(spec.ref > REF_MAX) spec.ref = REF_MAX;
+      break;
+
+    case F_AVG:
+      spec.avg = (spec.avg + 1) % 5;
+      spec.recompute = 1;                    //restart the average now, also when stopped
       break;
 
     case F_AUTO:
@@ -1741,7 +1844,7 @@ int32 spectrum_read(int ch, uint32 first, uint32 max_bins, uint8 *hdr, uint8 *le
   hdr[0] = ch & 1;
   hdr[1] = f->window;
   hdr[2] = f->log2n;
-  hdr[3] = (uint8)(f->unit_amps | (f->wide << 1) | (f->k << 2));
+  hdr[3] = (uint8)(f->unit_amps | (f->wide << 1) | (f->k << 2) | (spec.avg << 4));
   put32(hdr + 4, spec.frames);
   put32(hdr + 8, f->divider);
   put32(hdr + 12, (uint32)((f->fs_mhz + 500) / 1000));

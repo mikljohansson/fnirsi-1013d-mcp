@@ -587,6 +587,21 @@ touch that moves more than 2 px is a drag: the spectrum follows the finger horiz
 1/65536 of the Nyquist range) and is redrawn while dragging; at full span there is nothing to pan. Start, centre and
 stop frequencies are the labels under the plot.
 
+Header and averaging (fw 0.2.40, owner): one header line, left to right: per shown channel its peak "CH1 ^ 977 Hz
++2.7 dBV" in the channel colour, "RBW 732 Hz", the averaging ("Avg 4" / "Max", hidden when off), the decimation
+filter tag ("CIC3") and, in the waterfall, the time its rows span; the colour legend sits at the right end in the
+history views. No fs or N (they are the time base and the FFT-length field). Warnings appear centred over the top of
+the plot in orange only while they apply: "CHn overrange", "no anti-alias filter below 200 MS/s" (decimated without
+the 0x1534 filter), "Stopped: RUN fills the view" (history views, or no record). The plot is 8 divisions of 43 px.
+Average field: Off, 4, 16, 64 (exponential average of the dB levels over a growing count up to that many captures,
+x16 fixed point, so the first captures converge at once) or Max hold (the highest level per bin). Default 4. It is
+applied before drawing and before READ_SPECTRUM (header byte 3 bits 4-6: 0 off, 1-3 = 4 / 16 / 64, 4 max-hold) and
+restarts whenever a bin's meaning changes (FFT length, window, sample rate, filter, range or probe, V/A, the mode
+itself); display-only changes (ref, scale, span, pan) keep it, as on a bench analyser. Averaging dB is not averaging
+power: on noise it reads about 2.5 dB low (log of the mean vs mean of the log), which is fine for steadying a
+display; use the host for calibrated noise power. The waterfall and density views take the unaveraged records. The
+averaging mode persists with the other settings (word 209 bits 12-14; ref in bits 0-11).
+
 Span and sample rate (fw 0.2.39, owner: like a spectrum analyser): the span drives the scope's time base (the same
 setting the scope view uses, short time bases only). A zoom-out tap with the whole axis shown steps to the next
 faster rate, until fs/2 reaches 25 MHz (50 MS/s, 2 us/div); a zoom-in tap that would show fewer than 64 bins steps
