@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.0 (protocol 1.3, shared control), built and host-tested, not yet benched. Read `CLAUDE.md` (repo root) first, then
+State on 2026-10-18, fw 0.2.1 (protocol 1.3, shared control; 0.2.1 clips a READ_TRACE count past the end), built and host-tested, not yet benched. Read `CLAUDE.md` (repo root) first, then
 this file. For details, this file links to `firmware/README.md` (build, SD layout, FEL, memory budget, bring-up
 checklist), `docs/protocol.md` (the spec; section 14 lists every deviation from it) and
 `docs/plans/firmware-usb-protocol.md` (the original plan). It does not repeat them.

@@ -717,10 +717,16 @@ static void test_trace(void)
     T_EQ(r.p[48], 255 - inv0);
   }
 
-  //count 0 = to the end; start past the end
+  //count 0 = to the end; a count past the end is clipped; start past the end is an error
   p[1] = 0; pc_put_u32(p + 4, 3990); pc_put_u32(p + 8, 0);
   r = req(PC_CMD_READ_TRACE, p, 12);
   T_EQ(pc_get_u32(r.p + 12), 10);
+  pc_put_u32(p + 8, 16000);
+  r = req(PC_CMD_READ_TRACE, p, 12);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p + 4), 4000); T_EQ(pc_get_u32(r.p + 12), 10); T_EQ(r.len, 32 + 16 + 10);
+  pc_put_u32(p + 4, 4000); pc_put_u32(p + 8, 5);
+  r = req(PC_CMD_READ_TRACE, p, 12);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p + 12), 0);
   pc_put_u32(p + 4, 4001);
   r = req(PC_CMD_READ_TRACE, p, 12);
   T_EQ(r.h.status, PC_E_BAD_ARG);

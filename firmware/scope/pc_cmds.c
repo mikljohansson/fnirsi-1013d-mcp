@@ -1300,11 +1300,10 @@ static int h_read_trace(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
   if(start > samples)
     return pc_error(s, PC_E_BAD_ARG, 4, "start");
 
-  if(count == 0)
+  //count 0 = to the end; a count past the end is clipped (the header reports the count sent). The buffer length is the
+  //capture's, which can differ from the live GET_TRIGGER total (e.g. after SET_TRIGGER while stopped).
+  if((count == 0) || (count > samples - start))
     count = samples - start;
-
-  if(count > samples - start)
-    return pc_error(s, PC_E_BAD_ARG, 8, "count");
 
   for(i=0;i<2;i++)
     if(chm & (1 << i))
