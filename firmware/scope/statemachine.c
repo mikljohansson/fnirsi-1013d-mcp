@@ -1675,6 +1675,16 @@ void handle_main_menu_touch(void)
           //Signal calibration has been done
           calibrationopen = 2;
                     
+          //Calibration data v3: after a passed zero step the gain step at the calibration post comes next (prompt
+          //with OK, calibrationopen 10; a touch outside the box skips it)
+          if(scope_gain_calibration_offered())
+          {
+            timer0_delay(1000);
+            scope_show_gain_calibration_text();
+            calibrationopen = 10;
+            continue;
+          }
+
           //Close menu if confirmation mode is inactive & calibration is OK, delay 700ms
           if((!scopesettings.confirmationmode)&&(!calibrationfail)) {timer0_delay(700);close_open_menus(1);return;}
           
@@ -1804,6 +1814,39 @@ void handle_main_menu_touch(void)
                 }
             } 
       
+      //Calibration data v3: gain step prompt opened and OK touched
+      else if((calibrationopen == 10) && (xtouch >= 395) && (xtouch <= 594) && (ytouch >= 223) && (ytouch <= 280))
+      {
+        if((xtouch >= 517) && (xtouch <= 583) && (ytouch >= 230) && (ytouch <= 272))
+        {
+          //Highlight the button and wait until touch is released
+          scope_display_ok_button(517, 230, 1);
+          tp_i2c_wait_for_touch_release();
+
+          //Measure, then show the result for a moment
+          scope_show_calibrating_text();
+          scope_show_gain_calibration_result(scope_do_gain_calibration());
+          timer0_delay(1500);
+
+          //Then as after the zero step: the input calibration when it is due, else done
+          if(calibrationfail)
+          {
+            scope_show_Input_calibration();
+            calibrationopen = 2;
+          }
+          else
+          {
+            calibrationopen = 9;
+
+            if(!scopesettings.confirmationmode)
+            {
+              timer0_delay(700);
+              close_open_menus(1);
+              return;
+            }
+          }
+        }
+      }
       //-**************************************************************************************************************
       //Check on calibration done text opened and being touched
       else if((calibrationopen == 9) && (xtouch >= 395) && (xtouch <= 580) && (ytouch >= 223) && (ytouch <= 280))  //505    

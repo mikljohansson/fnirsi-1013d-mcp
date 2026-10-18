@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// adc_cal.c - per-core ADC zero calibration maths and the sector 708 block (adc_cal.h, firmware/README.md section 6).
+// adc_cal.c - per-core ADC calibration maths and the sector 708 block (adc_cal.h, firmware/README.md section 6).
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "adc_cal.h"
@@ -49,25 +49,31 @@ static uint8_t *put32(uint8_t *p, uint32_t v) { p = put16(p, v & 0xFFFF); return
 static uint32_t get16(const uint8_t *p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8); }
 static uint32_t get32(const uint8_t *p) { return get16(p) | (get16(p + 2) << 16); }
 
+uint8_t *acal_pack_channel(const acal_channel *c, uint8_t *p)
+{
+  uint32_t k, r, m;
+
+  for(r=0;r<ACAL_RANGES;r++) p = put16(p, c->pwm[r]);
+  for(m=0;m<ACAL_CLASSES;m++) for(k=0;k<2;k++) for(r=0;r<ACAL_RANGES;r++) p = put16(p, (uint16_t)c->zero[m][k][r]);
+  for(m=0;m<ACAL_CLASSES;m++) for(k=0;k<2;k++) for(r=0;r<ACAL_RANGES;r++) p = put16(p, (uint16_t)c->slope[m][k][r]);
+  for(m=0;m<ACAL_CLASSES;m++) for(k=0;k<2;k++) for(r=0;r<ACAL_RANGES;r++) *p++ = c->noise[m][k][r];
+  for(m=0;m<ACAL_CLASSES;m++) for(k=0;k<2;k++) p = put16(p, c->gain[m][k]);
+  *p++ = c->gain_range;
+  *p++ = c->gain_flags;
+  return put16(p, c->gain_lever);
+}
+
 void acal_pack(const acal_channel ch[2], uint8_t *block)
 {
   uint8_t *p = block;
-  uint32_t c, k, r, m;
 
   p = put32(p, ACAL_MAGIC);
   p = put16(p, ACAL_VERSION);
   p = put16(p, ACAL_BLOCK_BYTES);
   p = put16(p, ACAL_CLASSES);
   p = put16(p, 0);
-
-  for(c=0;c<2;c++)
-  {
-    for(r=0;r<ACAL_RANGES;r++) p = put16(p, ch[c].pwm[r]);
-    for(m=0;m<ACAL_CLASSES;m++) for(k=0;k<2;k++) for(r=0;r<ACAL_RANGES;r++) p = put16(p, (uint16_t)ch[c].zero[m][k][r]);
-    for(k=0;k<2;k++) for(r=0;r<ACAL_RANGES;r++) p = put32(p, (uint32_t)ch[c].slope[k][r]);
-    for(m=0;m<ACAL_CLASSES;m++) for(k=0;k<2;k++) for(r=0;r<ACAL_RANGES;r++) p = put16(p, ch[c].noise[m][k][r]);
-  }
-
+  p = acal_pack_channel(&ch[0], p);
+  p = acal_pack_channel(&ch[1], p);
   put32(p, acal_crc32(block, ACAL_BLOCK_BYTES - 4));
 }
 
@@ -89,8 +95,13 @@ int acal_unpack(const uint8_t *block, acal_channel ch[2])
   {
     for(r=0;r<ACAL_RANGES;r++, p+=2) ch[c].pwm[r] = (uint16_t)get16(p);
     for(m=0;m<ACAL_CLASSES;m++) for(k=0;k<2;k++) for(r=0;r<ACAL_RANGES;r++, p+=2) ch[c].zero[m][k][r] = (int16_t)get16(p);
-    for(k=0;k<2;k++) for(r=0;r<ACAL_RANGES;r++, p+=4) ch[c].slope[k][r] = (int32_t)get32(p);
-    for(m=0;m<ACAL_CLASSES;m++) for(k=0;k<2;k++) for(r=0;r<ACAL_RANGES;r++, p+=2) ch[c].noise[m][k][r] = (uint16_t)get16(p);
+    for(m=0;m<ACAL_CLASSES;m++) for(k=0;k<2;k++) for(r=0;r<ACAL_RANGES;r++, p+=2) ch[c].slope[m][k][r] = (int16_t)get16(p);
+    for(m=0;m<ACAL_CLASSES;m++) for(k=0;k<2;k++) for(r=0;r<ACAL_RANGES;r++) ch[c].noise[m][k][r] = *p++;
+    for(m=0;m<ACAL_CLASSES;m++) for(k=0;k<2;k++, p+=2) ch[c].gain[m][k] = (uint16_t)get16(p);
+    ch[c].gain_range = *p++;
+    ch[c].gain_flags = *p++;
+    ch[c].gain_lever = (uint16_t)get16(p);
+    p += 2;
   }
 
   return ACAL_OK;
@@ -105,6 +116,11 @@ int acal_bound(const acal_channel *c, const uint16_t *cal_offset)
       return 0;
 
   return 1;
+}
+
+uint32_t acal_gain16(const acal_channel *c, uint32_t cls, uint32_t k)
+{
+  return (c->gain_range == ACAL_GAIN_NONE) ? 65536u : 2u * c->gain[cls][k];
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -122,14 +138,23 @@ void acal_round_pair(int32_t da16, int32_t db16, int16_t *comp_a, int16_t *comp_
   *comp_b = (int16_t)((b > 127) ? 127 : ((b < -127) ? -127 : b));
 }
 
+//offset term slope (Q16 codes per count) x dcoffset in 1/16 code
+static int32_t acal_off16(int32_t slope, int32_t dcoffset)
+{
+  return (int32_t)rdiv64((int64_t)slope * dcoffset, 4096);
+}
+
 void acal_correction(const acal_channel *c, const uint16_t *cal_offset, uint8_t range, uint32_t divider,
                      int16_t dcoffset, int32_t dc_shift_value, int16_t atlan_a, int16_t atlan_b, acal_corr *out)
 {
   uint32_t hr  = (range < ACAL_RANGES) ? range : ACAL_RANGES - 1;
   uint32_t cls = divider ? ACAL_GATED : ACAL_FULL;
-  int32_t  t16, off16, zf16[2], d16, k;
+  int32_t  t16, zc16, zf16[2], d16, k, lo[2], hi[2];
+  uint32_t g, gf[2];
   int16_t  comp[2];
   uint8_t  frac[2];
+  uint32_t gain[2];
+  int32_t  off[2];
 
   out->shift = dc_shift_value ? ((int32_t)dcoffset * 100) / dc_shift_value : 0;
   out->cls   = (uint8_t)cls;
@@ -140,36 +165,68 @@ void acal_correction(const acal_channel *c, const uint16_t *cal_offset, uint8_t 
 
     for(k=0;k<2;k++)
     {
-      //offset term of core k, 1/16 code
-      off16    = (int32_t)rdiv64((int64_t)c->slope[k][hr] * dcoffset, 4096);
-      zf16[k]  = c->zero[ACAL_FULL][k][hr] + off16;
+      //0 V of core k in this clock class and in the full class (16-bit path), 1/16 code
+      zc16    = c->zero[cls][k][hr] + acal_off16(c->slope[cls][k][hr], dcoffset);
+      zf16[k] = c->zero[ACAL_FULL][k][hr] + acal_off16(c->slope[ACAL_FULL][k][hr], dcoffset);
 
-      //8-bit readout: correction to T for this clock class, split into whole codes and sixteenths
-      d16 = t16 - (c->zero[cls][k][hr] + off16);
+      //8-bit readout: mean code = T + G (raw - z) = (raw x gain + off) / 65536
+      g       = acal_gain16(c, cls, k);
+      gf[k]   = acal_gain16(c, ACAL_FULL, k);
+      gain[k] = g;
+      off[k]  = (int32_t)rdiv64((int64_t)t16 * 65536 - (int64_t)g * zc16, 16);
+      lo[k]   = (int32_t)((int64_t)off[k] >> 16);
+      hi[k]   = (int32_t)(((int64_t)255 * g + off[k]) >> 16);
+
+      //the correction at the core's 0 V point, whole codes and sixteenths (GET_CAL, diagnostics)
+      d16 = t16 - zc16;
       d16 = (d16 > 127 * 16) ? 127 * 16 : ((d16 < -127 * 16) ? -127 * 16 : d16);
 
       comp[k] = (int16_t)floor16(d16);
       frac[k] = (uint8_t)(d16 - 16 * comp[k]);
     }
 
-    out->comp_a  = comp[0];
-    out->comp_b  = comp[1];
-    out->frac_a  = frac[0];
-    out->frac_b  = frac[1];
+    //16-bit path: both cores weigh equally, so the mean gain is g_ref (1 / G_A + 1 / G_B) / 2: correct with the
+    //harmonic mean of the two gains
+    out->gain16  = (uint32_t)((2ull * gf[0] * gf[1] + (gf[0] + gf[1]) / 2) / (gf[0] + gf[1]));
+    out->corr16  = (int32_t)rdiv64((int64_t)t16 * 131072 - (int64_t)out->gain16 * (zf16[0] + zf16[1]), 131072);
     out->zero_q8 = t16 * 16;
-    out->corr16  = rdiv(2 * t16 - zf16[0] - zf16[1], 2);
-    out->v2      = 1;
+    out->version = 3;
   }
   else
   {
-    out->comp_a  = atlan_a;
-    out->comp_b  = atlan_b;
-    out->frac_a  = 0;
-    out->frac_b  = 0;
+    comp[0] = atlan_a;
+    comp[1] = atlan_b;
+    frac[0] = frac[1] = 0;
+
+    for(k=0;k<2;k++)
+    {
+      gain[k] = 65536;
+      off[k]  = (int32_t)comp[k] * 65536;
+      lo[k]   = comp[k];
+      hi[k]   = 255 + comp[k];
+    }
+
+    out->gain16  = 65536;
     out->zero_q8 = dc_shift_value ? 128 * 256 - ((int32_t)dcoffset * 25600) / dc_shift_value : 128 * 256;
     out->corr16  = ((int32_t)atlan_a + atlan_b) * 8;
-    out->v2      = 0;
+    out->version = 1;
   }
+
+  out->comp_a  = comp[0];
+  out->comp_b  = comp[1];
+  out->frac_a  = frac[0];
+  out->frac_b  = frac[1];
+  out->gain_a  = gain[0];
+  out->gain_b  = gain[1];
+  out->off_a   = off[0];
+  out->off_b   = off[1];
+  out->clip_lo = (lo[0] > lo[1]) ? lo[0] : lo[1];
+  out->clip_hi = (hi[0] < hi[1]) ? hi[0] : hi[1];
+}
+
+uint32_t acal_scale(uint32_t scale_q24, uint32_t gain16)
+{
+  return (uint32_t)(((uint64_t)scale_q24 * gain16 + 32768) >> 16);
 }
 
 void acal_atlan_comps(const acal_channel *c, int16_t *comp_a, int16_t *comp_b)
@@ -275,7 +332,7 @@ int32_t acal_centre_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32
 
 int acal_range_store(const acal_range_meas *m, acal_channel *c, uint8_t r)
 {
-  int32_t  slope[2];
+  int32_t  slope[ACAL_CLASSES][2];
   uint32_t k, cl;
 
   if(r >= ACAL_RANGES)
@@ -287,26 +344,26 @@ int acal_range_store(const acal_range_meas *m, acal_channel *c, uint8_t r)
   if(m->pwm_hi <= m->pwm_lo)
     return ACAL_E_SLOPE;
 
-  for(k=0;k<2;k++)
+  for(cl=0;cl<ACAL_CLASSES;cl++)
   {
-    for(cl=0;cl<ACAL_CLASSES;cl++)
+    for(k=0;k<2;k++)
     {
       if(m->noise16[cl][k] > ACAL_MAX_NOISE16)
         return ACAL_E_NOISE;
 
       if(iabs(m->drift16[cl][k]) > ACAL_MAX_DRIFT16)
         return ACAL_E_DRIFT;
+
+      //(1/16 code) / count -> Q16: x 4096
+      slope[cl][k] = rdiv((m->mean16_hi[cl][k] - m->mean16_lo[cl][k]) * 4096, m->pwm_hi - m->pwm_lo);
+
+      if((slope[cl][k] < ACAL_SLOPE_MIN_Q16) || (slope[cl][k] > ACAL_SLOPE_MAX_Q16))
+        return ACAL_E_SLOPE;
     }
 
-    //(1/16 code) / count -> Q16: x 4096
-    slope[k] = rdiv((m->mean16_hi[k] - m->mean16_lo[k]) * 4096, m->pwm_hi - m->pwm_lo);
-
-    if((slope[k] < ACAL_SLOPE_MIN_Q16) || (slope[k] > ACAL_SLOPE_MAX_Q16))
+    if(iabs(slope[cl][0] - slope[cl][1]) > ACAL_MAX_DSLOPE_Q16)
       return ACAL_E_SLOPE;
   }
-
-  if(iabs(slope[0] - slope[1]) > ACAL_MAX_DSLOPE_Q16)
-    return ACAL_E_SLOPE;
 
   for(cl=0;cl<ACAL_CLASSES;cl++)
   {
@@ -324,33 +381,156 @@ int acal_range_store(const acal_range_meas *m, acal_channel *c, uint8_t r)
 
   c->pwm[r] = (uint16_t)m->pwm;
 
-  for(k=0;k<2;k++)
+  for(cl=0;cl<ACAL_CLASSES;cl++)
   {
-    c->slope[k][r] = slope[k];
-
-    for(cl=0;cl<ACAL_CLASSES;cl++)
+    for(k=0;k<2;k++)
     {
+      c->slope[cl][k][r] = (int16_t)slope[cl][k];
       c->zero[cl][k][r]  = (int16_t)m->zero16[cl][k];
-      c->noise[cl][k][r] = (uint16_t)m->noise16[cl][k];
+      c->noise[cl][k][r] = (uint8_t)m->noise16[cl][k];
     }
   }
 
   return ACAL_OK;
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+//Gain step
+
+//Nominal sensitivity per hardware range (5, 2.5, 1, 0.5, 0.2, 0.1 V/div)
+static const int32_t acal_sens[ACAL_RANGES] = { 1, 2, 5, 10, 25, 50 };
+
+uint8_t acal_gain_range(int32_t span16_probe)
+{
+  int32_t r;
+
+  if(span16_probe <= 0)
+    return ACAL_GAIN_PROBE_RANGE;
+
+  for(r=ACAL_RANGES-1;r>0;r--)
+    if((int64_t)span16_probe * acal_sens[r] <= (int64_t)ACAL_GAIN_MAX_SPAN16 * acal_sens[ACAL_GAIN_PROBE_RANGE])
+      break;
+
+  return (uint8_t)r;
+}
+
+int32_t acal_gain_mid_at(int32_t mid16_probe, uint8_t r)
+{
+  return rdiv(mid16_probe * acal_sens[(r < ACAL_RANGES) ? r : ACAL_RANGES - 1], acal_sens[ACAL_GAIN_PROBE_RANGE]);
+}
+
+int32_t acal_gain_pwm(const acal_channel *c, uint8_t r, int32_t off16)
+{
+  int32_t s, p;
+
+  if(r >= ACAL_RANGES)
+    r = ACAL_RANGES - 1;
+
+  //mean gated slope of both cores, Q16 codes per count = 1/4096 sixteenths per count (negative)
+  s = ((int32_t)c->slope[ACAL_GATED][0][r] + c->slope[ACAL_GATED][1][r]) / 2;
+  p = c->pwm[r];
+
+  if(s < 0)
+    p += (int32_t)rdiv64((int64_t)off16 * 4096, -s);
+
+  return (p < ACAL_PWM_MIN) ? ACAL_PWM_MIN : ((p > ACAL_PWM_MAX) ? ACAL_PWM_MAX : p);
+}
+
+int acal_gain_store(const acal_gain_meas *m, uint8_t r, acal_channel *c)
+{
+  int32_t  span2[ACAL_CLASSES][2], ref2, g[ACAL_CLASSES][2], ratio;
+  uint32_t k, cl;
+
+  if(m->clipped)
+    return ACAL_E_GAIN_CLIP;
+
+  for(cl=0;cl<ACAL_CLASSES;cl++)
+    for(k=0;k<2;k++)
+    {
+      if(iabs(m->mean16[cl][2][k] - m->mean16[cl][0][k]) > ACAL_GAIN_MAX_DRIFT16)
+        return ACAL_E_GAIN_DRIFT;
+
+      //high minus the mean of the two lows (linear drift cancels), 1/32 code
+      span2[cl][k] = 2 * m->mean16[cl][1][k] - m->mean16[cl][0][k] - m->mean16[cl][2][k];
+    }
+
+  //reference: the gated span of the mean of both cores (1/32 code)
+  ref2 = (span2[ACAL_GATED][0] + span2[ACAL_GATED][1]) / 2;
+
+  for(cl=0;cl<ACAL_CLASSES;cl++)
+    for(k=0;k<2;k++)
+      if(span2[cl][k] < 2 * ACAL_GAIN_MIN_LEVER16)
+        return ACAL_E_GAIN_LEVER;
+
+  for(cl=0;cl<ACAL_CLASSES;cl++)
+  {
+    for(k=0;k<2;k++)
+      g[cl][k] = (int32_t)rdiv64((int64_t)ref2 * ACAL_GAIN_ONE, span2[cl][k]);
+
+    if(iabs(g[cl][0] - g[cl][1]) > ACAL_GAIN_MAX_SPLIT)
+      return ACAL_E_GAIN_SPLIT;
+  }
+
+  ratio = (int32_t)rdiv64((int64_t)(g[ACAL_FULL][0] + g[ACAL_FULL][1]) * ACAL_GAIN_ONE, g[ACAL_GATED][0] + g[ACAL_GATED][1]);
+
+  if((ratio < ACAL_GAIN_CLASS_MIN) || (ratio > ACAL_GAIN_CLASS_MAX))
+    return ACAL_E_GAIN_CLASS;
+
+  for(cl=0;cl<ACAL_CLASSES;cl++)
+    for(k=0;k<2;k++)
+      c->gain[cl][k] = (uint16_t)g[cl][k];
+
+  c->gain_range = r;
+  c->gain_flags = 0;
+  c->gain_lever = (uint16_t)rdiv(ref2, 2);
+
+  return ACAL_OK;
+}
+
+void acal_gain_carry(const acal_channel *old, acal_channel *c)
+{
+  uint32_t k, cl;
+
+  if(old && (old->gain_range != ACAL_GAIN_NONE))
+  {
+    for(cl=0;cl<ACAL_CLASSES;cl++)
+      for(k=0;k<2;k++)
+        c->gain[cl][k] = old->gain[cl][k];
+
+    c->gain_range = old->gain_range;
+    c->gain_flags = old->gain_flags | ACAL_GAIN_KEPT;
+    c->gain_lever = old->gain_lever;
+    return;
+  }
+
+  for(cl=0;cl<ACAL_CLASSES;cl++)
+    for(k=0;k<2;k++)
+      c->gain[cl][k] = ACAL_GAIN_ONE;
+
+  c->gain_range = ACAL_GAIN_NONE;
+  c->gain_flags = 0;
+  c->gain_lever = 0;
+}
+
 const char *acal_reason_text(int reason)
 {
   switch(reason)
   {
-    case ACAL_OK:         return "OK";
-    case ACAL_E_RESPONSE: return "offset not responding";
-    case ACAL_E_CLIP:     return "input clips: unplug";
-    case ACAL_E_NOISE:    return "noisy: unplug probe";
-    case ACAL_E_ZERO:     return "zero off centre";
-    case ACAL_E_SPREAD:   return "ADC cores differ > 20";
-    case ACAL_E_SLOPE:    return "offset slope wrong";
-    case ACAL_E_DRIFT:    return "zero not settled";
-    case ACAL_E_CLASS:    return "zero moves w/ clock";
-    default:              return "no calibration data";
+    case ACAL_OK:           return "OK";
+    case ACAL_E_RESPONSE:   return "offset not responding";
+    case ACAL_E_CLIP:       return "input clips: unplug";
+    case ACAL_E_NOISE:      return "noisy: unplug probe";
+    case ACAL_E_ZERO:       return "zero off centre";
+    case ACAL_E_SPREAD:     return "ADC cores differ > 20";
+    case ACAL_E_SLOPE:      return "offset slope wrong";
+    case ACAL_E_DRIFT:      return "zero not settled";
+    case ACAL_E_CLASS:      return "zero moves w/ clock";
+    case ACAL_E_GAIN_CLIP:  return "gain: level clips";
+    case ACAL_E_GAIN_DRIFT: return "gain: level drifts";
+    case ACAL_E_GAIN_LEVER: return "gain: probe on post?";
+    case ACAL_E_GAIN_SPLIT: return "gain: cores differ";
+    case ACAL_E_GAIN_CLASS: return "gain: clock classes";
+    case ACAL_E_GAIN_NONE:  return "gain: no generator";
+    default:                return "no calibration data";
   }
 }

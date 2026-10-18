@@ -35,7 +35,9 @@ void scope_acquire_trace_data(void);
 void scope_process_trigger(uint32 count);   
 
 uint32 scope_do_baseline_calibration(void);
-extern char calibration_fail_reason[40];  //"CH1: <reason>" after a failed base calibration
+uint32 scope_gain_calibration_offered(void);   //1 right after a passed zero step on a bitstream with the generator
+uint32 scope_do_gain_calibration(void);        //gain step at the calibration post: 1 when both channels passed
+extern char calibration_fail_reason[40];  //"CH1: <reason>" after a failed base calibration or gain step
 void scope_input_calibration(void);
 
 void scope_do_50_percent_trigger_setup(void);

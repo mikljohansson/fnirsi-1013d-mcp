@@ -31,6 +31,23 @@ by CI from the tag commit and has its own hash.
 With `PC_PROTOCOL=0` the tree builds byte-identical to Atlan4's v1.00o5 image (`make check-reference`).
 Every protocol change sits behind `#if PC_PROTOCOL`.
 
+#### 0.2.45 - 2026-10-19
+
+- Added: calibration data v3 with a gain per ADC core and clock class (c8f17bf). The base calibration
+  now has a second step: with both probes on the calibration post, the generator holds the post low
+  and then high, and the spans give each core's gain at full rate and gated. The gated mean stays the
+  reference of the voltage calibration. 200 MSa/s, filtered (CIC / FIR) and legacy captures then read
+  the same volts, and the A/B gain difference behind the full-rate fs/2 spur is corrected. The zero
+  step also measures the offset slopes at full rate (c8f17bf).
+- Changed: the readout multiplies each core by its gain (code = (raw x gain + offset + dither) >> 16),
+  and the 16-bit path takes the full-class gain into its scale (c8f17bf). Same memory accesses per
+  sample as 0.2.43.
+- Changed: sector 708 block v3 (304 bytes), protocol 1.12, GET_CAL 256 bytes (docs/protocol.md
+  section 14 row 51) (3aa3431, c8f17bf). v2 blocks of 0.2.43-0.2.44 are not read: run the base
+  calibration again.
+- Added: the gain step prompt after a passed zero step, gain failure reasons in the box, and gains,
+  their range and lever in the diagnostics view (f5fdf72, c8f17bf).
+
 #### 0.2.7 - 2026-10-18
 
 - Changed: SD_STAGE is served from the 1 ms timer poll instead of one request per UI pass (d88e9ea).

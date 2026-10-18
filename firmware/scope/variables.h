@@ -487,16 +487,21 @@ struct tagChannelSettings
   int16  adc1compensation;
   int16  adc2compensation;
 
-  //Zero correction of the current readout (fpga_prepare_correction, adc_cal.h): whole codes per core, sixteenths
-  //added by dither, the dcoffset term of the measurements, the 16-bit path constant; frac is the current pass's
-  int16  comp_a;
-  int16  comp_b;
-  uint8  frac;
-  uint8  frac_a;
-  uint8  frac_b;
-  uint8  cal_v2;
+  //Correction of the current readout (fpga_prepare_correction, adc_cal.h): per core code = (raw x gain + off +
+  //dither) >> 16 (gain Q16, off Q16 codes), the rail limits, the dcoffset term of the measurements, the 16-bit path
+  //gain (Q16) and constant (1/16 code); gain / off are the current pass's
+  int32  gain_a;
+  int32  gain_b;
+  int32  off_a;
+  int32  off_b;
+  int32  gain;
+  int32  off;
+  int32  clip_lo;
+  int32  clip_hi;
+  uint8  cal_ver;
   int32  dcshift;
   int32  corr16;
+  uint32 gain16;
   
   //DC offset calibration for center level of the ADC's
   uint16 dc_calibration_offset[7];

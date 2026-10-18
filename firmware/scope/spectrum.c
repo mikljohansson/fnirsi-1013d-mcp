@@ -418,11 +418,13 @@ static void spec_compute(void)
 
     if(x16 && dc.scale_q24 && (n16 >= (2u * half)))
     {
-      //16-bit record: one unit is scale_q24 / 2^24 codes (out -> code = out scale / 2^24 + corr16 / 16, pc_decim.h; corr16
-      //is the zero correction of the record's readout, adc_cal.h), so 0 V = (16 x zero code - corr16) x 2^20 / scale
-      int32 zero = (int32)((((int64)16 * spec_zero_code(s) - s->corr16) << 20) / (int64)dc.scale_q24);
+      //16-bit record: one unit is scale / 2^24 codes (out -> code = out scale / 2^24 + corr16 / 16, pc_decim.h; scale =
+      //scale_q24 with the readout's gain16, corr16 its zero correction, adc_cal.h), so 0 V = (16 x zero code - corr16) x
+      //2^20 / scale
+      uint32 scale = acal_scale(dc.scale_q24, s->gain16);
+      int32  zero  = (int32)((((int64)16 * spec_zero_code(s) - s->corr16) << 20) / (int64)scale);
 
-      g += spec_cdb20(dc.scale_q24) - spec_cdb20(1ull << 24);
+      g += spec_cdb20(scale) - spec_cdb20(1ull << 24);
       fx_fft_run_u16(&spec_plan, x16, zero);
       f->wide = 1;
     }

@@ -7761,8 +7761,25 @@ void scope_system_settings_ONOFF_RTC_item(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//Gain Q15 as "1.0123"
+static char *fmt_gain(char *p, uint32 q15)
+{
+  uint32 v = (q15 * 10000 + 16384) >> 15;
+  uint32 f = v % 10000;
+
+  p = fmt_uint(p, v / 10000);
+  *p++ = '.';
+  *p++ = '0' + f / 1000;
+  *p++ = '0' + (f / 100) % 10;
+  *p++ = '0' + (f / 10) % 10;
+  *p++ = '0' + f % 10;
+  *p = 0;
+  return p;
+}
+
 //Diagnostics, right column: calibration data version and, per channel at its current range, the stored core zeros of
-//both clock classes, their spread and noise, and the correction the next readout applies (adc_cal.h)
+//both clock classes, their spread, noise and offset slopes, the correction the next readout applies at 0 V, and the core
+//gains per clock class with where they were measured (adc_cal.h)
 static void scope_diagnostic_adc_cal(void)
 {
   PCHANNELSETTINGS chs[2] = { &scopesettings.channel1, &scopesettings.channel2 };
@@ -7774,7 +7791,7 @@ static void scope_diagnostic_adc_cal(void)
 
   display_set_font(&font_3);
   display_set_fg_color(adc_cal_loaded ? GREEN_COLOR : ORANGE_COLOR);
-  display_text(525, 20, adc_cal_loaded ? "Calibration data: v2" : "Calibration data: v1");
+  display_text(525, 20, adc_cal_loaded ? "Calibration data: v3" : "Calibration data: v1");
 
   for(ch=0;ch<2;ch++)
   {
@@ -7789,10 +7806,10 @@ static void scope_diagnostic_adc_cal(void)
     display_text(525, y, (int8 *)line);
     display_set_fg_color(WHITE_COLOR);
 
-    if(!k.v2)
+    if(k.version != 3)
     {
       display_text(525, y + 15, (adc_cal_loaded && !acal_bound(c, chs[ch]->dc_calibration_offset)) ?
-                                "v2 data stale: run base cal" : "no v2 data: run base cal");
+                                "v3 data stale: run base cal" : "no v3 data: run base cal");
       p = fmt_str(line, "1.00o5 comp A ");
       p = fmt_int(p, k.comp_a);
       p = fmt_str(p, "  B ");
@@ -7819,11 +7836,15 @@ static void scope_diagnostic_adc_cal(void)
     fmt_x16(p, c->noise[ACAL_GATED][ACAL_CORE_B][r]);
     display_text(525, y + 45, (int8 *)line);
 
-    p = fmt_str(line, "slope A ");
-    p = fmt_int(p, (c->slope[ACAL_CORE_A][r] * 10000) / 65536);
-    p = fmt_str(p, "  B ");
-    p = fmt_int(p, (c->slope[ACAL_CORE_B][r] * 10000) / 65536);
-    fmt_str(p, " e-4/count");
+    //offset slopes in 1e-4 codes per count, gated then full rate
+    p = fmt_str(line, "slope g ");
+    p = fmt_int(p, (c->slope[ACAL_GATED][ACAL_CORE_A][r] * 10000) / 65536);
+    p = fmt_str(p, "/");
+    p = fmt_int(p, (c->slope[ACAL_GATED][ACAL_CORE_B][r] * 10000) / 65536);
+    p = fmt_str(p, " f ");
+    p = fmt_int(p, (c->slope[ACAL_FULL][ACAL_CORE_A][r] * 10000) / 65536);
+    p = fmt_str(p, "/");
+    fmt_int(p, (c->slope[ACAL_FULL][ACAL_CORE_B][r] * 10000) / 65536);
     display_text(525, y + 60, (int8 *)line);
 
     p = fmt_str(line, "now A ");
@@ -7832,6 +7853,33 @@ static void scope_diagnostic_adc_cal(void)
     p = fmt_x16(p, 16 * k.comp_b + k.frac_b);
     fmt_str(p, k.cls == ACAL_FULL ? " (full)" : " (gated)");
     display_text(525, y + 75, (int8 *)line);
+
+    //gains per class and core (1.0000 = the gated mean of both cores), then where they come from
+    for(cl=0;cl<ACAL_CLASSES;cl++)
+    {
+      p = fmt_str(line, "gain ");
+      p = fmt_str(p, cls_name[cl]);
+      p = fmt_str(p, " A ");
+      p = fmt_gain(p, c->gain[cl][ACAL_CORE_A]);
+      p = fmt_str(p, " B ");
+      fmt_gain(p, c->gain[cl][ACAL_CORE_B]);
+      display_text(525, y + 90 + 15 * cl, (int8 *)line);
+    }
+
+    if(c->gain_range == ACAL_GAIN_NONE)
+    {
+      display_set_fg_color(ORANGE_COLOR);
+      display_text(525, y + 120, "gain not measured: cal post");
+    }
+    else
+    {
+      p = fmt_str(line, "gain at range ");
+      p = fmt_uint(p, c->gain_range);
+      p = fmt_str(p, ", lever ");
+      p = fmt_x16(p, c->gain_lever);
+      fmt_str(p, (c->gain_flags & ACAL_GAIN_KEPT) ? " (kept)" : "");
+      display_text(525, y + 120, (int8 *)line);
+    }
   }
 }
 
@@ -8222,6 +8270,49 @@ void scope_show_calibration_fail(void)
     display_text(405, 255, (int8 *)calibration_fail_reason);
   else
     display_text(445, 255, "Check hardware");
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//Calibration data v3: the gain step's prompt (OK starts it, a touch outside the box skips it) and its result
+
+void scope_show_gain_calibration_text(void)
+{
+  display_set_fg_color(YELLOW_COLOR);
+  display_fill_rounded_rect(395, 222, 198, 58, 3);
+  display_set_fg_color(LIGHTGREY_COLOR);
+  display_draw_rounded_rect(395, 222, 199, 59, 3);
+
+  display_set_fg_color(BLACK_COLOR);
+  display_set_font(&font_3);
+  display_text(404, 227, "Gain: put both");
+  display_text(404, 243, "probes on the");
+  display_text(404, 259, "cal post, OK");
+
+  scope_display_ok_button(517, 230, 0);
+}
+
+void scope_show_gain_calibration_result(uint32 ok)
+{
+  display_set_fg_color(ok ? DARKGREY_COLOR : WHITE_COLOR);
+  display_fill_rounded_rect(395, 222, 198, 58, 3);
+  display_set_fg_color(LIGHTGREY_COLOR);
+  display_draw_rounded_rect(395, 222, 199, 59, 3);
+  display_set_font(&font_3);
+
+  if(ok)
+  {
+    display_set_fg_color(GREEN_COLOR);
+    display_text(430, 233, "Gain calibration");
+    display_text(448, 255, "successful");
+    return;
+  }
+
+  //The first channel's reason; a channel that passed has its new gains (saved), the other keeps its previous ones
+  display_set_fg_color(RED_COLOR);
+  display_text(422, 233, "Gain calibration failed");
+
+  if(calibration_fail_reason[0])
+    display_text(405, 255, (int8 *)calibration_fail_reason);
 }
 
 //-*********************************************************************************

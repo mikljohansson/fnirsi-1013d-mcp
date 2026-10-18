@@ -799,8 +799,7 @@ uint32 pc_glue_decim_ui_start(uint32 start)
 void pc_glue_decim_read(void *settings, uint32 start)
 {
   PCHANNELSETTINGS s = (PCHANNELSETTINGS)settings;
-  int32  ca, cb;
-  uint32 ch, n, i;
+  uint32 ch, n, i, scale;
 
   pc_decim_src    = 0;
   pc_dec_even_src = 0;
@@ -825,14 +824,13 @@ void pc_glue_decim_read(void *settings, uint32 start)
 
   fpga_read_decim_data(s->adc1command, s->adc2command, start % PC_DEC_RING, n, pc_dec_raw[ch]);
 
-  //Into the 8-bit trace domain. fpga_read_adc_data adds comp_a to the odd samples (its first pass) and comp_b to the
-  //even ones (no dither for a 16-bit readout), so take them off here: the result is the converted code plus corr16,
-  //the zero correction for both cores at full rate (each output sample weighs both cores equally for even N)
-  ca = s->comp_a;
-  cb = s->comp_b;
+  //Into the 8-bit trace domain with the readout's full-class correction (adc_cal.h): gain16 folded into the scale, corr16
+  //added (each output sample weighs both cores equally for even N). fpga_read_adc_data then passes the codes through
+  //unchanged (unity gain, no offset for a 16-bit readout)
+  scale = acal_scale(pc_dec_cur.scale_q24, s->gain16);
 
   for(i=0;i<n;i++)
-    pc_dec_feed[i] = (int16)(pc_decim_to_code(pc_dec_raw[ch][i], pc_dec_cur.scale_q24, s->corr16) - ((i & 1) ? ca : cb));
+    pc_dec_feed[i] = (int16)pc_decim_to_code(pc_dec_raw[ch][i], scale, s->corr16);
 
   pc_dec_raw_n[ch] = n;
   pc_decim_src     = &pc_dec_feed[1];
