@@ -931,8 +931,14 @@ differs from or fills a gap in sections 1-13. Hosts written against this documen
 - USB FIFO RAM layout (v0.1.1). The F1C100s USB FIFO RAM is 2048 bytes. The 1.00o5 CDC layout placed EP1 at byte
   2048 and the EP2 TX FIFO at byte 4096, outside it (aliasing onto the EP2 RX FIFO). Now: EP2 OUT 0-511 (single
   buffered), EP2 IN 512-1535 (2 x 512, double buffered), EP1 IN 1536-1599. The MSC layout was already inside 2 KiB.
-- The TX pump is driven by the EP2 TX interrupt and, as a fallback, from every poll (main loop and BUSY polls), so a
-  missed interrupt costs at most one poll interval.
+- The TX pump is driven by the EP2 TX interrupt and, as a fallback, from every poll (main loop, BUSY polls and the 1 ms
+  timer poll), so a missed interrupt costs at most 1 ms.
+- Poll contexts (v0.1.2): MAIN (top of the main loop; everything), BUSY (touch-panel scans and UI spin loops; the safe
+  set, E_BUSY for the rest once the UI is modal) and ISR (1 ms timer interrupt; the safe set PING, GET_INFO,
+  GET_STATUS, GET_BATTERY, `#VER`, `#RESET`, plus error answers; everything else stays queued for MAIN, never
+  E_BUSY). A guard flag keeps the ISR poll out of a running MAIN/BUSY poll and out of the REMOTE service.
+- On USB bus reset, suspend or disconnect the transport flushes the EP2 FIFOs itself (v0.1.2): the 1.00o5 reset
+  handler issues its flushes with EPIND = 0, so EP2 kept a stale frame across host sessions.
 
 - ARM writes 0x0F = 0, then 0x1A = the configured mode (FORCE leaves it in auto), then the 0x01 reset with a
   bounded 0x05 wait (2,000,000 reads), then 0x0B / 0x0C (programmable variants) and 0x0E (all variants) in reset,

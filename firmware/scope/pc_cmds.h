@@ -13,7 +13,7 @@
 // Build identity (overridden from the Makefile)
 
 #ifndef PC_FW_VERSION
-#define PC_FW_VERSION     "0.1.1"
+#define PC_FW_VERSION     "0.1.2"
 #endif
 
 #ifndef PC_FW_BUILD
@@ -34,6 +34,7 @@
 
 #define PC_CTX_MAIN       0     //top of the main loop: may touch the FPGA while REMOTE
 #define PC_CTX_BUSY       1     //inside a UI busy loop: answers PING/GET_INFO/GET_STATUS/GET_BATTERY only, no FPGA
+#define PC_CTX_ISR        2     //1 ms timer interrupt: same safe set and the TX pump, never E_BUSY, never the UI/FPGA
 
 //Time without a MAIN poll after which the UI counts as modal (LOCAL_BUSY): other requests then get E_BUSY
 #define PC_MODAL_MS       250

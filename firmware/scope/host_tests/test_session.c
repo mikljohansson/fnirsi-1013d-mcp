@@ -820,6 +820,53 @@ static void test_busy_context(void)
   T_EQ(r.h.status, 0);
 }
 
+static void test_isr_context(void)
+{
+  uint8_t p[4] = { 1, 0, 0, 0 };
+  resp_t r;
+  uint32_t k;
+
+  //The 1 ms tick poll answers the safe set at once
+  setup(0x1532);
+  pc_poll(&S, PC_CTX_MAIN);
+  r = req_ctx(PC_CMD_PING, "x", 1, PC_CTX_ISR);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 1);
+  r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 32);
+
+  //...and leaves everything else for the main loop, never E_BUSY, however long the main loop takes
+  mock_clear_resps();
+  push_frame(PC_CMD_SET_REMOTE, 2000, p, 4);
+  for(k=0;k<1000;k++)
+  {
+    mock.now++;
+    pc_poll(&S, PC_CTX_ISR);
+  }
+  T_EQ(mock_nresps, 0); T_EQ(mock.enters, 0);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_EQ(mock_nresps, 1); T_EQ(decode(&mock_resps[0]).h.status, 0); T_EQ(mock.enters, 1);
+
+  //In REMOTE it still answers GET_STATUS between main-loop passes; FPGA commands stay on the main loop
+  r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
+  T_EQ(r.h.status, 0); T_EQ(r.p[0], PC_REMOTE);
+  mock_clear_resps();
+  push_frame(PC_CMD_ARM, 2001, 0, 0);
+  pc_poll(&S, PC_CTX_ISR);
+  T_EQ(mock_nresps, 0); T_EQ(mock.arms, 0);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_EQ(mock.arms, 1);
+
+  //Never nests into a running poll or the remote service
+  S.in_poll = 1;
+  mock_clear_resps();
+  push_frame(PC_CMD_PING, 2002, "y", 1);
+  pc_poll(&S, PC_CTX_ISR);
+  T_EQ(mock_nresps, 0);
+  S.in_poll = 0;
+  pc_poll(&S, PC_CTX_ISR);
+  T_EQ(mock_nresps, 1);
+}
+
 static void test_transport_window(void)
 {
   uint16_t s1, s2;
@@ -1004,6 +1051,7 @@ int main(void)
   test_generator();
   test_cal_battery_pattern();
   test_busy_context();
+  test_isr_context();
   test_transport_window();
   test_ui_capture_and_status();
   test_fel_reset_stall();

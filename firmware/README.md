@@ -331,6 +331,10 @@ Hooks in the 1.00o5 code, all under `#if PC_PROTOCOL`:
   `pc_poll(MAIN)` first and skips the UI loop while the host owns the scope.
 - `scope_functions.c`: a BUSY poll in the 12 calibration and auto-setup conversion spin loops, and
   a capture counter after the UI readout.
+- `timer.c`: a poll from the 1 ms timer interrupt. It answers PING, GET_INFO, GET_STATUS,
+  GET_BATTERY, `#VER` and `#RESET`, and pumps TX, without waiting for the UI loop. Everything else
+  stays on the main loop. It never runs while a main-loop or BUSY poll, or the REMOTE service, is
+  active.
 - `touchpanel.c`: a BUSY poll in `tp_i2c_read_status()`. Every modal menu loop and the MSC screen
   scan the touch panel, so the link answers PING, GET_INFO, GET_STATUS and GET_BATTERY there.
 - `fpga_control.c`: a BUSY poll every 65,536 polls of the 0x05 ready wait. The UI wait stays
@@ -391,10 +395,13 @@ Recovery without a power cycle: the text line `#RESET` (Enter) drops a response 
 WAIT and partial input, and answers `#OK`. A response that makes no progress for 2 s is dropped
 automatically, and reopening the port (DTR 0 -> 1) discards an old frame.
 
-GET_STATUS (protocol 1.1) reports the main-loop pass time at offset 28 (last) and 30 (max since the
-previous GET_STATUS). In LOCAL that is the UI loop period, which bounds every round trip except PING,
-GET_INFO, GET_STATUS and GET_BATTERY (those are also answered from the touch-panel scan); in REMOTE
-the loop does nothing but poll.
+Round trips: PING, GET_INFO, GET_STATUS, GET_BATTERY, `#VER` and `#RESET` are answered from the
+1 ms timer interrupt, so they take about 1 ms plus USB time in any state. Commands that touch the
+FPGA, the UI settings or the display run on the main loop. In REMOTE that loop does nothing but
+poll (plus a touch-panel scan every 100 ms), so READ_RAW, ARM, WAIT and SET_* do not wait for a UI
+pass. In LOCAL the read-only GET_CHANNEL / TIMEBASE / TRIGGER / CAL / GEN and READ_TRACE wait for
+the next UI pass. GET_STATUS (protocol 1.1) reports that pass time at offset 28 (last) and 30 (max
+since the previous GET_STATUS).
 
 ### First hardware bring-up checklist
 
@@ -423,7 +430,7 @@ sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
    ModemManager ignore rule from plan section 10. The device is high-speed only: use a USB 2.0 HS
    port or hub, not a full-speed VM pass-through.
 3. **Text probe.** In a terminal, `#VER` + Enter must answer
-   `#OK,FNIRSI-1013D-AI,fw=0.1.1,proto=1.1,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
+   `#OK,FNIRSI-1013D-AI,fw=0.1.2,proto=1.1,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
 4. **Identify, LOCAL.** PING with random 0..492 byte payloads, 10,000 times. GET_INFO must report
    variant 2, ring 8192, max total 16382, caps 0x1C03 (PROG_TRIGGER_POS, GENERATOR_DDS, ENTER_FEL and
    the two UNVERIFIED bits; `PC_DEBUG=1` adds 0x120). Run GET_STATUS, GET_BATTERY,

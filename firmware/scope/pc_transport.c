@@ -285,10 +285,17 @@ int pc_transport_tx_drained(void)
 
 void pc_usb_isr_link(void)
 {
-  //The bus reset handler already flushed the endpoint FIFOs; drop what we hold
-  pc_tx_active = 0;
-  pc_tx_left   = 0;
-  pc_tx_zlp    = 0;
+  uint8 epind = *USBC_REG_EPIND;
+
+  //Drop what we hold. The 1.00o5 reset handler flushes with EPIND = 0, i.e. not EP2: flush EP2 here, so a frame left
+  //over from the previous host session can never be sent to the next one.
+  pc_tx_flush();
+
+  *USBC_REG_EPIND = 2;
+  if(*USBC_REG_RXCSR & USBC_BP_RXCSR_D_RX_PKT_READY)
+    *USBC_REG_RXCSR |= USBC_BP_RXCSR_D_FLUSH_FIFO;
+  *USBC_REG_EPIND = epind;                         //SET_CONFIGURATION re-enables the EP2 RX interrupt
+
   pc_rx_out    = pc_rx_in;
   pc_rx_stalled = 0;
   pc_dtr       = 0;

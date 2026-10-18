@@ -1509,10 +1509,11 @@ static int pc_dispatch(pc_session *s, int ctx)
   {
     st = pc_error(s, PC_E_UNSUPPORTED, 0, "capability");
   }
-  else if((ctx == PC_CTX_BUSY) && !(e->flags & F_BUSY))
+  else if((ctx != PC_CTX_MAIN) && !(e->flags & F_BUSY))
   {
-    //Normally the next MAIN poll comes within one main-loop pass. If it does not, the UI is modal.
-    if(!s->ui_busy)
+    //The timer-tick poll leaves these for the main loop. A BUSY poll does the same unless the UI is modal (no main-loop
+    //pass for PC_MODAL_MS), then it answers E_BUSY.
+    if((ctx == PC_CTX_ISR) || !s->ui_busy)
       return 0;
 
     st = pc_error(s, PC_E_BUSY, 0, "UI busy");
@@ -1763,7 +1764,20 @@ void pc_poll(pc_session *s, int ctx)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+static void pc_remote_service_body(pc_session *s);
+
 void pc_remote_service(pc_session *s)
+{
+  //Keeps the timer-tick poll out while this changes ownership or draws (it runs outside pc_poll)
+  if(s->in_poll)
+    return;
+
+  s->in_poll = 1;
+  pc_remote_service_body(s);
+  s->in_poll = 0;
+}
+
+static void pc_remote_service_body(pc_session *s)
 {
   uint32_t now = pc_hal_ms();
 

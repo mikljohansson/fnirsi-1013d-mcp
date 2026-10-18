@@ -3,6 +3,7 @@
 #include "timer.h"
 #include "interrupt.h"
 #include "variables.h"
+#include "pc_hooks.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -36,6 +37,9 @@ void timer0_irq_handler(void)
   
   //Add one more milli second to the ticks
   timer0ticks++;
+
+  //PC protocol: answer the safe requests and pump TX from here, so round trips do not wait for the UI loop
+  PC_TIMER_TICK();
   //for reaload time
   if (timerRTC) timerRTC--;
   //for hold timer

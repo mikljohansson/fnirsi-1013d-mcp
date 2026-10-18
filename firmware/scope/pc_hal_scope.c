@@ -610,6 +610,14 @@ void pc_glue_poll_busy(void)
     pc_poll(&pc_sess, PC_CTX_BUSY);
 }
 
+void pc_glue_poll_isr(void)
+{
+  //Timer0 IRQ, every ms: PING/GET_INFO/GET_STATUS/GET_BATTERY/#VER/#RESET and the TX pump without waiting for the
+  //UI loop. Skipped while a main-loop or BUSY poll is running (in_poll), so it never interleaves with one.
+  if(pc_ready)
+    pc_poll(&pc_sess, PC_CTX_ISR);
+}
+
 int pc_glue_remote(void)
 {
   return pc_ready && pc_remote_active(&pc_sess);
