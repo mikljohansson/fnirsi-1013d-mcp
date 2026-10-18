@@ -455,6 +455,12 @@ Recovery without a power cycle: the text line `#RESET` (Enter) drops a response 
 WAIT and partial input, and answers `#OK`. A response that makes no progress for 2 s is dropped
 automatically, and reopening the port (DTR 0 -> 1) discards an old frame.
 
+Boot: USB enumerates about 1.5 s before the main loop starts (GET_LINK_STATS counter 27: 1515-1517 ms on the
+bench, first pass 31 ms). The time goes to the 1.00o5 splash, `load_picture("scope.bmp")` after `usb_device_init`
+(an 800x480 BMP of about 1.1 MB read from FAT at ~730 KB/s). Kept on purpose (owner/lead decision 2026-10-18): the
+owner sees the splash, and hosts wait for the port anyway. Meanwhile the timer poll answers PING, GET_INFO,
+GET_STATUS (`ui_busy` = 2 STARTING) and the other fast-path commands; everything else waits for the main loop.
+
 Round trips: PING, GET_INFO, GET_STATUS, GET_BATTERY, `#VER` and `#RESET` are answered from the
 1 ms timer interrupt, so they take about 1 ms plus USB time in any state. Commands that touch the
 FPGA, the UI settings or the display run on the main loop, between UI passes, so they wait for the

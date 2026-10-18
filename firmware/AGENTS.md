@@ -200,9 +200,8 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
   without new data: 0.2.7 counts the branches (GET_LINK_STATS 41-46). The hdr_crc/duplicate pairing looks like host
   retries of requests that had been executed (each SD_STAGE waited a UI pass, each SD_WRITE up to 4 s). 0.2.7
   serves SD_STAGE from the timer poll, which removes the back-pressure regime; hosts should write <= 32 sectors.
-- Startup: 1515 ms from session init to the first MAIN poll (0.2.4/0.2.5 bench, counter 27); the first pass is
-  31 ms. Prime suspect: `load_picture("scope.bmp")` (800x480 BMP, ~1.1 MB from FAT at ~730 KB/s) after
-  usb_device_init. Not changed: dropping or deferring the splash is the owner's call.
+- Startup (closed 2026-10-18): 1515 ms from session init to the first MAIN poll is the 1.00o5 splash
+  (`load_picture("scope.bmp")`); kept by decision, documented in README section 4 ("Boot"). The first pass is 31 ms.
 - USB "Error state" incident (0.2.2, lead): port closed, scope idle ~10 min, then Windows showed the device present but
   in an error state (CreateFile failed); a cable replug recovered it. Not reproduced, cause unknown. Code reading:
   the suspend path calls pc_usb_isr_link, which flushed a held-back OUT packet but left EP2 OUT masked in INTRXE
@@ -233,7 +232,8 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
 
 ## 10. TODO, in priority order
 
-1. Bench the shared-control acceptance on 0.2.0 (README section 5 step 6) and read the startup counters.
+1. Bench 0.2.7: chip without flicker, diagnostics identity line / no temperature, an SD persist with GET_LINK_STATS
+   41-46 read afterwards (back-pressure branch counters), hidden-menu visual check (0.2.6, owner).
 2. Bench the SD commands (0.2.2, protocol section 14 row 40): SD_INFO VERIFY on the owner's card (sector 750 must
    show eGON.EXE, check 1), SD_READ_SECTORS of 16 / 80 / 750 against backups/, then persist an image with
    SD_STAGE + SD_WRITE_SECTORS from 750 (back up 750..2047 first), SD_INFO VERIFY, power-cycle boot. Host tool:
