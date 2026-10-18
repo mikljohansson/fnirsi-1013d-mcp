@@ -930,24 +930,11 @@ void pc_glue_ui_mask(int menu)
 
   switch(menu)
   {
-    case PC_MASK_GEN_MENU:
-      //Wave row between the separators at y 102 and 158; Ampl, Offset, Phase rows from below the line at 270
-      if(!pc_glue_ui_has(PC_FEAT_GEN_WAVE))
-        pc_mask_rect(GEN_MENU_XPOS + 2, 104, GEN_MENU_WIDTH - 4, 53);
-
-      if(!pc_glue_ui_has(PC_FEAT_GEN_ANALOG))
-        pc_mask_rect(GEN_MENU_XPOS + 2, 272, GEN_MENU_WIDTH - 4, GEN_MENU_YPOS + GEN_MENU_HEIGHT - 2 - 272);
-      break;
+    //PC_MASK_GEN_MENU, PC_MASK_TRIG_MENU: since 0.2.8 those rows are not laid out at all (pc_hooks.h compact layout)
 
     case PC_MASK_TRIG_CHANNEL:
       if(!pc_glue_ui_has(PC_FEAT_EXT_TRIGGER))
         pc_mask_rect(TRIGGER_MENU_XPOS + 170, TRIGGER_MENU_YPOS + 127, 37, 26);
-      break;
-
-    case PC_MASK_TRIG_MENU:
-      //The "Hold off" labels (scope_hold_off_select draws nothing)
-      if(!pc_glue_ui_has(PC_FEAT_HOLDOFF))
-        pc_mask_rect(TRIGGER_MENU_XPOS + 4, TRIGGER_MENU_YPOS + 231, 66, 42);
       break;
 
     case PC_MASK_ACQ_LONG:

@@ -17,6 +17,20 @@
 #define PC_FEAT_HOLDOFF       7     //trigger hold-off: never sent to the FPGA
 #define PC_FEAT_MEM_BASE      16    //+ i: memory depth box i (3000 x (i + 1) samples) fits the bitstream
 
+//Compacted menus (fw 0.2.8, owner: no gaps). The kept rows move up by whole rows; the menu heights in variables.h
+//shrink to match. With PC_PROTOCOL=0 the shifts are 0 and nothing moves.
+#if PC_PROTOCOL
+#define PC_GEN_COMPACT        1     //generator: Power, Freq, Duty (no Wave / Ampl / Offset / Phase rows)
+#define PC_GEN_DY             56    //Freq and Duty move up one row
+#define PC_TRIG_COMPACT       1     //trigger: no Hold off row
+#define PC_TRIG_DY            56    //Always 50% moves up one row
+#else
+#define PC_GEN_COMPACT        0
+#define PC_GEN_DY             0
+#define PC_TRIG_COMPACT       0
+#define PC_TRIG_DY            0
+#endif
+
 #define PC_MASK_GEN_MENU      1
 #define PC_MASK_TRIG_CHANNEL  2
 #define PC_MASK_TRIG_MENU     3

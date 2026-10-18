@@ -3438,13 +3438,13 @@ void handle_trigger_menu_touch(void)
           }
         }
         //Check on 50% button and not in waveform view
-        else if((ytouch >= TRIGGER_MENU_YPOS+284) && (ytouch <= TRIGGER_MENU_YPOS+332) && (!scopesettings.waveviewmode)) //125-147
+        else if((ytouch >= TRIGGER_MENU_YPOS+284-PC_TRIG_DY) && (ytouch <= TRIGGER_MENU_YPOS+332-PC_TRIG_DY) && (!scopesettings.waveviewmode)) //125-147
         {
           //Toggle the always trigger 50% state
           scopesettings.alwaystrigger50 ^= 1;
           
           //Show the state 
-          scope_display_slide_button(TRIGGER_MENU_XPOS + 140, TRIGGER_MENU_YPOS + 296, scopesettings.alwaystrigger50, GREEN_COLOR);//298
+          scope_display_slide_button(TRIGGER_MENU_XPOS + 140, TRIGGER_MENU_YPOS + 296 - PC_TRIG_DY, scopesettings.alwaystrigger50, GREEN_COLOR);//298
         }
         //else if(holdoffmenuopen)close_open_trigger_menus(0);
         //Wait until touch is released before checking on a new position
@@ -3561,7 +3561,7 @@ void handle_generator_menu_touch(void)
         }
         //====================================================================================================
         //Check on buttons on freq flor 3
-        else if((ytouch >= GEN_MENU_YPOS+116) && (ytouch <= GEN_MENU_YPOS+164) && (!scopesettings.waveviewmode)) //185 220 ,188-210
+        else if((ytouch >= GEN_MENU_YPOS+116-PC_GEN_DY) && (ytouch <= GEN_MENU_YPOS+164-PC_GEN_DY) && (!scopesettings.waveviewmode)) //185 220 ,188-210
         {
           //Check on box with frequency value
           if((xtouch >= GEN_MENU_XPOS+80) && (xtouch <= GEN_MENU_XPOS+150))
@@ -3617,8 +3617,8 @@ void handle_generator_menu_touch(void)
             display_set_font(&font_3);
             //Display the green text and frame
             display_set_fg_color(GREEN_COLOR);
-            display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+129, 42, 22, 2);
-            display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS+132,  "1 kHz");//695 155 33
+            display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+129-PC_GEN_DY, 42, 22, 2);
+            display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS+132-PC_GEN_DY,  "1 kHz");//695 155 33
     
             fpgasettings.gen_freq = 1000; //1000Hz freq
             fpga_set_generator_freq(fpgasettings.gen_freq);
@@ -3634,7 +3634,7 @@ void handle_generator_menu_touch(void)
         }
         //====================================================================================================
         //Check on buttons on duty flor 4
-        else if((ytouch >= GEN_MENU_YPOS+172) && (ytouch <= GEN_MENU_YPOS+220) && (!scopesettings.waveviewmode)) //125-147
+        else if((ytouch >= GEN_MENU_YPOS+172-PC_GEN_DY) && (ytouch <= GEN_MENU_YPOS+220-PC_GEN_DY) && (!scopesettings.waveviewmode)) //125-147
         {
           //Check on box with duty value 
           if((xtouch >= GEN_MENU_XPOS+90) && (xtouch <= GEN_MENU_XPOS+140))
@@ -3685,8 +3685,8 @@ void handle_generator_menu_touch(void)
             display_set_font(&font_3);
             //Display the yellow text and frame
             display_set_fg_color(YELLOW_COLOR);
-            display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+185, 42, 22, 2);
-            display_text(GEN_MENU_XPOS+175, GEN_MENU_YPOS+188, "50%");//175
+            display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+185-PC_GEN_DY, 42, 22, 2);
+            display_text(GEN_MENU_XPOS+175, GEN_MENU_YPOS+188-PC_GEN_DY, "50%");//175
 
             fpgasettings.gen_duty = 50; //50% duty
             fpga_set_generator_duty(fpgasettings.gen_duty);

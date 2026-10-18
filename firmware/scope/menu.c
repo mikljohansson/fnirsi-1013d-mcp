@@ -5782,7 +5782,7 @@ void scope_open_trigger_menu(void)
   display_draw_horz_line(158, xstart, xend);//158//716
   display_draw_horz_line(214, xstart, xend);////214 716
   display_draw_horz_line(270, xstart, xend);////270 716
-  display_draw_horz_line(326, xstart, xend);////270 716
+  if(!PC_TRIG_COMPACT) display_draw_horz_line(326, xstart, xend);////270 716
 
   //Main texts in white
   display_set_fg_color(WHITE_COLOR);
@@ -5801,14 +5801,17 @@ void scope_open_trigger_menu(void)
   display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+178, "Trigger");//224
   display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+197, "position");//243 position 
   
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+234, "Hold");//280
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+253, "off");//299
+  if(!PC_TRIG_COMPACT)
+  {
+    display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+234, "Hold");//280
+    display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+253, "off");//299
+  }
   
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+290, "Always");//224
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+309, "50%");//243
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+290-PC_TRIG_DY, "Always");//224
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+309-PC_TRIG_DY, "50%");//243
   
   //Display the icon with the set colors
-  display_copy_icon_use_colors(trigger_50_percent_icon, TRIGGER_MENU_XPOS+75, TRIGGER_MENU_YPOS+294, 24, 24);//296 //184
+  display_copy_icon_use_colors(trigger_50_percent_icon, TRIGGER_MENU_XPOS+75, TRIGGER_MENU_YPOS+294-PC_TRIG_DY, 24, 24);//296 //184
 
   //Display the actual settings
   scope_trigger_mode_select();
@@ -5818,7 +5821,6 @@ void scope_open_trigger_menu(void)
   scope_hold_off_select();
   scope_always_trigger50_select();
   //scope_hold_off_select();
-  PC_UI_MASK(PC_MASK_TRIG_MENU);
 
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1
@@ -6378,7 +6380,7 @@ void scope_always_trigger50_select(void)
   //display_set_fg_color(DARKGREY_COLOR); //treba? 21.11.2025
   
   //Show the state (if always trige 50 on or off)
-  scope_display_slide_button(TRIGGER_MENU_XPOS + 140, TRIGGER_MENU_YPOS + 296, scopesettings.alwaystrigger50, GREEN_COLOR);//140 186
+  scope_display_slide_button(TRIGGER_MENU_XPOS + 140, TRIGGER_MENU_YPOS + 296 - PC_TRIG_DY, scopesettings.alwaystrigger50, GREEN_COLOR);//140 186
 }
 
 //==============================================================================
@@ -6445,10 +6447,13 @@ void scope_open_generator_menu(void)
   display_set_fg_color(BLACK_COLOR);
   display_draw_horz_line(102, xstart, xend);//
   display_draw_horz_line(158, xstart, xend);//
-  display_draw_horz_line(214, xstart, xend);//
-  display_draw_horz_line(270, xstart, xend);//
-  display_draw_horz_line(326, xstart, xend);//
-  display_draw_horz_line(382, xstart, xend);//
+  if(!PC_GEN_COMPACT)
+  {
+    display_draw_horz_line(214, xstart, xend);//
+    display_draw_horz_line(270, xstart, xend);//
+    display_draw_horz_line(326, xstart, xend);//
+    display_draw_horz_line(382, xstart, xend);//
+  }
 
   //Main texts in white
   display_set_fg_color(WHITE_COLOR);
@@ -6458,12 +6463,12 @@ void scope_open_generator_menu(void)
 
   //Display the texts
   display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+20,  "Power");//
-  display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+76,  "Wave");// 
-  display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+132, "Freq");//
-  display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+188, "Duty");//
-  display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+244, "Ampl");// 
-  display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+300, "Offset");//
-  display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+356, "Phase");//
+  if(!PC_GEN_COMPACT) display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+76,  "Wave");// 
+  display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+132-PC_GEN_DY, "Freq");//
+  display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+188-PC_GEN_DY, "Duty");//
+  if(!PC_GEN_COMPACT) display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+244, "Ampl");// 
+  if(!PC_GEN_COMPACT) display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+300, "Offset");//
+  if(!PC_GEN_COMPACT) display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+356, "Phase");//
   
    //display_copy_icon_use_colors ramik olkolo ikony generatora
   //display_draw_rounded_rect(GEN_MENU_XPOS+77, GEN_MENU_YPOS+11, 30, 32, 2);
@@ -6479,13 +6484,15 @@ void scope_open_generator_menu(void)
 
   //Display the actual settings
   gen_enable_select(); //gen_source_select();
-  gen_wave_select();
+  if(!PC_GEN_COMPACT) gen_wave_select();
   gen_freq_select();
   gen_duty_select();
-  gen_ampl_select();
-  gen_offset_select();
-  gen_phase_select();
-  PC_UI_MASK(PC_MASK_GEN_MENU);
+  if(!PC_GEN_COMPACT)
+  {
+    gen_ampl_select();
+    gen_offset_select();
+    gen_phase_select();
+  }
   
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1
@@ -6636,22 +6643,22 @@ void gen_freq_select(void)
   display_set_fg_color(DARKGREY_COLOR);
   
   //dark grey 
-  display_fill_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS+129, 92, 22, 2);//69-129-88-22-2//65 17na74 47 22      
-  display_fill_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+129, 42, 22, 2);//692 56
+  display_fill_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS-PC_GEN_DY+129, 92, 22, 2);//69-129-88-22-2//65 17na74 47 22      
+  display_fill_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS-PC_GEN_DY+129, 42, 22, 2);//692 56
       
   display_set_fg_color(GREEN_COLOR);
-  display_draw_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS+129, 92, 22, 2);
+  display_draw_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS-PC_GEN_DY+129, 92, 22, 2);
   display_set_fg_color(GREY_COLOR);
-  display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+129, 42, 22, 2);//692 56
+  display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS-PC_GEN_DY+129, 42, 22, 2);//692 56
 
   //White normal text if in normal mode
   display_set_fg_color(WHITE_COLOR);
 
   make_freq_to_long_text(buffer, fpgasettings.gen_freq);
-  display_text(GEN_MENU_XPOS + 68, GEN_MENU_YPOS + 132, buffer);
+  display_text(GEN_MENU_XPOS + 68, GEN_MENU_YPOS-PC_GEN_DY + 132, buffer);
 
   //Display the normal text
-  display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS+132, "1 kHz");//695 155 33
+  display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS-PC_GEN_DY+132, "1 kHz");//695 155 33
 }
 //==============================================================================
 void gen_duty_select(void)
@@ -6667,14 +6674,14 @@ void gen_duty_select(void)
   //Set dark grey color for the boxes behind the not selected texts
   display_set_fg_color(DARKGREY_COLOR);
 
-  display_fill_rounded_rect(GEN_MENU_XPOS+90,  GEN_MENU_YPOS+185, 42, 22, 2);//69-129-88-22-2//65 17na74 47 22      
-  display_fill_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+185, 42, 22, 2);//692 56
+  display_fill_rounded_rect(GEN_MENU_XPOS+90,  GEN_MENU_YPOS-PC_GEN_DY+185, 42, 22, 2);//69-129-88-22-2//65 17na74 47 22      
+  display_fill_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS-PC_GEN_DY+185, 42, 22, 2);//692 56
       
   display_set_fg_color(YELLOW_COLOR);
-  //display_draw_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS+185, 92, 22, 2);
-  display_draw_rounded_rect(GEN_MENU_XPOS+90,  GEN_MENU_YPOS+185, 42, 22, 2);//65//90
+  //display_draw_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS-PC_GEN_DY+185, 92, 22, 2);
+  display_draw_rounded_rect(GEN_MENU_XPOS+90,  GEN_MENU_YPOS-PC_GEN_DY+185, 42, 22, 2);//65//90
   display_set_fg_color(GREY_COLOR);
-  display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+185, 42, 22, 2);//692 56
+  display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS-PC_GEN_DY+185, 42, 22, 2);//692 56
 
   //White normal text if in normal mode
   display_set_fg_color(WHITE_COLOR);
@@ -6683,11 +6690,11 @@ void gen_duty_select(void)
     //fpga_set_generator_duty(fpgasettings.gen_duty);  //in Hz
 
   make_value_to_text(buffer, fpgasettings.gen_duty, '%');
-  display_text(GEN_MENU_XPOS + 95, GEN_MENU_YPOS + 188, buffer);//70
+  display_text(GEN_MENU_XPOS + 95, GEN_MENU_YPOS-PC_GEN_DY + 188, buffer);//70
 
   //Display the normal text
-  display_text(GEN_MENU_XPOS+175, GEN_MENU_YPOS+188, "50%");//175
-//display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS+132,  "1 kHz");//695 155 33
+  display_text(GEN_MENU_XPOS+175, GEN_MENU_YPOS-PC_GEN_DY+188, "50%");//175
+//display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS-PC_GEN_DY+132,  "1 kHz");//695 155 33
   
 }
 //==============================================================================

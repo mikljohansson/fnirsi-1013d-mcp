@@ -335,7 +335,11 @@
 #define TRIGGER_MENU_XPOS      TRIGGER_BUTTON_XPOS-38//28
 #define TRIGGER_MENU_YPOS                       48//46
 #define TRIGGER_MENU_WIDTH                     220//210//166
+#if PC_PROTOCOL
+#define TRIGGER_MENU_HEIGHT                    280     //5 rows: no Hold off row (pc_hooks.h PC_TRIG_COMPACT)
+#else
 #define TRIGGER_MENU_HEIGHT                    336//280//280//246//336
+#endif
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Signal generator button and menu
@@ -351,7 +355,11 @@
 #define GEN_MENU_XPOS                      508//GEN_BUTTON_XPOS-100//28
 #define GEN_MENU_YPOS                       48//46
 #define GEN_MENU_WIDTH                     220//210//166
+#if PC_PROTOCOL
+#define GEN_MENU_HEIGHT                    169     //3 rows: Power, Freq, Duty (pc_hooks.h PC_GEN_COMPACT)
+#else
 #define GEN_MENU_HEIGHT                    393//392//280//280//246//336
+#endif
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Battery button and menu

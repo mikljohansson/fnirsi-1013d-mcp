@@ -1,6 +1,7 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.7 (protocol 1.3: shared control, SD sector commands; 0.2.7: SD_STAGE from the timer poll,
+State on 2026-10-18, fw 0.2.8 (protocol 1.3: shared control, SD sector commands; 0.2.8: generator and trigger menus
+compacted; 0.2.7: SD_STAGE from the timer poll,
 RX back-pressure counters, our version on screen, chip drawn with the top bar, temperature only with an RTC; 0.2.6:
 menus hide what the hardware lacks, README "Hidden menu options"; 0.2.5: USB event counters; 0.2.3: chip above RUN/STOP and
 steady, one-step SET_TIMEBASE). 0.2.1 passed the protocol-level

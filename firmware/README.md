@@ -377,8 +377,12 @@ Hooks in the 1.00o5 code, all under `#if PC_PROTOCOL`:
 
 ### Hidden menu options (fw 0.2.6)
 
-Owner policy: the UI offers only what the running hardware can do. Protocol builds hide these 1.00o5 menu items
-(painted over with the menu background, touches ignored; `pc_glue_ui_has` / `pc_glue_ui_mask` in `pc_hal_scope.c`,
+Owner policy: the UI offers only what the running hardware can do. Protocol builds hide these 1.00o5 menu items.
+Since 0.2.8 the generator and trigger menus are compacted (owner: no gaps): the kept rows move up and the menu
+boxes shrink (generator 3 rows, 169 px: Power, Freq, Duty; trigger 5 rows, 280 px: Always 50 % moves into the hold-off
+slot), via `PC_GEN_DY` / `PC_TRIG_DY` in `pc_hooks.h` and the `*_MENU_HEIGHT` values in `variables.h`, which also
+size the screen save/restore and the touch area. Items inside a row (memory boxes, EXT, the system-settings
+Time & Date row) are still painted over (touches ignored; `pc_glue_ui_has` / `pc_glue_ui_mask` in `pc_hal_scope.c`,
 hooks `PC_UI_HAS` / `PC_UI_MASK` that are empty with `PC_PROTOCOL=0`):
 
 | item | where | hidden when | why |
