@@ -67,6 +67,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   a capture loop that reads several records per pass would raise the waveform rate. Measure pass_ms in the view first.
 - [ ] **Gain-per-range check** (fw-cal2 assumption 1, README 6.3 step 7): gains measured on one range are applied to all six; bench
   CH1 at ranges 1/2/3 with the generator static on the post; if spans disagree beyond 0.3 %, store gains per range (80 bytes free).
+- [ ] **Bode analyser, host steps H1-H3** (docs/plans/bode-design.md fe5780b): MCP tool `scope_bode_sweep` host-driven with the existing
+  commands (SET_GEN raw 50 MHz / M tones, SET_DECIM CIC3+FIR, coherent READ_RAW layout 2, single-bin DFT), thru-calibration, fixed range
+  first, then down-ranging; bench first on an RC low-pass R 1.6 kOhm / C 10 nF (fc 9.95 kHz) with DUT ground on the USB shell.
+- [ ] **Bode analyser, device steps D1-D5** after the host version proves the numbers: display mode with magnitude/phase panes,
+  BODE_CTRL / READ_BODE. Owner decision: entry from the generator menu (the main menu has no eighth row).
 - [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s): deterministic test with
   GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
 - [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md
@@ -98,7 +103,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 - fw-gen7 (worktree, Opus, started 10-19 00:35): dead-code purge, reproducible builds, 16-bit trigger level fix; fw 0.2.47.
 - fw-mmu (worktree, Opus, started 10-19 00:35): MMU + D-cache enable with PC_MMU switch; fw 0.2.48; bench only with the owner present.
-- bode-design (Opus, docs only, started 10-19 00:35): docs/plans/bode-design.md.
+- bode-design (done 01:05): docs/plans/bode-design.md committed fe5780b.
 - fw-cal2 (retired, about 400k tokens): calibration v3 delivered and merged (c20957a, fw 0.2.45 / 1.12 / row 51); handoff section 23.
 - fw-phosphor (retired, about 430k tokens): phosphor view delivered and merged (2e73d28, fw 0.2.46 / 1.13 / row 52); handoff section 24.
 - mcp-gen3: protocol 1.12 + 1.13 host side (GET_CAL v3 gains in the volts model, DisplayMode 2-4, settings word 210).
