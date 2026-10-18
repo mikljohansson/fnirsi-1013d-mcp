@@ -56,6 +56,7 @@ in long WSL command lines and Windows Python heredocs halve backslashes: put mul
 |---|---|
 | `make` | GCC 13.2.1, protocol on: `build/fnirsi_1013d.bin` |
 | `make gcc10` | Atlan's GCC 10.3.1 (`~/opt/gcc10`, from `tools/fetch_gcc10.sh`): `build-gcc10-pc/`. The bench uses this one |
+| `make gcc10-nofb` | same with PC_USB_TICK_FALLBACK=0 (no USB tick fallback, version `-nofb`): `build-gcc10-pc-nofb/` |
 | `make check-reference` | PC_PROTOCOL=0 with GCC 10 + Atlan's build_time.h, `cmp` against Atlan's binary: must print IDENTICAL |
 | `make PC_DEBUG=1 BUILD=build-dbg` | adds DEBUG_FPGA + FORCE (caps 0x120) for bench tests T3/T7 |
 | `make PC_FIFO_MAP=1 ...` | alternative USB FIFO layout (version string `-m1`) |
@@ -193,8 +194,13 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.18 | 50c9802 | ed117dc5 | event-log snapshot re-armed only with request flag bit 0 | built, host-tested, not benched |
 | 0.2.19 | 55d5c5b | 9b94c9a8 | restart record at 0x81A00000, exception vectors record and restart, counters 49-56, event type 15 | built, host-tested, disassembly checked; **ELF kept at backups/fw-0.2.19-9b94c9a8.elf** |
 
-All of 0.2.12-0.2.19 contain the tick fallback; 0.2.11 does not. Full 0.2.19 sha256:
-9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4.
+| 0.2.19 A/B pair | 02288b8 | c30ff516 / 3d1f3c88 | same code as 0.2.19; `make gcc10-nofb` (PC_USB_TICK_FALLBACK=0) builds `0.2.19-nofb` without the tick fallback (#VER shows the suffix) | for the restart A/B; both ELFs kept as backups/fw-0.2.19-c30ff516.elf and backups/fw-0.2.19-nofb-3d1f3c88.elf |
+
+All of 0.2.12-0.2.19 contain the tick fallback, except 0.2.19-nofb; 0.2.11 does not. Full 0.2.19 sha256:
+9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
+build hash and build time; use the pair together. Full sha256: 0.2.19 (02288b8)
+c30ff5168bf227e0bf80038d037845e7a5d1e883fe00473f5f9f99a7f9b780fc, 0.2.19-nofb
+3d1f3c889a206621bc6546c0a7df227365e76589d5b41c05341183e4cb161cd9.
 
 ## 9. Open crash: self-restart from RAM (seen on 0.2.12 and 0.2.16)
 
@@ -305,7 +311,15 @@ Keep the ELF of every later bench image next to its .bin: a rebuild moves addres
   sessions with no drop seen by the host (link_resets 22 = 12 + 10). A host port reset shows as suspend, then bus
   reset. Unknown whether Windows silently recovers a failed control transfer, resets on port open, or something
   else. The 0.2.18 frozen snapshot (re-armed only on request) is the tool: read GET_EVENT_LOG without flag bit 0
-  right after a session, look at the 16 events before the first reset.
+  right after a session, look at the 16 events before the first reset. Host EP0 traffic per mcp-gen2 (from pyserial
+  and usbser behaviour, not a USB trace): open = SET_LINE_CODING 0x20 + SET_CONTROL_LINE_STATE 0x22 (DTR 0, RTS 1),
+  20 ms later 0x22 with DTR 1; close = 0x22 with DTR 0; no reconfiguration while open. In the snapshot, a setup
+  (type 5) with bRequest 0x20/0x22 or a bad setup (type 6) right before the suspend + reset pair points at an
+  unfinished open/close request; a suspend with no EP0 traffic before it, or a resume then a reset, points at
+  selective suspend. On the owner's PC selective suspend is off on AC, on on battery (turning it off on battery is the
+  lead's call: `powercfg /setdcvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3
+  48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0`, then `powercfg /setactive SCHEME_CURRENT`). The mcp soak saves the
+  frozen snapshot before re-arming it (mcp commits 2c6a4c5, 56bf8ad); no session-open path reads the log.
 - **Drops seen** (Windows WriteFile error 22, device re-enumerates): 0.2.2 idle with the port closed, 0.2.3 during an
   SD write under back-pressure, 0.2.11 during 10 Hz GET_STATUS polling, 0.2.12 soak (two drops 7 s apart, the first
   with three suspend+reset pairs). The owner turned Windows USB selective suspend off before the 0.2.12 soak.
