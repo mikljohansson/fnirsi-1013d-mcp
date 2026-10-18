@@ -555,6 +555,16 @@ static uint32_t pc_timebase_body(pc_session *s, uint8_t *p)
   return 16;
 }
 
+//Firmware auto mode (fw 0.2.41, pc_hal_scope.c "Firmware auto mode"): the FPGA's auto time-out counts samples and
+//expires in microseconds at fast rates, and 0x18 then keeps watching, so a timed-out record could read "triggered".
+//Auto captures on Atlan bitstreams arm in normal mode and the firmware gives up after this many ms.
+uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider)
+{
+  uint64_t rec = ((uint64_t)samples * ((uint64_t)divider + 1) + 199999) / 200000;   //record length in ms
+
+  return (2 * rec > PC_AUTO_MIN_MS) ? (uint32_t)(2 * rec) : PC_AUTO_MIN_MS;
+}
+
 static uint32_t pc_auto_timeout(pc_session *s, uint32_t total)
 {
   if(s->auto_timeout_cfg)
@@ -1141,7 +1151,7 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   //2.-5. conversion start with a bounded ready wait                                  BENCH: T6 (stock 0x0F semantics)
   s->ring_valid = 0;
 
-  if(pc_hal_arm(pre_w, tot_w, pc_auto_timeout(s, t.total), prog, t.ui_mode != 0,
+  if(pc_hal_arm(pre_w, tot_w, pc_auto_timeout(s, t.total), prog, (t.ui_mode != 0) || prog,
                 (s->var.caps & PC_CAP_DECIM) ? &dc : NULL))
   {
     s->acq_state = PC_ACQ_ABORTED;
@@ -1160,6 +1170,18 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   s->cap_pre_words    = pre_w;
   s->cap_total_words  = tot_w;
   s->cap_divider      = s->cap_next.divider;
+
+  //Auto mode in firmware on Atlan bitstreams (armed normal above): an explicit host time-out (samples) counts too
+  s->fw_auto     = (uint8_t)(prog && (t.ui_mode == 0));
+  s->host_forced = 0;
+  s->auto_ms     = pc_auto_deadline_ms(t.total, s->cap_divider);
+  if(s->auto_timeout_cfg)
+  {
+    uint32_t cfg_ms = pc_auto_deadline_ms(s->auto_timeout_cfg, s->cap_divider) / 2;
+
+    if(cfg_ms > s->auto_ms)
+      s->auto_ms = cfg_ms;
+  }
 
   *rl = pc_status_body(s, resp);
   return PC_OK;
@@ -2420,6 +2442,19 @@ static void pc_acq_service(pc_session *s)
 
   //Only 0x0A and 0x18: no touch scan, unlike fpga_done_conversion
   pc_hal_acq_poll(&done, &trig);
+
+  //Firmware auto mode: no trigger in time ends the capture now (0x1A = 0; the FPGA's sample time-out is long past)
+  if(s->fw_auto && !s->host_forced && !done && !trig && (s->acq_state == PC_ACQ_ARMED) &&
+     ((pc_hal_ms() - s->arm_ms) >= s->auto_ms))
+  {
+    pc_hal_force();
+    s->host_forced = 1;
+    pc_hal_acq_poll(&done, &trig);
+  }
+
+  //A record the time-out ended is untriggered, whatever 0x18 says by now
+  if(s->host_forced)
+    trig = 0;
 
   s->fpga_triggered = (uint8_t)trig;
   s->fpga_done      = (uint8_t)done;

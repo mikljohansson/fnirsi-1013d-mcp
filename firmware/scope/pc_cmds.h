@@ -14,13 +14,17 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 // Build identity (overridden from the Makefile)
 
+//Firmware auto mode (fw 0.2.41): give up waiting for a trigger after max(100 ms, two record lengths)
+#define PC_AUTO_MIN_MS    100
+uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
+
 #ifndef PC_FW_VERSION
 #if PC_FIFO_MAP == 1
 #define PC_FW_VERSION_MAP "-m1"         //alternative USB FIFO layout (pc_transport.h)
 #else
 #define PC_FW_VERSION_MAP ""
 #endif
-#define PC_FW_VERSION     "0.2.40" PC_FW_VERSION_MAP
+#define PC_FW_VERSION     "0.2.41" PC_FW_VERSION_MAP
 #endif
 
 #ifndef PC_FW_BUILD
@@ -205,6 +209,9 @@ typedef struct
   uint8_t    fpga_triggered;
   uint8_t    fpga_done;
   uint8_t    auto_timeout_hit;
+  uint8_t    fw_auto;           //fw 0.2.41: host auto mode armed normal, firmware time-out at auto_ms
+  uint8_t    host_forced;       //the firmware time-out ended it (untriggered)
+  uint32_t   auto_ms;
   uint8_t    armed_once;
   uint32_t   capture_id;
   uint32_t   arm_ms;

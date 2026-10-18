@@ -202,6 +202,8 @@ typedef struct
 } SPECFRAME;
 
 static FX_FFT    spec_plan;
+static uint8     spec_untrig;                           //the latest UI record is untriggered (spectrum_capture_info)
+static uint32    spec_trig_ms;
 static SPECFRAME spec_frame[2];
 static int16     spec_db[2][(FX_FFT_N_MAX / 2) + 1];    //centi-dBV as shown (averaged or held)
 static int16     spec_raw[2][(FX_FFT_N_MAX / 2) + 1];   //centi-dBV of the latest record (the history views use it)
@@ -744,6 +746,9 @@ static void spec_draw_warnings(int k, uint64 fs_mhz, int hch)
   if(!scopesettings.runstate && ((spec.view != VIEW_SPECTRUM) || (!spec.have[0] && !spec.have[1])))
     p = fmt_str(p, "Stopped: RUN fills the view   ");
 
+  if(spec_untrig && scopesettings.runstate)
+    p = fmt_str(p, "untriggered (auto time-out)   ");
+
   if(p == t)
     return;
 
@@ -1145,6 +1150,19 @@ void spectrum_new_data(void)
   spec.fresh = 1;
 }
 
+//Untriggered records (fw 0.2.41): with a periodic signal that normally triggers, an occasional auto time-out record
+//(no edge in it) would flash a different spectrum (the owner's bimodal flicker), so it is dropped while a triggered
+//record came within the last second. A signal that stops triggering for longer is shown, with a warning.
+static uint8  spec_untrig;
+static uint32 spec_trig_ms;
+
+void spectrum_capture_info(int triggered)
+{
+  spec_untrig = triggered ? 0 : 1;
+  if(triggered)
+    spec_trig_ms = timer0ticks;
+}
+
 void spectrum_service(void)
 {
   if(spec.active && !spectrum_available())
@@ -1194,6 +1212,12 @@ int spectrum_display(void)
 
   log2n = spec_log2n();
   fresh = spec.fresh;
+
+  if(fresh && spec_untrig && ((timer0ticks - spec_trig_ms) < 1000) && (spec.have[0] || spec.have[1]))
+  {
+    spec.fresh = 0;
+    fresh = 0;
+  }
 
   //After a time base change only a record at the new rate counts
   if(spec.wait)
@@ -1299,7 +1323,7 @@ int spectrum_display(void)
 
 #define TB_FIRST              11          //short time bases (the roll-mode ones below would leave the view)
 #define TB_LAST               ((int)(sizeof(time_per_div_sample_rate) / sizeof(time_per_div_sample_rate[0])) - 1)
-#define MIN_SPAN_BINS         64          //zooming in past this many bins steps to a slower rate instead
+//Zooming in at a span of fs/16 or less (N/16 bins: 128 at 2048, 256 at 4096) steps to a slower rate instead
 
 static uint32 tb_divider(int i)
 {
@@ -1404,7 +1428,7 @@ static void spec_centre_span(uint64 *centre, uint64 *span)
 }
 
 //Span: one zoom step narrower (in) or wider (out) about the centre. Past the widest span (the whole axis) a zoom out
-//steps to the next faster rate until fs/2 reaches PC_SPECTRUM_FMAX_HZ; past MIN_SPAN_BINS a zoom in steps to the next
+//steps to the next faster rate until fs/2 reaches PC_SPECTRUM_FMAX_HZ; at a span of fs/16 or less a zoom in steps to the next
 //slower rate, keeping the centre and halving the span in Hz.
 static void spec_zoom(int in)
 {
@@ -1425,7 +1449,7 @@ static void spec_zoom(int in)
     return;
   }
 
-  if(in && ((v.span >> 1) < MIN_SPAN_BINS))
+  if(in && (v.span <= ((1u << log2n) / 16)))
   {
     spec_centre_span(&centre, &span);
     next = spec_tb_next(-1);

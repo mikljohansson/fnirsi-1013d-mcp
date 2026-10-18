@@ -520,10 +520,11 @@ static void test_auto_timeout_and_stop(void)
 
   setup(0x1532);
 
-  //Auto mode with no trigger: DONE with 0x18 = 0 -> auto_timeout flag
+  //Auto mode with no trigger: DONE with 0x18 = 0 -> auto_timeout flag. Since fw 0.2.41 auto arms normal on Atlan
+  //bitstreams (the firmware keeps the time-out)
   mock.polls_to_trigger = -1; mock.polls_to_done = 2;
   r = req(PC_CMD_ARM, 0, 0);
-  T_EQ(mock.arm_normal, 0);
+  T_EQ(mock.arm_normal, 1);
   r = wait_done(500);
   T_EQ(r.p[1], PC_ACQ_DONE); T_EQ(r.p[2] & 0x04, 0x04);
   r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
@@ -1625,6 +1626,49 @@ static void test_spectrum(void)
   mock_spec_total = -1;
 }
 
+//Firmware auto mode (fw 0.2.41): no trigger and no FPGA DONE within max(100 ms, two record lengths) -> the firmware
+//forces the capture and reports it untriggered, even if 0x18 reads 1 afterwards
+static void test_fw_auto_timeout(void)
+{
+  resp_t r;
+  int k, forced = 0;
+
+  T_EQ(pc_auto_deadline_ms(3000, 19), 100);            //10 MS/s, 0.3 ms record: the 100 ms floor
+  T_EQ(pc_auto_deadline_ms(3000, 199999), 6000);       //1 kS/s, 3 s record: two records
+
+  setup(0x1532);
+  mock.polls_to_trigger = -1; mock.polls_to_done = -1;
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.arm_normal, 1);
+
+  for(k = 0; k < 200 && !forced; k++)
+  {
+    mock.now += 1;
+    pc_poll(&S, PC_CTX_MAIN);
+    forced = mock.forces > 0;
+    if(forced) T_TRUE(k >= 98);
+  }
+  T_TRUE(forced);
+
+  //After the force 0x18 reads 1 (an edge came after the stop): still untriggered
+  mock.polls_to_trigger = 0;
+  mock.now += 1;
+  pc_poll(&S, PC_CTX_MAIN);
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  T_EQ(r.p[1], PC_ACQ_DONE); T_EQ(r.p[2] & 0x05, 0x04);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[9] & 0x03, 0x02);
+
+  //A trigger in time: no force, triggered
+  mock.forces = 0;
+  mock.polls_to_trigger = 1; mock.polls_to_done = 3;
+  r = req(PC_CMD_ARM, 0, 0);
+  for(k = 0; k < 10; k++) { mock.now += 1; pc_poll(&S, PC_CTX_MAIN); }
+  T_EQ(mock.forces, 0);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[9] & 0x03, 0x01);
+}
+
 static void test_fel_reset_stall(void)
 {
   uint8_t p[4];
@@ -2058,6 +2102,7 @@ int main(void)
   test_event_log();
   test_fel_reset_stall();
   test_fft_bench();
+  test_fw_auto_timeout();
   test_spectrum();
   test_decim_math();
   test_decim_protocol();

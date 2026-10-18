@@ -1,8 +1,9 @@
 # firmware/ handoff for agents
 
-Handoff fw-gen3 -> fw-gen4, 2026-10-18. Latest build: **fw 0.2.20** (protocol 1.5, race-free USB tick fallback,
-section 11), 8 bench passes clean, 30-minute capture soak running at handoff. The SD card runs **0.2.11**, which stays there until the self-restart below is fixed. Read the root `AGENTS.md`
-first, then this file. Details live in `firmware/README.md` (build, SD layout, FEL, memory budget, boot, bring-up
+**Current state (fw-gen5 -> fw-gen6, 2026-10-18): latest build fw 0.2.41** (protocol 1.9 + fw-cal's 1.10 work in a
+worktree), see the ladder (section 8) and **section 20** (spectrum analyser, firmware auto trigger mode, the 0x1535 FIR
+plan, open owner verdicts). The USB story is closed (0.2.25 PHYCTL fix, cold-boot soak clean). Sections 9-17 below are
+older generations' notes, kept for history. Read the root `AGENTS.md` first, then this file. Details live in `firmware/README.md` (build, SD layout, FEL, memory budget, boot, bring-up
 checklist), `docs/protocol.md` (the spec; section 14 lists every deviation and addition, rows 28-42 are this
 generation's) and `docs/hardware-status.md` (bench log, newest at the bottom). This file does not repeat them.
 
@@ -221,6 +222,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.38 | 6ce82d9 | a6f50f6c | pass time under the acquisition menu's Memory header | built, host-tested |
 | 0.2.39 | 11b1729 | 267e80fe | span drives the time base (zoom out past full span = faster rate up to 50 MS/s, zoom in past 64 bins = slower), Auto picks the rate in up to 3 captures, spectrum settings persist in settings words 208/209, filter tag "CIC3" instead of the N text | built, host-tested |
 | 0.2.40 | e595a0f | 3907e7ac | spectrum Average field (Off/4/16/64/Max hold, default 4), one header line + warnings over the plot, Roll mode label without on/off | built, host-tested |
+| 0.2.41 | PENDING | | firmware auto trigger mode (auto captures arm normal; time-out max(100 ms, 2 records) forces an untriggered record, reported truthfully, UI and host); spectrum drops occasional untriggered records; zoom-in steps the rate down at span <= fs/16 | built, host-tested (test_fw_auto_timeout) |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -630,7 +632,7 @@ Open: the bench list in README "Decimation filter"; TODO 1c (trigger position at
 re-measured with the filter on, since its geometry is exact (no `T + 7441`); mcp/ needs GET_DECIM / SET_DECIM, the
 READ_TRACE WIDE flag and the 76-byte GET_CAPTURE_INFO (message to mcp-gen2).
 
-## 20. Spectrum analyser (fw-gen5, fw 0.2.26-0.2.40)
+## 20. Spectrum analyser and auto trigger mode (fw-gen5, fw 0.2.26-0.2.41; retired at about 290k tokens)
 
 Spec and design: docs/plans/dpos350p-features.md section 2; README section 5 "FFT core" and "Spectrum view"; protocol
 section 14 rows 44 (FFT_BENCH) and 45 (READ_SPECTRUM, GET_STATUS byte 43).
@@ -660,10 +662,31 @@ section 14 rows 44 (FFT_BENCH) and 45 (READ_SPECTRUM, GET_STATUS byte 43).
   A host capture with a raw divider is labelled with the UI rate (row 45).
 - Owner verdicts so far: spectrum view works, harmonics within 0.4 dB; waterfall "very nice"; density band fixed in
   0.2.35 (verdict pending); 0.2.35-0.2.40 UX items pending on the screen (header layout, gestures, Auto, averaging).
-Open (fw-gen5's list): owner verdicts on 0.2.35-0.2.40; FPGA 0x1535 FIR support (lead's interface delta: 0x56 bit 0,
-  0x29 bits 6/5, gain (N/2)^K, S + 1, latency/settle formulas; Filter box toggle, SET_DECIM flags bit 3, caps bit 16,
-  protocol 1.11) once the lead confirms fpga-gen4's testbench numbers; an assembly u16 load if the filtered path's
-  speed matters.
+- Firmware auto trigger mode (0.2.41): README section 5 "Firmware auto trigger mode", protocol section 7.5. The
+  FPGA's 0x0E time-out counts samples and 0x18 is not gated by the stop, so auto records at fast rates were untriggered
+  but could read triggered. Auto now arms normal on Atlan bitstreams; `pc_ui_auto_service` (main poll) and the host
+  poll write 0x1A = 0 at the deadline and clear the triggered flag. Calibration and auto setup keep the FPGA's auto
+  (`pc_glue_decim_conversion` writes 0x1A per conversion). Bench: the 10 MS/s / 1 kHz square case from the lead's
+  host captures (2 of 6 flat "triggered" records on 0.2.40) should give 6 of 6 single-edge records in auto mode, and
+  the spectrum view's comb must not flicker.
+- Owner verdicts open: 0.2.40 header line / averaging / Roll label (loaded, checks in progress), 0.2.41 auto mode
+  and zoom-in rate stepping. Accepted so far: spectrum view, waterfall, the CIC3 floor; the "wagging tail" was
+  window-leakage variation, fixed by averaging (default 4).
+- Next for fw-gen6: FPGA 0x1535 FIR support, once the lead confirms fpga-gen4's testbench numbers. Interface delta
+  (lead, fixed): write 0x56 bit 0 = FIR enable; the FIR is active only when 0x56 = 1, K >= 1, N >= 16 and N % 4 == 0
+  (D >= 14, D mod 4 in {2, 3}); 0x29 byte 0 bit 6 = FIR enable as written, bit 5 = FIR active now. Chain: CIC of
+  order K decimating by N/2 (gain (N/2)^K), shift S, saturate to 16 bit, 15-tap FIR decimating by 2 with DC gain 1.
+  Firmware S = max(0, bitlen(255 (N/2)^K) - 16) + 1; ADC mean = out 2^S / (N/2)^K; 16-bit trigger level =
+  round(v (N/2)^K / 2^S); K = 3 exact while N/2 <= 10334. Latency 25 write clocks (250 ns) + EXT data lag 250 ns +
+  17.5 N ns + 1.25 K (N - 2) ns; settle (K + 10) N 5 ns + 1 us after changing 0x0D / 0x53 / 0x54 / 0x56. Plan:
+  extend pc_decim.c/h (FIR flag in pc_decim_cfg, gain/shift/scale/level/ext-shift/settle per the formulas, host
+  vectors in decim_check + test_session), write 0x56 in pc_dec_apply, read back bits 5/6, a "FIR" toggle in the
+  Filter box hidden when unsupported, SET_DECIM flags bit 3, GET_DECIM reports it, caps bit 16 FIR, protocol minor
+  1.11 (fw-cal has 1.10), a protocol section 14 row, and settings word 207 bit for FIR. The spectrum view needs no
+  change (it takes scale_q24 and the rate from pc_hal_decim_current); check that the FIR's halving of the output rate
+  shows in `spec_fs_mhz` (rate = 200 MHz / N stays the output rate if N counts the whole chain; confirm with fpga-gen4).
+- Other open items: an assembly u16 load if the filtered path's FFT speed matters (C now, about 2x the u8 path);
+  `fpga/al3/src/zaklad.sdc` showed as modified in the tree all session (not firmware's, never committed by fw-gen5).
 - TODO (lead, later, not fw-gen5's): enable the MMU with a flat 1:1 section map, DDR cacheable, the framebuffers and
   any DMA regions uncached, peripherals strongly ordered. The D-cache bit is already set (CP15 0x0005107C) but does
   nothing without the MMU. Numbers that motivate it: 0.2.27 FFT_BENCH 4096 points 24.3 ms in DDR (~90 cycles per

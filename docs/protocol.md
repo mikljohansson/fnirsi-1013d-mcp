@@ -324,7 +324,15 @@ reports it; layout 0 (per-core blocks) is unaffected.
 - Auto mode: if no trigger arrives within `auto_timeout` write clocks, the capture stops and the FPGA forces
   `trigger_addr` to `pretrigger_words` [V zaklad.v :520-542]. Data are then not synchronised to anything.
   GET_STATUS flags this as `auto_timeout` when 0x18 reads 0 at DONE [U: depends on 0x18 staying 0 on
-  timeout].
+  timeout]. **Corrected in v0.2.41** (bench: at 10 MS/s with a 1 kHz square, 2 of 6 auto captures came back flat but
+  flagged triggered): the time-out counts samples, so at fast rates it expires long before a slow signal's next edge,
+  and 0x18 keeps watching after sampling stopped (zaklad.v: trigger detection is not gated by the stop), so an edge
+  between the stop and the read sets it. Since v0.2.41 auto captures on Atlan bitstreams (host ARM with UI mode 0, and
+  the UI's own acquisition) arm in normal mode, and the firmware gives up after max(100 ms, two record lengths, an
+  explicit `auto_timeout` converted to time): it writes 0x1A = 0, the FPGA stops at once, and the capture is reported
+  untriggered (`auto_timeout` set, GET_CAPTURE_INFO flags triggered clear) whatever 0x18 says afterwards. Stock
+  bitstreams, calibration and auto setup keep the FPGA's own auto mode. The `auto_timeout` value is still written to
+  0x0E (it no longer acts in normal mode).
 - Normal mode has no timeout: the ring keeps wrapping until a trigger arrives.
 - Stock FPGA geometry: fixed 750 pre-trigger and 750 post-trigger words; the readout window is
   `T - 750 .. T + 749`. Fresh data extend roughly 910 words before and 1700-2500 words after the trigger;

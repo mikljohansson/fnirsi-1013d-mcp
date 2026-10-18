@@ -34,6 +34,7 @@ int    spectrum_mode(void);                  //SPECTRUM_MODE_*
 int    spectrum_available(void);             //0 in roll mode and in the picture / waveform viewers
 void   spectrum_set_active(int on);
 void   spectrum_new_data(void);              //a capture (UI or host) refilled the trace buffers
+void   spectrum_capture_info(int triggered); //fw 0.2.41: the UI capture about to arrive triggered (0: auto time-out)
 int    spectrum_display(void);               //from scope_display_trace_data: 1 = drew the spectrum view instead
 int    spectrum_touch(void);                 //touch in the trace area (xtouch, ytouch): 1 = handled
 void   spectrum_service(void);               //every main-loop pass: leave the mode when it is no longer available

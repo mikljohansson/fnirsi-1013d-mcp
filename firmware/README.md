@@ -604,7 +604,7 @@ averaging mode persists with the other settings (word 209 bits 12-14; ref in bit
 
 Span and sample rate (fw 0.2.39, owner: like a spectrum analyser): the span drives the scope's time base (the same
 setting the scope view uses, short time bases only). A zoom-out tap with the whole axis shown steps to the next
-faster rate, until fs/2 reaches 25 MHz (50 MS/s, 2 us/div); a zoom-in tap that would show fewer than 64 bins steps
+faster rate, until fs/2 reaches 25 MHz (50 MS/s, 2 us/div); a zoom-in tap at a span of fs/16 or less (N/16 bins; fw 0.2.41, 0.2.39 used 64 bins) steps
 to the next slower rate instead, keeping the centre frequency and halving the span in Hz, provided the new axis
 still holds the window (otherwise the plain zoom continues to 1/64 of the axis). After a rate change the view waits
 for the first capture at the new rate ("Waiting for a capture at the new sample rate") and the histories clear.
@@ -636,6 +636,19 @@ Costs: FFT per channel per new capture, measured with FFT_BENCH on 0.2.31: 2048 
 on-chip SRAM, 4096 points 10.9 ms (+ about 1-2.5 ms dB conversion). Since 0.2.33 the view runs N <= 2048 from SRAM A
 (0x1000-0x7008, the space FFT_BENCH borrows; nothing else uses it at run time, all stacks are in DDR). Drawing: one
 728 x 432 clear (memset bursts since 0.2.32) and blit per pass, as 1.00o5's trace view.
+
+### Firmware auto trigger mode (fw 0.2.41)
+
+The FPGA's auto time-out (0x0E) counts samples, i.e. one record length: 0.3 ms at 10 MS/s with 3000 samples, so a
+1 kHz signal's edge often came too late and the record was untriggered; worse, 0x18 kept watching after the stop
+and read "triggered" if an edge came before the MCU read it (flat records flagged triggered; the spectrum view
+flickered between the comb and the floor). On Atlan bitstreams auto mode is now done in firmware like a real scope:
+the UI acquisition and host ARM in auto arm the FPGA in normal mode, and after max(100 ms, two record lengths) without
+a trigger the main loop writes 0x1A = 0, which ends the sampling at once with an untriggered record that is reported
+as such (`pc_hal_scope.c` "Firmware auto mode", `pc_cmds.c` `pc_auto_deadline_ms`, host test test_fw_auto_timeout).
+Calibration and auto setup still use the FPGA's auto mode (`pc_glue_decim_conversion` writes 0x1A per caller). The
+spectrum view drops an untriggered record while a triggered one came within the last second (a periodic signal's
+occasional miss) and otherwise shows it with the warning "untriggered (auto time-out)".
 
 ### Pass time in the acquisition menu (fw 0.2.38)
 

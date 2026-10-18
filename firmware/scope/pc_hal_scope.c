@@ -379,6 +379,8 @@ void pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable)
 
 static void pc_dec_apply(const pc_decim_cfg *c);
 
+static uint8  pc_ui_auto;                             //defined with the firmware auto mode below
+
 int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal,
                const pc_decim_cfg *dc)
 {
@@ -386,6 +388,9 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
 
   //Trigger level from the marker, as every UI conversion does (scope_acquire_trace_data)
   fpga_set_trigger_level();
+
+  //The host capture replaces any UI conversion in flight (and its firmware auto time-out)
+  pc_ui_auto = 0;
 
   //Decimation filter mode, shift and 16-bit level, settled before the reset (0x1534+ only)
   if(dc)
@@ -542,7 +547,8 @@ int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t
   if(ch_mask & 0x02)
     fpga_read_sample_data(&scopesettings.channel2, start_word);
 
-  //The spectrum view shows host captures too
+  //The spectrum view shows host captures too (never dropped as untriggered)
+  spectrum_capture_info(1);
   spectrum_new_data();
 
   //scope_process_trigger looks at samples pre - 20 .. pre + 60
@@ -672,13 +678,73 @@ void pc_glue_ui_decim_arm(void)
   pc_dec_ui_arm = 1;
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// Firmware auto mode (fw 0.2.41). The FPGA's auto time-out (0x0E) counts samples (the record length), so at fast rates
+// it expires in microseconds (3000 samples at 10 MS/s = 0.3 ms), before a slow signal's next edge; and 0x18 keeps
+// watching after sampling stopped, so such a record read "triggered" when an edge came between the stop and the read
+// (bench: flat records flagged triggered). On Atlan bitstreams the UI's auto mode now arms in normal mode and the main
+// loop gives up after max(100 ms, two record lengths): 0x1A = 0 then ends the sampling at once (the time-out is long
+// past) with an untriggered record, which is reported as such. Calibration and auto setup keep 1.00o5's FPGA auto.
+
+static uint8  pc_ui_auto;                             //a UI conversion runs in firmware auto mode
+static uint8  pc_ui_forced;                           //it was ended by the firmware time-out (untriggered)
+static uint32 pc_ui_auto_t0, pc_ui_auto_ms;
+
+static int pc_fw_auto_possible(void)
+{
+  return (fpgasettings.fw_FPGA != 1) && !scopesettings.long_mode;
+}
+
 void pc_glue_decim_conversion(void)
 {
   pc_decim_cfg c;
+  int          ui = pc_dec_ui_arm;
 
   pc_dec_config(&c, pc_dec_ui_arm ? pc_dec_setting : 0);
   pc_dec_ui_arm = 0;
   pc_dec_apply(&c);
+
+  //Trigger mode for this conversion, written before the sampling reset
+  pc_ui_auto   = 0;
+  pc_ui_forced = 0;
+
+  if(pc_fw_auto_possible())
+  {
+    int fw_auto = ui && (scopesettings.triggermode == 0);
+
+    fpga_write_cmd(0x1A);
+    fpga_write_byte((scopesettings.triggermode || fw_auto) ? 0x01 : 0x00);
+
+    if(fw_auto)
+    {
+      uint32 d = (scopesettings.samplerate < (sizeof(sample_rate_settings) / sizeof(uint32))) ?
+                 sample_rate_settings[scopesettings.samplerate] : 0;
+
+      pc_ui_auto    = 1;
+      pc_ui_auto_t0 = timer0ticks;
+      pc_ui_auto_ms = pc_auto_deadline_ms(scopesettings.samplecount, d);
+    }
+  }
+}
+
+//Main loop: give up on a trigger that did not come in time
+static void pc_ui_auto_service(void)
+{
+  int done, trig;
+
+  if(!pc_ui_auto || pc_ui_forced || !scopesettings.runstate || ((timer0ticks - pc_ui_auto_t0) < pc_ui_auto_ms))
+    return;
+
+  pc_hal_acq_poll(&done, &trig);
+
+  if(!done && !trig)
+  {
+    fpga_write_cmd(0x1A);
+    fpga_write_byte(0x00);
+    pc_ui_forced = 1;
+  }
+  else
+    pc_ui_auto = 0;                                   //it triggered: the record completes by itself
 }
 
 uint32 pc_glue_decim_words(uint32 samples)
@@ -1644,6 +1710,8 @@ void pc_glue_poll_main(void)
 {
   if(pc_ready)
     pc_poll(&pc_sess, PC_CTX_MAIN);
+
+  pc_ui_auto_service();
 }
 
 void pc_glue_poll_busy(void)
@@ -1699,7 +1767,16 @@ void pc_glue_ui_capture_addr(uint32 addr)
   pc_dec_ui_addr = (uint16)addr;
 
   if(pc_ready)
+  {
     pc_ui_capture_addr(&pc_sess, (uint16_t)addr);
+
+    //A record the firmware time-out ended is untriggered, whatever 0x18 says now
+    if(pc_ui_forced)
+      pc_sess.ui_trig = 0;
+  }
+
+  spectrum_capture_info(!pc_ui_forced && (!pc_ready || pc_sess.ui_trig || scopesettings.triggermode));
+  pc_ui_auto = 0;
 }
 
 void pc_glue_ui_capture(void)
