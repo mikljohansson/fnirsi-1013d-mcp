@@ -42,6 +42,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from . import analysis as A
+from . import bode as BD
 from . import protocol as P
 from .scope import (CHANNEL_NAMES, SCALING_CAVEAT, Capture, CaptureContext, Scope, Spectrum, channel_index,
                     settings_diff)
@@ -187,6 +188,8 @@ class Session:
         self.relay_times: collections.deque[float] = collections.deque()
         self.last_capture: Capture | None = None
         self.last_capture_file: str | None = None
+        #: the Bode tool shows its wiring text with the first sweep of a session
+        self.bode_wiring_shown = False
         self.last_tool = time.monotonic()
         self._stop = threading.Event()
         self._ka = threading.Thread(target=self._keepalive, name="fnirsi-keepalive", daemon=True)
@@ -2358,6 +2361,151 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             notes = sess.ensure_control()
             return _self_test(s, notes)
         return await run("scope_self_test_loopback", 3, args, go)
+
+    @register(3, title="Bode / frequency-response sweep", destructive=True, open_world=True)
+    async def scope_bode_sweep(
+        ctx: Context,
+        start: Annotated[float | str, Field(description="lowest frequency, e.g. '100Hz' (>= 1 Hz)")] = "100Hz",
+        stop: Annotated[float | str, Field(description="highest frequency, e.g. '1MHz' (<= 10 MHz; above about "
+                                                       "2 MHz the x1 probe on the post rolls the stimulus off)")] = "1MHz",
+        points: Annotated[int, Field(ge=1, le=200, description="log-spaced points; requests that round to the "
+                                                               "same clean-edge frequency are merged")] = 50,
+        settle: Annotated[str | float, Field(description="periods before each record: 'fast' (3, RC / RL), 'normal' "
+                                                         "(10, Q <= 7), 'resonant' (50, Q <= 34), 'high_q' (200), "
+                                                         "or a number")] = "normal",
+        ch2_range: Annotated[str | float, Field(description="'auto' (down-range CH2 as the response falls, splice "
+                                                            "at each switch), 'fixed' (CH2's current range) or a "
+                                                            "V/div at the probe tip")] = "auto",
+        thru_cal: Annotated[str | None, Field(description="'measure': this sweep is a thru calibration (both "
+                                                          "probes on the DUT input; stored under thru_name); a "
+                                                          "stored name: divide this sweep by it")] = None,
+        thru_name: Annotated[str | None, Field(description="name to store a measured thru calibration under "
+                                                           "(default: a timestamp)")] = None,
+        background: Annotated[bool, Field(description="one generator-off capture per rate and CH2 range: flags "
+                                                      "points less than 20 dB above it 'near_floor'")] = True,
+        max_duration_s: Annotated[float, Field(gt=0, le=3600, description="refuse sweeps estimated longer")] = 120.0,
+        inline_max: Annotated[int, Field(ge=0, le=200, description="rows of the table returned inline")] = 200,
+        confirm_token: Annotated[str | None, Field(description="token from the confirmation response")] = None,
+    ) -> dict[str, Any]:
+        """Frequency response H(f) = CH2 / CH1 of a passive DUT driven by the calibration-pin generator (stepped
+        single tone, docs/plans/bode-design.md). Wiring: post -> DUT input with the CH1 tip there, CH2 tip on the DUT
+        output, DUT ground to the scope's USB ground (USB shell), probe ground clips OPEN. Per point the generator
+        runs at a clean-edge frequency 50 MHz / M, both channels are captured through the 16-bit CIC3 + FIR filter
+        at a rate that makes the record a whole number of periods (legacy 200 MSa/s above 1.5 MHz), and a single-bin
+        DFT at the exact DDS frequency gives magnitude (dB) and phase (deg); the square's harmonics drop out.
+
+        Returns the plan, a table (f_requested, f_actual, mag_db, phase_deg, V1 / V2 rms, ranges, sample rate,
+        filter, SNR, flags per point), markers (-3 dB points, peak and Q for a resonance, phase crossings), files
+        (.csv, .json, .npz with the complex values) and caveats. Flagged points (clipped, near_floor, low_snr,
+        unsettled, incoherent, ch1_clipped) are left out of the markers. Run thru_cal='measure' once with both
+        probes on the DUT input, then pass its name to remove the CH1 / CH2 mismatch.
+
+        Drives the calibration pin (3.1 Vpp square through 1 kOhm): the first call returns a confirmation token.
+        Passive DUTs or buffered inputs only, never a coil, a MOSFET drain or anything that can drive the post.
+        Changes the channels (DC coupling, ranges, offsets), time base, trigger, filter and generator during the
+        sweep and gives them back afterwards."""
+        args = {"start": start, "stop": stop, "points": points, "settle": settle, "ch2_range": ch2_range,
+                "thru_cal": thru_cal, "thru_name": thru_name, "background": background,
+                "max_duration_s": max_duration_s, "inline_max": inline_max}
+        thru_dir = Path(cfg.data_dir) / "bode" / "thru"
+
+        def safe(name: str) -> str:
+            n = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in name.strip()).strip(".")
+            if not n:
+                raise ValueError(f"thru calibration name {name!r} is empty")
+            return n
+
+        def known() -> list[str]:
+            return sorted(p.stem for p in thru_dir.glob("*.json")) if thru_dir.is_dir() else []
+
+        def go() -> dict[str, Any]:
+            s = sess.get_scope()
+            f0, f1 = parse_quantity(start, "Hz"), parse_quantity(stop, "Hz")
+            plans = BD.plan_sweep(f0, f1, points)
+            if f1 > min(cfg.gen_max_hz, 25e6) or f0 > min(cfg.gen_max_hz, 25e6):
+                raise ValueError(f"stop {f1:g} Hz above the generator ceiling {cfg.gen_max_hz:g} Hz "
+                                 "(FNIRSI_MCP_GEN_MAX_HZ)")
+            settle_p = BD.parse_settle(settle)
+            BD.BodeRunner._parse_ch2(ch2_range)  # validate before asking for a token
+            cal = None
+            if thru_cal is not None and thru_cal != "measure":
+                path = thru_dir / f"{safe(thru_cal)}.json"
+                if not path.is_file():
+                    raise ToolError(f"scope_bode_sweep: no thru calibration {thru_cal!r}; stored: "
+                                    f"{', '.join(known()) or 'none'} (run with thru_cal='measure' first)")
+                cal = BD.ThruCal.load(path)
+            est = BD.estimate_duration(plans, settle_p, background, str(ch2_range).lower() == "auto")
+            if est > max_duration_s:
+                raise ToolError(f"scope_bode_sweep: estimated {est:.0f} s > max_duration_s {max_duration_s:g} s "
+                                f"({len(plans)} points, lowest {plans[0].f_actual:.4g} Hz: the low decade "
+                                "dominates); raise max_duration_s, raise start or use fewer points")
+            if not s.profile().has_generator:
+                raise ToolError("scope_bode_sweep: this FPGA bitstream has no programmable generator")
+            if not s.info.caps & P.Caps.DECIM:
+                raise ToolError("scope_bode_sweep: needs the decimation filter (FPGA 0x1534+, best 0x1535 with the "
+                                "FIR); this bitstream would alias the stimulus harmonics at the slower rates")
+            summary = (f"calibration pin will output a 3.1 Vpp square (through 1 kOhm) stepped over {len(plans)} "
+                       f"frequencies {fmt_si(plans[0].f_actual, 'Hz', 4)} .. {fmt_si(plans[-1].f_actual, 'Hz', 4)}, "
+                       f"about {est:.0f} s; both channels set to DC coupling, ranges and offsets changed and "
+                       "restored afterwards. Only for a passive DUT (or a buffered input) on the post: if the pin is "
+                       "wired into the detector, this switches real coil current.")
+            req = sess.confirm("scope_bode_sweep", args, confirm_token, summary)
+            if req is not None:
+                return req
+            notes = sess.ensure_control()
+
+            def progress(i: int, n: int, text: str) -> None:
+                try:
+                    anyio.from_thread.run(_progress, ctx, i, n, text)
+                except Exception:  # noqa: BLE001 - progress is best effort
+                    pass
+
+            runner = BD.BodeRunner(s, settle=settle_p, ch2_range=ch2_range, background=background,
+                                   relay_wait=sess.relay_slot, progress=progress)
+            res = runner.run(plans, cal, role="thru" if thru_cal == "measure" else "measure")
+            out: dict[str, Any] = {"ok": True}
+            if not sess.bode_wiring_shown:
+                out["connection"] = BD.CONNECTION_TEXT
+                sess.bode_wiring_shown = True
+            rows = res.table()
+            ps = BD.plan_summary(plans)
+            out.update({
+                "points": len(res.points), "planned": len(plans), "stopped_early": res.stopped_early,
+                "plan": {**ps, "sample_rates": [_r6(x) for x in ps["sample_rates"]],
+                         "settle_periods": settle_p, "ch2_range": res.ch2_mode},
+                "summary": res.summary(), "table": rows[:inline_max],
+                "table_truncated": len(rows) > inline_max,
+                "ranges": {"start": res.meta.get("start_ranges"), "switches": res.range_switches,
+                           "splices": res.splices},
+                "timing": {"duration_s": round(res.duration_s, 2), "estimate_s": round(res.estimate_s, 2)},
+            })
+            now = _dt.datetime.now()
+            d = Path(cfg.data_dir) / now.strftime("%Y-%m-%d")
+            stem = f"{now.strftime('%H%M%S_%f')[:-3]}_bode{'_thru' if thru_cal == 'measure' else ''}"
+            files = {"csv": res.write_csv(d / f"{stem}.csv"), "json": res.write_json(d / f"{stem}.json")}
+            meta = {**res.to_json(), "table": None}
+            files["npz"] = sess.save_npz("bode", res.arrays(), meta)
+            out["files"] = files
+            if thru_cal == "measure":
+                name = safe(thru_name) if thru_name else now.strftime("thru_%Y%m%d_%H%M%S")
+                tc = BD.ThruCal.from_sweep(res, name, tuple(res.meta["probes"]))
+                out["thru_cal"] = {"stored_as": name, "file": tc.save(thru_dir / f"{name}.json"),
+                                   "use": f"pass thru_cal='{name}' with the same start, stop and points",
+                                   "mismatch_db": [round(BD.db(abs(p.h_raw)), 4) for p in res.points],
+                                   "mismatch_deg": [round(p.phase_deg, 3) for p in res.points]}
+            elif cal is not None:
+                out["thru_cal"] = {"applied": cal.name, "created": cal.created}
+            cav = list(notes) + res.caveats + BD.result_caveats(res)
+            if res.role == "thru":
+                cav.append("thru calibration: both probes must have been on the DUT input node; |H| should be "
+                           "within a few % of 0 dB (the CH1 / CH2 mismatch), otherwise the wiring was wrong")
+            if not out.get("connection"):
+                cav.append("wiring: DUT ground on the USB ground, probe ground clips open (see the connection text "
+                           "of the first sweep)")
+            out["caveats"] = cav
+            out["applied"] = {"points": len(res.points), "f_first": plans[0].f_actual, "f_last": plans[-1].f_actual}
+            return out
+        return await run("scope_bode_sweep", 3, args, go)
 
     # ---- tier 4: raw ---------------------------------------------------------------------------------------
 

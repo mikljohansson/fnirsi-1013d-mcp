@@ -19,7 +19,8 @@ ALL_TOOLS = {
     "scope_info", "scope_profile", "scope_status", "scope_calibration_info", "scope_sd_info", "scope_event_log", "scope_spectrum", "scope_get_config", "scope_read_calibration", "scope_screenshot",
     "scope_set_channel", "scope_calibrate_volts", "scope_set_timebase", "scope_set_decimation", "scope_set_trigger", "scope_capture",
     "scope_fetch_waveform", "scope_acquisition_control", "scope_averaged_capture", "scope_capture_and_fft",
-    "scope_decay_fit", "scope_measure", "scope_generator", "scope_self_test_loopback", "scope_raw_fpga",
+    "scope_decay_fit", "scope_measure", "scope_generator", "scope_self_test_loopback", "scope_bode_sweep",
+    "scope_raw_fpga",
     "scope_enter_fel",
 }
 
