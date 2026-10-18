@@ -582,3 +582,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   backups/fw-0.2.48_2d067686.bin (MMU on) and backups/fw-0.2.48-nommu_9a2152d3.bin (A/B image, #VER says 0.2.48-nommu). Host tests 8/8
   files 0 failures, vectors OK, mcp 310 passed. **Not loaded tonight**: a hang would need a power cycle; the first MMU boot is the morning's
   first step with the owner at the scope (expected FFT_BENCH CP15 word 0x0005107D and DDR FFT rows 2-4x faster).
+- fw-gen7 delivered the purge batch (PC_PROTOCOL=0 build, check-reference/package, FFT switch, generator Wave/Ampl/Offset/Phase rows,
+  Long memory, hold-off and the v2 calibration vectors removed; reproducible images: identity data in build_id.c linked last, read from
+  the commit, -ffile-prefix-map; 16-bit trigger level now corrected like the trace). Merged d3a2247 on top of fw-mmu; the merged main
+  is fw 0.2.48 (both batches). Clean rebuild on main: backups/fw-0.2.48_14b2dc0f.bin (MMU on) and backups/fw-0.2.48-nommu_1cce7858.bin
+  (the earlier 2d067686 / 9a2152d3 pins, without the purge, deleted). Host tests 8/8 files 0 failures, vectors OK. The identity line now
+  reads "git d3a22472 of 2026-10-18 23:12:47 UTC"; an image built elsewhere from the same commit must hash identically (CI prints it).
