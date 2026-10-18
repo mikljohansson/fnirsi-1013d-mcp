@@ -163,3 +163,5 @@ Newest entries at the bottom. Format: date, who, what, result.
   CH2 still on the firmware formula until a shorted-input run. Owner's MCP server must be restarted to load the file.
 - Calibration-output mystery closed: DMM DC reading of the calibration pin vs probe ground = 0.310 V, matching the mean of the scope's -1.2/+1.9 V
   square (0.35 V). The output is capacitively coupled with a small positive bias on this hardware; the scope's volts are correct.
+- CH2 zero sweep (backups/t8off_CH2_0.000V.json, fw 0.2.1): at dcoffset 0 A 128.4 / B 128.9 (cores within 0.5 codes), slope -0.265; CH2 is close to the
+  firmware model, CH1 is the outlier (A/B spread 5.5). Sent to mcp-gen2 for the calibration file.
