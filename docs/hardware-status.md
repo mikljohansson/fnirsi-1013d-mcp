@@ -320,3 +320,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   (0.2.11/0.2.19/0.2.20/0.2.21, two 30-min soaks, >1500 x 64 KiB). Hypothesis (fw-gen4 task, 0.2.22): the SD-boot path inherits USB
   controller state from Atlan's bootloader and 1.00o5's usb_device_init never soft-resets the controller / data toggles; the FEL path does
   not. This may also explain today's early drops (0.2.2 idle, 0.2.3 persist were cold-booted card images).
+- **EXT trigger functional test (0x1533, fw 0.2.21, loopback via the generator, owner switched the generator on in the UI while EXT was selected
+  over the protocol):** trigger menu shows EXT (owner); GET_STATUS ext flags 6 (generator on, edge seen); 10/10 captures in normal mode
+  triggered. Trigger index vs the CH1 rising edge of the 1 kHz square: at 20 MS/s -50 ns (one sample early, consistent over 6 captures;
+  fpga-gen2 predicted 20-25 ns FPGA latency plus the ADC pipeline, so the sign/size need a cleaner edge source to pin down); at 1 MS/s -1.0 us
+  in 17 later captures, but +11/+12 us in the first 10 captures and +2/+3 us for the CH1 source in one run, i.e. the sample-domain trigger
+  position of host captures varies by run at decimated rates for BOTH sources (geometry/alignment item, not EXT-specific; data in
+  backups/ext_loopback_CH1_fast.json). Trigger set back to CH1 afterwards. Card boots 0.2.21.
