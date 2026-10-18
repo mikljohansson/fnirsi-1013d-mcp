@@ -195,6 +195,7 @@ void     pc_hal_rx_debug(uint32_t *v);
 //fw 0.2.12: timer polls that found USB IRQ flags left by a lost interrupt; the event log (8 bytes per entry: u32 ms,
 //u8 type, u8 a, u16 b; oldest first), returns the number of entries, *total = events logged since boot
 uint32_t pc_hal_usb_irq_polled(void);
+uint32_t pc_hal_usb_irq_races(void);          //fw 0.2.20: real USB IRQ pending where the old fallback served
 uint32_t pc_hal_boot_splash_ms(void);
 //fw 0.2.19 restart record: restarts since the last cold boot / ENTER_FEL, exception type (0 = jump to the image entry,
 //1 undefined, 2 SWI, 3 prefetch abort, 4 data abort, 5 reserved, 6 FIQ), exception LR, its SPSR, its SP, then LR, SP and

@@ -67,6 +67,7 @@ static volatile uint32 pc_evlog_n;              //events logged since boot
 static volatile uint32 pc_usb_irq_polled;       //timer polls that found USB flags left by a lost interrupt
 static volatile uint8  pc_usb_in_poll;          //the CDC handler runs from the timer poll
 static volatile uint32 pc_usb_isr_runs;         //real USB interrupts (the handler not called from the poll)
+static volatile uint32 pc_usb_irq_races;        //ticks that found the real USB IRQ pending after two quiet ticks (fw 0.2.20)
 
 //The events before the first bus reset since the host last read the log, frozen there (fw 0.2.15): Windows retries
 //its port reset, and anything may flood the ring afterwards, but the lead-up to the original fault survives
@@ -518,70 +519,132 @@ void pc_usb_isr_bad_setup(uint32 count)
   pc_evlog_add(PC_EVT_BAD_SETUP, 0, (uint16)count);
 }
 
-//Top of the CDC IRQ handler. Called with the flags just read (reading clears them). From the timer poll a non-zero
-//set means the interrupt for them was lost (1.00o5's irq_handler writes 0 to INTC pending after reading it).
-//Real USB interrupt entry (the flags are its own, just read)
+//Real USB interrupt entry (the flags are its own, just read): counts the runs, which the tick fallback watches
 void pc_usb_isr_flags(uint32 usb, uint32 tx, uint32 rx)
 {
   (void)usb; (void)tx; (void)rx;
   pc_usb_isr_runs++;
 }
 
-//Timer tick (IRQ context, so it cannot interleave with the USB IRQ): serve USB flags a lost interrupt left latched.
-//Only after two consecutive ticks without a real USB interrupt (fw 0.2.14): when both IRQs are pending, 1.00o5's
-//irq_handler calls the timer handler first, so serving on every tick raced the real interrupt during normal traffic
-//(0.2.12 bench: 46,033 "lost" counts in 3 min, all of them that race). A flag the real interrupt is about to serve
-//makes it run before the second quiet tick. Only while the CDC handler is installed (not in MSC mode).
+//Timer tick fallback for a lost USB interrupt (fw 0.2.20). IRQ context, so it cannot interleave with the USB ISR.
+//
+//0.2.12-0.2.19 read and cleared the MUSB flag registers once two ticks had passed without a USB ISR run. When a
+//request arrived after an idle gap and its interrupt became pending in the same dispatch as a timer tick, 1.00o5's
+//irq_handler called the timer handler first (IRQ 13 before 26) and the tick took the packet from under the real ISR:
+//counted as "lost" although it was a race (inference from the 0.2.16 log: only EP2 OUT hits, never EP0 or EP2 IN).
+//
+//Now the tick never touches the flag registers to decide. It looks at endpoint state, which reading does not change:
+//EP0 CSR0 (a setup or OUT packet waiting, SetupEnd, SentStall, an IN data phase whose packet the host has taken, a
+//SET_ADDRESS whose status stage has completed) and EP2 RXCSR RxPktRdy (while EP2 OUT is unmasked, not stalled). Only a
+//condition seen on two consecutive ticks with no USB ISR run in between is a lost interrupt: the real ISR serves within
+//microseconds. Then the flags are read (that clears them, so a stuck interrupt line can drop and the next event raise a
+//new interrupt) and the body runs with them plus the synthesized endpoint flags. Counter 47 counts these.
+//
+//Counter 57 (races): ticks at which the 0.2.14-0.2.19 gate would have served (two quiet ticks) while the real USB
+//interrupt was pending in this dispatch (captured by irq_handler, pc_irq_dispatch_pend0) or newly pending at the INTC.
+//Only while the CDC handler is installed (not in MSC mode).
 void pc_usb_poll_irq(void)
 {
   extern void usb_device_CDC_irq_handler(void);
+  extern void usb_device_CDC_irq_body(uint32 usbirq, uint32 txirq, uint32 rxirq);
   extern IRQHANDLERFUNCION interrupthandlers[];
+  extern volatile uint32 pc_irq_dispatch_pend0;
+  extern int32  usb_ep0_state;
+  extern volatile uint32 usb_set_faddr;
   static uint32 seen_runs;
   static uint8  quiet;
+  static uint8  seen;                            //a service condition was seen at the previous tick
+  uint32 runs = pc_usb_isr_runs;
+  uint32 usb_pending, csr0, tx = 0, rx = 0;
+  uint8  epind;
 
   if(interrupthandlers[USB_IRQ_NUM] != usb_device_CDC_irq_handler)
-    return;
-
-  if(pc_usb_isr_runs != seen_runs)
   {
-    seen_runs = pc_usb_isr_runs;
-    quiet     = 0;
+    seen = 0;
     return;
   }
 
-  if(quiet < 2)
+  if(runs != seen_runs)
+  {
+    //The real ISR ran since the last tick: whatever was seen then has been served
+    seen_runs = runs;
+    quiet     = 0;
+    seen      = 0;
+  }
+  else if(quiet < 2)
   {
     quiet++;
+  }
+
+  usb_pending = (pc_irq_dispatch_pend0 | INTC_PEND_REG0[0]) & (1u << USB_IRQ_NUM);
+
+  if(usb_pending)
+  {
+    //The real ISR runs right after this tick
+    if(quiet >= 2)
+      pc_usb_irq_races++;
+
+    seen = 0;
     return;
   }
 
-  //Read the three flag registers (reading clears them). The SOF flag latches every frame even with its interrupt
-  //disabled, nothing uses it: SOF alone is not a lost interrupt and runs nothing (0.2.12-0.2.15 ran the whole handler
-  //for it, 300-500 times per second; 0.2.12 and 0.2.14 each lost one 64 KiB census response). Anything else is served
-  //by the handler body and counted.
-  {
-    extern void usb_device_CDC_irq_body(uint32 usbirq, uint32 txirq, uint32 rxirq);
-    uint32 usb = *USBC_REG_INTUSB;
-    uint32 tx  = *USBC_REG_INTTX;
-    uint32 rx  = *USBC_REG_INTRX;
-    uint32 now;
+  //Endpoint state (IRQ mode, CPSR I set; EPIND restored for the code this tick interrupted)
+  epind = *USBC_REG_EPIND;
+  *USBC_REG_EPIND = 0;
+  csr0 = *USBC_REG_CSR0;
+  *USBC_REG_EPIND = 2;
 
-    if(!((usb & ~(uint32)USBC_BP_INTUSB_SOF) | tx | rx))
-      return;
+  if(!pc_rx_stalled && (*USBC_REG_INTRXE & USBC_INTRX_FLAG_EP2) && (*USBC_REG_RXCSR & USBC_BP_RXCSR_D_RX_PKT_READY))
+    rx = USBC_INTRX_FLAG_EP2;
+
+  *USBC_REG_EPIND = epind;
+
+  if((csr0 & (USBC_BP_CSR0_D_RX_PKT_READY | USBC_BP_CSR0_D_SETUP_END | USBC_BP_CSR0_D_SENT_STALL)) ||
+     ((usb_ep0_state == EP0_IN_DATA_PHASE) && !(csr0 & USBC_BP_CSR0_D_TX_PKT_READY)) ||
+     (usb_set_faddr && !(csr0 & USBC_BP_CSR0_D_DATA_END)))
+    tx = USBC_INTTX_FLAG_EP0;
+
+  if(!(tx | rx))
+  {
+    seen = 0;
+    return;
+  }
+
+  if(!seen)
+  {
+    seen = 1;
+    return;
+  }
+
+  //Seen on two consecutive ticks without a USB ISR run: the interrupt was lost
+  seen = 0;
+
+  {
+    uint32 usb = *USBC_REG_INTUSB;
+    uint32 txf = *USBC_REG_INTTX;
+    uint32 rxf = *USBC_REG_INTRX;
+    uint32 now = pc_hal_ms();
 
     pc_usb_irq_polled++;
-    now = pc_hal_ms();
 
+    //Type 14 (fw 0.2.20): a = INTUSB as read, b = INTTX << 8 | INTRX as read (low 7 bits each), bit 15 = EP0
+    //condition, bit 7 = EP2 OUT condition. A latched flag next to a condition means the interrupt itself was lost.
     if((now - pc_polled_log_ms) >= 100)
     {
       pc_polled_log_ms = now;
-      pc_evlog_add(PC_EVT_IRQ_POLLED, (uint8)usb, (uint16)(((tx & 0xFF) << 8) | (rx & 0xFF)));
+      pc_evlog_add(PC_EVT_IRQ_POLLED, (uint8)usb, (uint16)(((txf & 0x7F) << 8) | (rxf & 0x7F) | (tx ? 0x8000 : 0) |
+                                                           (rx ? 0x0080 : 0)));
     }
 
     pc_usb_in_poll = 1;
-    usb_device_CDC_irq_body(usb, tx, rx);
+    usb_device_CDC_irq_body(usb, txf | tx, rxf | rx);
     pc_usb_in_poll = 0;
   }
+}
+
+uint32_t pc_hal_usb_irq_races(void)
+{
+  return pc_usb_irq_races;
 }
 
 uint32_t pc_hal_usb_irq_polled(void)

@@ -883,7 +883,7 @@ static void test_busy_context(void)
   r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
   T_EQ(r.p[3], PC_UI_IDLE);
   r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
-  T_EQ(pc_get_u16(r.p), 57); T_EQ(pc_get_u32(r.p + 4 + 4 * 28), 4800);       //duration of the first pass
+  T_EQ(pc_get_u16(r.p), 58); T_EQ(pc_get_u32(r.p + 4 + 4 * 28), 4800);       //duration of the first pass
   T_EQ(pc_get_u32(r.p + 4 + 4 * 29), 1200 + 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 30), 1500 + 1);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 31), 30 + 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 32), 1500 + 1);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 33), 4800 + 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 34), 4800 + 1);
@@ -1559,8 +1559,9 @@ static void test_fel_reset_stall(void)
   //GET_LINK_STATS: 11 transport + 8 parser + 8 session + 2 startup counters, answered from every context
   setup(0x1532);
   r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
-  T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 57); T_EQ(r.len, 4 + 57 * 4);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 58); T_EQ(r.len, 4 + 58 * 4);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 49), 6000); T_EQ(pc_get_u32(r.p + 4 + 4 * 56), 6007);   //restart record
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 57), 4001);                      //USB IRQ races (fw 0.2.20)
   T_EQ(pc_get_u32(r.p + 4 + 4 * 47), 4000);                      //USB IRQs served by the timer poll
   T_EQ(pc_get_u32(r.p + 4 + 4 * 48), 5000);                      //boot splash ms + 1
   T_EQ(pc_get_u32(r.p + 4 + 4 * 41), 3000); T_EQ(pc_get_u32(r.p + 4 + 4 * 46), 3005);   //RX back-pressure

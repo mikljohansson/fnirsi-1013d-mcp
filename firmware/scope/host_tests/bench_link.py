@@ -176,7 +176,9 @@ def main():
              'boot_splash_ms '
              # fw 0.2.19+: restart record
              'restarts restart_exc_type restart_exc_lr restart_exc_spsr restart_exc_sp '
-             'restart_reset_lr restart_reset_sp restart_reset_cpsr').split()
+             'restart_reset_lr restart_reset_sp restart_reset_cpsr '
+             # fw 0.2.20+: ticks that found the real USB IRQ pending where the old fallback served
+             'usb_irq_races').split()
     st, body, _ = L.request(0x0007)
     if st == 0 and body:
         n = struct.unpack_from('<H', body)[0]

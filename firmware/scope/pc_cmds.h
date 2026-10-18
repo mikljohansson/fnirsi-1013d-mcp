@@ -29,7 +29,7 @@
 #else
 #define PC_FW_VERSION_FB  "-nofb"
 #endif
-#define PC_FW_VERSION     "0.2.19" PC_FW_VERSION_MAP PC_FW_VERSION_FB
+#define PC_FW_VERSION     "0.2.20" PC_FW_VERSION_MAP PC_FW_VERSION_FB
 #endif
 
 #ifndef PC_FW_BUILD
