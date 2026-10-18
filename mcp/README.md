@@ -166,7 +166,7 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_set_channel` | 2 | range, coupling, offset, probe, invert; relay changes limited to 5 per second |
 | `scope_event_log` | 0 | the scope's last 128 USB / link events with device ms (protocol >= 1.5), the pre-reset snapshot and (fw >= 0.2.24) the bus-level ring |
 | `scope_sd_info` | 0 | SD card size, partition, write window, eGON headers at 16/80/750 (optionally checksum-verified); fw >= 0.2.2 |
-| `scope_calibration_info` | 0 | scaling in effect per channel, calibration file and its fitted zero / slope / gain per range and core |
+| `scope_calibration_info` | 0 | scaling in effect per channel, the scope's calibration (v1 / v2, flags, current correction, stored per-core zeros per clock class), calibration file and its fitted zero / slope / gain per range and core |
 | `scope_calibrate_volts` | 2 | a known DC voltage on every range: fits 0 V code, volts per code and offset slope per range and ADC core, saves the calibration file |
 | `scope_generator` | 3 | calibration-pin square wave; confirmation token to enable |
 | `scope_self_test_loopback` | 3 | generator into CH1: frequency, duty, swing (the output is not ground-referenced), bench tests T4, T5, T7; token |
@@ -195,7 +195,11 @@ flags, `meta_json`; decimated captures add `CH<n>_samples16`, the stored u16 fil
 `meta_json["decimation"]`); results up to 2000 points also carry the samples inline, longer ones a 500-point min/max
 preview.
 
-Physical units: volts are converted per ADC core. With a per-unit calibration covering the range,
+Physical units: volts are converted per ADC core. With the scope's own calibration v2 in use (firmware >= 0.2.43,
+protocol 1.10, GET_CAL version 2 after a base calibration at the scope), the 0 V code of each core comes from the
+scope's stored zeros for the capture's clock class (full rate: divider 0 and filtered captures; gated: legacy divider
+>= 1) plus the offset slope; READ_TRACE codes are already corrected to the common zero, and a per-unit file then only
+contributes gains (`scaling` = `scope calibration v2 (...)`). Otherwise, with a per-unit calibration covering the range,
 `raw_code = zero + slope x (offset_pwm - pwm_ref) + volts / gain` per core (fitted by `scope_calibrate_volts`,
 or imported from bench data with `python -m fnirsi1013d.calibration --import <t8 json...> --out <file>`); otherwise
 the firmware's `uv_per_lsb_q8` and `zero_code_q8` (the same for both cores, after the stored compensation).

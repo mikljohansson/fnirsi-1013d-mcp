@@ -226,8 +226,9 @@ def settings_diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, list[An
 ORIGIN_NAMES = {P.CaptureOrigin.HOST: "host", P.CaptureOrigin.UI_RUN: "ui_run", P.CaptureOrigin.UI_SINGLE: "ui_single"}
 
 
-def compensate(raw: np.ndarray, comp: int) -> np.ndarray:
-    """Firmware per-core compensation (protocol 7.6 step 2): code + comp, clamped to 0..255."""
+def compensate(raw: np.ndarray, comp: float) -> np.ndarray:
+    """Firmware per-core compensation (protocol 7.6 step 2): code + comp, clamped to 0..255 (comp is fractional with
+    calibration v2, where the scope dithers the fraction)."""
     return np.clip(raw.astype(np.int16) + comp, 0, 255)
 
 
@@ -591,11 +592,21 @@ class Scope:
                 sd.verify(start_sector, image)
             return plan
 
-    def scale(self, ch: int | str, cfg: P.ChannelConfig | None = None) -> ChannelScale:
+    def scale(self, ch: int | str, cfg: P.ChannelConfig | None = None, clock_class: int | None = None) -> ChannelScale:
         """Code <-> volt conversion for a channel with ``cfg`` (default: the current settings), per ADC core: the
-        per-unit calibration when it covers the range, else the firmware's uv_per_lsb / zero_code."""
+        scope's calibration v2 (protocol 1.10) for ``clock_class`` (P.cal_clock_class of the capture; default: the
+        current time base and filter), else the per-unit calibration when it covers the range, else the firmware's
+        uv_per_lsb / zero_code."""
         c = channel_index(ch)
-        return channel_scale(c, cfg or self.get_channel(c), self.get_cal(c), self.unit_cal)
+        cal = self.get_cal(c)
+        if clock_class is None:
+            clock_class = self.current_clock_class() if cal.v2 else P.CAL_CLASS_GATED
+        return channel_scale(c, cfg or self.get_channel(c), cal, self.unit_cal, clock_class)
+
+    def current_clock_class(self) -> int:
+        """Calibration v2 clock class of the live settings (full at divider 0 or with the filter on)."""
+        dec = self.get_decim().next.k if self.info.caps & P.Caps.DECIM else 0
+        return P.cal_clock_class(self.get_timebase().divider, dec > 0)
 
     def get_cal(self, ch: int | str, cached: bool = True) -> P.CalResp:
         c = channel_index(ch)
@@ -900,16 +911,16 @@ class Scope:
             st = self.status()
         order = self.info.interleave_order
         out: dict[str, ChannelData] = {}
+        cls = P.cal_clock_class(tb.divider, False)
         for c in chans:
             cfg = cfgs[c]
-            cal = self.get_cal(c)
             a, b = cores[2 * c], cores[2 * c + 1]
-            comp = interleave(compensate(a, cal.adc_a_comp), compensate(b, cal.adc_b_comp), order)
+            sc = self.scale(c, cfg, cls)
+            comp = interleave(compensate(a, sc.adc_a_comp), compensate(b, sc.adc_b_comp), order)
             clip_raw = interleave((a == 0) | (a == 255), (b == 0) | (b == 255), order)
             off = start_sample - 2 * w0
             codes = comp[off: off + count].astype(np.float64)
             clipped = clip_raw[off: off + count]
-            sc = self.scale(c, cfg)
             volts = interleave(sc.volts_raw(a, "A"), sc.volts_raw(b, "B"), order)[off: off + count]
             if cfg.invert:
                 volts = -volts  # invert is a display option; codes stay as sampled
@@ -926,10 +937,9 @@ class Scope:
         """A channel of a decimated capture: stored u16 -> mean raw code of the filter window (x 2^S / N^K), the
         mean core compensation added for ``codes``; volts with the cores' mean zero and gain (both cores weigh
         equally in every boxcar / CIC window, N being even)."""
-        cal = self.get_cal(c)
-        sc = self.scale(c, cfg)
+        sc = self.scale(c, cfg, P.CAL_CLASS_FULL)  # the ADCs run at full rate with the filter on
         mean_raw = raw16.astype(np.float64) * dec.code_per_count
-        codes = mean_raw + (cal.adc_a_comp + cal.adc_b_comp) / 2
+        codes = mean_raw + (sc.adc_a_comp + sc.adc_b_comp) / 2  # v2: corr16 / 16; else the 1.00o5 mean compensation
         volts = sc.volts_mean_compensated(codes)
         if cfg.invert:
             volts = -volts
@@ -986,7 +996,7 @@ class Scope:
                 continue
             codes = arr.astype(np.float64)
             clipped = (arr == 0) | (arr == 255)
-            sc = self.scale(c, cfg)
+            sc = self.scale(c, cfg, P.cal_clock_class(hdr.divider, dec is not None))
             # trace sample i: index parity (with the start offset) says which core it came from (protocol 7.3)
             idx = hdr.start + np.arange(codes.size)
             first_is_b = order == 0

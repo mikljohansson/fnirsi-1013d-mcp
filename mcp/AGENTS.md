@@ -2,7 +2,7 @@
 
 Python host library, device simulator, MCP server and bench CLIs for the FNIRSI 1013D open firmware's USB protocol.
 Read first: `../AGENTS.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec; **section 14 is how
-the firmware actually behaves**, rows 30-47 are protocol 1.3-1.9), `../docs/mcp-tools.md` (tool design),
+the firmware actually behaves**, rows 30-48 are protocol 1.3-1.10), `../docs/mcp-tools.md` (tool design),
 `README.md` (user-facing install, tools, CLIs, output formats), `../docs/agent-measurement-guide.md` (how agents
 should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those here; fix them instead.
 
@@ -87,6 +87,7 @@ path. |
 | 1.5 | 0.2.12+ | GET_EVENT_LOG 0x0009 (fast path; 64 then 128 entries, reset-snapshot tail from 0.2.15, request flags byte bit 0 = re-arm from 0.2.18, bus-level ring tail from 0.2.24) |
 | 1.6 | 0.2.27+ | FFT_BENCH 0x0F02 (diagnostic; `Scope.fft_bench`, 5 s timeout, `fnirsi1013d-bench --fft`) |
 | 1.7 | 0.2.28+ | spectrum view: GET_STATUS byte 43 display_mode, READ_SPECTRUM 0x020A (bulk timeout class; 32-byte header, i16 centi-dBV) |
+| 1.10 | 0.2.43+ | calibration v2: GET_CAL 248 bytes (`CalResp.v2`, `zero_at`, `parse_adc_cal_block` vs the `adc_cal` vectors); `channel_scale` puts the v2 zeros first (class from `P.cal_clock_class`, unit file gains only), READ_RAW / WIDE corrected on the host, READ_TRACE already corrected; `decim_to_code` takes corr16 (1/16 code) |
 | 1.9 | 0.2.30+ | decimation filter (caps bit 15 DECIM on FPGA 0x1534): GET_DECIM 0x020C / SET_DECIM 0x020D, GET_TRIGGER words = samples and GET_TIMEBASE period N x 5 ns while on, READ_TRACE flag bit 2 WIDE (header bytes 30/31 = mode, S), READ_RAW layout 2, GET_CAPTURE_INFO 76 bytes. 1.8 was skipped |
 
 GET_LINK_STATS counts (named by the count field): 27 (0.1.4-0.1.7), 29 (0.2.0-0.2.1), 31 (0.2.2-0.2.3),
@@ -126,13 +127,14 @@ range-independent; 0 V at dcoffset 0: CH1 A 132.47 / B 127.14, CH2 A 128.80 / B 
 firmware gains). The firmware formula assumes 128 on the compensated mean. Grounds: the probe ground is VRF1,
 +1.24 V over the USB ground (fpga/al3/README.md); the calibration output reads -1.24 / +1.9 V against it by design.
 
-## Tests (`tests/`, 289, about 50 s)
+## Tests (`tests/`, 296, about 50 s)
 
 `test_protocol` (codec, structs, vectors, link stats/event log), `test_transport` (incl. the scripted-link deferred
 cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `test_shared_mode` (1.3),
 `test_firmware_match` (section 14 items), `test_server` (every tool in-process, restarts, legacy fallback),
 `test_stdio` (server subprocess), `test_analysis`, `test_calibration`, `test_flash` (FEL flow, bench wrapper),
 `test_sdcard` (SD commands, persist, resume after drops, restore, CLI), `test_ext_trigger`, `test_soak`,
+`test_cal_v2` (1.10 GET_CAL, block vectors, 0 V on both cores per clock class, no unit zeros on top),
 `test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH), `test_decim` (1.9: maths vs
 the firmware vectors, wire layouts, simulator noise / volts / trigger / EXT latency, `scope_set_decimation`).
 Fixtures: `sim`/`transport`/`scope` are collaborative with UI captures on demand (`ui_capture_period_s=0`);
@@ -140,6 +142,9 @@ Fixtures: `sim`/`transport`/`scope` are collaborative with UI captures on demand
 `garbage_next`, `drop_next`, `bad_crc_next`, `lose_next`/`lose_cmd`, `drop_link_on`; `Device.ui_set_*`,
 `ui_press_run/stop`, `ui_run_capture`, `ui_set_spectrum` (display mode, window, FFT length, channel), `on_arm`,
 `user_tap` (legacy), `log_event` (also feeds the bus-level ring), `self_restart`, `ui_set_decim`, `sd.*` faults.
+SimConfig `cal_v2` (a bound v2 block measured from the model) and `gated_zero_shift` (per-core zero moves while the
+encode clock is gated). Known flake: `test_sdcard::test_slow_write_answers_are_retried_without_reopening` (0.2 s write
+timeout) can fail once under a loaded full run; it passes alone.
 Run: `.venv/Scripts/python -m pytest -q`; WSL: `wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/mcp &&
 ~/.venvs/fnirsi1013d-mcp/bin/python -m pytest -q -p no:cacheprovider"`; lint: `.venv/Scripts/ruff check --select
 F,E9,B023 --line-length 120 src tests`; vectors: `python -m fnirsi1013d.vectors --check` (the C checker:
@@ -157,12 +162,8 @@ Pending work for every agent lives in `../docs/plans/task-queue.md` (section "MC
 from there and moves items to "Dispatched". Add host items you discover there, not only here. Agent-to-agent
 messages describe work; only the coordinator puts it in your queue.
 
-0. **GET_CAL v2 (protocol 1.10, row 48)**: next once fw-cal is merged (the lead reports it). Parse 248 bytes (keep
-   the 72-byte form); calibration version 2 = the 8-bit READ_TRACE and GET_CHANNEL zero_q8 are already corrected, so
-   no per-unit JSON on top; READ_RAW / WIDE stay raw: per core raw_k(0 V) = zero/16 + slope/65536 x dcoffset (zero
-   per class: 0 = full rate, divider 0 and filtered; 1 = gated legacy divider >= 1; core A = low byte in layout 2);
-   16-bit path: code = out x 2^S / N^K + corr16 / 16 (mean of both cores, full-rate zeros); test against the
-   `adc_cal` vectors; `scope_calibration_info` shows v1/v2 and the per-core zeros.
+0. **Protocol 1.11 (fw-gen6, 0.2.44, row 49)**: 0x1535 FIR enable (SET_DECIM flags bit 3), caps bit 16, FIR gain
+   (N/2)^K in the 16-bit conversion; after the lead reports the merge.
 1. **Release 0.3.0** (on hold): bump `version` in `pyproject.toml` (still 0.1.0) with the lead's release; the 30-minute soak
    (`fnirsi1013d-soak --duration 1800`) is the gate; fold the baseline soak results (requests, drops, restarts,
    latency, counter deltas, the selective-suspend setting) into README "Link soak" once the lead has them.

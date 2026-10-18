@@ -50,7 +50,7 @@ def test_decim_config_fallbacks():
     c = P.decim_config(2, P.DECIM_NEG_A, 19, 3000)
     assert c.mode == 0x0A and c.status == 0x8A and c.code_per_count == pytest.approx(2 / 400)
     assert P.decim_to_code(65535, P.decim_scale_q24(400, 1), 0) == 255
-    assert P.decim_to_code(25600, P.decim_scale_q24(400, 1), 3) == 129  # 128 + 1.5 with the Q24 scale just below 1/200
+    assert P.decim_to_code(25600, P.decim_scale_q24(400, 1), 24) == 129  # 128 + 1.5 with the Q24 scale just below 1/200
 
 
 def test_wire_layouts():
@@ -147,8 +147,8 @@ def test_decimated_capture_volts_and_noise(sim_factory, filt, k):
         assert np.array_equal(tc.channels["CH1"].samples16, c.samples16)
         hdr, data = s.read_trace(["CH1"])  # without WIDE: the firmware's 8-bit conversion
         assert hdr.decim_mode == cap.decim.status and hdr.decim_shift == cap.decim.shift
-        comp2 = cal.adc_a_comp + cal.adc_b_comp
-        conv = [P.decim_to_code(int(v), cap.decim.scale_q24, comp2) for v in c.samples16[:50]]
+        conv = [P.decim_to_code(int(v), cap.decim.scale_q24, 8 * (cal.adc_a_comp + cal.adc_b_comp))
+                for v in c.samples16[:50]]
         assert list(data[0][1][:50]) == conv
 
 
