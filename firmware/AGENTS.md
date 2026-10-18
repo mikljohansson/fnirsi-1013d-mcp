@@ -27,6 +27,8 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
   pc_rx_ring.h             RX ring copies (two-segment in/out) and the one-FIFO-read-per-packet store. Header only,
                            host-buildable; host_tests/test_rx_ring.c runs it at every ring phase
   pc_hooks.h               the hook macros used in 1.00o5 files; empty with PC_PROTOCOL=0
+  pc_decim.c/.h            decimation filter maths for FPGA 0x1534 (N, K fallback, S, L16, Q24 scale, settle). Pure C,
+                           host-buildable (section 19)
   host_tests/              test_protocol.c, test_rx_ring.c, test_session.c (+ mock_hal.c FPGA/transport model), vector_check.c,
                            check_vectors.py, gen_vectors.py, bench_link.py (pyserial, bench only)
 firmware/tools/            mksunxi.py, make_sd_image.py, fetch_gcc10.sh, spiflash tools (not this agent's)
@@ -168,6 +170,10 @@ wait, 0x0B/0x0C/0x0E in reset, 0x01=0); DONE latches 0x14 and writes 0x0F=1; cap
 (trigger_addr - pretrigger_words) mod ring (the UI keeps 1.00o5's `T + 7441` math). READ_RAW reads per core with
 one dummy strobe after each 0x1F write, splits at the ring end, `read_lag` = 0. READ_TRACE runs the 1.00o5
 readout (`fpga_read_sample_data`, B before A, no dummy read).
+
+0x1534 (fw 0.2.30) adds caps bit 15 DECIM: the decimation filter with 16-bit samples, one per ring word. Then
+pretrigger / total / start are words = samples (`pc_cap_words`, `s->cap_wide`, `pc_glue_decim_words`), the UI start
+is (0x14 - pretrigger) mod 8192, and every conversion start writes the filter mode. Section 19.
 
 Unverified (caps UNVERIFIED bits stay set until they pass; `BENCH: Tn` comments mark the code):
 T1 ZLP (passed on Windows and Linux), T2 throughput (1.0 MB/s LOCAL, 2.35 MB/s REMOTE on Windows, >1 MB/s Linux),
@@ -585,3 +591,29 @@ Gotchas from this session: Python heredocs via Git Bash turn `\0`-style C escape
 eaten; put WSL steps in a script and run it through PowerShell `wsl -d Ubuntu -- bash /mnt/c/...`. Every rebuild
 changes the sha256 (build time is embedded): pin from the same build you report. Of the init entries, type 16 is
 copied into the bus ring and type 19 is not (only the main ring and the snapshot hold it).
+
+## 19. Decimation filter (fw-decim, fw 0.2.30, protocol 1.9)
+
+Built and host-tested against fpga-gen3's interface for bitstream 0x1534 (not flashed yet, nothing benched). Spec:
+docs/protocol.md section 14 row 47; design and file map: README section 5 "Decimation filter". Points a successor
+needs:
+- One rule for when the FPGA mode changes: at every conversion start (`pc_glue_decim_conversion` at the top of
+  `fpga_do_conversion`, `pc_dec_apply` in `pc_hal_arm`). The UI acquisition sets `pc_dec_ui_arm` just before its
+  `fpga_do_conversion`; every other caller (calibration, auto setup) gets K = 0, because they read per-core
+  averages. A new acquisition path that should be filtered must set the flag (`pc_glue_ui_decim_arm`).
+- `pc_dec_cur` (what the FPGA runs) decides the readout and the word geometry, never the setting: the setting only
+  takes effect at the next arm, so a capture in the ring is always read the way it was taken.
+- The display path never sees 16-bit data: `pc_glue_decim_read` converts into 8-bit codes and feeds
+  `fpga_read_adc_data` through `pc_decim_src` (odd pass, then even pass, compensation pre-subtracted per core).
+  READ_TRACE WIDE serves the raw u16 buffer (`pc_hal_trace16`).
+- Memory depth with the filter on is at most 8190 samples (UI boxes 9000+ hidden, SET_TRIGGER / SET_DECIM refuse,
+  `pc_decim_config` falls back to legacy as a last guard).
+- EXT latency: `pc_decim_ext_shift` samples fewer pretrigger words (UI `pc_glue_decim_pre_words`, host `h_arm`),
+  start computed from the words actually written; `ext_shift` per capture (GET_CAPTURE_INFO byte 70).
+- 0x53 bits 2-4 (swap, falling-edge A / B) are `pc_decim_cfg.flags`, written with every mode; neg A / B are saved in
+  word 207 bits 3-4, swap is not.
+- Settle waits use timer0 ms (`fpga_delay` is not calibrated: 54 loops per "us").
+- The spectrum work (fw-gen5) can take the 16-bit buffer and N / S / gain from `pc_hal_decim_current`.
+Open: the bench list in README "Decimation filter"; TODO 1c (trigger position at decimated rates) should be
+re-measured with the filter on, since its geometry is exact (no `T + 7441`); mcp/ needs GET_DECIM / SET_DECIM, the
+READ_TRACE WIDE flag and the 76-byte GET_CAPTURE_INFO (message to mcp-gen2).
