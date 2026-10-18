@@ -22,6 +22,7 @@
 #define PC_SETTING_WORD_DECIM 207
 #define PC_SETTING_WORD_SPEC0 208   //fw 0.2.39: spectrum view FFT length, window, scale (0x5E00 marker)
 #define PC_SETTING_WORD_SPEC1 209   //fw 0.2.39: spectrum view ref level, dBV (int16)
+#define PC_SETTING_WORD_PHOS  210   //fw 0.2.46: phosphor view persistence, palette (0x9A00 marker)
 
 //Compacted menus (fw 0.2.8, owner: no gaps). The kept rows move up by whole rows; the menu heights in variables.h
 //shrink to match. With PC_PROTOCOL=0 the shifts are 0 and nothing moves.
@@ -76,6 +77,10 @@ int  pc_glue_main_menu_row6(uint32 y);//main menu: touch on the Spectrum analyze
 void pc_glue_main_menu_items(void);   //main menu drawn: add the Spectrum analyzer row
 void pc_glue_main_menu_touch(void);   //Spectrum analyzer row tapped: switch the display mode
 int  pc_glue_main_menu_height(void);  //main menu box height (variables.h MAIN_MENU_HEIGHT)
+int  pc_glue_phosphor_on(void);       //fw 0.2.46: the phosphor view replaces the CH1 / CH2 polylines
+void pc_glue_phosphor_draw(void);     //after the channel blocks: paint the phosphor maps and the strip
+int  pc_glue_phosphor_xy(uint32 index); //XY branch: 1 = the phosphor view drew it
+void pc_glue_phosphor_strip(void);    //scope_preset_values: the phosphor strip over the slider
 
 //Decimation filter (bitstream 0x1534+, pc_decim.h). With it off or absent every call is a no-op and the 1.00o5 paths run.
 extern int16 *pc_decim_src;           //fpga_read_adc_data: converted samples to take instead of bus reads (0 = bus)
@@ -91,6 +96,7 @@ void   pc_glue_decim_tap(void);       //acquisition menu: Filter box touched
 void   pc_glue_settings_defaults(void); //fw 0.2.44: scope_reset_config_data (DEFAULT button, sector load failure)
 uint16 pc_glue_decim_setting_word(void);         //settings sector word (scope_save_config_data)
 uint16 pc_glue_spectrum_setting_word(int i);     //settings sector words 208, 209 (scope_save_config_data)
+uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (scope_save_config_data)
 
 #define PC_BUSY_POLL()          pc_glue_poll_busy()
 #define PC_TIMER_TICK()         pc_glue_poll_isr()
@@ -113,6 +119,10 @@ uint16 pc_glue_spectrum_setting_word(int i);     //settings sector words 208, 20
 #define PC_MAIN_MENU_ROW6(y)    pc_glue_main_menu_row6(y)
 #define PC_MAIN_MENU_ITEMS()    pc_glue_main_menu_items()
 #define PC_MAIN_MENU_TOUCH()    pc_glue_main_menu_touch()
+#define PC_PHOSPHOR_SKIP()      if(!pc_glue_phosphor_on())
+#define PC_PHOSPHOR_DRAW()      pc_glue_phosphor_draw()
+#define PC_PHOSPHOR_XY(i, last) do { if(pc_glue_phosphor_xy(i)) (i) = (last); } while(0)
+#define PC_PHOSPHOR_STRIP()     pc_glue_phosphor_strip()
 
 #else
 
@@ -137,6 +147,10 @@ uint16 pc_glue_spectrum_setting_word(int i);     //settings sector words 208, 20
 #define PC_MAIN_MENU_ROW6(y)    0
 #define PC_MAIN_MENU_ITEMS()    do { } while(0)
 #define PC_MAIN_MENU_TOUCH()    do { } while(0)
+#define PC_PHOSPHOR_SKIP()
+#define PC_PHOSPHOR_DRAW()      do { } while(0)
+#define PC_PHOSPHOR_XY(i, last) do { } while(0)
+#define PC_PHOSPHOR_STRIP()     do { } while(0)
 
 #endif
 

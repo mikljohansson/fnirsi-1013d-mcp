@@ -31,6 +31,7 @@
 #include "pc_cmds.h"
 #include "pc_hooks.h"
 #include "spectrum.h"
+#include "phosphor.h"
 #include "spec_fmt.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -555,6 +556,13 @@ int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t
   spectrum_capture_info(1);
   spectrum_new_data();
 
+  //The phosphor view adds a host capture once, when it completes (a READ_TRACE re-read of it is not a new record)
+  if((pc_sess.acq_state == PC_ACQ_ARMED) || (pc_sess.acq_state == PC_ACQ_TRIGGERED))
+  {
+    phosphor_capture_info(1);
+    phosphor_new_data();
+  }
+
   //scope_process_trigger looks at samples pre - 20 .. pre + 60
   if((pretrigger_samples >= 20) && (pretrigger_samples + 64 <= total_samples))
   {
@@ -847,6 +855,11 @@ void pc_glue_decim_even(void)
 uint16 pc_glue_spectrum_setting_word(int i)
 {
   return spectrum_settings_word(i);
+}
+
+uint16 pc_glue_phosphor_setting_word(void)
+{
+  return phosphor_settings_word();
 }
 
 uint16 pc_glue_decim_setting_word(void)
@@ -1554,7 +1567,7 @@ uint32_t pc_hal_fft_bench(uint8_t *dst, uint32_t reps)
 
 uint8_t pc_hal_display_mode(void)
 {
-  return (uint8_t)spectrum_mode();
+  return phosphor_mode() ? PHOSPHOR_DISPLAY_MODE : (uint8_t)spectrum_mode();
 }
 
 int32_t pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t *hdr, uint8_t *levels)
@@ -1563,15 +1576,23 @@ int32_t pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t 
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Spectrum view glue (fw 0.2.28): a sixth main-menu row switches the trace area between the traces and the spectrum
+// Spectrum view glue (fw 0.2.28): a sixth main-menu row switches the trace area between the traces and the spectrum.
+// Phosphor view (fw 0.2.46): a seventh row, the same way. The two views exclude each other; both share the
+// availability rule (no roll mode, no viewer), so both rows show or neither.
 
 int pc_glue_spectrum_display(void) { return spectrum_display(); }
-int pc_glue_spectrum_touch(void)   { return spectrum_touch(); }
-int pc_glue_main_menu_height(void) { return spectrum_available() ? 351 : 292; }
+int pc_glue_spectrum_touch(void)   { return spectrum_touch() || phosphor_touch(); }
+int pc_glue_main_menu_height(void) { return spectrum_available() ? 410 : 292; }
 
+int  pc_glue_phosphor_on(void)          { return phosphor_owns_traces(); }
+void pc_glue_phosphor_draw(void)        { phosphor_draw(); }
+int  pc_glue_phosphor_xy(uint32 index)  { return phosphor_xy(index); }
+void pc_glue_phosphor_strip(void)       { phosphor_strip(); }
+
+//Rows 6 (y 343..400) and 7 (y 402..459)
 int pc_glue_main_menu_row6(uint32 y)
 {
-  return spectrum_available() && (y >= 343) && (y <= 400);
+  return spectrum_available() && (y >= 343) && (y <= 459);
 }
 
 //The row in the style of the other five: icon (spectrum bars), two text lines naming where a tap goes
@@ -1594,6 +1615,32 @@ static void pc_main_menu_spectrum_item(int mode)
   display_text(60, 371, on ? (int8 *)"view" : (int8 *)"analyzer");
 }
 
+//Row 7: icon (three square-wave edges in fading greys, like an intensity-graded trace)
+static void pc_main_menu_phosphor_item(int mode)
+{
+  static const uint32 shade[3] = { 0x00505050, 0x00909090, 0x00FFFFFF };
+  uint32 i, x0 = MAIN_MENU_XPOS + 15;
+  int    on = phosphor_mode();
+
+  display_set_fg_color(mode ? 0x00CCCCCC : DARKGREY_COLOR);
+  display_fill_rounded_rect(9, 413, 131, 35, 3);
+
+  for(i = 0; i < 3; i++)
+  {
+    uint32 xe = x0 + 10 + 2 * i;
+
+    display_set_fg_color(mode ? (i == 2 ? BLACK_COLOR : 0x00707070) : shade[i]);
+    display_draw_horz_line(441, x0, xe);
+    display_draw_vert_line(xe, 421, 441);
+    display_draw_horz_line(421, xe, x0 + 25);
+  }
+
+  display_set_fg_color(mode ? BLACK_COLOR : WHITE_COLOR);
+  display_set_font(&font_3);
+  display_text(60, 414, on ? (int8 *)"Scope" : (int8 *)"Phosphor");
+  display_text(60, 430, on ? (int8 *)"view" : (int8 *)"display");
+}
+
 void pc_glue_main_menu_items(void)
 {
   if(!spectrum_available())
@@ -1601,14 +1648,31 @@ void pc_glue_main_menu_items(void)
 
   display_set_fg_color(BLACK_COLOR);
   display_draw_horz_line(340, 9, 140);
+  display_draw_horz_line(399, 9, 140);
   pc_main_menu_spectrum_item(0);
+  pc_main_menu_phosphor_item(0);
 }
 
 void pc_glue_main_menu_touch(void)
 {
-  pc_main_menu_spectrum_item(1);
-  tp_i2c_wait_for_touch_release();
-  spectrum_set_active(spectrum_mode() == SPECTRUM_MODE_SCOPE);
+  if(ytouch <= 400)
+  {
+    int on = (spectrum_mode() == SPECTRUM_MODE_SCOPE);
+
+    pc_main_menu_spectrum_item(1);
+    tp_i2c_wait_for_touch_release();
+    phosphor_set_active(0);
+    spectrum_set_active(on);
+  }
+  else
+  {
+    int on = !phosphor_mode();
+
+    pc_main_menu_phosphor_item(1);
+    tp_i2c_wait_for_touch_release();
+    spectrum_set_active(0);
+    phosphor_set_active(on);
+  }
 }
 
 //System settings menu height (variables.h SYSTEM_MENU_HEIGHT): Time & Date is the last row, 59 px
@@ -1725,6 +1789,9 @@ static void pc_ui_fix_settings(void)
   //Spectrum view settings (fw 0.2.39); the display mode itself is not restored: the scope boots into the scope view
   spectrum_settings_restore(settingsworkbuffer[PC_SETTING_WORD_SPEC0], settingsworkbuffer[PC_SETTING_WORD_SPEC1]);
 
+  //Phosphor view settings (fw 0.2.46): persistence and palette, the same rule (marker 0x9A00, fields in range)
+  phosphor_settings_restore(settingsworkbuffer[PC_SETTING_WORD_PHOS]);
+
   //Memory depth: the largest offered step (3000 x n) the bitstream can capture
   if(fpgasettings.totalsamples > max)
   {
@@ -1791,8 +1858,9 @@ void pc_glue_ui_service(void)
   if(pc_ready)
     pc_ui_service(&pc_sess);
 
-  //Roll mode or a viewer ends the spectrum view
+  //Roll mode or a viewer ends the spectrum view and the phosphor view
   spectrum_service();
+  phosphor_service();
 }
 
 void pc_glue_pass_mark(int n)
@@ -1832,12 +1900,14 @@ void pc_glue_ui_capture_addr(uint32 addr)
   }
 
   spectrum_capture_info(!pc_ui_forced && (!pc_ready || pc_sess.ui_trig || scopesettings.triggermode));
+  phosphor_capture_info(!pc_ui_forced && (!pc_ready || pc_sess.ui_trig || scopesettings.triggermode));
   pc_ui_auto = 0;
 }
 
 void pc_glue_ui_capture(void)
 {
   spectrum_new_data();
+  phosphor_new_data();
 
   if(pc_ready)
     pc_ui_capture_done(&pc_sess);
