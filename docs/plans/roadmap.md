@@ -61,6 +61,10 @@ purpose-written Q15 FFT is proposed instead.
 
 ## 5. Calibration in firmware
 
+Visible symptom (2026-10-18, spectrum view): a spur at the Nyquist bin (fs/2), ~18 dB above the noise floor on CH1, because the two
+interleaved ADC cores differ in zero (A 130.9 vs B 125.6 codes on the owner's unit) and the sample-skipping decimation alternates cores.
+Per-core zero correction in firmware removes it everywhere; the boxcar/CIC modes also cancel it (both cores summed).
+
 - Base calibration stores measured per-core zero and the PWM slope; on-screen volts use them; export via
   GET_CAL so the host model and the screen agree. Owner re-runs base calibration once.
 

@@ -387,3 +387,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   unchanged. 2.2-2.5x faster; 4096-point spectra now cost ~11 ms per channel per pass. Owner: keep memory depth default at 3000 (UI slows
   down at long memory).
 - Owner on 0.2.31 spectrum view: harmonic comb looks as before. READ_SPECTRUM cross-check logged below.
+- Spectrum view, Nyquist-bin spur: the last bin (500 kHz at 1 MS/s) reads -32 dBV against a -50 dBV floor. Live capture: CH1 core A mean
+  130.93 vs core B 125.58 codes (+5.35, the known A/B zero spread); the sample-skipping decimation alternates cores, so the A/B offset
+  appears as an fs/2 tone. Fix: per-core zero correction in firmware (roadmap item 5) and/or the 0x1534 boxcar/CIC modes.
