@@ -214,6 +214,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.31 | 0930c72 | b5685268 | FFT hot loops in ARM assembly (LDRD/STRD, no spills, twiddle table), qemu-arm host test; includes 0.2.30 | bench clean on 0x1533; FFT_BENCH 2.2-2.5x faster (4096: 10.9 ms; SRAM 2048: 2.3 ms); spectrum as before |
 | 0.2.32 | 83aa5b5 | ed9fb0f8 | spectrum view: Waterfall and Density sub-views (View field), GET_STATUS byte 43 = 2 / 3; trace area cleared with memset | built, host-tested; owner verdict pending |
 | 0.2.33 | d125a41 | e002ab21 | 0.2.32 plus the view's FFT from SRAM A for N <= 2048 | built, host-tested; bench with 0.2.32's items |
+| 0.2.34 | 1a9a773 | 00847286 | spectrum view on the 0x1534 16-bit records (fx_fft_run_u16, filter rate 200 MHz / N, scale_q24 levels) | built, host-tested; on 0x1533 identical in behaviour to 0.2.33 |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -641,7 +642,6 @@ section 14 rows 44 (FFT_BENCH) and 45 (READ_SPECTRUM, GET_STATUS byte 43).
   Buffers 8-byte aligned (`fx_fft_init` refuses otherwise).
 - The view: settings in RAM only; N limited by the record (`scopesettings.samplecount`); fs from the UI time base
   (`sample_rate_settings`), so a host capture with a raw divider is labelled wrong (documented in row 45).
-Open (fw-gen5's list): owner verdict on the 0.2.32 waterfall / density views; FFT_BENCH numbers for 0.2.31; the view with the 0x1534
-decimation filter (16-bit buffer via `pc_hal_trace16`, fs/N/gain from `pc_hal_decim_current`, i32 path or a u16
-assembly load); dB conversion in assembly (about 9 accesses per bin now); MMU + D-cache as the big speed lever.
+Open (fw-gen5's list): owner verdict on the 0.2.32 waterfall / density views; the view on 0x1534 once it is flashed (0.2.34 code path: 16-bit records, C load; an assembly u16 load if it
+matters); dB conversion in assembly (about 9 accesses per bin now); MMU + D-cache as the big speed lever.
 
