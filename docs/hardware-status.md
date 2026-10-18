@@ -377,3 +377,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   GET_DECIM 0x020C / SET_DECIM 0x020D, caps bit 15, u16 READ_TRACE/READ_RAW, GET_CAPTURE_INFO 76 bytes, Filter box in the acquisition menu
   (0x1534 only). Not benched; the first clean bench image comes as 0.2.31 together with fw-gen5's FFT speed-up (its work-in-progress edits
   were in the shared tree, so no pinned image was taken from this merge).
+- **Spectrum view (fw 0.2.28) works on the scope (owner: "wow, the spectrum analyser works").** READ_SPECTRUM while the view was on: CH1,
+  Hann, N=2048 at 1 MS/s (488 Hz bins), generator 1 kHz square: fundamental 977 Hz at +2.71 dBV (theory for a 3.1 Vpp square: +2.9 dBV),
+  3rd harmonic -9.7 dB (theory -9.5), 5th -14.4 dB (theory -14.0), 7th/9th/11th present; GET_STATUS byte 43 = 1 in the view. Levels and
+  harmonic ratios within 0.4 dB of theory.
