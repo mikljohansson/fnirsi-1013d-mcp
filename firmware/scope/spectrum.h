@@ -14,6 +14,8 @@
 //Display modes as GET_STATUS byte 43 reports them (protocol section 14 row 45)
 #define SPECTRUM_MODE_SCOPE       0
 #define SPECTRUM_MODE_SPECTRUM    1
+#define SPECTRUM_MODE_WATERFALL   2     //fw 0.2.32
+#define SPECTRUM_MODE_DENSITY     3     //fw 0.2.32
 
 //Microseconds since boot from timer0 (1 ms ticks + the 24 MHz down-counter), wraps after 71 minutes
 uint32 spectrum_us(void);

@@ -19,6 +19,8 @@
 #include "fnirsi_1013d_scope.h"
 #include "spec_fmt.h"
 
+#include <string.h>
+
 extern DISPLAYDATA displaydata;     //display_lib.c (current font for text_width)
 
 //Work memory in DDR (.bss, uncached: the MMU and so the D-cache are off)
@@ -172,9 +174,14 @@ typedef struct
   uint8  plan_ok;       //plan matches log2n / window
   uint8  have[2];       //spec_db[ch] holds a spectrum
   uint32 frames;        //spectra computed
+  uint8  view;          //VIEW_*
 } SPECSTATE;
 
-static SPECSTATE spec = { 0, 0, 12, FX_WIN_HANN, 1, 0, 0, 0, 0, 0, 0, { 0, 0 }, 0 };
+#define VIEW_SPECTRUM         0
+#define VIEW_WATERFALL        1
+#define VIEW_DENSITY          2
+
+static SPECSTATE spec = { 0, 0, 12, FX_WIN_HANN, 1, 0, 0, 0, 0, 0, 0, { 0, 0 }, 0, VIEW_SPECTRUM };
 
 //What the last FFT used, per channel (READ_SPECTRUM reports these)
 typedef struct
@@ -189,6 +196,21 @@ typedef struct
 static FX_FFT    spec_plan;
 static SPECFRAME spec_frame[2];
 static int16     spec_db[2][(FX_FFT_N_MAX / 2) + 1];    //centi-dBV
+
+//History of the waterfall and density views (section "Waterfall and density views" below)
+#define HIST_H                PLOT_H        //rows of waterfall history = levels of the density view
+#define DENS_INC              24            //count added per hit (saturating)
+#define DENS_STRIPES          8             //the fade visits one stripe of rows per capture: c -= c / 4
+
+static uint16 wf_rows[HIST_H][PLOT_W] __attribute__((aligned(8)));
+static uint32 wf_ms[HIST_H];
+static uint32 wf_head, wf_count;
+static uint8  dens[HIST_H][PLOT_W] __attribute__((aligned(8)));
+static uint32 dens_stripe;
+static uint16 spec_pal[256];
+static uint8  spec_pal_ok;
+static uint32 hist_key;
+static int32  spec_col[PLOT_W];
 
 static int spec_plan_dirty(void)
 {
@@ -541,6 +563,18 @@ static void spec_draw_info(int log2n, uint32 divider, uint64 bin_mhz)
   p = fmt_uint(p, 1u << log2n);
   p = fmt_str(p, "   RBW ");
   p = fmt_freq(p, (bin_mhz * fx_enbw_milli(spec.window) + 500) / 1000);
+
+  //Waterfall: the time the visible rows span, oldest at the bottom
+  if((spec.view == VIEW_WATERFALL) && (wf_count > 1))
+  {
+    uint32 oldest = (wf_head + HIST_H - wf_count) % HIST_H;
+
+    p = fmt_str(p, "   rows ");
+    p = fmt_uint(p, wf_count);
+    p = fmt_str(p, " = ");
+    p = fmt_c1(p, (int32)((timer0ticks - wf_ms[oldest]) / 10));
+    p = fmt_str(p, " s");
+  }
   display_text(PLOT_X, INFO_Y1, (int8 *)t);
 
   //Decimated rates skip samples: anything above fs/2 folds into the plot
@@ -549,6 +583,223 @@ static void spec_draw_info(int log2n, uint32 divider, uint64 bin_mhz)
     display_set_fg_color(ORANGE_COLOR);
     display_text(PLOT_X, INFO_Y2, (int8 *)"no anti-alias filter: signals above fs/2 fold back");
   }
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Waterfall and density views (fw 0.2.32). Both keep a history of one channel, one plot column per screen column:
+//   waterfall: a ring of RGB565 rows (newest at the top), coloured when added, drawn with memcpy (STM bursts)
+//   density:   8-bit hit counts per (level, column) cell along each spectrum's line, faded one stripe per capture
+// The history is cleared whenever what a column or a level means changes (FFT length, window, span, start, ref,
+// scale, sample rate, channel), so it never mixes axes. Costs are kept to word accesses: the DDR is uncached.
+
+
+static uint16 rgb565(uint32 r, uint32 g, uint32 b)
+{
+  return (uint16)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+}
+
+//Black, deep blue, blue, cyan, green-yellow, yellow, red, white
+static void spec_palette(void)
+{
+  static const uint8 stop[][4] = { { 0, 0, 0, 0 }, { 40, 0, 0, 120 }, { 90, 0, 60, 255 }, { 135, 0, 220, 230 },
+                                   { 175, 120, 255, 40 }, { 205, 255, 230, 0 }, { 235, 255, 50, 0 }, { 255, 255, 255, 255 } };
+  uint32 i, s = 0;
+
+  for(i = 0; i < 256; i++)
+  {
+    uint32 span, t;
+
+    while((s < 6) && (i > stop[s + 1][0]))
+      s++;
+
+    span = stop[s + 1][0] - stop[s][0];
+    t = i - stop[s][0];
+    spec_pal[i] = rgb565(stop[s][1] + ((int32)(stop[s + 1][1] - stop[s][1]) * (int32)t) / (int32)span,
+                         stop[s][2] + ((int32)(stop[s + 1][2] - stop[s][2]) * (int32)t) / (int32)span,
+                         stop[s][3] + ((int32)(stop[s + 1][3] - stop[s][3]) * (int32)t) / (int32)span);
+  }
+
+  spec_pal_ok = 1;
+}
+
+//Level per plot column: the highest bin a column covers, or the nearest bin when zoomed past one bin per column
+static void spec_columns(const SPECVIEW *v, const int16 *db, int32 *col)
+{
+  uint32 x, k;
+
+  for(x = 0; x < PLOT_W; x++)
+  {
+    if(v->span >= PLOT_W)
+    {
+      uint32 k0 = v->first + (uint32)(((uint64)x * v->span) / PLOT_W);
+      uint32 k1 = v->first + (uint32)(((uint64)(x + 1) * v->span) / PLOT_W);
+      int32  m = db[k0];
+
+      for(k = k0 + 1; k < k1; k++)
+        if(db[k] > m)
+          m = db[k];
+      col[x] = m;
+    }
+    else
+      col[x] = db[v->first + (x * v->span + PLOT_W / 2) / PLOT_W];
+  }
+}
+
+//Palette index of a level: the plot's 8 divisions from the bottom line (0, black) to the top line (255)
+static uint32 spec_level_index(const SPECVIEW *v, int32 cdb)
+{
+  int32 range = PLOT_YDIV * v->cdb_per_div;
+  int32 i = ((cdb - (v->top - range)) * 255) / range;
+
+  return (i < 0) ? 0 : (i > 255) ? 255 : (uint32)i;
+}
+
+static int spec_hist_ch(void)
+{
+  return ((spec.channel == 1) || !spec_ch_on(0)) ? 1 : 0;
+}
+
+static void spec_hist_clear(void)
+{
+  wf_head = wf_count = 0;
+  memset(dens, 0, sizeof(dens));
+  dens_stripe = 0;
+}
+
+//What the columns and levels mean; a change clears the history
+static uint32 spec_hist_key(const SPECVIEW *v, int log2n, uint32 divider)
+{
+  uint32 k = 2166136261u, i;
+  uint32 parts[9];
+
+  parts[0] = log2n;      parts[1] = spec.window; parts[2] = spec.view; parts[3] = spec_hist_ch();
+  parts[4] = v->first;   parts[5] = v->span;     parts[6] = (uint32)v->top; parts[7] = (uint32)v->cdb_per_div;
+  parts[8] = divider;
+
+  for(i = 0; i < 9; i++)
+    k = (k ^ parts[i]) * 16777619u;
+
+  return k;
+}
+
+//A new capture's spectrum into the history of the current view
+static void spec_hist_add(const SPECVIEW *v)
+{
+  int    ch = spec_hist_ch();
+  uint32 x;
+
+  if(!spec.have[ch])
+    return;
+
+  if(!spec_pal_ok)
+    spec_palette();
+
+  spec_columns(v, spec_db[ch], spec_col);
+
+  if(spec.view == VIEW_WATERFALL)
+  {
+    uint32 *row = (uint32 *)wf_rows[wf_head];
+
+    for(x = 0; x < PLOT_W; x += 2)
+      *row++ = spec_pal[spec_level_index(v, spec_col[x])] | ((uint32)spec_pal[spec_level_index(v, spec_col[x + 1])] << 16);
+
+    wf_ms[wf_head] = timer0ticks;
+    wf_head = (wf_head + 1) % HIST_H;
+    if(wf_count < HIST_H)
+      wf_count++;
+  }
+  else if(spec.view == VIEW_DENSITY)
+  {
+    int32  py = -1;
+    uint32 r, *w, n;
+
+    //Fade one stripe: c -= c / 4, four cells per word (no borrow between bytes)
+    r = dens_stripe * (HIST_H / DENS_STRIPES);
+    w = (uint32 *)dens[r];
+    for(n = 0; n < (HIST_H / DENS_STRIPES) * PLOT_W / 4; n++, w++)
+      if(*w)
+        *w -= (*w >> 2) & 0x3F3F3F3F;
+    dens_stripe = (dens_stripe + 1) % DENS_STRIPES;
+
+    //Hits along the line: every cell between the previous column's level and this one's
+    for(x = 0; x < PLOT_W; x++)
+    {
+      int32 y = spec_y(v, spec_col[x]) - PLOT_Y, lo, hi;
+
+      if(y > HIST_H - 1)
+        y = HIST_H - 1;
+
+      lo = hi = y;
+      if(py >= 0)
+      {
+        if(py < lo) lo = py;
+        if(py > hi) hi = py;
+      }
+
+      for(; lo <= hi; lo++)
+      {
+        uint32 c = dens[lo][x];
+
+        dens[lo][x] = (c > 255 - DENS_INC) ? 255 : c + DENS_INC;
+      }
+
+      py = y;
+    }
+  }
+}
+
+static void spec_draw_waterfall(void)
+{
+  uint32 r;
+
+  for(r = 0; r < wf_count; r++)
+    memcpy(&displaybuffertmp[(PLOT_Y + r) * 800 + PLOT_X], wf_rows[(wf_head + HIST_H - 1 - r) % HIST_H], PLOT_W * 2);
+}
+
+static void spec_draw_density(void)
+{
+  uint32 y, n, b;
+
+  for(y = 0; y < HIST_H; y++)
+  {
+    const uint32 *src = (const uint32 *)dens[y];
+    uint16 *dst = &displaybuffertmp[(PLOT_Y + y) * 800 + PLOT_X];
+
+    for(n = 0; n < PLOT_W / 4; n++, dst += 4)
+    {
+      uint32 v = src[n];
+
+      if(!v)
+        continue;
+
+      //Counts start at a visible dark blue (palette index 48)
+      for(b = 0; b < 4; b++, v >>= 8)
+        if(v & 0xFF)
+          dst[b] = spec_pal[48 + (((v & 0xFF) * 207) >> 8)];
+    }
+  }
+}
+
+//Colour legend in the second info line, right side: bottom level, the palette, top level
+static void spec_draw_legend(const SPECVIEW *v, int ch)
+{
+  char   t[24], *p;
+  uint32 x, y, x0 = PLOT_X + PLOT_W - 40 - 128;
+
+  if(!spec_pal_ok)
+    spec_palette();
+
+  for(y = INFO_Y2 + 2; y < INFO_Y2 + 11; y++)
+    for(x = 0; x < 128; x++)
+      displaybuffertmp[y * 800 + x0 + x] = spec_pal[2 * x];
+
+  display_set_font(&font_2);
+  display_set_fg_color(0x00A0A0A0);
+  fmt_int(t, (v->top - PLOT_YDIV * v->cdb_per_div) / 100);
+  text_right(x0 - 4, INFO_Y2, t);
+  p = fmt_int(t, v->top / 100);
+  fmt_str(p, spec_frame[ch].unit_amps ? " dBA" : " dBV");
+  display_text(x0 + 132, INFO_Y2, (int8 *)t);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -561,11 +812,12 @@ static void spec_draw_info(int log2n, uint32 divider, uint64 bin_mhz)
 #define F_REF       4
 #define F_SPAN      5
 #define F_START     6
-#define F_EXIT      7
-#define F_COUNT     8
+#define F_VIEW      7
+#define F_EXIT      8
+#define F_COUNT     9
 
-static const char *spec_field_label[F_COUNT] = { "Channel", "FFT length", "Window", "Scale", "Ref level", "Span", "Start", "" };
-static const uint8 spec_field_twoway[F_COUNT] = { 0, 0, 0, 0, 1, 1, 1, 0 };
+static const char *spec_field_label[F_COUNT] = { "Channel", "FFT length", "Window", "Scale", "Ref level", "Span", "Start", "View", "" };
+static const uint8 spec_field_twoway[F_COUNT] = { 0, 0, 0, 0, 1, 1, 1, 0, 0 };
 
 #define FIELD_W     (PLOT_W / F_COUNT)
 
@@ -607,6 +859,10 @@ static void spec_field_value(int f, char *t, int log2n, uint64 bin_mhz)
     case F_START:
       spec_view(&v, log2n);
       fmt_freq(t, bin_mhz * v.first);
+      break;
+
+    case F_VIEW:
+      fmt_str(t, (spec.view == VIEW_WATERFALL) ? "Waterfall" : (spec.view == VIEW_DENSITY) ? "Density" : "Spectrum");
       break;
 
     default:
@@ -652,7 +908,7 @@ static void spec_draw_strip(int log2n, uint64 bin_mhz)
 
 int spectrum_mode(void)
 {
-  return spec.active ? SPECTRUM_MODE_SPECTRUM : SPECTRUM_MODE_SCOPE;
+  return spec.active ? SPECTRUM_MODE_SPECTRUM + spec.view : SPECTRUM_MODE_SCOPE;
 }
 
 int spectrum_available(void)
@@ -665,6 +921,7 @@ void spectrum_set_active(int on)
   spec.active = (on && spectrum_available()) ? 1 : 0;
   spec.recompute = 1;
   spec.have[0] = spec.have[1] = 0;
+  spec_hist_clear();
 }
 
 void spectrum_new_data(void)
@@ -678,10 +935,34 @@ void spectrum_service(void)
     spectrum_set_active(0);
 }
 
+//Black trace area with STM bursts (display_fill_rect writes one pixel at a time)
+static void spec_clear(void)
+{
+  uint32 y;
+
+  for(y = 48; y < 480; y++)
+    memset(&displaybuffertmp[y * 800 + 2], 0, 728 * 2);
+}
+
+static uint32 spec_find_peak(const SPECVIEW *v, const int16 *db)
+{
+  uint32 k, peak = 0, lo = (v->first < 2) ? 2 : v->first;
+  int32  pv = -0x7FFFFFFF;
+
+  for(k = lo; k <= v->first + v->span; k++)
+    if(db[k] > pv)
+    {
+      pv = db[k];
+      peak = k;
+    }
+
+  return peak;
+}
+
 int spectrum_display(void)
 {
-  int     log2n, ch;
-  uint32  divider, peak[2] = { 0, 0 };
+  int     log2n, ch, fresh, hch;
+  uint32  divider, peak[2] = { 0, 0 }, key;
   uint64  bin_mhz;
   SPECVIEW v;
 
@@ -691,6 +972,7 @@ int spectrum_display(void)
   spec_fix_channel();
 
   log2n = spec_log2n();
+  fresh = spec.fresh;
   if(spec.fresh || spec.recompute || (spec_frame[0].log2n != log2n && spec.have[0]) ||
      (spec_frame[1].log2n != log2n && spec.have[1]))
     spec_compute();
@@ -698,32 +980,64 @@ int spectrum_display(void)
   divider = spec_divider();
   bin_mhz = spec_bin_mhz(divider, log2n);
   spec_view(&v, log2n);
+  hch = spec_hist_ch();
+
+  //History views: a new axis starts a new history; each new capture adds one row / one line of hits
+  if(spec.view != VIEW_SPECTRUM)
+  {
+    key = spec_hist_key(&v, log2n, divider);
+    if(key != hist_key)
+    {
+      spec_hist_clear();
+      hist_key = key;
+    }
+
+    if(fresh)
+      spec_hist_add(&v);
+  }
 
   display_set_screen_buffer(displaybuffertmp);
-  display_set_fg_color(BLACK_COLOR);
-  display_fill_rect(2, 48, 728, 432);
+  spec_clear();
 
-  spec_draw_grid(&v);
+  if(spec.view == VIEW_WATERFALL)
+    spec_draw_waterfall();
+  else
+  {
+    if(spec.view == VIEW_DENSITY)
+      spec_draw_density();
+    spec_draw_grid(&v);
+  }
+
   spec_draw_freq_labels(&v, bin_mhz);
   spec_draw_info(log2n, divider, bin_mhz);
 
-  if(!spec.have[0] && !spec.have[1])
+  if((!spec.have[0] && !spec.have[1]) || ((spec.view == VIEW_WATERFALL) && !wf_count))
   {
+    const char *msg = !(spec_ch_on(0) || spec_ch_on(1)) ? "No channel enabled" :
+                      !scopesettings.runstate ? "Stopped: RUN fills the view with new captures" : "Waiting for a capture";
+
     display_set_font(&font_3);
     display_set_fg_color(WHITE_COLOR);
-    text_center(PLOT_X + PLOT_W / 2, PLOT_Y + PLOT_H / 2 - 8,
-                (spec_ch_on(0) || spec_ch_on(1)) ? "Waiting for a capture" : "No channel enabled");
+    text_center(PLOT_X + PLOT_W / 2, PLOT_Y + PLOT_H / 2 - 8, (char *)msg);
   }
 
-  //CH2 first, so CH1 is on top where they overlap
-  for(ch = 1; ch >= 0; ch--)
-    if(spec.have[ch])
-      peak[ch] = spec_draw_trace(&v, spec_db[ch], ch ? CHANNEL2_COLOR : CHANNEL1_COLOR);
+  if(spec.view == VIEW_SPECTRUM)
+  {
+    //CH2 first, so CH1 is on top where they overlap
+    for(ch = 1; ch >= 0; ch--)
+      if(spec.have[ch])
+        peak[ch] = spec_draw_trace(&v, spec_db[ch], ch ? CHANNEL2_COLOR : CHANNEL1_COLOR);
 
-  if(spec.have[0])
-    spec_draw_peak(INFO_Y1, 0, peak[0], bin_mhz);
-  if(spec.have[1])
-    spec_draw_peak(spec.have[0] ? INFO_Y2 : INFO_Y1, 1, peak[1], bin_mhz);
+    if(spec.have[0])
+      spec_draw_peak(INFO_Y1, 0, peak[0], bin_mhz);
+    if(spec.have[1])
+      spec_draw_peak(spec.have[0] ? INFO_Y2 : INFO_Y1, 1, peak[1], bin_mhz);
+  }
+  else if(spec.have[hch])
+  {
+    spec_draw_peak(INFO_Y1, hch, spec_find_peak(&v, spec_db[hch]), bin_mhz);
+    spec_draw_legend(&v, hch);
+  }
 
   spec_draw_strip(log2n, bin_mhz);
 
@@ -795,6 +1109,10 @@ static void spec_step_field(int f, int up)
         else
           spec.start = (spec.start > step) ? spec.start - step : 0;
       }
+      break;
+
+    case F_VIEW:
+      spec.view = (spec.view + 1) % 3;
       break;
 
     case F_EXIT:

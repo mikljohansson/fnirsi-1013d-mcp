@@ -212,6 +212,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.28 | e6a7c4c | b7109d34 | spectrum view (main menu row 6), READ_SPECTRUM 0x020A, GET_STATUS byte 43 (protocol 1.7, row 45); spec_fmt.c (bed2dd4) | owner: works; harmonics within 0.4 dB of theory |
 | 0.2.29-0.2.30 | (fw-decim) | | decimation filter for FPGA 0x1534 (protocol 1.9, row 47, section 19) | merged, not benched alone |
 | 0.2.31 | 0930c72 | b5685268 | FFT hot loops in ARM assembly (LDRD/STRD, no spills, twiddle table), qemu-arm host test; includes 0.2.30 | built, host-tested incl. qemu; bench: FFT_BENCH vs 0.2.27 |
+| 0.2.32 | (see git log) | | spectrum view: Waterfall and Density sub-views (View field), GET_STATUS byte 43 = 2 / 3; trace area cleared with memset | built, host-tested; owner verdict pending |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -639,7 +640,7 @@ section 14 rows 44 (FFT_BENCH) and 45 (READ_SPECTRUM, GET_STATUS byte 43).
   Buffers 8-byte aligned (`fx_fft_init` refuses otherwise).
 - The view: settings in RAM only; N limited by the record (`scopesettings.samplecount`); fs from the UI time base
   (`sample_rate_settings`), so a host capture with a raw divider is labelled wrong (documented in row 45).
-Open (fw-gen5's list): S2 waterfall and density views; FFT_BENCH numbers for 0.2.31; the view with the 0x1534
+Open (fw-gen5's list): owner verdict on the 0.2.32 waterfall / density views; FFT_BENCH numbers for 0.2.31; the view with the 0x1534
 decimation filter (16-bit buffer via `pc_hal_trace16`, fs/N/gain from `pc_hal_decim_current`, i32 path or a u16
 assembly load); dB conversion in assembly (about 9 accesses per bin now); MMU + D-cache as the big speed lever.
 

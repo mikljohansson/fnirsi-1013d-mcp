@@ -548,7 +548,18 @@ straight lines between bins. A white triangle marks the peak (DC bins skipped). 
 | Ref level | -100 .. +60 dBV at the top line, one division per step | left half down, right half up |
 | Span | Nyquist range / 1 .. / 64 | left half wider, right half narrower (keeps the centre) |
 | Start | in half-span steps | left half down, right half up |
+| View | Spectrum, Waterfall, Density (fw 0.2.32) | next |
 | Scope | | leave the view |
+
+Waterfall and density (fw 0.2.32) show one channel (CH1 unless only CH2 is selected or on). Waterfall: each new
+capture adds one row at the top (the plot holds 336), coloured over the plot's 8 divisions from the bottom line
+(black) to the ref level (white), the colour legend on the second info line, the time the rows span on the first.
+Density: each capture's spectrum line adds hits to a 720 x 336 grid of 8-bit counts (saturating), one eighth of the
+rows fades by a quarter per capture, so frequent levels glow and rare ones fade; the level grid and labels stay.
+Both histories clear when anything that changes what a column or level means changes (FFT length, window, span,
+start, ref, scale, sample rate, channel), so a view never mixes axes; in STOP they wait for RUN and say so. The
+rows are stored as RGB565 (drawn with memcpy bursts) and the counts as words with zero words skipped, since every
+uncached pixel access costs about 90 cycles. Memory: 484 KB waterfall + 242 KB density (.bss).
 
 Levels are dBV of a sine's RMS (a tone centred on a bin reads its RMS level on every window; noise reads per bin,
 divide by ENBW for density). Volts per code use the calibration chain of protocol section 8.5, probe factor included
