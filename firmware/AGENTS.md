@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.16 (0.2.16: the tick runs nothing for SOF; CDC handler split into entry + body under
+State on 2026-10-18, fw 0.2.17 (0.2.17: quiet boot without scope.bmp; 0.2.16: the tick runs nothing for SOF; CDC handler split into entry + body under
 PC_PROTOCOL; 0.2.15: event log 128 entries, SOF ignored, reset snapshot; 0.2.14: the USB IRQ fallback serves only after two quiet ticks; 0.2.13: System settings compacted without an RTC, battery level filtered; 0.2.12: USB IRQ fallback in the timer poll, GET_EVENT_LOG, protocol 1.5; 0.2.11: a request sent right after the port is opened is no longer dropped; 0.2.10: MCP chip drawn as one idempotent blit, acquisition "Roll mode on/off" toggle
 label; protocol 1.4: shared control, SD sector commands, EXT trigger for FPGA 0x1533
 (protocol section 14 row 41, needs bench with fpga-gen2's bitstream); 0.2.8: generator and trigger menus compacted; 0.2.7: SD_STAGE from the timer poll,

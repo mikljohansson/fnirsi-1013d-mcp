@@ -471,10 +471,20 @@ WAIT and partial input, and answers `#OK`. A response that makes no progress for
 automatically, and reopening the port (DTR 0 -> 1) discards an old frame.
 
 Boot: USB enumerates about 1.5 s before the main loop starts (GET_LINK_STATS counter 27: 1515-1517 ms on the
-bench, first pass 31 ms). The time goes to the 1.00o5 splash, `load_picture("scope.bmp")` after `usb_device_init`
-(an 800x480 BMP of about 1.1 MB read from FAT at ~730 KB/s). Kept on purpose (owner/lead decision 2026-10-18): the
-owner sees the splash, and hosts wait for the port anyway. Meanwhile the timer poll answers PING, GET_INFO,
-GET_STATUS (`ui_busy` = 2 STARTING) and the other fast-path commands; everything else waits for the main loop.
+bench up to 0.2.16, first pass 31 ms). Up to 0.2.16 a card without `scope.bmp` (the normal case) made 1.00o5's
+`load_picture` show "Failed to open file" in a box for 700 ms (or until a touch, with the confirmation setting on):
+the brief error the owner saw at every boot. Since 0.2.17 the protocol build probes for the file silently and
+skips the splash without a message; with the file present it is shown as in 1.00o5, for 3 s (counter 48 = the
+time this step took + 1). The rest of the gap is the 1.00o5 init after USB (FPGA settings, main screen setup).
+Meanwhile the timer poll answers PING, GET_INFO, GET_STATUS (`ui_busy` = 2 STARTING) and the other fast-path
+commands; everything else waits for the main loop.
+
+SD card FAT partition: the firmware needs nothing on it at boot. Optional `scope.bmp` in the root for a splash: it
+must be exactly the scope's own screenshot format, an 800x480 16-bit RGB565 BMP of 768,070 bytes with 1.00o5's 70-byte
+header (`bmpheader` in variables.c); the easiest source is a picture saved on the scope and renamed. It adds about
+4 s to every boot (1 s read, 3 s shown), so the release package leaves it out. The picture and waveform folders are
+created by the firmware on the first save (`scope_load_thumbnail_file`, `f_mkdir`); a real file-system failure is
+reported only there, in the file menus.
 
 Round trips: PING, GET_INFO, GET_STATUS, GET_BATTERY, `#VER` and `#RESET` are answered from the
 1 ms timer interrupt, so they take about 1 ms plus USB time in any state. Commands that touch the

@@ -25,6 +25,7 @@
 #include "sd_card_interface.h"
 #include "DS3231.h"
 #include "build_time.h"
+#include "ff.h"
 
 #include "pc_hal.h"
 #include "pc_cmds.h"
@@ -1070,6 +1071,30 @@ void pc_glue_roll_label(void)
   display_text(ACQ_MENU_XPOS + (on ? 46 : 44), ACQ_MENU_YPOS + 182, on ? "on" : "off");
   displaydata.fg_color = fg;
   displaydata.font     = font;
+}
+
+//Boot splash (fw 0.2.17). 1.00o5's load_picture shows "Failed to open file" for 700 ms (or until a touch, with the
+//confirmation setting on) when the card has no scope.bmp, which is the normal case: probe silently first. With the
+//file present it runs as in 1.00o5 (shown for 3 s). The time spent here goes to GET_LINK_STATS counter 48.
+static uint32 pc_boot_splash_ms;
+
+void pc_glue_boot_splash(void)
+{
+  static FIL fp;
+  uint32 t0 = timer0ticks;
+
+  if(f_open(&fp, "scope.bmp", FA_READ) == FR_OK)
+  {
+    f_close(&fp);
+    load_picture("scope.bmp");
+  }
+
+  pc_boot_splash_ms = (timer0ticks - t0) + 1;
+}
+
+uint32_t pc_hal_boot_splash_ms(void)
+{
+  return pc_boot_splash_ms;
 }
 
 //System settings menu height (variables.h SYSTEM_MENU_HEIGHT): Time & Date is the last row, 59 px

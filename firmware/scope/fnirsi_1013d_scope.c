@@ -174,7 +174,12 @@ int main(void)
   fpga_set_translated_brightness();
   
   //load picture startup logo
+#if PC_PROTOCOL
+  //PC protocol build: no "Failed to open file" box (and its 700 ms wait) when the card has no scope.bmp
+  pc_glue_boot_splash();
+#else
   load_picture("scope.bmp");
+#endif
   //if (!dev_mode) timer0_delay(3000);//2000
   
   //View message if load a default configuration in case of settings

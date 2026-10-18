@@ -55,6 +55,7 @@ void pc_glue_diag_drawn(void);        //diagnostics screen drawn: identity line
 void pc_glue_ext_selected(void);      //EXT trigger chosen in the trigger menu
 void pc_glue_roll_label(void);        //acquisition menu: the long (roll) time base box as a state toggle
 int  pc_glue_battery_level(int raw, int charging, int shown);   //filtered battery level for the indicator
+void pc_glue_boot_splash(void);       //boot: show scope.bmp if the card has it, otherwise nothing (no error box)
 void pc_glue_ui_mask(int menu);       //PC_MASK_*: paint over what it does not support (current draw buffer)
 void pc_glue_ui_capture_start(void);  //fpga_do_conversion started a conversion
 void pc_glue_ui_capture_addr(uint32 addr); //0x14 read of the finished UI capture

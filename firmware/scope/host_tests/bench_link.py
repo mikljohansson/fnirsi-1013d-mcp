@@ -171,7 +171,9 @@ def main():
              # fw 0.2.7+: RX back-pressure branches
              'rx_isr_stalls rx_releases rx_restalls rx_empty_releases rx_count_max rx_count_oversize '
              # fw 0.2.12+: USB interrupts served by the timer poll (lost IRQs)
-             'usb_irq_polled').split()
+             'usb_irq_polled '
+             # fw 0.2.17+: ms spent on the boot splash step + 1
+             'boot_splash_ms').split()
     st, body, _ = L.request(0x0007)
     if st == 0 and body:
         n = struct.unpack_from('<H', body)[0]
