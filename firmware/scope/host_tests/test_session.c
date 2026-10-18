@@ -165,7 +165,7 @@ static void test_info(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, 76);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 11); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 13); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
   T_EQ(pc_get_u16(r.p + 8), 0x1532); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS), PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED), PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED);
@@ -276,7 +276,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.11,fpga=0x1532");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.13,fpga=0x1532");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -1427,7 +1427,7 @@ static void test_ext_trigger(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
-  T_EQ(r.p[1], 11);                                             //proto 1.11
+  T_EQ(r.p[1], 13);                                             //proto 1.13
 
   //Generator on, then EXT: the generator goes off
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -1739,7 +1739,7 @@ static void test_fel_reset_stall(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 11);                                             //proto_minor 1.11
+  T_EQ(r.p[1], 13);                                             //proto_minor 1.13
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -2247,7 +2247,7 @@ static void test_decim_fir_protocol(void)
   setup(0x1535);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_DECIM | PC_CAP_FIR), PC_CAP_DECIM | PC_CAP_FIR);
-  T_EQ(r.p[1], 11);
+  T_EQ(r.p[1], 13);
   set_trigger(0x30, 0, 0, 0, 0, 3000, 6000, 0, 0, &r);
   T_EQ(r.h.status, 0);
   memset(p, 0, 4); p[0] = 2; p[1] = 0x08;
