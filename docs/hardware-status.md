@@ -238,3 +238,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   0/3.1 V logic swing relative to the probe ground. Candidates: the probe/BNC ground is ~1.1 V above the FPGA's digital ground, or a resistive
   level shift to a negative rail. Owner DMM tests requested: (1) BNC shell vs USB shell DC with USB unplugged, (2) post vs BNC shell with the
   generator at 0.5 Hz. Matters for EXT: a 3.3 V logic input referenced to the probe ground might sit 1.1 V higher at the pad.
+- Firmware 0.2.12 (commit e797f25, sha256 c9270dd3..., pinned backups/fw-0.2.12-c9270dd3.bin, protocol 1.5): USB CDC handler also run from
+  the 1 ms tick (lost-interrupt fallback, prime suspect for the host-side port resets: an unanswered EP0 control transfer), counter 47
+  usb_irq_polled, GET_EVENT_LOG 0x0009 (last 64 USB/link events). Loaded in RAM only. First bench after boot: one 64 KiB response lost
+  (0.20 MB/s run, tx_aborts 1, first ever), two reruns clean at 1.00 MB/s; usb_irq_polled 46033 in ~3 min (the tick races the real ISR, so the
+  counter does not isolate lost interrupts). Both with fw-gen2. 20-minute 10 Hz GET_STATUS soak started (USB selective suspend now off).
+  Card keeps 0.2.11.
