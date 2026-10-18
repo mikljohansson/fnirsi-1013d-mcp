@@ -19,13 +19,17 @@ Hash entries use sha256 of files in `backups/` (gitignored).
 | Stock FPGA version word | 0x1432 expected | not read on this unit |
 | Firmware / bootloader now | unknown | owner to determine (hardware-prep.md section 4) |
 | Programmers available | generic ARM JTAG debuggers (J-Link / ST-Link / CMSIS-DAP class); CH341A can be bought; WSL Ubuntu with flashrom | owner |
-| Programmer chosen for SPI | not decided | recommend a 3.3 V FT232H, or a CH341A with verified 3.3 V signals |
+| Adapters on hand (per lead) | FT232RL (no MPSSE, unusable), Sipeed USB-JTAG/TTL RISC-V debugger (FT2232D if the original version; BL702 emulation if the Plus version), J-Link V9 clone (not recommended) | lead; hardware-prep.md 2.4 |
+| Programmer chosen for SPI | not decided. Options: pyftdi script `firmware/tools/spiflash_ftdi.py` on the Sipeed adapter, pico-serprog on a Pico, CH341A with 3.3 V mod | hardware-prep.md 2.4 |
+| Sipeed adapter type | unknown: real FT2232D or BL702 emulation | check chip marking and USB descriptor |
 
 ## Checklist
 
 - [ ] Header pins soldered
 - [ ] Pinout verified by continuity (hardware-prep.md 1.3 table filled and photographed)
+- [ ] Programmer chosen and its pin mapping to the header written down
 - [ ] Programmer signal levels measured (3.3 V on CLK, MOSI, CS)
+- [ ] `spiflash_ftdi.py id` (or flashrom probe) returns a valid JEDEC ID
 - [ ] 25Q80 backed up twice, dumps identical, sha256 recorded
 - [ ] 25Q80 dump compared with the stock reference (sha256 `90f65f084bdee8f443830ff6c48b7a90d0600fafa7e68713686542a29fa0d253`), result noted
 - [ ] W25Q32 backed up, sha256 recorded, compared with reference dumps
@@ -34,7 +38,8 @@ Hash entries use sha256 of files in `backups/` (gitignored).
 - [ ] Current firmware version noted
 - [ ] Current bootloader version noted (or "none, stock")
 - [ ] FPGA version word noted
-- [ ] Lead's go received for Tier 1 (bootloader >= 0.8, scope 1.00x source of binaries decided)
+- [ ] Lead's go received for Tier 1
+- [ ] Tier 1 SD card prepared with `make_sd_image.py` (bootloader v0.8, updater, scope; boot mode 4), written to a spare card
 - [ ] Tier 1 step 5.3.3 done: open firmware booted with stock FPGA
 - [ ] AL3 bitstream (0x1532) written and verified by read-back
 - [ ] FEL path tested (usbipd attach, `sunxi-fel version`)
@@ -50,3 +55,4 @@ Hash entries use sha256 of files in `backups/` (gitignored).
 Newest entries at the bottom. Format: date, who, what, result.
 
 - 2026-10-18: Guide `docs/hardware-prep.md` and this log created. No hardware action taken. Reference hashes (computed on the `D:\src` copies): stock AL3 flash image `90f65f08...0d253`; Atlan AL3 `FPGA.bin` `0d4c829c...0fd2`; padded AL3 image `8a9d3559...2177`; on-scope backup tool `64bc81e6...1f6`.
+- 2026-10-18: Guide updated after the firmware bootstrap. Bootloader v0.8, updater v0.02v and scope v1.00o5 exist in Atlan's v1.00o5 package (721,992 bytes), which `make package` in `firmware/scope` reproduces. SD cards are to be written with `firmware/tools/make_sd_image.py`, not with Atlan's `dd` line, which zeroes sectors 708 to 710. Added programmer options and `firmware/tools/spiflash_ftdi.py` (tested only against a simulated flash). No hardware action taken.

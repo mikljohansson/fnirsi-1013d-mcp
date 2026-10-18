@@ -1,6 +1,6 @@
 # Hardware preparation and backup guide (FNIRSI 1013D, AL3A10 variant)
 
-Status: DRAFT for owner review. Nothing in this guide has been executed on the owner's unit yet.
+Status: DRAFT for owner review (updated 2026-10-18 with the firmware bootstrap findings). Nothing in this guide has been executed on the owner's unit yet.
 Date written: 2026-10-18. Log every executed step in `docs/hardware-status.md`.
 
 Citation style: `(file.md §x)` points to `research/notes/`. `[checked locally]` means the author ran a
@@ -120,6 +120,48 @@ Recommended procedure (an inference from the above):
 3. Use short leads. Use a low SPI speed where the programmer allows it.
 4. Read twice and compare before any write. Reads cannot damage the flash contents.
 5. If the board must be off during a write, tell the lead first: no source covers that mode.
+
+### 2.4 Options for the owner's adapters
+
+Facts from the lead: the owner has an FT232RL, a Sipeed USB-JTAG/TTL RISC-V debugger and a J-Link V9 clone. A CH341A can be bought. This section lists three routes without deciding which adapter the owner will use.
+
+Not usable:
+- **FT232RL:** no MPSSE engine, so neither flashrom's `ft2232_spi` nor `spiflash_ftdi.py` can drive it (lead's finding; MPSSE is the SPI engine of the FT2232/FT232H family [general knowledge]).
+- **J-Link V9 clone:** not recommended. Donwulff's J-Link failed with flashrom (repo-donwulff.md "Flashing routes"), and it cannot program the Anlogic FPGA (2.1).
+
+**(a) Sipeed USB-JTAG/TTL debugger with `firmware/tools/spiflash_ftdi.py` (pyftdi).**
+- flashrom's `ft2232_spi` lists only FT2232H-class devices (lead's finding), so the route is a pyftdi script.
+- First check which device the owner has. The original Sipeed RV-Debugger uses a real FT2232D. The newer "RV-Debugger Plus" is a BL702 chip whose firmware emulates an FT2232D (mobilefish.com Sipeed RV Debugger Plus guide, found by web search 2026-10-18). Whether pyftdi's MPSSE SPI works on the emulation is unknown. Read the chip marking and look at the USB descriptor (`lsusb -v` in WSL after usbipd attach, or Device Manager details).
+- MPSSE channel A signals for SPI mode 0 (pyftdi `SpiController` convention [general knowledge]): AD0 = SCK, AD1 = MOSI, AD2 = MISO, AD3 = CS0. The same pins are TCK, TDI, TDO, TMS in JTAG mode. The mobilefish guide lists the Sipeed header as TCK, TDI, TDO, TMS with a 3.3 V default level. I found no schematic or wiki that confirms the header mapping, so this is an inference: TCK to flash CLK, TDI to flash DI, TDO from flash DO, TMS to flash /CS. Check the silkscreen. Run the `id` command before anything else: a valid JEDEC ID (EF4014 for a Winbond 25Q80) proves the mapping, while all 0x00 or all 0xFF does not.
+- Measure the idle level of TCK, TDI and TMS with a multimeter before connecting. 3.3 V is expected; 5 V would be unsafe for this board (see 2.2).
+- The FT2232D is a full-speed chip, so MPSSE clocks are slow and a 1 MB read can take minutes [general knowledge]. The script defaults to 1 MHz.
+- Install and run. On Windows give interface A a WinUSB or libusbK driver with Zadig first; that removes the COM port of interface A only.
+
+```bash
+pip install pyftdi
+python3 firmware/tools/spiflash_ftdi.py --selftest                       # no hardware, simulated flash
+python3 firmware/tools/spiflash_ftdi.py --url ftdi://ftdi:2232/1 id      # JEDEC ID and status register
+python3 firmware/tools/spiflash_ftdi.py dump backups/2026-10-18_fpga-25q80   # reads twice, writes _A.bin and _B.bin, compares
+python3 firmware/tools/spiflash_ftdi.py verify some_image.bin --pad
+python3 firmware/tools/spiflash_ftdi.py write al3_atlan_0x1532_padded.bin --write --backup backups/2026-10-18_fpga-25q80_A.bin
+```
+
+  `write` needs `--write`, a `--backup` dump that equals the current chip content, clear block-protect bits, and you must type the JEDEC ID. It erases only changed 4 KB sectors, programs 256-byte pages, and reads the whole chip back to verify. `--pad` fills a short image with 0xFF, so the padding step of 5.3 is not needed with this tool. The script has run only against a simulated flash. `dump` replaces the two flashrom reads of 3a and uses the same file names.
+
+**(b) Raspberry Pi Pico running pico-serprog, used through flashrom.** The flashrom-compatible fallback.
+- Flash the pico-serprog firmware UF2 onto the Pico. The Pico is 3.3 V logic.
+- The pin assignment depends on the firmware build. One readme lists Pico pins 4 SCK, 5 MOSI, 6 MISO, 7 CS; a fork puts CS on pin 2; a multi-chip fork uses GP5 to GP8 as chip selects (web search 2026-10-18, github.com/opensensor/pico-serprog and forks). Libreboot's guide shows the wiring only as an image. Take the table from the readme of the build you flash.
+- Command (Libreboot documents `-p serprog:dev=/dev/ttyACMx,spispeed=16M` for flashprog; the baud suffix is the older flashrom form):
+
+```bash
+flashrom -p serprog:dev=/dev/ttyACM0:115200,spispeed=4M
+flashrom -p serprog:dev=/dev/ttyACM0:115200,spispeed=4M -r 2026-10-18_fpga-25q80_A.bin
+```
+
+  If this flashrom rejects the `:115200` suffix, drop it. Find the device name with `dmesg`. In WSL the Pico appears as a ttyACM device only after `usbipd attach`, and the WSL kernel must have the cdc-acm driver (unverified). A Windows flashrom build with a COM port is the alternative [general knowledge].
+- Libreboot's warnings apply: wire everything before applying power, never feed two supplies to one flash, and match the programmer voltage to the chip. Keep the Pico's 3V3 pin unconnected on this board (2.3).
+
+**(c) CH341A with a 3.3 V mod.** As in 2.2: measure the idle data-line levels, then fix them with a level shifter or buy a board known to have 3.3 V signals. Command: `flashrom -p ch341a_spi -r <file>`. This is the route the thread and Atlan's AL3 readme use.
 
 ## 3. Backups (mandatory)
 
@@ -292,15 +334,20 @@ Do not start this section without the lead's go. Sections 1 to 4 must be complet
 
 | Item | Where | Status |
 |---|---|---|
-| Bootloader v0.8 plus updater v0.02v | `D:\src\FNIRSI_1014D_Firmware\fnirsi_101xd_scope\bootloader_base.bin`, 375,808 bytes, SHA-256 `628ba21b86617fcf4bd719b2c40b159f1fe6bf0971cb8fb26a304b634d9b497d` [checked locally] | Donwulff describes it as Atlan4's "BOOT fw v0.8", placed at sector 16 and spanning to sector 750 (repo-donwulff.md "Boot chain" and build notes). Binary only; no source in any tree (SYNTHESIS.md §4, §9). |
-| Atlan scope 1.00x binary | not in the `D:\src\Fnirsi1013D` checkout | That checkout has source zips for 1.00g to 1.00o5. The folder `latest firmware version` holds only 0.026j and 0.26k4 [checked locally]. SYNTHESIS.md mentions a 1.00q2 binary; none was found. Build 1.00o5 from `firmware/scope` once that tree exists, or obtain Atlan's latest binary. |
-| Atlan "first use" image | `Guide to firmware\Frst use (install) firmware\fnirsi_1013d.bin`, 695,368 bytes | Contains bootloader v0.7 and updater v0.02l (strings checked locally). v0.7 hangs on a custom FPGA, so it is not usable for the custom bitstream. |
+| Bootloader v0.8, updater v0.02v and scope v1.00o5 | Atlan's package `research/atlan4-extracted/_dso1xxx/v1.00o5/fnirsi_1013d_scope/dist/Debug/GNU_ARM-Linux/fnirsi_1013d.bin`, 721,992 bytes. Copy: `firmware/reference/fnirsi_1013d_v1.00o5_atlan_sdpackage.bin` (not committed) | Bootloader "BOOT fw v0.8" at the start (binary only, no source), updater v0.02v at +0x8000, scope v1.00o5 at +0x5BC00, then a 72-byte trailer. Sectors 708 to 710 inside it are zeros (`firmware/reference/README.md`; firmware/README.md §3). The firmware agent rebuilt the scope byte-identically, and `make package` in `firmware/scope` reproduces the 721,992-byte package (firmware/README.md "Verification against Atlan's binary"). Donwulff's `bootloader_base.bin` (375,808 bytes, SHA-256 `628ba21b...b497d` [checked locally]) is the bootloader plus updater part of the same chain (repo-donwulff.md "Boot chain"). |
+| Our own scope build | `firmware/scope`, outputs in `firmware/scope/build/` | `make` gives `fnirsi_1013d.bin` (scope for sector 750 or FEL). `make package` gives `fnirsi_1013d_sdpackage.bin` (firmware/README.md §1). The GCC 13 build is untested on hardware; the README advises the GCC 10 build (`make check-reference`) for a first test. |
+| SD writing tool | `firmware/tools/make_sd_image.py` | Writes only the parts you give it, checks magic, checksum and region size, refuses GPT cards and device-looking `--image` paths, backs up sectors 0 to the last written sector, and verifies by read-back. Tested only on image files (firmware/README.md §3). |
+| Atlan "first use" image | `Guide to firmware\Frst use (install) firmware\fnirsi_1013d.bin`, 695,368 bytes | A concatenated image written at SD sector 16 by Loader 1.1.3: bootloader v0.7 at image offset 0, updater at SD sector 80, scope at SD sector 750 (`make_sd_image.py info` [checked locally]). The strings I found report updater v0.02l and scope v0.26y3, while the lead's note says v0.02r and v0.26y2; neither part matches the loose files in `firmware_Atlan_Peco` byte for byte. v0.7 hangs on a custom FPGA, so this image cannot be used with the custom bitstream. The project's install path uses our own package instead. |
 | Migration image | `Guide to firmware\Transition ...\fnirsi_1013d_migration.bin` | Banner `BOOT fw 0.06`, updater v0.02g. Older still. |
 | Loader | `D:\src\Fnirsi1013D\loader_v1.1.3.zip` and `Guide to firmware\loader_v1.1.3.zip` | Windows; writes raw sectors; needs the scope in USB mode (atlan4-history-and-docs.md §2.2). |
 | Guide text | `Guide to firmware\FNIRSI 1013D  alternative firmware v1.00n3v ANG v1 – kópia.doc` | Digested in atlan4-history-and-docs.md §2.1, §2.2. |
 | AL3 bitstream | `Verzia 1.xxx\FPGA for 1.xxx\FPGA AL3\FPGA.bin`, 282,898 bytes, SHA-256 `0d4c829c231b3bbe18c6dd6e815523b6e168f787561376aae502db6c1f370fd2` [checked locally] | Version word 0x1532 (SYNTHESIS.md §3). Same header and sync word as the stock image; 47,494 bytes differ (fpga-verilog-analysis.md bitstream table). |
 
-The task brief points at "latest firmware version" and "Guide to firmware". The checkout does not carry bootloader >= 0.8 or a 1.00x scope binary there. Ask the lead which source to use. The rest of this section assumes a prepared SD image `tier1.img` with bootloader v0.8 at sector 16 (from `bootloader_base.bin`) and the scope 1.00x at sector 750 (repo-donwulff.md: scope overlaid on the bootloader base at offset 0x5BC00, which is sector 750).
+The `latest firmware version` and `Guide to firmware` folders of the Atlan4 checkout do not carry bootloader >= 0.8 or a 1.00x scope; the v1.00o5 `dist` package does (first row). Sector layout, boot-mode values and FEL commands are in `firmware/README.md` §3 and §4, and this guide does not repeat them.
+
+Boot-mode byte (sector 710, offset 31), from the bootloader v0.7 source: 0 = scope from sector 750, 1 = stock SPI firmware at 0x27000, 2 = FEL, 3 = updater from sector 80, above 3 = show the menu (firmware/README.md §3). In v0.8 the wait-for-0x1432 loop exists but is never called, from disassembly (firmware/README.md §3; repo-donwulff.md "Boot chain"). This is consistent with the thread's note that v0.8 skips the version check (thread-pages-121-155.md §3.3).
+
+The rest of this section assumes an SD card prepared with `make_sd_image.py`: bootloader v0.8 at sector 16, updater at 80, scope at 750.
 
 ### 5.2 Order matters
 
@@ -309,14 +356,15 @@ Gate (repo-donwulff.md "Flashing routes"): install and test bootloader >= 0.8 be
 ### 5.3 Steps
 
 1. Use a spare SD card, not the backed-up card (Atlan: "safe approach: use a second SD card", atlan4-history-and-docs.md §2.2). FAT32 partition with at least 1 MiB free before it.
-2. Write the image at byte 8192 as in the Atlan readme (atlan4-history-and-docs.md §2.2):
+2. Write the card with the project tool, not with Atlan's `dd` line. Atlan's `dd if=fnirsi_1013d.bin of=/dev/sdX bs=1024 seek=8` writes the whole package from sector 16 and zeroes sectors 708 to 710 (calibration, settings, display config and boot byte), because the package holds zeros there (firmware/README.md §3 warning; thread-pages-121-155.md §2.2 and §4.1 say the same of the ALL images). Instead, from `firmware/` (options in firmware/README.md §3):
 
 ```bash
-sudo umount /dev/sdX1
-sudo dd if=tier1.img of=/dev/sdX bs=1024 seek=8
+python3 tools/make_sd_image.py extract reference/fnirsi_1013d_v1.00o5_atlan_sdpackage.bin -d parts/
+python3 tools/make_sd_image.py write --image card.img --bootloader parts/bootloader.bin \
+        --updater parts/updater.bin --scope scope/build/fnirsi_1013d.bin --boot-mode 4
 ```
 
-   Atlan's "ALL" images clear sectors 708 to 710 (thread-pages-121-155.md §2.2, §4.1), so expect to recalibrate (Base calibration, then input dividers; order in atlan4-history-and-docs.md §2.1). Restore the 3c sector dumps instead if the calibration should survive.
+   Practise on an image file first (`--create` makes one). For a real card use `--device /dev/sdX` instead of `--image` (`\\.\PhysicalDriveN` on Windows, untested). The tool makes you type the device path and backs up sectors 0 to the last written sector into `backups/` before writing. `--boot-mode 4` shows the menu with the scope preselected, the safest choice while the firmware is new (firmware/README.md §3). Calibration is whatever the card already holds in sectors 708 to 710; restore the 3c dumps there if they were taken from this card, otherwise expect to recalibrate (order in atlan4-history-and-docs.md §2.1).
 3. Boot the scope with this card, still with the stock FPGA. Expect the `BOOT fw v0.8` banner, then the scope. Open the diagnostic screen; it should report FPGA 0x1432 and "fw: Fnirsi" (1.00o5 handles the stock word: atlan4-history-and-docs.md §1.4). Note it in the status log. Run Base calibration with the BNCs disconnected (repo-donwulff.md "Flashing routes": first power-on with nothing on the BNCs, relay polarity unverified).
 4. Confirm a return path: set the boot byte so the menu shows (bit 4 set, e.g. 5 = FNIRSI with menu), or confirm the menu appears at boot (atlan4-history-and-docs.md §2.1 "Other settings menu").
 5. Power off and disconnect the battery. Prepare the padded bitstream. flashrom wants a file the size of the chip, and Atlan's `FPGA.bin` is 282,898 bytes, so pad with 0xFF to 1,048,576 bytes (the stock image's tail is erased 0xFF) [inference; flashrom's size rule is general knowledge]:
@@ -373,6 +421,8 @@ What the sources state:
 - There is no PC-triggered reset; FEL needs a power cycle (thread-pages-091-120.md §2).
 - A hardware FEL-force is not documented. The hack repo marks two pads "GND HERE" on the old board, purpose presumed to be FEL, flagged as inference (hack-repo-hardware-fpga.md §2.1, §5). The thread says F1C100s pin 70 is RESET and "short to GND to free SPI bus" (thread-pages-001-030.md, "Test access" row). The 1013D has no boot jumper (repo-atlan4.md §4.1). Do not try either.
 - Recovery from an accidentally chosen FEL default: zero the boot byte or reformat the card; pcprogrammer suggests writing 0xFF to sectors 16 to 800 (thread-pages-091-120.md §2, §8).
+
+The exact FEL commands for the scope image (through the Atlan bootloader, through pecostm32's DRAM stub, xfel, usbipd) are in `firmware/README.md` §4. Boot mode 2, or the menu's FEL button, is the entry that also initialises DRAM, and it needs the open bootloader on the card (firmware/README.md §3, §4). That answers the FEL-entry question for a unit with Atlan's bootloader.
 
 Limit: stock FEL does not initialise DRAM. Code that needs DRAM must start from a loader that already did it, such as the Atlan bootloader's FEL choice or pecostm32's `fnirsi_1013d_startup_with_fel.bin` (thread-pages-091-120.md §2; hack-repo-software.md §2.2; repo-donwulff.md "Boot chain"). The SPI-flash commands of `sunxi-fel` work without DRAM.
 
@@ -441,7 +491,7 @@ How the stock firmware can always be restored:
 ## 8. Unresolved items for the owner or lead
 
 1. Pinout: ded's differing pinout (page 142, post 3542) is not in the notes. Verify by continuity (section 1) and read that post.
-2. Where Atlan's bootloader v0.8 and a 1.00x scope binary should come from (5.1).
+2. Whether the first card carries the GCC 10 or the GCC 13 scope build; the firmware README advises GCC 10 for the first hardware test (5.1).
 3. Behaviour of the FPGA and its configuration bus when the flash is read or written with the board powered. Only reads are bench-proven (2.3).
 4. Whether the unit has an SD card holding open firmware now, and which stock firmware date it runs. The stock UI offers no documented version display.
 5. Whether the owner's board has the MCU-flash header J1 (3b alternatives).
