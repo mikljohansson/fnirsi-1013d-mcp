@@ -18,9 +18,8 @@ by CI from the tag commit and has its own hash.
 
 ### Plan for the first tag (v0.3.0)
 
-- Land the current firmware queue (`docs/plans/roadmap.md` item 0): request corruption under RX
-  back-pressure, SD_STAGE from the ISR, hidden unsupported UI, our version string on the diagnostics
-  screen, the MCP chip drawn by the top-bar routine, a shorter startup init.
+- Land the rest of the current firmware queue (`docs/plans/roadmap.md` item 0). As of 0.2.7, the fix for
+  request corruption under RX back-pressure is still open. That version added counters for it.
 - Bench every item, persist the firmware to the card, and run a 30-minute soak with the MCP server polling.
 - Set `PC_FW_VERSION` to `0.3.0`, set the mcp package version from `0.1.0` to `0.3.0`, and move the
   entries below into a `## [0.3.0]` section.
@@ -31,6 +30,18 @@ by CI from the tag commit and has its own hash.
 
 With `PC_PROTOCOL=0` the tree builds byte-identical to Atlan4's v1.00o5 image (`make check-reference`).
 Every protocol change sits behind `#if PC_PROTOCOL`.
+
+#### 0.2.7 - 2026-10-18
+
+- Changed: SD_STAGE is served from the 1 ms timer poll instead of one request per UI pass (d88e9ea).
+  On 0.2.3 a 64 KiB stage took about 5.8 s.
+- Added: six RX back-pressure counters in GET_LINK_STATS, 47 counters in all (d88e9ea).
+- Added: our version is shown on the main screen, the restore screen and the diagnostics screen
+  (d88e9ea). The diagnostics screen also shows an identity line with fw, protocol, base, git hash and
+  build time.
+- Fixed: the MCP chip is part of the top-bar redraw, so it no longer blinks off (d88e9ea).
+- Changed: the diagnostics temperature is shown only when a DS3231 answered at boot (d88e9ea).
+- Docs: the 1.5 s startup gap is the boot splash (0aea00f).
 
 #### 0.2.6 - 2026-10-18
 
