@@ -1390,8 +1390,8 @@ LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     "usb_bus_resets", "usb_suspends", "usb_resumes", "usb_disconnects", "ep0_setups", "ep0_bad_setups",
     # fw 0.2.7 (47 counters): RX back-pressure diagnostics (names as in firmware/scope/host_tests/bench_link.py)
     "rx_isr_stalls", "rx_releases", "rx_restalls", "rx_empty_releases", "rx_count_max", "rx_count_oversize",
-    # fw 0.2.12 (48 counters): timer polls that found USB interrupt flags (lost interrupts served; 0 in a clean
-    # session from 0.2.16, SOF no longer counts)
+    # fw 0.2.12-0.2.20 (48 counters): timer polls that served USB interrupt flags; retired in fw 0.2.21 (the tick
+    # fallback was removed: the dispatcher never lost interrupts), always 0 there
     "usb_irq_polled",
     # fw 0.2.17 (49 counters): ms the boot splash step took + 1 (0 = not run)
     "boot_splash_ms",
@@ -1399,7 +1399,7 @@ LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     "restarts", "restart_exc_type", "restart_exc_lr", "restart_exc_spsr", "restart_exc_sp", "restart_reset_lr",
     "restart_reset_sp", "restart_reset_cpsr",
     # fw 0.2.20 (58 counters): ticks where the quiet-tick gate would have served USB flags but the USB IRQ was
-    # pending at the INTC (the tick racing the real handler; served by the real ISR instead)
+    # pending at the INTC (the tick racing the real handler); retired in fw 0.2.21, always 0 there
     "usb_irq_races")
 
 #: restart_exc_type / event 15 a (fw 0.2.19)
