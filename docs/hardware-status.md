@@ -333,3 +333,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   ISCR 0x2fc0. Cold-boot comparison pending. fw-gen4's caveat: the pass-3 failure after 200 clean transfers argues against a stale init state;
   the cable going in after boot (charging start, contact bounce = six suspends in 1 ms) is the other difference. Tests: FEL-loaded + cable
   replug, and cold boot with the cable already in.
+- Firmware 0.2.23 (fw-gen4, commit 25e90fc, sha256 545126ff..., pinned with ELF; = 0.2.22 + TX-abort diagnostics types 17/18). FEL-loaded on
+  0x1533: 1 pass clean. **Test 1 (cable unplug/replug with the FEL-loaded image running):** 4 bench passes after the replug, 400 x 64 KiB,
+  0 failed, tx_aborts 0; the replug itself produced 15 bus resets / 18 suspends (enumeration storm, like after the cold boots) but no
+  functional failure. The 128-entry ring had already been pushed out by the benches' EP0 setups and DTR edges, and the snapshot was still the
+  boot-time one (never re-armed) -> lesson: re-arm before each test, drain the ring after. **0.2.23 persisted to the card** (backup
+  sd_750-1522_20261018-194839.bin = 0.2.21) for test 2: cold boot with the cable already plugged in.
