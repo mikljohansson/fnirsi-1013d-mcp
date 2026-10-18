@@ -103,14 +103,39 @@ count when the `#VER` probe answers `#OK,FNIRSI-1013D-AI,...`.
 ### Claude Code
 
 The repository's [`.mcp.json`](../.mcp.json) registers `fnirsi1013d-sim`, the server with an in-process AL3
-simulator producing an 80 us PI decay on CH1 and the TX gate on CH2 (Windows venv path). To add servers by hand:
+simulator producing an 80 us PI decay on CH1 and the TX gate on CH2, and `fnirsi1013d` on COM10 (Windows venv
+paths, relative to the repository). The skill `.claude/skills/fnirsi-scope/` teaches agents a measurement session
+(body: `docs/agent-measurement-guide.md`).
+
+Outside the repository, register the server for your user with absolute paths (`--scope user` makes it available
+in every project; the data dir and audit log then also need absolute paths):
 
 ```
-claude mcp add fnirsi1013d-sim -- D:/src/fnirsi-1013d-ai/mcp/.venv/Scripts/fnirsi1013d-mcp.exe --sim "--variant al3 --signal decay:tau=80us"
-claude mcp add fnirsi1013d -e FNIRSI_MCP_MAX_TIER=3 -- D:/src/fnirsi-1013d-ai/mcp/.venv/Scripts/fnirsi1013d-mcp.exe --port COM5
+claude mcp add --scope user fnirsi1013d -e FNIRSI_MCP_MAX_TIER=3 -e FNIRSI_MCP_DATA_DIR=D:/src/fnirsi-1013d-ai/mcp/data -e FNIRSI_MCP_AUDIT_LOG=D:/src/fnirsi-1013d-ai/mcp/logs/audit.jsonl -- D:/src/fnirsi-1013d-ai/mcp/.venv/Scripts/fnirsi1013d-mcp.exe --port COM10
+claude mcp add --scope user fnirsi1013d-sim -- D:/src/fnirsi-1013d-ai/mcp/.venv/Scripts/fnirsi1013d-mcp.exe --sim "--variant al3 --signal decay:tau=80us"
+claude mcp list
 ```
 
-In WSL use the Linux venv, e.g. `~/.venvs/fnirsi1013d-mcp/bin/fnirsi1013d-mcp --port /dev/ttyACM0`.
+The data dir matters: the per-unit voltage calibration is read from `<data dir>/cal/<serial>.json`. In WSL use the
+Linux venv, e.g. `~/.venvs/fnirsi1013d-mcp/bin/fnirsi1013d-mcp --port /dev/ttyACM0`.
+
+### Codex
+
+Codex reads MCP servers from `~/.codex/config.toml` (Codex has no skills directory: point it at
+`docs/agent-measurement-guide.md`, which the root `AGENTS.md` links):
+
+```toml
+[mcp_servers.fnirsi1013d]
+command = "D:/src/fnirsi-1013d-ai/mcp/.venv/Scripts/fnirsi1013d-mcp.exe"
+args = ["--port", "COM10"]
+env = { FNIRSI_MCP_MAX_TIER = "3", FNIRSI_MCP_DATA_DIR = "D:/src/fnirsi-1013d-ai/mcp/data", FNIRSI_MCP_AUDIT_LOG = "D:/src/fnirsi-1013d-ai/mcp/logs/audit.jsonl" }
+
+[mcp_servers.fnirsi1013d-sim]
+command = "D:/src/fnirsi-1013d-ai/mcp/.venv/Scripts/fnirsi1013d-mcp.exe"
+args = ["--sim", "--variant al3 --signal decay:tau=80us"]
+```
+
+Only one session may hold the scope's serial port: do not run the real-scope server in two clients at once.
 
 ### Tools
 

@@ -102,6 +102,11 @@ Reference checkouts (read-only, outside this repo, never build inside them):
 - Small, reviewable commits; one topic per commit. Keep this file and the subdirectory `AGENTS.md` files current when layout or facts change. Agents with very
   large contexts are rotated: before retiring, an agent updates the `AGENTS.md` of the directory it worked in.
 
+## Using the scope from an agent
+
+Measurement sessions through the `fnirsi1013d` MCP server (setup: `mcp/README.md`, also for Codex): follow
+`docs/agent-measurement-guide.md`. Claude Code loads it as the skill `.claude/skills/fnirsi-scope/`.
+
 ## Working as a team
 
 The coordinating session dispatches Opus agents for design/implementation and Sonnet agents for surveys,
