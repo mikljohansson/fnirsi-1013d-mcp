@@ -158,9 +158,13 @@ to the JSONL audit log; waveforms go to `.npz` under the data dir.
   the per-range fit, `UnitCalibration.channel_fit` holds the per-core channel model `zero = Z + slope x dcoffset`
   (dcoffset = offset_pwm - dc_calibration_offset[range]); it lends its slope to ranges measured at one offset and
   converts ranges without points (firmware gain). CalResp adc_*_rawavg are only the last readout (1.00o5
-  overwrites them), not a calibration. The owner's file `data/cal/1013D-0001.json` (gitignored) was built from
-  the four `../backups/t8*_CH1_*.json` files with `python -m fnirsi1013d.calibration --import ... --unit
-  1013D-0001 --out data/cal/1013D-0001.json`; CH2 has no points yet (firmware formula).
+  overwrites them), not a calibration. The owner's file `data/cal/1013D-0001.json` (gitignored, 69 points) is
+  rebuilt with
+  `python -m fnirsi1013d.calibration --unit 1013D-0001 --out data/cal/1013D-0001.json --import
+  ../backups/t8_CH1_0.010V.json ../backups/t8_CH1_0.308V.json ../backups/t8_ch1_1.000V.json
+  ../backups/t8off_CH1_0.000V.json ../backups/t8off_CH2_0.000V.json` (delete the file first: --import appends).
+  CH2 (fw 0.2.1 sweep, 0 V only): Z A 128.80 / B 129.19, slope -0.265 / -0.266, per-range rms <= 0.13 codes;
+  gains are the firmware's until a known-voltage CH2 point is added.
 - `scope_averaged_capture`: host averaging (Welford mean/std, clipped-any mask) or device ACQUIRE_AVG (only
   hardware alignment, no clip rejection, must fit one response). Edge alignment: per capture the crossing of
   `align_channel` at `align_level` nearest the trigger (+-12 samples), linear interpolation, then a fractional
