@@ -161,3 +161,5 @@ Newest entries at the bottom. Format: date, who, what, result.
   ui_busy=1 while a menu is open, main-loop reads refused with E_BUSY meanwhile, as designed).
 - Host volts calibration installed for serial 1013D-0001 (mcp/data/cal/1013D-0001.json, 45 points, residual <= 0.14 codes); new scope_calibration_info tool.
   CH2 still on the firmware formula until a shorted-input run. Owner's MCP server must be restarted to load the file.
+- Calibration-output mystery closed: DMM DC reading of the calibration pin vs probe ground = 0.310 V, matching the mean of the scope's -1.2/+1.9 V
+  square (0.35 V). The output is capacitively coupled with a small positive bias on this hardware; the scope's volts are correct.
