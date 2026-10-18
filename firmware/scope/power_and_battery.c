@@ -66,7 +66,14 @@ void battery_check_status(void)
   }
   
   //Copy it to the global variable
+#if PC_PROTOCOL
+  //PC protocol build: averaged, with hysteresis while charging (the raw level followed ADC noise, the last column of
+  //the indicator flapped; owner report)
+  scopesettings.batterychargelevel = pc_glue_battery_level(chargelevel, scopesettings.batterycharging, scopesettings.batterychargelevel);
+  (void)prev_chargelevel;
+#else
   if (chargelevel < prev_chargelevel) scopesettings.batterychargelevel = chargelevel;
+#endif
   
   //Display the level on the screen
   scope_battery_status();

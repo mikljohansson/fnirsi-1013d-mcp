@@ -400,8 +400,13 @@ hooks `PC_UI_HAS` / `PC_UI_MASK` that are empty with `PC_PROTOCOL=0`):
 
 Relabelled (fw 0.2.10): the acquisition menu's "ACQ / Long mode" box (it named the mode a tap switches to) is drawn
 as a state toggle, "Roll mode" + "on" / "off", green when the long (roll) time base is on, like Average and Long
-memory. It stays: roll mode works on this hardware. The empty bottom row of System settings (Time & Date hidden
-without an RTC) is accepted by the owner as is.
+memory. It stays: roll mode works on this hardware. System settings (fw 0.2.13): without a DS3231 the Time & Date
+row (the last one) is not drawn and the menu box is one row (59 px) shorter; `SYSTEM_MENU_HEIGHT` is a runtime value
+in protocol builds (`pc_glue_sys_menu_height`), feeding the box, separators, slide-in and screen save/restore.
+
+Battery indicator (fw 0.2.13): the level is a running average, and while charging it changes only when the average
+moves 1.25 steps away from the shown value (the raw level followed ADC noise while charging over USB and the last
+column flapped). Off the charger the 1.00o5 rule stays (the level only drops), applied to the average.
 
 Version display (fw 0.2.7): the main-screen corner and the restore screen show `v<fw>`, the diagnostics screen shows
 `fw <fw>` in place of 1.00o5 and a full identity line along its top edge (`FNIRSI-1013D-AI fw .., proto 1.3, base

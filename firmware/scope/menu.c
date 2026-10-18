@@ -6831,7 +6831,7 @@ void scope_open_system_settings_menu(void)
 
   for(y=SYSTEM_MENU_YPOS+58;y<SYSTEM_MENU_HEIGHT;y+=59)//350
   {
-    display_draw_horz_line(y, SYSTEM_MENU_XPOS+9, SYSTEM_MENU_HEIGHT-28);
+    display_draw_horz_line(y, SYSTEM_MENU_XPOS+9, SYSTEM_MENU_HEIGHT_FULL-28);
   }
 
   //Display the menu items
@@ -6843,7 +6843,7 @@ void scope_open_system_settings_menu(void)
   scope_system_settings_calibration_item(0);
   scope_system_settings_x_y_mode_item(0);
   scope_system_settings_confirmation_item(0);
-  scope_system_settings_RTC_settings_item(0);
+  if(1 PC_UI_HAS(PC_FEAT_RTC)) scope_system_settings_RTC_settings_item(0);
 
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);

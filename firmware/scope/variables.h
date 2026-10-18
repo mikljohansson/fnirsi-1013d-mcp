@@ -193,7 +193,14 @@
 #define SYSTEM_MENU_XPOS                     150
 #define SYSTEM_MENU_YPOS          MAIN_MENU_YPOS//46
 #define SYSTEM_MENU_WIDTH                    244
+#define SYSTEM_MENU_HEIGHT_FULL              413
+#if PC_PROTOCOL
+//fw 0.2.13: one row (59 px) shorter when no DS3231 answered at boot (Time & Date is the last row)
+int pc_glue_sys_menu_height(void);
+#define SYSTEM_MENU_HEIGHT                   (pc_glue_sys_menu_height())
+#else
 #define SYSTEM_MENU_HEIGHT                   413
+#endif
 
 //Screen brightness settings
 #define S_BRIGHTNESS_MENU_XPOS               395// nema byt 396 tj 2pixely medzera ?

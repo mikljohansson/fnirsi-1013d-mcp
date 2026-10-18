@@ -1044,11 +1044,7 @@ void pc_glue_ui_mask(int menu)
           pc_mask_rect(ACQ_MENU_XPOS + 313, ACQ_MENU_YPOS + 31 + 36 * i, 58, 29);
       break;
 
-    case PC_MASK_SYS_RTC:
-      //"Time & Date settings" item, background (159, 410, 226, 38)
-      if(!pc_glue_ui_has(PC_FEAT_RTC))
-        pc_mask_rect(155, 406, 234, 46);
-      break;
+    //PC_MASK_SYS_RTC: since 0.2.13 the item is not drawn and the menu is one row shorter (pc_glue_sys_menu_height)
   }
 
   displaydata.fg_color = fg;
@@ -1074,6 +1070,38 @@ void pc_glue_roll_label(void)
   display_text(ACQ_MENU_XPOS + (on ? 46 : 44), ACQ_MENU_YPOS + 182, on ? "on" : "off");
   displaydata.fg_color = fg;
   displaydata.font     = font;
+}
+
+//System settings menu height (variables.h SYSTEM_MENU_HEIGHT): Time & Date is the last row, 59 px
+int pc_glue_sys_menu_height(void)
+{
+  return (pc_ready && !pc_rtc_present) ? (SYSTEM_MENU_HEIGHT_FULL - 59) : SYSTEM_MENU_HEIGHT_FULL;
+}
+
+//Battery level for the indicator: a running average (x16, 1/8 per pass), then the 1.00o5 rule on it (level only drops
+//while not charging) or, while charging, a change only when the average moves 1.25 steps away from what is shown
+int pc_glue_battery_level(int raw, int charging, int shown)
+{
+  static int32 avg16;
+  static uint8 init;
+  int32 lvl;
+
+  if(!init)
+  {
+    avg16 = raw * 16;
+    init  = 1;
+  }
+
+  avg16 += (raw * 16 - avg16) / 8;
+  lvl    = (avg16 + 8) / 16;
+
+  if(lvl < 0)
+    lvl = 0;
+
+  if(charging)
+    return ((avg16 >= shown * 16 + 20) || (avg16 <= shown * 16 - 20)) ? lvl : shown;
+
+  return (lvl < shown) ? lvl : shown;
 }
 
 //Settings saved by an earlier firmware (or another unit) may select what this hardware cannot do
