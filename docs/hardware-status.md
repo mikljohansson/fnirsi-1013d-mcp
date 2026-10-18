@@ -440,3 +440,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   (settings word 207), spectrum view settings to be saved except the view mode.
 - Firmware 0.2.38 (fw-gen5, commits 6ce82d9/348e80b, sha256 a6f50f6c..., pinned): "pass NN ms" shown under the acquisition menu's Memory
   header (value = last main-loop pass before the menu opened). Loaded on 0x1534, census clean. Owner check of the label placement pending.
+- Firmware 0.2.39 (fw-gen5, commits 11b1729/4acb971, sha256 267e80fe..., pinned): span zoom drives the time base (zoom-out at full span ->
+  faster rate up to 50 MS/s; zoom-in below 64 bins -> slower rate), Auto picks the rate, "CIC3" tag instead of the filter line, spectrum
+  FFT length/window/scale/ref saved in settings words 208/209 (1.00o5 writes sector 709 only on power-key shutdown). Loaded on 0x1534,
+  census clean. Owner checks pending.
