@@ -1,15 +1,10 @@
 name: Firmware build and host tests
 description: >
-  Installs the apt arm-none-eabi toolchain and Atlan4's GCC 10.3.1 (cached), fetches Atlan4's v1.00o5
-  reference image (cached, sha256-verified), then runs make gcc10, make (GCC 13),
-  the PC_DEBUG build and the host tests. Leaves the release image and its sha256 in dist-firmware/.
+  Installs the apt arm-none-eabi toolchain and Atlan4's GCC 10.3.1 (cached), then runs make gcc10,
+  make (GCC 13), the PC_DEBUG build and the host tests. Leaves the release image and its sha256 in dist-firmware/.
   Used by ci.yml (and through it by release.yml). Needs an ubuntu runner and a checkout of the repo.
-
-inputs:
-  source-date-epoch:
-    description: build_time.h timestamp for the gcc10 image (default = commit time of HEAD, reproducible)
-    required: false
-    default: ""
+  The image is reproducible: it depends only on the commit (hash and commit time, read from git by the
+  Makefile), so a local `make gcc10` of the same commit gives the sha256 this job prints.
 
 outputs:
   image:
@@ -49,30 +44,14 @@ runs:
       shell: bash
       run: ~/opt/gcc10/usr/bin/arm-none-eabi-gcc --version | head -1
 
-    - name: Cache Atlan's v1.00o5 reference files
-      uses: actions/cache@v5
-      with:
-        path: |
-          firmware/reference/fnirsi_1013d_v1.00o5_atlan.bin
-          firmware/reference/fnirsi_1013d_v1.00o5_atlan_sdpackage.bin
-        key: atlan-v1.00o5-${{ hashFiles('tools/make_release_sd_package.py') }}
-
-    - name: Fetch and verify Atlan's v1.00o5 reference files (sha256)
-      shell: bash
-      run: python3 -I tools/make_release_sd_package.py reference --dest firmware/reference
-
-    - name: make gcc10 (GCC 10, protocol on; the release image)
+    - name: make gcc10 (GCC 10; the release image)
       shell: bash
       working-directory: firmware/scope
-      env:
-        INPUT_EPOCH: ${{ inputs.source-date-epoch }}
       run: |
-        SOURCE_DATE_EPOCH=${INPUT_EPOCH:-$(git log -1 --format=%ct)}
-        export SOURCE_DATE_EPOCH
-        echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH ($(date -u -d "@$SOURCE_DATE_EPOCH"))"
         make -j"$(nproc)" gcc10
+        sha256sum build-gcc10-pc/fnirsi_1013d.bin
 
-    - name: make (apt GCC 13, protocol on)
+    - name: make (apt GCC 13)
       shell: bash
       working-directory: firmware/scope
       run: make -j"$(nproc)"
@@ -97,6 +76,8 @@ runs:
         cp "$img" dist-firmware/fnirsi_1013d.bin
         (cd dist-firmware && sha256sum fnirsi_1013d.bin > fnirsi_1013d.bin.sha256)
         sum=$(cut -d' ' -f1 dist-firmware/fnirsi_1013d.bin.sha256)
+        echo "firmware $ver image sha256 $sum (commit $(git rev-parse --short=8 HEAD))"
+        echo "::notice title=firmware image sha256::$ver $sum"
         {
           echo "image=$img"
           echo "sha256=$sum"
@@ -107,7 +88,7 @@ runs:
           echo ""
           echo "| build | bytes | sha256 |"
           echo "|---|---|---|"
-          for b in build-gcc10-pc build build-dbg build-gcc10; do
+          for b in build-gcc10-pc build build-dbg; do
             f=firmware/scope/$b/fnirsi_1013d.bin
             echo "| $b | $(stat -c %s "$f") | \`$(sha256sum "$f" | cut -d' ' -f1)\` |"
           done

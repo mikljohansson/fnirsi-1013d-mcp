@@ -2482,8 +2482,6 @@ void scope_trigger_settings(int mode)
 
 void scope_generator_settings(int mode)
 {
-  int8 *modetext = 0;
-  
   //buffer for text frequency
   char buffer[16];
 
@@ -2554,24 +2552,6 @@ void scope_generator_settings(int mode)
     display_set_fg_color(BLACK_COLOR);
   }
 
-  //Check on which trigger mode is set
-  switch(fpgasettings.gen_wave_select)
-  {
-    case 0:
-      modetext = "   Sine"; 
-      break;
-
-    case 1:
-      //modetext = "  Single";
-      modetext = "  Square";
-      break;
-
-    case 2:
-      //modetext = " Normal";
-      modetext = "Triangle";
-      break;
-  }
-
   //Select the font for the texts
   display_set_font(&font_2);
 
@@ -2598,13 +2578,8 @@ void scope_generator_settings(int mode)
   //display_text(GEN_BUTTON_XPOS+27, GEN_BUTTON_YPOS+2, "100%");//+30 +1
  //display_text(GEN_BUTTON_XPOS+27, GEN_BUTTON_YPOS+10, "100%");//+30 +1
 
-  //Check which generator mode is selected
-                               //SQUARE 
-  if((fpgasettings.gen_wave_select==0)&&(!mode)) display_set_fg_color(ORANGE_COLOR);
-                              //SINE
-  else if((fpgasettings.gen_wave_select==1)&&(!mode)) display_set_fg_color(GREEN_COLOR);
-                                //TRIANGLE
-  else if((fpgasettings.gen_wave_select==2)&&(!mode)) display_set_fg_color(YELLOW_COLOR);
+  //Square wave (the only one without a DAC): orange frequency text while inactive
+  if(!mode) display_set_fg_color(ORANGE_COLOR);
  
   //convert freq number to text with dot and Hz kHz MHz
   make_freq_to_text(buffer, fpgasettings.gen_freq);
@@ -3072,7 +3047,6 @@ void scope_open_channel_menu(PCHANNELSETTINGS settings)
   display_draw_horz_line(CH_MENU_YPOS +  56, xstart, xend); //56
   display_draw_horz_line(CH_MENU_YPOS + 112, xstart, xend); //112
   display_draw_horz_line(CH_MENU_YPOS + 168, xstart, xend); //168
-  if(!PC_CH_COMPACT) display_draw_horz_line(CH_MENU_YPOS + 224, xstart, xend); //224
   
   //Set channel color
   display_set_fg_color(settings->color);
@@ -3105,21 +3079,15 @@ void scope_open_channel_menu(PCHANNELSETTINGS settings)
   display_text(settings->menuxpos + 15, CH_MENU_YPOS +  10, "Open");    //12
   display_text(settings->menuxpos + 23, CH_MENU_YPOS +  29, "CH");      //31
   
-  if(!PC_CH_COMPACT)
-  {
-    display_text(settings->menuxpos + 15, CH_MENU_YPOS +  66, "Open");    //72
-    display_text(settings->menuxpos + 20, CH_MENU_YPOS +  85, "FFT");     //19 91
-  }
-  
-  display_text(settings->menuxpos + 14, CH_MENU_YPOS +  122 - PC_CH_DY, "Invert"); //13 72
-  display_text(settings->menuxpos + 23, CH_MENU_YPOS +  141 - PC_CH_DY, "CH");     //91
+  display_text(settings->menuxpos + 14, CH_MENU_YPOS +  66, "Invert"); //13 72
+  display_text(settings->menuxpos + 23, CH_MENU_YPOS +  85, "CH");     //91
   
   
-  display_text(settings->menuxpos + 15, CH_MENU_YPOS + 178 - PC_CH_DY, "Coup");    //132
-  display_text(settings->menuxpos + 19, CH_MENU_YPOS + 197 - PC_CH_DY, "ling");    //18 151
+  display_text(settings->menuxpos + 15, CH_MENU_YPOS + 122, "Coup");    //132
+  display_text(settings->menuxpos + 19, CH_MENU_YPOS + 141, "ling");    //18 151
   
-  display_text(settings->menuxpos + 15, CH_MENU_YPOS + 234 - PC_CH_DY, "V / A");   //192
-  display_text(settings->menuxpos + 12, CH_MENU_YPOS + 253 - PC_CH_DY, "mode");    //211
+  display_text(settings->menuxpos + 15, CH_MENU_YPOS + 178, "V / A");   //192
+  display_text(settings->menuxpos + 12, CH_MENU_YPOS + 197, "mode");    //211
   
   display_text(settings->menuxpos + 14, CH_MENU_YPOS + 290, "Probe");   //15 252
   display_text(settings->menuxpos + 15, CH_MENU_YPOS + 309, "mode");    //271
@@ -3143,7 +3111,6 @@ void scope_open_channel_menu(PCHANNELSETTINGS settings)
 
   //Display the actual settings
   scope_channel_enable_select(settings);
-  if(!PC_CH_COMPACT) scope_channel_fft_show(settings);
   scope_channel_invert_select(settings);
   scope_channel_coupling_select(settings);
   scope_channel_VA_select(settings);
@@ -3178,19 +3145,6 @@ void scope_channel_enable_select(PCHANNELSETTINGS settings)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void scope_channel_fft_show(PCHANNELSETTINGS settings)
-{
-  //Select the font for the texts
-  display_set_font(&font_3);
-
-  //Set dark grey color for the box behind the not selected text
-  display_set_fg_color(DARKGREY_COLOR);
-
- //Show the state (if FFT is disabled or enabled)
-  scope_display_slide_button(settings->menuxpos + 98, CH_MENU_YPOS + 74, settings->fftenable, GREEN_COLOR);//82
-}
-//----------------------------------------------------------------------------------------------------------------------------------
-
 void scope_channel_invert_select(PCHANNELSETTINGS settings)
 {
   //Select the font for the texts
@@ -3200,7 +3154,7 @@ void scope_channel_invert_select(PCHANNELSETTINGS settings)
   display_set_fg_color(DARKGREY_COLOR);
  
  //Show the state (if invert is disabled or enabled)
-  scope_display_slide_button(settings->menuxpos + 98, CH_MENU_YPOS + 130 - PC_CH_DY, settings->invert, GREEN_COLOR);//82
+  scope_display_slide_button(settings->menuxpos + 98, CH_MENU_YPOS + 74, settings->invert, GREEN_COLOR);//82
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -3217,16 +3171,16 @@ void scope_channel_coupling_select(PCHANNELSETTINGS settings)
   if(settings->coupling == 0)
   {
     //DC so dark grey box behind ac text
-    display_fill_rect(settings->menuxpos + 130, CH_MENU_YPOS + 185 - PC_CH_DY, 32, 22);//139
+    display_fill_rect(settings->menuxpos + 130, CH_MENU_YPOS + 129, 32, 22);//139
     display_set_fg_color(GREY_COLOR);//GREY_COLOR
-    display_draw_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 185 - PC_CH_DY, 32, 22, 2);
+    display_draw_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 129, 32, 22, 2);
   }
   else
   {
     //AC so dark grey box behind dc text
-    display_fill_rect(settings->menuxpos + 78, CH_MENU_YPOS + 185 - PC_CH_DY, 32, 22);//139
+    display_fill_rect(settings->menuxpos + 78, CH_MENU_YPOS + 129, 32, 22);//139
     display_set_fg_color(GREY_COLOR);//GREY_COLOR
-    display_draw_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 185 - PC_CH_DY, 32, 22, 2);
+    display_draw_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 129, 32, 22, 2);
   }
 
   //Set channel color for the box behind the selected text
@@ -3236,12 +3190,12 @@ void scope_channel_coupling_select(PCHANNELSETTINGS settings)
   if(settings->coupling == 0)
   {
     //DC so channel color box behind dc text
-    display_fill_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 185 - PC_CH_DY, 32, 22, 2);
+    display_fill_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 129, 32, 22, 2);
   }
   else
   {
     //AC so channel color box behind ac text
-    display_fill_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 185 - PC_CH_DY, 32, 22, 2);
+    display_fill_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 129, 32, 22, 2);
   }
 
   //Check if coupling is dc or ac
@@ -3266,7 +3220,7 @@ void scope_channel_coupling_select(PCHANNELSETTINGS settings)
   }
 
   //Display the DC text
-  display_text(settings->menuxpos + 85, CH_MENU_YPOS + 188 - PC_CH_DY, "DC");//145
+  display_text(settings->menuxpos + 85, CH_MENU_YPOS + 132, "DC");//145
 
   //Check if coupling is DC or AC
   if(settings->coupling == 0)
@@ -3290,7 +3244,7 @@ void scope_channel_coupling_select(PCHANNELSETTINGS settings)
   }
 
   //Display the off text
-  display_text(settings->menuxpos + 137, CH_MENU_YPOS + 188 - PC_CH_DY, "AC");//145
+  display_text(settings->menuxpos + 137, CH_MENU_YPOS + 132, "AC");//145
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -3306,16 +3260,16 @@ void scope_channel_VA_select(PCHANNELSETTINGS settings)
   if(settings->V_A == 0)
   {
     //V so dark grey box behind A text
-    display_fill_rect(settings->menuxpos + 130, CH_MENU_YPOS + 241 - PC_CH_DY, 32, 22);//199
+    display_fill_rect(settings->menuxpos + 130, CH_MENU_YPOS + 185, 32, 22);//199
     display_set_fg_color(GREY_COLOR);//GREY_COLOR
-    display_draw_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 241 - PC_CH_DY, 32, 22, 2);
+    display_draw_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 185, 32, 22, 2);
   }
   else
   {
     //A so dark grey box behind V text
-    display_fill_rect(settings->menuxpos + 78, CH_MENU_YPOS + 241 - PC_CH_DY, 32, 22);
+    display_fill_rect(settings->menuxpos + 78, CH_MENU_YPOS + 185, 32, 22);
     display_set_fg_color(GREY_COLOR);//GREY_COLOR
-    display_draw_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 241 - PC_CH_DY, 32, 22, 2);
+    display_draw_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 185, 32, 22, 2);
   }
 
   //Set channel color for the box behind the selected text
@@ -3325,12 +3279,12 @@ void scope_channel_VA_select(PCHANNELSETTINGS settings)
   if(settings->V_A == 0)
   {
     //V so channel color box behind V text
-    display_fill_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 241 - PC_CH_DY, 32, 22, 2);
+    display_fill_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 185, 32, 22, 2);
   }
   else
   {
     //A so channel color box behind A text
-    display_fill_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 241 - PC_CH_DY, 32, 22, 2);
+    display_fill_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 185, 32, 22, 2);
   }
 
   //Check if measures is V or A
@@ -3355,7 +3309,7 @@ void scope_channel_VA_select(PCHANNELSETTINGS settings)
   }
 
   //Display the V text
-  display_text(settings->menuxpos + 90, CH_MENU_YPOS + 244 - PC_CH_DY, "V");//85 202
+  display_text(settings->menuxpos + 90, CH_MENU_YPOS + 188, "V");//85 202
 
   //Check if measures is V or A
   if(settings->V_A == 0)
@@ -3379,7 +3333,7 @@ void scope_channel_VA_select(PCHANNELSETTINGS settings)
   }
 
   //Display the off text
-  display_text(settings->menuxpos + 142, CH_MENU_YPOS + 244 - PC_CH_DY, "A");//137 202
+  display_text(settings->menuxpos + 142, CH_MENU_YPOS + 188, "A");//137 202
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -5127,12 +5081,8 @@ void scope_open_keyboard_menu(void)
   //Select the font for the texts
   display_set_font(&font_3);//3
 
-  if(holdoffmenuopen)     display_text(KEY_MENU_XPOS + 20, KEY_MENU_YPOS + 7, "TRIGGER                   Set hold off time");//117
-  else if(freqmenuopen)   display_text(KEY_MENU_XPOS + 20, KEY_MENU_YPOS + 7, "GENERATOR                 Set frequency");//117
+  if(freqmenuopen)   display_text(KEY_MENU_XPOS + 20, KEY_MENU_YPOS + 7, "GENERATOR                 Set frequency");//117
   else if(dutymenuopen)   display_text(KEY_MENU_XPOS + 20, KEY_MENU_YPOS + 7, "GENERATOR                 Set duty");//117
-  else if(amplmenuopen)   display_text(KEY_MENU_XPOS + 20, KEY_MENU_YPOS + 7, "GENERATOR                 Set amplitude");//117
-  else if(offsetmenuopen) display_text(KEY_MENU_XPOS + 20, KEY_MENU_YPOS + 7, "GENERATOR                 Set offset");//117
-  else if(phasemenuopen)  display_text(KEY_MENU_XPOS + 20, KEY_MENU_YPOS + 7, "GENERATOR                 Set phase");//117
   
   //display_text(KEY_MENU_XPOS +  97, KEY_MENU_YPOS + 216, "Time per Division");//166
   
@@ -5329,13 +5279,6 @@ void scope_open_acquisition_menu(void)
     display_text(ACQ_MENU_XPOS + 20, ACQ_MENU_YPOS +  182, "Short mode");
   }
   PC_ROLL_LABEL();
-  /*
-  if (scopesettings.long_memory)
-  //Set black color for the text
-  display_set_fg_color(BLACK_COLOR); else display_set_fg_color(WHITE_COLOR);
-  display_text(ACQ_MENU_XPOS + 235, ACQ_MENU_YPOS +  168, "Long");
-  display_text(ACQ_MENU_XPOS + 225, ACQ_MENU_YPOS +  182, "memory");
-   */
   
   //display_set_fg_color(WHITE_COLOR);
   //***************************************************************
@@ -5345,8 +5288,8 @@ void scope_open_acquisition_menu(void)
   scope_acquisition_timeperdiv_select();
   //scope_acquisition_ACQ_mode_select();
   scope_acquisition_Average_mode_select();
-  scope_acquisition_Long_memory_select();
-  
+  PC_UI_MASK(PC_MASK_ACQ_FILTER);    //the decimation Filter box (bitstream 0x1534+) in 1.00o5's Long memory slot
+
   scope_acquisition_memory_deep_select();
   scope_acquisition_trace_select();
 
@@ -5589,55 +5532,6 @@ void scope_acquisition_Average_mode_select(void)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-void scope_acquisition_Long_memory_select(void)
-{                  
-    if ((scopesettings.long_memory)&&(!scopesettings.long_mode))
-    {
-        //Set dark grey color for the boxes behind the not selected texts
-        display_set_fg_color(GREEN_COLOR);
-        //Clear the boxes for the not selected items (Long_memory)
-        display_fill_rounded_rect(ACQ_MENU_XPOS + 204, ACQ_MENU_YPOS + 163, 90, 40, 3);
-        //Texts in black
-        display_set_fg_color(BLACK_COLOR);        
-
-    }
-    else
-    {
-        //Set dark grey color for the boxes behind the not selected texts
-        display_set_fg_color(LIGHTGREY_COLOR);
-        //Clear the boxes for the not selected items (Average)
-        display_fill_rounded_rect(ACQ_MENU_XPOS + 204, ACQ_MENU_YPOS + 163, 90, 40, 3);
-        //Texts in white
-        display_set_fg_color(WHITE_COLOR); 
-    }
-    
-    /*
-     * 
-     *   //Clear the boxes for the not selected items (ACQ, Average, Long memory)
-  display_fill_rect(ACQ_MENU_XPOS +   8, ACQ_MENU_YPOS + 163, 90, 40);
-  //display_fill_rect(ACQ_MENU_XPOS + 106, ACQ_MENU_YPOS + 163, 90, 40);
-  display_fill_rect(ACQ_MENU_XPOS + 204, ACQ_MENU_YPOS + 163, 90, 40);
-     * 
-     * 
-       if (scopesettings.long_memory)
-  //Set black color for the text
-  display_set_fg_color(BLACK_COLOR); else display_set_fg_color(WHITE_COLOR);
-  display_text(ACQ_MENU_XPOS + 235, ACQ_MENU_YPOS +  168, "Long");
-  display_text(ACQ_MENU_XPOS + 225, ACQ_MENU_YPOS +  182, "memory");
-     
-     */
-    
-    //Select the font for the texts
-    display_set_font(&font_2);
-  
-    //Display long memory text
-    display_text(ACQ_MENU_XPOS + 235, ACQ_MENU_YPOS +  168, "Long");
-    display_text(ACQ_MENU_XPOS + 225, ACQ_MENU_YPOS +  182, "memory");     
-
-  PC_UI_MASK(PC_MASK_ACQ_LONG);
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
 
 void scope_acquisition_memory_deep_select(void)
 {                  
@@ -5789,7 +5683,6 @@ void scope_open_trigger_menu(void)
   display_draw_horz_line(158, xstart, xend);//158//716
   display_draw_horz_line(214, xstart, xend);////214 716
   display_draw_horz_line(270, xstart, xend);////270 716
-  if(!PC_TRIG_COMPACT) display_draw_horz_line(326, xstart, xend);////270 716
 
   //Main texts in white
   display_set_fg_color(WHITE_COLOR);
@@ -5808,17 +5701,11 @@ void scope_open_trigger_menu(void)
   display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+178, "Trigger");//224
   display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+197, "position");//243 position 
   
-  if(!PC_TRIG_COMPACT)
-  {
-    display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+234, "Hold");//280
-    display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+253, "off");//299
-  }
-  
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+290-PC_TRIG_DY, "Always");//224
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+309-PC_TRIG_DY, "50%");//243
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+234, "Always");//224
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+253, "50%");//243
   
   //Display the icon with the set colors
-  display_copy_icon_use_colors(trigger_50_percent_icon, TRIGGER_MENU_XPOS+75, TRIGGER_MENU_YPOS+294-PC_TRIG_DY, 24, 24);//296 //184
+  display_copy_icon_use_colors(trigger_50_percent_icon, TRIGGER_MENU_XPOS+75, TRIGGER_MENU_YPOS+238, 24, 24);//296 //184
 
   //Display the actual settings
   scope_trigger_mode_select();
@@ -6387,7 +6274,7 @@ void scope_always_trigger50_select(void)
   //display_set_fg_color(DARKGREY_COLOR); //treba? 21.11.2025
   
   //Show the state (if always trige 50 on or off)
-  scope_display_slide_button(TRIGGER_MENU_XPOS + 140, TRIGGER_MENU_YPOS + 296 - PC_TRIG_DY, scopesettings.alwaystrigger50, GREEN_COLOR);//140 186
+  scope_display_slide_button(TRIGGER_MENU_XPOS + 140, TRIGGER_MENU_YPOS + 240, scopesettings.alwaystrigger50, GREEN_COLOR);//140 186
 }
 
 //==============================================================================
@@ -6454,13 +6341,6 @@ void scope_open_generator_menu(void)
   display_set_fg_color(BLACK_COLOR);
   display_draw_horz_line(102, xstart, xend);//
   display_draw_horz_line(158, xstart, xend);//
-  if(!PC_GEN_COMPACT)
-  {
-    display_draw_horz_line(214, xstart, xend);//
-    display_draw_horz_line(270, xstart, xend);//
-    display_draw_horz_line(326, xstart, xend);//
-    display_draw_horz_line(382, xstart, xend);//
-  }
 
   //Main texts in white
   display_set_fg_color(WHITE_COLOR);
@@ -6470,12 +6350,8 @@ void scope_open_generator_menu(void)
 
   //Display the texts
   display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+20,  "Power");//
-  if(!PC_GEN_COMPACT) display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+76,  "Wave");// 
-  display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+132-PC_GEN_DY, "Freq");//
-  display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+188-PC_GEN_DY, "Duty");//
-  if(!PC_GEN_COMPACT) display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+244, "Ampl");// 
-  if(!PC_GEN_COMPACT) display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+300, "Offset");//
-  if(!PC_GEN_COMPACT) display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+356, "Phase");//
+  display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+76, "Freq");//
+  display_text(GEN_MENU_XPOS+10, GEN_MENU_YPOS+132, "Duty");//
   
    //display_copy_icon_use_colors ramik olkolo ikony generatora
   //display_draw_rounded_rect(GEN_MENU_XPOS+77, GEN_MENU_YPOS+11, 30, 32, 2);
@@ -6491,15 +6367,8 @@ void scope_open_generator_menu(void)
 
   //Display the actual settings
   gen_enable_select(); //gen_source_select();
-  if(!PC_GEN_COMPACT) gen_wave_select();
   gen_freq_select();
   gen_duty_select();
-  if(!PC_GEN_COMPACT)
-  {
-    gen_ampl_select();
-    gen_offset_select();
-    gen_phase_select();
-  }
   
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1
@@ -6530,114 +6399,6 @@ void gen_enable_select(void) //genmenuopen
   
 }
 //==============================================================================
-void gen_wave_select(void) //genmenuopen
-{
-  //Select the font for the texts
-  display_set_font(&font_3);
-
-  //Set dark grey color for the boxes behind the not selected texts
-  display_set_fg_color(DARKGREY_COLOR);
-  
-  //Check which generator mode is selected
-  switch(fpgasettings.gen_wave_select)
-  {
-    case 0:                                  //SINE
-      //dark grey SINE and TRIANGLE
-      display_fill_rounded_rect(GEN_MENU_XPOS+117, GEN_MENU_YPOS+73, 38, 22, 2);//36 57 20 38
-      display_fill_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+73, 42, 22, 2);
-      display_set_fg_color(GREY_COLOR);//GREY_COLOR
-      display_draw_rounded_rect(GEN_MENU_XPOS+117, GEN_MENU_YPOS+73, 38, 22, 2);//628 57 20 38
-      display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+73, 42, 22, 2);//692 56
-      break;//SINE
-
-
-    case 1:                                 //SQUARE
-      //dark grey SQUARE and TRIANGLE
-      display_fill_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS+73, 42, 22, 2);//65 17na74 47 22
-      display_fill_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+73, 42, 22, 2);//54 56
-      display_set_fg_color(GREY_COLOR);//GREY_COLOR
-      display_draw_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS+73, 42, 22, 2);//47 56
-      display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+73, 42, 22, 2);//54 56
-      break;
-
-    default:                                //TRIANGLE
-      //dark grey SINE and SQUARE
-      display_fill_rounded_rect(GEN_MENU_XPOS+65, GEN_MENU_YPOS+73, 42, 22, 2);//629 57 20 38
-      display_fill_rounded_rect(GEN_MENU_XPOS+117, GEN_MENU_YPOS+73, 38, 22, 2);//661
-      display_set_fg_color(GREY_COLOR);//GREY_COLOR
-      display_draw_rounded_rect(GEN_MENU_XPOS+65, GEN_MENU_YPOS+73, 42, 22, 2);//661 56
-      display_draw_rounded_rect(GEN_MENU_XPOS+117, GEN_MENU_YPOS+73, 38, 22, 2);//661
-      break;
-  }
-
-  switch(fpgasettings.gen_wave_select)
-  {
-    case 0:
-      //Highlight SQUARE mode
-      display_set_fg_color(ORANGE_COLOR); 
-      display_fill_rounded_rect(GEN_MENU_XPOS+65, GEN_MENU_YPOS+73, 42, 22, 2);//661 68 101 132
-      break;
-      
-    case 1:
-      //Highlight SINE mode
-      display_set_fg_color(GREEN_COLOR);  
-      display_fill_rounded_rect(GEN_MENU_XPOS+117, GEN_MENU_YPOS+73, 38, 22, 2);//629 57 20 38
-      break;
-
-    default:
-      //Highlight TRIANGLE mode
-      display_set_fg_color(YELLOW_COLOR);//DARKGREEN_COLOR
-      display_fill_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+73, 42, 22, 2);//692
-      break;
-  }
-
-  //Check if generator mode is square
-  if(fpgasettings.gen_wave_select == 0)
-  {
-    //Yes so black square text
-    display_set_fg_color(BLACK_COLOR);
-  }
-  else
-  {
-    //White square text if in normal mode
-    display_set_fg_color(WHITE_COLOR);
-  }
-  
-  //Display the single text
-  display_text(GEN_MENU_XPOS+67, GEN_MENU_YPOS+76,  "SQUR");//71
-
-  //Check if generator mode is sine
-  if(fpgasettings.gen_wave_select == 1)
-  {
-    //Yes so black sine text
-    display_set_fg_color(BLACK_COLOR);
-  }
-  else
-  {
-    //White sine text if in generator mode
-    display_set_fg_color(WHITE_COLOR);
-  }
-  
-  //Display the sine text
-  display_text(GEN_MENU_XPOS+121, GEN_MENU_YPOS+76, "SINE");//123
-
-
-  //Check if generator mode is triangle
-  if(fpgasettings.gen_wave_select == 2)
-  {
-    //Yes so black normal text
-    display_set_fg_color(BLACK_COLOR);
-  }
-  else
-  {
-    //White normal text if in triangle mode
-    display_set_fg_color(WHITE_COLOR); 
-  }
-
-  //Display the triangle text
-  display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS+76,  "TRGL");//695 155 33
-}
-//==============================================================================
 void gen_freq_select(void)
 {  
   //buffer for text frequency
@@ -6650,22 +6411,22 @@ void gen_freq_select(void)
   display_set_fg_color(DARKGREY_COLOR);
   
   //dark grey 
-  display_fill_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS-PC_GEN_DY+129, 92, 22, 2);//69-129-88-22-2//65 17na74 47 22      
-  display_fill_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS-PC_GEN_DY+129, 42, 22, 2);//692 56
+  display_fill_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS+73, 92, 22, 2);//69-129-88-22-2//65 17na74 47 22      
+  display_fill_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+73, 42, 22, 2);//692 56
       
   display_set_fg_color(GREEN_COLOR);
-  display_draw_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS-PC_GEN_DY+129, 92, 22, 2);
+  display_draw_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS+73, 92, 22, 2);
   display_set_fg_color(GREY_COLOR);
-  display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS-PC_GEN_DY+129, 42, 22, 2);//692 56
+  display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+73, 42, 22, 2);//692 56
 
   //White normal text if in normal mode
   display_set_fg_color(WHITE_COLOR);
 
   make_freq_to_long_text(buffer, fpgasettings.gen_freq);
-  display_text(GEN_MENU_XPOS + 68, GEN_MENU_YPOS-PC_GEN_DY + 132, buffer);
+  display_text(GEN_MENU_XPOS + 68, GEN_MENU_YPOS+76, buffer);
 
   //Display the normal text
-  display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS-PC_GEN_DY+132, "1 kHz");//695 155 33
+  display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS+76, "1 kHz");//695 155 33
 }
 //==============================================================================
 void gen_duty_select(void)
@@ -6681,14 +6442,14 @@ void gen_duty_select(void)
   //Set dark grey color for the boxes behind the not selected texts
   display_set_fg_color(DARKGREY_COLOR);
 
-  display_fill_rounded_rect(GEN_MENU_XPOS+90,  GEN_MENU_YPOS-PC_GEN_DY+185, 42, 22, 2);//69-129-88-22-2//65 17na74 47 22      
-  display_fill_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS-PC_GEN_DY+185, 42, 22, 2);//692 56
+  display_fill_rounded_rect(GEN_MENU_XPOS+90,  GEN_MENU_YPOS+129, 42, 22, 2);//69-129-88-22-2//65 17na74 47 22      
+  display_fill_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+129, 42, 22, 2);//692 56
       
   display_set_fg_color(YELLOW_COLOR);
-  //display_draw_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS-PC_GEN_DY+185, 92, 22, 2);
-  display_draw_rounded_rect(GEN_MENU_XPOS+90,  GEN_MENU_YPOS-PC_GEN_DY+185, 42, 22, 2);//65//90
+  //display_draw_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS+129, 92, 22, 2);
+  display_draw_rounded_rect(GEN_MENU_XPOS+90,  GEN_MENU_YPOS+129, 42, 22, 2);//65//90
   display_set_fg_color(GREY_COLOR);
-  display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS-PC_GEN_DY+185, 42, 22, 2);//692 56
+  display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+129, 42, 22, 2);//692 56
 
   //White normal text if in normal mode
   display_set_fg_color(WHITE_COLOR);
@@ -6697,121 +6458,13 @@ void gen_duty_select(void)
     //fpga_set_generator_duty(fpgasettings.gen_duty);  //in Hz
 
   make_value_to_text(buffer, fpgasettings.gen_duty, '%');
-  display_text(GEN_MENU_XPOS + 95, GEN_MENU_YPOS-PC_GEN_DY + 188, buffer);//70
+  display_text(GEN_MENU_XPOS + 95, GEN_MENU_YPOS+132, buffer);//70
 
   //Display the normal text
-  display_text(GEN_MENU_XPOS+175, GEN_MENU_YPOS-PC_GEN_DY+188, "50%");//175
-//display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS-PC_GEN_DY+132,  "1 kHz");//695 155 33
+  display_text(GEN_MENU_XPOS+175, GEN_MENU_YPOS+132, "50%");//175
+//display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS+76,  "1 kHz");//695 155 33
   
 }
-//==============================================================================
-void gen_ampl_select(void)
-{  
-  //buffer for text frequency
-  char buffer[16];
-   
-  //Select the font for the texts
-  display_set_font(&font_3);
-
-  //Set dark grey color for the boxes behind the not selected texts
-  display_set_fg_color(DARKGREY_COLOR);
-                                //SINE
-  //dark grey SQUARE and TRIANGLE
-  display_fill_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS+241, 92, 22, 2);//69-129-88-22-2//65 17na74 47 22      
-  display_fill_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+241, 42, 22, 2);//692 56
-      
-  display_set_fg_color(RED_COLOR);
-  display_draw_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS+241, 92, 22, 2);
-  display_set_fg_color(GREY_COLOR);
-  display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+241, 42, 22, 2);//692 56
-
-  //White normal text if in normal mode
-  display_set_fg_color(WHITE_COLOR);
-  
-      //extern uint32 a,b,c,d,e,f,g,h,i,j,k;
-  
-
-  make_volt_to_long_text(buffer, fpgasettings.gen_ampl);
-  //my_strcat(buffer, " V");
-  display_text(GEN_MENU_XPOS + 80, GEN_MENU_YPOS + 244, buffer);//+3 //68 //80
-
-  //Display the normal text
-  display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS+244, "5.00V");//695 155 33
-}
-//==============================================================================
-void gen_offset_select(void)
-{  
-  //buffer for text frequency
-  char buffer[16];
-   
-  //Select the font for the texts
-  display_set_font(&font_3);
-
-  //Set dark grey color for the boxes behind the not selected texts
-  display_set_fg_color(DARKGREY_COLOR);
-                                //SINE
-  //dark grey SQUARE and TRIANGLE
-  display_fill_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS+297, 92, 22, 2);//69-129-88-22-2//65 17na74 47 22      
-  display_fill_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+297, 42, 22, 2);//692 56
-      
-  display_set_fg_color(BLUE_COLOR);
-  display_draw_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS+297, 92, 22, 2);
-  display_set_fg_color(GREY_COLOR);
-  display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+297, 42, 22, 2);//692 56
-
-  //White normal text if in normal mode
-  display_set_fg_color(WHITE_COLOR);
-
-        //extern uint32 a,b,c,d,e,f,g,h,i,j,k;
-        //fpgasettings.gen_offset=f;
-        
-  make_volt_to_long_text(buffer, fpgasettings.gen_offset);
-  //my_strcat(buffer, " V");
-  display_text(GEN_MENU_XPOS + 80, GEN_MENU_YPOS + 300, buffer);//68-300
-
-  //Display the normal text
-  display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS+300,  "2.50V");//695 155 33
-}
-//==============================================================================
-void gen_phase_select(void)
-{  
-  //buffer for text frequency
-  char buffer[16];
-   
-  //Select the font for the texts
-  display_set_font(&font_3);
-
-    //Set dark grey color for the boxes behind the not selected texts
-  display_set_fg_color(DARKGREY_COLOR);
-                                //SINE
-  //dark grey SQUARE and TRIANGLE
-  display_fill_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS+353, 92, 22, 2);//69-129-88-22-2//65 17na74 47 22      
-  display_fill_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+353, 42, 22, 2);//692 56
-      
-  display_set_fg_color(ORANGE_COLOR);
-  display_draw_rounded_rect(GEN_MENU_XPOS+65,  GEN_MENU_YPOS+353, 92, 22, 2);
-  display_set_fg_color(GREY_COLOR);
-  display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+353, 42, 22, 2);//692 56
-
-  //White normal text if in normal mode
-  display_set_fg_color(WHITE_COLOR);
-
-  //extern uint32 a,b,c,d,e,f,g,h,i,j,k;
-  //fpgasettings.gen_phase=k;
-      
-  make_value_to_text(buffer, fpgasettings.gen_phase, 176); //176 is °
-  //my_strcat(buffer, " p");
-  display_text(GEN_MENU_XPOS + 100, GEN_MENU_YPOS + 356, buffer);//68 //85
-  
-
-  //Display the normal text
-  display_text(GEN_MENU_XPOS+182, GEN_MENU_YPOS+356,  "0");//169//172
-  display_character(GEN_MENU_XPOS+182+8, GEN_MENU_YPOS+356, 176);//-1 ma byt //198
-  
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
 void scope_open_system_settings_menu(void)
 {
   int y;
@@ -7449,7 +7102,6 @@ void scope_system_settings_RTC_settings_item(int mode)//set
   
   //Read time for RTC
   get_fattime();
-  PC_UI_MASK(PC_MASK_SYS_RTC);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

@@ -742,12 +742,9 @@ void scope_acquire_trace_data(void)
     //fpga_set_time_base(scopesettings.timeperdiv); 2.12 move to reset window
 
     //Sampling with trigger circuit enabled (standard memory mode)
-    //if(scopesettings.long_memory) scopesettings.samplemode = 0; else scopesettings.samplemode = 1;
 
-#if PC_PROTOCOL
     //Decimation filter (0x1534+): this conversion uses the UI's Filter setting
     pc_glue_ui_decim_arm();
-#endif
 
     //Start the conversion
     fpga_do_conversion();
@@ -839,10 +836,8 @@ void scope_acquire_trace_data(void)
       }
     }
 
-#if PC_PROTOCOL
     //16-bit layout (decimation filter on): one sample per word, start = (0x14 - pretrigger) mod 8192
     data = pc_glue_decim_ui_start(data);
-#endif
     
     //display_decimal(550, 20, data);
 
@@ -854,7 +849,6 @@ void scope_acquire_trace_data(void)
       
     */
         
-    //if(scopesettings.long_memory) data=10;
    
     //Only need a single count variable for both channels, since they run on the same sample rate
     //This can be changed to a global define
@@ -933,11 +927,9 @@ void scope_process_trigger(uint32 count)
 
    disp_have_trigger = 0;
 
-#if PC_PROTOCOL
   //EXT trigger: no level crossing to refine in the traces; the hardware trigger position stands
   if(scopesettings.triggerchannel == 2)
     return;
-#endif
   
   //Set a starting point for checking on trigger
   //Count is half a sample buffer!!
@@ -4729,7 +4721,6 @@ void scope_restore_setup_from_file(void)
   scopesettings.long_mode        = ptr[index++];
   scopesettings.average_mode     = ptr[index++];
   scopesettings.ACQ_trace        = ptr[index++];
-  //scopesettings.long_memory      = 0;           //docasne zrusene
 
   index = CURSOR_SETTING_OFFSET;
   
@@ -6939,18 +6930,12 @@ void scope_reset_config_data(void)
   //----------------------------------------------------------------------------
   
   fpgasettings.gen_enable       = 1;    //1 is enable
-  fpgasettings.gen_wave_select  = 0;    //0-square, 1-sine, 2-triangle
   fpgasettings.gen_freq         = 1000; //1kHz                      //int32 !!!
   fpgasettings.gen_duty         = 50;   //50%
-  fpgasettings.gen_ampl         = 3280; //3.280V
-  fpgasettings.gen_offset       = 350;  //350mV
-  fpgasettings.gen_phase        = 0;    //0                      
 
 
   fpgasettings.totalsamples           = 3000; //Set max samples in FPGA       (1500*2)
   fpgasettings.settriggerpoint        = 1500; //Set start triger point in FPGA (750*2)
-  fpgasettings.en_holdoff_trigger     = 0;    //0-holdoff disable
-  fpgasettings.value_holdoff_trigger  = 1000; //1000 is 1sec
 
   
   //----------------------------------------------------------------------------
@@ -7149,20 +7134,19 @@ void scope_save_config_data(void)
   ptr = &settingsworkbuffer[FPGA_SETTING_OFFSET];
   
   *ptr++ = fpgasettings.gen_enable;
-  *ptr++ = fpgasettings.gen_wave_select;   
+  *ptr++ = 0;                                 //retired slot: 1.00o5 generator wave (no DAC)
   *ptr++ = fpgasettings.gen_freq >> 16;       //int32 !!!
   *ptr++ = fpgasettings.gen_freq & 0xFFFF;    //int32 !!!
   *ptr++ = fpgasettings.gen_duty;   
-  *ptr++ = fpgasettings.gen_ampl;         
-  *ptr++ = fpgasettings.gen_offset;      
-  *ptr++ = fpgasettings.gen_phase;         
+  *ptr++ = 0;                                 //retired slots: 1.00o5 generator amplitude, offset, phase (no DAC)
+  *ptr++ = 0;
+  *ptr++ = 0;
   
   *ptr++ = fpgasettings.totalsamples;
   *ptr++ = fpgasettings.settriggerpoint;
-  *ptr++ = fpgasettings.en_holdoff_trigger;
-  *ptr++ = fpgasettings.value_holdoff_trigger; 
+  *ptr++ = 0;                                 //retired slots: 1.00o5 trigger hold-off enable, value (never sent to the FPGA)
+  *ptr++ = 0;
 
-#if PC_PROTOCOL
   //Acquisition Filter setting (decimation filter, 0x1534+) in a spare word of the FPGA block
   settingsworkbuffer[PC_SETTING_WORD_DECIM] = pc_glue_decim_setting_word();
   //Spectrum view settings (FFT length, window, scale, ref level)
@@ -7170,7 +7154,6 @@ void scope_save_config_data(void)
   settingsworkbuffer[PC_SETTING_WORD_SPEC1] = pc_glue_spectrum_setting_word(1);
   //Phosphor view settings (persistence, palette)
   settingsworkbuffer[PC_SETTING_WORD_PHOS] = pc_glue_phosphor_setting_word();
-#endif
   
   
 //-----------------------------------------------------------------
@@ -7268,7 +7251,6 @@ void scope_restore_config_data(void)
     scopesettings.long_mode        = *ptr++;
     scopesettings.average_mode     = *ptr++; 
     scopesettings.ACQ_trace      = *ptr++;
-    //scopesettings.long_memory      = 0;           //docasne zrusene, aj v file setup zrusene
     scopesettings.new_autosetup    = *ptr++;
     scopesettings.maxlight         = *ptr++;
     scopesettings.ref1             = *ptr++;     
@@ -7339,19 +7321,16 @@ void scope_restore_config_data(void)
   ptr = &settingsworkbuffer[FPGA_SETTING_OFFSET];
     
   fpgasettings.gen_enable       = *ptr++;  
-  fpgasettings.gen_wave_select  = *ptr++;   
+  ptr++;                                      //retired slot: generator wave
   tmp                           = *ptr++; 
   fpgasettings.gen_freq         = tmp << 16;
   fpgasettings.gen_freq         += *ptr++;    //int32 !!!
   fpgasettings.gen_duty         = *ptr++;
-  fpgasettings.gen_ampl         = *ptr++;         
-  fpgasettings.gen_offset       = *ptr++;      
-  fpgasettings.gen_phase        = *ptr++; 
+  ptr += 3;                                   //retired slots: generator amplitude, offset, phase
 
   fpgasettings.totalsamples           = *ptr++;
   fpgasettings.settriggerpoint        = *ptr++;
-  fpgasettings.en_holdoff_trigger     = *ptr++;
-  fpgasettings.value_holdoff_trigger  = *ptr++;
+  ptr += 2;                                   //retired slots: trigger hold-off
   
   //---------------------------------------------------------------------------- 
   }

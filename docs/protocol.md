@@ -1021,7 +1021,7 @@ differs from or fills a gap in sections 1-13. Hosts written against this documen
 - The UI's own acquisition is unchanged: the 1.00o5 `T + 7441` pointer shortcut and the unbounded 0x05 wait stay
   in the UI path (the wait now services USB every 65,536 polls). The modular formula and the bounded wait are
   used for host ARM and for the geometry the protocol reports (1.3: also for UI captures).
-- Shared control hooks (v0.2.0, all compile away with PC_PROTOCOL=0): `fpga_do_conversion` ends with
+- Shared control hooks (v0.2.0): `fpga_do_conversion` ends with
   PC_UI_CAPTURE_START (a UI conversion started: the ring no longer holds the last capture, a host single is
   aborted, the capture's settings are latched); `scope_acquire_trace_data` reports the raw 0x14 word
   (PC_UI_CAPTURE_ADDR, which also reads 0x18) and the finished readout (PC_UI_CAPTURE_DONE, counted once per

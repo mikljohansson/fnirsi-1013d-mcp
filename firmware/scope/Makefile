@@ -7,21 +7,18 @@
 #   link     arm-none-eabi-gcc -o elf $(OBJS) -T./fnirsi_1013d.ld -nostdlib -lgcc
 #   post     objcopy -O binary elf bin ; ./mksunxi bin
 # The upstream post-build copies to Atlan's own SD-card mount points and runs
-# sudo sunxi-fel; those steps are not reproduced (see `make fel`/`package`).
+# sudo sunxi-fel; those steps are not reproduced (see `make fel`; SD packages:
+# tools/make_release_sd_package.py).
 #
 #   make                build/fnirsi_1013d.elf, build/fnirsi_1013d.bin
-#   make package        build/fnirsi_1013d_sdpackage.bin (scope overlaid on a
-#                       bootloader+updater base at 0x5BC00 = sector 750)
 #   make fel            load build/fnirsi_1013d.bin into DRAM over FEL
-#   make check-reference  rebuild with Atlan's GCC 10.3.1 and compare with
-#                       ../reference/fnirsi_1013d_v1.00o5_atlan.bin
 #   make clean
 #   make V=1            show full commands
-#   make SOURCE_DATE_EPOCH=<unix time>   reproducible build_time.h (UTC)
+#   make PC_FW_BUILD=<8 hex> SOURCE_DATE_EPOCH=<unix time>   identity without git
 #   make CROSS_COMPILE=/opt/gcc-arm-10.3/bin/arm-none-eabi-   other toolchain
-#   make PC_PROTOCOL=0  build without the USB control protocol (= Atlan's v1.00o5)
 #   make PC_DEBUG=1     protocol bench build: DEBUG_FPGA and FORCE enabled
-#   make gcc10          PC_PROTOCOL build with Atlan's GCC 10.3.1 (build-gcc10-pc/)
+#   make gcc10          the release image, Atlan's GCC 10.3.1 (build-gcc10-pc/)
+#   make gcc10-nommu    the same with the MMU left off (fw 0.2.48 A/B, build-gcc10-nommu/)
 
 CROSS_COMPILE ?= arm-none-eabi-
 CC      := $(CROSS_COMPILE)gcc
@@ -40,12 +37,6 @@ ELF     := $(BUILD)/$(TARGET).elf
 RAWBIN  := $(BUILD)/$(TARGET)_raw.bin
 BIN     := $(BUILD)/$(TARGET).bin
 MAP     := $(BUILD)/$(TARGET).map
-PKG     := $(BUILD)/$(TARGET)_sdpackage.bin
-
-# Base image for `make package`: Atlan's SD package (bootloader v0.8 at +0,
-# updater v0.02v at +0x8000). Same as upstream overlaying dist/.../fnirsi_1013d.bin.
-PACKAGE_BASE     ?= ../reference/fnirsi_1013d_v1.00o5_atlan_sdpackage.bin
-PACKAGE_LOCATION := 0x5BC00
 
 # Link order = nbproject/Makefile-Debug.mk OBJECTFILES order. It determines
 # the memory layout, keep it. Not built upstream (and not here): font_6.c,
@@ -59,30 +50,36 @@ SRCS := \
 	sd_card_interface.c sin_cos_math.c spi_control.c start.s statemachine.c \
 	test.c timer.c touchpanel.c usb_interface.c variables.c adc_cal.c spec_fmt.c
 
-# USB control protocol (docs/protocol.md, firmware/README.md). Linked after the
-# upstream objects so the upstream part of the layout keeps its order.
-#   PC_PROTOCOL=0  hooks compile to nothing, image identical to upstream
+# USB control protocol and the views built on it (docs/protocol.md, firmware/README.md),
+# linked after the upstream objects. Options:
 #   PC_DEBUG=1     DEBUG_FPGA + FORCE (bench builds only)
 #   PC_FORCE_CDC=1 CDC at boot even when the saved USB setting says MSC
 #   PC_FIFO_MAP=n  USB endpoint FIFO layout (pc_transport.h), 0 default, 1 OUT FIFO at 1536
-PC_PROTOCOL  ?= 1
+#   PC_MMU=0       fw 0.2.48: leave the MMU off (D-cache ineffective, the pre-0.2.48 state), version suffix -nommu
+#   PC_MMU_SRAM=0  map SRAM A strongly ordered instead of write-back (FFT_BENCH A/B)
 PC_DEBUG     ?= 0
 PC_FORCE_CDC ?= 1
 PC_FIFO_MAP  ?= 0
-#   PC_MMU=0       fw 0.2.48: leave the MMU off (D-cache ineffective, the pre-0.2.48 state), version suffix -nommu
-#   PC_MMU_SRAM=0  map SRAM A strongly ordered instead of write-back (FFT_BENCH A/B)
 PC_MMU       ?= 1
 PC_MMU_SRAM  ?= 1
-ifeq ($(PC_PROTOCOL),1)
 SRCS += pc_protocol.c pc_cmds.c pc_transport.c pc_hal_scope.c fx_fft.c fx_fft_tables.c spectrum.c pc_decim.c phos_map.c phosphor.c pc_mmu.c
-PC_FW_BUILD := $(shell git rev-parse --short=8 HEAD 2>/dev/null)
-ifeq ($(PC_FW_BUILD),)
-PC_FW_BUILD := 00000000
-endif
-PC_DEFS := -DPC_PROTOCOL=1 -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FW_BUILD=0x$(PC_FW_BUILD)u -DPC_FIFO_MAP=$(PC_FIFO_MAP) \
+# Last: the identity data (build_id.c), so its bytes are the only ones a new commit changes.
+SRCS += build_id.c
+PC_DEFS := -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FIFO_MAP=$(PC_FIFO_MAP) \
            -DPC_MMU=$(PC_MMU) -DPC_MMU_SRAM=$(PC_MMU_SRAM)
-else
-PC_DEFS := -DPC_PROTOCOL=0
+
+# ----------------------------------------------------------------- identity
+# The image depends only on the source, the toolchain and the commit: the identity is the commit hash
+# (PC_FW_BUILD) and the commit time (SOURCE_DATE_EPOCH, also the RTC default), both read from git, never the
+# wall clock or the build directory. In a worktree whose .git file holds a Windows path (D:/...), WSL's git
+# cannot follow it, so the gitdir is translated to /mnt/d/... . Without git pass both values by hand.
+GIT_WSLDIR := $(shell sed -n 's|^gitdir: \([A-Za-z]\):/\(.*\)|/mnt/\L\1\E/\2|p' ../../.git 2>/dev/null)
+GIT := git$(if $(wildcard $(GIT_WSLDIR)), --git-dir=$(GIT_WSLDIR))
+ifeq ($(origin PC_FW_BUILD),undefined)
+PC_FW_BUILD := $(shell $(GIT) rev-parse --short=8 HEAD 2>/dev/null)
+endif
+ifeq ($(origin SOURCE_DATE_EPOCH),undefined)
+SOURCE_DATE_EPOCH := $(shell $(GIT) log -1 --format=%ct 2>/dev/null)
 endif
 
 OBJS := $(addprefix $(OBJDIR)/,$(addsuffix .o,$(basename $(SRCS))))
@@ -100,6 +97,9 @@ CFLAGS  := -Wall -Wno-write-strings -Wno-char-subscripts -fno-stack-protector \
            -DNO_STDLIB=1 -mcpu=arm926ej-s -O3 -mfloat-abi=soft -g
 ASFLAGS := -x assembler-with-cpp -c -O0 -mcpu=arm926ej-s -mthumb -Wall \
            -fmessage-length=0 -g
+# The ELF's debug info names the source directory: map it to "." so the ELF does not depend on it either
+CFLAGS  += -ffile-prefix-map=$(CURDIR)=.
+ASFLAGS += -ffile-prefix-map=$(CURDIR)=. -Wa,--debug-prefix-map=$(CURDIR)=.
 # build_time.h is generated into $(BUILD) (not the source dir)
 CPPFLAGS := -I$(BUILD) $(PC_DEFS)
 LDFLAGS := -T fnirsi_1013d.ld -nostdlib -Wl,-Map=$(MAP)
@@ -114,27 +114,23 @@ else
 Q := @
 endif
 
-.PHONY: all clean package fel info check-reference gcc10 gcc10-nommu FORCE
+.PHONY: all clean fel info gcc10 gcc10-nommu FORCE
 all: $(BIN)
 
 # ----------------------------------------------------------------- build_time.h
-# Upstream regenerates build_time.h (local time) on every make. Same here,
-# unless SOURCE_DATE_EPOCH is set (then UTC of that time, reproducible).
-# The file is only replaced when its content changes.
-ifdef SOURCE_DATE_EPOCH
-DATE := date -u -d @$(SOURCE_DATE_EPOCH)
-else
-DATE := date
-endif
-
+# Commit time (UTC) and hash for variables.c (RTC defaults) and build_id.c. Upstream used the local wall clock.
+# The file is only replaced when its content changes, so a rebuild of the same commit recompiles nothing.
 $(BUILD)/build_time.h: FORCE
+	@test -n "$(PC_FW_BUILD)" -a -n "$(SOURCE_DATE_EPOCH)" || { echo "error: git cannot be read here;" \
+	   "pass PC_FW_BUILD=<git rev-parse --short=8 HEAD> SOURCE_DATE_EPOCH=<git log -1 --format=%ct>" >&2; exit 1; }
 	@mkdir -p $(BUILD)
 	@{ echo "#ifndef BUILD_TIME_H"; echo "#define BUILD_TIME_H"; \
-	   $(DATE) '+#define COMPILE_YEAR %y%n#define COMPILE_MONTH %-m%n#define COMPILE_DAY %-d%n#define COMPILE_HOUR %-H%n#define COMPILE_MIN %-M%n#define COMPILE_SEC %-S'; \
+	   date -u -d @$(SOURCE_DATE_EPOCH) '+#define COMPILE_YEAR %y%n#define COMPILE_MONTH %-m%n#define COMPILE_DAY %-d%n#define COMPILE_HOUR %-H%n#define COMPILE_MIN %-M%n#define COMPILE_SEC %-S'; \
+	   echo "#define PC_FW_BUILD 0x$(PC_FW_BUILD)u"; \
 	   echo "#endif"; } > $@.tmp
-	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; echo "  GEN     $@"; fi
+	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; echo "  GEN     $@ (git $(PC_FW_BUILD), $$(date -u -d @$(SOURCE_DATE_EPOCH) '+%F %T') UTC)"; fi
 
-$(OBJDIR)/variables.o: $(BUILD)/build_time.h
+$(OBJDIR)/variables.o $(OBJDIR)/build_id.o: $(BUILD)/build_time.h
 
 # ----------------------------------------------------------------- compile/link
 $(OBJDIR)/%.o: %.c | $(OBJDIR)
@@ -167,14 +163,6 @@ $(BIN): $(RAWBIN) $(TOOLS)/mksunxi.py
 	$(Q)$(SIZE) $(ELF)
 	@ls -l $@ | awk '{print "  image   " $$NF ": " $$5 " bytes"}'
 
-# Upstream: ./flashfilepacker -o dist/.../fnirsi_1013d.bin -i ..._scope.bin -l 0x5BC00
-$(PKG): $(BIN) $(PACKAGE_BASE) $(TOOLS)/make_sd_image.py
-	@$(if $(Q),echo "  PACK    $@")
-	$(Q)cp $(PACKAGE_BASE) $@
-	$(Q)$(PYTHON) $(TOOLS)/make_sd_image.py pack -o $@ -i $(BIN) -l $(PACKAGE_LOCATION)
-
-package: $(PKG)
-
 # Needs the scope in FEL mode with DRAM initialised (boot mode 2 / menu "FEL").
 # Needs USB access to 1f3a:efe8: run as root or `make fel SUNXI_FEL="sudo sunxi-fel"`.
 SUNXI_FEL ?= sunxi-fel
@@ -184,26 +172,17 @@ fel: $(BIN)
 info: $(ELF)
 	$(OBJDUMP) -h $(ELF)
 
-# Rebuild with Atlan's exact toolchain (GCC 10.3.1, see ../tools/fetch_gcc10.sh)
-# and Atlan's build_time.h (2026-02-13 18:59:33), compare with the reference.
-# Always PC_PROTOCOL=0: proves the protocol hooks leave the base untouched.
-GCC10      ?= $(HOME)/opt/gcc10
-REF_EPOCH  := 1771009173
-REF_BIN    := ../reference/fnirsi_1013d_v1.00o5_atlan.bin
-check-reference:
-	$(MAKE) BUILD=build-gcc10 CROSS_COMPILE=$(GCC10)/usr/bin/arm-none-eabi- 	  EXTRA_CFLAGS="-isystem $(GCC10)/usr/include/newlib" SOURCE_DATE_EPOCH=$(REF_EPOCH) PC_PROTOCOL=0
-	cmp build-gcc10/$(TARGET).bin $(REF_BIN) && echo "IDENTICAL to $(REF_BIN)"
-
-# The protocol build with Atlan's compiler (warning check / conservative image)
+# The release image: Atlan's compiler, GCC 10.3.1 (../tools/fetch_gcc10.sh)
+GCC10 ?= $(HOME)/opt/gcc10
 gcc10:
-	$(MAKE) BUILD=build-gcc10-pc CROSS_COMPILE=$(GCC10)/usr/bin/arm-none-eabi- 	  EXTRA_CFLAGS="-isystem $(GCC10)/usr/include/newlib" PC_PROTOCOL=1
+	$(MAKE) BUILD=build-gcc10-pc CROSS_COMPILE=$(GCC10)/usr/bin/arm-none-eabi- 	  EXTRA_CFLAGS="-isystem $(GCC10)/usr/include/newlib"
 
 # fw 0.2.48 A/B: the same with the MMU left off (version suffix -nommu)
 gcc10-nommu:
-	$(MAKE) BUILD=build-gcc10-nommu CROSS_COMPILE=$(GCC10)/usr/bin/arm-none-eabi- 	  EXTRA_CFLAGS="-isystem $(GCC10)/usr/include/newlib" PC_PROTOCOL=1 PC_MMU=0
+	$(MAKE) BUILD=build-gcc10-nommu CROSS_COMPILE=$(GCC10)/usr/bin/arm-none-eabi- 	  EXTRA_CFLAGS="-isystem $(GCC10)/usr/include/newlib" PC_MMU=0
 
 clean:
-	rm -rf $(BUILD) build-gcc10 build-gcc10-pc build-gcc10-nommu
+	rm -rf $(BUILD) build-gcc10-pc build-gcc10-nommu
 
 FORCE:
 

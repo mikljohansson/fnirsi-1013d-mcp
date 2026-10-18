@@ -97,7 +97,6 @@ void scope_main_menu_usb_connection(int mode);
 //----------------------------------------------------------------------
 void scope_open_channel_menu(PCHANNELSETTINGS settings);
 void scope_channel_enable_select(PCHANNELSETTINGS settings);
-void scope_channel_fft_show(PCHANNELSETTINGS settings);
 void scope_channel_invert_select(PCHANNELSETTINGS settings);
 void scope_channel_coupling_select(PCHANNELSETTINGS settings);
 void scope_channel_VA_select(PCHANNELSETTINGS settings);
@@ -142,7 +141,6 @@ void scope_acquisition_speed_select(void);
 void scope_acquisition_timeperdiv_select(void);
 void scope_acquisition_ACQ_mode_select(void);
 void scope_acquisition_Average_mode_select(void);
-void scope_acquisition_Long_memory_select(void);
 
 void scope_acquisition_memory_deep_select(void);
 void scope_acquisition_trace_select(void);
@@ -163,12 +161,8 @@ void scope_trigger_symbol(int x, int y);
 //----------------------------------------------------------------------
 void scope_open_generator_menu(void);
 void gen_enable_select(void);
-void gen_wave_select(void);
 void gen_freq_select(void);
 void gen_duty_select(void);
-void gen_ampl_select(void);
-void gen_offset_select(void);
-void gen_phase_select(void);
 
 
 //void display_frequency(uint32 f);

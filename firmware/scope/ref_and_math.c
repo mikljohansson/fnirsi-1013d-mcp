@@ -698,7 +698,7 @@ void scope_prepare_setup_for_REFx_file(uint8 number)
   ptr[index++] = scopesettings.confirmationmode;
   ptr[index++] = scopesettings.long_mode;
   ptr[index++] = scopesettings.average_mode; 
-  ptr[index++] = scopesettings.long_memory;
+  ptr[index++] = 0;                                   //retired slot: 1.00o5 long_memory (never implemented)
 
   //Leave some space for other cursor settings changes  6
   index = CURSOR_SETTING_OFFSET;

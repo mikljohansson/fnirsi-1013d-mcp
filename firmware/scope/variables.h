@@ -188,26 +188,18 @@
 #define MAIN_MENU_XPOS            2
 #define MAIN_MENU_YPOS           46
 #define MAIN_MENU_WIDTH         147
-#if PC_PROTOCOL
 //fw 0.2.28: a sixth row (Spectrum analyzer, 59 px) when the spectrum view is available
 int pc_glue_main_menu_height(void);
 #define MAIN_MENU_HEIGHT        (pc_glue_main_menu_height())
-#else
-#define MAIN_MENU_HEIGHT        292
-#endif
 
 //Menu system settings
 #define SYSTEM_MENU_XPOS                     150
 #define SYSTEM_MENU_YPOS          MAIN_MENU_YPOS//46
 #define SYSTEM_MENU_WIDTH                    244
 #define SYSTEM_MENU_HEIGHT_FULL              413
-#if PC_PROTOCOL
 //fw 0.2.13: one row (59 px) shorter when no DS3231 answered at boot (Time & Date is the last row)
 int pc_glue_sys_menu_height(void);
 #define SYSTEM_MENU_HEIGHT                   (pc_glue_sys_menu_height())
-#else
-#define SYSTEM_MENU_HEIGHT                   413
-#endif
 
 //Screen brightness settings
 #define S_BRIGHTNESS_MENU_XPOS               395// nema byt 396 tj 2pixely medzera ?
@@ -349,11 +341,7 @@ int pc_glue_sys_menu_height(void);
 #define TRIGGER_MENU_XPOS      TRIGGER_BUTTON_XPOS-38//28
 #define TRIGGER_MENU_YPOS                       48//46
 #define TRIGGER_MENU_WIDTH                     220//210//166
-#if PC_PROTOCOL
-#define TRIGGER_MENU_HEIGHT                    280     //5 rows: no Hold off row (pc_hooks.h PC_TRIG_COMPACT)
-#else
-#define TRIGGER_MENU_HEIGHT                    336//280//280//246//336
-#endif
+#define TRIGGER_MENU_HEIGHT                    280     //5 rows (no Hold off row: never sent to the FPGA)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Signal generator button and menu
@@ -369,11 +357,7 @@ int pc_glue_sys_menu_height(void);
 #define GEN_MENU_XPOS                      508//GEN_BUTTON_XPOS-100//28
 #define GEN_MENU_YPOS                       48//46
 #define GEN_MENU_WIDTH                     220//210//166
-#if PC_PROTOCOL
-#define GEN_MENU_HEIGHT                    169     //3 rows: Power, Freq, Duty (pc_hooks.h PC_GEN_COMPACT)
-#else
-#define GEN_MENU_HEIGHT                    393//392//280//280//246//336
-#endif
+#define GEN_MENU_HEIGHT                    169     //3 rows: Power, Freq, Duty (no DAC: no Wave / Ampl / Offset / Phase)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Battery button and menu
@@ -403,12 +387,8 @@ int pc_glue_sys_menu_height(void);
 // Sampling system
 
 #define MAX_SAMPLE_BUFFER_SIZE            16382//3000//4095
-#if PC_PROTOCOL
 //Round up: 16382 / 4 = 4095 words is 2 bytes short of a 16382-sample readout (Donwulff fix, plan section 4)
 #define UINT32_SAMPLE_BUFFER_SIZE         ((MAX_SAMPLE_BUFFER_SIZE + 3) / 4)
-#else
-#define UINT32_SAMPLE_BUFFER_SIZE         (MAX_SAMPLE_BUFFER_SIZE / 4)
-#endif
 
 #define SAMPLE_COUNT                      MAX_SAMPLE_BUFFER_SIZE //samplecount  10000
 #define SAMPLES_PER_ADC                   (SAMPLE_COUNT / 2)        //nofsamples 5000
@@ -470,7 +450,7 @@ struct tagChannelSettings
   uint8  V_A;
   uint8  displayvoltperdiv;
   uint8  samplevoltperdiv;
-  uint8  fftenable;
+  uint8  fftenable;                //retired (1.00o5 FFT switch, never implemented): kept as settings / file format slot, always 0
   uint8  invert;
   
   //Trace on screen position
@@ -661,7 +641,6 @@ struct tagScopeSettings
   uint8 confirmationmode;
   uint8 long_mode;            //flag long_time base 1-active, 0-sort_time base
   uint8 average_mode;         //flag for average display data
-  uint8 long_memory;          //flag for long memory. 1-long memory & long trigger
   
   uint8 ACQ_trace;            //flag for choice trace. 0-linear, 1-peak, 2-sine x
   
@@ -694,18 +673,12 @@ struct tagScopeSettings
 
 struct tagFPGASettings
 {
-  uint8     gen_enable;   
-  uint8     gen_wave_select;
-  uint32    gen_freq;  
+  uint8     gen_enable;
+  uint32    gen_freq;
   uint8     gen_duty;
-  uint16    gen_ampl; 
-  uint16    gen_offset; 
-  uint16    gen_phase; 
   
   uint16    totalsamples;           //Set max samples in FPGA
   uint16    settriggerpoint;        //Set start triger point in FPGA
-  uint16    en_holdoff_trigger;     //Set hold off time in FPGA
-  uint16    value_holdoff_trigger;  //Set hold off time in FPGA //32bit
   
   
   uint8     fw_FPGA;              //1- firmware in fpga is fnirsi, 2 is AL3-PECO, 3 is EF2-PECO
@@ -878,15 +851,11 @@ extern uint8 channelA;
 extern uint8 channelB;
 
 extern uint8 triggermenuopen;  
-extern uint8 holdoffmenuopen;             
         
 
 extern uint8 genmenuopen;                  
 extern uint8 freqmenuopen;                 
 extern uint8 dutymenuopen;                 
-extern uint8 amplmenuopen;                 
-extern uint8 offsetmenuopen;              
-extern uint8 phasemenuopen;                
 
 extern uint8 keymenuopen; 
 

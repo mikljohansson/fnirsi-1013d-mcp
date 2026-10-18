@@ -205,10 +205,8 @@ uint16 fpga_get_version(void)
   if(fw_version == 0x1432) fpgasettings.fw_FPGA = 1;  //fnirsi fw in FPGA
   if(fw_version == 0x1532) fpgasettings.fw_FPGA = 2;  //PECO fw in FPGA AL3
   if(fw_version == 0x1632) fpgasettings.fw_FPGA = 3;  //PECO fw in FPGA EF2
-#if PC_PROTOCOL
   //AL3 family: 0x1532 and later minors (0x1533 adds the EXT trigger, fpga/al3/README.md); same geometry
   if(((fw_version & 0xFFF0) == 0x1530) && (fw_version >= 0x1532)) fpgasettings.fw_FPGA = 2;
-#endif
 
   return(fw_version);
 }
@@ -398,10 +396,8 @@ void fpga_set_sample_rate(uint32 samplerate)
     fpga_write_int(sample_rate_settings[samplerate]);
     fpga_divider = sample_rate_settings[samplerate];
 
-#if PC_PROTOCOL
     //Decimation filter (0x1534+): N follows the divider, and a change needs the filter to settle
     pc_glue_divider_written(sample_rate_settings[samplerate]);
-#endif
   }
 }
 
@@ -412,14 +408,12 @@ void fpga_set_trigger_channel(void)
   //Send the command for selecting the trigger channel to the FPGA
   fpga_write_cmd(0x15);
 
-#if PC_PROTOCOL
   //EXT trigger (bitstream 0x1533+): source 2. Only selectable when the bitstream has it (pc_glue_ui_has)
   if(scopesettings.triggerchannel == 2)
   {
     fpga_write_byte(0x02);
     return;
   }
-#endif
   
   //Write the needed data based on the setting
   if(scopesettings.triggerchannel == 0)
@@ -625,11 +619,9 @@ void fpga_do_conversion(void)
 { 
   scopesettings.conversion_done = 0;    //flag for conversion, 0-start
 
-#if PC_PROTOCOL
   //Decimation filter (0x1534+): the UI acquisition's setting, legacy (K = 0) for every other caller (calibration,
   //auto setup), written and settled before the sampling reset
   pc_glue_decim_conversion();
-#endif
   
   //Check if sampling with trigger system enabled
   if(scopesettings.samplemode == 1)
@@ -659,7 +651,6 @@ void fpga_do_conversion(void)
   fpga_write_cmd(0x05);
   
   //Wait for the flag to become 1
-#if PC_PROTOCOL
   {
     //Same unbounded wait as 1.00o5 (UI behaviour unchanged), but keep the USB link answering if the FPGA hangs.
     //The BUSY poll never touches the FPGA bus, so it is safe between these reads.
@@ -671,9 +662,6 @@ void fpga_do_conversion(void)
         PC_BUSY_POLL();
     }
   }
-#else
-  while((fpga_read_byte() & 1) == 0);
-#endif
   
   //Test again to make sure it was no glitch?????
   //while((fpga_read_byte() & 1) == 0);
@@ -684,20 +672,12 @@ void fpga_do_conversion(void)
   {
     //Write the command to set the pretrigger_samples to the FPGA
     fpga_write_cmd(0x0B);
-#if PC_PROTOCOL
     //16-bit layout (decimation filter on): one sample per word
     fpga_write_short(pc_glue_decim_pre_words(fpgasettings.settriggerpoint));
-#else
-    fpga_write_short(fpgasettings.settriggerpoint/2);
-#endif
 
     //Write the command to set the total_samples to the FPGA
     fpga_write_cmd(0x0C);
-#if PC_PROTOCOL
     fpga_write_short(pc_glue_decim_words(fpgasettings.totalsamples));
-#else
-    fpga_write_short(fpgasettings.totalsamples/2);
-#endif
 
     //set time to automode
     fpga_set_time_base(scopesettings.timeperdiv);
@@ -835,7 +815,6 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
   //Zero correction for this readout (per core, for the capture's clock class)
   fpga_prepare_correction(settings);
 
-#if PC_PROTOCOL
   //Decimation filter on: read the 16-bit samples now; both passes below then take them from memory (odd, even). The
   //converted samples already carry the full correction (gain16, corr16), so unity gain, no offset, no dither (the
   //dither's top 16 bits never carry into a whole code) and no rail rule on top
@@ -848,7 +827,6 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
     settings->clip_lo = 0;
     settings->clip_hi = 255;
   }
-#endif
 
   //Send command 0x1F to the FPGA followed by the translated data returned from command 0x14
   fpga_write_cmd(0x1F);
@@ -933,9 +911,7 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
   //Signal to check the readings of the first ADC on being zero when compensating
   settings->checkfirstadc = 1;
 
-#if PC_PROTOCOL
   pc_glue_decim_even();
-#endif
 
   //Setup for reading the second ADC
   settings->gain = settings->gain_b;
@@ -945,9 +921,7 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
   //Read the data for the second ADC. Samples start on the first location, skipping every other sample
   fpga_read_adc_data(settings);
 
-#if PC_PROTOCOL
   pc_decim_src = 0;
-#endif
 
   //Save the calculated measurements
   settings->adc2rawaverage = settings->rawaverage;
@@ -1131,9 +1105,7 @@ void fpga_read_adc_data(PCHANNELSETTINGS settings)
   register int32  dcshift = settings->dcshift;
   register int32  clip_lo = settings->clip_lo;
   register int32  clip_hi = settings->clip_hi;
-#if PC_PROTOCOL
   const int16 *src = pc_decim_src;      //decimation filter: samples already read and converted (pc_glue_decim_read)
-#endif
   
   //static uint64 global_sample_counter = 0;
   
@@ -1150,7 +1122,6 @@ void fpga_read_adc_data(PCHANNELSETTINGS settings)
   //Read the data as long as there is count
   while(count)
   {
-#if PC_PROTOCOL
     if(src)
     {
       sample = *src;
@@ -1161,13 +1132,6 @@ void fpga_read_adc_data(PCHANNELSETTINGS settings)
       FPGA_PULSE_CLK();
       sample = FPGA_GET_DATA();
     }
-#else
-    //Clock the data to the output of the FPGA
-    FPGA_PULSE_CLK();
-
-    //Read the data
-    sample = FPGA_GET_DATA();
-#endif
     
     //Sum the raw data for ADC difference calibration
     sum += sample;
@@ -1573,7 +1537,6 @@ void fpga_set_battery_level(void)
 */
 //----------------------------------------------------------------------------------------------------------------------------------
 
-#if PC_PROTOCOL
 //----------------------------------------------------------------------------------------------------------------------------------
 //Decimation filter, bitstream 0x1534+ only (pc_decim.h). Callers check the bitstream: older ones do not decode 0x29,
 //0x53-0x55.
@@ -1647,7 +1610,6 @@ void fpga_read_decim_data(uint8 cmdlo, uint8 cmdhi, uint32 start, uint32 count, 
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-#endif
 
 void fpga_delay(uint32 usec)
 {

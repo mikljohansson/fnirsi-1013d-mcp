@@ -1,7 +1,8 @@
 # firmware/ handoff for agents
 
-**Current state (coordinator merge, 2026-10-19): latest build fw 0.2.46** (protocol 1.13: digital phosphor view, section 24)
-on fw-cal2's 0.2.45 (protocol 1.12: calibration data v3, a gain per ADC core and clock class from a gain step at the
+**Current state (2026-10-19): latest build fw 0.2.47** (fw-gen7, branch `fw-gen7`, **section 25**: dead-code purge,
+reproducible images, 16-bit trigger level fix; protocol 1.13 unchanged) on 0.2.46 (protocol 1.13: digital phosphor view,
+section 24) on fw-cal2's 0.2.45 (protocol 1.12: calibration data v3, a gain per ADC core and clock class from a gain step at the
 calibration post, **section 23**) on fw-gen6's 0.2.44 (protocol 1.11: FPGA 0x1535 FIR support, spectrum strip repaint fix,
 Filter default CIC2, USB suspend as a state, section 22); see the ladder (section 8); section 20 (spectrum analyser, auto
 trigger mode) and 21 (calibration v2; its zero model and zero step still hold) still apply. The USB drop story: 0.2.25 PHYCTL fix closed the cold-boot drops; the reopen-after-idle reset is open (section 22). Sections 9-17 below are
@@ -29,7 +30,8 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
                            ZLP, link events, counters, FIFO layout constants (PC_FIFO_MAP)
   pc_rx_ring.h             RX ring copies (two-segment in/out) and the one-FIFO-read-per-packet store. Header only,
                            host-buildable; host_tests/test_rx_ring.c runs it at every ring phase
-  pc_hooks.h               the hook macros used in 1.00o5 files; empty with PC_PROTOCOL=0
+  pc_hooks.h               the hook macros used in 1.00o5 files (always built since 0.2.47)
+  build_id.c               the build identity as data (commit hash, commit time), linked last (section 25)
   pc_decim.c/.h            decimation filter maths for FPGA 0x1534 (N, K fallback, S, L16, Q24 scale, settle). Pure C,
                            host-buildable (section 19)
   adc_cal.c/.h             calibration data v3: per-core zero and gain model, sector 708 block, correction maths,
@@ -40,7 +42,6 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
   host_tests/              test_protocol.c, test_rx_ring.c, test_session.c (+ mock_hal.c FPGA/transport model), vector_check.c,
                            check_vectors.py, gen_vectors.py, bench_link.py (pyserial, bench only)
 firmware/tools/            mksunxi.py, make_sd_image.py, fetch_gcc10.sh, spiflash tools (not this agent's)
-firmware/reference/        Atlan's v1.00o5 binaries (not committed)
 docs/protocol-vectors.json shared frame vectors; the MCP agent merges entries with "source": "host" into it
 ```
 
@@ -66,18 +67,17 @@ in long WSL command lines and Windows Python heredocs halve backslashes: put mul
 |---|---|
 | `make` | GCC 13.2.1, protocol on: `build/fnirsi_1013d.bin` |
 | `make gcc10` | Atlan's GCC 10.3.1 (`~/opt/gcc10`, from `tools/fetch_gcc10.sh`): `build-gcc10-pc/`. The bench uses this one |
-| `make check-reference` | PC_PROTOCOL=0 with GCC 10 + Atlan's build_time.h, `cmp` against Atlan's binary: must print IDENTICAL |
 | `make PC_DEBUG=1 BUILD=build-dbg` | adds DEBUG_FPGA + FORCE (caps 0x120) for bench tests T3/T7 |
 | `make PC_FIFO_MAP=1 ...` | alternative USB FIFO layout (version string `-m1`) |
 | `make -C host_tests test` | host gcc: test_protocol, test_rx_ring (all 2048 ring phases), test_session + mock_hal (release + PC_DEBUG; 762 / 760 checks on 0.2.19), check_vectors.py (79 vectors). None of them models usb_interface.c, the IRQ dispatcher or the timer-tick USB path |
 | `python host_tests/bench_link.py COM10 [--census 2000] [--fel]` | on the bench PC, needs pyserial |
 
-"IDENTICAL to reference" means: with PC_PROTOCOL=0 every hook compiles away and the image is byte-identical to
-what Atlan shipped, so the protocol cannot have changed the base when disabled. Also verified for GCC 13 against a
-GCC 13 build of the untouched tree. Keep it that way: every change in a 1.00o5 file goes under `#if PC_PROTOCOL`,
-and `make check-reference` runs before every commit that touches one. Warning policy: the 32-33 upstream warnings
-stay; new code must add none under GCC 13 or GCC 10 (compare sorted, line-number-free warning lists of
-PC_PROTOCOL=0 vs 1 builds; new files are also clean with -Wextra).
+Since 0.2.47 there is no PC_PROTOCOL=0 build and no `make check-reference` (owner dropped the byte-identical rule on
+2026-10-18; the proof up to then is in the CI logs). Images are reproducible: the identity comes from the commit, so a
+change that only removes dead code can be checked by building both commits with a fixed `PC_FW_BUILD=11111111
+SOURCE_DATE_EPOCH=<any>` and comparing sha256 (section 25). Warning policy: no new warning under GCC 13 or GCC 10
+(compare sorted, line-number-free warning lists against the parent commit; new files are also clean with -Wextra).
+0.2.47: GCC 10 36, GCC 13 31, PC_DEBUG 31, all upstream.
 
 ## 3. Dev loop (no SD writes)
 
@@ -234,6 +234,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.43 | 80ab45d | 7d2ea871 | calibration data v2: per-core zeros (full / gated clock), dithered correction, GET_CAL 248 bytes (protocol 1.10, row 48, section 21) | built, host-tested; bench list README 6.2 |
 | 0.2.44 | e0ee6f3 | 08f9a5ed | FPGA 0x1535 FIR (protocol 1.11, row 49), spectrum view not repainted by scope_preset_values, Filter default CIC2 (PC_DECIM_DEFAULT), USB suspend as a state + resume logging (row 50), generator Freq row no longer hits the removed Wave row; includes main's fw-cal 64 full-rate conversions | built, host-tested (section 22) |
 | 0.2.45 | df61557 | 32f259b4 | calibration data v3: gain per core and clock class from a gain step at the calibration post, per-class offset slopes, block v3 (304 bytes), GET_CAL 256 bytes (protocol 1.12, row 51, section 23) | built, host-tested; bench list README 6.3 |
+| 0.2.47 | 463b489 | b5098dc4 | dead-code purge (PC_PROTOCOL=0, check-reference / package, FFT switch, generator Wave/Ampl/Offset/Phase, Long memory, hold-off), reproducible image (identity = commit; same sha256 from any directory), 16-bit trigger level through gain16 / corr16 (fw-gen7, section 25) | built, host-tested; bench list in section 25 |
 | 0.2.46 | 1b6359f | cdba5b51 | digital phosphor view (main menu row 7; Persistence / Palette / Clear strip; XY), GET_STATUS byte 43 = 4 (protocol 1.13, row 52), settings word 210 (fw-phosphor, section 24) | built, host-tested (test_phosphor 95 checks); bench steps in section 24 |
 | 0.2.48 | b1922c3 | 2f768fd9 | MMU + D-cache on (flat map, DDR / SRAM write-back, framebuffer write-through, restart record and peripherals strongly ordered), clean + off at _reset and ENTER_FEL, GET_LINK_STATS 58-59 fault status / address (fw-mmu, section 26) | built, host-tested (test_mmu); A/B image `make gcc10-nommu` 0.2.48-nommu sha256 45e03f7f; bench sequence in section 26 |
 
@@ -497,9 +498,9 @@ compact menus rather than painting over gaps.
 
 - No libc (`-nostdlib`): memcpy/memset/memcmp/memmove come from the .s files. No `double` or float in acquisition or
   protocol paths. 64-bit integer math is fine (libgcc).
-- PC_PROTOCOL=0 must stay byte-identical to Atlan's image: `make check-reference` prints IDENTICAL before every
-  commit that touches a 1.00o5 file, and every such change goes under `#if PC_PROTOCOL` or a pc_hooks.h macro.
-- No new warnings under GCC 13 or GCC 10 (compare sorted, line-number-free warning lists against PC_PROTOCOL=0).
+- (Until 0.2.46: PC_PROTOCOL=0 byte-identical to Atlan's image. Dropped by the owner; the switch is gone in 0.2.47.)
+  Hidden features are removed in code, not masked (owner, 2026-10-18); keep settings sector / file slots stable.
+- No new warnings under GCC 13 or GCC 10 (compare sorted, line-number-free warning lists against the parent commit).
 - Small commits, one topic each, touching only firmware/ (plus docs/protocol.md section 14 and
   docs/protocol-vectors.json for wire changes), message ending with the Co-Authored-By line.
 - Edits from Windows: put Python edit scripts in a file and run them with absolute paths; open files with
@@ -967,6 +968,92 @@ Bug indicators: trace not on the pointer / cursor positions (LUT mismatch); grid
 brightness shimmer at a constant signal; a picture that never fades at 1 s or never clears after a V/div change; the
 strip briefly replaced by the slider on a time base change; wfm/s far below the scope view's record rate; `pass_ms`
 over 50 ms for a single clean trace; any hang or restart (SRAM 0x0400-0x0FFF use; check GET_LINK_STATS 49-56).
+
+## 25. fw-gen7: dead-code purge, reproducible images, 16-bit trigger level (fw 0.2.47, protocol 1.13)
+
+Branch `fw-gen7` from main ca5aeb8. Commits, one topic each (bisectable): 0f84761 (check-reference, make package,
+reference download, CI), 8770209 (PC_PROTOCOL=0 removed with unifdef; image byte-identical to ca5aeb8 with a fixed
+identity), 473bd0b + 57d0d26 (reproducible image), 2731e52 (FFT switch), 55960cf (generator Wave / Ampl / Offset /
+Phase), 3a5ffc6 (Long memory), 5906fbe (hold-off), f09e381 (v2 `adc_cal` vectors), 04619ca (16-bit trigger level),
+463b489 (0.2.47, CHANGELOG, README, docs), then this handoff. Image from 463b489: `build-gcc10-pc/fnirsi_1013d.bin`,
+481,792 B, sha256 b5098dc48d2605f38a967585ea6d7a1671f0c98568176884e1450c7ab6f5b2b0, ELF
+5f7f463cb8709a67afa5b88712812023371e042757406a26a9218a5b7ed53a32 (identical from the worktree and two fresh clones at
+other paths). A build of a later commit differs only in the 10 identity bytes. Not pinned in backups/, nothing benched.
+
+**Reproducible images.** Cause of 0.2.44's main d4c0b716 vs worktree 08f9a5ed: WSL's git cannot follow a worktree's
+`gitdir: D:/...`, so the worktree build had PC_FW_BUILD 00000000 and the wall-clock time; both were compile-time
+constants in the code (-DPC_FW_BUILD in every file, COMPILE_* in pc_version_init), and GCC folds the hex loop /
+literal pool differently for 0 (80 bytes less .text), shifting everything after pc_hal_scope.o. No __FILE__ /
+__DATE__ / __TIME__ / assert is used. Now: build_time.h (generated, rewritten only when it changes) carries COMPILE_*
+from the commit time (UTC) and PC_FW_BUILD; only variables.c (RTC defaults, data) and build_id.c (pc_fw_build,
+pc_build_time[6], linked last) include it; pc_cmds.c / pc_hal_scope.c read the data. The Makefile reads hash and
+commit time from git, translating a worktree's Windows gitdir to /mnt/x/...; without git it stops and asks for
+`PC_FW_BUILD=... SOURCE_DATE_EPOCH=...`. `-ffile-prefix-map=$(CURDIR)=.` (C) and `-Wa,--debug-prefix-map` (gas does not
+get the GCC option under GCC 10) make the ELF path-independent. CI prints the image sha256 (log line + notice). The
+identity line now reads `git <hash> of 20yy-mm-dd hh:mm` (commit time, UTC). Host tests define pc_fw_build = 0 in
+mock_hal.c. Useful side effect: for a pure dead-code commit build parent and child with a fixed identity and compare.
+
+**What was removed** (settings sector 709 and waveform file slots kept, written 0, skipped on load; wire unchanged):
+- PC_PROTOCOL=0 paths (12 files, unifdef), the empty hook variants, the Makefile switch; `make check-reference`,
+  `make package` (PACKAGE_BASE came from the reference download; `tools/make_release_sd_package.py build` makes SD
+  packages), the `reference` subcommand of that script, firmware/reference/README.md, the CI reference cache/fetch.
+- Channel menu FFT switch (scope_channel_fft_show, draw/touch, PC_CH_COMPACT; PC_CH_DY folded into coordinates).
+  `fftenable` stays as a slot. kiss_fft was never in this tree.
+- Generator Wave / Ampl / Offset / Phase: select functions, keyboard sub-menus + amplmenuopen / offsetmenuopen /
+  phasemenuopen, touch branches, fpgasettings fields, defaults, PC_FEAT_GEN_WAVE / GEN_ANALOG, PC_GEN_COMPACT /
+  PC_GEN_DY. The top-bar frequency text is always orange (green / yellow were only for sine / triangle).
+- Long memory: the menu box function, touch branch, empty main-loop branch, scopesettings.long_memory,
+  PC_FEAT_LONG_MEMORY; the slot is PC_MASK_ACQ_FILTER (Filter box on 0x1534+, empty background otherwise).
+- Hold-off: menu text, touch branch + keyboard sub-menu, holdoffmenuopen, fpgasettings fields, PC_FEAT_HOLDOFF,
+  PC_TRIG_COMPACT / PC_TRIG_DY. SET_TRIGGER still answers E_UNSUPPORTED detail 6 for a hold-off.
+- Unused PC_MASK_GEN_MENU / TRIG_MENU / SYS_RTC (the RTC mask call was a no-op).
+- docs/protocol-vectors.json `adc_cal` (v2) section and its generator (the regenerated file differs only by it).
+Warnings: GCC 10 37 -> 36, GCC 13 32 -> 31 (menu.c `modetext` set but not used is gone), PC_DEBUG 31.
+
+Sizes (GCC 10 release image, text / data / bss, image bytes): ca5aeb8 366,009 / 118,416 / 7,756,136, 484,864 B;
+463b489 362,985 / 118,448 / 7,756,120, 481,792 B (-3,024 text, +32 data: build_id.o, -16 bss). GCC 13: 370,025 ->
+366,905 text.
+
+**Decided to keep (and why)**: the hook macros in pc_hooks.h (they mark every place the protocol reaches into a
+1.00o5 file, README section 5 lists them; inlining them would spread pc_glue calls without a marker); settings and
+file slots of removed features (format stability); `usb_irq_polled` / `usb_irq_races` slots 47 / 57 (wire, already
+retired as always 0; no dead code left behind them was found in the time I had: re-check pc_transport.c for code that
+only feeds them); the RTC and EXT masks (hardware-dependent, live).
+
+**Trigger level fix (04619ca).** pc_dec_apply wrote round(level x N^K / 2^S), the inverse of the uncorrected
+transform; the trace shows out x acal_scale(scale_q24, gain16) / 2^24 + corr16 / 16. New pc_decim_level16_corr
+(pc_decim.c) inverts pc_decim_to_code with the trigger channel's gain16 and corr16 (fpga_channel_correction at arm
+time, so a V/div or offset change since the last readout is included); EXT keeps the plain conversion. Host test
+test_adc_cal `test_trigger_level16` (59,717 checks in all): exact round trip for every level, the old conversion at
+unity, the 1 % case. Inference to bench: triggerlevel is in the corrected trace domain (it is computed from the
+screen position by fpga_set_trigger_level); the 8-bit legacy path still compares raw per-core codes (unchanged).
+
+**Not done (for the next agent)**: a --gc-sections diagnostic (`EXTRA_CFLAGS="-ffunction-sections -fdata-sections"`
+and `-Wl,-e,_start -Wl,--gc-sections -Wl,--print-gc-sections`, the linker script only names `.text`, so diagnosis
+only) lists about 150 unreferenced functions; candidates after a grep check: test.c (filter experiments,
+scope_test_*, scope_get_long_timebase_data1, convert_waveforms_to_csv_excel, display_text_message), PC_interface.c
+(OEM-app helpers my_str*, usb_CDC_process_rx, send_hex_byte, usb_send_uint), spi_control.c sys_spi_flash_*,
+usb_interface.c usb_CDC_send_*/usb_write_ep2_data, cdc_class.c circular_buffer_* / usb_CDC_in_ep_callback,
+scope_functions.c sinx / thumbnail / fir variants, display_lib.c unused draws, ff.c unused API (FatFs: keep, it is a
+library), fpga_control.c fpga_average_trace_data_long / fpga_read_short. Many "removed" entries are only inlined
+static copies, so grep every name before deleting. Files never built: font_6.c, font_7.c, font_8.c, malloc.c/.h.
+1014D remnants are comments only (display_control.c 187-188, spi_control.c 27). Remove in topic commits and check
+with a fixed identity that only the expected functions change.
+
+**Bench checks (coordinator)**
+1. FEL-load the image, `#VER` fw=0.2.47 proto=1.13; GET_INFO byte 52 = 0x463b4895 (or the hash of the built
+   commit); diagnostics screen identity line "git 463b4895 of 2026-10-18 23:04" (UTC).
+2. Census (bench_link.py --census 2000) and the mcp soak for 10 minutes: clean as 0.2.46.
+3. Owner taps: channel menus CH1 / CH2 (Open CH, Invert, Coupling, V/A, Probe, V/div; no FFT row); generator
+   (Power, Freq, Duty, the keyboard for Freq and Duty, nothing below Duty reacts); trigger menu (mode, edge,
+   channel incl. EXT on 0x1533+, position, Always 50 %; no hold-off); acquisition menu (Roll, Average, Filter box on
+   0x1534+ / empty slot on older, memory depths, time/div); system settings and RTC row; DEFAULT button; power off
+   and on (settings restored, generator frequency / duty kept).
+4. Trigger level in CIC mode (0x1534+): CIC2 at 1 MSa/s, generator 1 kHz square on CH1, normal trigger, level line
+   at mid-edge and near both plateaus: the trigger point (GET_CAPTURE_INFO pretrigger vs the edge crossing the level
+   in READ_TRACE) should sit on the level within one code; compare with 0.2.46 (about 1 % / 1 code off). Also with a
+   dcoffset and on CH2.
+5. CI on the merge: the firmware job's "image sha256" line equals a local `make gcc10` of the same commit.
 
 ## 26. fw-mmu: MMU + D-cache (fw 0.2.48, protocol stays 1.13)
 

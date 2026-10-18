@@ -2,7 +2,7 @@
 # Fetch the exact toolchain Atlan4 built v1.00o5 with (ELF .comment:
 # "GCC: (15:10.3-2021.07-4) 10.3.1 20210621", the Ubuntu 22.04 "jammy"
 # package) and unpack it under $PREFIX without installing anything.
-# Used by `make check-reference` to prove the tree reproduces Atlan's binary.
+# Used by `make gcc10` (the release image) and CI.
 # Every .deb is checked against a pinned sha256 before it is unpacked
 # (hashes from the downloads that rebuilt v1.00o5 IDENTICAL, 2026-10-18).
 #

@@ -1,4 +1,4 @@
-# CI: firmware (reference reproduction, GCC 10 + GCC 13 builds, host tests), mcp (ruff + pytest on
+# CI: firmware (GCC 10 + GCC 13 builds, host tests), mcp (ruff + pytest on
 # Linux and Windows), shared protocol vectors. Also called by release.yml (workflow_call), which then
 # downloads the firmware-image artifact. docs/releasing.md describes both workflows.
 name: CI

@@ -20,14 +20,16 @@ The firmware job runs these steps in order:
 1. Install the apt toolchain (GCC 13.2.1).
 2. Unpack Atlan4's GCC 10.3.1 with `firmware/tools/fetch_gcc10.sh`. It is cached and keyed on the
    script's hash.
-3. Fetch Atlan4's v1.00o5 reference files with `tools/make_release_sd_package.py reference`. They are
-   cached and checked by sha256 on every run.
-4. Run `make check-reference`. Its output must contain `IDENTICAL`.
-5. Run `make gcc10`, then `make`, then `make PC_DEBUG=1 BUILD=build-dbg`.
-6. Run `make -C host_tests test`, which includes `check_vectors.py`.
+3. Run `make gcc10`, then `make`, then `make PC_DEBUG=1 BUILD=build-dbg`.
+4. Run `make -C host_tests test`, which includes `check_vectors.py`.
 
 The job uploads `build-gcc10-pc/fnirsi_1013d.bin` and its `.sha256` as the `firmware-image` artifact.
-The step summary lists the size and sha256 of each of the four builds.
+The step summary lists the size and sha256 of each of the three builds.
+
+Until 2026-10-18 the job also fetched Atlan4's v1.00o5 binary and ran `make check-reference`, which proved
+that a `PC_PROTOCOL=0` build was byte-identical to it. The owner dropped that rule to allow dead-code removal
+(fw 0.2.47 removed the target, the `PC_PROTOCOL=0` build and the download); the CI logs up to that date
+hold the proof.
 
 Warnings are handled exactly as the repository already handles them. The firmware builds keep the
 upstream warnings and do not use `-Werror`. The host tests build with `-Werror`, as their Makefile
@@ -62,7 +64,7 @@ The firmware and the mcp package share one version. The first tag is planned as 
 3. Before committing, run the same checks as CI:
 
    ```
-   wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/firmware/scope && make check-reference && make gcc10 && make && make -C host_tests test"
+   wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/firmware/scope && make gcc10 && make && make -C host_tests test"
    cd mcp && .venv/Scripts/python -m pytest -q
    ```
 
@@ -171,22 +173,21 @@ but redistributing a GPL binary obliges the distributor to offer the correspondi
 offer source we do not have. So this repository never attaches them, and never attaches the full SD
 package that contains them. Instead, `make_release_sd_package.py` fetches them from Atlan4's repository
 on the user's machine. It pins the commit and checks sha256, so users get exactly the files Atlan4
-published, from Atlan4. CI fetches the same zip for `make check-reference`, and that stays inside the CI
-cache. `firmware/reference/` stays gitignored.
+published, from Atlan4. CI downloads nothing from Atlan4 except in the release job's SD tools test.
 
 If Atlan4 publishes the bootloader v0.8 or updater source later:
 
 1. Import it under `firmware/bootloader/`, with its licence and the upstream commit noted. Build it with
    a plain Makefile, like `firmware/scope`.
-2. Prove a byte-identical rebuild of the binaries in the v1.00o5 package. Add a `make check-reference`
-   style target and run it in CI's firmware job.
+2. Prove a byte-identical rebuild of the binaries in the v1.00o5 package with a CI step that compares
+   them with the pinned sha256 values.
 3. Only then attach the bootloader, the updater or a full SD package to releases. Add a
-   `fnirsi_1013d-fw-X.Y.Z-sdpackage.bin` step to `release.yml` from `make package`. The SD tools zip can
-   then become optional.
+   `fnirsi_1013d-fw-X.Y.Z-sdpackage.bin` step to `release.yml`. The SD tools zip can then become
+   optional.
 4. Update this section, `firmware/README.md` section 3 and `CHANGELOG.md`.
 
 If the pinned download disappears, for example after a history rewrite in Atlan4's repository, the
-release job's SD tools test fails. CI also fails on a cache miss. In that case, find the zip, verify the
+release job's SD tools test fails. In that case, find the zip, verify the
 two inner sha256 values in `tools/make_release_sd_package.py`, and update `ATLAN_COMMIT`. The inner
 files must not change. If Atlan4 publishes a new package, that is a new reference and needs a deliberate
 change.

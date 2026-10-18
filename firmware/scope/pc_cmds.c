@@ -703,7 +703,7 @@ static int h_get_info(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   for(i=0;(i<sizeof(fw) - 1) && (i<16);i++)
     resp[36 + i] = (uint8_t)fw[i];
 
-  pc_put_u32(resp + 52, PC_FW_BUILD);
+  pc_put_u32(resp + 52, pc_fw_build);
 
   for(i=0;(i<sizeof(sn) - 1) && (i<16);i++)
     resp[56 + i] = (uint8_t)sn[i];
