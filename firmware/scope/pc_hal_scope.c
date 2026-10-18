@@ -1760,6 +1760,8 @@ void pc_glue_init(void)
 
 void pc_glue_poll_main(void)
 {
+  pc_usb_main_service();
+
   if(pc_ready)
     pc_poll(&pc_sess, PC_CTX_MAIN);
 
