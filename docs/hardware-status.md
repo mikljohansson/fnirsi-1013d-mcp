@@ -285,3 +285,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   confirmed self-restart: 0.2.16, ~17:25:35, within 4 minutes of its FEL load, under bench traffic. fw-gen3's reading of counter 47: most
   "lost interrupt" hits are probably the tick racing the real USB ISR after an idle gap (only EP2 RX ever shows); the dispatcher's write-0
   to INTC pending is unverified as a loss mechanism. 0.2.20 (endpoint-state fallback without flag clearing + race-avoided counter) in work.
+- 0.2.19 (c30ff516) capture soak 17:58-18:28 (4 KiB TEST_PATTERN every 50 ms): 35,579 requests, 0 failures, 0 drops, 0 restarts; latency median
+  22.9 ms, p99 50 ms. Only usb_irq_polled moved (+2011, 1.1/s); type-14 entries: 128 EP2 TX, 10 EP2 RX, 1 EP0 (SOF-only INTUSB).
+- Firmware 0.2.20 (fw-gen3, commit 7f1c0c0, sha256 e1517803..., pinned with ELF; nofb variant c7210b74...): tick fallback acts on endpoint state
+  seen on two consecutive ticks and never when the USB IRQ is pending at the INTC; counter 57 usb_irq_races. Loaded: 8 bench passes = 800 x
+  64 KiB, 0 failed, no restart; usb_irq_polled 0, usb_irq_races 59 in ~90 s. => The 1.00o5 dispatcher does not lose interrupts; every
+  0.2.12-0.2.19 "lost interrupt" was the tick racing the real ISR, and 0.2.16's tick body racing on live traffic is the likely restart cause
+  (inference; no restart record captured). 30-minute capture soak on 0.2.20 started 18:31.
