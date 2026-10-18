@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/adc_cal.c mock_hal.c
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/adc_cal.h $(SRC)/pc_protocol.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor
 
 $(OUT):
 	mkdir -p $@
@@ -47,6 +47,9 @@ $(OUT)/fft_cli: fft_cli.c $(FFT_SRCS) $(SRC)/fx_fft.h | $(OUT)
 
 $(OUT)/test_adc_cal: test_adc_cal.c test_util.h $(SRC)/adc_cal.c $(SRC)/adc_cal.h $(SRC)/pc_decim.c $(SRC)/pc_decim.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_adc_cal.c $(SRC)/adc_cal.c $(SRC)/pc_decim.c
+
+$(OUT)/test_phosphor: test_phosphor.c test_util.h $(SRC)/phos_map.c $(SRC)/phos_map.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_phosphor.c $(SRC)/phos_map.c
 
 $(OUT)/test_spec_fmt: test_spec_fmt.c test_util.h $(SRC)/spec_fmt.c $(SRC)/spec_fmt.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_spec_fmt.c $(SRC)/spec_fmt.c
@@ -81,6 +84,7 @@ test: all
 	$(OUT)/test_session_debug
 	$(OUT)/test_spec_fmt
 	$(OUT)/test_adc_cal
+	$(OUT)/test_phosphor
 	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --decim-checker $(OUT)/decim_check --adc-cal-checker $(OUT)/test_adc_cal --vectors $(VECTORS)
 	$(PYTHON) -I test_fft.py --cli $(OUT)/fft_cli --tables $(SRC)/fx_fft_tables.c --gen ../../tools/gen_fft_tables.py
 	@if command -v qemu-arm >/dev/null && command -v arm-none-eabi-gcc >/dev/null && [ -x $(ARM_CC10) ]; then \
