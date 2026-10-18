@@ -373,3 +373,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   fixed latency 120 ns + K*(N-1)*2.5 ns): bitstream sha256 83140510... (282,898 B) pinned as backups/al3_decim_0x1534_83140510.bin, padded
   1 MiB image backups/al3_decim_0x1534_padded.bin sha256 c387a15e.... **Not flashed**; waits for the firmware support (fw-decim) to be benched
   on 0x1533 first. Firmware 0.2.28 (fw-gen5, e6a7c4c, protocol 1.7): on-scope spectrum view as a main-loop display mode; not yet benched.
+- fw-decim branch merged into main (merge a45e500; commits b770356/5702f7a/66bd6b4): decimation support, fw 0.2.30 / protocol 1.9 / row 47,
+  GET_DECIM 0x020C / SET_DECIM 0x020D, caps bit 15, u16 READ_TRACE/READ_RAW, GET_CAPTURE_INFO 76 bytes, Filter box in the acquisition menu
+  (0x1534 only). Not benched; the first clean bench image comes as 0.2.31 together with fw-gen5's FFT speed-up (its work-in-progress edits
+  were in the shared tree, so no pinned image was taken from this merge).
