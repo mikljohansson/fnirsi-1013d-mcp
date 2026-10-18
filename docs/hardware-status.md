@@ -347,3 +347,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   (0.2.20 port resets, 0.2.21 20 s stall, 0.2.23 one abort), every FEL-loaded run was clean (two 30-min soaks, >2000 x 64 KiB). Working
   theory (inference, with fw-gen4 for 0.2.24): 1.00o5's USB init lacks the PHY calibration/tuning the boot ROM performs, leaving a marginal
   high-speed link on the cold path; Windows' packet-error recovery then shows as stalled TxPktRdy / pipe resets. Card boots 0.2.23.
+- Firmware 0.2.25 (fw-gen4, commit 85a113d, sha256 c71935f9..., pinned with ELF; includes 0.2.24's bus-event ring): **1.00o5 wrote its three
+  USB PHY tuning values (RES45 calibration, TX amplitude, disconnect threshold) to 0x01C13410, the PHYCTL offset of later Allwinner chips;
+  on the F1C100s PHYCTL is 0x01C13404 (Linux phy-sun4i-usb suniv config + suniv-f1c100s.dtsi).** Protocol builds now write 0x404. FEL-loaded
+  on 0x1533: 3 bench passes, 300 x 64 KiB, 0 failed. Post-init log (type 19): POWER/FADDR 0x700e, INTUSBE/CCU 0x270f, ISCR 0x3f00,
+  USBPHY_CFG 0x0003, PHY tuning read-back after the writes 0x00e9 (= the packed written value), before the writes 0x0068 (defaults), PHYCTL
+  0x2b80. So the tuning writes now reach the PHY; in every earlier image they did not. Persisted to the card for the cold-boot soak.
