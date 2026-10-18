@@ -18,25 +18,55 @@ the agent and the human share the instrument.
 
 What you get over stock and over Atlan4's firmware:
 
-- **Agent control over USB.** A binary, CRC-protected protocol over USB CDC: 1 ms command latency, 2 MB/s
-  readout, a full 16k-sample dual-channel capture every 110 ms. Every acquisition parameter, trigger, raw ADC
-  buffers, processed traces, generator, calibration and link diagnostics are reachable.
+- **Agent control over USB.** A binary, CRC-protected protocol over USB CDC (protocol 1.13): 1 ms command
+  latency, 2 MB/s readout, a full 16k-sample dual-channel capture every 110 ms. Every acquisition parameter,
+  trigger, raw ADC buffers, processed traces, generator, calibration and link diagnostics are reachable.
 - **Collaborative mode.** No "remote" lock-out. The agent and you change settings on the same live scope;
   the screen follows the agent, the agent sees your touch changes. A small green MCP chip in the top bar shows
   a host is connected.
 - **MCP server with 20+ tools**, safety tiers, a device simulator for development without hardware, and
   derived tools for measurement work: averaged capture with edge alignment, FFT, exponential decay fit
   (pulse-induction metal detector work was the motivating use case).
-- **Per-unit voltage calibration** on the host, fitted from bench-supply measurements, correcting the ADC
-  core zero errors the firmware's model misses.
+- **Spectrum analyser view on the scope** (main menu, "Spectrum analyzer"): FFT length, window, dB/div and
+  reference level, tap-to-zoom and drag-to-pan, Auto, averaging (Off / 4 / 16 / 64 / Max hold), and waterfall and
+  density views. The agent can read it with `scope_spectrum`. Details: `firmware/README.md`, "Spectrum view".
+- **Decimation filters** (acquisition menu "Filter", AL3 bitstream 0x1534 or later): the FPGA filters the 200 MS/s
+  stream before decimating, with boxcar, CIC2 or CIC3, so slow time bases no longer alias by skipping samples.
+  Bitstream 0x1535 adds a compensation FIR after the CIC (boxcar+FIR, CIC2+FIR, CIC3+FIR at 10 MS/s and slower).
+  Captures then carry 16-bit samples. CIC2 is the default for new settings. Details: `firmware/README.md`,
+  "Decimation filter", and `fpga/al3/README.md`.
+- **Digital phosphor view** (main menu, "Phosphor display"): the traces show how often each pixel was hit by
+  recent records, with persistence 0.2 s / 1 s / 5 s / infinite and a mono or heat palette. It is a display mode
+  of the normal scope view. `firmware/README.md`, "Phosphor view".
+- **Calibration v3** (System settings, Base calibration): per-core, per-clock-class zeros and gains, stored on
+  the card and applied in the firmware's readout, so 200 MS/s, filtered and legacy captures read the same volts.
+  It is a two-step procedure, see "Calibrate" below. The host keeps a per-unit calibration file as well, fitted
+  from bench-supply measurements (`scope_calibrate_volts`).
+- **MMU and D-cache** (fw 0.2.48): the F1C100s code runs with the MMU and data cache on. The same code builds
+  without it (`make gcc10-nommu`, version suffix `-nommu`) for A/B comparison. `docs/plans/mmu-dcache.md`.
 - **Hands-free firmware updates.** `fnirsi1013d-flash` reboots the scope into FEL, loads a build into RAM
   in seconds, and can persist it to the SD card over the protocol. No card handling, no buttons.
+- **Removed options**: the hardware cannot do them, so the menus no longer carry them. They are the channel menu's
+  FFT switch, the generator's Wave / Ampl / Offset / Phase rows (there is no DAC), Long memory and trigger
+  hold-off (`firmware/README.md`, "Removed and hidden menu options"). The `PC_PROTOCOL=0` build and the
+  byte-identical check against Atlan4's binary are gone as well.
 - **Link robustness fixes** found on the bench: USB FIFO layout (the inherited layout aliased the control
   endpoint), receive-ring wrap corruption, host serial driver quirks on Windows.
 - **Verified lineage**: the port of Atlan4's v1.00o5 source was proven by rebuilding his released binary byte for
   byte (git history up to 2026-10-18); from there on the firmware is simplified freely, with the credits intact.
-- **FPGA toolchain**: a headless Anlogic TD flow that rebuilds the AL3 bitstream byte-identical, ready for
-  the next FPGA work (external trigger, deeper memory).
+- **Reproducible images**: the firmware image depends only on the source, the toolchain and the commit. Two
+  clones of the same commit, in any directory, give the same sha256 (`firmware/README.md`, "Reproducible images").
+- **FPGA toolchain**: a headless Anlogic TD flow that rebuilds Atlan4's AL3 bitstream byte-identical. It built
+  our bitstreams 0x1533 (external trigger on the calibration pin), 0x1534 (boxcar / CIC) and 0x1535 (CIC + FIR).
+  The owner's unit runs 0x1534 (`docs/hardware-status.md`); 0x1535 is built but not yet flashed there.
+
+## Status
+
+Firmware 0.2.48 with protocol 1.13, development builds only: nothing is tagged yet (`CHANGELOG.md`). The owner's
+unit boots 0.2.25 from the SD card; every later build has been loaded into RAM over FEL and benched as recorded in
+`docs/hardware-status.md`, and a power cycle returns to the card's 0.2.25. Persisting a newer build to the card
+is a deliberate step (see "Firmware updates" below). The 0.2.48 MMU image had not been run on the unit as of the
+last log entry.
 
 ## Hardware this supports
 
@@ -60,6 +90,10 @@ pin).
    (`firmware/tools/make_sd_image.py`). The stock firmware in the MCU flash is never touched; remove the card
    and the scope is stock again.
 3. Boot. Atlan4's bootloader shows a menu with the scope, the stock firmware and FEL mode.
+
+Releases, once tagged, attach the scope image, the SD tools, the mcp package and `SHA256SUMS`. They do not
+attach Atlan4's binary-only bootloader and updater: `tools/make_release_sd_package.py` fetches those on your
+machine and checks their hashes. See `docs/releasing.md`.
 
 ### 2. Install the MCP server
 
@@ -95,7 +129,21 @@ Meanwhile you keep using the touch screen; settings are shared both ways. Large 
 files and the path is returned; hardware-changing tools are logged to an audit file.
 
 Firmware updates: `fnirsi1013d-flash --image <bin> --sha256 <hash> --persist` loads a build into RAM over
-FEL and writes it to the card. `fnirsi1013d-bench` checks the link.
+FEL and writes it to the card. Without `--persist` only RAM is written and a power cycle returns to the card's
+firmware. `fnirsi1013d-bench` checks the link.
+
+### 4. Calibrate (once per unit, after warming up)
+
+The firmware's base calibration (System settings, Base calibration) has two steps. Calibration data v3 is
+required: blocks written by 0.2.43 and 0.2.44 (v2) are not read, and until the calibration is run again the scope
+uses the original 1.00o5 compensations.
+
+1. Zero step: unplug both probes and USB, then OK. Each channel takes a few seconds.
+2. Gain step, after the zero step passed: put both probes (set to x1) on the calibration post and press OK.
+   A touch outside the box skips the step and keeps the previous gains.
+
+Details and failure messages: `firmware/README.md` sections 6.2 and 6.3. The host side of the volts model is in
+`mcp/AGENTS.md`.
 
 ## Development
 
@@ -110,21 +158,23 @@ conventions and prioritised TODO lists.
 - Docs: `docs/protocol.md` (wire protocol), `docs/mcp-tools.md`, `docs/plans/`, `docs/hardware-status.md`
   (bench log), `research/notes/` (the reverse-engineering digests this started from).
 
-The dev loop with hardware: build, `fnirsi1013d-flash` into RAM (hands-free via the protocol's FEL command),
-test, persist when good. Everything runs on Windows with WSL or on Linux.
+The dev loop with hardware: build with `make gcc10` in `firmware/scope` (WSL or Linux), then `fnirsi1013d-flash`
+loads `build-gcc10-pc/fnirsi_1013d.bin` into RAM hands-free (the protocol's ENTER_FEL command, `usbipd` and
+`sunxi-fel`), test, persist when good. Everything runs on Windows with WSL or on Linux.
 
 ## Roadmap and community wishes
 
 Open items in this repo are tracked in the `AGENTS.md` TODO lists. Feature requests seen in the EEVblog
 thread and elsewhere that fit this hardware, in rough priority:
 
-- External trigger input on the calibration pin (FPGA), to sync captures to an external TX pulse.
 - Deeper memory using the AL3's spare block RAM, and trigger on both ADC cores.
-- FFT and averaging / high-resolution modes on the scope itself (the 1.00 line lacks FFT, roll mode and
-  hold-off; the DPOS350P's FFT and frequency-response analyser are the reference ideas).
-- Screenshot over USB, CSV export, a dot display mode, triggered sweeps slower than 10 ms/div.
-- Base calibration that stores the measured per-core zero, so the on-screen volts match the host's.
-- Hiding every UI option the running hardware does not support (in progress).
+- A frequency-response (Bode) analyser: host tool first, then on the scope (`docs/plans/bode-design.md`).
+- CSV export, a dot display mode, triggered sweeps slower than 10 ms/div.
+- The remaining queue is in `docs/plans/task-queue.md`.
+
+Done since the first version of this list: the external trigger on the calibration pin (bitstream 0x1533),
+FFT and averaging on the scope (spectrum view), the decimation filters, calibration v3 storing the per-core
+zeros and gains, screenshot over USB (`scope_screenshot`), and removing the options the hardware cannot do.
 
 ## Contributing
 
