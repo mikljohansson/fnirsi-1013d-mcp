@@ -465,3 +465,7 @@ Newest entries at the bottom. Format: date, who, what, result.
 - Firmware 0.2.42 (fw-gen5, commits cebb982/7d20866, sha256 b23f5fc8..., pinned; fw-gen5 retired): deterministic Auto (probe at 50 MSa/s,
   period search, f0/f_hi rules, RBW <= f0/4), actionable warnings with MSa/s units, header without Avg. Loaded on 0x1534, census clean.
   Owner checks pending (three identical Auto presses -> identical settings; expected 200 kSa/s at depth 3000 for the 1 kHz square).
+- FPGA 0x1535 (fpga-gen4, commits e2aec2e/74fb8a3): CIC by N/2 + 15-tap FIR by 2, FIR enable 0x56; built: 3082 LUT / 2716 reg, 32 BRAM9K,
+  2 of 3 M18x18 inferred; clk_200MHz slack +0.324 ns; tb passes (latency 25 write clocks verified, EXT lag formula within 1-4 ns); FIR engages
+  at 10 MSa/s and slower. Bitstream sha256 5040a2ae... pinned, padded image 5ade9e75.... **Not flashed**; waits for mutation runs, docs, and
+  the firmware support (queue: FPGA 0x1535 firmware support, now unblocked for a fresh firmware agent).
