@@ -16,9 +16,10 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            4     //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            5     //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
-                                        //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9)
+                                        //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
+                                        //1.5: GET_EVENT_LOG (fw 0.2.12)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
@@ -51,6 +52,7 @@
 #define PC_CMD_TEST_PATTERN       0x0006
 #define PC_CMD_GET_LINK_STATS     0x0007     //1.2: link counters (firmware 0.1.4)
 #define PC_CMD_GET_BAD_FRAME      0x0008     //1.2: last request that failed its payload CRC, as received
+#define PC_CMD_GET_EVENT_LOG      0x0009     //1.5: the last 64 USB / link events with timestamps
 #define PC_CMD_GET_CHANNEL        0x0100
 #define PC_CMD_SET_CHANNEL        0x0101
 #define PC_CMD_GET_TIMEBASE       0x0102

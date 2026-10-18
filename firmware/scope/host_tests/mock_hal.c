@@ -414,6 +414,24 @@ void     pc_hal_link_stats(uint32_t *v) { uint32_t i; for(i=0;i<PC_TSTAT_COUNT;i
 
 void     pc_hal_usb_events(uint32_t *v) { uint32_t i; for(i=0;i<PC_USBEV_COUNT;i++) v[i] = 2000 + i; }
 void     pc_hal_rx_debug(uint32_t *v)   { uint32_t i; for(i=0;i<PC_RXDBG_COUNT;i++) v[i] = 3000 + i; }
+uint32_t pc_hal_usb_irq_polled(void)   { return 4000; }
+
+uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total)
+{
+  uint32_t i, k = (max < 3) ? max : 3;
+
+  for(i=0;i<k;i++)
+  {
+    memset(dst + 8 * i, 0, 8);
+    pc_put_u32(dst + 8 * i, 100 + i);
+    dst[8 * i + 4] = (uint8_t)(1 + i);
+    dst[8 * i + 5] = 0xA0;
+    pc_put_u16(dst + 8 * i + 6, 0x1234);
+  }
+
+  *total = 77;
+  return k;
+}
 
 uint32_t pc_hal_sd_sectors(void) { return mock.sd_sectors; }
 

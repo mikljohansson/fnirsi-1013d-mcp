@@ -71,6 +71,28 @@ void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
 #define PC_USB_EV_BAD_SETUP   5             //EP0 packets that were not 8 bytes (stalled)
 #define PC_USB_EV_COUNT       6
 
+//Event log (fw 0.2.12, GET_EVENT_LOG): the last PC_EVLOG_SIZE USB / link events with their ms time
+#define PC_EVLOG_SIZE         64
+#define PC_EVT_BUS_RESET      1
+#define PC_EVT_SUSPEND        2
+#define PC_EVT_RESUME         3
+#define PC_EVT_DISCONNECT     4
+#define PC_EVT_SETUP          5     //a = bRequest, b = bmRequestType << 8 | wValue low byte
+#define PC_EVT_BAD_SETUP      6     //b = COUNT0
+#define PC_EVT_CONFIGURED     7
+#define PC_EVT_EP_CLEARED     8     //a = endpoint (0x02 / 0x82)
+#define PC_EVT_DTR            9     //a = new DTR
+#define PC_EVT_RX_STALL       10    //ring full, EP2 OUT held back
+#define PC_EVT_RX_RELEASE     11
+#define PC_EVT_TX_FLUSH       12    //a frame in flight was dropped (link, DTR)
+#define PC_EVT_TX_ABORT       13    //dropped by the session (2 s no progress, #RESET)
+#define PC_EVT_IRQ_POLLED     14    //the timer poll found USB flags the interrupt had not taken: a = INTUSB, b = INTTX << 8 | INTRX
+
+void pc_usb_isr_flags(uint32 usb, uint32 tx, uint32 rx);   //top of the CDC IRQ handler (also when called from the poll)
+void pc_usb_isr_setup(uint32 d0, uint32 d1);                //EP0 setup packet (the 8 bytes as two words)
+void pc_usb_isr_bad_setup(uint32 count);                    //EP0 packet that was not 8 bytes
+void pc_usb_poll_irq(void);                                 //timer tick: run the CDC handler for flags a lost IRQ left
+
 //1 when no response byte is left in the staging buffer or the endpoint FIFO (ENTER_FEL waits for this)
 int  pc_transport_tx_drained(void);
 

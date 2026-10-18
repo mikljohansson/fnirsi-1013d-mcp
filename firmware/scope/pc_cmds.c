@@ -672,10 +672,10 @@ static int h_get_battery(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //-> first pass after battery check, acquisition, touch handler, RTC. The last six are ms + 1, 0 = not reached),
 //USB events (fw 0.2.5: bus resets, suspends, resumes, disconnects, EP0 setups, malformed EP0 setups), RX back-pressure
 //(fw 0.2.7: stalls from the ISR, releases, re-stalls inside a release, releases with no packet waiting, largest
-//RXCOUNT, RXCOUNT > 512)
+//RXCOUNT, RXCOUNT > 512), fw 0.2.12: USB interrupts served by the timer poll (lost IRQs)
 static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
-  uint32_t v[PC_TSTAT_COUNT + 24 + PC_USBEV_COUNT + PC_RXDBG_COUNT];
+  uint32_t v[PC_TSTAT_COUNT + 25 + PC_USBEV_COUNT + PC_RXDBG_COUNT];
   const pc_parser_stats *ps = &s->parser.stats;
   uint32_t n = PC_TSTAT_COUNT, i;
 
@@ -692,6 +692,7 @@ static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uin
   n += PC_USBEV_COUNT;
   pc_hal_rx_debug(v + n);
   n += PC_RXDBG_COUNT;
+  v[n++] = pc_hal_usb_irq_polled();
 
   pc_put_u16(resp, (uint16_t)n);
   pc_put_u16(resp + 2, 0);
@@ -714,6 +715,23 @@ static int h_get_bad_frame(pc_session *s, const uint8_t *req, uint32_t len, uint
   pc_put_u16(resp + 10, 0);
   memcpy(resp + 12, s->bad, s->bad_len);
   *rl = 12 + s->bad_len;
+  return PC_OK;
+}
+
+//GET_EVENT_LOG (protocol 1.5): u16 n, u16 0, u32 total events since boot, u32 now (ms), then n entries of 8 bytes
+//oldest first: u32 ms, u8 type (PC_EVT_* in pc_transport.h, docs/protocol.md section 14), u8 a, u16 b
+static int h_get_event_log(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint32_t total, n;
+
+  (void)s; (void)req; (void)len;
+
+  n = pc_hal_event_log(resp + 12, 64, &total);
+  pc_put_u16(resp, (uint16_t)n);
+  pc_put_u16(resp + 2, 0);
+  pc_put_u32(resp + 4, total);
+  pc_put_u32(resp + 8, pc_hal_ms());
+  *rl = 12 + 8 * n;
   return PC_OK;
 }
 
@@ -1824,6 +1842,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_TEST_PATTERN, F_BASIC,                      0, h_test_pattern },
   { PC_CMD_GET_LINK_STATS, F_BUSY | F_CONTROL | F_BASIC, 0, h_get_link_stats },
   { PC_CMD_GET_BAD_FRAME, F_BUSY | F_CONTROL | F_BASIC, 0, h_get_bad_frame },
+  { PC_CMD_GET_EVENT_LOG, F_BUSY | F_CONTROL | F_BASIC, 0, h_get_event_log },
   { PC_CMD_GET_CHANNEL,  0,                            0, h_get_channel },
   { PC_CMD_SET_CHANNEL,  0,                            0, h_set_channel },
   { PC_CMD_GET_TIMEBASE, 0,                            0, h_get_timebase },

@@ -169,7 +169,9 @@ def main():
              # fw 0.2.5+: USB device events
              'usb_bus_resets usb_suspends usb_resumes usb_disconnects ep0_setups ep0_bad_setups '
              # fw 0.2.7+: RX back-pressure branches
-             'rx_isr_stalls rx_releases rx_restalls rx_empty_releases rx_count_max rx_count_oversize').split()
+             'rx_isr_stalls rx_releases rx_restalls rx_empty_releases rx_count_max rx_count_oversize '
+             # fw 0.2.12+: USB interrupts served by the timer poll (lost IRQs)
+             'usb_irq_polled').split()
     st, body, _ = L.request(0x0007)
     if st == 0 and body:
         n = struct.unpack_from('<H', body)[0]

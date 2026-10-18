@@ -165,7 +165,7 @@ static void test_info(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, 76);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 4); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 5); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
   T_EQ(pc_get_u16(r.p + 8), 0x1532); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS), PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED), PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED);
@@ -276,7 +276,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.4,fpga=0x1532");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.5,fpga=0x1532");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -883,7 +883,7 @@ static void test_busy_context(void)
   r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
   T_EQ(r.p[3], PC_UI_IDLE);
   r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
-  T_EQ(pc_get_u16(r.p), 47); T_EQ(pc_get_u32(r.p + 4 + 4 * 28), 4800);       //duration of the first pass
+  T_EQ(pc_get_u16(r.p), 48); T_EQ(pc_get_u32(r.p + 4 + 4 * 28), 4800);       //duration of the first pass
   T_EQ(pc_get_u32(r.p + 4 + 4 * 29), 1200 + 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 30), 1500 + 1);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 31), 30 + 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 32), 1500 + 1);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 33), 4800 + 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 34), 4800 + 1);
@@ -1367,7 +1367,7 @@ static void test_ext_trigger(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
-  T_EQ(r.p[1], 4);                                              //proto 1.4
+  T_EQ(r.p[1], 5);                                              //proto 1.5
 
   //Generator on, then EXT: the generator goes off
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -1455,6 +1455,18 @@ static void test_dtr_up_keeps_request(void)
   }
 }
 
+//GET_EVENT_LOG (protocol 1.5): answered from the timer poll, entries oldest first
+static void test_event_log(void)
+{
+  resp_t r;
+
+  setup(0x1532);
+  r = req_ctx(PC_CMD_GET_EVENT_LOG, 0, 0, PC_CTX_ISR);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 3); T_EQ(pc_get_u32(r.p + 4), 77); T_EQ(pc_get_u32(r.p + 8), mock.now);
+  T_EQ(r.len, 12 + 3 * 8); T_EQ(pc_get_u32(r.p + 12), 100); T_EQ(r.p[12 + 4], 1); T_EQ(r.p[12 + 8 + 4], 2);
+  T_EQ(r.p[12 + 5], 0xA0); T_EQ(pc_get_u16(r.p + 12 + 6), 0x1234);
+}
+
 static void test_fel_reset_stall(void)
 {
   uint8_t p[4];
@@ -1466,7 +1478,7 @@ static void test_fel_reset_stall(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 4);                                              //proto_minor 1.4
+  T_EQ(r.p[1], 5);                                              //proto_minor 1.5
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -1530,7 +1542,8 @@ static void test_fel_reset_stall(void)
   //GET_LINK_STATS: 11 transport + 8 parser + 8 session + 2 startup counters, answered from every context
   setup(0x1532);
   r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
-  T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 47); T_EQ(r.len, 4 + 47 * 4);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 48); T_EQ(r.len, 4 + 48 * 4);
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 47), 4000);                      //USB IRQs served by the timer poll
   T_EQ(pc_get_u32(r.p + 4 + 4 * 41), 3000); T_EQ(pc_get_u32(r.p + 4 + 4 * 46), 3005);   //RX back-pressure
   T_EQ(pc_get_u32(r.p + 4 + 4 * 35), 2000); T_EQ(pc_get_u32(r.p + 4 + 4 * 40), 2005);   //USB events
   T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 4 + 4 * 10), 1010);
@@ -1587,6 +1600,7 @@ int main(void)
   test_sd();
   test_ext_trigger();
   test_dtr_up_keeps_request();
+  test_event_log();
   test_fel_reset_stall();
   mock_clear_resps();
   return t_report("test_session");

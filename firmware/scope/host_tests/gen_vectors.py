@@ -23,6 +23,7 @@ MAX_REQUEST_PAYLOAD = 492
 CMDS = {
     "PING": 0x0001, "GET_INFO": 0x0002, "GET_STATUS": 0x0003, "SET_REMOTE": 0x0004,
     "GET_BATTERY": 0x0005, "TEST_PATTERN": 0x0006, "GET_LINK_STATS": 0x0007, "GET_BAD_FRAME": 0x0008,
+    "GET_EVENT_LOG": 0x0009,
     "GET_CHANNEL": 0x0100, "SET_CHANNEL": 0x0101, "GET_TIMEBASE": 0x0102, "SET_TIMEBASE": 0x0103,
     "GET_TRIGGER": 0x0104, "SET_TRIGGER": 0x0105,
     "ARM": 0x0200, "FORCE": 0x0201, "STOP": 0x0202, "WAIT": 0x0203, "READ_RAW": 0x0204,
@@ -85,6 +86,7 @@ REQUESTS = [
     ("GET_CAPTURE_INFO", b"", "1.3: settings of the latest finished capture"),
     ("GET_LINK_STATS", b"", "1.2: link counters"),
     ("GET_BAD_FRAME", b"", "1.2: last request with a payload CRC error"),
+    ("GET_EVENT_LOG", b"", "1.5: the last 64 USB / link events with ms timestamps"),
     ("SD_INFO", struct.pack("<B3x", 1), "1.3: card, partition, write window, eGON headers, VERIFY checksums"),
     ("SD_READ_SECTORS", struct.pack("<IHH", 750, 128, 0), "1.3: sectors 750..877"),
     ("SD_STAGE", struct.pack("<IHH", 512, 4, 0) + b"eGON", "1.3: 4 bytes at stage offset 512"),

@@ -863,6 +863,10 @@ void usb_device_CDC_irq_handler(void)
   register uint32 usbirq = *USBC_REG_INTUSB;
   register uint32 txirq  = *USBC_REG_INTTX;
   register uint32 rxirq  = *USBC_REG_INTRX;
+#if PC_PROTOCOL
+  //PC protocol: event log, and the lost-interrupt count when this runs from the timer poll
+  pc_usb_isr_flags(usbirq, txirq, rxirq);
+#endif
   
   //Check on a RESET interrupt
   if(usbirq & USBC_BP_INTUSB_RESET)
@@ -1045,7 +1049,7 @@ void usb_device_CDC_irq_handler(void)
               usb_setup_packet.data[0] = *USBC_REG_EPFIFO0;
               usb_setup_packet.data[1] = *USBC_REG_EPFIFO0;
 #if PC_PROTOCOL
-              pc_usb_isr_event(PC_USB_EV_SETUP);
+              pc_usb_isr_setup(usb_setup_packet.data[0], usb_setup_packet.data[1]);
 #endif
               
               //Signal packet has been serviced
@@ -1403,7 +1407,7 @@ void usb_device_CDC_irq_handler(void)
             {
               //Signal packet has been serviced and stall the end point
 #if PC_PROTOCOL
-              pc_usb_isr_event(PC_USB_EV_BAD_SETUP);
+              pc_usb_isr_bad_setup(*USBC_REG_COUNT0);
 #endif
               *USBC_REG_CSR0 = USBC_BP_CSR0_D_SERVICED_RX_PKT_READY | USBC_BP_CSR0_D_SEND_STALL;
             }

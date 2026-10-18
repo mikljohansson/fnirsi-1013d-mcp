@@ -17,6 +17,7 @@
 #include "pc_rx_ring.h"
 #include "pc_protocol.h"
 #include "pc_hal.h"
+#include "interrupt.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -51,6 +52,31 @@ static volatile uint32 pc_usb_ev[PC_USB_EV_COUNT];
 #define PC_RXD_OVERSIZE     5
 static volatile uint32 pc_rxd[PC_RXDBG_COUNT];
 static volatile uint8  pc_rx_in_release;       //drain called from the main-loop release
+
+//Event log ring (IRQ context writers; the reader masks IRQs)
+typedef struct
+{
+  uint32 ms;
+  uint8  type;
+  uint8  a;
+  uint16 b;
+} pc_evlog_entry;
+
+static pc_evlog_entry  pc_evlog[PC_EVLOG_SIZE];
+static volatile uint32 pc_evlog_n;              //events logged since boot
+static volatile uint32 pc_usb_irq_polled;       //timer polls that found USB flags left by a lost interrupt
+static volatile uint8  pc_usb_in_poll;          //the CDC handler runs from the timer poll
+
+static void pc_evlog_add(uint8 type, uint8 a, uint16 b)
+{
+  pc_evlog_entry *en = &pc_evlog[pc_evlog_n & (PC_EVLOG_SIZE - 1)];
+
+  en->ms   = pc_hal_ms();
+  en->type = type;
+  en->a    = a;
+  en->b    = b;
+  pc_evlog_n++;
+}
 static volatile uint8  pc_ep2_configured;    //SET_CONFIGURATION set up EP2 since the last bus reset
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -108,6 +134,7 @@ static uint32 pc_rx_drain_fifo(void)
       *USBC_REG_INTRXE &= ~USBC_INTRX_FLAG_EP2;
       pc_rx_stalled = 1;
       pc_ts[PC_TS_RX_STALLS]++;
+      pc_evlog_add(PC_EVT_RX_STALL, 0, (uint16)count);
       pc_rxd[pc_rx_in_release ? PC_RXD_RESTALL : PC_RXD_ISR_STALL]++;
       return packets;
     }
@@ -192,6 +219,7 @@ uint32_t pc_hal_rx_read(uint8_t *dst, uint32_t max)
     *USBC_REG_EPIND = 2;
     pc_rx_stalled   = 0;
     pc_rxd[PC_RXD_RELEASE]++;
+    pc_evlog_add(PC_EVT_RX_RELEASE, 0, 0);
 
     if(!(*USBC_REG_RXCSR & USBC_BP_RXCSR_D_RX_PKT_READY))
       pc_rxd[PC_RXD_EMPTY]++;
@@ -261,7 +289,10 @@ static void pc_tx_flush(void)
   uint32 k;
 
   if(pc_tx_active)
+  {
     pc_ts[PC_TS_TX_FLUSHES]++;
+    pc_evlog_add(PC_EVT_TX_FLUSH, 0, (uint16)pc_tx_left);
+  }
 
   pc_tx_active = 0;
   pc_tx_left   = 0;
@@ -349,6 +380,7 @@ void pc_hal_tx_abort(void)
 {
   uint32 cpsr = pc_irq_save();
 
+  pc_evlog_add(PC_EVT_TX_ABORT, 0, (uint16)pc_tx_left);
   pc_tx_flush();
   pc_irq_restore(cpsr);
 }
@@ -397,8 +429,17 @@ void pc_usb_isr_link(void)
 
 void pc_usb_isr_event(uint8 ev)
 {
+  static const uint8 type[PC_USB_EV_COUNT] = { PC_EVT_BUS_RESET, PC_EVT_SUSPEND, PC_EVT_RESUME, PC_EVT_DISCONNECT,
+                                               PC_EVT_SETUP, PC_EVT_BAD_SETUP };
+
   if(ev < PC_USB_EV_COUNT)
+  {
     pc_usb_ev[ev]++;
+
+    //Setups and bad setups are logged with their details by their own hooks
+    if(ev < PC_USB_EV_SETUP)
+      pc_evlog_add(type[ev], 0, 0);
+  }
 
   if(ev == PC_USB_EV_BUS_RESET)
     pc_ep2_configured = 0;
@@ -431,10 +472,85 @@ void pc_hal_rx_debug(uint32_t *v)
 void pc_usb_isr_configured(void)
 {
   pc_ep2_configured = 1;
+  pc_evlog_add(PC_EVT_CONFIGURED, 0, 0);
+}
+
+void pc_usb_isr_setup(uint32 d0, uint32 d1)
+{
+  (void)d1;
+  pc_usb_ev[PC_USB_EV_SETUP]++;
+  pc_evlog_add(PC_EVT_SETUP, (uint8)(d0 >> 8), (uint16)(((d0 & 0xFF) << 8) | ((d0 >> 16) & 0xFF)));
+}
+
+void pc_usb_isr_bad_setup(uint32 count)
+{
+  pc_usb_ev[PC_USB_EV_BAD_SETUP]++;
+  pc_evlog_add(PC_EVT_BAD_SETUP, 0, (uint16)count);
+}
+
+//Top of the CDC IRQ handler. Called with the flags just read (reading clears them). From the timer poll a non-zero
+//set means the interrupt for them was lost (1.00o5's irq_handler writes 0 to INTC pending after reading it).
+void pc_usb_isr_flags(uint32 usb, uint32 tx, uint32 rx)
+{
+  if(pc_usb_in_poll && (usb | tx | rx))
+  {
+    pc_usb_irq_polled++;
+    pc_evlog_add(PC_EVT_IRQ_POLLED, (uint8)usb, (uint16)(((tx & 0xFF) << 8) | (rx & 0xFF)));
+  }
+}
+
+//Timer tick (IRQ context, so it cannot interleave with the USB IRQ): run the CDC handler once. With nothing pending it
+//only reads the three flag registers. Only while the CDC handler is the installed USB handler (not in MSC mode).
+void pc_usb_poll_irq(void)
+{
+  extern void usb_device_CDC_irq_handler(void);
+  extern IRQHANDLERFUNCION interrupthandlers[];
+
+  if(interrupthandlers[USB_IRQ_NUM] != usb_device_CDC_irq_handler)
+    return;
+
+  pc_usb_in_poll = 1;
+  usb_device_CDC_irq_handler();
+  pc_usb_in_poll = 0;
+}
+
+uint32_t pc_hal_usb_irq_polled(void)
+{
+  return pc_usb_irq_polled;
+}
+
+uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total)
+{
+  uint32 cpsr = pc_irq_save();
+  uint32 n = pc_evlog_n, k, i, first;
+
+  k = (n < PC_EVLOG_SIZE) ? n : PC_EVLOG_SIZE;
+
+  if(k > max)
+    k = max;
+
+  first = n - k;
+
+  for(i=0;i<k;i++)
+  {
+    const pc_evlog_entry *en = &pc_evlog[(first + i) & (PC_EVLOG_SIZE - 1)];
+    uint8_t *p = dst + 8 * i;
+
+    p[0] = (uint8_t)en->ms; p[1] = (uint8_t)(en->ms >> 8); p[2] = (uint8_t)(en->ms >> 16); p[3] = (uint8_t)(en->ms >> 24);
+    p[4] = en->type;
+    p[5] = en->a;
+    p[6] = (uint8_t)en->b; p[7] = (uint8_t)(en->b >> 8);
+  }
+
+  *total = n;
+  pc_irq_restore(cpsr);
+  return k;
 }
 
 void pc_usb_isr_ep_cleared(uint8 ep)
 {
+  pc_evlog_add(PC_EVT_EP_CLEARED, ep, 0);
+
   if(ep & 0x80)
   {
     //IN FIFO flushed: the frame in flight is incomplete anyway, the host resynchronises
@@ -453,6 +569,9 @@ void pc_usb_isr_ep_cleared(uint8 ep)
 void pc_usb_dtr(uint8 dtr)
 {
   dtr = dtr ? 1 : 0;
+
+  if(dtr != pc_dtr)
+    pc_evlog_add(PC_EVT_DTR, dtr, 0);
 
   if(pc_dtr && !dtr)
   {

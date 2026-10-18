@@ -1137,7 +1137,12 @@ void pc_glue_poll_isr(void)
   //Timer0 IRQ, every ms: PING/GET_INFO/GET_STATUS/GET_BATTERY/#VER/#RESET and the TX pump without waiting for the
   //UI loop. Skipped while a main-loop or BUSY poll is running (in_poll), so it never interleaves with one.
   if(pc_ready)
+  {
+    //fw 0.2.12: a USB interrupt lost by 1.00o5's irq_handler would leave EP0 (no other fallback) unanswered until the
+    //host gives up and resets the port. The handler's flags stay latched until read, so the tick serves them.
+    pc_usb_poll_irq();
     pc_poll(&pc_sess, PC_CTX_ISR);
+  }
 }
 
 void pc_glue_ui_service(void)

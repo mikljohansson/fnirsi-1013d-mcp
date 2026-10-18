@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.11 (0.2.11: a request sent right after the port is opened is no longer dropped; 0.2.10: MCP chip drawn as one idempotent blit, acquisition "Roll mode on/off" toggle
+State on 2026-10-18, fw 0.2.12 (0.2.12: USB IRQ fallback in the timer poll, GET_EVENT_LOG, protocol 1.5; 0.2.11: a request sent right after the port is opened is no longer dropped; 0.2.10: MCP chip drawn as one idempotent blit, acquisition "Roll mode on/off" toggle
 label; protocol 1.4: shared control, SD sector commands, EXT trigger for FPGA 0x1533
 (protocol section 14 row 41, needs bench with fpga-gen2's bitstream); 0.2.8: generator and trigger menus compacted; 0.2.7: SD_STAGE from the timer poll,
 RX back-pressure counters, our version on screen, chip drawn with the top bar, temperature only with an RTC; 0.2.6:
@@ -213,6 +213,13 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
   test_dtr_up_keeps_request.
 - Startup (closed 2026-10-18): 1515 ms from session init to the first MAIN poll is the 1.00o5 splash
   (`load_picture("scope.bmp")`); kept by decision, documented in README section 4 ("Boot"). The first pass is 31 ms.
+- USB drops (Windows error 22, device re-enumerates): 0.2.2 idle with the port closed, 0.2.3 during an SD write,
+  0.2.11 during 10 Hz GET_STATUS polling (counters: one extra suspend + one extra bus reset = one host port reset;
+  no stalls, CRC errors or aborts). Prime suspect (not proven): a lost USB interrupt. 1.00o5's irq_handler clears
+  INTC pending by writing 0 after reading it; EP2 OUT has the sweep and EP2 IN the pump kick as fallbacks, EP0 had
+  none, so a lost EP0 interrupt leaves a control transfer unanswered until the host fails the device. 0.2.12 runs
+  the CDC handler from every timer tick (flags stay latched until read), counts the hits (GET_LINK_STATS 47) and
+  logs the last 64 USB/link events (GET_EVENT_LOG). Next drop: read counter 47 and the log right after it.
 - USB "Error state" incident (0.2.2, lead): port closed, scope idle ~10 min, then Windows showed the device present but
   in an error state (CreateFile failed); a cable replug recovered it. Not reproduced, cause unknown. Code reading:
   the suspend path calls pc_usb_isr_link, which flushed a held-back OUT packet but left EP2 OUT masked in INTRXE
