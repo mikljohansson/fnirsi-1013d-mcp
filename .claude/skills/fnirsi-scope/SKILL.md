@@ -40,6 +40,16 @@ The person at the scope may change settings at any time (last change wins). Long
 and report `restarts`: pass that on; after repeated restarts ask them to leave the knobs alone. "Modal screen" /
 E_BUSY = a menu is open on the scope: ask them to close it. Say what you changed; leave the scope running.
 
+## Grounds
+
+The probe ground (BNC shells) is VRF1, about +1.24 V above the scope's USB/digital ground (fpga/al3/README.md).
+- The calibration output reading about -1.24 / +1.9 V against the probe ground is by design.
+- Earthed device under test plus earthed PC = ground loop through R71: VRF1 sags (about 1.1 V, calculated) and every
+  trace shifts. Ask to float one side (battery DUT or laptop, isolated USB); check with a shorted-input zero with
+  and without the device connected.
+- EXT trigger sources: 3.3 V logic referenced to the USB ground; if they share the probe ground, a red LED (or
+  3 x 1N4148) in series and the rising edge. Never connect the calibration pin to a coil, drain or damping resistor.
+
 ## Safety
 
 - Generator and loopback test (tier 3) drive the calibration pin and need a confirmation token: state frequency,
@@ -59,7 +69,7 @@ decay_fit: `t` (after the edge), `data`, `fit`, `residual`; fft: `f`, `amplitude
 Value + unit + method (n, sample rate, range, alignment), and: 8-bit ADC (~2 LSB noise, `volts_per_lsb` in every
 result); max 200 MS/s per channel; ~30 MHz analog bandwidth (rise times < ~12 ns are the scope's); absolute volts
 depend on `scaling`; the calibration pin is a frequency/duty/timing reference, not a voltage reference (~3.1 Vpp,
-low level ~ -1.2 V on this board). Keep the tool's dynamic caveats (clipping, auto trigger, aliasing, restarts).
+referenced to USB ground, so -1.24 / +1.9 V against the probe ground). Keep the tool's dynamic caveats (clipping, auto trigger, aliasing, restarts).
 
 ## Troubleshooting
 

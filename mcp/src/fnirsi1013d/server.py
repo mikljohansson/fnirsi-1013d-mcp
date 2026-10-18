@@ -136,7 +136,7 @@ STATIC_PROFILE: dict[str, str] = {
     "input": "1 MOhm; assume 40 V peak maximum at 1x and use a 10x probe for anything higher [U]",
     "generator": "square wave only on the calibration pin, 11.6 mHz steps, 20 ns edge jitter, <= 25 MHz; only on "
                  "Atlan4 bitstreams. No DAC, no arbitrary waveform. At the probe it is a ~3.1 Vpp square wave whose "
-                 "DC level is not 0 V (low about -1.2 V on the owner's unit): a frequency/duty/timing reference, not "
+                 "DC level is the USB ground, 1.24 V below the probe ground (reads -1.24 / +1.9 V): a timing reference, not "
                  "a voltage reference",
     "throughput": "~50-65 full dual-channel AL3 captures per second via raw reads; hundreds per second for "
                   "short windows [U USB rate]",
@@ -150,12 +150,20 @@ STANDING_CAVEATS = [
 ]
 
 #: T8 square-wave check (backups/t8sq_CH1.json): bench DC reads right, the calibration output does not swing 0..3.3 V
-CAL_OUTPUT_NOTE = ("The calibration output is a frequency/duty/timing reference, not a voltage reference: on the owner's unit it is a ~3.1 Vpp square wave whose low level sits about -1.2 V below ground at the probe (its output network is capacitively coupled or biased; T8 2026-10-18), not 0..3.3 V.")
+#: fpga-gen2, fpga/al3/README.md "Changes" 2 (commit 28126aa): probe ground = VRF1 = +1.24 V over USB ground
+CAL_OUTPUT_NOTE = ("The calibration output is a frequency/duty/timing reference, not a voltage reference: a ~3.1 Vpp "
+                   "square wave referenced to the scope's USB/digital ground, while the probe ground (BNC shells) "
+                   "sits on VRF1, about +1.24 V above it (fpga/al3/README.md), so against the probe ground it reads "
+                   "about -1.24 / +1.9 V. That is by design, not an error.")
 
-EXT_NOTE = ("EXT triggers on the calibration pin: 3.3 V logic only, never more than 3.3 V on that pin; the level is "
-            "ignored (logic threshold); the trigger point lags the pin by 20-25 ns (4-5 samples at 200 MS/s, under one "
-            "sample at <= 10 MS/s); pulses shorter than ~10 ns are rejected. The pin is also the generator output: EXT "
-            "and scope_generator are mutually exclusive.")
+EXT_NOTE = ("EXT triggers on the calibration pin, a 3.3 V logic input (never more than 3.3 V) referenced to the "
+            "scope's USB/digital ground, NOT to the probe ground: the BNC shells sit on VRF1, about +1.24 V above USB "
+            "ground (fpga/al3/README.md). Reference the EXT source to the USB connector shell; a source that shares the "
+            "probe ground idles at ~1.24 V at the pin and is not recognised: put a red LED (or 3 x 1N4148) in series, "
+            "anode at the source, and trigger on the rising edge. Never connect the pin to a detector coil, drain or "
+            "damping resistor (flyback is hundreds of volts). The level is ignored (logic threshold); the trigger lags "
+            "the pin by 20-25 ns (4-5 samples at 200 MS/s, under one sample at <= 10 MS/s); pulses under ~10 ns are "
+            "rejected. The pin is also the generator output: EXT and scope_generator are mutually exclusive.")
 
 DESC_SHARED = ("The scope is shared with the person at it (collaborative firmware): either side may change "
                "settings, the last change wins and the screen shows the host's captures.")
@@ -1061,8 +1069,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     @register(1, title="Set the trigger and capture geometry", idempotent=True)
     async def scope_set_trigger(
         source: Annotated[Literal["CH1", "CH2", "EXT"] | None, Field(description="trigger channel; EXT = the "
-                          "calibration pin as a 3.3 V logic input (bitstream 0x1533+, caps EXT_TRIGGER, generator off; "
-                          "level ignored)")] = None,
+                          "calibration pin as a 3.3 V logic input referenced to the USB ground, not the probe ground "
+                          "(bitstream 0x1533+, caps EXT_TRIGGER, generator off; level ignored)")] = None,
         edge: Annotated[Literal["rising", "falling"] | None, Field(description="trigger edge")] = None,
         level: Annotated[float | str | None, Field(description="trigger level in volts at the probe tip, "
                                                                "converted to a raw core-A code")] = None,
@@ -2005,7 +2013,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         confirm_token returns a token and a summary of the physical effect; repeat the identical call with the
         token within 120 s. Disabling needs no token. Returns the actual frequency, duty and enable state.
 
-        The calibration output is a frequency/duty/timing reference, not a voltage reference: on the owner's unit it is a ~3.1 Vpp square wave whose low level sits about -1.2 V below ground at the probe (its output network is capacitively coupled or biased; T8 2026-10-18), not 0..3.3 V.
+        The calibration output is a frequency/duty/timing reference, not a voltage reference: a ~3.1 Vpp square wave
+        referenced to the USB ground; the probe ground is VRF1, +1.24 V above it, so it reads about -1.24 / +1.9 V.
         Square wave only, 3.3 V logic, about 20 ns edge jitter. Not a sine source and not a power driver: buffer
         it before driving a MOSFET gate. If the pin is wired into the detector (e.g. as a TX gate drive) this
         switches real coil current. On the stock FPGA the pin always outputs a fixed 1 kHz and this tool is

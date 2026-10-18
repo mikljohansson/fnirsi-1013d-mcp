@@ -57,7 +57,24 @@ to leave the knobs alone (the tool gives up after 5 restarts). A menu open on th
 with "modal screen" (E_BUSY): ask them to close it. Leave the scope as you found it where reasonable (RUN, the
 user's range) and say what you changed.
 
-## 5. Safety
+## 5. Grounds: the probe ground is not the USB ground
+
+The BNC shells (probe ground clips) sit on VRF1, a TL432 reference about +1.24 V above the scope's digital ground
+(USB connector shell, SD card), through R71 (100 Ohm) (fpga/al3/README.md "Changes" 2). Consequences:
+
+- Never assume probe ground = USB ground. The calibration output reading about -1.24 / +1.9 V against the probe
+  ground is this offset by design, not an error.
+- Ground loops shift every trace: if the device under test is earthed and the PC is earthed (USB), a current flows
+  through R71 (about 12 mA, calculated) and VRF1 sags (to about 1.1 V, calculated), moving all channels. Ask the
+  user to float one side (battery-powered device under test, battery laptop, or an isolated USB link), and check
+  by comparing a shorted-input zero (`scope_fetch_waveform` mean) with and without the device connected.
+- EXT trigger (bitstreams 0x1533+): reference the source to the USB ground (connector shell); 3.3 V logic only.
+  A source that shares the probe ground idles at ~1.24 V at the pin and is not recognised: insert a red LED or
+  3 x 1N4148 in series (anode at the source) and trigger on the rising edge.
+- Never connect the calibration pin to a detector coil, drain or damping resistor: the flyback is hundreds of
+  volts.
+
+## 5a. Safety
 
 - Tier 2 (`scope_set_channel`) clicks relays; changes are rate-limited. Tier 3 (`scope_generator`,
   `scope_self_test_loopback`) drives the calibration pin and needs a confirmation token: say what will happen
@@ -90,8 +107,8 @@ Give value, unit and how it was measured (n averaged, sample rate, range, alignm
 - 200 MS/s per channel at most; trigger jitter up to 2 / fs without edge alignment.
 - Analog bandwidth ~30 MHz: rise times below ~12 ns and content above 30 MHz measure the scope.
 - Absolute volts: say whether `scaling` was `unit-calibration` or `firmware`.
-- The calibration pin is a frequency / duty / timing reference, not a voltage reference: on this board it is a
-  ~3.1 Vpp square wave whose low level sits about -1.2 V at the probe (capacitively coupled).
+- The calibration pin is a frequency / duty / timing reference, not a voltage reference: it is a ~3.1 Vpp square
+  wave referenced to the USB ground, so against the probe ground (VRF1, +1.24 V) it reads about -1.24 / +1.9 V.
 - Pass on dynamic caveats (clipping, auto trigger fired, aliasing, restarts) instead of dropping them.
 
 ## 8. Troubleshooting
