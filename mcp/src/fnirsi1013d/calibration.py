@@ -217,14 +217,16 @@ def _fit_core(pts: list[dict[str, Any]], core: str) -> CoreFit | None:
 @dataclass
 class ChannelScale:
     """Code <-> volt conversion for one channel in its current state, per ADC core, at the BNC (1x).
-    ``zero_a``/``zero_b`` are raw (uncompensated) core codes of 0 V; ``gain_*`` volts per code."""
+    ``zero_a``/``zero_b`` are raw (uncompensated) core codes of 0 V; ``gain_*`` volts per code; ``adc_*_comp`` what
+    the firmware adds to each core's raw code in READ_TRACE (whole codes with the 1.00o5 compensations; with
+    calibration v2 the exact correction to the common 0 V code T, applied on the scope as whole codes plus dither)."""
 
     zero_a: float
     zero_b: float
     gain_a: float
     gain_b: float
-    adc_a_comp: int
-    adc_b_comp: int
+    adc_a_comp: float
+    adc_b_comp: float
     probe: float
     source: str  # "unit-calibration" or "firmware"
 
@@ -259,13 +261,31 @@ class ChannelScale:
         return (self.gain_a + self.gain_b) / 2 * self.probe
 
 
-def channel_scale(ch: int, cfg: Any, cal_resp: Any, unit: UnitCalibration | None) -> ChannelScale:
-    """Scale for channel ``ch`` with ChannelConfig ``cfg`` and CalResp ``cal_resp``; uses ``unit`` when it has a
-    fit for the channel's range, else the firmware formula."""
+def channel_scale(ch: int, cfg: Any, cal_resp: Any, unit: UnitCalibration | None,
+                  clock_class: int = 1) -> ChannelScale:
+    """Scale for channel ``ch`` with ChannelConfig ``cfg`` and CalResp ``cal_resp``. Order: the scope's calibration
+    v2 when it is in use for the channel (protocol 1.10: per-core zeros of ``clock_class``, 0 full rate / 1 gated,
+    plus the offset slope; gains from ``unit`` when it fits the range, else the firmware's), then ``unit`` (per-unit
+    calibration file), then the firmware formula."""
     ca, cb = int(cal_resp.adc_a_comp), int(cal_resp.adc_b_comp)
     probe = cfg.probe_factor
     fw_g = cfg.volts_per_lsb
     fs = fw_slope(getattr(cal_resp, "dc_shift_value", 0))
+    if getattr(cal_resp, "v2", False):
+        from .protocol import CAL_CLASS_NAMES, cal_target
+        r = min(cfg.range, 6)
+        dco = cfg.offset_pwm - cal_resp.dc_calibration_offset[r]  # offset_pwm = centre[range] + dcoffset
+        za = cal_resp.zero_at(clock_class, 0, r, dco)
+        zb = cal_resp.zero_at(clock_class, 1, r, dco)
+        t = cal_target(dco, cal_resp.dc_shift_value)
+        src = f"scope calibration v2 ({CAL_CLASS_NAMES[clock_class]} clock)"
+        ga = gb = fw_g
+        if unit is not None and unit.has(ch, cfg.range):
+            fa, fb = unit.core_fit(ch, cfg.range, "A"), unit.core_fit(ch, cfg.range, "B")
+            assert fa is not None and fb is not None
+            ga, gb = fa.gain or fw_g, fb.gain or fw_g
+            src += ", unit-calibration gains"
+        return ChannelScale(za, zb, ga, gb, t - za, t - zb, probe, src)
     if unit is not None and unit.has(ch, cfg.range):
         fa = unit.core_fit(ch, cfg.range, "A")
         fb = unit.core_fit(ch, cfg.range, "B")

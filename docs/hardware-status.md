@@ -474,3 +474,55 @@ Newest entries at the bottom. Format: date, who, what, result.
   GET_CAL both channels: 248 bytes, version 1, flags 4 (fw-cal expected flags 0 before calibration; to be explained). Pass times before
   calibration: 44 ms at 20 MSa/s, 45 ms at 1 MSa/s, 58 ms at ~10 kSa/s (max 79-80). Next: owner runs Base calibration with probes and USB
   unplugged. fw-gen6 spawned (worktree) on the 0.2.44 batch: 0x1535 FIR support, spectrum strip overdraw fix, CIC2 default.
+- **Base calibration v2 run by the owner ("Calibration successful").** GET_CAL: version 2, flags 0x07 on both channels. CH1 with the
+  generator off (pin pulled down, i.e. ~-1.24 V vs probe ground, NOT a shorted input): corrected trace odd/even (core A/B) means differ by
+  -0.05 at 1 MSa/s and -0.06 at 10 kSa/s (raw spread +5.95), -0.23 at 20 MSa/s, but -1.49 at 200 MSa/s (raw +4.51); filtered modes read
+  94.65 vs gated legacy 93.0 (1.65-code step remains at this level). Legacy 1 MSa/s with the 1 kHz square: Nyquist spur -34.7 dBV against a
+  -61 dBV floor (was -27 vs -50): 8 dB better but still 26 dB above the floor. Interpretation (inference): the zero correction works where
+  the level is near the calibration point; the residual spur with a +/-1.5 V square and the full-rate/filtered offsets at -1.24 V point at a
+  per-core GAIN mismatch (and a class-dependent gain), which a zero-only model cannot remove. Pass time 30 ms at every rate (was 44-58):
+  the readout loop is faster. Next: shorted-input measurements (true 0 V) and a per-core gain term.
+- **Shorted-input check of calibration v2 (both probes shorted, DC):** CH1 corrected A/B difference +0.03 at 200 MSa/s, -0.14 at 20 MSa/s,
+  +0.05 at 1 MSa/s, -0.04 at 10 kSa/s (raw spread 3.5-5.7 codes); corrected means 127.9 (target 128); filtered boxcar/CIC2/CIC3 127.9-128.0,
+  equal to legacy (the 1.65-code step at -1.24 V is gone at 0 V, so it was gain). CH2 (range 6): differences +0.44/-0.20/-0.17/-0.39,
+  filtered 128.35 vs legacy 128.6-128.9. Zero model verified in both clock classes; a per-core gain term is the remaining item (bench with
+  1.000 V from the supply next).
+- USB drop at 22:48 on 0.2.43 (FEL-loaded, PHY fix present) when the host opened the port after ~5 min idle: bus ring shows suspend ->
+  bus_reset -> set_config right then, no tx_abort/clear_feature; usb_resumes still 0 after 18 suspends => the device never handles the
+  resume; Windows resets the port. Queued: USB suspend/resume handling. The earlier 150-155 s storm of six resets = the owner's unplug/
+  replug for the calibration.
+- Correction (fw-cal): the "corrected" means logged above came from the host's own compensation of READ_RAW, not the firmware. Firmware
+  path (READ_TRACE flags 0), shorted inputs, 4 captures averaged: CH1 A/B difference +0.42 at 200 MSa/s (full-rate class, noisier data),
+  +0.07 at 1 MSa/s, +0.02 at 10 kSa/s, means 127.9 (target 128), CIC2 127.94 = legacy: **CH1 zero criterion met at the gated rates and in
+  the filtered path.** CH2 at range 6: firmware codes equal raw codes (128.6/128.9), i.e. no correction applied there; +0.53 at 200 MSa/s.
+  Reported to fw-cal (range-6-uses-5 binding suspected). Pass time 30 ms and the spur improvement are firmware-path facts and stand.
+- **Gain bench, CH1 at 1.0045 V DC (DMM), range 2, dcoffset 0, 4 captures averaged (backups/gain_bench_1V.json incl. the GET_CAL dumps):**
+  firmware READ_TRACE A/B: 200 MSa/s 157.01/155.76 (+1.25), 1 MSa/s 156.11/156.53 (-0.42), 10 kSa/s 156.14/156.56 (-0.43), CIC2 156.20;
+  raw A/B: 200 MSa/s 160.57/155.82 (+4.75), gated 159.24/153.97 (+5.27). Against the 0 V raw values (131.73/127.86 full, 131.09/125.33 gated):
+  per 1.0045 V core A gains 28.84 codes full-rate vs B 27.96 (A 3.1 % higher), gated A 28.15 vs B 28.64 (B 1.7 % higher): the core gain
+  mismatch is real and its sign depends on the clock class. Host volts model read 0.977-0.979 V (2.6 % low at range 2).
+- fw-cal on the CH2 range-6 question: the correction is applied but tiny by construction; CH2's range-5 zero drifted ~0.7 codes since the
+  calibration (warm-up/drift suspected; Atlan recommends 5 minutes warm-up); the CH1 full-rate residual is 25 kHz offset-PWM ripple
+  (fixed by averaging 64 conversions at full rate, commit 3bfc892 on fw-cal, unbuilt).
+- Owner: the diagnostics view shows the v2 calibration data. fw-cal (~500k tokens) is writing its handoff; fw-cal2 will build v3 (per-core,
+  per-class gain from the voltage-calibration steps; the PWM-slope ratio predicted the sign but only half the magnitude of the measured gated
+  gain mismatch).
+- **Gain bench, CH1 at -1.0045 V DC (DMM -1.005/-1.004), range 2, dcoffset 0, 4 captures averaged (backups/gain_bench_neg1V.json
+  incl. the GET_CAL dumps, script scratchpad gain_bench.py), fw 0.2.43, scope on all day:** firmware READ_TRACE A/B: 200 MSa/s 99.49/100.07
+  (-0.58), 1 MSa/s 98.76/99.41 (-0.65), 10 kSa/s 98.73/99.46 (-0.73), CIC2 99.88; raw A/B: 200 MSa/s 103.06/100.14, gated 101.88/96.85.
+  Host volts: 200 MSa/s -0.973, 1 MSa/s -0.997, 10 kSa/s -0.997, CIC2 -0.970.
+  **Combined with the +1.0045 V point (endpoint gains over 2.009 V):**
+  - Full-rate class: A 28.62 codes/V, B 27.71 codes/V, **A/B = 1.033** (same 3.1-3.4 % at both polarities): a genuine core gain
+    mismatch. Both cores' +/-1 V midpoints land within 0.12 code of the shorted-input raw zero, so the full-rate transfer is linear.
+  - Gated class: A 28.54, B 28.42 codes/V, **A/B = 1.004**: the cores match in gain. The "1.7 % B higher" from the +1 V point alone was a
+    zero error: core A's +/-1 V midpoint sits 0.53 code below its shorted-input raw zero (B: +0.08), i.e. about 0.5 LSB of relative
+    INL/bow in core A at the slowed clock (AD9288 INL spec order), which a linear gain cannot remove. The firmware trace A-B difference is
+    -0.4 at +1 V and -0.65 at -1 V (same sign both ends), consistent with that bow and not with a gain term.
+  - Class gain: full-rate mean 28.17 codes/V vs gated 28.48 (full 1.1 % lower). CIC2 spans 28.02 codes/V, i.e. the CIC path carries the
+    full-rate class gain (its 8-bit mean of both cores) as expected from its full-speed encode clock.
+  - Host volts model (single uv_per_lsb, calibrated at the gated rate): 0.3-0.8 % low at gated rates, 2.7-3.5 % low at 200 MSa/s and in
+    CIC2. **Conclusion for v3:** one gain per core and class is enough (no split above/below zero); the full-rate class needs it
+    (3.3 % A/B, 1.1 % class), the gated class barely (0.4 %); the residual 0.5-code bow at gated rates is INL and stays.
+- mcp-gen3's GET_CAL v2 host decoder verified against the live scope: both channels report version 2, flags block_loaded, bound,
+  current_divider_gated; stored full-class zeros 129.3-130.8 codes, gated 127.9-128.1, slopes -0.259..-0.266 codes/count; a shared-mode
+  capture through the v2 volts path read CH2 (shorted, range 6) at +1.4 mV and CH1 at the -1 V reference.

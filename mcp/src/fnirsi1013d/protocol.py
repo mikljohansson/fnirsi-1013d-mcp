@@ -28,8 +28,9 @@ PROTO_MAJOR = 1
 #: trigger (source 2 on 0x1533+ bitstreams), GET_STATUS ext_flags, GET_CAPTURE_INFO flag bit 5; 1.5 (fw 0.2.12):
 #: GET_EVENT_LOG, link counter 47 usb_irq_polled; 1.6 (fw 0.2.27): FFT_BENCH; 1.7 (fw 0.2.28): spectrum view,
 #: READ_SPECTRUM, GET_STATUS display_mode; 1.9 (fw 0.2.30, FPGA 0x1534): decimation filter (GET_DECIM / SET_DECIM,
-#: caps DECIM, 16-bit samples: READ_TRACE WIDE, READ_RAW layout 2, GET_CAPTURE_INFO 76 bytes); 1.8 was not used
-PROTO_MINOR = 9
+#: caps DECIM, 16-bit samples: READ_TRACE WIDE, READ_RAW layout 2, GET_CAPTURE_INFO 76 bytes); 1.8 was not used;
+#: 1.10 (fw 0.2.43): calibration data v2, GET_CAL 248 bytes
+PROTO_MINOR = 10
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -1348,9 +1349,10 @@ def decim_scale_q24(gain: int, shift: int) -> int:
     return ((1 << (24 + shift)) + (gain >> 1)) // gain
 
 
-def decim_to_code(out: int, scale_q24: int, comp2: int) -> int:
-    """Firmware conversion of a stored 16-bit sample to the 8-bit trace: round(out x 2^S / N^K + comp2 / 2), 0..255."""
-    v = (out * scale_q24 + (comp2 << 23) + (1 << 23)) >> 24
+def decim_to_code(out: int, scale_q24: int, corr16: int) -> int:
+    """Firmware conversion of a stored 16-bit sample to the 8-bit trace: round(out x 2^S / N^K + corr16 / 16), 0..255.
+    corr16 (1/16 code) is GET_CAL's with calibration v2, else 8 x (adc_a_comp + adc_b_comp) (fw 0.2.43)."""
+    v = (out * scale_q24 + (corr16 << 20) + (1 << 23)) >> 24
     return max(0, min(255, v))
 
 
@@ -1676,11 +1678,40 @@ def gen_duty_bp(threshold: int) -> int:
     return (threshold * 10000 + 0x7FFFFFFF) // 0xFFFFFFFF
 
 
+#: GET_CAL byte 73 (protocol 1.10)
+CAL_LOADED = 0x01  # a v2 block is loaded
+CAL_BOUND = 0x02  # bound to the current PWM centres (dc_calibration_offset[0..5])
+CAL_GATED = 0x04  # the current divider is gated (legacy divider >= 1): the gated zeros apply
+#: calibration v2 clock classes: 0 full rate (legacy divider 0 and every filtered capture), 1 gated (legacy divider >= 1)
+CAL_CLASS_FULL = 0
+CAL_CLASS_GATED = 1
+CAL_CLASS_NAMES = ("full", "gated")
+
+
+def cal_clock_class(divider: int, decimated: bool) -> int:
+    """The v2 clock class of a capture: full at divider 0 and for every filtered (16-bit) capture, else gated."""
+    return CAL_CLASS_FULL if divider == 0 or decimated else CAL_CLASS_GATED
+
+
+def cal_target(dcoffset: int, dc_shift_value: int) -> int:
+    """T = 128 - trunc(dcoffset x 100 / dc_shift_value): the trace code of 0 V under calibration v2 (C division)."""
+    if not dc_shift_value:
+        return 128
+    q = abs(dcoffset * 100) // abs(dc_shift_value)
+    return 128 - (q if (dcoffset * 100 >= 0) == (dc_shift_value > 0) else -q)
+
+
 @dataclass
 class CalResp(Payload):
+    """GET_CAL: 72 bytes up to protocol 1.9; 1.10 (fw 0.2.43, row 48) appends the calibration v2 state and the
+    channel's stored v2 block (248 bytes). Older firmware: the 1.10 fields read 0 (``cal_version`` 0)."""
+
     FIELDS = [("channel", "B"), ("_r0", "3x"), ("dc_calibration_offset", "7H"), ("_r1", "2x"),
               ("input_calibration", "7i"), ("adc_a_comp", "h"), ("adc_b_comp", "h"), ("dc_shift_center", "I"),
-              ("dc_shift_size", "i"), ("dc_shift_value", "i"), ("adc_a_rawavg", "I"), ("adc_b_rawavg", "I")]
+              ("dc_shift_size", "i"), ("dc_shift_value", "i"), ("adc_a_rawavg", "I"), ("adc_b_rawavg", "I"),
+              ("cal_version", "B"), ("cal_flags", "B"), ("comp_a", "h"), ("comp_b", "h"), ("frac_a", "B"),
+              ("frac_b", "B"), ("cal_zero_q8", "i"), ("corr16", "i"), ("cal_shift", "i"), ("pwm", "6H"),
+              ("zero", "24h"), ("slope", "12i"), ("noise", "24H")]
     channel: int = 0
     dc_calibration_offset: tuple[int, ...] = field(default_factory=lambda: (0,) * 7)
     input_calibration: tuple[int, ...] = field(default_factory=lambda: (0,) * 7)
@@ -1691,6 +1722,79 @@ class CalResp(Payload):
     dc_shift_value: int = 0
     adc_a_rawavg: int = 0
     adc_b_rawavg: int = 0
+    #: 1.10: calibration in use for this channel (1 = the 1.00o5 compensations, 2 = v2; 0 = firmware before 1.10)
+    cal_version: int = 0
+    #: CAL_LOADED / CAL_BOUND / CAL_GATED
+    cal_flags: int = 0
+    #: whole codes the next readout adds per core, and the dithered sixteenths
+    comp_a: int = 0
+    comp_b: int = 0
+    frac_a: int = 0
+    frac_b: int = 0
+    #: trace code of 0 V x 256 for the current settings
+    cal_zero_q8: int = 0
+    #: 16-bit path correction in 1/16 code (mean of both cores): code = out x 2^S / N^K + corr16 / 16
+    corr16: int = 0
+    #: dcoffset x 100 / dc_shift_value (what the firmware measurements add)
+    cal_shift: int = 0
+    #: the stored block: the PWM centres it was measured at, zero[class][core][range] (1/16 code, raw codes at
+    #: dcoffset 0), slope[core][range] (Q16 codes per PWM count), noise[class][core][range] (RMS, 1/16 code)
+    pwm: tuple[int, ...] = field(default_factory=lambda: (0,) * 6)
+    zero: tuple[int, ...] = field(default_factory=lambda: (0,) * 24)
+    slope: tuple[int, ...] = field(default_factory=lambda: (0,) * 12)
+    noise: tuple[int, ...] = field(default_factory=lambda: (0,) * 24)
+
+    @property
+    def v2(self) -> bool:
+        """Calibration v2 in use for this channel."""
+        return self.cal_version == 2
+
+    def zero_raw(self, cls: int, core: int, rng: int) -> float:
+        """Stored raw 0 V code of core (0 A, 1 B) at dcoffset 0, codes."""
+        return self.zero[12 * cls + 6 * core + min(rng, 5)] / 16.0
+
+    def slope_codes(self, core: int, rng: int) -> float:
+        """Stored offset slope, codes per PWM count."""
+        return self.slope[6 * core + min(rng, 5)] / 65536.0
+
+    def noise_rms(self, cls: int, core: int, rng: int) -> float:
+        return self.noise[12 * cls + 6 * core + min(rng, 5)] / 16.0
+
+    def zero_at(self, cls: int, core: int, rng: int, dcoffset: int) -> float:
+        """Row 48 host model: raw_k(0 V) = zero / 16 + slope / 65536 x dcoffset (raw uncompensated codes)."""
+        return self.zero_raw(cls, core, rng) + self.slope_codes(core, rng) * dcoffset
+
+
+@dataclass
+class AdcCalChannel:
+    """One channel of the calibration v2 block (sector 708 bytes 128..455), decoded like GET_CAL bytes 92..247."""
+
+    pwm: tuple[int, ...]
+    zero: tuple[int, ...]
+    slope: tuple[int, ...]
+    noise: tuple[int, ...]
+
+
+ADC_CAL_MAGIC = b"ACAL"
+_ADC_CAL_CH = struct.Struct("<6H24h12i24H")
+
+
+def parse_adc_cal_block(block: bytes) -> list[AdcCalChannel]:
+    """The v2 block: u32 'ACAL', u16 version 2, u16 length 328, u16 classes 2, u16 0, two channels of 156 bytes,
+    u32 zlib.crc32 of the 324 bytes before it. Raises ValueError when the header or the CRC is wrong."""
+    if len(block) < 328 or block[:4] != ADC_CAL_MAGIC:
+        raise ValueError("not a calibration v2 block")
+    ver, length, classes, _r = struct.unpack_from("<HHHH", block, 4)
+    if ver != 2 or length != 328 or classes != 2:
+        raise ValueError(f"calibration block version {ver}, length {length}, classes {classes}")
+    (crc,) = struct.unpack_from("<I", block, 324)
+    if crc != zlib.crc32(block[:324]):
+        raise ValueError("calibration block CRC mismatch")
+    out = []
+    for i in range(2):
+        v = _ADC_CAL_CH.unpack_from(block, 12 + 156 * i)
+        out.append(AdcCalChannel(v[:6], v[6:30], v[30:42], v[42:66]))
+    return out
 
 
 @dataclass
