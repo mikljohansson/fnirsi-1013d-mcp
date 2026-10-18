@@ -451,7 +451,8 @@ static int h_get_info(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   pc_put_u32(resp + 20, s->var.caps);
   pc_put_u32(resp + 24, (s->var.caps & PC_CAP_GENERATOR_DDS) ? 50000000u : 0);
   pc_put_u16(resp + 28, s->var.max_total);
-  pc_put_u16(resp + 30, 80);
+  //Stock geometry is fixed at 3000, so min = max there
+  pc_put_u16(resp + 30, (s->var.caps & PC_CAP_PROG_TRIGGER_POS) ? 80 : s->var.max_total);
   resp[32] = s->var.read_lag;
   resp[33] = 7;
   resp[34] = 6;
@@ -1433,6 +1434,10 @@ static int pc_dispatch(pc_session *s, int ctx)
 
   //Any valid frame feeds the watchdog
   s->last_frame_ms = pc_hal_ms();
+
+  //Retransmission of the deferred request still pending: ignore it, its answer follows
+  if(s->def_active && (s->def_cmd == h->cmd) && (s->def_seq == h->seq))
+    return 1;
 
   //Duplicate of the last completed request: answer from the cache without executing again (P-4.3)
   if(s->cache_valid && (s->cache_cmd == h->cmd) && (s->cache_seq == h->seq))

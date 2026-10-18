@@ -917,7 +917,8 @@ differs from or fills a gap in sections 1-13. Hosts written against this documen
 | 17 | READ_TRACE | REMOTE needs a DONE capture (E_STATE otherwise); channels are built on demand and the build is reused per capture. `sw_trigger_index` is -1 unless 20 <= pretrigger and pretrigger + 64 <= total (the 1.00o5 search window) | |
 | 18 | Not built in v0.1.0 | READ_LIVE, ACQUIRE_AVG, READ_SCREEN, ENTER_FEL: caps 0, E_UNSUPPORTED. DEBUG_FPGA and FORCE exist only in `PC_DEBUG=1` builds, which set DEBUG_RAW and FORCE_TRIGGER (FORCE before test T7) | phase 2/3 of the plan; fail closed |
 | 19 | USB identity | VID:PID 0x1209:0x0001 (pid.codes test PID, development only), bcdDevice 0x0100, manufacturer `fnirsi-1013d-ai`, product `FNIRSI 1013D`, serial `1013D-0001` on every unit (GET_INFO `serial` is the same string) | per-unit serial and a real PID are plan phase 3 |
-| 20 | `min_total_samples` | 80 as specified; not checked against the FPGA. The 1.00o5 UI never goes below 3000 | [U] |
+| 20 | `min_total_samples` | 80 on variants with PROG_TRIGGER_POS (not checked against the FPGA; the 1.00o5 UI never goes below 3000); 3000 (= max) on the stock bitstream | stock geometry is fixed [U] |
+| 22 | Retransmitted deferred request | a WAIT with the same cmd and seq as the pending one is ignored; the pending answer follows (no E_BUSY) | host retry after a read timeout |
 | 21 | `#LOCAL` | releases with the acquire-time KEEP_SETTINGS flag; ASCII lines count as traffic for the watchdog | |
 
 ### Firmware-internal

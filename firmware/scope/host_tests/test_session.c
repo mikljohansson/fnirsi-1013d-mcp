@@ -133,6 +133,7 @@ static void test_info(void)
   T_EQ(r.p[10], 1); T_EQ(pc_get_u16(r.p + 12), 4096);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS), 0);
   T_EQ(pc_get_u32(r.p + 24), 0);
+  T_EQ(pc_get_u16(r.p + 28), 3000); T_EQ(pc_get_u16(r.p + 30), 3000);
 
   //EP4 is recognised
   setup(0x1732);
@@ -560,6 +561,10 @@ static void test_auto_timeout_and_stop(void)
 
     mock_clear_resps();
     pc_put_u32(w, 5000);
+    push_frame(PC_CMD_WAIT, sw, w, 4);
+    pc_poll(&S, PC_CTX_MAIN);
+    T_EQ(mock_nresps, 0);
+    //A retransmitted pending WAIT (same seq) is ignored, not answered with E_BUSY
     push_frame(PC_CMD_WAIT, sw, w, 4);
     pc_poll(&S, PC_CTX_MAIN);
     T_EQ(mock_nresps, 0);
