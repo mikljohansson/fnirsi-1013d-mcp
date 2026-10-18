@@ -1,6 +1,7 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.15 (0.2.15: event log 128 entries, SOF ignored, reset snapshot; 0.2.14: the USB IRQ fallback serves only after two quiet ticks; 0.2.13: System settings compacted without an RTC, battery level filtered; 0.2.12: USB IRQ fallback in the timer poll, GET_EVENT_LOG, protocol 1.5; 0.2.11: a request sent right after the port is opened is no longer dropped; 0.2.10: MCP chip drawn as one idempotent blit, acquisition "Roll mode on/off" toggle
+State on 2026-10-18, fw 0.2.16 (0.2.16: the tick runs nothing for SOF; CDC handler split into entry + body under
+PC_PROTOCOL; 0.2.15: event log 128 entries, SOF ignored, reset snapshot; 0.2.14: the USB IRQ fallback serves only after two quiet ticks; 0.2.13: System settings compacted without an RTC, battery level filtered; 0.2.12: USB IRQ fallback in the timer poll, GET_EVENT_LOG, protocol 1.5; 0.2.11: a request sent right after the port is opened is no longer dropped; 0.2.10: MCP chip drawn as one idempotent blit, acquisition "Roll mode on/off" toggle
 label; protocol 1.4: shared control, SD sector commands, EXT trigger for FPGA 0x1533
 (protocol section 14 row 41, needs bench with fpga-gen2's bitstream); 0.2.8: generator and trigger menus compacted; 0.2.7: SD_STAGE from the timer poll,
 RX back-pressure counters, our version on screen, chip drawn with the top bar, temperature only with an RTC; 0.2.6:
@@ -228,6 +229,11 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
   pairs (Windows retrying), the event log useless: ~1000 type-14 events/s, all INTUSB = 0x08 (the SOF flag latches
   every frame even with its interrupt off). 0.2.15: SOF ignored for counter 47 and type 14, type 14 rate-limited to
   10/s, ring 128, and the 16 events before the first bus reset since the last read are frozen (GET_EVENT_LOG tail).
+  0.2.14 bench: counter 47 still 11.8k in 2 min (SOF; the real ISR never runs for it, so the quiet gate passed) and
+  a second 64 KiB census loss (1/100 on 0.2.12 and 0.2.14, 0 in ~800 on 0.2.6-0.2.11): the tick-run handler is the
+  suspect. 0.2.16: usb_device_CDC_irq_handler (1.00o5) is split under PC_PROTOCOL into the entry (reads the flags)
+  and usb_device_CDC_irq_body(flags); the tick reads the flags itself and calls the body only for non-SOF flags.
+  Retest: 64 KiB x 300 should be 0 failed and counter 47 0 in a clean session.
 - USB "Error state" incident (0.2.2, lead): port closed, scope idle ~10 min, then Windows showed the device present but
   in an error state (CreateFile failed); a cable replug recovered it. Not reproduced, cause unknown. Code reading:
   the suspend path calls pc_usb_isr_link, which flushed a held-back OUT packet but left EP2 OUT masked in INTRXE

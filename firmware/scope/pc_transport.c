@@ -512,27 +512,11 @@ void pc_usb_isr_bad_setup(uint32 count)
 
 //Top of the CDC IRQ handler. Called with the flags just read (reading clears them). From the timer poll a non-zero
 //set means the interrupt for them was lost (1.00o5's irq_handler writes 0 to INTC pending after reading it).
+//Real USB interrupt entry (the flags are its own, just read)
 void pc_usb_isr_flags(uint32 usb, uint32 tx, uint32 rx)
 {
-  if(!pc_usb_in_poll)
-    pc_usb_isr_runs++;
-
-  //The SOF flag latches every frame even with its interrupt disabled: it alone is not a lost interrupt (0.2.12 soak:
-  //~1000 type 14 events per second flushed the ring)
-  usb &= ~(uint32)USBC_BP_INTUSB_SOF;
-
-  if(pc_usb_in_poll && (usb | tx | rx))
-  {
-    uint32 now = pc_hal_ms();
-
-    pc_usb_irq_polled++;
-
-    if((now - pc_polled_log_ms) >= 100)
-    {
-      pc_polled_log_ms = now;
-      pc_evlog_add(PC_EVT_IRQ_POLLED, (uint8)usb, (uint16)(((tx & 0xFF) << 8) | (rx & 0xFF)));
-    }
-  }
+  (void)usb; (void)tx; (void)rx;
+  pc_usb_isr_runs++;
 }
 
 //Timer tick (IRQ context, so it cannot interleave with the USB IRQ): serve USB flags a lost interrupt left latched.
@@ -563,9 +547,33 @@ void pc_usb_poll_irq(void)
     return;
   }
 
-  pc_usb_in_poll = 1;
-  usb_device_CDC_irq_handler();
-  pc_usb_in_poll = 0;
+  //Read the three flag registers (reading clears them). The SOF flag latches every frame even with its interrupt
+  //disabled, nothing uses it: SOF alone is not a lost interrupt and runs nothing (0.2.12-0.2.15 ran the whole handler
+  //for it, 300-500 times per second; 0.2.12 and 0.2.14 each lost one 64 KiB census response). Anything else is served
+  //by the handler body and counted.
+  {
+    extern void usb_device_CDC_irq_body(uint32 usbirq, uint32 txirq, uint32 rxirq);
+    uint32 usb = *USBC_REG_INTUSB;
+    uint32 tx  = *USBC_REG_INTTX;
+    uint32 rx  = *USBC_REG_INTRX;
+    uint32 now;
+
+    if(!((usb & ~(uint32)USBC_BP_INTUSB_SOF) | tx | rx))
+      return;
+
+    pc_usb_irq_polled++;
+    now = pc_hal_ms();
+
+    if((now - pc_polled_log_ms) >= 100)
+    {
+      pc_polled_log_ms = now;
+      pc_evlog_add(PC_EVT_IRQ_POLLED, (uint8)usb, (uint16)(((tx & 0xFF) << 8) | (rx & 0xFF)));
+    }
+
+    pc_usb_in_poll = 1;
+    usb_device_CDC_irq_body(usb, tx, rx);
+    pc_usb_in_poll = 0;
+  }
 }
 
 uint32_t pc_hal_usb_irq_polled(void)
