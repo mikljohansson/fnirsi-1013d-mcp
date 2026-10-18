@@ -244,8 +244,9 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
 ## 10. TODO, in priority order
 
 1. Bench state (2026-10-18): 0.2.10 benched by the lead (census clean, first request OK, chip/Roll/menus with the
-   owner); 0.2.11 (first request after a port open) built, not benched: check with open + TEST_PATTERN as the very
-   first request + close, ~20 times. Pending owner verdicts: chip stable while free-running (0.2.10), "Roll mode"
+   owner); 0.2.11 (first request after a port open) benched and accepted: census clean, open + TEST_PATTERN first +
+   close 0/20 failures (the fnirsi1013d transport's open sequence also passed 0/20 on 0.2.10, so only the host test
+   discriminates; bench_link's minimal open is what hit the race). Pending owner verdicts: chip stable while free-running (0.2.10), "Roll mode"
    label (0.2.10), compacted generator/trigger menus (0.2.8). Pending EXT bench: 0.2.9+ with fpga-gen2's 0x1533
    (caps 0x0008, trigger menu EXT, GET_STATUS byte 42, latency measurement). Persist path verified on 0.2.7 (5.3 s).
 2. Bench the SD commands (0.2.2, protocol section 14 row 40): SD_INFO VERIFY on the owner's card (sector 750 must
