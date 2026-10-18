@@ -93,7 +93,7 @@ ASFLAGS := -x assembler-with-cpp -c -O0 -mcpu=arm926ej-s -mthumb -Wall \
            -fmessage-length=0 -g
 # The ELF's debug info names the source directory: map it to "." so the ELF does not depend on it either
 CFLAGS  += -ffile-prefix-map=$(CURDIR)=.
-ASFLAGS += -ffile-prefix-map=$(CURDIR)=.
+ASFLAGS += -ffile-prefix-map=$(CURDIR)=. -Wa,--debug-prefix-map=$(CURDIR)=.
 # build_time.h is generated into $(BUILD) (not the source dir)
 CPPFLAGS := -I$(BUILD) $(PC_DEFS)
 LDFLAGS := -T fnirsi_1013d.ld -nostdlib -Wl,-Map=$(MAP)
