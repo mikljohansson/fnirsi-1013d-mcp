@@ -27,9 +27,7 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #define PC_FW_VERSION     "0.2.46" PC_FW_VERSION_MAP
 #endif
 
-#ifndef PC_FW_BUILD
-#define PC_FW_BUILD       0x00000000u
-#endif
+extern const uint32_t pc_fw_build;    //short git hash of the build (build_id.c; host tests: mock_hal.c)
 
 #ifndef PC_SERIAL
 #define PC_SERIAL         "1013D-0001"

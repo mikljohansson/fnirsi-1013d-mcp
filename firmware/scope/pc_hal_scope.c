@@ -24,7 +24,6 @@
 #include "pc_transport.h"
 #include "sd_card_interface.h"
 #include "DS3231.h"
-#include "build_time.h"
 #include "ff.h"
 
 #include "pc_hal.h"
@@ -53,6 +52,7 @@ static uint16        pc_fpga_word;
 
 extern DISPLAYDATA   displaydata;           //display_lib.c: current buffer, colours, font
 extern uint32        cardsectors;           //sd_card_interface.c: card size from the CSD, 0 = no card
+extern const uint8_t  pc_build_time[6];     //build_id.c: commit time (UTC) yy, mm, dd, hh, mm, ss
 
 //SD_STAGE / SD_WRITE_SECTORS staging buffer (protocol section 14 row 40)
 static uint8         pc_sd_stage_buf[65536] __attribute__((aligned(4)));
@@ -1219,19 +1219,20 @@ static void pc_version_init(void)
   *p++ = (char)('0' + PC_PROTO_MINOR);
   p = pc_vcat(p, ", base Atlan4 1.00o5, git ");
 
+  //Commit hash and commit time (build_id.c): data, not constants, so the identity cannot change the code
   for(i=28;i>=0;i-=4)
-    *p++ = hex[(PC_FW_BUILD >> i) & 0xF];
+    *p++ = hex[(pc_fw_build >> i) & 0xF];
 
-  p = pc_vcat(p, ", built 20");
-  p = pc_vdec2(p, COMPILE_YEAR);
+  p = pc_vcat(p, " of 20");
+  p = pc_vdec2(p, pc_build_time[0]);
   p = pc_vcat(p, "-");
-  p = pc_vdec2(p, COMPILE_MONTH);
+  p = pc_vdec2(p, pc_build_time[1]);
   p = pc_vcat(p, "-");
-  p = pc_vdec2(p, COMPILE_DAY);
+  p = pc_vdec2(p, pc_build_time[2]);
   p = pc_vcat(p, " ");
-  p = pc_vdec2(p, COMPILE_HOUR);
+  p = pc_vdec2(p, pc_build_time[3]);
   p = pc_vcat(p, ":");
-  pc_vdec2(p, COMPILE_MIN);
+  pc_vdec2(p, pc_build_time[4]);
 }
 
 char *pc_glue_version(int form)

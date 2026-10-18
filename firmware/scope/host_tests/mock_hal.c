@@ -11,6 +11,7 @@
 mock_state mock;
 mock_resp  mock_resps[MOCK_MAX_RESP];
 uint32_t   mock_nresps;
+const uint32_t pc_fw_build = 0;   //build_id.c on the target
 
 static uint8_t mock_tx[PC_MAX_RESPONSE_FRAME + 16] __attribute__((aligned(4)));
 static uint8_t mock_sd[MOCK_SD_SECTORS * 512] __attribute__((aligned(4)));

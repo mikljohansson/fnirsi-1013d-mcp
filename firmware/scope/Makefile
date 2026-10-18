@@ -14,7 +14,7 @@
 #   make fel            load build/fnirsi_1013d.bin into DRAM over FEL
 #   make clean
 #   make V=1            show full commands
-#   make SOURCE_DATE_EPOCH=<unix time>   reproducible build_time.h (UTC)
+#   make PC_FW_BUILD=<8 hex> SOURCE_DATE_EPOCH=<unix time>   identity without git
 #   make CROSS_COMPILE=/opt/gcc-arm-10.3/bin/arm-none-eabi-   other toolchain
 #   make PC_DEBUG=1     protocol bench build: DEBUG_FPGA and FORCE enabled
 #   make gcc10          the release image, Atlan's GCC 10.3.1 (build-gcc10-pc/)
@@ -58,11 +58,23 @@ PC_DEBUG     ?= 0
 PC_FORCE_CDC ?= 1
 PC_FIFO_MAP  ?= 0
 SRCS += pc_protocol.c pc_cmds.c pc_transport.c pc_hal_scope.c fx_fft.c fx_fft_tables.c spectrum.c pc_decim.c phos_map.c phosphor.c
-PC_FW_BUILD := $(shell git rev-parse --short=8 HEAD 2>/dev/null)
-ifeq ($(PC_FW_BUILD),)
-PC_FW_BUILD := 00000000
+# Last: the identity data (build_id.c), so its bytes are the only ones a new commit changes.
+SRCS += build_id.c
+PC_DEFS := -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FIFO_MAP=$(PC_FIFO_MAP)
+
+# ----------------------------------------------------------------- identity
+# The image depends only on the source, the toolchain and the commit: the identity is the commit hash
+# (PC_FW_BUILD) and the commit time (SOURCE_DATE_EPOCH, also the RTC default), both read from git, never the
+# wall clock or the build directory. In a worktree whose .git file holds a Windows path (D:/...), WSL's git
+# cannot follow it, so the gitdir is translated to /mnt/d/... . Without git pass both values by hand.
+GIT_WSLDIR := $(shell sed -n 's|^gitdir: \([A-Za-z]\):/\(.*\)|/mnt/\L\1\E/\2|p' ../../.git 2>/dev/null)
+GIT := git$(if $(wildcard $(GIT_WSLDIR)), --git-dir=$(GIT_WSLDIR))
+ifeq ($(origin PC_FW_BUILD),undefined)
+PC_FW_BUILD := $(shell $(GIT) rev-parse --short=8 HEAD 2>/dev/null)
 endif
-PC_DEFS := -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FW_BUILD=0x$(PC_FW_BUILD)u -DPC_FIFO_MAP=$(PC_FIFO_MAP)
+ifeq ($(origin SOURCE_DATE_EPOCH),undefined)
+SOURCE_DATE_EPOCH := $(shell $(GIT) log -1 --format=%ct 2>/dev/null)
+endif
 
 OBJS := $(addprefix $(OBJDIR)/,$(addsuffix .o,$(basename $(SRCS))))
 DEPS := $(OBJS:.o=.d)
@@ -79,6 +91,9 @@ CFLAGS  := -Wall -Wno-write-strings -Wno-char-subscripts -fno-stack-protector \
            -DNO_STDLIB=1 -mcpu=arm926ej-s -O3 -mfloat-abi=soft -g
 ASFLAGS := -x assembler-with-cpp -c -O0 -mcpu=arm926ej-s -mthumb -Wall \
            -fmessage-length=0 -g
+# The ELF's debug info names the source directory: map it to "." so the ELF does not depend on it either
+CFLAGS  += -ffile-prefix-map=$(CURDIR)=.
+ASFLAGS += -ffile-prefix-map=$(CURDIR)=.
 # build_time.h is generated into $(BUILD) (not the source dir)
 CPPFLAGS := -I$(BUILD) $(PC_DEFS)
 LDFLAGS := -T fnirsi_1013d.ld -nostdlib -Wl,-Map=$(MAP)
@@ -97,23 +112,19 @@ endif
 all: $(BIN)
 
 # ----------------------------------------------------------------- build_time.h
-# Upstream regenerates build_time.h (local time) on every make. Same here,
-# unless SOURCE_DATE_EPOCH is set (then UTC of that time, reproducible).
-# The file is only replaced when its content changes.
-ifdef SOURCE_DATE_EPOCH
-DATE := date -u -d @$(SOURCE_DATE_EPOCH)
-else
-DATE := date
-endif
-
+# Commit time (UTC) and hash for variables.c (RTC defaults) and build_id.c. Upstream used the local wall clock.
+# The file is only replaced when its content changes, so a rebuild of the same commit recompiles nothing.
 $(BUILD)/build_time.h: FORCE
+	@test -n "$(PC_FW_BUILD)" -a -n "$(SOURCE_DATE_EPOCH)" || { echo "error: git cannot be read here;" \
+	   "pass PC_FW_BUILD=<git rev-parse --short=8 HEAD> SOURCE_DATE_EPOCH=<git log -1 --format=%ct>" >&2; exit 1; }
 	@mkdir -p $(BUILD)
 	@{ echo "#ifndef BUILD_TIME_H"; echo "#define BUILD_TIME_H"; \
-	   $(DATE) '+#define COMPILE_YEAR %y%n#define COMPILE_MONTH %-m%n#define COMPILE_DAY %-d%n#define COMPILE_HOUR %-H%n#define COMPILE_MIN %-M%n#define COMPILE_SEC %-S'; \
+	   date -u -d @$(SOURCE_DATE_EPOCH) '+#define COMPILE_YEAR %y%n#define COMPILE_MONTH %-m%n#define COMPILE_DAY %-d%n#define COMPILE_HOUR %-H%n#define COMPILE_MIN %-M%n#define COMPILE_SEC %-S'; \
+	   echo "#define PC_FW_BUILD 0x$(PC_FW_BUILD)u"; \
 	   echo "#endif"; } > $@.tmp
-	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; echo "  GEN     $@"; fi
+	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; echo "  GEN     $@ (git $(PC_FW_BUILD), $$(date -u -d @$(SOURCE_DATE_EPOCH) '+%F %T') UTC)"; fi
 
-$(OBJDIR)/variables.o: $(BUILD)/build_time.h
+$(OBJDIR)/variables.o $(OBJDIR)/build_id.o: $(BUILD)/build_time.h
 
 # ----------------------------------------------------------------- compile/link
 $(OBJDIR)/%.o: %.c | $(OBJDIR)
