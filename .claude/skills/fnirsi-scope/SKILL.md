@@ -11,9 +11,13 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) in `.m
 ## Start every session
 
 1. `scope_profile`: capabilities of this unit and its standing caveats.
-2. `scope_calibration_info`: volts conversion per channel (`unit-calibration` or `firmware`).
-3. `scope_status` + `scope_get_config`: mode (collaborative = shared with the person at the scope), run state,
-   live settings. Never assume your earlier settings still hold.
+2. `scope_calibration_info`: volts conversion per channel (`scope calibration v3 ...`, `unit-calibration` or
+   `firmware`). Only the scope's calibration v3 is decoded: a v2 block (fw 0.2.43-0.2.44) is refused with a message
+   to update the firmware and re-run the base calibration, which the person does at the scope (probes and USB
+   unplugged for the zero step, both x1 probes on the calibration post for the gain step). Ask; do not skip it.
+3. `scope_status` + `scope_get_config`: mode (collaborative = shared with the person at the scope), display mode
+   (scope, spectrum, waterfall, density, phosphor), run state, live settings. Never assume your earlier settings
+   still hold.
 
 ## Choose settings for the signal
 
@@ -32,8 +36,10 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) in `.m
 - `scope_fetch_waveform` = what the scope shows now, with the settings of that capture; changes nothing.
 - Noise below ~2 LSB or fits: `scope_averaged_capture` (n 16-64 quick, 256+ for fits; `align='edge'` on the TX gate).
 - PI decays: `scope_decay_fit` (t_start past the flyback, check r2 and residuals). Spectra: `scope_capture_and_fft`; what the scope's own spectrum view shows: `scope_spectrum`.
-  Below 200 MSa/s on a DECIM bitstream, `scope_set_decimation` (cic2 for decays) gives 16-bit, anti-aliased samples
-  (guide section 3a); turn it off when done.
+  Below 200 MSa/s on a DECIM bitstream, `scope_set_decimation` (filter off, boxcar, cic2, cic3, plus the +fir
+  variants on a 0x1535 bitstream; cic2 for decays) gives 16-bit, anti-aliased samples (guide section 3a); turn it
+  off when done. `scope_spectrum` works while the screen shows the spectrum, waterfall or density view.
+  Captures add a caveat while a spectrum or phosphor view is on: pass it on.
 - Quick numbers: `scope_measure`.
 
 ## The screen is shared

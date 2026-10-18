@@ -8,10 +8,18 @@ descriptions are authoritative. Server setup: `mcp/README.md`.
 
 1. `scope_profile`: what this unit can do (FPGA variant, memory depth, generator, which facts are unverified).
    Read its standing caveats once.
-2. `scope_calibration_info`: which volts conversion is in effect per channel. `unit-calibration` = measured per-unit
-   zero/gain (T8); `firmware` = the firmware formula, absolute DC levels can be off by a few codes.
+2. `scope_calibration_info`: which volts conversion is in effect per channel. The source string is `scope
+   calibration v3 (full|gated clock)` (the scope's own per-core, per-class zeros and gains, after its base
+   calibration on firmware >= 0.2.45), `unit-calibration` (measured per-unit zero/gain, T8; with v3 in use it only
+   contributes the gated per-core gains) or `firmware` (the firmware formula; absolute DC levels can be off by a few
+   codes). Only calibration v3 is decoded: if the scope still holds a v2 block (firmware 0.2.43-0.2.44) the volts
+   model refuses it and the error says to update the firmware and run the base calibration again. That is done at
+   the scope by the person: System settings, Base calibration, with the probes and USB unplugged for the zero step,
+   then both x1 probes on the calibration post for the gain step. An agent cannot do it; ask. With no calibration
+   block (version 1) the readings use the 1.00o5 compensations until it is run.
 3. `scope_status`: `mode` collaborative (shared with the person at the scope) or exclusive (legacy firmware),
-   `run_state`, `settings_seq`.
+   `display_mode` (`scope`, `spectrum`, `waterfall`, `density` or `phosphor`, protocol modes 0-4), `run_state`,
+   `settings_seq`.
 4. `scope_get_config`: the live settings. Do not assume your last settings still hold: the person may have changed
    them.
 
@@ -47,15 +55,18 @@ descriptions are authoritative. Server setup: `mcp/README.md`.
   `t_end` before the noise floor), `exp`, `exp+offset`, `exp2` or `power`. Check `r2`, residuals and caveats.
 - `scope_capture_and_fft`: spectra; `flattop` window for amplitudes, `hann` for resolution.
 - `scope_spectrum`: what the scope's own spectrum view shows (firmware >= 0.2.28), when the person has it open
-  (`scope_status` `display_mode` = `spectrum`). Cheap, takes no capture, single shot, firmware scaling. Use it to
+  (`scope_status` `display_mode` = `spectrum`, `waterfall` or `density`; it fails with a hint otherwise, also in the
+  `phosphor` view, which has no spectrum). Cheap, takes no capture, single shot, firmware scaling. Use it to
   talk about the same picture the person sees; use `scope_capture_and_fft` for averaging, other windows or the
   per-unit calibration. `cross_check=true` confirms both agree on the same capture.
 - `scope_measure`: vpp, rms, frequency, duty, rise time, CH1->CH2 delay on the last capture (or a fresh one).
 
 ## 3a. Choosing a decimation mode for decay curves
 
-On firmware >= 0.2.30 with the 0x1534 bitstream (`scope_info` caps list `DECIM`), `scope_set_decimation` makes the
-FPGA filter every raw 200 MSa/s sample down to the chosen rate instead of skipping samples, and store 16 bits.
+On firmware >= 0.2.30 with the 0x1534 bitstream or later (`scope_info` caps list `DECIM`), `scope_set_decimation`
+(`filter` = `off`, `boxcar`, `cic2`, `cic3`, and on 0x1535 with caps `FIR` also `boxcar+fir`, `cic2+fir`,
+`cic3+fir`) makes the FPGA filter every raw 200 MSa/s sample down to the chosen rate instead of skipping samples,
+and store 16 bits.
 Below 200 MSa/s that is free resolution and anti-aliasing; the cost is a total of at most 8190 samples (set
 `scope_set_trigger total_samples` first) and that it is the scope's own Filter setting (tell the person, turn it
 `off` when done).
@@ -65,7 +76,7 @@ Below 200 MSa/s that is free resolution and anti-aliasing; the cost is a total o
   edge (TX turn-off, flyback) are smeared. Start the fit at least K samples (`t_start >= K x dt`) past the flyback.
   The sample time is self-consistent with the ADC trigger; with the EXT trigger the firmware corrects the pipeline
   latency to the nearest output sample (`ext_latency_shift_samples`).
-- **FIR (FPGA 0x1535, `+fir`)**: `cic2+fir` flattens the passband to fs / 4 and rejects aliases about 20 dB more,
+- **FIR (FPGA 0x1535, `+fir`)**: needs the `FIR` capability (on 0x1534 the call is refused). `cic2+fir` flattens the passband to fs / 4 and rejects aliases about 20 dB more,
   at a little less noise reduction and a longer edge transient (the 15-tap FIR spans 7 output samples on each
   side of a sharp edge: start fits at least 8 samples after it). Use it for spectra and waveform shape; for tau
   fits plain `cic2` keeps the edge transient short. It engages at 10 MSa/s and slower only.
@@ -171,7 +182,9 @@ Give value, unit and how it was measured (n averaged, sample rate, range, alignm
 - 8-bit ADC, ~2 LSB noise per sample; volts per code is in every result (`volts_per_lsb`).
 - 200 MS/s per channel at most; trigger jitter up to 2 / fs without edge alignment.
 - Analog bandwidth ~30 MHz: rise times below ~12 ns and content above 30 MHz measure the scope.
-- Absolute volts: say whether `scaling` was `unit-calibration` or `firmware`.
+- Absolute volts: say which `scaling` applied (`scope calibration v3 ...`, `unit-calibration` or `firmware`).
+- While the scope shows its spectrum, waterfall or phosphor view the capture tools add a caveat. The data are
+  unaffected, but the person sees a different picture than your trace: pass the caveat on.
 - The calibration pin is a frequency / duty / timing reference, not a voltage reference: it is a ~3.1 Vpp square
   wave referenced to the USB ground, so against the probe ground (VRF1, +1.24 V) it reads about -1.24 / +1.9 V.
 - Pass on dynamic caveats (clipping, auto trigger fired, aliasing, restarts) instead of dropping them.
