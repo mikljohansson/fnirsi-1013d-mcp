@@ -610,6 +610,63 @@ uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total)
 
 //The reset snapshot (entries as above), *reset_ms = when it was taken; returns its size, -1 when none is frozen.
 //Only rearm re-arms it (fw 0.2.18: a plain read kept nothing frozen if the host read the log at every session open)
+//PHY register read through PHYCTL (0x01C13404): address in bits 8-15, the addressed bit appears at bit 16 (+ PHY
+//index). UNVERIFIED: from Allwinner's BSP USBC_Phy_Read as remembered (fw-gen4); Linux has no PHY read. Bits
+//addr .. addr + len - 1, addr in bit 0 of the result. Clock and reset of the OTG block must be up.
+static uint32 pc_usb_phy_read(uint32 addr, uint32 len)
+{
+  uint32 i, r = 0;
+  volatile uint32 d;
+
+  for(i=0;i<len;i++)
+  {
+    *USBC_REG_PHYCTL = (*USBC_REG_PHYCTL & ~0x0000FF00u) | ((addr + i) << 8);
+
+    for(d=0;d<8;d++)
+      ;
+
+    r |= ((*USBC_REG_PHYCTL >> 16) & 1u) << i;
+  }
+
+  return r;
+}
+
+//Packed tuning bits: bit 0 RES45 calibration (0x0C), bits 1-5 TX amplitude (0x20, 5 bits), bits 6-7 disconnect
+//threshold (0x2A, 2 bits). Linux and 1.00o5 write 1, 0x14, 3, i.e. 0x00E9 when read back as written.
+static uint16 pc_usb_phy_tuning(void)
+{
+  return (uint16)(pc_usb_phy_read(0x0C, 1) | (pc_usb_phy_read(0x20, 5) << 1) | (pc_usb_phy_read(0x2A, 2) << 6));
+}
+
+static uint16 pc_usb_phy_pre_bits;
+
+void pc_usb_phy_pre(void)
+{
+  pc_usb_phy_pre_bits = pc_usb_phy_tuning();
+}
+
+//End of usb_device_init (fw 0.2.25): seven type 19 entries, a = field.
+//  0: POWER << 8 | FADDR          1: INTUSBE << 8 | CCU flags (as type 16)    2: ISCR bits 4-19
+//  3: USBPHY_CFG bits 0-15        4: PHY tuning bits now (packed, pc_usb_phy_tuning)
+//  5: PHY tuning bits before the writes   6: PHYCTL bits 0-15 now
+void pc_usb_log_post_init(void)
+{
+  uint32 cpsr = pc_irq_save();
+  uint32 phy  = *CCU_USBPHY_CFG;
+  uint8  flags = (uint8)(((*CCU_BUS_SOFT_RST0 & CCU_BSRR1_USBOTG_EN) ? 0x01 : 0) |
+                         ((*CCU_BUS_CLK_GATE0 & CCU_BCGR1_USBOTG_EN) ? 0x02 : 0) |
+                         ((phy & CCU_USBPHY_CFG_RST) ? 0x04 : 0) | ((phy & CCU_USBPHY_CFG_GAT) ? 0x08 : 0));
+
+  pc_evlog_add(PC_EVT_USB_POST_INIT, 0, (uint16)((*USBC_REG_PCTL << 8) | (*USBC_REG_FADDR & 0x7F)));
+  pc_evlog_add(PC_EVT_USB_POST_INIT, 1, (uint16)((*USBC_REG_INTUSBE << 8) | flags));
+  pc_evlog_add(PC_EVT_USB_POST_INIT, 2, (uint16)((*USBC_REG_ISCR >> 4) & 0xFFFF));
+  pc_evlog_add(PC_EVT_USB_POST_INIT, 3, (uint16)(phy & 0xFFFF));
+  pc_evlog_add(PC_EVT_USB_POST_INIT, 4, pc_usb_phy_tuning());
+  pc_evlog_add(PC_EVT_USB_POST_INIT, 5, pc_usb_phy_pre_bits);
+  pc_evlog_add(PC_EVT_USB_POST_INIT, 6, (uint16)(*USBC_REG_PHYCTL & 0xFFFF));
+  pc_irq_restore(cpsr);
+}
+
 uint32_t pc_hal_event_bus(uint8_t *dst, uint32_t *total)
 {
   uint32 cpsr = pc_irq_save();

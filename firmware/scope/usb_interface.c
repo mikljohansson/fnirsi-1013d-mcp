@@ -65,32 +65,41 @@ uint8 rts_state = 0;
 //----------------------------------------------------------------------------------------------------------------------------------
 //In original code the register is written as byte, which might be wrong since some data is shifted 8 bits to the left
 //So using 32 bit register here
+#if PC_PROTOCOL
+//fw 0.2.25: the PHY control register of the F1C100s is 0x01C13404 (Linux phy-sun4i-usb.c: suniv_f1c100s_cfg uses
+//REG_PHYCTL_A10 = 0x04 from "phy_ctrl", which suniv-f1c100s.dtsi maps at 0x01C13400, length 0x10). 1.00o5 writes
+//0x01C13410 (the A33-and-later offset, outside that region), so its three PHY tuning writes presumably never reached
+//the PHY (inference, see firmware/AGENTS.md). Same bit protocol as Linux: address in bits 8-15, data bit 7, pulse bit 0.
+#define USB_PHY_SETUP_REG USBC_REG_PHYCTL
+#else
+#define USB_PHY_SETUP_REG USBC_REG_CSR
+#endif
 static void usb_phy_setup(int32 addr, int32 data, int32 len)
 {
   int32 j;
 
   //Clear the clock bit
-  *USBC_REG_CSR &= 0xFFFFFFFE;
+  *USB_PHY_SETUP_REG &= 0xFFFFFFFE;
   
   for(j=0;j<len;j++)
   {
     //set the bit address to be written
-    *USBC_REG_CSR &= 0xFFFF00FF;
-    *USBC_REG_CSR |= ((addr + j) << 8);
+    *USB_PHY_SETUP_REG &= 0xFFFF00FF;
+    *USB_PHY_SETUP_REG |= ((addr + j) << 8);
     
     //set or clear data bit
     if(data & 0x1)
     {
-      *USBC_REG_CSR |= 0x00000080;
+      *USB_PHY_SETUP_REG |= 0x00000080;
     }
     else
     {
-      *USBC_REG_CSR &= 0xFFFFFF7F;
+      *USB_PHY_SETUP_REG &= 0xFFFFFF7F;
     }
 
     //Create some sort of clock pulse
-    *USBC_REG_CSR |= 0x00000001;
-    *USBC_REG_CSR &= 0xFFFFFFFE;
+    *USB_PHY_SETUP_REG |= 0x00000001;
+    *USB_PHY_SETUP_REG &= 0xFFFFFFFE;
     
     //Next data bit
     data >>= 1;
@@ -121,6 +130,11 @@ void usb_device_init(void)
 
     // Lift the reset of the USB interface
     *CCU_BUS_SOFT_RST0 |= CCU_BSRR1_USBOTG_EN;
+
+#if PC_PROTOCOL
+    // fw 0.2.25: PHY tuning bits as the reset left them (read back before the writes below)
+    pc_usb_phy_pre();
+#endif
 
     // PHY calibration: 45 Ω regulation
     usb_phy_setup(0x0C, 0x01, 1);
@@ -173,6 +187,11 @@ void usb_device_init(void)
         setup_interrupt(USB_IRQ_NUM, usb_device_irq_handler, 2);
         //usb_device_enable();
     }
+
+#if PC_PROTOCOL
+    // fw 0.2.25: controller and PHY state at the end of the init (event type 19)
+    pc_usb_log_post_init();
+#endif
 }
 
 /*

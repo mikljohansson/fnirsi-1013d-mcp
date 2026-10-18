@@ -96,10 +96,13 @@ void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
 #define PC_EVT_USB_INIT       16    //fw 0.2.22, usb_device_init before its reset, a = field, b = value (protocol section 14 row 43)
 #define PC_EVT_TX_ABORT_CSR   17    //fw 0.2.22, after each type 13: a = POWER, b = EP2 TXCSR
 #define PC_EVT_TX_ABORT_FRM   18    //fw 0.2.22, after type 17: a = bit 0 EP2 TX interrupt enabled, bit 1 ZLP pending; b = frame number
+#define PC_EVT_USB_POST_INIT  19    //fw 0.2.25, end of usb_device_init, a = field, b = value (protocol section 14 row 43)
 #define PC_EVT_RESTART        15    //fw 0.2.19, at boot after a restart from RAM: a = exception type, b = low PC bits
 
 void pc_usb_log_restart(uint8 type, uint16 pc);
 void pc_usb_log_init_state(void);                          //usb_device_init: controller state found (type 16)
+void pc_usb_phy_pre(void);                                 //usb_device_init: PHY tuning bits before the writes
+void pc_usb_log_post_init(void);                           //usb_device_init: state at the end (type 19)
 
 void pc_usb_isr_setup(uint32 d0, uint32 d1);                //EP0 setup packet (the 8 bytes as two words)
 void pc_usb_isr_bad_setup(uint32 count);                    //EP0 packet that was not 8 bytes
