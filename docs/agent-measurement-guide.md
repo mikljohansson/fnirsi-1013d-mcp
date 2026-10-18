@@ -75,6 +75,24 @@ Below 200 MSa/s that is free resolution and anti-aliasing; the cost is a total o
   16-bit samples the 8-bit quantisation no longer limits it.
 - Check the range with the filter `off` first: a clipped raw sample inside a filter window does not show in the
   output.
+- The scope's own calibration and auto setup always run with the filter off. At the scope, memory depths of 9000
+  and more are hidden and reduced to 6000 while the filter is on; the host limit is 8190 samples. CIC3 is
+  downgraded to CIC2 below about 19.4 kSa/s (N > 10,334).
+- Every capture tool reads the 16-bit samples themselves (READ_RAW layout 2, the same u16 values READ_TRACE WIDE
+  returns), so host spectra are not limited by the 8-bit trace the screen uses.
+
+Bench, owner's unit, FPGA 0x1534 with fw 0.2.34, 1 MSa/s (N = 200; S = 0 / 8 / 15 as row 47 says):
+
+| | legacy | boxcar | CIC2 | CIC3 |
+|---|---|---|---|---|
+| DC noise, std in 8-bit codes | 0.86 | 0.19 | 0.11 | 0.12 |
+| alias of a 900 kHz square, dBV (8-bit trace path) | +2.4 | -17.5 | -30.4 | -35.7 |
+
+The 1 kHz fundamental was unchanged within 0.1 dB, and the core A/B spur at Nyquist fell from -27 to -88 dBV. The
+alias figures came through the 8-bit trace path, which limits the CIC2 / CIC3 values by quantisation. To repeat them
+at full resolution, set up the same signal at the same rate, then call `scope_set_decimation` and
+`scope_capture_and_fft` (window `flattop`) once per filter, and read the alias line in `peaks` against the
+fundamental.
 
 Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivalent N)` with dithering raw noise
 (the unit has about 1-2 LSB), capped by the 16-bit storage (2^S / N^K codes per count):

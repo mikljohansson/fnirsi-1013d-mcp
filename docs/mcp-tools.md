@@ -258,7 +258,8 @@ lowers the order where the 48-bit accumulators would not be exact: CIC3 only up 
 (8 + log2 sqrt(noise-equivalent N), capped by the 16-bit storage; assumes the raw noise dithers, >= 0.5 LSB),
 `settle_us`, `max_total_samples` (8190), and `ext_latency_shift_samples` with the EXT source; plus the timebase.
 Fails with a hint when the trigger total is over 8190 or the bitstream has no filter. Captures, fetches and
-`processed` reads then use the 16-bit samples (READ_RAW layout 2, READ_TRACE WIDE): `codes` = stored x 2^S / N^K
+`processed` reads then use the 16-bit samples (READ_RAW layout 2, or READ_TRACE WIDE for `processed`; the same u16
+values, never the 8-bit trace, so `scope_capture_and_fft` and the averaging tools get the full resolution): `codes` = stored x 2^S / N^K
 plus the mean core compensation (fractional codes), volts with the cores' mean zero and gain, results carry
 `decimation` and a caveat (window length, resolution, raw clipping inside a window is invisible), the `.npz`
 `CH<n>_samples16`. `scope_get_config` shows `decimation` on DECIM bitstreams. Caveats: shared Filter setting, the
