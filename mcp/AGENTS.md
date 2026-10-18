@@ -155,7 +155,11 @@ reload: announce "about to reload with <image> for <reason>", wait for the lead'
 
 1. Drop the Windows 8 KiB cap (`WINDOWS_SERIAL_MAX_RESPONSE`, README "Windows notes") once the firmware RX fix
    lands and the lead confirms a clean census at 20460 / 32748 / 65536 x20.
-2. Re-run the retries=0 census after each firmware RX fix; include GET_LINK_STATS before/after
+2. fw 0.1.6 (697e1f6) fixes the 2 KiB RX ring-wrap loss (packets straddling the ring end were read from the
+   FIFO in two access runs). Re-run the 304-request LOCAL repro (PING x100 + TEST_PATTERN 495/4096/20460/32748/
+   65536 x40, retries=0): expect zero lost requests. Add GET_BAD_FRAME (0x0008, protocol 1.2, item 29: u32
+   bad_count, u32 rx_bytes, u16 len, u16 0, last bad-CRC request as received) to protocol.py / Scope /
+   simulator / FAST_CMDS and dump it on any E_BAD_CRC. Then: re-run the retries=0 census after each firmware RX fix; include GET_LINK_STATS before/after
    (`Scope.link_stats()`) and GET_STATUS `pass_ms` in failure reports to the firmware agent.
 3. `--persist` / settings commands (SD sector writes) when the firmware adds them: tier 2+, confirmation token,
    never touch calibration (protocol.md: no SET_CAL in v1).
