@@ -88,6 +88,13 @@ Reference checkouts (read-only, outside this repo, never build inside them):
 - Hardware access (programmer, FEL, serial) is done by the owner or with the owner present; agents prepare
   exact commands and expected outputs.
 - Cite facts to `research/notes/` files when making design decisions; mark inferences as such.
+- Bench coordination: the scope's serial port (COM10 on Windows, /dev/ttyACM0 when attached to WSL with
+  `usbipd attach --wsl --busid <id>`) is exclusive. Only the coordinating session takes REMOTE or sends
+  hardware-changing commands; agents may use PING/TEST_PATTERN/GET_* in LOCAL and must close the port when
+  asked. Expect E_BUSY whenever the owner is in a scope menu (every menu is a modal loop).
+- Dev loop: `make gcc10` in firmware/scope, boot menu -> FEL (or ENTER_FEL once available), attach the FEL
+  device to WSL, `sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`. The SD card
+  image is only rewritten for releases.
 - Small, reviewable commits; one topic per commit. Keep this file current when layout or facts change.
 
 ## Working as a team
