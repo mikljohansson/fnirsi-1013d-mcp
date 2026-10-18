@@ -1852,7 +1852,6 @@ static void pc_send(pc_session *s, uint16_t cmd, uint16_t seq, int status, uint3
   }
 
   s->responses++;
-  s->last_cmd_ms = pc_hal_ms();                 //MCP indicator pulse
   pc_hal_tx_submit(n);
 }
 
@@ -2329,9 +2328,8 @@ void pc_poll(pc_session *s, int ctx)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-//Every main-loop pass after the MAIN poll: the MCP indicator in the top bar. On while DTR is up or a frame came within
-//PC_HOST_ACTIVE_MS, brighter for PC_PULSE_MS after each command, redrawn every PC_CHIP_REDRAW_MS (UI redraws of the
-//top bar paint over it).
+//Every main-loop pass after the MAIN poll: the MCP indicator in the top bar. Steady while DTR is up or a frame came
+//within PC_HOST_ACTIVE_MS, redrawn every PC_CHIP_REDRAW_MS (UI redraws of the top bar paint over it).
 void pc_ui_service(pc_session *s)
 {
   uint32_t now = pc_hal_ms();
@@ -2342,10 +2340,7 @@ void pc_ui_service(pc_session *s)
 
   s->in_poll = 1;
 
-  if(!pc_hal_dtr() && !(s->frame_seen && ((now - s->last_frame_ms) < PC_HOST_ACTIVE_MS)))
-    st = 0;
-  else
-    st = (s->frame_seen && ((now - s->last_cmd_ms) < PC_PULSE_MS)) ? 2 : 1;
+  st = (pc_hal_dtr() || (s->frame_seen && ((now - s->last_frame_ms) < PC_HOST_ACTIVE_MS))) ? 1 : 0;
 
   if((st != s->chip_state) || (st && ((now - s->chip_ms) >= PC_CHIP_REDRAW_MS)))
   {
@@ -2355,6 +2350,11 @@ void pc_ui_service(pc_session *s)
   }
 
   s->in_poll = 0;
+}
+
+int pc_ui_chip_shown(const pc_session *s)
+{
+  return s->chip_state != 0;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

@@ -14,6 +14,7 @@ void pc_glue_poll_busy(void);         //UI busy loops and touch scans: no FPGA a
 void pc_glue_poll_isr(void);          //1 ms timer interrupt: safe commands and the TX pump only
 void pc_glue_ui_service(void);        //main loop, after the MAIN poll: MCP indicator
 int  pc_glue_ui_arm_allowed(void);    //0 while a host READ_RAW waits for the UI capture in flight
+int  pc_glue_rtc_allowed(void);       //0 while the MCP chip occupies the RTC clock slot
 void pc_glue_ui_capture_start(void);  //fpga_do_conversion started a conversion
 void pc_glue_ui_capture_addr(uint32 addr); //0x14 read of the finished UI capture
 void pc_glue_ui_capture(void);        //UI finished reading a capture
@@ -24,6 +25,7 @@ void pc_glue_ui_capture(void);        //UI finished reading a capture
 #define PC_UI_CAPTURE_START()   pc_glue_ui_capture_start()
 #define PC_UI_CAPTURE_ADDR(a)   pc_glue_ui_capture_addr(a)
 #define PC_UI_ARM_ALLOWED()     && pc_glue_ui_arm_allowed()
+#define PC_RTC_ALLOWED()        && pc_glue_rtc_allowed()
 
 #else
 
@@ -33,6 +35,7 @@ void pc_glue_ui_capture(void);        //UI finished reading a capture
 #define PC_UI_CAPTURE_START()   do { } while(0)
 #define PC_UI_CAPTURE_ADDR(a)   do { } while(0)
 #define PC_UI_ARM_ALLOWED()
+#define PC_RTC_ALLOWED()
 
 #endif
 

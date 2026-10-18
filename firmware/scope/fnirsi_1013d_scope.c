@@ -377,7 +377,8 @@ int main(void)
     //--------------------------------------------------------------------------    
     
     //READ and show RTC time
-    if (!(timerRTC)&&(onoffRTC))
+    //PC protocol: the MCP chip uses the clock's slot while a host is connected
+    if (!(timerRTC)&&(onoffRTC) PC_RTC_ALLOWED())
     {
       timerRTC=500;
       //Reading time and date of DS3231

@@ -30,12 +30,12 @@
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-//MCP indicator chip: top right, over the version text, under the battery symbol (x 701..726, y 5..18), clear of the
-//right control bar at x 730. 32 x 18 px.
-#define PC_CHIP_X         697
-#define PC_CHIP_Y         22
-#define PC_CHIP_W         32
-#define PC_CHIP_H         18
+//MCP indicator chip: stacked directly above the RUN/STOP chip (x 127, y 22, 38 x 18), same width, in the slot of the
+//RTC clock (x 123..170, y 3..15), which is not drawn while the chip shows. Menus open below the top bar (y >= 46).
+#define PC_CHIP_X         RUN_STOP_TEXT_XPOS
+#define PC_CHIP_Y         3
+#define PC_CHIP_W         RUN_STOP_TEXT_WIDTH
+#define PC_CHIP_H         17
 
 //0x05 ready polls before ARM gives up (1.00o5 waits forever)
 #define PC_READY_POLLS    2000000
@@ -196,21 +196,24 @@ void pc_hal_timebase_write(const pc_hw_timebase *t, int raw)
     return;
   }
 
-  //The UI's own apply (long/short mode, FPGA time base, display); it keeps the sample rate when stopped, the host
-  //always gets the rate that belongs to the index
+  //The target index in one step (owner, 0.2.1: going through scope_set_timebase flickered before settling): index,
+  //rate and short mode first, then the FPGA, then one redraw of the label and the trace area. Same effect as the
+  //short branch of scope_set_timebase in RUN, without its single-mode re-arm. Host indices are 11..34 (short only).
   {
     DISPLAYDATA save;
 
-    pc_draw_begin(&save);
     scopesettings.timeperdiv = t->timeperdiv;
-    scope_set_timebase();
+    scopesettings.samplerate = t->samplerate;
+    scopesettings.long_mode  = 0;
+    fpga_set_time_base(scopesettings.timeperdiv);
+    fpga_set_sample_rate(scopesettings.samplerate);
 
-    if(scopesettings.samplerate != t->samplerate)
-    {
-      scopesettings.samplerate = t->samplerate;
-      fpga_set_sample_rate(scopesettings.samplerate);
-    }
+    //The next UI pass arms a fresh conversion at the new rate
+    scopesettings.display_data_done = 1;
 
+    pc_draw_begin(&save);
+    scope_preset_values();
+    scope_acqusition_settings(0);
     pc_draw_end(&save);
   }
 }
@@ -609,23 +612,23 @@ void pc_hal_indicator(int state)
   DISPLAYDATA save;
 
   pc_draw_begin(&save);
-  display_set_fg_color(BLACK_COLOR);
-  display_fill_rect(PC_CHIP_X, PC_CHIP_Y, PC_CHIP_W, PC_CHIP_H);
-  display_set_font(&font_2);
 
   if(state == 0)
   {
-    //Back to what scope_setup_main_screen shows there
-    display_set_fg_color(WHITE_COLOR);
-    display_text(VERSION_STRING_XPOS, VERSION_STRING_YPOS, VERSION_STRING + 1);
+    //Clear the slot; the RTC clock (when enabled) redraws its time there within 0.5 s
+    display_set_fg_color(BLACK_COLOR);
+    display_fill_rect(TIME_TEXT_XPOS, TIME_TEXT_YPOS, TIME_TEXT_WIDTH, PC_CHIP_H);
   }
   else
   {
-    //Green chip, brighter for a moment after each command
-    display_set_fg_color((state == 2) ? GREEN_COLOR : DARKGREEN_COLOR);
+    //Steady green chip, same width as the RUN/STOP chip under it
+    display_set_fg_color(BLACK_COLOR);
+    display_fill_rect(TIME_TEXT_XPOS, TIME_TEXT_YPOS, TIME_TEXT_WIDTH, PC_CHIP_H);
+    display_set_fg_color(GREEN_COLOR);
     display_fill_rounded_rect(PC_CHIP_X, PC_CHIP_Y, PC_CHIP_W, PC_CHIP_H, 2);
-    display_set_fg_color((state == 2) ? BLACK_COLOR : WHITE_COLOR);
-    display_text(PC_CHIP_X + 5, PC_CHIP_Y + 3, "MCP");
+    display_set_fg_color(BLACK_COLOR);
+    display_set_font(&font_3);
+    display_text(PC_CHIP_X + 4, PC_CHIP_Y, "MCP");
   }
 
   pc_draw_end(&save);
@@ -781,6 +784,12 @@ void pc_glue_ui_service(void)
 {
   if(pc_ready)
     pc_ui_service(&pc_sess);
+}
+
+//The RTC clock shares the chip's slot: not drawn while the chip shows
+int pc_glue_rtc_allowed(void)
+{
+  return !pc_ready || !pc_ui_chip_shown(&pc_sess);
 }
 
 int pc_glue_ui_arm_allowed(void)

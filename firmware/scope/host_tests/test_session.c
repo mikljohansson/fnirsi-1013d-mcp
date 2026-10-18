@@ -1164,7 +1164,7 @@ static void test_read_raw_hold(void)
   T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 2);
 }
 
-//MCP chip: on while DTR is up or traffic within 2 s, pulse after each response
+//MCP chip: steady while DTR is up or traffic within 2 s (no pulse)
 static void test_indicator(void)
 {
   setup(0x1532);
@@ -1177,12 +1177,10 @@ static void test_indicator(void)
   pc_ui_service(&S);
   T_EQ(mock.indicator, 1);
 
+  T_EQ(pc_ui_chip_shown(&S), 1);
   (void)req(PC_CMD_PING, "z", 1);
   pc_ui_service(&S);
-  T_EQ(mock.indicator, 2);
-  mock.now += PC_PULSE_MS;
-  pc_ui_service(&S);
-  T_EQ(mock.indicator, 1);
+  T_EQ(mock.indicator, 1);                                       //no pulse on traffic
 
   //Redrawn periodically, not every pass
   {
@@ -1200,7 +1198,7 @@ static void test_indicator(void)
   T_EQ(mock.indicator, 1);
   mock.now += PC_HOST_ACTIVE_MS;
   pc_ui_service(&S);
-  T_EQ(mock.indicator, 0);
+  T_EQ(mock.indicator, 0); T_EQ(pc_ui_chip_shown(&S), 0);
 }
 
 //SD sector commands: info, read, stage + write with every safety limit

@@ -16,9 +16,9 @@
 
 #ifndef PC_FW_VERSION
 #if PC_FIFO_MAP == 1
-#define PC_FW_VERSION     "0.2.2-m1"   //alternative USB FIFO layout (pc_transport.h)
+#define PC_FW_VERSION     "0.2.3-m1"   //alternative USB FIFO layout (pc_transport.h)
 #else
-#define PC_FW_VERSION     "0.2.2"
+#define PC_FW_VERSION     "0.2.3"
 #endif
 #endif
 
@@ -69,10 +69,10 @@
 //READ_RAW of a UI capture in RUN waits at most this long for the capture in flight
 #define PC_HOLD_MS        1000
 
-//MCP indicator: host active while DTR is up or a frame came within this time; pulse after each command
+//MCP indicator: steady while DTR is up or a frame came within this time (owner: no pulse); redrawn this often, since
+//UI top-bar redraws paint over it
 #define PC_HOST_ACTIVE_MS 2000
-#define PC_PULSE_MS       100
-#define PC_CHIP_REDRAW_MS 500
+#define PC_CHIP_REDRAW_MS 100
 
 //Acquisition states (P-6.2)
 #define PC_ACQ_IDLE       0
@@ -168,7 +168,6 @@ typedef struct
   uint8_t    chip_state;        //what the indicator shows now
   uint32_t   chip_ms;           //when it was last drawn
   uint32_t   last_frame_ms;
-  uint32_t   last_cmd_ms;       //last dispatched command (indicator pulse)
   uint32_t   last_main_ms;
   uint32_t   init_ms;
   uint32_t   first_poll_ms;     //boot -> first MAIN poll, first pass duration (GET_LINK_STATS)
@@ -279,6 +278,7 @@ typedef struct
 void     pc_session_init(pc_session *s);                 //reads the FPGA version through the HAL cache
 void     pc_poll(pc_session *s, int ctx);
 void     pc_ui_service(pc_session *s);                    //every main-loop pass after the MAIN poll: MCP indicator
+int      pc_ui_chip_shown(const pc_session *s);           //1 while the chip occupies the RTC clock slot
 
 //UI acquisition hooks (scope_functions.c / fpga_control.c, main-loop code)
 int      pc_ui_arm_allowed(pc_session *s);                //0 while a READ_RAW waits for the UI capture in flight

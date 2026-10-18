@@ -463,12 +463,13 @@ sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
    ModemManager ignore rule from plan section 10. The device is high-speed only: use a USB 2.0 HS
    port or hub, not a full-speed VM pass-through.
 3. **Text probe.** In a terminal, `#VER` + Enter must answer
-   `#OK,FNIRSI-1013D-AI,fw=0.2.2,proto=1.3,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
+   `#OK,FNIRSI-1013D-AI,fw=0.2.3,proto=1.3,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
 4. **Identify.** PING with random 0..492 byte payloads, 10,000 times. GET_INFO must report
    variant 2, ring 8192, max total 16382, caps 0x7C03 (PROG_TRIGGER_POS, GENERATOR_DDS, ENTER_FEL,
    SHARED_MODE, SD_SECTORS and the two UNVERIFIED bits; `PC_DEBUG=1` adds 0x120). Run GET_STATUS, GET_BATTERY,
    and GET_CHANNEL / TIMEBASE / TRIGGER / CAL, and compare with the screen. The UI keeps running, and
-   the green MCP chip shows at the top right while the port is open. Open a menu: GET_STATUS must
+   the green MCP chip shows directly above the RUN/STOP chip while the port is open (steady, no
+   pulse; the RTC clock is hidden meanwhile). Open a menu: GET_STATUS must
    answer with `ui_busy` = 1, and SET_CHANNEL must give E_BUSY.
 5. **Link tests T1, T2.** TEST_PATTERN lengths 492, 495, 496, 1008 and 4076, 1000 times each,
    with no timeouts (ZLP). Then 65,536 bytes x 200: record MB/s in `docs/hardware-status.md`.

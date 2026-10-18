@@ -1,6 +1,7 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.2 (protocol 1.3: shared control, SD sector commands). 0.2.1 passed the protocol-level
+State on 2026-10-18, fw 0.2.3 (protocol 1.3: shared control, SD sector commands; 0.2.3: chip above RUN/STOP and
+steady, one-step SET_TIMEBASE). 0.2.1 passed the protocol-level
 shared-control acceptance on the bench (owner's visual checks pending); 0.2.2 adds SD_* and two startup counters,
 built and host-tested, not benched. Read `CLAUDE.md` (repo root) first, then
 this file. For details, this file links to `firmware/README.md` (build, SD layout, FEL, memory budget, bring-up
@@ -139,8 +140,13 @@ Plan: `docs/plans/collaborative-mode.md`; wire format agreed with the MCP agent 
   the parser takes no new event (so `#RESET` comes after the hold); link reset / DTR up drop the hold. The done hook
   counts a conversion once (`ui_started`), because 1.00o5 re-processes a finished conversion every pass while the
   gate holds (conversion_done stays set).
-- MCP chip (`pc_ui_service`, `pc_hal_indicator`): x 697 y 22, 32 x 18, over the version text; on while DTR or a frame
-  in the last 2 s, bright 100 ms after each response, redrawn every 500 ms.
+- MCP chip (`pc_ui_service`, `pc_hal_indicator`): 0.2.3 steady green, 38 x 17 at x 127 y 3, directly above the
+  RUN/STOP chip, in the RTC clock's slot (the main-loop RTC draw is gated by PC_RTC_ALLOWED while the chip shows);
+  on while DTR or a frame in the last 2 s, redrawn every 100 ms. Owner rejected the 0.2.1 spot (x 697 y 22 under the
+  battery) and the pulse.
+- SET_TIMEBASE mode 0 (0.2.3): sets index + rate + short mode, FPGA, then one scope_preset_values +
+  scope_acqusition_settings. 0.2.1 called scope_set_timebase and the owner saw flicker through time/div values; the
+  exact mechanism was not identified (host requests never use the UI's one-index step routine). Bench: confirm.
 - Unverified on the bench (acceptance list in README section 5, step 6): screen redraws after host SET_*, marker
   search for the trigger level on every range, the UI showing a host capture, the chip position and colours.
 
