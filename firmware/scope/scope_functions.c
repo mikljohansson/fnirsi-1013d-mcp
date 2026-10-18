@@ -300,6 +300,9 @@ void scope_adjust_timebase_and_voltdiv (void)
     
     //Draw the signal center, trigger level and trigger position pointers
     scope_draw_pointers();
+
+    //PC protocol build: the phosphor strip over the grid's record-position slider
+    PC_PHOSPHOR_STRIP();
      
     //Copy it to the actual screen buffer
     display_set_source_buffer(displaybuffertmp);//1
@@ -2830,6 +2833,8 @@ void scope_display_trace_data(void)
       if (scopesettings.channel1.ADoverload)display_set_fg_color(RED_COLOR); 
         else display_set_fg_color(CHANNEL1_COLOR);
         
+      //PC protocol build: in the phosphor view the map replaces the polyline (PC_PHOSPHOR_DRAW below)
+      PC_PHOSPHOR_SKIP()
       switch(scopesettings.ACQ_trace)
       { 
                 //Linear trace mode
@@ -2876,6 +2881,7 @@ void scope_display_trace_data(void)
         if (scopesettings.channel2.ADoverload)display_set_fg_color(RED_COLOR); 
             else display_set_fg_color(CHANNEL2_COLOR);
         
+              PC_PHOSPHOR_SKIP()
               switch(scopesettings.ACQ_trace)
       { 
                 //Linear trace mode
@@ -2901,6 +2907,9 @@ void scope_display_trace_data(void)
       //uint32 backup_settings = 0;
   
   //backup_settings = settings;
+    //PC protocol build: the phosphor view paints its maps where the traces were, before REF / MATH
+    PC_PHOSPHOR_DRAW();
+
     //Check and displaying of REFx.
     display_REFx_data();
     
@@ -2934,6 +2943,9 @@ void scope_display_trace_data(void)
     x1 = scope_get_x_sample(&scopesettings.channel1, index);
     y1 = scope_get_y_sample(&scopesettings.channel2, index);
     
+    //PC protocol build: the phosphor view draws XY from its map (the loop is skipped)
+    PC_PHOSPHOR_XY(index, last);
+
     //Handle all the needed samples
     for(;index<last;index++)
     {
@@ -7156,6 +7168,8 @@ void scope_save_config_data(void)
   //Spectrum view settings (FFT length, window, scale, ref level)
   settingsworkbuffer[PC_SETTING_WORD_SPEC0] = pc_glue_spectrum_setting_word(0);
   settingsworkbuffer[PC_SETTING_WORD_SPEC1] = pc_glue_spectrum_setting_word(1);
+  //Phosphor view settings (persistence, palette)
+  settingsworkbuffer[PC_SETTING_WORD_PHOS] = pc_glue_phosphor_setting_word();
 #endif
   
   

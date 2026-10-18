@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            12    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            13    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -26,6 +26,7 @@
                                         //1.11: CIC compensation FIR (FPGA 0x1535, fw 0.2.44);
                                         //1.12: calibration data v3 (per-core, per-class gain), GET_CAL 256 bytes
                                         //      (fw 0.2.45)
+                                        //1.13: phosphor view, GET_STATUS display_mode 4 (fw 0.2.46)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4

@@ -477,7 +477,7 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
   p[40] = pc_run_state(s);
   p[41] = s->capture_id ? s->cap.origin : 0;
   p[42] = s->ext_flags;                         //1.4: EXT pin (bit0 level, bit1 generator on, bit2 edge since arm)
-  p[43] = pc_hal_display_mode();                //1.7: 0 scope, 1 spectrum view
+  p[43] = pc_hal_display_mode();                //1.7: 0 scope, 1 spectrum view; 2 / 3 waterfall / density; 1.13: 4 phosphor
   return 44;
 }
 
