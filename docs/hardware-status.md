@@ -386,3 +386,4 @@ Newest entries at the bottom. Format: date, who, what, result.
   DDR 1024 2.2 ms (was 5.3), 2048 4.9 (11.4), 4096 10.9 (24.3), 16384 51.4 (108.7); SRAM 1024 1.0 (4.0), 2048 2.3 (8.5); peak levels
   unchanged. 2.2-2.5x faster; 4096-point spectra now cost ~11 ms per channel per pass. Owner: keep memory depth default at 3000 (UI slows
   down at long memory).
+- Owner on 0.2.31 spectrum view: harmonic comb looks as before. READ_SPECTRUM cross-check logged below.
