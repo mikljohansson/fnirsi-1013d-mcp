@@ -31,6 +31,7 @@
 #include "pc_cmds.h"
 #include "pc_hooks.h"
 #include "spectrum.h"
+#include "spec_fmt.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -1350,6 +1351,23 @@ void pc_glue_ui_mask(int menu)
       for(i=0;i<5;i++)
         if(!pc_glue_ui_has(PC_FEAT_MEM_BASE + i))
           pc_mask_rect(ACQ_MENU_XPOS + 313, ACQ_MENU_YPOS + 31 + 36 * i, 58, 29);
+
+      //fw 0.2.38 (owner): the main-loop pass time under the "Memory" header, so the cost of a longer record shows
+      //where it is chosen. It is the last pass before the menu opened (the menu is modal, nothing captures while it
+      //is open), so a new depth shows its cost the next time the menu opens.
+      {
+        PFONTDATA font = displaydata.font;
+        char t[20], *q;
+
+        display_fill_rect(ACQ_MENU_XPOS + 306, ACQ_MENU_YPOS + 21, 72, 11);
+        q = fmt_str(t, "pass ");
+        q = fmt_uint(q, pc_sess.pass_ms);
+        fmt_str(q, " ms");
+        display_set_font(&font_2);
+        display_set_fg_color(0x00A0A0A0);
+        display_text(ACQ_MENU_XPOS + 314, ACQ_MENU_YPOS + 20, (int8 *)t);
+        display_set_font(font);
+      }
       break;
 
     //PC_MASK_SYS_RTC: since 0.2.13 the item is not drawn and the menu is one row shorter (pc_glue_sys_menu_height)

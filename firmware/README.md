@@ -604,6 +604,13 @@ on-chip SRAM, 4096 points 10.9 ms (+ about 1-2.5 ms dB conversion). Since 0.2.33
 (0x1000-0x7008, the space FFT_BENCH borrows; nothing else uses it at run time, all stacks are in DDR). Drawing: one
 728 x 432 clear (memset bursts since 0.2.32) and blit per pass, as 1.00o5's trace view.
 
+### Pass time in the acquisition menu (fw 0.2.38)
+
+Owner: the cost of a longer record shows where it is chosen. Under the acquisition menu's "Memory" header the menu
+shows "pass NN ms", the main-loop pass time (GET_STATUS `pass_ms`) of the last pass before the menu opened. The menu
+is modal and nothing captures while it is open, so a newly chosen depth shows its cost the next time the menu opens.
+Drawn by the `PC_MASK_ACQ_MEMORY` glue after every memory-depth draw (`pc_hal_scope.c`).
+
 ### Memory budget
 
 All new buffers are static in `.bss`, in DDR after the image. The linker script has one 32 MB
