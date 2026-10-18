@@ -822,3 +822,92 @@ sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
 
 `BENCH: Tn` comments in `pc_cmds.c`, `pc_hal_scope.c`, `pc_transport.c` and `usb_interface.c` mark
 the code each test confirms.
+
+## 6. Calibration
+
+### 6.1 What 1.00o5 measures, stores and applies (analysis, fw-cal 2026-10-18)
+
+Sources: `scope_functions.c` (`scope_do_baseline_calibration`, `scope_do_channel_calibration`,
+`scope_input_calibration`, `scope_load/save_input_calibration_data`, `scope_save_config_data`), `fpga_control.c`
+(`fpga_read_sample_data`, `fpga_read_adc_data`, `fpga_set_channel_offset`), `statemachine.c` (the menu flow), bench
+facts from `docs/hardware-status.md` (T8, the Nyquist spur). Line numbers drift; search the function names.
+
+**Base ("baseline") calibration**, System settings, prompt "Please unplug the probe and USB first!". Trigger off
+(samplemode 0, AUTO), trigger level 0, invert off, dcoffset 0, `calibrationsettings` (a scratch CHANNELSETTINGS)
+with both compensations 0, 1000 samples per readout (500 per core) read from ring position 100. Per channel
+(`scope_do_channel_calibration`), for each of the 6 hardware ranges (relay 0x33/0x36 value 0..5, 60 ms settle):
+
+1. At 200 MSa/s (rate index 0) and 50 kSa/s (index 11): offset PWM 500, 30 ms, one conversion, integer mean of
+   core A only (`adc1rawaverage = sum / 500`, truncated) = H; PWM 1200, same = L. Step (PWM counts per code, Q20)
+   `s = (700 << 20) / (H - L)`; PWM estimate for A = 128 from each end, `500 + ((H - 128) s >> 20)` and
+   `1200 - ((128 - L) s >> 20)`, averaged. The two rates' estimates are averaged again.
+2. At 2 MSa/s (index 6), PWM = that estimate, 60 ms, one conversion: **FAIL 1** if core A's integer mean (no
+   compensation) is outside 125..131, i.e. the linear PWM model missed 128 by more than 3 codes on any range (noise,
+   a non-linear offset path, a wrong reference: thread notes, a 2.5 V TL432 instead of the 1.25 V part gives FAIL 1,
+   research/notes/thread-pages-121-155.md). The integer difference B - A of the same readout is summed.
+3. `d = sum / 6` (C division, truncates toward zero); `adc1compensation = d / 2` (truncated),
+   `adc2compensation = -(d - adc1compensation)`, so the two add up to -d. **FAIL 2** if |d| > 20 codes.
+4. Each range's PWM is moved by `adc1compensation x mean step` so that core A **plus its compensation** reads 128:
+   that is `dc_calibration_offset[r]`. Entry 6 (50 mV/div, software zoom of range 5) copies entry 5.
+
+The results are copied per channel only while the running flag is still 1 (a CH1 failure also discards CH2; a CH2
+failure leaves CH1 updated), and are **not written by the calibration**: they live in RAM and reach sector 709 at
+the next power-off (`scope_save_configuration_data`). Coupling is not set (whatever the channel had).
+`calibrationsettings.dc_shift_value` is never initialised, so every calibration sample evaluates 0 / 0 in the
+dcoffset term below (libgcc's `__aeabi_idiv0` returns 0).
+
+**Input-divider ("voltage") calibration**, offered after a base calibration only while `calibrationfail` is set
+(first run or after RESET): DC coupling, 1x, dcoffset 0, 5 MSa/s time base, one conversion per step of both
+channels with 300 mV / 600 mV / 1.5 V / 3 V / 7.5 V / 15 V on ranges 5..0; `value = average - 128` (integer mean of
+both compensated cores, the zero assumed at exactly 128), then `input_calibration[r]` counts up from 3,000,000 until
+`((value x ic) >> 21) x mul_factor == calibVolt` (10 uV units, e.g. 30000 for 300 mV); failure above 4,000,000.
+`input_calibration[6] = 2 x [5]`. Saved to sector 708 when the sequence completes. Any zero error goes straight
+into the gain.
+
+**DC shift parameters** (diagnostic menu, manual +/- trim, saved to 708 at "End"): `dc_shift_value` (default 385)
+maps the offset PWM to codes for the measurements (`+ dcoffset x 100 / dc_shift_value` per sample, i.e. 0.26 codes
+per count), `dc_shift_size` (220) maps it to screen pixels for the trace and the trigger marker, `dc_shift_center`
+(112/174) is used by auto setup.
+
+**Sector 708** (`INPUT_CALIBRATION_SECTOR`, little-endian, byte offsets):
+
+| bytes | field |
+|---|---|
+| 0-3 | u16 checksum high, u16 checksum low: sum of the u16 words 8..59 (bytes 16..119). Valid only if high is 1..0xFFFE |
+| 4-15 | 0 |
+| 16-43 | CH1 `input_calibration[0..6]` (i32, 2^21 scale) |
+| 44-47 | 0 |
+| 48-75 | CH2 `input_calibration[0..6]` |
+| 76-79 | 0 |
+| 80, 84, 88 | CH1 `dc_shift_center` (u32), `dc_shift_size` (i32), `dc_shift_value` (i32) |
+| 92-95 | 0 |
+| 96, 100, 104 | CH2 the same |
+| 108-511 | 0 (not covered by the checksum; every save rewrites the whole sector from zeros) |
+
+**Sector 709** (settings, u16 words, checksum of words 2..255 in words 0-1, version 0x0100/0x0015 in words 2-3)
+holds the base calibration results: words 168-173 CH1 `dc_calibration_offset[0..5]`, 174-179 CH2, 184-187
+`adc1compensation` / `adc2compensation` of CH1 then CH2 (i16). They are taken from the loaded 709 buffer only
+when sector 708's checksum is valid; otherwise defaults (PWM 860, compensation 0, `signal_adjusters`, 174/220/385)
+load and the input calibration is offered again. The diagnostic view's RESTORE reloads them (and 708), RESET sets
+the defaults in RAM.
+
+**Where the compensation is applied.** `fpga_read_adc_data` (every UI readout, READ_TRACE, the calibrations): per
+core `sample = raw + compensation`, clamped to 0..255, overload flags, and in the second (core B) pass a clip-matching
+rule that copies one core's value to the other near 0 and 255 so the two saturate at the same code. Then, for
+min/max/average/RMS only (not the trace buffer), `+ dcoffset x 100 / dc_shift_value` (a soft-division per sample).
+The decimation path (0x1534, K >= 1) adds `(adc1compensation + adc2compensation) / 2` to every 16-bit sample
+converted to a code (`pc_glue_decim_read`). `fpga_average_trace_data(_long)` (test.c only) adds core A's value.
+READ_RAW is raw.
+
+**Why the per-core spread survives on the owner's unit.** CH1's raw core zeros differ by 5.35 codes (A 130.93,
+B 125.58, live capture 2026-10-18; T8: Z_A 132.5 / Z_B 127.0 at dcoffset 0); the stored compensation is -2/+2, so
+4 codes are corrected and 1.35 remain. The arithmetic loses up to about 2 codes: core means are truncated to
+integers (each core loses 0..1 code, independently); the 6-range mean of B - A is truncated toward zero (a true
+-4.9 becomes -4); the split is in whole codes. Inference, not verified: the base calibration on the card was run
+on the stock bitstream (0x1432, hardware-status 2026-10-18), and the spread under the AL3 bitstream may differ.
+Beyond the quantisation the model is too small: one compensation per channel for all ranges and offsets, while
+the two cores' offset slopes differ (CH1 -0.2641 vs -0.2598 codes per count, host fit), i.e. another 0.4 codes per
+100 counts of dcoffset. In legacy sample-skipping mode consecutive samples alternate A, B, A, B, so the residual
+A - B difference is a square wave at fs/2: the Nyquist-bin spur in the spectrum view. The trace's 0 V also sits
+at the mean of the two compensated cores, not at 128 - dcoffset x 100 / dc_shift_value, so the screen zero and the
+voltage calibration's zero are off by up to a code.
