@@ -15,6 +15,7 @@
 
 #include "usb_interface.h"
 #include "PC_interface.h"
+#include "pc_hooks.h"
 #include "variables.h"
 #include "generator.h"
 
@@ -5624,6 +5625,7 @@ void scope_acquisition_Long_memory_select(void)
     display_text(ACQ_MENU_XPOS + 235, ACQ_MENU_YPOS +  168, "Long");
     display_text(ACQ_MENU_XPOS + 225, ACQ_MENU_YPOS +  182, "memory");     
 
+  PC_UI_MASK(PC_MASK_ACQ_LONG);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -5683,6 +5685,7 @@ void scope_acquisition_memory_deep_select(void)
     display_text(ACQ_MENU_XPOS + x, ACQ_MENU_YPOS + y, (int8 *)memory_deep_texts[c]);
   }
 
+  PC_UI_MASK(PC_MASK_ACQ_MEMORY);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -5813,6 +5816,7 @@ void scope_open_trigger_menu(void)
   scope_hold_off_select();
   scope_always_trigger50_select();
   //scope_hold_off_select();
+  PC_UI_MASK(PC_MASK_TRIG_MENU);
 
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1
@@ -6206,6 +6210,7 @@ void scope_trigger_channel_select(void)
 
   //Display the CH2 text
   display_text(TRIGGER_MENU_XPOS+176, TRIGGER_MENU_YPOS+132, "EXT");
+  PC_UI_MASK(PC_MASK_TRIG_CHANNEL);
 }
 
 //==============================================================================
@@ -6478,6 +6483,7 @@ void scope_open_generator_menu(void)
   gen_ampl_select();
   gen_offset_select();
   gen_phase_select();
+  PC_UI_MASK(PC_MASK_GEN_MENU);
   
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1
@@ -7427,6 +7433,7 @@ void scope_system_settings_RTC_settings_item(int mode)//set
   
   //Read time for RTC
   get_fattime();
+  PC_UI_MASK(PC_MASK_SYS_RTC);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

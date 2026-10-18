@@ -375,6 +375,31 @@ Hooks in the 1.00o5 code, all under `#if PC_PROTOCOL`:
   text debug path is gone, so the debug helpers in `menu.c` print nothing. MSC is unchanged.
 - `variables.h`: the trace buffers are rounded up to 4096 words (16,384 bytes per channel).
 
+### Hidden menu options (fw 0.2.6)
+
+Owner policy: the UI offers only what the running hardware can do. Protocol builds hide these 1.00o5 menu items
+(painted over with the menu background, touches ignored; `pc_glue_ui_has` / `pc_glue_ui_mask` in `pc_hal_scope.c`,
+hooks `PC_UI_HAS` / `PC_UI_MASK` that are empty with `PC_PROTOCOL=0`):
+
+| item | where | hidden when | why |
+|---|---|---|---|
+| Wave SQUR / SINE / TRGL | generator menu | always | no DAC: the generator is the FPGA's DDS square wave on the calibration pin; the setting was never sent anywhere |
+| Ampl, Offset, Phase | generator menu | always | no DAC; the FPGA writes are commented out in 1.00o5 |
+| the generator menu itself (top-bar button does not open it) | top bar | stock bitstream 0x1432 (no DDS) | the stock core has a fixed 1 kHz square wave |
+| memory depth boxes above the bitstream's maximum | acquisition menu | 6000+ on stock (3000), 15000 on EF2/EP4 (12286) | the FPGA cannot capture more |
+| Long memory | acquisition menu | always | 1.00o5 forces it off; the main-loop branch is empty |
+| EXT trigger source | trigger menu | always | no external trigger input (yet; FPGA work item) |
+| Hold off | trigger menu | always | never sent to the FPGA in 1.00o5 |
+| Time & Date settings (RTC submenu) | system settings | no DS3231 answers at boot | the clock, file stamps and FAT times would read garbage |
+
+At boot a saved setting that selects a hidden option is corrected: RTC off without a module, EXT trigger -> CH1,
+memory depth clamped to the largest offered step. The DS3231 is detected by addressing it (0xD0) on the touch
+panel's I2C bus and sampling the ACK bit [U, bench check: with and without a module]. No option needs a manual switch
+yet (everything above is detected); new hardware mods that cannot be detected get a switch in "Other settings"
+(the menu is full: a second column or page is needed) with the value in a spare settings word (108..119 or 204..255,
+`scope_save_config_data`), default off. Not changed: trigger positions 25 % / 75 % on the stock bitstream (software
+only there), the generator top-bar button text on stock.
+
 ### Memory budget
 
 All new buffers are static in `.bss`, in DDR after the image. The linker script has one 32 MB

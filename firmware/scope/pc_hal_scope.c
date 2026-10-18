@@ -23,6 +23,7 @@
 #include "interrupt.h"
 #include "pc_transport.h"
 #include "sd_card_interface.h"
+#include "DS3231.h"
 
 #include "pc_hal.h"
 #include "pc_cmds.h"
@@ -42,6 +43,7 @@
 
 static pc_session    pc_sess;
 static uint8         pc_ready;
+static uint8         pc_rtc_present;        //DS3231 answered its address at boot
 static uint16        pc_fpga_word;
 
 extern DISPLAYDATA   displaydata;           //display_lib.c: current buffer, colours, font
@@ -747,6 +749,165 @@ void pc_hal_enter_fel(void)
 //----------------------------------------------------------------------------------------------------------------------------------
 // Glue called from the 1.00o5 code (pc_hooks.h)
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// Hidden menu options (owner policy: the UI offers only what the running hardware can do)
+
+//DS3231 present? Address 0xD0 (write) on the touch panel's bit-banged bus, sample the slave ACK, stop. The 1.00o5 I2C
+//routines clock a master ACK and never look at the slave's, so they cannot tell.                     BENCH: RTC probe
+static uint8 pc_probe_ds3231(void)
+{
+  uint8 data = 0xD0, ack;
+  int   i;
+
+  tp_i2c_send_start();
+  *PORT_A_CFG_REG = 0xFFFF1101;
+
+  for(i=0;i<8;i++)
+  {
+    if(data & 0x80)
+      *PORT_A_DATA_REG |= 0x00000004;
+    else
+      *PORT_A_DATA_REG &= 0x0000000B;
+
+    tp_delay(TP_DATA_DELAY);
+    *PORT_A_DATA_REG |= 0x00000008;
+    tp_delay(TP_CLOCK_DELAY);
+    *PORT_A_DATA_REG &= 0x00000007;
+    tp_delay(TP_DATA_DELAY);
+    data <<= 1;
+  }
+
+  //Release SDA, clock the ACK bit, sample it (low = a device answered)
+  *PORT_A_CFG_REG = 0xFFFF1001;
+  tp_delay(TP_DATA_DELAY);
+  *PORT_A_DATA_REG |= 0x00000008;
+  tp_delay(TP_CLOCK_DELAY);
+  ack = (*PORT_A_DATA_REG & 0x00000004) ? 0 : 1;
+  *PORT_A_DATA_REG &= 0x00000007;
+  tp_delay(TP_DATA_DELAY);
+
+  tp_i2c_send_stop();
+  return ack;
+}
+
+int pc_glue_ui_has(int feature)
+{
+  if(!pc_ready)
+    return 1;
+
+  switch(feature)
+  {
+    case PC_FEAT_GEN_DDS:
+      return (pc_sess.var.caps & PC_CAP_GENERATOR_DDS) != 0;
+
+    case PC_FEAT_RTC:
+      return pc_rtc_present;
+
+    case PC_FEAT_GEN_WAVE:
+    case PC_FEAT_GEN_ANALOG:
+    case PC_FEAT_LONG_MEMORY:
+    case PC_FEAT_EXT_TRIGGER:
+    case PC_FEAT_HOLDOFF:
+      return 0;
+
+    default:
+      if((feature >= PC_FEAT_MEM_BASE) && (feature < PC_FEAT_MEM_BASE + 8))
+        return (uint32)(3000 * (feature - PC_FEAT_MEM_BASE + 1)) <= pc_sess.var.max_total;
+
+      return 1;
+  }
+}
+
+static void pc_mask_rect(uint32 x, uint32 y, uint32 w, uint32 h)
+{
+  display_fill_rect(x, y, w, h);
+}
+
+//All these menus have a DARKGREY_COLOR background (scope_open_*_menu). Draws into the current buffer: a menu being
+//built off screen before it slides in, or the screen when an item is redrawn.
+void pc_glue_ui_mask(int menu)
+{
+  uint16 fg = displaydata.fg_color;
+  uint32 i;
+
+  if(!pc_ready)
+    return;
+
+  display_set_fg_color(DARKGREY_COLOR);
+
+  switch(menu)
+  {
+    case PC_MASK_GEN_MENU:
+      //Wave row between the separators at y 102 and 158; Ampl, Offset, Phase rows from below the line at 270
+      if(!pc_glue_ui_has(PC_FEAT_GEN_WAVE))
+        pc_mask_rect(GEN_MENU_XPOS + 2, 104, GEN_MENU_WIDTH - 4, 53);
+
+      if(!pc_glue_ui_has(PC_FEAT_GEN_ANALOG))
+        pc_mask_rect(GEN_MENU_XPOS + 2, 272, GEN_MENU_WIDTH - 4, GEN_MENU_YPOS + GEN_MENU_HEIGHT - 2 - 272);
+      break;
+
+    case PC_MASK_TRIG_CHANNEL:
+      if(!pc_glue_ui_has(PC_FEAT_EXT_TRIGGER))
+        pc_mask_rect(TRIGGER_MENU_XPOS + 170, TRIGGER_MENU_YPOS + 127, 37, 26);
+      break;
+
+    case PC_MASK_TRIG_MENU:
+      //The "Hold off" labels (scope_hold_off_select draws nothing)
+      if(!pc_glue_ui_has(PC_FEAT_HOLDOFF))
+        pc_mask_rect(TRIGGER_MENU_XPOS + 4, TRIGGER_MENU_YPOS + 231, 66, 42);
+      break;
+
+    case PC_MASK_ACQ_LONG:
+      if(!pc_glue_ui_has(PC_FEAT_LONG_MEMORY))
+        pc_mask_rect(ACQ_MENU_XPOS + 202, ACQ_MENU_YPOS + 161, 94, 44);
+      break;
+
+    case PC_MASK_ACQ_MEMORY:
+      for(i=0;i<5;i++)
+        if(!pc_glue_ui_has(PC_FEAT_MEM_BASE + i))
+          pc_mask_rect(ACQ_MENU_XPOS + 313, ACQ_MENU_YPOS + 31 + 36 * i, 58, 29);
+      break;
+
+    case PC_MASK_SYS_RTC:
+      //"Time & Date settings" item, background (159, 410, 226, 38)
+      if(!pc_glue_ui_has(PC_FEAT_RTC))
+        pc_mask_rect(155, 406, 234, 46);
+      break;
+  }
+
+  displaydata.fg_color = fg;
+}
+
+//Settings saved by an earlier firmware (or another unit) may select what this hardware cannot do
+static void pc_ui_fix_settings(void)
+{
+  uint32 max = pc_sess.var.max_total, total;
+
+  pc_rtc_present = pc_probe_ds3231();
+
+  //Without the module the clock, file stamps and FAT times would show garbage
+  if(!pc_rtc_present)
+    onoffRTC = 0;
+
+  //No external trigger input
+  if(scopesettings.triggerchannel > 1)
+    scopesettings.triggerchannel = 0;
+
+  //Memory depth: the largest offered step (3000 x n) the bitstream can capture
+  if(fpgasettings.totalsamples > max)
+  {
+    total = (max / 3000) * 3000;
+
+    if(total < 3000)
+      total = 3000;
+
+    fpgasettings.totalsamples = total;
+
+    if(fpgasettings.settriggerpoint + 2 > total)
+      fpgasettings.settriggerpoint = total / 2;
+  }
+}
+
 void pc_glue_init(void)
 {
 #if PC_FORCE_CDC
@@ -758,6 +919,7 @@ void pc_glue_init(void)
   pc_fpga_word = fpga_get_version();
   pc_session_init(&pc_sess);
   pc_ready = 1;
+  pc_ui_fix_settings();
 }
 
 void pc_glue_poll_main(void)

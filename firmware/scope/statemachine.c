@@ -10,6 +10,7 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "statemachine.h"
+#include "pc_hooks.h"
 #include "touchpanel.h"
 #include "timer.h"
 #include "fpga_control.h"
@@ -518,7 +519,7 @@ void scan_for_touch(void)
     //===========================================================================================================
     //******************
     //Check if in generator settings button range
-    else if((xtouch >= GEN_BUTTON_XPOS) && (xtouch <= GEN_BUTTON_XPOS+GEN_BUTTON_BG_WIDTH))    
+    else if((xtouch >= GEN_BUTTON_XPOS) && (xtouch <= GEN_BUTTON_XPOS+GEN_BUTTON_BG_WIDTH) PC_UI_HAS(PC_FEAT_GEN_DDS))    
     {
       //Set the button active
       scope_generator_settings(1);
@@ -1323,7 +1324,7 @@ void handle_main_menu_touch(void)
           tp_i2c_wait_for_touch_release();
         }
         //check on RTC settings
-        else if((ytouch >= 405) && (ytouch <= 470))
+        else if((ytouch >= 405) && (ytouch <= 470) PC_UI_HAS(PC_FEAT_RTC))
         {
           //Check if already open
           if(RTCsettingsopen == 0)
@@ -3045,7 +3046,7 @@ void handle_acquisition_menu_touch(void)
           }    
             
           //Check Long memory button if touch within this bounding box
-          if((xtouch >= ACQ_MENU_XPOS + 220) && (xtouch <= ACQ_MENU_XPOS + 290))
+          if((xtouch >= ACQ_MENU_XPOS + 220) && (xtouch <= ACQ_MENU_XPOS + 290) PC_UI_HAS(PC_FEAT_LONG_MEMORY))
           {
             //Toggle the average_mode state
             //scopesettings.long_memory  ^= 1;        
@@ -3091,7 +3092,7 @@ void handle_acquisition_menu_touch(void)
             y = (i * 36) + 33 + ACQ_MENU_YPOS;
 
             //Check if touch within this bounding box
-            if((xtouch >= x) && (xtouch <= x + 54) && (ytouch >= y) && (ytouch <= y + 25))
+            if((xtouch >= x) && (xtouch <= x + 54) && (ytouch >= y) && (ytouch <= y + 25) PC_UI_HAS(PC_FEAT_MEM_BASE + i))
             {
               //Set the new memory deep
 
@@ -3292,7 +3293,7 @@ void handle_trigger_menu_touch(void)
               tp_i2c_wait_for_touch_release();
             }
           }
-          else if((xtouch >= TRIGGER_MENU_XPOS+172) && (xtouch <= TRIGGER_MENU_XPOS+205))
+          else if((xtouch >= TRIGGER_MENU_XPOS+172) && (xtouch <= TRIGGER_MENU_XPOS+205) PC_UI_HAS(PC_FEAT_EXT_TRIGGER))
           {
             //Only when the channel is enabled
             //if(scopesettings.channel2.enable)
@@ -3388,7 +3389,7 @@ void handle_trigger_menu_touch(void)
           }
         }
         //Check on HoldOff, and not in waveform view
-        else if((ytouch >= TRIGGER_MENU_YPOS+229) && (ytouch <= TRIGGER_MENU_YPOS+275) && (!scopesettings.waveviewmode)) //125-147
+        else if((ytouch >= TRIGGER_MENU_YPOS+229) && (ytouch <= TRIGGER_MENU_YPOS+275) && (!scopesettings.waveviewmode) PC_UI_HAS(PC_FEAT_HOLDOFF)) //125-147
         {
           //Check on box with hold off value
           if((xtouch >= TRIGGER_MENU_XPOS+80) && (xtouch <= TRIGGER_MENU_XPOS+130))
@@ -3530,7 +3531,7 @@ void handle_generator_menu_touch(void)
         }
         //====================================================================================================
         //Check on buttons on wave flor 2
-        else if((ytouch >= GEN_MENU_YPOS+60) && (ytouch <= GEN_MENU_YPOS+108) && (!scopesettings.waveviewmode)) //120 155 ,125-147
+        else if((ytouch >= GEN_MENU_YPOS+60) && (ytouch <= GEN_MENU_YPOS+108) && (!scopesettings.waveviewmode) PC_UI_HAS(PC_FEAT_GEN_WAVE)) //120 155 ,125-147
         {
           //Check on square
           if((xtouch >= GEN_MENU_XPOS+65) && (xtouch <= GEN_MENU_XPOS+112))//67-114
@@ -3701,7 +3702,7 @@ void handle_generator_menu_touch(void)
         }
         //====================================================================================================
         //Check on buttons on ampl flor 5
-        else if((ytouch >= GEN_MENU_YPOS+228) && (ytouch <= GEN_MENU_YPOS+276) && (!scopesettings.waveviewmode)) //125-147
+        else if((ytouch >= GEN_MENU_YPOS+228) && (ytouch <= GEN_MENU_YPOS+276) && (!scopesettings.waveviewmode) PC_UI_HAS(PC_FEAT_GEN_ANALOG)) //125-147
         {
           //Check on box with amplitude value
           if((xtouch >= GEN_MENU_XPOS+80) && (xtouch <= GEN_MENU_XPOS+150))
@@ -3748,7 +3749,7 @@ void handle_generator_menu_touch(void)
         }
         //====================================================================================================
         //Check on buttons on offset flor 6
-        else if((ytouch >= GEN_MENU_YPOS+284) && (ytouch <= GEN_MENU_YPOS+332) && (!scopesettings.waveviewmode)) //125-147
+        else if((ytouch >= GEN_MENU_YPOS+284) && (ytouch <= GEN_MENU_YPOS+332) && (!scopesettings.waveviewmode) PC_UI_HAS(PC_FEAT_GEN_ANALOG)) //125-147
         {
           //Check on box with offset value
           if((xtouch >= GEN_MENU_XPOS+80) && (xtouch <= GEN_MENU_XPOS+150))
@@ -3794,7 +3795,7 @@ void handle_generator_menu_touch(void)
         }
         //====================================================================================================
         //Check on buttons on phase flor 7
-        else if((ytouch >= GEN_MENU_YPOS+340) && (ytouch <= GEN_MENU_YPOS+388) && (!scopesettings.waveviewmode)) //125-147
+        else if((ytouch >= GEN_MENU_YPOS+340) && (ytouch <= GEN_MENU_YPOS+388) && (!scopesettings.waveviewmode) PC_UI_HAS(PC_FEAT_GEN_ANALOG)) //125-147
         {
           //Check on 
           if((xtouch >= GEN_MENU_XPOS+80) && (xtouch <= GEN_MENU_XPOS+150))

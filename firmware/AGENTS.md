@@ -1,6 +1,7 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.5 (protocol 1.3: shared control, SD sector commands; 0.2.5: USB event counters; 0.2.3: chip above RUN/STOP and
+State on 2026-10-18, fw 0.2.6 (protocol 1.3: shared control, SD sector commands; 0.2.6: menus hide what the hardware
+lacks, README "Hidden menu options"; 0.2.5: USB event counters; 0.2.3: chip above RUN/STOP and
 steady, one-step SET_TIMEBASE). 0.2.1 passed the protocol-level
 shared-control acceptance on the bench (owner's visual checks pending); 0.2.2 adds SD_* and two startup counters,
 built and host-tested, not benched. Read `CLAUDE.md` (repo root) first, then
@@ -34,7 +35,9 @@ firmware/reference/        Atlan's v1.00o5 binaries (not committed)
 docs/protocol-vectors.json shared frame vectors; the MCP agent merges entries with "source": "host" into it
 ```
 
-1.00o5 files touched (all under `#if PC_PROTOCOL` or hook macros that are empty without it): `fnirsi_1013d_scope.c`
+1.00o5 files touched (all under `#if PC_PROTOCOL` or hook macros that are empty without it; 0.2.6 adds `menu.c` and
+`statemachine.c`: PC_UI_MASK after the generator, trigger, acquisition and system-settings item draws, PC_UI_HAS in
+their touch conditions): `fnirsi_1013d_scope.c`
 (init + main loop: MAIN poll, indicator, then the UI pass), `scope_functions.c` (12 spin-loop BUSY polls; in
 `scope_acquire_trace_data` the arm gate PC_UI_ARM_ALLOWED, PC_UI_CAPTURE_ADDR after the 0x14 read, PC_UI_CAPTURE_DONE),
 `touchpanel.c` (BUSY poll in `tp_i2c_read_status`), `fpga_control.c` (BUSY poll in the 0x05 wait,

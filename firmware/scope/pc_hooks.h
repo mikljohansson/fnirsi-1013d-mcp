@@ -6,6 +6,24 @@
 #ifndef PC_HOOKS_H
 #define PC_HOOKS_H
 
+//UI features the running hardware may lack (fw 0.2.6, firmware/README.md "Hidden menu options"). PC_UI_HAS(f) goes
+//into a touch condition, PC_UI_MASK(m) paints over the unsupported parts of a menu just drawn.
+#define PC_FEAT_GEN_DDS       1     //generator menu: Atlan DDS bitstreams only (not stock 0x1432)
+#define PC_FEAT_GEN_WAVE      2     //SINE / TRGL waveform: no DAC on the 1013D
+#define PC_FEAT_GEN_ANALOG    3     //amplitude / offset / phase: no DAC
+#define PC_FEAT_RTC           4     //DS3231 module (probed at boot)
+#define PC_FEAT_LONG_MEMORY   5     //"Long memory": not implemented in 1.00o5
+#define PC_FEAT_EXT_TRIGGER   6     //EXT trigger source: no external trigger input
+#define PC_FEAT_HOLDOFF       7     //trigger hold-off: never sent to the FPGA
+#define PC_FEAT_MEM_BASE      16    //+ i: memory depth box i (3000 x (i + 1) samples) fits the bitstream
+
+#define PC_MASK_GEN_MENU      1
+#define PC_MASK_TRIG_CHANNEL  2
+#define PC_MASK_TRIG_MENU     3
+#define PC_MASK_ACQ_LONG      4
+#define PC_MASK_ACQ_MEMORY    5
+#define PC_MASK_SYS_RTC       6
+
 #if PC_PROTOCOL
 
 void pc_glue_init(void);              //after the settings are loaded, before usb_device_init()
@@ -16,6 +34,8 @@ void pc_glue_ui_service(void);        //main loop, after the MAIN poll: MCP indi
 int  pc_glue_ui_arm_allowed(void);    //0 while a host READ_RAW waits for the UI capture in flight
 int  pc_glue_rtc_allowed(void);       //0 while the MCP chip occupies the RTC clock slot
 void pc_glue_pass_mark(int n);        //main loop stage reached (first-pass timing, GET_LINK_STATS)
+int  pc_glue_ui_has(int feature);     //PC_FEAT_*: 1 when the running hardware supports it
+void pc_glue_ui_mask(int menu);       //PC_MASK_*: paint over what it does not support (current draw buffer)
 void pc_glue_ui_capture_start(void);  //fpga_do_conversion started a conversion
 void pc_glue_ui_capture_addr(uint32 addr); //0x14 read of the finished UI capture
 void pc_glue_ui_capture(void);        //UI finished reading a capture
@@ -28,6 +48,8 @@ void pc_glue_ui_capture(void);        //UI finished reading a capture
 #define PC_UI_ARM_ALLOWED()     && pc_glue_ui_arm_allowed()
 #define PC_RTC_ALLOWED()        && pc_glue_rtc_allowed()
 #define PC_PASS_MARK(n)         pc_glue_pass_mark(n)
+#define PC_UI_HAS(f)            && pc_glue_ui_has(f)
+#define PC_UI_MASK(m)           pc_glue_ui_mask(m)
 
 #else
 
@@ -39,6 +61,8 @@ void pc_glue_ui_capture(void);        //UI finished reading a capture
 #define PC_UI_ARM_ALLOWED()
 #define PC_RTC_ALLOWED()
 #define PC_PASS_MARK(n)         do { } while(0)
+#define PC_UI_HAS(f)
+#define PC_UI_MASK(m)           do { } while(0)
 
 #endif
 
