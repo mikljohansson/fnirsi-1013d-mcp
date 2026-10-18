@@ -597,7 +597,8 @@ uint32_t pc_hal_trace_capacity(void)
 
 #define PC_DEC_RING       8192
 
-static uint8         pc_dec_setting;                  //bits 1:0 requested K (UI Filter), saved in the settings sector
+static uint8         pc_dec_setting = PC_DECIM_DEFAULT;   //bits 1:0 requested K (UI Filter), PC_DECIM_SET_FIR;
+                                                      //saved in the settings sector
 static uint8         pc_dec_flags = PC_INTERLEAVE_ORDER ? PC_DECIM_SWAP : 0;  //0x53 bits 2-4: swap (host only, not
                                                       //saved), falling-edge capture A / B (hidden, saved)
 static uint8         pc_dec_ui_arm;                   //the next fpga_do_conversion is the UI acquisition's
@@ -612,9 +613,13 @@ static int16         pc_dec_feed[PC_DEC_RING + 2];    //converted samples for fp
 static int16        *pc_dec_even_src;
 int16               *pc_decim_src;
 
+//PC_DECIM_HAS_*: what the bitstream offers (0 = no filter)
 static int pc_dec_has(void)
 {
-  return pc_ready && (pc_sess.var.caps & PC_CAP_DECIM);
+  if(!pc_ready || !(pc_sess.var.caps & PC_CAP_DECIM))
+    return PC_DECIM_HAS_NONE;
+
+  return (pc_sess.var.caps & PC_CAP_FIR) ? PC_DECIM_HAS_FIR : PC_DECIM_HAS_CIC;
 }
 
 static uint32 pc_dec_div(void)
@@ -625,9 +630,11 @@ static uint32 pc_dec_div(void)
   return (scopesettings.samplerate < (sizeof(sample_rate_settings) / sizeof(uint32))) ? sample_rate_settings[scopesettings.samplerate] : 0;
 }
 
-static void pc_dec_config(pc_decim_cfg *c, uint8 k)
+//set: bits 1:0 K, PC_DECIM_SET_FIR (pc_dec_setting, or 0 for the legacy path)
+static void pc_dec_config(pc_decim_cfg *c, uint8 set)
 {
-  pc_decim_config(k, pc_dec_flags, pc_dec_div(), fpgasettings.totalsamples, pc_dec_has(), c);
+  pc_decim_config(set & 3, (uint8)(pc_dec_flags | (set & PC_DECIM_SET_FIR)), pc_dec_div(), fpgasettings.totalsamples,
+                  pc_dec_has(), c);
 }
 
 //Write c to the FPGA (only what changed, the 16-bit level always) and wait for the filter to settle
@@ -645,6 +652,13 @@ static void pc_dec_apply(const pc_decim_cfg *c)
     pc_dec_dirty = 1;
   }
 
+  //0x1535+: FIR enable (0x56); older bitstreams never get the command
+  if((pc_dec_has() >= PC_DECIM_HAS_FIR) && (!pc_dec_written || (c->fir_en != pc_dec_cur.fir_en)))
+  {
+    fpga_set_decim_fir(c->fir_en);
+    pc_dec_dirty = 1;
+  }
+
   if(c->k)
   {
     if(!pc_dec_written || !pc_dec_cur.k || (c->shift != pc_dec_cur.shift))
@@ -658,7 +672,7 @@ static void pc_dec_apply(const pc_decim_cfg *c)
     level = (level < 0) ? 0 : ((level > 255) ? 255 : level);
     fpga_set_decim_level(pc_decim_level16((uint8)level, c->gain, c->shift));
 
-    //(K + 2) output periods; timer0 ticks are 1 ms, + 1 for the partial tick
+    //(K + 2) output periods, (K + 10) N x 5 ns + 1 us with the FIR; timer0 ticks are 1 ms, + 1 for the partial tick
     if(pc_dec_dirty)
       timer0_delay((pc_decim_settle_us(c) + 999) / 1000 + 1);
   }
@@ -757,7 +771,7 @@ uint32 pc_glue_decim_words(uint32 samples)
 }
 
 //EXT trigger in the 16-bit layout: trigger_address is the last sample written before the edge, but the data lag it by
-//120 ns + K (N - 1) 2.5 ns (fpga-gen3). Writing that many samples fewer as pretrigger puts the edge back at sample
+//120 ns + K (N - 1) 2.5 ns (fpga-gen3; with the FIR 250 ns + 17.5 N ns + 1.25 K (N - 2) ns, fpga-gen4). Writing that many samples fewer as pretrigger puts the edge back at sample
 //settriggerpoint of the capture (GET_CAPTURE_INFO byte 70 reports the shift).
 static uint32 pc_dec_ext_shift(void)
 {
@@ -837,27 +851,35 @@ uint16 pc_glue_spectrum_setting_word(int i)
 
 uint16 pc_glue_decim_setting_word(void)
 {
-  //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (Filter off). Bits 3-4:
-  //the hidden falling-edge capture settings (SET_DECIM only)
-  return (uint16)(0xDE00 | (pc_dec_flags & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)) | (pc_dec_setting & 3));
+  //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (PC_DECIM_DEFAULT). Bits
+  //3-4: the hidden falling-edge capture settings (SET_DECIM only); bit 5: FIR (fw 0.2.44)
+  return (uint16)(0xDE00 | (pc_dec_flags & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)) | (pc_dec_setting & (PC_DECIM_SET_FIR | 3)));
 }
 
-static const char *pc_dec_names[4] = { "off", "boxcar", "CIC2", "CIC3" };
+static const char *pc_dec_names[8] = { "off", "boxcar", "CIC2", "CIC3", "off", "boxcar+FIR", "CIC2+FIR", "CIC3+FIR" };
+
+//Index into pc_dec_names: "+FIR" only where the bitstream has it
+static uint32 pc_dec_name_index(void)
+{
+  uint32 k = pc_dec_setting & 3;
+
+  return ((pc_dec_has() >= PC_DECIM_HAS_FIR) && (pc_dec_setting & PC_DECIM_SET_FIR) && k) ? k + 4 : k;
+}
 
 //Acquisition menu: Filter box in the Long memory slot (masked on every Atlan bitstream), same style as the Roll mode box
 static void pc_dec_draw_box(void)
 {
   uint16    fg   = displaydata.fg_color;
   PFONTDATA font = displaydata.font;
-  int       on   = pc_dec_setting != 0;
-  uint32    len  = strlen(pc_dec_names[pc_dec_setting & 3]);
+  int       on   = (pc_dec_setting & 3) != 0;
+  uint32    len  = strlen(pc_dec_names[pc_dec_name_index()]);
 
   display_set_fg_color(on ? GREEN_COLOR : LIGHTGREY_COLOR);
   display_fill_rounded_rect(ACQ_MENU_XPOS + 204, ACQ_MENU_YPOS + 163, 90, 40, 3);
   display_set_font(&font_2);
   display_set_fg_color(on ? BLACK_COLOR : WHITE_COLOR);
   display_text(ACQ_MENU_XPOS + 231, ACQ_MENU_YPOS + 168, "Filter");
-  display_text(ACQ_MENU_XPOS + 249 - 3 * len, ACQ_MENU_YPOS + 182, (int8 *)pc_dec_names[pc_dec_setting & 3]);
+  display_text(ACQ_MENU_XPOS + 249 - 3 * len, ACQ_MENU_YPOS + 182, (int8 *)pc_dec_names[pc_dec_name_index()]);
   displaydata.fg_color = fg;
   displaydata.font     = font;
 }
@@ -883,11 +905,37 @@ static void pc_dec_fit_memory(void)
   scopesettings.nofsamples      = total / 2;
 }
 
+//A tap steps off, boxcar, CIC2, CIC3; on 0x1535+ each filter also with the FIR: off, boxcar, boxcar+FIR, CIC2,
+//CIC2+FIR, CIC3, CIC3+FIR
+//The DEFAULT button and a settings sector that failed to load (scope_reset_config_data)
+void pc_glue_settings_defaults(void)
+{
+  pc_dec_setting = PC_DECIM_DEFAULT;
+
+  if(pc_dec_has() && (pc_dec_setting & 3))
+    pc_dec_fit_memory();
+}
+
 void pc_glue_decim_tap(void)
 {
-  pc_dec_setting = (uint8)((pc_dec_setting + 1) & 3);
+  uint32 k = pc_dec_setting & 3, fir = (pc_dec_setting & PC_DECIM_SET_FIR) != 0;
 
-  if(pc_dec_setting)
+  if(pc_dec_has() < PC_DECIM_HAS_FIR)
+  {
+    k   = (k + 1) & 3;
+    fir = 0;
+  }
+  else if(k && !fir)
+    fir = 1;
+  else
+  {
+    k   = (k + 1) & 3;
+    fir = 0;
+  }
+
+  pc_dec_setting = (uint8)(k | (fir ? PC_DECIM_SET_FIR : 0));
+
+  if(k)
   {
     pc_dec_fit_memory();
     scope_acquisition_memory_deep_select();
@@ -899,15 +947,15 @@ void pc_glue_decim_tap(void)
 
 uint8_t pc_hal_decim_setting(void)
 {
-  return (uint8_t)((pc_dec_setting & 3) | pc_dec_flags);
+  return (uint8_t)((pc_dec_setting & (PC_DECIM_SET_FIR | 3)) | pc_dec_flags);
 }
 
 void pc_hal_decim_set(uint8_t setting)
 {
-  pc_dec_setting = setting & 3;
+  pc_dec_setting = setting & (PC_DECIM_SET_FIR | 3);
   pc_dec_flags   = setting & PC_DECIM_FLAGS;
 
-  if(pc_dec_setting)
+  if(pc_dec_setting & 3)
     pc_dec_fit_memory();
 
   //The next UI pass arms a fresh conversion with it
@@ -1380,7 +1428,7 @@ int pc_glue_ui_has(int feature)
     default:
       //With the Filter on, the 16-bit layout holds one sample per word: at most PC_DECIM_MAX_TOTAL
       if((feature >= PC_FEAT_MEM_BASE) && (feature < PC_FEAT_MEM_BASE + 8))
-        return (uint32)(3000 * (feature - PC_FEAT_MEM_BASE + 1)) <= ((pc_dec_has() && pc_dec_setting) ? PC_DECIM_MAX_TOTAL : pc_sess.var.max_total);
+        return (uint32)(3000 * (feature - PC_FEAT_MEM_BASE + 1)) <= ((pc_dec_has() && (pc_dec_setting & 3)) ? PC_DECIM_MAX_TOTAL : pc_sess.var.max_total);
 
       return 1;
   }
@@ -1660,15 +1708,16 @@ static void pc_ui_fix_settings(void)
   if((scopesettings.triggerchannel > 1) && !(pc_sess.var.caps & PC_CAP_EXT_TRIGGER))
     scopesettings.triggerchannel = 0;
 
-  //Acquisition Filter (decimation, 0x1534+): kept in a spare settings word, default off. With it on the 16-bit layout
-  //limits the memory depth.
-  if((settingsworkbuffer[PC_SETTING_WORD_DECIM] & 0xFFE4) == 0xDE00)
+  //Acquisition Filter (decimation, 0x1534+): kept in a spare settings word; a sector without a valid word (new
+  //settings, or one written before 0.2.30) keeps PC_DECIM_DEFAULT. With it on the 16-bit layout limits the memory
+  //depth.
+  if((settingsworkbuffer[PC_SETTING_WORD_DECIM] & 0xFFC4) == 0xDE00)
   {
-    pc_dec_setting = (uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM] & 3);
+    pc_dec_setting = (uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_SET_FIR | 3));
     pc_dec_flags   = (uint8)((pc_dec_flags & PC_DECIM_SWAP) | (settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)));
   }
 
-  if(pc_dec_has() && pc_dec_setting)
+  if(pc_dec_has() && (pc_dec_setting & 3))
     pc_dec_fit_memory();
 
   //Spectrum view settings (fw 0.2.39); the display mode itself is not restored: the scope boots into the scope view
@@ -1711,6 +1760,8 @@ void pc_glue_init(void)
 
 void pc_glue_poll_main(void)
 {
+  pc_usb_main_service();
+
   if(pc_ready)
     pc_poll(&pc_sess, PC_CTX_MAIN);
 

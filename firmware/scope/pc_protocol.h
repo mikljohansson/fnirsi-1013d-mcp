@@ -16,13 +16,14 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            10    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            11    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
                                         //1.7: spectrum view, READ_SPECTRUM, GET_STATUS display_mode (fw 0.2.28);
                                         //1.9: decimation filter (FPGA 0x1534, fw 0.2.30);
-                                        //1.10: calibration data v2, GET_CAL 248 bytes (fw 0.2.43)
+                                        //1.10: calibration data v2, GET_CAL 248 bytes (fw 0.2.43);
+                                        //1.11: CIC compensation FIR (FPGA 0x1535, fw 0.2.44)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
@@ -125,6 +126,7 @@
 #define PC_CAP_SHARED_MODE            (1u << 13)   //1.3: no LOCAL/REMOTE, shared control with the UI
 #define PC_CAP_SD_SECTORS             (1u << 14)   //1.3: SD_INFO / SD_READ_SECTORS / SD_STAGE / SD_WRITE_SECTORS
 #define PC_CAP_DECIM                  (1u << 15)   //1.9: decimation filter, 16-bit samples (FPGA 0x1534+)
+#define PC_CAP_FIR                    (1u << 16)   //1.11: CIC compensation FIR, SET_DECIM flags bit 3 (FPGA 0x1535+)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Decoded header

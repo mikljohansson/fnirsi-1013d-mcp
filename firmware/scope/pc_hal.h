@@ -119,7 +119,8 @@ void     pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t 
                           uint32_t ring_words, uint8_t read_lag);
 
 //Decimation filter (bitstream 0x1534+, pc_decim.h). The setting is the UI's acquisition "Filter" selector (saved with
-//the settings): bits 1:0 requested K (0 off, 1 boxcar, 2 CIC2, 3 CIC3), plus PC_DECIM_SWAP (host only, not saved).
+//the settings): bits 1:0 requested K (0 off, 1 boxcar, 2 CIC2, 3 CIC3), PC_DECIM_SET_FIR (0x1535+), the falling-edge
+//capture bits, plus PC_DECIM_SWAP (host only, not saved).
 uint8_t  pc_hal_decim_setting(void);
 void     pc_hal_decim_set(uint8_t setting);                                            //[UI]
 //What the FPGA runs: the configuration written at the last arm (UI or host). *written = 0 before the first write.

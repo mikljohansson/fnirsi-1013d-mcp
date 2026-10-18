@@ -56,11 +56,13 @@ void pc_transport_reset(void);
 //ISR side. EPIND must be 2 for the two endpoint handlers.
 void pc_usb_isr_rx(void);                   //EP2 OUT packet(s) ready
 void pc_usb_isr_tx(void);                   //EP2 IN packet sent
-void pc_usb_isr_link(void);                 //bus reset, suspend or disconnect
+void pc_usb_isr_link(void);                 //bus reset or disconnect
 void pc_usb_isr_ep_cleared(uint8 ep);       //CLEAR_FEATURE(ENDPOINT_HALT) flushed this endpoint's FIFO (0x02 / 0x82)
 void pc_usb_dtr(uint8 dtr);                 //SET_CONTROL_LINE_STATE
 void pc_usb_isr_event(uint8 ev);            //PC_USB_EV_*: counted for GET_LINK_STATS (fw 0.2.5)
 void pc_usb_isr_resume(void);               //RESUME: the configuration is kept, re-enable the EP2 OUT interrupt
+void pc_usb_isr_suspend(void);              //SUSPEND (fw 0.2.44): a state, not a link reset; logged with POWER, frame
+void pc_usb_main_service(void);             //main loop: resume without a RESUME interrupt (fw 0.2.44)
 void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
 
 #define PC_USB_EV_BUS_RESET   0
@@ -79,10 +81,10 @@ void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
 #define PC_EVBUS_TYPES        ((1u << 1) | (1u << 2) | (1u << 3) | (1u << 4) | (1u << 7) | (1u << 8) | (1u << 12) |\
                                (1u << 13) | (1u << 15) | (1u << 16) | (1u << 17) | (1u << 18))
 #define PC_SETUP_REPEAT_MS    1000  //fw 0.2.24: a setup identical to the last logged one is logged at most once per second
-#define PC_EVT_BUS_RESET      1
-#define PC_EVT_SUSPEND        2
-#define PC_EVT_RESUME         3
-#define PC_EVT_DISCONNECT     4
+#define PC_EVT_BUS_RESET      1     //fw 0.2.44: a = 1 if suspended before, b = ms since that suspend (65535 = longer)
+#define PC_EVT_SUSPEND        2     //fw 0.2.44: a = POWER, b = frame number
+#define PC_EVT_RESUME         3     //fw 0.2.44: a = POWER (bit 7: inferred, no RESUME interrupt), b = ms suspended
+#define PC_EVT_DISCONNECT     4     //fw 0.2.44: as type 1
 #define PC_EVT_SETUP          5     //a = bRequest, b = bmRequestType << 8 | wValue low byte
 #define PC_EVT_BAD_SETUP      6     //b = COUNT0
 #define PC_EVT_CONFIGURED     7

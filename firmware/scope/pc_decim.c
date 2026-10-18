@@ -55,11 +55,16 @@ uint32_t pc_decim_scale_q24(uint64_t gain, uint8_t shift)
   return (uint32_t)((num + (gain >> 1)) / gain);
 }
 
-void pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t total_samples, int has_filter,
+int pc_decim_fir_eligible(uint32_t n)
+{
+  return (n >= PC_DECIM_FIR_MIN_N) && ((n & 3) == 0);
+}
+
+void pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t total_samples, int has,
                      pc_decim_cfg *c)
 {
   uint8_t  k = k_req & 3;
-  uint32_t n = pc_decim_n(divider);
+  uint32_t n = pc_decim_n(divider), m;
 
   c->flags     = 0;
   c->why       = PC_DECIM_WHY_NONE;
@@ -68,8 +73,10 @@ void pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t to
   c->n         = 0;
   c->gain      = 1;
   c->scale_q24 = 0;
+  c->fir_en    = 0;
+  c->fir       = 0;
 
-  if(!has_filter)
+  if(has == PC_DECIM_HAS_NONE)
   {
     c->why = PC_DECIM_WHY_NOCAP;
     return;
@@ -77,6 +84,9 @@ void pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t to
 
   //Swap and capture edges are written with every mode, the legacy one included
   c->flags = flags & PC_DECIM_FLAGS;
+
+  //0x56 is written as requested; the FPGA engages the FIR only where it is eligible
+  c->fir_en = (has >= PC_DECIM_HAS_FIR) && (flags & PC_DECIM_SET_FIR);
 
   if(k == 0)
   {
@@ -97,14 +107,18 @@ void pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t to
     return;
   }
 
-  //Exactness: 255 * N^K < 2^48
-  if((k == 3) && (n > PC_DECIM_CIC3_MAX_N))
+  //With the FIR the CIC decimates by M = N/2 and the FIR by 2
+  c->fir = c->fir_en && pc_decim_fir_eligible(n);
+  m      = c->fir ? n / 2 : n;
+
+  //Exactness: 255 * M^K < 2^48
+  if((k == 3) && (m > PC_DECIM_CIC3_MAX_N))
   {
     k = 2;
     c->why = PC_DECIM_WHY_CIC3;
   }
 
-  if((k == 2) && (n > PC_DECIM_CIC2_MAX_N))
+  if((k == 2) && (m > PC_DECIM_CIC2_MAX_N))
   {
     k = 1;
     c->why = PC_DECIM_WHY_CIC2;
@@ -112,8 +126,8 @@ void pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t to
 
   c->k         = k;
   c->n         = n;
-  c->gain      = pc_decim_gain(n, k);
-  c->shift     = pc_decim_shift(c->gain);
+  c->gain      = pc_decim_gain(m, k);
+  c->shift     = (uint8_t)(pc_decim_shift(c->gain) + (c->fir ? 1 : 0));
   c->scale_q24 = pc_decim_scale_q24(c->gain, c->shift);
 }
 
@@ -124,7 +138,8 @@ uint8_t pc_decim_mode(const pc_decim_cfg *c)
 
 uint8_t pc_decim_status(const pc_decim_cfg *c)
 {
-  return (uint8_t)(pc_decim_mode(c) | (c->k ? PC_DECIM_WIDE : 0));
+  return (uint8_t)(pc_decim_mode(c) | (c->k ? PC_DECIM_WIDE : 0) | (c->fir_en ? PC_DECIM_FIR_EN : 0) |
+                   (c->fir ? PC_DECIM_FIR_ACT : 0));
 }
 
 int32_t pc_decim_to_code(uint16_t out, uint32_t scale_q24, int32_t corr16)
@@ -150,9 +165,19 @@ uint32_t pc_decim_ext_shift(const pc_decim_cfg *c)
   if(!c->k || !c->n)
     return 0;
 
-  //In units of 0.5 ns: 120 ns = 240, 2.5 ns = 5, one output period N x 5 ns = 10 N
-  lag    = 240 + (uint64_t)c->k * (c->n - 1) * 5;
-  period = (uint64_t)c->n * 10;
+  if(c->fir)
+  {
+    //In units of 0.25 ns: 250 ns = 1000, 17.5 N ns = 70 N, 1.25 K (N - 2) ns = 5 K (N - 2), one period N x 5 ns = 20 N
+    lag    = 1000 + (uint64_t)c->n * 70 + (uint64_t)c->k * (c->n - 2) * 5;
+    period = (uint64_t)c->n * 20;
+  }
+  else
+  {
+    //In units of 0.5 ns: 120 ns = 240, 2.5 ns = 5, one output period N x 5 ns = 10 N
+    lag    = 240 + (uint64_t)c->k * (c->n - 1) * 5;
+    period = (uint64_t)c->n * 10;
+  }
+
   return (uint32_t)((lag + period / 2) / period);
 }
 
@@ -163,7 +188,10 @@ uint32_t pc_decim_settle_us(const pc_decim_cfg *c)
   if(!c->k)
     return 0;
 
-  //(K + 2) output periods of N x 5 ns
-  t = ((uint64_t)(c->k + 2) * c->n + 199) / 200;
+  //(K + 2) output periods of N x 5 ns; with the FIR (K + 10) N x 5 ns + 1 us
+  if(c->fir)
+    t = ((uint64_t)(c->k + 10) * c->n + 199) / 200 + 1;
+  else
+    t = ((uint64_t)(c->k + 2) * c->n + 199) / 200;
   return (t > 0xFFFFFFFFull) ? 0xFFFFFFFFu : (uint32_t)t;
 }

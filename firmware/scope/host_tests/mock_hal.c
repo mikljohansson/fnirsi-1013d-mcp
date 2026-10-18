@@ -344,7 +344,7 @@ void pc_hal_trace_ui_info(uint32_t *sample_count, uint32_t *pretrigger, int32_t 
 uint32_t pc_hal_trace_capacity(void) { return sizeof(mock.trace[0]); }
 
 uint8_t  pc_hal_decim_setting(void)        { return mock.decim_setting; }
-void     pc_hal_decim_set(uint8_t setting) { mock.decim_setting = setting & 0x1F; mock.fpga_ops++; }
+void     pc_hal_decim_set(uint8_t setting) { mock.decim_setting = setting & 0x3F; mock.fpga_ops++; }
 uint16_t pc_hal_decim_readback(void)       { mock.fpga_ops++; return mock.decim_rb; }
 
 void pc_hal_decim_current(pc_decim_cfg *c, int *written)

@@ -461,8 +461,9 @@ min(65535, y >> S), y = filter output with gain N^K. On 0x1532/0x1533 none of th
 - Hidden settings: falling-edge capture of the A / B cores (0x53 bits 3 / 4), only via SET_DECIM flags bits 1 / 2,
   saved in bits 3 / 4 of settings word 207; the core-order swap (bit 2) is host only and not saved.
 - UI: acquisition menu "Filter" box (off / boxcar / CIC2 / CIC3, a tap steps through them, green while on) in the
-  slot of the hidden Long memory box, only on 0x1534+. Saved in settings word 207 (0xDE00 | K); older sectors read
-  as off. Turning it on with 9000+ samples sets the memory depth to 6000 (trigger point kept at 25 / 50 / 75 %).
+  slot of the hidden Long memory box, only on 0x1534+. Saved in settings word 207 (0xDE00 | K); sectors without
+  a valid word (new settings, written before 0.2.30) and the DEFAULT button give `PC_DECIM_DEFAULT` (pc_decim.h; CIC2
+  since fw 0.2.44, owner; until then off). A saved word is kept as it is. Turning it on with 9000+ samples sets the memory depth to 6000 (trigger point kept at 25 / 50 / 75 %).
   The box shows the setting; GET_DECIM tells the effective K (e.g. legacy at 200 MSa/s).
 - Protocol 1.9 (docs/protocol.md section 14 row 47): GET_DECIM 0x020C, SET_DECIM 0x020D (shared control: it is the
   UI setting; SET_TRIGGER total > 8190 is refused while it is on), READ_TRACE flag bit 2 (u16 samples),
@@ -470,6 +471,26 @@ min(65535, y >> S), y = filter output with gain N^K. On 0x1532/0x1533 none of th
 - Host tests: `test_session.c` `test_decim_math` (all table rates x K, exactness limits against 128-bit references,
   L16 round trip for every level, compensation, rates, settle) and `test_decim_protocol` (0x1533 untouched, 0x1534
   flow); `decim_check.c` reproduces the 80 "decim" cases that `gen_vectors.py` computes in Python.
+
+CIC compensation FIR (FPGA 0x1535, fw 0.2.44, protocol 1.11, row 49):
+- 0x1535 adds a 15-tap FIR after the CIC (fpga-gen4, fpga/al3/README.md): with 0x56 = 1, K >= 1, N >= 16 and N % 4 == 0
+  (10 MSa/s and slower in the table) the CIC decimates by N/2 and the FIR by 2, so the output rate is still 200 MSa/s / N.
+  `pc_decim_config` takes the capability level (`PC_DECIM_HAS_FIR` on 0x1535+) and the request bit `PC_DECIM_SET_FIR`
+  and computes `fir_en` (what 0x56 gets) and `fir` (active); with `fir` the gain is (N/2)^K, S gets + 1 (headroom for the
+  6-9 % step overshoot), exactness and the CIC3 limit apply to N/2, the EXT shift uses 250 ns + 17.5 N ns + 1.25 K (N - 2) ns
+  and the settle time (K + 10) N x 5 ns + 1 us. Everything downstream (scale_q24, L16, the readout's corr16, the spectrum's
+  16-bit path, GET_CAPTURE_INFO) takes gain / S / scale from the configuration, so no other code knows about the FIR.
+- `pc_dec_apply` writes 0x56 only on 0x1535+ and only when the enable changes; a change counts as a filter change (settle).
+- UI: the Filter box steps off, boxcar, boxcar+FIR, CIC2, CIC2+FIR, CIC3, CIC3+FIR on 0x1535+ (0x1534: no FIR steps). The
+  box shows the setting; at 20 MSa/s and faster the FIR is not eligible and the record is plain CIC (GET_DECIM byte 2 bit 5
+  clear; the spectrum header tag says "CIC2", not "CIC2+FIR"). Saved in settings word 207 bit 5 (valid mask 0xFFC4).
+- Host: SET_DECIM flags bit 3, GET_DECIM byte 1 bit 3 and 0x29 bits 6 / 5 in bytes 2 / 24 / 26, caps bit 16.
+- Host tests: `test_decim_fir_math` (every table divider and D 1..200 x K: eligibility by both the N and the D rule, gain,
+  S, level round trip, headroom against the 1.21 FIR gain, latency, settle, CIC3 limit at N/2) and `test_decim_fir_protocol`;
+  the `decim` vectors have `fir_req` cases (gen_vectors.py, cross-checked by decim_check).
+- Bench: GET_DECIM bytes 26-27 = 0xE2 / 0x01 after an arm at 10 MSa/s CIC2+FIR (0xC2 at 20 MSa/s); a DC level reads the
+  same code with FIR on and off; a tone at fo/4 is flat with the FIR (CIC2 droop 1.8 dB without); the 100 kHz alias of a
+  900 kHz square at 1 MSa/s drops by about 20 dB; EXT edge at sample `pretrigger` with the FIR shift.
 
 Bench (nothing verified on hardware; bitstream not yet flashed): 0x29 read-back after an arm (GET_DECIM bytes
 26-27); a DC level reads the same code with the filter off and on; a 3.9 MHz generator at 1 MSa/s aliases at
@@ -659,6 +680,17 @@ Costs: FFT per channel per new capture, measured with FFT_BENCH on 0.2.31: 2048 
 on-chip SRAM, 4096 points 10.9 ms (+ about 1-2.5 ms dB conversion). Since 0.2.33 the view runs N <= 2048 from SRAM A
 (0x1000-0x7008, the space FFT_BENCH borrows; nothing else uses it at run time, all stacks are in DDR). Drawing: one
 728 x 432 clear (memset bursts since 0.2.32) and blit per pass, as 1.00o5's trace view.
+
+Redraws in the spectrum view (fw 0.2.44): the only 1.00o5 routine that paints the scope view outside
+`scope_display_trace_data` is `scope_preset_values` (host SET_TIMEBASE, the UI time base change, RUN in roll mode, the
+spectrum's own span / Auto steps through `pc_hal_timebase_write`). It cleared the trace area and painted grid, cursors and
+pointers over the spectrum, strip included, until the next pass. It now starts with `PC_SPECTRUM_DISPLAY()`: in the
+spectrum view it redraws the spectrum and returns (trace buffers kept). `spectrum_display` has a re-entry guard (a time
+base change from inside a draw redraws through the same path), and `spec_tb_set` sets its wait state before the write, so
+that redraw shows the new axis without the old spectra. Audit of the other host-driven redraws (SET_CHANNEL, SET_TRIGGER,
+SET_GEN, RUN/STOP, the MCP chip): they draw only top-bar buttons (y < 46) and never touch the trace area or the right
+column. Not host-testable (scope_functions.c and spectrum.c drawing are target-only); bench: spectrum view on, then
+SET_TIMEBASE / SET_TRIGGER / SET_GEN in a loop from the host and span taps: the strip must never show grid or pointers.
 
 ### Firmware auto trigger mode (fw 0.2.41)
 

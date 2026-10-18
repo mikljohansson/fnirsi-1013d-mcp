@@ -257,6 +257,10 @@ void usb_device_enable(void)
   //Enable the high speed mode
   *USBC_REG_PCTL |= USBC_BP_POWER_D_HIGH_SPEED_EN;
 
+  //Keep the PHY powered in suspend (SUSPENDM not driven), as Linux musb does for sunxi: the core still detects the
+  //host's resume, and nothing has to be restored afterwards
+  *USBC_REG_PCTL &= ~USBC_BP_POWER_D_ENABLE_SUSPENDM;
+
   //Enable the needed interrupts
   *USBC_REG_INTUSBE = USBC_BP_INTUSB_SUSPEND | USBC_BP_INTUSB_RESUME | USBC_BP_INTUSB_RESET | USBC_BP_INTUSB_DISCONNECT;
   
@@ -958,8 +962,8 @@ void usb_device_CDC_irq_handler(void)
     usb_ep0_state = EP0_IDLE;
 
 #if PC_PROTOCOL
-    pc_usb_isr_event(PC_USB_EV_SUSPEND);
-    pc_usb_isr_link();
+    //fw 0.2.44: a state, not a link reset (pc_transport.c); the following RESUME or bus reset decides
+    pc_usb_isr_suspend();
 #endif
   }
 

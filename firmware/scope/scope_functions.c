@@ -240,6 +240,12 @@ void scope_adjust_timebase_and_voltdiv (void)
  
   void scope_preset_values(void)
 {
+    //PC protocol build (fw 0.2.44): in the spectrum view this redraws the spectrum and stops. Below, the scope view's
+    //grid, cursors and pointers would be painted over the whole trace area, strip included, until the next UI pass
+    //(the owner's strip flicker on host SET_TIMEBASE and on time base changes); the trace buffers are kept, so a
+    //recompute does not see a flat record either.
+    PC_SPECTRUM_DISPLAY();
+
     //Use a separate buffer to clear the screen
     display_set_screen_buffer(displaybuffertmp);
   
@@ -6769,6 +6775,9 @@ void scope_reset_config_data(void)
   //Load input calibration value 
   scope_load_input_calibration_data();
   //----------------------------------------------------------------------------  
+  //PC protocol build: acquisition Filter back to PC_DECIM_DEFAULT
+  PC_SETTINGS_DEFAULTS();
+
   restore = 1;      //Flag - view restore text in display
 }
 

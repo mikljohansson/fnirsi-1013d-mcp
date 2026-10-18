@@ -40,6 +40,14 @@ static volatile uint32 pc_tx_last_ms;      //time of the last packet handed to t
 static volatile uint32 pc_link_events;
 static volatile uint8  pc_dtr;
 
+//USB suspend state (fw 0.2.44). A suspend is a state, not a link reset: the host keeps the configuration and the line
+//state over a suspend / resume, and a port reset (which the MUSB reports as suspend first: the SE0 looks idle) still
+//resets the link when its RESET interrupt arrives.
+static volatile uint8  pc_usb_suspended;
+static volatile uint32 pc_usb_susp_ms;
+static volatile uint16 pc_usb_susp_frame;
+static uint32          pc_usb_watch_ms;
+
 //Link counters for GET_LINK_STATS (order = pc_hal_link_stats, docs/protocol.md section 14)
 static volatile uint32 pc_ts[PC_TSTAT_COUNT];
 static volatile uint32 pc_usb_ev[PC_USB_EV_COUNT];
@@ -466,6 +474,16 @@ void pc_usb_isr_link(void)
   pc_link_events |= PC_LINK_RESET;
 }
 
+//ms since the last suspend, at most 65535
+static uint16 pc_usb_susp_age(void)
+{
+  uint32 d = pc_hal_ms() - pc_usb_susp_ms;
+
+  return (uint16)((d > 65535) ? 65535 : d);
+}
+
+//Types 1 and 4 (fw 0.2.44): a = 1 when the device was suspended, b = ms since that suspend (65535 = longer). A port
+//reset shows a few ms (the SE0 detected as idle first); a reset after a real host suspend shows the suspend's length.
 void pc_usb_isr_event(uint8 ev)
 {
   static const uint8 type[PC_USB_EV_COUNT] = { PC_EVT_BUS_RESET, PC_EVT_SUSPEND, PC_EVT_RESUME, PC_EVT_DISCONNECT,
@@ -475,21 +493,69 @@ void pc_usb_isr_event(uint8 ev)
   {
     pc_usb_ev[ev]++;
 
-    //Setups and bad setups are logged with their details by their own hooks
-    if(ev < PC_USB_EV_SETUP)
-      pc_evlog_add(type[ev], 0, 0);
+    if((ev == PC_USB_EV_BUS_RESET) || (ev == PC_USB_EV_DISCONNECT))
+    {
+      pc_evlog_add(type[ev], pc_usb_suspended, pc_usb_suspended ? pc_usb_susp_age() : 0);
+      pc_usb_suspended = 0;
+    }
   }
 
   if(ev == PC_USB_EV_BUS_RESET)
     pc_ep2_configured = 0;
 }
 
-void pc_usb_isr_resume(void)
+//Type 2 (fw 0.2.44): a = POWER, b = frame number at the suspend
+void pc_usb_isr_suspend(void)
 {
-  pc_usb_isr_event(PC_USB_EV_RESUME);
+  uint16 frame = (uint16)(*USBC_REG_FRNUM & 0x07FF);
 
+  pc_usb_ev[PC_USB_EV_SUSPEND]++;
+  pc_evlog_add(PC_EVT_SUSPEND, (uint8)*USBC_REG_PCTL, frame);
+
+  pc_usb_suspended  = 1;
+  pc_usb_susp_ms    = pc_hal_ms();
+  pc_usb_susp_frame = frame;
+}
+
+//Type 3 (fw 0.2.44): a = POWER (bit 7 set: inferred by pc_usb_main_service, no RESUME interrupt), b = ms suspended.
+//Counter 37 counts RESUME interrupts only.
+static void pc_usb_resumed(uint8 power)
+{
+  pc_evlog_add(PC_EVT_RESUME, power, pc_usb_susp_age());
+  pc_usb_suspended = 0;
+
+  //The configuration is kept: no SET_CONFIGURATION follows to unmask EP2 OUT
   if(pc_ep2_configured)
     *USBC_REG_INTRXE |= USBC_INTRX_FLAG_EP2;
+}
+
+void pc_usb_isr_resume(void)
+{
+  pc_usb_ev[PC_USB_EV_RESUME]++;
+  pc_usb_resumed((uint8)(*USBC_REG_PCTL & 0x7F));
+}
+
+//Main loop, every pass (fw 0.2.44): a device that is still marked suspended while the frame number moves on again
+//(SOFs arrive) was resumed without a RESUME interrupt; log that (type 3, a bit 7, with POWER: bit 1 = the core's
+//suspend mode) so the bench can tell a missed resume from a host that never suspended. Checked every 20 ms.
+void pc_usb_main_service(void)
+{
+  uint32 now = pc_hal_ms(), cpsr;
+  uint8  power;
+  uint16 frame;
+
+  if(!pc_usb_suspended || ((now - pc_usb_watch_ms) < 20))
+    return;
+
+  pc_usb_watch_ms = now;
+  cpsr  = pc_irq_save();
+  power = (uint8)*USBC_REG_PCTL;
+  frame = (uint16)(*USBC_REG_FRNUM & 0x07FF);
+
+  if(pc_usb_suspended && (frame != pc_usb_susp_frame))
+    pc_usb_resumed((uint8)(0x80 | (power & 0x7F)));
+
+  pc_irq_restore(cpsr);
 }
 
 void pc_hal_usb_events(uint32_t *v)
@@ -784,9 +850,11 @@ uint32_t pc_hal_link_take_events(void)
   return ev;
 }
 
+//The line state the host set; a suspended host (or a pulled cable, which also reads as suspend with VBUS forced
+//valid) is not an active connection, but its DTR comes back with the resume
 int pc_hal_dtr(void)
 {
-  return pc_dtr;
+  return pc_dtr && !pc_usb_suspended;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
