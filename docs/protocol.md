@@ -924,6 +924,7 @@ differs from or fills a gap in sections 1-13. Hosts written against this documen
 | 24 | New host connection (v0.1.1) | DTR 0 -> 1 also flushes a frame still in flight, so a reopened port never receives the tail of an old response | bench: a fresh connection read the rest of a 64 KiB pattern |
 | 25 | `#RESET` (v0.1.1) | ASCII line, honoured even while a response is being sent: drops the frame in flight, a pending WAIT (no answer), the duplicate cache and partial input, then replies `#OK`. REMOTE ownership and acquisition state stay | bench recovery without a power cycle |
 | 26 | Protocol 1.1 (v0.1.1) | GET_INFO `proto_minor` = 1, `#VER` says `proto=1.1`. GET_STATUS appends u16 `pass_ms` (offset 28: interval between the last two main-loop polls) and u16 `pass_max_ms` (offset 30: maximum since the previous GET_STATUS); the body is 32 bytes | measure the main-loop period the round trip depends on |
+| 28 | GET_LINK_STATS 0x0007 (protocol 1.2, v0.1.4) | any state and poll context. Response: u16 n (27), u16 0, n x u32 counters since boot: rx_packets, rx_bytes, rx_stalls, rx_swept (packets the poll sweep took because their interrupt never came), tx_packets, tx_zlps, tx_kicked (packets loaded by the poll pump), tx_flushes, link_resets (bus reset/suspend/disconnect), dtr_up, dtr_down; parser: frames, hdr_crc_errors, payload_crc_errors, oversize, version_errors, responses_dropped, rx_timeouts, junk_bytes; session: responses, duplicates, tx_aborts, disp_main, disp_busy, disp_isr, held (polls that left a request for the main loop), isr_skipped | bench diagnosis of request loss |
 | 27 | ENTER_FEL (v0.1.1) | cap ENTER_FEL on every known bitstream (not on unknown ones). Magic 0x4C45465F, else E_BAD_ARG detail 0. The OK response is sent first; once it has left the FIFO (at most 200 ms) the scope shows "FEL mode", soft-disconnects USB for 300 ms, masks IRQs, disables the timer, power-key and INTC sources, puts the USB controller and PHY back in reset, turns the caches off (I-cache invalidated), selects high vectors, sets SVC mode with SP = 0x7C00 (the bootloader's FEL state) and jumps to 0xFFFF0020. Settings are not saved; leave FEL with a power cycle or `sunxi-fel exe` | iteration without the boot menu |
 
 ### Firmware-internal
@@ -936,6 +937,9 @@ differs from or fills a gap in sections 1-13. Hosts written against this documen
   compile time. v0.1.1-0.1.2 still had EP2 OUT at 0. The MSC layout (OUT at 0, IN at 1024) is unchanged 1.00o5 code.
 - The TX pump is driven by the EP2 TX interrupt and, as a fallback, from every poll (main loop, BUSY polls and the 1 ms
   timer poll), so a missed interrupt costs at most 1 ms.
+- RX sweep (v0.1.4): every poll checks the EP2 OUT FIFO; a packet still waiting 2 ms after it was first seen (its
+  interrupt was lost) is read by the poll. 1.00o5's `irq_handler` clears INTC pending by writing 0 after reading it,
+  which can discard a USB interrupt raised in between; the 1 ms timer interrupt makes that window frequent.
 - Poll contexts (v0.1.2): MAIN (top of the main loop; everything), BUSY (touch-panel scans and UI spin loops; the safe
   set, E_BUSY for the rest once the UI is modal) and ISR (1 ms timer interrupt; the safe set PING, GET_INFO,
   GET_STATUS, GET_BATTERY, `#VER`, `#RESET`, plus error answers; everything else stays queued for MAIN, never

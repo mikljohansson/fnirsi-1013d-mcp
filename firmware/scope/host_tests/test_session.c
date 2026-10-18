@@ -290,7 +290,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.1,fpga=0x1532");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.2,fpga=0x1532");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -961,7 +961,7 @@ static void test_fel_reset_stall(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 1);                                              //proto_minor 1.1
+  T_EQ(r.p[1], 2);                                              //proto_minor 1.2
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -1022,6 +1022,27 @@ static void test_fel_reset_stall(void)
   mock.tx_hold = 0; mock_tx_release();
   r = req(PC_CMD_GET_STATUS, 0, 0);
   T_EQ(r.h.status, 0); T_EQ(r.p[2] & 0x20, 0);                  //no deferred request pending
+
+  //GET_LINK_STATS 1.2: 11 transport + 8 parser + 8 session counters, answered from every context
+  setup(0x1532);
+  r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 27); T_EQ(r.len, 4 + 27 * 4);
+  T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 4 + 4 * 10), 1010);
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 11), S.parser.stats.frames);
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 24), 0);                         //disp_isr counted after this response
+  r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 24), 1);
+  r = req(PC_CMD_GET_LINK_STATS, 0, 0);
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 22), 0);                         //disp_main, also counted after the response
+  r = req(PC_CMD_GET_LINK_STATS, 0, 0);
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 22), 1);
+
+  //First MAIN interval (boot) is not a pass
+  setup(0x1532);
+  mock.now += 1500;
+  pc_poll(&S, PC_CTX_MAIN);
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  T_TRUE(pc_get_u16(r.p + 30) < 100);
 
   //GET_STATUS 1.1: main-loop pass time, last and max since the previous GET_STATUS
   setup(0x1532);

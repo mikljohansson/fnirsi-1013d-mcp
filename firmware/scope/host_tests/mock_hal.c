@@ -338,3 +338,4 @@ int      pc_hal_tx_pump(void)    { return mock.tx_busy; }
 uint32_t pc_hal_tx_idle_ms(void) { return mock.tx_busy ? (mock.now - mock.tx_since) : 0; }
 void     pc_hal_tx_abort(void)   { mock.tx_busy = 0; mock.tx_aborts++; }
 void     pc_hal_enter_fel(void)  { mock.fel_entries++; }
+void     pc_hal_link_stats(uint32_t *v) { uint32_t i; for(i=0;i<PC_TSTAT_COUNT;i++) v[i] = 1000 + i; }

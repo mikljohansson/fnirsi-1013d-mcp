@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            1     //1.1: GET_STATUS appends main-loop pass times (firmware 0.1.1)
+#define PC_PROTO_MINOR            2     //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
@@ -47,6 +47,7 @@
 #define PC_CMD_SET_REMOTE         0x0004
 #define PC_CMD_GET_BATTERY        0x0005
 #define PC_CMD_TEST_PATTERN       0x0006
+#define PC_CMD_GET_LINK_STATS     0x0007     //1.2: link counters (firmware 0.1.4)
 #define PC_CMD_GET_CHANNEL        0x0100
 #define PC_CMD_SET_CHANNEL        0x0101
 #define PC_CMD_GET_TIMEBASE       0x0102

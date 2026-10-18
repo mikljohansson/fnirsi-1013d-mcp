@@ -160,6 +160,21 @@ int      pc_hal_tx_pump(void);                   //load the next packet(s) if th
 uint32_t pc_hal_tx_idle_ms(void);                //ms since the last packet of the frame in flight was loaded (0 if idle)
 void     pc_hal_tx_abort(void);                  //drop the frame in flight and flush the endpoint FIFO
 
+//Transport counters for GET_LINK_STATS, in this order
+#define PC_TS_RX_PACKETS  0     //EP2 OUT packets taken from the FIFO
+#define PC_TS_RX_BYTES    1
+#define PC_TS_RX_STALLS   2     //ring full: packet left in the FIFO (NAK back-pressure)
+#define PC_TS_RX_SWEPT    3     //packets taken by the poll sweep because their interrupt never came
+#define PC_TS_TX_PACKETS  4     //EP2 IN packets handed to the controller (ZLPs included)
+#define PC_TS_TX_ZLPS     5
+#define PC_TS_TX_KICKED   6     //of those, loaded by the poll pump rather than the TX interrupt
+#define PC_TS_TX_FLUSHES  7     //frames dropped in flight (DTR, stall watchdog, #RESET, link reset)
+#define PC_TS_LINK_RESETS 8     //bus reset / suspend / disconnect
+#define PC_TS_DTR_UP      9
+#define PC_TS_DTR_DOWN    10
+#define PC_TSTAT_COUNT    11
+void     pc_hal_link_stats(uint32_t *v);         //PC_TSTAT_COUNT values
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // FEL [UI]: wait until the last response left, detach USB, quiesce IRQs, jump to the boot ROM FEL entry. No return on
 // the target.

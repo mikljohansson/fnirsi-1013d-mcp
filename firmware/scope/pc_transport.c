@@ -35,6 +35,9 @@ static volatile uint32 pc_tx_last_ms;      //time of the last packet handed to t
 static volatile uint32 pc_link_events;
 static volatile uint8  pc_dtr;
 
+//Link counters for GET_LINK_STATS (order = pc_hal_link_stats, docs/protocol.md section 14)
+static volatile uint32 pc_ts[PC_TSTAT_COUNT];
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // IRQ masking (CPSR I bit), nests safely
 
@@ -55,9 +58,11 @@ static inline void pc_irq_restore(uint32 cpsr)
 //----------------------------------------------------------------------------------------------------------------------------------
 // RX. EPIND == 2, IRQs off (ISR or masked).
 
-static void pc_rx_drain_fifo(void)
+static uint32 pc_rx_drain_fifo(void)
 {
-  //Double buffered FIFO: a second packet can become ready as soon as the first is released
+  uint32 packets = 0;
+
+  //A further packet can become ready as soon as one is released
   while(*USBC_REG_RXCSR & USBC_BP_RXCSR_D_RX_PKT_READY)
   {
     uint32 count = *USBC_REG_RXCOUNT & 0x1FFF;
@@ -69,7 +74,8 @@ static void pc_rx_drain_fifo(void)
       //No room: leave RxPktRdy set so the controller NAKs, stop interrupts until the main loop made room
       *USBC_REG_INTRXE &= ~USBC_INTRX_FLAG_EP2;
       pc_rx_stalled = 1;
-      return;
+      pc_ts[PC_TS_RX_STALLS]++;
+      return packets;
     }
 
     pos   = pc_rx_in & (PC_RX_RING_SIZE - 1);
@@ -84,10 +90,15 @@ static void pc_rx_drain_fifo(void)
       usb_read_from_fifo((void *)USBC_REG_EPFIFO2, &pc_rx_ring[0], count - first);
 
     pc_rx_in += count;
+    pc_ts[PC_TS_RX_PACKETS]++;
+    pc_ts[PC_TS_RX_BYTES] += count;
+    packets++;
 
     //Release the packet and clear a possible overrun (same as 1.00o5)
     *USBC_REG_RXCSR &= ~(USBC_BP_RXCSR_D_RX_PKT_READY | USBC_BP_RXCSR_D_OVERRUN);
   }
+
+  return packets;
 }
 
 void pc_usb_isr_rx(void)
@@ -102,10 +113,48 @@ void pc_usb_isr_rx(void)
 
 uint32_t pc_hal_rx_read(uint8_t *dst, uint32_t max)
 {
-  uint32 in   = pc_rx_in;
-  uint32 used = in - pc_rx_out;
-  uint32 n    = (used < max) ? used : max;
-  uint32 i;
+  uint32 in, used, n, i;
+
+  //Sweep: take a packet the EP2 RX interrupt did not deliver. 1.00o5's irq_handler clears the INTC pending register
+  //by writing 0 after reading it, so a USB interrupt raised in between can be lost; the packet would then sit in
+  //the FIFO (host request unanswered) until some other USB event. Every poll (1 ms tick included) checks the FIFO;
+  //a packet still waiting 2 ms after it was first seen has missed its interrupt and is taken here (and counted).
+  if(!pc_rx_stalled)
+  {
+    static uint8  seen;
+    static uint32 seen_ms;
+    static uint32 seen_pkts;                       //packet count when seen: the ISR may have taken it meanwhile
+    uint32 cpsr  = pc_irq_save();
+    uint8  epind = *USBC_REG_EPIND;
+
+    *USBC_REG_EPIND = 2;
+
+    if(*USBC_REG_RXCSR & USBC_BP_RXCSR_D_RX_PKT_READY)
+    {
+      if(!seen || (seen_pkts != pc_ts[PC_TS_RX_PACKETS]))
+      {
+        seen      = 1;
+        seen_ms   = pc_hal_ms();
+        seen_pkts = pc_ts[PC_TS_RX_PACKETS];
+      }
+      else if((pc_hal_ms() - seen_ms) >= 2)
+      {
+        pc_ts[PC_TS_RX_SWEPT] += pc_rx_drain_fifo();
+        seen = 0;
+      }
+    }
+    else
+    {
+      seen = 0;
+    }
+
+    *USBC_REG_EPIND = epind;
+    pc_irq_restore(cpsr);
+  }
+
+  in   = pc_rx_in;
+  used = in - pc_rx_out;
+  n    = (used < max) ? used : max;
 
   for(i=0;i<n;i++)
     dst[i] = pc_rx_ring[(pc_rx_out + i) & (PC_RX_RING_SIZE - 1)];
@@ -135,9 +184,9 @@ uint32_t pc_hal_rx_read(uint8_t *dst, uint32_t max)
 //----------------------------------------------------------------------------------------------------------------------------------
 // TX. EPIND == 2, IRQs off (ISR or masked).
 
-static void pc_tx_fill(void)
+static uint32 pc_tx_fill(void)
 {
-  uint32 k;
+  uint32 k, loaded = 0;
 
   //Up to two packets: with the double buffered FIFO TxPktRdy clears at once while the other half is free
   for(k=0;(k<2) && pc_tx_active;k++)
@@ -159,7 +208,11 @@ static void pc_tx_fill(void)
     {
       //Zero length packet after a frame of n x 512 bytes                              BENCH: T1
       pc_tx_zlp = 0;
+      pc_ts[PC_TS_TX_ZLPS]++;
     }
+
+    loaded++;
+    pc_ts[PC_TS_TX_PACKETS]++;
 
     //Clear a possible under run first, then hand the packet to the controller (same order as 1.00o5)
     *USBC_REG_TXCSR &= ~USBC_BP_TXCSR_D_UNDER_RUN;
@@ -169,12 +222,17 @@ static void pc_tx_fill(void)
     if((pc_tx_left == 0) && !pc_tx_zlp)
       pc_tx_active = 0;
   }
+
+  return loaded;
 }
 
 static void pc_tx_flush(void)
 {
   uint8 epind = *USBC_REG_EPIND;
   uint32 k;
+
+  if(pc_tx_active)
+    pc_ts[PC_TS_TX_FLUSHES]++;
 
   pc_tx_active = 0;
   pc_tx_left   = 0;
@@ -245,7 +303,7 @@ int pc_hal_tx_pump(void)
     uint8  epind = *USBC_REG_EPIND;
 
     *USBC_REG_EPIND = 2;
-    pc_tx_fill();
+    pc_ts[PC_TS_TX_KICKED] += pc_tx_fill();
     *USBC_REG_EPIND = epind;
     pc_irq_restore(cpsr);
   }
@@ -299,6 +357,7 @@ void pc_usb_isr_link(void)
   pc_rx_out    = pc_rx_in;
   pc_rx_stalled = 0;
   pc_dtr       = 0;
+  pc_ts[PC_TS_LINK_RESETS]++;
   pc_link_events |= PC_LINK_RESET;
 }
 
@@ -328,12 +387,14 @@ void pc_usb_dtr(uint8 dtr)
     //Host closed the port: a pending response is discarded (P-3.2)
     pc_tx_flush();
     pc_link_events |= PC_LINK_DTR_DOWN;
+    pc_ts[PC_TS_DTR_DOWN]++;
   }
   else if(!pc_dtr && dtr)
   {
     //A new host connection must not receive the tail of a frame meant for the previous one
     pc_tx_flush();
     pc_link_events |= PC_LINK_DTR_UP;
+    pc_ts[PC_TS_DTR_UP]++;
   }
 
   pc_dtr = dtr;
@@ -368,6 +429,16 @@ uint32_t pc_hal_link_take_events(void)
 int pc_hal_dtr(void)
 {
   return pc_dtr;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+
+void pc_hal_link_stats(uint32_t *v)
+{
+  uint32 i;
+
+  for(i=0;i<PC_TSTAT_COUNT;i++)
+    v[i] = pc_ts[i];
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

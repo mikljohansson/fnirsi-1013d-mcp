@@ -540,6 +540,34 @@ static int h_get_battery(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   return PC_OK;
 }
 
+//GET_LINK_STATS (protocol 1.2): u16 count, u16 reserved, then count u32 counters since boot:
+//transport PC_TS_* (11), parser stats (8: frames, hdr_crc_errors, payload_crc_errors, oversize, version_errors,
+//responses_dropped, timeouts, junk_bytes), session (8: responses, duplicates, tx_aborts, disp_main, disp_busy,
+//disp_isr, held, isr_skipped)
+static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint32_t v[PC_TSTAT_COUNT + 16];
+  const pc_parser_stats *ps = &s->parser.stats;
+  uint32_t n = PC_TSTAT_COUNT, i;
+
+  (void)req; (void)len;
+
+  pc_hal_link_stats(v);
+  v[n++] = ps->frames;     v[n++] = ps->hdr_crc_errors; v[n++] = ps->payload_crc_errors; v[n++] = ps->oversize;
+  v[n++] = ps->version_errors; v[n++] = ps->responses_dropped; v[n++] = ps->timeouts; v[n++] = ps->junk_bytes;
+  v[n++] = s->responses;   v[n++] = s->duplicates;     v[n++] = s->tx_aborts;  v[n++] = s->disp_main;
+  v[n++] = s->disp_busy;   v[n++] = s->disp_isr;       v[n++] = s->held;       v[n++] = s->isr_skipped;
+
+  pc_put_u16(resp, (uint16_t)n);
+  pc_put_u16(resp + 2, 0);
+
+  for(i=0;i<n;i++)
+    pc_put_u32(resp + 4 + 4 * i, v[i]);
+
+  *rl = 4 + 4 * n;
+  return PC_OK;
+}
+
 static int h_test_pattern(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   uint32_t n = pc_get_u32(req);
@@ -1281,6 +1309,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_SET_REMOTE,   F_LOCAL | F_CONTROL,                    0, h_set_remote },
   { PC_CMD_GET_BATTERY,  F_LOCAL | F_BUSY | F_BASIC,             0, h_get_battery },
   { PC_CMD_TEST_PATTERN, F_LOCAL | F_BASIC,                      0, h_test_pattern },
+  { PC_CMD_GET_LINK_STATS, F_LOCAL | F_BUSY | F_CONTROL | F_BASIC, 0, h_get_link_stats },
   { PC_CMD_GET_CHANNEL,  F_LOCAL,                                0, h_get_channel },
   { PC_CMD_SET_CHANNEL,  F_REMOTE,                               0, h_set_channel },
   { PC_CMD_GET_TIMEBASE, F_LOCAL,                                0, h_get_timebase },
@@ -1662,7 +1691,11 @@ void pc_poll(pc_session *s, int ctx)
 
   //The touch panel hook can call in from inside a poll (banner check); never nest
   if(s->in_poll)
+  {
+    if(ctx == PC_CTX_ISR)
+      s->isr_skipped++;
     return;
+  }
 
   //While REMOTE the main loop polls continuously; BUSY polls (touch scans in the remote service) have nothing to do
   if((ctx == PC_CTX_BUSY) && (s->control == PC_REMOTE))
@@ -1683,9 +1716,13 @@ void pc_poll(pc_session *s, int ctx)
   {
     uint32_t pass = now - s->last_main_ms;
 
-    s->pass_ms = (pass > 0xFFFF) ? 0xFFFF : (uint16_t)pass;
-    if(s->pass_ms > s->pass_max_ms)
-      s->pass_max_ms = s->pass_ms;
+    //The first interval runs from pc_session_init through the rest of boot (logo, USB start): not a loop pass
+    if(s->main_polls++)
+    {
+      s->pass_ms = (pass > 0xFFFF) ? 0xFFFF : (uint16_t)pass;
+      if(s->pass_ms > s->pass_max_ms)
+        s->pass_max_ms = s->pass_ms;
+    }
 
     s->last_main_ms = now;
     s->ui_busy      = 0;
@@ -1742,7 +1779,14 @@ void pc_poll(pc_session *s, int ctx)
       break;
 
     if(!pc_dispatch(s, ctx))
+    {
+      s->held++;
       break;
+    }
+
+    if(ctx == PC_CTX_MAIN)      s->disp_main++;
+    else if(ctx == PC_CTX_BUSY) s->disp_busy++;
+    else                        s->disp_isr++;
 
     s->pending_ev = PC_EV_NONE;
 

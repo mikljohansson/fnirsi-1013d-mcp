@@ -118,6 +118,17 @@ def main():
     dt = time.perf_counter() - t0
     check(total == reps * 65536, "throughput %.2f MB/s (%d x 64 KiB)" % (total / dt / 1e6, reps))
 
+    names = ('rx_packets rx_bytes rx_stalls rx_swept tx_packets tx_zlps tx_kicked tx_flushes link_resets dtr_up '
+             'dtr_down frames hdr_crc payload_crc oversize version resp_dropped rx_timeouts junk_bytes responses '
+             'duplicates tx_aborts disp_main disp_busy disp_isr held isr_skipped').split()
+    st, body, _ = L.request(0x0007)
+    if st == 0 and body:
+        n = struct.unpack_from('<H', body)[0]
+        vals = struct.unpack_from('<%dI' % n, body, 4)
+        print('     GET_LINK_STATS ' + ' '.join('%s=%d' % (names[i] if i < len(names) else 'v%d' % i, v) for i, v in enumerate(vals)))
+    else:
+        print('     GET_LINK_STATS not supported (fw < 0.1.4)')
+
     if a.fel:
         st, _, _ = L.request(0x0F01, struct.pack("<I", 0x4C45465F))
         check(st == 0, "ENTER_FEL answered OK; now expect USB 1f3a:efe8 within ~1 s")

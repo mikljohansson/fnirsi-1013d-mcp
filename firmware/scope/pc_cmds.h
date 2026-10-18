@@ -13,7 +13,7 @@
 // Build identity (overridden from the Makefile)
 
 #ifndef PC_FW_VERSION
-#define PC_FW_VERSION     "0.1.3"
+#define PC_FW_VERSION     "0.1.4"
 #endif
 
 #ifndef PC_FW_BUILD
@@ -182,6 +182,14 @@ typedef struct
   uint16_t   pass_max_ms;       //maximum since the previous GET_STATUS
 
   uint8_t    fel_pending;       //ENTER_FEL answered: jump once the response has left
+
+  //Dispatch counters (GET_LINK_STATS)
+  uint32_t   main_polls;
+  uint32_t   disp_main;         //events handled per poll context
+  uint32_t   disp_busy;
+  uint32_t   disp_isr;
+  uint32_t   held;              //polls that left a request queued for the main loop
+  uint32_t   isr_skipped;       //timer-tick polls skipped because another poll was running
 } pc_session;
 
 //----------------------------------------------------------------------------------------------------------------------------------
