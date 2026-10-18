@@ -547,24 +547,39 @@ def _timebase_summary(s: Scope) -> dict[str, Any]:
 
 
 def _scope_cal_summary(c: P.CalResp) -> dict[str, Any]:
-    """GET_CAL's calibration v2 state and stored block (protocol 1.10, row 48) in codes."""
+    """GET_CAL's calibration state and stored v3 block (protocol 1.12, row 51) in codes and gain factors."""
     if not c.cal_version:
-        return {"version": None, "note": "firmware before protocol 1.10 (no calibration v2)"}
+        return {"version": None, "note": "firmware before protocol 1.10 (no scope calibration block)"}
+    if c.cal_version == 2:
+        return {"version": 2, "in_use": "v2 (not decoded)",
+                "note": "firmware 0.2.43-0.2.44 calibration v2: update to >= 0.2.45 and re-run the base calibration"}
     flags = [n for b, n in ((P.CAL_LOADED, "block_loaded"), (P.CAL_BOUND, "bound_to_pwm_centres"),
-                            (P.CAL_GATED, "current_divider_gated")) if c.cal_flags & b]
+                            (P.CAL_GATED, "current_divider_gated"), (P.CAL_GAINS_MEASURED, "gains_measured"),
+                            (P.CAL_GAINS_KEPT, "gains_kept_from_earlier_run")) if c.cal_flags & b]
     out: dict[str, Any] = {
-        "version": c.cal_version, "in_use": "v2" if c.v2 else "1.00o5 compensations", "flags": flags,
+        "version": c.cal_version, "in_use": "v3" if c.v3 else "1.00o5 compensations", "flags": flags,
         "current": {"comp": {"A": c.comp_a + c.frac_a / 16, "B": c.comp_b + c.frac_b / 16},
-                    "zero_code": _r6(c.cal_zero_q8 / 256), "corr16_codes": _r6(c.corr16 / 16),
-                    "shift": c.cal_shift}}
+                    "gain": {"A": _r6(c.gain_a / 65536), "B": _r6(c.gain_b / 65536)},
+                    "offset_codes": {"A": _r6(c.off_a / 65536), "B": _r6(c.off_b / 65536)},
+                    "gain16": _r6(c.gain16 / 65536), "zero_code": _r6(c.cal_zero_q8 / 256),
+                    "corr16_codes": _r6(c.corr16 / 16), "shift": c.cal_shift}}
     if c.cal_flags & P.CAL_LOADED:
+        names = P.CAL_CLASS_NAMES
+        measured = c.gain_range != P.CAL_GAIN_NONE
         out["stored"] = {
             "pwm_centres": list(c.pwm),
-            "zero_codes": {P.CAL_CLASS_NAMES[k]: {core: [_r6(c.zero_raw(k, i, r)) for r in range(6)]
-                                                  for i, core in enumerate("AB")} for k in (0, 1)},
-            "slope_codes_per_count": {core: [_r6(c.slope_codes(i, r)) for r in range(6)] for i, core in enumerate("AB")},
-            "noise_rms_codes": {P.CAL_CLASS_NAMES[k]: {core: [_r6(c.noise_rms(k, i, r)) for r in range(6)]
-                                                       for i, core in enumerate("AB")} for k in (0, 1)}}
+            "zero_codes": {names[k]: {core: [_r6(c.zero_raw(k, i, r)) for r in range(6)]
+                                      for i, core in enumerate("AB")} for k in (0, 1)},
+            "slope_codes_per_count": {names[k]: {core: [_r6(c.slope_codes(k, i, r)) for r in range(6)]
+                                                 for i, core in enumerate("AB")} for k in (0, 1)},
+            "noise_rms_codes": {names[k]: {core: [_r6(c.noise_rms(k, i, r)) for r in range(6)]
+                                           for i, core in enumerate("AB")} for k in (0, 1)},
+            "gain_correction": {names[k]: {core: _r6(c.gain_corr(k, i)) for i, core in enumerate("AB")}
+                                for k in (0, 1)},
+            "gain16_full": _r6(c.gain16_full() / 65536),
+            "gains_measured_on_range": c.gain_range if measured else None,
+            "gain_lever_codes": _r6(c.gain_lever / 16) if measured else None,
+            "gains_carried_over": bool(c.gain_flags & 1)}
     return out
 
 
@@ -969,10 +984,10 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
 
     @register(0, title="Voltage scaling in effect", read_only=True, idempotent=True)
     async def scope_calibration_info() -> dict[str, Any]:
-        """Which code-to-volts conversion is in effect per channel (the scope's calibration v2, the per-unit
-        calibration file or the firmware formula), the scope's own calibration state (protocol 1.10: version 1 or
-        2, flags, the correction for the current settings and the stored per-core zeros per clock class, slopes and
-        noise), the calibration file and its fitted numbers: per range and ADC core the raw 0 V code at the
+        """Which code-to-volts conversion is in effect per channel (the scope's calibration v3, the per-unit
+        calibration file or the firmware formula), the scope's own calibration state (protocol 1.12: version 1 or
+        3, flags, the correction for the current settings, and the stored per-core zeros, slopes and noise per clock
+        class with the per-core, per-class gain corrections, the range and lever they were measured with), the calibration file and its fitted numbers: per range and ADC core the raw 0 V code at the
         reference offset, the offset-PWM slope, volts per code and the fit residual, plus the per-core channel
         model (0 V code at dcoffset 0, slope). Also the live conversion for each channel's current range and offset.
         Read-only; scope_calibrate_volts adds points."""
@@ -1001,10 +1016,10 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     "channel_model": {CHANNEL_NAMES[ch]: v for ch, v in sorted(cal.channel_fit.items())},
                     "summary": describe_cal(cal)})
             out["caveats"] = [SCALING_CAVEAT, CAL_OUTPUT_NOTE]
-            if any(v.get("in_use") == "v2" for v in scope_cal.values()):
-                out["caveats"].insert(0, "the scope's calibration v2 sets the 0 V codes (READ_TRACE is already "
-                                         "corrected; raw reads get the stored per-core zeros); the per-unit file "
-                                         "only contributes gains")
+            if any(v.get("in_use") == "v3" for v in scope_cal.values()):
+                out["caveats"].insert(0, "the scope's calibration v3 sets the 0 V codes and the per-core, per-class "
+                                         "gains (READ_TRACE is already corrected; raw reads get the stored zeros and "
+                                         "gains); the per-unit file only contributes its gated gains")
             return out
         return await run("scope_calibration_info", 0, {}, go)
 

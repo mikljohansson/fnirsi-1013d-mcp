@@ -217,9 +217,12 @@ def _fit_core(pts: list[dict[str, Any]], core: str) -> CoreFit | None:
 @dataclass
 class ChannelScale:
     """Code <-> volt conversion for one channel in its current state, per ADC core, at the BNC (1x).
-    ``zero_a``/``zero_b`` are raw (uncompensated) core codes of 0 V; ``gain_*`` volts per code; ``adc_*_comp`` what
-    the firmware adds to each core's raw code in READ_TRACE (whole codes with the 1.00o5 compensations; with
-    calibration v2 the exact correction to the common 0 V code T, applied on the scope as whole codes plus dither)."""
+    ``zero_a``/``zero_b`` are raw (uncompensated) core codes of 0 V; ``gain_*`` volts per raw code. The firmware's
+    READ_TRACE code of core k is ``zero_k + adc_k_comp + corr_gain_k x (raw - zero_k)``: with the 1.00o5
+    compensations corr_gain = 1 and comp = whole codes; with calibration v3 (protocol 1.12) zero + comp = T (the
+    common 0 V code) and corr_gain = G_k (the per-core, per-class gain correction), applied on the scope with dither.
+    ``wide_gain`` is the 16-bit path's factor on the mean raw code (v3: gain16 = the harmonic mean of the full-class
+    G_A, G_B; 1 otherwise)."""
 
     zero_a: float
     zero_b: float
@@ -229,15 +232,45 @@ class ChannelScale:
     adc_b_comp: float
     probe: float
     source: str  # "unit-calibration" or "firmware"
+    corr_gain_a: float = 1.0
+    corr_gain_b: float = 1.0
+    wide_gain: float = 1.0
 
     def volts_raw(self, raw: np.ndarray, core: str) -> np.ndarray:
         z, g = (self.zero_a, self.gain_a) if core == "A" else (self.zero_b, self.gain_b)
         return (np.asarray(raw, np.float64) - z) * g * self.probe
 
+    def codes_from_raw(self, raw: np.ndarray, core: str) -> np.ndarray:
+        """What the firmware's readout makes of raw codes (mean, before dither and rounding), clamped to 0..255."""
+        z, comp, cg = ((self.zero_a, self.adc_a_comp, self.corr_gain_a) if core == "A"
+                       else (self.zero_b, self.adc_b_comp, self.corr_gain_b))
+        return np.clip(z + comp + cg * (np.asarray(raw, np.float64) - z), 0, 255)
+
     def volts_compensated(self, codes: np.ndarray, core: str) -> np.ndarray:
-        """Codes that already include the firmware's per-core compensation (READ_TRACE)."""
-        comp = self.adc_a_comp if core == "A" else self.adc_b_comp
-        return self.volts_raw(np.asarray(codes, np.float64) - comp, core)
+        """Codes that already include the firmware's per-core correction (READ_TRACE)."""
+        z, comp, cg = ((self.zero_a, self.adc_a_comp, self.corr_gain_a) if core == "A"
+                       else (self.zero_b, self.adc_b_comp, self.corr_gain_b))
+        raw = z + (np.asarray(codes, np.float64) - z - comp) / cg
+        return self.volts_raw(raw, core)
+
+    @property
+    def _mean_gain(self) -> float:
+        """Volts per mean raw code of a sample that weighs both cores equally: the harmonic mean of the cores'."""
+        return 2 * self.gain_a * self.gain_b / (self.gain_a + self.gain_b)
+
+    def volts_mean_raw(self, mean_raw: np.ndarray) -> np.ndarray:
+        """A 16-bit (filtered) sample converted to the mean raw code of its window (out x 2^S / gain): volts."""
+        return (np.asarray(mean_raw, np.float64) - (self.zero_a + self.zero_b) / 2) * self._mean_gain * self.probe
+
+    def volts_wide_codes(self, codes: np.ndarray) -> np.ndarray:
+        """The firmware's 8-bit READ_TRACE codes of a 16-bit capture (codes_mean_raw, rounded) to volts."""
+        m = (self.zero_a + self.zero_b) / 2 + (np.asarray(codes, np.float64) - self.zero_compensated) / self.wide_gain
+        return self.volts_mean_raw(m)
+
+    def codes_mean_raw(self, mean_raw: np.ndarray) -> np.ndarray:
+        """The firmware's 8-bit code (unrounded) of a 16-bit sample's mean raw code: T + gain16 (m - mean zero)."""
+        return self.zero_compensated + (np.asarray(mean_raw, np.float64) - (self.zero_a + self.zero_b) / 2) * \
+            self.wide_gain
 
     def volts_mean_compensated(self, codes: np.ndarray) -> np.ndarray:
         """Mean of the two compensated cores (ACQUIRE_AVG), converted with the cores' mean zero and gain."""
@@ -264,28 +297,35 @@ class ChannelScale:
 def channel_scale(ch: int, cfg: Any, cal_resp: Any, unit: UnitCalibration | None,
                   clock_class: int = 1) -> ChannelScale:
     """Scale for channel ``ch`` with ChannelConfig ``cfg`` and CalResp ``cal_resp``. Order: the scope's calibration
-    v2 when it is in use for the channel (protocol 1.10: per-core zeros of ``clock_class``, 0 full rate / 1 gated,
-    plus the offset slope; gains from ``unit`` when it fits the range, else the firmware's), then ``unit`` (per-unit
-    calibration file), then the firmware formula."""
+    v3 when it is in use for the channel (protocol 1.12, row 51: per-core zeros and offset slopes of
+    ``clock_class``, 0 full rate / 1 gated, and per-core, per-class gain corrections G_k[c] onto the gated mean
+    gain), then ``unit`` (per-unit calibration file), then the firmware formula. With v3 a unit file that fits the
+    range contributes only its (gated, per-core) gains, carried to the capture's class by G_k[c] / G_k[gated]."""
     ca, cb = int(cal_resp.adc_a_comp), int(cal_resp.adc_b_comp)
     probe = cfg.probe_factor
     fw_g = cfg.volts_per_lsb
     fs = fw_slope(getattr(cal_resp, "dc_shift_value", 0))
-    if getattr(cal_resp, "v2", False):
-        from .protocol import CAL_CLASS_NAMES, cal_target
+    version = getattr(cal_resp, "cal_version", 0)
+    if version == 2:
+        raise ValueError("the scope uses calibration v2 (firmware 0.2.43-0.2.44), which this host no longer "
+                         "decodes; update the firmware to 0.2.45 or later and re-run the base calibration")
+    if version == 3:
+        from .protocol import CAL_CLASS_GATED, CAL_CLASS_NAMES, cal_target
         r = min(cfg.range, 6)
         dco = cfg.offset_pwm - cal_resp.dc_calibration_offset[r]  # offset_pwm = centre[range] + dcoffset
         za = cal_resp.zero_at(clock_class, 0, r, dco)
         zb = cal_resp.zero_at(clock_class, 1, r, dco)
         t = cal_target(dco, cal_resp.dc_shift_value)
-        src = f"scope calibration v2 ({CAL_CLASS_NAMES[clock_class]} clock)"
-        ga = gb = fw_g
+        Ga, Gb = cal_resp.gain_corr(clock_class, 0), cal_resp.gain_corr(clock_class, 1)
+        src = f"scope calibration v3 ({CAL_CLASS_NAMES[clock_class]} clock)"
+        ga, gb = fw_g * Ga, fw_g * Gb
         if unit is not None and unit.has(ch, cfg.range):
             fa, fb = unit.core_fit(ch, cfg.range, "A"), unit.core_fit(ch, cfg.range, "B")
             assert fa is not None and fb is not None
-            ga, gb = fa.gain or fw_g, fb.gain or fw_g
+            ga = (fa.gain or fw_g) * Ga / cal_resp.gain_corr(CAL_CLASS_GATED, 0)
+            gb = (fb.gain or fw_g) * Gb / cal_resp.gain_corr(CAL_CLASS_GATED, 1)
             src += ", unit-calibration gains"
-        return ChannelScale(za, zb, ga, gb, t - za, t - zb, probe, src)
+        return ChannelScale(za, zb, ga, gb, t - za, t - zb, probe, src, Ga, Gb, cal_resp.gain16_full() / 65536.0)
     if unit is not None and unit.has(ch, cfg.range):
         fa = unit.core_fit(ch, cfg.range, "A")
         fb = unit.core_fit(ch, cfg.range, "B")

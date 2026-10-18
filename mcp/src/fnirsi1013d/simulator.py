@@ -289,8 +289,12 @@ class SimConfig:
     #: extra raw zero (codes) per channel and core while the encode clock is gated (legacy divider >= 1), like the
     #: owner's unit (bench 2026-10-18: CH1 core A -0.8, core B -3.6)
     gated_zero_shift: tuple[tuple[float, float], tuple[float, float]] = ((0.0, 0.0), (0.0, 0.0))
-    #: protocol 1.10: a bound calibration v2 block measured from this model (GET_CAL version 2, corrected traces)
-    cal_v2: bool = False
+    #: relative gain (codes per volt, 1 = the firmware's uv_per_lsb) per channel, clock class (full, gated) and core
+    #: (A, B), like the owner's unit (bench 2026-10-18, CH1 range 2: full A 1.020 / B 0.988, gated 1.002 / 0.998)
+    core_gain: tuple[tuple[tuple[float, float], tuple[float, float]], ...] = (((1.0, 1.0), (1.0, 1.0)),
+                                                                              ((1.0, 1.0), (1.0, 1.0)))
+    #: protocol 1.12: a bound calibration v3 block measured from this model (GET_CAL version 3, corrected traces)
+    cal_v3: bool = False
 
 
 def make_egon_image(size: int, kind: bytes = b"eGON.EXE", fill: int = 0, version: str | None = None) -> bytes:
@@ -527,7 +531,7 @@ class Device:
             offset_pwm=max(0, min(2000, cal.dc_calibration_offset[cs.range] + cs.dcoffset)),
             center_cal=cal.dc_calibration_offset[cs.range],
             uv_per_lsb_q8=P.uv_per_lsb_q8(cal.input_calibration[cs.range], cs.range),
-            zero_code_q8=(P.cal_target(cs.dcoffset, cal.dc_shift_value) * 256 if self.cfg.cal_v2
+            zero_code_q8=(P.cal_target(cs.dcoffset, cal.dc_shift_value) * 256 if self.cfg.cal_v3
                           else P.zero_code_q8(cs.dcoffset, cal.dc_shift_value)))
 
     # --- signal generation ---------------------------------------------------------------------------
@@ -545,9 +549,12 @@ class Device:
             zero = P.zero_code_q8(cs.dcoffset, cal.dc_shift_value) / 256.0
         else:
             zero = 128.0 + self.cfg.offset_slope * cs.dcoffset
-        if core is None:  # filtered: the ADCs run at full rate
-            return zero + v / vpl + (self.raw_zero_offset(ch, 0, 0) + self.raw_zero_offset(ch, 1, 0)) / 2
-        return zero + v / vpl + self.raw_zero_offset(ch, 0 if core == "A" else 1, self._clock_class(settings))
+        g = self.cfg.core_gain[ch]
+        if core is None:  # filtered: the ADCs run at full rate, both cores weigh equally
+            return zero + v / vpl * (g[0][0] + g[0][1]) / 2 + \
+                (self.raw_zero_offset(ch, 0, 0) + self.raw_zero_offset(ch, 1, 0)) / 2
+        k, cls = (0 if core == "A" else 1), self._clock_class(settings)
+        return zero + v / vpl * g[cls][k] + self.raw_zero_offset(ch, k, cls)
 
     def raw_zero_offset(self, ch: int, core: int, cls: int) -> float:
         """Model: the raw 0 V code of a core minus the offset formula's zero, for clock class cls (1 = gated)."""
@@ -563,36 +570,52 @@ class Device:
             return P.zero_code_q8(dcoffset, self.cal[ch].dc_shift_value) / 256.0
         return 128.0 + self.cfg.offset_slope * dcoffset
 
-    def _v2_zero(self, ch: int, cls: int, core: int, dcoffset: int) -> float:
-        """The stored v2 model's raw 0 V code (zero / 16 + slope x dcoffset), as the host and firmware compute it."""
-        return self._v2_tables(ch).zero_at(cls, core, 0, dcoffset)
-
-    def _v2_tables(self, ch: int) -> P.CalResp:
-        """The stored v2 block a base calibration of this model measures (range-independent here)."""
+    def _v3_tables(self, ch: int) -> P.CalResp:
+        """The stored v3 block a base calibration of this model measures (range-independent here): zeros and slopes
+        per class and core, gains G_k[c] = g_ref / g_k[c] (Q15) with g_ref the gated mean of both cores."""
         c = self.cal[ch]
         slope = self.cfg.offset_slope if self.cfg.offset_slope is not None else -100.0 / c.dc_shift_value
         zero = []
         for k in (0, 1):
             for core in (0, 1):
                 zero += [int(round(16 * (self._offset_zero(ch, 0) + self.raw_zero_offset(ch, core, k))))] * 6
+        g = self.cfg.core_gain[ch]
+        g_ref = (g[1][0] + g[1][1]) / 2
+        gains = tuple(int(round(32768 * g_ref / g[k][core])) for k in (0, 1) for core in (0, 1))
         return P.CalResp(ch, pwm=tuple(c.dc_calibration_offset[:6]), zero=tuple(zero),
-                         slope=tuple([int(round(65536 * slope))] * 12),
-                         noise=tuple([int(round(16 * self.cfg.noise_lsb))] * 24))
+                         slope=tuple([int(round(65536 * slope))] * 24),
+                         noise=tuple([int(round(16 * self.cfg.noise_lsb))] * 24), gain=gains, gain_range=2,
+                         gain_flags=0, gain_lever=1416)
 
-    def _v2_corr(self, ch: int, cls: int, settings: Settings) -> tuple[float, float, int]:
-        """v2 per-core corrections to T and T for a channel's settings."""
-        d = settings.channels[ch].dcoffset
-        t = P.cal_target(d, self.cal[ch].dc_shift_value)
-        return t - self._v2_zero(ch, cls, 0, d), t - self._v2_zero(ch, cls, 1, d), t
+    def _v3_corr(self, ch: int, settings: Settings) -> dict:
+        """adc_cal.c acal_correction for the channel's settings: per-core Q16 gain / offset of the 8-bit readout
+        (class by the legacy divider), comp / frac at 0 V, the 16-bit path gain16 / corr16 (full-class zeros)."""
+        cs = settings.channels[ch]
+        d, r = cs.dcoffset, min(cs.range, 5)
+        cls = P.CAL_CLASS_GATED if settings.divider else P.CAL_CLASS_FULL
+        tb = self._v3_tables(ch)
+        t16 = 16 * P.cal_target(d, self.cal[ch].dc_shift_value)
+        out: dict = {"gain": [], "off": [], "comp": [], "frac": [], "t16": t16}
+        zf = []
+        for k in (0, 1):
+            zc16 = tb.zero16_at(cls, k, r, d)
+            zf.append(tb.zero16_at(P.CAL_CLASS_FULL, k, r, d))
+            g = tb.gain_q16(cls, k)
+            out["gain"].append(g)
+            out["off"].append(P._rdiv(t16 * 65536 - g * zc16, 16))
+            d16 = max(-127 * 16, min(127 * 16, t16 - zc16))
+            out["comp"].append(d16 // 16)
+            out["frac"].append(d16 - 16 * (d16 // 16))
+        out["gain16"] = tb.gain16_full()
+        out["corr16"] = P._rdiv(t16 * 131072 - out["gain16"] * (zf[0] + zf[1]), 131072)
+        return out
 
-    def _corr16(self, ch: int, settings: Settings) -> int:
-        """16-bit path correction (1/16 code) the firmware adds: v2 full-rate zeros, else 8 x (comp_a + comp_b)."""
-        if not self.cfg.cal_v2:
-            return 8 * (self.cal[ch].adc_a_comp + self.cal[ch].adc_b_comp)
-        d = settings.channels[ch].dcoffset
-        t = P.cal_target(d, self.cal[ch].dc_shift_value)
-        z = (self._v2_zero(ch, 0, 0, d) + self._v2_zero(ch, 0, 1, d)) * 16 / 2
-        return int(round(16 * t - z))
+    def _corr16(self, ch: int, settings: Settings) -> tuple[int, int]:
+        """16-bit path (gain16 Q16, corr16 in 1/16 code) the firmware applies: v3, else 1 and 8 x (comp_a + comp_b)."""
+        if not self.cfg.cal_v3:
+            return 65536, 8 * (self.cal[ch].adc_a_comp + self.cal[ch].adc_b_comp)
+        c = self._v3_corr(ch, settings)
+        return c["gain16"], c["corr16"]
 
     def _codes(self, ch: int, t: np.ndarray, core: str, settings: Settings,
                noise: np.ndarray | None = None) -> np.ndarray:
@@ -1185,8 +1208,9 @@ class Device:
         dec = self.capture_decim
         if dec.k:
             out = self.build_trace16(ch).astype(np.int64)
-            corr16 = self._corr16(ch, settings)
-            tr = np.clip((out * dec.scale_q24 + (corr16 << 20) + (1 << 23)) >> 24, 0, 255).astype(np.uint8)
+            gain16, corr16 = self._corr16(ch, settings)
+            scale = (dec.scale_q24 * gain16 + 32768) >> 16  # acal_scale
+            tr = np.clip((out * scale + (corr16 << 20) + (1 << 23)) >> 24, 0, 255).astype(np.uint8)
             return tr, (1 if settings.channels[ch].invert else 0)
         start = self.capture_start_word
         a = self.read_ring(2 * ch, start, Tw, lag_applied=self.cfg.hw_read_lag).astype(np.int16)
@@ -1199,11 +1223,11 @@ class Device:
         raw_clip0 = (a == 0) | (b == 0)
         raw_clip255 = (a == 255) | (b == 255)
         cal = self.cal[ch]
-        if self.cfg.cal_v2:  # fw 0.2.43: whole codes plus dithered sixteenths to T on both cores
-            ca, cb, _t = self._v2_corr(ch, self._clock_class(settings), settings)
-            dither = np.random.default_rng(self.capture_id).random((2, a.size))
-            ac = np.clip(a + np.floor(ca + dither[0]), 0, 255).astype(np.int16)
-            bc = np.clip(b + np.floor(cb + dither[1]), 0, 255).astype(np.int16)
+        if self.cfg.cal_v3:  # fw 0.2.45: code = (raw x gain + off + u) >> 16, u a 16-bit dither
+            c = self._v3_corr(ch, settings)
+            u = np.random.default_rng(self.capture_id).integers(0, 65536, (2, a.size), dtype=np.int64)
+            ac = np.clip((a.astype(np.int64) * c["gain"][0] + c["off"][0] + u[0]) >> 16, 0, 255).astype(np.int16)
+            bc = np.clip((b.astype(np.int64) * c["gain"][1] + c["off"][1] + u[1]) >> 16, 0, 255).astype(np.int16)
         else:
             ac = np.clip(a + cal.adc_a_comp, 0, 255)
             bc = np.clip(b + cal.adc_b_comp, 0, 255)
@@ -1901,7 +1925,7 @@ class Device:
         return self._ok(req, self.gen().pack())
 
     def _cal_resp(self, ch: int) -> P.CalResp:
-        """GET_CAL (1.10, 248 bytes). With cfg.cal_v2 the stored block is what a base calibration of this model
+        """GET_CAL (1.12, 256 bytes). With cfg.cal_v3 the stored block is what a base calibration of this model
         measures (per class and core, range-independent here), bound to the current PWM centres."""
         c = self.cal[ch]
         a = self.ring[2 * ch].astype(np.int64)
@@ -1913,22 +1937,24 @@ class Device:
         cls = self._clock_class(s)
         r.cal_flags = P.CAL_GATED if cls == P.CAL_CLASS_GATED else 0
         r.cal_shift = 128 - P.cal_target(d, c.dc_shift_value)
-        if not self.cfg.cal_v2:
+        if not self.cfg.cal_v3:
             r.cal_version, r.comp_a, r.comp_b = 1, c.adc_a_comp, c.adc_b_comp
             r.cal_zero_q8 = P.zero_code_q8(d, c.dc_shift_value)
             r.corr16 = 8 * (c.adc_a_comp + c.adc_b_comp)
+            r.off_a, r.off_b = c.adc_a_comp * 65536, c.adc_b_comp * 65536
             return r
-        t = self._v2_tables(ch)
-        r.cal_version, r.cal_flags = 2, r.cal_flags | P.CAL_LOADED | P.CAL_BOUND
+        t = self._v3_tables(ch)
+        r.cal_version = 3
+        r.cal_flags |= P.CAL_LOADED | P.CAL_BOUND | P.CAL_GAINS_MEASURED
         r.pwm, r.zero, r.slope, r.noise = t.pwm, t.zero, t.slope, t.noise
-        if self.decim_config(s).k:
-            r.comp_a = r.comp_b = r.frac_a = r.frac_b = 0
-        else:
-            ca, cb, _t = self._v2_corr(ch, cls, s)
-            r.comp_a, r.comp_b = math.floor(ca), math.floor(cb)
-            r.frac_a, r.frac_b = int(round((ca - math.floor(ca)) * 16)), int(round((cb - math.floor(cb)) * 16))
-        r.cal_zero_q8 = P.cal_target(d, c.dc_shift_value) * 256
-        r.corr16 = self._corr16(ch, s)
+        r.gain, r.gain_range, r.gain_flags, r.gain_lever = t.gain, t.gain_range, t.gain_flags, t.gain_lever
+        v = self._v3_corr(ch, s)
+        r.comp_a, r.comp_b = v["comp"]
+        r.frac_a, r.frac_b = v["frac"]
+        r.gain_a, r.gain_b = v["gain"]
+        r.off_a, r.off_b = v["off"]
+        r.gain16, r.corr16 = v["gain16"], v["corr16"]
+        r.cal_zero_q8 = v["t16"] * 16
         return r
 
     def _cmd_get_cal(self, req: P.Frame) -> P.Frame:

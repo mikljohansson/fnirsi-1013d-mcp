@@ -226,9 +226,8 @@ def settings_diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, list[An
 ORIGIN_NAMES = {P.CaptureOrigin.HOST: "host", P.CaptureOrigin.UI_RUN: "ui_run", P.CaptureOrigin.UI_SINGLE: "ui_single"}
 
 
-def compensate(raw: np.ndarray, comp: float) -> np.ndarray:
-    """Firmware per-core compensation (protocol 7.6 step 2): code + comp, clamped to 0..255 (comp is fractional with
-    calibration v2, where the scope dithers the fraction)."""
+def compensate(raw: np.ndarray, comp: int) -> np.ndarray:
+    """The 1.00o5 per-core compensation (protocol 7.6 step 2): code + comp, clamped to 0..255."""
     return np.clip(raw.astype(np.int16) + comp, 0, 255)
 
 
@@ -603,17 +602,17 @@ class Scope:
 
     def scale(self, ch: int | str, cfg: P.ChannelConfig | None = None, clock_class: int | None = None) -> ChannelScale:
         """Code <-> volt conversion for a channel with ``cfg`` (default: the current settings), per ADC core: the
-        scope's calibration v2 (protocol 1.10) for ``clock_class`` (P.cal_clock_class of the capture; default: the
+        scope's calibration v3 (protocol 1.12) for ``clock_class`` (P.cal_clock_class of the capture; default: the
         current time base and filter), else the per-unit calibration when it covers the range, else the firmware's
         uv_per_lsb / zero_code."""
         c = channel_index(ch)
         cal = self.get_cal(c)
         if clock_class is None:
-            clock_class = self.current_clock_class() if cal.v2 else P.CAL_CLASS_GATED
+            clock_class = self.current_clock_class() if cal.v3 else P.CAL_CLASS_GATED
         return channel_scale(c, cfg or self.get_channel(c), cal, self.unit_cal, clock_class)
 
     def current_clock_class(self) -> int:
-        """Calibration v2 clock class of the live settings (full at divider 0 or with the filter on)."""
+        """Calibration clock class of the live settings (full at divider 0 or with the filter on)."""
         dec = self.get_decim().next.k if self.info.caps & P.Caps.DECIM else 0
         return P.cal_clock_class(self.get_timebase().divider, dec > 0)
 
@@ -925,7 +924,7 @@ class Scope:
             cfg = cfgs[c]
             a, b = cores[2 * c], cores[2 * c + 1]
             sc = self.scale(c, cfg, cls)
-            comp = interleave(compensate(a, sc.adc_a_comp), compensate(b, sc.adc_b_comp), order)
+            comp = interleave(sc.codes_from_raw(a, "A"), sc.codes_from_raw(b, "B"), order)
             clip_raw = interleave((a == 0) | (a == 255), (b == 0) | (b == 255), order)
             off = start_sample - 2 * w0
             codes = comp[off: off + count].astype(np.float64)
@@ -948,8 +947,8 @@ class Scope:
         equally in every boxcar / CIC window, N being even)."""
         sc = self.scale(c, cfg, P.CAL_CLASS_FULL)  # the ADCs run at full rate with the filter on
         mean_raw = raw16.astype(np.float64) * dec.code_per_count
-        codes = mean_raw + (sc.adc_a_comp + sc.adc_b_comp) / 2  # v2: corr16 / 16; else the 1.00o5 mean compensation
-        volts = sc.volts_mean_compensated(codes)
+        codes = sc.codes_mean_raw(mean_raw)  # v3: T + gain16 (m - mean zero); else m + the 1.00o5 mean compensation
+        volts = sc.volts_mean_raw(mean_raw)
         if cfg.invert:
             volts = -volts
         # a rail in the window mean only; a clipped raw sample inside a window is not visible
@@ -1011,7 +1010,7 @@ class Scope:
             first_is_b = order == 0
             is_b = (idx % 2 == 0) == first_is_b
             if dec is not None:  # 8-bit trace of a decimated capture: every sample is a mean of both cores
-                volts = sc.volts_mean_compensated(codes)
+                volts = sc.volts_wide_codes(codes)
             else:
                 volts = np.where(is_b, sc.volts_compensated(codes, "B"), sc.volts_compensated(codes, "A"))
             out[CHANNEL_NAMES[c]] = ChannelData(CHANNEL_NAMES[c], codes, volts, clipped, cfg, scale=sc)

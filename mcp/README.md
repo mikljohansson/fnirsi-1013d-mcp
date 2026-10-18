@@ -196,11 +196,13 @@ flags, `meta_json`; decimated captures add `CH<n>_samples16`, the stored u16 fil
 `meta_json["decimation"]`); results up to 2000 points also carry the samples inline, longer ones a 500-point min/max
 preview.
 
-Physical units: volts are converted per ADC core. With the scope's own calibration v2 in use (firmware >= 0.2.43,
-protocol 1.10, GET_CAL version 2 after a base calibration at the scope), the 0 V code of each core comes from the
-scope's stored zeros for the capture's clock class (full rate: divider 0 and filtered captures; gated: legacy divider
->= 1) plus the offset slope; READ_TRACE codes are already corrected to the common zero, and a per-unit file then only
-contributes gains (`scaling` = `scope calibration v2 (...)`). Otherwise, with a per-unit calibration covering the range,
+Physical units: volts are converted per ADC core. With the scope's own calibration v3 in use (firmware >= 0.2.45,
+protocol 1.12, GET_CAL version 3 after a base calibration at the scope), each core's 0 V code and gain come from the
+scope's stored block for the capture's clock class (full rate: divider 0 and filtered captures; gated: legacy divider
+>= 1): zeros plus the per-class offset slope, and per-core gain corrections onto the gated mean gain (so 200 MSa/s,
+filtered and gated captures agree, and the cores agree at full rate). READ_TRACE codes are already corrected on the
+scope; a per-unit file then only contributes its gated per-core gains (`scaling` = `scope calibration v3 (...)`).
+Calibration v2 (firmware 0.2.43-0.2.44) is refused: update the firmware and re-run the base calibration. Otherwise, with a per-unit calibration covering the range,
 `raw_code = zero + slope x (offset_pwm - pwm_ref) + volts / gain` per core (fitted by `scope_calibrate_volts`,
 or imported from bench data with `python -m fnirsi1013d.calibration --import <t8 json...> --out <file>`); otherwise
 the firmware's `uv_per_lsb_q8` and `zero_code_q8` (the same for both cores, after the stored compensation).
