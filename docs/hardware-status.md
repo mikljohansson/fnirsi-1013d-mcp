@@ -193,3 +193,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   hands-free (first ENTER_FEL attempt refused with E_BUSY while the owner was in a menu, as designed). Census 2000 PINGs 0/0, PING median 0.36 ms
   (fast path); 64 KiB transfers refused only while a menu is open. Startup 1.5 s gap attributed to the splash BMP load; kept (coordinator decision).
   Card still holds 0.2.3; persist and the 47-counter readout pending the owner leaving the menus.
+- Owner's 0.2.7 verdict: "v0.2.7" in the main-screen corner and on the diagnostics view, no Temperature line. MCP chip check in progress (port held
+  open by the coordinator while the owner opens menus).
+- Repository published: https://github.com/mikljohansson/fnirsi-1013d-mcp (public, 2026-10-18, owner's decision); first CI run triggered by the push.
