@@ -469,3 +469,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   2 of 3 M18x18 inferred; clk_200MHz slack +0.324 ns; tb passes (latency 25 write clocks verified, EXT lag formula within 1-4 ns); FIR engages
   at 10 MSa/s and slower. Bitstream sha256 5040a2ae... pinned, padded image 5ade9e75.... **Not flashed**; waits for mutation runs, docs, and
   the firmware support (queue: FPGA 0x1535 firmware support, now unblocked for a fresh firmware agent).
+- fw-cal merged into main (merge b27c1ee): calibration v2, fw 0.2.43, protocol 1.10, row 48. Rebuilt on main: sha256 b8efcb04..., pinned with
+  ELF. SD sectors 700-710 backed up before the bench (backups/sdcard/sd_700-710_20261018-224105_pre-calv2.bin). Loaded: census clean,
+  GET_CAL both channels: 248 bytes, version 1, flags 4 (fw-cal expected flags 0 before calibration; to be explained). Pass times before
+  calibration: 44 ms at 20 MSa/s, 45 ms at 1 MSa/s, 58 ms at ~10 kSa/s (max 79-80). Next: owner runs Base calibration with probes and USB
+  unplugged. fw-gen6 spawned (worktree) on the 0.2.44 batch: 0x1535 FIR support, spectrum strip overdraw fix, CIC2 default.
