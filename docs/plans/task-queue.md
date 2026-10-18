@@ -103,6 +103,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Dispatched
 
+- docs-gen1 (Sonnet, docs only, started 10-19 01:30): README / guides / protocol / flashing-releasing / AGENTS.md consistency pass for 0.2.48.
 - fw-gen7 (done 01:40, about 400k tokens, retired): purge batch merged into main (a86cd6c); the merged main build is numbered 0.2.48.
 - fw-mmu (done 01:10, about 330k tokens, retired): fw 0.2.48 MMU + D-cache merged; images pinned backups/fw-0.2.48_*.bin (MMU and nommu).
 - bode-design (done 01:05): docs/plans/bode-design.md committed fe5780b.
