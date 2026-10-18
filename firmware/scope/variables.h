@@ -11,6 +11,7 @@
 #include "font_structs.h"
 #include "fnirsi_1013d_scope.h"
 #include "ff.h"
+#include "adc_cal.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Version info
@@ -485,6 +486,17 @@ struct tagChannelSettings
   int16  compensation;
   int16  adc1compensation;
   int16  adc2compensation;
+
+  //Zero correction of the current readout (fpga_prepare_correction, adc_cal.h): whole codes per core, sixteenths
+  //added by dither, the dcoffset term of the measurements, the 16-bit path constant; frac is the current pass's
+  int16  comp_a;
+  int16  comp_b;
+  uint8  frac;
+  uint8  frac_a;
+  uint8  frac_b;
+  uint8  cal_v2;
+  int32  dcshift;
+  int32  corr16;
   
   //DC offset calibration for center level of the ADC's
   uint16 dc_calibration_offset[7];
@@ -909,6 +921,11 @@ extern FPGASETTINGS     fpgasettings;
 
 extern CHANNELSETTINGS  calibrationsettings;
 
+//Calibration data v2 (adc_cal.h): per-core zeros of both channels, loaded from sector 708 or set by the base
+//calibration; adc_cal_loaded = 1 when the block is valid (in use per channel only while bound to its PWM centres)
+extern acal_channel adc_cal[2];
+extern uint8        adc_cal_loaded;
+
 extern SCOPESETTINGS    savedscopesettings1;
 extern SCOPESETTINGS    savedscopesettings2;
 
@@ -1028,18 +1045,6 @@ extern uint16 previous_ch_ref5_position;
 extern uint16 previous_ch_ref6_position;
 extern uint16 previous_ch_ref7_position;
 extern uint16 previous_ch_ref8_position;
-
-//----------------------------------------------------------------------------------------------------------------------------------
-//Calibration data
-//----------------------------------------------------------------------------------------------------------------------------------
-
-extern uint32 samplerateindex;
-
-//Average data for calibration calculations
-extern uint32 samplerateaverage[2][6];
-
-//Single ADC bit dc offset step per input sensitivity setting
-extern uint32 sampleratedcoffsetstep[2][6];
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Predefined data

@@ -35,7 +35,7 @@ void scope_acquire_trace_data(void);
 void scope_process_trigger(uint32 count);   
 
 uint32 scope_do_baseline_calibration(void);
-uint32 scope_do_channel_calibration(void);
+extern char calibration_fail_reason[40];  //"CH1: <reason>" after a failed base calibration
 void scope_input_calibration(void);
 
 void scope_do_50_percent_trigger_setup(void);

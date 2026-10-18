@@ -12,6 +12,7 @@ static const char *f(unsigned long long mhz) { fmt_freq(b, mhz); return b; }
 static const char *r(unsigned long long mhz) { fmt_freq_units(b, mhz, 1); return b; }
 static const char *c1(int v) { fmt_c1(b, v); return b; }
 static const char *si(int v) { fmt_int(b, v); return b; }
+static const char *x16(int v) { fmt_x16(b, v); return b; }
 
 int main(void)
 {
@@ -37,6 +38,11 @@ int main(void)
   T_STR(r(10000000ull), "10.00 kSa/s");
   T_STR(r(0), "0 Sa/s");
 
+  T_STR(x16(2095), "130.94");
+  T_STR(x16(-8), "-0.50");
+  T_STR(x16(0), "0.00");
+  T_STR(x16(1), "0.06");
+  T_STR(x16(-16 * 5 - 6), "-5.38");
   T_STR(c1(0), "0.0");
   T_STR(c1(-1234), "-12.3");
   T_STR(c1(1235), "12.4");

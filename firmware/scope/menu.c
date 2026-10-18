@@ -20,6 +20,7 @@
 #include "generator.h"
 
 #include "sin_cos_math.h"
+#include "spec_fmt.h"
 
 #include <string.h>
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -7760,6 +7761,80 @@ void scope_system_settings_ONOFF_RTC_item(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//Diagnostics, right column: calibration data version and, per channel at its current range, the stored core zeros of
+//both clock classes, their spread and noise, and the correction the next readout applies (adc_cal.h)
+static void scope_diagnostic_adc_cal(void)
+{
+  PCHANNELSETTINGS chs[2] = { &scopesettings.channel1, &scopesettings.channel2 };
+  static const char *cls_name[ACAL_CLASSES] = { "full ", "gated" };
+  const acal_channel *c;
+  acal_corr k;
+  char   line[48], *p;
+  uint32 ch, cl, r, y;
+
+  display_set_font(&font_3);
+  display_set_fg_color(adc_cal_loaded ? GREEN_COLOR : ORANGE_COLOR);
+  display_text(525, 20, adc_cal_loaded ? "Calibration data: v2" : "Calibration data: v1");
+
+  for(ch=0;ch<2;ch++)
+  {
+    y = ch ? 205 : 45;
+    c = &adc_cal[ch];
+    r = (chs[ch]->samplevoltperdiv < ACAL_RANGES) ? chs[ch]->samplevoltperdiv : ACAL_RANGES - 1;
+    fpga_channel_correction(chs[ch], &k);
+
+    display_set_fg_color(ch ? CHANNEL2_COLOR : CHANNEL1_COLOR);
+    p = fmt_str(line, "ADC cores, range ");
+    fmt_uint(p, r);
+    display_text(525, y, (int8 *)line);
+    display_set_fg_color(WHITE_COLOR);
+
+    if(!k.v2)
+    {
+      display_text(525, y + 15, (adc_cal_loaded && !acal_bound(c, chs[ch]->dc_calibration_offset)) ?
+                                "v2 data stale: run base cal" : "no v2 data: run base cal");
+      p = fmt_str(line, "1.00o5 comp A ");
+      p = fmt_int(p, k.comp_a);
+      p = fmt_str(p, "  B ");
+      fmt_int(p, k.comp_b);
+      display_text(525, y + 30, (int8 *)line);
+      continue;
+    }
+
+    for(cl=0;cl<ACAL_CLASSES;cl++)
+    {
+      p = fmt_str(line, cls_name[cl]);
+      p = fmt_str(p, " A ");
+      p = fmt_x16(p, c->zero[cl][ACAL_CORE_A][r]);
+      p = fmt_str(p, " B ");
+      p = fmt_x16(p, c->zero[cl][ACAL_CORE_B][r]);
+      p = fmt_str(p, " d ");
+      fmt_x16(p, c->zero[cl][ACAL_CORE_A][r] - c->zero[cl][ACAL_CORE_B][r]);
+      display_text(525, y + 15 + 15 * cl, (int8 *)line);
+    }
+
+    p = fmt_str(line, "noise A ");
+    p = fmt_x16(p, c->noise[ACAL_GATED][ACAL_CORE_A][r]);
+    p = fmt_str(p, "  B ");
+    fmt_x16(p, c->noise[ACAL_GATED][ACAL_CORE_B][r]);
+    display_text(525, y + 45, (int8 *)line);
+
+    p = fmt_str(line, "slope A ");
+    p = fmt_int(p, (c->slope[ACAL_CORE_A][r] * 10000) / 65536);
+    p = fmt_str(p, "  B ");
+    p = fmt_int(p, (c->slope[ACAL_CORE_B][r] * 10000) / 65536);
+    fmt_str(p, " e-4/count");
+    display_text(525, y + 60, (int8 *)line);
+
+    p = fmt_str(line, "now A ");
+    p = fmt_x16(p, 16 * k.comp_a + k.frac_a);
+    p = fmt_str(p, " B ");
+    p = fmt_x16(p, 16 * k.comp_b + k.frac_b);
+    fmt_str(p, k.cls == ACAL_FULL ? " (full)" : " (gated)");
+    display_text(525, y + 75, (int8 *)line);
+  }
+}
+
 void scope_open_diagnostic_view(void)
 {
   //Setup the menu in a separate buffer to be able to slide it onto the screen
@@ -8025,6 +8100,8 @@ void scope_open_diagnostic_view(void)
     
   //display_decimal(430, 40, scopesettings.samplecount);
   
+  scope_diagnostic_adc_cal();
+
   //Add the button for EXIT
   scope_exit_button(710, 410, 0);
   
@@ -8139,7 +8216,12 @@ void scope_show_calibration_fail(void)
   display_set_font(&font_3);
   
   display_text(420, 233, "Offset calibration failed");
-  display_text(445, 255, "Check hardware");
+
+  //The reason of the base calibration (old values kept), or the 1.00o5 text
+  if(calibration_fail_reason[0])
+    display_text(405, 255, (int8 *)calibration_fail_reason);
+  else
+    display_text(445, 255, "Check hardware");
 }
 
 //-*********************************************************************************

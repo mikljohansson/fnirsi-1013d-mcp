@@ -396,6 +396,7 @@ void fpga_set_sample_rate(uint32 samplerate)
 
     //Write the time base clock setting to the FPGA
     fpga_write_int(sample_rate_settings[samplerate]);
+    fpga_divider = sample_rate_settings[samplerate];
 
 #if PC_PROTOCOL
     //Decimation filter (0x1534+): N follows the divider, and a change needs the filter to settle
@@ -781,6 +782,40 @@ uint32 isqrt(uint32 n) {
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+uint32 fpga_divider;
+static uint32 fpga_dither = 1;
+
+void fpga_channel_correction(PCHANNELSETTINGS settings, acal_corr *c)
+{
+  const acal_channel *cal = 0;
+
+  if(adc_cal_loaded)
+  {
+    if(settings == &scopesettings.channel1)
+      cal = &adc_cal[0];
+    else if(settings == &scopesettings.channel2)
+      cal = &adc_cal[1];
+  }
+
+  acal_correction(cal, settings->dc_calibration_offset, settings->samplevoltperdiv, fpga_divider, settings->dcoffset,
+                  settings->dc_shift_value, settings->adc1compensation, settings->adc2compensation, c);
+}
+
+void fpga_prepare_correction(PCHANNELSETTINGS settings)
+{
+  acal_corr c;
+
+  fpga_channel_correction(settings, &c);
+
+  settings->comp_a  = c.comp_a;
+  settings->comp_b  = c.comp_b;
+  settings->frac_a  = c.frac_a;
+  settings->frac_b  = c.frac_b;
+  settings->cal_v2  = c.v2;
+  settings->dcshift = c.shift;
+  settings->corr16  = c.corr16;
+}
+
 void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
 {
   uint32 threshold;
@@ -794,9 +829,16 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
   settings->minDC     = 0x7FFFFFFF;
   settings->maxDC     = 0;
   
+  //Zero correction for this readout (per core, for the capture's clock class)
+  fpga_prepare_correction(settings);
+
 #if PC_PROTOCOL
-  //Decimation filter on: read the 16-bit samples now; both passes below then take them from memory (odd, even)
+  //Decimation filter on: read the 16-bit samples now; both passes below then take them from memory (odd, even). The
+  //converted samples already carry the full correction (corr16), so no dither on top
   pc_glue_decim_read(settings, triggerpoint);
+
+  if(pc_decim_src)
+    settings->frac_a = settings->frac_b = 0;
 #endif
 
   //Send command 0x1F to the FPGA followed by the translated data returned from command 0x14
@@ -810,7 +852,8 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
   settings->checkfirstadc = 0;
   
   //Setup for reading the first ADC
-  settings->compensation = settings->adc1compensation;
+  settings->compensation = settings->comp_a;
+  settings->frac = settings->frac_a;
   settings->buffer = &settings->tracebuffer[1];
   
   //Read the data for the first ADC. Samples start on the second location, skipping every other sample
@@ -885,8 +928,9 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
   pc_glue_decim_even();
 #endif
 
-  //Setup for reading the first ADC
-  settings->compensation = settings->adc2compensation;
+  //Setup for reading the second ADC
+  settings->compensation = settings->comp_b;
+  settings->frac = settings->frac_b;
   settings->buffer = &settings->tracebuffer[0];
   
   //Read the data for the second ADC. Samples start on the first location, skipping every other sample
@@ -1070,6 +1114,13 @@ void fpga_read_adc_data(PCHANNELSETTINGS settings)
   register int32  sample;
   register uint32 count;
   register uint32 sum = 0;
+  //Zero correction of this pass (fpga_prepare_correction): whole codes, plus one with probability frac / 16
+  register int32  comp    = settings->compensation;
+  register uint32 frac    = settings->frac;
+  register uint32 dither  = fpga_dither;
+  register int32  dcshift = settings->dcshift;
+  register int32  comp_a  = settings->comp_a;
+  register int32  comp_b  = settings->comp_b;
 #if PC_PROTOCOL
   const int16 *src = pc_decim_src;      //decimation filter: samples already read and converted (pc_glue_decim_read)
 #endif
@@ -1111,8 +1162,9 @@ void fpga_read_adc_data(PCHANNELSETTINGS settings)
     //Sum the raw data for ADC difference calibration
     sum += sample;
 
-    //Compensate the value for ADC in equality
-    sample += settings->compensation;
+    //Zero correction of this core (adc_cal.h): whole codes and the dithered sixteenths
+    ACAL_DITHER_STEP(dither);
+    sample += comp + ((dither >> 28) < frac);
      
     //Check if sample became negative
     if(sample < 0)
@@ -1139,32 +1191,32 @@ void fpga_read_adc_data(PCHANNELSETTINGS settings)
     {
       //When ADC1 compensation is positive, ADC1 bottoms out on this value
       //Near the top ADC2 reaches the top value first, so same method is needed
-      if(settings->adc1compensation > 0)
+      if(comp_a > 0)
       {
         //So when the compensated ADC2 sample is below the ADC1 compensation value the reading needs to be matched
-        if(sample < settings->adc1compensation)
+        if(sample < comp_a)
         {
           //Match the two readings when within compensation range
           settings->buffer[1] = sample;
         }
         //Or when the compensated ADC1 sample is above max value ADC2 can reach the reading also needs to be matched
-        else if(settings->buffer[1] > (255 + settings->adc2compensation))
+        else if(settings->buffer[1] > (255 + comp_b))
         {
           //Use the compensated ADC1 sample in that case
           sample = settings->buffer[1];
         }
       }
       //When ADC1 compensation is negative, ADC2 bottoms out on it's compensation value
-      else if(settings->adc1compensation < 0)
+      else if(comp_a < 0)
       {
         //So when the compensated ADC1 sample is below the ADC2 compensation value the reading needs to be matched
-        if(settings->buffer[1] < settings->adc2compensation)
+        if(settings->buffer[1] < comp_b)
         {
           //Use the compensated ADC1 sample in that case
           sample = settings->buffer[1];
         }
         //Or when the compensated ADC2 sample is above max value ADC1 can reach the reading also needs to be matched
-        else if(sample > (255 + settings->adc1compensation))
+        else if(sample > (255 + comp_a))
         {
           //Match the two readings when within compensation range
           settings->buffer[1] = sample;
@@ -1383,9 +1435,7 @@ void fpga_read_adc_data(PCHANNELSETTINGS settings)
     */
   //***************  
     //For dc shift in DC mode  
-    //385 korekcia nameranej hodnoty (avg=0 pri DC s offsetom aj AC mode), vecie cislo-nizsia zobrazena hodnota
-    //sample+=((settings->dcoffset*100)/385); //386 = -200mV, 385 = +100mV
-    sample+=((settings->dcoffset*100)/(settings->dc_shift_value)); //386 = -200mV, 385 = +100mV
+    sample += dcshift;              //dcoffset x 100 / dc_shift_value, computed once per readout
     
     //Get the minimum value of the samples
     if(sample < settings->min)
@@ -1416,6 +1466,8 @@ void fpga_read_adc_data(PCHANNELSETTINGS settings)
     count--;
   }
  
+  fpga_dither = dither;
+
   //Calculate the raw average
   settings->rawaverage = sum / scopesettings.nofsamples;
 }

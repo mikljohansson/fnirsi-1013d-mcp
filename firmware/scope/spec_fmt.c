@@ -38,6 +38,21 @@ char *fmt_c1(char *p, int32 c)
   return p;
 }
 
+char *fmt_x16(char *p, int32 v)
+{
+  uint32 a = ((uint32)((v < 0) ? -v : v) * 100 + 8) / 16;
+
+  //No sign on a value that rounds to zero
+  if((v < 0) && a)
+    *p++ = '-';
+  p = fmt_uint(p, a / 100);
+  *p++ = '.';
+  *p++ = '0' + (a / 10) % 10;
+  *p++ = '0' + (a % 10);
+  *p = 0;
+  return p;
+}
+
 char *fmt_int(char *p, int32 v)
 {
   if(v < 0) { *p++ = '-'; v = -v; }

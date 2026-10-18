@@ -15,6 +15,7 @@
 
 #include "usb_interface.h"
 #include "pc_hooks.h"
+#include "spec_fmt.h"
 #include "variables.h"
 
 #include "sin_cos_math.h"
@@ -964,341 +965,249 @@ void scope_process_trigger(uint32 count)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-uint32 scope_do_baseline_calibration(void)
+//Base calibration (calibration data v2, adc_cal.h, firmware/README.md section 6.2). Inputs open or shorted. Per channel and
+//hardware range: the PWM centre where the mean of both cores reads 128, the offset slope of each core from two PWM points
+//150 counts either side, and each core's zero at that centre with the ADC clock gated (2 MSa/s, every legacy time base
+//but 200 MSa/s) and at full rate (200 MSa/s, every filtered capture). Nothing changes unless both channels pass.
+
+#define CAL_PWM_HIGHCODE    500     //coarse points: low PWM gives a high code
+#define CAL_PWM_LOWCODE    1200
+#define CAL_FINE_STEP       150     //slope points: centre +- 150 counts (+- 40 codes)
+#define CAL_RATE_GATED        6     //2 MSa/s
+#define CAL_RATE_FULL         0     //200 MSa/s
+
+char calibration_fail_reason[40];
+
+static void cal_set_rate(uint32 rate)
 {
-  uint32 flag = 1;
-  uint32 voltperdiv;
-  uint8 backup_invert_ch1;
-  uint8 backup_invert_ch2;
-  //uint8 backup_samplerate;
-  //uint8 backup_timeperdiv; 
-
-  //Disable the trigger circuit
-  scopesettings.samplemode = 0;
-
-  //Switch back to AUTO trigger mode to avoid lockup in NORMAL or SINGLE mode
-  scopesettings.triggermode = 0;
-  
-  //Show it on the display
-  scope_trigger_settings(0);
-  
-  //Also set the FPGA to the AUTO trigger mode
-  fpga_set_trigger_mode();
-  
-  //Set number of samples
-  //This can be changed to a global define
-  scopesettings.samplecount = 1000;//SAMPLE_COUNT;
-  scopesettings.nofsamples = 500;
-  //scopesettings.nofsamples  = SAMPLES_PER_ADC;
-
-  //Send the command for setting the trigger level to the FPGA
-  fpga_write_cmd(0x17);
-  fpga_write_byte(0);
-  
-  //Sample rate ant time per div settings backup
-  //backup_samplerate = scopesettings.samplerate;
-  //backup_timeperdiv = scopesettings.timeperdiv;
-  
-  //Invert channel settings backup and OFF
-  backup_invert_ch1 = scopesettings.channel1.invert;
-  backup_invert_ch2 = scopesettings.channel2.invert;
-  scopesettings.channel1.invert = 0;
-  scopesettings.channel2.invert = 0;
-  
-  //Set offset to 0
-  scopesettings.channel1.dcoffset = 0;
-  scopesettings.channel2.dcoffset = 0;
-
-  //Clear the compensation values before doing the calibration
-  calibrationsettings.adc1compensation = 0;
-  calibrationsettings.adc2compensation = 0;
-
-  //Setup for channel 1 calibration
-  calibrationsettings.voltperdivcommand = 0x33;
-  calibrationsettings.offsetcommand     = 0x32;
-  calibrationsettings.adc1command       = 0x20;
-  calibrationsettings.adc2command       = 0x21;
-
-  //Use the trace buffer of this channel
-  calibrationsettings.tracebuffer = (uint8 *)channel1tracebuffer;
-  
-  display_set_font(&font_3);
-  //Display the text in channel color
-  display_set_fg_color(CHANNEL1_COLOR);
-  display_text(409, 255, "Ch1....");
-  
-  //Calibrate this channel
-  flag &= scope_do_channel_calibration(); 
-
-  //Check if calibration was successful
-  if(flag)
-  { 
-    //Display the text in channel color
-    display_set_fg_color(GREEN_COLOR); 
-    display_text(470, 255, "OK");
-    timer0_delay(300);
-    
-    //Copy the results if so
-    for(voltperdiv=0;voltperdiv<6;voltperdiv++)
-    {
-      //For each volt per division setting there is a DC calibration offset
-      scopesettings.channel1.dc_calibration_offset[voltperdiv] = calibrationsettings.dc_calibration_offset[voltperdiv];
-    }
-
-    //The last one is also for the highest sensitivity setting
-    scopesettings.channel1.dc_calibration_offset[6] = scopesettings.channel1.dc_calibration_offset[5];
-
-    //Copy the ADC compensation values
-    scopesettings.channel1.adc1compensation = calibrationsettings.adc1compensation;
-    scopesettings.channel1.adc2compensation = calibrationsettings.adc2compensation;
-  }
-
-  //Setup for channel 2 calibration
-  calibrationsettings.voltperdivcommand = 0x36;
-  calibrationsettings.offsetcommand     = 0x35;
-  calibrationsettings.adc1command       = 0x22;
-  calibrationsettings.adc2command       = 0x23;
-
-  //Use the trace buffer of this channel
-  calibrationsettings.tracebuffer = (uint8 *)channel2tracebuffer;
-  
-  //Draw the background in dark grey
-  display_set_fg_color(DARKGREY_COLOR);
-  display_fill_rect(400, 250, 100, 28);
-//  display_fill_rounded_rect(395, 222, 109, 58, 3);
-  //Display the text in channel color
-  display_set_fg_color(CHANNEL2_COLOR);
-  display_text(409, 255, "Ch2....");
-  
-  //Calibrate this channel
-  flag &= scope_do_channel_calibration();
-
-  //Check if calibration was successful
-  if(flag)
-  { 
-    //Display the text in channel color
-    display_set_fg_color(GREEN_COLOR); 
-    display_text(470, 255, "OK");
-    timer0_delay(300);
-    
-    //Copy the results if so
-    for(voltperdiv=0;voltperdiv<6;voltperdiv++)
-    {
-      //For each volt per division setting there is a DC calibration offset
-      scopesettings.channel2.dc_calibration_offset[voltperdiv] = calibrationsettings.dc_calibration_offset[voltperdiv];
-    }
-
-    //The last one is also for the highest sensitivity setting
-    scopesettings.channel2.dc_calibration_offset[6] = scopesettings.channel2.dc_calibration_offset[5];
-
-    //Copy the ADC compensation values
-    scopesettings.channel2.adc1compensation = calibrationsettings.adc1compensation;
-    scopesettings.channel2.adc2compensation = calibrationsettings.adc2compensation;
-  } 
-  
-  //Set a default sample rate and time per division setting
-  //scopesettings.timeperdiv = 23;//12
-  //scopesettings.samplerate = time_per_div_sample_rate[23];//12
-  
-  //Restore backup time per div and sample rate
-  //scopesettings.timeperdiv = backup_timeperdiv;
-  //scopesettings.samplerate = backup_samplerate;
-  
-  scopesettings.samplecount = fpgasettings.totalsamples;//SAMPLE_COUNT;
-  scopesettings.nofsamples = fpgasettings.totalsamples/2;
-
-  //Load the normal operation settings back into the FPGA
-  fpga_set_channel_voltperdiv(&scopesettings.channel1);
-  fpga_set_channel_offset(&scopesettings.channel1);
-  fpga_set_channel_voltperdiv(&scopesettings.channel2);
-  fpga_set_channel_offset(&scopesettings.channel2);
-  fpga_set_sample_rate(scopesettings.samplerate);
-  
-  //Show the new settings
-  scope_acqusition_settings(0);
-  
-  //Restore invert channel settings
-  scopesettings.channel1.invert = backup_invert_ch1;
-  scopesettings.channel2.invert = backup_invert_ch2;
-  
-  //Display the channel menu select buttons and their settings
-  scope_channel_settings(&scopesettings.channel1, 0);
-  scope_channel_settings(&scopesettings.channel2, 0);
- 
-  return(flag);
+  fpga_set_sample_rate(rate);
+  fpga_set_time_base(sample_rate_time_per_div[rate]);
 }
 
-//----------------------------------------------------------------------------------------------------------------------------------
-
-#define HIGH_DC_OFFSET   500
-#define LOW_DC_OFFSET   1200
-
-uint32 scope_do_channel_calibration(void)
+//convs conversions at PWM pwm on range r: per core accumulators, first and second half of the conversions apart
+static void cal_measure(uint32 r, int32 pwm, uint32 settle_ms, uint32 convs, acal_acc acc[2][2])
 {
-  uint32 flag = 1;
-  int32  samplerate;
-  int32  voltperdiv;
-  int32  highaverage;
-  int32  lowaverage;
-  int32  dcoffsetstep;
-  int32  compensationsum = 0;
+  uint32 i, h;
 
-  //Calibrate for the hardware sensitivity settings
-  for(voltperdiv=0;voltperdiv<6;voltperdiv++)
+  calibrationsettings.dc_calibration_offset[r] = (uint16)pwm;
+  fpga_set_channel_offset(&calibrationsettings);
+  timer0_delay(settle_ms);
+
+  memset(acc, 0, 4 * sizeof(acal_acc));
+
+  for(i=0;i<convs;i++)
   {
-    //Set the to do sensitivity setting in the FPGA
-    calibrationsettings.samplevoltperdiv = voltperdiv;
-    fpga_set_channel_voltperdiv(&calibrationsettings);
-
-    //Wait 60ms to allow the relays to settle
-    timer0_delay(60);//50
-
-    //Start with the first set of averages
-    samplerateindex = 0;
-
-    //Do the measurements on two sample rates. 200MSa/s and 50KSa/s
-    for(samplerate=0;samplerate<18;samplerate+=11)//ok      //0 a 11  4 a 7   
-    {
-      //Set the selected sample rate
-      fpga_set_sample_rate(samplerate);
-
-      //Set the matching time base
-      fpga_set_time_base(sample_rate_time_per_div[samplerate]); // toto je problem?
-
-      //Set the high DC offset in the FPGA (Lower value returns higher ADC reading)
-      calibrationsettings.dc_calibration_offset[voltperdiv] = HIGH_DC_OFFSET;
-      fpga_set_channel_offset(&calibrationsettings);
-
-      //Wait 30ms before sampling
-      timer0_delay(30);//25
-
-      //Start the conversion
-      fpga_do_conversion();
-      //Wait until conversion done or touch panel active
-      while (fpga_done_conversion() == 0) PC_BUSY_POLL();
-
-      //Get the data from a sample run
-      fpga_read_sample_data(&calibrationsettings, 100);
-
-      //Need the average as one reading here. Only use ADC1 data
-      highaverage = calibrationsettings.adc1rawaverage;
-
-      //Set the low DC offset in the FPGA (Higher value returns lower ADC reading)
-      calibrationsettings.dc_calibration_offset[voltperdiv] = LOW_DC_OFFSET;
-      fpga_set_channel_offset(&calibrationsettings);
-
-      //Wait 30ms before sampling
-      timer0_delay(30);
-
-      //Start the conversion
-      fpga_do_conversion();
-      //Wait until conversion done or touch panel active
-      while (fpga_done_conversion() == 0) PC_BUSY_POLL();
-
-      //Get the data from a sample run
-      fpga_read_sample_data(&calibrationsettings, 100);
-
-      //Need the average as another reading here. Only use ADC1 data
-      lowaverage = calibrationsettings.adc1rawaverage;
-
-      //Calculate the DC offset step for a single ADC bit change for this volt/div setting
-      //Low DC offset minus high DC offset (1200 - 500) = 700. Scaled up for fixed point calculation ==> 700 << 20 = 734003200
-      dcoffsetstep = 734003200 / (highaverage - lowaverage);
-
-      //Calculate the average DC offset settings for both the low to center as the high to center readings
-      highaverage = HIGH_DC_OFFSET + (((highaverage - 128) * dcoffsetstep) >> 20);
-      lowaverage  = LOW_DC_OFFSET  - (((128 - lowaverage) * dcoffsetstep) >> 20);
-
-      //Set the result for this sample rate and volt per division setting
-      samplerateaverage[samplerateindex][voltperdiv] = (highaverage + lowaverage) / 2;
-
-      //Save the dc offset step for final calibration after compensation data has been determined
-      sampleratedcoffsetstep[samplerateindex][voltperdiv] = dcoffsetstep;
-
-      //Select the next set of sample indexes
-      samplerateindex++;
-    }
-  }
-
-  //Set the sample rate to 2MSa/s
-  fpga_set_sample_rate(6);
-
-  //Set the matching time base
-  fpga_set_time_base(sample_rate_time_per_div[6]);
-
-  //Average and test the results on a third sample rate
-  for(voltperdiv=0;voltperdiv<6;voltperdiv++)
-  {
-    //Set the average of the two measurements as the DC offset to work with
-    calibrationsettings.dc_calibration_offset[voltperdiv] = (samplerateaverage[0][voltperdiv] + samplerateaverage[1][voltperdiv]) / 2;
-
-    //Set the to do sensitivity setting in the FPGA
-    calibrationsettings.samplevoltperdiv = voltperdiv;
-    fpga_set_channel_voltperdiv(&calibrationsettings);
-
-    //Set the new DC channel offset in the FPGA
-    fpga_set_channel_offset(&calibrationsettings);
-
-    //Wait 60ms before sampling
-    timer0_delay(60);
-
-    //Start the conversion
     fpga_do_conversion();
-    //Wait until conversion done or touch panel active
-    while (fpga_done_conversion() == 0) PC_BUSY_POLL();
+    while(fpga_done_conversion() == 0) PC_BUSY_POLL();
 
-    //Get the data from a sample run
+    //No compensation (calibrationsettings has none), no invert, no dcoffset: raw codes, core A odd, core B even
     fpga_read_sample_data(&calibrationsettings, 100);
 
-    //Check if the average reading is outside allowed range
-    if((calibrationsettings.adc1rawaverage < 125) || (calibrationsettings.adc1rawaverage > 131))
-    //if((calibrationsettings.adc1rawaverage < 95) || (calibrationsettings.adc1rawaverage > 160))
+    h = (i >= convs / 2);
+    acal_acc_add(&acc[h][ACAL_CORE_A], calibrationsettings.tracebuffer + 1, scopesettings.nofsamples, 2);
+    acal_acc_add(&acc[h][ACAL_CORE_B], calibrationsettings.tracebuffer, scopesettings.nofsamples, 2);
+  }
+}
+
+//Both halves of a measurement merged: mean, noise and clipped samples per core, drift between the halves
+static void cal_result(acal_acc acc[2][2], int32_t *mean16, int32_t *drift16, uint32_t *noise16, uint32_t *clipped)
+{
+  uint32 k;
+  acal_acc all;
+
+  for(k=0;k<2;k++)
+  {
+    all = acc[0][k];
+    acal_acc_merge(&all, &acc[1][k]);
+    mean16[k] = acal_mean16(&all);
+
+    if(drift16)
+      drift16[k] = acal_mean16(&acc[1][k]) - acal_mean16(&acc[0][k]);
+
+    if(noise16)
+      noise16[k] = acal_rms16(&all);
+
+    *clipped += all.clipped;
+  }
+}
+
+static int cal_channel(acal_channel *c)
+{
+  acal_acc        acc[2][2];
+  acal_range_meas m;
+  int32_t         mean[2], hi, lo, p;
+  uint32_t        r, unused = 0;
+  int             rc;
+
+  for(r=0;r<ACAL_RANGES;r++)
+  {
+    calibrationsettings.samplevoltperdiv = r;
+    fpga_set_channel_voltperdiv(&calibrationsettings);
+    timer0_delay(60);
+
+    memset(&m, 0, sizeof(m));
+    cal_set_rate(CAL_RATE_GATED);
+
+    //Coarse centre from two far points (clipping there only biases the estimate)
+    cal_measure(r, CAL_PWM_HIGHCODE, 30, 2, acc);
+    cal_result(acc, mean, 0, 0, &unused);
+    hi = (mean[0] + mean[1]) / 2;
+    cal_measure(r, CAL_PWM_LOWCODE, 30, 2, acc);
+    cal_result(acc, mean, 0, 0, &unused);
+    lo = (mean[0] + mean[1]) / 2;
+
+    p = acal_centre_pwm(CAL_PWM_HIGHCODE, hi, CAL_PWM_LOWCODE, lo);
+
+    if(p < 0)
+      return ACAL_E_RESPONSE;
+
+    //Slope of each core
+    m.pwm_lo = p - CAL_FINE_STEP;
+    m.pwm_hi = p + CAL_FINE_STEP;
+    cal_measure(r, m.pwm_lo, 60, 4, acc);
+    cal_result(acc, m.mean16_lo, 0, 0, &m.clipped);
+    cal_measure(r, m.pwm_hi, 60, 4, acc);
+    cal_result(acc, m.mean16_hi, 0, 0, &m.clipped);
+
+    //Centre refined on the slope points, then the zeros there in both clock classes
+    m.pwm = acal_interp_pwm(m.pwm_lo, (m.mean16_lo[0] + m.mean16_lo[1]) / 2, m.pwm_hi,
+                            (m.mean16_hi[0] + m.mean16_hi[1]) / 2);
+
+    cal_measure(r, m.pwm, 60, 8, acc);
+    cal_result(acc, m.zero16[ACAL_GATED], m.drift16[ACAL_GATED], m.noise16[ACAL_GATED], &m.clipped);
+
+    cal_set_rate(CAL_RATE_FULL);
+    cal_measure(r, m.pwm, 30, 8, acc);
+    cal_result(acc, m.zero16[ACAL_FULL], m.drift16[ACAL_FULL], m.noise16[ACAL_FULL], &m.clipped);
+
+    rc = acal_range_store(&m, c, (uint8)r);
+
+    if(rc != ACAL_OK)
+      return rc;
+  }
+
+  return ACAL_OK;
+}
+
+uint32 scope_do_baseline_calibration(void)
+{
+  static const uint8 cmds[2][5] = { { 0x33, 0x32, 0x20, 0x21, 0x34 }, { 0x36, 0x35, 0x22, 0x23, 0x37 } };
+  acal_channel     newcal[2];
+  PCHANNELSETTINGS chs[2] = { &scopesettings.channel1, &scopesettings.channel2 };
+  uint8            backup_invert[2];
+  uint32           ch, r;
+  int              rc = ACAL_OK;
+  char            *p;
+
+  //Trigger off, AUTO mode (no lockup in NORMAL or SINGLE), level 0
+  scopesettings.samplemode  = 0;
+  scopesettings.triggermode = 0;
+  scope_trigger_settings(0);
+  fpga_set_trigger_mode();
+  fpga_write_cmd(0x17);
+  fpga_write_byte(0);
+
+  //1000 samples per readout, 500 per core
+  scopesettings.samplecount = 1000;
+  scopesettings.nofsamples  = 500;
+
+  for(ch=0;ch<2;ch++)
+  {
+    backup_invert[ch] = chs[ch]->invert;
+    chs[ch]->invert   = 0;
+    chs[ch]->dcoffset = 0;
+  }
+
+  //Scratch channel: no compensation, no invert, no dcoffset, DC coupling
+  memset(newcal, 0, sizeof(newcal));
+  calibrationsettings.adc1compensation = 0;
+  calibrationsettings.adc2compensation = 0;
+  calibrationsettings.invert           = 0;
+  calibrationsettings.dcoffset         = 0;
+  calibrationsettings.dc_shift_value   = 0;
+  calibrationsettings.coupling         = 0;
+  calibration_fail_reason[0]           = 0;
+
+  for(ch=0;ch<2;ch++)
+  {
+    calibrationsettings.voltperdivcommand = cmds[ch][0];
+    calibrationsettings.offsetcommand     = cmds[ch][1];
+    calibrationsettings.adc1command       = cmds[ch][2];
+    calibrationsettings.adc2command       = cmds[ch][3];
+    calibrationsettings.couplingcommand   = cmds[ch][4];
+    calibrationsettings.tracebuffer       = ch ? (uint8 *)channel2tracebuffer : (uint8 *)channel1tracebuffer;
+    fpga_set_channel_coupling(&calibrationsettings);
+
+    display_set_font(&font_3);
+    display_set_fg_color(DARKGREY_COLOR);
+    display_fill_rect(400, 250, 100, 28);
+    display_set_fg_color(ch ? CHANNEL2_COLOR : CHANNEL1_COLOR);
+    display_text(409, 255, ch ? "Ch2...." : "Ch1....");
+
+    rc = cal_channel(&newcal[ch]);
+
+    if(rc == ACAL_OK)
     {
-      //When deviation is more then 3, signal it as a failure
-      flag = 0;
-      
-      //Display the text in red color
-      display_set_fg_color(RED_COLOR);
-      display_text(455, 255, "FAIL 1");
-      timer0_delay(1500);
+      display_set_fg_color(GREEN_COLOR);
+      display_text(470, 255, "OK");
+      timer0_delay(300);
+      continue;
     }
 
-    //Sum the ADC differences
-    compensationsum += (calibrationsettings.adc2rawaverage - calibrationsettings.adc1rawaverage);
-  }
-
-  //Calculate the average of the ADC difference
-  compensationsum /= 6;
-
-  //Split the difference on the two ADC's
-  calibrationsettings.adc1compensation = compensationsum / 2;
-  calibrationsettings.adc2compensation = -1 * (compensationsum - calibrationsettings.adc1compensation);
-
-  //Check if the found result is within limits
-  if((compensationsum < -20) || (compensationsum > 20))
-  {
-    //Not so clear the flag
-    flag = 0;
-    
-    //Draw the background in dark grey
-    display_set_fg_color(DARKGREY_COLOR);
-    display_fill_rect(450, 250, 50, 28);
-    
-    //Display the text in red color
     display_set_fg_color(RED_COLOR);
-    display_text(455, 255, "FAIL 2");
+    display_text(455, 255, "FAIL");
     timer0_delay(1500);
+
+    //"CH1: " + the reason (at most 21 characters), shown by scope_show_calibration_fail
+    p = fmt_str(calibration_fail_reason, ch ? "CH2: " : "CH1: ");
+    fmt_str(p, acal_reason_text(rc));
+    break;
   }
 
-  //Adjust the center point DC offsets with the found compensation values
-  for(voltperdiv=0;voltperdiv<6;voltperdiv++)
+  //Both channels passed: take the results (PWM centres and the 1.00o5 compensations, for older firmware too) and save
+  if(rc == ACAL_OK)
   {
-    //The DC offset is based on the pre compensated ADC1 reading, so need to adjust with the average DC offset step times the ADC1 compensation value
-    calibrationsettings.dc_calibration_offset[voltperdiv] = (int16)calibrationsettings.dc_calibration_offset[voltperdiv] + (((int32)calibrationsettings.adc1compensation * (((int32)sampleratedcoffsetstep[0][voltperdiv] + (int32)sampleratedcoffsetstep[1][voltperdiv]) / 2)) >> 20);
+    for(ch=0;ch<2;ch++)
+    {
+      for(r=0;r<ACAL_RANGES;r++)
+        chs[ch]->dc_calibration_offset[r] = newcal[ch].pwm[r];
+
+      chs[ch]->dc_calibration_offset[6] = chs[ch]->dc_calibration_offset[5];
+      acal_atlan_comps(&newcal[ch], &chs[ch]->adc1compensation, &chs[ch]->adc2compensation);
+      adc_cal[ch] = newcal[ch];
+    }
+
+    adc_cal_loaded = 1;
   }
 
-  //Return the result of the tests. ZERO (True) if all tests passed
-  return(flag);
+  scopesettings.samplecount = fpgasettings.totalsamples;
+  scopesettings.nofsamples  = fpgasettings.totalsamples / 2;
+
+  //Load the normal operation settings back into the FPGA
+  for(ch=0;ch<2;ch++)
+  {
+    chs[ch]->invert = backup_invert[ch];
+    fpga_set_channel_voltperdiv(chs[ch]);
+    fpga_set_channel_offset(chs[ch]);
+    fpga_set_channel_coupling(chs[ch]);
+  }
+
+  fpga_set_sample_rate(scopesettings.samplerate);
+
+  //Persist at once (1.00o5 left the results in RAM until power-off): 708 with the v2 block, 709 with the PWM centres
+  //and compensations it is bound to, after the settings above are back
+  if(rc == ACAL_OK)
+  {
+    scope_save_input_calibration_data();
+    scope_save_configuration_data();
+  }
+
+  //Show the new settings
+  scope_acqusition_settings(0);
+  scope_channel_settings(&scopesettings.channel1, 0);
+  scope_channel_settings(&scopesettings.channel2, 0);
+
+  return(rc == ACAL_OK);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -6629,7 +6538,9 @@ void scope_load_input_calibration_data(void)
     scopesettings.channel2.dc_shift_center = ptr32[4];
     scopesettings.channel2.dc_shift_size   = ptr32[5];
     scopesettings.channel2.dc_shift_value  = ptr32[6];
-    
+
+    //Calibration data v2 (bytes 128.., outside the checksum): used per channel while bound to the 709 PWM centres
+    adc_cal_loaded = (acal_unpack((uint8 *)buffer + ACAL_SECTOR_OFFSET, adc_cal) == ACAL_OK);
     }
     else
     {   
@@ -6663,6 +6574,7 @@ void scope_load_input_calibration_data(void)
         scopesettings.channel2.dc_shift_size   = 220;
         scopesettings.channel2.dc_shift_value  = 385;
     
+        adc_cal_loaded = 0;
         calibrationfail = 1;    //Ready to input calibration
     }
 }
@@ -6699,6 +6611,10 @@ void scope_save_input_calibration_data(void)
     ptr32[4] = scopesettings.channel2.dc_shift_center;
     ptr32[5] = scopesettings.channel2.dc_shift_size;
     ptr32[6] = scopesettings.channel2.dc_shift_value;
+
+    //Calibration data v2 block (not part of the 1.00o5 checksum; an older firmware's save writes zeros here)
+    if(adc_cal_loaded)
+      acal_pack(adc_cal, (uint8 *)buffer + ACAL_SECTOR_OFFSET);
 
      //Calculate a checksum over the settings data
     for(index=8;index<60;index++)   //40

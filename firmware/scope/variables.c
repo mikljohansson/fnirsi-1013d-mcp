@@ -166,6 +166,9 @@ FPGASETTINGS fpgasettings;
 
 CHANNELSETTINGS calibrationsettings;
 
+acal_channel adc_cal[2];
+uint8        adc_cal_loaded = 0;
+
 SCOPESETTINGS savedscopesettings1;
 SCOPESETTINGS savedscopesettings2;
 
@@ -309,18 +312,6 @@ uint16 viewfilenumberdata[VIEW_MAX_ITEMS];
 uint8 viewbitmapheader[PICTURE_HEADER_SIZE];
 
 uint32 viewfilesetupdata[VIEW_NUMBER_OF_SETTINGS];
-
-//----------------------------------------------------------------------------------------------------------------------------------
-//Calibration data
-//----------------------------------------------------------------------------------------------------------------------------------
-
-uint32 samplerateindex;
-
-//Average data for calibration calculations
-uint32 samplerateaverage[2][6];
-
-//Single ADC bit dc offset step per input sensitivity setting
-uint32 sampleratedcoffsetstep[2][6];
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Predefined data

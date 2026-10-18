@@ -70,6 +70,9 @@ Per-core zero correction in firmware removes it everywhere; the boxcar/CIC modes
 
 - Base calibration stores measured per-core zero and the PWM slope; on-screen volts use them; export via
   GET_CAL so the host model and the screen agree. Owner re-runs base calibration once.
+- Built (fw 0.2.43, protocol 1.10, branch fw-cal): zeros per core in two clock classes (the legacy divider gates the
+  ADC clock and moves the zero; filtered captures run at full rate), dithered sub-code correction, GET_CAL export.
+  Bench list: firmware/README.md section 6.2.
 
 ## 5b. Memory depth and readout (firmware + FPGA), owner request 2026-10-18
 

@@ -24,7 +24,7 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #else
 #define PC_FW_VERSION_MAP ""
 #endif
-#define PC_FW_VERSION     "0.2.42" PC_FW_VERSION_MAP
+#define PC_FW_VERSION     "0.2.43" PC_FW_VERSION_MAP
 #endif
 
 #ifndef PC_FW_BUILD

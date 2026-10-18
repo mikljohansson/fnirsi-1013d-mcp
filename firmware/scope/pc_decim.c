@@ -127,9 +127,9 @@ uint8_t pc_decim_status(const pc_decim_cfg *c)
   return (uint8_t)(pc_decim_mode(c) | (c->k ? PC_DECIM_WIDE : 0));
 }
 
-int32_t pc_decim_to_code(uint16_t out, uint32_t scale_q24, int32_t comp2)
+int32_t pc_decim_to_code(uint16_t out, uint32_t scale_q24, int32_t corr16)
 {
-  int64_t acc = (int64_t)((uint64_t)out * scale_q24) + ((int64_t)comp2 << 23) + (1 << 23);
+  int64_t acc = (int64_t)((uint64_t)out * scale_q24) + ((int64_t)corr16 << 20) + (1 << 23);
   int32_t v   = (int32_t)(acc >> 24);
 
   return (v < 0) ? 0 : ((v > 255) ? 255 : v);

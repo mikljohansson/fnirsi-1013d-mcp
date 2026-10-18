@@ -62,6 +62,7 @@ def main():
     ap.add_argument("--checker", default=os.path.join(here, "vector_check"))
     ap.add_argument("--vectors", default=os.path.join(here, "..", "..", "..", "docs", "protocol-vectors.json"))
     ap.add_argument("--decim-checker", help="decim_check binary (pc_decim.c): cross-check the decim section")
+    ap.add_argument("--adc-cal-checker", help="test_adc_cal binary (adc_cal.c): cross-check the adc_cal block")
     args = ap.parse_args()
 
     with open(args.vectors) as fh:
@@ -158,6 +159,14 @@ def main():
             if f[:len(exp)] != exp:
                 fail(f"decim {c['divider']} {c['k_req']} {c['total']}: C gave {f}, expected {exp}")
         print(f"decim: {len(dec['cases'])} cases checked against pc_decim.c")
+
+    # 6. calibration data v2 block (1.10): acal_pack of the same content against the Python layout
+    if args.adc_cal_checker and "adc_cal" in data:
+        out = subprocess.run([args.adc_cal_checker, "--pack"], capture_output=True, text=True, check=True).stdout.strip()
+        if out != data["adc_cal"]["block_hex"]:
+            fail(f"adc_cal block: C packs {out}, expected {data['adc_cal']['block_hex']}")
+        else:
+            print("adc_cal: sector block identical to acal_pack")
 
     if fails:
         print(f"{fails} FAILURES")

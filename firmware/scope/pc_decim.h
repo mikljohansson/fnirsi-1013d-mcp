@@ -78,9 +78,9 @@ uint32_t pc_decim_ext_shift(const pc_decim_cfg *c);
 uint8_t  pc_decim_mode(const pc_decim_cfg *c);
 uint8_t  pc_decim_status(const pc_decim_cfg *c);
 
-//Stored 16-bit sample -> 8-bit ADC code in Q24 (out * 2^S / N^K), comp2 = sum of the two cores' compensations added
-//as comp2 / 2, rounded and clamped to 0..255
-int32_t  pc_decim_to_code(uint16_t out, uint32_t scale_q24, int32_t comp2);
+//Stored 16-bit sample -> 8-bit ADC code in Q24 (out * 2^S / N^K) plus corr16 / 16 codes (the zero correction,
+//adc_cal.h acal_corr.corr16), rounded and clamped to 0..255
+int32_t  pc_decim_to_code(uint16_t out, uint32_t scale_q24, int32_t corr16);
 
 //Output sample rate in Sa/s (200 MSa/s / N for k >= 1, 200 MSa/s / (D + 1) for k = 0)
 uint32_t pc_decim_rate(const pc_decim_cfg *c, uint32_t divider);
