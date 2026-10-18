@@ -438,3 +438,5 @@ Newest entries at the bottom. Format: date, who, what, result.
   filtered floor is 20-30 dB lower; not a filter fault. Fix: spectrum trace averaging / max-hold in the view (fw-gen5). Other owner feedback:
   drop the "decimation filter CIC3, N = 200" info text; span zoom should drive the time base at full/minimum span; Filter setting persists
   (settings word 207), spectrum view settings to be saved except the view mode.
+- Firmware 0.2.38 (fw-gen5, commits 6ce82d9/348e80b, sha256 a6f50f6c..., pinned): "pass NN ms" shown under the acquisition menu's Memory
+  header (value = last main-loop pass before the menu opened). Loaded on 0x1534, census clean. Owner check of the label placement pending.
