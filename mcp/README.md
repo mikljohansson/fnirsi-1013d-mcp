@@ -275,6 +275,7 @@ gives up on a drop: it polls the COM port list every 0.5 s while the port is gon
 2026-10-18T17:01:02.300 host: USB selective suspend AC disabled, DC enabled; port COM10 1209:0001 ..., location 1-9.3, hwid USB VID:PID=1209:0001 SER=1013D-0001 LOCATION=1-9.3
 2026-10-18T17:01:02.310 soak mode status, interval 0.1 s, duration 1800 s
 2026-10-18T17:01:02.345 open COM10 (fw 0.2.11, proto 1.4)
+2026-10-18T17:01:02.350 uptime open 431977 ms
 2026-10-18T17:01:02.360 stats start (41 counters) rx_packets=10 rx_bytes=1145 ...
 2026-10-18T17:12:40.118 fail #1 GET_STATUS: write to COM10 failed: WriteFile failed (...) [winerror 22]
 2026-10-18T17:12:40.120 port COM10 gone
@@ -286,6 +287,7 @@ gives up on a drop: it polls the COM port list every 0.5 s while the port is gon
 2026-10-18T17:12:42.660 stats reopen delta usb_bus_resets +1 usb_suspends +1 dtr_up +1 (since start: ...)
 2026-10-18T17:12:42.700 open COM10 (fw 0.2.12, proto 1.5)
 2026-10-18T17:12:43.020 reopen COM10 ok (down 2.90 s)
+2026-10-18T17:20:11.002 DEVICE RESTARTED (uptime went backwards: 1580221 -> 175012 ms)
 2026-10-18T17:31:02.400 stats end delta none (since start: usb_bus_resets +1 usb_suspends +1 dtr_up +1)
 2026-10-18T17:31:02.401 summary requests 17985, failures 1, drops 1 (down 2.90 s), longest gap 2.90 s, latency median 1.1 ms, p99 2.3 ms, max 12.0 ms; counters delta usb_bus_resets +1 ...
 ```
@@ -294,9 +296,14 @@ On protocol >= 1.5 (fw 0.2.12) the first requests after a reopen are the fast-pa
 GET_LINK_STATS, so the device's event ring still holds what happened before the reset; the new events are
 printed with device ms and the matching host time (a host port reset shows as suspend, then bus reset). The
 counter deltas cover link_resets, dtr_up/down, the usb_* events, ep0 setups, usb_irq_polled (lost USB interrupts
-served by the timer poll; also in the summary), rx_stalls and the CRC/timeout counters. A request that only times out (no port error) is logged and followed by the protocol's recovery; a
-write/read error or a vanished port is a drop. Exit 0 when nothing failed, 1 on any failure or drop, 2 when the
-port cannot be opened at start.
+served by the timer poll; also in the summary), rx_stalls and the CRC/timeout counters. The pre-reset snapshot
+(fw 0.2.15+, the events right before a bus reset) is read with a plain request, saved, and only then re-armed
+(fw 0.2.18 flag). GET_STATUS uptime_ms is logged at open, every reopen and the end, and checked on every status
+poll: a decrease means the firmware restarted itself (which looks like a USB drop to the host); it prints
+DEVICE RESTARTED and is counted as a device restart, separately from drops. `fnirsi1013d-bench` compares the
+uptime before and after its run the same way. A request that only times out (no port error) is logged and
+followed by the protocol's recovery; a write/read error or a vanished port is a drop. Exit 0 when nothing failed,
+1 on any failure, drop or restart, 2 when the port cannot be opened at start.
 
 ## Bench link check: `fnirsi1013d-bench`
 
