@@ -381,3 +381,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   Hann, N=2048 at 1 MS/s (488 Hz bins), generator 1 kHz square: fundamental 977 Hz at +2.71 dBV (theory for a 3.1 Vpp square: +2.9 dBV),
   3rd harmonic -9.7 dB (theory -9.5), 5th -14.4 dB (theory -14.0), 7th/9th/11th present; GET_STATUS byte 43 = 1 in the view. Levels and
   harmonic ratios within 0.4 dB of theory.
+- Firmware 0.2.31 (fw-gen5, commits 0930c72/2af662c, sha256 b5685268..., pinned with ELF; = 0.2.30 decimation support + FFT hot loops in
+  ARM assembly). Loaded on 0x1533: census clean, caps 0x7C0B (no DECIM, as expected), GET_DECIM refused with E_NOCAP. FFT_BENCH vs 0.2.27:
+  DDR 1024 2.2 ms (was 5.3), 2048 4.9 (11.4), 4096 10.9 (24.3), 16384 51.4 (108.7); SRAM 1024 1.0 (4.0), 2048 2.3 (8.5); peak levels
+  unchanged. 2.2-2.5x faster; 4096-point spectra now cost ~11 ms per channel per pass. Owner: keep memory depth default at 3000 (UI slows
+  down at long memory).
