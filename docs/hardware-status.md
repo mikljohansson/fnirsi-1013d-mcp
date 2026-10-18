@@ -244,3 +244,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   (0.20 MB/s run, tx_aborts 1, first ever), two reruns clean at 1.00 MB/s; usb_irq_polled 46033 in ~3 min (the tick races the real ISR, so the
   counter does not isolate lost interrupts). Both with fw-gen2. 20-minute 10 Hz GET_STATUS soak started (USB selective suspend now off).
   Card keeps 0.2.11.
+- Offset explained (fpga-gen2, schematic trace, commit 28126aa): the BNC shells are not at digital ground. They sit on VRF1 = TL432 reference
+  1.24 V (via R71 100 Ohm; fed from 3V3 through 200 Ohm + 1 Ohm), whose anode is the common GND of FPGA, USB and SD. The cal path is FPGA pin 133 ->
+  R21 1 kOhm -> post, DC. Predicted -1.24/+1.9 V vs measured -1.09/+2.01 V (scope DC error ~0.15 V, inference). EXT consequences: a 3.3 V source
+  referenced to USB/digital ground works on levels and edges; a source referenced to the probe ground needs a series red LED (or 3x 1N4148),
+  rising edge, else its low sits at ~1.24 V between VIL and VIH. General measurement caveat (new): tying probe ground to USB ground (earthed DUT
+  + earthed PC) pulls ~12 mA through R71, sags VRF1 to ~1.1 V and shifts every trace -> goes into docs/agent-measurement-guide.md.
+  Owner's DMM checks (optional confirmation): BNC shell to USB shell = +1.2..1.25 V; post to shell at 0.5 Hz alternates ~-1.24 / +1.9..2.0 V.
