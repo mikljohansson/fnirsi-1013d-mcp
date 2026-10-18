@@ -5444,6 +5444,7 @@ void handle_diagnostic_view_touch(void)
           scopesettings.channel1.adc2compensation = 0;
           scopesettings.channel2.adc1compensation = 0;
           scopesettings.channel2.adc2compensation = 0; 
+          adc_cal_loaded = 0;
         
           //Set default DC shift values  
           scopesettings.channel1.dc_shift_center  = 112;

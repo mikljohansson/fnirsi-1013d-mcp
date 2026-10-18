@@ -283,7 +283,11 @@ static void test_measurement(void)
     T_MEM(&before, &c, sizeof(c));                            //nothing stored on a reject
   }
 
-  T_STR(acal_reason_text(ACAL_E_NOISE), "too noisy: unplug probe");
+  T_STR(acal_reason_text(ACAL_E_NOISE), "noisy: unplug probe");
+  for(i=0;i<=12;i++)
+    T_TRUE(strlen(acal_reason_text((int)i)) <= 21);
+  T_EQ(acal_interp_pwm(753, 2048 + 634, 1053, 2048 - 634), 903);
+  T_EQ(acal_interp_pwm(753, 2000, 1053, 2000), 753);
   T_STR(acal_reason_text(99), "no calibration data");
 }
 
@@ -319,7 +323,7 @@ static void test_end_to_end(void)
         int32_t s = adc(zero1024[core], 1000);
         uint32_t frac = core ? k.frac_b : k.frac_a;
 
-        lfsr = ACAL_DITHER_NEXT(lfsr);
+        ACAL_DITHER_STEP(lfsr);
         s += (core ? k.comp_b : k.comp_a) + ((lfsr >> 28) < frac);
         s  = (s < 0) ? 0 : ((s > 255) ? 255 : s);
         sum[core] += s;

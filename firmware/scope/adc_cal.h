@@ -76,9 +76,9 @@ typedef struct
   int32_t  corr16;                        //16-bit path (ADCs at full rate): added to every converted sample, 1/16 code
 } acal_corr;
 
-//Dither for the 8-bit loop: next LCG state (Numerical Recipes constants); its top 4 bits are uniform 0..15, so
-//"(state >> 28) < frac" adds one code with probability frac / 16
-#define ACAL_DITHER_NEXT(x)  ((x) * 1664525u + 1013904223u)
+//Dither for the 8-bit loop: xorshift32 step (three register instructions on ARM, no constants to load; state never 0).
+//Its top 4 bits are uniform 0..15, so "(state >> 28) < frac" adds one code with probability frac / 16
+#define ACAL_DITHER_STEP(x)  do { (x) ^= (x) << 13; (x) ^= (x) >> 17; (x) ^= (x) << 5; } while(0)
 
 //c = 0 (or not bound to cal_offset): 1.00o5 behaviour with atlan_a / atlan_b (adc1/adc2compensation). divider: the 0x0D
 //value of the capture (legacy clock class)
@@ -113,6 +113,9 @@ uint32_t acal_rms16(const acal_acc *a);   //16 x RMS about the mean
 //response is under ACAL_MIN_RESPONSE or the result is outside ACAL_PWM_MIN..ACAL_PWM_MAX
 int32_t  acal_centre_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t mean16_hi);
 
+//The same interpolation without the checks (slope points, already checked by acal_range_store); pwm_lo when flat
+int32_t  acal_interp_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t mean16_hi);
+
 //One range: per core means (1/16 code) at pwm_lo / pwm_hi (gated clock) and the zero point pwm in both classes
 typedef struct
 {
@@ -127,7 +130,7 @@ typedef struct
 //Checks m and stores it as range r of c: ACAL_OK or the first ACAL_E_* that applies (c unchanged then)
 int      acal_range_store(const acal_range_meas *m, acal_channel *c, uint8_t r);
 
-const char *acal_reason_text(int reason);                     //short text for the failure box
+const char *acal_reason_text(int reason);                     //failure box text, at most 21 characters
 
 //Limits (codes in 1/16, slope Q16)
 #define ACAL_MIN_RESPONSE    (100 * 16)   //coarse points: 700 PWM counts must move the mean by >= 100 codes (~185)

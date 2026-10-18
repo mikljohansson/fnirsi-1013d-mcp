@@ -254,15 +254,21 @@ uint32_t acal_rms16(const acal_acc *a)
   return (uint32_t)r;
 }
 
-int32_t acal_centre_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t mean16_hi)
+int32_t acal_interp_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t mean16_hi)
 {
   int32_t resp = mean16_lo - mean16_hi;
+
+  return (resp > 0) ? pwm_lo + rdiv((mean16_lo - 2048) * (pwm_hi - pwm_lo), resp) : pwm_lo;
+}
+
+int32_t acal_centre_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t mean16_hi)
+{
   int32_t p;
 
-  if((resp < ACAL_MIN_RESPONSE) || (pwm_hi <= pwm_lo))
+  if(((mean16_lo - mean16_hi) < ACAL_MIN_RESPONSE) || (pwm_hi <= pwm_lo))
     return -1;
 
-  p = pwm_lo + rdiv((mean16_lo - 2048) * (pwm_hi - pwm_lo), resp);
+  p = acal_interp_pwm(pwm_lo, mean16_lo, pwm_hi, mean16_hi);
 
   return ((p < ACAL_PWM_MIN) || (p > ACAL_PWM_MAX)) ? -1 : p;
 }
@@ -337,14 +343,14 @@ const char *acal_reason_text(int reason)
   switch(reason)
   {
     case ACAL_OK:         return "OK";
-    case ACAL_E_RESPONSE: return "offset does not respond";
-    case ACAL_E_CLIP:     return "signal clips: unplug probe";
-    case ACAL_E_NOISE:    return "too noisy: unplug probe";
-    case ACAL_E_ZERO:     return "zero far from centre";
-    case ACAL_E_SPREAD:   return "ADC A/B differ > 20";
-    case ACAL_E_SLOPE:    return "offset slope implausible";
+    case ACAL_E_RESPONSE: return "offset not responding";
+    case ACAL_E_CLIP:     return "input clips: unplug";
+    case ACAL_E_NOISE:    return "noisy: unplug probe";
+    case ACAL_E_ZERO:     return "zero off centre";
+    case ACAL_E_SPREAD:   return "ADC cores differ > 20";
+    case ACAL_E_SLOPE:    return "offset slope wrong";
     case ACAL_E_DRIFT:    return "zero not settled";
-    case ACAL_E_CLASS:    return "zero moves with clock";
+    case ACAL_E_CLASS:    return "zero moves w/ clock";
     default:              return "no calibration data";
   }
 }

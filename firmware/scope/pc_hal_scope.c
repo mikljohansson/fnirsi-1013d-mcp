@@ -114,6 +114,9 @@ void pc_hal_channel_read(int ch, pc_hw_channel *c)
   c->dc_shift_value  = s->dc_shift_value;
   c->adc_a_rawavg    = s->adc1rawaverage;
   c->adc_b_rawavg    = s->adc2rawaverage;
+  c->cal2_loaded     = adc_cal_loaded;
+  c->divider         = fpga_divider;
+  c->cal2            = adc_cal[ch ? 1 : 0];
 }
 
 void pc_hal_channel_write(int ch, const pc_hw_channel *c, uint8_t mask)
@@ -202,6 +205,7 @@ void pc_hal_timebase_write(const pc_hw_timebase *t, int raw)
   {
     fpga_write_cmd(0x0D);
     fpga_write_int(t->divider);
+    fpga_divider = t->divider;
     pc_glue_divider_written(t->divider);
     return;
   }
@@ -781,7 +785,7 @@ uint32 pc_glue_decim_ui_start(uint32 start)
 void pc_glue_decim_read(void *settings, uint32 start)
 {
   PCHANNELSETTINGS s = (PCHANNELSETTINGS)settings;
-  int32  ca, cb, comp2;
+  int32  ca, cb;
   uint32 ch, n, i;
 
   pc_decim_src    = 0;
@@ -807,15 +811,14 @@ void pc_glue_decim_read(void *settings, uint32 start)
 
   fpga_read_decim_data(s->adc1command, s->adc2command, start % PC_DEC_RING, n, pc_dec_raw[ch]);
 
-  //Into the 8-bit trace domain. fpga_read_adc_data adds adc1compensation to the odd samples (its first pass) and
-  //adc2compensation to the even ones, so take them off here: the result is the converted code with the mean of both
-  //compensations (each output sample weighs both cores equally for even N).
-  ca    = s->adc1compensation;
-  cb    = s->adc2compensation;
-  comp2 = ca + cb;
+  //Into the 8-bit trace domain. fpga_read_adc_data adds comp_a to the odd samples (its first pass) and comp_b to the
+  //even ones (no dither for a 16-bit readout), so take them off here: the result is the converted code plus corr16,
+  //the zero correction for both cores at full rate (each output sample weighs both cores equally for even N)
+  ca = s->comp_a;
+  cb = s->comp_b;
 
   for(i=0;i<n;i++)
-    pc_dec_feed[i] = (int16)(pc_decim_to_code(pc_dec_raw[ch][i], pc_dec_cur.scale_q24, comp2) - ((i & 1) ? ca : cb));
+    pc_dec_feed[i] = (int16)(pc_decim_to_code(pc_dec_raw[ch][i], pc_dec_cur.scale_q24, s->corr16) - ((i & 1) ? ca : cb));
 
   pc_dec_raw_n[ch] = n;
   pc_decim_src     = &pc_dec_feed[1];

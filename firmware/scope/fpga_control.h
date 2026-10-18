@@ -88,6 +88,10 @@ uint8  fpga_done_conversion(void);
 uint16 fpga_prepare_for_transfer(void);
 
 void   fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint);
+void   fpga_channel_correction(PCHANNELSETTINGS settings, acal_corr *c);  //zero correction for the current settings
+void   fpga_prepare_correction(PCHANNELSETTINGS settings);                //the same, into the readout fields
+
+extern uint32 fpga_divider;     //last 0x0D value written (clock class of the zero correction)
 void   fpga_read_adc_data(PCHANNELSETTINGS settings);
 
 uint16 fpga_average_trace_data(PCHANNELSETTINGS settings);  //For long time base
