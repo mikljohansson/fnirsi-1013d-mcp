@@ -40,6 +40,8 @@
   "ACQUIRE_AVG": 519,
   "SET_ACQ_STATE": 520,
   "GET_CAPTURE_INFO": 521,
+  "GET_DECIM": 524,
+  "SET_DECIM": 525,
   "SD_INFO": 1280,
   "SD_READ_SECTORS": 1281,
   "SD_STAGE": 1282,
@@ -50,6 +52,1583 @@
   "READ_SCREEN": 1025,
   "DEBUG_FPGA": 3840,
   "ENTER_FEL": 3841
+ },
+ "decim": {
+  "notes": "1.9 decimation filter: N = 2 * (floor(D / 2) + 1); effective K = 0 for k_req 0, divider 0 or total > 8190, else the largest K <= k_req with 255 * N^K < 2^48; gain N^K; shift S = max(0, bitlen(255 * gain) - 16); level16[i] = min(65535, round(levels[i] * gain / 2^S)); rate = 200 MSa/s / N (K = 0: 200 MSa/s / (D + 1)); settle_us = ceil((K + 2) * N / 200); ext_shift = round((120 ns + K (N - 1) 2.5 ns) / (N x 5 ns)), halves up, 0 for K = 0.",
+  "levels": [
+   0,
+   1,
+   64,
+   127,
+   128,
+   200,
+   254,
+   255
+  ],
+  "cases": [
+   {
+    "divider": 0,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 200000000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 0,
+    "k_req": 1,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 200000000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 0,
+    "k_req": 2,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 200000000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 0,
+    "k_req": 3,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 200000000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 1,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 100000000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 1,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 2,
+    "gain": 2,
+    "shift": 0,
+    "rate": 100000000,
+    "settle_us": 1,
+    "ext_shift": 12,
+    "level16": [
+     0,
+     2,
+     128,
+     254,
+     256,
+     400,
+     508,
+     510
+    ]
+   },
+   {
+    "divider": 1,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 2,
+    "gain": 4,
+    "shift": 0,
+    "rate": 100000000,
+    "settle_us": 1,
+    "ext_shift": 13,
+    "level16": [
+     0,
+     4,
+     256,
+     508,
+     512,
+     800,
+     1016,
+     1020
+    ]
+   },
+   {
+    "divider": 1,
+    "k_req": 3,
+    "total": 3000,
+    "k": 3,
+    "n": 2,
+    "gain": 8,
+    "shift": 0,
+    "rate": 100000000,
+    "settle_us": 1,
+    "ext_shift": 13,
+    "level16": [
+     0,
+     8,
+     512,
+     1016,
+     1024,
+     1600,
+     2032,
+     2040
+    ]
+   },
+   {
+    "divider": 3,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 50000000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 3,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 4,
+    "gain": 4,
+    "shift": 0,
+    "rate": 50000000,
+    "settle_us": 1,
+    "ext_shift": 6,
+    "level16": [
+     0,
+     4,
+     256,
+     508,
+     512,
+     800,
+     1016,
+     1020
+    ]
+   },
+   {
+    "divider": 3,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 4,
+    "gain": 16,
+    "shift": 0,
+    "rate": 50000000,
+    "settle_us": 1,
+    "ext_shift": 7,
+    "level16": [
+     0,
+     16,
+     1024,
+     2032,
+     2048,
+     3200,
+     4064,
+     4080
+    ]
+   },
+   {
+    "divider": 3,
+    "k_req": 3,
+    "total": 3000,
+    "k": 3,
+    "n": 4,
+    "gain": 64,
+    "shift": 0,
+    "rate": 50000000,
+    "settle_us": 1,
+    "ext_shift": 7,
+    "level16": [
+     0,
+     64,
+     4096,
+     8128,
+     8192,
+     12800,
+     16256,
+     16320
+    ]
+   },
+   {
+    "divider": 9,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 20000000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 9,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 10,
+    "gain": 10,
+    "shift": 0,
+    "rate": 20000000,
+    "settle_us": 1,
+    "ext_shift": 3,
+    "level16": [
+     0,
+     10,
+     640,
+     1270,
+     1280,
+     2000,
+     2540,
+     2550
+    ]
+   },
+   {
+    "divider": 9,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 10,
+    "gain": 100,
+    "shift": 0,
+    "rate": 20000000,
+    "settle_us": 1,
+    "ext_shift": 3,
+    "level16": [
+     0,
+     100,
+     6400,
+     12700,
+     12800,
+     20000,
+     25400,
+     25500
+    ]
+   },
+   {
+    "divider": 9,
+    "k_req": 3,
+    "total": 3000,
+    "k": 3,
+    "n": 10,
+    "gain": 1000,
+    "shift": 2,
+    "rate": 20000000,
+    "settle_us": 1,
+    "ext_shift": 4,
+    "level16": [
+     0,
+     250,
+     16000,
+     31750,
+     32000,
+     50000,
+     63500,
+     63750
+    ]
+   },
+   {
+    "divider": 19,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 10000000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 19,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 20,
+    "gain": 20,
+    "shift": 0,
+    "rate": 10000000,
+    "settle_us": 1,
+    "ext_shift": 2,
+    "level16": [
+     0,
+     20,
+     1280,
+     2540,
+     2560,
+     4000,
+     5080,
+     5100
+    ]
+   },
+   {
+    "divider": 19,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 20,
+    "gain": 400,
+    "shift": 1,
+    "rate": 10000000,
+    "settle_us": 1,
+    "ext_shift": 2,
+    "level16": [
+     0,
+     200,
+     12800,
+     25400,
+     25600,
+     40000,
+     50800,
+     51000
+    ]
+   },
+   {
+    "divider": 19,
+    "k_req": 3,
+    "total": 3000,
+    "k": 3,
+    "n": 20,
+    "gain": 8000,
+    "shift": 5,
+    "rate": 10000000,
+    "settle_us": 1,
+    "ext_shift": 3,
+    "level16": [
+     0,
+     250,
+     16000,
+     31750,
+     32000,
+     50000,
+     63500,
+     63750
+    ]
+   },
+   {
+    "divider": 39,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 5000000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 39,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 40,
+    "gain": 40,
+    "shift": 0,
+    "rate": 5000000,
+    "settle_us": 1,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     40,
+     2560,
+     5080,
+     5120,
+     8000,
+     10160,
+     10200
+    ]
+   },
+   {
+    "divider": 39,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 40,
+    "gain": 1600,
+    "shift": 3,
+    "rate": 5000000,
+    "settle_us": 1,
+    "ext_shift": 2,
+    "level16": [
+     0,
+     200,
+     12800,
+     25400,
+     25600,
+     40000,
+     50800,
+     51000
+    ]
+   },
+   {
+    "divider": 39,
+    "k_req": 3,
+    "total": 3000,
+    "k": 3,
+    "n": 40,
+    "gain": 64000,
+    "shift": 8,
+    "rate": 5000000,
+    "settle_us": 1,
+    "ext_shift": 2,
+    "level16": [
+     0,
+     250,
+     16000,
+     31750,
+     32000,
+     50000,
+     63500,
+     63750
+    ]
+   },
+   {
+    "divider": 99,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 2000000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 99,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 100,
+    "gain": 100,
+    "shift": 0,
+    "rate": 2000000,
+    "settle_us": 2,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     100,
+     6400,
+     12700,
+     12800,
+     20000,
+     25400,
+     25500
+    ]
+   },
+   {
+    "divider": 99,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 100,
+    "gain": 10000,
+    "shift": 6,
+    "rate": 2000000,
+    "settle_us": 2,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     156,
+     10000,
+     19844,
+     20000,
+     31250,
+     39688,
+     39844
+    ]
+   },
+   {
+    "divider": 99,
+    "k_req": 3,
+    "total": 3000,
+    "k": 3,
+    "n": 100,
+    "gain": 1000000,
+    "shift": 12,
+    "rate": 2000000,
+    "settle_us": 3,
+    "ext_shift": 2,
+    "level16": [
+     0,
+     244,
+     15625,
+     31006,
+     31250,
+     48828,
+     62012,
+     62256
+    ]
+   },
+   {
+    "divider": 199,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 1000000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 199,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 200,
+    "gain": 200,
+    "shift": 0,
+    "rate": 1000000,
+    "settle_us": 3,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     200,
+     12800,
+     25400,
+     25600,
+     40000,
+     50800,
+     51000
+    ]
+   },
+   {
+    "divider": 199,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 200,
+    "gain": 40000,
+    "shift": 8,
+    "rate": 1000000,
+    "settle_us": 4,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     156,
+     10000,
+     19844,
+     20000,
+     31250,
+     39688,
+     39844
+    ]
+   },
+   {
+    "divider": 199,
+    "k_req": 3,
+    "total": 3000,
+    "k": 3,
+    "n": 200,
+    "gain": 8000000,
+    "shift": 15,
+    "rate": 1000000,
+    "settle_us": 5,
+    "ext_shift": 2,
+    "level16": [
+     0,
+     244,
+     15625,
+     31006,
+     31250,
+     48828,
+     62012,
+     62256
+    ]
+   },
+   {
+    "divider": 399,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 500000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 399,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 400,
+    "gain": 400,
+    "shift": 1,
+    "rate": 500000,
+    "settle_us": 6,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     200,
+     12800,
+     25400,
+     25600,
+     40000,
+     50800,
+     51000
+    ]
+   },
+   {
+    "divider": 399,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 400,
+    "gain": 160000,
+    "shift": 10,
+    "rate": 500000,
+    "settle_us": 8,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     156,
+     10000,
+     19844,
+     20000,
+     31250,
+     39688,
+     39844
+    ]
+   },
+   {
+    "divider": 399,
+    "k_req": 3,
+    "total": 3000,
+    "k": 3,
+    "n": 400,
+    "gain": 64000000,
+    "shift": 18,
+    "rate": 500000,
+    "settle_us": 10,
+    "ext_shift": 2,
+    "level16": [
+     0,
+     244,
+     15625,
+     31006,
+     31250,
+     48828,
+     62012,
+     62256
+    ]
+   },
+   {
+    "divider": 999,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 200000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 999,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 1000,
+    "gain": 1000,
+    "shift": 2,
+    "rate": 200000,
+    "settle_us": 15,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     250,
+     16000,
+     31750,
+     32000,
+     50000,
+     63500,
+     63750
+    ]
+   },
+   {
+    "divider": 999,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 1000,
+    "gain": 1000000,
+    "shift": 12,
+    "rate": 200000,
+    "settle_us": 20,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     244,
+     15625,
+     31006,
+     31250,
+     48828,
+     62012,
+     62256
+    ]
+   },
+   {
+    "divider": 999,
+    "k_req": 3,
+    "total": 3000,
+    "k": 3,
+    "n": 1000,
+    "gain": 1000000000,
+    "shift": 22,
+    "rate": 200000,
+    "settle_us": 25,
+    "ext_shift": 2,
+    "level16": [
+     0,
+     238,
+     15259,
+     30279,
+     30518,
+     47684,
+     60558,
+     60797
+    ]
+   },
+   {
+    "divider": 1999,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 100000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 1999,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 2000,
+    "gain": 2000,
+    "shift": 3,
+    "rate": 100000,
+    "settle_us": 30,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     250,
+     16000,
+     31750,
+     32000,
+     50000,
+     63500,
+     63750
+    ]
+   },
+   {
+    "divider": 1999,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 2000,
+    "gain": 4000000,
+    "shift": 14,
+    "rate": 100000,
+    "settle_us": 40,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     244,
+     15625,
+     31006,
+     31250,
+     48828,
+     62012,
+     62256
+    ]
+   },
+   {
+    "divider": 1999,
+    "k_req": 3,
+    "total": 3000,
+    "k": 3,
+    "n": 2000,
+    "gain": 8000000000,
+    "shift": 25,
+    "rate": 100000,
+    "settle_us": 50,
+    "ext_shift": 2,
+    "level16": [
+     0,
+     238,
+     15259,
+     30279,
+     30518,
+     47684,
+     60558,
+     60797
+    ]
+   },
+   {
+    "divider": 3999,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 50000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 3999,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 4000,
+    "gain": 4000,
+    "shift": 4,
+    "rate": 50000,
+    "settle_us": 60,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     250,
+     16000,
+     31750,
+     32000,
+     50000,
+     63500,
+     63750
+    ]
+   },
+   {
+    "divider": 3999,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 4000,
+    "gain": 16000000,
+    "shift": 16,
+    "rate": 50000,
+    "settle_us": 80,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     244,
+     15625,
+     31006,
+     31250,
+     48828,
+     62012,
+     62256
+    ]
+   },
+   {
+    "divider": 3999,
+    "k_req": 3,
+    "total": 3000,
+    "k": 3,
+    "n": 4000,
+    "gain": 64000000000,
+    "shift": 28,
+    "rate": 50000,
+    "settle_us": 100,
+    "ext_shift": 2,
+    "level16": [
+     0,
+     238,
+     15259,
+     30279,
+     30518,
+     47684,
+     60558,
+     60797
+    ]
+   },
+   {
+    "divider": 9999,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 20000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 9999,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 10000,
+    "gain": 10000,
+    "shift": 6,
+    "rate": 20000,
+    "settle_us": 150,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     156,
+     10000,
+     19844,
+     20000,
+     31250,
+     39688,
+     39844
+    ]
+   },
+   {
+    "divider": 9999,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 10000,
+    "gain": 100000000,
+    "shift": 19,
+    "rate": 20000,
+    "settle_us": 200,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     191,
+     12207,
+     24223,
+     24414,
+     38147,
+     48447,
+     48637
+    ]
+   },
+   {
+    "divider": 9999,
+    "k_req": 3,
+    "total": 3000,
+    "k": 3,
+    "n": 10000,
+    "gain": 1000000000000,
+    "shift": 32,
+    "rate": 20000,
+    "settle_us": 250,
+    "ext_shift": 2,
+    "level16": [
+     0,
+     233,
+     14901,
+     29569,
+     29802,
+     46566,
+     59139,
+     59372
+    ]
+   },
+   {
+    "divider": 19999,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 10000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 19999,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 20000,
+    "gain": 20000,
+    "shift": 7,
+    "rate": 10000,
+    "settle_us": 300,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     156,
+     10000,
+     19844,
+     20000,
+     31250,
+     39688,
+     39844
+    ]
+   },
+   {
+    "divider": 19999,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 20000,
+    "gain": 400000000,
+    "shift": 21,
+    "rate": 10000,
+    "settle_us": 400,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     191,
+     12207,
+     24223,
+     24414,
+     38147,
+     48447,
+     48637
+    ]
+   },
+   {
+    "divider": 19999,
+    "k_req": 3,
+    "total": 3000,
+    "k": 2,
+    "n": 20000,
+    "gain": 400000000,
+    "shift": 21,
+    "rate": 10000,
+    "settle_us": 400,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     191,
+     12207,
+     24223,
+     24414,
+     38147,
+     48447,
+     48637
+    ]
+   },
+   {
+    "divider": 39999,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 5000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 39999,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 40000,
+    "gain": 40000,
+    "shift": 8,
+    "rate": 5000,
+    "settle_us": 600,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     156,
+     10000,
+     19844,
+     20000,
+     31250,
+     39688,
+     39844
+    ]
+   },
+   {
+    "divider": 39999,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 40000,
+    "gain": 1600000000,
+    "shift": 23,
+    "rate": 5000,
+    "settle_us": 800,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     191,
+     12207,
+     24223,
+     24414,
+     38147,
+     48447,
+     48637
+    ]
+   },
+   {
+    "divider": 39999,
+    "k_req": 3,
+    "total": 3000,
+    "k": 2,
+    "n": 40000,
+    "gain": 1600000000,
+    "shift": 23,
+    "rate": 5000,
+    "settle_us": 800,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     191,
+     12207,
+     24223,
+     24414,
+     38147,
+     48447,
+     48637
+    ]
+   },
+   {
+    "divider": 99999,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 2000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 99999,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 100000,
+    "gain": 100000,
+    "shift": 9,
+    "rate": 2000,
+    "settle_us": 1500,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     195,
+     12500,
+     24805,
+     25000,
+     39063,
+     49609,
+     49805
+    ]
+   },
+   {
+    "divider": 99999,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 100000,
+    "gain": 10000000000,
+    "shift": 26,
+    "rate": 2000,
+    "settle_us": 2000,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     149,
+     9537,
+     18924,
+     19073,
+     29802,
+     37849,
+     37998
+    ]
+   },
+   {
+    "divider": 99999,
+    "k_req": 3,
+    "total": 3000,
+    "k": 2,
+    "n": 100000,
+    "gain": 10000000000,
+    "shift": 26,
+    "rate": 2000,
+    "settle_us": 2000,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     149,
+     9537,
+     18924,
+     19073,
+     29802,
+     37849,
+     37998
+    ]
+   },
+   {
+    "divider": 199999,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 1000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 199999,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 200000,
+    "gain": 200000,
+    "shift": 10,
+    "rate": 1000,
+    "settle_us": 3000,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     195,
+     12500,
+     24805,
+     25000,
+     39063,
+     49609,
+     49805
+    ]
+   },
+   {
+    "divider": 199999,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 200000,
+    "gain": 40000000000,
+    "shift": 28,
+    "rate": 1000,
+    "settle_us": 4000,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     149,
+     9537,
+     18924,
+     19073,
+     29802,
+     37849,
+     37998
+    ]
+   },
+   {
+    "divider": 199999,
+    "k_req": 3,
+    "total": 3000,
+    "k": 2,
+    "n": 200000,
+    "gain": 40000000000,
+    "shift": 28,
+    "rate": 1000,
+    "settle_us": 4000,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     149,
+     9537,
+     18924,
+     19073,
+     29802,
+     37849,
+     37998
+    ]
+   },
+   {
+    "divider": 399999,
+    "k_req": 0,
+    "total": 3000,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 500,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   },
+   {
+    "divider": 399999,
+    "k_req": 1,
+    "total": 3000,
+    "k": 1,
+    "n": 400000,
+    "gain": 400000,
+    "shift": 11,
+    "rate": 500,
+    "settle_us": 6000,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     195,
+     12500,
+     24805,
+     25000,
+     39063,
+     49609,
+     49805
+    ]
+   },
+   {
+    "divider": 399999,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 400000,
+    "gain": 160000000000,
+    "shift": 30,
+    "rate": 500,
+    "settle_us": 8000,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     149,
+     9537,
+     18924,
+     19073,
+     29802,
+     37849,
+     37998
+    ]
+   },
+   {
+    "divider": 399999,
+    "k_req": 3,
+    "total": 3000,
+    "k": 2,
+    "n": 400000,
+    "gain": 160000000000,
+    "shift": 30,
+    "rate": 500,
+    "settle_us": 8000,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     149,
+     9537,
+     18924,
+     19073,
+     29802,
+     37849,
+     37998
+    ]
+   },
+   {
+    "divider": 2,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 4,
+    "gain": 16,
+    "shift": 0,
+    "rate": 50000000,
+    "settle_us": 1,
+    "ext_shift": 7,
+    "level16": [
+     0,
+     16,
+     1024,
+     2032,
+     2048,
+     3200,
+     4064,
+     4080
+    ]
+   },
+   {
+    "divider": 20,
+    "k_req": 3,
+    "total": 3000,
+    "k": 3,
+    "n": 22,
+    "gain": 10648,
+    "shift": 6,
+    "rate": 9090909,
+    "settle_us": 1,
+    "ext_shift": 3,
+    "level16": [
+     0,
+     166,
+     10648,
+     21130,
+     21296,
+     33275,
+     42259,
+     42426
+    ]
+   },
+   {
+    "divider": 10332,
+    "k_req": 3,
+    "total": 3000,
+    "k": 3,
+    "n": 10334,
+    "gain": 1103583939704,
+    "shift": 32,
+    "rate": 19353,
+    "settle_us": 259,
+    "ext_shift": 2,
+    "level16": [
+     0,
+     257,
+     16445,
+     32632,
+     32889,
+     51390,
+     65265,
+     65522
+    ]
+   },
+   {
+    "divider": 10334,
+    "k_req": 3,
+    "total": 3000,
+    "k": 2,
+    "n": 10336,
+    "gain": 106832896,
+    "shift": 19,
+    "rate": 19349,
+    "settle_us": 207,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     204,
+     13041,
+     25878,
+     26082,
+     40754,
+     51757,
+     51961
+    ]
+   },
+   {
+    "divider": 1050629,
+    "k_req": 2,
+    "total": 3000,
+    "k": 2,
+    "n": 1050630,
+    "gain": 1103823396900,
+    "shift": 32,
+    "rate": 190,
+    "settle_us": 21013,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     257,
+     16448,
+     32639,
+     32897,
+     51401,
+     65279,
+     65535
+    ]
+   },
+   {
+    "divider": 1050630,
+    "k_req": 2,
+    "total": 3000,
+    "k": 1,
+    "n": 1050632,
+    "gain": 1050632,
+    "shift": 12,
+    "rate": 190,
+    "settle_us": 15760,
+    "ext_shift": 1,
+    "level16": [
+     0,
+     257,
+     16416,
+     32576,
+     32832,
+     51300,
+     65151,
+     65408
+    ]
+   },
+   {
+    "divider": 19,
+    "k_req": 2,
+    "total": 8190,
+    "k": 2,
+    "n": 20,
+    "gain": 400,
+    "shift": 1,
+    "rate": 10000000,
+    "settle_us": 1,
+    "ext_shift": 2,
+    "level16": [
+     0,
+     200,
+     12800,
+     25400,
+     25600,
+     40000,
+     50800,
+     51000
+    ]
+   },
+   {
+    "divider": 19,
+    "k_req": 2,
+    "total": 8192,
+    "k": 0,
+    "n": 0,
+    "gain": 1,
+    "shift": 0,
+    "rate": 10000000,
+    "settle_us": 0,
+    "ext_shift": 0,
+    "level16": []
+   }
+  ]
  },
  "vectors": [
   {
@@ -625,12 +2204,12 @@
    ]
   },
   {
-   "name": "req_get_link_stats",
-   "description": "1.2: link counters",
-   "hex": "a513010007002000000000000000e958",
+   "name": "req_get_decim",
+   "description": "1.9: decimation filter setting and state (FPGA 0x1534+)",
+   "hex": "a51301000c0220000000000000000a65",
    "frames": [
     {
-     "cmd": 7,
+     "cmd": 524,
      "seq": 32,
      "status": 0,
      "flags": 0,
@@ -640,8 +2219,60 @@
    ],
    "device_events": [
     {
-     "cmd": 7,
+     "cmd": 524,
      "seq": 32,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": "",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_set_decim",
+   "description": "1.9: filter CIC2, no core-order swap",
+   "hex": "a51301000d0221000000040000006d870200000097174d8b",
+   "frames": [
+    {
+     "cmd": 525,
+     "seq": 33,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "02000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 525,
+     "seq": 33,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "02000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_get_link_stats",
+   "description": "1.2: link counters",
+   "hex": "a5130100070022000000000000004fd7",
+   "frames": [
+    {
+     "cmd": 7,
+     "seq": 34,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": ""
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 7,
+     "seq": 34,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -653,11 +2284,11 @@
   {
    "name": "req_get_bad_frame",
    "description": "1.2: last request with a payload CRC error",
-   "hex": "a5130100080021000000000000008b49",
+   "hex": "a5130100080023000000000000002dc6",
    "frames": [
     {
      "cmd": 8,
-     "seq": 33,
+     "seq": 35,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -667,7 +2298,7 @@
    "device_events": [
     {
      "cmd": 8,
-     "seq": 33,
+     "seq": 35,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -679,11 +2310,11 @@
   {
    "name": "req_get_event_log",
    "description": "1.5: the last 64 USB / link events with ms timestamps",
-   "hex": "a513010009002200000000000000bbee",
+   "hex": "a513010009002400000000000000706e",
    "frames": [
     {
      "cmd": 9,
-     "seq": 34,
+     "seq": 36,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -693,7 +2324,7 @@
    "device_events": [
     {
      "cmd": 9,
-     "seq": 34,
+     "seq": 36,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -705,11 +2336,11 @@
   {
    "name": "req_sd_info",
    "description": "1.3: card, partition, write window, eGON headers, VERIFY checksums",
-   "hex": "a5130100000523000000040000005b310100000079b8f899",
+   "hex": "a51301000005250000000400000090b10100000079b8f899",
    "frames": [
     {
      "cmd": 1280,
-     "seq": 35,
+     "seq": 37,
      "status": 0,
      "flags": 0,
      "len": 4,
@@ -719,7 +2350,7 @@
    "device_events": [
     {
      "cmd": 1280,
-     "seq": 35,
+     "seq": 37,
      "status": 0,
      "flags": 0,
      "len": 4,
@@ -731,11 +2362,11 @@
   {
    "name": "req_sd_read_sectors",
    "description": "1.3: sectors 750..877",
-   "hex": "a51301000105240000000800000034d6ee02000080000000284fbe89",
+   "hex": "a5130100010526000000080000009259ee02000080000000284fbe89",
    "frames": [
     {
      "cmd": 1281,
-     "seq": 36,
+     "seq": 38,
      "status": 0,
      "flags": 0,
      "len": 8,
@@ -745,7 +2376,7 @@
    "device_events": [
     {
      "cmd": 1281,
-     "seq": 36,
+     "seq": 38,
      "status": 0,
      "flags": 0,
      "len": 8,
@@ -757,11 +2388,11 @@
   {
    "name": "req_sd_stage",
    "description": "1.3: 4 bytes at stage offset 512",
-   "hex": "a51301000205250000000c000000d9ea000200000400000065474f4e7dd25b38",
+   "hex": "a51301000205270000000c0000007f65000200000400000065474f4e7dd25b38",
    "frames": [
     {
      "cmd": 1282,
-     "seq": 37,
+     "seq": 39,
      "status": 0,
      "flags": 0,
      "len": 12,
@@ -771,7 +2402,7 @@
    "device_events": [
     {
      "cmd": 1282,
-     "seq": 37,
+     "seq": 39,
      "status": 0,
      "flags": 0,
      "len": 12,
@@ -783,11 +2414,11 @@
   {
    "name": "req_sd_write_sectors",
    "description": "1.3: stage[0, 64 KiB) to sector 750, stage crc32 0x1C291CA3 (example value), magic 'SDWR'",
-   "hex": "a5130100030526000000100000007c19ee02000080000000a31c291c534457524f457fbe",
+   "hex": "a5130100030528000000100000006d87ee02000080000000a31c291c534457524f457fbe",
    "frames": [
     {
      "cmd": 1283,
-     "seq": 38,
+     "seq": 40,
      "status": 0,
      "flags": 0,
      "len": 16,
@@ -797,7 +2428,7 @@
    "device_events": [
     {
      "cmd": 1283,
-     "seq": 38,
+     "seq": 40,
      "status": 0,
      "flags": 0,
      "len": 16,
@@ -809,11 +2440,11 @@
   {
    "name": "req_get_gen",
    "description": "",
-   "hex": "a5130100000327000000000000004fae",
+   "hex": "a5130100000329000000000000005e30",
    "frames": [
     {
      "cmd": 768,
-     "seq": 39,
+     "seq": 41,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -823,7 +2454,7 @@
    "device_events": [
     {
      "cmd": 768,
-     "seq": 39,
+     "seq": 41,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -835,11 +2466,11 @@
   {
    "name": "req_set_gen",
    "description": "enable, 10 kHz (10,000,000 mHz), 50.00 %",
-   "hex": "a5130100010328000000140000009ec90701000080969800000000008813000000000000303ee14d",
+   "hex": "a513010001032a0000001400000038460701000080969800000000008813000000000000303ee14d",
    "frames": [
     {
      "cmd": 769,
-     "seq": 40,
+     "seq": 42,
      "status": 0,
      "flags": 0,
      "len": 20,
@@ -849,7 +2480,7 @@
    "device_events": [
     {
      "cmd": 769,
-     "seq": 40,
+     "seq": 42,
      "status": 0,
      "flags": 0,
      "len": 20,
@@ -861,11 +2492,11 @@
   {
    "name": "req_get_cal",
    "description": "CH1",
-   "hex": "a51301000004290000000100000041f7008def02d2",
+   "hex": "a513010000042b00000001000000e778008def02d2",
    "frames": [
     {
      "cmd": 1024,
-     "seq": 41,
+     "seq": 43,
      "status": 0,
      "flags": 0,
      "len": 1,
@@ -875,7 +2506,7 @@
    "device_events": [
     {
      "cmd": 1024,
-     "seq": 41,
+     "seq": 43,
      "status": 0,
      "flags": 0,
      "len": 1,
@@ -887,11 +2518,11 @@
   {
    "name": "req_read_screen",
    "description": "rows 0..39",
-   "hex": "a513010001042a0000000400000034ec00002800b671197c",
+   "hex": "a513010001042c00000004000000ff6c00002800b671197c",
    "frames": [
     {
      "cmd": 1025,
-     "seq": 42,
+     "seq": 44,
      "status": 0,
      "flags": 0,
      "len": 4,
@@ -901,7 +2532,7 @@
    "device_events": [
     {
      "cmd": 1025,
-     "seq": 42,
+     "seq": 44,
      "status": 0,
      "flags": 0,
      "len": 4,
@@ -913,11 +2544,11 @@
   {
    "name": "req_debug_fpga",
    "description": "write command 0x06, read 2 bytes (FPGA version)",
-   "hex": "a5130100000f2b00000005000000adb6010106030295f75082",
+   "hex": "a5130100000f2d000000050000006636010106030295f75082",
    "frames": [
     {
      "cmd": 3840,
-     "seq": 43,
+     "seq": 45,
      "status": 0,
      "flags": 0,
      "len": 5,
@@ -927,7 +2558,7 @@
    "device_events": [
     {
      "cmd": 3840,
-     "seq": 43,
+     "seq": 45,
      "status": 0,
      "flags": 0,
      "len": 5,
@@ -939,11 +2570,11 @@
   {
    "name": "req_enter_fel",
    "description": "magic 'FEL_' little-endian",
-   "hex": "a5130100010f2c0000000400000044685f46454c61875934",
+   "hex": "a5130100010f2e00000004000000e2e75f46454c61875934",
    "frames": [
     {
      "cmd": 3841,
-     "seq": 44,
+     "seq": 46,
      "status": 0,
      "flags": 0,
      "len": 4,
@@ -953,7 +2584,7 @@
    "device_events": [
     {
      "cmd": 3841,
-     "seq": 44,
+     "seq": 46,
      "status": 0,
      "flags": 0,
      "len": 4,
