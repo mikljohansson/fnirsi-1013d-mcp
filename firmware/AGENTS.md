@@ -847,8 +847,9 @@ Commits 2e0cd10 (FIR), 9591d83 (repaint), e09b25a (default), 45b9b9a (USB suspen
 Branch `fw-cal2` from main 854ed2a: 3aa3431 (protocol row 51, spec first), c8f17bf (adc_cal v3, readout, 16-bit path,
 GET_CAL, diagnostics, vectors, host tests), f5fdf72 (gain step prompt), df61557 (0.2.45, CHANGELOG), 510f54c (README
 6.3), then this handoff. Image from df61557: `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the fw-cal2 worktree,
-sha256 32f259b4f4ea9ad435b64af41a2d90516b96461b1c9d2b126ea1957228dce5fa (not pinned in backups/ yet; the image embeds
-the git hash, so a rebuild after the merge differs). Nothing benched. Design, assumptions, cost and the bench
+sha256 32f259b4f4ea9ad435b64af41a2d90516b96461b1c9d2b126ea1957228dce5fa (not pinned in backups/ yet; built 2026-10-19 00:06; WSL cannot
+resolve the worktree's Windows gitdir, so the identity line carries an empty hash: a rebuild on main after the merge differs
+in hash and build time only). Nothing benched. Design, assumptions, cost and the bench
 procedure: README 6.3; wire: protocol row 51.
 
 **What was decided and why**
