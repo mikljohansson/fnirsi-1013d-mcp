@@ -8,9 +8,18 @@ State on 2026-10-18:
   (`docs/hardware-status.md`). The stock image is backed up.
 - TD 4.6.8 SP1 runs headless in WSL. `SRC_REV=a947e78 ./build.sh` rebuilds Atlan4's original **byte-identical**
   to that bitstream in about 15 s.
-- `src/` now holds our design, version word **0x1533**: the external trigger on the calibration pin (roadmap item 2;
-  commits 526c969, 4601dec, 2839258). It is built (`out/FPGA-ext-trigger.bin`, sha256 `a9656703...1216`), meets
-  timing and passes the iverilog testbench.
+- `src/` now holds our design, version word **0x1534** (fpga-gen3). It adds the decimation filter (boxcar, CIC2,
+  CIC3; cmds 0x53-0x55, read 0x29) for the spectrum analyser, on top of 0x1533, the external trigger on the
+  calibration pin (commits 526c969, 4601dec, 2839258; source rev 2839258 is the tb's 0x1533 reference).
+  - With 0x53 = 0 (the default) it is cycle-identical to 0x1533.
+  - Built as `out/FPGA-decim.bin`, sha256 `83140510...20c1`, pinned in `backups/al3_decim_0x1534_83140510.bin`;
+    padded flash image `backups/al3_decim_0x1534_83140510_padded.bin`, sha256 `c387a15e...c0a0`.
+  - Meets timing (with the new `sample_write_clock` constraint) and passes `tb/run.sh`.
+  - Interface, design, gain/alias table and bench checks: `README.md` "Changes" section 3. The firmware spec went to
+    the coordinator on 2026-10-18.
+  - **Not flashed.** It needs firmware that knows 0x1534. A 0x153x-aware firmware that does not use 0x53 sees 0x1533
+    behaviour.
+- The FPGA in the unit has not changed: it still holds 0x1532, not the 0x1533 design described below.
 - Bench status of 0x1533:
   - Pinned copy: `backups/al3_ext-trigger_0x1533_a9656703.bin`.
   - **Not flashed.** It needs fw 0.2.9 or later on the MCU first. 0.2.9 (commit bebf901) decodes 0x153x as AL3,
@@ -31,8 +40,8 @@ State on 2026-10-18:
 | Path | What |
 |---|---|
 | `src/` | Atlan4's AL3 TD project with our changes: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc` (pins), `zaklad.sdc` (clocks), `FPGA.al` (TD project, holds `<UCode>`), `al_ip/` (PLL and sample-memory IP), `FPGA commands.txt` (command table, current). Upstream material, licence unstated, attributed to Atlan4. Unmodified original: git a947e78. |
-| `tb/` | iverilog testbench: `run.sh [seed]` simulates `src/zaklad.v` against Atlan4's original from git (`REF_REV`), `tb_ext_trigger.v`, `sim_models.v` (behavioural PLL/BRAM). `DUT=<file>` for mutation runs. |
-| `out/` | Named bitstreams for the bench (gitignored `*.bin`): `FPGA-ext-trigger.bin`. |
+| `tb/` | iverilog testbench, `run.sh [seed]`, three steps: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model; `cic_model.py table` prints the gain/alias/droop table). `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext` or `ONLY=decim` for one step. |
+| `out/` | Named bitstreams for the bench (gitignored `*.bin`): `FPGA-ext-trigger.bin` (0x1533), `FPGA-decim.bin` (0x1534). |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the stock FNIRSI design (0x1432), GPL-3.0. Same pin map. Use it for "what did stock do" questions. |
 | `bitstreams/` | Prebuilt images, gitignored except `README.md` (provenance and sha256). |
 | `build.sh`, `build.tcl` | Headless TD 4.6.8 build (replay of Atlan4's GUI command sequence). `SRC_REV=<rev>` builds `src/` from git. |
@@ -63,14 +72,18 @@ wsl -d Ubuntu -- python3 -I /mnt/d/src/fnirsi-1013d-ai/fpga/al3/td/compare_bin.p
 - `build.sh` copies `src/` to `~/al3-build` (WSL-local, fast), fills `build.tcl` with the TD path and the user
   code, runs `td flow.tcl`, then copies `FPGA.bin`, `FPGA.bit`, `FPGA_rtl.area`, `FPGA_gate.area`,
   `FPGA_phy.area`, `FPGA_phy.timing`, `FPGA_phy.tsm` and `build.log` to `fpga/al3/build/`.
-- Wall clock is 11 to 16 s. On failure it exits non-zero and prints "BUILD FAILED" with the first errors.
+- Wall clock is 11 to 16 s (about 35 s for 0x1534). On failure it exits non-zero and prints "BUILD FAILED" with the first errors.
 - Overrides: `TD_HOME`, `TD_SHIM`, `FLOW` (`atlan` default, `donwulff`), `SRC_REV` (git revision of `src/`); the
   first argument is the work dir.
-- Current `src/` (0x1533) gives `build/FPGA.bin` sha256 `a96567031872ae99bd40f0722a111a08da0f6381b6c710b70998af784a341216`.
+- Current `src/` (0x1534) gives `build/FPGA.bin` sha256 `83140510dfbfef56cc5ed15d70866e6bc52c407a41fd0ea480e8993df5b820c1`.
+  0x1533 (`SRC_REV=2839258`) gave `a96567031872ae99bd40f0722a111a08da0f6381b6c710b70998af784a341216`.
 - Testbench: install iverilog once as root (`wsl -d Ubuntu -u root -- apt-get install -y iverilog`, done 2026-10-18),
-  then run `wsl -d Ubuntu -- bash /mnt/d/src/fnirsi-1013d-ai/fpga/al3/tb/run.sh [seed]`. It takes about 4 s and
-  ends with `RESULT: 38 checks, 0 failed -> PASS`. Any change to `zaklad.v` must keep it passing. The equivalence
-  phase is what proves "CH1/CH2 unchanged".
+  then run `wsl -d Ubuntu -- bash /mnt/d/src/fnirsi-1013d-ai/fpga/al3/tb/run.sh [seed]`. It takes about 25 s and
+  ends with `ALL PASS (seed N)`: 38 checks (tb_ext_trigger), 98 checks (tb_decim), and about 1,870 samples in
+  `cic_model: ... -> PASS`. Any change to `zaklad.v` must keep it passing. The equivalence phases prove that CH1/CH2
+  match 0x1532 and that K = 0 (including EXT) matches 0x1533.
+- Run testbench work from PowerShell (`wsl -d Ubuntu -- bash <script>`). Git Bash rewrites `/mnt/...` arguments.
+  Concurrent runs need different `SIM_WORK` directories.
 
 Expected output for Atlan4's original (`SRC_REV=a947e78`; before 2026-10-18 this was plain `src/`):
 
@@ -113,8 +126,18 @@ trusting any design change. Builds are deterministic, so a changed hash means a 
 
 Numbers for Atlan4's original (`SRC_REV=a947e78`, equal to the shipped bitstream). The 0x1533 numbers are in
 `README.md` "Changes": 635 LUT / 486 reg, `clk_200MHz` 4.459 ns TNS 0, `clkc[1]` 8.394 ns / 6 errors,
-`clkc[0]` 8.298 ns / 50 errors. The worst `clk_200MHz` path is now `sample_write_clock` (negedge) to
+`clkc[0]` 8.298 ns / 50 errors. The worst `clk_200MHz` path is `sample_write_clock` (negedge) to
 `sampling_triggered`, slack +0.541 ns.
+
+0x1534 (section 3):
+- 2304 LUT / 1790 reg / 2488 LE, 32 BRAM9K.
+- `clk_200MHz` 4.899 ns, 0 errors. The worst path is the same half-cycle path, at +0.101 ns against the SDC's 40 %
+  waveform. It is placement-sensitive: it varied between +0.03 and +0.7 ns across the builds made while developing
+  0x1534.
+- `sample_write_clock` is constrained now (generated clock plus multicycle into `clk_200MHz`), 0 errors. The decimator
+  has +3.36 ns of a 10 ns budget.
+- To list more than 3 endpoints, re-run `report_timing` on `~/al3-build/FPGA_pr.db` (`import_device`, `import_db`,
+  `read_sdc`, `report_timing -ep_num N`). That does not change the bitstream.
 
 | Item | Value |
 |---|---|
@@ -171,9 +194,10 @@ References:
 - `research/notes/fpga-verilog-analysis.md`: command tables for all variants, bus timing, limits.
 - `README.md` here: zaklad.v vs stock table, pin map. `docs/protocol.md`: the PC-side protocol of our firmware.
 
-`src/zaklad.v` (968 lines), top to bottom:
+`src/zaklad.v` (about 1260 lines), top to bottom:
 - Helper modules `clockdivider`, `pwmcounter`, `freq_generator_dds_pwm` (32-bit phase accumulator; output is
-  `phase_acc < duty_threshold`).
+  `phase_acc < duty_threshold`), and `decim_chan` (0x1534 filter per channel: capture on either write-clock edge,
+  polyphase (1+z^-1)^K prefilter, 3 integrators, decimation strobe, 3 combs, shift and saturation, all 48 bit).
 - `pll main_clock`: 50 MHz `i_xtal` to `clk_200MHz` (clk0) and `clk_ADC` (clk1, 200 MHz at 90 degrees).
   IP in `al_ip/pll.v`.
 - Clock dividers: 50 MHz peripheral clock, PWM counters for the offsets (25 kHz) and the backlight.
@@ -186,17 +210,24 @@ References:
 - Capture logic on `sample_write_clock`: write address, pretrigger (0x0B) and total (0x0C) counts, trigger
   compare on the raw ADC core A inputs (rising/falling), auto time-out, trigger address.
 - MCU bus on `i_mcu_clk`: command latch (`i_mcu_dcs` = 1), write decoder (0x01, 0x0B-0x0F, 0x15-0x17, 0x1A,
-  0x1B, 0x32-0x38, 0x3C, 0x50-0x52), read mux (0x05, 0x06, 0x0A, 0x14, 0x18, 0x20-0x28, 0x41).
+  0x1B, 0x32-0x38, 0x3C, 0x50-0x55), read mux (0x05, 0x06, 0x0A, 0x14, 0x18, 0x20-0x29, 0x41).
   Multi-byte values are big-endian and stepped by `mcu_state`.
 - External trigger (0x1533), block after the generator pin assign. The pad is read through `ext_sync` (2 flops,
   first in the IOB), then a 3-sample majority filter (`ext_level`), then the edge select per `trigger_edge`. The
   latched `ext_pending` fires into `sampling_triggered` after the next `sample_write_clock` rising edge. Cmd 0x15
   `data[1]` = `trigger_ext` (value 2 = EXT) gates the ADC detect off. Read 0x28 = {ext_activity, gen_out_enable,
   ext_level}. P133 has PULLDOWN in `zaklad.adc`.
-- Command codes still free in the decoders (checked 2026-10-18): writes 0x02-0x0A, 0x10-0x14, 0x18, 0x19, 0x1C-0x1E,
-  0x20-0x31, 0x39-0x3B, 0x3D-0x4F, 0x53 and up; reads 0x01-0x04, 0x07-0x09, 0x0B-0x13, 0x15-0x17, 0x19-0x1F, 0x29-0x40,
-  0x42 and up. Stock firmware wrote 0x28 (roll mode) and Donwulff says stock used 0x24/0x26 differently, so prefer
-  0x29 and up, or 0x53 and up, for new codes.
+- Decimation filter (0x1534), block after the sample-rate divider. `dec_on` (K != 0):
+  - forces divider 0 on the static side of the rate compare, so the ADCs run at full rate;
+  - drives `dec_pc` (P counter) and `dec_sv` (valid chain), whose `dec_wr` stage gives `swc_adv`, the clock enable of
+    every capture register (the reset branches stay ungated);
+  - muxes `{dec_out2, dec_out1}` into the memory;
+  - turns the 16-bit trigger compare into 0xFF/0x00 in `trigger_data`, compared against level 0x80.
+  - `swc_adv_q` gates the EXT apply.
+- Command codes still free in the decoders (checked 2026-10-18, after 0x1534): writes 0x02-0x0A, 0x10-0x14, 0x18,
+  0x19, 0x1C-0x1E, 0x20-0x31, 0x39-0x3B, 0x3D-0x4F, 0x56 and up; reads 0x01-0x04, 0x07-0x09, 0x0B-0x13, 0x15-0x17,
+  0x19-0x1F, 0x2A-0x40, 0x42 and up. Stock firmware wrote 0x28 (roll mode) and Donwulff says stock used 0x24/0x26
+  differently, so prefer 0x2A and up, or 0x56 and up, for new codes.
 
 ## Wanted next (priority order)
 
@@ -227,6 +258,18 @@ Do not edit `src/` in place without keeping Atlan4's original reproducible (the 
 5. **200 MHz DDS clock.** Clock `freq_generator_dds_pwm` from `clk_200MHz` instead of 50 MHz for 4x frequency
    resolution and lower jitter. The phase increment scale changes by 4, so the firmware's 0x51 computation must
    follow. Pipeline the 32-bit compare to meet 200 MHz.
+
+Decimation filter (0x1534), open items:
+- firmware support (0x53-0x55, the 0x29 check, 16-bit read-back, the EXT latency correction) and flashing;
+- bench checks 1 to 5 of `README.md` section 3. Check 2 (capture window) decides the 0x53 bit 3/4 defaults, and check 3
+  confirms the B-before-A order. If the bench shows bit errors in both capture settings, try `INDEL` on the ADC pins
+  in `zaklad.adc` (TD user guide chapter 9, IOB input delay).
+- Possible extensions: a deeper record in 16-bit mode (item 2 above; 16 free BRAM9K hold another 4k words); and CIC3
+  for N > 10,334 with Hogenauer pruning or wider registers.
+- Mutation runs made for 0x1534 (`DUT=` override): the list is in commit 65417a8. A tenth (K = 2 comb bypass
+  broken) was still running at hand-over.
+- Next design: 0x1535, a CIC compensation FIR as the intended default mode (owner direction). Study only, no RTL yet:
+  `tb/fir_design.py report` and `README.md` section 4. 0x1534 stays frozen until it is benched.
 
 Also open: the structural `clkc[1]` violation (retime `sample_clock_enable`), symmetric IOB packing on the four
 encode outputs, and the 32-bit sample-rate counter as critical path (down-counter with registered terminal count).

@@ -392,8 +392,8 @@ traced with a netlist script):
 - **Case (b) is ruled out.** The lead's alternative was a resistive level shift to a negative rail on the calibration path.
   No such element is drawn, and the -6V3 rail appears only on the power and processor sheets.
 
-**(a) What an external signal must look like to register as EXT.** The pad is LVCMOS33. I assume the usual thresholds,
-about VIH 2.0 V and VIL 0.8 V against FPGA ground; they are not checked in an AL3 datasheet. P133 has the internal
+**(a) What an external signal must look like to register as EXT.** The pad is LVCMOS33: VIH min 1.9 V and VIL max 0.8 V against
+FPGA ground, absolute maximum 3.75 V (AL3 datasheet DS001 v1.3, "Device facts from the datasheet" below). P133 has the internal
 pull-down, value not documented, probably tens of kΩ. The path from the post to the pad is DC through R21 (1 kΩ).
 - **The reference ground decides everything.** The scope has two grounds on its connectors:
   - digital GND: USB connector shell, USB cable ground and SD-card cage, the same as the FPGA's ground;
@@ -471,6 +471,214 @@ descriptions, `docs/agent-measurement-guide.md`) should say:
   ground;
 - never link the probe ground and USB ground, because the traces shift.
 
+### 3. Decimation filter: boxcar and CIC (version 0x1534, 2026-10-18)
+
+This is the FPGA half of the spectrum-analyser work (`docs/plans/dpos350p-features.md`, sections 2c and 2e, step F1).
+Before 0x1534, slower timebases ran the ADC encodes at 200/(D+1) MSa/s and stored every sample. That gave no
+anti-alias filter and no resolution gain. With the new mode on, the ADCs always convert at 200 MSa/s. The FPGA then
+stores a boxcar sum or a CIC of order 2 or 3 over N samples as one 16-bit sample. With the mode off (the power-on
+default), the design is functionally identical to 0x1533; the testbench proves it cycle by cycle.
+
+**Protocol** (also in `src/FPGA commands.txt`; multi-byte values high byte first):
+
+| Cmd | Dir | Meaning |
+|---|---|---|
+| 0x06 | read, 2 B | 0x15 0x34. AL3 with EXT trigger (0x28) and the decimation filter. |
+| 0x53 | write, 1 B | bits 1..0 = K: 0 = sample skipping as 0x1533 (default), 1 = boxcar, 2 = CIC2, 3 = CIC3. bit 2 = swap: 0 means core B is the earlier sample of a pair, the interleave `fpga_read_sample_data` uses. bit 3 / bit 4 = capture the A / B cores on the falling write-clock edge, 5 ns later (bench knob, default 0). Bits 7..5 write 0. |
+| 0x54 | write, 1 B | Output shift S, bits 5..0. |
+| 0x55 | write, 2 B | 16-bit trigger level for K >= 1, compared with the stored sample of the 0x15 channel. 0x17 is ignored while K >= 1. |
+| 0x29 | read, 2 B | byte 0 = {bit 7: 16-bit layout active (K >= 1), bits 6..5 = 0, bit 4 neg_b, bit 3 neg_a, bit 2 swap, bits 1..0 K}; byte 1 = S. |
+
+**Decimation and scaling.** D is the 0x0D divider.
+- N = 2 * (floor(D / 2) + 1); the output rate is 200 MSa/s / N. For odd D this is the K = 0 rate 200 / (D + 1), so the
+  firmware's `sample_rate_settings` table works unchanged except for its entry 0.
+- With K >= 1 and D = 0, N = 2 (100 MSa/s). Use K = 0 for 200 MSa/s.
+- The filter output y has gain N^K. The stored sample is min(65535, y >> S).
+- Recommended S = max(0, bitlen(255 * N^K) - 16). It never saturates, and full scale lands at 32,768 to 65,280.
+- In ADC LSB: mean = out * 2^S / N^K. The 16-bit trigger level for an 8-bit level v is round(v * N^K / 2^S).
+- The 48-bit integrators and combs are exact while 255 * N^K < 2^48:
+  - K = 1: every divider.
+  - K = 2: N <= 1,050,630, which covers the whole firmware table.
+  - K = 3: N <= 10,334 (D <= 9999, 20 kSa/s and up). Beyond that the result is wrong; use K = 2.
+
+**Memory layout and read-back.** With K >= 1 each 32-bit word is {CH2[15:0], CH1[15:0]}, one output sample per
+channel. That gives 8192 samples per channel instead of 16,384 8-bit samples (one A/B pair per word).
+- The read commands are unchanged. 0x20 / 0x21 return CH1 low / high and 0x22 / 0x23 return CH2 low / high. Each read
+  still advances the read address by one word.
+- A channel is read as two passes from the same 0x1F start: low bytes, then high bytes. That is the same bus cost as
+  the A and B passes at K = 0.
+- 0x0B (pretrigger), 0x0C (total), 0x0E (time-out) and 0x14 (trigger_address) count words, so they count output
+  samples. They are still 13 bit.
+
+**Design** (`src/zaklad.v`, module `decim_chan` and the block "Decimation filter control and data path"):
+- **Clocking.** `sample_clock_enable` is forced on by putting divider 0 on the static side of the 32-bit compare, which
+  keeps it off the timed counter path. The encodes and `sample_write_clock` then run at full rate (100 MHz, one A/B
+  pair per edge).
+- **Strobe.** `dec_pc` counts P = floor(D / 2) + 1 write clocks per output sample. The valid chain `dec_sv` follows
+  the filter pipeline. Its last stage, `dec_wr`, marks the edge where a sample is written.
+- **Capture gating.** `swc_adv = ~dec_on | dec_wr` gates the write address, `time_base_cnt`, `sample_write_enable`,
+  `sampling_half_way`, `trigger_read_address`, `trigger_address`, the trigger data registers and the memory CE. With
+  K = 0 it is constant 1. The reset branches are not gated, so a reset reaches the logic within one write clock at any N.
+- **Filter.** A CIC of order K decimating by N = 2P is the polyphase prefilter (1 + z^-1)^K, evaluated once per pair
+  (taps 1,1 / 1,2,1 / 1,3,3,1 over B(k-1) A(k-1) B(k) A(k)), followed by a CIC of order K that decimates the 100 MSa/s
+  pair stream by P (noble identity). K = 1 is the plain boxcar sum of N consecutive samples.
+- **Bypassed stages.** For K < 3 the unused integrator and comb stages are plain registers, so the latency is the same
+  for every K.
+- **Free-running.** The filter is never reset, so data stays valid across captures. After changing 0x0D, 0x53 or
+  0x54, wait at least (K + 2) * N * 5 ns plus 1 us before 0x01.
+- **Output stage.** A two-step barrel shift by S (8-bit steps, then 1-bit steps), then the saturation to 0xFFFF.
+- **Capture.** Pins are captured on the rising write-clock edge (`pa`/`pb`) or, per core, on the falling edge
+  (`na`/`nb`, 5 ns later), then registered into the pair.
+- **Trigger on the 16-bit stream.** The result of `sample >= trigger_level16` goes into the existing 8-bit
+  `trigger_data` register as 0xFF or 0x00, and the 8-bit compare runs against 0x80. The rise and fall rules
+  (prev < L <= cur, prev >= L > cur) and the timed path into `sampling_triggered` therefore keep their 0x1533 structure.
+- **EXT.** The EXT detect gains `swc_adv_q`, a register, so it is applied only right after an edge that wrote a sample.
+  The term still fits one LUT4.
+- **Latency.** 12 write clocks (120 ns) from the pin capture to the memory write, for every K and N. Measured by the
+  testbench against the reference model.
+  - A stored sample covers the input up to 120 ns before its write edge. Its centre lies K * (N - 1) / 2 input samples
+    (K * (N - 1) * 2.5 ns) earlier.
+  - ADC triggers run on the stored stream and keep the K = 0 convention, so no correction is needed.
+  - For EXT, trigger_address is still the last sample written before the edge. The data lags the edge by
+    120 ns + K * (N - 1) * 2.5 ns, and the firmware should shift the EXT trigger point by that amount.
+- **Interleave.** (1 + z^-1)^K has a zero at 100 MHz, so the A/B core mismatch spur at fs/2 is removed for every K.
+
+**Gain, resolution, alias rejection and droop** (from `tb/cic_model.py table`). Definitions:
+- fo = output rate.
+- Droop is measured at B = fo/8 and fo/4.
+- Alias is the attenuation at fo - B, the nearest input that folds onto B.
+- Noise bits = 0.5 * log2((sum h)^2 / sum h^2), the gain for white noise. The ADC has about 2 LSB of noise, so this is
+  the expected resolution gain over 8 bits until the ADC's linearity and the front end dominate. That limit has not
+  been measured.
+- LSB = one 16-bit step in 8-bit ADC LSB, with the recommended S.
+
+| K | N | fo | S | LSB | noise bits | droop fo/8 | droop fo/4 | alias fo/8 | alias fo/4 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 2 | 100 M | 0 | 0.5 | 0.50 | -0.17 dB | -0.69 dB | -14.2 dB | -8.3 dB |
+| 1 | 10 | 20 M | 0 | 0.1 | 1.66 | -0.22 dB | -0.90 dB | -17.0 dB | -10.4 dB |
+| 1 | 100 | 2 M | 0 | 0.01 | 3.32 | -0.22 dB | -0.91 dB | -17.1 dB | -10.5 dB |
+| 1 | 1000 | 200 k | 2 | 0.004 | 4.98 | -0.22 dB | -0.91 dB | -17.1 dB | -10.5 dB |
+| 1 | 10000 | 20 k | 6 | 0.0064 | 6.64 | -0.22 dB | -0.91 dB | -17.1 dB | -10.5 dB |
+| 2 | 2 | 100 M | 0 | 0.25 | 0.71 | -0.34 dB | -1.38 dB | -28.4 dB | -16.7 dB |
+| 2 | 10 | 20 M | 0 | 0.01 | 1.95 | -0.44 dB | -1.81 dB | -34.0 dB | -20.7 dB |
+| 2 | 100 | 2 M | 6 | 0.0064 | 3.61 | -0.45 dB | -1.82 dB | -34.3 dB | -20.9 dB |
+| 2 | 1000 | 200 k | 12 | 0.0041 | 5.28 | -0.45 dB | -1.82 dB | -34.3 dB | -20.9 dB |
+| 2 | 10000 | 20 k | 19 | 0.0052 | 6.94 | -0.45 dB | -1.82 dB | -34.3 dB | -20.9 dB |
+| 3 | 2 | 100 M | 0 | 0.125 | 0.84 | -0.51 dB | -2.06 dB | -42.6 dB | -25.0 dB |
+| 3 | 10 | 20 M | 2 | 0.004 | 2.09 | -0.67 dB | -2.71 dB | -51.1 dB | -31.1 dB |
+| 3 | 100 | 2 M | 12 | 0.0041 | 3.75 | -0.67 dB | -2.74 dB | -51.4 dB | -31.4 dB |
+| 3 | 1000 | 200 k | 22 | 0.0042 | 5.41 | -0.67 dB | -2.74 dB | -51.4 dB | -31.4 dB |
+| 3 | 10000 | 20 k | 32 | 0.0043 | 7.08 | -0.67 dB | -2.74 dB | -51.4 dB | -31.4 dB |
+
+Sample skipping (K = 0) has 0 dB alias rejection everywhere.
+- The plan's F1 acceptance case is a 3.9 MHz input at 1 MSa/s (N = 200), which aliases to 100 kHz. The model
+  attenuates it by 32 dB (K = 1), 64 dB (K = 2) and 96 dB (K = 3) against skipping, with 0.14 / 0.29 / 0.43 dB droop
+  at 100 kHz.
+- A square wave from the generator carries harmonics, and the 8-bit ADC's own spurs (SFDR about 45 to 50 dBc) limit
+  what the bench can see.
+- Use K = 3 for spectra and K = 1 for time-domain views that must not ring. The CIC step response is monotonic but
+  K * (N - 1) + 1 samples long.
+
+**Build** (TD 4.6.8 SP1, `./build.sh`, about 35 s; corner TT 1.10 V 85 C):
+
+| | 0x1533 | 0x1534 |
+|---|---|---|
+| LUT / reg / LE | 635 / 486 / 686 | 2304 / 1790 / 2488 (TD counts 8640 LUT sites: 26.7 %; the datasheet lists 10,368 LUT) |
+| BRAM9K, pads | 32, 60 | 32, 60 |
+| IOB regs | 13 OREG, 1 IREG | 13 OREG, 1 IREG. TD cannot pack the ADC pins into IREG because they feed registers on both write-clock edges; `PACKREG = ON` in the `.adc` has no effect (the bitstream is identical). |
+| `clk_200MHz` | 4.459 ns, 0 errors | 4.899 ns, 0 errors, TNS 0. Worst path: the existing half-cycle `sample_write_clock` (negedge) to `sampling_triggered`, 2 LUT levels, slack +0.101 ns against the SDC's 40 % waveform (2.0 ns half period). Against the PLL's real 50 % duty that is about +0.6 ns. The sample-rate counter compare is not on this path any more. |
+| `sample_write_clock` | not constrained | 100 MHz generated clock, 0 errors. Decimator internal worst slack +3.36 ns (6.64 ns, 151 MHz). clk_200MHz to write-clock crossings +1.40 ns. Write-clock to clk_200MHz paths: 2-cycle multicycle, +2.9 ns or more. |
+| `clkc[1]` (`clk_ADC`) | 8.394 ns, 6 errors | 7.528 ns, 6 errors, TNS -11.7. The known structural enable crossing. It is inert at K >= 1 (enable constant) and at 200 MSa/s. |
+| `clkc[0]` (SDC alias) | 8.298 ns, 50 errors | 8.431 ns, 51 errors, TNS -92.0. Artefact of the duplicate clock definition. |
+
+**`zaklad.sdc` change.** `sample_write_clock` is declared a generated clock: `-edges {2 4 6}` on `clk_200MHz`, rising
+on its falling edges, period 10 ns, the fastest rate.
+- Paths from it into `clk_200MHz` get `set_multicycle_path -setup 2 / -hold 1`. Their sources hold for a whole write
+  clock (>= 10 ns), so either of the next two 200 MHz edges takes them, and trigger_address is the same either way.
+- Before 0x1534 all of these paths were unconstrained.
+- With `-divide_by 2` instead of `-edges`, TD assumes the clock rises with `clk_200MHz` and reports 40 false hold
+  errors.
+
+**Bitstream** (`out/FPGA-decim.bin`, not committed; deterministic: four builds of the same source gave the same hash):
+
+| File | Bytes | sha256 |
+|---|---|---|
+| `out/FPGA-decim.bin` (= `build/FPGA.bin`) | 282,898 | `83140510dfbfef56cc5ed15d70866e6bc52c407a41fd0ea480e8993df5b820c1` |
+| `backups/al3_decim_0x1534_83140510_padded.bin` (0xFF to 1 MiB, flash image) | 1,048,576 | `c387a15ed11d209deab639d1de84dd3117419d800aed05e032b192650e13c0a0` |
+
+Header words as before: `cc55aa33 f0000006 18006c31`, user code 0x0056.
+
+**Testbench** (`tb/run.sh [seed]`, about 25 s). It now runs three steps; all must pass.
+1. `tb_ext_trigger.v` against Atlan4's 0x1532, unchanged apart from the version check: 38 checks.
+2. `tb_decim.v` against our 0x1533 from git (`REF1533_REV`, default 2839258): 98 checks.
+   - Phase 1: 50 random K = 0 captures, trigger source CH1, CH2 or EXT, triangle or random ADC data, random values
+     written to 0x53 (K = 0), 0x54 and 0x55. Pins, capture registers, the write-clock and EXT state, every bus read and
+     the whole 8192-word memory after each capture must equal 0x1533. About 1.0 M samples, 0 mismatches.
+   - Directed checks: 0x06 = 0x1534, 0x29 fields, and the MCU read-back of the 16-bit samples through 0x20 to 0x23.
+   - Trigger position: a step through K = 1, 2 and 3 at N = 2, 10, 20, 64 and 100, rising and falling, CH1 and CH2,
+     60 cases. In every case the first stored sample past the 16-bit level is at trigger_address + 1. The K = 0 run
+     measured the same offset.
+   - 0x17 is ignored with K >= 1.
+   - EXT with K = 1 to 3 at N = 20 and 200: trigger_address = last sample written before the edge.
+   - Auto time-out counts output samples.
+   - Back to K = 0: the free-running divide-by-2 toggle phase is copied to the reference (arbitrary history in 0x1533
+     too), then 10 more random captures with 0 mismatches.
+3. `cic_model.py check`: every memory write of 18 logged decimated captures, about 1,870 samples, is recomputed with a
+   direct-form FIR. The FIR is the N-tap boxcar convolved K times; for K = 1 it is also checked as the plain sum.
+   - The captures cover all K, N from 2 to 2000, both core orders, all four capture-edge settings, recommended and
+     too-small shifts (saturation), and even and odd dividers.
+   - Every sample matches at latency 12 write clocks, and the writes are spaced exactly P edges apart.
+
+Seeds 1 to 10, 77, 1234 and 99999 all pass. Mutation runs (`DUT=` override) fail as they should; the list of variants
+is in `AGENTS.md`.
+
+**Bench checks** (owner/coordinator; needs firmware that knows 0x1534, and never flash without the verified stock dump):
+1. K = 0 regression: as for 0x1533, including EXT. The ADC capture path now has a 2-input mux in front of the BRAM, and
+   the netlist was re-placed. Look for glitches on a 10 to 30 MHz sine at 200 MSa/s.
+2. Capture window: K = 1, D = 1 (N = 2, 100 MSa/s) on a slow ramp or a 100 kHz sine. Compare out / 2 with the K = 0 A
+   and B values; there must be no isolated spikes. Repeat with 0x53 bits 3 / 4 set and keep the cleanest setting.
+3. Core order: K = 3, N = 2 or 4 on a 20 to 30 MHz sine. The amplitude should follow the droop table for swap = 0. A
+   wrong order shows as excess attenuation and distortion; then set bit 2.
+4. Alias rejection (F1): generator 3.9 MHz square, 1 MSa/s, K = 0 vs K = 1 vs K = 3. Measure the 100 kHz alias with the
+   host FFT; expect at least 15 dB less with K = 1.
+5. Resolution: shorted input, K = 1 and 3 at N = 1000. The rms noise in ADC LSB should fall roughly as the noise-bits
+   column predicts.
+
+### 4. Design study: CIC compensation FIR (planned 0x1535, not built)
+
+Owner direction: the default acquisition mode should become CIC plus a compensation FIR. 0x1534 stays frozen; this
+section is a design study (`tb/fir_design.py report`, numpy only, 18-bit quantised taps).
+
+**Where the FIR goes decides what it can do.**
+- **A: a FIR at the output rate fo after the CIC.** It flattens the droop below 0.02 dB with 15 taps. It cannot remove
+  aliases, which already folded in the CIC decimation; it raises the alias band by 1 to 7 dB.
+- **B: CIC decimating by N/2, then a symmetric FIR at 2 fo that decimates by 2.** This flattens the passband and adds
+  about 20 dB of alias rejection. Recommended.
+
+**Results for B, whole chain:**
+- Passband edge a = 0.5 means flat to fo/4. Ripple is 0.04 to 0.08 dB with T = 15 taps, and alias rejection is 17 / 34
+  / 51 dB for K = 1 / 2 / 3, against 10.5 / 20.9 / 31.4 dB for the CIC alone.
+- a = 0.8 (flat to 0.4 fo) needs T = 31 taps for 0.3 dB ripple, with alias rejection 12 / 24 / 36 dB (CIC alone: 6 /
+  12 / 18 dB).
+- Ripple and alias rejection at N = 32 and at N = 4096 agree within 0.5 dB, so one coefficient set per K and profile
+  covers every N.
+
+**Cost and limits:**
+- Multiplier: one M18x18 per channel (2 of the 3). It is time-multiplexed with the symmetric pre-add, (T + 1) / 2
+  multiply-accumulates per output sample. There are N / 2 write clocks per output, so the FIR engages for N >= 16 at
+  T = 15 and N >= 32 at T = 31.
+- N must be a multiple of 4, so that the pair-stream CIC decimates by P / 2. Below the minimum N, the 0x1534 path is
+  used unchanged.
+- Other logic: a T x 18-bit delay line per channel (one BRAM9K, or about 560 FF), a 16 x 18 coefficient ROM per K, and
+  a 40-bit accumulator. The estimate is +300 to +600 LUT and +200 to +700 FF, against 2304 LUT used now. K = 3 fits;
+  coefficients are per K, the datapath is shared.
+- Scaling: FIR input 18 bit (the CIC output shifted to 17 bits). Coefficients sum to 2^17, and sum |h| is 1.35 to
+  1.84. The output is acc >> 17, clamped to 0 .. 65535.
+- Headroom: the step overshoot and undershoot of the chain is 6 to 9 %, so the FIR mode needs the recommended shift + 1.
+- Group delay in output samples: (T - 1) / 4 for the FIR (3.5 at T = 15, 7.5 at T = 31) plus K (N / 2 - 1) / (2 N)
+  (about K / 4) for the CIC, plus the pipeline latency in write clocks. The tb would report it the same way as the
+  12-write-clock latency of 0x1534.
+
 ## Device facts from the datasheet
 
 Source: Anlogic "AL3 series FPGA datasheet" DS001 v1.3 (Sept 2017, Chinese, owner's download `AL3A10LG144.pdf`, 84 pages).
@@ -490,5 +698,5 @@ Page numbers are PDF pages. Details and the configuration-pin analysis: `docs/fp
 | Weak pull-up / pull-down | 35 to 250 uA, so about 13 to 94 kOhm at 3.3 V [inference] (p.62) |
 | Configuration | MSPI (MSEL 001 fast 0x0B, 010 standard 0x03), CCLK 2 to 64 MHz selectable in the bitstream; CCLK is a dedicated pin (pin 12), MOSI (6), MISO (13), SPICSN (8) are reusable as user I/O after configuration (p.51-54, p.69-70) |
 
-The external-trigger notes in "Changes" section 2 say the VIH/VIL values were not checked in an AL3 datasheet. They now are:
+The external-trigger notes in "Changes" section 2 now quote these VIH/VIL values:
 the table above confirms 1.9 V / 0.8 V for LVCMOS33, and the 1 kOhm series path is within the input ratings for a 3.3 V source.
