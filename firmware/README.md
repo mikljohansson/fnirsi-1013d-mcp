@@ -943,7 +943,8 @@ and dcoffset 0, DC coupling forced (restored after), 500 samples per core per co
 relay, 60 ms; at 2 MSa/s the mean of both cores at PWM 500 and 1200 (2 conversions each) gives the coarse centre
 (reject if 700 counts move the mean by under 100 codes or the centre is outside 200..1800); means per core at
 centre - 150 and centre + 150 (60 ms settle, 4 conversions each) give each core's slope and the refined centre P
-where the mean of both cores reads 128; at P, 8 conversions gated (2 MSa/s) and 8 at full rate (200 MSa/s) give the
+where the mean of both cores reads 128; at P, 8 conversions gated (2 MSa/s) and 64 at full rate (200 MSa/s; a readout spans only 5 us of the
+40 us PWM ripple period, so it takes many to average the ripple phase) give the
 zeros (1/16 code), the RMS noise and the drift between the first and the second 4 conversions. About 0.4 s per range,
 5 s in all. Checks per range (`acal_range_store`, first failure wins, shown as "CH1: <reason>" in the failure box;
 nothing changes unless both channels pass): no sample at 0 or 255; noise <= 3 codes RMS; drift <= 0.5 code; slopes
