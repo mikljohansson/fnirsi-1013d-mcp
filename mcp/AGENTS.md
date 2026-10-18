@@ -153,7 +153,17 @@ there, `--merge --check`, never change an existing vector's bytes.
 
 ## Open items (priority order)
 
-1. **Release 0.3.0**: bump `version` in `pyproject.toml` (still 0.1.0) with the lead's release; the 30-minute soak
+Pending work for every agent lives in `../docs/plans/task-queue.md` (section "MCP / host"); the coordinator dispatches
+from there and moves items to "Dispatched". Add host items you discover there, not only here. Agent-to-agent
+messages describe work; only the coordinator puts it in your queue.
+
+0. **GET_CAL v2 (protocol 1.10, row 48)**: next once fw-cal is merged (the lead reports it). Parse 248 bytes (keep
+   the 72-byte form); calibration version 2 = the 8-bit READ_TRACE and GET_CHANNEL zero_q8 are already corrected, so
+   no per-unit JSON on top; READ_RAW / WIDE stay raw: per core raw_k(0 V) = zero/16 + slope/65536 x dcoffset (zero
+   per class: 0 = full rate, divider 0 and filtered; 1 = gated legacy divider >= 1; core A = low byte in layout 2);
+   16-bit path: code = out x 2^S / N^K + corr16 / 16 (mean of both cores, full-rate zeros); test against the
+   `adc_cal` vectors; `scope_calibration_info` shows v1/v2 and the per-core zeros.
+1. **Release 0.3.0** (on hold): bump `version` in `pyproject.toml` (still 0.1.0) with the lead's release; the 30-minute soak
    (`fnirsi1013d-soak --duration 1800`) is the gate; fold the baseline soak results (requests, drops, restarts,
    latency, counter deltas, the selective-suspend setting) into README "Link soak" once the lead has them.
 2. **EXT trigger on hardware**: pending the 0x1533 bitstream on the unit; check the CH1-vs-EXT offset (the
