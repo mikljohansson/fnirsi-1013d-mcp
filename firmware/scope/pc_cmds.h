@@ -20,7 +20,7 @@
 #else
 #define PC_FW_VERSION_MAP ""
 #endif
-#define PC_FW_VERSION     "0.2.28" PC_FW_VERSION_MAP
+#define PC_FW_VERSION     "0.2.30" PC_FW_VERSION_MAP
 #endif
 
 #ifndef PC_FW_BUILD
@@ -138,6 +138,10 @@ typedef struct
   uint32_t   divider;
   uint32_t   pretrigger;        //samples
   uint32_t   total;
+  uint8_t    decim;             //1.9: decimation filter as written for it (0x29 byte 0 layout: bit 7 16-bit, bit 2 swap, K)
+  uint8_t    decim_shift;       //S
+  uint32_t   decim_n;           //N (0 when K = 0)
+  uint16_t   ext_shift;         //EXT trigger with K >= 1: latency correction in samples (pc_decim_ext_shift)
   pc_hw_channel ch[2];
 } pc_capture;
 
@@ -208,6 +212,8 @@ typedef struct
   uint16_t   capture_start;
   uint16_t   cap_pre_words;     //geometry latched at ARM
   uint16_t   cap_total_words;
+  uint16_t   cap_ext_shift;     //EXT latency correction of the host capture (samples)
+  uint8_t    cap_wide;          //1.9: 16-bit layout (decimation filter on): one sample per word
   uint32_t   cap_divider;
   uint32_t   settle_until;
   uint8_t    settle_pending;

@@ -1,0 +1,169 @@
+//----------------------------------------------------------------------------------------------------------------------------------
+// pc_decim.c - decimation filter maths (pc_decim.h). Integer only; 64-bit divisions only in the per-setting functions,
+// never per sample.
+//----------------------------------------------------------------------------------------------------------------------------------
+
+#include "pc_decim.h"
+
+uint32_t pc_decim_n(uint32_t divider)
+{
+  return 2u * ((divider >> 1) + 1u);
+}
+
+uint64_t pc_decim_gain(uint32_t n, uint8_t k)
+{
+  uint64_t g = 1;
+
+  while(k--)
+    g *= n;
+
+  return g;
+}
+
+uint8_t pc_decim_shift(uint64_t gain)
+{
+  uint64_t y = gain * 255u;
+  uint8_t  bits = 0;
+
+  while(y)
+  {
+    bits++;
+    y >>= 1;
+  }
+
+  return (bits > 16) ? (uint8_t)(bits - 16) : 0;
+}
+
+uint16_t pc_decim_level16(uint8_t level8, uint64_t gain, uint8_t shift)
+{
+  uint64_t y = (uint64_t)level8 * gain;
+
+  if(shift)
+    y = (y + (1ull << (shift - 1))) >> shift;
+
+  return (y > 65535u) ? 65535u : (uint16_t)y;
+}
+
+uint32_t pc_decim_scale_q24(uint64_t gain, uint8_t shift)
+{
+  uint64_t num;
+
+  if((gain == 0) || (shift > 39))
+    return 0;
+
+  num = 1ull << (24 + shift);
+  return (uint32_t)((num + (gain >> 1)) / gain);
+}
+
+void pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t total_samples, int has_filter,
+                     pc_decim_cfg *c)
+{
+  uint8_t  k = k_req & 3;
+  uint32_t n = pc_decim_n(divider);
+
+  c->flags     = 0;
+  c->why       = PC_DECIM_WHY_NONE;
+  c->k         = 0;
+  c->shift     = 0;
+  c->n         = 0;
+  c->gain      = 1;
+  c->scale_q24 = 0;
+
+  if(!has_filter)
+  {
+    c->why = PC_DECIM_WHY_NOCAP;
+    return;
+  }
+
+  //Swap and capture edges are written with every mode, the legacy one included
+  c->flags = flags & PC_DECIM_FLAGS;
+
+  if(k == 0)
+  {
+    c->why = PC_DECIM_WHY_OFF;
+    return;
+  }
+
+  //D = 0 with K >= 1 would give N = 2 (100 MSa/s): 200 MSa/s exists only on the legacy path
+  if(divider == 0)
+  {
+    c->why = PC_DECIM_WHY_FULLRATE;
+    return;
+  }
+
+  if(total_samples > PC_DECIM_MAX_TOTAL)
+  {
+    c->why = PC_DECIM_WHY_TOTAL;
+    return;
+  }
+
+  //Exactness: 255 * N^K < 2^48
+  if((k == 3) && (n > PC_DECIM_CIC3_MAX_N))
+  {
+    k = 2;
+    c->why = PC_DECIM_WHY_CIC3;
+  }
+
+  if((k == 2) && (n > PC_DECIM_CIC2_MAX_N))
+  {
+    k = 1;
+    c->why = PC_DECIM_WHY_CIC2;
+  }
+
+  c->k         = k;
+  c->n         = n;
+  c->gain      = pc_decim_gain(n, k);
+  c->shift     = pc_decim_shift(c->gain);
+  c->scale_q24 = pc_decim_scale_q24(c->gain, c->shift);
+}
+
+uint8_t pc_decim_mode(const pc_decim_cfg *c)
+{
+  return (uint8_t)((c->k & 3) | c->flags);
+}
+
+uint8_t pc_decim_status(const pc_decim_cfg *c)
+{
+  return (uint8_t)(pc_decim_mode(c) | (c->k ? PC_DECIM_WIDE : 0));
+}
+
+int32_t pc_decim_to_code(uint16_t out, uint32_t scale_q24, int32_t comp2)
+{
+  int64_t acc = (int64_t)((uint64_t)out * scale_q24) + ((int64_t)comp2 << 23) + (1 << 23);
+  int32_t v   = (int32_t)(acc >> 24);
+
+  return (v < 0) ? 0 : ((v > 255) ? 255 : v);
+}
+
+uint32_t pc_decim_rate(const pc_decim_cfg *c, uint32_t divider)
+{
+  if(c->k && c->n)
+    return 200000000u / c->n;
+
+  return (uint32_t)(200000000ull / ((uint64_t)divider + 1));
+}
+
+uint32_t pc_decim_ext_shift(const pc_decim_cfg *c)
+{
+  uint64_t lag, period;
+
+  if(!c->k || !c->n)
+    return 0;
+
+  //In units of 0.5 ns: 120 ns = 240, 2.5 ns = 5, one output period N x 5 ns = 10 N
+  lag    = 240 + (uint64_t)c->k * (c->n - 1) * 5;
+  period = (uint64_t)c->n * 10;
+  return (uint32_t)((lag + period / 2) / period);
+}
+
+uint32_t pc_decim_settle_us(const pc_decim_cfg *c)
+{
+  uint64_t t;
+
+  if(!c->k)
+    return 0;
+
+  //(K + 2) output periods of N x 5 ns
+  t = ((uint64_t)(c->k + 2) * c->n + 199) / 200;
+  return (t > 0xFFFFFFFFull) ? 0xFFFFFFFFu : (uint32_t)t;
+}

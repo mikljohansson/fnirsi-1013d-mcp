@@ -133,11 +133,15 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
     case 0x1533:
     case 0x1534: case 0x1535: case 0x1536: case 0x1537: case 0x1538: case 0x1539:
     case 0x153A: case 0x153B: case 0x153C: case 0x153D: case 0x153E: case 0x153F:
-      //AL3 family, later minors: 0x1533 adds the EXT trigger on the calibration pin (fpga/al3/README.md)
+      //AL3 family, later minors: 0x1533 adds the EXT trigger on the calibration pin (fpga/al3/README.md), 0x1534 the
+      //decimation filter with 16-bit samples (cmds 0x53-0x55, read 0x29; pc_decim.h)
       v->variant    = 2;
       v->ring_words = 8192;
       v->max_total  = 16382;
       v->caps       = unverified | PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS | PC_CAP_EXT_TRIGGER;   //BENCH: EXT
+
+      if(version >= 0x1534)
+        v->caps |= PC_CAP_DECIM;                                                     //BENCH: DECIM
       break;
 
     case 0x1632:
@@ -240,6 +244,23 @@ static void pc_host_abort(pc_session *s)
   }
 }
 
+//Ring words for a sample count of a capture: two samples per word, one in the 16-bit layout (decimation filter on)
+static uint32_t pc_cap_words(const pc_capture *c, uint32_t samples)
+{
+  return (c->decim & PC_DECIM_WIDE) ? samples : samples / 2;
+}
+
+//Decimation filter configuration an arm with the current settings and total samples writes (k = 0 without the cap)
+static void pc_decim_next(pc_session *s, uint32_t total, pc_decim_cfg *c)
+{
+  pc_hw_timebase tb;
+  uint8_t set = pc_hal_decim_setting();
+
+  pc_hal_timebase_read(&tb);
+  pc_decim_config(set & 3, set & PC_DECIM_FLAGS, s->tb_raw ? s->tb_divider : tb.divider, total,
+                  (s->var.caps & PC_CAP_DECIM) != 0, c);
+}
+
 //Settings a capture is armed with
 static void pc_capture_latch(pc_session *s, pc_capture *c, uint8_t origin, uint32_t pretrigger, uint32_t total)
 {
@@ -263,6 +284,22 @@ static void pc_capture_latch(pc_session *s, pc_capture *c, uint8_t origin, uint3
   c->total      = total;
   pc_hal_channel_read(0, &c->ch[0]);
   pc_hal_channel_read(1, &c->ch[1]);
+
+  //1.9: the decimation filter as written for this capture (the arm wrote it just before)
+  if(s->var.caps & PC_CAP_DECIM)
+  {
+    pc_decim_cfg d;
+    int written;
+
+    pc_hal_decim_current(&d, &written);
+    c->decim       = pc_decim_status(&d);
+    c->decim_shift = d.shift;
+    c->decim_n     = d.n;
+    c->ext_shift   = (uint16_t)((c->source == 2) ? pc_decim_ext_shift(&d) : 0);
+
+    if(c->ext_shift > pretrigger)
+      c->ext_shift = (uint16_t)pretrigger;
+  }
 }
 
 //Capture DONE: it becomes the latest capture; the FPGA ring holds it until the next arm
@@ -301,7 +338,7 @@ static void pc_capture_finish(pc_session *s, pc_capture *c, uint16_t trigger_add
   }
 
   c->trigger_addr  = trigger_addr;
-  c->capture_start = (uint16_t)pc_ring_mod((int64_t)trigger_addr - (int64_t)(c->pretrigger / 2), s->var.ring_words);
+  c->capture_start = (uint16_t)pc_ring_mod((int64_t)trigger_addr - ((int64_t)pc_cap_words(c, c->pretrigger) - c->ext_shift), s->var.ring_words);
   c->capture_id    = ++s->capture_id;
 
   s->trigger_addr  = c->trigger_addr;
@@ -499,13 +536,21 @@ static uint32_t pc_timebase_body(pc_session *s, uint8_t *p)
     t.divider    = s->tb_divider;
   }
 
-  ps = 5000ull * ((uint64_t)t.divider + 1);
+  //1.9: with the decimation filter on the output period is N x 5 ns, N = 2 * (floor(D / 2) + 1) (equal for odd D)
+  {
+    pc_hw_trigger trg;
+    pc_decim_cfg  d;
+
+    pc_hal_trigger_read(&trg);
+    pc_decim_next(s, trg.total, &d);
+    ps = 5000ull * (d.k ? (uint64_t)d.n : ((uint64_t)t.divider + 1));
+  }
 
   memset(p, 0, 16);
   p[0] = t.timeperdiv;
   p[1] = t.samplerate;
   pc_put_u32(p + 4, t.divider);
-  pc_put_u32(p + 8, (uint32_t)(200000000ull / ((uint64_t)t.divider + 1)));
+  pc_put_u32(p + 8, (uint32_t)(1000000000000ull / ps));
   pc_put_u32(p + 12, (ps > 0xFFFFFFFFull) ? 0xFFFFFFFFu : (uint32_t)ps);
   return 16;
 }
@@ -533,8 +578,15 @@ static uint32_t pc_trigger_body(pc_session *s, uint8_t *p)
   pc_put_u32(p + 8,  t.total);
   pc_put_u32(p + 12, 0);
   pc_put_u32(p + 16, pc_auto_timeout(s, t.total));
-  pc_put_u16(p + 20, t.pretrigger / 2);
-  pc_put_u16(p + 22, t.total / 2);
+
+  //Ring words: one sample per word in the 16-bit layout (1.9)
+  {
+    pc_decim_cfg d;
+
+    pc_decim_next(s, t.total, &d);
+    pc_put_u16(p + 20, d.k ? t.pretrigger : t.pretrigger / 2);
+    pc_put_u16(p + 22, d.k ? t.total : t.total / 2);
+  }
   return 28;
 }
 
@@ -1011,6 +1063,10 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
     if((t.total < 80) || (t.total > s->var.max_total)) return pc_error(s, PC_E_BAD_ARG, 5, "total out of range");
     if(t.pretrigger & 1)                               return pc_error(s, PC_E_BAD_ARG, 4, "pretrigger odd");
     if(t.pretrigger + 2 > t.total)                     return pc_error(s, PC_E_BAD_ARG, 4, "pretrigger > total - 2");
+
+    //1.9: the 16-bit layout holds one sample per word
+    if((s->var.caps & PC_CAP_DECIM) && (pc_hal_decim_setting() & 3) && (t.total > PC_DECIM_MAX_TOTAL))
+      return pc_error(s, PC_E_BAD_ARG, 5, "total > 8190 with the filter on");
   }
 
   pc_hal_trigger_write(&t, hwmask);
@@ -1031,6 +1087,8 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
 {
   pc_hw_trigger t;
   pc_hw_ui u;
+  pc_decim_cfg dc;
+  uint16_t pre_w, tot_w;
   int prog = (s->var.caps & PC_CAP_PROG_TRIGGER_POS) != 0;
 
   (void)req; (void)len;
@@ -1067,10 +1125,24 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
     t.total      = 3000;
   }
 
+  //1.9: decimation filter for this capture; the 16-bit layout has one sample per ring word
+  pc_decim_next(s, t.total, &dc);
+  s->cap_wide = dc.k != 0;
+
+  //EXT trigger: the stored data lag the edge (pc_decim_ext_shift), so fewer pretrigger words put the edge back at
+  //sample `pretrigger` of the capture
+  s->cap_ext_shift = (uint16_t)((t.source == 2) ? pc_decim_ext_shift(&dc) : 0);
+  if(s->cap_ext_shift > t.pretrigger)
+    s->cap_ext_shift = t.pretrigger;
+
+  pre_w = s->cap_wide ? (uint16_t)(t.pretrigger - s->cap_ext_shift) : t.pretrigger / 2;
+  tot_w = s->cap_wide ? t.total : t.total / 2;
+
   //2.-5. conversion start with a bounded ready wait                                  BENCH: T6 (stock 0x0F semantics)
   s->ring_valid = 0;
 
-  if(pc_hal_arm(t.pretrigger / 2, t.total / 2, pc_auto_timeout(s, t.total), prog, t.ui_mode != 0))
+  if(pc_hal_arm(pre_w, tot_w, pc_auto_timeout(s, t.total), prog, t.ui_mode != 0,
+                (s->var.caps & PC_CAP_DECIM) ? &dc : NULL))
   {
     s->acq_state = PC_ACQ_ABORTED;
     return pc_error(s, PC_E_FPGA, 0, "0x05 not ready");
@@ -1085,8 +1157,8 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   s->auto_timeout_hit = 0;
   s->armed_once       = 1;
   s->arm_ms           = pc_hal_ms();
-  s->cap_pre_words    = t.pretrigger / 2;
-  s->cap_total_words  = t.total / 2;
+  s->cap_pre_words    = pre_w;
+  s->cap_total_words  = tot_w;
   s->cap_divider      = s->cap_next.divider;
 
   *rl = pc_status_body(s, resp);
@@ -1150,7 +1222,7 @@ static int h_get_capture_info(pc_session *s, const uint8_t *req, uint32_t len, u
   if(s->capture_id == 0)
     return pc_error(s, PC_E_STATE, 0, "no capture");
 
-  memset(resp, 0, 68);
+  memset(resp, 0, 76);
   pc_put_u32(resp,      c->capture_id);
   pc_put_u32(resp + 4,  c->seq);
   resp[8] = c->origin;
@@ -1185,7 +1257,13 @@ static int h_get_capture_info(pc_session *s, const uint8_t *req, uint32_t len, u
     pc_put_u32(p + 12, (uint32_t)zero);
   }
 
-  *rl = 68;
+  //1.9: decimation filter of this capture (0x29 byte 0 layout, S, N)
+  resp[68] = c->decim;
+  resp[69] = c->decim_shift;
+  pc_put_u16(resp + 70, c->ext_shift);    //EXT + K >= 1: pretrigger words written = pretrigger - this (rounded latency)
+  pc_put_u32(resp + 72, c->decim_n);
+
+  *rl = 76;
   return PC_OK;
 }
 
@@ -1228,12 +1306,12 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
 
   if((mask == 0) || (mask & 0xF0)) return pc_error(s, PC_E_BAD_ARG, 0, "core_mask");
   if(mode > 2)                     return pc_error(s, PC_E_BAD_ARG, 1, "addr_mode");
-  if(layout > 1)                   return pc_error(s, PC_E_BAD_ARG, 2, "layout");
+  if(layout > 2)                   return pc_error(s, PC_E_BAD_ARG, 2, "layout");
   if(flags & ~0x01)                return pc_error(s, PC_E_BAD_ARG, 3, "flags");
   if((count == 0) || (count > ring)) return pc_error(s, PC_E_BAD_ARG, 8, "count 1..ring_words");
 
-  if((layout == 1) && ((((mask & 0x03) != 0) && ((mask & 0x03) != 0x03)) || (((mask & 0x0C) != 0) && ((mask & 0x0C) != 0x0C))))
-    return pc_error(s, PC_E_BAD_ARG, 2, "layout 1 needs both cores");
+  if((layout >= 1) && ((((mask & 0x03) != 0) && ((mask & 0x03) != 0x03)) || (((mask & 0x0C) != 0) && ((mask & 0x0C) != 0x0C))))
+    return pc_error(s, PC_E_BAD_ARG, 2, "layout 1/2 needs both cores");
 
   //1.3: the latest finished capture of any origin, while the ring still holds it. flags bit 0 (ANY) reads the ring as
   //it is. In RUN the UI has usually armed the next capture already: wait for it (at most PC_HOLD_MS) and keep the UI
@@ -1308,6 +1386,20 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
       }
     }
   }
+  else if(layout == 2)
+  {
+    //1.9: u16 little-endian per word, low byte core A (0x20/0x22), high byte core B (0x21/0x23): the 16-bit samples
+    //of a decimated capture
+    for(i=0;i<2;i++)
+    {
+      if(mask & (3 << (2 * i)))
+      {
+        pc_hal_read_core((uint8_t)(2 * i),     start, count, d,     2, ring, s->var.read_lag);
+        pc_hal_read_core((uint8_t)(2 * i + 1), start, count, d + 1, 2, ring, s->var.read_lag);
+        d += 2 * count;
+      }
+    }
+  }
   else
   {
     for(i=0;i<2;i++)
@@ -1337,11 +1429,13 @@ static int h_read_trace(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
   uint8_t  origin;
   uint32_t divider;
   uint8_t *meta, *d;
+  uint8_t  decim = 0, dshift = 0;
+  int      wide;
 
   (void)len;
 
   if((chm == 0) || (chm & ~0x03)) return pc_error(s, PC_E_BAD_ARG, 0, "ch_mask");
-  if(flags & ~0x03)               return pc_error(s, PC_E_BAD_ARG, 1, "flags");
+  if(flags & ~0x07)               return pc_error(s, PC_E_BAD_ARG, 1, "flags");
 
   if(s->capture_id && (s->cap.origin == PC_ORIGIN_HOST) && (s->trace_capture_id == s->capture_id))
   {
@@ -1375,6 +1469,8 @@ static int h_read_trace(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
   {
     origin  = s->cap.origin;
     divider = s->cap.divider;
+    decim   = s->cap.decim;
+    dshift  = s->cap.decim_shift;
   }
   else
   {
@@ -1397,7 +1493,22 @@ static int h_read_trace(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
     if(chm & (1 << i))
       nch++;
 
-  total = 32 + 16 * nch + count * nch;
+  //1.9: flags bit 2 (WIDE) returns the 16-bit samples of a decimated capture (u16 little-endian, as the FPGA stored
+  //them, no compensation, no inversion); otherwise the 8-bit trace as always
+  wide = (flags & 0x04) && (decim & PC_DECIM_WIDE);
+
+  if(wide)
+  {
+    for(i=0;i<2;i++)
+    {
+      uint32_t n16;
+
+      if((chm & (1 << i)) && ((pc_hal_trace16((int)i, &n16) == 0) || (n16 < start + count)))
+        return pc_error(s, PC_E_STATE, 3, "no 16-bit trace");
+    }
+  }
+
+  total = 32 + 16 * nch + count * nch * (wide ? 2 : 1);
   if((total > PC_MAX_RESPONSE_PAYLOAD) || (total > s->tx_cap - PC_HDR_SIZE - PC_CRC_SIZE))
     return pc_error(s, PC_E_OVERFLOW, 0, "response too large");
 
@@ -1411,6 +1522,8 @@ static int h_read_trace(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
   pc_put_u32(resp + 24, divider);
   resp[28] = chm;
   resp[29] = origin;
+  resp[30] = decim;                       //1.9: 0x29 byte 0 layout; bit 7 with flags bit 2 = 16-bit samples follow
+  resp[31] = dshift;
 
   meta = resp + 32;
   d    = meta + 16 * nch;
@@ -1446,6 +1559,18 @@ static int h_read_trace(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
     pc_put_u16(meta + 14, (uint16_t)c.adc_b_comp);
     meta += 16;
 
+    if(wide)
+    {
+      uint32_t n16;
+      const uint16_t *s16 = pc_hal_trace16((int)i, &n16) + start;
+
+      for(k=0;k<count;k++)
+        pc_put_u16(d + 2 * k, s16[k]);
+
+      d += 2 * count;
+      continue;
+    }
+
     src = pc_hal_trace((int)i) + start;
 
     if(flip)
@@ -1462,6 +1587,74 @@ static int h_read_trace(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
   }
 
   *rl = total;
+  return PC_OK;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Decimation filter (1.9, bitstream 0x1534+, pc_decim.h)
+
+//GET_DECIM / SET_DECIM response, 32 bytes
+static uint32_t pc_decim_body(pc_session *s, uint8_t *p)
+{
+  pc_hw_trigger t;
+  pc_hw_timebase tb;
+  pc_decim_cfg next, cur;
+  uint8_t  set = pc_hal_decim_setting();
+  uint16_t rb  = pc_hal_decim_readback();
+  int      written;
+
+  pc_hal_trigger_read(&t);
+  pc_hal_timebase_read(&tb);
+  pc_decim_next(s, t.total, &next);
+  pc_hal_decim_current(&cur, &written);
+
+  memset(p, 0, 32);
+  p[0] = set & 3;                                       //UI Filter: 0 off, 1 boxcar, 2 CIC2, 3 CIC3
+  p[1] = (uint8_t)((set & PC_DECIM_FLAGS) >> 2);       //flags: bit 0 core-order swap, bits 1 / 2 falling-edge A / B
+  p[2] = pc_decim_status(&next);                        //what the next arm writes (0x29 byte 0 layout)
+  p[3] = next.shift;
+  pc_put_u32(p + 4, next.n);
+  pc_put_u64(p + 8, next.gain);
+  pc_put_u32(p + 16, s->tb_raw ? s->tb_divider : tb.divider);
+  pc_put_u32(p + 20, pc_decim_rate(&next, s->tb_raw ? s->tb_divider : tb.divider));
+  p[24] = written ? pc_decim_status(&cur) : 0xFF;       //written at the last arm (0xFF: not yet)
+  p[25] = cur.shift;
+  p[26] = (uint8_t)(rb >> 8);                           //FPGA 0x29 now
+  p[27] = (uint8_t)rb;
+  pc_put_u16(p + 28, PC_DECIM_MAX_TOTAL);
+  p[30] = next.why;                                     //why the effective K is lower than requested
+  p[31] = (uint8_t)((t.source == 2) ? pc_decim_ext_shift(&next) : 0);   //EXT latency shift the next arm applies
+  return 32;
+}
+
+static int h_get_decim(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  (void)req; (void)len;
+  *rl = pc_decim_body(s, resp);
+  return PC_OK;
+}
+
+//SET_DECIM: u8 filter (0 off, 1 boxcar, 2 CIC2, 3 CIC3), u8 flags (bit 0 core-order swap, bit 1 / bit 2 capture the
+//A / B cores on the falling write-clock edge), u16 0. Sets the UI's Filter
+//setting (shared control); the next arm (UI or host) writes it.
+static int h_set_decim(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  pc_hw_trigger t;
+
+  (void)len;
+
+  if(req[0] > 3)     return pc_error(s, PC_E_BAD_ARG, 0, "filter 0..3");
+  if(req[1] & ~0x07) return pc_error(s, PC_E_BAD_ARG, 1, "flags");
+
+  pc_hal_trigger_read(&t);
+
+  if(req[0] && (t.total > PC_DECIM_MAX_TOTAL))
+    return pc_error(s, PC_E_BAD_ARG, 0, "total > 8190: SET_TRIGGER total first");
+
+  pc_hal_decim_set((uint8_t)(req[0] | ((req[1] & 0x07) << 2)));
+  pc_settings_track(s);
+
+  *rl = pc_decim_body(s, resp);
   return PC_OK;
 }
 
@@ -1880,7 +2073,7 @@ static int h_fft_bench(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// READ_SPECTRUM (1.7, fw 0.2.28): u8 channel, u8 0, u16 first bin, u16 count (0 = as many as fit), u16 0
+// READ_SPECTRUM (1.9, fw 0.2.28): u8 channel, u8 0, u16 first bin, u16 count (0 = as many as fit), u16 0
 
 static int h_read_spectrum(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
@@ -1933,6 +2126,8 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_SET_ACQ_STATE, F_CONTROL,                   0, h_set_acq_state },
   { PC_CMD_GET_CAPTURE_INFO, F_BUSY | F_CONTROL,       0, h_get_capture_info },
   { PC_CMD_READ_SPECTRUM, F_BASIC,                     0, h_read_spectrum },
+  { PC_CMD_GET_DECIM,    0,                            PC_CAP_DECIM, h_get_decim },
+  { PC_CMD_SET_DECIM,    0,                            PC_CAP_DECIM, h_set_decim },
   { PC_CMD_SD_INFO,      F_BASIC,                      PC_CAP_SD_SECTORS, h_sd_info },
   { PC_CMD_SD_READ_SECTORS, F_BASIC,                   PC_CAP_SD_SECTORS, h_sd_read },
   { PC_CMD_SD_STAGE,     F_BUSY | F_BASIC,             PC_CAP_SD_SECTORS, h_sd_stage },   //memory copy only: timer poll
@@ -2237,7 +2432,8 @@ static void pc_acq_service(pc_session *s)
     pc_hw_channel c1, c2;
     uint16_t addr  = pc_hal_acq_finish();                                            //BENCH: T5 (trigger_addr alignment)
     uint32_t start = pc_ring_mod((int64_t)addr - s->cap_pre_words, s->var.ring_words);
-    uint32_t samples = (uint32_t)s->cap_total_words * 2;
+    uint32_t samples = (uint32_t)s->cap_total_words * (s->cap_wide ? 1 : 2);
+    uint32_t pre_samples = s->cap_wide ? (uint32_t)s->cap_pre_words + s->cap_ext_shift : (uint32_t)s->cap_pre_words * 2;
     uint8_t  mask;
 
     //Into the trace buffers for the enabled channels, so the UI shows the capture (it redraws every pass)
@@ -2246,7 +2442,7 @@ static void pc_acq_service(pc_session *s)
     mask = (uint8_t)((c1.enable ? 0x01 : 0) | (c2.enable ? 0x02 : 0));
 
     if(mask && (samples <= pc_hal_trace_capacity()))
-      s->trace_sw_index = pc_hal_trace_build(start, samples, (uint32_t)s->cap_pre_words * 2, mask);
+      s->trace_sw_index = pc_hal_trace_build(start, samples, pre_samples, mask);
 
     s->auto_timeout_hit = !trig;                                                     //BENCH: T6
     s->acq_state        = PC_ACQ_DONE;
