@@ -217,6 +217,16 @@ def main():
     ap.add_argument("-o", "--output", default=os.path.join(here, "..", "..", "..", "docs", "protocol-vectors.json"))
     args = ap.parse_args()
     data = build()
+    # Other generators merge their own vectors into the same file (mcp/src/fnirsi1013d/vectors.py --merge adds
+    # entries with "source": "host"). Keep every vector that is not ours so regenerating never drops them.
+    if os.path.exists(args.output):
+        with open(args.output) as fh:
+            old = json.load(fh)
+        ours = {v["name"] for v in data["vectors"]}
+        kept = [v for v in old.get("vectors", []) if v.get("source") not in (None, "firmware") and v["name"] not in ours]
+        data["vectors"] += kept
+        if kept:
+            print(f"kept {len(kept)} vectors from other generators")
     with open(args.output, "w", newline="\n") as fh:
         json.dump(data, fh, indent=1)
         fh.write("\n")

@@ -1,0 +1,160 @@
+//----------------------------------------------------------------------------------------------------------------------------------
+// pc_hal.h - the only interface pc_cmds.c uses to reach the scope (docs/plans/firmware-usb-protocol.md section 4).
+//
+// Target implementation: pc_hal_scope.c (scopesettings / fpga_control.c / display) and pc_transport.c (USB).
+// Host implementation:   host_tests/mock_hal.c (FPGA ring model, fake transport, settable clock).
+//
+// Rules for the target implementation:
+//  - functions marked [FPGA] drive the FPGA bus; pc_cmds.c only calls them from the main-loop poll context while
+//    REMOTE (never from a BUSY poll, never while the UI owns the FPGA).
+//  - functions marked [UI] draw or touch the scope settings; same restriction.
+//  - all others are safe in any poll context.
+//----------------------------------------------------------------------------------------------------------------------------------
+
+#ifndef PC_HAL_H
+#define PC_HAL_H
+
+#include <stdint.h>
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Front end channel state as the firmware keeps it (CHANNELSETTINGS subset)
+
+#define PC_CH_ENABLE      0x01
+#define PC_CH_RANGE       0x02
+#define PC_CH_COUPLING    0x04
+#define PC_CH_OFFSET      0x08
+#define PC_CH_INVERT      0x10
+#define PC_CH_PROBE       0x20
+
+typedef struct
+{
+  uint8_t  enable;
+  uint8_t  range;               //samplevoltperdiv 0..6 (6 = software zoom of hardware range 5)
+  uint8_t  coupling;            //0 DC, 1 AC
+  uint8_t  invert;
+  uint8_t  probe;               //magnification index 0..6
+  uint8_t  overload;            //ADoverload of the last readout: bit0 a sample hit 0, bits 1-7 a sample hit 255
+  int16_t  dcoffset;            //UI offset added to the PWM centre
+  uint16_t cal_offset[7];       //dc_calibration_offset: PWM centre per range
+  int32_t  input_cal[7];        //input_calibration (2^21 scale)
+  int16_t  adc_a_comp;          //adc1compensation (core A, FPGA 0x20/0x22)
+  int16_t  adc_b_comp;          //adc2compensation (core B, FPGA 0x21/0x23)
+  uint32_t dc_shift_center;
+  int32_t  dc_shift_size;
+  int32_t  dc_shift_value;
+  uint32_t adc_a_rawavg;
+  uint32_t adc_b_rawavg;
+} pc_hw_channel;
+
+void     pc_hal_channel_read(int ch, pc_hw_channel *c);
+void     pc_hal_channel_write(int ch, const pc_hw_channel *c, uint8_t mask);            //[UI][FPGA] masked PC_CH_* fields
+uint32_t pc_hal_mul_factor_1x(uint8_t range);                                          //volt_calc_data[1x][range].mul_factor
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Timebase
+
+typedef struct
+{
+  uint8_t  timeperdiv;          //UI index 0..34
+  uint8_t  samplerate;          //UI sample rate table index
+  uint32_t divider;             //N written to FPGA 0x0D
+} pc_hw_timebase;
+
+void     pc_hal_timebase_read(pc_hw_timebase *t);
+int      pc_hal_timebase_lookup(uint8_t index, uint8_t *samplerate, uint32_t *divider);   //0 ok, -1 index out of range
+void     pc_hal_timebase_write(const pc_hw_timebase *t, int raw);                      //[UI][FPGA] raw: only divider is valid
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Trigger
+
+#define PC_TRG_SOURCE     0x01
+#define PC_TRG_EDGE       0x02
+#define PC_TRG_LEVEL      0x04
+#define PC_TRG_MODE       0x08
+#define PC_TRG_PRE        0x10
+#define PC_TRG_TOTAL      0x20
+
+typedef struct
+{
+  uint8_t  source;              //0 CH1, 1 CH2
+  uint8_t  edge;                //0 rising, 1 falling
+  uint8_t  level;               //raw core A code
+  uint8_t  ui_mode;             //scopesettings.triggermode: 0 auto, 1 single, 2 normal
+  uint16_t pretrigger;          //fpgasettings.settriggerpoint (samples)
+  uint16_t total;               //fpgasettings.totalsamples (samples)
+} pc_hw_trigger;
+
+void     pc_hal_trigger_read(pc_hw_trigger *t);
+void     pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask);                    //[UI][FPGA] masked PC_TRG_* fields
+uint32_t pc_hal_auto_timeout_default(uint32_t total_samples);                          //what 1.00o5 writes to 0x0E
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Generator (Atlan4 DDS, FPGA 0x50-0x52)
+
+void     pc_hal_gen_read_ui(uint8_t *enable, uint32_t *freq_hz, uint8_t *duty_pct);    //fpgasettings gen_*
+void     pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable);      //[FPGA] duty, freq, enable in that order
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Acquisition [FPGA]
+
+//Reset the sample system, write the geometry while in reset (prog != 0: 0x0B/0x0C; always 0x0E), release.
+//normal: trigger mode written to 0x1A (1 normal/single, 0 auto). Returns 0, or -1 when 0x05 never became ready.
+int      pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal);
+void     pc_hal_acq_poll(int *done, int *triggered);                                   //0x0A bit 0, 0x18 bit 0
+uint16_t pc_hal_acq_finish(void);                                                      //post-done writes, returns 0x14 & 0x1FFF
+void     pc_hal_force(void);                                                           //0x1A = 0
+
+//Read count bytes of one core (0..3 = FPGA 0x20..0x23) from ring word start, splitting at the ring end, one dummy read
+//after every 0x1F write, read_lag added to the address written. dst advances by stride per byte.
+void     pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,
+                          uint32_t ring_words, uint8_t read_lag);
+
+//Raw bus access for DEBUG_FPGA
+void     pc_hal_fpga_write_cmd(uint8_t cmd);
+void     pc_hal_fpga_write_data(uint8_t data);
+uint8_t  pc_hal_fpga_read_data(void);
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Processed trace (the UI's tracebuffer)
+
+//[FPGA] Run the 1.00o5 readout (fpga_read_sample_data) for the channels in ch_mask starting at ring word start_word,
+//total_samples per channel. Returns the software trigger index (scope_process_trigger) or -1.
+int32_t  pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t pretrigger_samples, uint8_t ch_mask);
+
+//Current UI trace buffer of a channel and the UI's own capture geometry (LOCAL READ_TRACE)
+const uint8_t *pc_hal_trace(int ch);
+void     pc_hal_trace_ui_info(uint32_t *sample_count, uint32_t *pretrigger, int32_t *sw_trigger_index);
+uint32_t pc_hal_trace_capacity(void);                                                  //bytes per channel buffer
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// System
+
+uint32_t pc_hal_ms(void);                                                              //1 ms ticks, wraps
+void     pc_hal_delay_ms(uint32_t ms);
+uint16_t pc_hal_fpga_version(void);                                                    //cached at init, no bus access
+void     pc_hal_battery(uint8_t *level, uint8_t *charging, uint8_t *keyadc_raw);
+void     pc_hal_battery_refresh(void);                                                 //[UI] battery_check_status()
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Ownership and UI [UI]
+
+void     pc_hal_remote_enter(void);              //snapshot scopesettings + fpgasettings, stop UI acquisition, draw banner
+void     pc_hal_remote_exit(int keep_settings);  //restore snapshot unless keep, push all settings to the FPGA, redraw
+int      pc_hal_banner_touched(void);            //scan touch panel; 1 when the banner was tapped (waits for release)
+void     pc_hal_show_trace(void);                //SHOW_TRACES: draw the current tracebuffer, redraw banner
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Transport (pc_transport.c on the target). Safe in every context.
+
+#define PC_LINK_DTR_UP    0x01
+#define PC_LINK_DTR_DOWN  0x02
+#define PC_LINK_RESET     0x04      //bus reset, suspend or disconnect
+
+uint8_t *pc_hal_tx_buffer(uint32_t *capacity);   //staging buffer, 4-byte aligned
+int      pc_hal_tx_busy(void);                   //1 while a submitted frame is still being copied to the FIFO
+void     pc_hal_tx_submit(uint32_t len);         //send len bytes of the staging buffer (+ ZLP when needed)
+uint32_t pc_hal_rx_read(uint8_t *dst, uint32_t max);
+uint32_t pc_hal_link_take_events(void);          //PC_LINK_* since the last call
+int      pc_hal_dtr(void);
+
+#endif /* PC_HAL_H */
