@@ -107,6 +107,17 @@ Reference checkouts (read-only, outside this repo, never build inside them):
 Measurement sessions through the `fnirsi1013d` MCP server (setup: `mcp/README.md`, also for Codex): follow
 `docs/agent-measurement-guide.md`. Claude Code loads it as the skill `.claude/skills/fnirsi-scope/`.
 
+## CI and releases
+
+GitHub Actions run `.github/workflows/ci.yml` on every push and pull request to main. It covers
+`make check-reference` (must print IDENTICAL), the GCC 10, GCC 13 and PC_DEBUG builds, host tests, the
+mcp ruff and pytest runs on Linux and Windows, and both protocol-vector checkers. Keep those commands
+green locally before pushing. A `vX.Y.Z` tag runs `release.yml`. The tag must equal `PC_FW_VERSION`
+and the mcp version, and `CHANGELOG.md` needs a matching section. Atlan4's binary-only bootloader and
+updater are never attached; `tools/make_release_sd_package.py` fetches them on the user's machine.
+Procedure, FEL hash check and the GPL reasoning: `docs/releasing.md`. Add user-visible changes to
+`CHANGELOG.md` under Unreleased, citing the commit.
+
 ## Working as a team
 
 The coordinating session dispatches Opus agents for design/implementation and Sonnet agents for surveys,
