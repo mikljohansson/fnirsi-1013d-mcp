@@ -196,3 +196,9 @@ Newest entries at the bottom. Format: date, who, what, result.
 - Owner's 0.2.7 verdict: "v0.2.7" in the main-screen corner and on the diagnostics view, no Temperature line. MCP chip check in progress (port held
   open by the coordinator while the owner opens menus).
 - Repository published: https://github.com/mikljohansson/fnirsi-1013d-mcp (public, 2026-10-18, owner's decision); first CI run triggered by the push.
+- Persist of 0.2.7 to the card (fw 0.2.7 SD_STAGE on the timer poll, host 32-sector SD_WRITE, 99eb034): backup of 750..end, write 3.45 s (111 KiB/s,
+  no resends), SD_READ compare of 763 sectors identical, header verified; total 5.3 s (was 34 s with a mid-run USB drop on 0.2.3). Counters after
+  it: rx_stalls 0, hdr_crc 0, duplicates 0, rx_isr_stalls/releases/restalls/empty_releases 0, rx_count_max 512, pass_max_ms 832 during the write.
+  The back-pressure corruption regime no longer occurs on this path. **Card now boots 0.2.7.**
+- MCP chip on 0.2.7 (owner): visible, stable while a menu is open, still flickers occasionally while free-running -> periodic top-bar clear
+  suspected; with fw-gen2 for 0.2.8 together with the menu compaction and the "ACQ / Long mode" box.
