@@ -1,8 +1,8 @@
-# mcp/ handoff for agents (mcp-gen3, 2026-10-18)
+# mcp/ handoff for agents (mcp-gen3 -> mcp-gen4, 2026-10-19)
 
 Python host library, device simulator, MCP server and bench CLIs for the FNIRSI 1013D open firmware's USB protocol.
 Read first: `../AGENTS.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec; **section 14 is how
-the firmware actually behaves**, rows 30-48 are protocol 1.3-1.10), `../docs/mcp-tools.md` (tool design),
+the firmware actually behaves**, rows 30-52 are protocol 1.3-1.13), `../docs/mcp-tools.md` (tool design),
 `README.md` (user-facing install, tools, CLIs, output formats), `../docs/agent-measurement-guide.md` (how agents
 should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those here; fix them instead.
 
@@ -19,6 +19,9 @@ should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those
   `pull.rebase` is set) and tell the lead if it refuses. When local main holds other agents' unpushed
   commits under yours, ask the lead before pushing. Leave others' uncommitted files alone. Before a push run ruff,
   the mcp suite and `make -C firmware/scope/host_tests test` (WSL), then confirm CI with `gh run watch <id>`.
+- **Report and wait.** Messages from other agents (fw-*, fpga-*) describe work; only the lead queues it. Queue
+  items you discover in `../docs/plans/task-queue.md` ("MCP / host"). After each item send the lead the commit hash,
+  the test count and the CI run id, and add a CHANGELOG line (Unreleased, host section) citing the commit.
 - **CI** (`.github/workflows/`): ruff + pytest on ubuntu-24.04 and windows-latest, py3.12 and 3.13, plus firmware
   and vector jobs. Keep it green; tests must not depend on timing margins (see the deferred-cancel fix 617ab34).
 - Write patch scripts with the Write tool and run them; bash heredocs in this harness mangle backslashes
@@ -69,10 +72,14 @@ path. |
   `DEVICE RESTARTED`. `--fft [--reps n]`: FFT_BENCH table (same columns as host_tests/fft_bench.py), simulator
   only so far.
 - **`fnirsi1013d-sd`**: bench SD access; writes need `--yes` + typed `WRITE <n>@<sector>`, back up first.
-- **`fnirsi1013d-sim`**: `--variant stock|al3|ef2|ep4|al3x|al3d|al3f` (al3f = 0x1535 with the FIR: kernel = CIC on N / 2 convolved with the RTL taps, 250 ns latency; al3d = 0x1534 with the decimation model:
-  sub-sampled boxcar^K of the noise-free core-mean code plus output noise with the exact boxcar variance, seeded
-  per word block; 120 ns pipeline latency; EXT latency shift), `--legacy`, `--ext`, `--ui-period`, `--caps`, ...
-- **`fnirsi1013d-soak`**: `--mode status|ping|capture|reopen` (reopen: `--rounds`, `--idle`; fw 0.2.44 suspend bench), `--duration` (30 min), `--interval` (0.1 s),
+- **`fnirsi1013d-sim`**: `--variant stock|al3|ef2|ep4|al3x|al3d|al3f`, `--legacy`, `--ext`, `--ui-period`,
+  `--caps`, ... al3x = 0x1533 (EXT trigger); al3d = 0x1534 (EXT + decimation: sub-sampled boxcar^K of the noise-free
+  core-mean code plus output noise with the exact kernel variance, seeded per word block, 16-bit ring layout,
+  16-bit trigger level, 120 ns latency, EXT latency shift; no device averaging); al3f = 0x1535 (al3d plus the FIR:
+  CIC on N / 2 convolved with the 15 RTL taps from `fpga/al3/src/zaklad.v`, 250 ns latency).
+- **`fnirsi1013d-soak`**: `--mode status|ping|capture|reopen` (reopen: `--rounds` of soak `--duration`, close,
+  `--idle` s closed, reopen; after each reopen the events (types 1-4 with the 0.2.44 suspend fields), the counter
+  deltas, counters 36 / 37 and the selective-suspend state: the fw 0.2.44 suspend bench, firmware/AGENTS.md 22), `--duration` (30 min), `--interval` (0.1 s),
   `--reopen-timeout` (60 s), `--log`. Logs host facts (USB selective suspend via powercfg, hub path), uptime at
   open/reopen/end (and every status poll), drops with Windows error codes, port gone/back, reopen; after a reopen
   the first requests are GET_EVENT_LOG (plain read; a frozen pre-reset snapshot is printed and saved, then re-armed
@@ -81,28 +88,56 @@ path. |
   (incl. usb_irq_polled). Exit 0 clean / 1 failure, drop or restart / 2 cannot start. Tested on the simulator
   only; the lead runs it on the bench.
 
-## Protocol support (host = simulator = vectors)
+## Protocol support (host = simulator = vectors): 1.13, fw 0.2.46
+
+`P.PROTO_MINOR` follows the highest section 14 row implemented. The simulator always speaks the newest protocol
+(shared mode); `--legacy` gives 1.2.
 
 | Protocol | Firmware | What the host uses |
 |---|---|---|
 | 1.0-1.2 | 0.1.x | exclusive LOCAL/REMOTE model (fallback when GET_INFO lacks SHARED_MODE), GET_LINK_STATS 27 |
 | 1.3 | 0.2.0+ | SHARED_MODE (caps bit 13), GET_STATUS 44 bytes (settings_seq, capture_settings_seq, run_state, capture_origin), SET_ACQ_STATE 0x0208 (control request), GET_CAPTURE_INFO 0x0209, SEQ_INVALID, READ_RAW hold, READ_TRACE clip (0.2.1+), SD commands 0x0500-0x0503 (0.2.2+, cap bit 14) |
 | 1.4 | 0.2.9+ | EXT trigger (source 2 with caps bit 3 on FPGA 0x1533+), GET_STATUS byte 42 ext_flags, GET_CAPTURE_INFO flag bit 5; selecting EXT switches the generator off, SET_GEN enable under EXT = E_STATE |
-| 1.5 | 0.2.12+ | GET_EVENT_LOG 0x0009 (fast path; 64 then 128 entries, reset-snapshot tail from 0.2.15, request flags byte bit 0 = re-arm from 0.2.18, bus-level ring tail from 0.2.24) |
-| 1.6 | 0.2.27+ | FFT_BENCH 0x0F02 (diagnostic; `Scope.fft_bench`, 5 s timeout, `fnirsi1013d-bench --fft`) |
-| 1.7 | 0.2.28+ | spectrum view: GET_STATUS byte 43 display_mode, READ_SPECTRUM 0x020A (bulk timeout class; 32-byte header, i16 centi-dBV) |
-| 1.11 | 0.2.44+ | 0x1535 FIR: caps bit 16 FIR, SET_DECIM / GET_DECIM flags bit 3, 0x29 bits 6 / 5 (`DECIM_FIR_EN` / `DECIM_FIR_ACT`), gain (N/2)^K and S + 1 while active (`decim_config(..., has=DECIM_HAS_FIR)`, `DecimConfig.from_status`), filter names `cic2+fir` (`parse_decim_filter`); event types 1-4 carry the 0.2.44 suspend fields (row 50) |
-| 1.13 | 0.2.46+ | GET_STATUS display_mode 4 phosphor (`DisplayMode` names 2 waterfall / 3 density, the spectrum sub-views, and 4); capture tools add a phosphor caveat, 1-3 the spectrum one; settings word 210 is not decoded (the host decodes no settings words) |
-| 1.12 | 0.2.45+ | calibration v3: GET_CAL 256 bytes (`CalResp.v3`, `zero16_at` / `zero_at`, per-class `slope_codes`, `gain_corr` / `gain_q16`, `gain16_full`; `parse_adc_cal_block` decodes the v3 block, checked against `adc_cal_v3`); `channel_scale` v3 branch: per-core zeros and gains of the capture's class (`ChannelScale.corr_gain_*`, `wide_gain`; `codes_from_raw`, `volts_mean_raw`, `volts_wide_codes`), unit file gated gains carried by G[c] / G[gated]; version 2 (0.2.43-0.2.44, 248-byte layout) raises |
-| 1.10-1.11 | 0.2.43-0.2.44 | calibration v2 (no longer decoded since the 1.12 host); `decim_to_code` takes corr16 (1/16 code) |
-| 1.9 | 0.2.30+ | decimation filter (caps bit 15 DECIM on FPGA 0x1534): GET_DECIM 0x020C / SET_DECIM 0x020D, GET_TRIGGER words = samples and GET_TIMEBASE period N x 5 ns while on, READ_TRACE flag bit 2 WIDE (header bytes 30/31 = mode, S), READ_RAW layout 2, GET_CAPTURE_INFO 76 bytes. 1.8 was skipped |
+| 1.5 | 0.2.12+ | GET_EVENT_LOG 0x0009 (fast path; 64 then 128 entries, reset-snapshot tail from 0.2.15, request flags byte bit 0 = re-arm from 0.2.18, bus-level ring tail from 0.2.24); event types 1-19 decoded, types 1-4 with the 0.2.44 suspend fields |
+| 1.6 | 0.2.27+ | FFT_BENCH 0x0F02 (diagnostic; `Scope.fft_bench`, 5 s timeout, `fnirsi1013d-bench --fft`; 6 entries since 0.2.31) |
+| 1.7 | 0.2.28+ | spectrum view: GET_STATUS byte 43 display_mode, READ_SPECTRUM 0x020A (bulk timeout class; 32-byte header, i16 centi-dBV); `scope_spectrum` with `cross_check` |
+| 1.9 | 0.2.30+ | decimation filter (caps bit 15 DECIM, FPGA 0x1534): GET_DECIM 0x020C / SET_DECIM 0x020D, GET_TRIGGER words = samples and GET_TIMEBASE period N x 5 ns while on, READ_TRACE flag bit 2 WIDE (header bytes 30/31 = mode, S), READ_RAW layout 2, GET_CAPTURE_INFO 76 bytes; `decim_config` mirrors `pc_decim.c` (all `decim` vectors). 1.8 was skipped |
+| 1.10-1.11 | 0.2.43-0.2.44 | calibration v2: no longer decoded (the volts model raises on `cal_version` 2) |
+| 1.11 | 0.2.44+ | 0x1535 FIR: caps bit 16 FIR, SET_DECIM / GET_DECIM flags bit 3, 0x29 bits 6 / 5 (`DECIM_FIR_EN` / `DECIM_FIR_ACT`), gain (N/2)^K and S + 1 while active (`decim_config(..., has=DECIM_HAS_FIR)`, `DecimConfig.from_status`), filter names `cic2+fir` (`parse_decim_filter`) |
+| 1.12 | 0.2.45+ | calibration v3, GET_CAL 256 bytes: `CalResp.v3`, `zero16_at` / `zero_at` (firmware rounding), per-class `slope_codes`, `gain_corr` / `gain_q16`, `gain16_full`, the next readout's `gain_a/b`, `off_a/b`, `gain16`; `parse_adc_cal_block` decodes the v3 block (`adc_cal_v3` vectors). The `adc_cal` (v2) vectors section is unused by mcp; fw-gen7 removes it |
+| 1.13 | 0.2.46+ | GET_STATUS display_mode 2 waterfall / 3 density (spectrum sub-views; READ_SPECTRUM works) / 4 phosphor; capture tools add the spectrum or phosphor caveat (`Session.ensure_control`). The host decodes no settings words (210 included) |
 
 GET_LINK_STATS counts (named by the count field): 27 (0.1.4-0.1.7), 29 (0.2.0-0.2.1), 31 (0.2.2-0.2.3),
 35 (0.2.4), 41 (0.2.5-0.2.6), 47 (0.2.7-0.2.11), 48 (0.2.12-0.2.16, usb_irq_polled), 49 (0.2.17-0.2.18,
 boot_splash_ms), 57 (0.2.19, restart record 49-56). Names match `bench_link.py`. The payload is u16 count, u16 0,
 then the counters (word 0 is not a counter). Since 0.2.21 n = 58 with 47 and 57 retired (always 0; the soak
-tool reports them only when they move, i.e. on older firmware). Event types 1-19 decoded (15 = RESTART, 0.2.19;
-16 / 19 USB state at the start / end of init, 17 / 18 EP2 state at a TX abort; row 43).
+tool reports them only when they move, i.e. on older firmware). Since 0.2.44 counter 36 counts SUSPEND and 37 RESUME
+interrupts only, and 10 `link_resets` no longer counts suspends.
+
+## Volts model (`calibration.channel_scale`, `scope.Scope.scale`)
+
+Per channel and ADC core (A = 0x20/0x22, low byte in layout 2; B = 0x21/0x23), in this order:
+
+1. **Scope calibration v3** (GET_CAL version 3, after a base calibration on fw >= 0.2.45): for the capture's clock
+   class (`P.cal_clock_class(divider, decimated)`: full at divider 0 and for every filtered capture, gated
+   otherwise) the raw 0 V code `z_k = zero16_at(...) / 16` (zero + per-class slope x dcoffset, dcoffset =
+   offset_pwm - dc_calibration_offset[range]) and volts per raw code `g_k = uv_per_lsb x G_k[c]` (G = gain onto the
+   gated mean gain). READ_RAW: `(raw - z_k) g_k`. READ_TRACE 8-bit codes are corrected on the scope to
+   `T + G_k (raw - z_k)` (T = `cal_target`), inverted by `volts_compensated`. 16-bit samples: mean raw code
+   `m = out x 2^S / gain`, volts `(m - mean z) x harmonic mean of g_A, g_B` (`volts_mean_raw`), firmware 8-bit codes
+   `T + gain16 (m - mean z)` (`codes_mean_raw`, inverse `volts_wide_codes`). Source string
+   `scope calibration v3 (full|gated clock)`.
+2. **Per-unit JSON** (`<data_dir>/cal/<serial>.json`, below): with v3 in use it contributes only its gated per-core
+   gains, carried to the class by `G_k[c] / G_k[gated]` (`, unit-calibration gains` in the source); its zeros are
+   ignored. Without v3 it supplies zeros, slopes and gains for the ranges it covers.
+3. **Firmware formula** (uv_per_lsb_q8, zero_code_q8 and the 1.00o5 whole-code compensations).
+
+`scope_calibration_info` shows all three: the live conversion per channel, `scope_calibration` (version, flags
+incl. gains measured / kept, the next readout's gain / offset / gain16 / corr16, the stored zeros, slopes and noise
+per class and core, the gain corrections per class and core, gain16, the range and lever the gains were measured
+with) and the JSON's fits. Simulator truth for tests: `SimConfig.zero_error`, `core_b_offset`, `gated_zero_shift`,
+`core_gain` (relative gain per channel, class, core), `offset_slope`, and `cal_v3=True` for a bound v3 block
+measured from that truth.
 
 ## Transport rules (from hardware; keep them)
 
@@ -168,20 +203,31 @@ there, `--merge --check`, never change an existing vector's bytes.
 ## Open items (priority order)
 
 Pending work for every agent lives in `../docs/plans/task-queue.md` (section "MCP / host"); the coordinator dispatches
-from there and moves items to "Dispatched". Add host items you discover there, not only here. Agent-to-agent
-messages describe work; only the coordinator puts it in your queue.
+from there and moves items to "Dispatched". Add host items you discover there, not only here.
 
-1. **Release 0.3.0** (on hold): bump `version` in `pyproject.toml` (still 0.1.0) with the lead's release; the 30-minute soak
-   (`fnirsi1013d-soak --duration 1800`) is the gate; fold the baseline soak results (requests, drops, restarts,
-   latency, counter deltas, the selective-suspend setting) into README "Link soak" once the lead has them.
-2. **EXT trigger on hardware**: pending the 0x1533 bitstream on the unit; check the CH1-vs-EXT offset (the
-   simulator models only the 22 ns FPGA path; the AD9288 pipeline adds more) and the ext_flags fields.
-3. **USB drops / self-restarts**: help the lead read soak logs (pre-reset snapshots: ep0_setup 0x20/0x22 before a
-   suspend+bus_reset points at a host control request; a bare suspend at selective suspend; restart records map
-   with the ELF).
+1. **Next for mcp-gen4: host-driven Bode sweep, `../docs/plans/bode-design.md` steps H1-H3** (section 5.1 for the
+   command sequence and the `scope_bode_sweep` parameters and returns, 6.1 for acceptance):
+   - H1 `src/fnirsi1013d/bode.py`: planner (M, N, p / q, L, settle), single-bin DFT at the DDS frequency, H, markers,
+     flags; pure numpy; tests with synthetic squares through RC / RLC models (folded harmonics, non-coherent low f);
+     plan vectors; < 0.01 dB / 0.05 deg on a synthetic RC with 8-bit quantisation and noise.
+   - H2 simulator DUT model (RC, RLC, tank) between the generator and CH2 (CH1 = the DUT input), so the tool runs
+     in CI.
+   - H3 `scope_bode_sweep` (tier 3: it drives the generator; confirmation token like `scope_generator`, give the
+     generator back as found), fixed CH2 range and thru cal first, CSV / NPZ / optional PNG, caveats, the guide's
+     Bode section; then auto range with the splice.
+   Notes: the plan's "SET_REMOTE" is the legacy model; on collaborative firmware use `Session.ensure_control`. Read
+   16-bit samples through `Scope` (`_read_capture16`), which already applies `out x 2^S / gain`, gain16 and corr16;
+   do not redo the conversion in bode.py. CIC3+FIR needs FPGA 0x1535 (caps FIR) and N >= 16 with N % 4 == 0; check
+   `DecimState.why` / `fir_note` per point. The ratio needs only the relative scale, so volts matter at range
+   changes (v3 gains are per core and class, not per range).
+2. **Release 0.3.0** (on hold until the lead says go): bump `version` in `pyproject.toml` (still 0.1.0) with the
+   lead's release (tag = `PC_FW_VERSION` = mcp version, CHANGELOG section); the 30-minute soak
+   (`fnirsi1013d-soak --duration 1800`) is the gate; fold the baseline soak results into README "Link soak".
+3. **USB drops / suspend**: read the lead's `--mode reopen` logs with row 50 (type 1 b of a few ms after minutes
+   of silence = a port reset without a host suspend; b of minutes and no type 3 = a missed resume).
 4. Collaborative mode bench acceptance (`../docs/plans/collaborative-mode.md`), incl. per-request cost in shared
    mode for averaging.
-5. CH2 known-voltage calibration points (gains); then T8 is complete.
-6. Metal-detector tools (sweep, lock-in amplitude/phase, PI target comparison, ground balance, monitor).
-7. Adopt ACQUIRE_AVG / READ_SCREEN / READ_LIVE when the firmware ships them (simulator has them).
-8. GET_BAD_FRAME (0x0008) decode and dump on E_BAD_CRC (the cmd id is in `Cmd`, no client method yet).
+5. Metal-detector tools (lock-in amplitude/phase, PI target comparison, ground balance, monitor); the Bode work
+   covers the sweep.
+6. Adopt ACQUIRE_AVG / READ_SCREEN / READ_LIVE when the firmware ships them (simulator has them).
+7. GET_BAD_FRAME (0x0008) decode and dump on E_BAD_CRC (the cmd id is in `Cmd`, no client method yet).
