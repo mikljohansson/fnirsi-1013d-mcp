@@ -216,3 +216,27 @@ def test_transport_uses_the_shared_bulk_timeout(sim, scope):
     scope.status()
     assert scope.t.shared and not scope.t.remote
     assert scope.t.timeouts.for_cmd(P.Cmd.READ_RAW, scope.t.remote, scope.t.shared) == 2.5
+
+
+def test_set_acq_state_during_a_pending_wait_aborts_it(sim_factory):
+    """fw 0.2.0: SET_ACQ_STATE is a control request (F_CONTROL); RUN while a WAIT is pending aborts the WAIT."""
+    srv = sim_factory(signal="zero")
+    with Scope.connect(srv.url) as s:
+        s.set_trigger(mode=1, level=250)
+        s.arm()
+        sent = []
+
+        def press_run():
+            if not sent:
+                sent.append(s.t.control(P.Cmd.SET_ACQ_STATE, P.SetAcqStateReq(1).pack()))
+                return True
+            return False
+        resp = s.t.deferred(P.Cmd.WAIT, P.U32Req(2000).pack(), 3.0, cancel=press_run, on_cancel=lambda: None,
+                            check=False)
+        assert resp.status == P.Status.E_ABORTED
+        assert P.StatusResp.unpack(sent[0].payload).run_state == P.RunState.RUN
+
+
+def test_link_stats_has_the_0_2_0_counters(scope):
+    ls = scope.link_stats()
+    assert "first_poll_ms" in ls and "first_pass_ms" in ls and len(ls) == 29

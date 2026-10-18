@@ -2,7 +2,8 @@
 
 State on 2026-10-18: Python host library, device simulator and MCP server for the FNIRSI 1013D open firmware's
 USB protocol. Firmware on the owner's unit is 0.1.7 (protocol 1.2). Host, simulator and vectors speak protocol 1.3
-(collaborative mode, firmware 0.2.0 by fw-gen2, not yet on hardware) and fall back to the exclusive 1.2 model when
+(collaborative mode: fw 0.2.0, commit d77298f, image sha256 a80ba07b..., protocol.md section 14 rows 30-39;
+not yet benched) and fall back to the exclusive 1.2 model when
 GET_INFO lacks SHARED_MODE. This file is for a fresh agent with no
 context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec;
 **section 14 is how the firmware actually behaves**), `../docs/mcp-tools.md` (tool surface, tiers),
@@ -23,7 +24,7 @@ context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/p
 | `vectors.py` | Checks/extends `../docs/protocol-vectors.json` (`--check`, `--merge`). |
 | `units.py` | `parse_quantity("100us")`, `fmt_si`. |
 
-Tests in `tests/` (197): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
+Tests in `tests/` (199): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
 (resend, resync, #RESET, 1.1/1.2 fields, timeouts, paused responses), `test_serial_link` (no-reconfigure rule,
 fake pyserial), `test_simulator_scope`, `test_shared_mode` (1.3 semantics through `Scope`), `test_firmware_match`
 (protocol.md section 14 items), `test_server` (every tool in-process, collaborative restarts, legacy fallback),
@@ -74,7 +75,7 @@ wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/mcp && ~/.venvs/fnirsi1
    2.5 s on 1.3 firmware (READ_RAW is held up to 1 s in RUN until the UI capture in flight is DONE); WAIT
    has its own deadline. REMOTE / SHARED is tracked from status-shaped answers. `response_timeout=` overrides.
 7. **Host partial-frame timeout is 2 s**, not the device's 100 ms (a paused large response must survive).
-8. One request in flight; only control requests (GET_STATUS, STOP, SET_REMOTE, PING) while a deferred one is
+8. One request in flight; only control requests (GET_STATUS, STOP, SET_REMOTE, PING, 1.3 SET_ACQ_STATE) while a deferred one is
    pending, and only from the `deferred(cancel=...)` callback (single reader).
 9. **No response cap by default** (the 8 KiB Windows cap was dropped 2026-10-18 after the fw 0.1.6/0.1.7 census:
    2000 PINGs + 100 x 64 KiB, retries off, 0 errors). `--max-response` / `FNIRSI_MCP_MAX_RESPONSE` stays as an
@@ -90,7 +91,8 @@ regenerates its own entries and keeps every entry whose `source` is not `firmwar
 with `"source": "host"`, built by `vectors.build_host_vectors()`; add new ones there, run
 `python -m fnirsi1013d.vectors --merge --check`, and never change an existing vector's bytes (pin fields, e.g.
 `proto_minor=0`). The C checker: `wsl ... cd firmware/scope/host_tests && make && python3 check_vectors.py
---checker build/vector_check`. Both checkers pass on the current 65 vectors.
+--checker build/vector_check`. Both checkers pass on the current vectors (fw 0.2.0 merge). While a 1.3 READ_RAW is held (RUN, <= 1 s)
+the device parses nothing else, not even `#RESET`; a DTR 0->1 or USB reset drops the hold.
 
 ## Simulator fidelity
 

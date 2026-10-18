@@ -102,7 +102,7 @@ def test_fast_retry_after_lost_response(sim, transport):
 def test_get_link_stats_protocol_1_2(sim, scope):
     st = scope.link_stats()
     assert st is not None and list(st)[:4] == ["rx_packets", "rx_bytes", "rx_stalls", "rx_swept"]
-    assert len(st) == len(P.LINK_STATS_NAMES) == 27
+    assert len(st) == len(P.LINK_STATS_NAMES) == 29  # 27 in fw 0.1.4..0.1.7, 29 from 0.2.0
     assert st["frames"] >= 2 and st["rx_bytes"] > 512 and st["responses"] >= 2 and st["dtr_up"] >= 1
     assert st["junk_bytes"] >= 512  # the resync preamble's zeros
     assert st["link_resets"] >= 1  # its #RESET

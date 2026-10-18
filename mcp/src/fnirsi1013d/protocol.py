@@ -96,7 +96,8 @@ LOCAL_ALLOWED = frozenset(
 #: Commands accepted while the UI is modal (LOCAL_BUSY, section 6.1).
 BUSY_ALLOWED = frozenset({Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.GET_BATTERY, Cmd.GET_LINK_STATS})
 #: Control requests allowed while a deferred request is pending (section 3.2).
-CONTROL_CMDS = frozenset({Cmd.GET_STATUS, Cmd.STOP, Cmd.SET_REMOTE, Cmd.PING})
+#: SET_ACQ_STATE (1.3) is a control request too: RUN/STOP while a WAIT is pending aborts it (E_ABORTED).
+CONTROL_CMDS = frozenset({Cmd.GET_STATUS, Cmd.STOP, Cmd.SET_REMOTE, Cmd.PING, Cmd.SET_ACQ_STATE})
 DEFERRED_CMDS = frozenset({Cmd.WAIT, Cmd.ACQUIRE_AVG})
 
 
@@ -1217,6 +1218,8 @@ LINK_STATS_NAMES = (
     "link_resets", "dtr_up", "dtr_down", "frames", "hdr_crc_errors", "payload_crc_errors", "oversize",
     "version_errors", "responses_dropped", "rx_timeouts", "junk_bytes", "responses", "duplicates", "tx_aborts",
     "disp_main", "disp_busy", "disp_isr", "held", "isr_skipped",
+    # fw 0.2.0: ms from init to the first main-loop poll, duration of the first main-loop pass
+    "first_poll_ms", "first_pass_ms",
 )
 
 
