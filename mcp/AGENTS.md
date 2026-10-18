@@ -225,7 +225,8 @@ reload: announce "about to reload with <image> for <reason>", wait for the lead'
 9. T8 follow-ups: CH2 points (one shorted-input `scope_calibrate_volts` per offset is enough for the channel
    model); the lead's open square-wave discrepancy (calibration-pin 0..3.3 V read as about -1.1 / +2 V on ranges
    1 and 3 with DC coupling) was resolved by the lead (backups/t8sq_CH1.json): the conversion is right, the
-   calibration output is a ~3.1 Vpp square wave not referenced to ground (low ~ -1.2 V). Tool texts say so
+   calibration output is a ~3.1 Vpp square wave not referenced to ground (low ~ -1.2 V; a DMM reads
+   0.310 V DC on the pin, equal to the waveform's mean, so the output is capacitively coupled with a small bias). Tool texts say so
    (`CAL_OUTPUT_NOTE`); the self-test checks the swing (5/95 % levels), not absolute levels. Do not "fix" this
    in the conversion.
    Firmware idea for fw-gen2: base calibration could store the measured per-core 0 V codes.
