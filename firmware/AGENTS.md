@@ -273,6 +273,12 @@ wsl -d Ubuntu -- arm-none-eabi-addr2line -f -e /mnt/d/src/fnirsi-1013d-ai/backup
 wsl -d Ubuntu -- bash -lc "arm-none-eabi-objdump -d /mnt/d/src/fnirsi-1013d-ai/backups/fw-0.2.19-9b94c9a8.elf > /tmp/fw.dis"
 ```
 
+`firmware/tools/map_addr.py` (fw-gen3) does both and decodes the record: `python3 firmware/tools/map_addr.py ELF
+--restart v49 v50 ... v56` prints the mode at `_reset`, the fault PC with the LR offset applied, function + offset,
+source line, the disassembly around it and the stack each SP lies in; `map_addr.py ELF ADDR...` maps plain hex
+addresses (`--disasm N` adds N instructions either side). Run it in WSL (toolchain from ~/opt/gcc10, PATH or
+CROSS=prefix-); from Git Bash put the call in a script file.
+
 Keep the ELF of every later bench image next to its .bin: a rebuild moves addresses.
 
 ## 11. USB: lost interrupts, the tick fallback, SOF, port resets
