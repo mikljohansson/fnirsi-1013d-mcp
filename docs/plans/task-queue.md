@@ -17,14 +17,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [x] **Warnings state consequence + action, units MSa/s** (owner, 10-18): "Aliasing possible: set Acquisition > Filter"
   (only while Filter is Off and fs < 200 MSa/s), "CHn overrange: increase V/div", "Stopped: press RUN to fill the view",
   "Waiting for a capture at the new rate"; README table.
-- [>] **Spectrum view: no scope-view repaints over the strip** (owner, 10-18): host SET_TIMEBASE / SET_TRIGGER / SET_GEN (and
+- [x] **Spectrum view: no scope-view repaints over the strip** (owner, 10-18): host SET_TIMEBASE / SET_TRIGGER / SET_GEN (and
   menu changes) made the bottom strip "glitch and show something else for a flicker": 1.00o5's setting-change redraw routines paint
   the scope view's bottom row regardless of the display mode. Route every setting redraw through the display-mode-aware draw (skip or
   redirect when display_mode != scope), and audit the top bar/right column the same way.
-- [>] **FPGA 0x1535 firmware support** (UNBLOCKED 10-18 evening: bitstream 5040a2ae built, tb passes, latency 25 write clocks verified; output rate stays 200 MHz / N): 0x56 FIR
+- [x] **FPGA 0x1535 firmware support** (UNBLOCKED 10-18 evening: bitstream 5040a2ae built, tb passes, latency 25 write clocks verified; output rate stays 200 MHz / N): 0x56 FIR
   enable, 0x29 bits 5/6, S = ... + 1, (N/2)^K maths, latency/settle formulas, Filter box FIR option, SET_DECIM flags
   bit 3, GET_DECIM, caps bit 16, protocol 1.11. Confirm with fpga-gen4 that the output rate stays 200 MHz / N.
-- [>] **Default filter = CIC2 now** (owner leaning yes after the 0x1534 bench; CIC + FIR once 0x1535 is benched).
+- [x] **Default filter = CIC2 now** (owner leaning yes after the 0x1534 bench; CIC + FIR once 0x1535 is benched).
 - [ ] **USB suspend/resume handling** (10-18 22:48, fw 0.2.43 FEL-loaded, PHY fix present): after an idle period with the port closed the
   device logged suspend -> bus_reset -> set_config and the host's first write hit Windows error 22 (device failed before the open); the
   reconnect a second later worked. usb_resumes has been 0 on every build while usb_suspends count: the device never sees or handles the
@@ -41,7 +41,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   base calibration; bench with 0 V, 1.0045 V and the -1 V point per class.
 - [x] **Bench: -1 V point on CH1 range 2** (done 10-18 evening, docs/hardware-status.md): one gain per core and class suffices; full-rate
   class A/B 1.033 and 1.1 % below the gated class; gated A/B 1.004 with a 0.5-code INL bow in core A that no gain term removes.
-- [ ] **Generator menu: tapping the frequency row toggles the waveform** (owner 10-18 evening). The Wave row was removed in the menu
+- [x] **Generator menu: tapping the frequency row toggles the waveform** (fw-gen6 e0ee6f3 in 0.2.44: the removed Wave/Analog features read as present on 0x1533+; bench pending) (owner 10-18 evening). The Wave row was removed in the menu
   purge; the touch hit-areas (or the row-to-action table) still map the old row positions. Fix the hit-area table, verify every row of
   the generator, trigger and acquisition menus by tapping each; also check that no removed action is still reachable.
 - [ ] **CH2 range-5 zero drift check** (fw-cal hypothesis): CH2 raw at ranges 4/5 vs the stored zeros now; re-calibrate after 10 minutes
@@ -76,7 +76,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Dispatched
 
-- fw-gen6 (worktree, branch fw-gen6): fw 0.2.44 batch = items marked [>] above (0x1535 support, strip overdraw, CIC2 default).
+- fw-gen6 (worktree, branch fw-gen6, about 350k tokens, retired): fw 0.2.44 merged into main (463931d, image d4c0b716): 0x1535 FIR
+  support, spectrum strip repaint, CIC2 default, USB suspend/resume rework (protocol 1.11, rows 49-50), generator menu hit-area fix.
+  Bench by the coordinator in progress.
 - fw-cal (retired at 515k tokens): fw 0.2.43 merged (b27c1ee); handoff firmware/AGENTS.md section 21 merged (5effb7d). Remaining
   README 6.2 bench steps (CH2 drift check, -1 V point, PWM sweep, volts check) are queued above.
 
