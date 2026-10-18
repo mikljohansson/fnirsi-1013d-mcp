@@ -277,3 +277,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   0 drops, latency median 1.1 ms / p99 2.1 ms / max 3.1 ms, every counter delta none (no bus reset, no suspend, no restart). The earlier
   0.2.11 drop (16:5x) happened with selective suspend still on; the 0.2.12/0.2.16 "drops" were self-restarts. fw-gen2 retired (handoff
   0e19102), fpga-gen2 retired (d30cff8), mcp-gen2 retired (7de3a41); fw-gen3 active with the 0.2.19 / 0.2.19-nofb A/B pair (02288b8).
+- Firmware 0.2.19 A/B pair (fw-gen3, commit 02288b8): backups/fw-0.2.19-c30ff516.bin (with tick fallback) and backups/fw-0.2.19-nofb-3d1f3c88.bin
+  (PC_USB_TICK_FALLBACK=0), ELFs pinned alongside. 0.2.19 (c30ff516) loaded: 8 bench passes = 800 x 64 KiB, 0 failed, uptime monotonic,
+  restarts 0, usb_irq_polled 54 in 90 s (lost interrupts are frequent under traffic and all recovered). The 0.2.16 restart did not reproduce
+  in 8 passes; 30-minute capture-mode soak (4 KiB every 50 ms) started on 0.2.19 at 17:58 to catch one with the restart record.
