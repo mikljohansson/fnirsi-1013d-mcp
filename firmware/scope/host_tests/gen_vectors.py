@@ -156,52 +156,12 @@ def decim_cases():
     return cases
 
 
-# Calibration data v2 (adc_cal.h, firmware/README.md section 6.2): the sector 708 block at byte 128 and GET_CAL bytes
-# 92..247. Example content = host_tests/test_adc_cal.c unit_ch1() on both channels plus three edits on CH2.
+# Calibration data v3 (protocol row 51, adc_cal.h, firmware/README.md section 6.3): the sector 708 block at byte 128 and
+# GET_CAL bytes 112..255. Example content = host_tests/test_adc_cal.c example_channels(): unit_ch1() on both channels plus
+# edits on CH2. (The v2 section was dropped in fw 0.2.47: nothing reads it any more.)
 ADC_CAL_PWM = [904, 900, 908, 903, 908, 903]
 
 
-def adc_cal_channel(edits=False):
-    zero = [[[2107] * 6, [2067] * 6], [[2094] * 6, [2009] * 6]]           # [class full, gated][core A, B][range]
-    slope = [[-17308] * 6, [-17026] * 6]                                   # [core][range], Q16 codes per count
-    noise = [[[0] * 6, [0] * 6], [[10] * 6, [21] * 6]]                     # [class][core][range], 1/16 code
-    if edits:
-        zero[0][1][4] = -77
-        slope[0][5] = -20000
-        noise[0][1][2] = 47
-    return {"pwm": list(ADC_CAL_PWM), "zero": zero, "slope": slope, "noise": noise}
-
-
-def adc_cal_pack(chs):
-    b = struct.pack("<IHHHH", 0x4C414341, 2, 328, 2, 0)
-    for c in chs:
-        b += struct.pack("<6H", *c["pwm"])
-        b += struct.pack("<24h", *[v for cls in c["zero"] for core in cls for v in core])
-        b += struct.pack("<12i", *[v for core in c["slope"] for v in core])
-        b += struct.pack("<24H", *[v for cls in c["noise"] for core in cls for v in core])
-    return b + struct.pack("<I", zlib.crc32(b))
-
-
-def adc_cal_section():
-    chs = [adc_cal_channel(), adc_cal_channel(True)]
-    blk = adc_cal_pack(chs)
-    assert len(blk) == 328
-    return {
-        "notes": "Calibration data v2 block, sector 708 bytes 128..455, little-endian: u32 magic 'ACAL', u16 version 2, "
-                 "u16 length 328, u16 clock classes 2, u16 0; per channel (CH1, CH2): u16 pwm[6] (the "
-                 "dc_calibration_offset values it was measured at; ignored unless equal to sector 709's), i16 "
-                 "zero[class][core][range] (class 0 full rate = divider 0 and filtered, 1 gated = legacy divider >= 1; "
-                 "core 0 A = FPGA 0x20/0x22, 1 B = 0x21/0x23; 1/16 code), i32 slope[core][range] (Q16 codes per PWM "
-                 "count), u16 noise[class][core][range] (RMS, 1/16 code); u32 zlib.crc32 of the 324 bytes before it. "
-                 "GET_CAL (1.10) bytes 92..247 carry the same per-channel layout for the requested channel.",
-        "block_hex": blk.hex(),
-        "channels": chs,
-    }
-
-
-# Calibration data v3 (protocol row 51, adc_cal.h, firmware/README.md section 6.3): the sector 708 block at byte 128 and
-# GET_CAL bytes 112..255. Example content = host_tests/test_adc_cal.c example_channels(): unit_ch1() on both channels plus
-# edits on CH2. The v2 section above stays until the host has moved to v3 (mcp/tests/test_cal_v2.py reads it).
 def adc_cal_v3_channel(edits=False):
     zero = [[[2107] * 6, [2067] * 6], [[2094] * 6, [2009] * 6]]           # [class full, gated][core A, B][range]
     slope = [[[-17257] * 6, [-16572] * 6], [[-17308] * 6, [-17026] * 6]]  # [class][core][range], Q16 codes per count
@@ -379,7 +339,6 @@ def build():
             "levels": DECIM_LEVELS,
             "cases": decim_cases(),
         },
-        "adc_cal": adc_cal_section(),
         "adc_cal_v3": adc_cal_v3_section(),
         "vectors": vectors,
     }
