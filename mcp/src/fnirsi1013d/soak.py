@@ -41,7 +41,7 @@ from .transport import (PIDCODES_TEST_PIDS, PIDCODES_VID, Link, Transport, Trans
 #: counters whose deltas tell what happened on the USB side
 WATCH = ("link_resets", "dtr_up", "dtr_down", "usb_bus_resets", "usb_suspends", "usb_resumes", "usb_disconnects",
          "ep0_setups", "ep0_bad_setups", "usb_irq_polled", "rx_stalls", "hdr_crc_errors", "payload_crc_errors",
-         "rx_timeouts")
+         "rx_timeouts", "restarts")
 #: Windows: USB settings subgroup / USB selective suspend setting
 POWERCFG = ("2a737441-1930-4402-8d77-b2bebba308a3", "48e6b7a6-50f5-4782-a5d4-53bb8f07e226")
 
@@ -148,8 +148,28 @@ class Soak:
             self.st.restarts += 1
             self.log(f"DEVICE RESTARTED (uptime went backwards: {prev} -> {up} ms)")
             self.events_seen = 0  # the device's event counter starts over too
+            self.restart_record()
             return True
         return False
+
+    def restart_record(self) -> None:
+        """fw 0.2.19: read the restart record (GET_LINK_STATS 49-56) and the event log right away, raw."""
+        if self.t is None:
+            return
+        try:
+            cur = P.parse_link_stats(self.t.request(P.Cmd.GET_LINK_STATS, retries=1).payload)
+        except Exception as e:  # noqa: BLE001
+            self.log(f"restart record unavailable ({e})")
+            return
+        if "restarts" in cur:
+            et = cur.get("restart_exc_type", 0)
+            self.log("restart record (raw, map with the ELF): " + " ".join(
+                f"{k}=0x{cur[k]:08X}" for k in P.RESTART_RECORD if k in cur)
+                + f" [exc type {et}: {P.RESTART_EXC_TYPES.get(et, '?')}]")
+        else:
+            self.log(f"restart record: not in this firmware ({len(cur)} counters)")
+        if self.proto_minor >= 5:
+            self.events("restart")
 
     def uptime(self, label: str) -> None:
         assert self.t is not None
@@ -242,7 +262,7 @@ class Soak:
                     self.log(f"port {self.port} back after {self.clock() - t_down:.2f} s")
                     gone_logged = False
                 try:
-                    self.open(after_drop=True)
+                    self.open(after_drop=True)  # its uptime check reads the restart record on a restart
                     down = self.clock() - t_down
                     self.log(f"reopen {self.port} ok (down {down:.2f} s)")
                     if self.proto_minor < 5:

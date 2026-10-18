@@ -148,6 +148,8 @@ def test_device_self_restart_is_flagged_and_counted(sim):
     text = "\n".join(lines)
     assert rc == 1 and s.st.restarts == 1 and s.st.drops == 0, text
     assert "DEVICE RESTARTED (uptime went backwards: " in text and "device restarts 1" in lines[-1]
+    i = next(i for i, ln in enumerate(lines) if "DEVICE RESTARTED" in ln)
+    assert "restart record" in lines[i + 1]  # read right away (31-counter simulator: "not in this firmware")
     assert any("uptime open " in ln for ln in lines) and any("uptime end " in ln for ln in lines)
 
 

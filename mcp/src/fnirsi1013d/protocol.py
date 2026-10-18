@@ -1394,7 +1394,17 @@ LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     # session from 0.2.16, SOF no longer counts)
     "usb_irq_polled",
     # fw 0.2.17 (49 counters): ms the boot splash step took + 1 (0 = not run)
-    "boot_splash_ms")
+    "boot_splash_ms",
+    # fw 0.2.19 (57 counters): restart record since the last cold boot / ENTER_FEL (the lead maps PCs with the ELF)
+    "restarts", "restart_exc_type", "restart_exc_lr", "restart_exc_spsr", "restart_exc_sp", "restart_reset_lr",
+    "restart_reset_sp", "restart_reset_cpsr")
+
+#: restart_exc_type / event 15 a (fw 0.2.19)
+RESTART_EXC_TYPES = {0: "jump to entry", 1: "undefined", 2: "SWI", 3: "prefetch abort", 4: "data abort",
+                     5: "reserved", 6: "FIQ"}
+#: GET_LINK_STATS counters of the restart record (printed raw, in hex, by fnirsi1013d-soak)
+RESTART_RECORD = ("restarts", "restart_exc_type", "restart_exc_lr", "restart_exc_spsr", "restart_exc_sp",
+                  "restart_reset_lr", "restart_reset_sp", "restart_reset_cpsr")
 
 
 #: GET_EVENT_LOG request flags (fw 0.2.18): bit 0 re-arms the reset snapshot after this read (a plain read keeps it;
@@ -1404,7 +1414,7 @@ EVENT_LOG_REARM = 0x01
 #: GET_EVENT_LOG entry types (protocol 1.5, section 14 row 42)
 EVENT_TYPES = {1: "bus_reset", 2: "suspend", 3: "resume", 4: "disconnect", 5: "ep0_setup", 6: "ep0_short_packet",
                7: "set_configuration", 8: "clear_halt", 9: "dtr", 10: "rx_ring_full", 11: "rx_release",
-               12: "tx_flushed", 13: "tx_aborted", 14: "usb_irq_polled"}
+               12: "tx_flushed", 13: "tx_aborted", 14: "usb_irq_polled", 15: "restart"}
 
 
 @dataclass
@@ -1434,6 +1444,8 @@ class DeviceEvent:
             return f"{self.name} {b} bytes left"
         if t == 14:
             return f"usb_irq_polled INTUSB 0x{a:02X} INTTX 0x{b >> 8:02X} INTRX 0x{b & 0xFF:02X}"
+        if t == 15:
+            return f"restart exception {a} ({RESTART_EXC_TYPES.get(a, '?')}) pc.lo16 0x{b:04X}"
         return self.name
 
 

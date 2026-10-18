@@ -221,3 +221,11 @@ def test_event_log_reset_snapshot_tail():
     assert back == log and len(back.events) == 128 and back.frozen and back.reset_ms == 1010
     idle = P.parse_event_log(data[:12 + 8 * 128] + struct.pack("<HHI", 0, 0, 0))
     assert idle.has_snapshot and not idle.frozen
+
+
+
+def test_restart_record_fw_0_2_19():
+    import struct
+    d57 = P.parse_link_stats(struct.pack("<HH57I", 57, 0, *range(57)))
+    assert d57["boot_splash_ms"] == 48 and d57["restarts"] == 49 and d57["restart_reset_cpsr"] == 56
+    assert P.DeviceEvent(5, 15, 4, 0x1234).describe() == "restart exception 4 (data abort) pc.lo16 0x1234"
