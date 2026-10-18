@@ -35,7 +35,7 @@ runs:
 
     - name: Cache Atlan's GCC 10.3.1
       id: gcc10-cache
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ~/opt/gcc10
         key: gcc10-${{ runner.os }}-${{ hashFiles('firmware/tools/fetch_gcc10.sh') }}
@@ -50,7 +50,7 @@ runs:
       run: ~/opt/gcc10/usr/bin/arm-none-eabi-gcc --version | head -1
 
     - name: Cache Atlan's v1.00o5 reference files
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: |
           firmware/reference/fnirsi_1013d_v1.00o5_atlan.bin
