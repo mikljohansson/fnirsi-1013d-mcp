@@ -532,3 +532,33 @@ compact menus rather than painting over gaps.
 5. Phase 2/3 commands: READ_LIVE, READ_SCREEN (T9), ACQUIRE_AVG (128 KiB accumulators), full-speed fallback.
 6. Per-unit USB serial (SID/eFuse) and a real pid.codes PID before anyone else flashes this.
 7. Optional: composite CDC + MSC (needs a TinyUSB-style rework; plan section 9).
+
+## 18. Handoff from fw-gen4 (retired at about 270k tokens, 2026-10-18)
+
+State: 0.2.21-0.2.25 built, host-tested, pinned in backups/ with ELFs (ladder, section 8). The coordinator has
+benched 0.2.21 and 0.2.23 (results in TODO 1b) and has 0.2.24 and 0.2.25 for the next A/B. Nothing is uncommitted.
+
+What fw-gen4 did:
+- 0.2.21: USB tick fallback removed (section 11 closed); counters 47/57 and event type 14 retired.
+- Host test `test_fast_path_no_fpga` (mock `fpga_ops`): no FPGA bus access from ISR/BUSY polls. EXT audit: clean.
+- 0.2.22: USB OTG + PHY reset asserted at init, pre-init state logged (type 16).
+- 0.2.23: EP2 IN state after each TX abort (types 17, 18).
+- 0.2.24: GET_EVENT_LOG bus-level ring tail; identical EP0 setups logged once per second.
+- 0.2.25: PHY tuning writes to PHYCTL 0x01C13404 instead of 0x01C13410; post-init state + PHY read-back (type 19).
+
+Open, for fw-gen5 (in this order):
+1. Evaluate the 0.2.25 A/B (FEL vs cold boot, post-init type 19 on both). If field 4 reads 0x00E9 and field 5
+   differs, the read-back works and the writes land: record it as verified here and in protocol row 43. If the
+   read-back is constant (0 / 0xFF), the read protocol is wrong, not necessarily the writes.
+2. The cold-boot IN stall is not explained. Facts: only cold SD boots fail, about 1 per 500 x 64 KiB or a ~20 s
+   episode; device holds TxPktRdy with SOFs arriving and recovers after the 2 s abort; replugging after a FEL load
+   does not reproduce it. If 0.2.25 still fails on cold boot, next candidates (inference): other state the boot
+   ROM's FEL leaves (clocks: compare CCU PLL / AHB / USB-related registers between paths with a one-off dump
+   event), and host-side recovery timing. Judge on long runs; small samples cannot separate the paths.
+3. mcp/ (mcp-gen2) still needs decoders for event types 16-19, the bus ring tail, and the retired counters 47/57.
+4. TODO 1c (trigger position by run at decimated rates), then the older TODOs below it.
+
+Gotchas from this session: Python heredocs via Git Bash turn `\0`-style C escapes into raw bytes; check with
+`cat -A` or write escapes via `bytes([92])`. Bash variables inside `wsl ... bash -lc "..."` from Git Bash get
+eaten; put WSL steps in a script and run it through PowerShell `wsl -d Ubuntu -- bash /mnt/c/...`. Every rebuild
+changes the sha256 (build time is embedded): pin from the same build you report.
