@@ -10,6 +10,11 @@
 #include "mass_storage_class.h"
 #include "cdc_class.h"
 #include "PC_interface.h"
+#include "pc_hooks.h"
+
+#if PC_PROTOCOL
+#include "pc_transport.h"
+#endif
 
 #include <string.h>
 
@@ -26,8 +31,10 @@ uint8  current_speed = USB_SPEED_UNKNOWN;
 uint32 usb_connect = 0;
 int32  usb_ep0_state = EP0_IDLE;
 
+#if !PC_PROTOCOL
 uint8 bufferCDC[64]; //max is 512
 uint32 lenCDC = 0;
+#endif
 
 extern volatile uint32 msc_state;
 
@@ -93,6 +100,11 @@ static void usb_phy_setup(int32 addr, int32 data, int32 len)
 //----------------------------------------------------------------------------------------------------------------------------------
 void usb_device_init(void)
 {
+#if PC_PROTOCOL
+    // PC protocol: drop buffered data and flag a link reset (boot, CDC <-> MSC switch)
+    pc_transport_reset();
+#endif
+
     // Enable and clock the USB PHY
     *CCU_USBPHY_CFG |= (CCU_USBPHY_CFG_RST | CCU_USBPHY_CFG_GAT);
 
@@ -223,7 +235,11 @@ void usb_device_enable(void)
   
   //Enable the needed interrupts ch340
     //*USBC_REG_INTUSBE = USBC_BP_INTUSB_SOF | USBC_BP_INTUSB_SUSPEND | USBC_BP_INTUSB_RESUME | USBC_BP_INTUSB_RESET | USBC_BP_INTUSB_DISCONNECT;
+#if !PC_PROTOCOL
   if(USB_CH340==1) *USBC_REG_INTUSBE |= USBC_BP_INTUSB_SOF;
+#else
+  //PC protocol: no SOF interrupt (8000/s at high speed); the EP2 TX interrupt drives the transmit pump
+#endif
 
   //Enable EP0 interrupt
   *USBC_REG_INTTXE = 1;
@@ -879,6 +895,11 @@ void usb_device_CDC_irq_handler(void)
         *USBC_REG_TXCSR |= USBC_BP_TXCSR_D_FLUSH_FIFO;
         *USBC_REG_RXCSR |= USBC_BP_RXCSR_D_FLUSH_FIFO;
 
+#if PC_PROTOCOL
+    //Bus reset: REMOTE ends (exit_reason 5), buffers are dropped                  BENCH: plan 11.3 step 3 (cable pull)
+    pc_usb_isr_link();
+#endif
+
     
     return;
   }
@@ -903,6 +924,10 @@ void usb_device_CDC_irq_handler(void)
     //No longer connected
     usb_connect = 0;
     usb_ep0_state = EP0_IDLE;
+
+#if PC_PROTOCOL
+    pc_usb_isr_link();
+#endif
   }
 
   //Check on a DISCONNECT interrupt
@@ -914,6 +939,10 @@ void usb_device_CDC_irq_handler(void)
     //No longer connected
     usb_connect = 0;
     usb_ep0_state = EP0_IDLE;
+
+#if PC_PROTOCOL
+    pc_usb_isr_link();
+#endif
     
     //Need to add code here to force the scope to go back to its normal mode???
     //Use a flag that is checked in the touch scan for the usb on/off
@@ -1220,6 +1249,12 @@ void usb_device_CDC_irq_handler(void)
                       
                       //Switch back to EP0
                       *USBC_REG_EPIND = 0;
+
+#if PC_PROTOCOL
+                      //The FIFO of a CDC data endpoint was flushed: tell the transport
+                      if((usb_setup_packet.packet.wIndex & 0x0F) == 2)
+                        pc_usb_isr_ep_cleared(usb_setup_packet.packet.wIndex & 0x8F);
+#endif
                       break;
                   } //end switch(usb_setup_packet.packet.bRequest)
                   break;
@@ -1391,6 +1426,10 @@ void usb_device_CDC_irq_handler(void)
     //Set EP2 as active one
     *USBC_REG_EPIND = 2;
 
+#if PC_PROTOCOL
+    //PC protocol: packet(s) into the RX ring, NAK back-pressure when it is full; parsing happens in the main loop
+    pc_usb_isr_rx();
+#else
     //Check if the end point is in a stall
     if(*USBC_REG_RXCSR & USBC_BP_RXCSR_D_SENT_STALL)
     {
@@ -1422,6 +1461,7 @@ void usb_device_CDC_irq_handler(void)
       //Signal done with the packet and clear possible errors
       *USBC_REG_RXCSR &= ~(USBC_BP_RXCSR_D_RX_PKT_READY | USBC_BP_RXCSR_D_OVERRUN);
     }
+#endif
   }
   
   //Check on data transmitted for EP2
@@ -1447,6 +1487,11 @@ void usb_device_CDC_irq_handler(void)
       //usb_CDC_in_ep_callback();
 
     }
+
+#if PC_PROTOCOL
+    //PC protocol: next packet (or the ZLP) of the staged response
+    pc_usb_isr_tx();
+#endif
   }
 }
 //******************************************************************************************
@@ -1457,9 +1502,11 @@ static uint16 lcd_y2 = 70;
 char line[128];
 
 // extern alebo definícia štruktúry (ak nie je v .h)
+#if !PC_PROTOCOL
 #define RX_BUFFER_SIZE 128
 static char rx_buffer[RX_BUFFER_SIZE];
 static uint32 rx_index = 0;
+#endif
 
 extern sysparam SysParam;
 
@@ -1477,6 +1524,7 @@ uint32 j = 182;
 uint32 k = 20;
 
 
+#if !PC_PROTOCOL
 //void usb_CDC_receive_callback(uint8 *data, uint32 len)
 void usb_CDC_receive_callback(void)
 {
@@ -1589,6 +1637,8 @@ if (c == '\n' || c == '\r')
     //usb_CDC_in_ep_callback();
 }
 
+#endif
+
 //***************************************************************************
 // jednoduchá funkcia na prevod bajtu na hex znaky
 char nibble_to_hex(uint8 nibble)
@@ -1599,6 +1649,7 @@ char nibble_to_hex(uint8 nibble)
 
 //***************************************************************************
 
+#if !PC_PROTOCOL
 //--------------------------------------------------------------------
 //  Odosielanie textu do USB CDC bufferu (neblokujúco, bez priameho TX)
 //--------------------------------------------------------------------
@@ -1668,6 +1719,20 @@ void usb_CDC_send_data(uint8 *data, uint32 length)
     //  NEPOSIELAJ hneď, len naplň buffer
       // *USBC_REG_INTTXE |= USBC_INTTX_FLAG_EP1;
 }
+#else
+//PC protocol: the text debug output path (usb_tx ring) is gone; the protocol owns the CDC data endpoint.
+//Callers (menu.c debug helpers via usb_send_uint) become no-ops instead of corrupting the binary stream.
+void usb_CDC_send_text(const char *text)
+{
+  (void)text;
+}
+
+void usb_CDC_send_data(uint8 *data, uint32 length)
+{
+  (void)data;
+  (void)length;
+}
+#endif
 
 
 
@@ -1747,6 +1812,11 @@ void usb_cdc_set_control_line_state(uint16 value)
 
     // If the host sends DTR=1, we consider it an "open" port
     if (dtr_state || rts_state) usb_connect = 1; else usb_connect = 0;
+
+#if PC_PROTOCOL
+    // DTR 1 -> 0 releases REMOTE (exit_reason 4) unless IGNORE_DTR
+    pc_usb_dtr(dtr_state);
+#endif
 }
 
 //==============================================================================

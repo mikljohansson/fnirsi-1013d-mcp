@@ -3,12 +3,44 @@
 #include "usb_interface.h" /* for usb_read_from_fifo / usb_write_ep2_data etc. */
 #include <string.h>
 
+#if PC_PROTOCOL
+#include "pc_cmds.h"      /* PC_SERIAL */
+#endif
+
+//------------------------------------------------------------------------------
+// USB identity. PC protocol builds use the pid.codes test VID/PID (never to be shipped; plan section 10)
+// instead of ST's 0x0483:0x5740, a new bcdDevice so Windows does not reuse a cached binding, a serial number
+// string and interface strings.
+#if PC_PROTOCOL
+#ifndef PC_USB_VID
+#define PC_USB_VID 0x1209
+#endif
+#ifndef PC_USB_PID
+#define PC_USB_PID 0x0001
+#endif
+#define CDC_VID           PC_USB_VID
+#define CDC_PID           PC_USB_PID
+#define CDC_BCD_DEVICE    0x0100
+#define CDC_ISERIAL       0x03
+#define CDC_IIF_CONTROL   0x05
+#define CDC_IIF_DATA      0x06
+#else
+#define CDC_VID           0x0483
+#define CDC_PID           0x5740
+#define CDC_BCD_DEVICE    0x0310
+#define CDC_ISERIAL       0x00
+#define CDC_IIF_CONTROL   0x00
+#define CDC_IIF_DATA      0x00
+#endif
 
  /* Buffers and indices */
  uint8 usb_rx[1024];
  volatile uint32 usb_rx_in_idx = 0;
  volatile uint32 usb_rx_out_idx = 0;
 
+//PC protocol: the 32 KiB text TX ring is not needed (pc_transport.c stages whole responses). The 1 KiB RX ring stays
+//because PC_interface.c (unused OEM-app code, still linked) references it; nothing fills it.
+#if !PC_PROTOCOL
  uint8 usb_tx[32768];
  volatile uint32 usb_tx_in_idx = 0;
  volatile uint32 usb_tx_out_idx = 0;
@@ -21,6 +53,8 @@ static uint8 usb_tx[1024];
 static volatile uint32 usb_tx_in_idx = 0;
 static volatile uint32 usb_tx_out_idx = 0;
 */
+#endif /* !PC_PROTOCOL */
+
   uint32 circular_buffer_used(const volatile uint32 in, const volatile uint32 out, const uint32 size);
   uint32 circular_buffer_free(const volatile uint32 in, const volatile uint32 out, const uint32 size);
   
@@ -51,12 +85,12 @@ volatile uint32 EP1DisableTX = 0;       /* flag to disable EP transmission */
   0x00,
   0x00,
   USB_EP0_FIFO_SIZE,
-  0x0483,
-  0x5740,
-  0x0310,
+  CDC_VID,
+  CDC_PID,
+  CDC_BCD_DEVICE,
   0x01,
   0x02,
-  0x00,
+  CDC_ISERIAL,
   0x01
 };
 
@@ -83,7 +117,7 @@ const CDC_Descriptor CDC_ConfDesc =
     0x02,
     0x02,
     0x01,
-    0x00
+    CDC_IIF_CONTROL
   },
   {
     sizeof(USB_CDC_HeaderDescriptor),
@@ -130,7 +164,7 @@ const CDC_Descriptor CDC_ConfDesc =
     0x0A,
     0x00,
     0x00,
-    0x00
+    CDC_IIF_DATA
   },
   /* Bulk IN and OUT endpoints (IN = 0x82, OUT = 0x02) */
   {
@@ -153,6 +187,41 @@ const CDC_Descriptor CDC_ConfDesc =
   }
 };
 
+#if PC_PROTOCOL
+/* String descriptors, PC protocol build (product string is what host discovery checks, protocol.md 3.1) */
+const uint8 str_vendor[32] = {
+    0x20, 0x03,   // "fnirsi-1013d-ai"
+    'f',0,'n',0,'i',0,'r',0,'s',0,'i',0,'-',0,'1',0,'0',0,'1',0,'3',0,'d',0,'-',0,'a',0,'i',0
+};
+
+const uint8 str_ret[26] = {
+    0x1A, 0x03,   // "FNIRSI 1013D"
+    'F',0,'N',0,'I',0,'R',0,'S',0,'I',0,' ',0,'1',0,'0',0,'1',0,'3',0,'D',0
+};
+
+const uint8 str_isernum[22] = {
+    0x16, 0x03,   // "1013D-0001" = PC_SERIAL (GET_INFO serial)
+    '1',0,'0',0,'1',0,'3',0,'D',0,'-',0,'0',0,'0',0,'0',0,'1',0
+};
+
+//The serial string must be PC_SERIAL; this fails to compile when only one of them is changed
+typedef char pc_serial_length_check[(sizeof(PC_SERIAL) * 2 == sizeof(str_isernum)) ? 1 : -1];
+
+const uint8 str_config[24] = {
+    0x18, 0x03,   // "FNIRSI Conf"
+    'F',0,'N',0,'I',0,'R',0,'S',0,'I',0,' ',0,'C',0,'o',0,'n',0,'f',0
+};
+
+const uint8 str_interface1[42] = {
+    0x2A, 0x03,   // "FNIRSI 1013D control"
+    'F',0,'N',0,'I',0,'R',0,'S',0,'I',0,' ',0,'1',0,'0',0,'1',0,'3',0,'D',0,' ',0,'c',0,'o',0,'n',0,'t',0,'r',0,'o',0,'l',0
+};
+
+const uint8 str_interface2[36] = {
+    0x24, 0x03,   // "FNIRSI 1013D data"
+    'F',0,'N',0,'I',0,'R',0,'S',0,'I',0,' ',0,'1',0,'0',0,'1',0,'3',0,'D',0,' ',0,'d',0,'a',0,'t',0,'a',0
+};
+#else
 /* String descriptors (FNIRSI Custom CDC ACM) */
 const uint8 str_vendor[14] = {
     0x0E, 0x03,   // 14 bytes = 2 + (6 characters * 2)
@@ -195,12 +264,14 @@ const uint8 str_interface2[30] = {
     'D',0,'a',0,'t',0,'a',0,' ',0,'I',0,'n',0,
     't',0,'e',0,'r',0,'f',0,'a',0,'c',0,'e',0
 };
+#endif
 
 /* vendor specifics */
 const uint8 vendorVersion[2] = { 0x31, 0x00 };
 const uint8 vendorAttach[2]  = { 0xC3, 0x00 };
 const uint8 vendorStatus[2]  = { 0xFF, 0xEE };
 
+#if !PC_PROTOCOL
 /* Read one character from RX circular buffer.
    Returns -1 if no data available, otherwise 0..255 value. */
 int16 CDCReceive(void)
@@ -294,6 +365,15 @@ void usb_CDC_in_ep_callback(void)
     // all done, TX free
     usb_tx_busy = 0;
 }
+#else
+//PC protocol: the CDC data endpoint belongs to pc_transport.c. The old busy-wait pump stays as a no-op for the
+//debug helpers in menu.c that still call it.
+volatile uint8 usb_tx_busy = 0;
+
+void usb_CDC_in_ep_callback(void)
+{
+}
+#endif
 
 //==============================================================================
 
