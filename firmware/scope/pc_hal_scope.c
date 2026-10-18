@@ -1254,7 +1254,10 @@ void pc_glue_poll_isr(void)
   {
     //fw 0.2.12: a USB interrupt lost by 1.00o5's irq_handler would leave EP0 (no other fallback) unanswered until the
     //host gives up and resets the port. The handler's flags stay latched until read, so the tick serves them.
+    //PC_USB_TICK_FALLBACK=0 (version -nofb) leaves it out, for the self-restart A/B (firmware/AGENTS.md section 9).
+#if PC_USB_TICK_FALLBACK
     pc_usb_poll_irq();
+#endif
     pc_poll(&pc_sess, PC_CTX_ISR);
   }
 }
