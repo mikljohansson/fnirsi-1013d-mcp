@@ -557,3 +557,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   GET_LINK_STATS + GET_EVENT_LOG (this doubles as fw-gen6's USB reopen bench: suspend/resume events after 10 minutes idle with the port
   closed), capture both channels' per-core raw and corrected means at 200 MSa/s, 1 MSa/s and CIC2 with dcoffset 0, restore the owner's
   settings, close. 60 rounds. Round 0: gated CH1 128.01/127.89, CH2 129.22/129.06; full CH1 127.70/127.96, CH2 128.81/129.85.
+- fpga-gen4 on the decimation bench's unexplained 100 kHz residual (CIC2 -30, CIC3 -36 dBV with the 900 kHz square): it is the DDS
+  generator's own 100 kHz spur (50 MHz DDS clock, 20 ns edge grid, pattern repeats every 9 periods = 10 us), about -37.5 dBV at 3.1 Vpp,
+  reproduced by the model (CIC2 -31.1, CIC3 -39.0 dBV). The filters perform as modelled. Future alias tests use 50 MHz / M, M even.

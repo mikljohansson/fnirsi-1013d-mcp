@@ -67,8 +67,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 - [ ] **Version bump to 0.3.0** in mcp/pyproject.toml and firmware PC_FW_VERSION, CHANGELOG section, release notes
   (mcp-gen3 item 4) when the owner gives the go for v0.3.0.
-- [ ] **Alias residual model check**: compute the 100 kHz bin content for the full 900 kHz square (all odd harmonics folded)
-  for K = 1..3 at N = 200 and compare with the measured -17.5 / -30.1 / -35.8 dBV (asked of fpga-gen4; may be host work).
+- [x] **Alias residual model check** (fpga-gen4): the 100 kHz residual is the DDS generator's own spur. The DDS clock is 50 MHz, so a
+  900 kHz square's edges fall on a 20 ns grid with a 55.56-tick period that repeats every 9 periods (10 us): a real 100 kHz component at
+  about -37.5 dBV for 3.1 Vpp that no filter can remove. Model vs bench at N = 200: CIC2 -31.1 vs -30, CIC3 -39.0 vs -36 dBV. For alias
+  tests use f = 50 MHz / M with M even (e.g. inc = round(2^32 / 56) = 892.857 kHz, aliasing to 107.1 kHz); fpga-gen4 fixed README check 4.
 
 ## FPGA
 
@@ -96,5 +98,5 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - fw-gen5 (retired after 0.2.42): Auto redesign, header, warnings delivered in fw 0.2.42; owner verdict pending.
 
 - fpga-gen4 (retired at about 290k tokens, 10-18 23:40): FPGA 0x1535 built, pinned, host-tested, documented (292a596); not flashed.
-  The residual 100 kHz CIC alias question (full-square model) stays open above for fpga-gen5 or host work.
+  The 100 kHz residual question is answered (DDS spur, see above).
 - mcp-gen3: idle, holds item 4 (version bump).
