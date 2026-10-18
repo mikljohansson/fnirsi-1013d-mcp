@@ -72,8 +72,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## FPGA
 
-- [ ] **Long free-running testbench** for the decimation filter (100k outputs, DC + tone, bounded and periodic) as
-  insurance, in fpga-gen4's 0x1535 work.
+- [x] **Long free-running testbench** for the decimation filter: fpga-gen4's 0x1535 work (tb/run.sh, seeds 12345/1/77, 13 FIR
+  mutations caught; fpga/al3/README.md section 5, commit 292a596).
 - [ ] **Open input / EXT bench tests 1-4** from fpga/al3/README.md "Changes" section 2 (needs an external 3.3 V source
   referenced to USB ground).
 
@@ -95,5 +95,6 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 - fw-gen5 (retired after 0.2.42): Auto redesign, header, warnings delivered in fw 0.2.42; owner verdict pending.
 
-- fpga-gen4: FPGA 0x1535 (CIC N/2 + 15-tap FIR).
+- fpga-gen4 (retired at about 290k tokens, 10-18 23:40): FPGA 0x1535 built, pinned, host-tested, documented (292a596); not flashed.
+  The residual 100 kHz CIC alias question (full-square model) stays open above for fpga-gen5 or host work.
 - mcp-gen3: idle, holds item 4 (version bump).
