@@ -12,7 +12,7 @@ Workflows: `.github/workflows/ci.yml`, `.github/workflows/release.yml`, the comp
 | job | runner | what must pass |
 |---|---|---|
 | firmware | ubuntu-24.04 | see the list below |
-| mcp | ubuntu-latest and windows-latest, Python 3.12 and 3.13 | `pip install -e mcp[dev]`, then ruff with the selection from `mcp/AGENTS.md`, then pytest |
+| mcp | ubuntu-24.04 and windows-latest, Python 3.12 and 3.13 | `pip install -e mcp[dev]`, then ruff with the selection from `mcp/AGENTS.md`, then pytest |
 | docs-lint | ubuntu-24.04 | `docs/protocol-vectors.json` against the Python checker and the C checker; `CHANGELOG.md` structure |
 
 The firmware job runs these steps in order:
@@ -191,62 +191,57 @@ two inner sha256 values in `tools/make_release_sd_package.py`, and update `ATLAN
 files must not change. If Atlan4 publishes a new package, that is a new reference and needs a deliberate
 change.
 
-## 6. Creating the GitHub repository (owner, once)
+## 6. The GitHub repository
 
-The repository does not exist yet, and the local checkout has no remote. These commands create it as a
-**private** repository under the owner's account. They push main and start CI. The owner decides
-separately when it goes public. Run them from the repository root, in Git Bash or WSL. `gh` is logged
-in as `mikljohansson` over ssh.
-
-Before the push, check two things:
-- The working tree holds only what should go up. Run `git status`, and confirm `git ls-files backups`
-  prints nothing.
-- Private repositories use the account's Actions minutes, and Windows jobs count double. One CI run is
-  one firmware job, four mcp jobs (two of them on Windows) and docs-lint.
+The repository is public at https://github.com/mikljohansson/fnirsi-1013d-mcp, with remote `origin`.
+It was created and published on 2026-10-18. Every push to main runs CI, and each commit gets its own
+run. To start a run by hand, watch it and see a failing step:
 
 ```
-gh auth status
-gh repo create mikljohansson/fnirsi-1013d-mcp --private \
-  --description "Open firmware, FPGA and MCP server for the FNIRSI 1013D oscilloscope" \
-  --source . --remote origin
-git push -u origin main                       # the push itself starts a CI run (on: push to main)
-gh run list --workflow ci.yml --limit 1       # first run, started by the push
+gh workflow run ci.yml --ref main
 gh run watch "$(gh run list --workflow ci.yml --limit 1 --json databaseId -q '.[0].databaseId')" --exit-status
-gh workflow run ci.yml --ref main             # second run by workflow_dispatch: shows the cache hits
-gh run watch "$(gh run list --workflow ci.yml --event workflow_dispatch --limit 1 --json databaseId -q '.[0].databaseId')" --exit-status
-gh api repos/mikljohansson/fnirsi-1013d-mcp/actions/permissions/workflow
+gh run view <id> --log-failed
 ```
 
-`gh workflow run` works only once `ci.yml` is on the default branch, which the push takes care of. If
-`gh run list` is empty right after the push, wait a few seconds and run it again. When a run fails, use
-`gh run view <id> --log-failed` to see the failing step.
+The default `GITHUB_TOKEN` permission of the repository is read
+(`gh api repos/mikljohansson/fnirsi-1013d-mcp/actions/permissions/workflow`). That is intended. The
+release job requests `contents: write` in `release.yml`, so no repository setting needs changing.
 
-Before making the repository public, review its contents once more. That includes the vendored
-`research/tools/vendor/capstone/lib/capstone.dll`, a third-party binary of about 7 MB.
+The repository contains a vendored third-party binary,
+`research/tools/vendor/capstone/lib/capstone.dll`, of about 7 MB. Check its licence notice.
 
-## 7. Checklist after the first runs on GitHub
+## 7. Checklist from the first runs on GitHub (2026-10-18)
 
-The workflows were validated locally with PyYAML and actionlint 1.7.7 (with shellcheck). The composite
-action's steps were also run in a fresh clone in WSL Ubuntu 24.04. Tick each item once it has been seen
-on GitHub.
+Runs on main:
+- 39136819132, the first push run:
+  https://github.com/mikljohansson/fnirsi-1013d-mcp/actions/runs/39136819132
+- 39136866307, the second push run:
+  https://github.com/mikljohansson/fnirsi-1013d-mcp/actions/runs/39136866307
+- 39137812868, a workflow_dispatch run after the action update:
+  https://github.com/mikljohansson/fnirsi-1013d-mcp/actions/runs/39137812868
 
-After the push run and the workflow_dispatch run:
+- [x] apt on ubuntu-24.04 installs `libnewlib-arm-none-eabi` 4.4.0.20231231-2 with `gcc-arm-none-eabi`
+      13.2.1. `make` links.
+- [x] The GCC 10.3.1 `.deb`s download over https and pass their pinned sha256 values. This happened on
+      the first run, on a cache miss.
+- [x] The second and later runs restore `gcc10-Linux-...` and `atlan-v1.00o5-...` from the cache. The
+      reference step prints "nothing to download". `make check-reference` prints IDENTICAL on every run.
+- [x] The mcp tests pass on windows-latest with Python 3.12 and 3.13. The first run had one flaky
+      failure on ubuntu with Python 3.13, in `test_set_acq_state_during_a_pending_wait_aborts_it`. Its
+      cause was a one-shot cancel callback. `Transport.deferred` resent the WAIT after the abort, and
+      the device answered the resend with OK. The fix latches the cancel. It landed in 4f17414, and
+      later runs pass.
 
-- [ ] apt on ubuntu-24.04 installs `libnewlib-arm-none-eabi` together with `gcc-arm-none-eabi`. In the
-      firmware job, "Install arm-none-eabi toolchain" prints `13.2.1`, and `make` links.
-- [ ] Runners can reach the jammy `.deb` URLs in `fetch_gcc10.sh` (https://archive.ubuntu.com), and
-      the pinned sha256 values match. Look for "Fetch Atlan's GCC 10.3.1" on the first run.
-- [ ] The second run, from workflow_dispatch, reports cache hits for `gcc10-Linux-...` and
-      `atlan-v1.00o5-...`. It skips the GCC 10 fetch and prints "nothing to download" for the reference files.
-- [ ] The mcp tests pass on windows-latest with Python 3.13. The local runs used Windows with 3.12 and
-      WSL with 3.12.
+Found and fixed on the first day:
+- The v4 actions ran on deprecated Node 20. CI now uses Node 24 majors (cd422b9).
+- ubuntu-latest moves to Ubuntu 26 from 2026-10-19, so the mcp Linux runner is pinned to ubuntu-24.04
+  (cd422b9).
+- The concurrency group used to be per ref. With several pushes in a row, a newer pending run replaced
+  an older one, so some commits got no CI. Pushes now have one group per commit.
 
 After the first tag, `v0.3.0`:
 
-- [ ] `release.yml` downloads the `firmware-image` artifact that was uploaded inside the called `ci.yml`.
-- [ ] `gh release create` succeeds with the default `GITHUB_TOKEN`. The publish job requests
-      `contents: write` itself. If the organisation or repository policy caps tokens at read, the last
-      `gh api` command above shows it, and "Settings > Actions > General > Workflow permissions" must
-      allow write.
-
-Record the outcome, with the run URLs, in `docs/hardware-status.md` or the coordinating session's notes.
+- [ ] `release.yml` downloads the `firmware-image` artifact that was uploaded inside the called
+      `ci.yml`. The artifact exists on every CI run, about 225 KB zipped.
+- [ ] `gh release create` succeeds with the job-level `contents: write` while the repository default
+      is read.
