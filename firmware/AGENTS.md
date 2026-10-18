@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.1.7 (protocol 1.2). Read `CLAUDE.md` (repo root) first, then
+State on 2026-10-18, fw 0.2.0 (protocol 1.3, shared control), built and host-tested, not yet benched. Read `CLAUDE.md` (repo root) first, then
 this file. For details, this file links to `firmware/README.md` (build, SD layout, FEL, memory budget, bring-up
 checklist), `docs/protocol.md` (the spec; section 14 lists every deviation from it) and
 `docs/plans/firmware-usb-protocol.md` (the original plan). It does not repeat them.
@@ -11,12 +11,14 @@ checklist), `docs/protocol.md` (the spec; section 14 lists every deviation from 
 firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (PC_PROTOCOL)
   pc_protocol.c/.h         frame layer: 16-byte header, CRC-16/CCITT-FALSE + CRC-32, parser with 100 ms
                            timeout and resync replay queue, ASCII probe lines. Pure C, no globals, host-buildable
-  pc_cmds.c/.h             session: dispatch table, all handlers, LOCAL/REMOTE + acquisition state machines,
+  pc_cmds.c/.h             session: dispatch table, all handlers, shared control with the UI (settings_seq,
+                           capture records, READ_RAW hold, MCP indicator), host single capture state machine,
                            duplicate cache, deferred WAIT, link counters. Hardware only via pc_hal.h. Host-buildable
   pc_hal.h                 the HAL interface (front end, timebase, trigger, generator, FPGA acquisition, trace,
-                           UI ownership, transport, FEL)
-  pc_hal_scope.c           HAL on the scope (scopesettings/fpgasettings, fpga_control.c, display), the static
-                           pc_session, the glue called from 1.00o5 (pc_glue_*), ENTER_FEL jump
+                           shared UI state + fingerprint + indicator, transport, FEL)
+  pc_hal_scope.c           HAL on the scope: writes go through the UI's own apply functions and redraw what changed
+                           (drawing state saved/restored), the static pc_session, the glue called from 1.00o5
+                           (pc_glue_*), ENTER_FEL jump
   pc_transport.c/.h        USB CDC transport: 2 KiB RX ring + NAK back-pressure, 66,580 B TX staging + pump,
                            ZLP, link events, counters, FIFO layout constants (PC_FIFO_MAP)
   pc_rx_ring.h             RX ring copies (two-segment in/out) and the one-FIFO-read-per-packet store. Header only,
@@ -29,9 +31,11 @@ firmware/reference/        Atlan's v1.00o5 binaries (not committed)
 docs/protocol-vectors.json shared frame vectors; the MCP agent merges entries with "source": "host" into it
 ```
 
-1.00o5 files touched (all under `#if PC_PROTOCOL`): `fnirsi_1013d_scope.c` (init + main loop), `scope_functions.c`
-(12 spin-loop BUSY polls, UI capture counter), `touchpanel.c` (BUSY poll in `tp_i2c_read_status`),
-`fpga_control.c` (BUSY poll in the 0x05 wait), `power_and_battery.c` (snapshot restore before the power-off save),
+1.00o5 files touched (all under `#if PC_PROTOCOL` or hook macros that are empty without it): `fnirsi_1013d_scope.c`
+(init + main loop: MAIN poll, indicator, then the UI pass), `scope_functions.c` (12 spin-loop BUSY polls; in
+`scope_acquire_trace_data` the arm gate PC_UI_ARM_ALLOWED, PC_UI_CAPTURE_ADDR after the 0x14 read, PC_UI_CAPTURE_DONE),
+`touchpanel.c` (BUSY poll in `tp_i2c_read_status`), `fpga_control.c` (BUSY poll in the 0x05 wait,
+PC_UI_CAPTURE_START at the end of `fpga_do_conversion`), `power_and_battery.c` (PC_POWER_OFF, empty since 0.2.0),
 `timer.c` (1 ms ISR poll), `usb_interface.c`, `cdc_class.c/.h` (transport hooks, FIFO map, USB identity),
 `variables.h` (trace buffers rounded up to 4096 words). List with reasons: README section 5.
 
@@ -96,7 +100,7 @@ the screen during tests (menus are modal and defer commands). The power-off ISR 
   saves/restores EPIND (`pc_irq_save`). USB ISR paths set EPIND explicitly; IRQs do not nest.
 - 1.00o5's bus-reset handler flushes CSRs with EPIND = 0 (not EP2); `pc_usb_isr_link` flushes EP2 itself.
 - SOF interrupt is not enabled in protocol builds.
-- DTR: pyserial asserts DTR on open. DTR 1->0 releases REMOTE (unless IGNORE_DTR) and flushes TX; DTR 0->1 flushes
+- DTR: pyserial asserts DTR on open. DTR 1->0 flushes TX (1.2 also released REMOTE); DTR 0->1 flushes
   a leftover frame. Windows usbser sends GET_LINE_CODING when the app calls SetCommState (pyserial reconfigure),
   also mid-transfer. Windows-side reads of 20-33 KiB stalled in the host stack (fixed in mcp/); Linux cdc_acm
   reads every size up to 64 KiB.
@@ -106,28 +110,43 @@ the screen during tests (menus are modal and defer commands). The power-off ISR 
 
 | context | where | may touch | answers |
 |---|---|---|---|
-| ISR (`PC_CTX_ISR`) | timer0 IRQ, every 1 ms | transport, session reads | PING, GET_INFO, GET_STATUS, GET_BATTERY, GET_LINK_STATS, GET_BAD_FRAME, `#VER`, `#RESET`, error replies; never E_BUSY |
+| ISR (`PC_CTX_ISR`) | timer0 IRQ, every 1 ms | transport, session reads | PING, GET_INFO, GET_STATUS, SET_REMOTE (no-op), GET_BATTERY, GET_LINK_STATS, GET_BAD_FRAME, GET_CAPTURE_INFO, `#VER`, `#RESET`, error replies; never E_BUSY |
 | BUSY (`PC_CTX_BUSY`) | touch-panel scans, UI spin loops, 0x05 wait | transport, session | same set; others E_BUSY once no MAIN poll for 250 ms (UI modal) |
-| MAIN (`PC_CTX_MAIN`) | top of the main loop | everything (FPGA, UI, display) | all commands, deferred WAIT completion, link events, watchdog, ENTER_FEL |
+| MAIN (`PC_CTX_MAIN`) | top of the main loop, between UI passes | everything (FPGA, UI, display) | all commands, deferred WAIT completion, link events, settings tracking, host capture polling, ENTER_FEL |
 
-Guard: `s->in_poll`. A poll returns at once if another is running (ISR skips are counted); `pc_remote_service`
-holds it too. Everything not in the safe set (`F_BUSY` flag in the dispatch table) stays queued as `pending_ev`
+Guard: `s->in_poll`. A poll returns at once if another is running (ISR skips are counted); `pc_ui_service` and the
+UI capture hooks hold it too. Everything not in the safe set (`F_BUSY` flag in the dispatch table) stays queued as `pending_ev`
 for MAIN. One response in flight at a time (TX staging buffer); one further event is parsed and held, so `#RESET`
-still works. In REMOTE the main loop only polls (+ banner touch scan every 100 ms, battery every 1 s): pass_ms ~0.
+still works, except behind a held READ_RAW (section 6). Every non-ISR command waits for the next UI pass (35-75 ms).
 
-## 6. LOCAL / REMOTE
+## 6. Shared control (protocol 1.3, fw 0.2.0)
 
-Protocol section 6. SET_REMOTE acquire (MAIN only, refused with E_BUSY when the UI is modal): memcpy snapshot of
-scopesettings + fpgasettings, red banner in the top bar (x 150-690). Exit reasons: release, banner tap, watchdog,
-DTR drop, USB reset/suspend/disconnect, `#LOCAL`. Exit restores the snapshot unless KEEP_SETTINGS, re-pushes all
-settings with main()'s boot sequence, redraws (`pc_hal_remote_exit`). Power-off ISR restores the snapshot before
-saving. LOCAL never touches the FPGA (GET_* read UI state; READ_TRACE copies the UI buffer).
+Plan: `docs/plans/collaborative-mode.md`; wire format agreed with the MCP agent (mcp-gen2), spec in protocol section
+14 rows 30-39. No LOCAL/REMOTE, no lock, no banner, no snapshot, no watchdog. The UI loop always runs.
+- Host SET_* call the UI apply code in `pc_hal_scope.c` (`scope_set_timebase`, fpga_set_*, the trigger level as a
+  marker position found by search, rounded UI copy of SET_GEN) and redraw the touched top-bar item. Drawing saves
+  and restores `displaydata` (the UI's current buffer/colour/font).
+- `settings_seq`: fingerprint (CRC of the capture-relevant fields, `pc_hal_settings_fingerprint`) compared at every
+  poll, UI arm and UI DONE. Captures latch their settings at arm (`pc_capture`); a change before DONE makes
+  capture_settings_seq 0xFFFFFFFF.
+- ARM = host single: `pc_hal_ui_set_run(0)` (screen shows STOP), then the 1.2 ARM sequence; DONE builds the trace
+  buffers for the enabled channels, which the UI redraws. Aborted when the UI arms (start hook or runstate seen
+  set). SET_ACQ_STATE 0x0208 = RUN/STOP button. GET_CAPTURE_INFO 0x0209 = latest capture's settings.
+- READ_RAW needs `ring_valid` (no arm since the capture's DONE). In RUN it returns PC_HOLD (request stays queued,
+  re-run every MAIN poll), the UI arm gate is closed, at most PC_HOLD_MS = 1000 ms, then E_BUSY detail 1. While held,
+  the parser takes no new event (so `#RESET` comes after the hold); link reset / DTR up drop the hold. The done hook
+  counts a conversion once (`ui_started`), because 1.00o5 re-processes a finished conversion every pass while the
+  gate holds (conversion_done stays set).
+- MCP chip (`pc_ui_service`, `pc_hal_indicator`): x 697 y 22, 32 x 18, over the version text; on while DTR or a frame
+  in the last 2 s, bright 100 ms after each response, redrawn every 500 ms.
+- Unverified on the bench (acceptance list in README section 5, step 6): screen redraws after host SET_*, marker
+  search for the trigger level on every range, the UI showing a host capture, the chip position and colours.
 
 ## 7. FPGA layer and capture geometry
 
 Variant table from the 0x06 word in `pc_variant_from_version` (0x1432 stock: ring 4096, fixed 1500/3000;
 0x1532 AL3: ring 8192, max 16382; 0x1632 EF2 / 0x1732 EP4: ring 6144, max 12286; unknown: caps 0). The owner's
-unit runs AL3 0x1532. REMOTE ARM uses its own sequence (`pc_hal_arm`: 0x0F=0, 0x1A=mode, 0x01=1, bounded 0x05
+unit runs AL3 0x1532. Host ARM uses its own sequence (`pc_hal_arm`: 0x0F=0, 0x1A=mode, 0x01=1, bounded 0x05
 wait, 0x0B/0x0C/0x0E in reset, 0x01=0); DONE latches 0x14 and writes 0x0F=1; capture start =
 (trigger_addr - pretrigger_words) mod ring (the UI keeps 1.00o5's `T + 7441` math). READ_RAW reads per core with
 one dummy strobe after each 0x1F write, splits at the ring end, `read_lag` = 0. READ_TRACE runs the 1.00o5
@@ -142,10 +161,15 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
 
 ## 8. Known issues (numbers from the bench, 2026-10-18)
 
-- Request corruption: root cause fixed in 0.1.6 (RX ring-wrap split FIFO read, see section 4), confirmed by the
-  lead's 0.1.5 census (2000 PINGs: 77 E_BAD_CRC + 9 no response, every diff starting exactly at a 2 KiB boundary of
-  rx_bytes). 0.1.6 was never benched; 0.1.7 adds pc_rx_ring.h + the all-phase host test. Acceptance census on 0.1.7
-  pending. History: fw 0.1.3, Windows, no retries, idle scope: PING x1000 LOCAL 42
+- Request corruption: fixed in 0.1.6 (RX ring-wrap split FIFO read, see section 4) and confirmed on the bench: 0.1.6
+  census 2000 PINGs 0 E_BAD_CRC 0 no response, 100 x 64 KiB 0 failed, hdr_crc 0, payload_crc 0. The 0.1.5 census had
+  77 E_BAD_CRC + 9 no response, every diff starting exactly at a 2 KiB boundary of rx_bytes. 0.1.7 adds
+  pc_rx_ring.h + the all-phase host test (no behaviour change). PC_FIFO_MAP=1 can go.
+- Startup: after a FEL load GET_STATUS showed no completed main-loop pass ~1 s after enumeration and the first MAIN
+  command waited ~5 s (lead, 0.1.6). Cause not found: nothing slow runs between usb_device_init and the loop, so the
+  first UI pass is slow (first conversion's 0x05 wait or the touch scan suspected). 0.2.0 reports `ui_busy` = 2
+  STARTING until the second MAIN poll and GET_LINK_STATS counters 27/28 (init -> first poll, first pass ms): read them
+  on the bench to locate it. History: fw 0.1.3, Windows, no retries, idle scope: PING x1000 LOCAL 42
   E_BAD_CRC + 4 no response, REMOTE 40 + 5; 64 KiB x100: 1 (LOCAL) / 8 (REMOTE) no response. 0.1.2 (OUT FIFO at
   0) had 0 E_BAD_CRC but ~2% no response. Responses are always clean. 0.1.5 adds GET_BAD_FRAME, the RX sweep,
   GET_LINK_STATS and PC_FIFO_MAP=1. Next step: `bench_link.py COM10 --census 2000` on map 0 and map 1, read the
@@ -154,7 +178,7 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
   PINGs + 100 x 64 KiB. Ideas not yet tried: unload EP2 OUT with 32-bit reads only (pad the ring position to 4),
   read RXCOUNT twice, check RXCSR DataError/Overrun on bad packets, try the FIFO on Linux to separate host effects.
 - pass_max_ms showed 1515 after boot in 0.1.2: that was the boot interval, excluded since 0.1.4.
-- Latency: PING ~1 ms (ISR poll), LOCAL non-safe commands wait one UI pass (35-75 ms), REMOTE ~0.2-0.6 ms.
+- Latency: PING ~1 ms (ISR poll); non-safe commands wait one UI pass (35-75 ms; 1.2 REMOTE was ~0.2-0.6 ms).
 - Upstream: 32 GCC 13 warnings (unused variables, implicit `usb_CDC_in_ep_callback` in menu.c), menu debug helpers
   print nothing in protocol builds, 1.00o5 UI pointer math off by one in the wrapped case (left as is for LOCAL).
 - ENTER_FEL works on the bench (hands-free loop proven). It does not save settings.
@@ -173,11 +197,10 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
 
 ## 10. TODO, in priority order
 
-1. Run the acceptance census on 0.1.7 (`bench_link.py COM10 --census 2000`: 0 E_BAD_CRC, 0 no response in
-   2000 PINGs + 100 x 64 KiB, GET_BAD_FRAME count 0). If it passes, drop PC_FIFO_MAP=1.
+1. Bench the shared-control acceptance on 0.2.0 (README section 5 step 6) and read the startup counters.
 2. SD_INFO / SD_READ_SECTORS / SD_WRITE_SECTORS (owner's ask: persist a FEL-loaded image to sector 750 without
    removing the card). Design agreed with the lead, not started:
-   - REMOTE only, hardware-changing tier; MAIN context (SD access is not reentrant; the power-off ISR also writes
+   - hardware-changing tier (1.3: no REMOTE; refuse while a capture runs or require STOP); MAIN context (SD access is not reentrant; the power-off ISR also writes
      SD, so mask the power interrupt or check `viewactive` around the write).
    - Allowed range: sectors 16..2047 and below the first partition start read from the MBR at runtime; refuse
      708-710 (calibration, settings, display/boot byte) unless an explicit flag targets them.

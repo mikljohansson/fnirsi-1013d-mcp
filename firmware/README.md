@@ -339,20 +339,24 @@ Files:
 | file | role | host build |
 |---|---|---|
 | `scope/pc_protocol.c/.h` | frame parser and encoder, CRCs, ASCII probe lines | yes |
-| `scope/pc_cmds.c/.h` | dispatcher, handlers, LOCAL/REMOTE and acquisition state machines | yes, via `pc_hal.h` |
+| `scope/pc_cmds.c/.h` | dispatcher, handlers, shared control with the UI (protocol 1.3), host single capture | yes, via `pc_hal.h` |
 | `scope/pc_hal.h` | the only interface `pc_cmds.c` uses to reach the scope | |
 | `scope/pc_hal_scope.c` | `pc_hal.h` on the 1.00o5 settings and `fpga_control.c`, firmware glue | no |
 | `scope/pc_transport.c/.h` | USB RX ring, TX pump, ZLP, link events | no |
+| `scope/pc_rx_ring.h` | RX ring copies and the one-FIFO-read-per-packet store | yes (`test_rx_ring`) |
 | `scope/pc_hooks.h` | the hooks in the 1.00o5 files, empty with `PC_PROTOCOL=0` | |
-| `scope/host_tests/` | `test_protocol`, `test_session` (mock FPGA), `check_vectors.py` | |
+| `scope/host_tests/` | `test_protocol`, `test_rx_ring`, `test_session` (mock FPGA and UI), `check_vectors.py` | |
 | `../docs/protocol-vectors.json` | shared frame vectors (`gen_vectors.py`; the MCP server merges its own) | |
 
 Hooks in the 1.00o5 code, all under `#if PC_PROTOCOL`:
 
 - `fnirsi_1013d_scope.c`: `pc_glue_init()` before `usb_device_init()`. The main loop calls
-  `pc_poll(MAIN)` first and skips the UI loop while the host owns the scope.
-- `scope_functions.c`: a BUSY poll in the 12 calibration and auto-setup conversion spin loops, and
-  a capture counter after the UI readout.
+  `pc_poll(MAIN)` first, then the MCP indicator service, then the normal UI pass (protocol 1.3 shares
+  control: the UI loop always runs).
+- `scope_functions.c`: a BUSY poll in the 12 calibration and auto-setup conversion spin loops. In
+  `scope_acquire_trace_data`: the arm condition gains `PC_UI_ARM_ALLOWED()` (false while a READ_RAW
+  waits for the capture just finished), the raw 0x14 word is reported (`PC_UI_CAPTURE_ADDR`), and the
+  finished readout is counted (`PC_UI_CAPTURE_DONE`).
 - `timer.c`: a poll from the 1 ms timer interrupt. It answers PING, GET_INFO, GET_STATUS,
   GET_BATTERY, `#VER` and `#RESET`, and pumps TX, without waiting for the UI loop. Everything else
   stays on the main loop. It never runs while a main-loop or BUSY poll, or the REMOTE service, is
@@ -360,8 +364,10 @@ Hooks in the 1.00o5 code, all under `#if PC_PROTOCOL`:
 - `touchpanel.c`: a BUSY poll in `tp_i2c_read_status()`. Every modal menu loop and the MSC screen
   scan the touch panel, so the link answers PING, GET_INFO, GET_STATUS and GET_BATTERY there.
 - `fpga_control.c`: a BUSY poll every 65,536 polls of the 0x05 ready wait. The UI wait stays
-  unbounded, so LOCAL acquisition behaves exactly as 1.00o5.
-- `power_and_battery.c`: the power-off ISR restores the UI snapshot before it saves settings.
+  unbounded, so UI acquisition behaves exactly as 1.00o5. `fpga_do_conversion` ends with
+  `PC_UI_CAPTURE_START()`: the ring no longer holds the last capture, and a host single is aborted.
+- `power_and_battery.c`: the `PC_POWER_OFF()` hook is empty since 0.2.0. Host changes are live
+  settings and are saved like the user's.
 - `usb_interface.c`, `cdc_class.c`: the transport hooks, an endpoint FIFO layout that fits the
   F1C100s's 2 KiB USB FIFO RAM and keeps clear of the fixed EP0 FIFO at 0-63 (`pc_transport.h`; 1.00o5
   put the CDC OUT FIFO on EP0 and the IN FIFO at byte 4096), and the new USB identity
@@ -380,7 +386,7 @@ of 5879cf2. They move with code size.
 |---|---|---|
 | `pc_tx_stage`, TX staging buffer: 16 + 66,560 + 4 bytes, rounded to 4 | 66,580 B | 0x8057F50C |
 | `pc_rx_ring`, RX ring | 2,048 B | 0x8057ED04 |
-| `pc_shadow_scope` + `pc_shadow_fpga`, UI snapshot | 2,740 + 28 B | 0x8058F924 |
+| `pc_shadow_scope` + `pc_shadow_fpga`, UI snapshot | removed in 0.2.0 | |
 | `pc_sess`, parser, duplicate cache, state | 1,676 B | 0x805903F4 |
 | CRC-32 table, dispatch table (`.data`) | 1,024 + 312 B | in the image |
 | `usb_tx` 32 KiB text ring | removed | |
@@ -420,14 +426,13 @@ automatically, and reopening the port (DTR 0 -> 1) discards an old frame.
 
 Round trips: PING, GET_INFO, GET_STATUS, GET_BATTERY, `#VER` and `#RESET` are answered from the
 1 ms timer interrupt, so they take about 1 ms plus USB time in any state. Commands that touch the
-FPGA, the UI settings or the display run on the main loop. In REMOTE that loop does nothing but
-poll (plus a touch-panel scan every 100 ms), so READ_RAW, ARM, WAIT and SET_* do not wait for a UI
-pass. In LOCAL the read-only GET_CHANNEL / TIMEBASE / TRIGGER / CAL / GEN and READ_TRACE wait for
-the next UI pass. GET_STATUS (protocol 1.1) reports that pass time at offset 28 (last) and 30 (max
-since the previous GET_STATUS).
+FPGA, the UI settings or the display run on the main loop, between UI passes, so they wait for the
+next pass (35-75 ms in RUN). GET_CAPTURE_INFO is answered from the timer interrupt too. GET_STATUS
+(protocol 1.1) reports that pass time at offset 28 (last) and 30 (max since the previous GET_STATUS).
+In RUN a READ_RAW waits up to 1 s for the UI capture in flight (protocol section 14, row 35).
 
-Link counters: GET_LINK_STATS (0x0007, protocol 1.2) returns 27 u32 counters since boot (transport,
-parser and dispatch; list in `docs/protocol.md` section 14). `host_tests/bench_link.py` prints them.
+Link counters: GET_LINK_STATS (0x0007, protocol 1.2) returns 29 u32 counters since boot (transport,
+parser, dispatch and, since 0.2.0, the two startup intervals; list in `docs/protocol.md` section 14). `host_tests/bench_link.py` prints them.
 `rx_swept` counts request packets whose USB interrupt never arrived and that a poll picked up
 instead; `link_resets` counts bus reset / suspend / disconnect events (each drops buffered data).
 
@@ -440,7 +445,7 @@ save stores "USB CH340 mode" = on.
 
 The owner's 25Q80 now holds Atlan's AL3 bitstream (0x1532, variant 2; written and read back
 2026-10-18, power-cycle check of the diagnostics screen pending). The expected values below are
-for 0x1532. The stock bitstream (0x1432, variant 1) gives `fpga=0x1432`, ring 4096, caps 0x1C00,
+for 0x1532. The stock bitstream (0x1432, variant 1) gives `fpga=0x1432`, ring 4096, caps 0x3C00,
 and E_UNSUPPORTED for the generator and for geometry other than 1500/3000. The owner also saw
 "Cannot recognize device" from the updater's MSC mode on Windows (cable suspected): rule that out
 with a known-good cable before step 2.
@@ -450,7 +455,7 @@ make gcc10                                             # conservative compiler f
 sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
 ```
 
-1. **No host.** The scope boots to the normal UI with no banner. Touch, menus, run/stop and
+1. **No host.** The scope boots to the normal UI with no MCP chip. Touch, menus, run/stop and
    calibration work. The USB menu still switches to MSC, the PC sees the SD card, and leaving the
    menu returns to CDC.
 2. **Enumeration.** Windows Device Manager shows a COM port `USB\VID_1209&PID_0001` with usbser.sys
@@ -458,18 +463,22 @@ sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
    ModemManager ignore rule from plan section 10. The device is high-speed only: use a USB 2.0 HS
    port or hub, not a full-speed VM pass-through.
 3. **Text probe.** In a terminal, `#VER` + Enter must answer
-   `#OK,FNIRSI-1013D-AI,fw=0.1.6,proto=1.2,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
-4. **Identify, LOCAL.** PING with random 0..492 byte payloads, 10,000 times. GET_INFO must report
-   variant 2, ring 8192, max total 16382, caps 0x1C03 (PROG_TRIGGER_POS, GENERATOR_DDS, ENTER_FEL and
-   the two UNVERIFIED bits; `PC_DEBUG=1` adds 0x120). Run GET_STATUS, GET_BATTERY,
-   and GET_CHANNEL / TIMEBASE / TRIGGER / CAL, and compare with the screen. The UI keeps running.
-   Open a menu: GET_STATUS must answer with `ui_busy` = 1, and SET_REMOTE must give E_BUSY.
+   `#OK,FNIRSI-1013D-AI,fw=0.2.0,proto=1.3,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
+4. **Identify.** PING with random 0..492 byte payloads, 10,000 times. GET_INFO must report
+   variant 2, ring 8192, max total 16382, caps 0x3C03 (PROG_TRIGGER_POS, GENERATOR_DDS, ENTER_FEL,
+   SHARED_MODE and the two UNVERIFIED bits; `PC_DEBUG=1` adds 0x120). Run GET_STATUS, GET_BATTERY,
+   and GET_CHANNEL / TIMEBASE / TRIGGER / CAL, and compare with the screen. The UI keeps running, and
+   the green MCP chip shows at the top right while the port is open. Open a menu: GET_STATUS must
+   answer with `ui_busy` = 1, and SET_CHANNEL must give E_BUSY.
 5. **Link tests T1, T2.** TEST_PATTERN lengths 492, 495, 496, 1008 and 4076, 1000 times each,
    with no timeouts (ZLP). Then 65,536 bytes x 200: record MB/s in `docs/hardware-status.md`.
-6. **REMOTE without hardware changes.** SET_REMOTE acquire must show the red banner. Then try every
-   exit: release, tap on the banner, watchdog (5 s, no traffic), closing the port (DTR), cable
-   pull, `#LOCAL`. Each must restore the UI with the user's settings. Power off while REMOTE, then
-   boot again (stock or this image): the settings must be the user's.
+6. **Shared control (protocol 1.3, plan acceptance).** Change the timebase on the touch screen:
+   GET_TIMEBASE shows it within one UI pass, and GET_STATUS `settings_seq` went up. SET_CHANNEL a
+   range from the host: the screen shows the new V/div and the relay clicks once. In RUN, READ_TRACE
+   returns the displayed trace. ARM + WAIT: the capture appears on screen and the run chip shows
+   STOP; RUN resumes from the screen and from SET_ACQ_STATE 1. Change the range during an
+   averaged_capture run: the tool reports the restart. The MCP chip goes away 2 s after the port is
+   closed. Power off and boot again: the last settings, from either side, are kept.
 7. **Readout with the UI's geometry.** Leave the trigger and memory settings as the UI had them.
    Use auto trigger mode with a signal on CH1. Run ARM, WAIT, READ_RAW (all cores, `addr_mode` 1,
    `total_words` words): repeated reads of one capture must be byte-identical. Compare READ_TRACE
@@ -477,8 +486,8 @@ sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
    (0x18 after an auto timeout).
 8. **Hardware-changing commands, front end.** SET_CHANNEL across all ranges and both couplings:
    relays click, and the read-back equals the request. Then the offset, SET_TIMEBASE (index and
-   raw), and SET_TRIGGER including geometry up to 16,382 samples. Release and check that the UI
-   shows the user's settings again. Run T8 with a known DC voltage on each range.
+   raw), and SET_TRIGGER including geometry up to 16,382 samples. The screen follows every change.
+   Run T8 with a known DC voltage on each range.
 9. **Hardware-changing commands, output.** SET_GEN drives the calibration pin: check it with a
    probe first, then loop it back to CH1 (`self_test_loopback`). Run T4 (interleave order) and T7
    (FORCE, `PC_DEBUG=1`). T10 (stock trigger core) needs the stock bitstream restored from
