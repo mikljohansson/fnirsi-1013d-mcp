@@ -1406,6 +1406,55 @@ static void test_ext_trigger(void)
   T_EQ(r.h.status, 0);
 }
 
+//A host opens the port (DTR 0 -> 1) and sends a main-loop request at once. The timer poll parses it before the
+//main loop takes the DTR event: the request must still be answered (fw 0.2.10 and older dropped it: bench 0.2.8/0.2.9,
+//the first TEST_PATTERN after a FEL load timed out)
+static void test_dtr_up_keeps_request(void)
+{
+  uint8_t p[8];
+  resp_t r;
+  uint16_t seq;
+
+  setup(0x1532);
+  memset(p, 0, 8); pc_put_u32(p, 492);
+
+  mock_clear_resps();
+  mock.link_events = PC_LINK_DTR_UP;
+  seq = next_seq++;
+  push_frame(PC_CMD_TEST_PATTERN, seq, p, 8);
+  pc_poll(&S, PC_CTX_ISR);                                       //parsed, held for the main loop
+  T_EQ(mock_nresps, 0);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0); T_EQ(r.len, 492);
+
+  //The same with the DTR edge arriving while the request is already pending
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_TEST_PATTERN, seq, p, 8);
+  pc_poll(&S, PC_CTX_ISR);
+  mock.link_events = PC_LINK_DTR_UP;
+  pc_poll(&S, PC_CTX_MAIN);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0);
+
+  //A partial frame from before the DTR edge is still discarded: the next complete frame is parsed cleanly
+  {
+    uint8_t f[64];
+    uint32_t n;
+
+    mock_clear_resps();
+    n = pc_frame_finish(f, PC_CMD_PING, 0x7000, 0, 0, 0);
+    mock_rx_push(f, 10);                                         //10 of 16 header bytes, then the port is reopened
+    pc_poll(&S, PC_CTX_ISR);
+    mock.link_events = PC_LINK_DTR_UP;
+    seq = next_seq++;
+    push_frame(PC_CMD_PING, seq, "q", 1);
+    pc_poll(&S, PC_CTX_ISR);
+    pc_poll(&S, PC_CTX_ISR);
+    T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0);
+    (void)n;
+  }
+}
+
 static void test_fel_reset_stall(void)
 {
   uint8_t p[4];
@@ -1537,6 +1586,7 @@ int main(void)
   test_indicator();
   test_sd();
   test_ext_trigger();
+  test_dtr_up_keeps_request();
   test_fel_reset_stall();
   mock_clear_resps();
   return t_report("test_session");

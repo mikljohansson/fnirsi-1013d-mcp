@@ -2212,10 +2212,14 @@ static void pc_link_service(pc_session *s)
     pc_drop_deferred(s);
   }
 
+  //A new connection: drop partial input of the old one, but never a complete request that is waiting for the main
+  //loop. The host sends right after opening the port, and the timer poll may parse that request before the DTR event
+  //is taken (fw 0.1.1-0.2.10 dropped it unanswered: bench, first TEST_PATTERN after a FEL load timed out)
   if(ev & PC_LINK_DTR_UP)
   {
-    pc_parser_reset(&s->parser);
-    s->pending_ev  = PC_EV_NONE;
+    if(s->pending_ev == PC_EV_NONE)
+      pc_parser_reset(&s->parser);
+
     s->cache_valid = 0;
   }
 }
@@ -2261,6 +2265,10 @@ void pc_poll(pc_session *s, int ctx)
     s->tx_aborts++;
   }
 
+  //Link events in every context (session state only), before any new byte is parsed: the DTR edge of a new
+  //connection must be seen before its first request
+  pc_link_service(s);
+
   if(ctx == PC_CTX_MAIN)
   {
     uint32_t pass = now - s->last_main_ms;
@@ -2285,7 +2293,6 @@ void pc_poll(pc_session *s, int ctx)
     s->last_main_ms = now;
     s->ui_busy      = 0;
 
-    pc_link_service(s);
     pc_settings_track(s);
 
     //A held READ_RAW that was dropped (#RESET, link reset) must not keep the UI from arming

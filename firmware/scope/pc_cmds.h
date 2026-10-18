@@ -16,9 +16,9 @@
 
 #ifndef PC_FW_VERSION
 #if PC_FIFO_MAP == 1
-#define PC_FW_VERSION     "0.2.10-m1"   //alternative USB FIFO layout (pc_transport.h)
+#define PC_FW_VERSION     "0.2.11-m1"   //alternative USB FIFO layout (pc_transport.h)
 #else
-#define PC_FW_VERSION     "0.2.10"
+#define PC_FW_VERSION     "0.2.11"
 #endif
 #endif
 

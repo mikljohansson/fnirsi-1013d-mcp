@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.10 (0.2.10: MCP chip drawn as one idempotent blit, acquisition "Roll mode on/off" toggle
+State on 2026-10-18, fw 0.2.11 (0.2.11: a request sent right after the port is opened is no longer dropped; 0.2.10: MCP chip drawn as one idempotent blit, acquisition "Roll mode on/off" toggle
 label; protocol 1.4: shared control, SD sector commands, EXT trigger for FPGA 0x1533
 (protocol section 14 row 41, needs bench with fpga-gen2's bitstream); 0.2.8: generator and trigger menus compacted; 0.2.7: SD_STAGE from the timer poll,
 RX back-pressure counters, our version on screen, chip drawn with the top bar, temperature only with an RTC; 0.2.6:
@@ -206,6 +206,11 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
   poll and the flash tool writes 32 sectors per SD_WRITE: 0.2.7 persist 5.3 s, rx_stalls 0, hdr_crc 0, duplicates 0,
   and the branch counters (GET_LINK_STATS 41-46) never fired. No shipped host flow reaches back-pressure any more.
   Repro idea if it matters again: a host that floods 492-byte PINGs without reading responses, then read 41-46.
+- First request after opening the port (fixed in 0.2.11): the DTR-up link event was taken only in the MAIN poll and
+  reset the parser including a complete pending request; the timer poll had already parsed the host's first
+  main-loop request (TEST_PATTERN after a FEL load, bench 0.2.8/0.2.9), so it vanished without an answer and without
+  a counter. Link events are now taken in every poll context, and DTR-up keeps a pending request. Test:
+  test_dtr_up_keeps_request.
 - Startup (closed 2026-10-18): 1515 ms from session init to the first MAIN poll is the 1.00o5 splash
   (`load_picture("scope.bmp")`); kept by decision, documented in README section 4 ("Boot"). The first pass is 31 ms.
 - USB "Error state" incident (0.2.2, lead): port closed, scope idle ~10 min, then Windows showed the device present but
