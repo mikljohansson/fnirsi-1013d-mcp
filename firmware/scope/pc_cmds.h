@@ -13,7 +13,7 @@
 // Build identity (overridden from the Makefile)
 
 #ifndef PC_FW_VERSION
-#define PC_FW_VERSION     "0.1.0"
+#define PC_FW_VERSION     "0.1.1"
 #endif
 
 #ifndef PC_FW_BUILD
@@ -64,6 +64,13 @@
 
 //Responses cached for duplicate requests (P-4.3)
 #define PC_CACHE_PAYLOAD  256
+
+//A frame in flight that makes no progress for this long is dropped (host gone or stuck), so the device never stays
+//blocked on one response. Same as the host's write timeout (P-3.2).
+#define PC_TX_STALL_MS    2000
+
+//ENTER_FEL magic, 'FEL_' little-endian (P-8.8)
+#define PC_FEL_MAGIC      0x4C45465Fu
 
 //Relay settling time after a range or coupling change (P-8.3)
 #define PC_SETTLE_MS      50
@@ -167,6 +174,13 @@ typedef struct
   //Counters
   uint32_t   responses;
   uint32_t   duplicates;
+  uint32_t   tx_aborts;         //frames dropped by the TX stall watchdog or #RESET
+
+  //Main-loop pass time (interval between MAIN polls), reported in GET_STATUS
+  uint16_t   pass_ms;
+  uint16_t   pass_max_ms;       //maximum since the previous GET_STATUS
+
+  uint8_t    fel_pending;       //ENTER_FEL answered: jump once the response has left
 } pc_session;
 
 //----------------------------------------------------------------------------------------------------------------------------------

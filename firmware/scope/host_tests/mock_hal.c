@@ -309,7 +309,10 @@ void pc_hal_tx_submit(uint32_t len)
   mock.submits++;
 
   if(mock.tx_hold)
-    mock.tx_busy = 1;
+  {
+    mock.tx_busy  = 1;
+    mock.tx_since = mock.now;
+  }
 }
 
 uint32_t pc_hal_rx_read(uint8_t *dst, uint32_t max)
@@ -330,3 +333,8 @@ uint32_t pc_hal_link_take_events(void)
 }
 
 int pc_hal_dtr(void) { return mock.dtr; }
+
+int      pc_hal_tx_pump(void)    { return mock.tx_busy; }
+uint32_t pc_hal_tx_idle_ms(void) { return mock.tx_busy ? (mock.now - mock.tx_since) : 0; }
+void     pc_hal_tx_abort(void)   { mock.tx_busy = 0; mock.tx_aborts++; }
+void     pc_hal_enter_fel(void)  { mock.fel_entries++; }

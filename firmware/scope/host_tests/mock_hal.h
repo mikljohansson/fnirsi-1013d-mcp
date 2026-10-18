@@ -68,6 +68,9 @@ typedef struct
   int      tx_hold;               //1: a submitted frame stays "busy" until mock_tx_release()
   int      tx_busy;
   uint32_t submits;
+  uint32_t tx_since;
+  uint32_t tx_aborts;
+  uint32_t fel_entries;
 } mock_state;
 
 extern mock_state mock;

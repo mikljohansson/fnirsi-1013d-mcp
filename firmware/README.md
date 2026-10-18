@@ -336,7 +336,8 @@ Hooks in the 1.00o5 code, all under `#if PC_PROTOCOL`:
 - `fpga_control.c`: a BUSY poll every 65,536 polls of the 0x05 ready wait. The UI wait stays
   unbounded, so LOCAL acquisition behaves exactly as 1.00o5.
 - `power_and_battery.c`: the power-off ISR restores the UI snapshot before it saves settings.
-- `usb_interface.c`, `cdc_class.c`: the transport hooks and the new USB identity
+- `usb_interface.c`, `cdc_class.c`: the transport hooks, an endpoint FIFO layout that fits the
+  F1C100s's 2 KiB USB FIFO RAM (`pc_transport.h`; 1.00o5 put the CDC TX FIFO at byte 4096), and the new USB identity
   (VID:PID 0x1209:0x0001 pid.codes test PID, product `FNIRSI 1013D`, serial `1013D-0001`). The
   text debug path is gone, so the debug helpers in `menu.c` print nothing. MSC is unchanged.
 - `variables.h`: the trace buffers are rounded up to 4096 words (16,384 bytes per channel).
@@ -368,6 +369,33 @@ The next fixed DDR user above `.bss` is the bootloader's copy of SD sector 710 a
 22.4 MiB above the new end of `.bss`. The image needs 740 SD sectors from sector 750, so it ends
 at sector 1489, well below the FAT partition start at 2048 or later.
 
+### Bench loop without the boot menu (ENTER_FEL)
+
+ENTER_FEL (0x0F01, magic 0x4C45465F) reboots the running scope into the boot ROM's FEL mode. The scope
+answers OK, shows "FEL mode", detaches from USB, and about 0.5 s later the boot ROM enumerates as
+`1f3a:efe8`. DRAM stays initialised, so a new image can be loaded directly:
+
+```
+<host> ENTER_FEL                                      # mcp client / any protocol host
+usbipd attach --wsl --hardware-id 1f3a:efe8           # Windows: hand the FEL device to WSL
+sunxi-fel version                                     # AWUSBFEX soc=00001663(F1C100s)
+sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
+```
+
+Caveats: settings are not saved on the way into FEL. The boot ROM's expectations when entered this
+way are inferred from Atlan's bootloader (SVC mode, IRQs off, SP 0x7C00, high vectors) and from a cold
+FEL boot (USB controller in reset); the first ENTER_FEL on the bench is the test. If the scope hangs
+on the "FEL mode" screen without `1f3a:efe8` appearing, power-cycle and use the boot menu.
+
+Recovery without a power cycle: the text line `#RESET` (Enter) drops a response in flight, a pending
+WAIT and partial input, and answers `#OK`. A response that makes no progress for 2 s is dropped
+automatically, and reopening the port (DTR 0 -> 1) discards an old frame.
+
+GET_STATUS (protocol 1.1) reports the main-loop pass time at offset 28 (last) and 30 (max since the
+previous GET_STATUS). In LOCAL that is the UI loop period, which bounds every round trip except PING,
+GET_INFO, GET_STATUS and GET_BATTERY (those are also answered from the touch-panel scan); in REMOTE
+the loop does nothing but poll.
+
 ### First hardware bring-up checklist
 
 Order is by risk: each step is gated on the previous one. Load over FEL only, as in section 4A:
@@ -377,7 +405,7 @@ save stores "USB CH340 mode" = on.
 
 The owner's 25Q80 now holds Atlan's AL3 bitstream (0x1532, variant 2; written and read back
 2026-10-18, power-cycle check of the diagnostics screen pending). The expected values below are
-for 0x1532. The stock bitstream (0x1432, variant 1) gives `fpga=0x1432`, ring 4096, caps 0x1800,
+for 0x1532. The stock bitstream (0x1432, variant 1) gives `fpga=0x1432`, ring 4096, caps 0x1C00,
 and E_UNSUPPORTED for the generator and for geometry other than 1500/3000. The owner also saw
 "Cannot recognize device" from the updater's MSC mode on Windows (cable suspected): rule that out
 with a known-good cable before step 2.
@@ -395,10 +423,10 @@ sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
    ModemManager ignore rule from plan section 10. The device is high-speed only: use a USB 2.0 HS
    port or hub, not a full-speed VM pass-through.
 3. **Text probe.** In a terminal, `#VER` + Enter must answer
-   `#OK,FNIRSI-1013D-AI,fw=0.1.0,proto=1.0,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
+   `#OK,FNIRSI-1013D-AI,fw=0.1.1,proto=1.1,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
 4. **Identify, LOCAL.** PING with random 0..492 byte payloads, 10,000 times. GET_INFO must report
-   variant 2, ring 8192, max total 16382, caps 0x1803 (PROG_TRIGGER_POS, GENERATOR_DDS and the two
-   UNVERIFIED bits; `PC_DEBUG=1` adds 0x120). Run GET_STATUS, GET_BATTERY,
+   variant 2, ring 8192, max total 16382, caps 0x1C03 (PROG_TRIGGER_POS, GENERATOR_DDS, ENTER_FEL and
+   the two UNVERIFIED bits; `PC_DEBUG=1` adds 0x120). Run GET_STATUS, GET_BATTERY,
    and GET_CHANNEL / TIMEBASE / TRIGGER / CAL, and compare with the screen. The UI keeps running.
    Open a menu: GET_STATUS must answer with `ui_busy` = 1, and SET_REMOTE must give E_BUSY.
 5. **Link tests T1, T2.** TEST_PATTERN lengths 492, 495, 496, 1008 and 4076, 1000 times each,

@@ -153,6 +153,9 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
       return;
   }
 
+  //Reboot into the boot ROM's FEL mode: touches no FPGA, works on every known bitstream          BENCH: plan 11.3 step 1
+  v->caps |= PC_CAP_ENTER_FEL;
+
 #if PC_DEBUG
   v->caps |= PC_CAP_DEBUG_RAW;
 
@@ -257,7 +260,7 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
     wd = (elapsed >= limit) ? 0 : (uint16_t)((limit - elapsed + 999) / 1000);
   }
 
-  memset(p, 0, 28);
+  memset(p, 0, 32);
   p[0] = s->control;
   p[1] = (s->control == PC_REMOTE) ? s->acq_state : PC_ACQ_IDLE;
   p[2] = flags;
@@ -270,7 +273,11 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
   pc_put_u16(p + 20, wd);
   p[22] = level;
   p[23] = s->exit_reason;
-  return 28;
+  //Protocol 1.1 appends the main-loop pass time (interval between main-loop polls), last and maximum since the
+  //previous GET_STATUS, in ms. In LOCAL this is the UI loop period, in REMOTE the poll loop period.
+  pc_put_u16(p + 28, s->pass_ms);
+  pc_put_u16(p + 30, s->pass_max_ms);
+  return 32;
 }
 
 //uV per code x 256 at the BNC with a 1x probe, and the processed code of 0 V x 256 (P-8.5) [U]   BENCH: T8
@@ -476,6 +483,7 @@ static int h_get_status(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
 {
   (void)req; (void)len;
   *rl = pc_status_body(s, resp);
+  s->pass_max_ms = s->pass_ms;                  //max is per GET_STATUS interval
   return PC_OK;
 }
 
@@ -1193,6 +1201,19 @@ static int h_get_cal(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
   return PC_OK;
 }
 
+static int h_enter_fel(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  (void)len; (void)resp;
+
+  if(pc_get_u32(req) != PC_FEL_MAGIC)
+    return pc_error(s, PC_E_BAD_ARG, 0, "magic");
+
+  //Answer OK first; pc_poll jumps once the response has been handed to the controller (P-8.8)
+  s->fel_pending = 1;
+  *rl = 0;
+  return PC_OK;
+}
+
 #if PC_DEBUG
 static int h_debug_fpga(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
@@ -1279,7 +1300,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_GET_CAL,      F_LOCAL,                                0, h_get_cal },
   { PC_CMD_READ_SCREEN,  F_LOCAL,                                PC_CAP_SCREENSHOT, NULL },   //BENCH: T9 before it gets a handler
   { PC_CMD_DEBUG_FPGA,   F_REMOTE,                               PC_CAP_DEBUG_RAW, h_debug_fpga },
-  { PC_CMD_ENTER_FEL,    F_LOCAL,                                PC_CAP_ENTER_FEL, NULL },
+  { PC_CMD_ENTER_FEL,    F_LOCAL,                                PC_CAP_ENTER_FEL, h_enter_fel },
 };
 
 static const pc_cmd_entry *pc_find(uint16_t cmd)
@@ -1349,6 +1370,25 @@ static void pc_send_text(pc_session *s, const char *text)
 
 static const char pc_hex[] = "0123456789abcdef";
 
+#define PC_STR2(x) #x
+#define PC_STR(x)  PC_STR2(x)
+
+//"#RESET": bench recovery. Drops the frame in flight, a pending WAIT (no answer), the duplicate cache and any partial
+//input; ownership and acquisition state stay as they are. Handled even while a response is being sent.
+static void pc_link_reset(pc_session *s)
+{
+  if(pc_hal_tx_busy())
+  {
+    pc_hal_tx_abort();
+    s->tx_aborts++;
+  }
+
+  pc_drop_deferred(s);
+  pc_parser_reset(&s->parser);
+  s->cache_valid = 0;
+  s->pending_ev  = PC_EV_NONE;
+}
+
 //No libc on the scope (-nostdlib): no strcmp
 static int pc_streq(const char *a, const char *b)
 {
@@ -1366,7 +1406,7 @@ static int pc_ascii(pc_session *s, int ctx, int ev)
   if((ev == PC_EV_ASCII) && pc_streq(s->parser.line, "VER"))
   {
     char buf[80];
-    const char *a = "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.0,fpga=0x";
+    const char *a = "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=" PC_STR(PC_PROTO_MAJOR) "." PC_STR(PC_PROTO_MINOR) ",fpga=0x";
     uint32_t n = 0, i;
 
     while(*a) buf[n++] = *a++;
@@ -1375,6 +1415,13 @@ static int pc_ascii(pc_session *s, int ctx, int ev)
     buf[n]   = 0;
 
     pc_send_text(s, buf);
+    return 1;
+  }
+
+  if((ev == PC_EV_ASCII) && pc_streq(s->parser.line, "RESET"))
+  {
+    pc_link_reset(s);
+    pc_send_text(s, "#OK\n");
     return 1;
   }
 
@@ -1623,8 +1670,22 @@ void pc_poll(pc_session *s, int ctx)
   s->in_poll = 1;
   now = pc_hal_ms();
 
+  //Keep the TX pump moving even if an EP2 TX interrupt was missed, and never stay blocked on one response: a frame
+  //that makes no progress for PC_TX_STALL_MS (host gone, port closed without DTR drop) is dropped
+  if(pc_hal_tx_pump() && (pc_hal_tx_idle_ms() >= PC_TX_STALL_MS))
+  {
+    pc_hal_tx_abort();
+    s->tx_aborts++;
+  }
+
   if(ctx == PC_CTX_MAIN)
   {
+    uint32_t pass = now - s->last_main_ms;
+
+    s->pass_ms = (pass > 0xFFFF) ? 0xFFFF : (uint16_t)pass;
+    if(s->pass_ms > s->pass_max_ms)
+      s->pass_max_ms = s->pass_ms;
+
     s->last_main_ms = now;
     s->ui_busy      = 0;
 
@@ -1645,8 +1706,9 @@ void pc_poll(pc_session *s, int ctx)
     s->ui_busy = 1;
   }
 
-  //One request in flight at a time: nothing is parsed while the TX staging buffer is in use (P-3.2 window)
-  while(!pc_hal_tx_busy())
+  //One request in flight at a time (P-3.2 window): while the TX staging buffer is in use at most one further event is
+  //parsed and held, so a "#RESET" line can still abort a stuck response
+  for(;;)
   {
     if(s->pending_ev == PC_EV_NONE)
     {
@@ -1669,6 +1731,15 @@ void pc_poll(pc_session *s, int ctx)
       s->pending_ev = ev;
     }
 
+    if((s->pending_ev == PC_EV_ASCII) && pc_streq(s->parser.line, "RESET"))
+    {
+      pc_link_reset(s);                            //frees the TX buffer; the "#OK" goes out through pc_dispatch
+      s->pending_ev = PC_EV_ASCII;
+    }
+
+    if(pc_hal_tx_busy())
+      break;
+
     if(!pc_dispatch(s, ctx))
       break;
 
@@ -1681,6 +1752,13 @@ void pc_poll(pc_session *s, int ctx)
 
   pc_parser_tick(&s->parser, now);
   s->in_poll = 0;
+
+  //ENTER_FEL: the OK response has been handed to the controller; the HAL waits until it has left, then jumps
+  if((ctx == PC_CTX_MAIN) && s->fel_pending && !pc_hal_tx_busy())
+  {
+    s->fel_pending = 0;
+    pc_hal_enter_fel();
+  }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

@@ -187,7 +187,7 @@ static void test_gating(void)
 
   //Not built in this firmware: capability bits are 0 and the commands fail closed
   r = req(PC_CMD_READ_SCREEN, 0, 0);    T_EQ(r.h.status, PC_E_UNSUPPORTED);
-  r = req(PC_CMD_ENTER_FEL, 0, 0);      T_EQ(r.h.status, PC_E_UNSUPPORTED);
+  r = req(PC_CMD_ENTER_FEL, 0, 0);      T_EQ(r.h.status, PC_E_BAD_ARG);   //magic missing; FEL itself in test_fel_reset_stall
   go_remote(0, 0);
   r = req(PC_CMD_ACQUIRE_AVG, 0, 0);    T_EQ(r.h.status, PC_E_UNSUPPORTED);
   r = req(PC_CMD_READ_LIVE, 0, 0);      T_EQ(r.h.status, PC_E_UNSUPPORTED);
@@ -290,7 +290,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.0,fpga=0x1532");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.1,fpga=0x1532");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -897,10 +897,95 @@ static void test_ui_capture_and_status(void)
   pc_ui_capture_done(&S);
   pc_ui_capture_done(&S);
   r = req(PC_CMD_GET_STATUS, 0, 0);
-  T_EQ(r.len, 28); T_EQ(r.p[0], 0); T_EQ(r.p[1], 0); T_EQ(pc_get_u32(r.p + 4), 2);
+  T_EQ(r.len, 32); T_EQ(r.p[0], 0); T_EQ(r.p[1], 0); T_EQ(pc_get_u32(r.p + 4), 2);
   T_EQ(r.p[2] & 0x18, 0x18);                                 //dtr, charging
   T_EQ(r.p[22], 17); T_EQ(pc_get_u16(r.p + 20), 0xFFFF);
   T_EQ(pc_get_u32(r.p + 16), mock.now);
+}
+
+static void test_fel_reset_stall(void)
+{
+  uint8_t p[4];
+  resp_t r;
+  uint32_t j;
+  int found;
+
+  //ENTER_FEL: cap set, wrong magic refused, right magic answers OK first and jumps after the response is out
+  setup(0x1532);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
+  T_EQ(r.p[1], 1);                                              //proto_minor 1.1
+  pc_put_u32(p, 0x12345678);
+  r = req(PC_CMD_ENTER_FEL, p, 4);
+  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
+  pc_put_u32(p, PC_FEL_MAGIC);
+  mock.tx_hold = 1;
+  mock_clear_resps();
+  push_frame(PC_CMD_ENTER_FEL, 777, p, 4);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_EQ(mock_nresps, 1); T_EQ(decode(&mock_resps[0]).h.status, 0);
+  T_EQ(mock.fel_entries, 0);                                    //response still in flight
+  mock_tx_release();
+  pc_poll(&S, PC_CTX_MAIN);
+  T_EQ(mock.fel_entries, 1);
+  mock.tx_hold = 0;
+
+  //Unknown bitstream: no FEL cap (fail closed)
+  setup(0x9999);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20), 0);
+
+  //TX stall watchdog: a frame that makes no progress for 2 s is dropped, the next request is served
+  setup(0x1532);
+  mock.tx_hold = 1;
+  mock_clear_resps();
+  push_frame(PC_CMD_PING, 900, "a", 1);
+  pc_poll(&S, PC_CTX_MAIN);
+  push_frame(PC_CMD_PING, 901, "b", 1);
+  mock.now += PC_TX_STALL_MS - 1;
+  pc_poll(&S, PC_CTX_MAIN);
+  T_EQ(mock_nresps, 1); T_EQ(mock.tx_aborts, 0);
+  mock.now += 1;
+  pc_poll(&S, PC_CTX_MAIN);
+  T_EQ(mock.tx_aborts, 1); T_EQ(S.tx_aborts, 1);
+  T_EQ(mock_nresps, 2); T_EQ(decode(&mock_resps[1]).h.seq, 901);
+
+  //#RESET aborts a stuck response at once, drops a pending WAIT and answers #OK
+  setup(0x1532);
+  go_remote(0, 0);
+  mock.polls_to_done = -1;
+  r = req(PC_CMD_ARM, 0, 0);
+  pc_put_u32(p, 5000);
+  mock_clear_resps();
+  push_frame(PC_CMD_WAIT, 950, p, 4);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_EQ(S.def_active, 1);
+  mock.tx_hold = 1;
+  push_frame(PC_CMD_TEST_PATTERN, 951, "\x00\x10\x00\x00\x00\x00\x00\x00", 8);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_EQ(mock.tx_busy, 1);
+  mock_rx_push((const uint8_t *)"#RESET\n", 7);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_EQ(mock.tx_aborts, 1); T_EQ(S.def_active, 0);
+  found = 0;
+  for(j=0;j<mock_nresps;j++)
+    if(mock_resps[j].len == 4 && memcmp(mock_resps[j].data, "#OK\n", 4) == 0) found = 1;
+  T_TRUE(found);
+  T_EQ(pc_remote_active(&S), 1);                                //ownership unchanged
+  mock.tx_hold = 0; mock_tx_release();
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.p[2] & 0x20, 0);                  //no deferred request pending
+
+  //GET_STATUS 1.1: main-loop pass time, last and max since the previous GET_STATUS
+  setup(0x1532);
+  pc_poll(&S, PC_CTX_MAIN);
+  mock.now += 40; pc_poll(&S, PC_CTX_MAIN);
+  mock.now += 90; pc_poll(&S, PC_CTX_MAIN);
+  mock.now += 30; pc_poll(&S, PC_CTX_MAIN);
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  T_EQ(r.len, 32); T_EQ(pc_get_u16(r.p + 30), 90);
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  T_TRUE(pc_get_u16(r.p + 30) < 90);
 }
 
 int main(void)
@@ -921,6 +1006,7 @@ int main(void)
   test_busy_context();
   test_transport_window();
   test_ui_capture_and_status();
+  test_fel_reset_stall();
   mock_clear_resps();
   return t_report("test_session");
 }

@@ -1155,10 +1155,18 @@ void usb_device_CDC_irq_handler(void)
 
                       //The FIFO size is set based on 2^n * 8, so for 512 bytes it is 6
                       //As double buffering is used this bit is also set
+#if PC_PROTOCOL
+                      *USBC_REG_TXFIFOSZ = PC_EP1_TXFIFOSZ;  // 2 KiB FIFO RAM: see pc_transport.h
+#else
                       *USBC_REG_TXFIFOSZ = USBC_BP_TXFIFOSZ_DPB | 3;  // 64B for EP1 interrupt
+#endif
                       
                       //The base address of the third FIFO is set to the first free address
+#if PC_PROTOCOL
+                      *USBC_REG_TXFIFOAD = PC_EP1_TXFIFOAD;
+#else
                       *USBC_REG_TXFIFOAD = 256;
+#endif
 
                       //Enable the endpoint interrupts
                       *USBC_REG_INTTXE |= USBC_INTTX_FLAG_EP1;
@@ -1181,7 +1189,11 @@ void usb_device_CDC_irq_handler(void)
     
                       //The FIFO size is set based on 2^n * 8, so for 512 bytes it is 6
                       //As double buffering is used this bit is also set
+#if PC_PROTOCOL
+                      *USBC_REG_RXFIFOSZ = PC_EP2_RXFIFOSZ;
+#else
                       *USBC_REG_RXFIFOSZ = USBC_BP_RXFIFOSZ_DPB | 6;
+#endif
                       // nastav RX FIFO size podľa vyjednanej veľkosti
                       //*USBC_REG_RXFIFOSZ = USBC_BP_RXFIFOSZ_DPB | fifo_n;
     
@@ -1207,14 +1219,22 @@ void usb_device_CDC_irq_handler(void)
 
                       //The FIFO size is set based on 2^n * 8, so for 512 bytes it is 6
                       //As double buffering is used this bit is also set
+#if PC_PROTOCOL
+                      *USBC_REG_TXFIFOSZ = PC_EP2_TXFIFOSZ;
+#else
                       *USBC_REG_TXFIFOSZ = USBC_BP_TXFIFOSZ_DPB | 6;
+#endif
                                             
                       // nastaviť TX FIFO velkost rovnakú ako RX (alebo inak, podľa potreby)
                       //*USBC_REG_TXFIFOSZ = USBC_BP_TXFIFOSZ_DPB | fifo_n;
                       //*USBC_REG_TXFIFOAD = tx_fifo_base_for_ep2; // posuň TX za RX blok
                       
                       //The base address of the second FIFO is set to the first free address (twice the receive FIFO size / 8)
+#if PC_PROTOCOL
+                      *USBC_REG_TXFIFOAD = PC_EP2_TXFIFOAD;
+#else
                       *USBC_REG_TXFIFOAD = 512;
+#endif
 
                       //Enable the endpoint interrupts
                       *USBC_REG_INTRXE |= USBC_INTRX_FLAG_EP2;

@@ -17,6 +17,10 @@
 #include "timer.h"
 #include "menu.h"
 #include "variables.h"
+#include "usb_interface.h"
+#include "ccu_control.h"
+#include "interrupt.h"
+#include "pc_transport.h"
 
 #include "pc_hal.h"
 #include "pc_cmds.h"
@@ -498,6 +502,84 @@ void pc_hal_show_trace(void)
 {
   scope_display_trace_data();                                                        //BENCH: plan 11.3 step 3 (SHOW_TRACES cost [U])
   pc_draw_banner();
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// ENTER_FEL
+//
+// Atlan's bootloader enters FEL (boot mode 2) by jumping to 0xFFFF0020 in SVC mode, IRQs never enabled, SP in SRAM
+// (0x7C00), USB untouched, caches on (fw0.04 fnirsi_1014d_startup.c). The scope differs and is put back into that
+// shape: IRQs, the timer and the power-key interrupt are live, USB is configured as our CDC device, the vector base is
+// switched to low vectors with our table copied to SRAM 0 (start.s), and the I-cache holds lines of this image, which
+// must not survive into an image that sunxi-fel loads to the same addresses.
+// DRAM, clocks, display and FPGA stay as they are, which is what FEL mode from the boot menu also leaves.
+
+static void __attribute__((naked, noreturn)) pc_fel_jump(void)
+{
+  __asm__ __volatile__ (
+    "mrs  r0, cpsr\n"
+    "bic  r0, r0, #0x1F\n"
+    "orr  r0, r0, #0xD3\n"            //SVC mode, IRQ and FIQ masked
+    "msr  cpsr_c, r0\n"
+    "mov  r0, #0\n"
+    "mcr  p15, 0, r0, c7, c10, 4\n"   //drain the write buffer
+    "mrc  p15, 0, r1, c1, c0, 0\n"
+    "bic  r1, r1, #0x1000\n"          //I-cache off
+    "bic  r1, r1, #0x0004\n"          //D-cache off (MMU is off: no dirty lines)
+    "orr  r1, r1, #0x2000\n"          //high vectors at 0xFFFF0000, the reset state the boot ROM runs with
+    "mcr  p15, 0, r1, c1, c0, 0\n"
+    "mcr  p15, 0, r0, c7, c5, 0\n"    //invalidate the I-cache
+    "mcr  p15, 0, r0, c7, c6, 0\n"    //invalidate the D-cache
+    "ldr  sp, =0x00007C00\n"          //SVC stack where the bootloader has it when it enters FEL
+    "ldr  pc, =0xFFFF0020\n"          //boot ROM FEL entry
+    ".ltorg\n"
+  );
+}
+
+void pc_hal_enter_fel(void)
+{
+  uint32 t0 = timer0ticks;
+  uint32 cpsr;
+
+  //1. The OK response must reach the host before USB goes away (at most 200 ms)
+  while(!pc_transport_tx_drained() && ((timer0ticks - t0) < 200));
+  timer0_delay(10);
+
+  //2. Tell the person at the scope
+  display_set_screen_buffer((uint16 *)maindisplaybuffer);
+  display_set_fg_color(BLACK_COLOR);
+  display_fill_rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  display_set_fg_color(WHITE_COLOR);
+  display_set_font(&font_3);
+  display_text(300, 220, "FEL mode (USB boot)");
+  display_text(300, 250, "power cycle to leave");
+
+  //3. Detach from the host so it sees our CDC device leave before the boot ROM enumerates as 1f3a:efe8
+  usb_device_disable();
+  timer0_delay(300);
+
+  //4. Quiesce: no interrupt source may fire into our handlers once the boot ROM runs
+  __asm__ __volatile__ ("mrs %0, cpsr" : "=r" (cpsr));
+  __asm__ __volatile__ ("msr cpsr_c, %0" : : "r" (cpsr | 0xC0) : "memory");
+
+  *TMR_IRQ_EN_REG  = 0;
+  *TMR_IRQ_STA_REG = 0xFFFFFFFF;
+  *TMR0_CTRL_REG   = 0;
+  *EINT_PE_ENB_REG = 0;
+
+  INTC_EN_REG0[0]   = 0;
+  INTC_EN_REG0[1]   = 0;
+  INTC_PEND_REG0[0] = 0;
+  INTC_PEND_REG0[1] = 0;
+
+  //5. USB controller and PHY back to their power-on state (reset asserted, clocks gated): the boot ROM initialises
+  //   them itself, as on a cold FEL boot                                                    BENCH: ENTER_FEL [U]
+  *CCU_BUS_SOFT_RST0 &= ~CCU_BSRR1_USBOTG_EN;
+  *CCU_BUS_CLK_GATE0 &= ~CCU_BCGR1_USBOTG_EN;
+  *CCU_USBPHY_CFG    &= ~(CCU_USBPHY_CFG_RST | CCU_USBPHY_CFG_GAT);
+
+  //6. Caches, vectors, mode, stack, jump
+  pc_fel_jump();
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

@@ -156,5 +156,13 @@ void     pc_hal_tx_submit(uint32_t len);         //send len bytes of the staging
 uint32_t pc_hal_rx_read(uint8_t *dst, uint32_t max);
 uint32_t pc_hal_link_take_events(void);          //PC_LINK_* since the last call
 int      pc_hal_dtr(void);
+int      pc_hal_tx_pump(void);                   //load the next packet(s) if the FIFO has room; returns pc_hal_tx_busy()
+uint32_t pc_hal_tx_idle_ms(void);                //ms since the last packet of the frame in flight was loaded (0 if idle)
+void     pc_hal_tx_abort(void);                  //drop the frame in flight and flush the endpoint FIFO
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// FEL [UI]: wait until the last response left, detach USB, quiesce IRQs, jump to the boot ROM FEL entry. No return on
+// the target.
+void     pc_hal_enter_fel(void);
 
 #endif /* PC_HAL_H */

@@ -30,6 +30,7 @@ static const uint8 * volatile pc_tx_ptr;
 static volatile uint32 pc_tx_left;
 static volatile uint8  pc_tx_zlp;
 static volatile uint8  pc_tx_active;
+static volatile uint32 pc_tx_last_ms;      //time of the last packet handed to the controller
 
 static volatile uint32 pc_link_events;
 static volatile uint8  pc_dtr;
@@ -152,6 +153,7 @@ static void pc_tx_fill(void)
       usb_write_to_fifo((void *)USBC_REG_EPFIFO2, (void *)pc_tx_ptr, n);
       pc_tx_ptr  += n;
       pc_tx_left -= n;
+      pc_tx_last_ms = pc_hal_ms();
     }
     else
     {
@@ -223,12 +225,59 @@ void pc_hal_tx_submit(uint32_t len)
   pc_tx_left   = len;
   pc_tx_zlp    = (uint8)pc_frame_needs_zlp(len, PC_USB_PACKET);
   pc_tx_active = 1;
+  pc_tx_last_ms = pc_hal_ms();
 
   *USBC_REG_EPIND = 2;
   pc_tx_fill();
   *USBC_REG_EPIND = epind;
 
   pc_irq_restore(cpsr);
+}
+
+//Main-loop kick of the pump. The EP2 TX interrupt normally does all the work; this makes progress independent of a
+//missed or late interrupt (bench 2026-10-18: frames above ~5 KiB stalled). Safe at any time: fill only loads a packet
+//when the controller has room.
+int pc_hal_tx_pump(void)
+{
+  if(pc_tx_active)
+  {
+    uint32 cpsr  = pc_irq_save();
+    uint8  epind = *USBC_REG_EPIND;
+
+    *USBC_REG_EPIND = 2;
+    pc_tx_fill();
+    *USBC_REG_EPIND = epind;
+    pc_irq_restore(cpsr);
+  }
+
+  return pc_tx_active;
+}
+
+uint32_t pc_hal_tx_idle_ms(void)
+{
+  return pc_tx_active ? (pc_hal_ms() - pc_tx_last_ms) : 0;
+}
+
+void pc_hal_tx_abort(void)
+{
+  uint32 cpsr = pc_irq_save();
+
+  pc_tx_flush();
+  pc_irq_restore(cpsr);
+}
+
+int pc_transport_tx_drained(void)
+{
+  uint32 cpsr  = pc_irq_save();
+  uint8  epind = *USBC_REG_EPIND;
+  int    empty;
+
+  *USBC_REG_EPIND = 2;
+  empty = !pc_tx_active && !(*USBC_REG_TXCSR & USBC_BP_TXCSR_D_FIFO_NOT_EMPTY);
+  *USBC_REG_EPIND = epind;
+  pc_irq_restore(cpsr);
+
+  return empty;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -275,6 +324,8 @@ void pc_usb_dtr(uint8 dtr)
   }
   else if(!pc_dtr && dtr)
   {
+    //A new host connection must not receive the tail of a frame meant for the previous one
+    pc_tx_flush();
     pc_link_events |= PC_LINK_DTR_UP;
   }
 

@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            0
+#define PC_PROTO_MINOR            1     //1.1: GET_STATUS appends main-loop pass times (firmware 0.1.1)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4

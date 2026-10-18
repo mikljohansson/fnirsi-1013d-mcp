@@ -915,13 +915,24 @@ differs from or fills a gap in sections 1-13. Hosts written against this documen
 | 15 | CHANNEL_CONFIG `range` | `samplevoltperdiv` (what the hardware does); SET_CHANNEL range sets display and sample V/div equal. uv_per_lsb_q8 uses input_calibration[range] and mul_factor[1x][range] | 8.3 |
 | 16 | SET_CHANNEL offset | the resulting PWM value (centre + dcoffset) must be 0..2000 whenever offset or range is in the mask, else E_BAD_ARG detail 3 | the PWM period is 2000 counts |
 | 17 | READ_TRACE | REMOTE needs a DONE capture (E_STATE otherwise); channels are built on demand and the build is reused per capture. `sw_trigger_index` is -1 unless 20 <= pretrigger and pretrigger + 64 <= total (the 1.00o5 search window) | |
-| 18 | Not built in v0.1.0 | READ_LIVE, ACQUIRE_AVG, READ_SCREEN, ENTER_FEL: caps 0, E_UNSUPPORTED. DEBUG_FPGA and FORCE exist only in `PC_DEBUG=1` builds, which set DEBUG_RAW and FORCE_TRIGGER (FORCE before test T7) | phase 2/3 of the plan; fail closed |
+| 18 | Not built in v0.1.1 | READ_LIVE, ACQUIRE_AVG, READ_SCREEN: caps 0, E_UNSUPPORTED. DEBUG_FPGA and FORCE exist only in `PC_DEBUG=1` builds, which set DEBUG_RAW and FORCE_TRIGGER (FORCE before test T7) | phase 2/3 of the plan; fail closed |
 | 19 | USB identity | VID:PID 0x1209:0x0001 (pid.codes test PID, development only), bcdDevice 0x0100, manufacturer `fnirsi-1013d-ai`, product `FNIRSI 1013D`, serial `1013D-0001` on every unit (GET_INFO `serial` is the same string) | per-unit serial and a real PID are plan phase 3 |
 | 20 | `min_total_samples` | 80 on variants with PROG_TRIGGER_POS (not checked against the FPGA; the 1.00o5 UI never goes below 3000); 3000 (= max) on the stock bitstream | stock geometry is fixed [U] |
-| 22 | Retransmitted deferred request | a WAIT with the same cmd and seq as the pending one is ignored; the pending answer follows (no E_BUSY) | host retry after a read timeout |
 | 21 | `#LOCAL` | releases with the acquire-time KEEP_SETTINGS flag; ASCII lines count as traffic for the watchdog | |
+| 22 | Retransmitted deferred request | a WAIT with the same cmd and seq as the pending one is ignored; the pending answer follows (no E_BUSY) | host retry after a read timeout |
+| 23 | TX stall (v0.1.1) | a response that makes no progress for 2 s (no IN tokens taken) is dropped and the endpoint FIFO flushed; 3.2 said it stays pending | bench 2026-10-18: a stuck frame blocked the device until power-off |
+| 24 | New host connection (v0.1.1) | DTR 0 -> 1 also flushes a frame still in flight, so a reopened port never receives the tail of an old response | bench: a fresh connection read the rest of a 64 KiB pattern |
+| 25 | `#RESET` (v0.1.1) | ASCII line, honoured even while a response is being sent: drops the frame in flight, a pending WAIT (no answer), the duplicate cache and partial input, then replies `#OK`. REMOTE ownership and acquisition state stay | bench recovery without a power cycle |
+| 26 | Protocol 1.1 (v0.1.1) | GET_INFO `proto_minor` = 1, `#VER` says `proto=1.1`. GET_STATUS appends u16 `pass_ms` (offset 28: interval between the last two main-loop polls) and u16 `pass_max_ms` (offset 30: maximum since the previous GET_STATUS); the body is 32 bytes | measure the main-loop period the round trip depends on |
+| 27 | ENTER_FEL (v0.1.1) | cap ENTER_FEL on every known bitstream (not on unknown ones). Magic 0x4C45465F, else E_BAD_ARG detail 0. The OK response is sent first; once it has left the FIFO (at most 200 ms) the scope shows "FEL mode", soft-disconnects USB for 300 ms, masks IRQs, disables the timer, power-key and INTC sources, puts the USB controller and PHY back in reset, turns the caches off (I-cache invalidated), selects high vectors, sets SVC mode with SP = 0x7C00 (the bootloader's FEL state) and jumps to 0xFFFF0020. Settings are not saved; leave FEL with a power cycle or `sunxi-fel exe` | iteration without the boot menu |
 
 ### Firmware-internal
+
+- USB FIFO RAM layout (v0.1.1). The F1C100s USB FIFO RAM is 2048 bytes. The 1.00o5 CDC layout placed EP1 at byte
+  2048 and the EP2 TX FIFO at byte 4096, outside it (aliasing onto the EP2 RX FIFO). Now: EP2 OUT 0-511 (single
+  buffered), EP2 IN 512-1535 (2 x 512, double buffered), EP1 IN 1536-1599. The MSC layout was already inside 2 KiB.
+- The TX pump is driven by the EP2 TX interrupt and, as a fallback, from every poll (main loop and BUSY polls), so a
+  missed interrupt costs at most one poll interval.
 
 - ARM writes 0x0F = 0, then 0x1A = the configured mode (FORCE leaves it in auto), then the 0x01 reset with a
   bounded 0x05 wait (2,000,000 reads), then 0x0B / 0x0C (programmable variants) and 0x0E (all variants) in reset,
