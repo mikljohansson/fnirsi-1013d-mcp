@@ -150,6 +150,19 @@ int32_t pc_decim_to_code(uint16_t out, uint32_t scale_q24, int32_t corr16)
   return (v < 0) ? 0 : ((v > 255) ? 255 : v);
 }
 
+uint16_t pc_decim_level16_corr(uint8_t code8, uint32_t scale_q24, int32_t corr16)
+{
+  //code = out x scale / 2^24 + corr16 / 16, so out = (16 code - corr16) x 2^20 / scale
+  int64_t num = ((int64_t)code8 * 16 - corr16) * (1ll << 20);
+
+  if(!scale_q24 || (num <= 0))
+    return 0;
+
+  num = (num + scale_q24 / 2) / scale_q24;
+
+  return (num > 65535) ? 65535u : (uint16_t)num;
+}
+
 uint32_t pc_decim_rate(const pc_decim_cfg *c, uint32_t divider)
 {
   if(c->k && c->n)

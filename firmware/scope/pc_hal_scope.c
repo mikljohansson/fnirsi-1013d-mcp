@@ -675,10 +675,22 @@ static void pc_dec_apply(const pc_decim_cfg *c)
       pc_dec_dirty = 1;
     }
 
-    //0x17 is ignored while K >= 1: the UI level (raw 8-bit code, as fpga_set_trigger_level computed it) scaled
+    //0x17 is ignored while K >= 1: the UI level (8-bit code in the trace domain, as fpga_set_trigger_level computed it)
+    //mapped back through the readout's 16-bit transform (fw 0.2.47): the trigger channel's gain16 folded into the
+    //scale and its corr16 zero term, so the level sits where the corrected trace shows it (it ignored both before,
+    //about 1 % level error at full rate). EXT has no samples: the plain conversion.
     level = (int16)scopesettings.triggerlevel;
     level = (level < 0) ? 0 : ((level > 255) ? 255 : level);
-    fpga_set_decim_level(pc_decim_level16((uint8)level, c->gain, c->shift));
+
+    if(scopesettings.triggerchannel < 2)
+    {
+      acal_corr k;
+
+      fpga_channel_correction(scopesettings.triggerchannel ? &scopesettings.channel2 : &scopesettings.channel1, &k);
+      fpga_set_decim_level(pc_decim_level16_corr((uint8)level, acal_scale(c->scale_q24, k.gain16), k.corr16));
+    }
+    else
+      fpga_set_decim_level(pc_decim_level16((uint8)level, c->gain, c->shift));
 
     //(K + 2) output periods, (K + 10) N x 5 ns + 1 us with the FIR; timer0 ticks are 1 ms, + 1 for the partial tick
     if(pc_dec_dirty)

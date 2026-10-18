@@ -116,6 +116,12 @@ uint8_t  pc_decim_status(const pc_decim_cfg *c);
 //adc_cal.h acal_corr.corr16), rounded and clamped to 0..255
 int32_t  pc_decim_to_code(uint16_t out, uint32_t scale_q24, int32_t corr16);
 
+//The inverse for the trigger: the 16-bit level (0x54) for a level in the corrected 8-bit trace domain, i.e. the stored
+//sample value that pc_decim_to_code maps onto code8 with the same scale (scale_q24 with the readout's gain16 folded in,
+//adc_cal.h acal_scale) and corr16. Rounded, clamped to 0..65535. With corr16 0 and scale = cfg.scale_q24 it equals
+//pc_decim_level16 to within one 16-bit step (scale_q24 is rounded).
+uint16_t pc_decim_level16_corr(uint8_t code8, uint32_t scale_q24, int32_t corr16);
+
 //Output sample rate in Sa/s (200 MSa/s / N for k >= 1, 200 MSa/s / (D + 1) for k = 0)
 uint32_t pc_decim_rate(const pc_decim_cfg *c, uint32_t divider);
 

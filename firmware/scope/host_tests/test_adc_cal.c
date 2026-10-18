@@ -849,6 +849,81 @@ static int pack_example(void)
   return 0;
 }
 
+//fw 0.2.47: the 16-bit trigger level goes through the same transform as the readout (gain16 in the scale, corr16).
+//For every 8-bit level the stored-sample level must convert back to that level, and the old (uncorrected) conversion
+//must be what remains with unity gain and no zero term.
+static void test_trigger_level16(void)
+{
+  static const uint8_t kreq[] = { PC_DECIM_BOXCAR, PC_DECIM_CIC2, PC_DECIM_CIC3 };
+  static const uint32_t div[] = { 1, 9, 199, 1999 };
+  static const uint32_t g16[] = { 65536, 64880, 66192, 67700 };     //1.0, -1 %, +1 %, +3.3 %
+  static const int32_t  c16[] = { 0, 37, -52, 300 };                 //1/16 code
+  uint32_t a, b, g, z;
+  int32_t  lv, worst = 0, moved = 0;
+
+  for(a=0;a<sizeof(kreq);a++)
+    for(b=0;b<sizeof(div)/sizeof(div[0]);b++)
+    {
+      pc_decim_cfg cfg;
+
+      pc_decim_config(kreq[a], 0, div[b], 3000, PC_DECIM_HAS_CIC, &cfg);
+
+      if(!cfg.k)
+        continue;
+
+      for(g=0;g<4;g++)
+        for(z=0;z<4;z++)
+        {
+          uint32_t scale = acal_scale(cfg.scale_q24, g16[g]);
+
+          for(lv=0;lv<256;lv++)
+          {
+            uint16_t L = pc_decim_level16_corr((uint8_t)lv, scale, c16[z]);
+            int32_t  back = pc_decim_to_code(L, scale, c16[z]);
+            int32_t  lo = c16[z] / 16 - 1, hi = c16[z] / 16 + (int32_t)(65535ull * scale >> 24) + 1;
+            int32_t  d = back - lv;
+
+            //Inside the representable span the round trip is exact; outside it clamps to the ends
+            if((lv > lo + 1) && (lv < hi - 1))
+            {
+              T_EQ(back, lv);
+              if(d < 0) d = -d;
+              if(d > worst) worst = d;
+            }
+
+            //Unity gain, no zero term: the old conversion, to within one 16-bit step of the rounded scale
+            if((g == 0) && (z == 0))
+            {
+              int32_t old = pc_decim_level16((uint8_t)lv, cfg.gain, cfg.shift);
+              T_TRUE((L - old <= 1) && (old - L <= 1));
+            }
+            else if(L != pc_decim_level16((uint8_t)lv, cfg.gain, cfg.shift))
+              moved++;
+          }
+        }
+    }
+
+  //The owner's full-rate case (fw-cal2, README 6.3): gain16 about 1 % off unity moves a mid-screen level by about one
+  //code in the 8-bit domain, i.e. the old conversion put the trigger about 1 code (1 %) away from the trace
+  {
+    pc_decim_cfg cfg;
+    uint32_t s1;
+    int32_t  e;
+
+    pc_decim_config(PC_DECIM_CIC2, 0, 199, 3000, PC_DECIM_HAS_CIC, &cfg);
+    s1 = acal_scale(cfg.scale_q24, 64880);
+    e  = pc_decim_to_code(pc_decim_level16(200, cfg.gain, cfg.shift), s1, 0) - 200;
+    T_TRUE((e <= -1) && (e >= -3));
+    T_EQ(pc_decim_to_code(pc_decim_level16_corr(200, s1, 0), s1, 0), 200);
+  }
+
+  T_EQ(worst, 0);
+  T_TRUE(moved > 0);
+  T_EQ(pc_decim_level16_corr(0, 1u << 24, 16), 0);                 //below the zero term: clamps to 0
+  T_EQ(pc_decim_level16_corr(255, 1u << 10, 0), 65535);             //tiny scale: clamps to the 16-bit top
+  T_EQ(pc_decim_level16_corr(128, 0, 0), 0);                        //no scale (K = 0): 0, never a division by zero
+}
+
 int main(int argc, char **argv)
 {
   if((argc > 1) && !strcmp(argv[1], "--pack"))
@@ -861,5 +936,6 @@ int main(int argc, char **argv)
   test_gain_step();
   test_bench_model();
   test_end_to_end();
+  test_trigger_level16();
   return t_report("test_adc_cal");
 }
