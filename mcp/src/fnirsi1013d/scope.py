@@ -571,31 +571,62 @@ class Scope:
     def read_trace(self, channels: Iterable[int | str] = ("CH1",), start: int = 0, count: int = 0,
                    reread: bool = False, no_invert: bool = False) -> tuple[P.ReadTraceHeader,
                                                                           dict[int, tuple[P.TraceChannelMeta, np.ndarray]]]:
-        """READ_TRACE, split into several requests when needed (count 0 = to the end)."""
+        """READ_TRACE, split into several requests when needed (count 0 = to the end). The firmware rejects a count
+        beyond the trace (E_BAD_ARG detail 8), so until the first header tells the trace length, an open-ended read
+        asks for everything only when the longest possible trace fits one response, else for a short first piece."""
         mask = 0
         for ch in channels:
             mask |= 1 << channel_index(ch)
         chans = [c for c in (0, 1) if mask & (1 << c)]
         flags = (P.ReadTraceReq.REREAD if reread else 0) | (P.ReadTraceReq.NO_INVERT if no_invert else 0)
         per = max(1, (self.response_limit - 32 - 16 * len(chans)) // len(chans))
+        # first-piece size for an open-ended read: the trace is normally total_samples long
+        try:
+            guess = self.get_trigger().total_samples
+        except DeviceError:
+            guess = 0
+        for _ in range(3):
+            try:
+                got = self._read_trace_once(mask, chans, flags, per, start, count, guess)
+            except DeviceError as e:
+                if e.status != P.Status.E_BAD_ARG or e.detail != 8 or guess <= 1:
+                    raise
+                guess = 1  # the trace is shorter than the geometry says: learn its length from a short piece
+                continue
+            if got is not None:
+                return got
+            flags &= ~P.ReadTraceReq.REREAD
+        raise CaptureChanged("the trace kept changing between READ_TRACE pieces (the UI captures between requests); "
+                             "read it in one response (raise max_response) or stop the scope first")
+
+    def _read_trace_once(self, mask: int, chans: list[int], flags: int, per: int, start: int, count: int,
+                         guess: int):
         hdr0: P.ReadTraceHeader | None = None
         metas: list[P.TraceChannelMeta] = []
         pieces: dict[int, list[np.ndarray]] = {c: [] for c in chans}
         pos = start
+        end: int | None = None if count == 0 else start + count
         while True:
-            n = per if count == 0 else min(per, count - (pos - start))
+            if end is not None:
+                n = min(per, end - pos)
+            elif (self.info.max_total_samples or 16382) - start <= per:
+                n = 0  # to the end, fits whatever the trace length is
+            else:
+                n = min(per, max(1, guess - start))
             data = self._req(P.Cmd.READ_TRACE, P.ReadTraceReq(mask, flags, pos, n).pack())
             hdr = P.ReadTraceHeader.unpack(data)
             if hdr0 is None:
                 hdr0 = hdr
                 metas = [P.TraceChannelMeta.unpack(data[32 + 16 * i: 48 + 16 * i]) for i in range(len(chans))]
                 flags &= ~P.ReadTraceReq.REREAD  # rebuild once, then keep reading the same trace
+            elif hdr.capture_id != hdr0.capture_id:
+                return None  # a newer capture replaced the trace between pieces
             off = 32 + 16 * len(chans)
             for i, c in enumerate(chans):
                 pieces[c].append(np.frombuffer(data, np.uint8, hdr.count, off + i * hdr.count))
             pos += hdr.count
             end = hdr.sample_count if count == 0 else min(hdr.sample_count, start + count)
-            if pos >= end or hdr.count == 0 or hdr.capture_id != hdr0.capture_id:
+            if pos >= end or hdr.count == 0:
                 break
         assert hdr0 is not None
         hdr0.count = pos - start

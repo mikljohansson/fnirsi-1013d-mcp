@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from fnirsi1013d import protocol as P
-from fnirsi1013d.scope import Scope, compensate, interleave
+from fnirsi1013d.scope import CaptureChanged, Scope, compensate, interleave
 from fnirsi1013d.transport import DeviceError, TransportError
 
 
@@ -364,3 +364,22 @@ def test_chunked_reads_match_single_reads(sim_factory):
             small.t.request(P.Cmd.READ_RAW, P.ReadRawReq(0x0F, 1, 0, 0, 0, 8000).pack(), timeout=0.2, retries=0)
     finally:
         small.close()
+
+
+@pytest.mark.parametrize("cap", [None, 8192, 2048])
+def test_read_trace_never_asks_beyond_the_trace(sim_factory, cap):
+    """Firmware 0.1.7 on the bench: READ_TRACE with count > samples - start is E_BAD_ARG detail 8."""
+    srv = sim_factory(legacy=True)
+    with Scope.connect(srv.url, max_response=cap) as s:
+        if cap == 2048:
+            # LOCAL: every request may see a newer UI trace; pieces of different traces are never mixed
+            with pytest.raises(CaptureChanged):
+                s.read_trace(["CH1", "CH2"])
+            return
+        hdr, tr = s.read_trace(["CH1", "CH2"])
+        assert hdr.count == hdr.sample_count == 3000 and tr[0][1].size == 3000
+        hdr, tr = s.read_trace(["CH1"], start=2990, count=10)
+        assert tr[0][1].size == 10
+        with pytest.raises(DeviceError) as e:
+            s.t.request(P.Cmd.READ_TRACE, P.ReadTraceReq(1, 0, 2990, 11).pack())
+        assert e.value.status == P.Status.E_BAD_ARG and e.value.detail == 8

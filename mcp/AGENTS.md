@@ -23,7 +23,7 @@ context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/p
 | `vectors.py` | Checks/extends `../docs/protocol-vectors.json` (`--check`, `--merge`). |
 | `units.py` | `parse_quantity("100us")`, `fmt_si`. |
 
-Tests in `tests/` (190): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
+Tests in `tests/` (193): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
 (resend, resync, #RESET, 1.1/1.2 fields, timeouts, paused responses), `test_serial_link` (no-reconfigure rule,
 fake pyserial), `test_simulator_scope`, `test_shared_mode` (1.3 semantics through `Scope`), `test_firmware_match`
 (protocol.md section 14 items), `test_server` (every tool in-process, collaborative restarts, legacy fallback),
@@ -161,6 +161,12 @@ reload: announce "about to reload with <image> for <reason>", wait for the lead'
 `#VER`; pin the image with `--sha256` (the build file can be rebuilt in place by the firmware agent).
 
 ## Known issues and current numbers (COM10, Windows, this transport)
+
+- 2026-10-18, fw 0.1.7 LOCAL, MCP transport with no response cap: TEST_PATTERN 20460/32748/65536 x20 = 60 requests,
+  0 failures, 3.3 s. READ_TRACE used to fail every time on hardware (E_BAD_ARG detail 8): the host asked for a full
+  chunk and the firmware rejects count > samples - start (the simulator clamped). Fixed: the first piece is sized
+  from total_samples, pieces never pass the trace end, and a trace replaced between pieces is re-read, never mixed.
+  Verified on the unit: READ_TRACE x10 ok with and without the 8 KiB cap.
 
 - fw 0.1.4 LOCAL, retries off, 304 requests: 0 bad CRC, 0 garbage; 4 requests (1.3 %) unanswered, one per
   ~2048 bytes sent host->device (looks like the device RX ring wrap; reported to the firmware agent). With

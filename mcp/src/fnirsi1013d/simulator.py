@@ -1280,9 +1280,12 @@ class Device:
             raise _DevErr(P.Status.E_STATE, 0, f"state {P.AcqState(self.acq_state).name}, not DONE")
         Pw, Tw = self.capture_geometry
         n = 2 * Tw
-        if r.start >= n:
-            raise _DevErr(P.Status.E_BAD_ARG, 4, f"start {r.start} >= sample_count {n}")
-        count = n - r.start if r.count == 0 else min(r.count, n - r.start)
+        # firmware (pc_cmds.c h_read_trace): start <= samples, count <= samples - start, 0 = to the end
+        if r.start > n:
+            raise _DevErr(P.Status.E_BAD_ARG, 4, f"start {r.start} > sample_count {n}")
+        count = n - r.start if r.count == 0 else r.count
+        if count > n - r.start:
+            raise _DevErr(P.Status.E_BAD_ARG, 8, "count")
         chans = [c for c in (0, 1) if r.ch_mask & (1 << c)]
         if 32 + 16 * len(chans) + count * len(chans) > P.MAX_RESPONSE_PAYLOAD:
             raise _DevErr(P.Status.E_OVERFLOW, 0, "trace too long; lower count")
