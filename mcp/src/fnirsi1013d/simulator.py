@@ -1331,6 +1331,10 @@ class SimServer:
         self.drop_next = 0
         #: test hook: treat the next n valid requests as corrupted (answer E_BAD_CRC, do not execute)
         self.bad_crc_next = 0
+        #: test hook: lose the next n valid requests (never executed, never answered; the firmware RX-loss bug)
+        self.lose_next = 0
+        #: if set, ``lose_next`` only applies to requests with this cmd
+        self.lose_cmd: int | None = None
 
     @property
     def url(self) -> str:
@@ -1444,6 +1448,9 @@ class SimServer:
                 return
             if ev.proto_major != P.PROTO_MAJOR:
                 L["version_errors"] += 1
+            if self.lose_next and self.lose_cmd in (None, ev.cmd):
+                self.lose_next -= 1
+                return
             if self.bad_crc_next:
                 self.bad_crc_next -= 1
                 self._send(client, P.response(ev, P.error_payload(0, "payload crc"), P.Status.E_BAD_CRC))

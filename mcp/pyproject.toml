@@ -20,6 +20,7 @@ dev = ["pytest>=8", "anyio>=4", "ruff>=0.5"]
 fnirsi1013d-mcp = "fnirsi1013d.server:main"
 fnirsi1013d-sim = "fnirsi1013d.simulator:main"
 fnirsi1013d-flash = "fnirsi1013d.flash:main"
+fnirsi1013d-bench = "fnirsi1013d.bench:main"
 
 [build-system]
 requires = ["hatchling"]

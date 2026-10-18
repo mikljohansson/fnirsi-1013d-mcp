@@ -16,11 +16,12 @@ context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/p
 | `analysis.py` | Stats, crossings, frequency/duty, rise/fall, delay, preview, Welford `Averager`, fractional shift, edge finding, FFT (windows, peaks, THD), decay fits (`exp`, `exp+offset`, `exp2`, `power`), clip blanking, sample points. |
 | `simulator.py` | `Device` (protocol state machine + FPGA/ring model) and `SimServer` (TCP, one host at a time, test hooks). CLI `fnirsi1013d-sim`. |
 | `server.py` | FastMCP server (`fnirsi1013d-mcp`): `Session` (connection, lock, tokens, relay limit, audit, .npz), 21 tools, `--sim` in-process simulator, `preload_native_modules`. |
-| `flash.py` | `fnirsi1013d-flash`: ENTER_FEL -> usbipd -> sunxi-fel RAM load -> wait for `#VER`. |
+| `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 fresh attempts, 1 s apart; `#VER` check if all unanswered) -> usbipd -> sunxi-fel RAM load -> wait for `#VER`. Any failure: one `FAILED:` line, non-zero exit. |
+| `bench.py` | `fnirsi1013d-bench`: runs `../firmware/scope/host_tests/bench_link.py` (link checks + census; `--fel` not exposed). |
 | `vectors.py` | Checks/extends `../docs/protocol-vectors.json` (`--check`, `--merge`). |
 | `units.py` | `parse_quantity("100us")`, `fmt_si`. |
 
-Tests in `tests/` (156): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
+Tests in `tests/` (162): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
 (resend, resync, #RESET, 1.1/1.2 fields, timeouts, paused responses), `test_serial_link` (no-reconfigure rule,
 fake pyserial), `test_simulator_scope`, `test_firmware_match` (protocol.md section 14 items), `test_server` (every
 tool in-process), `test_stdio` (server as a real subprocess), `test_analysis`, `test_flash`.
@@ -35,6 +36,7 @@ wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/mcp && ~/.venvs/fnirsi1
 .venv/Scripts/fnirsi1013d-sim --variant al3 --port 5555 --signal decay:tau=80us
 .venv/Scripts/fnirsi1013d-mcp --port tcp://localhost:5555           # or --sim "<sim args>", or --port COM10
 .venv/Scripts/fnirsi1013d-flash --image <bin> --sha256 <hash>       # reload: only with the lead's ack
+.venv/Scripts/fnirsi1013d-bench --port COM10 --census 2000          # LOCAL-safe link census
 .venv/Scripts/ruff check --select F,E9,B023 --line-length 120 src tests
 ```
 
@@ -93,7 +95,8 @@ section 14 (zero-extended requests, detail numbering, ARM-while-ARMED, LOCAL fla
 TEST_PATTERN 3, stock GET_GEN, offset PWM range, #RESET even inside a partial frame), protocol 1.1 timing fields
 (constant 5 ms) and 1.2 GET_LINK_STATS (counts what a TCP model can see). `--caps` mimics a build (0x1C03 =
 fw 0.1.1+ on AL3, 0x1803 = 0.1.0), `--fail-responses-over` drops large responses, `--time-scale` (0 = instant).
-Test hooks on `SimServer`: `corrupt_next`, `garbage_next`, `drop_next`, `bad_crc_next`; `Device.user_tap()`.
+Test hooks on `SimServer`: `corrupt_next`, `garbage_next`, `drop_next` (responses), `bad_crc_next`, `lose_next`
+(+ `lose_cmd` filter: requests lost before execution); `Device.user_tap()`.
 
 Limits: no USB timing or packet loss model (TCP), no relay transients, AC coupling = subtract the signal's
 declared DC, front-end bandwidth not modelled, `checkfirstadc` rails logic approximated, READ_SCREEN draws a

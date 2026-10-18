@@ -32,13 +32,17 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from . import protocol as P
-from .transport import (PIDCODES_TEST_PIDS, PIDCODES_VID, Transport, TransportError, list_candidates, open_link,
-                        parse_ver)
+from .transport import (PIDCODES_TEST_PIDS, PIDCODES_VID, DeviceError, Transport, TransportError, list_candidates,
+                        open_link, parse_ver)
 
 FEL_VID_PID = "1f3a:efe8"
 LOAD_ADDR = 0x7FFFFFE0
 EXEC_ADDR = 0x80000000
 REPO = Path(__file__).resolve().parents[3]
+#: ENTER_FEL attempts. The firmware answers OK before it reboots, and a request lost on the way in (fw <= 0.1.5
+#: RX-ring bug, ~4 % of requests) is harmless to resend, so each attempt is a fresh request (new seq).
+ENTER_FEL_ATTEMPTS = 3
+ENTER_FEL_INTERVAL_S = 1.0
 DEFAULT_IMAGE = REPO / "firmware" / "scope" / "build-gcc10-pc" / "fnirsi_1013d.bin"
 
 
@@ -177,12 +181,42 @@ class Flasher:
                 self.step("this firmware has no ENTER_FEL: on the scope, open the boot menu (power on with the menu "
                           "boot mode) and pick 'Start FEL mode'; waiting for the FEL device")
                 return
-            t.request(P.Cmd.ENTER_FEL, P.U32Req(P.ENTER_FEL_MAGIC).pack(), retries=0)
-            self.step("ENTER_FEL acknowledged; the scope leaves USB")
+            self._send_enter_fel(t, info.fw_version_str)
         except TransportError as e:
             raise FlashError(f"talking to the scope on {port} failed: {e}", 3) from e
         finally:
             t.close()
+
+    def _send_enter_fel(self, t: Transport, old_fw: str) -> None:
+        payload = P.U32Req(P.ENTER_FEL_MAGIC).pack()
+        last = ""
+        for attempt in range(1, ENTER_FEL_ATTEMPTS + 1):
+            t0 = time.monotonic()
+            try:
+                t.request(P.Cmd.ENTER_FEL, payload, timeout=ENTER_FEL_INTERVAL_S, retries=0)
+                self.step(f"ENTER_FEL acknowledged (attempt {attempt}); the scope leaves USB")
+                return
+            except DeviceError as e:
+                if e.status != P.Status.E_BUSY:
+                    raise FlashError(f"ENTER_FEL refused: {e}", 3) from e
+                last = "E_BUSY (a scope menu is open: close it)"
+            except TransportError as e:
+                last = str(e)
+            self.step(f"ENTER_FEL attempt {attempt}/{ENTER_FEL_ATTEMPTS}: {last}")
+            if attempt < ENTER_FEL_ATTEMPTS:
+                self.sleep(max(0.0, ENTER_FEL_INTERVAL_S - (time.monotonic() - t0)))
+        # No answer at all. The OK could have been lost after the scope executed it: if the old firmware
+        # still answers #VER, it did not.
+        try:
+            ver = t.ascii("#VER", timeout=0.3)
+        except TransportError:
+            ver = None
+        if ver and ver.startswith("#OK"):
+            raise FlashError(f"ENTER_FEL got no answer after {ENTER_FEL_ATTEMPTS} attempts ({last}) and the scope "
+                             f"still runs firmware {parse_ver(ver).get('fw', old_fw)} ({ver}); nothing was loaded. "
+                             "Close any scope menu and rerun, or use the boot menu and --no-fel", 3)
+        self.step(f"ENTER_FEL unanswered after {ENTER_FEL_ATTEMPTS} attempts but #VER is silent: assuming the scope "
+                  "rebooted into FEL")
 
     def wait_fel_device(self) -> None:
         deadline = time.monotonic() + self.fel_timeout
@@ -278,7 +312,13 @@ class Flasher:
             return 0
         except FlashError as e:
             self.step(f"FAILED: {e}")
-            return e.code
+            return e.code or 1
+        except Exception as e:  # noqa: BLE001 - every failure must print FAILED and exit non-zero
+            self.step(f"FAILED: unexpected {type(e).__name__}: {e}")
+            return 1
+        except KeyboardInterrupt:
+            self.step("FAILED: interrupted")
+            return 130
 
 
 def main(argv: list[str] | None = None) -> None:

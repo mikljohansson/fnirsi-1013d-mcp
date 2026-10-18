@@ -143,3 +143,75 @@ def test_sha256_pin(sim, tmp_path):
     assert f.run_all() == 2 and any("does not match --sha256" in ln for ln in lines)
     f2, lines2 = flasher(sim, tmp_path, FakeHost(), no_fel=True, sha256=good[:12])
     assert f2.run_all() == 0 and any(f"sha256 {good}" in ln for ln in lines2)
+
+
+@pytest.fixture
+def fast_fel(monkeypatch):
+    monkeypatch.setattr(F, "ENTER_FEL_INTERVAL_S", 0.2)
+
+
+def test_enter_fel_retried_after_lost_request(sim, tmp_path, fast_fel):
+    sim.lose_cmd, sim.lose_next = P.Cmd.ENTER_FEL, 2
+    f, lines = flasher(sim, tmp_path, FakeHost())
+    assert f.run_all() == 0, "\n".join(lines)
+    assert any("attempt 1/3" in ln for ln in lines) and any("attempt 2/3" in ln for ln in lines)
+    assert any("ENTER_FEL acknowledged (attempt 3)" in ln for ln in lines)
+
+
+def test_enter_fel_never_answered_old_firmware_still_running(sim, tmp_path, fast_fel):
+    sim.lose_cmd, sim.lose_next = P.Cmd.ENTER_FEL, 3
+    host = FakeHost()
+    f, lines = flasher(sim, tmp_path, host)
+    assert f.run_all() == 3
+    failed = [ln for ln in lines if "FAILED" in ln]
+    assert len(failed) == 1 and "still runs firmware" in failed[0] and "nothing was loaded" in failed[0]
+    assert not any("write" in c for c in host.calls)
+
+
+def test_enter_fel_answer_lost_but_executed(sim, tmp_path, fast_fel):
+    sim.lose_cmd = None
+    sim.drop_next = 0
+    # the device executes ENTER_FEL (closes the link) but the OK never arrives
+    orig = sim._send
+
+    def drop_fel(client, resp):
+        if resp.cmd == P.Cmd.ENTER_FEL:
+            return
+        orig(client, resp)
+    sim._send = drop_fel
+    f, lines = flasher(sim, tmp_path, FakeHost())
+    assert f.run_all() == 0, "\n".join(lines)
+    assert any("assuming the scope rebooted into FEL" in ln for ln in lines)
+
+
+def test_unexpected_error_prints_failed_and_nonzero(sim, tmp_path):
+    def boom(cmd, timeout):
+        raise RuntimeError("kaboom")
+    f, lines = flasher(sim, tmp_path, boom, no_fel=True)
+    assert f.run_all() == 1 and any("FAILED: unexpected RuntimeError: kaboom" in ln for ln in lines)
+
+
+def test_main_exit_code_nonzero(tmp_path, capsys):
+    with pytest.raises(SystemExit) as ei:
+        F.main(["--image", str(tmp_path / "missing.bin"), "--no-fel"])
+    assert ei.value.code == 2
+    assert "FAILED" in capsys.readouterr().out
+
+
+def test_bench_wrapper_runs_bench_link_census(sim, monkeypatch, capsys):
+    import types
+
+    import serial
+
+    from fnirsi1013d import bench
+    mod = bench.load_bench_link()
+    mod.serial = types.SimpleNamespace(Serial=lambda port, baud, timeout, write_timeout: serial.serial_for_url(
+        port, baudrate=baud, timeout=timeout, write_timeout=write_timeout))
+    monkeypatch.setattr(bench, "load_bench_link", lambda: mod)
+    url = sim.url.replace("tcp://", "socket://")
+    with pytest.raises(SystemExit) as ei:
+        bench.main(["--port", url, "--census", "20", "--n", "10"])
+    out = capsys.readouterr().out
+    assert ei.value.code == 0, out
+    assert "census: 20 PINGs: 0 E_BAD_CRC, 0 no response" in out and "0 failures" in out
+    assert bench.build_argv(["--port", "COM10", "--census", "0"]) == ["COM10", "--n", "200"]

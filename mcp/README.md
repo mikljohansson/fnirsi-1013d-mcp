@@ -152,6 +152,21 @@ FEL with ENTER_FEL, hands the boot ROM device (1f3a:efe8) to WSL with usbipd, lo
 `sunxi-fel -p write 0x7FFFFFE0 <image> exe 0x80000000`, and waits for the serial port and `#VER`. Details and exit
 codes: firmware/README.md section 4. It changes what the scope runs: announce it at the bench first.
 
+ENTER_FEL is sent up to 3 times, 1 s apart, each as a fresh request: the firmware answers OK before it reboots, and
+a request lost on the way in (fw <= 0.1.5 RX bug) is harmless to resend. If none is answered and the scope still
+answers `#VER`, the tool stops ("still runs firmware ..., nothing was loaded"). Every failure prints one `FAILED:`
+line and exits non-zero (2 image, 3 scope link / ENTER_FEL, 4 usbipd / FEL device, 5 sunxi-fel, 6 port did not
+come back, 1 anything else).
+
+## Bench link check: `fnirsi1013d-bench`
+
+`fnirsi1013d-bench [--port COM10] [--census 2000] [--n 200]` runs the firmware's
+`firmware/scope/host_tests/bench_link.py` from the venv: `#RESET`, `#VER`, GET_INFO, PING latency, TEST_PATTERN
+sizes up to 64 KiB, throughput, then the no-retry acceptance census (random 1..200 B PINGs, every E_BAD_CRC diffed
+against the request with GET_BAD_FRAME, plus 100 x 64 KiB) and GET_LINK_STATS. LOCAL-safe; `--census 0` skips the
+census. Exit status 0 only when every check passed. It needs the repository checkout (the script is not part of
+the package).
+
 ## Tests
 
 ```
