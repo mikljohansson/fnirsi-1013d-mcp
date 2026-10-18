@@ -207,3 +207,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   co-simulation. **Not flashed**: firmware must accept version 0x1533 first (fw-gen2 has the spec); flashing needs the programmer, the stock
   backup at hand and the owner present. Open question before relying on it: the circuit between the FPGA pad and the calibration connector
   (the output looks capacitively coupled: mean 0.31 V for a 3.3 V square).
+- Firmware 0.2.8 (commit 0ff64c6, sha256 a9c7f446..., pinned) loaded: generator menu compacted to Power/Freq/Duty (393 -> 169 px), trigger menu to
+  5 rows (336 -> 280 px). Census 1000 PINGs 0/0, 100 x 64 KiB 0 failed. "ACQ / Long mode" box is the roll-mode toggle (a real control), kept;
+  relabel as a state toggle requested.
+- Firmware 0.2.9 (commit bebf901, sha256 a9864b08..., pinned backups/fw-0.2.9-a9864b08.bin, protocol 1.4): EXT trigger support for FPGA 0x1533
+  (AL3 family 0x1532..0x153F, caps EXT_TRIGGER, SET_TRIGGER source 2, generator interlock, GET_STATUS byte 42 EXT flags). Loaded on the current
+  0x1532: #VER proto=1.4, caps 0x7C03 unchanged, census 1000 PINGs 0/0, 100 x 64 KiB 0 failed, 0.99 MB/s. Observation on 0.2.8 and 0.2.9: the
+  first TEST_PATTERN (492 B) right after a FEL load timed out once (5 s) and was fine on every rerun; not seen on 0.2.6/0.2.7; watching.
+  Owner's menu checks on the compacted layout pending. Card holds 0.2.7.
