@@ -51,11 +51,14 @@ typedef struct
   uint32_t ui_samples, ui_pre;
   int32_t  ui_sw;
 
-  //Ownership / UI
-  uint32_t enters, exits;
-  int      last_keep;
-  int      banner_touch;
-  uint32_t shows;
+  //UI (shared control)
+  uint8_t  ui_run;                //scopesettings.runstate
+  uint8_t  ui_armed;              //UI conversion in flight
+  uint8_t  long_mode;
+  uint32_t run_sets;              //pc_hal_ui_set_run calls
+  int      last_run_set;
+  int      indicator;             //last pc_hal_indicator state
+  uint32_t indicator_draws;
 
   //Battery
   uint8_t  batt_level, batt_charging, batt_raw;

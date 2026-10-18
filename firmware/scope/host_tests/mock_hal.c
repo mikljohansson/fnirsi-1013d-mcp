@@ -89,6 +89,7 @@ void mock_reset(uint16_t fpga_version)
   mock.gen_en = 0; mock.gen_hz = 1000; mock.gen_duty = 50;
   mock.batt_level = 17; mock.batt_charging = 1; mock.batt_raw = 50;
   mock.ui_samples = 3000; mock.ui_pre = 1500; mock.ui_sw = 1502;
+  mock.ui_run = 1; mock.last_run_set = -1; mock.indicator = -1;
 
   fill_ring();
 }
@@ -174,6 +175,11 @@ void pc_hal_gen_read_ui(uint8_t *enable, uint32_t *freq_hz, uint8_t *duty_pct)
 void pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable)
 {
   mock.gen_phase = phase_inc; mock.gen_thr = threshold; mock.gen_hw_en = enable; mock.gen_writes++;
+
+  //UI copy, rounded as pc_hal_scope.c does
+  mock.gen_en   = enable;
+  mock.gen_hz   = (uint32_t)(((uint64_t)phase_inc * 50000000ull + 0x80000000ull) >> 32);
+  mock.gen_duty = (uint8_t)(((uint64_t)threshold * 100 + 0x7FFFFFFFull) / 0xFFFFFFFFull);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -273,12 +279,41 @@ void pc_hal_battery(uint8_t *level, uint8_t *charging, uint8_t *keyadc_raw)
   *level = mock.batt_level; *charging = mock.batt_charging; *keyadc_raw = mock.batt_raw;
 }
 
-void pc_hal_battery_refresh(void) { }
+void pc_hal_ui_read(pc_hw_ui *u)
+{
+  u->run = mock.ui_run; u->ui_armed = mock.ui_armed; u->long_mode = mock.long_mode;
+}
 
-void pc_hal_remote_enter(void)           { mock.enters++; }
-void pc_hal_remote_exit(int keep)        { mock.exits++; mock.last_keep = keep; }
-int  pc_hal_banner_touched(void)         { int t = mock.banner_touch; mock.banner_touch = 0; return t; }
-void pc_hal_show_trace(void)             { mock.shows++; }
+void pc_hal_ui_set_run(int run)
+{
+  mock.ui_run = run ? 1 : 0;
+  mock.ui_armed = 0;
+  mock.run_sets++;
+  mock.last_run_set = run;
+}
+
+uint32_t pc_hal_settings_fingerprint(void)
+{
+  uint8_t b[64];
+  uint32_t n = 0;
+  int i;
+
+  for(i=0;i<2;i++)
+  {
+    b[n++] = mock.ch[i].enable; b[n++] = mock.ch[i].range; b[n++] = mock.ch[i].coupling;
+    b[n++] = mock.ch[i].invert; b[n++] = mock.ch[i].probe;
+    b[n++] = (uint8_t)mock.ch[i].dcoffset; b[n++] = (uint8_t)(mock.ch[i].dcoffset >> 8);
+  }
+
+  b[n++] = mock.tb.timeperdiv; b[n++] = mock.tb.samplerate;
+  b[n++] = mock.trg.source; b[n++] = mock.trg.edge; b[n++] = mock.trg.level; b[n++] = mock.trg.ui_mode;
+  b[n++] = (uint8_t)mock.trg.pretrigger; b[n++] = (uint8_t)(mock.trg.pretrigger >> 8);
+  b[n++] = (uint8_t)mock.trg.total; b[n++] = (uint8_t)(mock.trg.total >> 8);
+  b[n++] = mock.long_mode;
+  return pc_crc32(b, n);
+}
+
+void pc_hal_indicator(int state) { mock.indicator = state; mock.indicator_draws++; }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 

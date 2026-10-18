@@ -16,6 +16,7 @@
 #include "touchpanel.h"
 #include "timer.h"
 #include "menu.h"
+#include "statemachine.h"
 #include "variables.h"
 #include "usb_interface.h"
 #include "ccu_control.h"
@@ -28,11 +29,12 @@
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-//Banner in the top bar, clear of the battery symbol at x 701..726
-#define PC_BANNER_X       150
-#define PC_BANNER_Y       0
-#define PC_BANNER_W       540
-#define PC_BANNER_H       46
+//MCP indicator chip: top right, over the version text, under the battery symbol (x 701..726, y 5..18), clear of the
+//right control bar at x 730. 32 x 18 px.
+#define PC_CHIP_X         697
+#define PC_CHIP_Y         22
+#define PC_CHIP_W         32
+#define PC_CHIP_H         18
 
 //0x05 ready polls before ARM gives up (1.00o5 waits forever)
 #define PC_READY_POLLS    2000000
@@ -41,9 +43,22 @@ static pc_session    pc_sess;
 static uint8         pc_ready;
 static uint16        pc_fpga_word;
 
-//UI state saved on entering REMOTE (plan 6.4)
-static SCOPESETTINGS pc_shadow_scope;
-static FPGASETTINGS  pc_shadow_fpga;
+extern DISPLAYDATA   displaydata;           //display_lib.c: current buffer, colours, font
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Drawing from the protocol (MAIN context, between UI passes). The UI loop keeps its own drawing state in displaydata
+//(buffer, colours, font); save it, draw on the visible screen, put it back.
+
+static void pc_draw_begin(DISPLAYDATA *save)
+{
+  *save = displaydata;
+  display_set_screen_buffer((uint16 *)maindisplaybuffer);
+}
+
+static void pc_draw_end(const DISPLAYDATA *save)
+{
+  displaydata = *save;
+}
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -118,6 +133,18 @@ void pc_hal_channel_write(int ch, const pc_hw_channel *c, uint8_t mask)
   {
     s->dcoffset = c->dcoffset;
     fpga_set_channel_offset(s);
+
+    //The UI keeps the trigger level as a marker position: the level follows range and offset, as on the screen
+    fpga_set_trigger_level();
+  }
+
+  //Show it: channel button in the top bar (the traces redraw every UI pass)
+  {
+    DISPLAYDATA save;
+
+    pc_draw_begin(&save);
+    scope_channel_settings(s, 0);
+    pc_draw_end(&save);
   }
 }
 
@@ -160,9 +187,23 @@ void pc_hal_timebase_write(const pc_hw_timebase *t, int raw)
     return;
   }
 
-  scopesettings.timeperdiv = t->timeperdiv;
-  scopesettings.samplerate = t->samplerate;
-  fpga_set_sample_rate(scopesettings.samplerate);
+  //The UI's own apply (long/short mode, FPGA time base, display); it keeps the sample rate when stopped, the host
+  //always gets the rate that belongs to the index
+  {
+    DISPLAYDATA save;
+
+    pc_draw_begin(&save);
+    scopesettings.timeperdiv = t->timeperdiv;
+    scope_set_timebase();
+
+    if(scopesettings.samplerate != t->samplerate)
+    {
+      scopesettings.samplerate = t->samplerate;
+      fpga_set_sample_rate(scopesettings.samplerate);
+    }
+
+    pc_draw_end(&save);
+  }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -180,13 +221,60 @@ void pc_hal_trigger_read(pc_hw_trigger *t)
   t->total      = fpgasettings.totalsamples;
 }
 
+//The UI derives the level from the marker position (fpga_set_trigger_level, before every UI conversion). Place the
+//marker where the derivation gives the requested level, or the nearest reachable one (marker 0..401).
+static int32 pc_level_from_marker(PCHANNELSETTINGS c, int32 marker)
+{
+  int32 dcoffset = c->dc_shift_size ? (c->dcoffset * 100) / c->dc_shift_size : 0;
+
+  return ((((int32)(marker - dcoffset) - (int32)c->traceposition) * 2097152) / signal_adjusters[c->samplevoltperdiv]) + 128;
+}
+
+static void pc_set_trigger_marker(uint8_t level)
+{
+  PCHANNELSETTINGS c = scopesettings.triggerchannel ? &scopesettings.channel2 : &scopesettings.channel1;
+  int32 dcoffset, est, m, best, bestd = 0x7FFFFFFF;
+
+  if(c->samplevoltperdiv > 6)
+    return;
+
+  dcoffset = c->dc_shift_size ? (c->dcoffset * 100) / c->dc_shift_size : 0;
+  est      = (int32)(((int64)((int32)level - 128) * signal_adjusters[c->samplevoltperdiv]) / 2097152) + (int32)c->traceposition + dcoffset;
+  best     = (est < 0) ? 0 : ((est > 401) ? 401 : est);
+
+  for(m=est-4;m<=est+4;m++)
+  {
+    int32 d;
+
+    if((m < 0) || (m > 401))
+      continue;
+
+    d = pc_level_from_marker(c, m) - (int32)level;
+
+    if(d < 0)
+      d = -d;
+
+    if(d < bestd)
+    {
+      bestd = d;
+      best  = m;
+    }
+  }
+
+  scopesettings.triggerverticalposition = (uint16)best;
+  fpga_set_trigger_level();
+}
+
 void pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask)
 {
+  DISPLAYDATA save;
+
   if(mask & PC_TRG_SOURCE)
   {
     //Atlan4 bitstreams compare core A only; the stock trigger core is unverified       BENCH: T10
     scopesettings.triggerchannel = t->source;
     fpga_set_trigger_channel();
+    fpga_set_trigger_level();
   }
 
   if(mask & PC_TRG_EDGE)
@@ -196,12 +284,7 @@ void pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask)
   }
 
   if(mask & PC_TRG_LEVEL)
-  {
-    //Raw level as given; the UI's marker derivation (fpga_set_trigger_level) is not run in REMOTE
-    scopesettings.triggerlevel = t->level;
-    fpga_write_cmd(0x17);
-    fpga_write_byte(t->level);
-  }
+    pc_set_trigger_marker(t->level);
 
   if(mask & PC_TRG_MODE)
   {
@@ -209,12 +292,18 @@ void pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask)
     fpga_set_trigger_mode();
   }
 
-  //Geometry is written at ARM, inside the sample-system reset
+  //Geometry is written at every arm (UI conversion or host ARM), inside the sample-system reset
   if(mask & PC_TRG_PRE)
     fpgasettings.settriggerpoint = t->pretrigger;
 
   if(mask & PC_TRG_TOTAL)
     fpgasettings.totalsamples = t->total;
+
+  //Show it: trigger button, RUN/WAIT colour of the run chip
+  pc_draw_begin(&save);
+  scope_trigger_settings(0);
+  scope_run_stop_text();
+  pc_draw_end(&save);
 }
 
 uint32_t pc_hal_auto_timeout_default(uint32_t total_samples)
@@ -245,6 +334,19 @@ void pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable)
   fpga_write_int(phase_inc);
   fpga_write_cmd(0x50);
   fpga_write_int(enable ? 1 : 0);
+
+  //UI copy, rounded to the UI's units (Hz, %), so the generator menu and the power-off save show the host's values
+  {
+    DISPLAYDATA save;
+
+    fpgasettings.gen_enable = enable ? 1 : 0;
+    fpgasettings.gen_freq   = (uint32)(((uint64)phase_inc * 50000000ull + 0x80000000ull) >> 32);
+    fpgasettings.gen_duty   = (uint8)(((uint64)threshold * 100 + 0x7FFFFFFFull) / 0xFFFFFFFFull);
+
+    pc_draw_begin(&save);
+    scope_generator_settings(0);
+    pc_draw_end(&save);
+  }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -253,6 +355,9 @@ void pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable)
 int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal)
 {
   uint32 n = 0;
+
+  //Trigger level from the marker, as every UI conversion does (scope_acquire_trace_data)
+  fpga_set_trigger_level();
 
   //Trigger enable (dead on Atlan4 bitstreams, meaningful on stock)                    BENCH: T6, T10
   fpga_write_cmd(0x0F);
@@ -417,91 +522,104 @@ void pc_hal_battery(uint8_t *level, uint8_t *charging, uint8_t *keyadc_raw)
   *keyadc_raw = (uint8_t)(*KEY_ADC_DATA_REG & 0x3F);
 }
 
-void pc_hal_battery_refresh(void)
-{
-  battery_check_status();
-}
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Ownership and UI
+// Shared control with the UI
 
-static void pc_draw_banner(void)
+void pc_hal_ui_read(pc_hw_ui *u)
 {
-  display_set_screen_buffer((uint16 *)maindisplaybuffer);
-  display_set_fg_color(RED_COLOR);
-  display_fill_rect(PC_BANNER_X, PC_BANNER_Y, PC_BANNER_W, PC_BANNER_H);
-  display_set_fg_color(WHITE_COLOR);
-  display_set_font(&font_3);
-  display_text(PC_BANNER_X + 110, PC_BANNER_Y + 14, "REMOTE - tap here to release");
+  u->run       = scopesettings.runstate;
+  u->ui_armed  = scopesettings.runstate && !scopesettings.display_data_done;
+  u->long_mode = scopesettings.long_mode;
 }
 
-void pc_hal_remote_enter(void)
+void pc_hal_ui_set_run(int run)
 {
-  memcpy(&pc_shadow_scope, &scopesettings, sizeof(SCOPESETTINGS));
-  memcpy(&pc_shadow_fpga, &fpgasettings, sizeof(FPGASETTINGS));
+  DISPLAYDATA save;
 
-  //The UI acquisition is simply not called any more; the next ARM resets the sample system
-  pc_draw_banner();
-}
+  pc_draw_begin(&save);
+  scopesettings.runstate = run ? 1 : 0;
 
-void pc_hal_remote_exit(int keep_settings)
-{
-  if(!keep_settings)
+  //What the RUN/STOP button does on RUN (statemachine.c)
+  if(run)
   {
-    memcpy(&scopesettings, &pc_shadow_scope, sizeof(SCOPESETTINGS));
-    memcpy(&fpgasettings, &pc_shadow_fpga, sizeof(FPGASETTINGS));
+    if(scopesettings.long_mode)
+      scope_preset_values();
+
+    scope_acqusition_settings(0);
+    match_volt_per_div_settings(&scopesettings.channel1);
+    match_volt_per_div_settings(&scopesettings.channel2);
   }
 
-  //Push every setting with the sequence main() uses at boot (fnirsi_1013d_scope.c)        BENCH: plan 11.3 step 3
-  fpga_set_channel_enable(&scopesettings.channel1);
-  fpga_set_channel_enable(&scopesettings.channel2);
-  fpga_set_channel_voltperdiv(&scopesettings.channel1);
-  fpga_set_channel_voltperdiv(&scopesettings.channel2);
-  fpga_set_channel_coupling(&scopesettings.channel1);
-  fpga_set_channel_coupling(&scopesettings.channel2);
-  fpga_set_sample_rate(scopesettings.samplerate);
-
-  if(scopesettings.long_mode)
-    fpga_set_long_timebase(scopesettings.timeperdiv);
-  else
-    fpga_set_time_base(scopesettings.timeperdiv);
-
-  fpga_set_trigger_channel();
-  fpga_set_trigger_edge();
-  fpga_set_trigger_level();
-  fpga_set_trigger_mode();
-  fpga_set_channel_offset(&scopesettings.channel1);
-  fpga_set_channel_offset(&scopesettings.channel2);
-  fpga_on_off_generator();
-
-  //Let the relays settle as main() does before the first conversion
-  timer0_delay(50);
-
-  //Redraw and resume the UI loop with a fresh conversion
-  scope_setup_main_screen();
+  //The next UI pass arms a fresh conversion; one in flight is abandoned
   scopesettings.display_data_done = 1;
-  scopesettings.conversion_done   = 0;
+  scope_run_stop_text();
+  pc_draw_end(&save);
 }
 
-int pc_hal_banner_touched(void)
+//Capture-relevant settings (protocol section 14, settings_seq). The trigger level counts unless the UI's "always 50%"
+//rewrites it after every capture; the flag counts instead.
+uint32_t pc_hal_settings_fingerprint(void)
 {
-  tp_i2c_read_status();
+  uint8  b[40];
+  uint32 n = 0;
+  int    i;
 
-  if(havetouch && (xtouch >= PC_BANNER_X) && (xtouch < PC_BANNER_X + PC_BANNER_W) && (ytouch < PC_BANNER_Y + PC_BANNER_H))
+  for(i=0;i<2;i++)
   {
-    //Do not let the UI see this touch after the release
-    tp_i2c_wait_for_touch_release();
-    havetouch = 0;
-    return 1;
+    PCHANNELSETTINGS c = pc_ch(i);
+
+    b[n++] = c->enable;
+    b[n++] = c->samplevoltperdiv;
+    b[n++] = c->coupling;
+    b[n++] = c->invert;
+    b[n++] = c->magnification;
+    b[n++] = (uint8)c->dcoffset;
+    b[n++] = (uint8)(c->dcoffset >> 8);
   }
 
-  return 0;
+  b[n++] = scopesettings.timeperdiv;
+  b[n++] = scopesettings.samplerate;
+  b[n++] = scopesettings.long_mode;
+  b[n++] = scopesettings.triggerchannel;
+  b[n++] = scopesettings.triggeredge;
+  b[n++] = scopesettings.triggermode;
+  b[n++] = scopesettings.alwaystrigger50;
+  b[n++] = scopesettings.alwaystrigger50 ? 0 : (uint8)scopesettings.triggerlevel;
+  b[n++] = scopesettings.alwaystrigger50 ? 0 : (uint8)(scopesettings.triggerlevel >> 8);
+  b[n++] = (uint8)fpgasettings.settriggerpoint;
+  b[n++] = (uint8)(fpgasettings.settriggerpoint >> 8);
+  b[n++] = (uint8)fpgasettings.totalsamples;
+  b[n++] = (uint8)(fpgasettings.totalsamples >> 8);
+
+  return pc_crc32(b, n);
 }
 
-void pc_hal_show_trace(void)
+void pc_hal_indicator(int state)
 {
-  scope_display_trace_data();                                                        //BENCH: plan 11.3 step 3 (SHOW_TRACES cost [U])
-  pc_draw_banner();
+  DISPLAYDATA save;
+
+  pc_draw_begin(&save);
+  display_set_fg_color(BLACK_COLOR);
+  display_fill_rect(PC_CHIP_X, PC_CHIP_Y, PC_CHIP_W, PC_CHIP_H);
+  display_set_font(&font_2);
+
+  if(state == 0)
+  {
+    //Back to what scope_setup_main_screen shows there
+    display_set_fg_color(WHITE_COLOR);
+    display_text(VERSION_STRING_XPOS, VERSION_STRING_YPOS, VERSION_STRING + 1);
+  }
+  else
+  {
+    //Green chip, brighter for a moment after each command
+    display_set_fg_color((state == 2) ? GREEN_COLOR : DARKGREEN_COLOR);
+    display_fill_rounded_rect(PC_CHIP_X, PC_CHIP_Y, PC_CHIP_W, PC_CHIP_H, 2);
+    display_set_fg_color((state == 2) ? BLACK_COLOR : WHITE_COLOR);
+    display_text(PC_CHIP_X + 5, PC_CHIP_Y + 3, "MCP");
+  }
+
+  pc_draw_end(&save);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -618,30 +736,33 @@ void pc_glue_poll_isr(void)
     pc_poll(&pc_sess, PC_CTX_ISR);
 }
 
-int pc_glue_remote(void)
+void pc_glue_ui_service(void)
 {
-  return pc_ready && pc_remote_active(&pc_sess);
+  if(pc_ready)
+    pc_ui_service(&pc_sess);
 }
 
-void pc_glue_remote_service(void)
+int pc_glue_ui_arm_allowed(void)
 {
-  pc_remote_service(&pc_sess);
+  return !pc_ready || pc_ui_arm_allowed(&pc_sess);
+}
+
+void pc_glue_ui_capture_start(void)
+{
+  if(pc_ready)
+    pc_ui_capture_start(&pc_sess);
+}
+
+void pc_glue_ui_capture_addr(uint32 addr)
+{
+  if(pc_ready)
+    pc_ui_capture_addr(&pc_sess, (uint16_t)addr);
 }
 
 void pc_glue_ui_capture(void)
 {
   if(pc_ready)
     pc_ui_capture_done(&pc_sess);
-}
-
-void pc_glue_power_off(void)
-{
-  //The power-off ISR saves scopesettings to SD next: it must save the user's settings, not the host's (plan 6.4)
-  if(pc_ready && pc_power_off_restore_needed(&pc_sess))
-  {
-    memcpy(&scopesettings, &pc_shadow_scope, sizeof(SCOPESETTINGS));
-    memcpy(&fpgasettings, &pc_shadow_fpga, sizeof(FPGASETTINGS));
-  }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

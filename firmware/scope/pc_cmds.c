@@ -1,5 +1,6 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// pc_cmds.c - PC protocol session: dispatch, handlers, ownership and remote acquisition (docs/protocol.md).
+// pc_cmds.c - PC protocol session: dispatch, handlers, shared control with the UI and the host single capture
+// (docs/protocol.md, section 14 for protocol 1.3; docs/plans/collaborative-mode.md).
 //
 // All hardware access goes through pc_hal.h. All state lives in the caller's pc_session. Builds for the scope and for
 // the host tests (firmware/scope/host_tests).
@@ -15,13 +16,12 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 // Dispatch table
 
-#define F_LOCAL     0x01      //accepted while the UI owns the scope
-#define F_BUSY      0x02      //accepted from a BUSY poll (UI modal, no FPGA access)
+#define F_BUSY      0x02      //accepted from a BUSY or timer poll (no FPGA, no UI access)
 #define F_CONTROL   0x04      //accepted while a deferred request is pending
-#define F_REMOTE    0x08      //needs REMOTE ownership
 #define F_BASIC     0x10      //works on an unknown FPGA variant
 
 #define PC_DEFERRED 0x10000   //handler result: response comes later
+#define PC_HOLD     0x20000   //handler result: not yet, run the request again at the next MAIN poll
 
 typedef int (*pc_handler)(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *resp_len);
 
@@ -156,6 +156,9 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
   //Reboot into the boot ROM's FEL mode: touches no FPGA, works on every known bitstream          BENCH: plan 11.3 step 1
   v->caps |= PC_CAP_ENTER_FEL;
 
+  //Protocol 1.3: shared control with the UI, no LOCAL/REMOTE
+  v->caps |= PC_CAP_SHARED_MODE;
+
 #if PC_DEBUG
   v->caps |= PC_CAP_DEBUG_RAW;
 
@@ -166,7 +169,7 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Ownership
+// Shared control
 
 static void pc_complete_deferred(pc_session *s, uint16_t status)
 {
@@ -183,101 +186,224 @@ static void pc_drop_deferred(pc_session *s)
   s->def_ready  = 0;
 }
 
-static void pc_leave_remote(pc_session *s, uint8_t reason, int keep, int link_up)
-{
-  if(s->control != PC_REMOTE)
-    return;
+static const uint8_t pc_mode_ui_to_proto[3] = { 0, 2, 1 };    //UI 0 auto, 1 single, 2 normal -> P 0 auto, 1 normal, 2 single
+static const uint8_t pc_mode_proto_to_ui[3] = { 0, 2, 1 };
 
-  //1. complete a deferred request (only if the host can still receive it)
-  if(link_up)
+//settings_seq: +1 whenever the capture-relevant settings change, from the UI or the host (protocol section 14). A
+//fingerprint compare at every poll, UI arm and UI DONE, so no UI code needs a hook per setting.
+static void pc_settings_track(pc_session *s)
+{
+  uint32_t fp;
+
+  //A raw divider (SET_TIMEBASE mode 1) holds until the UI selects a time base again
+  if(s->tb_raw)
+  {
+    pc_hw_timebase tb;
+
+    pc_hal_timebase_read(&tb);
+
+    if((tb.timeperdiv != s->tb_raw_tpd) || (tb.samplerate != s->tb_raw_sr))
+      s->tb_raw = 0;
+  }
+
+  fp = pc_hal_settings_fingerprint();
+
+  if(s->tb_raw)
+    fp ^= (s->tb_divider * 2654435761u) | 1u;
+
+  if(fp != s->settings_fp)
+  {
+    s->settings_fp = fp;
+
+    if(++s->settings_seq == PC_SEQ_INVALID)
+      s->settings_seq = 0;
+  }
+}
+
+//A pending host single capture is abandoned (the UI arms, RUN/STOP from either side)
+static void pc_host_abort(pc_session *s)
+{
+  if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
+  {
+    s->acq_state = PC_ACQ_ABORTED;
     pc_complete_deferred(s, PC_E_ABORTED);
-  else
-    pc_drop_deferred(s);
-
-  //2./3. restore the UI snapshot unless kept, push everything to the FPGA, redraw
-  pc_hal_remote_exit(keep);                                                          //BENCH: plan 11.3 step 3 (UI comes back intact)
-
-  s->control      = PC_LOCAL;
-  s->acq_state    = PC_ACQ_IDLE;
-  s->exit_reason  = reason;
-  s->remote_flags = 0;
-  s->tb_raw       = 0;
-  s->gen_valid    = 0;
-  s->auto_timeout_cfg = 0;
-  s->settle_pending   = 0;
-  s->trace_capture_id = 0;
+  }
 }
 
-int pc_remote_active(const pc_session *s)
+//Settings a capture is armed with
+static void pc_capture_latch(pc_session *s, pc_capture *c, uint8_t origin, uint32_t pretrigger, uint32_t total)
 {
-  return s->control == PC_REMOTE;
+  pc_hw_timebase tb;
+  pc_hw_trigger  t;
+
+  pc_settings_track(s);
+  pc_hal_timebase_read(&tb);
+  pc_hal_trigger_read(&t);
+
+  memset(c, 0, sizeof(*c));
+  c->origin     = origin;
+  c->seq        = s->settings_seq;
+  c->timeperdiv = s->tb_raw ? 0xFF : tb.timeperdiv;
+  c->divider    = s->tb_raw ? s->tb_divider : tb.divider;
+  c->source     = t.source;
+  c->edge       = t.edge;
+  c->level      = t.level;
+  c->mode       = (t.ui_mode < 3) ? pc_mode_ui_to_proto[t.ui_mode] : 0;
+  c->pretrigger = pretrigger;
+  c->total      = total;
+  pc_hal_channel_read(0, &c->ch[0]);
+  pc_hal_channel_read(1, &c->ch[1]);
 }
 
-int pc_power_off_restore_needed(const pc_session *s)
+//Capture DONE: it becomes the latest capture; the FPGA ring holds it until the next arm
+static void pc_capture_finish(pc_session *s, pc_capture *c, uint16_t trigger_addr, int triggered)
 {
-  return (s->control == PC_REMOTE) && !(s->remote_flags & PC_RF_KEEP_SETTINGS);
+  pc_hw_channel ch;
+  int i;
+
+  pc_settings_track(s);
+
+  if(s->settings_seq != c->seq)
+  {
+    c->seq    = PC_SEQ_INVALID;
+    c->flags |= 0x10;
+  }
+
+  c->flags |= triggered ? 0x01 : 0x02;
+
+  //Overload flags of this readout
+  for(i=0;i<2;i++)
+  {
+    pc_hal_channel_read(i, &ch);
+    c->ch[i].overload = ch.overload;
+
+    if(ch.overload)
+      c->flags |= (uint8_t)(0x04 << i);
+  }
+
+  c->trigger_addr  = trigger_addr;
+  c->capture_start = (uint16_t)pc_ring_mod((int64_t)trigger_addr - (int64_t)(c->pretrigger / 2), s->var.ring_words);
+  c->capture_id    = ++s->capture_id;
+
+  s->trigger_addr  = c->trigger_addr;
+  s->capture_start = c->capture_start;
+  s->cap           = *c;
+  s->ring_valid    = 1;
+}
+
+//UI hooks. They run in main-loop code outside pc_poll; in_poll keeps the timer-tick poll out meanwhile.
+int pc_ui_arm_allowed(pc_session *s)
+{
+  return !s->ui_hold;
+}
+
+void pc_ui_capture_start(pc_session *s)
+{
+  uint8_t ip = s->in_poll;
+  pc_hw_trigger t;
+
+  s->in_poll = 1;
+
+  //The UI resets the sample system: a host single in flight is lost, the ring no longer holds the last capture
+  pc_host_abort(s);
+  s->ring_valid = 0;
+  s->ui_started = 1;
+
+  pc_hal_trigger_read(&t);
+  pc_capture_latch(s, &s->cap_next, (t.ui_mode == 1) ? PC_ORIGIN_UI_SINGLE : PC_ORIGIN_UI_RUN, t.pretrigger, t.total);
+  s->in_poll = ip;
+}
+
+void pc_ui_capture_addr(pc_session *s, uint16_t addr)
+{
+  int done, trig;
+
+  //0x18 (triggered) read as for a host capture                                        BENCH: T6
+  pc_hal_acq_poll(&done, &trig);
+  s->ui_addr = addr;
+  s->ui_trig = (uint8_t)trig;
 }
 
 void pc_ui_capture_done(pc_session *s)
 {
-  if(s->control == PC_LOCAL)
-    s->capture_id++;
+  uint8_t ip = s->in_poll;
+
+  //Count each conversion once: while the arm gate holds, 1.00o5 processes the same finished conversion again every
+  //pass (conversion_done stays set until the next fpga_do_conversion)
+  if(!s->ui_started)
+    return;
+
+  s->in_poll    = 1;
+  s->ui_started = 0;
+  pc_capture_finish(s, &s->cap_next, s->ui_addr, s->ui_trig);
+  s->in_poll    = ip;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Response bodies
+
+static uint8_t pc_run_state(pc_session *s)
+{
+  pc_hw_ui u;
+  pc_hw_trigger t;
+
+  if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
+    return PC_RUN_SINGLE;
+
+  pc_hal_ui_read(&u);
+
+  if(!u.run)
+    return PC_RUN_STOP;
+
+  pc_hal_trigger_read(&t);
+  return (t.ui_mode == 1) ? PC_RUN_SINGLE : PC_RUN_RUN;
+}
 
 static uint32_t pc_status_body(pc_session *s, uint8_t *p)
 {
   uint32_t now = pc_hal_ms();
   uint8_t  level, charging, raw;
   uint8_t  flags = 0;
-  uint16_t wd = 0xFFFF;
   pc_hw_channel c1, c2;
 
+  pc_settings_track(s);
   pc_hal_battery(&level, &charging, &raw);
   pc_hal_channel_read(0, &c1);
   pc_hal_channel_read(1, &c2);
 
-  if(s->control == PC_REMOTE)
-  {
-    if(s->fpga_triggered)   flags |= 0x01;
-    if(s->fpga_done)        flags |= 0x02;
-    if(s->auto_timeout_hit) flags |= 0x04;
-  }
+  //Bits 0-2 describe the host single capture
+  if(s->fpga_triggered)   flags |= 0x01;
+  if(s->fpga_done)        flags |= 0x02;
+  if(s->auto_timeout_hit) flags |= 0x04;
+  if(pc_hal_dtr())        flags |= 0x08;
+  if(charging)            flags |= 0x10;
+  if(s->def_active)       flags |= 0x20;
+  if(c1.overload)         flags |= 0x40;
+  if(c2.overload)         flags |= 0x80;
 
-  if(pc_hal_dtr())          flags |= 0x08;
-  if(charging)              flags |= 0x10;
-  if(s->def_active)         flags |= 0x20;
-  if(c1.overload)           flags |= 0x40;
-  if(c2.overload)           flags |= 0x80;
-
-  if((s->control == PC_REMOTE) && s->watchdog_s)
-  {
-    uint32_t elapsed = now - s->last_frame_ms;
-    uint32_t limit   = (uint32_t)s->watchdog_s * 1000;
-
-    wd = (elapsed >= limit) ? 0 : (uint16_t)((limit - elapsed + 999) / 1000);
-  }
-
-  memset(p, 0, 32);
-  p[0] = s->control;
-  p[1] = (s->control == PC_REMOTE) ? s->acq_state : PC_ACQ_IDLE;
+  memset(p, 0, 44);
+  p[0] = PC_SHARED;
+  p[1] = s->acq_state;
   p[2] = flags;
-  p[3] = s->ui_busy;
+  p[3] = (s->main_polls < 2) ? PC_UI_STARTING : s->ui_busy;
   pc_put_u32(p + 4,  s->capture_id);
   pc_put_u16(p + 8,  s->trigger_addr);
   pc_put_u16(p + 10, s->capture_start);
   pc_put_u32(p + 12, s->armed_once ? (now - s->arm_ms) : 0);
   pc_put_u32(p + 16, now);
-  pc_put_u16(p + 20, wd);
+  pc_put_u16(p + 20, 0xFFFF);                   //no watchdog in 1.3
   p[22] = level;
-  p[23] = s->exit_reason;
+  p[23] = 0;                                    //no exit reasons in 1.3
   //Protocol 1.1 appends the main-loop pass time (interval between main-loop polls), last and maximum since the
-  //previous GET_STATUS, in ms. In LOCAL this is the UI loop period, in REMOTE the poll loop period.
+  //previous GET_STATUS, in ms
   pc_put_u16(p + 28, s->pass_ms);
   pc_put_u16(p + 30, s->pass_max_ms);
-  return 32;
+  //Protocol 1.3: settings tracking and the shared acquisition state
+  pc_put_u32(p + 32, s->settings_seq);
+  pc_put_u32(p + 36, s->capture_id ? s->cap.seq : PC_SEQ_INVALID);
+  p[40] = pc_run_state(s);
+  p[41] = s->capture_id ? s->cap.origin : 0;
+  return 44;
 }
 
 //uV per code x 256 at the BNC with a 1x probe, and the processed code of 0 V x 256 (P-8.5) [U]   BENCH: T8
@@ -333,7 +459,7 @@ static uint32_t pc_timebase_body(pc_session *s, uint8_t *p)
 
   pc_hal_timebase_read(&t);
 
-  if(s->control == PC_REMOTE && s->tb_raw)
+  if(s->tb_raw)
   {
     t.timeperdiv = 0xFF;
     t.samplerate = 0xFF;
@@ -351,12 +477,9 @@ static uint32_t pc_timebase_body(pc_session *s, uint8_t *p)
   return 16;
 }
 
-static const uint8_t pc_mode_ui_to_proto[3] = { 0, 2, 1 };    //UI 0 auto, 1 single, 2 normal -> P 0 auto, 1 normal, 2 single
-static const uint8_t pc_mode_proto_to_ui[3] = { 0, 2, 1 };
-
 static uint32_t pc_auto_timeout(pc_session *s, uint32_t total)
 {
-  if((s->control == PC_REMOTE) && s->auto_timeout_cfg)
+  if(s->auto_timeout_cfg)
     return s->auto_timeout_cfg;
 
   return pc_hal_auto_timeout_default(total);
@@ -396,17 +519,22 @@ static uint32_t pc_gen_body(pc_session *s, uint8_t *p)
   }
   else
   {
-    if((s->control == PC_REMOTE) && s->gen_valid)
+    uint32_t hz;
+    uint8_t  pct;
+
+    pc_hal_gen_read_ui(&en, &hz, &pct);
+
+    //Raw DDS words from SET_GEN stay in effect until the UI generator settings change
+    if(s->gen_valid && ((en != s->gen_ui_en) || (hz != s->gen_ui_hz) || (pct != s->gen_ui_pct)))
+      s->gen_valid = 0;
+
+    if(s->gen_valid)
     {
       en = s->gen_enable; phase = s->gen_phase; thr = s->gen_thr;
     }
     else
     {
-      uint32_t hz;
-      uint8_t  pct;
-
       //Same integer math as fpga_set_generator_freq / _duty
-      pc_hal_gen_read_ui(&en, &hz, &pct);
       phase = (uint32_t)(((uint64_t)hz << 32) / 50000000ull);
       thr   = (uint32_t)(((uint64_t)pct * 0xFFFFFFFFull) / 100);
     }
@@ -487,46 +615,10 @@ static int h_get_status(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
   return PC_OK;
 }
 
+//SET_REMOTE (1.3): compatibility no-op. There is no ownership any more; every flag and the watchdog are ignored.
 static int h_set_remote(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
-  uint8_t  action = req[0];
-  uint8_t  flags  = req[1];
-  uint16_t wd     = pc_get_u16(req + 2);
-
-  (void)len;
-
-  if(action > 1)
-    return pc_error(s, PC_E_BAD_ARG, 0, "action");
-
-  if(flags & ~(PC_RF_KEEP_SETTINGS | PC_RF_SHOW_TRACES | PC_RF_IGNORE_DTR))
-    return pc_error(s, PC_E_BAD_ARG, 1, "flags");
-
-  if(action == 0)
-  {
-    //Release; KEEP_SETTINGS of this request decides
-    pc_leave_remote(s, PC_EXIT_RELEASE, flags & PC_RF_KEEP_SETTINGS, 1);
-  }
-  else
-  {
-    //Only a release may interrupt a pending WAIT
-    if(s->def_active)
-      return pc_error(s, PC_E_BUSY, 0, "deferred request pending");
-
-    if(s->control != PC_REMOTE)
-    {
-      //We are in the MAIN context at the top of the loop: no UI transaction is open    BENCH: plan 11.3 step 3
-      pc_hal_remote_enter();
-      s->control   = PC_REMOTE;
-      s->acq_state = PC_ACQ_IDLE;
-      s->shown     = 1;
-      s->last_touch_ms = s->last_battery_ms = pc_hal_ms();
-    }
-
-    s->remote_flags  = flags;
-    s->watchdog_s    = wd;
-    s->last_frame_ms = pc_hal_ms();
-  }
-
+  (void)req; (void)len;
   *rl = pc_status_body(s, resp);
   return PC_OK;
 }
@@ -543,10 +635,11 @@ static int h_get_battery(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //GET_LINK_STATS (protocol 1.2): u16 count, u16 reserved, then count u32 counters since boot:
 //transport PC_TS_* (11), parser stats (8: frames, hdr_crc_errors, payload_crc_errors, oversize, version_errors,
 //responses_dropped, timeouts, junk_bytes), session (8: responses, duplicates, tx_aborts, disp_main, disp_busy,
-//disp_isr, held, isr_skipped)
+//disp_isr, held, isr_skipped), startup (2, fw 0.2.0: ms from session init to the first MAIN poll, duration of the first
+//main-loop pass)
 static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
-  uint32_t v[PC_TSTAT_COUNT + 16];
+  uint32_t v[PC_TSTAT_COUNT + 18];
   const pc_parser_stats *ps = &s->parser.stats;
   uint32_t n = PC_TSTAT_COUNT, i;
 
@@ -557,6 +650,7 @@ static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uin
   v[n++] = ps->version_errors; v[n++] = ps->responses_dropped; v[n++] = ps->timeouts; v[n++] = ps->junk_bytes;
   v[n++] = s->responses;   v[n++] = s->duplicates;     v[n++] = s->tx_aborts;  v[n++] = s->disp_main;
   v[n++] = s->disp_busy;   v[n++] = s->disp_isr;       v[n++] = s->held;       v[n++] = s->isr_skipped;
+  v[n++] = s->first_poll_ms; v[n++] = s->first_pass_ms;
 
   pc_put_u16(resp, (uint16_t)n);
   pc_put_u16(resp + 2, 0);
@@ -695,7 +789,6 @@ static int h_set_channel(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   }
 
   pc_hal_channel_write(ch, &nw, mask);
-  s->trace_capture_id = 0;
 
   *rl = pc_channel_body(ch, resp);
   return PC_OK;
@@ -736,6 +829,8 @@ static int h_set_timebase(pc_session *s, const uint8_t *req, uint32_t len, uint8
     t.divider = value;
     pc_hal_timebase_write(&t, 1);
     s->tb_raw     = 1;
+    s->tb_raw_tpd = t.timeperdiv;
+    s->tb_raw_sr  = t.samplerate;
     s->tb_divider = value;
   }
   else
@@ -842,16 +937,27 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //----------------------------------------------------------------------------------------------------------------------------------
 // Acquisition handlers
 
+//ARM (1.3): host single capture. The UI acquisition stops (the screen shows STOP), the host's own ARM sequence runs
+//as in 1.2, and at DONE the capture is built into the trace buffers, which the UI then shows.
 static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   pc_hw_trigger t;
-  pc_hw_timebase tb;
+  pc_hw_ui u;
   int prog = (s->var.caps & PC_CAP_PROG_TRIGGER_POS) != 0;
 
   (void)req; (void)len;
 
   if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
     return pc_error(s, PC_E_STATE, 0, "already armed");
+
+  pc_hal_ui_read(&u);
+
+  if(u.long_mode)
+    return pc_error(s, PC_E_STATE, 2, "UI long time base");
+
+  //Stop the UI loop from arming its own conversions; its next RUN starts afresh
+  if(u.run)
+    pc_hal_ui_set_run(0);
 
   //1. relay settling
   if(s->settle_pending)
@@ -865,7 +971,6 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   }
 
   pc_hal_trigger_read(&t);
-  pc_hal_timebase_read(&tb);
 
   if(!prog)
   {
@@ -875,11 +980,16 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   }
 
   //2.-5. conversion start with a bounded ready wait                                  BENCH: T6 (stock 0x0F semantics)
+  s->ring_valid = 0;
+
   if(pc_hal_arm(t.pretrigger / 2, t.total / 2, pc_auto_timeout(s, t.total), prog, t.ui_mode != 0))
   {
     s->acq_state = PC_ACQ_ABORTED;
     return pc_error(s, PC_E_FPGA, 0, "0x05 not ready");
   }
+
+  pc_capture_latch(s, &s->cap_next, PC_ORIGIN_HOST, t.pretrigger, t.total);
+  s->ui_started = 0;
 
   s->acq_state        = PC_ACQ_ARMED;
   s->fpga_done        = 0;
@@ -889,7 +999,7 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   s->arm_ms           = pc_hal_ms();
   s->cap_pre_words    = t.pretrigger / 2;
   s->cap_total_words  = t.total / 2;
-  s->cap_divider      = s->tb_raw ? s->tb_divider : tb.divider;
+  s->cap_divider      = s->cap_next.divider;
 
   *rl = pc_status_body(s, resp);
   return PC_OK;
@@ -907,14 +1017,87 @@ static int h_force(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *res
   return PC_OK;
 }
 
+//STOP (1.3): aborts a host single and stops the UI acquisition (run_state STOP)
 static int h_stop(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
+  pc_hw_ui u;
+
   (void)req; (void)len;
 
   s->acq_state = PC_ACQ_ABORTED;
   pc_complete_deferred(s, PC_E_ABORTED);
 
+  pc_hal_ui_read(&u);
+
+  if(u.run)
+    pc_hal_ui_set_run(0);
+
   *rl = pc_status_body(s, resp);
+  return PC_OK;
+}
+
+//SET_ACQ_STATE (1.3): u8 state 0 STOP / 1 RUN, as the RUN/STOP button. Both abort a pending host single.
+static int h_set_acq_state(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  (void)len;
+
+  if(req[0] > 1)
+    return pc_error(s, PC_E_BAD_ARG, 0, "state 0..1");
+
+  pc_host_abort(s);
+  pc_hal_ui_set_run(req[0]);
+
+  *rl = pc_status_body(s, resp);
+  return PC_OK;
+}
+
+//GET_CAPTURE_INFO (1.3): the settings the latest finished capture (any origin) was taken with
+static int h_get_capture_info(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  const pc_capture *c = &s->cap;
+  uint32_t i;
+
+  (void)req; (void)len;
+
+  if(s->capture_id == 0)
+    return pc_error(s, PC_E_STATE, 0, "no capture");
+
+  memset(resp, 0, 68);
+  pc_put_u32(resp,      c->capture_id);
+  pc_put_u32(resp + 4,  c->seq);
+  resp[8] = c->origin;
+  resp[9] = c->flags;
+  pc_put_u16(resp + 10, c->trigger_addr);
+  pc_put_u16(resp + 12, c->capture_start);
+  pc_put_u32(resp + 16, c->divider);
+  resp[20] = c->timeperdiv;
+  resp[21] = c->source;
+  resp[22] = c->edge;
+  resp[23] = c->level;
+  resp[24] = c->mode;
+  pc_put_u32(resp + 28, c->pretrigger);
+  pc_put_u32(resp + 32, c->total);
+
+  for(i=0;i<2;i++)
+  {
+    const pc_hw_channel *ch = &c->ch[i];
+    uint8_t *p = resp + 36 + 16 * i;
+    uint8_t  r = (ch->range < 7) ? ch->range : 6;
+    uint32_t uv;
+    int32_t  zero;
+
+    pc_channel_scaling(ch, &uv, &zero);
+    p[0] = ch->enable;
+    p[1] = ch->range;
+    p[2] = ch->coupling;
+    p[3] = ch->invert;
+    p[4] = ch->probe;
+    pc_put_u16(p + 6, (uint16_t)(ch->cal_offset[r] + ch->dcoffset));
+    pc_put_u32(p + 8, uv);
+    pc_put_u32(p + 12, (uint32_t)zero);
+  }
+
+  *rl = 68;
   return PC_OK;
 }
 
@@ -964,8 +1147,43 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   if((layout == 1) && ((((mask & 0x03) != 0) && ((mask & 0x03) != 0x03)) || (((mask & 0x0C) != 0) && ((mask & 0x0C) != 0x0C))))
     return pc_error(s, PC_E_BAD_ARG, 2, "layout 1 needs both cores");
 
-  if((s->acq_state != PC_ACQ_DONE) && !(flags & 0x01))
-    return pc_error(s, PC_E_STATE, 0, "not done");
+  //1.3: the latest finished capture of any origin, while the ring still holds it. flags bit 0 (ANY) reads the ring as
+  //it is. In RUN the UI has usually armed the next capture already: wait for it (at most PC_HOLD_MS) and keep the UI
+  //from re-arming until this request is answered.
+  if(!(flags & 0x01))
+  {
+    pc_hw_ui u;
+
+    pc_hal_ui_read(&u);
+
+    if(u.long_mode)
+      return pc_error(s, PC_E_STATE, 2, "UI long time base");
+
+    if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
+      return pc_error(s, PC_E_STATE, 0, "not done");
+
+    if(!s->ring_valid)
+    {
+      if(!u.run)
+        return pc_error(s, PC_E_STATE, s->capture_id ? 1 : 0, s->capture_id ? "ring overwritten" : "no capture");
+
+      if(!s->hold_active)
+      {
+        s->hold_active   = 1;
+        s->ui_hold       = 1;
+        s->hold_deadline = pc_hal_ms() + PC_HOLD_MS;
+        return PC_HOLD;
+      }
+
+      if((int32_t)(pc_hal_ms() - s->hold_deadline) < 0)
+        return PC_HOLD;
+
+      return pc_error(s, PC_E_BUSY, 1, "UI capture running");
+    }
+
+    if(s->capture_id == 0)
+      return pc_error(s, PC_E_STATE, 0, "no capture");
+  }
 
   for(i=0;i<4;i++)
     if(mask & (1 << i))
@@ -1037,42 +1255,46 @@ static int h_read_trace(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
   if((chm == 0) || (chm & ~0x03)) return pc_error(s, PC_E_BAD_ARG, 0, "ch_mask");
   if(flags & ~0x03)               return pc_error(s, PC_E_BAD_ARG, 1, "flags");
 
-  if(s->control == PC_REMOTE)
+  if(s->capture_id && (s->cap.origin == PC_ORIGIN_HOST) && (s->trace_capture_id == s->capture_id))
   {
-    if(s->acq_state != PC_ACQ_DONE)
-      return pc_error(s, PC_E_STATE, 0, "no capture");
-
-    samples = (uint32_t)s->cap_total_words * 2;
-    pre     = (uint32_t)s->cap_pre_words * 2;
+    //Host single: built from the ring at DONE (enabled channels), again on REREAD or for channels not built yet
+    samples = s->cap.total;
+    pre     = s->cap.pretrigger;
 
     if(samples > pc_hal_trace_capacity())
       return pc_error(s, PC_E_INTERNAL, 0, "trace buffer");
 
-    //Build from the ring once per capture, or again on REREAD / for channels not built yet
-    if((flags & 0x01) || (s->trace_capture_id != s->capture_id) || ((s->trace_mask & chm) != chm))
+    if(s->ring_valid && ((flags & 0x01) || ((s->trace_mask & chm) != chm)))
     {
-      uint8_t build = (s->trace_capture_id == s->capture_id && !(flags & 0x01)) ? (uint8_t)(s->trace_mask | chm) : chm;
+      uint8_t build = (flags & 0x01) ? chm : (uint8_t)(s->trace_mask | chm);
 
-      s->trace_sw_index   = pc_hal_trace_build(s->capture_start, samples, pre, build);
-      s->trace_capture_id = s->capture_id;
-      s->trace_mask       = build;
+      s->trace_sw_index = pc_hal_trace_build(s->cap.capture_start, samples, pre, build);
+      s->trace_mask     = build;
     }
 
-    sw      = s->trace_sw_index;
-    origin  = 0;
-    divider = s->cap_divider;
+    sw = s->trace_sw_index;
+  }
+  else
+  {
+    //UI capture: the UI's own trace buffer and geometry
+    pc_hal_trace_ui_info(&samples, &pre, &sw);
+
+    if(samples > pc_hal_trace_capacity())
+      samples = pc_hal_trace_capacity();
+  }
+
+  if(s->capture_id)
+  {
+    origin  = s->cap.origin;
+    divider = s->cap.divider;
   }
   else
   {
     pc_hw_timebase tb;
 
-    pc_hal_trace_ui_info(&samples, &pre, &sw);
     pc_hal_timebase_read(&tb);
-    origin  = 1;
+    origin  = PC_ORIGIN_UI_RUN;
     divider = tb.divider;
-
-    if(samples > pc_hal_trace_capacity())
-      samples = pc_hal_trace_capacity();
   }
 
   if(start > samples)
@@ -1117,7 +1339,12 @@ static int h_read_trace(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
     if(!(chm & (1 << i)))
       continue;
 
-    pc_hal_channel_read((int)i, &c);
+    //Front end state the capture was taken with
+    if(s->capture_id)
+      c = s->cap.ch[i];
+    else
+      pc_hal_channel_read((int)i, &c);
+
     pc_channel_scaling(&c, &uv, &zero);
     flip = c.invert && (flags & 0x02);
 
@@ -1206,6 +1433,7 @@ static int h_set_gen(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
 
   s->gen_valid = 1;
   pc_hal_gen_write(s->gen_phase, s->gen_thr, s->gen_enable);
+  pc_hal_gen_read_ui(&s->gen_ui_en, &s->gen_ui_hz, &s->gen_ui_pct);
 
   *rl = pc_gen_body(s, resp);
   return PC_OK;
@@ -1317,34 +1545,36 @@ static int h_debug_fpga(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
 
 static const pc_cmd_entry pc_cmds[] =
 {
-  { PC_CMD_PING,         F_LOCAL | F_BUSY | F_CONTROL | F_BASIC, 0, h_ping },
-  { PC_CMD_GET_INFO,     F_LOCAL | F_BUSY | F_BASIC,             0, h_get_info },
-  { PC_CMD_GET_STATUS,   F_LOCAL | F_BUSY | F_CONTROL | F_BASIC, 0, h_get_status },
-  { PC_CMD_SET_REMOTE,   F_LOCAL | F_CONTROL,                    0, h_set_remote },
-  { PC_CMD_GET_BATTERY,  F_LOCAL | F_BUSY | F_BASIC,             0, h_get_battery },
-  { PC_CMD_TEST_PATTERN, F_LOCAL | F_BASIC,                      0, h_test_pattern },
-  { PC_CMD_GET_LINK_STATS, F_LOCAL | F_BUSY | F_CONTROL | F_BASIC, 0, h_get_link_stats },
-  { PC_CMD_GET_BAD_FRAME, F_LOCAL | F_BUSY | F_CONTROL | F_BASIC, 0, h_get_bad_frame },
-  { PC_CMD_GET_CHANNEL,  F_LOCAL,                                0, h_get_channel },
-  { PC_CMD_SET_CHANNEL,  F_REMOTE,                               0, h_set_channel },
-  { PC_CMD_GET_TIMEBASE, F_LOCAL,                                0, h_get_timebase },
-  { PC_CMD_SET_TIMEBASE, F_REMOTE,                               0, h_set_timebase },
-  { PC_CMD_GET_TRIGGER,  F_LOCAL,                                0, h_get_trigger },
-  { PC_CMD_SET_TRIGGER,  F_REMOTE,                               0, h_set_trigger },
-  { PC_CMD_ARM,          F_REMOTE,                               0, h_arm },
-  { PC_CMD_FORCE,        F_REMOTE,                               PC_CAP_FORCE_TRIGGER, h_force },
-  { PC_CMD_STOP,         F_REMOTE | F_CONTROL,                   0, h_stop },
-  { PC_CMD_WAIT,         F_REMOTE,                               0, h_wait },
-  { PC_CMD_READ_RAW,     F_REMOTE,                               0, h_read_raw },
-  { PC_CMD_READ_TRACE,   F_LOCAL,                                0, h_read_trace },
-  { PC_CMD_READ_LIVE,    F_REMOTE,                               PC_CAP_LIVE_READ, NULL },
-  { PC_CMD_ACQUIRE_AVG,  F_REMOTE,                               PC_CAP_DEVICE_AVERAGE, NULL },
-  { PC_CMD_GET_GEN,      F_LOCAL,                                0, h_get_gen },
-  { PC_CMD_SET_GEN,      F_REMOTE,                               PC_CAP_GENERATOR_DDS, h_set_gen },
-  { PC_CMD_GET_CAL,      F_LOCAL,                                0, h_get_cal },
-  { PC_CMD_READ_SCREEN,  F_LOCAL,                                PC_CAP_SCREENSHOT, NULL },   //BENCH: T9 before it gets a handler
-  { PC_CMD_DEBUG_FPGA,   F_REMOTE,                               PC_CAP_DEBUG_RAW, h_debug_fpga },
-  { PC_CMD_ENTER_FEL,    F_LOCAL,                                PC_CAP_ENTER_FEL, h_enter_fel },
+  { PC_CMD_PING,         F_BUSY | F_CONTROL | F_BASIC, 0, h_ping },
+  { PC_CMD_GET_INFO,     F_BUSY | F_BASIC,             0, h_get_info },
+  { PC_CMD_GET_STATUS,   F_BUSY | F_CONTROL | F_BASIC, 0, h_get_status },
+  { PC_CMD_SET_REMOTE,   F_BUSY | F_CONTROL,           0, h_set_remote },
+  { PC_CMD_GET_BATTERY,  F_BUSY | F_BASIC,             0, h_get_battery },
+  { PC_CMD_TEST_PATTERN, F_BASIC,                      0, h_test_pattern },
+  { PC_CMD_GET_LINK_STATS, F_BUSY | F_CONTROL | F_BASIC, 0, h_get_link_stats },
+  { PC_CMD_GET_BAD_FRAME, F_BUSY | F_CONTROL | F_BASIC, 0, h_get_bad_frame },
+  { PC_CMD_GET_CHANNEL,  0,                            0, h_get_channel },
+  { PC_CMD_SET_CHANNEL,  0,                            0, h_set_channel },
+  { PC_CMD_GET_TIMEBASE, 0,                            0, h_get_timebase },
+  { PC_CMD_SET_TIMEBASE, 0,                            0, h_set_timebase },
+  { PC_CMD_GET_TRIGGER,  0,                            0, h_get_trigger },
+  { PC_CMD_SET_TRIGGER,  0,                            0, h_set_trigger },
+  { PC_CMD_ARM,          0,                            0, h_arm },
+  { PC_CMD_FORCE,        0,                            PC_CAP_FORCE_TRIGGER, h_force },
+  { PC_CMD_STOP,         F_CONTROL,                    0, h_stop },
+  { PC_CMD_WAIT,         0,                            0, h_wait },
+  { PC_CMD_READ_RAW,     0,                            0, h_read_raw },
+  { PC_CMD_READ_TRACE,   0,                            0, h_read_trace },
+  { PC_CMD_READ_LIVE,    0,                            PC_CAP_LIVE_READ, NULL },
+  { PC_CMD_ACQUIRE_AVG,  0,                            PC_CAP_DEVICE_AVERAGE, NULL },
+  { PC_CMD_SET_ACQ_STATE, F_CONTROL,                   0, h_set_acq_state },
+  { PC_CMD_GET_CAPTURE_INFO, F_BUSY | F_CONTROL,       0, h_get_capture_info },
+  { PC_CMD_GET_GEN,      0,                            0, h_get_gen },
+  { PC_CMD_SET_GEN,      0,                            PC_CAP_GENERATOR_DDS, h_set_gen },
+  { PC_CMD_GET_CAL,      0,                            0, h_get_cal },
+  { PC_CMD_READ_SCREEN,  0,                            PC_CAP_SCREENSHOT, NULL },   //BENCH: T9 before it gets a handler
+  { PC_CMD_DEBUG_FPGA,   0,                            PC_CAP_DEBUG_RAW, h_debug_fpga },
+  { PC_CMD_ENTER_FEL,    0,                            PC_CAP_ENTER_FEL, h_enter_fel },
 };
 
 static const pc_cmd_entry *pc_find(uint16_t cmd)
@@ -1393,6 +1623,7 @@ static void pc_send(pc_session *s, uint16_t cmd, uint16_t seq, int status, uint3
   }
 
   s->responses++;
+  s->last_cmd_ms = pc_hal_ms();                 //MCP indicator pulse
   pc_hal_tx_submit(n);
 }
 
@@ -1417,8 +1648,8 @@ static const char pc_hex[] = "0123456789abcdef";
 #define PC_STR2(x) #x
 #define PC_STR(x)  PC_STR2(x)
 
-//"#RESET": bench recovery. Drops the frame in flight, a pending WAIT (no answer), the duplicate cache and any partial
-//input; ownership and acquisition state stay as they are. Handled even while a response is being sent.
+//"#RESET": bench recovery. Drops the frame in flight, a pending WAIT (no answer), a held READ_RAW, the duplicate cache
+//and any partial input; settings and acquisition state stay as they are. Handled even while a response is being sent.
 static void pc_link_reset(pc_session *s)
 {
   if(pc_hal_tx_busy())
@@ -1431,6 +1662,8 @@ static void pc_link_reset(pc_session *s)
   pc_parser_reset(&s->parser);
   s->cache_valid = 0;
   s->pending_ev  = PC_EV_NONE;
+  s->ui_hold     = 0;
+  s->hold_active = 0;
 }
 
 //No libc on the scope (-nostdlib): no strcmp
@@ -1445,7 +1678,7 @@ static int pc_streq(const char *a, const char *b)
   return *a == *b;
 }
 
-static int pc_ascii(pc_session *s, int ctx, int ev)
+static int pc_ascii(pc_session *s, int ev)
 {
   if((ev == PC_EV_ASCII) && pc_streq(s->parser.line, "VER"))
   {
@@ -1469,13 +1702,9 @@ static int pc_ascii(pc_session *s, int ctx, int ev)
     return 1;
   }
 
+  //1.2 escape hatch out of REMOTE; 1.3 has no ownership, the answer stays for old hosts
   if((ev == PC_EV_ASCII) && pc_streq(s->parser.line, "LOCAL"))
   {
-    //Releasing touches the UI and the FPGA: wait for the MAIN context
-    if((s->control == PC_REMOTE) && (ctx != PC_CTX_MAIN))
-      return 0;
-
-    pc_leave_remote(s, PC_EXIT_RELEASE, s->remote_flags & PC_RF_KEEP_SETTINGS, 1);
     pc_send_text(s, "#OK\n");
     return 1;
   }
@@ -1502,7 +1731,7 @@ static int pc_dispatch(pc_session *s, int ctx)
     case PC_EV_ASCII:
     case PC_EV_ASCII_OVERFLOW:
       s->last_frame_ms = pc_hal_ms();
-      return pc_ascii(s, ctx, s->pending_ev);
+      return pc_ascii(s, s->pending_ev);
 
     case PC_EV_BAD_CRC:
     {
@@ -1534,8 +1763,9 @@ static int pc_dispatch(pc_session *s, int ctx)
       return 1;
   }
 
-  //Any valid frame feeds the watchdog
+  //Link activity (MCP indicator)
   s->last_frame_ms = pc_hal_ms();
+  s->frame_seen    = 1;
 
   //Retransmission of the deferred request still pending: ignore it, its answer follows
   if(s->def_active && (s->def_cmd == h->cmd) && (s->def_seq == h->seq))
@@ -1577,10 +1807,6 @@ static int pc_dispatch(pc_session *s, int ctx)
   {
     st = pc_error(s, PC_E_BUSY, 0, "deferred request pending");
   }
-  else if((e->flags & F_REMOTE) && (s->control != PC_REMOTE))
-  {
-    st = pc_error(s, PC_E_NOT_REMOTE, 0, "SET_REMOTE first");
-  }
   else
   {
     //Zero extended copy of the request (missing trailing fields read as 0)
@@ -1588,6 +1814,13 @@ static int pc_dispatch(pc_session *s, int ctx)
     memcpy(s->req, s->parser.payload, h->len);
 
     st = e->handler(s, s->req, h->len, s->tx + PC_HDR_SIZE, &rl);
+
+    //READ_RAW waiting for the UI capture in flight: stays queued, runs again at the next MAIN poll
+    if(st == PC_HOLD)
+      return 0;
+
+    s->ui_hold     = 0;
+    s->hold_active = 0;
 
     if(st == PC_DEFERRED)
     {
@@ -1602,14 +1835,25 @@ static int pc_dispatch(pc_session *s, int ctx)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Remote acquisition polling (MAIN context, REMOTE)
+// Host single capture polling (MAIN context)
 
 static void pc_acq_service(pc_session *s)
 {
   int done, trig;
 
+  pc_hw_ui u;
+
   if((s->acq_state != PC_ACQ_ARMED) && (s->acq_state != PC_ACQ_TRIGGERED))
     return;
+
+  //RUN pressed on the screen (or anything else that let the UI arm): the host single is lost
+  pc_hal_ui_read(&u);
+
+  if(u.run)
+  {
+    pc_host_abort(s);
+    return;
+  }
 
   //Only 0x0A and 0x18: no touch scan, unlike fpga_done_conversion
   pc_hal_acq_poll(&done, &trig);
@@ -1622,13 +1866,25 @@ static void pc_acq_service(pc_session *s)
 
   if(done)
   {
-    //Latch the capture geometry                                                       BENCH: T5 (trigger_addr alignment)
-    s->trigger_addr     = pc_hal_acq_finish();
-    s->capture_start    = (uint16_t)pc_ring_mod((int64_t)s->trigger_addr - s->cap_pre_words, s->var.ring_words);
+    pc_hw_channel c1, c2;
+    uint16_t addr  = pc_hal_acq_finish();                                            //BENCH: T5 (trigger_addr alignment)
+    uint32_t start = pc_ring_mod((int64_t)addr - s->cap_pre_words, s->var.ring_words);
+    uint32_t samples = (uint32_t)s->cap_total_words * 2;
+    uint8_t  mask;
+
+    //Into the trace buffers for the enabled channels, so the UI shows the capture (it redraws every pass)
+    pc_hal_channel_read(0, &c1);
+    pc_hal_channel_read(1, &c2);
+    mask = (uint8_t)((c1.enable ? 0x01 : 0) | (c2.enable ? 0x02 : 0));
+
+    if(mask && (samples <= pc_hal_trace_capacity()))
+      s->trace_sw_index = pc_hal_trace_build(start, samples, (uint32_t)s->cap_pre_words * 2, mask);
+
     s->auto_timeout_hit = !trig;                                                     //BENCH: T6
-    s->capture_id++;
     s->acq_state        = PC_ACQ_DONE;
-    s->shown            = 0;
+    pc_capture_finish(s, &s->cap_next, addr, trig);
+    s->trace_capture_id = s->capture_id;
+    s->trace_mask       = mask;
   }
 }
 
@@ -1666,11 +1922,9 @@ static void pc_deferred_service(pc_session *s)
 static void pc_link_service(pc_session *s)
 {
   uint32_t ev = pc_hal_link_take_events();
-  int keep = s->remote_flags & PC_RF_KEEP_SETTINGS;
 
   if(ev & PC_LINK_RESET)
   {
-    pc_leave_remote(s, PC_EXIT_USB, keep, 0);
     pc_parser_reset(&s->parser);
     s->pending_ev  = PC_EV_NONE;
     s->rx_len      = s->rx_pos = 0;
@@ -1680,9 +1934,6 @@ static void pc_link_service(pc_session *s)
 
   if(ev & PC_LINK_DTR_DOWN)
   {
-    if(!(s->remote_flags & PC_RF_IGNORE_DTR))
-      pc_leave_remote(s, PC_EXIT_DTR, keep, 0);
-
     s->cache_valid = 0;
     pc_drop_deferred(s);
   }
@@ -1703,9 +1954,10 @@ void pc_session_init(pc_session *s)
   pc_parser_init(&s->parser);
   s->tx = pc_hal_tx_buffer(&s->tx_cap);
   pc_variant_from_version(pc_hal_fpga_version(), &s->var);
-  s->control      = PC_LOCAL;
   s->acq_state    = PC_ACQ_IDLE;
   s->last_main_ms = pc_hal_ms();
+  s->init_ms      = s->last_main_ms;
+  s->settings_fp  = pc_hal_settings_fingerprint();
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -1715,17 +1967,13 @@ void pc_poll(pc_session *s, int ctx)
   uint32_t now;
   int ev;
 
-  //The touch panel hook can call in from inside a poll (banner check); never nest
+  //Never nest (UI hooks and pc_ui_service hold in_poll too)
   if(s->in_poll)
   {
     if(ctx == PC_CTX_ISR)
       s->isr_skipped++;
     return;
   }
-
-  //While REMOTE the main loop polls continuously; BUSY polls (touch scans in the remote service) have nothing to do
-  if((ctx == PC_CTX_BUSY) && (s->control == PC_REMOTE))
-    return;
 
   s->in_poll = 1;
   now = pc_hal_ms();
@@ -1742,7 +1990,13 @@ void pc_poll(pc_session *s, int ctx)
   {
     uint32_t pass = now - s->last_main_ms;
 
-    //The first interval runs from pc_session_init through the rest of boot (logo, USB start): not a loop pass
+    //The first interval runs from pc_session_init through the rest of boot (logo, USB start): not a loop pass.
+    //Both startup intervals are kept for GET_LINK_STATS (bench: first commands waited ~5 s after a FEL load).
+    if(s->main_polls == 0)
+      s->first_poll_ms = pass;
+    else if(s->main_polls == 1)
+      s->first_pass_ms = pass;
+
     if(s->main_polls++)
     {
       s->pass_ms = (pass > 0xFFFF) ? 0xFFFF : (uint16_t)pass;
@@ -1754,15 +2008,23 @@ void pc_poll(pc_session *s, int ctx)
     s->ui_busy      = 0;
 
     pc_link_service(s);
+    pc_settings_track(s);
 
-    if(s->control == PC_REMOTE)
+    //A held READ_RAW that was dropped (#RESET, link reset) must not keep the UI from arming
+    if(s->pending_ev == PC_EV_NONE)
+      s->ui_hold = s->hold_active = 0;
+
+    //The long time base acquisition does not use the capture ring
     {
-      pc_acq_service(s);
+      pc_hw_ui u;
 
-      if(s->watchdog_s && ((now - s->last_frame_ms) >= (uint32_t)s->watchdog_s * 1000))
-        pc_leave_remote(s, PC_EXIT_WATCHDOG, s->remote_flags & PC_RF_KEEP_SETTINGS, 1);
+      pc_hal_ui_read(&u);
+
+      if(u.long_mode)
+        s->ring_valid = 0;
     }
 
+    pc_acq_service(s);
     pc_deferred_service(s);
   }
   else if((now - s->last_main_ms) >= PC_MODAL_MS)
@@ -1834,60 +2096,32 @@ void pc_poll(pc_session *s, int ctx)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-static void pc_remote_service_body(pc_session *s);
-
-void pc_remote_service(pc_session *s)
+//Every main-loop pass after the MAIN poll: the MCP indicator in the top bar. On while DTR is up or a frame came within
+//PC_HOST_ACTIVE_MS, brighter for PC_PULSE_MS after each command, redrawn every PC_CHIP_REDRAW_MS (UI redraws of the
+//top bar paint over it).
+void pc_ui_service(pc_session *s)
 {
-  //Keeps the timer-tick poll out while this changes ownership or draws (it runs outside pc_poll)
+  uint32_t now = pc_hal_ms();
+  uint8_t  st;
+
   if(s->in_poll)
     return;
 
   s->in_poll = 1;
-  pc_remote_service_body(s);
+
+  if(!pc_hal_dtr() && !(s->frame_seen && ((now - s->last_frame_ms) < PC_HOST_ACTIVE_MS)))
+    st = 0;
+  else
+    st = (s->frame_seen && ((now - s->last_cmd_ms) < PC_PULSE_MS)) ? 2 : 1;
+
+  if((st != s->chip_state) || (st && ((now - s->chip_ms) >= PC_CHIP_REDRAW_MS)))
+  {
+    pc_hal_indicator(st);
+    s->chip_state = st;
+    s->chip_ms    = now;
+  }
+
   s->in_poll = 0;
-}
-
-static void pc_remote_service_body(pc_session *s)
-{
-  uint32_t now = pc_hal_ms();
-
-  if(s->control != PC_REMOTE)
-    return;
-
-  //A person at the scope stays in control: a tap on the banner releases (every 100 ms)
-  if((now - s->last_touch_ms) >= 100)
-  {
-    s->last_touch_ms = now;
-
-    if(pc_hal_banner_touched())
-    {
-      pc_leave_remote(s, PC_EXIT_TAP, s->remote_flags & PC_RF_KEEP_SETTINGS, 1);
-      return;
-    }
-  }
-
-  //Battery level stays fresh for GET_BATTERY / GET_STATUS
-  if((now - s->last_battery_ms) >= 1000)
-  {
-    s->last_battery_ms = now;
-    pc_hal_battery_refresh();
-  }
-
-  //Optional trace display of each capture (costs tens of ms per capture [U])
-  if((s->remote_flags & PC_RF_SHOW_TRACES) && (s->acq_state == PC_ACQ_DONE) && !s->shown && !s->def_active)
-  {
-    uint32_t samples = (uint32_t)s->cap_total_words * 2;
-
-    s->shown = 1;
-
-    if(samples <= pc_hal_trace_capacity())
-    {
-      s->trace_sw_index   = pc_hal_trace_build(s->capture_start, samples, (uint32_t)s->cap_pre_words * 2, 0x03);
-      s->trace_capture_id = s->capture_id;
-      s->trace_mask       = 0x03;
-      pc_hal_show_trace();
-    }
-  }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

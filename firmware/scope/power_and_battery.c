@@ -94,7 +94,7 @@ void power_interrupt_init(void)
 
 void power_interrupt_handler(void)
 {
-  //While the host owns the scope, put the user's settings back before they are saved (plan 6.4)   BENCH: plan 11.3 step 3 (power-off in REMOTE)
+  //PC protocol hook, empty since protocol 1.3: host changes are live settings and are saved like the user's
   PC_POWER_OFF();
 
   //Need to check if it is ok to save settings.

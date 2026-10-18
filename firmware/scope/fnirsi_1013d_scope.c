@@ -255,15 +255,10 @@ int main(void)
   while(1)
   {
 #if PC_PROTOCOL
-    //PC control protocol: parse requests, run handlers (docs/plans/firmware-usb-protocol.md 5.3)
+    //PC control protocol: parse requests, run handlers (docs/plans/firmware-usb-protocol.md 5.3). Protocol 1.3 shares
+    //control with the UI, so the UI loop below always runs; the MCP indicator follows the host's activity.
     pc_glue_poll_main();
-
-    //While the host owns the scope the UI loop (acquisition, drawing, touch) does not run
-    if(pc_glue_remote())
-    {
-      pc_glue_remote_service();
-      continue;
-    }
+    pc_glue_ui_service();
 #endif
 
     //Handle the touch panel input

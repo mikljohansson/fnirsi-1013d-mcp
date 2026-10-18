@@ -12,23 +12,31 @@ void pc_glue_init(void);              //after the settings are loaded, before us
 void pc_glue_poll_main(void);         //top of the main loop
 void pc_glue_poll_busy(void);         //UI busy loops and touch scans: no FPGA access
 void pc_glue_poll_isr(void);          //1 ms timer interrupt: safe commands and the TX pump only
-int  pc_glue_remote(void);            //1 while the host owns the scope
-void pc_glue_remote_service(void);    //main loop while REMOTE
+void pc_glue_ui_service(void);        //main loop, after the MAIN poll: MCP indicator
+int  pc_glue_ui_arm_allowed(void);    //0 while a host READ_RAW waits for the UI capture in flight
+void pc_glue_ui_capture_start(void);  //fpga_do_conversion started a conversion
+void pc_glue_ui_capture_addr(uint32 addr); //0x14 read of the finished UI capture
 void pc_glue_ui_capture(void);        //UI finished reading a capture
-void pc_glue_power_off(void);         //top of the power-off ISR, before the settings are saved
 
-#define PC_BUSY_POLL()        pc_glue_poll_busy()
-#define PC_TIMER_TICK()       pc_glue_poll_isr()
-#define PC_UI_CAPTURE_DONE()  pc_glue_ui_capture()
-#define PC_POWER_OFF()        pc_glue_power_off()
+#define PC_BUSY_POLL()          pc_glue_poll_busy()
+#define PC_TIMER_TICK()         pc_glue_poll_isr()
+#define PC_UI_CAPTURE_DONE()    pc_glue_ui_capture()
+#define PC_UI_CAPTURE_START()   pc_glue_ui_capture_start()
+#define PC_UI_CAPTURE_ADDR(a)   pc_glue_ui_capture_addr(a)
+#define PC_UI_ARM_ALLOWED()     && pc_glue_ui_arm_allowed()
 
 #else
 
-#define PC_BUSY_POLL()        do { } while(0)
-#define PC_TIMER_TICK()       do { } while(0)
-#define PC_UI_CAPTURE_DONE()  do { } while(0)
-#define PC_POWER_OFF()        do { } while(0)
+#define PC_BUSY_POLL()          do { } while(0)
+#define PC_TIMER_TICK()         do { } while(0)
+#define PC_UI_CAPTURE_DONE()    do { } while(0)
+#define PC_UI_CAPTURE_START()   do { } while(0)
+#define PC_UI_CAPTURE_ADDR(a)   do { } while(0)
+#define PC_UI_ARM_ALLOWED()
 
 #endif
+
+//Protocol 1.3 has no snapshot to restore: the power-off save stores the live settings as 1.00o5 does
+#define PC_POWER_OFF()          do { } while(0)
 
 #endif /* PC_HOOKS_H */

@@ -1,6 +1,7 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// pc_cmds.h - PC protocol session: dispatcher, command handlers, LOCAL/REMOTE ownership and the remote acquisition state
-// machine (docs/protocol.md sections 5, 6, 8). Hardware is reached only through pc_hal.h, so this builds on the host.
+// pc_cmds.h - PC protocol session: dispatcher, command handlers, shared control with the UI (protocol 1.3,
+// docs/plans/collaborative-mode.md) and the host single-capture state machine (docs/protocol.md sections 5, 6, 8, 14).
+// Hardware is reached only through pc_hal.h, so this builds on the host.
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #ifndef PC_CMDS_H
@@ -8,15 +9,16 @@
 
 #include <stdint.h>
 #include "pc_protocol.h"
+#include "pc_hal.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Build identity (overridden from the Makefile)
 
 #ifndef PC_FW_VERSION
 #if PC_FIFO_MAP == 1
-#define PC_FW_VERSION     "0.1.7-m1"   //alternative USB FIFO layout (pc_transport.h)
+#define PC_FW_VERSION     "0.2.0-m1"   //alternative USB FIFO layout (pc_transport.h)
 #else
-#define PC_FW_VERSION     "0.1.7"
+#define PC_FW_VERSION     "0.2.0"
 #endif
 #endif
 
@@ -36,16 +38,41 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 // Poll contexts (plan section 5.2)
 
-#define PC_CTX_MAIN       0     //top of the main loop: may touch the FPGA while REMOTE
+#define PC_CTX_MAIN       0     //top of the main loop, between UI passes: may touch the FPGA and the UI
 #define PC_CTX_BUSY       1     //inside a UI busy loop: answers PING/GET_INFO/GET_STATUS/GET_BATTERY only, no FPGA
 #define PC_CTX_ISR        2     //1 ms timer interrupt: same safe set and the TX pump, never E_BUSY, never the UI/FPGA
 
 //Time without a MAIN poll after which the UI counts as modal (LOCAL_BUSY): other requests then get E_BUSY
 #define PC_MODAL_MS       250
 
-//Ownership
-#define PC_LOCAL          0
-#define PC_REMOTE         1
+//GET_STATUS control byte. 1.3 has one behaviour, shared control (1.2 used 0 LOCAL, 1 REMOTE)
+#define PC_SHARED         2
+
+//GET_STATUS ui_busy byte
+#define PC_UI_IDLE        0
+#define PC_UI_MODAL       1     //a UI menu is open (no main-loop pass for PC_MODAL_MS)
+#define PC_UI_STARTING    2     //USB is up but the main loop has not completed its first pass
+
+//run_state (GET_STATUS offset 40)
+#define PC_RUN_STOP       0
+#define PC_RUN_RUN        1
+#define PC_RUN_SINGLE     2     //a single capture (host ARM or UI single) is armed and waiting
+
+//Capture origin (GET_STATUS offset 41, GET_CAPTURE_INFO, READ_TRACE byte 29)
+#define PC_ORIGIN_HOST    0
+#define PC_ORIGIN_UI_RUN  1
+#define PC_ORIGIN_UI_SINGLE 2
+
+//capture_settings_seq of a capture whose settings changed while it ran; settings_seq never takes this value
+#define PC_SEQ_INVALID    0xFFFFFFFFu
+
+//READ_RAW of a UI capture in RUN waits at most this long for the capture in flight
+#define PC_HOLD_MS        1000
+
+//MCP indicator: host active while DTR is up or a frame came within this time; pulse after each command
+#define PC_HOST_ACTIVE_MS 2000
+#define PC_PULSE_MS       100
+#define PC_CHIP_REDRAW_MS 500
 
 //Acquisition states (P-6.2)
 #define PC_ACQ_IDLE       0
@@ -53,19 +80,6 @@
 #define PC_ACQ_TRIGGERED  2
 #define PC_ACQ_DONE       3
 #define PC_ACQ_ABORTED    4
-
-//Exit reasons (P-6.1)
-#define PC_EXIT_NONE      0
-#define PC_EXIT_RELEASE   1     //SET_REMOTE release or "#LOCAL"
-#define PC_EXIT_TAP       2
-#define PC_EXIT_WATCHDOG  3
-#define PC_EXIT_DTR       4
-#define PC_EXIT_USB       5
-
-//SET_REMOTE flags
-#define PC_RF_KEEP_SETTINGS 0x01
-#define PC_RF_SHOW_TRACES   0x02
-#define PC_RF_IGNORE_DTR    0x04
 
 //Responses cached for duplicate requests (P-4.3)
 #define PC_CACHE_PAYLOAD  256
@@ -97,6 +111,23 @@ typedef struct
   uint32_t caps;
 } pc_variant;
 
+//Settings a capture was taken with (GET_CAPTURE_INFO)
+typedef struct
+{
+  uint32_t   capture_id;
+  uint32_t   seq;               //settings_seq at arm, PC_SEQ_INVALID when it changed before DONE
+  uint8_t    origin;
+  uint8_t    flags;             //bit0 triggered, bit1 auto timeout, bit2/3 overload CH1/CH2, bit4 settings changed
+  uint16_t   trigger_addr;
+  uint16_t   capture_start;
+  uint8_t    timeperdiv;        //0xFF: raw divider
+  uint8_t    source, edge, level, mode;
+  uint32_t   divider;
+  uint32_t   pretrigger;        //samples
+  uint32_t   total;
+  pc_hw_channel ch[2];
+} pc_capture;
+
 typedef struct
 {
   pc_parser  parser;
@@ -118,25 +149,42 @@ typedef struct
   uint32_t   cache_len;
   uint8_t    cache[PC_FRAME_SIZE(PC_CACHE_PAYLOAD)] __attribute__((aligned(4)));
 
-  //Ownership
-  uint8_t    control;
-  uint8_t    remote_flags;
-  uint8_t    exit_reason;
+  //Contexts and link activity
   uint8_t    ui_busy;
   uint8_t    in_poll;
-  uint16_t   watchdog_s;
+  uint8_t    frame_seen;        //a valid frame arrived since boot (MCP indicator)
+  uint8_t    chip_state;        //what the indicator shows now
+  uint32_t   chip_ms;           //when it was last drawn
   uint32_t   last_frame_ms;
+  uint32_t   last_cmd_ms;       //last dispatched command (indicator pulse)
   uint32_t   last_main_ms;
-  uint32_t   last_touch_ms;
-  uint32_t   last_battery_ms;
+  uint32_t   init_ms;
+  uint32_t   first_poll_ms;     //boot -> first MAIN poll, first pass duration (GET_LINK_STATS)
+  uint32_t   first_pass_ms;
 
-  //Remote acquisition
+  //Shared settings tracking
+  uint32_t   settings_fp;
+  uint32_t   settings_seq;
+
+  //Latest finished capture (any origin) and the one in flight
+  pc_capture cap;
+  pc_capture cap_next;
+  uint8_t    ring_valid;        //the FPGA ring still holds capture cap (no arm since its DONE)
+  uint8_t    ui_started;        //a UI conversion started and has not been counted yet
+  uint8_t    ui_trig;           //0x18 at the UI capture's DONE
+  uint16_t   ui_addr;           //0x14 of the UI capture
+
+  //READ_RAW hold while the UI capture in flight finishes
+  uint8_t    ui_hold;           //UI must not re-arm
+  uint8_t    hold_active;
+  uint32_t   hold_deadline;
+
+  //Host single capture
   uint8_t    acq_state;
   uint8_t    fpga_triggered;
   uint8_t    fpga_done;
   uint8_t    auto_timeout_hit;
   uint8_t    armed_once;
-  uint8_t    shown;             //SHOW_TRACES: capture already drawn
   uint32_t   capture_id;
   uint32_t   arm_ms;
   uint16_t   trigger_addr;
@@ -153,8 +201,10 @@ typedef struct
   uint8_t    trace_mask;
   int32_t    trace_sw_index;
 
-  //Raw divider set by SET_TIMEBASE mode 1 (no UI index)
+  //Raw divider set by SET_TIMEBASE mode 1 (no UI index); dropped once the UI changes its time base
   uint8_t    tb_raw;
+  uint8_t    tb_raw_tpd;
+  uint8_t    tb_raw_sr;
   uint32_t   tb_divider;
 
   //Generator values set by SET_GEN (raw DDS words)
@@ -162,6 +212,9 @@ typedef struct
   uint8_t    gen_enable;
   uint32_t   gen_phase;
   uint32_t   gen_thr;
+  uint8_t    gen_ui_en;         //UI copy right after SET_GEN: a UI change of it drops the raw values
+  uint8_t    gen_ui_pct;
+  uint32_t   gen_ui_hz;
 
   //Deferred request (WAIT)
   uint8_t    def_active;
@@ -206,10 +259,13 @@ typedef struct
 
 void     pc_session_init(pc_session *s);                 //reads the FPGA version through the HAL cache
 void     pc_poll(pc_session *s, int ctx);
-int      pc_remote_active(const pc_session *s);
-void     pc_remote_service(pc_session *s);                //MAIN loop while REMOTE: banner tap, battery, trace display
-void     pc_ui_capture_done(pc_session *s);               //the UI finished a capture (LOCAL capture_id)
-int      pc_power_off_restore_needed(const pc_session *s);//power-off ISR: 1 when the UI snapshot must be restored first
+void     pc_ui_service(pc_session *s);                    //every main-loop pass after the MAIN poll: MCP indicator
+
+//UI acquisition hooks (scope_functions.c / fpga_control.c, main-loop code)
+int      pc_ui_arm_allowed(pc_session *s);                //0 while a READ_RAW waits for the UI capture in flight
+void     pc_ui_capture_start(pc_session *s);              //fpga_do_conversion started a conversion
+void     pc_ui_capture_addr(pc_session *s, uint16_t addr);//0x14 read of the finished UI capture
+void     pc_ui_capture_done(pc_session *s);               //the UI read and processed it
 
 //Exposed for tests
 void     pc_variant_from_version(uint16_t version, pc_variant *v);

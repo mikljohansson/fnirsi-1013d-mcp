@@ -672,6 +672,9 @@ void fpga_do_conversion(void)
   //Done with reset
   fpga_write_cmd(0x01);
   fpga_write_byte(0x00);
+
+  //PC protocol: a UI conversion started (the ring no longer holds the last capture)
+  PC_UI_CAPTURE_START();
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 

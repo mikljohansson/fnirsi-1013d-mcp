@@ -5,8 +5,8 @@
 // Host implementation:   host_tests/mock_hal.c (FPGA ring model, fake transport, settable clock).
 //
 // Rules for the target implementation:
-//  - functions marked [FPGA] drive the FPGA bus; pc_cmds.c only calls them from the main-loop poll context while
-//    REMOTE (never from a BUSY poll, never while the UI owns the FPGA).
+//  - functions marked [FPGA] drive the FPGA bus; pc_cmds.c only calls them from the main-loop poll context (top of
+//    the UI loop, between UI passes; never from a BUSY or timer poll).
 //  - functions marked [UI] draw or touch the scope settings; same restriction.
 //  - all others are safe in any poll context.
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -92,7 +92,7 @@ uint32_t pc_hal_auto_timeout_default(uint32_t total_samples);                   
 // Generator (Atlan4 DDS, FPGA 0x50-0x52)
 
 void     pc_hal_gen_read_ui(uint8_t *enable, uint32_t *freq_hz, uint8_t *duty_pct);    //fpgasettings gen_*
-void     pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable);      //[FPGA] duty, freq, enable in that order
+void     pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable);      //[UI][FPGA] duty, freq, enable; UI copy rounded
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Acquisition [FPGA]
@@ -121,7 +121,7 @@ uint8_t  pc_hal_fpga_read_data(void);
 //total_samples per channel. Returns the software trigger index (scope_process_trigger) or -1.
 int32_t  pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t pretrigger_samples, uint8_t ch_mask);
 
-//Current UI trace buffer of a channel and the UI's own capture geometry (LOCAL READ_TRACE)
+//Current UI trace buffer of a channel and the UI's own capture geometry (READ_TRACE of a UI capture)
 const uint8_t *pc_hal_trace(int ch);
 void     pc_hal_trace_ui_info(uint32_t *sample_count, uint32_t *pretrigger, int32_t *sw_trigger_index);
 uint32_t pc_hal_trace_capacity(void);                                                  //bytes per channel buffer
@@ -133,15 +133,22 @@ uint32_t pc_hal_ms(void);                                                       
 void     pc_hal_delay_ms(uint32_t ms);
 uint16_t pc_hal_fpga_version(void);                                                    //cached at init, no bus access
 void     pc_hal_battery(uint8_t *level, uint8_t *charging, uint8_t *keyadc_raw);
-void     pc_hal_battery_refresh(void);                                                 //[UI] battery_check_status()
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Ownership and UI [UI]
+// Shared control with the UI (protocol 1.3, docs/plans/collaborative-mode.md). The UI loop always runs; host SET_*
+// write the live UI settings through the UI's own apply functions and redraw what they changed.
 
-void     pc_hal_remote_enter(void);              //snapshot scopesettings + fpgasettings, stop UI acquisition, draw banner
-void     pc_hal_remote_exit(int keep_settings);  //restore snapshot unless keep, push all settings to the FPGA, redraw
-int      pc_hal_banner_touched(void);            //scan touch panel; 1 when the banner was tapped (waits for release)
-void     pc_hal_show_trace(void);                //SHOW_TRACES: draw the current tracebuffer, redraw banner
+typedef struct
+{
+  uint8_t  run;                 //scopesettings.runstate
+  uint8_t  ui_armed;            //a UI conversion is in flight (display_data_done == 0)
+  uint8_t  long_mode;           //UI long (roll) time base: its own acquisition, no ring capture
+} pc_hw_ui;
+
+void     pc_hal_ui_read(pc_hw_ui *u);
+void     pc_hal_ui_set_run(int run);             //[UI] as the RUN/STOP button; the next UI pass arms afresh
+uint32_t pc_hal_settings_fingerprint(void);      //hash of the capture-relevant UI settings (protocol section 14)
+void     pc_hal_indicator(int state);            //[UI] MCP chip in the top bar: 0 off, 1 on, 2 pulse
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Transport (pc_transport.c on the target). Safe in every context.

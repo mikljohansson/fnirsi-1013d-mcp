@@ -721,7 +721,8 @@ void scope_acquire_trace_data(void)
 {
   uint32 data;
   
-  if((scopesettings.runstate)&&(scopesettings.display_data_done)&&(touchstate == 0))//runstate ok
+  //PC protocol: no re-arm while a host READ_RAW waits for the capture just finished
+  if((scopesettings.runstate)&&(scopesettings.display_data_done)&&(touchstate == 0) PC_UI_ARM_ALLOWED())//runstate ok
   //if((scopesettings.runstate) && (scopesettings.display_data_done))//runstate ok
   {
     //Set the trigger level
@@ -762,6 +763,9 @@ void scope_acquire_trace_data(void)
     //Get trigger point information
     //Later on used to send to the FPGA with command 0x1F
     data = fpga_prepare_for_transfer();
+
+    //PC protocol: raw 0x14 trigger address of this capture
+    PC_UI_CAPTURE_ADDR(data);
 
     //Just using the same calculation for every setting solves the frequency calculation error
     //The signal representation still is correct and the trigger point seems to be more valid also

@@ -22,11 +22,12 @@ MAX_REQUEST_PAYLOAD = 492
 
 CMDS = {
     "PING": 0x0001, "GET_INFO": 0x0002, "GET_STATUS": 0x0003, "SET_REMOTE": 0x0004,
-    "GET_BATTERY": 0x0005, "TEST_PATTERN": 0x0006,
+    "GET_BATTERY": 0x0005, "TEST_PATTERN": 0x0006, "GET_LINK_STATS": 0x0007, "GET_BAD_FRAME": 0x0008,
     "GET_CHANNEL": 0x0100, "SET_CHANNEL": 0x0101, "GET_TIMEBASE": 0x0102, "SET_TIMEBASE": 0x0103,
     "GET_TRIGGER": 0x0104, "SET_TRIGGER": 0x0105,
     "ARM": 0x0200, "FORCE": 0x0201, "STOP": 0x0202, "WAIT": 0x0203, "READ_RAW": 0x0204,
     "READ_TRACE": 0x0205, "READ_LIVE": 0x0206, "ACQUIRE_AVG": 0x0207,
+    "SET_ACQ_STATE": 0x0208, "GET_CAPTURE_INFO": 0x0209,
     "GET_GEN": 0x0300, "SET_GEN": 0x0301, "GET_CAL": 0x0400, "READ_SCREEN": 0x0401,
     "DEBUG_FPGA": 0x0F00, "ENTER_FEL": 0x0F01,
 }
@@ -60,7 +61,7 @@ REQUESTS = [
     ("PING", b"hi", "echo 2 bytes (spec section 13 example, seq 2)"),
     ("GET_INFO", b"", "spec section 13 example, seq 1"),
     ("GET_STATUS", b"", ""),
-    ("SET_REMOTE", struct.pack("<BBH", 1, 0x00, 15), "acquire, flags 0, watchdog 15 s"),
+    ("SET_REMOTE", struct.pack("<BBH", 1, 0x00, 15), "acquire, flags 0, watchdog 15 s (1.3: accepted as a no-op)"),
     ("GET_BATTERY", b"", ""),
     ("TEST_PATTERN", struct.pack("<IB3x", 4076, 0), "4076 byte counter pattern: response frame is exactly 4096 bytes (ZLP case, test T1)"),
     ("GET_CHANNEL", struct.pack("<B", 1), "CH2"),
@@ -79,6 +80,10 @@ REQUESTS = [
     ("READ_TRACE", struct.pack("<BBHII", 0x03, 0x00, 0, 0, 0), "both channels, everything"),
     ("READ_LIVE", struct.pack("<BBH", 0, 0, 100), "CH1 A, 100 bytes"),
     ("ACQUIRE_AVG", struct.pack("<HBBIIII", 64, 0x01, 0x01, 100, 0, 2000, 0), "64 captures, CH1, require trigger"),
+    ("SET_ACQ_STATE", struct.pack("<B3x", 1), "1.3: UI RUN (0 = STOP)"),
+    ("GET_CAPTURE_INFO", b"", "1.3: settings of the latest finished capture"),
+    ("GET_LINK_STATS", b"", "1.2: link counters"),
+    ("GET_BAD_FRAME", b"", "1.2: last request with a payload CRC error"),
     ("GET_GEN", b"", ""),
     ("SET_GEN", struct.pack("<BBBBQII", 0x07, 1, 0, 0, 10_000_000, 5000, 0), "enable, 10 kHz (10,000,000 mHz), 50.00 %"),
     ("GET_CAL", struct.pack("<B", 0), "CH1"),

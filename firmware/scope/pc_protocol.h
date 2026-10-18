@@ -16,7 +16,8 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            2     //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4)
+#define PC_PROTO_MINOR            3     //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+                                        //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
@@ -63,6 +64,8 @@
 #define PC_CMD_READ_TRACE         0x0205
 #define PC_CMD_READ_LIVE          0x0206
 #define PC_CMD_ACQUIRE_AVG        0x0207
+#define PC_CMD_SET_ACQ_STATE      0x0208     //1.3: UI RUN / STOP
+#define PC_CMD_GET_CAPTURE_INFO   0x0209     //1.3: settings of the latest finished capture
 #define PC_CMD_GET_GEN            0x0300
 #define PC_CMD_SET_GEN            0x0301
 #define PC_CMD_GET_CAL            0x0400
@@ -104,6 +107,7 @@
 #define PC_CAP_ENTER_FEL              (1u << 10)
 #define PC_CAP_READ_LAG_UNVERIFIED    (1u << 11)
 #define PC_CAP_INTERLEAVE_UNVERIFIED  (1u << 12)
+#define PC_CAP_SHARED_MODE            (1u << 13)   //1.3: no LOCAL/REMOTE, shared control with the UI
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Decoded header
