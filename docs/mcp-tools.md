@@ -248,6 +248,22 @@ can be hundreds of volts: use a 10x probe or a clamp and check the input rating 
 "with fs = F, the decay is sampled every 1/F; tau below ~5 samples is not resolvable", "AC coupling
 distorts decays longer than the coupling time constant [U value]; use DC coupling for decays".
 
+**`scope_set_decimation`** (tier 1, protocol 1.9, firmware >= 0.2.30 on FPGA 0x1534, capability DECIM). Param
+`filter`: `off` (legacy 8-bit sample skipping), `boxcar` (mean of N raw 200 MSa/s samples), `cic2`, `cic3` (2- / 3-fold
+boxcar). It is the scope's acquisition Filter setting (shared, saved, part of settings_seq); the core-order and
+capture-edge flags are kept as they are. Returns `applied`: `setting`, `effective` and `reason` (the firmware
+lowers the order where the 48-bit accumulators would not be exact: CIC3 only up to N = 10,334, CIC2 up to
+1,050,630; 200 MSa/s and totals over 8190 samples stay legacy), `k`, `n` (= 200 MSa/s / output rate), `shift` S,
+`gain` N^K, `codes_per_count` (2^S / N^K), `noise_equivalent_n`, `storage_bits`, `effective_bits_estimate`
+(8 + log2 sqrt(noise-equivalent N), capped by the 16-bit storage; assumes the raw noise dithers, >= 0.5 LSB),
+`settle_us`, `max_total_samples` (8190), and `ext_latency_shift_samples` with the EXT source; plus the timebase.
+Fails with a hint when the trigger total is over 8190 or the bitstream has no filter. Captures, fetches and
+`processed` reads then use the 16-bit samples (READ_RAW layout 2, READ_TRACE WIDE): `codes` = stored x 2^S / N^K
+plus the mean core compensation (fractional codes), volts with the cores' mean zero and gain, results carry
+`decimation` and a caveat (window length, resolution, raw clipping inside a window is invisible), the `.npz`
+`CH<n>_samples16`. `scope_get_config` shows `decimation` on DECIM bitstreams. Caveats: shared Filter setting, the
+legacy cases, the exactness limits, clipping.
+
 **`scope_spectrum`** (tier 0, protocol 1.7, firmware >= 0.2.28). Reads the spectrum the scope's own spectrum
 view shows (READ_SPECTRUM, docs/protocol.md section 14 row 45): the on-scope FFT of the latest capture, window and
 FFT length as chosen at the scope (N = the largest power of two the record holds, up to the view's length). Takes

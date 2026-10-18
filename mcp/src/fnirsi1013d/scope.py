@@ -70,6 +70,9 @@ class ChannelData:
     raw_b: np.ndarray | None = None
     #: the conversion used for ``volts`` (per-unit calibration or the firmware formula)
     scale: ChannelScale | None = None
+    #: 1.9 decimated capture: the stored 16-bit filter outputs (``codes`` = samples16 x 2^S / N^K + the mean core
+    #: compensation, i.e. compensated ADC codes with fractional resolution)
+    samples16: np.ndarray | None = None
 
     @property
     def volts_per_lsb(self) -> float:
@@ -99,6 +102,8 @@ class Capture:
     capture_info: P.CaptureInfo | None = None
     #: what the client had to do to read it (e.g. pausing RUN), for caveats
     notes: list[str] = field(default_factory=list)
+    #: 1.9: the decimation filter of the capture (None = legacy 8-bit samples)
+    decim: P.DecimConfig | None = None
 
     @property
     def n(self) -> int:
@@ -196,6 +201,8 @@ class CaptureContext:
     trigger: P.Trigger
     timebase: P.Timebase
     channels: dict[int, P.ChannelConfig]
+    #: 1.9 (cap DECIM): the decimation the next arm writes (None without the cap; k = 0 = legacy)
+    decim: P.DecimConfig | None = None
 
     def settings_key(self) -> dict[str, Any]:
         """Same keys as ``CaptureInfo.settings_key`` (for reporting what changed)."""
@@ -203,6 +210,8 @@ class CaptureContext:
         d: dict[str, Any] = {"divider": self.timebase.divider, "trig_source": tr.source, "trig_edge": tr.edge,
                              "trig_level": tr.level, "trig_mode": tr.mode,
                              "pretrigger_samples": tr.pretrigger_samples, "total_samples": tr.total_samples}
+        if self.decim is not None:
+            d["decim"] = f"{self.decim.filter_name} N {self.decim.n} S {self.decim.shift}" if self.decim.k else "off"
         for i, c in sorted(self.channels.items()):
             for k in ("enable", "range", "coupling", "invert", "probe_index", "offset_pwm"):
                 d[f"CH{i + 1}.{k}"] = getattr(c, k)
@@ -432,7 +441,8 @@ class Scope:
         for _ in range(attempts):
             st0 = self.status()
             ctx = CaptureContext(st0.settings_seq, self.get_trigger(cached=False), self.get_timebase(cached=False),
-                                 {c: self.get_channel(c, cached=False) for c in (0, 1)})
+                                 {c: self.get_channel(c, cached=False) for c in (0, 1)},
+                                 self.get_decim().next if self.info.caps & P.Caps.DECIM else None)
             if not self.shared:
                 return ctx
             st1 = self.status()
@@ -525,6 +535,22 @@ class Scope:
         return self._trig
 
     # --- SD card (fw >= 0.2.2, cap SD_SECTORS) -------------------------------------------------------------
+
+    def get_decim(self) -> P.DecimState:
+        """GET_DECIM (protocol 1.9, cap DECIM): the Filter setting, what the next arm writes and why."""
+        return P.DecimState.unpack(self._req(P.Cmd.GET_DECIM))
+
+    def set_decim(self, filter_: int | str, flags: int | None = None) -> P.DecimState:
+        """SET_DECIM: 0/'off', 1/'boxcar', 2/'cic2', 3/'cic3'. ``flags`` (P.SetDecimReq bits: core-order swap, host
+        only; falling-edge capture of the A / B cores, hidden and saved) default to the current ones, so a filter
+        change keeps the person's hidden settings. The firmware lowers K where the result would not be exact or not
+        possible (``DecimState.why``). A filter needs a trigger total of at most 8190 samples."""
+        f = P.DECIM_FILTERS.index(filter_.lower()) if isinstance(filter_, str) else int(filter_)
+        if flags is None:
+            flags = self.get_decim().flags
+        st = P.DecimState.unpack(self._req(P.Cmd.SET_DECIM, P.SetDecimReq(f, flags).pack()))
+        self._trig = self._tb = None  # words and the sample period follow the filter
+        return st
 
     def sd_card(self):
         from .sdcard import SdCard
@@ -667,17 +693,20 @@ class Scope:
         return first, {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
 
     def read_trace(self, channels: Iterable[int | str] = ("CH1",), start: int = 0, count: int = 0,
-                   reread: bool = False, no_invert: bool = False) -> tuple[P.ReadTraceHeader,
-                                                                          dict[int, tuple[P.TraceChannelMeta, np.ndarray]]]:
+                   reread: bool = False, no_invert: bool = False, wide: bool = False
+                   ) -> tuple[P.ReadTraceHeader, dict[int, tuple[P.TraceChannelMeta, np.ndarray]]]:
         """READ_TRACE, split into several requests when needed (count 0 = to the end). The firmware rejects a count
         beyond the trace (E_BAD_ARG detail 8), so until the first header tells the trace length, an open-ended read
-        asks for everything only when the longest possible trace fits one response, else for a short first piece."""
+        asks for everything only when the longest possible trace fits one response, else for a short first piece.
+        ``wide`` (1.9): the u16 samples of a decimated capture (uint16 arrays when the header's decim_mode has bit 7;
+        a legacy capture still answers 8-bit samples)."""
         mask = 0
         for ch in channels:
             mask |= 1 << channel_index(ch)
         chans = [c for c in (0, 1) if mask & (1 << c)]
-        flags = (P.ReadTraceReq.REREAD if reread else 0) | (P.ReadTraceReq.NO_INVERT if no_invert else 0)
-        per = max(1, (self.response_limit - 32 - 16 * len(chans)) // len(chans))
+        flags = (P.ReadTraceReq.REREAD if reread else 0) | (P.ReadTraceReq.NO_INVERT if no_invert else 0) | \
+            (P.ReadTraceReq.WIDE if wide else 0)
+        per = max(1, (self.response_limit - 32 - 16 * len(chans)) // (len(chans) * (2 if wide else 1)))
         # first-piece size for an open-ended read: the trace is normally total_samples long
         try:
             guess = self.get_trigger().total_samples
@@ -720,8 +749,12 @@ class Scope:
             elif hdr.capture_id != hdr0.capture_id:
                 return None  # a newer capture replaced the trace between pieces
             off = 32 + 16 * len(chans)
+            w16 = bool(flags & P.ReadTraceReq.WIDE) and bool(hdr.decim_mode & P.DECIM_WIDE)
             for i, c in enumerate(chans):
-                pieces[c].append(np.frombuffer(data, np.uint8, hdr.count, off + i * hdr.count))
+                if w16:
+                    pieces[c].append(np.frombuffer(data, "<u2", hdr.count, off + 2 * i * hdr.count).astype(np.uint16))
+                else:
+                    pieces[c].append(np.frombuffer(data, np.uint8, hdr.count, off + i * hdr.count))
             pos += hdr.count
             end = hdr.sample_count if count == 0 else min(hdr.sample_count, start + count)
             if pos >= end or hdr.count == 0:
@@ -814,7 +847,7 @@ class Scope:
                 st.capture_origin == P.CaptureOrigin.HOST:
             try:
                 return self._read_capture(chans, start_sample, count, keep_raw, st, ctx.trigger, ctx.timebase,
-                                          ctx.channels, None, expect_id=st.capture_id)
+                                          ctx.channels, None, expect_id=st.capture_id, dec=ctx.decim)
             except CaptureChanged:
                 pass
         for _ in range(3):
@@ -842,16 +875,19 @@ class Scope:
                           flags=(P.StatusFlags.FPGA_TRIGGERED if h.flags & h.F_TRIGGERED else 0) |
                                 (P.StatusFlags.AUTO_TIMEOUT if h.flags & h.F_AUTO_TIMEOUT else 0))
         return self._read_capture(chans, start_sample, count, keep_raw, st, ci.trigger(), ci.timebase(), cfgs, ci,
-                                  expect_id=h.capture_id)
+                                  expect_id=h.capture_id, dec=ci.decim)
 
     def _read_capture(self, chans: list[int], start_sample: int, count: int | None, keep_raw: bool,
                       st: P.StatusResp | None, trig: P.Trigger, tb: P.Timebase, cfgs: dict[int, P.ChannelConfig],
-                      ci: P.CaptureInfo | None, expect_id: int | None = None) -> Capture:
+                      ci: P.CaptureInfo | None, expect_id: int | None = None,
+                      dec: P.DecimConfig | None = None) -> Capture:
         total = trig.total_samples
         if count is None:
             count = total - start_sample
         if start_sample < 0 or count <= 0 or start_sample + count > total:
             raise ValueError(f"sample window {start_sample}+{count} outside 0..{total}")
+        if dec is not None and dec.k:
+            return self._read_capture16(chans, start_sample, count, st, trig, tb, cfgs, ci, expect_id, dec)
         w0 = start_sample // 2
         w1 = (start_sample + count + 1) // 2
         mask = 0
@@ -886,13 +922,49 @@ class Scope:
                        bool(st.flags & P.StatusFlags.AUTO_TIMEOUT), out, trig, origin, hdr.acq_state,
                        st.capture_settings_seq if shared else None, ci)
 
+    def _channel16(self, c: int, cfg: P.ChannelConfig, raw16: np.ndarray, dec: P.DecimConfig) -> ChannelData:
+        """A channel of a decimated capture: stored u16 -> mean raw code of the filter window (x 2^S / N^K), the
+        mean core compensation added for ``codes``; volts with the cores' mean zero and gain (both cores weigh
+        equally in every boxcar / CIC window, N being even)."""
+        cal = self.get_cal(c)
+        sc = self.scale(c, cfg)
+        mean_raw = raw16.astype(np.float64) * dec.code_per_count
+        codes = mean_raw + (cal.adc_a_comp + cal.adc_b_comp) / 2
+        volts = sc.volts_mean_compensated(codes)
+        if cfg.invert:
+            volts = -volts
+        # a rail in the window mean only; a clipped raw sample inside a window is not visible
+        clipped = (mean_raw <= 0.5) | (mean_raw >= 254.5) | (raw16 == 65535)
+        return ChannelData(CHANNEL_NAMES[c], codes, volts, clipped, cfg, scale=sc, samples16=raw16)
+
+    def _read_capture16(self, chans: list[int], start_sample: int, count: int, st: P.StatusResp | None,
+                        trig: P.Trigger, tb: P.Timebase, cfgs: dict[int, P.ChannelConfig], ci: P.CaptureInfo | None,
+                        expect_id: int | None, dec: P.DecimConfig) -> Capture:
+        """1.9: a decimated capture through READ_RAW layout 2 (one u16 sample per word, words = samples)."""
+        mask = 0
+        for c in chans:
+            mask |= 3 << (2 * c)
+        hdr, data = self.read_raw(mask, addr_mode=P.ReadRawReq.ADDR_CAPTURE, address=start_sample, count=count,
+                                  layout=P.ReadRawReq.LAYOUT_WIDE)
+        if expect_id is not None and hdr.capture_id != expect_id:
+            raise CaptureChanged(f"expected capture {expect_id}, READ_RAW returned {hdr.capture_id}")
+        if st is None:
+            st = self.status()
+        out = {CHANNEL_NAMES[c]: self._channel16(c, cfgs[c], np.frombuffer(data[c].tobytes(), "<u2").astype(np.uint16),
+                                                 dec) for c in chans}
+        origin = ORIGIN_NAMES.get(st.capture_origin, "host")
+        return Capture(hdr.capture_id, tb.dt, tb.divider, start_sample, trig.pretrigger_samples, trig.total_samples,
+                       bool(st.flags & P.StatusFlags.FPGA_TRIGGERED) and not (st.flags & P.StatusFlags.AUTO_TIMEOUT),
+                       bool(st.flags & P.StatusFlags.AUTO_TIMEOUT), out, trig, origin, hdr.acq_state,
+                       st.capture_settings_seq, ci, decim=dec)
+
     def read_trace_capture(self, channels: Iterable[int | str] = ("CH1",)) -> Capture:
         """Read the firmware's processed trace (READ_TRACE). Works in LOCAL (the UI's last trace). Collaborative
         firmware: the latest capture with the settings it was taken under (GET_CAPTURE_INFO)."""
         if self.shared:
             for _ in range(3):
                 ci = self.capture_info()
-                hdr, data = self.read_trace(channels)
+                hdr, data = self.read_trace(channels, wide=ci.decim is not None)
                 if hdr.capture_id == ci.header.capture_id:
                     break
             else:
@@ -906,8 +978,12 @@ class Scope:
             cfgs = {c: self.get_channel(c, cached=False) for c in data}
         out: dict[str, ChannelData] = {}
         order = self.info.interleave_order
+        dec = ci.decim if ci is not None else None
         for c, (meta, arr) in data.items():
             cfg = cfgs[c]
+            if dec is not None and arr.dtype == np.uint16:
+                out[CHANNEL_NAMES[c]] = self._channel16(c, cfg, arr, dec)
+                continue
             codes = arr.astype(np.float64)
             clipped = (arr == 0) | (arr == 255)
             sc = self.scale(c, cfg)
@@ -915,15 +991,18 @@ class Scope:
             idx = hdr.start + np.arange(codes.size)
             first_is_b = order == 0
             is_b = (idx % 2 == 0) == first_is_b
-            volts = np.where(is_b, sc.volts_compensated(codes, "B"), sc.volts_compensated(codes, "A"))
+            if dec is not None:  # 8-bit trace of a decimated capture: every sample is a mean of both cores
+                volts = sc.volts_mean_compensated(codes)
+            else:
+                volts = np.where(is_b, sc.volts_compensated(codes, "B"), sc.volts_compensated(codes, "A"))
             out[CHANNEL_NAMES[c]] = ChannelData(CHANNEL_NAMES[c], codes, volts, clipped, cfg, scale=sc)
         dt = (hdr.divider + 1) / P.BASE_CLOCK_HZ
         if ci is not None:
             h = ci.header
-            return Capture(hdr.capture_id, dt, hdr.divider, hdr.start, hdr.hw_trigger_index, hdr.sample_count,
-                           bool(h.flags & h.F_TRIGGERED) and not h.flags & h.F_AUTO_TIMEOUT,
+            return Capture(hdr.capture_id, ci.timebase().dt, hdr.divider, hdr.start, hdr.hw_trigger_index,
+                           hdr.sample_count, bool(h.flags & h.F_TRIGGERED) and not h.flags & h.F_AUTO_TIMEOUT,
                            bool(h.flags & h.F_AUTO_TIMEOUT), out, trig, ORIGIN_NAMES.get(h.origin, "host"),
-                           settings_seq=h.settings_seq, capture_info=ci)
+                           settings_seq=h.settings_seq, capture_info=ci, decim=dec)
         st = self.status()
         return Capture(hdr.capture_id, dt, hdr.divider, hdr.start, hdr.hw_trigger_index, hdr.sample_count,
                        bool(st.flags & P.StatusFlags.FPGA_TRIGGERED), bool(st.flags & P.StatusFlags.AUTO_TIMEOUT),

@@ -199,6 +199,33 @@ def effective_bits(noise_lsb_single: float, n: int) -> float:
     return 8.0 + 0.5 * math.log2(n)
 
 
+def decim_noise_n(k: int, n: int) -> float:
+    """Noise-equivalent number of averaged samples of a K-fold boxcar of N (1 / sum of the squared normalised
+    weights): N for a boxcar, 3N^3 / (2N^2 + 1) for CIC2, about 20N / 11 for CIC3."""
+    if k <= 0 or n <= 1:
+        return 1.0
+    if k == 1:
+        return float(n)
+    if k == 2:
+        return 3.0 * n ** 3 / (2.0 * n * n + 1.0)
+    if n <= 4096:
+        w = np.ones(n) / n
+        w3 = np.convolve(np.convolve(w, w), w)
+        return float(1.0 / np.sum(w3 * w3))
+    return 20.0 * n / 11.0
+
+
+def decim_bits(k: int, n: int, gain: int, shift: int, noise_lsb: float = 1.0) -> dict[str, float]:
+    """Resolution of a decimated sample in bits re the 8-bit range: ``storage`` = 8 + log2(N^K / 2^S) (the stored
+    step is 2^S / N^K codes, at most 16 bits), ``averaging`` = 8 + log2(sqrt(noise-equivalent N)) while the raw noise
+    dithers (>= ~0.5 LSB rms), ``effective`` = the smaller."""
+    if k <= 0:
+        return {"storage": 8.0, "averaging": 8.0, "effective": 8.0}
+    storage = 8.0 + math.log2(gain / (1 << shift))
+    averaging = 8.0 + 0.5 * math.log2(decim_noise_n(k, n)) if noise_lsb >= 0.5 else 8.0
+    return {"storage": storage, "averaging": averaging, "effective": min(storage, averaging)}
+
+
 # ---------------------------------------------------------------------------------------------------------
 # Spectrum
 

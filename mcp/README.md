@@ -40,6 +40,7 @@ fnirsi1013d-sim --variant al3 --port 5555 --signal decay:tau=80us
 |---|---|
 | `--variant stock\|al3\|ef2\|ep4` | FPGA version word 0x1432 / 0x1532 / 0x1632 / 0x1732 with its ring size, memory limit, fixed or programmable geometry, generator |
 | `--variant al3x`, `--ext SIGNAL` | AL3 with the external trigger (0x1533): trigger source EXT on the calibration pin, fed by `--ext` (default: CH2's signal), 3.3 V logic, 22 ns latency |
+| `--variant al3d` | AL3 0x1534: EXT trigger plus the decimation filter (protocol 1.9, caps DECIM): boxcar / CIC2 / CIC3 model with 16-bit samples, the 120 ns pipeline latency and the EXT latency correction (no device averaging) |
 | `--signal SPEC` | CH1 signal; CH2 defaults to the matching TX gate (decay) or a sync square (sine/square) |
 | `--ch1 SPEC`, `--ch2 SPEC` | per-channel signals |
 | `--noise L` | Gaussian noise per ADC core, LSB rms (default 1.0, about 2 LSB as on the real unit) |
@@ -154,6 +155,7 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_fetch_waveform` | 0 | the latest capture (what the screen shows) with the settings it was taken under, without capturing |
 | `scope_measure` | 0 / 1 with `capture=true` | vpp, vmin, vmax, mean, rms, ac_rms, frequency, period, duty, rise/fall time, CH1->CH2 delay |
 | `scope_set_timebase` | 1 | sample rate, window or raw divider |
+| `scope_set_decimation` | 1 | decimation filter off / boxcar / CIC2 / CIC3 (fw >= 0.2.30, FPGA 0x1534): effective filter, N, shift, codes per count, effective bits; captures then read 16-bit samples |
 | `scope_set_trigger` | 1 | source, edge, level (volts or code), mode, pre-trigger, total samples, auto timeout |
 | `scope_capture` | 1 | host single capture (the screen shows it, the scope stays in STOP); statistics, file, inline samples or preview |
 | `scope_acquisition_control` | 1 | arm / wait / force / stop / run (RUN/STOP shared with the scope's button) |
@@ -189,7 +191,8 @@ keeping the host's settings, after `FNIRSI_MCP_LEGACY_IDLE_RELEASE_S` (60 s) wit
 
 Confirmation tokens are bound to the exact
 arguments, single-use, and expire after 120 s. Waveforms of any length go to `.npz` (`t`, volts, codes, clip
-flags, `meta_json`); results up to 2000 points also carry the samples inline, longer ones a 500-point min/max
+flags, `meta_json`; decimated captures add `CH<n>_samples16`, the stored u16 filter outputs, and
+`meta_json["decimation"]`); results up to 2000 points also carry the samples inline, longer ones a 500-point min/max
 preview.
 
 Physical units: volts are converted per ADC core. With a per-unit calibration covering the range,

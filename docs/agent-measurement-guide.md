@@ -52,6 +52,45 @@ descriptions are authoritative. Server setup: `mcp/README.md`.
   per-unit calibration. `cross_check=true` confirms both agree on the same capture.
 - `scope_measure`: vpp, rms, frequency, duty, rise time, CH1->CH2 delay on the last capture (or a fresh one).
 
+## 3a. Choosing a decimation mode for decay curves
+
+On firmware >= 0.2.30 with the 0x1534 bitstream (`scope_info` caps list `DECIM`), `scope_set_decimation` makes the
+FPGA filter every raw 200 MSa/s sample down to the chosen rate instead of skipping samples, and store 16 bits.
+Below 200 MSa/s that is free resolution and anti-aliasing; the cost is a total of at most 8190 samples (set
+`scope_set_trigger total_samples` first) and that it is the scope's own Filter setting (tell the person, turn it
+`off` when done).
+
+- **The decay constant is not biased.** Boxcar and CIC are linear filters and an exponential stays an exponential
+  with the same tau after any of them; only the amplitude scales and the first K output samples after a sharp
+  edge (TX turn-off, flyback) are smeared. Start the fit at least K samples (`t_start >= K x dt`) past the flyback.
+  The sample time is self-consistent with the ADC trigger; with the EXT trigger the firmware corrects the pipeline
+  latency to the nearest output sample (`ext_latency_shift_samples`).
+- **Which filter**: `cic2` is the default for decays (good alias rejection, 1.5 N noise-equivalent averaging, a
+  2-sample edge transient). `boxcar` when the samples right after the edge matter most (1-sample transient, N
+  noise-equivalent). `cic3` for spectra and narrow-band work (best alias rejection, about 1.8 N, 3-sample
+  transient; exact only up to N = 10,334, i.e. down to about 19.4 kSa/s, below that the firmware uses CIC2 and
+  says so in `reason`).
+- **Rate**: as before, at least 10 samples per time constant; then the filter averages all N = 200 MSa/s / rate raw
+  samples per output. Averaging captures (`scope_averaged_capture`) on top still lowers the noise by sqrt(n); with
+  16-bit samples the 8-bit quantisation no longer limits it.
+- Check the range with the filter `off` first: a clipped raw sample inside a filter window does not show in the
+  output.
+
+Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivalent N)` with dithering raw noise
+(the unit has about 1-2 LSB), capped by the 16-bit storage (2^S / N^K codes per count):
+
+| N (output rate) | boxcar | CIC2 | CIC3 |
+|---|---|---|---|
+| 2 (100 MSa/s) | 8.5 | 8.7 | 8.8 |
+| 10 (20 MSa/s) | 9.7 | 9.9 | 10.1 |
+| 20 (10 MSa/s) | 10.2 | 10.5 | 10.6 |
+| 100 (2 MSa/s) | 11.3 | 11.6 | 11.8 |
+| 200 (1 MSa/s) | 11.8 | 12.1 | 12.3 |
+| 1000 (200 kSa/s) | 13.0 | 13.3 | 13.4 |
+| 10000 (20 kSa/s) | 14.6 | 14.9 | 15.1 |
+| 20000 (10 kSa/s) | 15.1 | 15.4 | CIC2: 15.4 |
+| 100000 (2 kSa/s) | 15.6 (storage) | 15.2 (storage) | CIC2: 15.2 |
+
 ## 4. The screen is shared
 
 On collaborative firmware the person at the scope can change any setting at any time; the last change wins. Every
@@ -96,7 +135,7 @@ Every waveform is saved as `.npz` (path in `file`); load with `numpy.load(path)`
 
 | Tool | Arrays |
 |---|---|
-| capture / fetch | `t` (s, 0 = trigger), `CH1_volts`, `CH1_codes`, `CH1_clipped` (and `_raw_a` / `_raw_b` with raw=true) |
+| capture / fetch | `t` (s, 0 = trigger), `CH1_volts`, `CH1_codes`, `CH1_clipped` (and `_raw_a` / `_raw_b` with raw=true; decimated captures: `CH1_samples16`, codes are fractional) |
 | averaged_capture | `t`, `CH1_mean`, `CH1_std`, `CH1_clipped_any`, `edge_shifts_samples` |
 | decay_fit | `t` (s after the edge), `data`, `fit`, `residual`, `fit_mask`, `excluded`, `std` |
 | capture_and_fft | `f` (Hz), `amplitude_vrms` |

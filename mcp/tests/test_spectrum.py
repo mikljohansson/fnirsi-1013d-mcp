@@ -87,7 +87,7 @@ def test_scope_fft_model_level():
 def test_read_spectrum_needs_the_view(sim_factory):
     srv = sim_factory(signal=SINE)
     with Scope.connect(srv.url) as s:
-        assert s.info.proto_minor == 7
+        assert s.info.proto_minor == P.PROTO_MINOR
         s.capture(["CH1"])
         assert s.status().display_mode == P.DisplayMode.SCOPE
         with pytest.raises(DeviceError) as e:

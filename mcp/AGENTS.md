@@ -2,7 +2,7 @@
 
 Python host library, device simulator, MCP server and bench CLIs for the FNIRSI 1013D open firmware's USB protocol.
 Read first: `../AGENTS.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec; **section 14 is how
-the firmware actually behaves**, rows 30-45 are protocol 1.3-1.7), `../docs/mcp-tools.md` (tool design),
+the firmware actually behaves**, rows 30-47 are protocol 1.3-1.9), `../docs/mcp-tools.md` (tool design),
 `README.md` (user-facing install, tools, CLIs, output formats), `../docs/agent-measurement-guide.md` (how agents
 should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those here; fix them instead.
 
@@ -28,13 +28,17 @@ should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those
 
 | Module | Role |
 |---|---|
-| `protocol.py` | Pure wire format: frames, `FrameParser`, `Cmd`/`Status`/`Caps`/`Control`/`RunState`/`CaptureOrigin`/`ExtFlags`/`UiBusy`, payload dataclasses (tolerant unpack), CaptureInfo, SD structs, eGON checksum, GET_LINK_STATS names by count (`link_stats_names`), GET_EVENT_LOG (`parse_event_log`, `DeviceEvent.describe`, reset snapshot), restart record names, scaling helpers, DEBUG_FPGA codec. |
+| `protocol.py` | Pure wire format (no numpy): frames, `FrameParser`, `Cmd`/`Status`/`Caps`/`Control`/`RunState`/`CaptureOrigin`/`ExtFlags`/`UiBusy`, payload dataclasses (tolerant unpack), CaptureInfo, SD structs, eGON checksum, GET_LINK_STATS names by count (`link_stats_names`), GET_EVENT_LOG (`parse_event_log`, `DeviceEvent.describe`, reset snapshot), restart record names, scaling helpers, DEBUG_FPGA codec, READ_SPECTRUM / FFT_BENCH codecs, decimation maths (`decim_config` etc.,
+a mirror of `firmware/scope/pc_decim.c`, checked against the `decim` vectors), `DecimState`, CaptureInfo 76. |
 | `transport.py` | `TcpLink`, `SerialLink`, discovery, `Transport` (seq, same-seq retries, deferred WAIT/ACQUIRE_AVG with control requests, resync, recovery, timeout classes incl. 2.5 s bulk on 1.3, first-answer-wins inbox, no resend after a cancelled deferred). |
-| `scope.py` | `Scope` client: one method per command; `capture` (host single), `read_capture` (latest capture of any origin with its GET_CAPTURE_INFO settings), `read_trace_capture`, `capture_context`, `set_acq_state`, `ensure_control`/`end_control` + `legacy_*` (1.2 model), `scale()` (per-core volts via calibration), `sd_*`, `event_log(rearm=)`, `link_stats()`, `read_spectrum()` (`Spectrum`). |
+| `scope.py` | `Scope` client: one method per command; `capture` (host single), `read_capture` (latest capture of any origin with its GET_CAPTURE_INFO settings), `read_trace_capture`, `capture_context`, `set_acq_state`, `ensure_control`/`end_control` + `legacy_*` (1.2 model), `scale()` (per-core volts via calibration), `sd_*`, `event_log(rearm=)`, `link_stats()`, `read_spectrum()` (`Spectrum`), `fft_bench()`, `get_decim()` /
+`set_decim()` (keeps the flags by default); decimated captures (`Capture.decim`, `ChannelData.samples16`) through
+`_read_capture16` (READ_RAW layout 2) and `read_trace(wide=True)`; `CaptureContext.decim` keeps the fast host-capture
+path. |
 | `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points, least-squares zero / 1/gain / PWM slope per channel-range-core, channel model `zero = Z + slope x dcoffset`), `channel_scale`, T8 importer CLI. |
-| `analysis.py` | Stats, frequency, edges, Welford averager, FFT, decay fits, sample points, `scope_fft_db` (float model of the on-scope FFT) and `compare_spectra`. |
+| `analysis.py` | Stats, frequency, edges, Welford averager, FFT, decay fits, sample points, `scope_fft_db` (float model of the on-scope FFT), `compare_spectra`, `decim_noise_n` / `decim_bits`. |
 | `simulator.py` | `Device` (protocol state machine, FPGA ring, shared mode, legacy mode, SD card, EXT trigger, event log) + `SimServer` (TCP) with test hooks. CLI `fnirsi1013d-sim`. |
-| `server.py` | FastMCP server `fnirsi1013d-mcp`, 25 tools (list with tiers in README.md). |
+| `server.py` | FastMCP server `fnirsi1013d-mcp`, 26 tools (list with tiers in README.md). |
 | `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 attempts, FEL-device check between), usbipd, sunxi-fel RAM load, `#VER`; `--persist` / `--persist-only` / `--restore` (SD sector 750 via the firmware). |
 | `sdcard.py` | SD access (`SdCard`: checked reads, verified backups, staged 32-sector writes, compare), `plan_write`, `check_image`, `image_version`. |
 | `sdcli.py` | `fnirsi1013d-sd` info / read / write (`--dry-run`, `--yes` + typed confirmation, backup first). |
@@ -61,7 +65,9 @@ should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those
   `DEVICE RESTARTED`. `--fft [--reps n]`: FFT_BENCH table (same columns as host_tests/fft_bench.py), simulator
   only so far.
 - **`fnirsi1013d-sd`**: bench SD access; writes need `--yes` + typed `WRITE <n>@<sector>`, back up first.
-- **`fnirsi1013d-sim`**: `--variant stock|al3|ef2|ep4|al3x`, `--legacy`, `--ext`, `--ui-period`, `--caps`, ...
+- **`fnirsi1013d-sim`**: `--variant stock|al3|ef2|ep4|al3x|al3d` (al3d = 0x1534 with the decimation model:
+  sub-sampled boxcar^K of the noise-free core-mean code plus output noise with the exact boxcar variance, seeded
+  per word block; 120 ns pipeline latency; EXT latency shift), `--legacy`, `--ext`, `--ui-period`, `--caps`, ...
 - **`fnirsi1013d-soak`**: `--mode status|ping|capture`, `--duration` (30 min), `--interval` (0.1 s),
   `--reopen-timeout` (60 s), `--log`. Logs host facts (USB selective suspend via powercfg, hub path), uptime at
   open/reopen/end (and every status poll), drops with Windows error codes, port gone/back, reopen; after a reopen
@@ -81,6 +87,7 @@ should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those
 | 1.5 | 0.2.12+ | GET_EVENT_LOG 0x0009 (fast path; 64 then 128 entries, reset-snapshot tail from 0.2.15, request flags byte bit 0 = re-arm from 0.2.18, bus-level ring tail from 0.2.24) |
 | 1.6 | 0.2.27+ | FFT_BENCH 0x0F02 (diagnostic; `Scope.fft_bench`, 5 s timeout, `fnirsi1013d-bench --fft`) |
 | 1.7 | 0.2.28+ | spectrum view: GET_STATUS byte 43 display_mode, READ_SPECTRUM 0x020A (bulk timeout class; 32-byte header, i16 centi-dBV) |
+| 1.9 | 0.2.30+ | decimation filter (caps bit 15 DECIM on FPGA 0x1534): GET_DECIM 0x020C / SET_DECIM 0x020D, GET_TRIGGER words = samples and GET_TIMEBASE period N x 5 ns while on, READ_TRACE flag bit 2 WIDE (header bytes 30/31 = mode, S), READ_RAW layout 2, GET_CAPTURE_INFO 76 bytes. 1.8 was skipped |
 
 GET_LINK_STATS counts (named by the count field): 27 (0.1.4-0.1.7), 29 (0.2.0-0.2.1), 31 (0.2.2-0.2.3),
 35 (0.2.4), 41 (0.2.5-0.2.6), 47 (0.2.7-0.2.11), 48 (0.2.12-0.2.16, usb_irq_polled), 49 (0.2.17-0.2.18,
@@ -119,19 +126,20 @@ range-independent; 0 V at dcoffset 0: CH1 A 132.47 / B 127.14, CH2 A 128.80 / B 
 firmware gains). The firmware formula assumes 128 on the compensated mean. Grounds: the probe ground is VRF1,
 +1.24 V over the USB ground (fpga/al3/README.md); the calibration output reads -1.24 / +1.9 V against it by design.
 
-## Tests (`tests/`, 280, about 50 s)
+## Tests (`tests/`, 289, about 50 s)
 
 `test_protocol` (codec, structs, vectors, link stats/event log), `test_transport` (incl. the scripted-link deferred
 cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `test_shared_mode` (1.3),
 `test_firmware_match` (section 14 items), `test_server` (every tool in-process, restarts, legacy fallback),
 `test_stdio` (server subprocess), `test_analysis`, `test_calibration`, `test_flash` (FEL flow, bench wrapper),
 `test_sdcard` (SD commands, persist, resume after drops, restore, CLI), `test_ext_trigger`, `test_soak`,
-`test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH).
+`test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH), `test_decim` (1.9: maths vs
+the firmware vectors, wire layouts, simulator noise / volts / trigger / EXT latency, `scope_set_decimation`).
 Fixtures: `sim`/`transport`/`scope` are collaborative with UI captures on demand (`ui_capture_period_s=0`);
 `legacy_sim` / `sim_factory(legacy=True)` give the 1.2 model. Simulator hooks: `SimServer.corrupt_next`,
 `garbage_next`, `drop_next`, `bad_crc_next`, `lose_next`/`lose_cmd`, `drop_link_on`; `Device.ui_set_*`,
 `ui_press_run/stop`, `ui_run_capture`, `ui_set_spectrum` (display mode, window, FFT length, channel), `on_arm`,
-`user_tap` (legacy), `log_event` (also feeds the bus-level ring), `self_restart`, `sd.*` faults.
+`user_tap` (legacy), `log_event` (also feeds the bus-level ring), `self_restart`, `ui_set_decim`, `sd.*` faults.
 Run: `.venv/Scripts/python -m pytest -q`; WSL: `wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/mcp &&
 ~/.venvs/fnirsi1013d-mcp/bin/python -m pytest -q -p no:cacheprovider"`; lint: `.venv/Scripts/ruff check --select
 F,E9,B023 --line-length 120 src tests`; vectors: `python -m fnirsi1013d.vectors --check` (the C checker:

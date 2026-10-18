@@ -69,16 +69,23 @@ class VariantSpec:
     fresh_after: int = 0
     #: bitstream 0x1533: trigger source 2 = EXT on the calibration pin (shared with the generator)
     ext_trigger: bool = False
+    #: bitstream 0x1534: decimation filter (boxcar / CIC2 / CIC3) with 16-bit samples (protocol 1.9)
+    decim: bool = False
 
 
 #: EXT trigger path latency from the pin (fpga-gen2 simulation: 20-25 ns)
 EXT_LATENCY_S = 22e-9
+#: decimation filter: fixed latency from pin to memory (12 write clocks) for every K and N (row 47)
+DECIM_LATENCY_S = 120e-9
+#: decimation model: sub-samples per output period (exact for N <= this)
+DECIM_SUBSAMPLES = 64
 EXT_THRESHOLD_V = 1.65
 
 VARIANTS = {
     "stock": VariantSpec("stock", 0x1432, P.FpgaVariant.STOCK, 4096, 3000, False, False, 910, 2000),
     "al3": VariantSpec("al3", 0x1532, P.FpgaVariant.AL3, 8192, 16382, True, True),
     "al3x": VariantSpec("al3x", 0x1533, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True),
+    "al3d": VariantSpec("al3d", 0x1534, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True),
     "ef2": VariantSpec("ef2", 0x1632, P.FpgaVariant.EF2, 6144, 12286, True, True),
     "ep4": VariantSpec("ep4", 0x1732, P.FpgaVariant.EP4, 6144, 12286, True, True),
 }
@@ -221,10 +228,12 @@ class Settings:
     sr_index: int = 4
     trigger: TriggerState = field(default_factory=TriggerState)
     gen: GenState = field(default_factory=GenState)
+    #: 1.9: the Filter setting as the firmware keeps it: bits 1:0 K requested, bits 2-4 P.DECIM_FLAGS
+    decim: int = 0
 
     def copy(self) -> "Settings":
         return Settings([replace(c) for c in self.channels], self.divider, self.tpd_index, self.sr_index,
-                        replace(self.trigger), replace(self.gen))
+                        replace(self.trigger), replace(self.gen), self.decim)
 
 
 @dataclass
@@ -391,7 +400,13 @@ class Device:
         self.ring = self.rng.integers(100, 156, size=(4, R), dtype=np.int64).astype(np.uint8)
         self._pending_capture: dict | None = None
         self.capture_divider = self.settings.divider
+        #: ring words of the capture: pretrigger words written, total words
         self.capture_geometry = (750, 1500)
+        #: the capture's samples (pretrigger, total) and decimation (k = 0: legacy 8-bit)
+        self.capture_samples = (1500, 3000)
+        self.capture_decim = P.DecimConfig()
+        #: decimation written at the last arm (GET_DECIM bytes 24/25, FPGA 0x29)
+        self.decim_written: P.DecimConfig | None = None
         self.relay_switches = 0
         self.relay_settle_until = 0.0
         self.deferred: Deferred | None = None
@@ -464,6 +479,9 @@ class Device:
             c |= P.Caps.GENERATOR_DDS
         if self.spec.ext_trigger:
             c |= P.Caps.EXT_TRIGGER
+        if self.spec.decim:
+            c |= P.Caps.DECIM
+            c &= ~P.Caps.DEVICE_AVERAGE  # the averaging model is 8-bit only (the firmware has no ACQUIRE_AVG)
         return int(c) & ~self.cfg.caps_clear
 
     # --- time ---------------------------------------------------------------------------------------
@@ -499,9 +517,8 @@ class Device:
 
     # --- signal generation ---------------------------------------------------------------------------
 
-    def _codes(self, ch: int, t: np.ndarray, core: str, settings: Settings,
-               noise: np.ndarray | None = None) -> np.ndarray:
-        """Uncompensated 8-bit codes of one core at times t. ``noise`` (LSB) defaults to fresh noise."""
+    def _analog(self, ch: int, t: np.ndarray, core: str | None, settings: Settings) -> np.ndarray:
+        """Noise-free core code (float) at times t; ``core`` None = the mean of both cores."""
         sig = self.cfg.signals[ch]
         v = sig.eval(t, settings.gen)
         cs = settings.channels[ch]
@@ -513,9 +530,18 @@ class Device:
             zero = P.zero_code_q8(cs.dcoffset, cal.dc_shift_value) / 256.0
         else:
             zero = 128.0 + self.cfg.offset_slope * cs.dcoffset
-        code = zero + v / vpl + self.cfg.zero_error[ch][0 if core == "A" else 1]
+        ze = self.cfg.zero_error[ch]
+        if core is None:
+            return zero + v / vpl + (ze[0] + ze[1] + self.cfg.core_b_offset[ch]) / 2
+        code = zero + v / vpl + ze[0 if core == "A" else 1]
         if core == "B":
             code = code + self.cfg.core_b_offset[ch]
+        return code
+
+    def _codes(self, ch: int, t: np.ndarray, core: str, settings: Settings,
+               noise: np.ndarray | None = None) -> np.ndarray:
+        """Uncompensated 8-bit codes of one core at times t. ``noise`` (LSB) defaults to fresh noise."""
+        code = self._analog(ch, t, core, settings)
         if noise is None and self.cfg.noise_lsb > 0:
             noise = self.rng.normal(0.0, self.cfg.noise_lsb, size=code.shape)
         if noise is not None:
@@ -553,22 +579,71 @@ class Device:
             out[core] = self._codes(ch, tt, ab, settings, None if nz is None else nz[core])
         return out
 
-    def _ext_words(self, t0: float, k0: int, n: int, dt: float, settings: Settings) -> np.ndarray:
+    def _ext_words(self, t0: float, k0: int, n: int, dt: float, settings: Settings,
+                   dec: P.DecimConfig | None = None) -> np.ndarray:
         """EXT input per write clock as codes 0 / 255: the pin's logic level, seen EXT_LATENCY_S late."""
         sig = self.cfg.ext_signal or self.cfg.signals[1]
         k = np.arange(k0, k0 + n, dtype=np.float64)
-        t = t0 + 2 * k * dt + dt - EXT_LATENCY_S
+        if dec is not None and dec.k:
+            t = t0 + k * dec.n * 5e-9 - EXT_LATENCY_S  # one output sample per word
+        else:
+            t = t0 + 2 * k * dt + dt - EXT_LATENCY_S
         return np.where(sig.eval(t, settings.gen) > EXT_THRESHOLD_V, 255, 0).astype(np.uint8)
+
+    def decim_config(self, settings: Settings | None = None) -> P.DecimConfig:
+        """The decimation an arm with these settings writes (pc_decim_next)."""
+        s = settings or self.settings
+        return P.decim_config(s.decim & 3, s.decim & P.DECIM_FLAGS, s.divider, s.trigger.total_samples,
+                              self.spec.decim)
+
+    def _decim_samples(self, ch: int, t0: float, k0: int, n: int, settings: Settings, seed: int,
+                       dec: P.DecimConfig) -> np.ndarray:
+        """Stored 16-bit samples k0..k0+n-1 of one channel with the filter on (boxcar / CIC2 / CIC3 model).
+
+        Word k is written at t0 + k N 5 ns; its newest raw sample was taken DECIM_LATENCY_S earlier. The filter is
+        the K-fold boxcar of N raw samples (gain N^K), modelled on M = min(N, 64) sub-samples per output period of
+        the noise-free core-mean code (clipped to the 8-bit rails); the raw noise (cfg.noise_lsb plus 1/12 LSB^2 of
+        quantisation) enters at the output with the exact boxcar variance. Stored = min(65535, floor(y / 2^S)).
+        The noise is seeded per block of words, so the trigger search and the stored ring agree."""
+        N, K = dec.n, dec.k
+        M = min(N, DECIM_SUBSAMPLES)
+        w = np.ones(M) / M
+        for _ in range(K - 1):
+            w = np.convolve(w, np.ones(M) / M)
+        L = w.size
+        step = N * 5e-9 / M
+        t_end0 = t0 + k0 * N * 5e-9 - DECIM_LATENCY_S
+        g = t_end0 - (L - 1) * step + np.arange((n - 1) * M + L) * step
+        c = np.clip(self._analog(ch, g, None, settings), 0.0, 255.0)
+        mean = np.convolve(c, w, "valid")[::M][:n]
+        if self.cfg.noise_lsb > 0:
+            B = self._NOISE_BLOCK
+            b0, b1 = k0 // B, (k0 + n - 1) // B
+            nz = np.concatenate([np.random.default_rng((seed, b + (2 << 40), ch)).normal(0.0, 1.0, B)
+                                 for b in range(b0, b1 + 1)])[k0 - b0 * B: k0 - b0 * B + n]
+            sigma = math.sqrt(self.cfg.noise_lsb ** 2 + 1 / 12) * math.sqrt(float(np.sum(w * w)) * M / N)
+            mean = mean + sigma * nz
+        y = np.clip(mean, 0.0, 255.0) * dec.gain
+        return np.minimum(np.floor(y / (1 << dec.shift)), 65535).astype(np.uint16)
+
+    def _dwords(self, t0: float, k0: int, n: int, settings: Settings, seed: int, dec: P.DecimConfig) -> np.ndarray:
+        """(4, n) ring bytes of a decimated capture: per channel low byte at core A, high byte at core B."""
+        out = np.empty((4, n), dtype=np.uint8)
+        for ch in (0, 1):
+            v = self._decim_samples(ch, t0, k0, n, settings, seed, dec)
+            out[2 * ch] = v & 0xFF
+            out[2 * ch + 1] = v >> 8
+        return out
 
     def _find_trigger(self, a: np.ndarray, prev: int | None, trig: TriggerState) -> int:
         """Index in a of the first crossing (current sample) or -1. prev: sample before a[0]."""
         if prev is None:
             if len(a) < 2:
                 return -1
-            pa, ca, off = a[:-1].astype(np.int16), a[1:].astype(np.int16), 1
+            pa, ca, off = a[:-1].astype(np.int32), a[1:].astype(np.int32), 1
         else:
-            pa = np.concatenate(([prev], a[:-1])).astype(np.int16)
-            ca, off = a.astype(np.int16), 0
+            pa = np.concatenate(([prev], a[:-1])).astype(np.int32)
+            ca, off = a.astype(np.int32), 0
         lvl = trig.level
         if trig.edge == 0:
             hit = (pa < lvl) & (ca >= lvl)
@@ -578,11 +653,16 @@ class Device:
         return int(idx[0]) + off if len(idx) else -1
 
     def geometry(self, settings: Settings | None = None) -> tuple[int, int, int]:
-        """pretrigger_words, total_words, auto_timeout write clocks."""
+        """pretrigger_words, total_words, auto_timeout write clocks. 1.9 decimated: one sample per word, and with
+        the EXT source the pretrigger words are lowered by the EXT latency shift (row 47)."""
         s = settings or self.settings
         tr = s.trigger
         if not self.spec.programmable:
             return 750, 1500, tr.auto_timeout or 1500
+        dec = self.decim_config(s)
+        if dec.k:
+            shift = min(dec.ext_shift, tr.pretrigger_samples) if tr.source == 2 else 0
+            return tr.pretrigger_samples - shift, tr.total_samples, tr.auto_timeout or tr.total_samples
         return tr.pretrigger_samples // 2, tr.total_samples // 2, tr.auto_timeout or tr.total_samples
 
     def simulate_capture(self, settings: Settings, forced: bool = False) -> dict:
@@ -591,6 +671,8 @@ class Device:
         R = self.spec.ring_words
         Pw, Tw, auto_to = self.geometry(settings)
         dt = self.dt(settings.divider)
+        dec = self.decim_config(settings)
+        wp = dec.n * 5e-9 if dec.k else 2 * dt  # write period of one ring word
         t0 = self.pyrng.uniform(0.0, 10.0)
         w0 = self.pyrng.randrange(R)
         seed = self.pyrng.randrange(1 << 62)
@@ -599,6 +681,20 @@ class Device:
         ext = tr.source == 2
         if ext:  # logic level of the pin, compared at mid-scale; the edge polarity as configured
             tr = replace(tr, level=128)
+        elif dec.k:  # 0x55: the 16-bit level, compared with the stored sample of the source channel
+            tr = replace(tr, level=P.decim_level16(tr.level, dec.gain, dec.shift))
+
+        def make_words(k0: int, n: int) -> np.ndarray:
+            if dec.k:
+                return self._dwords(t0, k0, n, settings, seed, dec)
+            return self._words(t0, k0, n, dt, settings, seed)
+
+        def trig_samples(k0: int, n: int) -> np.ndarray:
+            if ext:
+                return self._ext_words(t0, k0, n, dt, settings, dec)
+            if dec.k:
+                return self._decim_samples(src // 2, t0, k0, n, settings, seed, dec)
+            return self._words(t0, k0, n, dt, settings, seed)[src]
         kt = -1
         auto = tr.mode == 0
         limit = auto_to if auto else (1 << 21)
@@ -610,10 +706,7 @@ class Device:
             while k < Pw + limit:
                 n = min(chunk, Pw + limit - k)
                 k0, nn = (k - 1 if prev is None else k), n + (1 if prev is None else 0)
-                if ext:
-                    a = self._ext_words(t0, k0, nn, dt, settings)
-                else:
-                    a = self._words(t0, k0, nn, dt, settings, seed)[src]
+                a = trig_samples(k0, nn)
                 idx = self._find_trigger(a, prev, tr)
                 if idx >= 0:
                     kt = (k - 1 if prev is None else k) + idx
@@ -621,14 +714,16 @@ class Device:
                 prev = int(a[-1])
                 k += n
         res: dict = {"t0": t0, "dt": dt, "divider": settings.divider, "Pw": Pw, "Tw": Tw,
-                     "settings": settings.copy(), "seq": self.settings_seq}
+                     "settings": settings.copy(), "seq": self.settings_seq, "decim": dec,
+                     "samples": (settings.trigger.pretrigger_samples, settings.trigger.total_samples)
+                     if self.spec.programmable else (1500, 3000)}
         if self.spec.ext_trigger:  # did the pin toggle during the capture window (GET_CAPTURE_INFO bit 5)?
-            e = self._ext_words(t0, Pw, Tw + Pw, dt, settings)
+            e = self._ext_words(t0, Pw, Tw + Pw, dt, settings, dec)
             res["ext_edge"] = bool(np.any(np.diff(e.astype(np.int16)) != 0))
         if kt >= 0:
             end = kt + (Tw - Pw)
             k_first = end - R
-            words = self._words(t0, k_first, R, dt, settings, seed)
+            words = make_words(k_first, R)
             addr = (w0 + np.arange(k_first, end)) % R
             ring = self.ring.copy()
             if self.spec.fresh_before:
@@ -643,18 +738,18 @@ class Device:
                 ring[:, addr] = words
             trig_addr = (w0 + kt + self.cfg.trigger_align_offset) % R
             res.update(ring=ring, trigger_addr=trig_addr, triggered=True, auto_timeout=False,
-                       t_trigger=kt * 2 * dt, t_done=end * 2 * dt)
+                       t_trigger=kt * wp, t_done=end * wp)
             return res
         if auto or forced:
             # auto timeout: FPGA forces trigger_addr = pretrigger_words; data contiguous, not synchronised
             end = Pw + (auto_to if not forced else 0) + Tw
-            words = self._words(t0, end - R, R, dt, settings, seed)
+            words = make_words(end - R, R)
             ring = np.empty_like(self.ring)
             # stream word (end - Tw + a) sits at address a for a in [0, Tw); older words wrap behind
             addr = (np.arange(end - R, end) - (end - Tw)) % R
             ring[:, addr] = words
             res.update(ring=ring, trigger_addr=Pw % R, triggered=False, auto_timeout=True,
-                       t_trigger=None, t_done=(Pw + (auto_to if not forced else 0) + Tw) * 2 * dt)
+                       t_trigger=None, t_done=(Pw + (auto_to if not forced else 0) + Tw) * wp)
             return res
         res.update(ring=None, triggered=False, auto_timeout=False, t_trigger=None, t_done=None)
         return res
@@ -689,6 +784,8 @@ class Device:
         self.trigger_addr = pc["trigger_addr"]
         self.capture_start_word = (self.trigger_addr - pc["Pw"]) % R
         self.capture_geometry = (pc["Pw"], pc["Tw"])
+        self.capture_samples = pc.get("samples", (2 * pc["Pw"], 2 * pc["Tw"]))
+        self.capture_decim = pc.get("decim") or P.DecimConfig()
         self.capture_divider = pc["divider"]
         self.fpga_triggered = pc["triggered"]
         self.fpga_done = True
@@ -742,7 +839,7 @@ class Device:
         ch = tuple((c.enable, c.range, c.coupling, c.dcoffset, c.invert, c.probe_index) for c in s.channels)
         tr = s.trigger
         return ch, s.divider, (tr.source, tr.edge, tr.level, tr.mode, tr.pretrigger_samples, tr.total_samples,
-                               tr.holdoff, tr.auto_timeout)
+                               tr.holdoff, tr.auto_timeout), s.decim
 
     def _bump_if_changed(self, before: tuple) -> None:
         if self.settings_key() != before:
@@ -822,6 +919,8 @@ class Device:
         self.fpga_done = False
         self.auto_timeout_flag = False
         self._pending_capture = self.simulate_capture(self.settings)
+        if self.spec.decim:
+            self.decim_written = self._pending_capture["decim"]
         self.tick()
 
     def force(self) -> None:
@@ -947,15 +1046,18 @@ class Device:
              (P.CaptureInfoHeader.F_SETTINGS_CHANGED if getattr(self, "capture_settings_changed", False) else 0) | \
              (P.CaptureInfoHeader.F_EXT_EDGE if getattr(self, "capture_ext_edge", False) else 0)
         tr = s.trigger
+        pre, total = self.capture_samples
         h = P.CaptureInfoHeader(self.capture_id & 0xFFFFFFFF, self.capture_settings_seq, self.capture_origin, fl,
                                 self.trigger_addr, self.capture_start_word, self.capture_divider, s.tpd_index,
-                                tr.source, tr.edge, tr.level, tr.mode, 2 * Pw, 2 * Tw)
+                                tr.source, tr.edge, tr.level, tr.mode, pre, total)
         chans = []
         for ch in (0, 1):
             cc = self.channel_config(ch, s)
             chans.append(P.CaptureChannelInfo(cc.enable, cc.range, cc.coupling, cc.invert, cc.probe_index,
                                               cc.offset_pwm, cc.uv_per_lsb_q8, cc.zero_code_q8))
-        return P.CaptureInfo(h, chans)
+        d = self.capture_decim
+        return P.CaptureInfo(h, chans, d.status, d.shift, (min(d.ext_shift, pre) if tr.source == 2 else 0),
+                             d.n, has_decim=True)
 
     def info(self) -> P.InfoResp:
         sp = self.spec
@@ -968,14 +1070,20 @@ class Device:
 
     def timebase(self) -> P.Timebase:
         s = self.settings
-        return P.timebase_for_divider(s.divider, s.tpd_index, s.sr_index)
+        tb = P.timebase_for_divider(s.divider, s.tpd_index, s.sr_index)
+        dec = self.decim_config()
+        if dec.k:  # 1.9: the output period N x 5 ns
+            tb.sample_rate_hz, tb.sample_period_ps = P.BASE_CLOCK_HZ // dec.n, min(5000 * dec.n, 0xFFFFFFFF)
+        return tb
 
     def trigger(self) -> P.Trigger:
         tr = self.settings.trigger
         Pw, Tw, auto_to = self.geometry()
+        pre, total = (tr.pretrigger_samples, tr.total_samples) if self.spec.programmable else (1500, 3000)
+        per = 1 if self.decim_config().k else 2
         return P.Trigger(source=tr.source, edge=tr.edge, level=tr.level, mode=tr.mode,
-                         pretrigger_samples=Pw * 2, total_samples=Tw * 2, holdoff=tr.holdoff,
-                         auto_timeout=auto_to, pretrigger_words=Pw, total_words=Tw)
+                         pretrigger_samples=pre, total_samples=total, holdoff=tr.holdoff,
+                         auto_timeout=auto_to, pretrigger_words=pre // per, total_words=total // per)
 
     def gen(self) -> P.Gen:
         g = self.settings.gen
@@ -1004,9 +1112,23 @@ class Device:
             self.ui_capture_base = self.capture_id
             self.ui_t0 = self.now()
 
+    def build_trace16(self, ch: int) -> np.ndarray:
+        """1.9: the 16-bit samples of a decimated capture as stored (low byte core A, high byte core B)."""
+        Tw = self.capture_geometry[1]
+        lo = self.read_ring(2 * ch, self.capture_start_word, Tw, lag_applied=self.cfg.hw_read_lag).astype(np.uint16)
+        hi = self.read_ring(2 * ch + 1, self.capture_start_word, Tw, lag_applied=self.cfg.hw_read_lag)
+        return lo | (hi.astype(np.uint16) << 8)
+
     def build_trace(self, ch: int, settings: Settings) -> tuple[np.ndarray, int]:
-        """Processed trace of one channel (section 7.6) with the 1.00o5 stale first byte per core."""
+        """Processed trace of one channel (section 7.6) with the 1.00o5 stale first byte per core. 1.9 decimated
+        capture: the converted codes round(sample x 2^S / N^K + (adc_a_comp + adc_b_comp) / 2), 0..255."""
         Pw, Tw = self.capture_geometry
+        dec = self.capture_decim
+        if dec.k:
+            out = self.build_trace16(ch).astype(np.int64)
+            comp2 = self.cal[ch].adc_a_comp + self.cal[ch].adc_b_comp
+            tr = np.clip((out * dec.scale_q24 + (comp2 << 23) + (1 << 23)) >> 24, 0, 255).astype(np.uint8)
+            return tr, (1 if settings.channels[ch].invert else 0)
         start = self.capture_start_word
         a = self.read_ring(2 * ch, start, Tw, lag_applied=self.cfg.hw_read_lag).astype(np.int16)
         b = self.read_ring(2 * ch + 1, start, Tw, lag_applied=self.cfg.hw_read_lag).astype(np.int16)
@@ -1050,7 +1172,7 @@ class Device:
             except ValueError:
                 return self._done(req, self._err(req, P.Status.E_UNKNOWN_CMD, 0, f"cmd 0x{req.cmd:04X}"))
             if not self.shared and cmd in (P.Cmd.SET_ACQ_STATE, P.Cmd.GET_CAPTURE_INFO, P.Cmd.READ_SPECTRUM,
-                                           P.Cmd.FFT_BENCH):
+                                           P.Cmd.FFT_BENCH, P.Cmd.GET_DECIM, P.Cmd.SET_DECIM):
                 # protocol 1.2 firmware does not know the 1.3 commands
                 return self._done(req, self._err(req, P.Status.E_UNKNOWN_CMD, 0, f"cmd 0x{req.cmd:04X}"))
             if self.deferred is not None and self.deferred.frame.seq == req.seq and                     self.deferred.frame.cmd == req.cmd:
@@ -1200,7 +1322,7 @@ class Device:
     def _spectra(self) -> dict[int, tuple[P.SpectrumHeader, np.ndarray]]:
         """The spectra of the latest capture as the view computes them (recomputed on a new capture or setting)."""
         s = self.capture_settings
-        n = 2 * self.capture_geometry[1]
+        n = self.capture_samples[1]
         lmax = 10
         while lmax < 14 and (2 << lmax) <= n:
             lmax += 1
@@ -1251,6 +1373,36 @@ class Device:
             out.append(P.FftBenchEntry(n, 1, sram, n // 3, run, run + 900, n // 2, k,
                                        int(round(max(db[k], -320.0) * 100))))
         return self._ok(req, P.pack_fft_bench(P.FftBench(reps, 0x00051078, out)))
+
+    def decim_state(self) -> P.DecimState:
+        s = self.settings
+        nxt = self.decim_config()
+        last = self.decim_written
+        return P.DecimState(s.decim & 3, (s.decim & P.DECIM_FLAGS) >> 2, nxt.status, nxt.shift, nxt.n, nxt.gain,
+                            s.divider, nxt.rate(s.divider), last.status if last else 0xFF, last.shift if last else 0,
+                            last.status if last else 0, last.shift if last else 0, P.DECIM_MAX_TOTAL, nxt.why,
+                            nxt.ext_shift if s.trigger.source == 2 else 0)
+
+    def _cmd_get_decim(self, req: P.Frame) -> P.Frame:
+        return self._ok(req, self.decim_state().pack())
+
+    def _cmd_set_decim(self, req: P.Frame) -> P.Frame:
+        r = P.SetDecimReq.unpack(req.payload)
+        if r.filter > 3:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "filter 0..3")
+        if r.flags & ~0x07:
+            raise _DevErr(P.Status.E_BAD_ARG, 1, "flags")
+        if r.filter and self.settings.trigger.total_samples > P.DECIM_MAX_TOTAL:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "total > 8190: SET_TRIGGER total first")
+        self.settings.decim = r.filter | ((r.flags & 0x07) << 2)
+        return self._ok(req, self.decim_state().pack())
+
+    def ui_set_decim(self, filter_: int, flags: int = 0) -> None:
+        """Test hook: the person sets the acquisition Filter at the scope."""
+        with self.lock:
+            before = self.settings_key()
+            self.settings.decim = filter_ | ((flags & 0x07) << 2)
+            self._bump_if_changed(before)
 
     def _cmd_read_spectrum(self, req: P.Frame) -> P.Frame:
         r = P.ReadSpectrumReq.unpack(req.payload)
@@ -1388,6 +1540,8 @@ class Device:
             new.pretrigger_samples = r.pretrigger_samples
         if r.mask & M.M_TOTAL:
             new.total_samples = r.total_samples
+            if self.spec.decim and self.settings.decim & 3 and new.total_samples > P.DECIM_MAX_TOTAL:
+                raise _DevErr(P.Status.E_BAD_ARG, 5, "total > 8190 with the filter on")
         if r.mask & M.M_HOLDOFF:
             if r.holdoff and not (self.caps & P.Caps.HOLDOFF):
                 raise _DevErr(P.Status.E_UNSUPPORTED, 6, "hold-off not implemented by this FPGA")
@@ -1491,9 +1645,9 @@ class Device:
         R = self.spec.ring_words
         if not 1 <= r.core_mask <= 15:
             raise _DevErr(P.Status.E_BAD_ARG, 0, f"core_mask 0x{r.core_mask:X}")
-        if r.layout > 1:
+        if r.layout > 2 or (r.layout == 2 and not self.spec.decim):
             raise _DevErr(P.Status.E_BAD_ARG, 2, f"layout {r.layout}")
-        if r.layout == 1:
+        if r.layout >= 1:
             for ch in (0, 1):
                 bits = (r.core_mask >> (2 * ch)) & 3
                 if bits not in (0, 3):
@@ -1517,6 +1671,14 @@ class Device:
                 clip[c // 2] = True
         if r.layout == 0:
             blocks = [data[c].tobytes() for c in cores]
+        elif r.layout == 2:  # 1.9: u16 little-endian per word, low byte core A, high byte core B
+            clip = [False, False]
+            for ch in (0, 1):
+                if r.core_mask & (3 << (2 * ch)):
+                    il = np.empty(2 * r.count, dtype=np.uint8)
+                    il[0::2] = data[2 * ch]
+                    il[1::2] = data[2 * ch + 1]
+                    blocks.append(il.tobytes())
         else:
             for ch in (0, 1):
                 if r.core_mask & (3 << (2 * ch)):
@@ -1533,6 +1695,8 @@ class Device:
         r = P.ReadTraceReq.unpack(req.payload)
         if not 1 <= r.ch_mask <= 3:
             raise _DevErr(P.Status.E_BAD_ARG, 0, f"ch_mask {r.ch_mask}")
+        if r.flags & ~0x07:
+            raise _DevErr(P.Status.E_BAD_ARG, 1, "flags")
         origin = 0
         s = self.settings
         if self.shared:
@@ -1544,8 +1708,10 @@ class Device:
             origin = 1
         elif self.acq_state != P.AcqState.DONE:
             raise _DevErr(P.Status.E_STATE, 0, f"state {P.AcqState(self.acq_state).name}, not DONE")
-        Pw, Tw = self.capture_geometry
-        n = 2 * Tw
+        pre, n = self.capture_samples
+        dec = self.capture_decim
+        wide = bool(r.flags & P.ReadTraceReq.WIDE) and dec.k > 0
+        bps = 2 if wide else 1
         # firmware (pc_cmds.c h_read_trace): start <= samples, count <= samples - start, 0 = to the end
         if r.start > n:
             raise _DevErr(P.Status.E_BAD_ARG, 4, f"start {r.start} > sample_count {n}")
@@ -1555,7 +1721,7 @@ class Device:
                 raise _DevErr(P.Status.E_BAD_ARG, 8, "count")
             count = n - r.start  # fw >= 0.2.1: clipped; the header's count says what was sent
         chans = [c for c in (0, 1) if r.ch_mask & (1 << c)]
-        if 32 + 16 * len(chans) + count * len(chans) > P.MAX_RESPONSE_PAYLOAD:
+        if 32 + 16 * len(chans) + count * len(chans) * bps > P.MAX_RESPONSE_PAYLOAD:
             raise _DevErr(P.Status.E_OVERFLOW, 0, "trace too long; lower count")
         metas, datas = [], []
         sw_idx = -1
@@ -1566,13 +1732,16 @@ class Device:
             cfg = self.channel_config(c, s)
             metas.append(P.TraceChannelMeta(c, cfg.range, cfg.coupling, fl, cfg.uv_per_lsb_q8, cfg.zero_code_q8,
                                             self.cal[c].adc_a_comp, self.cal[c].adc_b_comp).pack())
-            datas.append(tr[r.start: r.start + count].tobytes())
-            if c == s.trigger.source and 20 <= 2 * Pw and 2 * Pw + 64 <= n:
-                sw_idx = self._sw_trigger(tr, 2 * Pw, s.trigger)
+            if wide:  # as the FPGA stored them: no compensation, no inversion
+                datas.append(self.build_trace16(c)[r.start: r.start + count].astype("<u2").tobytes())
+            else:
+                datas.append(tr[r.start: r.start + count].tobytes())
+            if c == s.trigger.source and 20 <= pre and pre + 64 <= n:
+                sw_idx = self._sw_trigger(tr, pre, s.trigger)
         if s.trigger.source not in chans:
             sw_idx = -1
-        hdr = P.ReadTraceHeader(self.capture_id, n, r.start, count, 2 * Pw, sw_idx, self.capture_divider,
-                                r.ch_mask, origin)
+        hdr = P.ReadTraceHeader(self.capture_id, n, r.start, count, pre, sw_idx, self.capture_divider,
+                                r.ch_mask, origin, dec.status, dec.shift)
         return self._ok(req, hdr.pack() + b"".join(metas) + b"".join(datas))
 
     def _sw_trigger(self, tr: np.ndarray, centre: int, trig: TriggerState) -> int:

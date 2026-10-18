@@ -546,6 +546,37 @@ def _timebase_summary(s: Scope) -> dict[str, Any]:
             "window": _r6(win), "time_per_div_equivalent": _r6(win / 10)}
 
 
+def _decim_summary(st: P.DecimState) -> dict[str, Any]:
+    """GET_DECIM / SET_DECIM in physical terms (protocol 1.9)."""
+    d = st.next
+    bits = A.decim_bits(d.k, d.n, d.gain, d.shift)
+    out: dict[str, Any] = {
+        "setting": P.DECIM_FILTERS[st.filter], "effective": d.filter_name, "k": d.k,
+        "reason": P.DECIM_WHY[st.why] if st.why < len(P.DECIM_WHY) else st.why,
+        "output_rate": st.rate_hz, "dt": _r6(1 / st.rate_hz) if st.rate_hz else None}
+    if d.k:
+        out.update({"n": d.n, "shift": d.shift, "gain": d.gain, "codes_per_count": _r6(d.code_per_count),
+                    "noise_equivalent_n": _r6(A.decim_noise_n(d.k, d.n)), "storage_bits": _r6(bits["storage"]),
+                    "effective_bits_estimate": _r6(bits["effective"]), "settle_us": d.settle_us,
+                    "max_total_samples": st.max_total})
+        if st.ext_shift:
+            out["ext_latency_shift_samples"] = st.ext_shift
+    if st.flags:
+        out["flags"] = [n for b, n in ((1, "core_order_swap"), (2, "falling_edge_A"), (4, "falling_edge_B"))
+                        if st.flags & b]
+    return out
+
+
+DECIM_CAVEATS = [
+    "the filter is the scope's acquisition Filter setting: shared with the person at the scope and saved with its "
+    "settings; turn it off when done unless they want it",
+    "200 MSa/s (divider 0) and captures over 8190 samples always use the legacy 8-bit path",
+    "CIC3 is exact up to N = 10,334 (rates of about 19.4 kSa/s and above), CIC2 up to N = 1,050,630; slower rates "
+    "fall back one order (reason says so)",
+    "a clipped raw sample inside a filter window is not visible in the output: check the range with the filter off "
+    "first"]
+
+
 def _level_volts(s: Scope, src: int, level_code: int) -> float | None:
     if src > 1:
         return None
@@ -582,6 +613,11 @@ def _capture_caveats(cap: Capture, freq: dict[str, float | None]) -> list[str]:
     cav = []
     if cap.auto_timeout:
         cav.append("auto trigger fired: data not synchronised to the signal")
+    if cap.decim is not None:
+        d = cap.decim
+        cav.append(f"decimated capture ({d.filter_name}, N = {d.n}): each sample is the filter output over "
+                   f"{d.n * d.k - d.k + 1} raw samples ({fmt_si(5e-9 * (d.k * (d.n - 1) + 1), 's')}), resolution "
+                   f"{d.code_per_count:.3g} codes; a clipped raw sample inside a window is not visible")
     for name, ch in cap.channels.items():
         n0 = int(np.sum(ch.codes <= 0))
         n255 = int(np.sum(ch.codes >= 255))
@@ -620,11 +656,18 @@ def _save_capture(sess: Session, cap: Capture, kind: str, extra_meta: dict[str, 
         if ch.raw_a is not None:
             arrays[f"{name}_raw_a"] = ch.raw_a
             arrays[f"{name}_raw_b"] = ch.raw_b  # type: ignore[assignment]
+    for name, ch in cap.channels.items():
+        if ch.samples16 is not None:
+            arrays[f"{name}_samples16"] = ch.samples16
     meta = {"capture_id": cap.capture_id, "dt": cap.dt, "divider": cap.divider, "start_sample": cap.start_sample,
             "pretrigger_samples": cap.pretrigger_samples, "total_samples": cap.total_samples,
             "triggered": cap.triggered, "auto_timeout": cap.auto_timeout, "origin": cap.origin,
             "channels": {n: c.config.to_dict() for n, c in cap.channels.items()},
             "trigger": cap.trigger.to_dict(), "scaling": SCALING_CAVEAT}
+    if cap.decim is not None:
+        d = cap.decim
+        meta["decimation"] = {"filter": d.filter_name, "k": d.k, "n": d.n, "shift": d.shift, "gain": d.gain,
+                              "codes_per_count": d.code_per_count}
     if extra_meta:
         meta.update(extra_meta)
     return sess.save_npz(kind, arrays, meta)
@@ -657,6 +700,10 @@ def _capture_result(sess: Session, cap: Capture, kind: str) -> dict[str, Any]:
         h = cap.capture_info.header
         if h.trig_source == 2:
             out["ext_edge_seen"] = bool(h.flags & h.F_EXT_EDGE)
+    if cap.decim is not None:
+        d = cap.decim
+        out["decimation"] = {"filter": d.filter_name, "n": d.n, "shift": d.shift,
+                             "codes_per_count": _r6(d.code_per_count)}
     out["caveats"] = list(cap.notes) + _capture_caveats(cap, freq) + STANDING_CAVEATS
     return out
 
@@ -865,9 +912,12 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 head: dict[str, Any] = {"control": "SHARED", "settings_seq": ctx.settings_seq}
             else:
                 head = {"control": "REMOTE" if s.remote else "LOCAL"}
-            return {"ok": True, **head, "channels": [_channel_summary(s, 0), _channel_summary(s, 1)],
-                    "timebase": _timebase_summary(s), "trigger": _trigger_summary(s), "generator": _gen_summary(s),
-                    "caveats": [SCALING_CAVEAT]}
+            out = {"ok": True, **head, "channels": [_channel_summary(s, 0), _channel_summary(s, 1)],
+                   "timebase": _timebase_summary(s), "trigger": _trigger_summary(s), "generator": _gen_summary(s)}
+            if s.profile().has(P.Caps.DECIM):
+                out["decimation"] = _decim_summary(s.get_decim())
+            out["caveats"] = [SCALING_CAVEAT]
+            return out
         return await run("scope_get_config", 0, {}, go)
 
     @register(0, title="Read calibration", read_only=True, idempotent=True)
@@ -1199,6 +1249,39 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                            "use align='edge' when averaging")
             return {"ok": True, "applied": summ, "caveats": cav}
         return await run("scope_set_timebase", 1, args, go)
+
+    @register(1, title="Set the decimation filter", idempotent=True)
+    async def scope_set_decimation(
+        filter: Annotated[Literal["off", "boxcar", "cic2", "cic3"], Field(
+            description="off = legacy 8-bit sample skipping; boxcar = mean of N raw samples; cic2 / cic3 = 2- / "
+                        "3-fold boxcar (better alias rejection, slightly less noise reduction per N)")],
+    ) -> dict[str, Any]:
+        """The scope's decimation filter (protocol 1.9, FPGA 0x1534+, capability DECIM). At sample rates below
+        200 MSa/s the FPGA filters every raw 200 MSa/s sample instead of skipping, N = 200 MSa/s / output rate, and
+        stores 16-bit samples: anti-aliased and up to about 8 + log2(sqrt N) bits (noise permitting). Returns the
+        effective filter (the firmware lowers the order where it would not be exact: CIC3 only up to N = 10,334,
+        CIC2 up to 1,050,630; 200 MSa/s and totals over 8190 stay legacy), N, the output shift S, the resolution in
+        codes per stored count and an effective-bits estimate. Needs scope_set_trigger total_samples <= 8190 first.
+        Captures and fetches then read the 16-bit samples automatically (the .npz gets CH<n>_samples16). For decay
+        curves: cic2 or boxcar at the rate the decay needs; see the measurement guide."""
+        args = {"filter": filter}
+
+        def go() -> dict[str, Any]:
+            notes = sess.ensure_control()
+            s = sess.get_scope()
+            if not s.profile().has(P.Caps.DECIM):
+                raise ToolError("scope_set_decimation: this firmware / bitstream has no decimation filter "
+                                "(capability DECIM: firmware >= 0.2.30 with FPGA 0x1534)")
+            if filter != "off" and s.get_trigger(cached=False).total_samples > P.DECIM_MAX_TOTAL:
+                raise ToolError(f"scope_set_decimation: the trigger total is over {P.DECIM_MAX_TOTAL} samples; "
+                                f"scope_set_trigger(total_samples <= {P.DECIM_MAX_TOTAL}) first")
+            st = s.set_decim(filter)
+            summ = _decim_summary(st)
+            cav = list(notes) + DECIM_CAVEATS
+            if st.why not in (0, 1):
+                cav.insert(0, f"effective filter is {summ['effective']}: {summ['reason']}")
+            return {"ok": True, "applied": summ, "timebase": _timebase_summary(s), "caveats": cav}
+        return await run("scope_set_decimation", 1, args, go)
 
     @register(1, title="Set the trigger and capture geometry", idempotent=True)
     async def scope_set_trigger(

@@ -27,8 +27,9 @@ PROTO_MAJOR = 1
 #: mode: SHARED_MODE cap, GET_STATUS settings/run fields, SET_ACQ_STATE, GET_CAPTURE_INFO; 1.4 (fw 0.2.9): EXT
 #: trigger (source 2 on 0x1533+ bitstreams), GET_STATUS ext_flags, GET_CAPTURE_INFO flag bit 5; 1.5 (fw 0.2.12):
 #: GET_EVENT_LOG, link counter 47 usb_irq_polled; 1.6 (fw 0.2.27): FFT_BENCH; 1.7 (fw 0.2.28): spectrum view,
-#: READ_SPECTRUM, GET_STATUS display_mode
-PROTO_MINOR = 7
+#: READ_SPECTRUM, GET_STATUS display_mode; 1.9 (fw 0.2.30, FPGA 0x1534): decimation filter (GET_DECIM / SET_DECIM,
+#: caps DECIM, 16-bit samples: READ_TRACE WIDE, READ_RAW layout 2, GET_CAPTURE_INFO 76 bytes); 1.8 was not used
+PROTO_MINOR = 9
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -82,6 +83,8 @@ class Cmd(enum.IntEnum):
     SET_ACQ_STATE = 0x0208  # protocol 1.3, SHARED_MODE
     GET_CAPTURE_INFO = 0x0209  # protocol 1.3, SHARED_MODE
     READ_SPECTRUM = 0x020A  # protocol 1.7, fw 0.2.28: the spectrum the scope's spectrum view shows (main loop)
+    GET_DECIM = 0x020C  # protocol 1.9, fw 0.2.30, cap DECIM: decimation filter setting and state
+    SET_DECIM = 0x020D  # protocol 1.9: the decimation filter (the UI's acquisition Filter setting)
     GET_GEN = 0x0300
     SET_GEN = 0x0301
     GET_CAL = 0x0400
@@ -172,6 +175,8 @@ class Caps(enum.IntFlag):
     SHARED_MODE = 1 << 13
     #: fw 0.2.2: SD_INFO / SD_READ_SECTORS / SD_STAGE / SD_WRITE_SECTORS
     SD_SECTORS = 1 << 14
+    #: protocol 1.9 (FPGA 0x1534+): decimation filter with 16-bit samples
+    DECIM = 1 << 15
 
 
 def caps_names(caps: int) -> list[str]:
@@ -193,6 +198,8 @@ CMD_CAP: dict[Cmd, Caps] = {
     Cmd.SD_READ_SECTORS: Caps.SD_SECTORS,
     Cmd.SD_STAGE: Caps.SD_SECTORS,
     Cmd.SD_WRITE_SECTORS: Caps.SD_SECTORS,
+    Cmd.GET_DECIM: Caps.DECIM,
+    Cmd.SET_DECIM: Caps.DECIM,
 }
 
 
@@ -818,21 +825,43 @@ class CaptureChannelInfo(Payload):
 
 @dataclass
 class CaptureInfo:
-    """Decoded GET_CAPTURE_INFO (68 bytes)."""
+    """Decoded GET_CAPTURE_INFO (68 bytes; 76 from protocol 1.9 with the capture's decimation filter)."""
 
     header: CaptureInfoHeader
     channels: list[CaptureChannelInfo]
+    #: 1.9: the capture's mode (FPGA 0x29 byte 0 layout, 0 = legacy), S, EXT latency shift (samples), N
+    decim_mode: int = 0
+    decim_shift: int = 0
+    ext_shift: int = 0
+    decim_n: int = 0
+    has_decim: bool = False
 
     SIZE: ClassVar[int] = 36 + 2 * 16
 
     def pack(self) -> bytes:
-        return self.header.pack() + b"".join(c.pack() for c in self.channels)
+        out = self.header.pack() + b"".join(c.pack() for c in self.channels)
+        if self.has_decim:
+            out += struct.pack("<BBHI", self.decim_mode, self.decim_shift, self.ext_shift, self.decim_n)
+        return out
 
     @classmethod
     def unpack(cls, data: bytes) -> "CaptureInfo":
         h = CaptureInfoHeader.unpack(data)
         chans = [CaptureChannelInfo.unpack(data[36 + 16 * i: 52 + 16 * i]) for i in range(2)]
-        return cls(h, chans)
+        ci = cls(h, chans)
+        if len(data) >= 76:
+            ci.decim_mode, ci.decim_shift, ci.ext_shift, ci.decim_n = struct.unpack_from("<BBHI", data, 68)
+            ci.has_decim = True
+        return ci
+
+    @property
+    def decim(self) -> "DecimConfig | None":
+        """The capture's decimation (None for a legacy 8-bit capture)."""
+        if not self.decim_mode & DECIM_WIDE:
+            return None
+        k = self.decim_mode & 3
+        return DecimConfig(k, self.decim_mode & DECIM_FLAGS, self.decim_shift, 0, self.decim_n,
+                           decim_gain(self.decim_n, k))
 
     def channel_config(self, ch: int) -> "ChannelConfig":
         """The capture-time channel settings as a CHANNEL_CONFIG (dcoffset / center_cal are not carried)."""
@@ -843,11 +872,16 @@ class CaptureInfo:
 
     def trigger(self) -> "Trigger":
         h = self.header
+        per = 1 if self.decim is not None else 2  # 1.9: one 16-bit sample per ring word
         return Trigger(source=h.trig_source, edge=h.trig_edge, level=h.trig_level, mode=h.trig_mode,
                        pretrigger_samples=h.pretrigger_samples, total_samples=h.total_samples,
-                       pretrigger_words=h.pretrigger_samples // 2, total_words=h.total_samples // 2)
+                       pretrigger_words=h.pretrigger_samples // per, total_words=h.total_samples // per)
 
     def timebase(self) -> "Timebase":
+        d = self.decim
+        if d is not None:  # output period N x 5 ns
+            return Timebase(self.header.timeperdiv_index, 0xFF, self.header.divider, BASE_CLOCK_HZ // d.n,
+                            min(5000 * d.n, 0xFFFFFFFF))
         return timebase_for_divider(self.header.divider, self.header.timeperdiv_index)
 
     def settings_key(self) -> dict[str, Any]:
@@ -1106,6 +1140,10 @@ class Timebase(Payload):
 
     @property
     def dt(self) -> float:
+        """Sample period: the device's period field (1.9: N x 5 ns while the decimation filter is on), or
+        (divider + 1) x 5 ns when that field is saturated or absent."""
+        if 0 < self.sample_period_ps < 0xFFFFFFFF:
+            return self.sample_period_ps * 1e-12
         return (self.divider + 1) / BASE_CLOCK_HZ
 
 
@@ -1191,6 +1229,10 @@ class ReadRawReq(Payload):
     ADDR_ABSOLUTE: ClassVar[int] = 0
     ADDR_CAPTURE: ClassVar[int] = 1
     ADDR_TRIGGER: ClassVar[int] = 2
+    #: layouts: 0 per core, 1 both cores of a channel interleaved, 2 (1.9) u16 per word (low byte core A)
+    LAYOUT_CORES: ClassVar[int] = 0
+    LAYOUT_INTERLEAVED: ClassVar[int] = 1
+    LAYOUT_WIDE: ClassVar[int] = 2
 
 
 #: core_mask bits in ascending order: CH1 A, CH1 B, CH2 A, CH2 B.
@@ -1221,13 +1263,15 @@ class ReadTraceReq(Payload):
 
     REREAD: ClassVar[int] = 0x01
     NO_INVERT: ClassVar[int] = 0x02
+    #: 1.9: u16 samples of a decimated capture as the FPGA stored them (no compensation, no inversion)
+    WIDE: ClassVar[int] = 0x04
 
 
 @dataclass
 class ReadTraceHeader(Payload):
     FIELDS = [("capture_id", "I"), ("sample_count", "I"), ("start", "I"), ("count", "I"),
               ("hw_trigger_index", "i"), ("sw_trigger_index", "i"), ("divider", "I"), ("ch_mask", "B"),
-              ("origin", "B"), ("_r", "2x")]
+              ("origin", "B"), ("decim_mode", "B"), ("decim_shift", "B")]
     capture_id: int = 0
     sample_count: int = 0
     start: int = 0
@@ -1237,6 +1281,9 @@ class ReadTraceHeader(Payload):
     divider: int = 0
     ch_mask: int = 0
     origin: int = 0
+    #: 1.9: the capture's mode (0x29 byte 0 layout; bit 7 = 16-bit capture) and S; 0 for legacy captures
+    decim_mode: int = 0
+    decim_shift: int = 0
 
 
 @dataclass
@@ -1251,6 +1298,193 @@ class TraceChannelMeta(Payload):
     zero_code_q8: int = 0
     adc_a_comp: int = 0
     adc_b_comp: int = 0
+
+
+# Decimation filter (protocol 1.9, FPGA 0x1534, section 14 row 47; mirrors firmware/scope/pc_decim.c)
+
+#: SET_DECIM filter / GET_DECIM byte 0 (the UI's acquisition Filter setting)
+DECIM_FILTERS = ("off", "boxcar", "cic2", "cic3")
+#: 0x53 / 0x29 byte 0 bits besides K (bits 1:0)
+DECIM_SWAP = 0x04  # core A is the earlier sample of each pair (host only, not saved)
+DECIM_NEG_A = 0x08  # A cores captured on the falling write-clock edge
+DECIM_NEG_B = 0x10
+DECIM_FLAGS = DECIM_SWAP | DECIM_NEG_A | DECIM_NEG_B
+DECIM_WIDE = 0x80  # 0x29 bit 7: 16-bit layout active (K >= 1)
+#: largest capture (samples) in the 16-bit layout
+DECIM_MAX_TOTAL = 8190
+#: exactness 255 x N^K < 2^48: CIC3 up to N = 10,334, CIC2 up to 1,050,630
+DECIM_CIC3_MAX_N = 10334
+DECIM_CIC2_MAX_N = 1050630
+#: GET_DECIM byte 30: why the effective K is lower than requested
+DECIM_WHY = ("as requested", "filter off", "200 MSa/s (divider 0) is legacy only", "capture longer than 8190 samples",
+             "CIC3 not exact at this N: CIC2 used", "CIC2 not exact at this N: boxcar used", "bitstream without the filter")
+
+
+def decim_n(divider: int) -> int:
+    """Decimation factor N = 2 x (floor(D / 2) + 1) for the 0x0D divider D."""
+    return 2 * ((divider >> 1) + 1)
+
+
+def decim_gain(n: int, k: int) -> int:
+    return n ** k
+
+
+def decim_shift(gain: int) -> int:
+    """Output shift S = max(0, bitlen(255 x gain) - 16)."""
+    return max(0, (255 * gain).bit_length() - 16)
+
+
+def decim_level16(level8: int, gain: int, shift: int) -> int:
+    """16-bit trigger level for an 8-bit one: round(level x N^K / 2^S), at most 65535."""
+    y = level8 * gain
+    if shift:
+        y = (y + (1 << (shift - 1))) >> shift
+    return min(y, 65535)
+
+
+def decim_scale_q24(gain: int, shift: int) -> int:
+    if gain == 0 or shift > 39:
+        return 0
+    return ((1 << (24 + shift)) + (gain >> 1)) // gain
+
+
+def decim_to_code(out: int, scale_q24: int, comp2: int) -> int:
+    """Firmware conversion of a stored 16-bit sample to the 8-bit trace: round(out x 2^S / N^K + comp2 / 2), 0..255."""
+    v = (out * scale_q24 + (comp2 << 23) + (1 << 23)) >> 24
+    return max(0, min(255, v))
+
+
+@dataclass
+class DecimConfig:
+    """Effective decimation for a setting (pc_decim_cfg): order K (0 = legacy 8-bit), flags, shift S, why (DECIM_WHY
+    index), factor N (0 legacy), gain N^K (1 legacy)."""
+
+    k: int = 0
+    flags: int = 0
+    shift: int = 0
+    why: int = 0
+    n: int = 0
+    gain: int = 1
+
+    @property
+    def mode(self) -> int:
+        """The 0x53 byte."""
+        return (self.k & 3) | self.flags
+
+    @property
+    def status(self) -> int:
+        """The 0x29 byte 0 the FPGA reports."""
+        return self.mode | (DECIM_WIDE if self.k else 0)
+
+    @property
+    def scale_q24(self) -> int:
+        return decim_scale_q24(self.gain, self.shift) if self.k else 0
+
+    @property
+    def code_per_count(self) -> float:
+        """ADC codes (mean of the filter window) per stored count: 2^S / N^K."""
+        return (1 << self.shift) / self.gain if self.k else 1.0
+
+    def rate(self, divider: int) -> int:
+        if self.k and self.n:
+            return BASE_CLOCK_HZ // self.n
+        return BASE_CLOCK_HZ // (divider + 1)
+
+    @property
+    def ext_shift(self) -> int:
+        """EXT trigger: output samples by which the stored data lag the edge (120 ns + K (N - 1) 2.5 ns, rounded)."""
+        if not self.k or not self.n:
+            return 0
+        lag, period = 240 + self.k * (self.n - 1) * 5, self.n * 10
+        return (lag + period // 2) // period
+
+    @property
+    def settle_us(self) -> int:
+        """Filter settling after a change: (K + 2) output periods, us, rounded up."""
+        if not self.k:
+            return 0
+        return min(((self.k + 2) * self.n + 199) // 200, 0xFFFFFFFF)
+
+    @property
+    def filter_name(self) -> str:
+        return DECIM_FILTERS[self.k] if self.k else "off"
+
+
+def decim_config(k_req: int, flags: int, divider: int, total_samples: int, has_filter: bool = True) -> DecimConfig:
+    """pc_decim_config: the configuration an arm writes for the Filter setting ``k_req`` (0-3), ``flags``
+    (DECIM_FLAGS bits), the 0x0D divider and the capture length."""
+    k, n = k_req & 3, decim_n(divider)
+    if not has_filter:
+        return DecimConfig(why=6)
+    c = DecimConfig(flags=flags & DECIM_FLAGS)
+    if k == 0:
+        c.why = 1
+        return c
+    if divider == 0:
+        c.why = 2
+        return c
+    if total_samples > DECIM_MAX_TOTAL:
+        c.why = 3
+        return c
+    if k == 3 and n > DECIM_CIC3_MAX_N:
+        k, c.why = 2, 4
+    if k == 2 and n > DECIM_CIC2_MAX_N:
+        k, c.why = 1, 5
+    c.k, c.n, c.gain = k, n, decim_gain(n, k)
+    c.shift = decim_shift(c.gain)
+    return c
+
+
+@dataclass
+class SetDecimReq(Payload):
+    """SET_DECIM: u8 filter (0 off, 1 boxcar, 2 CIC2, 3 CIC3), u8 flags (bit 0 core-order swap, bit 1 / 2 capture the
+    A / B cores on the falling edge), u16 0."""
+
+    FIELDS = [("filter", "B"), ("flags", "B"), ("_r", "2x")]
+    filter: int = 0
+    flags: int = 0
+
+    SWAP: ClassVar[int] = 0x01
+    NEG_A: ClassVar[int] = 0x02
+    NEG_B: ClassVar[int] = 0x04
+
+
+@dataclass
+class DecimState(Payload):
+    """GET_DECIM / SET_DECIM response, 32 bytes."""
+
+    FIELDS = [("filter", "B"), ("flags", "B"), ("next_mode", "B"), ("next_shift", "B"), ("next_n", "I"),
+              ("next_gain", "Q"), ("divider", "I"), ("rate_hz", "I"), ("last_mode", "B"), ("last_shift", "B"),
+              ("fpga_mode", "B"), ("fpga_shift", "B"), ("max_total", "H"), ("why", "B"), ("ext_shift", "B")]
+    #: the setting: 0 off, 1 boxcar, 2 CIC2, 3 CIC3
+    filter: int = 0
+    #: SetDecimReq flag bits
+    flags: int = 0
+    #: what the next arm writes (0x29 byte 0 layout; 0 = legacy), its S, N and gain N^K
+    next_mode: int = 0
+    next_shift: int = 0
+    next_n: int = 0
+    next_gain: int = 1
+    divider: int = 0
+    #: output rate of the next arm
+    rate_hz: int = 0
+    #: written at the last arm (0xFF: none yet) and its S
+    last_mode: int = 0xFF
+    last_shift: int = 0
+    #: FPGA 0x29 read now
+    fpga_mode: int = 0
+    fpga_shift: int = 0
+    max_total: int = DECIM_MAX_TOTAL
+    #: DECIM_WHY index
+    why: int = 0
+    #: EXT latency shift (samples) the next arm applies with the current source
+    ext_shift: int = 0
+
+    @property
+    def next(self) -> DecimConfig:
+        k = self.next_mode & 3 if self.next_mode & DECIM_WIDE else 0
+        return DecimConfig(k, self.next_mode & DECIM_FLAGS, self.next_shift, self.why, self.next_n if k else 0,
+                           self.next_gain if k else 1)
 
 
 @dataclass
@@ -1705,7 +1939,7 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.ACQUIRE_AVG: AcquireAvgReq.size(), Cmd.GET_GEN: 0, Cmd.SET_GEN: SetGenReq.size(), Cmd.GET_CAL: 1,
     Cmd.READ_SCREEN: ReadScreenReq.size(), Cmd.ENTER_FEL: 4, Cmd.SET_ACQ_STATE: SetAcqStateReq.size(),
     Cmd.GET_CAPTURE_INFO: 0, Cmd.GET_EVENT_LOG: 0, Cmd.SD_INFO: 4, Cmd.SD_READ_SECTORS: 8, Cmd.SD_STAGE: 8, Cmd.SD_WRITE_SECTORS: 16,
-    Cmd.READ_SPECTRUM: ReadSpectrumReq.size(),
+    Cmd.READ_SPECTRUM: ReadSpectrumReq.size(), Cmd.GET_DECIM: 0, Cmd.SET_DECIM: SetDecimReq.size(),
 }
 
 
