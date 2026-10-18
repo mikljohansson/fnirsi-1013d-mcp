@@ -3072,7 +3072,6 @@ void scope_open_channel_menu(PCHANNELSETTINGS settings)
   display_draw_horz_line(CH_MENU_YPOS +  56, xstart, xend); //56
   display_draw_horz_line(CH_MENU_YPOS + 112, xstart, xend); //112
   display_draw_horz_line(CH_MENU_YPOS + 168, xstart, xend); //168
-  if(!PC_CH_COMPACT) display_draw_horz_line(CH_MENU_YPOS + 224, xstart, xend); //224
   
   //Set channel color
   display_set_fg_color(settings->color);
@@ -3105,21 +3104,15 @@ void scope_open_channel_menu(PCHANNELSETTINGS settings)
   display_text(settings->menuxpos + 15, CH_MENU_YPOS +  10, "Open");    //12
   display_text(settings->menuxpos + 23, CH_MENU_YPOS +  29, "CH");      //31
   
-  if(!PC_CH_COMPACT)
-  {
-    display_text(settings->menuxpos + 15, CH_MENU_YPOS +  66, "Open");    //72
-    display_text(settings->menuxpos + 20, CH_MENU_YPOS +  85, "FFT");     //19 91
-  }
-  
-  display_text(settings->menuxpos + 14, CH_MENU_YPOS +  122 - PC_CH_DY, "Invert"); //13 72
-  display_text(settings->menuxpos + 23, CH_MENU_YPOS +  141 - PC_CH_DY, "CH");     //91
+  display_text(settings->menuxpos + 14, CH_MENU_YPOS +  66, "Invert"); //13 72
+  display_text(settings->menuxpos + 23, CH_MENU_YPOS +  85, "CH");     //91
   
   
-  display_text(settings->menuxpos + 15, CH_MENU_YPOS + 178 - PC_CH_DY, "Coup");    //132
-  display_text(settings->menuxpos + 19, CH_MENU_YPOS + 197 - PC_CH_DY, "ling");    //18 151
+  display_text(settings->menuxpos + 15, CH_MENU_YPOS + 122, "Coup");    //132
+  display_text(settings->menuxpos + 19, CH_MENU_YPOS + 141, "ling");    //18 151
   
-  display_text(settings->menuxpos + 15, CH_MENU_YPOS + 234 - PC_CH_DY, "V / A");   //192
-  display_text(settings->menuxpos + 12, CH_MENU_YPOS + 253 - PC_CH_DY, "mode");    //211
+  display_text(settings->menuxpos + 15, CH_MENU_YPOS + 178, "V / A");   //192
+  display_text(settings->menuxpos + 12, CH_MENU_YPOS + 197, "mode");    //211
   
   display_text(settings->menuxpos + 14, CH_MENU_YPOS + 290, "Probe");   //15 252
   display_text(settings->menuxpos + 15, CH_MENU_YPOS + 309, "mode");    //271
@@ -3143,7 +3136,6 @@ void scope_open_channel_menu(PCHANNELSETTINGS settings)
 
   //Display the actual settings
   scope_channel_enable_select(settings);
-  if(!PC_CH_COMPACT) scope_channel_fft_show(settings);
   scope_channel_invert_select(settings);
   scope_channel_coupling_select(settings);
   scope_channel_VA_select(settings);
@@ -3178,19 +3170,6 @@ void scope_channel_enable_select(PCHANNELSETTINGS settings)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void scope_channel_fft_show(PCHANNELSETTINGS settings)
-{
-  //Select the font for the texts
-  display_set_font(&font_3);
-
-  //Set dark grey color for the box behind the not selected text
-  display_set_fg_color(DARKGREY_COLOR);
-
- //Show the state (if FFT is disabled or enabled)
-  scope_display_slide_button(settings->menuxpos + 98, CH_MENU_YPOS + 74, settings->fftenable, GREEN_COLOR);//82
-}
-//----------------------------------------------------------------------------------------------------------------------------------
-
 void scope_channel_invert_select(PCHANNELSETTINGS settings)
 {
   //Select the font for the texts
@@ -3200,7 +3179,7 @@ void scope_channel_invert_select(PCHANNELSETTINGS settings)
   display_set_fg_color(DARKGREY_COLOR);
  
  //Show the state (if invert is disabled or enabled)
-  scope_display_slide_button(settings->menuxpos + 98, CH_MENU_YPOS + 130 - PC_CH_DY, settings->invert, GREEN_COLOR);//82
+  scope_display_slide_button(settings->menuxpos + 98, CH_MENU_YPOS + 74, settings->invert, GREEN_COLOR);//82
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -3217,16 +3196,16 @@ void scope_channel_coupling_select(PCHANNELSETTINGS settings)
   if(settings->coupling == 0)
   {
     //DC so dark grey box behind ac text
-    display_fill_rect(settings->menuxpos + 130, CH_MENU_YPOS + 185 - PC_CH_DY, 32, 22);//139
+    display_fill_rect(settings->menuxpos + 130, CH_MENU_YPOS + 129, 32, 22);//139
     display_set_fg_color(GREY_COLOR);//GREY_COLOR
-    display_draw_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 185 - PC_CH_DY, 32, 22, 2);
+    display_draw_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 129, 32, 22, 2);
   }
   else
   {
     //AC so dark grey box behind dc text
-    display_fill_rect(settings->menuxpos + 78, CH_MENU_YPOS + 185 - PC_CH_DY, 32, 22);//139
+    display_fill_rect(settings->menuxpos + 78, CH_MENU_YPOS + 129, 32, 22);//139
     display_set_fg_color(GREY_COLOR);//GREY_COLOR
-    display_draw_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 185 - PC_CH_DY, 32, 22, 2);
+    display_draw_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 129, 32, 22, 2);
   }
 
   //Set channel color for the box behind the selected text
@@ -3236,12 +3215,12 @@ void scope_channel_coupling_select(PCHANNELSETTINGS settings)
   if(settings->coupling == 0)
   {
     //DC so channel color box behind dc text
-    display_fill_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 185 - PC_CH_DY, 32, 22, 2);
+    display_fill_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 129, 32, 22, 2);
   }
   else
   {
     //AC so channel color box behind ac text
-    display_fill_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 185 - PC_CH_DY, 32, 22, 2);
+    display_fill_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 129, 32, 22, 2);
   }
 
   //Check if coupling is dc or ac
@@ -3266,7 +3245,7 @@ void scope_channel_coupling_select(PCHANNELSETTINGS settings)
   }
 
   //Display the DC text
-  display_text(settings->menuxpos + 85, CH_MENU_YPOS + 188 - PC_CH_DY, "DC");//145
+  display_text(settings->menuxpos + 85, CH_MENU_YPOS + 132, "DC");//145
 
   //Check if coupling is DC or AC
   if(settings->coupling == 0)
@@ -3290,7 +3269,7 @@ void scope_channel_coupling_select(PCHANNELSETTINGS settings)
   }
 
   //Display the off text
-  display_text(settings->menuxpos + 137, CH_MENU_YPOS + 188 - PC_CH_DY, "AC");//145
+  display_text(settings->menuxpos + 137, CH_MENU_YPOS + 132, "AC");//145
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -3306,16 +3285,16 @@ void scope_channel_VA_select(PCHANNELSETTINGS settings)
   if(settings->V_A == 0)
   {
     //V so dark grey box behind A text
-    display_fill_rect(settings->menuxpos + 130, CH_MENU_YPOS + 241 - PC_CH_DY, 32, 22);//199
+    display_fill_rect(settings->menuxpos + 130, CH_MENU_YPOS + 185, 32, 22);//199
     display_set_fg_color(GREY_COLOR);//GREY_COLOR
-    display_draw_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 241 - PC_CH_DY, 32, 22, 2);
+    display_draw_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 185, 32, 22, 2);
   }
   else
   {
     //A so dark grey box behind V text
-    display_fill_rect(settings->menuxpos + 78, CH_MENU_YPOS + 241 - PC_CH_DY, 32, 22);
+    display_fill_rect(settings->menuxpos + 78, CH_MENU_YPOS + 185, 32, 22);
     display_set_fg_color(GREY_COLOR);//GREY_COLOR
-    display_draw_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 241 - PC_CH_DY, 32, 22, 2);
+    display_draw_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 185, 32, 22, 2);
   }
 
   //Set channel color for the box behind the selected text
@@ -3325,12 +3304,12 @@ void scope_channel_VA_select(PCHANNELSETTINGS settings)
   if(settings->V_A == 0)
   {
     //V so channel color box behind V text
-    display_fill_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 241 - PC_CH_DY, 32, 22, 2);
+    display_fill_rounded_rect(settings->menuxpos + 78, CH_MENU_YPOS + 185, 32, 22, 2);
   }
   else
   {
     //A so channel color box behind A text
-    display_fill_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 241 - PC_CH_DY, 32, 22, 2);
+    display_fill_rounded_rect(settings->menuxpos + 130, CH_MENU_YPOS + 185, 32, 22, 2);
   }
 
   //Check if measures is V or A
@@ -3355,7 +3334,7 @@ void scope_channel_VA_select(PCHANNELSETTINGS settings)
   }
 
   //Display the V text
-  display_text(settings->menuxpos + 90, CH_MENU_YPOS + 244 - PC_CH_DY, "V");//85 202
+  display_text(settings->menuxpos + 90, CH_MENU_YPOS + 188, "V");//85 202
 
   //Check if measures is V or A
   if(settings->V_A == 0)
@@ -3379,7 +3358,7 @@ void scope_channel_VA_select(PCHANNELSETTINGS settings)
   }
 
   //Display the off text
-  display_text(settings->menuxpos + 142, CH_MENU_YPOS + 244 - PC_CH_DY, "A");//137 202
+  display_text(settings->menuxpos + 142, CH_MENU_YPOS + 188, "A");//137 202
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

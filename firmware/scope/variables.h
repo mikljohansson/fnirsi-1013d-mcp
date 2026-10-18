@@ -450,7 +450,7 @@ struct tagChannelSettings
   uint8  V_A;
   uint8  displayvoltperdiv;
   uint8  samplevoltperdiv;
-  uint8  fftenable;
+  uint8  fftenable;                //retired (1.00o5 FFT switch, never implemented): kept as settings / file format slot, always 0
   uint8  invert;
   
   //Trace on screen position
