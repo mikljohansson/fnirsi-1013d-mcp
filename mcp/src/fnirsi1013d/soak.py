@@ -118,6 +118,8 @@ class Soak:
         self.proto_minor = 0
         #: device events already printed (GET_EVENT_LOG total at the last read)
         self.events_seen = 0
+        #: fw 0.2.15 reset snapshots seen (kept for the run)
+        self.snapshots: list[P.EventLog] = []
 
     def log(self, msg: str) -> None:
         self.say(f"{_dt.datetime.now().isoformat(timespec='milliseconds')} {msg}")
@@ -160,6 +162,15 @@ class Soak:
         for e in shown:
             at = host_now - _dt.timedelta(milliseconds=log.now_ms - e.ms)
             self.log(f"  device {e.ms} ms (~host {at.isoformat(timespec='milliseconds')}) {e.describe()}")
+        if log.frozen:  # fw 0.2.15: the events right before the first bus reset since the previous read
+            at = host_now - _dt.timedelta(milliseconds=log.now_ms - log.reset_ms)
+            self.log(f"events {label}: reset snapshot: bus reset at device {log.reset_ms} ms "
+                     f"(~host {at.isoformat(timespec='milliseconds')}), {len(log.snapshot)} events before it:")
+            for e in log.snapshot:
+                at = host_now - _dt.timedelta(milliseconds=log.now_ms - e.ms)
+                self.log(f"  before reset: device {e.ms} ms (~host {at.isoformat(timespec='milliseconds')}) "
+                         f"{e.describe()}")
+            self.snapshots.append(log)
         self.events_seen = log.total
 
     def stats(self, label: str) -> None:

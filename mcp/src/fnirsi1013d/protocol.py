@@ -1435,21 +1435,45 @@ class EventLog:
     total: int
     now_ms: int
     events: list[DeviceEvent]
+    #: fw 0.2.15 tail: a bus reset happened since the previous read; ``snapshot`` = the events right before it
+    frozen: bool = False
+    reset_ms: int = 0
+    snapshot: list[DeviceEvent] = field(default_factory=list)
+    has_snapshot: bool = False
+
+
+def _event(payload: bytes, off: int) -> DeviceEvent:
+    return DeviceEvent(*struct.unpack_from("<IBBH", payload, off))
 
 
 def parse_event_log(payload: bytes) -> EventLog:
-    """GET_EVENT_LOG: u16 n, u16 0, u32 total, u32 now_ms, then n x (u32 ms, u8 type, u8 a, u16 b), oldest first."""
+    """GET_EVENT_LOG: u16 n (<= 64, <= 128 from fw 0.2.15), u16 0, u32 total, u32 now_ms, then n x (u32 ms, u8 type,
+    u8 a, u16 b), oldest first. fw 0.2.15 appends a reset snapshot: u16 m (<= 16), u16 frozen, u32 reset_ms, m
+    entries (the events right before the first bus reset since the previous read). Older firmware: exactly 12 + 8n."""
     if len(payload) < 12:
         return EventLog(0, 0, [])
     n, _r, total, now = struct.unpack_from("<HHII", payload)
     n = min(n, (len(payload) - 12) // 8)
-    ev = [DeviceEvent(*struct.unpack_from("<IBBH", payload, 12 + 8 * i)) for i in range(n)]
-    return EventLog(total, now, ev)
+    ev = [_event(payload, 12 + 8 * i) for i in range(n)]
+    log = EventLog(total, now, ev)
+    off = 12 + 8 * n
+    if len(payload) >= off + 8:
+        m, frozen, reset_ms = struct.unpack_from("<HHI", payload, off)
+        m = min(m, (len(payload) - off - 8) // 8)
+        log.has_snapshot = True
+        log.frozen = bool(frozen)
+        log.reset_ms = reset_ms
+        log.snapshot = [_event(payload, off + 8 + 8 * i) for i in range(m)]
+    return log
 
 
 def pack_event_log(log: EventLog) -> bytes:
-    return struct.pack("<HHII", len(log.events), 0, log.total & 0xFFFFFFFF, log.now_ms & 0xFFFFFFFF) + \
+    out = struct.pack("<HHII", len(log.events), 0, log.total & 0xFFFFFFFF, log.now_ms & 0xFFFFFFFF) + \
         b"".join(struct.pack("<IBBH", e.ms & 0xFFFFFFFF, e.type, e.a, e.b) for e in log.events)
+    if log.has_snapshot:
+        out += struct.pack("<HHI", len(log.snapshot), int(log.frozen), log.reset_ms & 0xFFFFFFFF) + \
+            b"".join(struct.pack("<IBBH", e.ms & 0xFFFFFFFF, e.type, e.a, e.b) for e in log.snapshot)
+    return out
 
 
 def link_stats_names(n: int) -> tuple[str, ...]:

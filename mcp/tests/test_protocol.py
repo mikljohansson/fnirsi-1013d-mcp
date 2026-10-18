@@ -202,3 +202,20 @@ def test_event_log_decode():
     import struct
     d48 = P.parse_link_stats(struct.pack("<HH48I", 48, 0, *range(48)))
     assert d48["usb_irq_polled"] == 47
+
+
+def test_event_log_reset_snapshot_tail():
+    """fw 0.2.15: after the n entries, u16 m, u16 frozen, u32 reset_ms, m entries; 0.2.12-0.2.14 end at 12 + 8n."""
+    import struct
+    old = P.pack_event_log(P.EventLog(3, 900, [P.DeviceEvent(800, 9, 1, 0)]))
+    o = P.parse_event_log(old)
+    assert not o.has_snapshot and not o.frozen and o.snapshot == []
+    snap = [P.DeviceEvent(1000 + i, 5, 0x20, 0x2100) for i in range(3)]
+    log = P.EventLog(200, 5000, [P.DeviceEvent(4000 + i, 14, 4, 0) for i in range(128)], frozen=True,
+                     reset_ms=1010, snapshot=snap, has_snapshot=True)
+    data = P.pack_event_log(log)
+    assert len(data) == 12 + 8 * 128 + 8 + 8 * 3
+    back = P.parse_event_log(data)
+    assert back == log and len(back.events) == 128 and back.frozen and back.reset_ms == 1010
+    idle = P.parse_event_log(data[:12 + 8 * 128] + struct.pack("<HHI", 0, 0, 0))
+    assert idle.has_snapshot and not idle.frozen

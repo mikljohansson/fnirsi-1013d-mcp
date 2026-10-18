@@ -1,10 +1,10 @@
 # mcp/ handoff for agents
 
 State on 2026-10-18: Python host library, device simulator and MCP server for the FNIRSI 1013D open firmware's
-USB protocol. Firmware on the owner's unit is 0.1.7 (protocol 1.2). Host, simulator and vectors speak protocol 1.3
-(collaborative mode: fw 0.2.0, commit d77298f, image sha256 a80ba07b..., protocol.md section 14 rows 30-39;
-not yet benched) and fall back to the exclusive 1.2 model when
-GET_INFO lacks SHARED_MODE. This file is for a fresh agent with no
+USB protocol. Host, simulator and vectors speak protocol 1.5 (fw 0.2.12-0.2.15: collaborative mode 1.3, EXT
+trigger 1.4, GET_EVENT_LOG 1.5 incl. the 0.2.15 reset snapshot; protocol.md section 14 rows 30-42) and fall back to
+the exclusive 1.2 model when GET_INFO lacks SHARED_MODE. The owner's unit runs 0.2.x from the SD card (see
+../docs/hardware-status.md). This file is for a fresh agent with no
 context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec;
 **section 14 is how the firmware actually behaves**), `../docs/mcp-tools.md` (tool surface, tiers),
 `README.md` (user-facing install and usage). Do not duplicate those here; fix them instead.
@@ -28,7 +28,7 @@ context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/p
 | `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points -> least-squares fit of zero, 1/gain, PWM slope per channel/range/core; JSON file), `ChannelScale`/`channel_scale` (raw, compensated, mean and trigger-level conversions; firmware formula fallback), `import_t8` + CLI for the lead's `backups/t8_*.json`. |
 | `units.py` | `parse_quantity("100us")`, `fmt_si`. |
 
-Tests in `tests/` (249, incl. `test_ext_trigger`, `test_soak`, incl. `test_calibration`, `test_sdcard`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
+Tests in `tests/` (250, incl. `test_ext_trigger`, `test_soak`, incl. `test_calibration`, `test_sdcard`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
 (resend, resync, #RESET, 1.1/1.2 fields, timeouts, paused responses), `test_serial_link` (no-reconfigure rule,
 fake pyserial), `test_simulator_scope`, `test_shared_mode` (1.3 semantics through `Scope`), `test_firmware_match`
 (protocol.md section 14 items), `test_server` (every tool in-process, collaborative restarts, legacy fallback),
@@ -243,8 +243,10 @@ reload: announce "about to reload with <image> for <reason>", wait for the lead'
 9. T8 follow-ups: CH2 points (one shorted-input `scope_calibrate_volts` per offset is enough for the channel
    model); the lead's open square-wave discrepancy (calibration-pin 0..3.3 V read as about -1.1 / +2 V on ranges
    1 and 3 with DC coupling) was resolved by the lead (backups/t8sq_CH1.json): the conversion is right, the
-   calibration output is a ~3.1 Vpp square wave not referenced to ground (low ~ -1.2 V; a DMM reads
-   0.310 V DC on the pin, equal to the waveform's mean, so the output is capacitively coupled with a small bias). Tool texts say so
+   calibration output is a ~3.1 Vpp square wave referenced to the USB/digital ground, while the probe ground
+   (BNC shells) is VRF1, +1.24 V above it through R71 (fpga-gen2, fpga/al3/README.md Changes 2): hence -1.24 /
+   +1.9 V against the probe ground. Ground loops (earthed DUT + earthed PC) sag VRF1 and shift every trace; EXT
+   sources must be referenced to the USB ground (`EXT_NOTE`, docs/agent-measurement-guide.md section 5). Tool texts say so
    (`CAL_OUTPUT_NOTE`); the self-test checks the swing (5/95 % levels), not absolute levels. Do not "fix" this
    in the conversion.
    Firmware idea for fw-gen2: base calibration could store the measured per-core 0 V codes.

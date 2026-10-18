@@ -70,6 +70,10 @@ def test_drop_is_logged_waited_out_and_reopened(sim):
 
     def present(port: str) -> bool:  # gone for the first two polls after the drop, then back
         calls["n"] += 1
+        if calls["n"] == 1:  # what the device logs during a host port reset (fw 0.2.15 freezes a snapshot)
+            sim.device.log_event(5, 0x22, 0x2101)
+            sim.device.log_event(2)
+            sim.device.log_event(1)
         return calls["n"] > 2
     rc, lines, s = run_soak(sim, fail_at={12}, present=present, duration=0.8)
     text = "\n".join(lines)
@@ -86,6 +90,9 @@ def test_drop_is_logged_waited_out_and_reopened(sim):
     assert i_back < i_ev < i_st < i_open < i_reopen
     assert any("dtr 0" in ln for ln in lines[i_ev:i_st])  # the drop, decoded with device ms and host time
     assert "dtr_down +1" in lines[i_st]  # the simulator saw the old connection close
+    snap = next(i for i, ln in enumerate(lines) if "reset snapshot: bus reset at device" in ln)
+    assert i_ev < snap < i_st and "before reset:" in lines[snap + 1] and "ep0_setup bRequest 0x22" in "\n".join(
+        lines[snap:i_st]) and len(s.snapshots) == 1
     assert "drops 1 (down " in lines[-1] and "longest gap" in lines[-1]
     assert s.st.requests > 13  # it carried on after the reopen (the drop was at write 12)
 

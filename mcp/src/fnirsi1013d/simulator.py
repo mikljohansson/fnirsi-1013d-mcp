@@ -428,6 +428,9 @@ class Device:
         #: GET_EVENT_LOG ring (fw 0.2.12)
         self.events: list[P.DeviceEvent] = []
         self.event_total = 0
+        self.ev_frozen = False
+        self.ev_reset_ms = 0
+        self.ev_snapshot: list[P.DeviceEvent] = []
         #: SD card and the 64 KiB write staging buffer (fw 0.2.2)
         self.sd = SimCard()
         self.sd_stage = bytearray(P.SD_STAGE_BYTES)
@@ -1133,12 +1136,19 @@ class Device:
         if self.proto_minor < 5:
             raise _DevErr(P.Status.E_UNKNOWN_CMD, 0, "cmd 0x0009")
         now = int((self.now() - self.t_boot) * 1000)
-        return self._ok(req, P.pack_event_log(P.EventLog(self.event_total, now, list(self.events[-64:]))))
+        log = P.EventLog(self.event_total, now, list(self.events[-128:]), frozen=self.ev_frozen,
+                         reset_ms=self.ev_reset_ms, snapshot=list(self.ev_snapshot), has_snapshot=True)
+        self.ev_frozen, self.ev_snapshot, self.ev_reset_ms = False, [], 0  # every read re-arms the snapshot
+        return self._ok(req, P.pack_event_log(log))
 
     def log_event(self, type_: int, a: int = 0, b: int = 0) -> None:
-        """Record a USB/link event for GET_EVENT_LOG (test hook too)."""
-        self.events.append(P.DeviceEvent(int((self.now() - self.t_boot) * 1000), type_, a, b))
-        del self.events[:-64]
+        """Record a USB/link event for GET_EVENT_LOG (test hook too). fw 0.2.15: ring of 128; the first bus reset
+        after a read freezes the 16 events before it."""
+        ms = int((self.now() - self.t_boot) * 1000)
+        if type_ == 1 and not self.ev_frozen:
+            self.ev_frozen, self.ev_reset_ms, self.ev_snapshot = True, ms, list(self.events[-16:])
+        self.events.append(P.DeviceEvent(ms, type_, a, b))
+        del self.events[:-128]
         self.event_total += 1
 
     def _cmd_get_battery(self, req: P.Frame) -> P.Frame:
