@@ -140,8 +140,12 @@ reload: announce "about to reload with <image> for <reason>", wait for the lead'
 - fw 0.1.4 LOCAL, retries off, 304 requests: 0 bad CRC, 0 garbage; 4 requests (1.3 %) unanswered, one per
   ~2048 bytes sent host->device (looks like the device RX ring wrap; reported to the firmware agent). With
   retries on: 0 failures.
+- `fnirsi1013d-flash` verified on the unit 2026-10-18 (pinned fw 0.1.4 image from `backups/`): ENTER_FEL
+  0.08 s, FEL device 9-3 at 1.3 s, attach 2.7 s, load 3.1-5.0 s, COM10 back with `#VER` at 6.6 s.
 - PING ~1 ms (timer IRQ, fw >= 0.1.2); TEST_PATTERN 64 KiB ~65-72 ms LOCAL; lead measured 2.35 MB/s REMOTE,
   full-depth capture arm+wait+read 110 ms median.
+- Lead's census on 0.1.4 (random 1..200 B payloads): ~4 % E_BAD_CRC + ~0.5 % no response, consistent with
+  the request straddling the 2 KiB RX ring wrap being corrupted.
 - Lead's census on 0.1.3: ~4 % PING E_BAD_CRC (request corrupted on arrival, firmware RX path) and
   garbage_bytes from the old 100 ms host partial drop (fixed in 20b4d8b).
 - Firmware 0.1.x has no ACQUIRE_AVG, READ_SCREEN, READ_LIVE; FORCE/DEBUG_FPGA only in PC_DEBUG builds. The
