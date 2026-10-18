@@ -186,3 +186,36 @@ def test_scope_event_log_shows_bus_ring(sim, tmp_path):
             assert bus[:2] == ["tx_aborted", "tx_abort_txcsr"] and "suspend" in bus
             assert r["bus_total_since_boot"] >= 3
     anyio.run(main)
+
+
+# --- FFT_BENCH (protocol 1.6, fw 0.2.27) --------------------------------------------------------------------
+
+
+def test_fft_bench_layout_matches_the_firmware_script():
+    """firmware/scope/host_tests/fft_bench.py unpacks entries as <HBBIIIIHh after an <HHI head."""
+    raw = struct.pack("<HHI", 1, 3, 0x1078) + struct.pack("<HBBIIIIHh", 4096, 1, 1, 340, 7800, 8700, 2000, 205, 3907)
+    b = P.parse_fft_bench(raw)
+    assert P.FftBenchEntry.size() == 24 and b.reps == 3 and b.cp15 == 0x1078
+    e = b.entries[0]
+    assert (e.n, e.memory, e.run_min_us, e.peak_bin, e.peak_cdb) == (4096, 1, 7800, 205, 3907)
+    assert P.pack_fft_bench(b) == raw
+
+
+def test_bench_fft_cli(sim_factory, capsys):
+    from fnirsi1013d import bench
+    srv = sim_factory(signal=SINE)
+    with Scope.connect(srv.url) as s:
+        s.capture(["CH1"])
+        b = s.fft_bench(2)
+        assert b.reps == 2 and [e.n for e in b.entries] == [1024, 2048, 4096, 16384, 1024, 2048, 4096]
+        assert b.entries[1].peak_bin == 20  # the 97.66 kHz tone at 10 MS/s, N = 2048
+        with pytest.raises(DeviceError) as e:
+            s.t.request(P.Cmd.FFT_BENCH, bytes([17]))
+        assert e.value.status == P.Status.E_BAD_ARG
+        with pytest.raises(ValueError):
+            s.fft_bench(0)
+    with pytest.raises(SystemExit) as ex:
+        bench.main(["--port", srv.url, "--fft", "--reps", "4"])
+    out = capsys.readouterr().out
+    assert ex.value.code == 0, out
+    assert "FFT_BENCH: 7 entries, reps 4" in out and " 16384   DDR " in out and "(no restart)" in out

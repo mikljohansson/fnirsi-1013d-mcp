@@ -1232,6 +1232,26 @@ class Device:
         self._spec_key, self._spec = key, out
         return out
 
+    def _cmd_fft_bench(self, req: P.Frame) -> P.Frame:
+        """FFT_BENCH (fw 0.2.27): the CH1 trace buffer as codes - 128, Hann; plausible ARM926 timings."""
+        reps = req.payload[0] if req.payload else 0
+        if reps > 16:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "reps")
+        reps = reps or 3
+        tr = np.full(16384, 128, dtype=np.float64)
+        if self.capture_id and self.ring_valid:
+            t, _ = self.build_trace(0, self.capture_settings)
+            tr[:min(t.size, tr.size)] = t[:tr.size]
+        out = []
+        for log2n, sram in ((10, 0), (11, 0), (12, 0), (14, 0), (10, 1), (11, 1), (12, 1)):
+            n = 1 << log2n
+            db = analysis.scope_fft_db(tr, 128, "hann", n)
+            k = int(np.argmax(np.where(np.isfinite(db[2:]), db[2:], -1e9))) + 2
+            run = int(n * log2n * (0.11 if sram else 0.16))
+            out.append(P.FftBenchEntry(n, 1, sram, n // 3, run, run + 900, n // 2, k,
+                                       int(round(max(db[k], -320.0) * 100))))
+        return self._ok(req, P.pack_fft_bench(P.FftBench(reps, 0x00051078, out)))
+
     def _cmd_read_spectrum(self, req: P.Frame) -> P.Frame:
         r = P.ReadSpectrumReq.unpack(req.payload)
         if r.channel > 1:

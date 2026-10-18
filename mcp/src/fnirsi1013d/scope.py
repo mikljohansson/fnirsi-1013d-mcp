@@ -740,6 +740,15 @@ class Scope:
                                                P.ReadSpectrumReq(channel_index(ch), first, count).pack()))
         return Spectrum(h, np.asarray(levels, dtype=np.int16))
 
+    def fft_bench(self, reps: int = 3) -> P.FftBench:
+        """FFT_BENCH (protocol 1.6, fw 0.2.27): time the on-scope FFT on the CH1 trace buffer, ``reps`` 1-16 runs per
+        size. Main loop only; the UI pass waits for the run (about 0.15 s at 3 reps)."""
+        if self.info.proto_minor < 6:
+            raise DeviceError(P.Cmd.FFT_BENCH, P.Status.E_UNKNOWN_CMD, 0, "needs protocol 1.6 (firmware >= 0.2.27)")
+        if not 1 <= reps <= 16:
+            raise ValueError("fft_bench: reps must be 1-16")
+        return P.parse_fft_bench(self._req(P.Cmd.FFT_BENCH, bytes([reps]), timeout=5.0))
+
     def read_live(self, core: int, count: int = 64) -> np.ndarray:
         return np.frombuffer(self._req(P.Cmd.READ_LIVE, P.ReadLiveReq(core, count).pack()), np.uint8)
 

@@ -39,7 +39,7 @@ should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those
 | `sdcard.py` | SD access (`SdCard`: checked reads, verified backups, staged 32-sector writes, compare), `plan_write`, `check_image`, `image_version`. |
 | `sdcli.py` | `fnirsi1013d-sd` info / read / write (`--dry-run`, `--yes` + typed confirmation, backup first). |
 | `soak.py` | `fnirsi1013d-soak`: long timestamped poll, drops, reopen, counters, event log, restart detection. |
-| `bench.py` | `fnirsi1013d-bench`: wraps `../firmware/scope/host_tests/bench_link.py` (fw-gen2's), plus uptime before/after. |
+| `bench.py` | `fnirsi1013d-bench`: wraps `../firmware/scope/host_tests/bench_link.py` (fw-gen2's), plus uptime before/after; `--fft` runs FFT_BENCH (`Scope.fft_bench`) itself. |
 | `vectors.py` | Host vectors in `../docs/protocol-vectors.json` (`--check`, `--merge`). |
 | `units.py` | `parse_quantity`, `fmt_si`. |
 
@@ -58,7 +58,8 @@ should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those
   write 111 KiB/s with 32-sector SD_WRITEs, no resends). Resume after a USB drop, version check vs `#VER`
   (`--force`), backups in `../backups/sdcard/`, failures exit 7 with a partial-image warning.
 - **`fnirsi1013d-bench`**: bench_link census through the venv; prints device uptime before/after and flags
-  `DEVICE RESTARTED`.
+  `DEVICE RESTARTED`. `--fft [--reps n]`: FFT_BENCH table (same columns as host_tests/fft_bench.py), simulator
+  only so far.
 - **`fnirsi1013d-sd`**: bench SD access; writes need `--yes` + typed `WRITE <n>@<sector>`, back up first.
 - **`fnirsi1013d-sim`**: `--variant stock|al3|ef2|ep4|al3x`, `--legacy`, `--ext`, `--ui-period`, `--caps`, ...
 - **`fnirsi1013d-soak`**: `--mode status|ping|capture`, `--duration` (30 min), `--interval` (0.1 s),
@@ -78,7 +79,7 @@ should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those
 | 1.3 | 0.2.0+ | SHARED_MODE (caps bit 13), GET_STATUS 44 bytes (settings_seq, capture_settings_seq, run_state, capture_origin), SET_ACQ_STATE 0x0208 (control request), GET_CAPTURE_INFO 0x0209, SEQ_INVALID, READ_RAW hold, READ_TRACE clip (0.2.1+), SD commands 0x0500-0x0503 (0.2.2+, cap bit 14) |
 | 1.4 | 0.2.9+ | EXT trigger (source 2 with caps bit 3 on FPGA 0x1533+), GET_STATUS byte 42 ext_flags, GET_CAPTURE_INFO flag bit 5; selecting EXT switches the generator off, SET_GEN enable under EXT = E_STATE |
 | 1.5 | 0.2.12+ | GET_EVENT_LOG 0x0009 (fast path; 64 then 128 entries, reset-snapshot tail from 0.2.15, request flags byte bit 0 = re-arm from 0.2.18, bus-level ring tail from 0.2.24) |
-| 1.6 | 0.2.27+ | FFT_BENCH 0x0F02 (diagnostic) |
+| 1.6 | 0.2.27+ | FFT_BENCH 0x0F02 (diagnostic; `Scope.fft_bench`, 5 s timeout, `fnirsi1013d-bench --fft`) |
 | 1.7 | 0.2.28+ | spectrum view: GET_STATUS byte 43 display_mode, READ_SPECTRUM 0x020A (bulk timeout class; 32-byte header, i16 centi-dBV) |
 
 GET_LINK_STATS counts (named by the count field): 27 (0.1.4-0.1.7), 29 (0.2.0-0.2.1), 31 (0.2.2-0.2.3),
@@ -118,14 +119,14 @@ range-independent; 0 V at dcoffset 0: CH1 A 132.47 / B 127.14, CH2 A 128.80 / B 
 firmware gains). The firmware formula assumes 128 on the compensated mean. Grounds: the probe ground is VRF1,
 +1.24 V over the USB ground (fpga/al3/README.md); the calibration output reads -1.24 / +1.9 V against it by design.
 
-## Tests (`tests/`, 278, about 50 s)
+## Tests (`tests/`, 280, about 50 s)
 
 `test_protocol` (codec, structs, vectors, link stats/event log), `test_transport` (incl. the scripted-link deferred
 cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `test_shared_mode` (1.3),
 `test_firmware_match` (section 14 items), `test_server` (every tool in-process, restarts, legacy fallback),
 `test_stdio` (server subprocess), `test_analysis`, `test_calibration`, `test_flash` (FEL flow, bench wrapper),
 `test_sdcard` (SD commands, persist, resume after drops, restore, CLI), `test_ext_trigger`, `test_soak`,
-`test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions).
+`test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH).
 Fixtures: `sim`/`transport`/`scope` are collaborative with UI captures on demand (`ui_capture_period_s=0`);
 `legacy_sim` / `sim_factory(legacy=True)` give the 1.2 model. Simulator hooks: `SimServer.corrupt_next`,
 `garbage_next`, `drop_next`, `bad_crc_next`, `lose_next`/`lose_cmd`, `drop_link_on`; `Device.ui_set_*`,

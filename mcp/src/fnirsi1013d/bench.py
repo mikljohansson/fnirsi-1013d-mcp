@@ -3,12 +3,17 @@
     fnirsi1013d-bench                    # auto-detect the scope port, link checks + census of 2000 PINGs
     fnirsi1013d-bench --port COM10 --census 0     # link checks only
     fnirsi1013d-bench --census 5000 --n 500
+    fnirsi1013d-bench --fft [--reps 3]   # FFT_BENCH (fw 0.2.27+): time the on-scope FFT, print the table
 
 Runs ``firmware/scope/host_tests/bench_link.py`` (owned by the firmware agent; it uses its own minimal frame code,
 no project imports, so the census measures the link and not this package's transport). LOCAL-safe: PING,
 GET_INFO, GET_STATUS, TEST_PATTERN, GET_LINK_STATS, GET_BAD_FRAME, ``#VER``, ``#RESET``. Its ``--fel`` option is
 not passed through (reloading needs the coordinator's ack; use ``fnirsi1013d-flash``). Exit status is
 bench_link's: 0 when every check passed.
+
+``--fft`` runs FFT_BENCH through this package's transport instead (docs/protocol.md section 14 row 44; main loop,
+the UI pass waits about 0.15 s at 3 reps, E_BUSY while a scope menu is open) and prints the timing table that
+``firmware/scope/host_tests/fft_bench.py`` prints. Exit 0 on a valid answer.
 """
 
 from __future__ import annotations
@@ -44,7 +49,7 @@ def load_bench_link(path: Path = BENCH_LINK):
     return mod
 
 
-def build_argv(argv: list[str] | None) -> list[str]:
+def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(prog="fnirsi1013d-bench", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", default=os.environ.get("FNIRSI_MCP_PORT", "auto"),
@@ -52,9 +57,17 @@ def build_argv(argv: list[str] | None) -> list[str]:
     ap.add_argument("--census", type=int, default=2000,
                     help="PING count of the no-retry census (plus 100 x 64 KiB); 0 = link checks only")
     ap.add_argument("--n", type=int, default=200, help="PING count of the latency check")
+    ap.add_argument("--fft", action="store_true", help="run FFT_BENCH instead of the link checks (fw 0.2.27+)")
+    ap.add_argument("--reps", type=int, default=3, choices=range(1, 17), metavar="1-16",
+                    help="FFT_BENCH runs per size (default 3)")
     a = ap.parse_args(argv)
-    port = find_port() if a.port.lower() == "auto" else a.port
-    out = [port, "--n", str(a.n)]
+    a.port = find_port() if a.port.lower() == "auto" else a.port
+    return a
+
+
+def build_argv(argv: list[str] | None) -> list[str]:
+    a = parse_args(argv)
+    out = [a.port, "--n", str(a.n)]
     if a.census:
         out += ["--census", str(a.census)]
     return out
@@ -86,9 +99,53 @@ def restart_note(before: int | None, after: int | None, elapsed_s: float) -> str
     return f"device uptime {before} -> {after} ms (no restart)"
 
 
+def format_fft_bench(b, round_trip_s: float | None = None) -> list[str]:
+    """The table of firmware/scope/host_tests/fft_bench.py."""
+    rt = f", round trip {round_trip_s * 1000:.0f} ms" if round_trip_s is not None else ""
+    lines = [f"FFT_BENCH: {len(b.entries)} entries, reps {b.reps}{rt}, CP15 control 0x{b.cp15:08x} "
+             f"(MMU {b.cp15 & 1}, D-cache {(b.cp15 >> 2) & 1}, I-cache {(b.cp15 >> 12) & 1})",
+             "%6s %5s %9s %10s %10s %9s %6s %8s" % ("N", "mem", "init ms", "run min", "run max", "dB ms", "peak", "dB")]
+    for e in b.entries:
+        lines.append("%6d %5s %9.3f %10.3f %10.3f %9.3f %6d %8.2f"
+                     % (e.n, "SRAM" if e.memory else "DDR", e.init_us / 1e3, e.run_min_us / 1e3, e.run_max_us / 1e3,
+                        e.db_min_us / 1e3, e.peak_bin, e.peak_cdb / 100))
+    return lines
+
+
+def run_fft_bench(port: str, reps: int) -> int:
+    import time
+
+    from .scope import Scope
+    from .transport import DeviceError, TransportError
+    try:
+        s = Scope.connect(port)
+    except TransportError as e:
+        print(f"fnirsi1013d-bench: cannot open {port}: {e}")
+        return 2
+    try:
+        before = s.status().uptime_ms
+        t0 = time.monotonic()
+        try:
+            b = s.fft_bench(reps)
+        except DeviceError as e:
+            print(f"FFT_BENCH failed: {e}")
+            return 1
+        dt = time.monotonic() - t0
+        for line in format_fft_bench(b, dt):
+            print(line)
+        note = restart_note(before, s.status().uptime_ms, dt)
+        print(note, flush=True)
+        return 1 if note.startswith("DEVICE RESTARTED") or not b.entries else 0
+    finally:
+        s.close()
+
+
 def main(argv: list[str] | None = None, uptime: Callable[[str], int | None] | None = None) -> None:
     import time
 
+    a = parse_args(argv)
+    if a.fft:
+        sys.exit(run_fft_bench(a.port, a.reps))
     args = build_argv(argv)
     mod = load_bench_link()
     port = args[0]

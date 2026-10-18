@@ -315,6 +315,12 @@ against the request with GET_BAD_FRAME, plus 100 x 64 KiB) and GET_LINK_STATS. L
 census. Exit status 0 only when every check passed. It needs the repository checkout (the script is not part of
 the package).
 
+`fnirsi1013d-bench --fft [--reps 3]` instead runs FFT_BENCH (firmware >= 0.2.27, protocol 1.6) through the
+package's own transport and prints the table `firmware/scope/host_tests/fft_bench.py` prints: per N and memory
+(DDR, on-chip SRAM) the plan init, run min/max and dB conversion times in ms, the peak bin and its level in dB re
+1 code RMS, plus the CP15 cache bits and the device uptime before/after. The scope's UI pass waits for the run
+(about 0.15 s at 3 reps); a scope menu open makes it fail with E_BUSY. Needs no repository checkout.
+
 ## Tests
 
 ```

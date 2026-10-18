@@ -1314,6 +1314,48 @@ def pack_spectrum(h: SpectrumHeader, levels: "list[int] | tuple[int, ...]") -> b
 
 
 @dataclass
+class FftBenchEntry(Payload):
+    """One FFT_BENCH entry (protocol 1.6, 24 bytes; section 14 row 44). Times in us."""
+
+    FIELDS = [("n", "H"), ("window", "B"), ("memory", "B"), ("init_us", "I"), ("run_min_us", "I"),
+              ("run_max_us", "I"), ("db_min_us", "I"), ("peak_bin", "H"), ("peak_cdb", "h")]
+    n: int = 0
+    window: int = 1
+    #: 0 DDR, 1 on-chip SRAM A
+    memory: int = 0
+    #: plan init (window table)
+    init_us: int = 0
+    #: window + load + FFT + split step, over the reps
+    run_min_us: int = 0
+    run_max_us: int = 0
+    #: dB conversion of the N/2 + 1 bins
+    db_min_us: int = 0
+    #: bins 2..N/2
+    peak_bin: int = 0
+    #: centi-dB re 1 code RMS (a full-scale sine reads about 3907)
+    peak_cdb: int = 0
+
+
+@dataclass
+class FftBench:
+    reps: int
+    #: CP15 control register as read: bit 0 MMU, bit 2 D-cache, bit 12 I-cache
+    cp15: int
+    entries: list[FftBenchEntry]
+
+
+def parse_fft_bench(payload: bytes) -> FftBench:
+    """FFT_BENCH: u16 n, u16 reps, u32 CP15 control, then n x 24-byte entries."""
+    n, reps, cp15 = struct.unpack_from("<HHI", payload)
+    n = min(n, (len(payload) - 8) // 24)
+    return FftBench(reps, cp15, [FftBenchEntry.unpack(payload[8 + 24 * i: 32 + 24 * i]) for i in range(n)])
+
+
+def pack_fft_bench(b: FftBench) -> bytes:
+    return struct.pack("<HHI", len(b.entries), b.reps, b.cp15) + b"".join(e.pack() for e in b.entries)
+
+
+@dataclass
 class ReadLiveReq(Payload):
     FIELDS = [("core", "B"), ("_r", "x"), ("count", "H")]
     core: int = 0
