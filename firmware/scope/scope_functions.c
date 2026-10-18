@@ -734,6 +734,11 @@ void scope_acquire_trace_data(void)
     //Sampling with trigger circuit enabled (standard memory mode)
     //if(scopesettings.long_memory) scopesettings.samplemode = 0; else scopesettings.samplemode = 1;
 
+#if PC_PROTOCOL
+    //Decimation filter (0x1534+): this conversion uses the UI's Filter setting
+    pc_glue_ui_decim_arm();
+#endif
+
     //Start the conversion
     fpga_do_conversion();
     
@@ -823,6 +828,11 @@ void scope_acquire_trace_data(void)
           data = data - (fpgasettings.settriggerpoint/2);
       }
     }
+
+#if PC_PROTOCOL
+    //16-bit layout (decimation filter on): one sample per word, start = (0x14 - pretrigger) mod 8192
+    data = pc_glue_decim_ui_start(data);
+#endif
     
     //display_decimal(550, 20, data);
 
@@ -7023,6 +7033,11 @@ void scope_save_config_data(void)
   *ptr++ = fpgasettings.settriggerpoint;
   *ptr++ = fpgasettings.en_holdoff_trigger;
   *ptr++ = fpgasettings.value_holdoff_trigger; 
+
+#if PC_PROTOCOL
+  //Acquisition Filter setting (decimation filter, 0x1534+) in a spare word of the FPGA block
+  settingsworkbuffer[PC_SETTING_WORD_DECIM] = pc_glue_decim_setting_word();
+#endif
   
   
 //-----------------------------------------------------------------

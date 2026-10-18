@@ -12,11 +12,11 @@ CFLAGS  := -std=c99 -O2 -g -Wall -Wextra -Werror -Wno-unused-function -I$(SRC) -
 VECTORS := ../../../docs/protocol-vectors.json
 
 PROTO_SRCS := $(SRC)/pc_protocol.c
-CMDS_SRCS  := $(SRC)/pc_cmds.c mock_hal.c
-CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_protocol.h mock_hal.h test_util.h
+CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/pc_decim.c mock_hal.c
+CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/pc_protocol.h mock_hal.h test_util.h
 
 .PHONY: all test vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt
 
 $(OUT):
 	mkdir -p $@
@@ -26,6 +26,9 @@ $(OUT)/test_protocol: test_protocol.c test_util.h $(PROTO_SRCS) $(SRC)/pc_protoc
 
 $(OUT)/test_rx_ring: test_rx_ring.c test_util.h $(PROTO_SRCS) $(SRC)/pc_protocol.h $(SRC)/pc_rx_ring.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_rx_ring.c $(PROTO_SRCS)
+
+$(OUT)/decim_check: decim_check.c $(SRC)/pc_decim.c $(SRC)/pc_decim.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ decim_check.c $(SRC)/pc_decim.c
 
 $(OUT)/vector_check: vector_check.c $(PROTO_SRCS) $(SRC)/pc_protocol.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ vector_check.c $(PROTO_SRCS)
@@ -51,7 +54,7 @@ test: all
 	$(OUT)/test_session
 	$(OUT)/test_session_debug
 	$(OUT)/test_spec_fmt
-	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --vectors $(VECTORS)
+	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --decim-checker $(OUT)/decim_check --vectors $(VECTORS)
 	$(PYTHON) -I test_fft.py --cli $(OUT)/fft_cli --tables $(SRC)/fx_fft_tables.c --gen ../../tools/gen_fft_tables.py
 
 vectors:

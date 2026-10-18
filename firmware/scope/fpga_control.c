@@ -396,6 +396,11 @@ void fpga_set_sample_rate(uint32 samplerate)
 
     //Write the time base clock setting to the FPGA
     fpga_write_int(sample_rate_settings[samplerate]);
+
+#if PC_PROTOCOL
+    //Decimation filter (0x1534+): N follows the divider, and a change needs the filter to settle
+    pc_glue_divider_written(sample_rate_settings[samplerate]);
+#endif
   }
 }
 
@@ -618,6 +623,12 @@ void fpga_set_long_timebase(uint32 timebase)
 void fpga_do_conversion(void)
 { 
   scopesettings.conversion_done = 0;    //flag for conversion, 0-start
+
+#if PC_PROTOCOL
+  //Decimation filter (0x1534+): the UI acquisition's setting, legacy (K = 0) for every other caller (calibration,
+  //auto setup), written and settled before the sampling reset
+  pc_glue_decim_conversion();
+#endif
   
   //Check if sampling with trigger system enabled
   if(scopesettings.samplemode == 1)
@@ -672,11 +683,20 @@ void fpga_do_conversion(void)
   {
     //Write the command to set the pretrigger_samples to the FPGA
     fpga_write_cmd(0x0B);
+#if PC_PROTOCOL
+    //16-bit layout (decimation filter on): one sample per word
+    fpga_write_short(pc_glue_decim_pre_words(fpgasettings.settriggerpoint));
+#else
     fpga_write_short(fpgasettings.settriggerpoint/2);
+#endif
 
     //Write the command to set the total_samples to the FPGA
     fpga_write_cmd(0x0C);
+#if PC_PROTOCOL
+    fpga_write_short(pc_glue_decim_words(fpgasettings.totalsamples));
+#else
     fpga_write_short(fpgasettings.totalsamples/2);
+#endif
 
     //set time to automode
     fpga_set_time_base(scopesettings.timeperdiv);
@@ -774,6 +794,11 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
   settings->minDC     = 0x7FFFFFFF;
   settings->maxDC     = 0;
   
+#if PC_PROTOCOL
+  //Decimation filter on: read the 16-bit samples now; both passes below then take them from memory (odd, even)
+  pc_glue_decim_read(settings, triggerpoint);
+#endif
+
   //Send command 0x1F to the FPGA followed by the translated data returned from command 0x14
   fpga_write_cmd(0x1F);
   fpga_write_short(triggerpoint);
@@ -856,12 +881,20 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
   //Signal to check the readings of the first ADC on being zero when compensating
   settings->checkfirstadc = 1;
 
+#if PC_PROTOCOL
+  pc_glue_decim_even();
+#endif
+
   //Setup for reading the first ADC
   settings->compensation = settings->adc2compensation;
   settings->buffer = &settings->tracebuffer[0];
   
   //Read the data for the second ADC. Samples start on the first location, skipping every other sample
   fpga_read_adc_data(settings);
+
+#if PC_PROTOCOL
+  pc_decim_src = 0;
+#endif
 
   //Save the calculated measurements
   settings->adc2rawaverage = settings->rawaverage;
@@ -1037,6 +1070,9 @@ void fpga_read_adc_data(PCHANNELSETTINGS settings)
   register int32  sample;
   register uint32 count;
   register uint32 sum = 0;
+#if PC_PROTOCOL
+  const int16 *src = pc_decim_src;      //decimation filter: samples already read and converted (pc_glue_decim_read)
+#endif
   
   //static uint64 global_sample_counter = 0;
   
@@ -1053,11 +1089,24 @@ void fpga_read_adc_data(PCHANNELSETTINGS settings)
   //Read the data as long as there is count
   while(count)
   {
+#if PC_PROTOCOL
+    if(src)
+    {
+      sample = *src;
+      src += 2;
+    }
+    else
+    {
+      FPGA_PULSE_CLK();
+      sample = FPGA_GET_DATA();
+    }
+#else
     //Clock the data to the output of the FPGA
     FPGA_PULSE_CLK();
 
     //Read the data
     sample = FPGA_GET_DATA();
+#endif
     
     //Sum the raw data for ADC difference calibration
     sum += sample;
@@ -1476,6 +1525,74 @@ void fpga_set_battery_level(void)
 }
 */
 //----------------------------------------------------------------------------------------------------------------------------------
+
+#if PC_PROTOCOL
+//----------------------------------------------------------------------------------------------------------------------------------
+//Decimation filter, bitstream 0x1534+ only (pc_decim.h). Callers check the bitstream: older ones do not decode 0x29,
+//0x53-0x55.
+
+void fpga_set_decim_mode(uint8 mode)
+{
+  //bits 1:0 K (0 legacy, 1 boxcar, 2 CIC2, 3 CIC3), bit 2 core-order swap, bits 3 / 4 A / B cores on the falling edge
+  fpga_write_cmd(0x53);
+  fpga_write_byte(mode & 0x1F);
+}
+
+void fpga_set_decim_shift(uint8 shift)
+{
+  fpga_write_cmd(0x54);
+  fpga_write_byte(shift & 0x3F);
+}
+
+void fpga_set_decim_level(uint16 level)
+{
+  //16-bit trigger level, used instead of 0x17 while K >= 1
+  fpga_write_cmd(0x55);
+  fpga_write_short(level);
+}
+
+uint16 fpga_get_decim_state(void)
+{
+  //High byte {bit 7 16-bit layout active, bit 4 neg B, bit 3 neg A, bit 2 swap, bits 1:0 K}, low byte S
+  fpga_write_cmd(0x29);
+  return(fpga_read_short());
+}
+
+//count 16-bit samples from ring word start: low bytes (cmdlo, 0x20/0x22) then high bytes (cmdhi, 0x21/0x23), each read
+//advancing one word. Same convention as fpga_read_sample_data (no dummy read after 0x1F), so both passes stay aligned.
+void fpga_read_decim_data(uint8 cmdlo, uint8 cmdhi, uint32 start, uint32 count, uint16 *dst)
+{
+  uint32 i;
+
+  fpga_write_cmd(0x1F);
+  fpga_write_short(start);
+  fpga_write_cmd(cmdlo);
+
+  FPGA_BUS_DIR_IN();
+  FPGA_DATA_READ();
+
+  for(i=0;i<count;i++)
+  {
+    FPGA_PULSE_CLK();
+    dst[i] = FPGA_GET_DATA();
+  }
+
+  fpga_write_cmd(0x1F);
+  fpga_write_short(start);
+  fpga_write_cmd(cmdhi);
+
+  FPGA_BUS_DIR_IN();
+  FPGA_DATA_READ();
+
+  for(i=0;i<count;i++)
+  {
+    FPGA_PULSE_CLK();
+    dst[i] |= FPGA_GET_DATA() << 8;
+  }
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+#endif
 
 void fpga_delay(uint32 usec)
 {

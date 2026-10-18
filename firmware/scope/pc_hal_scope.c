@@ -201,6 +201,7 @@ void pc_hal_timebase_write(const pc_hw_timebase *t, int raw)
   {
     fpga_write_cmd(0x0D);
     fpga_write_int(t->divider);
+    pc_glue_divider_written(t->divider);
     return;
   }
 
@@ -375,12 +376,19 @@ void pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable)
 //----------------------------------------------------------------------------------------------------------------------------------
 // Acquisition
 
-int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal)
+static void pc_dec_apply(const pc_decim_cfg *c);
+
+int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal,
+               const pc_decim_cfg *dc)
 {
   uint32 n = 0;
 
   //Trigger level from the marker, as every UI conversion does (scope_acquire_trace_data)
   fpga_set_trigger_level();
+
+  //Decimation filter mode, shift and 16-bit level, settled before the reset (0x1534+ only)
+  if(dc)
+    pc_dec_apply(dc);
 
   //Trigger enable (dead on Atlan4 bitstreams, meaningful on stock)                    BENCH: T6, T10
   fpga_write_cmd(0x0F);
@@ -566,6 +574,289 @@ uint32_t pc_hal_trace_capacity(void)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
+// Decimation filter (bitstream 0x1534+, pc_decim.h; firmware/README.md "Decimation filter")
+//
+// The FPGA keeps its mode until written, so the firmware writes it at every conversion start: the UI acquisition
+// (scope_acquire_trace_data -> fpga_do_conversion) and host ARM use the Filter setting, every other conversion
+// (calibration, auto setup) the legacy mode K = 0, since they need the per-core 8-bit data. A changed mode, shift or
+// divider waits (K + 2) output periods before the sampling reset (free-running filter). The readout of a 16-bit capture
+// reads both bytes per word into pc_dec_raw and converts them into the 8-bit trace domain
+// (code = out * 2^S / N^K + (comp A + comp B) / 2); fpga_read_adc_data then runs its normal per-sample work on those
+// values instead of bus reads, so the trace, the measurements and the software trigger work unchanged.
+
+#define PC_DEC_RING       8192
+
+static uint8         pc_dec_setting;                  //bits 1:0 requested K (UI Filter), saved in the settings sector
+static uint8         pc_dec_flags = PC_INTERLEAVE_ORDER ? PC_DECIM_SWAP : 0;  //0x53 bits 2-4: swap (host only, not
+                                                      //saved), falling-edge capture A / B (hidden, saved)
+static uint8         pc_dec_ui_arm;                   //the next fpga_do_conversion is the UI acquisition's
+static pc_decim_cfg  pc_dec_cur;                      //what the FPGA runs (k = 0 until written)
+static uint8         pc_dec_written;                  //pc_dec_cur was written at least once
+static uint8         pc_dec_dirty;                    //0x0D changed since the last write
+static uint32        pc_dec_divider = 0xFFFFFFFF;     //last 0x0D value written
+static uint16        pc_dec_ui_addr;                  //0x14 of the last UI capture
+static uint16        pc_dec_raw[2][PC_DEC_RING];      //16-bit samples of the last readout per channel
+static uint32        pc_dec_raw_n[2];                 //their count, 0 = that readout was 8-bit
+static int16         pc_dec_feed[PC_DEC_RING + 2];    //converted samples for fpga_read_adc_data
+static int16        *pc_dec_even_src;
+int16               *pc_decim_src;
+
+static int pc_dec_has(void)
+{
+  return pc_ready && (pc_sess.var.caps & PC_CAP_DECIM);
+}
+
+static uint32 pc_dec_div(void)
+{
+  if(pc_dec_divider != 0xFFFFFFFF)
+    return pc_dec_divider;
+
+  return (scopesettings.samplerate < (sizeof(sample_rate_settings) / sizeof(uint32))) ? sample_rate_settings[scopesettings.samplerate] : 0;
+}
+
+static void pc_dec_config(pc_decim_cfg *c, uint8 k)
+{
+  pc_decim_config(k, pc_dec_flags, pc_dec_div(), fpgasettings.totalsamples, pc_dec_has(), c);
+}
+
+//Write c to the FPGA (only what changed, the 16-bit level always) and wait for the filter to settle
+static void pc_dec_apply(const pc_decim_cfg *c)
+{
+  uint8 mode = pc_decim_mode(c);
+  int32 level;
+
+  if(!pc_dec_has())
+    return;
+
+  if(!pc_dec_written || (mode != pc_decim_mode(&pc_dec_cur)))
+  {
+    fpga_set_decim_mode(mode);
+    pc_dec_dirty = 1;
+  }
+
+  if(c->k)
+  {
+    if(!pc_dec_written || !pc_dec_cur.k || (c->shift != pc_dec_cur.shift))
+    {
+      fpga_set_decim_shift(c->shift);
+      pc_dec_dirty = 1;
+    }
+
+    //0x17 is ignored while K >= 1: the UI level (raw 8-bit code, as fpga_set_trigger_level computed it) scaled
+    level = (int16)scopesettings.triggerlevel;
+    level = (level < 0) ? 0 : ((level > 255) ? 255 : level);
+    fpga_set_decim_level(pc_decim_level16((uint8)level, c->gain, c->shift));
+
+    //(K + 2) output periods; timer0 ticks are 1 ms, + 1 for the partial tick
+    if(pc_dec_dirty)
+      timer0_delay((pc_decim_settle_us(c) + 999) / 1000 + 1);
+  }
+
+  pc_dec_dirty   = 0;
+  pc_dec_cur     = *c;
+  pc_dec_written = 1;
+}
+
+void pc_glue_divider_written(uint32 divider)
+{
+  if(divider != pc_dec_divider)
+  {
+    pc_dec_divider = divider;
+    pc_dec_dirty   = 1;
+  }
+}
+
+void pc_glue_ui_decim_arm(void)
+{
+  pc_dec_ui_arm = 1;
+}
+
+void pc_glue_decim_conversion(void)
+{
+  pc_decim_cfg c;
+
+  pc_dec_config(&c, pc_dec_ui_arm ? pc_dec_setting : 0);
+  pc_dec_ui_arm = 0;
+  pc_dec_apply(&c);
+}
+
+uint32 pc_glue_decim_words(uint32 samples)
+{
+  return pc_dec_cur.k ? samples : samples / 2;
+}
+
+//EXT trigger in the 16-bit layout: trigger_address is the last sample written before the edge, but the data lag it by
+//120 ns + K (N - 1) 2.5 ns (fpga-gen3). Writing that many samples fewer as pretrigger puts the edge back at sample
+//settriggerpoint of the capture (GET_CAPTURE_INFO byte 70 reports the shift).
+static uint32 pc_dec_ext_shift(void)
+{
+  return (pc_dec_cur.k && (scopesettings.triggerchannel == 2)) ? pc_decim_ext_shift(&pc_dec_cur) : 0;
+}
+
+uint32 pc_glue_decim_pre_words(uint32 samples)
+{
+  uint32 shift = pc_dec_ext_shift();
+
+  if(!pc_dec_cur.k)
+    return samples / 2;
+
+  return (samples > shift) ? samples - shift : 0;
+}
+
+uint32 pc_glue_decim_ui_start(uint32 start)
+{
+  if(!pc_dec_cur.k)
+    return start;
+
+  return (uint32)(pc_dec_ui_addr + PC_DEC_RING - (pc_glue_decim_pre_words(fpgasettings.settriggerpoint) % PC_DEC_RING)) % PC_DEC_RING;
+}
+
+void pc_glue_decim_read(void *settings, uint32 start)
+{
+  PCHANNELSETTINGS s = (PCHANNELSETTINGS)settings;
+  int32  ca, cb, comp2;
+  uint32 ch, n, i;
+
+  pc_decim_src    = 0;
+  pc_dec_even_src = 0;
+
+  if(s == &scopesettings.channel1)
+    ch = 0;
+  else if(s == &scopesettings.channel2)
+    ch = 1;
+  else
+    return;
+
+  pc_dec_raw_n[ch] = 0;
+
+  if(!pc_dec_cur.k)
+    return;
+
+  //fpga_read_adc_data takes 2 x nofsamples values
+  n = scopesettings.nofsamples * 2;
+
+  if(n > PC_DEC_RING)
+    n = PC_DEC_RING;
+
+  fpga_read_decim_data(s->adc1command, s->adc2command, start % PC_DEC_RING, n, pc_dec_raw[ch]);
+
+  //Into the 8-bit trace domain. fpga_read_adc_data adds adc1compensation to the odd samples (its first pass) and
+  //adc2compensation to the even ones, so take them off here: the result is the converted code with the mean of both
+  //compensations (each output sample weighs both cores equally for even N).
+  ca    = s->adc1compensation;
+  cb    = s->adc2compensation;
+  comp2 = ca + cb;
+
+  for(i=0;i<n;i++)
+    pc_dec_feed[i] = (int16)(pc_decim_to_code(pc_dec_raw[ch][i], pc_dec_cur.scale_q24, comp2) - ((i & 1) ? ca : cb));
+
+  pc_dec_raw_n[ch] = n;
+  pc_decim_src     = &pc_dec_feed[1];
+  pc_dec_even_src  = &pc_dec_feed[0];
+}
+
+void pc_glue_decim_even(void)
+{
+  pc_decim_src = pc_dec_even_src;
+}
+
+uint16 pc_glue_decim_setting_word(void)
+{
+  //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (Filter off). Bits 3-4:
+  //the hidden falling-edge capture settings (SET_DECIM only)
+  return (uint16)(0xDE00 | (pc_dec_flags & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)) | (pc_dec_setting & 3));
+}
+
+static const char *pc_dec_names[4] = { "off", "boxcar", "CIC2", "CIC3" };
+
+//Acquisition menu: Filter box in the Long memory slot (masked on every Atlan bitstream), same style as the Roll mode box
+static void pc_dec_draw_box(void)
+{
+  uint16    fg   = displaydata.fg_color;
+  PFONTDATA font = displaydata.font;
+  int       on   = pc_dec_setting != 0;
+  uint32    len  = strlen(pc_dec_names[pc_dec_setting & 3]);
+
+  display_set_fg_color(on ? GREEN_COLOR : LIGHTGREY_COLOR);
+  display_fill_rounded_rect(ACQ_MENU_XPOS + 204, ACQ_MENU_YPOS + 163, 90, 40, 3);
+  display_set_font(&font_2);
+  display_set_fg_color(on ? BLACK_COLOR : WHITE_COLOR);
+  display_text(ACQ_MENU_XPOS + 231, ACQ_MENU_YPOS + 168, "Filter");
+  display_text(ACQ_MENU_XPOS + 249 - 3 * len, ACQ_MENU_YPOS + 182, (int8 *)pc_dec_names[pc_dec_setting & 3]);
+  displaydata.fg_color = fg;
+  displaydata.font     = font;
+}
+
+//Memory depth for the 16-bit layout: the largest offered step that fits, trigger point kept at the same fraction
+static void pc_dec_fit_memory(void)
+{
+  uint32 old = fpgasettings.totalsamples, total = (PC_DECIM_MAX_TOTAL / 3000) * 3000, pre = fpgasettings.settriggerpoint;
+
+  if(old <= PC_DECIM_MAX_TOTAL)
+    return;
+
+  if(pre == old / 4)
+    pre = total / 4;
+  else if(pre == old - 1000)
+    pre = total - 1000;
+  else
+    pre = total / 2;
+
+  fpgasettings.totalsamples     = total;
+  fpgasettings.settriggerpoint  = pre;
+  scopesettings.samplecount     = total;
+  scopesettings.nofsamples      = total / 2;
+}
+
+void pc_glue_decim_tap(void)
+{
+  pc_dec_setting = (uint8)((pc_dec_setting + 1) & 3);
+
+  if(pc_dec_setting)
+  {
+    pc_dec_fit_memory();
+    scope_acquisition_memory_deep_select();
+  }
+
+  pc_dec_draw_box();
+  scopesettings.display_data_done = 1;
+}
+
+uint8_t pc_hal_decim_setting(void)
+{
+  return (uint8_t)((pc_dec_setting & 3) | pc_dec_flags);
+}
+
+void pc_hal_decim_set(uint8_t setting)
+{
+  pc_dec_setting = setting & 3;
+  pc_dec_flags   = setting & PC_DECIM_FLAGS;
+
+  if(pc_dec_setting)
+    pc_dec_fit_memory();
+
+  //The next UI pass arms a fresh conversion with it
+  scopesettings.display_data_done = 1;
+}
+
+void pc_hal_decim_current(pc_decim_cfg *c, int *written)
+{
+  *c       = pc_dec_cur;
+  *written = pc_dec_written;
+}
+
+uint16_t pc_hal_decim_readback(void)
+{
+  return pc_dec_has() ? fpga_get_decim_state() : 0;
+}
+
+const uint16_t *pc_hal_trace16(int ch, uint32_t *count)
+{
+  *count = pc_dec_raw_n[ch & 1];
+  return *count ? pc_dec_raw[ch & 1] : 0;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
 // System
 
 uint32_t pc_hal_ms(void)              { return timer0ticks; }
@@ -648,6 +939,7 @@ uint32_t pc_hal_settings_fingerprint(void)
   b[n++] = (uint8)(fpgasettings.settriggerpoint >> 8);
   b[n++] = (uint8)fpgasettings.totalsamples;
   b[n++] = (uint8)(fpgasettings.totalsamples >> 8);
+  b[n++] = pc_dec_has() ? pc_hal_decim_setting() : 0;
 
   return pc_crc32(b, n);
 }
@@ -1007,9 +1299,13 @@ int pc_glue_ui_has(int feature)
     case PC_FEAT_HOLDOFF:
       return 0;
 
+    case PC_FEAT_DECIM:
+      return pc_dec_has();
+
     default:
+      //With the Filter on, the 16-bit layout holds one sample per word: at most PC_DECIM_MAX_TOTAL
       if((feature >= PC_FEAT_MEM_BASE) && (feature < PC_FEAT_MEM_BASE + 8))
-        return (uint32)(3000 * (feature - PC_FEAT_MEM_BASE + 1)) <= pc_sess.var.max_total;
+        return (uint32)(3000 * (feature - PC_FEAT_MEM_BASE + 1)) <= ((pc_dec_has() && pc_dec_setting) ? PC_DECIM_MAX_TOTAL : pc_sess.var.max_total);
 
       return 1;
   }
@@ -1044,6 +1340,10 @@ void pc_glue_ui_mask(int menu)
     case PC_MASK_ACQ_LONG:
       if(!pc_glue_ui_has(PC_FEAT_LONG_MEMORY))
         pc_mask_rect(ACQ_MENU_XPOS + 202, ACQ_MENU_YPOS + 161, 94, 44);
+
+      //The slot holds the decimation Filter selector on 0x1534+
+      if(pc_glue_ui_has(PC_FEAT_DECIM))
+        pc_dec_draw_box();
       break;
 
     case PC_MASK_ACQ_MEMORY:
@@ -1267,6 +1567,17 @@ static void pc_ui_fix_settings(void)
   if((scopesettings.triggerchannel > 1) && !(pc_sess.var.caps & PC_CAP_EXT_TRIGGER))
     scopesettings.triggerchannel = 0;
 
+  //Acquisition Filter (decimation, 0x1534+): kept in a spare settings word, default off. With it on the 16-bit layout
+  //limits the memory depth.
+  if((settingsworkbuffer[PC_SETTING_WORD_DECIM] & 0xFFE4) == 0xDE00)
+  {
+    pc_dec_setting = (uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM] & 3);
+    pc_dec_flags   = (uint8)((pc_dec_flags & PC_DECIM_SWAP) | (settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)));
+  }
+
+  if(pc_dec_has() && pc_dec_setting)
+    pc_dec_fit_memory();
+
   //Memory depth: the largest offered step (3000 x n) the bitstream can capture
   if(fpgasettings.totalsamples > max)
   {
@@ -1358,6 +1669,8 @@ void pc_glue_ui_capture_start(void)
 
 void pc_glue_ui_capture_addr(uint32 addr)
 {
+  pc_dec_ui_addr = (uint16)addr;
+
   if(pc_ready)
     pc_ui_capture_addr(&pc_sess, (uint16_t)addr);
 }

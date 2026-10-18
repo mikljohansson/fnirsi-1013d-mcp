@@ -226,9 +226,19 @@ void pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable)
 
 static int mock_polls;
 
-int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal)
+int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal,
+               const pc_decim_cfg *dc)
 {
   mock.fpga_ops++;
+
+  if(dc)
+  {
+    //As pc_hal_scope.c: written (and settled) before the reset
+    mock.decim_cur     = *dc;
+    mock.decim_written = 1;
+    mock.decim_rb      = (uint16_t)((pc_decim_status(dc) << 8) | dc->shift);
+    mock.decim_arms++;
+  }
 
   if(mock.arm_fail)
     return -1;
@@ -290,6 +300,26 @@ int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t
     if(!(ch_mask & (1 << ch)))
       continue;
 
+    mock.trace16_n[ch] = 0;
+
+    //16-bit layout (as pc_glue_decim_read): one sample per word, low byte core A, high byte core B
+    if(mock.decim_cur.k)
+    {
+      int32_t comp2 = mock.ch[ch].adc_a_comp + mock.ch[ch].adc_b_comp;
+
+      for(k=0;k<total_samples;k++)
+      {
+        uint32_t a = (start_word + k) % mock.ring_words;
+        uint16_t v = (uint16_t)(mock.ring[2 * ch][a] | (mock.ring[2 * ch + 1][a] << 8));
+
+        mock.trace16[ch][k] = v;
+        mock.trace[ch][k]   = (uint8_t)pc_decim_to_code(v, mock.decim_cur.scale_q24, comp2);
+      }
+
+      mock.trace16_n[ch] = total_samples;
+      continue;
+    }
+
     for(k=0;k<total_samples/2;k++)
     {
       uint32_t a = (start_word + k) % mock.ring_words;
@@ -312,6 +342,22 @@ void pc_hal_trace_ui_info(uint32_t *sample_count, uint32_t *pretrigger, int32_t 
 }
 
 uint32_t pc_hal_trace_capacity(void) { return sizeof(mock.trace[0]); }
+
+uint8_t  pc_hal_decim_setting(void)        { return mock.decim_setting; }
+void     pc_hal_decim_set(uint8_t setting) { mock.decim_setting = setting & 0x1F; mock.fpga_ops++; }
+uint16_t pc_hal_decim_readback(void)       { mock.fpga_ops++; return mock.decim_rb; }
+
+void pc_hal_decim_current(pc_decim_cfg *c, int *written)
+{
+  *c = mock.decim_cur;
+  *written = mock.decim_written;
+}
+
+const uint16_t *pc_hal_trace16(int ch, uint32_t *count)
+{
+  *count = mock.trace16_n[ch & 1];
+  return *count ? mock.trace16[ch & 1] : 0;
+}
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -355,6 +401,7 @@ uint32_t pc_hal_settings_fingerprint(void)
   b[n++] = (uint8_t)mock.trg.pretrigger; b[n++] = (uint8_t)(mock.trg.pretrigger >> 8);
   b[n++] = (uint8_t)mock.trg.total; b[n++] = (uint8_t)(mock.trg.total >> 8);
   b[n++] = mock.long_mode;
+  b[n++] = mock.decim_setting;
   return pc_crc32(b, n);
 }
 

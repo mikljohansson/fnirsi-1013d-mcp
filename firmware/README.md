@@ -393,6 +393,8 @@ hooks `PC_UI_HAS` / `PC_UI_MASK` that are empty with `PC_PROTOCOL=0`):
 | the generator menu itself (top-bar button does not open it) | top bar | stock bitstream 0x1432 (no DDS) | the stock core has a fixed 1 kHz square wave |
 | memory depth boxes above the bitstream's maximum | acquisition menu | 6000+ on stock (3000), 15000 on EF2/EP4 (12286) | the FPGA cannot capture more |
 | Long memory | acquisition menu | always | 1.00o5 forces it off; the main-loop branch is empty |
+| Filter selector (in the Long memory slot) | acquisition menu | bitstream without DECIM (all but AL3 0x1534+) | the decimation filter exists only in fpga/al3 0x1534 (fw 0.2.30, "Decimation filter" below) |
+| memory depth 9000, 12000, 15000 | acquisition menu | Filter on (0x1534+) | the 16-bit layout holds one sample per ring word: at most 8190 samples |
 | EXT trigger source | trigger menu | bitstream without EXT_TRIGGER (all but AL3 0x1533+) | the input exists only in fpga/al3 0x1533 (calibration pin, 3.3 V logic referenced to the scope's USB ground, not the probe ground, which sits ~1.24 V above it); selecting it switches the generator off |
 | Hold off | trigger menu | always | never sent to the FPGA in 1.00o5 |
 | Spectrum analyzer row | main menu | roll mode, viewers (fw 0.2.28) | the roll-mode trace path does not run the spectrum hook; the menu is one row shorter then |
@@ -420,8 +422,59 @@ memory depth clamped to the largest offered step. The DS3231 is detected by addr
 panel's I2C bus and sampling the ACK bit [U, bench check: with and without a module]. No option needs a manual switch
 yet (everything above is detected); new hardware mods that cannot be detected get a switch in "Other settings"
 (the menu is full: a second column or page is needed) with the value in a spare settings word (108..119 or 204..255,
-`scope_save_config_data`), default off. Not changed: trigger positions 25 % / 75 % on the stock bitstream (software
+`scope_save_config_data`; 207 holds the Filter setting since 0.2.30), default off. Not changed: trigger positions 25 % / 75 % on the stock bitstream (software
 only there), the generator top-bar button text on stock.
+
+### Decimation filter (FPGA 0x1534, fw 0.2.30, protocol 1.9)
+
+fpga-gen3's AL3 bitstream 0x1534 filters the 200 MSa/s ADC stream before decimating (fpga/al3/src/FPGA commands.txt,
+fpga/al3/README.md): 0x53 mode (K: 0 legacy sample skipping, 1 boxcar, 2 CIC2, 3 CIC3; bit 2 core-order swap;
+bits 3 / 4 capture the A / B cores on the falling write-clock edge), 0x54 output shift S, 0x55 16-bit trigger level,
+read 0x29. Latency 120 ns pin to memory for every K and N, the sample centred K (N - 1) 2.5 ns earlier still. Decimation N = 2 x (floor(D / 2) + 1) for the 0x0D
+divider D, so the odd dividers of `sample_rate_settings` give the same rates as before; the FPGA stores
+min(65535, y >> S), y = filter output with gain N^K. On 0x1532/0x1533 none of this is written (caps bit 15 DECIM).
+
+- Maths, `pc_decim.c` (integer, host-tested): S = max(0, bitlen(255 x N^K) - 16), so full scale uses the top bit of
+  16; exactness 255 x N^K < 2^48 makes CIC3 fall back to CIC2 above N = 10334 (slower than 20 kSa/s) and CIC2 to
+  boxcar above N = 1,050,630 (not reached by the table); legacy at divider 0 (200 MSa/s: K >= 1 would give N = 2)
+  and for captures over 8190 samples. 16-bit trigger level L16 = round(v x N^K / 2^S) from the UI's 8-bit level.
+- When it is written (`pc_hal_scope.c`, "Decimation filter"): at every conversion start. `fpga_do_conversion` writes
+  the Filter setting for the UI acquisition (`scope_acquire_trace_data` flags it) and legacy (K = 0) for every
+  other caller, i.e. calibration (it needs the per-core averages) and auto setup; host ARM writes it in
+  `pc_hal_arm`. Only changed registers are written (0x55 always); a change of mode, shift or divider (tracked in
+  `fpga_set_sample_rate` and the raw SET_TIMEBASE path) waits (K + 2) output periods, rounded up to whole ms + 1,
+  before the sampling reset (the filter runs free and 0x01 does not reset it; at most 9 ms at 500 Sa/s).
+- Geometry: in the 16-bit layout 0x0B / 0x0C / 0x0E / 0x14 count samples (one word each), so `fpga_do_conversion`
+  writes `settriggerpoint` and `totalsamples` unhalved and the UI capture start is (0x14 - pretrigger) mod 8192
+  (`pc_glue_decim_ui_start`) instead of 1.00o5's `T + 7441`.
+- Readout: `fpga_read_sample_data` calls `pc_glue_decim_read`, which reads 2 x nofsamples words (0x1F, n x low
+  byte 0x20/0x22, 0x1F, n x high byte 0x21/0x23; `fpga_read_decim_data`, 1.00o5 convention without a dummy read)
+  into a uint16 buffer per channel, converts them into the 8-bit trace domain (code = out x 2^S / N^K + (comp A +
+  comp B) / 2, Q24, rounded and clamped) and lets `fpga_read_adc_data` take those values instead of bus reads in
+  its two passes (odd, then even samples, each with its core's compensation pre-subtracted). Trace, measurements,
+  frequency and the software trigger therefore run unchanged; the 16-bit buffer stays available to READ_TRACE WIDE.
+  Inference: the 1.00o5 rail-matching branch (`checkfirstadc`) still acts within |compensation| codes of 0 and 255,
+  and ADC overload now means "the average hit a rail".
+- EXT trigger with K >= 1: the data lag the edge by 120 ns + K (N - 1) 2.5 ns, rounded to the nearest output
+  sample (`pc_decim_ext_shift`); the UI (`pc_glue_decim_pre_words`) and host ARM write that many fewer pretrigger
+  words, so the edge stays at sample `settriggerpoint`; GET_CAPTURE_INFO byte 70 reports the shift.
+- Hidden settings: falling-edge capture of the A / B cores (0x53 bits 3 / 4), only via SET_DECIM flags bits 1 / 2,
+  saved in bits 3 / 4 of settings word 207; the core-order swap (bit 2) is host only and not saved.
+- UI: acquisition menu "Filter" box (off / boxcar / CIC2 / CIC3, a tap steps through them, green while on) in the
+  slot of the hidden Long memory box, only on 0x1534+. Saved in settings word 207 (0xDE00 | K); older sectors read
+  as off. Turning it on with 9000+ samples sets the memory depth to 6000 (trigger point kept at 25 / 50 / 75 %).
+  The box shows the setting; GET_DECIM tells the effective K (e.g. legacy at 200 MSa/s).
+- Protocol 1.9 (docs/protocol.md section 14 row 47): GET_DECIM 0x020C, SET_DECIM 0x020D (shared control: it is the
+  UI setting; SET_TRIGGER total > 8190 is refused while it is on), READ_TRACE flag bit 2 (u16 samples),
+  READ_RAW layout 2 (u16 little-endian words), GET_CAPTURE_INFO 76 bytes with the capture's mode, S and N.
+- Host tests: `test_session.c` `test_decim_math` (all table rates x K, exactness limits against 128-bit references,
+  L16 round trip for every level, compensation, rates, settle) and `test_decim_protocol` (0x1533 untouched, 0x1534
+  flow); `decim_check.c` reproduces the 80 "decim" cases that `gen_vectors.py` computes in Python.
+
+Bench (nothing verified on hardware; bitstream not yet flashed): 0x29 read-back after an arm (GET_DECIM bytes
+26-27); a DC level reads the same code with the filter off and on; a 3.9 MHz generator at 1 MSa/s aliases at
+100 kHz with skipping and is attenuated with boxcar / CIC (plan F1); trigger on CH1 with the 16-bit level at
+several rates; the swap bit (T4 dependency); settling after a time base change (first capture clean).
 
 ### FFT core (`fx_fft.c`, protocol builds)
 

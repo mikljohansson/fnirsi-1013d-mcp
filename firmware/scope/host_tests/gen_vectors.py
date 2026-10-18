@@ -28,7 +28,7 @@ CMDS = {
     "GET_TRIGGER": 0x0104, "SET_TRIGGER": 0x0105,
     "ARM": 0x0200, "FORCE": 0x0201, "STOP": 0x0202, "WAIT": 0x0203, "READ_RAW": 0x0204,
     "READ_TRACE": 0x0205, "READ_LIVE": 0x0206, "ACQUIRE_AVG": 0x0207,
-    "SET_ACQ_STATE": 0x0208, "GET_CAPTURE_INFO": 0x0209,
+    "SET_ACQ_STATE": 0x0208, "GET_CAPTURE_INFO": 0x0209, "GET_DECIM": 0x020C, "SET_DECIM": 0x020D,
     "SD_INFO": 0x0500, "SD_READ_SECTORS": 0x0501, "SD_STAGE": 0x0502, "SD_WRITE_SECTORS": 0x0503,
     "GET_GEN": 0x0300, "SET_GEN": 0x0301, "GET_CAL": 0x0400, "READ_SCREEN": 0x0401,
     "DEBUG_FPGA": 0x0F00, "ENTER_FEL": 0x0F01,
@@ -84,6 +84,8 @@ REQUESTS = [
     ("ACQUIRE_AVG", struct.pack("<HBBIIII", 64, 0x01, 0x01, 100, 0, 2000, 0), "64 captures, CH1, require trigger"),
     ("SET_ACQ_STATE", struct.pack("<B3x", 1), "1.3: UI RUN (0 = STOP)"),
     ("GET_CAPTURE_INFO", b"", "1.3: settings of the latest finished capture"),
+    ("GET_DECIM", b"", "1.9: decimation filter setting and state (FPGA 0x1534+)"),
+    ("SET_DECIM", struct.pack("<BBH", 2, 0, 0), "1.9: filter CIC2, no core-order swap"),
     ("GET_LINK_STATS", b"", "1.2: link counters"),
     ("GET_BAD_FRAME", b"", "1.2: last request with a payload CRC error"),
     ("GET_EVENT_LOG", b"", "1.5: the last 64 USB / link events with ms timestamps"),
@@ -99,6 +101,45 @@ REQUESTS = [
     ("DEBUG_FPGA", bytes([1, 1, 0x06, 3, 2]), "write command 0x06, read 2 bytes (FPGA version)"),
     ("ENTER_FEL", struct.pack("<I", 0x4C45465F), "magic 'FEL_' little-endian"),
 ]
+
+
+# Decimation filter maths (FPGA 0x1534, docs/protocol.md section 14 row 47), independent of pc_decim.c
+DECIM_MAX_TOTAL = 8190
+DECIM_LEVELS = [0, 1, 64, 127, 128, 200, 254, 255]
+SAMPLE_RATE_DIVIDERS = [0, 1, 3, 9, 19, 39, 99, 199, 399, 999, 1999, 3999, 9999, 19999, 39999, 99999, 199999, 399999]
+
+
+def decim_case(divider, k_req, total):
+    n = 2 * (divider // 2 + 1)
+    k = k_req
+    if k_req == 0 or divider == 0 or total > DECIM_MAX_TOTAL:
+        k = 0
+    while k > 1 and 255 * n ** k >= 1 << 48:
+        k -= 1
+    case = {"divider": divider, "k_req": k_req, "total": total, "k": k}
+    if k == 0:
+        case.update({"n": 0, "gain": 1, "shift": 0, "rate": 200000000 // (divider + 1), "settle_us": 0, "ext_shift": 0,
+                     "level16": []})
+        return case
+    gain = n ** k
+    shift = max(0, (255 * gain).bit_length() - 16)
+    lv = []
+    for v in DECIM_LEVELS:
+        y = v * gain
+        if shift:
+            y = (y + (1 << (shift - 1))) >> shift
+        lv.append(min(y, 65535))
+    case.update({"n": n, "gain": gain, "shift": shift, "rate": 200000000 // n,
+                 "settle_us": -(-((k + 2) * n) // 200), "ext_shift": (240 + k * (n - 1) * 5 + 5 * n) // (10 * n),
+                 "level16": lv})
+    return case
+
+
+def decim_cases():
+    cases = [decim_case(d, k, 3000) for d in SAMPLE_RATE_DIVIDERS for k in range(4)]
+    cases += [decim_case(2, 2, 3000), decim_case(20, 3, 3000), decim_case(10332, 3, 3000), decim_case(10334, 3, 3000),
+              decim_case(1050629, 2, 3000), decim_case(1050630, 2, 3000), decim_case(19, 2, 8190), decim_case(19, 2, 8192)]
+    return cases
 
 
 def build():
@@ -220,6 +261,15 @@ def build():
         ],
         "crc_check": {"crc16_ccitt_false_123456789": "29b1", "crc32_iso_hdlc_123456789": "cbf43926"},
         "commands": {k: v for k, v in CMDS.items()},
+        "decim": {
+            "notes": "1.9 decimation filter: N = 2 * (floor(D / 2) + 1); effective K = 0 for k_req 0, divider 0 or "
+                     "total > 8190, else the largest K <= k_req with 255 * N^K < 2^48; gain N^K; shift S = "
+                     "max(0, bitlen(255 * gain) - 16); level16[i] = min(65535, round(levels[i] * gain / 2^S)); "
+                     "rate = 200 MSa/s / N (K = 0: 200 MSa/s / (D + 1)); settle_us = ceil((K + 2) * N / 200); ext_shift = "
+                     "round((120 ns + K (N - 1) 2.5 ns) / (N x 5 ns)), halves up, 0 for K = 0.",
+            "levels": DECIM_LEVELS,
+            "cases": decim_cases(),
+        },
         "vectors": vectors,
     }
 

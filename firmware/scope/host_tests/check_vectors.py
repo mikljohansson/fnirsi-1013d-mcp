@@ -61,6 +61,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--checker", default=os.path.join(here, "vector_check"))
     ap.add_argument("--vectors", default=os.path.join(here, "..", "..", "..", "docs", "protocol-vectors.json"))
+    ap.add_argument("--decim-checker", help="decim_check binary (pc_decim.c): cross-check the decim section")
     args = ap.parse_args()
 
     with open(args.vectors) as fh:
@@ -144,6 +145,19 @@ def main():
         fail(f"stream: {len(g)} events, expected {len(exp)}")
     else:
         print(f"stream: {len(exp)} frames in one {len(stream)}-byte stream with junk, all found")
+
+    # 5. decimation maths (1.9): the C implementation against the vectors' Python reference
+    if args.decim_checker and "decim" in data:
+        dec = data["decim"]
+        text = "".join(f"{c['divider']} {c['k_req']} {c['total']}\n" for c in dec["cases"])
+        out = subprocess.run([args.decim_checker] + [str(v) for v in dec["levels"]], input=text,
+                             capture_output=True, text=True, check=True).stdout.split("\n")
+        for c, ln in zip(dec["cases"], out):
+            f = [int(x) for x in ln.split()]
+            exp = [c["k"], c["n"], c["gain"], c["shift"], c["rate"], c["settle_us"], c["ext_shift"]] + (c["level16"] or [])
+            if f[:len(exp)] != exp:
+                fail(f"decim {c['divider']} {c['k_req']} {c['total']}: C gave {f}, expected {exp}")
+        print(f"decim: {len(dec['cases'])} cases checked against pc_decim.c")
 
     if fails:
         print(f"{fails} FAILURES")

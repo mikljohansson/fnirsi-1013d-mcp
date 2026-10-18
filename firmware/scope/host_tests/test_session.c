@@ -165,7 +165,7 @@ static void test_info(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, 76);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 7); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 9); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
   T_EQ(pc_get_u16(r.p + 8), 0x1532); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS), PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED), PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED);
@@ -276,7 +276,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.7,fpga=0x1532");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.9,fpga=0x1532");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -477,7 +477,7 @@ static void test_capture_and_raw(void)
 
   //GET_CAPTURE_INFO: the settings of that capture
   r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
-  T_EQ(r.h.status, 0); T_EQ(r.len, 68);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 76);
   T_EQ(pc_get_u32(r.p), 1); T_EQ(r.p[8], PC_ORIGIN_HOST); T_EQ(r.p[9] & 0x13, 0x01);
   T_EQ(pc_get_u16(r.p + 10), 100); T_EQ(pc_get_u16(r.p + 12), 7292);
   T_EQ(pc_get_u32(r.p + 16), 19); T_EQ(r.p[20], 24); T_EQ(r.p[24], 1);
@@ -1367,7 +1367,7 @@ static void test_ext_trigger(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
-  T_EQ(r.p[1], 7);                                              //proto 1.7
+  T_EQ(r.p[1], 9);                                              //proto 1.9
 
   //Generator on, then EXT: the generator goes off
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -1636,7 +1636,7 @@ static void test_fel_reset_stall(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 7);                                              //proto_minor 1.7
+  T_EQ(r.p[1], 9);                                              //proto_minor 1.9
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -1738,6 +1738,299 @@ static void test_fel_reset_stall(void)
   T_TRUE(pc_get_u16(r.p + 30) < 90);
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// Decimation filter (protocol 1.9, bitstream 0x1534, pc_decim.c)
+
+//Independent reference for 255 * N^K < 2^48 (128-bit products, no overflow)
+static int ref_exact(uint32_t n, int k)
+{
+  unsigned __int128 y = 255;
+  int i;
+
+  for(i=0;i<k;i++)
+    y *= n;
+
+  return y < ((unsigned __int128)1 << 48);
+}
+
+static int ref_bitlen(unsigned __int128 y)
+{
+  int b = 0;
+
+  while(y) { b++; y >>= 1; }
+  return b;
+}
+
+static void test_decim_math(void)
+{
+  //sample_rate_settings[0..17] (variables.c)
+  static const uint32_t div[18] = { 0,1,3,9,19,39,99,199,399,999,1999,3999,9999,19999,39999,99999,199999,399999 };
+  pc_decim_cfg c;
+  uint32_t i, k;
+
+  //N = 2 * (floor(D / 2) + 1): odd D gives D + 1 (same rate as the legacy table), even D rounds up
+  T_EQ(pc_decim_n(0), 2); T_EQ(pc_decim_n(1), 2); T_EQ(pc_decim_n(2), 4); T_EQ(pc_decim_n(19), 20);
+  T_EQ(pc_decim_n(399999), 400000);
+
+  //Exactness limits from the FPGA brief
+  T_TRUE(ref_exact(PC_DECIM_CIC2_MAX_N, 2)); T_TRUE(!ref_exact(PC_DECIM_CIC2_MAX_N + 1, 2));
+  T_TRUE(ref_exact(PC_DECIM_CIC3_MAX_N, 3)); T_TRUE(!ref_exact(PC_DECIM_CIC3_MAX_N + 1, 3));
+
+  for(i=0;i<18;i++)
+  {
+    uint32_t n = div[i] ? div[i] + 1 : 2;
+
+    T_EQ(pc_decim_n(div[i]), n);
+
+    for(k=1;k<=3;k++)
+    {
+      unsigned __int128 g;
+      uint32_t kk, s_ref, j;
+
+      pc_decim_config((uint8_t)k, 0, div[i], 3000, 1, &c);
+
+      if(i == 0)
+      {
+        //200 MSa/s: legacy only
+        T_EQ(c.k, 0); T_EQ(c.why, PC_DECIM_WHY_FULLRATE);
+        continue;
+      }
+
+      //Effective K: the requested one while exact, else the next lower (K = 1 is always exact)
+      kk = k;
+      while((kk > 1) && !ref_exact(n, (int)kk))
+        kk--;
+
+      T_EQ(c.k, kk); T_EQ(c.n, n);
+      T_TRUE(ref_exact(c.n, c.k));
+      if(kk < k) T_TRUE((c.why == PC_DECIM_WHY_CIC3) || (c.why == PC_DECIM_WHY_CIC2));
+
+      g = 1;
+      for(j=0;j<kk;j++)
+        g *= n;
+
+      T_TRUE(c.gain == (uint64_t)g);
+      s_ref = (uint32_t)((ref_bitlen(g * 255) > 16) ? ref_bitlen(g * 255) - 16 : 0);
+      T_EQ(c.shift, s_ref);
+
+      //Full scale fits 16 bits after the shift, and uses its top bit
+      T_TRUE(((g * 255) >> c.shift) <= 65535);
+      T_TRUE((c.shift == 0) || (((g * 255) >> c.shift) >= 32768));
+
+      //L16 = round(v * N^K / 2^S); converted back to an 8-bit code it is v again, for every v
+      for(j=0;j<256;j++)
+      {
+        uint16_t l = pc_decim_level16((uint8_t)j, c.gain, c.shift);
+        unsigned __int128 ref = (unsigned __int128)j * g;
+
+        if(c.shift)
+          ref = (ref + ((unsigned __int128)1 << (c.shift - 1))) >> c.shift;
+
+        if(ref > 65535)
+          ref = 65535;
+
+        T_EQ(l, (uint32_t)ref);
+        T_EQ(pc_decim_to_code(l, c.scale_q24, 0), j);
+      }
+
+      //Constant inputs at full and mid scale give 255 and 128
+      T_EQ(pc_decim_to_code((uint16_t)((g * 255) >> c.shift), c.scale_q24, 0), 255);
+      T_EQ(pc_decim_to_code((uint16_t)((g * 128) >> c.shift), c.scale_q24, 0), 128);
+      //Compensation: the mean of both cores, clamped at the rails
+      T_EQ(pc_decim_to_code((uint16_t)((g * 128) >> c.shift), c.scale_q24, 2 * 3), 131);
+      T_EQ(pc_decim_to_code(0, c.scale_q24, -4), 0);
+
+      //Rate: 200 MSa/s / N equals the legacy 200 / (D + 1) for these odd dividers; settle (K + 2) periods
+      T_EQ(pc_decim_rate(&c, div[i]), 200000000u / (div[i] + 1));
+      T_EQ(pc_decim_settle_us(&c), (uint32_t)(((uint64_t)(kk + 2) * n + 199) / 200));
+    }
+  }
+
+  //Spot values: 10 MSa/s (D 19, N 20): K1 S 0, K2 gain 400 S 1, K3 gain 8000 S 5; slow rates CIC3 -> CIC2
+  pc_decim_config(1, 0, 19, 3000, 1, &c); T_EQ(c.shift, 0); T_EQ(pc_decim_level16(128, c.gain, c.shift), 2560);
+  pc_decim_config(2, 0, 19, 3000, 1, &c); T_EQ(c.gain, 400); T_EQ(c.shift, 1); T_EQ(pc_decim_status(&c), 0x82);
+  pc_decim_config(3, 4, 19, 3000, 1, &c); T_EQ(c.gain, 8000); T_EQ(c.shift, 5); T_EQ(pc_decim_mode(&c), 0x07);
+  T_EQ(pc_decim_status(&c), 0x87); T_EQ(pc_decim_level16(255, c.gain, c.shift), 63750);
+  pc_decim_config(3, 0, 9999, 3000, 1, &c); T_EQ(c.k, 3); T_EQ(c.n, 10000);
+  pc_decim_config(3, 0, 19999, 3000, 1, &c); T_EQ(c.k, 2); T_EQ(c.why, PC_DECIM_WHY_CIC3);
+  pc_decim_config(3, 0, 399999, 3000, 1, &c); T_EQ(c.k, 2); T_EQ(c.shift, 30);
+  pc_decim_config(2, 0, 2000000, 3000, 1, &c); T_EQ(c.k, 1); T_EQ(c.why, PC_DECIM_WHY_CIC2);
+
+  //EXT latency (120 ns + K (N - 1) 2.5 ns) in output periods, rounded: N 2 K 1 12.25 -> 12, N 20 K 2 2.15 -> 2, K 3 2.6 -> 3,
+  //N 400000 K 2 1.0 -> 1; legacy 0
+  pc_decim_config(1, 0, 1, 3000, 1, &c);      T_EQ(pc_decim_ext_shift(&c), 12);
+  pc_decim_config(2, 0, 19, 3000, 1, &c);     T_EQ(pc_decim_ext_shift(&c), 2);
+  pc_decim_config(3, 0, 19, 3000, 1, &c);     T_EQ(pc_decim_ext_shift(&c), 3);       //(240 + 285) / 200 = 2.6
+  pc_decim_config(2, 0, 399999, 3000, 1, &c); T_EQ(pc_decim_ext_shift(&c), 1);
+  pc_decim_config(0, 0, 19, 3000, 1, &c);     T_EQ(pc_decim_ext_shift(&c), 0);
+
+  //Flags (swap, falling-edge A / B) go into 0x53 for every K, never without the filter
+  pc_decim_config(2, 0x18, 19, 3000, 1, &c);  T_EQ(pc_decim_mode(&c), 0x1A); T_EQ(pc_decim_status(&c), 0x9A);
+  pc_decim_config(0, 0x1C, 19, 3000, 1, &c);  T_EQ(pc_decim_mode(&c), 0x1C); T_EQ(pc_decim_status(&c), 0x1C);
+  pc_decim_config(2, 0x1C, 19, 3000, 0, &c);  T_EQ(pc_decim_mode(&c), 0);
+  pc_decim_config(2, 0xE3, 19, 3000, 1, &c);  T_EQ(pc_decim_mode(&c), 0x02);
+
+  //Off, no filter in the bitstream, too long for the 16-bit layout
+  pc_decim_config(0, 0, 19, 3000, 1, &c);    T_EQ(c.k, 0); T_EQ(c.why, PC_DECIM_WHY_OFF); T_EQ(pc_decim_status(&c), 0);
+  pc_decim_config(2, 0, 19, 3000, 0, &c);    T_EQ(c.k, 0); T_EQ(c.why, PC_DECIM_WHY_NOCAP);
+  pc_decim_config(2, 0, 19, 8190, 1, &c);    T_EQ(c.k, 2);
+  pc_decim_config(2, 0, 19, 9000, 1, &c);    T_EQ(c.k, 0); T_EQ(c.why, PC_DECIM_WHY_TOTAL);
+  T_EQ(pc_decim_rate(&c, 19), 10000000);
+}
+
+static void test_decim_protocol(void)
+{
+  resp_t r;
+  uint8_t p[24];
+  uint32_t k;
+
+  //0x1533: no cap, the commands are unsupported, ARM writes nothing
+  setup(0x1533);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_DECIM, 0);
+  r = req(PC_CMD_GET_DECIM, 0, 0);
+  T_EQ(r.h.status, PC_E_UNSUPPORTED);
+  mock.decim_setting = 2;                                       //even with a stale setting
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.decim_arms, 0); T_EQ(mock.arm_total, 1500);
+
+  //0x1534: cap, default off
+  setup(0x1534);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_DECIM, PC_CAP_DECIM);
+  r = req(PC_CMD_GET_DECIM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 32);
+  T_EQ(r.p[0], 0); T_EQ(r.p[2], 0); T_EQ(r.p[24], 0xFF); T_EQ(pc_get_u16(r.p + 28), 8190); T_EQ(r.p[30], PC_DECIM_WHY_OFF);
+  T_EQ(pc_get_u32(r.p + 16), 19); T_EQ(pc_get_u32(r.p + 20), 10000000);
+
+  //Bad arguments; the filter cannot go on while the total is over 8190
+  memset(p, 0, 4); p[0] = 4;
+  r = req(PC_CMD_SET_DECIM, p, 4);  T_EQ(r.h.status, PC_E_BAD_ARG);
+  memset(p, 0, 4); p[1] = 8;
+  r = req(PC_CMD_SET_DECIM, p, 4);  T_EQ(r.h.status, PC_E_BAD_ARG);
+  set_trigger(0x30, 0, 0, 0, 0, 2000, 16000, 0, 0, &r);
+  T_EQ(r.h.status, 0);
+  memset(p, 0, 4); p[0] = 2;
+  r = req(PC_CMD_SET_DECIM, p, 4);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.decim_setting, 0);
+
+  //6000 samples, 3000 pretrigger, CIC2: N 20, gain 400, S 1; settings_seq moves
+  set_trigger(0x30, 0, 0, 0, 0, 3000, 6000, 0, 0, &r);
+  T_EQ(r.h.status, 0);
+  {
+    uint32_t seq;
+
+    r = status(); seq = pc_get_u32(r.p + 32);
+    r = req(PC_CMD_SET_DECIM, p, 4);
+    T_EQ(r.h.status, 0); T_EQ(mock.decim_setting, 2);
+    T_EQ(r.p[0], 2); T_EQ(r.p[2], 0x82); T_EQ(r.p[3], 1); T_EQ(pc_get_u32(r.p + 4), 20); T_EQ(pc_get_u64(r.p + 8), 400);
+    T_EQ(r.p[30], PC_DECIM_WHY_NONE);
+    r = status(); T_TRUE(pc_get_u32(r.p + 32) != seq);
+  }
+
+  //GET_TRIGGER words: one sample per word now; a longer total is refused while the filter is on
+  r = req(PC_CMD_GET_TRIGGER, 0, 0);
+  T_EQ(pc_get_u16(r.p + 20), 3000); T_EQ(pc_get_u16(r.p + 22), 6000);
+  set_trigger(0x20, 0, 0, 0, 0, 0, 9000, 0, 0, &r);
+  T_EQ(r.h.status, PC_E_BAD_ARG);
+  r = req(PC_CMD_GET_TIMEBASE, 0, 0);
+  T_EQ(pc_get_u32(r.p + 8), 10000000); T_EQ(pc_get_u32(r.p + 12), 100000);
+
+  //Host ARM: geometry in samples = words, the configuration goes to the HAL
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0);
+  T_EQ(mock.decim_arms, 1); T_EQ(mock.arm_pre, 3000); T_EQ(mock.arm_total, 6000);
+  T_EQ(mock.decim_cur.k, 2); T_EQ(mock.decim_cur.shift, 1);
+  r = wait_done(100);
+  T_EQ(r.p[1], PC_ACQ_DONE);
+  T_EQ(mock.trace16_n[0], 6000);
+
+  //GET_CAPTURE_INFO: 76 bytes with the filter; start = (0x14 - 3000 words) mod 8192
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.len, 76); T_EQ(r.p[68], 0x82); T_EQ(r.p[69], 1); T_EQ(pc_get_u32(r.p + 72), 20);
+  T_EQ(pc_get_u16(r.p + 12), (100 + 8192 - 3000) % 8192);
+  T_EQ(pc_get_u32(r.p + 28), 3000); T_EQ(pc_get_u32(r.p + 32), 6000);
+
+  //GET_DECIM after the arm: written state and the FPGA read-back
+  r = req(PC_CMD_GET_DECIM, 0, 0);
+  T_EQ(r.p[24], 0x82); T_EQ(r.p[25], 1); T_EQ(r.p[26], 0x82); T_EQ(r.p[27], 1);
+
+  //READ_TRACE WIDE: u16 per sample, as stored (core A low byte, core B high byte)
+  memset(p, 0, 12); p[0] = 0x01; p[1] = 0x04; pc_put_u32(p + 4, 10); pc_put_u32(p + 8, 100);
+  r = req(PC_CMD_READ_TRACE, p, 12);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 32 + 16 + 200);
+  T_EQ(pc_get_u32(r.p + 4), 6000); T_EQ(pc_get_u32(r.p + 16), 3000); T_EQ(r.p[30], 0x82); T_EQ(r.p[31], 1);
+  for(k=0;k<100;k+=33)
+  {
+    uint32_t a = (5292 + 10 + k) % 8192;
+    T_EQ(pc_get_u16(r.p + 48 + 2 * k), mock.ring[0][a] | (mock.ring[1][a] << 8));
+  }
+
+  //Without WIDE: the 8-bit trace (converted), same header bytes 30/31
+  p[1] = 0;
+  r = req(PC_CMD_READ_TRACE, p, 12);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 32 + 16 + 100); T_EQ(r.p[30], 0x82);
+  {
+    uint32_t a = (5292 + 10) % 8192;
+    uint16_t v = (uint16_t)(mock.ring[0][a] | (mock.ring[1][a] << 8));
+    T_EQ(r.p[48], pc_decim_to_code(v, mock.decim_cur.scale_q24, mock.ch[0].adc_a_comp + mock.ch[0].adc_b_comp));
+  }
+
+  //READ_RAW layout 2: u16 little-endian words of a channel (both cores required)
+  memset(p, 0, 16); p[0] = 0x03; p[1] = 1; p[2] = 2; pc_put_u32(p + 8, 4);
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 16 + 8); T_EQ(r.p[13], 2);
+  T_EQ(pc_get_u16(r.p + 16), mock.ring[0][5292] | (mock.ring[1][5292] << 8));
+  T_EQ(pc_get_u16(r.p + 22), mock.ring[0][5295] | (mock.ring[1][5295] << 8));
+  p[0] = 0x01;
+  r = req(PC_CMD_READ_RAW, p, 16);  T_EQ(r.h.status, PC_E_BAD_ARG);
+  p[0] = 0x03; p[2] = 3;
+  r = req(PC_CMD_READ_RAW, p, 16);  T_EQ(r.h.status, PC_E_BAD_ARG);
+
+  //200 MSa/s (raw divider 0): legacy path, two samples per word, WIDE ignored (8-bit trace)
+  memset(p, 0, 8); p[0] = 1; pc_put_u32(p + 4, 0);
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+  T_EQ(r.h.status, 0);
+  r = req(PC_CMD_GET_DECIM, 0, 0);
+  T_EQ(r.p[2], 0); T_EQ(r.p[30], PC_DECIM_WHY_FULLRATE);
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(mock.arm_pre, 1500); T_EQ(mock.arm_total, 3000); T_EQ(mock.decim_cur.k, 0);
+  r = wait_done(100);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[68], 0); T_EQ(pc_get_u16(r.p + 12), (100 + 8192 - 1500) % 8192);
+  memset(p, 0, 12); p[0] = 0x01; p[1] = 0x04;
+  r = req(PC_CMD_READ_TRACE, p, 12);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 32 + 16 + 6000); T_EQ(r.p[30], 0);
+
+  //Hidden falling-edge flags and swap via SET_DECIM flags bits 0-2; bit 3 refused
+  memset(p, 0, 8); p[0] = 1; pc_put_u32(p + 4, 19);
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+  memset(p, 0, 4); p[0] = 2; p[1] = 0x06;
+  r = req(PC_CMD_SET_DECIM, p, 4);
+  T_EQ(r.h.status, 0); T_EQ(mock.decim_setting, 0x1A); T_EQ(r.p[1], 0x06); T_EQ(r.p[2], 0x9A);
+  p[1] = 0x08;
+  r = req(PC_CMD_SET_DECIM, p, 4);  T_EQ(r.h.status, PC_E_BAD_ARG);
+
+  //EXT trigger with the filter: 2 samples fewer pretrigger words (N 20, CIC2), edge back at sample 3000
+  p[1] = 0;
+  r = req(PC_CMD_SET_DECIM, p, 4);
+  set_trigger(0x01, 2, 0, 0, 0, 0, 0, 0, 0, &r);
+  T_EQ(r.h.status, 0);
+  r = req(PC_CMD_GET_DECIM, 0, 0);
+  T_EQ(r.p[31], 2);
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.arm_pre, 2998); T_EQ(mock.arm_total, 6000);
+  r = wait_done(100);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(pc_get_u16(r.p + 70), 2); T_EQ(pc_get_u16(r.p + 12), (100 + 8192 - 2998) % 8192);
+  T_EQ(pc_get_u32(r.p + 28), 3000);
+  set_trigger(0x01, 0, 0, 0, 0, 0, 0, 0, 0, &r);
+
+  //Filter off again
+  memset(p, 0, 4);
+  r = req(PC_CMD_SET_DECIM, p, 4);
+  T_EQ(r.h.status, 0); T_EQ(mock.decim_setting, 0);
+}
+
 int main(void)
 {
   test_info();
@@ -1766,6 +2059,8 @@ int main(void)
   test_fel_reset_stall();
   test_fft_bench();
   test_spectrum();
+  test_decim_math();
+  test_decim_protocol();
   mock_clear_resps();
   return t_report("test_session");
 }

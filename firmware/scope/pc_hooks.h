@@ -15,7 +15,11 @@
 #define PC_FEAT_LONG_MEMORY   5     //"Long memory": not implemented in 1.00o5
 #define PC_FEAT_EXT_TRIGGER   6     //EXT trigger source: AL3 bitstream 0x1533+ only (calibration pin as input)
 #define PC_FEAT_HOLDOFF       7     //trigger hold-off: never sent to the FPGA
+#define PC_FEAT_DECIM         8     //acquisition "Filter" selector: AL3 bitstream 0x1534+ (decimation filter)
 #define PC_FEAT_MEM_BASE      16    //+ i: memory depth box i (3000 x (i + 1) samples) fits the bitstream
+
+//Settings sector word for the acquisition Filter setting: FPGA_SETTING_OFFSET (192) + 15, unused by 1.00o5
+#define PC_SETTING_WORD_DECIM 207
 
 //Compacted menus (fw 0.2.8, owner: no gaps). The kept rows move up by whole rows; the menu heights in variables.h
 //shrink to match. With PC_PROTOCOL=0 the shifts are 0 and nothing moves.
@@ -70,6 +74,19 @@ int  pc_glue_main_menu_row6(uint32 y);//main menu: touch on the Spectrum analyze
 void pc_glue_main_menu_items(void);   //main menu drawn: add the Spectrum analyzer row
 void pc_glue_main_menu_touch(void);   //Spectrum analyzer row tapped: switch the display mode
 int  pc_glue_main_menu_height(void);  //main menu box height (variables.h MAIN_MENU_HEIGHT)
+
+//Decimation filter (bitstream 0x1534+, pc_decim.h). With it off or absent every call is a no-op and the 1.00o5 paths run.
+extern int16 *pc_decim_src;           //fpga_read_adc_data: converted samples to take instead of bus reads (0 = bus)
+void   pc_glue_divider_written(uint32 divider);   //fpga_set_sample_rate wrote 0x0D
+void   pc_glue_ui_decim_arm(void);    //scope_acquire_trace_data: the next fpga_do_conversion uses the UI filter setting
+void   pc_glue_decim_conversion(void);//fpga_do_conversion, before the sampling reset: write the mode, settle
+uint32 pc_glue_decim_words(uint32 samples);       //ring words for a sample count (samples / 2, or samples in 16-bit)
+uint32 pc_glue_decim_pre_words(uint32 samples);   //the same for the pretrigger, less the EXT latency shift in 16-bit
+uint32 pc_glue_decim_ui_start(uint32 start);      //UI capture start word: (0x14 - pretrigger) mod 8192 in 16-bit
+void   pc_glue_decim_read(void *settings, uint32 start);   //fpga_read_sample_data: 16-bit read + convert, odd pass
+void   pc_glue_decim_even(void);      //fpga_read_sample_data: second pass takes the even samples
+void   pc_glue_decim_tap(void);       //acquisition menu: Filter box touched
+uint16 pc_glue_decim_setting_word(void);         //settings sector word (scope_save_config_data)
 
 #define PC_BUSY_POLL()          pc_glue_poll_busy()
 #define PC_TIMER_TICK()         pc_glue_poll_isr()

@@ -15,6 +15,7 @@
 #define PC_HAL_H
 
 #include <stdint.h>
+#include "pc_decim.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Front end channel state as the firmware keeps it (CHANNELSETTINGS subset)
@@ -98,8 +99,11 @@ void     pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable
 // Acquisition [FPGA]
 
 //Reset the sample system, write the geometry while in reset (prog != 0: 0x0B/0x0C; always 0x0E), release.
-//normal: trigger mode written to 0x1A (1 normal/single, 0 auto). Returns 0, or -1 when 0x05 never became ready.
-int      pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal);
+//normal: trigger mode written to 0x1A (1 normal/single, 0 auto). dc: decimation filter configuration for this capture
+//(bitstream 0x1534+, written and settled before the reset, 16-bit trigger level from the UI level), NULL on bitstreams
+//without the filter (nothing written). Returns 0, or -1 when 0x05 never became ready.
+int      pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal,
+                    const pc_decim_cfg *dc);
 void     pc_hal_acq_poll(int *done, int *triggered);                                   //0x0A bit 0, 0x18 bit 0
 uint16_t pc_hal_acq_finish(void);                                                      //post-done writes, returns 0x14 & 0x1FFF
 void     pc_hal_force(void);                                                           //0x1A = 0
@@ -109,6 +113,16 @@ uint8_t  pc_hal_ext_status(void);                                               
 //after every 0x1F write, read_lag added to the address written. dst advances by stride per byte.
 void     pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,
                           uint32_t ring_words, uint8_t read_lag);
+
+//Decimation filter (bitstream 0x1534+, pc_decim.h). The setting is the UI's acquisition "Filter" selector (saved with
+//the settings): bits 1:0 requested K (0 off, 1 boxcar, 2 CIC2, 3 CIC3), plus PC_DECIM_SWAP (host only, not saved).
+uint8_t  pc_hal_decim_setting(void);
+void     pc_hal_decim_set(uint8_t setting);                                            //[UI]
+//What the FPGA runs: the configuration written at the last arm (UI or host). *written = 0 before the first write.
+void     pc_hal_decim_current(pc_decim_cfg *c, int *written);
+uint16_t pc_hal_decim_readback(void);                                                  //[FPGA] 0x29: byte 0 << 8 | S
+//16-bit samples of the last readout of a channel (decimated captures only), NULL when that readout was 8-bit
+const uint16_t *pc_hal_trace16(int ch, uint32_t *count);
 
 //Raw bus access for DEBUG_FPGA
 void     pc_hal_fpga_write_cmd(uint8_t cmd);
