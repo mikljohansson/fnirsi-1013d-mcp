@@ -432,3 +432,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   clean. FFT_BENCH dB column: 1024 0.32 ms (was 0.70), 2048 0.72 (1.33), 4096 1.44 (2.72), 16384 5.63 (11.06); run columns unchanged
   (4096 points 10.96 ms DDR, 2048 2.30 ms SRAM). Owner checks of 0.2.35-0.2.37 features pending (gestures, Auto/Reset, density, Filter box,
   25 MHz stop label).
+- Owner: with CIC3 the spectrum's upper tail "wags" up and down, seemingly building up after a mode change. Measured 12 consecutive 16-bit
+  captures per mode (1 MS/s): no drift in any mode (CIC3 DC mean16 20983-21048, std 14-28 LSB16; CIC2/boxcar likewise); the upper-band
+  floors vary -61..-76 dBV between captures in every mode. => window-leakage variation of the square's harmonics, now visible because the
+  filtered floor is 20-30 dB lower; not a filter fault. Fix: spectrum trace averaging / max-hold in the view (fw-gen5). Other owner feedback:
+  drop the "decimation filter CIC3, N = 200" info text; span zoom should drive the time base at full/minimum span; Filter setting persists
+  (settings word 207), spectrum view settings to be saved except the view mode.
