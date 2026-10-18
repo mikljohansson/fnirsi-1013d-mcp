@@ -107,7 +107,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - bode-design (done 01:05): docs/plans/bode-design.md committed fe5780b.
 - fw-cal2 (retired, about 400k tokens): calibration v3 delivered and merged (c20957a, fw 0.2.45 / 1.12 / row 51); handoff section 23.
 - fw-phosphor (retired, about 430k tokens): phosphor view delivered and merged (2e73d28, fw 0.2.46 / 1.13 / row 52); handoff section 24.
-- mcp-gen3: protocol 1.12 + 1.13 host side (GET_CAL v3 gains in the volts model, DisplayMode 2-4, settings word 210).
+- mcp-gen4 (started 10-19 01:25): Bode host steps H1-H3 (scope_bode_sweep tool, simulator DUT model, fnirsi1013d-bode CLI).
+- mcp-gen3 (retired 01:20 after GET_CAL v2, 1.11, 1.12, 1.13): handoff mcp/AGENTS.md d4d891c.
 - fw-gen6 (worktree, branch fw-gen6, about 350k tokens, retired): fw 0.2.44 merged into main (463931d, image d4c0b716): 0x1535 FIR
   support, spectrum strip repaint, CIC2 default, USB suspend/resume rework (protocol 1.11, rows 49-50), generator menu hit-area fix.
   Bench by the coordinator in progress.
@@ -118,4 +119,3 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 - fpga-gen4 (retired at about 290k tokens, 10-18 23:40): FPGA 0x1535 built, pinned, host-tested, documented (292a596); not flashed.
   The 100 kHz residual question is answered (DDS spur, see above).
-- mcp-gen3: idle, holds item 4 (version bump).
