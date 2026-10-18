@@ -589,7 +589,7 @@ module tb;
     random_phase(p1n);
     $display("phase 1: %0d equivalence samples, %0d mismatches, %0d captures with the FIR bit set at K >= 1",
              eq_samples, eq_mismatch, fir_set_cnt);
-    check(eq_mismatch == mm0, "FIR off or not eligible: pins, decimator, bus reads, capture registers and memory identical to 0x1534");
+    check(eq_mismatch == mm0, "FIR off/not eligible: pins, decimator, bus reads, capture regs, memory identical to 0x1534");
     check(fir_set_cnt >= 5 || p1n < 40, "phase 1 covered FIR bit set at ineligible dividers");
 
     wr1(8'h50, 8'h00);
