@@ -108,9 +108,6 @@ uint8 holdoffmenuopen;              //flag for open the holdoff menu
 uint8 genmenuopen;                  //flag for open the generator menu
 uint8 freqmenuopen;                 //flag for open the frequency menu
 uint8 dutymenuopen;                 //flag for open the duty menu
-uint8 amplmenuopen;                 //flag for open the amplitude menu
-uint8 offsetmenuopen;               //flag for open the offset menu
-uint8 phasemenuopen;                //flag for open the phase menu
 
 uint8 keymenuopen;                  //flag for open the keyboard menu
 

@@ -162,12 +162,8 @@ void scope_trigger_symbol(int x, int y);
 //----------------------------------------------------------------------
 void scope_open_generator_menu(void);
 void gen_enable_select(void);
-void gen_wave_select(void);
 void gen_freq_select(void);
 void gen_duty_select(void);
-void gen_ampl_select(void);
-void gen_offset_select(void);
-void gen_phase_select(void);
 
 
 //void display_frequency(uint32 f);

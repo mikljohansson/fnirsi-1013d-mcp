@@ -9,8 +9,6 @@
 //UI features the running hardware may lack (fw 0.2.6, firmware/README.md "Hidden menu options"). PC_UI_HAS(f) goes
 //into a touch condition, PC_UI_MASK(m) paints over the unsupported parts of a menu just drawn.
 #define PC_FEAT_GEN_DDS       1     //generator menu: Atlan DDS bitstreams only (not stock 0x1432)
-#define PC_FEAT_GEN_WAVE      2     //SINE / TRGL waveform: no DAC on the 1013D
-#define PC_FEAT_GEN_ANALOG    3     //amplitude / offset / phase: no DAC
 #define PC_FEAT_RTC           4     //DS3231 module (probed at boot)
 #define PC_FEAT_LONG_MEMORY   5     //"Long memory": not implemented in 1.00o5
 #define PC_FEAT_EXT_TRIGGER   6     //EXT trigger source: AL3 bitstream 0x1533+ only (calibration pin as input)
@@ -26,8 +24,6 @@
 
 //Compacted menus (fw 0.2.8, owner: no gaps). The kept rows move up by whole rows; the menu heights in variables.h
 //shrink to match.
-#define PC_GEN_COMPACT        1     //generator: Power, Freq, Duty (no Wave / Ampl / Offset / Phase rows)
-#define PC_GEN_DY             56    //Freq and Duty move up one row
 #define PC_TRIG_COMPACT       1     //trigger: no Hold off row
 #define PC_TRIG_DY            56    //Always 50% moves up one row
 

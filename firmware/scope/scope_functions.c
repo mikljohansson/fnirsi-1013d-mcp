@@ -6933,12 +6933,8 @@ void scope_reset_config_data(void)
   //----------------------------------------------------------------------------
   
   fpgasettings.gen_enable       = 1;    //1 is enable
-  fpgasettings.gen_wave_select  = 0;    //0-square, 1-sine, 2-triangle
   fpgasettings.gen_freq         = 1000; //1kHz                      //int32 !!!
   fpgasettings.gen_duty         = 50;   //50%
-  fpgasettings.gen_ampl         = 3280; //3.280V
-  fpgasettings.gen_offset       = 350;  //350mV
-  fpgasettings.gen_phase        = 0;    //0                      
 
 
   fpgasettings.totalsamples           = 3000; //Set max samples in FPGA       (1500*2)
@@ -7143,13 +7139,13 @@ void scope_save_config_data(void)
   ptr = &settingsworkbuffer[FPGA_SETTING_OFFSET];
   
   *ptr++ = fpgasettings.gen_enable;
-  *ptr++ = fpgasettings.gen_wave_select;   
+  *ptr++ = 0;                                 //retired slot: 1.00o5 generator wave (no DAC)
   *ptr++ = fpgasettings.gen_freq >> 16;       //int32 !!!
   *ptr++ = fpgasettings.gen_freq & 0xFFFF;    //int32 !!!
   *ptr++ = fpgasettings.gen_duty;   
-  *ptr++ = fpgasettings.gen_ampl;         
-  *ptr++ = fpgasettings.gen_offset;      
-  *ptr++ = fpgasettings.gen_phase;         
+  *ptr++ = 0;                                 //retired slots: 1.00o5 generator amplitude, offset, phase (no DAC)
+  *ptr++ = 0;
+  *ptr++ = 0;
   
   *ptr++ = fpgasettings.totalsamples;
   *ptr++ = fpgasettings.settriggerpoint;
@@ -7331,14 +7327,12 @@ void scope_restore_config_data(void)
   ptr = &settingsworkbuffer[FPGA_SETTING_OFFSET];
     
   fpgasettings.gen_enable       = *ptr++;  
-  fpgasettings.gen_wave_select  = *ptr++;   
+  ptr++;                                      //retired slot: generator wave
   tmp                           = *ptr++; 
   fpgasettings.gen_freq         = tmp << 16;
   fpgasettings.gen_freq         += *ptr++;    //int32 !!!
   fpgasettings.gen_duty         = *ptr++;
-  fpgasettings.gen_ampl         = *ptr++;         
-  fpgasettings.gen_offset       = *ptr++;      
-  fpgasettings.gen_phase        = *ptr++; 
+  ptr += 3;                                   //retired slots: generator amplitude, offset, phase
 
   fpgasettings.totalsamples           = *ptr++;
   fpgasettings.settriggerpoint        = *ptr++;

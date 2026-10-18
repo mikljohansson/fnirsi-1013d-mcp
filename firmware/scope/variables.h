@@ -357,7 +357,7 @@ int pc_glue_sys_menu_height(void);
 #define GEN_MENU_XPOS                      508//GEN_BUTTON_XPOS-100//28
 #define GEN_MENU_YPOS                       48//46
 #define GEN_MENU_WIDTH                     220//210//166
-#define GEN_MENU_HEIGHT                    169     //3 rows: Power, Freq, Duty (pc_hooks.h PC_GEN_COMPACT)
+#define GEN_MENU_HEIGHT                    169     //3 rows: Power, Freq, Duty (no DAC: no Wave / Ampl / Offset / Phase)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Battery button and menu
@@ -674,13 +674,9 @@ struct tagScopeSettings
 
 struct tagFPGASettings
 {
-  uint8     gen_enable;   
-  uint8     gen_wave_select;
-  uint32    gen_freq;  
+  uint8     gen_enable;
+  uint32    gen_freq;
   uint8     gen_duty;
-  uint16    gen_ampl; 
-  uint16    gen_offset; 
-  uint16    gen_phase; 
   
   uint16    totalsamples;           //Set max samples in FPGA
   uint16    settriggerpoint;        //Set start triger point in FPGA
@@ -864,9 +860,6 @@ extern uint8 holdoffmenuopen;
 extern uint8 genmenuopen;                  
 extern uint8 freqmenuopen;                 
 extern uint8 dutymenuopen;                 
-extern uint8 amplmenuopen;                 
-extern uint8 offsetmenuopen;              
-extern uint8 phasemenuopen;                
 
 extern uint8 keymenuopen; 
 

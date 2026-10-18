@@ -3577,39 +3577,8 @@ void handle_generator_menu_touch(void)
 
           }
         }
-        //====================================================================================================
-        //Check on buttons on wave flor 2
-        else if((ytouch >= GEN_MENU_YPOS+60) && (ytouch <= GEN_MENU_YPOS+108) && (!scopesettings.waveviewmode) PC_UI_HAS(PC_FEAT_GEN_WAVE)) //120 155 ,125-147
-        {
-          //Check on square
-          if((xtouch >= GEN_MENU_XPOS+65) && (xtouch <= GEN_MENU_XPOS+112))//67-114
-          { 
-            fpgasettings.gen_wave_select = 0; //0-square, 1-sine, 2-triangle
-          }
-          //********************************************************************
-          //Check on sine
-          else if((xtouch >= GEN_MENU_XPOS+116) && (xtouch <= GEN_MENU_XPOS+152))//112-148 
-          {
-            fpgasettings.gen_wave_select = 1;
-          }
-          //********************************************************************
-          //Check on triangle
-          else if((xtouch >= GEN_MENU_XPOS+156) && (xtouch <= GEN_MENU_XPOS+210))//146-200
-          {
-            fpgasettings.gen_wave_select = 2;
-          }
-          
-          gen_wave_select();
-          
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-          
-          //Set the button inactive
-          scope_generator_settings(0);
-        }
-        //====================================================================================================
         //Check on buttons on freq flor 3
-        else if((ytouch >= GEN_MENU_YPOS+116-PC_GEN_DY) && (ytouch <= GEN_MENU_YPOS+164-PC_GEN_DY) && (!scopesettings.waveviewmode)) //185 220 ,188-210
+        else if((ytouch >= GEN_MENU_YPOS+60) && (ytouch <= GEN_MENU_YPOS+108) && (!scopesettings.waveviewmode)) //185 220 ,188-210
         {
           //Check on box with frequency value
           if((xtouch >= GEN_MENU_XPOS+80) && (xtouch <= GEN_MENU_XPOS+150))
@@ -3665,8 +3634,8 @@ void handle_generator_menu_touch(void)
             display_set_font(&font_3);
             //Display the green text and frame
             display_set_fg_color(GREEN_COLOR);
-            display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+129-PC_GEN_DY, 42, 22, 2);
-            display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS+132-PC_GEN_DY,  "1 kHz");//695 155 33
+            display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+73, 42, 22, 2);
+            display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS+76,  "1 kHz");//695 155 33
     
             fpgasettings.gen_freq = 1000; //1000Hz freq
             fpga_set_generator_freq(fpgasettings.gen_freq);
@@ -3682,7 +3651,7 @@ void handle_generator_menu_touch(void)
         }
         //====================================================================================================
         //Check on buttons on duty flor 4
-        else if((ytouch >= GEN_MENU_YPOS+172-PC_GEN_DY) && (ytouch <= GEN_MENU_YPOS+220-PC_GEN_DY) && (!scopesettings.waveviewmode)) //125-147
+        else if((ytouch >= GEN_MENU_YPOS+116) && (ytouch <= GEN_MENU_YPOS+164) && (!scopesettings.waveviewmode)) //125-147
         {
           //Check on box with duty value 
           if((xtouch >= GEN_MENU_XPOS+90) && (xtouch <= GEN_MENU_XPOS+140))
@@ -3733,8 +3702,8 @@ void handle_generator_menu_touch(void)
             display_set_font(&font_3);
             //Display the yellow text and frame
             display_set_fg_color(YELLOW_COLOR);
-            display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+185-PC_GEN_DY, 42, 22, 2);
-            display_text(GEN_MENU_XPOS+175, GEN_MENU_YPOS+188-PC_GEN_DY, "50%");//175
+            display_draw_rounded_rect(GEN_MENU_XPOS+165, GEN_MENU_YPOS+129, 42, 22, 2);
+            display_text(GEN_MENU_XPOS+175, GEN_MENU_YPOS+132, "50%");//175
 
             fpgasettings.gen_duty = 50; //50% duty
             fpga_set_generator_duty(fpgasettings.gen_duty);
@@ -3748,148 +3717,6 @@ void handle_generator_menu_touch(void)
             scope_generator_settings(0);
           }
         }
-        //====================================================================================================
-        //Check on buttons on ampl flor 5
-        else if((ytouch >= GEN_MENU_YPOS+228) && (ytouch <= GEN_MENU_YPOS+276) && (!scopesettings.waveviewmode) PC_UI_HAS(PC_FEAT_GEN_ANALOG)) //125-147
-        {
-          //Check on box with amplitude value
-          if((xtouch >= GEN_MENU_XPOS+80) && (xtouch <= GEN_MENU_XPOS+150))
-          {
-            //Check if already open
-            if(amplmenuopen == 0)//refnenu
-            {
-              //Close any of the sub menus if open
-              close_open_gen_menus(0); //close_open_channel_menus(settings, 0);
-              
-              //Set this item active
-              //scope_channel_ref_menu_item(settings, 1);
-              
-              //Wait until touch is released
-              tp_i2c_wait_for_touch_release();
-              
-              //Save the screen under the menu
-              display_set_destination_buffer(displaybuffer2);
-              display_copy_rect_from_screen(KEY_MENU_XPOS, KEY_MENU_YPOS, KEY_MENU_WIDTH, KEY_MENU_HEIGHT); //key (hold off) menu
-            
-              //Signal the amplitude menu is opened
-              amplmenuopen = 1; 
-              
-              buffer_set_number(fpgasettings.gen_ampl);
-              
-              //Show the screen key (amplitude) menu
-              scope_open_keyboard_menu();//scope_channel_open_ref_menu(settings);
-              
-                      
-            } 
-            handle_keyboard_menu_touch(); 
-            
-            fpgasettings.gen_ampl = buffer_to_int32(); 
-            //fpga_set_generator_ampl(fpgasettings.gen_ampl);
-            
-          }
-          //********************************************************************
-          //Check on 5.00V button
-          else if((xtouch >= GEN_MENU_XPOS+175) && (xtouch <= GEN_MENU_XPOS+205)) //else if((xtouch >= GEN_MENU_XPOS+172) && (xtouch <= GEN_MENU_XPOS+205))
-          {
-//Wait until touch is released before checking on a new position
-        tp_i2c_wait_for_touch_release();
-          }
-        }
-        //====================================================================================================
-        //Check on buttons on offset flor 6
-        else if((ytouch >= GEN_MENU_YPOS+284) && (ytouch <= GEN_MENU_YPOS+332) && (!scopesettings.waveviewmode) PC_UI_HAS(PC_FEAT_GEN_ANALOG)) //125-147
-        {
-          //Check on box with offset value
-          if((xtouch >= GEN_MENU_XPOS+80) && (xtouch <= GEN_MENU_XPOS+150))
-          {
-            //Check if already open
-            if(offsetmenuopen == 0)//refnenu
-            {
-              //Close any of the sub menus if open
-              close_open_gen_menus(0); //close_open_channel_menus(settings, 0);
-              
-              //Set this item active
-              //scope_channel_ref_menu_item(settings, 1);
-              
-              //Wait until touch is released
-              tp_i2c_wait_for_touch_release();
-              
-              //Save the screen under the menu
-              display_set_destination_buffer(displaybuffer2);
-              display_copy_rect_from_screen(KEY_MENU_XPOS, KEY_MENU_YPOS, KEY_MENU_WIDTH, KEY_MENU_HEIGHT); //key (offset) menu
-            
-              //Signal the offset menu is opened
-              offsetmenuopen = 1;
-              
-              buffer_set_number(fpgasettings.gen_offset);
-              
-              //Show the screen key (offset) menu
-              scope_open_keyboard_menu();
-                       
-            } 
-            handle_keyboard_menu_touch(); 
-            
-            fpgasettings.gen_offset = buffer_to_int32(); 
-            //fpga_set_generator_offset(fpgasettings.gen_offset);
-          
-          }
-          //********************************************************************
-          //Check on 2.50V button
-          else if((xtouch >= GEN_MENU_XPOS+175) && (xtouch <= GEN_MENU_XPOS+205)) //else if((xtouch >= GEN_MENU_XPOS+172) && (xtouch <= GEN_MENU_XPOS+205))
-          {
-        //Wait until touch is released before checking on a new position
-        tp_i2c_wait_for_touch_release();
-          }
-        }
-        //====================================================================================================
-        //Check on buttons on phase flor 7
-        else if((ytouch >= GEN_MENU_YPOS+340) && (ytouch <= GEN_MENU_YPOS+388) && (!scopesettings.waveviewmode) PC_UI_HAS(PC_FEAT_GEN_ANALOG)) //125-147
-        {
-          //Check on 
-          if((xtouch >= GEN_MENU_XPOS+80) && (xtouch <= GEN_MENU_XPOS+150))
-          {
-          //Check if already open
-            if(phasemenuopen == 0)//refnenu
-            {
-              //Close any of the sub menus if open
-              close_open_gen_menus(0); //close_open_channel_menus(settings, 0);
-              
-              //Set this item active
-              //scope_channel_ref_menu_item(settings, 1);
-              
-              //Wait until touch is released
-              tp_i2c_wait_for_touch_release();
-              
-              //Save the screen under the menu
-              display_set_destination_buffer(displaybuffer2);
-              display_copy_rect_from_screen(KEY_MENU_XPOS, KEY_MENU_YPOS, KEY_MENU_WIDTH, KEY_MENU_HEIGHT); //key (offset) menu
-            
-              //Signal the phase menu is opened
-              phasemenuopen = 1;
-              
-              buffer_set_number(fpgasettings.gen_phase);
-              
-              //Show the screen key (phase) menu
-              scope_open_keyboard_menu();
-                       
-            } 
-            handle_keyboard_menu_touch();
-            
-            fpgasettings.gen_phase = buffer_to_int32(); 
-            //fpga_set_generator_phase(fpgasettings.gen_phase);
-            
-
-          }
-          //********************************************************************
-          //Check on phase 0 button
-          else if((xtouch >= GEN_MENU_XPOS+175) && (xtouch <= GEN_MENU_XPOS+205)) //else if((xtouch >= GEN_MENU_XPOS+172) && (xtouch <= GEN_MENU_XPOS+205))
-          {
-
-            //Wait until touch is released before checking on a new position
-        tp_i2c_wait_for_touch_release();
-          }
-        }
-        //else if(freqmenuopen || dutymenuopen || amplmenuopen || offsetmenuopen || phasemenuopen)close_open_gen_menus(0);
         //====================================================================================================
         //Wait until touch is released before checking on a new position
         //tp_i2c_wait_for_touch_release(); // doplnik pre kr=azdy prikaz zvlast
@@ -4047,7 +3874,7 @@ void handle_keyboard_menu_touch(void)
         
         //Close any of the trigger menus if open (close all menu -hold off menu....)
         if(holdoffmenuopen == 1) close_open_trigger_menus(0);
-        if(freqmenuopen || dutymenuopen || amplmenuopen || offsetmenuopen || phasemenuopen) close_open_gen_menus(0);
+        if(freqmenuopen || dutymenuopen) close_open_gen_menus(0);
 
         return;
       }
@@ -5883,42 +5710,6 @@ void close_open_gen_menus( uint32 closemain)
 
     //Signal it is closed
     dutymenuopen = 0;
-  }
-    else if(amplmenuopen)
-  {
-    //Set the button inactive
-    //scope_channel_ref_menu_item(settings, 0);
-
-    //Restore the screen under the keyboard menu
-    display_set_source_buffer(displaybuffer2);
-    display_copy_rect_to_screen(KEY_MENU_XPOS, KEY_MENU_YPOS, KEY_MENU_WIDTH, KEY_MENU_HEIGHT);
-
-    //Signal it is closed
-    amplmenuopen = 0;
-  }
-    else if(offsetmenuopen)
-  {
-    //Set the button inactive
-    //scope_channel_ref_menu_item(settings, 0);
-
-    //Restore the screen under the keyboard menu
-    display_set_source_buffer(displaybuffer2);
-    display_copy_rect_to_screen(KEY_MENU_XPOS, KEY_MENU_YPOS, KEY_MENU_WIDTH, KEY_MENU_HEIGHT);
-
-    //Signal it is closed
-    offsetmenuopen = 0;
-  }
-    else if(phasemenuopen)
-  {
-    //Set the button inactive
-    //scope_channel_ref_menu_item(settings, 0);
-
-    //Restore the screen under the keyboard menu
-    display_set_source_buffer(displaybuffer2);
-    display_copy_rect_to_screen(KEY_MENU_XPOS, KEY_MENU_YPOS, KEY_MENU_WIDTH, KEY_MENU_HEIGHT);
-
-    //Signal it is closed
-    phasemenuopen = 0;
   }
 
   //Check if generator menu has been opened and needs to be closed
