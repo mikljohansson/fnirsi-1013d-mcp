@@ -177,3 +177,5 @@ Newest entries at the bottom. Format: date, who, what, result.
   device dropped off USB and re-enumerated; card left with a partial image at 750), second run succeeded: 34 s (11 KiB/s), SD_READ compare identical,
   header verified; card now holds 0.2.3. Counters showed hdr_crc 660 / duplicates 658 under rx_stalls 307837 => request corruption under RX
   back-pressure + SD_STAGE bound to UI passes (~5.8 s per 64 KiB). Both with fw-gen2.
+- Firmware 0.2.4 (commit b05cdbd, sha256 d99c6af7...) loaded; GET_LINK_STATS carries a leading count word (35) then the counters: init->first main-loop
+  poll = 1515 ms, first UI pass = 31 ms (earlier readings were off by one). The startup delay is in the init path before the main loop, not in the UI pass.
