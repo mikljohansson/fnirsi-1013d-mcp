@@ -275,7 +275,8 @@ VECTOR_FREQS = (1.0, 1.7, 10.0, 23.9, 24.5, 100.0, 999.0, 1000.0, 1234.5, 24e3, 
 def plan_vectors() -> dict[str, Any]:
     """The planner's output for VECTOR_FREQS and two sweeps: what the on-device engine (design step D1) must match."""
     def row(pp: PointPlan) -> dict[str, Any]:
-        return {"f_req": pp.f_requested, "m": pp.m, "n": pp.n, "divider": pp.divider, "phase_inc": pp.phase_inc,
+        # f_req to 9 digits: np.geomspace differs in the last bit between platforms; the plan does not
+        return {"f_req": float(f"{pp.f_requested:.9g}"), "m": pp.m, "n": pp.n, "divider": pp.divider, "phase_inc": pp.phase_inc,
                 "f_mhz": int(round(pp.f_actual * 1000)), "p": pp.p, "q": pp.q, "record": pp.record,
                 "total": pp.total_samples}
 
@@ -284,7 +285,7 @@ def plan_vectors() -> dict[str, Any]:
 
     return {"format": "fnirsi1013d-bode-plan", "version": 1,
             "notes": "mcp/src/fnirsi1013d/bode.py plan_point / plan_sweep (docs/plans/bode-design.md 3.1-3.2). "
-                     "f_req in Hz (sweeps: np.geomspace), f_mhz = round(phase_inc x 50e9 / 2^32), divider = N - 1 "
+                     "f_req in Hz to 9 significant digits (sweeps: np.geomspace), f_mhz = round(phase_inc x 50e9 / 2^32), divider = N - 1 "
                      "(0 = legacy 200 MSa/s), record = samples analysed, total = the even trigger total. "
                      "Regenerate: python -m fnirsi1013d.bode --write-vectors ../docs/bode-plan-vectors.json",
             "points": [row(plan_point(f)) for f in VECTOR_FREQS],
