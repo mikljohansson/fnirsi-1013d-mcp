@@ -202,3 +202,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   The back-pressure corruption regime no longer occurs on this path. **Card now boots 0.2.7.**
 - MCP chip on 0.2.7 (owner): visible, stable while a menu is open, still flickers occasionally while free-running -> periodic top-bar clear
   suspected; with fw-gen2 for 0.2.8 together with the menu compaction and the "ACQ / Long mode" box.
+- FPGA external trigger bitstream 0x1533 built (fpga-gen2, commits e45f411..5bbdda5): sha256 a9656703... (282,898 B), pinned
+  backups/al3_ext-trigger_0x1533_a9656703.bin. Timing met (224 MHz), 38 testbench checks pass, CH1/CH2 behaviour identical to 0x1532 in
+  co-simulation. **Not flashed**: firmware must accept version 0x1533 first (fw-gen2 has the spec); flashing needs the programmer, the stock
+  backup at hand and the owner present. Open question before relying on it: the circuit between the FPGA pad and the calibration connector
+  (the output looks capacitively coupled: mean 0.31 V for a 3.3 V square).
