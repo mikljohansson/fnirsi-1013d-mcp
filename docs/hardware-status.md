@@ -38,10 +38,10 @@ Hash entries use sha256 of files in `backups/` (gitignored).
 - [x] Current firmware version noted
 - [x] Current bootloader version noted (or "none, stock")
 - [x] FPGA version word noted
-- [ ] Lead's go received for Tier 1
+- [x] Lead's go received for Tier 1
 - [x] Tier 1 SD card prepared with `make_sd_image.py` (bootloader v0.8, updater, scope; boot mode 4), written to a spare card
 - [x] Tier 1 step 5.3.3 done: open firmware booted with stock FPGA
-- [ ] AL3 bitstream (0x1532) written and verified by read-back
+- [x] AL3 bitstream (0x1532) written and verified by read-back
 - [x] FEL path tested (usbipd attach, `sunxi-fel version`)
 
 ## Backup register
@@ -75,3 +75,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   Standard display config correct (no shift, touch OK). Base calibration done; input-divider calibration done against bench supply + DMM
   (first attempt failed with probes on 10x: the routine needs 1x). Updater's USB mass-storage mode gave "Cannot recognize device" on Windows (unresolved, cable suspected).
 - FEL verified: boot menu -> FEL, usbipd bind --hardware-id 1f3a:efe8, attach busid 9-3 to WSL, `sunxi-fel version` -> AWUSBFEX soc=00001663(F1C100s) ver=0001.
+- FEL RAM load proven: `sunxi-fel -p write 0x7FFFFFE0 scope.bin exe 0x80000000` (346 kB in 1.7 s) started the scope UI from RAM.
+- FPGA flash written with Atlan's AL3 bitstream (0x1532): `backups/al3_atlan_0x1532_padded.bin` sha256 8a9d3559566fbe9653ad52612818d336ce7f905498f422f228bb165335c42177;
+  pre-write backup `backups/20261018-131536-pre-write.bin` (= stock, sha256 90f65f08...); 68 sectors erased, 1080 pages programmed, read-back verified. Board powered from battery during write.
+  Awaiting power-cycle check of the diagnostics screen (expect 0x1532).
