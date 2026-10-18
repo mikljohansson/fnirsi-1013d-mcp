@@ -1,6 +1,6 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// pc_hooks.h - the PC protocol's hooks into the 1.00o5 code. With PC_PROTOCOL=0 (or undefined) every hook is an empty
-// statement, so the firmware compiles to the same image as without the protocol (make check-reference proves it).
+// pc_hooks.h - the PC protocol's hooks into the 1.00o5 code: each macro marks one place where the protocol, the views or
+// the UI changes reach into a 1.00o5 file (firmware/README.md section 5 lists them).
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #ifndef PC_HOOKS_H
@@ -25,22 +25,13 @@
 #define PC_SETTING_WORD_PHOS  210   //fw 0.2.46: phosphor view persistence, palette (0x9A00 marker)
 
 //Compacted menus (fw 0.2.8, owner: no gaps). The kept rows move up by whole rows; the menu heights in variables.h
-//shrink to match. With PC_PROTOCOL=0 the shifts are 0 and nothing moves.
-#if PC_PROTOCOL
+//shrink to match.
 #define PC_GEN_COMPACT        1     //generator: Power, Freq, Duty (no Wave / Ampl / Offset / Phase rows)
 #define PC_GEN_DY             56    //Freq and Duty move up one row
 #define PC_TRIG_COMPACT       1     //trigger: no Hold off row
 #define PC_TRIG_DY            56    //Always 50% moves up one row
 #define PC_CH_COMPACT         1     //channel menu: no FFT row (1.00o5 stores fftenable and draws nothing)
 #define PC_CH_DY              56    //Invert, Coupling, V/A move up one row
-#else
-#define PC_GEN_COMPACT        0
-#define PC_GEN_DY             0
-#define PC_TRIG_COMPACT       0
-#define PC_TRIG_DY            0
-#define PC_CH_COMPACT         0
-#define PC_CH_DY              0
-#endif
 
 #define PC_MASK_GEN_MENU      1
 #define PC_MASK_TRIG_CHANNEL  2
@@ -49,7 +40,6 @@
 #define PC_MASK_ACQ_MEMORY    5
 #define PC_MASK_SYS_RTC       6
 
-#if PC_PROTOCOL
 
 void pc_glue_init(void);              //after the settings are loaded, before usb_device_init()
 void pc_glue_poll_main(void);         //top of the main loop
@@ -124,35 +114,6 @@ uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (sco
 #define PC_PHOSPHOR_XY(i, last) do { if(pc_glue_phosphor_xy(i)) (i) = (last); } while(0)
 #define PC_PHOSPHOR_STRIP()     pc_glue_phosphor_strip()
 
-#else
-
-#define PC_BUSY_POLL()          do { } while(0)
-#define PC_TIMER_TICK()         do { } while(0)
-#define PC_UI_CAPTURE_DONE()    do { } while(0)
-#define PC_UI_CAPTURE_START()   do { } while(0)
-#define PC_UI_CAPTURE_ADDR(a)   do { } while(0)
-#define PC_UI_ARM_ALLOWED()
-#define PC_RTC_ALLOWED()
-#define PC_PASS_MARK(n)         do { } while(0)
-#define PC_UI_HAS(f)
-#define PC_UI_MASK(m)           do { } while(0)
-#define PC_UI_VERSION(d, form)  (d)
-#define PC_TOPBAR_DRAWN()       do { } while(0)
-#define PC_DIAG_DRAWN()         do { } while(0)
-#define PC_EXT_SELECTED()       do { } while(0)
-#define PC_ROLL_LABEL()         do { } while(0)
-#define PC_SPECTRUM_DISPLAY()   do { } while(0)
-#define PC_SETTINGS_DEFAULTS()  do { } while(0)
-#define PC_SPECTRUM_TOUCH()     do { } while(0)
-#define PC_MAIN_MENU_ROW6(y)    0
-#define PC_MAIN_MENU_ITEMS()    do { } while(0)
-#define PC_MAIN_MENU_TOUCH()    do { } while(0)
-#define PC_PHOSPHOR_SKIP()
-#define PC_PHOSPHOR_DRAW()      do { } while(0)
-#define PC_PHOSPHOR_XY(i, last) do { } while(0)
-#define PC_PHOSPHOR_STRIP()     do { } while(0)
-
-#endif
 
 //Protocol 1.3 has no snapshot to restore: the power-off save stores the live settings as 1.00o5 does
 #define PC_POWER_OFF()          do { } while(0)

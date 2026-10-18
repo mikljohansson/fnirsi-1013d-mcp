@@ -27,7 +27,6 @@ extern const USB_DeviceDescriptor CDC_DevDesc;
 extern const CDC_Descriptor CDC_ConfDesc;
 
 //extern const uint8 StringLangID[];
-#if PC_PROTOCOL
 //usb_interface.c sends sizeof() of these, so the sizes must match cdc_class.c
 extern const uint8 str_vendor[32];
 extern const uint8 str_ret[26];
@@ -35,15 +34,6 @@ extern const uint8 str_isernum[22];
 extern const uint8 str_config[24];
 extern const uint8 str_interface1[42];
 extern const uint8 str_interface2[36];
-#else
-extern const uint8 str_vendor[14];
-extern const uint8 str_ret[26];
-//extern const uint8 str_isernum[24];
-extern const uint8 str_isernum[20];
-extern const uint8 str_config[24];
-extern const uint8 str_interface1[30];
-extern const uint8 str_interface2[30];
-#endif
 
 extern const uint8 vendorVersion[2];
 extern const uint8 vendorAttach[2];

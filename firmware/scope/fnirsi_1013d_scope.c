@@ -119,10 +119,8 @@ int main(void)
 
   //Load configuration data from FLASH
   scope_load_configuration_data();
-#if PC_PROTOCOL
   //PC control protocol session (selects CDC mode, caches the FPGA version)
   pc_glue_init();
-#endif
   //if (dev_mode)
   //Setup the USB interface
   usb_device_init();
@@ -174,12 +172,8 @@ int main(void)
   fpga_set_translated_brightness();
   
   //load picture startup logo
-#if PC_PROTOCOL
   //PC protocol build: no "Failed to open file" box (and its 700 ms wait) when the card has no scope.bmp
   pc_glue_boot_splash();
-#else
-  load_picture("scope.bmp");
-#endif
   //if (!dev_mode) timer0_delay(3000);//2000
   
   //View message if load a default configuration in case of settings
@@ -259,12 +253,10 @@ int main(void)
   //Monitor the battery, process and display trace data and handle user input until power is switched off
   while(1)
   {
-#if PC_PROTOCOL
     //PC control protocol: parse requests, run handlers (docs/plans/firmware-usb-protocol.md 5.3). Protocol 1.3 shares
     //control with the UI, so the UI loop below always runs; the MCP indicator follows the host's activity.
     pc_glue_poll_main();
     pc_glue_ui_service();
-#endif
 
     //Handle the touch panel input
     //touch_handler();

@@ -11,7 +11,6 @@ _start:
 	.long 0, 0
 
 _reset:
-#if PC_PROTOCOL
 	//PC protocol: restart record in DDR outside the image, BSS and stacks (pc_hal_scope.c pc_restart_*). LR, SP and
 	//CPSR as found at this entry: after a jump to 0 / 0x80000000 (NULL function call, corrupt return address) LR
 	//points just past the culprit. Cold boots are told apart in C by the alive magic of the previous run.
@@ -20,7 +19,6 @@ _reset:
 	str sp, [r12, #12]
 	mrs r11, cpsr
 	str r11, [r12, #16]
-#endif
 	//Initialize stacks. Interrupts disabled
 	mrs r0, cpsr
 	bic r0, r0, #0x1f
@@ -109,7 +107,6 @@ _fiq:
 	.word fiq
 
 //Not used exception handlers
-#if PC_PROTOCOL
 //PC protocol: record the exception (type, LR, SPSR, SP of that mode) and restart instead of hanging, so the host sees
 //the device come back and can read where it crashed (GET_LINK_STATS restart counters, event type 15)
 undefined_instruction:
@@ -142,22 +139,6 @@ pc_exception_common:
 	ldr r10, =0x45584321
 	str r10, [r12, #36]
 	b _reset
-#else
-undefined_instruction:
-	b .
-
-software_interrupt:
-	b .
-
-prefetch_abort:
-	b .
-
-data_abort:
-	b .
-
-not_used:
-	b .
-#endif
 
 irq:
 	ldr sp, _stack_irq_end
@@ -178,12 +159,8 @@ irq:
 	subs pc, lr, #4
 
 fiq:
-#if PC_PROTOCOL
   mov r11, #6
   b pc_exception_common
-#else
-  b .
-#endif
 
 //The location of the stacks section
 _stack_und_end:

@@ -16,9 +16,8 @@
 #   make V=1            show full commands
 #   make SOURCE_DATE_EPOCH=<unix time>   reproducible build_time.h (UTC)
 #   make CROSS_COMPILE=/opt/gcc-arm-10.3/bin/arm-none-eabi-   other toolchain
-#   make PC_PROTOCOL=0  build without the USB control protocol (= Atlan's v1.00o5)
 #   make PC_DEBUG=1     protocol bench build: DEBUG_FPGA and FORCE enabled
-#   make gcc10          PC_PROTOCOL build with Atlan's GCC 10.3.1 (build-gcc10-pc/)
+#   make gcc10          the release image, Atlan's GCC 10.3.1 (build-gcc10-pc/)
 
 CROSS_COMPILE ?= arm-none-eabi-
 CC      := $(CROSS_COMPILE)gcc
@@ -50,26 +49,20 @@ SRCS := \
 	sd_card_interface.c sin_cos_math.c spi_control.c start.s statemachine.c \
 	test.c timer.c touchpanel.c usb_interface.c variables.c adc_cal.c spec_fmt.c
 
-# USB control protocol (docs/protocol.md, firmware/README.md). Linked after the
-# upstream objects so the upstream part of the layout keeps its order.
-#   PC_PROTOCOL=0  hooks compile to nothing, image identical to upstream
+# USB control protocol and the views built on it (docs/protocol.md, firmware/README.md),
+# linked after the upstream objects. Options:
 #   PC_DEBUG=1     DEBUG_FPGA + FORCE (bench builds only)
 #   PC_FORCE_CDC=1 CDC at boot even when the saved USB setting says MSC
 #   PC_FIFO_MAP=n  USB endpoint FIFO layout (pc_transport.h), 0 default, 1 OUT FIFO at 1536
-PC_PROTOCOL  ?= 1
 PC_DEBUG     ?= 0
 PC_FORCE_CDC ?= 1
 PC_FIFO_MAP  ?= 0
-ifeq ($(PC_PROTOCOL),1)
 SRCS += pc_protocol.c pc_cmds.c pc_transport.c pc_hal_scope.c fx_fft.c fx_fft_tables.c spectrum.c pc_decim.c phos_map.c phosphor.c
 PC_FW_BUILD := $(shell git rev-parse --short=8 HEAD 2>/dev/null)
 ifeq ($(PC_FW_BUILD),)
 PC_FW_BUILD := 00000000
 endif
-PC_DEFS := -DPC_PROTOCOL=1 -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FW_BUILD=0x$(PC_FW_BUILD)u -DPC_FIFO_MAP=$(PC_FIFO_MAP)
-else
-PC_DEFS := -DPC_PROTOCOL=0
-endif
+PC_DEFS := -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FW_BUILD=0x$(PC_FW_BUILD)u -DPC_FIFO_MAP=$(PC_FIFO_MAP)
 
 OBJS := $(addprefix $(OBJDIR)/,$(addsuffix .o,$(basename $(SRCS))))
 DEPS := $(OBJS:.o=.d)
@@ -165,7 +158,7 @@ info: $(ELF)
 # The release image: Atlan's compiler, GCC 10.3.1 (../tools/fetch_gcc10.sh)
 GCC10 ?= $(HOME)/opt/gcc10
 gcc10:
-	$(MAKE) BUILD=build-gcc10-pc CROSS_COMPILE=$(GCC10)/usr/bin/arm-none-eabi- 	  EXTRA_CFLAGS="-isystem $(GCC10)/usr/include/newlib" PC_PROTOCOL=1
+	$(MAKE) BUILD=build-gcc10-pc CROSS_COMPILE=$(GCC10)/usr/bin/arm-none-eabi- 	  EXTRA_CFLAGS="-isystem $(GCC10)/usr/include/newlib"
 
 clean:
 	rm -rf $(BUILD) build-gcc10-pc

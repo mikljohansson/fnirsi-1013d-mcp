@@ -3113,11 +3113,9 @@ void handle_acquisition_menu_touch(void)
             //scope_acqusition_settings(0);
           }
 
-#if PC_PROTOCOL
           //Filter selector (bitstream 0x1534+) in the slot of the hidden Long memory box: Off, Boxcar, CIC2, CIC3
           if((xtouch >= ACQ_MENU_XPOS + 204) && (xtouch <= ACQ_MENU_XPOS + 294) && pc_glue_ui_has(PC_FEAT_DECIM))
             pc_glue_decim_tap();
-#endif
         }        
         //======================================================================
         //Check on time per div being set

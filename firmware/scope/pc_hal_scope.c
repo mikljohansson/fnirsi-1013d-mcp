@@ -2,7 +2,7 @@
 // pc_hal_scope.c - pc_hal.h on the FNIRSI 1013D (1.00o5 settings, fpga_control.c, display) and the firmware glue that owns
 // the one pc_session. The transport part of pc_hal.h is in pc_transport.c.
 //
-// Only built with PC_PROTOCOL=1. Bench tests that must confirm an assumption are marked "BENCH: Tn" (protocol.md 12).
+// Bench tests that must confirm an assumption are marked "BENCH: Tn" (protocol.md 12).
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include <string.h>

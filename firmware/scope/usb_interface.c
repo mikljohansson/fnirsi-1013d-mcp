@@ -12,9 +12,7 @@
 #include "PC_interface.h"
 #include "pc_hooks.h"
 
-#if PC_PROTOCOL
 #include "pc_transport.h"
-#endif
 
 #include <string.h>
 
@@ -31,10 +29,6 @@ uint8  current_speed = USB_SPEED_UNKNOWN;
 uint32 usb_connect = 0;
 int32  usb_ep0_state = EP0_IDLE;
 
-#if !PC_PROTOCOL
-uint8 bufferCDC[64]; //max is 512
-uint32 lenCDC = 0;
-#endif
 
 extern volatile uint32 msc_state;
 
@@ -65,15 +59,11 @@ uint8 rts_state = 0;
 //----------------------------------------------------------------------------------------------------------------------------------
 //In original code the register is written as byte, which might be wrong since some data is shifted 8 bits to the left
 //So using 32 bit register here
-#if PC_PROTOCOL
 //fw 0.2.25: the PHY control register of the F1C100s is 0x01C13404 (Linux phy-sun4i-usb.c: suniv_f1c100s_cfg uses
 //REG_PHYCTL_A10 = 0x04 from "phy_ctrl", which suniv-f1c100s.dtsi maps at 0x01C13400, length 0x10). 1.00o5 writes
 //0x01C13410 (the A33-and-later offset, outside that region), so its three PHY tuning writes presumably never reached
 //the PHY (inference, see firmware/AGENTS.md). Same bit protocol as Linux: address in bits 8-15, data bit 7, pulse bit 0.
 #define USB_PHY_SETUP_REG USBC_REG_PHYCTL
-#else
-#define USB_PHY_SETUP_REG USBC_REG_CSR
-#endif
 static void usb_phy_setup(int32 addr, int32 data, int32 len)
 {
   int32 j;
@@ -109,7 +99,6 @@ static void usb_phy_setup(int32 addr, int32 data, int32 len)
 //----------------------------------------------------------------------------------------------------------------------------------
 void usb_device_init(void)
 {
-#if PC_PROTOCOL
     // PC protocol: drop buffered data and flag a link reset (boot, CDC <-> MSC switch)
     pc_transport_reset();
 
@@ -120,7 +109,6 @@ void usb_device_init(void)
     *CCU_BUS_SOFT_RST0 &= ~CCU_BSRR1_USBOTG_EN;
     *CCU_USBPHY_CFG    &= ~CCU_USBPHY_CFG_RST;
     timer0_delay(1);
-#endif
 
     // Enable and clock the USB PHY
     *CCU_USBPHY_CFG |= (CCU_USBPHY_CFG_RST | CCU_USBPHY_CFG_GAT);
@@ -131,10 +119,8 @@ void usb_device_init(void)
     // Lift the reset of the USB interface
     *CCU_BUS_SOFT_RST0 |= CCU_BSRR1_USBOTG_EN;
 
-#if PC_PROTOCOL
     // fw 0.2.25: PHY tuning bits as the reset left them (read back before the writes below)
     pc_usb_phy_pre();
-#endif
 
     // PHY calibration: 45 Ω regulation
     usb_phy_setup(0x0C, 0x01, 1);
@@ -188,10 +174,8 @@ void usb_device_init(void)
         //usb_device_enable();
     }
 
-#if PC_PROTOCOL
     // fw 0.2.25: controller and PHY state at the end of the init (event type 19)
     pc_usb_log_post_init();
-#endif
 }
 
 /*
@@ -266,11 +250,7 @@ void usb_device_enable(void)
   
   //Enable the needed interrupts ch340
     //*USBC_REG_INTUSBE = USBC_BP_INTUSB_SOF | USBC_BP_INTUSB_SUSPEND | USBC_BP_INTUSB_RESUME | USBC_BP_INTUSB_RESET | USBC_BP_INTUSB_DISCONNECT;
-#if !PC_PROTOCOL
-  if(USB_CH340==1) *USBC_REG_INTUSBE |= USBC_BP_INTUSB_SOF;
-#else
   //PC protocol: no SOF interrupt (8000/s at high speed); the EP2 TX interrupt drives the transmit pump
-#endif
 
   //Enable EP0 interrupt
   *USBC_REG_INTTXE = 1;
@@ -926,11 +906,9 @@ void usb_device_CDC_irq_handler(void)
         *USBC_REG_TXCSR |= USBC_BP_TXCSR_D_FLUSH_FIFO;
         *USBC_REG_RXCSR |= USBC_BP_RXCSR_D_FLUSH_FIFO;
 
-#if PC_PROTOCOL
     //Bus reset: buffers are dropped, the event is counted (GET_LINK_STATS)
     pc_usb_isr_event(PC_USB_EV_BUS_RESET);
     pc_usb_isr_link();
-#endif
 
     
     return;
@@ -946,9 +924,7 @@ void usb_device_CDC_irq_handler(void)
     usb_connect = 1;
     usb_ep0_state = EP0_IDLE;
 
-#if PC_PROTOCOL
     pc_usb_isr_resume();
-#endif
   }
 
   //Check on a SUSPEND interrupt
@@ -961,10 +937,8 @@ void usb_device_CDC_irq_handler(void)
     usb_connect = 0;
     usb_ep0_state = EP0_IDLE;
 
-#if PC_PROTOCOL
     //fw 0.2.44: a state, not a link reset (pc_transport.c); the following RESUME or bus reset decides
     pc_usb_isr_suspend();
-#endif
   }
 
   //Check on a DISCONNECT interrupt
@@ -977,10 +951,8 @@ void usb_device_CDC_irq_handler(void)
     usb_connect = 0;
     usb_ep0_state = EP0_IDLE;
 
-#if PC_PROTOCOL
     pc_usb_isr_event(PC_USB_EV_DISCONNECT);
     pc_usb_isr_link();
-#endif
     
     //Need to add code here to force the scope to go back to its normal mode???
     //Use a flag that is checked in the touch scan for the usb on/off
@@ -1075,9 +1047,7 @@ void usb_device_CDC_irq_handler(void)
               //Using a union for alignment to 32 bits
               usb_setup_packet.data[0] = *USBC_REG_EPFIFO0;
               usb_setup_packet.data[1] = *USBC_REG_EPFIFO0;
-#if PC_PROTOCOL
               pc_usb_isr_setup(usb_setup_packet.data[0], usb_setup_packet.data[1]);
-#endif
               
               //Signal packet has been serviced
               *USBC_REG_CSR0 = USBC_BP_CSR0_D_SERVICED_RX_PKT_READY;
@@ -1196,18 +1166,10 @@ void usb_device_CDC_irq_handler(void)
 
                       //The FIFO size is set based on 2^n * 8, so for 512 bytes it is 6
                       //As double buffering is used this bit is also set
-#if PC_PROTOCOL
                       *USBC_REG_TXFIFOSZ = PC_EP1_TXFIFOSZ;  // 2 KiB FIFO RAM: see pc_transport.h
-#else
-                      *USBC_REG_TXFIFOSZ = USBC_BP_TXFIFOSZ_DPB | 3;  // 64B for EP1 interrupt
-#endif
                       
                       //The base address of the third FIFO is set to the first free address
-#if PC_PROTOCOL
                       *USBC_REG_TXFIFOAD = PC_EP1_TXFIFOAD;
-#else
-                      *USBC_REG_TXFIFOAD = 256;
-#endif
 
                       //Enable the endpoint interrupts
                       *USBC_REG_INTTXE |= USBC_INTTX_FLAG_EP1;
@@ -1230,20 +1192,12 @@ void usb_device_CDC_irq_handler(void)
     
                       //The FIFO size is set based on 2^n * 8, so for 512 bytes it is 6
                       //As double buffering is used this bit is also set
-#if PC_PROTOCOL
                       *USBC_REG_RXFIFOSZ = PC_EP2_RXFIFOSZ;
-#else
-                      *USBC_REG_RXFIFOSZ = USBC_BP_RXFIFOSZ_DPB | 6;
-#endif
                       // nastav RX FIFO size podľa vyjednanej veľkosti
                       //*USBC_REG_RXFIFOSZ = USBC_BP_RXFIFOSZ_DPB | fifo_n;
     
                       //The base address of the first FIFO is set to zero
-#if PC_PROTOCOL
                       *USBC_REG_RXFIFOAD = PC_EP2_RXFIFOAD;  // above the fixed 64-byte EP0 FIFO
-#else
-                      *USBC_REG_RXFIFOAD = 0; // RX on address 0
-#endif
                       
                       // vypočítaj základ pre TX FIFO (RX zaberie rx_fifo_bytes)
                       // register očakáva adresu v jednotkách 8B (?) - ak používaš bytes, zachovaj pôvodné konvencie v driveri
@@ -1264,29 +1218,19 @@ void usb_device_CDC_irq_handler(void)
 
                       //The FIFO size is set based on 2^n * 8, so for 512 bytes it is 6
                       //As double buffering is used this bit is also set
-#if PC_PROTOCOL
                       *USBC_REG_TXFIFOSZ = PC_EP2_TXFIFOSZ;
-#else
-                      *USBC_REG_TXFIFOSZ = USBC_BP_TXFIFOSZ_DPB | 6;
-#endif
                                             
                       // nastaviť TX FIFO velkost rovnakú ako RX (alebo inak, podľa potreby)
                       //*USBC_REG_TXFIFOSZ = USBC_BP_TXFIFOSZ_DPB | fifo_n;
                       //*USBC_REG_TXFIFOAD = tx_fifo_base_for_ep2; // posuň TX za RX blok
                       
                       //The base address of the second FIFO is set to the first free address (twice the receive FIFO size / 8)
-#if PC_PROTOCOL
                       *USBC_REG_TXFIFOAD = PC_EP2_TXFIFOAD;
-#else
-                      *USBC_REG_TXFIFOAD = 512;
-#endif
 
                       //Enable the endpoint interrupts
                       *USBC_REG_INTRXE |= USBC_INTRX_FLAG_EP2;
                       *USBC_REG_INTTXE |= USBC_INTTX_FLAG_EP2;
-#if PC_PROTOCOL
                       pc_usb_isr_configured();
-#endif
   
                       //Switch back to EP0
                       *USBC_REG_EPIND = 0;
@@ -1318,11 +1262,9 @@ void usb_device_CDC_irq_handler(void)
                       //Switch back to EP0
                       *USBC_REG_EPIND = 0;
 
-#if PC_PROTOCOL
                       //The FIFO of a CDC data endpoint was flushed: tell the transport
                       if((usb_setup_packet.packet.wIndex & 0x0F) == 2)
                         pc_usb_isr_ep_cleared(usb_setup_packet.packet.wIndex & 0x8F);
-#endif
                       break;
                   } //end switch(usb_setup_packet.packet.bRequest)
                   break;
@@ -1433,9 +1375,7 @@ void usb_device_CDC_irq_handler(void)
             else
             {
               //Signal packet has been serviced and stall the end point
-#if PC_PROTOCOL
               pc_usb_isr_bad_setup(*USBC_REG_COUNT0);
-#endif
               *USBC_REG_CSR0 = USBC_BP_CSR0_D_SERVICED_RX_PKT_READY | USBC_BP_CSR0_D_SEND_STALL;
             }
           }
@@ -1497,42 +1437,8 @@ void usb_device_CDC_irq_handler(void)
     //Set EP2 as active one
     *USBC_REG_EPIND = 2;
 
-#if PC_PROTOCOL
     //PC protocol: packet(s) into the RX ring, NAK back-pressure when it is full; parsing happens in the main loop
     pc_usb_isr_rx();
-#else
-    //Check if the end point is in a stall
-    if(*USBC_REG_RXCSR & USBC_BP_RXCSR_D_SENT_STALL)
-    {
-      //Clear the stall state
-      *USBC_REG_RXCSR &= ~(USBC_BP_RXCSR_D_SENT_STALL | USBC_BP_RXCSR_D_SEND_STALL);
-    }
-  
-    //Check if there is data to handle
-    if(*USBC_REG_RXCSR & USBC_BP_RXCSR_D_RX_PKT_READY)
-    {
-      //Handle the received data in the ch340 code
-      //usb_ch340_out_ep_callback((void *)USBC_REG_EPFIFO2, *USBC_REG_RXCOUNT);
-      //-------------------------------
-      //uint32 len = *USBC_REG_RXCOUNT; // počet prijatých bajtov
-      //uint8 buffer[64]; //max is 512
-      lenCDC = *USBC_REG_RXCOUNT; // počet prijatých bajtov
-
-      // Prečítaj dáta z FIFO
-      usb_read_from_fifo((void *)USBC_REG_EPFIFO2, bufferCDC, lenCDC);
-      //usb_CDC_out_ep_callback(buffer, len);
-      //usb_CDC_receive_callback(buffer, len); 
-      
-      usb_CDC_receive_callback();
-      
-
-      
-      //-----------------------------------------
-
-      //Signal done with the packet and clear possible errors
-      *USBC_REG_RXCSR &= ~(USBC_BP_RXCSR_D_RX_PKT_READY | USBC_BP_RXCSR_D_OVERRUN);
-    }
-#endif
   }
   
   //Check on data transmitted for EP2
@@ -1559,10 +1465,8 @@ void usb_device_CDC_irq_handler(void)
 
     }
 
-#if PC_PROTOCOL
     //PC protocol: next packet (or the ZLP) of the staged response
     pc_usb_isr_tx();
-#endif
   }
 }
 //******************************************************************************************
@@ -1573,11 +1477,6 @@ static uint16 lcd_y2 = 70;
 char line[128];
 
 // extern alebo definícia štruktúry (ak nie je v .h)
-#if !PC_PROTOCOL
-#define RX_BUFFER_SIZE 128
-static char rx_buffer[RX_BUFFER_SIZE];
-static uint32 rx_index = 0;
-#endif
 
 extern sysparam SysParam;
 
@@ -1595,120 +1494,6 @@ uint32 j = 182;
 uint32 k = 20;
 
 
-#if !PC_PROTOCOL
-//void usb_CDC_receive_callback(uint8 *data, uint32 len)
-void usb_CDC_receive_callback(void)
-{
-     
-    display_set_font(&font_2);
-    display_set_fg_color(WHITE_COLOR);
-    
-    *USBC_REG_INTTXE &= ~USBC_INTTX_FLAG_EP2;
-    *USBC_REG_INTTX = USBC_INTTX_FLAG_EP2;
-    
-
-    for (uint32 i = 0; i < lenCDC; i++)
-    {
-        char c = bufferCDC[i];
-
-if (c == '\n' || c == '\r')
-    {
-        rx_buffer[rx_index] = 0;
-
-        // ----------------------------------------------------
-        // 1) ENTER BEZ TEXTU → VYPÍŠ VŠETKY PREMENNÉ
-        // ----------------------------------------------------
-        if (rx_index == 0)
-        {
-            usb_CDC_send_text("#Aktualne hodnoty: \n");
-
-            usb_send_uint("a: ", a);
-            usb_send_uint("b: ", b);
-            usb_send_uint("c: ", c);
-            usb_send_uint("d: ", d);
-            usb_send_uint("e: ", e);
-            usb_send_uint("f: ", f);
-            usb_send_uint("g: ", g);
-            usb_send_uint("h: ", h);
-            usb_send_uint("i: ", i);
-            usb_send_uint("j: ", j);
-            usb_send_uint("k: ", k);
-
-            usb_CDC_send_text("#DONE\n");   // ← odpoveď na ktorú si chcel reagovať „received“
-            
-            //fpgasettings.totalsamples = f;
-            usb_CDC_in_ep_callback();
-
-            rx_index = 0;
-            continue;
-        }
-
-        // ----------------------------------------------------
-        // 2) príkazy typu a999 b123456 e555555
-        // ----------------------------------------------------
-        if (rx_buffer[0] >= 'a' && rx_buffer[0] <= 'k')
-        {
-            char ch = rx_buffer[0];
-            uint32_t val = my_atoul(&rx_buffer[1]);
-
-            switch (ch)
-            {
-                case 'a': a = val; break;
-                case 'b': b = val; break;
-                case 'c': c = val; break;
-                case 'd': d = val; break;
-                case 'e': e = val; break;
-                case 'f': f = val; fpgasettings.totalsamples = f; break;
-                case 'g': g = val; scopesettings.ACQ_trace = g; break;
-                case 'h': h = val; break;
-                case 'i': i = val; break;
-                case 'j': j = val; break;
-                case 'k': k = val; break;
-            }
-            
-                       // extern uint32 a,b,c,d,e,f;
-      if (e==1) {scope_save_view_item_file(VIEW_TYPE_PICTURE); e=0;}
-
-            usb_CDC_send_text("#value: ");
-            usb_CDC_send_text(rx_buffer);
-            usb_CDC_send_text("\n");
-            usb_CDC_send_text("#END\n");   // <- tu je tvoj požadovaný reťazec
-
-            usb_CDC_in_ep_callback();
-            
-            rx_index = 0;
-            continue;
-        }
-
-        // ----------------------------------------------------
-        // 3) neznámy príkaz
-        // ----------------------------------------------------
-        usb_CDC_send_text("#ERR\n#END\n");
-        usb_CDC_in_ep_callback();
-
-        rx_index = 0;
-        continue;
-    }
-
-    // bežný znak
-   if (rx_index < sizeof(rx_buffer) - 1)
-      rx_buffer[rx_index++] = c;
-}
-
-        
-    
-
-    
-
-    
-    *USBC_REG_INTTXE |= USBC_INTTX_FLAG_EP2;
-    
-    
-
-    //usb_CDC_in_ep_callback();
-}
-
-#endif
 
 //***************************************************************************
 // jednoduchá funkcia na prevod bajtu na hex znaky
@@ -1720,77 +1505,6 @@ char nibble_to_hex(uint8 nibble)
 
 //***************************************************************************
 
-#if !PC_PROTOCOL
-//--------------------------------------------------------------------
-//  Odosielanie textu do USB CDC bufferu (neblokujúco, bez priameho TX)
-//--------------------------------------------------------------------
-    
-    //usb_disable_tx_irq();   // 🚫 zabráni prerušeniu TX
-    //*USBC_REG_INTTXE &= ~USBC_INTTX_FLAG_EP1;
-
-void usb_CDC_send_text(const char *text)
-{
-    if (!usb_connect || !text)
-        return;
-
-     //uint32 len = 200;
-
-     uint32 len = 0;
-    const char *p = text; //usb_CDC_send_text1
-
-    // zisti dĺžku textu
-    while (*p && len < sizeof(usb_tx)) { len++; p++; }
-
-    // koľko voľného miesta v TX buffri
-    uint32 free_space = circular_buffer_free(usb_tx_in_idx, usb_tx_out_idx, sizeof(usb_tx));
-    
-    //display_decimal(400,lcd_y2, free_space );
-    //lcd_y2 += 10;
-    if (len > free_space)
-        len = free_space; // orez, ak by sa nezmestil celý text
-
- 
-    for (uint32 i = 0; i < len; i++)
-    {
-        usb_tx[usb_tx_in_idx++] = (uint8)text[i];
-        usb_tx_in_idx %= sizeof(usb_tx);
-    }
-
-    // teraz buffer čaká na manuálne zavolanie usb_CDC_in_ep_callback()
-}
-
-
-    //*USBC_REG_INTTXE |= USBC_INTTX_FLAG_EP1;
-
-    //NEPOSIELAJ hneď — odoslanie spraví nadradená logika (napr. po #WAV2,3)
-//}
-
-
-//--------------------------------------------------------------------
-//  Odosielanie binárnych dát do USB CDC bufferu (neblokujúco)
-//--------------------------------------------------------------------
-void usb_CDC_send_data(uint8 *data, uint32 length)
-{
-    if (!usb_connect || !data || length == 0)
-        return;
-    //*USBC_REG_INTTXE &= ~USBC_INTTX_FLAG_EP1;
-
-    for (uint32 i = 0; i < length; i++)
-    {
-        // čakaj, ak nie je voľné miesto
-        while (circular_buffer_free(usb_tx_in_idx, usb_tx_out_idx, sizeof(usb_tx)) == 0)
-        {
-            //usb_CDC_in_ep_callback();
-        }
-
-        usb_tx[usb_tx_in_idx++] = data[i];
-        usb_tx_in_idx %= sizeof(usb_tx);
-    }
-
-    //  NEPOSIELAJ hneď, len naplň buffer
-      // *USBC_REG_INTTXE |= USBC_INTTX_FLAG_EP1;
-}
-#else
 //PC protocol: the text debug output path (usb_tx ring) is gone; the protocol owns the CDC data endpoint.
 //Callers (menu.c debug helpers via usb_send_uint) become no-ops instead of corrupting the binary stream.
 void usb_CDC_send_text(const char *text)
@@ -1803,7 +1517,6 @@ void usb_CDC_send_data(uint8 *data, uint32 length)
   (void)data;
   (void)length;
 }
-#endif
 
 
 
@@ -1884,10 +1597,8 @@ void usb_cdc_set_control_line_state(uint16 value)
     // If the host sends DTR=1, we consider it an "open" port
     if (dtr_state || rts_state) usb_connect = 1; else usb_connect = 0;
 
-#if PC_PROTOCOL
     // DTR 1 -> 0 releases REMOTE (exit_reason 4) unless IGNORE_DTR
     pc_usb_dtr(dtr_state);
-#endif
 }
 
 //==============================================================================
