@@ -1178,8 +1178,6 @@ uint32 scope_do_baseline_calibration(void)
     }
 
     adc_cal_loaded = 1;
-    scope_save_input_calibration_data();
-    scope_save_configuration_data();
   }
 
   scopesettings.samplecount = fpgasettings.totalsamples;
@@ -1195,6 +1193,14 @@ uint32 scope_do_baseline_calibration(void)
   }
 
   fpga_set_sample_rate(scopesettings.samplerate);
+
+  //Persist at once (1.00o5 left the results in RAM until power-off): 708 with the v2 block, 709 with the PWM centres
+  //and compensations it is bound to, after the settings above are back
+  if(rc == ACAL_OK)
+  {
+    scope_save_input_calibration_data();
+    scope_save_configuration_data();
+  }
 
   //Show the new settings
   scope_acqusition_settings(0);
