@@ -23,7 +23,9 @@ MAGIC = b"\xa5\x13"
 MAGIC0 = 0xA5
 MAGIC1 = 0x13
 PROTO_MAJOR = 1
-PROTO_MINOR = 2  # 1.1: GET_STATUS pass_ms / pass_max_ms (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4)
+#: 1.1: GET_STATUS pass_ms / pass_max_ms (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4); 1.3: collaborative (shared)
+#: mode: SHARED_MODE cap, GET_STATUS settings/run fields, SET_ACQ_STATE, GET_CAPTURE_INFO
+PROTO_MINOR = 3
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -72,6 +74,8 @@ class Cmd(enum.IntEnum):
     READ_TRACE = 0x0205
     READ_LIVE = 0x0206
     ACQUIRE_AVG = 0x0207
+    SET_ACQ_STATE = 0x0208  # protocol 1.3, SHARED_MODE
+    GET_CAPTURE_INFO = 0x0209  # protocol 1.3, SHARED_MODE
     GET_GEN = 0x0300
     SET_GEN = 0x0301
     GET_CAL = 0x0400
@@ -148,6 +152,8 @@ class Caps(enum.IntFlag):
     ENTER_FEL = 1 << 10
     READ_LAG_UNVERIFIED = 1 << 11
     INTERLEAVE_UNVERIFIED = 1 << 12
+    #: protocol 1.3: collaborative mode. No LOCAL/REMOTE; UI and host share one live settings set.
+    SHARED_MODE = 1 << 13
 
 
 def caps_names(caps: int) -> list[str]:
@@ -163,6 +169,8 @@ CMD_CAP: dict[Cmd, Caps] = {
     Cmd.READ_SCREEN: Caps.SCREENSHOT,
     Cmd.DEBUG_FPGA: Caps.DEBUG_RAW,
     Cmd.ENTER_FEL: Caps.ENTER_FEL,
+    Cmd.SET_ACQ_STATE: Caps.SHARED_MODE,
+    Cmd.GET_CAPTURE_INFO: Caps.SHARED_MODE,
 }
 
 
@@ -183,6 +191,39 @@ VARIANT_NAMES = {FpgaVariant.UNKNOWN: "unknown", FpgaVariant.STOCK: "stock", Fpg
 class Control(enum.IntEnum):
     LOCAL = 0
     REMOTE = 1
+    #: protocol 1.3 collaborative mode (SHARED_MODE): always this value
+    SHARED = 2
+
+
+class RunState(enum.IntEnum):
+    """GET_STATUS run_state (protocol 1.3): what the scope's acquisition loop does."""
+
+    STOP = 0
+    RUN = 1
+    #: a single capture (host ARM or UI single) is armed and waiting
+    SINGLE = 2
+
+
+class CaptureOrigin(enum.IntEnum):
+    """GET_STATUS capture_origin, GET_CAPTURE_INFO origin and READ_TRACE origin (protocol 1.3)."""
+
+    HOST = 0
+    UI_RUN = 1
+    UI_SINGLE = 2
+
+
+#: capture_settings_seq of a capture whose settings changed while it ran (and before the first capture);
+#: settings_seq itself never takes this value (protocol 1.3)
+SEQ_INVALID = 0xFFFFFFFF
+
+
+class UiBusy(enum.IntEnum):
+    """GET_STATUS ui_busy."""
+
+    IDLE = 0
+    MODAL = 1
+    #: protocol 1.3 firmware: USB is up but the main loop has not finished its first pass
+    STARTING = 2
 
 
 class AcqState(enum.IntEnum):
@@ -638,12 +679,14 @@ class InfoResp(Payload):
 @dataclass
 class StatusResp(Payload):
     """GET_STATUS response body: 28 bytes in protocol 1.0, 32 in 1.1 (pass_ms, pass_max_ms appended; a 1.0
-    device leaves them 0). Also returned by SET_REMOTE, ARM, FORCE, STOP, WAIT."""
+    device leaves them 0), 44 in 1.3 (settings_seq, capture_settings_seq, run_state, capture_origin). Also
+    returned by SET_REMOTE, ARM, FORCE, STOP, WAIT and SET_ACQ_STATE."""
 
     FIELDS = [("control", "B"), ("acq_state", "B"), ("flags", "B"), ("ui_busy", "B"), ("capture_id", "I"),
               ("trigger_addr", "H"), ("capture_start_word", "H"), ("ms_since_arm", "I"), ("uptime_ms", "I"),
               ("watchdog_remaining_s", "H"), ("battery_level", "B"), ("exit_reason", "B"), ("reserved", "I"),
-              ("pass_ms", "H"), ("pass_max_ms", "H")]
+              ("pass_ms", "H"), ("pass_max_ms", "H"), ("settings_seq", "I"), ("capture_settings_seq", "I"),
+              ("run_state", "B"), ("capture_origin", "B"), ("reserved2", "H")]
     control: int = 0
     acq_state: int = 0
     flags: int = 0
@@ -660,6 +703,119 @@ class StatusResp(Payload):
     #: 1.1: interval between the last two main-loop polls, and its maximum since the previous GET_STATUS
     pass_ms: int = 0
     pass_max_ms: int = 0
+    #: 1.3: +1 on every change of a capture-relevant setting (UI or host); wraps at 2^32
+    settings_seq: int = 0
+    #: 1.3: settings_seq when the capture ``capture_id`` was started
+    capture_settings_seq: int = 0
+    #: 1.3: RunState
+    run_state: int = 0
+    #: 1.3: CaptureOrigin of ``capture_id``
+    capture_origin: int = 0
+    reserved2: int = 0
+
+    @property
+    def shared(self) -> bool:
+        return self.control == Control.SHARED
+
+
+@dataclass
+class SetAcqStateReq(Payload):
+    """SET_ACQ_STATE request (protocol 1.3): u8 state (RunState.STOP or RunState.RUN), 3 reserved."""
+
+    FIELDS = [("state", "B"), ("_r", "3x")]
+    state: int = 0
+
+
+@dataclass
+class CaptureInfoHeader(Payload):
+    """GET_CAPTURE_INFO response, first 36 bytes (protocol 1.3): the settings the last DONE capture (any
+    origin) was taken with. Followed by one CaptureChannelInfo (16 bytes) per channel, CH1 first."""
+
+    FIELDS = [("capture_id", "I"), ("settings_seq", "I"), ("origin", "B"), ("flags", "B"), ("trigger_addr", "H"),
+              ("capture_start_word", "H"), ("_r0", "2x"), ("divider", "I"), ("timeperdiv_index", "B"),
+              ("trig_source", "B"), ("trig_edge", "B"), ("trig_level", "B"), ("trig_mode", "B"), ("_r1", "3x"),
+              ("pretrigger_samples", "I"), ("total_samples", "I")]
+    capture_id: int = 0
+    settings_seq: int = 0
+    origin: int = 0
+    flags: int = 0
+    trigger_addr: int = 0
+    capture_start_word: int = 0
+    divider: int = 0
+    timeperdiv_index: int = 0xFF
+    trig_source: int = 0
+    trig_edge: int = 0
+    trig_level: int = 128
+    trig_mode: int = 0
+    pretrigger_samples: int = 0
+    total_samples: int = 0
+
+    F_TRIGGERED: ClassVar[int] = 0x01
+    F_AUTO_TIMEOUT: ClassVar[int] = 0x02
+    F_OVERLOAD_CH1: ClassVar[int] = 0x04
+    F_OVERLOAD_CH2: ClassVar[int] = 0x08
+    #: a setting changed while the capture ran (settings_seq is then SEQ_INVALID)
+    F_SETTINGS_CHANGED: ClassVar[int] = 0x10
+
+
+@dataclass
+class CaptureChannelInfo(Payload):
+    FIELDS = [("enable", "B"), ("range", "B"), ("coupling", "B"), ("invert", "B"), ("probe_index", "B"),
+              ("_r", "x"), ("offset_pwm", "H"), ("uv_per_lsb_q8", "I"), ("zero_code_q8", "i")]
+    enable: int = 1
+    range: int = 5
+    coupling: int = 0
+    invert: int = 0
+    probe_index: int = 1
+    offset_pwm: int = 0
+    uv_per_lsb_q8: int = 0
+    zero_code_q8: int = 128 * 256
+
+
+@dataclass
+class CaptureInfo:
+    """Decoded GET_CAPTURE_INFO (68 bytes)."""
+
+    header: CaptureInfoHeader
+    channels: list[CaptureChannelInfo]
+
+    SIZE: ClassVar[int] = 36 + 2 * 16
+
+    def pack(self) -> bytes:
+        return self.header.pack() + b"".join(c.pack() for c in self.channels)
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "CaptureInfo":
+        h = CaptureInfoHeader.unpack(data)
+        chans = [CaptureChannelInfo.unpack(data[36 + 16 * i: 52 + 16 * i]) for i in range(2)]
+        return cls(h, chans)
+
+    def channel_config(self, ch: int) -> "ChannelConfig":
+        """The capture-time channel settings as a CHANNEL_CONFIG (dcoffset / center_cal are not carried)."""
+        c = self.channels[ch]
+        return ChannelConfig(channel=ch, enable=c.enable, range=c.range, hw_range=min(c.range, 5),
+                             coupling=c.coupling, invert=c.invert, probe_index=c.probe_index, offset_pwm=c.offset_pwm,
+                             uv_per_lsb_q8=c.uv_per_lsb_q8, zero_code_q8=c.zero_code_q8)
+
+    def trigger(self) -> "Trigger":
+        h = self.header
+        return Trigger(source=h.trig_source, edge=h.trig_edge, level=h.trig_level, mode=h.trig_mode,
+                       pretrigger_samples=h.pretrigger_samples, total_samples=h.total_samples,
+                       pretrigger_words=h.pretrigger_samples // 2, total_words=h.total_samples // 2)
+
+    def timebase(self) -> "Timebase":
+        return timebase_for_divider(self.header.divider, self.header.timeperdiv_index)
+
+    def settings_key(self) -> dict[str, Any]:
+        """Capture-relevant settings as a flat dict (for reporting what changed)."""
+        h = self.header
+        d: dict[str, Any] = {"divider": h.divider, "trig_source": h.trig_source, "trig_edge": h.trig_edge,
+                             "trig_level": h.trig_level, "trig_mode": h.trig_mode,
+                             "pretrigger_samples": h.pretrigger_samples, "total_samples": h.total_samples}
+        for i, c in enumerate(self.channels):
+            for k in ("enable", "range", "coupling", "invert", "probe_index", "offset_pwm"):
+                d[f"CH{i + 1}.{k}"] = getattr(c, k)
+        return d
 
 
 @dataclass
@@ -868,6 +1024,7 @@ class ReadRawReq(Payload):
     count: int = 0
     reserved: int = 0
 
+    #: protocol <= 1.2: read while ARMED; 1.3 ("ANY"): read the ring as it is, whatever it holds
     ALLOW_NOT_DONE: ClassVar[int] = 0x01
     ADDR_ABSOLUTE: ClassVar[int] = 0
     ADDR_CAPTURE: ClassVar[int] = 1
@@ -1087,7 +1244,8 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.SET_TRIGGER: SetTriggerReq.size(), Cmd.ARM: 4, Cmd.FORCE: 0, Cmd.STOP: 0, Cmd.WAIT: 4,
     Cmd.READ_RAW: ReadRawReq.size(), Cmd.READ_TRACE: ReadTraceReq.size(), Cmd.READ_LIVE: ReadLiveReq.size(),
     Cmd.ACQUIRE_AVG: AcquireAvgReq.size(), Cmd.GET_GEN: 0, Cmd.SET_GEN: SetGenReq.size(), Cmd.GET_CAL: 1,
-    Cmd.READ_SCREEN: ReadScreenReq.size(), Cmd.ENTER_FEL: 4,
+    Cmd.READ_SCREEN: ReadScreenReq.size(), Cmd.ENTER_FEL: 4, Cmd.SET_ACQ_STATE: SetAcqStateReq.size(),
+    Cmd.GET_CAPTURE_INFO: 0,
 }
 
 

@@ -47,4 +47,6 @@ async def test_server_subprocess_decay_fit(sim_factory, tmp_path):
                                pretrigger_fraction=0.05, total_samples=16000)
                     r = await call("scope_decay_fit", edge_channel="CH2", t_start="5us", t_end="400us", n_avg=8)
                     assert abs(r["tau"] - 80e-6) / 80e-6 < 0.03
-                    assert (await call("scope_remote_session", action="release"))["control"] == "LOCAL"
+                    assert r["restarts"] == []
+                    st = await call("scope_status")
+                    assert st["control"] == "SHARED" and st["run_state"] == "STOP"

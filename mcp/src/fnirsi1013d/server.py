@@ -43,7 +43,8 @@ from pydantic import Field
 
 from . import analysis as A
 from . import protocol as P
-from .scope import (CHANNEL_NAMES, SCALING_CAVEAT, Capture, Scope, channel_index, codes_to_volts,
+from .scope import (CHANNEL_NAMES, SCALING_CAVEAT, Capture, CaptureContext, Scope, channel_index,
+                    codes_to_volts, settings_diff,
                     volts_to_code)
 from .transport import DeviceError, TransportError
 from .units import fmt_si, parse_quantity
@@ -74,6 +75,11 @@ class ServerConfig:
     relay_changes_per_s: int = 5
     token_ttl_s: float = 120.0
     keepalive_s: float = 5.0
+    #: legacy firmware (no SHARED_MODE): release REMOTE, keeping the host settings, after this many idle seconds
+    #: (0 = hold it until the server exits)
+    legacy_idle_release_s: float = 60.0
+    #: collaborative firmware: restarts of a long run after settings changes at the scope before giving up
+    max_restarts: int = 5
     inline_max_points: int = 2000
     #: cap on one response payload; larger reads are split (None = the device's max_response_payload)
     max_response: int | None = None
@@ -91,6 +97,8 @@ class ServerConfig:
             cfg.max_response = int(e["FNIRSI_MCP_MAX_RESPONSE"])
         if "FNIRSI_MCP_DATA_DIR" in e:
             cfg.data_dir = Path(e["FNIRSI_MCP_DATA_DIR"])
+        if e.get("FNIRSI_MCP_LEGACY_IDLE_RELEASE_S"):
+            cfg.legacy_idle_release_s = float(e["FNIRSI_MCP_LEGACY_IDLE_RELEASE_S"])
         if "FNIRSI_MCP_AUDIT_LOG" in e:
             cfg.audit_log = Path(e["FNIRSI_MCP_AUDIT_LOG"]) if e["FNIRSI_MCP_AUDIT_LOG"] else None
         for k, v in override.items():
@@ -132,8 +140,11 @@ STANDING_CAVEATS = [
     SCALING_CAVEAT,
 ]
 
-DESC_REMOTE = ("While acquired, the scope's touch UI is frozen; a tap on the banner hands control back to the "
-               "person at the scope, and the next tool call will then fail with 'scope released by user'.")
+DESC_SHARED = ("The scope is shared with the person at it (collaborative firmware): either side may change "
+               "settings, the last change wins and the screen shows the host's captures.")
+LEGACY_NOTE = ("legacy firmware without collaborative mode: the scope's touch UI is frozen while the host holds "
+               "REMOTE; the server releases it (keeping the host's settings) after {idle:g} s without tool calls and "
+               "at exit")
 
 # ---------------------------------------------------------------------------------------------------------
 # Session
@@ -151,6 +162,7 @@ class Session:
         self.relay_times: collections.deque[float] = collections.deque()
         self.last_capture: Capture | None = None
         self.last_capture_file: str | None = None
+        self.last_tool = time.monotonic()
         self._stop = threading.Event()
         self._ka = threading.Thread(target=self._keepalive, name="fnirsi-keepalive", daemon=True)
         self._ka.start()
@@ -178,33 +190,55 @@ class Session:
         with self.lock:
             if self.scope is not None and self.scope.remote:
                 try:
-                    self.scope.release()
+                    self.scope.end_control(keep_settings=True)
                 except (TransportError, DeviceError):
                     pass
             self.drop_connection()
 
     def _keepalive(self) -> None:
-        """Send GET_STATUS while REMOTE and idle so the firmware watchdog does not expire."""
-        while not self._stop.wait(self.cfg.keepalive_s / 2):
-            s = self.scope
-            if s is None or not s.remote:
-                continue
-            if time.monotonic() - s.t.last_activity < self.cfg.keepalive_s:
-                continue
-            if self.lock.acquire(blocking=False):
-                try:
+        """Legacy firmware only (collaborative firmware has no REMOTE): send GET_STATUS while REMOTE and idle so
+        the firmware watchdog does not expire, and release REMOTE (keeping the host settings) once no tool has
+        run for ``legacy_idle_release_s``."""
+        while not self._stop.wait(min(self.cfg.keepalive_s / 2, 1.0)):
+            self.legacy_idle_check()
+
+    def legacy_idle_check(self, now: float | None = None) -> None:
+        s = self.scope
+        if s is None or not s.remote:
+            return
+        now = time.monotonic() if now is None else now
+        idle = self.cfg.legacy_idle_release_s
+        release = bool(idle) and now - self.last_tool > idle
+        if not release and now - s.t.last_activity < self.cfg.keepalive_s:
+            return
+        if self.lock.acquire(blocking=False):
+            try:
+                if release:
+                    s.end_control(keep_settings=True)
+                    self.expect_remote = False
+                    log.info("legacy firmware: released REMOTE after %.0f s idle (host settings kept)", idle)
+                else:
                     s.status()
-                except Exception:  # noqa: BLE001
-                    pass
-                finally:
-                    self.lock.release()
+            except Exception:  # noqa: BLE001
+                pass
+            finally:
+                self.lock.release()
 
-    # remote ownership -----------------------------------------------------------------------------------
+    # control --------------------------------------------------------------------------------------------
 
-    def ensure_remote(self) -> list[str]:
-        """Acquire REMOTE if needed. Returns caveats describing what happened."""
+    def ensure_control(self) -> list[str]:
+        """Make the scope accept SET_*/ARM/READ_*. Collaborative firmware (SHARED_MODE): nothing to take; only a
+        modal menu blocks. Legacy firmware: acquire REMOTE if needed. Returns caveats describing what happened."""
         s = self.get_scope()
+        self.last_tool = time.monotonic()
         st = s.status()
+        if st.ui_busy == P.UiBusy.STARTING:
+            raise ToolError("the scope is still starting (first UI pass not finished); retry in a second")
+        if st.ui_busy:
+            raise ToolError("scope UI is in a modal screen (menu, calibration or USB storage); close it on the "
+                            "scope and retry")
+        if s.shared:
+            return []
         if st.control == P.Control.REMOTE:
             s.remote = True
             return []
@@ -212,18 +246,14 @@ class Session:
         if self.expect_remote:
             self.expect_remote = False
             if st.exit_reason == P.ExitReason.USER_TAP:
-                raise ToolError("scope released by user (tap on the REMOTE banner). Someone at the scope took it "
-                                "back; ask before calling scope_remote_session(action='acquire') again.")
+                raise ToolError("scope released by user (tap on the REMOTE banner of this legacy firmware). Someone "
+                                "at the scope took it back; ask them before calling an acquisition tool again.")
             if st.exit_reason:
                 notes.append(f"scope had returned to LOCAL ({P.ExitReason(st.exit_reason).name}); re-acquired, "
                              "host settings were lost and the user's settings are active again")
-        if st.ui_busy:
-            raise ToolError("scope UI is in a modal screen (menu, calibration or USB storage); close it on the "
-                            "scope and retry")
-        s.take_remote(watchdog_s=self.cfg.watchdog_s)
+        s.legacy_take_remote(watchdog_s=self.cfg.watchdog_s)
         self.expect_remote = True
-        notes.append("remote_acquired: the scope's touch UI is now frozen (tap the banner on the scope to give "
-                     "it back)")
+        notes.append("remote_acquired: " + LEGACY_NOTE.format(idle=self.cfg.legacy_idle_release_s))
         return notes
 
     # tokens ---------------------------------------------------------------------------------------------
@@ -295,6 +325,15 @@ class Session:
         path = d / f"{now.strftime('%H%M%S_%f')[:-3]}_{kind}{f'_c{cid}' if cid != '' else ''}.npz"
         np.savez_compressed(path, meta_json=np.array(json.dumps(meta, default=str)), **arrays)
         return str(path)
+
+
+class _SettingsChanged(Exception):
+    """A capture of a long run was taken under another settings_seq (collaborative firmware)."""
+
+    def __init__(self, done: int, seq: int | None):
+        super().__init__(f"settings changed after {done} captures")
+        self.done = done
+        self.seq = seq
 
 
 class _Held:
@@ -507,7 +546,7 @@ def _capture_result(sess: Session, cap: Capture, kind: str) -> dict[str, Any]:
         freq[name] = r["frequency"]
         chans[name] = r
     out: dict[str, Any] = {
-        "ok": True, "capture_id": cap.capture_id,
+        "ok": True, "capture_id": cap.capture_id, "origin": cap.origin,
         "trigger": "fired" if cap.triggered else ("auto_timeout" if cap.auto_timeout else "none"),
         "dt": _r6(cap.dt), "sample_rate": _r6(cap.sample_rate), "n_samples": cap.n,
         "t_start": _r6(float(cap.t[0])) if cap.n else None, "t_end": _r6(float(cap.t[-1])) if cap.n else None,
@@ -517,8 +556,37 @@ def _capture_result(sess: Session, cap: Capture, kind: str) -> dict[str, Any]:
         out["samples"] = {"t": A._r(cap.t), **{n: A._r(c.volts) for n, c in cap.channels.items()}}
     else:
         out["preview"] = {n: A.preview(cap.t, c.volts) for n, c in cap.channels.items()}
-    out["caveats"] = _capture_caveats(cap, freq) + STANDING_CAVEATS
+    if cap.settings_seq is not None:
+        out["settings_seq"] = cap.settings_seq
+    if cap.capture_info is not None:
+        out["capture_settings"] = _capture_settings_summary(cap)
+    out["caveats"] = list(cap.notes) + _capture_caveats(cap, freq) + STANDING_CAVEATS
     return out
+
+
+def _capture_settings_summary(cap: Capture) -> dict[str, Any]:
+    """The settings a capture was taken with (collaborative firmware), which may differ from the live ones."""
+    ci = cap.capture_info
+    assert ci is not None
+    h = ci.header
+    chans = {}
+    for i, c in enumerate(ci.channels):
+        cfg = ci.channel_config(i)
+        chans[CHANNEL_NAMES[i]] = {"enabled": bool(c.enable), "volts_per_div": _volts_per_div_at_probe(c.range,
+                                   cfg.probe_factor), "range_index": c.range, "coupling": "AC" if c.coupling else "DC",
+                                   "probe": cfg.probe_factor, "invert": bool(c.invert)}
+    return {"sample_rate": _r6(1 / cap.dt), "divider": h.divider, "channels": chans,
+            "trigger": {"source": ("CH1", "CH2", "EXT")[h.trig_source] if h.trig_source < 3 else h.trig_source,
+                        "edge": P.EDGES[h.trig_edge] if h.trig_edge < 2 else h.trig_edge, "level_code": h.trig_level,
+                        "mode": P.TRIG_MODES[h.trig_mode] if h.trig_mode < 3 else h.trig_mode,
+                        "pretrigger_samples": h.pretrigger_samples, "total_samples": h.total_samples}}
+
+
+def _control_name(st: P.StatusResp) -> str:
+    try:
+        return P.Control(st.control).name
+    except ValueError:
+        return str(st.control)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -534,7 +602,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             "Controls a FNIRSI 1013D tablet oscilloscope (8-bit, 2 channels, up to 200 MS/s, ~30 MHz analog "
             "bandwidth) running the open firmware with the USB control protocol. Typical metal-detector workflow: "
             "scope_set_channel, scope_set_timebase, scope_set_trigger (trigger on the TX gate on CH2), then "
-            "scope_averaged_capture or scope_decay_fit; release with scope_remote_session(action='release'). "
+            "scope_averaged_capture or scope_decay_fit. The scope is shared with the person at it: either side "
+            "can change settings (the screen shows host captures; long runs restart and say so when a setting "
+            "is changed at the scope). "
             "Waveforms are saved as .npz files; results carry statistics, a preview and caveats. Read the "
             "caveats: they say when data is clipped, aliased or unsynchronised."),
     )
@@ -639,15 +709,23 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
 
     @register(0, title="Scope status", read_only=True)
     async def scope_status() -> dict[str, Any]:
-        """Current ownership (LOCAL/REMOTE), acquisition state, capture id, trigger address, time since arm,
-        battery level and charging, watchdog, and exit_reason if the scope went back to LOCAL on its own (user
-        tap, watchdog, port closed). Cheap; use it to poll."""
+        """Mode ('collaborative': shared with the person at the scope; 'exclusive' on legacy firmware with
+        LOCAL/REMOTE), run_state (RUN / STOP / SINGLE), settings_seq (changes whenever anyone changes a setting),
+        the latest capture's id and origin (host / ui_run / ui_single), the host capture state, trigger address,
+        battery, and on legacy firmware the watchdog and exit_reason. Cheap; use it to poll."""
         def go() -> dict[str, Any]:
             s = sess.get_scope()
             st = s.status()
             b = s.battery()
             flags = [f.name for f in P.StatusFlags if st.flags & f]
-            return {"ok": True, "control": P.Control(st.control).name, "acq_state": P.AcqState(st.acq_state).name,
+            extra: dict[str, Any] = {}
+            if st.shared:
+                extra = {"mode": "collaborative", "run_state": P.RunState(st.run_state).name,
+                         "settings_seq": st.settings_seq, "capture_settings_seq": st.capture_settings_seq,
+                         "capture_origin": P.CaptureOrigin(st.capture_origin).name.lower()}
+            else:
+                extra = {"mode": "exclusive (legacy firmware)"}
+            return {"ok": True, **extra, "control": _control_name(st), "acq_state": P.AcqState(st.acq_state).name,
                     "flags": flags, "ui_busy": bool(st.ui_busy), "capture_id": st.capture_id,
                     "trigger_addr": st.trigger_addr, "capture_start_word": st.capture_start_word,
                     "ms_since_arm": st.ms_since_arm, "uptime_s": st.uptime_ms / 1000,
@@ -663,13 +741,19 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         """Both channels (enabled, V/div at the probe, coupling, offset in divisions and volts, probe factor,
         invert, volts per code, full-scale span), timebase (rate, dt, divider, window, time/div equivalent),
         trigger (source, edge, level in volts and code, mode, pre-trigger samples and fraction, total samples,
-        window durations) and generator. Works in LOCAL (shows the UI's settings) and REMOTE."""
+        window durations) and generator: the live settings, which the person at the scope may change at any time
+        (collaborative firmware; settings_seq tells whether they did)."""
         def go() -> dict[str, Any]:
             s = sess.get_scope()
             s.invalidate()
-            return {"ok": True, "channels": [_channel_summary(s, 0), _channel_summary(s, 1)],
+            if s.shared:
+                ctx = s.capture_context()
+                head: dict[str, Any] = {"control": "SHARED", "settings_seq": ctx.settings_seq}
+            else:
+                head = {"control": "REMOTE" if s.remote else "LOCAL"}
+            return {"ok": True, **head, "channels": [_channel_summary(s, 0), _channel_summary(s, 1)],
                     "timebase": _timebase_summary(s), "trigger": _trigger_summary(s), "generator": _gen_summary(s),
-                    "control": "REMOTE" if s.remote else "LOCAL", "caveats": [SCALING_CAVEAT]}
+                    "caveats": [SCALING_CAVEAT]}
         return await run("scope_get_config", 0, {}, go)
 
     @register(0, title="Read calibration", read_only=True, idempotent=True)
@@ -708,41 +792,6 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         data = await run("scope_screenshot", 0, {}, go)
         return Image(data=data, format="png")
 
-    # ---- tier 1: session ---------------------------------------------------------------------------------
-
-    @register(1, title="Take or release remote control", destructive=False, idempotent=True)
-    async def scope_remote_session(
-        action: Annotated[Literal["acquire", "release"], Field(description="'acquire' takes the scope from the UI, "
-                                                                           "'release' gives it back")],
-        keep_settings: Annotated[bool, Field(description="on release, keep the host's settings in the UI instead "
-                                                         "of restoring the user's")] = False,
-        show_traces: Annotated[bool, Field(description="draw each capture on the scope screen (slower)")] = False,
-        watchdog_s: Annotated[int, Field(ge=0, le=3600, description="scope returns to LOCAL if the server is "
-                                                                    "silent this long; 0 disables")] = 15,
-    ) -> dict[str, Any]:
-        """Take the scope from its touch UI (REMOTE) or give it back (LOCAL). Every acquisition tool acquires
-        implicitly when needed and says so, so calling 'acquire' first is optional; call 'release' when done.
-
-        While acquired, the scope's touch UI is frozen; a tap on the banner hands control back to the person at
-        the scope, and the next tool call will then fail with 'scope released by user'."""
-        args = {"action": action, "keep_settings": keep_settings, "show_traces": show_traces,
-                "watchdog_s": watchdog_s}
-
-        def go() -> dict[str, Any]:
-            s = sess.get_scope()
-            if action == "acquire":
-                st = s.take_remote(watchdog_s=watchdog_s, show_traces=show_traces)
-                sess.expect_remote = True
-                cav = [DESC_REMOTE]
-            else:
-                st = s.release(keep_settings=keep_settings)
-                sess.expect_remote = False
-                cav = ["host settings kept in the UI" if keep_settings else "user's settings restored"]
-            return {"ok": True, "control": P.Control(st.control).name,
-                    "applied": {"control": P.Control(st.control).name, "watchdog_s": watchdog_s},
-                    "caveats": cav}
-        return await run("scope_remote_session", 1, args, go)
-
     # ---- tier 2: channel ---------------------------------------------------------------------------------
 
     @register(2, title="Configure a channel")
@@ -774,7 +823,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                       offset_raw=offset_raw, probe=probe, invert=invert).items() if v is not None}
 
         def go() -> dict[str, Any]:
-            notes = sess.ensure_remote()
+            notes = sess.ensure_control()
             s = sess.get_scope()
             ch = channel_index(channel)
             cur = s.get_channel(ch, cached=False)
@@ -853,7 +902,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         def go() -> dict[str, Any]:
             if len(args) != 1:
                 raise ValueError("give exactly one of sample_rate, window or divider")
-            notes = sess.ensure_remote()
+            notes = sess.ensure_control()
             s = sess.get_scope()
             if divider is not None:
                 n = divider
@@ -884,8 +933,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                                                "converted to a raw core-A code")] = None,
         level_code: Annotated[int | None, Field(ge=0, le=255, description="raw core-A code 0..255; alternative "
                                                                           "to level")] = None,
-        mode: Annotated[Literal["auto", "normal", "single"] | None, Field(description="remote captures never "
-                                                                                      "re-arm, so single = normal")] = None,
+        mode: Annotated[Literal["auto", "normal", "single"] | None, Field(description="host captures are always "
+                        "single shots, so single = normal for them; the mode also drives the scope's own RUN "
+                        "loop")] = None,
         pretrigger_fraction: Annotated[float | None, Field(ge=0, le=1, description="share of the capture before "
                                                                                    "the trigger")] = None,
         pretrigger_samples: Annotated[int | None, Field(ge=0, description="alternative to pretrigger_fraction "
@@ -907,7 +957,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                       total_samples=total_samples, auto_timeout=auto_timeout).items() if v is not None}
 
         def go() -> dict[str, Any]:
-            notes = sess.ensure_remote()
+            notes = sess.ensure_control()
             s = sess.get_scope()
             prof = s.profile()
             cur = s.get_trigger(cached=False)
@@ -966,7 +1016,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                           total_samples=total, auto_timeout=ato)
             summ = _trigger_summary(s)
             if mode == "single":
-                cav.append("remote captures never re-arm on their own: 'single' behaves like 'normal'")
+                cav.append("host captures never re-arm on their own: 'single' behaves like 'normal' for them")
             cav += ["level is an 8-bit code compared to core A only; edges faster than 2 / fs may be missed",
                     "hold-off is not implemented in any current FPGA bitstream"]
             if not prof.programmable:
@@ -988,17 +1038,19 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         processed: Annotated[bool, Field(description="use the firmware's processed trace (slower, matches the "
                                                      "screen) instead of raw reads plus host compensation")] = False,
     ) -> dict[str, Any]:
-        """Arm, wait for the trigger and read one capture. Returns per channel min, max, mean, rms, Vpp,
-        frequency estimate and clipped-sample count; the trigger outcome ('fired', 'auto_timeout', 'none'),
-        capture_id, dt, sample count, the .npz file path (t, volts, codes, clipped flags, metadata) and either
-        the samples inline (<= 2000 points) or a decimated min/max preview.
+        """Take one host single capture with the live settings: arm, wait for the trigger, read. The scope
+        screen shows it and the scope stays in STOP afterwards (resume with scope_acquisition_control(action=
+        'run')). Returns per channel min, max, mean, rms, Vpp, frequency estimate and clipped-sample count; the
+        trigger outcome ('fired', 'auto_timeout', 'none'), capture_id, settings_seq, dt, sample count, the .npz
+        file path (t, volts, codes, clipped flags, metadata) and either the samples inline (<= 2000 points) or a
+        decimated min/max preview.
 
         Dynamic caveats report clipping, unsynchronised auto-trigger data, likely aliasing and content above the
         analog bandwidth."""
         args = {"channels": channels, "timeout_s": timeout_s, "window": window, "raw": raw, "processed": processed}
 
         def go() -> dict[str, Any]:
-            notes = sess.ensure_remote()
+            notes = sess.ensure_control()
             s = sess.get_scope()
             chans = _channels_arg(channels, [CHANNEL_NAMES[c] for c in (0, 1) if s.get_channel(c).enable] or ["CH1"])
             w = _window_arg(window)
@@ -1017,6 +1069,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             else:
                 cap = s.read_capture(chans, a, n, keep_raw=raw, st=st)
             out = _capture_result(sess, cap, "capture")
+            if s.shared:
+                notes.append("the scope screen shows this capture and the scope is now in STOP; "
+                             "scope_acquisition_control(action='run') resumes its own acquisition")
             out["caveats"] = notes + out["caveats"]
             return out
         return await run("scope_capture", 1, args, go)
@@ -1026,11 +1081,15 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         channels: Annotated[list[str] | None, Field(description="channels to read, default ['CH1']")] = None,
         window: Annotated[list[float | str] | None, Field(description="[t0, t1] seconds relative to the "
                                                                       "trigger")] = None,
-        processed: Annotated[bool, Field(description="REMOTE only: read the firmware's processed trace instead "
-                                                     "of raw reads")] = False,
+        processed: Annotated[bool, Field(description="read the firmware's processed trace (what the screen "
+                                                     "draws) instead of raw reads")] = False,
     ) -> dict[str, Any]:
-        """Read the current capture without re-arming. In LOCAL this is the UI's last trace (tier 0, no change
-        to the scope); in REMOTE it is the last DONE remote capture. Same result format as scope_capture."""
+        """Read the latest capture without taking a new one: what the scope screen shows. Collaborative
+        firmware: the newest finished capture of any origin (the scope's RUN loop, a single at the scope, or a
+        host capture), converted with the settings it was taken under (reported as capture_settings; they may
+        differ from the live ones). Legacy firmware: the UI's last trace in LOCAL, the last remote capture in
+        REMOTE. Tier 0: changes nothing (in RUN mode, if the capture keeps being replaced during a chunked read,
+        RUN is paused for that one read and the caveats say so). Same result format as scope_capture."""
         args = {"channels": channels, "window": window, "processed": processed}
 
         def go() -> dict[str, Any]:
@@ -1038,7 +1097,16 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             chans = _channels_arg(channels, ["CH1"])
             st = s.status()
             w = _window_arg(window)
-            if st.control != P.Control.REMOTE or processed:
+            if st.shared and not processed:
+                if st.capture_id == 0:
+                    raise ToolError("scope_fetch_waveform: no capture since the scope booted; press RUN on the "
+                                    "scope or call scope_capture")
+                cap = s.read_capture(chans)
+                if w is not None:
+                    a = max(0, int(math.floor(w[0] / cap.dt)) + cap.pretrigger_samples)
+                    b = min(cap.total_samples, int(math.ceil(w[1] / cap.dt)) + cap.pretrigger_samples + 1)
+                    cap = _slice_capture(cap, a, b - a)
+            elif st.control != P.Control.REMOTE or processed:
                 cap = s.read_trace_capture(chans)
                 if w is not None:
                     tb = cap.dt
@@ -1056,19 +1124,21 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
 
     @register(1, title="Arm / wait / force / stop")
     async def scope_acquisition_control(
-        action: Annotated[Literal["arm", "wait", "force", "stop"], Field(description="arm a capture, wait for it, "
-                                                                                     "force it to end, or stop")],
+        action: Annotated[Literal["arm", "wait", "force", "stop", "run"], Field(
+            description="arm a host single capture, wait for it, force it to end, stop (also stops the scope's RUN "
+                        "loop), or run (resume the scope's own continuous acquisition)")],
         timeout_s: Annotated[float, Field(gt=0, le=10, description="for wait")] = 2.0,
     ) -> dict[str, Any]:
         """Low-level control for agents that want to arm, do something else (e.g. fire the detector), then wait
-        and read with scope_fetch_waveform.
+        and read with scope_fetch_waveform; and the scope's RUN/STOP state, shared with the person at the scope
+        (either side can press RUN or STOP; 'run' needs collaborative firmware).
 
         'force' is only available once verified on this FPGA variant (capability FORCE_TRIGGER, bench test T7);
         otherwise use trigger mode 'auto'."""
         args = {"action": action, "timeout_s": timeout_s}
 
         def go() -> dict[str, Any]:
-            notes = sess.ensure_remote()
+            notes = sess.ensure_control()
             s = sess.get_scope()
             if action == "arm":
                 st = s.arm()
@@ -1079,11 +1149,19 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     raise ToolError("scope_acquisition_control: FORCE is not verified on this FPGA variant (T7); "
                                     "use scope_set_trigger(mode='auto') instead")
                 st = s.force()
+            elif action == "run":
+                if not s.shared:
+                    raise ToolError("scope_acquisition_control: 'run' needs collaborative firmware (SHARED_MODE); "
+                                    "on this firmware the UI runs again when REMOTE is released")
+                st = s.set_acq_state(True)
             else:
                 st = s.stop()
-            return {"ok": True, "acq_state": P.AcqState(st.acq_state).name, "capture_id": st.capture_id,
-                    "flags": [f.name for f in P.StatusFlags if st.flags & f], "applied": {"action": action},
-                    "caveats": notes}
+            out = {"ok": True, "acq_state": P.AcqState(st.acq_state).name, "capture_id": st.capture_id,
+                   "flags": [f.name for f in P.StatusFlags if st.flags & f], "applied": {"action": action},
+                   "caveats": notes}
+            if st.shared:
+                out["run_state"] = P.RunState(st.run_state).name
+            return out
         return await run("scope_acquisition_control", 1, args, go)
 
     # ---- tier 1: derived ---------------------------------------------------------------------------------
@@ -1093,132 +1171,48 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                         timeout_s: float, reject_clipped: bool, on_device: bool | None,
                         tool: str) -> dict[str, Any]:
         """Shared engine of averaged_capture / decay_fit / capture_and_fft-like loops. Holds the session lock
-        across the whole run (other tools wait)."""
-        result: dict[str, Any] = {}
+        across the whole run (other tools wait).
+
+        Collaborative firmware: the run's settings are pinned to one settings_seq (``Scope.capture_context``).
+        A capture taken under another settings_seq means someone changed a setting at the scope: the run starts
+        over with the new settings (``restarts`` in the result says when and what changed), at most
+        ``max_restarts`` times."""
         held = _Held(sess.lock)
         try:
             await anyio.to_thread.run_sync(held.acquire)
-            notes = await anyio.to_thread.run_sync(sess.ensure_remote)
+            notes = await anyio.to_thread.run_sync(sess.ensure_control)
             s = sess.get_scope()
-            trig = s.get_trigger()
-            tb = s.get_timebase()
-            dt = tb.dt
-            pre = trig.pretrigger_samples
-            a, cnt = _sample_window(s, w)
-            prof = s.profile()
-            dev_fits = 16 + 2 * cnt * len(chans) <= s.response_limit
-            use_dev = (prof.has(P.Caps.DEVICE_AVERAGE) and align == "hardware" and on_device is not False
-                       and not reject_clipped and dev_fits)
-            if on_device and not prof.has(P.Caps.DEVICE_AVERAGE):
-                notes.append("on_device requested but the firmware has no ACQUIRE_AVG; averaged on the host")
-            if on_device and align != "hardware":
-                notes.append("on_device averaging supports hardware alignment only; averaged on the host")
-            if on_device and not dev_fits:
-                notes.append("on_device: the averaged window does not fit one response; averaged on the host")
-            if on_device and reject_clipped and align == "hardware" and prof.has(P.Caps.DEVICE_AVERAGE) and \
-                    dev_fits:
-                use_dev = True
-                notes.append("on_device: clipped captures cannot be rejected on the device")
+            restarts: list[dict[str, Any]] = []
             t0 = time.monotonic()
-            if use_dev:
-                means: dict[str, np.ndarray] = {}
-                left = n
-                used = dropped = 0
-                per_ms = int(timeout_s * 1000)
-                chunk = max(1, min(4096, 60000 // max(per_ms, 1)))
-                acc: dict[int, np.ndarray] = {}
-                while left > 0:
-                    k = min(left, chunk)
-                    hdr, data = await anyio.to_thread.run_sync(
-                        lambda k=k: s.acquire_avg_device(k, chans, a, cnt, per_ms, trig.mode != 0))
-                    for c, m in data.items():
-                        acc[c] = acc.get(c, 0) + m * hdr.n_used
-                    used += hdr.n_used
-                    dropped += hdr.n_dropped
-                    left -= k
+            while True:
+                cctx = await anyio.to_thread.run_sync(s.capture_context)
+                try:
+                    res = await _averaged_run(ctx, s, cctx, n=n, chans=chans, w=w, align=align,
+                                              align_channel=align_channel, align_level=align_level,
+                                              align_edge=align_edge, timeout_s=timeout_s,
+                                              reject_clipped=reject_clipped, on_device=on_device, tool=tool,
+                                              notes=notes)
+                except _SettingsChanged as sc:
+                    new = await anyio.to_thread.run_sync(s.capture_context)
+                    changed = settings_diff(cctx.settings_key(), new.settings_key())
+                    restarts.append({"after_captures": sc.done, "settings_seq": [cctx.settings_seq, sc.seq],
+                                     "changed": changed})
+                    if len(restarts) > cfg.max_restarts:
+                        raise ToolError(f"{tool}: settings were changed at the scope {len(restarts)} times during the "
+                                        f"run (last change: {changed or 'unknown'}); ask the person at the scope to "
+                                        "leave the settings alone, then retry") from None
                     if ctx is not None:
-                        await _progress(ctx, n - left, n, f"{used} captures averaged on the device")
-                if used == 0:
-                    raise ToolError(f"{tool}: no capture triggered within {timeout_s} s each ({dropped} dropped); "
-                                    "check the trigger with scope_get_config")
-                for c, v in acc.items():
-                    cfg = s.get_channel(c)
-                    means[CHANNEL_NAMES[c]] = codes_to_volts(v / used, cfg)
-                tt = (a + np.arange(cnt) - pre) * dt
-                result = {"mode": "device", "t": tt, "mean": means, "std": None, "clipped_any": None,
-                          "n_used": used, "n_dropped": dropped, "drop_reasons": {"no_trigger": dropped},
-                          "noise_single": None, "elapsed": time.monotonic() - t0, "notes": notes, "dt": dt,
-                          "edge_shifts": None}
-                return result
-            # host averaging
-            al_ch = channel_index(align_channel) if align_channel else (trig.source if trig.source < 2 else 0)
-            al_name = CHANNEL_NAMES[al_ch]
-            al_edge = align_edge or P.EDGES[trig.edge]
-            if align == "edge":
-                lvl = align_level if align_level is not None else _level_volts(s, al_ch, trig.level)
-                if lvl is None:
-                    raise ValueError("align_level is required when the trigger source is not CH1/CH2")
-                margin = 16
-                ra = max(0, min(a, pre - margin) - margin)
-                rb = min(trig.total_samples, max(a + cnt, pre + margin) + margin)
-            else:
-                lvl = None
-                ra, rb = a, a + cnt
-            read_chans = list(dict.fromkeys(chans + ([al_name] if align == "edge" else [])))
-            avgs = {c: A.Averager() for c in chans}
-            reasons: collections.Counter[str] = collections.Counter()
-            shifts: list[float] = []
-            noise_est: list[float] = []
-            for i in range(n):
-                cap = await anyio.to_thread.run_sync(
-                    lambda: s.capture(read_chans, timeout_s, ra, rb - ra))
-                if cap is None:
-                    reasons["no_trigger"] += 1
-                elif cap.auto_timeout and trig.mode != 0:
-                    reasons["auto_timeout"] += 1
-                else:
-                    off = a - ra
-                    clipped = any(cap.channels[c].clipped[off: off + cnt].any() for c in chans)
-                    if reject_clipped and clipped:
-                        reasons["clipped"] += 1
-                    else:
-                        shift = 0.0
-                        ok = True
-                        if align == "edge":
-                            v_al = cap.channels[al_name].volts
-                            x = A.find_edge_near(v_al, lvl, al_edge, pre - ra, 12)  # type: ignore[arg-type]
-                            if x is None:
-                                reasons["no_edge"] += 1
-                                ok = False
-                            else:
-                                shift = x - (pre - ra)
-                                shifts.append(shift)
-                        if ok:
-                            for c in chans:
-                                v = cap.channels[c].volts
-                                vv = A.shift_fractional(v, shift)[off: off + cnt] if shift else v[off: off + cnt]
-                                cl = cap.channels[c].clipped[off: off + cnt]
-                                avgs[c].add(vv, cl)
-                            if len(noise_est) < 4:
-                                ch0 = cap.channels[chans[0]]
-                                d = np.diff(ch0.codes[off: off + cnt])
-                                noise_est.append(float(np.median(np.abs(d - np.median(d))) * 1.4826 / math.sqrt(2)))
-                if ctx is not None and (i % 8 == 7 or i == n - 1):
-                    await _progress(ctx, i + 1, n, f"{avgs[chans[0]].n} used, {sum(reasons.values())} dropped")
-            used = avgs[chans[0]].n
-            if used == 0:
-                raise ToolError(f"{tool}: all {n} captures were dropped ({dict(reasons)}). Fix: "
-                                + ("increase volts_per_div or set reject_clipped=false; " if reasons["clipped"] else "")
-                                + ("check trigger level/source; " if reasons["no_trigger"] else "")
-                                + ("check align_channel/align_level; " if reasons["no_edge"] else ""))
-            tt = (a + np.arange(cnt) - pre) * dt
-            result = {"mode": "host", "t": tt, "mean": {c: avgs[c].mean for c in chans},
-                      "std": {c: avgs[c].std for c in chans}, "clipped_any": {c: avgs[c].clipped_any for c in chans},
-                      "n_used": used, "n_dropped": sum(reasons.values()), "drop_reasons": dict(reasons),
-                      "noise_single": float(np.median(noise_est)) if noise_est else None,
-                      "elapsed": time.monotonic() - t0, "notes": notes, "dt": dt,
-                      "edge_shifts": np.array(shifts) if shifts else None}
-            return result
+                        await _progress(ctx, 0, n, f"settings changed at the scope ({changed}); restarting")
+                    continue
+                res["restarts"] = restarts
+                res["elapsed"] = time.monotonic() - t0
+                if restarts:
+                    what = "; ".join(", ".join(f"{k} {v[0]} -> {v[1]}" for k, v in r["changed"].items()) or "unknown"
+                                     for r in restarts)
+                    res["notes"] = res["notes"] + [
+                        f"settings were changed at the scope during the run: restarted {len(restarts)} time(s) "
+                        f"({what}); the result uses only captures taken with the final settings"]
+                return res
         except BaseException as e:
             if isinstance(e, (anyio.get_cancelled_exc_class(), KeyboardInterrupt)):
                 with anyio.CancelScope(shield=True):
@@ -1231,6 +1225,136 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             raise
         finally:
             held.release()
+
+    async def _averaged_run(ctx: Context | None, s: Scope, cctx: CaptureContext, *, n: int, chans: list[str],
+                            w: tuple[float, float] | None, align: str, align_channel: str | None,
+                            align_level: float | None, align_edge: str | None, timeout_s: float,
+                            reject_clipped: bool, on_device: bool | None, tool: str,
+                            notes: list[str]) -> dict[str, Any]:
+        """One attempt of the averaging run with settings ``cctx``. Raises _SettingsChanged."""
+        notes = list(notes)
+        trig = cctx.trigger
+        dt = cctx.timebase.dt
+        pre = trig.pretrigger_samples
+        a, cnt = _sample_window(s, w)
+        prof = s.profile()
+        shared = s.shared
+        dev_fits = 16 + 2 * cnt * len(chans) <= s.response_limit
+        use_dev = (prof.has(P.Caps.DEVICE_AVERAGE) and align == "hardware" and on_device is not False
+                   and not reject_clipped and dev_fits)
+        if on_device and not prof.has(P.Caps.DEVICE_AVERAGE):
+            notes.append("on_device requested but the firmware has no ACQUIRE_AVG; averaged on the host")
+        if on_device and align != "hardware":
+            notes.append("on_device averaging supports hardware alignment only; averaged on the host")
+        if on_device and not dev_fits:
+            notes.append("on_device: the averaged window does not fit one response; averaged on the host")
+        if on_device and reject_clipped and align == "hardware" and prof.has(P.Caps.DEVICE_AVERAGE) and dev_fits:
+            use_dev = True
+            notes.append("on_device: clipped captures cannot be rejected on the device")
+        if use_dev:
+            means: dict[str, np.ndarray] = {}
+            left = n
+            used = dropped = 0
+            per_ms = int(timeout_s * 1000)
+            chunk = max(1, min(4096, 60000 // max(per_ms, 1)))
+            acc: dict[int, np.ndarray] = {}
+            while left > 0:
+                k = min(left, chunk)
+                hdr, data = await anyio.to_thread.run_sync(
+                    lambda k=k: s.acquire_avg_device(k, chans, a, cnt, per_ms, trig.mode != 0))
+                if shared:
+                    st = await anyio.to_thread.run_sync(s.status)
+                    if st.settings_seq != cctx.settings_seq or st.capture_settings_seq != cctx.settings_seq:
+                        raise _SettingsChanged(used, st.settings_seq)
+                for c, m in data.items():
+                    acc[c] = acc.get(c, 0) + m * hdr.n_used
+                used += hdr.n_used
+                dropped += hdr.n_dropped
+                left -= k
+                if ctx is not None:
+                    await _progress(ctx, n - left, n, f"{used} captures averaged on the device")
+            if used == 0:
+                raise ToolError(f"{tool}: no capture triggered within {timeout_s} s each ({dropped} dropped); "
+                                "check the trigger with scope_get_config")
+            for c, v in acc.items():
+                means[CHANNEL_NAMES[c]] = codes_to_volts(v / used, cctx.channels[c])
+            tt = (a + np.arange(cnt) - pre) * dt
+            return {"mode": "device", "t": tt, "mean": means, "std": None, "clipped_any": None,
+                    "n_used": used, "n_dropped": dropped, "drop_reasons": {"no_trigger": dropped},
+                    "noise_single": None, "notes": notes, "dt": dt, "edge_shifts": None}
+        # host averaging
+        al_ch = channel_index(align_channel) if align_channel else (trig.source if trig.source < 2 else 0)
+        al_name = CHANNEL_NAMES[al_ch]
+        al_edge = align_edge or P.EDGES[trig.edge]
+        if align == "edge":
+            lvl = align_level if align_level is not None else _level_volts(s, al_ch, trig.level)
+            if lvl is None:
+                raise ValueError("align_level is required when the trigger source is not CH1/CH2")
+            margin = 16
+            ra = max(0, min(a, pre - margin) - margin)
+            rb = min(trig.total_samples, max(a + cnt, pre + margin) + margin)
+        else:
+            lvl = None
+            ra, rb = a, a + cnt
+        read_chans = list(dict.fromkeys(chans + ([al_name] if align == "edge" else [])))
+        avgs = {c: A.Averager() for c in chans}
+        reasons: collections.Counter[str] = collections.Counter()
+        shifts: list[float] = []
+        noise_est: list[float] = []
+        for i in range(n):
+            cap = await anyio.to_thread.run_sync(
+                lambda: s.capture(read_chans, timeout_s, ra, rb - ra, ctx=cctx))
+            if cap is not None and shared and cap.settings_seq != cctx.settings_seq:
+                raise _SettingsChanged(i, cap.settings_seq)
+            if cap is None:
+                reasons["no_trigger"] += 1
+                if shared:
+                    st = await anyio.to_thread.run_sync(s.status)
+                    if st.settings_seq != cctx.settings_seq:
+                        raise _SettingsChanged(i, st.settings_seq)
+            elif cap.auto_timeout and trig.mode != 0:
+                reasons["auto_timeout"] += 1
+            else:
+                off = a - ra
+                clipped = any(cap.channels[c].clipped[off: off + cnt].any() for c in chans)
+                if reject_clipped and clipped:
+                    reasons["clipped"] += 1
+                else:
+                    shift = 0.0
+                    ok = True
+                    if align == "edge":
+                        v_al = cap.channels[al_name].volts
+                        x = A.find_edge_near(v_al, lvl, al_edge, pre - ra, 12)  # type: ignore[arg-type]
+                        if x is None:
+                            reasons["no_edge"] += 1
+                            ok = False
+                        else:
+                            shift = x - (pre - ra)
+                            shifts.append(shift)
+                    if ok:
+                        for c in chans:
+                            v = cap.channels[c].volts
+                            vv = A.shift_fractional(v, shift)[off: off + cnt] if shift else v[off: off + cnt]
+                            cl = cap.channels[c].clipped[off: off + cnt]
+                            avgs[c].add(vv, cl)
+                        if len(noise_est) < 4:
+                            ch0 = cap.channels[chans[0]]
+                            d = np.diff(ch0.codes[off: off + cnt])
+                            noise_est.append(float(np.median(np.abs(d - np.median(d))) * 1.4826 / math.sqrt(2)))
+            if ctx is not None and (i % 8 == 7 or i == n - 1):
+                await _progress(ctx, i + 1, n, f"{avgs[chans[0]].n} used, {sum(reasons.values())} dropped")
+        used = avgs[chans[0]].n
+        if used == 0:
+            raise ToolError(f"{tool}: all {n} captures were dropped ({dict(reasons)}). Fix: "
+                            + ("increase volts_per_div or set reject_clipped=false; " if reasons["clipped"] else "")
+                            + ("check trigger level/source; " if reasons["no_trigger"] else "")
+                            + ("check align_channel/align_level; " if reasons["no_edge"] else ""))
+        tt = (a + np.arange(cnt) - pre) * dt
+        return {"mode": "host", "t": tt, "mean": {c: avgs[c].mean for c in chans},
+                "std": {c: avgs[c].std for c in chans}, "clipped_any": {c: avgs[c].clipped_any for c in chans},
+                "n_used": used, "n_dropped": sum(reasons.values()), "drop_reasons": dict(reasons),
+                "noise_single": float(np.median(noise_est)) if noise_est else None,
+                "notes": notes, "dt": dt, "edge_shifts": np.array(shifts) if shifts else None}
 
     def _avg_summary(res: dict[str, Any], chans: list[str]) -> dict[str, Any]:
         out: dict[str, Any] = {}
@@ -1272,7 +1396,11 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
 
         Averaging reduces random noise by sqrt(n) but not the A/B interleave mismatch, the 8-bit quantisation of
         a noise-free signal, or trigger jitter (up to 2 / fs with hardware alignment). Edge alignment needs a
-        clean edge on align_channel with at least 3 samples on the slope."""
+        clean edge on align_channel with at least 3 samples on the slope.
+
+        The scope is shared with the person at it: if a setting (range, coupling, timebase, trigger, ...) is
+        changed at the scope during the run, the run restarts with the new settings and 'restarts' lists when
+        and what changed (gives up after 5 restarts). The scope screen shows the host captures."""
         args = {"n": n, "channels": channels, "window": window, "align": align, "align_channel": align_channel,
                 "align_level": align_level, "timeout_s": timeout_s, "reject_clipped": reject_clipped,
                 "on_device": on_device}
@@ -1293,7 +1421,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 arrays[f"{c}_clipped_any"] = res["clipped_any"][c]
         if res["edge_shifts"] is not None:
             arrays["edge_shifts_samples"] = res["edge_shifts"]
-        meta = {"kind": "averaged_capture", "args": args, "n_used": res["n_used"], "n_dropped": res["n_dropped"],
+        meta = {"kind": "averaged_capture", "args": args, "restarts": res["restarts"], "n_used": res["n_used"],
+                "n_dropped": res["n_dropped"],
                 "drop_reasons": res["drop_reasons"], "dt": res["dt"], "mode": res["mode"], "scaling": SCALING_CAVEAT}
         path = sess.save_npz("avg", arrays, meta)
         ns = res["noise_single"]
@@ -1306,7 +1435,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             "noise_after_lsb_estimate": _r6(ns / math.sqrt(res["n_used"])) if ns is not None else None,
             "effective_bits_estimate": _r6(A.effective_bits(ns if ns is not None else 1.0, res["n_used"])),
             "captures_per_second": _r6((res["n_used"] + res["n_dropped"]) / max(res["elapsed"], 1e-9)),
-            "file": path,
+            "restarts": res["restarts"], "file": path,
         }
         if res["edge_shifts"] is not None:
             es = res["edge_shifts"]
@@ -1351,33 +1480,46 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         args = {"channel": channel, "n_avg": n_avg, "window_fn": window_fn, "fmin": fmin, "fmax": fmax,
                 "peaks": peaks, "detrend": detrend}
 
-        def one() -> tuple[np.ndarray, float, int, bool, int]:
+        def one(cctx: CaptureContext) -> tuple[np.ndarray, float, int, bool, int, bool]:
             s = sess.get_scope()
-            cap = s.capture([channel], timeout_s)
+            cap = s.capture([channel], timeout_s, ctx=cctx)
             if cap is None:
                 raise ToolError(f"scope_capture_and_fft: no trigger within {timeout_s} s; use mode='auto' or check "
                                 "the trigger")
             ch = cap.channels[channel]
-            return ch.volts, cap.dt, cap.capture_id, cap.auto_timeout, int(ch.clipped.sum())
+            changed = s.shared and cap.settings_seq != cctx.settings_seq
+            return ch.volts, cap.dt, cap.capture_id, cap.auto_timeout, int(ch.clipped.sum()), changed
 
         held = _Held(sess.lock)
         try:
             try:
                 await anyio.to_thread.run_sync(held.acquire)
-                notes = await anyio.to_thread.run_sync(sess.ensure_remote)
+                notes = await anyio.to_thread.run_sync(sess.ensure_control)
                 psum = None
                 f = None
                 enbw = 0.0
                 dt = 0.0
                 clipped = 0
                 cid = 0
-                for i in range(n_avg):
-                    v, dt, cid, _, nclip = await anyio.to_thread.run_sync(one)
+                restarts = 0
+                cctx = await anyio.to_thread.run_sync(sess.get_scope().capture_context)
+                i = 0
+                while i < n_avg:
+                    v, dt, cid, _, nclip, changed = await anyio.to_thread.run_sync(one, cctx)
+                    if changed:
+                        restarts += 1
+                        if restarts > cfg.max_restarts:
+                            raise ToolError("scope_capture_and_fft: settings kept changing at the scope; retry when "
+                                            "they are left alone")
+                        cctx = await anyio.to_thread.run_sync(sess.get_scope().capture_context)
+                        psum, clipped, i = None, 0, 0
+                        continue
+                    i += 1
                     clipped += nclip
                     f, amp, enbw = A.amplitude_spectrum(v, dt, window_fn, detrend)
                     psum = amp ** 2 if psum is None else psum + amp ** 2
-                    if n_avg > 1 and (i % 8 == 7 or i == n_avg - 1):
-                        await _progress(ctx, i + 1, n_avg)
+                    if n_avg > 1 and (i % 8 == 0 or i == n_avg):
+                        await _progress(ctx, i, n_avg)
             finally:
                 held.release()
         except (DeviceError, TransportError, ValueError) as e:
@@ -1395,6 +1537,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         thd = A.thd(f, amp, pk[0][2]) if pk else None
         path = sess.save_npz("fft", {"f": f, "amplitude_vrms": amp},
                              {"kind": "fft", "args": args, "dt": dt, "enbw_hz": enbw, "capture_id": cid})
+        if restarts:
+            notes = list(notes) + [f"settings were changed at the scope during the run: restarted {restarts} time(s); "
+                                   "the spectrum uses only captures with the final settings"]
         cav = list(notes) + [
             "8-bit ADC: SFDR around 45-50 dBc at best; spurs below that are not trustworthy.",
             "expect a spur at fs/2 and images at fs/2 - f from core A/B mismatch",
@@ -1403,7 +1548,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         if clipped:
             cav.append(f"{clipped} samples clipped: harmonics are distorted; increase volts_per_div")
         out = {"ok": True, "sample_rate": _r6(fs), "frequency_resolution": _r6(f[1] - f[0]), "enbw_hz": _r6(enbw),
-               "n_avg": n_avg, "peaks": plist, "noise_floor_dbv_per_bin": _r6(A.db(floor)),
+               "n_avg": n_avg, "restarts": restarts, "peaks": plist, "noise_floor_dbv_per_bin": _r6(A.db(floor)),
                "thd_percent": _r6(thd * 100) if thd is not None else None, "file": path, "caveats": cav}
         sess.audit("scope_capture_and_fft", 1, args, "ok", {"file": path})
         return out
@@ -1501,7 +1646,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                "excluded_samples": int(excl[(t >= ts) & (t <= te)].sum()),
                                "n_used": res["n_used"], "n_dropped": res["n_dropped"],
                                "drop_reasons": res["drop_reasons"], "alignment": "edge" if use_edge else "hardware",
-                               "file": path}
+                               "restarts": res["restarts"], "file": path}
         if sample_points:
             dl = [parse_quantity(d, "s") for d in sample_points]
             out["sample_points"] = A.sample_points(t, y, dl, parse_quantity(sample_width, "s"))
@@ -1552,7 +1697,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             notes: list[str] = []
             chans = _channels_arg(channels, ["CH1", "CH2"] if "delay" in sel else ["CH1"])
             if capture:
-                notes += sess.ensure_remote()
+                notes += sess.ensure_control()
                 cap = s.capture(chans, timeout_s)
                 if cap is None:
                     raise ToolError(f"scope_measure: no trigger within {timeout_s} s")
@@ -1561,7 +1706,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 cap = sess.last_capture
                 if cap is None or any(c not in cap.channels for c in chans):
                     st = s.status()
-                    if st.control != P.Control.REMOTE:
+                    if st.shared and st.capture_id:
+                        cap = s.read_capture(chans)
+                    elif st.control != P.Control.REMOTE and not st.shared:
                         cap = s.read_trace_capture(chans)
                     elif st.acq_state == P.AcqState.DONE:
                         cap = s.read_capture(chans, st=st)
@@ -1647,7 +1794,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 req = sess.confirm("scope_generator", args, confirm_token, summary)
                 if req is not None:
                     return req
-            notes = sess.ensure_remote()
+            notes = sess.ensure_control()
             g = s.set_gen(enable=enabled, freq_hz=f, duty=None if duty_percent is None else duty_percent / 100)
             return {"ok": True, "applied": {"enabled": bool(g.enable), "frequency": _r6(g.frequency_hz),
                                             "duty_percent": _r6(g.duty * 100), "phase_inc": g.phase_inc},
@@ -1676,7 +1823,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                "CH1 settings are changed during the test and restored afterwards")
             if req is not None:
                 return req
-            notes = sess.ensure_remote()
+            notes = sess.ensure_control()
             return _self_test(s, notes)
         return await run("scope_self_test_loopback", 3, args, go)
 
@@ -1714,7 +1861,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             req = sess.confirm("scope_raw_fpga", args, confirm_token, summary)
             if req is not None:
                 return req
-            notes = sess.ensure_remote()
+            notes = sess.ensure_control()
             data = s.debug_fpga(enc)
             s.invalidate()
             return {"ok": True, "read": list(data), "read_hex": data.hex(" "), "applied": {"n_ops": len(enc)},
@@ -1781,7 +1928,7 @@ def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
         cal = s.get_cal(0)
         mid = int(round(volts_to_code(1.65, cfg) - cal.adc_a_comp))
         prof = s.profile()
-        total = 4000 if prof.programmable else 3000
+        total = 8000 if prof.programmable else 3000  # >= 4 periods of 10 kHz at 20 MS/s
         pre = total // 2
         s.set_trigger(source=0, edge=0, level=mid, mode=1, pretrigger_samples=pre, total_samples=total)
         for f_hz, duty, rates in ((10e3, 0.5, (2e6, 20e6)), (1e6, 0.25, (50e6, 200e6))):

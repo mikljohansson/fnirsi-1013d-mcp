@@ -17,7 +17,7 @@ pytestmark = pytest.mark.anyio
 
 ALL_TOOLS = {
     "scope_info", "scope_profile", "scope_status", "scope_get_config", "scope_read_calibration", "scope_screenshot",
-    "scope_remote_session", "scope_set_channel", "scope_set_timebase", "scope_set_trigger", "scope_capture",
+    "scope_set_channel", "scope_set_timebase", "scope_set_trigger", "scope_capture",
     "scope_fetch_waveform", "scope_acquisition_control", "scope_averaged_capture", "scope_capture_and_fft",
     "scope_decay_fit", "scope_measure", "scope_generator", "scope_self_test_loopback", "scope_raw_fpga",
     "scope_enter_fel",
@@ -93,7 +93,9 @@ async def test_tool_list_and_annotations(client):
     by = {t.name: t for t in tools}
     assert by["scope_info"].annotations.readOnlyHint is True
     assert by["scope_generator"].annotations.destructiveHint is True
-    assert "tap on the banner" in by["scope_remote_session"].description
+    assert "restarts with the new settings" in by["scope_averaged_capture"].description
+    assert "screen shows it" in by["scope_capture"].description
+    assert "'run'" in by["scope_acquisition_control"].description
     assert "Safety tier 3" in by["scope_generator"].description
     assert "50 mV/div is a software zoom" in by["scope_set_channel"].description
 
@@ -118,20 +120,34 @@ async def test_info_profile_status_config_cal(client):
     assert "200 MS/s" in prof["static"]["max_sample_rate"] and prof["live"]["max_total_samples"] == 16382
     assert any("T3" in u for u in prof["unverified"])
     st = await client.call("scope_status")
-    assert st["control"] == "LOCAL" and st["battery_level"] == 18
+    assert st["control"] == "SHARED" and st["mode"] == "collaborative" and st["run_state"] == "RUN"
+    assert st["battery_level"] == 18
     cfg = await client.call("scope_get_config")
     assert cfg["channels"][0]["channel"] == "CH1" and cfg["timebase"]["divider"] == 19
+    assert cfg["control"] == "SHARED" and cfg["settings_seq"] == 0
     assert cfg["generator"]["available"] is True
     cal = await client.call("scope_read_calibration")
     assert cal["channels"][0]["adc_b_comp"] == -3
     assert abs(cal["channels"][0]["volts_per_lsb_1x_per_range"][5] - 3.624e-3) < 1e-5  # default 3.8e6
 
 
-async def test_fetch_waveform_in_local_is_tier0(client):
+async def test_fetch_waveform_reads_the_ui_capture_and_changes_nothing(client):
+    client.srv.device.ui_set_channel(0, range=4)  # the user turns the V/div knob, then the RUN loop captures
+    client.srv.device.ui_run_capture()
     r = await client.call("scope_fetch_waveform", channels=["CH1"])
     assert r["ok"] and r["n_samples"] == 3000 and Path(r["file"]).exists()
+    assert r["origin"] == "ui_run" and r["capture_settings"]["channels"]["CH1"]["range_index"] == 4
+    assert r["settings_seq"] == 1
     st = await client.call("scope_status")
-    assert st["control"] == "LOCAL"  # did not take the scope
+    assert st["run_state"] == "RUN" and st["settings_seq"] == 1  # still running, nothing taken
+
+
+async def test_fetch_waveform_in_local_is_tier0_legacy(sim_factory, tmp_path):
+    async with client_for(sim_factory(legacy=True), tmp_path) as c:
+        r = await c.call("scope_fetch_waveform", channels=["CH1"])
+        assert r["ok"] and r["n_samples"] == 3000 and r["origin"] == "ui"
+        st = await c.call("scope_status")
+        assert st["control"] == "LOCAL" and st["mode"].startswith("exclusive")  # did not take the scope
 
 
 async def test_screenshot_png(client):
@@ -147,11 +163,20 @@ async def test_screenshot_png(client):
 # --- tier 1/2 configuration and capture -------------------------------------------------------------------
 
 
-async def test_remote_session_acquire_release(client):
-    r = await client.call("scope_remote_session", action="acquire")
-    assert r["control"] == "REMOTE"
-    r = await client.call("scope_remote_session", action="release")
-    assert r["control"] == "LOCAL"
+async def test_legacy_firmware_takes_remote_and_releases_when_idle(sim_factory, tmp_path):
+    srv = sim_factory(legacy=True)
+    async with client_for(srv, tmp_path) as c:
+        r = await c.call("scope_set_timebase", divider=9)
+        assert any("remote_acquired" in x and "legacy firmware" in x for x in r["caveats"])
+        assert (await c.call("scope_status"))["control"] == "REMOTE"
+        assert "needs collaborative firmware" in await c.fails("scope_acquisition_control", action="run")
+        import time
+        c.sess.legacy_idle_check(now=time.monotonic() + 3600)
+        st = await c.call("scope_status")
+        assert st["control"] == "LOCAL" and st["exit_reason"] == "HOST_RELEASE"
+        assert srv.device.settings.divider == 9  # released with KEEP_SETTINGS: the host's settings stay
+        r = await c.call("scope_set_timebase", divider=19)  # re-acquired without a 'released by user' error
+        assert any("remote_acquired" in x for x in r["caveats"])
 
 
 async def test_set_channel_snaps_and_reports(client):
@@ -160,7 +185,7 @@ async def test_set_channel_snaps_and_reports(client):
     a = r["applied"]
     assert a["volts_per_div"] == 10.0 and a["range_index"] == 2 and a["coupling"] == "AC" and a["probe"] == 10
     assert abs(a["offset_div"] - 1.0) < 0.1 and a["zero_code"] > 128
-    assert any("remote_acquired" in c for c in r["caveats"])
+    assert not any("remote_acquired" in c for c in r["caveats"])  # collaborative: nothing to take
     r = await client.call("scope_set_channel", channel="CH1", range_index=6, probe=1)
     assert r["applied"]["software_zoom"] is True
     assert "probe" in await client.fails("scope_set_channel", channel="CH1", probe=3)
@@ -426,22 +451,106 @@ async def test_raw_fpga_and_enter_fel(client):
     assert info["fpga_version"] == "0x1532"
 
 
-async def test_user_tap_makes_next_call_fail(client):
-    await client.call("scope_remote_session", action="acquire")
-    client.srv.device.user_tap()
-    msg = await client.fails("scope_set_timebase", sample_rate=1e6)
-    assert "released by user" in msg
-    r = await client.call("scope_set_timebase", sample_rate=1e6)  # an explicit retry re-acquires
-    assert any("remote_acquired" in x for x in r["caveats"])
+async def test_user_tap_makes_next_call_fail_legacy(sim_factory, tmp_path):
+    async with client_for(sim_factory(legacy=True), tmp_path) as client:
+        await client.call("scope_set_timebase", sample_rate=2e6)
+        client.srv.device.user_tap()
+        msg = await client.fails("scope_set_timebase", sample_rate=1e6)
+        assert "released by user" in msg
+        r = await client.call("scope_set_timebase", sample_rate=1e6)  # an explicit retry re-acquires
+        assert any("remote_acquired" in x for x in r["caveats"])
 
 
-async def test_watchdog_reacquire_note(sim, tmp_path):
-    async with client_for(sim, tmp_path, watchdog_s=1) as c:
+async def test_watchdog_reacquire_note_legacy(sim_factory, tmp_path):
+    async with client_for(sim_factory(legacy=True), tmp_path, watchdog_s=1) as c:
         await c.call("scope_set_timebase", sample_rate=1e6)
         import anyio
         await anyio.sleep(1.3)
         r = await c.call("scope_set_timebase", sample_rate=2e6)
         assert any("WATCHDOG" in x for x in r["caveats"])
+
+
+# --- collaborative mode ------------------------------------------------------------------------------------
+
+
+async def test_host_capture_stops_run_and_run_resumes(client):
+    dev = client.srv.device
+    r = await client.call("scope_capture", channels=["CH1"])
+    assert r["origin"] == "host" and any("now in STOP" in x for x in r["caveats"])
+    assert (await client.call("scope_status"))["run_state"] == "STOP"
+    r = await client.call("scope_acquisition_control", action="run")
+    assert r["run_state"] == "RUN"
+    dev.ui_run_capture()
+    f = await client.call("scope_fetch_waveform")
+    assert f["origin"] == "ui_run" and f["capture_id"] == r["capture_id"] + 1
+    dev.ui_press_stop()  # the person at the scope presses STOP
+    assert (await client.call("scope_status"))["run_state"] == "STOP"
+    r = await client.call("scope_acquisition_control", action="stop")
+    assert r["run_state"] == "STOP"
+
+
+async def test_settings_changed_at_the_scope_are_visible(client):
+    client.srv.device.ui_set_timebase(21)  # 100 us/div -> divider 199
+    cfg = await client.call("scope_get_config")
+    assert cfg["timebase"]["divider"] == 199 and cfg["settings_seq"] == 1
+    await client.call("scope_set_timebase", divider=9)  # host change, visible to the UI (one live set)
+    assert client.srv.device.settings.divider == 9
+    assert (await client.call("scope_status"))["settings_seq"] == 2
+
+
+async def test_averaged_capture_restarts_on_a_settings_change(sim_factory, tmp_path):
+    srv = sim_factory(signal="sine:freq=10kHz,amp=0.25")
+    dev = srv.device
+    async with client_for(srv, tmp_path) as c:
+        await c.call("scope_set_trigger", mode="auto")
+        n_arm0 = dev.arm_count
+        # at the 3rd capture of the run the user switches CH1 to 200 mV/div
+        dev.on_arm = lambda d: d.ui_set_channel(0, range=4) if d.arm_count == n_arm0 + 3 else None
+        r = await c.call("scope_averaged_capture", n=8, reject_clipped=False, on_device=False)
+        assert r["n_used"] == 8 and len(r["restarts"]) == 1
+        rs = r["restarts"][0]
+        assert rs["after_captures"] == 2 and rs["changed"] == {"CH1.range": [5, 4]}
+        assert any("restarted 1 time" in x and "CH1.range 5 -> 4" in x for x in r["caveats"])
+        assert dev.arm_count - n_arm0 == 3 + 8
+
+
+async def test_averaged_capture_gives_up_when_settings_keep_changing(sim_factory, tmp_path):
+    srv = sim_factory()
+    async with client_for(srv, tmp_path, max_restarts=2) as c:
+        await c.call("scope_set_trigger", mode="auto")
+        srv.device.on_arm = lambda d: d.ui_set_trigger(level=(d.settings.trigger.level + 1) % 256)
+        msg = await c.fails("scope_averaged_capture", n=4, reject_clipped=False, on_device=False)
+        assert "settings were changed at the scope 3 times" in msg
+
+
+async def test_device_averaging_restarts_on_a_settings_change(sim_factory, tmp_path):
+    srv = sim_factory(signal="sine:freq=10kHz,amp=0.25")
+    async with client_for(srv, tmp_path) as c:
+        await c.call("scope_set_trigger", mode="auto", total_samples=2000, pretrigger_samples=200)
+        orig = srv.device._cmd_acquire_avg
+        calls = []
+
+        def avg_then_knob(req):
+            out = orig(req)
+            if not calls:
+                srv.device.ui_set_channel(1, coupling=1)
+            calls.append(1)
+            return out
+        srv.device._cmd_acquire_avg = avg_then_knob
+        r = await c.call("scope_averaged_capture", n=4, reject_clipped=False, on_device=True)
+        assert r["averaging"] == "device" and len(r["restarts"]) == 1 and len(calls) == 2
+        assert r["restarts"][0]["changed"] == {"CH2.coupling": [0, 1]}
+
+
+async def test_fft_restarts_on_a_settings_change(sim_factory, tmp_path):
+    srv = sim_factory(signal="sine:freq=10kHz,amp=0.25")
+    async with client_for(srv, tmp_path) as c:
+        await c.call("scope_set_trigger", mode="auto")
+        n0 = srv.device.arm_count
+        srv.device.on_arm = lambda d: d.ui_set_timebase(23) if d.arm_count == n0 + 2 else None
+        r = await c.call("scope_capture_and_fft", n_avg=3)
+        assert r["restarts"] == 1 and r["sample_rate"] == 5e6
+        assert any("restarted 1 time" in x for x in r["caveats"])
 
 
 async def test_errors_are_actionable(client):

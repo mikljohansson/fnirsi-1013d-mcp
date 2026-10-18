@@ -55,7 +55,8 @@ def test_large_response_test_pattern(transport):
         P.test_pattern_bytes(1000, 3)
 
 
-def test_not_remote_error_is_actionable(transport):
+def test_not_remote_error_is_actionable(legacy_transport):
+    transport = legacy_transport
     with pytest.raises(DeviceError) as e:
         transport.request(P.Cmd.ARM, b"\0" * 4)
     assert e.value.status == P.Status.E_NOT_REMOTE
@@ -144,7 +145,7 @@ def test_lost_response_retry_uses_duplicate_cache(sim, transport):
     n0 = sim.device.arm_count
     sim.drop_next = 1
     st = P.StatusResp.unpack(transport.request(P.Cmd.ARM, b"\0" * 4).payload)
-    assert st.control == P.Control.REMOTE
+    assert st.control == P.Control.SHARED and st.acq_state == P.AcqState.DONE
     assert sim.device.arm_count == n0 + 1
     assert transport.stats.retries == 1
 

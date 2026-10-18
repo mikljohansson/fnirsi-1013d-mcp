@@ -65,7 +65,11 @@ Signal specs are `kind:key=value,...` with SI units, at the BNC in volts:
 What the simulator models, all observable through the protocol: four 8-bit cores per capture with a core B
 offset (+3 / -2 codes) that the calibration compensates; trigger on core A only with 2-dt quantisation;
 `pretrigger_words` before the trigger; modular `capture_start_word`; auto timeout (`trigger_addr` forced to
-`pretrigger_words`); stock FPGA with only part of the 4096-word ring fresh; LOCAL/REMOTE with snapshot and
+`pretrigger_words`); stock FPGA with only part of the 4096-word ring fresh; collaborative mode (protocol 1.3,
+the default) with one live settings set, `settings_seq`, RUN/STOP/SINGLE, UI captures in RUN every `--ui-period`,
+GET_CAPTURE_INFO and test hooks for the person at the scope (`Device.ui_set_channel`, `ui_set_timebase`,
+`ui_set_trigger`, `ui_press_run`, `ui_press_stop`, `ui_run_capture`, `on_arm`); with `--legacy` (or any `--caps`
+without SHARED_MODE) the old protocol 1.2 LOCAL/REMOTE model with snapshot and
 restore, watchdog, user tap (`Device.user_tap()`), DTR drop (TCP close); deferred WAIT and ACQUIRE_AVG with
 control requests in between; the duplicate-request cache; E_BAD_CRC, E_BAD_LEN, E_VERSION, E_BUSY and the rest;
 the `#VER` / `#LOCAL` probe; TEST_PATTERN; READ_SCREEN; a DEBUG_FPGA register model with the stale first byte.
@@ -92,6 +96,7 @@ count when the `#VER` probe answers `#OK,FNIRSI-1013D-AI,...`.
 | `FNIRSI_MCP_GEN_MAX_DUTY` | 50 | generator duty ceiling, percent |
 | `FNIRSI_MCP_DATA_DIR` | `mcp/data` | `.npz` output, one folder per day |
 | `FNIRSI_MCP_AUDIT_LOG` | `mcp/logs/audit.jsonl` | JSONL log of every tier 1+ call (empty string disables) |
+| `FNIRSI_MCP_LEGACY_IDLE_RELEASE_S` | 60 | legacy firmware only: release REMOTE (keeping the host settings) after this many seconds without a tool call; 0 = hold until exit |
 | `FNIRSI_MCP_MAX_RESPONSE` | 8192 on Windows serial, else device limit | largest response payload requested at once (`--max-response`); READ_RAW, READ_TRACE and READ_SCREEN are split, and device averaging falls back to the host when its result would not fit |
 
 ### Claude Code
@@ -115,18 +120,17 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 |---|---|---|
 | `scope_info` | 0 | firmware, protocol, FPGA variant, serial, capabilities, memory limits |
 | `scope_profile` | 0 | static capability profile, live values, unverified facts, standing caveats |
-| `scope_status` | 0 | LOCAL/REMOTE, acquisition state, capture id, battery, exit reason, link statistics |
+| `scope_status` | 0 | mode, run_state (RUN/STOP/SINGLE), settings_seq, latest capture id and origin, host capture state, battery, link statistics |
 | `scope_get_config` | 0 | channels, timebase, trigger and generator in physical units |
 | `scope_read_calibration` | 0 | offset centres, gains, A/B compensation, volts per code per range |
 | `scope_screenshot` | 0 | PNG of the 800x480 screen |
-| `scope_fetch_waveform` | 0 (LOCAL) / 1 | current capture or the UI's last trace, without re-arming |
+| `scope_fetch_waveform` | 0 | the latest capture (what the screen shows) with the settings it was taken under, without capturing |
 | `scope_measure` | 0 / 1 with `capture=true` | vpp, vmin, vmax, mean, rms, ac_rms, frequency, period, duty, rise/fall time, CH1->CH2 delay |
-| `scope_remote_session` | 1 | acquire or release REMOTE ownership |
 | `scope_set_timebase` | 1 | sample rate, window or raw divider |
 | `scope_set_trigger` | 1 | source, edge, level (volts or code), mode, pre-trigger, total samples, auto timeout |
-| `scope_capture` | 1 | arm, wait, read; statistics, file, inline samples or preview |
-| `scope_acquisition_control` | 1 | arm / wait / force / stop |
-| `scope_averaged_capture` | 1 | n captures averaged, hardware or edge alignment, on-device averaging when available |
+| `scope_capture` | 1 | host single capture (the screen shows it, the scope stays in STOP); statistics, file, inline samples or preview |
+| `scope_acquisition_control` | 1 | arm / wait / force / stop / run (RUN/STOP shared with the scope's button) |
+| `scope_averaged_capture` | 1 | n captures averaged, hardware or edge alignment, on-device averaging when available; restarts when a setting is changed at the scope |
 | `scope_capture_and_fft` | 1 | averaged amplitude spectrum, peaks in dBV and dBc, noise floor, THD |
 | `scope_decay_fit` | 1 | edge-aligned average, then `exp`, `exp+offset`, `exp2` or `power` fit after the TX edge; tau, R^2, sample points |
 | `scope_set_channel` | 2 | range, coupling, offset, probe, invert; relay changes limited to 5 per second |
@@ -135,8 +139,23 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_raw_fpga` | 4 | raw FPGA bus operations (DEBUG_RAW builds); needs `FNIRSI_MCP_ENABLE_RAW=1` and a token |
 | `scope_enter_fel` | 4 | reboot into FEL; needs `FNIRSI_MCP_ENABLE_RAW=1` and a token |
 
-Every tier 1+ tool takes REMOTE ownership when needed and says so in `caveats`. If the person at the scope taps
-the banner, the next call fails with "scope released by user". Confirmation tokens are bound to the exact
+**Collaborative mode** (firmware with the SHARED_MODE capability, protocol 1.3; docs/plans/collaborative-mode.md).
+There is no ownership: the person at the scope and the agent share one live set of settings, the last change
+wins, and the screen shows host captures (a green "MCP" chip marks a connected host). `scope_capture` is a host
+single: the scope stays in STOP afterwards until either side presses RUN (`scope_acquisition_control(action=
+'run')`). `scope_fetch_waveform` reads whatever the scope captured last, converted with the settings of that
+capture (`capture_settings` in the result). Every capture carries the `settings_seq` it was taken under. Long runs
+(`scope_averaged_capture`, `scope_decay_fit`, `scope_capture_and_fft`) pin their settings to one `settings_seq`;
+when someone changes a setting at the scope during the run, the run starts again with the new settings and
+`restarts` (plus a caveat) says after how many captures and what changed. After 5 restarts the tool gives up.
+A SET_* while a scope menu is open fails with "modal screen" (E_BUSY), as before.
+
+**Legacy firmware** (no SHARED_MODE, protocol <= 1.2) keeps the exclusive model: every tier 1+ tool takes REMOTE
+when needed and says so in `caveats`, the touch UI is frozen while the host holds it, and a tap on the banner makes
+the next call fail with "scope released by user". There is no release tool any more: the server releases REMOTE,
+keeping the host's settings, after `FNIRSI_MCP_LEGACY_IDLE_RELEASE_S` (60 s) without tool calls and at exit.
+
+Confirmation tokens are bound to the exact
 arguments, single-use, and expire after 120 s. Waveforms of any length go to `.npz` (`t`, volts, codes, clip
 flags, `meta_json`); results up to 2000 points also carry the samples inline, longer ones a 500-point min/max
 preview.

@@ -38,12 +38,12 @@ def test_spec_example_frames(hexstr, frame):
 
 
 @pytest.mark.parametrize("cls,size", [
-    (P.InfoResp, 76), (P.StatusResp, 32), (P.SetRemoteReq, 4), (P.BatteryResp, 4), (P.TestPatternReq, 8),
+    (P.InfoResp, 76), (P.StatusResp, 44), (P.SetRemoteReq, 4), (P.BatteryResp, 4), (P.TestPatternReq, 8),
     (P.ChannelConfig, 24), (P.SetChannelReq, 12), (P.Timebase, 16), (P.SetTimebaseReq, 8), (P.Trigger, 28),
     (P.SetTriggerReq, 24), (P.ReadRawReq, 16), (P.ReadRawHeader, 16), (P.ReadTraceReq, 12),
     (P.ReadTraceHeader, 32), (P.TraceChannelMeta, 16), (P.ReadLiveReq, 4), (P.AcquireAvgReq, 20),
     (P.AcquireAvgHeader, 16), (P.Gen, 24), (P.SetGenReq, 20), (P.CalResp, 72), (P.ReadScreenReq, 4),
-    (P.ReadScreenHeader, 8)])
+    (P.ReadScreenHeader, 8), (P.SetAcqStateReq, 4), (P.CaptureInfoHeader, 36), (P.CaptureChannelInfo, 16)])
 def test_struct_sizes_match_spec(cls, size):
     assert cls.size() == size
 
@@ -144,8 +144,27 @@ def test_host_vectors_present_and_current():
 
 
 def test_status_protocol_1_0_body_still_parses():
-    st = P.StatusResp(1, 3, 0x0B, 0, 42, pass_ms=7, pass_max_ms=31)
+    st = P.StatusResp(1, 3, 0x0B, 0, 42, pass_ms=7, pass_max_ms=31, settings_seq=9, run_state=1)
     data = st.pack()
-    assert len(data) == 32 and P.StatusResp.unpack(data).pass_max_ms == 31
+    assert len(data) == 44 and P.StatusResp.unpack(data).pass_max_ms == 31
     old = P.StatusResp.unpack(data[:28])  # firmware 0.1.0 / protocol 1.0
     assert old.capture_id == 42 and old.pass_ms == 0 and old.pass_max_ms == 0
+    p12 = P.StatusResp.unpack(data[:32])  # protocol 1.1 / 1.2
+    assert p12.pass_max_ms == 31 and p12.settings_seq == 0 and not p12.shared
+    sh = P.StatusResp.unpack(P.StatusResp(control=2, settings_seq=5, run_state=1).pack())
+    assert sh.shared and sh.settings_seq == 5 and sh.run_state == P.RunState.RUN
+
+
+def test_capture_info_roundtrip_and_views():
+    ci = P.CaptureInfo(P.CaptureInfoHeader(capture_id=7, settings_seq=3, origin=1, divider=9, trig_source=1,
+                                           pretrigger_samples=800, total_samples=16000),
+                       [P.CaptureChannelInfo(range=4, probe_index=2, uv_per_lsb_q8=1000),
+                        P.CaptureChannelInfo(range=2, coupling=1)])
+    data = ci.pack()
+    assert len(data) == 68
+    back = P.CaptureInfo.unpack(data)
+    assert back == ci
+    assert back.trigger().total_words == 8000 and back.timebase().divider == 9
+    cfg = back.channel_config(0)
+    assert cfg.range == 4 and cfg.hw_range == 4 and cfg.probe_factor == 10.0
+    assert back.settings_key()["CH2.coupling"] == 1

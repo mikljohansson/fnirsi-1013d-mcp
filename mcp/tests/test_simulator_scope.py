@@ -14,7 +14,7 @@ from fnirsi1013d.transport import DeviceError, TransportError
 
 def remote_scope(srv) -> Scope:
     s = Scope.connect(srv.url)
-    s.take_remote(watchdog_s=0)
+    s.ensure_control(watchdog_s=0)
     return s
 
 
@@ -154,8 +154,8 @@ def test_read_raw_addressing_and_layouts(sim_factory):
 
 
 def test_read_lag_mismatch_shifts_data(sim_factory):
-    good = sim_factory(seed=7, hw_read_lag=1, fw_read_lag=1)
-    bad = sim_factory(seed=7, hw_read_lag=1, fw_read_lag=0)
+    good = sim_factory(seed=7, hw_read_lag=1, fw_read_lag=1, legacy=True)
+    bad = sim_factory(seed=7, hw_read_lag=1, fw_read_lag=0, legacy=True)
     for srv in (good, bad):
         srv.device.ring[:] = np.arange(8192, dtype=np.uint32).astype(np.uint8)
         srv.device.acq_state = P.AcqState.DONE
@@ -168,7 +168,7 @@ def test_read_lag_mismatch_shifts_data(sim_factory):
 
 
 def test_debug_fpga_stale_first_byte(sim_factory):
-    srv = sim_factory()
+    srv = sim_factory(legacy=True)
     srv.device.ring[0, :] = 50
     srv.device.ring[0, 200:210] = np.arange(10) + 60
     s = remote_scope(srv)
@@ -243,7 +243,7 @@ def test_read_trace_matches_host_compensation(sim_factory):
 
 
 def test_local_mode_trace_and_restrictions(sim_factory):
-    srv = sim_factory()
+    srv = sim_factory(legacy=True)
     with Scope.connect(srv.url) as s:
         hdr, tr = s.read_trace(["CH1", "CH2"])
         assert hdr.origin == 1 and set(tr) == {0, 1}
@@ -254,38 +254,38 @@ def test_local_mode_trace_and_restrictions(sim_factory):
 
 
 def test_remote_snapshot_restore_and_keep(sim_factory):
-    srv = sim_factory()
+    srv = sim_factory(legacy=True)
     with Scope.connect(srv.url) as s:
         div0 = s.get_timebase(cached=False).divider
-        s.take_remote()
+        s.legacy_take_remote()
         s.set_timebase(divider=3)
-        s.release()
+        s.legacy_release()
         assert s.get_timebase(cached=False).divider == div0
         assert s.status().exit_reason == P.ExitReason.HOST_RELEASE
-        s.take_remote()
+        s.legacy_take_remote()
         s.set_timebase(divider=5)
-        s.release(keep_settings=True)
+        s.legacy_release(keep_settings=True)
         assert s.get_timebase(cached=False).divider == 5
 
 
 def test_user_tap_watchdog_and_dtr(sim_factory):
-    srv = sim_factory()
+    srv = sim_factory(legacy=True)
     s = Scope.connect(srv.url)
-    s.take_remote(watchdog_s=0)
+    s.legacy_take_remote(watchdog_s=0)
     srv.device.user_tap()
     st = s.status()
     assert st.control == P.Control.LOCAL and st.exit_reason == P.ExitReason.USER_TAP
-    s.take_remote(watchdog_s=1)
+    s.legacy_take_remote(watchdog_s=1)
     time.sleep(1.3)
     st = s.status()
     assert st.control == P.Control.LOCAL and st.exit_reason == P.ExitReason.WATCHDOG
-    s.take_remote(watchdog_s=0)
+    s.legacy_take_remote(watchdog_s=0)
     s.close()  # DTR drop
     time.sleep(0.1)
     s2 = Scope.connect(srv.url)
     st = s2.status()
     assert st.control == P.Control.LOCAL and st.exit_reason == P.ExitReason.DTR_DROP
-    s2.take_remote(ignore_dtr=True)
+    s2.legacy_take_remote(ignore_dtr=True)
     s2.close()  # link drops without release
     time.sleep(0.1)
     with Scope.connect(srv.url) as s3:
@@ -293,12 +293,22 @@ def test_user_tap_watchdog_and_dtr(sim_factory):
 
 
 def test_ui_busy(sim_factory):
+    srv = sim_factory(legacy=True)
+    srv.device.ui_busy = True
+    with Scope.connect(srv.url) as s:
+        assert s.status().ui_busy == 1
+        with pytest.raises(DeviceError) as e:
+            s.legacy_take_remote()
+        assert e.value.status == P.Status.E_BUSY
+
+
+def test_ui_busy_shared(sim_factory):
     srv = sim_factory()
     srv.device.ui_busy = True
     with Scope.connect(srv.url) as s:
         assert s.status().ui_busy == 1
         with pytest.raises(DeviceError) as e:
-            s.take_remote()
+            s.set_timebase(divider=3)  # a menu is open: SET_* is E_BUSY, there is nothing to take
         assert e.value.status == P.Status.E_BUSY
 
 
@@ -336,7 +346,7 @@ def test_chunked_reads_match_single_reads(sim_factory):
     srv = sim_factory(fail_responses_over=5120)
     small = Scope.connect(srv.url, max_response=5120)
     try:
-        small.take_remote(watchdog_s=0)
+        small.ensure_control(watchdog_s=0)
         small.set_trigger(mode=0, pretrigger_samples=1000, total_samples=16000)
         cap = small.capture(["CH1", "CH2"], 1.0, keep_raw=True)
         assert cap.n == 16000

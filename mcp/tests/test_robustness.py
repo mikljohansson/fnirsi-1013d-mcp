@@ -58,7 +58,7 @@ def test_reset_line_inside_partial_frame(sim):
 
 
 def test_reset_drops_pending_wait_keeps_remote(sim_factory):
-    srv = sim_factory(signal="zero")
+    srv = sim_factory(signal="zero", legacy=True)
     t = connect(srv.url)
     try:
         t.request(P.Cmd.SET_REMOTE, P.SetRemoteReq(1, 0, 0).pack())
@@ -77,7 +77,8 @@ def test_reset_drops_pending_wait_keeps_remote(sim_factory):
         t.close()
 
 
-def test_timeout_classes_follow_remote_state(sim, transport):
+def test_timeout_classes_follow_remote_state(legacy_transport):
+    transport = legacy_transport
     from fnirsi1013d.transport import TimeoutPolicy
 
     pol = TimeoutPolicy()

@@ -12,7 +12,12 @@ It models what the host can observe through docs/protocol.md:
 - ``read_lag`` (7.4): ``--hw-read-lag`` is the true FPGA lag, ``--fw-read-lag`` the value the firmware
   applies. When they differ READ_RAW returns data shifted by the difference, like a real mis-set lag.
   READ_TRACE has the stale first byte per core (1.00o5 behaviour).
-- LOCAL / REMOTE ownership (6.1) with snapshot/restore, watchdog, user tap, DTR (= TCP connection) drop.
+- Collaborative (shared) mode, protocol 1.3 (default, cap SHARED_MODE): one live settings set changed by host
+  SET_* and by the simulated UI (``Device.ui_set_channel`` / ``ui_set_timebase`` / ``ui_set_trigger``,
+  ``ui_press_run`` / ``ui_press_stop``), ``settings_seq``, RUN mode with UI captures every
+  ``ui_capture_period_s``, host single capture (ARM), SET_ACQ_STATE, GET_CAPTURE_INFO.
+- Legacy exclusive model (``--legacy``, or any caps without SHARED_MODE; protocol 1.2): LOCAL / REMOTE
+  ownership (6.1) with snapshot/restore, watchdog, user tap, DTR (= TCP connection) drop.
 - Deferred WAIT / ACQUIRE_AVG with control requests in between, duplicate-request cache (4.3), CRC errors,
   oversize frames, the ASCII probe (10), TEST_PATTERN, READ_SCREEN, DEBUG_FPGA register model.
 
@@ -244,7 +249,10 @@ class SimConfig:
     seed: int | None = None
     fw_version: str = "0.1.4-sim"
     serial: str = "1013D-SIM"
+    #: UI acquisition period (LOCAL in the legacy model, RUN in shared mode); <= 0: no automatic UI captures
     ui_capture_period_s: float = 0.05
+    #: legacy exclusive LOCAL/REMOTE firmware (protocol 1.2, no SHARED_MODE)
+    legacy: bool = False
     #: drop (never send) responses with a larger payload, like firmware 0.1.0 on hardware (> 5 KiB failed)
     fail_responses_over: int | None = None
 
@@ -319,6 +327,21 @@ class Device:
         self.pass_max_ms = 5
         #: GET_LINK_STATS counters (protocol 1.2); the ones the simulator can observe are counted
         self.link: dict[str, int] = {n: 0 for n in P.LINK_STATS_NAMES}
+        # --- collaborative mode (protocol 1.3)
+        self.shared = bool(self.caps & P.Caps.SHARED_MODE)
+        if self.shared:
+            self.control = P.Control.SHARED
+        self.run_state = P.RunState.RUN if self.shared else P.RunState.STOP
+        self.settings_seq = 0
+        self.capture_settings_seq = 0
+        self.capture_origin = int(P.CaptureOrigin.UI_RUN)
+        self.capture_settings = self.settings.copy()
+        self.ui_t0 = clock()
+        self.ui_done = -1  # the first poll in RUN produces a capture
+        #: the ring holds capture ``capture_id`` (False after an ARM until the next capture finishes)
+        self.ring_valid = False
+        #: test hook: called as on_arm(device) at the start of every host ARM (e.g. a UI change mid-run)
+        self.on_arm: Callable[["Device"], None] | None = None
 
     # --- capabilities -------------------------------------------------------------------------------
 
@@ -328,6 +351,8 @@ class Device:
             return self.cfg.caps_override
         c = P.Caps.SCREENSHOT | P.Caps.DEVICE_AVERAGE | P.Caps.DEBUG_RAW | P.Caps.LIVE_READ | P.Caps.ENTER_FEL
         c |= P.Caps.READ_LAG_UNVERIFIED | P.Caps.INTERLEAVE_UNVERIFIED | P.Caps.FORCE_TRIGGER
+        if not self.cfg.legacy:
+            c |= P.Caps.SHARED_MODE
         if self.spec.programmable:
             c |= P.Caps.PROG_TRIGGER_POS
         if self.spec.generator:
@@ -473,7 +498,8 @@ class Device:
                     break
                 prev = int(a[-1])
                 k += n
-        res: dict = {"t0": t0, "dt": dt, "divider": settings.divider, "Pw": Pw, "Tw": Tw}
+        res: dict = {"t0": t0, "dt": dt, "divider": settings.divider, "Pw": Pw, "Tw": Tw,
+                     "settings": settings.copy(), "seq": self.settings_seq}
         if kt >= 0:
             end = kt + (Tw - Pw)
             k_first = end - R
@@ -516,7 +542,9 @@ class Device:
             if self.control == P.Control.REMOTE and self.watchdog_s and \
                     now - self.last_frame_at > self.watchdog_s:
                 self.go_local(P.ExitReason.WATCHDOG)
-            if self.control != P.Control.REMOTE:
+            if self.shared and self.run_state == P.RunState.RUN and not self.ui_busy:
+                self._ui_run_catch_up(now)
+            if self.control not in (P.Control.REMOTE, P.Control.SHARED):
                 return
             pc = self._pending_capture
             if pc is None or self.acq_state not in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
@@ -528,7 +556,9 @@ class Device:
             if pc["t_done"] is not None and now >= self.arm_time + scale * pc["t_done"]:
                 self._complete(pc)
 
-    def _complete(self, pc: dict) -> None:
+    def _complete(self, pc: dict, origin: int = P.CaptureOrigin.HOST, n: int = 1) -> None:
+        """A capture reached DONE. ``origin``: host (acq_state DONE) or UI (acq_state unchanged); ``n``: captures
+        counted (the UI may have finished several since the last poll; only the latest is in the ring)."""
         self.ring = pc["ring"]
         R = self.spec.ring_words
         self.trigger_addr = pc["trigger_addr"]
@@ -538,14 +568,125 @@ class Device:
         self.fpga_triggered = pc["triggered"]
         self.fpga_done = True
         self.auto_timeout_flag = pc["auto_timeout"]
-        self.acq_state = P.AcqState.DONE
-        self.capture_id += 1
+        self.capture_id += n
+        self.ring_valid = True
         self.trace_cache = None
-        self._pending_capture = None
+        self.capture_settings = pc.get("settings") or self.settings.copy()
+        self.capture_settings_seq = pc.get("seq", self.settings_seq)
+        #: a setting changed between arm and DONE: the firmware marks the capture (protocol 1.3)
+        self.capture_settings_changed = self.capture_settings_seq != self.settings_seq
+        if self.capture_settings_changed:
+            self.capture_settings_seq = P.SEQ_INVALID
+        self.capture_origin = int(origin)
+        if origin == P.CaptureOrigin.HOST:
+            self.acq_state = P.AcqState.DONE
+            self._pending_capture = None
+            if self.shared:
+                self.run_state = P.RunState.STOP  # a host single leaves the UI in STOP (collaborative plan)
+
+    # --- collaborative mode: the simulated UI --------------------------------------------------------------
+
+    def _ui_run_catch_up(self, now: float) -> None:
+        period = self.cfg.ui_capture_period_s
+        if period <= 0:
+            if self.ui_done < 0:
+                self.ui_done = 0
+                self.ui_run_capture()
+            return
+        due = int((now - self.ui_t0) / period)
+        if due > self.ui_done:
+            n = due - self.ui_done if self.ui_done >= 0 else 1
+            self.ui_done = due
+            self.ui_run_capture(n)
+
+    def ui_run_capture(self, n: int = 1) -> bool:
+        """The UI loop finishes a capture with the live settings (RUN mode). In normal trigger mode without a
+        trigger nothing completes. Returns whether a capture was produced."""
+        with self.lock:
+            pc = self.simulate_capture(self.settings)
+            if pc["ring"] is None:
+                if self.settings.trigger.mode == 1:
+                    return False
+                pc = self.simulate_capture(self.settings, forced=True)
+            self._complete(pc, P.CaptureOrigin.UI_RUN, n)
+            return True
+
+    def settings_key(self, s: Settings | None = None) -> tuple:
+        s = s or self.settings
+        ch = tuple((c.enable, c.range, c.coupling, c.dcoffset, c.invert, c.probe_index) for c in s.channels)
+        tr = s.trigger
+        return ch, s.divider, (tr.source, tr.edge, tr.level, tr.mode, tr.pretrigger_samples, tr.total_samples,
+                               tr.holdoff, tr.auto_timeout)
+
+    def _bump_if_changed(self, before: tuple) -> None:
+        if self.settings_key() != before:
+            self.settings_seq = (self.settings_seq + 1) & 0xFFFFFFFF
+            if self.settings_seq == P.SEQ_INVALID:
+                self.settings_seq = 0
+
+    def ui_set_channel(self, ch: int, **fields: int) -> None:
+        """Test hook: the person at the scope changes a channel setting (enable, range, coupling, dcoffset,
+        invert, probe_index). Relays click like a host change."""
+        with self.lock:
+            before = self.settings_key()
+            cs = self.settings.channels[ch]
+            if "range" in fields and min(fields["range"], 5) != min(cs.range, 5) or \
+                    "coupling" in fields and fields["coupling"] != cs.coupling:
+                self.relay_switches += 1
+                self.relay_settle_until = self.now() + 0.050
+            for k, v in fields.items():
+                if not hasattr(cs, k):
+                    raise AttributeError(k)
+                setattr(cs, k, int(v))
+            self._bump_if_changed(before)
+
+    def ui_set_timebase(self, ui_index: int) -> None:
+        """Test hook: the user turns the timebase to UI index ``ui_index`` (11..34)."""
+        with self.lock:
+            before = self.settings_key()
+            sr = P.TIME_PER_DIV_SAMPLE_RATE[ui_index]
+            s = self.settings
+            s.divider, s.tpd_index, s.sr_index = P.SAMPLE_RATE_DIVIDERS[sr], ui_index, sr
+            self._bump_if_changed(before)
+
+    def ui_set_trigger(self, **fields: int) -> None:
+        """Test hook: the user changes trigger fields (source, edge, level, mode)."""
+        with self.lock:
+            before = self.settings_key()
+            for k, v in fields.items():
+                if not hasattr(self.settings.trigger, k):
+                    raise AttributeError(k)
+                setattr(self.settings.trigger, k, int(v))
+            self._bump_if_changed(before)
+
+    def ui_press_run(self) -> None:
+        with self.lock:
+            self._set_run_state(P.RunState.RUN)
+
+    def ui_press_stop(self) -> None:
+        with self.lock:
+            self._set_run_state(P.RunState.STOP)
+
+    def _set_run_state(self, state: int) -> None:
+        """RUN/STOP from either side: a pending host single is aborted."""
+        if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
+            self.acq_state = P.AcqState.ABORTED
+            self._pending_capture = None
+        if self.deferred is not None:
+            self._abort_deferred = True
+        self.run_state = P.RunState(state)
+        if state == P.RunState.RUN:
+            self.ui_t0 = self.now()
+            self.ui_done = 0
 
     def arm(self) -> None:
-        now = self.now()
         self.arm_count += 1
+        if self.on_arm is not None:
+            self.on_arm(self)
+        now = self.now()
+        self.ring_valid = False
+        if self.shared:
+            self.run_state = P.RunState.SINGLE
         if now < self.relay_settle_until:
             # firmware waits out the relay settling (8.4 step 1); in the model the ARM just starts later
             now = self.relay_settle_until
@@ -562,6 +703,8 @@ class Device:
         self._complete(pc)
 
     def go_remote(self, flags: int, watchdog_s: int) -> None:
+        if self.shared:
+            return  # protocol 1.3: SET_REMOTE is a no-op
         if self.control != P.Control.REMOTE:
             self.snapshot = self.settings.copy()
             self.control = P.Control.REMOTE
@@ -599,7 +742,9 @@ class Device:
 
     def status(self) -> P.StatusResp:
         now = self.now()
-        if self.control == P.Control.LOCAL and not self.ui_busy:
+        if self.shared:
+            return self._shared_status(now)
+        if self.control == P.Control.LOCAL and not self.ui_busy and self.cfg.ui_capture_period_s > 0:
             # the UI keeps capturing
             t0 = getattr(self, "ui_t0", self.t_boot)
             self.capture_id = self.ui_capture_base + int((now - t0) / self.cfg.ui_capture_period_s)
@@ -631,9 +776,54 @@ class Device:
             uptime_ms=int((now - self.t_boot) * 1000) & 0xFFFFFFFF, watchdog_remaining_s=wd,
             battery_level=18, exit_reason=self.exit_reason, pass_ms=self.pass_ms, pass_max_ms=self.pass_max_ms)
 
+    def _shared_status(self, now: float) -> P.StatusResp:
+        fl = 0
+        for on, bit in ((self.fpga_triggered, P.StatusFlags.FPGA_TRIGGERED), (self.fpga_done, P.StatusFlags.FPGA_DONE),
+                        (self.auto_timeout_flag, P.StatusFlags.AUTO_TIMEOUT), (self.dtr, P.StatusFlags.DTR),
+                        (self.deferred is not None, P.StatusFlags.DEFERRED_PENDING),
+                        (self.overload[0], P.StatusFlags.OVERLOAD_CH1), (self.overload[1], P.StatusFlags.OVERLOAD_CH2)):
+            if on:
+                fl |= bit
+        return P.StatusResp(
+            control=int(P.Control.SHARED), acq_state=int(self.acq_state), flags=int(fl), ui_busy=int(self.ui_busy),
+            capture_id=self.capture_id & 0xFFFFFFFF, trigger_addr=self.trigger_addr,
+            capture_start_word=self.capture_start_word, ms_since_arm=int((now - self.arm_time) * 1000) & 0xFFFFFFFF,
+            uptime_ms=int((now - self.t_boot) * 1000) & 0xFFFFFFFF, watchdog_remaining_s=0xFFFF, battery_level=18,
+            exit_reason=0, pass_ms=self.pass_ms, pass_max_ms=self.pass_max_ms, settings_seq=self.settings_seq,
+            capture_settings_seq=self.capture_settings_seq if self.capture_id else P.SEQ_INVALID,
+            run_state=int(self.run_state), capture_origin=self.capture_origin if self.capture_id else 0)
+
+    def status_bytes(self) -> bytes:
+        """GET_STATUS body as this firmware sends it: 32 bytes in the legacy (protocol 1.2) model, 44 in 1.3."""
+        b = self.status().pack()
+        return b if self.shared else b[:32]
+
+    @property
+    def proto_minor(self) -> int:
+        return P.PROTO_MINOR if self.shared else 2
+
+    def capture_info(self) -> P.CaptureInfo:
+        s = self.capture_settings
+        Pw, Tw = self.capture_geometry
+        fl = (P.CaptureInfoHeader.F_TRIGGERED if self.fpga_triggered else 0) | \
+             (P.CaptureInfoHeader.F_AUTO_TIMEOUT if self.auto_timeout_flag else 0) | \
+             (P.CaptureInfoHeader.F_OVERLOAD_CH1 if self.overload[0] else 0) | \
+             (P.CaptureInfoHeader.F_OVERLOAD_CH2 if self.overload[1] else 0) | \
+             (P.CaptureInfoHeader.F_SETTINGS_CHANGED if getattr(self, "capture_settings_changed", False) else 0)
+        tr = s.trigger
+        h = P.CaptureInfoHeader(self.capture_id & 0xFFFFFFFF, self.capture_settings_seq, self.capture_origin, fl,
+                                self.trigger_addr, self.capture_start_word, self.capture_divider, s.tpd_index,
+                                tr.source, tr.edge, tr.level, tr.mode, 2 * Pw, 2 * Tw)
+        chans = []
+        for ch in (0, 1):
+            cc = self.channel_config(ch, s)
+            chans.append(P.CaptureChannelInfo(cc.enable, cc.range, cc.coupling, cc.invert, cc.probe_index,
+                                              cc.offset_pwm, cc.uv_per_lsb_q8, cc.zero_code_q8))
+        return P.CaptureInfo(h, chans)
+
     def info(self) -> P.InfoResp:
         sp = self.spec
-        return P.InfoResp(
+        return P.InfoResp(proto_minor=self.proto_minor,
             fpga_version=sp.version_word, fpga_variant=int(sp.variant), ring_words=sp.ring_words,
             caps=self.caps, gen_clock_hz=P.GEN_CLOCK_HZ if sp.generator else 0,
             max_total_samples=sp.max_total_samples, min_total_samples=80 if sp.programmable else 3000,
@@ -723,13 +913,16 @@ class Device:
                 cmd = P.Cmd(req.cmd)
             except ValueError:
                 return self._done(req, self._err(req, P.Status.E_UNKNOWN_CMD, 0, f"cmd 0x{req.cmd:04X}"))
+            if not self.shared and cmd in (P.Cmd.SET_ACQ_STATE, P.Cmd.GET_CAPTURE_INFO):
+                # protocol 1.2 firmware does not know the 1.3 commands
+                return self._done(req, self._err(req, P.Status.E_UNKNOWN_CMD, 0, f"cmd 0x{req.cmd:04X}"))
             if self.deferred is not None and self.deferred.frame.seq == req.seq and                     self.deferred.frame.cmd == req.cmd:
                 return None  # retransmission of the pending deferred request: its response follows
             if self.deferred is not None and cmd not in P.CONTROL_CMDS:
                 return self._done(req, self._err(req, P.Status.E_BUSY, 0, "deferred request pending"))
             if self.ui_busy and cmd not in P.BUSY_ALLOWED:
                 return self._done(req, self._err(req, P.Status.E_BUSY, 0, "UI is modal"))
-            if cmd not in P.LOCAL_ALLOWED and self.control != P.Control.REMOTE:
+            if not self.shared and cmd not in P.LOCAL_ALLOWED and self.control != P.Control.REMOTE:
                 return self._done(req, self._err(req, P.Status.E_NOT_REMOTE, 0, "acquire REMOTE first"))
             need = P.CMD_CAP.get(cmd)
             if need is not None and not (self.caps & need):
@@ -740,10 +933,13 @@ class Device:
                 req = P.Frame(req.cmd, req.seq, req.payload + b"\0" * (size - len(req.payload)), req.status,
                               req.flags, req.proto_major)
             handler = getattr(self, f"_cmd_{cmd.name.lower()}")
+            before = self.settings_key()
             try:
                 out = handler(req)
             except _DevErr as e:
                 out = self._err(req, e.status, e.detail, e.text)
+            if self.shared:
+                self._bump_if_changed(before)
             if out is None:
                 return None
             return self._done(req, out)
@@ -778,7 +974,7 @@ class Device:
                 return self._done(d.frame, self._err(d.frame, P.Status.E_ABORTED, 0, "aborted"))
             if d.frame.cmd == P.Cmd.WAIT and self.acq_state == P.AcqState.DONE:
                 self.deferred = None
-                return self._done(d.frame, self._ok(d.frame, self.status().pack()))
+                return self._done(d.frame, self._ok(d.frame, self.status_bytes()))
             if now >= d.done_at:
                 self.deferred = None
                 status, payload = d.result()
@@ -794,7 +990,7 @@ class Device:
         return self._ok(req, self.info().pack())
 
     def _cmd_get_status(self, req: P.Frame) -> P.Frame:
-        return self._ok(req, self.status().pack())
+        return self._ok(req, self.status_bytes())
 
     def _cmd_set_remote(self, req: P.Frame) -> P.Frame:
         r = P.SetRemoteReq.unpack(req.payload)
@@ -808,7 +1004,7 @@ class Device:
                 self.go_local(P.ExitReason.HOST_RELEASE, keep=bool(r.flags & P.SetRemoteReq.KEEP_SETTINGS))
         else:
             raise _DevErr(P.Status.E_BAD_ARG, 0, f"action {r.action}")
-        return self._ok(req, self.status().pack())
+        return self._ok(req, self.status_bytes())
 
     def _cmd_get_link_stats(self, req: P.Frame) -> P.Frame:
         return self._ok(req, P.pack_link_stats(self.link))
@@ -955,13 +1151,13 @@ class Device:
         if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
             raise _DevErr(P.Status.E_STATE, 0, "already ARMED; STOP first")
         self.arm()
-        return self._ok(req, self.status().pack())
+        return self._ok(req, self.status_bytes())
 
     def _cmd_force(self, req: P.Frame) -> P.Frame:
         if self.acq_state not in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
             raise _DevErr(P.Status.E_STATE, 0, f"state {P.AcqState(self.acq_state).name}, not ARMED")
         self.force()
-        return self._ok(req, self.status().pack())
+        return self._ok(req, self.status_bytes())
 
     def _cmd_stop(self, req: P.Frame) -> P.Frame:
         if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
@@ -970,7 +1166,38 @@ class Device:
         if self.deferred is not None:
             self._abort_deferred = True
             self.acq_state = P.AcqState.ABORTED
-        return self._ok(req, self.status().pack())
+        if self.shared:
+            self.run_state = P.RunState.STOP
+        return self._ok(req, self.status_bytes())
+
+    def _cmd_set_acq_state(self, req: P.Frame) -> P.Frame:
+        r = P.SetAcqStateReq.unpack(req.payload)
+        if r.state not in (P.RunState.STOP, P.RunState.RUN):
+            raise _DevErr(P.Status.E_BAD_ARG, 0, f"state {r.state}: 0 STOP, 1 RUN")
+        self._set_run_state(r.state)
+        return self._ok(req, self.status_bytes())
+
+    def _cmd_get_capture_info(self, req: P.Frame) -> P.Frame:
+        if self.capture_id == 0:
+            raise _DevErr(P.Status.E_STATE, 0, "no capture since boot")
+        return self._ok(req, self.capture_info().pack())
+
+    def _check_capture_readable(self, flags: int = 0) -> None:
+        """Shared mode: the latest finished capture of any origin is readable unless a host single is
+        rewriting the ring."""
+        if flags & P.ReadRawReq.ALLOW_NOT_DONE:
+            return
+        if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
+            raise _DevErr(P.Status.E_STATE, 0, "not done")
+        if not self.ring_valid:
+            if self.run_state != P.RunState.RUN:
+                raise _DevErr(P.Status.E_STATE, 1 if self.capture_id else 0,
+                              "ring overwritten" if self.capture_id else "no capture")
+            # firmware: hold the request until the UI capture in flight is DONE (at most 1 s)
+            if not self.ui_run_capture():
+                raise _DevErr(P.Status.E_BUSY, 1, "UI capture running")
+        if self.capture_id == 0:
+            raise _DevErr(P.Status.E_STATE, 0, "no capture")
 
     def _cmd_wait(self, req: P.Frame) -> P.Frame | None:
         (tmo,) = struct.unpack_from("<I", req.payload)
@@ -978,9 +1205,9 @@ class Device:
             raise _DevErr(P.Status.E_BAD_ARG, 0, f"timeout_ms {tmo} > 10000")
         if self.acq_state == P.AcqState.DONE or self.acq_state not in (P.AcqState.ARMED,
                                                                          P.AcqState.TRIGGERED):
-            return self._ok(req, self.status().pack())
+            return self._ok(req, self.status_bytes())
         self.deferred = Deferred(req, self.now() + tmo / 1000.0,
-                                 lambda: (P.Status.OK, self.status().pack()))
+                                 lambda: (P.Status.OK, self.status_bytes()))
         return None
 
     def _resolve_start(self, mode: int, address: int) -> int:
@@ -1010,7 +1237,9 @@ class Device:
         ncores = bin(r.core_mask).count("1")
         if 16 + r.count * ncores > P.MAX_RESPONSE_PAYLOAD:
             raise _DevErr(P.Status.E_OVERFLOW, 0, f"{16 + r.count * ncores} > {P.MAX_RESPONSE_PAYLOAD}")
-        if self.acq_state != P.AcqState.DONE and not (r.flags & P.ReadRawReq.ALLOW_NOT_DONE):
+        if self.shared:
+            self._check_capture_readable(r.flags)
+        elif self.acq_state != P.AcqState.DONE and not (r.flags & P.ReadRawReq.ALLOW_NOT_DONE):
             raise _DevErr(P.Status.E_STATE, 0, f"state {P.AcqState(self.acq_state).name}, not DONE")
         start = self._resolve_start(r.addr_mode, r.address)
         blocks = []
@@ -1039,7 +1268,12 @@ class Device:
         if not 1 <= r.ch_mask <= 3:
             raise _DevErr(P.Status.E_BAD_ARG, 0, f"ch_mask {r.ch_mask}")
         origin = 0
-        if self.control == P.Control.LOCAL:
+        s = self.settings
+        if self.shared:
+            self._check_capture_readable()
+            origin = self.capture_origin  # 1.3: the CaptureOrigin codes
+            s = self.capture_settings
+        elif self.control == P.Control.LOCAL:
             self._ui_capture_if_local()
             origin = 1
         elif self.acq_state != P.AcqState.DONE:
@@ -1055,28 +1289,27 @@ class Device:
         metas, datas = [], []
         sw_idx = -1
         for c in chans:
-            tr, fl = self.build_trace(c, self.settings)
-            if self.settings.channels[c].invert and not (r.flags & P.ReadTraceReq.NO_INVERT):
+            tr, fl = self.build_trace(c, s)
+            if s.channels[c].invert and not (r.flags & P.ReadTraceReq.NO_INVERT):
                 tr = (255 - tr.astype(np.int16)).astype(np.uint8)
-            cfg = self.channel_config(c)
+            cfg = self.channel_config(c, s)
             metas.append(P.TraceChannelMeta(c, cfg.range, cfg.coupling, fl, cfg.uv_per_lsb_q8, cfg.zero_code_q8,
                                             self.cal[c].adc_a_comp, self.cal[c].adc_b_comp).pack())
             datas.append(tr[r.start: r.start + count].tobytes())
-            if c == self.settings.trigger.source and 20 <= 2 * Pw and 2 * Pw + 64 <= n:
-                sw_idx = self._sw_trigger(tr, 2 * Pw)
-        if self.settings.trigger.source not in chans:
+            if c == s.trigger.source and 20 <= 2 * Pw and 2 * Pw + 64 <= n:
+                sw_idx = self._sw_trigger(tr, 2 * Pw, s.trigger)
+        if s.trigger.source not in chans:
             sw_idx = -1
         hdr = P.ReadTraceHeader(self.capture_id, n, r.start, count, 2 * Pw, sw_idx, self.capture_divider,
                                 r.ch_mask, origin)
         return self._ok(req, hdr.pack() + b"".join(metas) + b"".join(datas))
 
-    def _sw_trigger(self, tr: np.ndarray, centre: int) -> int:
-        lvl = self.settings.trigger.level
+    def _sw_trigger(self, tr: np.ndarray, centre: int, trig: TriggerState) -> int:
+        lvl = trig.level
         lo, hi = max(2, centre - 40), min(len(tr) - 1, centre + 40)
         for i in range(lo, hi, 2):
             p, c = int(tr[i - 2]), int(tr[i])
-            if (self.settings.trigger.edge == 0 and p < lvl <= c) or (self.settings.trigger.edge == 1 and
-                                                                      p >= lvl > c):
+            if (trig.edge == 0 and p < lvl <= c) or (trig.edge == 1 and p >= lvl > c):
                 return i
         return -1
 
@@ -1185,6 +1418,8 @@ class Device:
         fb[:, 0::80] = 0x4208
         if self.control == P.Control.REMOTE:
             fb[0:24, :] = 0x001F  # banner
+        elif self.shared and self.dtr:
+            fb[4:24, 700:756] = 0x07E0  # green "MCP" chip (collaborative mode)
         Pw, Tw = self.capture_geometry
         for ch, colour in ((0, 0xFFE0), (1, 0x07FF)):
             a = self.ring[2 * ch, (self.capture_start_word + np.arange(Tw)) % self.spec.ring_words]
@@ -1273,7 +1508,7 @@ class Device:
             self.last_frame_at = self.now()  # 14.21
             cmd = line.strip().upper()
             if cmd == "#VER":
-                return (f"#OK,FNIRSI-1013D-AI,fw={self.cfg.fw_version},proto={P.PROTO_MAJOR}.{P.PROTO_MINOR},"
+                return (f"#OK,FNIRSI-1013D-AI,fw={self.cfg.fw_version},proto={P.PROTO_MAJOR}.{self.proto_minor},"
                         f"fpga=0x{self.spec.version_word:04X}")
             if cmd == "#LOCAL":
                 self.go_local(P.ExitReason.HOST_RELEASE)
@@ -1528,7 +1763,8 @@ def build_config(args: argparse.Namespace) -> SimConfig:
     return SimConfig(variant=args.variant, signals=(ch1, ch2), noise_lsb=args.noise,
                      hw_read_lag=args.hw_read_lag, fw_read_lag=args.fw_read_lag, true_order=args.true_order,
                      trigger_align_offset=args.trigger_align_offset, time_scale=args.time_scale,
-                     seed=args.seed, fail_responses_over=args.fail_responses_over, caps_override=args.caps)
+                     seed=args.seed, fail_responses_over=args.fail_responses_over, caps_override=args.caps,
+                     legacy=args.legacy, ui_capture_period_s=args.ui_period)
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -1552,6 +1788,10 @@ def make_parser() -> argparse.ArgumentParser:
     ap.add_argument("--caps", type=lambda x: int(x, 0), metavar="MASK",
                     help="capability mask override, e.g. 0x1803 = firmware 0.1.0 on AL3 (no device averaging, "
                          "screenshot, FORCE, DEBUG_FPGA); default: everything the simulator implements")
+    ap.add_argument("--legacy", action="store_true",
+                    help="firmware without collaborative mode (protocol 1.2, exclusive LOCAL/REMOTE)")
+    ap.add_argument("--ui-period", type=parse_quantity, default=0.05, metavar="S",
+                    help="UI capture period in RUN / LOCAL (default 50ms; 0 = only on demand)")
     ap.add_argument("--fail-responses-over", type=int, metavar="BYTES",
                     help="never send responses with a larger payload (reproduces the 5 KiB firmware bug)")
     ap.add_argument("-v", "--verbose", action="store_true")

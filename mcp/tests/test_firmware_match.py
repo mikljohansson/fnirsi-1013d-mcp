@@ -34,7 +34,7 @@ def test_pattern3_is_xorshift_words_little_endian():
 def test_arm_while_armed_is_e_state(sim_factory):
     srv = sim_factory(signal="zero")
     with Scope.connect(srv.url) as s:
-        s.take_remote(watchdog_s=0)
+        s.ensure_control(watchdog_s=0)
         s.set_trigger(mode=1, level=250)
         s.arm()
         with pytest.raises(DeviceError) as e:
@@ -46,7 +46,7 @@ def test_arm_while_armed_is_e_state(sim_factory):
 
 
 def test_local_fpga_flags_are_zero(sim_factory):
-    srv = sim_factory()
+    srv = sim_factory(legacy=True)
     with Scope.connect(srv.url) as s:
         s.read_trace(["CH1"])  # a UI capture completed
         st = s.status()
@@ -54,9 +54,9 @@ def test_local_fpga_flags_are_zero(sim_factory):
         assert st.flags & (P.StatusFlags.FPGA_TRIGGERED | P.StatusFlags.FPGA_DONE | P.StatusFlags.AUTO_TIMEOUT) == 0
 
 
-def test_error_responses_are_not_replayed(sim):
+def test_error_responses_are_not_replayed(legacy_sim):
     """14.5: only OK responses are cached; a retry after an error runs again."""
-    s = socket.create_connection((sim.host, sim.port))
+    s = socket.create_connection((legacy_sim.host, legacy_sim.port))
     try:
         p = P.FrameParser()
 
@@ -76,14 +76,14 @@ def test_error_responses_are_not_replayed(sim):
 
 
 def test_keep_settings_flag_of_release_request(sim_factory):
-    srv = sim_factory()
+    srv = sim_factory(legacy=True)
     with Scope.connect(srv.url) as s:
         div0 = s.get_timebase(cached=False).divider
-        s.take_remote(keep_settings=True)  # acquire-time flag ...
+        s.legacy_take_remote(keep_settings=True)  # acquire-time flag ...
         s.set_timebase(divider=3)
-        s.release(keep_settings=False)  # ... but the release request's flag decides
+        s.legacy_release(keep_settings=False)  # ... but the release request's flag decides
         assert s.get_timebase(cached=False).divider == div0
-        s.take_remote(keep_settings=True)
+        s.legacy_take_remote(keep_settings=True)
         s.set_timebase(divider=3)
         srv.device.user_tap()  # other exits use the acquire-time flag
         assert s.get_timebase(cached=False).divider == 3
@@ -96,7 +96,8 @@ def test_stock_gen_and_min_total(sim_factory):
         assert s.info.min_total_samples == s.info.max_total_samples == 3000
 
 
-def test_ascii_counts_for_watchdog(sim, transport):
+def test_ascii_counts_for_watchdog(legacy_transport):
+    transport = legacy_transport
     transport.request(P.Cmd.SET_REMOTE, P.SetRemoteReq(1, 0, 1).pack())
     for _ in range(4):
         time.sleep(0.4)

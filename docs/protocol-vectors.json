@@ -1478,6 +1478,111 @@
     }
    ],
    "source": "host"
+  },
+  {
+   "name": "host_resp_get_info_al3_proto_1_3",
+   "description": "GET_INFO response, protocol 1.3: caps 0x3C03 (SHARED_MODE bit 13 added)",
+   "hex": "a51301010200030000004c00000063d00103000200040100321502080020020200c2eb0b033c000080f0fa02fe3f500000070600302e322e300000000000000000000000dec0130031303133442d303030310000000000002003e0011c501ada",
+   "frames": [
+    {
+     "cmd": 2,
+     "seq": 3,
+     "status": 0,
+     "flags": 1,
+     "len": 76,
+     "payload": "0103000200040100321502080020020200c2eb0b033c000080f0fa02fe3f500000070600302e322e300000000000000000000000dec0130031303133442d303030310000000000002003e001"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_status_shared",
+   "description": "GET_STATUS response, protocol 1.3 (44 bytes): control 2 SHARED, host single DONE, capture 44, settings_seq 17, capture_settings_seq 16, run_state STOP, capture_origin host",
+   "hex": "a51301010300080000002c0000005b3002030b002c000000d11941180300000040e20100ffff1200000000001400230011000000100000000000000004bf4e59",
+   "frames": [
+    {
+     "cmd": 3,
+     "seq": 8,
+     "status": 0,
+     "flags": 1,
+     "len": 44,
+     "payload": "02030b002c000000d11941180300000040e20100ffff12000000000014002300110000001000000000000000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_acq_state_run",
+   "description": "SET_ACQ_STATE 0x0208 RUN (u8 state 1, 3 reserved)",
+   "hex": "a513010008021e0000000400000003da0100000079b8f899",
+   "frames": [
+    {
+     "cmd": 520,
+     "seq": 30,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "01000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 520,
+     "seq": 30,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "01000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_req_get_capture_info",
+   "description": "GET_CAPTURE_INFO 0x0209 request (empty)",
+   "hex": "a513010009021f000000000000006438",
+   "frames": [
+    {
+     "cmd": 521,
+     "seq": 31,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": ""
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 521,
+     "seq": 31,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": "",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_capture_info",
+   "description": "GET_CAPTURE_INFO response (68 bytes): capture 45 from the UI RUN loop, settings_seq 17, triggered, divider 19, CH2 falling 160 normal, 800/16000; CH1 range 5 DC 10x, CH2 range 2 AC 1x",
+   "hex": "a513010109021f0000004400000040442d000000110000000101d1194118000013000000180101a00100000020030000803e0000010500000200e803fd0c000000800000010201000100f203e28100000081000073a38839",
+   "frames": [
+    {
+     "cmd": 521,
+     "seq": 31,
+     "status": 0,
+     "flags": 1,
+     "len": 68,
+     "payload": "2d000000110000000101d1194118000013000000180101a00100000020030000803e0000010500000200e803fd0c000000800000010201000100f203e281000000810000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
   }
  ]
 }

@@ -98,18 +98,11 @@ limit, which bitstream, which caps are unverified: `read_lag`, interleave order,
 `trigger_addr`, time since arm, battery level and charging, `exit_reason` if the scope went back to local
 on its own (user tap, watchdog, port closed).
 
-**`remote_session`** (tier 1). Takes the scope from the UI or gives it back.
-
-| Param | Type | Default | Notes |
-|---|---|---|---|
-| `action` | `"acquire"` / `"release"` | | |
-| `keep_settings` | bool | false | on release, keep the host's settings in the UI instead of restoring the user's |
-| `show_traces` | bool | false | draw each capture on screen (slower) |
-| `watchdog_s` | int | 15 | scope returns to local if the server goes silent this long; the server sends keep-alives |
-
-Description caveat: "While acquired, the scope's touch UI is frozen; a tap on the banner hands control back
-to the person at the scope, and the next tool call will then fail with 'scope released by user'." Every tier
-1+ tool calls `acquire` implicitly when needed and reports that it did.
+**`remote_session`**: retired with collaborative mode (docs/plans/collaborative-mode.md, protocol 1.3). The scope
+is shared: no ownership to take or release, the last change wins, host captures appear on screen, and long runs
+restart (and say so) when a setting is changed at the scope. On legacy firmware without the SHARED_MODE capability
+the server takes REMOTE implicitly and releases it (keeping the host settings) after 60 s idle and at exit.
+`scope_status` reports `mode`, `run_state` and `settings_seq`; `acquisition_control` gained `run`.
 
 **`get_config`** (tier 0). Returns both channels (enabled, V/div, coupling, offset in divisions and volts,
 probe factor, invert), timebase (rate, dt, time/div equivalent, divider), trigger (source, edge, level in
@@ -300,14 +293,14 @@ port disappears.
 
 PI decay characterisation with the TX gate on CH2:
 
-1. `remote_session(acquire)`.
+1. (Nothing to acquire: the scope is shared with the person at it.)
 2. `set_channel(CH2, volts_per_div=1, probe=10, coupling=DC)` (TX gate drive), `set_channel(CH1,
    volts_per_div=0.1, probe=10, coupling=DC)` (coil or preamp output).
 3. `set_timebase(sample_rate=20e6)`; `set_trigger(source=CH2, edge=falling, level=1.5, mode=normal,
    pretrigger_fraction=0.05, total_samples=16000)` gives 40 us before and 760 us after the edge.
 4. `decay_fit(channel=CH1, edge_channel=CH2, t_start=8e-6, t_end=300e-6, model=exp2, n_avg=256)`.
 5. Change the target, repeat 4, compare tau.
-6. `remote_session(release)`.
+6. `acquisition_control(action='run')` if the scope should run on its own again.
 
 VLF RX phase measurement: `set_timebase(window=2e-3)`, trigger on the TX reference on CH2, `averaged_capture
 (n=32, channels=[CH1, CH2])`, then `measure(delay(CH1->CH2))` and `capture_and_fft` on both for amplitude and

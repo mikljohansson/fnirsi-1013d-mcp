@@ -106,7 +106,7 @@ def build_host_vectors() -> list[dict[str, Any]]:
     v.append(_vec("host_resp_get_info_al3_proto_1_1", _f(P.Cmd.GET_INFO, 2, info11.pack(), flags=R).encode(),
                   "GET_INFO response of firmware 0.1.1: proto 1.1, caps 0x1C03 (ENTER_FEL added)"))
     st11 = P.StatusResp(1, 3, 0x0B, 0, 43, 6609, 6209, 3, 123456, 15, 18, 0, 0, 7, 31)
-    v.append(_vec("host_resp_get_status_proto_1_1", _f(P.Cmd.GET_STATUS, 6, st11.pack(), flags=R).encode(),
+    v.append(_vec("host_resp_get_status_proto_1_1", _f(P.Cmd.GET_STATUS, 6, st11.pack()[:32], flags=R).encode(),
                   "GET_STATUS response, protocol 1.1 (32 bytes): pass_ms 7, pass_max_ms 31"))
     v.append(_vec("host_ascii_reset", b"#RESET\n", "#RESET recovery line (firmware 0.1.1)"))
     v.append(_vec("host_resp_e_bad_crc", _f(P.Cmd.PING, 23, P.error_payload(0, "payload crc"), P.Status.E_BAD_CRC,
@@ -131,6 +131,38 @@ def build_host_vectors() -> list[dict[str, Any]]:
                   "frame, a false 4-byte header start, frame, lone 0xA5 then silence (partial dropped)"))
     v.append(_vec("host_ascii_63_chars", b"#" + b"Y" * 63 + b"\n",
                   "longest accepted line: 63 characters after '#' (one more is ascii_overflow)"))
+    v += build_host_vectors_1_3()
+    return v
+
+
+def build_host_vectors_1_3() -> list[dict[str, Any]]:
+    """Protocol 1.3 (collaborative mode) frames."""
+    R = P.FLAG_RESPONSE
+    v = []
+    info = P.InfoResp(fpga_version=0x1532, fpga_variant=2, ring_words=8192, caps=0x3C03, gen_clock_hz=50_000_000,
+                      max_total_samples=16382, fw_version=b"0.2.0", fw_build=0x0013C0DE, serial=b"1013D-0001",
+                      proto_minor=3)
+    v.append(_vec("host_resp_get_info_al3_proto_1_3", _f(P.Cmd.GET_INFO, 3, info.pack(), flags=R).encode(),
+                  "GET_INFO response, protocol 1.3: caps 0x3C03 (SHARED_MODE bit 13 added)"))
+    st = P.StatusResp(control=2, acq_state=3, flags=0x0B, capture_id=44, trigger_addr=6609, capture_start_word=6209,
+                      ms_since_arm=3, uptime_ms=123456, battery_level=18, pass_ms=20, pass_max_ms=35,
+                      settings_seq=17, capture_settings_seq=16, run_state=0, capture_origin=0)
+    v.append(_vec("host_resp_get_status_shared", _f(P.Cmd.GET_STATUS, 8, st.pack()[:44], flags=R).encode(),
+                  "GET_STATUS response, protocol 1.3 (44 bytes): control 2 SHARED, host single DONE, capture 44, "
+                  "settings_seq 17, capture_settings_seq 16, run_state STOP, capture_origin host"))
+    v.append(_vec("host_req_set_acq_state_run", _f(P.Cmd.SET_ACQ_STATE, 30, P.SetAcqStateReq(1).pack()).encode(),
+                  "SET_ACQ_STATE 0x0208 RUN (u8 state 1, 3 reserved)"))
+    v.append(_vec("host_req_get_capture_info", _f(P.Cmd.GET_CAPTURE_INFO, 31).encode(),
+                  "GET_CAPTURE_INFO 0x0209 request (empty)"))
+    ci = P.CaptureInfo(
+        P.CaptureInfoHeader(capture_id=45, settings_seq=17, origin=1, flags=0x01, trigger_addr=6609,
+                            capture_start_word=6209, divider=19, timeperdiv_index=24, trig_source=1, trig_edge=1,
+                            trig_level=160, trig_mode=1, pretrigger_samples=800, total_samples=16000),
+        [P.CaptureChannelInfo(1, 5, 0, 0, 2, 1000, 3325, 32768),
+         P.CaptureChannelInfo(1, 2, 1, 0, 1, 1010, 33250, 33024)])
+    v.append(_vec("host_resp_get_capture_info", _f(P.Cmd.GET_CAPTURE_INFO, 31, ci.pack(), flags=R).encode(),
+                  "GET_CAPTURE_INFO response (68 bytes): capture 45 from the UI RUN loop, settings_seq 17, triggered, "
+                  "divider 19, CH2 falling 160 normal, 800/16000; CH1 range 5 DC 10x, CH2 range 2 AC 1x"))
     return v
 
 

@@ -2,12 +2,18 @@
 
     from fnirsi1013d.scope import Scope
     with Scope.connect("tcp://localhost:5555") as s:
-        s.take_remote()
+        s.ensure_control()                               # no-op on collaborative firmware (protocol 1.3)
         s.set_timebase(divider=9)                       # 20 MS/s
         s.set_trigger(source=1, edge=1, level=160, mode=1, pretrigger_samples=800, total_samples=16000)
-        cap = s.capture(timeout_s=1.0)
+        cap = s.capture(timeout_s=1.0)                   # host single capture; the scope screen shows it
         v = cap.channels["CH1"].volts                    # numpy, volts at the probe tip
         t = cap.t                                        # seconds relative to the trigger
+        latest = s.read_capture(["CH1"])                 # latest capture (UI or host) with its own settings
+
+Collaborative mode (protocol 1.3, cap SHARED_MODE): the UI and the host share one live settings set; there is
+no ownership. Every capture carries the ``settings_seq`` it was taken under, so long runs can detect a change
+made at the scope. Firmware without SHARED_MODE gets the old exclusive model: ``ensure_control()`` takes REMOTE
+and ``end_control()`` (also on close) releases it.
 
 Scaling [U, bench test T8, docs/protocol.md section 8.5]: the firmware reports ``uv_per_lsb_q8`` and
 ``zero_code_q8`` per channel, derived from ``input_calibration``, the 1x ``mul_factor`` table and the DC
@@ -20,7 +26,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
 import numpy as np
@@ -94,6 +100,12 @@ class Capture:
     trigger: P.Trigger
     origin: str = "remote"
     acq_state: int = P.AcqState.DONE
+    #: protocol 1.3: settings_seq the capture was started under (None on older firmware)
+    settings_seq: int | None = None
+    #: protocol 1.3: GET_CAPTURE_INFO of this capture when it was read from the device
+    capture_info: P.CaptureInfo | None = None
+    #: what the client had to do to read it (e.g. pausing RUN), for caveats
+    notes: list[str] = field(default_factory=list)
 
     @property
     def n(self) -> int:
@@ -130,6 +142,40 @@ class Profile:
 
 class ScopeError(Exception):
     pass
+
+
+class CaptureChanged(ScopeError):
+    """A newer capture replaced the one being read (RUN mode, chunked read)."""
+
+
+@dataclass
+class CaptureContext:
+    """Settings verified to belong to ``settings_seq`` (protocol 1.3). Captures whose capture_settings_seq equals
+    it can be converted without GET_CAPTURE_INFO."""
+
+    settings_seq: int
+    trigger: P.Trigger
+    timebase: P.Timebase
+    channels: dict[int, P.ChannelConfig]
+
+    def settings_key(self) -> dict[str, Any]:
+        """Same keys as ``CaptureInfo.settings_key`` (for reporting what changed)."""
+        tr = self.trigger
+        d: dict[str, Any] = {"divider": self.timebase.divider, "trig_source": tr.source, "trig_edge": tr.edge,
+                             "trig_level": tr.level, "trig_mode": tr.mode,
+                             "pretrigger_samples": tr.pretrigger_samples, "total_samples": tr.total_samples}
+        for i, c in sorted(self.channels.items()):
+            for k in ("enable", "range", "coupling", "invert", "probe_index", "offset_pwm"):
+                d[f"CH{i + 1}.{k}"] = getattr(c, k)
+        return d
+
+
+def settings_diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, list[Any]]:
+    """{key: [old, new]} for every setting that differs."""
+    return {k: [old.get(k), new.get(k)] for k in sorted(set(old) | set(new)) if old.get(k) != new.get(k)}
+
+
+ORIGIN_NAMES = {P.CaptureOrigin.HOST: "host", P.CaptureOrigin.UI_RUN: "ui_run", P.CaptureOrigin.UI_SINGLE: "ui_single"}
 
 
 def compensate(raw: np.ndarray, comp: int) -> np.ndarray:
@@ -171,7 +217,12 @@ class Scope:
         self._cal: dict[int, P.CalResp] = {}
         self._tb: P.Timebase | None = None
         self._trig: P.Trigger | None = None
+        #: legacy (no SHARED_MODE) only: REMOTE held by this client
         self.remote = False
+        #: protocol 1.3: settings_seq the caches belong to (None: unknown)
+        self._cache_seq: int | None = None
+        #: last status-shaped answer
+        self.last_status: P.StatusResp | None = None
 
     # --- lifecycle ---------------------------------------------------------------------------------------
 
@@ -192,8 +243,7 @@ class Scope:
 
     def __exit__(self, *a: object) -> None:
         try:
-            if self.remote:
-                self.release()
+            self.end_control()
         except (TransportError, DeviceError):
             pass
         self.close()
@@ -210,6 +260,20 @@ class Scope:
         self._chan.clear()
         self._tb = None
         self._trig = None
+        self._cache_seq = None
+
+    def _status(self, payload: bytes) -> P.StatusResp:
+        """Decode a status-shaped answer and keep the caches consistent with the device's settings_seq."""
+        st = P.StatusResp.unpack(payload)
+        self.last_status = st
+        if st.shared:
+            if self._cache_seq != st.settings_seq:
+                self.invalidate()
+                self._cache_seq = st.settings_seq
+        elif self.remote and st.control != P.Control.REMOTE:
+            self.remote = False
+            self.invalidate()
+        return st
 
     # --- system ------------------------------------------------------------------------------------------
 
@@ -229,6 +293,11 @@ class Scope:
         assert self._info is not None
         return self._info
 
+    @property
+    def shared(self) -> bool:
+        """Collaborative mode (protocol 1.3, cap SHARED_MODE): no LOCAL/REMOTE ownership."""
+        return bool(self.info.caps & P.Caps.SHARED_MODE)
+
     def profile(self) -> Profile:
         i = self.info
         try:
@@ -246,11 +315,7 @@ class Scope:
         return self._req(P.Cmd.PING, data)
 
     def status(self) -> P.StatusResp:
-        st = P.StatusResp.unpack(self._req(P.Cmd.GET_STATUS))
-        if self.remote and st.control != P.Control.REMOTE:
-            self.remote = False
-            self.invalidate()
-        return st
+        return self._status(self._req(P.Cmd.GET_STATUS))
 
     def link_stats(self) -> dict[str, int] | None:
         """Device-side link counters (GET_LINK_STATS, protocol >= 1.2), or None on older firmware."""
@@ -264,21 +329,68 @@ class Scope:
     def test_pattern(self, length: int, pattern: int = 0) -> bytes:
         return self._req(P.Cmd.TEST_PATTERN, P.TestPatternReq(length, pattern).pack())
 
-    def take_remote(self, watchdog_s: int = 15, keep_settings: bool = False, show_traces: bool = False,
-                    ignore_dtr: bool = False) -> P.StatusResp:
+    # --- control (legacy exclusive model only) --------------------------------------------------------------
+
+    def ensure_control(self, watchdog_s: int = 15, keep_settings: bool = False) -> bool:
+        """Make SET_*/ARM/READ_* possible. Collaborative firmware: nothing to do (returns False). Legacy firmware:
+        take REMOTE if not held (returns True when it did)."""
+        if self.shared:
+            return False
+        if self.remote:
+            return False
+        self.legacy_take_remote(watchdog_s=watchdog_s, keep_settings=keep_settings)
+        return True
+
+    def end_control(self, keep_settings: bool = False) -> None:
+        """Legacy firmware: release REMOTE if held. Collaborative firmware: nothing to do."""
+        if self.remote and not self.shared:
+            self.legacy_release(keep_settings=keep_settings)
+
+    def legacy_take_remote(self, watchdog_s: int = 15, keep_settings: bool = False, show_traces: bool = False,
+                           ignore_dtr: bool = False) -> P.StatusResp:
+        """SET_REMOTE acquire (protocol <= 1.2 exclusive model; a no-op on SHARED_MODE firmware)."""
         flags = (P.SetRemoteReq.KEEP_SETTINGS if keep_settings else 0) | \
                 (P.SetRemoteReq.SHOW_TRACES if show_traces else 0) | (P.SetRemoteReq.IGNORE_DTR if ignore_dtr else 0)
-        st = P.StatusResp.unpack(self._req(P.Cmd.SET_REMOTE, P.SetRemoteReq(1, flags, watchdog_s).pack()))
+        st = self._status(self._req(P.Cmd.SET_REMOTE, P.SetRemoteReq(1, flags, watchdog_s).pack()))
         self.remote = st.control == P.Control.REMOTE
         self.invalidate()
         return st
 
-    def release(self, keep_settings: bool = False) -> P.StatusResp:
+    def legacy_release(self, keep_settings: bool = False) -> P.StatusResp:
+        """SET_REMOTE release (protocol <= 1.2 exclusive model)."""
         flags = P.SetRemoteReq.KEEP_SETTINGS if keep_settings else 0
-        st = P.StatusResp.unpack(self._req(P.Cmd.SET_REMOTE, P.SetRemoteReq(0, flags, 0).pack()))
+        st = self._status(self._req(P.Cmd.SET_REMOTE, P.SetRemoteReq(0, flags, 0).pack()))
         self.remote = False
         self.invalidate()
         return st
+
+    # --- collaborative mode (protocol 1.3) --------------------------------------------------------------
+
+    def set_acq_state(self, run: bool) -> P.StatusResp:
+        """SET_ACQ_STATE: RUN (the UI acquires continuously) or STOP. A pending host single is aborted."""
+        state = P.RunState.RUN if run else P.RunState.STOP
+        return self._status(self._req(P.Cmd.SET_ACQ_STATE, P.SetAcqStateReq(int(state)).pack()))
+
+    def capture_info(self) -> P.CaptureInfo:
+        """GET_CAPTURE_INFO: the settings the latest finished capture (any origin) was taken with."""
+        return P.CaptureInfo.unpack(self._req(P.Cmd.GET_CAPTURE_INFO))
+
+    def capture_context(self, attempts: int = 5) -> CaptureContext:
+        """Read the live trigger, timebase and both channels and prove they belong to one settings_seq (status
+        before and after agree). Legacy firmware: settings_seq 0, the settings cannot change under REMOTE."""
+        for _ in range(attempts):
+            st0 = self.status()
+            ctx = CaptureContext(st0.settings_seq, self.get_trigger(cached=False), self.get_timebase(cached=False),
+                                 {c: self.get_channel(c, cached=False) for c in (0, 1)})
+            if not self.shared:
+                return ctx
+            st1 = self.status()
+            if st1.settings_seq == st0.settings_seq:
+                self._chan.update(ctx.channels)
+                self._trig, self._tb = ctx.trigger, ctx.timebase
+                return ctx
+        raise ScopeError(f"settings kept changing while being read ({attempts} attempts); is someone turning a "
+                         "knob on the scope?")
 
     # --- configuration -----------------------------------------------------------------------------------
 
@@ -390,14 +502,16 @@ class Scope:
     # --- acquisition -------------------------------------------------------------------------------------
 
     def arm(self) -> P.StatusResp:
-        return P.StatusResp.unpack(self._req(P.Cmd.ARM, b"\0\0\0\0"))
+        """ARM. Collaborative firmware: a host single capture with the live settings (the screen shows it and
+        the UI stays in STOP afterwards)."""
+        return self._status(self._req(P.Cmd.ARM, b"\0\0\0\0"))
 
     def force(self) -> P.StatusResp:
-        return P.StatusResp.unpack(self._req(P.Cmd.FORCE))
+        return self._status(self._req(P.Cmd.FORCE))
 
     def stop(self) -> P.StatusResp:
         with self.lock:
-            return P.StatusResp.unpack(self.t.control(P.Cmd.STOP).payload)
+            return self._status(self.t.control(P.Cmd.STOP).payload)
 
     def wait(self, timeout_s: float = 2.0, cancel: Callable[[], bool] | None = None) -> P.StatusResp:
         """WAIT (deferred). Returns the status; check ``acq_state == DONE``. Long waits are split into
@@ -408,7 +522,7 @@ class Scope:
             ms = int(min(left, 10.0) * 1000)
             with self.lock:
                 resp = self.t.deferred(P.Cmd.WAIT, P.U32Req(ms).pack(), ms / 1000.0 + 1.5, cancel=cancel)
-            st = P.StatusResp.unpack(resp.payload)
+            st = self._status(resp.payload)
             if st.acq_state == P.AcqState.DONE or time.monotonic() >= deadline or \
                     (cancel is not None and cancel()) or st.acq_state not in (P.AcqState.ARMED,
                                                                                 P.AcqState.TRIGGERED):
@@ -432,6 +546,9 @@ class Scope:
                                address + done, n)
             data = self._req(P.Cmd.READ_RAW, req.pack())
             hdr = P.ReadRawHeader.unpack(data)
+            if first is not None and hdr.capture_id != first.capture_id:
+                raise CaptureChanged(f"capture {first.capture_id} was replaced by {hdr.capture_id} during a chunked "
+                                     "READ_RAW")
             first = first or hdr
             body = np.frombuffer(data, dtype=np.uint8, offset=16)
             out: dict[int, np.ndarray] = {}
@@ -530,12 +647,58 @@ class Scope:
     # --- convenience ---------------------------------------------------------------------------------------
 
     def read_capture(self, channels: Iterable[int | str] = ("CH1",), start_sample: int = 0,
-                     count: int | None = None, keep_raw: bool = False, st: P.StatusResp | None = None) -> Capture:
-        """Read the DONE capture through READ_RAW (both cores per channel), apply the per-core compensation on
-        the host and convert to volts. ``start_sample`` / ``count`` are interleaved sample indices relative to
-        the capture start (0 .. total_samples)."""
-        trig = self.get_trigger()
-        tb = self.get_timebase()
+                     count: int | None = None, keep_raw: bool = False, st: P.StatusResp | None = None,
+                     ctx: CaptureContext | None = None) -> Capture:
+        """Read a capture through READ_RAW (both cores per channel), apply the per-core compensation on the host
+        and convert to volts. ``start_sample`` / ``count`` are interleaved sample indices relative to the capture
+        start (0 .. total_samples).
+
+        Legacy firmware: the DONE remote capture, converted with the current settings. Collaborative firmware:
+        the latest finished capture of any origin (UI RUN, UI single or host single) converted with the settings
+        it was taken under. When ``st`` (the WAIT answer) and ``ctx`` agree on its settings_seq, ``ctx`` is used;
+        otherwise GET_CAPTURE_INFO is read. In RUN mode a chunked read can race a newer UI capture: it is retried,
+        then read with RUN paused for the read (noted in ``Capture.notes``)."""
+        chans = [channel_index(c) for c in channels]
+        if not self.shared:
+            return self._read_capture(chans, start_sample, count, keep_raw, st, self.get_trigger(),
+                                      self.get_timebase(), {c: self.get_channel(c) for c in chans}, None)
+        if ctx is not None and st is not None and st.capture_settings_seq == ctx.settings_seq and \
+                st.capture_origin == P.CaptureOrigin.HOST:
+            try:
+                return self._read_capture(chans, start_sample, count, keep_raw, st, ctx.trigger, ctx.timebase,
+                                          ctx.channels, None, expect_id=st.capture_id)
+            except CaptureChanged:
+                pass
+        for _ in range(3):
+            ci = self.capture_info()
+            try:
+                return self._from_info(ci, chans, start_sample, count, keep_raw)
+            except CaptureChanged:
+                continue
+        # RUN mode keeps replacing the capture: pause it for one read
+        self.set_acq_state(False)
+        try:
+            ci = self.capture_info()
+            cap = self._from_info(ci, chans, start_sample, count, keep_raw)
+            cap.notes.append("RUN was paused briefly to read a consistent capture (it kept being replaced)")
+            return cap
+        finally:
+            self.set_acq_state(True)
+
+    def _from_info(self, ci: P.CaptureInfo, chans: list[int], start_sample: int, count: int | None,
+                   keep_raw: bool) -> Capture:
+        h = ci.header
+        cfgs = {c: ci.channel_config(c) for c in chans}
+        st = P.StatusResp(acq_state=P.AcqState.DONE, capture_id=h.capture_id, capture_settings_seq=h.settings_seq,
+                          capture_origin=h.origin,
+                          flags=(P.StatusFlags.FPGA_TRIGGERED if h.flags & h.F_TRIGGERED else 0) |
+                                (P.StatusFlags.AUTO_TIMEOUT if h.flags & h.F_AUTO_TIMEOUT else 0))
+        return self._read_capture(chans, start_sample, count, keep_raw, st, ci.trigger(), ci.timebase(), cfgs, ci,
+                                  expect_id=h.capture_id)
+
+    def _read_capture(self, chans: list[int], start_sample: int, count: int | None, keep_raw: bool,
+                      st: P.StatusResp | None, trig: P.Trigger, tb: P.Timebase, cfgs: dict[int, P.ChannelConfig],
+                      ci: P.CaptureInfo | None, expect_id: int | None = None) -> Capture:
         total = trig.total_samples
         if count is None:
             count = total - start_sample
@@ -543,17 +706,18 @@ class Scope:
             raise ValueError(f"sample window {start_sample}+{count} outside 0..{total}")
         w0 = start_sample // 2
         w1 = (start_sample + count + 1) // 2
-        chans = [channel_index(c) for c in channels]
         mask = 0
         for c in chans:
             mask |= 3 << (2 * c)
         hdr, cores = self.read_raw(mask, addr_mode=P.ReadRawReq.ADDR_CAPTURE, address=w0, count=w1 - w0)
+        if expect_id is not None and hdr.capture_id != expect_id:
+            raise CaptureChanged(f"expected capture {expect_id}, READ_RAW returned {hdr.capture_id}")
         if st is None:
             st = self.status()
         order = self.info.interleave_order
         out: dict[str, ChannelData] = {}
         for c in chans:
-            cfg = self.get_channel(c)
+            cfg = cfgs[c]
             cal = self.get_cal(c)
             a, b = cores[2 * c], cores[2 * c + 1]
             comp = interleave(compensate(a, cal.adc_a_comp), compensate(b, cal.adc_b_comp), order)
@@ -566,21 +730,44 @@ class Scope:
                 volts = -volts  # invert is a display option; codes stay as sampled
             out[CHANNEL_NAMES[c]] = ChannelData(CHANNEL_NAMES[c], codes, volts, clipped, cfg,
                                                 a.copy() if keep_raw else None, b.copy() if keep_raw else None)
+        shared = ci is not None or st.shared or self.shared
+        origin = ORIGIN_NAMES.get(st.capture_origin, "host") if shared else "remote"
         return Capture(hdr.capture_id, tb.dt, tb.divider, start_sample, trig.pretrigger_samples, total,
                        bool(st.flags & P.StatusFlags.FPGA_TRIGGERED) and not (st.flags & P.StatusFlags.AUTO_TIMEOUT),
-                       bool(st.flags & P.StatusFlags.AUTO_TIMEOUT), out, trig, "remote", hdr.acq_state)
+                       bool(st.flags & P.StatusFlags.AUTO_TIMEOUT), out, trig, origin, hdr.acq_state,
+                       st.capture_settings_seq if shared else None, ci)
 
     def read_trace_capture(self, channels: Iterable[int | str] = ("CH1",)) -> Capture:
-        """Read the firmware's processed trace (READ_TRACE). Works in LOCAL (the UI's last trace)."""
-        hdr, data = self.read_trace(channels)
-        trig = self.get_trigger(cached=False)
+        """Read the firmware's processed trace (READ_TRACE). Works in LOCAL (the UI's last trace). Collaborative
+        firmware: the latest capture with the settings it was taken under (GET_CAPTURE_INFO)."""
+        if self.shared:
+            for _ in range(3):
+                ci = self.capture_info()
+                hdr, data = self.read_trace(channels)
+                if hdr.capture_id == ci.header.capture_id:
+                    break
+            else:
+                raise CaptureChanged("the capture kept changing during READ_TRACE (RUN mode); stop the scope first")
+            trig = ci.trigger()
+            cfgs = {c: ci.channel_config(c) for c in data}
+        else:
+            ci = None
+            hdr, data = self.read_trace(channels)
+            trig = self.get_trigger(cached=False)
+            cfgs = {c: self.get_channel(c, cached=False) for c in data}
         out: dict[str, ChannelData] = {}
         for c, (meta, arr) in data.items():
-            cfg = self.get_channel(c, cached=False)
+            cfg = cfgs[c]
             codes = arr.astype(np.float64)
             clipped = (arr == 0) | (arr == 255)
             out[CHANNEL_NAMES[c]] = ChannelData(CHANNEL_NAMES[c], codes, codes_to_volts(codes, cfg), clipped, cfg)
         dt = (hdr.divider + 1) / P.BASE_CLOCK_HZ
+        if ci is not None:
+            h = ci.header
+            return Capture(hdr.capture_id, dt, hdr.divider, hdr.start, hdr.hw_trigger_index, hdr.sample_count,
+                           bool(h.flags & h.F_TRIGGERED) and not h.flags & h.F_AUTO_TIMEOUT,
+                           bool(h.flags & h.F_AUTO_TIMEOUT), out, trig, ORIGIN_NAMES.get(h.origin, "host"),
+                           settings_seq=h.settings_seq, capture_info=ci)
         st = self.status()
         return Capture(hdr.capture_id, dt, hdr.divider, hdr.start, hdr.hw_trigger_index, hdr.sample_count,
                        bool(st.flags & P.StatusFlags.FPGA_TRIGGERED), bool(st.flags & P.StatusFlags.AUTO_TIMEOUT),
@@ -588,12 +775,15 @@ class Scope:
 
     def capture(self, channels: Iterable[int | str] = ("CH1",), timeout_s: float = 2.0, start_sample: int = 0,
                 count: int | None = None, keep_raw: bool = False,
-                cancel: Callable[[], bool] | None = None) -> Capture | None:
-        """ARM, WAIT, READ. Returns None if no trigger arrived within ``timeout_s`` (the capture is STOPped)."""
+                cancel: Callable[[], bool] | None = None, ctx: CaptureContext | None = None) -> Capture | None:
+        """ARM, WAIT, READ: one host capture with the live settings. Collaborative firmware: a host single (the
+        screen shows it, the UI stays in STOP). Returns None if no trigger arrived within ``timeout_s`` (the
+        capture is STOPped). ``ctx``: settings already verified for a run (saves GET_CAPTURE_INFO); check
+        ``Capture.settings_seq`` against it."""
         self.arm()
         st = self.wait(timeout_s, cancel=cancel)
         if st.acq_state != P.AcqState.DONE:
             if st.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
                 self.stop()
             return None
-        return self.read_capture(channels, start_sample, count, keep_raw=keep_raw, st=st)
+        return self.read_capture(channels, start_sample, count, keep_raw=keep_raw, st=st, ctx=ctx)
