@@ -19,6 +19,10 @@
 #include "fnirsi_1013d_scope.h"
 #include "spec_fmt.h"
 #include "pc_hal.h"
+#include "fpga_control.h"
+#include "scope_functions.h"
+#include "menu.h"
+#include "pc_hooks.h"
 
 #include <string.h>
 
@@ -202,6 +206,7 @@ typedef struct
 } SPECFRAME;
 
 static FX_FFT    spec_plan;
+static uint8     auto_refused;                          //Auto refused: 1 stopped, 2 single mode (spec_auto_start)
 static uint8     spec_untrig;                           //the latest UI record is untriggered (spectrum_capture_info)
 static uint32    spec_trig_ms;
 static SPECFRAME spec_frame[2];
@@ -674,10 +679,9 @@ static uint32 spec_glyph_marker(uint32 x, uint32 y)
 
 static const char *spec_avg_names[] = { "", "Avg 4", "Avg 16", "Avg 64", "Max" };
 
-//The one header line (owner, fw 0.2.40), left to right: per shown channel its peak "CH1 ^ 977 Hz  +2.7 dBV" in the
-//channel colour, then "RBW 732 Hz", the averaging ("Avg 4" / "Max", hidden when off), the decimation filter tag
-//("CIC3", no N) and, in the waterfall, the time its rows span. Nothing that repeats a strip field (fs is the time base,
-//N the FFT length field).
+//The one header line (owner, fw 0.2.40-0.2.42), left to right: per shown channel its peak "CH1 ^ 977 Hz  +2.7 dBV" in
+//the channel colour, then "RBW 732 Hz", the decimation filter tag ("CIC3", no N; the filter lives in the acquisition
+//menu) and, in the waterfall, the time its rows span. Nothing that repeats a strip field (no fs, N or averaging).
 static void spec_draw_header(const uint32 *peak, int hch, int k, uint64 bin_mhz)
 {
   char   t[48], *p;
@@ -706,9 +710,6 @@ static void spec_draw_header(const uint32 *peak, int hch, int k, uint64 bin_mhz)
   fmt_freq(p, (bin_mhz * fx_enbw_milli(spec.window) + 500) / 1000);
   x = spec_text_at(x, INFO_Y1, t) + 18;
 
-  if(spec.avg)
-    x = spec_text_at(x, INFO_Y1, spec_avg_names[spec.avg]) + 12;
-
   if(k)
   {
     static const char *names[] = { "", "boxcar", "CIC2", "CIC3" };
@@ -727,27 +728,35 @@ static void spec_draw_header(const uint32 *peak, int hch, int k, uint64 bin_mhz)
   }
 }
 
-//Warnings, only while they apply, centred over the top of the plot in the warning colour: overrange of a shown
-//channel, no anti-alias filter (decimated without the 0x1534 filter), stopped while a history view cannot fill
+//Warnings (owner, fw 0.2.42), only while they apply, centred over the top of the plot in the warning colour, each
+//saying the consequence and the action (README "Spectrum view" lists them)
 static void spec_draw_warnings(int k, uint64 fs_mhz, int hch)
 {
-  char   t[128], *p = t;
+  char   t[160], *p = t;
   int    ch;
 
   *p = 0;
   for(ch = 0; ch < 2; ch++)
     if(spec_ch(ch)->enable && spec_ch(ch)->ADoverload &&
        ((spec.view == VIEW_SPECTRUM) ? ((spec.channel == SPEC_CH_BOTH) || (spec.channel == ch)) : (ch == hch)))
-      p = fmt_str(p, ch ? "CH2 overrange   " : "CH1 overrange   ");
+      p = fmt_str(p, ch ? "CH2 overrange: increase V/div   " : "CH1 overrange: increase V/div   ");
 
   if(!k && (fs_mhz < 200000000000ull))
-    p = fmt_str(p, "no anti-alias filter below 200 MS/s   ");
+    p = fmt_str(p, pc_glue_ui_has(PC_FEAT_DECIM) ? "Aliasing possible: set Acquisition > Filter   " :
+                                                   "Aliasing possible: use a faster time base   ");
 
   if(!scopesettings.runstate && ((spec.view != VIEW_SPECTRUM) || (!spec.have[0] && !spec.have[1])))
-    p = fmt_str(p, "Stopped: RUN fills the view   ");
+    p = fmt_str(p, "Stopped: press RUN to fill the view   ");
+  else if(auto_refused == 1)
+    p = fmt_str(p, "Auto needs RUN: press RUN   ");
+  else if(auto_refused == 2)
+    p = fmt_str(p, "Auto needs trigger mode Auto or Normal   ");
 
-  if(spec_untrig && scopesettings.runstate)
-    p = fmt_str(p, "untriggered (auto time-out)   ");
+  if(spec.wait && !spec.autostage && scopesettings.runstate)
+    p = fmt_str(p, "Waiting for a capture at the new rate   ");
+
+  if(spec_untrig && scopesettings.runstate && !spec.autostage)
+    p = fmt_str(p, "No trigger: check the trigger level   ");
 
   if(p == t)
     return;
@@ -1075,7 +1084,7 @@ static void spec_field_value(int f, char *t, int log2n, uint64 bin_mhz)
       break;
 
     case F_AUTO:
-      fmt_str(t, "Auto");
+      fmt_str(t, spec.autostage ? "Auto..." : "Auto");
       break;
 
     case F_RESET:
@@ -1281,9 +1290,8 @@ int spectrum_display(void)
 
   if(((!spec.have[0] && !spec.have[1]) || ((spec.view == VIEW_WATERFALL) && !wf_count)) && scopesettings.runstate)
   {
-    const char *msg = !(spec_ch_on(0) || spec_ch_on(1)) ? "No channel enabled" :
-                      spec.autostage ? "Auto: measuring the signal" :
-                      spec.wait ? "Waiting for a capture at the new sample rate" : "Waiting for a capture";
+    const char *msg = !(spec_ch_on(0) || spec_ch_on(1)) ? "No channel enabled: switch on CH1 or CH2" :
+                      spec.autostage ? "Auto..." : "Waiting for a capture";
 
     display_set_font(&font_3);
     display_set_fg_color(WHITE_COLOR);
@@ -1551,143 +1559,312 @@ static int spec_analyse(const SPECVIEW *v, int32 *P, int32 *F, uint32 *lo, uint3
   return 1;
 }
 
-//Auto, last stage, on the record held (rules in firmware/README.md "Spectrum view"): FFT length the longest the record
-//holds up to 4096, Hann; scale from P - F; ref the first multiple of the scale 3 dB above P; span over the band
-static void spec_auto_apply(void)
+//Auto (fw 0.2.42, owner): a fixed probe procedure, independent of the state it starts from, so identical presses on
+//the same signal give identical settings (rules in firmware/README.md "Spectrum view", Auto):
+//  probe   50 MSa/s, longest FFT up to 4096, Hann, averaging 4, trigger on the analysed channel at 50 %; 3 records
+//  measure f0 = fundamental from the time-domain period (rising crossings with hysteresis, 0 when fewer than 3),
+//          f_hi = top of the band (highest bin above max(peak - 40 dB, median + 10 dB))
+//  derive  span = max(1.25 f_hi, 20 f0) up to 25 MHz; rate = slowest with fs/2 >= 1.25 span; with f0 > 0 slower still
+//          until RBW <= f0 / 4 (span then trimmed to the axis)
+//  refine  2 records at that rate; if f_hi moved by more than 2x or f0 changed the rate, derive once more (3rd stage)
+//  final   ref = first scale multiple >= peak + 3 dB, scale from peak - floor, span from 0, averaging 4
+//Untriggered records are skipped while a triggered one came (spectrum_capture_info); any touch cancels; it gives up
+//after 4 s with what it has. Stopped or in single mode it does not run (warning says what to do).
+
+#define TB_FULL_AXIS          26          //2 us/div, 50 MSa/s: fs/2 = 25 MHz
+#define AUTO_TIMEOUT_MS       4000
+
+static uint32 auto_t0, auto_count;
+static uint8  auto_refused;               //1: stopped, 2: single mode (warning while the strip shows it)
+
+//Fundamental of the analysed channel's record in mHz (0 = no periodicity seen)
+static uint64 spec_f0_mhz(int ch, uint64 fs_mhz)
 {
-  int     log2n, z;
-  uint32  half, lo, hi, need, centre;
-  int32   P, F, range, scale;
-  pc_decim_cfg dc;
-  int     written;
-  SPECVIEW v;
+  PCHANNELSETTINGS s = spec_ch(ch);
+  uint32 n = scopesettings.samplecount, i, first = 0, last = 0, rises = 0, hi = s->highlevel, lo = s->lowlevel;
+  int    state = (s->tracebuffer[0] > hi) ? 1 : 0;
 
-  spec.log2n  = (spec_log2n_max() < LOG2N_VIEW_MAX) ? spec_log2n_max() : LOG2N_VIEW_MAX;
-  spec.window = FX_WIN_HANN;
-  spec.zoom   = 0;
-  spec.start  = 0;
-  spec_compute();
+  if(hi <= lo)
+    return 0;
 
-  log2n = spec_log2n();
-  pc_hal_decim_current(&dc, &written);
-  spec_view(&v, log2n, spec_bin_mhz(spec_fs_mhz(spec_divider(), &dc), log2n));
-  half = v.half;
-
-  if(!spec_analyse(&v, &P, &F, &lo, &hi))
-    return;
-
-  range = P - F + 1000;
-  scale = (range <= 8 * 500) ? 0 : (range <= 8 * 1000) ? 1 : 2;
-  spec.scale = scale;
+  for(i = 1; i < n; i++)
   {
-    int32 t = P + 300, sc = spec_scales[scale] * 100;
+    uint32 v = s->tracebuffer[i];
 
-    spec.ref = (int16)(((t >= 0) ? ((t + sc - 1) / sc) : -((-t) / sc)) * spec_scales[scale]);
+    if(!state && (v > hi))
+    {
+      state = 1;
+      if(!rises)
+        first = i;
+      last = i;
+      rises++;
+    }
+    else if(state && (v < lo))
+      state = 0;
   }
-  if(spec.ref < REF_MIN) spec.ref = REF_MIN;
-  if(spec.ref > REF_MAX) spec.ref = REF_MAX;
 
-  if(!hi)
-    return;
+  if(rises < 3)
+    return 0;
 
-  if(lo < hi - lo)
-  {
-    need = hi + hi / 4;
-    centre = 0;
-  }
-  else
-  {
-    need = ((hi - lo) * 3) / 2;
-    centre = (lo + hi) / 2;
-  }
-  if(need < 8)
-    need = 8;
-
-  for(z = ZOOM_MAX; (z > 0) && ((half >> z) < need); z--) {}
-  spec.zoom = z;
-
-  if(centre)
-  {
-    uint32 c = (uint32)(((uint64)centre * START_STEPS) / half);
-    uint32 w = START_STEPS >> z;
-
-    spec.start = (c > w / 2) ? c - w / 2 : 0;
-    if(spec.start > START_STEPS - w)
-      spec.start = START_STEPS - w;
-  }
+  return (fs_mhz * (rises - 1)) / (last - first);
 }
 
-//Auto (fw 0.2.39) picks the sample rate too, in up to three captures while running: (1) the rate whose fs/2 covers
-//PC_SPECTRUM_FMAX_HZ (50 MS/s) shows everything the front end passes; (2) on that record the band's top f_hi sets the
-//slowest rate with fs/2 >= 1.25 f_hi; (3) on that record the rest as before. Stopped, Auto works on the record held.
-#define TB_FULL_AXIS          26          //2 us/div, 50 MS/s: fs/2 = 25 MHz
+static int spec_auto_ch(void)
+{
+  return ((spec.channel == 1) || !spec_ch_on(0)) ? 1 : 0;
+}
+
+//Measure f0 and f_hi on the record(s) at the current rate (averaged spectrum)
+static void spec_auto_measure(uint64 *f0, uint64 *fhi)
+{
+  pc_decim_cfg dc;
+  int     written, log2n = spec_log2n();
+  uint64  fs, bin;
+  uint32  lo, hi;
+  int32   P, F;
+  SPECVIEW v;
+  uint32  z = spec.zoom, st = spec.start;
+
+  pc_hal_decim_current(&dc, &written);
+  fs  = spec_fs_mhz(spec_divider(), &dc);
+  bin = spec_bin_mhz(fs, log2n);
+  spec.zoom = 0;
+  spec.start = 0;
+  spec_view(&v, log2n, bin);
+  spec.zoom = z;
+  spec.start = st;
+
+  *fhi = (spec_analyse(&v, &P, &F, &lo, &hi) && hi) ? bin * hi : 0;
+  *f0  = spec_f0_mhz(spec_auto_ch(), fs);
+}
+
+//Rate (time base index) and span (mHz) from (f0, f_hi)
+static int spec_auto_derive(uint64 f0, uint64 fhi, uint64 *span)
+{
+  uint64 fmax = (uint64)PC_SPECTRUM_FMAX_HZ * 1000, s = fhi + fhi / 4;
+  int    i, log2n = spec_log2n();
+
+  if(20 * f0 > s)
+    s = 20 * f0;
+  if(!s || (s > fmax))
+    s = fmax;
+
+  for(i = TB_FIRST; i < TB_FULL_AXIS; i++)
+    if(tb_fs_mhz(i) / 2 >= s + s / 4)
+      break;
+
+  //Resolve the fundamental: RBW = 1.5 fs / N <= f0 / 4
+  if(f0)
+    while((i > TB_FIRST) && ((3 * tb_fs_mhz(i)) / (2u << log2n) > f0 / 4))
+      i--;
+
+  if(s > (tb_fs_mhz(i) / 2) * 4 / 5)
+    s = (tb_fs_mhz(i) / 2) * 4 / 5;
+
+  *span = s;
+  return i;
+}
+
+static void spec_auto_finish(uint64 span)
+{
+  pc_decim_cfg dc;
+  int     written, log2n = spec_log2n();
+  uint64  fs;
+  uint32  lo, hi;
+  int32   P, F, range, scale;
+  SPECVIEW v;
+
+  spec.autostage = 0;
+  spec.zoom = 0;
+  spec.start = 0;
+
+  pc_hal_decim_current(&dc, &written);
+  fs = spec_fs_mhz(spec_divider(), &dc);
+  spec_view(&v, log2n, spec_bin_mhz(fs, log2n));
+
+  if(spec_analyse(&v, &P, &F, &lo, &hi))
+  {
+    int32 t, sc;
+
+    range = P - F + 1000;
+    scale = (range <= 8 * 500) ? 0 : (range <= 8 * 1000) ? 1 : 2;
+    spec.scale = scale;
+    t  = P + 300;
+    sc = spec_scales[scale] * 100;
+    spec.ref = (int16)(((t >= 0) ? ((t + sc - 1) / sc) : -((-t) / sc)) * spec_scales[scale]);
+    if(spec.ref < REF_MIN) spec.ref = REF_MIN;
+    if(spec.ref > REF_MAX) spec.ref = REF_MAX;
+  }
+
+  spec_place(fs, span / 2, span);
+  spec.start = 0;
+}
 
 static void spec_auto_start(void)
 {
-  spec.autostage = 0;
+  int ch = spec_auto_ch();
 
-  if(!scopesettings.runstate)
-  {
-    spec_auto_apply();
+  spec.autostage = 0;
+  auto_refused = 0;
+
+  if(!scopesettings.runstate)  { auto_refused = 1; return; }
+  if(scopesettings.triggermode == 1) { auto_refused = 2; return; }
+  if(!spec_ch_on(ch))
     return;
-  }
 
   spec.log2n  = (spec_log2n_max() < LOG2N_VIEW_MAX) ? spec_log2n_max() : LOG2N_VIEW_MAX;
   spec.window = FX_WIN_HANN;
+  spec.avg    = 1;
   spec.zoom   = 0;
   spec.start  = 0;
   spec.recompute = 1;
 
-  if(tb_fs_mhz(scopesettings.timeperdiv) / 2 < (uint64)PC_SPECTRUM_FMAX_HZ * 1000)
+  //Trigger on the analysed channel (an EXT source stays)
+  if(scopesettings.triggerchannel < 2)
+  {
+    DISPLAYDATA save = displaydata;
+
+    scopesettings.triggerchannel = (uint8)ch;
+    fpga_set_trigger_channel();
+    display_set_screen_buffer((uint16 *)maindisplaybuffer);
+    scope_trigger_settings(0);
+    displaydata = save;
+  }
+
+  if(scopesettings.timeperdiv != TB_FULL_AXIS)
     spec_tb_set(TB_FULL_AXIS);
 
-  //Without a time base change the next capture serves too
-  spec.wait = 1;
-  spec.fresh = 0;
+  spec.wait   = 1;
+  spec.fresh  = 0;
+  auto_t0     = timer0ticks;
+  auto_count  = 0;
   spec.autostage = 1;
 }
 
-//Called after a fresh record was transformed
-static void spec_auto_step(void)
+//Rate and span from (f0, f_hi), then the confirmation records at that rate
+static uint64 auto_f0, auto_fhi, auto_span;
+
+static void spec_auto_go(void)
 {
-  if(spec.autostage == 1)
-  {
-    pc_decim_cfg dc;
-    int      written, log2n = spec_log2n(), i, pick = -1;
-    uint32   lo, hi;
-    int32    P, F;
-    uint64   bin, fhi;
-    SPECVIEW v;
+  int idx = spec_auto_derive(auto_f0, auto_fhi, &auto_span);
 
-    pc_hal_decim_current(&dc, &written);
-    bin = spec_bin_mhz(spec_fs_mhz(spec_divider(), &dc), log2n);
-    spec_view(&v, log2n, bin);
-
-    if(spec_analyse(&v, &P, &F, &lo, &hi) && hi)
-    {
-      fhi = bin * hi;
-
-      //Slowest short time base whose fs/2 holds 1.25 f_hi
-      for(i = TB_FIRST; i <= TB_FULL_AXIS; i++)
-        if(tb_fs_mhz(i) / 2 >= fhi + fhi / 4)
-        {
-          pick = i;
-          break;
-        }
-    }
-
-    if((pick >= 0) && (pick != scopesettings.timeperdiv))
-    {
-      spec_tb_set(pick);
-      spec.autostage = 2;
-      return;
-    }
-  }
-
-  spec.autostage = 0;
-  spec_auto_apply();
+  spec.autostage = 2;
+  auto_count = 0;
+  if(idx != scopesettings.timeperdiv)
+    spec_tb_set(idx);
 }
 
+//Span for the rate in use: derived from the latest measurement, trimmed to this rate's axis
+static void spec_auto_end(uint64 f0, uint64 fhi)
+{
+  uint64 span, axis = (tb_fs_mhz(scopesettings.timeperdiv) / 2) * 4 / 5;
+
+  spec_auto_derive(f0, fhi, &span);
+  if(span > axis)
+    span = axis;
+  spec_auto_finish(span);
+}
+
+//After each record transformed while Auto runs. Stages: 1 probe at 50 MSa/s, 4 period search (10x slower per record
+//until 3 periods fit or the slowest rate), 2 confirmation at the derived rate, 3 one refinement.
+static void spec_auto_step(void)
+{
+  uint64 f0, fhi;
+  int    idx, timeout = (timer0ticks - auto_t0) > AUTO_TIMEOUT_MS;
+
+  auto_count++;
+
+  //First probe record: trigger level to the middle of the signal; the average starts after it
+  if((spec.autostage == 1) && (auto_count == 1))
+  {
+    if(scopesettings.triggerchannel < 2)
+    {
+      DISPLAYDATA save = displaydata;
+
+      display_set_screen_buffer((uint16 *)maindisplaybuffer);
+      scope_do_50_percent_trigger_setup();
+      scope_trigger_settings(0);
+      displaydata = save;
+    }
+    spec_navg[0] = spec_navg[1] = 0;
+    return;
+  }
+
+  if(timeout)
+  {
+    spec_auto_measure(&f0, &fhi);
+    spec_auto_end(f0 ? f0 : auto_f0, (fhi && (spec.autostage == 1)) ? fhi : (auto_fhi ? auto_fhi : fhi));
+    return;
+  }
+
+  switch(spec.autostage)
+  {
+    case 1:
+      if(auto_count < 4)
+        return;
+
+      spec_auto_measure(&auto_f0, &auto_fhi);
+
+      if(!auto_f0 && (scopesettings.timeperdiv - 3 >= TB_FIRST))
+      {
+        spec.autostage = 4;
+        auto_count = 0;
+        spec_tb_set(scopesettings.timeperdiv - 3);
+        return;
+      }
+
+      spec_auto_go();
+      return;
+
+    case 4:
+      auto_f0 = spec_f0_mhz(spec_auto_ch(), tb_fs_mhz(scopesettings.timeperdiv));
+
+      if(!auto_f0 && (scopesettings.timeperdiv - 3 >= TB_FIRST))
+      {
+        auto_count = 0;
+        spec_tb_set(scopesettings.timeperdiv - 3);
+        return;
+      }
+
+      spec_auto_go();
+      return;
+
+    case 2:
+      if(auto_count < 2)
+        return;
+
+      spec_auto_measure(&f0, &fhi);
+      if(f0)
+        auto_f0 = f0;
+
+      //One refinement when the band seen at this rate is less than half the probe's (the probe sees edges and noise)
+      if(fhi && (2 * fhi < auto_fhi))
+      {
+        uint64 span;
+
+        idx = spec_auto_derive(auto_f0, fhi, &span);
+        if(idx != scopesettings.timeperdiv)
+        {
+          auto_fhi = fhi;
+          spec.autostage = 3;
+          auto_count = 0;
+          spec_tb_set(idx);
+          return;
+        }
+      }
+
+      spec_auto_end(auto_f0, auto_fhi);
+      return;
+
+    default:
+      if(auto_count < 2)
+        return;
+
+      spec_auto_measure(&f0, &fhi);
+      spec_auto_end(f0 ? f0 : auto_f0, auto_fhi);
+      return;
+  }
+}
 //----------------------------------------------------------------------------------------------------------------------------------
 // Settings that survive a power cycle (fw 0.2.39): FFT length, window, scale and ref level in two spare words of the
 // settings sector (709), saved where 1.00o5 saves everything (power-off interrupt). Not restored: the display mode
@@ -1790,8 +1967,9 @@ int spectrum_touch(void)
   if(!spec.active || !spectrum_available())
     return 0;
 
-  //Any touch ends a running Auto (the Auto field starts a new one)
+  //Any touch ends a running Auto (the Auto field starts a new one) and clears its refusal warning
   spec.autostage = 0;
+  auto_refused = 0;
 
   if(ytouch >= STRIP_Y)
   {

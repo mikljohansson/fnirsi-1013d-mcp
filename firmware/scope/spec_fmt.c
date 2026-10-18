@@ -45,11 +45,11 @@ char *fmt_int(char *p, int32 v)
   return fmt_uint(p, (uint32)v);
 }
 
-//Frequency in mHz with 4 significant digits: "0 Hz", "732.4 Hz", "1.000 kHz", "50.00 MHz"; rate = 1 for "S/s" units.
+//Frequency in mHz with 4 significant digits: "0 Hz", "732.4 Hz", "1.000 kHz", "50.00 MHz"; rate = 1 for "Sa/s" units (as the top bar).
 //Rounds first, then picks the unit, so 999.96 Hz reads "1.000 kHz".
 char *fmt_freq_units(char *p, uint64 mhz, int rate)
 {
-  static const char *units[2][3] = { { "Hz", "kHz", "MHz" }, { "S/s", "kS/s", "MS/s" } };
+  static const char *units[2][3] = { { "Hz", "kHz", "MHz" }, { "Sa/s", "kSa/s", "MSa/s" } };
   uint64 p10 = 1, value;
   uint32 v, u = 0, e_p = 0, e_u = 3, len, i;
   int32  dec;

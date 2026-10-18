@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-**Current state (fw-gen5 -> fw-gen6, 2026-10-18): latest build fw 0.2.41** (protocol 1.9 + fw-cal's 1.10 work in a
+**Current state (fw-gen5 -> fw-gen6, 2026-10-18): latest build fw 0.2.42** (protocol 1.9 + fw-cal's 1.10 work in a
 worktree), see the ladder (section 8) and **section 20** (spectrum analyser, firmware auto trigger mode, the 0x1535 FIR
 plan, open owner verdicts). The USB story is closed (0.2.25 PHYCTL fix, cold-boot soak clean). Sections 9-17 below are
 older generations' notes, kept for history. Read the root `AGENTS.md` first, then this file. Details live in `firmware/README.md` (build, SD layout, FEL, memory budget, boot, bring-up
@@ -223,6 +223,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.39 | 11b1729 | 267e80fe | span drives the time base (zoom out past full span = faster rate up to 50 MS/s, zoom in past 64 bins = slower), Auto picks the rate in up to 3 captures, spectrum settings persist in settings words 208/209, filter tag "CIC3" instead of the N text | built, host-tested |
 | 0.2.40 | e595a0f | 3907e7ac | spectrum Average field (Off/4/16/64/Max hold, default 4), one header line + warnings over the plot, Roll mode label without on/off | built, host-tested |
 | 0.2.41 | 0fd6a9c | 08aeaa63 | firmware auto trigger mode (auto captures arm normal; time-out max(100 ms, 2 records) forces an untriggered record, reported truthfully, UI and host); spectrum drops occasional untriggered records; zoom-in steps the rate down at span <= fs/16 | built, host-tested (test_fw_auto_timeout) |
+| 0.2.42 | PENDING | | deterministic Auto (probe 50 MSa/s, period search, derive from f0 / f_hi, confirm, refine once), warnings with consequence + action, "MSa/s" units, no Avg tag in the header | built, host-tested |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -669,8 +670,8 @@ section 14 rows 44 (FFT_BENCH) and 45 (READ_SPECTRUM, GET_STATUS byte 43).
   (`pc_glue_decim_conversion` writes 0x1A per conversion). Bench: the 10 MS/s / 1 kHz square case from the lead's
   host captures (2 of 6 flat "triggered" records on 0.2.40) should give 6 of 6 single-edge records in auto mode, and
   the spectrum view's comb must not flicker.
-- Owner verdicts open: 0.2.40 header line / averaging / Roll label (loaded, checks in progress), 0.2.41 auto mode
-  and zoom-in rate stepping. Accepted so far: spectrum view, waterfall, the CIC3 floor; the "wagging tail" was
+- Owner verdicts open: 0.2.41 auto mode and zoom-in rate stepping; 0.2.42 Auto procedure (README "Auto"), warnings.
+  0.2.40 header and averaging accepted (Avg tag removed from the header in 0.2.42). Accepted so far: spectrum view, waterfall, the CIC3 floor; the "wagging tail" was
   window-leakage variation, fixed by averaging (default 4).
 - Next for fw-gen6: FPGA 0x1535 FIR support, once the lead confirms fpga-gen4's testbench numbers. Interface delta
   (lead, fixed): write 0x56 bit 0 = FIR enable; the FIR is active only when 0x56 = 1, K >= 1, N >= 16 and N % 4 == 0

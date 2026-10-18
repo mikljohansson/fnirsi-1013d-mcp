@@ -32,10 +32,10 @@ int main(void)
   T_STR(f(66666666666ull), "66.67 MHz");
   T_STR(f(1234567890123ull), "1235 MHz");
   T_STR(f(12345678901234ull), "12350 MHz");
-  T_STR(r(200000000000ull), "200.0 MS/s");
-  T_STR(r(1000000000ull), "1.000 MS/s");
-  T_STR(r(10000000ull), "10.00 kS/s");
-  T_STR(r(0), "0 S/s");
+  T_STR(r(200000000000ull), "200.0 MSa/s");
+  T_STR(r(1000000000ull), "1.000 MSa/s");
+  T_STR(r(10000000ull), "10.00 kSa/s");
+  T_STR(r(0), "0 Sa/s");
 
   T_STR(c1(0), "0.0");
   T_STR(c1(-1234), "-12.3");

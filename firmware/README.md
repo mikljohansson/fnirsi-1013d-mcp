@@ -587,9 +587,9 @@ touch that moves more than 2 px is a drag: the spectrum follows the finger horiz
 1/65536 of the Nyquist range) and is redrawn while dragging; at full span there is nothing to pan. Start, centre and
 stop frequencies are the labels under the plot.
 
-Header and averaging (fw 0.2.40, owner): one header line, left to right: per shown channel its peak "CH1 ^ 977 Hz
-+2.7 dBV" in the channel colour, "RBW 732 Hz", the averaging ("Avg 4" / "Max", hidden when off), the decimation
-filter tag ("CIC3") and, in the waterfall, the time its rows span; the colour legend sits at the right end in the
+Header and averaging (fw 0.2.40-0.2.42, owner): one header line, left to right: per shown channel its peak "CH1 ^
+977 Hz +2.7 dBV" in the channel colour, "RBW 732 Hz", the decimation filter tag ("CIC3"; the averaging is not repeated,
+the strip's Average field shows it) and, in the waterfall, the time its rows span; the colour legend sits at the right end in the
 history views. No fs or N (they are the time base and the FFT-length field). Warnings appear centred over the top of
 the plot in orange only while they apply: "CHn overrange", "no anti-alias filter below 200 MS/s" (decimated without
 the 0x1534 filter), "Stopped: RUN fills the view" (history views, or no record). The plot is 8 divisions of 43 px.
@@ -609,22 +609,45 @@ to the next slower rate instead, keeping the centre frequency and halving the sp
 still holds the window (otherwise the plain zoom continues to 1/64 of the axis). After a rate change the view waits
 for the first capture at the new rate ("Waiting for a capture at the new sample rate") and the histories clear.
 
-Auto (fw 0.2.39) also picks the rate, in up to three captures while running: first 50 MS/s, so everything the front
-end passes is on the axis; on that record the top of the band f_hi selects the slowest rate with fs/2 >= 1.25 f_hi;
-on the record at that rate the settings below. Stopped, Auto works on the record held and leaves the rate alone. Any
-touch cancels a running Auto ("Auto: measuring the signal" meanwhile).
-
 Persistence (fw 0.2.39): FFT length, window, scale and ref level are saved in settings-sector words 208 (0x5E00
 marker, window, scale, length) and 209 (ref, int16), with everything else, by 1.00o5's power-off interrupt (the only
 place 1.00o5 writes the settings sector, apart from a failed load; not in the picture / waveform viewers, not on
 ENTER_FEL or a battery that dies). Not restored: the display mode (the scope boots into the scope view), channel,
 span, start and view. The Filter choice (fw-decim, word 207) is saved the same way.
 
-Auto rules: FFT length the longest the record holds up to 4096, Hann. P = highest bin above DC (bins 0 and 1 skipped)
-over the shown channel(s), F = median bin level. Scale 5 dB/div if P - F + 10 dB fits 8 divisions of 5 dB, 10 if it
-fits 8 of 10, else 20. Ref level = the first multiple of the scale at least 3 dB above P. Band = bins above both
-P - 40 dB and F + 10 dB, from lo to hi: if lo is below the band's width the span runs from 0 and must hold 1.25 hi,
-otherwise it must hold 1.5 (hi - lo) about the band's centre; the narrowest zoom step that does is used.
+Auto (fw 0.2.42, owner: deterministic, identical presses give identical settings): a fixed probe procedure that
+does not depend on the state it starts from, about 1-2 s, "Auto..." in the field and the plot meanwhile, any touch
+cancels, gives up after 4 s with what it has. It needs RUN and trigger mode Auto or Normal (otherwise a warning says
+so). Steps:
+1. Probe: 50 MSa/s (2 us/div), the longest FFT the record holds up to 4096, Hann, averaging 4, trigger source = the
+   analysed channel (CH1 unless only CH2 is shown; an EXT source stays), level set to 50 % on the first record
+   (1.00o5's `scope_do_50_percent_trigger_setup`); then 3 records averaged. Untriggered records are skipped while
+   triggered ones come.
+2. Measure f0 = the fundamental from the time-domain period (rising crossings with the readout's hysteresis levels;
+   0 with fewer than 3 periods in the record) and f_hi = the highest bin above both peak - 40 dB and median + 10 dB.
+3. Period search: while f0 = 0, step 10x slower (three time base steps) per record until 3 periods fit or the
+   slowest short time base.
+4. Derive from (f0, f_hi) only: span = max(1.25 f_hi, 20 f0), at most 25 MHz; rate = the slowest whose fs/2 >= 1.25
+   span; with f0 > 0 slower still until RBW = 1.5 fs / N <= f0 / 4, the span then trimmed to 0.8 fs/2.
+5. Confirm with 2 records at that rate; if the band seen there is less than half the probe's (the probe sees edges
+   and noise far up) and that asks for another rate, one refinement with 2 more records.
+6. Final: ref = the first multiple of the scale at least 3 dB above the peak, scale 5 / 10 / 20 dB/div by whether
+   peak - floor + 10 dB fits 8 divisions, span from 0 (the narrowest zoom step holding it), averaging 4.
+Expected for the 1 kHz square at depth 3000 (N = 2048): probe f0 = 0, the search finds 1 kHz at 500 kSa/s, the
+RBW rule (<= 250 Hz) picks 200 kSa/s, span about 80 kHz: the comb fills the plot. At depth 6000 (N = 4096) 500 kSa/s.
+
+Warnings (fw 0.2.42, owner: consequence and action, one short line each, centred over the top of the plot in orange,
+only while they apply; "MSa/s" everywhere as in the top bar):
+
+| warning | when |
+|---|---|
+| CHn overrange: increase V/div | the shown channel's last readout clipped |
+| Aliasing possible: set Acquisition > Filter | below 200 MSa/s with the Filter off (0x1534+); "use a faster time base" without the filter |
+| Stopped: press RUN to fill the view | stopped in a history view, or no record yet |
+| Auto needs RUN: press RUN / Auto needs trigger mode Auto or Normal | Auto pressed while stopped / in single mode |
+| Waiting for a capture at the new rate | after a span-driven rate change, until the first record at the new rate |
+| No trigger: check the trigger level | the latest record was an auto time-out (fw 0.2.41) |
+| No channel enabled: switch on CH1 or CH2 | centre of the plot, both channels off |
 
 Levels are dBV of a sine's RMS (a tone centred on a bin reads its RMS level on every window; noise reads per bin,
 divide by ENBW for density). Volts per code use the calibration chain of protocol section 8.5, probe factor included
