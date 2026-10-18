@@ -880,8 +880,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         resets, suspends/resumes, disconnects, EP0 setups, DTR changes, RX ring full/release, TX frames flushed or
         aborted, and lost USB interrupts served by the timer poll, each with the device time in ms. Use it to
         diagnose a link drop right after the scope reappears (a host port reset shows as suspend then bus reset).
-        fw 0.2.15 adds reset_snapshot: the events right before the first bus reset since the previous read (every
-        read, including this one, re-arms it). Read-only."""
+        fw 0.2.15 adds reset_snapshot: the events right before the first bus reset since the snapshot was armed.
+        This tool reads plainly, which keeps it on fw 0.2.18+ (0.2.15-0.2.17 re-armed on every read). Read-only."""
         def go() -> dict[str, Any]:
             s = sess.get_scope()
             log = s.event_log()

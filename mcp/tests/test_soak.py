@@ -90,7 +90,7 @@ def test_drop_is_logged_waited_out_and_reopened(sim):
     assert i_back < i_ev < i_st < i_open < i_reopen
     assert any("dtr 0" in ln for ln in lines[i_ev:i_st])  # the drop, decoded with device ms and host time
     assert "dtr_down +1" in lines[i_st]  # the simulator saw the old connection close
-    snap = next(i for i, ln in enumerate(lines) if "reset snapshot: bus reset at device" in ln)
+    snap = next(i for i, ln in enumerate(lines) if "pre-reset snapshot: bus reset at device" in ln)
     assert i_ev < snap < i_st and "before reset:" in lines[snap + 1] and "ep0_setup bRequest 0x22" in "\n".join(
         lines[snap:i_st]) and len(s.snapshots) == 1
     assert "drops 1 (down " in lines[-1] and "longest gap" in lines[-1]
@@ -138,3 +138,33 @@ def test_scope_event_log_api_and_tool(sim, sim_factory, tmp_path):
         async with client_for(sim_factory(legacy=True), tmp_path) as c:
             assert "protocol 1.5" in await c.fails("scope_event_log")
     anyio.run(main)
+
+
+def test_device_self_restart_is_flagged_and_counted(sim):
+    """Bench 0.2.12/0.2.16: the firmware restarted itself from RAM; #VER unchanged, uptime_ms went backwards."""
+    import threading
+    threading.Timer(0.3, sim.device.self_restart).start()
+    rc, lines, s = run_soak(sim, duration=0.8)
+    text = "\n".join(lines)
+    assert rc == 1 and s.st.restarts == 1 and s.st.drops == 0, text
+    assert "DEVICE RESTARTED (uptime went backwards: " in text and "device restarts 1" in lines[-1]
+    assert any("uptime open " in ln for ln in lines) and any("uptime end " in ln for ln in lines)
+
+
+def test_snapshot_survives_plain_reads_and_is_rearmed_after_saving(sim):
+    """fw 0.2.18: a plain GET_EVENT_LOG keeps the reset snapshot; the soak saves it, then re-arms with flags = 1."""
+    from fnirsi1013d import protocol as P
+    from fnirsi1013d.scope import Scope
+    sim.device.log_event(2)
+    sim.device.log_event(1)  # freezes a snapshot
+    with Scope.connect(sim.url) as sc:
+        assert sc.event_log().frozen and sc.event_log().frozen  # plain reads do not consume it
+        with pytest.raises(Exception):
+            sc.t.request(P.Cmd.GET_EVENT_LOG, b"\x02", retries=0)  # unknown flag bit: E_BAD_ARG
+        assert sc.event_log(rearm=True).frozen and not sc.event_log().frozen
+    sim.device.log_event(2)
+    sim.device.log_event(1)
+    rc, lines, s = run_soak(sim, duration=0.3)
+    text = "\n".join(lines)
+    assert "events start: pre-reset snapshot" in text and "events start: snapshot re-armed" in text
+    assert len(s.snapshots) == 1 and not sim.device.ev_frozen

@@ -1136,10 +1136,22 @@ class Device:
         if self.proto_minor < 5:
             raise _DevErr(P.Status.E_UNKNOWN_CMD, 0, "cmd 0x0009")
         now = int((self.now() - self.t_boot) * 1000)
+        flags = req.payload[0] if req.payload else 0
+        if flags & ~P.EVENT_LOG_REARM:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "flags")
         log = P.EventLog(self.event_total, now, list(self.events[-128:]), frozen=self.ev_frozen,
                          reset_ms=self.ev_reset_ms, snapshot=list(self.ev_snapshot), has_snapshot=True)
-        self.ev_frozen, self.ev_snapshot, self.ev_reset_ms = False, [], 0  # every read re-arms the snapshot
+        if flags & P.EVENT_LOG_REARM:  # fw 0.2.18: only an explicit re-arm clears the snapshot
+            self.ev_frozen, self.ev_snapshot, self.ev_reset_ms = False, [], 0
         return self._ok(req, P.pack_event_log(log))
+
+    def self_restart(self) -> None:
+        """Test hook: the firmware restarts itself from RAM (bench 0.2.12 / 0.2.16): uptime and the event ring
+        start over; the connection stays."""
+        with self.lock:
+            self.t_boot = self.now()
+            self.events, self.event_total = [], 0
+            self.ev_frozen, self.ev_snapshot, self.ev_reset_ms = False, [], 0
 
     def log_event(self, type_: int, a: int = 0, b: int = 0) -> None:
         """Record a USB/link event for GET_EVENT_LOG (test hook too). fw 0.2.15: ring of 128; the first bus reset

@@ -1390,9 +1390,16 @@ LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     "usb_bus_resets", "usb_suspends", "usb_resumes", "usb_disconnects", "ep0_setups", "ep0_bad_setups",
     # fw 0.2.7 (47 counters): RX back-pressure diagnostics (names as in firmware/scope/host_tests/bench_link.py)
     "rx_isr_stalls", "rx_releases", "rx_restalls", "rx_empty_releases", "rx_count_max", "rx_count_oversize",
-    # fw 0.2.12 (48 counters): timer polls that found USB interrupt flags (lost interrupts served)
-    "usb_irq_polled")
+    # fw 0.2.12 (48 counters): timer polls that found USB interrupt flags (lost interrupts served; 0 in a clean
+    # session from 0.2.16, SOF no longer counts)
+    "usb_irq_polled",
+    # fw 0.2.17 (49 counters): ms the boot splash step took + 1 (0 = not run)
+    "boot_splash_ms")
 
+
+#: GET_EVENT_LOG request flags (fw 0.2.18): bit 0 re-arms the reset snapshot after this read (a plain read keeps it;
+#: 0.2.15-0.2.17 re-armed on every read and ignore the byte)
+EVENT_LOG_REARM = 0x01
 
 #: GET_EVENT_LOG entry types (protocol 1.5, section 14 row 42)
 EVENT_TYPES = {1: "bus_reset", 2: "suspend", 3: "resume", 4: "disconnect", 5: "ep0_setup", 6: "ep0_short_packet",

@@ -96,6 +96,7 @@ class SoakStats:
     requests: int = 0
     failures: int = 0
     drops: int = 0
+    restarts: int = 0
     longest_gap: float = 0.0
     latencies: list[float] = field(default_factory=list)
     down_times: list[float] = field(default_factory=list)
@@ -120,6 +121,8 @@ class Soak:
         self.events_seen = 0
         #: fw 0.2.15 reset snapshots seen (kept for the run)
         self.snapshots: list[P.EventLog] = []
+        #: last GET_STATUS uptime_ms seen (a decrease = the device restarted)
+        self.last_uptime: int | None = None
 
     def log(self, msg: str) -> None:
         self.say(f"{_dt.datetime.now().isoformat(timespec='milliseconds')} {msg}")
@@ -136,6 +139,27 @@ class Soak:
         info = P.InfoResp.unpack(self.t.request(P.Cmd.GET_INFO, retries=1).payload)
         self.proto_minor = info.proto_minor
         self.log(f"open {self.port} (fw {info.fw_version_str}, proto {info.proto_major}.{info.proto_minor})")
+        self.uptime("reopen" if after_drop else "open")
+
+    def check_uptime(self, up: int) -> bool:
+        """Record GET_STATUS uptime_ms; True (and a DEVICE RESTARTED line) when it went backwards."""
+        prev, self.last_uptime = self.last_uptime, up
+        if prev is not None and up < prev:
+            self.st.restarts += 1
+            self.log(f"DEVICE RESTARTED (uptime went backwards: {prev} -> {up} ms)")
+            self.events_seen = 0  # the device's event counter starts over too
+            return True
+        return False
+
+    def uptime(self, label: str) -> None:
+        assert self.t is not None
+        try:
+            st = P.StatusResp.unpack(self.t.request(P.Cmd.GET_STATUS, retries=1).payload)
+        except Exception as e:  # noqa: BLE001
+            self.log(f"uptime {label} unavailable ({e})")
+            return
+        self.log(f"uptime {label} {st.uptime_ms} ms")
+        self.check_uptime(st.uptime_ms)
 
     def close(self) -> None:
         if self.t is not None:
@@ -149,11 +173,16 @@ class Soak:
         """Print GET_EVENT_LOG entries not printed yet, with device ms and the matching host wall-clock time."""
         assert self.t is not None
         try:
+            # fw 0.2.18: a plain read keeps the reset snapshot; it is re-armed below, after it was saved
             log = P.parse_event_log(self.t.request(P.Cmd.GET_EVENT_LOG, retries=1).payload)
         except Exception as e:  # noqa: BLE001
             self.log(f"events {label} unavailable ({e})")
             return
         host_now = _dt.datetime.now()
+        if log.total < self.events_seen:
+            self.log(f"events {label}: the device's event counter went back ({self.events_seen} -> {log.total}): "
+                     "it restarted")
+            self.events_seen = 0
         new = log.total - self.events_seen
         shown = log.events[-new:] if 0 < new <= len(log.events) else (log.events if new > 0 else [])
         lost = max(0, new - len(log.events))
@@ -162,9 +191,9 @@ class Soak:
         for e in shown:
             at = host_now - _dt.timedelta(milliseconds=log.now_ms - e.ms)
             self.log(f"  device {e.ms} ms (~host {at.isoformat(timespec='milliseconds')}) {e.describe()}")
-        if log.frozen:  # fw 0.2.15: the events right before the first bus reset since the previous read
+        if log.frozen:  # fw 0.2.15+: the events right before the first bus reset since the snapshot was armed
             at = host_now - _dt.timedelta(milliseconds=log.now_ms - log.reset_ms)
-            self.log(f"events {label}: reset snapshot: bus reset at device {log.reset_ms} ms "
+            self.log(f"events {label}: pre-reset snapshot: bus reset at device {log.reset_ms} ms "
                      f"(~host {at.isoformat(timespec='milliseconds')}), {len(log.snapshot)} events before it:")
             for e in log.snapshot:
                 at = host_now - _dt.timedelta(milliseconds=log.now_ms - e.ms)
@@ -172,6 +201,12 @@ class Soak:
                          f"{e.describe()}")
             self.snapshots.append(log)
         self.events_seen = log.total
+        if log.has_snapshot and (log.frozen or label == "start"):
+            try:  # saved: now re-arm it for the next reset (fw 0.2.18 flag; older firmware ignores the byte)
+                self.t.request(P.Cmd.GET_EVENT_LOG, bytes([P.EVENT_LOG_REARM]), retries=1)
+                self.log(f"events {label}: snapshot re-armed")
+            except Exception as e:  # noqa: BLE001
+                self.log(f"events {label}: re-arm failed ({e})")
 
     def stats(self, label: str) -> None:
         assert self.t is not None
@@ -234,7 +269,8 @@ class Soak:
             if body != P.test_pattern_bytes(n, 3):
                 raise TransportError("TEST_PATTERN content differs")
         else:
-            self.t.request(P.Cmd.GET_STATUS, retries=0)
+            st = P.StatusResp.unpack(self.t.request(P.Cmd.GET_STATUS, retries=0).payload)
+            self.check_uptime(st.uptime_ms)
 
     def run(self) -> int:
         self.log(f"host: USB selective suspend {selective_suspend()}; port {port_info(self.port)}")
@@ -291,9 +327,10 @@ class Soak:
             if self.proto_minor >= 5:
                 self.events("end")
             self.stats("end")
+            self.uptime("end")
         self.close()
         self.summary()
-        return 0 if not (self.st.failures or self.st.drops) else 1
+        return 0 if not (self.st.failures or self.st.drops or self.st.restarts) else 1
 
     def _link_down(self, text: str) -> bool:
         """A write/read error of the port itself (as opposed to a missing answer) means the device left."""
@@ -312,6 +349,7 @@ class Soak:
             cd = (cd + " " if cd else "") + f"(usb_irq_polled delta {irq})"
         self.log(f"summary requests {s.requests}, failures {s.failures}, drops {s.drops}"
                  + (f" (down {', '.join(f'{d:.2f}' for d in s.down_times)} s)" if s.down_times else "")
+                 + f", device restarts {s.restarts}"
                  + f", longest gap {s.longest_gap:.2f} s, {lat_txt}; counters delta {cd or 'none'}")
 
 

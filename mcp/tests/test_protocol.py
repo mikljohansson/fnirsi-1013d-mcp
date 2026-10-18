@@ -202,6 +202,8 @@ def test_event_log_decode():
     import struct
     d48 = P.parse_link_stats(struct.pack("<HH48I", 48, 0, *range(48)))
     assert d48["usb_irq_polled"] == 47
+    d49 = P.parse_link_stats(struct.pack("<HH49I", 49, 0, *range(49)))  # fw 0.2.17
+    assert d49["boot_splash_ms"] == 48 and "c48" not in d49
 
 
 def test_event_log_reset_snapshot_tail():

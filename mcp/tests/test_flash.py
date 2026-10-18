@@ -233,3 +233,22 @@ def test_bench_wrapper_runs_bench_link_census(sim, monkeypatch, capsys):
     assert ei.value.code == 0, out
     assert "census: 20 PINGs: 0 E_BAD_CRC, 0 no response" in out and "0 failures" in out
     assert bench.build_argv(["--port", "COM10", "--census", "0"]) == ["COM10", "--n", "200"]
+
+
+
+def test_bench_wrapper_flags_a_device_restart(monkeypatch, capsys):
+    from fnirsi1013d import bench
+    assert bench.restart_note(175000, 2000, 30).startswith("DEVICE RESTARTED (uptime went backwards: 175000 -> 2000")
+    assert bench.restart_note(1000, 31500, 30).endswith("(no restart)")
+    assert bench.restart_note(None, 5, 1) == "device uptime: not available"
+
+    class Mod:
+        @staticmethod
+        def main():
+            return 0
+    monkeypatch.setattr(bench, "load_bench_link", lambda: Mod)
+    ups = iter([400000, 1500])
+    with pytest.raises(SystemExit) as e:
+        bench.main(["--port", "COM10", "--census", "0"], uptime=lambda port: next(ups))
+    out = capsys.readouterr().out
+    assert e.value.code == 1 and "device uptime at start: 400000 ms" in out and "DEVICE RESTARTED" in out

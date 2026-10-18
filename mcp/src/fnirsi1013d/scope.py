@@ -321,12 +321,12 @@ class Scope:
             return None
         return P.parse_link_stats(self._req(P.Cmd.GET_LINK_STATS))
 
-    def event_log(self) -> P.EventLog | None:
-        """GET_EVENT_LOG (protocol >= 1.5): the last 64 USB/link events with device ms, or None on older
-        firmware."""
+    def event_log(self, rearm: bool = False) -> P.EventLog | None:
+        """GET_EVENT_LOG (protocol >= 1.5): the last 64/128 USB/link events with device ms, or None on older
+        firmware. ``rearm`` (fw 0.2.18) clears the reset snapshot after this read; a plain read keeps it."""
         if self.info.proto_minor < 5:
             return None
-        return P.parse_event_log(self._req(P.Cmd.GET_EVENT_LOG))
+        return P.parse_event_log(self._req(P.Cmd.GET_EVENT_LOG, bytes([P.EVENT_LOG_REARM]) if rearm else b""))
 
     def battery(self) -> P.BatteryResp:
         return P.BatteryResp.unpack(self._req(P.Cmd.GET_BATTERY))
