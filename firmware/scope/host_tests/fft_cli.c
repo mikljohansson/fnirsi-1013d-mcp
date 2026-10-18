@@ -2,7 +2,7 @@
 //
 //   fft_cli LOG2N WINDOW KIND OFFSET [CDB_OFFSET] < samples > result
 //
-// KIND u8: N bytes in; i32: N little-endian int32 in. Out (little-endian): int32 shift, int32 norm_q16,
+// KIND u8: N bytes in; u16: N little-endian uint16; i32: N little-endian int32 in. Out (little-endian): int32 shift, int32 norm_q16,
 // (N/2 + 1) x (int32 re, int32 im), (N/2 + 1) x int16 centi-dB (plus CDB_OFFSET), then the window w[0..N-1] as int32 Q30.
 // Mode "log2": reads u64 values, writes int32 fx_log2_q16 and int32 fx_cdb_from_q16 for each.
 
@@ -16,6 +16,7 @@ static int32 win[FX_FFT_WIN_WORDS(FX_FFT_LOG2_MAX)] __attribute__((aligned(8)));
 static int32 buf[FX_FFT_BUF_WORDS(FX_FFT_LOG2_MAX)] __attribute__((aligned(8)));
 static int32 xi[FX_FFT_N_MAX] __attribute__((aligned(8)));
 static uint8 xb[FX_FFT_N_MAX] __attribute__((aligned(8)));
+static uint16 xw[FX_FFT_N_MAX] __attribute__((aligned(8)));
 static int16 cdb[FX_FFT_N_MAX / 2 + 1];
 
 int main(int argc, char **argv)
@@ -60,6 +61,11 @@ int main(int argc, char **argv)
   {
     if(fread(xb, 1, n, stdin) != (size_t)n) return 3;
     fx_fft_run_u8(&p, xb, offset);
+  }
+  else if(!strcmp(argv[3], "u16"))
+  {
+    if(fread(xw, 2, n, stdin) != (size_t)n) return 3;
+    fx_fft_run_u16(&p, xw, offset);
   }
   else
   {

@@ -18,6 +18,7 @@
 #include "touchpanel.h"
 #include "fnirsi_1013d_scope.h"
 #include "spec_fmt.h"
+#include "pc_hal.h"
 
 #include <string.h>
 
@@ -190,7 +191,10 @@ typedef struct
   uint8  log2n;
   uint8  window;
   uint8  unit_amps;     //channel in A mode
-  uint32 divider;       //fs = 200 MHz / (divider + 1)
+  uint32 divider;       //the UI time base's 0x0D divider
+  uint64 fs_mhz;        //sample rate in mHz: 200 MHz / (divider + 1), or 200 MHz / N with the 0x1534 filter
+  uint8  wide;          //1: the 16-bit record of the decimation filter, 0: the 8-bit trace buffer
+  uint8  k;             //decimation filter order (0 off, 1 boxcar, 2 CIC2, 3 CIC3)
   int32  gain_cdb;      //centi-dB from "dB re 1 code RMS" to dBV
 } SPECFRAME;
 
@@ -278,10 +282,26 @@ static int spec_log2n(void)
   return (spec.log2n < m) ? spec.log2n : m;
 }
 
-//Bin width in mHz: 200e6 Hz / ((divider + 1) N)
-static uint64 spec_bin_mhz(uint32 divider, int log2n)
+//Sample rate of the record in mHz. With the 0x1534 decimation filter on (fw 0.2.30) it is 200 MHz / N, where
+//N = 2 (floor(D / 2) + 1) differs from D + 1 for even dividers (pc_decim.h)
+static uint64 spec_fs_mhz(uint32 divider, const pc_decim_cfg *dc)
 {
-  return (200000000000ull / (divider + 1)) >> log2n;
+  if(dc->k && dc->n)
+    return 200000000000ull / dc->n;
+
+  return 200000000000ull / (divider + 1);
+}
+
+//Bin width in mHz
+static uint64 spec_bin_mhz(uint64 fs_mhz, int log2n)
+{
+  return fs_mhz >> log2n;
+}
+
+//20 log10(v) in centi-dB
+static int32 spec_cdb20(uint64 v)
+{
+  return 2 * fx_cdb_from_q16(fx_log2_q16(v ? v : 1));
 }
 
 //Code offset of 0 V and the level term from "dB re 1 code RMS" to dBV (protocol section 8.5 scaling)
@@ -348,10 +368,18 @@ static void spec_compute(void)
     spec.plan_ok = 1;
   }
 
+  pc_decim_cfg dc;
+  int          written;
+
+  //The filter the FPGA ran for this record (fw-decim: pc_dec_cur decides the readout)
+  pc_hal_decim_current(&dc, &written);
+
   for(ch = 0; ch < 2; ch++)
   {
     PCHANNELSETTINGS s = spec_ch(ch);
     SPECFRAME *f = &spec_frame[ch];
+    const uint16_t *x16 = 0;
+    uint32_t n16 = 0;
     int32  g;
 
     spec.have[ch] = 0;
@@ -359,15 +387,36 @@ static void spec_compute(void)
     if(!s->enable || ((spec.channel != SPEC_CH_BOTH) && (spec.channel != ch)))
       continue;
 
+    if(dc.k)
+      x16 = pc_hal_trace16(ch, &n16);
+
     //Levels straight into dBV: the volts-per-code term rides along as the dB offset
     g = spec_gain_cdb(s);
-    fx_fft_run_u8(&spec_plan, s->tracebuffer, spec_zero_code(s));
+
+    if(x16 && dc.scale_q24 && (n16 >= (2u * half)))
+    {
+      //16-bit record: one unit is scale_q24 / 2^24 codes (out -> code = out scale / 2^24 + comp2 / 2, pc_decim.h)
+      int32 comp2 = s->adc1compensation + s->adc2compensation;
+      int32 zero = (int32)((((int64)2 * spec_zero_code(s) - comp2) << 23) / (int64)dc.scale_q24);
+
+      g += spec_cdb20(dc.scale_q24) - spec_cdb20(1ull << 24);
+      fx_fft_run_u16(&spec_plan, x16, zero);
+      f->wide = 1;
+    }
+    else
+    {
+      fx_fft_run_u8(&spec_plan, s->tracebuffer, spec_zero_code(s));
+      f->wide = 0;
+    }
+
     fx_fft_cdb(&spec_plan, 0, half + 1, g, spec_db[ch]);
 
     f->log2n     = log2n;
     f->window    = spec.window;
     f->unit_amps = s->V_A ? 1 : 0;
     f->divider   = spec_divider();
+    f->fs_mhz    = spec_fs_mhz(f->divider, &dc);
+    f->k         = dc.k;
     f->gain_cdb  = g;
     spec.have[ch] = 1;
   }
@@ -556,7 +605,7 @@ static void spec_draw_peak(uint32 y, int ch, uint32 peak, uint64 bin_mhz)
   text_right(PLOT_X + PLOT_W, y, t);
 }
 
-static void spec_draw_info(int log2n, uint32 divider, uint64 bin_mhz)
+static void spec_draw_info(int log2n, uint64 fs_mhz, int k, uint32 n, uint64 bin_mhz)
 {
   char t[96], *p;
 
@@ -564,7 +613,7 @@ static void spec_draw_info(int log2n, uint32 divider, uint64 bin_mhz)
   display_set_fg_color(WHITE_COLOR);
 
   p = fmt_str(t, "fs ");
-  p = fmt_freq_units(p, 200000000000ull / (divider + 1), 1);
+  p = fmt_freq_units(p, fs_mhz, 1);
   p = fmt_str(p, "   N ");
   p = fmt_uint(p, 1u << log2n);
   p = fmt_str(p, "   RBW ");
@@ -583,8 +632,19 @@ static void spec_draw_info(int log2n, uint32 divider, uint64 bin_mhz)
   }
   display_text(PLOT_X, INFO_Y1, (int8 *)t);
 
-  //Decimated rates skip samples: anything above fs/2 folds into the plot
-  if(divider)
+  //Decimation: the 0x1534 filter names itself; plain sample skipping folds everything above fs/2 into the plot
+  if(k)
+  {
+    static const char *names[] = { "", "boxcar", "CIC2", "CIC3" };
+
+    display_set_fg_color(0x00A0A0A0);
+    p = fmt_str(t, "decimation filter ");
+    p = fmt_str(p, names[k & 3]);
+    p = fmt_str(p, ", N = ");
+    fmt_uint(p, n);
+    display_text(PLOT_X, INFO_Y2, (int8 *)t);
+  }
+  else if(fs_mhz < 200000000000ull)
   {
     display_set_fg_color(ORANGE_COLOR);
     display_text(PLOT_X, INFO_Y2, (int8 *)"no anti-alias filter: signals above fs/2 fold back");
@@ -673,14 +733,14 @@ static void spec_hist_clear(void)
 }
 
 //What the columns and levels mean; a change clears the history
-static uint32 spec_hist_key(const SPECVIEW *v, int log2n, uint32 divider)
+static uint32 spec_hist_key(const SPECVIEW *v, int log2n, uint64 fs_mhz)
 {
   uint32 k = 2166136261u, i;
   uint32 parts[9];
 
   parts[0] = log2n;      parts[1] = spec.window; parts[2] = spec.view; parts[3] = spec_hist_ch();
   parts[4] = v->first;   parts[5] = v->span;     parts[6] = (uint32)v->top; parts[7] = (uint32)v->cdb_per_div;
-  parts[8] = divider;
+  parts[8] = (uint32)(fs_mhz ^ (fs_mhz >> 32));
 
   for(i = 0; i < 9; i++)
     k = (k ^ parts[i]) * 16777619u;
@@ -969,6 +1029,9 @@ int spectrum_display(void)
 {
   int     log2n, ch, fresh, hch;
   uint32  divider, peak[2] = { 0, 0 }, key;
+  uint64  fs_mhz;
+  pc_decim_cfg dc;
+  int     written;
   uint64  bin_mhz;
   SPECVIEW v;
 
@@ -984,14 +1047,16 @@ int spectrum_display(void)
     spec_compute();
 
   divider = spec_divider();
-  bin_mhz = spec_bin_mhz(divider, log2n);
+  pc_hal_decim_current(&dc, &written);
+  fs_mhz  = spec_fs_mhz(divider, &dc);
+  bin_mhz = spec_bin_mhz(fs_mhz, log2n);
   spec_view(&v, log2n);
   hch = spec_hist_ch();
 
   //History views: a new axis starts a new history; each new capture adds one row / one line of hits
   if(spec.view != VIEW_SPECTRUM)
   {
-    key = spec_hist_key(&v, log2n, divider);
+    key = spec_hist_key(&v, log2n, fs_mhz);
     if(key != hist_key)
     {
       spec_hist_clear();
@@ -1015,7 +1080,7 @@ int spectrum_display(void)
   }
 
   spec_draw_freq_labels(&v, bin_mhz);
-  spec_draw_info(log2n, divider, bin_mhz);
+  spec_draw_info(log2n, fs_mhz, dc.k, dc.n, bin_mhz);
 
   if((!spec.have[0] && !spec.have[1]) || ((spec.view == VIEW_WATERFALL) && !wf_count))
   {
@@ -1147,7 +1212,8 @@ int spectrum_touch(void)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// READ_SPECTRUM header (32 bytes): u8 channel, u8 window, u8 log2n, u8 flags (bit 0 levels in dBA), u32 frame,
+// READ_SPECTRUM header (32 bytes): u8 channel, u8 window, u8 log2n, u8 flags (bit 0 levels in dBA, bit 1 16-bit record,
+// bits 2-3 decimation filter K), u32 frame,
 // u32 divider, u32 sample rate Hz, u32 bin width mHz, i32 gain cdB (code-dB to dBV, already applied), u16 bins in the
 // spectrum (N/2 + 1), u16 first bin returned, u16 count returned, u16 ENBW milli-bins
 
@@ -1167,15 +1233,15 @@ int32 spectrum_read(int ch, uint32 first, uint32 max_bins, uint8 *hdr, uint8 *le
   if(n > max_bins)
     n = max_bins;
 
-  bin = spec_bin_mhz(f->divider, f->log2n);
+  bin = spec_bin_mhz(f->fs_mhz, f->log2n);
 
   hdr[0] = ch & 1;
   hdr[1] = f->window;
   hdr[2] = f->log2n;
-  hdr[3] = f->unit_amps;
+  hdr[3] = (uint8)(f->unit_amps | (f->wide << 1) | (f->k << 2));
   put32(hdr + 4, spec.frames);
   put32(hdr + 8, f->divider);
-  put32(hdr + 12, (200000000u + (f->divider + 1) / 2) / (f->divider + 1));
+  put32(hdr + 12, (uint32)((f->fs_mhz + 500) / 1000));
   put32(hdr + 16, (uint32)bin);
   put32(hdr + 20, (uint32)f->gain_cdb);
   put16(hdr + 24, total);

@@ -551,6 +551,12 @@ straight lines between bins. A white triangle marks the peak (DC bins skipped). 
 | View | Spectrum, Waterfall, Density (fw 0.2.32) | next |
 | Scope | | leave the view |
 
+With the 0x1534 decimation filter on (fw 0.2.34) the view transforms the filter's 16-bit record (`pc_hal_trace16`)
+instead of the 8-bit trace, with the filter's rate 200 MHz / N (N = 2 (floor(D / 2) + 1), so even dividers differ from
+the time base's D + 1), one 16-bit unit = `scale_q24` / 2^24 codes for the dBV term, and the zero code moved into the
+16-bit domain; the second info line then names the filter ("decimation filter CIC3, N = 100") instead of the orange
+aliasing warning. Not benched (the bitstream is not flashed yet).
+
 Waterfall and density (fw 0.2.32) show one channel (CH1 unless only CH2 is selected or on). Waterfall: each new
 capture adds one row at the top (the plot holds 336), coloured over the plot's 8 divisions from the bottom line
 (black) to the ref level (white), the colour legend on the second info line, the time the rows span on the first.

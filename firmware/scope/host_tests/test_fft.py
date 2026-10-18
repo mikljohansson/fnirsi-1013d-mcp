@@ -50,7 +50,8 @@ PREFIX = []
 
 def run(cli, log2n, kind, x, sample, offset, cdb_offset=None):
     n = 1 << log2n
-    data = (np.asarray(x, dtype=np.uint8) if sample == "u8" else np.asarray(x, dtype="<i4")).tobytes()
+    dt = {"u8": np.uint8, "u16": "<u2", "i32": "<i4"}[sample]
+    data = np.asarray(x, dtype=dt).tobytes()
     args = PREFIX + [cli, str(log2n), str(kind), sample, str(offset)] + ([str(cdb_offset)] if cdb_offset is not None else [])
     out = subprocess.run(args, input=data, capture_output=True, check=True).stdout
     shift, norm = np.frombuffer(out[:8], dtype="<i4")
@@ -88,6 +89,12 @@ def signals(n, rng):
     yield "i32_limit_noise", "i32", rng.integers(-lim, lim + 1, n), 0, float(lim)
     yield "i32_16bit_tone", "i32", np.round(32767 * np.sin(2 * np.pi * (c + 0.25) * k / n)), 0, 32767.0
     yield "i32_dc_limit", "i32", np.full(n, lim), 0, float(lim)
+    # 16-bit records of the 0x1534 decimation filter (u16 around a mid-scale offset); they hold at most 8190 samples
+    # (N <= 4096), so 16384 is not tested: there |x - offset| = 32768 needs one bit more than N * max <= 2^29 allows
+    if n <= 8192:
+        yield "u16_tone_fs", "u16", np.round(32768 + 32767 * np.sin(2 * np.pi * (c + 0.31) * k / n)), 32768, 32767.5
+        yield "u16_noise_small", "u16", rng.integers(30000, 30100, n), 30050, 50.0
+        yield "u16_full_range", "u16", rng.integers(0, 65536, n), 32768, 32768.0
 
 
 def main():

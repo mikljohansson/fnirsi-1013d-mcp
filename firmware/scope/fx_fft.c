@@ -591,31 +591,6 @@ static void fx_load_u8(FX_FFT *p, const uint8 *x, int32 offset)
 #endif
 }
 
-//i32 samples (C only): 64-bit products with the Q30 window
-static void fx_load_i32(FX_FFT *p, const int32 *x, int32 offset)
-{
-  uint32 M = 1u << (p->log2n - 1), q, Q = 0, bit;
-  int    k1 = 30 - p->shift - 1;
-  const int32 *win = p->win;
-  int32  *o = p->buf;
-
-#define FX_I32Z(n, w) ((int32)((((int64)(x[n] - offset) * (w)) >> k1) + 1) >> 1)
-  for(q = 0; q < M / 2; q++, o += 4)
-  {
-    uint32 n0 = 2 * Q, n1 = n0 + M;
-    int32  z0r = FX_I32Z(n0, win[n0]), z0i = FX_I32Z(n0 + 1, win[n0 + 1]);
-    int32  z1r = FX_I32Z(n1, win[n1]), z1i = FX_I32Z(n1 + 1, win[n1 + 1]);
-
-    fx_st(o,     z0r + z1r, z0i + z1i);
-    fx_st(o + 2, z0r - z1r, z0i - z1i);
-
-    bit = M >> 2;
-    while(Q & bit) { Q ^= bit; bit >>= 1; }
-    Q |= bit;
-  }
-#undef FX_I32Z
-}
-
 void fx_fft_run_u8(FX_FFT *p, const uint8 *x, int32 offset)
 {
   //|x - offset| <= 255 keeps the scaling bound (fx_fft.h: offset 0..255)
@@ -628,24 +603,14 @@ void fx_fft_run_u8(FX_FFT *p, const uint8 *x, int32 offset)
   fx_fft_split(p);
 }
 
-void fx_fft_run_i32(FX_FFT *p, const int32 *x, int32 offset)
-{
-  uint32 N = 1u << p->log2n, n, maxabs = 0;
+//Wide samples (C only: i32, and u16 for the 0x1534 decimation filter's 16-bit records): 64-bit products with the
+//Q30 window, the shift from the actual largest |x - offset|
+#define FX_WIDE_RUN(NAME, TYPE)                                                                 void NAME(FX_FFT *p, const TYPE *x, int32 offset)                                               {                                                                                                 uint32 N = 1u << p->log2n, M = N >> 1, n, q, Q = 0, bit, maxabs = 0;                            const int32 *win = p->win;                                                                      int32  *o = p->buf;                                                                             int    k1;                                                                                                                                                                                      for(n = 0; n < N; n++)                                                                          {                                                                                                 int32  v = (int32)x[n] - offset;                                                                uint32 a = (uint32)(v < 0 ? -v : v);                                                                                                                                                            if(a > maxabs)                                                                                    maxabs = a;                                                                                 }                                                                                                                                                                                               p->shift = 29 - p->log2n - fx_bits(maxabs);                                                     k1 = 30 - p->shift - 1;                                                                                                                                                                         for(q = 0; q < M / 2; q++, o += 4)                                                              {                                                                                                 uint32 n0 = 2 * Q, n1 = n0 + M;                                                                 int32  z0r = FX_WIDEZ(n0, win[n0]), z0i = FX_WIDEZ(n0 + 1, win[n0 + 1]);                         int32  z1r = FX_WIDEZ(n1, win[n1]), z1i = FX_WIDEZ(n1 + 1, win[n1 + 1]);                                                                                                                         fx_st(o,     z0r + z1r, z0i + z1i);                                                             fx_st(o + 2, z0r - z1r, z0i - z1i);                                                                                                                                                             bit = M >> 2;                                                                                   while(Q & bit) { Q ^= bit; bit >>= 1; }                                                         Q |= bit;                                                                                     }                                                                                                                                                                                               fx_fft_stages(p);                                                                               fx_fft_split(p);                                                                              }
 
-  for(n = 0; n < N; n++)
-  {
-    int32  v = x[n] - offset;
-    uint32 a = (uint32)(v < 0 ? -v : v);
-
-    if(a > maxabs)
-      maxabs = a;
-  }
-
-  p->shift = 29 - p->log2n - fx_bits(maxabs);
-  fx_load_i32(p, x, offset);
-  fx_fft_stages(p);
-  fx_fft_split(p);
-}
+#define FX_WIDEZ(n, w) ((int32)((((int64)((int32)x[n] - offset) * (w)) >> k1) + 1) >> 1)
+FX_WIDE_RUN(fx_fft_run_i32, int32)
+FX_WIDE_RUN(fx_fft_run_u16, uint16)
+#undef FX_WIDEZ
 
 //----------------------------------------------------------------------------------------------------------------------------------
 

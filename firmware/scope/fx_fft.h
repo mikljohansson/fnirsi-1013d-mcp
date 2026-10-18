@@ -51,6 +51,8 @@ int  fx_fft_init(FX_FFT *p, int log2n, int window, int32 *win, int32 *buf);
 //(inputs wider than 29 - log2n bits are rounded to that width).
 void fx_fft_run_u8(FX_FFT *p, const uint8 *x, int32 offset);
 void fx_fft_run_i32(FX_FFT *p, const int32 *x, int32 offset);
+//u16: 16-bit records of the FPGA 0x1534 filter (C only); every bit is kept up to N = 8192 (|x - offset| <= 32768)
+void fx_fft_run_u16(FX_FFT *p, const uint16 *x, int32 offset);
 
 //Bin power of the last run in centi-dB (see above) plus offset, bins k = first..first + count - 1 (<= N/2) into out;
 //FX_CDB_FLOOR marks an empty bin, other values are clamped to FX_CDB_FLOOR + 1..32767.
