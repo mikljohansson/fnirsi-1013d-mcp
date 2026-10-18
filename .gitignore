@@ -8,6 +8,7 @@ backups/
 
 # build outputs
 firmware/**/build/
+firmware/**/build-*/
 firmware/**/dist/
 firmware/**/*.o
 firmware/**/*.elf

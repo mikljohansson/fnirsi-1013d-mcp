@@ -70,8 +70,10 @@ Reference checkouts (read-only, outside this repo, never build inside them):
 - Cross toolchain lives in **WSL Ubuntu** (`wsl -d Ubuntu`): `arm-none-eabi-gcc`, `make`, `flashrom`,
   python3. Run builds from WSL with the repo at `/mnt/d/src/fnirsi-1013d-ai`. Root in WSL is available
   without a password via `wsl -d Ubuntu -u root` for installing packages.
-- Firmware: `cd firmware/scope && make` produces `fnirsi_1013d.bin` (eGON-wrapped SD image part). See
-  `firmware/README.md` for the SD layout and FEL load commands once written.
+- Firmware: `cd firmware/scope && make -j` produces `build/fnirsi_1013d.bin` (eGON.EXE image for SD sector
+  750 / FEL). apt toolchain is GCC 13.2.1; Atlan used GCC 10.3.1 and `make check-reference` (after
+  `firmware/tools/fetch_gcc10.sh`) rebuilds byte-identical to Atlan's v1.00o5 binary. SD layout, image
+  format, `make_sd_image.py` and FEL commands: `firmware/README.md`.
 - Compiler flags are inherited from Atlan4 (`-mcpu=arm926ej-s -O3 -nostdlib`, custom `mem*.s`, tiny malloc,
   no libc). Keep it that way; do not introduce libc or floating point in acquisition paths.
 - Python host tools: `python -I` for anything that reads downloaded/untrusted files; venv under `mcp/.venv`.
