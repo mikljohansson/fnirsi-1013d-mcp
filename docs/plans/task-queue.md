@@ -96,6 +96,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Dispatched
 
+- fw-gen7 (worktree, Opus, started 10-19 00:35): dead-code purge, reproducible builds, 16-bit trigger level fix; fw 0.2.47.
+- fw-mmu (worktree, Opus, started 10-19 00:35): MMU + D-cache enable with PC_MMU switch; fw 0.2.48; bench only with the owner present.
+- bode-design (Opus, docs only, started 10-19 00:35): docs/plans/bode-design.md.
 - fw-cal2 (retired, about 400k tokens): calibration v3 delivered and merged (c20957a, fw 0.2.45 / 1.12 / row 51); handoff section 23.
 - fw-phosphor (retired, about 430k tokens): phosphor view delivered and merged (2e73d28, fw 0.2.46 / 1.13 / row 52); handoff section 24.
 - mcp-gen3: protocol 1.12 + 1.13 host side (GET_CAL v3 gains in the volts model, DisplayMode 2-4, settings word 210).
