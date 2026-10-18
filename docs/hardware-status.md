@@ -367,3 +367,5 @@ Newest entries at the bottom. Format: date, who, what, result.
   DDR 1024/2048/4096/16384 points = 5.3 / 11.4 / 24.3 / 108.7 ms (+0.6/1.3/2.5/10.1 ms dB conversion); on-chip SRAM 1024/2048/4096 =
   4.0 / 8.5 / 18.1 ms. About 4x slower than the uncached estimate; 2048-4096 points still fit a UI pass. Enabling the MMU with a flat map
   (framebuffer uncached) would turn the D-cache on and is the obvious speed-up for everything (later item). Card keeps 0.2.25.
+- Owner's verdict on 0.2.27 channel menus: Open CH, Invert, Coupling AC/DC, V/A mode, Probe mode 1x..1000x on both channels; the dead FFT
+  switch is gone. XY mode already exists in System settings (Atlan's); phosphor grading of it is a later nicety.
