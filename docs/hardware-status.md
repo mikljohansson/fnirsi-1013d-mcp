@@ -180,4 +180,4 @@ Newest entries at the bottom. Format: date, who, what, result.
 - Firmware 0.2.4 (commit b05cdbd, sha256 d99c6af7...) loaded; GET_LINK_STATS carries a leading count word (35) then the counters: init->first main-loop
   poll = 1515 ms, first UI pass = 31 ms (earlier readings were off by one). The startup delay is in the init path before the main loop, not in the UI pass.
 - Firmware 0.2.5 (commit 5086f7d, sha256 faefbdb3...): EP2 OUT interrupt re-enabled after suspend/reset/disconnect; USB event counters 35..40.
-  Loaded hands-free; baseline resets 1 / suspends 1 / resumes 0 / disconnects 0 / EP0 setups 40. Idle-fault reproduction (11 min port closed) running.
+  Loaded hands-free; baseline resets 1 / suspends 1 / resumes 0 / disconnects 0 / EP0 setups 40. Idle-fault reproduction (11 min port closed): no fault, reopen OK, no suspend/reset/disconnect events counted; not reproduced on 0.2.5.
