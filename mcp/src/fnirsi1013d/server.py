@@ -1897,6 +1897,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--enable-raw", action="store_true", default=None, help="allow tier 4 (raw FPGA, FEL)")
     ap.add_argument("--data-dir", type=Path, help="where .npz files go (env FNIRSI_MCP_DATA_DIR)")
     ap.add_argument("--audit-log", type=Path, help="JSONL audit log (env FNIRSI_MCP_AUDIT_LOG)")
+    ap.add_argument("--sim", metavar="SIM_ARGS", help="start an in-process simulator and connect to it, e.g. "
+                    "--sim \"--variant al3 --signal decay:tau=80us\" (overrides --port; for development)")
     ap.add_argument("--transport", choices=("stdio", "streamable-http"), default="stdio")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args(argv)
@@ -1905,11 +1907,20 @@ def main(argv: list[str] | None = None) -> None:
     cfg = ServerConfig.from_env(port=a.port, max_tier=a.max_tier, enable_raw=a.enable_raw, data_dir=a.data_dir,
                                 audit_log=a.audit_log)
     preload_native_modules()
+    sim = None
+    if a.sim is not None:
+        from .simulator import start_from_args
+
+        sim = start_from_args(a.sim)
+        cfg.port = sim.url
+        log.warning("in-process simulator on %s (%s)", sim.url, a.sim)
     mcp, sess = build_server(cfg)
     try:
         mcp.run(transport=a.transport)
     finally:
         sess.close()
+        if sim is not None:
+            sim.stop()
 
 
 if __name__ == "__main__":

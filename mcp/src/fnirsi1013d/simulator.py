@@ -1441,7 +1441,7 @@ def build_config(args: argparse.Namespace) -> SimConfig:
                      seed=args.seed)
 
 
-def main(argv: list[str] | None = None) -> None:
+def make_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="fnirsi1013d-sim", description="FNIRSI 1013D protocol v1 device simulator")
     ap.add_argument("--variant", choices=sorted(VARIANTS), default="al3")
     ap.add_argument("--host", default="127.0.0.1")
@@ -1460,7 +1460,20 @@ def main(argv: list[str] | None = None) -> None:
                     help="scale modelled acquisition time (0 = instant captures)")
     ap.add_argument("--seed", type=int)
     ap.add_argument("-v", "--verbose", action="store_true")
-    args = ap.parse_args(argv)
+    return ap
+
+
+def start_from_args(arg_string: str, port: int = 0) -> SimServer:
+    """Start an in-process simulator from a CLI-style string, e.g. ``"--variant al3 --signal decay:tau=80us"``
+    (used by ``fnirsi1013d-mcp --sim``)."""
+    import shlex
+
+    args = make_parser().parse_args(shlex.split(arg_string, posix=True))
+    return SimServer(Device(build_config(args)), args.host, port or 0).start()
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = make_parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(asctime)s %(name)s %(message)s")
     cfg = build_config(args)
