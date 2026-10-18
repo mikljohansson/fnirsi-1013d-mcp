@@ -639,8 +639,14 @@ is in `AGENTS.md`.
    and B values; there must be no isolated spikes. Repeat with 0x53 bits 3 / 4 set and keep the cleanest setting.
 3. Core order: K = 3, N = 2 or 4 on a 20 to 30 MHz sine. The amplitude should follow the droop table for swap = 0. A
    wrong order shows as excess attenuation and distortion; then set bit 2.
-4. Alias rejection (F1): generator 3.9 MHz square, 1 MSa/s, K = 0 vs K = 1 vs K = 3. Measure the 100 kHz alias with the
-   host FFT; expect at least 15 dB less with K = 1.
+4. Alias rejection (F1): generator 50 MHz / 13 = 3.846 MHz square (0x51 = round(2^32 / 13) = 330382100), 1 MSa/s,
+   K = 0 vs K = 1 vs K = 3. Measure the 153.8 kHz alias with the host FFT. The model gives +2.4 / -26 / -83 dBV
+   for a 3.1 V p-p square; expect at least 15 dB less with K = 1. The ADC spurs and the front end set the floor
+   long before -83 dBV.
+   Use a frequency with 50 MHz / f an integer. Otherwise the DDS edges, quantised to its 20 ns clock, form a pattern
+   that repeats at a low frequency, and the generator output then contains a real in-band tone. A 900 kHz square,
+   for example, carries a 100 kHz component at about -37.5 dBV, which explained the bench residual of 2026-10-18
+   (`tb/square_alias.py`). 3.9 MHz has the same problem.
 5. Resolution: shorted input, K = 1 and 3 at N = 1000. The rms noise in ADC LSB should fall roughly as the noise-bits
    column predicts.
 
@@ -842,8 +848,13 @@ dump):
 2. Passband: K = 3, N = 100 (2 MSa/s), FIR on. Sweep a sine from 50 kHz to 500 kHz (fo/4) and compare the amplitude
    with the FIR off: flat within 0.1 dB with the FIR, versus up to 2.7 dB droop without. The front end's own response
    cancels in the ratio.
-3. Alias: generator square at fo - 50 kHz (for N = 100: 1.95 MHz), K = 1, FIR off vs on. The 50 kHz alias should drop
-   by about 6 dB more than the CIC alone gives at that frequency. Use the host FFT.
+3. Alias: N = 100 (2 MSa/s), generator 50 MHz / 26 = 1.923 MHz square (0x51 = round(2^32 / 26) = 165191050), K = 1,
+   FIR off vs on. Read the 76.9 kHz alias with the host FFT. The model gives -25 dBV with the FIR off and -94 dBV with
+   it on, so the bench should show the alias falling into the ADC's own spur floor.
+   - Use 50 MHz / f an integer (see section 3, check 4). A 1.95 MHz square has a DDS pattern tone at 50 kHz, right on
+     the alias.
+   - The FIR adds rejection only for inputs near odd multiples of fo. Near even multiples (for example 3.85 MHz at
+     1 MSa/s) the CIC's own N/2 nulls do the work, and the FIR and CIC paths give the same level.
 4. Step: generator 1 kHz square at N = 200, K = 2, FIR on. Expect about 7 % overshoot and undershoot, symmetric
    around the edge (linear phase), with no clipping at the recommended shift.
 5. EXT timing: EXT and CH1 driven from the same edge. The CH1 edge in the record should sit at trigger_address +
