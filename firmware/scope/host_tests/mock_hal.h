@@ -36,6 +36,7 @@ typedef struct
   uint32_t max_read_start;        //largest start address passed to read_core (must be < ring)
   uint32_t debug_cmds[16];
   uint32_t ndebug_cmds;
+  uint32_t fpga_ops;              //calls of HAL functions that drive the FPGA bus on the scope (test_fast_path_no_fpga)
 
   //Settings
   pc_hw_channel  ch[2];

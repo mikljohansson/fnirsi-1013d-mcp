@@ -480,6 +480,14 @@ compact menus rather than painting over gaps.
    IRQ-mode signature of the vector-overwrite suspect (section 9). The 0.2.20 soak was clean (counter 47 = 0,
    57 = 2176), so 0.2.21 (fw-gen4) removed the fallback outright: the race that correlates with the only restart can
    no longer happen. 0.2.21 needs its own bench passes and soak before it replaces 0.2.20 as the persist candidate.
+1b. USB drops on bitstream 0x1533 (bench 2026-10-18): 0.2.20 from the card had four host port resets within ~60 s
+   (CLEAR_FEATURE 0x82, suspend, bus reset); 0.2.11 on the same bitstream ran 300 x 64 KiB clean. fw-gen4 audit: no
+   ISR- or BUSY-context path touches the FPGA (GET_STATUS sends `ext_flags` cached at the MAIN poll since 0.2.9; the
+   other 0x28 read is in capture finish, main loop / UI hook), and every EXT-gated line is the same in 0.2.11 and
+   0.2.21, so EXT code alone cannot explain 0.2.11 clean vs 0.2.20 failing. `test_fast_path_no_fpga` (host test,
+   mock `fpga_ops`) fails if a fast-path request ever drives the FPGA bus. Discriminator: 0.2.21 on 0x1533. If it
+   drops too, the suspects are the non-EXT changes since 0.2.11 (event log, restart record in start.s, splash probe,
+   battery filter, system menu) and boot conditions (card boot after a power cycle, generator on).
 2. Read the 0.2.18+ frozen snapshot after sessions to explain the two suspend+reset pairs per session (section 11).
 3. Owner verdicts on 0.2.13+ System settings and battery, 0.2.17+ quiet boot; EXT trigger bench with 0x1533.
 4. Bench tests T3-T8 and T10 (section 7), then clear the UNVERIFIED caps and set FORCE_TRIGGER in release builds.

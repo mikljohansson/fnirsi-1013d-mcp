@@ -150,6 +150,7 @@ void pc_hal_channel_write(int ch, const pc_hw_channel *c, uint8_t mask)
   if(mask & PC_CH_INVERT)   d->invert = c->invert;
   if(mask & PC_CH_PROBE)    d->probe = c->probe;
   mock.ch_writes++;
+  mock.fpga_ops++;
 }
 
 uint32_t pc_hal_mul_factor_1x(uint8_t range)
@@ -178,12 +179,15 @@ void pc_hal_timebase_write(const pc_hw_timebase *t, int raw)
     mock.tb = *t;
 
   mock.tb_writes++;
+  mock.fpga_ops++;
 }
 
 void pc_hal_trigger_read(pc_hw_trigger *t) { *t = mock.trg; }
 
 void pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask)
 {
+  mock.fpga_ops++;
+
   if(mask & PC_TRG_SOURCE)
   {
     mock.trg.source = t->source;
@@ -210,7 +214,7 @@ void pc_hal_gen_read_ui(uint8_t *enable, uint32_t *freq_hz, uint8_t *duty_pct)
 
 void pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable)
 {
-  mock.gen_phase = phase_inc; mock.gen_thr = threshold; mock.gen_hw_en = enable; mock.gen_writes++;
+  mock.gen_phase = phase_inc; mock.gen_thr = threshold; mock.gen_hw_en = enable; mock.gen_writes++; mock.fpga_ops++;
 
   //UI copy, rounded as pc_hal_scope.c does
   mock.gen_en   = enable;
@@ -224,6 +228,8 @@ static int mock_polls;
 
 int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal)
 {
+  mock.fpga_ops++;
+
   if(mock.arm_fail)
     return -1;
 
@@ -238,13 +244,14 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
 void pc_hal_acq_poll(int *done, int *triggered)
 {
   mock_polls++;
+  mock.fpga_ops++;
   *triggered = (mock.polls_to_trigger >= 0) && (mock_polls >= mock.polls_to_trigger);
   *done      = (mock.polls_to_done >= 0) && (mock_polls >= mock.polls_to_done);
 }
 
-uint16_t pc_hal_acq_finish(void) { return mock.trigger_addr; }
-uint8_t  pc_hal_ext_status(void) { mock.ext_reads++; return mock.ext_status; }
-void     pc_hal_force(void)      { mock.forces++; mock_polls = 1000000; mock.polls_to_trigger = -1; mock.polls_to_done = 0; }
+uint16_t pc_hal_acq_finish(void) { mock.fpga_ops++; return mock.trigger_addr; }
+uint8_t  pc_hal_ext_status(void) { mock.fpga_ops++; mock.ext_reads++; return mock.ext_status; }
+void     pc_hal_force(void)      { mock.fpga_ops++; mock.forces++; mock_polls = 1000000; mock.polls_to_trigger = -1; mock.polls_to_done = 0; }
 
 void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,
                       uint32_t ring_words, uint8_t read_lag)
@@ -258,6 +265,7 @@ void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst
   (void)read_lag;
 
   mock.read_calls++;
+  mock.fpga_ops++;
   if(start > mock.max_read_start)
     mock.max_read_start = start;
 
@@ -265,9 +273,9 @@ void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst
     dst[i * stride] = mock.ring[core][(start + i) % ring_words];
 }
 
-void    pc_hal_fpga_write_cmd(uint8_t cmd)   { if(mock.ndebug_cmds < 16) mock.debug_cmds[mock.ndebug_cmds++] = 0x100 | cmd; }
-void    pc_hal_fpga_write_data(uint8_t data) { if(mock.ndebug_cmds < 16) mock.debug_cmds[mock.ndebug_cmds++] = 0x200 | data; }
-uint8_t pc_hal_fpga_read_data(void)          { return 0x5A; }
+void    pc_hal_fpga_write_cmd(uint8_t cmd)   { mock.fpga_ops++; if(mock.ndebug_cmds < 16) mock.debug_cmds[mock.ndebug_cmds++] = 0x100 | cmd; }
+void    pc_hal_fpga_write_data(uint8_t data) { mock.fpga_ops++; if(mock.ndebug_cmds < 16) mock.debug_cmds[mock.ndebug_cmds++] = 0x200 | data; }
+uint8_t pc_hal_fpga_read_data(void)          { mock.fpga_ops++; return 0x5A; }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 

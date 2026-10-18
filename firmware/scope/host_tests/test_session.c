@@ -1406,6 +1406,75 @@ static void test_ext_trigger(void)
   T_EQ(r.h.status, 0);
 }
 
+//The timer-tick (ISR) and BUSY polls must never drive the FPGA bus: they can interrupt the main loop, or a UI busy
+//loop, in the middle of a bit-banged FPGA transaction. Worst case for 0x1533: EXT caps, generator on, an armed
+//capture, main-loop requests queued behind the safe set, the UI modal. Counts every mock HAL call that drives the bus.
+static void test_fast_path_no_fpga(void)
+{
+  static const uint16_t safe[] = { PC_CMD_PING, PC_CMD_GET_INFO, PC_CMD_GET_STATUS, PC_CMD_GET_BATTERY,
+                                   PC_CMD_GET_LINK_STATS, PC_CMD_GET_BAD_FRAME, PC_CMD_GET_EVENT_LOG,
+                                   PC_CMD_GET_CAPTURE_INFO };
+  static const int ctxs[] = { PC_CTX_ISR, PC_CTX_BUSY };
+  resp_t r;
+  uint8_t g[20];
+  uint32_t ops, i, c, k;
+
+  setup(0x1533);
+  r = req(PC_CMD_SET_REMOTE, "\1", 1);
+  T_EQ(r.h.status, 0);
+  memset(g, 0, 20); g[0] = 1; g[1] = 1;
+  r = req(PC_CMD_SET_GEN, g, 20);
+  T_EQ(r.h.status, 0);
+  mock.ext_status = 0x06;
+  mock.polls_to_trigger = -1; mock.polls_to_done = -1;
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0);
+  r = status();
+  T_EQ(r.p[42], 0x06);                                           //cached at the MAIN poll
+
+  ops = mock.fpga_ops;
+
+  for(c=0;c<2;c++)
+  {
+    for(i=0;i<sizeof(safe)/sizeof(safe[0]);i++)
+    {
+      r = req_ctx(safe[i], 0, 0, ctxs[c]);
+      T_TRUE(r.h.status != 0xEEEE);
+    }
+    r = req_ctx(PC_CMD_SET_REMOTE, "\1", 1, ctxs[c]);
+    T_EQ(r.h.status, 0);
+    r = req_ctx(PC_CMD_GET_STATUS, 0, 0, ctxs[c]);
+    T_EQ(r.p[42], 0x06);                                         //the cached byte, no 0x28 read
+  }
+
+  //FPGA requests queued while only fast polls run (UI not modal, then modal: E_BUSY from BUSY polls)
+  for(k=0;k<2;k++)
+  {
+    mock_clear_resps();
+    push_frame(PC_CMD_ARM, next_seq++, 0, 0);
+    push_frame(PC_CMD_SET_CHANNEL, next_seq++, "\0\x01\0\x03", 4);
+    push_frame(PC_CMD_FORCE, next_seq++, 0, 0);
+
+    for(i=0;i<200;i++)
+    {
+      mock.now++;
+      pc_poll(&S, PC_CTX_ISR);
+      pc_poll(&S, PC_CTX_BUSY);
+      mock_tx_release();
+    }
+
+    if(k == 0)
+      mock.now += PC_MODAL_MS + 1;
+  }
+
+  T_EQ(mock.fpga_ops, ops);
+  T_EQ(mock.arms, 1); T_EQ(mock.ch_writes, 0); T_EQ(mock.forces, 0);
+
+  //Sanity: the counter sees the MAIN poll's own reads (acquisition service, 0x28)
+  pc_poll(&S, PC_CTX_MAIN);
+  T_TRUE(mock.fpga_ops > ops);
+}
+
 //A host opens the port (DTR 0 -> 1) and sends a main-loop request at once. The timer poll parses it before the
 //main loop takes the DTR event: the request must still be answered (fw 0.2.10 and older dropped it: bench 0.2.8/0.2.9,
 //the first TEST_PATTERN after a FEL load timed out)
@@ -1619,6 +1688,7 @@ int main(void)
   test_indicator();
   test_sd();
   test_ext_trigger();
+  test_fast_path_no_fpga();
   test_dtr_up_keeps_request();
   test_event_log();
   test_fel_reset_stall();
