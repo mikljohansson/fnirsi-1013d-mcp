@@ -66,6 +66,7 @@ static pc_evlog_entry  pc_evlog[PC_EVLOG_SIZE];
 static volatile uint32 pc_evlog_n;              //events logged since boot
 static volatile uint32 pc_usb_irq_polled;       //timer polls that found USB flags left by a lost interrupt
 static volatile uint8  pc_usb_in_poll;          //the CDC handler runs from the timer poll
+static volatile uint32 pc_usb_isr_runs;         //real USB interrupts (the handler not called from the poll)
 
 static void pc_evlog_add(uint8 type, uint8 a, uint16 b)
 {
@@ -492,6 +493,9 @@ void pc_usb_isr_bad_setup(uint32 count)
 //set means the interrupt for them was lost (1.00o5's irq_handler writes 0 to INTC pending after reading it).
 void pc_usb_isr_flags(uint32 usb, uint32 tx, uint32 rx)
 {
+  if(!pc_usb_in_poll)
+    pc_usb_isr_runs++;
+
   if(pc_usb_in_poll && (usb | tx | rx))
   {
     pc_usb_irq_polled++;
@@ -499,15 +503,33 @@ void pc_usb_isr_flags(uint32 usb, uint32 tx, uint32 rx)
   }
 }
 
-//Timer tick (IRQ context, so it cannot interleave with the USB IRQ): run the CDC handler once. With nothing pending it
-//only reads the three flag registers. Only while the CDC handler is the installed USB handler (not in MSC mode).
+//Timer tick (IRQ context, so it cannot interleave with the USB IRQ): serve USB flags a lost interrupt left latched.
+//Only after two consecutive ticks without a real USB interrupt (fw 0.2.14): when both IRQs are pending, 1.00o5's
+//irq_handler calls the timer handler first, so serving on every tick raced the real interrupt during normal traffic
+//(0.2.12 bench: 46,033 "lost" counts in 3 min, all of them that race). A flag the real interrupt is about to serve
+//makes it run before the second quiet tick. Only while the CDC handler is installed (not in MSC mode).
 void pc_usb_poll_irq(void)
 {
   extern void usb_device_CDC_irq_handler(void);
   extern IRQHANDLERFUNCION interrupthandlers[];
+  static uint32 seen_runs;
+  static uint8  quiet;
 
   if(interrupthandlers[USB_IRQ_NUM] != usb_device_CDC_irq_handler)
     return;
+
+  if(pc_usb_isr_runs != seen_runs)
+  {
+    seen_runs = pc_usb_isr_runs;
+    quiet     = 0;
+    return;
+  }
+
+  if(quiet < 2)
+  {
+    quiet++;
+    return;
+  }
 
   pc_usb_in_poll = 1;
   usb_device_CDC_irq_handler();
