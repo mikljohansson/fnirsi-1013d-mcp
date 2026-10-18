@@ -400,3 +400,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   31.4 dB for K=1/2/3 (skipping: 0 dB), droop 0.9 / 1.8 / 2.7 dB at fo/4, resolution +3.3 / +3.6 / +3.75 bits at N=100. 0x1535 FIR
   study: a FIR at the output rate cannot fix aliases, so the plan is CIC by N/2 followed by a 15-tap symmetric FIR decimating by 2
   (flat to fo/4 within 0.08 dB, alias rejection 17 / 34 / 51 dB), one M18x18 per channel, engages at N >= 16, N multiple of 4.
+- **FPGA flash written with the decimation bitstream 0x1534** (21:46): pre-write dumps backups/20261018-214611-pre-decim.bin and
+  backups/20261018-214621-pre-write.bin both sha256 96159a87... (= the 0x1533 image, rollback confirmed); wrote
+  backups/al3_decim_0x1534_padded.bin (c387a15e..., 0xFF-padded fpga/al3/out/FPGA-decim.bin 83140510...), 69 sectors erased, 1104 pages
+  programmed, read-back verified, independent verify OK. Scope on battery, USB unplugged, Sipeed FT2232D on J2. Power cycle pending.
+- Owner decision: the spectrum view's frequency axis is capped at 25 MHz (front end rolls off ~30 MHz); fw-gen5 implements it.
