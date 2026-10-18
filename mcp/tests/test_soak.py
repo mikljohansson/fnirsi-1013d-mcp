@@ -78,8 +78,14 @@ def test_drop_is_logged_waited_out_and_reopened(sim):
     i_gone, i_back, i_reopen = (next(i for i, ln in enumerate(lines) if k in ln)
                                 for k in (" gone", "back after", "reopen tcp://"))
     assert i_gone < i_back < i_reopen
-    assert "ok (down" in lines[i_reopen] and "stats reopen delta" in lines[i_reopen + 1]
-    assert "dtr_down +1" in lines[i_reopen + 1]  # the simulator saw the old connection close
+    assert "ok (down" in lines[i_reopen]
+    # fw 0.2.12: the first requests after the reopen are GET_EVENT_LOG, then GET_LINK_STATS, then GET_INFO
+    i_ev = next(i for i, ln in enumerate(lines) if "events reopen:" in ln)
+    i_st = next(i for i, ln in enumerate(lines) if "stats reopen delta" in ln)
+    i_open = max(i for i, ln in enumerate(lines) if " open tcp://" in ln)
+    assert i_back < i_ev < i_st < i_open < i_reopen
+    assert any("dtr 0" in ln for ln in lines[i_ev:i_st])  # the drop, decoded with device ms and host time
+    assert "dtr_down +1" in lines[i_st]  # the simulator saw the old connection close
     assert "drops 1 (down " in lines[-1] and "longest gap" in lines[-1]
     assert s.st.requests > 13  # it carried on after the reopen (the drop was at write 12)
 
@@ -103,3 +109,25 @@ def test_selective_suspend_parsing(monkeypatch):
     monkeypatch.setattr(S.sys, "platform", "win32")
     monkeypatch.setattr(S.subprocess, "run", lambda *a, **k: R())
     assert S.selective_suspend() == "AC enabled, DC disabled"
+
+
+def test_scope_event_log_api_and_tool(sim, sim_factory, tmp_path):
+    import anyio
+
+    from fnirsi1013d.scope import Scope
+    from test_server import client_for
+    sim.device.log_event(2)
+    sim.device.log_event(1)
+    with Scope.connect(sim.url) as s:
+        log = s.event_log()
+        assert log.total >= 2 and [e.name for e in log.events][-2:] == ["suspend", "bus_reset"]
+
+    async def main():
+        async with client_for(sim, tmp_path) as c:
+            r = await c.call("scope_event_log", last=16)
+            types = [e["type"] for e in r["events"]]
+            i = types.index("suspend")
+            assert types[i + 1] == "bus_reset" and "dtr" in types[i:] and all(e["ago_ms"] >= 0 for e in r["events"])
+        async with client_for(sim_factory(legacy=True), tmp_path) as c:
+            assert "protocol 1.5" in await c.fails("scope_event_log")
+    anyio.run(main)

@@ -864,6 +864,26 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             return out
         return await run("scope_calibration_info", 0, {}, go)
 
+    @register(0, title="Device USB event log", read_only=True)
+    async def scope_event_log(
+        last: Annotated[int, Field(ge=1, le=64, description="newest events to return")] = 64,
+    ) -> dict[str, Any]:
+        """The scope firmware's ring of the last 64 USB / link events (protocol >= 1.5, firmware >= 0.2.12): bus
+        resets, suspends/resumes, disconnects, EP0 setups, DTR changes, RX ring full/release, TX frames flushed or
+        aborted, and lost USB interrupts served by the timer poll, each with the device time in ms. Use it to
+        diagnose a link drop right after the scope reappears (a host port reset shows as suspend then bus reset).
+        Read-only."""
+        def go() -> dict[str, Any]:
+            s = sess.get_scope()
+            log = s.event_log()
+            if log is None:
+                raise ToolError("scope_event_log: needs protocol 1.5 (firmware >= 0.2.12)")
+            ev = log.events[-last:]
+            return {"ok": True, "device_now_ms": log.now_ms, "total_since_boot": log.total,
+                    "events": [{"ms": e.ms, "ago_ms": log.now_ms - e.ms, "type": e.name, "detail": e.describe()}
+                               for e in ev], "caveats": []}
+        return await run("scope_event_log", 0, {"last": last}, go)
+
     @register(0, title="SD card info", read_only=True)
     async def scope_sd_info(
         verify: Annotated[bool, Field(description="recompute the eGON checksums of the images on the card (reads "

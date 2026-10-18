@@ -25,8 +25,9 @@ MAGIC1 = 0x13
 PROTO_MAJOR = 1
 #: 1.1: GET_STATUS pass_ms / pass_max_ms (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4); 1.3: collaborative (shared)
 #: mode: SHARED_MODE cap, GET_STATUS settings/run fields, SET_ACQ_STATE, GET_CAPTURE_INFO; 1.4 (fw 0.2.9): EXT
-#: trigger (source 2 on 0x1533+ bitstreams), GET_STATUS ext_flags, GET_CAPTURE_INFO flag bit 5
-PROTO_MINOR = 4
+#: trigger (source 2 on 0x1533+ bitstreams), GET_STATUS ext_flags, GET_CAPTURE_INFO flag bit 5; 1.5 (fw 0.2.12):
+#: GET_EVENT_LOG, link counter 47 usb_irq_polled
+PROTO_MINOR = 5
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -61,6 +62,8 @@ class Cmd(enum.IntEnum):
     GET_BATTERY = 0x0005
     TEST_PATTERN = 0x0006
     GET_LINK_STATS = 0x0007  # protocol 1.2
+    GET_BAD_FRAME = 0x0008  # protocol 1.2, fw 0.1.5
+    GET_EVENT_LOG = 0x0009  # protocol 1.5, fw 0.2.12: last 64 USB/link events
     GET_CHANNEL = 0x0100
     SET_CHANNEL = 0x0101
     GET_TIMEBASE = 0x0102
@@ -99,7 +102,8 @@ LOCAL_ALLOWED = frozenset(
     }
 )
 #: Commands accepted while the UI is modal (LOCAL_BUSY, section 6.1).
-BUSY_ALLOWED = frozenset({Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.GET_BATTERY, Cmd.GET_LINK_STATS})
+BUSY_ALLOWED = frozenset({Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.GET_BATTERY, Cmd.GET_LINK_STATS,
+                          Cmd.GET_EVENT_LOG})
 #: Control requests allowed while a deferred request is pending (section 3.2).
 #: SET_ACQ_STATE (1.3) is a control request too: RUN/STOP while a WAIT is pending aborts it (E_ABORTED).
 CONTROL_CMDS = frozenset({Cmd.GET_STATUS, Cmd.STOP, Cmd.SET_REMOTE, Cmd.PING, Cmd.SET_ACQ_STATE})
@@ -1385,7 +1389,67 @@ LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     # fw 0.2.5+ (41 counters): USB device events
     "usb_bus_resets", "usb_suspends", "usb_resumes", "usb_disconnects", "ep0_setups", "ep0_bad_setups",
     # fw 0.2.7 (47 counters): RX back-pressure diagnostics (names as in firmware/scope/host_tests/bench_link.py)
-    "rx_isr_stalls", "rx_releases", "rx_restalls", "rx_empty_releases", "rx_count_max", "rx_count_oversize")
+    "rx_isr_stalls", "rx_releases", "rx_restalls", "rx_empty_releases", "rx_count_max", "rx_count_oversize",
+    # fw 0.2.12 (48 counters): timer polls that found USB interrupt flags (lost interrupts served)
+    "usb_irq_polled")
+
+
+#: GET_EVENT_LOG entry types (protocol 1.5, section 14 row 42)
+EVENT_TYPES = {1: "bus_reset", 2: "suspend", 3: "resume", 4: "disconnect", 5: "ep0_setup", 6: "ep0_short_packet",
+               7: "set_configuration", 8: "clear_halt", 9: "dtr", 10: "rx_ring_full", 11: "rx_release",
+               12: "tx_flushed", 13: "tx_aborted", 14: "usb_irq_polled"}
+
+
+@dataclass
+class DeviceEvent:
+    ms: int
+    type: int
+    a: int
+    b: int
+
+    @property
+    def name(self) -> str:
+        return EVENT_TYPES.get(self.type, f"type{self.type}")
+
+    def describe(self) -> str:
+        t, a, b = self.type, self.a, self.b
+        if t == 5:
+            return f"ep0_setup bRequest 0x{a:02X} bmRequestType 0x{b >> 8:02X} wValue.lo 0x{b & 0xFF:02X}"
+        if t == 6:
+            return f"ep0_short_packet COUNT0 {b}"
+        if t == 8:
+            return f"clear_halt ep 0x{a:02X}"
+        if t == 9:
+            return f"dtr {a}"
+        if t == 10:
+            return f"rx_ring_full RXCOUNT {b}"
+        if t in (12, 13):
+            return f"{self.name} {b} bytes left"
+        if t == 14:
+            return f"usb_irq_polled INTUSB 0x{a:02X} INTTX 0x{b >> 8:02X} INTRX 0x{b & 0xFF:02X}"
+        return self.name
+
+
+@dataclass
+class EventLog:
+    total: int
+    now_ms: int
+    events: list[DeviceEvent]
+
+
+def parse_event_log(payload: bytes) -> EventLog:
+    """GET_EVENT_LOG: u16 n, u16 0, u32 total, u32 now_ms, then n x (u32 ms, u8 type, u8 a, u16 b), oldest first."""
+    if len(payload) < 12:
+        return EventLog(0, 0, [])
+    n, _r, total, now = struct.unpack_from("<HHII", payload)
+    n = min(n, (len(payload) - 12) // 8)
+    ev = [DeviceEvent(*struct.unpack_from("<IBBH", payload, 12 + 8 * i)) for i in range(n)]
+    return EventLog(total, now, ev)
+
+
+def pack_event_log(log: EventLog) -> bytes:
+    return struct.pack("<HHII", len(log.events), 0, log.total & 0xFFFFFFFF, log.now_ms & 0xFFFFFFFF) + \
+        b"".join(struct.pack("<IBBH", e.ms & 0xFFFFFFFF, e.type, e.a, e.b) for e in log.events)
 
 
 def link_stats_names(n: int) -> tuple[str, ...]:
@@ -1415,7 +1479,7 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.READ_RAW: ReadRawReq.size(), Cmd.READ_TRACE: ReadTraceReq.size(), Cmd.READ_LIVE: ReadLiveReq.size(),
     Cmd.ACQUIRE_AVG: AcquireAvgReq.size(), Cmd.GET_GEN: 0, Cmd.SET_GEN: SetGenReq.size(), Cmd.GET_CAL: 1,
     Cmd.READ_SCREEN: ReadScreenReq.size(), Cmd.ENTER_FEL: 4, Cmd.SET_ACQ_STATE: SetAcqStateReq.size(),
-    Cmd.GET_CAPTURE_INFO: 0, Cmd.SD_INFO: 4, Cmd.SD_READ_SECTORS: 8, Cmd.SD_STAGE: 8, Cmd.SD_WRITE_SECTORS: 16,
+    Cmd.GET_CAPTURE_INFO: 0, Cmd.GET_EVENT_LOG: 0, Cmd.SD_INFO: 4, Cmd.SD_READ_SECTORS: 8, Cmd.SD_STAGE: 8, Cmd.SD_WRITE_SECTORS: 16,
 }
 
 

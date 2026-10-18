@@ -40,7 +40,8 @@ from .transport import (PIDCODES_TEST_PIDS, PIDCODES_VID, Link, Transport, Trans
 
 #: counters whose deltas tell what happened on the USB side
 WATCH = ("link_resets", "dtr_up", "dtr_down", "usb_bus_resets", "usb_suspends", "usb_resumes", "usb_disconnects",
-         "ep0_setups", "ep0_bad_setups", "rx_stalls", "hdr_crc_errors", "payload_crc_errors", "rx_timeouts")
+         "ep0_setups", "ep0_bad_setups", "usb_irq_polled", "rx_stalls", "hdr_crc_errors", "payload_crc_errors",
+         "rx_timeouts")
 #: Windows: USB settings subgroup / USB selective suspend setting
 POWERCFG = ("2a737441-1930-4402-8d77-b2bebba308a3", "48e6b7a6-50f5-4782-a5d4-53bb8f07e226")
 
@@ -114,14 +115,22 @@ class Soak:
         self.start_stats: dict[str, int] | None = None
         self.last_stats: dict[str, int] | None = None
         self.n_counters = 0
+        self.proto_minor = 0
+        #: device events already printed (GET_EVENT_LOG total at the last read)
+        self.events_seen = 0
 
     def log(self, msg: str) -> None:
         self.say(f"{_dt.datetime.now().isoformat(timespec='milliseconds')} {msg}")
 
     # --- link ----------------------------------------------------------------------------------------------
 
-    def open(self) -> None:
+    def open(self, after_drop: bool = False) -> None:
+        """Open the port. After a drop the very first requests are the fast-path GET_EVENT_LOG and GET_LINK_STATS
+        (fw 0.2.12), so the event ring still holds what happened before the reset; then GET_INFO."""
         self.t = Transport(self.link_factory(self.port), retries=0)
+        if after_drop and self.proto_minor >= 5:
+            self.events("reopen")
+            self.stats("reopen")
         info = P.InfoResp.unpack(self.t.request(P.Cmd.GET_INFO, retries=1).payload)
         self.proto_minor = info.proto_minor
         self.log(f"open {self.port} (fw {info.fw_version_str}, proto {info.proto_major}.{info.proto_minor})")
@@ -133,6 +142,25 @@ class Soak:
             except Exception:  # noqa: BLE001
                 pass
             self.t = None
+
+    def events(self, label: str, t_drop: _dt.datetime | None = None) -> None:
+        """Print GET_EVENT_LOG entries not printed yet, with device ms and the matching host wall-clock time."""
+        assert self.t is not None
+        try:
+            log = P.parse_event_log(self.t.request(P.Cmd.GET_EVENT_LOG, retries=1).payload)
+        except Exception as e:  # noqa: BLE001
+            self.log(f"events {label} unavailable ({e})")
+            return
+        host_now = _dt.datetime.now()
+        new = log.total - self.events_seen
+        shown = log.events[-new:] if 0 < new <= len(log.events) else (log.events if new > 0 else [])
+        lost = max(0, new - len(log.events))
+        self.log(f"events {label}: {len(shown)} new of {log.total} since boot (device now {log.now_ms} ms)"
+                 + (f", {lost} older ones overwritten" if lost else ""))
+        for e in shown:
+            at = host_now - _dt.timedelta(milliseconds=log.now_ms - e.ms)
+            self.log(f"  device {e.ms} ms (~host {at.isoformat(timespec='milliseconds')}) {e.describe()}")
+        self.events_seen = log.total
 
     def stats(self, label: str) -> None:
         assert self.t is not None
@@ -168,10 +196,11 @@ class Soak:
                     self.log(f"port {self.port} back after {self.clock() - t_down:.2f} s")
                     gone_logged = False
                 try:
-                    self.open()
+                    self.open(after_drop=True)
                     down = self.clock() - t_down
                     self.log(f"reopen {self.port} ok (down {down:.2f} s)")
-                    self.stats("reopen")
+                    if self.proto_minor < 5:
+                        self.stats("reopen")
                     return down
                 except (TransportError, OSError) as e:
                     self.log(f"reopen {self.port} failed: {e}" + _wec(str(e)))
@@ -205,6 +234,8 @@ class Soak:
             self.log(f"FAILED: cannot open {self.port}: {e}{_wec(str(e))}")
             return 2
         self.stats("start")
+        if self.proto_minor >= 5:
+            self.events("start")
         t_end = self.clock() + self.duration
         last_ok = self.clock()
         name = {"status": "GET_STATUS", "ping": "PING", "capture": "TEST_PATTERN"}[self.mode]
@@ -246,6 +277,8 @@ class Soak:
         except KeyboardInterrupt:
             self.log("interrupted")
         if self.t is not None:
+            if self.proto_minor >= 5:
+                self.events("end")
             self.stats("end")
         self.close()
         self.summary()
@@ -263,6 +296,9 @@ class Soak:
         lat_txt = (f"latency median {statistics.median(lat) * 1e3:.1f} ms, p99 {lat[int(0.99 * (len(lat) - 1))] * 1e3:.1f}"
                    f" ms, max {lat[-1] * 1e3:.1f} ms" if lat else "no successful request")
         cd = fmt(deltas(self.start_stats, self.last_stats)) if self.start_stats and self.last_stats else "unavailable"
+        if self.start_stats and self.last_stats and "usb_irq_polled" in self.last_stats:
+            irq = self.last_stats["usb_irq_polled"] - self.start_stats.get("usb_irq_polled", 0)
+            cd = (cd + " " if cd else "") + f"(usb_irq_polled delta {irq})"
         self.log(f"summary requests {s.requests}, failures {s.failures}, drops {s.drops}"
                  + (f" (down {', '.join(f'{d:.2f}' for d in s.down_times)} s)" if s.down_times else "")
                  + f", longest gap {s.longest_gap:.2f} s, {lat_txt}; counters delta {cd or 'none'}")

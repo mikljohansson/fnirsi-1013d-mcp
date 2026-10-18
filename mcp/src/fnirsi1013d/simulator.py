@@ -425,6 +425,9 @@ class Device:
         self.ring_valid = False
         #: test hook: called as on_arm(device) at the start of every host ARM (e.g. a UI change mid-run)
         self.on_arm: Callable[["Device"], None] | None = None
+        #: GET_EVENT_LOG ring (fw 0.2.12)
+        self.events: list[P.DeviceEvent] = []
+        self.event_total = 0
         #: SD card and the 64 KiB write staging buffer (fw 0.2.2)
         self.sd = SimCard()
         self.sd_stage = bytearray(P.SD_STAGE_BYTES)
@@ -916,7 +919,7 @@ class Device:
 
     @property
     def proto_minor(self) -> int:
-        return P.PROTO_MINOR if self.shared else 2
+        return P.PROTO_MINOR if self.shared else 2  # fw 0.2.12 = 1.5 (1.2 model in legacy)
 
     def capture_info(self) -> P.CaptureInfo:
         s = self.capture_settings
@@ -1125,6 +1128,18 @@ class Device:
 
     def _cmd_get_link_stats(self, req: P.Frame) -> P.Frame:
         return self._ok(req, P.pack_link_stats(self.link))
+
+    def _cmd_get_event_log(self, req: P.Frame) -> P.Frame:
+        if self.proto_minor < 5:
+            raise _DevErr(P.Status.E_UNKNOWN_CMD, 0, "cmd 0x0009")
+        now = int((self.now() - self.t_boot) * 1000)
+        return self._ok(req, P.pack_event_log(P.EventLog(self.event_total, now, list(self.events[-64:]))))
+
+    def log_event(self, type_: int, a: int = 0, b: int = 0) -> None:
+        """Record a USB/link event for GET_EVENT_LOG (test hook too)."""
+        self.events.append(P.DeviceEvent(int((self.now() - self.t_boot) * 1000), type_, a, b))
+        del self.events[:-64]
+        self.event_total += 1
 
     def _cmd_get_battery(self, req: P.Frame) -> P.Frame:
         return self._ok(req, P.BatteryResp(18, 0, 41, 0).pack())
@@ -1717,6 +1732,8 @@ class Device:
         """#RESET (protocol 14.25): drop a pending WAIT without an answer and the duplicate cache; REMOTE
         ownership and acquisition state stay."""
         with self.lock:
+            if self.deferred is not None or self.last_resp is not None:
+                self.log_event(13)
             self.link["link_resets"] += 1
             self.deferred = None
             self._abort_deferred = False
@@ -1725,6 +1742,7 @@ class Device:
     def link_down(self) -> None:
         """DTR 1->0 / TCP close."""
         with self.lock:
+            self.log_event(9, 0)
             self.dtr = False
             self.deferred = None
             if self.control == P.Control.REMOTE and not (self.remote_flags & P.SetRemoteReq.IGNORE_DTR):

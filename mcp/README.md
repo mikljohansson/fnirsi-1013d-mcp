@@ -161,6 +161,7 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_capture_and_fft` | 1 | averaged amplitude spectrum, peaks in dBV and dBc, noise floor, THD |
 | `scope_decay_fit` | 1 | edge-aligned average, then `exp`, `exp+offset`, `exp2` or `power` fit after the TX edge; tau, R^2, sample points |
 | `scope_set_channel` | 2 | range, coupling, offset, probe, invert; relay changes limited to 5 per second |
+| `scope_event_log` | 0 | the scope's last 64 USB / link events with device ms (protocol >= 1.5) |
 | `scope_sd_info` | 0 | SD card size, partition, write window, eGON headers at 16/80/750 (optionally checksum-verified); fw >= 0.2.2 |
 | `scope_calibration_info` | 0 | scaling in effect per channel, calibration file and its fitted zero / slope / gain per range and core |
 | `scope_calibrate_volts` | 2 | a known DC voltage on every range: fits 0 V code, volts per code and offset slope per range and ADC core, saves the calibration file |
@@ -278,14 +279,22 @@ gives up on a drop: it polls the COM port list every 0.5 s while the port is gon
 2026-10-18T17:12:40.118 fail #1 GET_STATUS: write to COM10 failed: WriteFile failed (...) [winerror 22]
 2026-10-18T17:12:40.120 port COM10 gone
 2026-10-18T17:12:42.640 port COM10 back after 2.52 s
+2026-10-18T17:12:42.650 events reopen: 3 new of 41 since boot (device now 691234 ms)
+2026-10-18T17:12:42.651   device 689001 ms (~host 2026-10-18T17:12:40.417) suspend
+2026-10-18T17:12:42.651   device 689003 ms (~host 2026-10-18T17:12:40.419) bus_reset
+2026-10-18T17:12:42.651   device 690120 ms (~host 2026-10-18T17:12:41.536) dtr 1
+2026-10-18T17:12:42.660 stats reopen delta usb_bus_resets +1 usb_suspends +1 dtr_up +1 (since start: ...)
+2026-10-18T17:12:42.700 open COM10 (fw 0.2.12, proto 1.5)
 2026-10-18T17:12:43.020 reopen COM10 ok (down 2.90 s)
-2026-10-18T17:12:43.030 stats reopen delta usb_bus_resets +1 usb_suspends +1 dtr_up +1 (since start: ...)
 2026-10-18T17:31:02.400 stats end delta none (since start: usb_bus_resets +1 usb_suspends +1 dtr_up +1)
 2026-10-18T17:31:02.401 summary requests 17985, failures 1, drops 1 (down 2.90 s), longest gap 2.90 s, latency median 1.1 ms, p99 2.3 ms, max 12.0 ms; counters delta usb_bus_resets +1 ...
 ```
 
-The counter deltas cover link_resets, dtr_up/down, the usb_* events, ep0 setups, rx_stalls and the CRC/timeout
-counters. A request that only times out (no port error) is logged and followed by the protocol's recovery; a
+On protocol >= 1.5 (fw 0.2.12) the first requests after a reopen are the fast-path GET_EVENT_LOG and
+GET_LINK_STATS, so the device's event ring still holds what happened before the reset; the new events are
+printed with device ms and the matching host time (a host port reset shows as suspend, then bus reset). The
+counter deltas cover link_resets, dtr_up/down, the usb_* events, ep0 setups, usb_irq_polled (lost USB interrupts
+served by the timer poll; also in the summary), rx_stalls and the CRC/timeout counters. A request that only times out (no port error) is logged and followed by the protocol's recovery; a
 write/read error or a vanished port is a drop. Exit 0 when nothing failed, 1 on any failure or drop, 2 when the
 port cannot be opened at start.
 
