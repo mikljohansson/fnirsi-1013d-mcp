@@ -1,256 +1,152 @@
-# mcp/ handoff for agents
+# mcp/ handoff for agents (mcp-gen2 -> mcp-gen3, 2026-10-18)
 
-State on 2026-10-18: Python host library, device simulator and MCP server for the FNIRSI 1013D open firmware's
-USB protocol. Host, simulator and vectors speak protocol 1.5 (fw 0.2.12-0.2.15: collaborative mode 1.3, EXT
-trigger 1.4, GET_EVENT_LOG 1.5 incl. the 0.2.15 reset snapshot; protocol.md section 14 rows 30-42) and fall back to
-the exclusive 1.2 model when GET_INFO lacks SHARED_MODE. The owner's unit runs 0.2.x from the SD card (see
-../docs/hardware-status.md). This file is for a fresh agent with no
-context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec;
-**section 14 is how the firmware actually behaves**), `../docs/mcp-tools.md` (tool surface, tiers),
-`README.md` (user-facing install and usage). Do not duplicate those here; fix them instead.
+Python host library, device simulator, MCP server and bench CLIs for the FNIRSI 1013D open firmware's USB protocol.
+Read first: `../AGENTS.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec; **section 14 is how
+the firmware actually behaves**, rows 30-42 are protocol 1.3-1.5), `../docs/mcp-tools.md` (tool design),
+`README.md` (user-facing install, tools, CLIs, output formats), `../docs/agent-measurement-guide.md` (how agents
+should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those here; fix them instead.
 
-## Layout
+## Working rules (learned the hard way)
 
-| Module (`src/fnirsi1013d/`) | Role |
+- **COM10 is exclusive and belongs to the lead.** Never open it, not even for LOCAL-safe reads, without an explicit
+  "port free" from the lead in a message after you asked. (mcp-gen2 once opened it "while free" during a bench
+  calibration; it happened not to collide.) Develop and test against the simulator.
+- **Stage files by name** (`git add mcp/src/... mcp/tests/...`), never `git add mcp`: other agents edit files in the
+  tree concurrently, and a directory add sweeps their uncommitted work into your commit (happened once, 4f17414).
+- Pushing to main is allowed for mcp work and CI fixes (no tags). Use `git pull --rebase --autostash` before
+  pushing (others' uncommitted firmware edits sit in the tree), then confirm CI with `gh run watch <id>`.
+- **CI** (`.github/workflows/`): ruff + pytest on ubuntu-24.04 and windows-latest, py3.12 and 3.13, plus firmware
+  and vector jobs. Keep it green; tests must not depend on timing margins (see the deferred-cancel fix 617ab34).
+- Write patch scripts with the Write tool and run them; bash heredocs in this harness mangle backslashes
+  (`"\n"` becomes a newline). Files are LF; on Windows write with `write_bytes(... .encode())`.
+- **Venv reinstall gotcha**: `uv pip install --python .venv -e ".[dev]"` fails ("Access denied") while any
+  `fnirsi1013d-*.exe` is running (the owner's MCP session, the lead's bench), and uv may already have removed
+  other .exe files. Rerun when nothing runs; meanwhile `python -m fnirsi1013d.<module>` works for every CLI.
+  As of this handoff `fnirsi1013d-soak.exe` was not yet created (use `python -m fnirsi1013d.soak`).
+
+## Layout (`src/fnirsi1013d/`)
+
+| Module | Role |
 |---|---|
-| `protocol.py` | Pure wire format: frame encode/decode, `FrameParser` (resync, oversize skip, ASCII lines and overflow), `Cmd`/`Status`/`Caps` enums, payload dataclasses (tolerant unpack: longer payloads ignore the tail, shorter ones zero-fill), TEST_PATTERN generator, GET_LINK_STATS names, scaling (`uv_per_lsb_q8`, `zero_code_q8`), DEBUG_FPGA op codec. Shared by host, simulator and tests. |
-| `transport.py` | Links (`TcpLink`, `SerialLink`), discovery (`list_candidates`, `#VER` probe), request engine `Transport` (seq, retries, deferred WAIT/ACQUIRE_AVG, control requests, resync, recovery, timeout classes, `LinkStats`). |
-| `scope.py` | `Scope` client: one method per command plus `capture` (host single), `read_capture` (READ_RAW + host compensation + volts; 1.3: latest capture of any origin with its GET_CAPTURE_INFO settings), `read_trace_capture`, `acquire_avg_device`, `capture_context` (settings proven to belong to one settings_seq), `set_acq_state`; `ensure_control`/`end_control` (no-ops on 1.3) and `legacy_take_remote`/`legacy_release`; caches dropped whenever a status answer shows a new settings_seq; chunked reads under `max_response` raise `CaptureChanged` if the capture is replaced mid-read (retried, then RUN paused for one read); `Capture`/`ChannelData` with numpy arrays, `settings_seq`, `origin`, `t` in s relative to trigger, `volts` at the probe tip. |
-| `analysis.py` | Stats, crossings, frequency/duty, rise/fall, delay, preview, Welford `Averager`, fractional shift, edge finding, FFT (windows, peaks, THD), decay fits (`exp`, `exp+offset`, `exp2`, `power`), clip blanking, sample points. |
-| `simulator.py` | `Device` (protocol state machine + FPGA/ring model) and `SimServer` (TCP, one host at a time, test hooks). CLI `fnirsi1013d-sim`. |
-| `server.py` | FastMCP server (`fnirsi1013d-mcp`): `Session` (connection, lock, tokens, relay limit, audit, .npz, `ensure_control`, legacy idle release), 20 tools, `_averaged` restart loop (`_SettingsChanged`), `--sim` in-process simulator, `preload_native_modules`. |
-| `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 fresh attempts, 1 s apart; between them a look for the FEL device 1f3a:efe8, which means the OK was lost but the scope rebooted: continue; `#VER` check if all unanswered) -> usbipd -> sunxi-fel RAM load -> wait for `#VER`. Any failure: one `FAILED:` line, non-zero exit. `--persist` / `--persist-only` write the image to SD sector 750: image version must equal the running `#VER` (`--force`), verified backup of 750..750+max(new, old) to `../backups/sdcard/`, 128-sector pieces, SD_READ compare, SD_INFO VERIFY, timings; 32 sectors per SD_WRITE (`--write-sectors`, 5 s timeout, 4 same-seq resends); an unconfirmed piece is resent on the same connection while PING answers, else the tool waits for the port (`--port-return` 15 s) and reconnects (<= 4 tries per piece, resends listed); `--stage-delay-ms`; `--restore <backup>`; persist failures exit 7 and warn about a partial image. |
-| `sdcard.py` | SD sector access (fw >= 0.2.2): `SdCard` info/read/backup (double read + file re-read)/stage/write (stage CRC, read-back CRC)/verify (SD_READ compare), `plan_write` (the firmware's window/flag rules for dry runs), `check_image` (eGON length + checksum), `image_version` (the `#VER` literal in a binary). `Scope.sd_info/sd_read/sd_write(dry_run=)` wrap it. Used by `flash.py --persist`. |
-| `sdcli.py` | `fnirsi1013d-sd` bench CLI: info / read / write (`--dry-run`, `--yes` + typed `WRITE <n>@<sector>`, backup first). |
-| `soak.py` | `fnirsi1013d-soak`: long poll with timestamped events, drop detection (port error or vanished from the COM list), wait + reopen, GET_LINK_STATS deltas, Windows selective-suspend and hub path at start; on protocol >= 1.5 GET_EVENT_LOG and GET_LINK_STATS are the first requests after a reopen (events printed with device ms and host time; the pre-reset snapshot is read plainly, saved, then re-armed with flags = 1 as fw 0.2.18 wants); GET_STATUS uptime_ms at open, reopen, end and every status poll: a decrease prints DEVICE RESTARTED and counts as a restart, separately from drops. `bench.py` reads uptime before and after bench_link the same way. |
-| `bench.py` | `fnirsi1013d-bench`: runs `../firmware/scope/host_tests/bench_link.py` (link checks + census; `--fel` not exposed). |
-| `vectors.py` | Checks/extends `../docs/protocol-vectors.json` (`--check`, `--merge`). |
-| `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points -> least-squares fit of zero, 1/gain, PWM slope per channel/range/core; JSON file), `ChannelScale`/`channel_scale` (raw, compensated, mean and trigger-level conversions; firmware formula fallback), `import_t8` + CLI for the lead's `backups/t8_*.json`. |
-| `units.py` | `parse_quantity("100us")`, `fmt_si`. |
+| `protocol.py` | Pure wire format: frames, `FrameParser`, `Cmd`/`Status`/`Caps`/`Control`/`RunState`/`CaptureOrigin`/`ExtFlags`/`UiBusy`, payload dataclasses (tolerant unpack), CaptureInfo, SD structs, eGON checksum, GET_LINK_STATS names by count (`link_stats_names`), GET_EVENT_LOG (`parse_event_log`, `DeviceEvent.describe`, reset snapshot), restart record names, scaling helpers, DEBUG_FPGA codec. |
+| `transport.py` | `TcpLink`, `SerialLink`, discovery, `Transport` (seq, same-seq retries, deferred WAIT/ACQUIRE_AVG with control requests, resync, recovery, timeout classes incl. 2.5 s bulk on 1.3, first-answer-wins inbox, no resend after a cancelled deferred). |
+| `scope.py` | `Scope` client: one method per command; `capture` (host single), `read_capture` (latest capture of any origin with its GET_CAPTURE_INFO settings), `read_trace_capture`, `capture_context`, `set_acq_state`, `ensure_control`/`end_control` + `legacy_*` (1.2 model), `scale()` (per-core volts via calibration), `sd_*`, `event_log(rearm=)`, `link_stats()`. |
+| `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points, least-squares zero / 1/gain / PWM slope per channel-range-core, channel model `zero = Z + slope x dcoffset`), `channel_scale`, T8 importer CLI. |
+| `analysis.py` | Stats, frequency, edges, Welford averager, FFT, decay fits, sample points. |
+| `simulator.py` | `Device` (protocol state machine, FPGA ring, shared mode, legacy mode, SD card, EXT trigger, event log) + `SimServer` (TCP) with test hooks. CLI `fnirsi1013d-sim`. |
+| `server.py` | FastMCP server `fnirsi1013d-mcp`, 24 tools (list with tiers in README.md). |
+| `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 attempts, FEL-device check between), usbipd, sunxi-fel RAM load, `#VER`; `--persist` / `--persist-only` / `--restore` (SD sector 750 via the firmware). |
+| `sdcard.py` | SD access (`SdCard`: checked reads, verified backups, staged 32-sector writes, compare), `plan_write`, `check_image`, `image_version`. |
+| `sdcli.py` | `fnirsi1013d-sd` info / read / write (`--dry-run`, `--yes` + typed confirmation, backup first). |
+| `soak.py` | `fnirsi1013d-soak`: long timestamped poll, drops, reopen, counters, event log, restart detection. |
+| `bench.py` | `fnirsi1013d-bench`: wraps `../firmware/scope/host_tests/bench_link.py` (fw-gen2's), plus uptime before/after. |
+| `vectors.py` | Host vectors in `../docs/protocol-vectors.json` (`--check`, `--merge`). |
+| `units.py` | `parse_quantity`, `fmt_si`. |
 
-Tests in `tests/` (253, incl. `test_ext_trigger`, `test_soak`, incl. `test_calibration`, `test_sdcard`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
-(resend, resync, #RESET, 1.1/1.2 fields, timeouts, paused responses), `test_serial_link` (no-reconfigure rule,
-fake pyserial), `test_simulator_scope`, `test_shared_mode` (1.3 semantics through `Scope`), `test_firmware_match`
-(protocol.md section 14 items), `test_server` (every tool in-process, collaborative restarts, legacy fallback),
-`test_stdio` (server as a real subprocess), `test_analysis`, `test_flash`. Fixtures: `sim`/`transport`/`scope` are
-collaborative (1.3, UI captures only on demand: `ui_capture_period_s=0`); `legacy_sim`/`legacy_transport` or
-`sim_factory(legacy=True)` give the 1.2 exclusive model; tests about LOCAL/REMOTE, user tap, watchdog, KEEP_SETTINGS
-use those.
+## State of each tool / CLI
 
-## Setup and running
+- **`fnirsi1013d-mcp`** (server): collaborative mode (shared settings, last change wins, host captures are singles
+  that leave the scope in STOP, `scope_acquisition_control(action='run')` resumes; long runs pin a settings_seq and
+  restart on a change, `max_restarts` 5); legacy exclusive model on firmware without SHARED_MODE (implicit REMOTE,
+  idle release after 60 s keeping settings). Tiers 0-4, tokens for 3/4, relay rate limit, audit log, `.npz` per
+  waveform. Read-only extras: `scope_calibration_info`, `scope_sd_info`, `scope_event_log`. No SD write tool by
+  design. Verified on the unit by the owner on fw 0.1.7 (capture/measure); collaborative mode, EXT and SD on
+  hardware are the lead's bench items.
+- **`fnirsi1013d-flash`**: FEL dev loop verified on the unit. `--persist-only` verified on fw 0.2.7 (5.3 s total,
+  write 111 KiB/s with 32-sector SD_WRITEs, no resends). Resume after a USB drop, version check vs `#VER`
+  (`--force`), backups in `../backups/sdcard/`, failures exit 7 with a partial-image warning.
+- **`fnirsi1013d-bench`**: bench_link census through the venv; prints device uptime before/after and flags
+  `DEVICE RESTARTED`.
+- **`fnirsi1013d-sd`**: bench SD access; writes need `--yes` + typed `WRITE <n>@<sector>`, back up first.
+- **`fnirsi1013d-sim`**: `--variant stock|al3|ef2|ep4|al3x`, `--legacy`, `--ext`, `--ui-period`, `--caps`, ...
+- **`fnirsi1013d-soak`**: `--mode status|ping|capture`, `--duration` (30 min), `--interval` (0.1 s),
+  `--reopen-timeout` (60 s), `--log`. Logs host facts (USB selective suspend via powercfg, hub path), uptime at
+  open/reopen/end (and every status poll), drops with Windows error codes, port gone/back, reopen; after a reopen
+  the first requests are GET_EVENT_LOG (plain read; a frozen pre-reset snapshot is printed and saved, then re-armed
+  with flags = 1) and GET_LINK_STATS; on a restart it reads the restart record (counters 49-56, raw hex) and the
+  event log. Summary: requests, failures, drops, device restarts, longest gap, latency, counter deltas
+  (incl. usb_irq_polled). Exit 0 clean / 1 failure, drop or restart / 2 cannot start. Tested on the simulator
+  only; the lead runs it on the bench.
 
-```
-cd mcp
-uv venv .venv && uv pip install --python .venv -e ".[dev]"        # Windows venv lives in mcp/.venv
-.venv/Scripts/python -m pytest -q                                   # ~18 s
-wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/mcp && ~/.venvs/fnirsi1013d-mcp/bin/python -m pytest -q -p no:cacheprovider"
-.venv/Scripts/fnirsi1013d-sim --variant al3 --port 5555 --signal decay:tau=80us
-.venv/Scripts/fnirsi1013d-mcp --port tcp://localhost:5555           # or --sim "<sim args>", or --port COM10
-.venv/Scripts/fnirsi1013d-flash --image <bin> --sha256 <hash>       # reload: only with the lead's ack
-.venv/Scripts/fnirsi1013d-flash --image <bin> --sha256 <hash> --persist  # + write SD sector 750: only with the lead's ack
-.venv/Scripts/fnirsi1013d-bench --port COM10 --census 2000          # LOCAL-safe link census
-.venv/Scripts/fnirsi1013d-soak --port COM10 --duration 1800          # LOCAL-safe link soak (v0.3.0 gate)
-.venv/Scripts/fnirsi1013d-sd info --verify                          # read-only; `write` only with the lead's ack
-.venv/Scripts/ruff check --select F,E9,B023 --line-length 120 src tests
-```
+## Protocol support (host = simulator = vectors)
 
-- WSL needs its own venv (`~/.venvs/fnirsi1013d-mcp`, created with `uv venv` + `uv pip install -e .[dev]` from
-  `/mnt/d/...`); never let a Linux tool touch `mcp/.venv`.
-- Repo-root `../.mcp.json` registers `fnirsi1013d-sim` (server with in-process AL3 simulator, PI decay on CH1,
-  TX gate on CH2). For the real scope: `claude mcp add fnirsi1013d -- <venv>/Scripts/fnirsi1013d-mcp.exe --port COM10`.
-- MCP SDK pinned `mcp>=1.12,<2` (2.x renamed FastMCP). Files are LF; Python on Windows writes CRLF in text mode,
-  so write with `write_bytes(... .encode())` or `newline="\n"`. Reinstalling the venv fails while a console
-  script (e.g. `fnirsi1013d-flash.exe` or `fnirsi1013d-mcp.exe` of the owner's session) is running, and uv may
-  already have removed other .exe files: rerun the install once it is free; `python -m fnirsi1013d.<module>`
-  works meanwhile. Bash heredocs in this harness sometimes mangle
-  backslashes and quotes: write patch scripts with the Write tool and run them.
+| Protocol | Firmware | What the host uses |
+|---|---|---|
+| 1.0-1.2 | 0.1.x | exclusive LOCAL/REMOTE model (fallback when GET_INFO lacks SHARED_MODE), GET_LINK_STATS 27 |
+| 1.3 | 0.2.0+ | SHARED_MODE (caps bit 13), GET_STATUS 44 bytes (settings_seq, capture_settings_seq, run_state, capture_origin), SET_ACQ_STATE 0x0208 (control request), GET_CAPTURE_INFO 0x0209, SEQ_INVALID, READ_RAW hold, READ_TRACE clip (0.2.1+), SD commands 0x0500-0x0503 (0.2.2+, cap bit 14) |
+| 1.4 | 0.2.9+ | EXT trigger (source 2 with caps bit 3 on FPGA 0x1533+), GET_STATUS byte 42 ext_flags, GET_CAPTURE_INFO flag bit 5; selecting EXT switches the generator off, SET_GEN enable under EXT = E_STATE |
+| 1.5 | 0.2.12+ | GET_EVENT_LOG 0x0009 (fast path; 64 then 128 entries, reset-snapshot tail from 0.2.15, request flags byte bit 0 = re-arm from 0.2.18) |
 
-## Transport rules (learned on hardware; keep them)
+GET_LINK_STATS counts (named by the count field): 27 (0.1.4-0.1.7), 29 (0.2.0-0.2.1), 31 (0.2.2-0.2.3),
+35 (0.2.4), 41 (0.2.5-0.2.6), 47 (0.2.7-0.2.11), 48 (0.2.12-0.2.16, usb_irq_polled), 49 (0.2.17-0.2.18,
+boot_splash_ms), 57 (0.2.19, restart record 49-56). Names match `bench_link.py`. The payload is u16 count, u16 0,
+then the counters (word 0 is not a counter). Event types 1-15 decoded (15 = RESTART, 0.2.19).
 
-1. **Never reconfigure the serial port after open.** On Windows every pyserial setting change (even `timeout`)
-   calls SetCommState and usbser.sys sends CDC line-coding control requests. On firmware 0.1.0 their setup bytes
-   leaked into in-flight bulk responses (FIFO aliasing, fixed in firmware). `SerialLink` uses a fixed 20 ms
-   timeout; `tests/test_serial_link.py` guards it.
-2. **Reads are `in_waiting`-driven** (or `read(1)` with the fixed timeout). One large pending `read(65536)`
-   sometimes never completed on Windows.
-3. **DTR**: opened low, raised after open; firmware >= 0.1.1 flushes a stale TX frame on DTR 0->1. DTR drop
-   releases REMOTE (exit_reason 4) unless IGNORE_DTR. DTR changes use EscapeCommFunction, not SetCommState.
-4. **Resync on connect** (`Transport.resync`): 512 x 0x00 + `\n#RESET\n` + PING until the matching answer;
-   stale answers are dropped by seq. Recovery (`recover`) = pause 150 ms, flush, same preamble, PING.
-5. **Retries resend the same frame (same seq)**: on timeout, and on `E_BAD_CRC`/`E_BAD_LEN` answers (device saw a
-   corrupted request; nothing executed), for normal and deferred requests. Idempotency comes from the device's
-   duplicate cache (only OK responses <= 256 B; a retried READ_RAW simply re-executes, it is read-only).
-6. **Timeout classes** (`TimeoutPolicy`): 100 ms for PING/GET_INFO/GET_STATUS/GET_BATTERY/GET_LINK_STATS and
-   text lines (timer-IRQ answered); main-loop commands 300 ms REMOTE / 1 s LOCAL; bulk reads 0.5 / 1.5 s, and
-   2.5 s on 1.3 firmware (READ_RAW is held up to 1 s in RUN until the UI capture in flight is DONE); WAIT
-   has its own deadline. REMOTE / SHARED is tracked from status-shaped answers. `response_timeout=` overrides.
-7. **Host partial-frame timeout is 2 s**, not the device's 100 ms (a paused large response must survive).
-8. One request in flight; only control requests (GET_STATUS, STOP, SET_REMOTE, PING, 1.3 SET_ACQ_STATE) while a deferred one is
-   pending, and only from the `deferred(cancel=...)` callback (single reader).
-9. **No response cap by default** (the 8 KiB Windows cap was dropped 2026-10-18 after the fw 0.1.6/0.1.7 census:
-   2000 PINGs + 100 x 64 KiB, retries off, 0 errors). `--max-response` / `FNIRSI_MCP_MAX_RESPONSE` stays as an
-   optional override; the split-read paths are kept and tested with small caps.
-10. Server: import DLL-loading modules (scipy, pyserial) before `mcp.run` (Windows stdio deadlock otherwise).
+## Transport rules (from hardware; keep them)
+
+1. Never reconfigure the serial port after open (Windows usbser sends CDC line-coding requests on every
+   SetCommState); fixed 20 ms timeout; `tests/test_serial_link.py` guards it.
+2. Reads are `in_waiting`-driven.
+3. DTR opened low, raised after open (the 0->1 edge flushes a stale TX frame); DTR changes via EscapeCommFunction.
+   Each open/close costs about three EP0 class requests (SET_LINE_CODING, SET_CONTROL_LINE_STATE x2, +1 at close).
+4. Resync on connect: 512 x 0x00 + `#RESET` + PING; recovery = pause, flush, preamble, PING.
+5. Retries resend the same seq (timeouts, E_BAD_CRC/E_BAD_LEN); the device's duplicate cache answers completed
+   OK requests (<= 256 B). Never resend a cancelled deferred request (errors are not cached). First answer per seq
+   wins.
+6. Timeout classes: fast 100 ms (PING, GET_INFO, GET_STATUS, GET_BATTERY, GET_LINK_STATS, GET_EVENT_LOG), main loop
+   300 ms REMOTE / 1 s otherwise, bulk 0.5 / 1.5 s and 2.5 s on 1.3; SD_WRITE 5 s with 4 same-seq resends.
+7. Host partial-frame timeout 2 s. One request in flight; control requests only from the deferred callback.
+8. No response cap by default (the 8 KiB Windows cap was dropped after the 0.1.6/0.1.7 census).
+9. Server imports scipy/pyserial before `mcp.run` (Windows stdio deadlock otherwise).
+
+## Calibration file
+
+Per unit at `<data_dir>/cal/<serial>.json` (default data dir `mcp/data`, gitignored), loaded at connect,
+`--cal-file` / `FNIRSI_MCP_CAL_FILE` override, written by `scope_calibrate_volts`, shown by
+`scope_calibration_info`. The owner's `mcp/data/cal/1013D-0001.json` (69 points) is rebuilt with
+`python -m fnirsi1013d.calibration --unit 1013D-0001 --out data/cal/1013D-0001.json --import
+../backups/t8_CH1_0.010V.json ../backups/t8_CH1_0.308V.json ../backups/t8_ch1_1.000V.json
+../backups/t8off_CH1_0.000V.json ../backups/t8off_CH2_0.000V.json` (delete it first; `--import` appends). Facts
+(T8, fw 0.1.7): gains within 1.5 % of uv_per_lsb on every range; slope -0.264 (A) / -0.260 (B) codes per PWM count,
+range-independent; 0 V at dcoffset 0: CH1 A 132.47 / B 127.14, CH2 A 128.80 / B 129.19 (CH2 has 0 V points only, so
+firmware gains). The firmware formula assumes 128 on the compensated mean. Grounds: the probe ground is VRF1,
++1.24 V over the USB ground (fpga/al3/README.md); the calibration output reads -1.24 / +1.9 V against it by design.
+
+## Tests (`tests/`, 254, about 45 s)
+
+`test_protocol` (codec, structs, vectors, link stats/event log), `test_transport` (incl. the scripted-link deferred
+cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `test_shared_mode` (1.3),
+`test_firmware_match` (section 14 items), `test_server` (every tool in-process, restarts, legacy fallback),
+`test_stdio` (server subprocess), `test_analysis`, `test_calibration`, `test_flash` (FEL flow, bench wrapper),
+`test_sdcard` (SD commands, persist, resume after drops, restore, CLI), `test_ext_trigger`, `test_soak`.
+Fixtures: `sim`/`transport`/`scope` are collaborative with UI captures on demand (`ui_capture_period_s=0`);
+`legacy_sim` / `sim_factory(legacy=True)` give the 1.2 model. Simulator hooks: `SimServer.corrupt_next`,
+`garbage_next`, `drop_next`, `bad_crc_next`, `lose_next`/`lose_cmd`, `drop_link_on`; `Device.ui_set_*`,
+`ui_press_run/stop`, `ui_run_capture`, `on_arm`, `user_tap` (legacy), `log_event`, `self_restart`, `sd.*` faults.
+Run: `.venv/Scripts/python -m pytest -q`; WSL: `wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/mcp &&
+~/.venvs/fnirsi1013d-mcp/bin/python -m pytest -q -p no:cacheprovider"`; lint: `.venv/Scripts/ruff check --select
+F,E9,B023 --line-length 120 src tests`; vectors: `python -m fnirsi1013d.vectors --check` (the C checker:
+`make -C ../firmware/scope/host_tests test` in WSL).
 
 ## Protocol vectors contract
 
-`../docs/protocol-vectors.json` is shared with the firmware. Schema is the firmware's: per vector `hex` (byte
-stream, then silence), `frames` (direction-agnostic valid proto-1 frames), `device_events` (frame / bad_crc /
-bad_len / bad_version / ascii / ascii_overflow). The firmware's `firmware/scope/host_tests/gen_vectors.py`
-regenerates its own entries and keeps every entry whose `source` is not `firmware`. Host entries are `host_*`
-with `"source": "host"`, built by `vectors.build_host_vectors()`; add new ones there, run
-`python -m fnirsi1013d.vectors --merge --check`, and never change an existing vector's bytes (pin fields, e.g.
-`proto_minor=0`). The C checker: `wsl ... cd firmware/scope/host_tests && make && python3 check_vectors.py
---checker build/vector_check`. Both checkers pass on the current vectors (fw 0.2.0 merge). While a 1.3 READ_RAW is held (RUN, <= 1 s)
-the device parses nothing else, not even `#RESET`; a DTR 0->1 or USB reset drops the hold.
+`../docs/protocol-vectors.json` is shared; fw-gen2's `gen_vectors.py` keeps entries whose `source` is not
+`firmware`. Host entries are `host_*` from `vectors.build_host_vectors()` (19, incl. five 1.3 ones); add new ones
+there, `--merge --check`, never change an existing vector's bytes.
 
-## Simulator fidelity
+## Open items (priority order)
 
-Mirrors: variants stock/al3/ef2/ep4 and al3x (0x1533, EXT trigger on the calibration pin: caps EXT_TRIGGER, source 2, `--ext` signal or CH2's, logic threshold 1.65 V, 22 ns latency, protocol 1.4 / fw 0.2.9 as in protocol.md section 14 row 41: selecting EXT switches the generator off, SET_GEN enable while EXT = E_STATE, GET_STATUS ext_flags (byte 42: level, generator, edge since arm), GET_CAPTURE_INFO flag bit 5 EXT edge; the tools report `ext` in scope_status and `ext_edge_seen` on EXT captures) (version word, ring, max samples, fixed vs programmable geometry, generator,
-stock fresh-window), the ring (4 cores, core B offset +3/-2 codes compensated by GET_CAL), trigger on core A
-with 2-dt quantisation, pretrigger arming, modular capture_start, auto timeout, FORCE (as auto timeout),
-read_lag (`--hw-read-lag`/`--fw-read-lag`), A/B order (`--true-order`), trigger alignment offset, LOCAL/REMOTE
-with snapshot/restore and every exit reason, deferred WAIT/ACQUIRE_AVG, duplicate cache, all of protocol.md
-section 14 (zero-extended requests, detail numbering, ARM-while-ARMED, LOCAL flags 0, KEEP_SETTINGS rules,
-TEST_PATTERN 3, stock GET_GEN, offset PWM range, #RESET even inside a partial frame), protocol 1.1 timing fields
-(constant 5 ms) and 1.2 GET_LINK_STATS (counts what a TCP model can see). `--caps` mimics a build (0x1C03 =
-fw 0.1.1+ on AL3, 0x1803 = 0.1.0), `--fail-responses-over` drops large responses, `--time-scale` (0 = instant).
-SD card (fw 0.2.2, cap SD_SECTORS, not in the 1.2 model): `Device.sd` = `SimCard` (sparse sectors, MBR with the
-partition at 8192 so write_end 2048, eGON.BT0 at 16, eGON.EXE at 80 and 750), `Device.sd_stage` (64 KiB), the
-firmware's check order for SD_WRITE_SECTORS, read-back compare. Hooks: `sd.present`, `sd.fail_next_write`
-(read-back mismatch), `sd.io_error_next` (driver error, e.g. -2), `sd.writes` (log). `make_egon_image()` builds
-valid images. GET_LINK_STATS: the simulator sends the 31-counter layout (fw 0.2.2-0.2.3); `parse_link_stats` names by the count field (`link_stats_names`: 35 counters = fw 0.2.4 layout, 29..34 first-pass milestones). The payload is u16 count, u16 0, then the counters: word 0 is not a counter.
-Front-end errors for calibration tests: `zero_error` (codes per channel/core) and `offset_slope` (true codes per
-PWM count). READ_TRACE count past the end: clipped in 1.3 mode (fw >= 0.2.1), E_BAD_ARG detail 8 in the 1.2 model.
-Test hooks on `SimServer`: `corrupt_next`, `garbage_next`, `drop_next` (responses), `bad_crc_next`, `lose_next`
-(+ `lose_cmd` filter: requests lost before execution), `drop_link_on` ({cmd: n}: close the connection at the n-th request, a USB drop); `Device.user_tap()` (legacy).
-
-Collaborative mode (default; `--legacy` or caps without bit 13 = the 1.2 model, which also answers E_UNKNOWN_CMD to
-0x0208/0x0209 and sends a 32-byte GET_STATUS): mirrors fw-gen2's pc_cmds.c 1.3 (read 2026-10-18). One live
-`Settings`; `settings_seq` bumps on any change of the capture-relevant key (host SET_* or the UI hooks
-`ui_set_channel/ui_set_timebase/ui_set_trigger`), never takes SEQ_INVALID. Captures snapshot settings + seq at arm;
-a change before DONE gives capture_settings_seq SEQ_INVALID and GET_CAPTURE_INFO flag bit4. RUN produces UI captures
-every `ui_capture_period_s` (lazily, at the next poll; 0 = only `ui_run_capture()` and one at boot); ARM = host single
-(run_state SINGLE, then STOP); `ui_press_run/ui_press_stop` and SET_ACQ_STATE abort a pending single; `on_arm(dev)`
-fires at each host ARM (mid-run changes). READ_RAW/READ_TRACE: latest capture; E_STATE while a host single is armed,
-E_STATE detail 1 after an aborted ARM (ring_valid), in RUN a fresh UI capture is made (the firmware's hold) or E_BUSY
-detail 1. READ_TRACE origin byte = CaptureOrigin. Screen: green chip at x 700..755 instead of the banner.
-
-Limits: no USB timing or packet loss model (TCP), no relay transients, AC coupling = subtract the signal's
-declared DC, front-end bandwidth not modelled, `checkfirstadc` rails logic approximated, READ_SCREEN draws a
-simple synthetic screen, DEBUG_FPGA stale-byte model is a hypothesis (T3), noise is white Gaussian.
-Signals: `sine`, `square`, `decay` (PI: period, width, tau, amp, tau2/amp2, flyback), `gate`, `dc`, `gen`
-(calibration-pin loopback), `zero`; CH2 defaults to the matching gate / sync square.
-
-## MCP tools and safety
-
-24 tools (`scope_calibrate_volts`, `scope_calibration_info`, `scope_sd_info`, `scope_event_log` added; no SD write tool by design), `scope_` prefix, list with tiers in `README.md`
-(`scope_remote_session` was retired with collaborative mode). Tiers: 0 read-only, 1 acquisition, 2 relays
-(`scope_set_channel`, 5 changes/s), 3 calibration-pin output (`scope_generator`, `scope_self_test_loopback`),
-4 raw (`scope_raw_fpga`, `scope_enter_fel`, only with `FNIRSI_MCP_ENABLE_RAW=1`). `FNIRSI_MCP_MAX_TIER` limits
-registration. Tier 3/4: a call without `confirm_token` returns `{confirmation_required, token, summary}`; the
-token is bound to a hash of the exact arguments, single-use, 120 s. Disabling the generator needs no token.
-Collaborative firmware: `Session.ensure_control` only checks ui_busy (1 modal: error; 2 starting: waits up to
-`starting_wait_s` 10 s, ~5 s after a FEL load); long runs pin a
-`capture_context` and restart on another settings_seq (`restarts` in the result, `max_restarts` 5); `scope_capture`
-says the scope is in STOP; `scope_acquisition_control(action='run')` = SET_ACQ_STATE RUN. Legacy firmware: tier 1+
-calls auto-acquire REMOTE and say so in `caveats`, a user tap makes the next call fail with "scope released by user",
-the keepalive thread releases with KEEP_SETTINGS after `legacy_idle_release_s` (60 s) idle. Every tier 1+ call goes
-to the JSONL audit log; waveforms go to `.npz` under the data dir.
-
-## Analysis assumptions
-
-- Volts: per ADC core through `Scope.scale(ch, cfg)`: the unit calibration (file `<data_dir>/cal/<serial>.json`,
-  model `raw = zero + slope*(offset_pwm - pwm_ref) + volts/gain`) when it covers the range, else the firmware's
-  `uv_per_lsb_q8` / `zero_code_q8` minus the per-core comp. Captures (READ_RAW) convert each core's raw codes;
-  READ_TRACE by sample parity (compensated codes); ACQUIRE_AVG means with the cores' mean zero/gain; trigger levels
-  in volts go through core A's model. T8 (fw 0.1.7, CH1, dcoffset 44): gains within ~1 %, zeros A ~121.0 /
-  B ~116.0 raw on every range vs the firmware's 116.57 on the compensated mean. Offset sweep (0 V, dcoffset
-  0/+-44/+100, ranges 0..5): slope -0.264 (A) / -0.260 (B) codes per count on every range (firmware -100/385 =
-  -0.260), so the offset is injected after the attenuator; 0 V at dcoffset 0 is A 132.5 / B 127.1 (firmware
-  assumes 128 on the compensated mean, i.e. 129.75 vs 128 plus a 5.5-code A/B spread vs the comps' 4). Besides
-  the per-range fit, `UnitCalibration.channel_fit` holds the per-core channel model `zero = Z + slope x dcoffset`
-  (dcoffset = offset_pwm - dc_calibration_offset[range]); it lends its slope to ranges measured at one offset and
-  converts ranges without points (firmware gain). CalResp adc_*_rawavg are only the last readout (1.00o5
-  overwrites them), not a calibration. The owner's file `data/cal/1013D-0001.json` (gitignored, 69 points) is
-  rebuilt with
-  `python -m fnirsi1013d.calibration --unit 1013D-0001 --out data/cal/1013D-0001.json --import
-  ../backups/t8_CH1_0.010V.json ../backups/t8_CH1_0.308V.json ../backups/t8_ch1_1.000V.json
-  ../backups/t8off_CH1_0.000V.json ../backups/t8off_CH2_0.000V.json` (delete the file first: --import appends).
-  CH2 (fw 0.2.1 sweep, 0 V only): Z A 128.80 / B 129.19, slope -0.265 / -0.266, per-range rms <= 0.13 codes;
-  gains are the firmware's until a known-voltage CH2 point is added.
-- `scope_averaged_capture`: host averaging (Welford mean/std, clipped-any mask) or device ACQUIRE_AVG (only
-  hardware alignment, no clip rejection, must fit one response). Edge alignment: per capture the crossing of
-  `align_channel` at `align_level` nearest the trigger (+-12 samples), linear interpolation, then a fractional
-  shift; removes the 2-sample trigger quantisation.
-- `scope_capture_and_fft`: coherent-gain-corrected RMS amplitude spectrum, power averaging, ENBW reported,
-  peaks with parabolic interpolation, THD over harmonics 2..5.
-- `scope_decay_fit`: edge-aligned average, fit window `t_start..t_end` after the edge, samples within
-  `blank_after_clip` of any clipped sample excluded, optional baseline window fixes the offset; scipy
-  `curve_fit` with log-linear initial guesses; `exp2` orders tau < tau2; `ok=false` if tau is implausible.
-  Recovers 80 us within 3 % on the simulator and over stdio.
-
-## Bench coordination (see `../CLAUDE.md`)
-
-COM10 is exclusive: if open fails with PermissionError someone else (the lead, the owner) is using it; wait
-(`waitport`-style retry loop), never kill their process. Allowed whenever the port is free: LOCAL-safe reads
-(PING, TEST_PATTERN, GET_*, `#VER`). SET_REMOTE and anything hardware-changing only when the lead asks. ENTER_FEL /
-reload: announce "about to reload with <image> for <reason>", wait for the lead's ack, report after with
-`#VER`; pin the image with `--sha256` (the build file can be rebuilt in place by the firmware agent).
-
-## Known issues and current numbers (COM10, Windows, this transport)
-
-- 2026-10-18, fw 0.1.7 LOCAL, MCP transport with no response cap: TEST_PATTERN 20460/32748/65536 x20 = 60 requests,
-  0 failures, 3.3 s. READ_TRACE used to fail every time on hardware (E_BAD_ARG detail 8): the host asked for a full
-  chunk and the firmware rejects count > samples - start (the simulator clamped). Fixed: the first piece is sized
-  from total_samples, pieces never pass the trace end, and a trace replaced between pieces is re-read, never mixed.
-  Verified on the unit: READ_TRACE x10 ok with and without the 8 KiB cap.
-
-- fw 0.1.4 LOCAL, retries off, 304 requests: 0 bad CRC, 0 garbage; 4 requests (1.3 %) unanswered, one per
-  ~2048 bytes sent host->device (looks like the device RX ring wrap; reported to the firmware agent). With
-  retries on: 0 failures.
-- `fnirsi1013d-flash` verified on the unit 2026-10-18 (pinned fw 0.1.4 image from `backups/`): ENTER_FEL
-  0.08 s, FEL device 9-3 at 1.3 s, attach 2.7 s, load 3.1-5.0 s, COM10 back with `#VER` at 6.6 s.
-- PING ~1 ms (timer IRQ, fw >= 0.1.2); TEST_PATTERN 64 KiB ~65-72 ms LOCAL; lead measured 2.35 MB/s REMOTE,
-  full-depth capture arm+wait+read 110 ms median.
-- Lead's census on 0.1.4 (random 1..200 B payloads): ~4 % E_BAD_CRC + ~0.5 % no response, consistent with
-  the request straddling the 2 KiB RX ring wrap being corrupted.
-- Lead's census on 0.1.3: ~4 % PING E_BAD_CRC (request corrupted on arrival, firmware RX path) and
-  garbage_bytes from the old 100 ms host partial drop (fixed in 20b4d8b).
-- Firmware 0.1.x has no ACQUIRE_AVG, READ_SCREEN, READ_LIVE; FORCE/DEBUG_FPGA only in PC_DEBUG builds. The
-  server fails closed on missing caps. Firmware also has GET_BAD_FRAME diagnostics (c31bd01), not used here.
-
-## TODO (priority order)
-
-1. (done) Windows 8 KiB cap dropped.
-2. fw 0.1.6 (697e1f6) fixes the 2 KiB RX ring-wrap loss (packets straddling the ring end were read from the
-   FIFO in two access runs). Re-run the 304-request LOCAL repro (PING x100 + TEST_PATTERN 495/4096/20460/32748/
-   65536 x40, retries=0): expect zero lost requests. Add GET_BAD_FRAME (0x0008, protocol 1.2, item 29: u32
-   bad_count, u32 rx_bytes, u16 len, u16 0, last bad-CRC request as received) to protocol.py / Scope /
-   simulator / FAST_CMDS and dump it on any E_BAD_CRC. Then: re-run the retries=0 census after each firmware RX fix; include GET_LINK_STATS before/after
-   (`Scope.link_stats()`) and GET_STATUS `pass_ms` in failure reports to the firmware agent.
-3. `--persist` / settings commands (SD sector writes) when the firmware adds them: tier 2+, confirmation token,
-   never touch calibration (protocol.md: no SET_CAL in v1).
-4. Metal-detector tools: a sweep tool (generator frequency or duty x averaged capture, one file), VLF amplitude/
-   phase at the TX frequency via lock-in on the averaged capture (CH1 vs CH2 reference), PI target comparison
-   (decay_fit with/without target, delta tau and sample-point deltas), ground-balance helper (exp2/power on a
-   reference capture), a continuous-monitor tool with drift statistics.
-5. Bench tests T3/T4/T5/T7/T8 helpers using DEBUG_FPGA builds; feed the results back into `read_lag`,
-   `interleave_order`, the trigger alignment and the scaling caveats.
-6. Adopt ACQUIRE_AVG / READ_SCREEN / READ_LIVE on hardware when the firmware ships them (simulator already
-   implements them; check payload layouts against the firmware first).
-7. MCP progress for long averaged runs works in-process; verify with Claude Code over stdio.
-9. T8 follow-ups: CH2 points (one shorted-input `scope_calibrate_volts` per offset is enough for the channel
-   model); the lead's open square-wave discrepancy (calibration-pin 0..3.3 V read as about -1.1 / +2 V on ranges
-   1 and 3 with DC coupling) was resolved by the lead (backups/t8sq_CH1.json): the conversion is right, the
-   calibration output is a ~3.1 Vpp square wave referenced to the USB/digital ground, while the probe ground
-   (BNC shells) is VRF1, +1.24 V above it through R71 (fpga-gen2, fpga/al3/README.md Changes 2): hence -1.24 /
-   +1.9 V against the probe ground. Ground loops (earthed DUT + earthed PC) sag VRF1 and shift every trace; EXT
-   sources must be referenced to the USB ground (`EXT_NOTE`, docs/agent-measurement-guide.md section 5). Tool texts say so
-   (`CAL_OUTPUT_NOTE`); the self-test checks the swing (5/95 % levels), not absolute levels. Do not "fix" this
-   in the conversion.
-   Firmware idea for fw-gen2: base calibration could store the measured per-core 0 V codes.
-8. Collaborative mode on hardware (fw 0.2.1, sha256 ca0b6d11...; 0.2.0 is superseded): run the plan's bench acceptance list (docs/plans/collaborative-
-   mode.md) through the tools; check the RUN-mode READ_RAW hold (a full 4-core read is now one response); measure the per-request cost in shared mode
-   (every main-loop command waits for a UI pass) and, if averaging is slow, consider a host ARM loop without
-   GET_CAPTURE_INFO (already: only when the WAIT seq matches) or ACQUIRE_AVG.
+1. **Release 0.3.0**: bump `version` in `pyproject.toml` (still 0.1.0) with the lead's release; the 30-minute soak
+   (`fnirsi1013d-soak --duration 1800`) is the gate; fold the baseline soak results (requests, drops, restarts,
+   latency, counter deltas, the selective-suspend setting) into README "Link soak" once the lead has them.
+2. **EXT trigger on hardware**: pending the 0x1533 bitstream on the unit; check the CH1-vs-EXT offset (the
+   simulator models only the 22 ns FPGA path; the AD9288 pipeline adds more) and the ext_flags fields.
+3. **USB drops / self-restarts**: help the lead read soak logs (pre-reset snapshots: ep0_setup 0x20/0x22 before a
+   suspend+bus_reset points at a host control request; a bare suspend at selective suspend; restart records map
+   with the ELF).
+4. Collaborative mode bench acceptance (`../docs/plans/collaborative-mode.md`), incl. per-request cost in shared
+   mode for averaging.
+5. CH2 known-voltage calibration points (gains); then T8 is complete.
+6. Metal-detector tools (sweep, lock-in amplitude/phase, PI target comparison, ground balance, monitor).
+7. Adopt ACQUIRE_AVG / READ_SCREEN / READ_LIVE when the firmware ships them (simulator has them).
+8. GET_BAD_FRAME (0x0008) decode and dump on E_BAD_CRC (the cmd id is in `Cmd`, no client method yet).
