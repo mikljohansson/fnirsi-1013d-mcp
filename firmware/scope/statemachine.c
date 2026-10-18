@@ -1881,7 +1881,7 @@ void handle_channel_menu_touch(PCHANNELSETTINGS settings)
           }
         } 
         //Check on fft enable or disable
-        else if((ytouch >= CH_MENU_YPOS + 75) && (ytouch <= CH_MENU_YPOS + 110))    //78-100
+        else if((ytouch >= CH_MENU_YPOS + 75) && (ytouch <= CH_MENU_YPOS + 110) && !PC_CH_COMPACT)    //78-100
         {
           //Check on enable
           if((xtouch >= settings->menuxpos + 80) && (xtouch <= settings->menuxpos + 155))   //
@@ -1897,7 +1897,7 @@ void handle_channel_menu_touch(PCHANNELSETTINGS settings)
           }
         }
         //Check on invert channel
-        else if((ytouch >= CH_MENU_YPOS + 125) && (ytouch <= CH_MENU_YPOS + 165))// && (scopesettings.waveviewmode == 0)) //140 170
+        else if((ytouch >= CH_MENU_YPOS + 125 - PC_CH_DY) && (ytouch <= CH_MENU_YPOS + 165 - PC_CH_DY))// && (scopesettings.waveviewmode == 0)) //140 170
         {
           //Check on invert channel
           if((xtouch >= settings->menuxpos + 80) && (xtouch <= settings->menuxpos + 155))//78 162
@@ -1916,7 +1916,7 @@ void handle_channel_menu_touch(PCHANNELSETTINGS settings)
         }
 
         //Check on coupling DC or AD, and in normal view mode
-        else if((ytouch >= CH_MENU_YPOS + 180) && (ytouch <= CH_MENU_YPOS + 220))// && (scopesettings.waveviewmode == 0)) //140 170
+        else if((ytouch >= CH_MENU_YPOS + 180 - PC_CH_DY) && (ytouch <= CH_MENU_YPOS + 220 - PC_CH_DY))// && (scopesettings.waveviewmode == 0)) //140 170
         {
           //Check on DC coupling
           if((xtouch >= settings->menuxpos + 78) && (xtouch <= settings->menuxpos + 110) && (!scopesettings.waveviewmode))
@@ -1992,7 +1992,7 @@ void handle_channel_menu_touch(PCHANNELSETTINGS settings)
           //------------------
         
         //Check on V_A mode setting, and in normal view mode
-        else if((ytouch >= CH_MENU_YPOS + 240) && (ytouch <= CH_MENU_YPOS + 275))// && (scopesettings.waveviewmode == 0)) //200 230
+        else if((ytouch >= CH_MENU_YPOS + 240 - PC_CH_DY) && (ytouch <= CH_MENU_YPOS + 275 - PC_CH_DY))// && (scopesettings.waveviewmode == 0)) //200 230
         {
           //Check on V
           if((xtouch >= settings->menuxpos + 75) && (xtouch <= settings->menuxpos + 105) && (!scopesettings.waveviewmode))

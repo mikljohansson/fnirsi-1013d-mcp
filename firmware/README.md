@@ -395,6 +395,7 @@ hooks `PC_UI_HAS` / `PC_UI_MASK` that are empty with `PC_PROTOCOL=0`):
 | Long memory | acquisition menu | always | 1.00o5 forces it off; the main-loop branch is empty |
 | EXT trigger source | trigger menu | bitstream without EXT_TRIGGER (all but AL3 0x1533+) | the input exists only in fpga/al3 0x1533 (calibration pin, 3.3 V logic referenced to the scope's USB ground, not the probe ground, which sits ~1.24 V above it); selecting it switches the generator off |
 | Hold off | trigger menu | always | never sent to the FPGA in 1.00o5 |
+| FFT switch ("Open FFT" row) | channel menus | always (fw 0.2.26) | 1.00o5 stores `fftenable` and draws nothing; Invert, Coupling and V/A move up one row (`PC_CH_DY`), the empty slot sits above Probe mode (the menu box keeps its height for the V/div column) |
 | Time & Date settings (RTC submenu) | system settings | no DS3231 answers at boot | the clock, file stamps and FAT times would read garbage |
 | Temperature (diagnostics screen) | diagnostics | no DS3231 answers at boot | it is the DS3231's temperature register; without the module it read "99" |
 

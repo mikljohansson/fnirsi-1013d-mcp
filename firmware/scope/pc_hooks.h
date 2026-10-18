@@ -24,11 +24,15 @@
 #define PC_GEN_DY             56    //Freq and Duty move up one row
 #define PC_TRIG_COMPACT       1     //trigger: no Hold off row
 #define PC_TRIG_DY            56    //Always 50% moves up one row
+#define PC_CH_COMPACT         1     //channel menu: no FFT row (1.00o5 stores fftenable and draws nothing)
+#define PC_CH_DY              56    //Invert, Coupling, V/A move up one row
 #else
 #define PC_GEN_COMPACT        0
 #define PC_GEN_DY             0
 #define PC_TRIG_COMPACT       0
 #define PC_TRIG_DY            0
+#define PC_CH_COMPACT         0
+#define PC_CH_DY              0
 #endif
 
 #define PC_MASK_GEN_MENU      1
