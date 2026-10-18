@@ -90,3 +90,21 @@ Per-core zero correction in firmware removes it everywhere; the boxcar/CIC modes
 - 200 MHz DDS clock for a finer generator (FPGA).
 - Frequency-response analysis tool on the host using the square-wave generator's harmonics (limited).
 - EF2L45 / EP4CE6 owners: untested paths; invite testers after the release.
+
+## 8. Ideas from the FPGA headroom (brainstorm 2026-10-18, not scheduled)
+
+Resources free after 0x1534/0x1535: ~8,000 LUTs, ~200 kbit block RAM, one PLL, one M18x18. Limits that stay: 30 MHz front end, 8-bit
+converters, bit-banged MCU bus (a few MB/s).
+
+- Advanced triggers in the FPGA: pulse width, runt, window, timeout, Nth edge, time-based hold-off (a few hundred LUTs each).
+- Peak-detect acquisition: min and max per decimation window in the two bytes of a 16-bit word (catches glitches at slow time bases).
+- Hardware measurements at 200 MS/s: frequency/period counter (5 ns), pulse width, duty, min/max, always-on readouts.
+- Trigger output pulse on the calibration pin (mode of the shared pin).
+- Segmented capture: many short full-rate records, one per trigger (one per detector TX pulse), dead time skipped.
+- Hardware averaging of N triggered records in block RAM (16-bit sums), one averaged readout.
+- Streaming data logger: FIFO in free RAM -> MCU -> 32 MB DDR at up to ~1 MS/s of 16-bit filtered samples (30 s at 500 kS/s single
+  channel, minutes at lower rates), zoomable afterwards.
+- Generator: pulse pattern generator (per-pulse widths/gaps, bursts, sweeps for Bode), PRBS/noise output.
+- Software: serial decode (UART/I2C/SPI) from analog captures, 4-digit DVM readout at CIC rates, mask/pass-fail testing on the phosphor map.
+- Not worth chasing: equivalent-time sampling beyond 200 MS/s (front end), logic-analyser channels (no spare pins reach a connector),
+  hardware FFT (the MCU does 4096 points in 11 ms).
