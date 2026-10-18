@@ -187,7 +187,13 @@
 #define MAIN_MENU_XPOS            2
 #define MAIN_MENU_YPOS           46
 #define MAIN_MENU_WIDTH         147
+#if PC_PROTOCOL
+//fw 0.2.28: a sixth row (Spectrum analyzer, 59 px) when the spectrum view is available
+int pc_glue_main_menu_height(void);
+#define MAIN_MENU_HEIGHT        (pc_glue_main_menu_height())
+#else
 #define MAIN_MENU_HEIGHT        292
+#endif
 
 //Menu system settings
 #define SYSTEM_MENU_XPOS                     150

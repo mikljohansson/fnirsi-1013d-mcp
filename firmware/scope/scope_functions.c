@@ -2564,6 +2564,9 @@ void scope_display_trace_data(void)
   PTHUMBNAILDATA thumbnaildata; 
   //thumbnaildata = &viewthumbnaildata[0]; 
   thumbnaildata = &viewthumbnaildata[viewcurrentindex];
+
+  //PC protocol build: the spectrum view draws the trace area instead
+  PC_SPECTRUM_DISPLAY();
   
   //See if it is possible to rework this to fixed point. A 32 bit mantissa is not accurate enough though
 

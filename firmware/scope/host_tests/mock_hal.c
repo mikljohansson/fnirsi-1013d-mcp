@@ -424,6 +424,32 @@ void     pc_hal_usb_events(uint32_t *v) { uint32_t i; for(i=0;i<PC_USBEV_COUNT;i
 void     pc_hal_rx_debug(uint32_t *v)   { uint32_t i; for(i=0;i<PC_RXDBG_COUNT;i++) v[i] = 3000 + i; }
 uint32_t pc_hal_boot_splash_ms(void)   { return 5000; }
 
+uint8_t  mock_display_mode;
+int32_t  mock_spec_total = -1;          //bins in the mock spectrum, -1 = none shown
+uint32_t mock_spec_first, mock_spec_max;
+int      mock_spec_ch;
+
+uint8_t pc_hal_display_mode(void) { return mock_display_mode; }
+
+int32_t pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t *hdr, uint8_t *levels)
+{
+  uint32_t n, i;
+
+  mock_spec_ch = ch; mock_spec_first = first; mock_spec_max = max_bins;
+  if(mock_spec_total < 0)
+    return -1;
+
+  n = (first < (uint32_t)mock_spec_total) ? (uint32_t)mock_spec_total - first : 0;
+  if(n > max_bins)
+    n = max_bins;
+  memset(hdr, 0, PC_SPECTRUM_HDR);
+  hdr[0] = (uint8_t)ch; hdr[2] = 12;
+  pc_put_u16(hdr + 24, (uint16_t)mock_spec_total); pc_put_u16(hdr + 26, (uint16_t)first); pc_put_u16(hdr + 28, (uint16_t)n);
+  for(i = 0; i < n; i++)
+    pc_put_u16(levels + 2 * i, (uint16_t)(int16_t)(-1000 - (int32_t)(first + i)));
+  return (int32_t)n;
+}
+
 uint32_t mock_fft_bench_reps;
 uint32_t pc_hal_fft_bench(uint8_t *dst, uint32_t reps)
 {

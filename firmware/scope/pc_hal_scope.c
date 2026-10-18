@@ -533,6 +533,9 @@ int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t
   if(ch_mask & 0x02)
     fpga_read_sample_data(&scopesettings.channel2, start_word);
 
+  //The spectrum view shows host captures too
+  spectrum_new_data();
+
   //scope_process_trigger looks at samples pre - 20 .. pre + 60
   if((pretrigger_samples >= 20) && (pretrigger_samples + 64 <= total_samples))
   {
@@ -1106,6 +1109,65 @@ uint32_t pc_hal_fft_bench(uint8_t *dst, uint32_t reps)
   return spectrum_bench(dst, reps);
 }
 
+uint8_t pc_hal_display_mode(void)
+{
+  return (uint8_t)spectrum_mode();
+}
+
+int32_t pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t *hdr, uint8_t *levels)
+{
+  return spectrum_read(ch, first, max_bins, hdr, levels);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Spectrum view glue (fw 0.2.28): a sixth main-menu row switches the trace area between the traces and the spectrum
+
+int pc_glue_spectrum_display(void) { return spectrum_display(); }
+int pc_glue_spectrum_touch(void)   { return spectrum_touch(); }
+int pc_glue_main_menu_height(void) { return spectrum_available() ? 351 : 292; }
+
+int pc_glue_main_menu_row6(uint32 y)
+{
+  return spectrum_available() && (y >= 343) && (y <= 400);
+}
+
+//The row in the style of the other five: icon (spectrum bars), two text lines naming where a tap goes
+static void pc_main_menu_spectrum_item(int mode)
+{
+  static const uint8 bars[] = { 4, 7, 22, 9, 5, 14, 4, 6, 10, 3, 5, 2 };
+  uint32 i;
+  int    on = (spectrum_mode() != SPECTRUM_MODE_SCOPE);
+
+  display_set_fg_color(mode ? 0x00CCCCCC : DARKGREY_COLOR);
+  display_fill_rounded_rect(9, 354, 131, 35, 3);
+
+  display_set_fg_color(mode ? BLACK_COLOR : WHITE_COLOR);
+  display_draw_horz_line(384, MAIN_MENU_XPOS + 15, MAIN_MENU_XPOS + 40);
+  for(i = 0; i < sizeof(bars); i++)
+    display_draw_vert_line(MAIN_MENU_XPOS + 16 + 2 * i, 383 - bars[i], 383);
+
+  display_set_font(&font_3);
+  display_text(60, 355, on ? (int8 *)"Scope" : (int8 *)"Spectrum");
+  display_text(60, 371, on ? (int8 *)"view" : (int8 *)"analyzer");
+}
+
+void pc_glue_main_menu_items(void)
+{
+  if(!spectrum_available())
+    return;
+
+  display_set_fg_color(BLACK_COLOR);
+  display_draw_horz_line(340, 9, 140);
+  pc_main_menu_spectrum_item(0);
+}
+
+void pc_glue_main_menu_touch(void)
+{
+  pc_main_menu_spectrum_item(1);
+  tp_i2c_wait_for_touch_release();
+  spectrum_set_active(spectrum_mode() == SPECTRUM_MODE_SCOPE);
+}
+
 //System settings menu height (variables.h SYSTEM_MENU_HEIGHT): Time & Date is the last row, 59 px
 int pc_glue_sys_menu_height(void)
 {
@@ -1266,6 +1328,9 @@ void pc_glue_ui_service(void)
 {
   if(pc_ready)
     pc_ui_service(&pc_sess);
+
+  //Roll mode or a viewer ends the spectrum view
+  spectrum_service();
 }
 
 void pc_glue_pass_mark(int n)
@@ -1299,6 +1364,8 @@ void pc_glue_ui_capture_addr(uint32 addr)
 
 void pc_glue_ui_capture(void)
 {
+  spectrum_new_data();
+
   if(pc_ready)
     pc_ui_capture_done(&pc_sess);
 }

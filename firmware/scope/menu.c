@@ -2790,13 +2790,13 @@ void scope_open_main_menu(void)
   display_set_fg_color(DARKGREY_COLOR);
 
   //Fill the background
-  display_fill_rect(2, 46, 147, 292);//0  149 233
+  display_fill_rect(2, 46, 147, MAIN_MENU_HEIGHT);//0  149 233
 
   //Draw the edge in a lighter grey
   display_set_fg_color(LIGHTGREY_COLOR);
 
   //Draw the edge
-  display_draw_rect(2, 46, 147, 292);//0  149 233
+  display_draw_rect(2, 46, 147, MAIN_MENU_HEIGHT);//0  149 233
 
   //Three black lines between the settings
   display_set_fg_color(BLACK_COLOR);
@@ -2811,13 +2811,14 @@ void scope_open_main_menu(void)
   scope_main_menu_waveform_view(0);
   scope_main_menu_diagnostic_view(0);
   scope_main_menu_usb_connection(0);
+  PC_MAIN_MENU_ITEMS();
 
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1
   display_set_screen_buffer((uint16 *)maindisplaybuffer);
 
   //Slide the image onto the actual screen. The speed factor makes it start fast and end slow, Smaller value makes it slower.
-  display_slide_top_rect_onto_screen(2, 46, 147, 292, 63039);//3  149 233
+  display_slide_top_rect_onto_screen(2, 46, 147, MAIN_MENU_HEIGHT, 63039);//3  149 233
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

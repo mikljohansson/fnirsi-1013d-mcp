@@ -165,7 +165,7 @@ static void test_info(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, 76);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 6); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 7); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
   T_EQ(pc_get_u16(r.p + 8), 0x1532); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS), PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED), PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED);
@@ -276,7 +276,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.6,fpga=0x1532");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.7,fpga=0x1532");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -1367,7 +1367,7 @@ static void test_ext_trigger(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
-  T_EQ(r.p[1], 6);                                              //proto 1.6
+  T_EQ(r.p[1], 7);                                              //proto 1.7
 
   //Generator on, then EXT: the generator goes off
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -1579,6 +1579,52 @@ static void test_fft_bench(void)
   T_EQ(r.h.status, 0); T_EQ(mock_fft_bench_reps, 1);
 }
 
+static void test_spectrum(void)
+{
+  extern uint8_t  mock_display_mode;
+  extern int32_t  mock_spec_total;
+  extern uint32_t mock_spec_first, mock_spec_max;
+  extern int      mock_spec_ch;
+  uint8_t p[8];
+  resp_t r;
+
+  setup(0x1532);
+
+  //GET_STATUS byte 43 follows the display mode, from any poll context
+  mock_display_mode = 0;
+  r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
+  T_EQ(r.p[43], 0);
+  mock_display_mode = 1;
+  r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
+  T_EQ(r.p[43], 1);
+
+  //READ_SPECTRUM: no spectrum shown, bad channel, then a 2049-bin spectrum read whole and in part
+  memset(p, 0, sizeof(p));
+  mock_spec_total = -1;
+  r = req(PC_CMD_READ_SPECTRUM, p, 8);
+  T_EQ(r.h.status, PC_E_STATE);
+  p[0] = 2;
+  r = req(PC_CMD_READ_SPECTRUM, p, 8);
+  T_EQ(r.h.status, PC_E_BAD_ARG);
+
+  mock_spec_total = 2049;
+  p[0] = 1;
+  r = req(PC_CMD_READ_SPECTRUM, p, 8);
+  T_EQ(r.h.status, 0); T_EQ(mock_spec_ch, 1); T_EQ(mock_spec_first, 0); T_EQ(mock_spec_max, (PC_MAX_RESPONSE_PAYLOAD - 32) / 2);
+  T_EQ(r.len, 32 + 2 * 2049); T_EQ(pc_get_u16(r.p + 28), 2049); T_EQ((int16_t)pc_get_u16(r.p + 32 + 2 * 5), -1005);
+
+  pc_put_u16(p + 2, 2000); pc_put_u16(p + 4, 10);
+  r = req(PC_CMD_READ_SPECTRUM, p, 8);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 32 + 2 * 10); T_EQ(mock_spec_first, 2000); T_EQ((int16_t)pc_get_u16(r.p + 32), -3000);
+
+  pc_put_u16(p + 2, 2040); pc_put_u16(p + 4, 100);
+  r = req(PC_CMD_READ_SPECTRUM, p, 8);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 32 + 2 * 9);
+
+  mock_display_mode = 0;
+  mock_spec_total = -1;
+}
+
 static void test_fel_reset_stall(void)
 {
   uint8_t p[4];
@@ -1590,7 +1636,7 @@ static void test_fel_reset_stall(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 6);                                              //proto_minor 1.6
+  T_EQ(r.p[1], 7);                                              //proto_minor 1.7
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -1719,6 +1765,7 @@ int main(void)
   test_event_log();
   test_fel_reset_stall();
   test_fft_bench();
+  test_spectrum();
   mock_clear_resps();
   return t_report("test_session");
 }

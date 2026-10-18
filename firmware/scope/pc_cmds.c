@@ -435,6 +435,7 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
   p[40] = pc_run_state(s);
   p[41] = s->capture_id ? s->cap.origin : 0;
   p[42] = s->ext_flags;                         //1.4: EXT pin (bit0 level, bit1 generator on, bit2 edge since arm)
+  p[43] = pc_hal_display_mode();                //1.7: 0 scope, 1 spectrum view
   return 44;
 }
 
@@ -1878,6 +1879,32 @@ static int h_fft_bench(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
   return PC_OK;
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// READ_SPECTRUM (1.7, fw 0.2.28): u8 channel, u8 0, u16 first bin, u16 count (0 = as many as fit), u16 0
+
+static int h_read_spectrum(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint32_t first = pc_get_u16(req + 2);
+  uint32_t count = pc_get_u16(req + 4);
+  uint32_t max = (PC_MAX_RESPONSE_PAYLOAD - PC_SPECTRUM_HDR) / 2;
+  int32_t  n;
+
+  (void)len;
+
+  if(req[0] > 1)
+    return pc_error(s, PC_E_BAD_ARG, 0, "channel");
+
+  if((count == 0) || (count > max))
+    count = max;
+
+  n = pc_hal_spectrum_read(req[0], first, count, resp, resp + PC_SPECTRUM_HDR);
+  if(n < 0)
+    return pc_error(s, PC_E_STATE, 0, "no spectrum shown for this channel");
+
+  *rl = PC_SPECTRUM_HDR + 2 * (uint32_t)n;
+  return PC_OK;
+}
+
 static const pc_cmd_entry pc_cmds[] =
 {
   { PC_CMD_PING,         F_BUSY | F_CONTROL | F_BASIC, 0, h_ping },
@@ -1905,6 +1932,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_ACQUIRE_AVG,  0,                            PC_CAP_DEVICE_AVERAGE, NULL },
   { PC_CMD_SET_ACQ_STATE, F_CONTROL,                   0, h_set_acq_state },
   { PC_CMD_GET_CAPTURE_INFO, F_BUSY | F_CONTROL,       0, h_get_capture_info },
+  { PC_CMD_READ_SPECTRUM, F_BASIC,                     0, h_read_spectrum },
   { PC_CMD_SD_INFO,      F_BASIC,                      PC_CAP_SD_SECTORS, h_sd_info },
   { PC_CMD_SD_READ_SECTORS, F_BASIC,                   PC_CAP_SD_SECTORS, h_sd_read },
   { PC_CMD_SD_STAGE,     F_BUSY | F_BASIC,             PC_CAP_SD_SECTORS, h_sd_stage },   //memory copy only: timer poll

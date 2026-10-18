@@ -395,6 +395,7 @@ hooks `PC_UI_HAS` / `PC_UI_MASK` that are empty with `PC_PROTOCOL=0`):
 | Long memory | acquisition menu | always | 1.00o5 forces it off; the main-loop branch is empty |
 | EXT trigger source | trigger menu | bitstream without EXT_TRIGGER (all but AL3 0x1533+) | the input exists only in fpga/al3 0x1533 (calibration pin, 3.3 V logic referenced to the scope's USB ground, not the probe ground, which sits ~1.24 V above it); selecting it switches the generator off |
 | Hold off | trigger menu | always | never sent to the FPGA in 1.00o5 |
+| Spectrum analyzer row | main menu | roll mode, viewers (fw 0.2.28) | the roll-mode trace path does not run the spectrum hook; the menu is one row shorter then |
 | FFT switch ("Open FFT" row) | channel menus | always (fw 0.2.26) | 1.00o5 stores `fftenable` and draws nothing; Invert, Coupling and V/A move up one row (`PC_CH_DY`), the empty slot sits above Probe mode (the menu box keeps its height for the V/div column) |
 | Time & Date settings (RTC submenu) | system settings | no DS3231 answers at boot | the clock, file stamps and FAT times would read garbage |
 | Temperature (diagnostics screen) | diagnostics | no DS3231 answers at boot | it is the DS3231's temperature register; without the module it read "99" |
@@ -453,6 +454,42 @@ bounds (worst over all signals and windows; limits from the plan: bin error < -1
 dBFS here is relative to the bin of a full-scale sine. The level error includes the 0.01 dB output step; the
 log2/dB conversion alone is within 1.6e-5 octaves (0.005 dB). Bin-centred full-scale tone: within 0.02 dB of
 39.07 dB on all windows; flat-top half a bin off: within 0.05 dB.
+
+### Spectrum view (`spectrum.c`, fw 0.2.28)
+
+A display mode of the main loop, not a modal menu, so the MCP's polling and the shared screen keep working (plan:
+`docs/plans/dpos350p-features.md` 2b). Main menu, sixth row "Spectrum analyzer" (hidden in roll mode, where the
+trace path is different); in the view the row reads "Scope view" and a tap returns. The strip's "Scope" field does
+the same. While on, `scope_display_trace_data` (hook `PC_SPECTRUM_DISPLAY`) draws the trace area itself and touches
+in it go to the strip (`PC_SPECTRUM_TOUCH`); the top bar, the MCP chip and the right column (RUN/STOP, AUTO, menus)
+are 1.00o5's. Each new capture (UI or host) is transformed once; settings changes recompute from the held buffer,
+so a stopped capture can be re-examined. Roll mode or a viewer ends the view.
+
+Screen: info line (sample rate, N, RBW; peak frequency and level per channel in its colour), plot of 10 x 8
+divisions with dBV labels (dBA in A mode), start / centre / stop frequency labels, and the strip. Each plot column
+shows the highest bin it covers, so narrow lines survive at 720 columns; zoomed in past one bin per column it draws
+straight lines between bins. A white triangle marks the peak (DC bins skipped). Below 200 MS/s an orange line says
+"no anti-alias filter": the FPGA decimates by skipping samples (until a filtering bitstream lands).
+
+| field | values | tap |
+|---|---|---|
+| Channel | CH1, CH2, CH1 + CH2 (only enabled channels) | next |
+| FFT length | 1024 .. the largest power of two the record holds (2048 at depth 3000, 8192 at 15000) | next, wraps |
+| Window | Hann, flat top, rect | next |
+| Scale | 5, 10, 20 dB/div | next |
+| Ref level | -100 .. +60 dBV at the top line, one division per step | left half down, right half up |
+| Span | Nyquist range / 1 .. / 64 | left half wider, right half narrower (keeps the centre) |
+| Start | in half-span steps | left half down, right half up |
+| Scope | | leave the view |
+
+Levels are dBV of a sine's RMS (a tone centred on a bin reads its RMS level on every window; noise reads per bin,
+divide by ENBW for density). Volts per code use the calibration chain of protocol section 8.5, probe factor included
+[U: T8]. Number formatting is host-tested (`host_tests/test_spec_fmt.c`). Settings live in RAM (defaults: CH1, 4096,
+Hann, 10 dB/div, ref 0 dBV, full span). Protocol: GET_STATUS byte 43 = display mode, READ_SPECTRUM 0x020A returns
+the displayed spectrum (protocol section 14 row 45).
+
+Costs [E, to be measured on the bench with `pass_ms`]: FFT per channel ~6 ms at 4096 (FFT_BENCH measures it), the
+plot about the same as 1.00o5's trace drawing (one 728 x 432 fill and blit per pass).
 
 ### Memory budget
 

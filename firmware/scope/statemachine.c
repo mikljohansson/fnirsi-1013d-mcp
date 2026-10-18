@@ -620,6 +620,9 @@ void scan_for_touch(void)
   else
   {
     //Main screen part, so handle that
+    //PC protocol build: the spectrum view takes touches in the trace area
+    PC_SPECTRUM_TOUCH();
+
     //Get timer ticks to detect touch duration
     previoustimerticks = timer0_get_ticks();
 
@@ -1182,6 +1185,17 @@ void handle_main_menu_touch(void)
           //Copy back the original screen to continue were left of
           display_set_source_buffer(displaybuffer2);
           display_copy_rect_to_screen(0, 0, 800, 480);
+
+          //Need to exit the loop here
+          return;
+        }
+        //PC protocol build: Spectrum analyzer row (switches the display mode)
+        else if(PC_MAIN_MENU_ROW6(ytouch))
+        {
+          //Close any other open menu
+          close_open_menus(1);
+
+          PC_MAIN_MENU_TOUCH();
 
           //Need to exit the loop here
           return;

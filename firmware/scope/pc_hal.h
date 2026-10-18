@@ -222,5 +222,10 @@ void     pc_hal_enter_fel(void);
 // writes the response body (docs/protocol.md section 14 row 44) and returns its length (<= PC_FFT_BENCH_MAX).
 #define PC_FFT_BENCH_MAX  (8 + 8 * 24)
 uint32_t pc_hal_fft_bench(uint8_t *dst, uint32_t reps);
+//fw 0.2.28: the display mode (GET_STATUS byte 43: 0 scope, 1 spectrum; any context) and the displayed spectrum of
+//channel ch (MAIN): 32-byte header + up to max_bins i16 centi-dBV from bin first; returns the bins written, -1 = none
+uint8_t  pc_hal_display_mode(void);
+#define PC_SPECTRUM_HDR   32
+int32_t  pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t *hdr, uint8_t *levels);
 
 #endif /* PC_HAL_H */
