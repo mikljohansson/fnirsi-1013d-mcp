@@ -252,6 +252,12 @@ class Scope:
             self.invalidate()
         return st
 
+    def link_stats(self) -> dict[str, int] | None:
+        """Device-side link counters (GET_LINK_STATS, protocol >= 1.2), or None on older firmware."""
+        if self.info.proto_minor < 2:
+            return None
+        return P.parse_link_stats(self._req(P.Cmd.GET_LINK_STATS))
+
     def battery(self) -> P.BatteryResp:
         return P.BatteryResp.unpack(self._req(P.Cmd.GET_BATTERY))
 

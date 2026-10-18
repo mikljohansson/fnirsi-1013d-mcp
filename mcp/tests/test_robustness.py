@@ -39,7 +39,7 @@ def test_resync_flushes_dirty_device_ring(sim):
     try:
         assert t.request(P.Cmd.PING, b"clean").payload == b"clean"
         assert t.stats.retries == 0
-        assert P.InfoResp.unpack(t.request(P.Cmd.GET_INFO).payload).proto_minor == 1
+        assert P.InfoResp.unpack(t.request(P.Cmd.GET_INFO).payload).proto_minor == P.PROTO_MINOR
     finally:
         t.close()
 
@@ -95,3 +95,54 @@ def test_fast_retry_after_lost_response(sim, transport):
     t0 = time.monotonic()
     assert transport.request(P.Cmd.PING, b"q").payload == b"q"
     assert time.monotonic() - t0 < 0.5 and transport.stats.retries == 1  # resent after ~100 ms, not 1 s
+
+
+def test_get_link_stats_protocol_1_2(sim, scope):
+    st = scope.link_stats()
+    assert st is not None and list(st)[:4] == ["rx_packets", "rx_bytes", "rx_stalls", "rx_swept"]
+    assert len(st) == len(P.LINK_STATS_NAMES) == 27
+    assert st["frames"] >= 2 and st["rx_bytes"] > 512 and st["responses"] >= 2 and st["dtr_up"] >= 1
+    assert st["junk_bytes"] >= 512  # the resync preamble's zeros
+    assert st["link_resets"] >= 1  # its #RESET
+    assert P.parse_link_stats(P.pack_link_stats({"rx_bytes": 7})[:8]) == {"rx_packets": 0}  # short body
+
+
+def test_host_keeps_partial_response_across_a_pause():
+    """A response pausing > 100 ms mid-transfer must not be dropped by the host (census: garbage_bytes)."""
+    import threading
+    from fnirsi1013d.transport import Transport
+
+    class SlowLink:
+        description = "slow"
+
+        def __init__(self):
+            self.out = bytearray()
+            self.q: list[bytes] = []
+            self.lock = threading.Lock()
+
+        def write(self, data):
+            f = P.decode_frame(bytes(data)) if data[:2] == P.MAGIC else None
+            if f is not None:
+                resp = P.Frame(f.cmd, f.seq, f.payload, flags=1).encode()
+                with self.lock:
+                    self.q += [resp[:20], b"PAUSE", resp[20:]]
+
+        def read(self, n, timeout):
+            with self.lock:
+                item = self.q.pop(0) if self.q else b""
+            if item == b"PAUSE":
+                time.sleep(0.3)
+                return b""
+            if not item:
+                time.sleep(min(timeout, 0.01))
+            return item
+
+        def flush_input(self):
+            pass
+
+        def close(self):
+            pass
+
+    t = Transport(SlowLink(), resync=False, response_timeout=1.0)
+    assert t.request(P.Cmd.PING, b"x" * 100).payload == b"x" * 100
+    assert t.stats.partial_drops == 0 and t.stats.garbage_bytes == 0 and t.stats.retries == 0

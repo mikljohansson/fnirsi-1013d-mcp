@@ -655,7 +655,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     "main_loop_pass_ms": st.pass_ms or None, "main_loop_pass_max_ms": st.pass_max_ms or None,
                     "battery_level": b.level, "charging": bool(b.charging),
                     "exit_reason": P.ExitReason(st.exit_reason).name if st.exit_reason else None,
-                    "link_stats": vars(s.t.stats)}
+                    "link_stats": vars(s.t.stats), "device_link_stats": s.link_stats()}
         return await run("scope_status", 0, {}, go)
 
     @register(0, title="Read configuration", read_only=True, idempotent=True)

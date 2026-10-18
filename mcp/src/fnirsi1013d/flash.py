@@ -106,12 +106,14 @@ def parse_usbipd_list(text: str) -> list[UsbipdDevice]:
 
 class Flasher:
     def __init__(self, *, port: str = "auto", image: Path = DEFAULT_IMAGE, no_fel: bool = False,
+                 sha256: str | None = None,
                  distro: str = "Ubuntu", fel_timeout: float = 20.0, port_timeout: float = 15.0,
                  sunxi_fel: str = "sunxi-fel", windows: bool | None = None, runner: Runner = run_cmd,
                  out: Callable[[str], None] = print, transport_factory: Callable[[str], Transport] | None = None,
                  sleep: Callable[[float], None] = time.sleep):
         self.port = port
         self.image = Path(image)
+        self.sha256 = sha256.lower() if sha256 else None
         self.no_fel = no_fel
         self.distro = distro
         self.fel_timeout = fel_timeout
@@ -155,7 +157,12 @@ class Flasher:
         if len(data) < 64 or data[4:12] != b"eGON.EXE":
             raise FlashError(f"{self.image} does not look like an eGON.EXE scope image (bytes 4..11 = "
                              f"{data[4:12]!r})", 2)
-        self.step(f"image {self.image} ({len(data)} bytes, sha256 {hashlib.sha256(data).hexdigest()[:16]}...)")
+        digest = hashlib.sha256(data).hexdigest()
+        self.step(f"image {self.image} ({len(data)} bytes) sha256 {digest}")
+        if self.sha256 and not digest.startswith(self.sha256):
+            raise FlashError(f"image sha256 {digest} does not match --sha256 {self.sha256}: the file changed (was it "
+                             "rebuilt in place?)", 2)
+        self._image_bytes = data
 
     def enter_fel(self) -> None:
         port = self._scope_port()
@@ -219,6 +226,9 @@ class Flasher:
             self.sleep(0.5)
 
     def load(self) -> None:
+        # the file must not change between the check and the load (it can be rebuilt in place)
+        if self.image.read_bytes() != getattr(self, "_image_bytes", None):
+            raise FlashError(f"{self.image} changed after it was checked; rerun", 2)
         img = self.image_arg()
         cmd = self.fel_cmd("-p", "write", f"0x{LOAD_ADDR:08X}", img, "exe", f"0x{EXEC_ADDR:08X}")
         self.step("load: " + " ".join(cmd))
@@ -278,12 +288,13 @@ def main(argv: list[str] | None = None) -> None:
                     help="scope serial port (default: auto-detect 1209:0001)")
     ap.add_argument("--image", type=Path, default=DEFAULT_IMAGE, help=f"scope image (default {DEFAULT_IMAGE})")
     ap.add_argument("--no-fel", action="store_true", help="the scope is already in FEL; skip ENTER_FEL")
+    ap.add_argument("--sha256", help="expected image sha256 (full or prefix); refuse to load anything else")
     ap.add_argument("--distro", default="Ubuntu", help="WSL distribution with sunxi-tools (Windows only)")
     ap.add_argument("--sunxi-fel", default="sunxi-fel", help="sunxi-fel command, e.g. 'sudo sunxi-fel' on Linux")
     ap.add_argument("--fel-timeout", type=float, default=20.0, help="seconds to wait for 1f3a:efe8")
     ap.add_argument("--port-timeout", type=float, default=15.0, help="seconds to wait for the serial port after exe")
     a = ap.parse_args(argv)
-    f = Flasher(port=a.port, image=a.image, no_fel=a.no_fel, distro=a.distro, sunxi_fel=a.sunxi_fel,
+    f = Flasher(port=a.port, image=a.image, no_fel=a.no_fel, sha256=a.sha256, distro=a.distro, sunxi_fel=a.sunxi_fel,
                 fel_timeout=a.fel_timeout, port_timeout=a.port_timeout)
     sys.exit(f.run_all())
 

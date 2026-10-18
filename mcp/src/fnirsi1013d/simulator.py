@@ -242,7 +242,7 @@ class SimConfig:
     caps_override: int | None = None
     caps_clear: int = 0
     seed: int | None = None
-    fw_version: str = "0.1.1-sim"
+    fw_version: str = "0.1.4-sim"
     serial: str = "1013D-SIM"
     ui_capture_period_s: float = 0.05
     #: drop (never send) responses with a larger payload, like firmware 0.1.0 on hardware (> 5 KiB failed)
@@ -317,6 +317,8 @@ class Device:
         #: protocol 1.1 main-loop timing fields (simulated as a steady 5 ms loop)
         self.pass_ms = 5
         self.pass_max_ms = 5
+        #: GET_LINK_STATS counters (protocol 1.2); the ones the simulator can observe are counted
+        self.link: dict[str, int] = {n: 0 for n in P.LINK_STATS_NAMES}
 
     # --- capabilities -------------------------------------------------------------------------------
 
@@ -713,9 +715,10 @@ class Device:
             self.tick()
             if req.proto_major != P.PROTO_MAJOR:
                 return self._err(req, P.Status.E_VERSION, 0, f"proto {req.proto_major} != 1")
+            self.link["frames"] += 1
             if self.last_resp and self.last_resp[0] == req.seq and self.last_resp[1] == req.cmd:
-                cached = P.decode_frame(self.last_resp[2])
-                return cached
+                self.link["duplicates"] += 1
+                return P.decode_frame(self.last_resp[2])
             try:
                 cmd = P.Cmd(req.cmd)
             except ValueError:
@@ -806,6 +809,9 @@ class Device:
         else:
             raise _DevErr(P.Status.E_BAD_ARG, 0, f"action {r.action}")
         return self._ok(req, self.status().pack())
+
+    def _cmd_get_link_stats(self, req: P.Frame) -> P.Frame:
+        return self._ok(req, P.pack_link_stats(self.link))
 
     def _cmd_get_battery(self, req: P.Frame) -> P.Frame:
         return self._ok(req, P.BatteryResp(18, 0, 41, 0).pack())
@@ -1281,6 +1287,7 @@ class Device:
         """#RESET (protocol 14.25): drop a pending WAIT without an answer and the duplicate cache; REMOTE
         ownership and acquisition state stay."""
         with self.lock:
+            self.link["link_resets"] += 1
             self.deferred = None
             self._abort_deferred = False
             self.last_resp = None
@@ -1373,6 +1380,7 @@ class SimServer:
                 parser.reset()
                 with self.device.lock:
                     self.device.dtr = True
+                    self.device.link["dtr_up"] += 1
                 log.info("host connected")
             if client and client in r:
                 try:
@@ -1384,6 +1392,8 @@ class SimServer:
                     client = None
                     continue
                 last_rx = time.monotonic()
+                self.device.link["rx_packets"] += (len(data) + 511) // 512
+                self.device.link["rx_bytes"] += len(data)
                 for chunk, is_reset in _split_reset(data):
                     if is_reset:
                         parser.reset()
@@ -1417,14 +1427,23 @@ class SimServer:
             client.close()
         except OSError:
             pass
+        self.device.link["dtr_down"] += 1
         self.device.link_down()
         log.info("host disconnected")
 
     def _event(self, client: socket.socket, ev: P.ParseEvent) -> None:
         dev = self.device
+        L = dev.link
+        if isinstance(ev, P.Garbage):
+            L["junk_bytes"] += len(ev.data)
+        elif isinstance(ev, P.BadHeader):
+            L["hdr_crc_errors"] += 1
         if isinstance(ev, P.Frame):
             if ev.is_response:
+                L["responses_dropped"] += 1
                 return
+            if ev.proto_major != P.PROTO_MAJOR:
+                L["version_errors"] += 1
             if self.bad_crc_next:
                 self.bad_crc_next -= 1
                 self._send(client, P.response(ev, P.error_payload(0, "payload crc"), P.Status.E_BAD_CRC))
@@ -1433,10 +1452,12 @@ class SimServer:
             if resp is not None:
                 self._send(client, resp)
         elif isinstance(ev, P.BadPayloadCrc):
+            L["payload_crc_errors"] += 1
             with dev.lock:
                 dev.last_frame_at = dev.now()
             self._send(client, P.response(ev.frame, P.error_payload(0, "payload crc"), P.Status.E_BAD_CRC))
         elif isinstance(ev, P.Oversize):
+            L["oversize"] += 1
             self._send(client, P.response(ev.frame, P.error_payload(0, f"frame over {P.MAX_REQUEST_FRAME}"),
                                           P.Status.E_BAD_LEN))
         elif isinstance(ev, (P.AsciiLine, P.AsciiOverflow)):
@@ -1455,6 +1476,11 @@ class SimServer:
             self.drop_next -= 1
             return
         data = bytearray(resp.encode())
+        L = self.device.link
+        L["responses"] += 1
+        L["tx_packets"] += (len(data) + 511) // 512
+        if len(data) % 512 == 0:
+            L["tx_zlps"] += 1
         if self.corrupt_next and resp.payload:
             self.corrupt_next -= 1
             data[P.HEADER_SIZE] ^= 0xFF

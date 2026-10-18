@@ -74,7 +74,10 @@ class TimeoutPolicy:
 
 
 #: answered from the timer IRQ (firmware >= 0.1.2)
-FAST_CMDS = frozenset({P.Cmd.PING, P.Cmd.GET_INFO, P.Cmd.GET_STATUS, P.Cmd.GET_BATTERY})
+FAST_CMDS = frozenset({P.Cmd.PING, P.Cmd.GET_INFO, P.Cmd.GET_STATUS, P.Cmd.GET_BATTERY, P.Cmd.GET_LINK_STATS})
+#: Host-side partial-frame discard: much longer than the device's 100 ms rule. A large response may pause
+#: mid-transfer; dropping it after 100 ms turned its tail into "garbage" (bench census 2026-10-18, fw 0.1.3).
+HOST_PARTIAL_TIMEOUT_S = 2.0
 #: responses that can be tens of KiB
 BULK_CMDS = frozenset({P.Cmd.READ_RAW, P.Cmd.READ_TRACE, P.Cmd.READ_SCREEN, P.Cmd.TEST_PATTERN})
 #: commands whose OK response is a GET_STATUS body (byte 0 = control); used to track REMOTE for timeouts
@@ -416,7 +419,7 @@ class Transport:
         data = self.link.read(65536, timeout)
         now = time.monotonic()
         if not data:
-            if self._parser.pending_bytes and now - self._last_rx > P.INTERBYTE_TIMEOUT_S:
+            if self._parser.pending_bytes and now - self._last_rx > HOST_PARTIAL_TIMEOUT_S:
                 self._parser.reset()
                 self.stats.partial_drops += 1
             return

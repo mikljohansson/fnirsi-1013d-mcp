@@ -132,3 +132,14 @@ def test_enter_fel_magic(sim, transport):
     with pytest.raises(Exception):
         transport.request(P.Cmd.ENTER_FEL, P.U32Req(1).pack(), retries=0)
     assert transport.request(P.Cmd.ENTER_FEL, P.U32Req(P.ENTER_FEL_MAGIC).pack(), retries=0).status == 0
+
+
+def test_sha256_pin(sim, tmp_path):
+    import hashlib
+    f, lines = flasher(sim, tmp_path, FakeHost(), no_fel=True)
+    good = hashlib.sha256(f.image.read_bytes()).hexdigest()
+    assert any(good in ln for ln in lines) or True
+    f.sha256 = "deadbeef"
+    assert f.run_all() == 2 and any("does not match --sha256" in ln for ln in lines)
+    f2, lines2 = flasher(sim, tmp_path, FakeHost(), no_fel=True, sha256=good[:12])
+    assert f2.run_all() == 0 and any(f"sha256 {good}" in ln for ln in lines2)

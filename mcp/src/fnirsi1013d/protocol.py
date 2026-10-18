@@ -23,7 +23,7 @@ MAGIC = b"\xa5\x13"
 MAGIC0 = 0xA5
 MAGIC1 = 0x13
 PROTO_MAJOR = 1
-PROTO_MINOR = 1  # 1.1: GET_STATUS pass_ms / pass_max_ms (firmware 0.1.1)
+PROTO_MINOR = 2  # 1.1: GET_STATUS pass_ms / pass_max_ms (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4)
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -57,6 +57,7 @@ class Cmd(enum.IntEnum):
     SET_REMOTE = 0x0004
     GET_BATTERY = 0x0005
     TEST_PATTERN = 0x0006
+    GET_LINK_STATS = 0x0007  # protocol 1.2
     GET_CHANNEL = 0x0100
     SET_CHANNEL = 0x0101
     GET_TIMEBASE = 0x0102
@@ -83,12 +84,13 @@ class Cmd(enum.IntEnum):
 LOCAL_ALLOWED = frozenset(
     {
         Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.SET_REMOTE, Cmd.GET_BATTERY, Cmd.TEST_PATTERN,
+        Cmd.GET_LINK_STATS,
         Cmd.GET_CHANNEL, Cmd.GET_TIMEBASE, Cmd.GET_TRIGGER, Cmd.READ_TRACE, Cmd.GET_GEN, Cmd.GET_CAL,
         Cmd.READ_SCREEN, Cmd.ENTER_FEL,
     }
 )
 #: Commands accepted while the UI is modal (LOCAL_BUSY, section 6.1).
-BUSY_ALLOWED = frozenset({Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.GET_BATTERY})
+BUSY_ALLOWED = frozenset({Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.GET_BATTERY, Cmd.GET_LINK_STATS})
 #: Control requests allowed while a deferred request is pending (section 3.2).
 CONTROL_CMDS = frozenset({Cmd.GET_STATUS, Cmd.STOP, Cmd.SET_REMOTE, Cmd.PING})
 DEFERRED_CMDS = frozenset({Cmd.WAIT, Cmd.ACQUIRE_AVG})
@@ -1052,10 +1054,34 @@ class ReadScreenHeader(Payload):
     format: int = 1
 
 
+#: GET_LINK_STATS counter names in wire order (protocol 1.2, docs/protocol.md section 14 item 28).
+LINK_STATS_NAMES = (
+    "rx_packets", "rx_bytes", "rx_stalls", "rx_swept", "tx_packets", "tx_zlps", "tx_kicked", "tx_flushes",
+    "link_resets", "dtr_up", "dtr_down", "frames", "hdr_crc_errors", "payload_crc_errors", "oversize",
+    "version_errors", "responses_dropped", "rx_timeouts", "junk_bytes", "responses", "duplicates", "tx_aborts",
+    "disp_main", "disp_busy", "disp_isr", "held", "isr_skipped",
+)
+
+
+def pack_link_stats(counters: dict[str, int]) -> bytes:
+    vals = [int(counters.get(n, 0)) & 0xFFFFFFFF for n in LINK_STATS_NAMES]
+    return struct.pack(f"<HH{len(vals)}I", len(vals), 0, *vals)
+
+
+def parse_link_stats(payload: bytes) -> dict[str, int]:
+    """u16 n, u16 0, n x u32. Unknown extra counters are named ``c<index>``."""
+    if len(payload) < 4:
+        return {}
+    (n,) = struct.unpack_from("<H", payload)
+    n = min(n, (len(payload) - 4) // 4)
+    vals = struct.unpack_from(f"<{n}I", payload, 4)
+    return {(LINK_STATS_NAMES[i] if i < len(LINK_STATS_NAMES) else f"c{i}"): v for i, v in enumerate(vals)}
+
+
 #: Request sizes of v1.0 for fixed-size requests. Shorter requests get E_BAD_LEN, longer ones are accepted
 #: and the tail ignored (resolution in mcp/README.md "Spec ambiguities").
 REQUEST_SIZES: dict[Cmd, int] = {
-    Cmd.GET_INFO: 0, Cmd.GET_STATUS: 0, Cmd.SET_REMOTE: SetRemoteReq.size(), Cmd.GET_BATTERY: 0,
+    Cmd.GET_INFO: 0, Cmd.GET_STATUS: 0, Cmd.GET_LINK_STATS: 0, Cmd.SET_REMOTE: SetRemoteReq.size(), Cmd.GET_BATTERY: 0,
     Cmd.TEST_PATTERN: TestPatternReq.size(), Cmd.GET_CHANNEL: 1, Cmd.SET_CHANNEL: SetChannelReq.size(),
     Cmd.GET_TIMEBASE: 0, Cmd.SET_TIMEBASE: SetTimebaseReq.size(), Cmd.GET_TRIGGER: 0,
     Cmd.SET_TRIGGER: SetTriggerReq.size(), Cmd.ARM: 4, Cmd.FORCE: 0, Cmd.STOP: 0, Cmd.WAIT: 4,
