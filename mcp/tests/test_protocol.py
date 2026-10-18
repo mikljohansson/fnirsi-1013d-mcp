@@ -180,3 +180,6 @@ def test_link_stats_fw_0_2_4_sample():
     assert d["first_poll_ms"] == 1515 and d["first_pass_ms"] == 31  # counters 27 and 28
     assert d["first_conversion_ms"] == 1 and d["first_after_rtc_ms"] == 32
     assert list(P.parse_link_stats(P.pack_link_stats({}))) == list(P.LINK_STATS_NAMES)  # 31-counter layout
+    import struct as st2
+    d41 = P.parse_link_stats(st2.pack("<HH41I", 41, 0, *range(41)))
+    assert d41["first_after_rtc_ms"] == 34 and d41["usb_bus_resets"] == 35 and d41["usb_ep0_bad_setups"] == 40

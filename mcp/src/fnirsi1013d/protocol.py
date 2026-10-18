@@ -1361,11 +1361,13 @@ def pack_link_stats(counters: dict[str, int]) -> bytes:
     return struct.pack(f"<HH{len(vals)}I", len(vals), 0, *vals)
 
 
-#: fw 0.2.4 (35 counters): 29..34 are "ms + 1 after the first main-loop poll, 0 = not reached"; in 0.2.2-0.2.3
+#: fw 0.2.4 (35 counters, 41 from 0.2.5): 29..34 are "ms + 1 after the first main-loop poll, 0 = not reached"; in 0.2.2-0.2.3
 #: (31 counters) 29/30 were first_arm_ms / first_done_ms ("ms | 1")
 LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     "first_conversion_ms", "first_capture_ms", "first_after_battery_ms", "first_after_acquisition_ms",
-    "first_after_touch_ms", "first_after_rtc_ms")
+    "first_after_touch_ms", "first_after_rtc_ms",
+    # fw 0.2.5+ (41 counters): USB device events
+    "usb_bus_resets", "usb_suspends", "usb_resumes", "usb_disconnects", "usb_ep0_setups", "usb_ep0_bad_setups")
 
 
 def link_stats_names(n: int) -> tuple[str, ...]:
