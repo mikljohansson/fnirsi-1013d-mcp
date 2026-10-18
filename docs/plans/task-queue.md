@@ -37,8 +37,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   check-reference target and reference downloads removed from the Makefile/CI/docs. Do after the spectrum/calibration
   work lands to avoid conflicts.
 - [ ] **Calibration v3: per-core, per-class gain** (fw-cal2, after fw-gen6's 0.2.44 merges): design in firmware/AGENTS.md section 21;
-  include 3bfc892 (64 full-rate conversions); block v3 376 bytes; owner re-runs base calibration; bench with 0 V, 1.0045 V and a second
-  voltage point (-1 V or 2 V) per class.
+  3bfc892 (64 full-rate conversions) is merged into main (5effb7d) but unbuilt, goes out with 0.2.44; block v3 376 bytes; owner re-runs
+  base calibration; bench with 0 V, 1.0045 V and the -1 V point per class.
+- [ ] **Bench: -1 V point on CH1 range 2** (fw-cal request, before fw-cal2 designs): read_trace_capture at 200 MSa/s, 1 MSa/s legacy
+  and CIC2 with the probe on a -1 V source (the 1.0045 V reference reversed). fw-cal saw the gated A/B gain ratio at 0.994 for -1.24 V
+  but 0.983 for +1 V, so v3 needs to know whether the cores need separate gains above and below zero.
 - [ ] **CH2 range-5 zero drift check** (fw-cal hypothesis): CH2 raw at ranges 4/5 vs the stored zeros now; re-calibrate after 10 minutes
   warm-up and re-measure range 6 immediately and 10 minutes later. If it drifts, document a warm-up recommendation (Atlan: 5 min).
 - [ ] **Calibration v2 bench** (when fw-cal delivers): shorted inputs, per-core means equal within 0.3 codes after
@@ -72,10 +75,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 ## Dispatched
 
 - fw-gen6 (worktree, branch fw-gen6): fw 0.2.44 batch = items marked [>] above (0x1535 support, strip overdraw, CIC2 default).
-- fw-cal: merged (b27c1ee) as fw 0.2.43; bench steps 2-11 in progress with the owner.
+- fw-cal (retired at 515k tokens): fw 0.2.43 merged (b27c1ee); handoff firmware/AGENTS.md section 21 merged (5effb7d). Remaining
+  README 6.2 bench steps (CH2 drift check, -1 V point, PWM sweep, volts check) are queued above.
 
 - fw-gen5 (retired after 0.2.42): Auto redesign, header, warnings delivered in fw 0.2.42; owner verdict pending.
 
-- fw-cal (worktree): calibration v2 delivered on branch fw-cal; rebase to main + renumber 0.2.42 requested; bench steps 1-11 in firmware/README.md 6.2 pending.
 - fpga-gen4: FPGA 0x1535 (CIC N/2 + 15-tap FIR).
 - mcp-gen3: idle, holds item 4 (version bump).
