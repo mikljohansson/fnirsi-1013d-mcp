@@ -444,11 +444,16 @@ typedef struct
   int32  cdb_per_div;
 } SPECVIEW;
 
-static void spec_view(SPECVIEW *v, int log2n)
+//The displayed axis ends at PC_SPECTRUM_FMAX_HZ or fs/2, whichever is lower (owner: the front end rolls off near
+//30 MHz, above 25 MHz there are only artefacts); span, start and the Auto band all live inside it
+static void spec_view(SPECVIEW *v, int log2n, uint64 bin_mhz)
 {
   uint32 maxfirst;
+  uint64 capbins = bin_mhz ? ((uint64)PC_SPECTRUM_FMAX_HZ * 1000) / bin_mhz : 0;
 
   v->half = 1u << (log2n - 1);
+  if(capbins < v->half)
+    v->half = (capbins < 16) ? 16 : (uint32)capbins;
   v->span = v->half >> spec.zoom;
   if(v->span < 8)
     v->span = 8;
@@ -1099,7 +1104,7 @@ int spectrum_display(void)
   pc_hal_decim_current(&dc, &written);
   fs_mhz  = spec_fs_mhz(divider, &dc);
   bin_mhz = spec_bin_mhz(fs_mhz, log2n);
-  spec_view(&v, log2n);
+  spec_view(&v, log2n, bin_mhz);
   hch = spec_hist_ch();
 
   //History views: a new axis starts a new history; each new capture adds one row / one line of hits
@@ -1230,8 +1235,14 @@ static void spec_auto(void)
   spec_compute();
 
   log2n = spec_log2n();
-  half  = 1u << (log2n - 1);
-  spec_view(&v, log2n);
+  {
+    pc_decim_cfg dc;
+    int          written;
+
+    pc_hal_decim_current(&dc, &written);
+    spec_view(&v, log2n, spec_bin_mhz(spec_fs_mhz(spec_divider(), &dc), log2n));
+  }
+  half  = v.half;                            //only what the axis shows
 
   memset(hist, 0, sizeof(hist));
   for(ch = 0; ch < 2; ch++)

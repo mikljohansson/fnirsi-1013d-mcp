@@ -17,6 +17,10 @@
 #define SPECTRUM_MODE_WATERFALL   2     //fw 0.2.32
 #define SPECTRUM_MODE_DENSITY     3     //fw 0.2.32
 
+//Highest frequency the view shows (fw 0.2.36, owner): the front end rolls off near 30 MHz. READ_SPECTRUM still
+//returns every bin up to fs/2.
+#define PC_SPECTRUM_FMAX_HZ       25000000u
+
 //Microseconds since boot from timer0 (1 ms ticks + the 24 MHz down-counter), wraps after 71 minutes
 uint32 spectrum_us(void);
 

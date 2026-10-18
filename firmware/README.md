@@ -572,6 +572,11 @@ start, ref, scale, sample rate, channel), so a view never mixes axes; in STOP th
 rows are stored as RGB565 (drawn with memcpy bursts) and the counts as words with zero words skipped, since every
 uncached pixel access costs about 90 cycles. Memory: 484 KB waterfall + 726 KB density (.bss).
 
+Axis cap (fw 0.2.36, owner): the view shows at most `PC_SPECTRUM_FMAX_HZ` = 25 MHz (spectrum.h), or fs/2 when that
+is lower; at 200 MS/s the full span is 0-25 MHz and zoom, pan and Auto stay inside it. The front end rolls off near
+30 MHz, so above 25 MHz there would only be artefacts. The info line still states the sample rate, and READ_SPECTRUM
+still returns every bin up to fs/2.
+
 Gestures on the plot (fw 0.2.35, the scope view's rules from `scan_for_touch` in statemachine.c): a touch that stays
 within 2 px and ends within 200 ms is a tap; left of the plot centre zooms the span out one step (x 2), right of it
 zooms in (/ 2, down to 1/64 of the Nyquist range), keeping the centre, like the time/div taps in the scope view. A
