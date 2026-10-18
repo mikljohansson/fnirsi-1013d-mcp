@@ -145,3 +145,7 @@ Newest entries at the bottom. Format: date, who, what, result.
 - Firmware 0.1.7 PROMOTED to the SD card (sector 750..1490) via the scope's USB mass-storage mode (0483:5720, bound for usbipd, /dev/sdg in WSL)
   with make_sd_image.py write --scope; sectors 0..749 and the tail verified unchanged (calibration 708 / settings 709 / boot byte 710 intact);
   pre-write backup backups/sdcard/sd_sectors_0-1490_20261018-144808.bin. Power-cycle confirmed: boots from the card to fw 0.1.7, calibration and settings intact (input_calibration values unchanged).
+- T8 volts calibration data (fw 0.1.7, CH1 1x DC, bench supply + DMM): backups/t8_CH1_1.000V.json, t8_CH1_0.010V.json, t8off_CH1_0.000V.json.
+  Findings: gains match uv_per_lsb_q8 within 1%; zero model zero_core = Z_core - 0.265*dcoffset, range-independent; on this unit Z_A=132.5, Z_B=127.0
+  (A/B spread 5.5 codes vs stored comps -2/+2; centre 129.75 vs assumed 128). Host per-unit calibration being built by mcp-gen2.
+  Open: generator loop-back read ~75 codes low at range 3 (coupling encoding or trace position?), to be checked with a controlled square-wave test.
