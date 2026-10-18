@@ -496,3 +496,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   +0.07 at 1 MSa/s, +0.02 at 10 kSa/s, means 127.9 (target 128), CIC2 127.94 = legacy: **CH1 zero criterion met at the gated rates and in
   the filtered path.** CH2 at range 6: firmware codes equal raw codes (128.6/128.9), i.e. no correction applied there; +0.53 at 200 MSa/s.
   Reported to fw-cal (range-6-uses-5 binding suspected). Pass time 30 ms and the spur improvement are firmware-path facts and stand.
+- **Gain bench, CH1 at 1.0045 V DC (DMM), range 2, dcoffset 0, 4 captures averaged (backups/gain_bench_1V.json incl. the GET_CAL dumps):**
+  firmware READ_TRACE A/B: 200 MSa/s 157.01/155.76 (+1.25), 1 MSa/s 156.11/156.53 (-0.42), 10 kSa/s 156.14/156.56 (-0.43), CIC2 156.20;
+  raw A/B: 200 MSa/s 160.57/155.82 (+4.75), gated 159.24/153.97 (+5.27). Against the 0 V raw values (131.73/127.86 full, 131.09/125.33 gated):
+  per 1.0045 V core A gains 28.84 codes full-rate vs B 27.96 (A 3.1 % higher), gated A 28.15 vs B 28.64 (B 1.7 % higher): the core gain
+  mismatch is real and its sign depends on the clock class. Host volts model read 0.977-0.979 V (2.6 % low at range 2).
+- fw-cal on the CH2 range-6 question: the correction is applied but tiny by construction; CH2's range-5 zero drifted ~0.7 codes since the
+  calibration (warm-up/drift suspected; Atlan recommends 5 minutes warm-up); the CH1 full-rate residual is 25 kHz offset-PWM ripple
+  (fixed by averaging 64 conversions at full rate, commit 3bfc892 on fw-cal, unbuilt).
