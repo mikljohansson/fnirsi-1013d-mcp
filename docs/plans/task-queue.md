@@ -49,6 +49,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [ ] **Calibration v2 bench** (when fw-cal delivers): shorted inputs, per-core means equal within 0.3 codes after
   correction at full-rate and gated rates, T8-style PWM sweep, Nyquist spur gone in legacy mode, volts at 1.000 V /
   0.010 V match the host model within 1 %; owner reruns base calibration.
+- [ ] **Reproducible firmware builds**: the same source with the same GCC 10.3.1 gives different images from main and from a worktree
+  (0.2.44: d4c0b716 vs 08f9a5ed, 172,941 differing bytes). Likely __FILE__/path strings; add `-ffile-prefix-map=$(abspath .)=.` (and
+  `-fdebug-prefix-map`), check for __DATE__/__TIME__, and make CI's image hash match a local main build. Fold into the dead-code purge.
+- [ ] **CH2 reads +1.0..1.5 codes at range 6 with shorted input right after calibration** (10-18 late): channel offset with the cores
+  agreeing; see docs/hardware-status.md late evening and the overnight log. Decide after the log: PWM/relay drift at hw range 5 vs probe.
+- [ ] **Morning bench with the owner (0.2.44)**: spectrum strip repaint loops, generator menu rows, Filter box steps + DEFAULT = CIC2,
+  recalibrate on 0.2.44 (64 full-rate conversions), flash FPGA 0x1535 (backup first) and bench CIC2+FIR (GET_DECIM bytes 26-27 = 0xE2 0x01
+  at 10 MSa/s).
 - [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s): deterministic test with
   GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
 - [ ] **Digital phosphor** (roadmap, owner priority 2 after the spectrum analyser): design in docs/plans/dpos350p-features.md
@@ -76,6 +84,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Dispatched
 
+- fw-cal2 (worktree, Opus, started 10-18 23:20): calibration v3 per-core/per-class gain, fw 0.2.45, protocol 1.12, row 51.
+- fw-phosphor (worktree, Opus, started 10-18 23:20): digital phosphor display mode, fw 0.2.46, protocol 1.13, row 52.
+- mcp-gen3: protocol 1.11 host side (FIR bits, event fields, soak --mode reopen).
 - fw-gen6 (worktree, branch fw-gen6, about 350k tokens, retired): fw 0.2.44 merged into main (463931d, image d4c0b716): 0x1535 FIR
   support, spectrum strip repaint, CIC2 default, USB suspend/resume rework (protocol 1.11, rows 49-50), generator menu hit-area fix.
   Bench by the coordinator in progress.

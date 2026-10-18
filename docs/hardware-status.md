@@ -535,3 +535,25 @@ Newest entries at the bottom. Format: date, who, what, result.
   within 0.2 at every step): the CH2 mean wanders about 1.3 codes within a minute while the cores stay together. Reads as a slow input /
   relay settling or pickup effect, not a per-core calibration error; the gated zero model itself holds (A-B <= 0.21). Overnight plan:
   log both channels' per-core raw and corrected means with shorted inputs at 1 MSa/s and 200 MSa/s every 10 minutes.
+
+### 2026-10-18 late evening: fw 0.2.44 loaded, overnight log
+
+- fw-gen6's 0.2.44 batch merged into main (463931d: FIR 0x1535 support, spectrum strip repaint, CIC2 default, USB suspend/resume rework,
+  generator menu hit-area fix) plus fw-cal's 64 full-rate calibration conversions. Built on main with GCC 10.3.1, pinned as
+  backups/fw-0.2.44_d4c0b716.bin (sha256 d4c0b716dfaf79a7a7a7b8932a83cfa0dd63f6ebcef075932823e951f7aeccdb), loaded into RAM hands-free
+  with fnirsi1013d-flash (ENTER_FEL -> usbipd -> sunxi-fel, 7.3 s). fw-gen6's own image (08f9a5ed, same source, same GCC 10.3.1) differs
+  in 172,941 bytes: the build is not reproducible across checkout paths (inference: __FILE__ strings from the worktree path); queued.
+  The SD card still boots 0.2.25; a power cycle returns to it.
+- 0.2.44 bench, inputs shorted (owner), CH1 range 2, CH2 range 6: census 500 PINGs 0 failures, 0.96 ms each; GET_DECIM setting off
+  (owner's saved word), caps bit 16 (FIR) clear on 0x1534 and SET_DECIM with the FIR flag refused with E_BAD_ARG detail 1 as designed.
+  Zeros (4 captures, fw trace per core): CH1 200 MSa/s 127.61/127.96, 1 MSa/s 128.02/128.00, CIC2 127.72; CH2 200 MSa/s 128.89/129.86,
+  1 MSa/s 129.30/129.04, CIC2 129.39. CH1 is on target; CH2 reads 1.0-1.5 codes (3-5 mV at range 6) above 128 at every rate with the
+  cores agreeing, within an hour of the owner's recalibration: a channel offset, not a per-core error. Candidates: CH2's zero is set at
+  hw range 5 and the PWM/relay state drifts, or the shorted probe adds an offset. The overnight log decides whether it is time-dependent.
+  The full-rate 0.2.43 calibration (8 conversions) is still in sector 708; the 64-conversion zeros need a recalibration on 0.2.44.
+- Still to bench with the owner (needs eyes/hands): spectrum strip repaint on SET_TIMEBASE / SET_TRIGGER / SET_GEN loops and span taps,
+  generator menu rows (Freq value, 1 kHz, Duty), Filter box steps, DEFAULT button gives CIC2.
+- **Overnight log started 23:16** (scratchpad night_log.py -> backups/night_log_20261018.jsonl): every 10 minutes open COM10, read
+  GET_LINK_STATS + GET_EVENT_LOG (this doubles as fw-gen6's USB reopen bench: suspend/resume events after 10 minutes idle with the port
+  closed), capture both channels' per-core raw and corrected means at 200 MSa/s, 1 MSa/s and CIC2 with dcoffset 0, restore the owner's
+  settings, close. 60 rounds. Round 0: gated CH1 128.01/127.89, CH2 129.22/129.06; full CH1 127.70/127.96, CH2 128.81/129.85.
