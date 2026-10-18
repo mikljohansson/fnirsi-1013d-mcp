@@ -2,7 +2,7 @@
 
 Guidance for AI agents (Claude Code, Codex, others) and humans working in this repository. Read fully before
 touching code. Subdirectories carry their own `AGENTS.md` handoffs: `firmware/AGENTS.md`, `mcp/AGENTS.md`,
-`fpga/al3/AGENTS.md`. `CLAUDE.md` only imports this file.
+`fpga/al3/AGENTS.md`.
 
 ## What this project is
 
