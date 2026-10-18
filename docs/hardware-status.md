@@ -416,3 +416,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   - Alias test, 900 kHz square at 1 MS/s (fundamental folds to 100 kHz): +2.4 dBV legacy, -17.5 boxcar (-20 dB), -30.4 CIC2 (-33 dB),
     -35.7 CIC3 (-38 dB); the residual for CIC2/3 sits at the 8-bit path's quantisation floor, so the true rejection is likely higher
     (inference; to be measured with the 16-bit WIDE path once the host has it). Data backups/decim_bench_0x1534.json.
+- Firmware 0.2.35 (fw-gen5, commits 36149d1/0ef8230, sha256 b1be459d..., pinned): spectrum gestures (tap left/right of the plot = span
+  x2 / /2, drag = pan), Span/Start fields replaced by Auto and Reset, FFT length capped at 4096 (default 2048), density view without a fade
+  pass (per-cell count + last-hit index, exp(-age/16) decay, black-blue-red-yellow-white ramp). Loaded on 0x1534: census clean, pass_ms 33.
+  Owner checks pending. mcp 0de32dd: protocol 1.9 host support (16-bit captures, scope_set_decimation, simulator al3d), CI green.
+  FPGA 0x1535 interface fixed by fpga-gen4 (0x56 FIR enable; latency 25 write clocks predicted), build/testbench pending.
