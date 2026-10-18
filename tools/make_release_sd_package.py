@@ -9,15 +9,12 @@ them (docs/releasing.md explains why).
 Commands:
 
   build      download Atlan's v1.00o5 package, verify its sha256, replace the scope at sector 750 with
-             yours and write an SD package (same layout and trailer as `make package`). --parts DIR also
+             yours and write an SD package (Atlan's layout and 72-byte flashfilepacker trailer). --parts DIR also
              writes bootloader.bin, updater.bin and scope.bin for `make_sd_image.py write`.
-  reference  write Atlan's scope image and SD package under the names firmware/scope/Makefile expects
-             (`make check-reference`, `make package`). Used by CI.
 
   python3 make_release_sd_package.py build --scope fnirsi_1013d-fw-0.3.0.bin
   python3 make_release_sd_package.py build --scope build-gcc10-pc/fnirsi_1013d.bin --parts parts/
   python3 make_release_sd_package.py build --scope our.bin --local path/to/v1.00o5.zip   # no download
-  python3 make_release_sd_package.py reference --dest firmware/reference
 
 --local takes the v1.00o5 zip or a directory that holds its extracted files (searched recursively).
 Every source is accepted only when the two files match the pinned sha256 values below.
@@ -48,7 +45,7 @@ ZIP_PATH = "Verzia 1.xxx/DSO 1.xxx/backup dso/v1.00o5.zip"
 ZIP_SHA256 = "ab63e7ba2ebb12e0218f9a74f85d4ddd5d6a285a472c973635d71b8aa4f6335f"   # informational
 MEMBER_DIR = "fnirsi_1013d_scope/dist/Debug/GNU_ARM-Linux/"
 
-# name in the zip -> (size, sha256, name in firmware/reference/)
+# name in the zip -> (size, sha256, descriptive name)
 SCOPE_FILE = "fnirsi_1013d_scope.bin"
 PACKAGE_FILE = "fnirsi_1013d.bin"
 EXPECTED = {
@@ -221,28 +218,6 @@ def cmd_build(args):
     return 0
 
 
-def cmd_reference(args):
-    present = 0
-    for name, (size, digest, ref_name) in EXPECTED.items():
-        path = os.path.join(args.dest, ref_name)
-        if os.path.isfile(path) and os.path.getsize(path) == size:
-            with open(path, "rb") as f:
-                present += sha256(f.read()) == digest
-    if present == len(EXPECTED) and not (args.local or args.url):
-        print("%s: reference files present, sha256 verified, nothing to download" % args.dest)
-        return 0
-    atlan = get_atlan_files(args.local, args.url)
-    for name, data in atlan.items():
-        path = os.path.join(args.dest, EXPECTED[name][2])
-        if os.path.isfile(path):
-            with open(path, "rb") as f:
-                if f.read() == data:
-                    print("%s: already present, sha256 %s" % (path, EXPECTED[name][1]))
-                    continue
-        write_file(path, data)
-    return 0
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
@@ -259,12 +234,6 @@ def main(argv=None):
     p.add_argument("--parts", help="also write bootloader.bin, updater.bin, scope.bin to this directory")
     source_opts(p)
     p.set_defaults(func=cmd_build)
-
-    p = sub.add_parser("reference", help="Atlan's reference files for make check-reference / make package")
-    p.add_argument("--dest", default=os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                                  "..", "firmware", "reference"))
-    source_opts(p)
-    p.set_defaults(func=cmd_reference)
 
     args = ap.parse_args(argv)
     return args.func(args)

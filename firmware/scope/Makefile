@@ -7,14 +7,11 @@
 #   link     arm-none-eabi-gcc -o elf $(OBJS) -T./fnirsi_1013d.ld -nostdlib -lgcc
 #   post     objcopy -O binary elf bin ; ./mksunxi bin
 # The upstream post-build copies to Atlan's own SD-card mount points and runs
-# sudo sunxi-fel; those steps are not reproduced (see `make fel`/`package`).
+# sudo sunxi-fel; those steps are not reproduced (see `make fel`; SD packages:
+# tools/make_release_sd_package.py).
 #
 #   make                build/fnirsi_1013d.elf, build/fnirsi_1013d.bin
-#   make package        build/fnirsi_1013d_sdpackage.bin (scope overlaid on a
-#                       bootloader+updater base at 0x5BC00 = sector 750)
 #   make fel            load build/fnirsi_1013d.bin into DRAM over FEL
-#   make check-reference  rebuild with Atlan's GCC 10.3.1 and compare with
-#                       ../reference/fnirsi_1013d_v1.00o5_atlan.bin
 #   make clean
 #   make V=1            show full commands
 #   make SOURCE_DATE_EPOCH=<unix time>   reproducible build_time.h (UTC)
@@ -40,12 +37,6 @@ ELF     := $(BUILD)/$(TARGET).elf
 RAWBIN  := $(BUILD)/$(TARGET)_raw.bin
 BIN     := $(BUILD)/$(TARGET).bin
 MAP     := $(BUILD)/$(TARGET).map
-PKG     := $(BUILD)/$(TARGET)_sdpackage.bin
-
-# Base image for `make package`: Atlan's SD package (bootloader v0.8 at +0,
-# updater v0.02v at +0x8000). Same as upstream overlaying dist/.../fnirsi_1013d.bin.
-PACKAGE_BASE     ?= ../reference/fnirsi_1013d_v1.00o5_atlan_sdpackage.bin
-PACKAGE_LOCATION := 0x5BC00
 
 # Link order = nbproject/Makefile-Debug.mk OBJECTFILES order. It determines
 # the memory layout, keep it. Not built upstream (and not here): font_6.c,
@@ -109,7 +100,7 @@ else
 Q := @
 endif
 
-.PHONY: all clean package fel info check-reference gcc10 FORCE
+.PHONY: all clean fel info gcc10 FORCE
 all: $(BIN)
 
 # ----------------------------------------------------------------- build_time.h
@@ -162,14 +153,6 @@ $(BIN): $(RAWBIN) $(TOOLS)/mksunxi.py
 	$(Q)$(SIZE) $(ELF)
 	@ls -l $@ | awk '{print "  image   " $$NF ": " $$5 " bytes"}'
 
-# Upstream: ./flashfilepacker -o dist/.../fnirsi_1013d.bin -i ..._scope.bin -l 0x5BC00
-$(PKG): $(BIN) $(PACKAGE_BASE) $(TOOLS)/make_sd_image.py
-	@$(if $(Q),echo "  PACK    $@")
-	$(Q)cp $(PACKAGE_BASE) $@
-	$(Q)$(PYTHON) $(TOOLS)/make_sd_image.py pack -o $@ -i $(BIN) -l $(PACKAGE_LOCATION)
-
-package: $(PKG)
-
 # Needs the scope in FEL mode with DRAM initialised (boot mode 2 / menu "FEL").
 # Needs USB access to 1f3a:efe8: run as root or `make fel SUNXI_FEL="sudo sunxi-fel"`.
 SUNXI_FEL ?= sunxi-fel
@@ -179,22 +162,13 @@ fel: $(BIN)
 info: $(ELF)
 	$(OBJDUMP) -h $(ELF)
 
-# Rebuild with Atlan's exact toolchain (GCC 10.3.1, see ../tools/fetch_gcc10.sh)
-# and Atlan's build_time.h (2026-02-13 18:59:33), compare with the reference.
-# Always PC_PROTOCOL=0: proves the protocol hooks leave the base untouched.
-GCC10      ?= $(HOME)/opt/gcc10
-REF_EPOCH  := 1771009173
-REF_BIN    := ../reference/fnirsi_1013d_v1.00o5_atlan.bin
-check-reference:
-	$(MAKE) BUILD=build-gcc10 CROSS_COMPILE=$(GCC10)/usr/bin/arm-none-eabi- 	  EXTRA_CFLAGS="-isystem $(GCC10)/usr/include/newlib" SOURCE_DATE_EPOCH=$(REF_EPOCH) PC_PROTOCOL=0
-	cmp build-gcc10/$(TARGET).bin $(REF_BIN) && echo "IDENTICAL to $(REF_BIN)"
-
-# The protocol build with Atlan's compiler (warning check / conservative image)
+# The release image: Atlan's compiler, GCC 10.3.1 (../tools/fetch_gcc10.sh)
+GCC10 ?= $(HOME)/opt/gcc10
 gcc10:
 	$(MAKE) BUILD=build-gcc10-pc CROSS_COMPILE=$(GCC10)/usr/bin/arm-none-eabi- 	  EXTRA_CFLAGS="-isystem $(GCC10)/usr/include/newlib" PC_PROTOCOL=1
 
 clean:
-	rm -rf $(BUILD) build-gcc10 build-gcc10-pc
+	rm -rf $(BUILD) build-gcc10-pc
 
 FORCE:
 
