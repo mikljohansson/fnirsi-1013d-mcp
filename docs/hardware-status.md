@@ -482,3 +482,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   the level is near the calibration point; the residual spur with a +/-1.5 V square and the full-rate/filtered offsets at -1.24 V point at a
   per-core GAIN mismatch (and a class-dependent gain), which a zero-only model cannot remove. Pass time 30 ms at every rate (was 44-58):
   the readout loop is faster. Next: shorted-input measurements (true 0 V) and a per-core gain term.
+- **Shorted-input check of calibration v2 (both probes shorted, DC):** CH1 corrected A/B difference +0.03 at 200 MSa/s, -0.14 at 20 MSa/s,
+  +0.05 at 1 MSa/s, -0.04 at 10 kSa/s (raw spread 3.5-5.7 codes); corrected means 127.9 (target 128); filtered boxcar/CIC2/CIC3 127.9-128.0,
+  equal to legacy (the 1.65-code step at -1.24 V is gone at 0 V, so it was gain). CH2 (range 6): differences +0.44/-0.20/-0.17/-0.39,
+  filtered 128.35 vs legacy 128.6-128.9. Zero model verified in both clock classes; a per-core gain term is the remaining item (bench with
+  1.000 V from the supply next).
+- USB drop at 22:48 on 0.2.43 (FEL-loaded, PHY fix present) when the host opened the port after ~5 min idle: bus ring shows suspend ->
+  bus_reset -> set_config right then, no tx_abort/clear_feature; usb_resumes still 0 after 18 suspends => the device never handles the
+  resume; Windows resets the port. Queued: USB suspend/resume handling. The earlier 150-155 s storm of six resets = the owner's unplug/
+  replug for the calibration.
