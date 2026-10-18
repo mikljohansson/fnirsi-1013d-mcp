@@ -3086,18 +3086,7 @@ void handle_acquisition_menu_touch(void)
             scope_acqusition_settings(0);
           }    
             
-          //Check Long memory button if touch within this bounding box
-          if((xtouch >= ACQ_MENU_XPOS + 220) && (xtouch <= ACQ_MENU_XPOS + 290) PC_UI_HAS(PC_FEAT_LONG_MEMORY))
-          {
-            //Toggle the average_mode state
-            //scopesettings.long_memory  ^= 1;        
-            scopesettings.long_memory  = 0;   //docasne zrusene
-            scope_acquisition_Long_memory_select();
-            //Update the top menu bar display
-            //scope_acqusition_settings(0);
-          }
-
-          //Filter selector (bitstream 0x1534+) in the slot of the hidden Long memory box: Off, Boxcar, CIC2, CIC3
+          //Filter selector (bitstream 0x1534+) in 1.00o5's Long memory slot: Off, Boxcar, CIC2, CIC3 (+ FIR on 0x1535+)
           if((xtouch >= ACQ_MENU_XPOS + 204) && (xtouch <= ACQ_MENU_XPOS + 294) && pc_glue_ui_has(PC_FEAT_DECIM))
             pc_glue_decim_tap();
         }        

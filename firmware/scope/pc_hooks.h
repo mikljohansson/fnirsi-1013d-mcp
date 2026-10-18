@@ -10,7 +10,6 @@
 //into a touch condition, PC_UI_MASK(m) paints over the unsupported parts of a menu just drawn.
 #define PC_FEAT_GEN_DDS       1     //generator menu: Atlan DDS bitstreams only (not stock 0x1432)
 #define PC_FEAT_RTC           4     //DS3231 module (probed at boot)
-#define PC_FEAT_LONG_MEMORY   5     //"Long memory": not implemented in 1.00o5
 #define PC_FEAT_EXT_TRIGGER   6     //EXT trigger source: AL3 bitstream 0x1533+ only (calibration pin as input)
 #define PC_FEAT_HOLDOFF       7     //trigger hold-off: never sent to the FPGA
 #define PC_FEAT_DECIM         8     //acquisition "Filter" selector: AL3 bitstream 0x1534+ (decimation filter)
@@ -30,7 +29,7 @@
 #define PC_MASK_GEN_MENU      1
 #define PC_MASK_TRIG_CHANNEL  2
 #define PC_MASK_TRIG_MENU     3
-#define PC_MASK_ACQ_LONG      4
+#define PC_MASK_ACQ_FILTER    4     //acquisition menu: the Filter box
 #define PC_MASK_ACQ_MEMORY    5
 #define PC_MASK_SYS_RTC       6
 

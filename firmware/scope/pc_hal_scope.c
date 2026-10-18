@@ -877,7 +877,7 @@ static uint32 pc_dec_name_index(void)
   return ((pc_dec_has() >= PC_DECIM_HAS_FIR) && (pc_dec_setting & PC_DECIM_SET_FIR) && k) ? k + 4 : k;
 }
 
-//Acquisition menu: Filter box in the Long memory slot (masked on every Atlan bitstream), same style as the Roll mode box
+//Acquisition menu: Filter box in 1.00o5's Long memory slot, same style as the Roll mode box
 static void pc_dec_draw_box(void)
 {
   uint16    fg   = displaydata.fg_color;
@@ -1428,7 +1428,6 @@ int pc_glue_ui_has(int feature)
     case PC_FEAT_EXT_TRIGGER:
       return (pc_sess.var.caps & PC_CAP_EXT_TRIGGER) != 0;
 
-    case PC_FEAT_LONG_MEMORY:
     case PC_FEAT_HOLDOFF:
       return 0;
 
@@ -1470,11 +1469,8 @@ void pc_glue_ui_mask(int menu)
         pc_mask_rect(TRIGGER_MENU_XPOS + 170, TRIGGER_MENU_YPOS + 127, 37, 26);
       break;
 
-    case PC_MASK_ACQ_LONG:
-      if(!pc_glue_ui_has(PC_FEAT_LONG_MEMORY))
-        pc_mask_rect(ACQ_MENU_XPOS + 202, ACQ_MENU_YPOS + 161, 94, 44);
-
-      //The slot holds the decimation Filter selector on 0x1534+
+    case PC_MASK_ACQ_FILTER:
+      //1.00o5's Long memory slot holds the decimation Filter selector on 0x1534+ (empty menu background otherwise)
       if(pc_glue_ui_has(PC_FEAT_DECIM))
         pc_dec_draw_box();
       break;

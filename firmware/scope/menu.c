@@ -5280,13 +5280,6 @@ void scope_open_acquisition_menu(void)
     display_text(ACQ_MENU_XPOS + 20, ACQ_MENU_YPOS +  182, "Short mode");
   }
   PC_ROLL_LABEL();
-  /*
-  if (scopesettings.long_memory)
-  //Set black color for the text
-  display_set_fg_color(BLACK_COLOR); else display_set_fg_color(WHITE_COLOR);
-  display_text(ACQ_MENU_XPOS + 235, ACQ_MENU_YPOS +  168, "Long");
-  display_text(ACQ_MENU_XPOS + 225, ACQ_MENU_YPOS +  182, "memory");
-   */
   
   //display_set_fg_color(WHITE_COLOR);
   //***************************************************************
@@ -5296,8 +5289,8 @@ void scope_open_acquisition_menu(void)
   scope_acquisition_timeperdiv_select();
   //scope_acquisition_ACQ_mode_select();
   scope_acquisition_Average_mode_select();
-  scope_acquisition_Long_memory_select();
-  
+  PC_UI_MASK(PC_MASK_ACQ_FILTER);    //the decimation Filter box (bitstream 0x1534+) in 1.00o5's Long memory slot
+
   scope_acquisition_memory_deep_select();
   scope_acquisition_trace_select();
 
@@ -5537,55 +5530,6 @@ void scope_acquisition_Average_mode_select(void)
     display_text(ACQ_MENU_XPOS + 128, ACQ_MENU_YPOS +  168, "Average");
     display_text(ACQ_MENU_XPOS + 136, ACQ_MENU_YPOS +  182, "mode");       
 
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-void scope_acquisition_Long_memory_select(void)
-{                  
-    if ((scopesettings.long_memory)&&(!scopesettings.long_mode))
-    {
-        //Set dark grey color for the boxes behind the not selected texts
-        display_set_fg_color(GREEN_COLOR);
-        //Clear the boxes for the not selected items (Long_memory)
-        display_fill_rounded_rect(ACQ_MENU_XPOS + 204, ACQ_MENU_YPOS + 163, 90, 40, 3);
-        //Texts in black
-        display_set_fg_color(BLACK_COLOR);        
-
-    }
-    else
-    {
-        //Set dark grey color for the boxes behind the not selected texts
-        display_set_fg_color(LIGHTGREY_COLOR);
-        //Clear the boxes for the not selected items (Average)
-        display_fill_rounded_rect(ACQ_MENU_XPOS + 204, ACQ_MENU_YPOS + 163, 90, 40, 3);
-        //Texts in white
-        display_set_fg_color(WHITE_COLOR); 
-    }
-    
-    /*
-     * 
-     *   //Clear the boxes for the not selected items (ACQ, Average, Long memory)
-  display_fill_rect(ACQ_MENU_XPOS +   8, ACQ_MENU_YPOS + 163, 90, 40);
-  //display_fill_rect(ACQ_MENU_XPOS + 106, ACQ_MENU_YPOS + 163, 90, 40);
-  display_fill_rect(ACQ_MENU_XPOS + 204, ACQ_MENU_YPOS + 163, 90, 40);
-     * 
-     * 
-       if (scopesettings.long_memory)
-  //Set black color for the text
-  display_set_fg_color(BLACK_COLOR); else display_set_fg_color(WHITE_COLOR);
-  display_text(ACQ_MENU_XPOS + 235, ACQ_MENU_YPOS +  168, "Long");
-  display_text(ACQ_MENU_XPOS + 225, ACQ_MENU_YPOS +  182, "memory");
-     
-     */
-    
-    //Select the font for the texts
-    display_set_font(&font_2);
-  
-    //Display long memory text
-    display_text(ACQ_MENU_XPOS + 235, ACQ_MENU_YPOS +  168, "Long");
-    display_text(ACQ_MENU_XPOS + 225, ACQ_MENU_YPOS +  182, "memory");     
-
-  PC_UI_MASK(PC_MASK_ACQ_LONG);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

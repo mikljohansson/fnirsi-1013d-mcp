@@ -641,7 +641,6 @@ struct tagScopeSettings
   uint8 confirmationmode;
   uint8 long_mode;            //flag long_time base 1-active, 0-sort_time base
   uint8 average_mode;         //flag for average display data
-  uint8 long_memory;          //flag for long memory. 1-long memory & long trigger
   
   uint8 ACQ_trace;            //flag for choice trace. 0-linear, 1-peak, 2-sine x
   

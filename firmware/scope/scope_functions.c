@@ -742,7 +742,6 @@ void scope_acquire_trace_data(void)
     //fpga_set_time_base(scopesettings.timeperdiv); 2.12 move to reset window
 
     //Sampling with trigger circuit enabled (standard memory mode)
-    //if(scopesettings.long_memory) scopesettings.samplemode = 0; else scopesettings.samplemode = 1;
 
     //Decimation filter (0x1534+): this conversion uses the UI's Filter setting
     pc_glue_ui_decim_arm();
@@ -850,7 +849,6 @@ void scope_acquire_trace_data(void)
       
     */
         
-    //if(scopesettings.long_memory) data=10;
    
     //Only need a single count variable for both channels, since they run on the same sample rate
     //This can be changed to a global define
@@ -4723,7 +4721,6 @@ void scope_restore_setup_from_file(void)
   scopesettings.long_mode        = ptr[index++];
   scopesettings.average_mode     = ptr[index++];
   scopesettings.ACQ_trace        = ptr[index++];
-  //scopesettings.long_memory      = 0;           //docasne zrusene
 
   index = CURSOR_SETTING_OFFSET;
   
@@ -7256,7 +7253,6 @@ void scope_restore_config_data(void)
     scopesettings.long_mode        = *ptr++;
     scopesettings.average_mode     = *ptr++; 
     scopesettings.ACQ_trace      = *ptr++;
-    //scopesettings.long_memory      = 0;           //docasne zrusene, aj v file setup zrusene
     scopesettings.new_autosetup    = *ptr++;
     scopesettings.maxlight         = *ptr++;
     scopesettings.ref1             = *ptr++;     

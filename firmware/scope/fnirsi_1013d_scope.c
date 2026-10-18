@@ -328,24 +328,12 @@ int main(void)
         scope_get_long_timebase_data();
     }
     else
-    {   //Long memory mode, trigger is the beginning buffer
-        //----------------------long memory mode --------------------------------------------------------
-        if(scopesettings.long_memory)
-        {
-           
-            
-        }
-        //--------------------- short mode --------------------
-        else
-        //Standard memory mode, trigger is the middle buffer
-        {
-            scopesettings.samplemode = 1;//1
-            
-            
-            //Go through the trace data and display the trace data
-            scope_acquire_trace_data();
-             
-        }
+    {
+        //Standard memory mode, trigger is the middle buffer (1.00o5's empty "long memory" branch is gone)
+        scopesettings.samplemode = 1;
+
+        //Go through the trace data and display the trace data
+        scope_acquire_trace_data();
     }
     
     //--------------------------------------------------------------------------

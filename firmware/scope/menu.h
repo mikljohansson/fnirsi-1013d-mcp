@@ -141,7 +141,6 @@ void scope_acquisition_speed_select(void);
 void scope_acquisition_timeperdiv_select(void);
 void scope_acquisition_ACQ_mode_select(void);
 void scope_acquisition_Average_mode_select(void);
-void scope_acquisition_Long_memory_select(void);
 
 void scope_acquisition_memory_deep_select(void);
 void scope_acquisition_trace_select(void);
