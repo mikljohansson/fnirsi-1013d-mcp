@@ -1,8 +1,8 @@
 # firmware/ handoff for agents
 
-**Current state (fw-gen5 -> fw-gen6, 2026-10-18): latest build fw 0.2.42** (protocol 1.9 + fw-cal's 1.10 work in a
-worktree), see the ladder (section 8) and **section 20** (spectrum analyser, firmware auto trigger mode, the 0x1535 FIR
-plan, open owner verdicts). The USB story is closed (0.2.25 PHYCTL fix, cold-boot soak clean). Sections 9-17 below are
+**Current state (fw-gen6, 2026-10-18): latest build fw 0.2.44** (protocol 1.11: FPGA 0x1535 FIR support, spectrum
+strip repaint fix, Filter default CIC2, USB suspend as a state), see the ladder (section 8) and **section 22**; section
+20 (spectrum analyser, auto trigger mode) and 21 (calibration v2) still hold. The USB story is closed (0.2.25 PHYCTL fix, cold-boot soak clean). Sections 9-17 below are
 older generations' notes, kept for history. Read the root `AGENTS.md` first, then this file. Details live in `firmware/README.md` (build, SD layout, FEL, memory budget, boot, bring-up
 checklist), `docs/protocol.md` (the spec; section 14 lists every deviation and addition, rows 28-42 are this
 generation's) and `docs/hardware-status.md` (bench log, newest at the bottom). This file does not repeat them.
@@ -227,6 +227,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.41 | 0fd6a9c | 08aeaa63 | firmware auto trigger mode (auto captures arm normal; time-out max(100 ms, 2 records) forces an untriggered record, reported truthfully, UI and host); spectrum drops occasional untriggered records; zoom-in steps the rate down at span <= fs/16 | built, host-tested (test_fw_auto_timeout) |
 | 0.2.42 | cebb982 | b23f5fc8 | deterministic Auto (probe 50 MSa/s, period search, derive from f0 / f_hi, confirm, refine once), warnings with consequence + action, "MSa/s" units, no Avg tag in the header | built, host-tested |
 | 0.2.43 | 80ab45d | 7d2ea871 | calibration data v2: per-core zeros (full / gated clock), dithered correction, GET_CAL 248 bytes (protocol 1.10, row 48, section 21) | built, host-tested; bench list README 6.2 |
+| 0.2.44 | 45b9b9a | f063bc27 | FPGA 0x1535 FIR (protocol 1.11, row 49), spectrum view not repainted by scope_preset_values, Filter default CIC2 (PC_DECIM_DEFAULT), USB suspend as a state + resume logging (row 50) | built, host-tested (section 22) |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -727,3 +728,37 @@ Open: the bench list in README 6.2 (also AC vs DC, all ranges, pass times); mcp/
 per-unit file to GET_CAL bytes 72..247 when byte 72 = 2 (READ_TRACE codes are then already corrected; READ_RAW and
 WIDE stay raw: apply zero / slope / corr16 from GET_CAL); the 0x1534 bitstream's FULL class assumes every filtered
 capture clocks the ADCs at full rate (`sample_rate_divider_eff`), verify after any FPGA change.
+
+## 22. fw-gen6: 0x1535 FIR, spectrum repaint, Filter default, USB suspend (fw 0.2.44, protocol 1.11)
+
+Commits 2e0cd10 (FIR), 9591d83 (repaint), e09b25a (default), 45b9b9a (USB suspend). Image sha256
+f063bc27b3f949400703ccf2847e5fc0fa485581e51fe64b2220a9da944688e5 (from 45b9b9a; docs-only commits after it). Nothing
+benched. Host tests: test_session 68908 / 68906 (debug) checks, 163 decim vector cases, test-arm byte-identical.
+- FIR (README "Decimation filter", protocol row 49): `pc_decim_config` takes a capability level (`PC_DECIM_HAS_NONE /
+  CIC / FIR`) and the setting bit `PC_DECIM_SET_FIR` (0x20); `fir_en` is what 0x56 gets, `fir` whether it engages
+  (K >= 1, N >= 16, N % 4 == 0). With `fir` the configuration's gain is (N/2)^K and S has + 1, so every consumer
+  (scale_q24, L16, corr16 feed, spectrum 16-bit path, GET_CAPTURE_INFO) is right without knowing about the FIR. Keep
+  it that way: never recompute N^K outside pc_decim.c. Output rate 200 MHz / N confirmed by fpga-gen4's commands file.
+  Settings word 207 bit 5 = FIR (valid mask 0xFFC4); SET_DECIM flags bit 3; caps bit 16 from version 0x1535.
+- Filter box on 0x1535+: off, boxcar, boxcar+FIR, CIC2, CIC2+FIR, CIC3, CIC3+FIR (`pc_glue_decim_tap`). The box shows
+  the setting; the spectrum header tag shows the effective state (FIR only where active).
+- Default: `PC_DECIM_DEFAULT` (pc_decim.h) = CIC2, for sectors without a valid word 207 and the DEFAULT button
+  (`PC_SETTINGS_DEFAULTS` in scope_reset_config_data). Owner: CIC2 | PC_DECIM_SET_FIR once 0x1535 is benched.
+- Spectrum repaint (README "Redraws in the spectrum view"): `scope_preset_values` starts with `PC_SPECTRUM_DISPLAY()`;
+  `spectrum_display` has a re-entry guard (spec_tb_set -> pc_hal_timebase_write -> preset -> display). Audit: no other
+  host-driven redraw reaches the trace area. If the owner still sees the strip flicker on SET_TRIGGER / SET_GEN alone,
+  look at what the host sent around it (MCP configure calls SET_TIMEBASE too) before searching the drawing code again.
+- USB suspend (protocol row 50): suspend no longer runs `pc_usb_isr_link` (no flush, no DTR clear, no session reset);
+  RESUME ends it, reset / disconnect reset the link. `pc_hal_dtr` reads 0 while suspended. `pc_usb_main_service`
+  (main poll, 20 ms) logs a resume inferred from a moving frame number (type 3, a bit 7). Types 1 / 4 carry
+  a = suspended before, b = ms since the suspend, which tells a port reset (a few ms after the SE0) from a reset after
+  a real host suspend. 1.00o5 audit: RESUME was always enabled, EnableSuspendM never set (now cleared explicitly), no
+  PHY / CCU handling on suspend, same as Linux musb. My reading of the 0.2.43 case (inference, unverified): "suspend ->
+  bus reset" at reopen with nothing before is most likely the reset preamble, i.e. Windows did not suspend and reset
+  the port for another reason; the new fields decide it.
+  Bench: soak tool for 10 s (`fnirsi1013d-soak --duration 10`), close, wait 2-5 min, repeat 10 times; after every
+  reopen read GET_EVENT_LOG and GET_LINK_STATS 36/37. Look at type 1 b (few ms vs minutes), whether type 2 appears at
+  the close (host suspend) or only at the reopen, and type 3 with or without a bit 7. Also: Windows powercfg USB
+  selective suspend on vs off (soak.py prints it). A `--mode reopen --idle S` in soak.py would automate this (mcp).
+- mcp/ needs: GET_DECIM byte 1 bit 3 / 0x29 bits 6-5 / caps bit 16 decoding, SET_DECIM fir flag, and the new event
+  field meanings of types 1-4.
