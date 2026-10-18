@@ -1417,7 +1417,7 @@ EVENT_LOG_REARM = 0x01
 #: GET_EVENT_LOG entry types (protocol 1.5, section 14 row 42)
 EVENT_TYPES = {1: "bus_reset", 2: "suspend", 3: "resume", 4: "disconnect", 5: "ep0_setup", 6: "ep0_short_packet",
                7: "set_configuration", 8: "clear_halt", 9: "dtr", 10: "rx_ring_full", 11: "rx_release",
-               12: "tx_flushed", 13: "tx_aborted", 14: "usb_irq_polled", 15: "restart", 16: "usb_init_state"}
+               12: "tx_flushed", 13: "tx_aborted", 14: "usb_irq_polled", 15: "restart", 16: "usb_init_state", 17: "tx_abort_txcsr", 18: "tx_abort_frame"}
 
 
 @dataclass
