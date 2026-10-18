@@ -200,6 +200,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.22 | 7b6d855 | 6615bab6 | usb_device_init logs the controller state it finds (event type 16, protocol row 43), then asserts the USB OTG bus reset and PHY reset for 1 ms before 1.00o5 releases them | built, host-tested; ELF backups/fw-0.2.22-6615bab6.elf |
 | 0.2.23 | 25e90fc | 545126ff | 0.2.22 plus EP2 IN state after every TX abort: type 17 (POWER, TXCSR), type 18 (EP2 TX int enabled / ZLP pending, frame number) | FEL: replug test clean (400 x 64 KiB); FEL init state 0x4000 / 0x070f / 0x2000 / 0x0000 / 0x2fc0; persisted to the card |
 | 0.2.24 | 7e5a2e3 | 9de2caad | 0.2.23 plus GET_EVENT_LOG bus-level ring tail (16, types 1-4, 7, 8, 12, 13, 15-18), identical EP0 setups logged at most once per second | built, host-tested; ELF backups/fw-0.2.24-9de2caad.elf |
+| 0.2.25 | 85a113d | c71935f9 | 0.2.24 plus PHY tuning writes to PHYCTL 0x01C13404 (Linux suniv) instead of 1.00o5's 0x01C13410; type 19 post-init state incl. PHY tuning read-back | built, host-tested, disassembly checked; ELF backups/fw-0.2.25-c71935f9.elf |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -211,7 +212,8 @@ c7210b749cc55482155a2211fec422f674efa3a22faa3d378bf5a60d33bbc318. 0.2.21 (1a893a
 6be6f9e81673c19bf88a812fe598b844426167cb14c3f73ca4d0b9c7bdbcdd04. 0.2.22 (7b6d855)
 6615bab63dc37918b654d00ce6e133b7c25a4b0d43d0845892e3a786cb96d1cb. 0.2.23 (25e90fc)
 545126ff304b6ce87802b51cc05e95d41f0084308758c4e116b62d536770955e. 0.2.24 (7e5a2e3)
-9de2caad698bcd96e5c7195f9f5aa7b6bb8aecad1ba2b2c74655ad9963c92d5c.
+9de2caad698bcd96e5c7195f9f5aa7b6bb8aecad1ba2b2c74655ad9963c92d5c. 0.2.25 (85a113d)
+c71935f9df1652b7d597875fb5eadcb3b49fb370770c5cc950e1bce3f781167e.
 
 ## 9. Open crash: self-restart from RAM (one confirmed case, 0.2.16)
 
@@ -505,6 +507,17 @@ compact menus rather than painting over gaps.
    aborted 64 KiB responses, then service resumed with no bus reset (tx_aborts 23, tx_flushes 49). 0.2.23 logs
    EP2 TXCSR / POWER / frame number at each abort (types 17, 18; protocol row 43) to tell a host that stopped
    taking IN data (TxPktRdy stays set) from a device that stopped loading (TxPktRdy clear, UnderRun set).
+   0.2.23 cold boot with the cable in: 1 abort in 500 x 64 KiB, type 17 TXCSR 0x0003 (TxPktRdy + FIFONotEmpty,
+   no UnderRun), POWER 0x70 (HS), SOFs arriving: the host stopped taking IN data, device side fine. Type 16 differs
+   by path: FEL 0x4000/0x070f/0x2000/0x0000/0x2fc0 (boot ROM left the block live, full speed), cold boot all 0.
+   **PHY register (fact from source, effect inferred):** 1.00o5's usb_phy_setup writes 0x01C13410; Linux
+   phy-sun4i-usb.c suniv_f1c100s_cfg uses REG_PHYCTL_A10 = 0x04 of "phy_ctrl" (dtsi: 0x01C13400, length 0x10),
+   i.e. 0x01C13404 (0x10 is the A33+ offset). So the RES45 / TX amplitude / disconnect-threshold tuning
+   presumably never reached the PHY in any 1.00o5-derived image. 0.2.25 writes 0x404 and logs a read-back
+   (type 19; the read protocol, data at PHYCTL bit 16, is unverified). Inference, unproven: an untuned PHY
+   gives a marginal HS eye. Counter-evidence to weigh: since 0.2.22 the PHY reset at init wipes whatever the
+   boot ROM's FEL tuned, yet the 0.2.23 FEL runs (500 x 64 KiB) were clean; the cold-boot failure rate is
+   about 1 per 500 transfers, so small samples cannot separate the paths. Judge 0.2.25 on long runs.
 1c. Host-capture trigger position varies between runs at decimated rates (lead, 0x1533 / 0.2.21, lower priority; owner
    of the fix TBD, firmware or host geometry). Capture.pretrigger_samples vs the measured CH1 edge is stable within a
    run but differs between runs: 1 MS/s (divider 199) EXT +11/+12 us in the first 10 captures after selecting EXT,
