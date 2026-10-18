@@ -253,6 +253,11 @@ class SimConfig:
     ui_capture_period_s: float = 0.05
     #: legacy exclusive LOCAL/REMOTE firmware (protocol 1.2, no SHARED_MODE)
     legacy: bool = False
+    #: front-end zero error per channel and core (codes added to the raw code), like the owner's unit (T8: the
+    #: cores sit 5 codes apart, the stored compensation corrects 4)
+    zero_error: tuple[tuple[float, float], tuple[float, float]] = ((0.0, 0.0), (0.0, 0.0))
+    #: true codes per offset-PWM count (None: the firmware formula -100 / dc_shift_value)
+    offset_slope: float | None = None
     #: drop (never send) responses with a larger payload, like firmware 0.1.0 on hardware (> 5 KiB failed)
     fail_responses_over: int | None = None
 
@@ -402,8 +407,11 @@ class Device:
             v = v - sig.dc
         cal = self.cal[ch]
         vpl = P.uv_per_lsb_q8(cal.input_calibration[cs.range], cs.range) / 256.0 * 1e-6
-        zero = P.zero_code_q8(cs.dcoffset, cal.dc_shift_value) / 256.0
-        code = zero + v / vpl
+        if self.cfg.offset_slope is None:
+            zero = P.zero_code_q8(cs.dcoffset, cal.dc_shift_value) / 256.0
+        else:
+            zero = 128.0 + self.cfg.offset_slope * cs.dcoffset
+        code = zero + v / vpl + self.cfg.zero_error[ch][0 if core == "A" else 1]
         if core == "B":
             code = code + self.cfg.core_b_offset[ch]
         if noise is None and self.cfg.noise_lsb > 0:
@@ -1285,7 +1293,9 @@ class Device:
             raise _DevErr(P.Status.E_BAD_ARG, 4, f"start {r.start} > sample_count {n}")
         count = n - r.start if r.count == 0 else r.count
         if count > n - r.start:
-            raise _DevErr(P.Status.E_BAD_ARG, 8, "count")
+            if not self.shared:  # up to fw 0.2.0 (the 1.2 model here): E_BAD_ARG detail 8
+                raise _DevErr(P.Status.E_BAD_ARG, 8, "count")
+            count = n - r.start  # fw >= 0.2.1: clipped; the header's count says what was sent
         chans = [c for c in (0, 1) if r.ch_mask & (1 << c)]
         if 32 + 16 * len(chans) + count * len(chans) > P.MAX_RESPONSE_PAYLOAD:
             raise _DevErr(P.Status.E_OVERFLOW, 0, "trace too long; lower count")

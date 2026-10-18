@@ -97,6 +97,7 @@ count when the `#VER` probe answers `#OK,FNIRSI-1013D-AI,...`.
 | `FNIRSI_MCP_DATA_DIR` | `mcp/data` | `.npz` output, one folder per day |
 | `FNIRSI_MCP_AUDIT_LOG` | `mcp/logs/audit.jsonl` | JSONL log of every tier 1+ call (empty string disables) |
 | `FNIRSI_MCP_LEGACY_IDLE_RELEASE_S` | 60 | legacy firmware only: release REMOTE (keeping the host settings) after this many seconds without a tool call; 0 = hold until exit |
+| `FNIRSI_MCP_CAL_FILE` | `<data dir>/cal/<serial>.json` | per-unit voltage calibration (`--cal-file`), loaded at connect if present, written by `scope_calibrate_volts` |
 | `FNIRSI_MCP_MAX_RESPONSE` | device limit | largest response payload requested at once (`--max-response`); READ_RAW, READ_TRACE and READ_SCREEN are split, and device averaging falls back to the host when its result would not fit |
 
 ### Claude Code
@@ -134,6 +135,7 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_capture_and_fft` | 1 | averaged amplitude spectrum, peaks in dBV and dBc, noise floor, THD |
 | `scope_decay_fit` | 1 | edge-aligned average, then `exp`, `exp+offset`, `exp2` or `power` fit after the TX edge; tau, R^2, sample points |
 | `scope_set_channel` | 2 | range, coupling, offset, probe, invert; relay changes limited to 5 per second |
+| `scope_calibrate_volts` | 2 | a known DC voltage on every range: fits 0 V code, volts per code and offset slope per range and ADC core, saves the calibration file |
 | `scope_generator` | 3 | calibration-pin square wave; confirmation token to enable |
 | `scope_self_test_loopback` | 3 | generator into CH1: frequency, duty, levels, bench tests T4, T5, T7; token |
 | `scope_raw_fpga` | 4 | raw FPGA bus operations (DEBUG_RAW builds); needs `FNIRSI_MCP_ENABLE_RAW=1` and a token |
@@ -160,8 +162,13 @@ arguments, single-use, and expire after 120 s. Waveforms of any length go to `.n
 flags, `meta_json`); results up to 2000 points also carry the samples inline, longer ones a 500-point min/max
 preview.
 
-Physical units: volts are `(code_compensated - zero_code) x volts_per_lsb x probe` with the firmware's
-`uv_per_lsb_q8` and `zero_code_q8`. That formula is bench test T8 and is flagged in every result. Time is
+Physical units: volts are converted per ADC core. With a per-unit calibration covering the range,
+`raw_code = zero + slope x (offset_pwm - pwm_ref) + volts / gain` per core (fitted by `scope_calibrate_volts`,
+or imported from bench data with `python -m fnirsi1013d.calibration --import <t8 json...> --out <file>`); otherwise
+the firmware's `uv_per_lsb_q8` and `zero_code_q8` (the same for both cores, after the stored compensation).
+Results say which one was used (`scaling`). T8 on the owner's unit (fw 0.1.7): gains within ~1 %, but the
+firmware zero was ~2 codes off (cores 5 codes apart, compensation corrects 4) and follows the trace offset with a
+different slope. Time is
 `(i - pretrigger_samples) x dt` relative to the hardware trigger, which is +-2 samples until T5 is run.
 
 ## Firmware dev loop: `fnirsi1013d-flash`

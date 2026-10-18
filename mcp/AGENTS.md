@@ -22,9 +22,10 @@ context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/p
 | `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 fresh attempts, 1 s apart; between them a look for the FEL device 1f3a:efe8, which means the OK was lost but the scope rebooted: continue; `#VER` check if all unanswered) -> usbipd -> sunxi-fel RAM load -> wait for `#VER`. Any failure: one `FAILED:` line, non-zero exit. |
 | `bench.py` | `fnirsi1013d-bench`: runs `../firmware/scope/host_tests/bench_link.py` (link checks + census; `--fel` not exposed). |
 | `vectors.py` | Checks/extends `../docs/protocol-vectors.json` (`--check`, `--merge`). |
+| `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points -> least-squares fit of zero, 1/gain, PWM slope per channel/range/core; JSON file), `ChannelScale`/`channel_scale` (raw, compensated, mean and trigger-level conversions; firmware formula fallback), `import_t8` + CLI for the lead's `backups/t8_*.json`. |
 | `units.py` | `parse_quantity("100us")`, `fmt_si`. |
 
-Tests in `tests/` (199): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
+Tests in `tests/` (204, incl. `test_calibration`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
 (resend, resync, #RESET, 1.1/1.2 fields, timeouts, paused responses), `test_serial_link` (no-reconfigure rule,
 fake pyserial), `test_simulator_scope`, `test_shared_mode` (1.3 semantics through `Scope`), `test_firmware_match`
 (protocol.md section 14 items), `test_server` (every tool in-process, collaborative restarts, legacy fallback),
@@ -105,6 +106,8 @@ section 14 (zero-extended requests, detail numbering, ARM-while-ARMED, LOCAL fla
 TEST_PATTERN 3, stock GET_GEN, offset PWM range, #RESET even inside a partial frame), protocol 1.1 timing fields
 (constant 5 ms) and 1.2 GET_LINK_STATS (counts what a TCP model can see). `--caps` mimics a build (0x1C03 =
 fw 0.1.1+ on AL3, 0x1803 = 0.1.0), `--fail-responses-over` drops large responses, `--time-scale` (0 = instant).
+Front-end errors for calibration tests: `zero_error` (codes per channel/core) and `offset_slope` (true codes per
+PWM count). READ_TRACE count past the end: clipped in 1.3 mode (fw >= 0.2.1), E_BAD_ARG detail 8 in the 1.2 model.
 Test hooks on `SimServer`: `corrupt_next`, `garbage_next`, `drop_next` (responses), `bad_crc_next`, `lose_next`
 (+ `lose_cmd` filter: requests lost before execution); `Device.user_tap()` (legacy).
 
@@ -127,7 +130,7 @@ Signals: `sine`, `square`, `decay` (PI: period, width, tau, amp, tau2/amp2, flyb
 
 ## MCP tools and safety
 
-20 tools, `scope_` prefix, list with tiers in `README.md`
+21 tools (`scope_calibrate_volts` added), `scope_` prefix, list with tiers in `README.md`
 (`scope_remote_session` was retired with collaborative mode). Tiers: 0 read-only, 1 acquisition, 2 relays
 (`scope_set_channel`, 5 changes/s), 3 calibration-pin output (`scope_generator`, `scope_self_test_loopback`),
 4 raw (`scope_raw_fpga`, `scope_enter_fel`, only with `FNIRSI_MCP_ENABLE_RAW=1`). `FNIRSI_MCP_MAX_TIER` limits
@@ -143,8 +146,15 @@ to the JSONL audit log; waveforms go to `.npz` under the data dir.
 
 ## Analysis assumptions
 
-- Volts: `(code + comp - zero_code) x volts_per_lsb x probe` with firmware `uv_per_lsb_q8` / `zero_code_q8`
-  (bench test T8 pending). Time: `(i - pretrigger_samples) x dt`, t = 0 at the core-B sample of the trigger
+- Volts: per ADC core through `Scope.scale(ch, cfg)`: the unit calibration (file `<data_dir>/cal/<serial>.json`,
+  model `raw = zero + slope*(offset_pwm - pwm_ref) + volts/gain`) when it covers the range, else the firmware's
+  `uv_per_lsb_q8` / `zero_code_q8` minus the per-core comp. Captures (READ_RAW) convert each core's raw codes;
+  READ_TRACE by sample parity (compensated codes); ACQUIRE_AVG means with the cores' mean zero/gain; trigger levels
+  in volts go through core A's model. T8 (fw 0.1.7, CH1, dcoffset 44): gains within ~1 %, zeros A ~121.0 /
+  B ~116.0 raw on every range vs the firmware's 116.57 on the compensated mean. CalResp adc_*_rawavg are only the
+  last readout (1.00o5 overwrites them), not a calibration. Open: the offset-PWM slope (1.00o5 calibration measures
+  a per-range step but stores only the centre); the lead is taking 0 V at several dcoffsets. Until then the slope
+  is the firmware's -100/dc_shift_value, so a unit calibration is only exact near the offset it was taken at. Time: `(i - pretrigger_samples) x dt`, t = 0 at the core-B sample of the trigger
   word (T5 pending, +-2 samples).
 - `scope_averaged_capture`: host averaging (Welford mean/std, clipped-any mask) or device ACQUIRE_AVG (only
   hardware alignment, no clip rejection, must fit one response). Edge alignment: per capture the crossing of
@@ -207,7 +217,11 @@ reload: announce "about to reload with <image> for <reason>", wait for the lead'
 6. Adopt ACQUIRE_AVG / READ_SCREEN / READ_LIVE on hardware when the firmware ships them (simulator already
    implements them; check payload layouts against the firmware first).
 7. MCP progress for long averaged runs works in-process; verify with Claude Code over stdio.
-8. Collaborative mode on hardware (fw 0.2.0): run the plan's bench acceptance list (docs/plans/collaborative-
+9. T8: when the lead's 0 V dcoffset sweep arrives, import it (`python -m fnirsi1013d.calibration --import ...
+   --out mcp/data/cal/1013D-0001.json`), check the fitted slopes per range/core, then re-check the owner's
+   calibration-pin square wave (expect ~0 / 3.3 V). Do not install a file fitted at one offset for the owner: it
+   extrapolates with the firmware slope.
+8. Collaborative mode on hardware (fw 0.2.1, sha256 ca0b6d11...; 0.2.0 is superseded): run the plan's bench acceptance list (docs/plans/collaborative-
    mode.md) through the tools; check the RUN-mode READ_RAW hold (a full 4-core read is now one response); measure the per-request cost in shared mode
    (every main-loop command waits for a UI pass) and, if averaging is slow, consider a host ARM loop without
    GET_CAPTURE_INFO (already: only when the WAIT seq matches) or ACQUIRE_AVG.

@@ -44,9 +44,9 @@ from pydantic import Field
 from . import analysis as A
 from . import protocol as P
 from .scope import (CHANNEL_NAMES, SCALING_CAVEAT, Capture, CaptureContext, Scope, channel_index,
-                    codes_to_volts, settings_diff,
-                    volts_to_code)
+                    settings_diff)
 from .transport import DeviceError, TransportError
+from .calibration import UnitCalibration, describe as describe_cal
 from .units import fmt_si, parse_quantity
 
 log = logging.getLogger("fnirsi1013d.mcp")
@@ -85,6 +85,8 @@ class ServerConfig:
     inline_max_points: int = 2000
     #: cap on one response payload; larger reads are split (None = the device's max_response_payload)
     max_response: int | None = None
+    #: per-unit voltage calibration file; None: <data_dir>/cal/<serial>.json (loaded if present)
+    cal_file: Path | None = None
 
     @classmethod
     def from_env(cls, **override: Any) -> "ServerConfig":
@@ -99,6 +101,8 @@ class ServerConfig:
             cfg.max_response = int(e["FNIRSI_MCP_MAX_RESPONSE"])
         if "FNIRSI_MCP_DATA_DIR" in e:
             cfg.data_dir = Path(e["FNIRSI_MCP_DATA_DIR"])
+        if e.get("FNIRSI_MCP_CAL_FILE"):
+            cfg.cal_file = Path(e["FNIRSI_MCP_CAL_FILE"])
         if e.get("FNIRSI_MCP_LEGACY_IDLE_RELEASE_S"):
             cfg.legacy_idle_release_s = float(e["FNIRSI_MCP_LEGACY_IDLE_RELEASE_S"])
         if "FNIRSI_MCP_AUDIT_LOG" in e:
@@ -177,7 +181,20 @@ class Session:
                 self.scope = Scope.connect(self.cfg.port, max_response=self.cfg.max_response)
             except TransportError as e:
                 raise ToolError(f"cannot connect to the scope at {self.cfg.port!r}: {e}") from e
+            p = self.cal_path()
+            if p.is_file():
+                try:
+                    self.scope.unit_cal = UnitCalibration.load(p)
+                except (OSError, ValueError, KeyError) as e:
+                    log.warning("calibration file %s not usable: %s", p, e)
         return self.scope
+
+    def cal_path(self) -> Path:
+        if self.cfg.cal_file is not None:
+            return Path(self.cfg.cal_file)
+        serial = self.scope.info.serial_str if self.scope is not None else "unit"
+        safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in serial) or "unit"
+        return Path(self.cfg.data_dir) / "cal" / f"{safe}.json"
 
     def drop_connection(self) -> None:
         if self.scope is not None:
@@ -433,16 +450,18 @@ def _volts_per_div_at_probe(rng: int, probe: float) -> float:
 def _channel_summary(s: Scope, ch: int) -> dict[str, Any]:
     cfg = s.get_channel(ch)
     cal = s.get_cal(ch)
+    sc = s.scale(ch, cfg)
     probe = cfg.probe_factor
-    vpl = cfg.volts_per_lsb * probe
-    codes_per_div = P.RANGE_VOLTS_PER_DIV[cfg.range] / cfg.volts_per_lsb if cfg.volts_per_lsb else 0.0
-    offset_codes = cfg.zero_code - 128.0
+    vpl = sc.volts_per_lsb
+    codes_per_div = P.RANGE_VOLTS_PER_DIV[cfg.range] * probe / vpl if vpl else 0.0
+    zero = sc.zero_compensated
+    offset_codes = zero - 128.0
     return {
         "channel": CHANNEL_NAMES[ch], "enabled": bool(cfg.enable), "range_index": cfg.range,
         "volts_per_div": _volts_per_div_at_probe(cfg.range, probe), "hw_range": cfg.hw_range,
         "software_zoom": cfg.range == 6, "coupling": "AC" if cfg.coupling else "DC", "probe": probe,
-        "invert": bool(cfg.invert), "volts_per_lsb": _r6(vpl), "zero_code": _r6(cfg.zero_code),
-        "full_scale_volts": [_r6((0 - cfg.zero_code) * vpl), _r6((255 - cfg.zero_code) * vpl)],
+        "invert": bool(cfg.invert), "volts_per_lsb": _r6(vpl), "zero_code": _r6(zero), "scaling": sc.source,
+        "full_scale_volts": [_r6((0 - zero) * vpl), _r6((255 - zero) * vpl)],
         "offset_div": _r6(offset_codes / codes_per_div) if codes_per_div else 0.0,
         "offset_volts": _r6(-offset_codes * vpl), "dcoffset": cfg.dcoffset, "offset_pwm": cfg.offset_pwm,
         "adc_a_comp": cal.adc_a_comp, "adc_b_comp": cal.adc_b_comp,
@@ -461,9 +480,7 @@ def _timebase_summary(s: Scope) -> dict[str, Any]:
 def _level_volts(s: Scope, src: int, level_code: int) -> float | None:
     if src > 1:
         return None
-    cfg = s.get_channel(src)
-    cal = s.get_cal(src)
-    return float(codes_to_volts(np.array([level_code + cal.adc_a_comp]), cfg)[0])
+    return s.scale(src).volts_for_raw_a(level_code)
 
 
 def _trigger_summary(s: Scope) -> dict[str, Any]:
@@ -480,7 +497,7 @@ def _trigger_summary(s: Scope) -> dict[str, Any]:
            "auto_timeout_s": _r6(tr.auto_timeout * 2 * tb.dt), "holdoff": tr.holdoff}
     if tr.source <= 1:
         cfg = s.get_channel(tr.source)
-        out["level_step_volts"] = _r6(cfg.volts_per_lsb * cfg.probe_factor)
+        out["level_step_volts"] = _r6(s.scale(tr.source, cfg).gain_a * cfg.probe_factor)
     return out
 
 
@@ -520,7 +537,8 @@ def _channel_result(cap: Capture, name: str, inline_max: int) -> dict[str, Any]:
     out: dict[str, Any] = {k: _r6(v) for k, v in st.items()}
     out.update({"frequency": _r6(fr["frequency"]) if fr["frequency"] else None,
                 "duty": _r6(fr["duty"]) if fr["duty"] is not None else None,
-                "clipped_samples": int(ch.clipped.sum()), "volts_per_lsb": _r6(ch.volts_per_lsb)})
+                "clipped_samples": int(ch.clipped.sum()), "volts_per_lsb": _r6(ch.volts_per_lsb),
+                "scaling": ch.scale.source if ch.scale is not None else "firmware"})
     return out
 
 
@@ -984,9 +1002,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     raise ValueError("level in volts needs source CH1 or CH2")
                 v = parse_quantity(level, "V")
                 cfg = s.get_channel(eff_src, cached=False)
-                cal = s.get_cal(eff_src)
-                processed = volts_to_code(v, cfg)
-                raw = round(processed - cal.adc_a_comp)
+                raw = round(s.scale(eff_src, cfg).raw_a_for_volts(v))
                 code = int(min(255, max(0, raw)))
                 if raw != code:
                     cav.append(f"level {v:g} V is outside the channel's range; clamped to code {code}")
@@ -1286,7 +1302,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 raise ToolError(f"{tool}: no capture triggered within {timeout_s} s each ({dropped} dropped); "
                                 "check the trigger with scope_get_config")
             for c, v in acc.items():
-                means[CHANNEL_NAMES[c]] = codes_to_volts(v / used, cctx.channels[c])
+                means[CHANNEL_NAMES[c]] = s.scale(c, cctx.channels[c]).volts_mean_compensated(v / used)
             tt = (a + np.arange(cnt) - pre) * dt
             return {"mode": "device", "t": tt, "mean": means, "std": None, "clipped_any": None,
                     "n_used": used, "n_dropped": dropped, "drop_reasons": {"no_trigger": dropped},
@@ -1758,6 +1774,109 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             return out
         return await run("scope_measure", 1 if capture else 0, args, go)
 
+    @register(2, title="Calibrate volts with a known DC voltage")
+    async def scope_calibrate_volts(
+        channel: Annotated[Literal["CH1", "CH2"], Field(description="channel the known voltage is connected to")],
+        applied_volts: Annotated[float | str, Field(description="the DC voltage at the probe tip, read with a DMM "
+                                                                "(0 V = input shorted), e.g. 0.3 or '1V'")],
+        ranges: Annotated[list[int] | None, Field(description="range indexes 0..6 to measure (default all); ranges "
+                                                              "where the voltage clips are skipped")] = None,
+        captures: Annotated[int, Field(ge=1, le=64, description="captures averaged per range")] = 4,
+        reset: Annotated[bool, Field(description="drop this channel's stored points first")] = False,
+    ) -> dict[str, Any]:
+        """Measure a known DC voltage on every range and fit the per-unit voltage calibration (bench test T8):
+        per range and ADC core the raw code of 0 V, volts per code and the offset-PWM slope, from all points stored
+        so far. Points accumulate across calls: use at least two voltages (e.g. 0 V and about 3 divisions of the
+        most sensitive range in use) and, to model moving the trace, the same voltage at two trace offsets. The fit
+        is saved to the calibration file and used for every conversion from then on (results say scaling=
+        'unit-calibration').
+
+        Switches the channel's range relays; the range and the trigger mode are restored afterwards. The channel
+        must be DC coupled and the voltage steady DC: ranges with a ripple above 4 codes are skipped."""
+        args = {"channel": channel, "applied_volts": applied_volts, "ranges": ranges, "captures": captures,
+                "reset": reset}
+
+        def go() -> dict[str, Any]:
+            notes = sess.ensure_control()
+            s = sess.get_scope()
+            ch = channel_index(channel)
+            v_tip = parse_quantity(applied_volts, "V")
+            rr = list(range(7)) if ranges is None else sorted(set(int(r) for r in ranges))
+            if any(not 0 <= r <= 6 for r in rr):
+                raise ValueError("ranges must be 0..6")
+            saved_ch = s.get_channel(ch, cached=False)
+            if saved_ch.coupling != 0:
+                raise ValueError(f"{channel} is AC coupled; calibrate with DC coupling (scope_set_channel "
+                                 f"coupling='DC')")
+            saved_tr = s.get_trigger(cached=False)
+            path = sess.cal_path()
+            cal = s.unit_cal or UnitCalibration.load_or_new(path, s.info.serial_str)
+            if reset:
+                cal.points = [p for p in cal.points if p["channel"] != ch]
+            v_bnc = v_tip / saved_ch.probe_factor
+            rows, skipped = [], []
+            try:
+                if saved_tr.mode != 0:
+                    s.set_trigger(mode=0)
+                for r in rr:
+                    if min(r, 5) != min(s.get_channel(ch).range, 5):
+                        sess.relay_slot()
+                    s.set_channel(ch, range_index=r)
+                    cfg = s.get_channel(ch, cached=False)
+                    calr = s.get_cal(ch)
+                    fw = s.scale(ch, cfg) if s.unit_cal is None or not s.unit_cal.has(ch, r) else None
+                    a_m, b_m, a_s, b_s = [], [], [], []
+                    for _ in range(captures):
+                        cap = s.capture([channel], 2.0, keep_raw=True)
+                        if cap is None:
+                            raise ToolError("scope_calibrate_volts: no capture completed in auto mode")
+                        cd = cap.channels[channel]
+                        a_m.append(float(cd.raw_a.mean()))  # type: ignore[union-attr]
+                        b_m.append(float(cd.raw_b.mean()))  # type: ignore[union-attr]
+                        a_s.append(float(cd.raw_a.std()))  # type: ignore[union-attr]
+                        b_s.append(float(cd.raw_b.std()))  # type: ignore[union-attr]
+                    ma, mb = float(np.mean(a_m)), float(np.mean(b_m))
+                    ripple = max(np.mean(a_s), np.mean(b_s))
+                    if not (3 <= ma <= 252 and 3 <= mb <= 252):
+                        skipped.append({"range": r, "reason": "clipped", "meanA": _r6(ma), "meanB": _r6(mb)})
+                        continue
+                    if ripple > 4:
+                        skipped.append({"range": r, "reason": f"not steady DC (std {ripple:.1f} codes)"})
+                        continue
+                    cal.add_point(channel=ch, range_index=r, offset_pwm=cfg.offset_pwm, volts=v_bnc, meanA=ma,
+                                  meanB=mb, fw_volts_per_lsb=cfg.volts_per_lsb, dc_shift_value=calr.dc_shift_value,
+                                  source=f"scope_calibrate_volts {_dt.datetime.now().isoformat(timespec='seconds')}")
+                    row: dict[str, Any] = {"range": r, "offset_pwm": cfg.offset_pwm, "meanA": _r6(ma),
+                                           "meanB": _r6(mb), "std": _r6(float(ripple))}
+                    if fw is not None:
+                        fwv = (fw.volts_raw(np.array([ma]), "A")[0] + fw.volts_raw(np.array([mb]), "B")[0]) / 2
+                        row["firmware_formula_volts"] = _r6(float(fwv))
+                    rows.append(row)
+            finally:
+                s.set_channel(ch, range_index=saved_ch.range)
+                if saved_tr.mode != 0:
+                    s.set_trigger(mode=saved_tr.mode)
+            cal.unit = cal.unit or s.info.serial_str
+            cal.refit()
+            saved = cal.save(path)
+            s.unit_cal = cal
+            for row in rows:
+                f_a = cal.core_fit(ch, row["range"], "A")
+                f_b = cal.core_fit(ch, row["range"], "B")
+                if f_a and f_b:
+                    row["fit"] = {"A": f_a.to_dict(), "B": f_b.to_dict()}
+            cav = list(notes) + [f"calibration saved to {saved}; {len(cal.points)} points in the file"]
+            if skipped:
+                cav.append(f"{len(skipped)} range(s) skipped: {skipped}")
+            n_volts = len({round(p['volts'], 4) for p in cal.points if p['channel'] == ch})
+            if n_volts < 2:
+                cav.append("only one voltage stored for this channel: zeros are fitted, gains stay the firmware's; "
+                           "add a second voltage")
+            return {"ok": True, "channel": channel, "applied_volts": v_tip, "measured": rows, "skipped": skipped,
+                    "calibration_file": str(saved), "fit": describe_cal(cal),
+                    "applied": {"points": len(cal.points)}, "caveats": cav}
+        return await run("scope_calibrate_volts", 2, args, go)
+
     # ---- tier 3: output ----------------------------------------------------------------------------------
 
     @register(3, title="Square-wave generator", destructive=True, open_world=True)
@@ -1934,8 +2053,7 @@ def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
     try:
         s.set_channel(0, enable=True, range_index=1, coupling=0, dcoffset=0, probe_index=1)  # 2.5 V/div at 1x
         cfg = s.get_channel(0)
-        cal = s.get_cal(0)
-        mid = int(round(volts_to_code(1.65, cfg) - cal.adc_a_comp))
+        mid = int(round(s.scale(0, cfg).raw_a_for_volts(1.65)))
         prof = s.profile()
         total = 8000 if prof.programmable else 3000  # >= 4 periods of 10 kHz at 20 MS/s
         pre = total // 2
@@ -2069,6 +2187,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--enable-raw", action="store_true", default=None, help="allow tier 4 (raw FPGA, FEL)")
     ap.add_argument("--data-dir", type=Path, help="where .npz files go (env FNIRSI_MCP_DATA_DIR)")
     ap.add_argument("--audit-log", type=Path, help="JSONL audit log (env FNIRSI_MCP_AUDIT_LOG)")
+    ap.add_argument("--cal-file", type=Path, help="per-unit voltage calibration file (env FNIRSI_MCP_CAL_FILE; "
+                    "default <data-dir>/cal/<serial>.json, loaded if present)")
     ap.add_argument("--max-response", type=int, help="largest response payload requested in one frame; larger "
                     "reads are split. Default: the device limit; "
                     "0 = always the device limit (env FNIRSI_MCP_MAX_RESPONSE)")
@@ -2080,7 +2200,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO if a.verbose else logging.WARNING, stream=sys.stderr,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     cfg = ServerConfig.from_env(port=a.port, max_tier=a.max_tier, enable_raw=a.enable_raw, data_dir=a.data_dir,
-                                audit_log=a.audit_log, max_response=a.max_response)
+                                audit_log=a.audit_log, max_response=a.max_response, cal_file=a.cal_file)
     preload_native_modules()
     sim = None
     if a.sim is not None:

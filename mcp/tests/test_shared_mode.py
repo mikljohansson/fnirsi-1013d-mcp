@@ -240,3 +240,12 @@ def test_set_acq_state_during_a_pending_wait_aborts_it(sim_factory):
 def test_link_stats_has_the_0_2_0_counters(scope):
     ls = scope.link_stats()
     assert "first_poll_ms" in ls and "first_pass_ms" in ls and len(ls) == 29
+
+
+def test_read_trace_count_is_clipped_on_1_3(sim, scope):
+    """fw 0.2.1 clips a count past the end (0.1.7 / 0.2.0 answered E_BAD_ARG detail 8, see test_simulator_scope)."""
+    hdr = P.ReadTraceHeader.unpack(scope.t.request(P.Cmd.READ_TRACE, P.ReadTraceReq(1, 0, 2990, 50).pack()).payload)
+    assert hdr.sample_count == 3000 and hdr.count == 10
+    with pytest.raises(DeviceError) as e:
+        scope.t.request(P.Cmd.READ_TRACE, P.ReadTraceReq(1, 0, 3001, 0).pack())
+    assert e.value.status == P.Status.E_BAD_ARG and e.value.detail == 4

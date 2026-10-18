@@ -32,13 +32,16 @@ from typing import Any, Callable, Iterable
 import numpy as np
 
 from . import protocol as P
+from .calibration import ChannelScale, UnitCalibration, channel_scale
 from .transport import DeviceError, Transport, TransportError, connect as _connect
 
 CHANNEL_NAMES = ("CH1", "CH2")
 
 #: Static caveats (docs/mcp-tools.md section 3).
-SCALING_CAVEAT = ("Absolute volts use the firmware's uv_per_lsb/zero_code formula (protocol 8.5), not yet "
-                  "verified against a reference voltage (bench test T8).")
+SCALING_CAVEAT = ("Absolute volts use the per-unit calibration when one covers the channel's range (field "
+                  "'scaling' = 'unit-calibration'), else the firmware's uv_per_lsb/zero_code formula, whose zero was "
+                  "off by ~2 codes (and more with the trace moved) on the owner's unit (T8). scope_calibrate_volts "
+                  "with a known DC voltage fixes the zero per range and ADC core.")
 
 
 def channel_index(ch: str | int) -> int:
@@ -65,9 +68,13 @@ class ChannelData:
     config: P.ChannelConfig
     raw_a: np.ndarray | None = None
     raw_b: np.ndarray | None = None
+    #: the conversion used for ``volts`` (per-unit calibration or the firmware formula)
+    scale: ChannelScale | None = None
 
     @property
     def volts_per_lsb(self) -> float:
+        if self.scale is not None:
+            return self.scale.volts_per_lsb
         return self.config.volts_per_lsb * self.config.probe_factor
 
 
@@ -209,6 +216,8 @@ class Scope:
         self._cache_seq: int | None = None
         #: last status-shaped answer
         self.last_status: P.StatusResp | None = None
+        #: per-unit, per-core voltage calibration (bench test T8); None = the firmware formula
+        self.unit_cal: UnitCalibration | None = None
 
     # --- lifecycle ---------------------------------------------------------------------------------------
 
@@ -217,8 +226,11 @@ class Scope:
         """``max_response``: optional cap on one response payload (larger reads are split); None or 0 = the
         device limit (``max_response_payload``). The 8 KiB Windows default was dropped after the fw 0.1.6/0.1.7
         RX fix passed the census (2000 PINGs + 100 x 64 KiB, retries off, 0 errors)."""
+        cal_file = kw.pop("cal_file", None)
         s = cls(_connect(url, **kw), max_response=max_response or None)
         s.identify()
+        if cal_file:
+            s.unit_cal = UnitCalibration.load(cal_file)
         return s
 
     def close(self) -> None:
@@ -458,6 +470,12 @@ class Scope:
                 r.total_samples = cur.total_samples
         self._trig = P.Trigger.unpack(self._req(P.Cmd.SET_TRIGGER, r.pack()))
         return self._trig
+
+    def scale(self, ch: int | str, cfg: P.ChannelConfig | None = None) -> ChannelScale:
+        """Code <-> volt conversion for a channel with ``cfg`` (default: the current settings), per ADC core: the
+        per-unit calibration when it covers the range, else the firmware's uv_per_lsb / zero_code."""
+        c = channel_index(ch)
+        return channel_scale(c, cfg or self.get_channel(c), self.get_cal(c), self.unit_cal)
 
     def get_cal(self, ch: int | str, cached: bool = True) -> P.CalResp:
         c = channel_index(ch)
@@ -742,11 +760,12 @@ class Scope:
             off = start_sample - 2 * w0
             codes = comp[off: off + count].astype(np.float64)
             clipped = clip_raw[off: off + count]
-            volts = codes_to_volts(codes, cfg)
+            sc = self.scale(c, cfg)
+            volts = interleave(sc.volts_raw(a, "A"), sc.volts_raw(b, "B"), order)[off: off + count]
             if cfg.invert:
                 volts = -volts  # invert is a display option; codes stay as sampled
             out[CHANNEL_NAMES[c]] = ChannelData(CHANNEL_NAMES[c], codes, volts, clipped, cfg,
-                                                a.copy() if keep_raw else None, b.copy() if keep_raw else None)
+                                                a.copy() if keep_raw else None, b.copy() if keep_raw else None, sc)
         shared = ci is not None or st.shared or self.shared
         origin = ORIGIN_NAMES.get(st.capture_origin, "host") if shared else "remote"
         return Capture(hdr.capture_id, tb.dt, tb.divider, start_sample, trig.pretrigger_samples, total,
@@ -773,11 +792,18 @@ class Scope:
             trig = self.get_trigger(cached=False)
             cfgs = {c: self.get_channel(c, cached=False) for c in data}
         out: dict[str, ChannelData] = {}
+        order = self.info.interleave_order
         for c, (meta, arr) in data.items():
             cfg = cfgs[c]
             codes = arr.astype(np.float64)
             clipped = (arr == 0) | (arr == 255)
-            out[CHANNEL_NAMES[c]] = ChannelData(CHANNEL_NAMES[c], codes, codes_to_volts(codes, cfg), clipped, cfg)
+            sc = self.scale(c, cfg)
+            # trace sample i: index parity (with the start offset) says which core it came from (protocol 7.3)
+            idx = hdr.start + np.arange(codes.size)
+            first_is_b = order == 0
+            is_b = (idx % 2 == 0) == first_is_b
+            volts = np.where(is_b, sc.volts_compensated(codes, "B"), sc.volts_compensated(codes, "A"))
+            out[CHANNEL_NAMES[c]] = ChannelData(CHANNEL_NAMES[c], codes, volts, clipped, cfg, scale=sc)
         dt = (hdr.divider + 1) / P.BASE_CLOCK_HZ
         if ci is not None:
             h = ci.header
