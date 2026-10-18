@@ -309,3 +309,7 @@ Newest entries at the bottom. Format: date, who, what, result.
 - A/B on 0x1533: fw 0.2.11 (no EXT code) in RAM: 3 bench passes, 300 x 64 KiB, 0 failed, no resets. => the bitstream is fine; the drops come
   from firmware code gated on fpga >= 0x1533 (EXT support since 0.2.9); suspect: GET_STATUS reading FPGA cmd 0x28 from the fast path (ISR) while
   the main loop uses the Port E bus. With fw-gen4 (0.2.22). 0.2.21 (fallback removed, 6be6f9e8) being checked on 0x1533 next.
+- 0.2.21 (fw-gen4, commit 1a893a9, sha256 6be6f9e8..., pinned with ELF; tick fallback removed, counters 47/57 retired) FEL-loaded on 0x1533:
+  4 bench passes, 400 x 64 KiB, 0 failed, no resets, event log only DTR edges. Weakens the EXT/0x28 theory: the 0.2.20 drops came after a
+  COLD boot from the card with USB plugged in later (six suspend events in one ms at plug-in), every clean run was a FEL load with USB attached.
+  **0.2.21 persisted to the card** (backup sd_750-1522_20261018-192445.bin = 0.2.20 image) for a cold-boot test with the owner.
