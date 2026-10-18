@@ -1824,7 +1824,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     s.set_channel(ch, range_index=r)
                     cfg = s.get_channel(ch, cached=False)
                     calr = s.get_cal(ch)
-                    fw = s.scale(ch, cfg) if s.unit_cal is None or not s.unit_cal.has(ch, r) else None
+                    pre = s.scale(ch, cfg)  # the conversion before this point (to report the error it had)
                     a_m, b_m, a_s, b_s = [], [], [], []
                     for _ in range(captures):
                         cap = s.capture([channel], 2.0, keep_raw=True)
@@ -1845,12 +1845,13 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                         continue
                     cal.add_point(channel=ch, range_index=r, offset_pwm=cfg.offset_pwm, volts=v_bnc, meanA=ma,
                                   meanB=mb, fw_volts_per_lsb=cfg.volts_per_lsb, dc_shift_value=calr.dc_shift_value,
-                                  source=f"scope_calibrate_volts {_dt.datetime.now().isoformat(timespec='seconds')}")
+                                  source=f"scope_calibrate_volts {_dt.datetime.now().isoformat(timespec='seconds')}",
+                                  center_cal=calr.dc_calibration_offset[r])
                     row: dict[str, Any] = {"range": r, "offset_pwm": cfg.offset_pwm, "meanA": _r6(ma),
                                            "meanB": _r6(mb), "std": _r6(float(ripple))}
-                    if fw is not None:
-                        fwv = (fw.volts_raw(np.array([ma]), "A")[0] + fw.volts_raw(np.array([mb]), "B")[0]) / 2
-                        row["firmware_formula_volts"] = _r6(float(fwv))
+                    prev = (pre.volts_raw(np.array([ma]), "A")[0] + pre.volts_raw(np.array([mb]), "B")[0]) / 2
+                    row["volts_before"] = _r6(float(prev))
+                    row["scaling_before"] = pre.source
                     rows.append(row)
             finally:
                 s.set_channel(ch, range_index=saved_ch.range)

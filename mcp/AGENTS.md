@@ -25,7 +25,7 @@ context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/p
 | `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points -> least-squares fit of zero, 1/gain, PWM slope per channel/range/core; JSON file), `ChannelScale`/`channel_scale` (raw, compensated, mean and trigger-level conversions; firmware formula fallback), `import_t8` + CLI for the lead's `backups/t8_*.json`. |
 | `units.py` | `parse_quantity("100us")`, `fmt_si`. |
 
-Tests in `tests/` (204, incl. `test_calibration`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
+Tests in `tests/` (205, incl. `test_calibration`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
 (resend, resync, #RESET, 1.1/1.2 fields, timeouts, paused responses), `test_serial_link` (no-reconfigure rule,
 fake pyserial), `test_simulator_scope`, `test_shared_mode` (1.3 semantics through `Scope`), `test_firmware_match`
 (protocol.md section 14 items), `test_server` (every tool in-process, collaborative restarts, legacy fallback),
@@ -151,11 +151,16 @@ to the JSONL audit log; waveforms go to `.npz` under the data dir.
   `uv_per_lsb_q8` / `zero_code_q8` minus the per-core comp. Captures (READ_RAW) convert each core's raw codes;
   READ_TRACE by sample parity (compensated codes); ACQUIRE_AVG means with the cores' mean zero/gain; trigger levels
   in volts go through core A's model. T8 (fw 0.1.7, CH1, dcoffset 44): gains within ~1 %, zeros A ~121.0 /
-  B ~116.0 raw on every range vs the firmware's 116.57 on the compensated mean. CalResp adc_*_rawavg are only the
-  last readout (1.00o5 overwrites them), not a calibration. Open: the offset-PWM slope (1.00o5 calibration measures
-  a per-range step but stores only the centre); the lead is taking 0 V at several dcoffsets. Until then the slope
-  is the firmware's -100/dc_shift_value, so a unit calibration is only exact near the offset it was taken at. Time: `(i - pretrigger_samples) x dt`, t = 0 at the core-B sample of the trigger
-  word (T5 pending, +-2 samples).
+  B ~116.0 raw on every range vs the firmware's 116.57 on the compensated mean. Offset sweep (0 V, dcoffset
+  0/+-44/+100, ranges 0..5): slope -0.264 (A) / -0.260 (B) codes per count on every range (firmware -100/385 =
+  -0.260), so the offset is injected after the attenuator; 0 V at dcoffset 0 is A 132.5 / B 127.1 (firmware
+  assumes 128 on the compensated mean, i.e. 129.75 vs 128 plus a 5.5-code A/B spread vs the comps' 4). Besides
+  the per-range fit, `UnitCalibration.channel_fit` holds the per-core channel model `zero = Z + slope x dcoffset`
+  (dcoffset = offset_pwm - dc_calibration_offset[range]); it lends its slope to ranges measured at one offset and
+  converts ranges without points (firmware gain). CalResp adc_*_rawavg are only the last readout (1.00o5
+  overwrites them), not a calibration. The owner's file `data/cal/1013D-0001.json` (gitignored) was built from
+  the four `../backups/t8*_CH1_*.json` files with `python -m fnirsi1013d.calibration --import ... --unit
+  1013D-0001 --out data/cal/1013D-0001.json`; CH2 has no points yet (firmware formula).
 - `scope_averaged_capture`: host averaging (Welford mean/std, clipped-any mask) or device ACQUIRE_AVG (only
   hardware alignment, no clip rejection, must fit one response). Edge alignment: per capture the crossing of
   `align_channel` at `align_level` nearest the trigger (+-12 samples), linear interpolation, then a fractional
@@ -217,10 +222,10 @@ reload: announce "about to reload with <image> for <reason>", wait for the lead'
 6. Adopt ACQUIRE_AVG / READ_SCREEN / READ_LIVE on hardware when the firmware ships them (simulator already
    implements them; check payload layouts against the firmware first).
 7. MCP progress for long averaged runs works in-process; verify with Claude Code over stdio.
-9. T8: when the lead's 0 V dcoffset sweep arrives, import it (`python -m fnirsi1013d.calibration --import ...
-   --out mcp/data/cal/1013D-0001.json`), check the fitted slopes per range/core, then re-check the owner's
-   calibration-pin square wave (expect ~0 / 3.3 V). Do not install a file fitted at one offset for the owner: it
-   extrapolates with the firmware slope.
+9. T8 follow-ups: CH2 points (one shorted-input `scope_calibrate_volts` per offset is enough for the channel
+   model); the lead's open square-wave discrepancy (calibration-pin 0..3.3 V read as about -1.1 / +2 V on ranges
+   1 and 3 with DC coupling, while bench DC reads right): analyse the raw per-core codes when they arrive.
+   Firmware idea for fw-gen2: base calibration could store the measured per-core 0 V codes.
 8. Collaborative mode on hardware (fw 0.2.1, sha256 ca0b6d11...; 0.2.0 is superseded): run the plan's bench acceptance list (docs/plans/collaborative-
    mode.md) through the tools; check the RUN-mode READ_RAW hold (a full 4-core read is now one response); measure the per-request cost in shared mode
    (every main-loop command waits for a UI pass) and, if averaging is slow, consider a host ARM loop without

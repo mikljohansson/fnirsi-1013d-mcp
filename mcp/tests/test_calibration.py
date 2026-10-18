@@ -150,3 +150,26 @@ def test_trigger_level_and_trace_use_the_calibration(sim_factory, tmp_path):
         assert sc.volts_for_raw_a(sc.raw_a_for_volts(0.25)) == pytest.approx(0.25)
         tr = s.read_trace_capture(["CH1"])  # processed trace, compensated codes, per-core by sample parity
         assert float(np.mean(tr.channels["CH1"].volts)) == pytest.approx(0.3, abs=0.01)
+
+
+def test_channel_model_fills_slope_and_unmeasured_ranges():
+    """T8 offset sweep: the slope and the 0 V code at dcoffset 0 are the same on every range (offset injected
+    after the attenuator), so a range measured at one offset borrows the slope and an unmeasured range uses Z."""
+    cal = UnitCalibration()
+    kw = dict(channel=0, fw_volts_per_lsb=0.0345, dc_shift_value=385)
+    for dco in (0, 44, -44):  # range 2: 0 V at three offsets, centre 864
+        cal.add_point(range_index=2, offset_pwm=864 + dco, volts=0.0, meanA=132.5 - 0.265 * dco,
+                      meanB=127.0 - 0.265 * dco, center_cal=864, **kw)
+    cal.add_point(range_index=4, offset_pwm=908, volts=0.0, meanA=132.5 - 0.265 * 44, meanB=127.0 - 0.265 * 44,
+                  center_cal=864, **kw)  # range 4: one offset only
+    cal.refit()
+    assert cal.core_fit(0, 4, "A").slope == pytest.approx(-0.265, abs=1e-6)
+    cm = cal.channel_fit[0]
+    assert cm["A"]["Z"] == pytest.approx(132.5, abs=1e-3) and cm["B"]["Z"] == pytest.approx(127.0, abs=1e-3)
+
+    class CalR(Cal):
+        dc_calibration_offset = (860, 856, 864, 859, 864, 859, 859)
+    sc = channel_scale(0, Cfg(5, 859 + 100, 882759), CalR(), cal)  # range 5 never measured, dcoffset +100
+    assert sc.source.startswith("unit-calibration (channel model")
+    assert sc.zero_a == pytest.approx(132.5 - 26.5, abs=1e-3) and sc.zero_b == pytest.approx(127.0 - 26.5, abs=1e-3)
+    assert sc.gain_a == pytest.approx(882759 / 256e6)

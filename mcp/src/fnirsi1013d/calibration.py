@@ -19,6 +19,12 @@ The file is JSON (``points`` are the raw measurements, ``fit`` is derived from t
       "meanA": 178.42, "meanB": 173.09, "fw_volts_per_lsb": 0.01744, "dc_shift_value": 385, "source": "..."}],
      "fit": {"0": {"3": {"A": {"zero": .., "pwm_ref": .., "slope": .., "gain": .., "n": .., "rms": ..}, "B": ..}}}}
 
+T8 on the owner's unit (fw 0.1.7, CH1, 45 points): slope -0.259..-0.265 codes per count on every range (firmware
+-100/385 = -0.260), gains within 1.5 % of uv_per_lsb, 0 V at dcoffset 0 at A 132.5 / B 127.0 on every range: the
+offset is injected after the attenuator. So besides the per-range fit there is a channel model per core,
+``zero = Z - slope x dcoffset`` with ``dcoffset = offset_pwm - dc_calibration_offset[range]``: it fills in the
+slope of ranges measured at one offset only, and converts ranges with no points at all (gain from the firmware).
+
 CLI: ``python -m fnirsi1013d.calibration --import backups/t8_CH1_*.json --out <file>`` builds a file from the
 lead's T8 dataset. ``--show <file>`` prints the fit.
 """
@@ -75,6 +81,8 @@ class UnitCalibration:
     unit: str = ""
     points: list[dict[str, Any]] = field(default_factory=list)
     fit: dict[int, dict[int, dict[str, CoreFit]]] = field(default_factory=dict)
+    #: per channel and core: {"Z": raw code of 0 V at dcoffset 0, "slope": codes per count, "n_ranges": ...}
+    channel_fit: dict[int, dict[str, dict[str, float]]] = field(default_factory=dict)
     path: Path | None = None
 
     # --- persistence ---------------------------------------------------------------------------------
@@ -98,7 +106,8 @@ class UnitCalibration:
         return {"unit": self.unit, "model": "raw = zero + slope*(offset_pwm - pwm_ref) + volts/gain",
                 "points": self.points,
                 "fit": {str(ch): {str(r): {c: f.to_dict() for c, f in cores.items()} for r, cores in rr.items()}
-                        for ch, rr in self.fit.items()}}
+                        for ch, rr in self.fit.items()},
+                "channel_fit": {str(ch): cores for ch, cores in self.channel_fit.items()}}
 
     def save(self, path: str | Path | None = None) -> Path:
         p = Path(path or self.path or "calibration.json")
@@ -110,14 +119,17 @@ class UnitCalibration:
     # --- fitting -------------------------------------------------------------------------------------
 
     def add_point(self, *, channel: int, range_index: int, offset_pwm: int, volts: float, meanA: float,
-                  meanB: float, fw_volts_per_lsb: float, dc_shift_value: int, source: str = "") -> None:
+                  meanB: float, fw_volts_per_lsb: float, dc_shift_value: int, source: str = "",
+                  center_cal: int | None = None) -> None:
+        """``center_cal`` = dc_calibration_offset[range] (offset_pwm at dcoffset 0), for the channel model."""
         self.points.append({"channel": int(channel), "range": int(range_index), "offset_pwm": int(offset_pwm),
                             "volts": float(volts), "meanA": float(meanA), "meanB": float(meanB),
                             "fw_volts_per_lsb": float(fw_volts_per_lsb), "dc_shift_value": int(dc_shift_value),
-                            "source": source})
+                            "center_cal": None if center_cal is None else int(center_cal), "source": source})
 
     def refit(self) -> None:
         self.fit = {}
+        self.channel_fit = {}
         groups: dict[tuple[int, int], list[dict[str, Any]]] = {}
         for p in self.points:
             groups.setdefault((p["channel"], p["range"]), []).append(p)
@@ -126,6 +138,27 @@ class UnitCalibration:
                 f = _fit_core(pts, core)
                 if f is not None:
                     self.fit.setdefault(ch, {}).setdefault(rng, {})[core] = f
+        # channel model: the slope is range-independent; ranges fitted at one offset borrow the measured one
+        for ch, rr in self.fit.items():
+            for core in CORES:
+                fits = [(rng, cores[core]) for rng, cores in rr.items() if core in cores]
+                slopes = [f.slope for _, f in fits if f.slope_measured and f.slope is not None]
+                slope = float(np.median(slopes)) if slopes else None
+                if slope is not None:
+                    for _, f in fits:
+                        if not f.slope_measured:
+                            f.slope = slope
+                zs = []
+                for rng, f in fits:
+                    centers = [p["center_cal"] for p in groups[(ch, rng)] if p.get("center_cal") is not None]
+                    if centers:
+                        s = f.slope if f.slope is not None else fw_slope(np.median(
+                            [p["dc_shift_value"] for p in groups[(ch, rng)]]))
+                        zs.append(f.zero + s * (float(np.median(centers)) - f.pwm_ref))
+                if zs:
+                    self.channel_fit.setdefault(ch, {})[core] = {
+                        "Z": round(float(np.median(zs)), 4), "slope": None if slope is None else round(slope, 5),
+                        "n_ranges": len(zs), "spread": round(float(np.ptp(zs)), 4)}
 
     def core_fit(self, channel: int, range_index: int, core: str) -> CoreFit | None:
         return self.fit.get(channel, {}).get(range_index, {}).get(core)
@@ -133,6 +166,9 @@ class UnitCalibration:
     def has(self, channel: int, range_index: int) -> bool:
         r = self.fit.get(channel, {}).get(range_index, {})
         return all(c in r for c in CORES)
+
+    def has_channel(self, channel: int) -> bool:
+        return all(c in self.channel_fit.get(channel, {}) for c in CORES)
 
 
 def _fit_core(pts: list[dict[str, Any]], core: str) -> CoreFit | None:
@@ -229,13 +265,18 @@ def channel_scale(ch: int, cfg: Any, cal_resp: Any, unit: UnitCalibration | None
     ca, cb = int(cal_resp.adc_a_comp), int(cal_resp.adc_b_comp)
     probe = cfg.probe_factor
     fw_g = cfg.volts_per_lsb
+    fs = fw_slope(getattr(cal_resp, "dc_shift_value", 0))
     if unit is not None and unit.has(ch, cfg.range):
-        fs = fw_slope(getattr(cal_resp, "dc_shift_value", 0))
         fa = unit.core_fit(ch, cfg.range, "A")
         fb = unit.core_fit(ch, cfg.range, "B")
         assert fa is not None and fb is not None
         return ChannelScale(fa.zero_at(cfg.offset_pwm, fs), fb.zero_at(cfg.offset_pwm, fs), fa.gain or fw_g,
                             fb.gain or fw_g, ca, cb, probe, "unit-calibration")
+    centers = getattr(cal_resp, "dc_calibration_offset", ())
+    if unit is not None and unit.has_channel(ch) and cfg.range < len(centers):
+        dco = cfg.offset_pwm - centers[cfg.range]
+        za, zb = (unit.channel_fit[ch][c]["Z"] + (unit.channel_fit[ch][c]["slope"] or fs) * dco for c in CORES)
+        return ChannelScale(za, zb, fw_g, fw_g, ca, cb, probe, "unit-calibration (channel model, firmware gain)")
     z = cfg.zero_code
     return ChannelScale(z - ca, z - cb, fw_g, fw_g, ca, cb, probe, "firmware")
 
@@ -258,7 +299,8 @@ def import_t8(files: Iterable[str | Path], cal: UnitCalibration | None = None) -
                 continue
             cal.add_point(channel=ch, range_index=r["range"], offset_pwm=r["offset_pwm"], volts=d["applied_volts"],
                           meanA=r["meanA"], meanB=r["meanB"], fw_volts_per_lsb=r["uv_per_lsb_q8"] / 256 * 1e-6,
-                          dc_shift_value=dsv, source=f"T8 {Path(f).name} fw {d.get('fw', '?')}")
+                          dc_shift_value=dsv, source=f"T8 {Path(f).name} fw {d.get('fw', '?')}",
+                          center_cal=r.get("center_cal"))
     cal.refit()
     return cal
 
@@ -277,6 +319,10 @@ def describe(cal: UnitCalibration) -> list[str]:
                 s = f"{f.slope:+.3f}/count" if f.slope is not None else "fw slope"
                 parts.append(f"{c}: zero {f.zero:.2f} @pwm {f.pwm_ref:.0f}, {g}, {s}, n={f.n}, rms {f.rms:.2f}")
             out.append(f"CH{ch + 1} range {rng}: " + "; ".join(parts))
+    for ch, cores in sorted(cal.channel_fit.items()):
+        out.append(f"CH{ch + 1} channel model (zero = Z + slope x dcoffset): " + "; ".join(
+            f"{c}: Z {v['Z']:.2f}, slope {v['slope'] if v['slope'] is not None else 'fw'}, over {v['n_ranges']} "
+            f"ranges (spread {v['spread']:.2f})" for c, v in sorted(cores.items())))
     return out
 
 
