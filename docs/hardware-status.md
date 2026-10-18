@@ -560,3 +560,19 @@ Newest entries at the bottom. Format: date, who, what, result.
 - fpga-gen4 on the decimation bench's unexplained 100 kHz residual (CIC2 -30, CIC3 -36 dBV with the 900 kHz square): it is the DDS
   generator's own 100 kHz spur (50 MHz DDS clock, 20 ns edge grid, pattern repeats every 9 periods = 10 us), about -37.5 dBV at 3.1 Vpp,
   reproduced by the model (CIC2 -31.1, CIC3 -39.0 dBV). The filters perform as modelled. Future alias tests use 50 MHz / M, M even.
+
+### 2026-10-19 night: 0.2.45 and 0.2.46 built, boot-tested between logger rounds
+
+- fw-cal2 delivered calibration v3 (fw 0.2.45, protocol 1.12, GET_CAL 256 bytes, block v3 at sector 708 bytes 128..431, gain step at the
+  calibration post after the zero step). Merged c20957a, built on main with GCC 10, pinned backups/fw-0.2.45_5b4cc268.bin. Boot test
+  00:17 (between logger rounds, 0.2.44 reloaded afterwards): #VER fw=0.2.45 proto=1.12, census 300 PINGs 0 failures 0.95 ms, GET_CAL
+  256 bytes with version 1 and flags 0x04 on both channels (the card's v2 block is no longer read, as designed: the owner re-runs the
+  base calibration in the morning), GET_DECIM 32 bytes, pass_ms 31.
+- fw-phosphor delivered the digital phosphor view (fw 0.2.46, protocol 1.13, GET_STATUS display_mode 4, settings word 210). Merged
+  2e73d28 (conflicts: version numbers, CHANGELOG, protocol rows 51/52, AGENTS.md; both kept), built on main, pinned
+  backups/fw-0.2.46_49a7989b.bin (fw-phosphor's branch image cdba5b51 unpinned). Host tests 7/7 files 0 failures, vectors OK. Boot test
+  00:27: #VER fw=0.2.46 proto=1.13, census 300/0 at 0.94 ms, GET_STATUS 44 bytes with display_mode 0, GET_CAL version 1, pass_ms 31, a
+  host capture of both channels (3000 samples) worked; then 0.2.44 reloaded.
+- The overnight logger stays on 0.2.44 (its zero readings depend on the v2 block, which 0.2.45+ ignore). Rounds 0-7 (23:16-00:27):
+  every reopen after 10 minutes with the port closed succeeded; gated CH1 128.0/127.9-128.2 steady, CH2 129.1-129.3 steady; full-rate
+  CH1 127.4-127.7 / 128.0-128.4 (ripple noise of the 8-conversion zeros), CH2 128.8-129.1 / 129.6-129.9.

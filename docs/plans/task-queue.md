@@ -36,7 +36,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   replaced by removal (FFT switch, generator Wave/Ampl/Offset/Phase, Long memory, hold-off, 1014D remnants), unused files,
   check-reference target and reference downloads removed from the Makefile/CI/docs. Do after the spectrum/calibration
   work lands to avoid conflicts.
-- [ ] **Calibration v3: per-core, per-class gain** (fw-cal2, after fw-gen6's 0.2.44 merges): design in firmware/AGENTS.md section 21;
+- [x] **Calibration v3: per-core, per-class gain** (fw-cal2, fw 0.2.45 merged c20957a; bench pending): design in firmware/AGENTS.md section 21;
   3bfc892 (64 full-rate conversions) is merged into main (5effb7d) but unbuilt, goes out with 0.2.44; block v3 376 bytes; owner re-runs
   base calibration; bench with 0 V, 1.0045 V and the -1 V point per class.
 - [x] **Bench: -1 V point on CH1 range 2** (done 10-18 evening, docs/hardware-status.md): one gain per core and class suffices; full-rate
@@ -54,12 +54,22 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   `-fdebug-prefix-map`), check for __DATE__/__TIME__, and make CI's image hash match a local main build. Fold into the dead-code purge.
 - [ ] **CH2 reads +1.0..1.5 codes at range 6 with shorted input right after calibration** (10-18 late): channel offset with the cores
   agreeing; see docs/hardware-status.md late evening and the overnight log. Decide after the log: PWM/relay drift at hw range 5 vs probe.
-- [ ] **Morning bench with the owner (0.2.44)**: spectrum strip repaint loops, generator menu rows, Filter box steps + DEFAULT = CIC2,
-  recalibrate on 0.2.44 (64 full-rate conversions), flash FPGA 0x1535 (backup first) and bench CIC2+FIR (GET_DECIM bytes 26-27 = 0xE2 0x01
-  at 10 MSa/s).
+- [ ] **Morning bench with the owner (load 0.2.46 first, backups/fw-0.2.46_49a7989b.bin)**: (1) back up SD 700-710; base calibration
+  with probes + USB unplugged, then the new gain step with both x1 probes on the post ("Gain calibration successful"); GET_CAL version 3,
+  gains about full A 0.995 / B 1.028, gated 0.998 / 1.002; (2) +-1.0045 V on CH1 range 2: |A-B| <= 0.15 at 200 MSa/s, codes/V equal
+  within 0.2 % across 200 MSa/s / 1 MSa/s / 10 kSa/s / CIC2, volts within 0.5 % of the DMM; fs/2 spur down >= 15 dB; (3) phosphor view
+  visual steps (firmware/AGENTS.md section 24 / README "Phosphor view"), pass_ms in and out of the view; (4) 0.2.44 items: spectrum
+  strip repaint loops, generator menu rows, Filter box steps + DEFAULT = CIC2; (5) flash FPGA 0x1535 (backup first) and bench CIC2+FIR
+  (GET_DECIM bytes 26-27 = 0xE2 0x01 at 10 MSa/s); (6) persist a release candidate to the SD card after a soak.
+- [ ] **16-bit trigger level ignores corr16 and the class gain** (fw-cal2 handoff, section 23): about 1 % level error at full
+  rate in filtered captures. Small firmware fix; add a host test.
+- [ ] **Phosphor fast capture loop** (design study, fw-phosphor section 24): the view draws one record per pass (about 30 wfm/s);
+  a capture loop that reads several records per pass would raise the waveform rate. Measure pass_ms in the view first.
+- [ ] **Gain-per-range check** (fw-cal2 assumption 1, README 6.3 step 7): gains measured on one range are applied to all six; bench
+  CH1 at ranges 1/2/3 with the generator static on the post; if spans disagree beyond 0.3 %, store gains per range (80 bytes free).
 - [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s): deterministic test with
   GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
-- [ ] **Digital phosphor** (roadmap, owner priority 2 after the spectrum analyser): design in docs/plans/dpos350p-features.md
+- [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md
   section 4; XY mode could get intensity grading from the same map.
 - [ ] **Bode / frequency response** (owner priority 3): host tool first, then on-scope; design in the same document.
 
@@ -86,9 +96,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Dispatched
 
-- fw-cal2 (worktree, Opus, started 10-18 23:20): calibration v3 per-core/per-class gain, fw 0.2.45, protocol 1.12, row 51.
-- fw-phosphor (worktree, Opus, started 10-18 23:20): digital phosphor display mode, fw 0.2.46, protocol 1.13, row 52.
-- mcp-gen3: protocol 1.11 host side (FIR bits, event fields, soak --mode reopen).
+- fw-cal2 (retired, about 400k tokens): calibration v3 delivered and merged (c20957a, fw 0.2.45 / 1.12 / row 51); handoff section 23.
+- fw-phosphor (retired, about 430k tokens): phosphor view delivered and merged (2e73d28, fw 0.2.46 / 1.13 / row 52); handoff section 24.
+- mcp-gen3: protocol 1.12 + 1.13 host side (GET_CAL v3 gains in the volts model, DisplayMode 2-4, settings word 210).
 - fw-gen6 (worktree, branch fw-gen6, about 350k tokens, retired): fw 0.2.44 merged into main (463931d, image d4c0b716): 0x1535 FIR
   support, spectrum strip repaint, CIC2 default, USB suspend/resume rework (protocol 1.11, rows 49-50), generator menu hit-area fix.
   Bench by the coordinator in progress.
