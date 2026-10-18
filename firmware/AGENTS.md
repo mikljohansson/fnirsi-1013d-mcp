@@ -630,7 +630,7 @@ Open: the bench list in README "Decimation filter"; TODO 1c (trigger position at
 re-measured with the filter on, since its geometry is exact (no `T + 7441`); mcp/ needs GET_DECIM / SET_DECIM, the
 READ_TRACE WIDE flag and the 76-byte GET_CAPTURE_INFO (message to mcp-gen2).
 
-## 20. Spectrum analyser (fw-gen5, fw 0.2.26-0.2.31)
+## 20. Spectrum analyser (fw-gen5, fw 0.2.26-0.2.40)
 
 Spec and design: docs/plans/dpos350p-features.md section 2; README section 5 "FFT core" and "Spectrum view"; protocol
 section 14 rows 44 (FFT_BENCH) and 45 (READ_SPECTRUM, GET_STATUS byte 43).
@@ -641,16 +641,29 @@ section 14 rows 44 (FFT_BENCH) and 45 (READ_SPECTRUM, GET_STATUS byte 43).
   the sixth main-menu row (`MAIN_MENU_HEIGHT` is runtime in protocol builds), `spectrum_new_data` in the UI capture
   hook and in `pc_hal_trace_build`, `spectrum_service` in `pc_glue_ui_service`.
 - Bench facts: CP15 control 0x0005107C (I-cache on, MMU off, so the D-cache bit is ineffective); about 90 cycles per
-  uncached data access, the stack included; SRAM A only ~25% faster than DDR. That is why the hot loops are assembly.
+  uncached data access, the stack included. With the stack spills gone SRAM A is ~2x faster than DDR, so the view
+  runs N <= 2048 from SRAM A at 0x1000 (FFT_BENCH borrows the same space). That is why the hot loops are assembly
+  (load+stage 1, stages, split, dB conversion). Measured 0.2.37: 4096 points 10.96 ms run + 1.44 ms dB in DDR, 2048
+  points 2.30 ms in SRAM.
   Every change to them: `make -C host_tests test-arm` (qemu-arm, byte-compares with the C twin) and objdump the loop
   for stack traffic. Inline asm with 64-bit operands forces even register pairs and made GCC spill; write whole loops.
 - Settings sector words 208 / 209 belong to the spectrum view (pc_hooks.h PC_SETTING_WORD_SPEC0/1); 207 is the Filter.
 - Constraints: u8 input offset 0..255 (clamped) for the Q22 window trick; i32 input is C only (64-bit products).
   Buffers 8-byte aligned (`fx_fft_init` refuses otherwise).
-- The view: settings in RAM only; N limited by the record (`scopesettings.samplecount`); fs from the UI time base
-  (`sample_rate_settings`), so a host capture with a raw divider is labelled wrong (documented in row 45).
-Open (fw-gen5's list): owner verdict on the 0.2.32 waterfall / density views; the view on 0x1534 once it is flashed (0.2.34 code path: 16-bit records, C load; an assembly u16 load if it
-matters).
+- The view (README "Spectrum view" is the user-facing spec): N 1024..4096 limited by the record; fs from the UI time
+  base, or 200 MHz / N with the 0x1534 filter (16-bit records via `pc_hal_trace16`, `fx_fft_run_u16`); axis capped at
+  `PC_SPECTRUM_FMAX_HZ` (spectrum.h); gestures as the scope view (2 px / 200 ms: tap left/right = span out/in, drag =
+  pan); span drives the time base past the ends (`spec_zoom`, `spec_tb_set` via pc_hal_timebase_write, then
+  `spec.wait` until a capture at the new rate); Auto is a 3-stage state machine (`spec_auto_start` / `spec_auto_step`);
+  Average field (`spec_acc`, keyed restart); waterfall rows RGB565, density count + last-hit capture index (no fading
+  pass). Persisted at power-off: FFT length, window, scale (word 208), ref + averaging (word 209); not the mode.
+  A host capture with a raw divider is labelled with the UI rate (row 45).
+- Owner verdicts so far: spectrum view works, harmonics within 0.4 dB; waterfall "very nice"; density band fixed in
+  0.2.35 (verdict pending); 0.2.35-0.2.40 UX items pending on the screen (header layout, gestures, Auto, averaging).
+Open (fw-gen5's list): owner verdicts on 0.2.35-0.2.40; FPGA 0x1535 FIR support (lead's interface delta: 0x56 bit 0,
+  0x29 bits 6/5, gain (N/2)^K, S + 1, latency/settle formulas; Filter box toggle, SET_DECIM flags bit 3, caps bit 16,
+  protocol 1.11) once the lead confirms fpga-gen4's testbench numbers; an assembly u16 load if the filtered path's
+  speed matters.
 - TODO (lead, later, not fw-gen5's): enable the MMU with a flat 1:1 section map, DDR cacheable, the framebuffers and
   any DMA regions uncached, peripherals strongly ordered. The D-cache bit is already set (CP15 0x0005107C) but does
   nothing without the MMU. Numbers that motivate it: 0.2.27 FFT_BENCH 4096 points 24.3 ms in DDR (~90 cycles per
