@@ -394,3 +394,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   = FFTs up to 2048 points from on-chip SRAM, memset trace clear). Loaded on 0x1533: census clean, pass_ms 52 in scope view. Owner:
   "Looking at the waterfall, very nice!" with the generator stepped 1/2/3 kHz per second. Density view and the Ref-tap history clear
   still to be confirmed. The gesture/Auto/Reset UX request is next for fw-gen5. Card keeps 0.2.25.
+- FPGA 0x1534 final (fpga-gen3, commits 6d4c8ad/65417a8/ca12aea/8445686): 2304 LUT / 1790 reg (0x1533: 635/486), BRAM 32/48, clk_200MHz
+  slack +0.10 ns at the SDC's 40 % duty (~+0.6 ns at the PLL's 50 %), deterministic build, tb seeds all pass (K=0 cycle-identical to
+  0x1533 incl. EXT; decimated samples equal the reference at latency 12; 9 mutations caught). Model: alias rejection at fo/4 10.5 / 20.9 /
+  31.4 dB for K=1/2/3 (skipping: 0 dB), droop 0.9 / 1.8 / 2.7 dB at fo/4, resolution +3.3 / +3.6 / +3.75 bits at N=100. 0x1535 FIR
+  study: a FIR at the output rate cannot fix aliases, so the plan is CIC by N/2 followed by a 15-tap symmetric FIR decimating by 2
+  (flat to fo/4 within 0.08 dB, alias rejection 17 / 34 / 51 dB), one M18x18 per channel, engages at N >= 16, N multiple of 4.
