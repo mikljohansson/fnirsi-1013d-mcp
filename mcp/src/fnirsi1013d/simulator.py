@@ -1399,8 +1399,8 @@ class SimServer:
         elif isinstance(ev, P.Oversize):
             self._send(client, P.response(ev.frame, P.error_payload(0, f"frame over {P.MAX_REQUEST_FRAME}"),
                                           P.Status.E_BAD_LEN))
-        elif isinstance(ev, P.AsciiLine):
-            reply = dev.handle_ascii(ev.text)
+        elif isinstance(ev, (P.AsciiLine, P.AsciiOverflow)):
+            reply = dev.handle_ascii(ev.text) if isinstance(ev, P.AsciiLine) else "#ERR,UNKNOWN"
             try:
                 client.sendall(reply.encode() + b"\n")
             except OSError:

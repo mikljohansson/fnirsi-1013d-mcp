@@ -339,13 +339,18 @@ class AsciiLine:
 
 
 @dataclass(slots=True)
+class AsciiOverflow:
+    """A '#' line longer than ``max_ascii`` characters (after the '#'); the device answers #ERR,UNKNOWN."""
+
+
+@dataclass(slots=True)
 class Garbage:
     """Bytes discarded while hunting for a magic."""
 
     data: bytes
 
 
-ParseEvent = Frame | BadPayloadCrc | BadHeader | Oversize | AsciiLine | Garbage
+ParseEvent = Frame | BadPayloadCrc | BadHeader | Oversize | AsciiLine | AsciiOverflow | Garbage
 
 
 class FrameParser:
@@ -354,8 +359,10 @@ class FrameParser:
     feed() bytes in any chunking and iterate the returned events. ``max_payload`` is the largest payload the
     parser will buffer; a frame with a larger valid header produces an ``Oversize`` event and its
     ``len + 4`` bytes are skipped (resolution of a spec gap, see mcp/README.md). ``ascii_lines`` enables the
-    ``#`` probe (section 10): when the parser is idle a ``#`` starts a line ended by CR or LF, at most 63
-    bytes on the device side (``max_ascii``).
+    ``#`` probe (section 10): when the parser is idle a ``#`` starts a line ended by CR or LF. Every byte up
+    to the terminator belongs to the line (a 0xA5 inside a line does not start a frame). A line with more than
+    ``max_ascii`` characters after the ``#`` (63 on the device, firmware ``PC_ASCII_MAX_LINE``) produces one
+    ``AsciiOverflow`` event when its terminator arrives.
     """
 
     def __init__(self, max_payload: int = MAX_RESPONSE_PAYLOAD, ascii_lines: bool = True,
@@ -365,15 +372,17 @@ class FrameParser:
         self.max_ascii = max_ascii
         self._buf = bytearray()
         self._skip = 0  # bytes still to drain after an Oversize header
+        self._ascii_discard = False  # inside an over-long ASCII line, dropping until CR/LF
 
     def reset(self) -> None:
-        """Discard a partially received frame (call after INTERBYTE_TIMEOUT_S of silence)."""
+        """Discard a partially received frame or line (call after INTERBYTE_TIMEOUT_S of silence)."""
         self._buf.clear()
         self._skip = 0
+        self._ascii_discard = False
 
     @property
     def idle(self) -> bool:
-        return not self._buf and not self._skip
+        return not self._buf and not self._skip and not self._ascii_discard
 
     @property
     def pending_bytes(self) -> int:
@@ -394,22 +403,31 @@ class FrameParser:
                     return
             if not buf:
                 return
+            if self._ascii_discard:
+                end = _find_eol(buf)
+                if end < 0:
+                    buf.clear()
+                    return
+                del buf[: end + 1]
+                self._ascii_discard = False
+                yield AsciiOverflow()
+                continue
             # Hunt for the start of a frame or an ASCII line.
             if buf[0] != MAGIC0:
                 if self.ascii_lines and buf[0] == 0x23:  # '#'
                     end = _find_eol(buf)
                     if end < 0:
-                        if len(buf) > self.max_ascii:
-                            yield AsciiLine(bytes(buf[: self.max_ascii]).decode("ascii", "replace"))
-                            del buf[: self.max_ascii]
-                            continue
+                        if len(buf) - 1 > self.max_ascii:
+                            buf.clear()
+                            self._ascii_discard = True
                         return
+                    if end - 1 > self.max_ascii:
+                        del buf[: end + 1]
+                        yield AsciiOverflow()
+                        continue
                     line = bytes(buf[:end]).decode("ascii", "replace")
-                    # swallow CR, LF or CRLF
-                    stop = end + 1
-                    if buf[end] == 0x0D and stop < len(buf) and buf[stop] == 0x0A:
-                        stop += 1
-                    del buf[:stop]
+                    # the terminator ends the line; a following LF of CR LF is junk like any other byte
+                    del buf[: end + 1]
                     yield AsciiLine(line)
                     continue
                 i = 1

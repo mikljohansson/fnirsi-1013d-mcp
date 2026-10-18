@@ -1181,6 +1181,256 @@
      "event": "frame"
     }
    ]
+  },
+  {
+   "name": "host_resp_get_info_al3",
+   "description": "GET_INFO response, 76 bytes, AL3 0x1532, caps PROG_TRIGGER_POS|GENERATOR_DDS|READ_LAG_UNVERIFIED|INTERLEAVE_UNVERIFIED",
+   "hex": "a51301010200010000004c000000c55f0100000200040100321502080020020200c2eb0b0318000080f0fa02fe3f500000070600302e312e300000000000000000000000cdab3412413142324333443400000000000000002003e001b9716969",
+   "frames": [
+    {
+     "cmd": 2,
+     "seq": 1,
+     "status": 0,
+     "flags": 1,
+     "len": 76,
+     "payload": "0100000200040100321502080020020200c2eb0b0318000080f0fa02fe3f500000070600302e312e300000000000000000000000cdab3412413142324333443400000000000000002003e001"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_status_done",
+   "description": "GET_STATUS response: REMOTE, DONE, flags triggered|done|dtr, capture 42",
+   "hex": "a51301010300050000001c000000d64a01030b002a000000d11941180300000040e201000f00120000000000326cf6cc",
+   "frames": [
+    {
+     "cmd": 3,
+     "seq": 5,
+     "status": 0,
+     "flags": 1,
+     "len": 28,
+     "payload": "01030b002a000000d11941180300000040e201000f00120000000000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_e_bad_crc",
+   "description": "E_BAD_CRC answer with detail 0 and text",
+   "hex": "a51301010100170001000d000000fd0e00007061796c6f616420637263ea7bc2e5",
+   "frames": [
+    {
+     "cmd": 1,
+     "seq": 23,
+     "status": 1,
+     "flags": 1,
+     "len": 13,
+     "payload": "00007061796c6f616420637263"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_e_version",
+   "description": "E_VERSION answer without payload",
+   "hex": "a5130101020018000b000000000074d9",
+   "frames": [
+    {
+     "cmd": 2,
+     "seq": 24,
+     "status": 11,
+     "flags": 1,
+     "len": 0,
+     "payload": ""
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_read_raw_4x4",
+   "description": "READ_RAW response: 4 words x 4 cores, layout 0 (blocks CH1A, CH1B, CH2A, CH2B)",
+   "hex": "a513010104020e000000200000003f252a00000041180020040000000f0003006465666768696a6b6c6d6e6f70717273689fb66f",
+   "frames": [
+    {
+     "cmd": 516,
+     "seq": 14,
+     "status": 0,
+     "flags": 1,
+     "len": 32,
+     "payload": "2a00000041180020040000000f0003006465666768696a6b6c6d6e6f70717273"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_read_raw_trigger_minus_400",
+   "description": "READ_RAW CH1 both cores, interleaved, 400 words before trigger_addr (i32 -400), 1000 words",
+   "hex": "a513010004020f000000100000004c960302010070feffffe803000000000000c89dd0c6",
+   "frames": [
+    {
+     "cmd": 516,
+     "seq": 15,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "0302010070feffffe803000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 516,
+     "seq": 15,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "0302010070feffffe803000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_remote_release_keep",
+   "description": "release with KEEP_SETTINGS",
+   "hex": "a513010004000700000004000000a79f000100002bb58620",
+   "frames": [
+    {
+     "cmd": 4,
+     "seq": 7,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "00010000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 4,
+     "seq": 7,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "00010000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_trigger_all_but_holdoff",
+   "description": "mask 0xBF: CH2 falling level 160 normal, pretrigger 800, total 16000, auto_timeout 0",
+   "hex": "a513010005010b00000018000000e35ebf000101a001000020030000803e000000000000000000001bdc54be",
+   "frames": [
+    {
+     "cmd": 261,
+     "seq": 11,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "bf000101a001000020030000803e00000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 261,
+     "seq": 11,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "bf000101a001000020030000803e00000000000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_req_wait_10000",
+   "description": "WAIT with the maximum timeout 10000 ms",
+   "hex": "a513010003020d0000000400000046d410270000e6d85f4c",
+   "frames": [
+    {
+     "cmd": 515,
+     "seq": 13,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "10270000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 515,
+     "seq": 13,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "10270000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_frames_with_false_magic_and_tail",
+   "description": "frame, a false 4-byte header start, frame, lone 0xA5 then silence (partial dropped)",
+   "hex": "a51301000100280000000100000038436143beb7e8a5130100a5130100010029000000000000005f72a5",
+   "frames": [
+    {
+     "cmd": 1,
+     "seq": 40,
+     "status": 0,
+     "flags": 0,
+     "len": 1,
+     "payload": "61"
+    },
+    {
+     "cmd": 1,
+     "seq": 41,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": ""
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 1,
+     "seq": 40,
+     "status": 0,
+     "flags": 0,
+     "len": 1,
+     "payload": "61",
+     "event": "frame"
+    },
+    {
+     "cmd": 1,
+     "seq": 41,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": "",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_ascii_63_chars",
+   "description": "longest accepted line: 63 characters after '#' (one more is ascii_overflow)",
+   "hex": "235959595959595959595959595959595959595959595959595959595959595959595959595959595959595959595959595959595959595959595959595959590a",
+   "frames": [],
+   "device_events": [
+    {
+     "event": "ascii",
+     "line": "YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
+    }
+   ],
+   "source": "host"
   }
  ]
 }

@@ -339,7 +339,7 @@ class Transport:
         self._last_rx = now
         for ev in self._parser.feed(data):
             if isinstance(ev, P.Frame):
-                if not ev.is_response:
+                if not ev.is_response or ev.proto_major != P.PROTO_MAJOR:
                     self.stats.garbage_bytes += len(ev)
                     continue
                 self.stats.frames_received += 1
