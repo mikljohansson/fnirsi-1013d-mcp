@@ -13,7 +13,7 @@
 #define PC_FEAT_GEN_ANALOG    3     //amplitude / offset / phase: no DAC
 #define PC_FEAT_RTC           4     //DS3231 module (probed at boot)
 #define PC_FEAT_LONG_MEMORY   5     //"Long memory": not implemented in 1.00o5
-#define PC_FEAT_EXT_TRIGGER   6     //EXT trigger source: no external trigger input
+#define PC_FEAT_EXT_TRIGGER   6     //EXT trigger source: AL3 bitstream 0x1533+ only (calibration pin as input)
 #define PC_FEAT_HOLDOFF       7     //trigger hold-off: never sent to the FPGA
 #define PC_FEAT_MEM_BASE      16    //+ i: memory depth box i (3000 x (i + 1) samples) fits the bitstream
 
@@ -52,6 +52,7 @@ int  pc_glue_ui_has(int feature);     //PC_FEAT_*: 1 when the running hardware s
 char *pc_glue_version(int form);      //0 "v0.2.7", 1 "fw 0.2.7", 2 full identity line (diagnostics)
 void pc_glue_topbar_drawn(void);      //the top bar / RUN-STOP chip was (re)drawn: put the MCP chip back with it
 void pc_glue_diag_drawn(void);        //diagnostics screen drawn: identity line
+void pc_glue_ext_selected(void);      //EXT trigger chosen in the trigger menu
 void pc_glue_ui_mask(int menu);       //PC_MASK_*: paint over what it does not support (current draw buffer)
 void pc_glue_ui_capture_start(void);  //fpga_do_conversion started a conversion
 void pc_glue_ui_capture_addr(uint32 addr); //0x14 read of the finished UI capture
@@ -70,6 +71,7 @@ void pc_glue_ui_capture(void);        //UI finished reading a capture
 #define PC_UI_VERSION(d, form)  ((int8 *)pc_glue_version(form))
 #define PC_TOPBAR_DRAWN()       pc_glue_topbar_drawn()
 #define PC_DIAG_DRAWN()         pc_glue_diag_drawn()
+#define PC_EXT_SELECTED()       pc_glue_ext_selected()
 
 #else
 
@@ -86,6 +88,7 @@ void pc_glue_ui_capture(void);        //UI finished reading a capture
 #define PC_UI_VERSION(d, form)  (d)
 #define PC_TOPBAR_DRAWN()       do { } while(0)
 #define PC_DIAG_DRAWN()         do { } while(0)
+#define PC_EXT_SELECTED()       do { } while(0)
 
 #endif
 

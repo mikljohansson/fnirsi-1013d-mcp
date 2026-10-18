@@ -16,9 +16,9 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            3     //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            4     //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
-                                        //     SD sector commands (fw 0.2.2)
+                                        //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4

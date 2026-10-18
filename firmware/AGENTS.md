@@ -1,7 +1,7 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.8 (protocol 1.3: shared control, SD sector commands; 0.2.8: generator and trigger menus
-compacted; 0.2.7: SD_STAGE from the timer poll,
+State on 2026-10-18, fw 0.2.9 (protocol 1.4: shared control, SD sector commands, EXT trigger for FPGA 0x1533
+(protocol section 14 row 41, needs bench with fpga-gen2's bitstream); 0.2.8: generator and trigger menus compacted; 0.2.7: SD_STAGE from the timer poll,
 RX back-pressure counters, our version on screen, chip drawn with the top bar, temperature only with an RTC; 0.2.6:
 menus hide what the hardware lacks, README "Hidden menu options"; 0.2.5: USB event counters; 0.2.3: chip above RUN/STOP and
 steady, one-step SET_TIMEBASE). 0.2.1 passed the protocol-level
@@ -158,7 +158,8 @@ Plan: `docs/plans/collaborative-mode.md`; wire format agreed with the MCP agent 
 ## 7. FPGA layer and capture geometry
 
 Variant table from the 0x06 word in `pc_variant_from_version` (0x1432 stock: ring 4096, fixed 1500/3000;
-0x1532 AL3: ring 8192, max 16382; 0x1632 EF2 / 0x1732 EP4: ring 6144, max 12286; unknown: caps 0). The owner's
+0x1532 AL3: ring 8192, max 16382; 0x1533..0x153F AL3 family, same geometry, 0x1533+ adds EXT_TRIGGER (cmd 0x15 = 2,
+status cmd 0x28; `fpga_get_version` maps the family to fw_FPGA 2 under PC_PROTOCOL); 0x1632 EF2 / 0x1732 EP4: ring 6144, max 12286; unknown: caps 0). The owner's
 unit runs AL3 0x1532. Host ARM uses its own sequence (`pc_hal_arm`: 0x0F=0, 0x1A=mode, 0x01=1, bounded 0x05
 wait, 0x0B/0x0C/0x0E in reset, 0x01=0); DONE latches 0x14 and writes 0x0F=1; capture start =
 (trigger_addr - pretrigger_words) mod ring (the UI keeps 1.00o5's `T + 7441` math). READ_RAW reads per core with

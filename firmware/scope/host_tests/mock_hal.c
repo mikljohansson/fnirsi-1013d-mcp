@@ -53,7 +53,7 @@ void mock_reset(uint16_t fpga_version)
   memset(&mock, 0, sizeof(mock));
   mock.now        = 5000;
   mock.version    = fpga_version;
-  mock.ring_words = (fpga_version == 0x1532) ? 8192 : ((fpga_version == 0x1632 || fpga_version == 0x1732) ? 6144 : 4096);
+  mock.ring_words = ((fpga_version & 0xFFF0) == 0x1530) ? 8192 : ((fpga_version == 0x1632 || fpga_version == 0x1732) ? 6144 : 4096);
   mock.polls_to_trigger = 2;
   mock.polls_to_done    = 3;
   mock.trigger_addr     = 100;
@@ -184,7 +184,13 @@ void pc_hal_trigger_read(pc_hw_trigger *t) { *t = mock.trg; }
 
 void pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask)
 {
-  if(mask & PC_TRG_SOURCE) mock.trg.source = t->source;
+  if(mask & PC_TRG_SOURCE)
+  {
+    mock.trg.source = t->source;
+
+    if(t->source == 2)
+      mock.gen_en = mock.gen_hw_en = 0;     //as pc_hal_scope.c: EXT switches the generator off
+  }
   if(mask & PC_TRG_EDGE)   mock.trg.edge = t->edge;
   if(mask & PC_TRG_LEVEL)  mock.trg.level = t->level;
   if(mask & PC_TRG_MODE)   mock.trg.ui_mode = t->ui_mode;
@@ -237,6 +243,7 @@ void pc_hal_acq_poll(int *done, int *triggered)
 }
 
 uint16_t pc_hal_acq_finish(void) { return mock.trigger_addr; }
+uint8_t  pc_hal_ext_status(void) { mock.ext_reads++; return mock.ext_status; }
 void     pc_hal_force(void)      { mock.forces++; mock_polls = 1000000; mock.polls_to_trigger = -1; mock.polls_to_done = 0; }
 
 void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,

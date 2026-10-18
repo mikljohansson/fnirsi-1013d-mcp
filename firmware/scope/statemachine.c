@@ -3301,6 +3301,9 @@ void handle_trigger_menu_touch(void)
               //Set channel 2 as trigger source
               scopesettings.triggerchannel = 2;
 
+              //PC protocol: write the EXT source to the FPGA, switch the generator off (it drives the same pin)
+              PC_EXT_SELECTED();
+
               //Update the FPGA
               //fpga_set_trigger_channel();
 

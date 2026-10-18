@@ -30,6 +30,8 @@ typedef struct
   int      polls_to_done;         //acq_poll calls until 0x0A reads 1
   uint16_t trigger_addr;
   uint32_t forces;
+  uint8_t  ext_status;            //FPGA 0x28
+  uint32_t ext_reads;
   uint32_t read_calls;
   uint32_t max_read_start;        //largest start address passed to read_core (must be < ring)
   uint32_t debug_cmds[16];

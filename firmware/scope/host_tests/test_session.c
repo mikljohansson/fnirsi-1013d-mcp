@@ -165,7 +165,7 @@ static void test_info(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, 76);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 3); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 4); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
   T_EQ(pc_get_u16(r.p + 8), 0x1532); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS), PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED), PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED);
@@ -276,7 +276,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.3,fpga=0x1532");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.4,fpga=0x1532");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -1348,6 +1348,64 @@ static void test_sd(void)
   r = req(PC_CMD_SD_INFO, "\0", 1);           T_EQ(r.h.status, PC_E_UNSUPPORTED);
 }
 
+//EXT trigger (FPGA 0x1533, protocol 1.4)
+static void test_ext_trigger(void)
+{
+  resp_t r;
+  uint8_t g[20];
+
+  //0x1532: no EXT
+  setup(0x1532);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, 0);
+  set_trigger(0x01, 2, 0, 0, 0, 0, 0, 0, 0, &r);
+  T_EQ(r.h.status, PC_E_UNSUPPORTED);
+  T_EQ(mock.ext_reads, 0);                                      //0x28 never read on 0x1532
+
+  //0x1533: AL3 geometry plus EXT
+  setup(0x1533);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
+  T_EQ(r.p[1], 4);                                              //proto 1.4
+
+  //Generator on, then EXT: the generator goes off
+  memset(g, 0, 20); g[0] = 1; g[1] = 1;
+  r = req(PC_CMD_SET_GEN, g, 20);
+  T_EQ(r.h.status, 0); T_EQ(mock.gen_hw_en, 1);
+  set_trigger(0x01, 2, 0, 0, 0, 0, 0, 0, 0, &r);
+  T_EQ(r.h.status, 0); T_EQ(r.p[0], 2); T_EQ(mock.gen_hw_en, 0); T_EQ(mock.gen_en, 0);
+
+  //...and cannot be switched on while EXT is the source
+  r = req(PC_CMD_SET_GEN, g, 20);
+  T_EQ(r.h.status, PC_E_STATE);
+  g[1] = 0;
+  r = req(PC_CMD_SET_GEN, g, 20);
+  T_EQ(r.h.status, 0);
+
+  //GET_STATUS byte 42: the FPGA 0x28 bits, read at MAIN polls
+  mock.ext_status = 0x05;
+  r = status();
+  T_EQ(r.p[42], 0x05); T_TRUE(mock.ext_reads > 0);
+
+  //A capture during which an EXT edge was seen: GET_CAPTURE_INFO flags bit 5
+  r = req(PC_CMD_ARM, 0, 0);
+  r = wait_done(100);
+  T_EQ(r.p[1], PC_ACQ_DONE);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[9] & 0x20, 0x20); T_EQ(r.p[21], 2);
+  mock.ext_status = 0;
+  ui_capture(10);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[9] & 0x20, 0);
+
+  //Back to CH1: generator allowed again
+  set_trigger(0x01, 0, 0, 0, 0, 0, 0, 0, 0, &r);
+  g[1] = 1;
+  r = req(PC_CMD_SET_GEN, g, 20);
+  T_EQ(r.h.status, 0);
+}
+
 static void test_fel_reset_stall(void)
 {
   uint8_t p[4];
@@ -1359,7 +1417,7 @@ static void test_fel_reset_stall(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 3);                                              //proto_minor 1.3
+  T_EQ(r.p[1], 4);                                              //proto_minor 1.4
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -1478,6 +1536,7 @@ int main(void)
   test_read_raw_hold();
   test_indicator();
   test_sd();
+  test_ext_trigger();
   test_fel_reset_stall();
   mock_clear_resps();
   return t_report("test_session");

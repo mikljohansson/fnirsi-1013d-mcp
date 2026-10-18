@@ -130,6 +130,16 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
       v->caps       = unverified | PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS;
       break;
 
+    case 0x1533:
+    case 0x1534: case 0x1535: case 0x1536: case 0x1537: case 0x1538: case 0x1539:
+    case 0x153A: case 0x153B: case 0x153C: case 0x153D: case 0x153E: case 0x153F:
+      //AL3 family, later minors: 0x1533 adds the EXT trigger on the calibration pin (fpga/al3/README.md)
+      v->variant    = 2;
+      v->ring_words = 8192;
+      v->max_total  = 16382;
+      v->caps       = unverified | PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS | PC_CAP_EXT_TRIGGER;   //BENCH: EXT
+      break;
+
     case 0x1632:
       v->variant    = 3;
       v->ring_words = 6144;
@@ -270,6 +280,15 @@ static void pc_capture_finish(pc_session *s, pc_capture *c, uint16_t trigger_add
   }
 
   c->flags |= triggered ? 0x01 : 0x02;
+
+  //1.4: an EXT edge was seen during this capture (0x28 bit 2 is cleared by every sampling reset)
+  if(s->var.caps & PC_CAP_EXT_TRIGGER)
+  {
+    s->ext_flags = pc_hal_ext_status() & 0x07;
+
+    if(s->ext_flags & 0x04)
+      c->flags |= 0x20;
+  }
 
   //Overload flags of this readout
   for(i=0;i<2;i++)
@@ -415,6 +434,7 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
   pc_put_u32(p + 36, s->capture_id ? s->cap.seq : PC_SEQ_INVALID);
   p[40] = pc_run_state(s);
   p[41] = s->capture_id ? s->cap.origin : 0;
+  p[42] = s->ext_flags;                         //1.4: EXT pin (bit0 level, bit1 generator on, bit2 edge since arm)
   return 44;
 }
 
@@ -891,7 +911,7 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   //detail = bit number of the offending field (P-8.3)
   if(mask & 0x01)
   {
-    if(req[2] == 2)  return pc_error(s, PC_E_UNSUPPORTED, 0, "EXT trigger");
+    if((req[2] == 2) && !(s->var.caps & PC_CAP_EXT_TRIGGER)) return pc_error(s, PC_E_UNSUPPORTED, 0, "EXT trigger");
     if(req[2] > 2)   return pc_error(s, PC_E_BAD_ARG, 0, "source");
     t.source = req[2];
     hwmask |= PC_TRG_SOURCE;
@@ -1430,6 +1450,17 @@ static int h_set_gen(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
   if(mask & 0x01)
   {
     if(req[1] > 1) return pc_error(s, PC_E_BAD_ARG, 0, "enable");
+  }
+
+  //1.4: the EXT trigger input is the generator's pin
+  if((mask & 0x01) && req[1])
+  {
+    pc_hw_trigger t;
+
+    pc_hal_trigger_read(&t);
+
+    if(t.source == 2)
+      return pc_error(s, PC_E_STATE, 0, "EXT trigger uses the pin");
   }
 
   if(mask & 0x02)
@@ -2270,6 +2301,10 @@ void pc_poll(pc_session *s, int ctx)
       if(u.long_mode)
         s->ring_valid = 0;
     }
+
+    //EXT pin status for GET_STATUS (FPGA read, MAIN only)
+    if(s->var.caps & PC_CAP_EXT_TRIGGER)
+      s->ext_flags = pc_hal_ext_status() & 0x07;
 
     pc_acq_service(s);
     pc_deferred_service(s);

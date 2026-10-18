@@ -72,6 +72,8 @@ static void pc_draw_end(const DISPLAYDATA *save)
   displaydata = *save;
 }
 
+static void pc_ext_generator_off(void);
+
 //----------------------------------------------------------------------------------------------------------------------------------
 
 static PCHANNELSETTINGS pc_ch(int ch)
@@ -290,6 +292,9 @@ void pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask)
     scopesettings.triggerchannel = t->source;
     fpga_set_trigger_channel();
     fpga_set_trigger_level();
+
+    if(t->source == 2)
+      pc_ext_generator_off();
   }
 
   if(mask & PC_TRG_EDGE)
@@ -431,6 +436,37 @@ uint16_t pc_hal_acq_finish(void)
   fpga_write_byte(0x01);
 
   return fpga_prepare_for_transfer();
+}
+
+uint8_t pc_hal_ext_status(void)
+{
+  //Read only on 0x1533+ (pc_cmds checks EXT_TRIGGER): older bitstreams return the stale bus byte
+  fpga_write_cmd(0x28);
+  return fpga_read_byte();
+}
+
+//EXT selected: the generator drives the same pin, switch it off (UI copy and FPGA) and show it
+static void pc_ext_generator_off(void)
+{
+  DISPLAYDATA save;
+
+  if(fpgasettings.gen_enable)
+  {
+    fpgasettings.gen_enable = 0;
+    fpga_on_off_generator();
+    pc_draw_begin(&save);
+    scope_generator_settings(0);
+    pc_draw_end(&save);
+  }
+}
+
+void pc_glue_ext_selected(void)
+{
+  if(pc_ready && (pc_sess.var.caps & PC_CAP_EXT_TRIGGER))
+  {
+    fpga_set_trigger_channel();
+    pc_ext_generator_off();
+  }
 }
 
 void pc_hal_force(void)
@@ -898,8 +934,10 @@ int pc_glue_ui_has(int feature)
 
     case PC_FEAT_GEN_WAVE:
     case PC_FEAT_GEN_ANALOG:
-    case PC_FEAT_LONG_MEMORY:
     case PC_FEAT_EXT_TRIGGER:
+      return (pc_sess.var.caps & PC_CAP_EXT_TRIGGER) != 0;
+
+    case PC_FEAT_LONG_MEMORY:
     case PC_FEAT_HOLDOFF:
       return 0;
 
@@ -969,8 +1007,8 @@ static void pc_ui_fix_settings(void)
   if(!pc_rtc_present)
     onoffRTC = 0;
 
-  //No external trigger input
-  if(scopesettings.triggerchannel > 1)
+  //EXT trigger only on bitstreams that have it
+  if((scopesettings.triggerchannel > 1) && !(pc_sess.var.caps & PC_CAP_EXT_TRIGGER))
     scopesettings.triggerchannel = 0;
 
   //Memory depth: the largest offered step (3000 x n) the bitstream can capture

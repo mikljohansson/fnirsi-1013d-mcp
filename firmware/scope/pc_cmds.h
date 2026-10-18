@@ -16,9 +16,9 @@
 
 #ifndef PC_FW_VERSION
 #if PC_FIFO_MAP == 1
-#define PC_FW_VERSION     "0.2.8-m1"   //alternative USB FIFO layout (pc_transport.h)
+#define PC_FW_VERSION     "0.2.9-m1"   //alternative USB FIFO layout (pc_transport.h)
 #else
-#define PC_FW_VERSION     "0.2.8"
+#define PC_FW_VERSION     "0.2.9"
 #endif
 #endif
 
@@ -186,6 +186,7 @@ typedef struct
   pc_capture cap_next;
   uint8_t    ring_valid;        //the FPGA ring still holds capture cap (no arm since its DONE)
   uint8_t    ui_started;        //a UI conversion started and has not been counted yet
+  uint8_t    ext_flags;         //FPGA 0x28 at the last MAIN poll (EXT_TRIGGER only): bit0 level, bit1 gen on, bit2 edge
   uint8_t    ui_trig;           //0x18 at the UI capture's DONE
   uint16_t   ui_addr;           //0x14 of the UI capture
 

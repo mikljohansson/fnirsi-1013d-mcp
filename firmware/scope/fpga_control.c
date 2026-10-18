@@ -205,6 +205,10 @@ uint16 fpga_get_version(void)
   if(fw_version == 0x1432) fpgasettings.fw_FPGA = 1;  //fnirsi fw in FPGA
   if(fw_version == 0x1532) fpgasettings.fw_FPGA = 2;  //PECO fw in FPGA AL3
   if(fw_version == 0x1632) fpgasettings.fw_FPGA = 3;  //PECO fw in FPGA EF2
+#if PC_PROTOCOL
+  //AL3 family: 0x1532 and later minors (0x1533 adds the EXT trigger, fpga/al3/README.md); same geometry
+  if(((fw_version & 0xFFF0) == 0x1530) && (fw_version >= 0x1532)) fpgasettings.fw_FPGA = 2;
+#endif
 
   return(fw_version);
 }
@@ -401,6 +405,15 @@ void fpga_set_trigger_channel(void)
 {
   //Send the command for selecting the trigger channel to the FPGA
   fpga_write_cmd(0x15);
+
+#if PC_PROTOCOL
+  //EXT trigger (bitstream 0x1533+): source 2. Only selectable when the bitstream has it (pc_glue_ui_has)
+  if(scopesettings.triggerchannel == 2)
+  {
+    fpga_write_byte(0x02);
+    return;
+  }
+#endif
   
   //Write the needed data based on the setting
   if(scopesettings.triggerchannel == 0)

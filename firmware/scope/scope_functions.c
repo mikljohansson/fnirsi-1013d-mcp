@@ -912,6 +912,12 @@ void scope_process_trigger(uint32 count)
   }
 
    disp_have_trigger = 0;
+
+#if PC_PROTOCOL
+  //EXT trigger: no level crossing to refine in the traces; the hardware trigger position stands
+  if(scopesettings.triggerchannel == 2)
+    return;
+#endif
   
   //Set a starting point for checking on trigger
   //Count is half a sample buffer!!
