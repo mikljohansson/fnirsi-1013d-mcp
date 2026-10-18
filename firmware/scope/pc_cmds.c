@@ -481,14 +481,14 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
   return 44;
 }
 
-//Zero correction for the channel's current settings (adc_cal.h): calibration data v2 when loaded and bound
+//Correction for the channel's current settings (adc_cal.h): calibration data v3 when loaded and bound
 static void pc_channel_corr(const pc_hw_channel *c, acal_corr *k)
 {
   acal_correction(c->cal2_loaded ? &c->cal2 : 0, c->cal_offset, c->range, c->divider, c->dcoffset, c->dc_shift_value,
                   c->adc_a_comp, c->adc_b_comp, k);
 }
 
-//uV per code x 256 at the BNC with a 1x probe, and the processed code of 0 V x 256 (P-8.5, protocol 1.10: the v2
+//uV per code x 256 at the BNC with a 1x probe, and the processed code of 0 V x 256 (P-8.5, protocol 1.10+: the v2 / v3
 //correction puts it at exactly 128 - dcoffset x 100 / dc_shift_value) [U]   BENCH: T8
 static void pc_channel_scaling(const pc_hw_channel *c, uint32_t *uv_q8, int32_t *zero_q8)
 {
@@ -1768,14 +1768,14 @@ static int h_set_gen(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
   return PC_OK;
 }
 
-#define PC_CAL_RESP_LEN 248     //72 bytes up to 1.9, the v2 export from 1.10
+#define PC_CAL_RESP_LEN 256     //72 bytes up to 1.9, 248 in 1.10-1.11 (v2), the v3 export from 1.12
 
 static int h_get_cal(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   pc_hw_channel c;
   acal_corr k;
-  uint32_t i, m, j;
-  uint8_t *p;
+  uint32_t i;
+  int bound;
 
   (void)s; (void)len;
 
@@ -1801,12 +1801,14 @@ static int h_get_cal(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
   pc_put_u32(resp + 64, c.adc_a_rawavg);
   pc_put_u32(resp + 68, c.adc_b_rawavg);
 
-  //1.10: calibration data v2 (protocol section 14 row 48)
+  //1.12: calibration data v3 (protocol section 14 row 51)
   pc_channel_corr(&c, &k);
+  bound = c.cal2_loaded && acal_bound(&c.cal2, c.cal_offset);
   memset(resp + 72, 0, PC_CAL_RESP_LEN - 72);
-  resp[72] = k.v2 ? 2 : 1;
-  resp[73] = (uint8_t)((c.cal2_loaded ? 1 : 0) | ((c.cal2_loaded && acal_bound(&c.cal2, c.cal_offset)) ? 2 : 0) |
-                       ((k.cls == ACAL_GATED) ? 4 : 0));
+  resp[72] = k.version;
+  resp[73] = (uint8_t)((c.cal2_loaded ? 1 : 0) | (bound ? 2 : 0) | ((k.cls == ACAL_GATED) ? 4 : 0) |
+                       ((c.cal2_loaded && (c.cal2.gain_range != ACAL_GAIN_NONE)) ? 8 : 0) |
+                       ((c.cal2_loaded && (c.cal2.gain_flags & ACAL_GAIN_KEPT)) ? 16 : 0));
   pc_put_u16(resp + 74, (uint16_t)k.comp_a);
   pc_put_u16(resp + 76, (uint16_t)k.comp_b);
   resp[78] = k.frac_a;
@@ -1814,15 +1816,14 @@ static int h_get_cal(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
   pc_put_u32(resp + 80, (uint32_t)k.zero_q8);
   pc_put_u32(resp + 84, (uint32_t)k.corr16);
   pc_put_u32(resp + 88, (uint32_t)k.shift);
+  pc_put_u32(resp + 92, k.gain_a);
+  pc_put_u32(resp + 96, k.gain_b);
+  pc_put_u32(resp + 100, (uint32_t)k.off_a);
+  pc_put_u32(resp + 104, (uint32_t)k.off_b);
+  pc_put_u32(resp + 108, k.gain16);
 
   if(c.cal2_loaded)
-  {
-    p = resp + 92;
-    for(j=0;j<ACAL_RANGES;j++, p+=2) pc_put_u16(p, c.cal2.pwm[j]);
-    for(m=0;m<ACAL_CLASSES;m++) for(i=0;i<2;i++) for(j=0;j<ACAL_RANGES;j++, p+=2) pc_put_u16(p, (uint16_t)c.cal2.zero[m][i][j]);
-    for(i=0;i<2;i++) for(j=0;j<ACAL_RANGES;j++, p+=4) pc_put_u32(p, (uint32_t)c.cal2.slope[i][j]);
-    for(m=0;m<ACAL_CLASSES;m++) for(i=0;i<2;i++) for(j=0;j<ACAL_RANGES;j++, p+=2) pc_put_u16(p, c.cal2.noise[m][i][j]);
-  }
+    acal_pack_channel(&c.cal2, resp + 112);
 
   *rl = PC_CAL_RESP_LEN;
   return PC_OK;

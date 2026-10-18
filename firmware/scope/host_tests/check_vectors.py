@@ -161,13 +161,16 @@ def main():
                 fail(f"decim {c['divider']} {c['k_req']} {c['total']} fir {c['fir_req']}: C gave {f}, expected {exp}")
         print(f"decim: {len(dec['cases'])} cases checked against pc_decim.c")
 
-    # 6. calibration data v2 block (1.10): acal_pack of the same content against the Python layout
-    if args.adc_cal_checker and "adc_cal" in data:
+    # 6. calibration data v3 block (1.12): acal_pack of the same content against the Python layout (the v2 section is
+    # history for the host side, adc_cal.c no longer packs it)
+    if args.adc_cal_checker and "adc_cal_v3" in data:
         out = subprocess.run([args.adc_cal_checker, "--pack"], capture_output=True, text=True, check=True).stdout.strip()
-        if out != data["adc_cal"]["block_hex"]:
-            fail(f"adc_cal block: C packs {out}, expected {data['adc_cal']['block_hex']}")
+        if out != data["adc_cal_v3"]["block_hex"]:
+            fail(f"adc_cal_v3 block: C packs {out}, expected {data['adc_cal_v3']['block_hex']}")
         else:
-            print("adc_cal: sector block identical to acal_pack")
+            print("adc_cal_v3: sector block identical to acal_pack")
+    elif args.adc_cal_checker:
+        fail("adc_cal_v3 section missing")
 
     if fails:
         print(f"{fails} FAILURES")

@@ -971,10 +971,12 @@ void scope_process_trigger(uint32 count)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-//Base calibration (calibration data v2, adc_cal.h, firmware/README.md section 6.2). Inputs open or shorted. Per channel and
-//hardware range: the PWM centre where the mean of both cores reads 128, the offset slope of each core from two PWM points
-//150 counts either side, and each core's zero at that centre with the ADC clock gated (2 MSa/s, every legacy time base
-//but 200 MSa/s) and at full rate (200 MSa/s, every filtered capture). Nothing changes unless both channels pass.
+//Base calibration (calibration data v3, adc_cal.h, firmware/README.md section 6.3). Zero step, inputs open or shorted:
+//per channel and hardware range the PWM centre where the mean of both cores reads 128, the offset slope of each core
+//from two PWM points 150 counts either side and its zero at that centre, each with the ADC clock gated (2 MSa/s, every
+//legacy time base but 200 MSa/s) and at full rate (200 MSa/s, every filtered capture). Nothing changes unless both
+//channels pass. Gain step (scope_do_gain_calibration), probes on the calibration post: per core and clock class the
+//span between the generator's two static levels.
 
 #define CAL_PWM_HIGHCODE    500     //coarse points: low PWM gives a high code
 #define CAL_PWM_LOWCODE    1200
@@ -1067,26 +1069,31 @@ static int cal_channel(acal_channel *c)
     if(p < 0)
       return ACAL_E_RESPONSE;
 
-    //Slope of each core
+    //Slope of each core, gated
     m.pwm_lo = p - CAL_FINE_STEP;
     m.pwm_hi = p + CAL_FINE_STEP;
     cal_measure(r, m.pwm_lo, 60, 4, acc);
-    cal_result(acc, m.mean16_lo, 0, 0, &m.clipped);
+    cal_result(acc, m.mean16_lo[ACAL_GATED], 0, 0, &m.clipped);
     cal_measure(r, m.pwm_hi, 60, 4, acc);
-    cal_result(acc, m.mean16_hi, 0, 0, &m.clipped);
+    cal_result(acc, m.mean16_hi[ACAL_GATED], 0, 0, &m.clipped);
 
     //Centre refined on the slope points, then the zeros there in both clock classes
-    m.pwm = acal_interp_pwm(m.pwm_lo, (m.mean16_lo[0] + m.mean16_lo[1]) / 2, m.pwm_hi,
-                            (m.mean16_hi[0] + m.mean16_hi[1]) / 2);
+    m.pwm = acal_interp_pwm(m.pwm_lo, (m.mean16_lo[ACAL_GATED][0] + m.mean16_lo[ACAL_GATED][1]) / 2, m.pwm_hi,
+                            (m.mean16_hi[ACAL_GATED][0] + m.mean16_hi[ACAL_GATED][1]) / 2);
 
     cal_measure(r, m.pwm, 60, 8, acc);
     cal_result(acc, m.zero16[ACAL_GATED], m.drift16[ACAL_GATED], m.noise16[ACAL_GATED], &m.clipped);
 
     //Full rate: a 1000-sample readout spans 5 us of the 40 us offset-PWM ripple period, so each conversion sees one
-    //ripple phase; 64 conversions (about 70 ms) average it out (bench 0.2.43: 8 left 0.2-0.4 code)
+    //ripple phase; 64 conversions (about 70 ms) average it out (bench 0.2.43: 8 left 0.2-0.4 code). The full-rate
+    //slope points too: the cores' gains differ per class, and so may their offset slopes
     cal_set_rate(CAL_RATE_FULL);
     cal_measure(r, m.pwm, 30, 64, acc);
     cal_result(acc, m.zero16[ACAL_FULL], m.drift16[ACAL_FULL], m.noise16[ACAL_FULL], &m.clipped);
+    cal_measure(r, m.pwm_hi, 60, 64, acc);
+    cal_result(acc, m.mean16_hi[ACAL_FULL], 0, 0, &m.clipped);
+    cal_measure(r, m.pwm_lo, 60, 64, acc);
+    cal_result(acc, m.mean16_lo[ACAL_FULL], 0, 0, &m.clipped);
 
     rc = acal_range_store(&m, c, (uint8)r);
 
@@ -1097,15 +1104,67 @@ static int cal_channel(acal_channel *c)
   return ACAL_OK;
 }
 
+//FPGA commands per channel: relay, offset PWM, core A, core B, coupling
+static const uint8 cal_cmds[2][5] = { { 0x33, 0x32, 0x20, 0x21, 0x34 }, { 0x36, 0x35, 0x22, 0x23, 0x37 } };
+
+//1 after a base calibration whose zero step passed, until the gain step ran (scope_gain_calibration_offered)
+static uint8 cal_zero_done;
+
+//The scratch channel for channel ch: its FPGA commands and trace buffer, DC coupling
+static void cal_scratch_channel(uint32 ch)
+{
+  calibrationsettings.voltperdivcommand = cal_cmds[ch][0];
+  calibrationsettings.offsetcommand     = cal_cmds[ch][1];
+  calibrationsettings.adc1command       = cal_cmds[ch][2];
+  calibrationsettings.adc2command       = cal_cmds[ch][3];
+  calibrationsettings.couplingcommand   = cal_cmds[ch][4];
+  calibrationsettings.tracebuffer       = ch ? (uint8 *)channel2tracebuffer : (uint8 *)channel1tracebuffer;
+  fpga_set_channel_coupling(&calibrationsettings);
+}
+
+//"Ch1...." / "Ch2...." in the calibrating box, then OK or FAIL next to it
+static void cal_show_channel(uint32 ch)
+{
+  display_set_font(&font_3);
+  display_set_fg_color(DARKGREY_COLOR);
+  display_fill_rect(400, 250, 100, 28);
+  display_set_fg_color(ch ? CHANNEL2_COLOR : CHANNEL1_COLOR);
+  display_text(409, 255, ch ? "Ch2...." : "Ch1....");
+}
+
+static void cal_show_result(uint32 ch, int rc)
+{
+  char *p;
+
+  if(rc == ACAL_OK)
+  {
+    display_set_fg_color(GREEN_COLOR);
+    display_text(470, 255, "OK");
+    timer0_delay(300);
+    return;
+  }
+
+  display_set_fg_color(RED_COLOR);
+  display_text(455, 255, "FAIL");
+  timer0_delay(1500);
+
+  //"CH1: " + the reason (at most 21 characters), shown by the failure box; the first failure is kept
+  if(calibration_fail_reason[0] == 0)
+  {
+    p = fmt_str(calibration_fail_reason, ch ? "CH2: " : "CH1: ");
+    fmt_str(p, acal_reason_text(rc));
+  }
+}
+
 uint32 scope_do_baseline_calibration(void)
 {
-  static const uint8 cmds[2][5] = { { 0x33, 0x32, 0x20, 0x21, 0x34 }, { 0x36, 0x35, 0x22, 0x23, 0x37 } };
   acal_channel     newcal[2];
   PCHANNELSETTINGS chs[2] = { &scopesettings.channel1, &scopesettings.channel2 };
   uint8            backup_invert[2];
   uint32           ch, r;
   int              rc = ACAL_OK;
-  char            *p;
+
+  cal_zero_done = 0;
 
   //Trigger off, AUTO mode (no lockup in NORMAL or SINGLE), level 0
   scopesettings.samplemode  = 0;
@@ -1138,41 +1197,17 @@ uint32 scope_do_baseline_calibration(void)
 
   for(ch=0;ch<2;ch++)
   {
-    calibrationsettings.voltperdivcommand = cmds[ch][0];
-    calibrationsettings.offsetcommand     = cmds[ch][1];
-    calibrationsettings.adc1command       = cmds[ch][2];
-    calibrationsettings.adc2command       = cmds[ch][3];
-    calibrationsettings.couplingcommand   = cmds[ch][4];
-    calibrationsettings.tracebuffer       = ch ? (uint8 *)channel2tracebuffer : (uint8 *)channel1tracebuffer;
-    fpga_set_channel_coupling(&calibrationsettings);
-
-    display_set_font(&font_3);
-    display_set_fg_color(DARKGREY_COLOR);
-    display_fill_rect(400, 250, 100, 28);
-    display_set_fg_color(ch ? CHANNEL2_COLOR : CHANNEL1_COLOR);
-    display_text(409, 255, ch ? "Ch2...." : "Ch1....");
-
+    cal_scratch_channel(ch);
+    cal_show_channel(ch);
     rc = cal_channel(&newcal[ch]);
+    cal_show_result(ch, rc);
 
-    if(rc == ACAL_OK)
-    {
-      display_set_fg_color(GREEN_COLOR);
-      display_text(470, 255, "OK");
-      timer0_delay(300);
-      continue;
-    }
-
-    display_set_fg_color(RED_COLOR);
-    display_text(455, 255, "FAIL");
-    timer0_delay(1500);
-
-    //"CH1: " + the reason (at most 21 characters), shown by scope_show_calibration_fail
-    p = fmt_str(calibration_fail_reason, ch ? "CH2: " : "CH1: ");
-    fmt_str(p, acal_reason_text(rc));
-    break;
+    if(rc != ACAL_OK)
+      break;
   }
 
-  //Both channels passed: take the results (PWM centres and the 1.00o5 compensations, for older firmware too) and save
+  //Both channels passed: take the results (PWM centres and the 1.00o5 compensations, for older firmware too) and save.
+  //The gains of the previous v3 block stay until the gain step measures new ones (the mismatch is inside the ADC)
   if(rc == ACAL_OK)
   {
     for(ch=0;ch<2;ch++)
@@ -1182,10 +1217,14 @@ uint32 scope_do_baseline_calibration(void)
 
       chs[ch]->dc_calibration_offset[6] = chs[ch]->dc_calibration_offset[5];
       acal_atlan_comps(&newcal[ch], &chs[ch]->adc1compensation, &chs[ch]->adc2compensation);
-      adc_cal[ch] = newcal[ch];
+      acal_gain_carry(adc_cal_loaded ? &adc_cal[ch] : 0, &newcal[ch]);
     }
 
+    for(ch=0;ch<2;ch++)
+      adc_cal[ch] = newcal[ch];
+
     adc_cal_loaded = 1;
+    cal_zero_done  = 1;
   }
 
   scopesettings.samplecount = fpgasettings.totalsamples;
@@ -1216,6 +1255,156 @@ uint32 scope_do_baseline_calibration(void)
   scope_channel_settings(&scopesettings.channel2, 0);
 
   return(rc == ACAL_OK);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//Gain step (calibration data v3, adc_cal.h): both probes on the calibration post, the generator holds its output low
+//(about -1.24 V against probe ground) or high (about +1.87 V). Both cores and both clock classes see the same node, so
+//the spans between the two levels give every relative gain; no level needs to be known. The gains are measured on one
+//range and used on all (assumption: the mismatch is inside the ADC; firmware/README.md section 6.3 has the bench check).
+
+uint32 scope_gain_calibration_offered(void)
+{
+  //AL3 bitstreams (Atlan's and ours) have the generator on 0x50-0x52; the stock 0x1432 drives a fixed 1 kHz
+  return cal_zero_done && adc_cal_loaded && (fpgasettings.fw_FPGA == 2);
+}
+
+//Generator as a static level: frequency 0 freezes the phase accumulator, threshold 0 keeps the output low, all ones
+//keeps it high (the accumulator is never all ones in practice; the lever check would catch it)
+static void cal_gen_level(uint32 high)
+{
+  fpga_write_cmd(0x52);
+  fpga_write_int(high ? 0xFFFFFFFF : 0);
+  fpga_write_cmd(0x51);
+  fpga_write_int(0);
+  fpga_write_cmd(0x50);
+  fpga_write_int(1);
+}
+
+//Per core means (1/16 code) of convs conversions at one post level, rate and PWM
+static void cal_gain_level(uint32 r, int32 pwm, uint32 rate, uint32 settle_ms, uint32 convs, uint32 high, int32_t *mean16,
+                           uint32_t *clipped)
+{
+  acal_acc acc[2][2];
+
+  cal_set_rate(rate);
+  cal_gen_level(high);
+  cal_measure(r, pwm, settle_ms, convs, acc);
+  cal_result(acc, mean16, 0, 0, clipped);
+}
+
+static int cal_gain_channel(acal_channel *c)
+{
+  acal_gain_meas m;
+  int32_t  lo[2], hi[2], span16, mid16, zm16, pwm;
+  uint32_t unused = 0, l;
+  uint8    r = ACAL_GAIN_PROBE_RANGE;
+
+  //Probe both levels at range 2 (gated, 2 conversions each): how far apart they are picks the range (40..120 codes)
+  calibrationsettings.samplevoltperdiv = r;
+  fpga_set_channel_voltperdiv(&calibrationsettings);
+  timer0_delay(60);
+  cal_gain_level(r, c->pwm[r], CAL_RATE_GATED, 60, 2, 0, lo, &unused);
+  cal_gain_level(r, c->pwm[r], CAL_RATE_GATED, 30, 2, 1, hi, &unused);
+  span16 = (hi[0] + hi[1] - lo[0] - lo[1]) / 2;
+  mid16  = (hi[0] + hi[1] + lo[0] + lo[1]) / 4;
+  zm16   = (c->zero[ACAL_GATED][0][r] + c->zero[ACAL_GATED][1][r]) / 2;
+
+  //The range, and the PWM that puts the levels symmetric about the 0 V code (even-order INL cancels in the span)
+  r   = acal_gain_range(span16);
+  pwm = acal_gain_pwm(c, r, acal_gain_mid_at(mid16 - zm16, r));
+
+  if(r != ACAL_GAIN_PROBE_RANGE)
+  {
+    calibrationsettings.samplevoltperdiv = r;
+    fpga_set_channel_voltperdiv(&calibrationsettings);
+    timer0_delay(60);
+  }
+
+  //Low, high, low again (linear drift cancels in the spans), each gated (8) and at full rate (64: PWM ripple)
+  memset(&m, 0, sizeof(m));
+
+  for(l=0;l<3;l++)
+  {
+    cal_gain_level(r, pwm, CAL_RATE_GATED, l ? 30 : 100, 8, l == 1, m.mean16[ACAL_GATED][l], &m.clipped);
+    cal_gain_level(r, pwm, CAL_RATE_FULL, 30, 64, l == 1, m.mean16[ACAL_FULL][l], &m.clipped);
+  }
+
+  return acal_gain_store(&m, r, c);
+}
+
+uint32 scope_do_gain_calibration(void)
+{
+  PCHANNELSETTINGS chs[2] = { &scopesettings.channel1, &scopesettings.channel2 };
+  acal_channel     work;
+  uint32           ch, passed = 0;
+  int              rc;
+
+  cal_zero_done = 0;
+  calibration_fail_reason[0] = 0;
+
+  if(!adc_cal_loaded || (fpgasettings.fw_FPGA != 2))
+  {
+    cal_show_result(0, adc_cal_loaded ? ACAL_E_GAIN_NONE : ACAL_E_MAGIC);
+    return 0;
+  }
+
+  //As the zero step: trigger off, AUTO, level 0, 1000 samples per readout, the raw scratch channel
+  scopesettings.samplemode  = 0;
+  scopesettings.triggermode = 0;
+  scope_trigger_settings(0);
+  fpga_set_trigger_mode();
+  fpga_write_cmd(0x17);
+  fpga_write_byte(0);
+  scopesettings.samplecount = 1000;
+  scopesettings.nofsamples  = 500;
+
+  calibrationsettings.adc1compensation = 0;
+  calibrationsettings.adc2compensation = 0;
+  calibrationsettings.invert           = 0;
+  calibrationsettings.dcoffset         = 0;
+  calibrationsettings.dc_shift_value   = 0;
+  calibrationsettings.coupling         = 0;
+
+  //Channels pass or fail on their own (one probe at a time works too); a failed channel keeps its previous gains
+  for(ch=0;ch<2;ch++)
+  {
+    cal_scratch_channel(ch);
+    cal_show_channel(ch);
+    work = adc_cal[ch];
+    rc = cal_gain_channel(&work);
+    cal_show_result(ch, rc);
+
+    if(rc == ACAL_OK)
+    {
+      adc_cal[ch] = work;
+      passed++;
+    }
+  }
+
+  //Generator back to the UI's state, the channels and the time base back
+  fpga_on_off_generator();
+
+  scopesettings.samplecount = fpgasettings.totalsamples;
+  scopesettings.nofsamples  = fpgasettings.totalsamples / 2;
+
+  for(ch=0;ch<2;ch++)
+  {
+    fpga_set_channel_voltperdiv(chs[ch]);
+    fpga_set_channel_offset(chs[ch]);
+    fpga_set_channel_coupling(chs[ch]);
+  }
+
+  fpga_set_sample_rate(scopesettings.samplerate);
+
+  if(passed)
+    scope_save_input_calibration_data();
+
+  scope_acqusition_settings(0);
+  scope_channel_settings(&scopesettings.channel1, 0);
+  scope_channel_settings(&scopesettings.channel2, 0);
+
+  return(passed == 2);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
