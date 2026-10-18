@@ -27,7 +27,7 @@ PROTO_MAJOR = 1
 #: mode: SHARED_MODE cap, GET_STATUS settings/run fields, SET_ACQ_STATE, GET_CAPTURE_INFO; 1.4 (fw 0.2.9): EXT
 #: trigger (source 2 on 0x1533+ bitstreams), GET_STATUS ext_flags, GET_CAPTURE_INFO flag bit 5; 1.5 (fw 0.2.12):
 #: GET_EVENT_LOG, link counter 47 usb_irq_polled
-PROTO_MINOR = 5
+PROTO_MINOR = 6
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -90,6 +90,7 @@ class Cmd(enum.IntEnum):
     SD_WRITE_SECTORS = 0x0503
     DEBUG_FPGA = 0x0F00
     ENTER_FEL = 0x0F01
+    FFT_BENCH = 0x0F02  # protocol 1.6, fw 0.2.27: time the on-scope FFT (main loop, any bitstream)
 
 
 #: Commands accepted while the UI owns the scope (section 8.1, column LOCAL).
