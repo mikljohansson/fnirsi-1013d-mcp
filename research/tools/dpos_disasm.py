@@ -1,4 +1,5 @@
-import sys,os; sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),"vendor"))
+# Requires the capstone package: pip install capstone  (BSD-3-Clause, https://www.capstone-engine.org)
+import sys, os
 import sys
 from capstone import *
 d=open(sys.argv[1],'rb').read()

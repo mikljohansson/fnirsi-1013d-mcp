@@ -35,3 +35,4 @@ fpga/al3/bitstreams/*
 
 # personal Anlogic TD licence, never commit
 fpga/al3/license/
+research/tools/vendor/

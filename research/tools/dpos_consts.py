@@ -1,5 +1,5 @@
 import sys,os,struct,collections
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),"vendor"))
+# Requires the capstone package: pip install capstone  (BSD-3-Clause, https://www.capstone-engine.org)
 from capstone import *
 from capstone.arm import *
 d=open(sys.argv[1],'rb').read()
