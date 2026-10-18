@@ -692,6 +692,71 @@ SET_GEN, RUN/STOP, the MCP chip): they draw only top-bar buttons (y < 46) and ne
 column. Not host-testable (scope_functions.c and spectrum.c drawing are target-only); bench: spectrum view on, then
 SET_TIMEBASE / SET_TRIGGER / SET_GEN in a loop from the host and span taps: the strip must never show grid or pointers.
 
+### Phosphor view (`phosphor.c`, fw 0.2.46)
+
+Digital phosphor (intensity-graded persistence), like the DPOS350P's "digital fluorescent" display: the traces show
+how often each pixel was hit by recent records, so jitter, rare glitches, a modulation envelope or the two duty
+cycles of a toggling signal are visible at once with their relative frequency. Design and cost arithmetic:
+`docs/plans/phosphor-design.md`.
+
+Entered and left like the spectrum view: main menu, seventh row "Phosphor display" (the row reads "Scope view" while
+it is on), or the strip's "Scope" field. The spectrum and phosphor views exclude each other. Not offered in roll mode
+or in the picture / waveform viewers (the rows are hidden and the view ends). It is a main-loop display mode: RUN/STOP,
+trigger, time base, channel menus, cursors, measurements and the MCP keep working as in the scope view.
+
+What changes: only the CH1 / CH2 traces. Each channel has a map of hit counts (one byte per pixel of the 728 x 400
+trace area); every new record adds its line to the map (all samples on screen, each column from its lowest to its
+highest point and joined to the next, so steep edges and dense records are drawn like peak detect), and the map fades
+with the persistence time. Grid, cursors, cursor readouts, measurement tiles, the trace / trigger pointers and REF /
+MATH traces are drawn as in the scope view, on top of the map. Where both channels light the same pixel the brighter
+one is shown (CH1 on ties). XY mode works the same way with one map (CH1 against CH2).
+
+Strip (one line under the grid, where the record-position slider is in the scope view):
+
+| field | values | tap |
+|---|---|---|
+| Persistence | 0.2 s, 1 s (default), 5 s, Infinite | next value; clears the picture |
+| Palette | Mono (channel colour, brightness by hit rate), Heat (dark blue, blue, cyan, green, yellow, red, white) | toggles |
+| Clear | | clears the picture |
+| Scope | | leaves the view |
+
+At the right end the strip shows the records added per second ("28 wfm/s") or, in orange while it applies, a warning:
+"CHn overrange: increase V/div" (the latest record clipped), "No trigger: check the trigger level" (the latest record
+was an auto time-out), "No channel enabled: switch on CH1 or CH2".
+
+Reading the picture:
+- Persistence is the time a pixel that is no longer hit takes to fade from full to 1/16 brightness. Infinite never
+  fades: each hit counts 1, up to 255.
+- Brightness means hit rate, not record rate: the increment per hit is scaled to the measured record interval, so a
+  pixel hit by every record is at full brightness at any time base, and one hit by 10 % of the records at about half
+  (square-root curve). In Infinite a single hit shows at about a quarter brightness.
+- The picture clears by itself when what a pixel means changes: per channel on enable, coupling, V/div, trace position
+  and DC offset (and recalibration); both channels on time base, sample rate, trigger position, memory depth,
+  acquisition Filter, XY mode and persistence. It does not clear on trigger level or palette changes.
+- Stopped: the picture freezes (no fading, persistence counts acquisition time). A modal menu also pauses the fade.
+- Untriggered records from the firmware auto time-out are left out while a triggered one came within the last second,
+  so a periodic signal's occasional miss does not paint a ghost that looks like a glitch.
+- Records: every UI capture, and a host single capture (ARM) once when it completes; READ_TRACE re-reads do not add.
+
+Limits:
+- One record per main-loop pass (about 30 per second at the default 3000 samples), as in the scope view. This is not
+  the DPOS350P's 50,000 wfm/s: rare events need time to show (a 1-in-1000 event needs about half a minute in
+  Infinite). The fast loop of the design study (window readout, several records per frame) is a later step.
+- Saving a waveform in the view keeps the thumbnail of the last scope-view trace (the waveform data itself is saved
+  as usual); a screenshot (picture save, READ_SCREEN) shows the graded picture.
+- The Trace selector (Linear / Dots / Peak / Pro) does not apply in the view: records are always drawn as joined
+  min/max columns.
+
+Settings: persistence and palette are saved with everything else at power-off (settings word 210, 0x9A00 marker;
+restored only when the marker and the fields are valid). The view itself is not restored: the scope boots into the
+scope view. Protocol: GET_STATUS byte 43 `display_mode` = 4 while it is on (protocol section 14 row 52); no new command.
+
+Costs (estimates, arithmetic in the design doc): per record about 0.9 ms per channel for a normal trace (one pass over
+the samples, one run per column, word accesses), per pass the lit area only (zero words skipped, grid shows through),
+typically 1-4 ms on top of the scope view's 30 ms pass; worst case (the whole area lit on both channels) about 90 ms
+per pass. Memory: 582 KB of maps in `.bss`; the code-to-row tables and palettes in on-chip SRAM A at 0x0400-0x0FFF.
+Bench check: GET_STATUS `pass_ms` with the view on vs off.
+
 ### Firmware auto trigger mode (fw 0.2.41)
 
 The FPGA's auto time-out (0x0E) counts samples, i.e. one record length: 0.3 ms at 10 MS/s with 3000 samples, so a

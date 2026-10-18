@@ -31,6 +31,16 @@ by CI from the tag commit and has its own hash.
 With `PC_PROTOCOL=0` the tree builds byte-identical to Atlan4's v1.00o5 image (`make check-reference`).
 Every protocol change sits behind `#if PC_PROTOCOL`.
 
+#### 0.2.46 - 2026-10-19 (protocol 1.13)
+
+- Added: digital phosphor view (main menu row 7 "Phosphor display"): the CH1 / CH2 traces are drawn from per-pixel
+  hit counts of the recent records, graded by hit rate, in the normal scope view (grid, cursors, measurements and
+  pointers unchanged). Strip under the grid: Persistence 0.2 s / 1 s / 5 s / Infinite, Palette Mono / Heat, Clear,
+  Scope, and a wfm/s or warning field. XY mode supported. Settings in settings word 210 (15f15e0; map core and host
+  test faca915, 04c60bc; design docs/plans/phosphor-design.md f46e1c5).
+- Added: GET_STATUS byte 43 `display_mode` = 4 while the phosphor view is on; protocol 1.13, section 14 row 52
+  (8be5f3a).
+
 #### 0.2.7 - 2026-10-18
 
 - Changed: SD_STAGE is served from the 1 ms timer poll instead of one request per UI pass (d88e9ea).
