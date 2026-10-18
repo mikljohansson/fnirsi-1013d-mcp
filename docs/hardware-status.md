@@ -302,3 +302,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   0x1532 padded, so the rollback image is confirmed); wrote backups/al3_ext-trigger_0x1533_padded_96159a87.bin (0xFF-padded 1 MiB of
   fpga/al3/out/FPGA-ext-trigger.bin a9656703...), 68 sectors erased, 1080 pages programmed, read-back verified, independent verify OK
   (sha256 96159a87...). Scope on battery, USB unplugged, Sipeed FT2232D on J2. Power cycle and #VER fpga=0x1533 check pending.
+- Power cycle on 0x1533: #VER fw=0.2.20 fpga=0x1533, caps 0x7C0B (EXT_TRIGGER), diagnostics show 0x1533 (owner). But: four host port resets within
+  the first minute of bench traffic (event log: DTR toggles, CLEAR_FEATURE on EP2 IN 0x82, suspend, bus_reset, set_config at 40.4/40.9/41.1/49.5 s),
+  Windows error 22 on the host. Restart record showed restarts=1 with reset LR 0x2a14 / SP 0x7bd8 / CPSR SVC = the SD bootloader in SRAM after the
+  owner's power cycle (DDR kept the magic): the predicted false positive; uptime matched the power cycle, no self-restart.
+- A/B on 0x1533: fw 0.2.11 (no EXT code) in RAM: 3 bench passes, 300 x 64 KiB, 0 failed, no resets. => the bitstream is fine; the drops come
+  from firmware code gated on fpga >= 0x1533 (EXT support since 0.2.9); suspect: GET_STATUS reading FPGA cmd 0x28 from the fast path (ISR) while
+  the main loop uses the Port E bus. With fw-gen4 (0.2.22). 0.2.21 (fallback removed, 6be6f9e8) being checked on 0x1533 next.
