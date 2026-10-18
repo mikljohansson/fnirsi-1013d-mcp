@@ -88,6 +88,7 @@ uint32 pc_glue_decim_ui_start(uint32 start);      //UI capture start word: (0x14
 void   pc_glue_decim_read(void *settings, uint32 start);   //fpga_read_sample_data: 16-bit read + convert, odd pass
 void   pc_glue_decim_even(void);      //fpga_read_sample_data: second pass takes the even samples
 void   pc_glue_decim_tap(void);       //acquisition menu: Filter box touched
+void   pc_glue_settings_defaults(void); //fw 0.2.44: scope_reset_config_data (DEFAULT button, sector load failure)
 uint16 pc_glue_decim_setting_word(void);         //settings sector word (scope_save_config_data)
 uint16 pc_glue_spectrum_setting_word(int i);     //settings sector words 208, 209 (scope_save_config_data)
 
@@ -107,6 +108,7 @@ uint16 pc_glue_spectrum_setting_word(int i);     //settings sector words 208, 20
 #define PC_EXT_SELECTED()       pc_glue_ext_selected()
 #define PC_ROLL_LABEL()         pc_glue_roll_label()
 #define PC_SPECTRUM_DISPLAY()   do { if(pc_glue_spectrum_display()) return; } while(0)
+#define PC_SETTINGS_DEFAULTS()  pc_glue_settings_defaults()
 #define PC_SPECTRUM_TOUCH()     do { if(pc_glue_spectrum_touch()) return; } while(0)
 #define PC_MAIN_MENU_ROW6(y)    pc_glue_main_menu_row6(y)
 #define PC_MAIN_MENU_ITEMS()    pc_glue_main_menu_items()
@@ -130,6 +132,7 @@ uint16 pc_glue_spectrum_setting_word(int i);     //settings sector words 208, 20
 #define PC_EXT_SELECTED()       do { } while(0)
 #define PC_ROLL_LABEL()         do { } while(0)
 #define PC_SPECTRUM_DISPLAY()   do { } while(0)
+#define PC_SETTINGS_DEFAULTS()  do { } while(0)
 #define PC_SPECTRUM_TOUCH()     do { } while(0)
 #define PC_MAIN_MENU_ROW6(y)    0
 #define PC_MAIN_MENU_ITEMS()    do { } while(0)

@@ -597,8 +597,8 @@ uint32_t pc_hal_trace_capacity(void)
 
 #define PC_DEC_RING       8192
 
-static uint8         pc_dec_setting;                  //bits 1:0 requested K (UI Filter), PC_DECIM_SET_FIR; saved in
-                                                      //the settings sector
+static uint8         pc_dec_setting = PC_DECIM_DEFAULT;   //bits 1:0 requested K (UI Filter), PC_DECIM_SET_FIR;
+                                                      //saved in the settings sector
 static uint8         pc_dec_flags = PC_INTERLEAVE_ORDER ? PC_DECIM_SWAP : 0;  //0x53 bits 2-4: swap (host only, not
                                                       //saved), falling-edge capture A / B (hidden, saved)
 static uint8         pc_dec_ui_arm;                   //the next fpga_do_conversion is the UI acquisition's
@@ -851,7 +851,7 @@ uint16 pc_glue_spectrum_setting_word(int i)
 
 uint16 pc_glue_decim_setting_word(void)
 {
-  //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (Filter off). Bits
+  //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (PC_DECIM_DEFAULT). Bits
   //3-4: the hidden falling-edge capture settings (SET_DECIM only); bit 5: FIR (fw 0.2.44)
   return (uint16)(0xDE00 | (pc_dec_flags & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)) | (pc_dec_setting & (PC_DECIM_SET_FIR | 3)));
 }
@@ -907,6 +907,15 @@ static void pc_dec_fit_memory(void)
 
 //A tap steps off, boxcar, CIC2, CIC3; on 0x1535+ each filter also with the FIR: off, boxcar, boxcar+FIR, CIC2,
 //CIC2+FIR, CIC3, CIC3+FIR
+//The DEFAULT button and a settings sector that failed to load (scope_reset_config_data)
+void pc_glue_settings_defaults(void)
+{
+  pc_dec_setting = PC_DECIM_DEFAULT;
+
+  if(pc_dec_has() && (pc_dec_setting & 3))
+    pc_dec_fit_memory();
+}
+
 void pc_glue_decim_tap(void)
 {
   uint32 k = pc_dec_setting & 3, fir = (pc_dec_setting & PC_DECIM_SET_FIR) != 0;
@@ -1699,8 +1708,9 @@ static void pc_ui_fix_settings(void)
   if((scopesettings.triggerchannel > 1) && !(pc_sess.var.caps & PC_CAP_EXT_TRIGGER))
     scopesettings.triggerchannel = 0;
 
-  //Acquisition Filter (decimation, 0x1534+): kept in a spare settings word, default off. With it on the 16-bit layout
-  //limits the memory depth.
+  //Acquisition Filter (decimation, 0x1534+): kept in a spare settings word; a sector without a valid word (new
+  //settings, or one written before 0.2.30) keeps PC_DECIM_DEFAULT. With it on the 16-bit layout limits the memory
+  //depth.
   if((settingsworkbuffer[PC_SETTING_WORD_DECIM] & 0xFFC4) == 0xDE00)
   {
     pc_dec_setting = (uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_SET_FIR | 3));

@@ -6773,6 +6773,9 @@ void scope_reset_config_data(void)
   //Load input calibration value 
   scope_load_input_calibration_data();
   //----------------------------------------------------------------------------  
+  //PC protocol build: acquisition Filter back to PC_DECIM_DEFAULT
+  PC_SETTINGS_DEFAULTS();
+
   restore = 1;      //Flag - view restore text in display
 }
 
