@@ -800,6 +800,12 @@ of 5879cf2. They move with code size.
 | end of `.bss` (GCC 13) | 0x8057F738 | 0x80590A81 |
 | free DDR up to the stacks at 0x81FB5000 | 26.2 MiB | 26.1 MiB |
 
+Since fw 0.2.48 the MMU is on (docs/plans/mmu-dcache.md): the page tables (16 KB first level + 2 KB coarse tables,
+`pc_mmu.c`) sit in `.bss`, and the 1 MB section at 0x81A00000 (restart record) is mapped strongly ordered, so nothing
+else may live there (the linker script asserts that `.bss` ends below it). New DDR buffers are cacheable write-back
+by default; a buffer that another bus master reads (only the display engine's `maindisplaybuffer` today) needs its
+own mapping in `pc_mmu_build`.
+
 The next fixed DDR user above `.bss` is the bootloader's copy of SD sector 710 at 0x81BFFC00,
 22.4 MiB above the new end of `.bss`. The image needs 740 SD sectors from sector 750, so it ends
 at sector 1489, well below the FAT partition start at 2048 or later.
