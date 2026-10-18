@@ -2,6 +2,12 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
+// fnirsi-1013d-mcp changes (version word 0x1533, see fpga/al3/README.md "Changes"):
+//  - External trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
+//    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
+//  - Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
+//    bit2 = EXT edge seen since the last sampling reset (command 0x01).
+//-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
 
@@ -214,6 +220,7 @@ module fnirsi_1013D
   reg trigger_mode = 0;                    //0 == auto mode and 1 == normal mode.
   reg trigger_edge = 0;                    //0 == rising edge and 1 =  falling edge.
   reg trigger_channel = 0;                 //0 == channel 1 and 1 == channel 2.
+  reg trigger_ext = 0;                     //1 == external trigger on the calibration pin (command 0x15 value 2)
 
   reg [7:0] trigger_level = 0;
   
@@ -280,6 +287,58 @@ freq_generator_dds_pwm u_freq
   assign o_1khz_calib = gen_out_enable ? clk_1KHz : 1'bZ; 
 
   //assign o_1khz_calib = clk_1KHz;
+
+//-------------------------------------------------------------------------------------
+//External trigger input on the calibration pin
+//The input buffer of the pad is always read. With the generator off (command 0x50 = 0)
+//the pad is hi-Z and an external 3.3 V logic signal can drive it. With the generator on
+//the input reads back the generator's own output.
+//Two flip-flop synchroniser into the clk_200MHz domain, then a 3-sample majority filter
+//(pulses of one 5 ns clock are rejected, two or more pass), then the edge detect.
+//The selected edge is held in ext_pending and applied to sampling_triggered right after
+//the next rising edge of sample_write_clock, which is where an ADC trigger is applied too.
+//So trigger_address follows the ADC convention: it is the address of the last sample that
+//was written before the (filtered) EXT edge. The pad to filtered-edge latency is 4 to 5
+//clk_200MHz cycles (20 to 25 ns). Pulses shorter than a sample period still trigger.
+
+  reg [1:0] ext_sync = 0;                  //Synchroniser, ext_sync[1] is the safe one
+  reg [1:0] ext_hist = 0;                  //Two older synchronised samples for the majority filter
+  reg ext_level = 0;                       //Filtered EXT level
+  reg ext_level_prev = 0;                  //Filtered EXT level one clock earlier
+  reg ext_activity = 0;                    //An EXT edge was seen since the last sampling reset
+  reg ext_pending = 0;                     //Selected EXT edge seen, waiting for the next sample write clock
+  reg swc_prev = 0;                        //sample_write_clock one clk_200MHz cycle earlier
+
+  wire ext_rise = ext_level & ~ext_level_prev;
+  wire ext_fall = ~ext_level & ext_level_prev;
+
+  //Selected edge per command 0x16 (0 = rising, 1 = falling), only when EXT is the source
+  wire ext_edge = trigger_ext & (trigger_edge ? ext_fall : ext_rise);
+
+  //Rising edge of sample_write_clock (it toggles on the falling edge of clk_200MHz)
+  wire swc_rise = sample_write_clock & ~swc_prev;
+
+  wire ext_trigger_detect = ext_pending & swc_rise;
+
+  always @(posedge clk_200MHz)
+    begin
+      ext_sync       <= { ext_sync[0], o_1khz_calib };
+      ext_hist       <= { ext_hist[0], ext_sync[1] };
+      ext_level      <= (ext_sync[1] & ext_hist[0]) | (ext_sync[1] & ext_hist[1]) | (ext_hist[0] & ext_hist[1]);
+      ext_level_prev <= ext_level;
+
+      swc_prev       <= sample_write_clock;
+
+      if(sample_system_reset == 1)
+        ext_activity <= 0;
+      else if(ext_rise | ext_fall)
+        ext_activity <= 1;
+
+      if(sample_system_reset == 1)
+        ext_pending <= 0;
+      else if(trigger_check_enable & ext_edge)
+        ext_pending <= 1;
+    end
 
 //Clock divider for making the 1KHz calibration signal
 //The original uses 32 bits and 25000 for last which gives the incorrect frequency
@@ -468,11 +527,11 @@ assign sampling_enable = ~(
   assign trigger_rise_enable = (~trigger_edge & prev_less_equal_lev) | trigger_detect_enable;
   assign trigger_fall_enable =  (trigger_edge & ~prev_less_equal_lev) | trigger_detect_enable;
 
-// Rising edge: previous ≤ level, current ≥ level
-  assign trigger_rise_detect = (~trigger_edge & prev_less_equal_lev & cur_greater_equal_lev);
+// Rising edge: previous ≤ level, current ≥ level (ADC trigger, not when EXT is selected)
+  assign trigger_rise_detect = (~trigger_ext & ~trigger_edge & prev_less_equal_lev & cur_greater_equal_lev);
 
-// Falling edge: previous ≥ level, current ≤ level
-  assign trigger_fall_detect = (trigger_edge & ~prev_less_equal_lev & cur_less_equal_lev); 
+// Falling edge: previous ≥ level, current ≤ level (ADC trigger, not when EXT is selected)
+  assign trigger_fall_detect = (~trigger_ext & trigger_edge & ~prev_less_equal_lev & cur_less_equal_lev); 
 
 
   always @(posedge clk_200MHz) begin			//clk_RAM  sample_write_clock
@@ -480,8 +539,8 @@ assign sampling_enable = ~(
         sampling_triggered <= 0;
         trigger_detect_enable <= 0;
     end else if(trigger_check_enable == 1) begin
-        sampling_triggered <= sampling_triggered | trigger_rise_detect | trigger_fall_detect;
-        trigger_detect_enable <= trigger_rise_detect | trigger_fall_detect;
+        sampling_triggered <= sampling_triggered | trigger_rise_detect | trigger_fall_detect | ext_trigger_detect;
+        trigger_detect_enable <= trigger_rise_detect | trigger_fall_detect | ext_trigger_detect;
     end
   end
 
@@ -687,9 +746,12 @@ assign sampling_enable = ~(
             8'h0F:
               sample_read_enable <= io_mcu_data[0];
 
-            //Setting the trigger channel
+            //Setting the trigger source: 0 = channel 1, 1 = channel 2, 2 = EXT (3 reserved, acts as EXT)
             8'h15:
-              trigger_channel <= io_mcu_data[0];
+              begin
+                trigger_channel <= io_mcu_data[0];
+                trigger_ext     <= io_mcu_data[1];
+              end
 
             //Setting the trigger edge
             8'h16:
@@ -850,7 +912,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h32;
+                    o_mcu_data <= 8'h33;
                 endcase
               end
 
@@ -907,6 +969,11 @@ assign sampling_enable = ~(
             //Reading of the sample data for channel 2 ADC 2
             8'h27:
               o_mcu_data <= i_adc2B_d;
+
+            //Reading of the external trigger status
+            //bit0 = filtered EXT pin level, bit1 = generator drives the pin, bit2 = EXT edge since the last reset
+            8'h28:
+              o_mcu_data <= { 5'b0, ext_activity, gen_out_enable, ext_level };
 
             //Reading of the touch panel address needs loading of high byte first
             8'h41:

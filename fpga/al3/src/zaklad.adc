@@ -57,4 +57,4 @@ set_pin_assignment	{ o_relay1_3 }	{ LOCATION = P126; IOSTANDARD = LVCMOS33; PULL
 set_pin_assignment	{ o_relay2_1 }	{ LOCATION = P128; IOSTANDARD = LVCMOS33; PULLTYPE = PULLUP; }
 set_pin_assignment	{ o_relay2_2 }	{ LOCATION = P125; IOSTANDARD = LVCMOS33; PULLTYPE = PULLUP; }
 set_pin_assignment	{ o_relay2_3 }	{ LOCATION = P127; IOSTANDARD = LVCMOS33; PULLTYPE = PULLUP; }
-set_pin_assignment   { o_1khz_calib } { LOCATION = P133; IOSTANDARD = LVCMOS33; PULLTYPE = NONE; SLEWRATE = FAST; }
+set_pin_assignment   { o_1khz_calib } { LOCATION = P133; IOSTANDARD = LVCMOS33; PULLTYPE = PULLDOWN; SLEWRATE = FAST; }
