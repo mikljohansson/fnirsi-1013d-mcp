@@ -369,3 +369,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   (framebuffer uncached) would turn the D-cache on and is the obvious speed-up for everything (later item). Card keeps 0.2.25.
 - Owner's verdict on 0.2.27 channel menus: Open CH, Invert, Coupling AC/DC, V/A mode, Probe mode 1x..1000x on both channels; the dead FFT
   switch is gone. XY mode already exists in System settings (Atlan's); phosphor grading of it is a later nicety.
+- FPGA 0x1534 (fpga-gen3, decimation filter: K = 0 legacy / 1 boxcar / 2 CIC2 / 3 CIC3, 16-bit samples, cmds 0x53/0x54/0x55, read 0x29;
+  fixed latency 120 ns + K*(N-1)*2.5 ns): bitstream sha256 83140510... (282,898 B) pinned as backups/al3_decim_0x1534_83140510.bin, padded
+  1 MiB image backups/al3_decim_0x1534_padded.bin sha256 c387a15e.... **Not flashed**; waits for the firmware support (fw-decim) to be benched
+  on 0x1533 first. Firmware 0.2.28 (fw-gen5, e6a7c4c, protocol 1.7): on-scope spectrum view as a main-loop display mode; not yet benched.
