@@ -173,7 +173,10 @@ def main():
              # fw 0.2.12+: USB interrupts served by the timer poll (lost IRQs)
              'usb_irq_polled '
              # fw 0.2.17+: ms spent on the boot splash step + 1
-             'boot_splash_ms').split()
+             'boot_splash_ms '
+             # fw 0.2.19+: restart record
+             'restarts restart_exc_type restart_exc_lr restart_exc_spsr restart_exc_sp '
+             'restart_reset_lr restart_reset_sp restart_reset_cpsr').split()
     st, body, _ = L.request(0x0007)
     if st == 0 and body:
         n = struct.unpack_from('<H', body)[0]

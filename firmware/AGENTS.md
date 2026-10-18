@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.18 (0.2.18: event-log snapshot re-armed only on request; 0.2.17: quiet boot without scope.bmp; 0.2.16: the tick runs nothing for SOF; CDC handler split into entry + body under
+State on 2026-10-18, fw 0.2.19 (0.2.19: restart record + exceptions restart, see Known issues; 0.2.18: event-log snapshot re-armed only on request; 0.2.17: quiet boot without scope.bmp; 0.2.16: the tick runs nothing for SOF; CDC handler split into entry + body under
 PC_PROTOCOL; 0.2.15: event log 128 entries, SOF ignored, reset snapshot; 0.2.14: the USB IRQ fallback serves only after two quiet ticks; 0.2.13: System settings compacted without an RTC, battery level filtered; 0.2.12: USB IRQ fallback in the timer poll, GET_EVENT_LOG, protocol 1.5; 0.2.11: a request sent right after the port is opened is no longer dropped; 0.2.10: MCP chip drawn as one idempotent blit, acquisition "Roll mode on/off" toggle
 label; protocol 1.4: shared control, SD sector commands, EXT trigger for FPGA 0x1533
 (protocol section 14 row 41, needs bench with fpga-gen2's bitstream); 0.2.8: generator and trigger menus compacted; 0.2.7: SD_STAGE from the timer poll,
@@ -214,6 +214,15 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
   test_dtr_up_keeps_request.
 - Startup (closed 2026-10-18): 1515 ms from session init to the first MAIN poll is the 1.00o5 splash
   (`load_picture("scope.bmp")`); kept by decision, documented in README section 4 ("Boot"). The first pass is 31 ms.
+- Restart from RAM (0.2.16 bench, open): uptime 175 s after 7+ min of running, #VER unchanged, three bench runs died
+  after "#VER OK". Not a watchdog or power reset (that boots the card's 0.2.11): a jump to 0 (low vector 0 =
+  ldr pc, _jump_reset) or 0x80000000 (eGON branch to _reset), i.e. a NULL function call or a corrupt return address;
+  1.00o5's exception vectors only spin (b .), so an exception would have hung, not restarted. No IRQ nesting: nothing
+  re-enables IRQs inside a handler (pc_irq_save/restore keep the I bit), the IRQ entry reloads SP at the top of the
+  IRQ stack (100 KB). 0.2.19 records the reset-entry LR/SP/CPSR and every exception (type, LR, SPSR, SP) at
+  0x81A00000 (free DDR: BSS ends at 0x805A5030, the bootloader's sector-710 copy is at 0x81BFFC00), restarts on
+  exceptions, and reports them: GET_LINK_STATS 49-56, event type 15. ENTER_FEL clears the record. Makefile: start.s
+  now gets $(PC_DEFS).
 - USB drops (Windows error 22, device re-enumerates): 0.2.2 idle with the port closed, 0.2.3 during an SD write,
   0.2.11 during 10 Hz GET_STATUS polling (counters: one extra suspend + one extra bus reset = one host port reset;
   no stalls, CRC errors or aborts). Prime suspect (not proven): a lost USB interrupt. 1.00o5's irq_handler clears

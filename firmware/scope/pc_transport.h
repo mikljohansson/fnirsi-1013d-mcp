@@ -88,6 +88,9 @@ void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
 #define PC_EVT_TX_FLUSH       12    //a frame in flight was dropped (link, DTR)
 #define PC_EVT_TX_ABORT       13    //dropped by the session (2 s no progress, #RESET)
 #define PC_EVT_IRQ_POLLED     14    //the timer poll found USB flags the interrupt had not taken: a = INTUSB, b = INTTX << 8 | INTRX
+#define PC_EVT_RESTART        15    //fw 0.2.19, at boot after a restart from RAM: a = exception type, b = low PC bits
+
+void pc_usb_log_restart(uint8 type, uint16 pc);
 
 void pc_usb_isr_flags(uint32 usb, uint32 tx, uint32 rx);   //top of the CDC IRQ handler (also when called from the poll)
 void pc_usb_isr_setup(uint32 d0, uint32 d1);                //EP0 setup packet (the 8 bytes as two words)

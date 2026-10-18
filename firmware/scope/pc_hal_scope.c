@@ -74,6 +74,7 @@ static void pc_draw_end(const DISPLAYDATA *save)
 }
 
 static void pc_ext_generator_off(void);
+static void pc_restart_clear(void);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -890,6 +891,8 @@ static void __attribute__((naked, noreturn)) pc_fel_jump(void)
 
 void pc_hal_enter_fel(void)
 {
+  pc_restart_clear();
+
   uint32 t0 = timer0ticks;
   uint32 cpsr;
 
@@ -1130,6 +1133,58 @@ int pc_glue_battery_level(int raw, int charging, int shown)
 }
 
 //Settings saved by an earlier firmware (or another unit) may select what this hardware cannot do
+//----------------------------------------------------------------------------------------------------------------------------------
+// Restart record (fw 0.2.19). The bench saw 0.2.16 restart from RAM (uptime reset, version unchanged): a jump to the
+// image entry. start.s stores LR/SP/CPSR at _reset and, for an exception, its type/LR/SPSR/SP, at this address. The
+// previous run leaves PC_RST_ALIVE in it; DDR keeps it across a warm restart, a power cycle does not.
+
+#define PC_RST_ADDR       ((volatile uint32 *)0x81A00000)
+#define PC_RST_ALIVE      0x4C495645u      //'EVIL' little-endian: the previous run was alive
+#define PC_RST_EXC_MAGIC  0x45584321u      //exception fields valid
+
+static uint32 pc_restart_info[8];          //restarts, type, exception LR, SPSR, exception SP, reset LR, reset SP, reset CPSR
+
+static void pc_restart_check(void)
+{
+  volatile uint32 *r = PC_RST_ADDR;
+  uint32 restarts = 0;
+
+  //[0] alive, [1] restart count, [2] reset LR, [3] reset SP, [4] reset CPSR, [5] exc type, [6] exc LR, [7] SPSR,
+  //[8] exc SP, [9] exc magic
+  if(r[0] == PC_RST_ALIVE)
+  {
+    restarts = r[1] + 1;
+
+    pc_restart_info[1] = (r[9] == PC_RST_EXC_MAGIC) ? r[5] : 0;
+    pc_restart_info[2] = (r[9] == PC_RST_EXC_MAGIC) ? r[6] : 0;
+    pc_restart_info[3] = (r[9] == PC_RST_EXC_MAGIC) ? r[7] : 0;
+    pc_restart_info[4] = (r[9] == PC_RST_EXC_MAGIC) ? r[8] : 0;
+    pc_restart_info[5] = r[2];
+    pc_restart_info[6] = r[3];
+    pc_restart_info[7] = r[4];
+  }
+
+  pc_restart_info[0] = restarts;
+  r[1] = restarts;
+  r[9] = 0;
+  r[0] = PC_RST_ALIVE;
+}
+
+void pc_hal_restart_info(uint32_t *v)
+{
+  uint32 i;
+
+  for(i=0;i<8;i++)
+    v[i] = pc_restart_info[i];
+}
+
+//ENTER_FEL is a deliberate exit: the next image must not count it as a restart
+static void pc_restart_clear(void)
+{
+  PC_RST_ADDR[0] = 0;
+  PC_RST_ADDR[1] = 0;
+}
+
 static void pc_ui_fix_settings(void)
 {
   uint32 max = pc_sess.var.max_total, total;
@@ -1168,9 +1223,15 @@ void pc_glue_init(void)
 
   //Version word from FPGA command 0x06, read once (main() read it already; this read has no side effect)
   pc_fpga_word = fpga_get_version();
+  pc_restart_check();
   pc_session_init(&pc_sess);
   pc_ready = 1;
   pc_ui_fix_settings();
+
+  //A restart is logged once, as event type 15 (a = exception type, 0 = jump to the entry; b = low 16 bits of the
+  //exception LR, or of the LR found at _reset)
+  if(pc_restart_info[0])
+    pc_usb_log_restart((uint8)pc_restart_info[1], (uint16)(pc_restart_info[1] ? pc_restart_info[2] : pc_restart_info[5]));
 }
 
 void pc_glue_poll_main(void)

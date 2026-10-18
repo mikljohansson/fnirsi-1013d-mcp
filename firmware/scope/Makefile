@@ -138,7 +138,7 @@ $(OBJDIR)/%.o: %.c | $(OBJDIR)
 
 $(OBJDIR)/%.o: %.s | $(OBJDIR)
 	@$(if $(Q),echo "  AS      $<")
-	$(Q)$(CC) $(ASFLAGS) -o $@ $<
+	$(Q)$(CC) $(ASFLAGS) $(PC_DEFS) -o $@ $<
 
 $(OBJDIR):
 	$(Q)mkdir -p $@

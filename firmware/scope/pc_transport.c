@@ -491,6 +491,14 @@ void pc_hal_rx_debug(uint32_t *v)
     v[i] = pc_rxd[i];
 }
 
+void pc_usb_log_restart(uint8 type, uint16 pc)
+{
+  uint32 cpsr = pc_irq_save();
+
+  pc_evlog_add(PC_EVT_RESTART, type, pc);
+  pc_irq_restore(cpsr);
+}
+
 void pc_usb_isr_configured(void)
 {
   pc_ep2_configured = 1;
