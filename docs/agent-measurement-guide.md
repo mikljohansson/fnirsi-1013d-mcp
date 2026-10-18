@@ -46,6 +46,10 @@ descriptions are authoritative. Server setup: `mcp/README.md`.
 - `scope_decay_fit`: PI decays: averaged, edge-aligned, fit window after the edge (`t_start` past the flyback,
   `t_end` before the noise floor), `exp`, `exp+offset`, `exp2` or `power`. Check `r2`, residuals and caveats.
 - `scope_capture_and_fft`: spectra; `flattop` window for amplitudes, `hann` for resolution.
+- `scope_spectrum`: what the scope's own spectrum view shows (firmware >= 0.2.28), when the person has it open
+  (`scope_status` `display_mode` = `spectrum`). Cheap, takes no capture, single shot, firmware scaling. Use it to
+  talk about the same picture the person sees; use `scope_capture_and_fft` for averaging, other windows or the
+  per-unit calibration. `cross_check=true` confirms both agree on the same capture.
 - `scope_measure`: vpp, rms, frequency, duty, rise time, CH1->CH2 delay on the last capture (or a fresh one).
 
 ## 4. The screen is shared

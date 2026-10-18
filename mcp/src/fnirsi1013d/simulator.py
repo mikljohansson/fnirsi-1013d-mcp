@@ -45,6 +45,7 @@ from typing import Callable
 
 import numpy as np
 
+from . import analysis
 from . import protocol as P
 from .units import parse_quantity
 
@@ -431,6 +432,18 @@ class Device:
         self.ev_frozen = False
         self.ev_reset_ms = 0
         self.ev_snapshot: list[P.DeviceEvent] = []
+        #: fw 0.2.24 bus-level ring (P.BUS_EVENT_TYPES only, 16 entries)
+        self.bus_events: list[P.DeviceEvent] = []
+        self.bus_total = 0
+        #: fw 0.2.28 spectrum view (ui_set_spectrum): display mode, window (0 rect, 1 Hann, 2 flat-top), the view's
+        #: FFT length (log2, capped by the record) and channel selection (0 CH1, 1 CH2, 2 both)
+        self.display_mode = P.DisplayMode.SCOPE
+        self.spec_window = 1
+        self.spec_log2n = 14
+        self.spec_channel = 2
+        self.spec_frames = 0
+        self._spec_key: tuple | None = None
+        self._spec: dict[int, tuple[P.SpectrumHeader, np.ndarray]] = {}
         #: SD card and the 64 KiB write staging buffer (fw 0.2.2)
         self.sd = SimCard()
         self.sd_stage = bytearray(P.SD_STAGE_BYTES)
@@ -905,7 +918,7 @@ class Device:
             exit_reason=0, pass_ms=self.pass_ms, pass_max_ms=self.pass_max_ms, settings_seq=self.settings_seq,
             capture_settings_seq=self.capture_settings_seq if self.capture_id else P.SEQ_INVALID,
             run_state=int(self.run_state), capture_origin=self.capture_origin if self.capture_id else 0,
-            ext_flags=self._ext_flags(now))
+            ext_flags=self._ext_flags(now), display_mode=int(self.display_mode))
 
     def _ext_flags(self, now: float) -> int:
         if not self.caps & P.Caps.EXT_TRIGGER:
@@ -1036,7 +1049,8 @@ class Device:
                 cmd = P.Cmd(req.cmd)
             except ValueError:
                 return self._done(req, self._err(req, P.Status.E_UNKNOWN_CMD, 0, f"cmd 0x{req.cmd:04X}"))
-            if not self.shared and cmd in (P.Cmd.SET_ACQ_STATE, P.Cmd.GET_CAPTURE_INFO):
+            if not self.shared and cmd in (P.Cmd.SET_ACQ_STATE, P.Cmd.GET_CAPTURE_INFO, P.Cmd.READ_SPECTRUM,
+                                           P.Cmd.FFT_BENCH):
                 # protocol 1.2 firmware does not know the 1.3 commands
                 return self._done(req, self._err(req, P.Status.E_UNKNOWN_CMD, 0, f"cmd 0x{req.cmd:04X}"))
             if self.deferred is not None and self.deferred.frame.seq == req.seq and                     self.deferred.frame.cmd == req.cmd:
@@ -1140,7 +1154,8 @@ class Device:
         if flags & ~P.EVENT_LOG_REARM:
             raise _DevErr(P.Status.E_BAD_ARG, 0, "flags")
         log = P.EventLog(self.event_total, now, list(self.events[-128:]), frozen=self.ev_frozen,
-                         reset_ms=self.ev_reset_ms, snapshot=list(self.ev_snapshot), has_snapshot=True)
+                         reset_ms=self.ev_reset_ms, snapshot=list(self.ev_snapshot), has_snapshot=True,
+                         bus_events=list(self.bus_events), bus_total=self.bus_total, has_bus_ring=True)
         if flags & P.EVENT_LOG_REARM:  # fw 0.2.18: only an explicit re-arm clears the snapshot
             self.ev_frozen, self.ev_snapshot, self.ev_reset_ms = False, [], 0
         return self._ok(req, P.pack_event_log(log))
@@ -1151,6 +1166,7 @@ class Device:
         with self.lock:
             self.t_boot = self.now()
             self.events, self.event_total = [], 0
+            self.bus_events, self.bus_total = [], 0
             self.ev_frozen, self.ev_snapshot, self.ev_reset_ms = False, [], 0
 
     def log_event(self, type_: int, a: int = 0, b: int = 0) -> None:
@@ -1162,6 +1178,80 @@ class Device:
         self.events.append(P.DeviceEvent(ms, type_, a, b))
         del self.events[:-128]
         self.event_total += 1
+        if type_ in P.BUS_EVENT_TYPES:
+            self.bus_events.append(self.events[-1])
+            del self.bus_events[:-16]
+            self.bus_total += 1
+
+    # --- spectrum view (fw 0.2.28) --------------------------------------------------------------------------
+
+    def ui_set_spectrum(self, on: bool = True, *, window: int | None = None, log2n: int | None = None,
+                        channel: int | None = None) -> None:
+        """Test hook: the person opens / closes the spectrum view or changes its window, FFT length or channel."""
+        with self.lock:
+            self.display_mode = P.DisplayMode.SPECTRUM if on else P.DisplayMode.SCOPE
+            if window is not None:
+                self.spec_window = window
+            if log2n is not None:
+                self.spec_log2n = log2n
+            if channel is not None:
+                self.spec_channel = channel
+
+    def _spectra(self) -> dict[int, tuple[P.SpectrumHeader, np.ndarray]]:
+        """The spectra of the latest capture as the view computes them (recomputed on a new capture or setting)."""
+        s = self.capture_settings
+        n = 2 * self.capture_geometry[1]
+        lmax = 10
+        while lmax < 14 and (2 << lmax) <= n:
+            lmax += 1
+        log2n = min(self.spec_log2n, lmax)
+        key = (self.capture_id, self.capture_settings_seq, self.spec_window, log2n, self.spec_channel)
+        if key == self._spec_key:
+            return self._spec
+        N = 1 << log2n
+        win = P.SPECTRUM_WINDOWS[self.spec_window]
+        out = {}
+        for ch in (0, 1):
+            cs = s.channels[ch]
+            if not cs.enable or self.spec_channel not in (2, ch):
+                continue
+            tr, _ = self.build_trace(ch, s)
+            dsv = self.cal[ch].dc_shift_value
+            zero = 128 - int(cs.dcoffset * 100 / dsv) if dsv else 128  # C division truncates
+            cfg = self.channel_config(ch, s)
+            gain = round(2000 * math.log10(cfg.uv_per_lsb_q8 / 256e6 * cfg.probe_factor))
+            with np.errstate(invalid="ignore"):
+                lv = np.round(analysis.scope_fft_db(tr, zero, win, N) * 100) + gain
+            lv = np.clip(np.nan_to_num(lv, nan=P.SPECTRUM_EMPTY, neginf=P.SPECTRUM_EMPTY), P.SPECTRUM_EMPTY, 32000)
+            bw = (200_000_000_000 // (self.capture_divider + 1)) >> log2n
+            h = P.SpectrumHeader(ch, self.spec_window, log2n, 0, 0, self.capture_divider,
+                                 (200_000_000 + (self.capture_divider + 1) // 2) // (self.capture_divider + 1), bw, gain,
+                                 N // 2 + 1, 0, 0, {0: 1000, 1: 1500, 2: 3770}[self.spec_window])
+            out[ch] = (h, lv.astype(np.int16))
+        self.spec_frames += 1
+        self._spec_key, self._spec = key, out
+        return out
+
+    def _cmd_read_spectrum(self, req: P.Frame) -> P.Frame:
+        r = P.ReadSpectrumReq.unpack(req.payload)
+        if r.channel > 1:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "channel")
+        if self.display_mode != P.DisplayMode.SPECTRUM or self.capture_id == 0:
+            raise _DevErr(P.Status.E_STATE, 0, "no spectrum shown for this channel")
+        try:
+            self._check_capture_readable()
+            spectra = self._spectra()
+        except _DevErr:
+            spectra = self._spec  # the view keeps showing the last spectrum it computed
+        if r.channel not in spectra:
+            raise _DevErr(P.Status.E_STATE, 0, "no spectrum shown for this channel")
+        h0, lv = spectra[r.channel]
+        mx = (P.MAX_RESPONSE_PAYLOAD - 32) // 2
+        count = mx if r.count == 0 or r.count > mx else r.count
+        first = min(r.first, h0.bins)
+        n = min(count, h0.bins - first)
+        h = replace(h0, frame=self.spec_frames, first=first, count=n)
+        return self._ok(req, P.pack_spectrum(h, lv[first: first + n].tolist()))
 
     def _cmd_get_battery(self, req: P.Frame) -> P.Frame:
         return self._ok(req, P.BatteryResp(18, 0, 41, 0).pack())

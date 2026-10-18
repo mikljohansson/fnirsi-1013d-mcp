@@ -170,3 +170,23 @@ def test_snapshot_survives_plain_reads_and_is_rearmed_after_saving(sim):
     text = "\n".join(lines)
     assert "events start: pre-reset snapshot" in text and "events start: snapshot re-armed" in text
     assert len(s.snapshots) == 1 and not sim.device.ev_frozen
+
+
+def test_soak_prints_bus_ring_events_evicted_from_the_main_ring(sim):
+    """fw 0.2.24: a TX abort flooded out of the 128-entry ring by DTR / EP0 chatter is still in the bus-level ring."""
+    sim.device.log_event(13, 0, 64)
+    sim.device.log_event(17, 0x40, 0x0001)
+    for _ in range(140):
+        sim.device.log_event(9, 1)
+    rc, lines, s = run_soak(sim, duration=0.3)
+    text = "\n".join(lines)
+    assert "bus ring 2 new of 2 since boot, 2 not in the main ring:" in text, text
+    assert "bus: device" in text and "TXCSR 0x0001 TxPktRdy" in text
+
+
+def test_retired_counters_are_not_watched():
+    """Counters 47 / 57 are always 0 since fw 0.2.21; a delta means older firmware and is reported separately."""
+    assert not set(S.RETIRED) & set(S.WATCH)
+    a = {"usb_irq_polled": 0, "usb_bus_resets": 0}
+    b = {"usb_irq_polled": 3, "usb_bus_resets": 1}
+    assert S.deltas(a, b) == {"usb_bus_resets": 1} and S.deltas(a, b, S.RETIRED) == {"usb_irq_polled": 3}

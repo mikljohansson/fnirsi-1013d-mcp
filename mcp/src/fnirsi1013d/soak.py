@@ -40,8 +40,11 @@ from .transport import (PIDCODES_TEST_PIDS, PIDCODES_VID, Link, Transport, Trans
 
 #: counters whose deltas tell what happened on the USB side
 WATCH = ("link_resets", "dtr_up", "dtr_down", "usb_bus_resets", "usb_suspends", "usb_resumes", "usb_disconnects",
-         "ep0_setups", "ep0_bad_setups", "usb_irq_polled", "rx_stalls", "hdr_crc_errors", "payload_crc_errors",
-         "rx_timeouts", "restarts")
+         "ep0_setups", "ep0_bad_setups", "rx_stalls", "hdr_crc_errors", "payload_crc_errors", "rx_timeouts",
+         "restarts")
+#: counters 47 and 57, retired in fw 0.2.21 (always 0 there; kept so decoders by count work): a delta is reported
+#: as a firmware older than 0.2.21
+RETIRED = ("usb_irq_polled", "usb_irq_races")
 #: Windows: USB settings subgroup / USB selective suspend setting
 POWERCFG = ("2a737441-1930-4402-8d77-b2bebba308a3", "48e6b7a6-50f5-4782-a5d4-53bb8f07e226")
 
@@ -119,6 +122,8 @@ class Soak:
         self.proto_minor = 0
         #: device events already printed (GET_EVENT_LOG total at the last read)
         self.events_seen = 0
+        #: fw 0.2.24 bus-level ring entries seen (its own since-boot counter)
+        self.bus_seen = 0
         #: fw 0.2.15 reset snapshots seen (kept for the run)
         self.snapshots: list[P.EventLog] = []
         #: last GET_STATUS uptime_ms seen (a decrease = the device restarted)
@@ -147,7 +152,7 @@ class Soak:
         if prev is not None and up < prev:
             self.st.restarts += 1
             self.log(f"DEVICE RESTARTED (uptime went backwards: {prev} -> {up} ms)")
-            self.events_seen = 0  # the device's event counter starts over too
+            self.events_seen = self.bus_seen = 0  # the device's event counters start over too
             self.restart_record()
             return True
         return False
@@ -211,6 +216,20 @@ class Soak:
         for e in shown:
             at = host_now - _dt.timedelta(milliseconds=log.now_ms - e.ms)
             self.log(f"  device {e.ms} ms (~host {at.isoformat(timespec='milliseconds')}) {e.describe()}")
+        if log.has_bus_ring:  # fw 0.2.24: bus-level events the EP0 / DTR chatter may have evicted from the main ring
+            if log.bus_total < self.bus_seen:
+                self.bus_seen = 0
+            newb = log.bus_total - self.bus_seen
+            showb = log.bus_events[-newb:] if 0 < newb <= len(log.bus_events) else (log.bus_events if newb > 0 else [])
+            printed = {(e.ms, e.type, e.a, e.b) for e in shown}
+            extra = [e for e in showb if (e.ms, e.type, e.a, e.b) not in printed]
+            if newb > 0:
+                self.log(f"events {label}: bus ring {newb} new of {log.bus_total} since boot"
+                         + (f", {len(extra)} not in the main ring:" if extra else ""))
+            for e in extra:
+                at = host_now - _dt.timedelta(milliseconds=log.now_ms - e.ms)
+                self.log(f"  bus: device {e.ms} ms (~host {at.isoformat(timespec='milliseconds')}) {e.describe()}")
+            self.bus_seen = log.bus_total
         if log.frozen:  # fw 0.2.15+: the events right before the first bus reset since the snapshot was armed
             at = host_now - _dt.timedelta(milliseconds=log.now_ms - log.reset_ms)
             self.log(f"events {label}: pre-reset snapshot: bus reset at device {log.reset_ms} ms "
@@ -364,19 +383,19 @@ class Soak:
         lat_txt = (f"latency median {statistics.median(lat) * 1e3:.1f} ms, p99 {lat[int(0.99 * (len(lat) - 1))] * 1e3:.1f}"
                    f" ms, max {lat[-1] * 1e3:.1f} ms" if lat else "no successful request")
         cd = fmt(deltas(self.start_stats, self.last_stats)) if self.start_stats and self.last_stats else "unavailable"
-        if self.start_stats and self.last_stats and "usb_irq_polled" in self.last_stats:
-            irq = self.last_stats["usb_irq_polled"] - self.start_stats.get("usb_irq_polled", 0)
-            cd = (cd + " " if cd else "") + f"(usb_irq_polled delta {irq})"
+        ret = deltas(self.start_stats, self.last_stats, RETIRED)
+        if ret:
+            cd = (cd + " " if cd else "") + f"(retired counters moved, firmware older than 0.2.21: {fmt(ret)})"
         self.log(f"summary requests {s.requests}, failures {s.failures}, drops {s.drops}"
                  + (f" (down {', '.join(f'{d:.2f}' for d in s.down_times)} s)" if s.down_times else "")
                  + f", device restarts {s.restarts}"
                  + f", longest gap {s.longest_gap:.2f} s, {lat_txt}; counters delta {cd or 'none'}")
 
 
-def deltas(a: dict[str, int] | None, b: dict[str, int] | None) -> dict[str, int]:
+def deltas(a: dict[str, int] | None, b: dict[str, int] | None, names: tuple[str, ...] = WATCH) -> dict[str, int]:
     if not a or not b:
         return {}
-    return {k: b[k] - a.get(k, 0) for k in WATCH if k in b and b[k] != a.get(k, 0)}
+    return {k: b[k] - a.get(k, 0) for k in names if k in b and b[k] != a.get(k, 0)}
 
 
 def fmt(d: dict[str, int]) -> str:

@@ -147,7 +147,7 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 |---|---|---|
 | `scope_info` | 0 | firmware, protocol, FPGA variant, serial, capabilities, memory limits |
 | `scope_profile` | 0 | static capability profile, live values, unverified facts, standing caveats |
-| `scope_status` | 0 | mode, run_state (RUN/STOP/SINGLE), settings_seq, latest capture id and origin, host capture state, battery, link statistics |
+| `scope_status` | 0 | mode, display_mode (scope / spectrum view, protocol 1.7), run_state (RUN/STOP/SINGLE), settings_seq, latest capture id and origin, host capture state, battery, link statistics |
 | `scope_get_config` | 0 | channels, timebase, trigger and generator in physical units |
 | `scope_read_calibration` | 0 | offset centres, gains, A/B compensation, volts per code per range |
 | `scope_screenshot` | 0 | PNG of the 800x480 screen |
@@ -159,9 +159,10 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_acquisition_control` | 1 | arm / wait / force / stop / run (RUN/STOP shared with the scope's button) |
 | `scope_averaged_capture` | 1 | n captures averaged, hardware or edge alignment, on-device averaging when available; restarts when a setting is changed at the scope |
 | `scope_capture_and_fft` | 1 | averaged amplitude spectrum, peaks in dBV and dBc, noise floor, THD |
+| `scope_spectrum` | 0 | the spectrum the scope's own spectrum view shows (READ_SPECTRUM, fw >= 0.2.28): bins, rate, bin width, window, ENBW/RBW, gain, peaks; `cross_check` recomputes it on the host from the same capture |
 | `scope_decay_fit` | 1 | edge-aligned average, then `exp`, `exp+offset`, `exp2` or `power` fit after the TX edge; tau, R^2, sample points |
 | `scope_set_channel` | 2 | range, coupling, offset, probe, invert; relay changes limited to 5 per second |
-| `scope_event_log` | 0 | the scope's last 64 USB / link events with device ms (protocol >= 1.5) |
+| `scope_event_log` | 0 | the scope's last 128 USB / link events with device ms (protocol >= 1.5), the pre-reset snapshot and (fw >= 0.2.24) the bus-level ring |
 | `scope_sd_info` | 0 | SD card size, partition, write window, eGON headers at 16/80/750 (optionally checksum-verified); fw >= 0.2.2 |
 | `scope_calibration_info` | 0 | scaling in effect per channel, calibration file and its fitted zero / slope / gain per range and core |
 | `scope_calibrate_volts` | 2 | a known DC voltage on every range: fits 0 V code, volts per code and offset slope per range and ADC core, saves the calibration file |

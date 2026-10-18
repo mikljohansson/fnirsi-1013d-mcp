@@ -103,6 +103,9 @@ is shared: no ownership to take or release, the last change wins, host captures 
 restart (and say so) when a setting is changed at the scope. On legacy firmware without the SHARED_MODE capability
 the server takes REMOTE implicitly and releases it (keeping the host settings) after 60 s idle and at exit.
 `scope_status` reports `mode`, `run_state` and `settings_seq`; `acquisition_control` gained `run`.
+Protocol 1.7 adds `display_mode` (`scope`, or `spectrum` while the screen shows the spectrum view); while it is
+`spectrum`, every tool that checks the scope first (captures, setters) adds the caveat that the person sees the
+spectrum of each capture, not the trace. The data are unaffected.
 
 **`get_config`** (tier 0). Returns both channels (enabled, V/div, coupling, offset in divisions and volts,
 probe factor, invert), timebase (rate, dt, time/div equivalent, divider), trigger (source, edge, level in
@@ -244,6 +247,21 @@ can be hundreds of volts: use a 10x probe or a clamp and check the input rating 
 "after clipping, the front end needs recovery time; samples within blank_after_clip are excluded",
 "with fs = F, the decay is sampled every 1/F; tau below ~5 samples is not resolvable", "AC coupling
 distorts decays longer than the coupling time constant [U value]; use DC coupling for decays".
+
+**`scope_spectrum`** (tier 0, protocol 1.7, firmware >= 0.2.28). Reads the spectrum the scope's own spectrum
+view shows (READ_SPECTRUM, docs/protocol.md section 14 row 45): the on-scope FFT of the latest capture, window and
+FFT length as chosen at the scope (N = the largest power of two the record holds, up to the view's length). Takes
+no capture. Params: `channel`, `fmin`, `fmax`, `peaks`, `cross_check`. Returns `unit` (dBV, dBA in A mode),
+`frame` (spectra computed since boot), `sample_rate`, `divider`, `n_fft`, `bin_width`, `window`, `enbw_bins`,
+`rbw_hz`, `gain_db` (20 log10 of the volts per code the scope applied), `peaks` (frequency, level, dBc), the median
+noise floor per bin, the bins inline when they fit `inline_max_points`, and a `.npz` (`f`, `level_db`, empty bins
+NaN). Fails with a hint when the screen is in the scope view or shows no spectrum of that channel.
+`cross_check=true` reads the same capture's trace (checked by the spectrum frame before and after) and recomputes
+it twice on the host: `fft` is the on-scope FFT model (codes minus the zero code, same window and N; expect
+< 0.1 dB within 60 dB of the peak), `volts` is `scope_capture_and_fft`'s computation on the calibrated volts
+(its `median_diff_db` is the scaling difference: the scope uses the firmware's volts per code, the host the
+per-unit calibration when there is one). Caveats: 8-bit SFDR, firmware scaling, and "a host capture with a raw
+divider is labelled with the UI time base's rate" (known firmware limit).
 
 **`measure`** (tier 0 on an existing capture, 1 if it captures). Items: `vpp`, `vmin`, `vmax`, `mean`,
 `rms`, `ac_rms`, `frequency`, `period`, `duty`, `rise_time`, `fall_time`, `delay(CH1->CH2)`. Computed on the

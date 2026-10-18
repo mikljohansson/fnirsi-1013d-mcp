@@ -43,7 +43,7 @@ from pydantic import Field
 
 from . import analysis as A
 from . import protocol as P
-from .scope import (CHANNEL_NAMES, SCALING_CAVEAT, Capture, CaptureContext, Scope, channel_index,
+from .scope import (CHANNEL_NAMES, SCALING_CAVEAT, Capture, CaptureContext, Scope, Spectrum, channel_index,
                     settings_diff)
 from .transport import DeviceError, TransportError
 from .calibration import UnitCalibration, describe as describe_cal
@@ -281,7 +281,7 @@ class Session:
             raise ToolError("scope UI is in a modal screen (menu, calibration or USB storage); close it on the "
                             "scope and retry")
         if s.shared:
-            return []
+            return [SPECTRUM_VIEW_NOTE] if st.display_mode == P.DisplayMode.SPECTRUM else []
         if st.control == P.Control.REMOTE:
             s.remote = True
             return []
@@ -396,6 +396,56 @@ class _Held:
 
 # ---------------------------------------------------------------------------------------------------------
 # Helpers
+
+
+#: caveat while the scope's screen shows its spectrum view (protocol 1.7, GET_STATUS display_mode)
+SPECTRUM_VIEW_NOTE = ("the scope's screen shows its spectrum view: the person at the scope sees the spectrum of each "
+                      "capture, not the trace (the data returned here are unaffected; scope_spectrum reads what the "
+                      "screen shows)")
+
+
+def _spectrum_cross_check(s: Scope, ch: str, sp: Spectrum) -> dict[str, Any]:
+    """Recompute the scope's spectrum on the host from the same capture's trace (READ_TRACE): the on-scope FFT
+    model (codes minus the zero code, same window and N) against the device's levels in dB re 1 code RMS, and
+    scope_capture_and_fft's computation (calibrated volts, analysis.amplitude_spectrum) against its dBV levels."""
+    for _ in range(3):
+        cap = s.read_trace_capture([ch])
+        again = s.read_spectrum(ch, 0, 1)
+        if again.header.frame == sp.header.frame:
+            break
+        sp = s.read_spectrum(ch)  # a new capture or setting replaced the spectrum meanwhile
+    else:
+        raise ToolError("scope_spectrum(cross_check): the spectrum kept changing (the scope is in RUN); stop it first")
+    n = sp.n_fft
+    c = cap.channels[ch]
+    if c.codes.size < n:
+        raise ToolError(f"scope_spectrum(cross_check): the trace has {c.codes.size} samples, the spectrum used {n}")
+    if sp.header.first != 0 or sp.cdb.size != n // 2 + 1:
+        raise ToolError("scope_spectrum(cross_check): needs the whole spectrum (first_bin 0, all bins)")
+    win = P.SPECTRUM_WINDOWS.get(sp.header.window)
+    if win is None:
+        raise ToolError(f"scope_spectrum(cross_check): unknown window code {sp.header.window}")
+    fft = A.compare_spectra(sp.db_codes, A.scope_fft_db(c.codes, round(c.config.zero_code), win, n))
+    f, amp, _ = A.amplitude_spectrum(c.volts[:n], cap.dt, win, detrend=False)
+    host = 20 * np.log10(np.maximum(amp, 1e-15))
+    host[n // 2] -= 20 * np.log10(2)  # amplitude_spectrum doubles the Nyquist bin; the scope does not
+    volts = A.compare_spectra(sp.db, host)
+    vpl_db = 20 * math.log10(c.volts_per_lsb) if c.volts_per_lsb > 0 else None
+    out = {"capture_id": cap.capture_id, "same_capture": True,
+           "fft": {k: _r6(v) if isinstance(v, float) else v for k, v in fft.items()},
+           "volts": {k: _r6(v) if isinstance(v, float) else v for k, v in volts.items()},
+           "host_volts_per_lsb_db": _r6(vpl_db), "device_gain_db": sp.header.gain_cdb / 100,
+           "scaling": c.scale.source if c.scale is not None else "firmware"}
+    notes = []
+    if fft["max_abs_diff_db"] is not None and fft["max_abs_diff_db"] > 0.2:
+        notes.append(f"the on-scope FFT differs from the host model by up to {fft['max_abs_diff_db']:.2f} dB within "
+                     "60 dB of the peak (expected < 0.1 dB)")
+    if vpl_db is not None and abs(vpl_db - sp.header.gain_cdb / 100) > 0.5:
+        notes.append(f"the scope labels levels with {sp.header.gain_cdb / 100:.2f} dB(V per code), the host's "
+                     f"{out['scaling']} scaling gives {vpl_db:.2f} dB: absolute levels differ by "
+                     f"{vpl_db - sp.header.gain_cdb / 100:+.2f} dB")
+    out["notes"] = notes
+    return out
 
 
 def _err_text(tool: str, e: Exception) -> str:
@@ -758,7 +808,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     @register(0, title="Scope status", read_only=True)
     async def scope_status() -> dict[str, Any]:
         """Mode ('collaborative': shared with the person at the scope; 'exclusive' on legacy firmware with
-        LOCAL/REMOTE), run_state (RUN / STOP / SINGLE), settings_seq (changes whenever anyone changes a setting),
+        LOCAL/REMOTE), display_mode (scope, or spectrum when the screen shows the spectrum view; protocol 1.7),
+        run_state (RUN / STOP / SINGLE), settings_seq (changes whenever anyone changes a setting),
         the latest capture's id and origin (host / ui_run / ui_single), the host capture state, trigger address,
         battery, and on legacy firmware the watchdog and exit_reason. Cheap; use it to poll."""
         def go() -> dict[str, Any]:
@@ -778,7 +829,11 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             else:
                 extra_ext = {}
             if st.shared:
-                extra = {"mode": "collaborative", "run_state": P.RunState(st.run_state).name,
+                try:
+                    disp = P.DisplayMode(st.display_mode).name.lower()
+                except ValueError:
+                    disp = st.display_mode
+                extra = {"mode": "collaborative", "display_mode": disp, "run_state": P.RunState(st.run_state).name,
                          "settings_seq": st.settings_seq, "capture_settings_seq": st.capture_settings_seq,
                          "capture_origin": P.CaptureOrigin(st.capture_origin).name.lower()}
             else:
@@ -881,7 +936,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         aborted, and lost USB interrupts served by the timer poll, each with the device time in ms. Use it to
         diagnose a link drop right after the scope reappears (a host port reset shows as suspend then bus reset).
         fw 0.2.15 adds reset_snapshot: the events right before the first bus reset since the snapshot was armed.
-        This tool reads plainly, which keeps it on fw 0.2.18+ (0.2.15-0.2.17 re-armed on every read). Read-only."""
+        fw 0.2.24 adds bus_events: the last 16 bus-level events (resets, suspend/resume, disconnect, configuration,
+        halts, TX flush/abort with their EP2 state, restarts, USB init state), which EP0 setups and DTR edges cannot
+        evict. This tool reads plainly, which keeps it on fw 0.2.18+ (0.2.15-0.2.17 re-armed on every read). Read-only."""
         def go() -> dict[str, Any]:
             s = sess.get_scope()
             log = s.event_log()
@@ -895,8 +952,79 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             if log.has_snapshot:
                 out["reset_snapshot"] = ({"reset_ms": log.reset_ms, "events_before": rows(log.snapshot)}
                                          if log.frozen else None)
+            if log.has_bus_ring:
+                out["bus_events"] = rows(log.bus_events)
+                out["bus_total_since_boot"] = log.bus_total
             return out
         return await run("scope_event_log", 0, {"last": last}, go)
+
+    @register(0, title="Read the scope's spectrum", read_only=True)
+    async def scope_spectrum(
+        channel: Annotated[Literal["CH1", "CH2"], Field(description="channel")] = "CH1",
+        fmin: Annotated[float | str, Field(description="lowest frequency for peaks and returned bins, Hz")] = 0.0,
+        fmax: Annotated[float | str | None, Field(description="highest frequency, Hz (default fs/2)")] = None,
+        peaks: Annotated[int, Field(ge=1, le=100, description="number of peaks to list")] = 10,
+        cross_check: Annotated[bool, Field(description="also read the same capture's trace and recompute the "
+                                                       "spectrum on the host (on-scope FFT model and the "
+                                                       "scope_capture_and_fft computation); about 0.1 s more")] = False,
+    ) -> dict[str, Any]:
+        """The spectrum the scope's own spectrum view shows (firmware >= 0.2.28, protocol 1.7): the on-scope FFT
+        of the latest capture (Hann, flat-top or rect window as chosen at the scope; N = the largest power of two
+        the record holds, up to the view's FFT length), with sample rate, bin width, window, ENBW / RBW, the volts
+        per code the scope applied, the peaks (frequency, dBV, dBc) and the median noise floor. The full spectrum is
+        saved as .npz (f, level_db). Read-only and cheap; it takes no capture (use scope_capture_and_fft for host
+        averaging or other windows). Fails with a hint when the screen is not in the spectrum view or shows no
+        spectrum of that channel (scope_status display_mode says which)."""
+        def go() -> dict[str, Any]:
+            s = sess.get_scope()
+            if s.info.proto_minor < 7:
+                raise ToolError("scope_spectrum: needs protocol 1.7 (firmware >= 0.2.28 with the spectrum view)")
+            try:
+                sp = s.read_spectrum(channel)
+            except DeviceError as e:
+                if e.status == P.Status.E_STATE:
+                    st = s.status()
+                    where = ("the screen is in the scope view: open main menu > Spectrum analyzer at the scope"
+                             if st.display_mode != P.DisplayMode.SPECTRUM else
+                             f"the spectrum view shows no spectrum of {channel} (channel off or not selected in the "
+                             "view, or no capture yet)")
+                    raise ToolError(f"scope_spectrum: {where}") from e
+                raise
+            h = sp.header
+            f = sp.freqs
+            lv = sp.db
+            fs = sp.sample_rate
+            f_lo = parse_quantity(fmin)
+            f_hi = parse_quantity(fmax) if fmax is not None else fs / 2
+            band = (f >= f_lo) & (f <= f_hi)
+            amp = np.where(np.isnan(lv), 0.0, 10 ** (np.nan_to_num(lv, nan=-400.0) / 20))
+            inband = amp[band & (np.arange(f.size) > 0)]
+            floor = float(np.median(inband)) if inband.size else 0.0
+            pk = A.peaks(f, amp, peaks, f_lo, f_hi, floor=floor * 3)
+            ref = pk[0][1] if pk else 1.0
+            unit = sp.unit
+            plist = [{"frequency": _r6(fr), unit.lower(): _r6(A.db(a)), "dbc": _r6(A.db(a, ref))} for fr, a, _ in pk]
+            path = sess.save_npz("spectrum", {"f": f, "level_db": lv},
+                                 {"kind": "spectrum", "source": "READ_SPECTRUM", "channel": channel, "unit": unit,
+                                  **h.to_dict()})
+            out: dict[str, Any] = {
+                "ok": True, "channel": channel, "unit": unit, "frame": h.frame, "sample_rate": _r6(fs),
+                "divider": h.divider, "n_fft": sp.n_fft, "bin_width": _r6(sp.bin_width), "window": h.window_name,
+                "enbw_bins": sp.enbw_bins, "rbw_hz": _r6(sp.enbw_bins * sp.bin_width),
+                "gain_db": h.gain_cdb / 100, "bins": h.bins, "peaks": plist,
+                "noise_floor_db_per_bin": _r6(A.db(floor)) if floor > 0 else None, "file": path}
+            if int(band.sum()) <= sess.cfg.inline_max_points:
+                out["spectrum"] = {"f": A._r(f[band]), "level_db": [None if np.isnan(x) else round(float(x), 2)
+                                                                    for x in lv[band]]}
+            cav = ["8-bit ADC: SFDR around 45-50 dBc at best; spurs below that are not trustworthy.",
+                   "levels use the firmware's volts per code (gain_db); the per-unit calibration is not applied",
+                   "a host capture with a raw divider is labelled with the UI time base's rate (known firmware limit)"]
+            if cross_check:
+                out["cross_check"] = _spectrum_cross_check(s, channel, sp)
+                cav += out["cross_check"]["notes"]
+            out["caveats"] = cav
+            return out
+        return await run("scope_spectrum", 0, {"channel": channel, "cross_check": cross_check}, go)
 
     @register(0, title="SD card info", read_only=True)
     async def scope_sd_info(

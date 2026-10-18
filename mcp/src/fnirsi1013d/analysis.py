@@ -272,6 +272,39 @@ def peaks(f: np.ndarray, amp: np.ndarray, count: int = 10, fmin: float = 0.0, fm
     return out
 
 
+def scope_fft_db(codes: np.ndarray, zero_code: float, window_fn: str, n: int) -> np.ndarray:
+    """Float model of the on-scope spectrum (fx_fft.c, as firmware/scope/host_tests/test_fft.py checks it): the first
+    ``n`` trace codes minus ``zero_code``, windowed, one-sided power per bin in dB re 1 code RMS (a sine of amplitude
+    A codes centred on a bin reads 20 log10(A / sqrt 2) on every window; DC and Nyquist carry their full value).
+    Bins with no power read -inf."""
+    x = np.asarray(codes[:n], dtype=np.float64) - zero_code
+    if x.size != n:
+        raise ValueError(f"scope_fft_db: {x.size} samples, need {n}")
+    w = window(window_fn, n)
+    p = np.abs(np.fft.rfft(w * x)) ** 2 * 2 / w.sum() ** 2
+    p[0] /= 2
+    p[n // 2] /= 2
+    with np.errstate(divide="ignore"):
+        return 10 * np.log10(p)
+
+
+def compare_spectra(device_db: np.ndarray, host_db: np.ndarray, span_db: float = 60.0) -> dict[str, Any]:
+    """Compare two spectra over the same bins (dB, NaN / -inf = empty) on the bins within ``span_db`` of the host
+    peak, DC excluded: worst and median level difference (device - host) and both peak bins."""
+    d = np.asarray(device_db, dtype=np.float64)
+    h = np.asarray(host_db, dtype=np.float64)
+    if d.size != h.size or d.size < 3:
+        raise ValueError("compare_spectra: spectra of different length")
+    hp = int(np.nanargmax(np.where(np.isfinite(h[1:]), h[1:], -np.inf))) + 1
+    dp = int(np.nanargmax(np.where(np.isfinite(d[1:]), d[1:], -np.inf))) + 1
+    sel = np.isfinite(h) & np.isfinite(d) & (h > h[hp] - span_db)
+    sel[0] = False
+    diff = d[sel] - h[sel]
+    return {"bins_compared": int(sel.sum()), "max_abs_diff_db": float(np.max(np.abs(diff))) if diff.size else None,
+            "median_diff_db": float(np.median(diff)) if diff.size else None, "host_peak_bin": hp,
+            "device_peak_bin": dp, "host_peak_db": float(h[hp]), "device_peak_db": float(d[dp])}
+
+
 def db(x: float, ref: float = 1.0) -> float:
     return 20 * math.log10(max(x, 1e-15) / ref)
 

@@ -116,6 +116,52 @@ class Capture:
 
 
 @dataclass
+class Spectrum:
+    """The spectrum the scope's spectrum view shows (READ_SPECTRUM, protocol 1.7)."""
+
+    header: P.SpectrumHeader
+    #: levels in centi-dBV (centi-dBA in A mode), P.SPECTRUM_EMPTY = empty bin
+    cdb: np.ndarray
+
+    @property
+    def n_fft(self) -> int:
+        return 1 << self.header.log2n
+
+    @property
+    def sample_rate(self) -> float:
+        """Exact rate from the divider (the header's Hz field is rounded)."""
+        return P.BASE_CLOCK_HZ / (self.header.divider + 1)
+
+    @property
+    def bin_width(self) -> float:
+        return self.sample_rate / self.n_fft
+
+    @property
+    def enbw_bins(self) -> float:
+        return self.header.enbw_milli / 1000.0
+
+    @property
+    def freqs(self) -> np.ndarray:
+        return (self.header.first + np.arange(self.cdb.size)) * self.bin_width
+
+    @property
+    def db(self) -> np.ndarray:
+        """Levels in dB (NaN for empty bins)."""
+        out = self.cdb.astype(np.float64) / 100.0
+        out[self.cdb <= P.SPECTRUM_EMPTY] = np.nan
+        return out
+
+    @property
+    def db_codes(self) -> np.ndarray:
+        """Levels in dB re 1 code RMS (the device's gain removed)."""
+        return self.db - self.header.gain_cdb / 100.0
+
+    @property
+    def unit(self) -> str:
+        return "dBA" if self.header.flags & P.SpectrumHeader.F_AMPS else "dBV"
+
+
+@dataclass
 class Profile:
     info: P.InfoResp
     variant: str
@@ -683,6 +729,16 @@ class Scope:
         assert hdr0 is not None
         hdr0.count = pos - start
         return hdr0, {c: (metas[i], np.concatenate(pieces[c])) for i, c in enumerate(chans)}
+
+    def read_spectrum(self, ch: int | str = "CH1", first: int = 0, count: int = 0) -> Spectrum:
+        """READ_SPECTRUM (protocol 1.7): the spectrum the scope's spectrum view shows for ``ch``, bins
+        [first, first + count) (count 0 = all that fit, which is every bin up to N = 65536). E_STATE when the view is
+        off or shows no spectrum of that channel."""
+        if self.info.proto_minor < 7:
+            raise DeviceError(P.Cmd.READ_SPECTRUM, P.Status.E_UNKNOWN_CMD, 0, "needs protocol 1.7 (firmware >= 0.2.28)")
+        h, levels = P.parse_spectrum(self._req(P.Cmd.READ_SPECTRUM,
+                                               P.ReadSpectrumReq(channel_index(ch), first, count).pack()))
+        return Spectrum(h, np.asarray(levels, dtype=np.int16))
 
     def read_live(self, core: int, count: int = 64) -> np.ndarray:
         return np.frombuffer(self._req(P.Cmd.READ_LIVE, P.ReadLiveReq(core, count).pack()), np.uint8)

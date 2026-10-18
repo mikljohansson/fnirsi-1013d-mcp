@@ -84,7 +84,8 @@ FAST_CMDS = frozenset({P.Cmd.PING, P.Cmd.GET_INFO, P.Cmd.GET_STATUS, P.Cmd.GET_B
 #: mid-transfer; dropping it after 100 ms turned its tail into "garbage" (bench census 2026-10-18, fw 0.1.3).
 HOST_PARTIAL_TIMEOUT_S = 2.0
 #: responses that can be tens of KiB
-BULK_CMDS = frozenset({P.Cmd.READ_RAW, P.Cmd.READ_TRACE, P.Cmd.READ_SCREEN, P.Cmd.TEST_PATTERN})
+BULK_CMDS = frozenset({P.Cmd.READ_RAW, P.Cmd.READ_TRACE, P.Cmd.READ_SCREEN, P.Cmd.TEST_PATTERN,
+                       P.Cmd.READ_SPECTRUM})
 #: commands whose OK response is a GET_STATUS body (byte 0 = control); used to track REMOTE for timeouts
 _STATUS_BODY_CMDS = frozenset({P.Cmd.GET_STATUS, P.Cmd.SET_REMOTE, P.Cmd.ARM, P.Cmd.FORCE, P.Cmd.STOP,
                                P.Cmd.WAIT})

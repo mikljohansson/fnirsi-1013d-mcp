@@ -31,7 +31,7 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) in `.m
   `scope_acquisition_control(action='run')` gives the person a live screen back.
 - `scope_fetch_waveform` = what the scope shows now, with the settings of that capture; changes nothing.
 - Noise below ~2 LSB or fits: `scope_averaged_capture` (n 16-64 quick, 256+ for fits; `align='edge'` on the TX gate).
-- PI decays: `scope_decay_fit` (t_start past the flyback, check r2 and residuals). Spectra: `scope_capture_and_fft`.
+- PI decays: `scope_decay_fit` (t_start past the flyback, check r2 and residuals). Spectra: `scope_capture_and_fft`; what the scope's own spectrum view shows: `scope_spectrum`.
 - Quick numbers: `scope_measure`.
 
 ## The screen is shared

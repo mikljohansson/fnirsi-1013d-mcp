@@ -26,8 +26,9 @@ PROTO_MAJOR = 1
 #: 1.1: GET_STATUS pass_ms / pass_max_ms (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4); 1.3: collaborative (shared)
 #: mode: SHARED_MODE cap, GET_STATUS settings/run fields, SET_ACQ_STATE, GET_CAPTURE_INFO; 1.4 (fw 0.2.9): EXT
 #: trigger (source 2 on 0x1533+ bitstreams), GET_STATUS ext_flags, GET_CAPTURE_INFO flag bit 5; 1.5 (fw 0.2.12):
-#: GET_EVENT_LOG, link counter 47 usb_irq_polled
-PROTO_MINOR = 6
+#: GET_EVENT_LOG, link counter 47 usb_irq_polled; 1.6 (fw 0.2.27): FFT_BENCH; 1.7 (fw 0.2.28): spectrum view,
+#: READ_SPECTRUM, GET_STATUS display_mode
+PROTO_MINOR = 7
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -80,6 +81,7 @@ class Cmd(enum.IntEnum):
     ACQUIRE_AVG = 0x0207
     SET_ACQ_STATE = 0x0208  # protocol 1.3, SHARED_MODE
     GET_CAPTURE_INFO = 0x0209  # protocol 1.3, SHARED_MODE
+    READ_SPECTRUM = 0x020A  # protocol 1.7, fw 0.2.28: the spectrum the scope's spectrum view shows (main loop)
     GET_GEN = 0x0300
     SET_GEN = 0x0301
     GET_CAL = 0x0400
@@ -245,6 +247,13 @@ class ExtFlags(enum.IntFlag):
     LEVEL = 1 << 0  # live level of the EXT pin
     GENERATOR = 1 << 1  # the generator drives the pin
     EDGE_SEEN = 1 << 2  # an EXT edge since the last sampling reset (every arm clears it)
+
+
+class DisplayMode(enum.IntEnum):
+    """GET_STATUS display_mode (protocol 1.7, byte 43; 0 before): what the scope's trace area shows."""
+
+    SCOPE = 0
+    SPECTRUM = 1
 
 
 class UiBusy(enum.IntEnum):
@@ -716,7 +725,7 @@ class StatusResp(Payload):
               ("trigger_addr", "H"), ("capture_start_word", "H"), ("ms_since_arm", "I"), ("uptime_ms", "I"),
               ("watchdog_remaining_s", "H"), ("battery_level", "B"), ("exit_reason", "B"), ("reserved", "I"),
               ("pass_ms", "H"), ("pass_max_ms", "H"), ("settings_seq", "I"), ("capture_settings_seq", "I"),
-              ("run_state", "B"), ("capture_origin", "B"), ("ext_flags", "B"), ("reserved2", "B")]
+              ("run_state", "B"), ("capture_origin", "B"), ("ext_flags", "B"), ("display_mode", "B")]
     control: int = 0
     acq_state: int = 0
     flags: int = 0
@@ -743,7 +752,8 @@ class StatusResp(Payload):
     capture_origin: int = 0
     #: 1.4: ExtFlags (0 unless caps EXT_TRIGGER)
     ext_flags: int = 0
-    reserved2: int = 0
+    #: 1.7: DisplayMode (0 before 1.7)
+    display_mode: int = 0
 
     @property
     def shared(self) -> bool:
@@ -1244,6 +1254,66 @@ class TraceChannelMeta(Payload):
 
 
 @dataclass
+class ReadSpectrumReq(Payload):
+    """READ_SPECTRUM request (protocol 1.7): u8 channel, u8 0, u16 first bin, u16 count (0 = as many as fit), u16 0."""
+
+    FIELDS = [("channel", "B"), ("_r0", "x"), ("first", "H"), ("count", "H"), ("_r1", "2x")]
+    channel: int = 0
+    first: int = 0
+    count: int = 0
+
+
+#: READ_SPECTRUM window codes
+SPECTRUM_WINDOWS = {0: "rect", 1: "hann", 2: "flattop"}
+#: READ_SPECTRUM level of an empty bin (centi-dB)
+SPECTRUM_EMPTY = -32000
+
+
+@dataclass
+class SpectrumHeader(Payload):
+    """READ_SPECTRUM response header, 32 bytes (section 14 row 45)."""
+
+    FIELDS = [("channel", "B"), ("window", "B"), ("log2n", "B"), ("flags", "B"), ("frame", "I"), ("divider", "I"),
+              ("sample_rate_hz", "I"), ("bin_width_mhz", "I"), ("gain_cdb", "i"), ("bins", "H"), ("first", "H"),
+              ("count", "H"), ("enbw_milli", "H")]
+    channel: int = 0
+    window: int = 1
+    log2n: int = 11
+    flags: int = 0
+    #: spectra computed since boot (changes with every new capture or setting)
+    frame: int = 0
+    divider: int = 0
+    sample_rate_hz: int = 0
+    #: fs / N in mHz, truncated
+    bin_width_mhz: int = 0
+    #: 20 log10(volts per code) in centi-dB, already applied to the levels
+    gain_cdb: int = 0
+    #: bins in the spectrum (N/2 + 1)
+    bins: int = 0
+    first: int = 0
+    count: int = 0
+    #: equivalent noise bandwidth in milli-bins (1000 rect, 1500 Hann, 3770 flat-top)
+    enbw_milli: int = 1000
+
+    F_AMPS: ClassVar[int] = 0x01
+
+    @property
+    def window_name(self) -> str:
+        return SPECTRUM_WINDOWS.get(self.window, f"window{self.window}")
+
+
+def parse_spectrum(payload: bytes) -> tuple[SpectrumHeader, tuple[int, ...]]:
+    """READ_SPECTRUM: 32-byte header, then ``count`` i16 levels (centi-dBV / centi-dBA, SPECTRUM_EMPTY = empty)."""
+    h = SpectrumHeader.unpack(payload[:32])
+    n = min(h.count, max(0, len(payload) - 32) // 2)
+    return h, struct.unpack_from(f"<{n}h", payload, 32)
+
+
+def pack_spectrum(h: SpectrumHeader, levels: "list[int] | tuple[int, ...]") -> bytes:
+    return h.pack() + struct.pack(f"<{len(levels)}h", *(int(v) for v in levels))
+
+
+@dataclass
 class ReadLiveReq(Payload):
     FIELDS = [("core", "B"), ("_r", "x"), ("count", "H")]
     core: int = 0
@@ -1418,7 +1488,50 @@ EVENT_LOG_REARM = 0x01
 #: GET_EVENT_LOG entry types (protocol 1.5, section 14 row 42)
 EVENT_TYPES = {1: "bus_reset", 2: "suspend", 3: "resume", 4: "disconnect", 5: "ep0_setup", 6: "ep0_short_packet",
                7: "set_configuration", 8: "clear_halt", 9: "dtr", 10: "rx_ring_full", 11: "rx_release",
-               12: "tx_flushed", 13: "tx_aborted", 14: "usb_irq_polled", 15: "restart", 16: "usb_init_state", 17: "tx_abort_txcsr", 18: "tx_abort_frame", 19: "usb_postinit_state"}
+               12: "tx_flushed", 13: "tx_aborted", 14: "usb_irq_polled", 15: "restart", 16: "usb_init_state",
+               17: "tx_abort_txcsr", 18: "tx_abort_frame", 19: "usb_postinit_state"}
+#: event types the fw 0.2.24 bus-level ring keeps (PC_EVBUS_TYPES)
+BUS_EVENT_TYPES = frozenset({1, 2, 3, 4, 7, 8, 12, 13, 15, 16, 17, 18})
+#: PHY tuning bits as fw 0.2.25 writes them (event 19 fields 4/5: bit 0 PHY 0x0C, bits 1-5 PHY 0x20-0x24, bits 6-7
+#: PHY 0x2A-0x2B)
+PHY_TUNING_WRITTEN = 0x00E9
+
+
+def _ccu_flags(f: int) -> str:
+    names = ("otg_reset_released", "otg_clock_on", "phy_reset_released", "phy_clock_on")
+    return ",".join(n for i, n in enumerate(names) if f & (1 << i)) or "none"
+
+
+def _phy_tuning(b: int) -> str:
+    return (f"0x{b:04X} (res45_cal {b & 1}, tx_amp 0x{(b >> 1) & 0x1F:02X}, disc_thresh {(b >> 6) & 3}"
+            + (", as written)" if b == PHY_TUNING_WRITTEN else ")"))
+
+
+def _usb_state_field(t: int, a: int, b: int) -> str:
+    """Events 16 (fw 0.2.22, controller state found at usb_device_init) and 19 (fw 0.2.25, at its end)."""
+    if a == 0:
+        return f"POWER 0x{b >> 8:02X} FADDR {b & 0x7F}"
+    if a == 1:
+        return f"INTUSBE 0x{b >> 8:02X} ccu {_ccu_flags(b & 0xFF)}"
+    if t == 16:
+        if a == 2:
+            return f"EP2 TXCSR 0x{b:04X}"
+        if a == 3:
+            return f"EP2 RXCSR 0x{b:04X}"
+        if a == 4:
+            return f"ISCR 0x{b << 4:06X} (bits 4-19)"
+    else:
+        if a == 2:
+            return f"ISCR 0x{b << 4:06X} (bits 4-19)"
+        if a == 3:
+            return f"USBPHY_CFG 0x{b:04X}"
+        if a == 4:
+            return "PHY tuning now " + _phy_tuning(b)
+        if a == 5:
+            return "PHY tuning after reset " + _phy_tuning(b)
+        if a == 6:
+            return f"PHYCTL 0x{b:04X}"
+    return f"field {a} 0x{b:04X}"
 
 
 @dataclass
@@ -1450,6 +1563,14 @@ class DeviceEvent:
             return f"usb_irq_polled INTUSB 0x{a:02X} INTTX 0x{b >> 8:02X} INTRX 0x{b & 0xFF:02X}"
         if t == 15:
             return f"restart exception {a} ({RESTART_EXC_TYPES.get(a, '?')}) pc.lo16 0x{b:04X}"
+        if t in (16, 19):
+            return f"{self.name} {_usb_state_field(t, a, b)}"
+        if t == 17:
+            pkt = "TxPktRdy (packet waits, host takes no IN data)" if b & 1 else \
+                ("UnderRun (host polls, nothing loaded)" if b & 4 else "idle")
+            return f"tx_abort_txcsr POWER 0x{a:02X} TXCSR 0x{b:04X} {pkt}"
+        if t == 18:
+            return (f"tx_abort_frame tx_irq_enabled {a & 1} zlp_pending {(a >> 1) & 1} frame {b & 0x7FF}")
         return self.name
 
 
@@ -1463,6 +1584,10 @@ class EventLog:
     reset_ms: int = 0
     snapshot: list[DeviceEvent] = field(default_factory=list)
     has_snapshot: bool = False
+    #: fw 0.2.24 tail: the last bus-level events (BUS_EVENT_TYPES), which EP0 setups and DTR edges cannot evict
+    bus_events: list[DeviceEvent] = field(default_factory=list)
+    bus_total: int = 0
+    has_bus_ring: bool = False
 
 
 def _event(payload: bytes, off: int) -> DeviceEvent:
@@ -1472,7 +1597,8 @@ def _event(payload: bytes, off: int) -> DeviceEvent:
 def parse_event_log(payload: bytes) -> EventLog:
     """GET_EVENT_LOG: u16 n (<= 64, <= 128 from fw 0.2.15), u16 0, u32 total, u32 now_ms, then n x (u32 ms, u8 type,
     u8 a, u16 b), oldest first. fw 0.2.15 appends a reset snapshot: u16 m (<= 16), u16 frozen, u32 reset_ms, m
-    entries (the events right before the first bus reset since the previous read). Older firmware: exactly 12 + 8n."""
+    entries (the events right before the first bus reset since the previous read). fw 0.2.24 then appends the
+    bus-level ring: u16 k (<= 16), u16 0, u32 bus events since boot, k entries. Older firmware: exactly 12 + 8n."""
     if len(payload) < 12:
         return EventLog(0, 0, [])
     n, _r, total, now = struct.unpack_from("<HHII", payload)
@@ -1487,6 +1613,13 @@ def parse_event_log(payload: bytes) -> EventLog:
         log.frozen = bool(frozen)
         log.reset_ms = reset_ms
         log.snapshot = [_event(payload, off + 8 + 8 * i) for i in range(m)]
+        off += 8 + 8 * m
+        if len(payload) >= off + 8:
+            k, _r, bus_total = struct.unpack_from("<HHI", payload, off)
+            k = min(k, (len(payload) - off - 8) // 8)
+            log.has_bus_ring = True
+            log.bus_total = bus_total
+            log.bus_events = [_event(payload, off + 8 + 8 * i) for i in range(k)]
     return log
 
 
@@ -1496,6 +1629,9 @@ def pack_event_log(log: EventLog) -> bytes:
     if log.has_snapshot:
         out += struct.pack("<HHI", len(log.snapshot), int(log.frozen), log.reset_ms & 0xFFFFFFFF) + \
             b"".join(struct.pack("<IBBH", e.ms & 0xFFFFFFFF, e.type, e.a, e.b) for e in log.snapshot)
+        if log.has_bus_ring:
+            out += struct.pack("<HHI", len(log.bus_events), 0, log.bus_total & 0xFFFFFFFF) + \
+                b"".join(struct.pack("<IBBH", e.ms & 0xFFFFFFFF, e.type, e.a, e.b) for e in log.bus_events)
     return out
 
 
@@ -1527,6 +1663,7 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.ACQUIRE_AVG: AcquireAvgReq.size(), Cmd.GET_GEN: 0, Cmd.SET_GEN: SetGenReq.size(), Cmd.GET_CAL: 1,
     Cmd.READ_SCREEN: ReadScreenReq.size(), Cmd.ENTER_FEL: 4, Cmd.SET_ACQ_STATE: SetAcqStateReq.size(),
     Cmd.GET_CAPTURE_INFO: 0, Cmd.GET_EVENT_LOG: 0, Cmd.SD_INFO: 4, Cmd.SD_READ_SECTORS: 8, Cmd.SD_STAGE: 8, Cmd.SD_WRITE_SECTORS: 16,
+    Cmd.READ_SPECTRUM: ReadSpectrumReq.size(),
 }
 
 
