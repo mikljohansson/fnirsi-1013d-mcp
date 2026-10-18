@@ -69,7 +69,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   a capture loop that reads several records per pass would raise the waveform rate. Measure pass_ms in the view first.
 - [ ] **Gain-per-range check** (fw-cal2 assumption 1, README 6.3 step 7): gains measured on one range are applied to all six; bench
   CH1 at ranges 1/2/3 with the generator static on the post; if spans disagree beyond 0.3 %, store gains per range (80 bytes free).
-- [ ] **Bode analyser, host steps H1-H3** (docs/plans/bode-design.md fe5780b): MCP tool `scope_bode_sweep` host-driven with the existing
+- [x] **Bode analyser, host steps H1-H3** (docs/plans/bode-design.md fe5780b; done by mcp-gen4: 1d46cf8, f0940ee, 363f676,
+  d3a16bb, simulator-tested, bench pending in "MCP / host"): MCP tool `scope_bode_sweep` host-driven with the existing
   commands (SET_GEN raw 50 MHz / M tones, SET_DECIM CIC3+FIR, coherent READ_RAW layout 2, single-bin DFT), thru-calibration, fixed range
   first, then down-ranging; bench first on an RC low-pass R 1.6 kOhm / C 10 nF (fc 9.95 kHz) with DUT ground on the USB shell.
 - [ ] **Bode analyser, device steps D1-D5** after the host version proves the numbers: display mode with magnitude/phase panes,
@@ -86,8 +87,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## MCP / host
 
-- [ ] **scope_status docstring** (docs-gen1): mcp/src/fnirsi1013d/server.py scope_status still says display_mode is "scope, or spectrum";
-  the enum has five values. mcp-gen4 to fix with its next commit.
+- [x] **scope_status docstring** (docs-gen1): names all five display modes (mcp-gen4, with the Bode docs commit).
+- [ ] **Bode bench session** (mcp-gen4 hand-off; procedure in mcp/AGENTS.md "Bode bench"): wiring A/B, thru, floor, coherence, the
+  1.6 kOhm / 10 nF RC; record the floor, skew and the wiring verdict in docs/hardware-status.md.
+- [ ] **Bode follow-ups** (after the bench): CH1 re-ranging when CH1 drops below 20 codes (resonant input nodes), the harmonic fast
+  mode (design 1.3), the impedance mode z_series_ohm (design 2.4, coil L / Q / SRF for the detector), an optional PNG plot.
 - [ ] **Version bump to 0.3.0** in mcp/pyproject.toml and firmware PC_FW_VERSION, CHANGELOG section, release notes
   (mcp-gen3 item 4) when the owner gives the go for v0.3.0.
 - [x] **Alias residual model check** (fpga-gen4): the 100 kHz residual is the DDS generator's own spur. The DDS clock is 50 MHz, so a

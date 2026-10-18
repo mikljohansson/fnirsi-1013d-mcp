@@ -591,6 +591,11 @@ was found (commit not identified).
   zeros and gains on every read path, and `scope_calibration_info` shows the gains. Calibration v2 is refused.
 - Added: protocol 1.13 display modes (8b6a736). `scope_status` names the waterfall, density and phosphor views,
   and the capture tools add a caveat while the phosphor view is on.
+- Added: host-driven Bode sweep, `scope_bode_sweep` (tier 3) and `fnirsi1013d-bode` (docs/plans/bode-design.md
+  steps H1-H3). Clean-edge tones 50 MHz / M, coherent 16-bit CIC3 + FIR records, single-bin DFT; magnitude, phase,
+  markers and Q, quality flags, background floor, CH2 auto-ranging with the splice, thru calibration, CSV / JSON /
+  NPZ. Planner, DFT and markers in f0940ee (plan vectors docs/bode-plan-vectors.json), runner and CLI in 363f676,
+  the tool in d3a16bb. The simulator has an RC / series RLC DUT on the generator (1d46cf8). Not benched yet.
 
 ### Tooling, FPGA and documentation
 

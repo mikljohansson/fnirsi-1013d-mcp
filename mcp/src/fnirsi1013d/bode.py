@@ -489,7 +489,8 @@ class PointResult:
                 "ch1_volts_per_div": self.ch1_volts_per_div, "ch2_volts_per_div": self.ch2_volts_per_div,
                 "sample_rate": pp.sample_rate, "filter": self.filter_effective, "fir": self.fir,
                 "snr_db": round(self.snr_db, 1) if math.isfinite(self.snr_db) else None,
-                "ch2_codes": round(self.codes2, 2), "flags": list(self.flags)}
+                "ch2_codes": round(self.codes2, 2),
+                "leak_db": round(self.leak_db, 1) if math.isfinite(self.leak_db) else None, "flags": list(self.flags)}
 
 
 def _cross(f: np.ndarray, y: np.ndarray, level: float) -> list[float]:

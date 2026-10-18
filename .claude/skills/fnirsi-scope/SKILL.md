@@ -1,6 +1,6 @@
 ---
 name: fnirsi-scope
-description: Run measurements on the FNIRSI 1013D oscilloscope through the fnirsi1013d MCP server (scope_* tools). Use when asked to measure on the scope, use the oscilloscope, capture CH1/CH2, look at a waveform, average captures, measure a metal detector / pulse-induction decay or time constant, take an FFT, or use the scope's generator / calibration pin. Covers session start, choosing range and timebase, averaging, the shared screen, generator safety, reading .npz results, reporting caveats and troubleshooting.
+description: Run measurements on the FNIRSI 1013D oscilloscope through the fnirsi1013d MCP server (scope_* tools). Use when asked to measure on the scope, use the oscilloscope, capture CH1/CH2, look at a waveform, average captures, measure a metal detector / pulse-induction decay or time constant, take an FFT, measure a frequency response / Bode plot of a filter or tank, or use the scope's generator / calibration pin. Covers session start, choosing range and timebase, averaging, the shared screen, generator safety, reading .npz results, reporting caveats and troubleshooting.
 ---
 
 # Measuring with the FNIRSI 1013D
@@ -41,6 +41,10 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) in `.m
   off when done. `scope_spectrum` works while the screen shows the spectrum, waterfall or density view.
   Captures add a caveat while a spectrum or phosphor view is on: pass it on.
 - Quick numbers: `scope_measure`.
+- Frequency response of a passive DUT on the calibration post: `scope_bode_sweep` (guide section 3b). Wiring
+  before anything: CH1 tip on the DUT input, CH2 on the output, DUT ground on the USB shell, probe ground clips
+  open. Thru calibration first (`thru_cal='measure'`, both probes on the DUT input), then the DUT with that name.
+  Report f_actual, the markers, the calibration used, and leave flagged points (near_floor, clipped, unsettled) out.
 
 ## The screen is shared
 

@@ -902,7 +902,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     @register(0, title="Scope status", read_only=True)
     async def scope_status() -> dict[str, Any]:
         """Mode ('collaborative': shared with the person at the scope; 'exclusive' on legacy firmware with
-        LOCAL/REMOTE), display_mode (scope, or spectrum when the screen shows the spectrum view; protocol 1.7),
+        LOCAL/REMOTE), display_mode (what the trace area shows: scope, spectrum, waterfall, density (protocol
+        1.7, the spectrum view and its sub-views) or phosphor (1.13); a number for a mode this host does not know),
         run_state (RUN / STOP / SINGLE), settings_seq (changes whenever anyone changes a setting),
         the latest capture's id and origin (host / ui_run / ui_single), the host capture state, trigger address,
         battery, and on legacy firmware the watchdog and exit_reason. Cheap; use it to poll."""

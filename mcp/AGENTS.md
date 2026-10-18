@@ -1,4 +1,4 @@
-# mcp/ handoff for agents (mcp-gen3 -> mcp-gen4, 2026-10-19)
+# mcp/ handoff for agents (mcp-gen4 -> mcp-gen5, 2026-10-19)
 
 Python host library, device simulator, MCP server and bench CLIs for the FNIRSI 1013D open firmware's USB protocol.
 Read first: `../AGENTS.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec; **section 14 is how
@@ -25,7 +25,9 @@ should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those
 - **CI** (`.github/workflows/`): ruff + pytest on ubuntu-24.04 and windows-latest, py3.12 and 3.13, plus firmware
   and vector jobs. Keep it green; tests must not depend on timing margins (see the deferred-cancel fix 617ab34).
 - Write patch scripts with the Write tool and run them; bash heredocs in this harness mangle backslashes
-  (`"\n"` becomes a newline). Files are LF; on Windows write with `write_bytes(... .encode())`.
+  (`"\n"` becomes a newline), and a heredoc whose text holds triple quotes or apostrophes can fail as a whole ("unexpected
+  EOF"). Files are LF except `../docs/plans/task-queue.md` (CRLF: keep it, or the commit rewrites every line); on Windows write with `write_bytes(... .encode())`. Windows Python does not resolve
+  `/c/Users/...` paths: pass `C:/Users/...`. The session scratchpad is shared with other agents: prefix your files.
 - **Venv reinstall gotcha**: `uv pip install --python .venv -e ".[dev]"` fails ("Access denied") while any
   `fnirsi1013d-*.exe` is running (the owner's MCP session, the lead's bench), and uv may already have removed
   other .exe files. Rerun when nothing runs; meanwhile `python -m fnirsi1013d.<module>` works for every CLI.
@@ -45,7 +47,7 @@ path. |
 | `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points, least-squares zero / 1/gain / PWM slope per channel-range-core, channel model `zero = Z + slope x dcoffset`), `channel_scale`, T8 importer CLI. |
 | `analysis.py` | Stats, frequency, edges, Welford averager, FFT, decay fits, sample points, `scope_fft_db` (float model of the on-scope FFT), `compare_spectra`, `decim_noise_n` / `decim_bits`. |
 | `simulator.py` | `Device` (protocol state machine, FPGA ring, shared mode, legacy mode, SD card, EXT trigger, event log) + `SimServer` (TCP) with test hooks. CLI `fnirsi1013d-sim`. |
-| `server.py` | FastMCP server `fnirsi1013d-mcp`, 26 tools (list with tiers in README.md). |
+| `server.py` | FastMCP server `fnirsi1013d-mcp`, 27 tools (list with tiers in README.md). |
 | `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 attempts, FEL-device check between), usbipd, sunxi-fel RAM load, `#VER`; `--persist` / `--persist-only` / `--restore` (SD sector 750 via the firmware). |
 | `sdcard.py` | SD access (`SdCard`: checked reads, verified backups, staged 32-sector writes, compare), `plan_write`, `check_image`, `image_version`. |
 | `sdcli.py` | `fnirsi1013d-sd` info / read / write (`--dry-run`, `--yes` + typed confirmation, backup first). |
@@ -53,6 +55,7 @@ path. |
 | `bench.py` | `fnirsi1013d-bench`: wraps `../firmware/scope/host_tests/bench_link.py` (fw-gen2's), plus uptime before/after; `--fft` runs FFT_BENCH (`Scope.fft_bench`) itself. |
 | `vectors.py` | Host vectors in `../docs/protocol-vectors.json` (`--check`, `--merge`). |
 | `units.py` | `parse_quantity`, `fmt_si`. |
+| `bode.py` | Host-driven Bode sweep (docs/plans/bode-design.md H1-H3): `plan_point` / `plan_sweep` (M, N, p / q, record, settle; `plan_vectors` = `../docs/bode-plan-vectors.json`), `tone` (rect / Hann), `residual_noise`, `measure_pair` (H, SNR, leakage, half-record check), `markers`, `PointResult` / `SweepResult` (table, CSV, JSON, arrays), `ThruCal`, `BodeRunner` (drives a `Scope`: pre-scan, centring, background, CH2 auto-range with the splice, E_BUSY, restore), `result_caveats`, CLI `fnirsi1013d-bode`. |
 
 ## State of each tool / CLI
 
@@ -72,11 +75,25 @@ path. |
   `DEVICE RESTARTED`. `--fft [--reps n]`: FFT_BENCH table (same columns as host_tests/fft_bench.py), simulator
   only so far.
 - **`fnirsi1013d-sd`**: bench SD access; writes need `--yes` + typed `WRITE <n>@<sector>`, back up first.
+- **`scope_bode_sweep` / `fnirsi1013d-bode`** (mcp-gen4): the host Bode sweep, README "Bode sweep" and guide 3b. Tier 3
+  with a token, refuses without DECIM / generator, above FNIRSI_MCP_GEN_MAX_HZ and above `max_duration_s`; thru
+  calibrations in `<data_dir>/bode/thru/<name>.json`; the first sweep of a session returns `connection` (wiring).
+  Simulator only so far (accuracy there: 0.02 dB / 0.2 deg to 1 MHz with auto-range splices); the bench procedure is
+  below. Design deviations, on purpose: a Hann window where the 32-bit increment rounding breaks the coherence (below
+  ~50 Hz, design 1.2 assumed rect was enough); the -3 dB marker is relative to the higher end of the sweep (or the
+  peak), so an RC swept from 1 kHz reads 1.0075 fc (10.02 kHz for the bench RC, 9.92 kHz with the probe's ~100 pF);
+  CH1 is ranged once by the pre-scan (no re-ranging when CH1 falls, flag `ch1_low` instead); background captures are
+  per (N, CH2 range), lazily, not once per N; the 50 ms relay settle is a host sleep after every range or offset move.
+  `mode` (harmonic fast mode), `z_series_ohm` and the PNG are not implemented (task queue "Bode follow-ups").
 - **`fnirsi1013d-sim`**: `--variant stock|al3|ef2|ep4|al3x|al3d|al3f`, `--legacy`, `--ext`, `--ui-period`,
   `--caps`, ... al3x = 0x1533 (EXT trigger); al3d = 0x1534 (EXT + decimation: sub-sampled boxcar^K of the noise-free
   core-mean code plus output noise with the exact kernel variance, seeded per word block, 16-bit ring layout,
   16-bit trigger level, 120 ns latency, EXT latency shift; no device averaging); al3f = 0x1535 (al3d plus the FIR:
-  CIC on N / 2 convolved with the 15 RTL taps from `fpga/al3/src/zaklad.v`, 250 ns latency).
+  CIC on N / 2 convolved with the 15 RTL taps from `fpga/al3/src/zaklad.v`, 250 ns latency). Signals `dut_in` /
+  `dut_out` (mcp-gen4): input and output node of an RC or series RLC on the generator through rs = 1 kOhm, against
+  the probe ground, with a 30 MHz front end; `gain` / `delay` model a probe mismatch (`--ch1 dut_in:r=1.6k,c=10n
+  --ch2 dut_out:r=1.6k,c=10n`). Captures below 24 kHz (N >= 128, 64 sub-samples per CIC period) cost about 0.5 s
+  each in the simulator; tests sweep above 24 kHz where they can.
 - **`fnirsi1013d-soak`**: `--mode status|ping|capture|reopen` (reopen: `--rounds` of soak `--duration`, close,
   `--idle` s closed, reopen; after each reopen the events (types 1-4 with the 0.2.44 suspend fields), the counter
   deltas, counters 36 / 37 and the selective-suspend state: the fw 0.2.44 suspend bench, firmware/AGENTS.md 22), `--duration` (30 min), `--interval` (0.1 s),
@@ -169,7 +186,7 @@ range-independent; 0 V at dcoffset 0: CH1 A 132.47 / B 127.14, CH2 A 128.80 / B 
 firmware gains). The firmware formula assumes 128 on the compensated mean. Grounds: the probe ground is VRF1,
 +1.24 V over the USB ground (fpga/al3/README.md); the calibration output reads -1.24 / +1.9 V against it by design.
 
-## Tests (`tests/`, 310, about 55 s)
+## Tests (`tests/`, 354, about 75 s)
 
 `test_protocol` (codec, structs, vectors, link stats/event log), `test_transport` (incl. the scripted-link deferred
 cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `test_shared_mode` (1.3),
@@ -179,7 +196,10 @@ cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `te
 `test_fir` (1.11 FIR maths / sim / tool, suspend event fields, soak reopen mode), `test_cal_v3` (1.12 GET_CAL 256, `adc_cal_v3` block vectors, volts on both cores and classes, GET_CAL's next-readout
 gain / offset vs the host model, unit file gated gains only, scope_calibration_info),
 `test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH), `test_decim` (1.9: maths vs
-the firmware vectors, wire layouts, simulator noise / volts / trigger / EXT latency, `scope_set_decimation`).
+the firmware vectors, wire layouts, simulator noise / volts / trigger / EXT latency, `scope_set_decimation`),
+`test_bode` (planner rules and vectors, DFT, a synthetic RC through dithered 8-bit at 200 MSa/s, gates, markers,
+thru cal), `test_bode_sim` (the DUT model, the runner end to end: RC, thru, fixed range, floor, legacy and CIC2
+points, a resonance that steps CH2 up and down, E_BUSY, EXT restore, the CLI), `test_bode_tool` (the MCP tool).
 Fixtures: `sim`/`transport`/`scope` are collaborative with UI captures on demand (`ui_capture_period_s=0`);
 `legacy_sim` / `sim_factory(legacy=True)` give the 1.2 model. Simulator hooks: `SimServer.corrupt_next`,
 `garbage_next`, `drop_next`, `bad_crc_next`, `lose_next`/`lose_cmd`, `drop_link_on`; `Device.ui_set_*`,
@@ -194,6 +214,51 @@ Run: `.venv/Scripts/python -m pytest -q`; WSL: `wsl -d Ubuntu -- bash -lc "cd /m
 F,E9,B023 --line-length 120 src tests`; vectors: `python -m fnirsi1013d.vectors --check` (the C checker:
 `make -C ../firmware/scope/host_tests test` in WSL).
 
+## Bode bench (for the coordinator; design 6.3)
+
+DUT: RC low-pass, R = 1.60 kOhm 1 %, C = 10.0 nF film or C0G (fc 9.95 kHz). CH1 x1 on the RC input (the post), CH2 x1
+on the output. Generator off before wiring. `--port COM10` (or the MCP tool with the same arguments; it asks for a
+token). Every run prints the table, the markers and the caveats; keep the `--json` files in `backups/bode/`.
+Expected magnitude / phase of the RC (no probe load): 1 kHz -0.04 dB / -5.7 deg, 3 kHz -0.38 / -16.8, 10 kHz
+-3.03 / -45.2, 30 kHz -10.0 / -71.7, 100 kHz -20.1 / -84.3, 300 kHz -29.6 / -88.1; CH2's ~100 pF adds about 1 % to C.
+
+```bash
+cd mcp && mkdir -p ../backups/bode
+B=".venv/Scripts/python -m fnirsi1013d.bode --port COM10 --yes"   # or fnirsi1013d-bode after a venv reinstall
+# 0. plan and time (no scope)
+$B --plan-only --start 1kHz --stop 300kHz --points 30
+# 1. ground wiring. A: DUT ground on the CH1 / CH2 ground clips. B: DUT ground on the USB shell, clips open.
+$B --start 1kHz --stop 300kHz --points 30 --json ../backups/bode/rc_clips.json      # wiring A
+$B --start 1kHz --stop 300kHz --points 30 --json ../backups/bode/rc_usb.json        # wiring B
+#    then in wiring A, CH2 tip on the DUT ground node (reads the return error e / V1):
+$B --start 1kHz --stop 300kHz --points 30 --json ../backups/bode/rc_clips_e.json
+# 2. thru: both probes on the post (no DUT), raw then calibrated, over the RC's plan and a wide one
+$B --start 1kHz --stop 300kHz --points 30 --thru measure --thru-out ../backups/bode/thru_rc.json
+$B --start 1kHz --stop 300kHz --points 30 --thru ../backups/bode/thru_rc.json --json ../backups/bode/thru_check.json
+$B --start 100Hz --stop 2MHz --points 50 --thru measure --thru-out ../backups/bode/thru_wide.json
+# 3. floor: CH1 on the post loaded with 1 kOhm to the DUT ground, CH2 tip on that ground
+$B --start 100Hz --stop 2MHz --points 50 --json ../backups/bode/floor.json
+# 4. coherence: single points at M = 50 and M = 5000; see leak_db in the table
+$B --start 1MHz --stop 1MHz --points 1
+$B --start 10kHz --stop 10kHz --points 1
+# 5. the RC (wiring B): a thru with this plan (both probes on the post), then five repeats on the RC
+$B --start 1kHz --stop 1MHz --points 50 --thru measure --thru-out ../backups/bode/thru_rc50.json
+for i in 1 2 3 4 5; do $B --start 1kHz --stop 1MHz --points 50 --thru ../backups/bode/thru_rc50.json --json ../backups/bode/rc_$i.json; done
+```
+
+Accept (design 6.3): step 1 wiring B within 0.2 dB / 1 deg of the expected values to 100 kHz; wiring A visibly off from
+about 30 kHz up if design 2.5 holds (then the connection text stays; otherwise relax it). Step 2: raw `mismatch_db`
+within +-0.2 dB and phase within +-1 deg to 1 MHz (record them); calibrated (thru_check) +-0.02 dB / +-0.1 deg. Step 3:
+every point flagged `near_floor` or `low_snr`, |H| below about -55 dB; record the worst |H| per decade (that is the
+isolation floor). Step 4: no `incoherent` flag, `leak_db` below -60 at both points (above -40 means the DDS and the ADC
+clock are not locked: design risk "clock coherence", fall back to the Hann window). For the pattern-tone half of
+bench item 4 use the generator and `scope_capture_and_fft` on CH1 at 12.5 MSa/s CIC3+FIR: 900 kHz (non-integer M)
+shows a 100 kHz tone near -37.5 dBV, 1 MHz does not. Step 5: within 0.2 dB / 1 deg of the RC (fit C_total from the -45 deg crossing), `minus_3db_hz` 9.9-10.1 kHz
+(relative to the 1 kHz point), five repeats within 0.05 dB. Then the tank (design 6.3 item 6): 1 mH parallel 10 nF
+fed through 10 kOhm from the post, CH2 x10 on the tank, `--start 30kHz --stop 80kHz --points 100 --settle resonant`:
+peak at 50.3 kHz within 0.5 %, Q against an LCR meter; the same with `--settle normal` should flag `unsettled` points.
+Record the verdicts in `docs/hardware-status.md`.
+
 ## Protocol vectors contract
 
 `../docs/protocol-vectors.json` is shared; fw-gen2's `gen_vectors.py` keeps entries whose `source` is not
@@ -205,21 +270,15 @@ there, `--merge --check`, never change an existing vector's bytes.
 Pending work for every agent lives in `../docs/plans/task-queue.md` (section "MCP / host"); the coordinator dispatches
 from there and moves items to "Dispatched". Add host items you discover there, not only here.
 
-1. **Next for mcp-gen4: host-driven Bode sweep, `../docs/plans/bode-design.md` steps H1-H3** (section 5.1 for the
-   command sequence and the `scope_bode_sweep` parameters and returns, 6.1 for acceptance):
-   - H1 `src/fnirsi1013d/bode.py`: planner (M, N, p / q, L, settle), single-bin DFT at the DDS frequency, H, markers,
-     flags; pure numpy; tests with synthetic squares through RC / RLC models (folded harmonics, non-coherent low f);
-     plan vectors; < 0.01 dB / 0.05 deg on a synthetic RC with 8-bit quantisation and noise.
-   - H2 simulator DUT model (RC, RLC, tank) between the generator and CH2 (CH1 = the DUT input), so the tool runs
-     in CI.
-   - H3 `scope_bode_sweep` (tier 3: it drives the generator; confirmation token like `scope_generator`, give the
-     generator back as found), fixed CH2 range and thru cal first, CSV / NPZ / optional PNG, caveats, the guide's
-     Bode section; then auto range with the splice.
-   Notes: the plan's "SET_REMOTE" is the legacy model; on collaborative firmware use `Session.ensure_control`. Read
-   16-bit samples through `Scope` (`_read_capture16`), which already applies `out x 2^S / gain`, gain16 and corr16;
-   do not redo the conversion in bode.py. CIC3+FIR needs FPGA 0x1535 (caps FIR) and N >= 16 with N % 4 == 0; check
-   `DecimState.why` / `fir_note` per point. The ratio needs only the relative scale, so volts matter at range
-   changes (v3 gains are per core and class, not per range).
+1. **Bode: bench results in, then the follow-ups.** Host steps H1-H3 are done (1d46cf8 simulator DUT, f0940ee H1,
+   363f676 runner and CLI, d3a16bb tool, docs commit after). Read the coordinator's bench numbers (procedure below)
+   against the design's expectations; if the wiring verdict (section 2.5) or the floor changes the advice, fix
+   `bode.CONNECTION_TEXT`, README "Bode sweep" and guide 3b. Then the task queue's "Bode follow-ups": CH1
+   re-ranging, the harmonic fast mode (design 1.3, same planner and DFT, harmonics as extra bins), the impedance mode
+   (design 2.4: Z = R_ext V2 / (V1 - V2), L / C / ESR markers; the coil measurement for the detector), PNG plot
+   (matplotlib optional). The device steps D1-D5 belong to a firmware agent; `docs/bode-plan-vectors.json` is the
+   planner they must reproduce (regenerate only on a deliberate plan change: `python -m fnirsi1013d.bode
+   --write-vectors ../docs/bode-plan-vectors.json`).
 2. **Release 0.3.0** (on hold until the lead says go): bump `version` in `pyproject.toml` (still 0.1.0) with the
    lead's release (tag = `PC_FW_VERSION` = mcp version, CHANGELOG section); the 30-minute soak
    (`fnirsi1013d-soak --duration 1800`) is the gate; fold the baseline soak results into README "Link soak".

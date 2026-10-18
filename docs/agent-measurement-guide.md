@@ -124,6 +124,34 @@ Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivale
 | 20000 (10 kSa/s) | 15.1 | 15.4 | CIC2: 15.4 |
 | 100000 (2 kSa/s) | 15.6 (storage) | 15.2 (storage) | CIC2: 15.2 |
 
+## 3b. Frequency response (Bode)
+
+`scope_bode_sweep` measures H(f) = CH2 / CH1 of a passive network driven by the calibration post (filters, RC / RL
+networks, coil plus capacitor tanks fed through a resistor). It needs an AL3 bitstream with the decimation filter
+(0x1534+) and drives the pin, so it is tier 3 with a confirmation token.
+
+1. **Wiring first, ask the person to do it and confirm.** Post to the DUT input; CH1 tip on the DUT input (not the
+   post side of an added resistor unless that is what you want to measure); CH2 tip on the DUT output. DUT ground on
+   the scope's USB ground (USB connector shell); **both probe ground clips left open** (section 5: a return through a
+   clip runs the stimulus current through R71 into the probe reference and corrupts both channels). The first sweep
+   of a session returns this as `connection`: show it to the person.
+2. **Never** on a coil being driven, a MOSFET drain, a powered circuit or anything that can drive the post. A PI
+   detector's coil can be measured only unpowered and disconnected from its driver, through a series resistor.
+3. **Thru calibration** once per session and probe setup: both probes on the DUT input, `thru_cal='measure'`,
+   `thru_name='...'`; check that `mismatch_db` is within a few tenths of a dB of 0 (else the wiring is wrong). Then
+   sweep the DUT with `thru_cal='<name>'` and the same start, stop and points.
+4. **Choose the sweep.** Default 100 Hz-1 MHz, 50 points, `settle='normal'` (Q up to about 7). Use `resonant` (Q up
+   to 34) or `high_q` for tanks; if points come back `unsettled`, rerun with the next preset. Each decade below 1 kHz
+   costs real time (10 Hz-100 kHz about 27 s); above about 2 MHz the stimulus itself rolls off with a x1 probe on
+   the post. `ch2_range='auto'` (default) follows a falling response down to the 100 mV/div range (about -55 dB).
+5. **Report** f_actual (not the requested values), magnitude and phase with the markers (`minus_3db_hz`, or the
+   peak, Q and bandwidth), the thru calibration used, and the flags: drop or grey out `near_floor`, `low_snr`,
+   `clipped` and `unsettled` points rather than quoting them; say `ch2_small` points are +-1 dB; say how many range
+   splices there were. Pass the caveats on.
+
+Accuracy (design estimate, to be confirmed on the bench): +-0.1 dB / +-0.5 deg down to about -30 dB with the thru
+calibration, about +-1 dB near -55 dB. The ground-return error is not removed by the calibration.
+
 ## 4. The screen is shared
 
 On collaborative firmware the person at the scope can change any setting at any time; the last change wins. Every
@@ -153,8 +181,9 @@ The BNC shells (probe ground clips) sit on VRF1, a TL432 reference about +1.24 V
 ## 5a. Safety
 
 - Tier 2 (`scope_set_channel`) clicks relays; changes are rate-limited. Tier 3 (`scope_generator`,
-  `scope_self_test_loopback`) drives the calibration pin and needs a confirmation token: say what will happen
-  (frequency, duty, where the pin is wired) before confirming.
+  `scope_self_test_loopback`, `scope_bode_sweep`) drives the calibration pin and needs a confirmation token: say
+  what will happen (frequency, duty or the sweep span, where the pin is wired) before confirming. The Bode sweep
+  turns the generator back to its previous state itself.
 - **Never leave the generator on**: after a loopback test or a generator experiment call
   `scope_generator(enabled=false)` (no token needed) and confirm it in your report. If the pin is wired into a
   detector it switches real coil current.
@@ -172,6 +201,7 @@ Every waveform is saved as `.npz` (path in `file`); load with `numpy.load(path)`
 | averaged_capture | `t`, `CH1_mean`, `CH1_std`, `CH1_clipped_any`, `edge_shifts_samples` |
 | decay_fit | `t` (s after the edge), `data`, `fit`, `residual`, `fit_mask`, `excluded`, `std` |
 | capture_and_fft | `f` (Hz), `amplitude_vrms` |
+| bode_sweep | `f_actual` (Hz), complex `h` (after splice and thru cal), `h_raw`, `x1` / `x2` (volts peak), `mag_db`, `phase_deg`, `ch1_range` / `ch2_range`, `snr_db`, `valid`; also `.csv` and `.json` (`files`) |
 
 Results with up to 2000 points also carry the samples inline; longer ones a 500-point min/max preview.
 

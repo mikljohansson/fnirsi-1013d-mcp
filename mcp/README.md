@@ -171,6 +171,7 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_calibrate_volts` | 2 | a known DC voltage on every range: fits 0 V code, volts per code and offset slope per range and ADC core, saves the calibration file |
 | `scope_generator` | 3 | calibration-pin square wave; confirmation token to enable |
 | `scope_self_test_loopback` | 3 | generator into CH1: frequency, duty, swing (the output is not ground-referenced), bench tests T4, T5, T7; token |
+| `scope_bode_sweep` | 3 | frequency response CH2 / CH1 of a passive DUT on the calibration post: stepped clean-edge tones, coherent 16-bit records, single-bin DFT; magnitude, phase, markers, thru calibration, CH2 auto-ranging; token (below) |
 | `scope_raw_fpga` | 4 | raw FPGA bus operations (DEBUG_RAW builds); needs `FNIRSI_MCP_ENABLE_RAW=1` and a token |
 | `scope_enter_fel` | 4 | reboot into FEL; needs `FNIRSI_MCP_ENABLE_RAW=1` and a token |
 
@@ -210,6 +211,65 @@ Results say which one was used (`scaling`). T8 on the owner's unit (fw 0.1.7): g
 firmware zero was ~2 codes off (cores 5 codes apart, compensation corrects 4) and follows the trace offset with a
 different slope. Time is
 `(i - pretrigger_samples) x dt` relative to the hardware trigger, which is +-2 samples until T5 is run.
+
+## Bode sweep: `scope_bode_sweep` and `fnirsi1013d-bode`
+
+Host-driven frequency-response analyser (docs/plans/bode-design.md, steps H1-H3; `bode.py`). Needs an AL3 bitstream
+with the decimation filter (0x1534+, best 0x1535 with the FIR) and the generator.
+
+**Wiring.** Calibration post to the DUT input, CH1 tip on the DUT input, CH2 tip on the DUT output. DUT ground to
+the scope's USB ground (USB connector shell or a USB breakout's GND), **both probe ground clips open**: a return
+through a clip pushes the stimulus current through R71 (100 Ohm) into the probe reference VRF1 and adds a common
+error to both channels (design 2.5). Passive DUTs or buffered inputs only; the post has nothing but R21 (1 kOhm)
+between the DUT and the FPGA pad. H = CH2 / CH1 at the DUT input node, so it does not depend on the 1 kOhm source; a
+filter specified for a 50 / 600 Ohm source shows its V2 / V1, not its insertion response.
+
+**Per point.** f = 50 MHz / M for an integer M (clean edges, no DDS pattern tones; `f_actual` in the table), raw
+DDS words; rate 200 MSa/s / N with N = 16 x 2^k (257-512 samples per period) below 24 kHz, N = 16 up to 1.5 MHz,
+legacy 200 MSa/s (8-bit) above; CIC3 + FIR (the firmware drops to CIC2 below about 24 Hz, the table says which
+filter ran); a record of a whole number of periods (>= 8, 2048-8190 samples), so the square's harmonics land on other
+bins; settle time `settle` periods (3x at the first point and after the generator was off); the DFT at the exact
+DDS frequency (a Hann window below about 50 Hz where the 32-bit increment rounding breaks the coherence). The plan
+is deterministic: the same start, stop and points give the same frequencies (`docs/bode-plan-vectors.json`).
+
+**Ranging.** A pre-scan at the first frequency picks CH1's range (and CH2's in `ch2_range='auto'`) and centres both
+on their DC level with the offset. `auto` steps CH2 to a more sensitive range when the next range would still be
+under 60 % of full scale, measures that point on both ranges and scales the rest of the sweep onto the first range
+(`spliced`, factors in `ranges.splices`); a clip steps back up and repeats the point. At most 6 switches per sweep.
+`fixed` keeps CH2's range (or give a V/div).
+
+**Quality flags** per point: `clipped` / `ch1_clipped`, `ch1_low` (CH1 under 20 codes: the DUT input loads the
+source), `ch2_small` (under 3 codes: +-1 dB), `near_floor` (CH2 under 20 dB above a generator-off capture in the
+same bin), `low_snr`, `unsettled` (the record halves disagree by > 0.1 dB / 1 deg after a retry with twice the
+settle), `incoherent` (energy beside the fundamental on CH1), `fir_off`, `spliced`, `no_cal` / `cal_range` (thru
+calibration). Points with a flag from the first group are left out of the markers (-3 dB crossings relative to the
+higher end, or peak, -3 dB points and Q for an interior peak; phase crossings).
+
+**Thru calibration.** Both probes on the DUT input, `thru_cal='measure'` (stored under `thru_name` in
+`<data_dir>/bode/thru/`), then `thru_cal='<name>'` with the same start, stop and points divides it out (CH1 / CH2
+gain, skew, probe mismatch). Points measured on other ranges than the calibration are flagged `cal_range`.
+
+**Time.** About 40 ms per point plus the settle and record time: 50 points 1 kHz-1 MHz about 3 s, 100 Hz-1 MHz about
+5 s, 10 Hz-100 kHz about 27 s (the low decade dominates). The tool refuses sweeps estimated above `max_duration_s`
+(120 s). E_BUSY (a menu open on the scope) is retried once, then the sweep stops with the partial table. Every
+setting (generator words, filter, channels, time base, trigger incl. EXT, RUN) is given back.
+
+**Files.** `.csv` (the table), `.json` (table, summary, splices, caveats, metadata) and `.npz` (`f_requested`,
+`f_actual`, `m`, `n`, complex `h`, `h_raw`, `x1`, `x2`, `mag_db`, `phase_deg`, ranges, `snr_db`, `valid`).
+
+```bash
+fnirsi1013d-bode --plan-only --start 1kHz --stop 1MHz --points 50     # the frequency plan and the time estimate
+fnirsi1013d-bode --port COM10 --start 1kHz --stop 300kHz --points 30 --yes --thru measure --thru-out thru.json
+fnirsi1013d-bode --port COM10 --start 1kHz --stop 300kHz --points 30 --yes --thru thru.json --csv rc.csv
+fnirsi1013d-sim --variant al3f --ch1 dut_in:r=1.6k,c=10n --ch2 dut_out:r=1.6k,c=10n   # an RC on the simulator
+```
+
+The simulator's `dut_in` / `dut_out` signals are the input and output node of an RC (`r`, `c`) or series RLC (`l`)
+network on the generator through `rs` (1 kOhm), against the probe ground, with a 30 MHz front end; `gain` and
+`delay` on one channel model a probe mismatch for thru-calibration tests.
+
+Not yet: the harmonic fast mode, the impedance mode (`z_series_ohm`), a PNG plot, CH1 re-ranging during a sweep,
+the on-device view (design steps D1-D5).
 
 ## Firmware dev loop: `fnirsi1013d-flash`
 
