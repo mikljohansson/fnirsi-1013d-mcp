@@ -444,3 +444,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   faster rate up to 50 MS/s; zoom-in below 64 bins -> slower rate), Auto picks the rate, "CIC3" tag instead of the filter line, spectrum
   FFT length/window/scale/ref saved in settings words 208/209 (1.00o5 writes sector 709 only on power-key shutdown). Loaded on 0x1534,
   census clean. Owner checks pending.
+- Owner on 0.2.39: zoom-out steps the rate up (OK); zoom-in never steps it down (the 64-bin rule is too strict at 2048 points); at 10 MS/s
+  zoomed to 0-312 kHz the spectrum flickers bimodally (noise floor vs comb). Measured: in AUTO mode at 10 MS/s (0.30 ms record, 1 kHz
+  square) 2 of 6 host captures are flat (no edge, p-p 0 V) yet flagged triggered with auto_timeout clear, 1 is garbage, 3 proper; NORMAL
+  mode 6/6 proper; at 5 MS/s both modes 6/6 proper. The FPGA auto time-out (0x0E, words, 13-bit) expires before the next edge at fast rates
+  and the firmware reports those records as triggered. Firmware fix requested (truthful flags, time-based auto hold-off, view skips
+  untriggered records); the view's trace averaging masks the rest.
