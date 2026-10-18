@@ -1355,7 +1355,7 @@ class Device:
         return out
 
     def _cmd_fft_bench(self, req: P.Frame) -> P.Frame:
-        """FFT_BENCH (fw 0.2.27): the CH1 trace buffer as codes - 128, Hann; plausible ARM926 timings."""
+        """FFT_BENCH (fw 0.2.27, entries as 0.2.31): the CH1 trace buffer as codes - 128, Hann; plausible ARM926 timings."""
         reps = req.payload[0] if req.payload else 0
         if reps > 16:
             raise _DevErr(P.Status.E_BAD_ARG, 0, "reps")
@@ -1365,7 +1365,8 @@ class Device:
             t, _ = self.build_trace(0, self.capture_settings)
             tr[:min(t.size, tr.size)] = t[:tr.size]
         out = []
-        for log2n, sram in ((10, 0), (11, 0), (12, 0), (14, 0), (10, 1), (11, 1), (12, 1)):
+        # fw 0.2.31: the plan holds twiddles too, so on-chip SRAM fits N <= 2048 only (row 44)
+        for log2n, sram in ((10, 0), (11, 0), (12, 0), (14, 0), (10, 1), (11, 1)):
             n = 1 << log2n
             db = analysis.scope_fft_db(tr, 128, "hann", n)
             k = int(np.argmax(np.where(np.isfinite(db[2:]), db[2:], -1e9))) + 2

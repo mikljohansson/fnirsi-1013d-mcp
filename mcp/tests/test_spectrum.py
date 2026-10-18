@@ -207,7 +207,8 @@ def test_bench_fft_cli(sim_factory, capsys):
     with Scope.connect(srv.url) as s:
         s.capture(["CH1"])
         b = s.fft_bench(2)
-        assert b.reps == 2 and [e.n for e in b.entries] == [1024, 2048, 4096, 16384, 1024, 2048, 4096]
+        assert b.reps == 2 and [(e.n, e.memory) for e in b.entries] == [(1024, 0), (2048, 0), (4096, 0), (16384, 0),
+                                                                    (1024, 1), (2048, 1)]
         assert b.entries[1].peak_bin == 20  # the 97.66 kHz tone at 10 MS/s, N = 2048
         with pytest.raises(DeviceError) as e:
             s.t.request(P.Cmd.FFT_BENCH, bytes([17]))
@@ -218,4 +219,4 @@ def test_bench_fft_cli(sim_factory, capsys):
         bench.main(["--port", srv.url, "--fft", "--reps", "4"])
     out = capsys.readouterr().out
     assert ex.value.code == 0, out
-    assert "FFT_BENCH: 7 entries, reps 4" in out and " 16384   DDR " in out and "(no restart)" in out
+    assert "FFT_BENCH: 6 entries, reps 4" in out and " 16384   DDR " in out and "(no restart)" in out
