@@ -20,7 +20,7 @@
 #else
 #define PC_FW_VERSION_MAP ""
 #endif
-#define PC_FW_VERSION     "0.2.21" PC_FW_VERSION_MAP
+#define PC_FW_VERSION     "0.2.22" PC_FW_VERSION_MAP
 #endif
 
 #ifndef PC_FW_BUILD

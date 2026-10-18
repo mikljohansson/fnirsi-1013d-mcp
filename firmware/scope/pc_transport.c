@@ -18,6 +18,7 @@
 #include "pc_protocol.h"
 #include "pc_hal.h"
 #include "interrupt.h"
+#include "ccu_control.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -492,6 +493,41 @@ void pc_usb_log_restart(uint8 type, uint16 pc)
   uint32 cpsr = pc_irq_save();
 
   pc_evlog_add(PC_EVT_RESTART, type, pc);
+  pc_irq_restore(cpsr);
+}
+
+//USB controller state as usb_device_init finds it (fw 0.2.22): five type 16 entries, a = field.
+//  0: b = POWER << 8 | FADDR            1: b = INTUSBE << 8 | CCU flags (bit 0 OTG reset released, bit 1 OTG bus clock
+//  2: b = EP2 TXCSR                        on, bit 2 PHY reset released, bit 3 PHY clock on)
+//  3: b = EP2 RXCSR                     4: b = ISCR bits 4-19 (change detects, VBUS source, force ID/VBUS, pull-ups)
+//Controller registers read as 0 unless the OTG clock is on and its reset released.
+void pc_usb_log_init_state(void)
+{
+  uint32 cpsr = pc_irq_save();
+  uint32 phy  = *CCU_USBPHY_CFG;
+  uint8  flags = (uint8)(((*CCU_BUS_SOFT_RST0 & CCU_BSRR1_USBOTG_EN) ? 0x01 : 0) |
+                         ((*CCU_BUS_CLK_GATE0 & CCU_BCGR1_USBOTG_EN) ? 0x02 : 0) |
+                         ((phy & CCU_USBPHY_CFG_RST) ? 0x04 : 0) | ((phy & CCU_USBPHY_CFG_GAT) ? 0x08 : 0));
+  uint16 power = 0, intusbe = 0, txcsr = 0, rxcsr = 0, iscr = 0;
+  uint8  epind;
+
+  if((flags & 0x03) == 0x03)
+  {
+    power   = (uint16)((*USBC_REG_PCTL << 8) | (*USBC_REG_FADDR & 0x7F));
+    intusbe = *USBC_REG_INTUSBE;
+    iscr    = (uint16)((*USBC_REG_ISCR >> 4) & 0xFFFF);
+    epind   = *USBC_REG_EPIND;
+    *USBC_REG_EPIND = 2;
+    txcsr   = *USBC_REG_TXCSR;
+    rxcsr   = *USBC_REG_RXCSR;
+    *USBC_REG_EPIND = epind;
+  }
+
+  pc_evlog_add(PC_EVT_USB_INIT, 0, power);
+  pc_evlog_add(PC_EVT_USB_INIT, 1, (uint16)((intusbe << 8) | flags));
+  pc_evlog_add(PC_EVT_USB_INIT, 2, txcsr);
+  pc_evlog_add(PC_EVT_USB_INIT, 3, rxcsr);
+  pc_evlog_add(PC_EVT_USB_INIT, 4, iscr);
   pc_irq_restore(cpsr);
 }
 

@@ -103,6 +103,14 @@ void usb_device_init(void)
 #if PC_PROTOCOL
     // PC protocol: drop buffered data and flag a link reset (boot, CDC <-> MSC switch)
     pc_transport_reset();
+
+    // fw 0.2.22: log what the boot path left in the controller (event type 16), then put the USB controller and
+    // PHY into reset. 1.00o5 below only releases the resets (|=), so after an SD boot it configured a controller in
+    // whatever state the bootloader or a previous mode left; now every path starts from the power-on state.
+    pc_usb_log_init_state();
+    *CCU_BUS_SOFT_RST0 &= ~CCU_BSRR1_USBOTG_EN;
+    *CCU_USBPHY_CFG    &= ~CCU_USBPHY_CFG_RST;
+    timer0_delay(1);
 #endif
 
     // Enable and clock the USB PHY
