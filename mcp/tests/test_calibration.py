@@ -173,3 +173,17 @@ def test_channel_model_fills_slope_and_unmeasured_ranges():
     assert sc.source.startswith("unit-calibration (channel model")
     assert sc.zero_a == pytest.approx(132.5 - 26.5, abs=1e-3) and sc.zero_b == pytest.approx(127.0 - 26.5, abs=1e-3)
     assert sc.gain_a == pytest.approx(882759 / 256e6)
+
+
+@pytest.mark.anyio
+async def test_calibration_info_tool(sim_factory, tmp_path):
+    srv = bad_unit(sim_factory)
+    async with client_for(srv, tmp_path) as c:
+        r = await c.call("scope_calibration_info")
+        assert r["loaded"] is False and r["live"]["CH1"]["scaling"] == "firmware"
+        assert any("not a voltage reference" in x for x in r["caveats"])
+        await c.call("scope_calibrate_volts", channel="CH1", applied_volts=0, ranges=[5])
+        r = await c.call("scope_calibration_info")
+        assert r["loaded"] and r["points"] == 1 and "5" in r["per_range"]["CH1"]
+        assert r["live"]["CH1"]["scaling"].startswith("unit-calibration") and r["live"]["CH2"]["scaling"] == "firmware"
+        assert r["summary"] and r["calibration_file"].endswith("1013D-SIM.json")

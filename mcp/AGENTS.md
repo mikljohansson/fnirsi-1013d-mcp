@@ -25,7 +25,7 @@ context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/p
 | `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points -> least-squares fit of zero, 1/gain, PWM slope per channel/range/core; JSON file), `ChannelScale`/`channel_scale` (raw, compensated, mean and trigger-level conversions; firmware formula fallback), `import_t8` + CLI for the lead's `backups/t8_*.json`. |
 | `units.py` | `parse_quantity("100us")`, `fmt_si`. |
 
-Tests in `tests/` (205, incl. `test_calibration`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
+Tests in `tests/` (206, incl. `test_calibration`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
 (resend, resync, #RESET, 1.1/1.2 fields, timeouts, paused responses), `test_serial_link` (no-reconfigure rule,
 fake pyserial), `test_simulator_scope`, `test_shared_mode` (1.3 semantics through `Scope`), `test_firmware_match`
 (protocol.md section 14 items), `test_server` (every tool in-process, collaborative restarts, legacy fallback),
@@ -130,7 +130,7 @@ Signals: `sine`, `square`, `decay` (PI: period, width, tau, amp, tau2/amp2, flyb
 
 ## MCP tools and safety
 
-21 tools (`scope_calibrate_volts` added), `scope_` prefix, list with tiers in `README.md`
+22 tools (`scope_calibrate_volts`, `scope_calibration_info` added), `scope_` prefix, list with tiers in `README.md`
 (`scope_remote_session` was retired with collaborative mode). Tiers: 0 read-only, 1 acquisition, 2 relays
 (`scope_set_channel`, 5 changes/s), 3 calibration-pin output (`scope_generator`, `scope_self_test_loopback`),
 4 raw (`scope_raw_fpga`, `scope_enter_fel`, only with `FNIRSI_MCP_ENABLE_RAW=1`). `FNIRSI_MCP_MAX_TIER` limits
@@ -224,7 +224,10 @@ reload: announce "about to reload with <image> for <reason>", wait for the lead'
 7. MCP progress for long averaged runs works in-process; verify with Claude Code over stdio.
 9. T8 follow-ups: CH2 points (one shorted-input `scope_calibrate_volts` per offset is enough for the channel
    model); the lead's open square-wave discrepancy (calibration-pin 0..3.3 V read as about -1.1 / +2 V on ranges
-   1 and 3 with DC coupling, while bench DC reads right): analyse the raw per-core codes when they arrive.
+   1 and 3 with DC coupling) was resolved by the lead (backups/t8sq_CH1.json): the conversion is right, the
+   calibration output is a ~3.1 Vpp square wave not referenced to ground (low ~ -1.2 V). Tool texts say so
+   (`CAL_OUTPUT_NOTE`); the self-test checks the swing (5/95 % levels), not absolute levels. Do not "fix" this
+   in the conversion.
    Firmware idea for fw-gen2: base calibration could store the measured per-core 0 V codes.
 8. Collaborative mode on hardware (fw 0.2.1, sha256 ca0b6d11...; 0.2.0 is superseded): run the plan's bench acceptance list (docs/plans/collaborative-
    mode.md) through the tools; check the RUN-mode READ_RAW hold (a full 4-core read is now one response); measure the per-request cost in shared mode

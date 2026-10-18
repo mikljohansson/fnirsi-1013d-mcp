@@ -135,9 +135,10 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_capture_and_fft` | 1 | averaged amplitude spectrum, peaks in dBV and dBc, noise floor, THD |
 | `scope_decay_fit` | 1 | edge-aligned average, then `exp`, `exp+offset`, `exp2` or `power` fit after the TX edge; tau, R^2, sample points |
 | `scope_set_channel` | 2 | range, coupling, offset, probe, invert; relay changes limited to 5 per second |
+| `scope_calibration_info` | 0 | scaling in effect per channel, calibration file and its fitted zero / slope / gain per range and core |
 | `scope_calibrate_volts` | 2 | a known DC voltage on every range: fits 0 V code, volts per code and offset slope per range and ADC core, saves the calibration file |
 | `scope_generator` | 3 | calibration-pin square wave; confirmation token to enable |
-| `scope_self_test_loopback` | 3 | generator into CH1: frequency, duty, levels, bench tests T4, T5, T7; token |
+| `scope_self_test_loopback` | 3 | generator into CH1: frequency, duty, swing (the output is not ground-referenced), bench tests T4, T5, T7; token |
 | `scope_raw_fpga` | 4 | raw FPGA bus operations (DEBUG_RAW builds); needs `FNIRSI_MCP_ENABLE_RAW=1` and a token |
 | `scope_enter_fel` | 4 | reboot into FEL; needs `FNIRSI_MCP_ENABLE_RAW=1` and a token |
 

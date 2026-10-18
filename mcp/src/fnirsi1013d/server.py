@@ -133,8 +133,10 @@ STATIC_PROFILE: dict[str, str] = {
     "full_scale": "about 256 codes = ~8.8 divisions; e.g. ~0.88 V at 100 mV/div [U]",
     "coupling": "DC or AC (relay)",
     "input": "1 MOhm; assume 40 V peak maximum at 1x and use a 10x probe for anything higher [U]",
-    "generator": "square wave only, 3.3 V logic on the calibration pin, 11.6 mHz steps, 20 ns edge jitter, "
-                 "<= 25 MHz; only on Atlan4 bitstreams. No DAC, no arbitrary waveform",
+    "generator": "square wave only on the calibration pin, 11.6 mHz steps, 20 ns edge jitter, <= 25 MHz; only on "
+                 "Atlan4 bitstreams. No DAC, no arbitrary waveform. At the probe it is a ~3.1 Vpp square wave whose "
+                 "DC level is not 0 V (low about -1.2 V on the owner's unit): a frequency/duty/timing reference, not "
+                 "a voltage reference",
     "throughput": "~50-65 full dual-channel AL3 captures per second via raw reads; hundreds per second for "
                   "short windows [U USB rate]",
 }
@@ -145,6 +147,9 @@ STANDING_CAVEATS = [
     "Trigger compares core A only: trigger jitter up to 2 / fs.",
     SCALING_CAVEAT,
 ]
+
+#: T8 square-wave check (backups/t8sq_CH1.json): bench DC reads right, the calibration output does not swing 0..3.3 V
+CAL_OUTPUT_NOTE = ("The calibration output is a frequency/duty/timing reference, not a voltage reference: on the owner's unit it is a ~3.1 Vpp square wave whose low level sits about -1.2 V below ground at the probe (its output network is capacitively coupled or biased; T8 2026-10-18), not 0..3.3 V.")
 
 DESC_SHARED = ("The scope is shared with the person at it (collaborative firmware): either side may change "
                "settings, the last change wins and the screen shows the host's captures.")
@@ -803,6 +808,40 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             return {"ok": True, "channels": out, "caveats": [
                 "Calibration is done on the scope's UI; these values are read-only from here.", SCALING_CAVEAT]}
         return await run("scope_read_calibration", 0, {}, go)
+
+    @register(0, title="Voltage scaling in effect", read_only=True, idempotent=True)
+    async def scope_calibration_info() -> dict[str, Any]:
+        """Which code-to-volts conversion is in effect per channel (the per-unit calibration file or the firmware
+        formula), the calibration file and its fitted numbers: per range and ADC core the raw 0 V code at the
+        reference offset, the offset-PWM slope, volts per code and the fit residual, plus the per-core channel
+        model (0 V code at dcoffset 0, slope). Also the live conversion for each channel's current range and offset.
+        Read-only; scope_calibrate_volts adds points."""
+        def go() -> dict[str, Any]:
+            s = sess.get_scope()
+            cal = s.unit_cal
+            live = {}
+            for ch in (0, 1):
+                cfg = s.get_channel(ch, cached=False)
+                sc = s.scale(ch, cfg)
+                live[CHANNEL_NAMES[ch]] = {
+                    "scaling": sc.source, "range_index": cfg.range, "offset_pwm": cfg.offset_pwm,
+                    "zero_raw": {"A": _r6(sc.zero_a), "B": _r6(sc.zero_b)},
+                    "volts_per_lsb": {"A": _r6(sc.gain_a), "B": _r6(sc.gain_b)},
+                    "zero_code_compensated": _r6(sc.zero_compensated),
+                    "firmware_zero_code": _r6(cfg.zero_code), "firmware_volts_per_lsb": _r6(cfg.volts_per_lsb)}
+            out: dict[str, Any] = {"ok": True, "calibration_file": str(sess.cal_path()),
+                                   "loaded": cal is not None, "live": live}
+            if cal is not None:
+                out.update({
+                    "unit": cal.unit, "points": len(cal.points),
+                    "per_range": {CHANNEL_NAMES[ch]: {str(r): {c: f.to_dict() for c, f in cores.items()}
+                                                      for r, cores in sorted(rr.items())}
+                                  for ch, rr in sorted(cal.fit.items())},
+                    "channel_model": {CHANNEL_NAMES[ch]: v for ch, v in sorted(cal.channel_fit.items())},
+                    "summary": describe_cal(cal)})
+            out["caveats"] = [SCALING_CAVEAT, CAL_OUTPUT_NOTE]
+            return out
+        return await run("scope_calibration_info", 0, {}, go)
 
     @register(0, title="Screenshot", read_only=True)
     async def scope_screenshot() -> Image:
@@ -1892,6 +1931,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         confirm_token returns a token and a summary of the physical effect; repeat the identical call with the
         token within 120 s. Disabling needs no token. Returns the actual frequency, duty and enable state.
 
+        The calibration output is a frequency/duty/timing reference, not a voltage reference: on the owner's unit it is a ~3.1 Vpp square wave whose low level sits about -1.2 V below ground at the probe (its output network is capacitively coupled or biased; T8 2026-10-18), not 0..3.3 V.
         Square wave only, 3.3 V logic, about 20 ns edge jitter. Not a sine source and not a power driver: buffer
         it before driving a MOSFET gate. If the pin is wired into the detector (e.g. as a TX gate drive) this
         switches real coil current. On the stock FPGA the pin always outputs a fixed 1 kHz and this tool is
@@ -1927,7 +1967,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             g = s.set_gen(enable=enabled, freq_hz=f, duty=None if duty_percent is None else duty_percent / 100)
             return {"ok": True, "applied": {"enabled": bool(g.enable), "frequency": _r6(g.frequency_hz),
                                             "duty_percent": _r6(g.duty * 100), "phase_inc": g.phase_inc},
-                    "caveats": notes + ["Square wave only, 3.3 V logic, about 20 ns edge jitter. Not a sine source "
+                    "caveats": notes + [CAL_OUTPUT_NOTE, "Square wave only, 3.3 V logic, about 20 ns edge jitter. Not a sine source "
                                         "and not a power driver: buffer it before driving a MOSFET gate."]}
         return await run("scope_generator", 3, args, go)
 
@@ -2078,8 +2118,11 @@ def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
                     dm = fr["duty"] or 0.0
                     check(f"duty {duty * 100:.0f} % at {fmt_si(fs, 'S/s')}", abs(dm - duty) < 0.03, measured=dm,
                           expected=duty)
-                check(f"levels at {fmt_si(fs, 'S/s')}", st["max"] > 2.5 and st["min"] < 0.8 and st["max"] < 4.2,
-                      vmin=st["min"], vmax=st["max"], expected="~0 V / ~3.3 V [U scaling T8]")
+                # the calibration output's DC level is not 0 V at the probe (T8): check the swing only
+                lo, hi = (float(x) for x in np.percentile(v, [5, 95]))  # the two levels, not noise or ringing
+                vpp = hi - lo
+                check(f"swing at {fmt_si(fs, 'S/s')}", 2.6 <= vpp <= 3.7, vpp=vpp, low=lo, high=hi,
+                      expected="~3.1..3.3 Vpp (DC level not checked: the output is not ground-referenced)")
                 if f_hz == 1e6 and fs == 200e6:
                     _t4_t5(s, cap, check)
         # T7: FORCE in normal mode with no signal
@@ -2109,7 +2152,7 @@ def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
         s.set_trigger(**kw)
     passed = all(c["pass"] for c in checks)
     return {"ok": True, "passed": passed, "n_checks": len(checks), "n_failed": sum(not c["pass"] for c in checks),
-            "checks": checks, "caveats": notes + ["Requires the calibration pin connected to CH1 with the probe at 1x; "
+            "checks": checks, "caveats": notes + [CAL_OUTPUT_NOTE, "Requires the calibration pin connected to CH1 with the probe at 1x; "
                                                   "failures without that connection are expected."]}
 
 
