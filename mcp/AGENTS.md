@@ -13,8 +13,12 @@ should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those
   calibration; it happened not to collide.) Develop and test against the simulator.
 - **Stage files by name** (`git add mcp/src/... mcp/tests/...`), never `git add mcp`: other agents edit files in the
   tree concurrently, and a directory add sweeps their uncommitted work into your commit (happened once, 4f17414).
-- Pushing to main is allowed for mcp work and CI fixes (no tags). Use `git pull --rebase --autostash` before
-  pushing (others' uncommitted firmware edits sit in the tree), then confirm CI with `gh run watch <id>`.
+- Pushing to main is allowed for mcp work and CI fixes (no tags). This checkout's main is shared with the
+  coordinator, who merges branches locally: **never `git pull --rebase`** (it flattens their merge commits and
+  conflicts); update with `git fetch && git merge --ff-only origin/main` (`git pull --ff-only` still rebases here because
+  `pull.rebase` is set) and tell the lead if it refuses. When local main holds other agents' unpushed
+  commits under yours, ask the lead before pushing. Leave others' uncommitted files alone. Before a push run ruff,
+  the mcp suite and `make -C firmware/scope/host_tests test` (WSL), then confirm CI with `gh run watch <id>`.
 - **CI** (`.github/workflows/`): ruff + pytest on ubuntu-24.04 and windows-latest, py3.12 and 3.13, plus firmware
   and vector jobs. Keep it green; tests must not depend on timing margins (see the deferred-cancel fix 617ab34).
 - Write patch scripts with the Write tool and run them; bash heredocs in this harness mangle backslashes
