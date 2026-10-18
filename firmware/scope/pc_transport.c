@@ -611,7 +611,7 @@ uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total)
 //The reset snapshot (entries as above), *reset_ms = when it was taken; returns its size, -1 when none is frozen.
 //Only rearm re-arms it (fw 0.2.18: a plain read kept nothing frozen if the host read the log at every session open)
 //PHY register read through PHYCTL (0x01C13404): address in bits 8-15, the addressed bit appears at bit 16 (+ PHY
-//index). UNVERIFIED: from Allwinner's BSP USBC_Phy_Read as remembered (fw-gen4); Linux has no PHY read. Bits
+//index). From Allwinner BSP USBC_Phy_Read; verified on the bench 2026-10-18 (0x68 defaults, 0xE9 after the writes). Bits
 //addr .. addr + len - 1, addr in bit 0 of the result. Clock and reset of the OTG block must be up.
 static uint32 pc_usb_phy_read(uint32 addr, uint32 len)
 {

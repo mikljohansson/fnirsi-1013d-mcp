@@ -533,32 +533,53 @@ compact menus rather than painting over gaps.
 6. Per-unit USB serial (SID/eFuse) and a real pid.codes PID before anyone else flashes this.
 7. Optional: composite CDC + MSC (needs a TinyUSB-style rework; plan section 9).
 
-## 18. Handoff from fw-gen4 (retired at about 270k tokens, 2026-10-18)
+## 18. Handoff from fw-gen4 (retired at about 280k tokens, 2026-10-18)
 
-State: 0.2.21-0.2.25 built, host-tested, pinned in backups/ with ELFs (ladder, section 8). The coordinator has
-benched 0.2.21 and 0.2.23 (results in TODO 1b) and has 0.2.24 and 0.2.25 for the next A/B. Nothing is uncommitted.
+State: 0.2.21-0.2.25 built, host-tested, pinned in backups/ with ELFs (ladder, section 8). **0.2.25 (c71935f9) is
+on the card.** Nothing is uncommitted. The coordinator is running the deciding test: cold boot with the cable in,
+then the 30-minute capture soak (~35,000 requests).
 
 What fw-gen4 did:
-- 0.2.21: USB tick fallback removed (section 11 closed); counters 47/57 and event type 14 retired.
-- Host test `test_fast_path_no_fpga` (mock `fpga_ops`): no FPGA bus access from ISR/BUSY polls. EXT audit: clean.
-- 0.2.22: USB OTG + PHY reset asserted at init, pre-init state logged (type 16).
+- 0.2.21: USB tick fallback removed. The 0.2.20 bench and soak showed counter 47 = 0 and 57 = 2176: the 1.00o5
+  dispatcher never lost a USB interrupt and the fallback only raced the real ISR (section 11, closed). Counters
+  47/57 are retired slots (always 0, n stays 58), event type 14 is retired, `make gcc10-nofb` is gone.
+- Host test `test_fast_path_no_fpga` (mock `fpga_ops`): no FPGA bus access from ISR/BUSY polls. EXT audit clean.
+- 0.2.22: USB OTG + PHY reset asserted at init; pre-init state logged (type 16).
 - 0.2.23: EP2 IN state after each TX abort (types 17, 18).
-- 0.2.24: GET_EVENT_LOG bus-level ring tail; identical EP0 setups logged once per second.
-- 0.2.25: PHY tuning writes to PHYCTL 0x01C13404 instead of 0x01C13410; post-init state + PHY read-back (type 19).
+- 0.2.24: GET_EVENT_LOG bus-level ring tail; identical EP0 setups logged at most once per second.
+- 0.2.25: PHY tuning written to PHYCTL 0x01C13404; post-init state with PHY read-back (type 19).
+
+**The PHY finding (verified on the bench 2026-10-18).** 1.00o5's `usb_phy_setup` writes 0x01C13410. Linux
+phy-sun4i-usb.c `suniv_f1c100s_cfg` uses REG_PHYCTL_A10 = 0x04 of "phy_ctrl" (suniv-f1c100s.dtsi: 0x01C13400,
+length 0x10), so PHYCTL is 0x01C13404 (0x10 is the A33+ offset). Evidence from 0.2.25 type 19 (FEL load):
+before the writes the packed tuning reads 0x0068 (RES45 calibration off, TX amplitude 0x14, disconnect threshold
+1), after them 0x00E9 (RES45 on, amplitude 0x14, threshold 3), i.e. exactly what was written; PHYCTL 0x2B80.
+So the read-back method (address in PHYCTL bits 8-15, data at bit 16) works, and every image before 0.2.25 ran
+the PHY at its defaults: no 45-ohm calibration, disconnect threshold 1. Since 0.2.22 that held on the FEL path
+too (the init reset wiped whatever the boot ROM tuned). Before 0.2.22, FEL loads inherited the boot ROM's PHY
+state, which may explain why only cold boots failed (inference). Other 0.2.25 post-init fields (FEL): POWER 0x70
+(HS), INTUSBE 0x27, CCU flags 0xF, ISCR bits 4-19 0x3F00, USBPHY_CFG 0x0003.
+
+What the soak decides: cold boot of 0.2.25 with the 30-minute soak clean (0.2.23 failed ~1 per 500 transfers,
+within 5 minutes) = the untuned PHY was the cause; note it in section 11 and docs/hardware-status.md. If it still
+fails, see the next candidates below.
 
 Open, for fw-gen5 (in this order):
-1. Evaluate the 0.2.25 A/B (FEL vs cold boot, post-init type 19 on both). If field 4 reads 0x00E9 and field 5
-   differs, the read-back works and the writes land: record it as verified here and in protocol row 43. If the
-   read-back is constant (0 / 0xFF), the read protocol is wrong, not necessarily the writes.
-2. The cold-boot IN stall is not explained. Facts: only cold SD boots fail, about 1 per 500 x 64 KiB or a ~20 s
-   episode; device holds TxPktRdy with SOFs arriving and recovers after the 2 s abort; replugging after a FEL load
-   does not reproduce it. If 0.2.25 still fails on cold boot, next candidates (inference): other state the boot
-   ROM's FEL leaves (clocks: compare CCU PLL / AHB / USB-related registers between paths with a one-off dump
-   event), and host-side recovery timing. Judge on long runs; small samples cannot separate the paths.
-3. mcp/ (mcp-gen2) still needs decoders for event types 16-19, the bus ring tail, and the retired counters 47/57.
-4. TODO 1c (trigger position by run at decimated rates), then the older TODOs below it.
+1. Soak verdict (above). If cold boot still fails: compare other state the boot ROM's FEL leaves (CCU PLL / AHB /
+   USB clock registers between paths with a one-off dump event); consider host-side recovery timing. The failure
+   signature is in TODO 1b (device holds TxPktRdy, SOFs arrive, recovers after the 2 s abort). Judge on long runs.
+2. Spectrum analyser work starts next, per docs/plans/dpos350p-features.md (recommended order there): fixed-point
+   FFT core plus an on-target benchmark, then the on-scope spectrum display mode. No float (no FPU, AGENTS.md);
+   keep it out of the acquisition hot path. fpga-gen3 will publish an FPGA decimation interface (commands and
+   semantics) that the spectrum path and the capture geometry must use; wait for its document, then wire it in
+   pc_hal_scope.c / fpga_control.c and add the caps bit, a protocol section 14 row and host tests.
+3. TODO 1c: host-capture trigger position varies between runs at decimated rates; likely tied to the decimation
+   interface in item 2, so look at it together.
+4. mcp/ (mcp-gen2) still needs decoders for event types 16-19, the bus ring tail and the retired counters 47/57.
+5. The older TODOs in section 17 (2-7).
 
 Gotchas from this session: Python heredocs via Git Bash turn `\0`-style C escapes into raw bytes; check with
-`cat -A` or write escapes via `bytes([92])`. Bash variables inside `wsl ... bash -lc "..."` from Git Bash get
+`cat -A` or build escapes with `bytes([92])`. Bash variables inside `wsl ... bash -lc "..."` from Git Bash get
 eaten; put WSL steps in a script and run it through PowerShell `wsl -d Ubuntu -- bash /mnt/c/...`. Every rebuild
-changes the sha256 (build time is embedded): pin from the same build you report.
+changes the sha256 (build time is embedded): pin from the same build you report. Of the init entries, type 16 is
+copied into the bus ring and type 19 is not (only the main ring and the snapshot hold it).
