@@ -219,3 +219,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   (the 0.2.7 flicker was the refresh's own clear-then-draw every 100 ms), "Roll mode on/off" label on the acquisition-menu toggle, back-pressure
   issue parked in firmware/AGENTS.md. Loaded hands-free; census 1000 PINGs 0/0, 100 x 64 KiB 0 failed, 1.00 MB/s; first TEST_PATTERN after boot
   fine this time (26 ms). Owner's chip/menu checks pending; card holds 0.2.7.
+- Firmware 0.2.11 (commit 1594918, sha256 af4b7f30..., pinned backups/fw-0.2.11-af4b7f30.bin): fixes the first-request-after-open drop (DTR-up
+  handled in the main-loop poll reset the parser and discarded a pending main-loop request already parsed by the timer poll; present since 0.1.1,
+  no counter showed it). Includes 0.2.10. Loaded hands-free; census 1000 PINGs 0/0, 100 x 64 KiB 0 failed, 1.00 MB/s. Open -> TEST_PATTERN as
+  the very first request -> close, 20x: 0 failures on 0.2.11 (also 0/20 on 0.2.10 with this host transport, whose open sequence avoids the race;
+  bench_link's minimal link hit it). Owner's visual checks (chip, Roll mode box, compacted menus) pending; card holds 0.2.7.
