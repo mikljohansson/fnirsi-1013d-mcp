@@ -155,7 +155,8 @@ uint32 spectrum_bench(uint8 *out, uint32 reps)
 #define STRIP_H               44
 
 #define ZOOM_MAX              6           //span down to 1/64 of the Nyquist range
-#define START_STEPS           1024u       //start position in 1/1024 of the Nyquist range
+#define START_STEPS           65536u      //start position in 1/65536 of the Nyquist range (fine enough to drag)
+#define LOG2N_VIEW_MAX        12          //on-scope FFT lengths 1024..4096 (0.2.31 bench: 16384 points take 51 ms)
 #define REF_MIN               (-100)
 #define REF_MAX               60
 
@@ -170,7 +171,7 @@ typedef struct
   uint8  scale;         //index into spec_scales
   uint8  zoom;          //span = Nyquist range >> zoom
   int16  ref;           //level at the top of the plot, dBV
-  uint16 start;         //span start in 1/1024 of the Nyquist range
+  uint32 start;         //span start in START_STEPS of the Nyquist range
   uint8  fresh;         //trace buffers refilled since the last FFT
   uint8  recompute;     //an FFT setting changed
   uint8  plan_ok;       //plan matches log2n / window
@@ -183,7 +184,7 @@ typedef struct
 #define VIEW_WATERFALL        1
 #define VIEW_DENSITY          2
 
-static SPECSTATE spec = { 0, 0, 12, FX_WIN_HANN, 1, 0, 0, 0, 0, 0, 0, { 0, 0 }, 0, VIEW_SPECTRUM };
+static SPECSTATE spec = { 0, 0, 11, FX_WIN_HANN, 1, 0, 0, 0, 0, 0, 0, { 0, 0 }, 0, VIEW_SPECTRUM };
 
 //What the last FFT used, per channel (READ_SPECTRUM reports these)
 typedef struct
@@ -204,15 +205,18 @@ static int16     spec_db[2][(FX_FFT_N_MAX / 2) + 1];    //centi-dBV
 
 //History of the waterfall and density views (section "Waterfall and density views" below)
 #define HIST_H                PLOT_H        //rows of waterfall history = levels of the density view
-#define DENS_INC              24            //count added per hit (saturating)
-#define DENS_STRIPES          8             //the fade visits one stripe of rows per capture: c -= c / 4
+#define DENS_INC              32            //count added per hit (saturating at 255)
+#define DENS_TAU              16            //persistence: a count decays by 1/e every 16 captures
 
 static uint16 wf_rows[HIST_H][PLOT_W] __attribute__((aligned(8)));
 static uint32 wf_ms[HIST_H];
 static uint32 wf_head, wf_count;
-static uint8  dens[HIST_H][PLOT_W] __attribute__((aligned(8)));
-static uint32 dens_stripe;
-static uint16 spec_pal[256];
+static uint8  dens[HIST_H][PLOT_W] __attribute__((aligned(8)));       //hit count as of the cell's last hit
+static uint16 dens_last[HIST_H][PLOT_W];                              //capture index of that hit
+static uint16 dens_cap;                                               //captures added since the history began
+static uint16 dens_dec[256];                                          //exp(-age / DENS_TAU) in Q8, age 0..255
+static uint16 spec_pal[256];                                          //waterfall: level colours
+static uint16 dens_pal[256];                                          //density: intensity colours
 static uint8  spec_pal_ok;
 static uint32 hist_key;
 static int32  spec_col[PLOT_W];
@@ -279,6 +283,8 @@ static int spec_log2n(void)
 {
   int m = spec_log2n_max();
 
+  if(m > LOG2N_VIEW_MAX)
+    m = LOG2N_VIEW_MAX;
   return (spec.log2n < m) ? spec.log2n : m;
 }
 
@@ -664,25 +670,43 @@ static uint16 rgb565(uint32 r, uint32 g, uint32 b)
   return (uint16)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
 
-//Black, deep blue, blue, cyan, green-yellow, yellow, red, white
-static void spec_palette(void)
+static void spec_ramp(const uint8 (*stop)[4], uint32 nstops, uint16 *pal)
 {
-  static const uint8 stop[][4] = { { 0, 0, 0, 0 }, { 40, 0, 0, 120 }, { 90, 0, 60, 255 }, { 135, 0, 220, 230 },
-                                   { 175, 120, 255, 40 }, { 205, 255, 230, 0 }, { 235, 255, 50, 0 }, { 255, 255, 255, 255 } };
   uint32 i, s = 0;
 
   for(i = 0; i < 256; i++)
   {
     uint32 span, t;
 
-    while((s < 6) && (i > stop[s + 1][0]))
+    while((s < nstops - 2) && (i > stop[s + 1][0]))
       s++;
 
     span = stop[s + 1][0] - stop[s][0];
     t = i - stop[s][0];
-    spec_pal[i] = rgb565(stop[s][1] + ((int32)(stop[s + 1][1] - stop[s][1]) * (int32)t) / (int32)span,
-                         stop[s][2] + ((int32)(stop[s + 1][2] - stop[s][2]) * (int32)t) / (int32)span,
-                         stop[s][3] + ((int32)(stop[s + 1][3] - stop[s][3]) * (int32)t) / (int32)span);
+    pal[i] = rgb565(stop[s][1] + ((int32)(stop[s + 1][1] - stop[s][1]) * (int32)t) / (int32)span,
+                    stop[s][2] + ((int32)(stop[s + 1][2] - stop[s][2]) * (int32)t) / (int32)span,
+                    stop[s][3] + ((int32)(stop[s + 1][3] - stop[s][3]) * (int32)t) / (int32)span);
+  }
+}
+
+//Waterfall levels: black, deep blue, blue, cyan, green-yellow, yellow, red, white. Density intensity: black, dark
+//blue, red, yellow, white (white = most frequent). Decay table: exp(-a / 16) in Q8 by repeated multiplication with
+//exp(-1/16) = 61565 / 65536 (no libm).
+static void spec_palette(void)
+{
+  static const uint8 wf[][4]   = { { 0, 0, 0, 0 }, { 40, 0, 0, 120 }, { 90, 0, 60, 255 }, { 135, 0, 220, 230 },
+                                   { 175, 120, 255, 40 }, { 205, 255, 230, 0 }, { 235, 255, 50, 0 }, { 255, 255, 255, 255 } };
+  static const uint8 ds[][4]   = { { 0, 0, 0, 0 }, { 50, 0, 0, 150 }, { 130, 220, 0, 0 }, { 200, 255, 220, 0 },
+                                   { 255, 255, 255, 255 } };
+  uint32 a, q = 65536;
+
+  spec_ramp(wf, 8, spec_pal);
+  spec_ramp(ds, 5, dens_pal);
+
+  for(a = 0; a < 256; a++)
+  {
+    dens_dec[a] = (uint16)((q + 128) >> 8);
+    q = (q * 61565u) >> 16;
   }
 
   spec_pal_ok = 1;
@@ -729,7 +753,7 @@ static void spec_hist_clear(void)
 {
   wf_head = wf_count = 0;
   memset(dens, 0, sizeof(dens));
-  dens_stripe = 0;
+  dens_cap = 0;
 }
 
 //What the columns and levels mean; a change clears the history
@@ -777,15 +801,6 @@ static void spec_hist_add(const SPECVIEW *v)
   else if(spec.view == VIEW_DENSITY)
   {
     int32  py = -1;
-    uint32 r, *w, n;
-
-    //Fade one stripe: c -= c / 4, four cells per word (no borrow between bytes)
-    r = dens_stripe * (HIST_H / DENS_STRIPES);
-    w = (uint32 *)dens[r];
-    for(n = 0; n < (HIST_H / DENS_STRIPES) * PLOT_W / 4; n++, w++)
-      if(*w)
-        *w -= (*w >> 2) & 0x3F3F3F3F;
-    dens_stripe = (dens_stripe + 1) % DENS_STRIPES;
 
     //Hits along the line: every cell between the previous column's level and this one's
     for(x = 0; x < PLOT_W; x++)
@@ -802,15 +817,20 @@ static void spec_hist_add(const SPECVIEW *v)
         if(py > hi) hi = py;
       }
 
+      //Decay the count to now from its last hit, then add this hit (exponential persistence, no fading pass)
       for(; lo <= hi; lo++)
       {
-        uint32 c = dens[lo][x];
+        uint32 c = dens[lo][x], age = (uint16)(dens_cap - dens_last[lo][x]);
 
+        c = (age > 255) ? 0 : (c * dens_dec[age]) >> 8;
         dens[lo][x] = (c > 255 - DENS_INC) ? 255 : c + DENS_INC;
+        dens_last[lo][x] = dens_cap;
       }
 
       py = y;
     }
+
+    dens_cap++;
   }
 }
 
@@ -822,13 +842,19 @@ static void spec_draw_waterfall(void)
     memcpy(&displaybuffertmp[(PLOT_Y + r) * 800 + PLOT_X], wf_rows[(wf_head + HIST_H - 1 - r) % HIST_H], PLOT_W * 2);
 }
 
+//Each cell's count decayed to the latest capture; a cell older than the decay table is cleared (so a 16-bit capture
+//index can never wrap back to look fresh). Zero words (4 cells) are skipped: the clear already left them black.
 static void spec_draw_density(void)
 {
+  uint16 now = (uint16)(dens_cap - 1);
   uint32 y, n, b;
+
+  if(!spec_pal_ok)
+    spec_palette();
 
   for(y = 0; y < HIST_H; y++)
   {
-    const uint32 *src = (const uint32 *)dens[y];
+    uint32 *src = (uint32 *)dens[y];
     uint16 *dst = &displaybuffertmp[(PLOT_Y + y) * 800 + PLOT_X];
 
     for(n = 0; n < PLOT_W / 4; n++, dst += 4)
@@ -838,10 +864,24 @@ static void spec_draw_density(void)
       if(!v)
         continue;
 
-      //Counts start at a visible dark blue (palette index 48)
-      for(b = 0; b < 4; b++, v >>= 8)
-        if(v & 0xFF)
-          dst[b] = spec_pal[48 + (((v & 0xFF) * 207) >> 8)];
+      for(b = 0; b < 4; b++)
+      {
+        uint32 c = (v >> (8 * b)) & 0xFF, x = 4 * n + b, age;
+
+        if(!c)
+          continue;
+
+        age = (uint16)(now - dens_last[y][x]);
+        if(age > 255)
+        {
+          dens[y][x] = 0;
+          continue;
+        }
+
+        c = (c * dens_dec[age]) >> 8;
+        if(c)
+          dst[b] = dens_pal[40 + ((c * 215) >> 8)];
+      }
     }
   }
 }
@@ -857,7 +897,17 @@ static void spec_draw_legend(const SPECVIEW *v, int ch)
 
   for(y = INFO_Y2 + 2; y < INFO_Y2 + 11; y++)
     for(x = 0; x < 128; x++)
-      displaybuffertmp[y * 800 + x0 + x] = spec_pal[2 * x];
+      displaybuffertmp[y * 800 + x0 + x] = (spec.view == VIEW_DENSITY) ? dens_pal[40 + ((2 * x * 215) >> 8)] : spec_pal[2 * x];
+
+  //Density: rare / old on the left, frequent on the right (white)
+  if(spec.view == VIEW_DENSITY)
+  {
+    display_set_font(&font_2);
+    display_set_fg_color(0x00A0A0A0);
+    text_right(x0 - 4, INFO_Y2, "rare or old");
+    display_text(x0 + 132, INFO_Y2, (int8 *)"frequent");
+    return;
+  }
 
   display_set_font(&font_2);
   display_set_fg_color(0x00A0A0A0);
@@ -876,22 +926,23 @@ static void spec_draw_legend(const SPECVIEW *v, int ch)
 #define F_WINDOW    2
 #define F_SCALE     3
 #define F_REF       4
-#define F_SPAN      5
-#define F_START     6
+#define F_AUTO      5
+#define F_RESET     6
 #define F_VIEW      7
 #define F_EXIT      8
 #define F_COUNT     9
 
-static const char *spec_field_label[F_COUNT] = { "Channel", "FFT length", "Window", "Scale", "Ref level", "Span", "Start", "View", "" };
-static const uint8 spec_field_twoway[F_COUNT] = { 0, 0, 0, 0, 1, 1, 1, 0, 0 };
+static const char *spec_field_label[F_COUNT] = { "Channel", "FFT length", "Window", "Scale", "Ref level", "", "", "View", "" };
+static const uint8 spec_field_twoway[F_COUNT] = { 0, 0, 0, 0, 1, 0, 0, 0, 0 };
 
 #define FIELD_W     (PLOT_W / F_COUNT)
 
 static void spec_field_value(int f, char *t, int log2n, uint64 bin_mhz)
 {
   static const char *wins[] = { "Rect", "Hann", "Flat top" };
-  SPECVIEW v;
   char    *p;
+
+  (void)bin_mhz;
 
   switch(f)
   {
@@ -917,14 +968,12 @@ static void spec_field_value(int f, char *t, int log2n, uint64 bin_mhz)
       fmt_str(p, spec_frame[spec.channel == 1].unit_amps ? " dBA" : " dBV");
       break;
 
-    case F_SPAN:
-      spec_view(&v, log2n);
-      fmt_freq(t, bin_mhz * v.span);
+    case F_AUTO:
+      fmt_str(t, "Auto");
       break;
 
-    case F_START:
-      spec_view(&v, log2n);
-      fmt_freq(t, bin_mhz * v.first);
+    case F_RESET:
+      fmt_str(t, "Reset");
       break;
 
     case F_VIEW:
@@ -966,7 +1015,7 @@ static void spec_draw_strip(int log2n, uint64 bin_mhz)
     spec_field_value(f, t, log2n, bin_mhz);
     display_set_font(&font_3);
     display_set_fg_color((f == F_EXIT) ? YELLOW_COLOR : WHITE_COLOR);
-    text_center(x + FIELD_W / 2, STRIP_Y + ((f == F_EXIT) ? 14 : 20), t);
+    text_center(x + FIELD_W / 2, STRIP_Y + (spec_field_label[f][0] ? 20 : 14), t);
   }
 }
 
@@ -1120,10 +1169,154 @@ int spectrum_display(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// Settings changes: span zoom, pan, defaults, Auto
+
+//Span: one zoom step narrower (in) or wider (out) about the centre of the view
+static void spec_zoom(int in)
+{
+  uint32 centre = spec.start + ((START_STEPS >> spec.zoom) / 2);
+
+  if(in && (spec.zoom < ZOOM_MAX)) spec.zoom++;
+  else if(!in && spec.zoom) spec.zoom--;
+
+  spec.start = (centre > ((START_STEPS >> spec.zoom) / 2)) ? centre - ((START_STEPS >> spec.zoom) / 2) : 0;
+  if(spec.start > START_STEPS - (START_STEPS >> spec.zoom))
+    spec.start = START_STEPS - (START_STEPS >> spec.zoom);
+}
+
+//Pan: the spectrum follows the finger, dx pixels from where the drag began (start0)
+static void spec_pan(uint32 start0, int32 dx)
+{
+  int64 s = (int64)start0 - ((int64)dx * (START_STEPS >> spec.zoom)) / PLOT_W;
+  int64 smax = START_STEPS - (START_STEPS >> spec.zoom);
+
+  spec.start = (uint32)((s < 0) ? 0 : (s > smax) ? smax : s);
+}
+
+//What the view starts with (Reset): 2048 points, Hann, 10 dB/div, ref 0 dBV, full span, spectrum
+static void spec_defaults(void)
+{
+  spec.log2n  = 11;
+  spec.window = FX_WIN_HANN;
+  spec.scale  = 1;
+  spec.ref    = 0;
+  spec.zoom   = 0;
+  spec.start  = 0;
+  spec.view   = VIEW_SPECTRUM;
+  spec.recompute = 1;
+}
+
+//Auto: from the spectrum of the signal present (rules in firmware/README.md "Spectrum view"):
+//  FFT length: the longest the record holds, at most 4096; window Hann
+//  peak P: the highest bin above DC (bins 0, 1 skipped) of the shown channel(s); floor F: the median bin level
+//  scale: 5 dB/div when P - F + 10 dB fits 8 x 5 dB, 10 when it fits 8 x 10 dB, else 20
+//  ref: the first multiple of the scale at least 3 dB above P
+//  span: the bins more than 40 dB below P and 10 dB above F are ignored; the rest spans lo..hi. A band starting
+//  near DC (lo below its own width) gets a span from 0 to 1.25 hi, otherwise 1.5 x (hi - lo) about its centre; the
+//  narrowest zoom step that holds it
+static void spec_auto(void)
+{
+  static uint16 hist[261];                   //1 dB steps from -200 to +60 dB
+  int     log2n, ch, z;
+  uint32  half, k, lo = 0, hi = 0, n = 0, need, centre, cum;
+  int32   P = -0x7FFFFFFF, F, thr, range, scale;
+  SPECVIEW v;
+
+  spec.log2n  = (spec_log2n_max() < LOG2N_VIEW_MAX) ? spec_log2n_max() : LOG2N_VIEW_MAX;
+  spec.window = FX_WIN_HANN;
+  spec.zoom   = 0;
+  spec.start  = 0;
+  spec_compute();
+
+  log2n = spec_log2n();
+  half  = 1u << (log2n - 1);
+  spec_view(&v, log2n);
+
+  memset(hist, 0, sizeof(hist));
+  for(ch = 0; ch < 2; ch++)
+  {
+    if(!spec.have[ch])
+      continue;
+
+    for(k = 2; k <= half; k++)
+    {
+      int32 d = spec_db[ch][k] / 100 + 200;
+
+      if(spec_db[ch][k] > P)
+        P = spec_db[ch][k];
+      hist[(d < 0) ? 0 : (d > 260) ? 260 : d]++;
+      n++;
+    }
+  }
+
+  if(!n)
+    return;
+
+  //Median level
+  for(k = 0, cum = 0; (k < 260) && (2 * (cum + hist[k]) < n); k++)
+    cum += hist[k];
+  F = ((int32)k - 200) * 100;
+
+  range = P - F + 1000;
+  scale = (range <= 8 * 500) ? 0 : (range <= 8 * 1000) ? 1 : 2;
+  spec.scale = scale;
+  {
+    int32 t = P + 300, sc = spec_scales[scale] * 100;
+
+    spec.ref = (int16)(((t >= 0) ? ((t + sc - 1) / sc) : -((-t) / sc)) * spec_scales[scale]);
+  }
+  if(spec.ref < REF_MIN) spec.ref = REF_MIN;
+  if(spec.ref > REF_MAX) spec.ref = REF_MAX;
+
+  //Occupied band
+  thr = P - 4000;
+  if(thr < F + 1000)
+    thr = F + 1000;
+
+  for(ch = 0; ch < 2; ch++)
+    if(spec.have[ch])
+      for(k = 2; k <= half; k++)
+        if(spec_db[ch][k] > thr)
+        {
+          if(!lo || (k < lo)) lo = k;
+          if(k > hi) hi = k;
+        }
+
+  if(!hi)
+    return;
+
+  if(lo < hi - lo)
+  {
+    need = hi + hi / 4;
+    centre = 0;
+  }
+  else
+  {
+    need = ((hi - lo) * 3) / 2;
+    centre = (lo + hi) / 2;
+  }
+  if(need < 8)
+    need = 8;
+
+  for(z = ZOOM_MAX; (z > 0) && ((half >> z) < need); z--) {}
+  spec.zoom = z;
+
+  if(centre)
+  {
+    uint32 c = (uint32)(((uint64)centre * START_STEPS) / half);
+    uint32 w = START_STEPS >> z;
+
+    spec.start = (c > w / 2) ? c - w / 2 : 0;
+    if(spec.start > START_STEPS - w)
+      spec.start = START_STEPS - w;
+  }
+}
+
 static void spec_step_field(int f, int up)
 {
   int log2n = spec_log2n();
-  int lmax = spec_log2n_max();
+  int lmax = (spec_log2n_max() < LOG2N_VIEW_MAX) ? spec_log2n_max() : LOG2N_VIEW_MAX;
 
   switch(f)
   {
@@ -1136,7 +1329,7 @@ static void spec_step_field(int f, int up)
       break;
 
     case F_FFT:
-      //1024 .. the longest the record holds, then back to 1024
+      //1024 .. the longest the record holds (at most 4096), then back to 1024
       spec.log2n = (log2n >= lmax) ? ((lmax > 10) ? 10 : lmax) : log2n + 1;
       spec.recompute = 1;
       break;
@@ -1156,30 +1349,12 @@ static void spec_step_field(int f, int up)
       if(spec.ref > REF_MAX) spec.ref = REF_MAX;
       break;
 
-    case F_SPAN:
-      //Narrower on the right half, wider on the left; the span keeps its centre
-      {
-        uint32 centre = spec.start + ((START_STEPS >> spec.zoom) / 2);
-
-        if(up && (spec.zoom < ZOOM_MAX)) spec.zoom++;
-        else if(!up && spec.zoom) spec.zoom--;
-
-        spec.start = (centre > ((START_STEPS >> spec.zoom) / 2)) ? centre - ((START_STEPS >> spec.zoom) / 2) : 0;
-        if(spec.start > START_STEPS - (START_STEPS >> spec.zoom))
-          spec.start = START_STEPS - (START_STEPS >> spec.zoom);
-      }
+    case F_AUTO:
+      spec_auto();
       break;
 
-    case F_START:
-      //Half a span per tap
-      {
-        uint32 step = (START_STEPS >> spec.zoom) / 2;
-
-        if(up)
-          spec.start = (spec.start + step > START_STEPS - (START_STEPS >> spec.zoom)) ? START_STEPS - (START_STEPS >> spec.zoom) : spec.start + step;
-        else
-          spec.start = (spec.start > step) ? spec.start - step : 0;
-      }
+    case F_RESET:
+      spec_defaults();
       break;
 
     case F_VIEW:
@@ -1192,22 +1367,60 @@ static void spec_step_field(int f, int up)
   }
 }
 
+//Touches in the trace area. Strip: one tap per field. Plot: the scope view's gestures (scan_for_touch in
+//statemachine.c): a touch that stays within 2 px and ends within 200 ms is a tap, left of the centre = zoom the span
+//out, right of it = zoom in; a touch that moves more than 2 px is a drag, and a horizontal drag pans the start
+//frequency (the spectrum follows the finger), redrawn while dragging.
 int spectrum_touch(void)
 {
   if(!spec.active || !spectrum_available())
     return 0;
 
-  if((ytouch >= STRIP_Y) && (xtouch >= PLOT_X) && (xtouch < PLOT_X + PLOT_W))
+  if(ytouch >= STRIP_Y)
   {
-    int    f = (xtouch - PLOT_X) / FIELD_W;
-    uint32 x = (xtouch - PLOT_X) % FIELD_W;
+    if((xtouch >= PLOT_X) && (xtouch < PLOT_X + PLOT_W))
+    {
+      int    f = (xtouch - PLOT_X) / FIELD_W;
+      uint32 x = (xtouch - PLOT_X) % FIELD_W;
 
-    if(f < F_COUNT)
-      spec_step_field(f, x >= FIELD_W / 2);
+      if(f < F_COUNT)
+        spec_step_field(f, x >= FIELD_W / 2);
+    }
+
+    tp_i2c_wait_for_touch_release();
+    return 1;
   }
 
-  //Touches on the plot do nothing (1.00o5 would move traces and change the time base)
-  tp_i2c_wait_for_touch_release();
+  {
+    uint32 t0 = timer0_get_ticks(), start0 = spec.start;
+    int32  x0 = xtouch, y0 = ytouch, moved = 0;
+
+    while(havetouch)
+    {
+      tp_i2c_read_status();
+
+      if(havetouch)
+      {
+        int32 dx = (int32)xtouch - x0, dy = (int32)ytouch - y0;
+
+        if(!moved && (((dx < 0) ? -dx : dx) > 2 || ((dy < 0) ? -dy : dy) > 2))
+          moved = 1;
+
+        if(moved && spec.zoom)
+        {
+          uint32 before = spec.start;
+
+          spec_pan(start0, dx);
+          if(spec.start != before)
+            spectrum_display();
+        }
+      }
+    }
+
+    if(!moved && ((timer0_get_ticks() - t0) < 200))
+      spec_zoom(x0 >= PLOT_X + PLOT_W / 2);
+  }
+
   return 1;
 }
 

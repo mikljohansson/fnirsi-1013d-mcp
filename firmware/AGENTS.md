@@ -215,6 +215,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.32 | 83aa5b5 | ed9fb0f8 | spectrum view: Waterfall and Density sub-views (View field), GET_STATUS byte 43 = 2 / 3; trace area cleared with memset | built, host-tested; owner verdict pending |
 | 0.2.33 | d125a41 | e002ab21 | 0.2.32 plus the view's FFT from SRAM A for N <= 2048 | built, host-tested; bench with 0.2.32's items |
 | 0.2.34 | 1a9a773 | 00847286 | spectrum view on the 0x1534 16-bit records (fx_fft_run_u16, filter rate 200 MHz / N, scale_q24 levels) | built, host-tested; on 0x1533 identical in behaviour to 0.2.33 |
+| 0.2.35 | PENDING | | owner's UX: tap left/right on the plot = zoom out/in, drag = pan, Auto and Reset replace Span/Start; FFT length capped at 4096, default 2048; density with per-cell age (no band) and intensity ramp | built, host-tested |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -643,5 +644,12 @@ section 14 rows 44 (FFT_BENCH) and 45 (READ_SPECTRUM, GET_STATUS byte 43).
 - The view: settings in RAM only; N limited by the record (`scopesettings.samplecount`); fs from the UI time base
   (`sample_rate_settings`), so a host capture with a raw divider is labelled wrong (documented in row 45).
 Open (fw-gen5's list): owner verdict on the 0.2.32 waterfall / density views; the view on 0x1534 once it is flashed (0.2.34 code path: 16-bit records, C load; an assembly u16 load if it
-matters); dB conversion in assembly (about 9 accesses per bin now); MMU + D-cache as the big speed lever.
+matters); dB conversion in assembly (about 9 accesses per bin now).
+- TODO (lead, later, not fw-gen5's): enable the MMU with a flat 1:1 section map, DDR cacheable, the framebuffers and
+  any DMA regions uncached, peripherals strongly ordered. The D-cache bit is already set (CP15 0x0005107C) but does
+  nothing without the MMU. Numbers that motivate it: 0.2.27 FFT_BENCH 4096 points 24.3 ms in DDR (~90 cycles per
+  data access), 18.1 ms with buffers in SRAM; 0.2.31 after the assembly rewrite 10.9 ms DDR, SRAM 2048 points 2.3 ms
+  vs 4.9 ms DDR. 1.00o5's per-pixel display fills pay the same price on every pass.
+- Plan cache: `fx_fft_init` runs only when N, window or the plan's memory (SRAM for N <= 2048, DDR above) changes, or
+  after FFT_BENCH borrowed SRAM (init 0.84 ms at 2048 in SRAM, 2.17 ms at 4096 in DDR on 0.2.31).
 

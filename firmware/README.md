@@ -542,12 +542,12 @@ straight lines between bins. A white triangle marks the peak (DC bins skipped). 
 | field | values | tap |
 |---|---|---|
 | Channel | CH1, CH2, CH1 + CH2 (only enabled channels) | next |
-| FFT length | 1024 .. the largest power of two the record holds (2048 at depth 3000, 8192 at 15000) | next, wraps |
+| FFT length | 1024 .. the largest power of two the record holds, at most 4096 (2048 at depth 3000) | next, wraps |
 | Window | Hann, flat top, rect | next |
 | Scale | 5, 10, 20 dB/div | next |
 | Ref level | -100 .. +60 dBV at the top line, one division per step | left half down, right half up |
-| Span | Nyquist range / 1 .. / 64 | left half wider, right half narrower (keeps the centre) |
-| Start | in half-span steps | left half down, right half up |
+| Auto | sets FFT length, window, scale, ref level and span from the signal (rules below) | once |
+| Reset | back to the defaults: 2048 points, Hann, 10 dB/div, ref 0 dBV, full span, Spectrum | once |
 | View | Spectrum, Waterfall, Density (fw 0.2.32) | next |
 | Scope | | leave the view |
 
@@ -560,16 +560,34 @@ aliasing warning. Not benched (the bitstream is not flashed yet).
 Waterfall and density (fw 0.2.32) show one channel (CH1 unless only CH2 is selected or on). Waterfall: each new
 capture adds one row at the top (the plot holds 336), coloured over the plot's 8 divisions from the bottom line
 (black) to the ref level (white), the colour legend on the second info line, the time the rows span on the first.
-Density: each capture's spectrum line adds hits to a 720 x 336 grid of 8-bit counts (saturating), one eighth of the
-rows fades by a quarter per capture, so frequent levels glow and rare ones fade; the level grid and labels stay.
+Density (fw 0.2.35): each capture's spectrum line adds hits to a 720 x 336 grid. A cell keeps an 8-bit count and the
+16-bit index of the capture of its last hit; a hit decays the count to now (exp(-age / 16 captures), Q8 table) and
+adds 32 (saturating), drawing decays it the same way, so the persistence is uniform in time and position with no
+fading pass (0.2.33's one-stripe-per-capture fade showed as a band sweeping down the screen). A cell hit in every
+capture saturates white; one hit in 10 % of captures sits around dark red; a cell 256 captures old is cleared when
+drawn. Colour ramp (legend "rare or old" .. "frequent" on the second info line): black, dark blue, red, yellow,
+white. The level grid and labels stay.
 Both histories clear when anything that changes what a column or level means changes (FFT length, window, span,
 start, ref, scale, sample rate, channel), so a view never mixes axes; in STOP they wait for RUN and say so. The
 rows are stored as RGB565 (drawn with memcpy bursts) and the counts as words with zero words skipped, since every
-uncached pixel access costs about 90 cycles. Memory: 484 KB waterfall + 242 KB density (.bss).
+uncached pixel access costs about 90 cycles. Memory: 484 KB waterfall + 726 KB density (.bss).
+
+Gestures on the plot (fw 0.2.35, the scope view's rules from `scan_for_touch` in statemachine.c): a touch that stays
+within 2 px and ends within 200 ms is a tap; left of the plot centre zooms the span out one step (x 2), right of it
+zooms in (/ 2, down to 1/64 of the Nyquist range), keeping the centre, like the time/div taps in the scope view. A
+touch that moves more than 2 px is a drag: the spectrum follows the finger horizontally (start frequency, in
+1/65536 of the Nyquist range) and is redrawn while dragging; at full span there is nothing to pan. Start, centre and
+stop frequencies are the labels under the plot.
+
+Auto rules: FFT length the longest the record holds up to 4096, Hann. P = highest bin above DC (bins 0 and 1 skipped)
+over the shown channel(s), F = median bin level. Scale 5 dB/div if P - F + 10 dB fits 8 divisions of 5 dB, 10 if it
+fits 8 of 10, else 20. Ref level = the first multiple of the scale at least 3 dB above P. Band = bins above both
+P - 40 dB and F + 10 dB, from lo to hi: if lo is below the band's width the span runs from 0 and must hold 1.25 hi,
+otherwise it must hold 1.5 (hi - lo) about the band's centre; the narrowest zoom step that does is used.
 
 Levels are dBV of a sine's RMS (a tone centred on a bin reads its RMS level on every window; noise reads per bin,
 divide by ENBW for density). Volts per code use the calibration chain of protocol section 8.5, probe factor included
-[U: T8]. Number formatting is host-tested (`host_tests/test_spec_fmt.c`). Settings live in RAM (defaults: CH1, 4096,
+[U: T8]. Number formatting is host-tested (`host_tests/test_spec_fmt.c`). Settings live in RAM (defaults: CH1, 2048,
 Hann, 10 dB/div, ref 0 dBV, full span). Protocol: GET_STATUS byte 43 = display mode, READ_SPECTRUM 0x020A returns
 the displayed spectrum (protocol section 14 row 45).
 
