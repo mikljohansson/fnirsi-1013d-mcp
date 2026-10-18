@@ -87,7 +87,14 @@ class TcpLink:
     """TCP stream to the simulator. Closing the socket is the DTR 1->0 equivalent."""
 
     def __init__(self, host: str, port: int, connect_timeout: float = 3.0):
-        self._sock = socket.create_connection((host, port), timeout=connect_timeout)
+        # Windows resolves "localhost" to ::1 first; the simulator listens on IPv4, which would cost a 2 s
+        # connect timeout per attempt.
+        addr = "127.0.0.1" if host.lower() == "localhost" else host
+        try:
+            self._sock = socket.create_connection((addr, port), timeout=connect_timeout)
+        except OSError as e:
+            raise TransportError(f"cannot connect to tcp://{host}:{port}: {e}. Is the simulator running "
+                                 f"(fnirsi1013d-sim --port {port})?") from e
         self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._desc = f"tcp://{host}:{port}"
 

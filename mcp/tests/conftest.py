@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from fnirsi1013d.scope import Scope
-from fnirsi1013d.simulator import SimConfig, Signal, parse_signal, start_simulator
+from fnirsi1013d.simulator import SimConfig, parse_signal, start_simulator
 from fnirsi1013d.transport import connect
 
 

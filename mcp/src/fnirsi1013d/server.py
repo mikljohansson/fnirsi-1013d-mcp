@@ -17,7 +17,6 @@ FNIRSI_MCP_ENABLE_RAW=1, confirmation token).
 from __future__ import annotations
 
 import argparse
-import asyncio
 import collections
 import datetime as _dt
 import hashlib
@@ -1115,14 +1114,14 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 while left > 0:
                     k = min(left, chunk)
                     hdr, data = await anyio.to_thread.run_sync(
-                        lambda: s.acquire_avg_device(k, chans, a, cnt, per_ms, trig.mode != 0))
+                        lambda k=k: s.acquire_avg_device(k, chans, a, cnt, per_ms, trig.mode != 0))
                     for c, m in data.items():
                         acc[c] = acc.get(c, 0) + m * hdr.n_used
                     used += hdr.n_used
                     dropped += hdr.n_dropped
                     left -= k
                     if ctx is not None:
-                        await ctx.report_progress(n - left, n, f"{used} captures averaged on the device")
+                        await _progress(ctx, n - left, n, f"{used} captures averaged on the device")
                 if used == 0:
                     raise ToolError(f"{tool}: no capture triggered within {timeout_s} s each ({dropped} dropped); "
                                     "check the trigger with scope_get_config")
@@ -1189,7 +1188,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                 d = np.diff(ch0.codes[off: off + cnt])
                                 noise_est.append(float(np.median(np.abs(d - np.median(d))) * 1.4826 / math.sqrt(2)))
                 if ctx is not None and (i % 8 == 7 or i == n - 1):
-                    await ctx.report_progress(i + 1, n, f"{avgs[chans[0]].n} used, {sum(reasons.values())} dropped")
+                    await _progress(ctx, i + 1, n, f"{avgs[chans[0]].n} used, {sum(reasons.values())} dropped")
             used = avgs[chans[0]].n
             if used == 0:
                 raise ToolError(f"{tool}: all {n} captures were dropped ({dict(reasons)}). Fix: "
@@ -1362,7 +1361,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     f, amp, enbw = A.amplitude_spectrum(v, dt, window_fn, detrend)
                     psum = amp ** 2 if psum is None else psum + amp ** 2
                     if n_avg > 1 and (i % 8 == 7 or i == n_avg - 1):
-                        await ctx.report_progress(i + 1, n_avg)
+                        await _progress(ctx, i + 1, n_avg)
             finally:
                 held.release()
         except (DeviceError, TransportError, ValueError) as e:
@@ -1730,6 +1729,16 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     return mcp, sess
 
 
+async def _progress(ctx: Context | None, done: float, total: float, message: str | None = None) -> None:
+    """Best-effort progress notification; never fails the tool."""
+    if ctx is None:
+        return
+    try:
+        await ctx.report_progress(done, total, message)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _slice_capture(cap: Capture, a: int, n: int) -> Capture:
     from dataclasses import replace
 
@@ -1865,6 +1874,21 @@ def _png_from_rgb565(fb: np.ndarray) -> bytes:
             chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
 
 
+def preload_native_modules() -> None:
+    """Import modules that load DLLs before the stdio transport starts.
+
+    On Windows, loading a DLL (scipy's BLAS, pyserial's setupapi) deadlocks while another thread has a pending
+    synchronous ReadFile on the stdin pipe, which is exactly what the MCP stdio reader thread does. Importing
+    them here, before ``mcp.run``, avoids the hang on the first decay fit or port scan."""
+    import scipy.linalg  # noqa: F401
+    import scipy.optimize  # noqa: F401
+    try:
+        import serial  # noqa: F401
+        import serial.tools.list_ports  # noqa: F401
+    except ImportError:  # pragma: no cover
+        pass
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="fnirsi1013d-mcp", description="MCP server for the FNIRSI 1013D oscilloscope")
     ap.add_argument("--port", help="COM5, /dev/ttyACM0, tcp://localhost:5555 (simulator) or auto "
@@ -1880,6 +1904,7 @@ def main(argv: list[str] | None = None) -> None:
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     cfg = ServerConfig.from_env(port=a.port, max_tier=a.max_tier, enable_raw=a.enable_raw, data_dir=a.data_dir,
                                 audit_log=a.audit_log)
+    preload_native_modules()
     mcp, sess = build_server(cfg)
     try:
         mcp.run(transport=a.transport)

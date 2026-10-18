@@ -1178,7 +1178,7 @@ class Device:
         try:
             ops = P.decode_debug_ops(req.payload)
         except P.ProtocolError as e:
-            raise _DevErr(P.Status.E_BAD_ARG, 0, str(e)[:60])
+            raise _DevErr(P.Status.E_BAD_ARG, 0, str(e)[:60]) from e
         out = bytearray()
         R = self.spec.ring_words
         for op, arg in ops:

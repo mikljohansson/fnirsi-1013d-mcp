@@ -58,8 +58,8 @@ class ToolFailed(Exception):
 async def client_for(srv, tmp_path: Path, **cfgkw):
     cfgkw.setdefault("max_tier", 4)
     cfgkw.setdefault("enable_raw", True)
-    cfg = ServerConfig(port=srv.url, data_dir=tmp_path / "data", audit_log=tmp_path / "audit.jsonl",
-                       keepalive_s=3600, **cfgkw)
+    cfgkw.setdefault("keepalive_s", 3600)
+    cfg = ServerConfig(port=srv.url, data_dir=tmp_path / "data", audit_log=tmp_path / "audit.jsonl", **cfgkw)
     mcp, sess = build_server(cfg)
     try:
         async with create_connected_server_and_client_session(mcp) as session:
