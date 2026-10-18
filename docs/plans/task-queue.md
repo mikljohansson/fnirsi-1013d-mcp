@@ -30,8 +30,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   reconnect a second later worked. usb_resumes has been 0 on every build while usb_suspends count: the device never sees or handles the
   resume, so the host resets the port instead. Investigate MUSB suspend/resume (INTRUSB resume enable, POWER.SuspendM/Resume, PHY state
   during suspend, clocks), make resume work, and bench with the soak tool in idle-closed-port mode (open, close, wait 2-5 min, open).
-- [ ] **MMU + D-cache** (big lever: FFT 4096 points 10.9 ms uncached; flat 1:1 map with the framebuffer/DMA regions
-  uncached; measure pass time and FFT_BENCH before/after). Separate agent, careful bench.
+- [x] **MMU + D-cache** built by fw-mmu as fw 0.2.48 (merged; PC_MMU switch, `make gcc10-nommu` for the A/B image; design
+  docs/plans/mmu-dcache.md; bench sequence firmware/AGENTS.md section 26, only with the owner present: a hang needs a power cycle).
+  Bench pending: FFT_BENCH CP15 word 0x0005107D, DDR FFT rows 2-4x faster, pass_ms per view, screen coherence, soak, SD, ENTER_FEL x3.
 - [ ] **Dead-code purge** (owner dropped the byte-identical rule 10-18): PC_PROTOCOL always on, hidden-option masks
   replaced by removal (FFT switch, generator Wave/Ampl/Offset/Phase, Long memory, hold-off, 1014D remnants), unused files,
   check-reference target and reference downloads removed from the Makefile/CI/docs. Do after the spectrum/calibration
@@ -102,7 +103,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 ## Dispatched
 
 - fw-gen7 (worktree, Opus, started 10-19 00:35): dead-code purge, reproducible builds, 16-bit trigger level fix; fw 0.2.47.
-- fw-mmu (worktree, Opus, started 10-19 00:35): MMU + D-cache enable with PC_MMU switch; fw 0.2.48; bench only with the owner present.
+- fw-mmu (done 01:10, about 330k tokens, retired): fw 0.2.48 MMU + D-cache merged; images pinned backups/fw-0.2.48_*.bin (MMU and nommu).
 - bode-design (done 01:05): docs/plans/bode-design.md committed fe5780b.
 - fw-cal2 (retired, about 400k tokens): calibration v3 delivered and merged (c20957a, fw 0.2.45 / 1.12 / row 51); handoff section 23.
 - fw-phosphor (retired, about 430k tokens): phosphor view delivered and merged (2e73d28, fw 0.2.46 / 1.13 / row 52); handoff section 24.

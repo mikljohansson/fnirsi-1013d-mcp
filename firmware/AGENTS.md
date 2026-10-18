@@ -36,6 +36,7 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
                            zero and gain step checks. Pure C, host-buildable (sections 21, 23)
   phos_map.c/.h            phosphor hit-count map: rasteriser, decay, render, palettes. Pure C, host-buildable (section 24)
   phosphor.c/.h            phosphor view (main menu row 7, strip, hooks in scope_display_trace_data; section 24)
+  pc_mmu.c/.h              flat page table (builder + walk host-buildable), MMU enable; pc_mmu_off in start.s (section 26)
   host_tests/              test_protocol.c, test_rx_ring.c, test_session.c (+ mock_hal.c FPGA/transport model), vector_check.c,
                            check_vectors.py, gen_vectors.py, bench_link.py (pyserial, bench only)
 firmware/tools/            mksunxi.py, make_sd_image.py, fetch_gcc10.sh, spiflash tools (not this agent's)
@@ -234,6 +235,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.44 | e0ee6f3 | 08f9a5ed | FPGA 0x1535 FIR (protocol 1.11, row 49), spectrum view not repainted by scope_preset_values, Filter default CIC2 (PC_DECIM_DEFAULT), USB suspend as a state + resume logging (row 50), generator Freq row no longer hits the removed Wave row; includes main's fw-cal 64 full-rate conversions | built, host-tested (section 22) |
 | 0.2.45 | df61557 | 32f259b4 | calibration data v3: gain per core and clock class from a gain step at the calibration post, per-class offset slopes, block v3 (304 bytes), GET_CAL 256 bytes (protocol 1.12, row 51, section 23) | built, host-tested; bench list README 6.3 |
 | 0.2.46 | 1b6359f | cdba5b51 | digital phosphor view (main menu row 7; Persistence / Palette / Clear strip; XY), GET_STATUS byte 43 = 4 (protocol 1.13, row 52), settings word 210 (fw-phosphor, section 24) | built, host-tested (test_phosphor 95 checks); bench steps in section 24 |
+| 0.2.48 | b1922c3 | 2f768fd9 | MMU + D-cache on (flat map, DDR / SRAM write-back, framebuffer write-through, restart record and peripherals strongly ordered), clean + off at _reset and ENTER_FEL, GET_LINK_STATS 58-59 fault status / address (fw-mmu, section 26) | built, host-tested (test_mmu); A/B image `make gcc10-nommu` 0.2.48-nommu sha256 45e03f7f; bench sequence in section 26 |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -315,7 +317,8 @@ As built, in `start.s` under `#if PC_PROTOCOL`:
 
 Record layout, u32 words at 0x81A00000 (free DDR: .bss ends at 0x805A5030, the bootloader's sector-710 copy sits at
 0x81BFFC00): [0] alive magic 0x4C495645, [1] restart count, [2] reset LR, [3] reset SP, [4] reset CPSR,
-[5] exception type, [6] exception LR, [7] SPSR, [8] exception SP, [9] exception magic.
+[5] exception type, [6] exception LR, [7] SPSR, [8] exception SP, [9] exception magic; since 0.2.48 [10] DFSR,
+[11] IFSR, [12] FAR (GET_LINK_STATS 58-59, section 26). Since 0.2.48 the record's 1 MB section is mapped strongly ordered.
 
 `pc_restart_check` (pc_hal_scope.c, about line 1147, first call in `pc_glue_init`) counts a restart when the alive
 magic of the previous run is present, copies the fields (exception fields only with the exception magic), clears [9]
@@ -437,6 +440,7 @@ Authoritative text: protocol section 14 rows 28 and 38.
 | 57 | 0.2.19 | 49-56 restart record (section 10) |
 | 58 | 0.2.20 | 57 USB IRQ races (section 11) |
 | 58 | 0.2.21+ | same layout; 47 and 57 retired, always 0 |
+| 60 | 0.2.48+ | 58 fault status (DFSR / IFSR of the restart's abort), 59 fault address (FAR, data abort only) |
 
 **GET_EVENT_LOG 0x0009** (protocol 1.5, any poll context). Request: empty, or since 0.2.18 u8 flags (bit 0 = re-arm
 the snapshot after this read; other bits E_BAD_ARG detail 0). Response: u16 n (<= 128; 64 before 0.2.15), u16 0,
@@ -963,3 +967,84 @@ Bug indicators: trace not on the pointer / cursor positions (LUT mismatch); grid
 brightness shimmer at a constant signal; a picture that never fades at 1 s or never clears after a V/div change; the
 strip briefly replaced by the slider on a time base change; wfm/s far below the scope view's record rate; `pass_ms`
 over 50 ms for a single clean trace; any hang or restart (SRAM 0x0400-0x0FFF use; check GET_LINK_STATS 49-56).
+
+## 26. fw-mmu: MMU + D-cache (fw 0.2.48, protocol stays 1.13)
+
+Branch `fw-mmu` from main 1950e58 (0.2.46 + mcp 1.13): 6e36a89 (design, docs/plans/mmu-dcache.md), d486c21 (table
+builder + test_mmu), 8cdefda (enable / exit paths, fault registers in the record), 52fe65a (GET_LINK_STATS 58-59),
+e877c75 (mcp names), b1922c3 (0.2.48, CHANGELOG, README, protocol row 38). Image from b1922c3 (GCC 10, PC_FW_BUILD
+passed by hand): `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin`, 485,888 B, sha256
+2f768fd9e9a02741e4c1b6c587bdaa7eebf01edb8cc51dc4e907cb92a725ad93; A/B `build-gcc10-nommu/fnirsi_1013d.bin`
+(`make gcc10-nommu`, #VER `fw=0.2.48-nommu`) sha256 45e03f7f86669e1f10be7b7ce8edda6995839fe4755340574315e58ba8342956.
+Not pinned in backups/ yet (the worktree agent cannot write there); the ELFs sit next to the .bins. **Nothing
+benched.** fw-gen7's 0.2.47 purge runs in parallel: my changes outside the new files are small (start.s, a block at
+the end of pc_hooks.h, one line in main, Makefile, linker ASSERT, pc_fel_jump, the restart record in pc_hal_scope.c,
+pc_cmds.c link stats, pc_cmds.h version); expect conflicts only in pc_cmds.h (version), CHANGELOG and the ladder.
+
+**What it does** (reasoning and the audit: docs/plans/mmu-dcache.md)
+- `pc_mmu.c/.h`: `pc_mmu_build` (pure C) fills 4096 section descriptors, domain 0 client, AP 11, no fault entries:
+  section 0 (SRAM A) write-back (`PC_MMU_SRAM=0`: strongly ordered), DDR 0x80000000-0x81FFFFFF write-back except the
+  restart record's section 0x81A00000 (strongly ordered, so the record reaches DDR without a clean), everything else
+  strongly ordered (= the MMU-off behaviour). The pages holding `maindisplaybuffer` (the only buffer another master
+  reads: DEBE layer 0) are write-through via two coarse tables. `pc_mmu_enable` (target): build, drain, invalidate
+  I/D/TLB, TTBR, DACR 1, control |= M C I with A S R V RR cleared; returns the control word. Called by
+  `PC_MMU_ENABLE()` right after 1.00o5's `arm32_dcache_enable()` in main (after the BSS clear, before IRQs).
+- `start.s`: `pc_mmu_off` (no stack): if the MMU is on, test-clean-invalidate the whole D-cache; drain; M C I off;
+  invalidate I/D/TLB. Called at `_reset` right after the record stores, with IRQ/FIQ masked, so every restart path
+  (NULL call, exception, eGON entry) starts from the cold-boot state with DDR coherent; and from `pc_fel_jump` before
+  its own cache-off and the jump to 0xFFFF0020. With the MMU off at entry it only invalidates (it never cleans lines
+  of unknown content over a freshly FEL-loaded image).
+- Exceptions also store DFSR / IFSR / FAR at record words 10-12; GET_LINK_STATS 58 = fault status (DFSR for type 4,
+  IFSR for type 3), 59 = FAR (type 4), n = 60. The fault PC is still counter 51 - 8 (data abort) / - 4.
+- Framebuffer write-through, not write-back: the ARM926 D-cache allocates on read misses only, so 1.00o5's
+  store-mostly drawing gains nothing from write-back, while write-back would need cleaning (no page flip; modal
+  menus idle with dirty lines on screen). Write-through is coherent by construction and still removes the per-store
+  stall (the write buffer takes it). Follow-up if pass_ms says the stores drain too slowly: write-back plus a clean of
+  the whole D-cache in the 1 ms tick (at most 512 lines).
+- Not needed: an alignment audit (A stays clear, as with the MMU off), volatile changes (one core, no DMA: SD and USB
+  are PIO, the FPGA bus is GPIO), delay-loop changes (tp_delay, fpga_delay, sd_card_delay are register-only asm).
+
+**Risks I see** (inference; the bench decides)
+1. Something reads DDR that I missed (another bus master, or a buffer handed to the display engine elsewhere):
+   symptom stale or torn screen content. Only `sys_init_display` sets a scan address (DEBE_LAY0_FB_ADDR).
+2. Code that only worked because it was slow: USB FIFO / CSR sequences, the touch I2C bit-bang between tp_delay
+   calls, FPGA pulse spacing where a trace-buffer store used to sit between two GPIO accesses (pulse widths are
+   device-access bound and unchanged). Symptoms: tx_aborts / drops in the soak, dead or erratic touch, wrong samples
+   (TEST_PATTERN content check, spikes in captures).
+3. A hand-over with dirty lines or the MMU on: the bench's CP15 0x0005107C (MMU off at run time, nothing in the image
+   turned it off) rules it out for the bootloader; the FEL `exe` after ENTER_FEL is new: the old image cleans before
+   jumping, so the new one must come up exactly like a cold FEL load.
+4. D-cache size unknown (16 KB per the F1C100s datasheet, unverified): performance only.
+5. Record words 10-12 are written only by 0.2.48+ vectors; they are reported only for exception types 3 / 4 with
+   the exception magic, which the same image wrote.
+
+**Bench sequence** (coordinator + owner; FEL loads only, nothing written to the card unless the coordinator decides)
+1. FEL-load `build-gcc10-pc/fnirsi_1013d.bin` (`sunxi-fel -p write 0x7FFFFFE0 ... exe 0x80000000`). Expect the
+   normal boot within the usual time, USB enumerates, `#VER` `fw=0.2.48,proto=1.13`. Black screen / no enumeration =
+   the enable path (a power cycle boots the card's image; then try -nommu to separate the MMU from the rest).
+2. `fnirsi1013d-bench --fft --reps 3`: CP15 control must read **0x0005107D** (0x0005107C on -nommu). Reference
+   (0.2.37, MMU off): 4096 DDR 10.96 ms run, 2048 DDR 4.9 ms, 2048 SRAM 2.3 ms. Expected: DDR rows 2-4x faster
+   (4096 about 3-5 ms, 2048 about 1.2-2.5 ms), SRAM rows 1-1.5x, DDR and SRAM rows close together. -nommu numbers on
+   0.2.48 = MMU not effective (check the CP15 word). Optional third image `make gcc10 PC_MMU_SRAM=0` (SRAM strongly
+   ordered) shows whether SRAM caching matters; if DDR ~ SRAM, the spectrum view's SRAM plan can go later.
+3. pass_ms (GET_STATUS, 20 samples each, both images): scope view with the 1 kHz calibration square at 200 us/div
+   and at 1 MSa/s; spectrum view N 2048 and 4096 (also waterfall and density); phosphor view (Persistence 1 s).
+   Baseline: scope view about 30 ms. Expect a clear drop wherever the display or the FFT dominates (scope view
+   perhaps 15-25 ms; the FPGA readout at ~0.3 us per byte does not change), the largest in spectrum and phosphor.
+4. Display correctness: open and close every menu over a running trace, spectrum waterfall and density, phosphor
+   with fading, the MCP chip, text fields, the FEL screen. Leftover pixels, text that appears late, torn rows, or a
+   screenshot (READ_SCREEN / picture save) that differs from the panel = coherence.
+5. `fnirsi1013d-bench` (link checks + census 2000) and readback rates: equal or better than -nommu; TEST_PATTERN
+   content errors or lower rates = regression.
+6. `fnirsi1013d-soak --mode capture --duration 1800`: 0 restarts (GET_LINK_STATS 49), tx_aborts as on 0.2.46, no drops.
+7. SD: save a picture and a waveform, view them back on the scope; power off / on keeps the settings (sector 709
+   written by the power-off ISR); `fnirsi1013d-sd info --verify` and `fnirsi1013d-sd read 708 3 -o ...` equal to a
+   -nommu read. The persist path (SD_STAGE + SD_WRITE_SECTORS) only if the coordinator wants this image on the card;
+   read-back identical is the check.
+8. ENTER_FEL round trip x3 from 0.2.48: FEL device appears, reload, it boots, counter 49 (restarts) = 0; once load
+   -nommu after 0.2.48 and once 0.2.48 after -nommu. FEL device missing = the jump; a reloaded image misbehaving or
+   restarting = stale cache state (pc_mmu_off not effective).
+9. Touch: taps and drags in the trace area, menus, spectrum gestures. Dead or erratic = I2C timing.
+On any restart: GET_LINK_STATS 49-59 and `map_addr.py <0.2.48 ELF> --restart v49..v56`; 58 / 59 give the fault
+status and address of a data abort (FS 0x5 / 0x7 translation, 0x9 / 0xB domain, 0xD / 0xF permission: none can come
+from this table; 0x1 / 0x3 alignment; 0x8 / 0xA external abort).

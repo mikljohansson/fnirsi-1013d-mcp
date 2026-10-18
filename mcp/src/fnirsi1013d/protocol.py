@@ -1963,14 +1963,18 @@ LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     "restart_reset_sp", "restart_reset_cpsr",
     # fw 0.2.20 (58 counters): ticks where the quiet-tick gate would have served USB flags but the USB IRQ was
     # pending at the INTC (the tick racing the real handler); retired in fw 0.2.21, always 0 there
-    "usb_irq_races")
+    "usb_irq_races",
+    # fw 0.2.48 (60 counters): fault status (DFSR for a data abort, IFSR for a prefetch abort) and fault address (FAR,
+    # data abort only) of the restart recorded in 49-56; 0 otherwise
+    "restart_fault_status", "restart_fault_addr")
 
 #: restart_exc_type / event 15 a (fw 0.2.19)
 RESTART_EXC_TYPES = {0: "jump to entry", 1: "undefined", 2: "SWI", 3: "prefetch abort", 4: "data abort",
                      5: "reserved", 6: "FIQ"}
 #: GET_LINK_STATS counters of the restart record (printed raw, in hex, by fnirsi1013d-soak)
 RESTART_RECORD = ("restarts", "restart_exc_type", "restart_exc_lr", "restart_exc_spsr", "restart_exc_sp",
-                  "restart_reset_lr", "restart_reset_sp", "restart_reset_cpsr")
+                  "restart_reset_lr", "restart_reset_sp", "restart_reset_cpsr", "restart_fault_status",
+                  "restart_fault_addr")
 
 
 #: GET_EVENT_LOG request flags (fw 0.2.18): bit 0 re-arms the reset snapshot after this read (a plain read keeps it;

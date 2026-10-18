@@ -24,7 +24,12 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #else
 #define PC_FW_VERSION_MAP ""
 #endif
-#define PC_FW_VERSION     "0.2.46" PC_FW_VERSION_MAP
+#if defined(PC_MMU) && !PC_MMU
+#define PC_FW_VERSION_MMU "-nommu"      //fw 0.2.48 A/B build: MMU and D-cache left off (pc_mmu.h)
+#else
+#define PC_FW_VERSION_MMU ""
+#endif
+#define PC_FW_VERSION     "0.2.48" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
 #endif
 
 #ifndef PC_FW_BUILD

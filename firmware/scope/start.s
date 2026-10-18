@@ -20,6 +20,14 @@ _reset:
 	str sp, [r12, #12]
 	mrs r11, cpsr
 	str r11, [r12, #16]
+#if PC_MMU
+	//fw 0.2.48: leave the MMU and caches as a cold boot finds them (cleaned first if they were on: .data is not
+	//reloaded on a restart, so its last values must reach DDR). IRQ / FIQ off: a restart may come from SVC mode.
+	mrs r0, cpsr
+	orr r0, r0, #0xC0
+	msr cpsr_c, r0
+	bl pc_mmu_off
+#endif
 #endif
 	//Initialize stacks. Interrupts disabled
 	mrs r0, cpsr
@@ -110,8 +118,9 @@ _fiq:
 
 //Not used exception handlers
 #if PC_PROTOCOL
-//PC protocol: record the exception (type, LR, SPSR, SP of that mode) and restart instead of hanging, so the host sees
-//the device come back and can read where it crashed (GET_LINK_STATS restart counters, event type 15)
+//PC protocol: record the exception (type, LR, SPSR, SP of that mode; since fw 0.2.48 also DFSR, IFSR and FAR at
+//+40 / +44 / +48) and restart instead of hanging, so the host sees the device come back and can read where it crashed
+//(GET_LINK_STATS restart counters 49-56 and 58-59, event type 15)
 undefined_instruction:
 	mov r11, #1
 	b pc_exception_common
@@ -139,9 +148,42 @@ pc_exception_common:
 	mrs r10, spsr
 	str r10, [r12, #28]
 	str sp, [r12, #32]
+	mrc p15, 0, r10, c5, c0, 0
+	str r10, [r12, #40]
+	mrc p15, 0, r10, c5, c0, 1
+	str r10, [r12, #44]
+	mrc p15, 0, r10, c6, c0, 0
+	str r10, [r12, #48]
 	ldr r10, =0x45584321
 	str r10, [r12, #36]
 	b _reset
+
+#if PC_MMU
+//fw 0.2.48 (docs/plans/mmu-dcache.md): MMU, D-cache and I-cache off, as a cold boot finds them. Called from _reset and
+//before the FEL jump, IRQs masked. With the MMU on the whole D-cache is cleaned and invalidated first (test, clean and
+//invalidate loop); with it off only invalidated: nothing ran cacheable, and cleaning lines of unknown content could
+//write over a freshly loaded image. No stack; clobbers r0 and the flags.
+	.global pc_mmu_off
+pc_mmu_off:
+	mrc p15, 0, r0, c1, c0, 0
+	tst r0, #1
+	beq 2f
+1:
+	mrc p15, 0, APSR_nzcv, c7, c14, 3
+	bne 1b
+2:
+	mov r0, #0
+	mcr p15, 0, r0, c7, c10, 4
+	mrc p15, 0, r0, c1, c0, 0
+	bic r0, r0, #0x1000
+	bic r0, r0, #0x0005
+	mcr p15, 0, r0, c1, c0, 0
+	mrc p15, 0, r0, c1, c0, 0
+	mov r0, #0
+	mcr p15, 0, r0, c7, c7, 0
+	mcr p15, 0, r0, c8, c7, 0
+	bx lr
+#endif
 #else
 undefined_instruction:
 	b .

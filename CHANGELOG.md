@@ -31,6 +31,16 @@ by CI from the tag commit and has its own hash.
 With `PC_PROTOCOL=0` the tree builds byte-identical to Atlan4's v1.00o5 image (`make check-reference`).
 Every protocol change sits behind `#if PC_PROTOCOL`.
 
+#### 0.2.48 - 2026-10-19 (protocol 1.13)
+
+- Changed: the MMU is on, so the D-cache and the write buffer finally take effect (the C bit was set since 1.00o5 but
+  does nothing with the MMU off). Flat 1:1 map: DDR and SRAM A write-back, the scanned framebuffer write-through,
+  peripherals, boot ROM and the restart record strongly ordered. Caches are cleaned and switched off at every restart
+  and before ENTER_FEL. `make gcc10-nommu` builds the same code with the MMU off (version suffix `-nommu`) for the A/B
+  (8cdefda; table builder and host test d486c21; design docs/plans/mmu-dcache.md 6e36a89).
+- Added: GET_LINK_STATS counters 58-59 (n = 60): fault status (DFSR / IFSR) and fault address (FAR) of the abort
+  that caused the last restart (52fe65a).
+
 #### 0.2.46 - 2026-10-19 (protocol 1.13)
 
 - Added: digital phosphor view (main menu row 7 "Phosphor display"): the CH1 / CH2 traces are drawn from per-pixel
