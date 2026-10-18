@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c mock_hal.c
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_protocol.h mock_hal.h test_util.h
 
 .PHONY: all test vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt
 
 $(OUT):
 	mkdir -p $@
@@ -42,11 +42,15 @@ FFT_SRCS := $(SRC)/fx_fft.c $(SRC)/fx_fft_tables.c
 $(OUT)/fft_cli: fft_cli.c $(FFT_SRCS) $(SRC)/fx_fft.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ fft_cli.c $(FFT_SRCS)
 
+$(OUT)/test_spec_fmt: test_spec_fmt.c test_util.h $(SRC)/spec_fmt.c $(SRC)/spec_fmt.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_spec_fmt.c $(SRC)/spec_fmt.c
+
 test: all
 	$(OUT)/test_protocol
 	$(OUT)/test_rx_ring
 	$(OUT)/test_session
 	$(OUT)/test_session_debug
+	$(OUT)/test_spec_fmt
 	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --vectors $(VECTORS)
 	$(PYTHON) -I test_fft.py --cli $(OUT)/fft_cli --tables $(SRC)/fx_fft_tables.c --gen ../../tools/gen_fft_tables.py
 
