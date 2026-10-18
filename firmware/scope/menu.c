@@ -43,6 +43,7 @@ void scope_setup_main_screen(void)
 
   //Top bar for the main, channel and trigger menu and information
   display_fill_rect(0, 0, 730, 48);
+  PC_TOPBAR_DRAWN();
 
   //Right bar for control buttons
   display_fill_rect(730, 0, 70, 480);
@@ -90,7 +91,7 @@ void scope_setup_main_screen(void)
   //Show version information
   display_set_fg_color(WHITE_COLOR);
   display_set_font(&font_2);
-  display_text(VERSION_STRING_XPOS, VERSION_STRING_YPOS, VERSION_STRING+1);
+  display_text(VERSION_STRING_XPOS, VERSION_STRING_YPOS, PC_UI_VERSION(VERSION_STRING+1, 0));
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -108,7 +109,7 @@ void scope_setup_restore_screen(void)
   //Display the text with font 5 and the white color
   display_set_font(&font_5);
   display_set_fg_color(WHITE_COLOR);
-  display_text(370, 130, VERSION_STRING);    //Show version information 
+  display_text(370, 130, PC_UI_VERSION(VERSION_STRING, 0));    //Show version information 
   display_text(270, 190, "Load default settings value");    
   
   if (calibrationfail == 1)
@@ -1865,6 +1866,7 @@ void scope_run_stop_text(void)
     display_set_fg_color(WHITE_COLOR);
     display_text(RUN_STOP_TEXT_XPOS + 1, RUN_STOP_TEXT_YPOS + 1, "STOP");
   }
+  PC_TOPBAR_DRAWN();
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -7788,12 +7790,12 @@ void scope_open_diagnostic_view(void)
   //Display the text with the green color
   display_set_fg_color(GREEN_COLOR);
   display_set_font(&font_3);
-  display_text(a, 20, VERSION_STRING);  //c//460      //Show version information 
+  display_text(a, 20, PC_UI_VERSION(VERSION_STRING, 1));  //c//460      //Show version information 
   
   //Display the temperature with darkgreen color
   //display_set_font(&font_3);
   display_set_fg_color(DARKGREEN_COLOR);
-  display_text(b, 20, "Temperature");//j+135
+  if(1 PC_UI_HAS(PC_FEAT_RTC)) display_text(b, 20, "Temperature");//j+135
   
   //Display the text with the white color
   display_set_fg_color(WHITE_COLOR);
@@ -7812,6 +7814,9 @@ void scope_open_diagnostic_view(void)
   display_text(k+57, 202, "Lock move cursors"); 
   */
     
+  //PC protocol: the temperature comes from the DS3231; only with the module fitted
+  if(1 PC_UI_HAS(PC_FEAT_RTC))
+  {
   temp = readtemperature();
   
   //Display sign (-)
@@ -7819,6 +7824,8 @@ void scope_open_diagnostic_view(void)
   
   display_decimal(b1, 20, temp & 0x7F);
   display_text(b1+20, 20, "C"); 
+  }
+  PC_DIAG_DRAWN();
  /* 
   //Display the text with font 3 and the red color
   display_set_fg_color(RED_COLOR);

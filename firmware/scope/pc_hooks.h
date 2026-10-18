@@ -35,6 +35,9 @@ int  pc_glue_ui_arm_allowed(void);    //0 while a host READ_RAW waits for the UI
 int  pc_glue_rtc_allowed(void);       //0 while the MCP chip occupies the RTC clock slot
 void pc_glue_pass_mark(int n);        //main loop stage reached (first-pass timing, GET_LINK_STATS)
 int  pc_glue_ui_has(int feature);     //PC_FEAT_*: 1 when the running hardware supports it
+char *pc_glue_version(int form);      //0 "v0.2.7", 1 "fw 0.2.7", 2 full identity line (diagnostics)
+void pc_glue_topbar_drawn(void);      //the top bar / RUN-STOP chip was (re)drawn: put the MCP chip back with it
+void pc_glue_diag_drawn(void);        //diagnostics screen drawn: identity line
 void pc_glue_ui_mask(int menu);       //PC_MASK_*: paint over what it does not support (current draw buffer)
 void pc_glue_ui_capture_start(void);  //fpga_do_conversion started a conversion
 void pc_glue_ui_capture_addr(uint32 addr); //0x14 read of the finished UI capture
@@ -50,6 +53,9 @@ void pc_glue_ui_capture(void);        //UI finished reading a capture
 #define PC_PASS_MARK(n)         pc_glue_pass_mark(n)
 #define PC_UI_HAS(f)            && pc_glue_ui_has(f)
 #define PC_UI_MASK(m)           pc_glue_ui_mask(m)
+#define PC_UI_VERSION(d, form)  ((int8 *)pc_glue_version(form))
+#define PC_TOPBAR_DRAWN()       pc_glue_topbar_drawn()
+#define PC_DIAG_DRAWN()         pc_glue_diag_drawn()
 
 #else
 
@@ -63,6 +69,9 @@ void pc_glue_ui_capture(void);        //UI finished reading a capture
 #define PC_PASS_MARK(n)         do { } while(0)
 #define PC_UI_HAS(f)
 #define PC_UI_MASK(m)           do { } while(0)
+#define PC_UI_VERSION(d, form)  (d)
+#define PC_TOPBAR_DRAWN()       do { } while(0)
+#define PC_DIAG_DRAWN()         do { } while(0)
 
 #endif
 

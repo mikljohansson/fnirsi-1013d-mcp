@@ -186,6 +186,11 @@ void     pc_hal_link_stats(uint32_t *v);         //PC_TSTAT_COUNT values
 #define PC_USBEV_COUNT    6
 void     pc_hal_usb_events(uint32_t *v);
 
+//RX back-pressure branches (fw 0.2.7): ISR stalls, releases, re-stalls in a release, empty releases, max RXCOUNT,
+//RXCOUNT > 512
+#define PC_RXDBG_COUNT    6
+void     pc_hal_rx_debug(uint32_t *v);
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // SD card (MAIN context only: the driver is not reentrant). Return 0 or the negative driver error.
 

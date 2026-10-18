@@ -161,7 +161,15 @@ def main():
 
     names = ('rx_packets rx_bytes rx_stalls rx_swept tx_packets tx_zlps tx_kicked tx_flushes link_resets dtr_up '
              'dtr_down frames hdr_crc payload_crc oversize version resp_dropped rx_timeouts junk_bytes responses '
-             'duplicates tx_aborts disp_main disp_busy disp_isr held isr_skipped').split()
+             'duplicates tx_aborts disp_main disp_busy disp_isr held isr_skipped '
+             # fw 0.2.0+: startup (27, 28), 0.2.2+: first conversion / capture (ms + 1 since 0.2.4)
+             'init_to_first_poll_ms first_pass_ms first_conversion first_capture '
+             # fw 0.2.4+: first-pass stage marks (ms + 1)
+             'after_battery after_acquisition after_touch after_rtc '
+             # fw 0.2.5+: USB device events
+             'usb_bus_resets usb_suspends usb_resumes usb_disconnects ep0_setups ep0_bad_setups '
+             # fw 0.2.7+: RX back-pressure branches
+             'rx_isr_stalls rx_releases rx_restalls rx_empty_releases rx_count_max rx_count_oversize').split()
     st, body, _ = L.request(0x0007)
     if st == 0 and body:
         n = struct.unpack_from('<H', body)[0]

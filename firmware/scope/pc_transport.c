@@ -41,6 +41,16 @@ static volatile uint8  pc_dtr;
 //Link counters for GET_LINK_STATS (order = pc_hal_link_stats, docs/protocol.md section 14)
 static volatile uint32 pc_ts[PC_TSTAT_COUNT];
 static volatile uint32 pc_usb_ev[PC_USB_EV_COUNT];
+
+//RX back-pressure diagnosis (bench 0.2.3: 307,837 stalls, 660 header CRC errors during an SD persist)
+#define PC_RXD_ISR_STALL    0
+#define PC_RXD_RELEASE      1
+#define PC_RXD_RESTALL      2
+#define PC_RXD_EMPTY        3
+#define PC_RXD_COUNT_MAX    4
+#define PC_RXD_OVERSIZE     5
+static volatile uint32 pc_rxd[PC_RXDBG_COUNT];
+static volatile uint8  pc_rx_in_release;       //drain called from the main-loop release
 static volatile uint8  pc_ep2_configured;    //SET_CONFIGURATION set up EP2 since the last bus reset
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -78,8 +88,14 @@ static uint32 pc_rx_drain_fifo(void)
     uint32 count = *USBC_REG_RXCOUNT & 0x1FFF;
     int32  stored;
 
+    if(count > pc_rxd[PC_RXD_COUNT_MAX])
+      pc_rxd[PC_RXD_COUNT_MAX] = count;
+
     if(count > sizeof(pc_rx_bounce))
+    {
+      pc_rxd[PC_RXD_OVERSIZE]++;
       count = sizeof(pc_rx_bounce);
+    }
 
     //One FIFO read per packet into the aligned bounce buffer, then a two-segment copy into the ring (pc_rx_ring.h:
     //the 0.1.2-0.1.5 split FIFO read at the ring end corrupted every request crossing a 2 KiB stream boundary)
@@ -92,6 +108,7 @@ static uint32 pc_rx_drain_fifo(void)
       *USBC_REG_INTRXE &= ~USBC_INTRX_FLAG_EP2;
       pc_rx_stalled = 1;
       pc_ts[PC_TS_RX_STALLS]++;
+      pc_rxd[pc_rx_in_release ? PC_RXD_RESTALL : PC_RXD_ISR_STALL]++;
       return packets;
     }
 
@@ -174,7 +191,14 @@ uint32_t pc_hal_rx_read(uint8_t *dst, uint32_t max)
 
     *USBC_REG_EPIND = 2;
     pc_rx_stalled   = 0;
+    pc_rxd[PC_RXD_RELEASE]++;
+
+    if(!(*USBC_REG_RXCSR & USBC_BP_RXCSR_D_RX_PKT_READY))
+      pc_rxd[PC_RXD_EMPTY]++;
+
+    pc_rx_in_release = 1;
     pc_rx_drain_fifo();
+    pc_rx_in_release = 0;
 
     if(!pc_rx_stalled)
       *USBC_REG_INTRXE |= USBC_INTRX_FLAG_EP2;
@@ -394,6 +418,14 @@ void pc_hal_usb_events(uint32_t *v)
 
   for(i=0;i<PC_USB_EV_COUNT;i++)
     v[i] = pc_usb_ev[i];
+}
+
+void pc_hal_rx_debug(uint32_t *v)
+{
+  uint32 i;
+
+  for(i=0;i<PC_RXDBG_COUNT;i++)
+    v[i] = pc_rxd[i];
 }
 
 void pc_usb_isr_configured(void)

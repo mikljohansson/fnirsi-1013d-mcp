@@ -1,7 +1,8 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.6 (protocol 1.3: shared control, SD sector commands; 0.2.6: menus hide what the hardware
-lacks, README "Hidden menu options"; 0.2.5: USB event counters; 0.2.3: chip above RUN/STOP and
+State on 2026-10-18, fw 0.2.7 (protocol 1.3: shared control, SD sector commands; 0.2.7: SD_STAGE from the timer poll,
+RX back-pressure counters, our version on screen, chip drawn with the top bar, temperature only with an RTC; 0.2.6:
+menus hide what the hardware lacks, README "Hidden menu options"; 0.2.5: USB event counters; 0.2.3: chip above RUN/STOP and
 steady, one-step SET_TIMEBASE). 0.2.1 passed the protocol-level
 shared-control acceptance on the bench (owner's visual checks pending); 0.2.2 adds SD_* and two startup counters,
 built and host-tested, not benched. Read `CLAUDE.md` (repo root) first, then
@@ -192,6 +193,16 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
   counters (rx_swept, link_resets, rx_packets vs requests sent). Acceptance: 0 E_BAD_CRC, 0 no response in 2000
   PINGs + 100 x 64 KiB. Ideas not yet tried: unload EP2 OUT with 32-bit reads only (pad the ring position to 4),
   read RXCOUNT twice, check RXCSR DataError/Overrun on bad packets, try the FIFO on Linux to separate host effects.
+- RX corruption under back-pressure (bench 0.2.3 SD persist): rx_stalls 307,837, hdr_crc 660, duplicates 658, then
+  the host's WriteFile failed (error 22) and the device re-enumerated. Not explained by code reading: only the ring
+  code unloads EP2 OUT, the stall path clamps the count before the room check, and the release path always has
+  room for one packet. The stall count is far above the packet count, so something re-enters the stall branch
+  without new data: 0.2.7 counts the branches (GET_LINK_STATS 41-46). The hdr_crc/duplicate pairing looks like host
+  retries of requests that had been executed (each SD_STAGE waited a UI pass, each SD_WRITE up to 4 s). 0.2.7
+  serves SD_STAGE from the timer poll, which removes the back-pressure regime; hosts should write <= 32 sectors.
+- Startup: 1515 ms from session init to the first MAIN poll (0.2.4/0.2.5 bench, counter 27); the first pass is
+  31 ms. Prime suspect: `load_picture("scope.bmp")` (800x480 BMP, ~1.1 MB from FAT at ~730 KB/s) after
+  usb_device_init. Not changed: dropping or deferring the splash is the owner's call.
 - USB "Error state" incident (0.2.2, lead): port closed, scope idle ~10 min, then Windows showed the device present but
   in an error state (CreateFile failed); a cable replug recovered it. Not reproduced, cause unknown. Code reading:
   the suspend path calls pc_usb_isr_link, which flushed a held-back OUT packet but left EP2 OUT masked in INTRXE

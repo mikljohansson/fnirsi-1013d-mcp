@@ -391,6 +391,12 @@ hooks `PC_UI_HAS` / `PC_UI_MASK` that are empty with `PC_PROTOCOL=0`):
 | EXT trigger source | trigger menu | always | no external trigger input (yet; FPGA work item) |
 | Hold off | trigger menu | always | never sent to the FPGA in 1.00o5 |
 | Time & Date settings (RTC submenu) | system settings | no DS3231 answers at boot | the clock, file stamps and FAT times would read garbage |
+| Temperature (diagnostics screen) | diagnostics | no DS3231 answers at boot | it is the DS3231's temperature register; without the module it read "99" |
+
+Version display (fw 0.2.7): the main-screen corner and the restore screen show `v<fw>`, the diagnostics screen shows
+`fw <fw>` in place of 1.00o5 and a full identity line along its top edge (`FNIRSI-1013D-AI fw .., proto 1.3, base
+Atlan4 1.00o5, git <hash>, built <date>`), all from PC_FW_VERSION / PC_PROTO_* / PC_FW_BUILD (the same as `#VER` and
+GET_INFO). Waveform and reference files still store 1.00o5's VERSION_STRING (file format data).
 
 At boot a saved setting that selects a hidden option is corrected: RTC off without a module, EXT trigger -> CH1,
 memory depth clamped to the largest offered step. The DS3231 is detected by addressing it (0xD0) on the touch

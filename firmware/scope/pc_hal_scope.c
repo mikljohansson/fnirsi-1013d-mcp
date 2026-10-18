@@ -24,6 +24,7 @@
 #include "pc_transport.h"
 #include "sd_card_interface.h"
 #include "DS3231.h"
+#include "build_time.h"
 
 #include "pc_hal.h"
 #include "pc_cmds.h"
@@ -609,11 +610,11 @@ uint32_t pc_hal_settings_fingerprint(void)
   return pc_crc32(b, n);
 }
 
-void pc_hal_indicator(int state)
+//The chip into the current draw buffer (the UI's own top-bar drawing calls this through PC_TOPBAR_DRAWN)
+static void pc_draw_chip(int state)
 {
-  DISPLAYDATA save;
-
-  pc_draw_begin(&save);
+  uint16 fg = displaydata.fg_color;
+  PFONTDATA font = displaydata.font;
 
   if(state == 0)
   {
@@ -633,7 +634,99 @@ void pc_hal_indicator(int state)
     display_text(PC_CHIP_X + 4, PC_CHIP_Y, "MCP");
   }
 
+  displaydata.fg_color = fg;
+  displaydata.font     = font;
+}
+
+void pc_hal_indicator(int state)
+{
+  DISPLAYDATA save;
+
+  pc_draw_begin(&save);
+  pc_draw_chip(state);
   pc_draw_end(&save);
+}
+
+void pc_glue_topbar_drawn(void)
+{
+  if(pc_ready && pc_ui_chip_shown(&pc_sess))
+    pc_draw_chip(1);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Version text: the same PC_FW_VERSION / PC_PROTO_* as #VER and GET_INFO, so they can never disagree
+
+static char pc_ver[3][112];
+
+static char *pc_vcat(char *p, const char *s)
+{
+  while(*s)
+    *p++ = *s++;
+
+  *p = 0;
+  return p;
+}
+
+static char *pc_vdec2(char *p, uint32 v)
+{
+  *p++ = (char)('0' + (v / 10) % 10);
+  *p++ = (char)('0' + v % 10);
+  *p = 0;
+  return p;
+}
+
+static void pc_version_init(void)
+{
+  static const char hex[] = "0123456789abcdef";
+  char *p;
+  int   i;
+
+  p = pc_vcat(pc_ver[0], "v");
+  pc_vcat(p, PC_FW_VERSION);
+
+  p = pc_vcat(pc_ver[1], "fw ");
+  pc_vcat(p, PC_FW_VERSION);
+
+  p = pc_vcat(pc_ver[2], "FNIRSI-1013D-AI fw " PC_FW_VERSION ", proto ");
+  *p++ = (char)('0' + PC_PROTO_MAJOR);
+  *p++ = '.';
+  *p++ = (char)('0' + PC_PROTO_MINOR);
+  p = pc_vcat(p, ", base Atlan4 1.00o5, git ");
+
+  for(i=28;i>=0;i-=4)
+    *p++ = hex[(PC_FW_BUILD >> i) & 0xF];
+
+  p = pc_vcat(p, ", built 20");
+  p = pc_vdec2(p, COMPILE_YEAR);
+  p = pc_vcat(p, "-");
+  p = pc_vdec2(p, COMPILE_MONTH);
+  p = pc_vcat(p, "-");
+  p = pc_vdec2(p, COMPILE_DAY);
+  p = pc_vcat(p, " ");
+  p = pc_vdec2(p, COMPILE_HOUR);
+  p = pc_vcat(p, ":");
+  pc_vdec2(p, COMPILE_MIN);
+}
+
+char *pc_glue_version(int form)
+{
+  if(!pc_ver[0][0])
+    pc_version_init();
+
+  return pc_ver[(form >= 0 && form < 3) ? form : 0];
+}
+
+//Diagnostics screen: the full identity in small type along the top edge (above the 1.00o5 layout, which starts at y 10)
+void pc_glue_diag_drawn(void)
+{
+  uint16 fg = displaydata.fg_color;
+  PFONTDATA font = displaydata.font;
+
+  display_set_fg_color(GREEN_COLOR);
+  display_set_font(&font_2);
+  display_text(20, 0, (int8 *)pc_glue_version(2));
+  displaydata.fg_color = fg;
+  displaydata.font     = font;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

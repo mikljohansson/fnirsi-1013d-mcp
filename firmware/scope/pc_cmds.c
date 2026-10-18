@@ -650,10 +650,12 @@ static int h_get_battery(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //disp_isr, held, isr_skipped), startup (fw 0.2.0: ms from session init to the first MAIN poll, duration of the first
 //main-loop pass; fw 0.2.2: first MAIN poll -> first UI conversion started, -> first UI capture processed; fw 0.2.4:
 //-> first pass after battery check, acquisition, touch handler, RTC. The last six are ms + 1, 0 = not reached),
-//USB events (fw 0.2.5: bus resets, suspends, resumes, disconnects, EP0 setups, malformed EP0 setups)
+//USB events (fw 0.2.5: bus resets, suspends, resumes, disconnects, EP0 setups, malformed EP0 setups), RX back-pressure
+//(fw 0.2.7: stalls from the ISR, releases, re-stalls inside a release, releases with no packet waiting, largest
+//RXCOUNT, RXCOUNT > 512)
 static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
-  uint32_t v[PC_TSTAT_COUNT + 24 + PC_USBEV_COUNT];
+  uint32_t v[PC_TSTAT_COUNT + 24 + PC_USBEV_COUNT + PC_RXDBG_COUNT];
   const pc_parser_stats *ps = &s->parser.stats;
   uint32_t n = PC_TSTAT_COUNT, i;
 
@@ -668,6 +670,8 @@ static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uin
   v[n++] = s->first_mark[0]; v[n++] = s->first_mark[1]; v[n++] = s->first_mark[2]; v[n++] = s->first_mark[3];
   pc_hal_usb_events(v + n);
   n += PC_USBEV_COUNT;
+  pc_hal_rx_debug(v + n);
+  n += PC_RXDBG_COUNT;
 
   pc_put_u16(resp, (uint16_t)n);
   pc_put_u16(resp + 2, 0);
@@ -1807,7 +1811,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_GET_CAPTURE_INFO, F_BUSY | F_CONTROL,       0, h_get_capture_info },
   { PC_CMD_SD_INFO,      F_BASIC,                      PC_CAP_SD_SECTORS, h_sd_info },
   { PC_CMD_SD_READ_SECTORS, F_BASIC,                   PC_CAP_SD_SECTORS, h_sd_read },
-  { PC_CMD_SD_STAGE,     F_BASIC,                      PC_CAP_SD_SECTORS, h_sd_stage },
+  { PC_CMD_SD_STAGE,     F_BUSY | F_BASIC,             PC_CAP_SD_SECTORS, h_sd_stage },   //memory copy only: timer poll
   { PC_CMD_SD_WRITE_SECTORS, F_BASIC,                  PC_CAP_SD_SECTORS, h_sd_write },
   { PC_CMD_GET_GEN,      0,                            0, h_get_gen },
   { PC_CMD_SET_GEN,      0,                            PC_CAP_GENERATOR_DDS, h_set_gen },

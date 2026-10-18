@@ -406,6 +406,7 @@ void     pc_hal_enter_fel(void)  { mock.fel_entries++; }
 void     pc_hal_link_stats(uint32_t *v) { uint32_t i; for(i=0;i<PC_TSTAT_COUNT;i++) v[i] = 1000 + i; }
 
 void     pc_hal_usb_events(uint32_t *v) { uint32_t i; for(i=0;i<PC_USBEV_COUNT;i++) v[i] = 2000 + i; }
+void     pc_hal_rx_debug(uint32_t *v)   { uint32_t i; for(i=0;i<PC_RXDBG_COUNT;i++) v[i] = 3000 + i; }
 
 uint32_t pc_hal_sd_sectors(void) { return mock.sd_sectors; }
 
