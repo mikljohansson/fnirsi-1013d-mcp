@@ -450,3 +450,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   mode 6/6 proper; at 5 MS/s both modes 6/6 proper. The FPGA auto time-out (0x0E, words, 13-bit) expires before the next edge at fast rates
   and the firmware reports those records as triggered. Firmware fix requested (truthful flags, time-based auto hold-off, view skips
   untriggered records); the view's trace averaging masks the rest.
+- Firmware 0.2.40 (fw-gen5, commits e595a0f/9a02173, sha256 3907e7ac..., pinned): spectrum trace averaging (Off/4/16/64/Max hold, default 4,
+  dB-domain, restarts on bin-meaning changes, reported in the READ_SPECTRUM header), one-line header (peak marker per channel, RBW, Avg,
+  filter tag), warnings centred over the plot, taller plot, Roll box without on/off text. Loaded on 0x1534 with CIC3 selected. Owner checks
+  pending. Not yet in: the auto-mode time-out fix and the wider zoom-in threshold (0.2.41).
