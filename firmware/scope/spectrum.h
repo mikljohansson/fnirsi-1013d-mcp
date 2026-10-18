@@ -43,4 +43,8 @@ void   spectrum_service(void);               //every main-loop pass: leave the m
 #define SPECTRUM_READ_HDR     32
 int32  spectrum_read(int ch, uint32 first, uint32 max_bins, uint8 *hdr, uint8 *levels);
 
+//Settings sector words (fw 0.2.39): FFT length, window, scale (word 0) and ref level (word 1)
+uint16 spectrum_settings_word(int i);
+void   spectrum_settings_restore(uint16 w0, uint16 w1);
+
 #endif

@@ -219,6 +219,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.36 | 8e1a946 | 6060514b | view axis capped at 25 MHz (PC_SPECTRUM_FMAX_HZ) | built |
 | 0.2.37 | 0f3e743 | 9fde228a | dB conversion in ARM assembly (3 accesses per bin, byte-identical to C) | built, host-tested incl. qemu |
 | 0.2.38 | 6ce82d9 | a6f50f6c | pass time under the acquisition menu's Memory header | built, host-tested |
+| 0.2.39 | PENDING | | span drives the time base (zoom out past full span = faster rate up to 50 MS/s, zoom in past 64 bins = slower), Auto picks the rate in up to 3 captures, spectrum settings persist in settings words 208/209, filter tag "CIC3" instead of the N text | built, host-tested |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -642,6 +643,7 @@ section 14 rows 44 (FFT_BENCH) and 45 (READ_SPECTRUM, GET_STATUS byte 43).
   uncached data access, the stack included; SRAM A only ~25% faster than DDR. That is why the hot loops are assembly.
   Every change to them: `make -C host_tests test-arm` (qemu-arm, byte-compares with the C twin) and objdump the loop
   for stack traffic. Inline asm with 64-bit operands forces even register pairs and made GCC spill; write whole loops.
+- Settings sector words 208 / 209 belong to the spectrum view (pc_hooks.h PC_SETTING_WORD_SPEC0/1); 207 is the Filter.
 - Constraints: u8 input offset 0..255 (clamped) for the Q22 window trick; i32 input is C only (64-bit products).
   Buffers 8-byte aligned (`fx_fft_init` refuses otherwise).
 - The view: settings in RAM only; N limited by the record (`scopesettings.samplecount`); fs from the UI time base

@@ -7037,6 +7037,9 @@ void scope_save_config_data(void)
 #if PC_PROTOCOL
   //Acquisition Filter setting (decimation filter, 0x1534+) in a spare word of the FPGA block
   settingsworkbuffer[PC_SETTING_WORD_DECIM] = pc_glue_decim_setting_word();
+  //Spectrum view settings (FFT length, window, scale, ref level)
+  settingsworkbuffer[PC_SETTING_WORD_SPEC0] = pc_glue_spectrum_setting_word(0);
+  settingsworkbuffer[PC_SETTING_WORD_SPEC1] = pc_glue_spectrum_setting_word(1);
 #endif
   
   

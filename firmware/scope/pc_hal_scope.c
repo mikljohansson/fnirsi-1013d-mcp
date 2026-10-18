@@ -761,6 +761,11 @@ void pc_glue_decim_even(void)
   pc_decim_src = pc_dec_even_src;
 }
 
+uint16 pc_glue_spectrum_setting_word(int i)
+{
+  return spectrum_settings_word(i);
+}
+
 uint16 pc_glue_decim_setting_word(void)
 {
   //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (Filter off). Bits 3-4:
@@ -1595,6 +1600,9 @@ static void pc_ui_fix_settings(void)
 
   if(pc_dec_has() && pc_dec_setting)
     pc_dec_fit_memory();
+
+  //Spectrum view settings (fw 0.2.39); the display mode itself is not restored: the scope boots into the scope view
+  spectrum_settings_restore(settingsworkbuffer[PC_SETTING_WORD_SPEC0], settingsworkbuffer[PC_SETTING_WORD_SPEC1]);
 
   //Memory depth: the largest offered step (3000 x n) the bitstream can capture
   if(fpgasettings.totalsamples > max)

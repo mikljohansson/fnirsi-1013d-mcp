@@ -20,6 +20,8 @@
 
 //Settings sector word for the acquisition Filter setting: FPGA_SETTING_OFFSET (192) + 15, unused by 1.00o5
 #define PC_SETTING_WORD_DECIM 207
+#define PC_SETTING_WORD_SPEC0 208   //fw 0.2.39: spectrum view FFT length, window, scale (0x5E00 marker)
+#define PC_SETTING_WORD_SPEC1 209   //fw 0.2.39: spectrum view ref level, dBV (int16)
 
 //Compacted menus (fw 0.2.8, owner: no gaps). The kept rows move up by whole rows; the menu heights in variables.h
 //shrink to match. With PC_PROTOCOL=0 the shifts are 0 and nothing moves.
@@ -87,6 +89,7 @@ void   pc_glue_decim_read(void *settings, uint32 start);   //fpga_read_sample_da
 void   pc_glue_decim_even(void);      //fpga_read_sample_data: second pass takes the even samples
 void   pc_glue_decim_tap(void);       //acquisition menu: Filter box touched
 uint16 pc_glue_decim_setting_word(void);         //settings sector word (scope_save_config_data)
+uint16 pc_glue_spectrum_setting_word(int i);     //settings sector words 208, 209 (scope_save_config_data)
 
 #define PC_BUSY_POLL()          pc_glue_poll_busy()
 #define PC_TIMER_TICK()         pc_glue_poll_isr()

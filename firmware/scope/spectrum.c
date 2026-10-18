@@ -178,13 +178,15 @@ typedef struct
   uint8  have[2];       //spec_db[ch] holds a spectrum
   uint32 frames;        //spectra computed
   uint8  view;          //VIEW_*
+  uint8  wait;          //the time base changed: ignore the trace buffers until a new capture
+  uint8  autostage;     //Auto in progress: 1 at the full-axis rate, 2 at the chosen rate
 } SPECSTATE;
 
 #define VIEW_SPECTRUM         0
 #define VIEW_WATERFALL        1
 #define VIEW_DENSITY          2
 
-static SPECSTATE spec = { 0, 0, 11, FX_WIN_HANN, 1, 0, 0, 0, 0, 0, 0, { 0, 0 }, 0, VIEW_SPECTRUM };
+static SPECSTATE spec = { 0, 0, 11, FX_WIN_HANN, 1, 0, 0, 0, 0, 0, 0, { 0, 0 }, 0, VIEW_SPECTRUM, 0, 0 };
 
 //What the last FFT used, per channel (READ_SPECTRUM reports these)
 typedef struct
@@ -641,21 +643,19 @@ static void spec_draw_info(int log2n, uint64 fs_mhz, int k, uint32 n, uint64 bin
     p = fmt_c1(p, (int32)((timer0ticks - wf_ms[oldest]) / 10));
     p = fmt_str(p, " s");
   }
-  display_text(PLOT_X, INFO_Y1, (int8 *)t);
 
-  //Decimation: the 0x1534 filter names itself; plain sample skipping folds everything above fs/2 into the plot
   if(k)
   {
-    static const char *names[] = { "", "boxcar", "CIC2", "CIC3" };
+    static const char *names[] = { "", "   boxcar", "   CIC2", "   CIC3" };
 
-    display_set_fg_color(0x00A0A0A0);
-    p = fmt_str(t, "decimation filter ");
     p = fmt_str(p, names[k & 3]);
-    p = fmt_str(p, ", N = ");
-    fmt_uint(p, n);
-    display_text(PLOT_X, INFO_Y2, (int8 *)t);
   }
-  else if(fs_mhz < 200000000000ull)
+  display_text(PLOT_X, INFO_Y1, (int8 *)t);
+
+  //Decimation: plain sample skipping folds everything above fs/2 into the plot; the 0x1534 filter's order is the
+  //short tag on the first line (owner: no N on the screen, READ_SPECTRUM has it)
+  (void)n;
+  if(!k && (fs_mhz < 200000000000ull))
   {
     display_set_fg_color(ORANGE_COLOR);
     display_text(PLOT_X, INFO_Y2, (int8 *)"no anti-alias filter: signals above fs/2 fold back");
@@ -1079,6 +1079,8 @@ static uint32 spec_find_peak(const SPECVIEW *v, const int16 *db)
   return peak;
 }
 
+static void spec_auto_step(void);
+
 int spectrum_display(void)
 {
   int     log2n, ch, fresh, hch;
@@ -1096,9 +1098,30 @@ int spectrum_display(void)
 
   log2n = spec_log2n();
   fresh = spec.fresh;
-  if(spec.fresh || spec.recompute || (spec_frame[0].log2n != log2n && spec.have[0]) ||
-     (spec_frame[1].log2n != log2n && spec.have[1]))
+
+  //After a time base change only a record at the new rate counts
+  if(spec.wait)
+  {
+    if(fresh)
+      spec.wait = 0;
+    else
+      fresh = 0;
+  }
+
+  if(!spec.wait && (spec.fresh || spec.recompute || (spec_frame[0].log2n != log2n && spec.have[0]) ||
+     (spec_frame[1].log2n != log2n && spec.have[1])))
+  {
     spec_compute();
+
+    //Auto's next stage on this record (may change the time base again, or finish the settings)
+    if(fresh && spec.autostage)
+    {
+      spec_auto_step();
+      if(spec.wait)
+        fresh = 0;
+      log2n = spec_log2n();
+    }
+  }
 
   divider = spec_divider();
   pc_hal_decim_current(&dc, &written);
@@ -1139,7 +1162,9 @@ int spectrum_display(void)
   if((!spec.have[0] && !spec.have[1]) || ((spec.view == VIEW_WATERFALL) && !wf_count))
   {
     const char *msg = !(spec_ch_on(0) || spec_ch_on(1)) ? "No channel enabled" :
-                      !scopesettings.runstate ? "Stopped: RUN fills the view with new captures" : "Waiting for a capture";
+                      !scopesettings.runstate ? "Stopped: RUN fills the view with new captures" :
+                      spec.autostage ? "Auto: measuring the signal" :
+                      spec.wait ? "Waiting for a capture at the new sample rate" : "Waiting for a capture";
 
     display_set_font(&font_3);
     display_set_fg_color(WHITE_COLOR);
@@ -1175,19 +1200,161 @@ int spectrum_display(void)
 //----------------------------------------------------------------------------------------------------------------------------------
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Settings changes: span zoom, pan, defaults, Auto
+// Time base coupling (fw 0.2.39, owner): the span drives the sample rate like a spectrum analyser. It is the scope's
+// own time base (same setting), stepped through the short time bases 11..34 (pc_hal_timebase_write, as SET_TIMEBASE).
+// After a change the trace buffers still hold the old rate's record, so the view waits for the first new capture.
 
-//Span: one zoom step narrower (in) or wider (out) about the centre of the view
+#define TB_FIRST              11          //short time bases (the roll-mode ones below would leave the view)
+#define TB_LAST               ((int)(sizeof(time_per_div_sample_rate) / sizeof(time_per_div_sample_rate[0])) - 1)
+#define MIN_SPAN_BINS         64          //zooming in past this many bins steps to a slower rate instead
+
+static uint32 tb_divider(int i)
+{
+  uint8_t  sr;
+  uint32_t d;
+
+  return pc_hal_timebase_lookup((uint8)i, &sr, &d) ? 0xFFFFFFFF : d;
+}
+
+//Time base index of the next faster (dir 1) or slower (dir -1) sample rate, -1 when there is none
+static int spec_tb_next(int dir)
+{
+  int    i;
+  uint32 d0 = tb_divider(scopesettings.timeperdiv);
+
+  for(i = scopesettings.timeperdiv + dir; (i >= TB_FIRST) && (i <= TB_LAST); i += dir)
+  {
+    uint32 d = tb_divider(i);
+
+    if((dir > 0) ? (d < d0) : (d > d0))
+      return i;
+  }
+
+  return -1;
+}
+
+static void spec_tb_set(int i)
+{
+  pc_hw_timebase t;
+
+  if((i < TB_FIRST) || (i > TB_LAST) || (i == scopesettings.timeperdiv))
+    return;
+
+  t.timeperdiv = (uint8)i;
+  if(pc_hal_timebase_lookup((uint8)i, &t.samplerate, &t.divider))
+    return;
+
+  pc_hal_timebase_write(&t, 0);
+
+  //Wait for a record at the new rate (anything finishing now was armed before the change)
+  spec.wait = 1;
+  spec.fresh = 0;
+  spec.have[0] = spec.have[1] = 0;
+}
+
+//Sample rate in mHz of a time base index, ignoring the decimation filter's even-divider rounding
+static uint64 tb_fs_mhz(int i)
+{
+  uint32 d = tb_divider(i);
+
+  return (d == 0xFFFFFFFF) ? 0 : 200000000000ull / (d + 1);
+}
+
+//Bins across the capped axis for a rate
+static uint32 spec_axis_bins(uint64 fs_mhz, int log2n)
+{
+  SPECVIEW v;
+  uint32 z = spec.zoom, s = spec.start;
+
+  spec.zoom = 0;
+  spec.start = 0;
+  spec_view(&v, log2n, spec_bin_mhz(fs_mhz, log2n));
+  spec.zoom = z;
+  spec.start = s;
+  return v.half;
+}
+
+//Show span_mhz about centre_mhz on the axis of rate fs_mhz: the zoom step nearest to that span, clamped to the axis
+static void spec_place(uint64 fs_mhz, uint64 centre_mhz, uint64 span_mhz)
+{
+  int    log2n = spec_log2n(), z;
+  uint64 bin = spec_bin_mhz(fs_mhz, log2n);
+  uint32 half = spec_axis_bins(fs_mhz, log2n);
+  uint64 want = bin ? span_mhz / bin : half;
+  int64  c, w, s;
+
+  for(z = 0; (z < ZOOM_MAX) && ((half >> (z + 1)) >= want) && ((half >> (z + 1)) >= 8); z++) {}
+  spec.zoom = z;
+
+  w = START_STEPS >> z;
+  c = bin ? (int64)(((uint64)centre_mhz * START_STEPS) / ((uint64)bin * half)) : 0;
+  s = c - w / 2;
+  if(s < 0) s = 0;
+  if(s > (int64)START_STEPS - w) s = START_STEPS - w;
+  spec.start = (uint32)s;
+}
+
+//The current view's centre and span in mHz
+static void spec_centre_span(uint64 *centre, uint64 *span)
+{
+  int     log2n = spec_log2n();
+  pc_decim_cfg dc;
+  int     written;
+  uint64  bin;
+  SPECVIEW v;
+
+  pc_hal_decim_current(&dc, &written);
+  bin = spec_bin_mhz(spec_fs_mhz(spec_divider(), &dc), log2n);
+  spec_view(&v, log2n, bin);
+  *span = bin * v.span;
+  *centre = bin * v.first + *span / 2;
+}
+
+//Span: one zoom step narrower (in) or wider (out) about the centre. Past the widest span (the whole axis) a zoom out
+//steps to the next faster rate until fs/2 reaches PC_SPECTRUM_FMAX_HZ; past MIN_SPAN_BINS a zoom in steps to the next
+//slower rate, keeping the centre and halving the span in Hz.
 static void spec_zoom(int in)
 {
-  uint32 centre = spec.start + ((START_STEPS >> spec.zoom) / 2);
+  SPECVIEW v;
+  uint64   centre, span;
+  int      log2n = spec_log2n(), next;
+  pc_decim_cfg dc;
+  int      written;
 
-  if(in && (spec.zoom < ZOOM_MAX)) spec.zoom++;
-  else if(!in && spec.zoom) spec.zoom--;
+  pc_hal_decim_current(&dc, &written);
+  spec_view(&v, log2n, spec_bin_mhz(spec_fs_mhz(spec_divider(), &dc), log2n));
 
-  spec.start = (centre > ((START_STEPS >> spec.zoom) / 2)) ? centre - ((START_STEPS >> spec.zoom) / 2) : 0;
-  if(spec.start > START_STEPS - (START_STEPS >> spec.zoom))
-    spec.start = START_STEPS - (START_STEPS >> spec.zoom);
+  if(!in && !spec.zoom)
+  {
+    //Whole axis shown: a faster rate widens it, until the axis is the full PC_SPECTRUM_FMAX_HZ
+    if((tb_fs_mhz(scopesettings.timeperdiv) / 2 < (uint64)PC_SPECTRUM_FMAX_HZ * 1000) && ((next = spec_tb_next(1)) >= 0))
+      spec_tb_set(next);
+    return;
+  }
+
+  if(in && ((v.span >> 1) < MIN_SPAN_BINS))
+  {
+    spec_centre_span(&centre, &span);
+    next = spec_tb_next(-1);
+    if((next >= 0) && (centre + span / 4 < tb_fs_mhz(next) / 2))
+    {
+      spec_tb_set(next);
+      spec_place(tb_fs_mhz(next), centre, span / 2);
+      return;
+    }
+    //No slower rate holds the centre: plain zoom down to the last step
+  }
+
+  {
+    uint32 centre_u = spec.start + ((START_STEPS >> spec.zoom) / 2);
+
+    if(in && (spec.zoom < ZOOM_MAX)) spec.zoom++;
+    else if(!in && spec.zoom) spec.zoom--;
+
+    spec.start = (centre_u > ((START_STEPS >> spec.zoom) / 2)) ? centre_u - ((START_STEPS >> spec.zoom) / 2) : 0;
+    if(spec.start > START_STEPS - (START_STEPS >> spec.zoom))
+      spec.start = START_STEPS - (START_STEPS >> spec.zoom);
+  }
 }
 
 //Pan: the spectrum follows the finger, dx pixels from where the drag began (start0)
@@ -1199,7 +1366,8 @@ static void spec_pan(uint32 start0, int32 dx)
   spec.start = (uint32)((s < 0) ? 0 : (s > smax) ? smax : s);
 }
 
-//What the view starts with (Reset): 2048 points, Hann, 10 dB/div, ref 0 dBV, full span, spectrum
+//What the view starts with (Reset): 2048 points, Hann, 10 dB/div, ref 0 dBV, full span, spectrum. The time base
+//is the scope's and stays.
 static void spec_defaults(void)
 {
   spec.log2n  = 11;
@@ -1209,23 +1377,71 @@ static void spec_defaults(void)
   spec.zoom   = 0;
   spec.start  = 0;
   spec.view   = VIEW_SPECTRUM;
+  spec.autostage = 0;
   spec.recompute = 1;
 }
 
-//Auto: from the spectrum of the signal present (rules in firmware/README.md "Spectrum view"):
-//  FFT length: the longest the record holds, at most 4096; window Hann
-//  peak P: the highest bin above DC (bins 0, 1 skipped) of the shown channel(s); floor F: the median bin level
-//  scale: 5 dB/div when P - F + 10 dB fits 8 x 5 dB, 10 when it fits 8 x 10 dB, else 20
-//  ref: the first multiple of the scale at least 3 dB above P
-//  span: the bins more than 40 dB below P and 10 dB above F are ignored; the rest spans lo..hi. A band starting
-//  near DC (lo below its own width) gets a span from 0 to 1.25 hi, otherwise 1.5 x (hi - lo) about its centre; the
-//  narrowest zoom step that holds it
-static void spec_auto(void)
+//Peak P (above DC), median floor F and the occupied band lo..hi (bins above P - 40 dB and F + 10 dB) of the shown
+//channel(s) on the axis v; returns 0 when there is no spectrum
+static int spec_analyse(const SPECVIEW *v, int32 *P, int32 *F, uint32 *lo, uint32 *hi)
 {
   static uint16 hist[261];                   //1 dB steps from -200 to +60 dB
-  int     log2n, ch, z;
-  uint32  half, k, lo = 0, hi = 0, n = 0, need, centre, cum;
-  int32   P = -0x7FFFFFFF, F, thr, range, scale;
+  uint32 k, n = 0, cum;
+  int32  thr;
+  int    ch;
+
+  *P = -0x7FFFFFFF;
+  *lo = *hi = 0;
+  memset(hist, 0, sizeof(hist));
+
+  for(ch = 0; ch < 2; ch++)
+  {
+    if(!spec.have[ch])
+      continue;
+
+    for(k = 2; k <= v->half; k++)
+    {
+      int32 d = spec_db[ch][k] / 100 + 200;
+
+      if(spec_db[ch][k] > *P)
+        *P = spec_db[ch][k];
+      hist[(d < 0) ? 0 : (d > 260) ? 260 : d]++;
+      n++;
+    }
+  }
+
+  if(!n)
+    return 0;
+
+  for(k = 0, cum = 0; (k < 260) && (2 * (cum + hist[k]) < n); k++)
+    cum += hist[k];
+  *F = ((int32)k - 200) * 100;
+
+  thr = *P - 4000;
+  if(thr < *F + 1000)
+    thr = *F + 1000;
+
+  for(ch = 0; ch < 2; ch++)
+    if(spec.have[ch])
+      for(k = 2; k <= v->half; k++)
+        if(spec_db[ch][k] > thr)
+        {
+          if(!*lo || (k < *lo)) *lo = k;
+          if(k > *hi) *hi = k;
+        }
+
+  return 1;
+}
+
+//Auto, last stage, on the record held (rules in firmware/README.md "Spectrum view"): FFT length the longest the record
+//holds up to 4096, Hann; scale from P - F; ref the first multiple of the scale 3 dB above P; span over the band
+static void spec_auto_apply(void)
+{
+  int     log2n, z;
+  uint32  half, lo, hi, need, centre;
+  int32   P, F, range, scale;
+  pc_decim_cfg dc;
+  int     written;
   SPECVIEW v;
 
   spec.log2n  = (spec_log2n_max() < LOG2N_VIEW_MAX) ? spec_log2n_max() : LOG2N_VIEW_MAX;
@@ -1235,39 +1451,12 @@ static void spec_auto(void)
   spec_compute();
 
   log2n = spec_log2n();
-  {
-    pc_decim_cfg dc;
-    int          written;
+  pc_hal_decim_current(&dc, &written);
+  spec_view(&v, log2n, spec_bin_mhz(spec_fs_mhz(spec_divider(), &dc), log2n));
+  half = v.half;
 
-    pc_hal_decim_current(&dc, &written);
-    spec_view(&v, log2n, spec_bin_mhz(spec_fs_mhz(spec_divider(), &dc), log2n));
-  }
-  half  = v.half;                            //only what the axis shows
-
-  memset(hist, 0, sizeof(hist));
-  for(ch = 0; ch < 2; ch++)
-  {
-    if(!spec.have[ch])
-      continue;
-
-    for(k = 2; k <= half; k++)
-    {
-      int32 d = spec_db[ch][k] / 100 + 200;
-
-      if(spec_db[ch][k] > P)
-        P = spec_db[ch][k];
-      hist[(d < 0) ? 0 : (d > 260) ? 260 : d]++;
-      n++;
-    }
-  }
-
-  if(!n)
+  if(!spec_analyse(&v, &P, &F, &lo, &hi))
     return;
-
-  //Median level
-  for(k = 0, cum = 0; (k < 260) && (2 * (cum + hist[k]) < n); k++)
-    cum += hist[k];
-  F = ((int32)k - 200) * 100;
 
   range = P - F + 1000;
   scale = (range <= 8 * 500) ? 0 : (range <= 8 * 1000) ? 1 : 2;
@@ -1279,20 +1468,6 @@ static void spec_auto(void)
   }
   if(spec.ref < REF_MIN) spec.ref = REF_MIN;
   if(spec.ref > REF_MAX) spec.ref = REF_MAX;
-
-  //Occupied band
-  thr = P - 4000;
-  if(thr < F + 1000)
-    thr = F + 1000;
-
-  for(ch = 0; ch < 2; ch++)
-    if(spec.have[ch])
-      for(k = 2; k <= half; k++)
-        if(spec_db[ch][k] > thr)
-        {
-          if(!lo || (k < lo)) lo = k;
-          if(k > hi) hi = k;
-        }
 
   if(!hi)
     return;
@@ -1321,6 +1496,107 @@ static void spec_auto(void)
     spec.start = (c > w / 2) ? c - w / 2 : 0;
     if(spec.start > START_STEPS - w)
       spec.start = START_STEPS - w;
+  }
+}
+
+//Auto (fw 0.2.39) picks the sample rate too, in up to three captures while running: (1) the rate whose fs/2 covers
+//PC_SPECTRUM_FMAX_HZ (50 MS/s) shows everything the front end passes; (2) on that record the band's top f_hi sets the
+//slowest rate with fs/2 >= 1.25 f_hi; (3) on that record the rest as before. Stopped, Auto works on the record held.
+#define TB_FULL_AXIS          26          //2 us/div, 50 MS/s: fs/2 = 25 MHz
+
+static void spec_auto_start(void)
+{
+  spec.autostage = 0;
+
+  if(!scopesettings.runstate)
+  {
+    spec_auto_apply();
+    return;
+  }
+
+  spec.log2n  = (spec_log2n_max() < LOG2N_VIEW_MAX) ? spec_log2n_max() : LOG2N_VIEW_MAX;
+  spec.window = FX_WIN_HANN;
+  spec.zoom   = 0;
+  spec.start  = 0;
+  spec.recompute = 1;
+
+  if(tb_fs_mhz(scopesettings.timeperdiv) / 2 < (uint64)PC_SPECTRUM_FMAX_HZ * 1000)
+    spec_tb_set(TB_FULL_AXIS);
+
+  //Without a time base change the next capture serves too
+  spec.wait = 1;
+  spec.fresh = 0;
+  spec.autostage = 1;
+}
+
+//Called after a fresh record was transformed
+static void spec_auto_step(void)
+{
+  if(spec.autostage == 1)
+  {
+    pc_decim_cfg dc;
+    int      written, log2n = spec_log2n(), i, pick = -1;
+    uint32   lo, hi;
+    int32    P, F;
+    uint64   bin, fhi;
+    SPECVIEW v;
+
+    pc_hal_decim_current(&dc, &written);
+    bin = spec_bin_mhz(spec_fs_mhz(spec_divider(), &dc), log2n);
+    spec_view(&v, log2n, bin);
+
+    if(spec_analyse(&v, &P, &F, &lo, &hi) && hi)
+    {
+      fhi = bin * hi;
+
+      //Slowest short time base whose fs/2 holds 1.25 f_hi
+      for(i = TB_FIRST; i <= TB_FULL_AXIS; i++)
+        if(tb_fs_mhz(i) / 2 >= fhi + fhi / 4)
+        {
+          pick = i;
+          break;
+        }
+    }
+
+    if((pick >= 0) && (pick != scopesettings.timeperdiv))
+    {
+      spec_tb_set(pick);
+      spec.autostage = 2;
+      return;
+    }
+  }
+
+  spec.autostage = 0;
+  spec_auto_apply();
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Settings that survive a power cycle (fw 0.2.39): FFT length, window, scale and ref level in two spare words of the
+// settings sector (709), saved where 1.00o5 saves everything (power-off interrupt). Not restored: the display mode
+// (boot into the scope view), channel, span, start, view.
+
+uint16 spectrum_settings_word(int i)
+{
+  if(i == 0)
+    return (uint16)(0x5E00 | ((spec.window & 3) << 6) | ((spec.scale & 3) << 4) | ((spec.log2n - 8) & 15));
+
+  return (uint16)spec.ref;
+}
+
+void spectrum_settings_restore(uint16 w0, uint16 w1)
+{
+  int16 ref = (int16)w1;
+
+  if((w0 & 0xFF00) != 0x5E00)
+    return;
+
+  if((((w0 >> 6) & 3) < FX_WIN_COUNT) && (((w0 >> 4) & 3) < sizeof(spec_scales)) && ((w0 & 15) + 8 >= 10) &&
+     ((w0 & 15) + 8 <= LOG2N_VIEW_MAX) && (ref >= REF_MIN) && (ref <= REF_MAX))
+  {
+    spec.window = (w0 >> 6) & 3;
+    spec.scale  = (w0 >> 4) & 3;
+    spec.log2n  = (w0 & 15) + 8;
+    spec.ref    = ref;
   }
 }
 
@@ -1361,7 +1637,7 @@ static void spec_step_field(int f, int up)
       break;
 
     case F_AUTO:
-      spec_auto();
+      spec_auto_start();
       break;
 
     case F_RESET:
@@ -1386,6 +1662,9 @@ int spectrum_touch(void)
 {
   if(!spec.active || !spectrum_available())
     return 0;
+
+  //Any touch ends a running Auto (the Auto field starts a new one)
+  spec.autostage = 0;
 
   if(ytouch >= STRIP_Y)
   {
