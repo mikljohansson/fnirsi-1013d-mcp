@@ -614,36 +614,149 @@ FX_WIDE_RUN(fx_fft_run_u16, uint16)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//One bin in C (the reference; DC and Nyquist always go through it)
+static int16 fx_cdb_one(const int32 *b, int dcfix, int32 base, int32 offset)
+{
+  int32  re, im, cdb;
+  uint64 pw;
+
+  fx_ld(b, &re, &im);
+  pw = (uint64)((int64)re * re) + (uint64)((int64)im * im);
+
+  if(pw == 0)
+    return FX_CDB_FLOOR;
+
+  //DC and Nyquist carry their full value in one bin (no conjugate partner): one octave of power less
+  cdb = fx_cdb_from_q16(fx_log2_q16(pw) - base - (dcfix ? 65536 : 0)) + offset;
+
+  //FX_CDB_FLOOR stays reserved for an empty bin
+  if(cdb <= FX_CDB_FLOOR)
+    cdb = FX_CDB_FLOOR + 1;
+  else if(cdb > 32767)
+    cdb = 32767;
+
+  return (int16)cdb;
+}
+
+#if defined(__arm__)
+//The bins between DC and Nyquist: one LDRD per bin, the log2 table as (t[i], t[i+1] - t[i]) pairs (one LDRD), and
+//the level as (L K + C) >> 32 with C = 2^31 - base K + offset 2^32, which is the C path's
+//((L - base) K + 2^31) >> 32 + offset exactly. Same clamps. params = { pairs, K, C low, C high }.
+static uint32 fx_log2_pair[256][2] __attribute__((aligned(8)));
+static uint8  fx_log2_pair_ok;
+
+void fx_cdb_arm(const int32 *in, int16 *out, uint32 count, const int32 *params);
+
+__asm__(
+"  .text\n"
+"  .arm\n"
+"  .align 2\n"
+"  .global fx_cdb_arm\n"
+"  .type fx_cdb_arm, %function\n"
+"fx_cdb_arm:\n"
+"  push   {r4-r11, lr}\n"
+"  ldm    r3, {r3, r4, r5, r6}\n"     /* pairs, K, C low, C high */
+"1:\n"
+"  ldrd   r8, r9, [r0], #8\n"         /* re, im */
+"  smull  r10, r11, r8, r8\n"
+"  smlal  r10, r11, r9, r9\n"         /* power, 64 bit */
+"  orrs   r12, r10, r11\n"
+"  beq    5f\n"
+"  cmp    r11, #0\n"
+"  beq    2f\n"
+"  clz    r12, r11\n"
+"  rsb    lr, r12, #32\n"
+"  mov    r8, r11, lsl r12\n"
+"  orr    r8, r8, r10, lsr lr\n"      /* top word, leading one at bit 31 (lsr by 32 gives 0) */
+"  rsb    r12, r12, #63\n"            /* exponent */
+"  b      3f\n"
+"2:\n"
+"  clz    r12, r10\n"
+"  mov    r8, r10, lsl r12\n"
+"  rsb    r12, r12, #31\n"
+"3:\n"
+"  mov    lr, r8, lsl #9\n"
+"  mov    lr, lr, lsr #16\n"          /* f: the 16 bits after the index */
+"  mov    r9, r8, lsl #1\n"
+"  mov    r9, r9, lsr #24\n"          /* index: the 8 bits after the leading one */
+"  add    r9, r3, r9, lsl #3\n"
+"  ldrd   r10, r11, [r9]\n"           /* t0, t1 - t0 */
+"  mul    r11, lr, r11\n"
+"  add    r11, r11, #0x8000\n"
+"  add    r10, r10, r11, lsr #16\n"
+"  add    r10, r10, r12, lsl #16\n"   /* L = log2(power) in Q16 */
+"  mov    r8, r5\n"
+"  mov    r9, r6\n"
+"  smlal  r8, r9, r10, r4\n"          /* centi-dB in r9 */
+"  cmp    r9, #0x8000\n"
+"  movge  r9, #0x7F00\n"
+"  orrge  r9, r9, #0xFF\n"            /* at most 32767 */
+"  cmn    r9, #0x7D00\n"
+"  mvnle  r9, #0x7D00\n"
+"  addle  r9, r9, #2\n"               /* at least -31999 (FX_CDB_FLOOR + 1) */
+"  strh   r9, [r1], #2\n"
+"  subs   r2, r2, #1\n"
+"  bne    1b\n"
+"  b      6f\n"
+"5:\n"
+"  mvn    r9, #0x7D00\n"
+"  add    r9, r9, #1\n"               /* FX_CDB_FLOOR = -32000 */
+"  strh   r9, [r1], #2\n"
+"  subs   r2, r2, #1\n"
+"  bne    1b\n"
+"6:\n"
+"  pop    {r4-r11, pc}\n"
+"  .size fx_cdb_arm, . - fx_cdb_arm\n"
+);
+#endif
+
 void fx_fft_cdb(const FX_FFT *p, int first, int count, int32 offset, int16 *out)
 {
-  uint32 M = 1u << (p->log2n - 1);
+  int    M = 1 << (p->log2n - 1);
   int32  base = p->norm_q16 + p->shift * 131072;   //2 * shift octaves
-  const int32 *b = p->buf + 2 * first;
-  int    k;
+  int    k = first, end = first + count;
 
-  for(k = first; k < first + count; k++, b += 2)
+  if((k == 0) && (k < end))
   {
-    int32  re, im, cdb;
-    uint64 pw;
-
-    fx_ld(b, &re, &im);
-    pw = (uint64)((int64)re * re) + (uint64)((int64)im * im);
-
-    if(pw == 0)
-    {
-      *out++ = FX_CDB_FLOOR;
-      continue;
-    }
-
-    //DC and Nyquist carry their full value in one bin (no conjugate partner): one octave of power less
-    cdb = fx_cdb_from_q16(fx_log2_q16(pw) - base - (((k == 0) || ((uint32)k == M)) ? 65536 : 0)) + offset;
-
-    //FX_CDB_FLOOR stays reserved for an empty bin
-    if(cdb <= FX_CDB_FLOOR)
-      cdb = FX_CDB_FLOOR + 1;
-    else if(cdb > 32767)
-      cdb = 32767;
-
-    *out++ = (int16)cdb;
+    *out++ = fx_cdb_one(p->buf, 1, base, offset);
+    k++;
   }
+
+  {
+    int mid = ((end > M) ? M : end) - k;            //bins k .. M - 1
+
+    if(mid > 0)
+    {
+#if defined(__arm__)
+      int32 params[4];
+      int64 c = (int64)1 << 31;
+      uint32 i;
+
+      if(!fx_log2_pair_ok)
+      {
+        for(i = 0; i < 256; i++)
+        {
+          fx_log2_pair[i][0] = fx_log2_tab[i];
+          fx_log2_pair[i][1] = fx_log2_tab[i + 1] - fx_log2_tab[i];
+        }
+        fx_log2_pair_ok = 1;
+      }
+
+      c += -(int64)base * 19728302 + ((int64)offset << 32);
+      params[0] = (int32)(unsigned long)fx_log2_pair;
+      params[1] = 19728302;
+      params[2] = (int32)(uint32)c;
+      params[3] = (int32)(c >> 32);
+      fx_cdb_arm(p->buf + 2 * k, out, (uint32)mid, params);
+      out += mid;
+      k += mid;
+#else
+      for(; k < M && k < end; k++)
+        *out++ = fx_cdb_one(p->buf + 2 * k, 0, base, offset);
+#endif
+    }
+  }
+
+  if((k == M) && (k < end))
+    *out++ = fx_cdb_one(p->buf + 2 * M, 1, base, offset);
 }
