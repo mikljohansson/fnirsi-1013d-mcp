@@ -80,8 +80,9 @@ bug, and GCC 14 makes it an error by default.
 - **Byte-identical with Atlan's toolchain.** `make check-reference` builds with `PC_PROTOCOL=0`
   (section 5), so it also proves that the protocol hooks leave the base untouched when disabled.
   It builds with GCC 10.3.1 from
-  `tools/fetch_gcc10.sh`. That script unpacks the jammy `.deb`s into `~/opt/gcc10` without
-  installing them: binutils 2.38 and newlib 3.3 headers. It uses Atlan's `build_time.h`
+  `tools/fetch_gcc10.sh`. That script downloads the jammy `.deb`s over https, checks each against a
+  pinned sha256, and unpacks them into `~/opt/gcc10` without installing them: binutils 2.38 and newlib
+  3.3 headers. The build uses Atlan's `build_time.h`
   (2026-02-13 18:59:33), and the result `cmp`s **identical** to
   `reference/fnirsi_1013d_v1.00o5_atlan.bin`. `make package` with that build is also identical
   to Atlan's 721,992 B SD package. The source tree and flags are therefore exactly what Atlan
