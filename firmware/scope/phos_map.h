@@ -1,6 +1,6 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 // phos_map.h - digital phosphor hit-count map (fw 0.2.46, docs/plans/phosphor-design.md): rasterise records into an
-// 8-bit per-pixel map, decay it with a dithered Q8 factor, paint it through a palette.
+// 8-bit per-pixel map, paint it through a palette, decay it per pass with a dithered factor for the elapsed time.
 //
 // Integer only, no globals, no hardware: builds for the scope and on the host (host_tests/test_phosphor.c).
 //
@@ -26,10 +26,10 @@
 #define PHOS_PERSIST_INF  3
 #define PHOS_PERSIST_COUNT 4
 
-#define PHOS_TICK_MS      50        //decay clock
-#define PHOS_TICKS_MAX    4         //ticks applied per pass at most (a stall freezes the picture instead of wiping it)
-#define PHOS_RATE_INIT    256       //records per tick, Q8, before the first measurement
-#define PHOS_RATE_MIN     16
+#define PHOS_DT_MAX       200       //ms of decay applied per pass at most (a stall freezes the picture instead of wiping it)
+#define PHOS_INTERVAL_INIT 33       //ms between records assumed before the first measurement
+#define PHOS_INTERVAL_MAX 2000
+#define PHOS_K_ONE        (1u << 24)
 
 typedef struct
 {
@@ -37,23 +37,26 @@ typedef struct
   uint32_t *ext;                    //PHOS_W
 } phos_map;
 
-//Decay factor per tick in Q8 for a persistence setting (256 = no decay): a cell no longer hit falls to 1/16 in the
-//persistence time, k = 256 exp(-0.05 ln 16 / T)
-extern const uint16_t phos_persist_k[PHOS_PERSIST_COUNT];
+//Decay per millisecond in Q24 for a persistence setting (PHOS_K_ONE = no decay): a cell no longer hit falls to 1/16
+//in the persistence time T, k1 = exp(-ln 16 / (1000 T))
+extern const uint32_t phos_persist_k1[PHOS_PERSIST_COUNT];
 
-//k^n in Q8 (n >= 1), the factor for n ticks at once
-uint32_t phos_k_ticks(uint32_t k, uint32_t n);
+//k1^dt in Q24: the factor for dt milliseconds
+uint32_t phos_k_dt(uint32_t k1, uint32_t dt);
 
-//Increment per hit: 1.25 x 255 x (1 - k / 256) / r, r = records per tick (rate_q8 / 256), 1..255; 1 without decay.
-//A pixel hit by every record then settles at saturation whatever the record rate (before the decay; the render paints
-//after it, so the brightest count shown is phos_full(k)); one hit by a fraction p of the records at about p x 319.
-uint32_t phos_inc(uint32_t k, uint32_t rate_q8);
+//Q16 factor for phos_render (65536 = none)
+static inline uint32_t phos_k16(uint32_t k_q24) { return (k_q24 + 128) >> 8; }
 
-//Records-per-tick estimate: exponential average over 8 ticks of `records` seen in `ticks` ticks
-uint32_t phos_rate_update(uint32_t rate_q8, uint32_t records, uint32_t ticks);
+//Increment per hit for records interval_ms apart: 1.25 x 255 x (1 - k1^interval), 1..255; 1 without decay. A pixel hit
+//by every record then settles at saturation whatever the record rate; one hit by a fraction p of the records at about
+//p x 319.
+uint32_t phos_inc(uint32_t k1, uint32_t interval_ms);
 
-//Next dither seed (one step per tick)
-static inline uint32_t phos_seed_next(uint32_t seed) { return (seed + 157u) & 0xFF; }
+//Record interval estimate: exponential average over 8 records, interval_ms clamped to PHOS_INTERVAL_MAX
+uint32_t phos_interval_update(uint32_t avg_ms, uint32_t interval_ms);
+
+//Next dither seed (one step per decaying pass)
+static inline uint32_t phos_seed_next(uint32_t seed) { return (seed + 40503u) & 0xFFFF; }
 
 //Empty map: zero the lit runs, all extents empty
 void phos_clear(phos_map *m);
@@ -70,25 +73,22 @@ uint32_t phos_add_record(phos_map *m, const uint8_t *codes, uint32_t n, const ui
 //chained segments). Points outside the map are clipped per pixel. Returns the cells touched.
 uint32_t phos_add_line(phos_map *m, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int skip_first, uint32_t inc);
 
-//Paint the map: dst points at the pixel of column 0, row 0; stride in pixels. Non-zero cells get pal[count], zero cells
-//are left alone. With k < 256 every lit word is first decayed (count = (count k + d) >> 8, d = seed + 89 x column,
-//0..255) and written back, and the extents shrink to the words still lit. With under != 0 a cell is painted only where
-//its count exceeds under's (the brighter channel wins; under must already be decayed for this pass). Returns the
-//pixels written.
+//Paint the map, then decay it: dst points at the pixel of column 0, row 0; stride in pixels. Non-zero cells get
+//pal[count], zero cells are left alone. With k16 < 65536 every lit cell then decays, count = (count k16 + d) >> 16 with
+//d = (seed + 25033 x column) mod 65536 (dither: the expected count is exactly count x k16 / 65536 and every cell
+//reaches 0), and the extents shrink to the words still lit. With under != 0 (already rendered this pass, so already
+//decayed with the same k16) a cell is painted only where its decayed count exceeds under's: the brighter channel wins.
+//Returns the pixels written.
 uint32_t phos_render(phos_map *m, const phos_map *under, uint16_t *dst, uint32_t stride, const uint16_t *pal,
-                     uint32_t k, uint32_t seed);
+                     uint32_t k16, uint32_t seed);
 
 //Cells currently non-zero (tests and diagnostics; reads the whole lit area)
 uint32_t phos_lit(const phos_map *m);
 
-//Highest count a saturated cell shows after one tick of decay k (255 x k / 256; 255 without decay)
-uint32_t phos_full(uint32_t k);
-
-//Palettes (256 RGB565 entries, entry 0 unused): brightness on a square-root curve of count / full, 24 % for the
-//smallest step to 100 % from full on (full = phos_full(k) of the persistence in use). Mono = one colour (0x00RRGGBB);
-//heat = dark blue, blue, cyan, green, yellow, red, white.
-void phos_palette_mono(uint16_t *pal, uint32_t rgb, uint32_t full);
-void phos_palette_heat(uint16_t *pal, uint32_t full);
+//Palettes (256 RGB565 entries, entry 0 unused): brightness on a square-root curve of the count, 24 % for one hit to
+//100 % at saturation. Mono = one colour (0x00RRGGBB); heat = dark blue, blue, cyan, green, yellow, red, white.
+void phos_palette_mono(uint16_t *pal, uint32_t rgb);
+void phos_palette_heat(uint16_t *pal);
 
 uint32_t phos_isqrt(uint32_t v);
 

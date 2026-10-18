@@ -62,28 +62,32 @@ edge heights for a square wave, 728 x 400 at worst. The host test checks the cou
 
 ## 4. Decay (persistence)
 
-- Fixed tick of 50 ms (20 Hz), independent of record and pass rate. Ticks advance only while running and in the view,
-  at most 4 per pass, so a modal menu or STOP freezes the picture (persistence counts acquisition time).
-- Per tick every cell in the extents: c = (c x k + d) >> 8, k in Q8, d a dither 0..255 per column and tick
-  (d = seed + 89 x column, seed stepped per tick). The floor alone would fade small counts linearly (a count of 4 at
-  k = 249 would vanish in 4 ticks instead of ~2 s); with the dither the expected value is exactly c x k / 256, a count
-  of 1 lives on average 256 / (256 - k) ticks, and every cell still reaches 0. Deterministic: the seed restarts at Clear.
-- Persistence T = the time a cell that is no longer hit takes to fade to 1/16 (from full to dim): k = 256 exp(-0.05
-  ln 16 / T). T = 0.2 s: k = 128; 1 s: 223; 5 s: 249; Infinite: no decay. Default 1 s.
+- Every pass, for the time since the previous pass (dt, at most 200 ms, so a stall or a modal menu does not wipe the
+  picture; nothing decays while stopped: persistence counts acquisition time). A fixed decay clock (e.g. 20 Hz) was
+  the first design and was dropped: with 30 ms passes a decay step lands on some passes and not others, and the
+  brightness shimmers by the step size (50 % per step at 0.2 s).
+- Factor k = k1^dt, k1 = exp(-ln 16 / (1000 T)) per millisecond in Q24 (square and multiply), applied in Q16 per cell:
+  c = (c x k + d) >> 16 with a dither d = (seed + 25033 x column) mod 65536, seed stepped every pass. The floor alone
+  would fade small counts linearly (a count of 4 at 5 s would vanish in a few passes instead of ~2 s); with the dither
+  the expected value is exactly c x k, and every cell still reaches 0. Deterministic for a given sequence of records
+  and dt (host-tested).
+- Persistence T = the time a cell that is no longer hit takes to fade to 1/16 (from full to dim). 0.2 s, 1 s, 5 s,
+  Infinite (no decay). Default 1 s. Host test: 255 falls to 15.7-16.1 at T for all three, at 33 and 50 ms per pass.
 - Increment normalised to the record rate, so the brightness means hit probability whatever the time base:
-  inc = round(1.25 x 255 x (1 - k / 256) / r), 1..255, r = records per tick (exponential average over 8 ticks). A pixel
-  hit by every record settles at 1.25 x 255 before the decay (saturated), one hit by 10 % at ~32. The render paints
-  after the pass's decay, so a saturated cell shows 255 k / 256 (`phos_full`); the palettes reach full brightness at
-  that count. Infinite: inc = 1 (the count is the number of hits, saturating at 255).
-- Fused with the render: on a pass with a tick due, the render loop decays each word it reads and writes it back when
-  it changed; extents shrink to the words still non-zero. No separate pass over the map.
+  inc = round(1.25 x 255 x (1 - k1^interval)), 1..255, interval = ms between records (exponential average over 8
+  records, at most 2 s). A pixel hit by every record settles at 1.25 x 255 (saturated); one hit by 10 % averages ~29
+  (host test). At 33 ms per record: inc 117 (0.2 s), 28 (1 s), 6 (5 s); records 2 s apart get 255 each. Infinite:
+  inc = 1 (the count is the number of hits, saturating at 255).
+- Fused with the render: the render paints each lit cell with its count, then decays it and writes the word back
+  when it changed; extents shrink to the words still lit. No separate pass over the map.
 
 ## 5. Render (every pass)
 
 1.00o5 clears and repaints the trace area every pass [F: scope_display_trace_data], so the map is painted every pass,
 into `displaybuffertmp` after the grid and before REF / MATH, cursors, pointers and measurements, exactly where the
 traces were drawn. Zero words are skipped (the grid shows through), non-zero cells write one RGB565 pixel each.
-CH2 is painted only where its count exceeds CH1's (the brighter channel wins, CH1 on ties).
+CH2 is painted only where its count exceeds CH1's (the brighter channel wins, CH1 on ties). The palette is indexed by
+the count before this pass's decay, so a saturated cell shows full brightness.
 
 Cost per pass and channel [E]: extent words read (~90 cycles each) + one pixel write per lit cell (posted writes; the
 1.00o5 clear writes 314 k pixels per pass inside a 30 ms pass, so a write costs under ~55 cycles [I]).
@@ -94,11 +98,11 @@ Cost per pass and channel [E]: extent words read (~90 cycles each) + one pixel w
 | trace with jitter / noise, 10-20 px per column | 728 x 4-6 | 7-15 k | ~1-2 ms |
 | worst: whole area lit | 72.8 k | 291 k | ~25 ms [E] |
 
-Decay ticks add one write per non-zero word on about 60 % of passes (pass 30 ms, tick 50 ms). With both channels at
-the worst case the pass grows from ~30 ms to ~80 ms (12 passes/s): still interactive. A typical picture adds 1-4 ms
+The decay adds one write per lit word per pass. With both channels at the worst case the pass grows from ~30 ms to
+~90 ms (11 passes/s): still interactive. A typical picture adds 1-4 ms
 to the 30 ms pass. Bench check: GET_STATUS `pass_ms` in the phosphor view vs the scope view (section 8).
 
-How the UI stays responsive: one record per pass at most (1.00o5's loop), decay on a fixed clock (not per record),
+How the UI stays responsive: one record per pass at most (1.00o5's loop), decay by elapsed time (not per record),
 everything bounded by the lit area, nothing allocates, nothing waits. Settings changes clear by extents (memset of
 the lit runs only).
 

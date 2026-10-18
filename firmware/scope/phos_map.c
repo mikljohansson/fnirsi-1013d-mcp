@@ -6,53 +6,58 @@
 
 #include <string.h>
 
-//k = 256 exp(-0.05 ln 16 / T) for T = 0.2 s, 1 s, 5 s; infinite = 256
-const uint16_t phos_persist_k[PHOS_PERSIST_COUNT] = { 128, 223, 249, 256 };
+//exp(-ln 16 / (1000 T)) in Q24 for T = 0.2 s, 1 s, 5 s; infinite = 1
+const uint32_t phos_persist_k1[PHOS_PERSIST_COUNT] = { 16546239u, 16730764u, 16767915u, PHOS_K_ONE };
 
-uint32_t phos_k_ticks(uint32_t k, uint32_t n)
+uint32_t phos_k_dt(uint32_t k1, uint32_t dt)
 {
-  uint32_t r = k;
+  uint64_t r = PHOS_K_ONE, b = k1;
 
-  if(k >= 256)
-    return 256;
+  if(k1 >= PHOS_K_ONE)
+    return PHOS_K_ONE;
 
-  while(n-- > 1)
-    r = (r * k + 128) >> 8;
+  //Square and multiply, Q24 (products below 2^48)
+  while(dt)
+  {
+    if(dt & 1)
+      r = (r * b + (1u << 23)) >> 24;
 
-  return r;
+    b  = (b * b + (1u << 23)) >> 24;
+    dt >>= 1;
+  }
+
+  return (uint32_t)r;
 }
 
-uint32_t phos_inc(uint32_t k, uint32_t rate_q8)
+uint32_t phos_inc(uint32_t k1, uint32_t interval_ms)
 {
-  uint32_t inc;
+  uint32_t k, inc;
 
-  if(k >= 256)
+  if(k1 >= PHOS_K_ONE)
     return 1;
 
-  if(rate_q8 < PHOS_RATE_MIN)
-    rate_q8 = PHOS_RATE_MIN;
+  if(interval_ms < 1)
+    interval_ms = 1;
 
-  //Before the decay a pixel hit by every record settles at inc r / (1 - k / 256) = 1.25 x 255:
-  //inc = 318.75 (256 - k) / rate_q8, rounded
-  inc = (1275u * (256u - k) + 2u * rate_q8) / (4u * rate_q8);
+  k   = phos_k_dt(k1, interval_ms);
+  inc = (uint32_t)((319ull * (PHOS_K_ONE - k) + (1u << 23)) >> 24);
 
   return (inc < 1) ? 1 : (inc > 255) ? 255 : inc;
 }
 
-uint32_t phos_rate_update(uint32_t rate_q8, uint32_t records, uint32_t ticks)
+uint32_t phos_interval_update(uint32_t avg_ms, uint32_t interval_ms)
 {
-  int32_t target, diff;
+  int32_t diff;
 
-  if(!ticks)
-    return rate_q8;
+  if(interval_ms > PHOS_INTERVAL_MAX)
+    interval_ms = PHOS_INTERVAL_MAX;
 
-  target = (int32_t)((records * 256u) / ticks);
-  diff   = target - (int32_t)rate_q8;
+  diff = (int32_t)interval_ms - (int32_t)avg_ms;
 
-  //1/8 of the difference, rounded away from zero so the estimate reaches the target
-  rate_q8 = (uint32_t)((int32_t)rate_q8 + ((diff >= 0) ? ((diff + 7) >> 3) : -((-diff + 7) >> 3)));
+  //1/8 of the difference, rounded away from zero so the estimate reaches the value
+  avg_ms = (uint32_t)((int32_t)avg_ms + ((diff >= 0) ? ((diff + 7) >> 3) : -((-diff + 7) >> 3)));
 
-  return (rate_q8 < PHOS_RATE_MIN) ? PHOS_RATE_MIN : rate_q8;
+  return avg_ms ? avg_ms : 1;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -316,17 +321,17 @@ uint32_t phos_add_line(phos_map *m, int32_t x1, int32_t y1, int32_t x2, int32_t 
 //----------------------------------------------------------------------------------------------------------------------------------
 
 uint32_t phos_render(phos_map *m, const phos_map *under, uint16_t *dst, uint32_t stride, const uint16_t *pal,
-                     uint32_t k, uint32_t seed)
+                     uint32_t k16, uint32_t seed)
 {
   uint32_t x, pixels = 0;
-  int      decay = (k < 256);
+  int      decay = (k16 < 65536);
 
   for(x = 0; x < PHOS_W; x++)
   {
-    uint32_t       e = m->ext[x], i, last, d, nlo = 0, nend = 0, ne, ui = 1, ulast = 0;
-    uint32_t      *w;
+    uint32_t        e = m->ext[x], i, last, d, nlo = 0, nend = 0, ne, ui = 1, ulast = 0;
+    uint32_t       *w;
     const uint32_t *uw = 0;
-    uint16_t      *col = dst + x;
+    uint16_t       *col = dst + x;
 
     if(!e)
       continue;
@@ -334,7 +339,7 @@ uint32_t phos_render(phos_map *m, const phos_map *under, uint16_t *dst, uint32_t
     w    = (uint32_t *)(void *)(m->cells + x * PHOS_H);
     i    = (e & 0xFFFF) >> 2;
     last = ((e >> 16) - 1) >> 2;
-    d    = ((seed + 89u * x) & 0xFF) * 0x00010001u;
+    d    = (seed + 25033u * x) & 0xFFFF;
 
     if(under && under->ext[x])
     {
@@ -347,47 +352,51 @@ uint32_t phos_render(phos_map *m, const phos_map *under, uint16_t *dst, uint32_t
 
     for(; i <= last; i++)
     {
-      uint32_t v = w[i], u, j;
+      uint32_t v = w[i], nv = v, u, j;
       uint16_t *p;
 
       if(!v)
         continue;
 
-      if(decay)
-      {
-        //Two lanes of two bytes: count * k + d stays below 65536 (k <= 255, d <= 255)
-        uint32_t a  = (v & 0x00FF00FFu) * k + d;
-        uint32_t b  = ((v >> 8) & 0x00FF00FFu) * k + d;
-        uint32_t nv = ((a >> 8) & 0x00FF00FFu) | (b & 0xFF00FF00u);
-
-        if(nv != v)
-        {
-          w[i] = nv;
-          v    = nv;
-        }
-
-        if(!v)
-          continue;
-      }
-
-      if(!nend)
-        nlo = 4 * i;
-
-      nend = 4 * i + 4;
-
       u = (uw && (i >= ui) && (i <= ulast)) ? uw[i] : 0;
       p = col + 4 * i * stride;
 
+      if(decay)
+        nv = 0;
+
       for(j = 0; j < 32; j += 8, p += stride)
       {
-        uint32_t c = (v >> j) & 0xFF;
+        uint32_t c = (v >> j) & 0xFF, n = c, ub;
 
-        if(c > ((u >> j) & 0xFF))
+        if(!c)
+          continue;
+
+        //count * k16 + d < 2^24: no overflow
+        if(decay)
+        {
+          n   = (c * k16 + d) >> 16;
+          nv |= n << j;
+        }
+
+        ub = (u >> j) & 0xFF;
+
+        if(!ub || (n > ub))
         {
           *p = pal[c];
           pixels++;
         }
       }
+
+      if(nv != v)
+        w[i] = nv;
+
+      if(!nv)
+        continue;
+
+      if(!nend)
+        nlo = 4 * i;
+
+      nend = 4 * i + 4;
     }
 
     //The extent shrinks to the lit words (word granularity: the rows around the old ends in a lit word are zero)
@@ -446,37 +455,27 @@ static uint16_t rgb565(uint32_t r, uint32_t g, uint32_t b)
   return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
 
-uint32_t phos_full(uint32_t k)
+//Index on the square-root curve: 15 for one hit, 255 at saturation
+static uint32_t level(uint32_t c)
 {
-  return (k >= 256) ? 255 : (255 * k) >> 8;
+  return phos_isqrt(c * 255);
 }
 
-//Index on the square-root curve of the count relative to full: 15 for a count of full / 255, 255 from full on
-static uint32_t level(uint32_t c, uint32_t full)
-{
-  c = (c * 255) / full;
-
-  return phos_isqrt(((c > 255) ? 255 : c) * 255);
-}
-
-void phos_palette_mono(uint16_t *pal, uint32_t rgb, uint32_t full)
+void phos_palette_mono(uint16_t *pal, uint32_t rgb)
 {
   uint32_t c, r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
 
   pal[0] = 0;
 
-  if(!full)
-    full = 1;
-
   for(c = 1; c < 256; c++)
   {
-    uint32_t br = 48 + (207 * level(c, full) + 127) / 255;
+    uint32_t br = 48 + (207 * level(c) + 127) / 255;
 
     pal[c] = rgb565((r * br) / 255, (g * br) / 255, (b * br) / 255);
   }
 }
 
-void phos_palette_heat(uint16_t *pal, uint32_t full)
+void phos_palette_heat(uint16_t *pal)
 {
   static const uint8_t stop[][4] = { { 0, 0, 0, 96 }, { 50, 0, 0, 255 }, { 100, 0, 200, 255 }, { 150, 0, 255, 0 },
                                      { 195, 255, 255, 0 }, { 235, 255, 0, 0 }, { 255, 255, 255, 255 } };
@@ -484,12 +483,9 @@ void phos_palette_heat(uint16_t *pal, uint32_t full)
 
   pal[0] = 0;
 
-  if(!full)
-    full = 1;
-
   for(c = 1; c < 256; c++)
   {
-    uint32_t l = level(c, full), span, t, ch[3], j;
+    uint32_t l = level(c), span, t, ch[3], j;
 
     while((s < sizeof(stop) / sizeof(stop[0]) - 2) && (l > stop[s + 1][0]))
       s++;

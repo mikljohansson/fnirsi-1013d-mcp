@@ -159,8 +159,8 @@ static void test_cost_worst(void)
   T_EQ(phos_lit(&ma), PHOS_W * PHOS_H);
 
   //Render without decay: one pixel per lit cell
-  phos_palette_mono(pal, 0xFFFF00, 255);
-  T_EQ(phos_render(&ma, 0, fb, 800, pal, 256, 0), PHOS_W * PHOS_H);
+  phos_palette_mono(pal, 0xFFFF00);
+  T_EQ(phos_render(&ma, 0, fb, 800, pal, 65536, 0), PHOS_W * PHOS_H);
 
   //Unaligned start: the word reader takes the right bytes
   reset();
@@ -200,14 +200,14 @@ static void test_determinism(void)
   T_MEM(cells_a, cells_b, sizeof(cells_a));
   T_MEM(ext_a, ext_b, sizeof(ext_a));
 
-  phos_palette_heat(pal, 255);
+  phos_palette_heat(pal);
   memset(fb, 0, sizeof(fb));
   memset(fb2, 0, sizeof(fb2));
 
   for(t = 0; t < 10; t++, s = phos_seed_next(s))
   {
-    phos_render(&ma, 0, fb, 800, pal, phos_persist_k[PHOS_PERSIST_1S], s);
-    phos_render(&mb, 0, fb2, 800, pal, phos_persist_k[PHOS_PERSIST_1S], s);
+    phos_render(&ma, 0, fb, 800, pal, 60000, s);
+    phos_render(&mb, 0, fb2, 800, pal, 60000, s);
   }
   T_MEM(cells_a, cells_b, sizeof(cells_a));
   T_MEM(ext_a, ext_b, sizeof(ext_a));
@@ -226,18 +226,18 @@ static void test_determinism(void)
   T_EQ(ext_a[100] | ext_a[0] | ext_a[PHOS_W - 1], 0);
 }
 
-//Mean count over the 728 cells of row 200 after `ticks` ticks from `start`
-static uint32_t decay_mean_x100(uint32_t k, uint32_t start, uint32_t ticks)
+//Mean count over the 728 cells of row 200 after `passes` passes dt ms apart (k1 per ms), from `start`
+static uint32_t decay_mean_x100(uint32_t k1, uint32_t dt, uint32_t start, uint32_t passes)
 {
-  uint32_t x, t, s = 0, sum = 0;
+  uint32_t x, t, s = 0, sum = 0, k16 = phos_k16(phos_k_dt(k1, dt));
 
   reset();
   lut_offset();
   memset(codes, 128, 3000);
   phos_add_record(&ma, codes, 3000, lut, 0, dx_span(3000), 0, PHOS_W - 1, start);
 
-  for(t = 0; t < ticks; t++, s = phos_seed_next(s))
-    phos_render(&ma, 0, fb, 800, pal, k, s);
+  for(t = 0; t < passes; t++, s = phos_seed_next(s))
+    phos_render(&ma, 0, fb, 800, pal, k16, s);
 
   for(x = 0; x < PHOS_W; x++)
     sum += cell(&ma, x, 200);
@@ -247,106 +247,110 @@ static uint32_t decay_mean_x100(uint32_t k, uint32_t start, uint32_t ticks)
 
 static void test_decay(void)
 {
-  uint32_t m, t, s, x;
+  uint32_t m, t, s, x, k16, i;
   int empty = 1;
 
-  T_EQ(phos_persist_k[PHOS_PERSIST_INF], 256);
-  T_EQ(phos_k_ticks(223, 1), 223);
-  T_EQ(phos_k_ticks(128, 2), 64);
-  T_EQ(phos_k_ticks(256, 4), 256);
+  T_EQ(phos_persist_k1[PHOS_PERSIST_INF], PHOS_K_ONE);
+  T_EQ(phos_k_dt(PHOS_K_ONE, 77), PHOS_K_ONE);
+  T_EQ(phos_k_dt(phos_persist_k1[PHOS_PERSIST_1S], 0), PHOS_K_ONE);
+  T_EQ(phos_k_dt(phos_persist_k1[PHOS_PERSIST_1S], 1), phos_persist_k1[PHOS_PERSIST_1S]);
+  for(i = 0; i < 3; i++)
+  {
+    //k1^T = 1/16 = 1048576 in Q24, within 0.2 %
+    uint32_t k = phos_k_dt(phos_persist_k1[i], (i == 0) ? 200 : (i == 1) ? 1000 : 5000);
 
-  //Persistence T: full (255) falls to 1/16 (15.9) in T, +-10 %
-  m = decay_mean_x100(phos_persist_k[PHOS_PERSIST_02S], 255, 200 / PHOS_TICK_MS);
-  T_TRUE((m >= 1435) && (m <= 1755));
-  m = decay_mean_x100(phos_persist_k[PHOS_PERSIST_1S], 255, 1000 / PHOS_TICK_MS);
-  T_TRUE((m >= 1435) && (m <= 1755));
-  m = decay_mean_x100(phos_persist_k[PHOS_PERSIST_5S], 255, 5000 / PHOS_TICK_MS);
-  T_TRUE((m >= 1435) && (m <= 1755));
-  printf("decay: 1/16 point at T: %u.%02u (0.2 s), ", decay_mean_x100(128, 255, 4) / 100, decay_mean_x100(128, 255, 4) % 100);
-  printf("%u.%02u (1 s), ", decay_mean_x100(223, 255, 20) / 100, decay_mean_x100(223, 255, 20) % 100);
-  printf("%u.%02u (5 s), expected 15.94\n", decay_mean_x100(249, 255, 100) / 100, decay_mean_x100(249, 255, 100) % 100);
+    T_TRUE((k >= 1046479) && (k <= 1050673));
+  }
+  T_EQ(phos_k16(PHOS_K_ONE), 65536);
 
-  //Dithered: small counts decay exponentially on average (4 / e after one time constant, 256 / 7 ticks at k = 249)
-  m = decay_mean_x100(249, 4, 37);
+  //Persistence T: full (255) falls to 1/16 (15.9) in T, +-10 %, at 50 ms and at 33 ms per pass
+  m = decay_mean_x100(phos_persist_k1[PHOS_PERSIST_02S], 50, 255, 4);
+  T_TRUE((m >= 1435) && (m <= 1755));
+  m = decay_mean_x100(phos_persist_k1[PHOS_PERSIST_1S], 50, 255, 20);
+  T_TRUE((m >= 1435) && (m <= 1755));
+  m = decay_mean_x100(phos_persist_k1[PHOS_PERSIST_5S], 50, 255, 100);
+  T_TRUE((m >= 1435) && (m <= 1755));
+  m = decay_mean_x100(phos_persist_k1[PHOS_PERSIST_1S], 33, 255, 30);
+  T_TRUE((m >= 1435) && (m <= 1790));
+  m = decay_mean_x100(phos_persist_k1[PHOS_PERSIST_5S], 33, 255, 152);
+  T_TRUE((m >= 1435) && (m <= 1755));
+  printf("decay: count at T from 255: %u (0.2 s), %u (1 s), %u (5 s) in 1/100, expected 1594\n",
+         decay_mean_x100(phos_persist_k1[0], 50, 255, 4), decay_mean_x100(phos_persist_k1[1], 50, 255, 20),
+         decay_mean_x100(phos_persist_k1[2], 50, 255, 100));
+
+  //Dithered: small counts decay exponentially on average (4 / e after one time constant T / ln 16 = 1.80 s at 5 s)
+  m = decay_mean_x100(phos_persist_k1[PHOS_PERSIST_5S], 30, 4, 60);
   T_TRUE((m >= 125) && (m <= 170));
 
-  //k^n for 4 ticks at once ~ 4 single ticks
-  T_TRUE(decay_mean_x100(phos_k_ticks(223, 4), 255, 5) * 100 / decay_mean_x100(223, 255, 20) >= 85);
-
   //Infinite: no change
-  T_EQ(decay_mean_x100(256, 77, 50), 7700);
+  T_EQ(decay_mean_x100(PHOS_K_ONE, 30, 77, 50), 7700);
 
   //Everything fades to zero and the extents empty
-  decay_mean_x100(249, 255, 1);
-  for(t = 0, s = 0; t < 2000; t++, s = phos_seed_next(s))
-    phos_render(&ma, 0, fb, 800, pal, 249, s);
+  decay_mean_x100(phos_persist_k1[PHOS_PERSIST_5S], 30, 255, 1);
+  k16 = phos_k16(phos_k_dt(phos_persist_k1[PHOS_PERSIST_5S], 30));
+  for(t = 0, s = 0; t < 3000; t++, s = phos_seed_next(s))
+    phos_render(&ma, 0, fb, 800, pal, k16, s);
   for(x = 0; x < PHOS_W; x++)
     if(ext_a[x])
       empty = 0;
   T_TRUE(empty);
   T_EQ(phos_lit(&ma), 0);
-  T_EQ(phos_render(&ma, 0, fb, 800, pal, 249, s), 0);
+  T_EQ(phos_render(&ma, 0, fb, 800, pal, k16, s), 0);
 }
 
 static void test_increment(void)
 {
-  uint32_t rate = PHOS_RATE_INIT, i, t, s = 0, inc, sum10 = 0;
+  uint32_t avg = PHOS_INTERVAL_INIT, i, t, s = 0, inc, sum10 = 0, k16, k1 = phos_persist_k1[PHOS_PERSIST_1S];
   int      full = 1;
 
-  T_EQ(phos_inc(256, 384), 1);
-  T_EQ(phos_inc(223, 384), 27);
-  T_EQ(phos_inc(128, 384), 106);
-  T_EQ(phos_inc(249, 384), 6);
-  T_EQ(phos_inc(128, 1), 255);       //slow records: each one at full brightness
+  T_EQ(phos_inc(PHOS_K_ONE, 33), 1);
+  T_EQ(phos_inc(phos_persist_k1[PHOS_PERSIST_1S], 33), 28);
+  T_EQ(phos_inc(phos_persist_k1[PHOS_PERSIST_02S], 33), 117);
+  T_EQ(phos_inc(phos_persist_k1[PHOS_PERSIST_5S], 33), 6);
+  T_EQ(phos_inc(phos_persist_k1[PHOS_PERSIST_02S], 2000), 255);   //slow records: each one at full brightness
+  T_EQ(phos_inc(phos_persist_k1[PHOS_PERSIST_5S], 0), 1);
 
-  //Rate estimate converges: 3 records per 2 ticks = 384
+  //Interval estimate converges, clamps
   for(i = 0; i < 60; i++)
-    rate = phos_rate_update(rate, 3, 2);
-  T_EQ(rate, 384);
-  T_EQ(phos_rate_update(rate, 0, 0), 384);
+    avg = phos_interval_update(avg, 50);
+  T_EQ(avg, 50);
   for(i = 0; i < 200; i++)
-    rate = phos_rate_update(rate, 0, 4);
-  T_EQ(rate, PHOS_RATE_MIN);
+    avg = phos_interval_update(avg, 100000);
+  T_EQ(avg, PHOS_INTERVAL_MAX);
 
-  //Steady state at 1.5 records per tick, 1 s: a row hit by every record stays saturated (shown after the decay, so at
-  //phos_full), one hit by 10 % averages about 28 over the last 200 ticks (between hits its count falls and rises)
+  //Steady state, 1 s, one record per 33 ms pass: a row hit by every record is painted at saturation, one hit by 10 %
+  //averages about 29 after the decay (between hits its count falls and rises)
   reset();
   lut_offset();
-  inc = phos_inc(223, 384);
-  for(t = 0; t < 400; t++, s = phos_seed_next(s))
+  phos_palette_mono(pal, 0xFFFFFF);
+  inc = phos_inc(k1, 33);
+  k16 = phos_k16(phos_k_dt(k1, 33));
+  for(t = 0; t < 600; t++, s = phos_seed_next(s))
   {
-    uint32_t r, nrec = (t & 1) ? 2 : 1;
+    memset(codes, (t % 10 == 0) ? 150 : 100, 3000);
+    phos_add_record(&ma, codes, 3000, lut, 0, dx_span(3000), 0, PHOS_W - 1, inc);
+    memset(codes, 200, 3000);
+    phos_add_record(&mb, codes, 3000, lut, 0, dx_span(3000), 0, PHOS_W - 1, inc);
 
-    for(r = 0; r < nrec; r++)
-    {
-      uint32_t rec = t + t / 2 + r;
+    memset(fb, 0, sizeof(fb));
+    phos_render(&ma, 0, fb, 800, pal, k16, s);
+    phos_render(&mb, 0, fb, 800, pal, k16, s);
 
-      memset(codes, 100, 3000);
-      if(rec % 10 == 0)
-        memset(codes, 150, 3000);
-      phos_add_record(&ma, codes, 3000, lut, 0, dx_span(3000), 0, PHOS_W - 1, inc);
-      memset(codes, 200, 3000);
-      phos_add_record(&mb, codes, 3000, lut, 0, dx_span(3000), 0, PHOS_W - 1, inc);
-    }
-
-    phos_render(&ma, 0, fb, 800, pal, 223, s);
-    phos_render(&mb, 0, fb, 800, pal, 223, s);
-
-    if(t >= 200)
+    if(t >= 300)
     {
       uint32_t x;
 
       for(x = 0; x < PHOS_W; x++)
         sum10 += cell(&ma, x, 222);
 
-      if(cell(&mb, 300, 272) < phos_full(223) - 12)      //ticks with one record dip a little
+      if(fb[272 * 800 + 300] != 0xFFFF)
         full = 0;
     }
   }
   T_TRUE(full);
-  sum10 /= 200 * PHOS_W;
-  printf("increment: a 10 %% hit rate averages %u (expected ~28)\n", sum10);
-  T_TRUE((sum10 >= 21) && (sum10 <= 35));
+  sum10 /= 300 * PHOS_W;
+  printf("increment: a 10 %% hit rate averages %u (expected ~29)\n", sum10);
+  T_TRUE((sum10 >= 21) && (sum10 <= 38));
 }
 
 static void test_render_rules(void)
@@ -355,8 +359,8 @@ static void test_render_rules(void)
 
   reset();
   lut_offset();
-  phos_palette_mono(pal, 0xFFFF00, 255);
-  phos_palette_mono(pal2, 0x00FFFF, 255);
+  phos_palette_mono(pal, 0xFFFF00);
+  phos_palette_mono(pal2, 0x00FFFF);
 
   memset(codes, 128, 3000);
   phos_add_record(&ma, codes, 3000, lut, 0, dx_span(3000), 0, PHOS_W - 1, 100);
@@ -366,8 +370,8 @@ static void test_render_rules(void)
   phos_add_record(&mb, codes, 3000, lut, 0, dx_span(3000), 0, PHOS_W - 1, 1);
 
   memset(fb, 0, sizeof(fb));
-  T_EQ(phos_render(&ma, 0, fb, 800, pal, 256, 0), PHOS_W);
-  n = phos_render(&mb, &ma, fb, 800, pal2, 256, 0);
+  T_EQ(phos_render(&ma, 0, fb, 800, pal, 65536, 0), PHOS_W);
+  n = phos_render(&mb, &ma, fb, 800, pal2, 65536, 0);
   //CH2 only where brighter: columns 100.. on row 200, and all of its own row 82
   T_EQ(n, (PHOS_W - 100) + PHOS_W);
   T_EQ(fb[200 * 800 + 50], pal[100]);
@@ -377,7 +381,7 @@ static void test_render_rules(void)
 
   //Palettes
   T_EQ(pal[0], 0);
-  phos_palette_mono(pal, 0xFFFFFF, 255);
+  phos_palette_mono(pal, 0xFFFFFF);
   T_EQ(pal[255], 0xFFFF);
   T_EQ(pal[1], (uint16_t)(((60 & 0xF8) << 8) | ((60 & 0xFC) << 3) | (60 >> 3)));   //24 % for one hit
   {
@@ -388,11 +392,7 @@ static void test_render_rules(void)
         mono = 0;
     T_TRUE(mono);
   }
-  phos_palette_mono(pal, 0xFFFFFF, phos_full(128));   //0.2 s: full brightness from 127 on
-  T_EQ(phos_full(128), 127);
-  T_EQ(pal[127], 0xFFFF);
-  T_TRUE(pal[100] != 0xFFFF);
-  phos_palette_heat(pal, 255);
+  phos_palette_heat(pal);
   T_EQ(pal[255], 0xFFFF);
   T_EQ(pal[1] & 0xFFE0, 0);           //rare: blue only
   T_TRUE((pal[1] & 0x1F) > 0);
