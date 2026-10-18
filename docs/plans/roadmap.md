@@ -64,6 +64,13 @@ purpose-written Q15 FFT is proposed instead.
 - Base calibration stores measured per-core zero and the PWM slope; on-screen volts use them; export via
   GET_CAL so the host model and the screen agree. Owner re-runs base calibration once.
 
+## 5b. Memory depth and readout (firmware + FPGA), owner request 2026-10-18
+
+- Default the memory depth to the bitstream maximum (16,384 on AL3; 6000 in decimation modes) and show the resulting pass time next to
+  the selector, keeping it as an explicit update-rate trade-off (pass 35-75 ms at 3000 samples today, ~9 passes/s at full depth).
+- Make depth cheap: read only the on-screen window for the display pass and the full record for the host/FFT; faster FPGA readout if
+  the bus allows (0.3 us per sample byte today). Shares work with the digital-phosphor fast loop.
+
 ## 6. Smaller community wishes (firmware)
 
 - Screenshot over USB (READ_SCREEN; RGB565 framebuffer, ~768 kB, 0.4 s at 2 MB/s).
