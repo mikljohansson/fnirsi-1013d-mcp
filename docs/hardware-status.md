@@ -273,3 +273,7 @@ Newest entries at the bottom. Format: date, who, what, result.
 - Owner (before leaving for a few hours): battery indicator stable now on 0.2.11 (battery likely full; the hysteresis fix is in 0.2.13+ and
   still to be checked while charging from a lower level); System settings empty row still present on 0.2.11 as expected (fixed in 0.2.13+).
   Agent rotation: fw-gen2 retiring at ~940k tokens with a firmware/AGENTS.md handoff; fw-gen3 takes the 0.2.16+ self-restart.
+- Baseline soak on 0.2.11 (fnirsi1013d-soak, status mode 10 Hz, 17:25-17:55, USB selective suspend off on AC): 17,890 requests, 0 failures,
+  0 drops, latency median 1.1 ms / p99 2.1 ms / max 3.1 ms, every counter delta none (no bus reset, no suspend, no restart). The earlier
+  0.2.11 drop (16:5x) happened with selective suspend still on; the 0.2.12/0.2.16 "drops" were self-restarts. fw-gen2 retired (handoff
+  0e19102), fpga-gen2 retired (d30cff8), mcp-gen2 retired (7de3a41); fw-gen3 active with the 0.2.19 / 0.2.19-nofb A/B pair (02288b8).
