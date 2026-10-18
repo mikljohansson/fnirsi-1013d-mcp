@@ -10,8 +10,9 @@ State on 2026-10-18:
   to that bitstream in about 15 s.
 - `src/` now holds our design, version word **0x1533**: the external trigger on the calibration pin (roadmap item 2;
   commits 526c969, 4601dec, 2839258). It is built (`out/FPGA-ext-trigger.bin`, sha256 `a9656703...1216`), meets
-  timing and passes the iverilog testbench. It is **not flashed**. It needs firmware that accepts 0x1533 (fw-gen2
-  was sent the spec) and then the bench checks in `README.md` "Changes".
+  timing and passes the iverilog testbench. It is **not flashed**. Firmware support exists in fw 0.2.9 (commit bebf901,
+  not benched): 0x153x decodes as AL3, caps EXT_TRIGGER, 0x28 in GET_STATUS byte 42. Next are the flash and the
+  bench checks in `README.md` "Changes", with that firmware loaded first.
 
 ## What is here
 
@@ -192,7 +193,7 @@ firmware can detect. Rebuild unchanged `src/` first to confirm the toolchain, th
 Do not edit `src/` in place without keeping Atlan4's original reproducible (the hash check above).
 
 1. **External trigger input on P133**: designed, built and simulated (0x1533, `README.md` "Changes"). Open items:
-   - firmware support for 0x153x and caps EXT_TRIGGER (fw-gen2);
+   - firmware support for 0x153x and caps EXT_TRIGGER: done in fw 0.2.9 (bebf901), not benched;
    - flashing and the five bench checks, including the pin input impedance and the EXT-to-CH1 skew;
    - a fixed trigger-point correction, if the bench shows one is needed.
 2. **Deeper sample memory.** 16 BRAM9K and both BRAM32K blocks are free (about 12k to 15.8k words possible).
