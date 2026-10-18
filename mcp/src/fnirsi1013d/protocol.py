@@ -31,8 +31,8 @@ PROTO_MAJOR = 1
 #: caps DECIM, 16-bit samples: READ_TRACE WIDE, READ_RAW layout 2, GET_CAPTURE_INFO 76 bytes); 1.8 was not used;
 #: 1.10 (fw 0.2.43): calibration data v2, GET_CAL 248 bytes; 1.11 (fw 0.2.44, FPGA 0x1535): CIC compensation FIR
 #: (caps FIR, SET_DECIM flags bit 3, 0x29 bits 6 / 5); 1.12 (fw 0.2.45): calibration data v3 (per-core, per-class
-#: gains), GET_CAL 256 bytes (v2 blocks are no longer used)
-PROTO_MINOR = 12
+#: gains), GET_CAL 256 bytes (v2 blocks are no longer used); 1.13 (fw 0.2.46): phosphor view, display_mode 4
+PROTO_MINOR = 13
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -266,6 +266,11 @@ class DisplayMode(enum.IntEnum):
 
     SCOPE = 0
     SPECTRUM = 1
+    #: fw 0.2.32: the spectrum view's waterfall and density sub-views (READ_SPECTRUM as in SPECTRUM)
+    WATERFALL = 2
+    DENSITY = 3
+    #: 1.13 (fw 0.2.46): the digital phosphor view (traces graded from per-pixel hit counts; data unchanged)
+    PHOSPHOR = 4
 
 
 class UiBusy(enum.IntEnum):

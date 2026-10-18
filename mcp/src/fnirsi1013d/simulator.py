@@ -1396,6 +1396,11 @@ class Device:
 
     # --- spectrum view (fw 0.2.28) --------------------------------------------------------------------------
 
+    def ui_set_display(self, mode: int) -> None:
+        """Test hook: the person switches the display mode (P.DisplayMode: 2 / 3 spectrum sub-views, 4 phosphor)."""
+        with self.lock:
+            self.display_mode = P.DisplayMode(mode)
+
     def ui_set_spectrum(self, on: bool = True, *, window: int | None = None, log2n: int | None = None,
                         channel: int | None = None) -> None:
         """Test hook: the person opens / closes the spectrum view or changes its window, FFT length or channel."""
@@ -1498,7 +1503,7 @@ class Device:
         r = P.ReadSpectrumReq.unpack(req.payload)
         if r.channel > 1:
             raise _DevErr(P.Status.E_BAD_ARG, 0, "channel")
-        if self.display_mode != P.DisplayMode.SPECTRUM or self.capture_id == 0:
+        if self.display_mode not in (1, 2, 3) or self.capture_id == 0:
             raise _DevErr(P.Status.E_STATE, 0, "no spectrum shown for this channel")
         try:
             self._check_capture_readable()

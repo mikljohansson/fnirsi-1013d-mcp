@@ -92,6 +92,7 @@ path. |
 | 1.6 | 0.2.27+ | FFT_BENCH 0x0F02 (diagnostic; `Scope.fft_bench`, 5 s timeout, `fnirsi1013d-bench --fft`) |
 | 1.7 | 0.2.28+ | spectrum view: GET_STATUS byte 43 display_mode, READ_SPECTRUM 0x020A (bulk timeout class; 32-byte header, i16 centi-dBV) |
 | 1.11 | 0.2.44+ | 0x1535 FIR: caps bit 16 FIR, SET_DECIM / GET_DECIM flags bit 3, 0x29 bits 6 / 5 (`DECIM_FIR_EN` / `DECIM_FIR_ACT`), gain (N/2)^K and S + 1 while active (`decim_config(..., has=DECIM_HAS_FIR)`, `DecimConfig.from_status`), filter names `cic2+fir` (`parse_decim_filter`); event types 1-4 carry the 0.2.44 suspend fields (row 50) |
+| 1.13 | 0.2.46+ | GET_STATUS display_mode 4 phosphor (`DisplayMode` names 2 waterfall / 3 density, the spectrum sub-views, and 4); capture tools add a phosphor caveat, 1-3 the spectrum one; settings word 210 is not decoded (the host decodes no settings words) |
 | 1.12 | 0.2.45+ | calibration v3: GET_CAL 256 bytes (`CalResp.v3`, `zero16_at` / `zero_at`, per-class `slope_codes`, `gain_corr` / `gain_q16`, `gain16_full`; `parse_adc_cal_block` decodes the v3 block, checked against `adc_cal_v3`); `channel_scale` v3 branch: per-core zeros and gains of the capture's class (`ChannelScale.corr_gain_*`, `wide_gain`; `codes_from_raw`, `volts_mean_raw`, `volts_wide_codes`), unit file gated gains carried by G[c] / G[gated]; version 2 (0.2.43-0.2.44, 248-byte layout) raises |
 | 1.10-1.11 | 0.2.43-0.2.44 | calibration v2 (no longer decoded since the 1.12 host); `decim_to_code` takes corr16 (1/16 code) |
 | 1.9 | 0.2.30+ | decimation filter (caps bit 15 DECIM on FPGA 0x1534): GET_DECIM 0x020C / SET_DECIM 0x020D, GET_TRIGGER words = samples and GET_TIMEBASE period N x 5 ns while on, READ_TRACE flag bit 2 WIDE (header bytes 30/31 = mode, S), READ_RAW layout 2, GET_CAPTURE_INFO 76 bytes. 1.8 was skipped |
@@ -133,7 +134,7 @@ range-independent; 0 V at dcoffset 0: CH1 A 132.47 / B 127.14, CH2 A 128.80 / B 
 firmware gains). The firmware formula assumes 128 on the compensated mean. Grounds: the probe ground is VRF1,
 +1.24 V over the USB ground (fpga/al3/README.md); the calibration output reads -1.24 / +1.9 V against it by design.
 
-## Tests (`tests/`, 309, about 50 s)
+## Tests (`tests/`, 310, about 55 s)
 
 `test_protocol` (codec, structs, vectors, link stats/event log), `test_transport` (incl. the scripted-link deferred
 cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `test_shared_mode` (1.3),
@@ -147,7 +148,7 @@ the firmware vectors, wire layouts, simulator noise / volts / trigger / EXT late
 Fixtures: `sim`/`transport`/`scope` are collaborative with UI captures on demand (`ui_capture_period_s=0`);
 `legacy_sim` / `sim_factory(legacy=True)` give the 1.2 model. Simulator hooks: `SimServer.corrupt_next`,
 `garbage_next`, `drop_next`, `bad_crc_next`, `lose_next`/`lose_cmd`, `drop_link_on`; `Device.ui_set_*`,
-`ui_press_run/stop`, `ui_run_capture`, `ui_set_spectrum` (display mode, window, FFT length, channel), `on_arm`,
+`ui_press_run/stop`, `ui_run_capture`, `ui_set_spectrum` (display mode, window, FFT length, channel), `ui_set_display` (any display mode), `on_arm`,
 `user_tap` (legacy), `log_event` (also feeds the bus-level ring), `self_restart`, `ui_set_decim`, `sd.*` faults.
 SimConfig `cal_v3` (a bound v3 block measured from the model: zeros, slopes, gains G = g_ref / g), `core_gain`
 (relative gain per channel, class and core) and `gated_zero_shift` (per-core zero moves while the encode clock is

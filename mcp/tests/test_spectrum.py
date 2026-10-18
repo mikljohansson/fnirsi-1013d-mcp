@@ -220,3 +220,27 @@ def test_bench_fft_cli(sim_factory, capsys):
     out = capsys.readouterr().out
     assert ex.value.code == 0, out
     assert "FFT_BENCH: 6 entries, reps 4" in out and " 16384   DDR " in out and "(no restart)" in out
+
+
+# --- protocol 1.13 (fw 0.2.46): display modes 2-4 -----------------------------------------------------------
+
+
+def test_display_modes_2_to_4(sim_factory, tmp_path):
+    from test_server import client_for
+    srv = sim_factory(signal=SINE)
+
+    async def main():
+        async with client_for(srv, tmp_path) as c:
+            await c.call("scope_capture", channels=["CH1"])
+            srv.device.ui_set_display(P.DisplayMode.WATERFALL)
+            assert (await c.call("scope_status"))["display_mode"] == "waterfall"
+            r = await c.call("scope_spectrum", channel="CH1")  # the sub-views show the same spectrum
+            assert r["n_fft"] == 2048
+            cap = await c.call("scope_capture", channels=["CH1"])
+            assert any("spectrum view" in cv for cv in cap["caveats"])
+            srv.device.ui_set_display(P.DisplayMode.PHOSPHOR)
+            assert (await c.call("scope_status"))["display_mode"] == "phosphor"
+            cap = await c.call("scope_capture", channels=["CH1"])
+            assert any("phosphor view" in cv for cv in cap["caveats"])
+            assert "Spectrum analyzer" in await c.fails("scope_spectrum")
+    anyio.run(main)

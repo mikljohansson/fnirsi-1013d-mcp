@@ -281,7 +281,9 @@ class Session:
             raise ToolError("scope UI is in a modal screen (menu, calibration or USB storage); close it on the "
                             "scope and retry")
         if s.shared:
-            return [SPECTRUM_VIEW_NOTE] if st.display_mode == P.DisplayMode.SPECTRUM else []
+            if st.display_mode in (1, 2, 3):
+                return [SPECTRUM_VIEW_NOTE]
+            return [PHOSPHOR_VIEW_NOTE] if st.display_mode == P.DisplayMode.PHOSPHOR else []
         if st.control == P.Control.REMOTE:
             s.remote = True
             return []
@@ -399,6 +401,9 @@ class _Held:
 
 
 #: caveat while the scope's screen shows its spectrum view (protocol 1.7, GET_STATUS display_mode)
+#: caveat while the scope shows its phosphor view (protocol 1.13, display_mode 4)
+PHOSPHOR_VIEW_NOTE = ("the scope's screen shows its phosphor view: the person sees a persistence picture of many "
+                      "captures (a host single is added once); the data returned here are unaffected")
 SPECTRUM_VIEW_NOTE = ("the scope's screen shows its spectrum view: the person at the scope sees the spectrum of each "
                       "capture, not the trace (the data returned here are unaffected; scope_spectrum reads what the "
                       "screen shows)")
@@ -1081,7 +1086,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 if e.status == P.Status.E_STATE:
                     st = s.status()
                     where = ("the screen is in the scope view: open main menu > Spectrum analyzer at the scope"
-                             if st.display_mode != P.DisplayMode.SPECTRUM else
+                             if st.display_mode not in (1, 2, 3) else
                              f"the spectrum view shows no spectrum of {channel} (channel off or not selected in the "
                              "view, or no capture yet)")
                     raise ToolError(f"scope_spectrum: {where}") from e
