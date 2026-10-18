@@ -26,28 +26,38 @@ The firmware job runs these steps in order:
 The job uploads `build-gcc10-pc/fnirsi_1013d.bin` and its `.sha256` as the `firmware-image` artifact.
 The step summary lists the size and sha256 of each of the three builds.
 
-Until 2026-10-18 the job also fetched Atlan4's v1.00o5 binary and ran `make check-reference`, which proved
-that a `PC_PROTOCOL=0` build was byte-identical to it. The owner dropped that rule to allow dead-code removal
-(fw 0.2.47 removed the target, the `PC_PROTOCOL=0` build and the download); the CI logs up to that date
-hold the proof.
+Until 2026-10-18 the job also fetched Atlan4's v1.00o5 binary and compared it with a build of this tree,
+which proved the two byte-identical. The owner dropped that rule to allow dead-code removal. Fw 0.2.47
+removed the comparison, the `PC_PROTOCOL=0` build, `make package` and the download; the CI logs up to that date
+hold the proof. SD packages are made only by `tools/make_release_sd_package.py build` (section 3).
 
 Warnings are handled exactly as the repository already handles them. The firmware builds keep the
 upstream warnings and do not use `-Werror`. The host tests build with `-Werror`, as their Makefile
 says. The warning-list comparison in `firmware/AGENTS.md` stays a manual review step.
 
-The release image is reproducible. `make gcc10` runs with `SOURCE_DATE_EPOCH` set to the commit time,
-so `build_time.h` is fixed. The image also embeds the 8-digit commit hash (`PC_FW_BUILD`). Two clean
-clones of the same commit gave the same sha256. To rebuild a release image locally:
+The release image is reproducible (fw 0.2.47, `firmware/README.md` "Reproducible images"). The image depends
+only on the source, the toolchain and the commit. The Makefile reads the 8-digit commit hash (`PC_FW_BUILD`)
+and the commit time (`SOURCE_DATE_EPOCH`, UTC) from git, never the wall clock or the checkout path. They enter
+the image as ten bytes of data in `build_id.c`, which is linked last, and the source directory is mapped out of
+the debug info. So the `.bin` and the `.elf` are the same from every directory, including a git worktree
+(the Makefile translates a worktree's Windows gitdir for WSL). To rebuild a release image locally:
 
 ```
 git checkout vX.Y.Z
 cd firmware/scope
-SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) make gcc10
+make gcc10
 sha256sum build-gcc10-pc/fnirsi_1013d.bin      # equals the release's SHA256SUMS line
 ```
 
-A bench image built without `SOURCE_DATE_EPOCH`, or at another commit, has a different hash. The hashes
-in `docs/hardware-status.md` come from such local builds.
+Where git cannot be read at all, the build stops and asks for
+`PC_FW_BUILD=<git rev-parse --short=8 HEAD> SOURCE_DATE_EPOCH=<git log -1 --format=%ct>`.
+
+To check reproducibility, build the same commit in two clones at different paths and compare the sha256 of
+`build-gcc10-pc/fnirsi_1013d.bin` and of the `.elf`. The firmware job prints the image sha256 in its log and as a
+notice, and a local `make gcc10` of the same commit must match it. A build from uncommitted changes carries its
+parent commit's identity but different code, so its hash differs. Images before 0.2.47 were not reproducible
+across checkout paths (the 0.2.44 images in `docs/hardware-status.md`). The release workflow builds only
+`make gcc10`; `make gcc10-nommu` (MMU off, version suffix `-nommu`) is a local A/B build.
 
 ## 2. Cutting a release
 
@@ -154,7 +164,8 @@ This is done once per release, on the bench, by the owner or with the owner pres
 4. Check the running firmware's identity:
    - `#VER` must answer `fw=X.Y.Z`.
    - GET_INFO, `scope_info` and the diagnostics screen show the build hash. It must equal the first
-     8 digits of the tag commit (`git rev-parse --short=8 vX.Y.Z`).
+     8 digits of the tag commit (`git rev-parse --short=8 vX.Y.Z`). The identity line reads
+     `git <hash> of <commit time, UTC>`.
 5. Note the result in `docs/hardware-status.md`: release, image sha256, FEL read-back identical, `#VER`.
 
 ## 5. GPL and Atlan4's binary-only parts
@@ -226,7 +237,8 @@ Runs on main:
 - [x] The GCC 10.3.1 `.deb`s download over https and pass their pinned sha256 values. This happened on
       the first run, on a cache miss.
 - [x] The second and later runs restore `gcc10-Linux-...` and `atlan-v1.00o5-...` from the cache. The
-      reference step prints "nothing to download". `make check-reference` prints IDENTICAL on every run.
+      reference step prints "nothing to download". The reference comparison (removed in fw 0.2.47) printed
+      IDENTICAL on every run.
 - [x] The mcp tests pass on windows-latest with Python 3.12 and 3.13. The first run had one flaky
       failure on ubuntu with Python 3.13, in `test_set_acq_state_during_a_pending_wait_aborts_it`. Its
       cause was a one-shot cancel callback. `Transport.deferred` resent the WAIT after the abort, and
