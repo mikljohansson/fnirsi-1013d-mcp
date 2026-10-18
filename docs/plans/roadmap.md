@@ -94,20 +94,28 @@ Per-core zero correction in firmware removes it everywhere; the boxcar/CIC modes
 - Frequency-response analysis tool on the host using the square-wave generator's harmonics (limited).
 - EF2L45 / EP4CE6 owners: untested paths; invite testers after the release.
 
-## 8. Ideas from the FPGA headroom (brainstorm 2026-10-18, not scheduled)
+## 8. FPGA-headroom features, prioritised (owner approved all, 2026-10-18 evening)
 
-Resources free after 0x1534/0x1535: ~8,000 LUTs, ~200 kbit block RAM, one PLL, one M18x18. Limits that stay: 30 MHz front end, 8-bit
-converters, bit-banged MCU bus (a few MB/s).
+Order after the spectrum analyser (done), digital phosphor (next) and Bode (then). Rationale in brackets: D = metal-detector value,
+C = community value, $ = cost. Resources free after 0x1535: ~7,000 LUTs, ~200 kbit block RAM, one PLL, one M18x18.
 
-- Advanced triggers in the FPGA: pulse width, runt, window, timeout, Nth edge, time-based hold-off (a few hundred LUTs each).
-- Peak-detect acquisition: min and max per decimation window in the two bytes of a 16-bit word (catches glitches at slow time bases).
-- Hardware measurements at 200 MS/s: frequency/period counter (5 ns), pulse width, duty, min/max, always-on readouts.
-- Trigger output pulse on the calibration pin (mode of the shared pin).
-- Segmented capture: many short full-rate records, one per trigger (one per detector TX pulse), dead time skipped.
-- Hardware averaging of N triggered records in block RAM (16-bit sums), one averaged readout.
-- Streaming data logger: FIFO in free RAM -> MCU -> 32 MB DDR at up to ~1 MS/s of 16-bit filtered samples (30 s at 500 kS/s single
-  channel, minutes at lower rates), zoomable afterwards.
-- Generator: pulse pattern generator (per-pulse widths/gaps, bursts, sweeps for Bode), PRBS/noise output.
-- Software: serial decode (UART/I2C/SPI) from analog captures, 4-digit DVM readout at CIC rates, mask/pass-fail testing on the phosphor map.
-- Not worth chasing: equivalent-time sampling beyond 200 MS/s (front end), logic-analyser channels (no spare pins reach a connector),
-  hardware FFT (the MCU does 4096 points in 11 ms).
+1. **Segmented capture + hardware averaging** (FPGA + firmware + MCP) [D high: one segment per TX pulse with the dead time skipped,
+   coherent averaging of the decay at full rate; C high; $ medium]. Segments of 128-2048 samples, up to the RAM; trigger per segment;
+   16-bit accumulators for N averaged records; readout of one segment set or the averaged record; MCP `scope_capture_segments`,
+   `scope_capture_averaged`.
+2. **Advanced triggers** (FPGA + firmware + MCP) [D: Nth edge / pulse-width on the TX train; C high; $ low]: pulse width, runt, window,
+   timeout, Nth edge, time-based hold-off; trigger menu grows a "Type" selector; SET_TRIGGER gains type + parameters.
+3. **Peak-detect acquisition** (FPGA + firmware) [C high: glitch capture at slow time bases; D medium; $ low]: min/max per decimation
+   window in the two bytes of the 16-bit word; a Filter choice "Peak"; trace drawn as min/max band.
+4. **Streaming data logger** (FPGA FIFO + firmware + MCP) [D high: whole sweeps; C unique; $ medium-high]: continuous 16-bit filtered
+   samples at <= ~1 MS/s into the 32 MB DDR (30 s at 500 kS/s), roll display with history and zoom, host download/streaming.
+5. **Pulse pattern generator + trigger output** (FPGA + firmware + MCP) [D high: drive the TX stage, sync external gear; $ low-medium]:
+   per-pulse widths/gaps, bursts, frequency sweeps for Bode; trigger-out pulse mode on the shared pin.
+6. **Hardware measurements** (FPGA + firmware) [C medium; $ low]: 200 MS/s frequency/period counter, pulse width, duty, min/max as
+   always-on readouts.
+7. **Software features on the new data** [C medium; $ low each]: 4-digit DVM readout at CIC rates (after calibration v2), serial decode
+   (UART/I2C/SPI) from analog captures, mask/pass-fail testing on the phosphor map.
+8. **PRBS / noise output** for impulse and noise-based frequency response [later].
+
+Not pursued: equivalent-time sampling beyond 200 MS/s (30 MHz front end), logic-analyser channels (no spare pins reach a connector),
+hardware FFT (the MCU does 4096 points in 11 ms).
