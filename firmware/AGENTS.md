@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-Handoff fw-gen2 -> fw-gen3, 2026-10-18. Latest build: **fw 0.2.19** (protocol 1.5), not benched yet. The SD card
+Handoff fw-gen2 -> fw-gen3, 2026-10-18 (kept current by fw-gen3). Latest build: **fw 0.2.20** (protocol 1.5, new USB tick fallback, section 11), not benched yet; 0.2.19 is on the bench. The SD card
 and the bench run **0.2.11**, which stays there until the self-restart below is fixed. Read the root `AGENTS.md`
 first, then this file. Details live in `firmware/README.md` (build, SD layout, FEL, memory budget, boot, bring-up
 checklist), `docs/protocol.md` (the spec; section 14 lists every deviation and addition, rows 28-42 are this
@@ -185,7 +185,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | fw | commit | sha256 | change | bench result |
 |---|---|---|---|---|
 | 0.2.11 | 1594918 | af4b7f30 | a request sent right after the port opens is kept (DTR-up no longer resets a pending request) | accepted: census clean, 20/20 open-then-request; **on the SD card**; one USB drop during 10 Hz polling |
-| 0.2.12 | e797f25 | c9270dd3 | timer tick runs the whole CDC IRQ handler (lost-IRQ fallback), counter 47, GET_EVENT_LOG, protocol 1.5 | counter 47 = 46k in 3 min (race with the real IRQ), 1/100 64 KiB lost, soak: 2 drops, and it **restarted** (event-log `now` 326 s after ~520 s) |
+| 0.2.12 | e797f25 | c9270dd3 | timer tick runs the whole CDC IRQ handler (lost-IRQ fallback), counter 47, GET_EVENT_LOG, protocol 1.5 | counter 47 = 46k in 3 min (race with the real IRQ), 1/100 64 KiB lost, soak: 2 drops; the "restart" reported earlier was retracted by the lead (timeline fits no restart) |
 | 0.2.13 | 7ebda04 | 691d0d28 | System settings compacted without a DS3231; battery level averaged with hysteresis while charging | not benched alone; owner verdicts pending |
 | 0.2.14 | d6a6b37 | aa4a142c | fallback only after two quiet ticks; EXT ground note | counter 47 = 11.8k in 2 min (SOF defeats the gate), 1/100 64 KiB lost |
 | 0.2.15 | c4989e5 | b0cec01f | SOF ignored for counter 47 / type 14, event log 128, frozen pre-reset snapshot | superseded unbenched, not pinned |
@@ -195,21 +195,34 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.19 | 55d5c5b | 9b94c9a8 | restart record at 0x81A00000, exception vectors record and restart, counters 49-56, event type 15 | built, host-tested, disassembly checked; **ELF kept at backups/fw-0.2.19-9b94c9a8.elf** |
 
 | 0.2.19 A/B pair | 02288b8 | c30ff516 / 3d1f3c88 | same code as 0.2.19; `make gcc10-nofb` (PC_USB_TICK_FALLBACK=0) builds `0.2.19-nofb` without the tick fallback (#VER shows the suffix) | for the restart A/B; both ELFs kept as backups/fw-0.2.19-c30ff516.elf and backups/fw-0.2.19-nofb-3d1f3c88.elf |
+| 0.2.20 | 7f1c0c0 | e1517803 | tick fallback checks endpoint state (served only when seen on two consecutive ticks, no USB ISR between), skips while the USB IRQ is pending, counter 57 = races (n = 58), type 14 b condition bits | built, host-tested; ELF backups/fw-0.2.20-e1517803.elf |
+| 0.2.20-nofb | 7f1c0c0 | c7210b74 | same without the tick fallback (`make gcc10-nofb`) | built; ELF backups/fw-0.2.20-nofb-c7210b74.elf |
 
 All of 0.2.12-0.2.19 contain the tick fallback, except 0.2.19-nofb; 0.2.11 does not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
 build hash and build time; use the pair together. Full sha256: 0.2.19 (02288b8)
 c30ff5168bf227e0bf80038d037845e7a5d1e883fe00473f5f9f99a7f9b780fc, 0.2.19-nofb
-3d1f3c889a206621bc6546c0a7df227365e76589d5b41c05341183e4cb161cd9.
+3d1f3c889a206621bc6546c0a7df227365e76589d5b41c05341183e4cb161cd9. 0.2.20 (7f1c0c0)
+e1517803e6bc9a8b595a3a2797924db4269e256b7ff34207136b6b4a12fbdc8e, 0.2.20-nofb
+c7210b749cc55482155a2211fec422f674efa3a22faa3d378bf5a60d33bbc318.
 
-## 9. Open crash: self-restart from RAM (seen on 0.2.12 and 0.2.16)
+## 9. Open crash: self-restart from RAM (one confirmed case, 0.2.16)
 
 Symptom (lead, 0.2.16): under repeated full bench_link runs the device restarts itself. GET_STATUS uptime_ms read
-175 s after 7+ minutes of running, `#VER` still 0.2.16, three bench runs died right after "#VER OK". 0.2.12 showed
-the same signature: GET_EVENT_LOG `now` 326 s after about 520 s. A watchdog or power reset would boot the card's
+175 s after 7+ minutes of running, `#VER` still 0.2.16, three bench runs died right after "#VER OK". Lead's
+timeline: one FEL load at ~17:21:30, no reload or ENTER_FEL after it, runs died 17:24-17:27, uptime says the restart
+was at ~17:25:35, i.e. within 4 minutes of boot under bench traffic. The 0.2.12 case was retracted (its `now` 326 s
+fits the load time). Bench since then: 0.2.11 30-minute soak (selective suspend off) clean, 0 restarts; 0.2.19 8
+bench passes (800 x 64 KiB) clean, restarts 0, usb_irq_polled 54 in 90 s. A watchdog or power reset would boot the card's
 0.2.11, so this is a jump back into the loaded image: to address 0 (low vector 0 is `ldr pc, _jump_reset`) or to
 0x80000000 (eGON branch to `_reset`). Up to 0.2.18 the exception vectors spun (`b .`), so an exception would have
 hung, not restarted: the cause is a NULL function call, a corrupt return address or a stack overwrite (inference).
+fw-gen3's first suspect (inference, not seen): a NULL-pointer write into SRAM 0, where start.s copies the low vectors
+and their literals (0x00-0x3F); a 0 in the IRQ literal at 0x38 sends the next IRQ to 0 and so to `_reset`. Signature
+in the 0.2.19 record: type 0, reset CPSR mode IRQ (0x12), reset SP near the IRQ stack top 0x81FDA800, LR - 4 = the
+interrupted code, not the writer. Next step then: compare the 16 vector words every tick and record the first change.
+Code review by fw-gen3 found nothing in the tick path the real ISR does not also do (same body, same flags, IRQ mode,
+no function pointers); EPIND is touched only by ISR bodies and IRQ-masked transport code.
 
 Ruled out by code reading (fw-gen2; verify if in doubt):
 - The 1.00o5 dispatcher `irq_handler` (interrupt.c) checks for a NULL handler, so a stray pending IRQ does not call 0.
@@ -290,7 +303,10 @@ Keep the ELF of every later bench image next to its .bin: a rebuild moves addres
 ## 11. USB: lost interrupts, the tick fallback, SOF, port resets
 
 - **Lost interrupts.** 1.00o5's `irq_handler` reads INTC pending and then writes 0 to it, so an interrupt raised
-  between the read and the write is lost. It also dispatches in IRQ-number order, so the timer handler runs before
+  between the read and the write could be lost. **Unverified as a loss mechanism**: the F1C200s manual (3.5.6.4)
+  calls the bits "Pending/Clear" without saying whether 0 or 1 clears or whether they follow the source level; the
+  Linux sun4i/suniv irqchip (from memory) never writes pending for level sources, which would make the write harmless.
+  Stock FNIRSI firmware writes 0 the same way. It also dispatches in IRQ-number order, so the timer handler runs before
   the USB handler when both are pending. The MUSB keeps its INTUSB/INTTX/INTRX flags latched until they are read, so
   a lost USB interrupt leaves its flags waiting. EP2 OUT had the 2 ms RX sweep and EP2 IN the pump kick as fallbacks;
   EP0 had none, so a lost EP0 interrupt leaves a control transfer unanswered until Windows fails the device (prime
@@ -307,6 +323,20 @@ Keep the ELF of every later bench image next to its .bin: a rebuild moves addres
   the flags itself and runs the body only for a flag other than SOF. 0.2.16 bench: 300 x 64 KiB clean, counter 47 =
   16 in about 7 min, every hit INTRX EP2 after 2-3 ms without any USB interrupt: real lost interrupts, so EP0 can lose
   them the same way.
+- **Races, not losses (inference).** The 0.2.16 hits were all EP2 OUT, never EP0 or EP2 IN, although a 64 KiB
+  response raises ~128 TX interrupts per RX packet. The gate opens after every idle gap of 2 ms or more; the first
+  event after a gap is the host's next request; if its interrupt pends in the same dispatch as a tick, the timer
+  handler (IRQ 13) runs before USB (26) and the old tick took the packet. 0.2.19 bench: 54 in 90 s.
+- **0.2.20 fallback** (`pc_usb_poll_irq`). Never reads the flag registers to decide. It skips any tick at which the
+  USB IRQ is pending (`pc_irq_dispatch_pend0`, stored by `irq_handler` under PC_PROTOCOL, or INTC_PEND_REG0 bit 26),
+  and counts those ticks where the old gate would have served as counter 57 (races). Otherwise it checks endpoint
+  state with EPIND saved: EP0 CSR0 RxPktRdy/SetupEnd/SentStall, an IN data phase with TxPktRdy clear, a SET_ADDRESS
+  whose status stage completed (usb_set_faddr with DataEnd clear); EP2 RXCSR RxPktRdy while EP2 OUT is unmasked and
+  not stalled. A condition seen on two consecutive ticks with no USB ISR run in between is a lost interrupt: the flags
+  are read (clearing them lets a stuck line drop), the body runs with them plus the synthesized EP0 / EP2 OUT flags,
+  counter 47 counts it, type 14 logs the flags as read plus bit 15 (EP0 condition) / bit 7 (EP2 OUT condition). A
+  lost bus reset or suspend is still invisible (only in INTUSB). EP2 IN keeps the pump kick; the 2 ms RX sweep stays.
+  Expect counter 47 near 0 and counter 57 near the old 0.6/s if the races explanation is right.
 - **Open: about two suspend + bus-reset pairs per session.** 0.2.16 counted usb_bus_resets 12 and suspends 10 over 6
   sessions with no drop seen by the host (link_resets 22 = 12 + 10). A host port reset shows as suspend, then bus
   reset. Unknown whether Windows silently recovers a failed control transfer, resets on port open, or something
@@ -343,6 +373,7 @@ Authoritative text: protocol section 14 rows 28 and 38.
 | 48 | 0.2.12-0.2.16 | 47 usb_irq_polled (meaningful only from 0.2.16) |
 | 49 | 0.2.17-0.2.18 | 48 boot splash ms + 1 |
 | 57 | 0.2.19 | 49-56 restart record (section 10) |
+| 58 | 0.2.20 | 57 USB IRQ races (section 11) |
 
 **GET_EVENT_LOG 0x0009** (protocol 1.5, any poll context). Request: empty, or since 0.2.18 u8 flags (bit 0 = re-arm
 the snapshot after this read; other bits E_BAD_ARG detail 0). Response: u16 n (<= 128; 64 before 0.2.15), u16 0,
@@ -352,7 +383,7 @@ entries (the events before the first bus reset since the snapshot was armed). 0.
 0.2.18+ only with flag bit 0. Types (pc_transport.h): 1 bus reset, 2 suspend, 3 resume, 4 disconnect, 5 EP0 setup
 (a = bRequest, b = bmRequestType << 8 | wValue low), 6 EP0 packet not 8 bytes (b = COUNT0), 7 SET_CONFIGURATION,
 8 CLEAR_FEATURE(HALT) (a = endpoint), 9 DTR (a = new DTR), 10 RX ring full, 11 RX release, 12 TX flushed, 13 TX
-aborted, 14 flags found by the tick (a = INTUSB, b = INTTX << 8 | INTRX; at most one per 100 ms), 15 restart
+aborted, 14 flags found by the tick (a = INTUSB, b = INTTX << 8 | INTRX; at most one per 100 ms; 0.2.20: low 7 bits each as read, bit 15 EP0 condition, bit 7 EP2 OUT condition), 15 restart
 (0.2.19, section 10).
 
 ## 13. Boot, splash and SD package
