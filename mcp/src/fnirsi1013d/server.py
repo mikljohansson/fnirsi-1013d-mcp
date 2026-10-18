@@ -571,19 +571,21 @@ def _scope_cal_summary(c: P.CalResp) -> dict[str, Any]:
 def _decim_summary(st: P.DecimState) -> dict[str, Any]:
     """GET_DECIM / SET_DECIM in physical terms (protocol 1.9)."""
     d = st.next
-    bits = A.decim_bits(d.k, d.n, d.gain, d.shift)
+    bits = A.decim_bits(d.k, d.n, d.gain, d.shift, fir=d.fir)
     out: dict[str, Any] = {
-        "setting": P.DECIM_FILTERS[st.filter], "effective": d.filter_name, "k": d.k,
+        "setting": st.filter_setting, "effective": d.filter_name, "k": d.k,
         "reason": P.DECIM_WHY[st.why] if st.why < len(P.DECIM_WHY) else st.why,
         "output_rate": st.rate_hz, "dt": _r6(1 / st.rate_hz) if st.rate_hz else None}
     if d.k:
         out.update({"n": d.n, "shift": d.shift, "gain": d.gain, "codes_per_count": _r6(d.code_per_count),
-                    "noise_equivalent_n": _r6(A.decim_noise_n(d.k, d.n)), "storage_bits": _r6(bits["storage"]),
+                    "noise_equivalent_n": _r6(A.decim_noise_n(d.k, d.n, d.fir)), "storage_bits": _r6(bits["storage"]),
                     "effective_bits_estimate": _r6(bits["effective"]), "settle_us": d.settle_us,
                     "max_total_samples": st.max_total})
         if st.ext_shift:
             out["ext_latency_shift_samples"] = st.ext_shift
-    if st.flags:
+        if d.fir_en and not d.fir:
+            out["fir_note"] = "FIR requested but not active: it needs N >= 16 with N % 4 == 0 (10 MSa/s and slower)"
+    if st.flags & 0x07:
         out["flags"] = [n for b, n in ((1, "core_order_swap"), (2, "falling_edge_A"), (4, "falling_edge_B"))
                         if st.flags & b]
     return out
@@ -1281,16 +1283,20 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
 
     @register(1, title="Set the decimation filter", idempotent=True)
     async def scope_set_decimation(
-        filter: Annotated[Literal["off", "boxcar", "cic2", "cic3"], Field(
+        filter: Annotated[Literal["off", "boxcar", "boxcar+fir", "cic2", "cic2+fir", "cic3", "cic3+fir"], Field(
             description="off = legacy 8-bit sample skipping; boxcar = mean of N raw samples; cic2 / cic3 = 2- / "
-                        "3-fold boxcar (better alias rejection, slightly less noise reduction per N)")],
+                        "3-fold boxcar (better alias rejection, slightly less noise reduction per N); +fir (FPGA "
+                        "0x1535+, caps FIR) adds the CIC compensation FIR: flat passband to fs/4 and about 20 dB "
+                        "more alias rejection, active at 10 MSa/s and slower")],
     ) -> dict[str, Any]:
         """The scope's decimation filter (protocol 1.9, FPGA 0x1534+, capability DECIM). At sample rates below
         200 MSa/s the FPGA filters every raw 200 MSa/s sample instead of skipping, N = 200 MSa/s / output rate, and
         stores 16-bit samples: anti-aliased and up to about 8 + log2(sqrt N) bits (noise permitting). Returns the
         effective filter (the firmware lowers the order where it would not be exact: CIC3 only up to N = 10,334,
         CIC2 up to 1,050,630; 200 MSa/s and totals over 8190 stay legacy), N, the output shift S, the resolution in
-        codes per stored count and an effective-bits estimate. Needs scope_set_trigger total_samples <= 8190 first.
+        codes per stored count and an effective-bits estimate. The +fir choices (protocol 1.11, FPGA 0x1535) run
+        the CIC on N / 2 and a 15-tap compensation FIR decimating by 2 (only where N >= 16 and N % 4 == 0; the
+        result's effective filter says whether it engaged). Needs scope_set_trigger total_samples <= 8190 first.
         Captures and fetches then read the 16-bit samples automatically (the .npz gets CH<n>_samples16). For decay
         curves: cic2 or boxcar at the rate the decay needs; see the measurement guide."""
         args = {"filter": filter}
@@ -1301,6 +1307,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             if not s.profile().has(P.Caps.DECIM):
                 raise ToolError("scope_set_decimation: this firmware / bitstream has no decimation filter "
                                 "(capability DECIM: firmware >= 0.2.30 with FPGA 0x1534)")
+            if filter.endswith("+fir") and not s.profile().has(P.Caps.FIR):
+                raise ToolError("scope_set_decimation: this bitstream has no compensation FIR (capability FIR: "
+                                "firmware >= 0.2.44 with FPGA 0x1535); use the filter without +fir")
             if filter != "off" and s.get_trigger(cached=False).total_samples > P.DECIM_MAX_TOTAL:
                 raise ToolError(f"scope_set_decimation: the trigger total is over {P.DECIM_MAX_TOTAL} samples; "
                                 f"scope_set_trigger(total_samples <= {P.DECIM_MAX_TOTAL}) first")
@@ -1309,6 +1318,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             cav = list(notes) + DECIM_CAVEATS
             if st.why not in (0, 1):
                 cav.insert(0, f"effective filter is {summ['effective']}: {summ['reason']}")
+            if "fir_note" in summ:
+                cav.insert(0, summ["fir_note"])
             return {"ok": True, "applied": summ, "timebase": _timebase_summary(s), "caveats": cav}
         return await run("scope_set_decimation", 1, args, go)
 

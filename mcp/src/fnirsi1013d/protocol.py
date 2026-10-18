@@ -29,8 +29,9 @@ PROTO_MAJOR = 1
 #: GET_EVENT_LOG, link counter 47 usb_irq_polled; 1.6 (fw 0.2.27): FFT_BENCH; 1.7 (fw 0.2.28): spectrum view,
 #: READ_SPECTRUM, GET_STATUS display_mode; 1.9 (fw 0.2.30, FPGA 0x1534): decimation filter (GET_DECIM / SET_DECIM,
 #: caps DECIM, 16-bit samples: READ_TRACE WIDE, READ_RAW layout 2, GET_CAPTURE_INFO 76 bytes); 1.8 was not used;
-#: 1.10 (fw 0.2.43): calibration data v2, GET_CAL 248 bytes
-PROTO_MINOR = 10
+#: 1.10 (fw 0.2.43): calibration data v2, GET_CAL 248 bytes; 1.11 (fw 0.2.44, FPGA 0x1535): CIC compensation FIR
+#: (caps FIR, SET_DECIM flags bit 3, 0x29 bits 6 / 5)
+PROTO_MINOR = 11
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -178,6 +179,8 @@ class Caps(enum.IntFlag):
     SD_SECTORS = 1 << 14
     #: protocol 1.9 (FPGA 0x1534+): decimation filter with 16-bit samples
     DECIM = 1 << 15
+    #: protocol 1.11 (FPGA 0x1535+): CIC compensation FIR after the decimation filter
+    FIR = 1 << 16
 
 
 def caps_names(caps: int) -> list[str]:
@@ -860,9 +863,7 @@ class CaptureInfo:
         """The capture's decimation (None for a legacy 8-bit capture)."""
         if not self.decim_mode & DECIM_WIDE:
             return None
-        k = self.decim_mode & 3
-        return DecimConfig(k, self.decim_mode & DECIM_FLAGS, self.decim_shift, 0, self.decim_n,
-                           decim_gain(self.decim_n, k))
+        return DecimConfig.from_status(self.decim_mode, self.decim_shift, self.decim_n)
 
     def channel_config(self, ch: int) -> "ChannelConfig":
         """The capture-time channel settings as a CHANNEL_CONFIG (dcoffset / center_cal are not carried)."""
@@ -1305,12 +1306,31 @@ class TraceChannelMeta(Payload):
 
 #: SET_DECIM filter / GET_DECIM byte 0 (the UI's acquisition Filter setting)
 DECIM_FILTERS = ("off", "boxcar", "cic2", "cic3")
+#: filter choices with the 1.11 FIR (GET_DECIM byte 1 bit 3 / SET_DECIM flags bit 3), as the UI's Filter box steps
+DECIM_FILTER_CHOICES = ("off", "boxcar", "boxcar+fir", "cic2", "cic2+fir", "cic3", "cic3+fir")
+
+
+def parse_decim_filter(name: str) -> tuple[int, bool]:
+    """'cic2+fir' -> (2, True); 'off' -> (0, False)."""
+    n = name.strip().lower()
+    if n not in DECIM_FILTER_CHOICES:
+        raise ValueError(f"unknown filter {name!r}; use one of {', '.join(DECIM_FILTER_CHOICES)}")
+    base, _, fir = n.partition("+")
+    return DECIM_FILTERS.index(base), bool(fir)
+
 #: 0x53 / 0x29 byte 0 bits besides K (bits 1:0)
 DECIM_SWAP = 0x04  # core A is the earlier sample of each pair (host only, not saved)
 DECIM_NEG_A = 0x08  # A cores captured on the falling write-clock edge
 DECIM_NEG_B = 0x10
 DECIM_FLAGS = DECIM_SWAP | DECIM_NEG_A | DECIM_NEG_B
 DECIM_WIDE = 0x80  # 0x29 bit 7: 16-bit layout active (K >= 1)
+DECIM_FIR_EN = 0x40  # 0x29 bit 6 (1.11): 0x56 FIR enable as written
+DECIM_FIR_ACT = 0x20  # 0x29 bit 5 (1.11): FIR active now (enable, K >= 1, N >= 16, N % 4 == 0)
+#: the firmware's Filter setting bit for the FIR (SET_DECIM flags bit 3, shifted like the other flags)
+DECIM_SET_FIR = 0x20
+DECIM_FIR_MIN_N = 16
+#: decim_config capability levels: bitstream without the filter, 0x1534 (boxcar / CIC), 0x1535+ (plus the FIR)
+DECIM_HAS_NONE, DECIM_HAS_CIC, DECIM_HAS_FIR = 0, 1, 2
 #: largest capture (samples) in the 16-bit layout
 DECIM_MAX_TOTAL = 8190
 #: exactness 255 x N^K < 2^48: CIC3 up to N = 10,334, CIC2 up to 1,050,630
@@ -1359,7 +1379,8 @@ def decim_to_code(out: int, scale_q24: int, corr16: int) -> int:
 @dataclass
 class DecimConfig:
     """Effective decimation for a setting (pc_decim_cfg): order K (0 = legacy 8-bit), flags, shift S, why (DECIM_WHY
-    index), factor N (0 legacy), gain N^K (1 legacy)."""
+    index), factor N (0 legacy), gain (N^K; (N/2)^K with the FIR active; 1 legacy), FIR enable as written (1.11) and
+    whether the FIR is active."""
 
     k: int = 0
     flags: int = 0
@@ -1367,6 +1388,8 @@ class DecimConfig:
     why: int = 0
     n: int = 0
     gain: int = 1
+    fir_en: bool = False
+    fir: bool = False
 
     @property
     def mode(self) -> int:
@@ -1376,7 +1399,18 @@ class DecimConfig:
     @property
     def status(self) -> int:
         """The 0x29 byte 0 the FPGA reports."""
-        return self.mode | (DECIM_WIDE if self.k else 0)
+        return self.mode | (DECIM_WIDE if self.k else 0) | (DECIM_FIR_EN if self.fir_en else 0) | \
+            (DECIM_FIR_ACT if self.fir else 0)
+
+    @classmethod
+    def from_status(cls, status: int, shift: int, n: int, gain: int | None = None, why: int = 0) -> "DecimConfig":
+        """From a 0x29 byte 0 (GET_DECIM, GET_CAPTURE_INFO, READ_TRACE); the gain is (N/2)^K with the FIR active."""
+        k = status & 3 if status & DECIM_WIDE else 0
+        fir = bool(status & DECIM_FIR_ACT) and k > 0
+        if gain is None:
+            gain = decim_gain(n // 2 if fir else n, k) if k else 1
+        return cls(k, status & DECIM_FLAGS, shift, why, n if k else 0, gain if k else 1, bool(status & DECIM_FIR_EN),
+                   fir)
 
     @property
     def scale_q24(self) -> int:
@@ -1384,7 +1418,7 @@ class DecimConfig:
 
     @property
     def code_per_count(self) -> float:
-        """ADC codes (mean of the filter window) per stored count: 2^S / N^K."""
+        """ADC codes (mean of the filter window) per stored count: 2^S / gain."""
         return (1 << self.shift) / self.gain if self.k else 1.0
 
     def rate(self, divider: int) -> int:
@@ -1394,31 +1428,45 @@ class DecimConfig:
 
     @property
     def ext_shift(self) -> int:
-        """EXT trigger: output samples by which the stored data lag the edge (120 ns + K (N - 1) 2.5 ns, rounded)."""
+        """EXT trigger: output samples by which the stored data lag the edge, rounded: 120 ns + K (N - 1) 2.5 ns;
+        with the FIR 250 ns + 17.5 N ns + 1.25 K (N - 2) ns."""
         if not self.k or not self.n:
             return 0
-        lag, period = 240 + self.k * (self.n - 1) * 5, self.n * 10
+        if self.fir:
+            lag, period = 1000 + 70 * self.n + 5 * self.k * (self.n - 2), 20 * self.n
+        else:
+            lag, period = 240 + self.k * (self.n - 1) * 5, self.n * 10
         return (lag + period // 2) // period
 
     @property
     def settle_us(self) -> int:
-        """Filter settling after a change: (K + 2) output periods, us, rounded up."""
+        """Filter settling after a change: (K + 2) output periods, us, rounded up; with the FIR (K + 10) N 5 ns + 1 us."""
         if not self.k:
             return 0
+        if self.fir:
+            return min(((self.k + 10) * self.n + 199) // 200 + 1, 0xFFFFFFFF)
         return min(((self.k + 2) * self.n + 199) // 200, 0xFFFFFFFF)
 
     @property
     def filter_name(self) -> str:
-        return DECIM_FILTERS[self.k] if self.k else "off"
+        """Effective filter: 'cic2+fir' only while the FIR is active."""
+        if not self.k:
+            return "off"
+        return DECIM_FILTERS[self.k] + ("+fir" if self.fir else "")
 
 
-def decim_config(k_req: int, flags: int, divider: int, total_samples: int, has_filter: bool = True) -> DecimConfig:
+def decim_fir_eligible(n: int) -> bool:
+    return n >= DECIM_FIR_MIN_N and n % 4 == 0
+
+
+def decim_config(k_req: int, flags: int, divider: int, total_samples: int, has: int = DECIM_HAS_CIC) -> DecimConfig:
     """pc_decim_config: the configuration an arm writes for the Filter setting ``k_req`` (0-3), ``flags``
-    (DECIM_FLAGS bits), the 0x0D divider and the capture length."""
+    (DECIM_FLAGS bits, plus DECIM_SET_FIR), the 0x0D divider, the capture length and the bitstream's level
+    (DECIM_HAS_*). With the FIR active the CIC decimates by M = N / 2: gain M^K, S one higher, exactness on M."""
     k, n = k_req & 3, decim_n(divider)
-    if not has_filter:
+    if has == DECIM_HAS_NONE:
         return DecimConfig(why=6)
-    c = DecimConfig(flags=flags & DECIM_FLAGS)
+    c = DecimConfig(flags=flags & DECIM_FLAGS, fir_en=has >= DECIM_HAS_FIR and bool(flags & DECIM_SET_FIR))
     if k == 0:
         c.why = 1
         return c
@@ -1428,12 +1476,14 @@ def decim_config(k_req: int, flags: int, divider: int, total_samples: int, has_f
     if total_samples > DECIM_MAX_TOTAL:
         c.why = 3
         return c
-    if k == 3 and n > DECIM_CIC3_MAX_N:
+    c.fir = c.fir_en and decim_fir_eligible(n)
+    m = n // 2 if c.fir else n
+    if k == 3 and m > DECIM_CIC3_MAX_N:
         k, c.why = 2, 4
-    if k == 2 and n > DECIM_CIC2_MAX_N:
+    if k == 2 and m > DECIM_CIC2_MAX_N:
         k, c.why = 1, 5
-    c.k, c.n, c.gain = k, n, decim_gain(n, k)
-    c.shift = decim_shift(c.gain)
+    c.k, c.n, c.gain = k, n, decim_gain(m, k)
+    c.shift = decim_shift(c.gain) + (1 if c.fir else 0)
     return c
 
 
@@ -1449,6 +1499,8 @@ class SetDecimReq(Payload):
     SWAP: ClassVar[int] = 0x01
     NEG_A: ClassVar[int] = 0x02
     NEG_B: ClassVar[int] = 0x04
+    #: 1.11 (caps FIR): the CIC compensation FIR
+    FIR: ClassVar[int] = 0x08
 
 
 @dataclass
@@ -1484,9 +1536,12 @@ class DecimState(Payload):
 
     @property
     def next(self) -> DecimConfig:
-        k = self.next_mode & 3 if self.next_mode & DECIM_WIDE else 0
-        return DecimConfig(k, self.next_mode & DECIM_FLAGS, self.next_shift, self.why, self.next_n if k else 0,
-                           self.next_gain if k else 1)
+        return DecimConfig.from_status(self.next_mode, self.next_shift, self.next_n, self.next_gain, self.why)
+
+    @property
+    def filter_setting(self) -> str:
+        """The setting as the UI's Filter box names it ('cic2+fir')."""
+        return DECIM_FILTERS[self.filter & 3] + ("+fir" if self.flags & SetDecimReq.FIR and self.filter else "")
 
 
 @dataclass
@@ -1927,6 +1982,17 @@ class DeviceEvent:
 
     def describe(self) -> str:
         t, a, b = self.type, self.a, self.b
+        if t in (1, 4):  # fw 0.2.44: a = suspended before, b = ms since that suspend (65535 = longer)
+            if not a:
+                return self.name
+            return f"{self.name} after suspend {'>= 65535' if b == 0xFFFF else b} ms"
+        if t == 2:  # fw 0.2.44: a = POWER, b = frame number (both 0 before)
+            return f"suspend POWER 0x{a:02X} frame {b & 0x7FF}" if a or b else self.name
+        if t == 3:  # fw 0.2.44: a = POWER (bit 7 = inferred from the frame counter), b = ms suspended
+            if not (a or b):
+                return self.name
+            how = "inferred from SOFs (no RESUME interrupt)" if a & 0x80 else "RESUME interrupt"
+            return f"resume after {b} ms suspended, {how}, POWER 0x{a & 0x7F:02X}"
         if t == 5:
             return f"ep0_setup bRequest 0x{a:02X} bmRequestType 0x{b >> 8:02X} wValue.lo 0x{b & 0xFF:02X}"
         if t == 6:

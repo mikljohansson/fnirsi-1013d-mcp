@@ -65,6 +65,10 @@ Below 200 MSa/s that is free resolution and anti-aliasing; the cost is a total o
   edge (TX turn-off, flyback) are smeared. Start the fit at least K samples (`t_start >= K x dt`) past the flyback.
   The sample time is self-consistent with the ADC trigger; with the EXT trigger the firmware corrects the pipeline
   latency to the nearest output sample (`ext_latency_shift_samples`).
+- **FIR (FPGA 0x1535, `+fir`)**: `cic2+fir` flattens the passband to fs / 4 and rejects aliases about 20 dB more,
+  at a little less noise reduction and a longer edge transient (the 15-tap FIR spans 7 output samples on each
+  side of a sharp edge: start fits at least 8 samples after it). Use it for spectra and waveform shape; for tau
+  fits plain `cic2` keeps the edge transient short. It engages at 10 MSa/s and slower only.
 - **Which filter**: `cic2` is the default for decays (good alias rejection, 1.5 N noise-equivalent averaging, a
   2-sample edge transient). `boxcar` when the samples right after the edge matter most (1-sample transient, N
   noise-equivalent). `cic3` for spectra and narrow-band work (best alias rejection, about 1.8 N, 3-sample

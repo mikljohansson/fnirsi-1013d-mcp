@@ -65,10 +65,10 @@ path. |
   `DEVICE RESTARTED`. `--fft [--reps n]`: FFT_BENCH table (same columns as host_tests/fft_bench.py), simulator
   only so far.
 - **`fnirsi1013d-sd`**: bench SD access; writes need `--yes` + typed `WRITE <n>@<sector>`, back up first.
-- **`fnirsi1013d-sim`**: `--variant stock|al3|ef2|ep4|al3x|al3d` (al3d = 0x1534 with the decimation model:
+- **`fnirsi1013d-sim`**: `--variant stock|al3|ef2|ep4|al3x|al3d|al3f` (al3f = 0x1535 with the FIR: kernel = CIC on N / 2 convolved with the RTL taps, 250 ns latency; al3d = 0x1534 with the decimation model:
   sub-sampled boxcar^K of the noise-free core-mean code plus output noise with the exact boxcar variance, seeded
   per word block; 120 ns pipeline latency; EXT latency shift), `--legacy`, `--ext`, `--ui-period`, `--caps`, ...
-- **`fnirsi1013d-soak`**: `--mode status|ping|capture`, `--duration` (30 min), `--interval` (0.1 s),
+- **`fnirsi1013d-soak`**: `--mode status|ping|capture|reopen` (reopen: `--rounds`, `--idle`; fw 0.2.44 suspend bench), `--duration` (30 min), `--interval` (0.1 s),
   `--reopen-timeout` (60 s), `--log`. Logs host facts (USB selective suspend via powercfg, hub path), uptime at
   open/reopen/end (and every status poll), drops with Windows error codes, port gone/back, reopen; after a reopen
   the first requests are GET_EVENT_LOG (plain read; a frozen pre-reset snapshot is printed and saved, then re-armed
@@ -87,6 +87,7 @@ path. |
 | 1.5 | 0.2.12+ | GET_EVENT_LOG 0x0009 (fast path; 64 then 128 entries, reset-snapshot tail from 0.2.15, request flags byte bit 0 = re-arm from 0.2.18, bus-level ring tail from 0.2.24) |
 | 1.6 | 0.2.27+ | FFT_BENCH 0x0F02 (diagnostic; `Scope.fft_bench`, 5 s timeout, `fnirsi1013d-bench --fft`) |
 | 1.7 | 0.2.28+ | spectrum view: GET_STATUS byte 43 display_mode, READ_SPECTRUM 0x020A (bulk timeout class; 32-byte header, i16 centi-dBV) |
+| 1.11 | 0.2.44+ | 0x1535 FIR: caps bit 16 FIR, SET_DECIM / GET_DECIM flags bit 3, 0x29 bits 6 / 5 (`DECIM_FIR_EN` / `DECIM_FIR_ACT`), gain (N/2)^K and S + 1 while active (`decim_config(..., has=DECIM_HAS_FIR)`, `DecimConfig.from_status`), filter names `cic2+fir` (`parse_decim_filter`); event types 1-4 carry the 0.2.44 suspend fields (row 50) |
 | 1.10 | 0.2.43+ | calibration v2: GET_CAL 248 bytes (`CalResp.v2`, `zero_at`, `parse_adc_cal_block` vs the `adc_cal` vectors); `channel_scale` puts the v2 zeros first (class from `P.cal_clock_class`, unit file gains only), READ_RAW / WIDE corrected on the host, READ_TRACE already corrected; `decim_to_code` takes corr16 (1/16 code) |
 | 1.9 | 0.2.30+ | decimation filter (caps bit 15 DECIM on FPGA 0x1534): GET_DECIM 0x020C / SET_DECIM 0x020D, GET_TRIGGER words = samples and GET_TIMEBASE period N x 5 ns while on, READ_TRACE flag bit 2 WIDE (header bytes 30/31 = mode, S), READ_RAW layout 2, GET_CAPTURE_INFO 76 bytes. 1.8 was skipped |
 
@@ -127,14 +128,14 @@ range-independent; 0 V at dcoffset 0: CH1 A 132.47 / B 127.14, CH2 A 128.80 / B 
 firmware gains). The firmware formula assumes 128 on the compensated mean. Grounds: the probe ground is VRF1,
 +1.24 V over the USB ground (fpga/al3/README.md); the calibration output reads -1.24 / +1.9 V against it by design.
 
-## Tests (`tests/`, 296, about 50 s)
+## Tests (`tests/`, 308, about 50 s)
 
 `test_protocol` (codec, structs, vectors, link stats/event log), `test_transport` (incl. the scripted-link deferred
 cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `test_shared_mode` (1.3),
 `test_firmware_match` (section 14 items), `test_server` (every tool in-process, restarts, legacy fallback),
 `test_stdio` (server subprocess), `test_analysis`, `test_calibration`, `test_flash` (FEL flow, bench wrapper),
 `test_sdcard` (SD commands, persist, resume after drops, restore, CLI), `test_ext_trigger`, `test_soak`,
-`test_cal_v2` (1.10 GET_CAL, block vectors, 0 V on both cores per clock class, no unit zeros on top),
+`test_fir` (1.11 FIR maths / sim / tool, suspend event fields, soak reopen mode), `test_cal_v2` (1.10 GET_CAL, block vectors, 0 V on both cores per clock class, no unit zeros on top),
 `test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH), `test_decim` (1.9: maths vs
 the firmware vectors, wire layouts, simulator noise / volts / trigger / EXT latency, `scope_set_decimation`).
 Fixtures: `sim`/`transport`/`scope` are collaborative with UI captures on demand (`ui_capture_period_s=0`);
@@ -162,8 +163,6 @@ Pending work for every agent lives in `../docs/plans/task-queue.md` (section "MC
 from there and moves items to "Dispatched". Add host items you discover there, not only here. Agent-to-agent
 messages describe work; only the coordinator puts it in your queue.
 
-0. **Protocol 1.11 (fw-gen6, 0.2.44, row 49)**: 0x1535 FIR enable (SET_DECIM flags bit 3), caps bit 16, FIR gain
-   (N/2)^K in the 16-bit conversion; after the lead reports the merge.
 1. **Release 0.3.0** (on hold): bump `version` in `pyproject.toml` (still 0.1.0) with the lead's release; the 30-minute soak
    (`fnirsi1013d-soak --duration 1800`) is the gate; fold the baseline soak results (requests, drops, restarts,
    latency, counter deltas, the selective-suspend setting) into README "Link soak" once the lead has them.

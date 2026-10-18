@@ -199,11 +199,43 @@ def effective_bits(noise_lsb_single: float, n: int) -> float:
     return 8.0 + 0.5 * math.log2(n)
 
 
-def decim_noise_n(k: int, n: int) -> float:
+#: 0x1535 CIC compensation FIR taps h[0..7] per K (fpga/al3/src/zaklad.v fir_chan; symmetric, 15 taps, sum 2^17)
+FIR_TAPS_HALF = {1: (-82, 682, 1890, -2151, -9088, 3022, 40046, 62434),
+                 2: (-231, 504, 2397, -1457, -10255, 877, 40852, 65698),
+                 3: (-381, 332, 2919, -766, -11452, -1289, 41675, 68996)}
+
+
+def fir_taps(k: int) -> np.ndarray:
+    """The 15 FIR taps for CIC order k, normalised to DC gain 1."""
+    h = FIR_TAPS_HALF[max(1, min(3, k))]
+    return np.array(h + h[-2::-1], dtype=np.float64) / (1 << 17)
+
+
+def decim_kernel(k: int, m: int, fir: bool) -> np.ndarray:
+    """Impulse response at the raw 200 MSa/s rate, DC gain 1: K-fold boxcar of m (the CIC), then with ``fir`` the
+    15-tap FIR at the CIC output rate (taps m raw samples apart)."""
+    w = np.ones(m) / m
+    out = w
+    for _ in range(k - 1):
+        out = np.convolve(out, w)
+    if fir:
+        up = np.zeros(14 * m + 1)
+        up[::m] = fir_taps(k)
+        out = np.convolve(out, up)
+    return out
+
+
+def decim_noise_n(k: int, n: int, fir: bool = False) -> float:
     """Noise-equivalent number of averaged samples of a K-fold boxcar of N (1 / sum of the squared normalised
-    weights): N for a boxcar, 3N^3 / (2N^2 + 1) for CIC2, about 20N / 11 for CIC3."""
+    weights): N for a boxcar, 3N^3 / (2N^2 + 1) for CIC2, about 20N / 11 for CIC3. With the 1.11 FIR the CIC runs
+    on N / 2 and the FIR follows (computed numerically, scaled from N / 2 <= 512)."""
     if k <= 0 or n <= 1:
         return 1.0
+    if fir:
+        m = n // 2
+        mm = min(m, 512)
+        w = decim_kernel(k, mm, True)
+        return float(1.0 / np.sum(w * w)) * m / mm
     if k == 1:
         return float(n)
     if k == 2:
@@ -215,14 +247,14 @@ def decim_noise_n(k: int, n: int) -> float:
     return 20.0 * n / 11.0
 
 
-def decim_bits(k: int, n: int, gain: int, shift: int, noise_lsb: float = 1.0) -> dict[str, float]:
+def decim_bits(k: int, n: int, gain: int, shift: int, noise_lsb: float = 1.0, fir: bool = False) -> dict[str, float]:
     """Resolution of a decimated sample in bits re the 8-bit range: ``storage`` = 8 + log2(N^K / 2^S) (the stored
     step is 2^S / N^K codes, at most 16 bits), ``averaging`` = 8 + log2(sqrt(noise-equivalent N)) while the raw noise
     dithers (>= ~0.5 LSB rms), ``effective`` = the smaller."""
     if k <= 0:
         return {"storage": 8.0, "averaging": 8.0, "effective": 8.0}
     storage = 8.0 + math.log2(gain / (1 << shift))
-    averaging = 8.0 + 0.5 * math.log2(decim_noise_n(k, n)) if noise_lsb >= 0.5 else 8.0
+    averaging = 8.0 + 0.5 * math.log2(decim_noise_n(k, n, fir)) if noise_lsb >= 0.5 else 8.0
     return {"storage": storage, "averaging": averaging, "effective": min(storage, averaging)}
 
 

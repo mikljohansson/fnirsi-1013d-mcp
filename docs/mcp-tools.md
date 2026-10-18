@@ -250,7 +250,10 @@ distorts decays longer than the coupling time constant [U value]; use DC couplin
 
 **`scope_set_decimation`** (tier 1, protocol 1.9, firmware >= 0.2.30 on FPGA 0x1534, capability DECIM). Param
 `filter`: `off` (legacy 8-bit sample skipping), `boxcar` (mean of N raw 200 MSa/s samples), `cic2`, `cic3` (2- / 3-fold
-boxcar). It is the scope's acquisition Filter setting (shared, saved, part of settings_seq); the core-order and
+boxcar), and on FPGA 0x1535 with firmware >= 0.2.44 (protocol 1.11, capability FIR) `boxcar+fir`, `cic2+fir`,
+`cic3+fir`: the CIC decimates by N / 2 and a 15-tap compensation FIR decimates by 2 (flat passband to fs / 4, about
+20 dB more alias rejection; gain (N/2)^K, S one higher, 250 ns latency). The FIR engages only at N >= 16 with
+N % 4 == 0 (10 MSa/s and slower); `effective` then reads e.g. `cic2+fir`, otherwise the result carries `fir_note`. It is the scope's acquisition Filter setting (shared, saved, part of settings_seq); the core-order and
 capture-edge flags are kept as they are. Returns `applied`: `setting`, `effective` and `reason` (the firmware
 lowers the order where the 48-bit accumulators would not be exact: CIC3 only up to N = 10,334, CIC2 up to
 1,050,630; 200 MSa/s and totals over 8190 samples stay legacy), `k`, `n` (= 200 MSa/s / output rate), `shift` S,

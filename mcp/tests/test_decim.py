@@ -33,9 +33,11 @@ def test_decim_maths_match_the_firmware_vectors():
     """docs/protocol-vectors.json "decim" is generated from firmware/scope/pc_decim.c."""
     d = json.loads(VECTORS.read_text(encoding="utf-8"))["decim"]
     assert len(d["cases"]) >= 80
+    assert sum(1 for c in d["cases"] if c.get("fir_req")) >= 80  # 1.11 FIR cases
     for c in d["cases"]:
-        x = P.decim_config(c["k_req"], 0, c["divider"], c["total"])
-        assert (x.k, x.n, x.gain, x.shift) == (c["k"], c["n"], c["gain"], c["shift"]), c
+        fl = P.DECIM_SET_FIR if c.get("fir_req") else 0
+        x = P.decim_config(c["k_req"], fl, c["divider"], c["total"], P.DECIM_HAS_FIR)
+        assert (x.k, x.n, x.gain, x.shift, int(x.fir)) == (c["k"], c["n"], c["gain"], c["shift"], c.get("fir", 0)), c
         assert (x.rate(c["divider"]), x.settle_us, x.ext_shift) == (c["rate"], c["settle_us"], c["ext_shift"]), c
         assert [P.decim_level16(v, x.gain, x.shift) for v in d["levels"]] == c["level16"] if x.k else not c["level16"]
 
@@ -46,7 +48,7 @@ def test_decim_config_fallbacks():
     assert (c.k, c.why, c.n) == (2, 4, 10336)
     assert P.decim_config(2, 0, 2_000_000, 3000).why == 5
     assert P.decim_config(1, 0, 0, 3000).why == 2 and P.decim_config(1, 0, 9, 8192).why == 3
-    assert P.decim_config(1, P.DECIM_SWAP, 9, 3000, has_filter=False).why == 6
+    assert P.decim_config(1, P.DECIM_SWAP, 9, 3000, P.DECIM_HAS_NONE).why == 6
     c = P.decim_config(2, P.DECIM_NEG_A, 19, 3000)
     assert c.mode == 0x0A and c.status == 0x8A and c.code_per_count == pytest.approx(2 / 400)
     assert P.decim_to_code(65535, P.decim_scale_q24(400, 1), 0) == 255

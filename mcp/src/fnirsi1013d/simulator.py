@@ -71,12 +71,16 @@ class VariantSpec:
     ext_trigger: bool = False
     #: bitstream 0x1534: decimation filter (boxcar / CIC2 / CIC3) with 16-bit samples (protocol 1.9)
     decim: bool = False
+    #: bitstream 0x1535: plus the CIC compensation FIR (protocol 1.11)
+    fir: bool = False
 
 
 #: EXT trigger path latency from the pin (fpga-gen2 simulation: 20-25 ns)
 EXT_LATENCY_S = 22e-9
-#: decimation filter: fixed latency from pin to memory (12 write clocks) for every K and N (row 47)
+#: decimation filter: fixed latency from pin to memory (12 write clocks) for every K and N (row 47); 25 write clocks
+#: with the 0x1535 FIR (row 49)
 DECIM_LATENCY_S = 120e-9
+FIR_LATENCY_S = 250e-9
 #: decimation model: sub-samples per output period (exact for N <= this)
 DECIM_SUBSAMPLES = 64
 EXT_THRESHOLD_V = 1.65
@@ -86,6 +90,8 @@ VARIANTS = {
     "al3": VariantSpec("al3", 0x1532, P.FpgaVariant.AL3, 8192, 16382, True, True),
     "al3x": VariantSpec("al3x", 0x1533, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True),
     "al3d": VariantSpec("al3d", 0x1534, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True),
+    "al3f": VariantSpec("al3f", 0x1535, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True,
+                        fir=True),
     "ef2": VariantSpec("ef2", 0x1632, P.FpgaVariant.EF2, 6144, 12286, True, True),
     "ep4": VariantSpec("ep4", 0x1732, P.FpgaVariant.EP4, 6144, 12286, True, True),
 }
@@ -228,7 +234,8 @@ class Settings:
     sr_index: int = 4
     trigger: TriggerState = field(default_factory=TriggerState)
     gen: GenState = field(default_factory=GenState)
-    #: 1.9: the Filter setting as the firmware keeps it: bits 1:0 K requested, bits 2-4 P.DECIM_FLAGS
+    #: the Filter setting as the firmware keeps it: bits 1:0 K requested, bits 2-4 P.DECIM_FLAGS, bit 5
+    #: P.DECIM_SET_FIR (1.11)
     decim: int = 0
 
     def copy(self) -> "Settings":
@@ -486,6 +493,8 @@ class Device:
             c |= P.Caps.EXT_TRIGGER
         if self.spec.decim:
             c |= P.Caps.DECIM
+        if self.spec.fir:
+            c |= P.Caps.FIR
             c &= ~P.Caps.DEVICE_AVERAGE  # the averaging model is 8-bit only (the firmware has no ACQUIRE_AVG)
         return int(c) & ~self.cfg.caps_clear
 
@@ -640,35 +649,38 @@ class Device:
     def decim_config(self, settings: Settings | None = None) -> P.DecimConfig:
         """The decimation an arm with these settings writes (pc_decim_next)."""
         s = settings or self.settings
-        return P.decim_config(s.decim & 3, s.decim & P.DECIM_FLAGS, s.divider, s.trigger.total_samples,
-                              self.spec.decim)
+        has = P.DECIM_HAS_FIR if self.spec.fir else (P.DECIM_HAS_CIC if self.spec.decim else P.DECIM_HAS_NONE)
+        return P.decim_config(s.decim & 3, s.decim & (P.DECIM_FLAGS | P.DECIM_SET_FIR), s.divider,
+                              s.trigger.total_samples, has)
 
     def _decim_samples(self, ch: int, t0: float, k0: int, n: int, settings: Settings, seed: int,
                        dec: P.DecimConfig) -> np.ndarray:
-        """Stored 16-bit samples k0..k0+n-1 of one channel with the filter on (boxcar / CIC2 / CIC3 model).
+        """Stored 16-bit samples k0..k0+n-1 of one channel with the filter on (boxcar / CIC2 / CIC3, 1.11 FIR).
 
-        Word k is written at t0 + k N 5 ns; its newest raw sample was taken DECIM_LATENCY_S earlier. The filter is
-        the K-fold boxcar of N raw samples (gain N^K), modelled on M = min(N, 64) sub-samples per output period of
-        the noise-free core-mean code (clipped to the 8-bit rails); the raw noise (cfg.noise_lsb plus 1/12 LSB^2 of
-        quantisation) enters at the output with the exact boxcar variance. Stored = min(65535, floor(y / 2^S)).
-        The noise is seeded per block of words, so the trigger search and the stored ring agree."""
+        Word k is written at t0 + k N 5 ns; its newest raw sample was taken DECIM_LATENCY_S (FIR_LATENCY_S) earlier.
+        The CIC is the K-fold boxcar of C raw samples (C = N, or N / 2 with the FIR active, which then filters the
+        CIC output with the 15 RTL taps and keeps every second sample), modelled on Q = min(C, 64) sub-samples per
+        CIC period of the noise-free core-mean code (clipped to the 8-bit rails); the raw noise (cfg.noise_lsb plus
+        1/12 LSB^2 of quantisation) enters at the output with the kernel's exact variance. Stored = min(65535,
+        floor(y / 2^S)), y = mean x gain. The noise is seeded per block of words, so the trigger search and the
+        stored ring agree."""
         N, K = dec.n, dec.k
-        M = min(N, DECIM_SUBSAMPLES)
-        w = np.ones(M) / M
-        for _ in range(K - 1):
-            w = np.convolve(w, np.ones(M) / M)
+        C = N // 2 if dec.fir else N
+        Q = min(C, DECIM_SUBSAMPLES)
+        w = analysis.decim_kernel(K, Q, dec.fir)
         L = w.size
-        step = N * 5e-9 / M
-        t_end0 = t0 + k0 * N * 5e-9 - DECIM_LATENCY_S
-        g = t_end0 - (L - 1) * step + np.arange((n - 1) * M + L) * step
+        per = 2 * Q if dec.fir else Q  # grid points per output sample
+        step = C * 5e-9 / Q
+        t_end0 = t0 + k0 * N * 5e-9 - (FIR_LATENCY_S if dec.fir else DECIM_LATENCY_S)
+        g = t_end0 - (L - 1) * step + np.arange((n - 1) * per + L) * step
         c = np.clip(self._analog(ch, g, None, settings), 0.0, 255.0)
-        mean = np.convolve(c, w, "valid")[::M][:n]
+        mean = np.convolve(c, w, "valid")[::per][:n]
         if self.cfg.noise_lsb > 0:
             B = self._NOISE_BLOCK
             b0, b1 = k0 // B, (k0 + n - 1) // B
             nz = np.concatenate([np.random.default_rng((seed, b + (2 << 40), ch)).normal(0.0, 1.0, B)
                                  for b in range(b0, b1 + 1)])[k0 - b0 * B: k0 - b0 * B + n]
-            sigma = math.sqrt(self.cfg.noise_lsb ** 2 + 1 / 12) * math.sqrt(float(np.sum(w * w)) * M / N)
+            sigma = math.sqrt(self.cfg.noise_lsb ** 2 + 1 / 12) * math.sqrt(float(np.sum(w * w)) * Q / C)
             mean = mean + sigma * nz
         y = np.clip(mean, 0.0, 255.0) * dec.gain
         return np.minimum(np.floor(y / (1 << dec.shift)), 65535).astype(np.uint16)
@@ -1432,7 +1444,7 @@ class Device:
         s = self.settings
         nxt = self.decim_config()
         last = self.decim_written
-        return P.DecimState(s.decim & 3, (s.decim & P.DECIM_FLAGS) >> 2, nxt.status, nxt.shift, nxt.n, nxt.gain,
+        return P.DecimState(s.decim & 3, (s.decim & (P.DECIM_FLAGS | P.DECIM_SET_FIR)) >> 2, nxt.status, nxt.shift, nxt.n, nxt.gain,
                             s.divider, nxt.rate(s.divider), last.status if last else 0xFF, last.shift if last else 0,
                             last.status if last else 0, last.shift if last else 0, P.DECIM_MAX_TOTAL, nxt.why,
                             nxt.ext_shift if s.trigger.source == 2 else 0)
@@ -1444,11 +1456,11 @@ class Device:
         r = P.SetDecimReq.unpack(req.payload)
         if r.filter > 3:
             raise _DevErr(P.Status.E_BAD_ARG, 0, "filter 0..3")
-        if r.flags & ~0x07:
+        if r.flags & ~(0x0F if self.spec.fir else 0x07):  # bit 3 FIR needs caps FIR (1.11)
             raise _DevErr(P.Status.E_BAD_ARG, 1, "flags")
         if r.filter and self.settings.trigger.total_samples > P.DECIM_MAX_TOTAL:
             raise _DevErr(P.Status.E_BAD_ARG, 0, "total > 8190: SET_TRIGGER total first")
-        self.settings.decim = r.filter | ((r.flags & 0x07) << 2)
+        self.settings.decim = r.filter | ((r.flags & 0x0F) << 2)
         return self._ok(req, self.decim_state().pack())
 
     def ui_set_decim(self, filter_: int, flags: int = 0) -> None:

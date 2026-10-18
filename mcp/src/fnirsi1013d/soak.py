@@ -107,11 +107,14 @@ class SoakStats:
 
 class Soak:
     def __init__(self, port: str, *, duration: float = 1800.0, interval: float = 0.1, mode: str = "status",
-                 reopen_timeout: float = 60.0, out: Callable[[str], None] = print,
+                 reopen_timeout: float = 60.0, rounds: int = 10, idle: float = 180.0,
+                 out: Callable[[str], None] = print,
                  link_factory: Callable[[str], Link] = open_link,
                  present: Callable[[str], bool] = port_present, clock: Callable[[], float] = time.monotonic,
                  sleep: Callable[[float], None] = time.sleep, poll_down: float = 0.5):
         self.port, self.duration, self.interval, self.mode = port, duration, interval, mode
+        #: --mode reopen: rounds of (soak duration, close, idle, reopen)
+        self.rounds, self.idle = rounds, idle
         self.reopen_timeout, self.say, self.link_factory, self.present = reopen_timeout, out, link_factory, present
         self.clock, self.sleep, self.poll_down = clock, sleep, poll_down
         self.st = SoakStats()
@@ -313,7 +316,8 @@ class Soak:
 
     def run(self) -> int:
         self.log(f"host: USB selective suspend {selective_suspend()}; port {port_info(self.port)}")
-        self.log(f"soak mode {self.mode}, interval {self.interval:g} s, duration {self.duration:g} s")
+        self.log(f"soak mode {self.mode}, interval {self.interval:g} s, duration {self.duration:g} s"
+                 + (f", {self.rounds} rounds with {self.idle:g} s closed between them" if self.mode == "reopen" else ""))
         try:
             self.open()
         except (TransportError, OSError) as e:
@@ -322,44 +326,11 @@ class Soak:
         self.stats("start")
         if self.proto_minor >= 5:
             self.events("start")
-        t_end = self.clock() + self.duration
-        last_ok = self.clock()
-        name = {"status": "GET_STATUS", "ping": "PING", "capture": "TEST_PATTERN"}[self.mode]
         try:
-            while self.clock() < t_end:
-                t0 = self.clock()
-                self.st.requests += 1
-                try:
-                    self.one()
-                    now = self.clock()
-                    self.st.latencies.append(now - t0)
-                    self.st.longest_gap = max(self.st.longest_gap, now - last_ok)
-                    last_ok = now
-                except (TransportError, OSError) as e:
-                    self.st.failures += 1
-                    text = str(e)
-                    self.log(f"fail #{self.st.failures} {name}: {text}{_wec(text)}")
-                    if self._link_down(text):
-                        self.st.drops += 1
-                        try:
-                            self.st.down_times.append(self.wait_and_reopen())
-                        except TransportError as e2:
-                            self.log(f"FAILED: {e2}")
-                            break
-                    elif self.t is not None:
-                        try:
-                            self.t.recover()
-                        except TransportError as e3:
-                            self.log(f"recover failed: {e3}; treating as a drop")
-                            self.st.drops += 1
-                            try:
-                                self.st.down_times.append(self.wait_and_reopen())
-                            except TransportError as e2:
-                                self.log(f"FAILED: {e2}")
-                                break
-                rest = self.interval - (self.clock() - t0)
-                if rest > 0:
-                    self.sleep(rest)
+            if self.mode == "reopen":
+                self._reopen_rounds()
+            else:
+                self._poll(self.duration)
         except KeyboardInterrupt:
             self.log("interrupted")
         if self.t is not None:
@@ -370,6 +341,74 @@ class Soak:
         self.close()
         self.summary()
         return 0 if not (self.st.failures or self.st.drops or self.st.restarts) else 1
+
+    def _reopen_rounds(self) -> None:
+        """fw 0.2.44 suspend / resume bench (firmware/AGENTS.md section 22): soak, close the port, leave it closed
+        (the host may suspend the device), reopen; after every reopen the new events (type 1 b = ms since a suspend,
+        types 2 / 3) and counters 36 / 37 (SUSPEND / RESUME interrupts)."""
+        for r in range(1, self.rounds + 1):
+            self.log(f"round {r}/{self.rounds}: soak {self.duration:g} s")
+            if not self._poll(self.duration):
+                return
+            self.close()
+            self.log(f"round {r}/{self.rounds}: port closed, idle {self.idle:g} s")
+            self.sleep(self.idle)
+            self.log(f"round {r}/{self.rounds}: host USB selective suspend {selective_suspend()}")
+            try:
+                self.open(after_drop=True)
+            except (TransportError, OSError) as e:
+                self.st.drops += 1
+                self.log(f"round {r}/{self.rounds}: reopen failed: {e}{_wec(str(e))}; waiting for the port")
+                try:
+                    self.st.down_times.append(self.wait_and_reopen())
+                except TransportError as e2:
+                    self.log(f"FAILED: {e2}")
+                    return
+            ls = self.last_stats or {}  # open(after_drop=True) printed the new events and the counter deltas
+            self.log(f"round {r}/{self.rounds}: counters 36 usb_suspends={ls.get('usb_suspends', 'n/a')} "
+                     f"37 usb_resumes={ls.get('usb_resumes', 'n/a')}")
+
+    def _poll(self, seconds: float) -> bool:
+        """Request every ``interval`` for ``seconds``; drops are waited out and reopened. False when the port did
+        not come back."""
+        t_end = self.clock() + seconds
+        last_ok = self.clock()
+        name = {"status": "GET_STATUS", "ping": "PING", "capture": "TEST_PATTERN", "reopen": "GET_STATUS"}[self.mode]
+        while self.clock() < t_end:
+            t0 = self.clock()
+            self.st.requests += 1
+            try:
+                self.one()
+                now = self.clock()
+                self.st.latencies.append(now - t0)
+                self.st.longest_gap = max(self.st.longest_gap, now - last_ok)
+                last_ok = now
+            except (TransportError, OSError) as e:
+                self.st.failures += 1
+                text = str(e)
+                self.log(f"fail #{self.st.failures} {name}: {text}{_wec(text)}")
+                if self._link_down(text):
+                    self.st.drops += 1
+                    try:
+                        self.st.down_times.append(self.wait_and_reopen())
+                    except TransportError as e2:
+                        self.log(f"FAILED: {e2}")
+                        return False
+                elif self.t is not None:
+                    try:
+                        self.t.recover()
+                    except TransportError as e3:
+                        self.log(f"recover failed: {e3}; treating as a drop")
+                        self.st.drops += 1
+                        try:
+                            self.st.down_times.append(self.wait_and_reopen())
+                        except TransportError as e2:
+                            self.log(f"FAILED: {e2}")
+                            return False
+            rest = self.interval - (self.clock() - t0)
+            if rest > 0:
+                self.sleep(rest)
+        return True
 
     def _link_down(self, text: str) -> bool:
         """A write/read error of the port itself (as opposed to a missing answer) means the device left."""
@@ -420,8 +459,13 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--port", default=os.environ.get("FNIRSI_MCP_PORT", "auto"))
     ap.add_argument("--duration", type=float, default=1800.0, help="seconds (default 30 min)")
     ap.add_argument("--interval", type=float, default=0.1, help="seconds between requests (default 0.1)")
-    ap.add_argument("--mode", choices=("status", "ping", "capture"), default="status",
-                    help="GET_STATUS, PING, or a content-checked 4 KiB TEST_PATTERN")
+    ap.add_argument("--mode", choices=("status", "ping", "capture", "reopen"), default="status",
+                    help="GET_STATUS, PING, a content-checked 4 KiB TEST_PATTERN, or reopen: --rounds of (GET_STATUS "
+                         "soak for --duration, close, --idle seconds closed, reopen) with the events and counters "
+                         "36 / 37 after every reopen")
+    ap.add_argument("--rounds", type=int, default=10, help="--mode reopen: rounds (default 10)")
+    ap.add_argument("--idle", type=float, default=180.0,
+                    help="--mode reopen: seconds the port stays closed per round (default 180)")
     ap.add_argument("--reopen-timeout", type=float, default=60.0, help="seconds to wait for the port after a drop")
     ap.add_argument("--log", help="also append the lines to this file")
     a = ap.parse_args(argv)
@@ -435,7 +479,7 @@ def main(argv: list[str] | None = None) -> None:
             fh.flush()
     try:
         rc = Soak(port, duration=a.duration, interval=a.interval, mode=a.mode, reopen_timeout=a.reopen_timeout,
-                  out=out).run()
+                  rounds=a.rounds, idle=a.idle, out=out).run()
     finally:
         if fh:
             fh.close()

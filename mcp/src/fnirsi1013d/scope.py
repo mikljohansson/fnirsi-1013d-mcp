@@ -542,13 +542,22 @@ class Scope:
         return P.DecimState.unpack(self._req(P.Cmd.GET_DECIM))
 
     def set_decim(self, filter_: int | str, flags: int | None = None) -> P.DecimState:
-        """SET_DECIM: 0/'off', 1/'boxcar', 2/'cic2', 3/'cic3'. ``flags`` (P.SetDecimReq bits: core-order swap, host
-        only; falling-edge capture of the A / B cores, hidden and saved) default to the current ones, so a filter
-        change keeps the person's hidden settings. The firmware lowers K where the result would not be exact or not
-        possible (``DecimState.why``). A filter needs a trigger total of at most 8190 samples."""
-        f = P.DECIM_FILTERS.index(filter_.lower()) if isinstance(filter_, str) else int(filter_)
+        """SET_DECIM: 0 / 'off', 1 / 'boxcar', 2 / 'cic2', 3 / 'cic3', and on 0x1535+ (caps FIR, protocol 1.11)
+        'boxcar+fir', 'cic2+fir', 'cic3+fir'. ``flags`` (P.SetDecimReq bits: core-order swap, host only; falling-edge
+        capture of the A / B cores, hidden and saved) default to the current ones, so a filter change keeps the
+        person's hidden settings; a filter name sets the FIR bit itself. The firmware lowers K where the result
+        would not be exact or not possible (``DecimState.why``) and engages the FIR only at N >= 16 with N % 4 == 0
+        (10 MSa/s and slower). A filter needs a trigger total of at most 8190 samples."""
+        if isinstance(filter_, str):
+            f, fir = P.parse_decim_filter(filter_)
+        else:
+            f, fir = int(filter_), None
+        if fir and not self.info.caps & P.Caps.FIR:
+            raise ValueError(f"set_decim({filter_!r}): no FIR on this bitstream (caps FIR: FPGA 0x1535+)")
         if flags is None:
             flags = self.get_decim().flags
+            if fir is not None:
+                flags = (flags & ~P.SetDecimReq.FIR) | (P.SetDecimReq.FIR if fir else 0)
         st = P.DecimState.unpack(self._req(P.Cmd.SET_DECIM, P.SetDecimReq(f, flags).pack()))
         self._trig = self._tb = None  # words and the sample period follow the filter
         return st

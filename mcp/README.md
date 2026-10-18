@@ -40,6 +40,7 @@ fnirsi1013d-sim --variant al3 --port 5555 --signal decay:tau=80us
 |---|---|
 | `--variant stock\|al3\|ef2\|ep4` | FPGA version word 0x1432 / 0x1532 / 0x1632 / 0x1732 with its ring size, memory limit, fixed or programmable geometry, generator |
 | `--variant al3x`, `--ext SIGNAL` | AL3 with the external trigger (0x1533): trigger source EXT on the calibration pin, fed by `--ext` (default: CH2's signal), 3.3 V logic, 22 ns latency |
+| `--variant al3f` | AL3 0x1535: as al3d plus the CIC compensation FIR (protocol 1.11, caps FIR): CIC on N / 2, the 15 RTL taps, 250 ns latency |
 | `--variant al3d` | AL3 0x1534: EXT trigger plus the decimation filter (protocol 1.9, caps DECIM): boxcar / CIC2 / CIC3 model with 16-bit samples, the 120 ns pipeline latency and the EXT latency correction (no device averaging) |
 | `--signal SPEC` | CH1 signal; CH2 defaults to the matching TX gate (decay) or a sync square (sine/square) |
 | `--ch1 SPEC`, `--ch2 SPEC` | per-channel signals |
@@ -155,7 +156,7 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_fetch_waveform` | 0 | the latest capture (what the screen shows) with the settings it was taken under, without capturing |
 | `scope_measure` | 0 / 1 with `capture=true` | vpp, vmin, vmax, mean, rms, ac_rms, frequency, period, duty, rise/fall time, CH1->CH2 delay |
 | `scope_set_timebase` | 1 | sample rate, window or raw divider |
-| `scope_set_decimation` | 1 | decimation filter off / boxcar / CIC2 / CIC3 (fw >= 0.2.30, FPGA 0x1534): effective filter, N, shift, codes per count, effective bits; captures then read 16-bit samples |
+| `scope_set_decimation` | 1 | decimation filter off / boxcar / CIC2 / CIC3 (fw >= 0.2.30, FPGA 0x1534), with `+fir` the compensation FIR (fw >= 0.2.44, FPGA 0x1535): effective filter, N, shift, codes per count, effective bits; captures then read 16-bit samples |
 | `scope_set_trigger` | 1 | source, edge, level (volts or code), mode, pre-trigger, total samples, auto timeout |
 | `scope_capture` | 1 | host single capture (the screen shows it, the scope stays in STOP); statistics, file, inline samples or preview |
 | `scope_acquisition_control` | 1 | arm / wait / force / stop / run (RUN/STOP shared with the scope's button) |
@@ -273,9 +274,14 @@ fnirsi1013d-sd write file.bin --sector 1000 --yes     # type "WRITE <n>@<sector>
 fnirsi1013d-soak --port COM10                                # 30 min GET_STATUS at 10 Hz (the v0.3.0 soak)
 fnirsi1013d-soak --mode capture --duration 600 --log soak.log   # 4 KiB TEST_PATTERN, content-checked
 fnirsi1013d-soak --mode ping --interval 0.02
+fnirsi1013d-soak --mode reopen --duration 10 --idle 180 --rounds 10   # suspend / resume bench (fw 0.2.44)
 ```
 
-Holds the port open and polls (`--mode status|ping|capture`, `--interval`, `--duration`), LOCAL-safe. It never
+Holds the port open and polls (`--mode status|ping|capture`, `--interval`, `--duration`), LOCAL-safe.
+`--mode reopen` runs `--rounds` of (GET_STATUS soak for `--duration`, close the port, leave it closed `--idle`
+seconds, reopen) and prints after every reopen the host's USB selective-suspend setting, the new event-log entries
+(fw 0.2.44: bus reset with the ms since a suspend, suspend with POWER and the frame number, resume with the ms
+suspended and whether it was inferred) and counters 36 / 37 (SUSPEND / RESUME interrupts). It never
 gives up on a drop: it polls the COM port list every 0.5 s while the port is gone and reopens when it is back
 (`--reopen-timeout`, default 60 s). Output, one line per event, wall-clock time in ms:
 
