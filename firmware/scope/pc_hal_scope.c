@@ -1428,9 +1428,6 @@ int pc_glue_ui_has(int feature)
     case PC_FEAT_EXT_TRIGGER:
       return (pc_sess.var.caps & PC_CAP_EXT_TRIGGER) != 0;
 
-    case PC_FEAT_HOLDOFF:
-      return 0;
-
     case PC_FEAT_DECIM:
       return pc_dec_has();
 
@@ -1462,7 +1459,6 @@ void pc_glue_ui_mask(int menu)
 
   switch(menu)
   {
-    //PC_MASK_GEN_MENU, PC_MASK_TRIG_MENU: since 0.2.8 those rows are not laid out at all (pc_hooks.h compact layout)
 
     case PC_MASK_TRIG_CHANNEL:
       if(!pc_glue_ui_has(PC_FEAT_EXT_TRIGGER))
@@ -1497,8 +1493,6 @@ void pc_glue_ui_mask(int menu)
         display_set_font(font);
       }
       break;
-
-    //PC_MASK_SYS_RTC: since 0.2.13 the item is not drawn and the menu is one row shorter (pc_glue_sys_menu_height)
   }
 
   displaydata.fg_color = fg;

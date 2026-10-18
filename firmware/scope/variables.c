@@ -102,7 +102,6 @@ uint8 channelA = 0;                 //0-ch1 do A
 uint8 channelB = 1;                 //1-ch2 to B
 
 uint8 triggermenuopen;              //flag for open the trigger menu
-uint8 holdoffmenuopen;              //flag for open the holdoff menu
         
 
 uint8 genmenuopen;                  //flag for open the generator menu

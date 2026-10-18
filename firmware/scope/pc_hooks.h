@@ -11,7 +11,6 @@
 #define PC_FEAT_GEN_DDS       1     //generator menu: Atlan DDS bitstreams only (not stock 0x1432)
 #define PC_FEAT_RTC           4     //DS3231 module (probed at boot)
 #define PC_FEAT_EXT_TRIGGER   6     //EXT trigger source: AL3 bitstream 0x1533+ only (calibration pin as input)
-#define PC_FEAT_HOLDOFF       7     //trigger hold-off: never sent to the FPGA
 #define PC_FEAT_DECIM         8     //acquisition "Filter" selector: AL3 bitstream 0x1534+ (decimation filter)
 #define PC_FEAT_MEM_BASE      16    //+ i: memory depth box i (3000 x (i + 1) samples) fits the bitstream
 
@@ -21,17 +20,10 @@
 #define PC_SETTING_WORD_SPEC1 209   //fw 0.2.39: spectrum view ref level, dBV (int16)
 #define PC_SETTING_WORD_PHOS  210   //fw 0.2.46: phosphor view persistence, palette (0x9A00 marker)
 
-//Compacted menus (fw 0.2.8, owner: no gaps). The kept rows move up by whole rows; the menu heights in variables.h
-//shrink to match.
-#define PC_TRIG_COMPACT       1     //trigger: no Hold off row
-#define PC_TRIG_DY            56    //Always 50% moves up one row
-
-#define PC_MASK_GEN_MENU      1
-#define PC_MASK_TRIG_CHANNEL  2
-#define PC_MASK_TRIG_MENU     3
+//PC_UI_MASK(m) items. Menus are compact (fw 0.2.8, owner: no gaps): what the 1013D lacks is not laid out at all.
+#define PC_MASK_TRIG_CHANNEL  2     //trigger menu: EXT source box (0x1533+)
 #define PC_MASK_ACQ_FILTER    4     //acquisition menu: the Filter box
-#define PC_MASK_ACQ_MEMORY    5
-#define PC_MASK_SYS_RTC       6
+#define PC_MASK_ACQ_MEMORY    5     //acquisition menu: memory depths the bitstream holds, pass time
 
 
 void pc_glue_init(void);              //after the settings are loaded, before usb_device_init()

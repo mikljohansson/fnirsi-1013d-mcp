@@ -341,7 +341,7 @@ int pc_glue_sys_menu_height(void);
 #define TRIGGER_MENU_XPOS      TRIGGER_BUTTON_XPOS-38//28
 #define TRIGGER_MENU_YPOS                       48//46
 #define TRIGGER_MENU_WIDTH                     220//210//166
-#define TRIGGER_MENU_HEIGHT                    280     //5 rows: no Hold off row (pc_hooks.h PC_TRIG_COMPACT)
+#define TRIGGER_MENU_HEIGHT                    280     //5 rows (no Hold off row: never sent to the FPGA)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Signal generator button and menu
@@ -679,8 +679,6 @@ struct tagFPGASettings
   
   uint16    totalsamples;           //Set max samples in FPGA
   uint16    settriggerpoint;        //Set start triger point in FPGA
-  uint16    en_holdoff_trigger;     //Set hold off time in FPGA
-  uint16    value_holdoff_trigger;  //Set hold off time in FPGA //32bit
   
   
   uint8     fw_FPGA;              //1- firmware in fpga is fnirsi, 2 is AL3-PECO, 3 is EF2-PECO
@@ -853,7 +851,6 @@ extern uint8 channelA;
 extern uint8 channelB;
 
 extern uint8 triggermenuopen;  
-extern uint8 holdoffmenuopen;             
         
 
 extern uint8 genmenuopen;                  

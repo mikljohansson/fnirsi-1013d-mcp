@@ -6936,8 +6936,6 @@ void scope_reset_config_data(void)
 
   fpgasettings.totalsamples           = 3000; //Set max samples in FPGA       (1500*2)
   fpgasettings.settriggerpoint        = 1500; //Set start triger point in FPGA (750*2)
-  fpgasettings.en_holdoff_trigger     = 0;    //0-holdoff disable
-  fpgasettings.value_holdoff_trigger  = 1000; //1000 is 1sec
 
   
   //----------------------------------------------------------------------------
@@ -7146,8 +7144,8 @@ void scope_save_config_data(void)
   
   *ptr++ = fpgasettings.totalsamples;
   *ptr++ = fpgasettings.settriggerpoint;
-  *ptr++ = fpgasettings.en_holdoff_trigger;
-  *ptr++ = fpgasettings.value_holdoff_trigger; 
+  *ptr++ = 0;                                 //retired slots: 1.00o5 trigger hold-off enable, value (never sent to the FPGA)
+  *ptr++ = 0;
 
   //Acquisition Filter setting (decimation filter, 0x1534+) in a spare word of the FPGA block
   settingsworkbuffer[PC_SETTING_WORD_DECIM] = pc_glue_decim_setting_word();
@@ -7332,8 +7330,7 @@ void scope_restore_config_data(void)
 
   fpgasettings.totalsamples           = *ptr++;
   fpgasettings.settriggerpoint        = *ptr++;
-  fpgasettings.en_holdoff_trigger     = *ptr++;
-  fpgasettings.value_holdoff_trigger  = *ptr++;
+  ptr += 2;                                   //retired slots: trigger hold-off
   
   //---------------------------------------------------------------------------- 
   }

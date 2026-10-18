@@ -5081,8 +5081,7 @@ void scope_open_keyboard_menu(void)
   //Select the font for the texts
   display_set_font(&font_3);//3
 
-  if(holdoffmenuopen)     display_text(KEY_MENU_XPOS + 20, KEY_MENU_YPOS + 7, "TRIGGER                   Set hold off time");//117
-  else if(freqmenuopen)   display_text(KEY_MENU_XPOS + 20, KEY_MENU_YPOS + 7, "GENERATOR                 Set frequency");//117
+  if(freqmenuopen)   display_text(KEY_MENU_XPOS + 20, KEY_MENU_YPOS + 7, "GENERATOR                 Set frequency");//117
   else if(dutymenuopen)   display_text(KEY_MENU_XPOS + 20, KEY_MENU_YPOS + 7, "GENERATOR                 Set duty");//117
   
   //display_text(KEY_MENU_XPOS +  97, KEY_MENU_YPOS + 216, "Time per Division");//166
@@ -5684,7 +5683,6 @@ void scope_open_trigger_menu(void)
   display_draw_horz_line(158, xstart, xend);//158//716
   display_draw_horz_line(214, xstart, xend);////214 716
   display_draw_horz_line(270, xstart, xend);////270 716
-  if(!PC_TRIG_COMPACT) display_draw_horz_line(326, xstart, xend);////270 716
 
   //Main texts in white
   display_set_fg_color(WHITE_COLOR);
@@ -5703,17 +5701,11 @@ void scope_open_trigger_menu(void)
   display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+178, "Trigger");//224
   display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+197, "position");//243 position 
   
-  if(!PC_TRIG_COMPACT)
-  {
-    display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+234, "Hold");//280
-    display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+253, "off");//299
-  }
-  
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+290-PC_TRIG_DY, "Always");//224
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+309-PC_TRIG_DY, "50%");//243
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+234, "Always");//224
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+253, "50%");//243
   
   //Display the icon with the set colors
-  display_copy_icon_use_colors(trigger_50_percent_icon, TRIGGER_MENU_XPOS+75, TRIGGER_MENU_YPOS+294-PC_TRIG_DY, 24, 24);//296 //184
+  display_copy_icon_use_colors(trigger_50_percent_icon, TRIGGER_MENU_XPOS+75, TRIGGER_MENU_YPOS+238, 24, 24);//296 //184
 
   //Display the actual settings
   scope_trigger_mode_select();
@@ -6282,7 +6274,7 @@ void scope_always_trigger50_select(void)
   //display_set_fg_color(DARKGREY_COLOR); //treba? 21.11.2025
   
   //Show the state (if always trige 50 on or off)
-  scope_display_slide_button(TRIGGER_MENU_XPOS + 140, TRIGGER_MENU_YPOS + 296 - PC_TRIG_DY, scopesettings.alwaystrigger50, GREEN_COLOR);//140 186
+  scope_display_slide_button(TRIGGER_MENU_XPOS + 140, TRIGGER_MENU_YPOS + 240, scopesettings.alwaystrigger50, GREEN_COLOR);//140 186
 }
 
 //==============================================================================
@@ -7110,7 +7102,6 @@ void scope_system_settings_RTC_settings_item(int mode)//set
   
   //Read time for RTC
   get_fattime();
-  PC_UI_MASK(PC_MASK_SYS_RTC);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
