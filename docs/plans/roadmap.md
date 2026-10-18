@@ -46,6 +46,9 @@ sits on VRF1, +1.24 V; see fpga/al3/README.md "Changes" 2), and the host-capture
 
 ## 4. On-scope averaging and FFT (firmware)
 
+Owner's order (2026-10-18 evening): spectrum analyser first, then digital phosphor, then Bode; the 3D waterfall is dropped; on-device
+features have priority, host (MCP) analysis tools on exported captures are welcome alongside. FPGA decimation filter (boxcar/CIC, 16-bit
+samples, version 0x1534) in work by fpga-gen3 as the foundation for clean spectra and higher resolution at slow time bases.
 Detailed design and step plan for the FFT/spectrum analyser, Bode plots and digital phosphor: `docs/plans/dpos350p-features.md`
 (2026-10-18). Note from that study: kiss_fft is not vendored in firmware/scope (only in Atlan's extracted tree, float-based); a small
 purpose-written Q15 FFT is proposed instead.
