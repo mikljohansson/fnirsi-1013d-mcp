@@ -149,3 +149,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   Findings: gains match uv_per_lsb_q8 within 1%; zero model zero_core = Z_core - 0.265*dcoffset, range-independent; on this unit Z_A=132.5, Z_B=127.0
   (A/B spread 5.5 codes vs stored comps -2/+2; centre 129.75 vs assumed 128). Host per-unit calibration being built by mcp-gen2.
   Open: generator loop-back read ~75 codes low at range 3 (coupling encoding or trace position?), to be checked with a controlled square-wave test.
+- Square-wave check (backups/t8sq_CH1.json): coupling 0 = DC, 1 = AC confirmed; in DC the calibration output's low level sits ~70 codes (~1.2 V)
+  below the shorted-input level, and the scope's own screen agrees (owner: zero marker ~1.1 V above the wave's bottom) => property of the
+  calibration output circuit, not of the measurement chain. The output is a timing reference (3.1 Vpp), not a voltage reference.
+- Firmware 0.2.1 (commit d9e1ac6, sha256 ca0b6d11..., protocol 1.3 collaborative mode) loaded hands-free; caps 0x3c03; startup counters:
+  3 ms to first poll, first UI pass 1516 ms. Protocol-level acceptance OK (host SET_* applied + read back, host single capture -> STOP,
+  host RUN, READ_TRACE in RUN origin ui_run, settings_seq increments). Visual checks (MCP chip, redraws) pending owner's report.
