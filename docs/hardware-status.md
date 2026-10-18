@@ -327,3 +327,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   in 17 later captures, but +11/+12 us in the first 10 captures and +2/+3 us for the CH1 source in one run, i.e. the sample-domain trigger
   position of host captures varies by run at decimated rates for BOTH sources (geometry/alignment item, not EXT-specific; data in
   backups/ext_loopback_CH1_fast.json). Trigger set back to CH1 afterwards. Card boots 0.2.21.
+- Firmware 0.2.22 (fw-gen4, commit 7b6d855, sha256 6615bab6..., pinned with ELF): usb_device_init asserts the OTG bus soft reset and the PHY
+  reset for 1 ms before 1.00o5's init, and logs the controller state it found (event type 16, five fields). FEL-loaded on 0x1533: 2 bench
+  passes, 200 x 64 KiB, 0 failed. Init state after a FEL load: POWER/FADDR 0x4000, INTUSBE/CCU 0x070f, EP2 TXCSR 0x2000, EP2 RXCSR 0x0000,
+  ISCR 0x2fc0. Cold-boot comparison pending. fw-gen4's caveat: the pass-3 failure after 200 clean transfers argues against a stale init state;
+  the cable going in after boot (charging start, contact bounce = six suspends in 1 ms) is the other difference. Tests: FEL-loaded + cable
+  replug, and cold boot with the cable already in.
