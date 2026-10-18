@@ -50,6 +50,7 @@ int main(void)
   //Instead of full memory management just the caches enabled
   arm32_icache_enable();
   arm32_dcache_enable();
+  PC_MMU_ENABLE();
 
   //Clear the interrupt variables
   memset(interrupthandlers, 0, 256);

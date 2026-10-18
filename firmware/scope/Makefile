@@ -69,13 +69,18 @@ PC_PROTOCOL  ?= 1
 PC_DEBUG     ?= 0
 PC_FORCE_CDC ?= 1
 PC_FIFO_MAP  ?= 0
+#   PC_MMU=0       fw 0.2.48: leave the MMU off (D-cache ineffective, the pre-0.2.48 state), version suffix -nommu
+#   PC_MMU_SRAM=0  map SRAM A strongly ordered instead of write-back (FFT_BENCH A/B)
+PC_MMU       ?= 1
+PC_MMU_SRAM  ?= 1
 ifeq ($(PC_PROTOCOL),1)
-SRCS += pc_protocol.c pc_cmds.c pc_transport.c pc_hal_scope.c fx_fft.c fx_fft_tables.c spectrum.c pc_decim.c phos_map.c phosphor.c
+SRCS += pc_protocol.c pc_cmds.c pc_transport.c pc_hal_scope.c fx_fft.c fx_fft_tables.c spectrum.c pc_decim.c phos_map.c phosphor.c pc_mmu.c
 PC_FW_BUILD := $(shell git rev-parse --short=8 HEAD 2>/dev/null)
 ifeq ($(PC_FW_BUILD),)
 PC_FW_BUILD := 00000000
 endif
-PC_DEFS := -DPC_PROTOCOL=1 -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FW_BUILD=0x$(PC_FW_BUILD)u -DPC_FIFO_MAP=$(PC_FIFO_MAP)
+PC_DEFS := -DPC_PROTOCOL=1 -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FW_BUILD=0x$(PC_FW_BUILD)u -DPC_FIFO_MAP=$(PC_FIFO_MAP) \
+           -DPC_MMU=$(PC_MMU) -DPC_MMU_SRAM=$(PC_MMU_SRAM)
 else
 PC_DEFS := -DPC_PROTOCOL=0
 endif
@@ -109,7 +114,7 @@ else
 Q := @
 endif
 
-.PHONY: all clean package fel info check-reference gcc10 FORCE
+.PHONY: all clean package fel info check-reference gcc10 gcc10-nommu FORCE
 all: $(BIN)
 
 # ----------------------------------------------------------------- build_time.h
@@ -193,8 +198,12 @@ check-reference:
 gcc10:
 	$(MAKE) BUILD=build-gcc10-pc CROSS_COMPILE=$(GCC10)/usr/bin/arm-none-eabi- 	  EXTRA_CFLAGS="-isystem $(GCC10)/usr/include/newlib" PC_PROTOCOL=1
 
+# fw 0.2.48 A/B: the same with the MMU left off (version suffix -nommu)
+gcc10-nommu:
+	$(MAKE) BUILD=build-gcc10-nommu CROSS_COMPILE=$(GCC10)/usr/bin/arm-none-eabi- 	  EXTRA_CFLAGS="-isystem $(GCC10)/usr/include/newlib" PC_PROTOCOL=1 PC_MMU=0
+
 clean:
-	rm -rf $(BUILD) build-gcc10 build-gcc10-pc
+	rm -rf $(BUILD) build-gcc10 build-gcc10-pc build-gcc10-nommu
 
 FORCE:
 

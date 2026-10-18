@@ -1304,11 +1304,14 @@ static void __attribute__((naked, noreturn)) pc_fel_jump(void)
     "bic  r0, r0, #0x1F\n"
     "orr  r0, r0, #0xD3\n"            //SVC mode, IRQ and FIQ masked
     "msr  cpsr_c, r0\n"
+#if PC_MMU
+    "bl   pc_mmu_off\n"               //fw 0.2.48: clean + invalidate the D-cache, MMU and caches off (start.s)
+#endif
     "mov  r0, #0\n"
     "mcr  p15, 0, r0, c7, c10, 4\n"   //drain the write buffer
     "mrc  p15, 0, r1, c1, c0, 0\n"
     "bic  r1, r1, #0x1000\n"          //I-cache off
-    "bic  r1, r1, #0x0004\n"          //D-cache off (MMU is off: no dirty lines)
+    "bic  r1, r1, #0x0004\n"          //D-cache off (MMU is off by now: no dirty lines)
     "orr  r1, r1, #0x2000\n"          //high vectors at 0xFFFF0000, the reset state the boot ROM runs with
     "mcr  p15, 0, r1, c1, c0, 0\n"
     "mcr  p15, 0, r0, c7, c5, 0\n"    //invalidate the I-cache
@@ -1716,6 +1719,7 @@ int pc_glue_battery_level(int raw, int charging, int shown)
 #define PC_RST_EXC_MAGIC  0x45584321u      //exception fields valid
 
 static uint32 pc_restart_info[8];          //restarts, type, exception LR, SPSR, exception SP, reset LR, reset SP, reset CPSR
+static uint32 pc_fault_info[PC_FAULT_COUNT];   //fw 0.2.48: fault status (DFSR / IFSR by type), fault address (FAR)
 
 static void pc_restart_check(void)
 {
@@ -1723,7 +1727,7 @@ static void pc_restart_check(void)
   uint32 restarts = 0;
 
   //[0] alive, [1] restart count, [2] reset LR, [3] reset SP, [4] reset CPSR, [5] exc type, [6] exc LR, [7] SPSR,
-  //[8] exc SP, [9] exc magic
+  //[8] exc SP, [9] exc magic, fw 0.2.48: [10] DFSR, [11] IFSR, [12] FAR
   if(r[0] == PC_RST_ALIVE)
   {
     restarts = r[1] + 1;
@@ -1735,6 +1739,15 @@ static void pc_restart_check(void)
     pc_restart_info[5] = r[2];
     pc_restart_info[6] = r[3];
     pc_restart_info[7] = r[4];
+
+    //The fault registers mean something only for the abort that wrote them
+    if((r[9] == PC_RST_EXC_MAGIC) && (r[5] == 4))
+    {
+      pc_fault_info[0] = r[10];
+      pc_fault_info[1] = r[12];
+    }
+    else if((r[9] == PC_RST_EXC_MAGIC) && (r[5] == 3))
+      pc_fault_info[0] = r[11];
   }
 
   pc_restart_info[0] = restarts;
@@ -1749,6 +1762,14 @@ void pc_hal_restart_info(uint32_t *v)
 
   for(i=0;i<8;i++)
     v[i] = pc_restart_info[i];
+}
+
+void pc_hal_fault_info(uint32_t *v)
+{
+  uint32 i;
+
+  for(i=0;i<PC_FAULT_COUNT;i++)
+    v[i] = pc_fault_info[i];
 }
 
 //ENTER_FEL is a deliberate exit: the next image must not count it as a restart

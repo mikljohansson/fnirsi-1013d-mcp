@@ -219,6 +219,10 @@ uint32_t pc_hal_boot_splash_ms(void);
 //CPSR found at _reset
 #define PC_RESTART_COUNT  8
 void     pc_hal_restart_info(uint32_t *v);           //fw 0.2.17: ms spent on the boot splash step + 1 (0 = not run)
+//fw 0.2.48: the restart's fault registers, GET_LINK_STATS 58-59: fault status (DFSR for a data abort, IFSR for a
+//prefetch abort, else 0), fault address (FAR, data abort only, else 0)
+#define PC_FAULT_COUNT    2
+void     pc_hal_fault_info(uint32_t *v);
 uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total);
 int32_t  pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms, int rearm);   //-1 = none frozen; rearm clears it
 uint32_t pc_hal_event_bus(uint8_t *dst, uint32_t *total);      //fw 0.2.24: bus-level ring (<= 16 entries), *total since boot
