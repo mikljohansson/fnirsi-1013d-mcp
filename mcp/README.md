@@ -47,6 +47,7 @@ fnirsi1013d-sim --variant al3 --port 5555 --signal decay:tau=80us
 | `--trigger-align-offset N` | offset of the latched `trigger_addr` against the crossing word (test T5) |
 | `--time-scale X` | scales modelled acquisition time; 0 completes captures instantly |
 | `--seed N` | reproducible noise and phases |
+| `--caps MASK` | capability override; `0x1803` is firmware 0.1.0 on AL3 |
 | `--fail-responses-over BYTES` | never send larger responses, like firmware 0.1.0 on the unit (over 5 KiB failed, T2) |
 
 Signal specs are `kind:key=value,...` with SI units, at the BNC in volts:
@@ -163,48 +164,53 @@ Shared vectors: `python -m fnirsi1013d.vectors --check` checks the Python parser
 `docs/protocol-vectors.json`. `--merge` adds the host vectors (`host_*`, `"source": "host"`) without touching the
 firmware's. The firmware's C checker (`firmware/scope/host_tests/check_vectors.py`) runs on the union.
 
-## Spec points resolved here
+## Spec points: firmware and simulator agree
 
-These are the choices the host and the simulator make where docs/protocol.md leaves room. The firmware should
-match them or the spec should be amended:
+docs/protocol.md section 14 records how firmware v0.1.0 fills the gaps of sections 1-13. The simulator follows it,
+and `tests/test_firmware_match.py` pins the host-visible items:
 
-1. **Oversize request** (valid header, `len` > 492): `E_BAD_LEN` right after the header, then `len + 4` bytes
-   are skipped. The firmware parser already does this.
-2. **Request length**: shorter than the v1.0 struct gives `E_BAD_LEN`; longer is accepted and the tail ignored.
-   PING and DEBUG_FPGA are variable length.
-3. **Deferred requests**: a WAIT retransmitted with the same seq while still pending is ignored and its response
-   comes once. Any other non-control request while a deferred one is pending gets `E_BUSY`.
-4. **WAIT outside ARMED/TRIGGERED** (IDLE, ABORTED, DONE) returns the status body at once with status OK.
-5. **STOP during a deferred request**: the STOP response comes first, then the deferred request's
-   `E_ABORTED`; `acq_state` becomes ABORTED.
-6. **Duplicate cache**: every completed response whose encoded frame is at most 256 bytes, completed
-   deferred responses included.
-7. **FORCE**: completes like an auto timeout: `trigger_addr = pretrigger_words`, flag `auto_timeout`,
-   `fpga_triggered` 0.
-8. **Auto-timeout data**: contiguous in the ring with `capture_start_word = 0`, unsynchronised.
-9. **trigger_addr**: the word whose core-A sample is the first one past the level. The host puts t = 0 at
-   interleaved index `2 x pretrigger_words`, the core-B sample of that word.
-10. **READ_TRACE in REMOTE before any DONE capture**: `E_STATE`. `count` is clipped to the end;
-    `start >= sample_count` gives `E_BAD_ARG`.
-11. **TEST_PATTERN 3**: low byte of the xorshift32 state after each step (`x ^= x << 13; x ^= x >> 17;
-    x ^= x << 5`), seed = `length`, seed 0 replaced by 1.
-12. **Stock GET_INFO**: `min_total_samples = max_total_samples = 3000`, since the geometry is fixed.
-13. **SET_TRIGGER with only one of pretrigger/total in the mask**: the host always sends both, filling the
-    other from GET_TRIGGER, so the firmware validates a consistent pair.
-14. **SET_CHANNEL offset**: `offset_mode 1` maps to `dcoffset = pwm - center_cal[range]`. `dcoffset` is clamped
-    so the PWM stays within 0..2000.
-15. **Overload flags** in GET_STATUS come from the last READ_RAW: a code of 0 or 255 on either core of the
-    channel.
-16. **ACQUIRE_AVG**: `count = 0` means to the end of the capture. Values are the mean compensated code x 256,
-    clamped to 0..65535. `n_dropped` counts timeouts and, with REQUIRE_TRIGGER, auto-timeout captures.
-17. **ASCII lines**: the 63-character limit excludes the `#`. Event text has no `#`. A longer line gives one
-    overflow and `#ERR,UNKNOWN`. This matches the firmware's `PC_ASCII_MAX_LINE`.
-18. **READ_SCREEN**: at most 41 rows per request fit 66,560 bytes. The host reads 40.
-19. **Host side**: response frames with `proto_major != 1` are ignored.
-20. **Stale first byte (T3)**: the simulator's DEBUG_FPGA model returns, on the first strobe after a 0x1F
-    write, the byte at `ptr - hw_read_lag` off by +1, then post-increments. That is one hypothesis. The
-    firmware's pointer arithmetic for the dummy read must follow whatever T3 shows. The host contract is only
-    that READ_RAW returns exactly `start_word .. start_word + count - 1`.
+- short request payloads are zero-extended; E_BAD_LEN only for frames over 512 bytes (then `len + 4` bytes are
+  skipped) and malformed DEBUG_FPGA op lists; longer payloads are accepted, the tail ignored;
+- error `detail`: the mask bit number for SET_CHANNEL, SET_TRIGGER and SET_GEN (0xFF = channel field), the byte
+  offset of the field for every other command;
+- only OK responses with a payload of at most 256 bytes are replayed from the duplicate cache;
+- WAIT in IDLE, ABORTED or DONE answers at once; a WAIT retransmitted with the pending seq is ignored and its
+  answer follows once; any other non-control request during a deferred one gets E_BUSY; STOP answers before the
+  aborted WAIT;
+- ARM while ARMED or TRIGGERED gives E_STATE (STOP first);
+- GET_STATUS FPGA flag bits are 0 in LOCAL;
+- KEEP_SETTINGS: a host release uses the release request's flag, every other exit the acquire-time flag;
+- TEST_PATTERN 3: state = length, one xorshift32 step (13/17/5) before every 4-byte group, emitted little-endian;
+- stock bitstream: GET_GEN reports enable 1, 1 kHz, 50 %; `min_total_samples = max_total_samples = 3000`;
+- SET_CHANNEL: the resulting offset PWM must stay within 0..2000 or E_BAD_ARG (detail 3); the server checks this
+  first and says how many divisions are reachable;
+- READ_TRACE in REMOTE needs a DONE capture; `sw_trigger_index` is -1 unless 20 <= pretrigger and
+  pretrigger + 64 <= total;
+- ASCII lines count as traffic for the watchdog; at most 63 characters after the `#`, longer gives one overflow
+  and `#ERR,UNKNOWN`;
+- USB identity: 0x1209:0x0001, product `FNIRSI 1013D`, serial `1013D-0001` (GET_INFO `serial` is the same).
+
+Choices made only on the host or in the simulator, not covered by section 14:
+
+1. **FORCE** (debug builds) is modelled as an auto-timeout completion: `trigger_addr = pretrigger_words`, flag
+   `auto_timeout`, `fpga_triggered` 0. Test T7 decides what the hardware does.
+2. **Auto-timeout data** sits contiguous in the ring with `capture_start_word = 0`.
+3. **trigger_addr** is the word whose core-A sample is the first one past the level; the host puts t = 0 at
+   interleaved index `2 x pretrigger_words`. Test T5 measures the real offset (`--trigger-align-offset`).
+4. **SET_TRIGGER** with only one of pretrigger/total requested: the host sends both, filling the other from
+   GET_TRIGGER, so the firmware always validates a consistent pair.
+5. **Overload flags** in GET_STATUS come from the last READ_RAW: a code of 0 or 255 on either core of a channel.
+6. **ACQUIRE_AVG** (not in v0.1.0): `count = 0` means to the end; values are mean compensated code x 256 clamped to
+   16 bits; `n_dropped` counts timeouts and, with REQUIRE_TRIGGER, auto-timeout captures.
+7. **READ_SCREEN** (not in v0.1.0): at most 41 rows fit one response; the host asks for 40 or fewer.
+8. **Host side**: response frames with `proto_major != 1` are ignored; responses larger than `--max-response` are
+   never requested.
+9. **Stale first byte (T3)**: the simulator's DEBUG_FPGA model returns, on the first strobe after a 0x1F write,
+   the byte at `ptr - hw_read_lag` off by +1, then post-increments. One hypothesis only; the host relies on
+   nothing but READ_RAW returning exactly `start_word .. start_word + count - 1`.
+
+To make the simulator report what the real firmware reports today, use `--caps 0x1803` (AL3, no ACQUIRE_AVG,
+READ_SCREEN, READ_LIVE, FORCE or DEBUG_FPGA).
 
 ## Windows note
 

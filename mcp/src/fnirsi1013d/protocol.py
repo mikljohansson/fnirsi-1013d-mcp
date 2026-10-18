@@ -692,15 +692,16 @@ def test_pattern_bytes(length: int, pattern: int) -> bytes:
     if pattern == 2:
         return b"\xff" * length
     if pattern == 3:
-        # xorshift32 seeded with length (seed 0 would stick at 0; use 1 then). Emit the low byte of each step.
-        x = length & 0xFFFFFFFF or 1
-        out = bytearray(length)
-        for i in range(length):
+        # xorshift32 (protocol 14.12): state = length; before bytes 4k..4k+3 the state steps once
+        # (x ^= x << 13; x ^= x >> 17; x ^= x << 5); the 4 bytes are the new state little-endian.
+        x = length & 0xFFFFFFFF
+        out = bytearray()
+        while len(out) < length:
             x ^= (x << 13) & 0xFFFFFFFF
             x ^= x >> 17
             x ^= (x << 5) & 0xFFFFFFFF
-            out[i] = x & 0xFF
-        return bytes(out)
+            out += x.to_bytes(4, "little")
+        return bytes(out[:length])
     raise ValueError(pattern)
 
 

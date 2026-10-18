@@ -243,7 +243,7 @@ class SimConfig:
     caps_clear: int = 0
     seed: int | None = None
     fw_version: str = "0.1.0-sim"
-    serial: str = "SIM00001"
+    serial: str = "1013D-SIM"
     ui_capture_period_s: float = 0.05
     #: drop (never send) responses with a larger payload, like firmware 0.1.0 on hardware (> 5 KiB failed)
     fail_responses_over: int | None = None
@@ -599,11 +599,12 @@ class Device:
             t0 = getattr(self, "ui_t0", self.t_boot)
             self.capture_id = self.ui_capture_base + int((now - t0) / self.cfg.ui_capture_period_s)
         fl = 0
-        if self.fpga_triggered:
+        remote = self.control == P.Control.REMOTE  # 14.10: the FPGA flags read 0 in LOCAL
+        if remote and self.fpga_triggered:
             fl |= P.StatusFlags.FPGA_TRIGGERED
-        if self.fpga_done:
+        if remote and self.fpga_done:
             fl |= P.StatusFlags.FPGA_DONE
-        if self.auto_timeout_flag:
+        if remote and self.auto_timeout_flag:
             fl |= P.StatusFlags.AUTO_TIMEOUT
         if self.dtr:
             fl |= P.StatusFlags.DTR
@@ -647,6 +648,8 @@ class Device:
 
     def gen(self) -> P.Gen:
         g = self.settings.gen
+        if not self.spec.generator:  # 14.13: stock bitstream, fixed 1 kHz, no DDS registers
+            return P.Gen(enable=1, phase_inc=0, duty_threshold=0, freq_mhz_actual=1_000_000, duty_bp_actual=5000)
         return P.Gen(enable=g.enable, phase_inc=g.phase_inc, duty_threshold=g.duty_threshold,
                      freq_mhz_actual=P.gen_freq_mhz(g.phase_inc), duty_bp_actual=P.gen_duty_bp(g.duty_threshold))
 
@@ -727,8 +730,9 @@ class Device:
                 return self._done(req, self._err(req, P.Status.E_UNSUPPORTED, 0, f"cap {need.name} missing"))
             size = P.REQUEST_SIZES.get(cmd)
             if size is not None and len(req.payload) < size:
-                return self._done(req, self._err(req, P.Status.E_BAD_LEN, 0,
-                                                 f"need {size} bytes, got {len(req.payload)}"))
+                # protocol 5 / 14.3: missing trailing fields read as zero (no E_BAD_LEN)
+                req = P.Frame(req.cmd, req.seq, req.payload + b"\0" * (size - len(req.payload)), req.status,
+                              req.flags, req.proto_major)
             handler = getattr(self, f"_cmd_{cmd.name.lower()}")
             try:
                 out = handler(req)
@@ -740,7 +744,7 @@ class Device:
 
     def _done(self, req: P.Frame, resp: P.Frame) -> P.Frame:
         enc = resp.encode()
-        if len(enc) <= 256:
+        if resp.status == P.Status.OK and len(resp.payload) <= 256:
             self.last_resp = (req.seq, req.cmd, enc)
         else:
             self.last_resp = None
@@ -794,9 +798,8 @@ class Device:
             self.go_remote(r.flags, r.watchdog_s)
         elif r.action == 0:
             if self.control == P.Control.REMOTE:
-                if r.flags & P.SetRemoteReq.KEEP_SETTINGS:
-                    self.remote_flags |= P.SetRemoteReq.KEEP_SETTINGS
-                self.go_local(P.ExitReason.HOST_RELEASE)
+                # 14.11: a host release uses its own KEEP_SETTINGS flag; other exits use the acquire-time flag
+                self.go_local(P.ExitReason.HOST_RELEASE, keep=bool(r.flags & P.SetRemoteReq.KEEP_SETTINGS))
         else:
             raise _DevErr(P.Status.E_BAD_ARG, 0, f"action {r.action}")
         return self._ok(req, self.status().pack())
@@ -809,12 +812,13 @@ class Device:
         if r.length > P.MAX_RESPONSE_PAYLOAD:
             raise _DevErr(P.Status.E_BAD_ARG, 0, f"length {r.length} > {P.MAX_RESPONSE_PAYLOAD}")
         if r.pattern > 3:
-            raise _DevErr(P.Status.E_BAD_ARG, 1, f"pattern {r.pattern}")
+            raise _DevErr(P.Status.E_BAD_ARG, 4, f"pattern {r.pattern}")
         return self._ok(req, P.test_pattern_bytes(r.length, r.pattern))
 
-    def _channel_arg(self, b: int) -> int:
+    def _channel_arg(self, b: int, detail: int = 0) -> int:
+        """detail: byte offset (0) for GET_CHANNEL / GET_CAL, 0xFF for SET_CHANNEL (14.4)."""
         if b > 1:
-            raise _DevErr(P.Status.E_BAD_ARG, 0, f"channel {b} > 1")
+            raise _DevErr(P.Status.E_BAD_ARG, detail, f"channel {b} > 1")
         return b
 
     def _cmd_get_channel(self, req: P.Frame) -> P.Frame:
@@ -823,17 +827,17 @@ class Device:
 
     def _cmd_set_channel(self, req: P.Frame) -> P.Frame:
         r = P.SetChannelReq.unpack(req.payload)
-        ch = self._channel_arg(r.channel)
+        ch = self._channel_arg(r.channel, 0xFF)
         cs = self.settings.channels[ch]
         M = P.SetChannelReq
         if r.mask & M.M_RANGE and r.range > 6:
-            raise _DevErr(P.Status.E_BAD_ARG, 3, f"range {r.range} > 6")
+            raise _DevErr(P.Status.E_BAD_ARG, 1, f"range {r.range} > 6")
         if r.mask & M.M_COUPLING and r.coupling > 1:
-            raise _DevErr(P.Status.E_BAD_ARG, 4, f"coupling {r.coupling} > 1")
+            raise _DevErr(P.Status.E_BAD_ARG, 2, f"coupling {r.coupling} > 1")
         if r.mask & M.M_PROBE and r.probe_index > 6:
-            raise _DevErr(P.Status.E_BAD_ARG, 6, f"probe_index {r.probe_index} > 6")
+            raise _DevErr(P.Status.E_BAD_ARG, 5, f"probe_index {r.probe_index} > 6")
         if r.mask & M.M_OFFSET and r.offset_mode > 1:
-            raise _DevErr(P.Status.E_BAD_ARG, 7, f"offset_mode {r.offset_mode} > 1")
+            raise _DevErr(P.Status.E_BAD_ARG, 3, f"offset_mode {r.offset_mode} > 1")
         relay = False
         if r.mask & M.M_ENABLE:
             cs.enable = 1 if r.enable else 0
@@ -853,12 +857,14 @@ class Device:
             center = self.cal[ch].dc_calibration_offset[cs.range]
             if r.offset_mode == 1:
                 if not 0 <= r.offset <= 2000:
-                    raise _DevErr(P.Status.E_BAD_ARG, 8, f"offset_pwm {r.offset} not in 0..2000")
+                    raise _DevErr(P.Status.E_BAD_ARG, 3, f"offset_pwm {r.offset} not in 0..2000")
                 cs.dcoffset = r.offset - center
             else:
                 cs.dcoffset = r.offset
-            # clamp so the PWM stays in range
-            cs.dcoffset = max(-center, min(2000 - center, cs.dcoffset))
+        if r.mask & (M.M_OFFSET | M.M_RANGE):
+            center = self.cal[ch].dc_calibration_offset[cs.range]
+            if not 0 <= center + cs.dcoffset <= 2000:
+                raise _DevErr(P.Status.E_BAD_ARG, 3, f"offset PWM {center + cs.dcoffset} not in 0..2000")
         if relay:
             self.relay_switches += 1
             self.relay_settle_until = self.now() + 0.050
@@ -872,7 +878,7 @@ class Device:
         s = self.settings
         if r.mode == 0:
             if r.value > 34:
-                raise _DevErr(P.Status.E_BAD_ARG, 1, f"timeperdiv index {r.value} > 34")
+                raise _DevErr(P.Status.E_BAD_ARG, 4, f"timeperdiv index {r.value} > 34")
             if r.value < P.MIN_REMOTE_TIMEPERDIV_INDEX:
                 raise _DevErr(P.Status.E_UNSUPPORTED, 1, "roll/long timebases not available remotely")
             sr = P.TIME_PER_DIV_SAMPLE_RATE[r.value]
@@ -937,6 +943,8 @@ class Device:
         return self._ok(req, self.trigger().pack())
 
     def _cmd_arm(self, req: P.Frame) -> P.Frame:
+        if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
+            raise _DevErr(P.Status.E_STATE, 0, "already ARMED; STOP first")
         self.arm()
         return self._ok(req, self.status().pack())
 
@@ -1045,7 +1053,7 @@ class Device:
             metas.append(P.TraceChannelMeta(c, cfg.range, cfg.coupling, fl, cfg.uv_per_lsb_q8, cfg.zero_code_q8,
                                             self.cal[c].adc_a_comp, self.cal[c].adc_b_comp).pack())
             datas.append(tr[r.start: r.start + count].tobytes())
-            if c == self.settings.trigger.source:
+            if c == self.settings.trigger.source and 20 <= 2 * Pw and 2 * Pw + 64 <= n:
                 sw_idx = self._sw_trigger(tr, 2 * Pw)
         if self.settings.trigger.source not in chans:
             sw_idx = -1
@@ -1085,7 +1093,7 @@ class Device:
         nsamp = 2 * Tw
         count = nsamp - r.start if r.count == 0 else r.count
         if r.start + count > nsamp:
-            raise _DevErr(P.Status.E_BAD_ARG, 12, f"start + count > total_samples {nsamp}")
+            raise _DevErr(P.Status.E_BAD_ARG, 8, f"start + count > total_samples {nsamp}")
         chans = [c for c in (0, 1) if r.ch_mask & (1 << c)]
         if 16 + 2 * count * len(chans) > P.MAX_RESPONSE_PAYLOAD:
             raise _DevErr(P.Status.E_OVERFLOW, 0, "window too long")
@@ -1131,11 +1139,11 @@ class Device:
         if r.mask & P.SetGenReq.M_FREQ:
             inc = r.freq if r.freq_mode == 1 else P.gen_phase_inc(r.freq)
             if inc > 1 << 31:
-                raise _DevErr(P.Status.E_BAD_ARG, 4, "frequency above 25 MHz")
+                raise _DevErr(P.Status.E_BAD_ARG, 1, "frequency above 25 MHz")
             g.phase_inc = inc
         if r.mask & P.SetGenReq.M_DUTY:
             if r.duty_mode == 0 and r.duty > 10000:
-                raise _DevErr(P.Status.E_BAD_ARG, 12, f"duty {r.duty} bp > 10000")
+                raise _DevErr(P.Status.E_BAD_ARG, 2, f"duty {r.duty} bp > 10000")
             g.duty_threshold = r.duty if r.duty_mode == 1 else P.gen_threshold(r.duty)
         if r.mask & P.SetGenReq.M_ENABLE:
             g.enable = 1 if r.enable else 0
@@ -1253,6 +1261,7 @@ class Device:
 
     def handle_ascii(self, line: str) -> str:
         with self.lock:
+            self.last_frame_at = self.now()  # 14.21
             cmd = line.strip().upper()
             if cmd == "#VER":
                 return (f"#OK,FNIRSI-1013D-AI,fw={self.cfg.fw_version},proto={P.PROTO_MAJOR}.{P.PROTO_MINOR},"
@@ -1444,7 +1453,7 @@ def build_config(args: argparse.Namespace) -> SimConfig:
     return SimConfig(variant=args.variant, signals=(ch1, ch2), noise_lsb=args.noise,
                      hw_read_lag=args.hw_read_lag, fw_read_lag=args.fw_read_lag, true_order=args.true_order,
                      trigger_align_offset=args.trigger_align_offset, time_scale=args.time_scale,
-                     seed=args.seed, fail_responses_over=args.fail_responses_over)
+                     seed=args.seed, fail_responses_over=args.fail_responses_over, caps_override=args.caps)
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -1465,6 +1474,9 @@ def make_parser() -> argparse.ArgumentParser:
     ap.add_argument("--time-scale", type=float, default=1.0,
                     help="scale modelled acquisition time (0 = instant captures)")
     ap.add_argument("--seed", type=int)
+    ap.add_argument("--caps", type=lambda x: int(x, 0), metavar="MASK",
+                    help="capability mask override, e.g. 0x1803 = firmware 0.1.0 on AL3 (no device averaging, "
+                         "screenshot, FORCE, DEBUG_FPGA); default: everything the simulator implements")
     ap.add_argument("--fail-responses-over", type=int, metavar="BYTES",
                     help="never send responses with a larger payload (reproduces the 5 KiB firmware bug)")
     ap.add_argument("-v", "--verbose", action="store_true")

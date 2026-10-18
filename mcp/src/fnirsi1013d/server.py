@@ -802,6 +802,13 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 codes_per_div = P.RANGE_VOLTS_PER_DIV[new_rng] / vpl
                 shift = offset_div * codes_per_div
                 dcoffset = int(round(-shift * (cal.dc_shift_value or 1) / 100))
+                center = cal.dc_calibration_offset[new_rng]
+                if not 0 <= center + dcoffset <= 2000:
+                    per_div = codes_per_div * 100 / (cal.dc_shift_value or 1)
+                    lo, hi = -(2000 - center) / per_div, center / per_div
+                    raise ValueError(f"offset_div {offset_div:g} is out of reach on this range: the offset PWM "
+                                     f"allows about {lo:.2f} .. {hi:.2f} divisions [U scaling]. Use a smaller "
+                                     "offset or a larger volts_per_div")
             relay = (rng is not None and min(rng, 5) != min(cur.range, 5)) or \
                     (coupling is not None and int(coupling == "AC") != cur.coupling)
             waited = sess.relay_slot() if relay else 0.0

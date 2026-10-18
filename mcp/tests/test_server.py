@@ -221,7 +221,9 @@ async def test_capture_inline_window_and_file(client):
 
 
 async def test_capture_caveats_clipping_and_no_trigger(client):
-    await client.call("scope_set_channel", channel="CH1", range_index=5, offset_div=4)  # pushes the sine into 255
+    msg = await client.fails("scope_set_channel", channel="CH1", range_index=5, offset_div=4)
+    assert "out of reach" in msg
+    await client.call("scope_set_channel", channel="CH1", range_index=5, offset_div=3)  # pushes the sine into 255
     await client.call("scope_set_trigger", source="CH1", level_code=128, mode="auto")
     r = await client.call("scope_capture", channels=["CH1"])
     assert r["channels"]["CH1"]["clipped_samples"] > 0 and any("clipped" in x for x in r["caveats"])

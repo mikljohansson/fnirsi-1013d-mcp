@@ -61,14 +61,16 @@ def test_not_remote_error_is_actionable(transport):
     assert "REMOTE" in str(e.value)
 
 
-def test_unknown_command_and_bad_len(transport):
+def test_unknown_command_and_short_requests(transport):
     with pytest.raises(DeviceError) as e:
         transport.request(0x0777)
     assert e.value.status == P.Status.E_UNKNOWN_CMD
+    # protocol 5 / 14.3: a shorter payload reads missing trailing fields as zero
+    cfg = P.ChannelConfig.unpack(transport.request(P.Cmd.GET_CHANNEL, b"").payload)
+    assert cfg.channel == 0
     remote(transport)
-    with pytest.raises(DeviceError) as e:
-        transport.request(P.Cmd.SET_TRIGGER, b"\0\0")
-    assert e.value.status == P.Status.E_BAD_LEN
+    before = transport.request(P.Cmd.GET_TRIGGER).payload
+    assert transport.request(P.Cmd.SET_TRIGGER, b"\0\0").payload == before  # mask 0: nothing changes
 
 
 def test_request_frame_limit_enforced_by_host(transport):
