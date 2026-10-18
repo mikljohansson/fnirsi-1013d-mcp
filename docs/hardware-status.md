@@ -251,3 +251,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   rising edge, else its low sits at ~1.24 V between VIL and VIH. General measurement caveat (new): tying probe ground to USB ground (earthed DUT
   + earthed PC) pulls ~12 mA through R71, sags VRF1 to ~1.1 V and shifts every trace -> goes into docs/agent-measurement-guide.md.
   Owner's DMM checks (optional confirmation): BNC shell to USB shell = +1.2..1.25 V; post to shell at 0.5 Hz alternates ~-1.24 / +1.9..2.0 V.
+- Soak on 0.2.12 (10 Hz GET_STATUS, 17:08-17:12, selective suspend off): two drops, 17:11:46 and 17:11:53 (Windows error 22; port back in 2.1 s
+  and 1.1 s; firmware kept running). Counters: usb_bus_resets 1->4->5, usb_suspends 1->4->5, link_resets 2->10, ep0_setups 300->377. The
+  GET_EVENT_LOG ring was flooded with irq_polled entries (INTUSB SOF flag every ms, ~1000 events/s), so nothing from before the resets survived.
+- Owner's DMM: 1.46 V between a second cable's USB ground on the same hub and a BNC shell with the scope's USB connected (predicted 1.24 V VRF1;
+  the extra ~0.2 V is probably the IR drop in the scope's cable ground from the charging current, inference).
+- Firmware 0.2.13 (7ebda04, sha256 691d0d28..., pinned): System settings compacted without DS3231, battery level averaged with hysteresis. Not
+  benched separately. Firmware 0.2.14 (d6a6b37, sha256 aa4a142c..., pinned): IRQ fallback gated on quiet ticks, EXT ground note. Loaded: census
+  1000 PINGs 0/0, 0.99 MB/s, but 1 of 100 64 KiB transfers lost again (second build with the tick-run USB handler; 0 in ~800 on 0.2.6-0.2.11);
+  usb_irq_polled 11798 in ~2 min (SOF flag defeats the gate). Both back with fw-gen2 for 0.2.15. Card keeps 0.2.11.
