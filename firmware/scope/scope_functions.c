@@ -1076,8 +1076,10 @@ static int cal_channel(acal_channel *c)
     cal_measure(r, m.pwm, 60, 8, acc);
     cal_result(acc, m.zero16[ACAL_GATED], m.drift16[ACAL_GATED], m.noise16[ACAL_GATED], &m.clipped);
 
+    //Full rate: a 1000-sample readout spans 5 us of the 40 us offset-PWM ripple period, so each conversion sees one
+    //ripple phase; 64 conversions (about 70 ms) average it out (bench 0.2.43: 8 left 0.2-0.4 code)
     cal_set_rate(CAL_RATE_FULL);
-    cal_measure(r, m.pwm, 30, 8, acc);
+    cal_measure(r, m.pwm, 30, 64, acc);
     cal_result(acc, m.zero16[ACAL_FULL], m.drift16[ACAL_FULL], m.noise16[ACAL_FULL], &m.clipped);
 
     rc = acal_range_store(&m, c, (uint8)r);
