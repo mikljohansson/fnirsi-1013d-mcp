@@ -53,10 +53,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 ## Owner bench verdicts outstanding
 
 - [ ] 0.2.40/0.2.41 layout: Roll/Average/Filter boxes and the pass-time label alignment; Max hold behaviour; overrange
-  warning; auto mode no longer flashing flat traces at fast time bases.
+  warning. (Auto mode verified by the coordinator on 0.2.41: 6/6 triggered records at 10 MS/s, untriggered flagged truthfully.)
 
 ## Dispatched
 
-- fw-cal (worktree): calibration v2 (roadmap item 5).
+- fw-cal (worktree): calibration v2 delivered on branch fw-cal; rebase to main + renumber 0.2.42 requested; bench steps 1-11 in firmware/README.md 6.2 pending.
 - fpga-gen4: FPGA 0x1535 (CIC N/2 + 15-tap FIR).
 - mcp-gen3: idle, holds item 4 (version bump).

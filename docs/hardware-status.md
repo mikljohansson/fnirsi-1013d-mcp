@@ -454,3 +454,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   dB-domain, restarts on bin-meaning changes, reported in the READ_SPECTRUM header), one-line header (peak marker per channel, RBW, Avg,
   filter tag), warnings centred over the plot, taller plot, Roll box without on/off text. Loaded on 0x1534 with CIC3 selected. Owner checks
   pending. Not yet in: the auto-mode time-out fix and the wider zoom-in threshold (0.2.41).
+- Firmware 0.2.41 (fw-gen5, commits 0fd6a9c/f041300, sha256 08aeaa63..., pinned; fw-gen5 retired, handoff in firmware/AGENTS.md section 20):
+  firmware auto trigger mode (FPGA armed in normal mode, main loop forces after max(100 ms, 2 records)), truthful untriggered flags, zoom-in
+  rate step at span <= fs/16. **Verified:** 1 kHz square, 3000 samples, AUTO mode: 10 MS/s 6/6 single-edge records (was 2 of 6 flat),
+  5 MS/s 6/6, ~120 ms per host capture; no signal at 10 MS/s: 4/4 reported triggered=0 auto_timeout=1, ~200 ms per capture. The earlier
+  E_BUSY refusals were the owner's open menu (30 SET_TRIGGER + 10 SET_TIMEBASE later: 0 refused).
+- fw-cal delivered calibration v2 on branch fw-cal (per-core zeros in two clock classes, full-rate and gated, per range; dithered sub-code
+  correction; versioned CRC block in sector 708; GET_CAL 248 bytes, protocol 1.10 row 48; diagnostics show v1/v2 and per-core zeros).
+  Rebase onto main and renumber to 0.2.42 requested before merging; bench steps in firmware/README.md 6.2 (owner runs base calibration).
