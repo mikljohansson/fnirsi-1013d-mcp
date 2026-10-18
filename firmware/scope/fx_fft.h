@@ -28,30 +28,33 @@
 
 #define FX_CDB_FLOOR        (-32000)  //centi-dB value for a zero bin
 
-//Memory the caller provides, in int32 words: window N/2 + 1, work buffer N + 2.
-#define FX_FFT_WIN_WORDS(log2n)   ((1 << ((log2n) - 1)) + 1)
+//Memory the caller provides, in int32 words, both 8-byte aligned: plan (window N + twiddles N), work buffer N + 2.
+#define FX_FFT_WIN_WORDS(log2n)   (2 << (log2n))
 #define FX_FFT_BUF_WORDS(log2n)   ((1 << (log2n)) + 2)
 
 typedef struct
 {
   int    log2n;
   int    window;
-  int32 *win;           //Q30 window, symmetric half: w[n] for n = 0..N/2, w[N - n] = w[n]
+  int32 *win;           //Q30 window, all N points (pairs load as one LDRD), then N/2 twiddle pairs (c, s) of W_N^k
   int32 *buf;           //after a run: bins k = 0..N/2 as re, im pairs (2 * X_k scaled by 2^shift)
   int    shift;         //input scale of the last run: buf holds 2 * 2^shift * X_k (shift may be negative)
   int32  norm_q16;      //level term in log2 Q16 from the window sum (fx_fft_init)
 } FX_FFT;
 
-//Set up a plan: fills the window table. Returns 0, or -1 for a bad log2n or window.
+//Set up a plan: fills the window table. Returns 0, or -1 for a bad log2n or window or a buffer not 8-byte aligned.
 int  fx_fft_init(FX_FFT *p, int log2n, int window, int32 *win, int32 *buf);
 
-//Window, scale and transform N samples. u8: x[n] - offset (8-bit ADC codes); i32: x[n] - offset, |x - offset| < 2^28
+//Window, scale and transform N samples. u8: x[n] - offset (8-bit ADC codes, x 2-byte aligned, offset 0..255, clamped);
+//i32: x[n] - offset,
+//x 8-byte aligned, |x - offset| < 2^28
 //(inputs wider than 29 - log2n bits are rounded to that width).
 void fx_fft_run_u8(FX_FFT *p, const uint8 *x, int32 offset);
 void fx_fft_run_i32(FX_FFT *p, const int32 *x, int32 offset);
 
-//Bin power of the last run in centi-dB (see above), bins k = first..first + count - 1 (<= N/2) into out.
-void fx_fft_cdb(const FX_FFT *p, int first, int count, int16 *out);
+//Bin power of the last run in centi-dB (see above) plus offset, bins k = first..first + count - 1 (<= N/2) into out;
+//FX_CDB_FLOOR marks an empty bin, other values are clamped to FX_CDB_FLOOR + 1..32767.
+void fx_fft_cdb(const FX_FFT *p, int first, int count, int32 offset, int16 *out);
 
 //Helpers, exposed for the display code and the host tests.
 int32  fx_log2_q16(uint64 v);            //log2(v) in Q16 (v > 0), error < 2^-16 after interpolation

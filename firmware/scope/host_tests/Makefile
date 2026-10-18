@@ -15,7 +15,7 @@ PROTO_SRCS := $(SRC)/pc_protocol.c
 CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/pc_decim.c mock_hal.c
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/pc_protocol.h mock_hal.h test_util.h
 
-.PHONY: all test vectors clean
+.PHONY: all test test-arm vectors clean
 all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt
 
 $(OUT):
@@ -48,6 +48,29 @@ $(OUT)/fft_cli: fft_cli.c $(FFT_SRCS) $(SRC)/fx_fft.h | $(OUT)
 $(OUT)/test_spec_fmt: test_spec_fmt.c test_util.h $(SRC)/spec_fmt.c $(SRC)/spec_fmt.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_spec_fmt.c $(SRC)/spec_fmt.c
 
+# The same FFT test on the target code: fx_fft.c built with the bench compiler (GCC 10, firmware flags, so the ARM
+# assembly paths are in), the CLI linked with newlib semihosting (system arm-none-eabi-gcc), run under qemu-arm.
+GCC10    ?= $(HOME)/opt/gcc10
+ARM_CC10 := $(GCC10)/usr/bin/arm-none-eabi-gcc
+ARM_FL   := -Wall -Wno-write-strings -Wno-char-subscripts -fno-stack-protector -DNO_STDLIB=1 -mcpu=arm926ej-s -O3 \
+            -mfloat-abi=soft -isystem $(GCC10)/usr/include/newlib
+ARM_OUT  := $(OUT)/arm
+$(ARM_OUT)/fft_cli: fft_cli.c $(FFT_SRCS) $(SRC)/fx_fft.h
+	mkdir -p $(ARM_OUT)
+	$(ARM_CC10) $(ARM_FL) -c $(SRC)/fx_fft.c -o $(ARM_OUT)/fx_fft.o
+	$(ARM_CC10) $(ARM_FL) -c $(SRC)/fx_fft_tables.c -o $(ARM_OUT)/fx_fft_tables.o
+	arm-none-eabi-gcc -mcpu=arm926ej-s -mfloat-abi=soft -O2 -I$(SRC) --specs=rdimon.specs -o $@ fft_cli.c \
+	  $(ARM_OUT)/fx_fft.o $(ARM_OUT)/fx_fft_tables.o
+
+test-arm: $(ARM_OUT)/fft_cli $(OUT)/fft_cli
+	$(PYTHON) -I test_fft.py --cli $(ARM_OUT)/fft_cli --prefix "qemu-arm -cpu arm926"
+	@for L in 8 10 12 14; do for W in 0 1 2; do \
+	  head -c $$((1 << L)) /dev/urandom > $(ARM_OUT)/in.bin; \
+	  qemu-arm -cpu arm926 $(ARM_OUT)/fft_cli $$L $$W u8 128 < $(ARM_OUT)/in.bin > $(ARM_OUT)/a.bin; \
+	  $(OUT)/fft_cli $$L $$W u8 128 < $(ARM_OUT)/in.bin > $(ARM_OUT)/h.bin; \
+	  cmp -s $(ARM_OUT)/a.bin $(ARM_OUT)/h.bin || { echo "test-arm: ARM and C builds differ (N 2^$$L, window $$W)"; exit 1; }; \
+	done; done; echo "test-arm: ARM assembly byte-identical to the C build (12 cases)"
+
 test: all
 	$(OUT)/test_protocol
 	$(OUT)/test_rx_ring
@@ -56,6 +79,8 @@ test: all
 	$(OUT)/test_spec_fmt
 	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --decim-checker $(OUT)/decim_check --vectors $(VECTORS)
 	$(PYTHON) -I test_fft.py --cli $(OUT)/fft_cli --tables $(SRC)/fx_fft_tables.c --gen ../../tools/gen_fft_tables.py
+	@if command -v qemu-arm >/dev/null && command -v arm-none-eabi-gcc >/dev/null && [ -x $(ARM_CC10) ]; then \
+	  $(MAKE) --no-print-directory test-arm; else echo "test-arm skipped (needs qemu-arm, arm-none-eabi-gcc + newlib, GCC 10)"; fi
 
 vectors:
 	$(PYTHON) -I gen_vectors.py -o $(VECTORS)

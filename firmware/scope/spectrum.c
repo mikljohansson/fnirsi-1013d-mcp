@@ -22,14 +22,15 @@
 extern DISPLAYDATA displaydata;     //display_lib.c (current font for text_width)
 
 //Work memory in DDR (.bss, uncached: the MMU and so the D-cache are off)
-static int32 spec_win[FX_FFT_WIN_WORDS(FX_FFT_LOG2_MAX)];
-static int32 spec_buf[FX_FFT_BUF_WORDS(FX_FFT_LOG2_MAX)];
+static int32 spec_win[FX_FFT_WIN_WORDS(FX_FFT_LOG2_MAX)] __attribute__((aligned(8)));
+static int32 spec_buf[FX_FFT_BUF_WORDS(FX_FFT_LOG2_MAX)] __attribute__((aligned(8)));
 static int16 spec_cdb[(FX_FFT_N_MAX / 2) + 1];
 
 //On-chip SRAM A (32 KB at 0): at run time only the low vectors (0x00-0x3F) live there; the bootloader's stack (and the
-//one ENTER_FEL sets up, 0x7C00) sit at the top. The benchmark borrows 0x1000-0x7000 for N <= 4096 (24,588 bytes).
+//one ENTER_FEL sets up, 0x7C00) sit at the top. The benchmark borrows 0x1000-0x7008 for N <= 2048 (plan 2 N words +
+//buffer N + 2 words; fw 0.2.27 went to 4096 with the half window).
 #define SPEC_SRAM_BASE        ((int32 *)0x00001000)
-#define SPEC_SRAM_LOG2_MAX    12
+#define SPEC_SRAM_LOG2_MAX    11
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -92,7 +93,7 @@ static uint8 *bench_one(uint8 *o, int log2n, int sram, uint32 reps)
     if(t_run > run_max) run_max = t_run;
 
     t0 = spectrum_us();
-    fx_fft_cdb(&p, 0, half + 1, spec_cdb);
+    fx_fft_cdb(&p, 0, half + 1, 0, spec_cdb);
     t_run = spectrum_us() - t0;
 
     if(t_run < cdb_min) cdb_min = t_run;
@@ -323,7 +324,6 @@ static void spec_compute(void)
   {
     PCHANNELSETTINGS s = spec_ch(ch);
     SPECFRAME *f = &spec_frame[ch];
-    uint32 k;
     int32  g;
 
     spec.have[ch] = 0;
@@ -331,17 +331,10 @@ static void spec_compute(void)
     if(!s->enable || ((spec.channel != SPEC_CH_BOTH) && (spec.channel != ch)))
       continue;
 
-    fx_fft_run_u8(&spec_plan, s->tracebuffer, spec_zero_code(s));
-    fx_fft_cdb(&spec_plan, 0, half + 1, spec_db[ch]);
-
+    //Levels straight into dBV: the volts-per-code term rides along as the dB offset
     g = spec_gain_cdb(s);
-    for(k = 0; k <= half; k++)
-    {
-      int32 v = spec_db[ch][k];
-
-      v = (v <= FX_CDB_FLOOR) ? FX_CDB_FLOOR : v + g;
-      spec_db[ch][k] = (int16)((v < -32000) ? -32000 : (v > 32000) ? 32000 : v);
-    }
+    fx_fft_run_u8(&spec_plan, s->tracebuffer, spec_zero_code(s));
+    fx_fft_cdb(&spec_plan, 0, half + 1, g, spec_db[ch]);
 
     f->log2n     = log2n;
     f->window    = spec.window;

@@ -17,6 +17,7 @@ Prints the measured bounds (firmware/README.md "FFT core" quotes them).
 """
 import argparse
 import math
+import shlex
 import subprocess
 import sys
 
@@ -44,18 +45,21 @@ def window_float(n, kind):
     return w
 
 
-def run(cli, log2n, kind, x, sample, offset):
+PREFIX = []
+
+
+def run(cli, log2n, kind, x, sample, offset, cdb_offset=None):
     n = 1 << log2n
     data = (np.asarray(x, dtype=np.uint8) if sample == "u8" else np.asarray(x, dtype="<i4")).tobytes()
-    out = subprocess.run([cli, str(log2n), str(kind), sample, str(offset)], input=data,
-                         capture_output=True, check=True).stdout
+    args = PREFIX + [cli, str(log2n), str(kind), sample, str(offset)] + ([str(cdb_offset)] if cdb_offset is not None else [])
+    out = subprocess.run(args, input=data, capture_output=True, check=True).stdout
     shift, norm = np.frombuffer(out[:8], dtype="<i4")
     pos = 8
     bins = np.frombuffer(out[pos:pos + 4 * (n + 2)], dtype="<i4").astype(np.float64)
     pos += 4 * (n + 2)
     cdb = np.frombuffer(out[pos:pos + 2 * (n // 2 + 1)], dtype="<i2").astype(np.float64) / 100.0
     pos += 2 * (n // 2 + 1)
-    win = np.frombuffer(out[pos:pos + 4 * (n // 2 + 1)], dtype="<i4").astype(np.float64) / 2.0 ** 30
+    win = np.frombuffer(out[pos:pos + 4 * n], dtype="<i4").astype(np.float64) / 2.0 ** 30
     X = (bins[0::2] + 1j * bins[1::2]) / (2.0 * 2.0 ** int(shift))
     return X, cdb, win
 
@@ -91,8 +95,10 @@ def main():
     ap.add_argument("--cli", required=True)
     ap.add_argument("--tables")
     ap.add_argument("--gen")
+    ap.add_argument("--prefix", default="", help="runner for the CLI, e.g. qemu-arm -cpu arm926")
     ap.add_argument("-v", action="store_true")
     a = ap.parse_args()
+    PREFIX[:] = shlex.split(a.prefix)
     rng = np.random.default_rng(1013)
 
     if a.tables and a.gen:
@@ -104,7 +110,7 @@ def main():
     vals = np.unique(np.concatenate([rng.integers(1, 2 ** 62, 20000, dtype=np.uint64),
                                      np.arange(1, 5000, dtype=np.uint64),
                                      (np.uint64(1) << np.arange(0, 63, dtype=np.uint64))]))
-    out = subprocess.run([a.cli, "log2"], input=vals.astype("<u8").tobytes(), capture_output=True, check=True).stdout
+    out = subprocess.run(PREFIX + [a.cli, "log2"], input=vals.astype("<u8").tobytes(), capture_output=True, check=True).stdout
     r = np.frombuffer(out, dtype="<i4").reshape(-1, 2)
     exact = np.array([math.log2(int(v)) for v in vals])
     e_log2 = np.max(np.abs(r[:, 0] / 65536.0 - exact))
@@ -123,7 +129,7 @@ def main():
             wsum = wf.sum()
             for name, sample, x, off, fs in signals(n, rng):
                 X, cdb, win = run(a.cli, log2n, kind, x, sample, off)
-                ew = np.max(np.abs(win - wf[:n // 2 + 1]))
+                ew = np.max(np.abs(win - wf))
                 check(ew < 4e-9, "window %d N %d error %g" % (kind, n, ew))
                 Xref = np.fft.rfft(wf * (np.asarray(x, dtype=np.float64) - off))
                 err = np.max(np.abs(X - Xref)) / (fs * wsum / 2)
@@ -142,6 +148,15 @@ def main():
                     peak = cdb[n // 8]
                     want = 20 * math.log10(127 / math.sqrt(2))
                     check(abs(peak - want) < 0.02, "N %d win %d: tone %.3f dB, want %.3f" % (n, kind, peak, want))
+            if kind == 1:
+                # the dB offset parameter shifts every non-empty bin, empty bins stay at the floor
+                x = np.round(128 + 100 * np.sin(2 * np.pi * (n // 8) * np.arange(n) / n))
+                _, c0, _ = run(a.cli, log2n, kind, x, "u8", 128)
+                _, c1, _ = run(a.cli, log2n, kind, x, "u8", 128, -1234)
+                live = c0 > -290.0
+                check(np.all(np.abs((c1[live] - c0[live]) + 12.34) < 0.006), "N %d dB offset not applied" % n)
+                _, cz, _ = run(a.cli, log2n, kind, np.full(n, 128), "u8", 128, 500)
+                check(np.all(cz == -320.0), "N %d empty bins not at the floor" % n)
             if kind == 2:
                 k = np.arange(n)
                 x = np.round(128 + 127 * np.sin(2 * np.pi * (n // 8 + 0.5) * k / n))
