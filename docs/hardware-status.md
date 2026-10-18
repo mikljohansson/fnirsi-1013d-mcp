@@ -292,3 +292,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   64 KiB, 0 failed, no restart; usb_irq_polled 0, usb_irq_races 59 in ~90 s. => The 1.00o5 dispatcher does not lose interrupts; every
   0.2.12-0.2.19 "lost interrupt" was the tick racing the real ISR, and 0.2.16's tick body racing on live traffic is the likely restart cause
   (inference; no restart record captured). 30-minute capture soak on 0.2.20 started 18:31.
+- 0.2.20 (e1517803) capture soak 18:30-19:00 (4 KiB every 50 ms): 35,528 requests, 0 failures, 0 drops, 0 restarts, latency median 22.9 ms /
+  p99 50.1 ms, counters delta none (usb_irq_polled stayed 0 for the whole soak). Together with the 8 bench passes: 0.2.20 is clean.
+  **0.2.20 persisted to the card** (backup of 750.. taken by the tool first; restore with `fnirsi1013d-flash --restore <backup>` if the owner's
+  visual checks of the 0.2.13+ UI changes fail). Pending owner checks on 0.2.20: System settings menu without the empty bottom row, battery
+  indicator steady while charging, no boot message, generator/trigger menus and chip unchanged. fw-gen3 retired (handoff 47b2387); no agent active.
