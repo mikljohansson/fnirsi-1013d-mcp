@@ -476,9 +476,18 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
   return 44;
 }
 
-//uV per code x 256 at the BNC with a 1x probe, and the processed code of 0 V x 256 (P-8.5) [U]   BENCH: T8
+//Zero correction for the channel's current settings (adc_cal.h): calibration data v2 when loaded and bound
+static void pc_channel_corr(const pc_hw_channel *c, acal_corr *k)
+{
+  acal_correction(c->cal2_loaded ? &c->cal2 : 0, c->cal_offset, c->range, c->divider, c->dcoffset, c->dc_shift_value,
+                  c->adc_a_comp, c->adc_b_comp, k);
+}
+
+//uV per code x 256 at the BNC with a 1x probe, and the processed code of 0 V x 256 (P-8.5, protocol 1.10: the v2
+//correction puts it at exactly 128 - dcoffset x 100 / dc_shift_value) [U]   BENCH: T8
 static void pc_channel_scaling(const pc_hw_channel *c, uint32_t *uv_q8, int32_t *zero_q8)
 {
+  acal_corr k;
   uint8_t  r   = (c->range < 7) ? c->range : 6;
   uint64_t mul = pc_hal_mul_factor_1x(r);
   int64_t  ic  = c->input_cal[r];
@@ -489,10 +498,8 @@ static void pc_channel_scaling(const pc_hw_channel *c, uint32_t *uv_q8, int32_t 
   //256 * ic / 2^21 * mul * 10 = ic * mul * 10 / 2^13, rounded
   *uv_q8 = (uint32_t)(((uint64_t)ic * mul * 10 + 4096) >> 13);
 
-  if(c->dc_shift_value)
-    *zero_q8 = 128 * 256 - (int32_t)(((int64_t)c->dcoffset * 100 * 256) / c->dc_shift_value);
-  else
-    *zero_q8 = 128 * 256;
+  pc_channel_corr(c, &k);
+  *zero_q8 = k.zero_q8;
 }
 
 static uint32_t pc_channel_body(int ch, uint8_t *p)
@@ -1752,10 +1759,14 @@ static int h_set_gen(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
   return PC_OK;
 }
 
+#define PC_CAL_RESP_LEN 248     //72 bytes up to 1.9, the v2 export from 1.10
+
 static int h_get_cal(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   pc_hw_channel c;
-  uint32_t i;
+  acal_corr k;
+  uint32_t i, m, j;
+  uint8_t *p;
 
   (void)s; (void)len;
 
@@ -1780,7 +1791,31 @@ static int h_get_cal(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
   pc_put_u32(resp + 60, (uint32_t)c.dc_shift_value);
   pc_put_u32(resp + 64, c.adc_a_rawavg);
   pc_put_u32(resp + 68, c.adc_b_rawavg);
-  *rl = 72;
+
+  //1.10: calibration data v2 (protocol section 14 row 48)
+  pc_channel_corr(&c, &k);
+  memset(resp + 72, 0, PC_CAL_RESP_LEN - 72);
+  resp[72] = k.v2 ? 2 : 1;
+  resp[73] = (uint8_t)((c.cal2_loaded ? 1 : 0) | ((c.cal2_loaded && acal_bound(&c.cal2, c.cal_offset)) ? 2 : 0) |
+                       ((k.cls == ACAL_GATED) ? 4 : 0));
+  pc_put_u16(resp + 74, (uint16_t)k.comp_a);
+  pc_put_u16(resp + 76, (uint16_t)k.comp_b);
+  resp[78] = k.frac_a;
+  resp[79] = k.frac_b;
+  pc_put_u32(resp + 80, (uint32_t)k.zero_q8);
+  pc_put_u32(resp + 84, (uint32_t)k.corr16);
+  pc_put_u32(resp + 88, (uint32_t)k.shift);
+
+  if(c.cal2_loaded)
+  {
+    p = resp + 92;
+    for(j=0;j<ACAL_RANGES;j++, p+=2) pc_put_u16(p, c.cal2.pwm[j]);
+    for(m=0;m<ACAL_CLASSES;m++) for(i=0;i<2;i++) for(j=0;j<ACAL_RANGES;j++, p+=2) pc_put_u16(p, (uint16_t)c.cal2.zero[m][i][j]);
+    for(i=0;i<2;i++) for(j=0;j<ACAL_RANGES;j++, p+=4) pc_put_u32(p, (uint32_t)c.cal2.slope[i][j]);
+    for(m=0;m<ACAL_CLASSES;m++) for(i=0;i<2;i++) for(j=0;j<ACAL_RANGES;j++, p+=2) pc_put_u16(p, c.cal2.noise[m][i][j]);
+  }
+
+  *rl = PC_CAL_RESP_LEN;
   return PC_OK;
 }
 

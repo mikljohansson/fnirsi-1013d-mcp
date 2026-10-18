@@ -81,7 +81,7 @@ test: all
 	$(OUT)/test_session_debug
 	$(OUT)/test_spec_fmt
 	$(OUT)/test_adc_cal
-	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --decim-checker $(OUT)/decim_check --vectors $(VECTORS)
+	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --decim-checker $(OUT)/decim_check --adc-cal-checker $(OUT)/test_adc_cal --vectors $(VECTORS)
 	$(PYTHON) -I test_fft.py --cli $(OUT)/fft_cli --tables $(SRC)/fx_fft_tables.c --gen ../../tools/gen_fft_tables.py
 	@if command -v qemu-arm >/dev/null && command -v arm-none-eabi-gcc >/dev/null && [ -x $(ARM_CC10) ]; then \
 	  $(MAKE) --no-print-directory test-arm; else echo "test-arm skipped (needs qemu-arm, arm-none-eabi-gcc + newlib, GCC 10)"; fi

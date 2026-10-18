@@ -370,8 +370,32 @@ static void test_end_to_end(void)
   }
 }
 
-int main(void)
+//--pack: the block of the vectors file's adc_cal example (gen_vectors.py adc_cal_section) as hex, for check_vectors.py
+static int pack_example(void)
 {
+  uint16_t pwm[7] = { 904, 900, 908, 903, 908, 903, 903 };
+  acal_channel ch[2];
+  uint8_t blk[ACAL_BLOCK_BYTES];
+  uint32_t i;
+
+  unit_ch1(&ch[0], pwm);
+  unit_ch1(&ch[1], pwm);
+  ch[1].zero[ACAL_FULL][1][4] = -77;
+  ch[1].slope[0][5] = -20000;
+  ch[1].noise[ACAL_FULL][1][2] = 47;
+  acal_pack(ch, blk);
+
+  for(i=0;i<ACAL_BLOCK_BYTES;i++)
+    printf("%02x", blk[i]);
+  printf("\n");
+  return 0;
+}
+
+int main(int argc, char **argv)
+{
+  if((argc > 1) && !strcmp(argv[1], "--pack"))
+    return pack_example();
+
   test_crc_and_block();
   test_round_pair();
   test_correction();

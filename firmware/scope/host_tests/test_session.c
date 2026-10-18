@@ -165,7 +165,7 @@ static void test_info(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, 76);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 9); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 10); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
   T_EQ(pc_get_u16(r.p + 8), 0x1532); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS), PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED), PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED);
@@ -276,7 +276,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.9,fpga=0x1532");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.10,fpga=0x1532");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -795,10 +795,69 @@ static void test_cal_battery_pattern(void)
 
   setup(0x1532);
   r = req(PC_CMD_GET_CAL, "\1", 1);
-  T_EQ(r.h.status, 0); T_EQ(r.len, 72); T_EQ(r.p[0], 1);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 248); T_EQ(r.p[0], 1);
   T_EQ(pc_get_u16(r.p + 4 + 2 * 6), 1060); T_EQ(pc_get_u32(r.p + 20 + 4 * 6), 7600000);
   T_EQ((int16_t)pc_get_u16(r.p + 48), 2); T_EQ((int16_t)pc_get_u16(r.p + 50), -1);
   T_EQ(pc_get_u32(r.p + 60), 385);
+  //1.10 extension without a v2 block: version 1, 1.00o5 compensations, the 1.00o5 zero, tables zero
+  T_EQ(r.p[72], 1); T_EQ(r.p[73], 0);
+  T_EQ((int16_t)pc_get_u16(r.p + 74), 2); T_EQ((int16_t)pc_get_u16(r.p + 76), -1);
+  T_EQ(r.p[78], 0); T_EQ(r.p[79], 0);
+  T_EQ((int32_t)pc_get_u32(r.p + 80), 128 * 256); T_EQ((int32_t)pc_get_u32(r.p + 84), 8);
+  T_EQ(pc_get_u16(r.p + 92), 0); T_EQ(pc_get_u16(r.p + 246), 0);
+
+  //v2 block bound to the PWM centres: per-core zeros at the gated clock, dcoffset 100
+  {
+    pc_hw_channel *c = &mock.ch[1];
+    uint32_t j, k;
+
+    c->cal2_loaded = 1;
+    c->divider     = 199;
+    c->dcoffset    = 100;
+    c->range       = 3;
+    for(j=0;j<ACAL_RANGES;j++)
+    {
+      c->cal2.pwm[j] = c->cal_offset[j];
+      for(k=0;k<2;k++)
+      {
+        c->cal2.zero[ACAL_FULL][k][j]  = (int16_t)(k ? 2067 : 2107);
+        c->cal2.zero[ACAL_GATED][k][j] = (int16_t)(k ? 2010 : 2094);
+        c->cal2.slope[k][j] = k ? -17026 : -17308;
+        c->cal2.noise[ACAL_GATED][k][j] = (uint16_t)(10 + k);
+      }
+    }
+
+    r = req(PC_CMD_GET_CAL, "", 1);
+    T_EQ(r.len, 248);
+    T_EQ(r.p[72], 2); T_EQ(r.p[73], 1 | 2 | 4);
+    //T = 128 - 100 x 100 / 385 = 103; A: 2094 + round(-17308 x 100 / 4096) = 2094 - 423 = 1671, to 1648: -23 sixteenths
+    T_EQ((int16_t)pc_get_u16(r.p + 74), -2); T_EQ(r.p[78], 9);
+    //B: 2010 - 416 = 1594, to 1648: +54 = 3 codes + 6
+    T_EQ((int16_t)pc_get_u16(r.p + 76), 3); T_EQ(r.p[79], 6);
+    T_EQ((int32_t)pc_get_u32(r.p + 80), 103 * 256);
+    //16-bit: full-rate zeros 2107 - 423 = 1684, 2067 - 416 = 1651: 1648 - 1667.5 -> -20 (half away from zero)
+    T_EQ((int32_t)pc_get_u32(r.p + 84), -20);
+    T_EQ((int32_t)pc_get_u32(r.p + 88), 25);
+    T_EQ(pc_get_u16(r.p + 92), c->cal_offset[0]);
+    T_EQ((int16_t)pc_get_u16(r.p + 104), 2107);                 //zero[full][A][0]
+    T_EQ((int16_t)pc_get_u16(r.p + 104 + 24 + 12 + 6), 2010);   //zero[gated][B][3]
+    T_EQ((int32_t)pc_get_u32(r.p + 152 + 24), -17026);          //slope[B][0]
+    T_EQ(pc_get_u16(r.p + 200 + 24 + 12), 11);                  //noise[gated][B][0]
+
+    //GET_CHANNEL zero_q8 follows the v2 zero
+    r = req(PC_CMD_GET_CHANNEL, "", 1);
+    T_EQ((int32_t)pc_get_u32(r.p + 20), 103 * 256);
+
+    //not bound (sector 709 values changed): back to 1.00o5, flags say why
+    c->cal_offset[2]++;
+    r = req(PC_CMD_GET_CAL, "", 1);
+    T_EQ(r.p[72], 1); T_EQ(r.p[73], 1 | 4);
+    T_EQ((int16_t)pc_get_u16(r.p + 74), 2);
+    c->cal_offset[2]--;
+    c->cal2_loaded = 0;
+    c->dcoffset = 0;
+    c->range = 5;
+  }
 
   r = req(PC_CMD_GET_BATTERY, 0, 0);
   T_EQ(r.len, 4); T_EQ(r.p[0], 17); T_EQ(r.p[1], 1); T_EQ(r.p[2], 50);
@@ -1368,7 +1427,7 @@ static void test_ext_trigger(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
-  T_EQ(r.p[1], 9);                                              //proto 1.9
+  T_EQ(r.p[1], 10);                                             //proto 1.10
 
   //Generator on, then EXT: the generator goes off
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -1680,7 +1739,7 @@ static void test_fel_reset_stall(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 9);                                              //proto_minor 1.9
+  T_EQ(r.p[1], 10);                                             //proto_minor 1.10
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
