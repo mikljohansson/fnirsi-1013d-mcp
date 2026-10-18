@@ -39,9 +39,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [ ] **Calibration v3: per-core, per-class gain** (fw-cal2, after fw-gen6's 0.2.44 merges): design in firmware/AGENTS.md section 21;
   3bfc892 (64 full-rate conversions) is merged into main (5effb7d) but unbuilt, goes out with 0.2.44; block v3 376 bytes; owner re-runs
   base calibration; bench with 0 V, 1.0045 V and the -1 V point per class.
-- [ ] **Bench: -1 V point on CH1 range 2** (fw-cal request, before fw-cal2 designs): read_trace_capture at 200 MSa/s, 1 MSa/s legacy
-  and CIC2 with the probe on a -1 V source (the 1.0045 V reference reversed). fw-cal saw the gated A/B gain ratio at 0.994 for -1.24 V
-  but 0.983 for +1 V, so v3 needs to know whether the cores need separate gains above and below zero.
+- [x] **Bench: -1 V point on CH1 range 2** (done 10-18 evening, docs/hardware-status.md): one gain per core and class suffices; full-rate
+  class A/B 1.033 and 1.1 % below the gated class; gated A/B 1.004 with a 0.5-code INL bow in core A that no gain term removes.
+- [ ] **Generator menu: tapping the frequency row toggles the waveform** (owner 10-18 evening). The Wave row was removed in the menu
+  purge; the touch hit-areas (or the row-to-action table) still map the old row positions. Fix the hit-area table, verify every row of
+  the generator, trigger and acquisition menus by tapping each; also check that no removed action is still reachable.
 - [ ] **CH2 range-5 zero drift check** (fw-cal hypothesis): CH2 raw at ranges 4/5 vs the stored zeros now; re-calibrate after 10 minutes
   warm-up and re-measure range 6 immediately and 10 minutes later. If it drifts, document a warm-up recommendation (Atlan: 5 min).
 - [ ] **Calibration v2 bench** (when fw-cal delivers): shorted inputs, per-core means equal within 0.3 codes after
