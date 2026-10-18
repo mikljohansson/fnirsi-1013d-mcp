@@ -196,10 +196,11 @@ Do not edit `src/` in place without keeping Atlan4's original reproducible (the 
    - firmware support for 0x153x and caps EXT_TRIGGER: done in fw 0.2.9 (bebf901), not benched;
    - flashing and the five bench checks, including the pin input impedance and the EXT-to-CH1 skew;
    - a fixed trigger-point correction, if the bench shows one is needed;
-   - the calibration-pin path. The schematic shows only R21 (1K series) after P133, and the path to the front-panel
-     post is not drawn. Bench readings (DMM 0.31 V, scope -1.2/+1.9 V DC) point to a series coupling C. If so,
-     only rising edges work as EXT, and 0x28 bit0 shows no static level. `README.md` "Changes" section 2 has the
-     analysis, the overvoltage limits (never the PI coil or drain) and bench tests 0 to 3.
+   - the calibration-pin path is DC: P133 to R21 (1 kΩ) to the post, measured with no droop at 0.1 Hz. The probe
+     ground (BNC shell) is VRF1, a TL432 virtual ground about +1.24 V above FPGA/USB ground, through R71 (100 Ω).
+     An EXT source must be referenced to USB/digital ground, or shifted down about 1.2 V (series red LED) when it
+     shares the probe ground. Linking the two grounds sags VRF1 and shifts all traces. `README.md` "Changes"
+     section 2 has the trace, limits and bench tests 0 to 4.
 2. **Deeper sample memory.** 16 BRAM9K and both BRAM32K blocks are free (about 12k to 15.8k words possible).
    The address registers (`pretrigger_samples`, `total_samples`, `trigger_address`, `sample_read_offset`) are
    13 bit with the high byte taking `[4:0]`. Widen them to 16 bit (the wire format already carries 16 bits),

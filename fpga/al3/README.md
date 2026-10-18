@@ -349,69 +349,124 @@ sample memory are behavioural models (`tb/sim_models.v`).
    20 to 25 ns from the FPGA side, plus the AD9288 pipeline delay on the CH1 side.
 5. Open input with EXT selected in normal mode: no triggers. This verifies the pull-down.
 
-### 2. Calibration-pin circuit and what EXT needs (2026-10-18)
+### 2. Calibration-pin circuit, the probe-ground offset, and what EXT needs (2026-10-18)
 
-Status: partly documented, partly inferred. The bench measurements below settle the open part.
+Summary: the calibration path is DC-coupled through 1 kΩ. The probe ground (BNC shell) is **not** the FPGA's ground: it
+sits on the front end's virtual ground VRF1, about +1.24 V above it. An EXT source must therefore be referenced to the
+scope's digital ground, or shifted down by about 1.2 V. This section replaces an earlier inference of a series coupling
+capacitor, which the 0.1 Hz measurement disproved.
 
-**What the schematic shows.** Source: pecostm32's EasyEDA file, read-only reference `D:\src\FNIRSI-1013D-1014D-Hack\Schematics\1013D\EASYEDA\SCH_Scope 1013D_2023-01-07.json`, sheet "Scope_Data_Acquisition". I traced it with a netlist script, not by eye.
-- FPGA U3 pin 133 connects to R21 (1K, 0805, pin 2). R21 pin 1 ends at the net port `1KHZ_CALIB_SIG`.
-- That net port occurs **once** in the whole file, on no other sheet. The schematic does not draw the path from R21 to the front-panel terminal at all.
-- On the schematic, R21 is the only part on the net. No capacitor, diode, TVS or pull resistor is drawn on the FPGA side of R21.
-- R13 to R20 (1K) on pins 121 to 132 are the relay and AC/DC drives, so R21 is the ninth of the same series-1K row. The board photo `Pictures/New version/fpga and adc's.jpg` shows that row of nine 0805 parts beside the FPGA's top-right pins. I cannot read the markings in the photo.
-- The terminal itself is the round metal post between the two BNC connectors (`Pictures/New version/Analog section new version.jpg`, right edge). That is an inference from the photo. The traces between the resistor row and the post run under the shield and cannot be followed in the photos.
+**Measured** (coordinator, 2026-10-18; fw 0.2.11, FPGA 0x1532, CH1 x1 probe on the post, DC coupling, generator on):
 
-**What the bench says.** Coordinator, 2026-10-18, generator on (0x1532, 1 kHz, 50 %):
-
-| Instrument | Reading at the probe-comp terminal |
+| Setting | Result |
 |---|---|
-| DMM, DC | 0.31 V |
-| Scope, DC coupling | -1.2 V to +1.9 V |
+| Generator at 0.1 Hz, 9 s window at 333 S/s (`backups/calcap_CH1_0.1Hz_div599999.json`) | Both levels hold for more than 4 s with +0.002 V droop. Low -1.09 V, high +2.01 V, swing 3.10 V, noise 0.05 V rms. |
+| 1 kHz, DMM DC, post to probe ground | 0.31 V. The mean of -1.09/+2.01 V is 0.46 V. |
+| Earlier, shorted-input comparison | The low level is about 70 codes below the shorted input. |
 
-A DC-coupled 0/3.3 V square at 50 % duty would read about 1.65 V on a DMM and 0 to 3.3 V on the scope. The swing of about 3.1 V peak-to-peak is the full logic swing. But it is centred near 0.35 V instead of 1.65 V.
+No series capacitor: anything below about 1000 µF into the 1 MΩ input would droop visibly in 4 s. The swing is the full
+logic swing, offset by about -1.1 V relative to the probe ground.
 
-**Inference: there is a series coupling capacitor between R21 and the post.** The undrawn part of the net is the likely place for it. I see no other way a full-swing square loses its DC level while keeping its amplitude.
-- At 1 kHz the plateaus look flat, so C times the load must be much longer than 0.5 ms. With a 1 MΩ scope input that means C is above about 10 nF. This is an estimate.
-- The +0.35 V residual centre is not explained by a pure series C into 1 MΩ, which would centre at 0 V. Candidates are a bias network on the terminal side, diode leakage, or the scope's own offset error at that range. Unknown.
+**Schematic** (pecostm32 EasyEDA file `D:\src\FNIRSI-1013D-1014D-Hack\Schematics\1013D\EASYEDA\SCH_Scope 1013D_2023-01-07.json`,
+traced with a netlist script):
+- **Calibration path** (sheet Scope_Data_Acquisition): FPGA U3 pin 133, then R21 (1 kΩ, 0805), then the net port
+  `1KHZ_CALIB_SIG`. The port occurs once, so the run from R21 to the front-panel post is not drawn. The 0.1 Hz result
+  shows it is DC: a wire or a resistor. No C, diode or TVS is drawn.
+- **Probe ground** (sheet Scope_Analog_Input):
+  - The shells of both BNC connectors (RF1 and RF2, pins 1 to 4) join R71 (100 Ω) and 100 nF / 1 nF caps (C100, C101,
+    C131, C132, C116). R71's other end is **VRF1**.
+  - VRF1 is made by U21, a TL432 with cathode tied to REF, so it shunts at its 1.24 V reference. It is fed from 3V3
+    through R81 (200 Ω) and reaches the VRF1 net through R82 (1 Ω). The anode is on GND, which is the same net as the
+    FPGA, F1C100s, USB connector and SD-card cage grounds.
+  - Two 1N5819 Schottky diodes, D11 to GND and D12 to 3V3, sit on VRF1, presumably as clamps; I did not check their
+    orientation.
+  - The input attenuators and opamps reference VRF1: R68/R74 1M8 and R66/R76 75K sit on that node.
+- **So the BNC shell is VRF1 through 100 Ω**: about +1.24 V above the FPGA's ground. The post swings 0 to about 3.1 V
+  against FPGA ground, which is about -1.24 V to +1.9 V against the probe ground. The bench numbers (-1.09/+2.01 V)
+  match to within about 0.15 V. Inference: that residual is the scope's own DC offset error at that range.
+- **Independent confirmation** (`research/notes`):
+  - thread-pages-031-060: VRF1 measured 1.233 V. It is the virtual ground for the input stage.
+  - thread-pages-121-155: Atlan names a "100 ohm resistor BNC to Vref1", and 1.25 V TLV431 parts.
+  - web-sources: "Front-end ground lifted to ~1.25 V; USB to grounded PC shifts center ~-1.25 V" and "USB ground not
+    at BNC ground -> Y-shift when PC connected".
+- **Case (b) is ruled out.** The lead's alternative was a resistive level shift to a negative rail on the calibration path.
+  No such element is drawn, and the -6V3 rail appears only on the power and processor sheets.
 
-**(a) What an external signal must look like to register as EXT.** The pad is LVCMOS33. I assume the usual LVCMOS33 thresholds, about VIH 2.0 V and VIL 0.8 V, but I have not checked them in an AL3 datasheet. P133 now has the FPGA's internal pull-down; its value is not documented in TD's files and is probably tens of kΩ.
-- **If the path is DC-coupled (no C).** The source drives the pad through R21 (1 kΩ) against the pull-down, so the loss is small. Any 3.3 V logic output with a source impedance up to a few kΩ registers. Levels and both edges work, and 0x28 bit0 follows the level.
-- **If a series C exists (the likely case).** Only edges pass.
-  - A rising step of V at the post lifts the pad by about V (C is much larger than the pad's few pF). The pad then decays to 0 V through the pull-down with time constant C times R_pulldown. With C = 10 nF and R_pd = 50 kΩ that is about 0.5 ms. These values are illustrative.
-  - A falling step drives the pad below ground. The pad's clamp diode catches it, with R21 limiting the current. Then the pad sits at 0 V.
-  - Consequences:
-    1. **Rising-edge EXT works**, provided the step is at least 2 V plus margin. A 3.3 V logic edge qualifies.
-    2. **Falling-edge EXT does not follow the source's falling edge.** It fires when the decay crosses VIL, about C x R_pd x ln(3.3 / 0.8) after the preceding rising edge, or not at all for short gaps. Use rising edge, and invert at the source if needed.
-    3. **0x28 bit0 shows no static level.** For "EXT present", use bit2 (edge seen during the capture).
-    4. Very slow edges, with rise times near C x R_pd, are attenuated.
-  - The internal pull-down is what makes this work: it re-references the coupled node to 0 V. With `PULLTYPE NONE` the node would float, and edges would ride on an undefined DC level.
-- **Source impedance.** Any logic output (tens of Ω) is fine. A source above a few kΩ loses edge amplitude into the pad capacitance and the pull-down.
-- **Pulse width.** At least 10 ns at the pad (majority filter), plus whatever the coupling stretches or shortens.
+**(a) What an external signal must look like to register as EXT.** The pad is LVCMOS33. I assume the usual thresholds,
+about VIH 2.0 V and VIL 0.8 V against FPGA ground; they are not checked in an AL3 datasheet. P133 has the internal
+pull-down, value not documented, probably tens of kΩ. The path from the post to the pad is DC through R21 (1 kΩ).
+- **The reference ground decides everything.** The scope has two grounds on its connectors:
+  - digital GND: USB connector shell, USB cable ground and SD-card cage, the same as the FPGA's ground;
+  - probe ground: the BNC shells and probe ground clips, which are VRF1, about +1.24 V, through 100 Ω.
+- **Source referenced to digital GND** (its ground wired to the USB shell or the USB cable's ground): any 3.3 V logic
+  output works directly. Levels and both edges register, 0x28 bit0 follows the level, and source impedance up to a few
+  kΩ is fine.
+  - Caveat: do **not** also clip a probe ground onto that circuit. Doing so ties the BNC shell to digital GND, so R71
+    loads VRF1 with about 12 mA. R81 can supply only about 10 mA, so the TL432 drops out and VRF1 sags to about 1.1 V
+    (3.3 V x 100 / 301). This is an inference from the schematic.
+  - The whole front end then shifts, in the same way as the forum's "USB to a grounded PC" effect. Measurements on CH1
+    or CH2 are offset until the link is removed. Nothing is damaged: R71 dissipates about 15 mW.
+  - A probe tip without its ground clip is fine. It reads the signal 1.24 V lower.
+- **Source referenced to the probe ground** (its ground on a probe clip or BNC shell, the natural setup when CH1/CH2 also
+  measure the same circuit): its 0/3.3 V appears at the post as about +1.24/+4.54 V against FPGA ground.
+  - **High is clamped:** the pad sits at about 3.9 V, with about 0.6 mA into the upper clamp diode through R21. That is
+    out of spec but small.
+  - **Low is at 1.24 V, between VIL and VIH.** A plain logic signal on the probe ground is therefore **not reliable**
+    as EXT. It may never read low, or may chatter.
+  - **Fix: shift it down with a series red LED or three 1N4148 diodes** between the source and the post, anode at the
+    source. This is an inference, to be confirmed on the bench.
+    - Low: the 1.24 V is below the LED's conduction threshold, so the internal pull-down holds the pad near 0 V.
+    - High: 4.54 V minus about 1.5 V gives about 3.0 V at the pad, which is above VIH and needs no clamp current.
+    - The source supplies only the pull-down current, tens of µA. The return current flows through R71 into VRF1, which
+      the TL432 absorbs.
+    - The rising edge is driven and fast. The falling edge is only the pull-down discharging the pad and the post
+      wiring: estimated about 0.5 µs (50 kΩ x 10 pF). Use **rising-edge EXT** with this shifter.
+  - Optocoupler alternative: the LED is driven from the detector side. The phototransistor runs on the scope side,
+    emitter on digital GND, collector to the post, with a pull-up to a scope-side supply such as the USB VBUS through a
+    divider. This is cleaner but needs parts and a digital-ground wire.
+- **Pulse width:** at least 10 ns at the pad, from the majority filter.
 
 **(b) ESD and overvoltage risk to the pad.**
-- **R21 is the only drawn protection.** There is no TVS or external clamp. The pad's internal clamp diodes take any excursion beyond about -0.6 V or 3.3 V + 0.6 V, and R21 limits the current. These are estimates, assuming 0.6 V diode drops and ideal sources:
-  - 5 V logic: about (5 - 3.9) / 1 kΩ = 1.1 mA DC through the upper clamp if the path is DC-coupled. A series C turns that into a short spike.
-  - 12 V step: about 8 mA peak.
-  - Generator on while an external source drives the pin: the two fight through R21, at most about 3.3 mA. Neither side should be damaged. The firmware turns the generator off when EXT is selected.
-- **I found no AL3 limit for clamp current.** Most FPGA vendors allow single-digit mA per pin at most and forbid sustained injection. Treat anything above 3.3 V as out of spec, even through 1 kΩ.
-- **The real hazard is high voltage.** A pulse-induction TX node can fly back to hundreds of volts. Never connect the probe-comp terminal to the coil, the MOSFET drain or the damping resistor. A series C would pass such an edge almost in full, and 1 kΩ is no protection at 300 V: about 300 mA peak into the clamp diode. The correct tap is the detector MCU's 3.3 V gate-drive or sync GPIO, before the gate driver.
-- **ESD.** The post is exposed. 1 kΩ plus the internal diodes is modest protection against a human-body discharge. Touch a ground first and keep cables plugged in before power-up. An external 3.3 V TVS or a 1 kΩ + BAT54S clamp on the source side is cheap insurance for regular use. This is a recommendation, not something the board has.
+- **R21 (1 kΩ) is the only drawn protection.** There is no TVS or external clamp. The pad's internal diodes take
+  excursions beyond about -0.6 V and 3.9 V, with R21 limiting the current. Estimates against FPGA ground:
+  - 3.3 V logic on the probe ground, unshifted: about 0.6 mA into the upper clamp, continuously while high.
+  - 5 V logic on the probe ground: 6.24 V at the post, about 2.3 mA. **Do not.**
+  - 5 V logic on digital GND: about 1.1 mA. Use a 1k/1k divider, or a 3.3 V source.
+  - An external source fighting the generator: up to about 4.5 mA with a probe-ground-referenced 3.3 V high against the
+    generator's 0 V. The firmware turns the generator off when EXT is selected.
+- **I found no AL3 clamp-current limit.** Treat any pad voltage outside 0 to 3.3 V as out of spec.
+- **The pulse-induction detector's flyback is the real hazard.** It reaches hundreds of volts. Never connect the post to
+  the coil, the MOSFET drain or the damping resistor. 300 V through 1 kΩ is about 300 mA into the clamp. Tap the
+  detector MCU's 3.3 V gate-drive or sync GPIO, before the gate driver.
+- **Ground loops:** linking the probe ground and digital GND through an external circuit (or through a mains-grounded
+  PC on USB plus an earthed device under test) loads VRF1 as described in (a). This is a measurement error, not damage.
+  It applies to **all** scope measurements, not only EXT.
+- **ESD:** the post is exposed. 1 kΩ plus the internal diodes is modest protection. Touch ground first, and keep the
+  wiring connected before power-up. For regular use, put a TVS or a BAT54S clamp on the source side.
 
 **(c) Recommended bench tests**
+0. **Owner's DMM tests** (already requested; predictions from the schematic):
+   - BNC shell to USB shell, scope on, on battery, USB unplugged: **+1.2 to +1.25 V** (VRF1, forum 1.233 V).
+   - Post to BNC shell with the generator at 0.5 Hz: alternating about -1.24 V and about +1.9 to +2.0 V. Post to USB
+     shell: about 0 and about 3.1 V.
+1. **EXT on digital GND, after flashing 0x1533 with fw 0.2.9, generator off.**
+   - Detector MCU or a 3.3 V GPIO toggling at 100 Hz and 1 kHz. GPIO to the post through 1 kΩ. MCU ground to the
+     scope's USB shell or a USB breakout's GND.
+   - CH1 probe **tip** on the GPIO with the **ground clip unconnected**. CH1 reads the GPIO about 1.24 V low; timing is
+     unaffected.
+   - Expect: rising and falling EXT both trigger at the CH1 edge, and 0x28 bit0 follows a 1 Hz toggle.
+   - Record the trigger-point to CH1-edge skew at 200, 10 and 1 MSa/s. The FPGA side predicts 20 to 25 ns.
+2. **EXT on the probe ground, same setup.** MCU ground on the CH1 ground clip; nothing on digital GND.
+   - First without a shifter: expect missed or chattering triggers, and bit0 stuck at 1 or noisy. That confirms the
+     1.24 V low.
+   - Then with a red LED in series, anode at the GPIO: expect clean rising-edge triggers and bit0 following the level.
+     Falling-edge EXT should be late by up to about 1 µs.
+3. **Ground-loop check, both grounds linked.** Leave the scope on the shorted-input view and connect the MCU ground to
+   both the USB shell and the CH1 clip. Expect the CH1 baseline to jump, the VRF1 sag. Remove the link afterwards.
+4. **Open post, EXT selected, normal mode, generator off.** Expect no triggers; the pull-down holds the pad at 0 V.
 
-0. **Circuit, before any flashing, scope off.** These need only a DMM, on the current bitstream.
-   - Ohms from the post to GND and from the post to 3V3. MΩ or open points to a series C, with the DMM seeing only the C. A few kΩ points to a bleed resistor.
-   - If the R21 end at the FPGA side can be reached, ohms from the post to that end. About 1 kΩ means DC-coupled; open means a series C.
-   - If the DMM has a capacitance range, the capacitance from the post to the R21 FPGA-side pad.
-1. **Coupling with the scope's own generator, 0x1532, generator on.**
-   - Set the generator to 1 Hz and then 10 Hz at 50 %. Use cmd 0x51 = 86 for about 1 Hz; f = inc x 50 MHz / 2^32.
-   - CH1 on the post, x1 probe, DC coupling, 1 V/div, 50 to 200 ms/div. A DC-coupled path shows flat 0 / 3.3 V plateaus. A series C shows a spike on each edge that decays toward the bias. The decay time constant is C x (R_load || R_bleed).
-   - Repeat with the probe at x10 (10 MΩ). If the time constant grows about tenfold, the scope input is the only load and C = tau / 1 MΩ.
-2. **EXT after flashing 0x1533 with fw 0.2.9, generator off.**
-   - Source: the detector MCU's 3.3 V GPIO, toggling at 100 Hz and 1 kHz, 50 % duty. Wire it to the post and to CH1 through a 1 kΩ series resistor, with grounds joined.
-   - If only the bench supply's TTL output is available and it is 5 V, put a 2:1 divider in front, for example 1 kΩ / 1 kΩ, so the post sees at most 2.5 V. That is still above VIH. Never connect 5 V directly.
-   - Expected if DC-coupled: rising and falling EXT both trigger on the CH1 edge, and 0x28 bit0 follows a slow 1 Hz toggle.
-   - Expected if a series C exists: rising EXT triggers on the CH1 rising edge. Falling EXT triggers late or not at all, as described in (a). 0x28 bit0 stays mostly 0, and bit2 is set after each capture.
-   - Either way, record the skew between the trigger point and the CH1 edge at 200, 10 and 1 MSa/s. The FPGA side predicts 20 to 25 ns.
-3. **Open post, EXT selected, normal mode, generator off.** Expect no triggers.
-
-Firmware and MCP texts say "3.3 V logic". If test 0 or 1 confirms a series C, they should add "rising edge recommended, levels are not seen". That is a documentation change only; the FPGA design does not change.
+**Text changes needed elsewhere:** "EXT is 3.3 V logic" is not enough. User-facing texts (firmware help, MCP tool
+descriptions, `docs/agent-measurement-guide.md`) should say:
+- reference the EXT source to the scope's USB ground, or shift it down about 1.2 V (series LED) when it shares the probe
+  ground;
+- never link the probe ground and USB ground, because the traces shift.
