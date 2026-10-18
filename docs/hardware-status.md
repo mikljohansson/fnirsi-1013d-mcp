@@ -526,3 +526,12 @@ Newest entries at the bottom. Format: date, who, what, result.
 - mcp-gen3's GET_CAL v2 host decoder verified against the live scope: both channels report version 2, flags block_loaded, bound,
   current_divider_gated; stored full-class zeros 129.3-130.8 codes, gated 127.9-128.1, slopes -0.259..-0.266 codes/count; a shared-mode
   capture through the v2 volts path read CH2 (shorted, range 6) at +1.4 mV and CH1 at the -1 V reference.
+- **Owner recalibrated (base calibration) after the scope had been on all day, fw 0.2.43** (GET_CAL dumps before: backups/gain_bench_neg1V.json,
+  after: backups/getcal_after_recal_20261018.json). Zero changes per range vs the morning calibration: CH1 gated A/B within +-0.44 code
+  (mostly <= 0.19), CH1 full-rate +-0.1..1.25 (8-conversion ripple noise; 64 conversions come with 0.2.44); CH2 gated A +0.44..+0.75,
+  B -0.75..-1.06 on every range, PWM centres +2..+3 counts: **CH2's core-to-core zero moved about 1.6 codes between the two calibrations**,
+  CH1's did not. Right after the recalibration (CH1 still on the -1 V reference, CH2 probe state not confirmed), 1 MSa/s, dcoffset 0, fw
+  trace means: CH2 range 6 A/B 128.60/128.80, then ranges 6/5/4/3/6 in sequence 129.48, 129.18, 129.17, 129.15, 128.23 (per-core agreement
+  within 0.2 at every step): the CH2 mean wanders about 1.3 codes within a minute while the cores stay together. Reads as a slow input /
+  relay settling or pickup effect, not a per-core calibration error; the gated zero model itself holds (A-B <= 0.21). Overnight plan:
+  log both channels' per-core raw and corrected means with shorted inputs at 1 MSa/s and 200 MSa/s every 10 minutes.
