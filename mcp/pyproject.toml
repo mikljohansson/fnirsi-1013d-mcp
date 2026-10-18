@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "anyio>=4"]
+dev = ["pytest>=8", "anyio>=4"]
 
 [project.scripts]
 fnirsi1013d-mcp = "fnirsi1013d.server:main"
@@ -29,5 +29,3 @@ packages = ["src/fnirsi1013d"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
