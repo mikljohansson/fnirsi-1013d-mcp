@@ -1469,6 +1469,19 @@ static void test_event_log(void)
   //0.2.15: the reset snapshot after the entries
   T_EQ(pc_get_u16(r.p + 36), 2); T_EQ(pc_get_u16(r.p + 38), 1); T_EQ(pc_get_u32(r.p + 40), 95);
   T_EQ(pc_get_u32(r.p + 44), 90); T_EQ(r.p[48], 5); T_EQ(r.p[52 + 4], 1);
+
+  //0.2.18: a plain read keeps the snapshot frozen; flag bit 0 re-arms it; other bits are refused
+  {
+    extern int mock_snap_rearms;
+    int before = mock_snap_rearms;
+
+    r = req_ctx(PC_CMD_GET_EVENT_LOG, "\x01", 1, PC_CTX_ISR);
+    T_EQ(r.h.status, 0); T_EQ(mock_snap_rearms, before + 1);
+    r = req_ctx(PC_CMD_GET_EVENT_LOG, 0, 0, PC_CTX_ISR);
+    T_EQ(mock_snap_rearms, before + 1);
+    r = req_ctx(PC_CMD_GET_EVENT_LOG, "\x02", 1, PC_CTX_ISR);
+    T_EQ(r.h.status, PC_E_BAD_ARG);
+  }
 }
 
 static void test_fel_reset_stall(void)

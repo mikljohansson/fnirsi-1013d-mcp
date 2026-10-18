@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.2.17 (0.2.17: quiet boot without scope.bmp; 0.2.16: the tick runs nothing for SOF; CDC handler split into entry + body under
+State on 2026-10-18, fw 0.2.18 (0.2.18: event-log snapshot re-armed only on request; 0.2.17: quiet boot without scope.bmp; 0.2.16: the tick runs nothing for SOF; CDC handler split into entry + body under
 PC_PROTOCOL; 0.2.15: event log 128 entries, SOF ignored, reset snapshot; 0.2.14: the USB IRQ fallback serves only after two quiet ticks; 0.2.13: System settings compacted without an RTC, battery level filtered; 0.2.12: USB IRQ fallback in the timer poll, GET_EVENT_LOG, protocol 1.5; 0.2.11: a request sent right after the port is opened is no longer dropped; 0.2.10: MCP chip drawn as one idempotent blit, acquisition "Roll mode on/off" toggle
 label; protocol 1.4: shared control, SD sector commands, EXT trigger for FPGA 0x1533
 (protocol section 14 row 41, needs bench with fpga-gen2's bitstream); 0.2.8: generator and trigger menus compacted; 0.2.7: SD_STAGE from the timer poll,
@@ -234,6 +234,12 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
   suspect. 0.2.16: usb_device_CDC_irq_handler (1.00o5) is split under PC_PROTOCOL into the entry (reads the flags)
   and usb_device_CDC_irq_body(flags); the tick reads the flags itself and calls the body only for non-SOF flags.
   Retest: 64 KiB x 300 should be 0 failed and counter 47 0 in a clean session.
+  0.2.16 bench: 300 x 64 KiB 0 failed (the tick-run handler was the 64 KiB regression), counter 47 = 16 in ~7 min,
+  every hit INTRX EP2 after 2-3 ms without any USB interrupt: real lost interrupts (no main-loop code masks IRQs for
+  more than microseconds), so the fallback does its job and EP0 can lose interrupts the same way. usb_bus_resets 12
+  / suspends 10 over 6 sessions with no drop seen by the host (link_resets 22 = 12 + 10, consistent): the resets had
+  been evicted from the 128-entry ring, and the snapshot was re-armed by reads; 0.2.18 keeps it frozen until a read
+  with flag bit 0. Open: why Windows resets the port about twice per session (silent recoveries?).
 - USB "Error state" incident (0.2.2, lead): port closed, scope idle ~10 min, then Windows showed the device present but
   in an error state (CreateFile failed); a cable replug recovered it. Not reproduced, cause unknown. Code reading:
   the suspend path calls pc_usb_isr_link, which flushed a held-back OUT packet but left EP2 OUT masked in INTRXE

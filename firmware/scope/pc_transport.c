@@ -609,9 +609,9 @@ uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total)
   return k;
 }
 
-//The reset snapshot (entries as above), *reset_ms = when it was taken; returns its size, -1 when none was frozen since
-//the previous read. A read re-arms it.
-int32_t pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms)
+//The reset snapshot (entries as above), *reset_ms = when it was taken; returns its size, -1 when none is frozen.
+//Only rearm re-arms it (fw 0.2.18: a plain read kept nothing frozen if the host read the log at every session open)
+int32_t pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms, int rearm)
 {
   uint32 cpsr = pc_irq_save();
   int32  k = pc_evsnap_frozen ? (int32)pc_evsnap_n : -1;
@@ -628,8 +628,11 @@ int32_t pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms)
     p[6] = (uint8_t)en->b; p[7] = (uint8_t)(en->b >> 8);
   }
 
-  *reset_ms        = pc_evsnap_ms;
-  pc_evsnap_frozen = 0;
+  *reset_ms = pc_evsnap_ms;
+
+  if(rearm)
+    pc_evsnap_frozen = 0;
+
   pc_irq_restore(cpsr);
   return k;
 }

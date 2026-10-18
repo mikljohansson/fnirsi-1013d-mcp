@@ -434,8 +434,11 @@ uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total)
   return k;
 }
 
-int32_t pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms)
+int mock_snap_rearms;
+
+int32_t pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms, int rearm)
 {
+  mock_snap_rearms += rearm ? 1 : 0;
   memset(dst, 0, 16);
   pc_put_u32(dst, 90);
   dst[4] = 5;
