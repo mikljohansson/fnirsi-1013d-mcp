@@ -232,3 +232,9 @@ Newest entries at the bottom. Format: date, who, what, result.
 - Owner's verdict on 0.2.11: MCP chip stable while free-running (fixed), generator/trigger menus and the Roll mode box good; System settings
   bottom row still empty (compaction queued for 0.2.12). 0.2.11 persisted to the card: 5.7 s total, no resends, read-back identical, header
   verified. **Card now boots 0.2.11.** Owner turned Windows USB selective suspend off (powercfg, was on for AC and DC) for the next soak.
+- Calibration-pin coupling test (fw 0.2.11, FPGA 0x1532, CH1 at 1x on the post, DC, range_index 1; backups/calcap_CH1*.json): generator at
+  10 Hz, 1 Hz and 0.1 Hz. At 0.1 Hz (9 s window, 333 S/s) both levels hold for >4 s with 0.002 V droop: low -1.09 V, high +2.01 V, swing 3.10 V,
+  noise 0.05 V rms. => No series coupling capacitor (any C < ~1000 uF would droop visibly); the output is DC-coupled but sits ~1.1 V below a
+  0/3.1 V logic swing relative to the probe ground. Candidates: the probe/BNC ground is ~1.1 V above the FPGA's digital ground, or a resistive
+  level shift to a negative rail. Owner DMM tests requested: (1) BNC shell vs USB shell DC with USB unplugged, (2) post vs BNC shell with the
+  generator at 0.5 Hz. Matters for EXT: a 3.3 V logic input referenced to the probe ground might sit 1.1 V higher at the pad.
