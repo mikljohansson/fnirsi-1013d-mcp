@@ -17,6 +17,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [ ] **Warnings state consequence + action, units MSa/s** (owner, 10-18): "Aliasing possible: set Acquisition > Filter"
   (only while Filter is Off and fs < 200 MSa/s), "CHn overrange: increase V/div", "Stopped: press RUN to fill the view",
   "Waiting for a capture at the new rate"; README table.
+- [ ] **Spectrum view: no scope-view repaints over the strip** (owner, 10-18): host SET_TIMEBASE / SET_TRIGGER / SET_GEN (and
+  menu changes) made the bottom strip "glitch and show something else for a flicker": 1.00o5's setting-change redraw routines paint
+  the scope view's bottom row regardless of the display mode. Route every setting redraw through the display-mode-aware draw (skip or
+  redirect when display_mode != scope), and audit the top bar/right column the same way.
 - [ ] **FPGA 0x1535 firmware support** (after fpga-gen4 delivers and the testbench numbers are confirmed): 0x56 FIR
   enable, 0x29 bits 5/6, S = ... + 1, (N/2)^K maths, latency/settle formulas, Filter box FIR option, SET_DECIM flags
   bit 3, GET_DECIM, caps bit 16, protocol 1.11. Confirm with fpga-gen4 that the output rate stays 200 MHz / N.
