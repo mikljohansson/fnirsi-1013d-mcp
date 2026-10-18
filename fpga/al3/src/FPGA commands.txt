@@ -1,11 +1,13 @@
 // Copy of Atlan4's "FPGA commands.txt" (D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\), updated
 // for fpga/al3/src/zaklad.v of fnirsi-1013d-mcp. Changes against Atlan4's file:
-//  - 0x06 returns 0x15 0x34 (0x1534; 0x1533 = EXT trigger only; Atlan4's 0x1532 AL3 design returns 0x15 0x32,
+//  - 0x06 returns 0x15 0x35 (0x1535; 0x1534 = decimation filter without the FIR, 0x1533 = EXT trigger only; Atlan4's 0x1532 AL3 design returns 0x15 0x32,
 //    his file still shows 0x14).
 //  - 0x15 takes data[1:0]: 0 = CH1, 1 = CH2, 2 = EXT (calibration pin P133), 3 = reserved (acts as EXT).
 //  - 0x28 (new read): external trigger status.
 //  - 0x53, 0x54, 0x55 (new writes), 0x29 (new read): decimation filter (0x1534). With 0x53 = 0 (power-on)
 //    the design behaves exactly as 0x1533.
+//  - 0x56 (new write), 0x29 byte 0 bits 6/5: CIC compensation FIR (0x1535). With 0x56 = 0 (power-on) the
+//    design behaves exactly as 0x1534.
 //  - 0x0B, 0x0C, 0x1F high bytes: zaklad.v takes io_mcu_data[5:0] into [12:8] (bit 5 is dropped by the
 //    13-bit register); this file showed [4:0].
 // Multi-byte values are high byte first. Details: fpga/al3/README.md, section "Changes".
@@ -23,7 +25,7 @@
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h34;       //0x1534 = AL3 with external trigger and decimation filter
+                    o_mcu_data <= 8'h35;       //0x1535 = AL3 with external trigger, decimation filter and FIR
             
             //When sampling finishes the writing is disabled. Enabled again with a reset.
             8'h0A: //Reading of the sampling done state
@@ -80,8 +82,10 @@
 
             8'h29: //Reading of the decimation geometry (0x1534 and later), 2 bytes
                   4'h0:
-                    o_mcu_data <= { dec_on, 2'b0, dec_neg_b, dec_neg_a, dec_swap, dec_order };
+                    o_mcu_data <= { dec_on, fir_en, fir_act, dec_neg_b, dec_neg_a, dec_swap, dec_order };
                     //bit7 = 1: 16-bit samples, one per channel per memory word (K >= 1)
+                    //bit6 = 0x56 bit 0 (FIR enable as written), bit5 = FIR active now: enable, K >= 1 and
+                    //divider >= 14 with divider bit 1 set (N >= 16, N a multiple of 4); both 0 before 0x1535
                     //bit4/bit3 = B/A cores captured on the falling write clock edge, bit2 = core order swap,
                     //bits 1..0 = K (0x53)
                   4'h1:
@@ -245,5 +249,18 @@
                     trigger_level16[15:8] <= io_mcu_data;
                   4'h1:
                     trigger_level16[7:0] <= io_mcu_data;
+
+//---------------------------------------------------------------------------------------
+// CIC compensation FIR (0x1535). Details: fpga/al3/README.md "Changes" section 5.
+// Engages when 0x56 bit 0 = 1, K >= 1, N >= 16 and N a multiple of 4 (divider >= 14, divider bit 1 set);
+// otherwise the 0x1534 path runs unchanged. The CIC then decimates by N/2 (gain (N/2)^K), its output is
+// min(65535, y >> shift), and a 15-tap symmetric FIR (DC gain 1, one tap set per K) decimates by 2:
+// stored = clamp(0 .. 65535, round(FIR)). Output rate, memory layout and read-back as 0x1534.
+// Recommended shift: max(0, bitlen(255 * (N/2)^K) - 16) + 1 (+1: headroom for the 6-9 % step overshoot).
+// Latency pin to memory: 25 write clocks; EXT data lag 250 + 17.5 N + 1.25 K (N - 2) ns.
+// After changing 0x0D, 0x53, 0x54 or 0x56 wait (K + 10) * N * 5 ns + 1 us before 0x01.
+
+            8'h56: //CIC compensation FIR, 1 byte
+                    fir_en <= io_mcu_data[0];       //1 = FIR on where eligible; bits 7..1 reserved, write 0
 
 //=======================================================================================

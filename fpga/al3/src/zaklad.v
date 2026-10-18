@@ -2,7 +2,7 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
-// fnirsi-1013d-mcp changes (version word 0x1534, see fpga/al3/README.md "Changes"):
+// fnirsi-1013d-mcp changes (version word 0x1535, see fpga/al3/README.md "Changes"):
 //  - 0x1533: external trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
 //    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
 //    Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
@@ -11,6 +11,9 @@
 //    level, read 0x29 geometry). K = 0 is the 0x1533 sample skipping, unchanged. K = 1..3 run
 //    the ADCs at 200 MSa/s and store a CIC of order K (K = 1 is a boxcar sum) decimated by
 //    N = 2 * (floor(divider / 2) + 1) as 16-bit samples, one per channel per memory word.
+//  - 0x1535: CIC compensation FIR (command 0x56 bit 0, read-back in 0x29 byte 0 bits 6/5).
+//    For K >= 1 and N >= 16 with N a multiple of 4 the CIC decimates by N / 2 and a 15-tap
+//    symmetric FIR decimates by 2 (flat to fo/4). Otherwise, and with 0x56 = 0, it is 0x1534.
 //-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
@@ -193,6 +196,141 @@ wire [W-1:0] fine = sh >> shift[2:0];
 endmodule
 
 //-------------------------------------------------------------------------------------
+//CIC compensation FIR for one channel (0x1535), clocked by the full-rate sample write clock.
+//With the FIR on, decim_chan decimates by N/2 and delivers 16-bit CIC samples at 2 fo; this
+//15-tap symmetric FIR (linear phase, DC gain 2^17) decimates them by 2. Taps per K from
+//fpga/al3/tb/fir_design.py (coeffs K 15 0.5): flat to fo/4, alias rejection about 17 dB per
+//CIC order. One M18x18 per channel, time-multiplexed: the symmetric pre-add leaves 8
+//multiply-accumulates per output, one per write clock, and there are P >= 8 write clocks per
+//output.
+//  shift_in: a new CIC sample is on x (decim_chan out); the 15-sample delay line shifts.
+//  load:     the clock after the shift of the sample that ends an output pair; the 8 pre-added
+//            sums are copied into the ps shift register and the MAC sequence starts.
+//  Pipeline: load, 8 x (ps head and tap into the multiplier input registers), product register,
+//            accumulator, output = clamp(0 .. 65535, (acc + 2^16) >> 17); done marks the clock in
+//            which out holds the new sample (the memory write is on the next write clock edge).
+//Nothing is reset; the delay line runs continuously like the CIC.
+
+module fir_chan
+(
+  input  wire        clk,
+  input  wire [1:0]  order,       //K selects the tap set (0 behaves as 1; its output is not used)
+  input  wire        shift_in,
+  input  wire        load,
+  input  wire [15:0] x,
+  output reg  [15:0] out = 0,
+  output reg         done = 0
+);
+
+reg [15:0] dl [0:14];             //delay line, dl[0] newest
+reg [16:0] ps [0:7];              //pre-added sums dl[i] + dl[14 - i], ps[7] = centre tap
+reg [3:0]  cnt = 0;               //MAC steps left (8 .. 1)
+reg [2:0]  ti = 0;                //tap index of the next MAC step
+reg signed [17:0] ma = 0, mb = 0; //multiplier input registers
+reg signed [35:0] prod = 0;       //multiplier output register
+reg signed [36:0] acc = 0;
+reg m0v = 0, m0f = 0, m0l = 0;    //valid / first / last tags at the multiplier input
+reg m1v = 0, m1f = 0, m1l = 0;    //tags at the product register
+reg m2l = 0;                      //the accumulator holds a complete sum
+
+integer i;
+initial
+  begin
+    for(i = 0; i < 15; i = i + 1) dl[i] = 0;
+    for(i = 0; i < 8; i = i + 1) ps[i] = 0;
+  end
+
+//Taps h[0..7] of the symmetric 15-tap set (h[14 - i] = h[i]), 18-bit signed, sum 2^17
+function signed [17:0] tap(input [1:0] k, input [2:0] t);
+  begin
+    case({ (k == 2'd3), (k == 2'd2), t })
+      //K = 3
+      5'b10_000: tap = -18'sd381;
+      5'b10_001: tap =  18'sd332;
+      5'b10_010: tap =  18'sd2919;
+      5'b10_011: tap = -18'sd766;
+      5'b10_100: tap = -18'sd11452;
+      5'b10_101: tap = -18'sd1289;
+      5'b10_110: tap =  18'sd41675;
+      5'b10_111: tap =  18'sd68996;
+      //K = 2
+      5'b01_000: tap = -18'sd231;
+      5'b01_001: tap =  18'sd504;
+      5'b01_010: tap =  18'sd2397;
+      5'b01_011: tap = -18'sd1457;
+      5'b01_100: tap = -18'sd10255;
+      5'b01_101: tap =  18'sd877;
+      5'b01_110: tap =  18'sd40852;
+      5'b01_111: tap =  18'sd65698;
+      //K = 1 (and 0)
+      5'b00_000: tap = -18'sd82;
+      5'b00_001: tap =  18'sd682;
+      5'b00_010: tap =  18'sd1890;
+      5'b00_011: tap = -18'sd2151;
+      5'b00_100: tap = -18'sd9088;
+      5'b00_101: tap =  18'sd3022;
+      5'b00_110: tap =  18'sd40046;
+      default:   tap =  18'sd62434;
+    endcase
+  end
+endfunction
+
+  always @(posedge clk)
+    begin
+      if(shift_in)
+        begin
+          dl[0] <= x;
+          for(i = 1; i < 15; i = i + 1)
+            dl[i] <= dl[i - 1];
+        end
+
+      //MAC step: the multiplier input registers take the ps head and its tap
+      ma  <= { 1'b0, ps[0] };
+      mb  <= tap(order, ti);
+      m0v <= (cnt != 0);
+      m0f <= (cnt == 4'd8);
+      m0l <= (cnt == 4'd1);
+
+      if(load)
+        begin
+          for(i = 0; i < 7; i = i + 1)
+            ps[i] <= { 1'b0, dl[i] } + { 1'b0, dl[14 - i] };
+          ps[7] <= { 1'b0, dl[7] };
+          cnt   <= 4'd8;
+          ti    <= 3'd0;
+        end
+      else
+        begin
+          for(i = 0; i < 7; i = i + 1)
+            ps[i] <= ps[i + 1];
+          ps[7] <= 17'd0;
+          if(cnt != 0)
+            begin
+              cnt <= cnt - 1;
+              ti  <= ti + 1;
+            end
+        end
+
+      //Product register
+      prod <= ma * mb;
+      m1v  <= m0v;
+      m1f  <= m0f;
+      m1l  <= m0v & m0l;
+
+      //Accumulator, started with the rounding constant 2^16
+      if(m1v)
+        acc <= (m1f ? 37'sd65536 : acc) + prod;
+      m2l <= m1l;
+
+      //Output: (acc + 2^16) >> 17, clamped to 0 .. 65535
+      if(m2l)
+        out <= acc[36] ? 16'd0 : (|acc[35:33]) ? 16'hFFFF : acc[32:17];
+      done <= m2l;
+    end
+
+endmodule
+
+//-------------------------------------------------------------------------------------
 //Not implemented in this version is the I2C interface part.
 
 module fnirsi_1013D
@@ -354,9 +492,11 @@ module fnirsi_1013D
   reg [5:0]  dec_shift = 0;                //Command 0x54: output = min(65535, filter >> dec_shift)
   reg [15:0] trigger_level16 = 0;          //Command 0x55: trigger level on the 16-bit samples (K >= 1)
 
+  reg        fir_en = 0;                   //Command 0x56 bit 0: CIC compensation FIR (0x1535)
+
   wire dec_on = (dec_order != 2'd0);
 
-  wire [15:0] dec_out1;                    //Decimated 16-bit samples
+  wire [15:0] dec_out1;                    //Decimated 16-bit samples (CIC, or FIR when fir_act)
   wire [15:0] dec_out2;
   wire        swc_adv;                     //Capture logic advances on this write clock edge
   reg         swc_adv_q = 1;               //The last write clock edge advanced the capture logic (wrote a sample)
@@ -591,9 +731,25 @@ freq_generator_dds_pwm u_freq
   reg [30:0] dec_pc = 0;
   reg [6:0]  dec_sv = 0;
 
+  //CIC compensation FIR (0x1535). fir_act: 0x56 bit 0, K >= 1 and N = 2P a multiple of 4 with
+  //N >= 16, i.e. P even and P >= 8, i.e. divider >= 14 with divider bit 1 set. The CIC then gets
+  //a second strobe half way through the P count (dec_pc == fir_hp = P / 2), so it decimates by
+  //N / 2, and the FIR decimates its output by 2. dec_t tags the strobes from dec_pc == 0: the
+  //CIC sample they make is the newest one of an output pair. dec_wr then comes from the FIR,
+  //still once per P write clocks. With fir_act = 0 every 0x1534 register and output is unchanged.
+  wire        fir_ok = fir_en & dec_on & sample_rate_divider[1] & (sample_rate_divider >= 32'd14);
+  reg         fir_act = 0;
+  reg [30:0]  fir_hp = 0;
+  reg [7:0]   dec_t = 0;
+  wire [15:0] cic_out1, cic_out2, fir_out1, fir_out2;
+  wire        fir_done1, fir_done2;
+
   wire [30:0] dec_ph = sample_rate_divider[31:1];
-  wire dec_wr  = dec_sv[6];
+  wire dec_wr  = fir_act ? fir_done1 : dec_sv[6];
   assign swc_adv = ~dec_on | dec_wr;
+
+  assign dec_out1 = fir_act ? fir_out1 : cic_out1;
+  assign dec_out2 = fir_act ? fir_out2 : cic_out2;
 
   always @(posedge sample_write_clock)
     begin
@@ -602,8 +758,12 @@ freq_generator_dds_pwm u_freq
       else
         dec_pc <= dec_pc - 1;
 
-      dec_sv      <= { dec_sv[5:0], (dec_pc == 0) };
+      dec_sv      <= { dec_sv[5:0], (dec_pc == 0) | (fir_act & (dec_pc == fir_hp)) };
       swc_adv_q   <= swc_adv;
+
+      fir_act     <= fir_ok;
+      fir_hp      <= dec_ph[30:1] + 31'd1;
+      dec_t       <= { dec_t[6:0], (dec_pc == 0) };
     end
 
   decim_chan dec_ch1
@@ -617,7 +777,7 @@ freq_generator_dds_pwm u_freq
     .neg_b (dec_neg_b),
     .shift (dec_shift),
     .sv    (dec_sv[5:0]),
-    .out   (dec_out1)
+    .out   (cic_out1)
   );
 
   decim_chan dec_ch2
@@ -631,7 +791,29 @@ freq_generator_dds_pwm u_freq
     .neg_b (dec_neg_b),
     .shift (dec_shift),
     .sv    (dec_sv[5:0]),
-    .out   (dec_out2)
+    .out   (cic_out2)
+  );
+
+  fir_chan fir_ch1
+  (
+    .clk      (sample_write_clock),
+    .order    (dec_order),
+    .shift_in (dec_sv[6]),
+    .load     (dec_t[7]),
+    .x        (cic_out1),
+    .out      (fir_out1),
+    .done     (fir_done1)
+  );
+
+  fir_chan fir_ch2
+  (
+    .clk      (sample_write_clock),
+    .order    (dec_order),
+    .shift_in (dec_sv[6]),
+    .load     (dec_t[7]),
+    .x        (cic_out2),
+    .out      (fir_out2),
+    .done     (fir_done2)
   );
 
   //Trigger on the 16-bit sample that is written on this edge (channel per 0x15): the result
@@ -1091,6 +1273,10 @@ assign sampling_enable = ~(
             8'h54:
               dec_shift <= io_mcu_data[5:0];
 
+            //CIC compensation FIR enable (0x1535), bit 0; bits 7..1 reserved
+            8'h56:
+              fir_en <= io_mcu_data[0];
+
             //Loading of the two bytes of the 16-bit trigger level high byte first
             8'h55:
               begin
@@ -1126,7 +1312,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h34;
+                    o_mcu_data <= 8'h35;
                 endcase
               end
 
@@ -1196,7 +1382,7 @@ assign sampling_enable = ~(
               begin
                 case(mcu_state)
                   4'h0:
-                    o_mcu_data <= { dec_on, 2'b0, dec_neg_b, dec_neg_a, dec_swap, dec_order };
+                    o_mcu_data <= { dec_on, fir_en, fir_act, dec_neg_b, dec_neg_a, dec_swap, dec_order };
                   4'h1:
                     o_mcu_data <= { 2'b0, dec_shift };
                 endcase
