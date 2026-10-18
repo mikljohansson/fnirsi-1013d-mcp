@@ -491,3 +491,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   bus_reset -> set_config right then, no tx_abort/clear_feature; usb_resumes still 0 after 18 suspends => the device never handles the
   resume; Windows resets the port. Queued: USB suspend/resume handling. The earlier 150-155 s storm of six resets = the owner's unplug/
   replug for the calibration.
+- Correction (fw-cal): the "corrected" means logged above came from the host's own compensation of READ_RAW, not the firmware. Firmware
+  path (READ_TRACE flags 0), shorted inputs, 4 captures averaged: CH1 A/B difference +0.42 at 200 MSa/s (full-rate class, noisier data),
+  +0.07 at 1 MSa/s, +0.02 at 10 kSa/s, means 127.9 (target 128), CIC2 127.94 = legacy: **CH1 zero criterion met at the gated rates and in
+  the filtered path.** CH2 at range 6: firmware codes equal raw codes (128.6/128.9), i.e. no correction applied there; +0.53 at 200 MSa/s.
+  Reported to fw-cal (range-6-uses-5 binding suspected). Pass time 30 ms and the spur improvement are firmware-path facts and stand.
