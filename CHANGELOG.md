@@ -153,6 +153,17 @@ Every protocol change sits behind `#if PC_PROTOCOL`.
   (c4b9735). A persist resumes after a USB drop (83b20c9).
 - Changed: GET_LINK_STATS names for the fw 0.2.4 and 0.2.5 counters (83b20c9, cf77969).
 - Added: agent measurement guide, the fnirsi-scope skill, and Codex and user-scope MCP setup (dc7f4b1).
+- Added: protocol 1.7 support (7f364a8). `scope_spectrum` reads the scope's spectrum view, and
+  `cross_check` recomputes it on the host from the same capture. `scope_status` shows the display mode.
+  `scope_event_log` and the soak tool decode the bus-event ring and event types 16-19.
+- Added: `fnirsi1013d-bench --fft` runs FFT_BENCH from the package (d1fe2e9).
+- Added: protocol 1.9 decimation filter (0de32dd). `scope_set_decimation` sets it. Captures read the
+  16-bit samples, and the simulator has a 0x1534 variant. The measurement guide explains choosing a filter
+  for decay curves.
+- Added: protocol 1.10 calibration v2 (f2d8008). The volts model uses the scope's per-core zeros for each
+  clock class, and `scope_calibration_info` shows them.
+- Added: protocol 1.11 compensation FIR (caab0eb). The `+fir` filter choices drive it, and event types 1-4
+  carry the USB suspend fields. `fnirsi1013d-soak --mode reopen` runs the suspend / resume bench.
 
 ### Tooling, FPGA and documentation
 
