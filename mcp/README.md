@@ -145,6 +145,13 @@ Physical units: volts are `(code_compensated - zero_code) x volts_per_lsb x prob
 `uv_per_lsb_q8` and `zero_code_q8`. That formula is bench test T8 and is flagged in every result. Time is
 `(i - pretrigger_samples) x dt` relative to the hardware trigger, which is +-2 samples until T5 is run.
 
+## Firmware dev loop: `fnirsi1013d-flash`
+
+`fnirsi1013d-flash [--image PATH] [--port COM10] [--no-fel] [--distro Ubuntu]` reboots the running scope into
+FEL with ENTER_FEL, hands the boot ROM device (1f3a:efe8) to WSL with usbipd, loads the image into RAM with
+`sunxi-fel -p write 0x7FFFFFE0 <image> exe 0x80000000`, and waits for the serial port and `#VER`. Details and exit
+codes: firmware/README.md section 4. It changes what the scope runs: announce it at the bench first.
+
 ## Tests
 
 ```
@@ -224,6 +231,11 @@ for 0.1.0 (AL3, no ACQUIRE_AVG, READ_SCREEN, READ_LIVE, FORCE or DEBUG_FPGA).
   nothing; the same frame (same seq) is resent, for normal and deferred requests (WAIT, ACQUIRE_AVG).
 - **Lost answers**: resent with the same seq, so the device's duplicate cache answers without executing twice;
   after repeated losses the recovery procedure (pause, flush, preamble, PING) runs.
+- **Timeouts per command class** (time before the same frame is resent): 100 ms for PING, GET_INFO,
+  GET_STATUS, GET_BATTERY and the text lines (answered from the firmware's 1 ms timer interrupt since 0.1.2);
+  main-loop commands 300 ms in REMOTE and 1 s in LOCAL (a UI pass); bulk reads (READ_RAW, READ_TRACE,
+  READ_SCREEN, TEST_PATTERN) 0.5 s / 1.5 s; WAIT and ACQUIRE_AVG use their own deadline. The transport tracks
+  REMOTE from status-shaped answers. `Transport(response_timeout=...)` overrides all classes.
 
 ## Windows notes
 

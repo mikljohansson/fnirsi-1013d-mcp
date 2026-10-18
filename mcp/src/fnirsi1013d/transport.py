@@ -46,6 +46,40 @@ VER_PREFIX = "#OK,FNIRSI-1013D-AI"
 
 WRITE_TIMEOUT_S = 2.0
 DEFAULT_RESPONSE_TIMEOUT_S = 1.0
+
+
+@dataclass
+class TimeoutPolicy:
+    """Response timeout (= time before the same frame is resent) per command class.
+
+    Firmware >= 0.1.2 answers PING, GET_INFO, GET_STATUS, GET_BATTERY and the ASCII lines from the 1 ms timer
+    interrupt (about 1 ms round trip in any state). Everything else runs on the main loop, which in REMOTE only
+    polls but in LOCAL waits for a UI pass (tens of ms, longer in busy screens). Bulk reads add transfer time
+    (64 KiB at 1-2.4 MB/s). Retries are idempotent through the device's duplicate cache.
+    """
+
+    fast: float = 0.1
+    main_remote: float = 0.3
+    main_local: float = 1.0
+    bulk_remote: float = 0.5
+    bulk_local: float = 1.5
+    text: float = 0.1
+
+    def for_cmd(self, cmd: int, remote: bool) -> float:
+        if cmd in FAST_CMDS:
+            return self.fast
+        if cmd in BULK_CMDS:
+            return self.bulk_remote if remote else self.bulk_local
+        return self.main_remote if remote else self.main_local
+
+
+#: answered from the timer IRQ (firmware >= 0.1.2)
+FAST_CMDS = frozenset({P.Cmd.PING, P.Cmd.GET_INFO, P.Cmd.GET_STATUS, P.Cmd.GET_BATTERY})
+#: responses that can be tens of KiB
+BULK_CMDS = frozenset({P.Cmd.READ_RAW, P.Cmd.READ_TRACE, P.Cmd.READ_SCREEN, P.Cmd.TEST_PATTERN})
+#: commands whose OK response is a GET_STATUS body (byte 0 = control); used to track REMOTE for timeouts
+_STATUS_BODY_CMDS = frozenset({P.Cmd.GET_STATUS, P.Cmd.SET_REMOTE, P.Cmd.ARM, P.Cmd.FORCE, P.Cmd.STOP,
+                               P.Cmd.WAIT})
 RECOVERY_PAUSE_S = 0.150
 
 
@@ -336,11 +370,15 @@ class LinkStats:
 class Transport:
     """Thread-safe request/response engine over a Link."""
 
-    def __init__(self, link: Link, retries: int = 2, response_timeout: float = DEFAULT_RESPONSE_TIMEOUT_S,
-                 resync: bool = True):
+    def __init__(self, link: Link, retries: int = 2, response_timeout: float | None = None,
+                 resync: bool = True, timeouts: TimeoutPolicy | None = None):
+        """``response_timeout`` (if set) overrides the per-command ``timeouts`` policy for every request."""
         self.link = link
         self.retries = retries
         self.response_timeout = response_timeout
+        self.timeouts = timeouts or TimeoutPolicy()
+        #: REMOTE as last reported by the device (status-shaped responses); selects the timeout class
+        self.remote = False
         self.stats = LinkStats()
         self._parser = P.FrameParser()
         self._lock = threading.RLock()
@@ -467,7 +505,12 @@ class Transport:
                  check: bool = True) -> P.Frame:
         seq = self.next_seq()
         frame = P.Frame(cmd, seq, payload)
-        tmo = self.response_timeout if timeout is None else timeout
+        if timeout is not None:
+            tmo = timeout
+        elif self.response_timeout is not None:
+            tmo = self.response_timeout
+        else:
+            tmo = self.timeouts.for_cmd(cmd, self.remote)
         n_try = 1 + (self.retries if retries is None else retries)
         self._outstanding[seq] = cmd
         try:
@@ -480,11 +523,18 @@ class Transport:
                     continue
                 if resp.status in RESEND_STATUSES and attempt + 1 < n_try:
                     continue  # our request was corrupted on the way; resend the same frame
+                self._note_status(resp)
                 return self._check(resp) if check else resp
             raise TransportError(f"no response to {P.Cmd(cmd).name} (seq {seq}) from {self.link.description} "
                                  f"after {n_try} attempts of {tmo:.2f} s")
         finally:
             self._outstanding.pop(seq, None)
+
+    def _note_status(self, resp: P.Frame) -> None:
+        if resp.status == P.Status.OK and resp.cmd in _STATUS_BODY_CMDS and resp.payload:
+            self.remote = resp.payload[0] == P.Control.REMOTE
+        elif resp.status == P.Status.E_NOT_REMOTE:
+            self.remote = False
 
     @staticmethod
     def _check(resp: P.Frame) -> P.Frame:
@@ -530,6 +580,7 @@ class Transport:
                     resp = self._await(seq, time.monotonic() + 1.0)
                 if resp is None:
                     raise TransportError(f"no response to deferred {P.Cmd(cmd).name} within {timeout:.1f} s")
+                self._note_status(resp)
                 return self._check(resp) if check else resp
             finally:
                 self._outstanding.pop(seq, None)
@@ -545,15 +596,21 @@ class Transport:
 
     # --- ASCII -----------------------------------------------------------------------------------------
 
-    def ascii(self, line: str, timeout: float = 0.5) -> str | None:
+    def ascii(self, line: str, timeout: float | None = None, retries: int | None = None) -> str | None:
+        """Send a ``#...`` line and return the reply line, resending after ``timeout`` (default: the policy's
+        text timeout). The text commands (#VER, #RESET, #LOCAL) are idempotent."""
+        tmo = timeout if timeout is not None else self.timeouts.text
         with self._lock:
             n0 = len(self.ascii_lines)
-            self.link.write(line.encode("ascii") + b"\n")
-            deadline = time.monotonic() + timeout
-            while time.monotonic() < deadline:
-                if len(self.ascii_lines) > n0:
-                    return self.ascii_lines.pop(n0)
-                self._pump(min(0.05, deadline - time.monotonic()))
+            for _ in range(1 + (self.retries if retries is None else retries)):
+                self.link.write(line.encode("ascii") + b"\n")
+                deadline = time.monotonic() + tmo
+                while time.monotonic() < deadline:
+                    if len(self.ascii_lines) > n0:
+                        reply = self.ascii_lines.pop(n0)
+                        del self.ascii_lines[n0:]  # answers to resent copies
+                        return reply
+                    self._pump(min(0.05, max(0.0, deadline - time.monotonic())))
             return None
 
 

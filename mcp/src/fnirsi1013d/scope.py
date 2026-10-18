@@ -256,7 +256,7 @@ class Scope:
         return P.BatteryResp.unpack(self._req(P.Cmd.GET_BATTERY))
 
     def test_pattern(self, length: int, pattern: int = 0) -> bytes:
-        return self._req(P.Cmd.TEST_PATTERN, P.TestPatternReq(length, pattern).pack(), timeout=5.0)
+        return self._req(P.Cmd.TEST_PATTERN, P.TestPatternReq(length, pattern).pack())
 
     def take_remote(self, watchdog_s: int = 15, keep_settings: bool = False, show_traces: bool = False,
                     ignore_dtr: bool = False) -> P.StatusResp:
@@ -424,7 +424,7 @@ class Scope:
             n = min(per, count - done)
             req = P.ReadRawReq(core_mask, addr_mode, layout, P.ReadRawReq.ALLOW_NOT_DONE if allow_not_done else 0,
                                address + done, n)
-            data = self._req(P.Cmd.READ_RAW, req.pack(), timeout=3.0)
+            data = self._req(P.Cmd.READ_RAW, req.pack())
             hdr = P.ReadRawHeader.unpack(data)
             first = first or hdr
             body = np.frombuffer(data, dtype=np.uint8, offset=16)
@@ -461,7 +461,7 @@ class Scope:
         pos = start
         while True:
             n = per if count == 0 else min(per, count - (pos - start))
-            data = self._req(P.Cmd.READ_TRACE, P.ReadTraceReq(mask, flags, pos, n).pack(), timeout=3.0)
+            data = self._req(P.Cmd.READ_TRACE, P.ReadTraceReq(mask, flags, pos, n).pack())
             hdr = P.ReadTraceHeader.unpack(data)
             if hdr0 is None:
                 hdr0 = hdr
@@ -490,7 +490,7 @@ class Scope:
         per = max(1, min(40, (self.response_limit - 8) // (2 * width)))
         while row < h:
             n = min(per, h - row)
-            data = self._req(P.Cmd.READ_SCREEN, P.ReadScreenReq(row, n).pack(), timeout=3.0)
+            data = self._req(P.Cmd.READ_SCREEN, P.ReadScreenReq(row, n).pack())
             hdr = P.ReadScreenHeader.unpack(data)
             rows.append(np.frombuffer(data, "<u2", hdr.nrows * hdr.width, 8).reshape(hdr.nrows, hdr.width))
             row += n

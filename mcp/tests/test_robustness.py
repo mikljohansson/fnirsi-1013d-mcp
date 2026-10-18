@@ -75,3 +75,23 @@ def test_reset_drops_pending_wait_keeps_remote(sim_factory):
         assert st.pass_ms == 5 and st.pass_max_ms == 5  # protocol 1.1 trailer
     finally:
         t.close()
+
+
+def test_timeout_classes_follow_remote_state(sim, transport):
+    from fnirsi1013d.transport import TimeoutPolicy
+
+    pol = TimeoutPolicy()
+    assert not transport.remote
+    assert pol.for_cmd(P.Cmd.PING, False) == 0.1 and pol.for_cmd(P.Cmd.GET_TIMEBASE, False) == 1.0
+    transport.request(P.Cmd.SET_REMOTE, P.SetRemoteReq(1, 0, 0).pack())
+    assert transport.remote
+    assert pol.for_cmd(P.Cmd.SET_TIMEBASE, True) == 0.3 and pol.for_cmd(P.Cmd.READ_RAW, True) == 0.5
+    transport.request(P.Cmd.SET_REMOTE, P.SetRemoteReq(0, 0, 0).pack())
+    assert not transport.remote
+
+
+def test_fast_retry_after_lost_response(sim, transport):
+    sim.drop_next = 1
+    t0 = time.monotonic()
+    assert transport.request(P.Cmd.PING, b"q").payload == b"q"
+    assert time.monotonic() - t0 < 0.5 and transport.stats.retries == 1  # resent after ~100 ms, not 1 s

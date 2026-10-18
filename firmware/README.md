@@ -262,6 +262,27 @@ xfel write 0x7FFFFFE0 build/fnirsi_1013d.bin
 xfel exec 0x80000000
 ```
 
+### Hands-free loop: `fnirsi1013d-flash`
+
+With a protocol firmware running (ENTER_FEL needs 0.1.1 or later), one command reboots the scope into FEL,
+loads a new image into RAM and waits for it to come back on the serial port:
+
+```
+mcp/.venv/Scripts/fnirsi1013d-flash.exe                                   # default image build-gcc10-pc/fnirsi_1013d.bin
+mcp/.venv/Scripts/fnirsi1013d-flash.exe --image firmware/scope/build/fnirsi_1013d.bin --port COM10
+mcp/.venv/Scripts/fnirsi1013d-flash.exe --no-fel                          # already in FEL (boot menu)
+```
+
+It runs `#VER` and GET_INFO, sends ENTER_FEL (without the capability it asks for the boot menu instead), polls
+`usbipd list` for `1f3a:efe8`, attaches it with `usbipd attach --wsl --busid <id>`, runs
+`wsl -d Ubuntu -u root -- sunxi-fel version` and the `-p write 0x7FFFFFE0 <image> exe 0x80000000` load (the
+image path converted to `/mnt/d/...`), then waits for 1209:0001 and prints its `#VER`. Each step is printed with
+its time; the exit code is non-zero on failure (2 image, 3 scope port, 4 FEL device / usbipd, 5 sunxi-fel,
+6 the port did not come back). The FEL device must have been shared once from an admin shell
+(`usbipd bind --hardware-id 1f3a:efe8`). On a Linux host the same command calls sunxi-fel directly
+(`--sunxi-fel "sudo sunxi-fel"` if the udev rule is missing). Options: `--distro`, `--fel-timeout`,
+`--port-timeout`. Only RAM is written; announce the reload at the bench first (CLAUDE.md).
+
 ### USB from Windows
 
 - **WSL with usbipd-win** (5.3.0 installed on this machine). Run from an admin PowerShell while
