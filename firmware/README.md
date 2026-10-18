@@ -282,9 +282,9 @@ xfel exec 0x80000000
   build of sunxi-fel or xfel. Do not mix the two approaches on the same device, because a bound
   usbipd device is not visible to Windows tools.
 
-FEL entry from the boot menu and `sunxi-fel version` through usbipd were verified on the owner's
-unit on 2026-10-18 (`docs/hardware-status.md`). Loading a scope image over FEL has not been run
-yet. Hardware steps are done by the owner.
+On the owner's unit, FEL entry from the boot menu, `sunxi-fel version` through usbipd, and a FEL
+RAM load of the v1.00o5 scope image (`sunxi-fel -p write 0x7FFFFFE0 scope.bin exe 0x80000000`)
+were verified on 2026-10-18 (`docs/hardware-status.md`). Hardware steps are done by the owner.
 
 ## 5. PC control protocol (USB CDC)
 
@@ -373,8 +373,14 @@ at sector 1489, well below the FAT partition start at 2048 or later.
 Order is by risk: each step is gated on the previous one. Load over FEL only, as in section 4A:
 the image runs from DDR and the scope image on the SD card is untouched. One write still happens:
 the power-off ISR saves settings to sector 709, as 1.00o5 always does. With `PC_FORCE_CDC=1` that
-save stores "USB CH340 mode" = on. The owner's unit has the stock bitstream (0x1432, variant 1),
-so steps 1-8 apply to it. The generator and programmable geometry need the Atlan AL3 bitstream.
+save stores "USB CH340 mode" = on.
+
+The owner's 25Q80 now holds Atlan's AL3 bitstream (0x1532, variant 2; written and read back
+2026-10-18, power-cycle check of the diagnostics screen pending). The expected values below are
+for 0x1532. The stock bitstream (0x1432, variant 1) gives `fpga=0x1432`, ring 4096, caps 0x1800,
+and E_UNSUPPORTED for the generator and for geometry other than 1500/3000. The owner also saw
+"Cannot recognize device" from the updater's MSC mode on Windows (cable suspected): rule that out
+with a known-good cable before step 2.
 
 ```
 make gcc10                                             # conservative compiler first
@@ -389,9 +395,10 @@ sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
    ModemManager ignore rule from plan section 10. The device is high-speed only: use a USB 2.0 HS
    port or hub, not a full-speed VM pass-through.
 3. **Text probe.** In a terminal, `#VER` + Enter must answer
-   `#OK,FNIRSI-1013D-AI,fw=0.1.0,proto=1.0,fpga=0x1432`. `#FOO` must answer `#ERR,UNKNOWN`.
+   `#OK,FNIRSI-1013D-AI,fw=0.1.0,proto=1.0,fpga=0x1532`. `#FOO` must answer `#ERR,UNKNOWN`.
 4. **Identify, LOCAL.** PING with random 0..492 byte payloads, 10,000 times. GET_INFO must report
-   variant 1, ring 4096, caps 0x1800 (only the two UNVERIFIED bits). Run GET_STATUS, GET_BATTERY,
+   variant 2, ring 8192, max total 16382, caps 0x1803 (PROG_TRIGGER_POS, GENERATOR_DDS and the two
+   UNVERIFIED bits; `PC_DEBUG=1` adds 0x120). Run GET_STATUS, GET_BATTERY,
    and GET_CHANNEL / TIMEBASE / TRIGGER / CAL, and compare with the screen. The UI keeps running.
    Open a menu: GET_STATUS must answer with `ui_busy` = 1, and SET_REMOTE must give E_BUSY.
 5. **Link tests T1, T2.** TEST_PATTERN lengths 492, 495, 496, 1008 and 4076, 1000 times each,
@@ -400,18 +407,20 @@ sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
    exit: release, tap on the banner, watchdog (5 s, no traffic), closing the port (DTR), cable
    pull, `#LOCAL`. Each must restore the UI with the user's settings. Power off while REMOTE, then
    boot again (stock or this image): the settings must be the user's.
-7. **Readout, stock bitstream.** Use auto trigger mode with the 1 kHz calibration signal on CH1.
-   Run ARM, WAIT, READ_RAW (all cores, `addr_mode` 1, 1500 words): repeated reads of one capture
-   must be byte-identical. Compare READ_TRACE with the screen. With a `PC_DEBUG=1` image, run T3
-   (`read_lag`), T5 (trigger alignment), T6 (0x18 after an auto timeout) and T10 (B-only edges).
-8. **Hardware-changing commands.** SET_CHANNEL across all ranges and both couplings: relays click,
-   and the read-back equals the request. Then the offset, SET_TIMEBASE (index and raw), and
-   SET_TRIGGER. Release and check that the UI shows the user's settings again. Run T8 with a known
-   DC voltage on each range.
-9. **Atlan AL3 bitstream (0x1532), only after it is flashed and verified.** Programmable geometry
-   up to 16,382 samples, SET_GEN on the calibration pin (`self_test_loopback`), T4 (interleave
-   order), and T7 (FORCE, `PC_DEBUG=1`). Only after T3, T4 and T7 pass may the firmware clear the
-   UNVERIFIED bits or set FORCE_TRIGGER in a release build.
+7. **Readout with the UI's geometry.** Leave the trigger and memory settings as the UI had them.
+   Use auto trigger mode with a signal on CH1. Run ARM, WAIT, READ_RAW (all cores, `addr_mode` 1,
+   `total_words` words): repeated reads of one capture must be byte-identical. Compare READ_TRACE
+   with the screen. With a `PC_DEBUG=1` image, run T3 (`read_lag`), T5 (trigger alignment) and T6
+   (0x18 after an auto timeout).
+8. **Hardware-changing commands, front end.** SET_CHANNEL across all ranges and both couplings:
+   relays click, and the read-back equals the request. Then the offset, SET_TIMEBASE (index and
+   raw), and SET_TRIGGER including geometry up to 16,382 samples. Release and check that the UI
+   shows the user's settings again. Run T8 with a known DC voltage on each range.
+9. **Hardware-changing commands, output.** SET_GEN drives the calibration pin: check it with a
+   probe first, then loop it back to CH1 (`self_test_loopback`). Run T4 (interleave order) and T7
+   (FORCE, `PC_DEBUG=1`). T10 (stock trigger core) needs the stock bitstream restored from
+   `backups/`. Only after T3, T4 and T7 pass may the firmware clear the UNVERIFIED bits or set
+   FORCE_TRIGGER in a release build.
 
 `BENCH: Tn` comments in `pc_cmds.c`, `pc_hal_scope.c`, `pc_transport.c` and `usb_interface.c` mark
 the code each test confirms.
