@@ -22,9 +22,6 @@
 
 void usb_device_irq_handler(void);
 void usb_device_CDC_irq_handler(void);//*
-#if PC_PROTOCOL
-void usb_device_CDC_irq_body(uint32 usbirq, uint32 txirq, uint32 rxirq);
-#endif
 
 int32 usb_device_write_data_ep_pack(int32 ep, uint8 * databuf, int32 len);
 
@@ -866,16 +863,6 @@ void usb_device_CDC_irq_handler(void)
   register uint32 usbirq = *USBC_REG_INTUSB;
   register uint32 txirq  = *USBC_REG_INTTX;
   register uint32 rxirq  = *USBC_REG_INTRX;
-#if PC_PROTOCOL
-  //PC protocol: the body below also serves flags the timer poll read itself (lost interrupts), so it takes them as
-  //parameters; this real-interrupt entry only reads them
-  pc_usb_isr_flags(usbirq, txirq, rxirq);
-  usb_device_CDC_irq_body(usbirq, txirq, rxirq);
-}
-
-void usb_device_CDC_irq_body(uint32 usbirq, uint32 txirq, uint32 rxirq)
-{
-#endif
   
   //Check on a RESET interrupt
   if(usbirq & USBC_BP_INTUSB_RESET)

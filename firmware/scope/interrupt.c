@@ -7,11 +7,6 @@
 //Interrupt handler function pointer table 
 IRQHANDLERFUNCION interrupthandlers[64];
 
-#if PC_PROTOCOL
-//INTC_PEND_REG0 as read by the dispatch now running: the timer tick sees whether the USB handler runs after it
-volatile uint32 pc_irq_dispatch_pend0;
-#endif
-
 //----------------------------------------------------------------------------------------------------------------------------------
 
 void setup_interrupt(uint32 irq, IRQHANDLERFUNCION function, uint32 priority)
@@ -44,11 +39,6 @@ void irq_handler(void)
   {
     //Get the interrupts of the first pending register
     pending = INTC_PEND_REG0[i];
-
-#if PC_PROTOCOL
-    if(i == 0)
-      pc_irq_dispatch_pend0 = pending;
-#endif
   
     //Clear the pending interrupts before servicing
     INTC_PEND_REG0[i] = 0;

@@ -1561,8 +1561,8 @@ static void test_fel_reset_stall(void)
   r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
   T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 58); T_EQ(r.len, 4 + 58 * 4);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 49), 6000); T_EQ(pc_get_u32(r.p + 4 + 4 * 56), 6007);   //restart record
-  T_EQ(pc_get_u32(r.p + 4 + 4 * 57), 4001);                      //USB IRQ races (fw 0.2.20)
-  T_EQ(pc_get_u32(r.p + 4 + 4 * 47), 4000);                      //USB IRQs served by the timer poll
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 57), 0);                         //retired (usb_irq_races, fw 0.2.20)
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 47), 0);                         //retired (usb_irq_polled, fw 0.2.12-0.2.20)
   T_EQ(pc_get_u32(r.p + 4 + 4 * 48), 5000);                      //boot splash ms + 1
   T_EQ(pc_get_u32(r.p + 4 + 4 * 41), 3000); T_EQ(pc_get_u32(r.p + 4 + 4 * 46), 3005);   //RX back-pressure
   T_EQ(pc_get_u32(r.p + 4 + 4 * 35), 2000); T_EQ(pc_get_u32(r.p + 4 + 4 * 40), 2005);   //USB events

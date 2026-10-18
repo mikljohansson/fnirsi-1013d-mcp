@@ -170,14 +170,14 @@ def main():
              'usb_bus_resets usb_suspends usb_resumes usb_disconnects ep0_setups ep0_bad_setups '
              # fw 0.2.7+: RX back-pressure branches
              'rx_isr_stalls rx_releases rx_restalls rx_empty_releases rx_count_max rx_count_oversize '
-             # fw 0.2.12+: USB interrupts served by the timer poll (lost IRQs)
+             # fw 0.2.12-0.2.20: USB interrupts served by the timer poll; retired (always 0) since 0.2.21
              'usb_irq_polled '
              # fw 0.2.17+: ms spent on the boot splash step + 1
              'boot_splash_ms '
              # fw 0.2.19+: restart record
              'restarts restart_exc_type restart_exc_lr restart_exc_spsr restart_exc_sp '
              'restart_reset_lr restart_reset_sp restart_reset_cpsr '
-             # fw 0.2.20+: ticks that found the real USB IRQ pending where the old fallback served
+             # fw 0.2.20: ticks that found the real USB IRQ pending where the old fallback served; retired since 0.2.21
              'usb_irq_races').split()
     st, body, _ = L.request(0x0007)
     if st == 0 and body:

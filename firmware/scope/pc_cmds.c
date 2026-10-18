@@ -692,11 +692,11 @@ static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uin
   n += PC_USBEV_COUNT;
   pc_hal_rx_debug(v + n);
   n += PC_RXDBG_COUNT;
-  v[n++] = pc_hal_usb_irq_polled();
+  v[n++] = 0;              //47 retired (usb_irq_polled, fw 0.2.12-0.2.20 tick fallback)
   v[n++] = pc_hal_boot_splash_ms();
   pc_hal_restart_info(v + n);
   n += PC_RESTART_COUNT;
-  v[n++] = pc_hal_usb_irq_races();
+  v[n++] = 0;              //57 retired (usb_irq_races, fw 0.2.20)
 
   pc_put_u16(resp, (uint16_t)n);
   pc_put_u16(resp + 2, 0);

@@ -414,8 +414,6 @@ void     pc_hal_link_stats(uint32_t *v) { uint32_t i; for(i=0;i<PC_TSTAT_COUNT;i
 
 void     pc_hal_usb_events(uint32_t *v) { uint32_t i; for(i=0;i<PC_USBEV_COUNT;i++) v[i] = 2000 + i; }
 void     pc_hal_rx_debug(uint32_t *v)   { uint32_t i; for(i=0;i<PC_RXDBG_COUNT;i++) v[i] = 3000 + i; }
-uint32_t pc_hal_usb_irq_polled(void)   { return 4000; }
-uint32_t pc_hal_usb_irq_races(void)    { return 4001; }
 uint32_t pc_hal_boot_splash_ms(void)   { return 5000; }
 void     pc_hal_restart_info(uint32_t *v) { uint32_t i; for(i=0;i<PC_RESTART_COUNT;i++) v[i] = 6000 + i; }
 

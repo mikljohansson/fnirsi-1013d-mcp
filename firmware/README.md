@@ -497,6 +497,10 @@ Link counters: GET_LINK_STATS (0x0007, protocol 1.2) returns 31 u32 counters sin
 parser, dispatch and, since 0.2.0, four startup intervals; list in `docs/protocol.md` section 14). `host_tests/bench_link.py` prints them.
 `rx_swept` counts request packets whose USB interrupt never arrived and that a poll picked up
 instead; `link_resets` counts bus reset / suspend / disconnect events (each drops buffered data).
+Counters 47 (`usb_irq_polled`) and 57 (`usb_irq_races`) are retired since 0.2.21 and always 0: they
+belonged to the USB timer-tick fallback (0.2.12-0.2.20), removed because the 0.2.20 soak showed
+1.00o5's interrupt dispatcher never loses a USB interrupt (the fallback only raced the real ISR). The
+slots stay so decoders by count keep working; event type 14 is likewise retired.
 
 ### First hardware bring-up checklist
 
