@@ -19,13 +19,14 @@ context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/p
 | `analysis.py` | Stats, crossings, frequency/duty, rise/fall, delay, preview, Welford `Averager`, fractional shift, edge finding, FFT (windows, peaks, THD), decay fits (`exp`, `exp+offset`, `exp2`, `power`), clip blanking, sample points. |
 | `simulator.py` | `Device` (protocol state machine + FPGA/ring model) and `SimServer` (TCP, one host at a time, test hooks). CLI `fnirsi1013d-sim`. |
 | `server.py` | FastMCP server (`fnirsi1013d-mcp`): `Session` (connection, lock, tokens, relay limit, audit, .npz, `ensure_control`, legacy idle release), 20 tools, `_averaged` restart loop (`_SettingsChanged`), `--sim` in-process simulator, `preload_native_modules`. |
-| `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 fresh attempts, 1 s apart; between them a look for the FEL device 1f3a:efe8, which means the OK was lost but the scope rebooted: continue; `#VER` check if all unanswered) -> usbipd -> sunxi-fel RAM load -> wait for `#VER`. Any failure: one `FAILED:` line, non-zero exit. |
+| `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 fresh attempts, 1 s apart; between them a look for the FEL device 1f3a:efe8, which means the OK was lost but the scope rebooted: continue; `#VER` check if all unanswered) -> usbipd -> sunxi-fel RAM load -> wait for `#VER`. Any failure: one `FAILED:` line, non-zero exit. `--persist` / `--persist-only` write the image to SD sector 750 after a verified backup of 750..write_end; `--restore <backup>`; persist failures exit 7. |
+| `sdcard.py` | SD sector access (fw >= 0.2.2): `SdCard` info/read/backup (double read + file re-read)/stage/write (stage CRC, read-back CRC), `check_image` (eGON length + checksum). Used by `flash.py --persist`. |
 | `bench.py` | `fnirsi1013d-bench`: runs `../firmware/scope/host_tests/bench_link.py` (link checks + census; `--fel` not exposed). |
 | `vectors.py` | Checks/extends `../docs/protocol-vectors.json` (`--check`, `--merge`). |
 | `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points -> least-squares fit of zero, 1/gain, PWM slope per channel/range/core; JSON file), `ChannelScale`/`channel_scale` (raw, compensated, mean and trigger-level conversions; firmware formula fallback), `import_t8` + CLI for the lead's `backups/t8_*.json`. |
 | `units.py` | `parse_quantity("100us")`, `fmt_si`. |
 
-Tests in `tests/` (206, incl. `test_calibration`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
+Tests in `tests/` (224, incl. `test_calibration`, `test_sdcard`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
 (resend, resync, #RESET, 1.1/1.2 fields, timeouts, paused responses), `test_serial_link` (no-reconfigure rule,
 fake pyserial), `test_simulator_scope`, `test_shared_mode` (1.3 semantics through `Scope`), `test_firmware_match`
 (protocol.md section 14 items), `test_server` (every tool in-process, collaborative restarts, legacy fallback),
@@ -44,6 +45,7 @@ wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/mcp && ~/.venvs/fnirsi1
 .venv/Scripts/fnirsi1013d-sim --variant al3 --port 5555 --signal decay:tau=80us
 .venv/Scripts/fnirsi1013d-mcp --port tcp://localhost:5555           # or --sim "<sim args>", or --port COM10
 .venv/Scripts/fnirsi1013d-flash --image <bin> --sha256 <hash>       # reload: only with the lead's ack
+.venv/Scripts/fnirsi1013d-flash --image <bin> --sha256 <hash> --persist  # + write SD sector 750: only with the lead's ack
 .venv/Scripts/fnirsi1013d-bench --port COM10 --census 2000          # LOCAL-safe link census
 .venv/Scripts/ruff check --select F,E9,B023 --line-length 120 src tests
 ```
@@ -106,6 +108,11 @@ section 14 (zero-extended requests, detail numbering, ARM-while-ARMED, LOCAL fla
 TEST_PATTERN 3, stock GET_GEN, offset PWM range, #RESET even inside a partial frame), protocol 1.1 timing fields
 (constant 5 ms) and 1.2 GET_LINK_STATS (counts what a TCP model can see). `--caps` mimics a build (0x1C03 =
 fw 0.1.1+ on AL3, 0x1803 = 0.1.0), `--fail-responses-over` drops large responses, `--time-scale` (0 = instant).
+SD card (fw 0.2.2, cap SD_SECTORS, not in the 1.2 model): `Device.sd` = `SimCard` (sparse sectors, MBR with the
+partition at 8192 so write_end 2048, eGON.BT0 at 16, eGON.EXE at 80 and 750), `Device.sd_stage` (64 KiB), the
+firmware's check order for SD_WRITE_SECTORS, read-back compare. Hooks: `sd.present`, `sd.fail_next_write`
+(read-back mismatch), `sd.io_error_next` (driver error, e.g. -2), `sd.writes` (log). `make_egon_image()` builds
+valid images. GET_LINK_STATS has the 31 counters of fw 0.2.2.
 Front-end errors for calibration tests: `zero_error` (codes per channel/core) and `offset_slope` (true codes per
 PWM count). READ_TRACE count past the end: clipped in 1.3 mode (fw >= 0.2.1), E_BAD_ARG detail 8 in the 1.2 model.
 Test hooks on `SimServer`: `corrupt_next`, `garbage_next`, `drop_next` (responses), `bad_crc_next`, `lose_next`

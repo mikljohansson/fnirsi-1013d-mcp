@@ -239,7 +239,7 @@ def test_set_acq_state_during_a_pending_wait_aborts_it(sim_factory):
 
 def test_link_stats_has_the_0_2_0_counters(scope):
     ls = scope.link_stats()
-    assert "first_poll_ms" in ls and "first_pass_ms" in ls and len(ls) == 29
+    assert "first_poll_ms" in ls and "first_done_ms" in ls and len(ls) == 31
 
 
 def test_read_trace_count_is_clipped_on_1_3(sim, scope):

@@ -262,6 +262,71 @@ class SimConfig:
     fail_responses_over: int | None = None
 
 
+def make_egon_image(size: int, kind: bytes = b"eGON.EXE", fill: int = 0) -> bytes:
+    """A minimal eGON image: branch, magic, checksum and 512-aligned length (mksunxi.py rule), then a pattern."""
+    size = (size + 511) // 512 * 512
+    buf = bytearray(((fill + i * 7) & 0xFF for i in range(size)))
+    buf[0:4] = b"\x06\x00\x00\xea"
+    buf[4:12] = kind
+    struct.pack_into("<I", buf, 16, size)
+    struct.pack_into("<I", buf, 12, P.egon_checksum(bytes(buf), size))
+    return bytes(buf)
+
+
+class SimCard:
+    """SD card behind the SD sector commands (fw 0.2.2): sparse 512-byte sectors, an MBR whose first partition
+    starts at ``part_start``, the Atlan bootloader at 16 and a scope image at 750. Test hooks: ``present``,
+    ``fail_next_write`` (read-back mismatch), ``io_error_next`` (driver error, e.g. -2 timeout)."""
+
+    def __init__(self, card_sectors: int = 131072, part_start: int = 8192):
+        self.card_sectors = card_sectors
+        self.sectors: dict[int, bytes] = {}
+        self.present = True
+        self.fail_next_write = 0
+        self.io_error_next = 0
+        self.writes: list[tuple[int, int]] = []
+        mbr = bytearray(512)
+        if part_start:
+            struct.pack_into("<BBBBBBBBII", mbr, 446, 0, 0, 0, 0, 0x0C, 0, 0, 0, part_start,
+                             card_sectors - part_start)
+            mbr[510:512] = b"\x55\xaa"
+        self.put(0, bytes(mbr))
+        self.put(16, make_egon_image(16 * 1024, b"eGON.BT0", 0x30))
+        self.put(80, make_egon_image(8 * 1024, b"eGON.EXE", 0x50))
+        self.put(750, make_egon_image(300 * 1024, b"eGON.EXE", 0x75))
+
+    def put(self, sector: int, data: bytes) -> None:
+        for i in range(0, len(data), 512):
+            self.sectors[sector + i // 512] = bytes(data[i: i + 512]).ljust(512, b"\0")
+
+    def read(self, sector: int, count: int) -> bytes:
+        return b"".join(self.sectors.get(s, bytes(512)) for s in range(sector, sector + count))
+
+    @property
+    def part_start(self) -> int:
+        mbr = self.read(0, 1)
+        if mbr[510:512] != b"\x55\xaa":
+            return 0
+        return struct.unpack_from("<I", mbr, 446 + 8)[0]
+
+    @property
+    def write_end(self) -> int:
+        ps = self.part_start
+        return min(ps, 2048) if ps else 0
+
+    def header(self, sector: int, verify: bool) -> P.SdHeaderInfo:
+        head = self.read(sector, 1)
+        magic, length, stored = P.egon_info(head)
+        h = P.SdHeaderInfo(sector, magic, P.SD_CHECK_NOT, length if magic else 0, stored if magic else 0)
+        if magic and verify:
+            if length == 0 or length % 4 or length > 2048 * 512:
+                h.check = P.SD_CHECK_LENGTH
+            else:
+                body = self.read(sector, (length + 511) // 512)
+                h.check = P.SD_CHECK_OK if P.egon_checksum(body, length) == stored else P.SD_CHECK_BAD
+        return h
+
+
 class Deferred:
     def __init__(self, frame: P.Frame, done_at: float, result: Callable[[], tuple[int, bytes]]):
         self.frame = frame
@@ -347,6 +412,9 @@ class Device:
         self.ring_valid = False
         #: test hook: called as on_arm(device) at the start of every host ARM (e.g. a UI change mid-run)
         self.on_arm: Callable[["Device"], None] | None = None
+        #: SD card and the 64 KiB write staging buffer (fw 0.2.2)
+        self.sd = SimCard()
+        self.sd_stage = bytearray(P.SD_STAGE_BYTES)
 
     # --- capabilities -------------------------------------------------------------------------------
 
@@ -357,7 +425,7 @@ class Device:
         c = P.Caps.SCREENSHOT | P.Caps.DEVICE_AVERAGE | P.Caps.DEBUG_RAW | P.Caps.LIVE_READ | P.Caps.ENTER_FEL
         c |= P.Caps.READ_LAG_UNVERIFIED | P.Caps.INTERLEAVE_UNVERIFIED | P.Caps.FORCE_TRIGGER
         if not self.cfg.legacy:
-            c |= P.Caps.SHARED_MODE
+            c |= P.Caps.SHARED_MODE | P.Caps.SD_SECTORS
         if self.spec.programmable:
             c |= P.Caps.PROG_TRIGGER_POS
         if self.spec.generator:
@@ -1440,6 +1508,75 @@ class Device:
             y = (479 - a[x].astype(int) * 479 // 255)
             fb[y, np.arange(800)] = colour
         return fb
+
+    # --- SD sector commands (fw 0.2.2, protocol section 14 row 40) ---------------------------------------
+
+    def _cmd_sd_info(self, req: P.Frame) -> P.Frame:
+        sd = self.sd
+        if not sd.present:
+            raise _DevErr(P.Status.E_IO, 0, "no card")
+        verify = bool(req.payload[0] & P.SD_FLAG_VERIFY)
+        info = P.SdInfo(sd.card_sectors, sd.part_start, sd.write_end, P.SD_STAGE_BYTES,
+                        [sd.header(s, verify) for s in (16, 80, 750)])
+        return self._ok(req, info.pack())
+
+    def _cmd_sd_read_sectors(self, req: P.Frame) -> P.Frame:
+        r = P.SdReadReq.unpack(req.payload)
+        if not 1 <= r.count <= P.SD_MAX_SECTORS:
+            raise _DevErr(P.Status.E_BAD_ARG, 4, f"count {r.count} not 1..128")
+        if not self.sd.present:
+            raise _DevErr(P.Status.E_IO, 0, "no card")
+        if r.sector + r.count > self.sd.card_sectors:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "beyond the card")
+        data = self.sd.read(r.sector, r.count)
+        return self._ok(req, P.SdReadHeader(r.sector, r.count, P.crc32_iso_hdlc(data)).pack() + data)
+
+    def _cmd_sd_stage(self, req: P.Frame) -> P.Frame:
+        h = P.SdStageHeader.unpack(req.payload)
+        data = req.payload[8:]
+        if h.length != len(data) or h.length > P.SD_STAGE_MAX_CHUNK:
+            raise _DevErr(P.Status.E_BAD_LEN, 4, f"length {h.length} != payload - 8 ({len(data)})")
+        if h.offset + h.length > P.SD_STAGE_BYTES:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "beyond 64 KiB")
+        self.sd_stage[h.offset: h.offset + h.length] = data
+        return self._ok(req, P.SdStageResp(h.offset, h.length, P.crc32_iso_hdlc(bytes(data))).pack())
+
+    def _cmd_sd_write_sectors(self, req: P.Frame) -> P.Frame:
+        r = P.SdWriteReq.unpack(req.payload)
+        sd = self.sd
+        if r.magic != P.SD_WRITE_MAGIC:
+            raise _DevErr(P.Status.E_BAD_ARG, 12, "magic")
+        if r.flags & ~(P.SD_WR_CONFIG | P.SD_WR_BOOT):
+            raise _DevErr(P.Status.E_BAD_ARG, 6, "flags")
+        if not 1 <= r.count <= P.SD_MAX_SECTORS:
+            raise _DevErr(P.Status.E_BAD_ARG, 4, "count 1..128")
+        if not sd.present:
+            raise _DevErr(P.Status.E_IO, 0, "no card")
+        if not sd.write_end:
+            raise _DevErr(P.Status.E_STATE, 0, "no valid partition table: writes off")
+        last = r.sector + r.count - 1
+        if r.sector < 16 or last >= sd.write_end:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, f"outside the write window [16, {sd.write_end})")
+        if r.sector < 80 and not r.flags & P.SD_WR_BOOT:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "sectors 16-79 need BOOT")
+        if r.sector <= 710 and last >= 708 and not r.flags & P.SD_WR_CONFIG:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "sectors 708-710 need CONFIG")
+        data = bytes(self.sd_stage[: r.count * 512])
+        if P.crc32_iso_hdlc(data) != r.crc32:
+            raise _DevErr(P.Status.E_BAD_ARG, 8, "stage crc")
+        if sd.io_error_next:
+            err, sd.io_error_next = sd.io_error_next, 0
+            raise _DevErr(P.Status.E_IO, (-err) & 0xFFFF, "driver error")
+        written = data
+        if sd.fail_next_write:
+            sd.fail_next_write -= 1
+            written = data[:100] + bytes([data[100] ^ 0xFF]) + data[101:]
+        sd.put(r.sector, written)
+        sd.writes.append((r.sector, r.count))
+        back = sd.read(r.sector, r.count)
+        if back != data:
+            raise _DevErr(P.Status.E_IO, 0xFFFF, "read-back mismatch")
+        return self._ok(req, P.SdWriteResp(r.sector, r.count, P.crc32_iso_hdlc(back)).pack())
 
     def _cmd_debug_fpga(self, req: P.Frame) -> P.Frame:
         try:

@@ -186,6 +186,26 @@ answers `#VER`, the tool stops ("still runs firmware ..., nothing was loaded"). 
 line and exits non-zero (2 image, 3 scope link / ENTER_FEL, 4 usbipd / FEL device, 5 sunxi-fel, 6 port did not
 come back, 1 anything else).
 
+### Making an image permanent: `--persist`
+
+With firmware 0.2.2 or later (capability SD_SECTORS) the flash tool can write the image to the SD card through
+the USB protocol, without removing the card:
+
+```
+fnirsi1013d-flash --image <bin> --sha256 <hash> --persist   # RAM load as above, then write sector 750
+fnirsi1013d-flash --image <bin> --persist-only              # write the card through the running firmware
+fnirsi1013d-flash --restore backups/sd_750-2048_<time>.bin  # put a backup back
+```
+
+`--persist` refuses images whose eGON header length or checksum is wrong (run `firmware/tools/mksunxi.py`), cards
+without a partition table and images that do not fit below `write_end` (min(partition start, 2048)). It first
+backs up sectors 750..write_end to `backups/sd_750-<end>_<time>.bin` (read twice and compared, saved, re-read) and
+prints its sha256. It then writes 64 KiB pieces: the 484-byte staging chunks, the stage CRC the firmware checks
+before writing, and the CRC the firmware reads back from the card are all checked. At the end, SD_INFO VERIFY
+recomputes the eGON checksum on the card. Only sector 750 onwards is touched: the bootloader (16-79), the
+calibration, settings and boot-mode sectors (708-710) need explicit firmware flags the tool never sets. Failures
+exit with code 7 and name the backup to restore.
+
 ## Bench link check: `fnirsi1013d-bench`
 
 `fnirsi1013d-bench [--port COM10] [--census 2000] [--n 200]` runs the firmware's

@@ -80,6 +80,10 @@ class Cmd(enum.IntEnum):
     SET_GEN = 0x0301
     GET_CAL = 0x0400
     READ_SCREEN = 0x0401
+    SD_INFO = 0x0500  # protocol 1.3, fw 0.2.2, cap SD_SECTORS
+    SD_READ_SECTORS = 0x0501
+    SD_STAGE = 0x0502
+    SD_WRITE_SECTORS = 0x0503
     DEBUG_FPGA = 0x0F00
     ENTER_FEL = 0x0F01
 
@@ -117,6 +121,8 @@ class Status(enum.IntEnum):
     E_ABORTED = 10
     E_VERSION = 11
     E_OVERFLOW = 12
+    #: fw 0.2.2: SD card error; detail = negated driver error (2 timeout, 4 out of range) or 0xFFFF read-back mismatch
+    E_IO = 13
     E_INTERNAL = 255
 
 
@@ -133,6 +139,7 @@ STATUS_HINTS: dict[int, str] = {
     Status.E_ABORTED: "request ended by STOP, release or watchdog",
     Status.E_VERSION: "protocol major version mismatch",
     Status.E_OVERFLOW: "response would exceed max_response_payload; read fewer words",
+    Status.E_IO: "SD card error (detail: driver error, 0xFFFF = read-back mismatch); nothing past the failing chunk was written",
     Status.E_INTERNAL: "firmware bug",
 }
 
@@ -155,6 +162,8 @@ class Caps(enum.IntFlag):
     INTERLEAVE_UNVERIFIED = 1 << 12
     #: protocol 1.3: collaborative mode. No LOCAL/REMOTE; UI and host share one live settings set.
     SHARED_MODE = 1 << 13
+    #: fw 0.2.2: SD_INFO / SD_READ_SECTORS / SD_STAGE / SD_WRITE_SECTORS
+    SD_SECTORS = 1 << 14
 
 
 def caps_names(caps: int) -> list[str]:
@@ -172,6 +181,10 @@ CMD_CAP: dict[Cmd, Caps] = {
     Cmd.ENTER_FEL: Caps.ENTER_FEL,
     Cmd.SET_ACQ_STATE: Caps.SHARED_MODE,
     Cmd.GET_CAPTURE_INFO: Caps.SHARED_MODE,
+    Cmd.SD_INFO: Caps.SD_SECTORS,
+    Cmd.SD_READ_SECTORS: Caps.SD_SECTORS,
+    Cmd.SD_STAGE: Caps.SD_SECTORS,
+    Cmd.SD_WRITE_SECTORS: Caps.SD_SECTORS,
 }
 
 
@@ -819,6 +832,124 @@ class CaptureInfo:
         return d
 
 
+# SD sector commands (protocol 1.3, fw 0.2.2, section 14 row 40)
+
+SD_SECTOR = 512
+SD_STAGE_BYTES = 65536
+SD_STAGE_MAX_CHUNK = 484
+SD_MAX_SECTORS = 128
+SD_WRITE_MAGIC = 0x52574453  # 'SDWR'
+SD_FLAG_VERIFY = 0x01
+SD_WR_CONFIG = 0x01  # allow sectors 708-710
+SD_WR_BOOT = 0x02  # allow sectors 16-79
+SD_EGON_NONE, SD_EGON_BT0, SD_EGON_EXE = 0, 1, 2
+SD_CHECK_NOT, SD_CHECK_OK, SD_CHECK_BAD, SD_CHECK_LENGTH = 0, 1, 2, 3
+
+
+@dataclass
+class SdHeaderInfo(Payload):
+    FIELDS = [("sector", "I"), ("magic", "B"), ("check", "B"), ("_r", "2x"), ("length", "I"), ("checksum", "I")]
+    sector: int = 0
+    magic: int = 0
+    check: int = 0
+    length: int = 0
+    checksum: int = 0
+
+
+@dataclass
+class SdInfo:
+    """SD_INFO response (64 bytes): card, partition, write window, eGON headers at sectors 16, 80 and 750."""
+
+    card_sectors: int
+    part_start: int
+    write_end: int
+    stage_bytes: int
+    headers: list[SdHeaderInfo]
+
+    def pack(self) -> bytes:
+        return struct.pack("<IIII", self.card_sectors, self.part_start, self.write_end, self.stage_bytes) + \
+            b"".join(h.pack() for h in self.headers)
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "SdInfo":
+        data = bytes(data) + b"\0" * max(0, 64 - len(data))
+        a, b, c, d = struct.unpack_from("<IIII", data)
+        return cls(a, b, c, d, [SdHeaderInfo.unpack(data[16 + 16 * i: 32 + 16 * i]) for i in range(3)])
+
+    def header(self, sector: int) -> SdHeaderInfo | None:
+        return next((h for h in self.headers if h.sector == sector), None)
+
+
+@dataclass
+class SdReadReq(Payload):
+    FIELDS = [("sector", "I"), ("count", "H"), ("_r", "2x")]
+    sector: int = 0
+    count: int = 1
+
+
+@dataclass
+class SdReadHeader(Payload):
+    FIELDS = [("sector", "I"), ("count", "H"), ("_r", "2x"), ("crc32", "I"), ("_r2", "4x")]
+    sector: int = 0
+    count: int = 0
+    crc32: int = 0
+
+
+@dataclass
+class SdStageHeader(Payload):
+    """SD_STAGE request head (then ``length`` data bytes) and response (12 bytes: ..., u32 crc32)."""
+
+    FIELDS = [("offset", "I"), ("length", "H"), ("_r", "2x")]
+    offset: int = 0
+    length: int = 0
+
+
+@dataclass
+class SdStageResp(Payload):
+    FIELDS = [("offset", "I"), ("length", "H"), ("_r", "2x"), ("crc32", "I")]
+    offset: int = 0
+    length: int = 0
+    crc32: int = 0
+
+
+@dataclass
+class SdWriteReq(Payload):
+    FIELDS = [("sector", "I"), ("count", "H"), ("flags", "B"), ("_r", "x"), ("crc32", "I"), ("magic", "I")]
+    sector: int = 0
+    count: int = 1
+    flags: int = 0
+    crc32: int = 0
+    magic: int = SD_WRITE_MAGIC
+
+
+@dataclass
+class SdWriteResp(Payload):
+    FIELDS = [("sector", "I"), ("count", "H"), ("_r", "2x"), ("crc32", "I"), ("_r2", "4x")]
+    sector: int = 0
+    count: int = 0
+    crc32: int = 0
+
+
+EGON_CHECKSUM_STAMP = 0x5F0A6C39
+
+
+def egon_info(buf: bytes) -> tuple[int, int, int]:
+    """(magic SD_EGON_*, header length, stored checksum) of an eGON image head."""
+    if len(buf) < 20:
+        return SD_EGON_NONE, 0, 0
+    tag = bytes(buf[4:12])
+    magic = SD_EGON_BT0 if tag == b"eGON.BT0" else SD_EGON_EXE if tag == b"eGON.EXE" else SD_EGON_NONE
+    stored, length = struct.unpack_from("<II", buf, 12)
+    return magic, length, stored
+
+
+def egon_checksum(buf: bytes, length: int) -> int:
+    """eGON checksum (firmware/tools/mksunxi.py): stamp in the field, u32 LE word sum of ``length`` bytes."""
+    tmp = bytearray(buf[:length])
+    struct.pack_into("<I", tmp, 12, EGON_CHECKSUM_STAMP)
+    return sum(struct.unpack_from(f"<{length // 4}I", tmp)) & 0xFFFFFFFF
+
+
 @dataclass
 class SetRemoteReq(Payload):
     FIELDS = [("action", "B"), ("flags", "B"), ("watchdog_s", "H")]
@@ -1220,6 +1351,8 @@ LINK_STATS_NAMES = (
     "disp_main", "disp_busy", "disp_isr", "held", "isr_skipped",
     # fw 0.2.0: ms from init to the first main-loop poll, duration of the first main-loop pass
     "first_poll_ms", "first_pass_ms",
+    # fw 0.2.2: ms from the first main-loop poll to the first capture arm / DONE (| 1; 0 = not yet)
+    "first_arm_ms", "first_done_ms",
 )
 
 
@@ -1248,7 +1381,7 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.READ_RAW: ReadRawReq.size(), Cmd.READ_TRACE: ReadTraceReq.size(), Cmd.READ_LIVE: ReadLiveReq.size(),
     Cmd.ACQUIRE_AVG: AcquireAvgReq.size(), Cmd.GET_GEN: 0, Cmd.SET_GEN: SetGenReq.size(), Cmd.GET_CAL: 1,
     Cmd.READ_SCREEN: ReadScreenReq.size(), Cmd.ENTER_FEL: 4, Cmd.SET_ACQ_STATE: SetAcqStateReq.size(),
-    Cmd.GET_CAPTURE_INFO: 0,
+    Cmd.GET_CAPTURE_INFO: 0, Cmd.SD_INFO: 4, Cmd.SD_READ_SECTORS: 8, Cmd.SD_STAGE: 8, Cmd.SD_WRITE_SECTORS: 16,
 }
 
 
