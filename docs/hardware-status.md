@@ -39,7 +39,7 @@ Hash entries use sha256 of files in `backups/` (gitignored).
 - [ ] Current bootloader version noted (or "none, stock")
 - [ ] FPGA version word noted
 - [ ] Lead's go received for Tier 1
-- [ ] Tier 1 SD card prepared with `make_sd_image.py` (bootloader v0.8, updater, scope; boot mode 4), written to a spare card
+- [x] Tier 1 SD card prepared with `make_sd_image.py` (bootloader v0.8, updater, scope; boot mode 4), written to a spare card
 - [ ] Tier 1 step 5.3.3 done: open firmware booted with stock FPGA
 - [ ] AL3 bitstream (0x1532) written and verified by read-back
 - [ ] FEL path tested (usbipd attach, `sunxi-fel version`)
@@ -67,3 +67,7 @@ Newest entries at the bottom. Format: date, who, what, result.
 - Backup: `backups/2026-10-18_fpga-25q80-stock.bin`, two reads identical, sha256 90f65f084bdee8f443830ff6c48b7a90d0600fafa7e68713686542a29fa0d253.
   Payload (282,866 bytes, header cc55aa33 f0000006 18006c31 0bb7c200) byte-identical to Atlan's zb25vq80 dump and pcprogrammer's W25Q80_FPGA.bin. Unit is confirmed stock AL3A10 bitstream (0x1432).
 - Spare SD card: 480 MB USB mass-storage card, originally FAT32 from sector 32 (would collide with firmware sectors); repartitioned with diskpart, FAT32 from 4 MiB (sector 8192).
+- Tier-1 SD card written (WSL /dev/sdg via usbipd busid 8-4): bootloader v0.8 @16, updater v0.02v @80, scope v1.00o5 (GCC 10 build, byte-identical to Atlan's reference) @750,
+  standard display config @710 with boot mode 4 (menu, scope preselected); sectors 708/709 blank (calibrate on first boot). Image: `backups/sdcard/card-1.00o5-stockfpga.img`
+  sha256 83a1ff773c766f1c04586996b6a22dd601828162e9806f573a912ab62442f012. Read-back identical. FAT32 partition from sector 8192, label FNIRSI.
+  Not yet booted on the scope.
