@@ -1431,6 +1431,53 @@
     }
    ],
    "source": "host"
+  },
+  {
+   "name": "host_resp_get_info_al3_proto_1_1",
+   "description": "GET_INFO response of firmware 0.1.1: proto 1.1, caps 0x1C03 (ENTER_FEL added)",
+   "hex": "a51301010200020000004c000000b0970101000200040100321502080020020200c2eb0b031c000080f0fa02fe3f500000070600302e312e310000000000000000000000be32845a31303133442d303030310000000000002003e001696ebb7f",
+   "frames": [
+    {
+     "cmd": 2,
+     "seq": 2,
+     "status": 0,
+     "flags": 1,
+     "len": 76,
+     "payload": "0101000200040100321502080020020200c2eb0b031c000080f0fa02fe3f500000070600302e312e310000000000000000000000be32845a31303133442d303030310000000000002003e001"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_status_proto_1_1",
+   "description": "GET_STATUS response, protocol 1.1 (32 bytes): pass_ms 7, pass_max_ms 31",
+   "hex": "a51301010300060000002000000078e101030b002b000000d11941180300000040e201000f0012000000000007001f00e8dea7bb",
+   "frames": [
+    {
+     "cmd": 3,
+     "seq": 6,
+     "status": 0,
+     "flags": 1,
+     "len": 32,
+     "payload": "01030b002b000000d11941180300000040e201000f0012000000000007001f00"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_ascii_reset",
+   "description": "#RESET recovery line (firmware 0.1.1)",
+   "hex": "2352455345540a",
+   "frames": [],
+   "device_events": [
+    {
+     "event": "ascii",
+     "line": "RESET"
+    }
+   ],
+   "source": "host"
   }
  ]
 }

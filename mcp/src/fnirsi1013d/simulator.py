@@ -242,7 +242,7 @@ class SimConfig:
     caps_override: int | None = None
     caps_clear: int = 0
     seed: int | None = None
-    fw_version: str = "0.1.0-sim"
+    fw_version: str = "0.1.1-sim"
     serial: str = "1013D-SIM"
     ui_capture_period_s: float = 0.05
     #: drop (never send) responses with a larger payload, like firmware 0.1.0 on hardware (> 5 KiB failed)
@@ -314,6 +314,9 @@ class Device:
         self._dbg_first = True
         self.log: list[str] = []
         self.arm_count = 0
+        #: protocol 1.1 main-loop timing fields (simulated as a steady 5 ms loop)
+        self.pass_ms = 5
+        self.pass_max_ms = 5
 
     # --- capabilities -------------------------------------------------------------------------------
 
@@ -624,7 +627,7 @@ class Device:
             trigger_addr=self.trigger_addr, capture_start_word=self.capture_start_word,
             ms_since_arm=int((now - self.arm_time) * 1000) & 0xFFFFFFFF,
             uptime_ms=int((now - self.t_boot) * 1000) & 0xFFFFFFFF, watchdog_remaining_s=wd,
-            battery_level=18, exit_reason=self.exit_reason)
+            battery_level=18, exit_reason=self.exit_reason, pass_ms=self.pass_ms, pass_max_ms=self.pass_max_ms)
 
     def info(self) -> P.InfoResp:
         sp = self.spec
@@ -1269,7 +1272,18 @@ class Device:
             if cmd == "#LOCAL":
                 self.go_local(P.ExitReason.HOST_RELEASE)
                 return "#OK"
+            if cmd == "#RESET":
+                self.reset_link()
+                return "#OK"
             return "#ERR,UNKNOWN"
+
+    def reset_link(self) -> None:
+        """#RESET (protocol 14.25): drop a pending WAIT without an answer and the duplicate cache; REMOTE
+        ownership and acquisition state stay."""
+        with self.lock:
+            self.deferred = None
+            self._abort_deferred = False
+            self.last_resp = None
 
     def link_down(self) -> None:
         """DTR 1->0 / TCP close."""
@@ -1308,6 +1322,8 @@ class SimServer:
         self.garbage_next = b""
         #: test hook: drop (do not send) the next n responses
         self.drop_next = 0
+        #: test hook: treat the next n valid requests as corrupted (answer E_BAD_CRC, do not execute)
+        self.bad_crc_next = 0
 
     @property
     def url(self) -> str:
@@ -1368,8 +1384,17 @@ class SimServer:
                     client = None
                     continue
                 last_rx = time.monotonic()
-                for ev in parser.feed(data):
-                    self._event(client, ev)
+                for chunk, is_reset in _split_reset(data):
+                    if is_reset:
+                        parser.reset()
+                        self.device.reset_link()
+                        try:
+                            client.sendall(b"#OK\n")
+                        except OSError:
+                            pass
+                        continue
+                    for ev in parser.feed(chunk):
+                        self._event(client, ev)
                 if self.device.fel_requested:
                     self.device.fel_requested = False
                     log.info("ENTER_FEL: closing the link")
@@ -1399,6 +1424,10 @@ class SimServer:
         dev = self.device
         if isinstance(ev, P.Frame):
             if ev.is_response:
+                return
+            if self.bad_crc_next:
+                self.bad_crc_next -= 1
+                self._send(client, P.response(ev, P.error_payload(0, "payload crc"), P.Status.E_BAD_CRC))
                 return
             resp = dev.handle(ev)
             if resp is not None:
@@ -1436,6 +1465,19 @@ class SimServer:
             client.sendall(bytes(data))
         except OSError:
             pass
+
+
+def _split_reset(data: bytes) -> list[tuple[bytes, bool]]:
+    """Split raw input around ``#RESET`` + CR/LF lines, which the device honours even inside a partial frame."""
+    out: list[tuple[bytes, bool]] = []
+    while True:
+        i = data.find(b"#RESET")
+        if i < 0 or i + 6 >= len(data) or data[i + 6] not in (0x0A, 0x0D):
+            out.append((data, False))
+            return out
+        out.append((data[:i], False))
+        out.append((b"", True))
+        data = data[i + 7:]
 
 
 def start_simulator(cfg: SimConfig | None = None, host: str = "127.0.0.1", port: int = 0) -> SimServer:

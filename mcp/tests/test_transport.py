@@ -24,7 +24,7 @@ def test_ver_probe_and_info(sim, transport):
     line = transport.ascii("#VER")
     assert line.startswith("#OK,FNIRSI-1013D-AI,")
     v = parse_ver(line)
-    assert v["proto"] == "1.0" and v["fpga"] == "0x1532"
+    assert v["proto"] == "1.1" and v["fpga"] == "0x1532"
     info = P.InfoResp.unpack(transport.request(P.Cmd.GET_INFO).payload)
     assert info.ring_words == 8192 and info.max_total_samples == 16382
     assert transport.ascii("#WHAT") == "#ERR,UNKNOWN"
@@ -40,10 +40,11 @@ def test_probe_ver_on_raw_link(sim):
 
 
 def test_ping_echo_and_seq(transport):
+    assert transport.stats.frames_sent == transport.stats.frames_received == 1  # the resync PING on connect
     for i in range(5):
         data = bytes([i]) * (i * 50)
         assert transport.request(P.Cmd.PING, data).payload == data
-    assert transport.stats.frames_sent == transport.stats.frames_received == 5
+    assert transport.stats.frames_sent == transport.stats.frames_received == 6
 
 
 def test_large_response_test_pattern(transport):

@@ -23,7 +23,7 @@ MAGIC = b"\xa5\x13"
 MAGIC0 = 0xA5
 MAGIC1 = 0x13
 PROTO_MAJOR = 1
-PROTO_MINOR = 0
+PROTO_MINOR = 1  # 1.1: GET_STATUS pass_ms / pass_max_ms (firmware 0.1.1)
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -635,11 +635,13 @@ class InfoResp(Payload):
 
 @dataclass
 class StatusResp(Payload):
-    """GET_STATUS response body, 28 bytes. Also returned by SET_REMOTE, ARM, FORCE, STOP, WAIT."""
+    """GET_STATUS response body: 28 bytes in protocol 1.0, 32 in 1.1 (pass_ms, pass_max_ms appended; a 1.0
+    device leaves them 0). Also returned by SET_REMOTE, ARM, FORCE, STOP, WAIT."""
 
     FIELDS = [("control", "B"), ("acq_state", "B"), ("flags", "B"), ("ui_busy", "B"), ("capture_id", "I"),
               ("trigger_addr", "H"), ("capture_start_word", "H"), ("ms_since_arm", "I"), ("uptime_ms", "I"),
-              ("watchdog_remaining_s", "H"), ("battery_level", "B"), ("exit_reason", "B"), ("reserved", "I")]
+              ("watchdog_remaining_s", "H"), ("battery_level", "B"), ("exit_reason", "B"), ("reserved", "I"),
+              ("pass_ms", "H"), ("pass_max_ms", "H")]
     control: int = 0
     acq_state: int = 0
     flags: int = 0
@@ -653,6 +655,9 @@ class StatusResp(Payload):
     battery_level: int = 0
     exit_reason: int = 0
     reserved: int = 0
+    #: 1.1: interval between the last two main-loop polls, and its maximum since the previous GET_STATUS
+    pass_ms: int = 0
+    pass_max_ms: int = 0
 
 
 @dataclass

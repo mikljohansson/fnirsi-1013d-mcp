@@ -33,6 +33,12 @@ log = logging.getLogger(__name__)
 #: Development VID/PID (docs/plans/firmware-usb-protocol.md section 10): pid.codes test range.
 PIDCODES_VID = 0x1209
 PIDCODES_TEST_PIDS = range(0x0001, 0x0011)
+#: Request statuses that mean the device received a corrupted request; the same frame (same seq) is resent.
+RESEND_STATUSES = frozenset({P.Status.E_BAD_CRC, P.Status.E_BAD_LEN})
+#: Bytes sent before the first request: completes and invalidates any partial frame or line left in the device's
+#: RX ring by an aborted session (a partial payload of up to 492 + 4 bytes), then ``#RESET`` (firmware >= 0.1.1;
+#: older firmware answers ``#ERR,UNKNOWN``, which is harmless).
+RESYNC_PREAMBLE = b"\x00" * 512 + b"\n#RESET\n"
 #: Current (1.00o5) ST Virtual COM Port IDs; only accepted after a successful #VER probe.
 ST_VID, ST_PID = 0x0483, 0x5740
 PRODUCT_STRING = "FNIRSI 1013D"
@@ -164,9 +170,14 @@ class SerialLink:
             self._ser = serial.Serial(port=None, baudrate=115200, timeout=SERIAL_POLL_S,
                                       write_timeout=WRITE_TIMEOUT_S, rtscts=False, dsrdtr=False, xonxoff=False)
             self._ser.port = port
-            self._ser.dtr = True
+            self._ser.dtr = False
             self._ser.rts = True
             self._ser.open()
+            # DTR 0 -> 1 after open: firmware 0.1.1 flushes a frame left over from a previous connection (14.24).
+            # DTR uses EscapeCommFunction, not SetCommState, so this is not a port reconfiguration.
+            time.sleep(0.02)
+            self._ser.dtr = True
+            time.sleep(0.03)
         except serial.SerialException as e:
             raise TransportError(f"cannot open {port}: {e}") from e
         self._desc = port
@@ -325,7 +336,8 @@ class LinkStats:
 class Transport:
     """Thread-safe request/response engine over a Link."""
 
-    def __init__(self, link: Link, retries: int = 2, response_timeout: float = DEFAULT_RESPONSE_TIMEOUT_S):
+    def __init__(self, link: Link, retries: int = 2, response_timeout: float = DEFAULT_RESPONSE_TIMEOUT_S,
+                 resync: bool = True):
         self.link = link
         self.retries = retries
         self.response_timeout = response_timeout
@@ -339,6 +351,8 @@ class Transport:
         self._last_rx = time.monotonic()
         self.ascii_lines: list[str] = []
         self.last_activity = time.monotonic()
+        if resync:
+            self.resync()
 
     # --- low level -------------------------------------------------------------------------------------
 
@@ -400,12 +414,30 @@ class Transport:
                 return None
             self._pump(min(deadline - now, poll))
 
+    def resync(self, attempts: int = 3) -> None:
+        """Flush a dirty device RX ring and our input, then PING until the matching answer arrives (stale
+        responses are discarded by sequence number). Run on connect."""
+        with self._lock:
+            for i in range(attempts):
+                self.link.flush_input()
+                self.link.write(RESYNC_PREAMBLE)
+                self._parser.reset()
+                try:
+                    self._request(P.Cmd.PING, b"resync", 0.5, retries=0)
+                    self.ascii_lines.clear()  # "#OK" / "#ERR,UNKNOWN" from the preamble
+                    return
+                except TransportError:
+                    if i + 1 == attempts:
+                        raise
+                    time.sleep(RECOVERY_PAUSE_S)
+
     def recover(self) -> None:
-        """Host recovery procedure (section 3.2)."""
+        """Host recovery procedure (section 3.2), plus ``#RESET`` for firmware >= 0.1.1."""
         with self._lock:
             self.stats.recoveries += 1
             time.sleep(RECOVERY_PAUSE_S)
             self.link.flush_input()
+            self.link.write(RESYNC_PREAMBLE)
             self._parser.reset()
             self._inbox.clear()
             keep = {self._deferred_seq: self._outstanding[self._deferred_seq]} \
@@ -446,8 +478,8 @@ class Transport:
                 resp = self._await(seq, time.monotonic() + tmo)
                 if resp is None:
                     continue
-                if resp.status == P.Status.E_BAD_CRC and attempt + 1 < n_try:
-                    continue  # our request was corrupted on the way; resend
+                if resp.status in RESEND_STATUSES and attempt + 1 < n_try:
+                    continue  # our request was corrupted on the way; resend the same frame
                 return self._check(resp) if check else resp
             raise TransportError(f"no response to {P.Cmd(cmd).name} (seq {seq}) from {self.link.description} "
                                  f"after {n_try} attempts of {tmo:.2f} s")
@@ -478,6 +510,13 @@ class Transport:
                 self._send(frame)
                 deadline = time.monotonic() + timeout
                 resp = self._await(seq, deadline, cancel)
+                for _ in range(self.retries):
+                    if resp is None or resp.status not in RESEND_STATUSES:
+                        break
+                    # the device saw a corrupted request (nothing was executed): resend the same frame
+                    self.stats.retries += 1
+                    self._send(frame)
+                    resp = self._await(seq, deadline, cancel)
                 if resp is None and cancel is not None and cancel():
                     if on_cancel:
                         on_cancel()

@@ -92,7 +92,7 @@ count when the `#VER` probe answers `#OK,FNIRSI-1013D-AI,...`.
 | `FNIRSI_MCP_GEN_MAX_DUTY` | 50 | generator duty ceiling, percent |
 | `FNIRSI_MCP_DATA_DIR` | `mcp/data` | `.npz` output, one folder per day |
 | `FNIRSI_MCP_AUDIT_LOG` | `mcp/logs/audit.jsonl` | JSONL log of every tier 1+ call (empty string disables) |
-| `FNIRSI_MCP_MAX_RESPONSE` | device limit | largest response payload requested at once (`--max-response`); READ_RAW, READ_TRACE and READ_SCREEN are split, and device averaging falls back to the host when its result would not fit |
+| `FNIRSI_MCP_MAX_RESPONSE` | 8192 on Windows serial, else device limit | largest response payload requested at once (`--max-response`); READ_RAW, READ_TRACE and READ_SCREEN are split, and device averaging falls back to the host when its result would not fit |
 
 ### Claude Code
 
@@ -186,6 +186,11 @@ and `tests/test_firmware_match.py` pins the host-visible items:
 - ASCII lines count as traffic for the watchdog; at most 63 characters after the `#`, longer gives one overflow
   and `#ERR,UNKNOWN`;
 - USB identity: 0x1209:0x0001, product `FNIRSI 1013D`, serial `1013D-0001` (GET_INFO `serial` is the same).
+- protocol 1.1 (firmware 0.1.1): GET_INFO `proto_minor` 1; GET_STATUS is 32 bytes with u16 `pass_ms` and
+  `pass_max_ms` (main-loop period; a 1.0 device's 28-byte body parses with both 0); ENTER_FEL on every known
+  bitstream (AL3 caps 0x1C03); `#RESET` drops a frame in flight, a pending WAIT (no answer), the duplicate cache
+  and partial input, keeps REMOTE, answers `#OK`; DTR 0 -> 1 flushes an old frame; a response with no progress for
+  2 s is dropped.
 
 Choices made only on the host or in the simulator, not covered by section 14:
 
@@ -206,21 +211,35 @@ Choices made only on the host or in the simulator, not covered by section 14:
    the byte at `ptr - hw_read_lag` off by +1, then post-increments. One hypothesis only; the host relies on
    nothing but READ_RAW returning exactly `start_word .. start_word + count - 1`.
 
-To make the simulator report what the real firmware reports today, use `--caps 0x1803` (AL3, no ACQUIRE_AVG,
-READ_SCREEN, READ_LIVE, FORCE or DEBUG_FPGA).
+To make the simulator report what the real firmware reports, use `--caps 0x1C03` for 0.1.1 or `--caps 0x1803`
+for 0.1.0 (AL3, no ACQUIRE_AVG, READ_SCREEN, READ_LIVE, FORCE or DEBUG_FPGA).
+
+## Link robustness
+
+- **On connect** the transport sends 512 zero bytes, a newline and `#RESET` (firmware 0.1.1; 0.1.0 answers
+  `#ERR,UNKNOWN`), then PINGs until the matching answer arrives. This completes and invalidates any partial frame or
+  line an aborted session left in the device's RX ring. Serial ports are opened with DTR low and then raised, so
+  0.1.1 also flushes a frame left over from the previous connection.
+- **Corrupted requests**: an `E_BAD_CRC` or `E_BAD_LEN` answer means the device saw a damaged request and executed
+  nothing; the same frame (same seq) is resent, for normal and deferred requests (WAIT, ACQUIRE_AVG).
+- **Lost answers**: resent with the same seq, so the device's duplicate cache answers without executing twice;
+  after repeated losses the recovery procedure (pause, flush, preamble, PING) runs.
 
 ## Windows notes
 
-The serial link sets every port parameter once at open and never again. On Windows each pyserial setting
-change (even `timeout`) calls SetCommState, and usbser.sys then sends CDC line-coding control requests. With
-firmware 0.1.0 those 8 setup bytes (`a1 21 00 00 00 00 07 00`) leaked into an in-flight bulk response and broke
-large responses. Reads ask only for `in_waiting` bytes, because one large pending `read(65536)` sometimes never
-completed. Measured on COM10 with TEST_PATTERN, 50 runs per size with normal retries: no failures from 492 B to
-64 KiB, median 39 ms at 492 B and 65 ms at 64 KiB, about 1 % of requests retried (device-side E_BAD_CRC or a lost
-response). `tests/test_serial_link.py` guards the no-reconfigure rule. `--max-response` stays available but is
-not needed.
+- The serial link sets every port parameter once at open and never again. On Windows each pyserial setting change
+  (even `timeout`) calls SetCommState, and usbser.sys then sends CDC line-coding control requests. On firmware 0.1.0
+  their 8 setup bytes (`a1 21 00 00 00 00 07 00`) appeared inside in-flight bulk responses; the firmware agent
+  traced this to the inherited USB FIFO layout (EP2 TX FIFO outside the 2 KiB FIFO RAM, aliased onto RX), fixed in
+  0.1.1. Reads ask only for `in_waiting` bytes. `tests/test_serial_link.py` guards both rules.
+- **Provisional cap**: on Windows serial ports a single response is limited to 8192 bytes by default (larger reads
+  are split). On 0.1.0 a 16 KiB READ_RAW chunk still timed out intermittently, 8 KiB worked throughout. The cap is
+  to be re-measured on 0.1.1 and dropped if 64 KiB is clean; `--max-response 0` uses the device limit now.
+- The server imports scipy and pyserial before the stdio transport starts (`preload_native_modules`): loading a DLL
+  later from the event loop deadlocks on Windows against the stdio reader thread's pending read on stdin.
+  `tests/test_stdio.py` guards this.
 
+## Library notes
 
-The server imports scipy and pyserial before the stdio transport starts (`preload_native_modules`). Loading a
-DLL later from the event loop deadlocks on Windows against the stdio reader thread's pending read on stdin.
-`tests/test_stdio.py` guards this.
+`Scope.info` is a property (the cached GET_INFO; `Scope.identify()` re-reads it). `Capture.t` is seconds relative
+to the trigger and `ChannelData.volts` is volts at the probe tip.

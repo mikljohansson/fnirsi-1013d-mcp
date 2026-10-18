@@ -35,6 +35,20 @@ SCALING_CAVEAT = ("Absolute volts use the firmware's uv_per_lsb/zero_code formul
                   "verified against a reference voltage (bench test T8).")
 
 
+#: Provisional cap for serial links on Windows (bench 2026-10-18, firmware 0.1.0: 16 KiB READ_RAW chunks timed
+#: out intermittently, 8 KiB worked throughout). To be re-measured on firmware 0.1.1 and dropped if 64 KiB is clean.
+WINDOWS_SERIAL_MAX_RESPONSE = 8192
+
+
+def default_max_response(url: str) -> int | None:
+    """Platform default for the per-response cap: 8 KiB on Windows serial ports, the device limit elsewhere."""
+    import sys
+
+    if sys.platform == "win32" and not url.strip().lower().startswith("tcp://"):
+        return WINDOWS_SERIAL_MAX_RESPONSE
+    return None
+
+
 def channel_index(ch: str | int) -> int:
     if isinstance(ch, int):
         if ch in (0, 1):
@@ -163,7 +177,10 @@ class Scope:
 
     @classmethod
     def connect(cls, url: str = "auto", max_response: int | None = None, **kw: Any) -> "Scope":
-        s = cls(_connect(url, **kw), max_response=max_response)
+        """``max_response``: None = platform default (see WINDOWS_SERIAL_MAX_RESPONSE), 0 = the device limit."""
+        if max_response is None:
+            max_response = default_max_response(url)
+        s = cls(_connect(url, **kw), max_response=max_response or None)
         s.identify()
         return s
 
@@ -206,6 +223,7 @@ class Scope:
 
     @property
     def info(self) -> P.InfoResp:
+        """GET_INFO of the connected device (a property, cached from connect; ``identify()`` re-reads it)."""
         if self._info is None:
             self.identify()
         assert self._info is not None

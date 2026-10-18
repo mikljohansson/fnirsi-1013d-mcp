@@ -38,7 +38,7 @@ def test_spec_example_frames(hexstr, frame):
 
 
 @pytest.mark.parametrize("cls,size", [
-    (P.InfoResp, 76), (P.StatusResp, 28), (P.SetRemoteReq, 4), (P.BatteryResp, 4), (P.TestPatternReq, 8),
+    (P.InfoResp, 76), (P.StatusResp, 32), (P.SetRemoteReq, 4), (P.BatteryResp, 4), (P.TestPatternReq, 8),
     (P.ChannelConfig, 24), (P.SetChannelReq, 12), (P.Timebase, 16), (P.SetTimebaseReq, 8), (P.Trigger, 28),
     (P.SetTriggerReq, 24), (P.ReadRawReq, 16), (P.ReadRawHeader, 16), (P.ReadTraceReq, 12),
     (P.ReadTraceHeader, 32), (P.TraceChannelMeta, 16), (P.ReadLiveReq, 4), (P.AcquireAvgReq, 20),
@@ -141,3 +141,11 @@ def test_host_vectors_present_and_current():
     for hv in V.build_host_vectors():
         assert hv["name"] in names, f"{hv['name']} missing: run python -m fnirsi1013d.vectors --merge"
         assert names[hv["name"]]["hex"] == hv["hex"]
+
+
+def test_status_protocol_1_0_body_still_parses():
+    st = P.StatusResp(1, 3, 0x0B, 0, 42, pass_ms=7, pass_max_ms=31)
+    data = st.pack()
+    assert len(data) == 32 and P.StatusResp.unpack(data).pass_max_ms == 31
+    old = P.StatusResp.unpack(data[:28])  # firmware 0.1.0 / protocol 1.0
+    assert old.capture_id == 42 and old.pass_ms == 0 and old.pass_max_ms == 0

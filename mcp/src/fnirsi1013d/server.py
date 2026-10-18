@@ -652,6 +652,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     "trigger_addr": st.trigger_addr, "capture_start_word": st.capture_start_word,
                     "ms_since_arm": st.ms_since_arm, "uptime_s": st.uptime_ms / 1000,
                     "watchdog_remaining_s": None if st.watchdog_remaining_s == 0xFFFF else st.watchdog_remaining_s,
+                    "main_loop_pass_ms": st.pass_ms or None, "main_loop_pass_max_ms": st.pass_max_ms or None,
                     "battery_level": b.level, "charging": bool(b.charging),
                     "exit_reason": P.ExitReason(st.exit_reason).name if st.exit_reason else None,
                     "link_stats": vars(s.t.stats)}
@@ -1913,7 +1914,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--data-dir", type=Path, help="where .npz files go (env FNIRSI_MCP_DATA_DIR)")
     ap.add_argument("--audit-log", type=Path, help="JSONL audit log (env FNIRSI_MCP_AUDIT_LOG)")
     ap.add_argument("--max-response", type=int, help="largest response payload requested in one frame; larger "
-                    "reads are split (env FNIRSI_MCP_MAX_RESPONSE)")
+                    "reads are split. Default 8192 on Windows serial ports (provisional), else the device limit; "
+                    "0 = always the device limit (env FNIRSI_MCP_MAX_RESPONSE)")
     ap.add_argument("--sim", metavar="SIM_ARGS", help="start an in-process simulator and connect to it, e.g. "
                     "--sim \"--variant al3 --signal decay:tau=80us\" (overrides --port; for development)")
     ap.add_argument("--transport", choices=("stdio", "streamable-http"), default="stdio")

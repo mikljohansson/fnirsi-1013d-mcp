@@ -92,13 +92,23 @@ def build_host_vectors() -> list[dict[str, Any]]:
     R = P.FLAG_RESPONSE
     v = []
     info = P.InfoResp(fpga_version=0x1532, fpga_variant=2, ring_words=8192, caps=0x1803, gen_clock_hz=50_000_000,
-                      max_total_samples=16382, fw_version=b"0.1.0", fw_build=0x1234ABCD, serial=b"A1B2C3D4")
+                      max_total_samples=16382, fw_version=b"0.1.0", fw_build=0x1234ABCD, serial=b"A1B2C3D4",
+                      proto_minor=0)
     v.append(_vec("host_resp_get_info_al3", _f(P.Cmd.GET_INFO, 1, info.pack(), flags=R).encode(),
                   "GET_INFO response, 76 bytes, AL3 0x1532, caps PROG_TRIGGER_POS|GENERATOR_DDS|READ_LAG_UNVERIFIED|"
                   "INTERLEAVE_UNVERIFIED"))
     st = P.StatusResp(1, 3, 0x0B, 0, 42, 6609, 6209, 3, 123456, 15, 18, 0)
-    v.append(_vec("host_resp_get_status_done", _f(P.Cmd.GET_STATUS, 5, st.pack(), flags=R).encode(),
-                  "GET_STATUS response: REMOTE, DONE, flags triggered|done|dtr, capture 42"))
+    v.append(_vec("host_resp_get_status_done", _f(P.Cmd.GET_STATUS, 5, st.pack()[:28], flags=R).encode(),
+                  "GET_STATUS response (protocol 1.0, 28 bytes): REMOTE, DONE, flags triggered|done|dtr, capture 42"))
+    info11 = P.InfoResp(fpga_version=0x1532, fpga_variant=2, ring_words=8192, caps=0x1C03, gen_clock_hz=50_000_000,
+                        max_total_samples=16382, fw_version=b"0.1.1", fw_build=0x5A8432BE, serial=b"1013D-0001",
+                        proto_minor=1)
+    v.append(_vec("host_resp_get_info_al3_proto_1_1", _f(P.Cmd.GET_INFO, 2, info11.pack(), flags=R).encode(),
+                  "GET_INFO response of firmware 0.1.1: proto 1.1, caps 0x1C03 (ENTER_FEL added)"))
+    st11 = P.StatusResp(1, 3, 0x0B, 0, 43, 6609, 6209, 3, 123456, 15, 18, 0, 0, 7, 31)
+    v.append(_vec("host_resp_get_status_proto_1_1", _f(P.Cmd.GET_STATUS, 6, st11.pack(), flags=R).encode(),
+                  "GET_STATUS response, protocol 1.1 (32 bytes): pass_ms 7, pass_max_ms 31"))
+    v.append(_vec("host_ascii_reset", b"#RESET\n", "#RESET recovery line (firmware 0.1.1)"))
     v.append(_vec("host_resp_e_bad_crc", _f(P.Cmd.PING, 23, P.error_payload(0, "payload crc"), P.Status.E_BAD_CRC,
                                             R).encode(), "E_BAD_CRC answer with detail 0 and text"))
     v.append(_vec("host_resp_e_version", _f(P.Cmd.GET_INFO, 24, b"", P.Status.E_VERSION, R).encode(),
