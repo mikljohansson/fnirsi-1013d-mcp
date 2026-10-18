@@ -492,17 +492,18 @@ class Scope:
             return self.sd_card().read(sector, count)
 
     def sd_write(self, image: bytes, start_sector: int, flags: int = 0, dry_run: bool = False,
-                 progress: Callable[[int, int], None] | None = None):
-        """Write ``image`` from ``start_sector``: stage 64 KiB, SD_WRITE 128 sectors (stage CRC and the card's
-        read-back CRC checked), repeat, then read everything back and compare. ``dry_run``: only SD_INFO and the
+                 progress: Callable[[int, int], None] | None = None, write_sectors: int | None = None):
+        """Write ``image`` from ``start_sector``: stage a piece, SD_WRITE it (``write_sectors``, default 32; stage CRC
+        and the card's read-back CRC checked), repeat, then read everything back and compare. ``dry_run``: only SD_INFO and the
         firmware's window/flag rules, nothing written. Returns a WritePlan (``refusals`` when it cannot be
         written, ``timings`` per phase). Takes no backup: callers do (fnirsi1013d-flash / fnirsi1013d-sd)."""
-        from .sdcard import plan_write, timed
+        from .sdcard import WRITE_SECTORS, plan_write, timed
 
         with self.lock:
             sd = self.sd_card()
+            sd.write_sectors = write_sectors or WRITE_SECTORS
             info = sd.info()
-            plan = plan_write(info, start_sector, len(image), flags)
+            plan = plan_write(info, start_sector, len(image), flags, sd.write_sectors)
             if dry_run or not plan.ok:
                 return plan
             with timed(plan.timings, "write"):

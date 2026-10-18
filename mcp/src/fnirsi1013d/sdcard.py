@@ -18,9 +18,13 @@ from typing import Callable
 from . import protocol as P
 from .transport import Transport
 
-#: SD_WRITE of 128 sectors runs on the main loop (~100 ms, unmeasured); generous
-WRITE_TIMEOUT_S = 3.0
-READ_TIMEOUT_S = 2.0
+#: SD_WRITE blocks the main loop for the write plus its read-back: up to ~4 s for 128 sectors on the bench (fw
+#: 0.2.3). So write 32 sectors per request with a 5 s timeout, and resend with the same seq on a timeout (the
+#: duplicate cache answers a completed write without writing again).
+WRITE_SECTORS = 32
+WRITE_TIMEOUT_S = 5.0
+WRITE_RETRIES = 4
+READ_TIMEOUT_S = 5.0
 IMAGE_SECTOR = 750
 
 
@@ -37,9 +41,12 @@ class Backup:
 
 
 class SdCard:
-    def __init__(self, t: Transport, say: Callable[[str], None] = print, stage_delay_s: float = 0.0):
+    def __init__(self, t: Transport, say: Callable[[str], None] = print, stage_delay_s: float = 0.0,
+                 write_sectors: int = WRITE_SECTORS):
         self.t = t
         self.say = say
+        #: sectors per SD_WRITE_SECTORS (1..128); each write stages its own piece at offset 0
+        self.write_sectors = max(1, min(P.SD_MAX_SECTORS, int(write_sectors)))
         #: pause between SD_STAGE requests (each already waits for its answer); bench throttle
         self.stage_delay_s = stage_delay_s
 
@@ -91,16 +98,17 @@ class SdCard:
     def write_staged(self, sector: int, data: bytes, flags: int = 0) -> None:
         count = len(data) // 512
         req = P.SdWriteReq(sector, count, flags, P.crc32_iso_hdlc(data))
-        r = self.t.request(P.Cmd.SD_WRITE_SECTORS, req.pack(), timeout=WRITE_TIMEOUT_S)
+        r = self.t.request(P.Cmd.SD_WRITE_SECTORS, req.pack(), timeout=WRITE_TIMEOUT_S, retries=WRITE_RETRIES)
         h = P.SdWriteResp.unpack(r.payload)
         if (h.sector, h.count) != (sector, count) or h.crc32 != req.crc32:
             raise SdError(f"SD_WRITE {sector}+{count}: read-back CRC 0x{h.crc32:08X} != 0x{req.crc32:08X}")
 
     def write(self, sector: int, data: bytes, flags: int = 0, progress: Callable[[int, int], None] | None = None) -> None:
-        """Write ``data`` (padded to 512) from ``sector`` in 128-sector (64 KiB) pieces: stage, write, check."""
+        """Write ``data`` (padded to 512) from ``sector`` in ``write_sectors`` pieces: stage, write, check."""
         data = bytes(data) + b"\0" * (-len(data) % 512)
-        for off in range(0, len(data), P.SD_STAGE_BYTES):
-            piece = data[off: off + P.SD_STAGE_BYTES]
+        step = self.write_sectors * 512
+        for off in range(0, len(data), step):
+            piece = data[off: off + step]
             self.stage(piece)
             self.write_staged(sector + off // 512, piece, flags)
             if progress:
@@ -136,11 +144,11 @@ class WritePlan:
         return not self.refusals
 
 
-def plan_write(info: P.SdInfo, sector: int, nbytes: int, flags: int = 0) -> WritePlan:
+def plan_write(info: P.SdInfo, sector: int, nbytes: int, flags: int = 0,
+               write_sectors: int = WRITE_SECTORS) -> WritePlan:
     """The host-side image of the firmware's checks (section 14 row 40), so a dry run can say what would fail."""
     n = (nbytes + 511) // 512
-    plan = WritePlan(sector, n, flags, [(sector + k, min(P.SD_MAX_SECTORS, n - k))
-                                       for k in range(0, n, P.SD_MAX_SECTORS)])
+    plan = WritePlan(sector, n, flags, [(sector + k, min(write_sectors, n - k)) for k in range(0, n, write_sectors)])
     last = sector + n - 1
     if not info.write_end:
         plan.refusals.append("the card has no valid partition table: the firmware refuses writes")

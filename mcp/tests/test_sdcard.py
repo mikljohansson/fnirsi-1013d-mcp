@@ -132,7 +132,7 @@ def test_persist_only_writes_backs_up_and_verifies(sim, tmp_path):
     f, lines = persister(sim, tmp_path, image)
     assert f.run_all() == 0, "\n".join(lines)
     assert card.read(750, len(image) // 512) == image
-    assert [w for w in card.writes] == [(750 + 128 * k, 128) for k in range(3)] + [(750 + 384, 16)]
+    assert card.writes == [(750 + 32 * k, 32) for k in range(12)] + [(750 + 384, 16)]  # 32 sectors per SD_WRITE
     backups = list((tmp_path / "backups").glob("sd_750-1350_*.bin"))
     assert len(backups) == 1 and backups[0].read_bytes() == old
     text = "\n".join(lines)
@@ -201,7 +201,8 @@ def test_scope_sd_api_and_dry_run(sim, scope):
     assert any("BOOT" in r for r in plan.refusals)
     data = bytes(range(256)) * 600  # 300 sectors: three pieces
     plan = scope.sd_write(data, 900)
-    assert [p for p in plan.pieces] == [(900, 128), (1028, 128), (1156, 44)] and "read_compare" in plan.timings
+    assert plan.pieces == [(900 + 32 * k, 32) for k in range(9)] + [(1188, 12)] and "read_compare" in plan.timings
+    assert scope.sd_write(data, 900, write_sectors=128).pieces == [(900, 128), (1028, 128), (1156, 44)]
     assert scope.sd_read(900, 300) == data + bytes(-len(data) % 512)
 
 
@@ -255,7 +256,7 @@ def test_one_mismatch_is_resent_and_reported(sim, tmp_path):
 def test_usb_drop_mid_write_resumes(sim, tmp_path):
     """Bench 2026-10-18: the scope fell off USB at 256 KiB of 379 KiB and re-enumerated a few seconds later."""
     image = make_egon_image(379 * 1024, fill=0x55, version=SIM_FW)
-    n_stage_per_piece = -(-P.SD_STAGE_BYTES // P.SD_STAGE_MAX_CHUNK)
+    n_stage_per_piece = -(-32 * 512 // P.SD_STAGE_MAX_CHUNK)
     sim.drop_link_on = {P.Cmd.SD_STAGE: 4 * n_stage_per_piece + 3}  # during the 5th piece
     f, lines = persister(sim, tmp_path, image, stage_delay_ms=0.0)
     assert f.run_all() == 0, "\n".join(lines)
@@ -263,7 +264,7 @@ def test_usb_drop_mid_write_resumes(sim, tmp_path):
     assert "link lost" in text and "reconnected; resuming" in text and "resends: piece 4: 1" in text
     assert "FAILED" not in text
     assert sim.device.sd.read(750, len(image) // 512) == image
-    assert [w[0] for w in sim.device.sd.writes] == [750 + 128 * k for k in range(6)]  # nothing written twice
+    assert [w[0] for w in sim.device.sd.writes] == [750 + 32 * k for k in range(24)]  # nothing written twice
 
 
 def test_usb_drop_port_never_returns(sim, tmp_path):
@@ -283,3 +284,27 @@ def test_usb_drop_port_never_returns(sim, tmp_path):
     failed = [ln for ln in lines if "FAILED" in ln]
     assert len(failed) == 1 and "did not come back" in failed[0] and "PARTIAL IMAGE" in failed[0]
     assert "do not power-cycle" in failed[0]
+
+
+def test_slow_write_answers_are_retried_without_reopening(sim, tmp_path, monkeypatch):
+    """fw 0.2.7 note: SD_WRITE blocks the main loop for seconds. Lost/late answers are resent with the same seq
+    (duplicate cache); when the transport gives up but the scope still answers PING, the piece is resent on the
+    same connection, never by reopening the port."""
+    from fnirsi1013d import sdcard
+    monkeypatch.setattr(sdcard, "WRITE_TIMEOUT_S", 0.2)
+    orig = sim._send
+    state = {"drop": 7}  # more than one request's 1 + WRITE_RETRIES tries
+
+    def lose_write_answers(client, resp):
+        if resp.cmd == P.Cmd.SD_WRITE_SECTORS and state["drop"] > 0:
+            state["drop"] -= 1
+            return
+        orig(client, resp)
+    sim._send = lose_write_answers
+    image = make_egon_image(40 * 1024, fill=0x77, version=SIM_FW)
+    f, lines = persister(sim, tmp_path, image)
+    assert f.run_all() == 0, "\n".join(lines)
+    text = "\n".join(lines)
+    assert "still answers PING: resending on the same connection" in text and "link lost" not in text
+    assert sim.device.link["dtr_down"] == 0  # the port was never reopened during the write
+    assert sim.device.sd.read(750, len(image) // 512) == image

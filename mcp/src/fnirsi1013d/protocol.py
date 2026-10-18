@@ -1361,13 +1361,16 @@ def pack_link_stats(counters: dict[str, int]) -> bytes:
     return struct.pack(f"<HH{len(vals)}I", len(vals), 0, *vals)
 
 
-#: fw 0.2.4 (35 counters, 41 from 0.2.5): 29..34 are "ms + 1 after the first main-loop poll, 0 = not reached"; in 0.2.2-0.2.3
+#: Counters per firmware (protocol.md row 38): 27 (0.1.4-0.1.7), 29 (0.2.0-0.2.1), 31 (0.2.2-0.2.3), 35 (0.2.4),
+#: 41 (0.2.5-0.2.6), 47 (0.2.7). fw 0.2.4+: 29..34 are "ms + 1 after the first main-loop poll, 0 = not reached"; in 0.2.2-0.2.3
 #: (31 counters) 29/30 were first_arm_ms / first_done_ms ("ms | 1")
 LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     "first_conversion_ms", "first_capture_ms", "first_after_battery_ms", "first_after_acquisition_ms",
     "first_after_touch_ms", "first_after_rtc_ms",
     # fw 0.2.5+ (41 counters): USB device events
-    "usb_bus_resets", "usb_suspends", "usb_resumes", "usb_disconnects", "usb_ep0_setups", "usb_ep0_bad_setups")
+    "usb_bus_resets", "usb_suspends", "usb_resumes", "usb_disconnects", "ep0_setups", "ep0_bad_setups",
+    # fw 0.2.7 (47 counters): RX back-pressure diagnostics (names as in firmware/scope/host_tests/bench_link.py)
+    "rx_isr_stalls", "rx_releases", "rx_restalls", "rx_empty_releases", "rx_count_max", "rx_count_oversize")
 
 
 def link_stats_names(n: int) -> tuple[str, ...]:

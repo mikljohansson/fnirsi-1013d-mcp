@@ -182,4 +182,6 @@ def test_link_stats_fw_0_2_4_sample():
     assert list(P.parse_link_stats(P.pack_link_stats({}))) == list(P.LINK_STATS_NAMES)  # 31-counter layout
     import struct as st2
     d41 = P.parse_link_stats(st2.pack("<HH41I", 41, 0, *range(41)))
-    assert d41["first_after_rtc_ms"] == 34 and d41["usb_bus_resets"] == 35 and d41["usb_ep0_bad_setups"] == 40
+    assert d41["first_after_rtc_ms"] == 34 and d41["usb_bus_resets"] == 35 and d41["ep0_bad_setups"] == 40
+    d47 = P.parse_link_stats(st2.pack("<HH47I", 47, 0, *range(47)))  # fw 0.2.7, names as in bench_link.py
+    assert d47["rx_isr_stalls"] == 41 and d47["rx_count_oversize"] == 46 and "c46" not in d47

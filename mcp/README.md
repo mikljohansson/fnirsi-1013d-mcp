@@ -228,14 +228,16 @@ without a partition table, images that do not fit below `write_end` (min(partiti
 whose version (the `#VER` literal in the binary) differs from what the running firmware answers to `#VER`
 (persist what is running and tested; `--force` overrides). It first backs up sectors 750..750+n (n = the larger
 of the new and the old image) to `backups/sdcard/sd_750-<end>_<time>.bin` (read twice and compared, saved,
-re-read) and prints its sha256. It then writes 128-sector (64 KiB) pieces: the 484-byte staging chunks, the stage
+re-read) and prints its sha256. It then writes 32-sector pieces (`--write-sectors`; an SD_WRITE blocks the
+scope's main loop for the write and its read-back, up to ~4 s for 128 sectors on fw 0.2.3; 5 s timeout, resent
+with the same seq so the duplicate cache answers a completed write): the 484-byte staging chunks, the stage
 CRC the firmware checks before writing, and the CRC the firmware reads back from the card are all checked. Then
 it reads the image back with SD_READ_SECTORS and compares, and SD_INFO VERIFY recomputes the eGON checksum on the
 card. Each phase prints its duration.
 
 If the link drops during the write (bench 2026-10-18: the scope fell off USB at 256 KiB and re-enumerated by
-itself), the tool waits up to `--port-return` (15 s) for the port, reconnects and resends the unconfirmed 64 KiB
-piece; pieces before it are already confirmed by the card's read-back CRC. A piece is tried at most 4 times. The
+itself), the tool waits up to `--port-return` (15 s) for the port, reconnects and resends the unconfirmed
+piece (while the scope still answers PING the piece is resent on the same connection instead); pieces before it are already confirmed by the card's read-back CRC. A piece is tried at most 4 times. The
 summary lists the pieces that needed resends. `--stage-delay-ms` pauses between staging requests (each already
 waits for its answer). When it cannot finish, the FAILED line says that the card may hold a partial image and
 must be repaired (rerun or `--restore`) before the scope is power-cycled. Only sector 750 onwards is touched: the bootloader (16-79), the
