@@ -186,3 +186,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   (0.2.5 -> FEL -> 0.2.6 in 6.5 s). Census 2000 PINGs 0/0, 100 x 64 KiB 0 failed, PING median 1.00 ms, LOCAL throughput 0.99 MB/s (unchanged).
   Startup counters: 1517 ms init -> first poll, first pass 31 ms, v29..v34 = 1/49/1/31/32/32. USB events at boot: 1 reset, 1 suspend, 0 resumes,
   0 disconnects, 39 EP0 setups. Card still holds 0.2.3. Visual checks of the hidden items pending the owner.
+- Owner's 0.2.6 verdict: items hidden, but painting over leaves gaps (generator: empty row between Power and Freq and empty rows below; trigger: one
+  empty row; system settings: empty bottom row) and the "ACQ / Long mode" box in the acquisition menu is still drawn. Compaction requested (fw 0.2.8).
+- Firmware 0.2.7 (commit d88e9ea, sha256 e1f04b43..., pinned backups/fw-0.2.7-e1f04b43.bin): SD_STAGE from the 1 ms timer, RX stall counters 41-46,
+  MCP chip redrawn by the UI's top-bar routine, version on screen (corner + diagnostics identity line), temperature only with a DS3231. Loaded
+  hands-free (first ENTER_FEL attempt refused with E_BUSY while the owner was in a menu, as designed). Census 2000 PINGs 0/0, PING median 0.36 ms
+  (fast path); 64 KiB transfers refused only while a menu is open. Startup 1.5 s gap attributed to the splash BMP load; kept (coordinator decision).
+  Card still holds 0.2.3; persist and the 47-counter readout pending the owner leaving the menus.
