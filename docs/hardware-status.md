@@ -224,3 +224,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   no counter showed it). Includes 0.2.10. Loaded hands-free; census 1000 PINGs 0/0, 100 x 64 KiB 0 failed, 1.00 MB/s. Open -> TEST_PATTERN as
   the very first request -> close, 20x: 0 failures on 0.2.11 (also 0/20 on 0.2.10 with this host transport, whose open sequence avoids the race;
   bench_link's minimal link hit it). Owner's visual checks (chip, Roll mode box, compacted menus) pending; card holds 0.2.7.
+- USB drop on 0.2.11 during an active 10 Hz GET_STATUS poll (host held the port open for the chip check, 16:5x): host WriteFile failed with
+  Windows error 22 (ERROR_BAD_COMMAND, same as the 0.2.3 persist drop); the device re-enumerated by itself (COM10 back, firmware still 0.2.11, no
+  reboot). Device counters afterwards: usb_bus_resets 2, usb_suspends 2 (both 1 at boot, i.e. one host-initiated re-enumeration), usb_disconnects 0,
+  link_resets 4, ep0_setups 308, rx_stalls 0, hdr_crc 0, resp_dropped 0. Third occurrence of this fault class (0.2.2 idle, 0.2.3 persist, 0.2.11
+  poll); not tied to traffic pattern. Needs a soak tool with timestamps and a host-side USB trace.
