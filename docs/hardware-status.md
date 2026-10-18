@@ -390,3 +390,7 @@ Newest entries at the bottom. Format: date, who, what, result.
 - Spectrum view, Nyquist-bin spur: the last bin (500 kHz at 1 MS/s) reads -32 dBV against a -50 dBV floor. Live capture: CH1 core A mean
   130.93 vs core B 125.58 codes (+5.35, the known A/B zero spread); the sample-skipping decimation alternates cores, so the A/B offset
   appears as an fs/2 tone. Fix: per-core zero correction in firmware (roadmap item 5) and/or the 0x1534 boxcar/CIC modes.
+- Firmware 0.2.33 (fw-gen5, commits 83aa5b5/d125a41/25a8f84, sha256 e002ab21..., pinned with ELF; 0.2.32 = waterfall + density views, 0.2.33
+  = FFTs up to 2048 points from on-chip SRAM, memset trace clear). Loaded on 0x1533: census clean, pass_ms 52 in scope view. Owner:
+  "Looking at the waterfall, very nice!" with the generator stepped 1/2/3 kHz per second. Density view and the Ref-tap history clear
+  still to be confirmed. The gesture/Auto/Reset UX request is next for fw-gen5. Card keeps 0.2.25.
