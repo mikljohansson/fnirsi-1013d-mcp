@@ -198,6 +198,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.20-nofb | 7f1c0c0 | c7210b74 | same without the tick fallback (`make gcc10-nofb`, target removed in 0.2.21) | built; ELF backups/fw-0.2.20-nofb-c7210b74.elf |
 | 0.2.21 | 1a893a9 | 6be6f9e8 | USB tick fallback removed (single 1.00o5 CDC handler again, no INTC pending capture); counters 47 and 57 retired (always 0, n stays 58); type 14 no longer emitted | built, host-tested; ELF backups/fw-0.2.21-6be6f9e8.elf; on 0x1533: FEL load 4 passes clean, cold boot from the card lost EP2 IN in pass 3 |
 | 0.2.22 | 7b6d855 | 6615bab6 | usb_device_init logs the controller state it finds (event type 16, protocol row 43), then asserts the USB OTG bus reset and PHY reset for 1 ms before 1.00o5 releases them | built, host-tested; ELF backups/fw-0.2.22-6615bab6.elf |
+| 0.2.23 | 25e90fc | 545126ff | 0.2.22 plus EP2 IN state after every TX abort: type 17 (POWER, TXCSR), type 18 (EP2 TX int enabled / ZLP pending, frame number) | built, host-tested; ELF backups/fw-0.2.23-545126ff.elf |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -207,7 +208,8 @@ c30ff5168bf227e0bf80038d037845e7a5d1e883fe00473f5f9f99a7f9b780fc, 0.2.19-nofb
 e1517803e6bc9a8b595a3a2797924db4269e256b7ff34207136b6b4a12fbdc8e, 0.2.20-nofb
 c7210b749cc55482155a2211fec422f674efa3a22faa3d378bf5a60d33bbc318. 0.2.21 (1a893a9)
 6be6f9e81673c19bf88a812fe598b844426167cb14c3f73ca4d0b9c7bdbcdd04. 0.2.22 (7b6d855)
-6615bab63dc37918b654d00ce6e133b7c25a4b0d43d0845892e3a786cb96d1cb.
+6615bab63dc37918b654d00ce6e133b7c25a4b0d43d0845892e3a786cb96d1cb. 0.2.23 (25e90fc)
+545126ff304b6ce87802b51cc05e95d41f0084308758c4e116b62d536770955e.
 
 ## 9. Open crash: self-restart from RAM (one confirmed case, 0.2.16)
 
@@ -497,7 +499,18 @@ compact menus rather than painting over gaps.
    failure came after 200 clean 64 KiB transfers. Also the FEL path runs the SD bootloader too (boot menu -> FEL).
    The cold boot differs further in that USB is plugged in after boot (six suspends in 1 ms = contact bounce with
    soft connect on and VBUS forced valid) and charging starts then. Discriminators: FEL load, then unplug and
-   replug the cable; cold boot with the cable already plugged in.
+   replug the cable; cold boot with the cable already plugged in. Later fact (lead): the episode was ~20 s of
+   aborted 64 KiB responses, then service resumed with no bus reset (tx_aborts 23, tx_flushes 49). 0.2.23 logs
+   EP2 TXCSR / POWER / frame number at each abort (types 17, 18; protocol row 43) to tell a host that stopped
+   taking IN data (TxPktRdy stays set) from a device that stopped loading (TxPktRdy clear, UnderRun set).
+1c. Host-capture trigger position varies between runs at decimated rates (lead, 0x1533 / 0.2.21, lower priority; owner
+   of the fix TBD, firmware or host geometry). Capture.pretrigger_samples vs the measured CH1 edge is stable within a
+   run but differs between runs: 1 MS/s (divider 199) EXT +11/+12 us in the first 10 captures after selecting EXT,
+   then -1.0 us in 17 captures over five setting orders; CH1 source +2/+3 us in one run, -1.0 us in another; 20 MS/s
+   both -50 ns consistently. Suspects: FPGA decimation phase or trigger_addr-to-sample mapping at divider > 0 (words
+   vs samples), 1.00o5 trace position state inherited by host-origin captures, a stale divider in the host geometry
+   when UI and host disagree. Test: alternate CH1/EXT and timebases, log GET_CAPTURE_INFO (trigger_addr,
+   capture_start_word, divider) next to the measured edge index (method in docs/hardware-status.md).
 2. Read the 0.2.18+ frozen snapshot after sessions to explain the two suspend+reset pairs per session (section 11).
 3. Owner verdicts on 0.2.13+ System settings and battery, 0.2.17+ quiet boot; EXT trigger bench with 0x1533.
 4. Bench tests T3-T8 and T10 (section 7), then clear the UNVERIFIED caps and set FORCE_TRIGGER in release builds.
