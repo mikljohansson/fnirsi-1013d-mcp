@@ -142,3 +142,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   fnirsi1013d-flash validated end to end (6.6 s hands-free reload).
 - Firmware 0.1.7 (commit 5de512e, sha256 fc3984b3..., ring refactor + exhaustive host test): full bench 0 failures, census 0/0/0, counters clean.
   Current RAM image on the unit. Card still holds Atlan v1.00o5 (promotion pending owner's choice: MSC-mode write now or SD commands later).
+- Firmware 0.1.7 PROMOTED to the SD card (sector 750..1490) via the scope's USB mass-storage mode (0483:5720, bound for usbipd, /dev/sdg in WSL)
+  with make_sd_image.py write --scope; sectors 0..749 and the tail verified unchanged (calibration 708 / settings 709 / boot byte 710 intact);
+  pre-write backup backups/sdcard/sd_sectors_0-1490_20261018-144808.bin. Awaiting power-cycle confirmation (#VER 0.1.7 from the card).
