@@ -421,3 +421,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   pass (per-cell count + last-hit index, exp(-age/16) decay, black-blue-red-yellow-white ramp). Loaded on 0x1534: census clean, pass_ms 33.
   Owner checks pending. mcp 0de32dd: protocol 1.9 host support (16-bit captures, scope_set_decimation, simulator al3d), CI green.
   FPGA 0x1535 interface fixed by fpga-gen4 (0x56 FIR enable; latency 25 write clocks predicted), build/testbench pending.
+- Firmware 0.2.36 (fw-gen5, commits 8e1a946/67c844e, sha256 6060514b..., pinned): 25 MHz axis cap (PC_SPECTRUM_FMAX_HZ). Loaded on
+  0x1534, census clean. Alias test repeated through the 16-bit host path (mcp 0de32dd): 900 kHz square at 1 MS/s -> 100 kHz alias +2.6 dBV
+  legacy, -17.6 boxcar, -30.1 CIC2, -35.8 CIC3 (same as the 8-bit path, so the residual is real, not quantisation; cause open).
+- **Per-core zero vs sample rate (fw-cal's hypothesis confirmed):** legacy K=0, steady level, CH1: at 200 MS/s A 87.80 / B 85.09 (spread
+  2.7, mean 86.44); at 20 MS/s and every slower rate A ~87.0 / B ~81.5 (spread 5.5, mean 84.2). Filtered modes (ADCs always at full rate)
+  read 86.3-86.6 = the full-rate mean. Legacy mode gates the ADC encode clocks to the sample rate (zaklad.v), so below 200 MS/s the AD9288
+  cores run far below their rated minimum and core B's zero shifts by -3.6 codes. Two zero sets per core (full-rate, gated) cover it.
