@@ -6,17 +6,23 @@ W25Q80DV, JEDEC `ef 40 14`). Read `CLAUDE.md` at the repo root first; its flashi
 State on 2026-10-18:
 - The unit's FPGA flash holds Atlan4's AL3 bitstream (version word 0x1532), written and verified by read-back
   (`docs/hardware-status.md`). The stock image is backed up.
-- TD 4.6.8 SP1 runs headless in WSL and rebuilds `src/` **byte-identical** to that bitstream in about 15 s.
-  You can change the design and rebuild without a GUI.
+- TD 4.6.8 SP1 runs headless in WSL. `SRC_REV=a947e78 ./build.sh` rebuilds Atlan4's original **byte-identical**
+  to that bitstream in about 15 s.
+- `src/` now holds our design, version word **0x1533**: the external trigger on the calibration pin (roadmap item 2;
+  commits 526c969, 4601dec, 2839258). It is built (`out/FPGA-ext-trigger.bin`, sha256 `a9656703...1216`), meets
+  timing and passes the iverilog testbench. It is **not flashed**. It needs firmware that accepts 0x1533 (fw-gen2
+  was sent the spec) and then the bench checks in `README.md` "Changes".
 
 ## What is here
 
 | Path | What |
 |---|---|
-| `src/` | Atlan4's AL3 TD project: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc` (pins), `zaklad.sdc` (clocks), `FPGA.al` (TD project, holds `<UCode>`), `al_ip/` (PLL and sample-memory IP). Upstream material, licence unstated, attributed to Atlan4. |
+| `src/` | Atlan4's AL3 TD project with our changes: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc` (pins), `zaklad.sdc` (clocks), `FPGA.al` (TD project, holds `<UCode>`), `al_ip/` (PLL and sample-memory IP), `FPGA commands.txt` (command table, current). Upstream material, licence unstated, attributed to Atlan4. Unmodified original: git a947e78. |
+| `tb/` | iverilog testbench: `run.sh [seed]` simulates `src/zaklad.v` against Atlan4's original from git (`REF_REV`), `tb_ext_trigger.v`, `sim_models.v` (behavioural PLL/BRAM). `DUT=<file>` for mutation runs. |
+| `out/` | Named bitstreams for the bench (gitignored `*.bin`): `FPGA-ext-trigger.bin`. |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the stock FNIRSI design (0x1432), GPL-3.0. Same pin map. Use it for "what did stock do" questions. |
 | `bitstreams/` | Prebuilt images, gitignored except `README.md` (provenance and sha256). |
-| `build.sh`, `build.tcl` | Headless TD 4.6.8 build (replay of Atlan4's GUI command sequence). |
+| `build.sh`, `build.tcl` | Headless TD 4.6.8 build (replay of Atlan4's GUI command sequence). `SRC_REV=<rev>` builds `src/` from git. |
 | `build_donwulff.tcl` | Donwulff's TD 5.x flow (`FLOW=donwulff`); crashes in `report_io` on 4.6.8. |
 | `td/td_install.sh` | Headless TD install into `~/anlogic` with listing check, licence copy and GUI-lib stubs. |
 | `td/td_fetch.sh` | Captcha download helper for TD 5.0.3 from Sipeed (needs a human). |
@@ -45,9 +51,15 @@ wsl -d Ubuntu -- python3 -I /mnt/d/src/fnirsi-1013d-ai/fpga/al3/td/compare_bin.p
   code, runs `td flow.tcl`, then copies `FPGA.bin`, `FPGA.bit`, `FPGA_rtl.area`, `FPGA_gate.area`,
   `FPGA_phy.area`, `FPGA_phy.timing`, `FPGA_phy.tsm` and `build.log` to `fpga/al3/build/`.
 - Wall clock is 11 to 16 s. On failure it exits non-zero and prints "BUILD FAILED" with the first errors.
-- Overrides: `TD_HOME`, `TD_SHIM`, `FLOW` (`atlan` default, `donwulff`); the first argument is the work dir.
+- Overrides: `TD_HOME`, `TD_SHIM`, `FLOW` (`atlan` default, `donwulff`), `SRC_REV` (git revision of `src/`); the
+  first argument is the work dir.
+- Current `src/` (0x1533) gives `build/FPGA.bin` sha256 `a96567031872ae99bd40f0722a111a08da0f6381b6c710b70998af784a341216`.
+- Testbench: install iverilog once as root (`wsl -d Ubuntu -u root -- apt-get install -y iverilog`, done 2026-10-18),
+  then run `wsl -d Ubuntu -- bash /mnt/d/src/fnirsi-1013d-ai/fpga/al3/tb/run.sh [seed]`. It takes about 4 s and
+  ends with `RESULT: 38 checks, 0 failed -> PASS`. Any change to `zaklad.v` must keep it passing. The equivalence
+  phase is what proves "CH1/CH2 unchanged".
 
-Expected output for unchanged `src/`:
+Expected output for Atlan4's original (`SRC_REV=a947e78`; before 2026-10-18 this was plain `src/`):
 
 | File | Bytes | sha256 |
 |---|---|---|
@@ -86,7 +98,10 @@ trusting any design change. Builds are deterministic, so a changed hash means a 
   paths. The corner is TT 1.10 V 85 C, typical silicon, not worst case.
 - `build/FPGA_phy.tsm` is a machine-readable summary. `build.log` has every command with its run time.
 
-Current numbers (unchanged `src/`, equal to the shipped bitstream):
+Numbers for Atlan4's original (`SRC_REV=a947e78`, equal to the shipped bitstream). The 0x1533 numbers are in
+`README.md` "Changes": 635 LUT / 486 reg, `clk_200MHz` 4.459 ns TNS 0, `clkc[1]` 8.394 ns / 6 errors,
+`clkc[0]` 8.298 ns / 50 errors. The worst `clk_200MHz` path is now `sample_write_clock` (negedge) to
+`sampling_triggered`, slack +0.541 ns.
 
 | Item | Value |
 |---|---|
@@ -158,8 +173,17 @@ References:
 - Capture logic on `sample_write_clock`: write address, pretrigger (0x0B) and total (0x0C) counts, trigger
   compare on the raw ADC core A inputs (rising/falling), auto time-out, trigger address.
 - MCU bus on `i_mcu_clk`: command latch (`i_mcu_dcs` = 1), write decoder (0x01, 0x0B-0x0F, 0x15-0x17, 0x1A,
-  0x1B, 0x32-0x38, 0x3C, 0x50-0x52), read mux (0x05, 0x06, 0x0A, 0x14, 0x18, 0x20-0x27, 0x41).
+  0x1B, 0x32-0x38, 0x3C, 0x50-0x52), read mux (0x05, 0x06, 0x0A, 0x14, 0x18, 0x20-0x28, 0x41).
   Multi-byte values are big-endian and stepped by `mcu_state`.
+- External trigger (0x1533), block after the generator pin assign. The pad is read through `ext_sync` (2 flops,
+  first in the IOB), then a 3-sample majority filter (`ext_level`), then the edge select per `trigger_edge`. The
+  latched `ext_pending` fires into `sampling_triggered` after the next `sample_write_clock` rising edge. Cmd 0x15
+  `data[1]` = `trigger_ext` (value 2 = EXT) gates the ADC detect off. Read 0x28 = {ext_activity, gen_out_enable,
+  ext_level}. P133 has PULLDOWN in `zaklad.adc`.
+- Command codes still free in the decoders (checked 2026-10-18): writes 0x02-0x0A, 0x10-0x14, 0x18, 0x19, 0x1C-0x1E,
+  0x20-0x31, 0x39-0x3B, 0x3D-0x4F, 0x53 and up; reads 0x01-0x04, 0x07-0x09, 0x0B-0x13, 0x15-0x17, 0x19-0x1F, 0x29-0x40,
+  0x42 and up. Stock firmware wrote 0x28 (roll mode) and Donwulff says stock used 0x24/0x26 differently, so prefer
+  0x29 and up, or 0x53 and up, for new codes.
 
 ## Wanted next (priority order)
 
@@ -167,12 +191,10 @@ Each item changes the bitstream, so it also needs firmware support and a version
 firmware can detect. Rebuild unchanged `src/` first to confirm the toolchain, then work on a copy or a branch.
 Do not edit `src/` in place without keeping Atlan4's original reproducible (the hash check above).
 
-1. **External trigger input on P133** (`o_1khz_calib`, already `inout`; the port comment says "to FPGA ext
-   trigger" but no logic reads it). Add a synchroniser and edge detect, a trigger-source select via a new write
-   command, and make the generator and the input mutually exclusive (hi-Z when used as input). Needs a firmware
-   menu and a protocol field. Check the board circuit on P133 before driving it from outside.
-   Pointers: `zaklad.v` around line 280 (pin assign) and the trigger logic on `sample_write_clock`;
-   ports section of `fpga-verilog-analysis.md`.
+1. **External trigger input on P133**: designed, built and simulated (0x1533, `README.md` "Changes"). Open items:
+   - firmware support for 0x153x and caps EXT_TRIGGER (fw-gen2);
+   - flashing and the five bench checks, including the pin input impedance and the EXT-to-CH1 skew;
+   - a fixed trigger-point correction, if the bench shows one is needed.
 2. **Deeper sample memory.** 16 BRAM9K and both BRAM32K blocks are free (about 12k to 15.8k words possible).
    The address registers (`pretrigger_samples`, `total_samples`, `trigger_address`, `sample_read_offset`) are
    13 bit with the high byte taking `[4:0]`. Widen them to 16 bit (the wire format already carries 16 bits),
