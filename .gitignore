@@ -1,0 +1,29 @@
+# untrusted extracted archives and downloads
+research/atlan4-extracted/
+research/dpos350p/*.iso
+research/dpos350p/*.zip
+
+# hardware backups (never commit flash dumps)
+backups/
+
+# build outputs
+firmware/**/build/
+firmware/**/dist/
+firmware/**/*.o
+firmware/**/*.elf
+firmware/**/*.bin
+fpga/**/build/
+fpga/**/*.db
+fpga/**/*.bit
+fpga/**/*.bin
+fpga/**/*.rbf
+
+# python
+mcp/.venv/
+__pycache__/
+*.pyc
+
+# editors / os
+.vscode/
+*.swp
+Thumbs.db

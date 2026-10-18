@@ -1,0 +1,17 @@
+Update steps:
+Step 1: Download the firmware and extract it to your desktop.
+Step 2: Connect the device to your computer using USB tethering. The computer will eject the corresponding drive.
+Step 3: Place the extracted firmware into the corresponding folder.
+Step 4: Disable USB tethering, disconnect the data connection, and then power cycle the device. Wait for the firmware to upgrade.
+
+==========================
+Update logs:
+
+20250619
+1. Fixed the problem of inconsistent measurement names of Du and DT parameters
+2. Fixed the problem of freezing in rolling mode
+3. Fixed the problem of phase difference between 2 channels
+4. The minimum frequency of the frequency response analyzer is changed to 10Hz
+5. The frequency response analyzer adds a display of the sampling progress percentage
+6. Fixed the problem of battery power jumping
+7. Fixed the problem of abnormal shutdown
