@@ -348,3 +348,70 @@ sample memory are behavioural models (`tb/sim_models.v`).
 4. Skew between the EXT trigger point and the CH1 edge at 200 MSa/s, 10 MSa/s and 1 MSa/s. The prediction is
    20 to 25 ns from the FPGA side, plus the AD9288 pipeline delay on the CH1 side.
 5. Open input with EXT selected in normal mode: no triggers. This verifies the pull-down.
+
+### 2. Calibration-pin circuit and what EXT needs (2026-10-18)
+
+Status: partly documented, partly inferred. The bench measurements below settle the open part.
+
+**What the schematic shows.** Source: pecostm32's EasyEDA file, read-only reference `D:\src\FNIRSI-1013D-1014D-Hack\Schematics\1013D\EASYEDA\SCH_Scope 1013D_2023-01-07.json`, sheet "Scope_Data_Acquisition". I traced it with a netlist script, not by eye.
+- FPGA U3 pin 133 connects to R21 (1K, 0805, pin 2). R21 pin 1 ends at the net port `1KHZ_CALIB_SIG`.
+- That net port occurs **once** in the whole file, on no other sheet. The schematic does not draw the path from R21 to the front-panel terminal at all.
+- On the schematic, R21 is the only part on the net. No capacitor, diode, TVS or pull resistor is drawn on the FPGA side of R21.
+- R13 to R20 (1K) on pins 121 to 132 are the relay and AC/DC drives, so R21 is the ninth of the same series-1K row. The board photo `Pictures/New version/fpga and adc's.jpg` shows that row of nine 0805 parts beside the FPGA's top-right pins. I cannot read the markings in the photo.
+- The terminal itself is the round metal post between the two BNC connectors (`Pictures/New version/Analog section new version.jpg`, right edge). That is an inference from the photo. The traces between the resistor row and the post run under the shield and cannot be followed in the photos.
+
+**What the bench says.** Coordinator, 2026-10-18, generator on (0x1532, 1 kHz, 50 %):
+
+| Instrument | Reading at the probe-comp terminal |
+|---|---|
+| DMM, DC | 0.31 V |
+| Scope, DC coupling | -1.2 V to +1.9 V |
+
+A DC-coupled 0/3.3 V square at 50 % duty would read about 1.65 V on a DMM and 0 to 3.3 V on the scope. The swing of about 3.1 V peak-to-peak is the full logic swing. But it is centred near 0.35 V instead of 1.65 V.
+
+**Inference: there is a series coupling capacitor between R21 and the post.** The undrawn part of the net is the likely place for it. I see no other way a full-swing square loses its DC level while keeping its amplitude.
+- At 1 kHz the plateaus look flat, so C times the load must be much longer than 0.5 ms. With a 1 MΩ scope input that means C is above about 10 nF. This is an estimate.
+- The +0.35 V residual centre is not explained by a pure series C into 1 MΩ, which would centre at 0 V. Candidates are a bias network on the terminal side, diode leakage, or the scope's own offset error at that range. Unknown.
+
+**(a) What an external signal must look like to register as EXT.** The pad is LVCMOS33. I assume the usual LVCMOS33 thresholds, about VIH 2.0 V and VIL 0.8 V, but I have not checked them in an AL3 datasheet. P133 now has the FPGA's internal pull-down; its value is not documented in TD's files and is probably tens of kΩ.
+- **If the path is DC-coupled (no C).** The source drives the pad through R21 (1 kΩ) against the pull-down, so the loss is small. Any 3.3 V logic output with a source impedance up to a few kΩ registers. Levels and both edges work, and 0x28 bit0 follows the level.
+- **If a series C exists (the likely case).** Only edges pass.
+  - A rising step of V at the post lifts the pad by about V (C is much larger than the pad's few pF). The pad then decays to 0 V through the pull-down with time constant C times R_pulldown. With C = 10 nF and R_pd = 50 kΩ that is about 0.5 ms. These values are illustrative.
+  - A falling step drives the pad below ground. The pad's clamp diode catches it, with R21 limiting the current. Then the pad sits at 0 V.
+  - Consequences:
+    1. **Rising-edge EXT works**, provided the step is at least 2 V plus margin. A 3.3 V logic edge qualifies.
+    2. **Falling-edge EXT does not follow the source's falling edge.** It fires when the decay crosses VIL, about C x R_pd x ln(3.3 / 0.8) after the preceding rising edge, or not at all for short gaps. Use rising edge, and invert at the source if needed.
+    3. **0x28 bit0 shows no static level.** For "EXT present", use bit2 (edge seen during the capture).
+    4. Very slow edges, with rise times near C x R_pd, are attenuated.
+  - The internal pull-down is what makes this work: it re-references the coupled node to 0 V. With `PULLTYPE NONE` the node would float, and edges would ride on an undefined DC level.
+- **Source impedance.** Any logic output (tens of Ω) is fine. A source above a few kΩ loses edge amplitude into the pad capacitance and the pull-down.
+- **Pulse width.** At least 10 ns at the pad (majority filter), plus whatever the coupling stretches or shortens.
+
+**(b) ESD and overvoltage risk to the pad.**
+- **R21 is the only drawn protection.** There is no TVS or external clamp. The pad's internal clamp diodes take any excursion beyond about -0.6 V or 3.3 V + 0.6 V, and R21 limits the current. These are estimates, assuming 0.6 V diode drops and ideal sources:
+  - 5 V logic: about (5 - 3.9) / 1 kΩ = 1.1 mA DC through the upper clamp if the path is DC-coupled. A series C turns that into a short spike.
+  - 12 V step: about 8 mA peak.
+  - Generator on while an external source drives the pin: the two fight through R21, at most about 3.3 mA. Neither side should be damaged. The firmware turns the generator off when EXT is selected.
+- **I found no AL3 limit for clamp current.** Most FPGA vendors allow single-digit mA per pin at most and forbid sustained injection. Treat anything above 3.3 V as out of spec, even through 1 kΩ.
+- **The real hazard is high voltage.** A pulse-induction TX node can fly back to hundreds of volts. Never connect the probe-comp terminal to the coil, the MOSFET drain or the damping resistor. A series C would pass such an edge almost in full, and 1 kΩ is no protection at 300 V: about 300 mA peak into the clamp diode. The correct tap is the detector MCU's 3.3 V gate-drive or sync GPIO, before the gate driver.
+- **ESD.** The post is exposed. 1 kΩ plus the internal diodes is modest protection against a human-body discharge. Touch a ground first and keep cables plugged in before power-up. An external 3.3 V TVS or a 1 kΩ + BAT54S clamp on the source side is cheap insurance for regular use. This is a recommendation, not something the board has.
+
+**(c) Recommended bench tests**
+
+0. **Circuit, before any flashing, scope off.** These need only a DMM, on the current bitstream.
+   - Ohms from the post to GND and from the post to 3V3. MΩ or open points to a series C, with the DMM seeing only the C. A few kΩ points to a bleed resistor.
+   - If the R21 end at the FPGA side can be reached, ohms from the post to that end. About 1 kΩ means DC-coupled; open means a series C.
+   - If the DMM has a capacitance range, the capacitance from the post to the R21 FPGA-side pad.
+1. **Coupling with the scope's own generator, 0x1532, generator on.**
+   - Set the generator to 1 Hz and then 10 Hz at 50 %. Use cmd 0x51 = 86 for about 1 Hz; f = inc x 50 MHz / 2^32.
+   - CH1 on the post, x1 probe, DC coupling, 1 V/div, 50 to 200 ms/div. A DC-coupled path shows flat 0 / 3.3 V plateaus. A series C shows a spike on each edge that decays toward the bias. The decay time constant is C x (R_load || R_bleed).
+   - Repeat with the probe at x10 (10 MΩ). If the time constant grows about tenfold, the scope input is the only load and C = tau / 1 MΩ.
+2. **EXT after flashing 0x1533 with fw 0.2.9, generator off.**
+   - Source: the detector MCU's 3.3 V GPIO, toggling at 100 Hz and 1 kHz, 50 % duty. Wire it to the post and to CH1 through a 1 kΩ series resistor, with grounds joined.
+   - If only the bench supply's TTL output is available and it is 5 V, put a 2:1 divider in front, for example 1 kΩ / 1 kΩ, so the post sees at most 2.5 V. That is still above VIH. Never connect 5 V directly.
+   - Expected if DC-coupled: rising and falling EXT both trigger on the CH1 edge, and 0x28 bit0 follows a slow 1 Hz toggle.
+   - Expected if a series C exists: rising EXT triggers on the CH1 rising edge. Falling EXT triggers late or not at all, as described in (a). 0x28 bit0 stays mostly 0, and bit2 is set after each capture.
+   - Either way, record the skew between the trigger point and the CH1 edge at 200, 10 and 1 MSa/s. The FPGA side predicts 20 to 25 ns.
+3. **Open post, EXT selected, normal mode, generator off.** Expect no triggers.
+
+Firmware and MCP texts say "3.3 V logic". If test 0 or 1 confirms a series C, they should add "rising edge recommended, levels are not seen". That is a documentation change only; the FPGA design does not change.
