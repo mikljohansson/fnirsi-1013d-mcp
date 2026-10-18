@@ -22,12 +22,13 @@ context. Read first: `../CLAUDE.md` (repo rules, bench coordination), `../docs/p
 | `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 fresh attempts, 1 s apart; between them a look for the FEL device 1f3a:efe8, which means the OK was lost but the scope rebooted: continue; `#VER` check if all unanswered) -> usbipd -> sunxi-fel RAM load -> wait for `#VER`. Any failure: one `FAILED:` line, non-zero exit. `--persist` / `--persist-only` write the image to SD sector 750: image version must equal the running `#VER` (`--force`), verified backup of 750..750+max(new, old) to `../backups/sdcard/`, 128-sector pieces, SD_READ compare, SD_INFO VERIFY, timings; 32 sectors per SD_WRITE (`--write-sectors`, 5 s timeout, 4 same-seq resends); an unconfirmed piece is resent on the same connection while PING answers, else the tool waits for the port (`--port-return` 15 s) and reconnects (<= 4 tries per piece, resends listed); `--stage-delay-ms`; `--restore <backup>`; persist failures exit 7 and warn about a partial image. |
 | `sdcard.py` | SD sector access (fw >= 0.2.2): `SdCard` info/read/backup (double read + file re-read)/stage/write (stage CRC, read-back CRC)/verify (SD_READ compare), `plan_write` (the firmware's window/flag rules for dry runs), `check_image` (eGON length + checksum), `image_version` (the `#VER` literal in a binary). `Scope.sd_info/sd_read/sd_write(dry_run=)` wrap it. Used by `flash.py --persist`. |
 | `sdcli.py` | `fnirsi1013d-sd` bench CLI: info / read / write (`--dry-run`, `--yes` + typed `WRITE <n>@<sector>`, backup first). |
+| `soak.py` | `fnirsi1013d-soak`: long poll with timestamped events, drop detection (port error or vanished from the COM list), wait + reopen, GET_LINK_STATS deltas, Windows selective-suspend and hub path at start. |
 | `bench.py` | `fnirsi1013d-bench`: runs `../firmware/scope/host_tests/bench_link.py` (link checks + census; `--fel` not exposed). |
 | `vectors.py` | Checks/extends `../docs/protocol-vectors.json` (`--check`, `--merge`). |
 | `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points -> least-squares fit of zero, 1/gain, PWM slope per channel/range/core; JSON file), `ChannelScale`/`channel_scale` (raw, compensated, mean and trigger-level conversions; firmware formula fallback), `import_t8` + CLI for the lead's `backups/t8_*.json`. |
 | `units.py` | `parse_quantity("100us")`, `fmt_si`. |
 
-Tests in `tests/` (237, incl. `test_ext_trigger`, incl. `test_calibration`, `test_sdcard`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
+Tests in `tests/` (247, incl. `test_ext_trigger`, `test_soak`, incl. `test_calibration`, `test_sdcard`): `test_protocol` (codec, structs, shared vectors), `test_transport`, `test_robustness`
 (resend, resync, #RESET, 1.1/1.2 fields, timeouts, paused responses), `test_serial_link` (no-reconfigure rule,
 fake pyserial), `test_simulator_scope`, `test_shared_mode` (1.3 semantics through `Scope`), `test_firmware_match`
 (protocol.md section 14 items), `test_server` (every tool in-process, collaborative restarts, legacy fallback),
@@ -48,6 +49,7 @@ wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/mcp && ~/.venvs/fnirsi1
 .venv/Scripts/fnirsi1013d-flash --image <bin> --sha256 <hash>       # reload: only with the lead's ack
 .venv/Scripts/fnirsi1013d-flash --image <bin> --sha256 <hash> --persist  # + write SD sector 750: only with the lead's ack
 .venv/Scripts/fnirsi1013d-bench --port COM10 --census 2000          # LOCAL-safe link census
+.venv/Scripts/fnirsi1013d-soak --port COM10 --duration 1800          # LOCAL-safe link soak (v0.3.0 gate)
 .venv/Scripts/fnirsi1013d-sd info --verify                          # read-only; `write` only with the lead's ack
 .venv/Scripts/ruff check --select F,E9,B023 --line-length 120 src tests
 ```

@@ -763,6 +763,10 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 extra_ext = {"ext": {"level": "high" if st.ext_flags & P.ExtFlags.LEVEL else "low",
                                      "generator_drives_pin": bool(st.ext_flags & P.ExtFlags.GENERATOR),
                                      "edge_seen_since_arm": bool(st.ext_flags & P.ExtFlags.EDGE_SEEN)}}
+                if st.ext_flags & P.ExtFlags.GENERATOR and s.get_trigger(cached=False).source == 2:
+                    # possible through the scope's own generator switch, which the firmware does not block
+                    extra_ext["ext"]["warning"] = ("generator on while the trigger source is EXT: the scope triggers "
+                                                   "on its own generator output, not on an external signal")
             else:
                 extra_ext = {}
             if st.shared:

@@ -88,3 +88,14 @@ def test_device_refuses_gen_while_ext(sim_factory):
             s.set_gen(enable=True, freq_hz=1000, duty=0.5)
         assert getattr(e.value, "status", None) == P.Status.E_STATE
         assert np.isfinite(s.get_trigger(cached=False).source)
+
+
+@pytest.mark.anyio
+async def test_status_warns_when_the_ui_turns_the_generator_on_under_ext(sim_factory, tmp_path):
+    srv = ext_sim(sim_factory)
+    async with client_for(srv, tmp_path) as c:
+        await c.call("scope_set_trigger", source="EXT")
+        assert "warning" not in (await c.call("scope_status"))["ext"]
+        srv.device.settings.gen.enable = 1  # the UI's generator Power switch is not blocked by the firmware
+        st = await c.call("scope_status")
+        assert st["ext"]["generator_drives_pin"] and "own generator" in st["ext"]["warning"]
