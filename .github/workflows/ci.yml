@@ -14,8 +14,11 @@ on:
 permissions:
   contents: read
 
+# Pushes get one group per commit, so no commit on main loses its run. With one group per ref, a newer
+# pending run replaces an older pending one (seen on the first day, with several agents pushing).
+# Pull requests keep one group per PR and cancel superseded runs.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
