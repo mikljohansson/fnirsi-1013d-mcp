@@ -294,8 +294,9 @@ static void phos_draw_strip(void)
   char   t[48], *p;
   uint32 f, x, w;
 
-  display_set_fg_color(BLACK_COLOR);
-  display_fill_rect(2, STRIP_Y, 728, STRIP_H);
+  //Black with STM bursts (display_fill_rect writes one uncached pixel at a time); the current buffer is displaybuffertmp
+  for(x = STRIP_Y; x < STRIP_Y + STRIP_H; x++)
+    memset(&displaybuffertmp[x * 800 + 2], 0, 728 * 2);
 
   for(f = 0; f < F_COUNT; f++)
   {
