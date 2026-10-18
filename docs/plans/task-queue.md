@@ -6,15 +6,15 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- [ ] **Spectrum Auto redesign** (owner, 10-18): deterministic probe procedure independent of the current state: probe
+- [x] **Spectrum Auto redesign** (owner, 10-18): deterministic probe procedure independent of the current state: probe
   at 50 MSa/s in normal trigger mode (2-3 captures, skip untriggered), measure f0 (time-domain period) and the band top
   f_hi (bins above max(peak - 40 dB, median + 10 dB)); span = max(1.25 f_hi, 20 f0) clamped to 25 MHz; rate = slowest
   with fs/2 >= 1.25 span; FFT length longest the record holds (<= 4096) with RBW <= f0/4; Hann; ref = first scale
   multiple >= peak + 3 dB after a confirmation capture; scale from dynamic range; Average 4; one refinement pass; 1-2 s
   allowed with an "Auto..." state; identical presses give identical settings. README documents the algorithm.
-- [ ] **Header: drop "Avg n"/"Max"** (owner, 10-18): the strip's Average field shows it. Header = peak marker per channel,
+- [x] **Header: drop "Avg n"/"Max"** (owner, 10-18): the strip's Average field shows it. Header = peak marker per channel,
   RBW, filter tag only.
-- [ ] **Warnings state consequence + action, units MSa/s** (owner, 10-18): "Aliasing possible: set Acquisition > Filter"
+- [x] **Warnings state consequence + action, units MSa/s** (owner, 10-18): "Aliasing possible: set Acquisition > Filter"
   (only while Filter is Off and fs < 200 MSa/s), "CHn overrange: increase V/div", "Stopped: press RUN to fill the view",
   "Waiting for a capture at the new rate"; README table.
 - [ ] **Spectrum view: no scope-view repaints over the strip** (owner, 10-18): host SET_TIMEBASE / SET_TRIGGER / SET_GEN (and
@@ -60,6 +60,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   warning. (Auto mode verified by the coordinator on 0.2.41: 6/6 triggered records at 10 MS/s, untriggered flagged truthfully.)
 
 ## Dispatched
+
+- fw-gen5 (retired after 0.2.42): Auto redesign, header, warnings delivered in fw 0.2.42; owner verdict pending.
 
 - fw-cal (worktree): calibration v2 delivered on branch fw-cal; rebase to main + renumber 0.2.42 requested; bench steps 1-11 in firmware/README.md 6.2 pending.
 - fpga-gen4: FPGA 0x1535 (CIC N/2 + 15-tap FIR).

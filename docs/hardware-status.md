@@ -462,3 +462,6 @@ Newest entries at the bottom. Format: date, who, what, result.
 - fw-cal delivered calibration v2 on branch fw-cal (per-core zeros in two clock classes, full-rate and gated, per range; dithered sub-code
   correction; versioned CRC block in sector 708; GET_CAL 248 bytes, protocol 1.10 row 48; diagnostics show v1/v2 and per-core zeros).
   Rebase onto main and renumber to 0.2.42 requested before merging; bench steps in firmware/README.md 6.2 (owner runs base calibration).
+- Firmware 0.2.42 (fw-gen5, commits cebb982/7d20866, sha256 b23f5fc8..., pinned; fw-gen5 retired): deterministic Auto (probe at 50 MSa/s,
+  period search, f0/f_hi rules, RBW <= f0/4), actionable warnings with MSa/s units, header without Avg. Loaded on 0x1534, census clean.
+  Owner checks pending (three identical Auto presses -> identical settings; expected 200 kSa/s at depth 3000 for the 1 kHz square).
