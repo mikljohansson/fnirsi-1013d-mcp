@@ -471,6 +471,26 @@ min(65535, y >> S), y = filter output with gain N^K. On 0x1532/0x1533 none of th
   L16 round trip for every level, compensation, rates, settle) and `test_decim_protocol` (0x1533 untouched, 0x1534
   flow); `decim_check.c` reproduces the 80 "decim" cases that `gen_vectors.py` computes in Python.
 
+CIC compensation FIR (FPGA 0x1535, fw 0.2.44, protocol 1.11, row 49):
+- 0x1535 adds a 15-tap FIR after the CIC (fpga-gen4, fpga/al3/README.md): with 0x56 = 1, K >= 1, N >= 16 and N % 4 == 0
+  (10 MSa/s and slower in the table) the CIC decimates by N/2 and the FIR by 2, so the output rate is still 200 MSa/s / N.
+  `pc_decim_config` takes the capability level (`PC_DECIM_HAS_FIR` on 0x1535+) and the request bit `PC_DECIM_SET_FIR`
+  and computes `fir_en` (what 0x56 gets) and `fir` (active); with `fir` the gain is (N/2)^K, S gets + 1 (headroom for the
+  6-9 % step overshoot), exactness and the CIC3 limit apply to N/2, the EXT shift uses 250 ns + 17.5 N ns + 1.25 K (N - 2) ns
+  and the settle time (K + 10) N x 5 ns + 1 us. Everything downstream (scale_q24, L16, the readout's corr16, the spectrum's
+  16-bit path, GET_CAPTURE_INFO) takes gain / S / scale from the configuration, so no other code knows about the FIR.
+- `pc_dec_apply` writes 0x56 only on 0x1535+ and only when the enable changes; a change counts as a filter change (settle).
+- UI: the Filter box steps off, boxcar, boxcar+FIR, CIC2, CIC2+FIR, CIC3, CIC3+FIR on 0x1535+ (0x1534: no FIR steps). The
+  box shows the setting; at 20 MSa/s and faster the FIR is not eligible and the record is plain CIC (GET_DECIM byte 2 bit 5
+  clear; the spectrum header tag says "CIC2", not "CIC2+FIR"). Saved in settings word 207 bit 5 (valid mask 0xFFC4).
+- Host: SET_DECIM flags bit 3, GET_DECIM byte 1 bit 3 and 0x29 bits 6 / 5 in bytes 2 / 24 / 26, caps bit 16.
+- Host tests: `test_decim_fir_math` (every table divider and D 1..200 x K: eligibility by both the N and the D rule, gain,
+  S, level round trip, headroom against the 1.21 FIR gain, latency, settle, CIC3 limit at N/2) and `test_decim_fir_protocol`;
+  the `decim` vectors have `fir_req` cases (gen_vectors.py, cross-checked by decim_check).
+- Bench: GET_DECIM bytes 26-27 = 0xE2 / 0x01 after an arm at 10 MSa/s CIC2+FIR (0xC2 at 20 MSa/s); a DC level reads the
+  same code with FIR on and off; a tone at fo/4 is flat with the FIR (CIC2 droop 1.8 dB without); the 100 kHz alias of a
+  900 kHz square at 1 MSa/s drops by about 20 dB; EXT edge at sample `pretrigger` with the FIR shift.
+
 Bench (nothing verified on hardware; bitstream not yet flashed): 0x29 read-back after an arm (GET_DECIM bytes
 26-27); a DC level reads the same code with the filter off and on; a 3.9 MHz generator at 1 MSa/s aliases at
 100 kHz with skipping and is attenuated with boxcar / CIC (plan F1); trigger on CH1 with the 16-bit level at

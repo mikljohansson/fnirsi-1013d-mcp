@@ -2,8 +2,8 @@
 // decim_check: the decimation filter maths of pc_decim.c for check_vectors.py (docs/protocol-vectors.json "decim").
 //
 // argv:   the 8-bit levels to convert into 16-bit trigger levels
-// stdin:  one case per line: <divider> <k_req> <total samples>
-// stdout: per case: <k> <n> <gain> <shift> <rate> <settle_us> <ext_shift> [<level16> per level when k >= 1]
+// stdin:  one case per line: <divider> <k_req> <total samples> <fir_req> (FIR on a 0x1535 bitstream)
+// stdout: per case: <k> <n> <gain> <shift> <rate> <settle_us> <ext_shift> <fir> [<level16> per level when k >= 1]
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include <stdio.h>
@@ -13,16 +13,17 @@
 
 int main(int argc, char **argv)
 {
-  unsigned long d, k, total;
+  unsigned long d, k, total, fir;
   int i;
 
-  while(scanf("%lu %lu %lu", &d, &k, &total) == 3)
+  while(scanf("%lu %lu %lu %lu", &d, &k, &total, &fir) == 4)
   {
     pc_decim_cfg c;
 
-    pc_decim_config((uint8_t)k, 0, (uint32_t)d, (uint32_t)total, 1, &c);
-    printf("%u %u %llu %u %u %u %u", c.k, (unsigned)c.n, (unsigned long long)c.gain, c.shift,
-           (unsigned)pc_decim_rate(&c, (uint32_t)d), (unsigned)pc_decim_settle_us(&c), (unsigned)pc_decim_ext_shift(&c));
+    pc_decim_config((uint8_t)k, fir ? PC_DECIM_SET_FIR : 0, (uint32_t)d, (uint32_t)total, PC_DECIM_HAS_FIR, &c);
+    printf("%u %u %llu %u %u %u %u %u", c.k, (unsigned)c.n, (unsigned long long)c.gain, c.shift,
+           (unsigned)pc_decim_rate(&c, (uint32_t)d), (unsigned)pc_decim_settle_us(&c), (unsigned)pc_decim_ext_shift(&c),
+           c.fir);
 
     if(c.k)
       for(i=1;i<argc;i++)

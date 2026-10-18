@@ -680,7 +680,8 @@ static uint32 spec_glyph_marker(uint32 x, uint32 y)
 static const char *spec_avg_names[] = { "", "Avg 4", "Avg 16", "Avg 64", "Max" };
 
 //The one header line (owner, fw 0.2.40-0.2.42), left to right: per shown channel its peak "CH1 ^ 977 Hz  +2.7 dBV" in
-//the channel colour, then "RBW 732 Hz", the decimation filter tag ("CIC3", no N; the filter lives in the acquisition
+//the channel colour, then "RBW 732 Hz", the decimation filter tag ("CIC3", "CIC3+FIR" while the FIR is active, no N;
+//k bits 1:0 the order, bit 2 the FIR; the filter lives in the acquisition
 //menu) and, in the waterfall, the time its rows span. Nothing that repeats a strip field (no fs, N or averaging).
 static void spec_draw_header(const uint32 *peak, int hch, int k, uint64 bin_mhz)
 {
@@ -710,11 +711,11 @@ static void spec_draw_header(const uint32 *peak, int hch, int k, uint64 bin_mhz)
   fmt_freq(p, (bin_mhz * fx_enbw_milli(spec.window) + 500) / 1000);
   x = spec_text_at(x, INFO_Y1, t) + 18;
 
-  if(k)
+  if(k & 3)
   {
-    static const char *names[] = { "", "boxcar", "CIC2", "CIC3" };
+    static const char *names[] = { "", "boxcar", "CIC2", "CIC3", "", "boxcar+FIR", "CIC2+FIR", "CIC3+FIR" };
 
-    x = spec_text_at(x, INFO_Y1, names[k & 3]) + 12;
+    x = spec_text_at(x, INFO_Y1, names[k & 7]) + 12;
   }
 
   //Waterfall: the time the visible rows span, oldest at the bottom
@@ -1312,7 +1313,7 @@ int spectrum_display(void)
     spec_draw_legend(&v, hch);
   }
 
-  spec_draw_header(peak, hch, dc.k, bin_mhz);
+  spec_draw_header(peak, hch, dc.k | (dc.fir ? 4 : 0), bin_mhz);
 
   spec_draw_strip(log2n, bin_mhz);
 

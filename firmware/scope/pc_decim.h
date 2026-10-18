@@ -1,5 +1,6 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// pc_decim.h - maths for the AL3 bitstream 0x1534 decimation filter (fpga/al3: FPGA cmds 0x53/0x54/0x55, read 0x29).
+// pc_decim.h - maths for the AL3 decimation filter: bitstream 0x1534 (FPGA cmds 0x53/0x54/0x55, read 0x29) and the
+// CIC compensation FIR of 0x1535 (cmd 0x56).
 //
 // Integer only (no FPU on the F1C100s), no globals, no hardware: builds for the scope and on the host (host_tests).
 //
@@ -14,6 +15,14 @@
 //   N = 2 * (floor(D / 2) + 1), D = the 0x0D divider; output rate 200 MSa/s / N (= 200 / (D + 1) for odd D)
 //   K >= 1: one 16-bit output sample per channel per 32-bit word (low byte 0x20/0x22, high byte 0x21/0x23); 0x0B,
 //   0x0C, 0x14 and 0x0E count output samples (words), at most 8191.
+//
+// FIR (0x1535, fpga-gen4, fpga/al3/src/FPGA commands.txt): 0x56 bit 0 = FIR enable (power-on 0). Active only when 0x56 = 1,
+//   K >= 1, N >= 16 and N % 4 == 0 (D >= 14, D mod 4 in {2, 3}); read 0x29 byte 0 bit 6 = enable as written, bit 5 =
+//   active now. Chain: CIC of order K decimating by N/2 (gain (N/2)^K), shift S, saturate to 16 bit, 15-tap FIR
+//   decimating by 2 with DC gain 1, so the output rate stays 200 MSa/s / N. S = max(0, bitlen(255 (N/2)^K) - 16) + 1
+//   (+1: headroom for the 6-9 % step overshoot; the worst-case FIR gain 1.21 cannot saturate). Exactness 255 (N/2)^K
+//   < 2^48 (CIC3 while N/2 <= 10334). Latency 25 write clocks (250 ns) pin to memory; an EXT edge leads the data by
+//   250 ns + 17.5 N ns + 1.25 K (N - 2) ns; settle (K + 10) N 5 ns + 1 us after a change of 0x0D, 0x53, 0x54 or 0x56.
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #ifndef PC_DECIM_H
@@ -31,11 +40,24 @@
 #define PC_DECIM_NEG_B        0x10      //0x53 / 0x29 bit 4: B cores captured on the falling write-clock edge
 #define PC_DECIM_FLAGS        (PC_DECIM_SWAP | PC_DECIM_NEG_A | PC_DECIM_NEG_B)
 #define PC_DECIM_WIDE         0x80      //0x29 bit 7: 16-bit layout active (K >= 1)
+#define PC_DECIM_FIR_EN       0x40      //0x29 bit 6: 0x56 FIR enable as written (0x1535+)
+#define PC_DECIM_FIR_ACT      0x20      //0x29 bit 5: FIR active now (enable, K >= 1, N >= 16, N % 4 == 0)
+
+//Filter setting byte (pc_hal_decim_setting, SET_DECIM): bits 1:0 K, bits 2-4 PC_DECIM_FLAGS, bit 5 FIR requested
+#define PC_DECIM_SET_FIR      0x20
+
+//Capability levels for pc_decim_config
+#define PC_DECIM_HAS_NONE     0         //bitstream without the filter (0x1533 and older)
+#define PC_DECIM_HAS_CIC      1         //0x1534: boxcar / CIC
+#define PC_DECIM_HAS_FIR      2         //0x1535+: plus the compensation FIR
+
+//FIR eligibility: N >= 16 (the 15-tap FIR needs N/2 write clocks per output) and N a multiple of 4
+#define PC_DECIM_FIR_MIN_N    16u
 
 //Largest capture in the 16-bit layout: 13-bit word counters (0x0B/0x0C), even sample counts as everywhere else
 #define PC_DECIM_MAX_TOTAL    8190
 
-//Exactness limits: 255 * N^K < 2^48 (the FPGA's 48-bit accumulators)
+//Exactness limits: 255 * M^K < 2^48 (the FPGA's 48-bit accumulators), M = the CIC's decimation (N, or N/2 with the FIR)
 #define PC_DECIM_CIC2_MAX_N   1050630u
 #define PC_DECIM_CIC3_MAX_N   10334u
 
@@ -54,9 +76,11 @@ typedef struct
   uint8_t  flags;             //0x53 bits 2-4: PC_DECIM_SWAP, PC_DECIM_NEG_A, PC_DECIM_NEG_B (written for every K)
   uint8_t  shift;             //S (0 when k = 0)
   uint8_t  why;               //PC_DECIM_WHY_*
-  uint32_t n;                 //decimation factor (0 when k = 0)
-  uint64_t gain;              //N^K (1 when k = 0)
-  uint32_t scale_q24;         //round(2^(24 + S) / N^K): stored sample -> 8-bit ADC code, Q24 (0 when k = 0)
+  uint8_t  fir_en;            //0x56 bit 0 as written: FIR requested on a 0x1535+ bitstream (any K)
+  uint8_t  fir;               //FIR active: fir_en, k >= 1, n >= 16, n % 4 == 0
+  uint32_t n;                 //decimation factor of the whole chain (0 when k = 0); output rate 200 MSa/s / n
+  uint64_t gain;              //M^K, M = n (n / 2 with the FIR); 1 when k = 0
+  uint32_t scale_q24;         //round(2^(24 + S) / gain): stored sample -> 8-bit ADC code, Q24 (0 when k = 0)
 } pc_decim_cfg;
 
 uint32_t pc_decim_n(uint32_t divider);                                   //2 * (floor(D / 2) + 1)
@@ -65,16 +89,22 @@ uint8_t  pc_decim_shift(uint64_t gain);                                  //max(0
 uint16_t pc_decim_level16(uint8_t level8, uint64_t gain, uint8_t shift); //round(v * N^K / 2^S), at most 65535
 uint32_t pc_decim_scale_q24(uint64_t gain, uint8_t shift);               //round(2^(24 + S) / N^K)
 
-//The effective configuration for a request (k_req 0..3, flags PC_DECIM_FLAGS bits), the 0x0D divider and the capture
-//length in samples. has_filter = 0 (bitstream without the filter) always gives k = 0 and no flags.
-void     pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t total_samples, int has_filter,
+//The effective configuration for a request (k_req 0..3, flags PC_DECIM_FLAGS bits plus PC_DECIM_SET_FIR), the 0x0D
+//divider and the capture length in samples. has = PC_DECIM_HAS_*: NONE always gives k = 0 and no flags, CIC ignores
+//PC_DECIM_SET_FIR.
+void     pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t total_samples, int has,
                          pc_decim_cfg *c);
 
-//EXT trigger with K >= 1: output samples by which the stored data lags the EXT edge, round((120 ns + K (N - 1) 2.5 ns)
-//   / (N x 5 ns)) to the nearest sample (halves up); 0 for K = 0
+//The FIR engages at decimation n (with K >= 1): n >= 16 and n % 4 == 0
+int      pc_decim_fir_eligible(uint32_t n);
+
+//EXT trigger with K >= 1: output samples by which the stored data lags the EXT edge, rounded to the nearest sample
+//(halves up); 0 for K = 0. Lag 120 ns + K (N - 1) 2.5 ns, with the FIR 250 ns + 17.5 N ns + 1.25 K (N - 2) ns; one
+//output sample is N x 5 ns
 uint32_t pc_decim_ext_shift(const pc_decim_cfg *c);
 
-//0x53 byte for c (bits 1:0 K, bits 2-4 flags) and the 0x29 byte 0 the FPGA reports for it (plus bit 7 when K >= 1)
+//0x53 byte for c (bits 1:0 K, bits 2-4 flags) and the 0x29 byte 0 the FPGA reports for it (plus bit 7 when K >= 1,
+//bit 6 FIR enable, bit 5 FIR active)
 uint8_t  pc_decim_mode(const pc_decim_cfg *c);
 uint8_t  pc_decim_status(const pc_decim_cfg *c);
 
@@ -85,7 +115,8 @@ int32_t  pc_decim_to_code(uint16_t out, uint32_t scale_q24, int32_t corr16);
 //Output sample rate in Sa/s (200 MSa/s / N for k >= 1, 200 MSa/s / (D + 1) for k = 0)
 uint32_t pc_decim_rate(const pc_decim_cfg *c, uint32_t divider);
 
-//Filter settling after a change of 0x0D, 0x53 or 0x54: (K + 2) output periods, in microseconds, rounded up
+//Filter settling after a change of 0x0D, 0x53, 0x54 or 0x56, in microseconds, rounded up: (K + 2) output periods,
+//with the FIR (K + 10) N x 5 ns + 1 us
 uint32_t pc_decim_settle_us(const pc_decim_cfg *c);
 
 #endif /* PC_DECIM_H */

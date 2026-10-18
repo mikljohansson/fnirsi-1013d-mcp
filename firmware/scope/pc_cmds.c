@@ -134,7 +134,8 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
     case 0x1534: case 0x1535: case 0x1536: case 0x1537: case 0x1538: case 0x1539:
     case 0x153A: case 0x153B: case 0x153C: case 0x153D: case 0x153E: case 0x153F:
       //AL3 family, later minors: 0x1533 adds the EXT trigger on the calibration pin (fpga/al3/README.md), 0x1534 the
-      //decimation filter with 16-bit samples (cmds 0x53-0x55, read 0x29; pc_decim.h)
+      //decimation filter with 16-bit samples (cmds 0x53-0x55, read 0x29; pc_decim.h), 0x1535 the CIC compensation FIR
+      //(cmd 0x56)
       v->variant    = 2;
       v->ring_words = 8192;
       v->max_total  = 16382;
@@ -142,6 +143,9 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
 
       if(version >= 0x1534)
         v->caps |= PC_CAP_DECIM;                                                     //BENCH: DECIM
+
+      if(version >= 0x1535)
+        v->caps |= PC_CAP_FIR;                                                       //BENCH: FIR
       break;
 
     case 0x1632:
@@ -257,8 +261,9 @@ static void pc_decim_next(pc_session *s, uint32_t total, pc_decim_cfg *c)
   uint8_t set = pc_hal_decim_setting();
 
   pc_hal_timebase_read(&tb);
-  pc_decim_config(set & 3, set & PC_DECIM_FLAGS, s->tb_raw ? s->tb_divider : tb.divider, total,
-                  (s->var.caps & PC_CAP_DECIM) != 0, c);
+  pc_decim_config(set & 3, set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR), s->tb_raw ? s->tb_divider : tb.divider, total,
+                  (s->var.caps & PC_CAP_FIR) ? PC_DECIM_HAS_FIR : ((s->var.caps & PC_CAP_DECIM) ? PC_DECIM_HAS_CIC :
+                  PC_DECIM_HAS_NONE), c);
 }
 
 //Settings a capture is armed with
@@ -1639,7 +1644,8 @@ static uint32_t pc_decim_body(pc_session *s, uint8_t *p)
 
   memset(p, 0, 32);
   p[0] = set & 3;                                       //UI Filter: 0 off, 1 boxcar, 2 CIC2, 3 CIC3
-  p[1] = (uint8_t)((set & PC_DECIM_FLAGS) >> 2);       //flags: bit 0 core-order swap, bits 1 / 2 falling-edge A / B
+  p[1] = (uint8_t)((set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR)) >> 2);   //flags: bit 0 core-order swap, bits 1 / 2
+                                                        //falling-edge A / B, bit 3 FIR (1.11)
   p[2] = pc_decim_status(&next);                        //what the next arm writes (0x29 byte 0 layout)
   p[3] = next.shift;
   pc_put_u32(p + 4, next.n);
@@ -1664,8 +1670,8 @@ static int h_get_decim(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
 }
 
 //SET_DECIM: u8 filter (0 off, 1 boxcar, 2 CIC2, 3 CIC3), u8 flags (bit 0 core-order swap, bit 1 / bit 2 capture the
-//A / B cores on the falling write-clock edge), u16 0. Sets the UI's Filter
-//setting (shared control); the next arm (UI or host) writes it.
+//A / B cores on the falling write-clock edge, bit 3 CIC compensation FIR, 1.11, FPGA 0x1535+ only), u16 0. Sets the UI's
+//Filter setting (shared control); the next arm (UI or host) writes it.
 static int h_set_decim(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   pc_hw_trigger t;
@@ -1673,14 +1679,17 @@ static int h_set_decim(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
   (void)len;
 
   if(req[0] > 3)     return pc_error(s, PC_E_BAD_ARG, 0, "filter 0..3");
-  if(req[1] & ~0x07) return pc_error(s, PC_E_BAD_ARG, 1, "flags");
+  if(req[1] & ~0x0F) return pc_error(s, PC_E_BAD_ARG, 1, "flags");
+
+  if((req[1] & 0x08) && !(s->var.caps & PC_CAP_FIR))
+    return pc_error(s, PC_E_BAD_ARG, 1, "FIR needs FPGA 0x1535+");
 
   pc_hal_trigger_read(&t);
 
   if(req[0] && (t.total > PC_DECIM_MAX_TOTAL))
     return pc_error(s, PC_E_BAD_ARG, 0, "total > 8190: SET_TRIGGER total first");
 
-  pc_hal_decim_set((uint8_t)(req[0] | ((req[1] & 0x07) << 2)));
+  pc_hal_decim_set((uint8_t)(req[0] | ((req[1] & 0x0F) << 2)));
   pc_settings_track(s);
 
   *rl = pc_decim_body(s, resp);

@@ -1603,9 +1603,17 @@ void fpga_set_decim_level(uint16 level)
   fpga_write_short(level);
 }
 
+void fpga_set_decim_fir(uint8 enable)
+{
+  //0x1535+: CIC compensation FIR, active where K >= 1, N >= 16 and N % 4 == 0
+  fpga_write_cmd(0x56);
+  fpga_write_byte(enable ? 0x01 : 0x00);
+}
+
 uint16 fpga_get_decim_state(void)
 {
-  //High byte {bit 7 16-bit layout active, bit 4 neg B, bit 3 neg A, bit 2 swap, bits 1:0 K}, low byte S
+  //High byte {bit 7 16-bit layout active, bit 6 FIR enable, bit 5 FIR active, bit 4 neg B, bit 3 neg A, bit 2 swap,
+  //bits 1:0 K}, low byte S
   fpga_write_cmd(0x29);
   return(fpga_read_short());
 }

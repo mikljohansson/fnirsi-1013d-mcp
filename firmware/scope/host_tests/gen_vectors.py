@@ -103,34 +103,44 @@ REQUESTS = [
 ]
 
 
-# Decimation filter maths (FPGA 0x1534, docs/protocol.md section 14 row 47), independent of pc_decim.c
+# Decimation filter maths (FPGA 0x1534, docs/protocol.md section 14 row 47; FIR 0x1535, row 49), independent of
+# pc_decim.c
 DECIM_MAX_TOTAL = 8190
 DECIM_LEVELS = [0, 1, 64, 127, 128, 200, 254, 255]
 SAMPLE_RATE_DIVIDERS = [0, 1, 3, 9, 19, 39, 99, 199, 399, 999, 1999, 3999, 9999, 19999, 39999, 99999, 199999, 399999]
 
 
-def decim_case(divider, k_req, total):
+def decim_case(divider, k_req, total, fir_req=0):
     n = 2 * (divider // 2 + 1)
     k = k_req
     if k_req == 0 or divider == 0 or total > DECIM_MAX_TOTAL:
         k = 0
-    while k > 1 and 255 * n ** k >= 1 << 48:
+    # FIR (0x1535): engages for K >= 1, N >= 16, N % 4 == 0; the CIC then decimates by M = N / 2
+    fir = 1 if (fir_req and k and n >= 16 and n % 4 == 0) else 0
+    m = n // 2 if fir else n
+    while k > 1 and 255 * m ** k >= 1 << 48:
         k -= 1
-    case = {"divider": divider, "k_req": k_req, "total": total, "k": k}
+    case = {"divider": divider, "k_req": k_req, "fir_req": fir_req, "total": total, "k": k, "fir": fir}
     if k == 0:
         case.update({"n": 0, "gain": 1, "shift": 0, "rate": 200000000 // (divider + 1), "settle_us": 0, "ext_shift": 0,
                      "level16": []})
         return case
-    gain = n ** k
-    shift = max(0, (255 * gain).bit_length() - 16)
+    gain = m ** k
+    shift = max(0, (255 * gain).bit_length() - 16) + fir
     lv = []
     for v in DECIM_LEVELS:
         y = v * gain
         if shift:
             y = (y + (1 << (shift - 1))) >> shift
         lv.append(min(y, 65535))
-    case.update({"n": n, "gain": gain, "shift": shift, "rate": 200000000 // n,
-                 "settle_us": -(-((k + 2) * n) // 200), "ext_shift": (240 + k * (n - 1) * 5 + 5 * n) // (10 * n),
+    if fir:
+        # (K + 10) N x 5 ns + 1 us; lag 250 ns + 17.5 N ns + 1.25 K (N - 2) ns, in 0.25 ns units
+        settle = -(-((k + 10) * n) // 200) + 1
+        ext = (1000 + 70 * n + 5 * k * (n - 2) + 10 * n) // (20 * n)
+    else:
+        settle = -(-((k + 2) * n) // 200)
+        ext = (240 + k * (n - 1) * 5 + 5 * n) // (10 * n)
+    case.update({"n": n, "gain": gain, "shift": shift, "rate": 200000000 // n, "settle_us": settle, "ext_shift": ext,
                  "level16": lv})
     return case
 
@@ -139,6 +149,10 @@ def decim_cases():
     cases = [decim_case(d, k, 3000) for d in SAMPLE_RATE_DIVIDERS for k in range(4)]
     cases += [decim_case(2, 2, 3000), decim_case(20, 3, 3000), decim_case(10332, 3, 3000), decim_case(10334, 3, 3000),
               decim_case(1050629, 2, 3000), decim_case(1050630, 2, 3000), decim_case(19, 2, 8190), decim_case(19, 2, 8192)]
+    # 1.11 FIR: every table rate and K, then the eligibility edges (D 11/13 no, 14/15 yes) and the CIC3 limit at N/2
+    cases += [decim_case(d, k, 3000, 1) for d in SAMPLE_RATE_DIVIDERS for k in range(4)]
+    cases += [decim_case(d, 2, 3000, 1) for d in (11, 12, 13, 14, 15, 16, 17, 18)]
+    cases += [decim_case(20667, 3, 3000, 1), decim_case(20671, 3, 3000, 1), decim_case(19, 2, 8192, 1)]
     return cases
 
 
@@ -306,10 +320,13 @@ def build():
         "commands": {k: v for k, v in CMDS.items()},
         "decim": {
             "notes": "1.9 decimation filter: N = 2 * (floor(D / 2) + 1); effective K = 0 for k_req 0, divider 0 or "
-                     "total > 8190, else the largest K <= k_req with 255 * N^K < 2^48; gain N^K; shift S = "
-                     "max(0, bitlen(255 * gain) - 16); level16[i] = min(65535, round(levels[i] * gain / 2^S)); "
+                     "total > 8190, else the largest K <= k_req with 255 * M^K < 2^48; gain M^K; shift S = "
+                     "max(0, bitlen(255 * gain) - 16) + fir; level16[i] = min(65535, round(levels[i] * gain / 2^S)); "
                      "rate = 200 MSa/s / N (K = 0: 200 MSa/s / (D + 1)); settle_us = ceil((K + 2) * N / 200); ext_shift = "
-                     "round((120 ns + K (N - 1) 2.5 ns) / (N x 5 ns)), halves up, 0 for K = 0.",
+                     "round((120 ns + K (N - 1) 2.5 ns) / (N x 5 ns)), halves up, 0 for K = 0. "
+                     "1.11 FIR (fir_req = SET_DECIM flags bit 3, FPGA 0x1535): fir = 1 when fir_req, K >= 1, N >= 16 "
+                     "and N % 4 == 0; then M = N / 2 (else M = N), settle_us = ceil((K + 10) * N / 200) + 1, ext_shift = "
+                     "round((250 ns + 17.5 N ns + 1.25 K (N - 2) ns) / (N x 5 ns)), halves up.",
             "levels": DECIM_LEVELS,
             "cases": decim_cases(),
         },
