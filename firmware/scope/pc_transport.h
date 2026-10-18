@@ -89,6 +89,8 @@ void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
 #define PC_EVT_TX_ABORT       13    //dropped by the session (2 s no progress, #RESET)
 //type 14 retired (fw 0.2.12-0.2.20: USB tick fallback served flags; removed in 0.2.21, never emitted)
 #define PC_EVT_USB_INIT       16    //fw 0.2.22, usb_device_init before its reset, a = field, b = value (protocol section 14 row 43)
+#define PC_EVT_TX_ABORT_CSR   17    //fw 0.2.22, after each type 13: a = POWER, b = EP2 TXCSR
+#define PC_EVT_TX_ABORT_FRM   18    //fw 0.2.22, after type 17: a = bit 0 EP2 TX interrupt enabled, bit 1 ZLP pending; b = frame number
 #define PC_EVT_RESTART        15    //fw 0.2.19, at boot after a restart from RAM: a = exception type, b = low PC bits
 
 void pc_usb_log_restart(uint8 type, uint16 pc);

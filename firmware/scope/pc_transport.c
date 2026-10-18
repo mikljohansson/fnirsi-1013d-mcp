@@ -398,8 +398,21 @@ uint32_t pc_hal_tx_idle_ms(void)
 void pc_hal_tx_abort(void)
 {
   uint32 cpsr = pc_irq_save();
+  uint8  epind = *USBC_REG_EPIND;
+  uint16 txcsr;
+
+  //fw 0.2.22: EP2 IN state when the session gives up (2 s without progress). UnderRun is cleared at every packet
+  //load, so TxPktRdy set = a packet waits and the host takes no IN data; TxPktRdy clear + UnderRun = the host polls
+  //and the device has nothing loaded. Device-mode TXCSR does not expose the data toggle. INTTX is not read (that
+  //would clear it).
+  *USBC_REG_EPIND = 2;
+  txcsr = *USBC_REG_TXCSR;
+  *USBC_REG_EPIND = epind;
 
   pc_evlog_add(PC_EVT_TX_ABORT, 0, (uint16)pc_tx_left);
+  pc_evlog_add(PC_EVT_TX_ABORT_CSR, *USBC_REG_PCTL, txcsr);
+  pc_evlog_add(PC_EVT_TX_ABORT_FRM, (uint8)(((*USBC_REG_INTTXE & USBC_INTTX_FLAG_EP2) ? 0x01 : 0) |
+                                            (pc_tx_zlp ? 0x02 : 0)), (uint16)(*USBC_REG_FRNUM & 0x07FF));
   pc_tx_flush();
   pc_irq_restore(cpsr);
 }
