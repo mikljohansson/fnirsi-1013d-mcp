@@ -218,6 +218,8 @@ void scope_open_calibration_start_text(void);
 void scope_show_calibrating_text(void);
 void scope_show_calibration_done_text(void);
 void scope_show_calibration_fail(void);
+void scope_show_gain_calibration_text(void);
+void scope_show_gain_calibration_result(uint32 ok);
 
 void scope_show_Input_calibration(void);
 void scope_show_calibrating_300mV_text(void);

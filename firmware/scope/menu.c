@@ -8272,6 +8272,49 @@ void scope_show_calibration_fail(void)
     display_text(445, 255, "Check hardware");
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+//Calibration data v3: the gain step's prompt (OK starts it, a touch outside the box skips it) and its result
+
+void scope_show_gain_calibration_text(void)
+{
+  display_set_fg_color(YELLOW_COLOR);
+  display_fill_rounded_rect(395, 222, 198, 58, 3);
+  display_set_fg_color(LIGHTGREY_COLOR);
+  display_draw_rounded_rect(395, 222, 199, 59, 3);
+
+  display_set_fg_color(BLACK_COLOR);
+  display_set_font(&font_3);
+  display_text(404, 227, "Gain: put both");
+  display_text(404, 243, "probes on the");
+  display_text(404, 259, "cal post, OK");
+
+  scope_display_ok_button(517, 230, 0);
+}
+
+void scope_show_gain_calibration_result(uint32 ok)
+{
+  display_set_fg_color(ok ? DARKGREY_COLOR : WHITE_COLOR);
+  display_fill_rounded_rect(395, 222, 198, 58, 3);
+  display_set_fg_color(LIGHTGREY_COLOR);
+  display_draw_rounded_rect(395, 222, 199, 59, 3);
+  display_set_font(&font_3);
+
+  if(ok)
+  {
+    display_set_fg_color(GREEN_COLOR);
+    display_text(430, 233, "Gain calibration");
+    display_text(448, 255, "successful");
+    return;
+  }
+
+  //The first channel's reason; a channel that passed has its new gains (saved), the other keeps its previous ones
+  display_set_fg_color(RED_COLOR);
+  display_text(422, 233, "Gain calibration failed");
+
+  if(calibration_fail_reason[0])
+    display_text(405, 255, (int8 *)calibration_fail_reason);
+}
+
 //-*********************************************************************************
 void scope_show_Input_calibration(void)
 {
