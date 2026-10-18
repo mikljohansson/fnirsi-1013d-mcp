@@ -123,19 +123,38 @@ Recommended procedure (an inference from the above):
 
 ### 2.4 Options for the owner's adapters
 
-Facts from the lead: the owner has an FT232RL, a Sipeed USB-JTAG/TTL RISC-V debugger and a J-Link V9 clone. A CH341A can be bought. This section lists three routes without deciding which adapter the owner will use.
+Facts from the lead: the owner has an FT232RL, a Sipeed USB-JTAG/TTL RISC-V debugger and a J-Link V9 clone. A CH341A can be bought. This section lists the routes without deciding for the owner; the Sipeed adapter is the one already verified to talk MPSSE.
 
 Not usable:
-- **FT232RL:** no MPSSE engine, so neither flashrom's `ft2232_spi` nor `spiflash_ftdi.py` can drive it (lead's finding; MPSSE is the SPI engine of the FT2232/FT232H family [general knowledge]).
+- **FT232RL:** no MPSSE engine, so neither flashrom's `ft2232_spi` nor the two project tools can drive it (lead's finding; MPSSE is the SPI engine of the FT2232/FT232H family [general knowledge]).
 - **J-Link V9 clone:** not recommended. Donwulff's J-Link failed with flashrom (repo-donwulff.md "Flashing routes"), and it cannot program the Anlogic FPGA (2.1).
 
-**(a) Sipeed USB-JTAG/TTL debugger with `firmware/tools/spiflash_ftdi.py` (pyftdi).**
-- flashrom's `ft2232_spi` lists only FT2232H-class devices (lead's finding), so the route is a pyftdi script.
-- First check which device the owner has. The original Sipeed RV-Debugger uses a real FT2232D. The newer "RV-Debugger Plus" is a BL702 chip whose firmware emulates an FT2232D (mobilefish.com Sipeed RV Debugger Plus guide, found by web search 2026-10-18). Whether pyftdi's MPSSE SPI works on the emulation is unknown. Read the chip marking and look at the USB descriptor (`lsusb -v` in WSL after usbipd attach, or Device Manager details).
-- MPSSE channel A signals for SPI mode 0 (pyftdi `SpiController` convention [general knowledge]): AD0 = SCK, AD1 = MOSI, AD2 = MISO, AD3 = CS0. The same pins are TCK, TDI, TDO, TMS in JTAG mode. The mobilefish guide lists the Sipeed header as TCK, TDI, TDO, TMS with a 3.3 V default level. I found no schematic or wiki that confirms the header mapping, so this is an inference: TCK to flash CLK, TDI to flash DI, TDO from flash DO, TMS to flash /CS. Check the silkscreen. Run the `id` command before anything else: a valid JEDEC ID (EF4014 for a Winbond 25Q80) proves the mapping, while all 0x00 or all 0xFF does not.
-- Measure the idle level of TCK, TDI and TMS with a multimeter before connecting. 3.3 V is expected; 5 V would be unsafe for this board (see 2.2).
-- The FT2232D is a full-speed chip, so MPSSE clocks are slow and a 1 MB read can take minutes [general knowledge]. The script defaults to 1 MHz.
-- Install and run. On Windows give interface A a WinUSB or libusbK driver with Zadig first; that removes the COM port of interface A only.
+**(a) Sipeed FT2232D on Windows via D2XX: `firmware/tools/spiflash_d2xx.py`. Primary route.**
+- The lead verified the owner's Sipeed debugger: a genuine FT2232D (D2XX reports type 4, serials "A" and "B", the Windows FTDI CDM driver is installed, the interfaces show as COM8 and COM9) and MPSSE sync on channel A works (0xAA answered by FA AA). This removes the doubt about a BL702 emulation for this unit.
+- The tool uses the `ftd2xx` package through the installed FTDI driver: no Zadig, no WSL passthrough (firmware/tools/README-spiflash.md). Options and safety notes are in that file; this guide does not repeat them.
+- flashrom's `ft2232_spi` lists only FT2232H-class devices (lead's finding), which is why the project has its own tool.
+- Wiring for SPI mode 0 on channel A: TCK (AD0) to flash CLK, TDI (AD1) to flash DI, TDO (AD2) from flash DO, TMS (AD3) to flash /CS, GND to GND, adapter power pins unconnected (README-spiflash.md "Wiring"). The Sipeed header labels are mapped by the standard FTDI JTAG convention; the schematic was not found, so the silkscreen is unconfirmed (README-spiflash.md; my own web search found no pinout either). A valid JEDEC ID from `probe` confirms the mapping; all 00 or all FF does not.
+- Measure the idle level of the three output pins with a multimeter before connecting. 3.3 V is expected; 5 V would be unsafe for this board (2.2).
+- The FT2232D MPSSE tops out at 6 MHz; the tool defaults to 1 MHz (README-spiflash.md).
+- Commands (Windows, from the repository root):
+
+```
+python -m pip install --user ftd2xx
+python firmware/tools/spiflash_d2xx.py wiring
+python firmware/tools/spiflash_d2xx.py probe
+python firmware/tools/spiflash_d2xx.py read -o backups/2026-10-18_fpga-25q80_A.bin --twice
+python firmware/tools/spiflash_d2xx.py verify -i backups/2026-10-18_fpga-25q80_A.bin
+python firmware/tools/spiflash_d2xx.py write -i al3_atlan_0x1532_padded.bin --yes
+```
+
+  `probe` expects `ef 40 14` for the Winbond 25Q80 (`5e 60 14` for a ZB25VQ80, the part the Atlan reference dump came from). `read --twice` fails if the two reads differ. `write` needs `--yes` and a typed confirmation of the JEDEC ID, saves a double-read backup to `backups/<timestamp>-pre-write.bin` first, erases only changed 4 KB sectors, and reads the whole chip back to verify (README-spiflash.md "Commands"). It pads short files with 0xFF, so the separate padding step of 5.3 is optional with this tool. For 3a, run `read --twice` to get one verified dump and a second `read` into the `_B` file, or run `read` twice, then compare the two files with `cmp` as in 3a.
+- At the time of writing the tool had been tested against a simulated chip and, on real hardware, only up to `probe` with nothing attached (README-spiflash.md "Safety notes").
+
+**(b) The same adapter through pyftdi, for Linux or WSL: `firmware/tools/spiflash_ftdi.py`. Alternative.**
+- Needs the adapter attached to WSL with `usbipd bind` and `usbipd attach` (6.3 shows the pattern; the FT2232D is `0403:6010` per README-spiflash.md) and libusb. Attaching it to WSL takes it away from the Windows driver, so the D2XX tool cannot be used at the same time.
+- Same wiring as (a).
+- FT2232D opcodes: the D is not an H-series chip and rejects the MPSSE opcodes 0x8A, 0x97 and 0x8D. I read pyftdi 0.57.2 to see what it does [checked locally]. It sends 0x8A and 0x8D only for H-series devices, and SPI mode 0 does not use the 3-phase clock. It does not guard 0x97: `SpiController.configure()` always sends it (spi.py line 433). A D answers with a bad-command reply that stays in the receive buffer. The script purges the FTDI buffers after configuring to discard it, but that is not proven on hardware. If `id` returns nothing sensible on the D, use route (a).
+- Commands:
 
 ```bash
 pip install pyftdi
@@ -146,9 +165,9 @@ python3 firmware/tools/spiflash_ftdi.py verify some_image.bin --pad
 python3 firmware/tools/spiflash_ftdi.py write al3_atlan_0x1532_padded.bin --write --backup backups/2026-10-18_fpga-25q80_A.bin
 ```
 
-  `write` needs `--write`, a `--backup` dump that equals the current chip content, clear block-protect bits, and you must type the JEDEC ID. It erases only changed 4 KB sectors, programs 256-byte pages, and reads the whole chip back to verify. `--pad` fills a short image with 0xFF, so the padding step of 5.3 is not needed with this tool. The script has run only against a simulated flash. `dump` replaces the two flashrom reads of 3a and uses the same file names.
+  `write` needs `--write`, a `--backup` dump that equals the current chip content, clear block-protect bits, and you must type the JEDEC ID. It erases only changed 4 KB sectors, programs 256-byte pages, and reads the whole chip back to verify. `--pad` fills a short image with 0xFF. The script is untested on hardware; only a simulated flash has been exercised.
 
-**(b) Raspberry Pi Pico running pico-serprog, used through flashrom.** The flashrom-compatible fallback.
+**(c) Raspberry Pi Pico running pico-serprog, used through flashrom.** The flashrom-compatible fallback.
 - Flash the pico-serprog firmware UF2 onto the Pico. The Pico is 3.3 V logic.
 - The pin assignment depends on the firmware build. One readme lists Pico pins 4 SCK, 5 MOSI, 6 MISO, 7 CS; a fork puts CS on pin 2; a multi-chip fork uses GP5 to GP8 as chip selects (web search 2026-10-18, github.com/opensensor/pico-serprog and forks). Libreboot's guide shows the wiring only as an image. Take the table from the readme of the build you flash.
 - Command (Libreboot documents `-p serprog:dev=/dev/ttyACMx,spispeed=16M` for flashprog; the baud suffix is the older flashrom form):
@@ -161,7 +180,7 @@ flashrom -p serprog:dev=/dev/ttyACM0:115200,spispeed=4M -r 2026-10-18_fpga-25q80
   If this flashrom rejects the `:115200` suffix, drop it. Find the device name with `dmesg`. In WSL the Pico appears as a ttyACM device only after `usbipd attach`, and the WSL kernel must have the cdc-acm driver (unverified). A Windows flashrom build with a COM port is the alternative [general knowledge].
 - Libreboot's warnings apply: wire everything before applying power, never feed two supplies to one flash, and match the programmer voltage to the chip. Keep the Pico's 3V3 pin unconnected on this board (2.3).
 
-**(c) CH341A with a 3.3 V mod.** As in 2.2: measure the idle data-line levels, then fix them with a level shifter or buy a board known to have 3.3 V signals. Command: `flashrom -p ch341a_spi -r <file>`. This is the route the thread and Atlan's AL3 readme use.
+**(d) CH341A with a 3.3 V mod.** As in 2.2: measure the idle data-line levels, then fix them with a level shifter or buy a board known to have 3.3 V signals. Command: `flashrom -p ch341a_spi -r <file>`. This is the route the thread and Atlan's AL3 readme use.
 
 ## 3. Backups (mandatory)
 
@@ -191,6 +210,8 @@ Copy the folder to a second drive too. Record each hash in `docs/hardware-status
 ### 3a. FPGA config flash (Winbond 25Q80), full 1 MB, twice
 
 If the programmer is USB, attach it to WSL first (6.3 shows the usbipd commands; the CH341A is `1a86:5512` and the FT232H is `0403:6014` [general knowledge]). Install flashrom if missing: `wsl -d Ubuntu -u root -- apt install -y flashrom`.
+
+With the Sipeed adapter use the commands of 2.4 (a) in place of the flashrom lines below; the file names and checks stay the same.
 
 1. Probe (read-only). Use the programmer name from the table in 2.1:
 
