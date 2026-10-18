@@ -263,3 +263,10 @@ Newest entries at the bottom. Format: date, who, what, result.
 - Owner's DMM on the calibration post vs BNC shell, generator at 0.047 Hz: +1.87 V / -1.23 V. Matches the VRF1 prediction (-1.24/+1.9 V) and
   confirms the DC-coupled, probe-ground-offset picture. The scope read the same signal as -1.09/+2.01 V at range_index 1, i.e. ~0.14 V high
   (inference: scope DC error at that range; worth a look when firmware calibration is done, roadmap item 5).
+- Firmware 0.2.15 (c4989e5, sha256 b0cec01f...) superseded unbenched by 0.2.16 (079f648, sha256 5f25b9e7..., pinned): tick path runs the CDC
+  handler body only for non-SOF flags; event ring 128 + frozen pre-reset snapshot. Loaded: 300 x 64 KiB in three censuses 0 failed, tx_aborts 0
+  (the tick-run-handler regression of 0.2.12/0.2.14 is gone). BUT: three bench runs died right after #VER, and GET_STATUS uptime_ms later read
+  175 s while the image had run 7+ min with #VER still 0.2.16 => the scope restarted itself from RAM (CPU exception -> reset vector suspected),
+  re-enumerated (usb_bus_resets 12 / suspends 10 are the enumeration retries, not drops; event log shows suspend/reset pairs at 8.3-12.2 s after
+  the restart). 0.2.16 crashes intermittently under traffic. Reported to fw-gen2 with a request for a reboot-reason record. Reloaded 0.2.11
+  (card version) for the 30-minute baseline soak. Event log on 0.2.16 otherwise showed 16 irq_polled hits, all INTRX EP2 with SOF-only INTUSB.
