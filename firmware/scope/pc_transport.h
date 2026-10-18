@@ -10,7 +10,7 @@
 
 #include "types.h"
 
-#define PC_RX_RING_SIZE   2048              //power of two
+#include "pc_rx_ring.h"           //PC_RX_RING_SIZE
 
 //Endpoint FIFO layout. The F1C100s USB FIFO RAM is 2048 bytes (F1C100s datasheet: "Configurable Data FIFO. The size
 //is 2048 byte"), and the Endpoint 0 FIFO has a fixed size (64 bytes) and a fixed location (start address 0)

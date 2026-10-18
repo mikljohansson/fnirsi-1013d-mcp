@@ -940,7 +940,11 @@ differs from or fills a gap in sections 1-13. Hosts written against this documen
 - RX packet read (v0.1.6): each OUT packet is read from the FIFO in one call into an aligned 512-byte buffer and
   then copied into the ring. Up to 0.1.5 a packet straddling the ring end was read in two parts, restarting 32-bit
   FIFO reads after 8/16-bit ones, which the MUSBMHDRC guide forbids ("all the transfers associated with one packet
-  must be of the same width"): one corrupted or lost request per 2 KiB received (~4% in the bench census). The MSC layout (OUT at 0, IN at 1024) is unchanged 1.00o5 code.
+  must be of the same width"): one corrupted or lost request per 2 KiB received (~4% in the bench census). The
+  0.1.5 GET_BAD_FRAME diffs show the mechanism: every byte from the 2 KiB stream boundary on is the last 8-bit value
+  replicated (constant) or the last 16-bit value replicated (2-byte alternation). v0.1.7: the ring copies in and out
+  are two-segment memcpys in `pc_rx_ring.h`, tested at every ring phase by `host_tests/test_rx_ring.c`. The MSC
+  layout (OUT at 0, IN at 1024) is unchanged 1.00o5 code.
 - The TX pump is driven by the EP2 TX interrupt and, as a fallback, from every poll (main loop, BUSY polls and the 1 ms
   timer poll), so a missed interrupt costs at most 1 ms.
 - RX sweep (v0.1.4): every poll checks the EP2 OUT FIFO; a packet still waiting 2 ms after it was first seen (its

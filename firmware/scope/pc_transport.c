@@ -14,6 +14,7 @@
 #include <string.h>
 #include "usb_interface.h"
 #include "pc_transport.h"
+#include "pc_rx_ring.h"
 #include "pc_protocol.h"
 #include "pc_hal.h"
 
@@ -60,6 +61,11 @@ static inline void pc_irq_restore(uint32 cpsr)
 //----------------------------------------------------------------------------------------------------------------------------------
 // RX. EPIND == 2, IRQs off (ISR or masked).
 
+static void pc_rx_fifo2_read(void *fifo, void *buffer, uint32_t length)
+{
+  usb_read_from_fifo(fifo, buffer, length);
+}
+
 static uint32 pc_rx_drain_fifo(void)
 {
   uint32 packets = 0;
@@ -68,10 +74,17 @@ static uint32 pc_rx_drain_fifo(void)
   while(*USBC_REG_RXCSR & USBC_BP_RXCSR_D_RX_PKT_READY)
   {
     uint32 count = *USBC_REG_RXCOUNT & 0x1FFF;
-    uint32 used  = pc_rx_in - pc_rx_out;
-    uint32 pos, first;
+    int32  stored;
 
-    if(PC_RX_RING_SIZE - used < count)
+    if(count > sizeof(pc_rx_bounce))
+      count = sizeof(pc_rx_bounce);
+
+    //One FIFO read per packet into the aligned bounce buffer, then a two-segment copy into the ring (pc_rx_ring.h:
+    //the 0.1.2-0.1.5 split FIFO read at the ring end corrupted every request crossing a 2 KiB stream boundary)
+    stored = pc_rx_ring_store_packet(pc_rx_ring, pc_rx_in, pc_rx_out, count, pc_rx_bounce, pc_rx_fifo2_read,
+                                     (void *)USBC_REG_EPFIFO2);
+
+    if(stored < 0)
     {
       //No room: leave RxPktRdy set so the controller NAKs, stop interrupts until the main loop made room
       *USBC_REG_INTRXE &= ~USBC_INTRX_FLAG_EP2;
@@ -79,26 +92,6 @@ static uint32 pc_rx_drain_fifo(void)
       pc_ts[PC_TS_RX_STALLS]++;
       return packets;
     }
-
-    //The whole packet in ONE FIFO read into an aligned buffer, then into the ring. MUSBMHDRC guide: "all the transfers
-    //associated with one packet must be of the same width". The old split read at the ring end (32-bit reads
-    //restarted after 8/16-bit ones) corrupted the packet straddling the wrap: one bad request per 2 KiB received
-    //(fw 0.1.2-0.1.5 bench census).
-    if(count > sizeof(pc_rx_bounce))
-      count = sizeof(pc_rx_bounce);
-
-    usb_read_from_fifo((void *)USBC_REG_EPFIFO2, pc_rx_bounce, count);
-
-    pos   = pc_rx_in & (PC_RX_RING_SIZE - 1);
-    first = PC_RX_RING_SIZE - pos;
-
-    if(first > count)
-      first = count;
-
-    memcpy(&pc_rx_ring[pos], pc_rx_bounce, first);
-
-    if(count > first)
-      memcpy(&pc_rx_ring[0], pc_rx_bounce + first, count - first);
 
     pc_rx_in += count;
     pc_ts[PC_TS_RX_PACKETS]++;
@@ -124,7 +117,7 @@ void pc_usb_isr_rx(void)
 
 uint32_t pc_hal_rx_read(uint8_t *dst, uint32_t max)
 {
-  uint32 in, used, n, i;
+  uint32 in, used, n;
 
   //Sweep: take a packet the EP2 RX interrupt did not deliver. 1.00o5's irq_handler clears the INTC pending register
   //by writing 0 after reading it, so a USB interrupt raised in between can be lost; the packet would then sit in
@@ -167,8 +160,7 @@ uint32_t pc_hal_rx_read(uint8_t *dst, uint32_t max)
   used = in - pc_rx_out;
   n    = (used < max) ? used : max;
 
-  for(i=0;i<n;i++)
-    dst[i] = pc_rx_ring[(pc_rx_out + i) & (PC_RX_RING_SIZE - 1)];
+  pc_rx_ring_read(pc_rx_ring, pc_rx_out, dst, n);
 
   pc_rx_out += n;
 

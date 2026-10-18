@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-State on 2026-10-18, fw 0.1.5 (protocol 1.2), commit c31bd01 and later. Read `CLAUDE.md` (repo root) first, then
+State on 2026-10-18, fw 0.1.7 (protocol 1.2). Read `CLAUDE.md` (repo root) first, then
 this file. For details, this file links to `firmware/README.md` (build, SD layout, FEL, memory budget, bring-up
 checklist), `docs/protocol.md` (the spec; section 14 lists every deviation from it) and
 `docs/plans/firmware-usb-protocol.md` (the original plan). It does not repeat them.
@@ -19,8 +19,10 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
                            pc_session, the glue called from 1.00o5 (pc_glue_*), ENTER_FEL jump
   pc_transport.c/.h        USB CDC transport: 2 KiB RX ring + NAK back-pressure, 66,580 B TX staging + pump,
                            ZLP, link events, counters, FIFO layout constants (PC_FIFO_MAP)
+  pc_rx_ring.h             RX ring copies (two-segment in/out) and the one-FIFO-read-per-packet store. Header only,
+                           host-buildable; host_tests/test_rx_ring.c runs it at every ring phase
   pc_hooks.h               the hook macros used in 1.00o5 files; empty with PC_PROTOCOL=0
-  host_tests/              test_protocol.c, test_session.c (+ mock_hal.c FPGA/transport model), vector_check.c,
+  host_tests/              test_protocol.c, test_rx_ring.c, test_session.c (+ mock_hal.c FPGA/transport model), vector_check.c,
                            check_vectors.py, gen_vectors.py, bench_link.py (pyserial, bench only)
 firmware/tools/            mksunxi.py, make_sd_image.py, fetch_gcc10.sh, spiflash tools (not this agent's)
 firmware/reference/        Atlan's v1.00o5 binaries (not committed)
@@ -78,8 +80,11 @@ the screen during tests (menus are modal and defer commands). The power-off ISR 
   Map 1: the 0.1.3-0.1.5 layout (OUT 64-575, IN 576-1599, EP1 1600-1663). Compile-time disjointness check. The
   guide requires only 8-byte granularity for FIFO addresses.
 - One FIFO access width per packet ("all the transfers associated with one packet must be of the same width"):
-  OUT packets are read in one `usb_read_from_fifo` call into an aligned bounce buffer, then copied into the ring.
-  Splitting the read at the ring end corrupted one request per 2 KiB received (0.1.2-0.1.5).
+  OUT packets are read in one `usb_read_from_fifo` call into an aligned bounce buffer, then copied into the ring
+  (`pc_rx_ring.h`). Splitting the read at the ring end corrupted one request per 2 KiB received (0.1.2-0.1.5): the
+  0.1.5 GET_BAD_FRAME diffs show the tail from the 2 KiB stream boundary on replaced by the last 8-bit value
+  replicated (constant bytes) or the last 16-bit value replicated (2-byte alternation), i.e. a wider read after a
+  narrower one inside a packet returns the previous value again. test_rx_ring.c models exactly that.
 - Double-buffered IN: every TxPktRdy clear raises the TX interrupt, including the immediate clear after the first
   load. The pump loads at most 2 packets per call; it runs from the EP2 TX ISR and from every poll (missed-IRQ
   fallback, counter tx_kicked). ZLP after frames that are an exact multiple of 512.
@@ -137,8 +142,10 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
 
 ## 8. Known issues (numbers from the bench, 2026-10-18)
 
-- Request corruption: root cause found in 0.1.6 (RX ring-wrap split FIFO read, see section 4); acceptance census
-  still to be run on 0.1.6. History: fw 0.1.3, Windows, no retries, idle scope: PING x1000 LOCAL 42
+- Request corruption: root cause fixed in 0.1.6 (RX ring-wrap split FIFO read, see section 4), confirmed by the
+  lead's 0.1.5 census (2000 PINGs: 77 E_BAD_CRC + 9 no response, every diff starting exactly at a 2 KiB boundary of
+  rx_bytes). 0.1.6 was never benched; 0.1.7 adds pc_rx_ring.h + the all-phase host test. Acceptance census on 0.1.7
+  pending. History: fw 0.1.3, Windows, no retries, idle scope: PING x1000 LOCAL 42
   E_BAD_CRC + 4 no response, REMOTE 40 + 5; 64 KiB x100: 1 (LOCAL) / 8 (REMOTE) no response. 0.1.2 (OUT FIFO at
   0) had 0 E_BAD_CRC but ~2% no response. Responses are always clean. 0.1.5 adds GET_BAD_FRAME, the RX sweep,
   GET_LINK_STATS and PC_FIFO_MAP=1. Next step: `bench_link.py COM10 --census 2000` on map 0 and map 1, read the
@@ -166,7 +173,7 @@ bitstream restored from backups/). Procedures: protocol section 12, README secti
 
 ## 10. TODO, in priority order
 
-1. Run the acceptance census on 0.1.6 (`bench_link.py COM10 --census 2000`: 0 E_BAD_CRC, 0 no response in
+1. Run the acceptance census on 0.1.7 (`bench_link.py COM10 --census 2000`: 0 E_BAD_CRC, 0 no response in
    2000 PINGs + 100 x 64 KiB, GET_BAD_FRAME count 0). If it passes, drop PC_FIFO_MAP=1.
 2. SD_INFO / SD_READ_SECTORS / SD_WRITE_SECTORS (owner's ask: persist a FEL-loaded image to sector 750 without
    removing the card). Design agreed with the lead, not started:

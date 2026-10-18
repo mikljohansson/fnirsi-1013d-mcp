@@ -16,13 +16,16 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c mock_hal.c
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_protocol.h mock_hal.h test_util.h
 
 .PHONY: all test vectors clean
-all: $(OUT)/test_protocol $(OUT)/vector_check $(OUT)/test_session $(OUT)/test_session_debug
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/test_session $(OUT)/test_session_debug
 
 $(OUT):
 	mkdir -p $@
 
 $(OUT)/test_protocol: test_protocol.c test_util.h $(PROTO_SRCS) $(SRC)/pc_protocol.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_protocol.c $(PROTO_SRCS)
+
+$(OUT)/test_rx_ring: test_rx_ring.c test_util.h $(PROTO_SRCS) $(SRC)/pc_protocol.h $(SRC)/pc_rx_ring.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_rx_ring.c $(PROTO_SRCS)
 
 $(OUT)/vector_check: vector_check.c $(PROTO_SRCS) $(SRC)/pc_protocol.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ vector_check.c $(PROTO_SRCS)
@@ -36,6 +39,7 @@ $(OUT)/test_session_debug: test_session.c $(CMDS_DEPS) | $(OUT)
 
 test: all
 	$(OUT)/test_protocol
+	$(OUT)/test_rx_ring
 	$(OUT)/test_session
 	$(OUT)/test_session_debug
 	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --vectors $(VECTORS)
