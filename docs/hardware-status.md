@@ -229,3 +229,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   reboot). Device counters afterwards: usb_bus_resets 2, usb_suspends 2 (both 1 at boot, i.e. one host-initiated re-enumeration), usb_disconnects 0,
   link_resets 4, ep0_setups 308, rx_stalls 0, hdr_crc 0, resp_dropped 0. Third occurrence of this fault class (0.2.2 idle, 0.2.3 persist, 0.2.11
   poll); not tied to traffic pattern. Needs a soak tool with timestamps and a host-side USB trace.
+- Owner's verdict on 0.2.11: MCP chip stable while free-running (fixed), generator/trigger menus and the Roll mode box good; System settings
+  bottom row still empty (compaction queued for 0.2.12). 0.2.11 persisted to the card: 5.7 s total, no resends, read-back identical, header
+  verified. **Card now boots 0.2.11.** Owner turned Windows USB selective suspend off (powercfg, was on for AC and DC) for the next soak.
