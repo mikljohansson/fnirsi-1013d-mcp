@@ -1,0 +1,124 @@
+# Release on a vX.Y.Z tag: version checks, the full CI (reusable), then a GitHub release with the scope
+# image, the SD package tools, the mcp wheel and sdist, SHA256SUMS and notes from CHANGELOG.md.
+# Atlan4's binary-only bootloader and updater are NOT attached (docs/releasing.md, GPL note).
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: versions and CHANGELOG
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag = firmware version = mcp version; CHANGELOG section present
+        id: meta
+        run: python3 .github/scripts/release_meta.py --tag "$GITHUB_REF_NAME" --notes release-notes.md >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+
+  ci:
+    name: CI
+    needs: check
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: publish
+    needs: [check, ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware-image
+          path: fw
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: notes
+
+      - name: Firmware image version and hash
+        run: |
+          (cd fw && sha256sum -c fnirsi_1013d.bin.sha256)
+          ver=$(grep -aoE '#OK,FNIRSI-1013D-AI,fw=[^,]*' fw/fnirsi_1013d.bin | head -1 | sed 's/.*fw=//')
+          if [ "$ver" != "$VERSION" ]; then
+            echo "::error::image reports fw=$ver, tag is v$VERSION"
+            exit 1
+          fi
+          mkdir -p dist
+          cp fw/fnirsi_1013d.bin "dist/fnirsi_1013d-fw-$VERSION.bin"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: mcp wheel and sdist
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build mcp --outdir dist
+
+      - name: SD package tools (fetch Atlan's bootloader + updater on the user's machine)
+        run: |
+          mkdir -p "$RUNNER_TEMP/sdtools"
+          cp tools/make_release_sd_package.py firmware/tools/make_sd_image.py firmware/tools/mksunxi.py "$RUNNER_TEMP/sdtools/"
+          (cd "$RUNNER_TEMP/sdtools" && zip -q -X "$GITHUB_WORKSPACE/dist/fnirsi_1013d-sdtools-$VERSION.zip" \
+            make_release_sd_package.py make_sd_image.py mksunxi.py)
+          # End-to-end test of what a user runs: the zip's tools, a real download, our image.
+          mkdir -p "$RUNNER_TEMP/sdtest" && cd "$RUNNER_TEMP/sdtest"
+          unzip -q "$GITHUB_WORKSPACE/dist/fnirsi_1013d-sdtools-$VERSION.zip"
+          python3 -I make_release_sd_package.py build --scope "$GITHUB_WORKSPACE/dist/fnirsi_1013d-fw-$VERSION.bin" \
+            --parts parts
+
+      - name: SHA256SUMS
+        run: |
+          cd dist
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+          {
+            echo ""
+            echo "### Files"
+            echo ""
+            echo "- \`fnirsi_1013d-fw-$VERSION.bin\`: scope image (eGON.EXE) for FEL or SD sector 750."
+            echo "- \`fnirsi_1013d-sdtools-$VERSION.zip\`: builds a full SD package on your machine from Atlan4's"
+            echo "  v1.00o5 package (bootloader v0.8 + updater, fetched from Atlan4's repository) and this image."
+            echo "- \`fnirsi1013d-$VERSION-*.whl\`, \`fnirsi1013d-$VERSION.tar.gz\`: the MCP server and host library."
+            echo ""
+            echo "Install and verification: docs/releasing.md and firmware/README.md in the repository."
+            echo ""
+            echo '```'
+            cat SHA256SUMS
+            echo '```'
+          } >> ../notes/release-notes.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.check.outputs.prerelease }}
+        run: |
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "fnirsi-1013d-mcp $VERSION" \
+            --notes-file notes/release-notes.md \
+            --verify-tag "${flags[@]}"

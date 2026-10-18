@@ -1,0 +1,121 @@
+name: Firmware build and host tests
+description: >
+  Installs the apt arm-none-eabi toolchain and Atlan4's GCC 10.3.1 (cached), fetches Atlan4's v1.00o5
+  reference image (cached, sha256-verified), then runs make check-reference, make gcc10, make (GCC 13),
+  the PC_DEBUG build and the host tests. Leaves the release image and its sha256 in dist-firmware/.
+  Used by ci.yml (and through it by release.yml). Needs an ubuntu runner and a checkout of the repo.
+
+inputs:
+  source-date-epoch:
+    description: build_time.h timestamp for the gcc10 image (default = commit time of HEAD, reproducible)
+    required: false
+    default: ""
+
+outputs:
+  image:
+    description: path of the protocol build with GCC 10 (build-gcc10-pc/fnirsi_1013d.bin)
+    value: ${{ steps.result.outputs.image }}
+  sha256:
+    description: sha256 of that image
+    value: ${{ steps.result.outputs.sha256 }}
+  version:
+    description: firmware version string compiled into the image (#VER answer)
+    value: ${{ steps.result.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install arm-none-eabi toolchain (apt, GCC 13)
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq --no-install-recommends \
+          gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi make gcc python3 wget
+        arm-none-eabi-gcc --version | head -1
+
+    - name: Cache Atlan's GCC 10.3.1
+      id: gcc10-cache
+      uses: actions/cache@v4
+      with:
+        path: ~/opt/gcc10
+        key: gcc10-${{ runner.os }}-${{ hashFiles('firmware/tools/fetch_gcc10.sh') }}
+
+    - name: Fetch Atlan's GCC 10.3.1 (Ubuntu 22.04 packages, unpacked to ~/opt/gcc10)
+      if: steps.gcc10-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: bash firmware/tools/fetch_gcc10.sh
+
+    - name: GCC 10 version
+      shell: bash
+      run: ~/opt/gcc10/usr/bin/arm-none-eabi-gcc --version | head -1
+
+    - name: Cache Atlan's v1.00o5 reference files
+      uses: actions/cache@v4
+      with:
+        path: |
+          firmware/reference/fnirsi_1013d_v1.00o5_atlan.bin
+          firmware/reference/fnirsi_1013d_v1.00o5_atlan_sdpackage.bin
+        key: atlan-v1.00o5-${{ hashFiles('tools/make_release_sd_package.py') }}
+
+    - name: Fetch and verify Atlan's v1.00o5 reference files (sha256)
+      shell: bash
+      run: python3 -I tools/make_release_sd_package.py reference --dest firmware/reference
+
+    - name: make check-reference (GCC 10, PC_PROTOCOL=0, must be IDENTICAL)
+      shell: bash
+      working-directory: firmware/scope
+      run: |
+        make -j"$(nproc)" check-reference 2>&1 | tee "$RUNNER_TEMP/check-reference.log"
+        grep -q '^IDENTICAL to ' "$RUNNER_TEMP/check-reference.log"
+
+    - name: make gcc10 (GCC 10, protocol on; the release image)
+      shell: bash
+      working-directory: firmware/scope
+      env:
+        INPUT_EPOCH: ${{ inputs.source-date-epoch }}
+      run: |
+        SOURCE_DATE_EPOCH=${INPUT_EPOCH:-$(git log -1 --format=%ct)}
+        export SOURCE_DATE_EPOCH
+        echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH ($(date -u -d "@$SOURCE_DATE_EPOCH"))"
+        make -j"$(nproc)" gcc10
+
+    - name: make (apt GCC 13, protocol on)
+      shell: bash
+      working-directory: firmware/scope
+      run: make -j"$(nproc)"
+
+    - name: make PC_DEBUG=1 BUILD=build-dbg
+      shell: bash
+      working-directory: firmware/scope
+      run: make -j"$(nproc)" PC_DEBUG=1 BUILD=build-dbg
+
+    - name: Host tests (test_protocol, test_rx_ring, test_session x2, check_vectors.py)
+      shell: bash
+      run: make -C firmware/scope/host_tests test
+
+    - name: Collect image and sha256
+      id: result
+      shell: bash
+      run: |
+        img=firmware/scope/build-gcc10-pc/fnirsi_1013d.bin
+        ver=$(grep -aoE '#OK,FNIRSI-1013D-AI,fw=[^,]*' "$img" | head -1 | sed 's/.*fw=//')
+        test -n "$ver" || { echo "::error::no #VER literal in $img"; exit 1; }
+        mkdir -p dist-firmware
+        cp "$img" dist-firmware/fnirsi_1013d.bin
+        (cd dist-firmware && sha256sum fnirsi_1013d.bin > fnirsi_1013d.bin.sha256)
+        sum=$(cut -d' ' -f1 dist-firmware/fnirsi_1013d.bin.sha256)
+        {
+          echo "image=$img"
+          echo "sha256=$sum"
+          echo "version=$ver"
+        } >> "$GITHUB_OUTPUT"
+        {
+          echo "### Firmware $ver"
+          echo ""
+          echo "| build | bytes | sha256 |"
+          echo "|---|---|---|"
+          for b in build-gcc10-pc build build-dbg build-gcc10; do
+            f=firmware/scope/$b/fnirsi_1013d.bin
+            echo "| $b | $(stat -c %s "$f") | \`$(sha256sum "$f" | cut -d' ' -f1)\` |"
+          done
+        } >> "$GITHUB_STEP_SUMMARY"

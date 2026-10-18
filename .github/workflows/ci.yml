@@ -1,0 +1,94 @@
+# CI: firmware (reference reproduction, GCC 10 + GCC 13 builds, host tests), mcp (ruff + pytest on
+# Linux and Windows), shared protocol vectors. Also called by release.yml (workflow_call), which then
+# downloads the firmware-image artifact. docs/releasing.md describes both workflows.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  firmware:
+    name: firmware
+    # Pinned: the documented toolchain is Ubuntu 24.04's arm-none-eabi GCC 13.2.1 (firmware/README.md).
+    # GCC 14 turns an upstream implicit declaration in menu.c into an error.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - id: build
+        uses: ./.github/actions/firmware-build
+      - name: Upload firmware image
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-image
+          path: dist-firmware/
+          if-no-files-found: error
+          retention-days: 30
+
+  mcp:
+    name: mcp (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12", "3.13"]
+    defaults:
+      run:
+        shell: bash
+        working-directory: mcp
+    env:
+      PYTHONUNBUFFERED: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: mcp/pyproject.toml
+      - name: Install fnirsi1013d with dev extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: ruff (the selection mcp/AGENTS.md uses)
+        run: ruff check --select F,E9,B023 --line-length 120 src tests
+      - name: pytest (simulator over TCP and stdio subprocesses; no hardware)
+        timeout-minutes: 10
+        run: python -m pytest -q -p no:cacheprovider
+
+  docs-lint:
+    name: protocol vectors and CHANGELOG
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: mcp/pyproject.toml
+      - name: Install fnirsi1013d
+        run: python -m pip install -e ./mcp
+      - name: docs/protocol-vectors.json against the Python parsers
+        run: python -m fnirsi1013d.vectors --check --file docs/protocol-vectors.json
+      - name: docs/protocol-vectors.json against the C parser (firmware/scope/pc_protocol.c)
+        run: |
+          make -C firmware/scope/host_tests build/vector_check
+          python3 -I firmware/scope/host_tests/check_vectors.py \
+            --checker firmware/scope/host_tests/build/vector_check --vectors docs/protocol-vectors.json
+      - name: CHANGELOG.md structure
+        run: python3 .github/scripts/release_meta.py --check-changelog
