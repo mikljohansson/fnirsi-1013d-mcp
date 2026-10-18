@@ -339,3 +339,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   functional failure. The 128-entry ring had already been pushed out by the benches' EP0 setups and DTR edges, and the snapshot was still the
   boot-time one (never re-armed) -> lesson: re-arm before each test, drain the ring after. **0.2.23 persisted to the card** (backup
   sd_750-1522_20261018-194839.bin = 0.2.21) for test 2: cold boot with the cable already plugged in.
+- **Test 2 (0.2.23 from the card, cold boot with the cable plugged in):** passes 1-4 clean, pass 5: 1 of 100 64 KiB failed, tx_aborts 1,
+  link recovered by itself (no bus reset, no suspend). Abort diagnostics: bytes left 0, POWER 0x70 (HS, soft-connected, not suspended), EP2
+  TXCSR 0x0003 (TxPktRdy + FIFONotEmpty: a packet waiting that the host did not take for 2 s), TX IRQ enabled, frame counter alive. Init
+  state at boot (type 16): cold SD boot = all five fields 0x0000 (OTG/PHY clocks off, nothing configured); FEL load = 0x4000/0x070f/0x2000/
+  0x0000/0x2fc0 (boot ROM had already brought the controller and PHY up). Pattern of the day: every cold-boot run failed within minutes
+  (0.2.20 port resets, 0.2.21 20 s stall, 0.2.23 one abort), every FEL-loaded run was clean (two 30-min soaks, >2000 x 64 KiB). Working
+  theory (inference, with fw-gen4 for 0.2.24): 1.00o5's USB init lacks the PHY calibration/tuning the boot ROM performs, leaving a marginal
+  high-speed link on the cold path; Windows' packet-error recovery then shows as stalled TxPktRdy / pipe resets. Card boots 0.2.23.
