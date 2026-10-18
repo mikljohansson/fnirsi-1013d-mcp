@@ -567,8 +567,10 @@ divide by ENBW for density). Volts per code use the calibration chain of protoco
 Hann, 10 dB/div, ref 0 dBV, full span). Protocol: GET_STATUS byte 43 = display mode, READ_SPECTRUM 0x020A returns
 the displayed spectrum (protocol section 14 row 45).
 
-Costs [E, to be measured on the bench with `pass_ms`]: FFT per channel ~6 ms at 4096 (FFT_BENCH measures it), the
-plot about the same as 1.00o5's trace drawing (one 728 x 432 fill and blit per pass).
+Costs: FFT per channel per new capture, measured with FFT_BENCH on 0.2.31: 2048 points 4.9 ms from DDR, 2.3 ms from
+on-chip SRAM, 4096 points 10.9 ms (+ about 1-2.5 ms dB conversion). Since 0.2.33 the view runs N <= 2048 from SRAM A
+(0x1000-0x7008, the space FFT_BENCH borrows; nothing else uses it at run time, all stacks are in DDR). Drawing: one
+728 x 432 clear (memset bursts since 0.2.32) and blit per pass, as 1.00o5's trace view.
 
 ### Memory budget
 

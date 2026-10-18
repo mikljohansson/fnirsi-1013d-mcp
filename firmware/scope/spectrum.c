@@ -28,7 +28,8 @@ static int32 spec_win[FX_FFT_WIN_WORDS(FX_FFT_LOG2_MAX)] __attribute__((aligned(
 static int32 spec_buf[FX_FFT_BUF_WORDS(FX_FFT_LOG2_MAX)] __attribute__((aligned(8)));
 static int16 spec_cdb[(FX_FFT_N_MAX / 2) + 1];
 
-//On-chip SRAM A (32 KB at 0): at run time only the low vectors (0x00-0x3F) live there; the bootloader's stack (and the
+//On-chip SRAM A (32 KB at 0): at run time only the low vectors (0x00-0x3F) live there (all stacks are in DDR, start.s);
+//the view's FFT up to 2048 points (fw 0.2.33) and FFT_BENCH use 0x1000-0x7008. The bootloader's stack (and the
 //one ENTER_FEL sets up, 0x7C00) sit at the top. The benchmark borrows 0x1000-0x7008 for N <= 2048 (plan 2 N words +
 //buffer N + 2 words; fw 0.2.27 went to 4096 with the half window).
 #define SPEC_SRAM_BASE        ((int32 *)0x00001000)
@@ -336,9 +337,14 @@ static void spec_compute(void)
   uint32 half = 1u << (log2n - 1);
   int    ch;
 
-  if(!spec.plan_ok || (spec_plan.log2n != log2n) || (spec_plan.window != spec.window))
+  //Up to 2048 points the plan and the work buffer fit the on-chip SRAM, about twice as fast as the uncached DDR
+  //(0.2.31 FFT_BENCH: 2048 points 2.3 ms in SRAM, 4.9 ms in DDR); FFT_BENCH borrows the same space and marks the plan
+  int32 *win = (log2n <= SPEC_SRAM_LOG2_MAX) ? SPEC_SRAM_BASE : spec_win;
+  int32 *buf = (log2n <= SPEC_SRAM_LOG2_MAX) ? SPEC_SRAM_BASE + FX_FFT_WIN_WORDS(log2n) : spec_buf;
+
+  if(!spec.plan_ok || (spec_plan.log2n != log2n) || (spec_plan.window != spec.window) || (spec_plan.win != win))
   {
-    fx_fft_init(&spec_plan, log2n, spec.window, spec_win, spec_buf);
+    fx_fft_init(&spec_plan, log2n, spec.window, win, buf);
     spec.plan_ok = 1;
   }
 
