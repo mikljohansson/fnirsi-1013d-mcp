@@ -644,7 +644,7 @@ is in `AGENTS.md`.
 5. Resolution: shorted input, K = 1 and 3 at N = 1000. The rms noise in ADC LSB should fall roughly as the noise-bits
    column predicts.
 
-### 4. Design study: CIC compensation FIR (planned 0x1535, not built)
+### 4. Design study: CIC compensation FIR (built as 0x1535, section 5)
 
 Owner direction: the default acquisition mode should become CIC plus a compensation FIR. 0x1534 stays frozen; this
 section is a design study (`tb/fir_design.py report`, numpy only, 18-bit quantised taps).
@@ -678,6 +678,176 @@ section is a design study (`tb/fir_design.py report`, numpy only, 18-bit quantis
 - Group delay in output samples: (T - 1) / 4 for the FIR (3.5 at T = 15, 7.5 at T = 31) plus K (N / 2 - 1) / (2 N)
   (about K / 4) for the CIC, plus the pipeline latency in write clocks. The tb would report it the same way as the
   12-write-clock latency of 0x1534.
+
+### 5. CIC compensation FIR (version 0x1535, 2026-10-18)
+
+This is option B of section 4, built. With the FIR on, the CIC decimates by N/2, and a 15-tap symmetric FIR decimates
+its output by 2. The result is flat to fo/4 and has about 17 dB more alias rejection per CIC order than 0x1534. With
+0x56 = 0 (power-on), or at a divider where the FIR cannot engage, the design is functionally identical to 0x1534. The
+testbench proves that cycle by cycle against 0x1534 from git.
+
+**Protocol** (also in `src/FPGA commands.txt`):
+
+| Cmd | Dir | Meaning |
+|---|---|---|
+| 0x06 | read, 2 B | 0x15 0x35. |
+| 0x56 | write, 1 B | bit 0 = FIR enable. Bits 7..1 are reserved; write 0. Power-on 0. |
+| 0x29 | read, 2 B | byte 0 bit 6 = 0x56 bit 0 as written; bit 5 = FIR active now. Other bits as 0x1534. Both bits are 0 with the FIR off, so 0x29 reads as on 0x1534. |
+
+**When it engages.** The FIR is active when 0x56 bit 0 = 1, K (0x53) >= 1, N >= 16 and N is a multiple of 4.
+- With D the 0x0D divider and N = 2 * (floor(D / 2) + 1), that is D >= 14 with D bit 1 set, so D mod 4 is 2 or 3.
+- Examples: D = 14, 15 give N = 16; D = 18, 19 give N = 20; D = 99 gives N = 100; D = 16, 17 (N = 18) do not engage.
+- In every other case the 0x1534 path runs, bit for bit. The firmware can read 0x29 bit 5 to see which one ran.
+- In the firmware's `sample_rate_settings` table (`firmware/scope/variables.c`, all odd dividers, N = D + 1), the FIR
+  engages at 10 MSa/s (N = 20) and every slower entry down to 500 Sa/s. 20 MSa/s (N = 10) and faster stay on the CIC
+  path.
+- K = 3 is exact down to 10 kSa/s with the FIR (N/2 <= 10,334), against 20 kSa/s on the CIC path.
+
+**Scaling.**
+- The CIC has gain (N/2)^K. Each CIC sample is min(65535, y >> S), and the FIR has DC gain 1:
+  stored = clamp(0 .. 65535, (sum(h * x) + 2^16) >> 17).
+- Recommended S = max(0, bitlen(255 * (N/2)^K) - 16) + 1. The + 1 keeps the CIC samples below 32,768. The largest
+  FIR gain for any input is the sum of its positive taps, 1.17 / 1.18 / 1.21 for K = 1 / 2 / 3. So with this S the
+  stored value cannot saturate, for any input.
+- Step response: 6.6 to 6.9 % overshoot and the same undershoot, for every K and N. A step from near 0 to near full
+  scale therefore clamps at 0 when the low level is within about 7 % of the step size of zero.
+- ADC LSB: mean = out * 2^S / (N/2)^K. The 16-bit trigger level for an 8-bit level v is round(v * (N/2)^K / 2^S).
+- Exact while 255 * (N/2)^K < 2^48. For K = 3 that means N/2 <= 10,334, so N <= 20,668.
+
+**Response** (`tb/fir_design.py`, whole chain; passband 0 to fo/4; alias = worst gain of any input that folds into
+the passband, relative to DC):
+
+| K | ripple N = 16 | ripple N = 4096 | alias N = 16 | alias N = 4096 | CIC alone (0x1534), alias fo/4 |
+|---|---|---|---|---|---|
+| 1 | 0.075 dB | 0.076 dB | -16.8 dB | -17.1 dB | -10.5 dB |
+| 2 | 0.058 dB | 0.060 dB | -33.5 dB | -34.1 dB | -20.9 dB |
+| 3 | 0.041 dB | 0.045 dB | -50.2 dB | -51.1 dB | -31.4 dB |
+
+The response varies by less than 0.1 dB in ripple and 1 dB in alias rejection between N = 16 and N = 4096, so one
+tap set per K covers every N.
+- Taps h[0..7] (h[14 - i] = h[i]), 18-bit signed, sum 2^17, from `fir_design.py coeffs K 15 0.5`:
+  - K = 1: -82 682 1890 -2151 -9088 3022 40046 62434
+  - K = 2: -231 504 2397 -1457 -10255 877 40852 65698
+  - K = 3: -381 332 2919 -766 -11452 -1289 41675 68996
+- The model check imports these from `fir_design.py`, so a passing `tb/run.sh` also proves that the RTL table equals
+  the design script.
+
+**Design** (`src/zaklad.v`, module `fir_chan` and the block "Decimation filter control and data path"):
+- **Strobes.** `fir_act` is `fir_ok` registered in the write-clock domain.
+  - With the FIR active, `dec_sv[0]` also fires at `dec_pc == fir_hp` (P/2, registered), half way through the P count.
+    The unchanged `decim_chan` therefore produces CIC samples every P/2 write clocks.
+  - `dec_t` tags the strobes from `dec_pc == 0`. The CIC sample they make is the newest one of an output pair.
+- **FIR per channel** (`fir_chan`):
+  - A 15 x 16-bit delay line shifts on every CIC sample (`dec_sv[6]`).
+  - On the clock after a tagged shift (`dec_t[7]`), the 8 symmetric pre-added sums are loaded into a shift register.
+  - 8 multiply-accumulates follow, one per write clock: the multiplier input registers take the shift-register head
+    and the tap, then a product register, then a 37-bit accumulator that starts from the rounding constant 2^16.
+  - Then the clamp and the output register. `done` replaces `dec_sv[6]` as `dec_wr`, still once per P write clocks.
+  - P = 8 (N = 16) is the minimum: the next load lands on the clock of the last MAC step.
+- **Multiplier.** TD 4.6.8 infers the M18x18 from the registered `ma * mb` (`#MACRO_MULT 2` in `FPGA_rtl.area`,
+  `#dsp 2 of 3` in `FPGA_phy.area`).
+- **Outputs.** `dec_out1/2 = fir_act ? fir_out : cic_out`; the memory mux, the 16-bit trigger compare and the capture
+  logic are those of 0x1534.
+- **Free-running.** Nothing is reset. After changing 0x0D, 0x53, 0x54 or 0x56, wait (K + 10) * N * 5 ns + 1 us
+  before 0x01.
+
+**Latency and EXT correction.**
+- Pin capture to memory write: **25 write clocks** (250 ns) with the FIR, against 12 on the CIC path. The model check
+  measures it on every FIR segment.
+- Group delay: the FIR centre is 7 CIC samples back, that is (T - 1) / 4 = 3.5 output samples. The CIC centre adds
+  K (N/2 - 1) / 2 input samples.
+- So a stored sample represents the input this long before its write edge:
+  - FIR path: lag = 250 + 17.5 N + 1.25 K (N - 2) ns.
+  - CIC path (0x1534, K >= 1): lag = 120 + 2.5 K (N - 1) ns.
+- ADC triggers run on the stored stream and need no correction; the testbench checks the same trigger convention as
+  K = 0.
+- EXT: trigger_address is still the last sample written before the (synchronised) edge. The EXT edge lies at record
+  position trigger_address + phase + lag / Tout, where Tout = 5 N ns and phase (0 to 1) is when the edge came after
+  the last write. Unknown to the firmware, so use 0.5.
+
+Measured with `tb_fir.v` (ramp from the EXT edge; a linear-phase filter delays a ramp by exactly its group delay;
+the stimulus adds about +1 ns, see the tb comment):
+
+| Path | K | N = 20: formula / measured | N = 100 | N = 400 |
+|---|---|---|---|---|
+| FIR | 1 | 622.5 / 623.9 ns | 2122.5 / 2123.8 ns | 7747.5 / 7748.6 ns |
+| FIR | 2 | 645.0 / 646.3 ns | 2245.0 / 2246.9 ns | 8245.0 / 8248.9 ns |
+| FIR | 3 | 667.5 / 668.8 ns | 2367.5 / 2369.2 ns | 8742.5 / 8744.7 ns |
+| CIC (0x1534) | 1 | 167.5 / 168.7 ns | 367.5 / 368.7 ns | 1117.5 / 1118.8 ns |
+| CIC (0x1534) | 2 | 215.0 / 216.0 ns | 615.0 / 616.5 ns | 2115.0 / 2117.2 ns |
+| CIC (0x1534) | 3 | 262.5 / 263.7 ns | 862.5 / 863.9 ns | 3112.5 / 3114.4 ns |
+
+So the formulas hold to within 1 to 4 ns. This also confirms the 0x1534 EXT formula of section 3. In output samples, the
+FIR lag is 6.2 (N = 20), 4.4 to 4.7 (N = 100) and 3.9 to 4.4 (N = 400); it approaches 3.5 + K / 4 for large N.
+
+**Build** (TD 4.6.8 SP1, `./build.sh`; corner TT 1.10 V 85 C):
+
+| | 0x1534 | 0x1535 |
+|---|---|---|
+| LUT / reg / LE | 2304 / 1790 / 2488 | 3082 / 2716 / 3501 (35.7 % of TD's 8640 LUT sites) |
+| M18x18 (`#dsp`) | 0 of 3 | 2 of 3, inferred from `ma * mb` (`#MACRO_MULT 2`) |
+| BRAM9K, pads, IOB regs | 32, 60, 13 OREG + 1 IREG | same |
+| `clk_200MHz` | 4.899 ns, slack +0.101 ns | 4.676 ns, 0 errors, TNS 0, worst slack +0.324 ns (the same half-cycle `sample_write_clock` to `sampling_triggered` path; placement-sensitive) |
+| `sample_write_clock` | 0 errors, decimator +3.36 ns | 0 errors. Worst +0.677 ns on the existing `sampling_triggered` crossing into the capture registers. Decimator internal +3.22 ns. No FIR register is among the 60 worst endpoints, so every FIR path has more than +3.59 ns. |
+| `clkc[1]`, `clkc[0]` | 6 / 51 errors (known, section 3) | 6 errors TNS -12.3 / 52 errors TNS -128.6, same structural and SDC-artefact paths |
+
+| File | Bytes | sha256 |
+|---|---|---|
+| `out/FPGA-fir.bin` (= `build/FPGA.bin`, = `backups/al3_fir_0x1535_5040a2ae.bin`) | 282,898 | `5040a2aeede071019bca0ffee47d765b87d980e1e47ca01ac32cb875c839aa96` |
+| `backups/al3_fir_0x1535_5040a2ae_padded.bin` (0xFF to 1 MiB, flash image) | 1,048,576 | `5ade9e755211fe65c6ff492419f3a4a91ec08edc8c16305ce52751baf9d588a5` |
+
+Deterministic: two builds in different work dirs gave the same hash. Header words as before (`cc55aa33 f0000006
+18006c31`), user code 0x0056.
+
+**Testbench** (`tb/run.sh [seed]`, about 6 to 12 minutes; the FIR step takes most of it). A fourth step, `tb_fir.v` against 0x1534 from git
+(`REF1534_REV`, default 6d4c8ad), followed by `cic_model.py check` on its log.
+- Phase 1: 40 random captures. K = 0..3, random core order, capture edges, shift and 16-bit level, dividers up to
+  45, trigger source CH1/CH2/EXT, generator and EXT noise.
+  - 0x56 gets random bytes. When bit 0 is set, the divider is one where the FIR does not engage.
+  - Compared every ns: pins, capture registers, `dec_out1/2`, `dec_wr`, `swc_adv`, `trigger_data`, the memory data
+    input, every bus read, and the whole memory after each capture. 0 mismatches.
+- Directed: 0x06 = 0x1535, and the 0x29 bits 6/5 for eligible and ineligible dividers, K = 0 and the reserved bits.
+- Phase 2: 21 logged FIR captures. All K; N = 16 to 2000 including odd dividers; both core orders; all capture-edge
+  settings; a telegraph signal (0 / 255) with the shift one below the rule, which saturates and clamps at 0; and a
+  random eligible case. `cic_model.py` recomputes every stored sample (CIC by N/2 as a direct-form FIR, 16-bit
+  saturation, the 15 taps, rounding, clamp): about 1,540 samples, all exact, all at latency 25.
+- Trigger position: K = 1..3 at N = 16, 20, 64, 100 and 200, rising and falling, CH1 and CH2, 60 cases. The first
+  stored sample past the level is at trigger_address + 1, as for K = 0.
+- EXT with the FIR (K = 1..3, N = 20 and 200): trigger_address = last sample written before the edge.
+- EXT data lag, 18 cases (table above). Auto time-out with the FIR counts output samples.
+- Phase 4: FIR off, one full-memory capture to resynchronise the memory, then 15 more random captures with
+  0 mismatches.
+
+**Mutation runs** (`DUT=<file> ONLY=fir tb/run.sh 3`, each with its own `SIM_WORK`). All 13 fail as they should:
+
+| # | Mutation | Caught by |
+|---|---|---|
+| 1 | engages without the "N multiple of 4" test | phase 1 equivalence, 0x29 check |
+| 2 | engages from divider 10 (N = 12) | 0x29 check |
+| 3 | one K = 2 tap off by one | model (K = 2 segments) |
+| 4 | half strobe one write clock late (`fir_hp` without + 1) | model (every FIR segment); the sim itself runs very long |
+| 5 | pre-add load one clock early (`dec_t[6]`) | model, EXT lag |
+| 6 | no rounding constant | model, EXT lag |
+| 7 | no clamp at 0 | model (telegraph segments) |
+| 8 | memory write one clock early | model latency, EXT lag |
+| 9 | output mux on `fir_en` instead of `fir_act` | phase 1 and 4 equivalence |
+| 10 | wrong centre-tap sample | model, EXT lag |
+| 11 | 0x29 bits 6 and 5 swapped | 0x29 check |
+| 12 | delay line shifts one clock early (`dec_sv[5]`) | model, EXT lag |
+| 13 | half strobe gated by `fir_en` instead of `fir_act` | phase 1 and 4 equivalence |
+
+**Bench checks** (owner/coordinator; needs firmware that knows 0x1535 and 0x56; never flash without the verified stock
+dump):
+1. FIR off: repeat the 0x1534 checks 1 and 4 (section 3), plus 0x29 bits 6/5 = 0.
+2. Passband: K = 3, N = 100 (2 MSa/s), FIR on. Sweep a sine from 50 kHz to 500 kHz (fo/4) and compare the amplitude
+   with the FIR off: flat within 0.1 dB with the FIR, versus up to 2.7 dB droop without. The front end's own response
+   cancels in the ratio.
+3. Alias: generator square at fo - 50 kHz (for N = 100: 1.95 MHz), K = 1, FIR off vs on. The 50 kHz alias should drop
+   by about 6 dB more than the CIC alone gives at that frequency. Use the host FFT.
+4. Step: generator 1 kHz square at N = 200, K = 2, FIR on. Expect about 7 % overshoot and undershoot, symmetric
+   around the edge (linear phase), with no clipping at the recommended shift.
+5. EXT timing: EXT and CH1 driven from the same edge. The CH1 edge in the record should sit at trigger_address +
+   0.5 + lag / Tout (+/- 0.5 sample) with the lag formula above.
 
 ## Device facts from the datasheet
 

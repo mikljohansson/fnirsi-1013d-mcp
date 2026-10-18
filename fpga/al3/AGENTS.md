@@ -8,7 +8,13 @@ State on 2026-10-18:
   (`docs/hardware-status.md`). The stock image is backed up.
 - TD 4.6.8 SP1 runs headless in WSL. `SRC_REV=a947e78 ./build.sh` rebuilds Atlan4's original **byte-identical**
   to that bitstream in about 15 s.
-- `src/` now holds our design, version word **0x1534** (fpga-gen3). It adds the decimation filter (boxcar, CIC2,
+- `src/` now holds our design, version word **0x1535** (fpga-gen4): 0x1534 plus the CIC compensation FIR (cmd 0x56,
+  read-back 0x29 bits 6/5; `README.md` "Changes" section 5). With 0x56 = 0, or at a divider the FIR does not engage at,
+  it is cycle-identical to 0x1534 (git 6d4c8ad, the tb's `REF1534_REV`).
+  - Built as `out/FPGA-fir.bin`, sha256 `5040a2ae...aa96`, pinned in `backups/al3_fir_0x1535_5040a2ae.bin`; padded
+    flash image `backups/al3_fir_0x1535_5040a2ae_padded.bin`, sha256 `5ade9e75...88a5`. **Not flashed**; needs
+    firmware that knows 0x1535 (a 0x153x-aware firmware that never writes 0x56 sees 0x1534).
+- 0x1534 (fpga-gen3, frozen) adds the decimation filter (boxcar, CIC2,
   CIC3; cmds 0x53-0x55, read 0x29) for the spectrum analyser, on top of 0x1533, the external trigger on the
   calibration pin (commits 526c969, 4601dec, 2839258; source rev 2839258 is the tb's 0x1533 reference).
   - With 0x53 = 0 (the default) it is cycle-identical to 0x1533.
@@ -40,8 +46,8 @@ State on 2026-10-18:
 | Path | What |
 |---|---|
 | `src/` | Atlan4's AL3 TD project with our changes: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc` (pins), `zaklad.sdc` (clocks), `FPGA.al` (TD project, holds `<UCode>`), `al_ip/` (PLL and sample-memory IP), `FPGA commands.txt` (command table, current). Upstream material, licence unstated, attributed to Atlan4. Unmodified original: git a947e78. |
-| `tb/` | iverilog testbench, `run.sh [seed]`, three steps: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model; `cic_model.py table` prints the gain/alias/droop table). `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext` or `ONLY=decim` for one step. |
-| `out/` | Named bitstreams for the bench (gitignored `*.bin`): `FPGA-ext-trigger.bin` (0x1533), `FPGA-decim.bin` (0x1534). |
+| `tb/` | iverilog testbench, `run.sh [seed]`, four steps: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim` or `fir` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs. |
+| `out/` | Named bitstreams for the bench (gitignored `*.bin`): `FPGA-ext-trigger.bin` (0x1533), `FPGA-decim.bin` (0x1534), `FPGA-fir.bin` (0x1535). |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the stock FNIRSI design (0x1432), GPL-3.0. Same pin map. Use it for "what did stock do" questions. |
 | `bitstreams/` | Prebuilt images, gitignored except `README.md` (provenance and sha256). |
 | `build.sh`, `build.tcl` | Headless TD 4.6.8 build (replay of Atlan4's GUI command sequence). `SRC_REV=<rev>` builds `src/` from git. |
@@ -75,12 +81,14 @@ wsl -d Ubuntu -- python3 -I /mnt/d/src/fnirsi-1013d-ai/fpga/al3/td/compare_bin.p
 - Wall clock is 11 to 16 s (about 35 s for 0x1534). On failure it exits non-zero and prints "BUILD FAILED" with the first errors.
 - Overrides: `TD_HOME`, `TD_SHIM`, `FLOW` (`atlan` default, `donwulff`), `SRC_REV` (git revision of `src/`); the
   first argument is the work dir.
-- Current `src/` (0x1534) gives `build/FPGA.bin` sha256 `83140510dfbfef56cc5ed15d70866e6bc52c407a41fd0ea480e8993df5b820c1`.
+- Current `src/` (0x1535) gives `build/FPGA.bin` sha256 `5040a2aeede071019bca0ffee47d765b87d980e1e47ca01ac32cb875c839aa96`
+  (two builds in different work dirs, same hash). 0x1534 (`SRC_REV=6d4c8ad`) gave `83140510dfbfef56cc5ed15d70866e6bc52c407a41fd0ea480e8993df5b820c1`.
   0x1533 (`SRC_REV=2839258`) gave `a96567031872ae99bd40f0722a111a08da0f6381b6c710b70998af784a341216`.
 - Testbench: install iverilog once as root (`wsl -d Ubuntu -u root -- apt-get install -y iverilog`, done 2026-10-18),
-  then run `wsl -d Ubuntu -- bash /mnt/d/src/fnirsi-1013d-ai/fpga/al3/tb/run.sh [seed]`. It takes about 25 s and
-  ends with `ALL PASS (seed N)`: 38 checks (tb_ext_trigger), 98 checks (tb_decim), and about 1,870 samples in
-  `cic_model: ... -> PASS`. Any change to `zaklad.v` must keep it passing. The equivalence phases prove that CH1/CH2
+  then run `wsl -d Ubuntu -- bash /mnt/d/src/fnirsi-1013d-ai/fpga/al3/tb/run.sh [seed]`. It takes 6 to 12 minutes
+  (the first three steps about 25 s, `tb_fir.v` the rest) and ends with `ALL PASS (seed N)`: 38 checks (tb_ext_trigger),
+  98 checks (tb_decim), about 1,870 samples in `cic_model: ... -> PASS`, 154 checks (tb_fir) and about 1,540 FIR
+  samples in the second `cic_model` line. `ONLY=fir` runs only the FIR step. Any change to `zaklad.v` must keep it passing. The equivalence phases prove that CH1/CH2
   match 0x1532 and that K = 0 (including EXT) matches 0x1533.
 - Run testbench work from PowerShell (`wsl -d Ubuntu -- bash <script>`). Git Bash rewrites `/mnt/...` arguments.
   Concurrent runs need different `SIM_WORK` directories.
@@ -197,7 +205,9 @@ References:
 `src/zaklad.v` (about 1260 lines), top to bottom:
 - Helper modules `clockdivider`, `pwmcounter`, `freq_generator_dds_pwm` (32-bit phase accumulator; output is
   `phase_acc < duty_threshold`), and `decim_chan` (0x1534 filter per channel: capture on either write-clock edge,
-  polyphase (1+z^-1)^K prefilter, 3 integrators, decimation strobe, 3 combs, shift and saturation, all 48 bit).
+  polyphase (1+z^-1)^K prefilter, 3 integrators, decimation strobe, 3 combs, shift and saturation, all 48 bit),
+  and `fir_chan` (0x1535 FIR per channel: 15 x 16-bit delay line, symmetric pre-add into an 8-entry shift register,
+  one inferred M18x18 with input and product registers, 37-bit accumulator, rounding, clamp; taps per K in `tap()`).
 - `pll main_clock`: 50 MHz `i_xtal` to `clk_200MHz` (clk0) and `clk_ADC` (clk1, 200 MHz at 90 degrees).
   IP in `al_ip/pll.v`.
 - Clock dividers: 50 MHz peripheral clock, PWM counters for the offsets (25 kHz) and the backlight.
@@ -210,7 +220,7 @@ References:
 - Capture logic on `sample_write_clock`: write address, pretrigger (0x0B) and total (0x0C) counts, trigger
   compare on the raw ADC core A inputs (rising/falling), auto time-out, trigger address.
 - MCU bus on `i_mcu_clk`: command latch (`i_mcu_dcs` = 1), write decoder (0x01, 0x0B-0x0F, 0x15-0x17, 0x1A,
-  0x1B, 0x32-0x38, 0x3C, 0x50-0x55), read mux (0x05, 0x06, 0x0A, 0x14, 0x18, 0x20-0x29, 0x41).
+  0x1B, 0x32-0x38, 0x3C, 0x50-0x56), read mux (0x05, 0x06, 0x0A, 0x14, 0x18, 0x20-0x29, 0x41).
   Multi-byte values are big-endian and stepped by `mcu_state`.
 - External trigger (0x1533), block after the generator pin assign. The pad is read through `ext_sync` (2 flops,
   first in the IOB), then a 3-sample majority filter (`ext_level`), then the edge select per `trigger_edge`. The
@@ -224,10 +234,14 @@ References:
   - muxes `{dec_out2, dec_out1}` into the memory;
   - turns the 16-bit trigger compare into 0xFF/0x00 in `trigger_data`, compared against level 0x80.
   - `swc_adv_q` gates the EXT apply.
-- Command codes still free in the decoders (checked 2026-10-18, after 0x1534): writes 0x02-0x0A, 0x10-0x14, 0x18,
-  0x19, 0x1C-0x1E, 0x20-0x31, 0x39-0x3B, 0x3D-0x4F, 0x56 and up; reads 0x01-0x04, 0x07-0x09, 0x0B-0x13, 0x15-0x17,
+- FIR (0x1535), same block: `fir_ok` (0x56 bit 0, K >= 1, divider >= 14 with bit 1 set) registered as `fir_act`. With
+  `fir_act`, `dec_sv[0]` also fires at `dec_pc == fir_hp` (P/2), `dec_t` tags the `dec_pc == 0` strobes, the FIR loads
+  on `dec_t[7]`, `dec_wr` = `fir_done1` and `dec_out1/2` = the FIR outputs. With `fir_act` = 0 all of these reduce to
+  0x1534.
+- Command codes still free in the decoders (checked 2026-10-18, after 0x1535): writes 0x02-0x0A, 0x10-0x14, 0x18,
+  0x19, 0x1C-0x1E, 0x20-0x31, 0x39-0x3B, 0x3D-0x4F, 0x57 and up; reads 0x01-0x04, 0x07-0x09, 0x0B-0x13, 0x15-0x17,
   0x19-0x1F, 0x2A-0x40, 0x42 and up. Stock firmware wrote 0x28 (roll mode) and Donwulff says stock used 0x24/0x26
-  differently, so prefer 0x2A and up, or 0x56 and up, for new codes.
+  differently, so prefer 0x2A and up, or 0x57 and up, for new codes.
 
 ## Wanted next (priority order)
 
@@ -268,9 +282,22 @@ Decimation filter (0x1534), open items:
   for N > 10,334 with Hogenauer pruning or wider registers.
 - Mutation runs made for 0x1534 (`DUT=` override): the list is in commit 65417a8. A tenth (K = 2 comb bypass
   broken) was still running at hand-over.
-- Next design: 0x1535, a CIC compensation FIR as the intended default mode (owner direction). Study only, no RTL yet:
-  `tb/fir_design.py report` and `README.md` section 4. 0x1534 is accepted by the coordinator (2026-10-18) and is
+- Next design: 0x1535, a CIC compensation FIR as the intended default mode (owner direction): built, see below and
+  `README.md` section 5. 0x1534 is accepted by the coordinator (2026-10-18) and is
   being flashed with fw 0.2.33.
+
+## 0x1535 status (fpga-gen4, 2026-10-18)
+
+- Done as briefed below: RTL (e2aec2e), testbench (74fb8a3), docs in `README.md` section 5 and `src/FPGA commands.txt`.
+  The interface delta went to team-lead before the build.
+- `tb/run.sh` passes for seeds 12345, 1 and 77. All 13 FIR mutations are caught (list in `README.md` section 5).
+- Build: 3082 LUT / 2716 reg, 2 of 3 M18x18 (inferred), `clk_200MHz` +0.324 ns, deterministic hash `5040a2ae...`.
+- Open: firmware support (0x56, the shift + 1 rule, (N/2)^K scaling, the EXT lag formula), flashing, and the bench checks
+  of section 5. Possible next steps: a T = 31 profile (flat to 0.4 fo, needs N >= 32 or a second multiplier per
+  channel, and the third M18x18 is the only one left); a deeper 16-bit record.
+- The `tb_fir.v` phase 1 dominates the runtime. Use `+p1=3` (edit `run.sh` or call vvp directly) for quick iterations.
+  The mutation driver used for 0x1535 was a sed list over `src/zaklad.v` with `DUT=` and `SIM_WORK=` per variant, run in
+  parallel. The half-strobe mutation makes the sim very slow; its model check fails long before the sim ends.
 
 ## Handoff to fpga-gen4: 0x1535 (written by fpga-gen3, 2026-10-18)
 
