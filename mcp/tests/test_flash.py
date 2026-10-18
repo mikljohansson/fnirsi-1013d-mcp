@@ -152,15 +152,17 @@ def fast_fel(monkeypatch):
 
 def test_enter_fel_retried_after_lost_request(sim, tmp_path, fast_fel):
     sim.lose_cmd, sim.lose_next = P.Cmd.ENTER_FEL, 2
-    f, lines = flasher(sim, tmp_path, FakeHost())
+    # two FEL-device checks per unanswered attempt (after the timeout and after the pause): 4 polls without it
+    f, lines = flasher(sim, tmp_path, FakeHost(appear_after=4))
     assert f.run_all() == 0, "\n".join(lines)
     assert any("attempt 1/3" in ln for ln in lines) and any("attempt 2/3" in ln for ln in lines)
     assert any("ENTER_FEL acknowledged (attempt 3)" in ln for ln in lines)
+    assert not any("FAILED" in ln for ln in lines)  # a step that continues is never reported as failed
 
 
 def test_enter_fel_never_answered_old_firmware_still_running(sim, tmp_path, fast_fel):
     sim.lose_cmd, sim.lose_next = P.Cmd.ENTER_FEL, 3
-    host = FakeHost()
+    host = FakeHost(appear_after=10**9)
     f, lines = flasher(sim, tmp_path, host)
     assert f.run_all() == 3
     failed = [ln for ln in lines if "FAILED" in ln]
@@ -179,9 +181,25 @@ def test_enter_fel_answer_lost_but_executed(sim, tmp_path, fast_fel):
             return
         orig(client, resp)
     sim._send = drop_fel
-    f, lines = flasher(sim, tmp_path, FakeHost())
+    # the FEL device is not seen while retrying (slow enumeration): #VER silence decides
+    f, lines = flasher(sim, tmp_path, FakeHost(appear_after=5))
     assert f.run_all() == 0, "\n".join(lines)
     assert any("assuming the scope rebooted into FEL" in ln for ln in lines)
+
+
+def test_enter_fel_answer_lost_fel_device_seen_continues(sim, tmp_path, fast_fel):
+    """Bench 0.1.5: the OK was lost but the scope had rebooted into FEL. Continue at once, no FAILED, no resend."""
+    orig = sim._send
+
+    def drop_fel(client, resp):
+        if resp.cmd != P.Cmd.ENTER_FEL:
+            orig(client, resp)
+    sim._send = drop_fel
+    f, lines = flasher(sim, tmp_path, FakeHost(appear_after=0))
+    assert f.run_all() == 0, "\n".join(lines)
+    assert not any("FAILED" in ln for ln in lines)
+    assert any("answer lost" in ln and "1f3a:efe8 is present" in ln for ln in lines)
+    assert sum("ENTER_FEL" in ln and "attempt" in ln for ln in lines) == 1
 
 
 def test_unexpected_error_prints_failed_and_nonzero(sim, tmp_path):

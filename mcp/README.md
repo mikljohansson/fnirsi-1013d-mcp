@@ -172,7 +172,8 @@ FEL with ENTER_FEL, hands the boot ROM device (1f3a:efe8) to WSL with usbipd, lo
 codes: firmware/README.md section 4. It changes what the scope runs: announce it at the bench first.
 
 ENTER_FEL is sent up to 3 times, 1 s apart, each as a fresh request: the firmware answers OK before it reboots, and
-a request lost on the way in (fw <= 0.1.5 RX bug) is harmless to resend. If none is answered and the scope still
+a request lost on the way in (fw <= 0.1.5 RX bug) is harmless to resend. Between attempts it looks for the FEL
+device: if it is there, the OK was lost after the scope executed the command, and the tool continues. If none is answered and the scope still
 answers `#VER`, the tool stops ("still runs firmware ..., nothing was loaded"). Every failure prints one `FAILED:`
 line and exits non-zero (2 image, 3 scope link / ENTER_FEL, 4 usbipd / FEL device, 5 sunxi-fel, 6 port did not
 come back, 1 anything else).

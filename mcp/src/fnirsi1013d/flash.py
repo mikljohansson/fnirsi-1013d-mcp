@@ -202,9 +202,20 @@ class Flasher:
                 last = "E_BUSY (a scope menu is open: close it)"
             except TransportError as e:
                 last = str(e)
-            self.step(f"ENTER_FEL attempt {attempt}/{ENTER_FEL_ATTEMPTS}: {last}")
+            # The OK may have been lost after the scope executed ENTER_FEL (seen on 0.1.5): look for the boot ROM
+            # device before resending. Not a failure, so never "FAILED" here.
+            if self.fel_device_present():
+                self.step(f"ENTER_FEL answer lost (attempt {attempt}: {last}), but the FEL device {FEL_VID_PID} is "
+                          "present: continuing")
+                return
+            self.step(f"ENTER_FEL not answered yet (attempt {attempt}/{ENTER_FEL_ATTEMPTS}: {last}); FEL device not "
+                      "seen, retrying" if attempt < ENTER_FEL_ATTEMPTS else
+                      f"ENTER_FEL not answered (attempt {attempt}/{ENTER_FEL_ATTEMPTS}: {last}); checking #VER")
             if attempt < ENTER_FEL_ATTEMPTS:
                 self.sleep(max(0.0, ENTER_FEL_INTERVAL_S - (time.monotonic() - t0)))
+                if self.fel_device_present():
+                    self.step(f"FEL device {FEL_VID_PID} appeared: ENTER_FEL was executed, continuing")
+                    return
         # No answer at all. The OK could have been lost after the scope executed it: if the old firmware
         # still answers #VER, it did not.
         try:
@@ -217,6 +228,14 @@ class Flasher:
                              "Close any scope menu and rerun, or use the boot menu and --no-fel", 3)
         self.step(f"ENTER_FEL unanswered after {ENTER_FEL_ATTEMPTS} attempts but #VER is silent: assuming the scope "
                   "rebooted into FEL")
+
+    def fel_device_present(self) -> bool:
+        """One quick look for the boot ROM's USB device (usbipd list on Windows, sunxi-fel version elsewhere)."""
+        if self.windows:
+            r = self.run(["usbipd", "list"], 10)
+            return r.rc == 0 and any(d.vid_pid == FEL_VID_PID for d in parse_usbipd_list(r.out))
+        r = self.run(self.fel_cmd("version"), 5)
+        return r.rc == 0 and "AWUSBFEX" in r.out
 
     def wait_fel_device(self) -> None:
         deadline = time.monotonic() + self.fel_timeout
