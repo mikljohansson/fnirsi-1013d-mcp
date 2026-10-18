@@ -155,3 +155,9 @@ Newest entries at the bottom. Format: date, who, what, result.
 - Firmware 0.2.1 (commit d9e1ac6, sha256 ca0b6d11..., protocol 1.3 collaborative mode) loaded hands-free; caps 0x3c03; startup counters:
   3 ms to first poll, first UI pass 1516 ms. Protocol-level acceptance OK (host SET_* applied + read back, host single capture -> STOP,
   host RUN, READ_TRACE in RUN origin ui_run, settings_seq increments). Visual checks (MCP chip, redraws) pending owner's report.
+  Visual/interactive acceptance on 0.2.1 (owner at the screen): MCP chip visible and pulsing (but placed below the battery indicator, not at the
+  RUN chip -> fix requested); host SET_CHANNEL redraws cleanly with relay click; host SET_TIMEBASE flickers through intermediate values (fix requested);
+  host single capture shows STOP, host RUN resumes; touch-screen time/div and V/div changes seen by the host within 0.25 s (settings_seq increments,
+  ui_busy=1 while a menu is open, main-loop reads refused with E_BUSY meanwhile, as designed).
+- Host volts calibration installed for serial 1013D-0001 (mcp/data/cal/1013D-0001.json, 45 points, residual <= 0.14 codes); new scope_calibration_info tool.
+  CH2 still on the firmware formula until a shorted-input run. Owner's MCP server must be restarted to load the file.
