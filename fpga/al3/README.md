@@ -1,16 +1,20 @@
 # fpga/al3 - Anlogic AL3A10LG144C7 project
 
-Status 2026-10-18: **TD 4.6.8 SP1 runs headless in WSL and rebuilds `src/` byte-identical to Atlan4's shipped
-`.bin`** (see "Rebuild results" at the end, setup in `TD_SETUP.md`). Nothing has been flashed from this folder.
+Status 2026-10-18: **TD 4.6.8 SP1 runs headless in WSL and rebuilds Atlan4's design byte-identical to his shipped
+`.bin`** (see "Rebuild results", setup in `TD_SETUP.md`). `src/` now carries our first change, the external trigger
+on the calibration pin (version word 0x1533, section "Changes" at the end). Atlan4's original stays buildable with
+`SRC_REV=a947e78`. Nothing has been flashed from this folder.
 
 ## Contents
 
 | Path | What |
 |---|---|
-| `src/` | Atlan4's AL3 TD project, sources only: `zaklad.v` (top `fnirsi_1013D`, version 0x1532), `zaklad.adc`, `zaklad.sdc`, `FPGA.al`, `al_ip/` (PLL and sample-memory IP: `.v`, `.ipc`, sim models). Copied unmodified from `D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\FPGA AL3\FPGA AL3S10\`. Build outputs (`*.db`, `*.area`, `*.timing`, `*.bit`, `*.bin`) were left out. |
+| `src/` | Atlan4's AL3 TD project, sources only: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc`, `zaklad.sdc`, `FPGA.al`, `al_ip/` (PLL and sample-memory IP: `.v`, `.ipc`, sim models), plus `FPGA commands.txt` (Atlan4's command table, updated). Copied from `D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\FPGA AL3\FPGA AL3S10\` (unmodified at commit a947e78, version 0x1532). `zaklad.v` and `zaklad.adc` now carry the changes listed in "Changes" (version 0x1533). Build outputs (`*.db`, `*.area`, `*.timing`, `*.bit`, `*.bin`) were left out. |
+| `tb/` | iverilog testbench: `run.sh`, `tb_ext_trigger.v`, `sim_models.v` (behavioural PLL and sample memory). See "Changes". |
+| `out/` | Named bitstreams for the bench, gitignored (`*.bin`). Hashes are recorded in "Changes". |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the **stock** FNIRSI design (version 0x1432), TD 5.0.28716 project. Sources only (`source/`, `al_ip/`, `Original_1013D.al`); his prebuilt `.bit` was left out. Licence GPL-3.0 (`LICENSE-GPL3`, repo `pecostm32/Anlogic_AL3-10_Analyzing`). |
 | `bitstreams/` | Prebuilt images, on disk only, with provenance and sha256 in `bitstreams/README.md`. Git ignores everything there except that README. |
-| `build.sh`, `build.tcl` | Headless TD 4.6.8 flow for `src/` (replay of Atlan4's GUI command sequence). Verified, see "Rebuild results". |
+| `build.sh`, `build.tcl` | Headless TD 4.6.8 flow for `src/` (replay of Atlan4's GUI command sequence). Verified, see "Rebuild results". `SRC_REV=<git rev>` builds `src/` as of that commit. |
 | `build_donwulff.tcl` | Donwulff's `read_verilog`/`map`/`pack` flow for TD 5.x (`FLOW=donwulff`). Crashes in `report_io` on 4.6.8. |
 | `td/` | `td_install.sh` (headless install), `td_fetch.sh` (Sipeed captcha download helper), `compare_bin.py`. |
 | `TD_SETUP.md` | Replayable install and build steps with hashes. |
@@ -204,7 +208,7 @@ Bus rows list bit 0 first.
 | AC/DC relays | `o_ac_dc_1` / `o_ac_dc_2` | P129 / P132 | out | none |
 | Offset PWM | `o_offset_1` / `o_offset_2` | P112 / P111 | out | 25 kHz, filtered on the board |
 | Backlight PWM | `o_pwm_display` | P42 | out | 833 Hz in these designs |
-| Calibration / generator | `o_1khz_calib` | P133 | out | SLEWRATE FAST; fixed 1 kHz in stock, DDS (hi-Z when disabled) in Atlan's |
+| Calibration / generator / EXT trigger | `o_1khz_calib` | P133 | inout | SLEWRATE FAST; fixed 1 kHz in stock, DDS (hi-Z when disabled) in Atlan's; ours adds the EXT trigger input and PULLDOWN |
 
 Atlan4's EF2 variant uses a different pin map and is not in this folder.
 
@@ -248,4 +252,99 @@ The section 10 numbers come from the reports in Atlan4's folder, and those are s
 so the table's first column is the true report for the shipped bitstream. The structural `clkc[1]` violation
 (enable crossing into the 90-degree clock) is present in every build.
 
-Not done: nothing was flashed, `zaklad.v` was not changed, and the CPLD release zip was not installed.
+Not done at that point: nothing was flashed, `zaklad.v` was unchanged, and the CPLD release zip was not installed.
+`SRC_REV=a947e78 ./build.sh` still reproduces `0d4c829c...` after the changes below (checked 2026-10-18).
+
+## Changes
+
+### 1. External trigger on the calibration pin (version 0x1533, 2026-10-18)
+
+Commits 526c969 (design) and 4601dec (testbench). This is roadmap item 2 (`docs/plans/roadmap.md`). Firmware support is
+needed before flashing: firmware that matches 0x1532 exactly treats 0x1533 as an unknown FPGA.
+
+**Protocol** (also in `src/FPGA commands.txt`):
+
+| Cmd | Dir | Change |
+|---|---|---|
+| 0x06 | read, 2 B | Returns 0x15 0x33. The AL3 family is 0x153x; the minor nibble 3 means EXT trigger and 0x28 exist. Everything else is as in 0x1532. |
+| 0x15 | write, 1 B | Trigger source `data[1:0]`: 0 = CH1, 1 = CH2 (both unchanged), 2 = EXT, 3 = reserved (acts as EXT). |
+| 0x28 | read, 1 B | New. bit0 = EXT level (synchronised, filtered), bit1 = generator enable (0x50, the FPGA drives the pin), bit2 = an EXT edge in either direction since the last sampling reset (0x01 = 1 clears it), bits 7..3 = 0. On 0x1532 the byte is stale, so read it only on 0x1533 or later. Stock firmware wrote 0x28 for roll mode. That write still does nothing. |
+
+EXT semantics: the edge comes from 0x16 (0 rising, 1 falling). Mode 0x1A, pretrigger 0x0B, total 0x0C and the auto
+time-out 0x0E work unchanged, and the level 0x17 is not used. The ADC level triggers are off while EXT is selected.
+trigger_address (0x14) has the same meaning as for an ADC trigger: the address of the last sample written before the
+edge. The firmware's trigger-point arithmetic is therefore the same for all sources.
+
+**Pin.** P133 is LVCMOS33. The input buffer is always read, so EXT only makes sense with the generator off (0x50 = 0,
+pad hi-Z). With the generator on, EXT reads the generator's own output back, which triggers on our own generator.
+`zaklad.adc` now sets `PULLTYPE = PULLDOWN` on P133, so an open input idles low instead of floating. Inputs above
+3.3 V are not allowed. The board network between P133 and the probe-comp terminal is not measured
+(`research/notes/hack-repo-hardware-fpga.md` lists the pin among the "1K series" controls).
+
+**Design** (`src/zaklad.v`, block "External trigger input on the calibration pin"):
+- `ext_sync`: two-flop synchroniser on `clk_200MHz`. TD packs the first stage into the P133 input register (IREG).
+- `ext_level`: majority of three consecutive synchronised samples. A 5 ns (one-clock) glitch is rejected; 10 ns and longer pass.
+- `ext_edge`: rising or falling edge of `ext_level` per `trigger_edge`, only when `trigger_ext` is set.
+- `ext_pending`: the edge is latched while `trigger_check_enable` is set (past the pretrigger, not yet triggered).
+  It is applied to `sampling_triggered` right after the next rising edge of `sample_write_clock`, detected in the
+  200 MHz domain with `swc_prev`. ADC triggers are applied at that same point. Pulses shorter than a sample period
+  still trigger at slow timebases.
+- The trigger_address capture, `sampling_enable`, pretrigger/total and auto time-out logic are untouched.
+- Latency from the pad to the filtered edge is 4 to 5 clocks (20 to 25 ns). That is under one sample at
+  <= 10 MSa/s and about 4 to 5 samples at 200 MSa/s. The AD9288 pipeline delay on the ADC side was not modelled.
+  Measure the EXT-to-CH1 skew on the bench before correcting either side.
+- `trigger_rise_detect` / `trigger_fall_detect` gain a `~trigger_ext` term. Cmd 0x15 also writes `trigger_ext` from `data[1]`.
+
+**Build** (TD 4.6.8 SP1, `./build.sh`, 14 s; `zaklad.sdc` unchanged; corner TT 1.10 V 85 C):
+
+| | Atlan4 0x1532 | 0x1533 | Delta |
+|---|---|---|---|
+| LUT / reg / LE | 623 / 476 / 661 | 635 / 486 / 686 | +12 / +10 / +25 |
+| BRAM9K, pads | 32, 60 | 32, 60 | 0 |
+| IOB regs | 14 OREG, 0 IREG | 13 OREG, 1 IREG | P133 holds the synchroniser's first stage, so the generator's output flop moved to fabric. That adds a small fixed routing delay at the pin. STA does not report it; my estimate is about 1 ns. Frequency, duty and the 20 ns DDS jitter are unchanged. |
+| `clk_200MHz` | 4.485 ns (223.0 MHz), 0 errors, TNS 0 | 4.459 ns (224.3 MHz), 0 errors, TNS 0 | Worst path is now the new half-cycle path `sample_write_clock` (negedge) to `sampling_triggered`, slack +0.541 ns. Before, it was the sample-rate counter, +0.515 ns. |
+| `clkc[1]` (`clk_ADC`) | 8.014 ns, 6 errors, TNS -15.8 | 8.394 ns, 6 errors, TNS -18.3 | The same structural enable crossing as before (see `AGENTS.md`). The netlist change moved the placement. |
+| `clkc[0]` (SDC alias) | 8.485 ns, 52 errors, TNS -140.9 | 8.298 ns, 50 errors, TNS -129.9 | Artefact of the duplicate clock definition. |
+
+The build log is clean apart from the existing `TMR-5009` (3 clock nets without constraints). Build steps:
+optimize_gate 2.3 s, place 2.7 s, route 5.3 s.
+
+**Bitstream** (`out/FPGA-ext-trigger.bin`, not committed; rebuild with `./build.sh`, deterministic):
+
+| File | Bytes | sha256 |
+|---|---|---|
+| `out/FPGA-ext-trigger.bin` (= `build/FPGA.bin` of commit 526c969) | 282,898 | `a96567031872ae99bd40f0722a111a08da0f6381b6c710b70998af784a341216` |
+| same, padded with 0xFF to 1 MiB (flash image) | 1,048,576 | `96159a871de3af57c2174fe1ec66ed14b10fbe2e845c44564e7bda9ed252acae` |
+
+Header words are the same as Atlan4's: `cc55aa33 f0000006 18006c31`, user code 0x0056.
+
+**Testbench** (`tb/run.sh [seed]` in WSL; iverilog 12.0, about 4 s per run). It simulates `src/zaklad.v` next to Atlan4's
+0x1532 file. `run.sh` takes that file from git (`REF_REV`, default a947e78) and renames its modules. The PLL and
+sample memory are behavioural models (`tb/sim_models.v`).
+- Phase 1: 60 random CH1/CH2 captures with random level, edge, mode, rate, pretrigger, total, time-out, relays,
+  offsets and generator settings. EXT is toggled at random while the generator is off. Every output pin, every MCU
+  read byte and the capture registers (trigger_address, write/read addresses, flags) must match the reference
+  continuously. Result: 0 mismatches in about 775,000 samples.
+- Directed checks: 0x06 = 0x1533; the 1 MHz generator matches the reference, and the pin is hi-Z when off. 0x28
+  bits 0, 1 and 2. EXT rising and falling at 1 MSa/s give trigger_address = edge address - 1, and a rising edge is
+  ignored when falling is selected. At 200 MSa/s the address lands within the latency window (seen: +1 write
+  address). A 3 ns glitch is rejected and a 12 ns pulse triggers. A 100 ns pulse at a 10 us write clock triggers
+  with the right address. With source CH1 or CH2, EXT edges do not trigger. The same step through CH1 and through
+  EXT gives the same trigger_address. In auto mode the time-out gives trigger_address = pretrigger. Source 3 acts as
+  EXT.
+- Phase 3: after the EXT tests, a resync capture and 10 more random captures. Again 0 mismatches.
+- Result: 38 checks, 0 failed, on seeds 12345, 1, 2, 3, 777, 4242, 99991 and 31337.
+- Mutation check: 4 deliberately broken variants all fail the testbench. They removed the source gate on EXT, the
+  EXT gate on the ADC trigger, the write-clock alignment, and the glitch filter. A fifth changed the ADC channel bit
+  only for sources 2 and 3. It is behaviourally equivalent and passes.
+
+**Bench checks** (owner/coordinator; flash only with firmware that accepts 0x1533):
+1. Measure the input impedance at the probe-comp terminal with the generator off (0x50 = 0): resistance to GND
+   and to 3V3, and the series resistance to P133 if reachable. This tells how strongly an external source must
+   drive the pin and whether a 5 V source needs a divider.
+2. Generator unchanged: 1 kHz default and a 1 MHz setting, frequency and duty on CH1 against the 0x1532 numbers.
+3. EXT from a second source, such as the detector MCU or a TTL output, into the probe-comp terminal, with the same
+   signal on CH1. Check rising and falling, normal and auto mode, and 0x28 bit0/bit2.
+4. Skew between the EXT trigger point and the CH1 edge at 200 MSa/s, 10 MSa/s and 1 MSa/s. The prediction is
+   20 to 25 ns from the FPGA side, plus the AD9288 pipeline delay on the CH1 side.
+5. Open input with EXT selected in normal mode: no triggers. This verifies the pull-down.
