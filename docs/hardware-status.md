@@ -405,3 +405,14 @@ Newest entries at the bottom. Format: date, who, what, result.
   backups/al3_decim_0x1534_padded.bin (c387a15e..., 0xFF-padded fpga/al3/out/FPGA-decim.bin 83140510...), 69 sectors erased, 1104 pages
   programmed, read-back verified, independent verify OK. Scope on battery, USB unplugged, Sipeed FT2232D on J2. Power cycle pending.
 - Owner decision: the spectrum view's frequency axis is capped at 25 MHz (front end rolls off ~30 MHz); fw-gen5 implements it.
+- **Decimation bench, FPGA 0x1534 + fw 0.2.34 (card 0.2.25 booted the new bitstream in legacy mode fine; 0.2.34 FEL-loaded: caps 0xFC0B
+  with DECIM).** At 1 MS/s (N = 200) via host captures (8-bit READ_TRACE path):
+  - Read-back: GET_DECIM mode/S/N and GET_CAPTURE_INFO agree with the spec (boxcar S=0, CIC2 S=8, CIC3 S=15; 0x29 = 0x81/0x82/0x83).
+  - DC level (generator off, pin pulled down): mean codes legacy 84.40 (std 0.86), boxcar 86.22 (0.19), CIC2 86.20 (0.11), CIC3 86.56
+    (0.12). Noise drops 4-8x as expected; the ~1.8-code mean step between legacy and filtered needs an explanation (legacy sampling
+    one core vs both cores summed, and the (adc_a_comp + adc_b_comp)/2 conversion; handed to fw-cal).
+  - 1 kHz square, normal trigger: triggered in every mode; fundamental 5.71 dBV legacy vs 5.63 (boxcar/CIC2/CIC3), within 0.1 dB;
+    **Nyquist A/B spur -27 dBV legacy -> -88 dBV filtered (gone)**; noise floor -55 -> -58 / -64 / -72 dBV.
+  - Alias test, 900 kHz square at 1 MS/s (fundamental folds to 100 kHz): +2.4 dBV legacy, -17.5 boxcar (-20 dB), -30.4 CIC2 (-33 dB),
+    -35.7 CIC3 (-38 dB); the residual for CIC2/3 sits at the 8-bit path's quantisation floor, so the true rejection is likely higher
+    (inference; to be measured with the 16-bit WIDE path once the host has it). Data backups/decim_bench_0x1534.json.
