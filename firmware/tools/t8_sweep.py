@@ -1,7 +1,8 @@
 """T8 bench helper: read raw ADC codes on one channel at every range with a known DC voltage applied.
 Usage: .venv python firmware/tools/t8_sweep.py <applied_volts> [CH1|CH2] [COM10]
 Writes backups/t8_<ch>_<volts>V.json. Requires the mcp venv (run from mcp/ or with PYTHONPATH=mcp/src)."""
-import sys, time, json, numpy as np
+import sys, time, json, os, numpy as np
+ROOT=os.path.abspath(os.path.join(os.path.dirname(__file__),"..",".."))
 from fnirsi1013d.scope import Scope
 V=float(sys.argv[1]); CH=sys.argv[2] if len(sys.argv)>2 else "CH1"; PORT=sys.argv[3] if len(sys.argv)>3 else "COM10"
 rows=[]
@@ -26,5 +27,5 @@ with Scope.connect(PORT) as sc:
     sc.set_channel(CH, range_index=0, coupling=0)
     if hasattr(sc,'legacy_release'): sc.legacy_release()
     elif hasattr(sc,'release'): sc.release()
-out=f"backups/t8_{CH}_{V:.3f}V.json"
+out=os.path.join(ROOT,"backups",f"t8_{CH}_{V:.3f}V.json")
 json.dump(dict(fw=fw, channel=CH, applied_volts=V, rows=rows, cal=str(cal)), open(out,'w'), indent=1); print("saved", out)
