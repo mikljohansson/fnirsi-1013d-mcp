@@ -244,3 +244,63 @@ def test_host_refuses_normal_request_while_deferred_pending(sim_factory):
 def test_connect_rejects_bad_url():
     with pytest.raises(TransportError):
         connect("tcp://nohost")
+
+
+class _ScriptedLink:
+    """A link that answers by script: on each written frame, the callback returns bytes to deliver."""
+
+    description = "scripted"
+
+    def __init__(self, react):
+        self.react = react
+        self.rx = bytearray()
+        self.sent: list[P.Frame] = []
+        self.parser = P.FrameParser()
+
+    def write(self, data: bytes) -> None:
+        for ev in self.parser.feed(data):
+            if isinstance(ev, P.Frame):
+                self.sent.append(ev)
+                self.rx += self.react(ev)
+
+    def read(self, max_bytes: int, timeout: float) -> bytes:
+        out, self.rx = bytes(self.rx[:max_bytes]), self.rx[max_bytes:]
+        return out
+
+    def flush_input(self) -> None:
+        self.rx.clear()
+
+    def close(self) -> None:
+        pass
+
+
+def test_cancelled_deferred_keeps_the_first_answer_and_never_resends():
+    """CI flake (slow runner): after a one-shot cancel the host must collect E_ABORTED, never resend the WAIT,
+    and a late second answer to the same seq must not overwrite the first."""
+    status_body = P.StatusResp(control=2, acq_state=P.AcqState.ABORTED).pack()
+    pending: dict[str, P.Frame] = {}
+
+    def react(f: P.Frame) -> bytes:
+        if f.cmd == P.Cmd.WAIT:
+            pending["wait"] = f
+            return b""
+        if f.cmd == P.Cmd.SET_ACQ_STATE:
+            w = pending["wait"]
+            return (P.response(f, status_body).encode() +
+                    P.response(w, P.error_payload(0, "aborted"), P.Status.E_ABORTED).encode() +
+                    P.response(w, status_body).encode())  # a late duplicate answer
+        return b""
+    link = _ScriptedLink(react)
+    t = Transport(link, resync=False)
+    sent = []
+
+    def press_run() -> bool:
+        if not sent:
+            sent.append(t.control(P.Cmd.SET_ACQ_STATE, P.SetAcqStateReq(1).pack()))
+            return True
+        return False
+    resp = t.deferred(P.Cmd.WAIT, P.U32Req(2000).pack(), 3.0, cancel=press_run, on_cancel=lambda: None, check=False)
+    assert resp.status == P.Status.E_ABORTED
+    assert [f.cmd for f in link.sent].count(P.Cmd.WAIT) == 1  # not resent after the cancel
+    t._pump(0.01)
+    assert t.stats.stale_responses == 1  # the duplicate answer was dropped, not delivered

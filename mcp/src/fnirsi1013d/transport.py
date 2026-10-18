@@ -436,8 +436,8 @@ class Transport:
                     self.stats.garbage_bytes += len(ev)
                     continue
                 self.stats.frames_received += 1
-                if self._outstanding.get(ev.seq) == ev.cmd:
-                    self._inbox[ev.seq] = ev
+                if self._outstanding.get(ev.seq) == ev.cmd and ev.seq not in self._inbox:
+                    self._inbox[ev.seq] = ev  # the first answer wins; a second one (to a resend) is stale
                 else:
                     self.stats.stale_responses += 1
             elif isinstance(ev, P.Garbage):
@@ -592,7 +592,12 @@ class Transport:
                         on_cancel()
                     else:
                         self._request(P.Cmd.STOP, b"", None, check=False)
-                    resp = self._await(seq, time.monotonic() + 1.0)
+                    resp = self._await(seq, time.monotonic() + 2.0)
+                    if resp is None:
+                        # never resend after a cancel: the aborted request is not in the duplicate cache, so the
+                        # device would run it again and answer OK (CI flake, slow runner)
+                        raise TransportError(f"deferred {P.Cmd(cmd).name} was cancelled but its answer did not "
+                                             "arrive")
                 if resp is None:
                     # Retry once with the same seq: the duplicate cache will answer if it completed.
                     self.stats.retries += 1
