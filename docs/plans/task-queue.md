@@ -1,0 +1,62 @@
+# Task queue
+
+Open items discovered on the bench or requested by the owner, not yet dispatched to an agent. The coordinator dispatches
+from here in batches (one agent generation gets a coherent set), and moves items to "Dispatched" with the agent name.
+Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-status.md`.
+
+## Firmware
+
+- [ ] **Spectrum Auto redesign** (owner, 10-18): deterministic probe procedure independent of the current state: probe
+  at 50 MSa/s in normal trigger mode (2-3 captures, skip untriggered), measure f0 (time-domain period) and the band top
+  f_hi (bins above max(peak - 40 dB, median + 10 dB)); span = max(1.25 f_hi, 20 f0) clamped to 25 MHz; rate = slowest
+  with fs/2 >= 1.25 span; FFT length longest the record holds (<= 4096) with RBW <= f0/4; Hann; ref = first scale
+  multiple >= peak + 3 dB after a confirmation capture; scale from dynamic range; Average 4; one refinement pass; 1-2 s
+  allowed with an "Auto..." state; identical presses give identical settings. README documents the algorithm.
+- [ ] **Header: drop "Avg n"/"Max"** (owner, 10-18): the strip's Average field shows it. Header = peak marker per channel,
+  RBW, filter tag only.
+- [ ] **Warnings state consequence + action, units MSa/s** (owner, 10-18): "Aliasing possible: set Acquisition > Filter"
+  (only while Filter is Off and fs < 200 MSa/s), "CHn overrange: increase V/div", "Stopped: press RUN to fill the view",
+  "Waiting for a capture at the new rate"; README table.
+- [ ] **FPGA 0x1535 firmware support** (after fpga-gen4 delivers and the testbench numbers are confirmed): 0x56 FIR
+  enable, 0x29 bits 5/6, S = ... + 1, (N/2)^K maths, latency/settle formulas, Filter box FIR option, SET_DECIM flags
+  bit 3, GET_DECIM, caps bit 16, protocol 1.11. Confirm with fpga-gen4 that the output rate stays 200 MHz / N.
+- [ ] **Default filter = CIC2 now** (owner leaning yes after the 0x1534 bench; CIC + FIR once 0x1535 is benched).
+- [ ] **MMU + D-cache** (big lever: FFT 4096 points 10.9 ms uncached; flat 1:1 map with the framebuffer/DMA regions
+  uncached; measure pass time and FFT_BENCH before/after). Separate agent, careful bench.
+- [ ] **Dead-code purge** (owner dropped the byte-identical rule 10-18): PC_PROTOCOL always on, hidden-option masks
+  replaced by removal (FFT switch, generator Wave/Ampl/Offset/Phase, Long memory, hold-off, 1014D remnants), unused files,
+  check-reference target and reference downloads removed from the Makefile/CI/docs. Do after the spectrum/calibration
+  work lands to avoid conflicts.
+- [ ] **Calibration v2 bench** (when fw-cal delivers): shorted inputs, per-core means equal within 0.3 codes after
+  correction at full-rate and gated rates, T8-style PWM sweep, Nyquist spur gone in legacy mode, volts at 1.000 V /
+  0.010 V match the host model within 1 %; owner reruns base calibration.
+- [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s): deterministic test with
+  GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
+- [ ] **Digital phosphor** (roadmap, owner priority 2 after the spectrum analyser): design in docs/plans/dpos350p-features.md
+  section 4; XY mode could get intensity grading from the same map.
+- [ ] **Bode / frequency response** (owner priority 3): host tool first, then on-scope; design in the same document.
+
+## MCP / host
+
+- [ ] **Version bump to 0.3.0** in mcp/pyproject.toml and firmware PC_FW_VERSION, CHANGELOG section, release notes
+  (mcp-gen3 item 4) when the owner gives the go for v0.3.0.
+- [ ] **Alias residual model check**: compute the 100 kHz bin content for the full 900 kHz square (all odd harmonics folded)
+  for K = 1..3 at N = 200 and compare with the measured -17.5 / -30.1 / -35.8 dBV (asked of fpga-gen4; may be host work).
+
+## FPGA
+
+- [ ] **Long free-running testbench** for the decimation filter (100k outputs, DC + tone, bounded and periodic) as
+  insurance, in fpga-gen4's 0x1535 work.
+- [ ] **Open input / EXT bench tests 1-4** from fpga/al3/README.md "Changes" section 2 (needs an external 3.3 V source
+  referenced to USB ground).
+
+## Owner bench verdicts outstanding
+
+- [ ] 0.2.40/0.2.41 layout: Roll/Average/Filter boxes and the pass-time label alignment; Max hold behaviour; overrange
+  warning; auto mode no longer flashing flat traces at fast time bases.
+
+## Dispatched
+
+- fw-cal (worktree): calibration v2 (roadmap item 5).
+- fpga-gen4: FPGA 0x1535 (CIC N/2 + 15-tap FIR).
+- mcp-gen3: idle, holds item 4 (version bump).
