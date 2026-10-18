@@ -191,18 +191,62 @@ two inner sha256 values in `tools/make_release_sd_package.py`, and update `ATLAN
 files must not change. If Atlan4 publishes a new package, that is a new reference and needs a deliberate
 change.
 
-## 6. Things to confirm after the first real run on GitHub
+## 6. Creating the GitHub repository (owner, once)
+
+The repository does not exist yet, and the local checkout has no remote. These commands create it as a
+**private** repository under the owner's account. They push main and start CI. The owner decides
+separately when it goes public. Run them from the repository root, in Git Bash or WSL. `gh` is logged
+in as `mikljohansson` over ssh.
+
+Before the push, check two things:
+- The working tree holds only what should go up. Run `git status`, and confirm `git ls-files backups`
+  prints nothing.
+- Private repositories use the account's Actions minutes, and Windows jobs count double. One CI run is
+  one firmware job, four mcp jobs (two of them on Windows) and docs-lint.
+
+```
+gh auth status
+gh repo create mikljohansson/fnirsi-1013d-mcp --private \
+  --description "Open firmware, FPGA and MCP server for the FNIRSI 1013D oscilloscope" \
+  --source . --remote origin
+git push -u origin main                       # the push itself starts a CI run (on: push to main)
+gh run list --workflow ci.yml --limit 1       # first run, started by the push
+gh run watch "$(gh run list --workflow ci.yml --limit 1 --json databaseId -q '.[0].databaseId')" --exit-status
+gh workflow run ci.yml --ref main             # second run by workflow_dispatch: shows the cache hits
+gh run watch "$(gh run list --workflow ci.yml --event workflow_dispatch --limit 1 --json databaseId -q '.[0].databaseId')" --exit-status
+gh api repos/mikljohansson/fnirsi-1013d-mcp/actions/permissions/workflow
+```
+
+`gh workflow run` works only once `ci.yml` is on the default branch, which the push takes care of. If
+`gh run list` is empty right after the push, wait a few seconds and run it again. When a run fails, use
+`gh run view <id> --log-failed` to see the failing step.
+
+Before making the repository public, review its contents once more. That includes the vendored
+`research/tools/vendor/capstone/lib/capstone.dll`, a third-party binary of about 7 MB.
+
+## 7. Checklist after the first runs on GitHub
 
 The workflows were validated locally with PyYAML and actionlint 1.7.7 (with shellcheck). The composite
-action's steps were also run in a fresh clone in WSL Ubuntu 24.04. They have not yet run on GitHub.
-After the first push and the first tag, confirm:
+action's steps were also run in a fresh clone in WSL Ubuntu 24.04. Tick each item once it has been seen
+on GitHub.
 
-- apt on ubuntu-24.04 installs `libnewlib-arm-none-eabi` together with `gcc-arm-none-eabi`.
-- The jammy `.deb` URLs in `fetch_gcc10.sh`, on http://archive.ubuntu.com, are reachable from runners.
-- The second run reports cache hits for GCC 10 and for the reference files.
-- The mcp tests pass on windows-latest with Python 3.13. The local runs used Windows with 3.12 and
-  WSL with 3.12.
-- On the tag run, `release.yml` can download the `firmware-image` artifact uploaded inside the called
-  `ci.yml`.
-- `gh release create` succeeds with the default `GITHUB_TOKEN`. The repository setting "Workflow
-  permissions" must allow `contents: write` for the publish job.
+After the push run and the workflow_dispatch run:
+
+- [ ] apt on ubuntu-24.04 installs `libnewlib-arm-none-eabi` together with `gcc-arm-none-eabi`. In the
+      firmware job, "Install arm-none-eabi toolchain" prints `13.2.1`, and `make` links.
+- [ ] Runners can reach the jammy `.deb` URLs in `fetch_gcc10.sh` (https://archive.ubuntu.com), and
+      the pinned sha256 values match. Look for "Fetch Atlan's GCC 10.3.1" on the first run.
+- [ ] The second run, from workflow_dispatch, reports cache hits for `gcc10-Linux-...` and
+      `atlan-v1.00o5-...`. It skips the GCC 10 fetch and prints "nothing to download" for the reference files.
+- [ ] The mcp tests pass on windows-latest with Python 3.13. The local runs used Windows with 3.12 and
+      WSL with 3.12.
+
+After the first tag, `v0.3.0`:
+
+- [ ] `release.yml` downloads the `firmware-image` artifact that was uploaded inside the called `ci.yml`.
+- [ ] `gh release create` succeeds with the default `GITHUB_TOKEN`. The publish job requests
+      `contents: write` itself. If the organisation or repository policy caps tokens at read, the last
+      `gh api` command above shows it, and "Settings > Actions > General > Workflow permissions" must
+      allow write.
+
+Record the outcome, with the run URLs, in `docs/hardware-status.md` or the coordinating session's notes.
