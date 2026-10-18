@@ -215,7 +215,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.32 | 83aa5b5 | ed9fb0f8 | spectrum view: Waterfall and Density sub-views (View field), GET_STATUS byte 43 = 2 / 3; trace area cleared with memset | built, host-tested; owner verdict pending |
 | 0.2.33 | d125a41 | e002ab21 | 0.2.32 plus the view's FFT from SRAM A for N <= 2048 | built, host-tested; bench with 0.2.32's items |
 | 0.2.34 | 1a9a773 | 00847286 | spectrum view on the 0x1534 16-bit records (fx_fft_run_u16, filter rate 200 MHz / N, scale_q24 levels) | built, host-tested; on 0x1533 identical in behaviour to 0.2.33 |
-| 0.2.35 | PENDING | | owner's UX: tap left/right on the plot = zoom out/in, drag = pan, Auto and Reset replace Span/Start; FFT length capped at 4096, default 2048; density with per-cell age (no band) and intensity ramp | built, host-tested |
+| 0.2.35 | 36149d1 | b1be459d | owner's UX: tap left/right on the plot = zoom out/in, drag = pan, Auto and Reset replace Span/Start; FFT length capped at 4096, default 2048; density with per-cell age (no band) and intensity ramp | built, host-tested |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
