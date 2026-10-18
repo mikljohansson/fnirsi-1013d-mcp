@@ -320,11 +320,14 @@ def make_backup(f, tag):
 def confirm(f, args, what):
     if not args.yes:
         raise FlashError("%s requires --yes" % what)
-    if not sys.stdin.isatty():
-        raise FlashError("%s requires an interactive terminal for the typed confirmation" % what)
     want = "".join("%02x" % b for b in f.jedec)
     print("About to %s %s (%s, %d bytes)." % (what, f.name, f.jedec_str(), f.size))
-    got = input("Type the JEDEC ID (%s) to confirm: " % want).strip().lower().replace(" ", "")
+    if getattr(args, "confirm_id", None):
+        got = args.confirm_id.strip().lower().replace(" ", "")
+    elif not sys.stdin.isatty():
+        raise FlashError("%s requires an interactive terminal for the typed confirmation (or --confirm-id)" % what)
+    else:
+        got = input("Type the JEDEC ID (%s) to confirm: " % want).strip().lower().replace(" ", "")
     if got != want:
         raise FlashError("confirmation mismatch, aborted")
 
@@ -554,6 +557,7 @@ def main(argv=None):
     p = sub.add_parser("write", help="erase, program and verify (needs --yes and typed confirmation)")
     p.add_argument("-i", "--input", required=True)
     p.add_argument("--yes", action="store_true")
+    p.add_argument("--confirm-id", help="non-interactive confirmation: must equal the chip's JEDEC ID, e.g. ef4014")
     p.add_argument("--no-backup", action="store_true")
     p.add_argument("--no-erase", action="store_true", help="program only; fails if sectors need erasing")
     p.add_argument("--sector-erase", action="store_true", help="erase only needed 4K sectors (default)")
@@ -564,6 +568,7 @@ def main(argv=None):
     p.add_argument("--chip", action="store_true")
     p.add_argument("--range", help="START:LENGTH, 4 KiB aligned")
     p.add_argument("--yes", action="store_true")
+    p.add_argument("--confirm-id", help="non-interactive confirmation: must equal the chip's JEDEC ID, e.g. ef4014")
     p.add_argument("--no-backup", action="store_true")
     p.add_argument("--unprotect", action="store_true")
     sub.add_parser("wiring", help="print wiring")
