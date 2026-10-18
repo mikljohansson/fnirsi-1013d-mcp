@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c mock_hal.c
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_protocol.h mock_hal.h test_util.h
 
 .PHONY: all test vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/test_session $(OUT)/test_session_debug
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli
 
 $(OUT):
 	mkdir -p $@
@@ -37,12 +37,18 @@ $(OUT)/test_session: test_session.c $(CMDS_DEPS) | $(OUT)
 $(OUT)/test_session_debug: test_session.c $(CMDS_DEPS) | $(OUT)
 	$(CC) $(CFLAGS) -DPC_DEBUG=1 -o $@ test_session.c $(CMDS_SRCS) $(PROTO_SRCS)
 
+# The target's fixed-point FFT, run natively and compared with numpy (test_fft.py)
+FFT_SRCS := $(SRC)/fx_fft.c $(SRC)/fx_fft_tables.c
+$(OUT)/fft_cli: fft_cli.c $(FFT_SRCS) $(SRC)/fx_fft.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ fft_cli.c $(FFT_SRCS)
+
 test: all
 	$(OUT)/test_protocol
 	$(OUT)/test_rx_ring
 	$(OUT)/test_session
 	$(OUT)/test_session_debug
 	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --vectors $(VECTORS)
+	$(PYTHON) -I test_fft.py --cli $(OUT)/fft_cli --tables $(SRC)/fx_fft_tables.c --gen ../../tools/gen_fft_tables.py
 
 vectors:
 	$(PYTHON) -I gen_vectors.py -o $(VECTORS)

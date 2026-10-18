@@ -70,7 +70,7 @@ PC_DEBUG     ?= 0
 PC_FORCE_CDC ?= 1
 PC_FIFO_MAP  ?= 0
 ifeq ($(PC_PROTOCOL),1)
-SRCS += pc_protocol.c pc_cmds.c pc_transport.c pc_hal_scope.c
+SRCS += pc_protocol.c pc_cmds.c pc_transport.c pc_hal_scope.c fx_fft.c fx_fft_tables.c
 PC_FW_BUILD := $(shell git rev-parse --short=8 HEAD 2>/dev/null)
 ifeq ($(PC_FW_BUILD),)
 PC_FW_BUILD := 00000000
