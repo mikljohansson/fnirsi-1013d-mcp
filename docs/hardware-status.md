@@ -165,7 +165,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   square (0.35 V). The output is capacitively coupled with a small positive bias on this hardware; the scope's volts are correct.
 - CH2 zero sweep (backups/t8off_CH2_0.000V.json, fw 0.2.1): at dcoffset 0 A 128.4 / B 128.9 (cores within 0.5 codes), slope -0.265; CH2 is close to the
   firmware model, CH1 is the outlier (A/B spread 5.5). Sent to mcp-gen2 for the calibration file.
-- Firmware 0.2.2 (commit dc49ad0, sha256 0f74b49c..., SD sector commands, caps 0x7C03) loaded hands-free. Startup counters: first poll 2 ms,
+- Firmware 0.2.2 (commit 0d4d9bb, sha256 0f74b49c..., SD sector commands, caps 0x7C03) loaded hands-free. Startup counters: first poll 2 ms,
   first pass 1515 ms, first conversion +30 ms, first capture processed ~0 ms -> the 1.5 s is in draw/touch/RTC init of the first pass.
   SD commands not yet benched (host CLI in progress).
 - USB incident on 0.2.2: after ~10 min idle with the host port closed, the device stayed enumerated but in a Windows Error state (CreateFile failed);
