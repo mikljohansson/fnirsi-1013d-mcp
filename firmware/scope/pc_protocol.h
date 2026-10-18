@@ -16,10 +16,10 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            5     //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            6     //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
-                                        //1.5: GET_EVENT_LOG (fw 0.2.12)
+                                        //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
@@ -79,6 +79,7 @@
 #define PC_CMD_READ_SCREEN        0x0401
 #define PC_CMD_DEBUG_FPGA         0x0F00
 #define PC_CMD_ENTER_FEL          0x0F01
+#define PC_CMD_FFT_BENCH          0x0F02     //1.6: time the on-scope FFT (fw 0.2.27)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Error codes (P-9)

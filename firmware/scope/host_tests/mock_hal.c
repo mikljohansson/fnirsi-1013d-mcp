@@ -423,6 +423,16 @@ void     pc_hal_link_stats(uint32_t *v) { uint32_t i; for(i=0;i<PC_TSTAT_COUNT;i
 void     pc_hal_usb_events(uint32_t *v) { uint32_t i; for(i=0;i<PC_USBEV_COUNT;i++) v[i] = 2000 + i; }
 void     pc_hal_rx_debug(uint32_t *v)   { uint32_t i; for(i=0;i<PC_RXDBG_COUNT;i++) v[i] = 3000 + i; }
 uint32_t pc_hal_boot_splash_ms(void)   { return 5000; }
+
+uint32_t mock_fft_bench_reps;
+uint32_t pc_hal_fft_bench(uint8_t *dst, uint32_t reps)
+{
+  mock_fft_bench_reps = reps;
+  memset(dst, 0, 8 + 24);
+  pc_put_u16(dst, 1); pc_put_u16(dst + 2, reps); pc_put_u32(dst + 4, 0x00050078);
+  pc_put_u16(dst + 8, 4096); dst[10] = 1; pc_put_u32(dst + 16, 6000);
+  return 8 + 24;
+}
 void     pc_hal_restart_info(uint32_t *v) { uint32_t i; for(i=0;i<PC_RESTART_COUNT;i++) v[i] = 6000 + i; }
 
 uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total)

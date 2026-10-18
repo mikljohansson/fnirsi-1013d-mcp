@@ -1860,6 +1860,24 @@ static int h_debug_fpga(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// FFT_BENCH (1.6, fw 0.2.27): u8 reps (0 = 3, at most 16); main loop only, blocks the UI pass for the run time
+
+static int h_fft_bench(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint32_t reps = req[0];
+
+  (void)len;
+
+  if(reps == 0)
+    reps = 3;
+  if(reps > 16)
+    return pc_error(s, PC_E_BAD_ARG, 0, "reps");
+
+  *rl = pc_hal_fft_bench(resp, reps);
+  return PC_OK;
+}
+
 static const pc_cmd_entry pc_cmds[] =
 {
   { PC_CMD_PING,         F_BUSY | F_CONTROL | F_BASIC, 0, h_ping },
@@ -1897,6 +1915,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_READ_SCREEN,  0,                            PC_CAP_SCREENSHOT, NULL },   //BENCH: T9 before it gets a handler
   { PC_CMD_DEBUG_FPGA,   0,                            PC_CAP_DEBUG_RAW, h_debug_fpga },
   { PC_CMD_ENTER_FEL,    0,                            PC_CAP_ENTER_FEL, h_enter_fel },
+  { PC_CMD_FFT_BENCH,    F_BASIC,                      0, h_fft_bench },
 };
 
 static const pc_cmd_entry *pc_find(uint16_t cmd)

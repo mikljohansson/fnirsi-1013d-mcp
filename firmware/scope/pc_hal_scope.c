@@ -30,6 +30,7 @@
 #include "pc_hal.h"
 #include "pc_cmds.h"
 #include "pc_hooks.h"
+#include "spectrum.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -1098,6 +1099,11 @@ void pc_glue_boot_splash(void)
 uint32_t pc_hal_boot_splash_ms(void)
 {
   return pc_boot_splash_ms;
+}
+
+uint32_t pc_hal_fft_bench(uint8_t *dst, uint32_t reps)
+{
+  return spectrum_bench(dst, reps);
 }
 
 //System settings menu height (variables.h SYSTEM_MENU_HEIGHT): Time & Date is the last row, 59 px

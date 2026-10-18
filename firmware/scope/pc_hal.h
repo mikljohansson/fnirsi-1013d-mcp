@@ -217,4 +217,10 @@ uint8_t *pc_hal_sd_stage(uint32_t *capacity);                                   
 // the target.
 void     pc_hal_enter_fel(void);
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// Spectrum analyser (MAIN context). fw 0.2.27: FFT_BENCH times the FFT on the CH1 trace buffer, reps runs per size;
+// writes the response body (docs/protocol.md section 14 row 44) and returns its length (<= PC_FFT_BENCH_MAX).
+#define PC_FFT_BENCH_MAX  (8 + 8 * 24)
+uint32_t pc_hal_fft_bench(uint8_t *dst, uint32_t reps);
+
 #endif /* PC_HAL_H */
