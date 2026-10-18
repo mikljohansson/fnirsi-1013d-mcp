@@ -54,7 +54,8 @@ firmware/bootloader/   bootloader/updater work (later)
 firmware/tools/        mksunxi, flashfilepacker, SD image + FEL load scripts
 fpga/al3/              Anlogic TD project for the AL3A10 (base: Atlan4 zaklad.v)
 mcp/                   Python MCP server + serial client library + host-side analysis
-docs/                  hardware-prep.md, flashing.md, protocol.md, plans
+docs/                  hardware-prep.md, protocol.md, mcp-tools.md, agent-measurement-guide.md, releasing.md,
+                       fpga-flash-from-mcu.md, hardware-status.md (bench log), plans/ (task-queue.md first)
 ```
 
 Reference checkouts (read-only, outside this repo, never build inside them):
@@ -75,13 +76,15 @@ Reference checkouts (read-only, outside this repo, never build inside them):
   python3. Run builds from WSL with the repo at `/mnt/d/src/fnirsi-1013d-ai`. Root in WSL is available
   without a password via `wsl -d Ubuntu -u root` for installing packages.
 - Firmware: `cd firmware/scope && make -j` produces `build/fnirsi_1013d.bin` (eGON.EXE image for SD sector
-  750 / FEL). apt toolchain is GCC 13.2.1; release images use GCC 10.3.1 (`firmware/tools/fetch_gcc10.sh`, `make gcc10`).
-  Provenance note: until 2026-10-18 evening a `PC_PROTOCOL=0` build was kept byte-identical to Atlan's v1.00o5 binary
-  (verified, see git history and the CI logs up to that date); the owner dropped that rule to allow simplification and
-  dead-code removal (fw 0.2.47 removed the switch and `make check-reference`). The lineage is documented in README
-  "Credits" and in git history. Images are reproducible: they depend only on the commit (identity = commit hash and
-  commit time from git), so the same commit gives the same sha256 in any checkout and in CI. SD layout, image
-  format, `make_sd_image.py` and FEL commands: `firmware/README.md`.
+  750 / FEL). apt toolchain is GCC 13.2.1; release and bench images use GCC 10.3.1 (`firmware/tools/fetch_gcc10.sh`,
+  `make gcc10` gives `build-gcc10-pc/`; `make gcc10-nommu` builds the same code with the MMU off, version suffix
+  `-nommu`, for the fw 0.2.48 A/B). The `PC_PROTOCOL=0` build and the byte-identical check against Atlan's v1.00o5
+  binary are history: the owner dropped that rule on 2026-10-18 and fw 0.2.47 removed them (lineage: README "Credits",
+  git history, CI logs up to that date). Images are reproducible: they depend only on the source, the toolchain and
+  the commit (identity = commit hash and commit time read from git), so the same commit gives the same sha256 in any
+  checkout and in CI (`firmware/README.md` "Reproducible images", check in `docs/releasing.md`). SD layout, image
+  format, `make_sd_image.py` and FEL commands: `firmware/README.md`; SD packages for a release:
+  `tools/make_release_sd_package.py`.
 - Compiler flags are inherited from Atlan4 (`-mcpu=arm926ej-s -O3 -nostdlib`, custom `mem*.s`, tiny malloc,
   no libc). Keep it that way; do not introduce libc or floating point in acquisition paths.
 - Python host tools: `python -I` for anything that reads downloaded/untrusted files; venv under `mcp/.venv`.
