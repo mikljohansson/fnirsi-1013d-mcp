@@ -1,8 +1,9 @@
 # firmware/ handoff for agents
 
-**Current state (fw-gen6, 2026-10-18): latest build fw 0.2.44** (protocol 1.11: FPGA 0x1535 FIR support, spectrum
-strip repaint fix, Filter default CIC2, USB suspend as a state), see the ladder (section 8) and **section 22**; section
-20 (spectrum analyser, auto trigger mode) and 21 (calibration v2) still hold. The USB drop story: 0.2.25 PHYCTL fix closed the cold-boot drops; the reopen-after-idle reset is open (section 22). Sections 9-17 below are
+**Current state (fw-phosphor, 2026-10-19): branch fw-phosphor builds fw 0.2.46** (protocol 1.13: digital phosphor
+view, section 24) on fw-gen6's 0.2.44 (protocol 1.11: FPGA 0x1535 FIR support, spectrum strip repaint fix, Filter default
+CIC2, USB suspend as a state, **section 22**); see the ladder (section 8); section 20 (spectrum analyser, auto trigger
+mode) and 21 (calibration v2) still hold. The USB drop story: 0.2.25 PHYCTL fix closed the cold-boot drops; the reopen-after-idle reset is open (section 22). Sections 9-17 below are
 older generations' notes, kept for history. Read the root `AGENTS.md` first, then this file. Details live in `firmware/README.md` (build, SD layout, FEL, memory budget, boot, bring-up
 checklist), `docs/protocol.md` (the spec; section 14 lists every deviation and addition, rows 28-42 are this
 generation's) and `docs/hardware-status.md` (bench log, newest at the bottom). This file does not repeat them.
@@ -32,6 +33,8 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
                            host-buildable (section 19)
   adc_cal.c/.h             calibration data v2: per-core zero model, sector 708 block, correction maths. Pure C,
                            host-buildable (section 21)
+  phos_map.c/.h            phosphor hit-count map: rasteriser, decay, render, palettes. Pure C, host-buildable (section 24)
+  phosphor.c/.h            phosphor view (main menu row 7, strip, hooks in scope_display_trace_data; section 24)
   host_tests/              test_protocol.c, test_rx_ring.c, test_session.c (+ mock_hal.c FPGA/transport model), vector_check.c,
                            check_vectors.py, gen_vectors.py, bench_link.py (pyserial, bench only)
 firmware/tools/            mksunxi.py, make_sd_image.py, fetch_gcc10.sh, spiflash tools (not this agent's)
@@ -228,6 +231,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.42 | cebb982 | b23f5fc8 | deterministic Auto (probe 50 MSa/s, period search, derive from f0 / f_hi, confirm, refine once), warnings with consequence + action, "MSa/s" units, no Avg tag in the header | built, host-tested |
 | 0.2.43 | 80ab45d | 7d2ea871 | calibration data v2: per-core zeros (full / gated clock), dithered correction, GET_CAL 248 bytes (protocol 1.10, row 48, section 21) | built, host-tested; bench list README 6.2 |
 | 0.2.44 | e0ee6f3 | 08f9a5ed | FPGA 0x1535 FIR (protocol 1.11, row 49), spectrum view not repainted by scope_preset_values, Filter default CIC2 (PC_DECIM_DEFAULT), USB suspend as a state + resume logging (row 50), generator Freq row no longer hits the removed Wave row; includes main's fw-cal 64 full-rate conversions | built, host-tested (section 22) |
+| 0.2.46 | 1b6359f | cdba5b51 | digital phosphor view (main menu row 7; Persistence / Palette / Clear strip; XY), GET_STATUS byte 43 = 4 (protocol 1.13, row 52), settings word 210 (fw-phosphor, section 24) | built, host-tested (test_phosphor 95 checks); bench steps in section 24 |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -839,3 +843,78 @@ Commits 2e0cd10 (FIR), 9591d83 (repaint), e09b25a (default), 45b9b9a (USB suspen
   Average, Filter / Long memory slot) and channel (FFT row gated by PC_CH_COMPACT) menus: nothing else stale.
 - mcp/ needs: GET_DECIM byte 1 bit 3 / 0x29 bits 6-5 / caps bit 16 decoding, SET_DECIM fir flag, and the new event
   field meanings of types 1-4.
+
+## 24. fw-phosphor: digital phosphor view (fw 0.2.46, protocol 1.13)
+
+Branch `fw-phosphor` from main 854ed2a (0.2.44). Commits f46e1c5 (design doc), faca915 + 04c60bc (map core + host
+test), 15f15e0 (view, hooks, menu row, settings word), 8be5f3a (0.2.46 / protocol 1.13, row 52), 0570f6b (strip clear),
+1b6359f (README, CHANGELOG). Image from 1b6359f: sha256 cdba5b514217f62dacceb5dcba8a36c4bb438c4c169988bb4702f588cbc8067e
+(481,280 B, 940 SD sectors), pinned as backups/fw-0.2.46-cdba5b51.bin + .elf. Nothing benched. fw-cal2 works in
+parallel on 0.2.45 / 1.12 / row 51: expect trivial merge conflicts in pc_protocol.h (minor + history comment),
+test_session.c (the three proto-minor checks, take 13), CHANGELOG and the ladder above.
+
+Design and arithmetic: docs/plans/phosphor-design.md; user-facing: README section 5 "Phosphor view"; protocol section 14
+row 52. Points a successor needs:
+- Files: `phos_map.c/.h` (pure C, host-buildable: rasteriser, Bresenham, render + decay, palettes, parameter maths;
+  `host_tests/test_phosphor.c`, 95 checks: cost model = cells touched per record for flat / square / zoomed / worst
+  shapes, decay to 1/16 at the persistence time at 33 and 50 ms passes, dither unbiased for small counts, steady states
+  of the rate-normalised increment, brighter-channel rule, determinism) and `phosphor.c/.h` (target only: the view).
+- Map: uint8 per pixel, **column-major** (400 bytes per column), 728 x 400, per-column extents `lo | (hi + 1) << 16` (0 =
+  empty, so .bss zero is a valid empty map). Everything works on 32-bit words (uncached DDR): SWAR saturating add,
+  two-lane decay products. Tables (2 code-to-row LUTs, 4 palettes) in SRAM A 0x0400-0x0FFF (`phos_sram_base` hides the
+  literal from GCC's -Warray-bounds); the spectrum's FFT owns 0x1000-0x7008, the vectors 0x00-0x3F.
+- Decay: every pass by k1^dt (Q24 per ms, `phos_persist_k1`, dt capped at 200 ms, none while stopped), applied in Q16
+  per cell with a per-column dither (`(seed + 25033 x)` mod 65536). The first version used a 50 ms tick and Q8: rejected
+  because ticks land on some 30 ms passes and not others (brightness shimmer). The render paints the count **before**
+  that pass's decay, so saturation shows full brightness; CH2 compares its decayed count with CH1's decayed count.
+- Increment: `phos_inc(k1, interval)` = 319 x (1 - k1^interval), interval = EMA of ms between added records; Infinite =
+  1. Brightness therefore means hit probability at any record rate.
+- Hooks (all under PC_PROTOCOL, `pc_hooks.h`): `PC_PHOSPHOR_SKIP()` before both `switch(scopesettings.ACQ_trace)` in
+  `scope_display_trace_data` (skips the polylines), `PC_PHOSPHOR_DRAW()` before `display_REFx_data()` (new record,
+  render, strip), `PC_PHOSPHOR_XY(index, last)` before the XY loop (skips it), `PC_PHOSPHOR_STRIP()` after the pointers in
+  `scope_preset_values` (its grid redraw would otherwise paint the slider over the strip until the next pass), settings
+  word 210 in `scope_save_config_data`. Glue in pc_hal_scope.c: main menu height 410 and row 7 (y 402..459, rect 413),
+  `pc_glue_spectrum_touch` also asks `phosphor_touch` (strip y >= 452 only; the rest of the trace area keeps 1.00o5's
+  gestures), `phosphor_new_data` in the UI capture hook and in `pc_hal_trace_build` only while the host capture is ARMED /
+  TRIGGERED (so READ_TRACE re-reads do not add), `phosphor_capture_info` beside the spectrum's, `phosphor_service`,
+  `phosphor_settings_restore` in `pc_ui_fix_settings`, `pc_hal_display_mode` = 4. PC_PROTOCOL=0 build verified
+  byte-identical to 854ed2a's PC_PROTOCOL=0 build (GCC 10, fixed epoch); warnings 32 = 32 on GCC 10 and 13; the new files
+  are clean with -Wextra. (`make check-reference` against Atlan's binary no longer matches on main since the owner
+  dropped that rule; compare against the base commit instead, script idea: git archive the base into the scratchpad.)
+- Clearing: per channel when `phos_inputs` changes (enable, coupling, V/div display + sample, input_calibration of the
+  sample range, trace position, dcoffset, dc_shift_size): the LUT is rebuilt from `scope_get_y_sample` with the trace
+  buffer pointer swapped for a 0..255 ramp, so rows match 1.00o5's traces, cursors and measurements by construction.
+  Both maps on `phos_xkey` (dx Q16, disp_xstart / xend, time base, rate, trigger position, depth, settriggerpoint, filter
+  K / FIR, XY, persistence). Not on trigger level (always-50 % moves it every record).
+- Known limits / open: one record per pass (no fast loop; design-study steps P3-P5 are open: window readout, several
+  records per frame, wfm/s counter is already there); the waveform-save thumbnail keeps the last scope-view
+  tracepoints; the Trace selector does not apply; per-pass costs are estimates (the bench must measure `pass_ms`);
+  `mcp/` `DisplayMode` lacks 2 / 3 / 4 (server falls back to the number; tell mcp-gen3).
+
+**Bench steps (owner, with the coordinator on COM10)**
+1. FEL-load the image (`sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`), check #VER
+   fw=0.2.46 proto=1.13. CH1 probe (x1) on the calibration pin, generator on, 1 kHz, duty 50 %; CH1 1 V/div DC, 200
+   us/div, trigger CH1 rising, Auto.
+2. Main menu: a seventh row "Phosphor display" under "Spectrum analyzer" (icon: three grey edges). Tap it. Expect: the
+   scope screen unchanged except the bottom line: `Persistence 1 s | Palette Mono | Clear | Scope` boxes and "NN wfm/s"
+   in grey at the right (about 25-33). The trace is yellow, sharp, both edges drawn, grid visible around it; pointers,
+   measurement tiles and cursors (switch them on) where they always are. The main menu row now reads "Scope view".
+3. Generator duty: toggle 30 % / 70 % (generator menu, or the coordinator loops SET_GEN every 0.25 s): both falling
+   edges visible at about equal brightness; stop toggling and the old edge fades within about 1 s.
+4. Persistence: tap through 5 s (slow fade), Infinite (no fade; rare paths stay), 0.2 s (almost the normal trace),
+   back to 1 s; each tap clears. Palette: Heat (frequent white / red, rare blue), Mono. Clear: the picture empties and
+   refills at once.
+5. Change V/div, drag the trace position, change the time base: the picture clears and rebuilds at the new place,
+   no ghost. STOP: the picture freezes (no fade); RUN: continues.
+6. CH2 on the same pin (cyan): where both overlap the brighter shows; turning CH2 off removes only its picture.
+7. Optional: XY display mode: a Lissajous graded in magenta. Roll mode (slow time base): the view ends, rows 6-7
+   hidden in the main menu.
+8. Main menu row 6 while the phosphor view is on: switches to the spectrum view (its "Scope" field returns to the
+   scope view). Row 7 from the spectrum view: switches to phosphor.
+9. Host: GET_STATUS byte 43 = 4 in the view, 0 after "Scope"; `pass_ms` in the view vs the scope view for the 1 kHz
+   square (expected within ~5 ms; report both); READ_SCREEN shows the graded picture. Power off / on: persistence and
+   palette kept, boots into the scope view.
+Bug indicators: trace not on the pointer / cursor positions (LUT mismatch); grid missing under or around the trace;
+brightness shimmer at a constant signal; a picture that never fades at 1 s or never clears after a V/div change; the
+strip briefly replaced by the slider on a time base change; wfm/s far below the scope view's record rate; `pass_ms`
+over 50 ms for a single clean trace; any hang or restart (SRAM 0x0400-0x0FFF use; check GET_LINK_STATS 49-56).

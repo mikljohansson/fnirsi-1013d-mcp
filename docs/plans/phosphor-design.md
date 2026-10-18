@@ -124,7 +124,8 @@ the lit runs only).
 - Strip fields (tap; one line each, grey label, white value; the value is the label, no on/off words):
   Persistence 0.2 s -> 1 s -> 5 s -> Infinite -> 0.2 s; Palette Mono <-> Heat; Clear; Scope (leave). Status field at
   the right: "NN wfm/s" (records added per second), or a warning in orange with consequence and action:
-  "CHn overrange: increase V/div", "No trigger: check the trigger level", "Stopped: press RUN to resume".
+  "CHn overrange: increase V/div", "No trigger: check the trigger level", "No channel enabled: switch on CH1 or CH2".
+  Stopped: the field is empty and the picture frozen (STOP is the user's own choice and the RUN/STOP chip shows it).
 - Settings word 210 (next after the spectrum's 208/209, unused by 1.00o5): 0x9A00 marker | palette << 2 | persistence;
   restored only when the marker matches and the fields are in range (the spectrum's rule). The mode itself is not
   restored (boot into the scope view).
