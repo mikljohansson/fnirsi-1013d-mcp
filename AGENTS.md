@@ -1,5 +1,7 @@
 # AGENTS.md
 
+Repository: **fnirsi-1013d-mcp** (local checkout directory may still be named `fnirsi-1013d-ai`).
+
 Guidance for AI agents (Claude Code, Codex, others) and humans working in this repository. Read fully before
 touching code. Subdirectories carry their own `AGENTS.md` handoffs: `firmware/AGENTS.md`, `mcp/AGENTS.md`,
 `fpga/al3/AGENTS.md`.
