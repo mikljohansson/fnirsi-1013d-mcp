@@ -960,6 +960,9 @@ under 1 MHz, outside that minimum, which is one more reason to make the filter m
 
 ### 6.2 Calibration data v2 (fw 0.2.43, protocol 1.10)
 
+Superseded by v3 (section 6.3) for the block, the gains and the readout arithmetic; the zero model, the zero
+step and its checks below still hold.
+
 Files: `adc_cal.c/.h` (model, sector block, checks; pure C, host-tested by `host_tests/test_adc_cal.c` and the
 `adc_cal` section of `docs/protocol-vectors.json`), `scope_functions.c` (`scope_do_baseline_calibration`, load and
 save of sector 708), `fpga_control.c` (`fpga_channel_correction`, `fpga_prepare_correction`, the readout loop),
@@ -1053,3 +1056,94 @@ calibration's own 708/709 write: back up sectors 700-710 first):
 10. Pass times as in step 1: equal or faster.
 11. Old firmware with the new card (backup first): 0.2.42 boots and shows the new PWM centres and compensations;
     after 0.2.42 saves sector 708 (input or DC-shift calibration end), 0.2.43 reports flags 0 (block cleared).
+
+### 6.3 Calibration data v3: per-core, per-class gain (fw 0.2.45, protocol 1.12)
+
+Why: the gain bench of 2026-10-18 (docs/hardware-status.md, CH1 range 2, +-1.0045 V against the shorted-input raw
+zeros) found a linear gain mismatch between the cores at full rate (A 28.62, B 27.71 codes/V, A/B 1.033) and almost
+none gated (A 28.54, B 28.42, A/B 1.004), and the full-rate class 1.1 % below the gated one. The zero-only v2 model
+left an A/B difference that grows with the signal (0.9 code per volt at 200 MSa/s, the fs/2 spur) and made 200 MSa/s
+and every filtered capture read 2.7-3.5 % low against the gated voltage calibration. One gain per core and class is
+enough (both polarities give the same ratio; core A's gated 0.5-code bow is INL and stays).
+
+**Model.** raw_k = z_k + V g_k[c], z_k = zero[c][k][r] / 16 + slope[c][k][r] / 65536 x dcoffset (the offset slope is
+now per class too). G_k[c] = g_ref / g_k[c], g_ref = the mean gain of both cores in the gated class, which is what
+`input_calibration` is fitted on: legacy gated volts keep their calibration, the full class is pulled onto it.
+
+**Gain step** (`scope_do_gain_calibration`, after a passed zero step, AL3 bitstreams only): the box asks for both
+probes on the calibration post; OK starts it, a touch outside skips it. The generator is set to frequency 0 with
+threshold 0 (output low, about -1.24 V against probe ground) or all ones (high, about +1.87 V); both cores and both
+clock classes see the same node, so no level needs to be known. Per channel, about 0.7 s:
+
+1. Range 2, PWM centre, gated: 2 conversions per level. The span picks the range (`acal_gain_range`, nominal
+   sensitivities 1 : 2 : 5 : 10 : 25 : 50): the most sensitive with a predicted span of at most 120 codes. x1 probe:
+   range 2, about 88 codes; x10: range 5.
+2. The offset PWM is moved (`acal_gain_pwm`, gated slopes) so the two levels sit symmetric about the 0 V code: the
+   midpoint of the levels is +0.31 V, so without it the levels sit at -35 / +53 codes, and core A's bow (0.53 code at
+   +-28 codes, quadratic) would shorten its span by 1.2 % (0.5 % gain error; the host test shows 0.07 % centred).
+3. Low, high, low again; at each 8 gated conversions (2 MSa/s) and 64 at 200 MSa/s (the 25 kHz PWM ripple, as the
+   zero step). span_k[c] = high - mean of the lows (linear drift cancels); G_k[c] = (span_A + span_B)[gated] / 2 /
+   span_k[c], stored as Q15.
+
+Checks (`acal_gain_store`, first failure wins, "CH1: <reason>" in the box; a failed channel keeps its gains, the other
+channel's new ones are saved): any sample at 0 or 255 "gain: level clips"; the two lows more than 0.5 code apart "gain:
+level drifts"; any span under 40 codes (no probe, levels swapped) "gain: probe on post?"; |G_A - G_B| > 0.08 in a class
+"gain: cores differ" (bench 0.033); (G_A + G_B) full / gated outside 0.9..1.1 "gain: clock classes" (bench 1.011). A
+new zero step carries the previous block's measured gains over (`acal_gain_carry`, flag KEPT); never measured =
+unity.
+
+**Assumptions (to verify on the bench, list below).** (1) The gain mismatch is inside the ADC, so gains measured on
+one range hold on all six (inference from the mechanism: the cores share the front end; not measured). (2) The post
+levels are static for the second the step takes (logic level of the FPGA pin against VRF1). (3) INL is even about
+the 0 V code to first order (only that part cancels by the centring).
+
+**Correction** (`acal_correction`, once per readout): gain_k = G_k x 65536, off_k = round((65536 T16 - gain_k z16_k) /
+16); per sample code = clamp((raw x gain_k + off_k + u) >> 16), u = the top 16 bits of the xorshift32, so the mean is
+exactly T + G_k (raw - z_k). With v1 (no block) gain 65536 and off = compensation x 65536 give the 1.00o5 arithmetic
+exactly. The rail rule (core B pass) uses clip_lo = the higher of both cores' codes for raw 0 and clip_hi = the lower
+of their codes for raw 255: below / above them both codes of the pair take the lower / higher one (equal to the
+1.00o5 rule with unity gains). 16-bit path: gain16 = 2 G_A G_B / (G_A + G_B) of the full class (each output weighs
+both cores equally), folded into the conversion scale (`acal_scale`), corr16 = T16 - gain16 / 65536 x the mean
+full-class zero; the 8-bit loop then runs at unity gain with no offset. The spectrum view's 16-bit FFT uses the same
+scale for its zero and dB terms.
+
+**Cost.** GCC 10 objdump of `fpga_read_adc_data`, 0.2.44 vs 0.2.45: the same loads and stores per sample; core A
+pass 24 instructions per sample instead of 26 (mla + add + asr replace shift, compare, conditional add), core B pass
+about 2 more ALU instructions for the min / max of the rail rule. Pass time expected unchanged (30 ms on 0.2.43).
+
+**Block v3**, sector 708 bytes 128..431 (304 bytes): header as v2 with version 3, length 304; per channel 144 bytes:
+u16 pwm[6], i16 zero[class][core][range], i16 slope[class][core][range], u8 noise[class][core][range], u16
+gain[class][core] (Q15), u8 gain_range (0xFF never measured), u8 gain_flags (bit 0 kept), u16 gain_lever (1/16 code);
+CRC-32. v2 blocks are not read (version check): after loading 0.2.45 the scope runs on the 1.00o5 compensations
+until the base calibration is run again. GET_CAL 256 bytes: protocol section 14 row 51.
+
+**Bench procedure** (coordinator and owner; back up SD sectors 700-710 first, the calibration writes 708 and 709):
+
+1. FEL-load 0.2.45. GET_CAL ch 0 / 1: 256 bytes, byte 72 = 1, flags bit 0 clear (the v2 block on the card is not
+   read). Diagnostics: "Calibration data: v1". Let the scope warm up 10 minutes.
+2. Owner: probes and USB unplugged, System settings, Base calibration, OK: "Ch1.... OK", "Ch2.... OK" (about 7 s,
+   2 s more than 0.2.43 for the full-rate slopes), "Calibration successful", then the yellow prompt "Gain: put both
+   probes on the cal post, OK".
+3. Owner: both probes switched to x1, both tips on the calibration post (ground clips not needed), OK: "Ch1.... OK",
+   "Ch2.... OK", "Gain calibration successful". Reconnect USB.
+4. GET_CAL both channels: byte 72 = 3, flags bit 3 set, bit 4 clear; block gain_range 2, gain_lever about 88 codes
+   (1400-1420); CH1 gains (Q15 / 32768) gated A and B within 0.995..1.005, full A about 0.995, B about 1.028 (the bench
+   predicts 0.9951 / 1.0278 / 0.9979 / 1.0021). CH2: record. Diagnostics: v3, the gains, "gain at range 2, lever ...".
+5. Repeat the gain bench (DMM-read +-1.0045 V on CH1, range 2, DC, dcoffset 0, 4 captures averaged, READ_TRACE flags
+   0, odd = A / even = B means; 200 MSa/s, 1 MSa/s, 10 kSa/s, CIC2 at 1 MSa/s). Pass: at 200 MSa/s |A - B| <= 0.15
+   code at both polarities (was +1.25 / -0.58); at the gated rates A - B the same at both polarities within 0.15
+   (what remains is core A's bow, about -0.5, not a gain); (mean(+1 V) - mean(-1 V)) / 2.009 V equal within 0.2 % at
+   all four settings (was 28.17 full / CIC2 28.02 vs 28.48 gated); firmware volts ((code - zero_q8 / 256) x uv_per_lsb)
+   within 0.5 % of the DMM at every rate (was 2.7-3.5 % low at full rate and CIC2).
+6. Shorted inputs, both channels, the 0.2.43 zero checks: A - B within 0.1 gated, 0.15 at 200 MSa/s, means within 0.1
+   of zero_q8 / 256, filtered = legacy.
+7. Range assumption: generator static on the post (SET_GEN enable 1, freq_mode 1 phase_inc 0, duty_mode 1 threshold 0,
+   then 0xFFFFFFFF), CH1 x1 at ranges 1, 2 and 3, 200 MSa/s and 1 MSa/s, 4 captures per level: corrected spans
+   (high - low) of A and B agree within 0.3 % at every range and rate, and full vs gated within 0.3 %. If range 1 or
+   3 misses while range 2 passes, the gains depend on the range: report it (v4 would store them per range).
+8. Spectrum view with the 1 kHz square on the post, CH1: the fs/2 bin at 200 MSa/s at least 15 dB lower than on
+   0.2.44; at 1 MSa/s legacy no worse (the gated gains barely change, the remaining spur there is INL).
+9. Pass times (acquisition menu, GET_STATUS) at 20 us/div and 1 ms/div: within 1 ms of 0.2.43's 30 ms.
+10. Skip and partial paths: run the base calibration again and touch outside the gain prompt: GET_CAL flags bit 4
+    (kept) set, gains unchanged. Again with only the CH1 probe on the post: "Gain calibration failed", "CH2: gain:
+    probe on post?", CH1 gains new (bit 4 clear), CH2 kept.
