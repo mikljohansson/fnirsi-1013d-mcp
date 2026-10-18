@@ -2,7 +2,7 @@
 
 **Current state (fw-gen6, 2026-10-18): latest build fw 0.2.44** (protocol 1.11: FPGA 0x1535 FIR support, spectrum
 strip repaint fix, Filter default CIC2, USB suspend as a state), see the ladder (section 8) and **section 22**; section
-20 (spectrum analyser, auto trigger mode) and 21 (calibration v2) still hold. The USB story is closed (0.2.25 PHYCTL fix, cold-boot soak clean). Sections 9-17 below are
+20 (spectrum analyser, auto trigger mode) and 21 (calibration v2) still hold. The USB drop story: 0.2.25 PHYCTL fix closed the cold-boot drops; the reopen-after-idle reset is open (section 22). Sections 9-17 below are
 older generations' notes, kept for history. Read the root `AGENTS.md` first, then this file. Details live in `firmware/README.md` (build, SD layout, FEL, memory budget, boot, bring-up
 checklist), `docs/protocol.md` (the spec; section 14 lists every deviation and addition, rows 28-42 are this
 generation's) and `docs/hardware-status.md` (bench log, newest at the bottom). This file does not repeat them.
@@ -227,7 +227,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.41 | 0fd6a9c | 08aeaa63 | firmware auto trigger mode (auto captures arm normal; time-out max(100 ms, 2 records) forces an untriggered record, reported truthfully, UI and host); spectrum drops occasional untriggered records; zoom-in steps the rate down at span <= fs/16 | built, host-tested (test_fw_auto_timeout) |
 | 0.2.42 | cebb982 | b23f5fc8 | deterministic Auto (probe 50 MSa/s, period search, derive from f0 / f_hi, confirm, refine once), warnings with consequence + action, "MSa/s" units, no Avg tag in the header | built, host-tested |
 | 0.2.43 | 80ab45d | 7d2ea871 | calibration data v2: per-core zeros (full / gated clock), dithered correction, GET_CAL 248 bytes (protocol 1.10, row 48, section 21) | built, host-tested; bench list README 6.2 |
-| 0.2.44 | 45b9b9a | f063bc27 | FPGA 0x1535 FIR (protocol 1.11, row 49), spectrum view not repainted by scope_preset_values, Filter default CIC2 (PC_DECIM_DEFAULT), USB suspend as a state + resume logging (row 50) | built, host-tested (section 22) |
+| 0.2.44 | e0ee6f3 | 08f9a5ed | FPGA 0x1535 FIR (protocol 1.11, row 49), spectrum view not repainted by scope_preset_values, Filter default CIC2 (PC_DECIM_DEFAULT), USB suspend as a state + resume logging (row 50), generator Freq row no longer hits the removed Wave row; includes main's fw-cal 64 full-rate conversions | built, host-tested (section 22) |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -804,9 +804,9 @@ after the 2^S / N^K conversion). The "zero_q8 = 0" seen on the bench was a host 
 
 ## 22. fw-gen6: 0x1535 FIR, spectrum repaint, Filter default, USB suspend (fw 0.2.44, protocol 1.11)
 
-Commits 2e0cd10 (FIR), 9591d83 (repaint), e09b25a (default), 45b9b9a (USB suspend). Image sha256
-f063bc27b3f949400703ccf2847e5fc0fa485581e51fe64b2220a9da944688e5 (from 45b9b9a; docs-only commits after it). Nothing
-benched. Host tests: test_session 68908 / 68906 (debug) checks, 163 decim vector cases, test-arm byte-identical.
+Commits 2e0cd10 (FIR), 9591d83 (repaint), e09b25a (default), 45b9b9a (USB suspend), f9b8e17 (merge of main: fw-cal's
+64 full-rate conversions), e0ee6f3 (generator menu hit areas). Image sha256
+08f9a5ed0b4e7097367bd209004eec27d6d729514b2f3be846df93e8f0420b22 (from e0ee6f3). Nothing benched. Host tests: test_session 68908 / 68906 (debug) checks, 163 decim vector cases, test-arm byte-identical.
 - FIR (README "Decimation filter", protocol row 49): `pc_decim_config` takes a capability level (`PC_DECIM_HAS_NONE /
   CIC / FIR`) and the setting bit `PC_DECIM_SET_FIR` (0x20); `fir_en` is what 0x56 gets, `fir` whether it engages
   (K >= 1, N >= 16, N % 4 == 0). With `fir` the configuration's gain is (N/2)^K and S has + 1, so every consumer
@@ -833,5 +833,9 @@ benched. Host tests: test_session 68908 / 68906 (debug) checks, 163 decim vector
   reopen read GET_EVENT_LOG and GET_LINK_STATS 36/37. Look at type 1 b (few ms vs minutes), whether type 2 appears at
   the close (host suspend) or only at the reopen, and type 3 with or without a bit 7. Also: Windows powercfg USB
   selective suspend on vs off (soak.py prints it). A `--mode reopen --idle S` in soak.py would automate this (mcp).
+- Generator menu (e0ee6f3): `pc_glue_ui_has` returned the EXT cap for PC_FEAT_GEN_WAVE / GEN_ANALOG, so on 0x1533+
+  the removed Wave row's touch area (y 60..108) overlapped the moved-up Freq row; they return 0 now (no DAC). Audit of
+  the touch rows of the generator, trigger (Hold off gated, Always 50% shifted with PC_TRIG_DY), acquisition (Roll,
+  Average, Filter / Long memory slot) and channel (FFT row gated by PC_CH_COMPACT) menus: nothing else stale.
 - mcp/ needs: GET_DECIM byte 1 bit 3 / 0x29 bits 6-5 / caps bit 16 decoding, SET_DECIM fir flag, and the new event
   field meanings of types 1-4.

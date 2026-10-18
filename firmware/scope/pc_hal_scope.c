@@ -1413,11 +1413,13 @@ int pc_glue_ui_has(int feature)
     case PC_FEAT_RTC:
       return pc_rtc_present;
 
-    case PC_FEAT_GEN_WAVE:
-    case PC_FEAT_GEN_ANALOG:
     case PC_FEAT_EXT_TRIGGER:
       return (pc_sess.var.caps & PC_CAP_EXT_TRIGGER) != 0;
 
+    //No DAC on the 1013D. fw 0.2.44: these fell through to the EXT case, so on 0x1533+ the removed Wave row's touch
+    //area (generator menu y 60..108) stayed live over the moved-up Freq row and a Freq tap changed the waveform
+    case PC_FEAT_GEN_WAVE:
+    case PC_FEAT_GEN_ANALOG:
     case PC_FEAT_LONG_MEMORY:
     case PC_FEAT_HOLDOFF:
       return 0;
