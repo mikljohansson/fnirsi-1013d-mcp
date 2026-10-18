@@ -32,7 +32,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   during suspend, clocks), make resume work, and bench with the soak tool in idle-closed-port mode (open, close, wait 2-5 min, open).
 - [ ] **MMU + D-cache** (big lever: FFT 4096 points 10.9 ms uncached; flat 1:1 map with the framebuffer/DMA regions
   uncached; measure pass time and FFT_BENCH before/after). Separate agent, careful bench.
-- [ ] **Dead-code purge** (owner dropped the byte-identical rule 10-18): PC_PROTOCOL always on, hidden-option masks
+- [~] **Dead-code purge** (fw-gen7, fw 0.2.47: PC_PROTOCOL, check-reference / package / reference download, FFT switch,
+  generator Wave/Ampl/Offset/Phase, Long memory, hold-off done; open: unused functions and files from the --gc-sections
+  list in firmware/AGENTS.md section 25, 1014D comments, usb counter cruft) (owner dropped the byte-identical rule 10-18): PC_PROTOCOL always on, hidden-option masks
   replaced by removal (FFT switch, generator Wave/Ampl/Offset/Phase, Long memory, hold-off, 1014D remnants), unused files,
   check-reference target and reference downloads removed from the Makefile/CI/docs. Do after the spectrum/calibration
   work lands to avoid conflicts.
@@ -49,7 +51,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [ ] **Calibration v2 bench** (when fw-cal delivers): shorted inputs, per-core means equal within 0.3 codes after
   correction at full-rate and gated rates, T8-style PWM sweep, Nyquist spur gone in legacy mode, volts at 1.000 V /
   0.010 V match the host model within 1 %; owner reruns base calibration.
-- [ ] **Reproducible firmware builds**: the same source with the same GCC 10.3.1 gives different images from main and from a worktree
+- [x] **Reproducible firmware builds** (fw-gen7, fw 0.2.47: identity as data from the commit; .bin and .elf identical
+  across directories): the same source with the same GCC 10.3.1 gives different images from main and from a worktree
   (0.2.44: d4c0b716 vs 08f9a5ed, 172,941 differing bytes). Likely __FILE__/path strings; add `-ffile-prefix-map=$(abspath .)=.` (and
   `-fdebug-prefix-map`), check for __DATE__/__TIME__, and make CI's image hash match a local main build. Fold into the dead-code purge.
 - [ ] **CH2 reads +1.0..1.5 codes at range 6 with shorted input right after calibration** (10-18 late): channel offset with the cores
@@ -61,7 +64,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   visual steps (firmware/AGENTS.md section 24 / README "Phosphor view"), pass_ms in and out of the view; (4) 0.2.44 items: spectrum
   strip repaint loops, generator menu rows, Filter box steps + DEFAULT = CIC2; (5) flash FPGA 0x1535 (backup first) and bench CIC2+FIR
   (GET_DECIM bytes 26-27 = 0xE2 0x01 at 10 MSa/s); (6) persist a release candidate to the SD card after a soak.
-- [ ] **16-bit trigger level ignores corr16 and the class gain** (fw-cal2 handoff, section 23): about 1 % level error at full
+- [x] **16-bit trigger level ignores corr16 and the class gain** (fw-gen7, fw 0.2.47, 04619ca; bench pending) (fw-cal2 handoff, section 23): about 1 % level error at full
   rate in filtered captures. Small firmware fix; add a host test.
 - [ ] **Phosphor fast capture loop** (design study, fw-phosphor section 24): the view draws one record per pass (about 30 wfm/s);
   a capture loop that reads several records per pass would raise the waveform rate. Measure pass_ms in the view first.

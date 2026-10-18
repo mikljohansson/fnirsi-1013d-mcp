@@ -3,7 +3,6 @@
 ```
 firmware/scope/       scope application, Atlan4 v1.00o5 source + plain Makefile
 firmware/tools/       mksunxi.py, make_sd_image.py, fetch_gcc10.sh
-firmware/reference/   Atlan's prebuilt v1.00o5 binaries (not committed, see its README)
 firmware/bootloader/  (later) bootloader/updater work
 ```
 
@@ -30,14 +29,28 @@ Outputs in `firmware/scope/build/`:
 | `fnirsi_1013d.elf` | linked ELF (with `-g`) | `fnirsi_1013d_scope.elf` |
 | `fnirsi_1013d.bin` | eGON.EXE image, mksunxi-fixed. Goes to SD sector 750 or is loaded over FEL | `fnirsi_1013d_scope.bin` (the updater's `scope.bin`) |
 | `fnirsi_1013d.map` | link map | - |
-| `fnirsi_1013d_sdpackage.bin` | `make package`: SD package (bootloader+updater+scope from sector 16) | `fnirsi_1013d.bin` |
 
-Targets: `make`, `make clean`, `make V=1`, `make package`, `make fel`, `make info`
-(`objdump -h`), `make check-reference`, `make gcc10`. Parallel builds and `-MMD -MP` dependency
-tracking work. `make` builds the USB control protocol in by default; section 5 has its options.
-`SOURCE_DATE_EPOCH=<unix time>` pins `build_time.h` to that time in UTC. Without it the
-file uses the current local time, like upstream. `CROSS_COMPILE=` selects another toolchain and
-`EXTRA_CFLAGS=` adds flags.
+Targets: `make`, `make clean`, `make V=1`, `make fel`, `make info` (`objdump -h`), `make gcc10`.
+Parallel builds and `-MMD -MP` dependency tracking work. The USB control protocol is always built in;
+section 5 has its options. `CROSS_COMPILE=` selects another toolchain and `EXTRA_CFLAGS=` adds flags.
+SD packages come from `tools/make_release_sd_package.py build` (it fetches Atlan's bootloader and updater).
+
+### Reproducible images (fw 0.2.47)
+
+The image depends only on the source, the toolchain and the commit. The identity is the short commit hash
+(`PC_FW_BUILD`) and the commit time (`SOURCE_DATE_EPOCH`, UTC; also the RTC default in variables.c), both read
+from git by the Makefile, never the wall clock or the checkout path. `build_id.c` (linked last) holds them as
+data, so a new commit changes those 10 bytes and not the code or the layout. `-ffile-prefix-map` and
+`-Wa,--debug-prefix-map` map the source directory to `.`, so the ELF is the same from every directory too.
+In a git worktree whose `.git` file names a Windows path (`gitdir: D:/...`), WSL's git cannot follow it; the
+Makefile translates it to `/mnt/d/...`. Where git is not readable at all, the build stops and asks for
+`PC_FW_BUILD=<git rev-parse --short=8 HEAD> SOURCE_DATE_EPOCH=<git log -1 --format=%ct>`.
+
+Cause of the old difference (0.2.44: main d4c0b716 vs worktree 08f9a5ed, 172,941 bytes): the worktree build had
+hash 00000000 and its own wall-clock time, compiled into the code as constants; GCC folds the hex loop and the
+literal pool differently for 0 (80 bytes less .text), which shifted everything linked after it. Check: build the
+same commit in two clones at different paths and compare `sha256sum build-gcc10-pc/fnirsi_1013d.bin` (and `.elf`);
+CI prints the image sha256 in the firmware job, which a local `make gcc10` of the same commit matches.
 
 ### What was reproduced from upstream
 
@@ -57,7 +70,7 @@ same (`research/notes/repo-donwulff.md`). The Makefile reproduces Debug exactly:
 
 Upstream post-build steps left out: copying to Atlan's own `/media/dk/...` cards and
 `../../FNIRSI_1013D_Firmware-main/...`, and `sudo sunxi-fel` after every build. Use `make fel`
-for that. `make package` replaces `flashfilepacker -l 0x5BC00` and needs a base image.
+for that. `tools/make_release_sd_package.py build` replaces `flashfilepacker -l 0x5BC00`.
 
 Changes to the copied source, all needed only for the build system:
 
@@ -77,14 +90,15 @@ bug, and GCC 14 makes it an error by default.
 
 ### Verification against Atlan's binary
 
-- **Byte-identical with Atlan's toolchain.** `make check-reference` builds with `PC_PROTOCOL=0`
-  (section 5), so it also proves that the protocol hooks leave the base untouched when disabled.
-  It builds with GCC 10.3.1 from
+- **Byte-identical with Atlan's toolchain (history, up to 0.2.46).** `make check-reference` built with
+  `PC_PROTOCOL=0` (section 5), which proved that the protocol hooks left the base untouched when disabled.
+  The owner dropped that rule on 2026-10-18 and 0.2.47 removed the target and the switch; the CI logs up to
+  that date hold the proof. It built with GCC 10.3.1 from
   `tools/fetch_gcc10.sh`. That script downloads the jammy `.deb`s over https, checks each against a
   pinned sha256, and unpacks them into `~/opt/gcc10` without installing them: binutils 2.38 and newlib
   3.3 headers. The build uses Atlan's `build_time.h`
   (2026-02-13 18:59:33), and the result `cmp`s **identical** to
-  `reference/fnirsi_1013d_v1.00o5_atlan.bin`. `make package` with that build is also identical
+  Atlan's `fnirsi_1013d_scope.bin`. `make package` with that build was also identical
   to Atlan's 721,992 B SD package. The source tree and flags are therefore exactly what Atlan
   shipped.
 - **apt GCC 13.2.1:** the build succeeds but the code differs. With the same timestamp, about
@@ -99,8 +113,7 @@ The memory layout matches the linker script. `_start` and the 32-byte eGON heade
 0x7FFFFFE0 and code starts at 0x80000000. The sections are the same in both builds: `.text`,
 `.rodata.str1.4`, `.ARM.exidx`, `.text.startup`, `.data`, then `.bss` up to about 0x8057F738,
 below the stacks at 0x81FB5000-0x82000000 (`start.s`). The GCC 13 image is untested on hardware.
-For a first hardware test, the GCC 10 build is the conservative choice:
-`make check-reference`, then use `build-gcc10/fnirsi_1013d.bin`.
+The bench and release image is the GCC 10 build: `make gcc10`, then `build-gcc10-pc/fnirsi_1013d.bin`.
 
 ## 2. Image format
 
@@ -190,7 +203,7 @@ because the GPT entries occupy sectors 2-33.
 
 ```
 python3 tools/make_sd_image.py info  card.img                 # or an SD package / card dump
-python3 tools/make_sd_image.py extract reference/fnirsi_1013d_v1.00o5_atlan_sdpackage.bin -d parts/
+python3 tools/make_sd_image.py extract fnirsi_1013d-fw-X.Y.Z-sdpackage.bin -d parts/
 python3 tools/make_sd_image.py write --image card.img --scope scope/build/fnirsi_1013d.bin
 python3 tools/make_sd_image.py write --image card.img --bootloader parts/bootloader.bin \
         --updater parts/updater.bin --scope scope/build/fnirsi_1013d.bin --boot-mode 4
@@ -318,22 +331,20 @@ notes" section of `docs/protocol.md`.
 
 | make variable | default | effect |
 |---|---|---|
-| `PC_PROTOCOL` | 1 | 0 builds Atlan's v1.00o5 unchanged: every hook compiles to nothing |
 | `PC_DEBUG` | 0 | 1 adds DEBUG_FPGA and FORCE, sets caps DEBUG_RAW and FORCE_TRIGGER. Bench builds only |
 | `PC_FORCE_CDC` | 1 | CDC at boot even if the saved "USB CH340 mode" setting says MSC |
 | `PC_FIFO_MAP` | 0 | USB endpoint FIFO layout (`pc_transport.h`). 1 = the fw 0.1.3-0.1.5 layout, fw version gets `-m1` |
 
 ```
-make                          # GCC 13, protocol on: build/fnirsi_1013d.bin
-make gcc10                    # same with Atlan's GCC 10.3.1: build-gcc10-pc/fnirsi_1013d.bin
+make                          # GCC 13: build/fnirsi_1013d.bin
+make gcc10                    # Atlan's GCC 10.3.1, the bench and release image: build-gcc10-pc/fnirsi_1013d.bin
 make PC_DEBUG=1 BUILD=build-dbg
-make check-reference          # PC_PROTOCOL=0 with GCC 10.3.1, must print IDENTICAL
 make -C host_tests test       # host gcc: frame layer, vectors, session tests (scope/host_tests)
 ```
 
-`make check-reference` always builds `PC_PROTOCOL=0` and compares with Atlan's binary. A GCC 13
-`PC_PROTOCOL=0` build is also identical to a GCC 13 build of the tree before the protocol. Neither
-compiler gives a new warning with the protocol on, in release or `PC_DEBUG` builds.
+The `PC_PROTOCOL=0` build (Atlan's v1.00o5 unchanged) and `make check-reference` were removed in 0.2.47
+(section 1). Warning policy: no new warning under either compiler, in release or `PC_DEBUG` builds (0.2.47:
+GCC 10 36, GCC 13 31, all upstream).
 
 Files:
 
@@ -345,11 +356,12 @@ Files:
 | `scope/pc_hal_scope.c` | `pc_hal.h` on the 1.00o5 settings and `fpga_control.c`, firmware glue | no |
 | `scope/pc_transport.c/.h` | USB RX ring, TX pump, ZLP, link events | no |
 | `scope/pc_rx_ring.h` | RX ring copies and the one-FIFO-read-per-packet store | yes (`test_rx_ring`) |
-| `scope/pc_hooks.h` | the hooks in the 1.00o5 files, empty with `PC_PROTOCOL=0` | |
+| `scope/pc_hooks.h` | the hooks in the 1.00o5 files (macros that mark each place) | |
+| `scope/build_id.c` | the build identity as data: commit hash and commit time (section 1, "Reproducible images") | |
 | `scope/host_tests/` | `test_protocol`, `test_rx_ring`, `test_session` (mock FPGA and UI), `check_vectors.py` | |
 | `../docs/protocol-vectors.json` | shared frame vectors (`gen_vectors.py`; the MCP server merges its own) | |
 
-Hooks in the 1.00o5 code, all under `#if PC_PROTOCOL`:
+Hooks in the 1.00o5 code (up to 0.2.46 all under `#if PC_PROTOCOL`, since 0.2.47 always built):
 
 - `fnirsi_1013d_scope.c`: `pc_glue_init()` before `usb_device_init()`. The main loop calls
   `pc_poll(MAIN)` first, then the MCP indicator service, then the normal UI pass (protocol 1.3 shares
@@ -376,29 +388,27 @@ Hooks in the 1.00o5 code, all under `#if PC_PROTOCOL`:
   text debug path is gone, so the debug helpers in `menu.c` print nothing. MSC is unchanged.
 - `variables.h`: the trace buffers are rounded up to 4096 words (16,384 bytes per channel).
 
-### Hidden menu options (fw 0.2.6)
+### Removed and hidden menu options (fw 0.2.6, removal fw 0.2.47)
 
-Owner policy: the UI offers only what the running hardware can do. Protocol builds hide these 1.00o5 menu items.
-Since 0.2.8 the generator and trigger menus are compacted (owner: no gaps): the kept rows move up and the menu
-boxes shrink (generator 3 rows, 169 px: Power, Freq, Duty; trigger 5 rows, 280 px: Always 50 % moves into the hold-off
-slot), via `PC_GEN_DY` / `PC_TRIG_DY` in `pc_hooks.h` and the `*_MENU_HEIGHT` values in `variables.h`, which also
-size the screen save/restore and the touch area. Items inside a row (memory boxes, EXT, the system-settings
-Time & Date row) are still painted over (touches ignored; `pc_glue_ui_has` / `pc_glue_ui_mask` in `pc_hal_scope.c`,
-hooks `PC_UI_HAS` / `PC_UI_MASK` that are empty with `PC_PROTOCOL=0`):
+Owner policy: the UI offers only what the running hardware can do, and what the 1013D can never do is removed in
+code, not hidden (owner, 2026-10-18). Removed in 0.2.47 (settings sector and waveform file slots stay, written 0):
+the generator's Wave (SQUR / SINE / TRGL), Ampl, Offset and Phase rows (no DAC: the generator is the FPGA's DDS
+square wave on the calibration pin; 1.00o5 never sent them anywhere), the trigger Hold off row (never sent to the
+FPGA), Long memory (1.00o5 forced it off; its main-loop branch was empty) and the channel menus' FFT switch
+(1.00o5 stored `fftenable` and drew nothing). The menus are compact (owner: no gaps; generator 3 rows, 169 px:
+Power, Freq, Duty; trigger 5 rows, 280 px; channel menus: Invert, Coupling and V/A one row up, the empty slot above
+Probe mode, the box keeps its height for the V/div column); `*_MENU_HEIGHT` in `variables.h` also sizes the
+screen save/restore and the touch area. What depends on the running hardware is hidden per item (touches ignored;
+`pc_glue_ui_has` / `pc_glue_ui_mask` in `pc_hal_scope.c`, hooks `PC_UI_HAS` / `PC_UI_MASK`):
 
 | item | where | hidden when | why |
 |---|---|---|---|
-| Wave SQUR / SINE / TRGL | generator menu | always | no DAC: the generator is the FPGA's DDS square wave on the calibration pin; the setting was never sent anywhere |
-| Ampl, Offset, Phase | generator menu | always | no DAC; the FPGA writes are commented out in 1.00o5 |
 | the generator menu itself (top-bar button does not open it) | top bar | stock bitstream 0x1432 (no DDS) | the stock core has a fixed 1 kHz square wave |
 | memory depth boxes above the bitstream's maximum | acquisition menu | 6000+ on stock (3000), 15000 on EF2/EP4 (12286) | the FPGA cannot capture more |
-| Long memory | acquisition menu | always | 1.00o5 forces it off; the main-loop branch is empty |
-| Filter selector (in the Long memory slot) | acquisition menu | bitstream without DECIM (all but AL3 0x1534+) | the decimation filter exists only in fpga/al3 0x1534 (fw 0.2.30, "Decimation filter" below) |
+| Filter selector (in 1.00o5's Long memory slot) | acquisition menu | bitstream without DECIM (all but AL3 0x1534+) | the decimation filter exists only in fpga/al3 0x1534 (fw 0.2.30, "Decimation filter" below) |
 | memory depth 9000, 12000, 15000 | acquisition menu | Filter on (0x1534+) | the 16-bit layout holds one sample per ring word: at most 8190 samples |
 | EXT trigger source | trigger menu | bitstream without EXT_TRIGGER (all but AL3 0x1533+) | the input exists only in fpga/al3 0x1533 (calibration pin, 3.3 V logic referenced to the scope's USB ground, not the probe ground, which sits ~1.24 V above it); selecting it switches the generator off |
-| Hold off | trigger menu | always | never sent to the FPGA in 1.00o5 |
 | Spectrum analyzer row | main menu | roll mode, viewers (fw 0.2.28) | the roll-mode trace path does not run the spectrum hook; the menu is one row shorter then |
-| FFT switch ("Open FFT" row) | channel menus | always (fw 0.2.26) | 1.00o5 stores `fftenable` and draws nothing; Invert, Coupling and V/A move up one row (`PC_CH_DY`), the empty slot sits above Probe mode (the menu box keeps its height for the V/div column) |
 | Time & Date settings (RTC submenu) | system settings | no DS3231 answers at boot | the clock, file stamps and FAT times would read garbage |
 | Temperature (diagnostics screen) | diagnostics | no DS3231 answers at boot | it is the DS3231's temperature register; without the module it read "99" |
 
@@ -461,7 +471,7 @@ min(65535, y >> S), y = filter output with gain N^K. On 0x1532/0x1533 none of th
 - Hidden settings: falling-edge capture of the A / B cores (0x53 bits 3 / 4), only via SET_DECIM flags bits 1 / 2,
   saved in bits 3 / 4 of settings word 207; the core-order swap (bit 2) is host only and not saved.
 - UI: acquisition menu "Filter" box (off / boxcar / CIC2 / CIC3, a tap steps through them, green while on) in the
-  slot of the hidden Long memory box, only on 0x1534+. Saved in settings word 207 (0xDE00 | K); sectors without
+  slot of 1.00o5's Long memory box, only on 0x1534+. Saved in settings word 207 (0xDE00 | K); sectors without
   a valid word (new settings, written before 0.2.30) and the DEFAULT button give `PC_DECIM_DEFAULT` (pc_decim.h; CIC2
   since fw 0.2.44, owner; until then off). A saved word is kept as it is. Turning it on with 9000+ samples sets the memory depth to 6000 (trigger point kept at 25 / 50 / 75 %).
   The box shows the setting; GET_DECIM tells the effective K (e.g. legacy at 200 MSa/s).
@@ -794,7 +804,7 @@ of 5879cf2. They move with code size.
 | `usb_tx` 32 KiB text ring | removed | |
 | trace buffers, 2 x 16,380 to 16,384 B | +8 B | |
 
-| | `PC_PROTOCOL=0` | `PC_PROTOCOL=1` |
+| (fw 0.2.x, history) | `PC_PROTOCOL=0` | `PC_PROTOCOL=1` |
 |---|---|---|
 | image (GCC 13 / GCC 10) | 348,672 / 346,112 B | 378,880 / 376,320 B |
 | end of `.bss` (GCC 13) | 0x8057F738 | 0x80590A81 |

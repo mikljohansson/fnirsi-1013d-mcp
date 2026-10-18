@@ -28,8 +28,28 @@ by CI from the tag commit and has its own hash.
 
 ### Firmware (scope application, `firmware/scope`, base Atlan4 v1.00o5)
 
-With `PC_PROTOCOL=0` the tree builds byte-identical to Atlan4's v1.00o5 image (`make check-reference`).
-Every protocol change sits behind `#if PC_PROTOCOL`.
+Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
+CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
+
+#### 0.2.47 - 2026-10-19 (protocol 1.13, unchanged)
+
+- Fixed: reproducible image. The same commit built in two directories (or main and a worktree) gave different
+  images: WSL's git cannot read a worktree's Windows gitdir, so the hash was 00000000 and the build time the wall
+  clock, both compiled into the code as constants, and GCC's different code for them shifted the whole layout. The
+  identity is now data (build_id.c, linked last), the commit hash and the commit time (UTC) from git, the worktree
+  gitdir is translated for WSL, and the source directory is mapped out of the debug info: the .bin and the .elf
+  are identical across directories (473bd0b, 57d0d26). The identity line reads "git <hash> of <commit time>"
+  (was "built <time>"). CI prints the image sha256.
+- Fixed: with the decimation filter on, the 16-bit trigger level now goes through the readout's correction (the
+  trigger channel's gain16 and corr16), so the trigger sits on the level line; it was about 1 % off at full rate
+  (04619ca).
+- Removed: UI features that were hidden, now removed in code: the channel-menu FFT switch (2731e52), the
+  generator Wave / Ampl / Offset / Phase rows, sub-menus and state (55960cf), Long memory (3a5ffc6), trigger
+  hold-off (5906fbe). Settings sector and waveform file slots stay (written 0). The generator's top-bar
+  frequency text is always orange.
+- Removed: the `PC_PROTOCOL=0` build (8770209), `make check-reference`, `make package` and the Atlan reference
+  download in CI (`tools/make_release_sd_package.py build` makes SD packages) (0f84761), and the calibration v2
+  `adc_cal` section of docs/protocol-vectors.json (f09e381).
 
 #### 0.2.46 - 2026-10-19 (protocol 1.13)
 

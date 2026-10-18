@@ -24,7 +24,7 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #else
 #define PC_FW_VERSION_MAP ""
 #endif
-#define PC_FW_VERSION     "0.2.46" PC_FW_VERSION_MAP
+#define PC_FW_VERSION     "0.2.47" PC_FW_VERSION_MAP
 #endif
 
 extern const uint32_t pc_fw_build;    //short git hash of the build (build_id.c; host tests: mock_hal.c)

@@ -78,7 +78,9 @@ Reference checkouts (read-only, outside this repo, never build inside them):
   750 / FEL). apt toolchain is GCC 13.2.1; release images use GCC 10.3.1 (`firmware/tools/fetch_gcc10.sh`, `make gcc10`).
   Provenance note: until 2026-10-18 evening a `PC_PROTOCOL=0` build was kept byte-identical to Atlan's v1.00o5 binary
   (verified, see git history and the CI logs up to that date); the owner dropped that rule to allow simplification and
-  dead-code removal. The lineage is documented in README "Credits" and in git history. SD layout, image
+  dead-code removal (fw 0.2.47 removed the switch and `make check-reference`). The lineage is documented in README
+  "Credits" and in git history. Images are reproducible: they depend only on the commit (identity = commit hash and
+  commit time from git), so the same commit gives the same sha256 in any checkout and in CI. SD layout, image
   format, `make_sd_image.py` and FEL commands: `firmware/README.md`.
 - Compiler flags are inherited from Atlan4 (`-mcpu=arm926ej-s -O3 -nostdlib`, custom `mem*.s`, tiny malloc,
   no libc). Keep it that way; do not introduce libc or floating point in acquisition paths.
