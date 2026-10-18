@@ -24,6 +24,11 @@ It models what the host can observe through docs/protocol.md:
 Signals are defined in volts at the BNC (1x probe) per channel, e.g. ``sine:freq=10kHz,amp=0.3``,
 ``square:freq=1kHz,amp=1,duty=0.3``, ``decay:tau=80us,amp=0.5,period=1ms,width=200us``,
 ``gate:period=1ms,width=200us,high=3.3``, ``dc:v=0.2``, ``gen`` (calibration-pin loopback), ``zero``.
+A device under test on the generator (Bode sweeps): ``dut_in`` / ``dut_out`` are the input and output node of an RC
+low-pass (``r``, ``c``) or, with ``l`` > 0, a series RLC (output across C), driven from the calibration pin through
+``rs`` (R21, 1 kOhm) with a ``high`` (3.1 V) square, seen against the probe ground (``offset`` -1.24 V); ``gain`` and
+``delay`` model a channel mismatch, ``bw`` the front end (30 MHz, first order). E.g. CH1 ``dut_in:r=1.6k,c=10n``, CH2 ``dut_out:r=1.6k,c=10n``; a thru is
+``dut_in`` on both.
 Noise is Gaussian, ``--noise`` LSB rms per core (default 1.0, i.e. about 2 LSB as on the real unit).
 
 Run: ``fnirsi1013d-sim --variant al3 --port 5555 --signal decay:tau=80us``.
@@ -117,6 +122,8 @@ class Signal:
             return 0.5 * (self.p("high", 3.3) + self.p("low", 0.0))
         if self.kind == "gen":
             return 1.65
+        if self.kind in ("dut_in", "dut_out"):
+            return self.p("offset", -1.24) + self.p("gain", 1.0) * 0.5 * self.p("high", 3.1)
         return self.p("offset", 0.0)
 
     def eval(self, t: np.ndarray, gen: "GenState") -> np.ndarray:
@@ -158,7 +165,80 @@ class Signal:
             f = gen.frequency_hz
             ph = np.mod(t * f, 1.0)
             return np.where(ph < gen.duty, self.p("high", 3.3), 0.0)
+        if k in ("dut_in", "dut_out"):
+            off, g = self.p("offset", -1.24), self.p("gain", 1.0)
+            if not gen.enable:
+                return np.full_like(t, off)  # pin tri-stated: the DUT rests at its ground
+            y = dut_response(np.asarray(t, np.float64) - self.p("delay", 0.0), gen.frequency_hz, gen.duty,
+                             self.p("high", 3.1), *self.dut_params, node=1 if k == "dut_out" else 0,
+                             bw=self.p("bw", 30e6))
+            return off + g * y
         raise ValueError(f"unknown signal kind {k!r}")
+
+    @property
+    def dut_params(self) -> tuple[float, float, float, float]:
+        """(rs, r, l, c) of a dut_* signal."""
+        return self.p("rs", 1000.0), self.p("r", 1600.0), self.p("l", 0.0), self.p("c", 10e-9)
+
+    def dut_h(self, f: np.ndarray | float) -> np.ndarray:
+        """Analytic V_out / V_in of the dut_* network at f (Hz), probe mismatch excluded."""
+        _, r, ll, c = self.dut_params
+        w = 2j * np.pi * np.asarray(f, np.float64)
+        return 1.0 / (1.0 + w * r * c + w * w * ll * c)
+
+
+def dut_response(t: np.ndarray, f: float, duty: float, high: float, rs: float, r: float, ll: float, c: float,
+                 node: int, bw: float = 30e6) -> np.ndarray:
+    """Steady-state voltage (against the DUT ground) of node 0 (the DUT input, after rs) or node 1 (the output across
+    c) of an RC (ll = 0: rs + r into c) or series RLC network driven by a 0 / high square of frequency f and duty
+    (high while (t f mod 1) < duty, like the ``gen`` signal), seen through a first-order front end of bandwidth
+    ``bw`` (0: none; the same on both channels, so it cancels in a ratio, but it keeps the square's harmonics near
+    the 200 MSa/s sample rate from aliasing as they would not on the real input). Exact: the input is piecewise
+    constant, so each segment is x(tau) = x_eq + e^{A tau} (x_start - x_eq), and the periodic start state solves
+    (I - E_low E_high) x0 = E_low (I - E_high) x_high."""
+    if ll > 0:
+        A = np.array([[0.0, 1.0 / c], [-1.0 / ll, -(rs + r) / ll]])
+        B = np.array([0.0, 1.0 / ll])
+        C = np.array([[0.0, -rs], [1.0, 0.0]])  # V_in = u - rs i, V_out = Vc
+        D = np.array([1.0, 0.0])
+    else:
+        tau = (rs + r) * c
+        A = np.array([[-1.0 / tau]])
+        B = np.array([1.0 / tau])
+        C = np.array([[rs / (rs + r)], [1.0]])  # V_in = (r u + rs Vc) / (rs + r), V_out = Vc
+        D = np.array([r / (rs + r), 0.0])
+    if bw > 0:  # one more state: the front end's output follows the node with tau = 1 / (2 pi bw)
+        k = 2 * np.pi * bw
+        n0 = A.shape[0]
+        A = np.block([[A, np.zeros((n0, 1))], [k * C[node][None, :], np.array([[-k]])]])
+        B = np.concatenate([B, [k * D[node]]])
+        sel = np.zeros(n0 + 1)
+        sel[-1] = 1.0
+        C = np.array([sel, sel])
+        D = np.array([0.0, 0.0])
+    x_hi = np.linalg.solve(A, -B * high)
+    if f <= 0:
+        return np.full_like(t, C[node] @ x_hi + D[node] * high)
+    lam, V = np.linalg.eig(A)
+    Vi = np.linalg.inv(V)
+
+    def E(tau: float) -> np.ndarray:
+        return (V * np.exp(lam * tau)) @ Vi
+
+    T = 1.0 / f
+    t1 = duty * T
+    E1, E2 = E(t1), E(T - t1)
+    eye = np.eye(A.shape[0])
+    x0 = np.linalg.solve(eye - E2 @ E1, E2 @ (eye - E1) @ x_hi).real
+    x1 = (x_hi + E1 @ (x0 - x_hi)).real
+    ph = np.mod(t * f, 1.0)
+    hi = ph < duty
+    tau = np.where(hi, ph, ph - duty) * T
+    z_hi = Vi @ (x0 - x_hi)
+    z_lo = Vi @ x1
+    ex = np.exp(np.outer(tau, lam))  # (n, dim)
+    xs = np.where(hi[:, None], x_hi[None, :] + (ex * z_hi[None, :]) @ V.T, (ex * z_lo[None, :]) @ V.T).real
+    return xs @ C[node] + np.where(hi, D[node] * high, 0.0)
 
 
 def parse_signal(spec: str) -> Signal:
@@ -166,8 +246,9 @@ def parse_signal(spec: str) -> Signal:
     spec = spec.strip()
     kind, _, rest = spec.partition(":")
     kind = kind.strip().lower()
-    if kind not in ("zero", "dc", "sine", "square", "decay", "gate", "gen"):
-        raise ValueError(f"unknown signal kind {kind!r}; use sine, square, decay, gate, dc, gen or zero")
+    if kind not in ("zero", "dc", "sine", "square", "decay", "gate", "gen", "dut_in", "dut_out"):
+        raise ValueError(f"unknown signal kind {kind!r}; use sine, square, decay, gate, dc, gen, dut_in, dut_out "
+                         "or zero")
     params: dict[str, float] = {}
     for item in filter(None, (s.strip() for s in rest.split(","))):
         k, _, v = item.partition("=")
