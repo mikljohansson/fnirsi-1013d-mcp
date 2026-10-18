@@ -27,8 +27,8 @@ then shows. A small indicator shows that a host is connected. There is no lock a
      presses RUN again (host: a RUN/STOP control in SET_ACQ_STATE or an existing command).
    - WAIT and the DONE/trigger_addr semantics are unchanged.
 4. **Indicator.** A green "MCP" chip drawn over/next to the RUN/STOP chip in the top bar while a host session
-   is active (DTR up, or traffic within the last 2 s). It pulses (brighter) for ~100 ms on each dispatched
-   command. Use the existing chip drawing helpers in menu.c; keep it under 60 px wide.
+   is active (DTR up, or traffic within the last 2 s). Steady, no pulsing or blinking on traffic (owner decision
+   2026-10-18). Use the existing chip drawing helpers in menu.c; keep it under 60 px wide.
 5. **No lock.** Long scripted runs (e.g. averaging) tag every capture with the settings it was taken under
    (timebase index/divider, ranges, trigger). If a capture's settings differ from the run's, the server
    restarts the run and reports it. The user is never blocked.
