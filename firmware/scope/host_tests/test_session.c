@@ -1553,6 +1553,50 @@ static void test_ext_trigger(void)
   r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
   T_EQ(r.p[9] & 0x20, 0);
 
+  //fw 0.2.70: legacy EXT shift, the ADC pipeline's 4 words (8 samples) at D >= 1, 2 words at D 0: fewer pretrigger
+  //words, GET_CAPTURE_INFO 70 the shift in samples, the record start 0x14 - the words written, edge back at pretrigger
+  {
+    static const uint32_t divs[] = { 199, 9, 1, 0 };
+    uint8_t p[8];
+    int i;
+
+    for(i=0;i<4;i++)
+    {
+      uint32_t sh = divs[i] ? 8 : 4;
+
+      memset(p, 0, 8); p[0] = 1; pc_put_u32(p + 4, divs[i]);
+      r = req(PC_CMD_SET_TIMEBASE, p, 8);
+      T_EQ(r.h.status, 0);
+      set_trigger(0x31, 2, 0, 0, 0, 200, 3000, 0, 0, &r);
+      T_EQ(r.h.status, 0);
+      r = req(PC_CMD_ARM, 0, 0);
+      T_EQ(r.h.status, 0); T_EQ(mock.arm_pre, (200 - sh) / 2); T_EQ(mock.arm_total, 1500);
+      r = wait_done(100);
+      r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+      T_EQ(pc_get_u16(r.p + 70), sh);
+      T_EQ(pc_get_u16(r.p + 12), (100 + 8192 - (200 - sh) / 2) % 8192);
+    }
+
+    //A pretrigger shorter than the shift: all of it, in whole words
+    set_trigger(0x31, 2, 0, 0, 0, 2, 3000, 0, 0, &r);
+    T_EQ(r.h.status, 0);
+    r = req(PC_CMD_ARM, 0, 0);
+    T_EQ(mock.arm_pre, 0);
+    r = wait_done(100);
+    r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+    T_EQ(pc_get_u16(r.p + 70), 2);
+    T_EQ(pc_get_u16(r.p + 12), 100);
+
+    //CH1 source: no shift
+    set_trigger(0x31, 0, 0, 0, 0, 200, 3000, 0, 0, &r);
+    r = req(PC_CMD_ARM, 0, 0);
+    T_EQ(mock.arm_pre, 100);
+    r = wait_done(100);
+    r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+    T_EQ(pc_get_u16(r.p + 70), 0);
+    set_trigger(0x01, 2, 0, 0, 0, 0, 0, 0, 0, &r);
+  }
+
   //Back to CH1: generator allowed again
   set_trigger(0x01, 0, 0, 0, 0, 0, 0, 0, 0, &r);
   g[1] = 1;
@@ -2134,6 +2178,9 @@ static void test_decim_math(void)
   pc_decim_config(3, 0, 19, 3000, 1, &c);     T_EQ(pc_decim_ext_shift(&c), 3);       //(240 + 285) / 200 = 2.6
   pc_decim_config(2, 0, 399999, 3000, 1, &c); T_EQ(pc_decim_ext_shift(&c), 1);
   pc_decim_config(0, 0, 19, 3000, 1, &c);     T_EQ(pc_decim_ext_shift(&c), 0);
+  //fw 0.2.70: legacy layout, the ADC pipeline in whole words (samples): 4 words, 2 at divider 0; K >= 1 unchanged
+  T_EQ(pc_decim_ext_shift_at(&c, 19), 8); T_EQ(pc_decim_ext_shift_at(&c, 0), 4); T_EQ(pc_decim_ext_shift_at(&c, 399999), 8);
+  pc_decim_config(2, 0, 19, 3000, 1, &c);     T_EQ(pc_decim_ext_shift_at(&c, 19), 2);
 
   //Flags (swap, falling-edge A / B) go into 0x53 for every K, never without the filter
   pc_decim_config(2, 0x18, 19, 3000, 1, &c);  T_EQ(pc_decim_mode(&c), 0x1A); T_EQ(pc_decim_status(&c), 0x9A);

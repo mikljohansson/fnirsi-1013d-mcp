@@ -786,22 +786,23 @@ uint32 pc_glue_decim_words(uint32 samples)
   return pc_dec_cur.k ? samples : samples / 2;
 }
 
-//EXT trigger in the 16-bit layout: trigger_address is the last sample written before the edge, but the data lag it by
-//120 ns + K (N - 1) 2.5 ns (fpga-gen3; with the FIR 250 ns + 17.5 N ns + 1.25 K (N - 2) ns, fpga-gen4). Writing that many samples fewer as pretrigger puts the edge back at sample
-//settriggerpoint of the capture (GET_CAPTURE_INFO byte 70 reports the shift).
+//EXT trigger: trigger_address is the last word written before the edge, but the data lag it. 16-bit layout: 120 ns +
+//K (N - 1) 2.5 ns (fpga-gen3; with the FIR 250 ns + 17.5 N ns + 1.25 K (N - 2) ns, fpga-gen4); legacy layout (fw 0.2.70):
+//the ADC pipeline's 4 words (2 at divider 0). Writing that many samples fewer as pretrigger puts the edge back at sample
+//settriggerpoint of the capture (GET_CAPTURE_INFO byte 70 reports the shift; pc_decim_ext_shift_at).
 static uint32 pc_dec_ext_shift(void)
 {
-  return (pc_dec_cur.k && (scopesettings.triggerchannel == 2)) ? pc_decim_ext_shift(&pc_dec_cur) : 0;
+  return (scopesettings.triggerchannel == 2) ? pc_decim_ext_shift_at(&pc_dec_cur, pc_dec_div()) : 0;
 }
 
 uint32 pc_glue_decim_pre_words(uint32 samples)
 {
   uint32 shift = pc_dec_ext_shift();
 
-  if(!pc_dec_cur.k)
-    return samples / 2;
+  if(shift > samples)
+    shift = pc_dec_cur.k ? samples : (samples & ~1u);
 
-  return (samples > shift) ? samples - shift : 0;
+  return pc_dec_cur.k ? samples - shift : (samples - shift) / 2;
 }
 
 uint32 pc_glue_ui_read_start(uint32 addr)

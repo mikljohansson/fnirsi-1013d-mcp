@@ -112,6 +112,18 @@ int      pc_decim_fir_eligible(uint32_t n);
 //output sample is N x 5 ns
 uint32_t pc_decim_ext_shift(const pc_decim_cfg *c);
 
+//EXT trigger in the legacy 8-bit layout (K = 0, fw 0.2.70): samples (two per word) by which the stored data lag the EXT
+//edge. The AD9288 outputs a sample 4 encode cycles after taking it, one word at every legacy rate, while the EXT trigger
+//address is taken at the edge (fpga/al3/README.md section 7 finding 4). tb_trigpos (0x1537 / 0x1538 model): an EXT edge
+//lands at word +5..+6 at D 9 and D 199 and at +3.5 at D 0 (the synchroniser's 15-20 ns are most of a 10 ns word there),
+//an ADC trigger at word +1..+1.5. Shift: 4 words, 2 at divider 0. Model numbers; bench check in firmware/AGENTS.md
+//section 46 (D 1..8 not simulated)
+uint32_t pc_decim_ext_shift_legacy(uint32_t divider);
+
+//The EXT shift of a capture with configuration c at divider (0x0D): pc_decim_ext_shift for K >= 1, else the legacy one.
+//Samples of the capture's layout; the pretrigger words written are (pretrigger - shift) (16-bit) or / 2 (legacy)
+uint32_t pc_decim_ext_shift_at(const pc_decim_cfg *c, uint32_t divider);
+
 //0x53 byte for c (bits 1:0 K, bits 2-4 flags) and the 0x29 byte 0 the FPGA reports for it (plus bit 7 when K >= 1,
 //bit 6 FIR enable, bit 5 FIR active)
 uint8_t  pc_decim_mode(const pc_decim_cfg *c);

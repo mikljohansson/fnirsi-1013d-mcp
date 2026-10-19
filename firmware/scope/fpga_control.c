@@ -486,6 +486,11 @@ void fpga_set_trigger_edge(void)
 
 void fpga_swap_trigger_channel(void)
 {
+  //EXT (source 2, 0x1533+) does not depend on which channels are on: keep it (fw 0.2.70; 1.00o5 overwrote it with CH1 /
+  //CH2 whenever one channel was toggled with the other off, fpga/al3/README.md section 7)
+  if(scopesettings.triggerchannel == 2)
+    return;
+
   //Check if channel 1 is disabled or channel 2 is enabled
   if((scopesettings.channel1.enable == 0) || (scopesettings.channel2.enable))
   {

@@ -276,6 +276,23 @@ static void pc_decim_next(pc_session *s, uint32_t total, pc_decim_cfg *c)
                   PC_DECIM_HAS_NONE), c);
 }
 
+//EXT trigger: samples by which the stored data lag the edge (pc_decim_ext_shift_at: the filter's latency with K >= 1, the
+//ADC pipeline's 4 words in the legacy layout since fw 0.2.70), at most the pretrigger (whole words in the legacy layout)
+static uint16_t pc_ext_shift(uint8_t source, const pc_decim_cfg *d, uint32_t divider, uint32_t pretrigger)
+{
+  uint32_t v;
+
+  if(source != 2)
+    return 0;
+
+  v = pc_decim_ext_shift_at(d, divider);
+
+  if(v > pretrigger)
+    v = d->k ? pretrigger : (pretrigger & ~1u);
+
+  return (uint16_t)v;
+}
+
 //Settings a capture is armed with
 static void pc_capture_latch(pc_session *s, pc_capture *c, uint8_t origin, uint32_t pretrigger, uint32_t total)
 {
@@ -301,19 +318,21 @@ static void pc_capture_latch(pc_session *s, pc_capture *c, uint8_t origin, uint3
   pc_hal_channel_read(1, &c->ch[1]);
 
   //1.9: the decimation filter as written for this capture (the arm wrote it just before)
-  if(s->var.caps & PC_CAP_DECIM)
   {
     pc_decim_cfg d;
     int written;
 
-    pc_hal_decim_current(&d, &written);
-    c->decim       = pc_decim_status(&d);
-    c->decim_shift = d.shift;
-    c->decim_n     = d.n;
-    c->ext_shift   = (uint16_t)((c->source == 2) ? pc_decim_ext_shift(&d) : 0);
+    memset(&d, 0, sizeof(d));
 
-    if(c->ext_shift > pretrigger)
-      c->ext_shift = (uint16_t)pretrigger;
+    if(s->var.caps & PC_CAP_DECIM)
+    {
+      pc_hal_decim_current(&d, &written);
+      c->decim       = pc_decim_status(&d);
+      c->decim_shift = d.shift;
+      c->decim_n     = d.n;
+    }
+
+    c->ext_shift = pc_ext_shift(c->source, &d, c->divider, pretrigger);
   }
 }
 
@@ -353,7 +372,7 @@ static void pc_capture_finish(pc_session *s, pc_capture *c, uint16_t trigger_add
   }
 
   c->trigger_addr  = trigger_addr;
-  c->capture_start = (uint16_t)pc_ring_mod((int64_t)trigger_addr - ((int64_t)pc_cap_words(c, c->pretrigger) - c->ext_shift), s->var.ring_words);
+  c->capture_start = (uint16_t)pc_ring_mod((int64_t)trigger_addr - ((int64_t)pc_cap_words(c, c->pretrigger) - pc_cap_words(c, c->ext_shift)), s->var.ring_words);
   c->capture_id    = ++s->capture_id;
 
   s->trigger_addr  = c->trigger_addr;
@@ -1258,6 +1277,7 @@ static void pc_arm_geometry(pc_session *s, pc_hw_trigger *t, pc_decim_cfg *dc, u
                             uint16_t *ext_shift)
 {
   int wide;
+  pc_hw_timebase tb;
 
   pc_hal_trigger_read(t);
 
@@ -1272,13 +1292,11 @@ static void pc_arm_geometry(pc_session *s, pc_hw_trigger *t, pc_decim_cfg *dc, u
   pc_decim_next(s, t->total, dc);
   wide = dc->k != 0;
 
-  //EXT trigger: the stored data lag the edge (pc_decim_ext_shift), so fewer pretrigger words put the edge back at
-  //sample `pretrigger` of the capture
-  *ext_shift = (uint16_t)((t->source == 2) ? pc_decim_ext_shift(dc) : 0);
-  if(*ext_shift > t->pretrigger)
-    *ext_shift = t->pretrigger;
+  //EXT trigger: the stored data lag the edge, so fewer pretrigger words put the edge back at sample `pretrigger`
+  pc_hal_timebase_read(&tb);
+  *ext_shift = pc_ext_shift(t->source, dc, s->tb_raw ? s->tb_divider : tb.divider, t->pretrigger);
 
-  *pre_w = wide ? (uint16_t)(t->pretrigger - *ext_shift) : t->pretrigger / 2;
+  *pre_w = wide ? (uint16_t)(t->pretrigger - *ext_shift) : (uint16_t)((t->pretrigger - *ext_shift) / 2);
   *tot_w = wide ? t->total : t->total / 2;
 }
 
@@ -1962,7 +1980,7 @@ static uint32_t pc_decim_body(pc_session *s, uint8_t *p)
   p[27] = (uint8_t)rb;
   pc_put_u16(p + 28, PC_DECIM_MAX_TOTAL);
   p[30] = next.why;                                     //why the effective K is lower than requested
-  p[31] = (uint8_t)((t.source == 2) ? pc_decim_ext_shift(&next) : 0);   //EXT latency shift the next arm applies
+  p[31] = (uint8_t)pc_ext_shift(t.source, &next, s->tb_raw ? s->tb_divider : tb.divider, t.pretrigger);   //EXT shift the next arm applies
   pc_features_body(s, p + 32);                          //1.17: as GET_STATUS 44..47
   return 36;
 }
@@ -3322,7 +3340,7 @@ static void pc_acq_service(pc_session *s)
     uint16_t addr  = pc_hal_acq_finish();                                            //BENCH: T5 (trigger_addr alignment)
     uint32_t start = pc_ring_mod((int64_t)addr - s->cap_pre_words, s->var.ring_words);
     uint32_t samples = (uint32_t)s->cap_total_words * (s->cap_wide ? 1 : 2);
-    uint32_t pre_samples = s->cap_wide ? (uint32_t)s->cap_pre_words + s->cap_ext_shift : (uint32_t)s->cap_pre_words * 2;
+    uint32_t pre_samples = (s->cap_wide ? (uint32_t)s->cap_pre_words : (uint32_t)s->cap_pre_words * 2) + s->cap_ext_shift;
     uint8_t  mask;
 
     if(pc_enc_rearm(s, start))
