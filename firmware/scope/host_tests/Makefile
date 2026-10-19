@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/adc_cal.c $(SRC)/acal_tr
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h $(SRC)/pc_ident.h $(SRC)/pc_report.h $(SRC)/pc_life.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_diag $(OUT)/test_ui
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick
 
 $(OUT):
 	mkdir -p $@
@@ -64,6 +64,10 @@ DIAG_SRCS := $(SRC)/pc_life.c $(SRC)/pc_ident.c $(SRC)/adc_cal.c mock_hal.c $(SR
 $(OUT)/test_diag: test_diag.c test_util.h $(CMDS_DEPS) | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_diag.c $(DIAG_SRCS)
 
+# Plot touch geometry: pointer position, left handle column, channel pick, shared move (fw 0.2.54)
+$(OUT)/test_touch_pick: test_touch_pick.c test_util.h $(SRC)/touch_pick.c $(SRC)/touch_pick.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_touch_pick.c $(SRC)/touch_pick.c
+
 $(OUT)/test_phosphor: test_phosphor.c test_util.h $(SRC)/phos_map.c $(SRC)/phos_map.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_phosphor.c $(SRC)/phos_map.c
 
@@ -109,6 +113,7 @@ test: all
 	$(OUT)/test_acal_track
 	$(OUT)/test_cal_wizard
 	$(OUT)/test_ui
+	$(OUT)/test_touch_pick
 	$(OUT)/test_phosphor
 	$(OUT)/test_mmu
 	$(OUT)/test_usbw

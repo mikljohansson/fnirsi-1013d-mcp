@@ -31,6 +31,25 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.54 - 2026-10-19 (protocol 1.16, unchanged; provisional number)
+
+Touch fix batch 1 (`docs/plans/touch-review.md` section c1; defects 1, 3, 4, 5, 8, 9, 10 and part of 19).
+
+- Fixed: the CH1, CH2 and reference pointers at the left edge of the plot are drag handles. A drag that starts within
+  a 44 px box around a pointer (x 0..43) moves it; the nearest switched-on pointer wins, a tie goes to the one drawn on
+  top (CH1, CH2, ref1..ref8 draw in that order). A tap on a pointer does nothing (it used to change the time base).
+  Pointers pinned at the top or bottom edge are grabbed where they are drawn (4bec0ff; geometry host-tested in
+  test_touch_pick, 4a3753b).
+- Fixed: the zero-line grab on the plot picks the nearest enabled channel (a disabled CH2 no longer blocks CH1; a tie
+  goes to CH2), reads the touch-down point rather than the point after the first move, and no longer shifts the
+  trigger point with the x component of a channel drag (4bec0ff).
+- Fixed: dragging a channel moves the trigger level on it by the same amount, limited so both stay on the grid: the
+  level keeps its voltage when the trace hits an edge. With the EXT trigger source the level no longer follows CH2
+  (ca7372a).
+- Fixed: the new auto setup with Invert on could put a trace position outside the grid (a wrapped subtraction or an
+  unlimited addition) and loaded settings were not range-checked; both are limited to the drag range 6..396 now, so a
+  channel can always be grabbed and the first drag no longer jumps (d94f09a).
+
 #### 0.2.52 - 2026-10-19 (protocol 1.16, docs/protocol.md section 14 row 55)
 
 - Added: GET_HEALTH (0x000A, answered in every context, also while a menu is open) reports the USB link state now
