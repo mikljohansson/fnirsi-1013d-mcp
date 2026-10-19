@@ -143,6 +143,7 @@ static void ud_gather(ud_input *in, int card)
   in->volts_default = (const int32_t *)signal_adjusters;          //int32 is int, int32_t long on the target: same size
   in->serial        = PC_SERIAL;
   in->dev_mode      = dev_mode;
+  in->dc_shift      = dc_shift_cal;
 
   pc_hal_battery(&level, &charging, &raw);
   in->battery  = level;
@@ -535,6 +536,10 @@ static void ud_touch(void)
 
     case UD_ID_OVERLAY:
       dev_mode ^= 1;
+      break;
+
+    case UD_ID_DCSHIFT:
+      dc_shift_cal ^= 1;
       break;
 
     case UD_ID_FEL:

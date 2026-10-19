@@ -107,6 +107,24 @@ Protocol 1.7 adds `display_mode` (`scope`, or `spectrum` while the screen shows 
 `spectrum`, every tool that checks the scope first (captures, setters) adds the caveat that the person sees the
 spectrum of each capture, not the trace. The data are unaffected.
 
+**`health`** (`scope_health`, tier 0, firmware 0.2.52+ / protocol 1.16, also while a menu is open). GET_HEALTH in
+words and values: USB state now (off, reconnecting, not configured, configured, suspended; high speed, port open,
+POWER / FADDR, time in the current suspend, since SET_CONFIGURATION), the CP15 control word (MMU, D-cache, I-cache),
+unit life (power-on number, operating hours, uptime, whether the settings sector was valid and the boot write
+succeeded, how the previous power-on ended), the settings save state, and the stored restart record (exception type,
+power-on, restarts, the saved registers; it survives power cycles until cleared at the scope). Read-only: the clear
+and restart-test flags are not exposed.
+
+**`save_report`** (`scope_save_report`, tier 1, 1.16, cap SD_SECTORS). SAVE_REPORT: the scope writes
+`reports/report-PPPPP-NN.txt` on its card's FAT partition (identity, life, USB, battery, counters, event log, both
+channels' calibration in words) and the tool returns the name and size; the file stays on the card. FatFs errors
+(no card, not ready, denied, 100 reports this power-on) come back in words.
+
+**`sd_info`** (`scope_sd_info`, tier 0, cap SD_SECTORS): card size, partition, write window, eGON headers at 16, 80
+and 750 (checksums with `verify`); from 1.16 `identify` (default true) adds `card_image`: the state of the
+identification (identity record, build tail, version string only, unknown, no image), version, commit hash and time,
+protocol, and whether it is the running image, with a sentence ("the card boots fw X; running now: fw Y").
+
 **`get_config`** (tier 0). Returns both channels (enabled, V/div, coupling, offset in divisions and volts,
 probe factor, invert), timebase (rate, dt, time/div equivalent, divider), trigger (source, edge, level in
 volts and code, mode, pre-trigger samples and fraction, total samples, window duration), generator.
@@ -303,6 +321,10 @@ logic, about 20 ns edge jitter. Not a sine source and not a power driver: buffer
 gate.", "On the stock FPGA the pin always outputs a fixed 1 kHz and this tool is unavailable."
 Disabling (`enabled=false`) does not need a token.
 
+**`bode_sweep`** (`scope_bode_sweep`, tier 3, token, caps DECIM and the generator): frequency response CH2 / CH1 of a
+passive DUT on the calibration post; parameters and returns in mcp/README.md "Bode sweep" and the guide's section 3b
+(design: docs/plans/bode-design.md).
+
 **`self_test_loopback`** (tier 3, token). Asks the user (in the description) to connect the calibration
 pin to CH1 with the probe. Runs: generator at 10 kHz / 50 % and 1 MHz / 25 %, captures at several rates,
 checks frequency, duty and levels against expectations, and runs the protocol bench tests that need a
@@ -310,6 +332,11 @@ known signal (protocol section 12, T4/T5/T7). Returns pass/fail per check. Used 
 bitstream change.
 
 ### 4.5 Calibration, screen (tier 0)
+
+**`calibration_info`** (`scope_calibration_info`, tier 0): the conversion in use per channel, the scope's calibration
+(v3 block, current correction), from 1.15 `tracking` per channel (the v4 tracker: tracking / frozen / idle, d, e, q,
+cm, ages, `in_words`) and from 1.16 `calibration_provenance` (which firmware build and FPGA calibrated, which parts it
+wrote, the date with a clock module, power-ons and operating hours since), plus the per-unit file.
 
 **`read_calibration`** (tier 0). Per channel: offset centres, gain factors per range, core A/B
 compensation, derived volts per code per range. Caveat: "Calibration is done on the scope's UI; these values

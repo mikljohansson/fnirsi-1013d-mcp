@@ -358,7 +358,8 @@ Roadmap section 8 item 1, segmented capture and hardware averaging.
   pretrigger value written to 0x0B.
 
 **Open.**
-- Firmware and MCP support.
+- Firmware support: built by fw-seq (fw 0.2.58 / protocol 1.17, both provisional; firmware/AGENTS.md section 33),
+  host-tested, not benched. MCP support: spec handed to the mcp agent (same section).
 - Flashing, and the bench checks of `README.md` section 6. Check 5, the N = 1 average against the sample memory, is
   the one hardware risk the testbench cannot cover: the mirror samples the raw ADC buses in other BRAMs.
 

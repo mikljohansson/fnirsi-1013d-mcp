@@ -86,7 +86,6 @@ uint32 previoustimerticks = 0;
 uint8 systemsettingsmenuopen = 0;   //flag for open menu
 uint8 screenbrightnessopen = 0;
 uint8 gridbrightnessopen = 0;
-uint8 othersettingsopen = 0;
 uint8 calibrationopen = 0;
 uint8 RTCsettingsopen = 0;
         
@@ -538,15 +537,7 @@ const int8 memory_deep_texts_x_offsets[5] =
 
 };
 //----------------------------------------------------------------------------------------------------------------------------------
-const int8 *trace_texts[4] =
-{
-  "Linear", "Dots", "Peak", "Pro"//, "Sine x"
-};
-
-const int8 trace_texts_x_offsets[4] =
-{
-  10, 13, 13, 18//, 10
-};
+//fw 0.2.56: the trace style names moved to ui_ctrl.c (ui_trace_names, the CTRL page's Trace style fold-out)
 //----------------------------------------------------------------------------------------------------------------------------------
 
 const int8 *keyboard_texts[20] =

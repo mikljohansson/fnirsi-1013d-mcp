@@ -58,7 +58,7 @@ What you get over stock and over Atlan4's firmware:
   clones of the same commit, in any directory, give the same sha256 (`firmware/README.md`, "Reproducible images").
 - **FPGA toolchain**: a headless Anlogic TD flow that rebuilds Atlan4's AL3 bitstream byte-identical. It built
   our bitstreams 0x1533 (external trigger on the calibration pin), 0x1534 (boxcar / CIC) and 0x1535 (CIC + FIR).
-  The owner's unit runs 0x1534 (`docs/hardware-status.md`); 0x1535 is built but not yet flashed there.
+  The owner's unit runs 0x1535 since 2026-10-19 (`docs/hardware-status.md`); 0x1536 (segmented capture, hardware averaging) is built and awaits firmware support.
 
 ## Status
 

@@ -12,11 +12,11 @@ CFLAGS  := -std=c99 -O2 -g -Wall -Wextra -Werror -Wno-unused-function -I$(SRC) -
 VECTORS := ../../../docs/protocol-vectors.json
 
 PROTO_SRCS := $(SRC)/pc_protocol.c
-CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/adc_cal.c $(SRC)/acal_track.c $(SRC)/pc_ident.c $(SRC)/pc_report.c $(SRC)/pc_life.c mock_hal.c
-CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h $(SRC)/pc_ident.h $(SRC)/pc_report.h $(SRC)/pc_life.h mock_hal.h test_util.h
+CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/pc_seq.c $(SRC)/adc_cal.c $(SRC)/acal_track.c $(SRC)/pc_ident.c $(SRC)/pc_report.c $(SRC)/pc_life.c mock_hal.c
+CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/pc_seq.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h $(SRC)/pc_ident.h $(SRC)/pc_report.h $(SRC)/pc_life.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_ui_diag
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag
 
 $(OUT):
 	mkdir -p $@
@@ -54,9 +54,10 @@ $(OUT)/test_acal_track: test_acal_track.c test_util.h $(SRC)/acal_track.c $(SRC)
 $(OUT)/test_cal_wizard: test_cal_wizard.c test_util.h $(SRC)/cal_wiz.c $(SRC)/cal_wiz.h $(SRC)/adc_cal.c $(SRC)/adc_cal.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_cal_wizard.c $(SRC)/cal_wiz.c $(SRC)/adc_cal.c
 
-# Screens: card formatting and fit with the device's font tables, main menu rows and mode rule (fw 0.2.51)
-UI_SRCS := $(SRC)/ui_fmt.c $(SRC)/ui_menu.c $(SRC)/font_2.c $(SRC)/font_3.c
-$(OUT)/test_ui: test_ui.c test_util.h $(UI_SRCS) $(SRC)/ui_fmt.h $(SRC)/ui_menu.h | $(OUT)
+# Screens: card formatting and fit with the device's font tables, main menu rows and mode rule (fw 0.2.51), the Settings
+# fold-out, screen and confirmation dialog (fw 0.2.55), the CTRL page, fold-outs, warnings and spectrum cards (fw 0.2.56)
+UI_SRCS := $(SRC)/ui_fmt.c $(SRC)/ui_menu.c $(SRC)/ui_settings.c $(SRC)/ui_ctrl.c $(SRC)/font_2.c $(SRC)/font_3.c $(SRC)/font_5.c
+$(OUT)/test_ui: test_ui.c test_util.h $(UI_SRCS) $(SRC)/ui_fmt.h $(SRC)/ui_menu.h $(SRC)/ui_settings.h $(SRC)/ui_ctrl.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_ui.c $(UI_SRCS)
 # fw 0.2.57: the Diagnostics pages and the first-run screen as data (ui_diag.c) with the 13, 16 and 24 px fonts
 UI_DIAG_SRCS := $(SRC)/ui_diag.c $(SRC)/ui_fmt.c $(SRC)/font_2.c $(SRC)/font_3.c $(SRC)/font_5.c
@@ -64,9 +65,20 @@ $(OUT)/test_ui_diag: test_ui_diag.c test_util.h $(UI_DIAG_SRCS) $(SRC)/ui_diag.h
 	$(CC) $(CFLAGS) -o $@ test_ui_diag.c $(UI_DIAG_SRCS)
 # fw 0.2.52 diagnostics: life record, provenance trailer, image identity (pure parts); --layouts prints the packed
 # layouts for check_vectors.py (diag_layouts)
-DIAG_SRCS := $(SRC)/pc_life.c $(SRC)/pc_ident.c $(SRC)/adc_cal.c mock_hal.c $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/acal_track.c $(SRC)/pc_report.c $(SRC)/pc_protocol.c
+DIAG_SRCS := $(SRC)/pc_life.c $(SRC)/pc_ident.c $(SRC)/adc_cal.c mock_hal.c $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/pc_seq.c $(SRC)/acal_track.c $(SRC)/pc_report.c $(SRC)/pc_protocol.c
 $(OUT)/test_diag: test_diag.c test_util.h $(CMDS_DEPS) | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_diag.c $(DIAG_SRCS)
+
+# Plot touch geometry: pointer position, left handle column, channel pick, shared move (fw 0.2.54)
+$(OUT)/test_touch_pick: test_touch_pick.c test_util.h $(SRC)/touch_pick.c $(SRC)/touch_pick.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_touch_pick.c $(SRC)/touch_pick.c
+
+# 0x1536 sequencer maths (fw 0.2.58): fit rules, table entries, slot addresses, UI averaging plan, exact mean
+$(OUT)/test_seq: test_seq.c test_util.h $(SRC)/pc_seq.c $(SRC)/pc_seq.h $(SRC)/adc_cal.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_seq.c $(SRC)/pc_seq.c
+
+$(OUT)/seq_check: seq_check.c $(SRC)/pc_seq.c $(SRC)/pc_seq.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ seq_check.c $(SRC)/pc_seq.c
 
 $(OUT)/test_phosphor: test_phosphor.c test_util.h $(SRC)/phos_map.c $(SRC)/phos_map.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_phosphor.c $(SRC)/phos_map.c
@@ -114,11 +126,13 @@ test: all
 	$(OUT)/test_cal_wizard
 	$(OUT)/test_ui
 	$(OUT)/test_ui_diag
+	$(OUT)/test_touch_pick
+	$(OUT)/test_seq
 	$(OUT)/test_phosphor
 	$(OUT)/test_mmu
 	$(OUT)/test_usbw
 	$(OUT)/test_diag
-	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --decim-checker $(OUT)/decim_check --adc-cal-checker $(OUT)/test_adc_cal --diag-checker $(OUT)/test_diag --vectors $(VECTORS)
+	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --decim-checker $(OUT)/decim_check --adc-cal-checker $(OUT)/test_adc_cal --diag-checker $(OUT)/test_diag --seq-checker $(OUT)/seq_check --vectors $(VECTORS)
 	$(PYTHON) -I test_fft.py --cli $(OUT)/fft_cli --tables $(SRC)/fx_fft_tables.c --gen ../../tools/gen_fft_tables.py
 	@if command -v qemu-arm >/dev/null && command -v arm-none-eabi-gcc >/dev/null && [ -x $(ARM_CC10) ]; then \
 	  $(MAKE) --no-print-directory test-arm; else echo "test-arm skipped (needs qemu-arm, arm-none-eabi-gcc + newlib, GCC 10)"; fi

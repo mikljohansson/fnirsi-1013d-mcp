@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            16    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            17    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -32,6 +32,9 @@
                                         //      bytes (fw 0.2.50)
                                         //1.16: diagnostics readers: GET_HEALTH, card image identity, calibration
                                         //      provenance, SAVE_REPORT (fw 0.2.52)
+                                        //1.17 (provisional numbering): FPGA 0x1536 sequencer:
+                                        //      SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW addr_mode 3, GET_STATUS 48
+                                        //      bytes (features, UI average), GET_DECIM 36, GET_CAPTURE_INFO 96 (fw 0.2.58)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
@@ -85,6 +88,9 @@
 #define PC_CMD_READ_SPECTRUM      0x020A     //1.7: the spectrum the scope displays (fw 0.2.28)
 #define PC_CMD_GET_DECIM          0x020C     //1.9: decimation filter setting and state (FPGA 0x1534+)
 #define PC_CMD_SET_DECIM          0x020D     //1.9: decimation filter setting (the UI's acquisition Filter)
+#define PC_CMD_SET_SEQ            0x020E     //1.17: sequencer setting for host ARM: segments / hardware averaging (0x1536+)
+#define PC_CMD_GET_SEQ            0x020F     //1.17: sequencer setting, fit and FPGA status
+#define PC_CMD_READ_SEQ           0x0210     //1.17: segment table or averaged record of the latest sequencer run
 #define PC_CMD_SD_INFO            0x0500     //1.3: card size, partition start, write window, eGON headers
 #define PC_CMD_SD_READ_SECTORS    0x0501     //1.3: up to 128 sectors
 #define PC_CMD_SD_STAGE           0x0502     //1.3: bytes into the 64 KiB write staging buffer
@@ -137,6 +143,14 @@
 #define PC_CAP_SD_SECTORS             (1u << 14)   //1.3: SD_INFO / SD_READ_SECTORS / SD_STAGE / SD_WRITE_SECTORS
 #define PC_CAP_DECIM                  (1u << 15)   //1.9: decimation filter, 16-bit samples (FPGA 0x1534+)
 #define PC_CAP_FIR                    (1u << 16)   //1.11: CIC compensation FIR, SET_DECIM flags bit 3 (FPGA 0x1535+)
+#define PC_CAP_SEQ                    (1u << 17)   //1.17: sequencer: segmented capture, hardware averaging (FPGA 0x1536+)
+
+//GET_STATUS bytes 44-45 / GET_DECIM bytes 32-33 (1.17): what the running bitstream has
+#define PC_FEAT_W_EXT_TRIGGER         0x0001       //0x1533+
+#define PC_FEAT_W_DECIM               0x0002       //0x1534+
+#define PC_FEAT_W_FIR                 0x0004       //0x1535+
+#define PC_FEAT_W_SEGMENTS            0x0008       //0x1536+
+#define PC_FEAT_W_HW_AVERAGE          0x0010       //0x1536+
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Decoded header

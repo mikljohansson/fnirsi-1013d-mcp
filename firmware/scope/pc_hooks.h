@@ -18,7 +18,8 @@
 #define PC_SETTING_WORD_DECIM 207
 #define PC_SETTING_WORD_SPEC0 208   //fw 0.2.39: spectrum view FFT length, window, scale (0x5E00 marker)
 #define PC_SETTING_WORD_SPEC1 209   //fw 0.2.39: spectrum view ref level, dBV (int16)
-#define PC_SETTING_WORD_PHOS  210   //fw 0.2.46: phosphor view persistence, palette (0x9A00 marker)
+#define PC_SETTING_WORD_PHOS  210   //fw 0.2.46: phosphor view persistence, palette (0x9A00 marker); 0.2.56: the switch
+#define PC_SETTING_WORD_UI    211   //fw 0.2.56: Grid, the spectrum's Display variant (0xC700 marker)
 
 //PC_UI_MASK(m) items. Menus are compact (fw 0.2.8, owner: no gaps): what the 1013D lacks is not laid out at all.
 #define PC_MASK_TRIG_CHANNEL  2     //trigger menu: EXT source box (0x1533+)
@@ -47,14 +48,13 @@ void pc_glue_ui_capture(void);        //UI finished reading a capture
 int  pc_glue_spectrum_display(void);  //fw 0.2.28: spectrum mode drew the trace area (1) instead of the traces
 int  pc_glue_spectrum_touch(void);    //touch in the trace area while the spectrum shows: 1 = handled
 void pc_glue_main_menu_mode(int row); //fw 0.2.51: main menu Scope or Spectrum analyser row chosen (ui_menu.h)
-void pc_glue_acq_display_draw(void);  //fw 0.2.51: acquisition menu: the Display row (Normal / Phosphor / X-Y)
-void pc_glue_acq_display_tap(void);   //fw 0.2.51: acquisition menu: touch on the Display row
 int  pc_glue_autoset(void);           //fw 0.2.51: AUTO SET tapped: the spectrum view's Auto (1 = handled there)
 int  pc_glue_autoset_running(void);   //fw 0.2.51: the spectrum view's Auto runs: AUTO SET reads "Auto..."
 int  pc_glue_phosphor_on(void);       //fw 0.2.46: the phosphor view replaces the CH1 / CH2 polylines
-void pc_glue_phosphor_draw(void);     //after the channel blocks: paint the phosphor maps and the strip
+void pc_glue_phosphor_draw(void);     //after the channel blocks: paint the phosphor maps
 int  pc_glue_phosphor_xy(uint32 index); //XY branch: 1 = the phosphor view drew it
-void pc_glue_phosphor_strip(void);    //scope_preset_values: the phosphor strip over the slider
+void pc_glue_scope_pass(void);        //fw 0.2.56: scope_display_trace_data starts: take the overrange flags
+void pc_glue_scope_warning(void);     //fw 0.2.56: scope_display_trace_data ends: the warning line, top middle
 
 //Decimation filter (bitstream 0x1534+, pc_decim.h). With it off or absent every call is a no-op and the 1.00o5 paths run.
 extern int16 *pc_decim_src;           //fpga_read_adc_data: converted samples to take instead of bus reads (0 = bus)
@@ -71,6 +71,7 @@ void   pc_glue_settings_defaults(void); //fw 0.2.44: scope_reset_config_data (DE
 uint16 pc_glue_decim_setting_word(void);         //settings sector word (scope_save_config_data)
 uint16 pc_glue_spectrum_setting_word(int i);     //settings sector words 208, 209 (scope_save_config_data)
 uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (scope_save_config_data)
+uint16 pc_glue_ui_setting_word(void);            //settings sector word 211 (scope_save_config_data)
 
 #define PC_BUSY_POLL()          pc_glue_poll_busy()
 #define PC_TIMER_TICK()         pc_glue_poll_isr()
@@ -89,14 +90,20 @@ uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (sco
 #define PC_SETTINGS_DEFAULTS()  pc_glue_settings_defaults()
 #define PC_SPECTRUM_TOUCH()     do { if(pc_glue_spectrum_touch()) return; } while(0)
 #define PC_MAIN_MENU_MODE(row) pc_glue_main_menu_mode(row)
-#define PC_ACQ_DISPLAY_DRAW()   pc_glue_acq_display_draw()
-#define PC_ACQ_DISPLAY_TAP()    pc_glue_acq_display_tap()
 #define PC_AUTOSET()            pc_glue_autoset()
 #define PC_AUTOSET_RUNNING()    pc_glue_autoset_running()
 #define PC_PHOSPHOR_SKIP()      if(!pc_glue_phosphor_on())
 #define PC_PHOSPHOR_DRAW()      pc_glue_phosphor_draw()
 #define PC_PHOSPHOR_XY(i, last) do { if(pc_glue_phosphor_xy(i)) (i) = (last); } while(0)
-#define PC_PHOSPHOR_STRIP()     pc_glue_phosphor_strip()
+#define PC_SCOPE_PASS()         pc_glue_scope_pass()
+#define PC_SCOPE_WARNING()      pc_glue_scope_warning()
+
+//fw 0.2.58 (0x1536 sequencer, pc_seq_hw.h): fpga_do_conversion writes the geometry and the sequencer registers before
+//the sampling reset; the software average is skipped while the traces hold a hardware average
+void   pc_seq_ui_pre_reset(void);
+int    pc_seq_sw_average(void);
+#define PC_SEQ_PRE_RESET()      pc_seq_ui_pre_reset()
+#define PC_SW_AVERAGE()         && pc_seq_sw_average()
 
 
 //Protocol 1.3 has no snapshot to restore: the power-off save stores the live settings as 1.00o5 does. fw 0.2.52: the

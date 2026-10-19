@@ -192,8 +192,7 @@
 #define SYSTEM_MENU_XPOS                     150
 #define SYSTEM_MENU_YPOS          MAIN_MENU_YPOS//46
 #define SYSTEM_MENU_WIDTH                    244
-#define SYSTEM_MENU_HEIGHT_FULL              354   //fw 0.2.51: the X-Y row went to the acquisition menu's Display row
-//fw 0.2.13: one row (59 px) shorter when no DS3231 answered at boot (Time & Date is the last row)
+//fw 0.2.55: the rows of ui_settings.h (ui_fo_height), one row shorter when no DS3231 answered at boot
 int pc_glue_sys_menu_height(void);
 #define SYSTEM_MENU_HEIGHT                   (pc_glue_sys_menu_height())
 
@@ -208,12 +207,6 @@ int pc_glue_sys_menu_height(void);
 #define G_BRIGHTNESS_MENU_YPOS               104//46
 #define G_BRIGHTNESS_MENU_WIDTH              331
 #define G_BRIGHTNESS_MENU_HEIGHT              58
-
-//Other settings    59step
-#define OTHER_MENU_XPOS                      395
-#define OTHER_MENU_YPOS                      46//163//46
-#define OTHER_MENU_WIDTH                     210
-#define OTHER_MENU_HEIGHT                    413//296
 
 //Calibration menu
 #define CALIBRATION_MENU_XPOS                395
@@ -311,10 +304,7 @@ int pc_glue_sys_menu_height(void);
 #define ACQ_MENU_XPOS                      250//ACQ_BUTTON_XPOS
 #define ACQ_MENU_YPOS                       48//46
 #define ACQ_MENU_WIDTH                     380//304
-#define ACQ_MENU_HEIGHT                    432   //fw 0.2.51: 386 + the Display row (until the CTRL page's Display fold-out)
-#define ACQ_MENU_BODY_H                    386   //1.00o5's part above the Display row
-#define ACQ_DISPLAY_Y                      390   //Display row: Normal / Phosphor / X-Y boxes, y offset in the menu
-#define ACQ_DISPLAY_H                       36
+#define ACQ_MENU_HEIGHT                    386   //fw 0.2.56: 1.00o5's height again (the 0.2.51 Display row went to CTRL)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Move fast button
@@ -835,7 +825,6 @@ extern uint32 previoustimerticks;
 extern uint8 systemsettingsmenuopen;
 extern uint8 screenbrightnessopen;
 extern uint8 gridbrightnessopen;
-extern uint8 othersettingsopen;
 extern uint8 calibrationopen;
 extern uint8 RTCsettingsopen;
 
@@ -1098,8 +1087,6 @@ extern const int8 acquisition_speed_text_x_offsets[29];//18
 extern const int8 *memory_deep_texts[5];
 extern const int8 memory_deep_texts_x_offsets[5];
 
-extern const int8 *trace_texts[4];//18
-extern const int8 trace_texts_x_offsets[4];//18
 
 extern const int8 *keyboard_texts[20];//18
 extern const int8 keyboard_texts_x_offsets[20];//18

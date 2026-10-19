@@ -36,3 +36,9 @@ fpga/al3/bitstreams/*
 # personal Anlogic TD licence, never commit
 fpga/al3/license/
 research/tools/vendor/
+
+# agent worktrees (local)
+.claude/worktrees/
+
+# the owner's local Claude Code MCP config (tracked example: .mcp.json.example)
+.mcp.json

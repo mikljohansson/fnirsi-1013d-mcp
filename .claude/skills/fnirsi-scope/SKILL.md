@@ -88,6 +88,8 @@ referenced to USB ground, so -1.24 / +1.9 V against the probe ground). Keep the 
 | Symptom | Fix |
 |---|---|
 | E_BUSY / "modal screen" | a menu is open on the scope: ask the person to close it |
+| scope restarted, link dropped, settings lost, which firmware? | fw 0.2.52+: `scope_health` (in_words: USB state, power-on, previous end, restart record) and `scope_sd_info` `card_image` (what the card boots vs what runs); `scope_save_report` writes a report file on the card for the person |
+| volts slightly off at 200 MSa/s / filtered, hours after calibrating | `scope_calibration_info`: `tracking` (fw 0.2.50+ v4 tracker state) and `calibration_provenance` (when, by which build) |
 | "still starting" | just booted; the server waits up to 10 s, retry once |
 | cannot connect / port busy | another session holds the serial port: ask who; never kill it |
 | no device | check the COM port (`--port`), power, USB-storage mode, cable |

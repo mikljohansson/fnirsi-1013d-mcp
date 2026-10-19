@@ -588,7 +588,121 @@ def _scope_cal_summary(c: P.CalResp) -> dict[str, Any]:
             "gains_measured_on_range": c.gain_range if measured else None,
             "gain_lever_codes": _r6(c.gain_lever / 16) if measured else None,
             "gains_carried_over": bool(c.gain_flags & 1)}
+    if c.has_tracker:
+        out["tracking"] = _tracker_summary(c)
     return out
+
+
+def _provenance_summary(c: P.CalResp, info: P.InfoResp) -> dict[str, Any]:
+    """GET_CAL 288..355 (protocol 1.16): where the scope's calibration came from, in words (one block for both
+    channels)."""
+    if c.prov_state == 0:
+        return {"state": "none", "text": "no provenance on the card: calibrated before fw 0.2.52, or an older "
+                                         "firmware saved sector 708 since (which clears the trailer)"}
+    if c.prov_state != 1:
+        return {"state": "unreadable", "text": "a provenance trailer is on the card but its CRC or version is wrong"}
+    try:
+        p = c.provenance()
+    except ValueError as e:
+        return {"state": "unreadable", "text": f"provenance: {e}"}
+    assert p is not None
+    when = p.time_str or "no clock module (no date)"
+    since = []
+    if c.prov_power_ons_since != P.CAL_AGE_NONE:
+        since.append(f"{c.prov_power_ons_since} power-ons")
+    if c.prov_minutes_since != P.CAL_AGE_NONE:
+        since.append(f"{c.prov_minutes_since / 60:.1f} h of operation")
+    same = p.build == info.fw_build and p.version == info.fw_version_str
+    text = (f"calibrated by fw {p.version} (build {p.build:08x}, FPGA 0x{p.fpga:04X}){' (the running build)' if same else ''}"
+            f", parts written: {', '.join(p.parts) or 'none'}; {when}; "
+            f"{' and '.join(since) + ' ago' if since else 'age unknown'}")
+    return {"state": "valid", "fw_version": p.version, "build": f"{p.build:08x}", "fpga": f"0x{p.fpga:04X}",
+            "parts": p.parts, "time": p.time_str, "power_on": p.power_on,
+            "power_ons_since": None if c.prov_power_ons_since == P.CAL_AGE_NONE else c.prov_power_ons_since,
+            "operating_hours_since": None if c.prov_minutes_since == P.CAL_AGE_NONE else
+            round(c.prov_minutes_since / 60, 2), "by_running_build": same, "text": text}
+
+
+def _health_words(d: dict[str, Any], h: P.HealthResp) -> list[str]:
+    u, cpu, life, st = d["usb"], d["cpu"], d["life"], d["settings"]
+    w = [f"USB {u['text']}" + (", high speed" if u["high_speed"] else "") +
+         (", port open" if u["port_open"] else ", port closed (DTR low)")]
+    w.append(f"CPU: MMU {'on' if cpu['mmu'] else 'off'}, D-cache {'on' if cpu['dcache'] else 'off'}, I-cache "
+             f"{'on' if cpu['icache'] else 'off'} (CP15 {cpu['cp15_control']})")
+    if life["power_on"]:
+        w.append(f"power-on #{life['power_on']}, {life['operating_hours']} h of operation in all, up "
+                 f"{life['uptime_s']:.0f} s; the previous power-on {life['previous_power_on_ended']}")
+    else:
+        w.append("power-on count unknown: no valid settings sector at boot (nothing is counted until the first save)")
+    if not life["settings_sector_valid_at_boot"]:
+        w.append("the settings sector was not valid at boot: the 1.00o5 defaults were loaded")
+    if st["last_save_failed"]:
+        w.append(f"the last settings save failed (result {st['last_save_result']})")
+    if st["changed_since_saved"]:
+        w.append(f"settings changed since they were saved (checked {st['evaluated_s_ago']} s ago): they are saved "
+                 "at power-off")
+    r = d["restart_record"]
+    if r is None:
+        w.append("no stored restart record")
+    else:
+        when = "this power-on" if r["from_this_power_on"] else f"power-on #{r['power_on']}"
+        w.append(f"stored restart record: {r['exception']} in {when} ({r['restarts']} restarts, at "
+                 f"{r['operating_hours']} h; exception LR {r['registers']['exc_lr']}, fault address "
+                 f"{r['registers']['far']}); it stays until cleared from the scope's Diagnostics")
+    return w
+
+
+def _age_text(ms: int) -> str:
+    if ms == P.CAL_AGE_NONE:
+        return "never since the reset"
+    s = ms / 1000
+    return f"{s:.1f} s ago" if s < 120 else f"{s / 60:.1f} min ago" if s < 7200 else f"{s / 3600:.1f} h ago"
+
+
+#: a tracker that has not accepted a record for this long is reported as frozen
+TRACK_FROZEN_S = 60.0
+
+
+def _tracker_summary(c: P.CalResp) -> dict[str, Any]:
+    """GET_CAL bytes 256..287 (protocol 1.15, row 54) in words: the full-rate A - B tracker and the class probe."""
+    f = c.track_flags
+    words = []
+    if not f & P.TRACK_RECORD:
+        state = "idle"
+        words.append("no record accepted since the reset (boot or the last calibration): the stored v3 values alone "
+                     "apply")
+    elif c.track_age_ms != P.CAL_AGE_NONE and c.track_age_ms / 1000 > TRACK_FROZEN_S:
+        state = "frozen"
+        words.append(f"frozen: the last accepted record was {_age_text(c.track_age_ms)}; the values are held")
+    else:
+        state = "tracking"
+        words.append(f"tracking: {c.track_records} records, the last {_age_text(c.track_age_ms)}")
+    if f & P.TRACK_RECORD and not f & P.TRACK_LAST_USABLE:
+        words.append(f"the last offered record was not usable ({c.track_last_pairs} pairs: needs >= 256 samples "
+                     "within 4..251 on gentle slopes; fast edges or energy near fs/2 reject it, as does the scope "
+                     "not running at 200 MSa/s with the filter off)")
+    if f & P.TRACK_RECORD and not f & P.TRACK_E:
+        words.append(f"slope e held: the input's spread of codes is {c.track_spread16 / 16:.1f} RMS (< 8 needed)")
+    if not f & P.TRACK_APPLIES:
+        words.append("not applied to this channel's next 8-bit readout (needs a bound v3 calibration, 200 MSa/s and "
+                     "the filter off at the last arm); cm still applies to full-rate and filtered readouts")
+    if f & P.TRACK_PROBE_DATA:
+        cm = f"common mode {c.track_cm:+.2f} code from {c.cm_probes} probes, the last {_age_text(c.cm_age_ms)}"
+        if not f & P.TRACK_PROBE_VALID:
+            cm += " (the last probe was not valid: the value is held)"
+        words.append(cm)
+    else:
+        words.append("no valid class probe since the reset: cm = 0 (a probe needs a quiet input on this channel, the "
+                     "scope running with no menu open and no host capture in flight)")
+    return {"state": state, "applies_to_next_8bit_readout": bool(f & P.TRACK_APPLIES),
+            "d_codes": _r6(c.track_d), "e": _r6(c.track_e),
+            "q_per_code2": _r6(c.track_q), "q_identified": bool(f & P.TRACK_Q),
+            "e_identified": bool(f & P.TRACK_E), "records": c.track_records,
+            "age_s": None if c.track_age_ms == P.CAL_AGE_NONE else round(c.track_age_ms / 1000, 1),
+            "last_pairs": c.track_last_pairs, "spread_codes": round(c.track_spread16 / 16, 2),
+            "cm_codes": _r6(c.track_cm), "cm_probes": c.cm_probes,
+            "cm_age_s": None if c.cm_age_ms == P.CAL_AGE_NONE else round(c.cm_age_ms / 1000, 1),
+            "in_words": words}
 
 
 def _decim_summary(st: P.DecimState) -> dict[str, Any]:
@@ -1013,9 +1127,12 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     "volts_per_lsb": {"A": _r6(sc.gain_a), "B": _r6(sc.gain_b)},
                     "zero_code_compensated": _r6(sc.zero_compensated),
                     "firmware_zero_code": _r6(cfg.zero_code), "firmware_volts_per_lsb": _r6(cfg.volts_per_lsb)}
-            scope_cal = {CHANNEL_NAMES[ch]: _scope_cal_summary(s.get_cal(ch, cached=False)) for ch in (0, 1)}
+            cals = [s.get_cal(ch, cached=False) for ch in (0, 1)]
+            scope_cal = {CHANNEL_NAMES[ch]: _scope_cal_summary(cals[ch]) for ch in (0, 1)}
             out: dict[str, Any] = {"ok": True, "calibration_file": str(sess.cal_path()),
                                    "loaded": cal is not None, "live": live, "scope_calibration": scope_cal}
+            if cals[0].has_provenance:
+                out["calibration_provenance"] = _provenance_summary(cals[0], s.info)
             if cal is not None:
                 out.update({
                     "unit": cal.unit, "points": len(cal.points),
@@ -1135,18 +1252,35 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     async def scope_sd_info(
         verify: Annotated[bool, Field(description="recompute the eGON checksums of the images on the card (reads "
                                                   "them; a few hundred ms)")] = False,
+        identify: Annotated[bool, Field(description="protocol 1.16: identify the image the card boots (version, "
+                                                    "commit, whether it is the running image); cached by the scope "
+                                                    "after the first read")] = True,
     ) -> dict[str, Any]:
         """The scope's SD card through the USB protocol (firmware >= 0.2.2, capability SD_SECTORS): size, partition
         start, the firmware's write window, and the eGON boot headers at sectors 16 (bootloader), 80 and 750 (the
-        scope image): magic, length, stored checksum and, with verify, whether it matches. Read-only. There is no
-        SD write tool: persisting firmware is a bench action (fnirsi1013d-flash --persist, fnirsi1013d-sd)."""
+        scope image): magic, length, stored checksum and, with verify, whether it matches. From firmware 0.2.52
+        (protocol 1.16) also ``card_image``: what the card boots (version, commit hash and time, protocol) and
+        whether that is the image running now (a FEL-loaded build differs). Read-only. There is no SD write tool:
+        persisting firmware is a bench action (fnirsi1013d-flash --persist, fnirsi1013d-sd)."""
         def go() -> dict[str, Any]:
             s = sess.get_scope()
             if not s.profile().has(P.Caps.SD_SECTORS):
                 raise ToolError("scope_sd_info: this firmware has no SD sector commands (capability SD_SECTORS, "
                                 "firmware >= 0.2.2)")
-            info = s.sd_info(verify)
+            info = s.sd_info(verify, identify)
             names = {0: "none", 1: "eGON.BT0", 2: "eGON.EXE"}
+            card_image = None
+            if info.ident is not None and info.ident.state:
+                ci, run_i = info.ident, s.info
+                running = f"fw {run_i.fw_version_str} build {run_i.fw_build:08x}"
+                card_image = {"state": P.SD_IDENT_STATES.get(ci.state, ci.state),
+                              "version": ci.version_str or None, "build": f"{ci.build:08x}" if ci.build else None,
+                              "commit_time": ci.time_str,
+                              "protocol": f"{ci.proto_major}.{ci.proto_minor}" if ci.proto_minor else None,
+                              "is_running_image": ci.running, "identified_ms": ci.ident_ms,
+                              "text": (f"the card boots {ci.describe()}; " +
+                                       ("that is the running image" if ci.running else f"running now: {running} "
+                                        "(loaded from RAM / FEL or a different build)"))}
             checks = {0: "not checked", 1: "ok", 2: "bad", 3: "length invalid"}
             return {"ok": True, "card_sectors": info.card_sectors, "card_mib": _r6(info.card_sectors / 2048),
                     "partition_start": info.part_start or None,
@@ -1155,8 +1289,56 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                  "length": h.length if h.magic else None,
                                  "checksum": f"0x{h.checksum:08X}" if h.magic else None,
                                  "check": checks.get(h.check, h.check)} for h in info.headers],
+                    "card_image": card_image,
                     "caveats": ["read-only; writing the card is done with fnirsi1013d-flash --persist on the bench"]}
-        return await run("scope_sd_info", 0, {"verify": verify}, go)
+        return await run("scope_sd_info", 0, {"verify": verify, "identify": identify}, go)
+
+    @register(0, title="Scope health", read_only=True)
+    async def scope_health() -> dict[str, Any]:
+        """The scope's own health (firmware 0.2.52+, protocol 1.16; answers even while a menu is open): USB state
+        now (configured, suspended, reconnecting, high speed, port open), the CPU's MMU / cache state, the unit's
+        life (power-on number, operating hours, uptime, how the previous power-on ended), whether the settings are
+        saved, and the stored restart record (an exception that restarted the firmware; it survives power cycles
+        until cleared at the scope). Returns the values and ``in_words``. Use it first when the scope restarted,
+        the link dropped or settings seem lost, and include it in a fault report."""
+        def go() -> dict[str, Any]:
+            s = sess.get_scope()
+            h = s.health()
+            if h is None:
+                raise ToolError("scope_health needs firmware 0.2.52 or later (protocol 1.16); use scope_status and "
+                                "scope_event_log on this firmware")
+            d = h.describe()
+            return {"ok": True, **d, "in_words": _health_words(d, h)}
+        return await run("scope_health", 0, {}, go)
+
+    @register(1, title="Save a diagnostics report on the scope")
+    async def scope_save_report() -> dict[str, Any]:
+        """Ask the scope to write its diagnostics report to its SD card (firmware 0.2.52+, protocol 1.16, cap
+        SD_SECTORS): reports/report-PPPPP-NN.txt on the card's FAT partition (PPPPP = power-on number), with the
+        identity of the running and the card image, unit life, USB state, battery, restart counters and the stored
+        restart record, every link counter by name, the decoded event log and both channels' calibration in words.
+        The same file as the Diagnostics "Save report" button. Returns the file name and size; the person reads it
+        from the card (USB mass-storage mode or a card reader). Changes no settings; fails with 'menu open' while a
+        scope menu is modal."""
+        def go() -> dict[str, Any]:
+            s = sess.get_scope()
+            if not s.profile().has(P.Caps.SD_SECTORS) or s.info.proto_minor < 16:
+                raise ToolError("scope_save_report needs firmware 0.2.52 or later (protocol 1.16) with the SD "
+                                "commands")
+            try:
+                r = s.save_report()
+            except DeviceError as e:
+                if e.status == P.Status.E_IO:
+                    why = {0: "no SD card", 3: "the card is not ready", 7: "access denied (card write-protected?)",
+                           8: "100 reports exist for this power-on: power-cycle or delete some"}.get(
+                               e.detail, f"FatFs error {e.detail}")
+                    raise ToolError(f"scope_save_report: the scope could not write the report: {why}") from e
+                raise
+            return {"ok": True, "file": r.name_str, "bytes": r.bytes_written,
+                    "applied": {"file": r.name_str},
+                    "caveats": ["the report is on the scope's SD card (FAT partition), not on this computer: read it "
+                                "through the scope's USB mass-storage mode or a card reader"]}
+        return await run("scope_save_report", 1, {}, go)
 
     @register(0, title="Screenshot", read_only=True)
     async def scope_screenshot() -> Image:

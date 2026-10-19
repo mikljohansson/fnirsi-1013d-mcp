@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 #include "pc_decim.h"
+#include "pc_seq.h"
 #include "adc_cal.h"
 #include "acal_track.h"
 #include "pc_life.h"
@@ -109,9 +110,11 @@ void     pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable
 //Reset the sample system, write the geometry while in reset (prog != 0: 0x0B/0x0C; always 0x0E), release.
 //normal: trigger mode written to 0x1A (1 normal/single, 0 auto). dc: decimation filter configuration for this capture
 //(bitstream 0x1534+, written and settled before the reset, 16-bit trigger level from the UI level), NULL on bitstreams
-//without the filter (nothing written). Returns 0, or -1 when 0x05 never became ready.
+//without the filter (nothing written). sq: sequencer setting for this arm (bitstream 0x1536+, pc_seq.h; written with
+//0x0B / 0x0C before the reset, mode 0 = a single capture), NULL on bitstreams without the sequencer (nothing written).
+//Returns 0, or -1 when 0x05 never became ready.
 int      pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal,
-                    const pc_decim_cfg *dc);
+                    const pc_decim_cfg *dc, const pc_seq_cfg *sq);
 void     pc_hal_acq_poll(int *done, int *triggered);                                   //0x0A bit 0, 0x18 bit 0
 uint16_t pc_hal_acq_finish(void);                                                      //post-done writes, returns 0x14 & 0x1FFF
 void     pc_hal_force(void);                                                           //0x1A = 0
@@ -132,6 +135,17 @@ void     pc_hal_decim_current(pc_decim_cfg *c, int *written);
 uint16_t pc_hal_decim_readback(void);                                                  //[FPGA] 0x29: byte 0 << 8 | S
 //16-bit samples of the last readout of a channel (decimated captures only), NULL when that readout was 8-bit
 const uint16_t *pc_hal_trace16(int ch, uint32_t *count);
+
+//Sequencer (bitstream 0x1536+, pc_seq.h) [FPGA]
+void     pc_hal_seq_status(uint8_t raw[8]);                                           //0x2A, read until two reads agree
+void     pc_hal_seq_stop(void);                                                        //0x5D = 1, then 0x1A = 0
+void     pc_hal_seq_view(uint8_t mode57, uint8_t shift);                               //readout: 0x5B = shift, 0x57 = mode57
+//count view-word bytes `byte` (0..7 = 0x2B..0x32) from accumulator word first: 0x1F, one dummy strobe, count strobes;
+//dst advances by stride per byte. first + count <= 2048.
+void     pc_hal_seq_read(uint8_t byte, uint32_t first, uint32_t count, uint8_t *dst, uint32_t stride);
+//The UI's Average (any context, no FPGA access): state 0 off, 1 software, 2 hardware (0x1536 averaging run of 2^log2n
+//records per displayed record)
+void     pc_hal_ui_average(uint8_t *state, uint8_t *log2n);
 
 //Raw bus access for DEBUG_FPGA
 void     pc_hal_fpga_write_cmd(uint8_t cmd);

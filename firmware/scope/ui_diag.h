@@ -60,6 +60,7 @@
 #define UD_ID_FEL        12
 #define UD_ID_LATER      13
 #define UD_ID_CAL_NOW    14
+#define UD_ID_DCSHIFT    15
 
 //Pages
 #define UD_PAGE_STATUS    0
@@ -127,6 +128,7 @@ typedef struct
   const int32_t     *volts_default;   //1.00o5's volts factors per range (signal_adjusters[7])
   const char        *serial;          //USB serial string
   uint8_t            dev_mode;        //Debug overlay on
+  uint8_t            dc_shift;        //1.00o5's DC shift trim shown on the CTRL page (dc_shift_cal)
   //Log page: the event log decoded in words (newest first), the time of each in ms
   uint32_t           nevents, events_total, events_first;   //shown, in the log since boot, index of the first shown
   uint8_t            events_more;     //older stored entries exist beyond the ones shown

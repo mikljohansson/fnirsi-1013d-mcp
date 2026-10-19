@@ -44,6 +44,12 @@ SCALING_CAVEAT = ("Absolute volts use the per-unit calibration when one covers t
                   "with a known DC voltage fixes the zero per range and ADC core.")
 
 
+#: SAVE_REPORT writes a file of a few tens of KiB through FatFs
+SAVE_REPORT_TIMEOUT_S = 15.0
+#: protocol 1.15: the oldest GET_CAL a conversion uses (the v4 tracker's values move with the full-rate cores)
+CAL_TRACK_AGE_S = 1.0
+
+
 def channel_index(ch: str | int) -> int:
     if isinstance(ch, int):
         if ch in (0, 1):
@@ -263,6 +269,7 @@ class Scope:
         self._info: P.InfoResp | None = None
         self._chan: dict[int, P.ChannelConfig] = {}
         self._cal: dict[int, P.CalResp] = {}
+        self._cal_t: dict[int, float] = {}
         self._tb: P.Timebase | None = None
         self._trig: P.Trigger | None = None
         #: legacy (no SHARED_MODE) only: REMOTE held by this client
@@ -382,6 +389,15 @@ class Scope:
         if self.info.proto_minor < 5:
             return None
         return P.parse_event_log(self._req(P.Cmd.GET_EVENT_LOG, bytes([P.EVENT_LOG_REARM]) if rearm else b""))
+
+    def health(self, clear_restart: bool = False) -> P.HealthResp | None:
+        """GET_HEALTH (protocol 1.16; answers also while a menu is modal): USB state now, CP15, unit life, settings
+        state and the stored restart record, or None on older firmware. ``clear_restart``: clear the stored record
+        after this answer (which still shows it)."""
+        if self.info.proto_minor < 16:
+            return None
+        return P.HealthResp.unpack(self._req(P.Cmd.GET_HEALTH,
+                                             bytes([P.HEALTH_CLEAR_RESTART]) if clear_restart else b""))
 
     def battery(self) -> P.BatteryResp:
         return P.BatteryResp.unpack(self._req(P.Cmd.GET_BATTERY))
@@ -569,10 +585,19 @@ class Scope:
                               "(firmware >= 0.2.2)")
         return SdCard(self.t)
 
-    def sd_info(self, verify: bool = False) -> P.SdInfo:
-        """SD_INFO: card size, partition start, write window, eGON headers at 16, 80, 750 (VERIFY: checksums)."""
+    def sd_info(self, verify: bool = False, identify: bool = False) -> P.SdInfo:
+        """SD_INFO: card size, partition start, write window, eGON headers at 16, 80, 750 (VERIFY: checksums);
+        ``identify`` (protocol 1.16): the identity of the image the card boots (``SdInfo.ident``; ignored before)."""
         with self.lock:
-            return self.sd_card().info(verify)
+            return self.sd_card().info(verify, identify and self.info.proto_minor >= 16)
+
+    def save_report(self) -> P.SaveReportResp:
+        """SAVE_REPORT (protocol 1.16, cap SD_SECTORS): the firmware writes reports/report-PPPPP-NN.txt on the card's
+        FAT partition (identity, life, USB, counters, event log, calibration in words) and answers the name."""
+        if self.info.proto_minor < 16:
+            raise DeviceError(P.Cmd.SAVE_REPORT, P.Status.E_UNKNOWN_CMD, 0, "SAVE_REPORT needs protocol 1.16 "
+                              "(firmware 0.2.52)")
+        return P.SaveReportResp.unpack(self._req(P.Cmd.SAVE_REPORT, timeout=SAVE_REPORT_TIMEOUT_S))
 
     def sd_read(self, sector: int, count: int) -> bytes:
         """SD_READ_SECTORS in pieces of 128, each CRC-checked."""
@@ -606,7 +631,8 @@ class Scope:
         current time base and filter), else the per-unit calibration when it covers the range, else the firmware's
         uv_per_lsb / zero_code."""
         c = channel_index(ch)
-        cal = self.get_cal(c)
+        # 1.15: the scope keeps tracking the full-rate cores; conversions use GET_CAL at most CAL_TRACK_AGE_S old
+        cal = self.get_cal(c, max_age=CAL_TRACK_AGE_S if self.info.proto_minor >= 15 else None)
         if clock_class is None:
             clock_class = self.current_clock_class() if cal.v3 else P.CAL_CLASS_GATED
         return channel_scale(c, cfg or self.get_channel(c), cal, self.unit_cal, clock_class)
@@ -616,10 +642,13 @@ class Scope:
         dec = self.get_decim().next.k if self.info.caps & P.Caps.DECIM else 0
         return P.cal_clock_class(self.get_timebase().divider, dec > 0)
 
-    def get_cal(self, ch: int | str, cached: bool = True) -> P.CalResp:
+    def get_cal(self, ch: int | str, cached: bool = True, max_age: float | None = None) -> P.CalResp:
+        """GET_CAL, cached; ``max_age`` (s): re-read when the cached answer is older (the v4 tracker moves)."""
         c = channel_index(ch)
-        if not cached or c not in self._cal:
+        now = time.monotonic()
+        if not cached or c not in self._cal or (max_age is not None and now - self._cal_t.get(c, 0.0) > max_age):
             self._cal[c] = P.CalResp.unpack(self._req(P.Cmd.GET_CAL, bytes((c,))))
+            self._cal_t[c] = now
         return self._cal[c]
 
     # --- generator ---------------------------------------------------------------------------------------

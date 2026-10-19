@@ -138,7 +138,6 @@ void scope_acquisition_ACQ_mode_select(void);
 void scope_acquisition_Average_mode_select(void);
 
 void scope_acquisition_memory_deep_select(void);
-void scope_acquisition_trace_select(void);
 //----------------------------------------------------------------------
 
 void scope_open_trigger_menu(void);
@@ -170,21 +169,7 @@ void scope_system_settings_grid_brightness_item(int mode);
 void scope_system_settings_grid_brightness_value(void);
 
 void scope_system_settings_other_settings_item(int mode);
-void scope_system_settings_open_other_settings_menu(void);
-
-void scope_system_settings_other_settings_boot_menu_item(void);
-void scope_system_settings_other_settings_default_start_item(void);
-void scope_system_settings_other_settings_new_autosetup_item(void);
-void scope_system_settings_other_settings_lock_cursor_item(void);
-void scope_system_settings_other_settings_dc_shift_cal_item(void);
-void scope_system_settings_other_settings_CH340_mode_item(void);
-void scope_system_settings_other_settings_dev_mode_item(void);
-void scope_system_settings_other_settings_BMP_mark_item(void);
-void scope_system_settings_other_settings_ref_on_start_item(void);
-//void scope_system_settings_other_settings_ine_mark_item(void);
-
-void scope_system_settings_calibration_item(int mode);
-void scope_system_settings_confirmation_item(int mode);
+void scope_system_settings_filemsg_item(int mode);
 void scope_system_settings_RTC_settings_item(int mode);
 void scope_open_RTC_settings_menu(void);
 
@@ -201,14 +186,6 @@ void scope_system_settings_year_item_value(void);
 void scope_system_settings_ONOFF_RTC_item(void);
 //----------------------------------------------------------------------
 //----------------------------------------------------------------------
-void scope_show_Input_calibration(void);
-void scope_show_calibrating_300mV_text(void);
-void scope_show_calibrating_600mV_text(void);
-void scope_show_calibrating_1_5V_text(void);
-void scope_show_calibrating_3V_text(void);
-void scope_show_calibrating_7_5V_text(void);
-void scope_show_calibrating_15V_text(void);
-void scope_show_Input_calibration_done(void);
 void scope_show_Input_calibration_fail(void);
 //----------------------------------------------------------------------
 //void scope_open_t_cursor_menu(void);
@@ -227,7 +204,6 @@ void scope_display_slider(uint16 xpos, uint16 ypos, uint8 position);
 int  scope_move_slider(uint16 xpos, uint16 ypos, uint8 *position);
 
 void scope_display_slide_button(uint16 xpos, uint16 ypos, uint8 state, uint32 color);
-void scope_display_ok_button(uint16 xpos, uint16 ypos, uint8 mode);
 
 void scope_boot_button(uint16 xpos, uint16 ypos);
 

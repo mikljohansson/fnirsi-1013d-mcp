@@ -300,7 +300,21 @@ static void test_pages(void)
   T_TRUE(has_text("Full-rate offset +0.70 code, 4 probes, 12 s ago"));
   T_TRUE(has_text("DC shift: centre 870, size 100, value 59136"));
   T_TRUE(has_text("1.00o5 core compensations: not used (v3 in use)"));
-  T_TRUE(has_text("Volts calibration needs a DC"));
+  T_TRUE(has_text("Needs a DC supply up to 15 V."));
+  T_TRUE(has_text("DC shift trim off."));
+  T_EQ(ud_hit(&pg, 170, 380), UD_ID_DCSHIFT);
+  T_EQ(ud_hit(&pg, 20, 440), UD_ID_VOLTS);
+  T_EQ(ud_hit(&pg, 700, 440), UD_ID_CLEAR);
+  T_EQ(ud_hit(&pg, 20, 380), UD_ID_CALIBRATE);
+  in.dc_shift = 1;
+  ud_build(&pg, UD_PAGE_CAL, &in, 0);
+  T_EQ(text_colour("DC shift trim on: CTRL on the scope opens it."), UD_C_WARN);
+  strcpy(note.text, "Calibration cleared: run Calibrate.");
+  note.colour = UD_C_WARN;
+  ud_build(&pg, UD_PAGE_CAL, &in, &note);
+  check_layout("cal note", 0);
+  T_TRUE(has_text("Calibration cleared: run Calibrate."));
+  in.dc_shift = 0;
 
   //Log page
   ud_build(&pg, UD_PAGE_LOG, &in, 0);

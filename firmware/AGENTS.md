@@ -1,6 +1,12 @@
 # firmware/ handoff for agents
 
-**Current state (coordinator merge, 2026-10-19 14:50): latest build fw 0.2.52, protocol 1.16** = main with fw-ui1 (UX makeover
+**Current state (coordinator merge, 2026-10-19 14:35): latest build fw 0.2.58, protocol 1.17** = main with fw-ui2 (UX makeover
+step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
+section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
+section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-ui3 (2026-10-19): fw 0.2.55 provisional, protocol 1.16 unchanged: UX makeover step 3 (Settings fold-out
+trimmed, full Settings screen, confirmation dialog), section 31.**
+**Current state (coordinator merge, 2026-10-19 13:50): latest build fw 0.2.52, protocol 1.16** = main with fw-ui1 (UX makeover
 step 1: main menu, USB drive screen, top bar, Display row, strips, measurement cards; section 29) and fw-readers (diagnostics
 readers: GET_HEALTH, card image identity, calibration provenance, unit life record, SAVE_REPORT; section 30) merged. Running in
 parallel: fw-ui2 (step 2), fw-ui3 (step 3), fw-touch1, fw-seg (0x1536, protocol 1.17). 
@@ -47,7 +53,10 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
                            (host_tests/test_cal_wizard.c; section 27)
   cal_wiz_ui.c             the wizard's full-screen view, touch loop and the zero / gain measurements (section 27)
   phos_map.c/.h            phosphor hit-count map: rasteriser, decay, render, palettes. Pure C, host-buildable (section 24)
-  phosphor.c/.h            phosphor view (main menu row 7, strip, hooks in scope_display_trace_data; section 24)
+  phosphor.c/.h            phosphor view (the Display fold-out's switch since 0.2.56; hooks in scope_display_trace_data;
+                           section 24, 33)
+  ui_ctrl.c/.h             CTRL page geometry, fold-outs, value names, warning line, spectrum cards. Pure C (test_ui; 33)
+  ctrl_page.c/.h           the CTRL page and its fold-outs: drawing and the modal touch loops (section 33)
   pc_mmu.c/.h              flat page table (builder + walk host-buildable), MMU enable; pc_mmu_off in start.s (section 26)
   host_tests/              test_protocol.c, test_rx_ring.c, test_session.c (+ mock_hal.c FPGA/transport model), vector_check.c,
                            check_vectors.py, gen_vectors.py, bench_link.py (pyserial, bench only)
@@ -248,6 +257,10 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.46 | 1b6359f | cdba5b51 | digital phosphor view (main menu row 7; Persistence / Palette / Clear strip; XY), GET_STATUS byte 43 = 4 (protocol 1.13, row 52), settings word 210 (fw-phosphor, section 24) | built, host-tested (test_phosphor 95 checks); bench steps in section 24 |
 | 0.2.48 | b1922c3 | 2f768fd9 | MMU + D-cache on (flat map, DDR / SRAM write-back, framebuffer write-through, restart record and peripherals strongly ordered), clean + off at _reset and ENTER_FEL, GET_LINK_STATS 58-59 fault status / address (fw-mmu, section 26) | built, host-tested (test_mmu); A/B image `make gcc10-nommu` 0.2.48-nommu sha256 45e03f7f; bench sequence in section 26 |
 | 0.2.49 | c477faa | 90f460d6 | USB suspend watch in the 1 ms tick (pc_usbw.c): inferred resume (SOFs, EP0 setup, EP2 OUT while suspended) acts, soft reconnect (SoftConn off 1 s) after a retry storm or 15 min suspended, GET_LINK_STATS 60-61, event type 20, SUSPEND before RESUME in the ISR (protocol 1.14, row 53; fw-usb2, section 27) | built, host-tested (test_usbw 90 checks); A/B `make gcc10-nommu` sha256 f5f377ea; bench plan in section 27 |
+| 0.2.56 | 5255516 | 7729e4fe | UX makeover step 2 (fw-ui2, section 33; provisional number): CTRL page in both modes (Display fold-out with icons and the Phosphor switch with Persistence / Palette / Clear / wfm/s, Trace style or Analyse with Scale and Ref level, Grid switch, compact V+ / CH / V- steppers, 50 % TRIG in Scope), ACQ menu acquisition only, phosphor and spectrum strips and spectrum header gone (spectrum cards Peak / Level / RBW / Time), empty cursor and measures slots in Spectrum, warning line in every scope variant, top bar chips one construction, settings word 211 | built, host-tested (test_ui 6672 checks); bench walk-through in section 33 |
+| 0.2.58 | 3934ea3 | 6bbd7598 | FPGA 0x1536 sequencer (fw-seq, section 35; provisional number): caps bit 17 SEQ, 0x0B / 0x0C / 0x57-0x5C before the reset, UI Average as a hardware run of 2-64 records for legacy records that fit, SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW addr_mode 3, GET_STATUS 48 (features, UI Average), GET_DECIM 36, GET_CAPTURE_INFO 96 (protocol 1.17, row 56) | built, host-tested (test_seq 732, test_session 69705); nommu fc8fc081; flash plan in section 35 |
+| 0.2.55 | e01f775 | 6f100098 | UX makeover step 3 (fw-ui3, section 31; provisional number): fold-out Screen / Grid brightness, File message timeout, Time and date, Baseline calibration (interim), Other settings; full Settings screen (`ui_settings.c` / `ui_settings_ui.c`) with At power-on 0 / 4 / 5 written on Back, Restore default settings behind a confirmation (boot byte kept, CDC kept); Other settings menu, USB-Serial and Dev mode rows removed; delete confirmation as the dialog pattern | built, host-tested (test_ui 1,431,758 checks); bench walk-through in section 31 |
+| 0.2.54 | f9fcac6 | a4f0c832 | touch fix batch 1 (fw-touch1, section 32; provisional number): left pointers are drag handles (`touch_pick.c`, 44 px boxes, nearest / on-top pick), pick at touch-down, nearest enabled zero line, no trigger-point move in a channel drag, channel + trigger level share one clamped delta, EXT no longer follows CH2, traceposition 6..396 in the new auto setup and at load |
 | 0.2.51 | 8f5bf16 | 38580def | UX makeover step 1 (fw-ui1, section 29): main menu Scope / Spectrum analyser / Saved pictures / Saved waveforms / Settings / Diagnostics / USB drive with one 59 px hit area per row, Spectrum in roll mode switches Roll off; USB drive screen text + Exit; no top-bar version; Display row Normal / Phosphor / X-Y in the acquisition menu (X-Y out of System settings); strips without Scope / Auto, AUTO SET = spectrum Auto; phosphor warnings top-middle; cards with chip, scope-maker names, 4 significant digits, defaults Freq / Vpp / Vavg | built, host-tested (test_ui 1513 checks); bench walk-through in section 29 |
 | 0.2.50 | e871c50 | 1b55efc2 | calibration wizard (one modal three-step flow, 48e5737) and calibration v4: A - B interleave tracker applied in the full class, full-class common-mode class probe, GET_CAL 288 bytes, diagnostics lines (protocol 1.14, row 53; fw-cal3, section 28) | built, host-tested; bench lists README 6.4 and 6.5 |
 | 0.2.52 | c8f874b | e0968392 | diagnostics readers (fw-readers, section 30): GET_HEALTH 0x000A (USB state, CP15, power-on count, operating minutes, settings save state, stored restart record), unit life record in settings words 224..255 with one sector-709 write per boot, image identity record + SD_INFO IDENT (112 bytes), calibration provenance in sector 708 432..487 + GET_CAL 356 bytes, SAVE_REPORT 0x0504 (protocol 1.16, row 55) | built, host-tested (test_diag 462 checks); bench list in section 30 |
@@ -1517,3 +1530,397 @@ calibration page incl. provenance. Firmware tile: `pc_image_ident` (running) vs 
    identity lines, "Card image (sector 750): 0.2.25 ...", counters, event log in words, calibration in words.
 6. Regression: `fnirsi1013d-bench` and the soak as on 0.2.50; pass_ms unchanged (the 1 Hz dirty check rebuilds 256
    words).
+
+
+
+## 31. fw-ui3: UX makeover step 3, Settings (fw 0.2.55 provisional, protocol 1.16 unchanged)
+
+Branch from main 9cc599c (fw 0.2.51), merged with origin/main (0.2.52 readers, 0.2.54 touch) in e01f775. Plan:
+`docs/plans/ux-makeover.md` section 5 (Settings), 6b (dialog buttons), 6c (full-screen look); rules
+`docs/ui-guidelines.md`; user-facing description README section 5 "Settings: fold-out, Settings screen, confirmations".
+Commits, one topic each: a4664ae (`ui_settings.c/.h` pure tables + `host_tests/test_ui.c` tests), 66a3a70 (fold-out
+trim, `ui_settings_ui.c` Settings screen, 1.00o5 Other settings menu removed, reset without boot byte), 24743a7 (delete
+confirmation), 3e2fec2 (max-light icon), 07bd90d (0.2.55, CHANGELOG, README), e01f775 (merge), then this handoff.
+Image from e01f775: `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 536,576 B, sha256
+6f1000986ea64d7a7b8ed13a22c13dc9995a8e9380aeb3c36dfd69eb968d68aa, ELF
+28d8054ba964ead137bee380414347f19cf2592ec11a905874409942beb17c48 (nommu bin b7cd9404...). **Nothing benched.** Host
+tests green (test_ui 1,431,758 checks: every pixel of the Settings, time-editor and dialog hit areas against the drawn
+rectangles; every row value in the 16 px font against its row). Warnings: GCC 10 36, GCC 13 31, line-number-free lists
+identical to 9cc599c; the new files are clean with -Wextra. No protocol change, no settings words.
+
+Where things are:
+- **Tables** (`ui_settings.h`): fold-out ids `UI_FO_*` and `ui_fo_rows/height/row_top/row_at` (contiguous 59 px rows
+  from y 46, Time and date only with a DS3231); Settings rows `ui_set_rows[]` (label, group, kind STEP / TAP / OPEN,
+  x, y), groups `ui_set_groups[]`, `ui_set_hit` (a STEP row answers only on its 80 x 44 - / + buttons), `ui_set_value`
+  (text + tone: ON green 0x35C26A, OFF grey, WARN orange, NA grey and inert), `ui_boot_next` / `ui_boot_text`, the time
+  editor (`ui_time_hit`), the dialog (`ui_dlg_layout`, `ui_dlg_hit`, texts `ui_dlg_restore`, `ui_dlg_delete`).
+- **Fold-out** (menu.c `scope_open_system_settings_menu`, `sys_fo_row`; statemachine.c `handle_main_menu_touch`
+  switches on `ui_fo_row_at`): `scope_system_settings_filemsg_item` replaces `..._confirmation_item`; the RTC, calibration
+  and Other settings items take their y from the table. `SYSTEM_MENU_HEIGHT` = `pc_glue_sys_menu_height` =
+  `ui_fo_height`. Other settings closes the fold-out, puts back what was under the main menu (displaybuffer1) and runs
+  `ui_settings_run()`, then returns from the menu.
+- **Settings screen** (`ui_settings_ui.c`): modal (menus are), saves the screen in displaybuffer4, `gather()` reads the
+  variables into `ui_set_state`, actions write the variables directly. Back writes the boot byte (uint8 store at
+  0x81BFFC1F, then `sd_card_write(710)`) only when it changed, restores the screen, clears the top-bar clock if it was
+  switched off here, redraws the max-light icon if a brightness step left max light, and copies the main-menu rect
+  into displaybuffer1 (the menu's caller restores that rect afterwards). After Restore default settings it calls
+  `apply_all()` (the FPGA setup of `main`) and `scope_setup_main_screen()` instead of restoring the old picture.
+- **Dialog** `ui_confirm(text, restore)`: saves/restores `displaydata`; with restore=1 the box area goes through
+  displaybuffer4 (so never call it with restore=1 while the Settings screen or the wizard owns displaybuffer4).
+  `handle_confirm_delete` is now one line on top of it.
+- **Removed**: 1.00o5's Other settings menu (`scope_system_settings_open_other_settings_menu` and its nine item
+  functions, `othersettingsopen`, `OTHER_MENU_*`, the boot-byte write in `close_open_menus` with its dev-mode rule),
+  `SYSTEM_MENU_HEIGHT_FULL`, the boot-byte write in `scope_reset_config_data`. `pc_glue_settings_defaults` sets
+  `USB_CH340 = 1` under PC_FORCE_CDC (the reset used to set MSC, and the USB drive screen's exit re-inits from it).
+
+Every removed control and where it went (guidelines section 5):
+
+| was | now |
+|---|---|
+| Fold-out: Notification confirmation (slide toggle) | Fold-out: File message timeout, chip "tap" / "0.7 s"; Settings > Controls |
+| Fold-out: RTC settings | Fold-out: Time and date (same editor); Settings > Clock |
+| Fold-out: Baseline calibration | **interim**, still in the fold-out above Other settings; fw-ui4 moves it to Diagnostics > Calibrate and deletes the row (`UI_FO_CAL`, `scope_system_settings_calibration_item`, the `calibrationopen` 2-9 volts boxes stay with it) |
+| Other settings: Boot menu + Default start | Settings > Start-up > At power-on (0 / 4 / 5); FEL not offered |
+| Other settings: New autosetup | Settings > Controls > Auto setup |
+| Other settings: Lock move cursors | Settings > Controls > Cursors |
+| Other settings: DC shift calibration | **interim** Settings > "Calibration (moves to Diagnostics)" > DC shift trim; fw-ui4 moves it to the Calibration page and deletes `UI_SET_DCSHIFT` and the group (the test's geometry checks follow the table) |
+| Other settings: USB-Serial mode | removed (PC_FORCE_CDC) |
+| Other settings: Dev mode | removed from the UI; `dev_mode` still loaded / saved and still drives the trigger-address overlay and `scope_test_TP`; fw-ui4's Developer page gets "Debug overlay" for it |
+| Other settings: Add a tag to BMP | Settings > Files > Stamp screenshots with (time / file name / nothing) |
+| Other settings: Load Ref on start | Settings > Files > Reference traces at power-on |
+| "Confirm to delete?" NO / YES | the dialog: Cancel left, Delete right (red), 160 x 44 px, 16 px apart |
+| DEFAULT button (diagnostics view, no confirmation) | unchanged (fw-ui4's territory); Settings > Restore default settings is the confirmed path. Both now keep the boot byte |
+
+Not done / for a successor:
+- The Settings screen is modal, not a main-loop mode (guidelines section 4 asks main-loop only for long-running screens).
+- No dimming behind the dialog (the panel library has no blend); the box is drawn over the screen.
+- Brightness - / + step 5 per tap, no auto-repeat while held.
+- The fold-out stays anchored at y 46 while its main-menu row is the fifth (as in step 1).
+- Restore default settings while the spectrum or phosphor view is active rebuilds the scope screen and leaves the view
+  switches alone; not tried on the device.
+- The full-screen colours (0x0D0D0D rows, 0x0F2447 / 0x1F3A66 buttons, 0x35C26A values) are local defines in
+  `ui_settings_ui.c`; fw-ui4's Diagnostics pages should move them to a shared header when they reuse them.
+
+**Bench walk-through (owner, coordinator on COM10)**
+1. FEL-load the image, `#VER` fw=0.2.55 proto=1.16.
+2. Menu > Settings: the fold-out shows Screen brightness, Grid brightness, File message timeout (chip "0.7 s" or "tap"),
+   Time and date (only with a DS3231), Baseline calibration, Other settings; the box ends under Other settings. Tap
+   each row near its top and bottom edge: Screen / Grid open their sliders; File message timeout flips the chip; Time
+   and date opens the hours..year editor; Baseline calibration opens the wizard (Cancel returns).
+3. Other settings: the Settings screen, black, "Settings" top left, Back top right, Display / Controls / Calibration
+   (moves to Diagnostics) on the left, Files / Clock / Start-up on the right, Restore default settings bottom left.
+   Values on the right of each row in green (grey for off, amber for DC shift trim on).
+4. Screen brightness - / +: the backlight steps by 5 %; Grid brightness - / +: the value steps (the grid shows it after
+   Back). A tap on the row outside the buttons does nothing.
+5. Tap File message timeout, Cursors, Auto setup, Stamp screenshots with, Reference traces at power-on, DC shift trim:
+   each flips its value. Back; Menu > Settings > Other settings: the values are as left. Power-cycle: they persist
+   (DC shift trim does not, as before).
+6. Clock: "shown" / "not used" (without a module "no clock module", inert, and Time and date inert too). Clock on:
+   Time and date shows "20yy-mm-dd hh:mm"; tap it: the editor page, - / + change and write at once; Back returns.
+   Clock off: Back to the scope, the top-bar time disappears; clock on: it comes back within a second.
+7. At power-on: cycles Open firmware -> Boot menu, then open firmware -> Boot menu, then stock firmware -> Open
+   firmware. Leave it on "Boot menu, then open firmware", Back, power-cycle: the boot menu shows with PECO
+   preselected. Set "Open firmware": the next power-on goes straight to the open firmware. With the byte at FEL (set
+   by the loader tool) the row reads "Boot menu, then FEL" in amber.
+8. Restore default settings: the dialog "Restore default settings?" with three lines, Cancel left, Restore right in red;
+   taps outside the two buttons do nothing. Cancel: back to the page, nothing changed. Restore: the page shows the
+   defaults (brightness 20 %, grid 25 %, clock not used); Back: the scope screen rebuilt (CH1 on, defaults), the boot
+   menu choice unchanged at the next power-on, calibration unchanged (diagnostics lines), COM10 still there (CDC), and
+   USB drive > Exit still returns to CDC.
+9. Saved pictures: select a file, Delete: "Delete from the SD card?", "This cannot be undone.", Cancel left, Delete
+   right (red), both 44 px tall and 16 px apart; Cancel keeps the file and the browser redraws cleanly; Delete removes
+   it. Same in Saved waveforms and in the waveform viewer's Delete wave.
+Bug indicators: a fold-out tap opening the neighbouring row; the Settings screen leaving parts of itself on the scope
+after Back; the main-menu area showing an old picture after Restore; a row's value overflowing into its label; the
+boot menu appearing (or not) against the At power-on value; a tap between rows or outside the dialog buttons acting;
+COM10 disappearing after Restore default settings; the delete dialog leaving a box behind in the browser.
+
+## 32. fw-touch1: touch fix batch 1 (fw 0.2.54 provisional, protocol 1.16 unchanged)
+
+Branch from main 9cc599c (fw 0.2.51). Spec: `docs/plans/touch-review.md` sections (b) and (c1); rule
+`docs/ui-guidelines.md` section 3 "Touch" (handles drawn on screen are draggable). Commits: 4a3753b (`touch_pick.c/.h`,
+`host_tests/test_touch_pick.c`, both Makefiles), 4bec0ff (drawing through `scope_pointer_top`, `scan_for_touch`
+handles and pick), ca7372a (`touch_handler` shared delta, `triggerchannel == 1`), d94f09a (traceposition clamps),
+f9fcac6 (0.2.54, CHANGELOG, README section 5 "Touch on the scope plot"), then this handoff. Image from f9fcac6:
+`firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 504,832 B, sha256
+a4f0c832079364cc2d5f91f04dfd6546b816f0a8ff336138884b7c75e0f72347, ELF
+52f9cf983405116adadb4500e55b228655a87f6267ff6f858acdf1c1c4a27a94 (nommu bin eefe9a4e...). **Nothing benched.** Host
+tests green (test_touch_pick 538 checks, the rest unchanged). GCC 10 warnings 36, line-number-free list identical to
+9cc599c; the new files are clean with the host tests' -Wall -Wextra -Werror. No settings words, no protocol change.
+
+What changed, by defect number of the review:
+- **1, 12 (refs)**: `scan_left_handle()` (statemachine.c, above `scan_for_touch`) builds the ten pointers (CH1, CH2,
+  ref1..ref8, draw order of `scope_draw_pointers`) and calls the pure `pick_left_handle()`: x 0..43 (`HANDLE_W`), rows
+  tip - 22 .. tip + 21 with tip = `scope_pointer_top(position) + POINTER_TIP_DY` (the clamped drawn top + 6), nearest
+  switched-on pointer, `<=` so a tie goes to the later-drawn one. Normal display only (`xymodedisplay == 0`). It runs at
+  the touch-down point, before the blocking loop; a lift without displacement on a handle returns without the tap
+  action; a drag sets `touchstate` to the handle's state alone. The old x < 60 ref block is deleted; the
+  `distance_ch_ref_*` globals in variables.c are now unused (left in place to keep the merge with fw-ui2/fw-ui3 small).
+- **Drawing**: CH1 / CH2 / ref / trigger level pointers use `scope_pointer_top()` (touch_pick.c) instead of eleven copies
+  of the 49..442 clamp. The X-Y CH1 top pointer and the H marker are unchanged.
+- **3, 4 (hit maths)**: the zero-line grab calls `pick_channel_line()` (int32, zero row `448 - position`, radius
+  `CHANNEL_GRAB_RADIUS` 30 as 1.00o5, only enabled channels, tie to CH2). Its x range starts at `HANDLE_W` (was > 60);
+  with volt cursors on it still skips x 310..410 (batch 2).
+- **5**: every pick in the plot branch (channels, trigger level, time and volt cursors) reads `previousxtouch` /
+  `previousytouch`. The drag maths still measure from that point, so nothing else moved.
+- **8**: channel grabs no longer carry `TOUCH_STATE_MOVE_TRIGGER_POINT`; the fallback (no object) still pans the
+  trigger point.
+- **9, 10**: `touch_handler` computes `touch_drag_delta()` once (Move slow /5, same truncation as before) and, when the
+  level follows the channel (`triggerchannel == 0` for CH1, `== 1` for CH2; 2 = EXT never follows), limits it with
+  `touch_shared_delta()` (both starts clamped first, so the limits never cross). `change_channel_1_offset`,
+  `change_channel_2_offset`, `change_trigger_level_offset` now take the delta (statemachine.h); X-Y passes x for CH1 and
+  y for CH2 as before. The snapshot at grab time also tests `== 1` for CH2.
+- **4, 19 (writers)**: `scope_do_auto_setup_new` computes the DC adjustment in int32 (`position`) and stores
+  `scope_trace_clamp(position)`; `dcoffset` follows from the clamped value as before. `scope_restore_config_data` and
+  `scope_restore_setup_from_file` clamp CH1 / CH2 `traceposition`. Not done (not in c1): `scope_do_auto_setup_old`
+  still writes 0 / 399, and the new auto setup's two-channel spread (+100 / -100 after the DC block) can leave 398 or
+  1..5; both are grabbable now (the pick uses the clamped drawn position) and jump into range on the first drag step.
+- Left for batch 2 / 3 as briefed: trace-body grab and radius 40, 8 px dead band, tap zones (the owner keeps the hidden
+  V/div bands), hidden objects (the trigger level hit while its pointer is hidden, X-Y moving disabled channels),
+  locked cursors, the blocking loop, the second GT911 reader, long-mode presets per step, spectrum pan.
+- Merge note: fw-ui2 edits the right-bar handlers in statemachine.c and fw-ui3 the settings fold-out; this branch only
+  touches `touch_handler`, `scan_for_touch`'s plot branch, the three `change_*` functions, `scope_draw_pointers`, the new
+  auto setup's DC blocks and the two loaders. Both Makefiles gained one SRCS / test line each.
+
+**Bench walk-through (owner, coordinator on COM10)** - FEL-load the image, `#VER` fw=0.2.54 proto=1.16. Normal
+display, both channels on, CH1 trigger, Move fast (not slow) unless noted.
+1. Defect 1, pointer is not a handle. Old repro: drag the yellow "1" pointer up: nothing moved. Now: touch the "1"
+   pointer and drag up and down: CH1 follows the finger; the same for "2". A touch up to about 20 px above or below the
+   pointer, within the left 44 px, still grabs it.
+2. Defect 3, nearest enabled. Old repro: drag CH2 to about 10 px below CH1, switch CH2 off in its menu, touch 5-10 px
+   below CH1's line and drag: nothing moved. Now: CH1 moves (both from its pointer and from the line on the plot). With
+   CH2 on and parked exactly on CH1: the drag moves CH2 (drawn on top); move it away and CH1 is reachable again.
+3. Owner's report (CH2 at the bottom, CH1 only from its zero line): CH1 now drags from its pointer at any height; on the
+   plot the zero-line grab is unchanged (the trace body follows in batch 2).
+4. Defect 5, pick after the move. Old repro: a quick upward flick starting on a channel's zero line often moved the
+   trigger point. Now: the flick moves the channel.
+5. Defect 8, H marker shifts. Old repro: drag CH1 up with a diagonal stroke: the H marker moved. Now: the H marker
+   stays; a drag on empty plot still moves it horizontally.
+6. Defect 9, level drifts. Old repro: CH1 trigger, level about one division above the trace, drag CH1 to the top and
+   back: the level ended on the trace. Now: the drag stops when the level reaches the top, and back down the level is
+   still one division above the trace (same trigger voltage).
+7. Defect 10, EXT follows CH2 (bitstream 0x1533+). Old repro: trigger source EXT, drag CH2: the level moved. Now: it
+   stays. With source CH2 it follows as before.
+8. Defect 4, auto setup with Invert (needs a DC input). Old repro: Settings > new auto setup, CH1 Invert on, DC
+   coupling, a positive DC input, AUTO SET: the CH1 pointer sat at the top and could not be dragged. Now: the pointer
+   is inside the grid (position 6..396) and drags from the pointer and from its line. Also: a settings sector or a
+   saved waveform setup with an out-of-range position loads with the pointer on the grid.
+9. Taps. A brisk tap on a pointer changes nothing (it used to change the time base). Taps elsewhere keep the 1.00o5
+   zones: left / right half time/div, top / bottom bands V/div.
+10. References: Ref menu, show two references at different heights; each drags from its own pointer (the nearer one when
+   their boxes overlap, the later-numbered one when they coincide). Touches at x 44..60 no longer reach the refs.
+11. X-Y: any drag moves CH1 with x and CH2 with y, as before; the left column is not a handle column there.
+Bug indicators: a pointer drag moving a different pointer than the one under the finger; the trigger level moving
+with EXT; a tap on a pointer changing time/div or V/div; a channel stuck after AUTO SET with Invert; the level jumping
+at the first drag step.
+
+## 33. fw-ui2: UX makeover step 2 (fw 0.2.56 provisional, protocol 1.16 unchanged)
+
+Branch from main 9cc599c (fw 0.2.51), merged with main d31ee84 (0.2.52 readers, 0.2.54 touch) in 2ebef4d and with main
+33cd1b5 (0.2.55 settings, fw-ui3) in 5255516. Plan:
+`docs/plans/ux-makeover.md` section 7 step 2; rules `docs/ui-guidelines.md`; user-facing description README section 5
+"Screens: CTRL page, fold-outs, chips, warnings, spectrum cards". Commits, one topic each: 93f1b68 (`ui_ctrl.c/.h`, the
+card formatters in `ui_fmt.c`, test_ui), aaa0613 (top bar chips), a41ca39 (CTRL page, fold-outs, strips and header out,
+warnings, ACQ menu, settings word 211), e1900ff (0.2.56, CHANGELOG, README), 2ebef4d (merge), f372581 (AUTO SET label
+only on page one), cf2cbf6 (handoff), 5255516 (merge of main with fw-ui3's 0.2.55), then this note. Bench image from
+5255516 (step 2 on top of 0.2.55): `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 543,744 B, sha256
+7729e4fe970f3fb634f5d600191c3cc873587edb9fd6ffb604b21f4e64cc69c8, ELF
+a79ad696068a3d3d5641d78710b86b5556ec0d83661f07a1dfc2ed36ce08324d (nommu bin 16bb691e..., ELF d73204cc...). The
+pre-merge image from f372581 was a182ba84 (536,576 B). **Nothing benched.** Host
+tests green (test_ui 6672 checks on the branch, 1,436,917 with fw-ui3's settings tests after the merge). GCC 10
+warnings 36, GCC 13 / PC_DEBUG 31, upstream only; the
+new files are clean with -Wall -Wextra. No protocol change: GET_STATUS byte 43 keeps its meaning (4 = phosphor drawn,
+now also in X-Y). Settings words: 210 bit 3 (the Phosphor switch), 211 (0xC700: bit 0 Grid, bits 1-2 the spectrum's
+Display variant); 212..223 stay free.
+
+Points for a successor:
+- **Files**: `ui_ctrl.c/.h` (pure: page-two items and hit areas `ui_ctrl_item_at`, page-one slots `ui_p1_shown`,
+  fold-out layout and hits `ui_fold_*`, the value-name tables, `ui_display_value`, `ui_scope_warning`, the spectrum
+  card set `ui_spec_cards`); `ctrl_page.c/.h` (target: drawing, the modal fold-out loop `cp_fold_run`, the steppers,
+  Grid, 50 % TRIG). menu.c `scope_setup_right_control_menu` calls `ctrl_page_draw` for page two outside the viewer;
+  statemachine.c `handle_right_volts_div_menu_touch` hands page two to `ctrl_page_touch`; the viewer's page two and the
+  DC shift states 2-4 still run 1.00o5's code below it (old V+ / V- at `voltdivypos`, Show grid, Next page / END cal.).
+- **Fold-outs** are modal loops like the top bar dropdowns: the trace area x 500..727 is saved in `displaybuffer2`
+  and put back on close, then the whole page is redrawn (a value can show on two buttons: Reset sets the Display
+  variant). Choice rows close, value rows step and stay, Ref level is the one two-way row (left half down), a tap
+  outside closes and is consumed. The wfm/s line in the Phosphor row is a snapshot taken when the panel is drawn.
+- **Phosphor switch** (phosphor.c `phos.wanted`, `phosphor_switch` / `phosphor_set_switch`): the picture is drawn while
+  the switch is on, the scope view shows and `phosphor_available()`; `phosphor_service` turns it off in roll mode and
+  the viewers and back on after. The spectrum keeps it off without touching the switch (`pc_glue_main_menu_mode`
+  passes `phosphor_switch()` to `ui_mm_choose`). `pc_phos_wanted`, `pc_display_variant`, the 0.2.51 Display row
+  (`pc_glue_acq_display_*`, `ACQ_MENU_BODY_H`, `ACQ_DISPLAY_*`), the strip (`phosphor_strip`, `phosphor_touch`,
+  `PC_PHOSPHOR_STRIP`) and `phos.over` are gone; `phosphor_param_text/step`, `phosphor_wfm_text` feed the fold-out.
+- **Warnings**: `PC_SCOPE_PASS()` at the start of `scope_display_trace_data` latches the ADoverload flags (the channel
+  blocks clear them), `PC_SCOPE_WARNING()` before the copy to the screen draws `ui_scope_warning` at (366 centre, y 69)
+  in font_2 orange, not in the viewer; the untriggered flag is `pc_scope_untrig` from `pc_glue_ui_capture_addr`. The
+  spectrum keeps `spec_draw_warnings`.
+- **Spectrum**: the strip (`F_*`, `spec_draw_strip`, `spec_field_value`) and the header (`spec_draw_header`,
+  `spec_text_at`, `spec_glyph_marker`) are gone; `spec_draw_cards` draws `ui_spec_cards` with `scope_draw_card` (the
+  scope cards' helper, factored out of `scope_display_channel_measurements`) at y 446; touches below y 436 do nothing.
+  `spectrum_param_text/step` (`SPEC_P_*`, a step ends a running Auto) and `spectrum_view/set_view` feed the fold-outs.
+  The grid dots follow `gridenable`, the level labels stay. `spec_autoset_button` draws only on page one.
+- **Grid** is `scopesettings.gridenable` in every mode now (1.00o5 used it only in the viewer): `scope_draw_grid` always
+  draws the record-position slider and the lines only when it is on; both callers in scope_functions.c call it
+  unconditionally. Restored from word 211 by `pc_ui_fix_settings`; 1.00o5's load still sets 1 first.
+- **Right bar follows the mode**: `pc_right_bar_follow` in `pc_glue_ui_service` redraws the bar when the spectrum view
+  starts or ends (main menu, roll mode, viewer, Auto), in `maindisplaybuffer`.
+- **Deviations from the brief / mockups, on purpose**: Scale and Ref level are below a separator in the Analyse
+  fold-out (the plan's owner text and the SpectrumCtrlAnalysis board; there is no free slot for an Axis button, and the
+  spectrum's 50 % slot stays empty). Grid shows a slide switch, not "on" (guidelines: a toggle never reads on / off).
+  MEASURES is an empty slot in Spectrum (the spectrum's own list is Measurements v2; the cards are a fixed set). The
+  Display button values are abbreviations that fit 47 px ("Phos", "XY Ph", "Spec", "Wfall"; test_ui checks the widths).
+- **Lost or open until later steps**: the spectrum's MEASURES list and THD card (Measurements v2); one-tap phosphor
+  Clear (now CTRL, Display, Clear, accepted by the owner); a live wfm/s while working (it shows only in the fold-out;
+  a card is the review's suggestion A8); the viewer's and DC shift pages keep 1.00o5's look; the Settings fold-out and
+  screen are step 3 (fw-ui3, 0.2.55, merged here); fold-outs pause the trace and the PC (E_BUSY after 250 ms)
+  like every dropdown.
+
+**Bench walk-through (owner, coordinator on COM10)**
+1. FEL-load the image, `#VER` fw=0.2.56 proto=1.16. Top bar: CH1, CH2, ACQ and the trigger chip each a grey box with
+   the coloured block on the left, no dark notch at the join; touch each chip: white box, menu opens as before.
+2. CTRL: page two reads Display (Normal), Trace style (Linear), Grid (switch, green), the CH1 stepper (grey V+, yellow
+   CH1, grey V-), the CH2 stepper (cyan), 50 % TRIG. Tap V+ / V- near their outer edges and near the middle of the
+   CH1 / CH2 block: the upper half of the block is V+, the lower V-; the top bar chip's V/div follows. CH2 off: its
+   centre is grey and the stepper does nothing. 50 % TRIG sets the level as before.
+3. Grid: the grid lines go, the record-position slider under the plot stays; power-cycle: Grid stays off.
+4. Display: a panel left of the bar with Normal (green), X-Y, a line, the Phosphor switch row. X-Y: closes, the
+   Lissajous shows. Display again, Phosphor on: Persistence, Palette, Clear appear, the second line of the Phosphor
+   row reads "NN wfm/s" after reopening. Close by tapping the plot: the plot under the panel is back, the button reads
+   "XY Ph", the X-Y figure is graded (phosphor in X-Y is back). Normal: "Phos", the graded traces; Clear empties the
+   picture and closes. Persistence / Palette step in place.
+5. Roll mode on (ACQ menu): Display shows the Phosphor row grey with "Not in roll mode"; Roll off: the picture comes
+   back by itself.
+6. Trace style: Linear / Dots / Peak / Pro, the chosen one green; a choice closes and applies. The ACQ menu has no
+   Trace column and no Display row (386 px high).
+7. Warnings in Normal: unplug the probe with a small V/div or overdrive CH1: "CH1 overrange: increase V/div" orange at
+   the top middle; Auto trigger with no edge: "No trigger: check the trigger level"; X-Y with CH2 off: "X-Y needs both
+   channels: switch on CH1 and CH2"; both off: "No channel enabled...".
+8. Menu > Spectrum analyser: page one shows CTRL, RUN/STOP, AUTO SET, three empty slots, SAVE PIC, SAVE WAVE; no strip,
+   no header line; cards at the bottom: [Peak] and [Level] per shown channel in its colour, [RBW] with a light grey
+   chip. Page two: Display (Spec), Analyse (2048 pt), Grid, the steppers, an empty bottom slot.
+9. Analyse: Analyse CH1 / CH2 / CH1 + CH2, FFT length, Window, Average, a line, Scale, Ref level with - and + (left
+   half down, right half up), Reset; values change in place, the plot follows after closing; the Analyse button shows
+   the new FFT length. Display: Waterfall: a fourth card [Time] counting up; Density: the legend top right.
+10. AUTO SET in the spectrum, then CTRL during "Auto...": the Analyse button is not overwritten; back to page one: AUTO
+   SET reads correctly. Menu > Scope: page one shows the cursor / measures buttons again, page two the Scope items.
+11. Power-cycle with Phosphor on and the spectrum in Waterfall: the scope boots graded, Spectrum analyser opens in
+   Waterfall. Settings > Restore default settings (0.2.55): Normal, Phosphor off, Grid on, Spectrum.
+12. Waveform viewer: page two is 1.00o5's (V+ / V-, Show grid).
+Bug indicators: a stepper half acting on the other channel or the wrong direction; a fold-out leaving a stripe of
+the panel on the plot (stopped scope); AUTO SET painted over Analyse; the right bar showing Scope items in the spectrum
+or empty slots in the scope after a mode change; the warning line in the waveform viewer; cards overlapping the
+frequency labels; Phosphor switch on but no graded picture in the scope view outside roll mode.
+## 35. fw-seq: FPGA 0x1536 segmented capture and hardware averaging (fw 0.2.58 provisional, protocol 1.17, row 56 provisional)
+
+Version 0.2.58 as assigned by the coordinator (main: 0.2.56 fw-ui2, 0.2.57 fw-ui4); protocol 1.17 with the row kept at
+**70** as briefed (main's last row is 55; renumber to 56 at the merge if preferred). Branch
+`worktree-agent-adad2198a41835255` from main 9cc599c (0.2.51), merged with origin/main 57924e0 (0.2.55, protocol
+1.16). Commits: e6bbc10 (pc_seq.c maths + test_seq + seq_check), 65abebf (HAL, UI averaging, protocol 1.17, mock,
+test_session, vectors), 32a80ed (protocol.md row 56), f10ccf4 (CHANGELOG, READMEs, design-note status), 7bfd267
+(docs/plans/phosphor-fast-capture.md), b4453bb (merge of main), 29c55ac (two GCC warnings), then this handoff. Then 246bc52 (merge of main), 3934ea3 (renumbered 0.2.58). Image from
+3934ea3 (#VER fw=0.2.58 proto=1.17): `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 548,352 B, sha256
+6bbd7598cfb473b5226e34a9a18bf808f1795ac6f02158c0cd368316eb954dfe, ELF
+ad1c1597c87441eb6c8bd26056229cf259227d75a13e910c477d0fb232b8c8dc; A/B `make gcc10-nommu` sha256
+fc8fc081016d13d7320152845e684bc9c7bf01ea53ac6ab156c799b7ddedb191. Not pinned in backups/. **Nothing benched, nothing
+flashed.** Host tests all green (test_seq 732, test_session 69705 / 69703, test_diag 462, check_vectors OK with 90 frames,
+163 decim, 73 seq cases). Warnings: clean GCC 10 / nommu 36, GCC 13 / PC_DEBUG 31, sorted lists identical to a clean build
+of origin/main 57924e0. No settings words or sector bytes claimed (none needed: the UI averaging picks N itself).
+
+Spec: docs/protocol.md section 14 row 56; user-facing and file map: firmware/README.md section 5 "Segmented capture and
+hardware averaging"; FPGA: fpga/al3/README.md section 6 (+ "Firmware support"), docs/plans/segmented-capture.md.
+
+**What was decided and why**
+- One cap bit, SEQ (17), for both modes (one bitstream feature); a features word in GET_STATUS 44-45 (and GET_DECIM
+  32-33) so a host sees EXT / DECIM / FIR / SEGMENTS / HW_AVERAGE without decoding caps; GET_STATUS 46-47 = the UI Average
+  state (0 off, 1 software, 2 hardware) and log2 N. All answered without FPGA access (ISR safe).
+- Host interface follows design note section 7 with changes: S and raw are per read (READ_SEQ), not in SET_SEQ, because
+  the FPGA applies them live; READ_SEQ has its own header; segments are read with READ_RAW addr_mode 3 so all three
+  layouts work; STOP ends a run as DONE (a circular run has no other end) instead of ABORTED.
+- Arm order on 0x1536: 0x0B / 0x0C and 0x57-0x5C before 0x01 = 1 (fpga-gen6 confirmed the race in simulation: a 0x0B in
+  the last write clock before the release is ignored, and 0x57 / 0x59 written last in the window left the slot mask at
+  1FFF). 0x57 = 0 is written whenever the tracked last value (`seq_57`, 0xFF after boot) is not 0; the READ_SEQ view write
+  (0x57 = 0x02 | raw) updates the tracker, so the next plain arm writes 0 (fpga-gen6's caveat).
+- UI averaging only for legacy records that fit the accumulator: the UI depths start at 3000 samples, so 16-bit records
+  (1 word per sample) never fit 2046 words. With the default filter (CIC2+FIR) that means hardware averaging only at
+  200 MSa/s or with the filter off. A UX follow-up could offer a 2000-sample depth (or cap the depth) while Average is on;
+  `pc_seq_ui_conversion` would then need the 16-bit lane path (L0 / L2, u32 sums, a 64-bit mean).
+- The averaged UI record is read with the dummy strobe (exact, as pc_hal_read_core). fpga-gen6 found that the 1.00o5
+  readout and `fpga_read_decim_data` (no dummy strobe) return mem[S], mem[S], mem[S+1], ...: one word late. So an averaged
+  UI record sits one word (2 samples) earlier than a single UI record at the same settings; the software trigger
+  refinement re-centres both. Not changed here (it is the 1.00o5 readout, all records); queue the fix for the UI readout.
+
+**Points a successor needs**
+- Files: `pc_seq.c/.h` (pure), `pc_seq_hw.c/.h` (target: pc_hal_seq_* and the UI run), handlers in pc_cmds.c section
+  "Sequencer". Edits in shared files are small: `fpga_control.c` (one hook before 0x01 = 1), `scope_functions.c` (`PC_SW_AVERAGE()`
+  appended to the two software-average conditions), `pc_hal_scope.c` (glue calls), `pc_hooks.h` (two macros). UI agents
+  editing scope_display_trace_data: keep the `PC_SW_AVERAGE()` term.
+- `pc_hal_arm` gained `const pc_seq_cfg *sq` (NULL on bitstreams without SEQ; mode 0 = plain capture). Every new arm path
+  must go through `pc_seq_hw_pre_reset` on 0x1536, or a stale mode turns a capture into a run.
+- The firmware auto time-out must never run during a run (it writes 0x1A = 0 between records): host runs use the FPGA's
+  0x0E in auto mode, UI runs have their own deadline (`pc_seq_ui_service`).
+
+**Flash session plan (owner with the coordinator; agents never flash)**
+1. Backups: the stock FPGA flash dump exists (`backups/2026-10-18_fpga-25q80-stock.bin`, sha256 90f65f08...0d253).
+   Before writing, dump the flash as it is now (0x1535): `python firmware/tools/spiflash_d2xx.py read -o
+   backups/<date>_fpga-25q80-0x1535-before-1536.bin --twice`; its sha256 must equal the 0x1535 padded image
+   `backups/al3_fir_0x1535_5040a2ae_padded.bin` (sha256 5ade9e755211fe65...), the rollback image. The tool also keeps its
+   own double-read pre-write backup.
+2. FEL-load this image on the running 0x1535 first (`sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe
+   0x80000000`). Check `#VER` fw=0.2.58 proto=1.17; GET_INFO caps without bit 17; GET_STATUS length 48, bytes 44-45 = 0x0007,
+   46 = 0 (Average off) / 1 (Average on); SET_SEQ answers E_UNSUPPORTED; a normal ARM / WAIT / READ_RAW as on 0.2.55. This
+   is the "older bitstream unchanged" check.
+3. Flash 0x1536: `python firmware/tools/spiflash_d2xx.py probe` (expect `ef 40 14`), then `python
+   firmware/tools/spiflash_d2xx.py write -i backups/al3_seg_0x1536_4eaf6811_padded.bin --yes` (padded sha256 66866c84...7408;
+   the tool asks for the JEDEC ID and verifies by read-back). Scope on battery, no USB, as in fpga/al3/AGENTS.md
+   "Flashing this unit". Power-cycle.
+4. Verify: Diagnostics shows FPGA version 0x1536; FEL-load the image again (or boot it), `#VER` ...fpga=0x1536; GET_INFO
+   caps has bit 17 (0x20000); GET_STATUS bytes 44-45 = 0x001F; GET_SEQ answers 48 bytes with byte 24 = 0x00 (no run yet).
+   Log hashes and results in docs/hardware-status.md.
+5. Modes off (fpga/al3/README.md section 6 check 1): the 0x1535 bench checks (legacy 200 MSa/s, CIC, CIC+FIR, EXT) give
+   the same pictures and GET_DECIM read-back as on 0x1535; UI with Average off looks unchanged.
+6. UI averaging: CH1 on the calibration pin, 1 kHz square, 200 MSa/s time base (filter irrelevant there), Average on:
+   GET_STATUS 46 = 2, 47 = 6 (64 records); the trace is visibly less noisy than with Average off; the edges stay where they
+   were (no shift beyond a sample); `pass_ms` within a few ms of Average off. Filter off at 1 MSa/s: 47 = 3 (8 records).
+   CIC2 at 1 MSa/s: 46 = 1 (software, as before). Auto mode with the probe unplugged: the trace free-runs (single records)
+   and comes back to 2 once the signal triggers. Normal mode, no signal: waits as before.
+7. Segments (README check 2), host: SET_TRIGGER CH1 rising, normal, pretrigger 32, total 240 samples (legacy 200 MSa/s:
+   16 / 120 words); SET_SEQ mode 1, m 7, count 32, hold-off 0; ARM; WAIT. GET_CAPTURE_INFO 76 = 1, 80 = 32, 84 = 0. READ_SEQ
+   table: timestamps 100 us +/- 10 ns apart with the generator at 10 kHz (difference 20000 units); every segment via READ_RAW
+   addr_mode 3 crosses the level at record index 32 (or the T5 convention). With the generator at 10 kHz: run time about
+   3.2 ms.
+8. Circular + STOP: SET_SEQ flags 1, count 4, m 7 on a 1 kHz square; ARM; after about 1 s STOP; WAIT returns DONE; GET_CAPTURE_INFO
+   77 = 0x07 (circular, stopped, wrapped), 80 about 1000; READ_SEQ of 64 entries: valid entries with timestamps 1 ms apart, one
+   invalid (the slot being refilled).
+9. Averaging (README checks 5 and 6): input shorted, legacy 200 MSa/s, EXT or auto; SET_SEQ mode 2, count 1, N 1: READ_SEQ
+   S 0 must equal READ_RAW of the same capture word for word (core A lane = 0x20 byte, B = 0x21) - the mirror check, the one
+   hardware risk the testbench cannot cover. Then N 256, S 8: rms of the averaged record about 1/16 of N 1. 16-bit: CIC2+FIR at
+   10 MSa/s, count 2, N 1000, READ_SEQ S 0xFF: sums / 1000 match the single-shot shape.
+10. PI case (README check 7), when the detector is at hand.
+Rollback: `spiflash_d2xx.py write -i backups/al3_fir_0x1535_5040a2ae_padded.bin --yes` (sha256 5ade9e75...; or the stock
+dump); 0.2.58
+runs on 0x1535 unchanged (step 2), so no firmware rollback is needed.
+
+**For the mcp agent (do not edit mcp/ from this branch)**
+- protocol.py: `Cmd.SET_SEQ = 0x020E`, `GET_SEQ = 0x020F`, `READ_SEQ = 0x0210` (cap SEQ), `Caps.SEQ = 1 << 17`;
+  StatusResp fields `features` (u16 at 44), `ui_average` (u8 46: 0 off, 1 software, 2 hardware), `ui_average_log2n` (u8 47);
+  DecimState the same at 32..35; CaptureInfo 76..95 (seq_mode, seq_flags, m, fmt16, count, untriggered, count requested, N,
+  hold-off ns); SetSeqReq (16 B), SeqState (48 B), ReadSeqReq (12 B) + header (16 B); ReadRawReq addr_mode 3; table entry
+  decode (ts 39..0 x 5 ns, offset 52..40, triggered 53, valid 63). Vectors to decode: `resp_get_seq_segments_done`,
+  `resp_read_seq_table`, `resp_get_status_1_17`, requests `req_set_seq*`, `req_read_seq*`, `req_read_raw_segment_5`.
+- client: `set_seq`, `get_seq`, `read_seq_table`, `read_seq_average(ch_mask, shift|raw)`, `read_segment(seg, layout)`; ARM / WAIT
+  / STOP as today (STOP keeps a run's data).
+- tools: `scope_capture_segments(count, length, pre, holdoff_us, circular, max_wait_s)` -> per segment timestamp (s), triggered,
+  data per channel in volts (READ_RAW mode 3 + the usual conversion; 16-bit via GET_DECIM gain); `scope_capture_averaged(n,
+  positions, length, pre)` -> mean per channel in volts (legacy: lane x 2^S / N per core then the per-core correction; 16-bit:
+  sum / N then the row 47 / 49 conversion), both refusing with the GET_SEQ fit code; `scope_status` gains `hardware_averaging`
+  (byte 46 == 2), the log2 N, and the features list. The simulator needs SET_SEQ / GET_SEQ / READ_SEQ and addr_mode 3.
+
+**Open / for the coordinator**
+- fpga-gen6 findings that hold for 0x1532-0x1536 (fixed in their 0x1537, not built yet): (1) the A/B order inside a word can
+  flip after a 0x0D or 0x53 write and stays flipped until the next such write, so PC_INTERLEAVE_ORDER and the swap bit are
+  right by chance (bench T4); (2) the 1.00o5 readout and `fpga_read_decim_data` are one word late (see above); (3) on
+  0x1532-0x1535 the 0x0B-in-reset race at slow legacy rates still exists (I kept their arm order byte-identical as the brief
+  asked): moving 0x0B / 0x0C before 0x01 = 1 there too is a one-line change in `pc_hal_arm` / `fpga_do_conversion`; queue it.
+- 0x1537 will need the version rule only (`pc_variant_from_version` already maps 0x1537..0x153F to SEQ).
+- Phosphor fast capture: design in docs/plans/phosphor-fast-capture.md (hundreds of wfm/s at fast time bases), not built.
+- UI 16-bit hardware averaging (see "decided" above) and an Average count setting are UX decisions for the owner.

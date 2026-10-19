@@ -1131,6 +1131,17 @@ stock dump):
    The run should take 256 pulse periods, with count 256 and untriggered 0. A longer run means pulses fell into
    the dead time (record + about 7.5 us here).
 
+**Firmware support** (fw-seq, fw 0.2.58 provisional, protocol 1.17 provisional; `firmware/README.md` section 5
+"Segmented capture and hardware averaging", `docs/protocol.md` section 14 row 56; not benched):
+- caps bit 17 SEQ on 0x1536..0x153F; GET_STATUS bytes 44-45 report the features (EXT, DECIM, FIR, SEGMENTS, HW_AVERAGE).
+- Arm order on 0x1536: 0x0B, 0x0C and 0x57..0x5C before 0x01 = 1 (fpga-gen6's finding: the write-clock registers
+  load only on write-clock edges in reset), 0x0B / 0x0C again in the reset window; 0x57 = 0 whenever the FPGA may
+  still hold another mode. Older bitstreams keep the old order.
+- Host: SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW addr_mode 3 (segment-relative), STOP = 0x5D then 0x1A = 0.
+- UI: the acquisition menu's Average runs an averaging run of 2..64 records for legacy records that fit the
+  accumulator (3000-sample depth); everything else keeps the software average.
+- Bench plan with the flash session, the checks of this section and the rollback: `firmware/AGENTS.md` section 33.
+
 ## Device facts from the datasheet
 
 Source: Anlogic "AL3 series FPGA datasheet" DS001 v1.3 (Sept 2017, Chinese, owner's download `AL3A10LG144.pdf`, 84 pages).

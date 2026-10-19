@@ -147,6 +147,37 @@ char *ui_fmt_sig4_fixed(char *p, int32 value, const char *unit)
   return ui_sig4(p, value, 4, unit, 1);
 }
 
+char *ui_fmt_mhz(char *p, uint64 mhz)
+{
+  if((mhz + 5) / 10 <= 0x7FFFFFFFull)
+    return ui_sig4(p, (int32)((mhz + 5) / 10), 4, "Hz", 0);
+
+  return ui_sig4(p, (int32)((mhz + 5000) / 10000), 5, "Hz", 0);
+}
+
+char *ui_fmt_cdb(char *p, int32 cdb, const char *unit)
+{
+  uint32 t = (uint32)(((cdb < 0) ? -(int64)cdb : (int64)cdb) + 5) / 10;
+  char   d[12];
+  int    n = 0;
+
+  if(t && (cdb > 0))
+    *p++ = '+';
+  else if(t)
+    *p++ = '-';
+
+  do { d[n++] = (char)('0' + (t % 10)); t /= 10; } while(t || (n < 2));
+
+  while(n > 1)
+    *p++ = d[--n];
+
+  *p++ = '.';
+  *p++ = d[0];
+  *p   = 0;
+
+  return ui_put(p, unit);
+}
+
 uint32 ui_card_chip_w(const FONTDATA *font, const char *name)
 {
   return ui_text_width(font, name) + 2 * UI_CARD_PAD;

@@ -691,10 +691,28 @@ Newest entries at the bottom. Format: date, who, what, result.
   channels (the 08:15 v3 block is still read), tracker flags 0x00 (no full-rate records yet), pass_ms 15. Wizard walk-through with the
   owner next (README 6.4).
 
-- 2026-10-19 14:00: fw 0.2.51 (UI makeover step 1, merge 9cc599c) built with GCC 10, MMU image sha256 acf88fee1005c1c70ef5793293200eaa3b1e5b18d1ab3a7ea092e1818da83664,
+- 2026-10-19 13:37: fw 0.2.51 (UI makeover step 1, merge 9cc599c) built with GCC 10, MMU image sha256 acf88fee1005c1c70ef5793293200eaa3b1e5b18d1ab3a7ea092e1818da83664,
   nommu e011d59776ad1c0cc41c9b0be55e0be8668bd90dbbe916495868e2db99ee571a, pinned in backups/. Not loaded: the scope still runs 0.2.50 in RAM with
-  the two-hour idle USB soak on COM10 (ends about 15:15). Walk-through for the owner: firmware/AGENTS.md section 29.
-- 2026-10-19 14:50: fw 0.2.52 (diagnostics readers, merge 72eacb3) built with GCC 10, MMU image sha256
+  the two-hour idle USB soak on COM10 (ends about 15:12). Walk-through for the owner: firmware/AGENTS.md section 29.
+- 2026-10-19 13:50: fw 0.2.52 (diagnostics readers, merge 72eacb3) built with GCC 10, MMU image sha256
   cd8bf6fc27d1d5cf9cdd733f9d2721b024d6a73b0004d393166965c5132d65ef, nommu 372267eb7917580ce0274f381bb02245b503c8ee1f6076dcdb108d2c4a752e5f,
   pinned in backups/. Not loaded (soak still on COM10). Note for the owner before loading: from 0.2.52 the firmware writes SD sector 709
   (settings) once at every boot when the sector loaded valid; SD sectors 700-710 are backed up (backups/), the stock boot chain is untouched.
+- 2026-10-19 13:55: fw 0.2.54 (touch fixes batch 1 on 0.2.52; merge of fw-touch1) built with GCC 10, MMU image sha256
+  05a126f77cfb8750958959e50132252b6abc94fe5ccaa3efb946467b914c6ba6, nommu 572784ed5b6160f599682576a0fd5f8f0d014013f3b68eadd49e498edc50a419,
+  pinned in backups/. This is the image to load for the next owner session (steps 1 + readers + touch handles). Not loaded.
+- 2026-10-19 14:07: fw 0.2.55 (UI step 3 Settings on 0.2.54; merge of fw-ui3) built with GCC 10, MMU image sha256
+  89c1e94794fc19a13897459ec564092bf9fa3068ef7628dce6e017f9db56b17b, nommu 1dc9b165990bcf5c647af1e68b1319bdef26c1d2e552685868994a0b5c17b7aa,
+  pinned in backups/. Now the image to load next (steps 1 + 3, readers, touch handles). Not loaded.
+- 2026-10-19 14:20: two-hour idle USB soak on 0.2.50 stopped after about 65 min of idle (13:12 to 14:17) to free COM10 for the
+  owner's Bode bench; no reopen check was made, so the long-idle question stays open: rerun overnight. Windows AC selective suspend
+  restored to 0 (DC stays 1). First Bode sweep, RC low-pass 1 kOhm / 15 nF (fc 10.6 kHz) with both probe clips on the breadboard ground
+  rail (wiring A), 1 kHz to 300 kHz 30 points, backups/bode/rc1_15n_clips.json: V1 1.36 Vrms at 1 kHz falling to 0.68 Vrms at 100 kHz
+  (the RC loads the 1 kOhm source as expected, so the R and C are on the post correctly), but V2 only 25 mV rms falling to 9 mV,
+  H about -33 to -37 dB flat: CH2 is not reading the R-C junction (floating tip or probe switch). Owner asked to put CH2 on the input.
+- 2026-10-19 14:21: fw 0.2.56 (UI step 2 on 0.2.55; merge of fw-ui2) built with GCC 10, MMU image sha256
+  35b2c2f6b1c35207673e164b45663e4b9489a0699c50304821c5025a98ac970f, nommu a406ed19c47a8db5bca57ca03aba1632fc57a41c69a7283c85f74061f90ec012,
+  pinned in backups/. Now the image to load next (steps 1-3, readers, touch handles). Not loaded.
+- 2026-10-19 14:27: fw 0.2.58 (0x1536 support on 0.2.56; merge of fw-seg) built with GCC 10, MMU image sha256
+  2f9c36f97bd4576c2d8010e7e78c92ca0dd1c8cf01303e2e0a40d9e9a47d642a, nommu 887f1a0406545735f82803fd588ee79566658cadb258853478a4a869a48f62a5,
+  pinned in backups/. Runs on 0x1535 unchanged (host-visible: GET_STATUS 48 bytes). Now the image to load next. Not loaded.

@@ -427,8 +427,8 @@ until 0.2.51), from the image's identity record (the same as `#VER` and GET_INFO
 At boot a saved setting that selects a hidden option is corrected: RTC off without a module, EXT trigger -> CH1,
 memory depth clamped to the largest offered step. The DS3231 is detected by addressing it (0xD0) on the touch
 panel's I2C bus and sampling the ACK bit [U, bench check: with and without a module]. No option needs a manual switch
-yet (everything above is detected); new hardware mods that cannot be detected get a switch in "Other settings"
-(the menu is full: a second column or page is needed) with the value in a spare settings word (108..119 or 204..255,
+yet (everything above is detected); new hardware mods that cannot be detected get a row on the Settings screen
+(fw 0.2.55, "Settings" above; its two columns are full: a new group needs a second page) with the value in a spare settings word (108..119 or 204..255,
 `scope_save_config_data`; 207 holds the Filter setting since 0.2.30, 208-210 the spectrum and phosphor views, 224..255 the unit life record since 0.2.52, so 211..223 are free), default off. Not changed: trigger positions 25 % / 75 % on the stock bitstream (software
 only there), the generator top-bar button text on stock.
 
@@ -470,7 +470,7 @@ min(65535, y >> S), y = filter output with gain N^K. On 0x1532/0x1533 none of th
 - UI: acquisition menu "Filter" box (off / boxcar / CIC2 / CIC3, a tap steps through them, green while on) in the
   slot of 1.00o5's Long memory box, only on 0x1534+. Saved in settings word 207 (0xDE00 | K); sectors without
   a valid word (new settings, written before 0.2.30) and the DEFAULT button give `PC_DECIM_DEFAULT` (pc_decim.h; CIC2
-  since fw 0.2.44, owner; until then off). A saved word is kept as it is. Turning it on with 9000+ samples sets the memory depth to 6000 (trigger point kept at 25 / 50 / 75 %).
+  since fw 0.2.44, CIC2+FIR since 0.2.48 where the FPGA has the FIR; until 0.2.43 off). A saved word is kept as it is. Turning it on with 9000+ samples sets the memory depth to 6000 (trigger point kept at 25 / 50 / 75 %).
   The box shows the setting; GET_DECIM tells the effective K (e.g. legacy at 200 MSa/s).
 - Protocol 1.9 (docs/protocol.md section 14 row 47): GET_DECIM 0x020C, SET_DECIM 0x020D (shared control: it is the
   UI setting; SET_TRIGGER total > 8190 is refused while it is on), READ_TRACE flag bit 2 (u16 samples),
@@ -504,6 +504,58 @@ Bench (nothing verified on hardware; bitstream not yet flashed): 0x29 read-back 
 100 kHz with skipping and is attenuated with boxcar / CIC (plan F1); trigger on CH1 with the 16-bit level at
 several rates; the swap bit (T4 dependency); settling after a time base change (first capture clean).
 
+### Segmented capture and hardware averaging (FPGA 0x1536, fw 0.2.58, protocol 1.17)
+
+fpga-gen5's AL3 bitstream 0x1536 adds a sequencer in front of the unchanged 0x1535 capture logic (fpga/al3/README.md
+section 6, docs/plans/segmented-capture.md): **segment mode** restarts the capture after each record into the next
+slot of 2^m words and logs a 40-bit timestamp and the trigger offset per segment; **averaging mode** adds each
+triggered record (pretrigger included) into a 2048 x 64 accumulator. Writes 0x57-0x5D, reads 0x2A (status) and
+0x2B-0x32 (bytes of the view word at the 0x1F pointer). On 0x1532-0x1535 none of this is written (caps bit 17 SEQ).
+
+- Files: `pc_seq.c/.h` (pure maths, host-tested: fit rules, register bytes, status and table layouts, slot
+  addresses, the UI averaging plan, the exact rounded mean), `pc_seq_hw.c/.h` (target: the pc_hal.h sequencer
+  functions and the UI averaging), handlers in `pc_cmds.c` ("Sequencer"). Hooks: `PC_SEQ_PRE_RESET()` in
+  `fpga_do_conversion` before 0x01 = 1, `PC_SW_AVERAGE()` in the two software-average conditions of
+  `scope_display_trace_data`; glue calls in `pc_glue_decim_conversion`, `pc_glue_decim_read`, `pc_glue_ui_capture_addr`,
+  `pc_glue_ui_capture`, `pc_glue_poll_main`, `pc_hal_trace_build`, `pc_hal_arm`.
+- Arm order on 0x1536: 0x0B / 0x0C and the sequencer registers are written **before** 0x01 = 1 (and 0x0B / 0x0C again in
+  the reset window as before). Reason (fpga-gen6, RTL reading): `trigger_read_address` and the slot mask are
+  write-clock registers that load only on write-clock edges while 0x01 = 1; at slow legacy rates (2 us per write clock
+  at 1 MSa/s) the reset window can pass without an edge. The 0x05 poll guarantees edges in reset. 0x57 = 0 is written
+  for every capture that is not a run while the FPGA may hold another mode (always the first arm after boot: an MCU
+  restart leaves the FPGA running). Bitstreams before 0x1536 keep the 0.2.51 order byte for byte.
+- **UI hardware averaging.** The acquisition menu's Average (1.00o5: auto or normal trigger mode, not the waveform viewer,
+  not roll) used to average every display pass, trace = (trace + previous) / 2, whether a new record came or not. On
+  0x1536 a UI conversion whose record is legacy (filter off, or 200 MSa/s) and fits the accumulator (the 3000-sample
+  depth = 1500 words; total <= 2046 words) is one averaging run of N records: the largest power of two in 2..64 with
+  N x (record + dead time) <= 40 ms (`pc_seq_ui_plan`; 64 at 200 MSa/s, 8 at 1 MSa/s, none at 100 kSa/s and slower).
+  The readout takes the four lane sums of the channel (S = 0, 4 bus passes of 1500 words, about 1.8 ms) and feeds
+  `fpga_read_adc_data` the corrected code of the mean per core (`pc_seq_avg_code`: mean in Q8 by an exact reciprocal,
+  then the core's gain / offset, rounded), so trace, measurements, software trigger, spectrum and phosphor take it as a
+  normal record; the software average is skipped for it (`pc_seq_sw_average`). 16-bit records (always 3000+ samples,
+  over the 2046-word accumulator) and slow rates keep the software average. GET_STATUS byte 46 tells which (0 off,
+  1 software, 2 hardware), byte 47 log2 N.
+- Deadline (`pc_seq_ui_service`, main loop): a run not done after max(100 ms, two records) + its run time is stopped
+  (0x5D = 1, then 0x1A = 0) once it holds a record, and shows the mean of what it has. Auto mode without any trigger:
+  the run is stopped empty, the record shown is the sample memory's (untriggered, as the firmware auto mode of 0.2.41
+  shows), and the next UI conversions are single records until one triggers. Normal mode with no record yet keeps
+  waiting, as a normal-mode capture does. The firmware auto time-out never runs during a UI run (it would end a record
+  between the records of a run).
+- Host (protocol row 56): SET_SEQ sets a run for the next host ARM (segments: m, count, circular, hold-off; averaging:
+  positions, N, hold-off), checked against the trigger geometry at SET_SEQ and at ARM; DONE is the end of the run;
+  STOP ends a run as DONE (0x5D, 0x1A = 0) and keeps its data; GET_SEQ reports the setting, its fit, the FPGA status
+  and the latest run; READ_SEQ returns the table (u64 entries) or the averaged record (lane sums >> S, or u32 sums for
+  16-bit records); READ_RAW addr_mode 3 reads segment s relative to its record start, wrapping at the slot end. A segment
+  run builds no trace (READ_TRACE E_STATE 5); an averaging run's last record is a normal capture in the ring.
+- Memory (GCC 10, against main at 0.2.55): .text +11,888 bytes, .bss +8,228 (`ui_lane` 8 KiB), image 536,576 -> 548,352 bytes.
+- Host tests: `test_seq.c` (fit limits from the README, every m, register bytes, entry bit positions, slot wrap, the
+  plan at the table rates, `pc_seq_udiv` exact for every c 1..256 at all multiples below 2^24, `pc_seq_avg_code` equal
+  to the per-sample correction for constant records), `test_session.c` `test_seq_older_bitstreams` / `test_seq_segments`
+  / `test_seq_average` against a mock sequencer that applies the FPGA's view rules (shift, clamp, raw), `seq_check.c`
+  for the `seq` vector section.
+- Not host-testable (target only, read against zaklad.v): the bus sequences in `pc_seq_hw.c`, the UI run and its
+  deadline. Bench plan: firmware/AGENTS.md section 33.
+
 ### FFT core (`fx_fft.c`, protocol builds)
 
 Fixed-point real-input FFT for the spectrum analyser (plan: `docs/plans/dpos350p-features.md` 1.2). No libc, no float:
@@ -518,7 +570,7 @@ plus a caller offset (the spectrum view passes 20 log10 volts per code, so the l
 corrected for their single bin. dB via CLZ + a 257-entry log2 table with interpolation. ENBW: rect 1.00, Hann 1.50,
 flat-top 3.77 bins (`fx_enbw_milli`).
 
-**Speed (fw 0.2.31).** The MMU and so the D-cache are off, so every data access, the stack included, goes to DDR:
+**Speed.** Before fw 0.2.48 the MMU and so the D-cache were off, so every data access, the stack included, went to DDR:
 about 90 CPU cycles each on the bench (0.2.27 FFT_BENCH: 4096 points in 24.3 ms, 4x the estimate; the C loops spilled
 to the stack and GCC 10 never paired accesses). Since 0.2.31 the hot loops are ARM assembly inside `fx_fft.c`,
 everything in registers: the u8 load with window and bit reversal fused with stage 1 (two LDRH, two LDRD, one 4-word
@@ -528,8 +580,21 @@ the split step (2 + 1 LDRD, 2 STRD). Each has a C twin computing the same intege
 Measured on 0.2.31: 4096 points 10.9 ms (was 24.3), 2048 points 4.9 ms in DDR, 2.3 ms in SRAM. Since 0.2.37 the dB
 conversion between DC and Nyquist is assembly too: one LDRD per bin, the log2 table as (t, delta) pairs (one LDRD),
 the window norm, shift and dBV offset folded into one 64-bit constant, so 3 accesses per bin instead of about 9
-(byte-identical to the C twin, including the clamps; DC and Nyquist stay in C). Enabling the MMU with cached DDR
-would beat all of this.
+(byte-identical to the C twin, including the clamps; DC and Nyquist stay in C).
+
+**With the MMU and D-cache on (fw 0.2.48, `pc_mmu.c`).** FFT_BENCH on the owner's unit, 2026-10-19 08:10 (CP15
+control word 0x0005107D: MMU, D-cache and I-cache on; `docs/hardware-status.md`), MMU off -> on, buffers in DDR:
+
+| Points | MMU off | MMU on |
+|---|---|---|
+| 1024 | 2.20 ms | 0.21 ms |
+| 2048 | 4.95 ms | 0.68 ms |
+| 4096 | 10.96 ms | 2.72 ms |
+| 16384 | 51.9 ms | 33.7 ms (the working set exceeds the 16 KB cache) |
+
+The same run with the buffers in on-chip SRAM: 1024 points 1.03 -> 0.22 ms, 2048 points 2.30 -> 0.66 ms. DDR and SRAM
+are now equally fast, so the SRAM A placement no longer buys speed. The assembly loops are unchanged; the gain is
+the cache. The figures above for 0.2.27 and 0.2.31 are history.
 
 Tables: `fx_fft_tables.c` is generated by `firmware/tools/gen_fft_tables.py` and committed (16 KB cosine quarter wave,
 log2 table, flat-top coefficients); the host test fails if it differs from the generator.
@@ -554,7 +619,7 @@ dBFS here is relative to the bin of a full-scale sine. The level error includes 
 log2/dB conversion alone is within 1.6e-5 octaves (0.005 dB). Bin-centred full-scale tone: within 0.02 dB of
 39.07 dB on all windows; flat-top half a bin off: within 0.05 dB.
 
-### Screens: main menu, USB drive, Display row, measurement cards (fw 0.2.51)
+### Screens: main menu, USB drive, measurement cards (fw 0.2.51)
 
 The first step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 1 plus the cards; rules in
 `docs/ui-guidelines.md`). Pure parts in `ui_menu.c` (row table, hit areas, mode rule) and `ui_fmt.c` (text widths,
@@ -568,7 +633,7 @@ Scope leaves the spectrum view (and brings the phosphor variant back if it was o
 roll mode Spectrum analyser switches Roll off first (time base 20, the acquisition menu's Roll box does the same) and
 the spectrum's warning line says "Roll off for the spectrum" for 5 s; going back to Scope does not switch Roll on again.
 Settings opens the System settings fold-out, which lost its X-Y row (Notification confirmation and RTC settings moved
-up one row; 354 px, 295 px without a DS3231).
+up one row; 354 px, 295 px without a DS3231). Since 0.2.55 the fold-out and the Settings screen below.
 
 USB drive: a header "USB drive", the 1.00o5 picture of the scope and the PC, three lines ("The SD card is now a USB
 drive on the PC.", "PC control (MCP) is disconnected until you leave this screen.", "Eject the drive on the PC before
@@ -578,12 +643,8 @@ to CDC (PC control) and re-syncs the file lists.
 
 Top bar: no version string any more (Diagnostics keeps the full identity).
 
-Acquisition menu, Display row (until the CTRL page's Display fold-out exists): a row of three boxes under 1.00o5's
-menu (which grew from 386 to 432 px): Normal, Phosphor, X-Y, the chosen one orange. X-Y is 1.00o5's X-Y mode (saved at
-power-off as before, it moved here from System settings), Phosphor the phosphor view below (not saved, the scope boots
-in Normal or X-Y). Chosen while the spectrum shows, Phosphor waits for the main menu's Scope row. Phosphor drawing in
-X-Y (possible since 0.2.46 by switching X-Y on in the phosphor view) is not offered by the row: it returns with the
-Display fold-out's Phosphor switch.
+Acquisition menu, Display row (0.2.51 only): Normal / Phosphor / X-Y under the acquisition menu until the CTRL page's
+Display fold-out existed; 0.2.56 replaced it (below).
 
 Measurement cards (Measures on the right bar; up to twelve per channel): Atlan's 118 x 22 cards in the bottom rows
 (CH1 from x 5, CH2 from x 366, three per row, rows upward from y 426), each a grey card with the measurement name in a
@@ -634,7 +695,9 @@ the page tabs Status, Calibration, Log, Developer (112 x 44 at x 160, 280, 400, 
   and full), the gains per class and core with the range they were measured on (or "carried over", "not measured"), the
   noise, the v4 tracking ("Tracking A-B +0.12 code, slope +0.31 %, 3 s ago", "Full-rate offset +0.70 code, 4 probes,
   12 s ago", grey until they ran), the DC shift values and whether the 1.00o5 core compensations are in use. Buttons:
-  Calibrate, Volts calibration (the 1.00o5 input-divider calibration as a step dialog: both inputs on one DC supply,
+  Calibrate, DC shift trim (1.00o5's manual trim of the trace scale, `dc_shift_cal`, not saved: while on, CTRL on the
+  scope opens the trim pages; was in Settings 0.2.55-0.2.56 and Other settings before), Volts calibration (the 1.00o5
+  input-divider calibration as a step dialog: both inputs on one DC supply,
   300 mV, 600 mV, 1.5 V, 3 V, 7.5 V, 15 V, retry on "No reading near ...", Save calibration writes sector 708, Cancel puts
   the factors back; the scope's channel, time base and trigger settings are restored either way), Clear calibration (red;
   confirmation "Zeros and gains are cleared; the volts-per-range factors are kept. Readings use defaults until you
@@ -671,31 +734,182 @@ gains, "gain at range", the v4 Track and Class lines (Calibration page; the slop
 saved report); DEFAULT (Restore default settings on the Settings screen of step 3); RESTORE (dropped: the card always
 holds the last calibration since 0.2.43; "Undo last calibration" is queued); RESET (Clear calibration, which keeps the
 volts factors and confirms); EXIT (Back); the hidden boot-mode and option hit areas at x 328-378 (gone).
+### Screens: CTRL page, fold-outs, chips, warnings, spectrum cards (fw 0.2.56)
+
+The second step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 2; rules in `docs/ui-guidelines.md`).
+Geometry, hit areas, the value names, the warning texts and the spectrum's card set are pure C in `ui_ctrl.c`
+(host-tested in `host_tests/test_ui.c`, also that every text fits its box in the device's fonts); `ctrl_page.c` draws
+and runs the touch loops.
+
+Right bar, page one (both modes): CTRL, RUN/STOP, AUTO SET, T CURSOR, V CURSOR, MEASURES, SAVE PIC, SAVE WAVE in
+1.00o5's slots. In the spectrum view T CURSOR, V CURSOR and MEASURES are empty (no spectrum markers or spectrum
+measurement list yet) and AUTO SET runs the spectrum's Auto (fw 0.2.51). The bar is redrawn whenever the spectrum view
+starts or ends.
+
+Right bar, page two = the CTRL page (CTRL highlighted as before), the same order in both modes:
+
+| slot (y) | Scope | Spectrum |
+|---|---|---|
+| 65 | Display, value Normal / X-Y / Phos / XY Ph: fold-out | Display, value Spec / Wfall / Density: fold-out |
+| 125 | Trace style, value Linear / Dots / Peak / Pro: fold-out | Analyse, value the FFT length ("2048 pt"): fold-out |
+| 185 | Grid: a switch (green = grid lines on) | Grid (the plot's dots; the level labels stay) |
+| 244..325 | V+ / CH1 / V- stepper | the same |
+| 334..415 | V+ / CH2 / V- stepper | the same |
+| 425 | 50 % TRIG | empty |
+
+Steppers: 82 px, a 28 px grey V+ bar, a 26 px centre in the channel colour reading CH1 or CH2 (grey while the channel
+is off; the value is in the top bar chip), a 28 px grey V- bar. V+ takes y 240..284 and V- 285..329 (CH2: 330..374 and
+375..420), so each gets 45 px of touch: the bar, its half of the centre and its half of the gap. They step
+`displayvoltperdiv` as 1.00o5's CTRL page did (V+ = the next smaller V/div). Grid is saved (settings word 211) and also
+hides the waveform viewer's grid; the record-position slider under the grid always shows.
+
+Fold-outs: a panel left of the bar over the plot's right edge (x up to 727, never over the bar), a grey title, rows of
+44 px at a 50 px pitch; the button stays orange while its panel is open. Modal like the top bar's dropdowns (the trace
+pauses, the PC gets E_BUSY after 250 ms): a tap outside the panel closes it and does nothing else; a choice row (green
+when chosen) closes it; value rows step to the next value and keep it open; a two-way row (Ref level) has - and + boxes
+at its ends and each half of the row steps that way. The plot under the panel is put back on close.
+
+| fold-out | rows |
+|---|---|
+| Display (Scope) | Normal, X-Y (with icons: a clean trace, a Lissajous loop) / a line / Phosphor switch (graded-trace icon; second line the records per second "55 wfm/s", or "Not in roll mode" greyed) and, while it is on, Persistence (0.2 s, 1 s, 5 s, Infinite; a step clears), Palette (Mono, Heat), Clear (clears and closes) |
+| Trace style (Scope) | Linear, Dots, Peak, Pro (1.00o5's `ACQ_trace`, saved as before; it left the acquisition menu) |
+| Display (Spectrum) | Spectrum, Waterfall, Density (icons: bars, colour stripes, graded dots); saved in word 211 |
+| Analyse (Spectrum) | Analyse (CH1, CH2, CH1 + CH2: the shown channel, the dBV / dBA unit and Auto's channel), FFT length, Window, Average / a line / Scale, Ref level (- / +), Reset |
+
+Phosphor is a switch, not a view: it combines with Normal or X-Y (phosphor drawing in X-Y is back after 0.2.51), is
+saved (word 210 bit 3), stays on while the spectrum shows (Scope brings the picture back) and pauses in roll mode and
+the viewers. Settings sector word 211 (0xC700 marker): bit 0 Grid, bits 1-2 the spectrum's Display variant; the DEFAULT
+button sets Normal, Phosphor off, Spectrum, Grid on.
+
+Acquisition menu: acquisition only again (sample rate, time per division, memory, Roll, Average, Filter; 386 px as in
+1.00o5). The Trace boxes and the 0.2.51 Display row left it.
+
+Top bar chips: CH1, CH2, ACQ and the trigger are built the same way: a grey box (0x333333) over the whole chip, the
+coloured block drawn over its left end with only its outer corners rounded, so the join has no notch (the trigger chip
+had its own rounded box). Block colours as before: channel colour (grey when off, black outlined when inverted), ACQ
+green (orange in roll mode), trigger green; touched chips keep 1.00o5's white box.
+
+Warnings: one line at the top middle of the plot in orange, consequence and action, in every scope variant (Normal,
+X-Y, Phosphor; not in the viewer), the most urgent one only: "No channel enabled: switch on CH1 or CH2", "X-Y needs both
+channels: switch on CH1 and CH2", "CHn overrange: increase V/div", "No trigger: check the trigger level" (the latest
+record was an auto time-out, while running). The spectrum keeps its own list (below). Readouts such as wfm/s are never
+warnings.
+
+Strips gone: the phosphor strip (its fields are in the Display fold-out) and the spectrum strip and header line (the
+fields are in the Display and Analyse fold-outs, the readouts are cards). The spectrum's cards sit in one row at y 446
+(where the scope's slider row is; the slider has no meaning there), built like the scope's cards (`scope_draw_card`):
+per shown channel [Peak] 1.000kHz and [Level] +2.7dBV in the channel colour, then [RBW] 146.5Hz and, in the waterfall,
+[Time] 12.30s (the time its rows span) with a light grey chip; at most six. The decimation filter tag is no longer shown
+(the acquisition menu has it). The waterfall's and density's colour legend stays above the plot's top right.
+
+### Settings: fold-out, Settings screen, confirmations (fw 0.2.55)
+
+Step 3 of the UX makeover (`docs/plans/ux-makeover.md` section 5, dialogs 6b). Tables, values, hit areas, the start-up
+choice and the dialog layout are pure C in `ui_settings.c` (host-tested in `host_tests/test_ui.c`: every pixel of every
+hit area against the drawn rectangle, every value text against its row in the device's fonts); the screen and the
+dialog are drawn and run in `ui_settings_ui.c`; the fold-out is drawn in `menu.c` and hit-tested in `statemachine.c`
+from the same table.
+
+Settings fold-out (Menu > Settings), 59 px rows from y 46, contiguous hit areas: Screen brightness and Grid
+brightness (sliders beside the fold-out, as before), File message timeout (1.00o5's "Notification confirmation",
+`confirmationmode`: a tap toggles; the chip reads "tap" when file messages such as "Failed to create file" wait for a
+tap, "0.7 s" when they close by themselves), Time and date (only with a DS3231; opens 1.00o5's editor beside the
+fold-out with hours .. year and RTC On/Off) and Other settings (opens the Settings screen). 295 px high, 236 px
+without a DS3231. (0.2.55-0.2.56 had an interim Baseline calibration row here: fw 0.2.57 moved it to Diagnostics >
+Calibrate, together with the 1.00o5 volts-calibration boxes that opened beside the fold-out after the wizard.)
+
+Settings screen (fold-out > Other settings): a modal full-screen page like the menus (the PC protocol answers E_BUSY
+while it is open), black ground, outlined 48 px rows in two columns, the value of each row on its right in the state
+colour (green in use, grey off or not available, amber needs attention). Back (top right) returns to the scope as it
+was. Every row is an existing setting, saved at power-off as before unless noted:
+
+| group | row | values | setting |
+|---|---|---|---|
+| Display | Screen brightness | 0..100 %, - / + by 5 | `screenbrightness` (also leaves max-light mode, as the slider does) |
+| Display | Grid brightness | 0..100 %, - / + by 5 | `gridbrightness` |
+| Controls | File message timeout | wait for a tap / 0.7 s | `confirmationmode` |
+| Controls | Cursors | move together / move freely | `lockcursors` |
+| Controls | Auto setup | improved / stock | `new_autosetup` |
+| Files | Stamp screenshots with | time / file name / nothing | `tag_in_BMP`; time with the clock on, else the file name |
+| Files | Reference traces at power-on | loaded / not loaded | `ref_on_startup` |
+| Clock | Clock | shown / not used / no clock module | `onoffRTC` (top-bar clock, file stamps, FAT times) |
+| Clock | Time and date | 2026-10-19 11:30 / needs the clock / no clock module | opens a page with Hour, Minute, Day, Month, Year and - / + (96 x 44 px); each tap is written to the DS3231 at once |
+| Start-up | At power-on | Open firmware / Boot menu, then open firmware / Boot menu, then stock firmware | boot-mode byte 0 / 4 / 5 (section 3); written to sector 710 on Back, only when changed |
+
+The start-up row never writes FEL (2) or the updater (3); a byte that holds one of them (or 1, stock without the menu,
+which only the loader tool writes) is shown in amber ("FEL, no boot menu", "Boot menu, then FEL", "Updater", "Stock
+firmware, no boot menu") and the next tap sets Open firmware. The stock image is offered only with the boot menu.
+
+Restore default settings (bottom left): asks first ("Restore default settings?" with the consequence: channels,
+trigger, time base, display and these settings go back to their defaults, the calibration and the start-up choice are
+kept). Restore runs `scope_reset_config_data` (sector 709's settings to defaults, the calibration reloaded from sector
+708), sets the hardware up from them as at power-on and rebuilds the scope screen. Since 0.2.55
+`scope_reset_config_data` no longer writes the boot-mode byte (1.00o5 set it to 4 on every reset, also when the
+settings sector failed to load), and in the CDC build the reset keeps USB in CDC mode.
+
+Confirmation dialog (`ui_confirm`): a 520 px box in the middle of the screen, a 24 px title, up to three 16 px lines,
+two 160 x 44 px buttons 16 px apart, the dismissing one left and the action right, red only for a destructive action.
+Only the two buttons react. Used by Restore default settings and by every delete in the file browsers and the
+waveform viewer ("Delete from the SD card?", "This cannot be undone.", Cancel / Delete; was "Confirm to delete?" with
+74 x 50 px NO / YES 11 px apart).
+
+Where the controls of 1.00o5's Other settings menu went (the menu is gone):
+
+| control | now |
+|---|---|
+| Boot menu (on / off) and Default start (PECO / FNIRSI / FEL) | Settings > Start-up > At power-on (three values; FEL is no longer offered: ENTER_FEL from the PC, the boot menu's FEL button, and the step-4 Developer page's "Enter FEL now") |
+| New autosetup | Settings > Controls > Auto setup |
+| Lock move cursors | Settings > Controls > Cursors |
+| DC shift calibration | Diagnostics > Calibration > DC shift trim (fw 0.2.57; Settings > Calibration in 0.2.55-0.2.56) |
+| USB-Serial mode | removed: the build forces CDC at boot (`PC_FORCE_CDC`), the flag did nothing visible |
+| Dev mode | Diagnostics > Developer > Debug overlay (fw 0.2.57; the flag stays in the settings sector with its effects: trigger address overlay, touch coordinates). Its exception to the boot-menu rule is gone: At power-on writes exactly the chosen value |
+| Add a tag to BMP | Settings > Files > Stamp screenshots with |
+| Load Ref on start | Settings > Files > Reference traces at power-on |
+| RTC On/Off (RTC editor) | still in the editor; also Settings > Clock > Clock |
+
+### Touch on the scope plot (fw 0.2.54)
+
+`scan_for_touch` (statemachine.c) decides at the touch-down point; geometry in `touch_pick.c` (pure, host-tested in
+`host_tests/test_touch_pick.c`). In the normal display the left 44 px (x 0..43) are a handle column: CH1, CH2 and the
+eight reference pointers each own the 44 rows around their tip (`scope_pointer_top(position) + 6`, the clamped
+position the pointer is drawn at), the nearest switched-on pointer wins and a tie goes to the one drawn on top (draw
+order CH1, CH2, ref1..ref8). A drag that starts there moves that pointer vertically; a tap there does nothing. Right of
+the column, as before: a drag within 30 px of a channel's zero line (`448 - traceposition`; with volt cursors on
+not in x 310..410) moves the nearest enabled channel (a tie to CH2), vertically only; then the trigger level (x > 660),
+the time cursors, the volt cursors, and otherwise a horizontal drag moves the trigger point. A tap (under 200 ms,
+within 2 px) away from the pointers keeps 1.00o5's zones (time/div left and right, V/div in the top and bottom bands).
+A channel drag moves the trigger level on that channel (CH1 for source 0, CH2 for 1, never for EXT) by the same delta,
+limited so both stay in the drag range 6..396. Trace positions written by the auto setup and by a settings load are
+limited to that range too. In X-Y every drag moves CH1 with x and CH2 with y. Planned (touch review batches 2-3): the
+trace body as a grab target, an 8 px dead band, no taps on cards and handles, a non-blocking touch loop.
 
 ### Spectrum view (`spectrum.c`, fw 0.2.28)
 
 A display mode of the main loop, not a modal menu, so the MCP's polling and the shared screen keep working (plan:
 `docs/plans/dpos350p-features.md` 2b). Main menu, row "Spectrum analyser"; the row "Scope" returns (fw 0.2.51; in roll
 mode the row switches Roll off first, see "Screens" above). While on, `scope_display_trace_data` (hook `PC_SPECTRUM_DISPLAY`) draws the trace area itself and touches
-in it go to the strip (`PC_SPECTRUM_TOUCH`); the top bar, the MCP chip and the right column (RUN/STOP, AUTO, menus)
-are 1.00o5's. Each new capture (UI or host) is transformed once; settings changes recompute from the held buffer,
+on the plot go to its gestures (`PC_SPECTRUM_TOUCH`); the top bar and the MCP chip are 1.00o5's, the right bar shows the
+spectrum's slots and CTRL page (fw 0.2.56, "Screens" above). Each new capture (UI or host) is transformed once; settings changes recompute from the held buffer,
 so a stopped capture can be re-examined. Roll mode or a viewer ends the view.
 
-Screen: info line (sample rate, N, RBW; peak frequency and level per channel in its colour), plot of 10 x 8
-divisions with dBV labels (dBA in A mode), start / centre / stop frequency labels, and the strip. Each plot column
-shows the highest bin it covers, so narrow lines survive at 720 columns; zoomed in past one bin per column it draws
-straight lines between bins. A white triangle marks the peak (DC bins skipped). Below 200 MS/s an orange line says
+Screen (fw 0.2.56): plot of 10 x 8 divisions with dBV labels (dBA in A mode), start / centre / stop frequency labels,
+and the cards (peak frequency and level per channel, RBW; "Screens" above). The info line and the strip went in 0.2.56.
+Each plot column shows the highest bin it covers, so narrow lines survive at 720 columns; zoomed in past one bin per
+column it draws straight lines between bins. A white triangle marks the peak (DC bins skipped). Below 200 MS/s an orange line says
 "no anti-alias filter": the FPGA decimates by skipping samples (until a filtering bitstream lands).
 
-| field | values | tap |
+Parameters, in the CTRL page's Analyse fold-out since fw 0.2.56 (a strip under the plot before; View is the
+Display fold-out):
+
+| row | values | tap |
 |---|---|---|
-| Channel | CH1, CH2, CH1 + CH2 (only enabled channels) | next |
+| Analyse | CH1, CH2, CH1 + CH2 (only enabled channels) | next |
 | FFT length | 1024 .. the largest power of two the record holds, at most 4096 (2048 at depth 3000) | next, wraps |
 | Window | Hann, flat top, rect | next |
 | Scale | 5, 10, 20 dB/div | next |
-| Ref level | -100 .. +60 dBV at the top line, one division per step | left half down, right half up |
+| Ref level | -100 .. +60 dBV at the top line, one division per step | left half (-) down, right half (+) up |
 | Reset | back to the defaults: 2048 points, Hann, 10 dB/div, ref 0 dBV, full span, Spectrum | once |
-| View | Spectrum, Waterfall, Density (fw 0.2.32) | next |
+| Display (its own fold-out) | Spectrum, Waterfall, Density (fw 0.2.32) | choose |
 
 Auto (sets FFT length, window, scale, ref level and span from the signal, rules below) is the right bar's AUTO SET
 while the view shows (fw 0.2.51; a strip field before): the button reads "Auto..." while it runs, and a second tap, or
@@ -704,23 +918,23 @@ any touch on the plot, cancels it. Leaving the view ends it.
 With the 0x1534 decimation filter on (fw 0.2.34) the view transforms the filter's 16-bit record (`pc_hal_trace16`)
 instead of the 8-bit trace, with the filter's rate 200 MHz / N (N = 2 (floor(D / 2) + 1), so even dividers differ from
 the time base's D + 1), one 16-bit unit = `scale_q24` / 2^24 codes for the dBV term, and the zero code moved into the
-16-bit domain; the first info line then carries the filter's order as a short tag ("CIC3"; owner: no N on the screen,
-READ_SPECTRUM has it) and the orange aliasing warning is not shown. Not benched (the bitstream is not flashed yet).
+16-bit domain; the orange aliasing warning is not shown (the info line's filter tag went with the line in 0.2.56;
+READ_SPECTRUM reports the filter). Not benched (the bitstream is not flashed yet).
 
 Waterfall and density (fw 0.2.32) show one channel (CH1 unless only CH2 is selected or on). Waterfall: each new
 capture adds one row at the top (the plot holds 336), coloured over the plot's 8 divisions from the bottom line
-(black) to the ref level (white), the colour legend on the second info line, the time the rows span on the first.
+(black) to the ref level (white), the colour legend above the plot's top right, the time the rows span on a card.
 Density (fw 0.2.35): each capture's spectrum line adds hits to a 720 x 336 grid. A cell keeps an 8-bit count and the
 16-bit index of the capture of its last hit; a hit decays the count to now (exp(-age / 16 captures), Q8 table) and
 adds 32 (saturating), drawing decays it the same way, so the persistence is uniform in time and position with no
 fading pass (0.2.33's one-stripe-per-capture fade showed as a band sweeping down the screen). A cell hit in every
 capture saturates white; one hit in 10 % of captures sits around dark red; a cell 256 captures old is cleared when
-drawn. Colour ramp (legend "rare or old" .. "frequent" on the second info line): black, dark blue, red, yellow,
+drawn. Colour ramp (legend "rare or old" .. "frequent" above the plot's top right): black, dark blue, red, yellow,
 white. The level grid and labels stay.
 Both histories clear when anything that changes what a column or level means changes (FFT length, window, span,
 start, ref, scale, sample rate, channel), so a view never mixes axes; in STOP they wait for RUN and say so. The
-rows are stored as RGB565 (drawn with memcpy bursts) and the counts as words with zero words skipped, since every
-uncached pixel access costs about 90 cycles. Memory: 484 KB waterfall + 726 KB density (.bss).
+rows are stored as RGB565 (drawn with memcpy bursts) and the counts as words with zero words skipped, since before the
+MMU (0.2.48) every uncached pixel access cost about 90 cycles. Memory: 484 KB waterfall + 726 KB density (.bss).
 
 Axis cap (fw 0.2.36, owner): the view shows at most `PC_SPECTRUM_FMAX_HZ` = 25 MHz (spectrum.h), or fs/2 when that
 is lower; at 200 MS/s the full span is 0-25 MHz and zoom, pan and Auto stay inside it. The front end rolls off near
@@ -734,10 +948,9 @@ touch that moves more than 2 px is a drag: the spectrum follows the finger horiz
 1/65536 of the Nyquist range) and is redrawn while dragging; at full span there is nothing to pan. Start, centre and
 stop frequencies are the labels under the plot.
 
-Header and averaging (fw 0.2.40-0.2.42, owner): one header line, left to right: per shown channel its peak "CH1 ^
-977 Hz +2.7 dBV" in the channel colour, "RBW 732 Hz", the decimation filter tag ("CIC3"; the averaging is not repeated,
-the strip's Average field shows it) and, in the waterfall, the time its rows span; the colour legend sits at the right end in the
-history views. No fs or N (they are the time base and the FFT-length field). Warnings appear centred over the top of
+Header and averaging (fw 0.2.40-0.2.42, owner; since 0.2.56 the header's readouts are cards, see "Screens"): per
+shown channel its peak frequency and level, the RBW and, in the waterfall, the time its rows span. No fs or N (they are
+the time base and the FFT length). Warnings appear centred over the top of
 the plot in orange only while they apply: "CHn overrange", "no anti-alias filter below 200 MS/s" (decimated without
 the 0x1534 filter), "Stopped: RUN fills the view" (history views, or no record). The plot is 8 divisions of 43 px.
 Average field: Off, 4, 16, 64 (exponential average of the dB levels over a growing count up to that many captures,
@@ -760,10 +973,10 @@ Persistence (fw 0.2.39): FFT length, window, scale and ref level are saved in se
 marker, window, scale, length) and 209 (ref, int16), with everything else, by 1.00o5's power-off interrupt (the only
 place 1.00o5 writes the settings sector, apart from a failed load; not in the picture / waveform viewers, not on
 ENTER_FEL or a battery that dies). Not restored: the display mode (the scope boots into the scope view), channel,
-span, start and view. The Filter choice (fw-decim, word 207) is saved the same way.
+span and start; the variant (Spectrum / Waterfall / Density) is restored since fw 0.2.56 (word 211). The Filter choice (fw-decim, word 207) is saved the same way.
 
 Auto (fw 0.2.42, owner: deterministic, identical presses give identical settings): a fixed probe procedure that
-does not depend on the state it starts from, about 1-2 s, "Auto..." in the field and the plot meanwhile, any touch
+does not depend on the state it starts from, about 1-2 s, "Auto..." on AUTO SET and the plot meanwhile, any touch
 cancels, gives up after 4 s with what it has. It needs RUN and trigger mode Auto or Normal (otherwise a warning says
 so). Steps:
 1. Probe: 50 MSa/s (2 us/div), the longest FFT the record holds up to 4096, Hann, averaging 4, trigger source = the
@@ -802,9 +1015,12 @@ divide by ENBW for density). Volts per code use the calibration chain of protoco
 Hann, 10 dB/div, ref 0 dBV, full span). Protocol: GET_STATUS byte 43 = display mode, READ_SPECTRUM 0x020A returns
 the displayed spectrum (protocol section 14 row 45).
 
-Costs: FFT per channel per new capture, measured with FFT_BENCH on 0.2.31: 2048 points 4.9 ms from DDR, 2.3 ms from
-on-chip SRAM, 4096 points 10.9 ms (+ about 1-2.5 ms dB conversion). Since 0.2.33 the view runs N <= 2048 from SRAM A
-(0x1000-0x7008, the space FFT_BENCH borrows; nothing else uses it at run time, all stacks are in DDR). Drawing: one
+Costs: FFT per channel per new capture. With the MMU on (0.2.48, FFT_BENCH 2026-10-19): 1024 points 0.21 ms, 2048 points
+0.68 ms, 4096 points 2.72 ms (the dB conversion of about 1-2.5 ms was measured before the MMU and is not re-measured).
+Before the MMU (0.2.31): 2048 points 4.9 ms from DDR, 2.3 ms from on-chip SRAM, 4096 points 10.9 ms. Since 0.2.33 the
+view runs N <= 2048 from SRAM A (0x1000-0x7008, the space FFT_BENCH borrows; nothing else uses it at run time, all
+stacks are in DDR); with the cache on this placement no longer matters. The scope view's whole main-loop pass
+(GET_STATUS `pass_ms`) went from 30 ms to a median of 15 ms (range 14-18) with the MMU. Drawing: one
 728 x 432 clear (memset bursts since 0.2.32) and blit per pass, as 1.00o5's trace view.
 
 Redraws in the spectrum view (fw 0.2.44): the only 1.00o5 routine that paints the scope view outside
@@ -816,7 +1032,8 @@ base change from inside a draw redraws through the same path), and `spec_tb_set`
 that redraw shows the new axis without the old spectra. Audit of the other host-driven redraws (SET_CHANNEL, SET_TRIGGER,
 SET_GEN, RUN/STOP, the MCP chip): they draw only top-bar buttons (y < 46) and never touch the trace area or the right
 column. Not host-testable (scope_functions.c and spectrum.c drawing are target-only); bench: spectrum view on, then
-SET_TIMEBASE / SET_TRIGGER / SET_GEN in a loop from the host and span taps: the strip must never show grid or pointers.
+SET_TIMEBASE / SET_TRIGGER / SET_GEN in a loop from the host and span taps: the cards row (the strip until 0.2.56)
+must never show grid or pointers.
 
 ### Phosphor view (`phosphor.c`, fw 0.2.46)
 
@@ -825,11 +1042,12 @@ how often each pixel was hit by recent records, so jitter, rare glitches, a modu
 cycles of a toggling signal are visible at once with their relative frequency. Design and cost arithmetic:
 `docs/plans/phosphor-design.md`.
 
-Chosen in the acquisition menu's Display row (fw 0.2.51; the main menu's "Phosphor display" row and the strip's
-"Scope" field before): Phosphor on, Normal or X-Y off. The spectrum and phosphor views exclude each other; the main
-menu's Scope row returns to the phosphor view when it was on before the spectrum. Not available in roll mode or in the
-picture / waveform viewers (the view ends). It is a main-loop display mode: RUN/STOP,
-trigger, time base, channel menus, cursors, measurements and the MCP keep working as in the scope view.
+Switched by the Phosphor switch in the CTRL page's Display fold-out (fw 0.2.56; the acquisition menu's Display row in
+0.2.51, the main menu's "Phosphor display" row and the strip's "Scope" field before); it combines with Normal or X-Y.
+The spectrum and phosphor views exclude each other; the switch stays on while the spectrum shows, so the main menu's
+Scope row brings the picture back. Not available in roll mode or in the picture / waveform viewers (the picture pauses
+and comes back when they end). It is a main-loop display mode: RUN/STOP, trigger, time base, channel menus, cursors,
+measurements and the MCP keep working as in the scope view.
 
 What changes: only the CH1 / CH2 traces. Each channel has a map of hit counts (one byte per pixel of the 728 x 400
 trace area); every new record adds its line to the map (all samples on screen, each column from its lowest to its
@@ -838,16 +1056,17 @@ with the persistence time. Grid, cursors, cursor readouts, measurement tiles, th
 MATH traces are drawn as in the scope view, on top of the map. Where both channels light the same pixel the brighter
 one is shown (CH1 on ties). XY mode works the same way with one map (CH1 against CH2).
 
-Strip (one line under the grid, where the record-position slider is in the scope view):
+Parameters, in the Display fold-out under the Phosphor switch since fw 0.2.56 (a strip over the record-position slider
+before; the slider shows again):
 
-| field | values | tap |
+| row | values | tap |
 |---|---|---|
 | Persistence | 0.2 s, 1 s (default), 5 s, Infinite | next value; clears the picture |
 | Palette | Mono (channel colour, brightness by hit rate), Heat (dark blue, blue, cyan, green, yellow, red, white) | toggles |
 | Clear | | clears the picture |
 
-At the right end the strip shows the records added per second ("28 wfm/s"). Warnings (fw 0.2.51: at the top middle of
-the plot in orange, as in the spectrum view; at the strip's right end before) while they apply: "CHn overrange:
+The Phosphor row's second line shows the records added per second ("28 wfm/s"; at the strip's right end before 0.2.56).
+Warnings (the scope view's warning line at the top middle of the plot since fw 0.2.56, "Screens" above) while they apply: "CHn overrange:
 increase V/div" (the latest record clipped), "No trigger: check the trigger level" (the latest record was an auto
 time-out), "No channel enabled: switch on CH1 or CH2".
 
@@ -880,7 +1099,7 @@ scope view. Protocol: GET_STATUS byte 43 `display_mode` = 4 while it is on (prot
 
 Costs (estimates, arithmetic in the design doc): per record about 0.9 ms per channel for a normal trace (one pass over
 the samples, one run per column, word accesses), per pass the lit area only (zero words skipped, grid shows through),
-typically 1-4 ms on top of the scope view's 30 ms pass; worst case (the whole area lit on both channels) about 90 ms
+typically 1-4 ms on top of the scope view's pass (30 ms estimated before the MMU, median 15 ms measured since 0.2.48); worst case (the whole area lit on both channels) about 90 ms
 per pass. Memory: 582 KB of maps in `.bss`; the code-to-row tables and palettes in on-chip SRAM A at 0x0400-0x0FFF.
 Bench check: GET_STATUS `pass_ms` with the view on vs off.
 
@@ -1326,7 +1545,8 @@ until the base calibration is run again. GET_CAL 256 bytes: protocol section 14 
 2. Owner: probes and USB unplugged, System settings, Base calibration, OK: "Ch1.... OK", "Ch2.... OK" (about 7 s,
    2 s more than 0.2.43 for the full-rate slopes), "Calibration successful", then the yellow prompt "Gain: put both
    probes on the cal post, OK".
-3. Owner: both probes switched to x1, both tips on the calibration post (ground clips not needed), OK: "Ch1.... OK",
+3. Owner: both probes switched to x1 (x10 works too: the firmware picks range 2 for x1 and range 5 for x10, step 1 of the
+   gain step above; the bench used x1), both tips on the calibration post (ground clips not needed), OK: "Ch1.... OK",
    "Ch2.... OK", "Gain calibration successful". Reconnect USB.
 4. GET_CAL both channels: byte 72 = 3, flags bit 3 set, bit 4 clear; block gain_range 2, gain_lever about 88 codes
    (1400-1420); CH1 gains (Q15 / 32768) gated A and B within 0.995..1.005, full A about 0.995, B about 1.028 (the bench
@@ -1352,8 +1572,8 @@ until the base calibration is run again. GET_CAL 256 bytes: protocol section 14 
 
 ### 6.4 Calibration wizard (fw 0.2.57: four screens, plan section 6a)
 
-Calibrate on the Diagnostics Status and Calibration pages, Calibrate now on the first-run screen and (until the Settings
-rebuild removes the row) System settings > Baseline calibration open one modal flow of four screens. Each is a step
+Calibrate on the Diagnostics Status and Calibration pages and Calibrate now on the first-run screen open one modal flow
+of four screens. Each is a step
 dialog (640 x 300 at 80, 90) over the dimmed, frozen screen: title, one instruction, a result or progress line, Cancel
 left (160 x 52) and the action right (180 x 52). Nothing is written before Save calibration; Cancel on any screen, also
 while a measurement runs, writes nothing. Files: `cal_wiz.c/.h` (the steps as a pure-C state machine,
@@ -1379,8 +1599,7 @@ with flag KEPT, GET_CAL flags bit 4) or "gains not measured".
 Save calibration writes the PWM centres (`dc_calibration_offset[0..6]`), the 1.00o5 compensations, the block, sectors
 708 and 709 (as the 0.2.45 base calibration did), then `cal_wizard_committed()` (the v4 tracker reset); the dialog
 closes and the screen under it comes back. With the volts factors missing (`calibrationfail`, sector 708 did not load)
-the Diagnostics and first-run callers go on to the volts calibration (section 5 "Screens: Diagnostics"); the System
-settings row still hands over to 1.00o5's boxes. Each measurement batch restores the channels, sample rate, trigger mode
+the Diagnostics and first-run callers go on to the volts calibration (section 5 "Screens: Diagnostics"). Each measurement batch restores the channels, sample rate, trigger mode
 and, after a gain step, the generator.
 
 The level check (both post levels at range 2, gated, 2 conversions each) and the measurements are fw 0.2.50's

@@ -31,6 +31,26 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.58 - 2026-10-19 (protocol 1.17, docs/protocol.md section 14 row 56)
+
+Support for the AL3 bitstream 0x1536 (segmented capture and hardware averaging, fpga-gen5; not flashed yet).
+Built on 0.2.55 / protocol 1.16 and numbered 0.2.58 by the coordinator (0.2.56 is fw-ui2, 0.2.57 fw-ui4); the
+protocol row number (56) is provisional, the coordinator renumbers it at the merge. Spec: `docs/protocol.md` section 14 row 56; README section 5 "Segmented
+capture and hardware averaging". Nothing is benched.
+
+- Added: version word 0x1536..0x153F gives caps bit 17 SEQ. Older bitstreams see no new FPGA command (65abebf).
+- Added: the acquisition menu's Average uses the FPGA's averaging on 0x1536 when the record fits its accumulator
+  (legacy records at the 3000-sample depth: filter off or 200 MSa/s): each displayed record is the mean of 2 to 64
+  records (as many as fit 40 ms) instead of the per-pass software average. Other cases keep the software average
+  (65abebf).
+- Added: SET_SEQ / GET_SEQ / READ_SEQ (0x020E-0x0210) and READ_RAW addr_mode 3: host ARM runs N segments with a
+  40-bit timestamp per segment, or averages N records per position (up to 65536 with the filter on); STOP ends a
+  run and keeps its data (65abebf).
+- Changed: GET_STATUS is 48 bytes (bytes 44-47: the bitstream's features word and the UI Average state), GET_DECIM 36
+  bytes, GET_CAPTURE_INFO 96 bytes (the run of the capture) (65abebf).
+- Changed: on 0x1536 the arm writes 0x0B / 0x0C and the sequencer registers before the sampling reset, so the
+  write-clock side loads them at every rate (65abebf).
+
 #### 0.2.57 - 2026-10-19 (protocol 1.16 unchanged; provisional number, renumbered at merge)
 
 UX makeover step 4 (`docs/plans/ux-makeover.md` sections 6-6c; `firmware/README.md` section 5 "Screens: Diagnostics,
@@ -53,6 +73,78 @@ calibration wizard, first run" and 6.4).
 - Removed: 1.00o5's "Load default settings value" start-up screen and the old diagnostics screen with its DEFAULT,
   RESTORE and RESET buttons and the hidden boot-mode touch areas; where each value went is listed in
   `firmware/README.md` section 5 (5e8a5db).
+- Moved: the interim Baseline calibration row of the Settings fold-out (with 1.00o5's volts-calibration boxes beside
+  it) and the Settings screen's DC shift trim row (0.2.55) to the Diagnostics pages (Calibrate, Volts calibration, DC
+  shift trim); Dev mode is the Developer page's Debug overlay.
+#### 0.2.56 - 2026-10-19 (protocol 1.16, unchanged)
+
+The second step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 2; rules in `docs/ui-guidelines.md`;
+README section 5 "Screens: CTRL page, fold-outs, chips, warnings, spectrum cards").
+
+- Changed: the right bar's second page is the CTRL page in both modes: Display, Trace style (Scope) or Analyse
+  (Spectrum), Grid, compact V+ / CH1 / V- and V+ / CH2 / V- steppers with 45 px of touch per half, 50 % TRIG (Scope;
+  the slot is empty in Spectrum). Buttons that hold a value show it and open a fold-out beside the bar; a tap outside
+  closes it. The waveform viewer's page keeps 1.00o5's V+ / V- and Show grid (a41ca39; geometry and texts host-tested
+  in test_ui, 93f1b68).
+- Changed: Display fold-outs with icons. Scope: Normal or X-Y, and a Phosphor switch with Persistence, Palette, Clear
+  and the wfm/s readout under it. Phosphor combines with X-Y again (lost in 0.2.51) and is saved; it pauses in roll
+  mode ("Not in roll mode") and comes back after. Spectrum: Spectrum, Waterfall, Density, saved (a41ca39).
+- Changed: the spectrum's parameters are in the Analyse fold-out (Analyse CH1 / CH2 / both, FFT length, Window,
+  Average, Scale, Ref level with - / +, Reset); Scale and Ref level sit below a line in the same fold-out, so both
+  CTRL pages keep one geometry (a41ca39).
+- Added: Grid on the CTRL page in every mode (a switch, saved); the record-position slider always shows (a41ca39).
+- Removed: the phosphor strip, the spectrum strip and the spectrum header line. The spectrum's readouts are cards in
+  the bottom row built like the scope's: Peak and Level per channel, RBW, and the waterfall's time span; the filter
+  tag is no longer shown (a41ca39).
+- Removed: Trace style and the 0.2.51 Display row from the acquisition menu, which holds acquisition only again
+  (a41ca39).
+- Changed: in the spectrum view T CURSOR, V CURSOR and MEASURES are empty slots; the right bar follows the mode
+  (a41ca39).
+- Changed: the warning line (overrange, no trigger, no channel, X-Y needs both channels) shows at the top middle of
+  the plot in Normal and X-Y too, not only with Phosphor (a41ca39).
+- Changed: the top bar chips CH1, CH2, ACQ and the trigger share one construction: a grey box with the coloured block
+  over its left end, no notch (aaa0613).
+- Settings sector: word 210 bit 3 holds the Phosphor switch, word 211 (0xC700) Grid and the spectrum's Display
+  variant.
+
+#### 0.2.55 - 2026-10-19 (protocol 1.16, unchanged)
+
+Step 3 of the UX makeover (`docs/plans/ux-makeover.md` section 5; README section 5 "Settings").
+
+- Changed: the Settings fold-out holds Screen brightness, Grid brightness, File message timeout (was "Notification
+  confirmation"; the chip shows "tap" or "0.7 s"), Time and date (with a clock module), Baseline calibration (interim
+  until Diagnostics has Calibrate) and Other settings, with contiguous 59 px hit areas (a4664ae, 66a3a70).
+- Added: Other settings opens a full Settings screen: Display, Controls (file message timeout, cursors, auto setup),
+  Files (screenshot stamp, reference traces at power-on), Clock (clock module, a time and date page), Start-up ("At
+  power-on": Open firmware, Boot menu then open firmware, Boot menu then stock firmware) and Restore default settings
+  behind a confirmation that says the calibration and the start-up choice are kept. DC shift trim sits there in an
+  interim Calibration group until Diagnostics takes it (66a3a70).
+- Removed: 1.00o5's Other settings menu with USB-Serial mode (the build forces CDC) and Dev mode (flag kept, back on
+  the Diagnostics developer page later); FEL is no longer a start-up choice in the UI. The dev-mode exception to the
+  boot-menu rule is gone (66a3a70).
+- Changed: restoring default settings (and a settings sector that fails to load) no longer writes the boot-mode byte,
+  and keeps USB in CDC mode (66a3a70).
+- Changed: "Confirm to delete?" became the confirmation dialog: "Delete from the SD card?", Cancel left and Delete
+  right in red, 160 x 44 px buttons 16 px apart (was NO / YES, 74 x 50 px, 11 px apart) (24743a7).
+
+#### 0.2.54 - 2026-10-19 (protocol 1.16, unchanged)
+
+Touch fix batch 1 (`docs/plans/touch-review.md` section c1; defects 1, 3, 4, 5, 8, 9, 10 and part of 19).
+
+- Fixed: the CH1, CH2 and reference pointers at the left edge of the plot are drag handles. A drag that starts within
+  a 44 px box around a pointer (x 0..43) moves it; the nearest switched-on pointer wins, a tie goes to the one drawn on
+  top (CH1, CH2, ref1..ref8 draw in that order). A tap on a pointer does nothing (it used to change the time base).
+  Pointers pinned at the top or bottom edge are grabbed where they are drawn (4bec0ff; geometry host-tested in
+  test_touch_pick, 4a3753b).
+- Fixed: the zero-line grab on the plot picks the nearest enabled channel (a disabled CH2 no longer blocks CH1; a tie
+  goes to CH2), reads the touch-down point rather than the point after the first move, and no longer shifts the
+  trigger point with the x component of a channel drag (4bec0ff).
+- Fixed: dragging a channel moves the trigger level on it by the same amount, limited so both stay on the grid: the
+  level keeps its voltage when the trace hits an edge. With the EXT trigger source the level no longer follows CH2
+  (ca7372a).
+- Fixed: the new auto setup with Invert on could put a trace position outside the grid (a wrapped subtraction or an
+  unlimited addition) and loaded settings were not range-checked; both are limited to the drag range 6..396 now, so a
+  channel can always be grabbed and the first drag no longer jumps (d94f09a).
 
 #### 0.2.52 - 2026-10-19 (protocol 1.16, docs/protocol.md section 14 row 55)
 
@@ -706,6 +798,15 @@ was found (commit not identified).
   markers and Q, quality flags, background floor, CH2 auto-ranging with the splice, thru calibration, CSV / JSON /
   NPZ. Planner, DFT and markers in f0940ee (plan vectors docs/bode-plan-vectors.json), runner and CLI in 363f676,
   the tool in d3a16bb. The simulator has an RC / series RLC DUT on the generator (1d46cf8). Not benched yet.
+- Added: protocol 1.15 calibration v4 (fw 0.2.50, 5f6bc0d). GET_CAL parses 288 bytes; the volts model takes the
+  tracked full-rate A - B (d, e) and common mode (cm) out of READ_RAW and 16-bit samples as the scope does in its own
+  readouts, re-reading GET_CAL at most a second old; `scope_calibration_info` shows the tracker and the class probe in
+  words (tracking / frozen / idle, age, d, e, q, cm). The simulator models the drift (`SimConfig.v4`).
+- Added: protocol 1.16 diagnostics readers (fw 0.2.52, b830434; protocol row 55, 8614032). `scope_health` (GET_HEALTH: USB state,
+  CP15, unit life, settings state, the stored restart record, in words), `scope_sd_info` reports the card image's
+  identity and whether it is the running build, `scope_calibration_info` the calibration provenance, and
+  `scope_save_report` has the scope write its report file to the card. Codecs for the stored layouts are checked
+  against the `diag_layouts` vectors; the simulator answers all four.
 
 ### Tooling, FPGA and documentation
 

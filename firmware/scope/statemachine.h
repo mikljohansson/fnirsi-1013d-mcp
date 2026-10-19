@@ -52,10 +52,12 @@ void move_trigger_point_position(void);
 
 //void change_channel_1_HW_offset(void);
 
-void change_channel_1_offset(void);
-void change_channel_2_offset(void);
+//fw 0.2.54: delta = drag distance in screen units (up / right positive, already divided for slow moves), added to the
+//position saved at grab time and limited to the drag range
+void change_channel_1_offset(int32 delta);
+void change_channel_2_offset(int32 delta);
 
-void change_trigger_level_offset(void);
+void change_trigger_level_offset(int32 delta);
 
 void move_left_time_cursor_position(void);
 void move_right_time_cursor_position(void);

@@ -79,7 +79,7 @@ class TimeoutPolicy:
 
 #: answered from the timer IRQ (firmware >= 0.1.2)
 FAST_CMDS = frozenset({P.Cmd.PING, P.Cmd.GET_INFO, P.Cmd.GET_STATUS, P.Cmd.GET_BATTERY, P.Cmd.GET_LINK_STATS,
-                       P.Cmd.GET_EVENT_LOG})
+                       P.Cmd.GET_EVENT_LOG, P.Cmd.GET_HEALTH})
 #: Host-side partial-frame discard: much longer than the device's 100 ms rule. A large response may pause
 #: mid-transfer; dropping it after 100 ms turned its tail into "garbage" (bench census 2026-10-18, fw 0.1.3).
 HOST_PARTIAL_TIMEOUT_S = 2.0

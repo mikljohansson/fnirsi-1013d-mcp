@@ -944,7 +944,7 @@ static const char *ud_range_names[ACAL_RANGES] = { "5 V", "2.5 V", "1 V", "500 m
 
 #define UD_CB_Y   96
 #define UD_CB_W   382
-#define UD_CB_H   312
+#define UD_CB_H   270
 
 static void ud_cal_channel(ud_page *pg, const ud_input *in, uint32_t ch)
 {
@@ -1114,6 +1114,8 @@ static const char *ud_block_state(const uint8_t *c)
   return (c[C_FLAGS] & F_LOADED) ? "not bound to the offsets" : "none";
 }
 
+#define UD_CAL_ROW1   374
+
 static void ud_page_cal(ud_page *pg, const ud_input *in, const ud_note *note)
 {
   char t[UD_TEXT_LEN], *p;
@@ -1132,17 +1134,19 @@ static void ud_page_cal(ud_page *pg, const ud_input *in, const ud_note *note)
   ud_cal_channel(pg, in, 0);
   ud_cal_channel(pg, in, 1);
 
-  ud_btn(pg, 12, UD_BTN_Y, 140, UD_BTN_H, UD_B_PRIMARY, UD_ID_CALIBRATE, "Calibrate");
-  ud_btn(pg, 164, UD_BTN_Y, 180, UD_BTN_H, UD_B_NEUTRAL, UD_ID_VOLTS, "Volts calibration");
-  ud_btn(pg, 612, UD_BTN_Y, 176, UD_BTN_H, UD_B_DANGER, UD_ID_CLEAR, "Clear calibration");
+  //Two rows of service actions: Calibrate and the DC shift trim (1.00o5's manual trim of the trace scale, run on the
+  //scope's CTRL page while on), then the volts calibration and, apart at the right, Clear calibration
+  ud_btn(pg, 12, UD_CAL_ROW1, 140, UD_BTN_H, UD_B_PRIMARY, UD_ID_CALIBRATE, "Calibrate");
+  ud_btn(pg, 164, UD_CAL_ROW1, 180, UD_BTN_H, UD_B_NEUTRAL, UD_ID_DCSHIFT, "DC shift trim");
+  ud_txt(pg, 356, UD_CAL_ROW1 + 6, 432, UD_F_SMALL, in->dc_shift ? UD_C_WARN : UD_C_DIM, in->dc_shift ?
+         "DC shift trim on: CTRL on the scope opens it." : "DC shift trim off.");
 
   if(note && note->text[0])
-    ud_txt(pg, 356, UD_BTN_Y + 6, 248, UD_F_SMALL, note->colour, note->text);
-  else
-  {
-    ud_txt(pg, 356, UD_BTN_Y + 6, 248, UD_F_SMALL, UD_C_DIM, "Volts calibration needs a DC");
-    ud_txt(pg, 356, UD_BTN_Y + 22, 248, UD_F_SMALL, UD_C_DIM, "supply up to 15 V.");
-  }
+    ud_txt(pg, 356, UD_CAL_ROW1 + 24, 432, UD_F_SMALL, note->colour, note->text);
+
+  ud_btn(pg, 12, UD_BTN_Y + 6, 180, UD_BTN_H, UD_B_NEUTRAL, UD_ID_VOLTS, "Volts calibration");
+  ud_txt(pg, 204, UD_BTN_Y + 20, 396, UD_F_SMALL, UD_C_DIM, "Needs a DC supply up to 15 V.");
+  ud_btn(pg, 612, UD_BTN_Y + 6, 176, UD_BTN_H, UD_B_DANGER, UD_ID_CLEAR, "Clear calibration");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

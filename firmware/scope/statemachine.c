@@ -21,6 +21,10 @@
 #include "DS3231.h"
 #include "menu.h"
 #include "ui_menu.h"
+#include "ui_settings.h"
+#include "ui_ctrl.h"
+#include "ctrl_page.h"
+#include "touch_pick.h"
 #include "ui_diag_view.h"
 #include "test.h"
 
@@ -31,10 +35,25 @@
 #include "variables.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
+//fw 0.2.54: a drag distance in screen units, divided by 5 when Move is slow
+
+static int32 touch_drag_delta(int32 distance)
+{
+  if(scopesettings.movespeed)
+  {
+    distance /= 5;
+  }
+
+  return distance;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
 //touch handler
 
 void touch_handler(void)
 {
+  int32 delta;
+
   //Check on touch state
   if(touchstate == TOUCH_STATE_INACTIVE)
   {
@@ -72,8 +91,8 @@ void touch_handler(void)
         case TOUCH_STATE_MOVE_CHANNEL_2:
           previous_channel_2_offset = scopesettings.channel2.traceposition;
 
-          //Check if trigger on this channel and if so save it's current offset
-          if(scopesettings.triggerchannel)
+          //Check if trigger on this channel and if so save it's current offset (fw 0.2.54: 1 only, 2 is EXT)
+          if(scopesettings.triggerchannel == 1)
           {
             previous_trigger_level_offset = scopesettings.triggerverticalposition;
           }
@@ -169,32 +188,51 @@ void touch_handler(void)
     switch(touchstate & TOUCH_STATE_MASK)
     {
       case TOUCH_STATE_X_Y_MODE:
-        change_channel_1_offset();
-        change_channel_2_offset();
+        //x moves channel 1, y moves channel 2
+        change_channel_1_offset(touch_drag_delta((int32)xtouch - (int32)previousxtouch));
+        change_channel_2_offset(touch_drag_delta((int32)previousytouch - (int32)ytouch));
         break;
 
+      //fw 0.2.54: a channel and the trigger level on it (triggerchannel 1 for CH2; 2 is EXT) move by one delta, limited so
+      //both stay in the drag range: the level keeps its distance to the trace (its voltage) at the edges
       case TOUCH_STATE_MOVE_CHANNEL_1:
-        if(scopesettings.channel1.enable) change_channel_1_offset();
-
-        //Check if trigger on this channel and if so move it accordingly
-        if(scopesettings.triggerchannel == 0)
+        if(scopesettings.channel1.enable)
         {
-          change_trigger_level_offset();
+          delta = touch_drag_delta((int32)previousytouch - (int32)ytouch);
+
+          if(scopesettings.triggerchannel == 0)
+          {
+            delta = touch_shared_delta(delta, previous_channel_1_offset, previous_trigger_level_offset, TRACE_POS_MIN, TRACE_POS_MAX);
+            change_channel_1_offset(delta);
+            change_trigger_level_offset(delta);
+          }
+          else
+          {
+            change_channel_1_offset(delta);
+          }
         }
         break;
 
       case TOUCH_STATE_MOVE_CHANNEL_2:
-        if(scopesettings.channel2.enable) change_channel_2_offset();
-
-        //Check if trigger on this channel and if so move it accordingly
-        if(scopesettings.triggerchannel)
+        if(scopesettings.channel2.enable)
         {
-          change_trigger_level_offset();
+          delta = touch_drag_delta((int32)previousytouch - (int32)ytouch);
+
+          if(scopesettings.triggerchannel == 1)
+          {
+            delta = touch_shared_delta(delta, previous_channel_2_offset, previous_trigger_level_offset, TRACE_POS_MIN, TRACE_POS_MAX);
+            change_channel_2_offset(delta);
+            change_trigger_level_offset(delta);
+          }
+          else
+          {
+            change_channel_2_offset(delta);
+          }
         }
         break;
 
       case TOUCH_STATE_MOVE_TRIGGER_LEVEL:
-        change_trigger_level_offset();
+        change_trigger_level_offset(touch_drag_delta((int32)previousytouch - (int32)ytouch));
         break;
 
       case TOUCH_STATE_MOVE_TIME_CURSOR_LEFT:
@@ -255,12 +293,44 @@ void touch_handler(void)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
+//fw 0.2.54: the left handle column. The pointers drawn at the left edge (scope_draw_pointers, draw order CH1, CH2, ref1..ref8)
+//are drag handles: the switched-on pointer whose 44 px box holds the touch-down point, nearest first, a tie to the one
+//drawn on top. Returns its TOUCH_STATE_MOVE_* or 0. Normal display only (in X-Y the CH1 pointer is a top pointer).
+
+static uint8 scan_left_handle(int32 x, int32 y)
+{
+  static const uint8 state[10] =
+  {
+    TOUCH_STATE_MOVE_CHANNEL_1, TOUCH_STATE_MOVE_CHANNEL_2,
+    TOUCH_STATE_MOVE_REF1, TOUCH_STATE_MOVE_REF2, TOUCH_STATE_MOVE_REF3, TOUCH_STATE_MOVE_REF4,
+    TOUCH_STATE_MOVE_REF5, TOUCH_STATE_MOVE_REF6, TOUCH_STATE_MOVE_REF7, TOUCH_STATE_MOVE_REF8
+  };
+  TOUCH_POINTER p[10] =
+  {
+    { scopesettings.channel1.enable, scopesettings.channel1.traceposition },
+    { scopesettings.channel2.enable, scopesettings.channel2.traceposition },
+    { scopesettings.ref1, scopesettings.ch_ref1.traceposition },
+    { scopesettings.ref2, scopesettings.ch_ref2.traceposition },
+    { scopesettings.ref3, scopesettings.ch_ref3.traceposition },
+    { scopesettings.ref4, scopesettings.ch_ref4.traceposition },
+    { scopesettings.ref5, scopesettings.ch_ref5.traceposition },
+    { scopesettings.ref6, scopesettings.ch_ref6.traceposition },
+    { scopesettings.ref7, scopesettings.ch_ref7.traceposition },
+    { scopesettings.ref8, scopesettings.ch_ref8.traceposition }
+  };
+  int32 i = pick_left_handle(p, 10, x, y);
+
+  return (i < 0) ? 0 : state[i];
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
 //Top menu bar ranges from 0,0 to 730,46        //44
 //Right menu bar ranges from 730,0 to 800,480
 
 void scan_for_touch(void)
 {
   uint32 offset;
+  uint8  handle;
 
   //Read the touch panel status
   tp_i2c_read_status();
@@ -632,6 +702,9 @@ void scan_for_touch(void)
     previousxtouch = xtouch;
     previousytouch = ytouch;
 
+    //fw 0.2.54: a pointer at the left edge under the touch-down point (picked here, before the finger moves)
+    handle = (scopesettings.xymodedisplay == 0) ? scan_left_handle(previousxtouch, previousytouch) : 0;
+
     //Wait for touch to end and detect movement within the trace display section
     while(havetouch)
     {
@@ -689,7 +762,8 @@ void scan_for_touch(void)
     if(touchstate == 0)
     {
       //See if it was short touch for time base change. Needs to be less then 200mS for that
-      if((timer0_get_ticks() - previoustimerticks) < 200)
+      //fw 0.2.54: a tap on a pointer does nothing
+      if((handle == 0) && ((timer0_get_ticks() - previoustimerticks) < 200))
       {
         //Change the time base setting
         //scope_adjust_timebase();
@@ -700,7 +774,15 @@ void scan_for_touch(void)
       return;
     }
 
+    //fw 0.2.54: a drag that started on a pointer moves it (vertical only, the trigger point stays)
+    if(handle)
+    {
+      touchstate = handle;
+      return;
+    }
+
     //Check if there is displacement that needs to be processed for trace and cursor movement
+    //fw 0.2.54: every pick below is made at the touch-down point (previousxtouch, previousytouch), not after the move
     if(touchstate)
     {
       //scope_test_TP();
@@ -715,174 +797,43 @@ void scan_for_touch(void)
        // if (((scopesettings.voltcursorsenable == 1) && ((xtouch > 60 && xtouch < 310) || (xtouch > 410 && xtouch < 660))) ||
         //      (scopesettings.voltcursorsenable == 0 && (xtouch > 0 && xtouch < 660))) 
               //(scopesettings.voltcursorsenable == 0 && (xtouch > 60 && xtouch < 660))) 
-      if (((scopesettings.voltcursorsenable == 1) && ((xtouch > 60 && xtouch < 310) || (xtouch > 410 && xtouch < 660))) ||
-              (scopesettings.voltcursorsenable == 0 && (xtouch > 60 && xtouch < 660))) 
-          //(scopesettings.ref1)
+      //fw 0.2.54: from the handle column's edge (x < HANDLE_W is the pointers'), the nearest switched-on zero line, a tie
+      //to CH2 (touch_pick.c); a channel drag no longer moves the trigger point. The refs are grabbed by their pointers only.
+      if (((scopesettings.voltcursorsenable == 1) && ((previousxtouch >= HANDLE_W && previousxtouch < 310) || (previousxtouch > 410 && previousxtouch < 660))) ||
+              (scopesettings.voltcursorsenable == 0 && (previousxtouch >= HANDLE_W && previousxtouch < 660)))
         {
-          //Need to make the trace offset in the same orientation as the touch
-          offset = 449 - scopesettings.channel1.traceposition;
+          switch(pick_channel_line(scopesettings.channel1.enable, scopesettings.channel1.traceposition,
+                                   scopesettings.channel2.enable, scopesettings.channel2.traceposition, previousytouch))
+          {
+            case 1:
+              touchstate = TOUCH_STATE_MOVE_CHANNEL_1;
+              return;
 
-          //Check if touch point below the trace
-          if(ytouch < offset)
-          {
-            //If so take the touch point of the offset for the distance
-            distance_channel_1 = offset - ytouch;
+            case 2:
+              touchstate = TOUCH_STATE_MOVE_CHANNEL_2;
+              return;
           }
-          else
-          {
-            //Otherwise take the offset of the touch point for the distance
-            distance_channel_1 =  ytouch - offset;
-          }
-        
-          //Need to make the trace offset in the same orientation as the touch
-          offset = 449 - scopesettings.channel2.traceposition;
-
-          //Check if touch point below the trace
-          if(ytouch < offset)
-          {
-            //If so take the touch point of the offset for the distance
-            distance_channel_2 = offset - ytouch;
-          }
-          else
-          {
-            //Otherwise take the offset of the touch point for the distance
-            distance_channel_2 =  ytouch - offset;
-          }
-        
-          //Check if touch closer to channel 1 center then channel 2 center
-          if((distance_channel_1 < 30) && (distance_channel_1 < distance_channel_2) && (scopesettings.channel1.enable))
-          {
-            //Signal channel 1 trace is being moved and that the trigger point position can also be moved
-            touchstate = TOUCH_STATE_MOVE_CHANNEL_1 | TOUCH_STATE_MOVE_TRIGGER_POINT;
-
-            //Go and handle it
-            return;
-          }
-          //Not close to channel 1 or closer to channel 2 so check if close to channel 2
-          else if((distance_channel_2 < 30) && (scopesettings.channel2.enable))
-          {
-            //Signal channel 2 trace is being moved and that the trigger point position can also be moved
-            touchstate = TOUCH_STATE_MOVE_CHANNEL_2 | TOUCH_STATE_MOVE_TRIGGER_POINT; 
-                //else touchstate = TOUCH_STATE_MOVE_CHANNEL_1 | TOUCH_STATE_MOVE_TRIGGER_POINT;
-
-            //Go and handle it
-            return;
-          }
-        }
-        //--------------------------------
-        //Check on x below 60 to decide early on which trace to move
-        if(xtouch < 60)
-        {
-          //Need to make the trace offset in the same orientation as the touch
-          offset = 449 - scopesettings.ch_ref1.traceposition;
-          //Check if touch point below the trace
-          if(ytouch < offset)
-          { //If so take the touch point of the offset for the distance
-            distance_ch_ref_1 = offset - ytouch;
-          }else
-          {  //Otherwise take the offset of the touch point for the distance
-            distance_ch_ref_1 =  ytouch - offset;
-          } 
-          //Need to make the trace offset in the same orientation as the touch
-          offset = 449 - scopesettings.ch_ref2.traceposition;
-          //Check if touch point below the trace
-          if(ytouch < offset)
-          { //If so take the touch point of the offset for the distance
-            distance_ch_ref_2 = offset - ytouch;
-          }else
-          {  //Otherwise take the offset of the touch point for the distance
-            distance_ch_ref_2 =  ytouch - offset;
-          }
-          //Need to make the trace offset in the same orientation as the touch
-          offset = 449 - scopesettings.ch_ref3.traceposition;
-          //Check if touch point below the trace
-          if(ytouch < offset)
-          { //If so take the touch point of the offset for the distance
-            distance_ch_ref_3 = offset - ytouch;
-          }else
-          {  //Otherwise take the offset of the touch point for the distance
-            distance_ch_ref_3 =  ytouch - offset;
-          }
-          //Need to make the trace offset in the same orientation as the touch
-          offset = 449 - scopesettings.ch_ref4.traceposition;
-          //Check if touch point below the trace
-          if(ytouch < offset)
-          { //If so take the touch point of the offset for the distance
-            distance_ch_ref_4 = offset - ytouch;
-          }else
-          {  //Otherwise take the offset of the touch point for the distance
-            distance_ch_ref_4 =  ytouch - offset;
-          }
-          //Need to make the trace offset in the same orientation as the touch
-          offset = 449 - scopesettings.ch_ref5.traceposition;
-          //Check if touch point below the trace
-          if(ytouch < offset)
-          { //If so take the touch point of the offset for the distance
-            distance_ch_ref_5 = offset - ytouch;
-          }else
-          {  //Otherwise take the offset of the touch point for the distance
-            distance_ch_ref_5 =  ytouch - offset;
-          }
-          //Need to make the trace offset in the same orientation as the touch
-          offset = 449 - scopesettings.ch_ref6.traceposition;
-          //Check if touch point below the trace
-          if(ytouch < offset)
-          { //If so take the touch point of the offset for the distance
-            distance_ch_ref_6 = offset - ytouch;
-          }else
-          {  //Otherwise take the offset of the touch point for the distance
-            distance_ch_ref_6 =  ytouch - offset;
-          }
-          //Need to make the trace offset in the same orientation as the touch
-          offset = 449 - scopesettings.ch_ref7.traceposition;
-          //Check if touch point below the trace
-          if(ytouch < offset)
-          { //If so take the touch point of the offset for the distance
-          distance_ch_ref_7 = offset - ytouch;
-          }else
-          {  //Otherwise take the offset of the touch point for the distance
-          distance_ch_ref_7 =  ytouch - offset;
-          }
-          //Need to make the trace offset in the same orientation as the touch
-          offset = 449 - scopesettings.ch_ref8.traceposition;
-          //Check if touch point below the trace
-          if(ytouch < offset)
-          { //If so take the touch point of the offset for the distance
-            distance_ch_ref_8 = offset - ytouch;
-          }else
-          {  //Otherwise take the offset of the touch point for the distance
-            distance_ch_ref_8 =  ytouch - offset;
-          }
-
-               if((distance_ch_ref_1 < 30)&&(scopesettings.ref1)) { touchstate = TOUCH_STATE_MOVE_REF1; return; }
-          else if((distance_ch_ref_2 < 30)&&(scopesettings.ref2)) { touchstate = TOUCH_STATE_MOVE_REF2; return; }
-          else if((distance_ch_ref_3 < 30)&&(scopesettings.ref3)) { touchstate = TOUCH_STATE_MOVE_REF3; return; }
-          else if((distance_ch_ref_4 < 30)&&(scopesettings.ref4)) { touchstate = TOUCH_STATE_MOVE_REF4; return; }
-          else if((distance_ch_ref_5 < 30)&&(scopesettings.ref5)) { touchstate = TOUCH_STATE_MOVE_REF5; return; }
-          else if((distance_ch_ref_6 < 30)&&(scopesettings.ref6)) { touchstate = TOUCH_STATE_MOVE_REF6; return; }
-          else if((distance_ch_ref_7 < 30)&&(scopesettings.ref7)) { touchstate = TOUCH_STATE_MOVE_REF7; return; }
-          else if((distance_ch_ref_8 < 30)&&(scopesettings.ref8)) { touchstate = TOUCH_STATE_MOVE_REF8; return; }
         }
 
         //This bit needs to be skipped for time base 200mS/div - 20mS/div
         //Hardware trigger seems to be available only from 10mS/div - 10nS/div
 
         //Check on x above 660 to decide early on move of trigger level offset
-        if(xtouch > 660)
+        if(previousxtouch > 660)
         {
           //Need to make the trigger level offset in the same orientation as the touch
           offset = 448 - scopesettings.triggerverticalposition;
 
           //Check if touch point below the trace
-          if(ytouch < offset)
+          if(previousytouch < offset)
           {
             //If so take the touch point of the offset for the distance
-            distance_trigger_level = offset - ytouch;
+            distance_trigger_level = offset - previousytouch;
           }
           else
           {
             //Otherwise take the offset of the touch point for the distance
-            distance_trigger_level =  ytouch - offset;
+            distance_trigger_level =  previousytouch - offset;
           }
 
           //Check if close to trigger level pointer
@@ -900,31 +851,31 @@ void scan_for_touch(void)
         if(scopesettings.timecursorsenable)
         {
           //Check if touch point left of the left cursor
-          if(xtouch < scopesettings.timecursor1position)
+          if(previousxtouch < scopesettings.timecursor1position)
           {
             //If so take the touch point of the offset for the distance
-            distance_time_cursor_left = scopesettings.timecursor1position - xtouch;
+            distance_time_cursor_left = scopesettings.timecursor1position - previousxtouch;
             //for lock move cursor
-            if(scopesettings.lockcursors) distance_time_cursor_right = scopesettings.timecursor2position - xtouch;
+            if(scopesettings.lockcursors) distance_time_cursor_right = scopesettings.timecursor2position - previousxtouch;
           }
           else
           {
             //Otherwise take the offset of the touch point for the distance
-            distance_time_cursor_left =  xtouch - scopesettings.timecursor1position;
+            distance_time_cursor_left =  previousxtouch - scopesettings.timecursor1position;
             //for lock move cursor
-            if(scopesettings.lockcursors) distance_time_cursor_right =  xtouch - scopesettings.timecursor2position;
+            if(scopesettings.lockcursors) distance_time_cursor_right =  previousxtouch - scopesettings.timecursor2position;
           }
 
           //Check if touch point left of the right cursor
-          if(xtouch < scopesettings.timecursor2position)
+          if(previousxtouch < scopesettings.timecursor2position)
           {
             //If so take the touch point of the offset for the distance
-            distance_time_cursor_right = scopesettings.timecursor2position - xtouch;
+            distance_time_cursor_right = scopesettings.timecursor2position - previousxtouch;
           }
           else
           {
             //Otherwise take the offset of the touch point for the distance
-            distance_time_cursor_right =  xtouch - scopesettings.timecursor2position;
+            distance_time_cursor_right =  previousxtouch - scopesettings.timecursor2position;
           }
 
           //Check if touch closer to left cursor then right cursor
@@ -948,39 +899,39 @@ void scan_for_touch(void)
         }
 
         //Check if volt cursor is enabled
-        if((scopesettings.voltcursorsenable)&&(xtouch > 60))
+        if((scopesettings.voltcursorsenable)&&(previousxtouch > 60))
         {
           //Check if touch point under of the bottom cursor
           //if(previousytouch < scopesettings.voltcursor2position)
-          if(ytouch < scopesettings.voltcursor2position)
+          if(previousytouch < scopesettings.voltcursor2position)
           {
             //If so take the touch point of the offset for the distance
-            distance_volt_cursor_bottom = scopesettings.voltcursor2position - ytouch;
+            distance_volt_cursor_bottom = scopesettings.voltcursor2position - previousytouch;
             //for lock move cursor
-            if(scopesettings.lockcursors) distance_volt_cursor_top = scopesettings.voltcursor1position - ytouch;
+            if(scopesettings.lockcursors) distance_volt_cursor_top = scopesettings.voltcursor1position - previousytouch;
           }
           else
           {
             //Otherwise take the offset of the touch point for the distance
-            distance_volt_cursor_bottom =  ytouch - scopesettings.voltcursor2position;
+            distance_volt_cursor_bottom =  previousytouch - scopesettings.voltcursor2position;
             //for lock move cursor
-            if(scopesettings.lockcursors) distance_volt_cursor_top =  ytouch - scopesettings.voltcursor1position;
+            if(scopesettings.lockcursors) distance_volt_cursor_top =  previousytouch - scopesettings.voltcursor1position;
           }
           
           //Check if touch point under of the top cursor
-          if(ytouch < scopesettings.voltcursor1position)
+          if(previousytouch < scopesettings.voltcursor1position)
           {
             //If so take the touch point of the offset for the distance
-            distance_volt_cursor_top = scopesettings.voltcursor1position - ytouch;
+            distance_volt_cursor_top = scopesettings.voltcursor1position - previousytouch;
             //for lock move cursor
-            //if(scopesettings.lockcursors) distance_volt_cursor_bottom = scopesettings.voltcursor2position - ytouch;
+            //if(scopesettings.lockcursors) distance_volt_cursor_bottom = scopesettings.voltcursor2position - previousytouch;
           }
           else
           {
             //Otherwise take the offset of the touch point for the distance
-            distance_volt_cursor_top =  ytouch - scopesettings.voltcursor1position;
+            distance_volt_cursor_top =  previousytouch - scopesettings.voltcursor1position;
             //for lock move cursor
-            //if(scopesettings.lockcursors) distance_volt_cursor_bottom =  ytouch - scopesettings.voltcursor2position;
+            //if(scopesettings.lockcursors) distance_volt_cursor_bottom =  previousytouch - scopesettings.voltcursor2position;
           }
 
           //Check if touch closer to top cursor then bottom cursor
@@ -1038,7 +989,6 @@ void scan_for_touch(void)
 
 void handle_main_menu_touch(void)
 {
-  uint8 tmp;                            //for set boot mode
   int   row;                            //fw 0.2.51: main menu row under the touch (ui_menu.h), -1 outside
   
   //Stay in the menu as long as there is no touch outside the menu
@@ -1203,11 +1153,11 @@ void handle_main_menu_touch(void)
       
       //**--------------------------------------------------------
       
-      //Check on system settings menu opened and being touched
-      else if(systemsettingsmenuopen && (xtouch >= 150) && (xtouch <= 394) && (ytouch >= 46) && (ytouch <= SYSTEM_MENU_YPOS + SYSTEM_MENU_HEIGHT))
+      //Check on system settings menu opened and being touched (fw 0.2.55: the rows of ui_settings.h, contiguous 59 px)
+      else if(systemsettingsmenuopen && ((row = ui_fo_row_at(pc_glue_ui_has(PC_FEAT_RTC), xtouch, ytouch)) >= 0))
       {
         //Check if on screen brightness
-        if((ytouch >= 47) && (ytouch <= 103))
+        if(row == UI_FO_SCREEN)
         {
           //Check if already open
           if(screenbrightnessopen == 0)
@@ -1229,7 +1179,7 @@ void handle_main_menu_touch(void)
           }
         }
         //Check if on grid brightness
-        else if((ytouch >= 105) && (ytouch <= 162))
+        else if(row == UI_FO_GRID)
         {
           //Check if already open
           if(gridbrightnessopen == 0)
@@ -1250,106 +1200,40 @@ void handle_main_menu_touch(void)
             gridbrightnessopen = 1;
           }
         }
-        //Check if on OTHER SETINGS
-        else if((ytouch >= 164) && (ytouch <= 221))
-        {
-          //Close any of the sub menus if open
-          //close_open_menus(0);
-
-          //Wait until touch is released
-          //tp_i2c_wait_for_touch_release();
-
-          //Check if already open
-          if(othersettingsopen == 0)
-          {
-            //Close any of the sub menus if open
-            close_open_menus(0);
-            
-            //Set this item active
-            scope_system_settings_other_settings_item(1);
- 
-            //Wait until touch is released
-            tp_i2c_wait_for_touch_release();
-            
-            //Save the screen under the menu
-            display_set_destination_buffer(displaybuffer3);
-            display_copy_rect_from_screen(OTHER_MENU_XPOS, OTHER_MENU_YPOS, OTHER_MENU_WIDTH, OTHER_MENU_HEIGHT);
-            
-            //Show the other settings menu
-            scope_system_settings_open_other_settings_menu();
-
-            //Signal the menu other_settings is opened
-            othersettingsopen = 1;
-          }
-        }
-        //Check if on baseline calibration: the calibration wizard (cal_wiz_ui.c), which owns the whole screen until
-        //Cancel or Done and restores it
-        else if((ytouch >= 223) && (ytouch <= 280))
-        {
-          //Check if already open (the input calibration boxes after a wizard run)
-          if(calibrationopen == 0)
-          {
-            //Close any of the sub menus if open
-            close_open_menus(0);
-
-            //Set this item active
-            scope_system_settings_calibration_item(1);
-
-            //Wait until touch is released
-            tp_i2c_wait_for_touch_release();
-
-            //Done while 1.00o5's input-divider calibration is due: its box beside the menu, as before
-            if(cal_wizard_run() && calibrationfail)
-            {
-              display_set_destination_buffer(displaybuffer3);
-              display_copy_rect_from_screen(CALIBRATION_MENU_XPOS, CALIBRATION_MENU_YPOS, CALIBRATION_MENU_WIDTH, CALIBRATION_MENU_HEIGHT);
-              scope_show_Input_calibration();
-              calibrationopen = 2;
-            }
-            else
-            {
-              //Cancel, or Done with nothing more to do: close the menus
-              scope_system_settings_calibration_item(0);
-              close_open_menus(1);
-              return;
-            }
-          }
-        }
-        //check on notification confirmation (fw 0.2.51: one row up, X-Y moved to the acquisition menu's Display row)
-        else if((ytouch >= 282) && (ytouch <= 339))
+        //File message timeout (1.00o5's notification confirmation): a tap toggles wait for a tap / 0.7 s
+        else if(row == UI_FO_FILEMSG)
         {
           //Close any of the sub menus if open
           close_open_menus(0);
 
-          //Toggle the notification confirmation mode
+          //Toggle the file message timeout and show it while touched
           scopesettings.confirmationmode ^= 1;
+          scope_system_settings_filemsg_item(1);
 
-          //Show the state
-          scope_system_settings_confirmation_item(1);
-          //scope_display_slide_button(326, 358, scopesettings.confirmationmode, GREEN_COLOR);
-          
           //Wait until touch is released
           tp_i2c_wait_for_touch_release();
+
+          scope_system_settings_filemsg_item(0);
         }
-        //check on RTC settings
-        else if((ytouch >= 341) && (ytouch <= 399) PC_UI_HAS(PC_FEAT_RTC))
+        //Time and date: 1.00o5's editor beside the fold-out
+        else if(row == UI_FO_TIME)
         {
           //Check if already open
           if(RTCsettingsopen == 0)
           {
             //Close any of the sub menus if open
             close_open_menus(0);
-            
+
             //Set this item active
             scope_system_settings_RTC_settings_item(1);
 
             //Wait until touch is released
             tp_i2c_wait_for_touch_release();
-            
+
             //Save the screen under the menu
             display_set_destination_buffer(displaybuffer3);
             display_copy_rect_from_screen(RTC_MENU_XPOS, RTC_MENU_YPOS, RTC_MENU_WIDTH, RTC_MENU_HEIGHT);
-            
+
             //Show the RTC settings menu
             scope_open_RTC_settings_menu();
 
@@ -1357,125 +1241,27 @@ void handle_main_menu_touch(void)
             RTCsettingsopen = 1;
           }
         }
-      }
-      //****----------------------------------------------------------------------      
-            //****----------------------------------------------------------------------      
-      else if(othersettingsopen && (xtouch >= OTHER_MENU_XPOS) && (xtouch <= OTHER_MENU_XPOS + OTHER_MENU_WIDTH) && (ytouch >= OTHER_MENU_YPOS) && (ytouch <= OTHER_MENU_YPOS + OTHER_MENU_HEIGHT+15))
-      {
-        //Check if touch button Boot menu
-        if((ytouch >= OTHER_MENU_YPOS) && (ytouch <= OTHER_MENU_YPOS + 46))//+59
+        //Other settings: the Settings screen (ui_settings_ui.c), modal until Back, then back to the scope
+        else
         {
-          //Toggle the Boot_menu
-          tmp = (boot_menu_start & 0x04)>>2;
-          tmp ^= 1;
-          boot_menu_start &= 0x03;
-          boot_menu_start |= tmp<<2;
-            
+          //Close any of the sub menus if open
+          close_open_menus(0);
+
           //Set this item active
-          scope_system_settings_other_settings_boot_menu_item();
-          //scope_system_settings_other_settings_default_start_item(0);
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-        }
-        //Check if touch default start
-        else if((ytouch >= OTHER_MENU_YPOS + 46) && (ytouch <= OTHER_MENU_YPOS + 92))//59-118
-        {    
-          //Toggle the Default start
-          tmp = (boot_menu_start & 0x03);
-          if (tmp < 2) tmp++; else tmp = 0;  
-          boot_menu_start &= 0x04;
-          boot_menu_start |= tmp;
-                  
-          //Set this item active
-          scope_system_settings_other_settings_default_start_item();
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-        } 
-        //Check if touch button NEWAUTOSETUP 
-        else if((ytouch >= OTHER_MENU_YPOS + 92) && (ytouch <= OTHER_MENU_YPOS + 138))//118-177
-        {    
-          //Toggle the new_autosetup
-          scopesettings.new_autosetup ^= 1;
-          
-          //Set this item active
-          scope_system_settings_other_settings_new_autosetup_item();
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-        }    
-        //Check if touch button lock cursors
-        else if((ytouch >= OTHER_MENU_YPOS + 138) && (ytouch <= OTHER_MENU_YPOS + 184))
-        {
-          //Toggle the lock cursors
-          scopesettings.lockcursors ^= 1;
-                  
-          //Set this item active
-          scope_system_settings_other_settings_lock_cursor_item();
-          
+          scope_system_settings_other_settings_item(1);
+
           //Wait until touch is released
           tp_i2c_wait_for_touch_release();
-        }
-        //Check if touch button DC shift calibration
-        else if((ytouch >= OTHER_MENU_YPOS + 184) && (ytouch <= OTHER_MENU_YPOS + 230))
-        {    
-          //Toggle the shift_cal
-          dc_shift_cal ^= 1;
-          
-          //Set this item active
-          scope_system_settings_other_settings_dc_shift_cal_item();
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-        }
-        //Check if touch button USB CH340 mode
-        else if((ytouch >= OTHER_MENU_YPOS + 230) && (ytouch <= OTHER_MENU_YPOS + 276))
-        {    
-          //Toggle the USB_CH340
-          USB_CH340 ^= 1;
-          
-          //Set this item active
-          scope_system_settings_other_settings_CH340_mode_item();
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-        }
-        //Check if touch button developer mode
-        else if((ytouch >= OTHER_MENU_YPOS + 276) && (ytouch <= OTHER_MENU_YPOS + 322))
-        {    
-          //Toggle the dev_mode
-          dev_mode ^= 1;
-          
-          //Set this item active
-          scope_system_settings_other_settings_dev_mode_item();
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-        }
-        //Check if touch button Add a tag to BMP
-        else if((ytouch >= OTHER_MENU_YPOS + 322) && (ytouch <= OTHER_MENU_YPOS + 368))
-        {    
-          //Toggle the tag_in_BMP
-          tag_in_BMP ^= 1;
-          
-          //Set this item active
-          scope_system_settings_other_settings_BMP_mark_item();
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-        }
-        //Check if touch button ref_on_start 
-        else if((ytouch >= OTHER_MENU_YPOS + 368) && (ytouch <= OTHER_MENU_YPOS + 425))//413
-        {    
-          //Toggle the ref_on_start
-          scopesettings.ref_on_startup ^= 1;
-          
-          //Set this item active
-          scope_system_settings_other_settings_ref_on_start_item();
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
+
+          //Close the fold-out and put back what was under the main menu, so the screen keeps the clean scope
+          close_open_menus(1);
+          display_set_source_buffer(displaybuffer1);
+          display_copy_rect_to_screen(MAIN_MENU_XPOS, MAIN_MENU_YPOS, MAIN_MENU_WIDTH, MAIN_MENU_HEIGHT);
+
+          ui_settings_run();
+
+          //Need to exit the loop here
+          return;
         }
       }
         //------------------------------------------------------------------------------------------------
@@ -1637,134 +1423,6 @@ void handle_main_menu_touch(void)
           //Update the actual grid brightness if needed. There is no direct update of the background!
         }
       }
-      //-********************************************************************************************************
-      //Check on Input_calibration text opened and OK touched
-      else if((calibrationfail) && (calibrationopen == 2) && (xtouch >= 495) && (xtouch <= 594) && (ytouch >= 223) && (ytouch <= 280))
-      {
-          //Highlight the button
-          scope_display_ok_button(517, 230, 1);
-
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release();
-            
-          //Show the calibration text 300mV
-          scope_show_calibrating_300mV_text();
-
-          //Signal calibration 300mV
-          calibrationopen = 3; 
-      }
-      
-      //Check on calibrating_300mV text opened and OK touched
-      else if((calibrationopen == 3) && (xtouch >= 495) && (xtouch <= 594) && (ytouch >= 223) && (ytouch <= 280))
-      { 
-            //Highlight the button
-            scope_display_ok_button(517, 230, 1);
-            
-            //GO calibration 300mV for settings calibrationopen = 3;
-            scope_input_calibration();
-
-            //Wait until touch is released
-            tp_i2c_wait_for_touch_release();
-            
-            //Show the calibration text 300mV
-            if (!calibrationfail) scope_show_calibrating_600mV_text();
-      }
-      
-      //Check on calibrating_600mV text opened and OK touched
-      else if((!calibrationfail) && (calibrationopen == 4) && (xtouch >= 495) && (xtouch <= 594) && (ytouch >= 223) && (ytouch <= 280))
-            {
-            //Highlight the button
-            scope_display_ok_button(517, 230, 1);
-            
-            //if no fail GO calibration 600mV for settings calibrationopen = 4;
-            scope_input_calibration();
-
-            //Wait until touch is released
-            tp_i2c_wait_for_touch_release();
-            
-            //Show the calibration text 300mV
-            if (!calibrationfail) scope_show_calibrating_1_5V_text();
-            }
-      
-      //Check on calibrating_1.5V text opened and OK touched
-      else if((!calibrationfail) && (calibrationopen == 5) && (xtouch >= 495) && (xtouch <= 594) && (ytouch >= 223) && (ytouch <= 280))
-            {
-            //Highlight the button
-            scope_display_ok_button(517, 230, 1);
-            
-            //if no fail GO calibration 1.5V for settings calibrationopen = 5;
-            scope_input_calibration();
-
-            //Wait until touch is released
-            tp_i2c_wait_for_touch_release();
-            
-            //Show the calibration text 300mV
-            if (!calibrationfail) scope_show_calibrating_3V_text();
-            }
-      
-      //Check on calibrating 3V text opened and OK touched
-      else if((!calibrationfail) && (calibrationopen == 6) && (xtouch >= 495) && (xtouch <= 594) && (ytouch >= 223) && (ytouch <= 280))
-            {
-            //Highlight the button
-            scope_display_ok_button(517, 230, 1);
-            
-            //if no fail GO calibration 3V for settings calibrationopen = 6;
-            scope_input_calibration();
-
-            //Wait until touch is released
-            tp_i2c_wait_for_touch_release();
-            
-            //Show the calibration text 300mV
-            if (!calibrationfail) scope_show_calibrating_7_5V_text();
-            }
-      
-      //Check on calibrating 7.5V text opened and OK touched
-      else if((!calibrationfail) && (calibrationopen == 7) && (xtouch >= 495) && (xtouch <= 594) && (ytouch >= 223) && (ytouch <= 280))
-            {
-            //Highlight the button
-            scope_display_ok_button(517, 230, 1);
-            
-            //if no fail GO calibration 7.5V for settings calibrationopen = 7;
-            scope_input_calibration();
-
-            //Wait until touch is released
-            tp_i2c_wait_for_touch_release();
-            
-            //Show the calibration text 15V
-            if (!calibrationfail) scope_show_calibrating_15V_text();
-            }
-      
-      //Check on calibrating 15V text opened and OK touched
-      else if((!calibrationfail) && (calibrationopen == 8) && (xtouch >= 495) && (xtouch <= 594) && (ytouch >= 223) && (ytouch <= 280))
-            {
-            //Highlight the button
-            scope_display_ok_button(517, 230, 1);
-            
-            //if no fail GO calibration 15V for settings calibrationopen = 8;
-            scope_input_calibration();
-            
-            //Wait until touch is released
-            tp_i2c_wait_for_touch_release();
-            
-            if (calibrationfail)
-                //Show the calibration FAILED text
-                scope_show_Input_calibration_fail();
-            else
-                {
-                //Save input_calibration data do SDcart
-                scope_save_input_calibration_data();
-                //Show the calibration successful text
-                scope_show_Input_calibration_done();  
-                }
-            } 
-      
-      //-**************************************************************************************************************
-      //Check on calibration done text opened and being touched
-      else if((calibrationopen == 9) && (xtouch >= 395) && (xtouch <= 580) && (ytouch >= 223) && (ytouch <= 280))  //505    
-        {
-        //Nothing to do here so wait until touch is released
-        tp_i2c_wait_for_touch_release();
-        }
       else
       {
         //Close any of the menus if open
@@ -3052,43 +2710,14 @@ void handle_acquisition_menu_touch(void)
               //scope_acqusition_settings(0);
               
               scope_acquisition_memory_deep_select();
-              //scope_acquisition_trace_select();
               break;
             }
           }
         }
         
         //======================================================================
-        //fw 0.2.51: Display row (Normal / Phosphor / X-Y) under 1.00o5's menu
-        else if((ytouch >= ACQ_MENU_YPOS + ACQ_DISPLAY_Y) && (ytouch < ACQ_MENU_YPOS + ACQ_DISPLAY_Y + ACQ_DISPLAY_H))
-        {
-          PC_ACQ_DISPLAY_TAP();
-        }
-        //Check on trace being set
-        else if((ytouch >= ACQ_MENU_YPOS + 241) && (ytouch <= ACQ_MENU_YPOS + ACQ_MENU_BODY_H) && (xtouch >= ACQ_MENU_XPOS + 304) && (xtouch <= ACQ_MENU_XPOS + ACQ_MENU_WIDTH))
-        {
-          //Check on the different bounding boxes for the separate settings
-          for(i=0;i<(sizeof(trace_texts) / sizeof(int8 *));i++)  
-          {
-            //Calculate the coordinates for this setting        
-            x = 315 + ACQ_MENU_XPOS;
-            y = (i * 36) +  241 + ACQ_MENU_YPOS;//228
-
-            //Check if touch within this bounding box
-            if((xtouch >= x) && (xtouch <= x + 54) && (ytouch >= y) && (ytouch <= y + 25))
-            {
-              //Set the new trace
-              scopesettings.ACQ_trace= i;
-
-              //Display the new setting
-              scope_acquisition_trace_select();
-              
-              break;
-            }
-          }
-        }
-        
-        
+        //fw 0.2.56: the acquisition menu holds acquisition only; Trace style and the Display variants (the 0.2.51 Display
+        //row) are on the CTRL page (ctrl_page.c)
         //======================================================================     
         
       //------------------------------------------------------------------------
@@ -3739,6 +3368,10 @@ void handle_keyboard_menu_touch(void)
 
 void handle_right_basic_menu_touch(void)
 {
+  //fw 0.2.56: the spectrum's empty slots (T CURSOR, V CURSOR, MEASURES; ui_p1_shown) do nothing
+  if((ytouch >= 183) && (ytouch <= 357) && !ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
+    return;
+
   //Check if run/stop or page up button is touched
   if((ytouch >= 63) && (ytouch <= 117))
   {
@@ -4008,6 +3641,13 @@ void handle_right_basic_menu_touch(void)
 
 void handle_right_volts_div_menu_touch(void)
 {
+  //fw 0.2.56: page two is the CTRL page (ctrl_page.c); below, the waveform viewer's page and the DC shift pages
+  if((scopesettings.rightmenustate == 1) && !scopesettings.waveviewmode)
+  {
+    ctrl_page_touch();
+    return;
+  }
+
   //Check if channel 1 V+ button is touched
   if((ytouch >= 93) && (ytouch <= 155))//78 - 140
   {
@@ -5064,88 +4704,8 @@ void handle_picture_view_touch(void)
 
 int32 handle_confirm_delete(void)
 {
-  int32 choice = 0;
-
-  //Save the screen rectangle where the menu will be displayed
-  display_copy_rect_from_screen(310, 192, 180, 96);
-
-  //display the confirm delete menu
-  //Draw the background in gray
-  display_set_fg_color(0x00202020);
-  display_fill_rounded_rect(310, 192, 179, 95, 3);//180 96
-
-  //Draw the border in a lighter gray
-  display_set_fg_color(LIGHTGREY_COLOR);
-  display_draw_rounded_rect(310, 192, 179, 95, 3);//180 96
-
-  //Draw the buttons
-  display_fill_rounded_rect(320, 228, 74, 50, 2);
-  display_fill_rounded_rect(405, 228, 74, 50, 2);
-
-  //White color for text and use font_3
-  display_set_fg_color(WHITE_COLOR);
-  display_set_font(&font_3);
-  display_text(340, 204, "Confirm to delete?");//204
-  display_text(348, 245, "NO");//246
-  display_text(431, 245, "YES");//246
-
-  //wait for touch
-  while(1)
-  {
-    //Read the touch panel status
-    tp_i2c_read_status();
-
-    //Check if the panel is touched
-    if(havetouch)
-    {
-      //Check if touch is on "NO"
-      if((xtouch >= 324) && (xtouch <= 390) && (ytouch >= 230) && (ytouch <= 276))
-      {
-        //Highlight the button
-        display_set_fg_color(ITEM_ACTIVE_COLOR);
-        display_fill_rounded_rect(320, 228, 74, 50, 2);
-        
-        //With the text in black
-        display_set_fg_color(BLACK_COLOR);
-        display_text(348, 246, "NO");
-        
-        //Set the chosen option
-        choice = VIEW_CONFIRM_DELETE_NO;
-
-        //Done so quit the loop
-        break;
-      }
-      //Else check if touch on "YES"
-      else if((xtouch >= 409) && (xtouch <= 475) && (ytouch >= 230) && (ytouch <= 276))
-      {
-        //Highlight the button
-        display_set_fg_color(ITEM_ACTIVE_COLOR);
-        display_fill_rounded_rect(405, 228, 74, 50, 2);
-        
-        //With the text in black
-        display_set_fg_color(BLACK_COLOR);
-        display_text(431, 246, "YES");
-        
-        //Set the chosen option
-        choice = VIEW_CONFIRM_DELETE_YES;
-
-        //Done so quit the loop
-        break;
-      }
-
-      //Need to wait for touch to release before checking again
-      tp_i2c_wait_for_touch_release();
-    }
-  }
-
-  //Need to wait for touch to release before returning
-  tp_i2c_wait_for_touch_release();
-
-  //Restore the original screen
-  display_copy_rect_to_screen(310, 192, 180, 96);
-
-  //return the choice
-  return(choice);
+  //fw 0.2.55: the confirmation dialog (ui_settings_ui.c); was 74 x 50 px NO / YES 11 px apart
+  return ui_confirm(&ui_dlg_delete, 1) ? VIEW_CONFIRM_DELETE_YES : VIEW_CONFIRM_DELETE_NO;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -5153,7 +4713,6 @@ int32 handle_confirm_delete(void)
 void close_open_menus(uint32 closemain)
 {
   //uint8 tmp;                            //for diagnostic menu
-  uint32 *ptr = STARTUP_CONFIG_ADDRESS; //for diagnostic menu
   //boot_menu_start = ptr[0] & 0x07;      //choice 1 for fnirsi firmware, 0 for peco firmware, 2 for FEL mode, 4 view choice menu
   
   //Only one of these menu's will be opened at any time
@@ -5183,41 +4742,6 @@ void close_open_menus(uint32 closemain)
 
     //Signal it is closed
     gridbrightnessopen = 0;
-  }
-  //Check if the other settings menu is open
-  else if(othersettingsopen)
-  {
-    //Set the button inactive
-    scope_system_settings_other_settings_item(0);
-    //scope_system_settings_RTC_settings_item(0);
-
-    //Restore the screen under the other_settings_menu
-    display_set_source_buffer(displaybuffer3);
-    display_copy_rect_to_screen(OTHER_MENU_XPOS, OTHER_MENU_YPOS, OTHER_MENU_WIDTH, OTHER_MENU_HEIGHT);
-    
-    //----------------------------------- save BOOT settings  ------------------------------------------
-    if(boot_menu_start == 1) boot_menu_start = 0x05;                      //fnirsi firmware always with boot menu
-    if (dev_mode == 0) {if(boot_menu_start > 0) boot_menu_start |= 0x04;} //fnirsi and FEL firmware always with boot menu for user
-    ptr[0] = boot_menu_start;
-    //SAVE the display configuration sector from DRAM to SDcart   //save boot menu and default start
-    sd_card_write(DISPLAY_CONFIG_SECTOR, 1, (uint8 *)0x81BFFC00);
-    //---------------------------------------------------------------------------------------------------
-   
-    //Signal it is closed
-    othersettingsopen = 0;
-  }
-  //Check if the calibration text is open
-  else if(calibrationopen)
-  {
-    //Set the button inactive
-    scope_system_settings_calibration_item(0);
-
-    //Restore the screen under the calibration text
-    display_set_source_buffer(displaybuffer3);
-    display_copy_rect_to_screen(CALIBRATION_MENU_XPOS, CALIBRATION_MENU_YPOS, CALIBRATION_MENU_WIDTH, CALIBRATION_MENU_HEIGHT);
-
-    //Signal it is closed
-    calibrationopen = 0;
   }
   //Check if the RTC settings menu is open
   else if(RTCsettingsopen)
@@ -5462,137 +4986,40 @@ void change_channel_1_HW_offset(void)
 //-----------------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void change_channel_1_offset(void)
+void change_channel_1_offset(int32 delta)
 {
-  int32 diff;
-  int32 position;
+  //fw 0.2.54: the drag distance comes from touch_handler (y in normal display, x in X-Y)
+  scopesettings.channel1.traceposition = scope_trace_clamp((int32)previous_channel_1_offset + delta);
 
-  //Calculate the distance to move the setting with based on the display mode
-  if(scopesettings.xymodedisplay == 0)
-  {
-    //For normal display use y displacement
-    diff = ytouch - previousytouch;
-  }
-  else
-  {
-    //For x-y mode display use x displacement
-    diff = previousxtouch - xtouch;
-  }
-
-  //Make it based on move speed
-  if(scopesettings.movespeed)
-  {
-    //For slow divide by 5
-    diff /= 5;
-  }
-
-  //Calculate the new position
-  position = (int32)previous_channel_1_offset - diff;
-
-  //Limit it on the trace portion of the screen
-  if(position < 6)
-  {
-    //So not below 6
-    position = 6;
-  }
-  else if(position > 396)//394
-  {
-    //And not above 394;
-    position = 396;//394
-  }
-    //position = 396-position;//add********
-  //Update the current position
-  scopesettings.channel1.traceposition = position;
-  
   //Write it to the FPGA
-  fpga_set_channel_offset(&scopesettings.channel1); 
-  
+  fpga_set_channel_offset(&scopesettings.channel1);
+
   //Skope mode & long time base - set other values and clear view area
   if((!scopesettings.waveviewmode) && scopesettings.long_mode) scope_preset_values();
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void change_channel_2_offset(void)
+void change_channel_2_offset(int32 delta)
 {
-  int32 diff;
-  int32 position;
-
-  //Calculate the distance to move the setting with
-  diff = ytouch - previousytouch;
-
-  //Make it based on move speed
-  if(scopesettings.movespeed)
-  {
-    //For slow divide by 5
-    diff /= 5;
-  }
-
-  //Calculate the new position
-  position = (int32)previous_channel_2_offset - diff;
-
-  //Limit it on the trace portion of the screen
-  if(position < 6)
-  {
-    //So not below 6
-    position = 6;
-  }
-  else if(position > 396)//394
-  {
-    //And not above 394;
-    position = 396;//394
-  }
-
-  //Update the current position
-  scopesettings.channel2.traceposition = position;
+  scopesettings.channel2.traceposition = scope_trace_clamp((int32)previous_channel_2_offset + delta);
 
   //Write it to the FPGA
-  fpga_set_channel_offset(&scopesettings.channel2); 
-  
+  fpga_set_channel_offset(&scopesettings.channel2);
+
   //Scope mode & long time base - set other values and clear view area
-  if((!scopesettings.waveviewmode) && scopesettings.long_mode) scope_preset_values(); 
+  if((!scopesettings.waveviewmode) && scopesettings.long_mode) scope_preset_values();
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void change_trigger_level_offset(void)
+void change_trigger_level_offset(int32 delta)
 {
-  int32 diff;
-  int32 position;
+  scopesettings.triggerverticalposition = scope_trace_clamp((int32)previous_trigger_level_offset + delta);
 
-  //Calculate the distance to move the setting with
-  diff = ytouch - previousytouch;
-
-  //Make it based on move speed
-  if(scopesettings.movespeed)
-  {
-    //For slow divide by 5
-    diff /= 5;
-  }
-
-  //Calculate the new position
-  position = (int32)previous_trigger_level_offset - diff;
-
-  //Limit it on the trace portion of the screen
-  if(position < 6)
-  {
-    //So not below 6
-    position = 6;
-  }
-  else if(position > 396)//394
-  {
-    //And not above 394;
-    position = 396;//394
-  }
-
-  //Update the current position
-  scopesettings.triggerverticalposition = position;
-  
-  //if(!scopesettings.long_mode || scopesettings.triggermode) scopesettings.triggerverticalposition = position;
-  
   //Skope mode & long time base & no auto mode - set other values and clear view area
   if((!scopesettings.waveviewmode) && scopesettings.long_mode && scopesettings.triggermode) scope_preset_values();
-  
+
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

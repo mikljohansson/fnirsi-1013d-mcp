@@ -34,7 +34,10 @@
 #include "spec_fmt.h"
 #include "acal_live.h"
 #include "ui_menu.h"
+#include "ui_settings.h"
 #include "ui_fmt.h"
+#include "ui_ctrl.h"
+#include "pc_seq_hw.h"
 #include "ui_diag_view.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -396,7 +399,7 @@ static void pc_dec_apply(const pc_decim_cfg *c);
 static uint8  pc_ui_auto;                             //defined with the firmware auto mode below
 
 int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal,
-               const pc_decim_cfg *dc)
+               const pc_decim_cfg *dc, const pc_seq_cfg *sq)
 {
   uint32 n = 0;
 
@@ -417,6 +420,13 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
   //Configured trigger mode again: FORCE leaves 0x1A in auto
   fpga_write_cmd(0x1A);
   fpga_write_byte(normal ? 0x01 : 0x00);
+
+  //Sequencer (0x1536+): geometry and run setting before the reset (pc_seq_hw.c); a host capture ends a UI averaging run
+  if(sq && prog)
+  {
+    pc_seq_ui_conversion(0, dc, 0);
+    pc_seq_hw_pre_reset(sq, pre_words, total_words);
+  }
 
   //Reset the sample system and wait for ready, bounded
   fpga_write_cmd(0x01);
@@ -554,6 +564,7 @@ int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t
   //Its interleave is B before A (fpga_read_sample_data), so READ_TRACE follows the 1.00o5 convention.
   scopesettings.nofsamples  = total_samples / 2;
   scopesettings.samplecount = total_samples;
+  pc_seq_trace_replaced();
 
   if(ch_mask & 0x01)
     fpga_read_sample_data(&scopesettings.channel1, start_word);
@@ -772,6 +783,11 @@ void pc_glue_decim_conversion(void)
       pc_ui_auto_ms = pc_auto_deadline_ms(scopesettings.samplecount, d);
     }
   }
+
+  //Average on a 0x1536 bitstream: this UI conversion may be a hardware averaging run, which has its own deadline
+  //(pc_seq_ui_service; the firmware time-out must never end a record between the records of a run)
+  if(pc_seq_ui_conversion(ui, &c, pc_dec_div()))
+    pc_ui_auto = 0;
 }
 
 //Main loop: give up on a trigger that did not come in time
@@ -841,6 +857,14 @@ void pc_glue_decim_read(void *settings, uint32 start)
     return;
 
   pc_dec_raw_n[ch] = 0;
+
+  //0x1536 UI averaging run: the corrected codes of the mean, both passes from memory as for the 16-bit path
+  if(pc_seq_ui_feed(settings, pc_dec_feed, scopesettings.nofsamples * 2))
+  {
+    pc_decim_src    = &pc_dec_feed[1];
+    pc_dec_even_src = &pc_dec_feed[0];
+    return;
+  }
 
   if(!pc_dec_cur.k)
     return;
@@ -943,6 +967,16 @@ static void pc_dec_fit_memory(void)
 void pc_glue_settings_defaults(void)
 {
   pc_dec_setting = PC_DECIM_DEFAULT;
+
+#if PC_FORCE_CDC
+  //The defaults say mass storage (USB_CH340 0); this build's USB stays CDC, also after Restore default settings (the
+  //USB drive screen's exit re-initialises USB from this flag)
+  USB_CH340 = 1;
+#endif
+
+  //fw 0.2.56: the Display variants back to Normal and Spectrum (X-Y and Grid are 1.00o5's own defaults)
+  phosphor_set_switch(0);
+  spectrum_set_view(0);
 
   if(pc_dec_has() && (pc_dec_setting & 3))
     pc_dec_fit_memory();
@@ -1509,21 +1543,17 @@ int32_t pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t 
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Spectrum view glue (fw 0.2.28) and phosphor view (fw 0.2.46). Since fw 0.2.51 the main menu's mode rows (Scope,
-// Spectrum analyser; ui_menu.h) are the only way between the modes; phosphor is a variant of the scope chosen in the
-// acquisition menu's Display box. The spectrum and phosphor views exclude each other.
+// Spectrum analyser; ui_menu.h) are the only way between the modes; phosphor is a drawing variant of the scope switched
+// in the CTRL page's Display fold-out (fw 0.2.56, ctrl_page.c). The spectrum and phosphor views exclude each other.
 
 int pc_glue_spectrum_display(void) { return spectrum_display(); }
-int pc_glue_spectrum_touch(void)   { return spectrum_touch() || phosphor_touch(); }
+int pc_glue_spectrum_touch(void)   { return spectrum_touch(); }
 int pc_glue_autoset(void)          { return spectrum_autoset(); }
 int pc_glue_autoset_running(void)  { return spectrum_auto_running(); }
 
 int  pc_glue_phosphor_on(void)          { return phosphor_owns_traces(); }
 void pc_glue_phosphor_draw(void)        { phosphor_draw(); }
 int  pc_glue_phosphor_xy(uint32 index)  { return phosphor_xy(index); }
-void pc_glue_phosphor_strip(void)       { phosphor_strip(); }
-
-//The Display variant Phosphor, remembered while the spectrum shows so that Scope brings it back
-static uint8 pc_phos_wanted;
 
 static int pc_spectrum_on(void)
 {
@@ -1533,15 +1563,14 @@ static int pc_spectrum_on(void)
 //Roll off as the acquisition menu's Roll box does (1.00o5 scope_acquisition_ACQ_mode_select): time base 20, its rate
 #define PC_ROLL_OFF_TIMEBASE  20
 
+//The phosphor variant is the Display fold-out's Phosphor switch (phosphor_switch, fw 0.2.56): it stays on while the
+//spectrum shows, so Scope brings the picture back
 void pc_glue_main_menu_mode(int row)
 {
   ui_mm_action a;
   int          sp = pc_spectrum_on();
 
-  if(!sp)
-    pc_phos_wanted = phosphor_mode() ? 1 : 0;
-
-  if(!ui_mm_choose(row, sp, scopesettings.long_mode != 0, pc_phos_wanted, &a))
+  if(!ui_mm_choose(row, sp, scopesettings.long_mode != 0, phosphor_switch(), &a))
     return;
 
   if(a.roll_off)
@@ -1567,83 +1596,81 @@ void pc_glue_main_menu_mode(int row)
     spectrum_note_roll_off();
 }
 
-//The scope's Display variant (fw 0.2.51): Normal, Phosphor or X-Y. A temporary row in the acquisition menu until the
-//CTRL page's Display fold-out exists (docs/plans/ux-makeover.md section 3); X-Y moved here from System settings.
-//X-Y is 1.00o5's xymodedisplay (saved at power-off as before); Phosphor is the phosphor view (not saved, as before).
-#define PC_DISP_NORMAL        0
-#define PC_DISP_PHOSPHOR      1
-#define PC_DISP_XY            2
+//The right bar differs between the modes (empty slots, the CTRL page's items): redrawn whenever the spectrum view
+//starts or ends, whatever started or ended it (main menu, roll mode, a viewer, the host)
+static uint8 pc_bar_spectrum;
 
-static const char *pc_disp_names[3] = { "Normal", "Phosphor", "X-Y" };
-
-static int pc_display_variant(void)
+static void pc_right_bar_follow(void)
 {
-  if(scopesettings.xymodedisplay)
-    return PC_DISP_XY;
+  DISPLAYDATA save;
+  uint8       sp = (uint8)pc_spectrum_on();
 
-  return (pc_spectrum_on() ? pc_phos_wanted : phosphor_mode()) ? PC_DISP_PHOSPHOR : PC_DISP_NORMAL;
-}
-
-//Box i of the row: 84 x 36 from x 100 of the menu, 8 px apart
-static uint32 pc_disp_box_x(int i)
-{
-  return ACQ_MENU_XPOS + 100 + 92 * i;
-}
-
-void pc_glue_acq_display_draw(void)
-{
-  uint16    fg = displaydata.fg_color;
-  PFONTDATA font = displaydata.font;
-  uint32    y = ACQ_MENU_YPOS + ACQ_DISPLAY_Y;
-  int       i, v = pc_display_variant();
-
-  display_set_fg_color(BLACK_COLOR);
-  display_draw_horz_line(ACQ_MENU_YPOS + ACQ_MENU_BODY_H - 2, ACQ_MENU_XPOS + 8, ACQ_MENU_XPOS + ACQ_MENU_WIDTH - 8);
-
-  display_set_font(&font_3);
-  display_set_fg_color(WHITE_COLOR);
-  display_text(ACQ_MENU_XPOS + 14, y + 10, "Display");
-
-  //The selection as the Trace boxes show it: orange with black text, the others grey with white text
-  for(i = 0; i < 3; i++)
-  {
-    uint32 x = pc_disp_box_x(i);
-
-    display_set_fg_color((i == v) ? ORANGE_COLOR : MIDLEGREY_COLOR);
-    display_fill_rounded_rect(x, y, 84, ACQ_DISPLAY_H, 2);
-    display_set_fg_color((i == v) ? BLACK_COLOR : WHITE_COLOR);
-    display_text(x + (84 - ui_text_width(&font_3, pc_disp_names[i])) / 2, y + 10, (int8 *)pc_disp_names[i]);
-  }
-
-  displaydata.fg_color = fg;
-  displaydata.font     = font;
-}
-
-void pc_glue_acq_display_tap(void)
-{
-  int i;
-
-  for(i = 0; i < 3; i++)
-    if((xtouch >= pc_disp_box_x(i)) && (xtouch < pc_disp_box_x(i) + 84))
-      break;
-
-  if(i == 3)
+  if(sp == pc_bar_spectrum)
     return;
 
-  scopesettings.xymodedisplay = (i == PC_DISP_XY) ? 1 : 0;
-  pc_phos_wanted = (i == PC_DISP_PHOSPHOR) ? 1 : 0;
-
-  //In the spectrum the variant waits for the Scope row; in the scope it applies now (phosphor clears its map)
-  if(!pc_spectrum_on() && (phosphor_mode() != pc_phos_wanted))
-    phosphor_set_active(pc_phos_wanted);
-
-  pc_glue_acq_display_draw();
+  pc_bar_spectrum = sp;
+  save = displaydata;
+  display_set_screen_buffer(ui_diag_scope_buffer());           //fw 0.2.57: the kept scope screen under Diagnostics
+  scope_setup_right_control_menu();
+  displaydata = save;
 }
 
-//System settings menu height (variables.h SYSTEM_MENU_HEIGHT): Time & Date is the last row, 59 px
+//The scope view's warning line (fw 0.2.56; ui_scope_warning): at the top middle of the plot in every variant, the
+//consequence and the action. The overrange flags are taken at the start of the pass, before 1.00o5 clears them.
+static uint8 pc_scope_over[2], pc_scope_untrig;
+
+void pc_glue_scope_pass(void)
+{
+  pc_scope_over[0] = scopesettings.channel1.ADoverload ? 1 : 0;
+  pc_scope_over[1] = scopesettings.channel2.ADoverload ? 1 : 0;
+}
+
+void pc_glue_scope_warning(void)
+{
+  ui_warn_in  w;
+  const char *t;
+
+  if(scopesettings.waveviewmode)
+    return;
+
+  w.en[0]   = scopesettings.channel1.enable ? 1 : 0;
+  w.en[1]   = scopesettings.channel2.enable ? 1 : 0;
+  w.over[0] = pc_scope_over[0];
+  w.over[1] = pc_scope_over[1];
+  w.untrig  = pc_scope_untrig;
+  w.running = scopesettings.runstate ? 1 : 0;
+  w.xy      = scopesettings.xymodedisplay ? 1 : 0;
+
+  t = ui_scope_warning(&w);
+  if(!*t)
+    return;
+
+  display_set_font(&font_2);
+  display_set_fg_color(ORANGE_COLOR);
+  display_text(366 - ui_text_width(&font_2, t) / 2, 69, (int8 *)t);
+}
+
+//Settings sector word 211 (fw 0.2.56): 0xC700 marker, bit 0 Grid, bits 1-2 the spectrum's Display variant. The scope's
+//variants are kept where they were (X-Y: 1.00o5's word; Phosphor: word 210 bit 3).
+uint16 pc_glue_ui_setting_word(void)
+{
+  return (uint16)(0xC700 | ((spectrum_view() & 3) << 1) | (scopesettings.gridenable ? 1 : 0));
+}
+
+static void pc_ui_setting_restore(uint16 w)
+{
+  if((w & 0xFFF8) != 0xC700)
+    return;
+
+  scopesettings.gridenable = w & 1;
+  spectrum_set_view((w >> 1) & 3);
+}
+
+//System settings menu height (variables.h SYSTEM_MENU_HEIGHT): the fold-out rows of ui_settings.h, Time and date only
+//with the clock module
 int pc_glue_sys_menu_height(void)
 {
-  return (pc_ready && !pc_rtc_present) ? (SYSTEM_MENU_HEIGHT_FULL - 59) : SYSTEM_MENU_HEIGHT_FULL;
+  return (int)ui_fo_height(pc_glue_ui_has(PC_FEAT_RTC));
 }
 
 //Battery level for the indicator: a running average (x16, 1/8 per pass), then the 1.00o5 rule on it (level only drops
@@ -1772,8 +1799,12 @@ static void pc_ui_fix_settings(void)
   //Spectrum view settings (fw 0.2.39); the display mode itself is not restored: the scope boots into the scope view
   spectrum_settings_restore(settingsworkbuffer[PC_SETTING_WORD_SPEC0], settingsworkbuffer[PC_SETTING_WORD_SPEC1]);
 
-  //Phosphor view settings (fw 0.2.46): persistence and palette, the same rule (marker 0x9A00, fields in range)
+  //Phosphor view settings (fw 0.2.46): persistence and palette, the same rule (marker 0x9A00, fields in range); since
+  //fw 0.2.56 also the Phosphor switch
   phosphor_settings_restore(settingsworkbuffer[PC_SETTING_WORD_PHOS]);
+
+  //fw 0.2.56: Grid and the spectrum's Display variant (word 211)
+  pc_ui_setting_restore(settingsworkbuffer[PC_SETTING_WORD_UI]);
 
   //Memory depth: the largest offered step (3000 x n) the bitstream can capture
   if(fpgasettings.totalsamples > max)
@@ -1812,6 +1843,7 @@ void pc_glue_init(void)
     pc_diag_boot(pc_restart_info[0] ? v : 0);
   }
   pc_session_init(&pc_sess);
+  pc_seq_hw_init((pc_sess.var.caps & PC_CAP_SEQ) != 0);
   pc_ready = 1;
   pc_ui_fix_settings();
 
@@ -1827,6 +1859,7 @@ void pc_glue_poll_main(void)
     pc_poll(&pc_sess, PC_CTX_MAIN);
 
   pc_ui_auto_service();
+  pc_seq_ui_service();
 }
 
 void pc_glue_poll_busy(void)
@@ -1856,9 +1889,10 @@ void pc_glue_ui_service(void)
   //fw 0.2.52: settings changed since the last save, once per second
   pc_diag_service();
 
-  //Roll mode or a viewer ends the spectrum view and the phosphor view
+  //Roll mode or a viewer ends the spectrum view and the phosphor view; the right bar follows the mode
   spectrum_service();
   phosphor_service();
+  pc_right_bar_follow();
 
   //Calibration v4 class probe (acal_live.c): only in the scope and spectrum views (the phosphor view's record rate would
   //see the gap; not while Diagnostics shows), never while a host capture is armed or triggered (the probe resets the sample system) or the host
@@ -1907,15 +1941,20 @@ void pc_glue_ui_capture_addr(uint32 addr)
     //A record the firmware time-out ended is untriggered, whatever 0x18 says now
     if(pc_ui_forced)
       pc_sess.ui_trig = 0;
+
+    //An averaging run is triggered when it holds a record (0x18 is the last record's)
+    pc_seq_ui_done(&pc_sess.ui_trig);
   }
 
-  spectrum_capture_info(!pc_ui_forced && (!pc_ready || pc_sess.ui_trig || scopesettings.triggermode));
-  phosphor_capture_info(!pc_ui_forced && (!pc_ready || pc_sess.ui_trig || scopesettings.triggermode));
+  pc_scope_untrig = (!pc_ui_forced && (!pc_ready || pc_sess.ui_trig || scopesettings.triggermode)) ? 0 : 1;
+  spectrum_capture_info(!pc_scope_untrig);
+  phosphor_capture_info(!pc_scope_untrig);
   pc_ui_auto = 0;
 }
 
 void pc_glue_ui_capture(void)
 {
+  pc_seq_ui_read_done();
   spectrum_new_data();
   phosphor_new_data();
 
