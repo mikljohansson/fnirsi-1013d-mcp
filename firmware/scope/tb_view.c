@@ -131,6 +131,41 @@ int tbv_fit(tbv_tb *s, uint32 fs, const uint32 *fpd, int32 first, int32 last, ui
   return 0;
 }
 
+int32 tbv_ladder_rate(uint32 fpd, const uint32 *rates, int32 nrates, uint32 total)
+{
+  int32 i;
+
+  for(i = 0; i < nrates; i++)
+    if(tbv_viable(rates[i], fpd, total))
+      return i;
+
+  return -1;
+}
+
+int32 tbv_zoom_step(int32 t, int dir, const uint32 *fpd, int32 first, int32 last, const uint32 *rates, int32 nrates,
+                    uint32 total)
+{
+  int32 step = (dir < 0) ? -1 : 1, i;
+
+  if(dir == 0)
+    return -1;
+
+  for(i = t + step; (i >= first) && (i <= last); i += step)
+    if(tbv_ladder_rate(fpd[i], rates, nrates, total) >= 0)
+      return i;
+
+  //Nothing further that way. From a time/div off the ladder (a start no rate can show, e.g. 5 ns/div), the ladder's end
+  //on the other side, so a step never leaves the pair where no rate can show it
+  if((t >= first) && (t <= last) && (tbv_ladder_rate(fpd[t], rates, nrates, total) >= 0))
+    return -1;
+
+  for(i = t - step; (i >= first) && (i <= last); i -= step)
+    if(tbv_ladder_rate(fpd[i], rates, nrates, total) >= 0)
+      return i;
+
+  return -1;
+}
+
 void tbv_window(int32 trig, int32 pos, uint32 fs, uint32 fpd, uint32 total, int32 *first, int32 *xend)
 {
   int64 num = (int64)TBV_PX_PER_DIV * fpd;

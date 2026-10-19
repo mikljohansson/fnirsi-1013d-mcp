@@ -1036,8 +1036,8 @@ what each screen does; this is what changed:
 2. **Record-position slider** (fw 0.2.73: a line at y 452, the track x 2..727 / y 453..471; hit area from y 450, and up
    to y 436 when nothing else is near: 44 px): the window follows the finger, dragging right shows later samples (the
    trace moves left), limited to the record (`acq_view_slider_pos`). A touch-down on the row (y 450 down) outside the
-   window first centres the window there (tap to jump, `acq_view_slider_jump`); the extended area above the row never
-   jumps. Short mode only.
+   window first centres the window there (tap to jump, `acq_view_slider_jump`, called in `scan_for_touch` at the
+   touch-down since fw 0.2.76, so a still tap jumps too); the extended area above the row never jumps. Short mode only.
 3. **Trigger level pointer** (x > 660, 30 px around its line), only while it is drawn.
 4. The nearest of: a **channel** (CH1 / CH2 switched on, x 44..685), measured to the nearer of its drawn trace
    (`trace_distance` over the polyline as drawn, the Peak / Pro min-max bands included; in the phosphor view only the
@@ -1078,6 +1078,17 @@ one and shows "Time/div set to X for this rate" in white at the top middle for 4
 time/div boxes cannot be chosen; memory depth and Filter changes refit), the plot's tap zoom while stopped (it stops
 at the record's limits), the host's SET_TIMEBASE mode 0, SET_TRIGGER pretrigger / total and SET_DECIM, and the
 settings load. Long (roll) mode is left as it was.
+
+**Time/div drives the sample rate (fw 0.2.76**, docs/ui-guidelines.md section 2). While running or in Single, a tap
+zoom step and an ACQ menu time/div box set the time/div together with its ladder rate (`tbv_ladder_rate`: the fastest
+short-mode rate at which the time/div is viable for the current record length), so the rate falls when zooming out
+past the record and rises when zooming in past ten samples per division; a time/div box is grey only when no rate can
+show it (20, 10, 5 ns/div). With 3000 samples the ladder runs from 200 ms/div at 1 kSa/s to 50 ns/div at 200 MSa/s
+(1 ms/div at 200 kSa/s, 200 samples a division); deeper memory moves every step to a faster rate. A rate box still
+sets the rate by hand (the time/div snaps with the notice when needed) until the next zoom step. The ends are plain
+stops and the tap never crosses into or out of roll. Stopped or in the viewer, the rate is the record's: the zoom
+steps through what the record can show and says "Stopped: press RUN to zoom further" where only a new record could
+go on. `acq_view_zoom`, host test `host_tests/test_acq_view.c` (acq_view.c built on the host with stub globals).
 
 ### Spectrum view (`spectrum.c`, fw 0.2.28)
 

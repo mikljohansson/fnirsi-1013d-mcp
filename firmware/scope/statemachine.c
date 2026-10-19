@@ -71,13 +71,8 @@ void touch_handler(void)
       //Check if the trigger point position can be moved (fw 0.2.64: also by the record slider)
       if((touchstate & TOUCH_STATE_MOVE_TRIGGER_POINT) || ((touchstate & TOUCH_STATE_MASK) == TOUCH_STATE_MOVE_RECORD))
       {
-        //fw 0.2.73, tap to jump: a touch-down on the slider row outside the window centres the window there first; the
-        //drag goes on from the new place
-        if((touchstate & TOUCH_STATE_MASK) == TOUCH_STATE_MOVE_RECORD)
-          scopesettings.triggerhorizontalposition = acq_view_slider_jump(scopesettings.triggerhorizontalposition,
-                                                                         (int32)xtouch, (int32)ytouch);
-
-        //Save the current position for it
+        //Save the current position for it (fw 0.2.76: after the slider's tap to jump, done at touch-down in
+        //scan_for_touch)
         previous_trigger_point_position = scopesettings.triggerhorizontalposition;
       }
 
@@ -843,6 +838,14 @@ void scan_for_touch(void)
     //cursors; scan_plot_pick)
     pick = (scopesettings.xymodedisplay == 0) ? scan_plot_pick(previousxtouch, previousytouch, &handle) : 0;
     moved = 0;
+
+    //fw 0.2.76, tap to jump at touch-down (the owner's 0.2.73 tap in the track did nothing): 0.2.73 jumped in
+    //touch_handler, which runs only once the finger has moved past the dead band, so a still tap ended in the tap
+    //branch below, where the slider (a handle) takes no tap. The Spectrum jumps at touch-down; so does the Scope now,
+    //and a drag that follows goes on from the new place (touch_handler snapshots the position after this).
+    if(pick == TOUCH_STATE_MOVE_RECORD)
+      scopesettings.triggerhorizontalposition = acq_view_slider_jump(scopesettings.triggerhorizontalposition,
+                                                                     (int32)previousxtouch, (int32)previousytouch);
 
     //Wait for touch to end and detect movement within the trace display section (still a blocking loop: touch-review
     //batch 3 replaces it)
@@ -2620,9 +2623,18 @@ void handle_acquisition_menu_touch(void)
             if((xtouch >= x) && (xtouch <= x + 68) && (ytouch >= y) && (ytouch <= y + 20))
             {
               //Set the new time per div, the trigger point kept inside the record (fw 0.2.68: acq_view_set_tb, the
-              //path the snap after a rate change takes too)
-              if(!acq_view_set_tb(((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i))
+              //path the snap after a rate change takes too). fw 0.2.76: running or in Single, the ladder's rate for it
+              //comes with it (docs/ui-guidelines.md section 2, "Time/div drives the sample rate")
+              int r = acq_view_set_tb(((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i);
+
+              if(!r)
                 break;
+
+              if(r == ACQ_SET_RATE)
+              {
+                fpga_set_sample_rate(scopesettings.samplerate);
+                scope_acquisition_speed_select();
+              }
 
               //Display the new setting
               scope_acquisition_timeperdiv_select();

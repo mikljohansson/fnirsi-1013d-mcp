@@ -31,6 +31,19 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.76 - 2026-10-19 (protocol 1.22, unchanged)
+
+- Scope slider: a still tap in the track outside the window now jumps the window there, as in the Spectrum. 0.2.73 ran
+  the jump only once the finger had moved past the dead band, so a tap did nothing; the jump now happens at touch-down
+  (ccddf2e).
+- Scope zoom: time/div drives the sample rate (docs/ui-guidelines.md section 2, owner 22:20-22:24). While running or
+  in Single, a tap zoom step or an ACQ menu time/div box sets the time/div and the ladder's rate for it: the fastest rate
+  whose record, at the memory depth kept, covers the ten divisions with at least ten samples per division. Zooming out
+  past the record lowers the rate, zooming in raises it, and the ends (50 ns/div at 200 MSa/s; 200 ms/div at the roll
+  boundary) are plain stops. The ACQ menu's rate boxes stay for a manual choice until the next zoom step; the snap notice
+  stays. Stopped, the record keeps its rate and the zoom steps through what it can show ("Stopped: press RUN to zoom
+  further" at its limit). A tap no longer enters or leaves roll mode. The host's SET_TIMEBASE by UI index is unchanged
+  (da24d91, rule 4eab9cc).
 #### 0.2.75 - 2026-10-19 (protocol 1.22, unchanged)
 
 - Spectrum: the colour legends of the Waterfall and Density variants are gone (owner, 2026-10-19 22:28: the blue ->

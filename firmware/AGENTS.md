@@ -3380,6 +3380,99 @@ geometry and the 20-row values. Bench: as step 1 above but no line at y 452, the
 around it, the overview over y 452..471 outside the box; a trace at the plot's top or bottom edge is visible only
 outside the window. Not benched.
 
+## 50. fw-zoom: Scope tap to jump at touch-down, the zoom ladder (fw 0.2.76, protocol 1.22 unchanged)
+
+Branch `fw-zoom` from main 1173abd (fw 0.2.74). Brief: docs/plans/task-queue.md "Scope tap-to-jump and zoom stepping"
+(owner 10-19 22:20 on 0.2.73) with the owner's additions relayed at 22:22 (zooming to either end and back must never
+leave a weird state; the ends plain stops) and 22:24 (the invariant is on the pair: after any taps the rate is the
+ladder's for the time/div, unless set by hand in the ACQ menu, until the next zoom step). Commits: 4eab9cc (the rule,
+docs/ui-guidelines.md section 2 "Time/div drives the sample rate"), ccddf2e (tap to jump at touch-down), da24d91 (the
+ladder: tb_view, acq_view, tap zoom, ACQ time/div boxes, host_tests/test_acq_view.c), 8327849 (0.2.76, CHANGELOG,
+protocol.md note), 0411c49 (firmware/README), then this section. Image of 0411c49 (GCC 10):
+`firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 730,112 B, sha256
+db457d10da0bfa0783157d15eeed0c322018b1995d02e8cfa9a9d6d655e0806d; nommu
+4895720277d90ac653424726e83ae6777ab11c03e31e2b38a18ba041eb91347b (a later commit differs only in the identity).
+Warnings GCC 10 36 (gcc10 and gcc10-nommu), GCC 13 31, as on main; none in the changed code. Host tests all green (new
+test_acq_view 1,895,407 checks). **Nothing benched. No protocol change, no settings word.**
+
+1. **Why the Scope's tap in the track did nothing.** Not the hit-test order: (x, 460) picks TOUCH_STATE_MOVE_RECORD in
+   `scan_plot_pick` (the slider row comes right after the left handle column). 0.2.73 called `acq_view_slider_jump` in
+   `touch_handler`, which only runs once `scan_for_touch` has seen the finger move past `TOUCH_DEAD_BAND` (it sets
+   touchstate to the pick then). A still tap left `scan_for_touch` through the tap branch, where the slider is a handle
+   and takes no tap, so nothing happened; a drag that began outside the window did jump (from the position 6 px on).
+   The Spectrum jumps inside `spectrum_touch` at touch-down, hence the difference. Fix: the jump runs in
+   `scan_for_touch` right after the pick, from the touch-down point; `touch_handler` snapshots
+   `previous_trigger_point_position` after it, so a drag continues from the new place. The screen shows the jump when
+   the finger lifts or moves (the touch loop still blocks: touch-review batch 3).
+2. **The ladder** (tb_view.c, pure): `tbv_ladder_rate(fpd, rates, n, total)` = the fastest of `sample_rate[0..17]` at
+   which the time/div is viable (`tbv_viable`: record covers the 724 px, at least ten samples a division). It is
+   monotonic (a faster time/div never takes a slower rate; tested). `tbv_zoom_step(t, dir, ...)` = the nearest index in
+   that direction with a ladder rate, -1 at the end; from an index no rate can show (a state no writer leaves, e.g.
+   5 ns/div) the end on the other side. With 3000 samples: 200 ms/div at 1 kSa/s .. 50 ns/div at 200 MSa/s; no holes
+   from 1000 samples up (below about 1000 samples the 1-2-5 rates leave holes; the step skips them).
+3. **acq_view.c**: `acq_view_rate_free()` = not in the viewer, and running or Single (the ACQ menu's rule for its rate
+   boxes). `acq_view_zoom(dir, rate_free)`: free -> the next time/div and its ladder rate (`acq_view_set_pair`, through
+   `acq_view_set` so the trigger point is clamped with the new rate); not free -> `tbv_zoom_step` over the record's one
+   rate, and where the full ladder would go on, the notice "Stopped: press RUN to zoom further" (same notice machinery
+   as the snap, `acq_notice_set`). At an end a plain stop, except that a pair not viable at all gets the ladder's rate
+   (safety; the writers snap, so it should not occur). Returns 0 / ACQ_SET_TB / ACQ_SET_RATE. `acq_view_set_tb` (the
+   ACQ box) takes the ladder's rate while free; `acq_view_tb_ok` greys by the ladder while free, by the record's rate
+   while stopped. `acq_view_fit` (the snap after a rate box, memory, Filter, host) is unchanged.
+4. **scope_functions.c** `scope_tap_zoom` replaces the tap's use of `scope_set_timebase` in short mode: the rate is free
+   when running, or in Single with a tap in the plot's upper half (1.00o5's rule; such a tap re-arms the shot); it
+   writes 0x0E, the rate when it changed, and calls `scope_preset_values` as before. 1.00o5's `time_per_div_sample_rate`
+   table (100 samples a division) is no longer used by taps. Roll: taps step 0..8 (50 s .. 100 ms/div; 0..10 in the
+   viewer) through `scope_set_timebase` as before but never cross into short mode, and short mode never zooms out into
+   roll (the ACQ menu's mode button is the way). **The owner may want this differently** (0.2.74 stepped from
+   200 ms/div into roll and back).
+5. **statemachine.c** ACQ time/div box: on ACQ_SET_RATE writes `fpga_set_sample_rate` and redraws the rate boxes.
+6. **SET_TIMEBASE mode 0 left alone** (docs/protocol.md note): it already picks a rate for every index (the documented
+   table, 100 samples a division down to 500 ns, viable for records of 1450 samples and more) and the simulator mirrors
+   it. Moving it to the ladder changes the rate a host gets for an index: it needs the simulator (`mcp` simulator.py
+   `TIME_PER_DIV_SAMPLE_RATE`) and a protocol note; queue it if the owner wants it.
+7. **test_acq_view.c** builds acq_view.c + tb_view.c + slider_ov.c on the host with the firmware's tables and stub
+   globals (variables.h compiles on the host). It checks every (rate, time/div) cell at depths 250..16382 in both
+   directions; five-leg walks (fast end, slow end, fast, slow, fast) from every cell, asserting the pair equals the
+   ladder's after every step and at the ends, that an end is a plain stop and the opposite tap works at once; hand
+   rates; the boxes; the stopped mode and its notice; the snap notice text; the owner's tap (y 460 left of the window,
+   five Scope states: the window centres on the finger or stops at the track's start; inside the window, y 440 and
+   y 449 never jump) and the Spectrum's (sov_jump on a Spectrum-shaped window). It tests the function the new
+   touch-down call uses; the control-flow move in `scan_for_touch` itself is target code and needs the bench.
+
+Not done / for the next agent: the jump is not drawn until the finger lifts or moves (the blocking touch loop); a left
+handle pointer at the plot's bottom can still win a touch at x < 44 on the track (the handle column comes first, as in
+0.2.73); X-Y and roll have no jump.
+
+**Bench walk-through (owner, coordinator on COM10; FEL load only)** - FEL-load (`sunxi-fel -p write 0x7FFFFFE0
+build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`), `#VER fw=0.2.76,proto=1.22`. CH1 on the 1 kHz calibration post.
+1. The owner's tap: Scope, 16k memory, 5 MSa/s at 2 us/div (window narrow), RUN or STOP. Tap the track at y about 460
+   far left of the window, finger still: on lift the window centres there and the trace shows that part. Tap far
+   right: the window goes to the track's end. Tap inside the window: nothing moves. Tap at y about 440 beside the
+   cards: nothing jumps. Touch outside the window and drag: the window jumps, then follows the finger. Spectrum: the
+   same tap still works as on 0.2.73.
+2. Zoom, RUN, Auto trigger, 3000 samples, from 1 ms/div. Tap the right half repeatedly: one time/div faster per tap,
+   the ACQ chip's rate rising with it (1 ms at 200 kSa/s, 2 us at 100 MSa/s, 1 us and faster at 200 MSa/s); at 50 ns/div
+   one more tap does nothing. Tap the left half repeatedly: back to 200 ms/div at 1 kSa/s, every step a full screen of
+   trace (no flat line at the right, no sparse dots); one more tap does nothing (no roll). Then right again: works at
+   once. Repeat at 6k and 16k memory: same ends, faster rates in the middle (16k: 1 ms/div at 1 MSa/s). The slider
+   window stays on the track and the trigger point on screen.
+3. Hand rate: ACQ menu at 500 us/div, pick 50 kSa/s: the time/div stays (25 samples a division); pick 200 MSa/s: it
+   snaps to 1 us with "Time/div set to 1us for this rate". Close the menu, tap left: 2 us/div at the ladder's rate
+   (100 MSa/s), not 200 MSa/s.
+4. ACQ time/div boxes while running: every box white except 20, 10, 5 ns; tap 200 ms: the rate becomes 1 kSa/s (the
+   rate box highlight moves); tap 50 ns: 200 MSa/s.
+5. STOP at 1 MSa/s, 200 us/div, 3000 samples: tap left: already at the record's limit, "Stopped: press RUN to zoom
+   further" for 4 s, nothing changes; tap right down to 10 us/div (10 samples a division), then the notice again. The
+   rate chip never changes while stopped; in the ACQ menu only the boxes the record can show are white. RUN: the next
+   tap continues on the ladder.
+6. Single: a tap in the upper half: the time/div and the ladder's rate, a new shot armed (WAIT); after the shot a tap
+   in the lower half rescales the shot (record's rate kept).
+7. Roll (ACQ mode button): taps step 50 s .. 100 ms/div and never leave roll.
+Bug indicators: a fraction of a screen of trace or a flat line at the right while running; a rate that is not the
+ladder's after a zoom step; a tap at an end that changes anything; an end the opposite tap cannot leave; the rate chip
+changing while stopped; the slider window off the track or the trigger point off screen after a step; a still tap in
+the Scope's track that does not jump; a jump from y 436..449.
+
 ## 51. fw-spec: legends removed (fw 0.2.75, protocol 1.22 unchanged)
 
 Owner 2026-10-19 22:28: spectrum.c lost `spec_draw_legend` and `INFO_Y1` (Waterfall and Density colour legends); the
