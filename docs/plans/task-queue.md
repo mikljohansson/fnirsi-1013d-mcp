@@ -123,6 +123,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [ ] **Measurement cards in the stock scheme** (owner 10-19): chip with the channel digit in the channel colour + "Metric: value" in
   white, dark grey rounded card; fix the "Freg" label; scope_functions.c scope_display_channel_measurements. Part of the UI batch
   (docs/plans/ux-makeover.md section 3).
+- [ ] **Measurements v2** (ux-review section 6, plan section 3a): per-mode MEASURES lists in spare settings words with default cards
+  (a new unit shows none today: scope_reset_config_data sets no cards despite its comment); the cheap on-device set (rise/fall, overshoot,
+  top/base, CH1-CH2 delay/phase/gain, cursor-gated statistics, PI decay tau; spectrum H2/H3, THD, SFDR, noise floor, band power, OBW);
+  AC RMS beside Vrms; the standard names (Period, +Width, -Width, +Duty, -Duty) and the "Freg" fix. After the UI batch.
+- [ ] **README timing fix**: firmware/README.md still quotes the pre-MMU FFT times (4096 points 10.9 ms); the MMU bench measured 2.72 ms
+  on 0.2.48 (docs/hardware-status.md 08:10). Update the spectrum section's numbers. Next firmware agent.
+- [ ] **"Confirm to delete?" dialog**: its two buttons sit 11 px apart (ux-review); apply the dialog rule (44 px, 16 px apart, primary right).
+  UI batch step 1.
 - [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s): deterministic test with
   GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
 - [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md
