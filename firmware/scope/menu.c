@@ -113,6 +113,9 @@ void scope_setup_main_screen(void)
 
 void scope_setup_view_screen(void)
 {
+  //fw 0.2.66: the Bode plot ends first, so the viewer saves (and later restores) the user's settings, not the sweep's
+  PC_VIEW_OPENING();
+
   //Switch to view mode so disallow saving of settings on power down
   viewactive = VIEW_ACTIVE;
 
@@ -355,7 +358,9 @@ void scope_setup_right_control_menu(void)
       scope_v_cursor_button(0);
     }
 
-    scope_measures_button(0);
+    //fw 0.2.66: not in the Bode plot (ui_p1_shown)
+    if(ui_p1_shown(UI_P1_MEASURES, ctrl_page_spectrum()))
+      scope_measures_button(0);
 
     scope_save_picture_button(0);
 
@@ -6077,6 +6082,9 @@ void scope_open_generator_menu(void)
   gen_enable_select(); //gen_source_select();
   gen_freq_select();
   gen_duty_select();
+
+  //fw 0.2.66: the fourth row, Bode plot (bode_view.c)
+  PC_GEN_BODE_DRAW();
   
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1

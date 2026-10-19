@@ -21,6 +21,8 @@
 #define PC_SETTING_WORD_PHOS  210   //fw 0.2.46: phosphor view persistence, palette (0x9A00 marker); 0.2.56: the switch
 #define PC_SETTING_WORD_UI    211   //fw 0.2.56: Grid, the spectrum's Display variant (0xC700 marker)
 #define PC_SETTING_WORD_DECIM_SPEC 212   //fw 0.2.64: the Spectrum's Filter (0xD500 marker; 207 is the Scope's)
+#define PC_SETTING_WORD_BODE0 219   //fw 0.2.66: Bode plot start, stop, points (0xB000 marker)
+#define PC_SETTING_WORD_BODE1 220   //fw 0.2.66: Bode plot settle, CH2 range (0xB100 marker)
 
 //PC_UI_MASK(m) items. Menus are compact (fw 0.2.8, owner: no gaps): what the 1013D lacks is not laid out at all.
 #define PC_MASK_TRIG_CHANNEL  2     //trigger menu: EXT source box (0x1533+)
@@ -78,6 +80,13 @@ uint16 pc_glue_spectrum_setting_word(int i);     //settings sector words 208, 20
 uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (scope_save_config_data)
 uint16 pc_glue_ui_setting_word(void);            //settings sector word 211 (scope_save_config_data)
 
+//fw 0.2.66: the Bode plot (bode_view.c), a mode opened from the generator menu
+int    pc_glue_bode_pass(void);                  //scope_acquire_trace_data: 1 = the Bode plot shows (no UI acquisition)
+void   pc_glue_gen_bode_draw(void);              //generator menu: draw its fourth row, "Bode plot"
+int    pc_glue_gen_bode_hit(void);               //generator menu: a tap on that row (ytouch): 1 = taken, close the menu
+uint16 pc_glue_bode_setting_word(int i);         //settings sector words 219, 220 (scope_save_config_data)
+void   pc_glue_view_opening(void);               //the picture / waveform viewer is about to open: the Bode plot ends
+
 #define PC_BUSY_POLL()          pc_glue_poll_busy()
 #define PC_TIMER_TICK()         pc_glue_poll_isr()
 #define PC_UI_CAPTURE_DONE()    pc_glue_ui_capture()
@@ -102,6 +111,10 @@ uint16 pc_glue_ui_setting_word(void);            //settings sector word 211 (sco
 #define PC_PHOSPHOR_XY(i, last) do { if(pc_glue_phosphor_xy(i)) (i) = (last); } while(0)
 #define PC_SCOPE_PASS()         pc_glue_scope_pass()
 #define PC_SCOPE_WARNING()      pc_glue_scope_warning()
+#define PC_BODE_PASS()          do { if(pc_glue_bode_pass()) return; } while(0)
+#define PC_GEN_BODE_DRAW()      pc_glue_gen_bode_draw()
+#define PC_GEN_BODE_HIT()       pc_glue_gen_bode_hit()
+#define PC_VIEW_OPENING()       pc_glue_view_opening()
 
 //fw 0.2.58 (0x1536 sequencer, pc_seq_hw.h): fpga_do_conversion writes the geometry and the sequencer registers before
 //the sampling reset; the software average is skipped while the traces hold a hardware average

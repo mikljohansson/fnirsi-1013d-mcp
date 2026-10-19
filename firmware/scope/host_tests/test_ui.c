@@ -276,6 +276,7 @@ static void test_ctrl_page(void)
   {
     T_EQ(ui_p1_shown(item, 0), 1);
     T_EQ(ui_p1_shown(item, 1), !((item == UI_P1_TCURSOR) || (item == UI_P1_VCURSOR)));   //fw 0.2.65: MEASURES too
+    T_EQ(ui_p1_shown(item, 2), !((item == UI_P1_TCURSOR) || (item == UI_P1_VCURSOR) || (item == UI_P1_MEASURES)));
   }
 
   //Button texts fit the 51 px buttons (2 px margins) in the 13 px font

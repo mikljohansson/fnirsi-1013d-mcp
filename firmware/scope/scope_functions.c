@@ -553,6 +553,9 @@ void scope_calculate_trigger_vertical_position()
 void scope_acquire_trace_data(void)
 {
   uint32 data;
+
+  //fw 0.2.66: while the Bode plot shows, its sweep owns the acquisition and it draws the trace area
+  PC_BODE_PASS();
   
   //PC protocol: no re-arm while a host READ_RAW waits for the capture just finished
   if((scopesettings.runstate)&&(scopesettings.display_data_done)&&(touchstate == 0) PC_UI_ARM_ALLOWED())//runstate ok
@@ -6438,6 +6441,9 @@ void scope_save_config_data(void)
   settingsworkbuffer[UI_MS_SPEC_WORD_CH1]  = ui_ms_spec_word(spectrum_cards(), 0);
   settingsworkbuffer[UI_MS_SPEC_WORD_CH2]  = ui_ms_spec_word(spectrum_cards(), 1);
   settingsworkbuffer[UI_MS_SPEC_WORD_VIEW] = ui_ms_spec_word(spectrum_cards(), UI_MS_SP_VIEW);
+  //Bode plot sweep settings (fw 0.2.66)
+  settingsworkbuffer[PC_SETTING_WORD_BODE0] = pc_glue_bode_setting_word(0);
+  settingsworkbuffer[PC_SETTING_WORD_BODE1] = pc_glue_bode_setting_word(1);
   //Unit life record, words 224..255 (fw 0.2.52, pc_diag.c)
   PC_SETTINGS_STORE(settingsworkbuffer);
   

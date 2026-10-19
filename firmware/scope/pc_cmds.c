@@ -458,6 +458,8 @@ static uint16_t pc_features(const pc_session *s)
   if(s->var.caps & PC_CAP_FIR)         f |= PC_FEAT_W_FIR;
   if(s->var.caps & PC_CAP_SEQ)         f |= PC_FEAT_W_SEGMENTS | PC_FEAT_W_HW_AVERAGE;
   if(s->var.caps & PC_CAP_ENC_CHECK)   f |= PC_FEAT_W_ENC_CHECK;
+  if((s->var.caps & PC_CAP_DECIM) && (s->var.caps & PC_CAP_GENERATOR_DDS))
+                                       f |= PC_FEAT_W_BODE;
 
   return f;
 }
@@ -514,7 +516,8 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
   p[40] = pc_run_state(s);
   p[41] = s->capture_id ? s->cap.origin : 0;
   p[42] = s->ext_flags;                         //1.4: EXT pin (bit0 level, bit1 generator on, bit2 edge since arm)
-  p[43] = pc_hal_display_mode();                //1.7: 0 scope, 1 spectrum view; 2 / 3 waterfall / density; 1.13: 4 phosphor
+  p[43] = pc_hal_display_mode();                //1.7: 0 scope, 1 spectrum view; 2 / 3 waterfall / density; 1.13: 4 phosphor;
+                                                //1.20: 5 Bode plot
   pc_features_body(s, p + 44);                  //1.17: features, UI Average (0 off, 1 software, 2 hardware), log2 N
   return 48;
 }
@@ -2795,6 +2798,49 @@ static int h_read_spectrum(pc_session *s, const uint8_t *req, uint32_t len, uint
   return PC_OK;
 }
 
+//BODE_CTRL (1.20): u8 action, u8 flags (bit 0 the settings below apply, bit 1 no background captures), u8 settle 0..3,
+//u8 CH2 range mode (0 auto, 1 hold), u32 start cHz, u32 stop cHz, u16 points 1..200, u16 0. Answers the READ_BODE header
+//and u32 the estimated duration of a sweep in ms, u32 0 (docs/protocol.md row 60)
+static int h_bode_ctrl(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint16_t detail = 0;
+  int st;
+
+  (void)len;
+
+  st = pc_hal_bode_ctrl(req, resp, &detail);
+
+  switch(st)
+  {
+    case PC_OK:
+      *rl = PC_BODE_CTRL_RESP;
+      return PC_OK;
+
+    case PC_E_BAD_ARG:
+      return pc_error(s, st, detail, (detail == 0) ? "action 0..10" : (detail == 1) ? "settle 0..3" :
+                      (detail == 2) ? "CH2 range mode 0..1" : (detail == 3) ? "start / stop 1 Hz .. 10 MHz" : "points 1..200");
+
+    default:
+      return pc_error(s, st, detail, (detail == 1) ? "Bode not available (a viewer is open)" :
+                      (detail == 2) ? "a sweep is running" : (detail == 4) ? "no thru calibration" : "Bode");
+  }
+}
+
+//READ_BODE (1.20): u16 first row, u16 count (0 or more than fit: all that fit), u32 0. The header, then the rows
+static int h_read_bode(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint32_t first = pc_get_u16(req), count = pc_get_u16(req + 2);
+  uint32_t max = (PC_MAX_RESPONSE_PAYLOAD - PC_BODE_HDR) / PC_BODE_ROW;
+
+  (void)s; (void)len;
+
+  if((count == 0) || (count > max))
+    count = max;
+
+  *rl = pc_hal_bode_read(first, count, resp);
+  return PC_OK;
+}
+
 static const pc_cmd_entry pc_cmds[] =
 {
   { PC_CMD_PING,         F_BUSY | F_CONTROL | F_BASIC, 0, h_ping },
@@ -2829,6 +2875,8 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_SET_SEQ,      0,                            PC_CAP_SEQ, h_set_seq },
   { PC_CMD_GET_SEQ,      0,                            PC_CAP_SEQ, h_get_seq },
   { PC_CMD_READ_SEQ,     0,                            PC_CAP_SEQ, h_read_seq },
+  { PC_CMD_BODE_CTRL,    0,                            PC_CAP_DECIM, h_bode_ctrl },
+  { PC_CMD_READ_BODE,    0,                            PC_CAP_DECIM, h_read_bode },
   { PC_CMD_SD_INFO,      F_BASIC,                      PC_CAP_SD_SECTORS, h_sd_info },
   { PC_CMD_SD_READ_SECTORS, F_BASIC,                   PC_CAP_SD_SECTORS, h_sd_read },
   { PC_CMD_SD_STAGE,     F_BUSY | F_BASIC,             PC_CAP_SD_SECTORS, h_sd_stage },   //memory copy only: timer poll

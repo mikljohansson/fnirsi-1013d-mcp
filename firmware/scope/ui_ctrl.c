@@ -11,6 +11,10 @@ int ui_p1_shown(int slot, int spectrum)
   if(spectrum && ((slot == UI_P1_TCURSOR) || (slot == UI_P1_VCURSOR)))
     return 0;
 
+  //fw 0.2.66: the Bode plot (spectrum = 2) has no measurement list either: its cards are fixed
+  if((spectrum == 2) && (slot == UI_P1_MEASURES))
+    return 0;
+
   return (slot >= UI_P1_CTRL) && (slot <= UI_P1_SAVEWAVE);
 }
 
