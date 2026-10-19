@@ -79,6 +79,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   display_mode there (add a "superseded" note); row 49 calls CIC+FIR the eventual default while CIC2 is the default since 0.2.44; row 51
   says x1 or x10 probes for the gain step while README 6.3 says x1 (fw-cal2: range 2 for x1, range 5 for x10, so both are supported:
   align the README). Next firmware agent.
+- [ ] **FPGA 0x1536 firmware + MCP support** (after fpga-gen5; fpga/al3/README.md section 6, docs/plans/segmented-capture.md, fpga/al3/AGENTS.md):
+  commands 0x57-0x5D, reads 0x2B-0x32 via the 0x1F pointer, segment table (64-bit entries: valid, triggered, trigger offset, 40-bit
+  5 ns timestamp), averaging with positions P and shift S at readout; firmware capture modes "Segments" and "Average N" with capture-info
+  fields, READ_RAW layouts for a segment set and the averaged record; MCP `scope_capture_segments` / `scope_capture_averaged`; bench check 5
+  (an N = 1 average equals the memory's record) first after flashing. Next firmware generation + mcp-gen4/5.
 - [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s): deterministic test with
   GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
 - [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md
@@ -113,8 +118,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Dispatched
 
-- fpga-gen5 (Opus, started 10-19 02:10, main tree fpga/ only): roadmap section 8 item 1, segmented capture + hardware averaging as 0x1536,
-  design doc + RTL + testbenches; not flashed.
+- fpga-gen5 (done 03:50, retired): 0x1536 segmented capture + hardware averaging built, simulated, documented (bcccd92..66232a6); pinned
+  backups/al3_seg_0x1536_4eaf6811.bin (+ padded 66866c84); not flashed; needs firmware support first.
 - docs-gen1 (done 01:50): README cb47f8f, guide/skill 4ed5f53, protocol 8d750bb, releasing/hardware-prep aa84507, AGENTS.md 9004569.
 - docs-gen2 (done 02:00): CHANGELOG backfill 0.2.8-0.2.44 committed 6154672 (37 sections; protocol 1.8 has no row/commit, noted there).
 - fw-gen7 (done 01:40, about 400k tokens, retired): purge batch merged into main (a86cd6c); the merged main build is numbered 0.2.48.
