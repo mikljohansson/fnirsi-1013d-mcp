@@ -61,6 +61,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   200 MS/s and re-arm when it is set (no data check needed); on 0x1532-0x1537 run the data check on every full-rate arm instead of
   only after 0x0D. Fix the stored core-order convention (interleave tracker A-B model, 0x53 swap bit) to what 0x1538 guarantees.
   fw-cal4 retired at 400k (handoff section 37); new agent.
+- **Documentation site and write-ups** (owner 10-19 17:30): docs/ stays the single source, published with MkDocs Material via a
+  GitHub Pages workflow; three shelves: user guide (install, first run, calibration, each screen with a screenshot, generator),
+  agent guide (MCP setup, measurement guide, worked examples with plots), engineering articles (calibration story, the ADC
+  encode-phase fault, decimation filters and FIR, MMU and FFT, Bode design and bench, UX makeover). Tooling: tools/screenshots.py
+  drives the scope through each state over USB (scope_screenshot) and saves named PNGs for reproducible screenshots; plots from
+  MCP data saved with their generating command. Order: site skeleton + screenshot tool + user guide before the announcement
+  (after the polish batch lands so the screens are final); articles at any pace. Dispatch a docs agent after fw-polish merges.
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
