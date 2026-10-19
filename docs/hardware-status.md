@@ -722,3 +722,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   -29.0 / -88 expected): consistent with about 50-60 Ohm in the capacitor's return path, i.e. the stimulus current returning through
   the probe clips and R71 (100 Ohm) as bode-design 2.5 predicts (inference). Next: wiring B (DUT ground to the USB shell, clips open),
   then a thru calibration with both probes on the input.
+- 2026-10-19 14:40: Bode sweep 3, same RC, DUT ground on a BNC shell instead of the clips (backups/bode/rc1_15n_bncshell.json):
+  repeats sweep 2 within 0.5 dB / 1.8 deg at every point (300 kHz -25.1 dB / -68 deg): the BNC shell is the probe reference node,
+  so it is wiring A. Owner has no reachable USB ground at the scope; options given: hub / extension socket shell, PC case, or a
+  10 kOhm / 1.5 nF DUT to cut the return current ten times.
