@@ -182,7 +182,12 @@ static void cp_icon_trace(uint32 x, uint32 y, uint32 color)
 
 static void cp_icon(int icon, uint32 x, uint32 y)
 {
-  static const uint8 loop[9][2] = { { 1, 14 }, { 5, 6 }, { 11, 2 }, { 18, 3 }, { 22, 7 }, { 19, 14 }, { 13, 18 }, { 6, 18 }, { 1, 14 } };
+  //X-Y (fw 0.2.63, owner): a figure 8 leaning right, the lemniscate x = cos t / (1 + sin^2 t), y = 1.3 sin t cos t /
+  //(1 + sin^2 t) turned by 55 degrees, 24 points
+  static const uint8 loop[25][2] = { { 17, 18 }, { 14, 19 }, { 12, 18 }, { 11, 16 }, { 10, 14 }, { 11, 12 }, { 12, 9 },
+                                     { 12, 7 }, { 13, 5 }, { 12, 3 }, { 11, 1 }, { 9, 0 }, { 6, 1 }, { 4, 4 }, { 4, 6 },
+                                     { 5, 8 }, { 7, 9 }, { 9, 9 }, { 11, 9 }, { 14, 10 }, { 16, 10 }, { 18, 11 },
+                                     { 19, 13 }, { 19, 15 }, { 17, 18 } };
   static const uint8 bars[8]    = { 3, 5, 16, 6, 4, 10, 3, 2 };
   static const uint8 dots[8]    = { 16, 13, 6, 3, 5, 11, 15, 17 };
   static const uint32 stripes[4] = { 0x00000090, 0x000090FF, 0x00FFFF00, 0x00FF4000 };
@@ -196,8 +201,8 @@ static void cp_icon(int icon, uint32 x, uint32 y)
 
     case CP_ICON_XY:
       display_set_fg_color(XYMODE_COLOR);
-      for(i = 0; i < 8; i++)
-        display_draw_line(x + loop[i][0], y + loop[i][1], x + loop[i + 1][0], y + loop[i + 1][1]);
+      for(i = 0; i < 24; i++)
+        display_draw_line(x + 2 + loop[i][0], y + loop[i][1], x + 2 + loop[i + 1][0], y + loop[i + 1][1]);
       break;
 
     case CP_ICON_PHOSPHOR:
