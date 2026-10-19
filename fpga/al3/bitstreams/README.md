@@ -1,5 +1,8 @@
 # Bitstreams (on disk only, not in git)
 
+Our own released bitstreams (0x1533 onwards) are committed in `../dist/` with their hashes; this folder holds
+the third-party reference images only.
+
 Everything here except this README is ignored by git (`fpga/**/*.bin` in `.gitignore`).
 These are binary SPI-flash images for the FPGA configuration flash (Winbond 25Q80, 1 MiB part).
 Never overwrite the stock dump. Never flash without a verified backup first (see `CLAUDE.md`).

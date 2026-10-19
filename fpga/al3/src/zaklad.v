@@ -2,7 +2,7 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
-// fnirsi-1013d-mcp changes (version word 0x1537, see fpga/al3/README.md "Changes"):
+// fnirsi-1013d-mcp changes (version word 0x1538, see fpga/al3/README.md "Changes"):
 //  - 0x1533: external trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
 //    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
 //    Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
@@ -24,6 +24,13 @@
 //    at slow rates too (before, only write clock edges during the reset loaded them). The ADC encode
 //    toggles follow the write clock, so the A/B order within a word can no longer flip on a divider
 //    or 0x53 write. Otherwise cycle-identical to 0x1536.
+//  - 0x1538: the encode flops of 0x1537 loaded the write clock's copy 1.25 ns after it toggled
+//    (negedge clk_200MHz to negedge clk_ADC), a path that missed timing for the A encode, so at
+//    200 MSa/s the A cores sampled late, with B, or with a metastable clock. Now the next write
+//    clock value is precomputed (registered enable look-ahead) on the rising clk_200MHz edge
+//    and the encode flops load it with no enable (3.75 ns paths): encB = write clock, encA = its
+//    complement, 1.25 ns later, at every rate and after any write (0x1535's normal state). Read
+//    0x33 reports a sticky encode self-check. Otherwise cycle-identical to 0x1537.
 //-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
@@ -635,9 +642,9 @@ module fnirsi_1013D
   wire        swc_adv;                     //Capture logic advances on this write clock edge
   reg         swc_adv_q = 1;               //The last write clock edge advanced the capture logic (wrote a sample)
 
-  reg adc1_encA = 0;                       //Clock signals for the ADC's
+  reg adc1_encA = 1;                       //Clock signals for the ADC's (0x1538: A starts as the complement of B)
   reg adc1_encB = 0;
-  reg adc2_encA = 0;
+  reg adc2_encA = 1;
   reg adc2_encB = 0;
 
 //-------------------------------------------------------------------------------------
@@ -824,36 +831,69 @@ freq_generator_dds_pwm u_freq
 //-------------------------------------------------------------------------------------
 //Sample write clock
 
-  //swc_enc_n: the complement of sample_write_clock in a register of its own for the encode flops, so the write
-  //clock's fanout and its half-cycle path into sampling_triggered stay as in 0x1536
-  reg swc_enc_n = 1;
+  //0x1538: encode generation. sce_q is sample_clock_enable one clock ahead, as a register: computed on each falling
+  //clk_200MHz edge from the counter, it equals the enable of the cycle after that edge while the divider is stable.
+  //swc_sh is a copy of the write clock (loaded from it, so a difference lasts one clock; it keeps the write clock's
+  //fanout, and with it the half-cycle path into sampling_triggered, as in 0x1537). enc_nxt is the value the write
+  //clock will have after the next falling clk_200MHz edge, made on the rising edge before it (2.5 ns path), and the
+  //encode flops load it on the falling edge of clk_ADC 1.25 ns after that falling edge (3.75 ns path, no enable).
+  //So encB follows the write clock and encA its complement, 1.25 ns later, at every rate, and nothing in the
+  //encodes keeps state of its own: a cycle disturbed by an asynchronous 0x0D / 0x53 write (sce_q one cycle behind
+  //the combinational enable) repairs itself on the next one. The write clock and the divider counter still use the
+  //combinational enable, so they stay cycle-identical to 0x1537.
+  //0x1537 loaded its copy swc_enc_n across the 1.25 ns window from negedge clk_200MHz to negedge clk_ADC; the A path
+  //(through an inverter) missed it by 0.21 ns in TD's report, so an A encode could be right, one clock late (A
+  //sampling with B) or metastable (fpga/al3/README.md "Changes" section 8).
+  reg sce_q     = 0;
+  reg swc_sh    = 0;                       //copy of sample_write_clock, loaded from it (a difference lasts one clock)
+  reg enc_nxt   = 0;                       //sample_write_clock after the next falling clk_200MHz edge
+  reg enc_nxt_n = 1;                       //its complement, a flop of its own (no LUT in front of the encA flops)
 
-  //0x1537: the B encode toggles to the complement of the write clock (its inverted copy swc_enc_n) instead of its own
-  //complement. In steady state that is the same thing (encB equals sample_write_clock between enables), so the pins are
-  //unchanged. But the enable is a combinational compare against the MCU-written divider: a 0x0D or 0x53 write
-  //that changes it between this edge and the write clock's sampling edge made the two flops disagree once,
-  //and up to 0x1536 that swapped which core is the earlier sample of a word until the next such accident
-  //(fpga/al3/README.md "Changes" section 7). Now the next enable restores the relation.
+  always @(posedge clk_200MHz)
+    begin
+      enc_nxt   <=  (swc_sh ^ sce_q);
+      enc_nxt_n <= ~(swc_sh ^ sce_q);
+    end
+
   always @(negedge clk_ADC)	//clk_ADC   clk_RAM
     begin
-      if(sample_clock_enable == 1)
-        begin
-          adc1_encB <= swc_enc_n;
-          adc2_encB <= swc_enc_n;
+      adc1_encB <= enc_nxt;
+      adc2_encB <= enc_nxt;
 
-          //The A and B clocks are inverted versions of each other
-          adc1_encA <= ~swc_enc_n;
-          adc2_encA <= ~swc_enc_n;
-        end
+      //The A and B clocks are inverted versions of each other
+      adc1_encA <= enc_nxt_n;
+      adc2_encA <= enc_nxt_n;
     end
 
   always @(negedge clk_200MHz)//clk_200MHz  clk_RAM
     begin
       if(sample_clock_enable == 1)
-        begin
-          sample_write_clock <= ~sample_write_clock;
-          swc_enc_n          <= ~swc_enc_n;
-        end
+        sample_write_clock <= ~sample_write_clock;
+
+      swc_sh <= sample_write_clock ^ sample_clock_enable;
+    end
+
+  //Encode self-check (read 0x33). enc_ref is enc_nxt taken on the falling clk_200MHz edge, i.e. the write clock this
+  //edge was predicted to give. On the next falling edge the four encode flops (loaded 3.75 ns before from the same
+  //enc_nxt) must equal enc_ref (B) and its complement (A), and the write clock must equal enc_ref (the prediction).
+  //enc_err: a mismatch since the last 0x01 = 1 (an asynchronous divider or 0x53 write can make the prediction miss
+  //once; the firmware writes those before the reset). swc_sh stands in for the write clock (equal unless a
+  //disturbed clock, which the next check then also flags).
+  reg       enc_ref     = 0;
+  reg [3:0] enc_ok      = 4'hF;
+  reg       enc_pred_ok = 1;
+  reg       enc_err     = 0;
+
+  always @(negedge clk_200MHz)
+    begin
+      enc_ref     <= enc_nxt;
+      enc_ok      <= { adc2_encA ^ enc_ref, ~(adc2_encB ^ enc_ref), adc1_encA ^ enc_ref, ~(adc1_encB ^ enc_ref) };
+      enc_pred_ok <= ~(swc_sh ^ enc_ref);
+
+      if(sample_system_reset == 1)
+        enc_err <= 0;
+      else if((enc_ok != 4'hF) | ~enc_pred_ok)
+        enc_err <= 1;
     end
 
 // ---------------------------------------------------
@@ -875,6 +915,11 @@ freq_generator_dds_pwm u_freq
   wire [31:0] sample_rate_divider_eff = dec_on ? 32'd0 : sample_rate_divider;
 
   assign sample_clock_enable = sample_rate_divider_eff < (sample_rate_counter);
+
+  //0x1538: the enable of the cycle after this edge is divider < counter after this edge, where the counter becomes
+  //1 (enable now) or counter + 1, so: enable now ? divider == 0 : divider <= counter
+  always @(negedge clk_200MHz)
+    sce_q <= sample_clock_enable ? (sample_rate_divider_eff == 32'd0) : (sample_rate_divider_eff <= sample_rate_counter);
 
 //-------------------------------------------------------------------------------------
 //Decimation filter control and data path (0x1534)
@@ -1935,7 +1980,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h37;
+                    o_mcu_data <= 8'h38;
                 endcase
               end
 
@@ -2034,6 +2079,12 @@ assign sampling_enable = ~(
                     o_mcu_data <= q_idx[7:0];
                 endcase
               end
+
+            //Encode self-check (0x1538), 1 byte: bit 0 sticky, a check failed since the last 0x01 = 1; bit 1 the last
+            //write clock prediction was right; bits 3:2 = 01, encode convention 1 (B = write clock, A = its complement,
+            //1.25 ns later, as 0x1535 normally ran); bits 7:4 the last pin check {CH2 A, CH2 B, CH1 A, CH1 B}, 1 = right
+            8'h33:
+              o_mcu_data <= { enc_ok, 2'b01, enc_pred_ok, enc_err };
 
             //Accumulator / segment table word at the read pointer, bytes 0..7 (0x1536)
             8'h2B:
