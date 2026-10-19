@@ -3379,3 +3379,8 @@ the horizontal mapping (726 px) unchanged; test_ui / test_tb_view needed no new 
 geometry and the 20-row values. Bench: as step 1 above but no line at y 452, the window a white box with a black ring
 around it, the overview over y 452..471 outside the box; a trace at the plot's top or bottom edge is visible only
 outside the window. Not benched.
+
+## 51. fw-spec: legends removed (fw 0.2.75 provisional, protocol 1.22 unchanged)
+
+Owner 2026-10-19 22:28: spectrum.c lost `spec_draw_legend` and `INFO_Y1` (Waterfall and Density colour legends); the
+warning line at the plot's top middle and the rest of both variants are unchanged. No test checked the legend texts.

@@ -92,7 +92,8 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   The Frequency response mode gets the same row for Start..Stop (`docs/plans/bode-ui.md` section 2). This replaces
   "the record-position slider is hidden in Spectrum". **Built in fw 0.2.71** (spectrum.c): the track is the displayed
   axis, 0 .. min(fs/2, 25 MHz) (the view caps its axis at 25 MHz, so at 200 MSa/s the window spans that, not 100 MHz);
-  the colour legend of Waterfall and Density moved inside the plot's top right (y 72); the frequency labels became the
+  the colour legend of Waterfall and Density moved inside the plot's top right (y 72), and fw 0.2.75 removed it (owner,
+  2026-10-19 22:28); the frequency labels became the
   grid rule's (docs/ui-guidelines.md section 3). Fold-outs open to the
   left of the bar over the plot's right edge and close on a second tap of their button, a tap outside, or another
   CTRL button; the waveform viewer's CTRL page stays as today. Display, Grid, persistence and palette are saved with the
