@@ -363,7 +363,7 @@ module tb;
     // Version word and status read
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h1535, "cmd 0x06 reads 0x1535");
+    check(rd16_d == 16'h1536, "cmd 0x06 reads 0x1536");
     check(rd16_r == 16'h1532, "reference cmd 0x06 reads 0x1532");
 
     //-------------------------------------------------------------------------------

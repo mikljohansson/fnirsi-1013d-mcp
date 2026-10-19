@@ -599,7 +599,7 @@ module tb;
     // Version word and the 0x29 FIR bits (byte 0 bit 6 = 0x56 bit 0, bit 5 = FIR active)
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h1535, "cmd 0x06 reads 0x1535");
+    check(rd16_d == 16'h1536, "cmd 0x06 reads 0x1536");
     check(rd16_r == 16'h1534, "reference cmd 0x06 reads 0x1534");
     ok29 = 1;
     wr1(8'h56, 8'h00); wr1(8'h53, 8'h07); wr1(8'h54, 8'h0C); wr4(8'h0D, 32'd14); #200;

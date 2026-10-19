@@ -11,7 +11,10 @@
 #   5. tb_long.v: decim_chan and fir_chan free-running for up to 100k outputs per configuration with a
 #      periodic input: periodic, wrap-independent (random 48-bit start state), bounded, correct mean.
 #      LONG_SCALE (percent, default 100) scales the output counts.
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long runs one testbench.
+#   6. tb_seg.v against our 0x1535 (REF1535_REV, default e2aec2e): sequencer off equivalence, then
+#      segment and averaging runs (0x1536), logged and checked by seg_model.py. SEG_P1 (default 12)
+#      sets the number of random equivalence captures of its first phase.
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -19,6 +22,7 @@ REPO=$(cd "$HERE/../../.." && pwd)
 REF_REV=${REF_REV:-a947e78}
 REF1533_REV=${REF1533_REV:-2839258}
 REF1534_REV=${REF1534_REV:-6d4c8ad}
+REF1535_REV=${REF1535_REV:-e2aec2e}
 SEED=${1:-12345}
 WORK=${SIM_WORK:-$HOME/al3-sim}
 DUT=${DUT:-$REPO/fpga/al3/src/zaklad.v}   # design under test (override for mutation runs)
@@ -28,7 +32,7 @@ command -v iverilog >/dev/null || { echo "iverilog not installed"; exit 1; }
 # Reference: the file at a git revision with every module renamed to <name>_ref (pll/sample_memory stay shared)
 mkref() {
   git -c safe.directory='*' -C "$REPO" show "$1:fpga/al3/src/zaklad.v" \
-    | sed -E 's/\b(clockdivider|pwmcounter|freq_generator_dds_pwm|decim_chan|fnirsi_1013D)\b/\1_ref/g' > "$2"
+    | sed -E 's/\b(clockdivider|pwmcounter|freq_generator_dds_pwm|decim_chan|fir_chan|fnirsi_1013D)\b/\1_ref/g' > "$2"
 }
 compile() {  # <out.vvp> <ref.v> <tb.v>
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -o "$1" "$HERE/sim_models.v" "$DUT" "$2" "$3" \
@@ -62,6 +66,14 @@ if [ "$ONLY" = all ] || [ "$ONLY" = long ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_long.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_long.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_long.vvp" +seed=$SEED +scale=${LONG_SCALE:-100} | tee "$WORK/sim_long.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_long.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = seg ]; then
+  mkref "$REF1535_REV" "$WORK/zaklad_ref1535.v"
+  compile "$WORK/tb_seg.vvp" "$WORK/zaklad_ref1535.v" "$HERE/tb_seg.v"
+  vvp -n "$WORK/tb_seg.vvp" +seed=$SEED +p1=${SEG_P1:-12} +logfile="$WORK/seg.log" | tee "$WORK/sim_seg.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_seg.log" || RC=1
+  python3 -I "$HERE/seg_model.py" check "$WORK/seg.log" | tee "$WORK/model_seg.log"
+  grep -q -- '-> PASS' "$WORK/model_seg.log" || RC=1
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
 [ $RC -eq 0 ] && echo "ALL PASS (seed $SEED)" || echo "SOMETHING FAILED (seed $SEED)"
