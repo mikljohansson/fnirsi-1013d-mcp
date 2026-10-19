@@ -1026,4 +1026,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   on a sound bitstream once 0x153A is flashed), 49 (overview), 50 (zoom ladder, owner: works), 52 (Spectrum ladder); the fpga-gen9
   report and the 0x153A flash session (owner present, FT2232D, battery, USB unplugged); the hardware averaging default decision.
   Agents still running overnight: fpga-gen9, fw-spzoom.
+- 2026-10-19 23:32: fw 0.2.77 (fw-spzoom: Spectrum zoom ladder) merged, built with GCC 10 and pinned backups/fw-0.2.77_1ffafab7.bin
+  (sha256 1ffafab7096a772f71e04425751319fc78481dfc61d61deaf0373f33c9d55977); host tests green; not loaded (scope off). This is the
+  morning's FEL image unless fw-yield lands first.
 

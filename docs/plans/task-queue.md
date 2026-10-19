@@ -415,7 +415,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   sweep. Open (queue): the simulator lacks reason 8 and the new header rule (mcp item); a single sweep started from the CTRL page
   leaves the bar on that page where RUN/STOP is not visible (owner to decide: jump back to page one?); after a sweep the generator
   chip shows the user's generator although the pin is off. Loaded 21:30 as backups/fw-0.2.71_1264e26c.bin; walk-through pending.
-- fw-spzoom (done 23:35, about 295k tokens, merged 23:40 as fw 0.2.77, handoff firmware/AGENTS.md section 52, not loaded: the
+- fw-spzoom (done 23:30, about 295k tokens, merged 23:32 as fw 0.2.77, handoff firmware/AGENTS.md section 52, not loaded: the
   scope is off): Spectrum zoom ladder in spec_ladder.c (1-2-5 spans about the centre, rate = slowest whose fs/2 covers the stop
   with a capture of N samples at most 2.048 s, 16-bin minimum, taps at an end do nothing, stopped keeps the record's rate with
   the Scope's notice, Auto lands on a ladder cell from 0 Hz, the full axis at 50 MSa/s = option (a)); test_spec_zoom 685,416
