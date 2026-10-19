@@ -330,6 +330,10 @@ uint8_t  pc_hal_enc_status(void);                            //[FPGA] read 0x33 
 void     pc_hal_enc_retry(void);                             //[FPGA] before a re-arm: 0x0D = 1, 0 on 0x1532..0x1536
 void     pc_hal_enc_note(uint8_t why, const eh_note *n);     //count a check, log event 21 when n->done
 
+//CAL_PROBE (fw 0.2.67, MAIN, UI stopped): the calibration wizard's zero measurement of one channel and hardware range
+//(cal_wiz_ui.c), nothing stored; writes ACAL_PROBE_BYTES (adc_cal.h) and returns that length, -1 for a bad argument
+int32_t  pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t *dst);
+
 //Calibration provenance (sector 708 bytes 432..487): ACAL_PROV_* state and the stored bytes (zeros when none)
 int      pc_hal_cal_prov(uint8_t *raw);
 

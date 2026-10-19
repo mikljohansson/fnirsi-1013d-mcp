@@ -181,6 +181,7 @@ void cw_zero_detail(cal_wiz *w, uint32_t ch, uint32_t range, const acal_fail *f)
   w->zero_core[ch]     = f->core;
   w->zero_val[ch]      = f->value;
   w->zero_within16[ch] = f->within16;
+  w->zero_f[ch]        = *f;
 }
 
 void cw_level_result(cal_wiz *w, int32_t span16)
@@ -393,6 +394,61 @@ char *cw_zero_line(const cal_wiz *w, uint32_t ch, char *p)
     default:
       return p;
   }
+}
+
+static const char *cw_point_name(uint32_t pt)
+{
+  switch(pt)
+  {
+    case ACAL_PT_COARSE_HI:
+    case ACAL_PT_COARSE_LO: return "coarse point";
+    case ACAL_PT_G_ZERO:
+    case ACAL_PT_F_ZERO:    return "zero point";
+    default:                return "slope point";
+  }
+}
+
+//"A 130.1 (126..135" plus ", 12 clip" (samples at 0 or 255) when there are any, then ")"
+static char *cw_core_note(char *p, const acal_fail *f, uint32_t k)
+{
+  int32_t m = f->mean16[k];
+
+  p = cw_str(p, k ? "B " : "A ");
+  p = cw_fmt_tenths(p, cw_tenths16((uint32_t)((m < 0) ? 0 : m)));
+  p = cw_str(p, " (");
+  p = cw_uint(p, f->lo[k]);
+  p = cw_str(p, "..");
+  p = cw_uint(p, f->hi[k]);
+
+  if(f->clipped[k])
+  {
+    p = cw_str(p, ", ");
+    p = cw_uint(p, f->clipped[k]);
+    p = cw_str(p, " clip");
+  }
+
+  return cw_str(p, ")");
+}
+
+char *cw_zero_note(const cal_wiz *w, uint32_t ch, char *p)
+{
+  const acal_fail *f = &w->zero_f[ch];
+
+  *p = 0;
+
+  if((ch > 1) || (w->zero_st[ch] != CW_Z_FAIL) || !w->zero_det[ch] || (f->point >= ACAL_POINTS))
+    return p;
+
+  p = cw_str(p, "Range ");
+  p = cw_uint(p, w->zero_r[ch] + 1u);
+  p = cw_str(p, (f->cls == ACAL_FULL) ? ", 200 MSa/s, " : ", 2 MSa/s, ");
+  p = cw_str(p, cw_point_name(f->point));
+  p = cw_str(p, ", PWM ");
+  p = cw_uint(p, f->pwm);
+  p = cw_str(p, ": ");
+  p = cw_core_note(p, f, ACAL_CORE_A);
+  p = cw_str(p, ", ");
+  return cw_core_note(p, f, ACAL_CORE_B);
 }
 
 char *cw_gain_line(const cal_wiz *w, char *p)

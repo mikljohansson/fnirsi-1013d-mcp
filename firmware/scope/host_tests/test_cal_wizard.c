@@ -8,7 +8,7 @@
 #include "cal_wiz.h"
 #include "ui_fmt.h"
 
-extern FONTDATA font_3;
+extern FONTDATA font_2, font_3;
 
 //The result line's room: the 640 px step dialog, 24 px margins, the 28 px icon column (ui_dlg_step_draw)
 #define RESULT_W   (640 - 48 - 28)
@@ -232,8 +232,9 @@ static void test_zero_fail_detail(void)
 {
   cal_wiz   w;
   int       rc[2] = { ACAL_E_NOISE, ACAL_E_DRIFT };
-  acal_fail f0 = { ACAL_GATED, ACAL_CORE_B, 52, 17 }, f1 = { ACAL_FULL, ACAL_CORE_A, -13, 18 };
-  acal_fail fw = { ACAL_FULL, ACAL_CORE_B, 1600, 1600 };
+  acal_fail f0 = { ACAL_GATED, ACAL_CORE_B, 52, 17, ACAL_PT_NONE, 0, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
+  acal_fail f1 = { ACAL_FULL, ACAL_CORE_A, -13, 18, ACAL_PT_NONE, 0, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
+  acal_fail fw = { ACAL_FULL, ACAL_CORE_B, 1600, 1600, ACAL_PT_NONE, 0, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
   char      t[96];
 
   cw_init(&w, 1);
@@ -284,6 +285,69 @@ static void test_zero_fail_detail(void)
   cw_zero_result(&w, rc, match_ok);
   cw_zero_line(&w, 0, t);
   T_STR(t, "CH1: the zero level is out of range");
+}
+
+//fw 0.2.67: the note under a failed channel: range, rate, point, PWM and the raw per-core numbers (the 2026-10-19 17:55
+//failure lines); nothing for a passed channel or without a measured point. Widest case fits the dialog in the 13 px font
+static void test_zero_fail_note(void)
+{
+  cal_wiz   w;
+  int       rc[2] = { ACAL_E_NOISE, ACAL_E_CLIP };
+  acal_fail f0, f1;
+  char      t[128];
+
+  memset(&f0, 0, sizeof(f0));
+  f0.cls = ACAL_FULL; f0.core = ACAL_CORE_B; f0.value = 115; f0.within16 = 115;
+  f0.point = ACAL_PT_F_ZERO; f0.pwm = 812;
+  f0.mean16[0] = 2082; f0.mean16[1] = 2014;
+  f0.lo[0] = 126; f0.hi[0] = 135; f0.lo[1] = 101; f0.hi[1] = 152;
+  memset(&f1, 0, sizeof(f1));
+  f1.cls = ACAL_GATED; f1.core = ACAL_CORE_B; f1.point = ACAL_PT_G_LO; f1.pwm = 1062;
+  f1.mean16[0] = 2693; f1.mean16[1] = 2400; f1.lo[0] = 160; f1.hi[0] = 176; f1.lo[1] = 0; f1.hi[1] = 255;
+  f1.clipped[1] = 12;
+
+  cw_init(&w, 1);
+  ev(&w, CW_EV_CALIBRATE);
+  take(&w);
+  cw_zero_detail(&w, 0, 0, &f0);
+  cw_zero_detail(&w, 1, 2, &f1);
+  cw_zero_result(&w, rc, match_ok);
+
+  cw_zero_line(&w, 0, t);
+  T_STR(t, "CH1: too much noise, range 1 at 200 MSa/s: core B 7.2 codes, 7.2 per capture");
+  cw_zero_note(&w, 0, t);
+  T_STR(t, "Range 1, 200 MSa/s, zero point, PWM 812: A 130.1 (126..135), B 125.9 (101..152)");
+  T_TRUE(ui_text_width(&font_2, t) <= RESULT_W);
+  cw_zero_line(&w, 1, t);
+  T_STR(t, "CH2: the input is not at 0 V: unplug the probe");
+  cw_zero_note(&w, 1, t);
+  T_STR(t, "Range 3, 2 MSa/s, slope point, PWM 1062: A 168.3 (160..176), B 150.0 (0..255, 12 clip)");
+  T_TRUE(ui_text_width(&font_2, t) <= RESULT_W);
+
+  //The widest: the highest slope point (ACAL_PWM_MAX + 150), both cores clipped in every sample of a full-rate point
+  f1.pwm = ACAL_PWM_MAX + 150; f1.mean16[0] = f1.mean16[1] = 255 * 16; f1.lo[0] = 0; f1.hi[0] = 255;
+  f1.clipped[0] = f1.clipped[1] = 32000; f1.cls = ACAL_FULL;
+  ev(&w, CW_EV_CALIBRATE);
+  take(&w);
+  cw_zero_detail(&w, 1, 5, &f1);
+  cw_zero_result(&w, rc, match_ok);
+  cw_zero_note(&w, 1, t);
+  T_TRUE(ui_text_width(&font_2, t) <= RESULT_W);
+
+  //No note: no detail in this run (CH1), a point that was not measured, a passed channel
+  cw_zero_note(&w, 0, t);
+  T_STR(t, "");
+  f1.point = ACAL_PT_NONE;
+  rc[0] = ACAL_OK;
+  ev(&w, CW_EV_CALIBRATE);
+  take(&w);
+  cw_zero_detail(&w, 0, 0, &f0);
+  cw_zero_detail(&w, 1, 1, &f1);
+  cw_zero_result(&w, rc, match_ok);
+  cw_zero_note(&w, 0, t);
+  T_STR(t, "");
+  cw_zero_note(&w, 1, t);
+  T_STR(t, "");
 }
 
 static void test_gain_nosignal_and_fail(void)
@@ -545,6 +609,7 @@ int main(void)
   test_happy_path();
   test_zero_fail_retry();
   test_zero_fail_detail();
+  test_zero_fail_note();
   test_gain_nosignal_and_fail();
   test_gain_unavailable();
   test_cancel_everywhere();

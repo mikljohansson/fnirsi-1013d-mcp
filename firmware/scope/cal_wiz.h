@@ -79,6 +79,7 @@ typedef struct
   uint8_t  zero_core[2];
   int32_t  zero_val[2];
   uint32_t zero_within16[2];
+  acal_fail zero_f[2];            //fw 0.2.67: the whole detail (point, PWM, raw per-core numbers) for the note line
 } cal_wiz;
 
 void cw_init(cal_wiz *w, int al3);
@@ -118,6 +119,10 @@ const char *cw_reason_text(int rc);                                             
 char *cw_fmt_tenths(char *p, uint32_t v);                                          //13 -> "1.3"
 char *cw_progress(char *p, uint32_t ch, uint32_t range);                           //"CH1: measuring range 3 of 6"
 char *cw_zero_line(const cal_wiz *w, uint32_t ch, char *p);                        //screen 1 result ("" when none)
+//fw 0.2.67: the small line under a failed channel's result: where (range, rate, point), the PWM and the raw per-core
+//means with their extremes and clipped samples, e.g. "Range 1, 200 MSa/s, zero point, PWM 812: A 130.1 (126..135),
+//B 125.9 (0..255, 12 clip)". "" when the channel passed or no point was measured
+char *cw_zero_note(const cal_wiz *w, uint32_t ch, char *p);
 char *cw_gain_line(const cal_wiz *w, char *p);                                     //screens 2-3 result ("" when none)
 char *cw_done_line(const cal_wiz *w, uint32_t ch, const acal_channel *c, char *p); //screen 4, one per channel
 
