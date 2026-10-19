@@ -321,6 +321,41 @@ static void test_ctrl_page(void)
     T_STR(ui_run_chip[UI_RUN_WAIT], "WAIT");
   }
 
+  //Screen brightness (fw 0.2.68): the sun goes to 100 % and back to where it came from; a value set at 100 by the slider
+  //goes back to the remembered one (or the default); the sector byte round-trips; 1.00o5's flag migrates
+  {
+    uint8  cur, back = 0, v;
+    uint16 b;
+
+    for(v = 0; v < 100; v++)
+    {
+      back = 77;
+      cur  = ui_bright_sun(v, &back);
+      T_EQ(cur, 100);
+      T_EQ(back, v);
+      T_EQ(ui_bright_sun(cur, &back), v);
+    }
+    back = 100;
+    T_EQ(ui_bright_sun(100, &back), UI_BRIGHT_DEFAULT);
+    back = 35;
+    T_EQ(ui_bright_sun(100, &back), 35);
+
+    for(v = 0; v <= 100; v++)
+    {
+      b = ui_bright_byte(v);
+      T_TRUE(b & UI_BRIGHT_SECTOR_NEW);
+      cur = 60;
+      ui_bright_load(b, &cur, &back);
+      T_EQ(cur, 60);
+      T_EQ(back, (v < 100) ? v : UI_BRIGHT_DEFAULT);
+    }
+
+    cur = 40;  ui_bright_load(1, &cur, &back);  T_EQ(cur, 100);  T_EQ(back, 40);      //1.00o5 max light on
+    cur = 40;  ui_bright_load(0, &cur, &back);  T_EQ(cur, 40);   T_EQ(back, 40);      //off
+    cur = 100; ui_bright_load(1, &cur, &back);  T_EQ(cur, 100);  T_EQ(back, UI_BRIGHT_DEFAULT);
+    cur = 250; ui_bright_load(0, &cur, &back);  T_EQ(cur, UI_BRIGHT_DEFAULT);
+  }
+
   //ACQ menu pass time (fw 0.2.63): inside the Memory column right of its rule at x 304 and left of the menu's edge at
   //380, below the rule at y 211 and above the bottom edge (386 - 8); the label and the widest value fit its width
   T_TRUE(UI_ACQ_PASS_X > 304);

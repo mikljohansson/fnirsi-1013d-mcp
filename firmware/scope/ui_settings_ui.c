@@ -314,7 +314,6 @@ static void apply_all(void)
 
   fpga_on_off_generator();
 
-  scope_set_maxlight(scopesettings.maxlight);
   fpga_set_translated_brightness();
 }
 
@@ -380,7 +379,7 @@ int ui_confirm(const ui_dlg_text *t, int restore)
 void ui_settings_run(void)
 {
   DISPLAYDATA save = displaydata;
-  uint8       boot_open, rtc_open = onoffRTC, maxlight_open = scopesettings.maxlight, restored = 0;
+  uint8       boot_open, rtc_open = onoffRTC, sun_open = scopesettings.screenbrightness, restored = 0;
   int         t, part;
   char        v[32];
 
@@ -439,8 +438,7 @@ void ui_settings_run(void)
     switch(t)
     {
       case UI_SET_SCREEN:
-        scopesettings.screenbrightness = ui_set_step(scopesettings.screenbrightness, part == UI_SET_P_PLUS);
-        scope_set_maxlight(0);
+        scope_set_brightness(ui_set_step(scopesettings.screenbrightness, part == UI_SET_P_PLUS), 0);
         break;
 
       case UI_SET_GRID:
@@ -500,8 +498,8 @@ void ui_settings_run(void)
       display_fill_rect(TIME_TEXT_XPOS, TIME_TEXT_YPOS, TIME_TEXT_WIDTH, TIME_TEXT_HEIGHT);
     }
 
-    //A brightness step leaves the top bar's max-light mode (as the fold-out's slider does): its icon back to normal
-    if(maxlight_open && !scopesettings.maxlight)
+    //fw 0.2.68: the top bar sun shows the brightness set here (yellow at 100 %)
+    if(sun_open != scopesettings.screenbrightness)
       scope_maxlight_item(0);
   }
 

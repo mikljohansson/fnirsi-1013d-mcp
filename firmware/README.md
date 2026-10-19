@@ -915,7 +915,7 @@ was. Every row is an existing setting, saved at power-off as before unless noted
 
 | group | row | values | setting |
 |---|---|---|---|
-| Display | Screen brightness | 0..100 %, - / + by 5 | `screenbrightness` (also leaves max-light mode, as the slider does) |
+| Display | Screen brightness | 0..100 %, - / + by 5 | `screenbrightness`, the same value as the fold-out slider and the top bar sun (fw 0.2.68) |
 | Display | Grid brightness | 0..100 %, - / + by 5 | `gridbrightness` |
 | Controls | File message timeout | wait for a tap / 0.7 s | `confirmationmode` |
 | Controls | Cursors | move together / move freely | `lockcursors` |

@@ -69,7 +69,8 @@ void scope_bmp_next_button(int mode);
 void scope_menu_button(int mode);
 void scope_main_return_button(int mode);
 void scope_maxlight_item(int mode);
-void scope_set_maxlight(int mode);
+void scope_set_brightness(uint8 value, int sun);
+void scope_brightness_sun(void);
 void scope_run_stop_text(void);
 void scope_channel_settings(PCHANNELSETTINGS settings, int mode);
 

@@ -541,23 +541,8 @@ void scan_for_touch(void)
       //Wait until touch is released
       tp_i2c_wait_for_touch_release();
 
-      //Toggle the max backlight brightness
-      scopesettings.maxlight ^= 1;
-
-      if(scopesettings.maxlight == 0)
-      {
-        //Set the icon to white sun
-        scope_maxlight_item(0);
-        //Set backlight brightness to user set value
-        scope_set_maxlight(0);
-      }
-      else
-      {  
-        //Set the icon to yellow sun
-        scope_maxlight_item(1);
-        //Set backlight brightness to max
-        scope_set_maxlight(1);
-      }
+      //fw 0.2.68: 100 % screen brightness and back to the value it came from (ui_settings.h); the sun redraws
+      scope_brightness_sun();
     }
     //===========================================================================================================  
     //Check if in channel 1 settings button range
@@ -914,7 +899,7 @@ void handle_main_menu_touch(void)
       if(scope_move_slider(395, 46, &scopesettings.screenbrightness))
       {
         scope_system_settings_screen_brightness_value();
-        fpga_set_translated_brightness();
+        scope_set_brightness(scopesettings.screenbrightness, 1);
       }
       continue;
     }
@@ -1322,8 +1307,8 @@ void handle_main_menu_touch(void)
           //Update the setting in the system settings menu
           scope_system_settings_screen_brightness_value();
 
-          //Update the actual screen brightness
-          fpga_set_translated_brightness();
+          //Update the actual screen brightness and the top bar sun (fw 0.2.68: one setting)
+          scope_set_brightness(scopesettings.screenbrightness, 1);
         }
       }
       //Check on grid brightness slider opened and being touched

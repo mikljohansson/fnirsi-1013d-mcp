@@ -94,8 +94,8 @@ void scope_setup_main_screen(void)
   //Show the user selected move speed
   scope_move_speed(0);
   
-  //Show the icon to white sun or yellow sun-max light
-  scope_maxlight_item(scopesettings.maxlight);      
+  //The sun: yellow at 100 % screen brightness (fw 0.2.68)
+  scope_maxlight_item(0);
 
   //Display the trigger menu select button and the settings
   scope_trigger_settings(0);
@@ -1762,19 +1762,15 @@ void scope_main_return_button(int mode)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//fw 0.2.68: the top bar sun shows the screen brightness (ui_settings.h): yellow at 100 %, white below; magenta while
+//touched (mode 2). 1.00o5 drew it from its max-light flag (mode 0 / 1).
 void scope_maxlight_item(int mode)
 {
    //Draw the black background
    display_set_fg_color(BLACK_COLOR);
    display_fill_rounded_rect(MAXLIGHT_BUTTON_XPOS, MAXLIGHT_BUTTON_YPOS, MAXLIGHT_BUTTON_WIDTH, MAXLIGHT_BUTTON_HEIGHT, 2); 
 
-  if(mode == 0)
-  {
-    //Inactive so white foreground and black background
-    display_set_fg_color(WHITE_COLOR);
-    display_set_bg_color(BLACK_COLOR);
-  }
-  else if(mode == 2)
+  if(mode == 2)
   {
     //Active, magenta rounded button
     display_set_fg_color(MAGENTA_COLOR);
@@ -1783,12 +1779,11 @@ void scope_maxlight_item(int mode)
     display_set_fg_color(BLACK_COLOR);
     display_set_bg_color(MAGENTA_COLOR);
   }
-  else if(mode == 1)
+  else
   {
-    //Active so yellow foreground and black background
-    display_set_fg_color(YELLOW_COLOR);
-    //Active, magenta menu button
-    display_set_bg_color(BLACK_COLOR); 
+    //Yellow sun at maximum, white below, on black
+    display_set_fg_color((scopesettings.screenbrightness >= UI_BRIGHT_MAX) ? YELLOW_COLOR : WHITE_COLOR);
+    display_set_bg_color(BLACK_COLOR);
   }
     
   //Display the icon with the set colors
@@ -1800,20 +1795,21 @@ void scope_maxlight_item(int mode)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void scope_set_maxlight(int mode)
+//fw 0.2.68: a new screen brightness from the sun, the slider or the Settings screen: the backlight, and the sun when
+//`sun` (not while the full-screen Settings page covers the top bar; it redraws the sun when it closes)
+void scope_set_brightness(uint8 value, int sun)
 {
-  if(mode == 0)
-  {
-    scopesettings.maxlight = 0;   //flag set to 0 - no max light
-    //Update the actual screen brightness
-    fpga_set_translated_brightness();
-  }
-  else if(mode == 1)
-  {
-    scopesettings.maxlight = 1;   //flag set to 1 - max light
-    //Update the screen brightness to max
-    fpga_set_backlight_brightness(60000);   //max brightness
-  }
+  scopesettings.screenbrightness = (value > UI_BRIGHT_MAX) ? UI_BRIGHT_MAX : value;
+  fpga_set_translated_brightness();
+
+  if(sun)
+    scope_maxlight_item(0);
+}
+
+//The sun tapped: 100 % and back (ui_bright_sun); an open Screen brightness slider follows
+void scope_brightness_sun(void)
+{
+  scope_set_brightness(ui_bright_sun(scopesettings.screenbrightness, &scopesettings.brightback), 1);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -6258,12 +6254,8 @@ void scope_system_settings_screen_brightness_item(int mode)
   }
   else
   {    
-    //Set the icon to white sun
-    scope_maxlight_item(0);
-    //switch from max light to user set value
-    scope_set_maxlight(0);
-    
-    //Active so black foreground and yellow background
+    //Active so black foreground and yellow background (fw 0.2.68: the slider shows the brightness as it is, 100 % after
+    //the sun; 1.00o5 left max-light mode here)
     display_set_fg_color(BLACK_COLOR);
     display_set_bg_color(YELLOW_COLOR);
   }

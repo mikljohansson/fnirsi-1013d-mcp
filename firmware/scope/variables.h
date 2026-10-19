@@ -638,7 +638,7 @@ struct tagScopeSettings
   uint8 ACQ_trace;            //flag for choice trace. 0-linear, 1-peak, 2-sine x
   
   uint8 new_autosetup;        //flag switch between old and 1-new autosetup
-  uint8 maxlight;             //flag switch between user setting backlight or 1-max backlight
+  uint8 brightback;           //fw 0.2.68: the screen brightness the top bar sun returns to (was the max-light flag)
   uint8 ref_on_startup;       //flag on reference waveforms on startup, 1 active
   
   uint8 lockcursors;          //flag for lock move cursors
