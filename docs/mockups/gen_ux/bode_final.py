@@ -62,7 +62,7 @@ def fr_overview(pts):
 
 
 def fr_slider(f0, f1, overview=None):
-    """Start..Stop as a window over 1 Hz..10 MHz on the log axis, the Scope slider's construction (fw 0.2.72: the line
+    """Start..Stop as a window over 1 Hz..10 MHz on the log axis, the Scope slider's construction (fw 0.2.73: the line
     at y 452, the track y 453..471, the window's two edge lines); dragging moves Start and Stop together by whole steps
     and re-sweeps, a tap outside the window centres it there. With the overview AUTO SET kept drawn in the track
     (x 209..727: 100 Hz .. 10 MHz), nothing before the first AUTO SET"""

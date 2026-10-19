@@ -393,7 +393,7 @@ def spectrum_strip():
 
 
 def spectrum_slider(start_khz=0.0, span_khz=SPAN_KHZ, nyq_khz=NYQ_KHZ):
-    """the Scope's slider row (fw 0.2.72: the line at y 452, the track x 2..727 / y 453..471, the window's two edge
+    """the Scope's slider row (fw 0.2.73: the line at y 452, the track x 2..727 / y 453..471, the window's two edge
     lines) with the shown span as a window over 0..fs/2: left edge at start / (fs/2), width span / (fs/2) of the 726 px
     track; dragging it pans the centre, the span stays (owner); a tap outside it centres it there"""
     x0 = OV_X + start_khz / nyq_khz * OV_W

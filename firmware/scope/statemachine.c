@@ -71,7 +71,7 @@ void touch_handler(void)
       //Check if the trigger point position can be moved (fw 0.2.64: also by the record slider)
       if((touchstate & TOUCH_STATE_MOVE_TRIGGER_POINT) || ((touchstate & TOUCH_STATE_MASK) == TOUCH_STATE_MOVE_RECORD))
       {
-        //fw 0.2.72, tap to jump: a touch-down on the slider row outside the window centres the window there first; the
+        //fw 0.2.73, tap to jump: a touch-down on the slider row outside the window centres the window there first; the
         //drag goes on from the new place
         if((touchstate & TOUCH_STATE_MASK) == TOUCH_STATE_MOVE_RECORD)
           scopesettings.triggerhorizontalposition = acq_view_slider_jump(scopesettings.triggerhorizontalposition,

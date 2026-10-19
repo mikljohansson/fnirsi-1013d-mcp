@@ -1027,7 +1027,7 @@ what each screen does; this is what changed:
 1. **Left handle column** (x 0..43): CH1, CH2 and the eight reference pointers each own the 44 rows around their tip
    (`scope_pointer_top(position) + 6`, the clamped position the pointer is drawn at); the nearest switched-on pointer
    wins, a tie to the one drawn on top (draw order CH1, CH2, ref1..ref8). A drag moves it vertically.
-2. **Record-position slider** (fw 0.2.72: a line at y 452, the track x 2..727 / y 453..471; hit area from y 450, and up
+2. **Record-position slider** (fw 0.2.73: a line at y 452, the track x 2..727 / y 453..471; hit area from y 450, and up
    to y 436 when nothing else is near: 44 px): the window follows the finger, dragging right shows later samples (the
    trace moves left), limited to the record (`acq_view_slider_pos`). A touch-down on the row (y 450 down) outside the
    window first centres the window there (tap to jump, `acq_view_slider_jump`); the extended area above the row never
@@ -1089,7 +1089,7 @@ stop labels and ten fixed divisions before); the cards at y 426 (peak frequency 
 above); the slider row at y 452..471 in the Scope's construction: the shown span as a window over the axis 0 ..
 min(fs/2, 25 MHz) (the window fills the track at the full span), a drag pans the centre with the span kept (the window
 follows the finger, as the Scope's record slider). The waterfall's and density's colour legend sits inside the plot's
-top right (y 72). The info line and the strip went in 0.2.56. Since 0.2.72 the track shows the whole axis's spectrum
+top right (y 72). The info line and the strip went in 0.2.56. Since 0.2.73 the track shows the whole axis's spectrum
 (below, "Slider track overview") and a tap outside the window centres it there.
 Each plot column shows the highest bin it covers, so narrow lines survive at 720 columns; zoomed in past one bin per
 column it draws straight lines between bins. A white triangle marks the peak (DC bins skipped). Below 200 MS/s an orange line says
@@ -1232,7 +1232,7 @@ column. Not host-testable (scope_functions.c and spectrum.c drawing are target-o
 SET_TIMEBASE / SET_TRIGGER / SET_GEN in a loop from the host and span taps: the cards row (the strip until 0.2.56)
 must never show grid or pointers.
 
-### Slider track overview (`slider_ov.c`, fw 0.2.72)
+### Slider track overview (`slider_ov.c`, fw 0.2.73)
 
 The slider row under the plot of the Scope, the Spectrum and the Frequency response (design and owner decisions:
 `docs/plans/slider-overview.md`): a line at y 452 parts it from the plot; the track below is x 2..727 (726 columns, the
@@ -1369,7 +1369,7 @@ Lines joins the valid points of each curve, Dots leaves them loose; flagged poin
 triangles mark the -3 dB crossings, the peak of a resonance and the phase crossings at +-45, +-90, -135 and -180 deg,
 from a complete table only (half a table misleads: a tank's rising skirt reads as a high-pass corner). While sweeping a
 dotted grey line marks the point being measured. Cards at y 426, chosen through MEASURES; the slider row at y 452
-(since 0.2.72 with AUTO SET's overview in the track and tap to jump; below, "Slider track overview").
+(since 0.2.73 with AUTO SET's overview in the track and tap to jump; below, "Slider track overview").
 
 **Right bar, first page** (the fixed meanings):
 

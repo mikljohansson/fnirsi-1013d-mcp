@@ -101,7 +101,7 @@ char *bu_fmt_deg(char *t, int32 mdeg);
 char *bu_fmt_fdiff(char *t, int64 dmhz);
 
 //----------------------------------------------------------------------------------------------------------------------------------
-//The slider row (owner, bode-ui.md section 2; fw 0.2.72 slider_ov.h): the Scope's construction (a line at y 452, the
+//The slider row (owner, bode-ui.md section 2; fw 0.2.73 slider_ov.h): the Scope's construction (a line at y 452, the
 //track x 2..727 / y 453..471, the window its two edge lines). The track is 1 Hz .. 10 MHz on a log scale (seven
 //decades); the window spans Start..Stop. A drag moves Start and Stop together by whole 1-2-5 steps (bode_step_mhz
 //indices 0..BODE_STEPS - 1) and stops at the ends.

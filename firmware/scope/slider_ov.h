@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// slider_ov.h - the overview in the slider track under the plot (fw 0.2.72, docs/plans/slider-overview.md).
+// slider_ov.h - the overview in the slider track under the plot (fw 0.2.73, docs/plans/slider-overview.md).
 //
 // The slider row of the Scope, the Spectrum and the Frequency response (owner 2026-10-19 21:36, section 10 F item 6):
 //   y 452          one line over x 2..727 that parts the track from the plot above it (the old frame's top; its left,
@@ -65,7 +65,7 @@ int   sov_inside(int32 x, int32 wx, int32 ww);
 //The track column of a position x (clipped to the track)
 int32 sov_col(int32 x);
 
-//Tap to jump (fw 0.2.72, owner 10 F item 2): a touch-down on the slider row (y SOV_TAP_Y and below; not the Scope's
+//Tap to jump (fw 0.2.73, owner 10 F item 2): a touch-down on the slider row (y SOV_TAP_Y and below; not the Scope's
 //extended drag area above it, which borders the cards) outside the window centres the window on the touch; the drag
 //goes on from there, so a tap and a drag end the same way (the Scope scrolls, the Spectrum pans, the Frequency response
 //sweeps the new span)

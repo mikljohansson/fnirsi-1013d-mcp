@@ -9,7 +9,7 @@
 //   x   6..726  the frequency axis, Log (decades with 2 and 5 lines) or Linear (1-2-5 steps); labels at y 400
 //   y 342..393  the C1 / C2 readout box at the bottom left (x 10..261)
 //   y 426..447  the cards chosen through MEASURES
-//   y 452..471  the slider: Start..Stop over 1 Hz .. 10 MHz; a drag pans the span and sweeps it; fw 0.2.72: AUTO SET's
+//   y 452..471  the slider: Start..Stop over 1 Hz .. 10 MHz; a drag pans the span and sweeps it; fw 0.2.73: AUTO SET's
 //               overview in the track (slider_ov.h), kept until the next AUTO SET or power-off
 // Before the first sweep the pane shows one two-line instruction. Integer only: mdB, mdeg, mHz.
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -104,7 +104,7 @@ static bv_state bv = { .start_i = 6, .stop_i = 18, .points_i = 2, .settle = BODE
 //fw 0.2.71: the table before AUTO SET's overview, given back when it is cancelled (bode-ui.md 3.2 step 6)
 static bode_snap as_snap;
 
-//fw 0.2.72 (slider-overview.md section 5, owner 10 F item 3): AUTO SET's overview, drawn in the slider track. `ov` is the
+//fw 0.2.73 (slider-overview.md section 5, owner 10 F item 3): AUTO SET's overview, drawn in the slider track. `ov` is the
 //last completed AUTO SET's (none after power-on or Restore default settings); `ov_new` is the one of the AUTO SET
 //running, taken when its overview pass completes and made `ov` when AUTO SET ends (a cancel drops it)
 typedef struct
@@ -1148,7 +1148,7 @@ static void draw_cards(int table)
     card(ui_ms_card_x(0, fit), NOTE_COLOR, ui_ms_more_text(more, extra), WHITE_COLOR, "more");
 }
 
-//fw 0.2.72: an overview in the track (slider-overview.md section 5): the magnitude, or the phase in Phase only, fitted to
+//fw 0.2.73: an overview in the track (slider-overview.md section 5): the magnitude, or the phase in Phase only, fitted to
 //the track's rows (only the shape counts: the track has no scale); valid points joined as on the chart (not across a
 //flagged point, the phase not across a wrap), a flagged point one grey pixel. Columns on the slider's log scale.
 static void draw_overview(int n, const uint64 *f, const int32 *v, const uint8 *ok, const uint8 *have, int32 wx, int32 ww)
@@ -1455,7 +1455,7 @@ static void slider_drag(void)
     return;
   }
 
-  //fw 0.2.72, tap to jump: a touch-down outside the window starts the drag as if the window had been dragged to centre
+  //fw 0.2.73, tap to jump: a touch-down outside the window starts the drag as if the window had been dragged to centre
   //on it (to the nearest steps); the release then sweeps the new span as after a drag
   jx = sov_jump(x0, (int32)ytouch, bu_slider_x(s0), bu_slider_x(e0) - bu_slider_x(s0));
 
@@ -2313,7 +2313,7 @@ void bode_view_defaults(void)
   bv.cursor_on = 0;
   bv.trace     = BU_TRACE_LINES;
   host_cfg_valid = 0;
-  ov.n = 0;                               //fw 0.2.72: no AUTO SET overview after Restore default settings
+  ov.n = 0;                               //fw 0.2.73: no AUTO SET overview after Restore default settings
   bu_ms_defaults(bv_ms);
   bv.dirty = 1;
 }

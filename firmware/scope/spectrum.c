@@ -11,7 +11,7 @@
 //   y 426..447  the cards (fw 0.2.56; chosen through MEASURES since 0.2.65, ui_meas.h): peak, level, THD, noise per
 //               channel, RBW, span, centre, the waterfall's time span
 //   y 452..471  the slider: the shown span as a window over the axis 0 .. min(fs/2, 25 MHz) (the Scope's construction);
-//               a drag pans the centre, the span kept; fw 0.2.72: the whole axis's spectrum in the track (slider_ov.h)
+//               a drag pans the centre, the span kept; fw 0.2.73: the whole axis's spectrum in the track (slider_ov.h)
 // The parameters are on the CTRL page (ctrl_page.c: Display, Analyse); the strip and the header line went in fw 0.2.56.
 // Integer only (no FPU): levels in centi-dB, frequencies in mHz (uint64).
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -635,7 +635,7 @@ static void spec_draw_freq_labels(const SPECVIEW *v, uint64 bin_mhz)
   }
 }
 
-//fw 0.2.71 (ux-makeover.md "Spectrum slider"): the Scope's slider row (fw 0.2.72: slider_ov.h, the track x 2..727 and
+//fw 0.2.71 (ux-makeover.md "Spectrum slider"): the Scope's slider row (fw 0.2.73: slider_ov.h, the track x 2..727 and
 //y 453..471, the window its two edge lines): the shown span as a window over the axis
 static void spec_slider_window(const SPECVIEW *v, int32 *x, int32 *w)
 {
@@ -652,7 +652,7 @@ static void spec_slider_window(const SPECVIEW *v, int32 *x, int32 *w)
   *w = (int32)ww;
 }
 
-//fw 0.2.72 (slider-overview.md section 4): the spectrum over the whole axis 0 .. half in the track, from the bins the
+//fw 0.2.73 (slider-overview.md section 4): the spectrum over the whole axis 0 .. half in the track, from the bins the
 //FFT already computed (no extra FFT): each column the highest bin it covers (the plot's rule), on the plot's ref level and
 //dB/div, joined as a line; dimmed outside the window wx, ww
 static void spec_draw_overview(const SPECVIEW *v, const int16 *db, uint32 full, uint32 dim, int32 wx, int32 ww)
@@ -2183,7 +2183,7 @@ int spectrum_touch(void)
   auto_refused = 0;
 
   //fw 0.2.71: the slider row; the window follows the finger (the span kept, the centre panned), as the Scope's record
-  //slider. At the full span there is nothing to pan. fw 0.2.72, tap to jump: a touch-down outside the window centres
+  //slider. At the full span there is nothing to pan. fw 0.2.73, tap to jump: a touch-down outside the window centres
   //the window there first (the window as drawn, sov_jump), then the drag goes on from the new place.
   if(ytouch >= BU_SL_HIT_Y)
   {

@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// slider_ov_draw.h - drawing the slider row and its overview (fw 0.2.72; geometry in slider_ov.h). The caller has set the
+// slider_ov_draw.h - drawing the slider row and its overview (fw 0.2.73; geometry in slider_ov.h). The caller has set the
 // screen buffer; colours are 0x00RRGGBB.
 //----------------------------------------------------------------------------------------------------------------------------------
 

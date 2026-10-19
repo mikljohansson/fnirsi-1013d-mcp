@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// test_slider_ov.c - the slider track overview's geometry (slider_ov.c, fw 0.2.72; docs/plans/slider-overview.md): the
+// test_slider_ov.c - the slider track overview's geometry (slider_ov.c, fw 0.2.73; docs/plans/slider-overview.md): the
 // track the three modes share, the column ranges with their join, rows, line runs, the inside-window test.
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -201,7 +201,7 @@ static void test_inside(void)
   T_EQ(sov_col(300), 300);
 }
 
-//Tap to jump (fw 0.2.72, owner 10 F item 2)
+//Tap to jump (fw 0.2.73, owner 10 F item 2)
 static void test_jump(void)
 {
   int32 x, y;

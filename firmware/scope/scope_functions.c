@@ -2183,7 +2183,7 @@ void scope_display_trace_data(void)
   //display_fill_rect(2, 44, 728, 434);       //opravit rozmery
 
   //The grid lines and dots unless Grid is off (fw 0.2.56, as in scope_preset_values); the record-position slider row
-  //with its overview after the traces (fw 0.2.72: from the record as drawn, after the averaging below)
+  //with its overview after the traces (fw 0.2.73: from the record as drawn, after the averaging below)
   scope_draw_grid_lines();
 
   //Check if scope is in normal display mode
@@ -2333,7 +2333,7 @@ void scope_display_trace_data(void)
     }
   }
 
-  //fw 0.2.72: the slider row, the record's overview and the window (slider-overview.md)
+  //fw 0.2.73: the slider row, the record's overview and the window (slider-overview.md)
   scope_draw_slider_row();
 
   //Draw the cursors with their measurement displays
@@ -2429,7 +2429,7 @@ int32 scope_get_x_sample(PCHANNELSETTINGS settings, int32 index)
 
 int32 scope_get_y_sample(PCHANNELSETTINGS settings, int32 index)
 {
-  //fw 0.2.72: the code-to-screen part is scope_code_to_y (the slider track's overview uses it too)
+  //fw 0.2.73: the code-to-screen part is scope_code_to_y (the slider track's overview uses it too)
   if (math_sample) return scope_code_to_y(settings, scopesettings.math_tracebuffer[index]);
   return scope_code_to_y(settings, settings->tracebuffer[index]);
 }

@@ -253,7 +253,7 @@ def scope_plot(warning="CH1 overrange: increase V/div"):
 
 
 # ---------------------------------------------------------------- the slider row and its overview (docs/plans/slider-overview.md)
-# fw 0.2.72 (owner 10-19 21:36, slider-overview.md 10 F item 6; firmware slider_ov.h): one line at y 452 over x 2..727
+# fw 0.2.73 (owner 10-19 21:36, slider-overview.md 10 F item 6; firmware slider_ov.h): one line at y 452 over x 2..727
 # parts the track from the plot (no frame sides or bottom); the track is x 2..727 (726 columns, TBV_SLIDER_X / _W,
 # BU_SL_X / _W) and y 453..471 (19 rows); the window is two 1 px lines, its left and right edges, over the track's full
 # height. The overview uses every row and column: dimmed outside the window, full colour inside it; the edges are drawn
@@ -306,7 +306,7 @@ def ov_svg(win_x, win_w, layers):
 
 
 def slider_row(win_x=189, win_w=350, layers=()):
-    """the record-position slider under the grid (menu.c scope_draw_slider_row, fw 0.2.72: the line at y 452, the
+    """the record-position slider under the grid (menu.c scope_draw_slider_row, fw 0.2.73: the line at y 452, the
     overview in the track y 453..471, the window's two edge lines; fw 0.2.64 tbv_slider window). The Scope boards'
     window: 3000 samples at 500 kSa/s, 200 us/div, the trigger at the record's middle on the centre line: first sample
     776 -> x 2 + 776 x 726 / 3000 = 189, 1449 samples on screen -> 350 px"""

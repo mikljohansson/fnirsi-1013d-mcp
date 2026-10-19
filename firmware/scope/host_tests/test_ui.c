@@ -1409,7 +1409,7 @@ static void test_bode_scales(void)
   //The slider: 1 Hz .. 10 MHz over the track; the design's spans; a drag shifts both ends by whole steps, kept on it
   T_EQ(bu_slider_x(0), BU_SL_X);
   T_EQ(bu_slider_x(BODE_STEPS - 1), BU_SL_X + BU_SL_W);
-  T_EQ(bu_slider_x(11), 386);                      //5 kHz (fw 0.2.72: the track x 2..727, 384 on x 4..723)
+  T_EQ(bu_slider_x(11), 386);                      //5 kHz (fw 0.2.73: the track x 2..727, 384 on x 4..723)
   T_EQ(bu_slider_x(17), 593);                      //500 kHz
   T_EQ(bu_slider_x(6), 209);                       //100 Hz
   for(i = 1; i < BODE_STEPS; i++)
