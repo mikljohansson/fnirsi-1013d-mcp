@@ -384,6 +384,10 @@ class SimConfig:
     #: corrected codes: core A reads + (d + e x + q x^2) / 2 + cm, core B - (d + e x + q x^2) / 2 + cm (x = code - 128);
     #: the firmware's tracker is modelled as converged (it reports and takes out d, e and cm; q is reported only)
     v4: tuple[tuple[float, float, float, float], tuple[float, float, float, float]] | None = None
+    #: input window (volts at the BNC, +-) per hardware range 0..5 of the stage in front of the offset injection: a
+    #: level beyond it pins the stage, and the noise (which the model puts in front of it) goes with the signal (bench
+    #: 2026-10-19: -1.2 V DC saturates 0.1 and 0.2 V/div, the ADC then reads a noise-free constant); None: no limit
+    frontend_window_v: tuple[float, float, float, float, float, float] | None = None
 
 
 #: the simulated running build's commit time (yy mm dd hh mm ss, UTC) and hash (GET_INFO fw_build)
@@ -688,6 +692,9 @@ class Device:
         cs = settings.channels[ch]
         if cs.coupling == 1:
             v = v - sig.dc
+        if self.cfg.frontend_window_v is not None:
+            w = self.cfg.frontend_window_v[min(cs.range, 5)]
+            v = np.clip(v, -w, w)
         cal = self.cal[ch]
         vpl = P.uv_per_lsb_q8(cal.input_calibration[cs.range], cs.range) / 256.0 * 1e-6
         if self.cfg.offset_slope is None:
@@ -782,6 +789,16 @@ class Device:
         c = self._v3_corr(ch, settings)
         return c["gain16"], c["corr16"]
 
+    def _pinned(self, ch: int, t: np.ndarray, settings: Settings) -> np.ndarray | None:
+        """Where the front-end window (``frontend_window_v``) pins the stage (None: no window model)."""
+        w = self.cfg.frontend_window_v
+        if w is None:
+            return None
+        sig = self.cfg.signals[ch]
+        cs = settings.channels[ch]
+        v = sig.eval(t, settings.gen) - (sig.dc if cs.coupling == 1 else 0.0)
+        return np.abs(v) >= w[min(cs.range, 5)]
+
     def _codes(self, ch: int, t: np.ndarray, core: str, settings: Settings,
                noise: np.ndarray | None = None) -> np.ndarray:
         """Uncompensated 8-bit codes of one core at times t. ``noise`` (LSB) defaults to fresh noise."""
@@ -789,7 +806,8 @@ class Device:
         if noise is None and self.cfg.noise_lsb > 0:
             noise = self.rng.normal(0.0, self.cfg.noise_lsb, size=code.shape)
         if noise is not None:
-            code = code + noise
+            pin = self._pinned(ch, t, settings)
+            code = code + (noise if pin is None else np.where(pin, 0.0, noise))
         return np.clip(np.rint(code), 0, 255).astype(np.uint8)
 
     _NOISE_BLOCK = 4096
@@ -863,13 +881,15 @@ class Device:
         g = t_end0 - (L - 1) * step + np.arange((n - 1) * per + L) * step
         c = np.clip(self._analog(ch, g, None, settings), 0.0, 255.0)
         mean = np.convolve(c, w, "valid")[::per][:n]
+        pin = self._pinned(ch, g, settings)
+        live = None if pin is None else 1.0 - np.convolve(pin.astype(np.float64), w / w.sum(), "valid")[::per][:n]
         if self.cfg.noise_lsb > 0:
             B = self._NOISE_BLOCK
             b0, b1 = k0 // B, (k0 + n - 1) // B
             nz = np.concatenate([np.random.default_rng((seed, b + (2 << 40), ch)).normal(0.0, 1.0, B)
                                  for b in range(b0, b1 + 1)])[k0 - b0 * B: k0 - b0 * B + n]
             sigma = math.sqrt(self.cfg.noise_lsb ** 2 + 1 / 12) * math.sqrt(float(np.sum(w * w)) * Q / C)
-            mean = mean + sigma * nz
+            mean = mean + sigma * nz * (1.0 if live is None else live)
         y = np.clip(mean, 0.0, 255.0) * dec.gain
         return np.minimum(np.floor(y / (1 << dec.shift)), 65535).astype(np.uint16)
 

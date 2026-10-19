@@ -75,18 +75,29 @@ CENTRE_TOLERANCE_CODES = 12.0  # re-centre the offset when the record's mean is 
 MAX_RANGE_SWITCHES = 6  # CH2 auto-range budget per sweep (3 for a monotonic filter, 2 more for a resonance)
 
 #: flags that make a point unusable for markers (drawn grey by the on-device view)
-BAD_FLAGS = frozenset({"ch1_clipped", "clipped", "unsettled", "incoherent", "near_floor", "low_snr"})
+BAD_FLAGS = frozenset({"ch1_clipped", "clipped", "ch2_overload", "unsettled", "incoherent", "near_floor", "low_snr"})
 
 #: wiring the person must use (design 2.5); shown with the first sweep of a session
 CONNECTION_TEXT = (
     "Wiring: calibration post -> DUT input, CH1 probe tip on the DUT input; CH2 probe tip on the DUT output. "
     "Source: the post is a 3.1 Vpp square through 1 kOhm (R21); H = CH2 / CH1, so CH1 must touch the DUT input. "
-    "Ground: connect the DUT ground to the scope's USB ground (USB connector shell or a USB breakout's GND) and leave "
-    "both probe ground clips OPEN. A DUT returned through a probe ground clip pushes the stimulus current through "
-    "R71 (100 Ohm) into the probe reference (VRF1) and adds a common error to both channels (about 10 % at 100 kHz "
-    "for a 1.6 kOhm RC, worse at low frequency). Clips on a node tied to USB ground load VRF1 and shift every trace. "
-    "Passive DUTs or buffered inputs only: the post has no protection beyond the 1 kOhm (never a coil, a MOSFET "
-    "drain or anything that can drive the post). DC coupling on both channels (the tool sets it).")
+    "Ground (default, wiring A): the DUT ground on the probe ground clips. Bench 2026-10-19: wiring A and the USB-ground "
+    "wiring gave the same H within 0.4 dB from 1 kHz to 300 kHz on a 1 kOhm / 15 nF RC; the feared return error through "
+    "R71 did not show. Alternative (wiring B, for a DUT that must not see the probe reference): the DUT ground on the "
+    "scope's USB ground (USB shell), both clips OPEN; the probes then read the DUT 1.24 V below their reference, which "
+    "saturates CH2 at 0.1 and 0.2 V/div with DC coupling (use ch2_coupling='ac' there). Never both (a clip on a node "
+    "tied to USB ground loads VRF1 and shifts every trace). Passive DUTs or buffered inputs only: the post has no "
+    "protection beyond the 1 kOhm (never a coil, a MOSFET drain or anything that can drive the post).")
+
+#: the CH2 record is this flat (largest distance from its mean, codes) while its tone is small: the front end in front
+#: of the offset injection is pinned (a DC level beyond the range's input window), the ADC sees a constant
+FLAT_CODES = 0.05
+#: after a CH2 range change at the same frequency the tone (volts) fell below this fraction of what the previous range
+#: measured: the new range's front end is saturated (its tone is gone, whatever noise the ADC adds)
+COLLAPSE_RATIO = 0.1
+OVERLOAD_TEXT = ("CH2's front end is saturated (a flat record on {vpd} V/div: a DC level of about {vdc:+.2f} V against "
+                 "the probe reference is beyond this range's input window). Remedy: wiring A (DUT ground on the probe "
+                 "ground clips, about 0 V DC), or ch2_coupling='ac', or a less sensitive CH2 range.")
 
 
 class BodeError(Exception):
@@ -374,6 +385,14 @@ class Measurement:
     #: the capture's decimation (None = legacy) as captured
     filter_effective: str = "legacy"
     fir: bool = False
+    #: set by the runner: CH2's tone vanished after a range change at the same frequency (COLLAPSE_RATIO)
+    collapsed: bool = False
+
+    @property
+    def flat2(self) -> bool:
+        """CH2 saturated: a constant record with no tone, or a tone that vanished on this range (the front end in
+        front of the offset injection pinned by a DC level beyond the range's window)."""
+        return self.collapsed or (self.ac2 < FLAT_CODES and self.codes2 < CH2_SMALL_CODES)
 
     @property
     def h(self) -> complex:
@@ -720,8 +739,15 @@ class BodeRunner:
     def __init__(self, scope: Any, *, settle: str | float = "normal", ch2_range: str | float | int = "auto",
                  background: bool = True, max_switches: int = MAX_RANGE_SWITCHES, splice: bool = True,
                  sleep: Callable[[float], None] = time.sleep, relay_wait: Callable[[], Any] | None = None,
-                 progress: Callable[[int, int, str], None] | None = None, busy_retry_s: float = 1.0):
+                 progress: Callable[[int, int, str], None] | None = None, busy_retry_s: float = 1.0,
+                 ch2_coupling: str = "dc"):
         self.s = scope
+        if ch2_coupling not in ("dc", "ac"):
+            raise ValueError(f"ch2_coupling {ch2_coupling!r}: 'dc' or 'ac'")
+        #: CH2 coupling: 'ac' removes the DUT's DC (wiring B) at the price of the coupling capacitor below ~10 Hz
+        self.ch2_coupling = ch2_coupling
+        #: channels whose offset reached the PWM limit while re-centring (reported once)
+        self._offset_exhausted: set[int] = set()
         self.settle_periods = parse_settle(settle)
         self.ch2_mode, self.ch2_vpd = self._parse_ch2(ch2_range)
         self.background = background
@@ -744,6 +770,9 @@ class BodeRunner:
         self._user_ch2_range = 3
         #: CH2 ranges a down-range step clipped on (the prediction failed there): not tried again
         self._bad_down: set[int] = set()
+        self._v_dc2 = 0.0
+        #: the prescan's range-1 measurement and its frequency (the first point re-checks CH2 against it)
+        self._ref2: tuple[float, Measurement] | None = None
         #: the generator went off or on: the DUT's DC state changed, the next point gets the first-point settle
         self._disturbed = True
 
@@ -832,14 +861,30 @@ class BodeRunner:
         codes = v_dc / vpl
         self._shift_offset(c, cfg, codes)
 
-    def _shift_offset(self, c: int, cfg: P.ChannelConfig, codes: float) -> None:
-        """Move the trace down by ``codes`` (positive = the record's mean is that far above 128)."""
-        d = cfg.dcoffset + int(round(codes * self._dcsv[c] / 100.0))
+    def _shift_offset(self, c: int, cfg: P.ChannelConfig, codes: float) -> bool:
+        """Move the trace down by ``codes`` (positive = the record's mean is that far above 128). False when the offset
+        PWM has no room left (clamped at 0 / 2000, or SET_CHANNEL refused it): noted once as a caveat."""
+        from .transport import DeviceError
+
+        want = cfg.dcoffset + int(round(codes * self._dcsv[c] / 100.0))
         lo, hi = -cfg.center_cal, 2000 - cfg.center_cal
-        d = max(lo, min(hi, d))
+        d = max(lo, min(hi, want))
+        ok = d == want
         if d != cfg.dcoffset:
-            self.s.set_channel(c, dcoffset=d)
-            self.sleep(RELAY_SETTLE_S)  # the offset PWM's filter in the front end
+            try:
+                self.s.set_channel(c, dcoffset=d)
+            except DeviceError as e:
+                if e.status != P.Status.E_BAD_ARG:
+                    raise
+                ok = False
+            else:
+                self.sleep(RELAY_SETTLE_S)  # the offset PWM's filter in the front end
+        if not ok and c not in self._offset_exhausted:
+            self._offset_exhausted.add(c)
+            self.caveats.append(f"CH{c + 1}: offset range exhausted (the trace could not be centred within the "
+                                "offset PWM's 0..2000): the DC level is beyond this range's window; see the "
+                                "ch2_overload / clipped flags")
+        return ok
 
     def _prepare(self, plans: list[PointPlan]) -> None:
         s = self.s
@@ -863,7 +908,10 @@ class BodeRunner:
                       total_samples=plans[0].total_samples)
         s.set_decim(filt)
         for c in (0, 1):
-            s.set_channel(c, enable=True, coupling=0)
+            s.set_channel(c, enable=True, coupling=1 if c == 1 and self.ch2_coupling == "ac" else 0)
+        if self.ch2_coupling == "ac":
+            self.caveats.append("CH2 AC coupled: the coupling capacitor (about 1 Hz corner) adds magnitude and phase "
+                                "error below about 10 Hz; take the thru calibration with the same coupling")
 
     def _set_rate(self, pp: PointPlan) -> None:
         s = self.s
@@ -922,10 +970,10 @@ class BodeRunner:
         real PWM slope on some units). True when something moved."""
         moved = False
         for c, centre in ((0, ms.centre1), (1, ms.centre2)):
-            if abs(centre - 128.0) > CENTRE_TOLERANCE_CODES:
+            if abs(centre - 128.0) > CENTRE_TOLERANCE_CODES and c not in self._offset_exhausted:
                 cfg = self.s.get_channel(c, cached=False)
-                self._shift_offset(c, cfg, centre - 128.0)
-                moved = True
+                if self._shift_offset(c, cfg, centre - 128.0):
+                    moved = True
         return moved
 
     def _prescan(self, pp: PointPlan) -> None:
@@ -938,7 +986,10 @@ class BodeRunner:
         self._gen(True, pp)
         ms = self._measure(pp, self.settle_periods * FIRST_POINT_SETTLE_FACTOR)
         self._disturbed = False
+        ref = ms  # range 1: the reference tone for the overload check
+        self._ref2 = (pp.f_actual, ms)
         v_dc = (ms.mean1, ms.mean2)
+        self._v_dc2 = ms.mean2  # on range 1: CH2's DC against the probe reference (a flat record has no usable mean)
         targets = []
         for c in (0, 1):
             cfg = s.get_channel(c)
@@ -959,14 +1010,43 @@ class BodeRunner:
         for _ in range(4):
             ms = self._measure(pp, self.settle_periods)
             changed = False
-            for c, clipped in ((0, ms.clipped1), (1, ms.clipped2)):
+            over = self.range[1] != 1 and self._check(ref, ms).flat2
+            if over and self.ch2_mode == "fixed":
+                raise BodeError(self._overload_text(v_dc[1]))
+            for c, clipped in ((0, ms.clipped1), (1, ms.clipped2 or over)):
                 if clipped and self.range[c] > 0 and not (c == 1 and self.ch2_mode == "fixed"):
-                    self._set_range(c, self.range[c] - 1, (ms.mean1, ms.mean2)[c])
+                    if c == 1 and over:
+                        self._bad_down.add(self.range[1])
+                    self._set_range(c, self.range[c] - 1, (ms.mean1, v_dc[1] if over else ms.mean2)[c])
                     changed = True
             if not changed:
                 changed = self._recentre_if_needed(ms)
             if not changed:
                 break
+
+    @staticmethod
+    def _collapsed(ref: Measurement, new: Measurement) -> bool:
+        """CH2's tone vanished on the new range (same frequency): ``ref`` measured it clearly on the previous one."""
+        return ref.codes2 >= 1.0 and not ref.clipped2 and abs(new.x2) < COLLAPSE_RATIO * abs(ref.x2)
+
+    def _check(self, ref: Measurement | None, new: Measurement) -> Measurement:
+        """Mark ``new`` collapsed against ``ref`` (the same frequency on another CH2 range)."""
+        if ref is not None and self._collapsed(ref, new):
+            new.collapsed = True
+        return new
+
+    def _ref_check(self, pp: PointPlan, ms: Measurement) -> Measurement:
+        """At the prescan's frequency on another CH2 range: compare with the range-1 tone; fixed mode stops on a
+        saturated CH2 (no point of the sweep would be valid)."""
+        if self._ref2 is not None and pp.f_actual == self._ref2[0] and self.range[1] != 1:
+            self._check(self._ref2[1], ms)
+        if ms.flat2 and self.ch2_mode == "fixed":
+            raise BodeError(self._overload_text(self._v_dc2))
+        return ms
+
+    def _overload_text(self, v_dc: float) -> str:
+        vpd = P.RANGE_VOLTS_PER_DIV[self.range[1]] * self.s.get_channel(1).probe_factor
+        return OVERLOAD_TEXT.format(vpd=f"{vpd:g}", vdc=v_dc)
 
     def _background(self, pp: PointPlan, plans: list[PointPlan]) -> None:
         """Generator off, one capture at this rate and CH2 range: the CH2 level in every bin the sweep will use at
@@ -994,10 +1074,10 @@ class BodeRunner:
         self._background(pp, plans)
         self._set_rate(pp)
         self._gen(True, pp)
-        ms = self._measure(pp, self._point_settle())
+        ms = self._ref_check(pp, self._measure(pp, self._point_settle()))
         retries = 0
         if self._recentre_if_needed(ms):
-            ms = self._measure(pp, self._point_settle())
+            ms = self._ref_check(pp, self._measure(pp, self._point_settle()))
             retries += 1
         if ms.unsettled:
             ms = self._measure(pp, 2 * self.settle_periods)
@@ -1012,6 +1092,8 @@ class BodeRunner:
             flags.append("ch1_clipped")
         if ms.clipped2:
             flags.append("clipped")
+        if ms.flat2:
+            flags.append("ch2_overload")
         if ms.codes1 < CH1_LOW_CODES:
             flags.append("ch1_low")
         if ms.codes2 < CH2_SMALL_CODES:
@@ -1043,11 +1125,14 @@ class BodeRunner:
         if self.ch2_mode != "auto":
             return None
         r = self.range[1]
-        if ms.clipped2:
+        if ms.clipped2 or ms.flat2:
             new = None
-            while (new is None or new.clipped2) and self.range[1] > 0 and self.switches < self.max_switches:
+            while (new is None or new.clipped2 or new.flat2) and self.range[1] > 0 and \
+                    self.switches < self.max_switches:
                 r = self.range[1]
-                self._switch(r - 1, (new or ms).mean2)
+                if (new or ms).flat2:
+                    self._bad_down.add(r)  # a saturated range is not tried again on the way down
+                self._switch(r - 1, self._v_dc2 if (new or ms).flat2 else (new or ms).mean2)
                 if prev is not None and self.splice_on:
                     ppp, pres = prev
                     self._set_rate(ppp)
@@ -1068,7 +1153,7 @@ class BodeRunner:
             return None
         self._switch(r + 1, ms.mean2)
         again = self._measure(pp, self._point_settle())
-        if again.clipped2:
+        if again.clipped2 or self._check(ms, again).flat2:
             self._switch(r, ms.mean2)  # the prediction failed: back, and do not try that range again
             self._bad_down.add(r + 1)
             return None
@@ -1154,6 +1239,8 @@ def result_caveats(res: SweepResult) -> list[str]:
     text = {
         "clipped": "CH2 clipped (set ch2_range='auto' or a larger V/div)",
         "ch1_clipped": "CH1 clipped",
+        "ch2_overload": "CH2 saturated by the DUT's DC level (a flat record): wiring A (DUT ground on the probe clips), "
+                        "ch2_coupling='ac' or a less sensitive CH2 range",
         "ch1_low": f"CH1 fundamental below {CH1_LOW_CODES:g} codes: the DUT input loads the 1 kOhm source",
         "ch2_small": f"CH2 below {CH2_SMALL_CODES:g} codes peak: the ADC's linearity limits these to about +-1 dB / "
                      "+-6 deg",
@@ -1207,6 +1294,8 @@ def main(argv: Iterable[str] | None = None) -> int:
     ap.add_argument("--points", type=int, default=50)
     ap.add_argument("--settle", default="normal", help=f"{', '.join(SETTLE_PRESETS)} or periods")
     ap.add_argument("--ch2-range", default="auto", help="auto, fixed (the current CH2 range) or a V/div")
+    ap.add_argument("--ch2-coupling", choices=("dc", "ac"), default="dc",
+                    help="ac removes the DUT's DC from CH2 (wiring B: the DUT sits 1.24 V below the probe reference)")
     ap.add_argument("--no-background", action="store_true", help="skip the generator-off floor captures")
     ap.add_argument("--thru", default=None, help="'measure' to record a thru calibration, or a calibration file")
     ap.add_argument("--thru-out", default=None, help="where --thru measure saves the calibration (JSON)")
@@ -1247,7 +1336,8 @@ def main(argv: Iterable[str] | None = None) -> int:
         s.ensure_control()
         try:
             r = BodeRunner(s, settle=settle, ch2_range=a.ch2_range, background=not a.no_background,
-                           progress=lambda i, n, t: print(f"  {i}/{n} {t}", file=sys.stderr))
+                           progress=lambda i, n, t: print(f"  {i}/{n} {t}", file=sys.stderr),
+                           ch2_coupling=a.ch2_coupling)
             res = r.run(plans, thru, role="thru" if a.thru == "measure" else "measure")
         finally:
             s.end_control(keep_settings=True)

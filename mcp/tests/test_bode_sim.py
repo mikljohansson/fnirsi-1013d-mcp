@@ -194,6 +194,62 @@ def test_fixed_ch2_range_and_clipping(sim_factory):
     assert any(c.startswith(f"{n_clip} point(s) clipped") for c in B.result_caveats(res))
 
 
+DIV_LOW = "dut_out:r=1.6k,c=1n,gain=0.05,offset=-1.1"  # 75 mV peak about -1 V DC from the probe reference
+WINDOW = (50.0, 50.0, 20.0, 5.0, 1.5, 0.2)  # the 0.1 V/div range pins beyond +-0.2 V
+
+
+def test_ch2_overload_flat_record(sim_factory):
+    """Bench 2026-10-19: wiring B puts the DUT about 1.2 V below the probe reference; on 0.1 V/div the stage in front of
+    the offset injection pins and the ADC sees a constant the offset loop can centre. Fixed range: refused with the
+    remedy; auto: stepped up and flagged; AC coupling: measured."""
+    srv = _sim(sim_factory, ch1=FAST_IN, ch2=DIV_LOW, noise_lsb=0.5)
+    srv.device.cfg.frontend_window_v = WINDOW
+    plans = B.plan_sweep(30e3, 300e3, 3)
+    with Scope.connect(srv.url) as s:
+        with pytest.raises(B.BodeError, match="saturated.*wiring A.*ch2_coupling='ac'"):
+            _run(s, plans, ch2_range="0.1", background=False)
+        ac = _run(s, plans, ch2_range="0.1", ch2_coupling="ac", background=False)
+        assert {p.ch2_range for p in ac.points} == {5} and not any("ch2_overload" in p.flags for p in ac.points)
+        assert any("AC coupled" in c for c in ac.caveats)
+        ref = _run(s, plans, ch2_range="0.5", background=False)
+        for a, r in zip(ac.points, ref.points):
+            assert abs(B.db(abs(a.h)) - B.db(abs(r.h))) < 0.1
+        assert s.get_channel(1, cached=False).coupling == 0  # restored
+    m = B.Measurement(1, 1e-6, 0, 0, -90, None, None, None, False, False, 50, 0.01, 0, -1.0, 40, 0.01, 128, 128)
+    assert m.flat2 and not B.Measurement(1, 1, 0, 0, -90, None, None, None, False, False, 50, 20, 0, 0, 40, 25,
+                                         128, 128).flat2
+
+
+def test_auto_range_steps_up_from_a_saturated_range(sim_factory):
+    srv = _sim(sim_factory, ch1=FAST_IN, ch2=DIV_LOW, noise_lsb=0.5)
+    srv.device.cfg.frontend_window_v = WINDOW
+    with Scope.connect(srv.url) as s:
+        res = _run(s, B.plan_sweep(1e6, 2e6, 3), background=False)  # the output is small: auto wants 0.1 V/div
+    assert all(p.ch2_range <= 4 for p in res.points)
+    assert not any("ch2_overload" in p.flags for p in res.points)
+
+
+def test_offset_exhausted_is_a_caveat_not_an_exception(sim_factory):
+    srv = _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, noise_lsb=0.5)
+    with Scope.connect(srv.url) as s:
+        r = B.BodeRunner(s, sleep=lambda x: None)
+        cfg = s.get_channel(1, cached=False)
+        assert r._shift_offset(1, cfg, 1e6) is False  # far beyond the PWM: clamped
+        assert any("offset range exhausted" in c for c in r.caveats)
+
+        real = s.set_channel
+
+        def refuse(c, **kw):
+            if "dcoffset" in kw and len(kw) == 1:
+                from fnirsi1013d.transport import DeviceError
+                raise DeviceError(P.Cmd.SET_CHANNEL, P.Status.E_BAD_ARG, 3, "pwm out of range")
+            return real(c, **kw)
+        s.set_channel = refuse
+        r2 = B.BodeRunner(s, sleep=lambda x: None)
+        assert r2._shift_offset(0, s.get_channel(0, cached=False), 5.0) is False
+        assert len([c for c in r2.caveats if "offset range exhausted" in c]) == 1
+
+
 def test_floor_sweep_flags_near_floor(sim_factory):
     """CH2 on the DUT ground (here: no signal): every point sits on the background, flagged and left out of the
     markers."""

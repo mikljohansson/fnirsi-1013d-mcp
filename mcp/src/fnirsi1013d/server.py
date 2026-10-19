@@ -2715,6 +2715,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         ch2_range: Annotated[str | float, Field(description="'auto' (down-range CH2 as the response falls, splice "
                                                             "at each switch), 'fixed' (CH2's current range) or a "
                                                             "V/div at the probe tip")] = "auto",
+        ch2_coupling: Annotated[Literal["dc", "ac"], Field(description="'ac' removes the DUT's DC level from CH2 "
+                                "(wiring B puts the DUT 1.24 V below the probe reference, which saturates CH2 on 0.1 "
+                                "and 0.2 V/div); about 1 Hz corner, take the thru with the same coupling")] = "dc",
         thru_cal: Annotated[str | None, Field(description="'measure': this sweep is a thru calibration (both "
                                                           "probes on the DUT input; stored under thru_name); a "
                                                           "stored name: divide this sweep by it")] = None,
@@ -2728,7 +2731,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     ) -> dict[str, Any]:
         """Frequency response H(f) = CH2 / CH1 of a passive DUT driven by the calibration-pin generator (stepped
         single tone, docs/plans/bode-design.md). Wiring: post -> DUT input with the CH1 tip there, CH2 tip on the DUT
-        output, DUT ground to the scope's USB ground (USB shell), probe ground clips OPEN. Per point the generator
+        output, DUT ground on the probe ground clips (wiring A; bench 2026-10-19: the same H as the USB-ground wiring
+        within 0.4 dB). Wiring B (DUT ground on the USB shell, clips open) puts the DUT 1.24 V below the probe
+        reference: use ch2_coupling='ac' there, or CH2 saturates on 0.1 and 0.2 V/div. Per point the generator
         runs at a clean-edge frequency 50 MHz / M, both channels are captured through the 16-bit CIC3 + FIR filter
         at a rate that makes the record a whole number of periods (legacy 200 MSa/s above 1.5 MHz), and a single-bin
         DFT at the exact DDS frequency gives magnitude (dB) and phase (deg); the square's harmonics drop out.
@@ -2741,10 +2746,13 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
 
         Drives the calibration pin (3.1 Vpp square through 1 kOhm): the first call returns a confirmation token.
         Passive DUTs or buffered inputs only, never a coil, a MOSFET drain or anything that can drive the post.
-        Changes the channels (DC coupling, ranges, offsets), time base, trigger, filter and generator during the
+        A CH2 saturated by the DUT's DC level reads flat: the point is flagged ch2_overload, auto mode steps CH2 up a
+        range, a fixed range stops with the remedy.
+
+        Changes the channels (coupling, ranges, offsets), time base, trigger, filter and generator during the
         sweep and gives them back afterwards."""
         args = {"start": start, "stop": stop, "points": points, "settle": settle, "ch2_range": ch2_range,
-                "thru_cal": thru_cal, "thru_name": thru_name, "background": background,
+                "ch2_coupling": ch2_coupling, "thru_cal": thru_cal, "thru_name": thru_name, "background": background,
                 "max_duration_s": max_duration_s, "inline_max": inline_max}
         thru_dir = Path(cfg.data_dir) / "bode" / "thru"
 
@@ -2800,7 +2808,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     pass
 
             runner = BD.BodeRunner(s, settle=settle_p, ch2_range=ch2_range, background=background,
-                                   relay_wait=sess.relay_slot, progress=progress)
+                                   relay_wait=sess.relay_slot, progress=progress, ch2_coupling=ch2_coupling)
             res = runner.run(plans, cal, role="thru" if thru_cal == "measure" else "measure")
             out: dict[str, Any] = {"ok": True}
             if not sess.bode_wiring_shown:
@@ -2839,8 +2847,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 cav.append("thru calibration: both probes must have been on the DUT input node; |H| should be "
                            "within a few % of 0 dB (the CH1 / CH2 mismatch), otherwise the wiring was wrong")
             if not out.get("connection"):
-                cav.append("wiring: DUT ground on the USB ground, probe ground clips open (see the connection text "
-                           "of the first sweep)")
+                cav.append("wiring: DUT ground on the probe ground clips (wiring A), or on the USB ground with the "
+                           "clips open and ch2_coupling='ac' (see the connection text of the first sweep)")
             out["caveats"] = cav
             out["applied"] = {"points": len(res.points), "f_first": plans[0].f_actual, "f_last": plans[-1].f_actual}
             return out
