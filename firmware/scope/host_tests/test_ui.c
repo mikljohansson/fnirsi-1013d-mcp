@@ -298,9 +298,28 @@ static void test_ctrl_page(void)
     T_STR(ui_display_value(1, 0, 1), "Spec");
   }
 
-  //RUN/STOP labels fit the 51 px button with 2 px margins (fw 0.2.63): "RUN" in the 16 px font, "Stopped" in the 13 px
-  T_TRUE(ui_text_width(&font_3, ui_run_label[1]) <= UI_BAR_W - 4);
-  T_TRUE(ui_text_width(&font_2, ui_run_label[0]) <= UI_BAR_W - 4);
+  //RUN/STOP (fw 0.2.68): the action labels fit the 51 px button with 2 px margins in the 16 px font, the chip texts the
+  //38 px chip at 1.00o5's offsets; one view for both: running or a host acquisition is RUN, a UI single armed is WAIT
+  {
+    int r, w, h;
+
+    T_TRUE(ui_text_width(&font_3, ui_run_action[0]) <= UI_BAR_W - 4);
+    T_TRUE(ui_text_width(&font_3, ui_run_action[1]) <= UI_BAR_W - 4);
+    T_STR(ui_run_action[0], "RUN");
+    T_STR(ui_run_action[1], "STOP");
+    for(r = 0; r < 3; r++)
+      T_TRUE(ui_text_width(&font_3, ui_run_chip[r]) <= 38 - 2);
+    T_EQ((38 - ui_text_width(&font_3, ui_run_chip[UI_RUN_STOP])) / 2, 1);   //centred = 1.00o5's offsets 1, 5, 2
+    T_EQ((38 - ui_text_width(&font_3, ui_run_chip[UI_RUN_RUN])) / 2, 5);
+    T_EQ((38 - ui_text_width(&font_3, ui_run_chip[UI_RUN_WAIT])) / 2, 2);
+    for(r = 0; r < 2; r++)
+      for(w = 0; w < 2; w++)
+        for(h = 0; h < 2; h++)
+          T_EQ(ui_run_view(r, w, h), r ? (w ? UI_RUN_WAIT : UI_RUN_RUN) : (h ? UI_RUN_RUN : UI_RUN_STOP));
+    T_STR(ui_run_chip[UI_RUN_STOP], "STOP");
+    T_STR(ui_run_chip[UI_RUN_RUN], "RUN");
+    T_STR(ui_run_chip[UI_RUN_WAIT], "WAIT");
+  }
 
   //ACQ menu pass time (fw 0.2.63): inside the Memory column right of its rule at x 304 and left of the menu's edge at
   //380, below the rule at y 211 and above the bottom edge (386 - 8); the label and the widest value fit its width

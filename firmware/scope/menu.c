@@ -544,15 +544,26 @@ void scope_control_button(int mode)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-//fw 0.2.63 (owner): a two-state button showing the state, a tap changes it (ui_ctrl.h): green "RUN" while running,
-//amber "Stopped" while stopped (red is for destructive actions), black text; orange while touched as every bar button
+//fw 0.2.68 (owner): one run state for the chip and the button (ui_ctrl.h ui_run_view); a host acquisition in progress
+//counts as running (pc_glue_host_busy)
+int scope_run_view(void)
+{
+  return ui_run_view(scopesettings.runstate, (scopesettings.triggermode == 1) && !triggerlong, pc_glue_host_busy());
+}
+
+//What the chip and the button last drew (UI_RUN_*; 0xFF: not drawn), for pc_run_follow
+uint8 scope_run_chip_shown = 0xFF;
+uint8 scope_run_button_shown = 0xFF;
+
+//fw 0.2.68 (owner, reverses 0.2.63): the button shows the ACTION a tap does: green "RUN" while stopped, red "STOP"
+//while running or waiting (white text on red, black on green); orange while touched as every bar button
 void scope_run_stop_button(int mode)
 {
-  int         run = scopesettings.runstate ? 1 : 0;
-  const char *s = ui_run_label[run];
-  PFONTDATA   f = run ? &font_3 : &font_2;
+  int         view = scope_run_view();
+  int         act = (view != UI_RUN_STOP) ? 1 : 0;
+  const char *s = ui_run_action[act];
 
-  display_set_fg_color(mode ? ITEM_ACTIVE_COLOR : run ? GREEN_COLOR : UI_C_AMBER);
+  display_set_fg_color(mode ? ITEM_ACTIVE_COLOR : act ? RED_COLOR : GREEN_COLOR);
 
   //Draw the body of the button
   display_fill_rounded_rect(739, 65, 51, 50, 2);
@@ -561,9 +572,10 @@ void scope_run_stop_button(int mode)
   display_set_fg_color(0x00505050);
   display_draw_rounded_rect(739, 65, 51, 50, 2);
 
-  display_set_fg_color(BLACK_COLOR);
-  display_set_font(f);
-  display_text(765 - ui_text_width(f, s) / 2, 65 + (50 - f->height) / 2, (int8 *)s);
+  display_set_fg_color((act && !mode) ? WHITE_COLOR : BLACK_COLOR);
+  display_set_font(&font_3);
+  display_text(765 - ui_text_width(&font_3, s) / 2, 65 + (50 - font_3.height) / 2, (int8 *)s);
+  scope_run_button_shown = (uint8)view;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -1808,41 +1820,22 @@ void scope_set_maxlight(int mode)
 
 void scope_run_stop_text(void)
 {
-  //Check if run or stop mode
-  if(scopesettings.runstate)//ok
-  {
-    //Run mode. Green box
-    if((scopesettings.triggermode == 1)&&(!triggerlong))
-        display_set_fg_color(ORANGE_COLOR); 
-        else display_set_fg_color(GREEN_COLOR);    
-  }
-  else
-  {
-    //Stop mode. Red box
-    display_set_fg_color(RED_COLOR);
-  }
-  
+  int view = scope_run_view();
+
+  //fw 0.2.68: the state (ui_run_view): green RUN, orange WAIT (single shot armed), red STOP
+  display_set_fg_color((view == UI_RUN_STOP) ? RED_COLOR : (view == UI_RUN_WAIT) ? ORANGE_COLOR : GREEN_COLOR);
+
   //Fill the box
   display_fill_rounded_rect(RUN_STOP_TEXT_XPOS, RUN_STOP_TEXT_YPOS, RUN_STOP_TEXT_WIDTH, RUN_STOP_TEXT_HEIGHT, 2);
 
   //Select the font for the text
   display_set_font(&font_3);
 
-  //Check if run or stop mode
-  if(scopesettings.runstate)//ok
-  {
-    //Run mode. Waiting mode. Black text, 
-    display_set_fg_color(BLACK_COLOR);
-    if((scopesettings.triggermode==1)&&(!triggerlong))
-        {display_text(RUN_STOP_TEXT_XPOS + 2, RUN_STOP_TEXT_YPOS + 1, "WAIT");}//3 1
-        else {display_text(RUN_STOP_TEXT_XPOS + 5, RUN_STOP_TEXT_YPOS + 1, "RUN");} //5 1
-  }
-  else
-  {
-    //Stop mode. White text
-    display_set_fg_color(WHITE_COLOR);
-    display_text(RUN_STOP_TEXT_XPOS + 1, RUN_STOP_TEXT_YPOS + 1, "STOP");
-  }
+  //Black text on green and orange, white on red, centred (gives 1.00o5's offsets 1, 5, 2; test_ui)
+  display_set_fg_color((view == UI_RUN_STOP) ? WHITE_COLOR : BLACK_COLOR);
+  display_text(RUN_STOP_TEXT_XPOS + (RUN_STOP_TEXT_WIDTH - ui_text_width(&font_3, ui_run_chip[view])) / 2,
+               RUN_STOP_TEXT_YPOS + 1, (int8 *)ui_run_chip[view]);
+  scope_run_chip_shown = (uint8)view;
   PC_TOPBAR_DRAWN();
 }
 

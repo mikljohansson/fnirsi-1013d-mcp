@@ -1659,6 +1659,71 @@ void pc_glue_main_menu_mode(int row)
 //starts or ends, whatever started or ended it (main menu, roll mode, a viewer, the host)
 static uint8 pc_bar_spectrum;
 
+//fw 0.2.68 (owner): a host acquisition in progress shows as RUN (ui_ctrl.h ui_run_view): a host ARM armed or triggered,
+//or one that finished less than UI_RUN_HOST_HOLD_MS ago (a burst of host captures holds RUN). A host STOP or
+//SET_ACQ_STATE aborts the single (ABORTED), so STOP shows at once.
+static uint8  pc_host_seen;
+static uint32 pc_host_seen_ms;
+
+int pc_glue_host_busy(void)
+{
+  if(!pc_ready)
+    return 0;
+
+  if((pc_sess.acq_state == PC_ACQ_ARMED) || (pc_sess.acq_state == PC_ACQ_TRIGGERED))
+  {
+    pc_host_seen    = 1;
+    pc_host_seen_ms = timer0ticks;
+    return 1;
+  }
+
+  if(pc_host_seen && (pc_sess.acq_state == PC_ACQ_DONE) && ((timer0ticks - pc_host_seen_ms) < UI_RUN_HOST_HOLD_MS))
+    return 1;
+
+  pc_host_seen = 0;
+  return 0;
+}
+
+//The RUN/STOP button reads STOP during a host acquisition: a tap ends it (the host's WAIT answers E_ABORTED) and the
+//UI stays stopped
+void pc_glue_host_stop(void)
+{
+  if(pc_ready)
+    pc_ui_host_stop(&pc_sess);
+
+  pc_host_seen = 0;
+}
+
+//fw 0.2.68: the chip and the button follow the run state, whoever changed it (host RUN / STOP / ARM, a single shot that
+//completed, the UI); each pass redraws whichever shows a stale value. Not in the file viewer; the button only on page
+//one and not in the waveform viewer (its slot holds the previous / next buttons there).
+static void pc_run_follow(void)
+{
+  DISPLAYDATA save;
+  int         view = scope_run_view();
+  int         chip, btn;
+
+  if(viewactive != VIEW_NOT_ACTIVE)
+    return;
+
+  chip = (scope_run_chip_shown != 0xFF) && (scope_run_chip_shown != view);
+  btn  = (scopesettings.rightmenustate == 0) && !scopesettings.waveviewmode && (scope_run_button_shown != 0xFF) &&
+         (scope_run_button_shown != view);
+
+  if(!chip && !btn)
+    return;
+
+  pc_draw_begin(&save);
+
+  if(chip)
+    scope_run_stop_text();
+
+  if(btn)
+    scope_run_stop_button(0);
+
+  pc_draw_end(&save);
+}
+
 static void pc_right_bar_follow(void)
 {
   DISPLAYDATA save;
@@ -2005,6 +2070,7 @@ void pc_glue_ui_service(void)
   phosphor_service();
   pc_right_bar_follow();
   pc_dec_follow_mode();
+  pc_run_follow();
 
   //Calibration v4 class probe (acal_live.c): only in the scope and spectrum views (the phosphor view's record rate would
   //see the gap; not while Diagnostics shows), never while a host capture is armed or triggered (the probe resets the sample system) or the host

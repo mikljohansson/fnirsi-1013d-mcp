@@ -3323,9 +3323,18 @@ void handle_right_basic_menu_touch(void)
       //Wait until touch is released
       tp_i2c_wait_for_touch_release();
 
-      //Toggle the run state
-      scopesettings.runstate ^= 1;
-      
+      //fw 0.2.68: the button does what it reads (scope_run_view): RUN while stopped, STOP while running, waiting or
+      //while a host acquisition runs (that one is aborted and the UI stays stopped)
+      if(scope_run_view() == UI_RUN_STOP)
+      {
+        scopesettings.runstate = 1;
+      }
+      else
+      {
+        scopesettings.runstate = 0;
+        pc_glue_host_stop();
+      }
+
       //Button back to inactive state
       scope_run_stop_button(0);
 

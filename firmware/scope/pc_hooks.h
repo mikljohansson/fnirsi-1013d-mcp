@@ -34,6 +34,8 @@ void pc_glue_poll_busy(void);         //UI busy loops and touch scans: no FPGA a
 void pc_glue_poll_isr(void);          //1 ms timer interrupt: safe commands and the TX pump only
 void pc_glue_ui_service(void);        //main loop, after the MAIN poll: MCP indicator
 int  pc_glue_ui_arm_allowed(void);    //0 while a host READ_RAW waits for the UI capture in flight
+int  pc_glue_host_busy(void);         //fw 0.2.68: a host acquisition in progress (the RUN/STOP chip and button read RUN)
+void pc_glue_host_stop(void);         //fw 0.2.68: the RUN/STOP button's STOP during a host acquisition: abort it
 int  pc_glue_rtc_allowed(void);       //0 while the MCP chip occupies the RTC clock slot
 void pc_glue_pass_mark(int n);        //main loop stage reached (first-pass timing, GET_LINK_STATS)
 int  pc_glue_ui_has(int feature);     //PC_FEAT_*: 1 when the running hardware supports it

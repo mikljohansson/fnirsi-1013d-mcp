@@ -27,6 +27,9 @@ void scope_setup_bottom_file_menu(int mode);
   
 void scope_control_button(int mode);
 void scope_run_stop_button(int mode);
+int  scope_run_view(void);                //fw 0.2.68: UI_RUN_* (ui_ctrl.h), what the chip and the button show
+extern uint8 scope_run_chip_shown;       //UI_RUN_* last drawn by scope_run_stop_text (0xFF: none)
+extern uint8 scope_run_button_shown;     //UI_RUN_* last drawn by scope_run_stop_button (0xFF: none)
 void scope_auto_set_button(int mode);
 void scope_next_wave_button(int mode);
 void scope_previous_wave_button(int mode);
