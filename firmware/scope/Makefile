@@ -68,8 +68,9 @@ SRCS += cal_wiz.c cal_wiz_ui.c
 # Calibration v4: interleave tracking and the class probe (pure maths in acal_track.c, host_tests/test_acal_track.c)
 SRCS += acal_track.c acal_live.c
 # Screens (fw 0.2.51): card formatting, main menu rows and mode rule (pure C, host_tests/test_ui.c)
-# fw 0.2.55: the Settings fold-out and screen tables (ui_settings.c, pure C, host_tests/test_ui.c)
-SRCS += ui_fmt.c ui_menu.c ui_settings.c
+# fw 0.2.55: the Settings fold-out and screen tables (ui_settings.c, pure C, host_tests/test_ui.c), the screen and the
+# confirmation dialog on the device (ui_settings_ui.c)
+SRCS += ui_fmt.c ui_menu.c ui_settings.c ui_settings_ui.c
 # Last: the identity data (build_id.c), so its bytes are the only ones a new commit changes.
 SRCS += build_id.c
 PC_DEFS := -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FIFO_MAP=$(PC_FIFO_MAP) \

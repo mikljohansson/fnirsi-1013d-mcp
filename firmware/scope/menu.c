@@ -24,6 +24,7 @@
 #include "spec_fmt.h"
 #include "ui_fmt.h"
 #include "ui_menu.h"
+#include "ui_settings.h"
 
 //USB drive screen: the Exit button (fw 0.2.51)
 #define USB_EXIT_X     610
@@ -6355,9 +6356,17 @@ void gen_duty_select(void)
 //display_text(GEN_MENU_XPOS+169, GEN_MENU_YPOS+76,  "1 kHz");//695 155 33
   
 }
+//fw 0.2.55: the rows come from ui_settings.h: Screen brightness, Grid brightness, File message timeout, Time and date
+//(with a clock module), Baseline calibration (interim, until Diagnostics has Calibrate), Other settings (the Settings screen)
+static int sys_fo_rtc(void)
+{
+  return pc_glue_ui_has(PC_FEAT_RTC);
+}
+
 void scope_open_system_settings_menu(void)
 {
-  int y;
+  uint8 ids[UI_FO_MAX_ROWS];
+  int   i, n = ui_fo_rows(sys_fo_rtc(), ids);
 
   //Setup the menu in a separate buffer to be able to slide it onto the screen
   display_set_screen_buffer(displaybuffertmp);
@@ -6366,38 +6375,39 @@ void scope_open_system_settings_menu(void)
   display_set_fg_color(DARKGREY_COLOR);
 
   //Fill the background
-  display_fill_rect(SYSTEM_MENU_XPOS, SYSTEM_MENU_YPOS, SYSTEM_MENU_WIDTH, SYSTEM_MENU_HEIGHT);//353
+  display_fill_rect(SYSTEM_MENU_XPOS, SYSTEM_MENU_YPOS, SYSTEM_MENU_WIDTH, SYSTEM_MENU_HEIGHT);
 
   //Draw the edge in a lighter grey
   display_set_fg_color(LIGHTGREY_COLOR);
 
   //Draw the edge
-  display_draw_rect(SYSTEM_MENU_XPOS, SYSTEM_MENU_YPOS, SYSTEM_MENU_WIDTH, SYSTEM_MENU_HEIGHT);//353
+  display_draw_rect(SYSTEM_MENU_XPOS, SYSTEM_MENU_YPOS, SYSTEM_MENU_WIDTH, SYSTEM_MENU_HEIGHT);
 
-  //Five black lines between the settings
+  //Black lines between the rows, on the last line of every row but the last
   display_set_fg_color(BLACK_COLOR);
 
-  for(y=SYSTEM_MENU_YPOS+58;y<SYSTEM_MENU_HEIGHT;y+=59)//350
+  for(i=1;i<n;i++)
   {
-    display_draw_horz_line(y, SYSTEM_MENU_XPOS+9, SYSTEM_MENU_XPOS+235);
+    display_draw_horz_line(SYSTEM_MENU_YPOS + i * UI_FO_PITCH - 1, SYSTEM_MENU_XPOS+9, SYSTEM_MENU_XPOS+235);
   }
 
   //Display the menu items
   scope_system_settings_screen_brightness_item(0);
   scope_system_settings_grid_brightness_item(0);
-  //scope_system_settings_trigger_50_item();
-  scope_system_settings_other_settings_item(0);
-  
+  scope_system_settings_filemsg_item(0);
+
+  if(sys_fo_rtc())
+    scope_system_settings_RTC_settings_item(0);
+
   scope_system_settings_calibration_item(0);
-  scope_system_settings_confirmation_item(0);
-  if(1 PC_UI_HAS(PC_FEAT_RTC)) scope_system_settings_RTC_settings_item(0);
+  scope_system_settings_other_settings_item(0);
 
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);
   display_set_screen_buffer((uint16 *)maindisplaybuffer);
 
   //Slide the image onto the actual screen. The speed factor makes it start fast and end slow, Smaller value makes it slower.
-  display_slide_left_rect_onto_screen(SYSTEM_MENU_XPOS, SYSTEM_MENU_YPOS, SYSTEM_MENU_WIDTH, SYSTEM_MENU_HEIGHT, 63039);//353
+  display_slide_left_rect_onto_screen(SYSTEM_MENU_XPOS, SYSTEM_MENU_YPOS, SYSTEM_MENU_WIDTH, SYSTEM_MENU_HEIGHT, 63039);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -6541,430 +6551,83 @@ void scope_system_settings_grid_brightness_value(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//A fold-out row (fw 0.2.55): 1.00o5's 226 x 36 box 12 px into the 59 px row, yellow while active, the icon at the left,
+//one or two 16 px text lines centred at x 256, and at the right either the value in a yellow chip (as the brightness
+//rows) or the arrow of a row that opens something
+static void sys_fo_row(int id, int mode, const uint8 *icon, uint32 iconh, const char *l1, const char *l2, const char *chip)
+{
+  uint32 y = ui_fo_row_top(sys_fo_rtc(), id);
+  uint32 w;
+
+  display_set_fg_color(mode ? YELLOW_COLOR : DARKGREY_COLOR);
+  display_fill_rounded_rect(SYSTEM_MENU_XPOS+9, y+12, 226, 36, 3);
+
+  display_set_fg_color(mode ? BLACK_COLOR : WHITE_COLOR);
+  display_set_bg_color(mode ? YELLOW_COLOR : DARKGREY_COLOR);
+  display_copy_icon_use_colors(icon, SYSTEM_MENU_XPOS+21, y+18, 24, iconh);
+
+  if(!chip)
+    display_copy_icon_use_colors(Right_drop_menu_icon, SYSTEM_MENU_XPOS+202, y+18, 24, 24);
+
+  display_set_font(&font_3);
+
+  if(l2)
+  {
+    display_text(256 - ui_text_width(&font_3, l1) / 2, y+14, (int8 *)l1);
+    display_text(256 - ui_text_width(&font_3, l2) / 2, y+30, (int8 *)l2);
+  }
+  else
+  {
+    display_text(256 - ui_text_width(&font_3, l1) / 2, y+22, (int8 *)l1);
+  }
+
+  if(chip)
+  {
+    w = ui_text_width(&font_2, chip) + 6;
+
+    if(w < 36)
+      w = 36;
+
+    display_set_fg_color(YELLOW_COLOR);
+    display_fill_rounded_rect(328, y+21, w, 16, 2);
+    display_set_font(&font_2);
+    display_set_fg_color(BLACK_COLOR);
+    display_text(328 + (w - ui_text_width(&font_2, chip)) / 2, y+22, (int8 *)chip);
+  }
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+
+//Other settings: opens the full Settings screen (ui_settings_ui.c)
 void scope_system_settings_other_settings_item(int mode)
 {
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive so dark grey background
-    display_set_fg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so yellow background
-    display_set_fg_color(YELLOW_COLOR);
-  }
-
-  //Draw the background
-  //display_fill_rounded_rect(159, 174, 226, 38, 3);//401 36 
-  display_fill_rounded_rect(SYSTEM_MENU_XPOS+9, SYSTEM_MENU_YPOS+128, 226, 38, 3);//401 36
-
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive so white foreground and grey background
-    display_set_fg_color(WHITE_COLOR);
-    display_set_bg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so black foreground and yellow background
-    display_set_fg_color(BLACK_COLOR);
-    display_set_bg_color(YELLOW_COLOR);
-  }
-
-  //Display the icon with the set colors
-  //display_copy_icon_use_colors(RTC_icon, 171, 417, 24, 24);
-    //Display the icon with the set colors
-  display_copy_icon_use_colors(Other_settings_icon, SYSTEM_MENU_XPOS+21, 181, 24, 24);//171
-  display_copy_icon_use_colors(Right_drop_menu_icon, SYSTEM_MENU_XPOS+202, 181, 24, 24);//211
-
-  //Display the text
-  display_set_font(&font_3);
-  display_text(235, 177, "Other");
-  display_text(229, 193, "settings");
+  sys_fo_row(UI_FO_OTHER, mode, Other_settings_icon, 24, "Other", "settings", 0);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void scope_system_settings_open_other_settings_menu(void)
-{
-  int y;
-  
-  uint32 *ptr = STARTUP_CONFIG_ADDRESS; //Read boot config 
-  boot_menu_start = ptr[0] & 0x07;      //choice 1 for fnirsi firmware, 0 for peco firmware, 2 for FEL mode, 4 view choice menu
-
-  //Setup the menu in a separate buffer to be able to slide it onto the screen
-  display_set_screen_buffer(displaybuffertmp);
-
-  //Draw the background in dark grey
-  display_set_fg_color(DARKGREY_COLOR);
-
-  //Fill the background
-  display_fill_rect(OTHER_MENU_XPOS, OTHER_MENU_YPOS, OTHER_MENU_WIDTH, OTHER_MENU_HEIGHT);//150  46 244 353
-
-  //Draw the edge in a lighter grey
-  display_set_fg_color(LIGHTGREY_COLOR);
-
-  //Draw the edge
-  display_draw_rect(OTHER_MENU_XPOS, OTHER_MENU_YPOS, OTHER_MENU_WIDTH, OTHER_MENU_HEIGHT);//46 413 353
-
-  //Five black lines between the settings
-  display_set_fg_color(BLACK_COLOR);
-
-  for(y=OTHER_MENU_YPOS+46;y<OTHER_MENU_YPOS+OTHER_MENU_HEIGHT;y+=46)//+59
-  {
-    display_draw_horz_line(y, OTHER_MENU_XPOS+9, OTHER_MENU_XPOS+OTHER_MENU_WIDTH-9);//1404 585//59 385 630
-  }
-
-  //Display the menu items
-  scope_system_settings_other_settings_boot_menu_item();
-  scope_system_settings_other_settings_default_start_item();
-  scope_system_settings_other_settings_new_autosetup_item();
-  scope_system_settings_other_settings_lock_cursor_item();
-  scope_system_settings_other_settings_dc_shift_cal_item();
-  scope_system_settings_other_settings_CH340_mode_item();
-  scope_system_settings_other_settings_dev_mode_item();
-  scope_system_settings_other_settings_BMP_mark_item();
-  scope_system_settings_other_settings_ref_on_start_item();
-  
-  //Set source and target for getting it on the actual screen
-  display_set_source_buffer(displaybuffertmp);
-  display_set_screen_buffer((uint16 *)maindisplaybuffer);
-
-  //Slide the image onto the actual screen. The speed factor makes it start fast and end slow, Smaller value makes it slower.
-  display_slide_left_rect_onto_screen(OTHER_MENU_XPOS, OTHER_MENU_YPOS, OTHER_MENU_WIDTH, OTHER_MENU_HEIGHT, 63039);//46 244 353
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_system_settings_other_settings_boot_menu_item(void)
-{
-  uint8 tmp;                  //for choice default start 
-  int x,y;
-  x = OTHER_MENU_XPOS + 9;
-  y = OTHER_MENU_YPOS + 6;//12
-  
-  //Inactive so dark grey background
-  display_set_fg_color(DARKGREY_COLOR);
-
-  //Draw the background
-  display_fill_rounded_rect(x, y, OTHER_MENU_WIDTH-18, 36, 3);//step 58
-  
-  //Show the state (boot menu button mode)
-  tmp=((boot_menu_start & 0x04)>>2);
-  scope_display_slide_button(x+6, y+7, tmp, GREEN_COLOR);//588
-  
-  //Display the text
-  display_set_font(&font_3);
-  display_set_fg_color(WHITE_COLOR);
-   
-  display_text(x+66, y+8, "Boot menu");     
-  //display_text(x+57, 162, "Default start"); 
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_system_settings_other_settings_default_start_item(void)
-{
-  //uint8 tmp;                  //for choice default start
-  int x,y;
-  x = OTHER_MENU_XPOS + 9;
-  y = OTHER_MENU_YPOS + 52;//step 46 //step 59
-  
-  //Inactive so dark grey background
-  display_set_fg_color(DARKGREY_COLOR);
-
-  //Draw the background
-  display_fill_rounded_rect(x, y, OTHER_MENU_WIDTH-18, 36, 3);//step 58
-
-  //Add the button for BOOT Default start
-  scope_boot_button(x+6, y+7);//588
-    
-  //Display the text
-  display_set_font(&font_3);
-  display_set_fg_color(WHITE_COLOR);
-  
-  display_text(x+66, y+8, "Default start"); 
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_system_settings_other_settings_new_autosetup_item(void)
-{
-  int x,y;
-  x = OTHER_MENU_XPOS + 9;
-  y = OTHER_MENU_YPOS + 98;//130
-  
-  //Inactive so dark grey background
-  display_set_fg_color(DARKGREY_COLOR);
-
-  //Draw the background
-  display_fill_rounded_rect(x, y, OTHER_MENU_WIDTH-18, 36, 3);//step 58
-
-  //Show the state (autosetup button mode)
-  scope_display_slide_button(x+6, y+7, scopesettings.new_autosetup, GREEN_COLOR);//588
-  
-  //Display the text
-  display_set_font(&font_3);
-  display_set_fg_color(WHITE_COLOR);
-  
-  display_text(x+66, y+8, "New autosetup");      //575 425
-}
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_system_settings_other_settings_lock_cursor_item(void)
-{
-  int x,y;
-  x = OTHER_MENU_XPOS + 9;
-  y = OTHER_MENU_YPOS + 144;//189
-  
-  //Inactive so dark grey background
-  display_set_fg_color(DARKGREY_COLOR);
-
-  //Draw the background
-  display_fill_rounded_rect(x, y, OTHER_MENU_WIDTH-18, 36, 3);//step 58
-  
-  //Show the state (lock cursors move)
-  scope_display_slide_button(x+6, y+7, scopesettings.lockcursors, GREEN_COLOR);//588
-  
-  //Display the text
-  display_set_font(&font_3);
-  display_set_fg_color(WHITE_COLOR);
-
-  display_text(x+66, y+8, "Lock move cursors"); 
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_system_settings_other_settings_dc_shift_cal_item(void)
-{
-  int x,y;
-  x = OTHER_MENU_XPOS + 9;
-  y = OTHER_MENU_YPOS + 190;//248
-  
-  //Inactive so dark grey background
-  display_set_fg_color(DARKGREY_COLOR);
-
-  //Draw the background
-  display_fill_rounded_rect(x, y, OTHER_MENU_WIDTH-18, 36, 3);//step 58
-        
-  //Show the state (dc_shift_cal button mode)
-  scope_display_slide_button(x+6, y+7, dc_shift_cal, GREEN_COLOR);//588
-   
-  //Display the text
-  display_set_font(&font_3);
-  display_set_fg_color(WHITE_COLOR);
-  
-  display_text(x+66, y+8, "DC shift calibration");     
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_system_settings_other_settings_CH340_mode_item(void)
-{
-  int x,y;
-  x = OTHER_MENU_XPOS + 9;
-  y = OTHER_MENU_YPOS + 236;//307
-  
-  //Inactive so dark grey background
-  display_set_fg_color(DARKGREY_COLOR);
-
-  //Draw the background
-  display_fill_rounded_rect(x, y, OTHER_MENU_WIDTH-18, 36, 3);//step 58
-        
-  //Show the state (dc_shift_cal button mode)
-  scope_display_slide_button(x+6, y+7, USB_CH340, GREEN_COLOR);//588
-   
-  //Display the text
-  display_set_font(&font_3);
-  display_set_fg_color(WHITE_COLOR);
-  
-  //display_text(x+66, y+8, "USB CH340 mode");  
-    display_text(x+66, y+8, "USB-Serial mode");
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_system_settings_other_settings_dev_mode_item(void)
-{
-  int x,y;
-  x = OTHER_MENU_XPOS + 9;
-  y = OTHER_MENU_YPOS + 282;//366
-  
-  //Inactive so dark grey background
-  display_set_fg_color(DARKGREY_COLOR);
-
-  //Draw the background
-  display_fill_rounded_rect(x, y, OTHER_MENU_WIDTH-18, 36, 3);//step 58
-        
-  //Show the state (dc_shift_cal button mode)
-  scope_display_slide_button(x+6, y+7, dev_mode, RED_COLOR);//588
-   
-  //Display the text
-  display_set_font(&font_3);
-  display_set_fg_color(WHITE_COLOR);
-  
-  display_text(x+66, y+8, "Dev mode"); 
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_system_settings_other_settings_BMP_mark_item(void)
-{
-  int x,y;
-  x = OTHER_MENU_XPOS + 9;
-  y = OTHER_MENU_YPOS + 328;//366
-  
-  //Inactive so dark grey background
-  display_set_fg_color(DARKGREY_COLOR);
-
-  //Draw the background
-  display_fill_rounded_rect(x, y, OTHER_MENU_WIDTH-18, 36, 3);//step 58
-        
-  //Show the state (dc_shift_cal button mode)
-  scope_display_slide_button(x+6, y+7, tag_in_BMP, GREEN_COLOR);//588
-   
-  //Display the text
-  display_set_font(&font_3);
-  display_set_fg_color(WHITE_COLOR);
-  
-  display_text(x+66, y+8, "Add a tag to BMP"); 
-}
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_system_settings_other_settings_ref_on_start_item(void)
-{
-  int x,y;
-  x = OTHER_MENU_XPOS + 9;
-  y = OTHER_MENU_YPOS + 374;//366
-  
-  //Inactive so dark grey background
-  display_set_fg_color(DARKGREY_COLOR);
-
-  //Draw the background
-  display_fill_rounded_rect(x, y, OTHER_MENU_WIDTH-18, 36, 3);//step 58
-        
-  //Show the state (ref_on_startup button)
-  scope_display_slide_button(x+6, y+7, scopesettings.ref_on_startup, GREEN_COLOR);//588
-   
-  //Display the text
-  display_set_font(&font_3);
-  display_set_fg_color(WHITE_COLOR);
-  
-  display_text(x+66, y+8, "Load Ref on start"); 
-}
-//----------------------------------------------------------------------------------------------------------------------------------
-
+//Baseline calibration: the calibration wizard (interim row; Diagnostics > Calibrate takes it over in step 4)
 void scope_system_settings_calibration_item(int mode)
 {
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive so dark grey background
-    display_set_fg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so yellow background
-    display_set_fg_color(YELLOW_COLOR);
-  }
-
-  //Draw the background
-  display_fill_rounded_rect(SYSTEM_MENU_XPOS+9, 233, 226, 36, 3);//235
-
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive so white foreground and grey background
-    display_set_fg_color(WHITE_COLOR);
-    display_set_bg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so black foreground and yellow background
-    display_set_fg_color(BLACK_COLOR);
-    display_set_bg_color(YELLOW_COLOR);
-  }
-
-  //Display the icon with the set colors
-  display_copy_icon_use_colors(baseline_calibration_icon, SYSTEM_MENU_XPOS+21, 239, 24, 25);//239
-  display_copy_icon_use_colors(Right_drop_menu_icon, SYSTEM_MENU_XPOS+202, 239, 24, 24);//211
-
-  //Display the text
-  display_set_font(&font_3);
-  display_text(225, 235, "Baseline");
-  display_text(219, 251, "calibration");
+  sys_fo_row(UI_FO_CAL, mode, baseline_calibration_icon, 25, "Baseline", "calibration", 0);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void scope_system_settings_confirmation_item(int mode)
+//File message timeout: 1.00o5's "Notification confirmation" (scopesettings.confirmationmode), which decides whether
+//file messages such as "Failed to create file" wait for a tap or close after 0.7 s
+void scope_system_settings_filemsg_item(int mode)
 {
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Set the colors for white foreground and grey background
-    display_set_fg_color(WHITE_COLOR);
-    display_set_bg_color(DARKGREY_COLOR);
-
-    //Display the icon with the set colors
-    display_copy_icon_use_colors(confirmation_icon, SYSTEM_MENU_XPOS+21, 299, 24, 24);//fw 0.2.51: X-Y's row
-
-    //Display the text
-    display_set_font(&font_3);
-    display_text(SYSTEM_MENU_XPOS+142, 295, "Notification");
-    display_text(SYSTEM_MENU_XPOS+138, 311, "confirmation");
-  }
-
-  //Show the state
-  scope_display_slide_button(SYSTEM_MENU_XPOS+70, 300, scopesettings.confirmationmode, GREEN_COLOR);
+  sys_fo_row(UI_FO_FILEMSG, mode, confirmation_icon, 24, "File message", "timeout", scopesettings.confirmationmode ? "tap" : "0.7 s");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void scope_system_settings_RTC_settings_item(int mode)//set
+//Time and date: opens 1.00o5's editor beside the fold-out (hours .. year, RTC On/Off)
+void scope_system_settings_RTC_settings_item(int mode)
 {
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive so dark grey background
-    display_set_fg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so yellow background
-    display_set_fg_color(YELLOW_COLOR);
-  }
+  sys_fo_row(UI_FO_TIME, mode, RTC_icon, 24, "Time and date", 0, 0);
 
-  //Draw the background
-  display_fill_rounded_rect(SYSTEM_MENU_XPOS+9, 351, 226, 38, 3);//fw 0.2.51: one row up (was 410)
-
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive so white foreground and grey background
-    display_set_fg_color(WHITE_COLOR);
-    display_set_bg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so black foreground and yellow background
-    display_set_fg_color(BLACK_COLOR);
-    display_set_bg_color(YELLOW_COLOR);
-  }
-
-  //Display the icon with the set colors
-  display_copy_icon_use_colors(RTC_icon, SYSTEM_MENU_XPOS+21, 358, 24, 24);
-  display_copy_icon_use_colors(Right_drop_menu_icon, SYSTEM_MENU_XPOS+202, 358, 24, 24);
-  
-
-  //Display the text
-  display_set_font(&font_3);
-  display_text(241, 354, "RTC settings");
-  display_text(213, 370, "Time & Date settings");
-  
   //Read time for RTC
   get_fattime();
 }

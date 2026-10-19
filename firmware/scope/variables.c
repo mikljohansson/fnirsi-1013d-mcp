@@ -86,7 +86,6 @@ uint32 previoustimerticks = 0;
 uint8 systemsettingsmenuopen = 0;   //flag for open menu
 uint8 screenbrightnessopen = 0;
 uint8 gridbrightnessopen = 0;
-uint8 othersettingsopen = 0;
 uint8 calibrationopen = 0;
 uint8 RTCsettingsopen = 0;
         

@@ -342,7 +342,7 @@ const ui_dlg_text ui_dlg_restore =
 const ui_dlg_text ui_dlg_delete =
 {
   "Delete from the SD card?",
-  { "The chosen files are deleted. This cannot be undone." },
+  { "This cannot be undone." },
   1, "Cancel", "Delete", 1
 };
 

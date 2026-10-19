@@ -171,21 +171,8 @@ void scope_system_settings_grid_brightness_item(int mode);
 void scope_system_settings_grid_brightness_value(void);
 
 void scope_system_settings_other_settings_item(int mode);
-void scope_system_settings_open_other_settings_menu(void);
-
-void scope_system_settings_other_settings_boot_menu_item(void);
-void scope_system_settings_other_settings_default_start_item(void);
-void scope_system_settings_other_settings_new_autosetup_item(void);
-void scope_system_settings_other_settings_lock_cursor_item(void);
-void scope_system_settings_other_settings_dc_shift_cal_item(void);
-void scope_system_settings_other_settings_CH340_mode_item(void);
-void scope_system_settings_other_settings_dev_mode_item(void);
-void scope_system_settings_other_settings_BMP_mark_item(void);
-void scope_system_settings_other_settings_ref_on_start_item(void);
-//void scope_system_settings_other_settings_ine_mark_item(void);
-
 void scope_system_settings_calibration_item(int mode);
-void scope_system_settings_confirmation_item(int mode);
+void scope_system_settings_filemsg_item(int mode);
 void scope_system_settings_RTC_settings_item(int mode);
 void scope_open_RTC_settings_menu(void);
 

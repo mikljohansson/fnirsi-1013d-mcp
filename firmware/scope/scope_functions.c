@@ -6343,7 +6343,6 @@ void scope_save_input_calibration_data(void)
 void scope_reset_config_data(void)
 {
   uint32 index;
-  uint32 *ptr = STARTUP_CONFIG_ADDRESS;     //for save and load boot menu settings
   
   //Load a default configuration in case of settings in flash being corrupted
    
@@ -6473,9 +6472,8 @@ void scope_reset_config_data(void)
   
   
   //----------------------------------------------------------------------------
-  ptr[0] = 4;  //PECO + menu //value for default start firmware (0-pepco,1-fnirsi, 2-FEL, <3 skip menu)
-  //SAVE the display configuration sector from DRAM to SDcart   //save boot menu and default start
-  sd_card_write(DISPLAY_CONFIG_SECTOR, 1, (uint8 *)0x81BFFC00);
+  //fw 0.2.55: the boot-mode byte (sector 710) is no longer written here: the start-up choice is kept (Settings >
+  //At power-on), as Restore default settings says
   
   //----------------------------------------------------------------------------
   //Load input calibration value 

@@ -214,6 +214,7 @@ typedef struct
 } ui_dlg;
 
 void ui_dlg_layout(int lines, ui_dlg *d);            //centred on the 800 x 480 screen
+int  ui_dlg_hit(const ui_dlg *d, uint32 x, uint32 y);
 
 //The texts of the two confirmations (here so the host test can check they fit the box in the device's fonts)
 typedef struct
@@ -228,6 +229,15 @@ typedef struct
 
 extern const ui_dlg_text ui_dlg_restore;     //Settings > Restore default settings
 extern const ui_dlg_text ui_dlg_delete;      //file browsers and the waveform viewer: delete
-int  ui_dlg_hit(const ui_dlg *d, uint32 x, uint32 y);
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//On the device (ui_settings_ui.c)
+
+//The Settings screen, modal until Back; leaves the screen as it found it (rebuilt after Restore default settings)
+void ui_settings_run(void);
+
+//The confirmation dialog over the screen; returns 1 for the action, 0 for Cancel. restore: save the screen under the box
+//(displaybuffer4) and put it back, else the caller redraws. The display state (buffers, colours, font) is kept.
+int  ui_confirm(const ui_dlg_text *t, int restore);
 
 #endif
