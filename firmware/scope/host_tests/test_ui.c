@@ -1649,6 +1649,159 @@ static void test_bode_texts(void)
   //Its switch row draws the texts from x 60 (bode_view.c)
   T_TRUE(60 + ui_text_width(&font_2, "other sweep settings") + 4 <= ui_fold_row_w(&f));
   T_TRUE(ui_text_width(&font_2, "Thru: both tips on the input") + 20 <= f.w);
+
+  //fw 0.2.70: the readout fault's warning (owner's fail-fast rule)
+  T_STR(bu_warn[BU_W_READOUT], "ADC readout fault: see Diagnostics");
+
+  //fw 0.2.70: Trace style at y 245 (the Scope's construction: "Trace" / "style" / the value in the 51 px button), its
+  //fold-out of two choice rows without icons
+  for(i = 0; i < BU_TRACE_COUNT; i++)
+    T_TRUE(ui_text_width(&font_2, bu_trace_names[i]) + 2 <= UI_BAR_W);
+  T_STR(bu_trace_names[BU_TRACE_LINES], "Lines");
+  ui_fold_layout(&f, 206, BU_TRACE_COUNT, 0, 245);
+  check_fold(&f);
+  for(i = 0; i < BU_TRACE_COUNT; i++)
+    T_TRUE(14 + ui_text_width(&font_3, bu_trace_names[i]) + 6 <= ui_fold_row_w(&f));
+
+  //fw 0.2.70, the top bar (bode-ui.md 7): the ACQ chip's two lines in its value column, the notes in their boxes, the
+  //trigger menu's line inside its 220 px
+  for(i = 0; i < 2; i++)
+    T_TRUE(BU_ACQ_CHIP_TEXT_X + ui_text_width(&font_2, bu_acq_chip[i]) + 2 <= BU_ACQ_CHIP_W);
+  T_TRUE(BU_NOTE_ACQ_X + ui_text_width(&font_3, bu_acq_note) + 2 * BU_NOTE_PAD <= 728);
+  T_TRUE(BU_NOTE_GEN_XR - (ui_text_width(&font_3, bu_gen_note) + 2 * BU_NOTE_PAD) >= 300);
+  T_TRUE(ui_text_width(&font_2, bu_trig_note) + 20 <= 220);
+  T_TRUE(strlen(bu_acq_note) <= BU_WARN_MAX);
+  T_TRUE(strlen(bu_gen_note) <= BU_WARN_MAX);
+}
+
+//fw 0.2.70, the grid rule (bode_ui.h bu_fgrid, ui-guidelines.md section 3): lines inside the span in order, at most
+//BU_GRID_MAX; on the log axis decades always, 2 and 5 under three decades, labelled under 1.5 decades, the linear
+//steps when fewer than two lines fall inside; labelled lines far enough apart for their labels
+static int grid_x(uint64 f0, uint64 f1, int linear, uint64 f)
+{
+  return linear ? bu_x_lin(f0, f1, f) : bu_x_log(bode_log2_q32(f0), bode_log2_q32(f1), bode_log2_q32(f));
+}
+
+//The Start / Stop steps (bode_sweep.c bode_step_mhz, not linked here)
+static uint64 step_mhz(int i)
+{
+  static const uint8 m125[3] = { 1, 2, 5 };
+  uint64 f = (uint64)m125[i % 3] * 1000;
+  int k;
+
+  for(k = 0; k < i / 3; k++)
+    f *= 10;
+  return f;
+}
+
+static void grid_check(uint64 f0, uint64 f1, int linear)
+{
+  bu_gline g[BU_GRID_MAX];
+  char   t[24];
+  int    n = bu_fgrid(f0, f1, linear, g), k, last = -1000, lastw = 0, labels = 0;
+
+  T_TRUE(n >= 1);
+  T_TRUE(n <= BU_GRID_MAX);
+
+  for(k = 0; k < n; k++)
+  {
+    T_TRUE((g[k].f >= f0) && (g[k].f <= f1));
+    if(k)
+      T_TRUE(g[k].f > g[k - 1].f);
+
+    if(g[k].label)
+    {
+      int x = grid_x(f0, f1, linear, g[k].f), w = (int)ui_text_width(&font_2, (bu_freq_short(t, g[k].f), t)) + 14;
+
+      //Centred labels with "Hz" (the Spectrum's; the edge ones are clamped inside the pane, which only moves them apart)
+      if((x - last) < (w + lastw) / 2 + 6)
+      {
+        T_TRUE(0);
+        printf("grid labels crowd: %llu .. %llu mHz %s at %d\n", (unsigned long long)f0, (unsigned long long)f1, t, x);
+      }
+
+      last = x;
+      lastw = w;
+      labels++;
+    }
+  }
+
+  T_TRUE(labels >= 1);
+}
+
+static void test_bode_grid(void)
+{
+  static const uint64 spans[][2] =
+  {
+    { 100000, 1000000000 }, { 1000000, 200000000 }, { 20000000, 100000000 }, { 44000000, 56000000 },
+    { 1000, 10000000000ull }, { 10000, 100000 }, { 5000000, 500000000 },
+    { 15300000ull * 1000 / 1030, 15300000ull * 1030 / 1000 },
+  };
+  bu_gline g[BU_GRID_MAX];
+  uint64 f0;
+  int    i, n, s;
+
+  //100 Hz .. 1 MHz: the five decades, labelled, no 2 / 5 lines (four decades)
+  n = bu_fgrid(100000, 1000000000, 0, g);
+  T_EQ(n, 5);
+  for(i = 0; i < n; i++)
+    T_TRUE(g[i].major && g[i].label);
+
+  //1 kHz .. 200 kHz (2.3 decades): 1k 2k 5k 10k 20k 50k 100k 200k, the 2 and 5 lines minor and unlabelled
+  n = bu_fgrid(1000000, 200000000, 0, g);
+  T_EQ(n, 8);
+  T_EQ(g[1].f, 2000000ull);
+  T_EQ(g[1].major, 0);
+  T_EQ(g[1].label, 0);
+  T_EQ(g[3].label, 1);
+
+  //20 kHz .. 100 kHz (0.7 decades): 20k 50k 100k, all labelled
+  n = bu_fgrid(20000000, 100000000, 0, g);
+  T_EQ(n, 3);
+  for(i = 0; i < n; i++)
+    T_TRUE(g[i].label);
+
+  //44 .. 56 kHz: no 1-2-5 line inside, the linear steps (2 kHz: 44 .. 56, seven lines, every other one labelled)
+  n = bu_fgrid(44000000, 56000000, 0, g);
+  T_EQ(n, 7);
+  T_EQ(g[0].f, 44000000ull);
+  T_EQ(g[1].label, 0);
+  T_EQ(g[2].label, 1);
+
+  //Linear: the label steps
+  bu_fgrid(1000000, 200000000, 1, g);
+  T_EQ(g[1].f - g[0].f, bu_lin_step(1000000, 200000000));
+
+  for(s = 0; s < (int)(sizeof(spans) / sizeof(spans[0])); s++)
+  {
+    grid_check(spans[s][0], spans[s][1], 0);
+    grid_check(spans[s][0], spans[s][1], 1);
+  }
+
+  //Every Start / Stop pair of the steps, both axes
+  for(i = 0; i < BODE_STEPS; i++)
+    for(s = i + 1; s < BODE_STEPS; s++)
+    {
+      grid_check(step_mhz(i), step_mhz(s), 0);
+      grid_check(step_mhz(i), step_mhz(s), 1);
+    }
+
+  //Spectrum spans (linear): zoomed windows and the whole axis
+  for(f0 = 0; f0 < 25000000000ull; f0 += 1234567891ull)
+  {
+    grid_check(f0, f0 + 390625000ull, 1);
+    grid_check(f0, 25000000000ull, 1);
+  }
+
+  //The slider: any frequency on the track, the steps where bu_slider_x puts them (within a pixel)
+  for(i = 0; i < BODE_STEPS; i++)
+  {
+    int32 d = bu_slider_x_mhz(step_mhz(i)) - bu_slider_x(i);
+
+    T_TRUE((d >= -1) && (d <= 1));
+  }
+  T_EQ(bu_slider_x_mhz(1), BU_SL_X);
+  T_EQ(bu_slider_x_mhz(20000000000ull), BU_SL_X + BU_SL_W);
 }
 int main(void)
 {
@@ -1677,5 +1830,6 @@ int main(void)
   test_bode_readout();
   test_bode_cards();
   test_bode_texts();
+  test_bode_grid();
   return t_report("test_ui");
 }
