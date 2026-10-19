@@ -35,10 +35,11 @@
 #define PC_USBW_LEVEL_MAX        6u           //storm wait at most 640 s
 #define PC_USBW_LONG_MS          900000u      //15 min
 
-//Inferred resume causes (type 3 a bits 6-5)
-#define PC_USBW_CAUSE_FRAME      1u           //frame number moved: SOFs again
-#define PC_USBW_CAUSE_EP0        2u           //EP0 setup packet
-#define PC_USBW_CAUSE_EP2        3u           //EP2 OUT packet
+//Inferred resume causes (type 3 a bits 6-5). 3 is what fw 0.2.44-0.2.48 logged (a = 0x80 | POWER bits 6-0, SoftConn and
+//HS enable always set): the frame number moved
+#define PC_USBW_CAUSE_FRAME      0u           //frame number moved: SOFs again
+#define PC_USBW_CAUSE_EP0        1u           //EP0 setup packet
+#define PC_USBW_CAUSE_EP2        2u           //EP2 OUT packet
 
 //Soft reconnect reasons (type 20 a bits 1-0)
 #define PC_USBW_WHY_STORM        1u
