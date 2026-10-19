@@ -81,11 +81,14 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   Measures button opens the list of up to twelve measurements per channel (Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq,
   Cycle, Time+, Time-, Duty+, Duty-; `scopesettings.measuresstate`, drawn by `scope_display_measurements`); the
   ticked ones appear as cards, CH1's from the left and CH2's from the middle (x 366), stacking upward over the plot.
-  Card scheme **(owner)**: the stock one, a small chip in the channel colour with the digit 1 or 2 in black, then
-  "Metric: value" in white on a dark grey rounded card ("[1] Vpp: 2.40V"); the metric names are the firmware's table
-  (Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq, Cycle, Time+, Time-, Duty+, Duty-) and values are formatted to fit the card's
-  about 92 px of text (four significant digits and a unit, "500us" not "500.0us"); today's Atlan drawing changes to that and
-  the "Freg" label typo is fixed with it. The record-position slider row under the grid stays in every mode. Roadmap,
+  Card scheme **(owner, final)**: Atlan's layout kept (it looks better than stock's): a dark grey rounded card with a
+  block in the channel colour at its left holding the measurement name in black, then the value in white; the block is
+  built like the top bar chips, full card height, rounded only on its outer left corners, the grey card drawn behind it
+  with no notch; the block is as wide as the name (no padding space after it). Names as scope makers spell them:
+  Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq, Period (was Cycle), +Width, -Width (were Time+, Time-), +Duty, -Duty (were
+  Duty+, Duty-); the "Freg" typo goes with it. Values are formatted to fit the card (four significant digits and a
+  unit). The spectrum's cards use the same scheme: [Peak] 1.000kHz and [Level] +2.7dBV in the channel colour, [RBW]
+  146Hz with a neutral grey block. The record-position slider row under the grid stays in every mode. Roadmap,
   not now: a spectrum card set (peak frequency and level per channel, THD) and the FPGA hardware measurements of
   docs/plans/roadmap.md section 8 item 6 feeding the same cards.
 - **Warnings**: top-middle of the plot in every mode (y 70, under the spectrum header), stating consequence and
