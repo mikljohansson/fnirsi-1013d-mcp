@@ -31,7 +31,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.75 - provisional (protocol 1.22, unchanged)
+#### 0.2.75 - 2026-10-19 (protocol 1.22, unchanged)
 
 - Spectrum: the colour legends of the Waterfall and Density variants are gone (owner, 2026-10-19 22:28: the blue ->
   red -> white scale is understood and nobody measures from those views). The warning line stays where it was and the
