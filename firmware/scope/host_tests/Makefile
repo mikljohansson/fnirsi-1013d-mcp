@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/adc_cal.c mock_hal.c
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/adc_cal.h $(SRC)/pc_protocol.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_phosphor $(OUT)/test_mmu
 
 $(OUT):
 	mkdir -p $@
@@ -47,6 +47,12 @@ $(OUT)/fft_cli: fft_cli.c $(FFT_SRCS) $(SRC)/fx_fft.h | $(OUT)
 
 $(OUT)/test_adc_cal: test_adc_cal.c test_util.h $(SRC)/adc_cal.c $(SRC)/adc_cal.h $(SRC)/pc_decim.c $(SRC)/pc_decim.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_adc_cal.c $(SRC)/adc_cal.c $(SRC)/pc_decim.c
+
+$(OUT)/test_acal_track: test_acal_track.c test_util.h $(SRC)/acal_track.c $(SRC)/acal_track.h $(SRC)/adc_cal.c $(SRC)/adc_cal.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_acal_track.c $(SRC)/acal_track.c $(SRC)/adc_cal.c -lm
+
+$(OUT)/test_cal_wizard: test_cal_wizard.c test_util.h $(SRC)/cal_wiz.c $(SRC)/cal_wiz.h $(SRC)/adc_cal.c $(SRC)/adc_cal.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_cal_wizard.c $(SRC)/cal_wiz.c $(SRC)/adc_cal.c
 
 $(OUT)/test_phosphor: test_phosphor.c test_util.h $(SRC)/phos_map.c $(SRC)/phos_map.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_phosphor.c $(SRC)/phos_map.c
@@ -87,6 +93,8 @@ test: all
 	$(OUT)/test_session_debug
 	$(OUT)/test_spec_fmt
 	$(OUT)/test_adc_cal
+	$(OUT)/test_acal_track
+	$(OUT)/test_cal_wizard
 	$(OUT)/test_phosphor
 	$(OUT)/test_mmu
 	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --decim-checker $(OUT)/decim_check --adc-cal-checker $(OUT)/test_adc_cal --vectors $(VECTORS)

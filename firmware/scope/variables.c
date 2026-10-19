@@ -142,7 +142,7 @@ uint32 maindisplaybuffer[SCREEN_SIZE / 2];
 uint16 displaybuffer1[SCREEN_SIZE]; //Main menu, Channel menu ch1 and ch2, ACQ menu, Trigger menu
 uint16 displaybuffer2[SCREEN_SIZE]; //System settings menu, REF menu, MATH menu
 uint16 displaybuffer3[SCREEN_SIZE]; //Screen brightness menu, Grid brightness menu, Other settings, Calibration menu, RTC settings
-uint16 displaybuffer4[SCREEN_SIZE];
+uint16 displaybuffer4[SCREEN_SIZE]; //Calibration wizard (the whole screen under it)
 uint16 displaybuffertmp[SCREEN_SIZE];
 
 uint16 gradientbuffer[SCREEN_HEIGHT];

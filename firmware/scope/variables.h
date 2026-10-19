@@ -1160,6 +1160,7 @@ extern uint32 maindisplaybuffer[SCREEN_SIZE / 2];
 extern uint16 displaybuffer1[SCREEN_SIZE];
 extern uint16 displaybuffer2[SCREEN_SIZE];
 extern uint16 displaybuffer3[SCREEN_SIZE];
+extern uint16 displaybuffer4[SCREEN_SIZE];   //calibration wizard: the screen under it
 extern uint16 displaybuffertmp[SCREEN_SIZE];
 
 extern uint16 gradientbuffer[SCREEN_HEIGHT];
