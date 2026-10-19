@@ -37,8 +37,8 @@ the drive on the PC first.
 ## 3. The bars and dropdowns **(owner, corrected 2026-10-19 afternoon: move as little as possible)**
 
 What exists today (menu.c `scope_setup_right_control_menu`, `scope_open_acquisition_menu`, `scope_open_trigger_menu`):
-the right bar's first page is CTRL, T CURSOR, V CURSOR, MEASURES, SAVE PICTURE, RUN/STOP, AUTO SET, SAVE WAVE (the waveform
-viewer swaps the last three for previous, next, delete); CTRL switches to the second page: CTRL, V+ CH1 V-, V+ CH2 V-,
+the right bar's first page is, top to bottom as drawn, CTRL, RUN/STOP, AUTO SET, T CURSOR, V CURSOR, MEASURES, SAVE PIC,
+SAVE WAVE (the waveform viewer swaps RUN/STOP, AUTO SET and SAVE WAVE for previous, next, delete); CTRL switches to the second page: CTRL, V+ CH1 V-, V+ CH2 V-,
 50 % TRIG (GRID in the viewer). The ACQ dropdown holds Sample rate, Time per division, Memory, Trace style, Roll,
 Average and Filter; the Trigger dropdown holds mode, edge, channel, position and Always 50 %.
 
@@ -50,9 +50,10 @@ Average and Filter; the Trigger dropdown holds mode, edge, channel, position and
 - **Dropdowns**: the ACQ dropdown gains a **Display** box next to Trace style with the values Trace, Phosphor, X-Y
   **(owner)**: Phosphor leaves the main menu and X-Y leaves System settings. Filter, Average, Roll and Memory stay in
   ACQ; 50 % stays in both places (the right-bar button sets the level once, Always 50 % in the trigger menu keeps it).
-- **Strips**: they stay, in the record-position slider's row under the grid, above the measurement cards, so they never
-  collide with the cards. Spectrum keeps Channel, FFT length, Window, Scale, Ref level, Average and View; Phosphor keeps
-  Persistence, Palette and Clear. Both lose the "Scope" field (the menu is the way between modes) and the spectrum
+- **Strips**: they stay, in the record-position slider's row under the grid (y 452); the measurement cards start at y 426
+  on the plot and stack upward, so the two never collide. Spectrum keeps Channel, FFT length, Window, Scale, Ref level, Average, View and Reset; Phosphor keeps
+  Persistence, Palette and Clear. In Spectrum the CTRL page shows the same V+ / V- / 50 % controls as in Scope (they
+  set the input range and trigger level, which the spectrum needs). Both lose the "Scope" field (the menu is the way between modes) and the spectrum
   strip loses Auto (AUTO SET does it).
 - **Bottom row**: the measurement cards, as the stock firmware and Atlan's draw them (FNIRSI product photos): the
   Measures button opens the list of up to twelve measurements per channel (Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq,
