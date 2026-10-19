@@ -100,6 +100,12 @@ int    ui_fold_dir(const ui_fold *f, uint32 x);              //two-way rows: -1 
 #define UI_FOLD_TWOWAY_IN     40
 #define UI_FOLD_TEXT_X        90
 
+//RUN/STOP (fw 0.2.63, owner): a two-state button that shows the state, a tap changes it. Running: green, "RUN" in the
+//16 px font. Stopped: amber (needs attention; red is kept for destructive actions, guidelines section 3), "Stopped" in
+//the 13 px font ("STOPPED" is 62 px in the 16 px font and 50 in the 13 px one, too wide for the 51 px button).
+#define UI_C_AMBER            0x00FFD262
+extern const char *const ui_run_label[2];                         //[0] stopped, [1] running
+
 //ACQ menu, Memory column (x 305..377 of the menu, under its rule at y 211): the main-loop pass time, a grey label line
 //and the value under it (fw 0.2.63; it sat between the "Memory" header and the first depth chip before)
 #define UI_ACQ_PASS_X         312

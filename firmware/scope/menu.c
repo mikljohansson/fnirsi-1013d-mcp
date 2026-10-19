@@ -539,26 +539,15 @@ void scope_control_button(int mode)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//fw 0.2.63 (owner): a two-state button showing the state, a tap changes it (ui_ctrl.h): green "RUN" while running,
+//amber "Stopped" while stopped (red is for destructive actions), black text; orange while touched as every bar button
 void scope_run_stop_button(int mode)
-{ 
-  //Check if inactive or active mode
-  if(mode == 0)
-  {
-  //Check if run or stop mode  
-  if(scopesettings.runstate) //ok
-    {//Run mode:Green box
-    display_set_fg_color(GREEN_COLOR);
-    }    
-    else 
-    {//Stop mode:Red box 
-    display_set_fg_color(RED_COLOR);
-    }
-  }
-  else
-  {
-    //Orange color for activated button
-    display_set_fg_color(ITEM_ACTIVE_COLOR);
-  }
+{
+  int         run = scopesettings.runstate ? 1 : 0;
+  const char *s = ui_run_label[run];
+  PFONTDATA   f = run ? &font_3 : &font_2;
+
+  display_set_fg_color(mode ? ITEM_ACTIVE_COLOR : run ? GREEN_COLOR : UI_C_AMBER);
 
   //Draw the body of the button
   display_fill_rounded_rect(739, 65, 51, 50, 2);
@@ -566,25 +555,10 @@ void scope_run_stop_button(int mode)
   //Draw the edge
   display_set_fg_color(0x00505050);
   display_draw_rounded_rect(739, 65, 51, 50, 2);
-        
-  //Check if inactive or active mode
-  if(mode == 0)
-  {
-      //Check if run or stop mode - Run mode: black text 
-    if(scopesettings.runstate) display_set_fg_color(BLACK_COLOR);//ok
-          //Stop mode: white text
-          else display_set_fg_color(WHITE_COLOR);  
-  }
-  else
-  {
-    //Black text color for activated button
-    display_set_fg_color(BLACK_COLOR);
-  }
 
-  //Display the text
-  display_set_font(&font_3);
-  display_text(746, 75, "RUN/");
-  display_text(746, 90, "STOP");
+  display_set_fg_color(BLACK_COLOR);
+  display_set_font(f);
+  display_text(765 - ui_text_width(f, s) / 2, 65 + (50 - f->height) / 2, (int8 *)s);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

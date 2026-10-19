@@ -1096,6 +1096,11 @@ void pc_hal_ui_set_run(int run)
   //The next UI pass arms a fresh conversion; one in flight is abandoned
   scopesettings.display_data_done = 1;
   scope_run_stop_text();
+
+  //fw 0.2.63 (owner): the right bar's RUN/STOP shows the state too; it stayed green when the host stopped
+  if((scopesettings.rightmenustate == 0) && !scopesettings.waveviewmode)
+    scope_run_stop_button(0);
+
   pc_draw_end(&save);
 }
 

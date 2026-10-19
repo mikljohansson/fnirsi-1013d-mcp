@@ -296,6 +296,10 @@ static void test_ctrl_page(void)
     T_STR(ui_display_value(1, 0, 1), "Spec");
   }
 
+  //RUN/STOP labels fit the 51 px button with 2 px margins (fw 0.2.63): "RUN" in the 16 px font, "Stopped" in the 13 px
+  T_TRUE(ui_text_width(&font_3, ui_run_label[1]) <= UI_BAR_W - 4);
+  T_TRUE(ui_text_width(&font_2, ui_run_label[0]) <= UI_BAR_W - 4);
+
   //ACQ menu pass time (fw 0.2.63): inside the Memory column right of its rule at x 304 and left of the menu's edge at
   //380, below the rule at y 211 and above the bottom edge (386 - 8); the label and the widest value fit its width
   T_TRUE(UI_ACQ_PASS_X > 304);
