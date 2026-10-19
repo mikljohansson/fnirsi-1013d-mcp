@@ -622,3 +622,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   1024 SRAM 1.03 -> 0.22 ms, 2048 SRAM 2.30 -> 0.66 ms; DDR and SRAM now equal, so SRAM A buffers no longer matter for speed.
   **pass_ms in the scope view 14-18 ms (median 15), was 30.** Census 500 PINGs 0 failures 0.89 ms. No restart, fault registers 0.
   Pending: owner's screen coherence check (menus, spectrum, phosphor), touch, soak, SD, ENTER_FEL round trips (section 26 steps 4-9).
+- Owner: screen, menus, spectrum and phosphor views and touch look right on the MMU image ("seems to work afaikt").
+- 08:15 owner ran the base calibration on 0.2.48 (probes + USB unplugged), then the new gain step with both x1 probes on the post:
+  "Gain calibration successful". SD 700-710 backed up before (backups/sd_700-710_20261019-0812_pre-calv3.bin). GET_CAL (dumps in
+  backups/getcal_v3_20261019.json): both channels version 3, flags 0x0F (loaded, bound, gated, gains measured), measured on range 2,
+  lever 88.0 / 88.6 codes. Gain corrections: CH1 full A 0.9993 B 1.0126, gated A 1.0004 B 0.9993, gain16 1.0059; CH2 full A 1.0161
+  B 1.0067, gated A 1.0107 B 0.9895, gain16 1.0114. Raw gated zeros at the PWM centre: CH1 A 131.0 B 125.1-125.4, CH2 A 128.0 B
+  128.0-128.25; full CH1 A 131.3-131.75 B 127.5-127.8, CH2 A/B 129.3-129.75. Note: the CH1 full-rate A/B gain ratio from the post
+  step is 1.013, smaller than the 1.033 the +-1 V DMM bench gave; the +-1 V check decides which is right.
