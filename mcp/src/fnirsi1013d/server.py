@@ -1490,9 +1490,10 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     @register(0, title="Screenshot", read_only=True)
     async def scope_screenshot() -> Image:
         """PNG image of the scope's 800x480 screen. Only on firmware that reports the SCREENSHOT capability
-        (check scope_info caps first): firmware 0.1.x and the current builds do not have READ_SCREEN, and this
-        tool then fails at once with "no SCREENSHOT capability". Takes about 0.1-0.3 s. Pixel format RGB565 is
-        unverified (T9): if colours look wrong, say so."""
+        (check scope_info caps first): firmware 0.2.70 and later have READ_SCREEN; older builds do not, and this
+        tool then fails at once with "no SCREENSHOT capability". 768,000 bytes in 12 requests, about 1 s over USB;
+        while a menu is open on the scope it fails with E_BUSY. Pixel format RGB565 is unverified on the unit (T9):
+        if colours look wrong, say so."""
         def go() -> bytes:
             s = sess.get_scope()
             if not s.profile().has(P.Caps.SCREENSHOT):
