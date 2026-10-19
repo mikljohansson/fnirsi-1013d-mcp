@@ -2412,6 +2412,14 @@ static void test_diag_wire(void)
   T_EQ(mock.life_clears, 1); T_EQ(mock.life.rst.valid, 0);     //... then it is cleared
   r = req(PC_CMD_GET_HEALTH, "\x02", 1);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.life_clears, 1);
+  r = req(PC_CMD_GET_HEALTH, "\x80", 1);
+#if PC_DEBUG
+  T_EQ(r.h.status, 0);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_EQ(mock.restart_tests, 1);
+#else
+  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.restart_tests, 0);
+#endif
 
   r = req(PC_CMD_SD_INFO, "\x02", 1);
   T_EQ(r.h.status, 0); T_EQ(r.len, PC_SD_INFO_LEN); T_EQ(r.p[64], PC_ID_UNKNOWN); T_EQ(pc_get_u32(r.p + 96), 750 * 512);

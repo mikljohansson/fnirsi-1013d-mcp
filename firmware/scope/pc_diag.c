@@ -157,6 +157,13 @@ void pc_hal_life(pc_hw_life *l)
   l->rst            = pc_life_rec.rst;
 }
 
+//PC_DEBUG bench aid (GET_HEALTH flag 0x80): restart from RAM through the image entry, as a NULL call would. start.s
+//records it (type 0, LR = the return address here), the next boot stores it in the life record.
+void pc_hal_restart_test(void)
+{
+  ((void (*)(void))0x80000000)();
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // CP15
 

@@ -101,6 +101,7 @@ typedef struct
   uint32_t   cp15;
   pc_hw_life life;
   uint32_t   life_clears;
+  uint32_t   restart_tests;         //pc_hal_restart_test calls
   int        prov_state;
   uint8_t    prov_raw[ACAL_PROV_BYTES];
   char      *report;                //last report text written (NUL-terminated)

@@ -850,12 +850,21 @@ void pc_health_body(uint8_t *p)
   }
 }
 
+#if PC_DEBUG
+#define PC_HEALTH_FLAGS 0x81    //bench builds: bit 7 = restart from RAM after the answer (tests the stored record)
+#else
+#define PC_HEALTH_FLAGS 0x01
+#endif
+
 static int h_get_health(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   uint8_t flags = len ? req[0] : 0;
 
-  if(flags & ~0x01)
+  if(flags & ~PC_HEALTH_FLAGS)
     return pc_error(s, PC_E_BAD_ARG, 0, "flags");
+
+  if(flags & 0x80)
+    s->restart_pending = 1;
 
   pc_health_body(resp);
 
@@ -2945,6 +2954,12 @@ void pc_poll(pc_session *s, int ctx)
   {
     s->fel_pending = 0;
     pc_hal_enter_fel();
+  }
+
+  if((ctx == PC_CTX_MAIN) && s->restart_pending && !pc_hal_tx_busy())
+  {
+    s->restart_pending = 0;
+    pc_hal_restart_test();
   }
 }
 

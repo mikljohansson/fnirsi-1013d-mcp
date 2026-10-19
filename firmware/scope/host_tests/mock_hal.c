@@ -493,6 +493,7 @@ void     pc_hal_usb_state(pc_hw_usb *u)  { *u = mock.usb; }
 uint32_t pc_hal_cp15_control(void)       { return mock.cp15; }
 void     pc_hal_life(pc_hw_life *l)      { *l = mock.life; }
 void     pc_hal_life_clear_restart(void) { mock.life.rst.valid = 0; mock.life_clears++; }
+void     pc_hal_restart_test(void)       { mock.restart_tests++; }
 
 int pc_hal_cal_prov(uint8_t *raw)
 {

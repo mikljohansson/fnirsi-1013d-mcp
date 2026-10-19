@@ -275,6 +275,7 @@ typedef struct
   uint16_t   pass_max_ms;       //maximum since the previous GET_STATUS
 
   uint8_t    fel_pending;       //ENTER_FEL answered: jump once the response has left
+  uint8_t    restart_pending;   //PC_DEBUG GET_HEALTH flag 0x80 answered: restart from RAM once the response has left
 
   //SD write staging buffer (HAL owned)
   uint8_t   *sd_stage;

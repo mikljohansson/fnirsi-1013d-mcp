@@ -287,6 +287,7 @@ typedef struct
 
 void     pc_hal_life(pc_hw_life *l);
 void     pc_hal_life_clear_restart(void);              //the next settings save writes the record cleared
+void     pc_hal_restart_test(void);                    //PC_DEBUG builds: jump to the image entry (a type 0 restart)
 
 //Calibration provenance (sector 708 bytes 432..487): ACAL_PROV_* state and the stored bytes (zeros when none)
 int      pc_hal_cal_prov(uint8_t *raw);
