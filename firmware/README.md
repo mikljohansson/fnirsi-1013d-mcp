@@ -656,7 +656,8 @@ measurement has them and a unit with prefix ("1.000kHz", "500.0us", "-1.190V", "
 its own is not padded (a value held as 0.50 V reads "500mV", not "500.0mV"). Freq, Period, the widths and the duties read "no
 period" while the record has fewer than three crossings. What the values mean is unchanged (whole-record statistics;
 Vrms includes DC). A new unit, and the DEFAULT button, show Freq, Vpp and Vavg on each enabled channel (in the table's
-order: Vavg, Vpp, Freq); 1.00o5 set none.
+order: Vavg, Vpp, Freq, until 0.2.65 kept the chosen order); 1.00o5 set none. Since 0.2.65 the cards stay in one row
+(Measurements v2, below).
 
 ### Screens: Diagnostics, calibration wizard, first run (fw 0.2.59)
 
@@ -800,7 +801,49 @@ fields are in the Display and Analyse fold-outs, the readouts are cards). The sp
 (where the scope's slider row is; the slider has no meaning there), built like the scope's cards (`scope_draw_card`):
 per shown channel [Peak] 1.000kHz and [Level] +2.7dBV in the channel colour, then [RBW] 146.5Hz and, in the waterfall,
 [Time] 12.30s (the time its rows span) with a light grey chip; at most six. The decimation filter tag is no longer shown
-(the acquisition menu has it). The waterfall's and density's colour legend stays above the plot's top right.
+(the acquisition menu has it). The waterfall's and density's colour legend stays above the plot's top right. Since 0.2.65
+the spectrum's cards are chosen through MEASURES (below).
+
+### Screens: Measurements v2 (fw 0.2.65)
+
+Plan `docs/plans/ux-makeover.md` section 3a, the review's measurement part (`docs/plans/ux-review.md` section 6 part B).
+The model is pure C in `ui_meas.c` (host-tested in `host_tests/test_ui.c`); `scope_functions.c` draws the Scope cards,
+`spectrum.c` the spectrum's, `menu.c` / `statemachine.c` the MEASURES menu.
+
+- **One list per mode.** MEASURES opens the list of the mode on screen: in the Scope (and the waveform viewer) the twelve
+  measurements per channel, in the Spectrum analyser (where the slot is no longer empty) Peak, Level, THD and Noise per
+  channel and RBW, Span, Center and Time for the view. The Scope's choice is kept where 1.00o5 kept it (the
+  `measuresstate` bytes of the settings sector); the spectrum's in settings words 221..223.
+- **Order.** The cards show in the order they were chosen: a measurement turned on goes last in its row, one turned off
+  closes its gap. Each chosen item shows its place at the top left of its cell in the menu. Select All keeps the chosen
+  ones first and adds the rest in table order. The defaults (a new unit, DEFAULT, Restore default settings) are Freq,
+  Vpp, Vavg per channel in that order; in the spectrum CH1 Peak, Level, THD, CH2 Peak, Level, then RBW and (waterfall
+  only) Time. A settings sector written by an older image shows its cards in table order (1.00o5 stored 1 for every
+  chosen card); a 1.00o5 image reading ours sees the same choice.
+- **Fit.** The cards keep to one row and no longer stack upward over the trace: the Scope's at y 426, CH1 three from x 5
+  (six, the whole row, while the CH2 block is not shown: CH2 off with no reference trace, or Hide), CH2 three from x 366;
+  the spectrum's six from x 5 at y 446. With more chosen than fit, the last place reads "+N more" (N the cards not shown)
+  in the block's colour, so nothing is dropped silently.
+- **Spectrum values.** Peak, Level and RBW as before. THD: the power in the three bins around each harmonic 2..10 (each
+  searched within n k +- (n / 2 + 1) bins of n times the peak bin, narrowed so neighbours never share a bin) against the
+  three bins around the peak, over the whole axis (harmonics may lie outside a zoomed span), from the shown (averaged)
+  levels; "f0 too low" when the peak is below bin 5, "f0 too high" when the second harmonic is past the axis. The 8-bit
+  ADC puts its floor near 0.3 % (about -50 dBc). Noise: the median bin level of the latest record (not averaged) over
+  the shown span, +1.59 dB (the median of a noise bin's power lies 10 log10(ln 2) below its mean), in dBV (dBA) at the
+  RBW shown on the RBW card; strong tones do not move a median. Span and Center are the shown span and its middle.
+- **MEASURES menu.** 1.00o5's box (x 232..730, dark grey, white edge, black separators, chosen names white and the others
+  grey) with a title band ("Scope measurements" / "Spectrum measurements", 16 px) and 44 px rows, ending at y 477.
+  Scope: the source row (CH1 or Ref 1-4, CH2 or Ref 5-8; the chosen source filled in its colour), Select All / Clear /
+  Hide (in the source colour; Hide in the active orange while the block is hidden), three rows of four measurements.
+  Spectrum: the channel label with Select All / Clear, the channel's four items, and the view's four items across the
+  whole width. A cell acts on touch and the menu stays open; a tap outside closes it (and does nothing else). Every tap
+  below the title band lands on a cell (the separators belong to the cells beside them).
+- **Card sources (hardware counter hook).** A Scope card of a live channel takes its value from a source registered for
+  its measurement (`ui_ms_set_source(UI_MEAS_FREQ, fn)`, `ui_meas.h`) instead of the record statistics; reference traces
+  always use their record. A source writes the card's text for CH1 or CH2 with the card formatters (`ui_fmt_sig4`,
+  "no period") and must only read latched values (it runs while the screen is drawn). An FPGA frequency / period
+  counter (`docs/plans/roadmap.md` section 8 item 6) registers itself at start-up when the bitstream reports it; the
+  cards, the menu and the settings need no change. Nothing registers one yet.
 
 ### Settings: fold-out, Settings screen, confirmations (fw 0.2.55)
 
