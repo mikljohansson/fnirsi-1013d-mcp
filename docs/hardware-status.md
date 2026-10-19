@@ -682,3 +682,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   4 KiB TEST_PATTERN requests, 0 failures, 0 drops, 0 device restarts, longest gap 0.12 s, latency median 9.2 ms, p99 17.3 ms, max 21.3 ms,
   no new USB events, counters unchanged. Section 26 bench steps 1-3 and 5-6 are now done; left: SD save/restore, ENTER_FEL round trips
   (three loads today without issue), touch (owner: fine). The reopen soak (3 x 30 min idle, selective suspend on) runs next.
+- **Reopen soak on 0.2.49 (MMU), Windows selective suspend enabled on AC and DC, 11:34-13:04** (backups/soak_0.2.49_reopen_20261019.log):
+  3 rounds of 10 s soak + 30 min idle with the port closed: 3/3 reopens OK, 300 requests 0 failures, 0 restarts; counters 36/37 stayed
+  1/0 in every round: **Windows did not suspend the idle device at 30 minutes even with selective suspend on.** The morning's loss
+  came after about 1 h 40 of idle, so the 2-hour idle test (fw-usb2 bench step 2) is still needed; it runs when the port is next free
+  for two hours. The soft-reconnect rules of 0.2.49 could not fire (no suspend seen).
+- 13:05 fw 0.2.50 (e54d29df, MMU) FEL-loaded: #VER fw=0.2.50 proto=1.15 fpga=0x1535; GET_CAL 288 bytes, version 3, flags 0x0F on both
+  channels (the 08:15 v3 block is still read), tracker flags 0x00 (no full-rate records yet), pass_ms 15. Wizard walk-through with the
+  owner next (README 6.4).
