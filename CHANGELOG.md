@@ -33,11 +33,23 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
 
 #### 0.2.67 - 2026-10-19 (protocol 1.21 provisional, docs/protocol.md section 14 row 61)
 
+- Fixed: the calibration wizard's Zero level step failed every time on FPGA 0x1538 ("CH1: too much noise, range 1 at
+  200 MSa/s: core B 7.2 codes", "CH2: the input is not at 0 V"). Cause (bench with CAL_PROBE and a READ_RAW offset
+  sweep): at 200 MSa/s some FPGA readout lanes mix the bits of two successive samples that straddle code 0x7F / 0x80,
+  giving outliers up to the rails only while a core's mean sits at 126..133; the zero step parked the zero exactly at
+  128. The zero is now measured as the mean of two points 12 codes either side of 128 (the PWM split from the range's
+  own slope), which is exactly the zero at the centre in the linear model: the stored calibration means the same.
+  Rail samples only at full rate with the gated reading at the same PWM quiet and near 128 now say "ADC readout fault
+  near code 128 (FPGA 0x1538): flash the fixed bitstream" instead of "the input is not at 0 V". The bitstream fix is
+  fpga-gen8's (c22896c).
 - Added: CAL_PROBE (0x0402), the calibration wizard's zero measurement from the host through the wizard's own code
   (`cal_range`), nothing stored: one channel and range (mode 0), or the whole zero step in the wizard's screen context
-  (mode 1). It returns all eight measurement points with PWM, per-core mean, RMS, RMS inside the captures,
+  (mode 1). It returns all eight measurement points and the zero split with PWM, per-core mean, RMS, RMS inside the captures,
   lowest / highest code and clipped samples, plus A/B switches for the FPGA bus readout (settle reads, a write strobe
-  before each sample strobe). `firmware/tools/cal_probe.py` runs it and decodes it (28158ea, 448c08c, cf3f9e2, b67219c).
+  before each sample strobe). `firmware/tools/cal_probe.py` runs it and decodes it (28158ea, 448c08c, cf3f9e2, b67219c,
+  8802b79).
+- Fixed: the request after a CAL_PROBE got E_BUSY "UI busy" (the probe runs seconds inside one main-loop poll and the
+  modal watch counted that); the watch restarts after it (b67219c).
 - Changed: a failed channel in the wizard's Zero level step gets a small note under its result line: range, rate,
   measurement point, PWM, and per core the raw mean with its lowest..highest code and clipped samples (789da66).
 - Fixed: the wizard's measurement batch writes a raw host divider (SET_TIMEBASE raw) and the time base back

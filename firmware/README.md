@@ -1878,10 +1878,25 @@ It names the measurement point the failure was found at (`acal_fail_point`: a cl
 coarse ones with a sample at 0 or 255, noise and drift at the zero point of the failing class, a missing response at
 the coarse high point), its PWM, and per core the raw mean, the lowest and highest code and the samples at 0 or 255.
 The zero step of one range is `cal_range` (cal_wiz_ui.c), shared by the wizard and CAL_PROBE, which records all eight
-points (`acal_point`, ACAL_PT_*: coarse 500 / 1200, gated centre -150 / +150 / centre, 200 MSa/s centre / +150 / -150).
+points (`acal_point`, ACAL_PT_*: coarse 500 / 1200, gated centre -150 / +150 / the zero pair, 200 MSa/s the zero pair /
++150 / -150).
+
+**Zero pair (fw 0.2.67).** The zero of each class is not measured at the centre PWM, where the level sits at code 128,
+but as the mean of two points d PWM counts either side of it (8 conversions each gated, 64 at 200 MSa/s), d from the
+range's gated slope points so each is 12 codes off 128 (`acal_zero_split`, 8..120 counts; about 27 on range 0 of the
+owner's unit, 45 at the nominal 0.26 codes per count). Reason: on FPGA 0x1538 the 200 MSa/s readout of some lanes mixes
+the bits of successive samples that straddle 0x7F / 0x80 (bench 2026-10-19: READ_RAW outliers up to 255 only while a
+core's mean was 126..133, clean everywhere else and at the gated rate), which failed every zero step. In the linear
+model the mean of the two points is the zero at the centre, so the block's zeros, slopes, PWM centres and the
+corrections built on them mean exactly what they meant. Drift comes from the halves of both points (the level step
+cancels), noise and within-capture RMS are the RMS of the two points' own (`acal_zero_pair`). A clip found only at
+200 MSa/s while the gated point at the same PWM is quiet and within 8 codes of 128 reports "ADC readout fault near code
+128 (FPGA 0x1538): flash the fixed bitstream" (ACAL_E_READOUT, `acal_readout_fault`). The UI's own 200 MSa/s traces
+near code 128 still show the outliers on such a bitstream; fpga-gen8's bitstream fixes the readout.
 CAL_PROBE runs it from the host with the UI stopped (mode 0, about 1 s), or runs the whole zero step exactly as a
 Calibrate tap does, over the dimmed screen with the dialog, progress and Cancel polls (mode 1, about 15 s);
-`python firmware/tools/cal_probe.py COM10 both all` prints every point. Nothing is stored.
+`python firmware/tools/cal_probe.py COM10 both all` prints every point (arguments: port, CH1 / CH2 / both, ranges, repeats,
+settle, prestrobe, mode). Nothing is stored.
 
 **Full-rate capture check (fw 0.2.61, per capture since fw 0.2.62, `enc_heal.h`).** Every 200 MSa/s conversion of the
 zero and gain steps is checked before the wizard reads it, like every other full-rate capture (section 5 "Full-rate
