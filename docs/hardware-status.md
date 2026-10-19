@@ -678,3 +678,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   common mode), Spectrum/Phosphor rows at the top of the main menu, GET_CAL 288 bytes. Renumbered in the merge to protocol 1.15 / row 54
   (fw-usb2 holds 1.14 / row 53). Built on main: backups/fw-0.2.50_e54d29df.bin (MMU), fw-0.2.50-nommu_41c207bb.bin. Host tests 11/11,
   vectors OK, mcp 360. Not loaded yet: the soak holds the port.
+- **MMU capture soak passed** (0.2.49 MMU image, 11:04-11:34, backups/soak_0.2.49_mmu_capture_20261019.log): 17,908 content-checked
+  4 KiB TEST_PATTERN requests, 0 failures, 0 drops, 0 device restarts, longest gap 0.12 s, latency median 9.2 ms, p99 17.3 ms, max 21.3 ms,
+  no new USB events, counters unchanged. Section 26 bench steps 1-3 and 5-6 are now done; left: SD save/restore, ENTER_FEL round trips
+  (three loads today without issue), touch (owner: fine). The reopen soak (3 x 30 min idle, selective suspend on) runs next.
