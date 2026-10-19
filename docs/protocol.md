@@ -208,6 +208,15 @@ Core order per bitstream:
 | 0x1537 | chip 1 A earlier; chip 2 undefined. Do not calibrate on it. |
 | 0x1538 | B earlier on both chips, always |
 
+**0x1539** (fpga/al3/README.md "Changes" section 9) has the interface and feature bits of 0x1538; a firmware that knows
+0x1538 runs it unchanged. It fixes the readout: 0x1532..0x1538 loaded each read byte on the rising edge of the MCU's bus
+clock, and the MCU reads the port right after that edge, sooner than the 9.4..10.9 ns the byte needs from the clock pad
+to the data pads, so bytes that differ from the previous one in several bits (0x7F / 0x80, 0x8F / 0x90, ...) could come
+back mixed on the slow lanes (bench 2026-10-19, fw 0.2.67, 0x1538: outliers up to 0xFF near code 128). 0x1539 loads the
+byte on the falling edge, the start of the strobe, so it is settled before the MCU raises the clock. Byte values, the
+read pointer, the dummy strobe after 0x1F and the 1.00o5 one-word lag are unchanged; asynchronous status reads are
+sampled at the start of the strobe instead of its end. Calibrations taken on 0x1537 / 0x1538 should be redone.
+
 ## 6. Control model
 
 ### 6.1 LOCAL / REMOTE ownership [D]

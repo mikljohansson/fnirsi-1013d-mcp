@@ -1,6 +1,8 @@
 // Copy of Atlan4's "FPGA commands.txt" (D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\), updated
 // for fpga/al3/src/zaklad.v of fnirsi-1013d-mcp. Changes against Atlan4's file:
-//  - 0x06 returns 0x15 0x38 (0x1538 = 0x1537 with the encode timing fix and read 0x33; 0x1537 = 0x1536 with the
+//  - 0x06 returns 0x15 0x39 (0x1539 = 0x1538 with the read byte loaded on the falling edge of the MCU clock, the
+//    start of the strobe, so it is settled on the pins before the MCU reads it; values, pointer advance and dummy strobe
+//    unchanged; 0x1538 = 0x1537 with the encode timing fix and read 0x33; 0x1537 = 0x1536 with the
 //    record-start and A/B-order fixes, no new command; 0x1536 = with
 //    segments/averaging; 0x1535 = without segments/averaging, 0x1534 = decimation filter without the FIR,
 //    0x1533 = EXT trigger only; Atlan4's 0x1532 AL3 design returns 0x15 0x32, his file still shows 0x14).
@@ -21,6 +23,10 @@
 // Multi-byte values are high byte first. Details: fpga/al3/README.md, section "Changes".
 
 //================================ FPGA commands table ==================================
+// Read timing (0x1539): every read byte below is loaded into o_mcu_data on the FALLING edge of i_mcu_clk (the start of
+// the strobe; 0x1532..0x1538: the rising edge) and holds until the next strobe starts. The read pointer and mcu_state
+// still advance on the rising edge, so the byte of a read strobe is the same as before; read the bus after raising the
+// clock, as the firmware does.
 
 //***************************************************************************************
 //********************************** READING commands ***********************************
@@ -33,7 +39,7 @@
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h38;       //0x1538 = AL3 with external trigger, decimation filter, FIR, segments, averaging
+                    o_mcu_data <= 8'h39;       //0x1539 = AL3 with external trigger, decimation filter, FIR, segments, averaging
             
             //When sampling finishes the writing is disabled. Enabled again with a reset.
             8'h0A: //Reading of the sampling done state

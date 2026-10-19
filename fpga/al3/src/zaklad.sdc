@@ -15,3 +15,11 @@ set_clock_latency  -source 1 [get_clocks {i_xtal}]
 create_generated_clock -name sample_write_clock -source [get_nets clk_200MHz] -edges {2 4 6} [get_nets sample_write_clock]
 set_multicycle_path -setup -from [get_clocks sample_write_clock] -to [get_clocks clk_200MHz] 2
 set_multicycle_path -hold -from [get_clocks sample_write_clock] -to [get_clocks clk_200MHz] 1
+
+# 0x1539: the MCU bus clock (i_mcu_clk, pin P1). 40 ns is shorter than any strobe the firmware makes (two
+# read-modify-writes of the port register each). The read path uses both edges (o_mcu_data and the read address copy
+# on the falling edge, the read pointer and the sample memory's read port on the rising edge), so each of its paths
+# has half a period. The strobes are asynchronous to the PLL clocks, and what crosses (status reads, the sequencer
+# readout, the configuration registers) is asynchronous by design, so i_mcu_clk is its own clock group.
+create_clock -name i_mcu_clk -period 40 -waveform {0 20} [get_ports i_mcu_clk]
+set_clock_groups -asynchronous -group [get_clocks i_mcu_clk]
