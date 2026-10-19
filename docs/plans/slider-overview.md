@@ -402,4 +402,8 @@ The frequency-response and Spectrum tracks start at x 2 as `BU_SL_X` does (host 
    margin between the row and the window; the overview is full colour between the edges and dimmed outside them; the
    drag hit areas stay as they were **(owner)**. Built in fw 0.2.73: the track x 2..727 (726 columns) by y 453..471 (19
    rows), section 2.
+7. Track geometry, second look on the unit (owner, 2026-10-19 22:15, fw 0.2.73 on screen): decision 6 does not work well; put the
+   window box back as a box with all four 1 px borders and the 1 px margin around it, with the overview inside the box in full
+   colour and outside it dimmed. The track's own top border line goes: the plot pane's outline is the separation. The overview
+   keeps every other row the removed container borders freed **(owner)**. fw-over2 writes the resulting rows here.
 
