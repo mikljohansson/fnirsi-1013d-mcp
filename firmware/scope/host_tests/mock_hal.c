@@ -22,18 +22,30 @@ static const uint8_t tpd_sr[35] = { 28,27,26,25,24,23,22,21,20,19,18, 17,16,15,1
 static const uint32_t sr_div[29] = { 0,1,3,9,19,39,99,199,399,999,1999,3999,9999,19999,39999,99999,199999,399999,
                                      399999,399999,399999,399999,399999,399999,399999,399999,399999,399999,399999 };
 
+//A triangle (one code per word, adjacent words always differ) per core and arm: smooth enough for the full-rate data
+//check (enc_heal.h), which reads clean unless the arm is marked garbled (enc_bad_arms)
 static uint8_t ring_value(int core, uint32_t addr, uint32_t arms)
 {
-  return (uint8_t)(addr * 3 + core * 50 + arms * 7 + (addr >> 8));
+  uint32_t t = addr % 400;
+
+  return (uint8_t)(((t < 200) ? t : 400 - t) + (uint32_t)core * 12 + (arms * 7) % 16);
 }
 
 static void fill_ring(void)
 {
-  uint32_t c, a;
+  uint32_t c, a, x = 12345 + mock.arms;
 
   for(c=0;c<4;c++)
     for(a=0;a<MOCK_RING_MAX;a++)
       mock.ring[c][a] = ring_value((int)c, a, mock.arms);
+
+  //A garbled capture (enc_heal.h): CH2 core A metastable, as on 0x1537
+  if(mock.enc_cur_bad)
+    for(a=0;a<MOCK_RING_MAX;a++)
+    {
+      x = x * 1664525u + 1013904223u;
+      mock.ring[2][a] = (uint8_t)(x >> 24);
+    }
 }
 
 void mock_clear_resps(void)
@@ -93,6 +105,9 @@ void mock_reset(uint16_t fpga_version)
   mock.batt_level = 17; mock.batt_charging = 1; mock.batt_raw = 50;
   mock.ui_samples = 3000; mock.ui_pre = 1500; mock.ui_sw = 1502;
   mock.ui_run = 1; mock.last_run_set = -1; mock.indicator = -1;
+  mock.enc33_bad  = 0x77;           //CH2 A wrong, check failed
+  mock.enc.mode   = (uint8_t)eh_mode(fpga_version);
+  mock.enc.boot33 = (mock.enc.mode == EH_MODE_FLAG) ? EH_33_GOOD : 0;
 
   fill_ring();
 
@@ -268,6 +283,10 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
 
   if(mock.arm_fail)
     return -1;
+
+  mock.enc_cur_bad = (uint8_t)(mock.enc_bad_arms != 0);
+  if(mock.enc_bad_arms > 0)
+    mock.enc_bad_arms--;
 
   mock.arms++;
   mock.arm_pre = pre_words; mock.arm_total = total_words; mock.arm_auto = auto_timeout;
@@ -620,7 +639,41 @@ uint32_t pc_hal_fft_bench(uint8_t *dst, uint32_t reps)
 void     pc_hal_restart_info(uint32_t *v) { uint32_t i; for(i=0;i<PC_RESTART_COUNT;i++) v[i] = 6000 + i; }
 void     pc_hal_fault_info(uint32_t *v) { v[0] = 0x0805u; v[1] = 0x80123456u; }
 void     pc_hal_usb_watch(uint32_t *v) { v[0] = 7000; v[1] = 7001; }
-void     pc_hal_enc_heal(uint32_t *v) { v[0] = 7100; v[1] = 7101; }
+
+//Full-rate capture check: 0x33 per the last arm, counted as enc_heal_hw.c counts
+void     pc_hal_enc_state(pc_hw_enc *e) { *e = mock.enc; }
+void     pc_hal_enc_retry(void)         { mock.fpga_ops++; mock.enc_retries++; }
+
+uint8_t pc_hal_enc_status(void)
+{
+  mock.fpga_ops++;
+  mock.enc_status_reads++;
+  mock.enc.last33 = mock.enc_cur_bad ? mock.enc33_bad : EH_33_GOOD;
+  mock.enc.flags |= PC_ENCF_READ;
+  return mock.enc.last33;
+}
+
+void pc_hal_enc_note(uint8_t why, const eh_note *n)
+{
+  mock.enc_notes++;
+  mock.enc_last_why  = why;
+  mock.enc_last_note = *n;
+  mock.enc.checked++;
+  mock.enc.bad += n->first;
+
+  if(!n->bad)
+    mock.enc.flags &= (uint8_t)~PC_ENCF_GARBLED;
+
+  if(n->done)
+  {
+    mock.enc_events++;
+
+    if(n->ok)
+      mock.enc.recovered++;
+    else
+      mock.enc.flags |= PC_ENCF_GARBLED;
+  }
+}
 
 uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total)
 {

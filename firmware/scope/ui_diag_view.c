@@ -40,7 +40,7 @@
 //pc_diag.c / pc_hal_scope.c (fw 0.2.52 readers, firmware/AGENTS.md section 30)
 const pc_card_id *pc_glue_card_ident(void);
 int               pc_glue_save_report(char *name, uint32 name_max);
-void              pc_glue_health(uint8 *body96);
+void              pc_glue_health(uint8 *body);
 pc_session       *pc_glue_session(void);
 
 static uint8   ud_open;

@@ -120,6 +120,15 @@ typedef struct
   uint32_t   report_len;
   uint32_t   report_writes;
   int        report_fail;           //FRESULT to return
+
+  //Full-rate capture check (fw 0.2.62, enc_heal.h)
+  int        enc_bad_arms;          //the next arms whose capture is garbled (-1: every one)
+  uint8_t    enc_cur_bad;           //the capture of the last arm is garbled
+  uint8_t    enc33_bad;             //0x33 of a garbled capture (0x1538+), else EH_33_GOOD
+  uint32_t   enc_status_reads, enc_retries, enc_notes, enc_events;
+  uint8_t    enc_last_why;
+  eh_note    enc_last_note;
+  pc_hw_enc  enc;                   //what pc_hal_enc_state answers (counted as the target counts)
 } mock_state;
 
 extern mock_state mock;

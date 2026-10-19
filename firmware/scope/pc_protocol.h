@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            18    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            19    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -37,6 +37,8 @@
                                         //      bytes (features, UI average), GET_DECIM 36, GET_CAPTURE_INFO 96 (fw 0.2.58)
                                         //1.18: GET_LINK_STATS 62-63 and event type 21: full-rate capture
                                         //      garbled after a rate change, recovered (fw 0.2.61)
+                                        //1.19: every full-rate capture checked (FPGA 0x1538 read 0x33, caps
+                                        //      ENC_CHECK), GET_HEALTH 104 bytes, event 21 reasons (fw 0.2.62)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
@@ -146,6 +148,7 @@
 #define PC_CAP_DECIM                  (1u << 15)   //1.9: decimation filter, 16-bit samples (FPGA 0x1534+)
 #define PC_CAP_FIR                    (1u << 16)   //1.11: CIC compensation FIR, SET_DECIM flags bit 3 (FPGA 0x1535+)
 #define PC_CAP_SEQ                    (1u << 17)   //1.17: sequencer: segmented capture, hardware averaging (FPGA 0x1536+)
+#define PC_CAP_ENC_CHECK              (1u << 18)   //1.19: the FPGA checks the ADC encodes per capture, read 0x33 (0x1538+)
 
 //GET_STATUS bytes 44-45 / GET_DECIM bytes 32-33 (1.17): what the running bitstream has
 #define PC_FEAT_W_EXT_TRIGGER         0x0001       //0x1533+
@@ -153,6 +156,7 @@
 #define PC_FEAT_W_FIR                 0x0004       //0x1535+
 #define PC_FEAT_W_SEGMENTS            0x0008       //0x1536+
 #define PC_FEAT_W_HW_AVERAGE          0x0010       //0x1536+
+#define PC_FEAT_W_ENC_CHECK           0x0020       //0x1538+ (1.19)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Decoded header

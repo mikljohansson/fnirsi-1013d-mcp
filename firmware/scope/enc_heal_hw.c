@@ -1,112 +1,152 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// enc_heal_hw.c - the target side of the full-rate check (enc_heal.h, fw 0.2.61): one full-rate capture of both
-// channels into scratch buffers through raw scratch channels, the retry (0x0D re-write), the counters and the event.
-//
-// Callers: the calibration wizard before every full-rate measurement (cal_wiz_ui.c); after any 0x0D write, the UI
-// acquisition before its next conversion (scope_functions.c) and the host ARM (pc_hal_arm), at divider 0 only.
+// enc_heal_hw.c - the target side of the full-rate capture check (enc_heal.h, fw 0.2.62): the mode of the running
+// bitstream, the 0x33 read and its boot check, the re-arm of UI / calibration / probe conversions from
+// fpga_done_conversion, the 0x0D re-write, the counters and event 21. Host ARM captures are checked by the session
+// (pc_acq_service in pc_cmds.c) through the pc_hal_enc_* functions here.
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "types.h"
-#include "timer.h"
 #include "fpga_control.h"
 #include "variables.h"
 #include "pc_hooks.h"
 #include "pc_hal.h"
+#include "pc_seq_hw.h"
 #include "pc_transport.h"
 #include "enc_heal.h"
 
-#include <string.h>
+#define EH_RING  8192                   //AL3 ring words (every checked bitstream is AL3 0x1532+)
 
-static uint8           eh_buf[2][2 * EH_SAMPLES];
-static CHANNELSETTINGS eh_ch;           //zero: no compensation, no invert, no dcoffset: raw codes (not CH1 / CH2)
-static uint32          eh_count[PC_ENCH_COUNT];
+uint8_t          fpga_enc_garbled;
+static uint16    eh_version;
+static pc_hw_enc eh_st;                 //mode, 0x33 bytes, flags, counters (GET_HEALTH, GET_LINK_STATS)
+static eh_cap    eh_ui;                 //re-arms of the UI / calibration / probe conversion in progress
+static uint8     eh_rearming;           //fpga_do_conversion called by the re-arm
 
-static const uint8 eh_cmds[2][2] = { { 0x20, 0x21 }, { 0x22, 0x23 } };
-
-//Re-issue the rate write: every 0x0D write re-rolls the state (0x1535 random, 0x1537 bench 16:40); the capture re-arms
-static void eh_hw_retry(void *ctx)
+void pc_hal_enc_state(pc_hw_enc *e)
 {
-  (void)ctx;
+  *e = eh_st;
+}
 
+uint8_t pc_hal_enc_status(void)
+{
+  uint8 s;
+
+  fpga_write_cmd(0x33);
+  s = fpga_read_byte();
+  eh_st.last33 = s;
+  eh_st.flags |= PC_ENCF_READ;
+  return s;
+}
+
+//0x1532..0x1536: only a rate write re-rolls the phase (0x1537 and 0x1538 re-resolve it at every sampling reset)
+void pc_hal_enc_retry(void)
+{
+  uint8 who = fpga_trace_who;
+
+  if(!eh_affected(eh_version))
+    return;
+
+  fpga_trace_who = FPGA_WHO_CHECK;
   fpga_write_cmd(0x0D);
   fpga_write_int(1);
   fpga_write_cmd(0x0D);
   fpga_write_int(0);
-
-  if(EH_WAIT_MS)
-    timer0_delay(EH_WAIT_MS);
-}
-
-static void eh_hw_capture(void *ctx, uint32_t res16[2])
-{
-  uint32 ch;
-
-  (void)ctx;
-
-  fpga_do_conversion();
-  while(fpga_done_conversion() == 0) PC_BUSY_POLL();
-
-  for(ch=0;ch<2;ch++)
-  {
-    eh_ch.adc1command = eh_cmds[ch][0];
-    eh_ch.adc2command = eh_cmds[ch][1];
-    eh_ch.tracebuffer = eh_buf[ch];
-    fpga_read_sample_data(&eh_ch, 100);
-    res16[ch] = eh_residual16(eh_buf[ch], EH_SAMPLES);
-  }
-}
-
-int fpga_encode_heal(void)
-{
-  static const eh_ops ops = { 0, eh_hw_retry, eh_hw_capture };
-  eh_result r;
-  uint32    tm = scopesettings.triggermode;
-  uint32    sm = scopesettings.samplemode;
-  uint32    sc = scopesettings.samplecount;
-  uint32    ns = scopesettings.nofsamples;
-
-  uint8     who = fpga_trace_who;
-
-  fpga_rate_dirty = 0;
-
-  if(fpga_divider != 0)
-    return 1;
-
-  fpga_trace_who = FPGA_WHO_CHECK;
-
-  //Trigger circuit off, FPGA auto mode, 500 samples per core (as the calibration's raw reads)
-  scopesettings.samplemode  = 0;
-  scopesettings.triggermode = 0;
-  fpga_set_trigger_mode();
-  scopesettings.samplecount = 2 * EH_SAMPLES;
-  scopesettings.nofsamples  = EH_SAMPLES;
-
-  eh_run(&ops, &r);
-
-  scopesettings.samplecount = sc;
-  scopesettings.nofsamples  = ns;
-  scopesettings.samplemode  = (uint8)sm;
-  scopesettings.triggermode = (uint8)tm;
-  fpga_set_trigger_mode();
   fpga_trace_who = who;
+}
 
-  if(r.bad)
+void pc_hal_enc_note(uint8_t why, const eh_note *n)
+{
+  eh_st.checked++;
+
+  if(n->first)
+    eh_st.bad++;
+
+  if(!n->bad)
+    eh_st.flags &= ~PC_ENCF_GARBLED;
+
+  if(n->done)
   {
-    eh_count[0]++;
-    eh_count[1] += r.ok;
-    pc_usb_log_fpga_heal((uint8)(r.tries | (r.ok ? 0 : 0x80)), (uint16)((r.first16 > 0xFFFF) ? 0xFFFF : r.first16));
+    if(n->ok)
+      eh_st.recovered++;
+    else
+    {
+      eh_st.flags |= PC_ENCF_GARBLED;
+      fpga_enc_garbled = 1;
+    }
+
+    pc_usb_log_fpga_heal(eh_event_a(why, n->tries, n->ok), eh_event_b(fpga_trace_who, n->value));
   }
-
-  return r.ok;
 }
 
-int fpga_encode_check_dirty(void)
+void fpga_encode_init(uint16_t fpga_version)
 {
-  return fpga_rate_dirty ? fpga_encode_heal() : 1;
+  eh_version = fpga_version;
+  eh_st.mode = (uint8)eh_mode(fpga_version);
+
+  if(eh_order_differs(fpga_version))
+    eh_st.flags |= PC_ENCF_ORDER;
+
+  //0x1538+: the encode convention must be 1 (core order guaranteed, B first: PC_INTERLEAVE_ORDER 0)
+  if(eh_st.mode == EH_MODE_FLAG)
+  {
+    fpga_write_cmd(0x33);
+    eh_st.boot33 = fpga_read_byte();
+
+    if(!eh_conv_ok(eh_st.boot33))
+    {
+      eh_st.flags |= PC_ENCF_CONV_BAD;
+      pc_usb_log_fpga_heal(eh_event_a(EH_WHY_CONV, 0, 0), eh_event_b(fpga_trace_who, eh_st.boot33));
+    }
+  }
 }
 
-void pc_hal_enc_heal(uint32_t *v)
+static uint8_t eh_hw_status(void *ctx)
 {
-  v[0] = eh_count[0];
-  v[1] = eh_count[1];
+  (void)ctx;
+  return pc_hal_enc_status();
+}
+
+static void eh_hw_read(void *ctx, uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride)
+{
+  (void)ctx;
+  pc_hal_read_core(core, start, count, dst, stride, EH_RING, 0);
+}
+
+void fpga_encode_new_conversion(void)
+{
+  if(!eh_rearming)
+    eh_cap_reset(&eh_ui);
+}
+
+int fpga_encode_after_capture(void)
+{
+  static const eh_io io = { 0, eh_hw_status, eh_hw_read };
+  uint32   pre, start;
+  uint32_t value;
+  eh_note  n;
+  int      bad, rearm;
+
+  //Full rate only (divider 0 is always the legacy 8-bit layout). A UI averaging run (0x1536 / 0x1537) leaves lane
+  //sums in the ring, not samples: the data check cannot read it; 0x1538's flag covers the whole run
+  if((eh_st.mode == EH_MODE_NONE) || (fpga_divider != 0) || ((eh_st.mode == EH_MODE_DATA) && pc_seq_ui_running()))
+    return 0;
+
+  //The record as fpga_do_conversion set it up: 0x0B = settriggerpoint / 2 words before 0x14
+  pre   = (fpgasettings.settriggerpoint / 2) % EH_RING;
+  start = (eh_st.mode == EH_MODE_DATA) ? (fpga_prepare_for_transfer() + EH_RING - pre) % EH_RING : 0;
+  bad   = eh_check(&io, eh_st.mode, start, fpgasettings.totalsamples / 2, &value);
+
+  rearm = eh_cap_step(&eh_ui, bad, value, &n);
+  pc_hal_enc_note((eh_st.mode == EH_MODE_FLAG) ? EH_WHY_FLAG : EH_WHY_DATA, &n);
+
+  if(rearm != EH_REARM)
+    return 0;
+
+  //Discard and re-arm the same conversion (the UI's filter setting again when it was the UI's)
+  pc_hal_enc_retry();
+  pc_glue_decim_rearm();
+  eh_rearming = 1;
+  fpga_do_conversion();
+  eh_rearming = 0;
+  return 1;
 }

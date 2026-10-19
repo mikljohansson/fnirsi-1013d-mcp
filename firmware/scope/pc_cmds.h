@@ -29,7 +29,7 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #else
 #define PC_FW_VERSION_MMU ""
 #endif
-#define PC_FW_VERSION     "0.2.61" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
+#define PC_FW_VERSION     "0.2.62" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
 #endif
 
 //The build identity record (build_id.c, pc_ident.h; host tests: mock_hal.c)
@@ -117,10 +117,10 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 //Relay settling time after a range or coupling change (P-8.3)
 #define PC_SETTLE_MS      50
 
-//READ_RAW / READ_TRACE interleave order: 0 = core B before core A in each word (1.00o5 convention, P-7.3)
-#ifndef PC_INTERLEAVE_ORDER
+//READ_RAW / READ_TRACE interleave order: 0 = core B before core A in each word (1.00o5 convention, P-7.3). Fixed since
+//fw 0.2.62: FPGA 0x1538 guarantees it at every rate (0x33 bits 3:2 = 01, checked at boot), the calibration's per-core
+//zeros and gains, acal_track's A - B model and the 0x53 swap bit (clear) all assume it
 #define PC_INTERLEAVE_ORDER 0
-#endif
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -244,6 +244,13 @@ typedef struct
   uint16_t   cap_ext_shift;     //EXT latency correction of the host capture (samples)
   uint8_t    cap_wide;          //1.9: 16-bit layout (decimation filter on): one sample per word
   uint32_t   cap_divider;
+  //fw 0.2.62: what the arm wrote, for a re-arm after a garbled full-rate capture (enc_heal.h)
+  pc_decim_cfg arm_dc;
+  pc_seq_cfg arm_seq;
+  uint32_t   arm_auto;
+  uint8_t    arm_prog;
+  uint8_t    arm_normal;
+  eh_cap     enc_cap;
   uint32_t   settle_until;
   uint8_t    settle_pending;
   uint32_t   auto_timeout_cfg;  //0 = firmware default
@@ -330,7 +337,7 @@ void     pc_ui_pass_mark(pc_session *s, int n);            //main loop stage n (
 //one channel's GET_CAL body (PC_CAL_RESP_LEN bytes), the SD_INFO body (112 bytes; ident: identify the card image,
 //MAIN context; returns 0, or 1 without a card). The report: pc_report.h
 #define PC_LINK_COUNTERS  64
-#define PC_HEALTH_LEN     96
+#define PC_HEALTH_LEN     104
 #define PC_CAL_RESP_LEN   356     //72 bytes up to 1.9, 248 in 1.10-1.11 (v2), 256 in 1.12-1.13 (v3), 288 in 1.14-1.15 (v4)
 #define PC_SD_INFO_LEN    112     //64 before 1.16
 uint32_t pc_link_counters(pc_session *s, uint32_t *v);

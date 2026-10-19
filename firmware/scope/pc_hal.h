@@ -20,6 +20,7 @@
 #include "adc_cal.h"
 #include "acal_track.h"
 #include "pc_life.h"
+#include "enc_heal.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Front end channel state as the firmware keeps it (CHANNELSETTINGS subset)
@@ -245,9 +246,9 @@ void     pc_hal_fault_info(uint32_t *v);
 //reconnects
 #define PC_USBW_COUNT     2
 void     pc_hal_usb_watch(uint32_t *v);
-//fw 0.2.61: full-rate capture check (enc_heal.h), GET_LINK_STATS 62-63: first checks above the limit, of those recovered
+//fw 0.2.61: full-rate capture check (enc_heal.h), GET_LINK_STATS 62-63: captures found bad, of those recovered by a
+//re-arm (fw 0.2.62: every full-rate capture; pc_hal_enc_state)
 #define PC_ENCH_COUNT     2
-void     pc_hal_enc_heal(uint32_t *v);
 uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total);
 int32_t  pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms, int rearm);   //-1 = none frozen; rearm clears it
 uint32_t pc_hal_event_bus(uint8_t *dst, uint32_t *total);      //fw 0.2.24: bus-level ring (<= 16 entries), *total since boot
@@ -305,6 +306,29 @@ typedef struct
 void     pc_hal_life(pc_hw_life *l);
 void     pc_hal_life_clear_restart(void);              //the next settings save writes the record cleared
 void     pc_hal_restart_test(void);                    //PC_DEBUG builds: jump to the image entry (a type 0 restart)
+
+//Full-rate capture check (fw 0.2.62, enc_heal.h; GET_HEALTH 88..103, protocol 1.19 row 58). UI, calibration and probe
+//conversions are checked on the target (enc_heal_hw.c), host ARM captures by the session (pc_acq_service); both count here
+typedef struct
+{
+  uint8_t  mode;            //EH_MODE_* of the running bitstream
+  uint8_t  last33;          //last FPGA 0x33 byte read (PC_ENCF_READ)
+  uint8_t  flags;           //PC_ENCF_*
+  uint8_t  boot33;          //0x33 at boot (0x1538+)
+  uint32_t bad;             //captures found bad (GET_LINK_STATS 62)
+  uint32_t recovered;       //of those, recovered by a re-arm (63)
+  uint32_t checked;         //full-rate captures checked
+} pc_hw_enc;
+
+#define PC_ENCF_READ         0x01  //last33 holds a byte read after a capture
+#define PC_ENCF_CONV_BAD     0x02  //boot: 0x33 bits 3:2 were not 01 (encode convention unknown)
+#define PC_ENCF_GARBLED      0x04  //the last checked capture was accepted bad after EH_MAX_TRIES re-arms
+#define PC_ENCF_ORDER        0x08  //AL3 0x1537: core order differs from the convention (recalibrate after 0x1538)
+
+void     pc_hal_enc_state(pc_hw_enc *e);                     //any context
+uint8_t  pc_hal_enc_status(void);                            //[FPGA] read 0x33 (0x1538+), remembered as last33
+void     pc_hal_enc_retry(void);                             //[FPGA] before a re-arm: 0x0D = 1, 0 on 0x1532..0x1536
+void     pc_hal_enc_note(uint8_t why, const eh_note *n);     //count a check, log event 21 when n->done
 
 //Calibration provenance (sector 708 bytes 432..487): ACAL_PROV_* state and the stored bytes (zeros when none)
 int      pc_hal_cal_prov(uint8_t *raw);

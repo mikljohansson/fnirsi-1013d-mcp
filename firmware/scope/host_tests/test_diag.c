@@ -455,7 +455,7 @@ static void test_report(void)
   T_EQ(strlen(mock.report), written);
 
   has("FNIRSI-1013D-AI diagnostics report\r\n");
-  has("Firmware running: " PC_FW_VERSION ", protocol 1.18, git 0x00000000 of 2026-10-19 12:00:00 UTC");
+  has("Firmware running: " PC_FW_VERSION ", protocol 1.19, git 0x00000000 of 2026-10-19 12:00:00 UTC");
   has("Card image (sector 750): unknown");
   has("FPGA: version word 0x1535, variant 2");
   has("USB serial: 1013D-0001");
@@ -476,7 +476,47 @@ static void test_report(void)
   has("sector 750: eGON.EXE, length 384000, checksum not checked");
   has("Event log (last ");
   has("Bus-level events (last ");
+  has("Full-rate capture check: record data (B against A neighbours); 0 checked, 0 bad, 0 recovered\r\n");
   T_TRUE(strstr(mock.report, "[report truncated]") == NULL);
+
+  //fw 0.2.62 (1.19): the check line on 0x1538 and 0x1537
+  mock_reset(0x1538);
+  pc_session_init(&S);
+  mock.enc.last33 = 0x77; mock.enc.flags = PC_ENCF_READ | PC_ENCF_GARBLED;
+  mock.enc.checked = 1200; mock.enc.bad = 3; mock.enc.recovered = 2;
+  T_EQ(pc_save_report(&S, ws, sizeof(ws) - 56, &written, name, sizeof(name)), 0);
+  has("Full-rate capture check: FPGA read 0x33, 0x33 at boot 0xf6 (convention 1, B first), last 0x77; 1200 checked, "
+      "3 bad, 2 recovered; the last one was accepted GARBLED\r\n");
+  mock_reset(0x1537);
+  pc_session_init(&S);
+  mock.enc.flags = PC_ENCF_ORDER;
+  T_EQ(pc_save_report(&S, ws, sizeof(ws) - 56, &written, name, sizeof(name)), 0);
+  has("Full-rate capture check: record data (B against A neighbours), core order differs from the convention "
+      "(recalibrate after 0x1538); 0 checked");
+
+  //Event 21 (1.19): reason, re-arms, value, caller
+  {
+    static const struct { uint8_t a; uint16_t b; const char *text; } ev[4] =
+    {
+      { 0x43, 0x1077, "full-rate ADC capture garbled (FPGA 0x33), recovered after 3 re-arms, 0x33 = 0x77, by host" },
+      { 0xB0, 0x2200, "full-rate ADC capture garbled (data check), not recovered after 16 re-arms, residual 32 codes, by calibration" },
+      { 0x21, 0x0150, "full-rate ADC capture garbled (data check), recovered after 1 re-arms, residual 21 codes, by UI" },
+      { 0xE0, 0x00FA, "FPGA encode convention unknown at boot, 0x33 = 0xfa" },
+    };
+    uint8_t  e[8];
+    char     b[160];
+    pc_text  t;
+    int      i;
+
+    for(i=0;i<4;i++)
+    {
+      memset(e, 0, 8);
+      e[4] = 21; e[5] = ev[i].a; pc_put_u16(e + 6, ev[i].b);
+      pc_text_init(&t, b, sizeof(b));
+      pc_report_event(&t, e);
+      T_STR(b, ev[i].text);
+    }
+  }
 
   //A card write error comes back as the FRESULT
   mock.report_fail = 7;

@@ -9,7 +9,6 @@
 #include "touchpanel.h"
 #include "timer.h"
 #include "fpga_control.h"
-#include "enc_heal.h"
 #include "spi_control.h"
 #include "sd_card_interface.h"
 #include "display_lib.h"
@@ -619,10 +618,6 @@ void scope_acquire_trace_data(void)
     //fpga_set_time_base(scopesettings.timeperdiv); 2.12 move to reset window
 
     //Sampling with trigger circuit enabled (standard memory mode)
-
-    //fw 0.2.61: after a rate write, a full-rate check before the conversion (enc_heal.h; before the decimation arm,
-    //which the next conversion consumes)
-    fpga_encode_check_dirty();
 
     //Decimation filter (0x1534+): this conversion uses the UI's Filter setting
     pc_glue_ui_decim_arm();

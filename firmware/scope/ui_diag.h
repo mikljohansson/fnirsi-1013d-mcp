@@ -111,7 +111,7 @@ typedef struct
 //Everything the pages show, as the firmware has it. Bodies as the protocol returns them (docs/protocol.md row 55).
 typedef struct
 {
-  const uint8_t     *health;          //GET_HEALTH body, 96 bytes
+  const uint8_t     *health;          //GET_HEALTH body, 104 bytes (PC_HEALTH_LEN)
   const uint8_t     *cal[2];          //GET_CAL bodies, 356 bytes each
   const uint32_t    *link;            //GET_LINK_STATS counters
   uint32_t           nlink;

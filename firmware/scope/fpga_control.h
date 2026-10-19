@@ -96,9 +96,8 @@ void   fpga_prepare_correction(PCHANNELSETTINGS settings);                //the 
 #define FPGA_WHO_HOST   1         //PC protocol commands (pc_poll)
 #define FPGA_WHO_CAL    2         //calibration wizard measurements
 #define FPGA_WHO_PROBE  3         //v4 class probe (acal_live.c)
-#define FPGA_WHO_CHECK  4         //full-rate check (enc_heal_hw.c)
+#define FPGA_WHO_CHECK  4         //full-rate check's 0x0D re-write (enc_heal_hw.c)
 extern uint8 fpga_trace_who;
-extern uint8 fpga_rate_dirty;     //a 0x0D write since the last full-rate check
 
 extern uint32 fpga_divider;     //last 0x0D value written (clock class of the zero correction)
 void   fpga_read_adc_data(PCHANNELSETTINGS settings);

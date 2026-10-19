@@ -8,6 +8,7 @@
 #include "pc_protocol.h"
 #include "adc_cal.h"
 #include "enc_heal.h"
+#include "pc_hal.h"
 
 extern FONTDATA font_2;
 extern FONTDATA font_3;
@@ -50,6 +51,10 @@ extern FONTDATA font_5;
 #define H_REC_PON    48
 #define H_REC_LR     52
 #define H_REC_FAR    80
+#define H_ENC_LAST   89           //1.19 (row 58): full-rate capture check
+#define H_ENC_FLAGS  90
+#define H_ENC_BOOT   91
+#define H_ENC_BAD    92
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Small text writers (each returns the end, NUL-terminated)
@@ -383,6 +388,53 @@ static void ud_identity_line(const ud_input *in, char *p)
   s_cp15(p, g32(in->health + H_CP15));
 }
 
+//0x1538+: the FPGA's own encode check (read 0x33 after each full-rate capture, GET_HEALTH 88..103)
+static int ud_enc_line(const ud_input *in, char *p)
+{
+  static const uint8_t pin[4]  = { EH_33_PIN_CH1B, EH_33_PIN_CH1A, EH_33_PIN_CH2B, EH_33_PIN_CH2A };
+  static const char   *name[4] = { "CH1 B", "CH1 A", "CH2 B", "CH2 A" };
+  const uint8_t *h = in->health;
+  uint8_t  f = h[H_ENC_FLAGS], s = h[H_ENC_LAST];
+  uint32_t bad = g32(h + H_ENC_BAD), i, n = 0;
+
+  if(f & PC_ENCF_CONV_BAD)
+  {
+    p = s_str(p, ": unknown encode convention, 0x33 = ");
+    s_hex(p, h[H_ENC_BOOT], 2);
+    return UD_C_WARN;
+  }
+
+  if(!(f & PC_ENCF_READ))
+  {
+    s_str(p, ": encode check, no 200 MSa/s capture yet");
+    return UD_C_SOFT;
+  }
+
+  if(s & EH_33_FAILED)
+  {
+    p = s_str(p, ": encode check failed");
+
+    for(i=4;i--;)
+      if(!(s & pin[i]))
+      {
+        p = s_str(p, n++ ? ", " : " on ");
+        p = s_str(p, name[i]);
+      }
+
+    return UD_C_WARN;
+  }
+
+  p = s_str(p, ": encode check OK");
+
+  if(bad)
+  {
+    p = s_str(p, ", ");
+    s_plural(p, bad, "capture re-taken", "captures re-taken");
+  }
+
+  return UD_C_SOFT;
+}
+
 //The FPGA line; returns its colour (amber for the stock or an unknown bitstream: the stock-bitstream exception)
 static int ud_fpga_line(const ud_input *in, char *p)
 {
@@ -411,12 +463,22 @@ static int ud_fpga_line(const ud_input *in, char *p)
   p = s_hex(p, in->fpga, 4);
 
   //fw 0.2.61: AL3 0x1532..0x1536 can garble one ADC core at 200 MSa/s after a rate change (enc_heal.h,
-  //fpga/al3/README.md "Findings" item 3)
+  //fpga/al3/README.md "Findings" item 3); each such capture is checked and re-taken since 0.2.62
   if((in->variant == 2) && eh_affected(in->fpga))
   {
-    s_str(p, ": ADC capture timing race, fixed in 0x1537");
+    s_str(p, ": ADC capture timing race, fixed in 0x1538");
     return UD_C_WARN;
   }
+
+  //fw 0.2.62: 0x1537 has chip 1's cores in the other order: a calibration taken on it must be redone on 0x1538
+  if((in->variant == 2) && eh_order_differs(in->fpga))
+  {
+    s_str(p, ": ADC core order differs: recalibrate after flashing 0x1538");
+    return UD_C_WARN;
+  }
+
+  if((in->variant == 2) && (eh_mode(in->fpga) == EH_MODE_FLAG))
+    return ud_enc_line(in, p);
 
   if(in->caps & PC_CAP_GENERATOR_DDS)
   {

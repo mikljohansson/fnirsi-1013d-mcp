@@ -165,7 +165,7 @@ static void test_info(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, 76);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 18); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 19); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
   T_EQ(pc_get_u16(r.p + 8), 0x1532); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS), PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED), PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED);
@@ -276,7 +276,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.18,fpga=0x1532");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.19,fpga=0x1532");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -1521,7 +1521,7 @@ static void test_ext_trigger(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
-  T_EQ(r.p[1], 18);                                             //proto 1.18
+  T_EQ(r.p[1], 19);                                             //proto 1.19
 
   //Generator on, then EXT: the generator goes off
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -1833,7 +1833,7 @@ static void test_fel_reset_stall(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 18);                                             //proto_minor 1.18
+  T_EQ(r.p[1], 19);                                             //proto_minor 1.19
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -1896,6 +1896,7 @@ static void test_fel_reset_stall(void)
 
   //GET_LINK_STATS: 11 transport + 8 parser + 8 session + 2 startup counters, answered from every context
   setup(0x1532);
+  mock.enc.bad = 7100; mock.enc.recovered = 7101;
   r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
   T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 64); T_EQ(r.len, 4 + 64 * 4);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 49), 6000); T_EQ(pc_get_u32(r.p + 4 + 4 * 56), 6007);   //restart record
@@ -1903,7 +1904,7 @@ static void test_fel_reset_stall(void)
   T_EQ(pc_get_u32(r.p + 4 + 4 * 47), 0);                         //retired (usb_irq_polled, fw 0.2.12-0.2.20)
   T_EQ(pc_get_u32(r.p + 4 + 4 * 58), 0x0805u); T_EQ(pc_get_u32(r.p + 4 + 4 * 59), 0x80123456u);   //fault status, address (fw 0.2.48)
   T_EQ(pc_get_u32(r.p + 4 + 4 * 60), 7000); T_EQ(pc_get_u32(r.p + 4 + 4 * 61), 7001);   //USB watch (fw 0.2.49)
-  T_EQ(pc_get_u32(r.p + 4 + 4 * 62), 7100); T_EQ(pc_get_u32(r.p + 4 + 4 * 63), 7101);   //encode race (fw 0.2.61)
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 62), 7100); T_EQ(pc_get_u32(r.p + 4 + 4 * 63), 7101);   //full-rate check (fw 0.2.61)
   T_EQ(pc_get_u32(r.p + 4 + 4 * 48), 5000);                      //boot splash ms + 1
   T_EQ(pc_get_u32(r.p + 4 + 4 * 41), 3000); T_EQ(pc_get_u32(r.p + 4 + 4 * 46), 3005);   //RX back-pressure
   T_EQ(pc_get_u32(r.p + 4 + 4 * 35), 2000); T_EQ(pc_get_u32(r.p + 4 + 4 * 40), 2005);   //USB events
@@ -2344,7 +2345,7 @@ static void test_decim_fir_protocol(void)
   setup(0x1535);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_DECIM | PC_CAP_FIR), PC_CAP_DECIM | PC_CAP_FIR);
-  T_EQ(r.p[1], 18);
+  T_EQ(r.p[1], 19);
   set_trigger(0x30, 0, 0, 0, 0, 3000, 6000, 0, 0, &r);
   T_EQ(r.h.status, 0);
   memset(p, 0, 4); p[0] = 2; p[1] = 0x08;
@@ -2480,7 +2481,7 @@ static void test_seq_segments(void)
 
   setup(0x1536);
   r = req(PC_CMD_GET_INFO, 0, 0);
-  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 18);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 19);
   r = status();
   T_EQ(r.len, 48); T_EQ(pc_get_u16(r.p + 44), 0x1F); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
   mock.ui_avg_state = 2; mock.ui_avg_log2n = 6;
@@ -2639,6 +2640,157 @@ static void test_seq_segments(void)
   r = read_seq(0, 0, 0, 0, 1);    T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 0);
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// fw 0.2.62 (protocol 1.19): every full-rate host capture is checked before READ_RAW (enc_heal.h). 0x1538+: FPGA read
+// 0x33 (bit 0 = an encode check failed); 0x1532..0x1537: the B-against-A residual of the record. A bad capture is
+// discarded and re-armed with the same setting, at most EH_MAX_TRIES times.
+
+//Raw divider (SET_TIMEBASE mode 1)
+static void enc_divider(uint32_t d)
+{
+  uint8_t p[8];
+  resp_t  r;
+
+  memset(p, 0, 8); p[0] = 1; pc_put_u32(p + 4, d);
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+  T_EQ(r.h.status, 0);
+}
+
+//ARM, then WAIT; returns the WAIT answer
+static resp_t enc_capture(void)
+{
+  resp_t r = req(PC_CMD_ARM, 0, 0);
+
+  T_EQ(r.h.status, 0);
+  return wait_done(1000);
+}
+
+static void test_enc_check(void)
+{
+  resp_t   r;
+  uint32_t arms, reads;
+  uint8_t  p[16];
+
+  //0x1538: caps ENC_CHECK, features bit 5; 0x1537 has neither
+  setup(0x1538);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_ENC_CHECK, PC_CAP_ENC_CHECK);
+  T_EQ(r.p[35], 0);                                             //interleave order: B first
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  T_EQ(pc_get_u16(r.p + 44), 0x3F);
+  setup(0x1537);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_ENC_CHECK, 0);
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  T_EQ(pc_get_u16(r.p + 44), 0x1F);
+
+  //0x1538, gated rate (divider 19): nothing checked, 0x33 never read
+  setup(0x1538);
+  mock.polls_to_trigger = 1; mock.polls_to_done = 1;
+  mock.enc_bad_arms = -1;
+  r = enc_capture();
+  T_EQ(r.h.status, 0); T_EQ(r.p[1], PC_ACQ_DONE);
+  T_EQ(mock.arms, 1); T_EQ(mock.enc_status_reads, 0); T_EQ(mock.enc_notes, 0);
+
+  //0x1538 at 200 MSa/s, good: one 0x33 read, no ring read for the check, accepted
+  setup(0x1538);
+  mock.polls_to_trigger = 1; mock.polls_to_done = 1;
+  enc_divider(0);
+  reads = mock.read_calls;
+  r = enc_capture();
+  T_EQ(r.p[1], PC_ACQ_DONE);
+  T_EQ(mock.arms, 1); T_EQ(mock.enc_status_reads, 1); T_EQ(mock.read_calls, reads);
+  T_EQ(mock.enc_notes, 1); T_EQ(mock.enc_last_note.bad, 0); T_EQ(mock.enc_events, 0); T_EQ(mock.enc_retries, 0);
+  T_EQ(mock.enc_last_why, EH_WHY_FLAG);
+
+  //Two bad captures, then good: re-armed twice with the same geometry, recovered, one event with the first 0x33
+  mock.enc_bad_arms = 2;
+  r = enc_capture();
+  T_EQ(r.p[1], PC_ACQ_DONE);
+  T_EQ(mock.arms, 1 + 3); T_EQ(mock.enc_status_reads, 1 + 3); T_EQ(mock.enc_retries, 2);
+  T_EQ(mock.arm_pre, 750); T_EQ(mock.arm_total, 1500);
+  T_EQ(mock.enc_last_note.done, 1); T_EQ(mock.enc_last_note.ok, 1); T_EQ(mock.enc_last_note.tries, 2);
+  T_EQ(mock.enc_last_note.value, 0x77);
+  T_EQ(mock.enc.bad, 1); T_EQ(mock.enc.recovered, 1); T_EQ(mock.enc_events, 1);
+  //READ_RAW reads the good capture (the last arm's ring, record start 0x14 - 750 words)
+  T_EQ(mock.enc_cur_bad, 0);
+  memset(p, 0, 16); p[0] = 0x04; pc_put_u32(p + 4, (100 + 8192 - 750) % 8192); pc_put_u32(p + 8, 4);
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, 0); T_EQ(r.p[16], mock.ring[2][(100 + 8192 - 750) % 8192]);
+
+  //GET_LINK_STATS 62-63 and GET_HEALTH 88..103
+  r = req(PC_CMD_GET_LINK_STATS, 0, 0);
+  T_EQ(pc_get_u32(r.p + 4 + 4 * 62), 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 63), 1);
+  r = req(PC_CMD_GET_HEALTH, 0, 0);
+  T_EQ(r.len, 104); T_EQ(pc_get_u16(r.p + 2), 104);
+  T_EQ(r.p[88], EH_MODE_FLAG); T_EQ(r.p[89], EH_33_GOOD); T_EQ(r.p[90], PC_ENCF_READ); T_EQ(r.p[91], EH_33_GOOD);
+  T_EQ(pc_get_u32(r.p + 92), 1); T_EQ(pc_get_u32(r.p + 96), 1); T_EQ(pc_get_u32(r.p + 100), 1 + 3);
+
+  //Never good: EH_MAX_TRIES re-arms, then the capture is accepted and flagged
+  mock.enc_bad_arms = -1;
+  arms = mock.arms;
+  r = enc_capture();
+  T_EQ(r.p[1], PC_ACQ_DONE);
+  T_EQ(mock.arms - arms, 1 + EH_MAX_TRIES);
+  T_EQ(mock.enc_last_note.done, 1); T_EQ(mock.enc_last_note.ok, 0); T_EQ(mock.enc_last_note.tries, EH_MAX_TRIES);
+  T_EQ(mock.enc.bad, 2); T_EQ(mock.enc.recovered, 1);
+  r = req(PC_CMD_GET_HEALTH, 0, 0);
+  T_EQ(r.p[89], 0x77); T_EQ(r.p[90], PC_ENCF_READ | PC_ENCF_GARBLED);
+
+  //The next good capture clears the flag; a new ARM starts its own count
+  mock.enc_bad_arms = 0;
+  r = enc_capture();
+  T_EQ(mock.enc_last_note.bad, 0);
+  r = req(PC_CMD_GET_HEALTH, 0, 0);
+  T_EQ(r.p[90], PC_ENCF_READ);
+
+  //A failed re-arm (0x05 never ready) aborts the capture
+  mock.enc_bad_arms = 1;
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0);
+  mock.arm_fail = 1;
+  r = wait_done(1000);
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  T_EQ(r.p[1], PC_ACQ_ABORTED);
+  mock.arm_fail = 0;
+
+  //0x1537 (data check: CH2 core A garbled in about 40 % of arms on the bench): three bad arms, then clean
+  setup(0x1537);
+  mock.polls_to_trigger = 1; mock.polls_to_done = 1;
+  enc_divider(0);
+  mock.enc_bad_arms = 3;
+  reads = mock.read_calls;
+  r = enc_capture();
+  T_EQ(r.p[1], PC_ACQ_DONE);
+  T_EQ(mock.arms, 4); T_EQ(mock.enc_status_reads, 0); T_EQ(mock.read_calls - reads, 4 * 4);
+  T_EQ(mock.enc_last_why, EH_WHY_DATA);
+  T_EQ(mock.enc_last_note.done, 1); T_EQ(mock.enc_last_note.ok, 1); T_EQ(mock.enc_last_note.tries, 3);
+  T_TRUE(mock.enc_last_note.value > 4 * EH_LIMIT16);
+  T_EQ(mock.enc.checked, 4); T_EQ(mock.enc.bad, 1); T_EQ(mock.enc.recovered, 1);
+  r = req(PC_CMD_GET_HEALTH, 0, 0);
+  T_EQ(r.p[88], EH_MODE_DATA); T_EQ(r.p[90], 0);
+  //A clean capture is read once for the check (4 cores x EH_CHECK_PAIRS words), then accepted
+  reads = mock.read_calls;
+  r = enc_capture();
+  T_EQ(mock.arms, 5); T_EQ(mock.read_calls - reads, 4); T_EQ(mock.enc_last_note.bad, 0);
+
+  //0x1535 the same way (its re-arm also re-writes 0x0D: pc_hal_enc_retry, target side)
+  setup(0x1535);
+  mock.polls_to_trigger = 1; mock.polls_to_done = 1;
+  enc_divider(0);
+  mock.enc_bad_arms = 1;
+  r = enc_capture();
+  T_EQ(r.p[1], PC_ACQ_DONE); T_EQ(mock.arms, 2); T_EQ(mock.enc_retries, 1);
+
+  //Stock and other families: not checked
+  setup(0x1432);
+  mock.polls_to_trigger = 1; mock.polls_to_done = 1;
+  mock.enc_bad_arms = -1;
+  mock.tb.divider = 0;
+  r = enc_capture();
+  T_EQ(mock.arms, 1); T_EQ(mock.enc_notes, 0);
+}
+
 static void test_seq_average(void)
 {
   resp_t r;
@@ -2791,6 +2943,7 @@ int main(void)
   test_seq_older_bitstreams();
   test_seq_segments();
   test_seq_average();
+  test_enc_check();
   mock_clear_resps();
   return t_report("test_session");
 }

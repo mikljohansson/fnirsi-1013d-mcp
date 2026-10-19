@@ -25,5 +25,6 @@ int    pc_seq_ui_feed(void *settings, int16 *feed, uint32 n);   //fpga_read_samp
 void   pc_seq_ui_read_done(void);              //UI readout of the conversion finished
 void   pc_seq_trace_replaced(void);            //a host capture was built into the trace buffers
 int    pc_seq_sw_average(void);                //0 while the traces hold a hardware average (no software average)
+int    pc_seq_ui_running(void);                //the UI conversion in flight (or just done) is an averaging run
 
 #endif /* PC_SEQ_HW_H */

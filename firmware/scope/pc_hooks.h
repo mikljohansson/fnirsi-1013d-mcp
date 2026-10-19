@@ -61,6 +61,7 @@ extern int16 *pc_decim_src;           //fpga_read_adc_data: converted samples to
 void   pc_glue_divider_written(uint32 divider);   //fpga_set_sample_rate wrote 0x0D
 void   pc_glue_ui_decim_arm(void);    //scope_acquire_trace_data: the next fpga_do_conversion uses the UI filter setting
 void   pc_glue_decim_conversion(void);//fpga_do_conversion, before the sampling reset: write the mode, settle
+void   pc_glue_decim_rearm(void);     //the full-rate check re-arms the last conversion: its filter setting again
 uint32 pc_glue_decim_words(uint32 samples);       //ring words for a sample count (samples / 2, or samples in 16-bit)
 uint32 pc_glue_decim_pre_words(uint32 samples);   //the same for the pretrigger, less the EXT latency shift in 16-bit
 uint32 pc_glue_decim_ui_start(uint32 start);      //UI capture start word: (0x14 - pretrigger) mod 8192 in 16-bit

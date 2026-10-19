@@ -223,6 +223,9 @@ static void restart_words(pc_text *t, const uint32_t *v)
 //----------------------------------------------------------------------------------------------------------------------------------
 // Sections
 
+//Callers of events 21 and 22 (FPGA_WHO_*)
+static const char *pc_who[5] = { "UI", "host", "calibration", "class probe", "full-rate check" };
+
 static const char *pc_counter_names[PC_LINK_COUNTERS] =
 {
   "rx_packets", "rx_bytes", "rx_stalls", "rx_swept", "tx_packets", "tx_zlps", "tx_kicked", "tx_flushes", "link_resets",
@@ -305,6 +308,41 @@ static void sec_identity(pc_text *t, pc_session *s, const uint8_t *sd, int sd_ok
   pc_text_str(t, " words, caps ");
   pc_text_hex(t, s->var.caps, 8);
   pc_text_nl(t);
+
+  //1.19: the full-rate capture check (GET_HEALTH 88..103, enc_heal.h)
+  {
+    static const char *mode[3] = { "none (not an AL3 0x1532+ bitstream)", "record data (B against A neighbours)",
+                                   "FPGA read 0x33" };
+
+    pc_text_str(t, "Full-rate capture check: ");
+    pc_text_str(t, mode[(h[88] < 3) ? h[88] : 0]);
+
+    if(h[88] == EH_MODE_FLAG)
+    {
+      pc_text_str(t, ", 0x33 at boot ");
+      pc_text_hex(t, h[91], 2);
+      pc_text_str(t, (h[90] & PC_ENCF_CONV_BAD) ? " (UNKNOWN encode convention)" : " (convention 1, B first)");
+      pc_text_str(t, ", last ");
+
+      if(h[90] & PC_ENCF_READ)
+        pc_text_hex(t, h[89], 2);
+      else
+        pc_text_str(t, "none");
+    }
+
+    if(h[90] & PC_ENCF_ORDER)
+      pc_text_str(t, ", core order differs from the convention (recalibrate after 0x1538)");
+
+    pc_text_str(t, "; ");
+    pc_text_udec(t, g32(h + 100));
+    pc_text_str(t, " checked, ");
+    pc_text_udec(t, g32(h + 92));
+    pc_text_str(t, " bad, ");
+    pc_text_udec(t, g32(h + 96));
+    pc_text_str(t, " recovered");
+    pc_text_str(t, (h[90] & PC_ENCF_GARBLED) ? "; the last one was accepted GARBLED" : "");
+    pc_text_nl(t);
+  }
   pc_text_str(t, "USB serial: ");
   line(t, PC_SERIAL);
   pc_text_str(t, "CPU: CP15 control ");
@@ -819,16 +857,43 @@ void pc_report_event(pc_text *t, const uint8_t *e)
       pc_text_str(t, " s");
       break;
     case 21:
-      pc_text_str(t, (a & 0x80) ? "full-rate ADC capture garbled, not recovered after " :
-                                  "full-rate ADC capture garbled, recovered after ");
-      pc_text_udec(t, a & 0x7F);
-      pc_text_str(t, " retries, residual ");
-      pc_text_udec(t, ((uint32_t)b + 8) / 16);
-      pc_text_str(t, " codes");
+    {
+      //1.19: a = reason << 5 | re-arms, bit 7 not recovered; b = caller << 12 | value (enc_heal.h)
+      static const char *why[3] = { "after a rate write", "data check", "FPGA 0x33" };
+      uint32_t r = (a >> 5) & 3;
+
+      if(r == EH_WHY_CONV)
+      {
+        pc_text_str(t, "FPGA encode convention unknown at boot, 0x33 = ");
+        pc_text_hex(t, b & 0xFF, 2);
+        break;
+      }
+
+      pc_text_str(t, "full-rate ADC capture garbled (");
+      pc_text_str(t, why[r]);
+      pc_text_str(t, (a & 0x80) ? "), not recovered after " : "), recovered after ");
+      pc_text_udec(t, a & 0x1F);
+      pc_text_str(t, " re-arms, ");
+
+      if(r == EH_WHY_FLAG)
+      {
+        pc_text_str(t, "0x33 = ");
+        pc_text_hex(t, b & 0xFF, 2);
+      }
+      else
+      {
+        pc_text_str(t, "residual ");
+        pc_text_udec(t, ((uint32_t)(b & 0xFFF) + 8) / 16);
+        pc_text_str(t, " codes");
+      }
+
+      pc_text_str(t, ", by ");
+      pc_text_str(t, ((b >> 12) < 5) ? pc_who[b >> 12] : "?");
       break;
+    }
     case 22:
     {
-      static const char *who[5] = { "UI", "host", "calibration", "class probe", "full-rate check" };
+      static const char *const *who = pc_who;
 
       pc_text_str(t, "FPGA write ");
       pc_text_hex(t, a, 2);

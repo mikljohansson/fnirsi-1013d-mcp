@@ -10,7 +10,6 @@
 #include "types.h"
 #include "fnirsi_1013d_scope.h"
 #include "fpga_control.h"
-#include "enc_heal.h"
 #include "scope_functions.h"
 #include "power_and_battery.h"
 #include "display_lib.h"
@@ -404,10 +403,6 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
 {
   uint32 n = 0;
 
-  //fw 0.2.61: after a rate write, a full-rate check first (enc_heal.h; the host's legacy mode at divider 0 is the
-  //check's, so pc_dec_apply below writes no 0x53)
-  fpga_encode_check_dirty();
-
   //Trigger level from the marker, as every UI conversion does (scope_acquire_trace_data)
   fpga_set_trigger_level();
 
@@ -632,9 +627,11 @@ uint32_t pc_hal_trace_capacity(void)
 
 static uint8         pc_dec_setting = PC_DECIM_DEFAULT;   //bits 1:0 requested K (UI Filter), PC_DECIM_SET_FIR;
                                                       //saved in the settings sector
-static uint8         pc_dec_flags = PC_INTERLEAVE_ORDER ? PC_DECIM_SWAP : 0;  //0x53 bits 2-4: swap (host only, not
-                                                      //saved), falling-edge capture A / B (hidden, saved)
+static uint8         pc_dec_flags;                    //0x53 bits 2-4: swap (host only, not saved; clear for
+                                                      //PC_INTERLEAVE_ORDER 0), falling-edge capture A / B (hidden,
+                                                      //saved)
 static uint8         pc_dec_ui_arm;                   //the next fpga_do_conversion is the UI acquisition's
+static uint8         pc_dec_last_ui;                  //the last one was (the full-rate check's re-arm repeats it)
 static pc_decim_cfg  pc_dec_cur;                      //what the FPGA runs (k = 0 until written)
 static uint8         pc_dec_written;                  //pc_dec_cur was written at least once
 static uint8         pc_dec_dirty;                    //0x0D changed since the last write
@@ -741,6 +738,11 @@ void pc_glue_ui_decim_arm(void)
   pc_dec_ui_arm = 1;
 }
 
+void pc_glue_decim_rearm(void)
+{
+  pc_dec_ui_arm = pc_dec_last_ui;
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // Firmware auto mode (fw 0.2.41). The FPGA's auto time-out (0x0E) counts samples (the record length), so at fast rates
 // it expires in microseconds (3000 samples at 10 MS/s = 0.3 ms), before a slow signal's next edge; and 0x18 keeps
@@ -764,7 +766,8 @@ void pc_glue_decim_conversion(void)
   int          ui = pc_dec_ui_arm;
 
   pc_dec_config(&c, pc_dec_ui_arm ? pc_dec_setting : 0);
-  pc_dec_ui_arm = 0;
+  pc_dec_last_ui = pc_dec_ui_arm;
+  pc_dec_ui_arm  = 0;
   pc_dec_apply(&c);
 
   //Trigger mode for this conversion, written before the sampling reset
@@ -1849,6 +1852,9 @@ void pc_glue_init(void)
   }
   pc_session_init(&pc_sess);
   pc_seq_hw_init((pc_sess.var.caps & PC_CAP_SEQ) != 0);
+
+  //fw 0.2.62: the full-rate capture check of this bitstream (enc_heal.h); 0x1538+: the 0x33 encode convention
+  fpga_encode_init(pc_fpga_word);
   pc_ready = 1;
   pc_ui_fix_settings();
 

@@ -319,6 +319,11 @@ int pc_seq_sw_average(void)
   return !ui_rec_hw;
 }
 
+int pc_seq_ui_running(void)
+{
+  return ui_run;
+}
+
 void pc_hal_ui_average(uint8_t *state, uint8_t *log2n)
 {
   *state = scopesettings.average_mode ? ui_state : 0;

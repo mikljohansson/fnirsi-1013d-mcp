@@ -170,10 +170,9 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
     //slope points too: the cores' gains differ per class, and so may their offset slopes
     cal_set_rate(CAL_RATE_FULL);
 
-    //The rate change may have garbled one core's full-rate capture (enc_heal.h): checked, retried, or failed
-    if(!fpga_encode_heal())
-      return ACAL_E_TIMING;
-
+    //Every full-rate conversion is checked and re-armed when garbled (fpga_done_conversion, enc_heal.h); one that stayed
+    //garbled after the re-arms fails the range
+    fpga_enc_garbled = 0;
     cal_measure(r, m.pwm, 30, 64, acc);
     cal_result(acc, m.zero16[ACAL_FULL], m.drift16[ACAL_FULL], m.noise16[ACAL_FULL], m.within16[ACAL_FULL],
                &m.clipped);
@@ -181,6 +180,9 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
     cal_result(acc, m.mean16_hi[ACAL_FULL], 0, 0, 0, &m.clipped);
     cal_measure(r, m.pwm_lo, 60, 64, acc);
     cal_result(acc, m.mean16_lo[ACAL_FULL], 0, 0, 0, &m.clipped);
+
+    if(fpga_enc_garbled)
+      return ACAL_E_TIMING;
 
     for(cl=0;cl<ACAL_CLASSES;cl++)
     {
@@ -233,21 +235,18 @@ static void cal_gen_level(uint32 high)
 }
 
 //Per core means (1/16 code) of convs conversions at one post level, rate and PWM. 0 when a full-rate capture stayed
-//garbled after the retries (enc_heal.h)
+//garbled after the re-arms (enc_heal.h)
 static int cal_gain_level(uint32 r, int32 pwm, uint32 rate, uint32 settle_ms, uint32 convs, uint32 high, int32_t *mean16,
                           uint32_t *clipped)
 {
   acal_acc acc[2][2];
 
   cal_set_rate(rate);
-
-  if((rate == CAL_RATE_FULL) && !fpga_encode_heal())
-    return 0;
-
   cal_gen_level(high);
+  fpga_enc_garbled = 0;
   cal_measure(r, pwm, settle_ms, convs, acc);
   cal_result(acc, mean16, 0, 0, 0, clipped);
-  return 1;
+  return !fpga_enc_garbled;
 }
 
 //Level check: both levels at range 2 (gated, 2 conversions each). Returns the span (1/16 code, mean of both cores; it
