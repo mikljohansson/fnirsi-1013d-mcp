@@ -636,7 +636,7 @@ static void spec_draw_freq_labels(const SPECVIEW *v, uint64 bin_mhz)
 }
 
 //fw 0.2.71 (ux-makeover.md "Spectrum slider"): the Scope's slider row (fw 0.2.73: slider_ov.h, the track x 2..727 and
-//y 453..471, the window its two edge lines): the shown span as a window over the axis
+//y 452..471, the window a box, decision 7): the shown span as a window over the axis
 static void spec_slider_window(const SPECVIEW *v, int32 *x, int32 *w)
 {
   int64 xx = BU_SL_X + ((int64)v->first * BU_SL_W) / v->half, ww = ((int64)v->span * BU_SL_W) / v->half;

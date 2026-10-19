@@ -25,8 +25,8 @@
 #define TBV_MIN_SAMPLES_PER_DIV  10      //fw 0.2.69 (owner, bench: 100 kSa/s at 10 us/div showed one sample per division
                                          //and a wobbling interpolated edge): 200 MSa/s reaches 50 ns/div
 
-//Record-position slider under the grid (fw 0.2.73, slider_ov.h): a line at y 452 over x 2..727, the track x 2..727 (726
-//columns) and y 453..471 under it; the window is its two edge lines over the track (scope_draw_slider_row). The hit
+//Record-position slider under the grid (slider_ov.h; fw 0.2.74, decision 7): the track x 2..727 (726 columns) by
+//y 452..471 with no line of its own; the window a box with a 1 px margin (scope_draw_slider_row). The hit
 //area is 44 px tall (TBV_SLIDER_HIT_Y..479) over x 2..727 (TBV_SLIDER_FRAME_*, the frame of fw 0.2.71 and before).
 #define TBV_SLIDER_FRAME_X       2
 #define TBV_SLIDER_FRAME_W       726
