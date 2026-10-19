@@ -7,6 +7,7 @@
 #include "touchpanel.h"
 #include "timer.h"
 #include "fpga_control.h"
+#include "acal_live.h"
 #include "spi_control.h"
 #include "sd_card_interface.h"  //only diagnostic menu?
 #include "display_lib.h"
@@ -7429,9 +7430,100 @@ static char *fmt_gain(char *p, uint32 q15)
   return p;
 }
 
+//Calibration v4 lines (acal_live.c): text in grey while nothing was tracked yet (never ran / no valid probe)
+#define DIAG_DIM_COLOR  0x00808080
+
+//Rounded n / d, half away from zero, d > 0
+static int32 diag_rdiv(int64 n, int64 d)
+{
+  return (int32)((n >= 0) ? (n + d / 2) / d : -((-n + d / 2) / d));
+}
+
+//v in 10^-dec units, signed: "+0.12", "-1.5"
+static char *fmt_fix(char *p, int32 v, uint32 dec)
+{
+  uint32 a = (uint32)((v < 0) ? -v : v), s = 1, f, i;
+
+  for(i=0;i<dec;i++)
+    s *= 10;
+
+  *p++ = (v < 0) ? '-' : '+';
+  p = fmt_uint(p, a / s);
+
+  if(dec)
+  {
+    f = a % s;
+    *p++ = '.';
+
+    while(s > 1)
+    {
+      s /= 10;
+      *p++ = (char)('0' + (f / s) % 10);
+    }
+  }
+
+  *p = 0;
+  return p;
+}
+
+//Age in s below 2 minutes, then minutes, then hours; "-" for never
+static char *fmt_age(char *p, uint32 have, uint32 ms)
+{
+  uint32 t = ms / 1000;
+
+  if(!have)
+    return fmt_str(p, "-");
+
+  if(t < 120)
+    p = fmt_uint(p, t);
+  else if(t < 7200)
+    p = fmt_uint(p, t / 60);
+  else
+    p = fmt_uint(p, t / 3600);
+
+  *p++ = (t < 120) ? 's' : ((t < 7200) ? 'm' : 'h');
+  *p = 0;
+  return p;
+}
+
+//"Track d +0.12 e +0.31% q +0.6@40 3s": the applied A - B offset (codes) and slope (percent), the bow estimate as its
+//effect at 40 codes from mid-scale, the age of the last accepted record. "Class cm +0.70 (4) 12s": the full-class common
+//mode subtracted, valid probes, age
+static void scope_diagnostic_v4(uint32 ch, uint32 y)
+{
+  const acal_track *t = &acal_trk[ch];
+  const acal_cm    *m = &acal_cms[ch];
+  uint32 now = timer0ticks;
+  char   line[48], *p;
+
+  display_set_fg_color((t->flags & ACAL_TRK_DATA) ? WHITE_COLOR : DIAG_DIM_COLOR);
+  p = fmt_str(line, "Track d ");
+  p = fmt_fix(p, diag_rdiv((int64)t->d_q8 * 100, 256), 2);
+  p = fmt_str(p, " e ");
+  p = fmt_fix(p, diag_rdiv((int64)t->e_q24 * 10000, 16777216), 2);
+  p = fmt_str(p, "% q ");
+  p = fmt_fix(p, diag_rdiv((int64)t->q_q24 * 16000, 16777216), 1);
+  p = fmt_str(p, "@40 ");
+  fmt_age(p, t->flags & ACAL_TRK_DATA, now - t->last_ms);
+  display_text(525, y, (int8 *)line);
+
+  display_set_fg_color((m->flags & ACAL_CM_DATA) ? WHITE_COLOR : DIAG_DIM_COLOR);
+#if PC_CAL_CLASS_PROBE
+  p = fmt_str(line, "Class cm ");
+  p = fmt_fix(p, diag_rdiv((int64)m->cm_q8 * 100, 256), 2);
+  p = fmt_str(p, " (");
+  p = fmt_uint(p, m->probes);
+  p = fmt_str(p, ") ");
+  fmt_age(p, m->flags & ACAL_CM_DATA, now - m->last_ms);
+#else
+  fmt_str(line, "Class probe off (build)");
+#endif
+  display_text(525, y + 15, (int8 *)line);
+}
+
 //Diagnostics, right column: calibration data version and, per channel at its current range, the stored core zeros of
 //both clock classes, their spread, noise and offset slopes, the correction the next readout applies at 0 V, and the core
-//gains per clock class with where they were measured (adc_cal.h)
+//gains per clock class with where they were measured (adc_cal.h), and the calibration v4 tracking (acal_live.c)
 static void scope_diagnostic_adc_cal(void)
 {
   PCHANNELSETTINGS chs[2] = { &scopesettings.channel1, &scopesettings.channel2 };
@@ -7447,7 +7539,7 @@ static void scope_diagnostic_adc_cal(void)
 
   for(ch=0;ch<2;ch++)
   {
-    y = ch ? 205 : 45;
+    y = ch ? 225 : 45;
     c = &adc_cal[ch];
     r = (chs[ch]->samplevoltperdiv < ACAL_RANGES) ? chs[ch]->samplevoltperdiv : ACAL_RANGES - 1;
     fpga_channel_correction(chs[ch], &k);
@@ -7532,6 +7624,9 @@ static void scope_diagnostic_adc_cal(void)
       fmt_str(p, (c->gain_flags & ACAL_GAIN_KEPT) ? " (kept)" : "");
       display_text(525, y + 120, (int8 *)line);
     }
+
+    //Calibration v4: the tracked A - B split and the full-class common mode
+    scope_diagnostic_v4(ch, y + 135);
   }
 }
 
