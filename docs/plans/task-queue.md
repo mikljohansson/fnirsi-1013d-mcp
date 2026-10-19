@@ -50,7 +50,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   message waits for a tap or times out); (j) Diagnostics uses the Settings screen's header/tab design; battery indicator drawn
   over the Diagnostics page (not over Settings); (k) Calibration tab: "DC shift trim off" becomes the button's state, drop the
   "Needs a DC supply up to 15V" hedge; (l) wizard: "Step N of 6" moves to the top right of the title line; (m) Waterfall / Density
-  show one channel (by design since 0.2.32; say so in the Display fold-out or allow CH1+CH2?). (n) Developer page "Debug overlay" is 1.00o5's per-pass debug box (right middle, flickers, raw numbers): either make it a static, labelled overlay drawn once per pass without clearing, or drop it (owner: "not sure what it is supposed to do"). (o) Zero level instruction names the calibration post too (fw-cal4, 0.2.60).
+  show one channel (by design since 0.2.32; say so in the Display fold-out or allow CH1+CH2?). (n) Developer page "Debug overlay" is 1.00o5's per-pass debug box (right middle, flickers, raw numbers): either make it a static, labelled overlay drawn once per pass without clearing, or drop it (owner: "not sure what it is supposed to do"). (o) Zero level instruction names the calibration post too (fw-cal4, 0.2.60). (p) RUN/STOP button: when the host (MCP) stops the acquisition the button stays green as in RUN; redraw it on every host-driven run-state change. Owner proposal: make it a two-state button that shows the current state and the action, green "RUN" while running (tap stops), red "STOP" while stopped (tap starts); check the dialog-colour rule (red = destructive) against this, since here red would mean "stopped", and settle the wording in the mockup before coding.
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
@@ -246,6 +246,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - mcp-gen5 (done 15:40, about 565k tokens, retired; handoff mcp/AGENTS.md): protocol 1.17 host side pushed 2097181 (CI 39258110694), Bode follow-ups pushed 514182f (CI 39260053987, 398 tests):
   wiring A default with the bench numbers, ch2_overload flag + auto range step-up + fixed-range failure text, --ch2-coupling ac,
   offset-range-exhausted caveat, simulator models the pinned front end. Next for mcp: 1.17 on the unit after the 0x1537 flash.
+- fw-cal4 (running, 10-19 15:50-): 0.2.60 merged (failure line with range/rate/core and RMS numbers, instruction names the post;
+  pinned backups/fw-0.2.60_27634587.bin, loaded 16:18). Now on the real fault: the wizard's 200 MS/s class reads one garbage core
+  per channel (CH1 B, CH2 A, 21-24 codes RMS) while host READ_RAW is clean; FPGA mode/shift state hypothesis; fix as 0.2.61.
 - fpga-gen6 (done 15:20, about 555k tokens, retired): FPGA not deterministic on 0x1532-0x1536 (pretrigger/slot-mask write race
   at slow rates, A/B core-order flip on divider writes); both fixed in 0x1537, built deterministically, pinned
   backups/al3_seg_0x1537_426a3784.bin (sha 426a3784...) + padded febc9299..., NOT flashed; tb_trigpos (882 checks, 36 fail on

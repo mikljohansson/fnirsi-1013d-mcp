@@ -795,9 +795,21 @@ Newest entries at the bottom. Format: date, who, what, result.
   The wizard computes something larger than the real noise: fw-cal4 dispatched (fw 0.2.60). COM10 flapped for about a minute after
   the USB replug (device seen, port not openable), then fine.
 - 2026-10-19 16:06: owner: select, save and delete in Saved pictures and Saved waveforms work on 0.2.59 (new delete dialog).
-- 2026-10-19 16:20: wizard noise root cause: with the calibration post still wired to the breadboard (probes unplugged), repeated
+- 2026-10-19 16:12: wizard noise, first reading (WRONG, see 16:18): with the calibration post still wired to the breadboard (probes unplugged), repeated
   200 MS/s captures show CH1 core B 19-30 codes RMS (60-code excursions) and CH2 core A 6-17 codes on ranges 0-1, far over the
   3-code limit; at 2 MS/s 0.1-0.5 codes. With only USB connected: 0.5-2.0 codes per core on all six ranges at both rates, generator
   on or off, std of capture means < 0.26, excursions < 10 codes. The wizard arithmetic is correct (fw-cal4 host check); the zero
   step must be run with nothing on the post, which the instruction did not say. fw-cal4 narrowed to the failure line with numbers
   and the instruction text. Owner: Log page works (scroll, save to card); Developer debug overlay flickers (1.00o5 per-pass redraw).
+- 2026-10-19 16:18: correction: the owner's first wizard attempts also had nothing connected, and the Zero level step fails
+  the same way with USB connected. So the environment is not the cause; the wizard measures something the host READ_RAW study does
+  not (host: 0.5-2.0 codes per core on all ranges, both rates). fw 0.2.60 (fw-cal4, merge of its branch: failure line with range,
+  rate, core, total and per-capture RMS; instruction names the post) built 27634587..., pinned backups/fw-0.2.60_27634587.bin, loaded
+  into RAM at 16:18 (#VER fw=0.2.60). Owner to run Zero level and read the failure line.
+- 2026-10-19 16:25: 0.2.60 failure lines, nothing connected, USB on: "CH1: range 4 at 200MSa/s: core B, 21.1 codes, 21.0 per
+  capture", "CH2: range 1 at 200MSa/s: core A, 24.4 codes, 24.3 per capture". One core per channel reads about 21-24 codes RMS inside
+  a single 200 MS/s capture inside the wizard, while READ_RAW from the host at 200 MS/s legacy at the same moment gives 0.5-2 codes on
+  every core and range (GET_DECIM: filter 0, fpga_mode 0, fpga_shift 2). The same lanes (CH1 B, CH2 A) showed 19-30 codes from the
+  host once today, right after the Bode run had left the FPGA in mode 225. Hypothesis under test by fw-cal4: the calibration
+  conversion does not force the FPGA decimation / shift registers to legacy, so one byte lane is not an 8-bit sample. The UI filter
+  was left at "off" by my study scripts between 15:55 and 16:25 and is restored to CIC2+FIR now.
