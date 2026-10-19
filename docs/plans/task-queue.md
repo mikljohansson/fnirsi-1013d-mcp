@@ -83,7 +83,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
 - [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md
   section 4; XY mode could get intensity grading from the same map.
-- [ ] **Bode / frequency response** (owner priority 3): host tool first, then on-scope; design in the same document.
+- [x] **Bode / frequency response** (owner priority 3): design docs/plans/bode-design.md; host tool done (H1-H3 above); device steps D1-D5 queued.
 
 ## MCP / host
 
@@ -120,7 +120,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - bode-design (done 01:05): docs/plans/bode-design.md committed fe5780b.
 - fw-cal2 (retired, about 400k tokens): calibration v3 delivered and merged (c20957a, fw 0.2.45 / 1.12 / row 51); handoff section 23.
 - fw-phosphor (retired, about 430k tokens): phosphor view delivered and merged (2e73d28, fw 0.2.46 / 1.13 / row 52); handoff section 24.
-- mcp-gen4 (started 10-19 01:25): Bode host steps H1-H3 (scope_bode_sweep tool, simulator DUT model, fnirsi1013d-bode CLI).
+- mcp-gen4 (idle since 02:00 after H1-H3; CI 39178908638 green): holds the Bode follow-ups and item 4 (0.3.0 bump, on hold).
 - mcp-gen3 (retired 01:20 after GET_CAL v2, 1.11, 1.12, 1.13): handoff mcp/AGENTS.md d4d891c.
 - fw-gen6 (worktree, branch fw-gen6, about 350k tokens, retired): fw 0.2.44 merged into main (463931d, image d4c0b716): 0x1535 FIR
   support, spectrum strip repaint, CIC2 default, USB suspend/resume rework (protocol 1.11, rows 49-50), generator menu hit-area fix.
