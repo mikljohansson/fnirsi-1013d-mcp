@@ -31,6 +31,26 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.56 - 2026-10-19 (protocol 1.17, provisional)
+
+Support for the AL3 bitstream 0x1536 (segmented capture and hardware averaging, fpga-gen5; not flashed yet).
+Version and protocol minor are provisional: fw-readers builds 0.2.52 / protocol 1.16 in parallel and the
+coordinator renumbers at the merge. Spec: `docs/protocol.md` section 14 row 70; README section 5 "Segmented
+capture and hardware averaging". Nothing is benched.
+
+- Added: version word 0x1536..0x153F gives caps bit 17 SEQ. Older bitstreams see no new FPGA command (65abebf).
+- Added: the acquisition menu's Average uses the FPGA's averaging on 0x1536 when the record fits its accumulator
+  (legacy records at the 3000-sample depth: filter off or 200 MSa/s): each displayed record is the mean of 2 to 64
+  records (as many as fit 40 ms) instead of the per-pass software average. Other cases keep the software average
+  (65abebf).
+- Added: SET_SEQ / GET_SEQ / READ_SEQ (0x020E-0x0210) and READ_RAW addr_mode 3: host ARM runs N segments with a
+  40-bit timestamp per segment, or averages N records per position (up to 65536 with the filter on); STOP ends a
+  run and keeps its data (65abebf).
+- Changed: GET_STATUS is 48 bytes (bytes 44-47: the bitstream's features word and the UI Average state), GET_DECIM 36
+  bytes, GET_CAPTURE_INFO 96 bytes (the run of the capture) (65abebf).
+- Changed: on 0x1536 the arm writes 0x0B / 0x0C and the sequencer registers before the sampling reset, so the
+  write-clock side loads them at every rate (65abebf).
+
 #### 0.2.51 - 2026-10-19 (protocol 1.15, unchanged)
 
 The first step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 1 plus the measurement cards; rules in

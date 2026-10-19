@@ -6,6 +6,10 @@ coherent averaging of many decays at full rate is what buys sensitivity. Communi
 per-event timestamps, and noise reduction by averaging.
 
 Status: built and verified in simulation as designed (fpga-gen5, 2026-10-19), not flashed. Section 9 has the results.
+Firmware support: fw 0.2.56 / protocol 1.17 (fw-seq, both numbers provisional), built and host-tested, not benched.
+What was built differs from section 7 in details; the spec is `docs/protocol.md` section 14 row 70 (SET_SEQ 16 bytes
+without S, which READ_SEQ takes per read; GET_SEQ 48 bytes; READ_SEQ with its own 16-byte header; GET_CAPTURE_INFO 96
+bytes with a different field order; STOP ends a run as DONE).
 Facts about the existing design come from `fpga/al3/README.md` sections 3 and 5 and `fpga/al3/AGENTS.md`. Statements
 marked "inference" are not measured.
 
