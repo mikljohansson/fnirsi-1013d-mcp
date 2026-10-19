@@ -24,6 +24,8 @@
 #include "ui_settings.h"
 #include "ui_ctrl.h"
 #include "ui_meas.h"
+#include "bode_view.h"
+#include "ui_fmt.h"
 #include "ctrl_page.h"
 #include "touch_pick.h"
 #include "tb_view.h"
@@ -1045,9 +1047,16 @@ void handle_main_menu_touch(void)
           //Need to exit the loop here
           return;
         }
-        //fw 0.2.68: Bode plot where the bitstream lacks the filter and the DDS (or in the waveform viewer): grey, inert
+        //fw 0.2.68: Frequency response where the bitstream lacks the filter and the DDS (or in the waveform viewer): grey;
+        //fw 0.2.69: a tap says why at the top middle of the plot (the menu stays open)
         else if((row == UI_MM_BODE) && !pc_glue_bode_available())
         {
+          const char *t = bode_view_unavailable_text();
+
+          display_set_screen_buffer((uint16 *)maindisplaybuffer);
+          display_set_font(&font_2);
+          display_set_fg_color(ORANGE_COLOR);
+          display_text(366 - ui_text_width(&font_2, t) / 2, 69, (int8 *)t);
           tp_i2c_wait_for_touch_release();
         }
         //Scope, Spectrum analyser or Bode plot: the mode rows (pc_glue_main_menu_mode carries out ui_mm_choose)
@@ -3294,7 +3303,11 @@ void handle_right_basic_menu_touch(void)
 {
   //fw 0.2.56: the spectrum's empty slots (T CURSOR, V CURSOR; ui_p1_shown) do nothing; fw 0.2.65: MEASURES opens the
   //spectrum's own list
-  if((ytouch >= 183) && (ytouch <= 297) && !ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
+  if((ytouch >= 183) && (ytouch <= 237) && !ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
+    return;
+
+  //fw 0.2.69: Frequency response has T CURSOR (C1 / C2) but no V CURSOR
+  if((ytouch >= 243) && (ytouch <= 297) && !ui_p1_shown(UI_P1_VCURSOR, ctrl_page_spectrum()))
     return;
 
   //fw 0.2.66: the Bode plot's empty MEASURES slot does nothing either
@@ -3436,6 +3449,13 @@ void handle_right_basic_menu_touch(void)
     //Button back to inactive state
     scope_t_cursor_button(0);
 
+    //fw 0.2.69: in Frequency response the frequency cursors C1 / C2
+    if(bode_view_active())
+    {
+      bode_view_tcursor();
+      return;
+    }
+
     //Toggle the enable setting
     scopesettings.timecursorsenable ^= 1;
     
@@ -3522,8 +3542,11 @@ void handle_right_basic_menu_touch(void)
       //Button back to inactive state
       scope_save_wave_button(0);
 
-      //Save the waveform on the SD card
-      scope_save_view_item_file(VIEW_TYPE_WAVEFORM);
+      //Save the waveform on the SD card; fw 0.2.69: in Frequency response the sweep table as CSV
+      if(bode_view_active())
+        bode_view_save();
+      else
+        scope_save_view_item_file(VIEW_TYPE_WAVEFORM);
     }
     else
     {

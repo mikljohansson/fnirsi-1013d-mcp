@@ -27,6 +27,8 @@
 #include "ui_settings.h"
 #include "ui_ctrl.h"
 #include "ui_meas.h"
+#include "bode_ui.h"
+#include "bode_view.h"
 #include "spectrum.h"
 #include "ctrl_page.h"
 #include "ui_diag_view.h"
@@ -353,12 +355,12 @@ void scope_setup_right_control_menu(void)
     //Main control state so draw the always used buttons; fw 0.2.56: the spectrum leaves the cursor slots empty
     //(ui_p1_shown) until spectrum markers exist; fw 0.2.65: MEASURES opens the spectrum's own list there
     if(ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
-    {
       scope_t_cursor_button(0);
-      scope_v_cursor_button(0);
-    }
 
-    //fw 0.2.66: not in the Bode plot (ui_p1_shown)
+    //fw 0.2.69: Frequency response shows T CURSOR (C1 / C2) and MEASURES, not V CURSOR (ui_p1_shown)
+    if(ui_p1_shown(UI_P1_VCURSOR, ctrl_page_spectrum()))
+      scope_v_cursor_button(0);
+
     if(ui_p1_shown(UI_P1_MEASURES, ctrl_page_spectrum()))
       scope_measures_button(0);
 
@@ -2740,16 +2742,19 @@ static void scope_main_menu_spectrum_icon(uint32 y)
     display_draw_vert_line(MAIN_MENU_XPOS + 16 + 2 * i, y + 29 - bars[i], y + 29);
 }
 
-//Bode plot (fw 0.2.68, owner): two sloping lines, magnitude above phase, as a low-pass reads: flat, then falling
-static void scope_main_menu_bode_icon(uint32 y)
+//Frequency response (bode-ui.md 1a, owner, fw 0.2.69): a low-pass magnitude response over an L frame
+static void scope_main_menu_bode_icon(uint32 y, uint32 fg)
 {
   uint32 x = MAIN_MENU_XPOS + 15;
 
-  display_draw_line(x, y + 8, x + 10, y + 8);
-  display_draw_line(x + 10, y + 8, x + 24, y + 22);
-  display_draw_line(x, y + 15, x + 5, y + 15);
-  display_draw_line(x + 5, y + 15, x + 19, y + 29);
-  display_draw_line(x + 19, y + 29, x + 24, y + 29);
+  display_set_fg_color(UI_MM_AXIS_COLOR);
+  display_draw_vert_line(x, y + 8, y + 29);
+  display_draw_horz_line(y + 29, x, x + 24);
+
+  display_set_fg_color(fg);
+  display_draw_horz_line(y + 12, x + 2, x + 10);
+  display_draw_horz_line(y + 13, x + 11, x + 12);
+  display_draw_line(x + 13, y + 14, x + 24, y + 25);
 }
 
 //One row of the main menu: mode 0 normal, 1 touched (Settings stays yellow while its fold-out is open, as 1.00o5)
@@ -2759,19 +2764,21 @@ void scope_main_menu_item(int row, int mode)
   uint32 y  = ui_mm_row_top(row) + UI_MM_BTN_DY;
   uint32 bg = !mode ? DARKGREY_COLOR : (row == UI_MM_SETTINGS) ? YELLOW_COLOR : 0x00CCCCCC;
   uint32 xc = MAIN_MENU_XPOS + 93;
+  uint32 fg;
 
   display_set_fg_color(bg);
   display_fill_rounded_rect(UI_MM_BTN_X, y, UI_MM_BTN_W, UI_MM_BTN_H, 3);
 
-  //Icons with the set colors; fw 0.2.68: the Bode plot row grey where it cannot open (no filter / DDS, the viewer)
-  display_set_fg_color(mode ? BLACK_COLOR : ((row == UI_MM_BODE) && !pc_glue_bode_available()) ? 0x00686868 : WHITE_COLOR);
+  //Icons with the set colors; fw 0.2.68: the Frequency response row grey where it cannot open (no filter / DDS, the viewer)
+  fg = mode ? BLACK_COLOR : ((row == UI_MM_BODE) && !pc_glue_bode_available()) ? 0x00686868 : WHITE_COLOR;
+  display_set_fg_color(fg);
   display_set_bg_color(bg);
 
   switch(row)
   {
     case UI_MM_SCOPE:       scope_main_menu_wave_icon(y, mode ? BLACK_COLOR : WHITE_COLOR); break;
     case UI_MM_SPECTRUM:    scope_main_menu_spectrum_icon(y); break;
-    case UI_MM_BODE:        scope_main_menu_bode_icon(y); break;
+    case UI_MM_BODE:        scope_main_menu_bode_icon(y, fg); break;
     case UI_MM_PICTURES:    display_copy_icon_use_colors(picture_view_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
     case UI_MM_WAVEFORMS:   display_copy_icon_use_colors(waveform_view_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
     case UI_MM_SETTINGS:    display_copy_icon_use_colors(Other_settings_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
@@ -6839,11 +6846,18 @@ void scope_open_v_cursor_menu(void)
 //shows its place in the row at its top left.
 int scope_measures_mode(void)
 {
+  //fw 0.2.69: Frequency response has its own list (bode_ui.h)
+  if(ctrl_page_spectrum() == 2)
+    return UI_MS_BODE;
+
   return ctrl_page_spectrum() ? UI_MS_SPECTRUM : UI_MS_SCOPE;
 }
 
 uint8 *scope_measures_ranks(int mode, int group)
 {
+  if(mode == UI_MS_BODE)
+    return bode_view_ms_ranks();
+
   if(mode == UI_MS_SPECTRUM)
     return spectrum_cards()->rank[(group < UI_MS_SP_GROUPS) ? group : 0];
 
@@ -6852,6 +6866,9 @@ uint8 *scope_measures_ranks(int mode, int group)
 
 int scope_measures_list_len(int mode)
 {
+  if(mode == UI_MS_BODE)
+    return BU_MS_COUNT;
+
   return (mode == UI_MS_SPECTRUM) ? UI_MS_SP_PER_GROUP : UI_MEAS_COUNT;
 }
 
@@ -6881,7 +6898,7 @@ void scope_measures_menu_cell(int mode, const ui_msm_cell *c)
 {
   int    ch  = c->group & 1;
   int    src = (mode == UI_MS_SCOPE) ? (ch ? scopesettings.source2_measures : scopesettings.source1_measures) : 0;
-  uint32 color = scope_measures_color(ch, src);
+  uint32 color = (mode == UI_MS_BODE) ? 0x00A0A0A0 : scope_measures_color(ch, src);     //fw 0.2.69: neutral grey
   uint8 *rank;
   char   num[4];
 
@@ -6915,6 +6932,11 @@ void scope_measures_menu_cell(int mode, const ui_msm_cell *c)
       display_fill_rect(c->x, c->y, c->w, c->h);
       display_set_fg_color(BLACK_COLOR);
       scope_measures_cell_text(c, &font_2, ui_msm_text(mode, c));
+      break;
+
+    case UI_MSC_EMPTY:
+      display_set_fg_color(DARKGREY_COLOR);
+      display_fill_rect(c->x, c->y, c->w, c->h);
       break;
 
     case UI_MSC_ITEM:
@@ -6971,8 +6993,11 @@ void scope_measures_menu_draw(int mode)
 
   display_set_fg_color(WHITE_COLOR);
   display_draw_rect(UI_MSM_X, top, UI_MSM_W, h);
-  display_draw_vert_line(480, top + 1 + UI_MSM_TITLE_H + 1, chan_bottom);
-  display_draw_vert_line(481, top + 1 + UI_MSM_TITLE_H + 1, chan_bottom);
+  if(mode != UI_MS_BODE)
+  {
+    display_draw_vert_line(480, top + 1 + UI_MSM_TITLE_H + 1, chan_bottom);
+    display_draw_vert_line(481, top + 1 + UI_MSM_TITLE_H + 1, chan_bottom);
+  }
 }
 
 void scope_open_measures_menu(void)

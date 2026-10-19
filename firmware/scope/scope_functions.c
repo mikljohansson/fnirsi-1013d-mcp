@@ -6444,6 +6444,10 @@ void scope_save_config_data(void)
   //Bode plot sweep settings (fw 0.2.66)
   settingsworkbuffer[PC_SETTING_WORD_BODE0] = pc_glue_bode_setting_word(0);
   settingsworkbuffer[PC_SETTING_WORD_BODE1] = pc_glue_bode_setting_word(1);
+  //Frequency response MEASURES list (fw 0.2.69, words 213..215)
+  settingsworkbuffer[PC_SETTING_WORD_BODE_MS]     = pc_glue_bode_setting_word(2);
+  settingsworkbuffer[PC_SETTING_WORD_BODE_MS + 1] = pc_glue_bode_setting_word(3);
+  settingsworkbuffer[PC_SETTING_WORD_BODE_MS + 2] = pc_glue_bode_setting_word(4);
   //Unit life record, words 224..255 (fw 0.2.52, pc_diag.c)
   PC_SETTINGS_STORE(settingsworkbuffer);
   

@@ -1028,6 +1028,9 @@ void pc_glue_settings_defaults(void)
   phosphor_set_switch(0);
   spectrum_set_view(0);
 
+  //fw 0.2.69: the Frequency response settings (words 219, 220, 213..215) back to their defaults
+  bode_view_defaults();
+
   if(pc_dec_has() && (pc_dec_setting & 3))
     pc_dec_fit_memory();
 }
@@ -1619,7 +1622,7 @@ int pc_glue_autoset_running(void)  { return bode_view_auto_running() || spectrum
 //fw 0.2.66: scope_acquire_trace_data while the Bode plot shows: no UI acquisition, the view's drawing instead
 int pc_glue_bode_pass(void)        { return bode_view_pass(); }
 int pc_glue_bode_available(void)   { return bode_view_available(); }
-uint16 pc_glue_bode_setting_word(int i) { return bode_view_setting_word(i); }
+uint16 pc_glue_bode_setting_word(int i) { return (i < 2) ? bode_view_setting_word(i) : bode_view_ms_word(i - 2); }
 void pc_glue_view_opening(void)    { if(bode_view_active()) bode_view_close(); }
 
 //fw 0.2.66 (pc_bode.c): the running bitstream's capabilities, the ring size, a host capture in flight, and the ring
@@ -1685,11 +1688,15 @@ void pc_glue_main_menu_mode(int row)
   if(a.phosphor && !phosphor_mode())
     phosphor_set_active(1);
 
-  if(a.warn_roll)
+  if(a.warn_roll && !a.bode)
     spectrum_note_roll_off();
 
   if(a.bode && !bode_view_active())
     bode_view_open();
+
+  //fw 0.2.69: entered from roll mode, the frequency response says so
+  if(a.warn_roll && a.bode)
+    bode_view_note_roll();
 }
 
 //The right bar differs between the modes (empty slots, the CTRL page's items): redrawn whenever the spectrum view
@@ -1998,6 +2005,8 @@ static void pc_ui_fix_settings(void)
 
   //fw 0.2.66: the Bode plot's sweep settings (words 219, 220); the mode itself is not restored
   bode_view_settings_restore(settingsworkbuffer[PC_SETTING_WORD_BODE0], settingsworkbuffer[PC_SETTING_WORD_BODE1]);
+  //fw 0.2.69: its MEASURES list (words 213..215; no marker: the defaults)
+  bode_view_ms_restore(&settingsworkbuffer[PC_SETTING_WORD_BODE_MS]);
 
   //Memory depth: the largest offered step (3000 x n) the bitstream can capture
   if(fpgasettings.totalsamples > max)
