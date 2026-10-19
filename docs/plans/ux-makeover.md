@@ -66,7 +66,8 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   centre so each gets about 45 px of touch; they step `displayvoltperdiv` exactly as the channel menu's chips do (same
   setting, the stepper is the quick way while watching the trace); 50 % TRIG (action, as today). That fills the eight
   slots exactly.
-- **Right bar, CTRL page, Spectrum** **(owner)**: CTRL; View (Spectrum, Waterfall, Density); Analysis (fold-out: FFT
+- **Right bar, CTRL page, Spectrum** **(owner)**: CTRL; Display (fold-out: Spectrum, Waterfall, Density, each with an
+  icon, the same button name and slot as in Scope); Analysis (fold-out: FFT
   length, Window, Average, Reset); Axis (fold-out: Scale, Ref level); Grid; the CH1 and CH2 V/div steppers; 50 % TRIG. The
   spectrum strip goes away; Span and Start keep their gestures. The one-line header goes away too **(owner)**: its
   readouts become measurement cards in the bottom row like the scope's ("[1] Peak: 1.000kHz", "[1] Level: +2.7dBV",
