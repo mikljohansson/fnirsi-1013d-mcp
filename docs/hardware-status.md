@@ -739,3 +739,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   300 kHz is refuted. New hypothesis: a component in phase with V1 added to CH2 (crosstalk / leak, the floor of bode-design 2.3),
   since the phase sticks at -70 deg while the magnitude runs high. Next: the floor sweep (CH2 tip on the ground rail) and the thru
   calibration (both tips on the input), wiring B via a second USB cable through the hub.
+- 2026-10-19 14:55: Bode floor sweep, CH1 on the loaded input, CH2 tip on the ground rail, wiring B (rail on a second USB
+  cable to the hub, probe grounds floating), backups/bode/floor_rc1_usbgnd.json: -78 to -90 dB at every point, CH2 0.03-0.14 mV rms
+  (0.1 code), all points flagged near_floor as designed. Crosstalk is not the cause of the RC deviation; the floor is 25 dB better
+  than bode-design 2.3 assumed. Next: thru calibration (both tips on the input), then the RC with it applied.
