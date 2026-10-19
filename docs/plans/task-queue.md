@@ -15,6 +15,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   unavailable, clamp the record slider to the record, derive viability from the real record length (memory depth) instead of the
   table, apply the same rule to SET_TIMEBASE / the protocol path, and check the resampling and zero-fill code for the exact
   cut-off and scroll behaviour.
+- **Release 0.3.0 readiness fixes** (docs/plans/release-readiness.md, 12 findings by docs-gen3): attach our FPGA bitstreams
+  (0x1533-0x1536, our own build of GPL sources) to the GitHub release with sha256 and the flash procedure, make the mcp wheel work
+  outside a checkout (data/log dirs, .mcp.json example without the Windows venv path and COM10), write release notes separate from
+  the CHANGELOG dev diary, fix docs/releasing.md step 1, dry-run release.yml on a scratch tag or fork, refresh README.md (Status, tool
+  count, FPGA state, Getting started gaps, the proposed outline). Dispatch when an mcp/docs agent is free; before tagging.
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
@@ -49,7 +54,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [x] **MMU + D-cache** fw 0.2.48 (fw-mmu; hook guard fixed 39b98c4 after the purge merge). Benched 10-19 08:10: CP15 0x0005107D, FFT 4096
   10.96 -> 2.72 ms, 1024 2.20 -> 0.21 ms, scope-view pass_ms 30 -> 15, census clean. Still to bench: screen coherence (owner), touch, soak,
   SD save/restore, ENTER_FEL round trips (section 26 steps 4-9).
-- [ ] **Dead-code purge** (owner dropped the byte-identical rule 10-18): PC_PROTOCOL always on, hidden-option masks
+- [x] **Dead-code purge** (done by fw-gen7 in 0.2.47/0.2.48) (owner dropped the byte-identical rule 10-18): PC_PROTOCOL always on, hidden-option masks
   replaced by removal (FFT switch, generator Wave/Ampl/Offset/Phase, Long memory, hold-off, 1014D remnants), unused files,
   check-reference target and reference downloads removed from the Makefile/CI/docs. Do after the spectrum/calibration
   work lands to avoid conflicts.
@@ -72,7 +77,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   `-fdebug-prefix-map`), check for __DATE__/__TIME__, and make CI's image hash match a local main build. Fold into the dead-code purge.
 - [ ] **CH2 reads +1.0..1.5 codes at range 6 with shorted input right after calibration** (10-18 late): channel offset with the cores
   agreeing; see docs/hardware-status.md late evening and the overnight log. Decide after the log: PWM/relay drift at hw range 5 vs probe.
-- [ ] **Morning bench with the owner (load 0.2.46 first, backups/fw-0.2.46_49a7989b.bin)**: (1) back up SD 700-710; base calibration
+- [~] **Morning bench with the owner** (10-19 morning: calibration v3 run 08:15, 0x1535 flashed 10:40 and benched; the +-1 V and phosphor checks still open; load the latest pinned image, not 0.2.46): (1) back up SD 700-710; base calibration
   with probes + USB unplugged, then the new gain step with both x1 probes on the post ("Gain calibration successful"); GET_CAL version 3,
   gains about full A 0.995 / B 1.028, gated 0.998 / 1.002; (2) +-1.0045 V on CH1 range 2: |A-B| <= 0.15 at 200 MSa/s, codes/V equal
   within 0.2 % across 200 MSa/s / 1 MSa/s / 10 kSa/s / CIC2, volts within 0.5 % of the DMM; fs/2 spur down >= 15 dB; (3) phosphor view

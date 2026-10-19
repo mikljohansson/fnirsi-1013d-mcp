@@ -484,7 +484,7 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
 }
 
 //Correction for the channel's current settings (adc_cal.h): calibration data v3 when loaded and bound, with the v4
-//tracking folded in exactly as the readout does it (acal_v4_apply; protocol row 53)
+//tracking folded in exactly as the readout does it (acal_v4_apply; protocol row 54)
 static void pc_channel_corr(const pc_hw_channel *c, acal_corr *k)
 {
   acal_correction(c->cal2_loaded ? &c->cal2 : 0, c->cal_offset, c->range, c->divider, c->dcoffset, c->dc_shift_value,
@@ -1910,7 +1910,7 @@ void pc_cal_body(int ch, uint8_t *resp)
   if(c.cal2_loaded)
     acal_pack_channel(&c.cal2, resp + 112);
 
-  //1.14: calibration v4 tracking (row 53). Bytes 84 and 92..107 above already include it
+  //1.15: calibration v4 tracking (row 54). Bytes 84 and 92..107 above already include it
   {
     pc_decim_cfg dc;
     int          written;
