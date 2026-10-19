@@ -298,6 +298,34 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Dispatched
 
+- Batch of 2026-10-19 20:58 (owner: "continue working off the roadmap with agents"), all in worktrees, all push their own branch:
+  fw-freq2 (Opus, branch fw-freq2, fw 0.2.70 provisional): single sweep visible and STOP cancels, Spectrum slider, top bar in the
+  mode, cancelled AUTO SET restores the table, Move fast cursors, MEASURES immediate, sharp-tank span, Trace style Lines/Dots,
+  meaningful grid lines in both modes, BODE_STATUS header/estimate consistency, pre-scan readout-fault reason.
+  ux-overview (Opus, designer, branch ux-overview): slider-track mini overview design (docs/plans/slider-overview.md, boards in
+  docs/mockups), self-review and owner questions; firmware batch after approval.
+  docs-site (Sonnet, branch docs-site): mkdocs.yml + Material, docs.yml Pages workflow, guide and article skeletons,
+  tools/screenshots.py against the simulator, CI build job.
+  fw-screen (Opus, branch fw-screen): READ_SCREEN firmware handler so scope_screenshot works on the unit (docs screenshots).
+  fw-bus (Opus, branch fw-bus): FPGA bus contract fixes (one-word-late readout per bitstream, EXT shift, arm order, 0x33 sticky
+  after a rate write, type 22 trace to debug level, core-order convention from 0x33 on 0x1538+).
+  fpga-gen9 (Fable, branch fpga-gen9 from fpga-gen8's branch, owner 20:55): adversarial review of the AL3 capture path, clocking,
+  constraints and the TD initial-value finding, then finish 0x153A (build, every testbench, tb_adccap, contract transcript, docs,
+  images for pinning, dist entry, firmware notes); 0x153B = the features branch gen8-features-wip afterwards.
+- fpga-gen8 (done 20:57, about 834k tokens, retired; handoff = the last section of fpga/al3/AGENTS.md on branch
+  worktree-agent-ac1eb52dff7a62fc7, commits 19d9a5c WIP + e924eba handoff, not merged: main keeps the 0x1539 sources until 0x153A is
+  benched). Delivered 0x1539 (flashed 20:06). Found: AD9288 data valid from tPD 6 ns max to tV 2 ns min, so at 200 MS/s each core
+  is valid 6 ns of every 10 and the A/B windows overlap about 0.4 ns; 0x1532..0x1539 sampled all four buses at one instant and
+  each build landed elsewhere (B bad on 0x1538, A on 0x1539). 0x153A WIP: every ADC pin through an IOB DDR input register with a
+  fixed pad delay plus two stages (samples 5..17.5 ns before the write edge in 2.5 ns steps), per-core stage select write 0x63,
+  outlier counters read 0x36 / threshold write 0x64, one extra word of ADC latency (EXT offsets grow by one word, 0x53 bits 3/4 no
+  effect). Earlier build met timing thinly (clk_200MHz +0.111 ns, sample_write_clock +0.123 ns, 5011 LUT); the latest source (new
+  registers stored XOR their defaults) is unbuilt; tb_ext_trigger 1/38 and tb_trigpos 42/882 fail on monitors that predate the
+  latency change; fir, long, seg not run; tb_adccap not written; docs not written. Finding for everyone: TD 4.6.8 ignores Verilog
+  initial values (every register powers up 0; builds with different initial values were byte-identical), so documented power-on
+  values of existing registers may be wrong on the hardware. Features (trigger types, peak detect, counter) on gen8-features-wip
+  9de82ca, each passed its own testbench in a scratch copy, full run and docs unfinished; to be rebased as 0x153B.
+
 - Swarm started 10-19 13:40 after step 1 merged (owner: ship the whole roadmap before the announcement, one big splash; front-load
   everything that needs no hardware). Provisional firmware numbers, renumbered at merge: fw-readers 0.2.52 / protocol 1.16,
   fw-ui2 0.2.56 (step 2: CTRL fold-outs, steppers, strips to cards, chips, ACQ Display row removed), fw-touch1 0.2.54 (touch-review
