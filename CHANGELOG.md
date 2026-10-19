@@ -31,6 +31,16 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### Next (fw-cal3, version set at the merge)
+
+- Changed: the base calibration is one full-screen wizard (System settings > Baseline calibration), replacing the
+  fold-out box and the separate gain prompt: step 1 zero (probes and USB unplugged, warns when a USB host is
+  attached, progress per range, a tick or the reason per channel), step 2 gain one channel at a time with a level
+  check first ("No signal on CH1: tip on the post?"), the CH2 gain measured at once when its probe is already on the
+  post, step 3 a summary in plain words. Retry and Skip per step, Cancel at any step writes nothing, Done saves only
+  what changed and shows the one success message. The trigger mode is restored after the calibration (it was left
+  in Auto) and the channels' offsets are no longer zeroed. firmware/README.md section 6.4 (commit pending).
+
 #### 0.2.47 - 2026-10-19 (protocol 1.13, unchanged)
 
 - Fixed: reproducible image. The same commit built in two directories (or main and a worktree) gave different

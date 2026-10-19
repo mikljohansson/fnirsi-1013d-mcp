@@ -36,6 +36,9 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
                            host-buildable (section 19)
   adc_cal.c/.h             calibration data v3: per-core zero and gain model, sector 708 block, correction maths,
                            zero and gain step checks. Pure C, host-buildable (sections 21, 23)
+  cal_wiz.c/.h             calibration wizard steps: state machine, actions, summary texts. Pure C, host-buildable
+                           (host_tests/test_cal_wizard.c; section 27)
+  cal_wiz_ui.c             the wizard's full-screen view, touch loop and the zero / gain measurements (section 27)
   phos_map.c/.h            phosphor hit-count map: rasteriser, decay, render, palettes. Pure C, host-buildable (section 24)
   phosphor.c/.h            phosphor view (main menu row 7, strip, hooks in scope_display_trace_data; section 24)
   pc_mmu.c/.h              flat page table (builder + walk host-buildable), MMU enable; pc_mmu_off in start.s (section 26)
@@ -1135,3 +1138,22 @@ pc_cmds.c link stats, pc_cmds.h version); expect conflicts only in pc_cmds.h (ve
 On any restart: GET_LINK_STATS 49-59 and `map_addr.py <0.2.48 ELF> --restart v49..v56`; 58 / 59 give the fault
 status and address of a data abort (FS 0x5 / 0x7 translation, 0x9 / 0xB domain, 0xD / 0xF permission: none can come
 from this table; 0x1 / 0x3 alignment; 0x8 / 0xA external abort).
+
+## 28. fw-cal3: calibration wizard and interleave tracking (fw 0.2.50, protocol 1.14)
+
+User-facing spec, layout, coordinates and the bench list: README section 6.4. Points for a successor:
+- `cal_wiz.c` is the whole step logic: states CW_*, button events, actions the glue runs (`cw_take`: ZERO, PREPARE,
+  GAIN_LEVEL, GAIN_MEASURE, COMMIT, DISCARD) and results fed back (`cw_zero_result`, `cw_level_result`,
+  `cw_gain_result`). Change behaviour there, with a test in `test_cal_wizard.c`; `cal_wiz_ui.c` only draws and runs.
+- The zero / gain measurement helpers (`cal_channel`, `cal_gain_check` + `cal_gain_measure`, the split of the old
+  `cal_gain_channel`) live static in `cal_wiz_ui.c`; `scope_do_baseline_calibration`, `scope_do_gain_calibration`,
+  `calibration_fail_reason`, `calibrationopen` 1 and 10 and their menu.c boxes are gone. `calibrationopen` 2..9 (the
+  1.00o5 input-divider calibration) is unchanged and is entered after Done while `calibrationfail` is set.
+- Measurements batch: `cal_begin` before the first measurement action of a touch, `cal_end` after the last
+  (channels, sample rate, trigger mode, generator after a gain action). The trigger mode is now restored (the old code
+  left Auto) and the channels' dcoffset is not zeroed any more.
+- `cal_wizard_committed()` (weak, empty, scope_functions.c) runs after Done wrote something: the calibration v4
+  tracker reset belongs there.
+- Skip in step 1 needs a block bound to both channels (`acal_bound`), so step 2 always has zeros; a channel skipped in
+  step 2 keeps what the working copy has (carried gains with flag KEPT after new zeros, or the block's own gains).
+- Screen: saved to `displaybuffer4` (was unused), the view drawn in `displaybuffertmp` and copied.

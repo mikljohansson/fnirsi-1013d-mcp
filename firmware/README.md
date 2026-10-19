@@ -1151,8 +1151,8 @@ enough (both polarities give the same ratio; core A's gated 0.5-code bow is INL 
 now per class too). G_k[c] = g_ref / g_k[c], g_ref = the mean gain of both cores in the gated class, which is what
 `input_calibration` is fitted on: legacy gated volts keep their calibration, the full class is pulled onto it.
 
-**Gain step** (`scope_do_gain_calibration`, after a passed zero step, AL3 bitstreams only): the box asks for both
-probes on the calibration post; OK starts it, a touch outside skips it. The generator is set to frequency 0 with
+**Gain step** (AL3 bitstreams only; since the calibration wizard, section 6.4, one channel at a time, step 2 of the
+wizard; 0.2.45-0.2.48 asked for both probes in a box after the zero step). The generator is set to frequency 0 with
 threshold 0 (output low, about -1.24 V against probe ground) or all ones (high, about +1.87 V); both cores and both
 clock classes see the same node, so no level needs to be known. Per channel, about 0.7 s:
 
@@ -1228,3 +1228,63 @@ until the base calibration is run again. GET_CAL 256 bytes: protocol section 14 
 10. Skip and partial paths: run the base calibration again and touch outside the gain prompt: GET_CAL flags bit 4
     (kept) set, gains unchanged. Again with only the CH1 probe on the post: "Gain calibration failed", "CH2: gain:
     probe on post?", CH1 gains new (bit 4 clear), CH2 kept.
+
+### 6.4 Calibration wizard (fw-cal3)
+
+System settings > Baseline calibration opens one modal, full-screen wizard instead of the fold-out box and the two
+separate prompts. It owns the screen until Cancel or Done (touches outside its buttons do nothing), saves the screen
+under it (`displaybuffer4`) and restores it at the end; the settings redraws run after the restore. Files:
+`cal_wiz.c/.h` (the steps as a pure-C state machine, `host_tests/test_cal_wizard.c`), `cal_wiz_ui.c` (the view, the
+touch loop and the measurements, moved from scope_functions.c because only the wizard uses them).
+
+**Steps** (header "Step n of 3" and a title):
+
+1. Zero. "Unplug both probes and the USB cable." Start / Skip / Cancel; Skip only when a v3 block bound to both
+   channels' PWM centres exists. A USB host is detected from the MUSB frame number (moving over 3 ms = attached and
+   not suspended, checked twice a second while step 1 shows): an orange warning "USB is connected: the PC ground can
+   shift the zero by about a code. Unplug it, or Start anyway." (Start is not refused). While it runs: "Measuring CH1
+   range 3 of 6". Both channels are always measured; result lines: a green tick and "CH1: cores matched to 0.1 code",
+   or the reason in red (`acal_reason_text`). Then Next (only when both passed) / Retry / Skip / Cancel. Nothing is
+   applied unless both channels pass.
+2. Gain, one channel at a time (AL3 bitstream; otherwise "The gain step needs the AL3 FPGA: gains kept." and Next).
+   "Plug in the CH1 probe at x1 and hold its tip on the calibration post." Measure / Skip / Cancel. Measure first
+   checks the level (both post levels at range 2, gated, 2 conversions each): when the span predicts under 40 codes
+   on the range the measurement would use (`cw_level_ok`: a x1 probe gives 88 codes at range 2, a x10 probe 88 at
+   range 5) the step says "No signal on CH1: tip on the post?" with Retry / Skip / Cancel; otherwise it measures
+   (README 6.3). Other failures show the reason with Retry / Skip / Cancel. After CH1 passes, CH2's level is checked
+   silently: a second probe already on the post is measured at once (its result line still shows), else the CH2 prompt
+   follows. Skip keeps the channel's earlier gains (carried over with flag KEPT when the zeros are new, GET_CAL flags
+   bit 4; "gain not measured" when there never were any). After CH2: Next / Cancel.
+3. Summary per channel, e.g. "CH1: cores matched to 0.1 code, gain 1.3 %", "CH2: zero kept, gain kept", and the date
+   when a DS3231 answers and the RTC is on. Done / Cancel. "Cores matched" is the zero step's worst |drift A - drift
+   B| over ranges and classes (one decimal, at least 0.1); "gain" the full-class |G_A / G_B - 1| in percent.
+
+Retry never redoes an earlier step. Cancel at any step writes nothing: the measurements work on copies (new zeros,
+a working block per channel). Done commits: new zeros: PWM centres (`dc_calibration_offset[0..6]`), the 1.00o5
+compensations, the block, sectors 708 and 709 (as the 0.2.45 base calibration did); only new gains: the block and
+708; nothing new: nothing. Then "Calibration saved" (or "Calibration unchanged") for 1.2 s, the only success
+message, and `cal_wizard_committed()` (weak, empty: the calibration v4 tracker reset). With 1.00o5's input-divider
+calibration due (`calibrationfail`), Done hands over to its box beside the menu as before; otherwise the menus close.
+Each measurement batch restores the channels, sample rate, trigger mode (now restored, was left in Auto) and, after
+the gain step, the generator; the channels' dcoffset is no longer zeroed by the calibration.
+
+**Layout** (800 x 480, black, grey frame 10,10,780,460, rule at y 62): header font_5 at (30, 26) and (200, 26); body
+font_3 lines at x 40, y 84 and 108; USB warning y 146 and 168; progress y 214; result lines y 256 and 292 (tick at
+x 40, text at x 66); note y 336. Buttons 150 x 52 at y 400, Cancel x 30, Skip x 230, Retry x 430, the step's main
+action (Start / Measure / Next / Done, green) x 620; touch areas the same x ranges, y 392..459. The view is drawn in
+`displaybuffertmp` and copied, so a step change shows no black frame; pressed buttons turn light grey.
+
+**Bench** (owner; back up SD sectors 700-710 first, Done writes 708 and 709):
+
+1. USB connected, open the wizard: step 1 with the orange warning; unplug USB: the warning goes within a second.
+   Cancel: the screen comes back exactly as before, GET_CAL unchanged.
+2. Probes off, Start: "Measuring CH1 range 1 of 6" .. "CH2 range 6 of 6" (about 8 s), two green ticks with the
+   match numbers, Next.
+3. Measure with no probe on the post: "No signal on CH1: tip on the post?". Probe x1 on the post, Retry: the CH1 line
+   with a tick, then the CH2 prompt (CH2 probe not on the post). Put both probes on the post and repeat via Cancel
+   and a new run: CH2 is measured without its prompt.
+4. Summary, Done: "Calibration saved", menus close; GET_CAL both channels flags bit 3 set, bit 4 clear, sector 709's
+   centres equal the block's pwm[].
+5. New run: Skip step 1 (zero kept), Skip CH1, Measure CH2: Done saves 708 only (709 unchanged), CH1 unchanged.
+6. New run, Skip, Skip, Skip, Done: "Calibration unchanged", nothing written. Stray touches anywhere off the buttons
+   do nothing in every step. Stock bitstream (if at hand): step 2 shows the AL3 note.
