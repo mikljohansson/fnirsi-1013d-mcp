@@ -35,6 +35,8 @@
 #include "ui_meas.h"
 #include "bode_ui.h"
 #include "slider_ov_draw.h"
+#include "spec_ladder.h"
+#include "acq_view.h"
 
 #include <string.h>
 
@@ -166,8 +168,8 @@ uint32 spectrum_bench(uint8 *out, uint32 reps)
 #define FLABEL_Y              406
 #define CARDS_Y               UI_MS_SPEC_Y    //from here to the slider: the cards; touches there do nothing
 
-#define ZOOM_MAX              6           //span down to 1/64 of the Nyquist range
-#define START_STEPS           65536u      //start position in 1/65536 of the Nyquist range (fine enough to drag)
+//fw 0.2.77: the span ladder's axis is the view's axis
+typedef char spec_fmax_matches_ladder[(PC_SPECTRUM_FMAX_HZ == SPL_FMAX_HZ) ? 1 : -1];
 #define LOG2N_VIEW_MAX        12          //on-scope FFT lengths 1024..4096 (0.2.31 bench: 16384 points take 51 ms)
 #define REF_MIN               (-100)
 #define REF_MAX               60
@@ -181,9 +183,7 @@ typedef struct
   uint8  log2n;         //requested FFT length; the effective one is limited by the record
   uint8  window;        //FX_WIN_*
   uint8  scale;         //index into spec_scales
-  uint8  zoom;          //span = Nyquist range >> zoom
   int16  ref;           //level at the top of the plot, dBV
-  uint32 start;         //span start in START_STEPS of the Nyquist range
   uint8  fresh;         //trace buffers refilled since the last FFT
   uint8  recompute;     //an FFT setting changed
   uint8  plan_ok;       //plan matches log2n / window
@@ -193,13 +193,16 @@ typedef struct
   uint8  wait;          //the time base changed: ignore the trace buffers until a new capture
   uint8  autostage;     //Auto in progress: 1 at the full-axis rate, 2 at the chosen rate
   uint8  avg;           //trace averaging: 0 off, 1..3 over 4 / 16 / 64 captures, 4 max-hold
+  spl_cell cell;        //fw 0.2.77: the span and centre shown (spec_ladder.h); the rate follows it at each zoom / pan step
+  uint8  cell_set;      //cell holds a choice (else the next entry takes the current rate's whole axis)
 } SPECSTATE;
 
 #define VIEW_SPECTRUM         0
 #define VIEW_WATERFALL        1
 #define VIEW_DENSITY          2
 
-static SPECSTATE spec = { 0, 0, 11, FX_WIN_HANN, 1, 0, 0, 0, 0, 0, 0, { 0, 0 }, 0, VIEW_SPECTRUM, 0, 0, 1 };
+static SPECSTATE spec = { .log2n = 11, .window = FX_WIN_HANN, .scale = 1, .view = VIEW_SPECTRUM, .avg = 1,
+                          .cell = { SPL_FULL, SPL_FMAX_MHZ / 2 } };
 
 //What the last FFT used, per channel (READ_SPECTRUM reports these)
 typedef struct
@@ -213,6 +216,8 @@ typedef struct
   uint8  k;             //decimation filter order (0 off, 1 boxcar, 2 CIC2, 3 CIC3)
   int32  gain_cdb;      //centi-dB from "dB re 1 code RMS" to dBV
 } SPECFRAME;
+
+static void      spec_cell_from_rate(void);
 
 static FX_FFT    spec_plan;
 static uint8     auto_refused;                          //Auto refused: 1 stopped, 2 single mode (spec_auto_start)
@@ -511,31 +516,34 @@ typedef struct
   uint32 first;         //first bin of the span
   uint32 span;          //bins across the plot width
   uint32 half;          //N / 2
+  uint8  whole;         //fw 0.2.77: the bins show the whole cell (else a rate picked by hand cut it to the axis)
   int32  top;           //centi-dBV at the top edge
   int32  cdb_per_div;
 } SPECVIEW;
 
 //The displayed axis ends at PC_SPECTRUM_FMAX_HZ or fs/2, whichever is lower (owner: the front end rolls off near
-//30 MHz, above 25 MHz there are only artefacts); span, start and the Auto band all live inside it
-static void spec_view(SPECVIEW *v, int log2n, uint64 bin_mhz)
+//30 MHz, above 25 MHz there are only artefacts); the span ladder and the Auto band live inside it. The whole axis 0 .. half:
+static void spec_view_full(SPECVIEW *v, int log2n, uint64 bin_mhz)
 {
-  uint32 maxfirst;
   uint64 capbins = bin_mhz ? ((uint64)PC_SPECTRUM_FMAX_HZ * 1000) / bin_mhz : 0;
 
   v->half = 1u << (log2n - 1);
   if(capbins < v->half)
     v->half = (capbins < 16) ? 16 : (uint32)capbins;
-  v->span = v->half >> spec.zoom;
-  if(v->span < 8)
-    v->span = 8;
-
-  v->first = (uint32)(((uint64)spec.start * v->half) / START_STEPS);
-  maxfirst = v->half - v->span;
-  if(v->first > maxfirst)
-    v->first = maxfirst;
-
+  v->first = 0;
+  v->span = v->half;
+  v->whole = 0;
   v->top = spec.ref * 100;
   v->cdb_per_div = spec_scales[spec.scale] * 100;
+}
+
+//fw 0.2.77: the cell's bins on this axis (spl_bins); while Auto runs, the whole axis of the rate it probes
+static void spec_view(SPECVIEW *v, int log2n, uint64 bin_mhz)
+{
+  spec_view_full(v, log2n, bin_mhz);
+
+  if(!spec.autostage)
+    v->whole = (uint8)spl_bins(&spec.cell, bin_mhz, v->half, &v->first, &v->span);
 }
 
 static int32 spec_y(const SPECVIEW *v, int32 cdb)
@@ -838,12 +846,14 @@ static void spec_draw_cards(const SPECVIEW *v, const uint32 *peak, int hch, uint
         ui_fmt_mhz(t, (bin_mhz * fx_enbw_milli(spec.window) + 500) / 1000);
         break;
 
+      //fw 0.2.77: the cell's own span and centre while the bins show all of it (the bins reach at most a bin past each
+      //end, so the labels' lines agree), else what the bins show
       case UI_MS_SP_SPAN:
-        ui_fmt_mhz(t, bin_mhz * v->span);
+        ui_fmt_mhz(t, v->whole ? spl_span_mhz(spec.cell.span) : bin_mhz * v->span);
         break;
 
       case UI_MS_SP_CENTER:
-        ui_fmt_mhz(t, (bin_mhz * (2 * (uint64)v->first + v->span)) / 2);
+        ui_fmt_mhz(t, v->whole ? spec.cell.centre : (bin_mhz * (2 * (uint64)v->first + v->span)) / 2);
         break;
 
       case UI_MS_SP_TIME:
@@ -869,6 +879,11 @@ static void spec_draw_cards(const SPECVIEW *v, const uint32 *peak, int hch, uint
 #define ROLL_NOTE_MS          5000
 static uint8  roll_note;
 static uint32 roll_note_ms;
+
+//fw 0.2.77, "Stopped: press RUN to zoom further": a stopped record's axis or bins ended a zoom the ladder would go on with
+#define STOP_NOTE_MS          4000
+static uint8  stop_note;
+static uint32 stop_note_ms;
 
 void spectrum_note_roll_off(void)
 {
@@ -900,10 +915,15 @@ static void spec_draw_warnings(int k, uint64 fs_mhz, int hch)
 
   if(!scopesettings.runstate && ((spec.view != VIEW_SPECTRUM) || (!spec.have[0] && !spec.have[1])))
     p = fmt_str(p, "Stopped: press RUN to fill the view   ");
+  else if(stop_note && ((timer0ticks - stop_note_ms) < STOP_NOTE_MS) && !scopesettings.runstate)
+    p = fmt_str(p, "Stopped: press RUN to zoom further   ");
   else if(auto_refused == 1)
     p = fmt_str(p, "Auto needs RUN: press RUN   ");
   else if(auto_refused == 2)
     p = fmt_str(p, "Auto needs trigger mode Auto or Normal   ");
+
+  if(scopesettings.runstate || ((timer0ticks - stop_note_ms) >= STOP_NOTE_MS))
+    stop_note = 0;
 
   if(spec.wait && !spec.autostage && scopesettings.runstate)
     p = fmt_str(p, "Waiting for a capture at the new rate   ");
@@ -1169,8 +1189,11 @@ void spectrum_param_text(int p, char *t)
       fmt_str(t, ui_spec_chan_names[spec.channel % 3]);
       break;
 
+    //fw 0.2.77: "(record)" when the record holds fewer samples than the length chosen
     case SPEC_P_FFT:
-      fmt_uint(t, 1u << spec_log2n());
+      q = fmt_uint(t, 1u << spec_log2n());
+      if(spec.log2n > spec_log2n())
+        fmt_str(q, " (record)");
       break;
 
     case SPEC_P_WINDOW:
@@ -1276,6 +1299,12 @@ void spectrum_set_active(int on)
 
   spec.active = (on && spectrum_available()) ? 1 : 0;
   spec.recompute = 1;
+
+  //fw 0.2.77: the cell kept from the last visit while the rate is still the one the ladder gives it; otherwise the
+  //current rate's whole axis (no rate change on entering)
+  if(spec.active && (!spec.cell_set ||
+     (spl_rate(spl_stop(&spec.cell), spec_log2n(), sample_rate, ACQ_RATES) != (int32)scopesettings.samplerate)))
+    spec_cell_from_rate();
   spec.have[0] = spec.have[1] = 0;
   spec_hist_clear();
 }
@@ -1350,6 +1379,16 @@ int spectrum_display(void)
   r = spectrum_display_body();
   spec_drawing = 0;
   return r;
+}
+
+//Bin width in mHz of the current rate and FFT length
+static uint64 spec_bin_mhz_now(void)
+{
+  pc_decim_cfg dc;
+  int          written;
+
+  pc_hal_decim_current(&dc, &written);
+  return spec_bin_mhz(spec_fs_mhz(spec_divider(), &dc), spec_log2n());
 }
 
 //The view as the next drawing will compute it (spectrum_display_body's steps, without computing a spectrum)
@@ -1483,13 +1522,16 @@ static int spectrum_display_body(void)
 //----------------------------------------------------------------------------------------------------------------------------------
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Time base coupling (fw 0.2.39, owner): the span drives the sample rate like a spectrum analyser. It is the scope's
-// own time base (same setting), stepped through the short time bases 11..34 (pc_hal_timebase_write, as SET_TIMEBASE).
-// After a change the trace buffers still hold the old rate's record, so the view waits for the first new capture.
+// Span drives the sample rate (fw 0.2.77, owner 2026-10-19 23:09; docs/ui-guidelines.md section 2): the view is a cell of
+// the span ladder (spec_ladder.h), a 1-2-5 span about a centre. After each zoom or pan step with the rate free (running
+// or Single, acq_view_rate_free) the rate is spl_rate of the cell's stop: the slowest whose fs / 2 covers it with a
+// capture N / fs of at most 2.048 s. It is the scope's own rate (same setting), written with the Scope ladder's time/div
+// for it (acq_view_tb_for_rate, so nothing snaps) through pc_hal_timebase_write, as SET_TIMEBASE. After a change the
+// trace buffers still hold the old rate's record, so the view waits for the first new capture. A rate set elsewhere (the
+// ACQ menu, the host) holds until the next step; the view shows the cell on that rate's axis as far as it reaches.
+// Stopped, zoom and pan stay on the record's rate and axis.
 
-#define TB_FIRST              11          //short time bases (the roll-mode ones below would leave the view)
-#define TB_LAST               ((int)(sizeof(time_per_div_sample_rate) / sizeof(time_per_div_sample_rate[0])) - 1)
-//Zooming in at a span of fs/16 or less (N/16 bins: 128 at 2048, 256 at 4096) steps to a slower rate instead
+#define TB_FIRST              11          //short time bases (Auto's probes; the roll-mode ones would leave the view)
 
 static uint32 tb_divider(int i)
 {
@@ -1499,41 +1541,47 @@ static uint32 tb_divider(int i)
   return pc_hal_timebase_lookup((uint8)i, &sr, &d) ? 0xFFFFFFFF : d;
 }
 
-//Time base index of the next faster (dir 1) or slower (dir -1) sample rate, -1 when there is none
-static int spec_tb_next(int dir)
+//The rate write: the view waits for a record at the new rate (anything finishing now was armed before the change). Set
+//before the write: its redraw (scope_preset_values -> spectrum_display) then shows the new axis without the old spectra
+static void spec_tb_write(pc_hw_timebase *t)
 {
-  int    i;
-  uint32 d0 = tb_divider(scopesettings.timeperdiv);
+  spec.wait = 1;
+  spec.fresh = 0;
+  spec.have[0] = spec.have[1] = 0;
 
-  for(i = scopesettings.timeperdiv + dir; (i >= TB_FIRST) && (i <= TB_LAST); i += dir)
-  {
-    uint32 d = tb_divider(i);
-
-    if((dir > 0) ? (d < d0) : (d > d0))
-      return i;
-  }
-
-  return -1;
+  pc_hal_timebase_write(t, 0);
 }
 
+//Time base index i (Auto's probes at fixed time bases)
 static void spec_tb_set(int i)
 {
   pc_hw_timebase t;
 
-  if((i < TB_FIRST) || (i > TB_LAST) || (i == scopesettings.timeperdiv))
+  if((i < TB_FIRST) || (i > ACQ_TB_LAST) || (i == scopesettings.timeperdiv))
     return;
 
   t.timeperdiv = (uint8)i;
   if(pc_hal_timebase_lookup((uint8)i, &t.samplerate, &t.divider))
     return;
 
-  //Wait for a record at the new rate (anything finishing now was armed before the change). Set before the write: its
-  //redraw (scope_preset_values -> spectrum_display) then shows the new axis without the old spectra
-  spec.wait = 1;
-  spec.fresh = 0;
-  spec.have[0] = spec.have[1] = 0;
+  spec_tb_write(&t);
+}
 
-  pc_hal_timebase_write(&t, 0);
+//Sample rate index r (sample_rate[]) with the Scope ladder's time/div for it
+static void spec_rate_set(int32 r)
+{
+  pc_hw_timebase t;
+  int32          tpd;
+
+  if((r < 0) || (r >= ACQ_RATES) || ((r == (int32)scopesettings.samplerate) && !scopesettings.long_mode))
+    return;
+
+  tpd = acq_view_tb_for_rate((uint32)r);
+  t.timeperdiv = (uint8)((tpd >= 0) ? tpd : scopesettings.timeperdiv);
+  t.samplerate = (uint8)r;
+  t.divider    = sample_rate_settings[r];
+
+  spec_tb_write(&t);
 }
 
 //Sample rate in mHz of a time base index, ignoring the decimation filter's even-divider rounding
@@ -1544,126 +1592,90 @@ static uint64 tb_fs_mhz(int i)
   return (d == 0xFFFFFFFF) ? 0 : 200000000000ull / (d + 1);
 }
 
-//Bins across the capped axis for a rate
-static uint32 spec_axis_bins(uint64 fs_mhz, int log2n)
+//The rates the ladder may use now: every short-mode rate while a new record can be taken, else the record's own
+static const uint32 *spec_rates(int32 *n)
 {
-  SPECVIEW v;
-  uint32 z = spec.zoom, s = spec.start;
+  uint32 r = (scopesettings.samplerate < ACQ_RATES) ? scopesettings.samplerate : 0;
 
-  spec.zoom = 0;
-  spec.start = 0;
-  spec_view(&v, log2n, spec_bin_mhz(fs_mhz, log2n));
-  spec.zoom = z;
-  spec.start = s;
-  return v.half;
+  if(acq_view_rate_free())
+  {
+    *n = ACQ_RATES;
+    return sample_rate;
+  }
+
+  *n = 1;
+  return &sample_rate[r];
 }
 
-//Show span_mhz about centre_mhz on the axis of rate fs_mhz: the zoom step nearest to that span, clamped to the axis
-static void spec_place(uint64 fs_mhz, uint64 centre_mhz, uint64 span_mhz)
+//After a zoom or pan step: the rule's rate for the cell, when the rate is free
+static void spec_cell_apply(void)
 {
-  int    log2n = spec_log2n(), z;
-  uint64 bin = spec_bin_mhz(fs_mhz, log2n);
-  uint32 half = spec_axis_bins(fs_mhz, log2n);
-  uint64 want = bin ? span_mhz / bin : half;
-  int64  c, w, s;
+  spec.cell_set = 1;
 
-  for(z = 0; (z < ZOOM_MAX) && ((half >> (z + 1)) >= want) && ((half >> (z + 1)) >= 8); z++) {}
-  spec.zoom = z;
-
-  w = START_STEPS >> z;
-  c = bin ? (int64)(((uint64)centre_mhz * START_STEPS) / ((uint64)bin * half)) : 0;
-  s = c - w / 2;
-  if(s < 0) s = 0;
-  if(s > (int64)START_STEPS - w) s = START_STEPS - w;
-  spec.start = (uint32)s;
+  if(acq_view_rate_free())
+    spec_rate_set(spl_rate(spl_stop(&spec.cell), spec_log2n(), sample_rate, ACQ_RATES));
 }
 
-//The current view's centre and span in mHz
-static void spec_centre_span(uint64 *centre, uint64 *span)
+//The cell that shows the current rate's whole axis (entry, Reset): no rate change, the rule gives this rate for it
+//(below 50 MSa/s; at 100 and 200 MSa/s the whole axis's rate is 50 MSa/s, taken at the next step)
+static void spec_cell_from_rate(void)
 {
-  int     log2n = spec_log2n();
-  pc_decim_cfg dc;
-  int     written;
-  uint64  bin;
-  SPECVIEW v;
+  uint32 r = (scopesettings.samplerate < ACQ_RATES) ? scopesettings.samplerate : 0;
 
-  pc_hal_decim_current(&dc, &written);
-  bin = spec_bin_mhz(spec_fs_mhz(spec_divider(), &dc), log2n);
-  spec_view(&v, log2n, bin);
-  *span = bin * v.span;
-  *centre = bin * v.first + *span / 2;
+  spl_from_axis(&spec.cell, spl_axis_mhz(&sample_rate[r], 1));
+  spec.cell_set = 1;
 }
 
-//Span: one zoom step narrower (in) or wider (out) about the centre. Past the widest span (the whole axis) a zoom out
-//steps to the next faster rate until fs/2 reaches PC_SPECTRUM_FMAX_HZ; at a span of fs/16 or less a zoom in steps to the next
-//slower rate, keeping the centre and halving the span in Hz.
+//Span: one ladder step narrower (in) or wider (out) about the centre; at an end nothing changes
 static void spec_zoom(int in)
 {
-  SPECVIEW v;
-  uint64   centre, span;
-  int      log2n = spec_log2n(), next;
-  pc_decim_cfg dc;
-  int      written;
+  int32           n;
+  const uint32   *r = spec_rates(&n);
+  int             log2n = spec_log2n();
+  spl_cell        c = spec.cell;
 
-  pc_hal_decim_current(&dc, &written);
-  spec_view(&v, log2n, spec_bin_mhz(spec_fs_mhz(spec_divider(), &dc), log2n));
-
-  if(!in && !spec.zoom)
+  if(spl_zoom(&spec.cell, in ? 1 : -1, log2n, r, n))
   {
-    //Whole axis shown: a faster rate widens it, until the axis is the full PC_SPECTRUM_FMAX_HZ
-    if((tb_fs_mhz(scopesettings.timeperdiv) / 2 < (uint64)PC_SPECTRUM_FMAX_HZ * 1000) && ((next = spec_tb_next(1)) >= 0))
-      spec_tb_set(next);
+    spec_cell_apply();
     return;
   }
 
-  if(in && (v.span <= ((1u << log2n) / 16)))
+  if((n == 1) && spl_zoom(&c, in ? 1 : -1, log2n, sample_rate, ACQ_RATES))
   {
-    spec_centre_span(&centre, &span);
-    next = spec_tb_next(-1);
-    if((next >= 0) && (centre + span / 4 < tb_fs_mhz(next) / 2))
-    {
-      spec_tb_set(next);
-      spec_place(tb_fs_mhz(next), centre, span / 2);
-      return;
-    }
-    //No slower rate holds the centre: plain zoom down to the last step
-  }
-
-  {
-    uint32 centre_u = spec.start + ((START_STEPS >> spec.zoom) / 2);
-
-    if(in && (spec.zoom < ZOOM_MAX)) spec.zoom++;
-    else if(!in && spec.zoom) spec.zoom--;
-
-    spec.start = (centre_u > ((START_STEPS >> spec.zoom) / 2)) ? centre_u - ((START_STEPS >> spec.zoom) / 2) : 0;
-    if(spec.start > START_STEPS - (START_STEPS >> spec.zoom))
-      spec.start = START_STEPS - (START_STEPS >> spec.zoom);
+    stop_note = 1;
+    stop_note_ms = timer0ticks;
   }
 }
 
-//Pan: the spectrum follows the finger, dx pixels from where the drag began (start0)
-static void spec_pan(uint32 start0, int32 dx)
+//Pan: the cell c0 (where the drag began) with its centre moved by d mHz; 1 when the view changed
+static int spec_pan_by(const spl_cell *c0, int64 d)
 {
-  int64 s = (int64)start0 - ((int64)dx * (START_STEPS >> spec.zoom)) / PLOT_W;
-  int64 smax = START_STEPS - (START_STEPS >> spec.zoom);
+  int32         n;
+  const uint32 *r = spec_rates(&n);
+  spl_cell      c = *c0;
 
-  spec.start = (uint32)((s < 0) ? 0 : (s > smax) ? smax : s);
+  spl_pan(&c, d, spl_axis_mhz(r, n));
+  if((c.span == spec.cell.span) && (c.centre == spec.cell.centre))
+    return 0;
+
+  spec.cell = c;
+  spec_cell_apply();
+  return 1;
 }
 
-//What the view starts with (Reset): 2048 points, Hann, 10 dB/div, ref 0 dBV, full span, spectrum. The time base
-//is the scope's and stays.
+//What the view starts with (Reset): 2048 points, Hann, 10 dB/div, ref 0 dBV, the current rate's whole axis,
+//spectrum. The rate is the scope's and stays.
 static void spec_defaults(void)
 {
   spec.log2n  = 11;
   spec.window = FX_WIN_HANN;
   spec.scale  = 1;
   spec.ref    = 0;
-  spec.zoom   = 0;
-  spec.start  = 0;
   spec.view   = VIEW_SPECTRUM;
   spec.avg    = 1;
   spec.autostage = 0;
   spec.recompute = 1;
+  spec_cell_from_rate();
 }
 
 //Peak P (above DC), median floor F and the occupied band lo..hi (bins above P - 40 dB and F + 10 dB) of the shown
@@ -1723,14 +1735,14 @@ static int spec_analyse(const SPECVIEW *v, int32 *P, int32 *F, uint32 *lo, uint3
 //  probe   50 MSa/s, longest FFT up to 4096, Hann, averaging 4, trigger on the analysed channel at 50 %; 3 records
 //  measure f0 = fundamental from the time-domain period (rising crossings with hysteresis, 0 when fewer than 3),
 //          f_hi = top of the band (highest bin above max(peak - 40 dB, median + 10 dB))
-//  derive  span = max(1.25 f_hi, 20 f0) up to 25 MHz; rate = slowest with fs/2 >= 1.25 span; with f0 > 0 slower still
-//          until RBW <= f0 / 4 (span then trimmed to the axis)
+//  derive  fw 0.2.77, on the span ladder (spl_auto): the span >= max(1.25 f_hi, 20 f0) up to the whole axis, from 0 Hz;
+//          with f0 > 0 narrower while RBW > f0 / 4, never past the zoom-in end; the rate is the ladder's for that cell
 //  refine  2 records at that rate; if f_hi moved by more than 2x or f0 changed the rate, derive once more (3rd stage)
-//  final   ref = first scale multiple >= peak + 3 dB, scale from peak - floor, span from 0, averaging 4
+//  final   ref = first scale multiple >= peak + 3 dB, scale from peak - floor, the cell and its rate, averaging 4
 //Untriggered records are skipped while a triggered one came (spectrum_capture_info); any touch cancels; it gives up
 //after 4 s with what it has. Stopped or in single mode it does not run (warning says what to do).
 
-#define TB_FULL_AXIS          26          //2 us/div, 50 MSa/s: fs/2 = 25 MHz
+#define TB_FULL_AXIS          26          //2 us/div, 50 MSa/s: fs/2 = 25 MHz (the probe)
 #define AUTO_TIMEOUT_MS       4000
 
 static uint32 auto_t0, auto_count;
@@ -1782,49 +1794,27 @@ static void spec_auto_measure(uint64 *f0, uint64 *fhi)
   uint32  lo, hi;
   int32   P, F;
   SPECVIEW v;
-  uint32  z = spec.zoom, st = spec.start;
 
   pc_hal_decim_current(&dc, &written);
   fs  = spec_fs_mhz(spec_divider(), &dc);
   bin = spec_bin_mhz(fs, log2n);
-  spec.zoom = 0;
-  spec.start = 0;
-  spec_view(&v, log2n, bin);
-  spec.zoom = z;
-  spec.start = st;
+  spec_view_full(&v, log2n, bin);
 
   *fhi = (spec_analyse(&v, &P, &F, &lo, &hi) && hi) ? bin * hi : 0;
   *f0  = spec_f0_mhz(spec_auto_ch(), fs);
 }
 
-//Rate (time base index) and span (mHz) from (f0, f_hi)
-static int spec_auto_derive(uint64 f0, uint64 fhi, uint64 *span)
+//The ladder cell and its rate (sample_rate[] index) from (f0, f_hi); Auto runs only with the rate free
+static int32 spec_auto_derive(uint64 f0, uint64 fhi, spl_cell *c)
 {
-  uint64 fmax = (uint64)PC_SPECTRUM_FMAX_HZ * 1000, s = fhi + fhi / 4;
-  int    i, log2n = spec_log2n();
+  int log2n = spec_log2n();
 
-  if(20 * f0 > s)
-    s = 20 * f0;
-  if(!s || (s > fmax))
-    s = fmax;
-
-  for(i = TB_FIRST; i < TB_FULL_AXIS; i++)
-    if(tb_fs_mhz(i) / 2 >= s + s / 4)
-      break;
-
-  //Resolve the fundamental: RBW = 1.5 fs / N <= f0 / 4
-  if(f0)
-    while((i > TB_FIRST) && ((3 * tb_fs_mhz(i)) / (2u << log2n) > f0 / 4))
-      i--;
-
-  if(s > (tb_fs_mhz(i) / 2) * 4 / 5)
-    s = (tb_fs_mhz(i) / 2) * 4 / 5;
-
-  *span = s;
-  return i;
+  spl_auto(c, f0, fhi, log2n, sample_rate, ACQ_RATES);
+  return spl_rate(spl_stop(c), log2n, sample_rate, ACQ_RATES);
 }
 
-static void spec_auto_finish(uint64 span)
+//The level settings from the record at hand, then the cell and its rate (a change waits for a record at that rate)
+static void spec_auto_finish(const spl_cell *c, int32 r)
 {
   pc_decim_cfg dc;
   int     written, log2n = spec_log2n();
@@ -1834,12 +1824,10 @@ static void spec_auto_finish(uint64 span)
   SPECVIEW v;
 
   spec.autostage = 0;
-  spec.zoom = 0;
-  spec.start = 0;
 
   pc_hal_decim_current(&dc, &written);
   fs = spec_fs_mhz(spec_divider(), &dc);
-  spec_view(&v, log2n, spec_bin_mhz(fs, log2n));
+  spec_view_full(&v, log2n, spec_bin_mhz(fs, log2n));
 
   if(spec_analyse(&v, &P, &F, &lo, &hi))
   {
@@ -1855,8 +1843,9 @@ static void spec_auto_finish(uint64 span)
     if(spec.ref > REF_MAX) spec.ref = REF_MAX;
   }
 
-  spec_place(fs, span / 2, span);
-  spec.start = 0;
+  spec.cell = *c;
+  spec.cell_set = 1;
+  spec_rate_set(r);
 }
 
 static void spec_auto_start(void)
@@ -1874,8 +1863,6 @@ static void spec_auto_start(void)
   spec.log2n  = (spec_log2n_max() < LOG2N_VIEW_MAX) ? spec_log2n_max() : LOG2N_VIEW_MAX;
   spec.window = FX_WIN_HANN;
   spec.avg    = 1;
-  spec.zoom   = 0;
-  spec.start  = 0;
   spec.recompute = 1;
 
   //Trigger on the analysed channel (an EXT source stays)
@@ -1900,28 +1887,26 @@ static void spec_auto_start(void)
   spec.autostage = 1;
 }
 
-//Rate and span from (f0, f_hi), then the confirmation records at that rate
-static uint64 auto_f0, auto_fhi, auto_span;
+//The cell and its rate from (f0, f_hi), then the confirmation records at that rate
+static uint64 auto_f0, auto_fhi;
 
 static void spec_auto_go(void)
 {
-  int idx = spec_auto_derive(auto_f0, auto_fhi, &auto_span);
+  spl_cell c;
+  int32    r = spec_auto_derive(auto_f0, auto_fhi, &c);
 
   spec.autostage = 2;
   auto_count = 0;
-  if(idx != scopesettings.timeperdiv)
-    spec_tb_set(idx);
+  spec_rate_set(r);
 }
 
-//Span for the rate in use: derived from the latest measurement, trimmed to this rate's axis
+//The cell from the latest measurement and the rate the ladder gives it
 static void spec_auto_end(uint64 f0, uint64 fhi)
 {
-  uint64 span, axis = (tb_fs_mhz(scopesettings.timeperdiv) / 2) * 4 / 5;
+  spl_cell c;
+  int32    r = spec_auto_derive(f0, fhi, &c);
 
-  spec_auto_derive(f0, fhi, &span);
-  if(span > axis)
-    span = axis;
-  spec_auto_finish(span);
+  spec_auto_finish(&c, r);
 }
 
 //After each record transformed while Auto runs. Stages: 1 probe at 50 MSa/s, 4 period search (10x slower per record
@@ -1929,7 +1914,7 @@ static void spec_auto_end(uint64 f0, uint64 fhi)
 static void spec_auto_step(void)
 {
   uint64 f0, fhi;
-  int    idx, timeout = (timer0ticks - auto_t0) > AUTO_TIMEOUT_MS;
+  int    timeout = (timer0ticks - auto_t0) > AUTO_TIMEOUT_MS;
 
   auto_count++;
 
@@ -1999,15 +1984,15 @@ static void spec_auto_step(void)
       //One refinement when the band seen at this rate is less than half the probe's (the probe sees edges and noise)
       if(fhi && (2 * fhi < auto_fhi))
       {
-        uint64 span;
+        spl_cell c;
+        int32    r = spec_auto_derive(auto_f0, fhi, &c);
 
-        idx = spec_auto_derive(auto_f0, fhi, &span);
-        if(idx != scopesettings.timeperdiv)
+        if((r >= 0) && (r != (int32)scopesettings.samplerate))
         {
           auto_fhi = fhi;
           spec.autostage = 3;
           auto_count = 0;
-          spec_tb_set(idx);
+          spec_rate_set(r);
           return;
         }
       }
@@ -2137,8 +2122,8 @@ int spectrum_auto_running(void)
 
 //Touches in the trace area (fw 0.2.56: the cards row below the plot does nothing). Plot: the scope view's gestures (scan_for_touch in
 //statemachine.c): a touch that stays within 2 px and ends within 200 ms is a tap, left of the centre = zoom the span
-//out, right of it = zoom in; a touch that moves more than 2 px is a drag, and a horizontal drag pans the start
-//frequency (the spectrum follows the finger), redrawn while dragging.
+//out, right of it = zoom in, one span of the ladder (fw 0.2.77); a touch that moves more than 2 px is a drag, and a
+//horizontal drag pans the centre (the spectrum follows the finger), redrawn while dragging.
 int spectrum_touch(void)
 {
   if(!spec.active || !spectrum_available())
@@ -2149,40 +2134,33 @@ int spectrum_touch(void)
   auto_refused = 0;
 
   //fw 0.2.71: the slider row; the window follows the finger (the span kept, the centre panned), as the Scope's record
-  //slider. At the full span there is nothing to pan. fw 0.2.73, tap to jump: a touch-down outside the window centres
-  //the window there first (the window as drawn, sov_jump), then the drag goes on from the new place.
+  //slider. At the whole axis there is nothing to pan. fw 0.2.73, tap to jump: a touch-down outside the window centres
+  //the window there first (the window as drawn, sov_jump), then the drag goes on from the new place. fw 0.2.77: a move
+  //is a pan step (the rate follows the stop); the track's scale is the axis at touch-down, so the finger's travel stays
+  //the same frequency step when a pan changes the rate and the track with it.
   if(ytouch >= BU_SL_HIT_Y)
   {
-    uint32 start0 = spec.start;
-    int32  x0 = xtouch, wx, ww, dx;
+    spl_cell c0 = spec.cell;
+    int32    x0 = xtouch, wx, ww, dx;
+    uint64   track;
     SPECVIEW v;
 
     spec_current_view(&v);
     spec_slider_window(&v, &wx, &ww);
+    track = spec_bin_mhz_now() * v.half;
     dx = sov_jump((int32)xtouch, (int32)ytouch, wx, ww);
 
     if(dx)
     {
-      int64 s = (int64)start0 + ((int64)dx * START_STEPS) / BU_SL_W;
-      int64 smax = START_STEPS - (START_STEPS >> spec.zoom);
-
-      s = (s < 0) ? 0 : (s > smax) ? smax : s;
-      spec.start = start0 = (uint32)s;
-      spectrum_display();
+      if(spec_pan_by(&c0, ((int64)dx * (int64)track) / BU_SL_W))
+        spectrum_display();
+      c0 = spec.cell;
     }
 
     while(havetouch)
     {
-      int64 s = (int64)start0 + (((int64)xtouch - x0) * START_STEPS) / BU_SL_W;
-      int64 smax = START_STEPS - (START_STEPS >> spec.zoom);
-
-      s = (s < 0) ? 0 : (s > smax) ? smax : s;
-
-      if((uint32)s != spec.start)
-      {
-        spec.start = (uint32)s;
+      if(spec_pan_by(&c0, (((int64)xtouch - x0) * (int64)track) / BU_SL_W))
         spectrum_display();
-      }
 
       tp_i2c_read_status();
     }
@@ -2197,8 +2175,10 @@ int spectrum_touch(void)
   }
 
   {
-    uint32 t0 = timer0_get_ticks(), start0 = spec.start;
-    int32  x0 = xtouch, y0 = ytouch, moved = 0;
+    uint32   t0 = timer0_get_ticks();
+    int32    x0 = xtouch, y0 = ytouch, moved = 0;
+    spl_cell c0 = spec.cell;
+    int64    span = (int64)spl_span_mhz(c0.span);
 
     while(havetouch)
     {
@@ -2212,14 +2192,9 @@ int spectrum_touch(void)
         if(!moved && (((dx < 0) ? -dx : dx) > TOUCH_DEAD_BAND || ((dy < 0) ? -dy : dy) > TOUCH_DEAD_BAND))
           moved = 1;
 
-        if(moved && spec.zoom)
-        {
-          uint32 before = spec.start;
-
-          spec_pan(start0, scopesettings.movespeed ? dx / 5 : dx);
-          if(spec.start != before)
-            spectrum_display();
-        }
+        //The spectrum follows the finger: dragging right shows lower frequencies
+        if(moved && spec_pan_by(&c0, -((int64)(scopesettings.movespeed ? dx / 5 : dx) * span) / PLOT_W))
+          spectrum_display();
       }
     }
 
