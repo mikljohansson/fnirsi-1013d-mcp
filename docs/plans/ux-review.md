@@ -287,3 +287,127 @@ sees or gets.
 14. **D14 Which calibration quantity and limit each page shows.** Recommendation: one table of quantities (mismatch
     measured at calibration, residual after correction, live tracker value) with one limit each, used by the wizard
     summary, Status and Calibration alike.
+
+## 5. Final pass: revision 3 boards
+
+Boards checked: Scope, ScopeCtrl, AcqMenu, Phosphor, Spectrum, SpectrumCtrl, Wizard1-4, Developer, ConfirmFel, against
+`ux-makeover.md` sections 3, 4, 5 and 6a as of f6230f0, against today's firmware, against each other and for text
+width. Not re-checked: MainMenu, SettingsFoldout, Settings, Confirm, FirstRun, UsbDrive and the three Diagnostics
+pages. Skipped on request: where the Display box lives (owner decision).
+
+### 5.1 What revision 3 and the plan now get right
+
+- **Scope and ScopeCtrl match today to the pixel.** The right bar has eight 51 x 50 slots at 60 px pitch from y 5 with
+  today's labels. The CTRL page has CH1 V+ at y 99 with its chip at 155 and V- at 185, CH2 at 264 / 320 / 350, and
+  50 % TRIG at 425 (`CH1_VOLT_DIV_MENU_YPOS` 99, `CH2_VOLT_DIV_MENU_YPOS` 264, `scope_channel_sensitivity_control`).
+  The top bar matches too: Move fast is at x 496, the MCP chip sits in the clock slot and the version string is gone.
+  The record-position slider is at y 452 (a 726 x 20 box with a 181 px window, as in `scope_draw_grid`), and the cards
+  stack up from y 426 with CH2 at x 366. L1, L3-L5, L12 and L16 are closed on the boards.
+- **Spectrum and SpectrumCtrl.** The strip is back in the slider row with the plan's eight fields. Ref level shows its
+  `<` and `>` halves, which closes L21. The ACQ tab reads 200KSa/s and 500us/div, consistent with RBW 146 Hz at N 2048
+  and a 0-100 kHz axis. T CURSOR, V CURSOR, MEASURES and SAVE WAVE are empty in their slots. The CTRL page is the
+  Scope one. The y 70 warning slot now clears the y 48 header.
+- **Phosphor.** The strip in the slider row has Persistence, Palette and Clear, with "55 wfm/s" at its right end, as
+  plan section 3 says.
+- **AcqMenu.** The box is 464 px wide with the Display column at x 638, which closes N1. With the Filter on, Memory
+  offers only 3000 and 6000 and says "Filter on: up to 6000", which closes N7.
+- **At plan level**, sections 4, 5 and 6a now close several findings. I1 is closed: Clear touches zeros and gains
+  only. L2 is closed by the "Volts calibration" service action. I4 is closed by "file message timeout". I5 is closed:
+  stock firmware always comes with the boot menu. N3 is closed by the stock-bitstream branch, N4 and N5 by the
+  section 5 rewrite, and N6 by the section 4 list. L11 (RTC on/off) and L14-L15 (the developer page) are closed too.
+  Note that the procedure 6a names `scope_input_calibration` does not exist. Today it is the
+  `scope_show_Input_calibration` box at `CALIBRATION_MENU_XPOS` 395, y 222, beside the System settings menu, driven by
+  `calibrationopen` 2-9 in `handle_main_menu_touch`. Launched from a Diagnostics page it needs a host screen of its
+  own.
+
+### 5.2 Findings, worst first
+
+**F1. "Start FEL at next power-on" is not one power-on, and the copy promises the wrong screen (Developer,
+ConfirmFel).** Boot mode 2 in byte 31 of sector 710 makes Atlan's bootloader jump to FEL on every boot until the byte
+changes (`firmware/README.md` section 3, boot-mode table). The open firmware cannot clear the byte, because it never
+runs while that mode is set. The plan's boot rule (section 5: the boot menu is forced for anything but the open
+firmware; today `close_open_menus`, "boot_menu_start |= 0x04" when dev mode is off) also means the next power-on shows
+the boot menu with FEL preselected and a 2 s timer. It does not go straight to "the screen stays dark". The user can
+escape by touching another button within 2 s.
+
+Change the copy to: "Every power-on shows the boot menu with FEL selected and starts FEL after 2 seconds (dark
+screen, PC with sunxi-fel needed). Touch PECO in the boot menu to start the open firmware instead. Set At power-on
+back to Open firmware to stop this."
+
+Also consider whether the row is needed at all. ENTER_FEL (README "Bench loop without the boot menu") already
+reaches FEL from a running scope without touching sector 710.
+
+**F2. The cards' text does not fit the card in the drawn font, and the names are inconsistent (Scope, Phosphor,
+AcqMenu).**
+- **Space:** a card is 118 px. The chip covers x+3..x+19 and the text starts at x+23, which leaves about 92 px for
+  "NAME: value".
+- **Fit:** values such as "Time+: 500.0us", "Cycle: 100.0ms" and "Vavg: -12.3mV" are 13-14 characters. In font_2 that
+  is 87-94 px, so the longer ones overflow. Today's tiles draw the name in `font_0`, a fixed-width 8 x 16 font
+  (`font_0.c`, 16 bytes per glyph, inferred 8 px advance), in which 14 characters are 112 px.
+- **Names:** the boards mix "VMIN" and "VPP" with "Freq" and "Duty+". The plan's example is "VPP: 2.40V". Today's
+  names are mixed case (`measurement_names`, including the "Freg" typo).
+- **Change:** one case for all twelve names, font_2, no space after the colon, and a check of the longest
+  `make_value_to_text` output for each metric against 92 px.
+
+**F3. "Trace" means two things in one dropdown (AcqMenu).** The Trace style column is headed "Trace" (Linear, Dots,
+Peak, Pro), and the Display column's first value is also "Trace". A user who picks "Trace" in Display has not chosen a
+trace style. Change: head the column "Trace style", as plan section 3 calls it, or name the Display value "Normal" or
+"Y-t". This holds wherever the Display control ends up.
+
+**F4. The pass time is missing from AcqMenu.** Today the dropdown shows "pass NN ms" under the Memory header (README
+"Pass time in the acquisition menu", the `PC_MASK_ACQ_MEMORY` glue). The board has the header at y 56 and 3000 at
+y 81, with no line between them. This reopens L23. Keep the line.
+
+**F5. The wizard still floats over a live-looking scope (Wizard1-4).** The panel is 630 x 300 at 50,90. Behind it the
+board keeps the top bar, the right bar, the cards and the orange warning at y 70-96, which sticks 6 px under the
+panel's top edge. In the firmware the wizard owns the screen, so touches outside its buttons do nothing (README 6.4).
+Showing RUN/STOP and the menus invites taps that are ignored. fw 0.2.50 draws a full-screen frame at 10,10,780,460.
+Change: either the full-screen frame, or dim the background, as Confirm and ConfirmFel do.
+
+**F6. Wizard copy needs line breaks the firmware does not do, and Done departs from 6a's words.**
+- **Line breaks:** screen 2's instruction is 112 characters and screen 3's 105. At 7.1 px that is about 795 and
+  745 px for a 582 px text box. Each needs two pre-broken lines, because `display_text` does not wrap. Screen 1's 80
+  characters (568 px) fit.
+- **Done screen:** Wizard4 says "Measured during calibration; the scope corrects these:" and "CH1: A-B 0.2 code at
+  0 V, gain mismatch 1.3 %, class ratio 1.1 %". Plan 6a says "cores matched to x code, gain mismatch y %" in plain
+  words, and "class ratio" is new jargon.
+- **Change:** use 6a's words, or say what the class ratio means to a user. D14 (which quantity, which limit) is still
+  open: 1.3 % is above the previous review's 1 % provisional limit and the screen shows no verdict.
+
+**F7. Wizard1 loses the USB-connected warning, and the running state is ambiguous.** fw 0.2.50 detects a USB host from
+the MUSB frame number and shows "USB is connected: the PC ground can shift the zero by about a code. Unplug it, or
+Start anyway." (README 6.4). The board's static instruction tells the user to unplug, but nothing confirms they did.
+6a's "no extra sentences" should not remove a state line. Keep it in the result-line slot before the user taps
+Calibrate.
+
+While measuring ("CH2: measuring range 3 of 6"), the board still shows a Calibrate button. Its background is the
+panel's own colour, so it is unclear whether it is disabled. Draw it disabled, or hide it, while the step runs.
+
+**F8. Spectrum Auto has lost its progress and cancel feedback.** Today the strip's Auto field reads "Auto..." during
+the 1-2 s probe, and any touch cancels it (README "Auto", fw 0.2.42). With Auto moved to AUTO SET there is no field to
+show progress. Change: AUTO SET stays highlighted while Auto runs, and the warning slot says "Auto: touch to cancel".
+
+**F9. SAVE WAVE hidden in the spectrum removes a working function (inference).** Today the spectrum view keeps
+1.00o5's right column (README "Spectrum view"), so SAVE WAVE saves the time record behind the spectrum. Plan section 3
+hides it "until a spectrum export exists". A user who wants the raw record of what the spectrum shows then has to
+leave the mode first. Keep SAVE WAVE in the spectrum, saving the waveform as today. If it stays hidden, the plan
+should say this is a loss, not a placeholder.
+
+**F10. The Developer page does not cover everything dev mode did.** Today dev mode also does three things the page
+does not mention:
+- it shows touch coordinates in the generator and keypad menus (`scope_test_TP`);
+- it draws the raw trigger address over the top bar at x 500-550, y 0-40, on top of the Move fast button
+  (`scope_functions.c`, the `dev_mode` block);
+- it lets a non-open-firmware default start skip the boot menu.
+
+The page has one "Trigger debug overlay" row. Say whether that row brings back all three, and move the address
+readout off Move fast. Today's diagnostics Xtouch / Ytouch readout (L18) has no home either; the Developer page is
+the place for it.
+
+**F11. Small consistency items.**
+- **CTRL colour:** the active CTRL page draws its CTRL button orange (#ef9311) on ScopeCtrl and SpectrumCtrl. Today
+  `scope_control_button` uses the active colour only while the button is pressed. If orange marks "page 2" from now
+  on, add it to plan section 4's list of visible changes.
+- **Plan wording:** section 5 still says the Developer page is "behind a confirmation". On the boards the page opens
+  directly, and only Start FEL asks first, which is reasonable. Fix the plan's sentence.
+- **Look:** the Developer and ConfirmFel boards use the navy look of the Diagnostics pages, which is open decision D9.
