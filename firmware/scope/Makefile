@@ -69,6 +69,8 @@ SRCS += cal_wiz.c cal_wiz_ui.c
 SRCS += acal_track.c acal_live.c
 # Screens (fw 0.2.51): card formatting, main menu rows and mode rule (pure C, host_tests/test_ui.c)
 SRCS += ui_fmt.c ui_menu.c
+# 0x1536 sequencer (fw 0.2.56): segmented capture and hardware averaging (maths in pc_seq.c, host_tests/test_seq.c)
+SRCS += pc_seq.c pc_seq_hw.c
 # Last: the identity data (build_id.c), so its bytes are the only ones a new commit changes.
 SRCS += build_id.c
 PC_DEFS := -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FIFO_MAP=$(PC_FIFO_MAP) \

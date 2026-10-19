@@ -165,7 +165,7 @@ static void test_info(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, 76);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 15); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 17); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
   T_EQ(pc_get_u16(r.p + 8), 0x1532); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS), PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED), PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED);
@@ -241,7 +241,7 @@ static void test_shared_basics(void)
   {
     uint8_t sr[4] = { 1, 0x07, 15, 0 };
     r = req(PC_CMD_SET_REMOTE, sr, 4);
-    T_EQ(r.h.status, 0); T_EQ(r.len, 44); T_EQ(r.p[0], PC_SHARED); T_EQ(pc_get_u16(r.p + 20), 0xFFFF); T_EQ(r.p[23], 0);
+    T_EQ(r.h.status, 0); T_EQ(r.len, 48); T_EQ(r.p[0], PC_SHARED); T_EQ(pc_get_u16(r.p + 20), 0xFFFF); T_EQ(r.p[23], 0);
     sr[0] = 0;
     r = req(PC_CMD_SET_REMOTE, sr, 4);
     T_EQ(r.h.status, 0); T_EQ(r.p[0], PC_SHARED);
@@ -276,7 +276,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.15,fpga=0x1532");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.17,fpga=0x1532");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -477,7 +477,7 @@ static void test_capture_and_raw(void)
 
   //GET_CAPTURE_INFO: the settings of that capture
   r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
-  T_EQ(r.h.status, 0); T_EQ(r.len, 76);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 96);
   T_EQ(pc_get_u32(r.p), 1); T_EQ(r.p[8], PC_ORIGIN_HOST); T_EQ(r.p[9] & 0x13, 0x01);
   T_EQ(pc_get_u16(r.p + 10), 100); T_EQ(pc_get_u16(r.p + 12), 7292);
   T_EQ(pc_get_u32(r.p + 16), 19); T_EQ(r.p[20], 24); T_EQ(r.p[24], 1);
@@ -628,7 +628,7 @@ static void test_auto_timeout_and_stop(void)
     st[0] = 0;
     mock.ui_run = 1;
     r = req(PC_CMD_SET_ACQ_STATE, st, 4);
-    T_EQ(r.h.status, 0); T_EQ(r.len, 44); T_EQ(mock.ui_run, 0); T_EQ(r.p[40], PC_RUN_STOP);
+    T_EQ(r.h.status, 0); T_EQ(r.len, 48); T_EQ(mock.ui_run, 0); T_EQ(r.p[40], PC_RUN_STOP);
     st[0] = 1;
     mock.trg.ui_mode = 1;                                        //UI single trigger mode: RUN is the UI single "WAIT"
     r = req(PC_CMD_SET_ACQ_STATE, st, 4);
@@ -1053,7 +1053,7 @@ static void test_isr_context(void)
   r = req_ctx(PC_CMD_PING, "x", 1, PC_CTX_ISR);
   T_EQ(r.h.status, 0); T_EQ(r.len, 1);
   r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
-  T_EQ(r.h.status, 0); T_EQ(r.len, 44); T_EQ(r.p[0], PC_SHARED);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 48); T_EQ(r.p[0], PC_SHARED);
 
   //...and leaves everything else for the main loop, never E_BUSY, however long the main loop takes
   mock_clear_resps();
@@ -1521,7 +1521,7 @@ static void test_ext_trigger(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
-  T_EQ(r.p[1], 15);                                             //proto 1.15
+  T_EQ(r.p[1], 17);                                             //proto 1.17
 
   //Generator on, then EXT: the generator goes off
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -1833,7 +1833,7 @@ static void test_fel_reset_stall(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 15);                                             //proto_minor 1.15
+  T_EQ(r.p[1], 17);                                             //proto_minor 1.17
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -1932,7 +1932,7 @@ static void test_fel_reset_stall(void)
   mock.now += 90; pc_poll(&S, PC_CTX_MAIN);
   mock.now += 30; pc_poll(&S, PC_CTX_MAIN);
   r = req(PC_CMD_GET_STATUS, 0, 0);
-  T_EQ(r.len, 44); T_EQ(pc_get_u16(r.p + 30), 90);
+  T_EQ(r.len, 48); T_EQ(pc_get_u16(r.p + 30), 90);
   r = req(PC_CMD_GET_STATUS, 0, 0);
   T_TRUE(pc_get_u16(r.p + 30) < 90);
 }
@@ -2098,7 +2098,7 @@ static void test_decim_protocol(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_DECIM, PC_CAP_DECIM);
   r = req(PC_CMD_GET_DECIM, 0, 0);
-  T_EQ(r.h.status, 0); T_EQ(r.len, 32);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 36);
   T_EQ(r.p[0], 0); T_EQ(r.p[2], 0); T_EQ(r.p[24], 0xFF); T_EQ(pc_get_u16(r.p + 28), 8190); T_EQ(r.p[30], PC_DECIM_WHY_OFF);
   T_EQ(pc_get_u32(r.p + 16), 19); T_EQ(pc_get_u32(r.p + 20), 10000000);
 
@@ -2145,7 +2145,7 @@ static void test_decim_protocol(void)
 
   //GET_CAPTURE_INFO: 76 bytes with the filter; start = (0x14 - 3000 words) mod 8192
   r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
-  T_EQ(r.len, 76); T_EQ(r.p[68], 0x82); T_EQ(r.p[69], 1); T_EQ(pc_get_u32(r.p + 72), 20);
+  T_EQ(r.len, 96); T_EQ(r.p[68], 0x82); T_EQ(r.p[69], 1); T_EQ(pc_get_u32(r.p + 72), 20);
   T_EQ(pc_get_u16(r.p + 12), (100 + 8192 - 3000) % 8192);
   T_EQ(pc_get_u32(r.p + 28), 3000); T_EQ(pc_get_u32(r.p + 32), 6000);
 
@@ -2343,7 +2343,7 @@ static void test_decim_fir_protocol(void)
   setup(0x1535);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_DECIM | PC_CAP_FIR), PC_CAP_DECIM | PC_CAP_FIR);
-  T_EQ(r.p[1], 15);
+  T_EQ(r.p[1], 17);
   set_trigger(0x30, 0, 0, 0, 0, 3000, 6000, 0, 0, &r);
   T_EQ(r.h.status, 0);
   memset(p, 0, 4); p[0] = 2; p[1] = 0x08;
@@ -2395,6 +2395,324 @@ static void test_decim_fir_protocol(void)
   T_EQ(r.h.status, 0); T_EQ(mock.decim_setting, 0x02); T_EQ(r.p[2], 0x82);
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// 1.17: FPGA 0x1536 sequencer (segmented capture, hardware averaging), docs/protocol.md section 14 row 70
+
+static resp_t set_seq(uint8_t mode, uint8_t flags, uint8_t m, uint16_t count, uint16_t n, uint32_t hold_ns)
+{
+  uint8_t p[16];
+
+  memset(p, 0, sizeof(p));
+  p[0] = mode; p[1] = flags; p[2] = m;
+  pc_put_u16(p + 4, count); pc_put_u16(p + 6, n); pc_put_u32(p + 8, hold_ns);
+  return req(PC_CMD_SET_SEQ, p, 16);
+}
+
+static resp_t read_seq(uint8_t what, uint8_t chm, uint8_t sh, uint16_t first, uint16_t count)
+{
+  uint8_t p[12];
+
+  memset(p, 0, sizeof(p));
+  p[0] = what; p[1] = chm; p[2] = sh;
+  pc_put_u16(p + 4, first); pc_put_u16(p + 6, count);
+  return req(PC_CMD_READ_SEQ, p, 12);
+}
+
+static resp_t read_raw3(uint8_t mask, uint8_t layout, uint32_t seg, uint32_t off, uint32_t count)
+{
+  uint8_t p[16];
+
+  memset(p, 0, sizeof(p));
+  p[0] = mask; p[1] = 3; p[2] = layout;
+  pc_put_u32(p + 4, (seg << 16) | off); pc_put_u32(p + 8, count);
+  return req(PC_CMD_READ_RAW, p, 16);
+}
+
+static void seq_status(uint8_t flags, uint32_t count, uint16_t untrig)
+{
+  mock.seq_status[0] = flags;
+  mock.seq_status[1] = (uint8_t)(count >> 16); mock.seq_status[2] = (uint8_t)(count >> 8); mock.seq_status[3] = (uint8_t)count;
+  mock.seq_status[4] = (uint8_t)(untrig >> 8); mock.seq_status[5] = (uint8_t)untrig;
+  mock.seq_status[6] = 0x20; mock.seq_status[7] = 0x03;
+}
+
+static void test_seq_older_bitstreams(void)
+{
+  resp_t r;
+  uint8_t p[16];
+
+  //0x1535: no SEQ cap, nothing written, the new commands fail closed; GET_STATUS still grows to 48 bytes
+  setup(0x1535);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, 0);
+  r = set_seq(1, 0, 7, 4, 0, 0);       T_EQ(r.h.status, PC_E_UNSUPPORTED);
+  r = req(PC_CMD_GET_SEQ, 0, 0);       T_EQ(r.h.status, PC_E_UNSUPPORTED);
+  r = read_seq(0, 0, 0, 0, 1);         T_EQ(r.h.status, PC_E_UNSUPPORTED);
+  r = status();
+  T_EQ(r.len, 48);
+  T_EQ(pc_get_u16(r.p + 44), PC_FEAT_W_EXT_TRIGGER | PC_FEAT_W_DECIM | PC_FEAT_W_FIR);
+  r = req(PC_CMD_GET_DECIM, 0, 0);
+  T_EQ(r.len, 36); T_EQ(pc_get_u16(r.p + 32), 0x07);
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.seq_arms, 0);                  //pc_hal_arm got sq = NULL
+  r = wait_done(100);
+  T_EQ(r.p[1], PC_ACQ_DONE);
+  r = read_raw3(1, 0, 0, 0, 10);
+  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 1);      //addr_mode 3 needs the cap
+  memset(p, 0, 16); p[0] = 1; p[1] = 1; pc_put_u32(p + 8, 10);
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, 0);
+
+  //Stock and 0x1532: features 0
+  setup(0x1532);
+  r = status();
+  T_EQ(pc_get_u16(r.p + 44), 0);
+  setup(0x1533);
+  r = status();
+  T_EQ(pc_get_u16(r.p + 44), PC_FEAT_W_EXT_TRIGGER);
+}
+
+static void test_seq_segments(void)
+{
+  resp_t r;
+  uint32_t i, s;
+
+  setup(0x1536);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 17);
+  r = status();
+  T_EQ(r.len, 48); T_EQ(pc_get_u16(r.p + 44), 0x1F); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
+  mock.ui_avg_state = 2; mock.ui_avg_log2n = 6;
+  r = status();
+  T_EQ(r.p[46], 2); T_EQ(r.p[47], 6);
+  r = req(PC_CMD_GET_DECIM, 0, 0);
+  T_EQ(pc_get_u16(r.p + 32), 0x1F); T_EQ(r.p[34], 2); T_EQ(r.p[35], 6);
+
+  //Default: off; the geometry the next arm writes (legacy: 1500 / 3000 samples = 750 / 1500 words)
+  r = req(PC_CMD_GET_SEQ, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 48); T_EQ(r.p[0], 0); T_EQ(r.p[16], 0); T_EQ(r.p[17], 0);
+  T_EQ(pc_get_u16(r.p + 18), 750); T_EQ(pc_get_u16(r.p + 20), 1500); T_EQ(mock.seq_status_reads, 1);
+
+  //Field checks
+  r = set_seq(3, 0, 7, 4, 0, 0);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
+  r = set_seq(1, 2, 7, 4, 0, 0);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 1);
+  r = set_seq(2, 1, 0, 1, 4, 0);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 1);   //circular averaging
+  r = set_seq(1, 0, 4, 4, 0, 0);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 2);
+  r = set_seq(1, 0, 13, 4, 0, 0); T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 2);
+  r = set_seq(1, 0, 12, 0, 0, 0); T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
+  r = set_seq(1, 0, 12, 3, 0, 0); T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);   //8192 >> 12 = 2
+  r = set_seq(1, 0, 7, 32, 0, 0); T_EQ(r.h.status, PC_E_STATE);   T_EQ(pc_get_u16(r.p), 5);   //1500 words > 126
+  r = set_seq(2, 0, 0, 1, 300, 0); T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 6);  //legacy N > 257
+  r = set_seq(2, 0, 0, 2, 16, 0); T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);   //2 x 1500 > 2048
+  r = req(PC_CMD_GET_SEQ, 0, 0);
+  T_EQ(r.p[0], 0);                                                //nothing taken
+
+  //README bench check 2: 32 segments of m = 7, pre 16 / total 120 words, hold-off 1 us
+  set_trigger(0x38, 0, 0, 0, 0, 32, 240, 0, 0, &r);
+  T_EQ(r.h.status, 0);
+  r = set_seq(1, 0, 7, 32, 0, 1001);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 48);
+  T_EQ(r.p[0], 1); T_EQ(r.p[2], 7); T_EQ(pc_get_u16(r.p + 4), 32); T_EQ(pc_get_u32(r.p + 8), 1001);
+  T_EQ(pc_get_u32(r.p + 12), 201); T_EQ(r.p[16], 0); T_EQ(pc_get_u16(r.p + 18), 16); T_EQ(pc_get_u16(r.p + 20), 120);
+  T_EQ(pc_get_u16(r.p + 22), 64);
+
+  //ARM: the run setting goes to the HAL; auto mode arms the FPGA's own time-out (no firmware forcing between segments)
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.seq_arms, 1); T_EQ(mock.seq_cfg.mode, 1); T_EQ(mock.seq_cfg.count, 32);
+  T_EQ(mock.seq_cfg.m, 7); T_EQ(mock.seq_cfg.holdoff_ns, 1001); T_EQ(mock.arm_pre, 16); T_EQ(mock.arm_total, 120);
+  T_EQ(mock.arm_normal, 0);
+
+  //Table: segment s triggered at s x 100 us (20000 x 5 ns), offset 7 s mod 128; segment 5 untriggered, 10 never written
+  for(s=0;s<32;s++)
+  {
+    pc_seq_entry e;
+
+    e.timestamp = 20000ull * s; e.offset = (uint16_t)((7 * s) % 128); e.triggered = (s != 5); e.valid = (s != 10);
+    mock.acc[s] = pc_seq_entry_encode(&e);
+  }
+  seq_status(0x81, 32, 1);
+  mock.polls_to_trigger = -1; mock.polls_to_done = 4;
+  mock.now += 5000;                                               //well past any firmware auto deadline
+  r = wait_done(1000);
+  T_EQ(r.p[1], PC_ACQ_DONE); T_EQ(mock.forces, 0);
+  T_EQ(r.p[2] & 0x05, 0x01);                                      //triggered (it holds triggered segments), no time-out
+  T_EQ(mock.trace_builds, 0);                                     //no single record to show
+
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.len, 96); T_EQ(r.p[76], 1); T_EQ(r.p[77], 0); T_EQ(r.p[78], 7); T_EQ(r.p[79], 0);
+  T_EQ(pc_get_u32(r.p + 80), 32); T_EQ(pc_get_u16(r.p + 84), 1); T_EQ(pc_get_u16(r.p + 86), 32);
+  T_EQ(pc_get_u32(r.p + 92), 1001);
+
+  //Table, little-endian u64 per entry
+  r = read_seq(0, 0, 0, 0, 32);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 16 + 32 * 8);
+  T_EQ(pc_get_u32(r.p), 1); T_EQ(pc_get_u16(r.p + 4), 0); T_EQ(pc_get_u16(r.p + 6), 32); T_EQ(r.p[8], 0);
+  T_EQ(r.p[9], 0); T_EQ(r.p[10], 7); T_EQ(pc_get_u16(r.p + 12), 16); T_EQ(pc_get_u16(r.p + 14), 120);
+  for(s=0;s<32;s++)
+    T_EQ(pc_get_u64(r.p + 16 + 8 * s), mock.acc[s]);
+  r = read_seq(0, 0, 0, 30, 2);   T_EQ(r.h.status, 0); T_EQ(pc_get_u64(r.p + 16), mock.acc[30]);
+  r = read_seq(0, 0, 0, 32, 1);   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
+  r = read_seq(0, 0, 0, 31, 2);   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 6);
+  r = read_seq(0, 0, 0, 0, 0);    T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 6);
+  r = read_seq(1, 1, 0, 0, 1);    T_EQ(r.h.status, PC_E_STATE);   T_EQ(pc_get_u16(r.p), 2);
+  r = read_seq(2, 0, 0, 0, 1);    T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
+
+  //Segment 3: offset 21, record start (21 - 16) mod 128 = 5 in slot 3 (absolute word 389)
+  r = read_raw3(0x01, 0, 3, 0, 120);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 16 + 120);
+  T_EQ(pc_get_u16(r.p + 4), 3 * 128 + 5); T_EQ(pc_get_u16(r.p + 6), 128); T_EQ(pc_get_u32(r.p + 8), 120);
+  for(i=0;i<120;i++)
+    T_EQ(r.p[16 + i], mock.ring[0][3 * 128 + ((5 + i) % 128)]);
+
+  //Segment 31: offset 89 + 7 = 217 mod 128 = 89; start 73, wraps at the slot end after 55 words; layout 1, both cores
+  r = read_raw3(0x03, 1, 31, 10, 100);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 16 + 200); T_EQ(pc_get_u16(r.p + 4), 31 * 128 + 83);
+  for(i=0;i<100;i++)
+  {
+    uint32_t w = 31 * 128 + ((83 + i) % 128);
+
+    T_EQ(r.p[16 + 2 * i], mock.ring[1][w]);                       //B before A (PC_INTERLEAVE_ORDER 0)
+    T_EQ(r.p[16 + 2 * i + 1], mock.ring[0][w]);
+  }
+
+  r = read_raw3(0x01, 0, 10, 0, 10);  T_EQ(r.h.status, PC_E_STATE);   T_EQ(pc_get_u16(r.p), 5);   //not recorded
+  r = read_raw3(0x01, 0, 32, 0, 10);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
+  r = read_raw3(0x01, 0, 0, 0, 129);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 8);
+
+  //Ring-relative modes make no sense for a segment run; absolute still works; READ_TRACE has no record
+  {
+    uint8_t p[16];
+
+    memset(p, 0, 16); p[0] = 1; p[1] = 1; pc_put_u32(p + 8, 10);
+    r = req(PC_CMD_READ_RAW, p, 16);  T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 4);
+    p[1] = 0;
+    r = req(PC_CMD_READ_RAW, p, 16);  T_EQ(r.h.status, 0);
+    memset(p, 0, 12); p[0] = 1;
+    r = req(PC_CMD_READ_TRACE, p, 12); T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 5);
+  }
+
+  r = req(PC_CMD_GET_SEQ, 0, 0);
+  T_EQ(r.p[34], 1); T_EQ(pc_get_u32(r.p + 36), 1); T_EQ(pc_get_u32(r.p + 40), 32); T_EQ(pc_get_u16(r.p + 44), 1);
+  T_EQ(r.p[46], 1);
+
+  //A UI conversion overwrites the run
+  ui_capture(200);
+  r = read_seq(0, 0, 0, 0, 1);    T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 0);
+  r = read_raw3(0x01, 0, 0, 0, 1); T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 4);
+
+  //Circular run ended by STOP: completes as DONE (not aborted) with flags stopped + overflow, all 64 slots readable
+  r = set_seq(1, 1, 7, 4, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.p[1], 1);
+  mock.polls_to_done = -1;
+  seq_status(0x64, 1000, 0);
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.seq_cfg.flags, 1);
+  r = req(PC_CMD_STOP, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.seq_stops, 1); T_EQ(r.p[1], PC_ACQ_ARMED);
+  r = wait_done(100);
+  T_EQ(r.h.status, 0); T_EQ(r.p[1], PC_ACQ_DONE);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[77], 0x07); T_EQ(pc_get_u32(r.p + 80), 1000);
+  r = read_seq(0, 0, 0, 0, 64);   T_EQ(r.h.status, 0);
+  r = read_seq(0, 0, 0, 0, 65);   T_EQ(r.h.status, PC_E_BAD_ARG);
+
+  //The geometry changed after SET_SEQ: ARM refuses, nothing armed
+  r = set_seq(1, 0, 7, 4, 0, 0);
+  set_trigger(0x30, 0, 0, 0, 0, 32, 1000, 0, 0, &r);
+  i = mock.arms;
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 3); T_EQ(mock.arms, i);
+  r = req(PC_CMD_GET_SEQ, 0, 0);
+  T_EQ(r.p[16], PC_SEQ_FIT_TOTAL);
+
+  //Off again: a plain capture, and the HAL is told mode 0 (it writes 0x57 = 0)
+  r = set_seq(0, 0, 0, 0, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.p[0], 0);
+  mock.polls_to_done = 3; mock.polls_to_trigger = 2;
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.seq_cfg.mode, 0); T_EQ(mock.arm_normal, 1);
+  r = wait_done(100);
+  T_EQ(mock.trace_builds, 1);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[76], 0);
+  r = read_seq(0, 0, 0, 0, 1);    T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 0);
+}
+
+static void test_seq_average(void)
+{
+  resp_t r;
+  uint32_t i, s;
+
+  //Legacy: 2 positions x 500 words (pre 50), N 16
+  setup(0x1536);
+  set_trigger(0x38, 0, 0, 0, 1, 100, 1000, 0, 0, &r);
+  r = set_seq(2, 0, 0, 2, 16, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.p[0], 2); T_EQ(pc_get_u16(r.p + 6), 16); T_EQ(pc_get_u16(r.p + 22), 4);
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.seq_cfg.n, 16); T_EQ(mock.seq_cfg.count, 2); T_EQ(mock.arm_normal, 1);
+  T_EQ(mock.seq_fmt16, 0);
+
+  for(i=0;i<1000;i++)
+    mock.acc[i] = ((uint64_t)(16 * 200 + i) << 48) | ((uint64_t)(16 * 150) << 32) | ((uint64_t)(16 * 100 + i) << 16) |
+                  (uint64_t)(16 * 50);
+  seq_status(0x82, 32, 3);
+  r = wait_done(100);
+  T_EQ(r.p[1], PC_ACQ_DONE); T_EQ(r.p[2] & 0x01, 0x01);
+  T_EQ(mock.trace_builds, 1);                                     //the last raw record, as a normal capture
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[76], 2); T_EQ(pc_get_u32(r.p + 80), 32); T_EQ(pc_get_u16(r.p + 84), 3); T_EQ(pc_get_u32(r.p + 88), 16);
+
+  //S = 4 gives the mean; core A block then core B block per channel, CH1 then CH2
+  r = read_seq(1, 3, 4, 0, 1000);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 16 + 2 * 1000 * 4);
+  T_EQ(r.p[8], 1); T_EQ(r.p[9], 0); T_EQ(r.p[10], 4); T_EQ(r.p[11], 3);
+  T_EQ(pc_get_u16(r.p + 12), 50); T_EQ(pc_get_u16(r.p + 14), 500);
+  T_EQ(mock.seq_57, 0x02); T_EQ(mock.seq_shift, 4);
+  for(i=0;i<1000;i+=37)
+  {
+    T_EQ(pc_get_u16(r.p + 16 + 2 * i), 50);
+    T_EQ(pc_get_u16(r.p + 16 + 2000 + 2 * i), (16 * 100 + i) >> 4);
+    T_EQ(pc_get_u16(r.p + 16 + 4000 + 2 * i), 150);
+    T_EQ(pc_get_u16(r.p + 16 + 6000 + 2 * i), (16 * 200 + i) >> 4);
+  }
+
+  //The sums (0xFF on legacy = S 0), CH2 only, a window
+  r = read_seq(1, 2, 0xFF, 500, 10);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 16 + 40); T_EQ(r.p[9], 0); T_EQ(r.p[10], 0); T_EQ(mock.seq_shift, 0);
+  T_EQ(pc_get_u16(r.p + 16), 16 * 150); T_EQ(pc_get_u16(r.p + 36), 16 * 200 + 500);
+  r = read_seq(1, 1, 0, 999, 2);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 6);
+  r = read_seq(1, 0, 0, 0, 1);    T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 1);
+  r = read_seq(1, 1, 32, 0, 1);   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 2);
+  r = read_seq(0, 0, 0, 0, 1);    T_EQ(r.h.status, PC_E_STATE);   T_EQ(pc_get_u16(r.p), 2);
+
+  //16-bit records (CIC2 at 10 MSa/s): N up to 65536, 32-bit sums
+  setup(0x1536);
+  mock.decim_setting = 2;
+  set_trigger(0x38, 0, 0, 0, 1, 100, 1000, 0, 0, &r);
+  r = set_seq(2, 0, 0, 2, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.p[17], 1); T_EQ(pc_get_u16(r.p + 6), 0); T_EQ(pc_get_u16(r.p + 18), 100);
+  T_EQ(pc_get_u16(r.p + 20), 1000);
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.seq_cfg.n, 65536); T_EQ(mock.seq_fmt16, 1);
+  for(s=0;s<2000;s++)
+    mock.acc[s] = ((uint64_t)(40000ull * 65536 + s) << 32) | (uint64_t)(1000ull * 65536 + s);
+  seq_status(0x92, 131072, 0);
+  r = wait_done(100);
+  T_EQ(r.p[1], PC_ACQ_DONE);
+
+  r = read_seq(1, 3, 0xFF, 0, 2000);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 16 + 2 * 2000 * 4); T_EQ(r.p[9], 0x03); T_EQ(r.p[10], 0xFF);
+  T_EQ(mock.seq_57, 0x0A);
+  T_EQ(pc_get_u32(r.p + 16 + 4 * 7), 1000u * 65536 + 7);
+  T_EQ(pc_get_u32(r.p + 16 + 8000 + 4 * 1999), 40000u * 65536 + 1999);
+
+  r = read_seq(1, 3, 16, 0, 2000);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 16 + 2 * 2000 * 2); T_EQ(r.p[9], 0x01); T_EQ(mock.seq_57, 0x02);
+  T_EQ(pc_get_u16(r.p + 16 + 2 * 5), 1000); T_EQ(pc_get_u16(r.p + 16 + 4000 + 2 * 5), 40000);
+  r = read_seq(1, 1, 0, 0, 1);
+  T_EQ(pc_get_u16(r.p + 16), 0xFFFF);                              //clamped at S 0
+}
+
 int main(void)
 {
   test_info();
@@ -2428,6 +2746,9 @@ int main(void)
   test_decim_protocol();
   test_decim_fir_math();
   test_decim_fir_protocol();
+  test_seq_older_bitstreams();
+  test_seq_segments();
+  test_seq_average();
   mock_clear_resps();
   return t_report("test_session");
 }

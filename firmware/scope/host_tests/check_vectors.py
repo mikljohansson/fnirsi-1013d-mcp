@@ -63,6 +63,7 @@ def main():
     ap.add_argument("--vectors", default=os.path.join(here, "..", "..", "..", "docs", "protocol-vectors.json"))
     ap.add_argument("--decim-checker", help="decim_check binary (pc_decim.c): cross-check the decim section")
     ap.add_argument("--adc-cal-checker", help="test_adc_cal binary (adc_cal.c): cross-check the adc_cal block")
+    ap.add_argument("--seq-checker", help="seq_check binary (pc_seq.c): cross-check the seq section (1.17)")
     args = ap.parse_args()
 
     with open(args.vectors) as fh:
@@ -170,6 +171,18 @@ def main():
             print("adc_cal_v3: sector block identical to acal_pack")
     elif args.adc_cal_checker:
         fail("adc_cal_v3 section missing")
+
+    # 7. sequencer maths (1.17): pc_seq.c against the vectors' Python reference
+    if args.seq_checker and "seq" in data:
+        cases = data["seq"]["cases"]
+        text = "".join(c["op"] + " " + " ".join(str(a) for a in c["args"]) + "\n" for c in cases)
+        out = subprocess.run([args.seq_checker], input=text, capture_output=True, text=True, check=True).stdout.split("\n")
+        for c, ln in zip(cases, out):
+            if [int(x) for x in ln.split()] != c["out"]:
+                fail(f"seq {c['op']} {c['args']}: C gave {ln}, expected {c['out']}")
+        print(f"seq: {len(cases)} cases checked against pc_seq.c")
+    elif args.seq_checker:
+        fail("seq section missing")
 
     if fails:
         print(f"{fails} FAILURES")

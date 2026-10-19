@@ -29,6 +29,7 @@ CMDS = {
     "ARM": 0x0200, "FORCE": 0x0201, "STOP": 0x0202, "WAIT": 0x0203, "READ_RAW": 0x0204,
     "READ_TRACE": 0x0205, "READ_LIVE": 0x0206, "ACQUIRE_AVG": 0x0207,
     "SET_ACQ_STATE": 0x0208, "GET_CAPTURE_INFO": 0x0209, "GET_DECIM": 0x020C, "SET_DECIM": 0x020D,
+    "SET_SEQ": 0x020E, "GET_SEQ": 0x020F, "READ_SEQ": 0x0210,
     "SD_INFO": 0x0500, "SD_READ_SECTORS": 0x0501, "SD_STAGE": 0x0502, "SD_WRITE_SECTORS": 0x0503,
     "GET_GEN": 0x0300, "SET_GEN": 0x0301, "GET_CAL": 0x0400, "READ_SCREEN": 0x0401,
     "DEBUG_FPGA": 0x0F00, "ENTER_FEL": 0x0F01,
@@ -86,6 +87,10 @@ REQUESTS = [
     ("GET_CAPTURE_INFO", b"", "1.3: settings of the latest finished capture"),
     ("GET_DECIM", b"", "1.9: decimation filter setting and state (FPGA 0x1534+)"),
     ("SET_DECIM", struct.pack("<BBH", 2, 0, 0), "1.9: filter CIC2, no core-order swap"),
+    ("SET_SEQ", struct.pack("<BBBBHHII", 1, 0, 7, 0, 32, 0, 1000, 0),
+     "1.17: 32 segments in slots of 2^7 words, hold-off 1000 ns (FPGA 0x1536)"),
+    ("GET_SEQ", b"", "1.17: sequencer setting, fit for the next ARM, FPGA 0x2A status, latest run"),
+    ("READ_SEQ", struct.pack("<BBBBHHI", 0, 0, 0, 0, 0, 32, 0), "1.17: segment table entries 0..31"),
     ("GET_LINK_STATS", b"", "1.2: link counters"),
     ("GET_BAD_FRAME", b"", "1.2: last request with a payload CRC error"),
     ("GET_EVENT_LOG", b"", "1.5: the last 64 USB / link events with ms timestamps"),
@@ -153,6 +158,98 @@ def decim_cases():
     cases += [decim_case(d, k, 3000, 1) for d in SAMPLE_RATE_DIVIDERS for k in range(4)]
     cases += [decim_case(d, 2, 3000, 1) for d in (11, 12, 13, 14, 15, 16, 17, 18)]
     cases += [decim_case(20667, 3, 3000, 1), decim_case(20671, 3, 3000, 1), decim_case(19, 2, 8192, 1)]
+    return cases
+
+
+# Sequencer of FPGA 0x1536 (protocol 1.17, docs/protocol.md section 14 row 70), independent of pc_seq.c
+def seq_fit(mode, flags, m, count, n, pre, total, wide):
+    if mode > 2:
+        return 1
+    if (flags & ~1) or ((flags & 1) and mode != 1):
+        return 2
+    if mode == 0:
+        return 0
+    if mode == 1:
+        if m < 5 or m > 12:
+            return 3
+        if count == 0 or count > (8192 >> m):
+            return 4
+        if total + 2 > (1 << m):
+            return 5
+    else:
+        if n == 0 or n > 65536 or (not wide and n > 257):
+            return 7
+        if total > 2046:
+            return 5
+        if count == 0 or count * total > 2048:
+            return 4
+    if total == 0 or pre >= total:
+        return 6
+    return 0
+
+
+def seq_fit_case(mode, flags, m, count, n, pre, total, wide):
+    if mode == 1:
+        maxc = (8192 >> m) if 5 <= m <= 12 else 0
+        slots = (8192 >> m) if (flags & 1) else count
+    elif mode == 2:
+        maxc = 0 if (total == 0 or total > 2046) else 2048 // total
+        slots = 0
+    else:
+        maxc = slots = 0
+    c57 = (mode & 3) | (4 if (mode == 1 and flags & 1) else 0)
+    return {"op": "fit", "args": [mode, flags, m, count, n, pre, total, wide],
+            "out": [seq_fit(mode, flags, m, count, n, pre, total, wide), maxc, slots, c57, count & 0xFFF, n & 0xFFFF]}
+
+
+def seq_entry_case(w):
+    return {"op": "entry", "args": ["%x" % w],
+            "out": [w & 0xFFFFFFFFFF, (w >> 40) & 0x1FFF, (w >> 53) & 1, w >> 63]}
+
+
+def seq_plan(total, pre, d):
+    word = 10 * (d + 1)
+    if total == 0 or total > 2046 or pre >= total or word > 1000000:
+        return [0, 0]
+    rec = total * word + total * 5 + 40 + (2 + pre) * word + 100
+    n = 64
+    while n >= 2 and n * rec > 40000 * 1000:
+        n >>= 1
+    if n < 2:
+        return [0, 0]
+    return [n, -(-(n * rec) // 1000)]
+
+
+def seq_avg(s, c, gain, off):
+    m8 = (s * 256 + c // 2) // c
+    v = (m8 * gain + (off << 8) + (1 << 23)) >> 24
+    return [min(255, max(0, v))]
+
+
+def seq_cases():
+    cases = []
+    fits = [(1, 0, 7, 32, 0, 16, 120, 0), (1, 0, 7, 32, 0, 16, 126, 0), (1, 0, 7, 32, 0, 16, 127, 0),
+            (1, 0, 7, 32, 0, 120, 120, 0), (1, 1, 7, 4, 0, 16, 120, 0), (1, 2, 7, 4, 0, 16, 120, 0),
+            (1, 0, 12, 2, 0, 100, 4000, 1), (1, 0, 12, 3, 0, 100, 4000, 1), (1, 0, 13, 1, 0, 1, 20, 0),
+            (1, 0, 0, 0, 0, 1, 20, 0), (2, 0, 0, 1, 257, 750, 1500, 0), (2, 0, 0, 1, 258, 750, 1500, 0),
+            (2, 0, 0, 1, 65536, 750, 1500, 1), (2, 0, 0, 1, 0, 750, 1500, 1), (2, 0, 0, 2, 16, 50, 1024, 1),
+            (2, 0, 0, 2, 16, 50, 1025, 1), (2, 0, 0, 1, 16, 50, 2047, 1), (2, 1, 0, 1, 16, 50, 1000, 1),
+            (3, 0, 0, 1, 1, 1, 10, 0), (0, 0, 0, 0, 0, 9999, 0, 0)]
+    fits += [(1, 0, m, 8192 >> m, 0, 4, (1 << m) - 2, w) for m in range(5, 13) for w in (0, 1)]
+    cases += [seq_fit_case(*f) for f in fits]
+    cases += [{"op": "hold", "args": [ns], "out": [(ns + 4) // 5]} for ns in (0, 1, 4, 5, 6, 999, 1000, 1001, 0xFFFFFFFF)]
+    cases += [seq_entry_case(w) for w in (0x803FFFFFFFFFFFFF, 0x8020050000004E20, 0x0040000000000000,
+                                           (1 << 63) | (93 << 40) | 123456789)]
+    cases += [{"op": "segw", "args": [m, s, off, pre, j], "out": [(s << m) + ((off - pre + j) & ((1 << m) - 1))]}
+              for (m, s, off, pre, j) in ((7, 3, 10, 16, 0), (7, 3, 10, 16, 5), (7, 3, 10, 16, 6), (7, 31, 89, 16, 110),
+                                          (12, 1, 4095, 0, 1), (5, 255, 0, 31, 30))]
+    cases += [{"op": "plan", "args": [t, p, d], "out": seq_plan(t, p, d)}
+              for (t, p, d) in ((1500, 750, 0), (1500, 750, 1), (1500, 750, 199), (1500, 750, 1999), (2046, 750, 0),
+                                (2047, 750, 0), (1500, 1500, 0), (1500, 375, 39), (1500, 1250, 99))]
+    cases += [{"op": "avg", "args": [s, c, g, o], "out": seq_avg(s, c, g, o)}
+              for (s, c, g, o) in ((201, 2, 65536, 0), (401, 4, 131072, 0), (765, 3, 70000, 1 << 20), (0, 3, 65536, -(1 << 20)),
+                                   (65280, 256, 65536, 0), (12345, 97, 67000, -150000), (100 * 64 + 31, 64, 64000, 300000),
+                                   (128, 1, 65536, 32767), (128, 1, 65536, 32768))]
     return cases
 
 
@@ -302,6 +399,42 @@ def build():
     add("magic_inside_payload", f, [ev_frame(CMDS["PING"], 24, MAGIC + b"\x01\x00")],
         "payload containing the magic bytes is not a frame start", [decoded(CMDS["PING"], 24, MAGIC + b"\x01\x00")])
 
+    # 5b. protocol 1.17 sequencer: requests besides the one-per-command set, and responses a host decodes
+    p = struct.pack("<BBBBHHII", 2, 0, 0, 0, 1, 256, 0, 0)
+    f = frame(CMDS["SET_SEQ"], 60, p)
+    add("req_set_seq_average_256", f, [ev_frame(CMDS["SET_SEQ"], 60, p)],
+        "1.17: hardware averaging, 1 position, N 256 (legacy records: N <= 257)", [decoded(CMDS["SET_SEQ"], 60, p)])
+    p = struct.pack("<BBBBHHI", 1, 0x03, 0xFF, 0, 0, 1000, 0)
+    f = frame(CMDS["READ_SEQ"], 61, p)
+    add("req_read_seq_average_raw", f, [ev_frame(CMDS["READ_SEQ"], 61, p)],
+        "1.17: averaged record, CH1 + CH2, the sums (S 0xFF), words 0..999", [decoded(CMDS["READ_SEQ"], 61, p)])
+    p = struct.pack("<BBBBiII", 0x03, 3, 1, 0, (5 << 16) | 0, 120, 0)
+    f = frame(CMDS["READ_RAW"], 62, p)
+    add("req_read_raw_segment_5", f, [ev_frame(CMDS["READ_RAW"], 62, p)],
+        "1.17: READ_RAW addr_mode 3: CH1 both cores interleaved, segment 5 (address 5 << 16 | 0), 120 words",
+        [decoded(CMDS["READ_RAW"], 62, p)])
+    gs = struct.pack("<BBBBHHII", 1, 0, 7, 0, 32, 0, 1000, 200) + struct.pack("<BBHHH", 0, 0, 16, 120, 64) + \
+        struct.pack("<BBHIHBB", 0x81, 7, 0, 32, 1, 1, 0) + struct.pack("<IIHBB", 9, 32, 1, 1, 0)
+    assert len(gs) == 48
+    f = frame(CMDS["GET_SEQ"], 63, gs, flags=FLAG_RESPONSE)
+    add("resp_get_seq_segments_done", f, [],
+        "1.17 GET_SEQ response (48 bytes): 32 segments m 7, hold-off 1000 ns = 200 x 5 ns, fits (pre 16 / total 120 words, "
+        "64 slots), FPGA 0x2A done + mode 1, 32 completed, 1 untriggered; held run = capture 9",
+        [decoded(CMDS["GET_SEQ"], 63, gs, flags=FLAG_RESPONSE)])
+    ent = [((1 << 63) | (1 << 53) | (((7 * s) % 128) << 40) | (20000 * s)) for s in range(2)]
+    rs = struct.pack("<IHHBBBBHH", 9, 0, 2, 0, 0, 7, 0, 16, 120) + b"".join(struct.pack("<Q", e) for e in ent)
+    f = frame(CMDS["READ_SEQ"], 64, rs, flags=FLAG_RESPONSE)
+    add("resp_read_seq_table", f, [],
+        "1.17 READ_SEQ table response: 16-byte header (capture 9, first 0, count 2, m 7, pre 16, total 120), then u64 "
+        "entries: bits 39..0 timestamp in 5 ns (0, 100 us), 52..40 trigger offset in the slot (0, 7), 53 triggered, 63 valid",
+        [decoded(CMDS["READ_SEQ"], 64, rs, flags=FLAG_RESPONSE)])
+    st = bytes(44) + struct.pack("<HBB", 0x1F, 2, 6)
+    f = frame(CMDS["GET_STATUS"], 65, st, flags=FLAG_RESPONSE)
+    add("resp_get_status_1_17", f, [],
+        "1.17 GET_STATUS tail (48 bytes; 0..43 as 1.13, zero here): 44 u16 features 0x1F (EXT, DECIM, FIR, SEGMENTS, "
+        "HW_AVERAGE = FPGA 0x1536), 46 UI Average 2 = hardware, 47 log2 N = 6 (64 records per displayed record)",
+        [decoded(CMDS["GET_STATUS"], 65, st, flags=FLAG_RESPONSE)])
+
     # 6. ASCII probe (section 10)
     add("ascii_ver", b"#VER\n", [{"event": "ascii", "line": "VER"}], "#VER probe")
     add("ascii_local_crlf", b"#LOCAL\r\n", [{"event": "ascii", "line": "LOCAL"}], "#LOCAL with CR LF (the LF is junk)")
@@ -340,6 +473,20 @@ def build():
             "cases": decim_cases(),
         },
         "adc_cal_v3": adc_cal_v3_section(),
+        "seq": {
+            "notes": "1.17 sequencer (FPGA 0x1536), checked against pc_seq.c by seq_check (check_vectors.py --seq-checker). "
+                     "fit: args mode flags m count n pre_words total_words wide -> fit code (0 ok, 1 mode, 2 flags, 3 m, "
+                     "4 count, 5 total, 6 pre, 7 N), max count, table slots, 0x57, 0x58, 0x5A. Segments: m 5..12, "
+                     "count <= 8192 >> m, total + 2 <= 2^m, pre < total; averaging: N 1..65536 (legacy <= 257), total "
+                     "<= 2046, count x total <= 2048. hold: ns -> 5 ns units, rounded up. entry: u64 -> timestamp "
+                     "(bits 39..0), offset (52..40), triggered (53), valid (63). segw: m s offset pre j -> sample memory "
+                     "word s 2^m + ((offset - pre + j) mod 2^m). plan (UI averaging): total pre divider -> N (largest "
+                     "power of two 2..64 with N (record + dead) <= 40 ms, word = 10 (D + 1) ns, dead = total x 5 + 40 + "
+                     "(2 + pre) word + 100 ns; 0 = software) and the run in us, rounded up. avg: sum c gain off -> "
+                     "corrected code of the mean: m8 = floor((sum x 256 + floor(c / 2)) / c), code = clamp((m8 x gain "
+                     "+ off x 256 + 2^23) >> 24, 0, 255).",
+            "cases": seq_cases(),
+        },
         "vectors": vectors,
     }
 

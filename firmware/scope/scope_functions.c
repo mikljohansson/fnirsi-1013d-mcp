@@ -2375,8 +2375,8 @@ void scope_display_trace_data(void)
     //Check if channel1 is enabled
     if(scopesettings.channel1.enable)
     {          
-        //Average mode active only auto and normal mode, no waveview mode
-        if((scopesettings.average_mode)&&(!scopesettings.waveviewmode)&&((scopesettings.triggermode==0)||(scopesettings.triggermode==2)))
+        //Average mode active only auto and normal mode, no waveview mode (PC protocol: not over a hardware average)
+        if((scopesettings.average_mode)&&(!scopesettings.waveviewmode)&&((scopesettings.triggermode==0)||(scopesettings.triggermode==2)) PC_SW_AVERAGE())
         {  
             for (size_t i = 0; i < MAX_SAMPLE_BUFFER_SIZE; i++) 
             {  
@@ -2418,8 +2418,8 @@ void scope_display_trace_data(void)
     //Check if channel2 is enabled
     if(scopesettings.channel2.enable)
     {  
-        //Average mode active only auto and normal mode, no waveview mode
-        if((scopesettings.average_mode)&&(!scopesettings.waveviewmode)&&((scopesettings.triggermode==0)||(scopesettings.triggermode==2)))
+        //Average mode active only auto and normal mode, no waveview mode (PC protocol: not over a hardware average)
+        if((scopesettings.average_mode)&&(!scopesettings.waveviewmode)&&((scopesettings.triggermode==0)||(scopesettings.triggermode==2)) PC_SW_AVERAGE())
         {
             for (size_t i = 0; i < MAX_SAMPLE_BUFFER_SIZE; i++) 
             {  

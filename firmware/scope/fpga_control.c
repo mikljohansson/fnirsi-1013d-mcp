@@ -644,6 +644,9 @@ void fpga_do_conversion(void)
   
 
   
+  //0x1536: geometry and sequencer registers before the reset (UI averaging run or 0x57 = 0)
+  PC_SEQ_PRE_RESET();
+
   //Reset the sample system
   fpga_write_cmd(0x01);
   fpga_write_byte(0x01);

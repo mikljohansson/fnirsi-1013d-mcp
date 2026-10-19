@@ -102,6 +102,13 @@ uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (sco
 #define PC_PHOSPHOR_XY(i, last) do { if(pc_glue_phosphor_xy(i)) (i) = (last); } while(0)
 #define PC_PHOSPHOR_STRIP()     pc_glue_phosphor_strip()
 
+//fw 0.2.56 (0x1536 sequencer, pc_seq_hw.h): fpga_do_conversion writes the geometry and the sequencer registers before
+//the sampling reset; the software average is skipped while the traces hold a hardware average
+void   pc_seq_ui_pre_reset(void);
+int    pc_seq_sw_average(void);
+#define PC_SEQ_PRE_RESET()      pc_seq_ui_pre_reset()
+#define PC_SW_AVERAGE()         && pc_seq_sw_average()
+
 
 //Protocol 1.3 has no snapshot to restore: the power-off save stores the live settings as 1.00o5 does
 #define PC_POWER_OFF()          do { } while(0)

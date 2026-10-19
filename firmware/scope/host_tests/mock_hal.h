@@ -45,6 +45,18 @@ typedef struct
   uint32_t decim_arms;            //arms with a non-NULL configuration
   uint16_t decim_rb;              //0x29 read-back
 
+  //Sequencer (0x1536+, pc_seq.h): the last arm's setting, the accumulator words, the 0x2A status, the readout view
+  uint32_t   seq_arms;            //arms with a non-NULL setting
+  pc_seq_cfg seq_cfg;
+  uint8_t    seq_run_mode;        //q_mode of the run (0 after an arm with mode 0)
+  uint8_t    seq_fmt16;
+  uint8_t    seq_57;              //0x57 as written (raw bit live)
+  uint8_t    seq_shift;           //0x5B
+  uint64_t   acc[2048];           //accumulator words as stored (table entries, lane sums)
+  uint8_t    seq_status[8];       //0x2A
+  uint32_t   seq_stops, seq_status_reads, seq_reads, seq_views;
+  uint8_t    ui_avg_state, ui_avg_log2n;
+
   //Settings
   pc_hw_channel  ch[2];
   uint32_t       ch_writes;

@@ -29,7 +29,7 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #else
 #define PC_FW_VERSION_MMU ""
 #endif
-#define PC_FW_VERSION     "0.2.51" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
+#define PC_FW_VERSION     "0.2.56" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
 #endif
 
 extern const uint32_t pc_fw_build;    //short git hash of the build (build_id.c; host tests: mock_hal.c)
@@ -149,6 +149,18 @@ typedef struct
   uint8_t    decim_shift;       //S
   uint32_t   decim_n;           //N (0 when K = 0)
   uint16_t   ext_shift;         //EXT trigger with K >= 1: latency correction in samples (pc_decim_ext_shift)
+  //1.17: sequencer run of this capture (host ARM after SET_SEQ, FPGA 0x1536+); mode 0 = a single capture
+  uint8_t    seq_mode;
+  uint8_t    seq_flags;         //bit 0 circular, bit 1 stopped by the host (STOP), bit 2 overflow (a circular run wrapped)
+  uint8_t    seq_m;
+  uint8_t    seq_fmt16;         //records in the 16-bit layout
+  uint16_t   seq_count;         //segments / positions requested
+  uint16_t   seq_untrig;        //untriggered segments or skipped records (0x2A at DONE)
+  uint32_t   seq_done;          //segments completed / records accumulated (0x2A at DONE)
+  uint32_t   seq_n;             //records per position
+  uint32_t   seq_holdoff_ns;
+  uint16_t   seq_pre_words;     //0x0B / 0x0C as written
+  uint16_t   seq_total_words;
   pc_hw_channel ch[2];
 } pc_capture;
 
@@ -206,6 +218,10 @@ typedef struct
   uint8_t    ui_hold;           //UI must not re-arm
   uint8_t    hold_active;
   uint32_t   hold_deadline;
+
+  //1.17: sequencer setting for the next host ARM (SET_SEQ), and the run in flight
+  pc_seq_cfg seq;
+  uint8_t    seq_stop;          //STOP ended the run in flight: it completes as DONE with what it holds
 
   //Host single capture
   uint8_t    acq_state;
