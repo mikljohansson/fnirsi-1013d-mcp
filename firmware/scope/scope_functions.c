@@ -1622,6 +1622,7 @@ void scope_do_auto_setup_old(void)
 void scope_do_auto_setup_new(void)
 {   
   PCHANNELSETTINGS settings;
+  int32  position;
   
   register uint32 multiply;
 
@@ -1851,38 +1852,28 @@ void scope_do_auto_setup_new(void)
     center = settings->centerDC+73;
 
     //Adjust the center line based on targeted center
+    //fw 0.2.54: computed in int32 and limited to the drag range 6..396 (an inverted channel's uint16 subtraction wrapped,
+    //its addition had no upper limit; such a channel's pointer sat clamped at the top and could not be grabbed)
     if(center < center1)
     {
       //Calculate a new trace offset
-      //settings->traceposition += ((center1 - center)*112)/100;  //120 mensie cislo posuva hore priebeh
-      if (settings->invert) settings->traceposition -= ((center1 - center)*settings->dc_shift_center)/100; 
-        else settings->traceposition += ((center1 - center)*settings->dc_shift_center)/100;  //120 mensie cislo posuva hore priebeh
-      
-      //Make sure it is not out of range
-      if(settings->traceposition > 399)//385
-      {
-          settings->traceposition = 399;
-      }
+      offset = ((center1 - center)*settings->dc_shift_center)/100;
+
+      if(settings->invert) position = (int32)settings->traceposition - (int32)offset;
+        else position = (int32)settings->traceposition + (int32)offset;
     }
     else
     {
       //Calculate the needed offset
-      //offset = ((center - center1)*112)/100;    //110
-        offset = ((center - center1)*settings->dc_shift_center)/100;    //110
-       
-      //Check if current setting large enough to subtract the offset
-      if(settings->traceposition > offset)
-      {
-          //Take of the found offset (of inverting ON or OFF)
-          if (settings->invert) settings->traceposition += offset; else settings->traceposition -= offset;
-      }
-      else
-      {
-          //Limit on zero
-          settings->traceposition = 0;
-      }
+      offset = ((center - center1)*settings->dc_shift_center)/100;
+
+      //Take of the found offset (of inverting ON or OFF)
+      if(settings->invert) position = (int32)settings->traceposition + (int32)offset;
+        else position = (int32)settings->traceposition - (int32)offset;
     }
-    
+
+    settings->traceposition = scope_trace_clamp(position);
+
     //Write the new offset to the FPGA
     settings->dcoffset = (center1 - (settings->traceposition))*2;
    }//end dc copuling 
@@ -1910,38 +1901,28 @@ void scope_do_auto_setup_new(void)
    if(!settings->coupling)
    {
     //Adjust the center line based on targeted center
+    //fw 0.2.54: computed in int32 and limited to the drag range 6..396 (an inverted channel's uint16 subtraction wrapped,
+    //its addition had no upper limit; such a channel's pointer sat clamped at the top and could not be grabbed)
     if(center < center2)
     {
-        //Calculate a new trace offset
-        //settings->traceposition += ((center2 - center)*112)/100;
-        if (settings->invert) settings->traceposition -= ((center2 - center)*settings->dc_shift_center)/100;
-            else settings->traceposition += ((center2 - center)*settings->dc_shift_center)/100;
-      
-        //Make sure it is not out of range
-        if(settings->traceposition > 399)//385
-        {
-            settings->traceposition = 399;
-        }
+      //Calculate a new trace offset
+      offset = ((center2 - center)*settings->dc_shift_center)/100;
+
+      if(settings->invert) position = (int32)settings->traceposition - (int32)offset;
+        else position = (int32)settings->traceposition + (int32)offset;
     }
     else
     {
       //Calculate the needed offset
-      //offset = ((center - center2)*112)/100;
       offset = ((center - center2)*settings->dc_shift_center)/100;
-       
-      //Check if current setting large enough to subtract the offset
-      if(settings->traceposition > offset)
-      {
-          //Take of the found offset (of inverting ON or OFF)
-          if (settings->invert) settings->traceposition += offset; else settings->traceposition -= offset;
-      }
-      else
-      {
-          //Limit on zero
-          settings->traceposition = 0;
-      }
+
+      //Take of the found offset (of inverting ON or OFF)
+      if(settings->invert) position = (int32)settings->traceposition + (int32)offset;
+        else position = (int32)settings->traceposition - (int32)offset;
     }
-    
+
+    settings->traceposition = scope_trace_clamp(position);
+
     //Write the new offset to the FPGA
     settings->dcoffset = (center2 - (settings->traceposition))*2;
    }//end dc copuling 
@@ -4030,7 +4011,8 @@ void scope_restore_setup_from_file(void)
   scopesettings.channel1.coupling          = ptr[index++];
   scopesettings.channel1.magnification     = ptr[index++];
   scopesettings.channel1.V_A               = ptr[index++];
-  scopesettings.channel1.traceposition     = ptr[index++];
+  //fw 0.2.54: limited to the drag range 6..396 (an out-of-range value made the channel ungrabbable)
+  scopesettings.channel1.traceposition     = scope_trace_clamp((int32)ptr[index++]);
   scopesettings.channel1.min               = ptr[index++];
   scopesettings.channel1.max               = ptr[index++];
   scopesettings.channel1.average           = ptr[index++];
@@ -4056,7 +4038,8 @@ void scope_restore_setup_from_file(void)
   scopesettings.channel2.coupling          = ptr[index++];
   scopesettings.channel2.magnification     = ptr[index++];
   scopesettings.channel2.V_A               = ptr[index++];
-  scopesettings.channel2.traceposition     = ptr[index++];
+  //fw 0.2.54: limited to the drag range 6..396 (an out-of-range value made the channel ungrabbable)
+  scopesettings.channel2.traceposition     = scope_trace_clamp((int32)ptr[index++]);
   scopesettings.channel2.min               = ptr[index++];
   scopesettings.channel2.max               = ptr[index++];
   scopesettings.channel2.average           = ptr[index++];
@@ -6599,7 +6582,8 @@ void scope_restore_config_data(void)
     scopesettings.channel1.displayvoltperdiv = *ptr++;
     scopesettings.channel1.samplevoltperdiv  = *ptr++;
     scopesettings.channel1.fftenable         = *ptr++;
-    scopesettings.channel1.traceposition     = *ptr++;
+    //fw 0.2.54: limited to the drag range 6..396 (an out-of-range value made the channel ungrabbable)
+    scopesettings.channel1.traceposition     = scope_trace_clamp((int32)*ptr++);
     scopesettings.channel1.triggerverticalposition= *ptr++;
     scopesettings.channel1.dcoffset          = *ptr++;
     scopesettings.channel1.invert            = *ptr++;
@@ -6615,7 +6599,8 @@ void scope_restore_config_data(void)
     scopesettings.channel2.displayvoltperdiv = *ptr++;
     scopesettings.channel2.samplevoltperdiv  = *ptr++;
     scopesettings.channel2.fftenable         = *ptr++;
-    scopesettings.channel2.traceposition     = *ptr++;
+    //fw 0.2.54: limited to the drag range 6..396 (an out-of-range value made the channel ungrabbable)
+    scopesettings.channel2.traceposition     = scope_trace_clamp((int32)*ptr++);
     scopesettings.channel2.triggerverticalposition= *ptr++; 
     scopesettings.channel2.dcoffset          = *ptr++;
     scopesettings.channel2.invert            = *ptr++;
