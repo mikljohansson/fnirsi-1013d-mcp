@@ -826,3 +826,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   (rollback image confirmed); wrote backups/al3_seg_0x1537_426a3784_padded.bin: 256 sectors erased, 1105 pages programmed, write
   verified febc9299..., independent verify OK over 1048576 bytes. Power cycle pending; then #VER must show fpga=0x1537 and the
   encode-phase host test (alternate 0x0D, READ_RAW at divider 0) must stay clean.
+- 2026-10-19 16:33: power cycle: the card's 0.2.25 boots FPGA 0x1537 (#VER fpga=0x1537, caps 0x7C0B); fw 0.2.60 FEL-loaded,
+  caps features 31 (SEQ bit set). Encode-phase test on 0x1537 (alternate 0x0D 99/1/3999 <-> 0, 40 trials each, READ_RAW 1000 at
+  divider 0): CH1 both cores clean in all 120 trials (max 1.16 codes), but CH2 core A bad in 35, 36 and 11 of 40 trials at 32-34
+  codes within-RMS. 0x1537 made the phase deterministic and the second ADC chip now mostly sits in the wrong one. Flag study next.
