@@ -330,7 +330,10 @@ int pc_glue_sys_menu_height(void);
 #define TRIGGER_MENU_XPOS      TRIGGER_BUTTON_XPOS-38//28
 #define TRIGGER_MENU_YPOS                       48//46
 #define TRIGGER_MENU_WIDTH                     220//210//166
-#define TRIGGER_MENU_HEIGHT                    280     //5 rows (no Hold off row: never sent to the FPGA)
+//5 rows (no Hold off row: never sent to the FPGA); fw 0.2.70: 24 px more in Frequency response for the line "Not used by
+//the sweep" (bode_ui.h BU_TRIG_NOTE_H)
+int bode_view_active(void);
+#define TRIGGER_MENU_HEIGHT                    (280 + (bode_view_active() ? 24 : 0))
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Signal generator button and menu

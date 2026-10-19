@@ -29,6 +29,7 @@
 #include "ui_meas.h"
 #include "bode_ui.h"
 #include "bode_view.h"
+#include "bode_ui.h"
 #include "spectrum.h"
 #include "ctrl_page.h"
 #include "ui_diag_view.h"
@@ -552,10 +553,12 @@ void scope_control_button(int mode)
 //----------------------------------------------------------------------------------------------------------------------------------
 
 //fw 0.2.68 (owner): one run state for the chip and the button (ui_ctrl.h ui_run_view); a host acquisition in progress
-//counts as running (pc_glue_host_busy)
+//counts as running (pc_glue_host_busy). fw 0.2.70: in Frequency response the trigger is not used, so a sweep (a single one
+//too) reads RUN, never WAIT
 int scope_run_view(void)
 {
-  return ui_run_view(scopesettings.runstate, (scopesettings.triggermode == 1) && !triggerlong, pc_glue_host_busy());
+  return ui_run_view(scopesettings.runstate, (scopesettings.triggermode == 1) && !triggerlong && !bode_view_active(),
+                     pc_glue_host_busy());
 }
 
 //What the chip and the button last drew (UI_RUN_*; 0xFF: not drawn), for pc_run_follow
@@ -2015,6 +2018,16 @@ void scope_acqusition_settings(int mode)
   //Black text in the block, white while touched
   display_set_fg_color(mode ? WHITE_COLOR : BLACK_COLOR);
 
+  //fw 0.2.70 (bode-ui.md 7): in Frequency response the sweep sets the rate for each point: "ACQ" and "Set by / the sweep"
+  if(bode_view_active())
+  {
+    display_text(ACQ_BUTTON_XPOS + 4, ACQ_BUTTON_YPOS + 11, "ACQ");
+    display_set_fg_color(mode ? BLACK_COLOR : WHITE_COLOR);
+    display_text(ACQ_BUTTON_XPOS + BU_ACQ_CHIP_TEXT_X, ACQ_BUTTON_YPOS + 3, (int8 *)bu_acq_chip[0]);
+    display_text(ACQ_BUTTON_XPOS + BU_ACQ_CHIP_TEXT_X, ACQ_BUTTON_YPOS + 19, (int8 *)bu_acq_chip[1]);
+    return;
+  }
+
   //Display the acquisition identifier text
   if (scopesettings.long_mode)
   {
@@ -2396,6 +2409,8 @@ void scope_generator_settings(int mode)
 {
   //buffer for text frequency
   char buffer[16];
+  uint32 hz = 0;
+  int tone;
 
   //Clear the area first light gray
   display_set_fg_color(BLACK_COLOR); //LIGHTGREY_COLOR  
@@ -2482,8 +2497,10 @@ void scope_generator_settings(int mode)
 //  fpgasettings.gen_freq = e;
 //  fpga_set_generator_freq(fpgasettings.gen_freq);
   
-  //convert duty number to text with %
-  make_value_to_text(buffer, fpgasettings.gen_duty, '%');
+  //convert duty number to text with % (fw 0.2.70, bode-ui.md 7: while a frequency response sweep runs, the tone being
+  //measured, duty 50 %, on)
+  tone = bode_view_gen_tone(&hz);
+  make_value_to_text(buffer, tone ? 50 : fpgasettings.gen_duty, '%');
   
   display_text(GEN_BUTTON_XPOS+25, GEN_BUTTON_YPOS+2, buffer);//+30 +1
   
@@ -2494,11 +2511,11 @@ void scope_generator_settings(int mode)
   if(!mode) display_set_fg_color(ORANGE_COLOR);
  
   //convert freq number to text with dot and Hz kHz MHz
-  make_freq_to_text(buffer, fpgasettings.gen_freq);
+  make_freq_to_text(buffer, tone ? hz : fpgasettings.gen_freq);
   //display_text(GEN_MENU_XPOS + 68, GEN_MENU_YPOS + 132, buffer);
   display_text(GEN_BUTTON_XPOS+6, GEN_BUTTON_YPOS+19, buffer);//
   
-  if((fpgasettings.gen_enable)&&(!mode))
+  if((tone || fpgasettings.gen_enable)&&(!mode))
   {
     display_set_fg_color(GREEN_COLOR);
     display_draw_rounded_rect(GEN_BUTTON_XPOS, GEN_BUTTON_YPOS, GEN_BUTTON_BG_WIDTH, GEN_BUTTON_BG_HEIGHT, 2);
@@ -5436,6 +5453,16 @@ void scope_open_trigger_menu(void)
   
   display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+234, "Always");//224
   display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+253, "50%");//243
+
+  //fw 0.2.70 (bode-ui.md 7): Frequency response does not use the trigger (its captures run in the FPGA's auto mode)
+  if(bode_view_active())
+  {
+    display_set_font(&font_2);
+    display_set_fg_color(0x00A0A0A0);
+    display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+282, (int8 *)bu_trig_note);
+    display_set_font(&font_3);
+    display_set_fg_color(WHITE_COLOR);
+  }
   
   //Display the icon with the set colors
   display_copy_icon_use_colors(trigger_50_percent_icon, TRIGGER_MENU_XPOS+75, TRIGGER_MENU_YPOS+238, 24, 24);//296 //184

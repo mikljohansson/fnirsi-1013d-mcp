@@ -25,6 +25,7 @@
 #define PC_SETTING_WORD_BODE1 220   //fw 0.2.66: Bode plot settle, CH2 range (0xB100 marker); fw 0.2.69: Display variant,
                                     //cursors, frequency axis (bits 3..6)
 #define PC_SETTING_WORD_BODE_MS 213 //fw 0.2.69: Frequency response MEASURES list, words 213..215 (bode_ui.h)
+#define PC_SETTING_WORD_BODE2 216   //fw 0.2.70: Frequency response Trace style (0xB200 marker, bit 0)
 
 //PC_UI_MASK(m) items. Menus are compact (fw 0.2.8, owner: no gaps): what the 1013D lacks is not laid out at all.
 #define PC_MASK_TRIG_CHANNEL  2     //trigger menu: EXT source box (0x1533+)
@@ -85,7 +86,7 @@ uint16 pc_glue_ui_setting_word(void);            //settings sector word 211 (sco
 //fw 0.2.66: the Bode plot (bode_view.c), a mode opened from the generator menu
 int    pc_glue_bode_pass(void);                  //scope_acquire_trace_data: 1 = the Bode plot shows (no UI acquisition)
 int    pc_glue_bode_available(void);             //fw 0.2.68: the main menu's Bode plot row can open the view
-uint16 pc_glue_bode_setting_word(int i);         //settings sector words 219, 220 (i 0, 1) and 213..215 (i 2..4)
+uint16 pc_glue_bode_setting_word(int i);         //settings sector words 219, 220 (i 0, 1), 213..215 (i 2..4), 216 (i 5)
 void   pc_glue_view_opening(void);               //the picture / waveform viewer is about to open: the Bode plot ends
 
 #define PC_BUSY_POLL()          pc_glue_poll_busy()

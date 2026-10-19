@@ -6448,6 +6448,8 @@ void scope_save_config_data(void)
   settingsworkbuffer[PC_SETTING_WORD_BODE_MS]     = pc_glue_bode_setting_word(2);
   settingsworkbuffer[PC_SETTING_WORD_BODE_MS + 1] = pc_glue_bode_setting_word(3);
   settingsworkbuffer[PC_SETTING_WORD_BODE_MS + 2] = pc_glue_bode_setting_word(4);
+  //Frequency response Trace style (fw 0.2.70, word 216)
+  settingsworkbuffer[PC_SETTING_WORD_BODE2] = pc_glue_bode_setting_word(5);
   //Unit life record, words 224..255 (fw 0.2.52, pc_diag.c)
   PC_SETTINGS_STORE(settingsworkbuffer);
   
