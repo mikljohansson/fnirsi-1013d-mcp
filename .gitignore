@@ -18,6 +18,8 @@ fpga/**/*.db
 fpga/**/*.bit
 fpga/**/*.bin
 fpga/**/*.rbf
+# released bitstreams are committed with their hashes (fpga/al3/dist/manifest.json, tools/bitstreams.py)
+!fpga/al3/dist/*.bin
 
 # python
 mcp/.venv/
