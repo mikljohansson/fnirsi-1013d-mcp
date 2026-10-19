@@ -743,3 +743,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   cable to the hub, probe grounds floating), backups/bode/floor_rc1_usbgnd.json: -78 to -90 dB at every point, CH2 0.03-0.14 mV rms
   (0.1 code), all points flagged near_floor as designed. Crosstalk is not the cause of the RC deviation; the floor is 25 dB better
   than bode-design 2.3 assumed. Next: thru calibration (both tips on the input), then the RC with it applied.
+- 2026-10-19 14:58: Bode thru calibration, both tips on the loaded input, wiring B (backups/bode/thru_rc30.json, run
+  thru_rc30_run.json): CH2/CH1 = +0.15 to +0.30 dB, 0.0 to 0.5 deg over 1 kHz to 300 kHz, 30/30 valid. The channels and probes match;
+  the RC deviation (thru-corrected: 51 kHz -12.1 dB / -66 deg vs -13.8 / -78 ideal; 137 kHz -19.3 / -70 vs -22.2 / -86) is not a
+  channel mismatch. Model fits (series R, parallel C, in-phase leak, skew) all leave > 1 dB / 3 deg rms: no simple fault explains it.
+  Wiring A and wiring B gave the same H within 0.4 dB, so the return-path error predicted in bode-design 2.5 is not visible on a
+  1 kOhm / 15 nF DUT. Next: the RC with the thru applied, then a 910 / 100 Ohm divider (flat -20.8 dB, 0 deg expected) to separate
+  a measurement error from a capacitor property, then a second capacitor.
