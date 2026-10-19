@@ -2038,12 +2038,32 @@ Bench fact (owner, 2026-10-19 15:45, 0.2.59 in RAM, FPGA 0x1535): the Zero level
 both channels in most runs, with probes and USB unplugged. 0.2.48's base calibration had passed in the morning (stored
 noise 0.6-1.3 codes).
 
-**Cause (coordinator's bench, 16:05): a wire from the calibration post to the owner's breadboard (Bode RC filter) was
-still connected.** The 0.2.59 text did not ask for it to be removed. 24 x 1000-sample captures, probes unplugged:
-- Wire on the post, 200 MSa/s legacy: CH1 core B within-capture std 19-30 codes with 50-60-code excursions on every
-  range; CH2 core A 6-17 codes on ranges 0-1. At 2 MSa/s 0.1-0.5 codes.
-- Only the USB cable connected: 0.5-2.0 codes per core on every range (CH2 range 0 the worst, 1.6-2.0). Std of the
-  capture means under 0.26, max excursion under 10 codes. The generator on or off makes no difference.
+**Correction (coordinator, after 16:15).** The step also fails with nothing connected, and with USB connected, on
+0.2.59 and on 0.2.60. The 0.2.60 line reads "CH1: range 4 at 200 MSa/s: core B, 21.1 codes, 21.0 per capture" and
+"CH2: range 1 at 200 MSa/s: core A, 24.4 codes, 24.3 per capture". One core per channel returns about 21-24 codes RMS
+inside a single full-rate capture, while host READ_RAW at 200 MSa/s legacy gives 0.5-2 codes on the same cores most of
+the time. The earlier wire-on-the-post reading (CH1 B 19-30 codes with 50-60-code excursions, CH2 A 6-17, 200 MSa/s
+only, 2 MSa/s clean) showed the same pattern and was not caused by the wire. With only USB connected and a good state:
+0.5-2.0 codes per core, std of the capture means under 0.26, max excursion under 10 codes, generator on or off the same.
+
+Likely cause, not confirmed on the bench: the A/B encode-phase race of 0x1532..0x1536 (fpga/al3/README.md "Findings"
+item 3, fixed in 0x1537). On 0x1535 each ADC chip's encode flops toggle themselves on negedge clk_ADC
+(e2aec2e:zaklad.v:685-695). The RAM write clock toggles 1.25 ns earlier on negedge clk_200MHz, and both sample the
+combinational enable `divider < counter`. A 0x0D or 0x53 write that changes the compare inside that window leaves the
+chip's encodes half a word out of phase with the write clock, until the next such accident; the two chips flip
+independently. At 2 MSa/s the data is stable for microseconds, so either phase reads clean. At 200 MSa/s one core's
+output transition can then fall on the capture edge, which returns metastable bytes on that core only. The odds per write
+grow as the divider nears 0. 0x0D is written every 30 s by the v4 class probe (acal_live.c, since 0.2.50), twice per range
+by the wizard, and many times by the Bode tool.
+Ruled out for this failure: a stale decimation mode. Calibration conversions configure K = 0 with the FIR off
+(pc_glue_decim_conversion), and pc_dec_apply writes 0x53 and 0x56 when its cache differs. Only pc_dec_apply calls
+fpga_set_decim_mode. With dec_on = 0 the RAM takes the raw pins (zaklad.v:806, sample_dia), so a stale 0x54 shift,
+0x55 level or swap/neg bits cannot reach the bytes. With dec_on set (the host study that showed fpga_mode 225), 0x20 /
+0x21 read the low / high byte of dec_out1 and 0x22 / 0x23 those of dec_out2: garbage on every lane, at every rate.
+Decisive bench test: alternate 0x0D between divider 0 and 1 (or a gated rate). After each change, take a 1000-sample
+READ_RAW at divider 0 with fpga_mode 0. If the race is the cause, individual cores switch between about 1 and about 20
+codes RMS, chip by chip. The cure is the 0x1537 bitstream. A firmware re-roll (toggle 0x0D until a full-rate check capture
+is clean) is possible on 0x1535 but not built.
 
 Ruled out (by reading and host tests):
 - The merge. `cal_result` / `cal_measure` / `cal_channel` are byte-for-byte the path of 0.2.48's
@@ -2067,16 +2087,12 @@ Built:
   core B 3.3 codes, 1.1 per capture" and "CH2: zero still moving, range 1 at 200 MSa/s: core A 0.8 code". The range is
   1-based like the progress line (range 1 = 5 V/div).
 - The Zero level instruction now reads "Disconnect everything from the device: both probes, anything on the /
-  calibration post, and the USB cable. Tap Calibrate."
+  calibration post, and the USB cable. Tap Calibrate." It is still right but not the fix: see the correction above.
 - test_cal_wizard checks the lines and their widths in the 16 px font. test_adc_cal checks the bench numbers, a
   +-3-code move between conversions (fails, 1.1 per capture) and a 64-code glitch per conversion (fails, within as
   large).
 
-Bench check (owner), not run yet:
-1. Run Zero level with the new text followed: it should pass on both channels.
-2. Then put the wire back on the post and run it again. The line should name a 200 MSa/s failure with "per capture"
-   about as large as the total: noise inside the captures, as the coordinator measured.
-3. If a run ever fails with a large total but a small "per capture" value, something moved between the captures:
-   pickup on the open input, which shows mostly at 2 MSa/s on the sensitive ranges 5-6, or a drift.
+Bench check: the 0x0D toggle test above. If a core shows about 20 codes "per capture" on the wizard line, that is the
+race. Pickup on an open input shows as a large total with a small "per capture" value instead.
 Open: the zero step does not detect a load on the post by itself. The noise check caught it only because the wire
 carried noise; a quiet wire would pass with a shifted zero.
