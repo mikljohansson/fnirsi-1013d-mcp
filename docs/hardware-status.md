@@ -883,3 +883,13 @@ Newest entries at the bottom. Format: date, who, what, result.
   Owner asked to disconnect the probes for a clean rerun. fw-polish2 dispatched 18:10 (RUN/STOP action button + host state follow,
   spanner icon, sine with axes, time/div snap not applying the manual path, sun icon = brightness slider, wizard Step M of N, Calibration
   tab button row).
+- 2026-10-19 18:35: ROOT CAUSE of the wizard failure found (fw-cal5 diag 0.2.67 b67219c, 7b881451, loaded; probes and post
+  disconnected). CAL_PROBE mode 0 and mode 1 (the wizard's exact on-screen path from the host): CH1 passes all ranges; CH2 fails at the
+  full-rate zero point of range 0 with core A [124..195] rms 11 and core B [127..255] clip 24-89 while the slope points +-40 codes
+  away are clean. Prestrobe (extra MCU strobe before each read) makes it worse, not better. READ_RAW dcoffset sweep at 200 MS/s: CH2
+  both cores show outliers (A max 195, B max 255 with up to 564/6000 rail samples) only while the mean is 126..133, clean at every
+  other mean; CH1 core A once (mean 131, max 213); gated rates clean everywhere. Conclusion: the FPGA's MCU readout path mixes bits
+  of two successive bytes where many bits flip (0x7F/0x80), lane- and build-dependent (0x1535 passed this morning, 0x1537/0x1538 fail;
+  fw-cal5: BRAM dob and o_mcu_data on the unconstrained i_mcu_clk). The wizard parks its zero at exactly 128, the worst code. fpga-gen8
+  redirected: register the output byte and constrain the MCU clock as the first change of 0x1539; fw-cal5: zero measured off-centre
+  as a workaround for all bitstreams, CAL_PROBE kept as protocol 1.21.
