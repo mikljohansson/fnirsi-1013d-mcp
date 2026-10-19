@@ -346,6 +346,16 @@ static void cp_build(cp_fold *d)
       d->title = "Display";
       for(i = 0; i < UI_SPEC_VIEW_COUNT; i++)
         cp_add(d, CP_ROW_CHOICE, ui_spec_view_names[i], spectrum_view() == (int)i, CP_ICON_SPECTRUM + i);
+
+      //Waterfall and Density show one channel's history (fw 0.2.63, owner): which one, a tap takes the other one; grey
+      //while the other channel is off
+      if(spectrum_view() != 0)
+      {
+        sep = d->n;
+        r = cp_add(d, CP_ROW_VALUE, "Channel", 0, 0);
+        fmt_str(r->value, ui_spec_chan_names[spectrum_hist_channel()]);
+        r->dim = !spectrum_hist_can_choose(spectrum_hist_channel() ^ 1);
+      }
       break;
 
     default:
@@ -391,9 +401,9 @@ static void cp_row_draw(const cp_row *r, uint32 rx, uint32 ry, uint32 rw)
       break;
 
     case CP_ROW_VALUE:
-      display_set_fg_color(WHITE_COLOR);
+      display_set_fg_color(r->dim ? CP_NOTE_COLOR : WHITE_COLOR);
       cp_text(&font_3, rx + UI_FOLD_VALUE_IN, ty, r->label);
-      display_set_fg_color(PALEYELLOW_COLOR);
+      display_set_fg_color(r->dim ? CP_NOTE_COLOR : PALEYELLOW_COLOR);
       cp_text_r(&font_3, rx + rw - UI_FOLD_VALUE_IN, ty, r->value);
       break;
 
@@ -467,8 +477,15 @@ static int cp_fold_tap(cp_fold *d, int row, int dir)
       return 1;
 
     case CP_F_SPEC_DISPLAY:
-      spectrum_set_view(row);
-      return 1;
+      if(row < UI_SPEC_VIEW_COUNT)
+      {
+        spectrum_set_view(row);
+        return 1;
+      }
+
+      if(!d->r[row].dim)
+        spectrum_set_hist_channel(spectrum_hist_channel() ^ 1);
+      return 0;
 
     default:
       spectrum_param_step(cp_analyse_p[row], (d->r[row].kind == CP_ROW_VALUE2) ? dir : 1);

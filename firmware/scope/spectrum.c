@@ -860,8 +860,15 @@ static uint32 spec_level_index(const SPECVIEW *v, int32 cdb)
   return (i < 0) ? 0 : (i > 255) ? 255 : (uint32)i;
 }
 
+//The history's channel: Analyse's channel, or with CH1 + CH2 the one chosen in the Display fold-out (fw 0.2.63; CH1
+//before). spec_hist_key holds it, so a change starts a new history.
+static uint8 spec_hist_pick;
+
 static int spec_hist_ch(void)
 {
+  if((spec.channel == SPEC_CH_BOTH) && spec_ch_on(0) && spec_ch_on(1))
+    return spec_hist_pick ? 1 : 0;
+
   return ((spec.channel == 1) || !spec_ch_on(0)) ? 1 : 0;
 }
 
@@ -1084,6 +1091,33 @@ void spectrum_set_view(int v)
 {
   if((v >= VIEW_SPECTRUM) && (v <= VIEW_DENSITY))
     spec.view = (uint8)v;
+}
+
+int spectrum_hist_channel(void)
+{
+  return spec_hist_ch();
+}
+
+int spectrum_hist_can_choose(int ch)
+{
+  return (ch >= 0) && (ch <= 1) && spec_ch_on(ch);
+}
+
+void spectrum_set_hist_channel(int ch)
+{
+  if(!spectrum_hist_can_choose(ch))
+    return;
+
+  //Like any setting in the fold-outs it ends a running Auto
+  spec.autostage = 0;
+  auto_refused = 0;
+  spec_hist_pick = (uint8)ch;
+
+  if(spec.channel != SPEC_CH_BOTH)
+  {
+    spec.channel   = (uint8)ch;
+    spec.recompute = 1;
+  }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
