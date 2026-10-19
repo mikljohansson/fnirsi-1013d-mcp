@@ -1029,4 +1029,8 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 2026-10-19 23:32: fw 0.2.77 (fw-spzoom: Spectrum zoom ladder) merged, built with GCC 10 and pinned backups/fw-0.2.77_1ffafab7.bin
   (sha256 1ffafab7096a772f71e04425751319fc78481dfc61d61deaf0373f33c9d55977); host tests green; not loaded (scope off). This is the
   morning's FEL image unless fw-yield lands first.
+- 2026-10-20 00:02: fw 0.2.78 (fw-yield merged on 0.2.77: host commands leave the modal screens, protocol 1.23) built with GCC 10 and pinned
+  backups/fw-0.2.78_195afb82.bin; firmware host tests, 102 vectors, mcp ruff and 428 pytest green on the merged tree. This is the
+  morning's FEL image. Bench list: firmware/AGENTS.md section 53 (each menu / fold-out / dialog / screen closes on a host command
+  with the note; wizard mid-measurement keeps E_BUSY detail 3; keypad half-typed keeps the old frequency; counters 68-69).
 

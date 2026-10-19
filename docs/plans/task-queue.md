@@ -419,6 +419,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   sweep. Open (queue): the simulator lacks reason 8 and the new header rule (mcp item); a single sweep started from the CTRL page
   leaves the bar on that page where RUN/STOP is not visible (owner to decide: jump back to page one?); after a sweep the generator
   chip shows the user's generator although the pin is off. Loaded 21:30 as backups/fw-0.2.71_1264e26c.bin; walk-through pending.
+- fw-yield (done 10-19 23:50, about 420k tokens, merged 2026-10-20 00:02 as fw 0.2.78 / protocol 1.23 row 63, handoff firmware/AGENTS.md
+  section 53, pinned backups/fw-0.2.78_195afb82.bin, not loaded: scope off): a main-loop request while the UI is modal sets a yield
+  flag, every menu / fold-out / dialog / screen / wizard-between-steps leaves by its cancel path, "Host command: menu closed" 4 s,
+  E_BUSY kept with details 2 (no main-loop pass in 1.5 s), 3 (calibration measurement), 4 (file save), 5 (USB drive);
+  GET_LINK_STATS 70 counters (68 yields, 69 kept-busy); mcp advice by protocol version, simulator yields; test_modal_yield.
+  Open: the Spectrum view does not draw the note yet (queued); BODE_CTRL / READ_BODE are main-loop commands, so a host polling
+  a device sweep closes a fold-out the person opens meanwhile; the simulator's link stats keep 31 counters.
 - fw-spzoom (done 23:30, about 295k tokens, merged 23:32 as fw 0.2.77, handoff firmware/AGENTS.md section 52, not loaded: the
   scope is off): Spectrum zoom ladder in spec_ladder.c (1-2-5 spans about the centre, rate = slowest whose fs/2 covers the stop
   with a capture of N samples at most 2.048 s, 16-bin minimum, taps at an end do nothing, stopped keeps the record's rate with
