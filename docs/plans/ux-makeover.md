@@ -28,7 +28,9 @@ Same column, same rows, same style. Top to bottom:
 7. Diagnostics
 8. USB drive
 
-Rules: modes first, utilities below, the row that takes the scope off-line (USB drive) last. No "current mode" marker:
+The Spectrum row is always shown, also in roll mode; choosing it switches Roll off and says so once in the top-middle
+warning line ("Roll off for the spectrum"); leaving Spectrum does not switch Roll back on **(owner)**. Rows never move or
+disappear. Rules: modes first, utilities below, the row that takes the scope off-line (USB drive) last. No "current mode" marker:
 the screen shows the mode **(owner)**. The "Scope" fields in the spectrum and phosphor strips go away: the menu is the
 only way between modes **(owner)**. "USB connection" becomes "USB drive"; its screen says in plain words that the SD
 card is shown to the PC as a drive, that PC control through the protocol stops until the screen is left, and to eject
@@ -58,7 +60,7 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   shown, as today.
 - **Right bar, CTRL page, Scope** **(owner)**, top to bottom: CTRL; Display (fold-out: the view, Normal or X-Y, each
   with an icon; below it a **Phosphor** switch, the same slide toggle as in the channel menus, and while it is on the
-  rows Persistence, Palette, Clear; so phosphor drawing combines with either view as the firmware allows today); Trace style
+  rows Persistence, Palette, Clear; so phosphor drawing combines with either view as the firmware allows today); Clear stays in that section at three taps (it matters only with Infinite persistence) **(owner)**; Trace style
   (fold-out: Linear, Dots, Peak, Pro; moved out of ACQ); Grid (toggle, in every mode); the CH1 and CH2 V/div
   Display fold-out rows carry a small icon each (owner): a clean trace line for Normal, a Lissajous loop for X-Y; the
   Phosphor switch row carries a soft graded trace icon; the
