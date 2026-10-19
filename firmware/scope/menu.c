@@ -2733,16 +2733,16 @@ void scope_open_main_menu(void)
 //----------------------------------------------------------------------------------------------------------------------------------
 //Main menu row icons without a bitmap, drawn in the current colour at the top of the row's button (y)
 
-//Scope: one period of a square wave
+//Scope: one period of a sine wave (fw 0.2.63, owner; a square wave before), 25 px wide, 22 px high: the rounded
+//17.5 - 10.5 sin(2 pi x / 24) per column, neighbouring columns joined so the 1 px stroke has no gaps
 static void scope_main_menu_wave_icon(uint32 y)
 {
-  uint32 x = MAIN_MENU_XPOS + 15;
+  static const uint8 sine[25] = { 18, 15, 12, 10, 8, 7, 7, 7, 8, 10, 12, 15, 18, 20, 23, 25, 27, 28, 28, 28, 27, 25, 23,
+                                  20, 18 };
+  uint32 x = MAIN_MENU_XPOS + 15, i;
 
-  display_draw_horz_line(y + 28, x, x + 6);
-  display_draw_vert_line(x + 6, y + 7, y + 28);
-  display_draw_horz_line(y + 7, x + 6, x + 18);
-  display_draw_vert_line(x + 18, y + 7, y + 28);
-  display_draw_horz_line(y + 28, x + 18, x + 25);
+  for(i = 1; i < sizeof(sine); i++)
+    display_draw_line(x + i - 1, y + sine[i - 1], x + i, y + sine[i]);
 }
 
 //Settings: a cogwheel (fw 0.2.63, owner), 21 x 21 px around (cx, cy): a ring from radius 3 to 7, four straight teeth
