@@ -34,7 +34,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   word can flip after a sample-rate or filter change (interleave right by chance until bench test T4), the screen readout returns
   data one word late (averaged trace sits 2 samples earlier), writes inside the sampling-reset window can be lost at slow rates on
   the older arm order. Firmware fix batch after fpga-gen6 reports; bench with the owner.
-- **CH2 at 0.1 V/div reads nothing when set at the start of a Bode sweep** (bench 10-19 15:10, docs/hardware-status.md): the
+- [x] **CH2 at 0.1 V/div reads nothing when set at the start of a Bode sweep** (resolved 15:20: DC overload of the sensitive ranges by wiring B's -1.2 V reference offset, not firmware; Bode tool to flag it and recommend wiring A, mcp-gen5) (bench 10-19 15:10, docs/hardware-status.md): the
   initial / fixed range path gives 48 uV on a 68 mV signal while 0.2 and 0.5 V/div are right and 0.1 reached by the mid-sweep
   switch is right too. Suspects: the initial SET_CHANNEL sequence for range 0.1 (relay / offset / trace position not applied, or the
   software-zoom boundary), or the host picking the wrong range index. mcp-gen5 to find the sequence difference; coordinator

@@ -766,3 +766,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   with the same parts, an electrolytic low-pass (different dielectric), and mcp-gen5's DC-saturation hypothesis for the 0.1 V/div
   blank (wiring B puts the DUT about -1.24 V below the probe reference VRF1; the divider output sat at about -1.15 V, the RC at
   -0.46 V).
+- 2026-10-19 15:20: DC-overload test of the 0.1 V/div blank (RC on the post, wiring B, generator 10 kHz duty 3 % so the pin
+  sits near USB ground): CH1 reads -1.12 V, i.e. the DUT is about 1.2 V below the probe reference VRF1 in wiring B. CH2 DC coupled:
+  range 4 mean code -2.4 / std 0.13 / 99 % clipped, and 1000 offset counts (pwm 857 -> 1857) move the mean only 2 codes; range 5
+  std 0.000, 100 % clipped; dcoffset 1500 -> E_BAD_ARG pwm out of range. CH2 AC coupled at the same DC: range 4 std 11.8, range 5
+  std 23.7 codes, no clipping. Conclusion: a -1.2 V DC input saturates the 0.1 and 0.2 V/div front end ahead of the offset
+  injection; the 0.1 V/div "bug" is wiring B's DC, not firmware. Since wiring A measured the same H as B, wiring A (DUT ground on
+  the probe clips) becomes the recommended Bode wiring; mcp-gen5 asked to update the tool, docs and add an overload flag.
