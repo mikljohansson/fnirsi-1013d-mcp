@@ -116,8 +116,18 @@ static void f_step_text(char *t, int i)
   fmt_str(fmt_uint(t, v), units[(u < 3) ? u : 2]);
 }
 
+//The host's exact settings (BODE_CTRL flags bit 0) stay in use until a setting is changed on the screen
+static bode_cfg host_cfg;
+static uint8    host_cfg_valid;
+
 static void cfg_now(bode_cfg *c)
 {
+  if(host_cfg_valid)
+  {
+    *c = host_cfg;
+    return;
+  }
+
   c->start_mhz  = f_step_mhz(bv.start_i);
   c->stop_mhz   = f_step_mhz(bv.stop_i);
   c->points     = pts_tab[bv.points_i & 3];
@@ -1227,6 +1237,10 @@ static int fold_tap(bv_fold *d, int row, int dir)
 
   if(d->id == FOLD_SWEEP)
   {
+    //A setting changed here: the screen's values apply again
+    if(row < 5)
+      host_cfg_valid = 0;
+
     switch(row)
     {
       case 0:
@@ -1474,9 +1488,6 @@ static uint8 step_of(uint64 mhz)
   return (uint8)best;
 }
 
-static bode_cfg host_cfg;
-static uint8    host_cfg_valid;
-
 int bode_view_ctrl(const uint8 *req, uint8 *resp, uint16 *detail)
 {
   bode_eng *e = bode_engine();
@@ -1544,27 +1555,12 @@ int bode_view_ctrl(const uint8 *req, uint8 *resp, uint16 *detail)
         return PC_E_STATE;
       }
 
-      if(host_cfg_valid && (flags & 0x01))
+      bv_start(act != BC_REPEAT, act == BC_THRU_MEASURE);
+      if(bode_state(e) == BODE_ST_ERROR)
       {
-        int r2 = scopesettings.channel2.samplevoltperdiv;
-
-        if(!scopesettings.runstate)
-          pc_hal_ui_set_run(1);
-        bv.last_run = 1;
-
-        if(bode_start(e, &host_cfg, act == BC_THRU_MEASURE, (r2 > 5) ? 5 : r2))
-        {
-          pc_hal_ui_set_run(0);
-          *detail = 3;
-          return PC_E_BAD_ARG;
-        }
-
-        bv.was_running = 1;
-        bv.single = (uint8)(act != BC_REPEAT);
-        bv.dirty = 1;
+        *detail = 3;
+        return PC_E_BAD_ARG;
       }
-      else
-        bv_start(act != BC_REPEAT, act == BC_THRU_MEASURE);
       break;
 
     case BC_STOP:
@@ -1606,8 +1602,6 @@ int bode_view_ctrl(const uint8 *req, uint8 *resp, uint16 *detail)
 
   //Header, then the estimated duration of a sweep with the current settings
   cfg_now(&c);
-  if(host_cfg_valid && (flags & 0x01))
-    c = host_cfg;
 
   bode_proto_header(e, (uint8)((bv.active ? 1 : 0) | ((scopesettings.runstate && !bv.single) ? 2 : 0)), resp);
   resp[32] = resp[33] = resp[34] = resp[35] = 0;
