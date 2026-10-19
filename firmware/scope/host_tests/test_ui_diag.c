@@ -352,6 +352,9 @@ static void test_pages(void)
     T_EQ(ud_hit(&pg, 420, 20), UD_ID_TAB_LOG);
     T_EQ(ud_hit(&pg, 630, 20), UD_ID_TAB_DEV);
     T_EQ(ud_hit(&pg, 700, 20), UD_ID_BACK);
+    T_EQ(ud_hit(&pg, 692, 4), UD_ID_BACK);      //fw 0.2.63: Back where the Settings screen has it (692, 4, 96 x 44)
+    T_EQ(ud_hit(&pg, 787, 47), UD_ID_BACK);
+    T_EQ(ud_hit(&pg, 691, 20), UD_ID_NONE);
     T_EQ(ud_hit(&pg, 100, 20), UD_ID_NONE);
     T_EQ(ud_hit(&pg, 400, 300), UD_ID_NONE);
     T_EQ(pg.btn[p].style, UD_B_TAB_ON);

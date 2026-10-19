@@ -14,8 +14,8 @@
 //The mockups' palette (docs/plans/ux-makeover.md 6c)
 #define RGB_CARD        0x000D0D0D
 #define RGB_CARD_EDGE   0x00262626
-#define RGB_HEADER      0x000B1A33
-#define RGB_HEADER_EDGE 0x001F3A66
+#define RGB_HEADER      0x00000000      //fw 0.2.63: the Settings screen's header (ui_settings_ui.c), black with a grey rule
+#define RGB_HEADER_EDGE 0x00262626
 #define RGB_RULE        0x00333333
 #define RGB_PANEL       0x00181818
 #define RGB_PANEL_EDGE  0x00606060

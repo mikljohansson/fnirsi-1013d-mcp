@@ -305,13 +305,14 @@ static int ud_state_colour(int state)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Header: title, the four page tabs, Back (all 44 px tall)
+// Header: title, the four page tabs, Back (all 44 px tall). fw 0.2.63 (owner): the Settings screen's header, black with
+// a grey rule under it (ui_dlg.c draws the band) and Back at the same place (x 692)
 
 #define UD_HDR_H     52
 #define UD_TAB_X     160
 #define UD_TAB_W     112
 #define UD_TAB_PITCH 120
-#define UD_BACK_X    696
+#define UD_BACK_X    692
 #define UD_BACK_W    96
 #define UD_BTN_Y     420          //bottom button row
 #define UD_BTN_H     44

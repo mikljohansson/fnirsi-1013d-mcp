@@ -27,6 +27,7 @@
 #include "ui_settings.h"
 #include "ui_ctrl.h"
 #include "ctrl_page.h"
+#include "ui_diag_view.h"
 
 //USB drive screen: the Exit button (fw 0.2.51)
 #define USB_EXIT_X     610
@@ -2683,10 +2684,12 @@ void scope_battery_status(void)
     }
   }
   //*/
-  //Copy it to the actual screen
+  //Copy it to the actual screen; while Diagnostics shows, to the scope screen kept under it (fw 0.2.63: the icon was
+  //drawn over the Diagnostics header)
   display_set_source_buffer(displaybuffertmp);//1
-  display_set_screen_buffer((uint16 *)maindisplaybuffer);
+  display_set_screen_buffer(ui_diag_scope_buffer());
   display_copy_rect_to_screen(701, 5, 25, 13);//700 5 26 13
+  display_set_screen_buffer((uint16 *)maindisplaybuffer);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
