@@ -31,6 +31,27 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.69 - 2026-10-19 (protocol 1.21, unchanged; provisional number)
+
+- Frequency response mode (the on-device Bode plot) redesigned per docs/plans/bode-ui.md and the owner's final decisions
+  (firmware/README.md "Frequency response"). The main menu row reads "Frequency" / "response" with a low-pass response
+  icon; a tap on the grey row says why (70d3dec). One pane with magnitude in dB on the left axis and phase in degrees on
+  the right axis, no legend, curves in their axis colours, both scales from the data with the top division kept free for
+  the warning line; Display fold-out: Overlaid, Magnitude only, Phase only, and Frequency axis Log / Linear (5d262b7).
+- The right bar keeps its meanings: RUN/STOP = continuous sweeps / stop after the point; AUTO SET = an overview sweep
+  (100 Hz .. 10 MHz, 20 points) that sets Start, Stop, Settle and CH2 range and then runs (`bode_auto_span`, 7772b64);
+  T CURSOR = cursors C1 and C2 with flags and a C1 / C2 / C2-C1 readout box at the bottom left; MEASURES = the mode's
+  list of ten (Level, -3dB, BW, Peak, Q, Ph45, Ph90, Ph180, Sweep, Thru; defaults -3dB, Peak, Q, Level); SAVE WAVE =
+  the sweep table as bode/FR00001.CSV; V CURSOR empty (bbf12f1, 5d262b7, 70d3dec).
+- CTRL page: Display, Sweep (Single sweep with its estimated duration), Thru, Grid. A slider row under the plot (owner)
+  pans Start and Stop over 1 Hz .. 10 MHz and re-sweeps. One two-line instruction before the first sweep; warnings
+  rewritten to at most 50 characters with the action (5d262b7).
+- Settings: word 220 bits 3..6 (Display variant, cursors, frequency axis), words 213..215 (the MEASURES list); Restore
+  default settings now resets the mode's words (70d3dec).
+- Time/div is viable only with at least ten samples per division (owner, bench: 100 kSa/s at 10 us/div drew one sample
+  per division and a wobbling edge). 200 MSa/s reaches 50 ns/div; 20, 10 and 5 ns/div snap to 50 ns/div with the notice,
+  also for a host SET_TIMEBASE (070e250).
+
 #### 0.2.68 - 2026-10-19 (protocol 1.20, unchanged; provisional number)
 
 - UI polish batch 2 (firmware/README.md "Screens: UI polish batch 2"). RUN/STOP follows the host (95c1033): the top bar

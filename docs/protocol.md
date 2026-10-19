@@ -514,7 +514,8 @@ Unknown cmd: `E_UNKNOWN_CMD`. LOCAL-only restriction violated: `E_NOT_REMOTE`. U
 **GET_STATUS (0x0003).** Request: empty. Response (28 bytes in the 1.0 draft, 32 bytes in 1.1, 44 bytes since 1.3, 48 bytes since 1.17).
 Also the response body of SET_REMOTE, ARM, FORCE, STOP and WAIT. The table is the 1.0 layout; the appended fields
 (`pass_ms` at 28, `settings_seq` at 32, `run_state` at 40, `capture_origin` at 41, `ext_flags` at 42 and
-`display_mode` at 43, values 0 scope, 1 spectrum, 2 waterfall, 3 density, 4 phosphor, 5 Bode plot (1.20, row 60);
+`display_mode` at 43, values 0 scope, 1 spectrum, 2 waterfall, 3 density, 4 phosphor, 5 Frequency response (the on-device Bode plot;
+1.20, row 60; the screen's name since fw 0.2.69);
 the features word, UI Average state and log2 N at 44..47) are in section 14 rows 26, 32, 41, 45, 52 and 56;
 features bit 5 (0x0020) ENC_CHECK in row 58, bit 6 (0x0040) BODE in row 60.
 

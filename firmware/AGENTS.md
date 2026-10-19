@@ -2912,3 +2912,103 @@ Answers for the owner:
 Bug indicators: chip and button disagreeing; the button reading STOP with the scope idle for more than a second; a STOP
 tap during a host capture that starts the UI's RUN; a main-menu tap selecting the neighbouring row; a Bode row in the
 generator menu; the sun yellow below 100 % or the slider not at 100 % after the sun; the snapped time/div cycling.
+
+## 45. fw-fr: Frequency response mode UI, ten samples per division (fw 0.2.69 provisional, protocol 1.21 unchanged)
+
+Branch from main 71b026e (fw 0.2.68), merged with origin/main several times (bode-ui.md's final decisions e4452d9, 4b86769,
+the icon de14622, the slider be0c93e / 6d849f6). Brief: implement docs/plans/bode-ui.md with the owner's decisions of
+2026-10-19 evening (they override the document's earlier drafts; the document now records them), plus the tb_view
+viability rule. User-facing description: firmware/README.md "Frequency response". Commits: 070e250 (ten samples per
+division), 7772b64 (`bode_auto_span`), bbf12f1 (`bode_ui.c`, MEASURES list, ui_p1_shown, menu row name), 5d262b7 (the
+view), 70d3dec (wiring, 0.2.69), then docs and this handoff. Host tests all green (test_ui 1,423,013 checks incl. the new
+test_bode_scales / readout / cards / texts, test_bode_sweep 199 incl. test_auto_span, test_tb_view 580,345, test_bode.py,
+check_vectors, CHANGELOG check). Warnings GCC 10 36 (gcc10 and gcc10-nommu), none in the new or changed code; bode_ui.c is
+clean with the host tests' -Wall -Wextra -Werror, bode_view.c with arm-none-eabi-gcc -Wall -Wextra. **Nothing benched.**
+**No protocol change** (the CSV and the cursors are screen-only; docs/protocol.md names display mode 5 "Frequency
+response"). **Settings words claimed: 213..215** (the MEASURES list: 0xE000 marker and three 4-bit ranks in 213, four in
+214, three in 215; anything else gives the defaults); word 220 gains bits 3..4 (Display variant), 5 (cursors), 6
+(frequency axis), bit 7 must be clear (an erased word reads 0xFFFF). 216..218 stay free.
+
+Points for a successor:
+- **bode_ui.c/.h** (pure): the chart geometry (pane y 60..396, six divisions of 56 px; labels y 400; cards y 426; slider
+  452..471), `bu_scale_pick` (the first division that holds the data with the free top division, else the first that
+  holds it at all: bode-ui.md 9 C3, so 55 or 60 dB of data goes to 20 dB/div), log / linear x, `bu_lin_step`, the
+  readout rows (`bu_readout`: C1, C2, C2-C1; a BODE_F_BAD point shows its reason instead of the phase and greys its row
+  and the difference; spliced points are valid), the MEASURES list (`bu_ms_*`, ranks as ui_meas.c's), `bu_card_text`
+  (no sweep / sweeping / not found / the value; Thru applied green, stale amber), the warning table `bu_warn[]` (all
+  <= 50 characters, test_ui checks), the instruction, the slider maths (`bu_slider_x` of a step index, `bu_slider_shift`).
+- **bode_view.c**: one `draw_all` into displaybuffertmp (pane, labels, curves, markers, the measured point's line,
+  cursors, warning or instruction, cards, slider). `table_state`: FILLING only while running with unmeasured points
+  (markers hidden; cards "sweeping"); a stopped partial table counts as complete. AUTO SET: `bv_auto_start` (aborts a
+  running sweep, turns the thru's Apply off for the overview and gives it back), `bv_auto_finish` in the service when the
+  overview ends (STOPPED = cancelled), a second tap aborts. Single sweep while RUN repeats sets `bv.single` (the sweep in
+  progress becomes the last). Cursors: `bv.cur[2]` re-placed (a third / two thirds of the axis) whenever invalid or
+  outside the span; reset when the plan changes. Slider: `slider_drag` (blocking while the finger is down, as the other
+  plot drags), `bv.drag` makes the axis follow the settings; release restarts or runs one sweep. CSV: `bode_view_save`
+  (24 KB static buffer, `bode/FRnnnnn.CSV` with FA_CREATE_NEW from 00001; its own file message box in the stock style).
+- **Wiring**: menu.c (`scope_main_menu_bode_icon(y, fg)` from bode-ui.md 1a; V CURSOR drawn separately from T CURSOR;
+  MEASURES `UI_MS_BODE`: neutral Select All / Clear, two `UI_MSC_EMPTY` places, no channel split), statemachine.c (T
+  CURSOR and SAVE WAVE in the mode; the grey row's reason drawn at the top middle, it stays until the trace area redraws),
+  pc_hal_scope.c (words 213..215 restore, `bode_view_defaults` from `pc_glue_settings_defaults`, the mode's roll note),
+  scope_functions.c (words 213..215 saved).
+- **Not done (queue them):** (1) the top bar in this mode, bode-ui.md section 7: ACQ chip "Set by / the sweep", the
+  generator chip showing the tone being measured (the engine writes the FPGA generator directly; `fpgasettings.gen_freq`
+  is untouched, so the chip shows the user's generator), the menus' notes. (2) The Spectrum view's slider (bode-ui.md /
+  ux-makeover: window = shown span over 0..fs/2, drag pans the centre, plot 8 divisions of 44 px y 50..402, labels y 406,
+  cards y 426): not started. (3) A cancelled AUTO SET leaves the partial overview on screen; the design says the previous
+  table comes back (the engine has no copy; it needs one of `pts` + `plans` + `cfg` + `np`, about 25 KB). (4) Move fast
+  does not change the cursor drag step (cursors snap to points). (5) The MEASURES menu's changes show at the view's next
+  redraw (at most 1 s), not at once. (6) The overview's Q is a lower bound when the band is narrower than its point
+  spacing; such tanks get half a decade and Settle Resonant, a Q 50 tank on the overview may need a manual narrower span.
+- **Ten samples per division** (tb_view.h `TBV_MIN_SAMPLES_PER_DIV` 10): 200 MSa/s now reaches 50 ns/div; 20, 10, 5 ns/div
+  are never viable (the ACQ menu greys them, a tap zoom or SET_TIMEBASE snaps to 50 ns/div with the notice). The spectrum's
+  time bases 32..34 share 200 MSa/s with 31, so its rate never depended on them. test_tb_view: 74 cells now differ from
+  1.00o5's table (71 below ten samples).
+
+**Bench walk-through (owner, coordinator on COM10; FEL load only, no SD writes; parts: the RC 1 kOhm / 15 nF ceramic and
+the 991 / 102 Ohm divider; wiring A, DUT ground on both probe ground clips; x1 probes)** - FEL-load
+(`sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`), `#VER fw=0.2.69,proto=1.21`.
+1. Ten samples per division: Scope, ACQ menu, 100 kSa/s: the time/div boxes below 100 us are grey; from 10 us/div the
+   rate change snaps to 100 us/div with "Time/div set to 100us for this rate". 200 MSa/s: 50 ns/div is the fastest box.
+2. Menu: the third row reads "Frequency" over "response", the icon a flat line, a knee and a 45 degree roll-off over a
+   grey L. On a 0x1532 bitstream (or in the waveform viewer) the row is grey; a tap shows "Frequency response needs FPGA
+   0x1534 or later" ("Leave the waveform viewer first") in orange at the top middle; the menu stays open.
+3. Open it (0x1538): STOP, the empty pane 100 Hz .. 1 MHz with "+10 dB" .. "-40" in cyan on the left and "+135 deg" ..
+   in pink on the right, the orange two-line instruction at the top middle, cards "-3dB no sweep", "Peak no sweep",
+   "Q no sweep", "Level no sweep", the slider's window over 100 Hz .. 1 MHz. Right bar: CTRL, RUN (green), AUTO SET,
+   T CURSOR, (empty), MEASURES, SAVE PIC, SAVE WAVE. CTRL: Display "Overlay", Sweep "50 pt", Thru "None", Grid at the
+   fourth slot; nothing below.
+4. RC (post -> 1 kOhm -> junction -> 15 nF -> clips; CH1 on the post side, CH2 on the junction): AUTO SET. "Auto..." and
+   the Sweep card "auto n/20" over 100 Hz .. 10 MHz (about 2 s, more if the 15 ms per capture is optimistic); then the
+   axis becomes 1 kHz .. 200 kHz, RUN (red STOP button, chip RUN), Settle Normal, CH2 Auto; the cards read "sweeping"
+   until the table is complete, then "-3dB" near 11 kHz (the host read 11.3 kHz on this capacitor), "Level" near 0 dB,
+   "Peak" / "Q" "not found". The magnitude stays below the top division (the top label one division above the data).
+5. T CURSOR: C1 and C2 flags above the pane at a third and two thirds; the readout box at the bottom left lists C1, C2
+   and C2-C1 (f white, dB cyan, deg pink). Drag a flag: its cursor follows, snapping to points; a tap in the plot moves
+   the nearer cursor. Put C1 near 1 kHz and C2 near 100 kHz: about 0 / -19 dB, the C2-C1 row about -19 dB / -80 deg. A
+   grey (flagged) point under a cursor shows its reason instead of the phase. T CURSOR again: both go.
+6. Slider: drag the window right by about a decade: Start / Stop step together (CTRL > Sweep shows them), the axis follows
+   with the old points inside the span; release: the sweep restarts at the new span (RUN repeats). STOP, drag back:
+   release runs one sweep and returns to STOP. During AUTO SET's overview a drag does nothing.
+7. CTRL > Display: Overlaid (green), Magnitude only (the phase curve and the right labels go), Phase only; Frequency
+   axis: Log -> Linear (1-2-5 labels, the points bunch at the left over 1 kHz .. 200 kHz), back to Log. CTRL > Sweep:
+   Single sweep reads "about N s"; while RUN repeats, tap it: "running, then STOP" and the sweep in progress is the last.
+8. MEASURES: "Frequency response measurements", Select All / Clear in grey, the ten items in three rows, -3dB 1, Peak 2,
+   Q 3, Level 4. Select BW and Ph45: their cards follow (Ph45 on a pink block). Select All: "+5 more" in the sixth place.
+9. SAVE WAVE: "Sweep table saved" / "bode/FR00001.CSV"; a second save: FR00002. On the PC (USB drive) the file has the
+   `#` lines and one row per point; compare with READ_BODE (section 42 step 9's script). Before any sweep: "Nothing to
+   save: run a sweep first".
+10. Divider (991 / 102): AUTO SET: "No corner from 100 Hz to 10 MHz: span kept" for 5 s, RUN at the kept span, flat
+    -20.6 dB / 0 deg (5 dB per division, the data in the second division). CH2 tip off the DUT (on the ground clip):
+    AUTO SET ends with "No response: CH2 tip on the DUT output?" and STOP. AUTO SET, then tap it again during the
+    overview: "Auto set cancelled: settings kept", STOP.
+11. Thru as in section 42 step 5 (Thru card applied green; change Points: stale amber and "Thru does not match this
+    sweep: measure again"). During AUTO SET's overview the thru is not applied; afterwards its Apply is back.
+12. Power cycle: Display variant, frequency axis, cursors on / off, Start / Stop / Points / Settle / CH2 range and the
+    MEASURES choice are kept. Settings > Restore default settings: Overlaid, Log, cursors off, 100 Hz .. 1 MHz / 50,
+    the default cards. Leave via Menu > Scope: everything given back as in section 42 step 8.
+Bug indicators: data drawn in the top division while the scale had room; a curve in the wrong colour or a label column on
+the wrong side; markers while "sweeping"; a cursor reading between points; the readout box beyond x 262; the slider window
+off the track or a drag that changes the span's width; a sweep that does not restart on release; AUTO SET changing
+settings after a cancel; a CSV row count different from the measured points; the T CURSOR / SAVE WAVE buttons acting on
+the scope's cursors / waveform files in this mode; a time/div under ten samples per division offered anywhere.
