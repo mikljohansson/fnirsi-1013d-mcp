@@ -836,3 +836,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   deterministically on 0x1537 for ADC chip 2; on 0x1535 it was random on chip 1. SET_DECIM flags do not matter; divider 1 static
   shows CH2 A 55 codes with constant B lanes (layout of that mode, parked). fpga-gen7 dispatched (0x1538), fw-cal4 redirected
   (check-retry heal + bus write instrumentation). Note: an accidental host STOP (sequencer stop) was sent at 16:38; harmless.
+- 2026-10-19 16:45: wizard on 0x1537 / 0.2.60: CH1 zero step passes every time, CH2 fails every time with "the input is not at
+  0 V". Host READ_RAW right after (8 captures after 0x0D 99 -> 0, all clean): CH2 core means A 128.7 / B 132.0 (A-B 3.3 codes; on
+  0x1535 today 129.8 / 130.1 and 130.4 / 130.4), CH1 A 131.0 / B 127.7 unchanged. Chip 2's cores arrive in the other order on
+  0x1537, so the stored per-core zeros land on the wrong cores. Both agents informed (fw-cal4: robust zero step, check-retry heal,
+  write log; fpga-gen7: deterministic order equal to 0x1535 plus a status read, 0x1538). Bench paused for the owner.
