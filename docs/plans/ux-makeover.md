@@ -34,45 +34,40 @@ only way between modes **(owner)**. "USB connection" becomes "USB drive"; its sc
 card is shown to the PC as a drive, that PC control through the protocol stops until the screen is left, and to eject
 the drive on the PC first.
 
-## 3. The three bars
+## 3. The bars and dropdowns **(owner, corrected 2026-10-19 afternoon: move as little as possible)**
 
-- **Top bar**: hardware state and global tools, identical in every mode: Menu, channels CH1/CH2, brightness icon,
-  ACQ (time base and sample rate), Trigger, Generator, battery, MCP chip. Removed: the version string (it lives in
-  Diagnostics) **(owner)**; "Move fast" moves to Settings, Controls. Where a mode drives one of these itself (the
-  spectrum's Span sets the time base), the button shows the value and its menu says "set by Span" instead of fighting
-  the mode.
-- **Right bar**: two pages toggled by **CTRL**, as the stock scope has today **(owner)**: the first page holds actions
-  on what is shown (RUN/STOP, AUTO, cursors or markers, measures, save picture, save data, grid, trigger 50 %), the
-  second page the parameters of the mode and its variant. Each slot keeps its place and meaning across modes; a slot a
-  mode cannot use stays empty rather than showing a control that does nothing.
-- **Bottom row**: the measurement cards, as the stock firmware and Atlan's draw them (owner, 2026-10-19, from the FNIRSI
-  product photos): the Measures button on the right bar opens the list of up to twelve measurements per channel (Vmax,
-  Vmin, Vavg, Vrms, Vpp, Vp, Freq, Cycle, Time+, Time-, Duty+, Duty-; `scopesettings.measuresstate`, drawn by
-  `scope_display_measurements`), and the ticked ones appear as cards in the channel's colour, CH1's from the left and
-  CH2's from the middle, stacking upward over the plot when more than fit one row. This stays exactly as it is; the
-  mockups show it. The spectrum's one-line header stays at the top of the plot as a readout. The spectrum and phosphor
-  parameter strips move into the right bar's CTRL page **(owner)**, so the bottom row is the cards' in every mode.
-  Roadmap, not now: cards for the spectrum mode (peak frequency and level per channel, THD) and the FPGA hardware
-  measurements of docs/plans/roadmap.md section 8 item 6 feeding the same cards at 200 MSa/s.
+What exists today (menu.c `scope_setup_right_control_menu`, `scope_open_acquisition_menu`, `scope_open_trigger_menu`):
+the right bar's first page is CTRL, T CURSOR, V CURSOR, MEASURES, SAVE PICTURE, RUN/STOP, AUTO SET, SAVE WAVE (the waveform
+viewer swaps the last three for previous, next, delete); CTRL switches to the second page: CTRL, V+ CH1 V-, V+ CH2 V-,
+50 % TRIG (GRID in the viewer). The ACQ dropdown holds Sample rate, Time per division, Memory, Trace style, Roll,
+Average and Filter; the Trigger dropdown holds mode, edge, channel, position and Always 50 %.
+
+- **Top bar**: unchanged, except the version string goes (it lives in Diagnostics) **(owner)**. Move fast stays: it
+  belongs with V+ / V- and dragging.
+- **Right bar**: unchanged in Scope, both pages. In Spectrum, AUTO SET runs the spectrum's Auto (one Auto per screen);
+  T CURSOR and V CURSOR are hidden until spectrum markers exist; SAVE WAVE is hidden until a spectrum export exists;
+  MEASURES is hidden. The slots keep their places.
+- **Dropdowns**: the ACQ dropdown gains a **Display** box next to Trace style with the values Trace, Phosphor, X-Y
+  **(owner)**: Phosphor leaves the main menu and X-Y leaves System settings. Filter, Average, Roll and Memory stay in
+  ACQ; 50 % stays in both places (the right-bar button sets the level once, Always 50 % in the trigger menu keeps it).
+- **Strips**: they stay, in the record-position slider's row under the grid, above the measurement cards, so they never
+  collide with the cards. Spectrum keeps Channel, FFT length, Window, Scale, Ref level, Average and View; Phosphor keeps
+  Persistence, Palette and Clear. Both lose the "Scope" field (the menu is the way between modes) and the spectrum
+  strip loses Auto (AUTO SET does it).
+- **Bottom row**: the measurement cards, as the stock firmware and Atlan's draw them (FNIRSI product photos): the
+  Measures button opens the list of up to twelve measurements per channel (Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq,
+  Cycle, Time+, Time-, Duty+, Duty-; `scopesettings.measuresstate`, drawn by `scope_display_measurements`), the
+  ticked ones appear as cards in the channel's colour, CH1's from the left and CH2's from the middle, stacking upward
+  over the plot. Unchanged. Roadmap, not now: a spectrum card set (peak frequency and level per channel, THD) and the
+  FPGA hardware measurements of docs/plans/roadmap.md section 8 item 6 feeding the same cards.
 - **Warnings**: top-middle of the plot in every mode, stating consequence and action **(owner)**; readouts such as
-  wfm/s stay with the parameters.
+  wfm/s and the spectrum's one-line header stay where they are.
 
-## 4. Per-mode right bar
+## 4. Visible changes for an existing user
 
-| Slot | Scope, actions | Scope, CTRL | Spectrum, actions | Spectrum, CTRL | Phosphor variant adds to Scope CTRL |
-|---|---|---|---|---|---|
-| 1 | RUN/STOP | Display: Trace / Phosphor / X-Y | RUN/STOP | Analyse: CH1 / CH2 / both | Persistence |
-| 2 | AUTO (auto setup) | Filter | AUTO (spectrum auto) | FFT length | Palette |
-| 3 | Time cursors | Average | Marker (peak) | Window | Clear |
-| 4 | Volt cursors | Roll | dB cursor | Scale | |
-| 5 | Measures | Trace style | (empty) | Ref level | |
-| 6 | Save picture | Memory depth | Save picture | Average | |
-| 7 | Save waveform | 50 % trigger | Save spectrum (CSV) | View: Spectrum / Waterfall / Density | |
-| 8 | Grid | | Grid | Reset | |
-
-Phosphor's persistence, palette and clear appear in Scope's CTRL page only while Display is Phosphor; X-Y has no extra
-parameters. The spectrum's Auto moves from the strip to the AUTO slot (one Auto per screen). Bode's bars are defined
-when it ships (docs/plans/bode-design.md section 4 is the starting point).
+Only these: the main menu order (section 2), the Display box in ACQ, the strips without their Scope and Auto fields,
+the version string gone from the top bar, Baseline calibration and X-Y gone from the Settings fold-out, and the new
+Diagnostics and Settings screens. Everything else keeps its place and its meaning.
 
 ## 5. Settings **(owner)**
 
@@ -97,8 +92,8 @@ SD state, timing. Details and the readers it needs: `docs/plans/diagnostics-revi
 ## 7. Implementation order
 
 1. Main menu rows and the USB drive screen text (small, no new data).
-2. Right bar CTRL pages for Scope (Display variant with Phosphor and X-Y moved in) and for Spectrum (strip removed);
-   warnings top-middle in phosphor; version string and Move fast out of the top bar.
+2. The Display box in ACQ (Phosphor and X-Y moved in), the strips without Scope and Auto, AUTO SET as the spectrum's
+   Auto, hidden right-bar slots in Spectrum, warnings top-middle in phosphor, the version string out of the top bar.
 3. Settings fold-out trim and the full Settings screen.
 4. Diagnostics as a display mode with the three pages and the firmware readers.
 
