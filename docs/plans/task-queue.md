@@ -117,9 +117,12 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   measurement cards in the stock chip scheme (+ "Freg" fix); step 3 Settings fold-out trim + full Settings screen (drag speed, file
   message timeout, RTC on/off, At power-on values, restore defaults without the boot byte); step 4 Diagnostics as a display mode with
   Status / Calibration / Log / Developer pages and the readers of diagnostics-review.md section 4, the four-screen wizard (section 6a),
-  Clear keeps the volts factors, Volts calibration kept as a service action, Enter FEL now via ENTER_FEL, first-run screen. Open owner
-  decisions: look of the new screens (stock palette vs the navy style), short CTRL labels ("Spec", "10dB", "Phos") vs wider buttons,
-  spectrum row in roll mode, main-menu row height when Bode ships. Next firmware generations (one step each).
+  Clear keeps the volts factors, Volts calibration kept as a service action, Enter FEL now via ENTER_FEL, first-run screen. Settled 10-19 afternoon
+  (plan sections 3, 3a, 6a, 6b): CTRL pages identical in both modes (Display with Normal / X-Y and a Phosphor switch, Trace style or
+  Analyse with the channel selector, Scale and Ref level, Grid, V+/CH/V- steppers, 50 % TRIG), strips and spectrum header gone with
+  readouts as cards in Atlan's card layout, top bar chips rebuilt, Spectrum row always shown and switching Roll off. Open: look of the
+  new full-screen pages (stock palette vs the navy style), short CTRL labels vs wider buttons, main-menu row height when Bode ships.
+  Next firmware generations (one step each).
 - [ ] **Measurement cards in the stock scheme** (owner 10-19): chip with the channel digit in the channel colour + "Metric: value" in
   white, dark grey rounded card; fix the "Freg" label; scope_functions.c scope_display_channel_measurements. Part of the UI batch
   (docs/plans/ux-makeover.md section 3).
