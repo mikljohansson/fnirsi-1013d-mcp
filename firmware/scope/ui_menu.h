@@ -32,6 +32,7 @@
 #define UI_MM_BTN_DY          13
 #define UI_MM_BTN_W           131
 #define UI_MM_BTN_H           35
+#define UI_MM_AXIS_COLOR      0x00707070   //fw 0.2.68: the Scope row icon's axes, behind its sine (menu.c)
 
 typedef struct
 {

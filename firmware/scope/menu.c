@@ -2708,37 +2708,23 @@ void scope_open_main_menu(void)
 //----------------------------------------------------------------------------------------------------------------------------------
 //Main menu row icons without a bitmap, drawn in the current colour at the top of the row's button (y)
 
-//Scope: one period of a sine wave (fw 0.2.63, owner; a square wave before), 25 px wide, 22 px high: the rounded
-//17.5 - 10.5 sin(2 pi x / 24) per column, neighbouring columns joined so the 1 px stroke has no gaps
-static void scope_main_menu_wave_icon(uint32 y)
+//Scope: one period of a sine wave over x / y axes (fw 0.2.68, owner), 25 px wide: the axes in a darker grey through
+//the centre (the zero line at y + 19, the vertical at the middle column), then the sine on top, the rounded
+//18.5 - 9.5 sin(2 pi x / 24) per column (2 px shorter than 0.2.63's, which touched the top), neighbouring columns joined
+//so the 1 px stroke has no gaps, in fg (white, black while touched); the axes keep their grey.
+static void scope_main_menu_wave_icon(uint32 y, uint32 fg)
 {
-  static const uint8 sine[25] = { 18, 15, 12, 10, 8, 7, 7, 7, 8, 10, 12, 15, 18, 20, 23, 25, 27, 28, 28, 28, 27, 25, 23,
-                                  20, 18 };
+  static const uint8 sine[25] = { 19, 16, 14, 12, 10, 9, 9, 9, 10, 12, 14, 16, 19, 21, 23, 25, 27, 28, 28, 28, 27, 25, 23,
+                                  21, 19 };
   uint32 x = MAIN_MENU_XPOS + 15, i;
+
+  display_set_fg_color(UI_MM_AXIS_COLOR);
+  display_draw_horz_line(y + 19, x, x + 24);
+  display_draw_vert_line(x + 12, y + 8, y + 29);
+  display_set_fg_color(fg);
 
   for(i = 1; i < sizeof(sine); i++)
     display_draw_line(x + i - 1, y + sine[i - 1], x + i, y + sine[i]);
-}
-
-//Settings: a cogwheel (fw 0.2.63, owner), 21 x 21 px around (cx, cy): a ring from radius 3 to 7, four straight teeth
-//5 px wide out to 10 px and four diagonal ones of the same width out to radius 9.9, drawn pixel by pixel
-static void scope_main_menu_cog_icon(uint32 y)
-{
-  int32 cx = MAIN_MENU_XPOS + 27, cy = y + 18, dx, dy, r2, d1, d2;
-
-  for(dy = -10; dy <= 10; dy++)
-  {
-    for(dx = -10; dx <= 10; dx++)
-    {
-      r2 = dx * dx + dy * dy;
-      d1 = dx - dy;
-      d2 = dx + dy;
-
-      if((r2 > 9) && ((r2 <= 50) || ((dy >= -2) && (dy <= 2)) || ((dx >= -2) && (dx <= 2)) ||
-                      (((d1 * d1 <= 8) || (d2 * d2 <= 8)) && (r2 <= 98))))
-        display_draw_pixel(cx + dx, cy + dy);
-    }
-  }
 }
 
 //Spectrum analyser: a base line with spectral lines (fw 0.2.28)
@@ -2770,11 +2756,11 @@ void scope_main_menu_item(int row, int mode)
 
   switch(row)
   {
-    case UI_MM_SCOPE:       scope_main_menu_wave_icon(y); break;
+    case UI_MM_SCOPE:       scope_main_menu_wave_icon(y, mode ? BLACK_COLOR : WHITE_COLOR); break;
     case UI_MM_SPECTRUM:    scope_main_menu_spectrum_icon(y); break;
     case UI_MM_PICTURES:    display_copy_icon_use_colors(picture_view_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
     case UI_MM_WAVEFORMS:   display_copy_icon_use_colors(waveform_view_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
-    case UI_MM_SETTINGS:    scope_main_menu_cog_icon(y); break;
+    case UI_MM_SETTINGS:    display_copy_icon_use_colors(Other_settings_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
     case UI_MM_DIAGNOSTICS: display_copy_icon_use_colors(diagnostic_view_icon, MAIN_MENU_XPOS + 15, y + 4, 24, 24); break;
     default:                display_copy_icon_use_colors(usb_icon, MAIN_MENU_XPOS + 18, y + 2, 18, 25); break;
   }
