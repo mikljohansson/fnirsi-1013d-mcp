@@ -1,13 +1,14 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// ui_ctrl.c - the CTRL page's geometry, the fold-outs, the value names, the warning line and the spectrum's card set (see
-// ui_ctrl.h). Host-tested: host_tests/test_ui.c.
+// ui_ctrl.c - the CTRL page's geometry, the fold-outs, the value names and the warning line (see
+// ui_ctrl.h; the spectrum's card set is in ui_meas.c since fw 0.2.65). Host-tested: host_tests/test_ui.c.
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "ui_ctrl.h"
 
 int ui_p1_shown(int slot, int spectrum)
 {
-  if(spectrum && ((slot == UI_P1_TCURSOR) || (slot == UI_P1_VCURSOR) || (slot == UI_P1_MEASURES)))
+  //fw 0.2.65: MEASURES opens the spectrum's own list there; the cursor slots stay empty
+  if(spectrum && ((slot == UI_P1_TCURSOR) || (slot == UI_P1_VCURSOR)))
     return 0;
 
   return (slot >= UI_P1_CTRL) && (slot <= UI_P1_SAVEWAVE);
@@ -171,38 +172,4 @@ const char *ui_scope_warning(const ui_warn_in *w)
     return "No trigger: check the trigger level";
 
   return "";
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-const char *const ui_sc_names[4] = { "Peak", "Level", "RBW", "Time" };
-
-int ui_spec_cards(const uint8 shown[2], int time_ok, ui_spec_card *out)
-{
-  int n = 0, ch;
-
-  for(ch = 0; ch < 2; ch++)
-    if(shown[ch])
-    {
-      out[n].kind = UI_SC_PEAK;
-      out[n++].ch = (uint8)ch;
-      out[n].kind = UI_SC_LEVEL;
-      out[n++].ch = (uint8)ch;
-    }
-
-  out[n].kind = UI_SC_RBW;
-  out[n++].ch = 0;
-
-  if(time_ok)
-  {
-    out[n].kind = UI_SC_TIME;
-    out[n++].ch = 0;
-  }
-
-  return n;
-}
-
-uint32 ui_spec_card_x(int i)
-{
-  return 5 + 120 * (uint32)i;
 }

@@ -31,6 +31,22 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.65 - 2026-10-19 (protocol 1.19, unchanged)
+
+- Measurements v2 (8749ffe; firmware/README.md "Screens: Measurements v2"). MEASURES now opens a list per mode: the
+  Scope's twelve measurements per channel, and in the Spectrum analyser (where the slot was empty) Peak, Level, THD and
+  Noise per channel plus RBW, Span, Center and Time. The spectrum's choice is saved in settings words 221..223.
+- Cards show in the order they were chosen; the defaults now read Freq, Vpp, Vavg. The menu shows each chosen item's
+  place. Older settings show their cards in table order.
+- The cards keep to one row instead of stacking up over the trace: three per channel (six for CH1 while CH2's block
+  is hidden), six in the spectrum. With more chosen, the last place reads "+N more".
+- New spectrum cards: THD over harmonics 2..10 ("f0 too low" / "f0 too high" when it cannot be measured), the noise
+  floor as the median bin level at the RBW, the shown span and its centre.
+- The MEASURES menu is redrawn in the stock look with a title per mode and 44 px rows; Hide shows in the active
+  colour instead of red.
+- A card source hook (`ui_ms_set_source`) lets a future FPGA frequency / period counter feed the Freq and Period cards
+  without UI changes. Nothing uses it yet.
+
 #### 0.2.64 - 2026-10-19 (protocol 1.18 unchanged; provisional number)
 
 - Fixed: after a sample-rate change in the ACQ menu the old time/div stayed although drawn grey, so the trace was cut

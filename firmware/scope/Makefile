@@ -74,6 +74,8 @@ SRCS += acal_track.c acal_live.c
 # confirmation dialog on the device (ui_settings_ui.c)
 # fw 0.2.56: the CTRL page and its fold-outs (ui_ctrl.c pure, host_tests/test_ui.c; ctrl_page.c on the device)
 SRCS += ui_fmt.c ui_menu.c ui_settings.c ui_settings_ui.c ui_ctrl.c ctrl_page.c
+# fw 0.2.65: Measurements v2 (ui_meas.c pure, host_tests/test_ui.c): MEASURES lists per mode, card order and fit
+SRCS += ui_meas.c
 # Plot touch geometry (fw 0.2.54): pointer position, handle and channel pick (pure C, host_tests/test_touch_pick.c)
 SRCS += touch_pick.c
 # fw 0.2.64: the record behind the trace, time/div viability, slider (pure C, host_tests/test_tb_view.c); the ACQ glue
