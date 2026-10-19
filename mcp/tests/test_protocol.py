@@ -41,7 +41,7 @@ def test_spec_example_frames(hexstr, frame):
 
 
 @pytest.mark.parametrize("cls,size", [
-    (P.InfoResp, 76), (P.StatusResp, 44), (P.SetRemoteReq, 4), (P.BatteryResp, 4), (P.TestPatternReq, 8),
+    (P.InfoResp, 76), (P.StatusResp, 48), (P.SetRemoteReq, 4), (P.BatteryResp, 4), (P.TestPatternReq, 8),
     (P.ChannelConfig, 24), (P.SetChannelReq, 12), (P.Timebase, 16), (P.SetTimebaseReq, 8), (P.Trigger, 28),
     (P.SetTriggerReq, 24), (P.ReadRawReq, 16), (P.ReadRawHeader, 16), (P.ReadTraceReq, 12),
     (P.ReadTraceHeader, 32), (P.TraceChannelMeta, 16), (P.ReadLiveReq, 4), (P.AcquireAvgReq, 20),
@@ -149,7 +149,7 @@ def test_host_vectors_present_and_current():
 def test_status_protocol_1_0_body_still_parses():
     st = P.StatusResp(1, 3, 0x0B, 0, 42, pass_ms=7, pass_max_ms=31, settings_seq=9, run_state=1)
     data = st.pack()
-    assert len(data) == 44 and P.StatusResp.unpack(data).pass_max_ms == 31
+    assert len(data) == 48 and P.StatusResp.unpack(data).pass_max_ms == 31
     old = P.StatusResp.unpack(data[:28])  # firmware 0.1.0 / protocol 1.0
     assert old.capture_id == 42 and old.pass_ms == 0 and old.pass_max_ms == 0
     p12 = P.StatusResp.unpack(data[:32])  # protocol 1.1 / 1.2

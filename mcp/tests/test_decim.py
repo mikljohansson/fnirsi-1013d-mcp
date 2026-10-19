@@ -56,7 +56,7 @@ def test_decim_config_fallbacks():
 
 
 def test_wire_layouts():
-    assert P.SetDecimReq(3, 5).pack() == bytes([3, 5, 0, 0]) and P.DecimState.size() == 32
+    assert P.SetDecimReq(3, 5).pack() == bytes([3, 5, 0, 0]) and P.DecimState.size() == 36
     st = P.DecimState(2, 1, 0x86, 1, 20, 400, 19, 10_000_000, 0xFF, 0, 0, 0, 8190, 0, 2)
     b = st.pack()
     assert struct.unpack_from("<BBBBIQII", b) == (2, 1, 0x86, 1, 20, 400, 19, 10_000_000)
