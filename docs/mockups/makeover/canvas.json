@@ -1,0 +1,267 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "AcqMenu.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "ACQ dropdown (acquisition only)",
+      "w": 800,
+      "x": 2640,
+      "y": 0
+    },
+    "Calibration.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Diagnostics, Calibration page",
+      "w": 800,
+      "x": 1760,
+      "y": 1800
+    },
+    "Confirm.dc.html": {
+      "h": 480,
+      "title": "Confirmation pattern",
+      "w": 800,
+      "x": 3520,
+      "y": 1200
+    },
+    "ConfirmFel.dc.html": {
+      "h": 480,
+      "title": "Confirmation: enter FEL",
+      "w": 800,
+      "x": 4400,
+      "y": 1800
+    },
+    "Developer.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Diagnostics, Developer page",
+      "w": 800,
+      "x": 3520,
+      "y": 1800
+    },
+    "FirstRun.dc.html": {
+      "h": 480,
+      "title": "First run",
+      "w": 800,
+      "x": 4400,
+      "y": 1200
+    },
+    "Log.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Diagnostics, Log page",
+      "w": 800,
+      "x": 2640,
+      "y": 1800
+    },
+    "Main.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Diagnostics, Status page",
+      "w": 800,
+      "x": 880,
+      "y": 1800
+    },
+    "MainMenu.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Main menu",
+      "w": 800,
+      "x": 0,
+      "y": 600
+    },
+    "Phosphor.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Scope view, Display = Phosphor",
+      "w": 800,
+      "x": 3520,
+      "y": 0
+    },
+    "Scope.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Scope view (action page, cards, warning)",
+      "w": 800,
+      "x": 0,
+      "y": 0
+    },
+    "ScopeCtrl.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Scope, CTRL page",
+      "w": 800,
+      "x": 880,
+      "y": 0
+    },
+    "ScopeCtrlDisplay.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Scope, Display fold-out (Phosphor)",
+      "w": 800,
+      "x": 1760,
+      "y": 0
+    },
+    "Settings.dc.html": {
+      "h": 480,
+      "title": "Settings screen (Other settings)",
+      "w": 800,
+      "x": 0,
+      "y": 1800
+    },
+    "SettingsFoldout.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Settings fold-out",
+      "w": 800,
+      "x": 4400,
+      "y": 600
+    },
+    "Spectrum.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Spectrum analyser view",
+      "w": 800,
+      "x": 880,
+      "y": 600
+    },
+    "SpectrumCtrl.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Spectrum, CTRL page",
+      "w": 800,
+      "x": 1760,
+      "y": 600
+    },
+    "SpectrumCtrlAnalysis.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Spectrum, Analysis fold-out",
+      "w": 800,
+      "x": 3520,
+      "y": 600
+    },
+    "UsbDrive.dc.html": {
+      "h": 480,
+      "title": "USB drive",
+      "w": 800,
+      "x": 5280,
+      "y": 600
+    },
+    "Wizard1.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Wizard 1, Zero level",
+      "w": 800,
+      "x": 0,
+      "y": 1200
+    },
+    "Wizard2.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Wizard 2, CH1 gain",
+      "w": 800,
+      "x": 880,
+      "y": 1200
+    },
+    "Wizard3.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Wizard 3, CH2 gain",
+      "w": 800,
+      "x": 1760,
+      "y": 1200
+    },
+    "Wizard4.dc.html": {
+      "h": 480,
+      "is_interactive": true,
+      "title": "Wizard 4, Done",
+      "w": 800,
+      "x": 2640,
+      "y": 1200
+    },
+    "SpectrumCtrlDisplay.dc.html": {
+      "x": 2640,
+      "y": 600,
+      "w": 800,
+      "h": 480,
+      "title": "Spectrum, Display fold-out",
+      "is_interactive": true
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-10-19T09:20:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "canvas"
+  },
+  "notes": {
+    "r0": {
+      "fill": "blue",
+      "text": "Row 1: Scope mode\n\nRight bar page 1 is the action page. The CTRL page: Display (Normal / Phosphor / X-Y with icons, phosphor parameters inside), Trace style, Grid, the V+ / CH / V- steppers, 50 % TRIG. ACQ holds acquisition only. The top bar loses only the version string; its chips share one construction.",
+      "w": 420,
+      "x": 6160,
+      "y": 0
+    },
+    "r1": {
+      "fill": "blue",
+      "text": "Row 2: main menu, Spectrum (action page, CTRL page, Display and Analysis fold-outs), Settings fold-out, USB drive\n\nSpectrum's CTRL page: Display (Spectrum / Waterfall / Density with icons), Analysis (FFT length, Window, Average, Reset), Axis (Scale, Ref level), Grid, V+ / CH / V- steppers, 50 % TRIG. No strip, no header line: peak, level and RBW are bottom-row cards. AUTO SET is the spectrum's Auto.",
+      "w": 420,
+      "x": 6160,
+      "y": 600
+    },
+    "r2": {
+      "fill": "blue",
+      "text": "Row 3: calibration wizard, owner's four screens, confirmation, first run\n\nZero level, CH1 gain, CH2 gain, Done. One instruction, a progress or result line, Cancel and Calibrate (Continue after success), Save calibration at the end. Cancel writes nothing.",
+      "w": 420,
+      "x": 6160,
+      "y": 1200
+    },
+    "r3": {
+      "fill": "blue",
+      "text": "Row 4: Settings screen, Diagnostics (Status, Calibration, Log, Developer), enter-FEL confirmation\n\nFrom the adversarial reviews (docs/plans/diagnostics-review.md, ux-review.md). Look of the new screens (stock palette or not) is still an open owner decision.",
+      "w": 420,
+      "x": 6160,
+      "y": 1800
+    },
+    "t1": {
+      "kind": "title1",
+      "maxW": 6080,
+      "text": "FNIRSI 1013D UX makeover, revision 6: Display fold-outs with icons in both modes, spectrum readouts as cards (docs/plans/ux-makeover.md)",
+      "w": 240,
+      "x": 0,
+      "y": -260
+    }
+  },
+  "order": [
+    "Scope.dc.html",
+    "ScopeCtrl.dc.html",
+    "ScopeCtrlDisplay.dc.html",
+    "AcqMenu.dc.html",
+    "Phosphor.dc.html",
+    "MainMenu.dc.html",
+    "Spectrum.dc.html",
+    "SpectrumCtrl.dc.html",
+    "SpectrumCtrlDisplay.dc.html",
+    "SpectrumCtrlAnalysis.dc.html",
+    "SettingsFoldout.dc.html",
+    "UsbDrive.dc.html",
+    "Wizard1.dc.html",
+    "Wizard2.dc.html",
+    "Wizard3.dc.html",
+    "Wizard4.dc.html",
+    "Confirm.dc.html",
+    "FirstRun.dc.html",
+    "Settings.dc.html",
+    "Main.dc.html",
+    "Calibration.dc.html",
+    "Log.dc.html",
+    "Developer.dc.html",
+    "ConfirmFel.dc.html"
+  ],
+  "pages": [],
+  "title": "1013D UX Makeover Screens"
+}

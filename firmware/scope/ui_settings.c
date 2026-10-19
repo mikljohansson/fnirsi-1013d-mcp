@@ -260,6 +260,39 @@ uint8 ui_set_step(uint8 v, int up)
   return (v <= 5) ? 0 : (uint8)(v - 5);
 }
 
+uint8 ui_bright_sun(uint8 cur, uint8 *back)
+{
+  if(cur >= UI_BRIGHT_MAX)
+    return (*back < UI_BRIGHT_MAX) ? *back : UI_BRIGHT_DEFAULT;
+
+  *back = cur;
+  return UI_BRIGHT_MAX;
+}
+
+uint16 ui_bright_byte(uint8 back)
+{
+  return (uint16)(UI_BRIGHT_SECTOR_NEW | ((back < UI_BRIGHT_MAX) ? back : UI_BRIGHT_DEFAULT));
+}
+
+void ui_bright_load(uint16 byte, uint8 *cur, uint8 *back)
+{
+  if(*cur > UI_BRIGHT_MAX)
+    *cur = UI_BRIGHT_DEFAULT;
+
+  if(byte & UI_BRIGHT_SECTOR_NEW)
+  {
+    byte &= 0x7F;
+    *back = (byte < UI_BRIGHT_MAX) ? (uint8)byte : UI_BRIGHT_DEFAULT;
+    return;
+  }
+
+  //1.00o5 / fw <= 0.2.67: the flag. On: the backlight was at maximum and the slider's value is what the sun returns to
+  *back = (*cur < UI_BRIGHT_MAX) ? *cur : UI_BRIGHT_DEFAULT;
+
+  if(byte == 1)
+    *cur = UI_BRIGHT_MAX;
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------
 //At power-on
 

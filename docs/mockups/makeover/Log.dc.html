@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Diagnostics, Log</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;background:#000}
+a{color:#9ecbff}a:hover{color:#ffffff}
+</style>
+</helmet>
+<div style="width: 800px; height: 480px; box-sizing: border-box; background: #000000; color: #e6e6e6; font-family: Verdana, 'DejaVu Sans', sans-serif; font-size: 16px; display: flex; flex-direction: column; overflow: hidden">
+
+  <div style="height: 52px; box-sizing: border-box; padding: 4px 8px; display: flex; align-items: center; gap: 8px; background: #0b1a33; border-bottom: 1px solid #1f3a66">
+    <div style="font-size: 24px; color: #ffffff; padding: 0 8px 0 4px">Diagnostics</div>
+    <a href="Main.dc.html" style="display: inline-flex; align-items: center; justify-content: center; height: 44px; min-width: 112px; padding: 0 14px; background: #0f2447; border: 1px solid #1f3a66; border-radius: 4px; color: #e6e6e6; font-size: 16px; text-decoration: none">Status</a>
+    <a href="Calibration.dc.html" style="display: inline-flex; align-items: center; justify-content: center; height: 44px; min-width: 112px; padding: 0 14px; background: #0f2447; border: 1px solid #1f3a66; border-radius: 4px; color: #e6e6e6; font-size: 16px; text-decoration: none">Calibration</a>
+    <button type="button" style="height: 44px; min-width: 112px; padding: 0 14px; background: #1f3a66; border: 2px solid #9ecbff; border-radius: 4px; color: #ffffff; font: inherit; font-size: 16px">Log</button>
+    <button type="button" style="margin-left: auto; height: 44px; min-width: 96px; padding: 0 16px; background: #0f2447; border: 1px solid #1f3a66; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px">Back</button>
+  </div>
+
+  <div style="flex: 1 1 0; display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 8px; padding: 8px 12px 0 12px; box-sizing: border-box; min-height: 0">
+
+    <div style="background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; padding: 8px 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 4px">
+      <div style="display: flex; align-items: baseline; gap: 10px">
+        <div style="font-size: 13px; color: #9a9a9a">USB and link events</div>
+        <div style="font-size: 13px; color: #9a9a9a">last 10 of 51, device time</div>
+      </div>
+      <div style="display: grid; grid-template-columns: 76px 1fr; gap: 1px 10px; font-size: 13px; line-height: 17px">
+        <div style="color: #777777; text-align: right">6132.4 s</div><div>Host opened the port</div>
+        <div style="color: #777777; text-align: right">6131.9 s</div><div>Set configuration 1</div>
+        <div style="color: #777777; text-align: right">6131.2 s</div><div>Bus reset, 4 ms after suspend</div>
+        <div style="color: #777777; text-align: right">6131.2 s</div><div style="color: #ffd262">Suspend</div>
+        <div style="color: #777777; text-align: right">2610.8 s</div><div>Host closed the port</div>
+        <div style="color: #777777; text-align: right">2008.5 s</div><div>Host opened the port</div>
+        <div style="color: #777777; text-align: right">2008.1 s</div><div>Set configuration 1</div>
+        <div style="color: #777777; text-align: right">2007.4 s</div><div>Bus reset</div>
+        <div style="color: #777777; text-align: right">4.1 s</div><div>Set configuration 1</div>
+        <div style="color: #777777; text-align: right">3.3 s</div><div>Bus reset</div>
+      </div>
+      <div style="margin-top: auto; font-size: 13px; color: #9a9a9a"><span style="display: block; white-space: nowrap">Since power-on: 1 suspend, 0 resumes,</span><span style="display: block; white-space: nowrap">0 inferred resumes, 0 reconnects, 0 bad frames.</span></div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px; min-height: 0">
+      <div style="background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; padding: 8px 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 4px">
+        <div style="font-size: 13px; color: #9a9a9a">Last restart</div>
+        <div style="font-size: 16px; color: #35c26a">None since power-on</div>
+        <div style="font-size: 13px; color: #c9c9c9; line-height: 17px"><span style="display: block; white-space: nowrap">A restart records its cause, program</span><span style="display: block; white-space: nowrap">address and fault address here.</span></div>
+      </div>
+      <div style="background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; padding: 8px 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 4px">
+        <div style="font-size: 13px; color: #9a9a9a">SD card</div>
+        <div style="font-size: 16px; color: #ffd262">Card image 0.2.25, running 0.2.48</div>
+        <div style="font-size: 13px; color: #c9c9c9; line-height: 17px"><span style="display: block; white-space: nowrap">7.4 GB. Boot sectors 16, 80, 750 checked.</span><span style="display: block; white-space: nowrap">Settings and calibration save at power-off.</span></div>
+      </div>
+      <div style="background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; padding: 8px 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 4px; flex: 1 1 0">
+        <div style="font-size: 13px; color: #9a9a9a">Timing</div>
+        <div style="font-size: 13px; color: #c9c9c9; line-height: 17px"><span style="display: block; white-space: nowrap">Screen pass 15 ms at 3000 samples.</span><span style="display: block; white-space: nowrap">FFT 4096 points 2.7 ms.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="height: 60px; box-sizing: border-box; padding: 8px 12px; display: flex; gap: 12px; align-items: center">
+    <button type="button" style="height: 44px; min-width: 140px; padding: 0 18px; background: #0f2447; border: 1px solid #1f3a66; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px">Save report to card</button>
+    <button type="button" style="height: 44px; min-width: 140px; padding: 0 18px; background: #0f2447; border: 1px solid #1f3a66; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px">Older events</button>
+    <a href="Developer.dc.html" style="margin-left: auto; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 44px; min-width: 140px; padding: 0 18px; background: #0f2447; border: 1px solid #1f3a66; border-radius: 4px; color: #e6e6e6; font-size: 16px; text-decoration: none">Developer</a>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":800,"height":480}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

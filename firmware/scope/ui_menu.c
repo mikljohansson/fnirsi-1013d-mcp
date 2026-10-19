@@ -8,6 +8,7 @@ const ui_mm_label ui_mm_labels[UI_MM_ROWS] =
 {
   { "Scope",       ""          },
   { "Spectrum",    "analyser"  },
+  { "Frequency",   "response"  },
   { "Saved",       "pictures"  },
   { "Saved",       "waveforms" },
   { "Settings",    ""          },
@@ -31,6 +32,7 @@ int ui_mm_row_at(uint32 x, uint32 y)
 int ui_mm_choose(int row, int spectrum_on, int roll_on, int phosphor_wanted, ui_mm_action *a)
 {
   a->spectrum  = spectrum_on ? 1 : 0;
+  a->bode      = 0;
   a->phosphor  = (!spectrum_on && phosphor_wanted) ? 1 : 0;
   a->roll_off  = 0;
   a->warn_roll = 0;
@@ -48,6 +50,16 @@ int ui_mm_choose(int row, int spectrum_on, int roll_on, int phosphor_wanted, ui_
     a->phosphor  = 0;
     a->roll_off  = roll_on ? 1 : 0;
     a->warn_roll = roll_on ? 1 : 0;
+    return 1;
+  }
+
+  if(row == UI_MM_BODE)
+  {
+    a->spectrum  = 0;
+    a->bode      = 1;
+    a->phosphor  = 0;
+    a->roll_off  = roll_on ? 1 : 0;
+    a->warn_roll = roll_on ? 1 : 0;           //fw 0.2.69: "Roll off for the frequency response"
     return 1;
   }
 

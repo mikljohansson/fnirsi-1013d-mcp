@@ -31,6 +31,70 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.69 - 2026-10-19 (protocol 1.21, unchanged; provisional number)
+
+- Frequency response mode (the on-device Bode plot) redesigned per docs/plans/bode-ui.md and the owner's final decisions
+  (firmware/README.md "Frequency response"). The main menu row reads "Frequency" / "response" with a low-pass response
+  icon; a tap on the grey row says why (70d3dec). One pane with magnitude in dB on the left axis and phase in degrees on
+  the right axis, no legend, curves in their axis colours, both scales from the data with the top division kept free for
+  the warning line; Display fold-out: Overlaid, Magnitude only, Phase only, and Frequency axis Log / Linear (5d262b7).
+- The right bar keeps its meanings: RUN/STOP = continuous sweeps / stop after the point; AUTO SET = an overview sweep
+  (100 Hz .. 10 MHz, 20 points) that sets Start, Stop, Settle and CH2 range and then runs (`bode_auto_span`, 7772b64);
+  T CURSOR = cursors C1 and C2 with flags and a C1 / C2 / C2-C1 readout box at the bottom left; MEASURES = the mode's
+  list of ten (Level, -3dB, BW, Peak, Q, Ph45, Ph90, Ph180, Sweep, Thru; defaults -3dB, Peak, Q, Level); SAVE WAVE =
+  the sweep table as bode/FR00001.CSV; V CURSOR empty (bbf12f1, 5d262b7, 70d3dec).
+- CTRL page: Display, Sweep (Single sweep with its estimated duration), Thru, Grid. A slider row under the plot (owner)
+  pans Start and Stop over 1 Hz .. 10 MHz and re-sweeps. One two-line instruction before the first sweep; warnings
+  rewritten to at most 50 characters with the action (5d262b7).
+- Settings: word 220 bits 3..6 (Display variant, cursors, frequency axis), words 213..215 (the MEASURES list); Restore
+  default settings now resets the mode's words (70d3dec).
+- Time/div is viable only with at least ten samples per division (owner, bench: 100 kSa/s at 10 us/div drew one sample
+  per division and a wobbling edge). 200 MSa/s reaches 50 ns/div; 20, 10 and 5 ns/div snap to 50 ns/div with the notice,
+  also for a host SET_TIMEBASE (070e250).
+
+#### 0.2.68 - 2026-10-19 (protocol 1.20, unchanged; provisional number)
+
+- UI polish batch 2 (firmware/README.md "Screens: UI polish batch 2"). RUN/STOP follows the host (95c1033): the top bar
+  chip and the right bar button take one run state that includes a host acquisition in progress, and every pass redraws
+  a stale one; the chip reads RUN while the PC captures. The button now shows the action: green "RUN" while stopped,
+  red "STOP" while running (owner exception to red-is-destructive). STOP during a host capture aborts it.
+- Main menu: Settings uses the Other settings spanner icon; the Scope sine is 2 px shorter, over grey axes (ec9f319).
+- The time/div snap after a sample rate change takes the same path as a manual time/div choice, with a host test
+  that both leave the same state (a9daba6). Owner report: after the snap the trace cycled until time/div was set by
+  hand once. Bench to confirm.
+- Screen brightness: the sun and the brightness slider are one setting (d51dcb7). The sun toggles 100 % and the value
+  it came from; the slider shows the current value. The settings sector's max-light byte now holds that value
+  (0x80 | value); an older sector with max light on loads as 100 %.
+- Calibration wizard: "Step M of N" on the title line. Diagnostics > Calibration: the four buttons in one bottom
+  row, Clear calibration last (3dc0ed9).
+- Main menu: Bode plot is the third mode row (owner decision; 1972245), entered and left like Scope and Spectrum
+  analyser; eight rows at 52 px. The generator menu's "Bode plot" row is gone. Grey on bitstreams without the filter
+  and DDS.
+
+#### 0.2.67 - 2026-10-19 (protocol 1.21 provisional, docs/protocol.md section 14 row 61)
+
+- Fixed: the calibration wizard's Zero level step failed every time on FPGA 0x1538 ("CH1: too much noise, range 1 at
+  200 MSa/s: core B 7.2 codes", "CH2: the input is not at 0 V"). Cause (bench with CAL_PROBE and a READ_RAW offset
+  sweep): at 200 MSa/s some FPGA readout lanes mix the bits of two successive samples that straddle code 0x7F / 0x80,
+  giving outliers up to the rails only while a core's mean sits at 126..133; the zero step parked the zero exactly at
+  128. The zero is now measured as the mean of two points 12 codes either side of 128 (the PWM split from the range's
+  own slope), which is exactly the zero at the centre in the linear model: the stored calibration means the same.
+  Rail samples only at full rate with the gated reading at the same PWM quiet and near 128 now say "ADC readout fault
+  near code 128 (FPGA 0x1538): flash the fixed bitstream" instead of "the input is not at 0 V". The bitstream fix is
+  fpga-gen8's (c22896c).
+- Added: CAL_PROBE (0x0402), the calibration wizard's zero measurement from the host through the wizard's own code
+  (`cal_range`), nothing stored: one channel and range (mode 0), or the whole zero step in the wizard's screen context
+  (mode 1). It returns all eight measurement points and the zero split with PWM, per-core mean, RMS, RMS inside the captures,
+  lowest / highest code and clipped samples, plus A/B switches for the FPGA bus readout (settle reads, a write strobe
+  before each sample strobe). `firmware/tools/cal_probe.py` runs it and decodes it (28158ea, 448c08c, cf3f9e2, b67219c,
+  8802b79).
+- Fixed: the request after a CAL_PROBE got E_BUSY "UI busy" (the probe runs seconds inside one main-loop poll and the
+  modal watch counted that); the watch restarts after it (b67219c).
+- Changed: a failed channel in the wizard's Zero level step gets a small note under its result line: range, rate,
+  measurement point, PWM, and per core the raw mean with its lowest..highest code and clipped samples (789da66).
+- Fixed: the wizard's measurement batch writes a raw host divider (SET_TIMEBASE raw) and the time base back
+  afterwards, as the class probe does (789da66).
+
 #### 0.2.66 - 2026-10-19 (protocol 1.20, docs/protocol.md section 14 row 60)
 
 - Added: a Bode plot on the scope. The generator menu has a fourth row, "Bode plot": it opens a mode that sweeps the
@@ -951,6 +1015,26 @@ was found (commit not identified).
   gains `hardware=true` (records summed in the FPGA, read as exact sums), `scope_status` shows the bitstream's features
   and the UI's Average. The client decodes GET_STATUS 48, GET_DECIM 36 and GET_CAPTURE_INFO 96 bytes and the sequencer
   commands; the simulator has a 0x1536 variant (`al3s`). Not yet run on the unit.
+- Added: protocol 1.19 host side (fw 0.2.62, FPGA 0x1538; 81a1a31). `scope_health` gains `encode_check` (GET_HEALTH
+  104 bytes: how 200 MSa/s captures are checked for a garbled ADC core, the last 0x33 byte and its failing pins,
+  captures checked / garbled / re-taken), capture tools add a caveat while the last full-rate capture was accepted
+  garbled, `scope_event_log` decodes event types 21 and 22 in words, `scope_status` lists the `enc_check` feature.
+  Simulator variant `al3e` (0x1538).
+- Added: protocol 1.20 host side, the on-device Bode sweep (fw 0.2.66; 0a8e94d). `scope_bode_sweep(where='device')`
+  lets the scope run the sweep and show its Bode plot, polls READ_BODE and returns the same table, markers and files
+  as the host sweep (flags mapped to the same names, f recomputed from the DDS period), with the device's thru
+  (`thru_cal='device'`) and `close_view`. Capture tools caveat the Bode view; `scope_status` shows display mode
+  `bode` and the `bode` feature. The simulator runs device sweeps with the host's engine, so device and host agree
+  there within 0.02 dB / 0.2 deg.
+- Added: `scope_report` and `fnirsi1013d.report` (1a3c0aa). A saved result (capture, averaged capture, decay fit,
+  segments, FFT, the scope's spectrum, a host or device Bode sweep) becomes a PNG plot and a self-contained HTML page
+  (plot, table, caveats, the generating command; no scripts or CDNs) under `~/.fnirsi1013d/reports/`. Matplotlib is
+  the optional extra `plot`; without it the page carries the numbers. The guide and the skill tell agents how to
+  show them (section 7a "Presenting results").
+- Added: protocol 1.21 host side, CAL_PROBE (fw 0.2.67, provisional numbering; 516b76a, b3b9c51). `scope_cal_probe`
+  (tier 2, diagnostic) runs the calibration wizard's zero measurement of one channel and range (or the whole zero
+  step) on the scope and returns the verdict, the failing point and per point and core the mean, RMS, extremes and
+  clipped samples; the simulator models the wizard's points with the CLIP and NOISE checks.
 
 ### Tooling, FPGA and documentation
 

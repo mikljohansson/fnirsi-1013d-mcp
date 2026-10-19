@@ -26,7 +26,7 @@
 #define UI_P1_SAVEPIC         6
 #define UI_P1_SAVEWAVE        7
 
-int ui_p1_shown(int slot, int spectrum);     //spectrum: 0 Scope, 1 Spectrum, 2 Bode plot (fw 0.2.66)
+int ui_p1_shown(int slot, int spectrum);     //spectrum: 0 Scope, 1 Spectrum, 2 Frequency response (fw 0.2.66)
 
 //CTRL page (page two), the same order in every mode: Display, the mode's analysis control (Trace style in Scope,
 //Analyse in Spectrum), Grid, the V+ / CH / V- steppers of both channels, 50 % TRIG (Scope only; the slot stays empty in
@@ -100,11 +100,20 @@ int    ui_fold_dir(const ui_fold *f, uint32 x);              //two-way rows: -1 
 #define UI_FOLD_TWOWAY_IN     40
 #define UI_FOLD_TEXT_X        90
 
-//RUN/STOP (fw 0.2.63, owner): a two-state button that shows the state, a tap changes it. Running: green, "RUN" in the
-//16 px font. Stopped: amber (needs attention; red is kept for destructive actions, guidelines section 3), "Stopped" in
-//the 13 px font ("STOPPED" is 62 px in the 16 px font and 50 in the 13 px one, too wide for the 51 px button).
+//RUN/STOP (fw 0.2.68, owner; reverses 0.2.63's state button): the top bar chip shows the STATE (STOP / RUN / WAIT), the
+//right bar button the ACTION a tap does: green "RUN" while stopped, red "STOP" while running or waiting (an owner
+//exception to red-is-destructive, guidelines section 3). One source of truth, ui_run_view: the UI's run state, its
+//single-shot wait, and a host acquisition in progress (a host ARM armed or triggered, or one finished less than
+//UI_RUN_HOST_HOLD_MS ago, so a burst of host captures reads RUN, not a flicker). Both draws take it; pc_glue_ui_service
+//redraws whichever shows a stale value after every pass (pc_hal_scope.c pc_run_follow).
 #define UI_C_AMBER            0x00FFD262
-extern const char *const ui_run_label[2];                         //[0] stopped, [1] running
+#define UI_RUN_STOP           0
+#define UI_RUN_RUN            1
+#define UI_RUN_WAIT           2
+#define UI_RUN_HOST_HOLD_MS   1000
+int ui_run_view(int runstate, int single_wait, int host_busy);
+extern const char *const ui_run_chip[3];                          //by view: "STOP", "RUN", "WAIT" (16 px, chip)
+extern const char *const ui_run_action[2];                        //[0] stopped: "RUN", [1] running / waiting: "STOP"
 
 //ACQ menu, Memory column (x 305..377 of the menu, under its rule at y 211): the main-loop pass time, a grey label line
 //and the value under it (fw 0.2.63; it sat between the "Memory" header and the first depth chip before)

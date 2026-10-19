@@ -60,8 +60,8 @@ $(OUT)/test_cal_wizard: test_cal_wizard.c test_util.h $(SRC)/cal_wiz.c $(SRC)/ca
 
 # Screens: card formatting and fit with the device's font tables, main menu rows and mode rule (fw 0.2.51), the Settings
 # fold-out, screen and confirmation dialog (fw 0.2.55), the CTRL page, fold-outs, warnings and spectrum cards (fw 0.2.56)
-UI_SRCS := $(SRC)/ui_fmt.c $(SRC)/ui_menu.c $(SRC)/ui_settings.c $(SRC)/ui_ctrl.c $(SRC)/ui_meas.c $(SRC)/font_2.c $(SRC)/font_3.c $(SRC)/font_5.c
-$(OUT)/test_ui: test_ui.c test_util.h $(UI_SRCS) $(SRC)/ui_fmt.h $(SRC)/ui_menu.h $(SRC)/ui_settings.h $(SRC)/ui_ctrl.h $(SRC)/ui_meas.h | $(OUT)
+UI_SRCS := $(SRC)/bode_ui.c $(SRC)/ui_fmt.c $(SRC)/ui_menu.c $(SRC)/ui_settings.c $(SRC)/ui_ctrl.c $(SRC)/ui_meas.c $(SRC)/font_2.c $(SRC)/font_3.c $(SRC)/font_5.c
+$(OUT)/test_ui: test_ui.c test_util.h $(UI_SRCS) $(SRC)/bode_ui.h $(SRC)/ui_fmt.h $(SRC)/ui_menu.h $(SRC)/ui_settings.h $(SRC)/ui_ctrl.h $(SRC)/ui_meas.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_ui.c $(UI_SRCS)
 # fw 0.2.59: the Diagnostics pages and the first-run screen as data (ui_diag.c) with the 13, 16 and 24 px fonts
 UI_DIAG_SRCS := $(SRC)/ui_diag.c $(SRC)/enc_heal.c $(SRC)/ui_fmt.c $(SRC)/font_2.c $(SRC)/font_3.c $(SRC)/font_5.c

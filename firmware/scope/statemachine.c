@@ -24,6 +24,8 @@
 #include "ui_settings.h"
 #include "ui_ctrl.h"
 #include "ui_meas.h"
+#include "bode_view.h"
+#include "ui_fmt.h"
 #include "ctrl_page.h"
 #include "touch_pick.h"
 #include "tb_view.h"
@@ -541,23 +543,8 @@ void scan_for_touch(void)
       //Wait until touch is released
       tp_i2c_wait_for_touch_release();
 
-      //Toggle the max backlight brightness
-      scopesettings.maxlight ^= 1;
-
-      if(scopesettings.maxlight == 0)
-      {
-        //Set the icon to white sun
-        scope_maxlight_item(0);
-        //Set backlight brightness to user set value
-        scope_set_maxlight(0);
-      }
-      else
-      {  
-        //Set the icon to yellow sun
-        scope_maxlight_item(1);
-        //Set backlight brightness to max
-        scope_set_maxlight(1);
-      }
+      //fw 0.2.68: 100 % screen brightness and back to the value it came from (ui_settings.h); the sun redraws
+      scope_brightness_sun();
     }
     //===========================================================================================================  
     //Check if in channel 1 settings button range
@@ -914,7 +901,7 @@ void handle_main_menu_touch(void)
       if(scope_move_slider(395, 46, &scopesettings.screenbrightness))
       {
         scope_system_settings_screen_brightness_value();
-        fpga_set_translated_brightness();
+        scope_set_brightness(scopesettings.screenbrightness, 1);
       }
       continue;
     }
@@ -928,7 +915,7 @@ void handle_main_menu_touch(void)
     //Check if there is touch
     if(havetouch)
     {
-      //Check if touch within the menu field: the rows' hit areas are contiguous, one 59 px pitch each (ui_menu.h)
+      //Check if touch within the menu field: the rows' hit areas are contiguous, one 52 px pitch each (ui_menu.h)
       if((row = ui_mm_row_at(xtouch, ytouch)) >= 0)
       {
         //Check if on system settings
@@ -1060,7 +1047,19 @@ void handle_main_menu_touch(void)
           //Need to exit the loop here
           return;
         }
-        //Scope or Spectrum analyser: the mode rows (pc_glue_main_menu_mode carries out ui_mm_choose)
+        //fw 0.2.68: Frequency response where the bitstream lacks the filter and the DDS (or in the waveform viewer): grey;
+        //fw 0.2.69: a tap says why at the top middle of the plot (the menu stays open)
+        else if((row == UI_MM_BODE) && !pc_glue_bode_available())
+        {
+          const char *t = bode_view_unavailable_text();
+
+          display_set_screen_buffer((uint16 *)maindisplaybuffer);
+          display_set_font(&font_2);
+          display_set_fg_color(ORANGE_COLOR);
+          display_text(366 - ui_text_width(&font_2, t) / 2, 69, (int8 *)t);
+          tp_i2c_wait_for_touch_release();
+        }
+        //Scope, Spectrum analyser or Bode plot: the mode rows (pc_glue_main_menu_mode carries out ui_mm_choose)
         else
         {
           //Close any other open menu
@@ -1322,8 +1321,8 @@ void handle_main_menu_touch(void)
           //Update the setting in the system settings menu
           scope_system_settings_screen_brightness_value();
 
-          //Update the actual screen brightness
-          fpga_set_translated_brightness();
+          //Update the actual screen brightness and the top bar sun (fw 0.2.68: one setting)
+          scope_set_brightness(scopesettings.screenbrightness, 1);
         }
       }
       //Check on grid brightness slider opened and being touched
@@ -2600,14 +2599,10 @@ void handle_acquisition_menu_touch(void)
             //Check if touch within this bounding box (fw 0.2.64: a grey, not viable, time/div cannot be chosen)
             if((xtouch >= x) && (xtouch <= x + 68) && (ytouch >= y) && (ytouch <= y + 20))
             {
-              if(!acq_view_tb_ok(((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i))
+              //Set the new time per div, the trigger point kept inside the record (fw 0.2.68: acq_view_set_tb, the
+              //path the snap after a rate change takes too)
+              if(!acq_view_set_tb(((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i))
                 break;
-
-              //Set the new time per div
-              scopesettings.timeperdiv = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i;
-
-              //The trigger point stays inside the record
-              acq_view_clamp_pos();
 
               //Display the new setting
               scope_acquisition_timeperdiv_select();
@@ -3139,13 +3134,6 @@ void handle_generator_menu_touch(void)
             scope_generator_settings(0);
           }
         }
-        //fw 0.2.66: the fourth row, Bode plot: the mode opens (or closes) once the menu has closed
-        else if(PC_GEN_BODE_HIT())
-        {
-          tp_i2c_wait_for_touch_release();
-          close_open_gen_menus(1);
-          return;
-        }
         //====================================================================================================
         //Wait until touch is released before checking on a new position
         //tp_i2c_wait_for_touch_release(); // doplnik pre kr=azdy prikaz zvlast
@@ -3315,7 +3303,11 @@ void handle_right_basic_menu_touch(void)
 {
   //fw 0.2.56: the spectrum's empty slots (T CURSOR, V CURSOR; ui_p1_shown) do nothing; fw 0.2.65: MEASURES opens the
   //spectrum's own list
-  if((ytouch >= 183) && (ytouch <= 297) && !ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
+  if((ytouch >= 183) && (ytouch <= 237) && !ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
+    return;
+
+  //fw 0.2.69: Frequency response has T CURSOR (C1 / C2) but no V CURSOR
+  if((ytouch >= 243) && (ytouch <= 297) && !ui_p1_shown(UI_P1_VCURSOR, ctrl_page_spectrum()))
     return;
 
   //fw 0.2.66: the Bode plot's empty MEASURES slot does nothing either
@@ -3334,9 +3326,18 @@ void handle_right_basic_menu_touch(void)
       //Wait until touch is released
       tp_i2c_wait_for_touch_release();
 
-      //Toggle the run state
-      scopesettings.runstate ^= 1;
-      
+      //fw 0.2.68: the button does what it reads (scope_run_view): RUN while stopped, STOP while running, waiting or
+      //while a host acquisition runs (that one is aborted and the UI stays stopped)
+      if(scope_run_view() == UI_RUN_STOP)
+      {
+        scopesettings.runstate = 1;
+      }
+      else
+      {
+        scopesettings.runstate = 0;
+        pc_glue_host_stop();
+      }
+
       //Button back to inactive state
       scope_run_stop_button(0);
 
@@ -3448,6 +3449,13 @@ void handle_right_basic_menu_touch(void)
     //Button back to inactive state
     scope_t_cursor_button(0);
 
+    //fw 0.2.69: in Frequency response the frequency cursors C1 / C2
+    if(bode_view_active())
+    {
+      bode_view_tcursor();
+      return;
+    }
+
     //Toggle the enable setting
     scopesettings.timecursorsenable ^= 1;
     
@@ -3534,8 +3542,11 @@ void handle_right_basic_menu_touch(void)
       //Button back to inactive state
       scope_save_wave_button(0);
 
-      //Save the waveform on the SD card
-      scope_save_view_item_file(VIEW_TYPE_WAVEFORM);
+      //Save the waveform on the SD card; fw 0.2.69: in Frequency response the sweep table as CSV
+      if(bode_view_active())
+        bode_view_save();
+      else
+        scope_save_view_item_file(VIEW_TYPE_WAVEFORM);
     }
     else
     {

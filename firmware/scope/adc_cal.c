@@ -339,6 +339,12 @@ void acal_acc_add(acal_acc *a, const uint8_t *buf, uint32_t count, uint32_t stri
   if(n == 0)
     return;
 
+  if(a->n == 0)
+  {
+    a->lo = 255;
+    a->hi = 0;
+  }
+
   //sq stays below 2^32 for count <= 66,000 (255^2 x count); callers pass at most a few thousand
   while(count--)
   {
@@ -347,6 +353,11 @@ void acal_acc_add(acal_acc *a, const uint8_t *buf, uint32_t count, uint32_t stri
     sum  += v;
     sq   += v * v;
     clip += (v == 0) || (v == 255);
+
+    if(v < a->lo)
+      a->lo = (uint8_t)v;
+    if(v > a->hi)
+      a->hi = (uint8_t)v;
   }
 
   a->n       += n;
@@ -358,6 +369,20 @@ void acal_acc_add(acal_acc *a, const uint8_t *buf, uint32_t count, uint32_t stri
 
 void acal_acc_merge(acal_acc *a, const acal_acc *b)
 {
+  if(b->n == 0)
+    return;
+
+  if(a->n == 0)
+  {
+    a->lo = b->lo;
+    a->hi = b->hi;
+  }
+  else
+  {
+    a->lo = (b->lo < a->lo) ? b->lo : a->lo;
+    a->hi = (b->hi > a->hi) ? b->hi : a->hi;
+  }
+
   a->n       += b->n;
   a->sum     += b->sum;
   a->sumsq   += b->sumsq;
@@ -457,7 +482,13 @@ int acal_range_check(const acal_range_meas *m, acal_fail *f)
   int32_t  slope[ACAL_CLASSES][2];
   uint32_t k, cl;
 
-  acal_fail_at(f, 0, 0, 0, 0);
+  if(f)
+  {
+    acal_fail z = { 0 };
+
+    *f       = z;
+    f->point = ACAL_PT_NONE;
+  }
 
   if(m->clipped)
     return ACAL_E_CLIP;
@@ -549,6 +580,246 @@ int acal_range_store(const acal_range_meas *m, acal_channel *c, uint8_t r)
   }
 
   return ACAL_OK;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//Measurement points (fw 0.2.67): the failure line and CAL_PROBE
+
+void acal_point_set(acal_point *p, int32_t pwm, uint32_t cls, uint32_t convs, const acal_acc acc[2][2])
+{
+  acal_acc all;
+  uint32_t k, v;
+
+  p->pwm   = (uint16_t)((pwm < 0) ? 0 : ((pwm > 0xFFFF) ? 0xFFFF : pwm));
+  p->cls   = (uint8_t)cls;
+  p->convs = (uint8_t)((convs > 255) ? 255 : convs);
+
+  for(k=0;k<2;k++)
+  {
+    all = acc[0][k];
+    acal_acc_merge(&all, &acc[1][k]);
+
+    p->mean16[k]   = acal_mean16(&all);
+    v              = acal_rms16(&all);
+    p->rms16[k]    = (uint16_t)((v > 0xFFFF) ? 0xFFFF : v);
+    v              = acal_rms16_within(&all);
+    p->within16[k] = (uint16_t)((v > 0xFFFF) ? 0xFFFF : v);
+    p->lo[k]       = all.n ? all.lo : 0;
+    p->hi[k]       = all.n ? all.hi : 0;
+    p->clipped[k]  = all.clipped;
+  }
+}
+
+void acal_fail_point(const acal_point pt[ACAL_POINTS], int rc, acal_fail *f)
+{
+  uint32_t i, k, idx = ACAL_PT_NONE;
+  const acal_point *p;
+
+  f->point = ACAL_PT_NONE;
+
+  if(rc == ACAL_OK)
+    return;
+
+  if((rc == ACAL_E_CLIP) || (rc == ACAL_E_READOUT))
+  {
+    for(i=ACAL_PT_G_LO;i<ACAL_POINTS;i++)
+    {
+      if(pt[i].convs && (pt[i].clipped[0] || pt[i].clipped[1]))
+      {
+        idx = i;
+        break;
+      }
+    }
+  }
+  else if(rc == ACAL_E_RESPONSE)
+    idx = ACAL_PT_COARSE_HI;
+  else if(rc == ACAL_E_TIMING)
+    idx = ACAL_PT_F_ZERO;
+  else
+    idx = (f->cls == ACAL_FULL) ? ACAL_PT_F_ZERO : ACAL_PT_G_ZERO;
+
+  if((idx == ACAL_PT_NONE) || !pt[idx].convs)
+    return;
+
+  p = &pt[idx];
+  f->point = (uint8_t)idx;
+  f->pwm   = p->pwm;
+
+  //Clip, response and timing name no class: the point's own (and for a clip the core with more clipped samples)
+  if((rc == ACAL_E_CLIP) || (rc == ACAL_E_READOUT) || (rc == ACAL_E_RESPONSE) || (rc == ACAL_E_TIMING))
+    f->cls = p->cls;
+
+  if((rc == ACAL_E_CLIP) || (rc == ACAL_E_READOUT))
+    f->core = (p->clipped[ACAL_CORE_A] >= p->clipped[ACAL_CORE_B]) ? ACAL_CORE_A : ACAL_CORE_B;
+
+  for(k=0;k<2;k++)
+  {
+    f->mean16[k]  = p->mean16[k];
+    f->lo[k]      = p->lo[k];
+    f->hi[k]      = p->hi[k];
+    f->clipped[k] = p->clipped[k];
+  }
+}
+
+int32_t acal_zero_split(const acal_range_meas *m)
+{
+  int32_t resp = (m->mean16_lo[ACAL_GATED][0] + m->mean16_lo[ACAL_GATED][1] - m->mean16_hi[ACAL_GATED][0] -
+                  m->mean16_hi[ACAL_GATED][1]) / 2;
+  int32_t d;
+
+  if((resp <= 0) || (m->pwm_hi <= m->pwm_lo))
+    return ACAL_ZERO_SPLIT_MIN;
+
+  d = rdiv(ACAL_ZERO_SPLIT16 * (m->pwm_hi - m->pwm_lo), resp);
+
+  return (d < ACAL_ZERO_SPLIT_MIN) ? ACAL_ZERO_SPLIT_MIN : ((d > ACAL_ZERO_SPLIT_MAX) ? ACAL_ZERO_SPLIT_MAX : d);
+}
+
+static uint32_t acal_rms_pair(uint32_t a, uint32_t b)
+{
+  return acal_isqrt64(((uint64_t)a * a + (uint64_t)b * b + 1) / 2);
+}
+
+void acal_zero_pair(const acal_acc lo[2][2], const acal_acc hi[2][2], int32_t zero16[2], int32_t drift16[2],
+                    uint32_t noise16[2], uint32_t within16[2], uint32_t *clipped)
+{
+  acal_acc a, b, h0, h1;
+  uint32_t k;
+
+  for(k=0;k<2;k++)
+  {
+    a = lo[0][k];
+    acal_acc_merge(&a, &lo[1][k]);
+    b = hi[0][k];
+    acal_acc_merge(&b, &hi[1][k]);
+    h0 = lo[0][k];
+    acal_acc_merge(&h0, &hi[0][k]);
+    h1 = lo[1][k];
+    acal_acc_merge(&h1, &hi[1][k]);
+
+    zero16[k] = rdiv(acal_mean16(&a) + acal_mean16(&b), 2);
+
+    if(drift16)
+      drift16[k] = acal_mean16(&h1) - acal_mean16(&h0);
+
+    if(noise16)
+      noise16[k] = acal_rms_pair(acal_rms16(&a), acal_rms16(&b));
+
+    if(within16)
+      within16[k] = acal_rms_pair(acal_rms16_within(&a), acal_rms16_within(&b));
+
+    *clipped += a.clipped + b.clipped;
+  }
+}
+
+void acal_point_set_pair(acal_point *p, int32_t pwm, uint32_t cls, uint32_t convs, const acal_acc lo[2][2],
+                         const acal_acc hi[2][2])
+{
+  acal_acc all;
+  int32_t  z[2], d[2];
+  uint32_t n[2], w[2], k, c = 0;
+
+  acal_point_set(p, pwm, cls, convs, lo);
+  acal_zero_pair(lo, hi, z, d, n, w, &c);
+
+  for(k=0;k<2;k++)
+  {
+    all = lo[0][k];
+    acal_acc_merge(&all, &lo[1][k]);
+    acal_acc_merge(&all, &hi[0][k]);
+    acal_acc_merge(&all, &hi[1][k]);
+
+    p->mean16[k]   = z[k];
+    p->rms16[k]    = (uint16_t)((n[k] > 0xFFFF) ? 0xFFFF : n[k]);
+    p->within16[k] = (uint16_t)((w[k] > 0xFFFF) ? 0xFFFF : w[k]);
+    p->lo[k]       = all.n ? all.lo : 0;
+    p->hi[k]       = all.n ? all.hi : 0;
+    p->clipped[k]  = all.clipped;
+  }
+}
+
+int acal_readout_fault(const acal_point pt[ACAL_POINTS])
+{
+  static const uint8_t twin[3][2] = { { ACAL_PT_F_ZERO, ACAL_PT_G_ZERO }, { ACAL_PT_F_HI, ACAL_PT_G_HI },
+                                      { ACAL_PT_F_LO, ACAL_PT_G_LO } };
+  const acal_point *f, *g;
+  uint32_t i, found = 0;
+  int32_t  mid;
+
+  for(i=0;i<ACAL_POINTS;i++)
+  {
+    //A clip anywhere at the gated rate (coarse points aside) is the input's
+    if((i >= ACAL_PT_G_LO) && pt[i].convs && (pt[i].cls == ACAL_GATED) && (pt[i].clipped[0] || pt[i].clipped[1]))
+      return 0;
+  }
+
+  for(i=0;i<3;i++)
+  {
+    f = &pt[twin[i][0]];
+    g = &pt[twin[i][1]];
+
+    if(!f->convs || !(f->clipped[0] || f->clipped[1]))
+      continue;
+
+    if(!g->convs)
+      return 0;
+
+    mid = (g->mean16[0] + g->mean16[1]) / 2;
+
+    if(iabs(mid - 128 * 16) > ACAL_READOUT_NEAR16)
+      return 0;
+
+    found = 1;
+  }
+
+  return (int)found;
+}
+
+uint32_t acal_probe_pack(uint8_t *dst, uint8_t ch, uint8_t range, int rc, uint8_t flags, int32_t centre, int32_t pwm,
+                         uint32_t enc_bad, uint32_t enc_recovered, const acal_fail *f, const acal_point pt[ACAL_POINTS],
+                         int32_t split)
+{
+  uint8_t *p = dst;
+  uint32_t i, k;
+
+  for(i=0;i<ACAL_PROBE_BYTES;i++)
+    dst[i] = 0;
+
+  *p++ = ch;
+  *p++ = range;
+  p    = put16(p, (uint32_t)(int32_t)rc);
+  *p++ = f->point;
+  *p++ = f->cls;
+  *p++ = f->core;
+  *p++ = flags;
+  p    = put32(p, (uint32_t)f->value);
+  p    = put32(p, f->within16);
+  p    = put16(p, (centre < 0) ? 0 : (uint32_t)centre);
+  p    = put16(p, (pwm < 0) ? 0 : (uint32_t)pwm);
+  p    = put16(p, (enc_bad > 0xFFFF) ? 0xFFFF : enc_bad);
+  p    = put16(p, (enc_recovered > 0xFFFF) ? 0xFFFF : enc_recovered);
+
+  for(i=0;i<ACAL_POINTS;i++)
+  {
+    p    = put16(p, pt[i].pwm);
+    *p++ = pt[i].cls;
+    *p++ = pt[i].convs;
+
+    for(k=0;k<2;k++)
+    {
+      p    = put32(p, (uint32_t)pt[i].mean16[k]);
+      p    = put16(p, pt[i].rms16[k]);
+      p    = put16(p, pt[i].within16[k]);
+      *p++ = pt[i].lo[k];
+      *p++ = pt[i].hi[k];
+      p    = put16(p, (pt[i].clipped[k] > 0xFFFF) ? 0xFFFF : pt[i].clipped[k]);
+    }
+  }
+
+  p = put16(p, (split < 0) ? 0 : (uint32_t)split);
+  p = put16(p, 0);
+
+  return (uint32_t)(p - dst);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -689,6 +960,7 @@ const char *acal_reason_text(int reason)
     case ACAL_E_GAIN_CLASS: return "gain: clock classes";
     case ACAL_E_GAIN_NONE:  return "gain: no generator";
     case ACAL_E_TIMING:     return "ADC timing: FPGA race";
+    case ACAL_E_READOUT:    return "ADC readout near 128";
     default:                return "no calibration data";
   }
 }

@@ -1,0 +1,172 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-10-19T19:20:00+02:00"
+  },
+  "title": "1013D Bode mode",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "MainMenu.dc.html": {
+      "x": 0,
+      "y": 260,
+      "w": 800,
+      "h": 480,
+      "title": "Main menu: the Frequency response row",
+      "is_interactive": true
+    },
+    "BodeFirst.dc.html": {
+      "x": 880,
+      "y": 260,
+      "w": 800,
+      "h": 480,
+      "title": "Before the first sweep: one instruction",
+      "is_interactive": true
+    },
+    "Main.dc.html": {
+      "x": 1760,
+      "y": 260,
+      "w": 800,
+      "h": 480,
+      "title": "Action page (final): one pane, dB left, deg right",
+      "is_interactive": true
+    },
+    "BodeCursors.dc.html": {
+      "x": 2640,
+      "y": 260,
+      "w": 800,
+      "h": 480,
+      "title": "Cursors C1 and C2: readout box bottom left (owner)",
+      "is_interactive": true
+    },
+    "BodeSingle.dc.html": {
+      "x": 3520,
+      "y": 260,
+      "w": 800,
+      "h": 480,
+      "title": "Single sweep in progress",
+      "is_interactive": true
+    },
+    "BodeAuto.dc.html": {
+      "x": 4400,
+      "y": 260,
+      "w": 800,
+      "h": 480,
+      "title": "AUTO SET: overview sweep running",
+      "is_interactive": true
+    },
+    "BodeCtrl.dc.html": {
+      "x": 0,
+      "y": 1120,
+      "w": 800,
+      "h": 480,
+      "title": "CTRL page",
+      "is_interactive": true
+    },
+    "BodeCtrlDisplay.dc.html": {
+      "x": 880,
+      "y": 1120,
+      "w": 800,
+      "h": 480,
+      "title": "CTRL: Display fold-out, Overlaid / Magnitude only / Phase only, Frequency axis (owner)",
+      "is_interactive": true
+    },
+    "BodeCtrlSweep.dc.html": {
+      "x": 1760,
+      "y": 1120,
+      "w": 800,
+      "h": 480,
+      "title": "CTRL: Sweep fold-out",
+      "is_interactive": true
+    },
+    "BodeCtrlThru.dc.html": {
+      "x": 2640,
+      "y": 1120,
+      "w": 800,
+      "h": 480,
+      "title": "CTRL: Thru fold-out",
+      "is_interactive": true
+    },
+    "BodeMeasures.dc.html": {
+      "x": 3520,
+      "y": 1120,
+      "w": 800,
+      "h": 480,
+      "title": "MEASURES: the mode's list",
+      "is_interactive": true
+    },
+    "BodeV1.dc.html": {
+      "x": 1760,
+      "y": 1980,
+      "w": 800,
+      "h": 480,
+      "title": "Variant 1 (superseded): two panes",
+      "is_interactive": true
+    },
+    "MenuIcon.dc.html": {
+      "x": 2640,
+      "y": 1980,
+      "w": 800,
+      "h": 480,
+      "title": "Main-menu icon candidates (A chosen)"
+    },
+    "SpectrumSlider.dc.html": {
+      "x": 3520,
+      "y": 1980,
+      "w": 800,
+      "h": 480,
+      "title": "Spectrum with the slider row (owner): span 0..50 kHz of 0..fs/2"
+    }
+  },
+  "order": [
+    "MainMenu.dc.html",
+    "BodeFirst.dc.html",
+    "Main.dc.html",
+    "BodeCursors.dc.html",
+    "BodeSingle.dc.html",
+    "BodeAuto.dc.html",
+    "BodeCtrl.dc.html",
+    "BodeCtrlDisplay.dc.html",
+    "BodeCtrlSweep.dc.html",
+    "BodeCtrlThru.dc.html",
+    "BodeMeasures.dc.html",
+    "BodeV1.dc.html",
+    "MenuIcon.dc.html",
+    "SpectrumSlider.dc.html"
+  ],
+  "notes": {
+    "row1": {
+      "x": 0,
+      "y": 0,
+      "text": "Frequency response (final): entry, action page, cursors, running states",
+      "kind": "title1",
+      "maxW": 5200
+    },
+    "row2": {
+      "x": 0,
+      "y": 860,
+      "text": "CTRL page, fold-outs and MEASURES",
+      "kind": "title1",
+      "maxW": 4320
+    },
+    "row3": {
+      "x": 0,
+      "y": 1720,
+      "text": "Reference boards, the menu icon and the Spectrum slider",
+      "kind": "title1",
+      "maxW": 4320
+    },
+    "compare": {
+      "x": 0,
+      "y": 1980,
+      "w": 1600,
+      "maxH": 1200,
+      "size": "m",
+      "text": "Owner decisions (2026-10-19):\n\nChart: variant 2's chart, one pane with two y axes and no legend. The axes carry their units (dB on the left, deg on the right), and each curve has its axis label's colour.\n\nCursors: T CURSOR toggles the flagged cursors C1 and C2. Their readout box sits at the bottom left with the C2-C1 row, as variant 2 drew it. The box covering part of the response is accepted.\n\nDisplay fold-out: Overlaid (the default), Magnitude only and Phase only, then Frequency axis (Log or Linear, default Log). The two-pane layout is dropped.\n\nInstruction: it says \"calibration post\".\n\nVariant 1 stays here for reference only."
+    }
+  },
+  "designSystems": []
+}

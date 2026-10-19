@@ -13,6 +13,7 @@
 #include "ui_settings.h"
 #include "ui_ctrl.h"
 #include "ui_meas.h"
+#include "bode_ui.h"
 #include "test_util.h"
 
 extern FONTDATA font_2, font_3, font_5;
@@ -102,6 +103,11 @@ static void test_menu(void)
   T_STR(ui_mm_labels[UI_MM_SCOPE].line1, "Scope");
   T_STR(ui_mm_labels[UI_MM_SPECTRUM].line1, "Spectrum");
   T_STR(ui_mm_labels[UI_MM_SPECTRUM].line2, "analyser");
+  T_STR(ui_mm_labels[UI_MM_BODE].line1, "Frequency");       //fw 0.2.68: the third mode row; 0.2.69 renamed (owner)
+  T_STR(ui_mm_labels[UI_MM_BODE].line2, "response");
+  T_EQ(UI_MM_BODE, UI_MM_SPECTRUM + 1);
+  T_EQ(UI_MM_PICTURES, UI_MM_BODE + 1);
+  T_EQ(UI_MM_ROWS, 8);
   T_STR(ui_mm_labels[UI_MM_PICTURES].line2, "pictures");
   T_STR(ui_mm_labels[UI_MM_WAVEFORMS].line2, "waveforms");
   T_STR(ui_mm_labels[UI_MM_SETTINGS].line1, "Settings");
@@ -117,7 +123,8 @@ static void test_menu(void)
   }
 
   //Hit areas: contiguous, one pitch each, every y of the column maps to exactly the row drawn there
-  T_EQ(UI_MM_H, 413);
+  T_EQ(UI_MM_H, 416);
+  T_EQ(UI_MM_PITCH, 52);
   T_TRUE(UI_MM_TOP + UI_MM_H <= 480);
   for(y = 0; y < 480; y++)
   {
@@ -140,17 +147,20 @@ static void test_menu(void)
     T_EQ(ui_mm_row_at(UI_MM_BTN_X + UI_MM_BTN_W - 1, ui_mm_row_top(row) + UI_MM_BTN_DY + UI_MM_BTN_H - 1), row);
   }
 
-  //1.00o5's separators at 104 / 163 / 222 / 281 end rows 0..3; the old hit areas this replaces had gaps there
-  T_EQ(ui_mm_row_at(80, 104), 0);
-  T_EQ(ui_mm_row_at(80, 105), 1);
-  T_EQ(ui_mm_row_at(80, 458), UI_MM_USB);
-  T_EQ(ui_mm_row_at(80, 459), -1);
+  //fw 0.2.68: eight rows of 52 px, the separators at 97 / 149 / ... end rows 0..6; the button keeps 35 px with at least
+  //8 px to the separator below and 9 px to the one above
+  T_EQ(ui_mm_row_at(80, 97), 0);
+  T_EQ(ui_mm_row_at(80, 98), 1);
+  T_EQ(ui_mm_row_at(80, 461), UI_MM_USB);
+  T_EQ(ui_mm_row_at(80, 462), -1);
+  T_TRUE(UI_MM_BTN_DY + UI_MM_BTN_H + 8 <= UI_MM_PITCH);
+  T_TRUE(UI_MM_BTN_H >= 35);
 
   //Left and right edges of the column
-  T_EQ(ui_mm_row_at(1, 100), -1);
-  T_EQ(ui_mm_row_at(2, 100), 0);
-  T_EQ(ui_mm_row_at(148, 100), 0);
-  T_EQ(ui_mm_row_at(149, 100), -1);
+  T_EQ(ui_mm_row_at(1, 60), -1);
+  T_EQ(ui_mm_row_at(2, 60), 0);
+  T_EQ(ui_mm_row_at(148, 60), 0);
+  T_EQ(ui_mm_row_at(149, 60), -1);
 }
 
 static void test_choose(void)
@@ -187,6 +197,26 @@ static void test_choose(void)
       T_EQ(a.roll_off, 0);
       T_EQ(a.warn_roll, 0);
     }
+
+  //fw 0.2.68: Frequency response from the scope, the spectrum, roll mode: the other modes off, Roll off; fw 0.2.69: with
+  //its own roll note
+  for(sp = 0; sp < 2; sp++)
+    for(roll = 0; roll < 2; roll++)
+      for(ph = 0; ph < 2; ph++)
+      {
+        T_EQ(ui_mm_choose(UI_MM_BODE, sp, roll, ph, &a), 1);
+        T_EQ(a.bode, 1);
+        T_EQ(a.spectrum, 0);
+        T_EQ(a.phosphor, 0);
+        T_EQ(a.roll_off, roll);
+        T_EQ(a.warn_roll, roll);
+
+        //Scope and Spectrum end it
+        T_EQ(ui_mm_choose(UI_MM_SCOPE, sp, roll, ph, &a), 1);
+        T_EQ(a.bode, 0);
+        T_EQ(ui_mm_choose(UI_MM_SPECTRUM, sp, roll, ph, &a), 1);
+        T_EQ(a.bode, 0);
+      }
 
   //Utility rows are not mode rows
   for(sp = 0; sp < 2; sp++)
@@ -276,7 +306,7 @@ static void test_ctrl_page(void)
   {
     T_EQ(ui_p1_shown(item, 0), 1);
     T_EQ(ui_p1_shown(item, 1), !((item == UI_P1_TCURSOR) || (item == UI_P1_VCURSOR)));   //fw 0.2.65: MEASURES too
-    T_EQ(ui_p1_shown(item, 2), !((item == UI_P1_TCURSOR) || (item == UI_P1_VCURSOR) || (item == UI_P1_MEASURES)));
+    T_EQ(ui_p1_shown(item, 2), item != UI_P1_VCURSOR);   //fw 0.2.69: T CURSOR (C1 / C2) and MEASURES in Frequency response
   }
 
   //Button texts fit the 51 px buttons (2 px margins) in the 13 px font
@@ -299,9 +329,63 @@ static void test_ctrl_page(void)
     T_STR(ui_display_value(1, 0, 1), "Spec");
   }
 
-  //RUN/STOP labels fit the 51 px button with 2 px margins (fw 0.2.63): "RUN" in the 16 px font, "Stopped" in the 13 px
-  T_TRUE(ui_text_width(&font_3, ui_run_label[1]) <= UI_BAR_W - 4);
-  T_TRUE(ui_text_width(&font_2, ui_run_label[0]) <= UI_BAR_W - 4);
+  //RUN/STOP (fw 0.2.68): the action labels fit the 51 px button with 2 px margins in the 16 px font, the chip texts the
+  //38 px chip at 1.00o5's offsets; one view for both: running or a host acquisition is RUN, a UI single armed is WAIT
+  {
+    int r, w, h;
+
+    T_TRUE(ui_text_width(&font_3, ui_run_action[0]) <= UI_BAR_W - 4);
+    T_TRUE(ui_text_width(&font_3, ui_run_action[1]) <= UI_BAR_W - 4);
+    T_STR(ui_run_action[0], "RUN");
+    T_STR(ui_run_action[1], "STOP");
+    for(r = 0; r < 3; r++)
+      T_TRUE(ui_text_width(&font_3, ui_run_chip[r]) <= 38 - 2);
+    T_EQ((38 - ui_text_width(&font_3, ui_run_chip[UI_RUN_STOP])) / 2, 1);   //centred = 1.00o5's offsets 1, 5, 2
+    T_EQ((38 - ui_text_width(&font_3, ui_run_chip[UI_RUN_RUN])) / 2, 5);
+    T_EQ((38 - ui_text_width(&font_3, ui_run_chip[UI_RUN_WAIT])) / 2, 2);
+    for(r = 0; r < 2; r++)
+      for(w = 0; w < 2; w++)
+        for(h = 0; h < 2; h++)
+          T_EQ(ui_run_view(r, w, h), r ? (w ? UI_RUN_WAIT : UI_RUN_RUN) : (h ? UI_RUN_RUN : UI_RUN_STOP));
+    T_STR(ui_run_chip[UI_RUN_STOP], "STOP");
+    T_STR(ui_run_chip[UI_RUN_RUN], "RUN");
+    T_STR(ui_run_chip[UI_RUN_WAIT], "WAIT");
+  }
+
+  //Screen brightness (fw 0.2.68): the sun goes to 100 % and back to where it came from; a value set at 100 by the slider
+  //goes back to the remembered one (or the default); the sector byte round-trips; 1.00o5's flag migrates
+  {
+    uint8  cur, back = 0, v;
+    uint16 b;
+
+    for(v = 0; v < 100; v++)
+    {
+      back = 77;
+      cur  = ui_bright_sun(v, &back);
+      T_EQ(cur, 100);
+      T_EQ(back, v);
+      T_EQ(ui_bright_sun(cur, &back), v);
+    }
+    back = 100;
+    T_EQ(ui_bright_sun(100, &back), UI_BRIGHT_DEFAULT);
+    back = 35;
+    T_EQ(ui_bright_sun(100, &back), 35);
+
+    for(v = 0; v <= 100; v++)
+    {
+      b = ui_bright_byte(v);
+      T_TRUE(b & UI_BRIGHT_SECTOR_NEW);
+      cur = 60;
+      ui_bright_load(b, &cur, &back);
+      T_EQ(cur, 60);
+      T_EQ(back, (v < 100) ? v : UI_BRIGHT_DEFAULT);
+    }
+
+    cur = 40;  ui_bright_load(1, &cur, &back);  T_EQ(cur, 100);  T_EQ(back, 40);      //1.00o5 max light on
+    cur = 40;  ui_bright_load(0, &cur, &back);  T_EQ(cur, 40);   T_EQ(back, 40);      //off
+    cur = 100; ui_bright_load(1, &cur, &back);  T_EQ(cur, 100);  T_EQ(back, UI_BRIGHT_DEFAULT);
+    cur = 250; ui_bright_load(0, &cur, &back);  T_EQ(cur, UI_BRIGHT_DEFAULT);
+  }
 
   //ACQ menu pass time (fw 0.2.63): inside the Memory column right of its rule at x 304 and left of the menu's edge at
   //380, below the rule at y 211 and above the bottom edge (386 - 8); the label and the widest value fit its width
@@ -738,8 +822,9 @@ static void test_meas_menu(void)
 
   T_STR(ui_msm_title(UI_MS_SCOPE), "Scope measurements");
   T_STR(ui_msm_title(UI_MS_SPECTRUM), "Spectrum measurements");
+  T_STR(ui_msm_title(UI_MS_BODE), "Frequency response measurements");
 
-  for(mode = 0; mode < 2; mode++)
+  for(mode = 0; mode < 3; mode++)
   {
     top = ui_msm_top(mode);
     n   = ui_msm_cells(mode, cells);
@@ -747,7 +832,7 @@ static void test_meas_menu(void)
     T_EQ(top + ui_msm_height(mode), UI_MSM_BOTTOM);
     T_TRUE(top >= 46);                                 //below the top bar
     T_TRUE(ui_text_width(&font_3, ui_msm_title(mode)) + 8 <= UI_MSM_W);
-    T_EQ(n, (mode == UI_MS_SCOPE) ? 40 : 18);
+    T_EQ(n, (mode == UI_MS_SCOPE) ? 40 : (mode == UI_MS_SPECTRUM) ? 18 : 14);
 
     memset(counts, 0, sizeof(counts));
 
@@ -763,11 +848,11 @@ static void test_meas_menu(void)
       T_TRUE(cells[i].x + cells[i].w <= UI_MSM_X + UI_MSM_W - 1);
       T_TRUE(cells[i].y > top + UI_MSM_TITLE_H);
       T_TRUE(cells[i].y + cells[i].h <= UI_MSM_BOTTOM - 1);
-      T_TRUE(t[0] != 0);
+      T_TRUE((t[0] != 0) == (cells[i].what != UI_MSC_EMPTY));
       T_TRUE(ui_text_width(f, t) + 4 <= cells[i].w);
 
-      //The channels' cells stay in their half
-      if((cells[i].group < 2) && !((mode == UI_MS_SPECTRUM) && (cells[i].group == UI_MS_SP_VIEW)))
+      //The channels' cells stay in their half (Frequency response has one block across the width)
+      if((mode != UI_MS_BODE) && (cells[i].group < 2) && !((mode == UI_MS_SPECTRUM) && (cells[i].group == UI_MS_SP_VIEW)))
       {
         if(cells[i].group == 0)
           T_TRUE(cells[i].x + cells[i].w <= 480);
@@ -785,6 +870,11 @@ static void test_meas_menu(void)
       T_EQ(counts[UI_MSC_SOURCE], 10);
       T_EQ(counts[UI_MSC_ALL], 2); T_EQ(counts[UI_MSC_CLEAR], 2); T_EQ(counts[UI_MSC_HIDE], 2);
       T_EQ(counts[UI_MSC_ITEM], 24);
+    }
+    else if(mode == UI_MS_BODE)
+    {
+      T_EQ(counts[UI_MSC_ALL], 1); T_EQ(counts[UI_MSC_CLEAR], 1); T_EQ(counts[UI_MSC_ITEM], 10);
+      T_EQ(counts[UI_MSC_EMPTY], 2); T_EQ(counts[UI_MSC_LABEL], 0); T_EQ(counts[UI_MSC_SOURCE], 0);
     }
     else
     {
@@ -841,6 +931,17 @@ static void test_meas_menu(void)
   T_TRUE(cells[n - 4].x < 480 && cells[n - 1].x > 482);
   T_STR(ui_msm_text(UI_MS_SPECTRUM, &cells[0]), "CH1");
   T_STR(ui_msm_text(UI_MS_SPECTRUM, &cells[6]), "Noise");
+
+  //Frequency response: Select All, Clear, then Level .. Thru in table order, the last row's two places empty
+  n = ui_msm_cells(UI_MS_BODE, cells);
+  T_EQ(cells[0].what, UI_MSC_ALL);
+  T_EQ(cells[1].what, UI_MSC_CLEAR);
+  T_TRUE(cells[0].x < 300 && cells[1].x + cells[1].w > 700);
+  T_STR(ui_msm_text(UI_MS_BODE, &cells[2]), "Level");
+  T_STR(ui_msm_text(UI_MS_BODE, &cells[9]), "Ph180");
+  T_STR(ui_msm_text(UI_MS_BODE, &cells[11]), "Thru");
+  T_EQ(cells[12].what, UI_MSC_EMPTY);
+  T_EQ(cells[13].what, UI_MSC_EMPTY);
 }
 
 static int in_rect(uint32 x, uint32 y, uint32 x0, uint32 y0, uint32 w, uint32 h)
@@ -1235,6 +1336,320 @@ static void test_dialog(void)
   }
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// fw 0.2.69: the Frequency response screen (bode_ui.c): scales with the free top division, the Log / Linear axis, the
+// C1 / C2 readout fit, the MEASURES list words and card texts, the texts' lengths, the fold-outs
+
+//The readout row r fits its columns in font_2: each column ends before the next one starts, the last inside the box
+static int ro_fits(const bu_ro_row *r)
+{
+  return (BU_RO_COL_NAME + ui_text_width(&font_2, r->name) + 4 <= BU_RO_COL_F) &&
+         (BU_RO_COL_F + ui_text_width(&font_2, r->f) + 4 <= BU_RO_COL_DB) &&
+         (BU_RO_COL_DB + ui_text_width(&font_2, r->db) + 4 <= BU_RO_COL_PH) &&
+         (BU_RO_COL_PH + ui_text_width(&font_2, r->ph) + 2 <= BU_RO_W);
+}
+
+static void test_bode_scales(void)
+{
+  bu_scale s, p;
+  char t[24];
+  int i;
+
+  //Magnitude: a low-pass from 0 to -40 dB: 10 dB / div, the top raised to +10 (the top division free)
+  bu_scale_mag(0, -40000, &s);
+  T_EQ(s.div, 10000); T_EQ(s.top, 10000);
+  T_EQ(bu_scale_y(&s, 0), BU_Y + BU_DIV);
+  //The divider: flat at -20.6 dB: 5 dB / div, top -15 (the data in the second division)
+  bu_scale_mag(-20400, -20800, &s);
+  T_EQ(s.div, 5000); T_EQ(s.top, -15000);
+  T_TRUE(bu_scale_y(&s, -20400) >= BU_Y + BU_DIV);
+  //55 dB of data: no room for the free division at 10 dB / div, so 20 dB / div with it (bode-ui.md 9 C3)
+  bu_scale_mag(0, -55000, &s);
+  T_EQ(s.div, 20000); T_EQ(s.top, 20000);
+  bu_scale_mag(0, -60000, &s);
+  T_EQ(s.div, 20000); T_EQ(s.top, 20000);
+  //50 dB keeps 10 dB / div with the free division
+  bu_scale_mag(0, -50000, &s);
+  T_EQ(s.div, 10000); T_EQ(s.top, 10000);
+  //More than 120 dB: 20 dB / div, the low end clipped to the pane
+  bu_scale_mag(0, -150000, &s);
+  T_EQ(s.div, 20000);
+  T_EQ(bu_scale_y(&s, -150000), BU_Y + BU_H);
+  //A tank: +1 .. -40 dB
+  bu_scale_mag(1000, -40000, &s);
+  T_EQ(s.div, 10000); T_EQ(s.top, 20000);
+
+  //Phase: the tank's +90 .. -90 deg: 45 / div, top +135; a low-pass 0 .. -90: 45 / div, top +45
+  bu_scale_phase(89000, -89000, &p);
+  T_EQ(p.div, 45000); T_EQ(p.top, 135000);
+  bu_scale_phase(0, -89000, &p);
+  T_EQ(p.div, 45000); T_EQ(p.top, 45000);
+  //The whole wrapped range always fits 90 / div with the free division
+  bu_scale_phase(180000, -179999, &p);
+  T_EQ(p.div, 90000); T_EQ(p.top, 270000);
+  T_TRUE(p.top - BU_NDIV * p.div <= -180000);
+  //Empty chart: +10 .. -50 dB and +135 .. -135 deg
+  bu_scale_empty(&s, &p);
+  T_EQ(s.top, 10000); T_EQ(s.div, 10000);
+  T_EQ(p.top, 135000); T_EQ(p.div, 45000);
+
+  //Frequency axis
+  T_EQ(bu_x_log(0, 100, 0), BU_PX);
+  T_EQ(bu_x_log(0, 100, 100), BU_PX + BU_PW);
+  T_EQ(bu_x_log(0, 100, 50), BU_PX + BU_PW / 2);
+  T_EQ(bu_x_log(0, 100, -5), BU_PX);
+  T_EQ(bu_x_lin(20000000, 100000000, 60000000), BU_PX + BU_PW / 2);
+  T_EQ(bu_x_lin(20000000, 100000000, 1), BU_PX);
+  T_EQ(bu_x_lin(20000000, 100000000, 200000000), BU_PX + BU_PW);
+  //Linear grid: 20 .. 100 kHz in 10 kHz steps (8 lines); 100 Hz .. 1 MHz in 100 kHz steps; 5 .. 500 kHz in 50 kHz
+  T_EQ(bu_lin_step(20000000, 100000000), 10000000ull);
+  T_EQ(bu_lin_step(100000, 1000000000), 100000000ull);
+  T_EQ(bu_lin_step(5000000, 500000000), 50000000ull);
+
+  //The slider: 1 Hz .. 10 MHz over the track; the design's spans; a drag shifts both ends by whole steps, kept on it
+  T_EQ(bu_slider_x(0), BU_SL_X);
+  T_EQ(bu_slider_x(BODE_STEPS - 1), BU_SL_X + BU_SL_W);
+  T_EQ(bu_slider_x(11), 384);                      //5 kHz (the design says about 385)
+  T_EQ(bu_slider_x(17), 590);                      //500 kHz
+  T_EQ(bu_slider_x(6), 210);                       //100 Hz
+  for(i = 1; i < BODE_STEPS; i++)
+    T_TRUE(bu_slider_x(i) > bu_slider_x(i - 1));
+  T_EQ(bu_slider_shift(6, 18, 0), 0);
+  T_EQ(bu_slider_shift(6, 18, 10), 0);
+  T_EQ(bu_slider_shift(6, 18, 25), 1);
+  T_EQ(bu_slider_shift(6, 18, 1000), 3);           //Stop at 10 MHz
+  T_EQ(bu_slider_shift(6, 18, -1000), -6);         //Start at 1 Hz
+  T_EQ(bu_slider_shift(6, 18, 103), 3);            //one decade
+  T_TRUE(BU_SL_HIT_Y > BU_CARDS_Y + UI_CARD_H);
+
+  //Short labels and values
+  T_STR((bu_freq_short(t, 100000), t), "100");
+  T_STR((bu_freq_short(t, 2500000), t), "2.5k");
+  T_STR((bu_freq_short(t, 10000000000ull), t), "10M");
+  T_STR((bu_freq_short(t, 150000000), t), "150k");
+  T_STR((bu_freq_short(t, 1250000000), t), "1.25M");
+  T_STR((bu_fmt_db(t, -7454), t), "-7.45dB");
+  T_STR((bu_fmt_db(t, 1210), t), "+1.21dB");
+  T_STR((bu_fmt_db(t, -4), t), "0.00dB");
+  T_STR((bu_fmt_deg(t, -60840), t), "-60.8deg");
+  T_STR((bu_fmt_deg(t, 135000), t), "+135.0deg");
+  T_STR((bu_fmt_fdiff(t, -33270000), t), "-33.27kHz");
+}
+
+static void test_bode_readout(void)
+{
+  bu_ro_row r[3];
+  int i;
+
+  //The design's example and its widest row ("C2-C1 33.27kHz -13.67dB -129.2deg")
+  bu_readout(56170000, -7450, -60800, 0, 89440000, -21120, 170000, 0, r);
+  T_STR(r[0].name, "C1"); T_STR(r[0].f, "56.17kHz"); T_STR(r[0].db, "-7.45dB"); T_STR(r[0].ph, "-60.8deg");
+  T_STR(r[2].name, "C2-C1"); T_STR(r[2].f, "33.27kHz"); T_STR(r[2].db, "-13.67dB");
+  T_STR(r[2].ph, "-129.2deg");                 //+230.8 wrapped
+  for(i = 0; i < 3; i++)
+  {
+    T_TRUE(ro_fits(&r[i]));
+    T_EQ(r[i].grey, 0);
+  }
+
+  //Worst cases: 10 MHz, -100 dB, a negative frequency difference, every flag reason
+  bu_readout(10000000000ull, -99990, -179900, 0, 1000, -99990, 179900, BODE_F_CH2_OVERLOAD, r);
+  T_TRUE(r[1].flagged && r[1].grey && r[2].grey);
+  T_STR(r[1].ph, "overload");
+  for(i = 0; i < 3; i++)
+    T_TRUE(ro_fits(&r[i]));
+  T_STR(r[2].f, "-10.00MHz");
+
+  {
+    static const uint16 fl[] = { BODE_F_CLIPPED, BODE_F_CH1_CLIPPED, BODE_F_UNSETTLED, BODE_F_NEAR_FLOOR, BODE_F_LOW_SNR,
+                                 BODE_F_INCOHERENT };
+    unsigned k;
+
+    for(k = 0; k < sizeof(fl) / sizeof(fl[0]); k++)
+    {
+      bu_readout(1000, -99990, 0, fl[k], 5000000000ull, -99990, 0, 0, r);
+      T_TRUE(r[0].flagged);
+      T_TRUE(r[0].ph[0] != 0);
+      T_TRUE(ro_fits(&r[0]));
+    }
+  }
+
+  //A valid point that was spliced reads normally (spliced points are valid)
+  bu_readout(1000, 0, 0, BODE_F_SPLICED, 2000, 0, 0, 0, r);
+  T_EQ(r[0].flagged, 0);
+
+  //Three rows in the box, which sits in the pane's bottom left
+  T_TRUE(BU_RO_ROW0 + 2 * BU_RO_PITCH + 13 <= BU_RO_H);
+  T_TRUE(BU_RO_X >= BU_PX && BU_RO_Y + BU_RO_H <= BU_Y + BU_H);
+  T_TRUE(ui_text_width(&font_2, "C2") + 4 <= BU_FLAG_W);
+}
+
+static void test_bode_cards(void)
+{
+  uint8 rank[BU_MS_COUNT], back[BU_MS_COUNT], order[UI_MS_LIST_MAX];
+  uint16 w[3];
+  bode_markers mk;
+  bu_card_in in;
+  char t[32];
+  int i, k;
+
+  //Defaults (owner): -3dB, Peak, Q, Level
+  bu_ms_defaults(rank);
+  k = ui_ms_order(rank, BU_MS_COUNT, order);
+  T_EQ(k, 4);
+  T_EQ(order[0], BU_MS_3DB); T_EQ(order[1], BU_MS_PEAK); T_EQ(order[2], BU_MS_Q); T_EQ(order[3], BU_MS_LEVEL);
+
+  //Words: round trip with every item chosen; erased words and bad ranks give the defaults
+  ui_ms_select_all(rank, BU_MS_COUNT);
+  for(i = 0; i < 3; i++)
+    w[i] = bu_ms_word(rank, i);
+  T_EQ(w[0] & 0xF000, BU_MS_MARKER);
+  memset(back, 0, sizeof(back));
+  T_EQ(bu_ms_restore(back, w), 1);
+  T_TRUE(memcmp(back, rank, BU_MS_COUNT) == 0);
+  w[0] = w[1] = w[2] = 0xFFFF;
+  T_EQ(bu_ms_restore(back, w), 0);
+  T_EQ(back[BU_MS_3DB], 1);
+  w[0] = BU_MS_MARKER | 0xB;                  //rank 11
+  w[1] = w[2] = 0;
+  T_EQ(bu_ms_restore(back, w), 0);
+  w[0] = BU_MS_MARKER; w[1] = 0; w[2] = 0x1000;  //junk above word 215's ranks
+  T_EQ(bu_ms_restore(back, w), 0);
+  w[0] = BU_MS_MARKER; w[1] = 0; w[2] = 0;       //nothing chosen is valid
+  T_EQ(bu_ms_restore(back, w), 1);
+  T_EQ(back[BU_MS_3DB], 0);
+
+  //Blocks: magnitude cyan, phase pink, the sweep's own state neutral
+  T_EQ(bu_ms_block(BU_MS_LEVEL), BU_BLOCK_MAG);
+  T_EQ(bu_ms_block(BU_MS_Q), BU_BLOCK_MAG);
+  T_EQ(bu_ms_block(BU_MS_PH45), BU_BLOCK_PHASE);
+  T_EQ(bu_ms_block(BU_MS_PH180), BU_BLOCK_PHASE);
+  T_EQ(bu_ms_block(BU_MS_SWEEP), BU_BLOCK_NEUTRAL);
+  T_EQ(bu_ms_block(BU_MS_THRU), BU_BLOCK_NEUTRAL);
+
+  //Texts per state; every card fits its 118 px (13 px font)
+  memset(&mk, 0, sizeof(mk));
+  memset(&in, 0, sizeof(in));
+  in.mk = &mk;
+  in.count = 100;
+
+  in.table = BU_TABLE_NONE;
+  T_EQ(bu_card_text(BU_MS_3DB, &in, t), BU_VAL_GREY);   T_STR(t, "no sweep");
+  T_EQ(bu_card_text(BU_MS_SWEEP, &in, t), BU_VAL_GREY); T_STR(t, "not run");
+  T_EQ(bu_card_text(BU_MS_THRU, &in, t), BU_VAL_GREY);  T_STR(t, "none");
+
+  in.table = BU_TABLE_FILLING;
+  in.done = 37;
+  T_EQ(bu_card_text(BU_MS_PEAK, &in, t), BU_VAL_GREY);  T_STR(t, "sweeping");
+  T_EQ(bu_card_text(BU_MS_SWEEP, &in, t), BU_VAL_WHITE); T_STR(t, "37/100");
+  in.autoset = 1; in.done = 12; in.count = 20;
+  T_EQ(bu_card_text(BU_MS_SWEEP, &in, t), BU_VAL_WHITE); T_STR(t, "auto 12/20");
+  T_TRUE(ui_card_fits(&font_2, "Sweep", t));
+  T_EQ(bu_card_text(BU_MS_Q, &in, t), BU_VAL_GREY);     T_STR(t, "sweeping");
+  in.autoset = 0; in.count = 100; in.done = 100;
+
+  in.table = BU_TABLE_COMPLETE;
+  mk.shape = BODE_SHAPE_RESONANT; mk.ref_mdb = -1210; mk.n3db = 2;
+  mk.f3db_mhz[0] = 47290000; mk.f3db_mhz[1] = 53500000;
+  mk.have_peak = 1; mk.peak_mhz = 50300000; mk.have_q = 1; mk.q_x100 = 810;
+  mk.ph_mhz[0] = 47300000; mk.ph_mhz[1] = 53400000; mk.ph_mhz[5] = 0;
+  T_EQ(bu_card_text(BU_MS_LEVEL, &in, t), BU_VAL_WHITE); T_STR(t, "-1.21dB");
+  T_EQ(bu_card_text(BU_MS_3DB, &in, t), BU_VAL_WHITE);   T_STR(t, "47.29kHz");
+  T_EQ(bu_card_text(BU_MS_BW, &in, t), BU_VAL_WHITE);    T_STR(t, "6.210kHz");
+  T_EQ(bu_card_text(BU_MS_PEAK, &in, t), BU_VAL_WHITE);  T_STR(t, "50.30kHz");
+  T_EQ(bu_card_text(BU_MS_Q, &in, t), BU_VAL_WHITE);     T_STR(t, "8.1");
+  T_EQ(bu_card_text(BU_MS_PH45, &in, t), BU_VAL_WHITE);  T_STR(t, "47.30kHz");
+  T_EQ(bu_card_text(BU_MS_PH90, &in, t), BU_VAL_GREY);   T_STR(t, "not found");
+  T_EQ(bu_card_text(BU_MS_PH180, &in, t), BU_VAL_GREY);  T_STR(t, "not found");
+
+  in.thru = BU_THRU_APPLIED;
+  T_EQ(bu_card_text(BU_MS_THRU, &in, t), BU_VAL_GREEN);  T_STR(t, "applied");
+  in.thru = BU_THRU_STALE;
+  T_EQ(bu_card_text(BU_MS_THRU, &in, t), BU_VAL_AMBER);  T_STR(t, "stale");
+  in.thru = BU_THRU_OFF;
+  T_EQ(bu_card_text(BU_MS_THRU, &in, t), BU_VAL_GREY);   T_STR(t, "off");
+
+  //Every item in every state fits its card, with the longest values (10 MHz, -100 dB, Q 999.9)
+  mk.ref_mdb = -99990; mk.f3db_mhz[0] = 9999000000ull; mk.f3db_mhz[1] = 10000000000ull; mk.peak_mhz = 9999000000ull;
+  mk.q_x100 = 99990; mk.ph_mhz[2] = 9999000000ull; mk.ph_mhz[5] = 9999000000ull;
+  for(k = BU_TABLE_NONE; k <= BU_TABLE_COMPLETE; k++)
+    for(i = 0; i < BU_MS_COUNT; i++)
+    {
+      in.table = (uint8)k;
+      in.done = 200; in.count = 200;
+      bu_card_text(i, &in, t);
+      T_TRUE(strlen(t) < 20);
+      if(!ui_card_fits(&font_2, bu_ms_names[i], t)) { T_TRUE(0); printf("card %s %s\n", bu_ms_names[i], t); }
+      in.autoset = 1;
+      bu_card_text(i, &in, t);
+      if(!ui_card_fits(&font_2, bu_ms_names[i], t)) printf("card auto %s %s\n", bu_ms_names[i], t);
+      in.autoset = 0;
+    }
+  T_TRUE(ui_card_fits(&font_2, "-3dB", "not found"));
+}
+
+static void test_bode_texts(void)
+{
+  ui_fold f;
+  char t[64];
+  int i;
+
+  //Warnings: at most 50 characters, inside the width they are budgeted (16 px estimate, 13 px drawn)
+  for(i = 0; i < BU_W_COUNT; i++)
+  {
+    if(strlen(bu_warn[i]) > BU_WARN_MAX) { T_TRUE(0); printf("long warning: %s\n", bu_warn[i]); }
+    T_TRUE(ui_text_width(&font_2, bu_warn[i]) <= 355);
+  }
+  for(i = 1; i <= 200; i++)
+  {
+    T_TRUE(strlen((bu_warn_unsettled(t, i), t)) <= BU_WARN_MAX);
+    T_TRUE(strlen((bu_warn_floor(t, i), t)) <= BU_WARN_MAX);
+  }
+  T_STR((bu_warn_unsettled(t, 2), t), "2 points not settled: choose a longer Settle");
+
+  //The instruction (owner): two lines in 16 px, centred at x 366 inside the pane and clear of both axes' labels
+  T_STR(bu_instruction[0], "Connect the calibration post and CH1 to the input, CH2 to the output,");
+  for(i = 0; i < 2; i++)
+  {
+    uint32 w = ui_text_width(&font_3, bu_instruction[i]);
+
+    T_TRUE(BU_WARN_XC - w / 2 >= BU_PX + 50);
+    T_TRUE(BU_WARN_XC + w / 2 <= BU_PX + BU_PW - 60);
+  }
+
+  //The Display button's values fit the 51 px button (13 px)
+  for(i = 0; i < BU_SHOW_COUNT; i++)
+    T_TRUE(ui_text_width(&font_2, bu_show_values[i]) + 2 <= UI_BAR_W);
+
+  //Display fold-out (228 px, as Spectrum's Analyse): three variants with icons, the separator, Frequency axis
+  ui_fold_layout(&f, 228, 4, 3, UI_CTRL_DISPLAY_Y);
+  check_fold(&f);
+  for(i = 0; i < BU_SHOW_COUNT; i++)
+    T_TRUE(46 + ui_text_width(&font_3, bu_show_names[i]) + 6 <= ui_fold_row_w(&f));
+  printf("axis row %u + %u, rw %u\n", ui_text_width(&font_3, bu_axis_row), ui_text_width(&font_3, "Linear"), ui_fold_row_w(&f));
+  for(i = 0; i < 2; i++)
+    T_TRUE(row_fits(&f, bu_axis_row, bu_axis_names[i], 0));
+
+  //Sweep fold-out beside its button at y 125: Start, Stop (two-way), Points, Settle, CH2 range, Single sweep
+  ui_fold_layout(&f, 206, 6, 5, 125);
+  check_fold(&f);
+  T_TRUE(row_fits(&f, "Start", "500kHz", 1));
+  T_TRUE(row_fits(&f, "Stop", "10MHz", 1));
+  T_TRUE(row_fits(&f, "Settle", "Resonant", 0));
+  T_TRUE(row_fits(&f, "CH2 range", "Auto", 0));
+  T_TRUE(ui_text_width(&font_2, bu_single_running) + 8 <= ui_fold_row_w(&f));
+  T_STR((bu_estimate_text(t, 2600), t), "about 3 s");
+  T_STR((bu_estimate_text(t, 120), t), "about 1 s");
+  T_STR((bu_estimate_text(t, 45000), t), "about 45 s");
+  T_STR((bu_estimate_text(t, 150000), t), "about 3 min");
+
+  //Thru fold-out beside its button at y 185
+  ui_fold_layout(&f, 206, 3, 0, 185);
+  check_fold(&f);
+  //Its switch row draws the texts from x 60 (bode_view.c)
+  T_TRUE(60 + ui_text_width(&font_2, "other sweep settings") + 4 <= ui_fold_row_w(&f));
+  T_TRUE(ui_text_width(&font_2, "Thru: both tips on the input") + 20 <= f.w);
+}
 int main(void)
 {
   test_sig4();
@@ -1258,5 +1673,9 @@ int main(void)
   test_meas_spectrum_maths();
   test_meas_sources();
   test_meas_menu();
+  test_bode_scales();
+  test_bode_readout();
+  test_bode_cards();
+  test_bode_texts();
   return t_report("test_ui");
 }

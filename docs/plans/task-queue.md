@@ -68,8 +68,49 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   drives the scope through each state over USB (scope_screenshot) and saves named PNGs for reproducible screenshots; plots from
   MCP data saved with their generating command. Order: site skeleton + screenshot tool + user guide before the announcement
   (after the polish batch lands so the screens are final); articles at any pace. Dispatch a docs agent after fw-polish merges.
-- **Wizard measurement setup fault** (fw-cal5 running, 10-19 18:00): zero step fails on 0x1538 with clean host data; see
+- [~] **FPGA ADC data capture window (was: MCU-readout bit mixing)** (0x1539 flashed 20:06: readout fixed, capture window still wrong on the A cores; 0x153A = programmable capture phase + training, fpga-gen8) (root cause of the wizard failure, bench 18:35; 0x1539 fix by fpga-gen8 first, features after; fw-cal5 workaround: zero measured off-centre; a flash session follows). Was: **Wizard measurement setup fault** (fw-cal5 running, 10-19 18:00): zero step fails on 0x1538 with clean host data; see
   hardware-status 17:55. Deliverable includes a host-triggerable dry run so the coordinator can verify without the owner.
+- [x] **Frequency response mode UI** (0.2.69, bench pending; follow-ups above) (design docs/plans/bode-ui.md + artifact DfydC8HJgnemUw3EHenTGP; owner 19:15: variant 2 one pane two y axes without legend, "calibration post" in the instruction, frequency axis Log/Linear in the Display fold-out, two flagged cursors C1/C2 with the bottom-left readout box and delta row kept (19:25), Display variants Overlaid / Magnitude / Phase; questions 1-5 per the coordinator's recommendations; fw-freq dispatched as 0.2.69 together with the 10 samples/div viability minimum). Was: **Bode mode UI redesign** (owner 10-19 18:50: fw-bode remapped RUN/STOP and AUTO SET to sweep control, which breaks the fixed
+  right-bar meanings; a designer (ux-bode, Opus) is producing the Bode mode mockup: action page with the standard slot meanings,
+  CTRL page with Display / Sweep / Thru / Grid, cards via MEASURES, docs/plans/bode-ui.md with the control map and a self-review).
+  Then a firmware batch implements it; until then the Bode view keeps its interim controls (menu row moves in polish batch 2).
+- [x] **Time/div viability: minimum samples per division** (0.2.69: 10 per division, 200 MS/s down to 50 ns/div) (owner 10-19 19:00, bench: 100 kS/s with 10 us/div = one sample per
+  division; host captures show the 1 kHz edge spread over the CIC2 step response (93, 108, 145, 155, 161) with the edge samples
+  drifting 108 -> 103 -> 99 between captures as the DDS 1 kHz (999.996 Hz, 4 ns per period) creeps across the 10 us sample grid,
+  so the interpolated trace wobbles at about 1 Hz; no trigger jitter: the edge index is stable). fw-acq's rule allows one sample
+  per division; raise the minimum to about 10 samples per division (10 px per sample) so such zooms are unavailable and the snap
+  picks a viable time/div; one constant in tb_view.c plus the host test. Next firmware batch.
+- **Bottom scroll bar in Spectrum and Frequency response** (owner 10-19 19:40): the Scope's record slider construction under the
+  plot of both modes; Spectrum: the span as a window over 0..fs/2, drag pans the centre; Frequency response: Start..Stop as a window
+  over 100 Hz..10 MHz on the log axis, drag pans both and re-sweeps. Designer (ux-bode) updates the boards and bode-ui.md /
+  ux-makeover.md first; firmware batch after fw-freq lands (spectrum.c and bode_view.c).
+- **Frequency response chart follow-ups** (owner 10-19 20:50, after the bench of the device sweep on the RC low-pass; batch
+  fw-freq2 together with the follow-ups listed under fw-freq): (a) a Trace style button on the mode's CTRL page like the Scope's,
+  Lines (default) / Dots, same fold-out construction; today valid points are joined and coloured per axis and flagged points are
+  grey loose dots, which is what the owner saw because the 0x1539 capture fault flagged every point (hardware-status 20:51); keep
+  the grey for flagged points. (b) Grid lines that mean something: on the log frequency axis vertical lines at the decades (minor
+  at 2 and 5 when the span is narrow enough to need them), on the linear axis at the label steps; horizontal lines at the dB and
+  degree divisions the labels name; the Spectrum view's grid the same way (vertical at its frequency labels, horizontal at its
+  dB/div); state the rule in ui-guidelines.md section 3. (c) BODE_STATUS consistency: with no sweep since boot the header
+  reported the engine's defaults (100 Hz..1 MHz / 50 / Normal) while the estimate (245.7 s) was computed for the view's own
+  settings; report one set (the settings in effect, cfg_now) in both. (d) Ranging robustness: the engine treats one rail sample
+  as a clip and ranged both channels to 5 V/div on a bitstream with the A-core fault; decide with the owner's fail-fast rule in
+  mind: either leave it (0x153A removes the cause) or stop the sweep with a "readout fault" reason when the pre-scan clips at
+  5 V/div with a fundamental under 20 codes, instead of producing a flagged table. (e) The estimate text of Single sweep must
+  use the same settings as (c).
+- **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
+  SCREENSHOT bit 6, simulator has it, `Scope.read_screen` reads 40 rows per request) but the firmware handler is NULL
+  (pc_cmds.c "BENCH: T9"). Implement it in all builds: rows of the live framebuffer as RGB565, the header per protocol.md, the
+  capability bit set; host test against the vectors; bench: `scope_screenshot` on the unit equals the screen (T9).
+- **FPGA review on a Fable agent** (owner 10-19 20:55: "might want to use a Fable agent to review and fix the FPGA code"):
+  fpga-gen8 retires at 810k tokens with its 0x153A handoff; fpga-gen9 runs on Fable: review the AL3 design end to end (ADC
+  capture path, clocking, constraints) against the bench record, then finish 0x153A.
+- [x] **Preserve the mockup sources** (docs/mockups/ committed 19:50): copy the gen_ux generators and the artboard HTML from the coordinator's scratchpad into
+  docs/mockups/ (committed) before the session ends; the makeover artifact itself is on a previous login (ux-makeover.md note).
+- **Wizard zero point back at code 128** (owner 10-19 20:30, fail fast): revert 0.2.67's two-point off-centre zero, measure at the
+  centre PWM so a bitstream with the capture fault fails the wizard loudly; keep the "ADC readout fault near code 128" wording and
+  the CAL_PROBE command; host test updated. Do it in the firmware batch that follows 0x153A (so the wizard keeps passing on the
+  owner's unit).
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
@@ -144,7 +185,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   d3a16bb, simulator-tested, bench pending in "MCP / host"): MCP tool `scope_bode_sweep` host-driven with the existing
   commands (SET_GEN raw 50 MHz / M tones, SET_DECIM CIC3+FIR, coherent READ_RAW layout 2, single-bin DFT), thru-calibration, fixed range
   first, then down-ranging; bench first on an RC low-pass R 1.6 kOhm / C 10 nF (fc 9.95 kHz) with DUT ground on the USB shell.
-- [ ] **Bode analyser, device steps D1-D5** after the host version proves the numbers: display mode with magnitude/phase panes,
+- [x] **Bode analyser, device steps D1-D5** (fw-bode 0.2.66 merged 18:20; owner 18:45: Bode plot is a main-menu mode row after Spectrum analyser at a 52 px pitch, eight rows, removed from the generator pop-over -> fw-polish2 item 6; the earlier "entry from the generator menu" note is superseded). Was: after the host version proves the numbers: display mode with magnitude/phase panes,
   BODE_CTRL / READ_BODE. Owner decision: entry from the generator menu (the main menu has no eighth row).
 - [ ] **docs/protocol.md tidy** (docs-gen1 findings): row 32 says GET_STATUS bytes 42-43 are zero while rows 41/45 define ext_flags and
   display_mode there (add a "superseded" note); row 49 calls CIC+FIR the eventual default while CIC2 is the default since 0.2.44; row 51
@@ -228,7 +269,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [x] **Bode bench session** (10-19 14:35-15:25: RC low-pass and high-pass consistent to 0.14 dB / 1 deg, floor -80 dB, thru +0.3 dB, divider flat: tool accepted; capacitor dispersion is the part; DC overload in wiring B found, wiring A recommended) (was: RC 1k/15n, floor -80 dB, thru +0.3 dB, divider flat -20.5 dB: tool proven; RC capacitor deviation open; 0.1 V/div bug found) (mcp-gen4 hand-off; procedure in mcp/AGENTS.md "Bode bench"): wiring A/B, thru, floor, coherence, the
   1.6 kOhm / 10 nF RC; record the floor, skew and the wiring verdict in docs/hardware-status.md.
 - [ ] **Bode follow-ups** (after the bench): CH1 re-ranging when CH1 drops below 20 codes (resonant input nodes), the harmonic fast
-  mode (design 1.3), the impedance mode z_series_ohm (design 2.4, coil L / Q / SRF for the detector), an optional PNG plot.
+  mode (design 1.3), the impedance mode z_series_ohm (design 2.4, coil L / Q / SRF for the detector); the PNG plot is done (scope_report, mcp-gen6).
+- [ ] **1.19 / 1.20 on the unit, host side** (mcp-gen6 hand-off, mcp/AGENTS.md open item 0a): scope_health encode_check
+  on 0x1538; scope_bode_sweep(where='device') on the divider and the RC next to where='host' (within 0.05 dB / 0.3 deg).
+- [x] **CAL_PROBE (1.21) host decoder** (mcp-gen6, b3b9c51): `scope_cal_probe`, `CalProbeResp`, simulator model.
 - [ ] **1.17 on the unit, host side** (mcp-gen5, after the owner's 0x1536 flash and firmware/AGENTS.md section 35 checks 7-9): run
   `scope_capture_segments` (10 kHz generator: intervals 100 us +- 10 ns, every segment crossing at the pretrigger point) and
   `scope_averaged_capture(hardware=true)` against host averaging of the same signal (means within 0.1 code, N = 1 equal to READ_RAW);
@@ -254,6 +298,34 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Dispatched
 
+- Batch of 2026-10-19 20:58 (owner: "continue working off the roadmap with agents"), all in worktrees, all push their own branch:
+  fw-freq2 (Opus, branch fw-freq2, fw 0.2.70 provisional): single sweep visible and STOP cancels, Spectrum slider, top bar in the
+  mode, cancelled AUTO SET restores the table, Move fast cursors, MEASURES immediate, sharp-tank span, Trace style Lines/Dots,
+  meaningful grid lines in both modes, BODE_STATUS header/estimate consistency, pre-scan readout-fault reason.
+  ux-overview (Opus, designer, branch ux-overview): slider-track mini overview design (docs/plans/slider-overview.md, boards in
+  docs/mockups), self-review and owner questions; firmware batch after approval.
+  docs-site (Sonnet, branch docs-site): mkdocs.yml + Material, docs.yml Pages workflow, guide and article skeletons,
+  tools/screenshots.py against the simulator, CI build job.
+  fw-screen (Opus, branch fw-screen): READ_SCREEN firmware handler so scope_screenshot works on the unit (docs screenshots).
+  fw-bus (Opus, branch fw-bus): FPGA bus contract fixes (one-word-late readout per bitstream, EXT shift, arm order, 0x33 sticky
+  after a rate write, type 22 trace to debug level, core-order convention from 0x33 on 0x1538+).
+  fpga-gen9 (Fable, branch fpga-gen9 from fpga-gen8's branch, owner 20:55): adversarial review of the AL3 capture path, clocking,
+  constraints and the TD initial-value finding, then finish 0x153A (build, every testbench, tb_adccap, contract transcript, docs,
+  images for pinning, dist entry, firmware notes); 0x153B = the features branch gen8-features-wip afterwards.
+- fpga-gen8 (done 20:57, about 834k tokens, retired; handoff = the last section of fpga/al3/AGENTS.md on branch
+  worktree-agent-ac1eb52dff7a62fc7, commits 19d9a5c WIP + e924eba handoff, not merged: main keeps the 0x1539 sources until 0x153A is
+  benched). Delivered 0x1539 (flashed 20:06). Found: AD9288 data valid from tPD 6 ns max to tV 2 ns min, so at 200 MS/s each core
+  is valid 6 ns of every 10 and the A/B windows overlap about 0.4 ns; 0x1532..0x1539 sampled all four buses at one instant and
+  each build landed elsewhere (B bad on 0x1538, A on 0x1539). 0x153A WIP: every ADC pin through an IOB DDR input register with a
+  fixed pad delay plus two stages (samples 5..17.5 ns before the write edge in 2.5 ns steps), per-core stage select write 0x63,
+  outlier counters read 0x36 / threshold write 0x64, one extra word of ADC latency (EXT offsets grow by one word, 0x53 bits 3/4 no
+  effect). Earlier build met timing thinly (clk_200MHz +0.111 ns, sample_write_clock +0.123 ns, 5011 LUT); the latest source (new
+  registers stored XOR their defaults) is unbuilt; tb_ext_trigger 1/38 and tb_trigpos 42/882 fail on monitors that predate the
+  latency change; fir, long, seg not run; tb_adccap not written; docs not written. Finding for everyone: TD 4.6.8 ignores Verilog
+  initial values (every register powers up 0; builds with different initial values were byte-identical), so documented power-on
+  values of existing registers may be wrong on the hardware. Features (trigger types, peak detect, counter) on gen8-features-wip
+  9de82ca, each passed its own testbench in a scratch copy, full run and docs unfinished; to be rebased as 0x153B.
+
 - Swarm started 10-19 13:40 after step 1 merged (owner: ship the whole roadmap before the announcement, one big splash; front-load
   everything that needs no hardware). Provisional firmware numbers, renumbered at merge: fw-readers 0.2.52 / protocol 1.16,
   fw-ui2 0.2.56 (step 2: CTRL fold-outs, steppers, strips to cards, chips, ACQ Display row removed), fw-touch1 0.2.54 (touch-review
@@ -269,6 +341,28 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   BITSTREAMS.md and tools/bitstreams.py check in CI; release.yml attaches them, accepts vX.Y.Z-rcN pre-release tags, takes release
   notes from docs/release-notes/X.Y.Z.md (0.3.0 draft with placeholders); releasing.md fixed; README rewritten; release-checklist.md).
   Open: add 0x1538 as recommended when pinned and benched; owner decisions: attach older bitstreams, AI credits wording (F12).
+- fw-freq (done 19:45, about 475k tokens, retired; handoff firmware/AGENTS.md section 45): Frequency response UI merged as fw 0.2.69
+  (one-pane dual-axis chart, Display variants + Log/Linear axis, C1/C2 cursors with the box, AUTO SET overview span, Single sweep,
+  CSV via SAVE WAVE, ten-item MEASURES, slider row, menu icon, "Frequency / response" row; ten samples per division rule; words
+  213..215, 220); pinned backups/fw-0.2.69_8babde3b.bin, loaded 19:48. Follow-up batch (owner 10-19 20:00 adds: a single sweep must be visible as running with STOP cancelling it after the point, today STOP has no effect; the Spectrum slider; a mini overview drawn in the slider track where the data exists: the record's min/max envelope in Scope, the full-span spectrum in Spectrum, the AUTO SET overview in Frequency response, design first): top bar in this mode (ACQ chip "Set by the
+  sweep", generator chip shows the tone), the Spectrum slider, cancelled AUTO SET restores the previous table, Move fast for
+  cursors, MEASURES change immediate, sharp-tank overview span.
+- ux-bode (done 19:55, designer, retired): Frequency response mode design (artifact DfydC8HJgnemUw3EHenTGP, docs/plans/bode-ui.md
+  6d849f6: chart, cursors, Display variants, icon, slider rows for Spectrum and Frequency response, track 1 Hz..10 MHz).
+- mcp-gen6 (done 19:05, about 500k tokens, retired; handoff mcp/AGENTS.md): protocols 1.19 (encode_check in scope_health, events
+  21/22), 1.20 (scope_bode_sweep where=device, close_view), 1.21 (scope_cal_probe, 252-byte decoder), fnirsi1013d.report +
+  scope_report (PNG + offline HTML), guide 7a "Presenting results", simulator variants al3e; pushed 2fb610e, CI 39290741852 green.
+  Bench left: scope_health on 0x1538, device vs host Bode sweep on the RC and divider (expect 0.05 dB / 0.3 deg), scope_cal_probe.
+- fw-cal5 (done 18:45, about 490k tokens, retired): 0.2.67 merged (off-centre zero, CAL_PROBE, readout fault named); the
+  workaround is insufficient on 0x1538 (hardware-status 18:50): the wizard waits for 0x1539. fw-polish2 (done 18:50, about 400k,
+  retired): 0.2.68 merged; walk-through firmware/AGENTS.md section 44. Owner 18:55: the mode row is "Frequency response".
+- fw-bode (done 18:20, about 760k tokens, retired): Bode on the device merged 0fbcf02 as fw 0.2.66 / protocol 1.20 row 60
+  (bode_dsp.c, bode_sweep.c main-loop engine, bode_view.c panes/markers/cards, generator menu row "Bode plot", CTRL Sweep/Thru/Grid,
+  BODE_CTRL 0x0211 / READ_BODE 0x0212 20-byte rows, display mode 5, features bit 6, words 219-220); pinned backups/fw-0.2.66_e2483907.bin;
+  walk-through firmware/AGENTS.md section 42 (RC and divider on the bench). Not loaded (the scope holds the CAL_PROBE image).
+- Third wave 18:25: mcp-gen6 (protocols 1.19-1.21 host side, scope_bode_sweep where=device, fnirsi1013d.report PNG/HTML +
+  scope_report, guide/skill "Presenting results"), fpga-gen8 (0x1539: pulse-width / Nth-edge / timeout triggers, peak detect,
+  200 MHz counter), fw-polish2 (batch 2), fw-cal5 (wizard screen-context fault).
 - Landed from the second swarm by 18:00: fw-enc 0.2.62 (benched on 0x1538: clean), fw-polish 0.2.63 (items a-q; Pro style and
   the Debug overlay switch removed, RUN/STOP = green RUN / amber Stopped, Waterfall channel row), fw-acq 0.2.64 (viability from
   the record length, time/div snap notice, slider drag, dead band, per-mode filter words 207/212, Peak/Pro buffer overrun fixed),

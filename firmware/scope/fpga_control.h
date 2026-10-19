@@ -100,6 +100,11 @@ void   fpga_prepare_correction(PCHANNELSETTINGS settings);                //the 
 extern uint8 fpga_trace_who;
 
 extern uint32 fpga_divider;     //last 0x0D value written (clock class of the zero correction)
+//fw 0.2.67, CAL_PROBE A/B tests of the sample readout (fpga_read_adc_data), both 0 normally: extra reads of the data port
+//after each sample strobe before the sampled one; a data-write strobe (bus not driven, ignored by the FPGA) before each
+//sample strobe, so the sample memory's read register settles on the address before the strobe that takes it
+extern uint8  fpga_read_settle;
+extern uint8  fpga_read_prestrobe;
 void   fpga_read_adc_data(PCHANNELSETTINGS settings);
 
 uint16 fpga_average_trace_data(PCHANNELSETTINGS settings);  //For long time base

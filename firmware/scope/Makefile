@@ -90,6 +90,8 @@ SRCS += pc_seq.c pc_seq_hw.c
 # fw 0.2.66: the Bode plot: maths (bode_dsp.c) and sweep engine (bode_sweep.c) pure C, host-tested (test_bode.py,
 # test_bode_sweep.c); the view (bode_view.c) and the scope's hardware and protocol glue (pc_bode.c)
 SRCS += bode_dsp.c bode_sweep.c bode_view.c pc_bode.c
+# fw 0.2.69: the Frequency response screen as data (bode_ui.c, pure C, host_tests/test_ui.c)
+SRCS += bode_ui.c
 # Last: the identity data (build_id.c), so its bytes are the only ones a new commit changes.
 SRCS += build_id.c
 PC_DEFS := -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FIFO_MAP=$(PC_FIFO_MAP) \

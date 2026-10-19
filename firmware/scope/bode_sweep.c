@@ -992,3 +992,160 @@ uint32 bode_proto_rows(const bode_eng *e, uint32 first, uint32 max, uint8 *p)
 
   return n;
 }
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Start / Stop steps and AUTO SET's span (fw 0.2.69)
+
+uint64 bode_step_mhz(int i)
+{
+  static const uint8 m125[3] = { 1, 2, 5 };
+  uint64 f;
+  int k;
+
+  if(i < 0) i = 0;
+  if(i >= BODE_STEPS) i = BODE_STEPS - 1;
+
+  f = (uint64)m125[i % 3] * 1000;
+  for(k = 0; k < i / 3; k++)
+    f *= 10;
+
+  return f;
+}
+
+int bode_auto_span(const uint64 *f, const int32 *m, const int32 *p, const uint16 *fl, const uint8 *have, int n,
+                   int start_i, int stop_i, bode_autospan *o)
+{
+  uint8 ok[BODE_MAX_POINTS];
+  bode_markers mk;
+  int   i, good = 0, a = -1, b = -1, changing = 0, coarse = 0;
+  uint64 lo = 0, hi = 0, f0 = 0;
+  uint32 q = 0;
+
+  o->start_i = (uint8)start_i;
+  o->stop_i  = (uint8)stop_i;
+  o->settle  = BODE_SETTLE_NORMAL;
+  o->q_x100  = 0;
+  o->f0_mhz  = 0;
+
+  if(n > BODE_MAX_POINTS)
+    n = BODE_MAX_POINTS;
+
+  for(i = 0; i < n; i++)
+  {
+    ok[i] = (uint8)(have[i] && !(fl[i] & BODE_F_BAD));
+
+    if(have[i] && !(fl[i] & (BODE_F_NEAR_FLOOR | BODE_F_LOW_SNR)))
+      good++;
+
+    if(ok[i])
+    {
+      if(a < 0)
+        a = i;
+      else if(b < 0)
+        b = i;
+    }
+  }
+
+  if(!good)
+    return BODE_AS_NO_RESPONSE;
+
+  bode_markers_find(f, m, p, ok, n, &mk);
+
+  if((a >= 0) && (b >= 0))
+  {
+    int32 dm = m[b] - m[a], dp = bode_wrap_mdeg(p[b] - p[a]);
+
+    changing = (dm > 1000) || (dm < -1000) || (dp > 5000) || (dp < -5000);
+  }
+
+  if((mk.shape == BODE_SHAPE_RESONANT) || (mk.ph_mhz[0] && mk.ph_mhz[1]))
+  {
+    //f0: the peak, else the middle (in log f) of the +45 and -45 deg crossings; Q from the -3 dB width, else from the
+    //+-45 deg crossings (a second-order band-pass passes them at its -3 dB points)
+    uint64 fa = mk.ph_mhz[0], fb = mk.ph_mhz[1];
+
+    if(mk.have_peak)
+      f0 = mk.peak_mhz;
+    else
+      f0 = bode_exp2_round((bode_log2_q32(fa) + bode_log2_q32(fb)) / 2);
+
+    if(mk.have_q)
+      q = mk.q_x100;
+    else if(fa && fb && (fa != fb))
+      q = (uint32)((f0 * 100) / ((fa > fb) ? fa - fb : fb - fa));
+
+    //A band narrower than two point spacings is not resolved: its Q reads low (a lower bound). Then at least half a
+    //decade either side and at least Settle Resonant (the overview's 20 points over five decades are 1.8x apart: a
+    //Q 8 tank's band is an eighth of f0)
+    if((a >= 0) && (n > 1) && (mk.n3db == 2) &&
+       ((bode_log2_q32(mk.f3db_mhz[1]) - bode_log2_q32(mk.f3db_mhz[0])) <
+        2 * ((bode_log2_q32(f[n - 1]) - bode_log2_q32(f[0])) / (n - 1))))
+      coarse = 1;
+
+    if(coarse && (q <= 200))
+      q = 201;
+
+    if(q <= 200)
+    {
+      lo = f0 / 10;
+      hi = f0 * 10;
+    }
+    else if(q <= 1000)
+    {
+      lo = (f0 * 1000) / 3162;
+      hi = (f0 * 3162) / 1000;
+    }
+    else
+    {
+      uint64 d = (f0 * 400) / q;
+
+      lo = f0 - d;
+      hi = f0 + d;
+    }
+
+    o->settle = (q <= 700) ? BODE_SETTLE_NORMAL : (q <= 3400) ? BODE_SETTLE_RESONANT : BODE_SETTLE_HIGHQ;
+    if(coarse && (o->settle == BODE_SETTLE_NORMAL))
+      o->settle = BODE_SETTLE_RESONANT;
+
+    //A band-pass always rises at its low end: the still-changing rule is for the other shapes
+    changing = 0;
+    o->q_x100 = q;
+  }
+  else if(((mk.shape == BODE_SHAPE_LOWPASS) || (mk.shape == BODE_SHAPE_HIGHPASS)) && mk.n3db)
+  {
+    f0 = mk.f3db_mhz[0];
+    lo = f0 / 10;
+    hi = f0 * 10;
+  }
+
+  if(changing)
+  {
+    lo = bode_step_mhz(BODE_STOP_MIN);                 //10 Hz
+    if(!hi)
+      hi = bode_step_mhz(stop_i);
+  }
+
+  if(!lo || !hi)
+    return BODE_AS_FLAT;
+
+  o->f0_mhz = f0;
+
+  //Outwards to the steps, inside 1 Hz .. 10 MHz
+  start_i = 0;
+  for(i = 0; i < BODE_STEPS; i++)
+    if(bode_step_mhz(i) <= lo)
+      start_i = i;
+
+  stop_i = BODE_STEPS - 1;
+  for(i = BODE_STEPS - 1; i >= 0; i--)
+    if(bode_step_mhz(i) >= hi)
+      stop_i = i;
+
+  if(start_i > BODE_START_MAX) start_i = BODE_START_MAX;
+  if(stop_i < BODE_STOP_MIN)   stop_i = BODE_STOP_MIN;
+  if(stop_i <= start_i)        stop_i = start_i + 1;
+
+  o->start_i = (uint8)start_i;
+  o->stop_i  = (uint8)stop_i;
+  return BODE_AS_SPAN;
+}

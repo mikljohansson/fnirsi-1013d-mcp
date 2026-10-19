@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            20    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            21    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -42,6 +42,8 @@
                                         //1.20: the on-device Bode
                                         //      plot: BODE_CTRL / READ_BODE, GET_STATUS display_mode 5, features
                                         //      bit 6 (fw 0.2.66)
+                                        //1.21 (provisional numbering): CAL_PROBE, the calibration wizard's zero
+                                        //      measurement from the host (fw 0.2.67)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
@@ -109,6 +111,7 @@
 #define PC_CMD_SET_GEN            0x0301
 #define PC_CMD_GET_CAL            0x0400
 #define PC_CMD_READ_SCREEN        0x0401
+#define PC_CMD_CAL_PROBE          0x0402     //1.21: the wizard's zero measurement of one channel and range (fw 0.2.67)
 #define PC_CMD_DEBUG_FPGA         0x0F00
 #define PC_CMD_ENTER_FEL          0x0F01
 #define PC_CMD_FFT_BENCH          0x0F02     //1.6: time the on-scope FFT (fw 0.2.27)

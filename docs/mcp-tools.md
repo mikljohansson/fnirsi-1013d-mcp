@@ -107,7 +107,9 @@ the server takes REMOTE implicitly and releases it (keeping the host settings) a
 `scope_status` reports `mode`, `run_state` and `settings_seq`; `acquisition_control` gained `run`.
 Protocol 1.7 adds `display_mode` (`scope`, or `spectrum` while the screen shows the spectrum view); while it is
 `spectrum`, every tool that checks the scope first (captures, setters) adds the caveat that the person sees the
-spectrum of each capture, not the trace. The data are unaffected.
+spectrum of each capture, not the trace. The data are unaffected. Later modes: `waterfall` / `density` (1.13 spectrum
+sub-views), `phosphor` (1.13), `bode` (1.20, the scope's Bode plot: its own acquisition is off). `features` gains
+`enc_check` (1.19, 0x1538) and `bode` (1.20, what the device sweep needs: DECIM and the generator).
 
 **`health`** (`scope_health`, tier 0, firmware 0.2.52+ / protocol 1.16, also while a menu is open). GET_HEALTH in
 words and values: USB state now (off, reconnecting, not configured, configured, suspended; high speed, port open,
@@ -115,7 +117,13 @@ POWER / FADDR, time in the current suspend, since SET_CONFIGURATION), the CP15 c
 unit life (power-on number, operating hours, uptime, whether the settings sector was valid and the boot write
 succeeded, how the previous power-on ended), the settings save state, and the stored restart record (exception type,
 power-on, restarts, the saved registers; it survives power cycles until cleared at the scope). Read-only: the clear
-and restart-test flags are not exposed.
+and restart-test flags are not exposed. From 1.19 (fw 0.2.62, GET_HEALTH 104 bytes) `encode_check`: how 200 MSa/s
+captures are checked for a garbled ADC core (none; record data on AL3 0x1532..0x1537; the FPGA's self-check read 0x33
+on 0x1538+), the last 0x33 byte with its failing pins, the boot convention check, captures checked / found garbled /
+re-taken clean, and one line in `in_words`. Every tool that checks the scope first adds a caveat while the last
+full-rate capture was accepted garbled after 16 re-arms (or the boot convention check failed). Event types 21
+(`adc_fullrate_garbled`: reason, re-arms, caller, residual or 0x33 byte) and 22 (`fpga_write`) are decoded in words by
+`scope_event_log`.
 
 **`save_report`** (`scope_save_report`, tier 1, 1.16, cap SD_SECTORS). SAVE_REPORT: the scope writes
 `reports/report-PPPPP-NN.txt` on its card's FAT partition (identity, life, USB, battery, counters, event log, both
@@ -344,7 +352,24 @@ Disabling (`enabled=false`) does not need a token.
 
 **`bode_sweep`** (`scope_bode_sweep`, tier 3, token, caps DECIM and the generator): frequency response CH2 / CH1 of a
 passive DUT on the calibration post; parameters and returns in mcp/README.md "Bode sweep" and the guide's section 3b
-(design: docs/plans/bode-design.md).
+(design: docs/plans/bode-design.md). `where='device'` (protocol 1.20, fw 0.2.66): the scope's own engine runs the sweep
+(BODE_CTRL action 1 with the settings, or 5 for `thru_cal='measure'`), the tool polls READ_BODE until the state leaves
+`running`, reads the 20-byte rows, recomputes f from the DDS period M, maps the flag bits to the host tool's flag names
+and returns the same structure as the host sweep (plus `device`: sweep id, state, reason, thru state, view), so the
+two compare point by point. Presets only, `ch2_range` auto / fixed, DC; `thru_cal` 'device' applies the scope's stored
+thru, a stored name is applied on the host; `close_view` closes the scope's Bode view afterwards (it restores the
+scope's settings). While the view shows (`display_mode` `bode`) the capture tools add a caveat.
+
+### 4.4a Presenting results (tier 0)
+
+**`report`** (`scope_report`, tier 0, touches no scope): `source` = a result file a tool returned (`.npz`, or a Bode
+sweep's `.json`) or `'latest'`; `title`, `command` (shown on the page; default: the tool and the arguments recorded in
+the file), `caveats` (added to the recorded ones), `plot`. Writes `<home>/reports/<date>/<stem>.png` (matplotlib,
+optional extra `plot`) and `<stem>.html` (plot embedded as base64, table, summary, caveats, command; no scripts, no
+external resources, light and dark). Returns both paths, the kind, the summary lines, up to 50 table rows, the caveats
+and `how_to_show` (Claude Code: Read the PNG, publish the HTML with the Artifact tool). Kinds: capture, averaged
+capture, decay fit, segments, host FFT, the scope's spectrum, Bode (host or device). Library: `fnirsi1013d.report`
+(`build_report`, `load_result`), CLI `python -m fnirsi1013d.report <file|latest>`.
 
 **`self_test_loopback`** (tier 3, token). Asks the user (in the description) to connect the calibration
 pin to CH1 with the probe. Runs: generator at 10 kHz / 50 % and 1 MHz / 25 %, captures at several rates,
@@ -353,6 +378,15 @@ known signal (protocol section 12, T4/T5/T7). Returns pass/fail per check. Used 
 bitstream change.
 
 ### 4.5 Calibration, screen (tier 0)
+
+**`cal_probe`** (`scope_cal_probe`, tier 2, protocol 1.21 / fw 0.2.67, provisional numbering; diagnostic): CAL_PROBE
+runs the calibration wizard's zero measurement of one channel and hardware range (or, `whole_step`, the wizard's whole
+zero step on the screen) and returns the verdict (OK, CLIP, NOISE, ZERO, SPREAD, SLOPE, DRIFT, CLASS, TIMING,
+READOUT) in words, the failing point / class / core / value, the centre and zero PWM, the zero split, the encode-check
+counts during the probe and per point (coarse, gated slope and zero pair, full-rate zero pair and slope) per core the
+mean, RMS about the mean (`noisy` above the wizard's 3-code limit), RMS within a conversion, extremes and clipped
+samples. Nothing is stored; the tool stops the UI acquisition for it and sets RUN again. A/B switches for the bus
+readout: `settle_reads`, `prestrobe`.
 
 **`calibration_info`** (`scope_calibration_info`, tier 0): the conversion in use per channel, the scope's calibration
 (v3 block, current correction), from 1.15 `tracking` per channel (the v4 tracker: tracking / frozen / idle, d, e, q,

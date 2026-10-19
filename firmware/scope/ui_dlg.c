@@ -294,7 +294,7 @@ static void ui_dlg_step_button(const ui_step *d, int which, int pressed)
 
 void ui_dlg_step_draw(const ui_step *d)
 {
-  int x = UI_STEP_X + 24, y = UI_STEP_Y, i;
+  int x = UI_STEP_X + 24, y = UI_STEP_Y, i, ry = 160, rs = 30;
 
   display_set_screen_buffer(displaybuffertmp);
   ui_dlg_box(UI_STEP_X, UI_STEP_Y, UI_STEP_W, UI_STEP_H, RGB_PANEL, RGB_PANEL_EDGE, 0);
@@ -312,13 +312,24 @@ void ui_dlg_step_draw(const ui_step *d)
   if(d->warn && d->warn[0])
     ui_dlg_text(x, y + 128, UD_F_BODY, UD_C_WARN, d->warn);
 
+  //With a note under a result the two results move up and apart: result at 148 + 38 i, its note (13 px font) 18 below
+  for(i=0;i<2;i++)
+    if(d->note[i] && d->note[i][0])
+    {
+      ry = 148;
+      rs = 38;
+    }
+
   for(i=0;i<2;i++)
   {
     if(d->result[i] && d->result[i][0])
     {
-      ui_dlg_icon(x, y + 160 + 30 * i, d->result_icon[i]);
-      ui_dlg_text(x + 28, y + 160 + 30 * i, UD_F_BODY, d->result_colour[i], d->result[i]);
+      ui_dlg_icon(x, y + ry + rs * i, d->result_icon[i]);
+      ui_dlg_text(x + 28, y + ry + rs * i, UD_F_BODY, d->result_colour[i], d->result[i]);
     }
+
+    if(d->note[i] && d->note[i][0])
+      ui_dlg_text(x + 28, y + ry + rs * i + 18, UD_F_SMALL, UD_C_SOFT, d->note[i]);
   }
 
   ui_dlg_step_button(d, 1, 0);

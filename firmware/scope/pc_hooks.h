@@ -22,7 +22,9 @@
 #define PC_SETTING_WORD_UI    211   //fw 0.2.56: Grid, the spectrum's Display variant (0xC700 marker)
 #define PC_SETTING_WORD_DECIM_SPEC 212   //fw 0.2.64: the Spectrum's Filter (0xD500 marker; 207 is the Scope's)
 #define PC_SETTING_WORD_BODE0 219   //fw 0.2.66: Bode plot start, stop, points (0xB000 marker)
-#define PC_SETTING_WORD_BODE1 220   //fw 0.2.66: Bode plot settle, CH2 range (0xB100 marker)
+#define PC_SETTING_WORD_BODE1 220   //fw 0.2.66: Bode plot settle, CH2 range (0xB100 marker); fw 0.2.69: Display variant,
+                                    //cursors, frequency axis (bits 3..6)
+#define PC_SETTING_WORD_BODE_MS 213 //fw 0.2.69: Frequency response MEASURES list, words 213..215 (bode_ui.h)
 
 //PC_UI_MASK(m) items. Menus are compact (fw 0.2.8, owner: no gaps): what the 1013D lacks is not laid out at all.
 #define PC_MASK_TRIG_CHANNEL  2     //trigger menu: EXT source box (0x1533+)
@@ -36,6 +38,8 @@ void pc_glue_poll_busy(void);         //UI busy loops and touch scans: no FPGA a
 void pc_glue_poll_isr(void);          //1 ms timer interrupt: safe commands and the TX pump only
 void pc_glue_ui_service(void);        //main loop, after the MAIN poll: MCP indicator
 int  pc_glue_ui_arm_allowed(void);    //0 while a host READ_RAW waits for the UI capture in flight
+int  pc_glue_host_busy(void);         //fw 0.2.68: a host acquisition in progress (the RUN/STOP chip and button read RUN)
+void pc_glue_host_stop(void);         //fw 0.2.68: the RUN/STOP button's STOP during a host acquisition: abort it
 int  pc_glue_rtc_allowed(void);       //0 while the MCP chip occupies the RTC clock slot
 void pc_glue_pass_mark(int n);        //main loop stage reached (first-pass timing, GET_LINK_STATS)
 int  pc_glue_ui_has(int feature);     //PC_FEAT_*: 1 when the running hardware supports it
@@ -80,9 +84,8 @@ uint16 pc_glue_ui_setting_word(void);            //settings sector word 211 (sco
 
 //fw 0.2.66: the Bode plot (bode_view.c), a mode opened from the generator menu
 int    pc_glue_bode_pass(void);                  //scope_acquire_trace_data: 1 = the Bode plot shows (no UI acquisition)
-void   pc_glue_gen_bode_draw(void);              //generator menu: draw its fourth row, "Bode plot"
-int    pc_glue_gen_bode_hit(void);               //generator menu: a tap on that row (ytouch): 1 = taken, close the menu
-uint16 pc_glue_bode_setting_word(int i);         //settings sector words 219, 220 (scope_save_config_data)
+int    pc_glue_bode_available(void);             //fw 0.2.68: the main menu's Bode plot row can open the view
+uint16 pc_glue_bode_setting_word(int i);         //settings sector words 219, 220 (i 0, 1) and 213..215 (i 2..4)
 void   pc_glue_view_opening(void);               //the picture / waveform viewer is about to open: the Bode plot ends
 
 #define PC_BUSY_POLL()          pc_glue_poll_busy()
@@ -110,8 +113,6 @@ void   pc_glue_view_opening(void);               //the picture / waveform viewer
 #define PC_SCOPE_PASS()         pc_glue_scope_pass()
 #define PC_SCOPE_WARNING()      pc_glue_scope_warning()
 #define PC_BODE_PASS()          do { if(pc_glue_bode_pass()) return; } while(0)
-#define PC_GEN_BODE_DRAW()      pc_glue_gen_bode_draw()
-#define PC_GEN_BODE_HIT()       pc_glue_gen_bode_hit()
 #define PC_VIEW_OPENING()       pc_glue_view_opening()
 
 //fw 0.2.58 (0x1536 sequencer, pc_seq_hw.h): fpga_do_conversion writes the geometry and the sequencer registers before

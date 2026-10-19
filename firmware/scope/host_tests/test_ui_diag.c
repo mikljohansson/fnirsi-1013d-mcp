@@ -344,7 +344,29 @@ static void test_pages(void)
   T_TRUE(!has_text("Needs a DC supply up to 15 V."));
   T_TRUE(!has_text("DC shift trim off."));
   T_TRUE(!has_text("On: CTRL on the scope opens the trim."));
-  T_EQ(ud_hit(&pg, 170, 380), UD_ID_DCSHIFT);
+  //fw 0.2.68: one bottom row, equal buttons 12 px apart, Clear calibration last
+  T_EQ(ud_hit(&pg, 20, 440), UD_ID_CALIBRATE);
+  T_EQ(ud_hit(&pg, 300, 440), UD_ID_DCSHIFT);
+  T_EQ(ud_hit(&pg, 500, 440), UD_ID_VOLTS);
+  T_EQ(ud_hit(&pg, 700, 440), UD_ID_CLEAR);
+  T_EQ(ud_hit(&pg, 20, 380), UD_ID_NONE);
+  T_EQ(ud_hit(&pg, 200, 440), UD_ID_NONE);
+  {
+    uint32_t b, n = 0;
+    int      x = 12;
+
+    for(b = 0; b < pg.nbtn; b++)
+      if(pg.btn[b].y == 420)
+      {
+        T_EQ(pg.btn[b].x, x);
+        T_EQ(pg.btn[b].h, 44);
+        T_EQ(pg.btn[b].w, 185);
+        x += 185 + 12;
+        n++;
+      }
+    T_EQ(n, 4);
+    T_EQ(x - 12, 788);
+  }
   {
     uint32_t b;
 
@@ -352,9 +374,6 @@ static void test_pages(void)
       if(pg.btn[b].id == UD_ID_DCSHIFT)
         T_EQ(pg.btn[b].style, UD_B_GREY);
   }
-  T_EQ(ud_hit(&pg, 20, 440), UD_ID_VOLTS);
-  T_EQ(ud_hit(&pg, 700, 440), UD_ID_CLEAR);
-  T_EQ(ud_hit(&pg, 20, 380), UD_ID_CALIBRATE);
   in.dc_shift = 1;
   ud_build(&pg, UD_PAGE_CAL, &in, 0);
   T_EQ(text_colour("On: CTRL on the scope opens the trim."), UD_C_WARN);

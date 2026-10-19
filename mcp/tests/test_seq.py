@@ -123,14 +123,14 @@ def test_status_features_and_ui_average(sim_factory):
     s = Scope.connect(srv.url)
     try:
         st = s.status()
-        assert st.features == 0x1F and st.ui_average == 0 and s.info.proto_minor == 17
+        assert st.features == 0x5F and st.ui_average == 0 and s.info.proto_minor >= 17  # + 1.20 BODE (bit 6)
         assert s.info.caps & P.Caps.SEQ
         s.set_timebase(divider=0)
         s.set_trigger(pretrigger_samples=1500, total_samples=3000)
         srv.device.ui_average = True
         st = s.status()
         assert (st.ui_average, st.ui_average_log2n) == (2, 6)  # 1500 words at 200 MSa/s: 64 records in 40 ms
-        assert s.get_decim().features == 0x1F and s.get_decim().ui_average == 2
+        assert s.get_decim().features == 0x5F and s.get_decim().ui_average == 2
         s.set_timebase(divider=19)
         s.set_decim("cic2")  # 16-bit records never fit the accumulator: software averaging
         assert s.status().ui_average == 1
@@ -138,7 +138,7 @@ def test_status_features_and_ui_average(sim_factory):
         s.close()
     old = sim_factory(variant="al3f")
     with Scope.connect(old.url) as s:
-        assert s.status().features == 0x07
+        assert s.status().features == 0x47
         with pytest.raises(DeviceError) as e:
             s.get_seq()
         assert e.value.status == P.Status.E_UNSUPPORTED
@@ -296,7 +296,7 @@ def test_segment_and_hardware_averaging_tools(sim_factory, tmp_path):
     async def main():
         async with client_for(srv, tmp_path) as c:
             st = await c.call("scope_status")
-            assert st["features"] == ["ext_trigger", "decim", "fir", "segments", "hw_average"]
+            assert st["features"] == ["ext_trigger", "decim", "fir", "segments", "hw_average", "bode"]
             assert st["ui_averaging"] == "off" and st["hardware_averaging"] is False
             await c.call("scope_set_timebase", sample_rate="200MS/s")
             await c.call("scope_set_trigger", source="CH1", edge="rising", level=0.0, mode="normal",

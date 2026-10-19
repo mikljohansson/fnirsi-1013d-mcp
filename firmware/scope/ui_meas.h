@@ -13,6 +13,7 @@
 //Modes with their own MEASURES list
 #define UI_MS_SCOPE           0
 #define UI_MS_SPECTRUM        1
+#define UI_MS_BODE            2           //fw 0.2.69: Frequency response (bode_ui.h list)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Selection and display order. A list of n items is an array of ranks: 0 = not chosen, otherwise the card's place in the
@@ -134,6 +135,7 @@ ui_ms_source ui_ms_get_source(int item);
 //1.00o5's box widened to 44 px rows). A title band with the mode's name, then rows of 44 px:
 //  Scope:    sources (CH1 / CH2 and Ref 1-4 / Ref 5-8), actions (Select All, Clear, Hide), three rows of four items
 //  Spectrum: actions (the channel label, Select All, Clear), the four channel items, the view's four items (whole width)
+//  Frequency response (fw 0.2.69): Select All, Clear (neutral grey), then its ten items four per row, whole width
 //The left half belongs to CH1, the right to CH2, split by a double white line at x 480. The box ends at y 477.
 
 #define UI_MSM_X              232
@@ -149,6 +151,7 @@ ui_ms_source ui_ms_get_source(int item);
 #define UI_MSC_HIDE           4
 #define UI_MSC_ITEM           5                     //group = channel (Scope), list group (Spectrum); index = item
 #define UI_MSC_LABEL          6                     //the spectrum's channel label: no action
+#define UI_MSC_EMPTY          7                     //Frequency response: the last row's unused places
 
 typedef struct
 {

@@ -4,6 +4,7 @@
 
 #include "ui_meas.h"
 #include "ui_fmt.h"
+#include "bode_ui.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Selection and display order
@@ -437,12 +438,15 @@ ui_ms_source ui_ms_get_source(int item)
 
 const char *ui_msm_title(int mode)
 {
+  if(mode == UI_MS_BODE)
+    return "Frequency response measurements";
+
   return (mode == UI_MS_SPECTRUM) ? "Spectrum measurements" : "Scope measurements";
 }
 
 int ui_msm_rows(int mode)
 {
-  return (mode == UI_MS_SPECTRUM) ? 3 : 5;
+  return (mode == UI_MS_SCOPE) ? 5 : (mode == UI_MS_SPECTRUM) ? 3 : 4;
 }
 
 //Edge, title band, its separator, then per row 44 px and the separator below it (the last one is the bottom edge)
@@ -488,6 +492,27 @@ int ui_msm_cells(int mode, ui_msm_cell *out)
   ui_msm_cell *c = out;
   uint32 y0 = ui_msm_top(mode) + 1 + UI_MSM_TITLE_H + 1, y;
   int    h, r;
+
+  //Frequency response: one block across the whole width
+  if(mode == UI_MS_BODE)
+  {
+    int k;
+
+    y = y0;
+    c = ui_msm_row(c, UI_MSM_HX(0), 729 - UI_MSM_HX(0) + 1, y, 2, UI_MSC_ALL, 0, 0, 1);
+
+    for(r = 0; r < 3; r++)
+    {
+      y += UI_MSM_ROW_H + 1;
+      c = ui_msm_row(c, UI_MSM_HX(0), 729 - UI_MSM_HX(0) + 1, y, 4, UI_MSC_ITEM, 0, 4 * r, 0);
+    }
+
+    for(k = 1; k <= 4; k++)
+      if(c[-k].index >= BU_MS_COUNT)
+        c[-k].what = UI_MSC_EMPTY;
+
+    return (int)(c - out);
+  }
 
   for(h = 0; h < 2; h++)
   {
@@ -540,6 +565,8 @@ const char *ui_msm_text(int mode, const ui_msm_cell *c)
     case UI_MSC_HIDE:    return "Hide";
     case UI_MSC_LABEL:   return ch;
     case UI_MSC_ITEM:
+      if(mode == UI_MS_BODE)
+        return (c->index < BU_MS_COUNT) ? bu_ms_names[c->index] : "";
       if(mode == UI_MS_SPECTRUM)
         return ui_ms_sp_names[ui_ms_spec_kind(c->group, c->index) & 7];
       return (c->index < UI_MEAS_COUNT) ? measurement_names[c->index] : "";

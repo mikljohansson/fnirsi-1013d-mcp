@@ -550,6 +550,165 @@ static void test_divider_floor(void)
   printf("  estimate 10 Hz - 100 kHz / 50: %u ms\n", bode_estimate_ms(&c));
 }
 
+
+//fw 0.2.69: AUTO SET's span from an overview sweep (100 Hz .. 10 MHz, 20 points, Fast, CH2 Auto)
+static int overview(uint64 *f, int32 *m, int32 *ph, uint16 *fl, uint8 *have)
+{
+  bode_cfg c = cfg(100, 1e7, 20, BODE_SETTLE_FAST, BODE_CH2_AUTO);
+  int i, n;
+
+  bode_init(&eng, &HW);
+  T_EQ(bode_start(&eng, &c, 0, 3), 0);
+  run(&eng, 600000);
+  T_EQ(bode_state(&eng), BODE_ST_DONE);
+  n = bode_count(&eng);
+
+  for(i = 0; i < n; i++)
+  {
+    bode_point p;
+
+    have[i] = (uint8)bode_point_get(&eng, i, &p);
+    f[i] = bode_plans(&eng)[i].f_mhz;
+    m[i] = p.h_mdb;
+    ph[i] = p.h_mdeg;
+    fl[i] = p.flags;
+  }
+
+  return n;
+}
+
+//A synthetic table: n log-spaced points f0..f1 of a second-order band-pass (peak gain k, resonance fr, quality q), or a
+//first-order high-pass (q = 0) with its corner at fr
+static int synth(double f0, double f1, int n, double fr, double q, double k, uint64 *f, int32 *m, int32 *ph, uint16 *fl,
+                 uint8 *have)
+{
+  int i;
+
+  for(i = 0; i < n; i++)
+  {
+    double fi = f0 * pow(f1 / f0, (double)i / (n - 1)), re, im;
+
+    if(q > 0)
+    {
+      //H = k (j x / q) / (1 - x^2 + j x / q), x = f / fr
+      double x = fi / fr, dr = 1 - x * x, di = x / q, den = dr * dr + di * di;
+
+      re = k * (di * di) / den;
+      im = k * (di * dr) / den;
+    }
+    else
+    {
+      //H = j x / (1 + j x)
+      double x = fi / fr, den = 1 + x * x;
+
+      re = x * x / den;
+      im = x / den;
+    }
+
+    f[i] = (uint64)(fi * 1000 + 0.5);
+    m[i] = (int32)(10 * log10(re * re + im * im) * 1000);
+    ph[i] = (int32)(atan2(im, re) * 180 / PI * 1000);
+    fl[i] = 0;
+    have[i] = 1;
+  }
+
+  return n;
+}
+
+static void test_auto_span(void)
+{
+  static uint64 f[BODE_MAX_POINTS];
+  static int32  m[BODE_MAX_POINTS], ph[BODE_MAX_POINTS];
+  static uint16 fl[BODE_MAX_POINTS];
+  static uint8  have[BODE_MAX_POINTS];
+  bode_autospan a;
+  int n, i, r;
+
+  //The steps: 1 Hz, 10 Hz, 5 MHz, 10 MHz
+  T_EQ(bode_step_mhz(0), 1000ull);
+  T_EQ(bode_step_mhz(BODE_STOP_MIN), 10000ull);
+  T_EQ(bode_step_mhz(BODE_START_MAX), 5000000000ull);
+  T_EQ(bode_step_mhz(BODE_STEPS - 1), 10000000000ull);
+
+  //RC low-pass (1600 Ohm / 10 nF, fc 9.95 kHz) through the engine: 500 Hz .. 100 kHz, Settle Normal
+  dut_rc(&D);
+  n = overview(f, m, ph, fl, have);
+  r = bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a);
+  printf("  auto span RC: %d, fc %.0f Hz, steps %d..%d\n", r, a.f0_mhz / 1000.0, a.start_i, a.stop_i);
+  T_EQ(r, BODE_AS_SPAN);
+  T_TRUE(fabs(a.f0_mhz / 1000.0 / 9947.0 - 1) < 0.1);
+  T_EQ(a.start_i, 8);
+  T_EQ(a.stop_i, 15);
+  T_EQ(a.settle, BODE_SETTLE_NORMAL);
+
+  //The owner's RC (1 kOhm / 15 nF, fc 10.6 kHz): 1 kHz .. 200 kHz
+  dut_rc(&D);
+  D.r = 1000; D.c = 15e-9;
+  n = overview(f, m, ph, fl, have);
+  r = bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a);
+  printf("  auto span RC 1k / 15n: %d, fc %.0f Hz, steps %d..%d\n", r, a.f0_mhz / 1000.0, a.start_i, a.stop_i);
+  T_EQ(r, BODE_AS_SPAN);
+  T_EQ(a.start_i, 9);
+  T_EQ(a.stop_i, 16);
+
+  //The bench divider: flat, the span kept
+  dut_rc(&D);
+  D.r = 991; D.c = 0; D.rl = 102;
+  n = overview(f, m, ph, fl, have);
+  r = bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a);
+  T_EQ(r, BODE_AS_FLAT);
+  T_EQ(a.start_i, 6);
+  T_EQ(a.stop_i, 18);
+
+  //A tank, Q 8.1 at 50.3 kHz, on the overview's 20 points: resonant, about a half decade either side
+  n = synth(100, 1e7, 20, 50300, 8.1, 0.87, f, m, ph, fl, have);
+  r = bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a);
+  printf("  auto span tank Q 8.1: %d, f0 %.0f Hz, Q %.2f, steps %d..%d, settle %d\n", r, a.f0_mhz / 1000.0,
+         a.q_x100 / 100.0, a.start_i, a.stop_i, a.settle);
+  T_EQ(r, BODE_AS_SPAN);
+  T_TRUE(fabs(a.f0_mhz / 1000.0 / 50300.0 - 1) < 0.15);
+  T_TRUE(bode_step_mhz(a.start_i) <= a.f0_mhz / 3);
+  T_TRUE(bode_step_mhz(a.stop_i) >= a.f0_mhz * 3);
+  T_EQ(a.settle, BODE_SETTLE_RESONANT);
+
+  //Q 50 on a dense table (1.6 % apart): read as Q 36 (the -3 dB crossings by linear interpolation), f0 (1 -+ 4 / Q) =
+  //44.5 .. 55.5 kHz -> 20 kHz .. 100 kHz, Settle High Q
+  n = synth(10e3, 250e3, 200, 50000, 50, 1.0, f, m, ph, fl, have);
+  r = bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a);
+  printf("  auto span tank Q 50: %d, f0 %.0f Hz, Q %.2f, steps %d..%d, settle %d\n", r, a.f0_mhz / 1000.0,
+         a.q_x100 / 100.0, a.start_i, a.stop_i, a.settle);
+  T_EQ(r, BODE_AS_SPAN);
+  T_TRUE(a.q_x100 > 3400);
+  T_EQ(a.start_i, 13);
+  T_EQ(a.stop_i, 15);
+  T_EQ(a.settle, BODE_SETTLE_HIGHQ);
+
+  //Q 20: Settle Resonant
+  n = synth(10e3, 250e3, 200, 50000, 20, 1.0, f, m, ph, fl, have);
+  bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a);
+  T_EQ(a.settle, BODE_SETTLE_RESONANT);
+
+  //A high-pass with its corner at 30 Hz: still rising at 100 Hz, Start 10 Hz
+  n = synth(100, 1e7, 20, 30, 0, 1.0, f, m, ph, fl, have);
+  r = bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a);
+  T_EQ(r, BODE_AS_SPAN);
+  T_EQ(a.start_i, BODE_STOP_MIN);
+  T_TRUE(a.stop_i > a.start_i);
+
+  //Nothing but the floor: no response, the span kept
+  n = synth(100, 1e7, 20, 50300, 8.1, 0.87, f, m, ph, fl, have);
+  for(i = 0; i < n; i++)
+    fl[i] = (i & 1) ? BODE_F_NEAR_FLOOR : BODE_F_LOW_SNR;
+  r = bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a);
+  T_EQ(r, BODE_AS_NO_RESPONSE);
+  T_EQ(a.start_i, 6);
+  T_EQ(a.stop_i, 18);
+
+  //No point measured at all: the same
+  for(i = 0; i < n; i++)
+    have[i] = 0;
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_NO_RESPONSE);
+}
 int main(void)
 {
   test_rc_auto();
@@ -558,5 +717,6 @@ int main(void)
   test_stop_and_steps();
   test_thru();
   test_divider_floor();
+  test_auto_span();
   return t_report("test_bode_sweep");
 }

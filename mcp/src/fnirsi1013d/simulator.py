@@ -4,7 +4,14 @@ It models what the host can observe through docs/protocol.md:
 
 - FPGA variants (section 5.1): ``stock`` 0x1432 (4096-word ring, fixed 1500/3000 geometry, no generator,
   only part of the ring fresh after a capture), ``al3`` 0x1532 (8192-word ring, 16382 samples per channel,
-  programmable pre-trigger/total, DDS generator), ``ef2`` 0x1632 (6144 words), ``ep4`` 0x1732.
+  programmable pre-trigger/total, DDS generator), ``ef2`` 0x1632 (6144 words), ``ep4`` 0x1732; the AL3 line
+  ``al3x`` 0x1533 (EXT), ``al3d`` 0x1534 (decimation), ``al3f`` 0x1535 (FIR), ``al3s`` 0x1536 (sequencer),
+  ``al3e`` 0x1538 (the per-capture encode check, protocol 1.19: GET_HEALTH 88..103, event 21; hooks
+  ``Device.enc_bad_next`` / ``enc_unrecovered_next``).
+- The on-device Bode plot (protocol 1.20, BODE_CTRL / READ_BODE, display mode 5) on every bitstream with the filter
+  and the generator: ``SimBode`` runs the host tool's ``bode.BodeRunner`` against this device through an in-process
+  link (the firmware's bode_sweep.c is a port of it), so device and host sweeps of a ``dut_in`` / ``dut_out`` DUT
+  agree within noise; a host ARM during a sweep ends it (reason 5).
 - The sample ring (section 7.2): four 8-bit cores, one word per write clock (2 dt), core B before core A in
   time by default (``--true-order`` changes the physical order so the host can test T4 handling), core B
   offset against core A (compensated by the calibration values), trigger on core A only with 2-dt
@@ -46,7 +53,7 @@ import struct
 import threading
 import time
 from dataclasses import dataclass, field, replace
-from typing import Callable
+from typing import Any, Callable
 
 import numpy as np
 
@@ -80,6 +87,16 @@ class VariantSpec:
     fir: bool = False
     #: bitstream 0x1536: plus the sequencer, segmented capture and hardware averaging (protocol 1.17)
     seq: bool = False
+    #: bitstream 0x1538: plus the per-capture encode self-check, FPGA read 0x33 (protocol 1.19)
+    enc_check: bool = False
+
+    @property
+    def enc_mode(self) -> int:
+        """GET_HEALTH 88 (protocol 1.19): 2 the FPGA's 0x33 check (0x1538+), 1 the record data check (AL3
+        0x1532..0x1537), 0 none."""
+        if self.enc_check:
+            return 2
+        return 1 if self.variant == P.FpgaVariant.AL3 and 0x1532 <= self.version_word <= 0x1537 else 0
 
 
 #: EXT trigger path latency from the pin (fpga-gen2 simulation: 20-25 ns)
@@ -101,6 +118,8 @@ VARIANTS = {
                         fir=True),
     "al3s": VariantSpec("al3s", 0x1536, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True,
                         fir=True, seq=True),
+    "al3e": VariantSpec("al3e", 0x1538, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True,
+                        fir=True, seq=True, enc_check=True),
     "ef2": VariantSpec("ef2", 0x1632, P.FpgaVariant.EF2, 6144, 12286, True, True),
     "ep4": VariantSpec("ep4", 0x1732, P.FpgaVariant.EP4, 6144, 12286, True, True),
 }
@@ -576,6 +595,9 @@ class Device:
         #: fw 0.2.28 spectrum view (ui_set_spectrum): display mode, window (0 rect, 1 Hann, 2 flat-top), the view's
         #: FFT length (log2, capped by the record) and channel selection (0 CH1, 1 CH2, 2 both)
         self.display_mode = P.DisplayMode.SCOPE
+        #: protocol 1.20: the Bode view and sweep engine; ``_internal`` is set while the engine's own requests run
+        self.bode = SimBode(self)
+        self._internal = False
         self.spec_window = 1
         self.spec_log2n = 14
         self.spec_channel = 2
@@ -606,6 +628,15 @@ class Device:
         self.run: dict | None = None
         #: the FPGA still holds that run (no arm since)
         self.run_held = False
+        #: protocol 1.19 full-rate encode check (GET_HEALTH 88..103): counters and the last 0x33 byte; test hooks
+        #: ``enc_bad_next`` (the next n full-rate captures are found garbled and re-taken clean after ``enc_rearms``
+        #: re-arms) and ``enc_unrecovered_next`` (the next n stay garbled after 16 re-arms and are accepted, flagged)
+        self.enc_checked = self.enc_bad = self.enc_recovered = 0
+        self.enc_last33 = 0
+        self.enc_flags = 0
+        self.enc_bad_next = 0
+        self.enc_unrecovered_next = 0
+        self.enc_rearms = 1
 
     # --- capabilities -------------------------------------------------------------------------------
 
@@ -630,6 +661,8 @@ class Device:
             c &= ~P.Caps.DEVICE_AVERAGE  # the averaging model is 8-bit only (the firmware has no ACQUIRE_AVG)
         if self.spec.seq:
             c |= P.Caps.SEQ
+        if self.spec.enc_check:
+            c |= P.Caps.ENC_CHECK
         return int(c) & ~self.cfg.caps_clear
 
     @property
@@ -637,7 +670,9 @@ class Device:
         """GET_STATUS 44-45 (protocol 1.17): from the bitstream, not the caps."""
         sp = self.spec
         return ((P.Features.EXT_TRIGGER if sp.ext_trigger else 0) | (P.Features.DECIM if sp.decim else 0) |
-                (P.Features.FIR if sp.fir else 0) | (P.Features.SEGMENTS | P.Features.HW_AVERAGE if sp.seq else 0))
+                (P.Features.FIR if sp.fir else 0) | (P.Features.SEGMENTS | P.Features.HW_AVERAGE if sp.seq else 0) |
+                (P.Features.ENC_CHECK if sp.enc_check else 0) |
+                (P.Features.BODE if sp.decim and sp.generator else 0))
 
     def ui_average_state(self) -> tuple[int, int]:
         """GET_STATUS 46 / 47 (protocol 1.17): the acquisition menu's Average (``ui_average`` test hook): 0 off; 2 with
@@ -1399,11 +1434,41 @@ class Device:
         self.capture_ext_edge = bool(pc.get("ext_edge", False))
         self.run = pc.get("run")
         self.run_held = self.run is not None
+        if self.run is None and self.capture_divider == 0 and not self.capture_decim.k:
+            self._enc_check(origin)
         if origin == P.CaptureOrigin.HOST:
             self.acq_state = P.AcqState.DONE
             self._pending_capture = None
             if self.shared:
                 self.run_state = P.RunState.STOP  # a host single leaves the UI in STOP (collaborative plan)
+
+    def _enc_check(self, origin: int) -> None:
+        """Protocol 1.19: the firmware checks every 200 MSa/s capture (legacy layout) before anything reads it; a
+        garbled one is re-armed (up to 16 times) and only the accepted capture is seen. Counters, the 0x33 byte and
+        event 21 as the firmware keeps them (the capture data in the model is always clean)."""
+        mode = self.spec.enc_mode
+        if not mode:
+            return
+        self.enc_checked += 1
+        bad = 0x77  # 0x33 with CH2 A wrong (the mock HAL's enc33_bad)
+        caller = 0 if origin != P.CaptureOrigin.HOST else 1
+        value = bad if mode == 2 else 320  # the 0x33 byte, or the residual in 1/16 code (20 codes)
+        last = P.ENC33_GOOD
+        self.enc_flags &= ~P.ENC_LAST_BAD
+        if self.enc_unrecovered_next > 0:
+            self.enc_unrecovered_next -= 1
+            self.enc_bad += 1
+            self.enc_flags |= P.ENC_LAST_BAD
+            self.log_event(21, 0x80 | (mode << 5) | 16, caller << 12 | value)
+            last = bad
+        elif self.enc_bad_next > 0:
+            self.enc_bad_next -= 1
+            self.enc_bad += 1
+            self.enc_recovered += 1
+            self.log_event(21, (mode << 5) | min(31, self.enc_rearms), caller << 12 | value)
+        if mode == 2:
+            self.enc_last33 = last
+            self.enc_flags |= P.ENC_READ
 
     # --- collaborative mode: the simulated UI --------------------------------------------------------------
 
@@ -2073,6 +2138,134 @@ class Device:
         h = replace(h0, frame=self.spec_frames, first=first, count=n)
         return self._ok(req, P.pack_spectrum(h, lv[first: first + n].tolist()))
 
+    def _cmd_cal_probe(self, req: P.Frame) -> P.Frame:
+        """Protocol 1.21 (row 61): the wizard's zero measurement of one channel and range, on the model's front end
+        (offset formula, per-core zero errors, the channel's signal and noise). Checks modelled: CLIP (a sample at 0 or
+        255 in a fine point) and NOISE (RMS about the mean over 3 codes); ``cal_probe_fail`` = (point, rc) forces a
+        failure for host tests."""
+        r = P.CalProbeReq.unpack(req.payload)
+        for v, lim, det in ((r.channel, 1, 0), (r.range, 5, 1), (r.settle, 15, 2), (r.prestrobe, 1, 3), (r.mode, 1, 4)):
+            if v > lim:
+                raise _DevErr(P.Status.E_BAD_ARG, det, "channel / range / settle / prestrobe / mode")
+        if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
+            raise _DevErr(P.Status.E_STATE, 0, "a host capture is armed")
+        if self.shared and self.run_state == P.RunState.RUN:
+            raise _DevErr(P.Status.E_STATE, 1, "the UI acquisition runs: SET_ACQ_STATE 0 first")
+        flags = (r.settle << 4) | (P.CALP_PRESTROBE if r.prestrobe else 0) | (P.CALP_MODE1 if r.mode else 0)
+        if r.mode:
+            out = None
+            for rng in range(6):
+                out = self._cal_probe_range(r.channel, rng, flags)
+                if out.rc:
+                    break
+            assert out is not None
+        else:
+            out = self._cal_probe_range(r.channel, r.range, flags)
+        return self._ok(req, out.pack())
+
+    def _cal_probe_range(self, ch: int, rng: int, flags: int) -> P.CalProbeResp:
+        cal = self.cal[ch]
+
+        def measure(pwm: int, gated: bool, convs: int) -> P.CalProbePoint:
+            s = self.settings.copy()
+            s.channels[ch].range = rng
+            s.channels[ch].coupling = 0
+            s.channels[ch].dcoffset = pwm - cal.dc_calibration_offset[rng]
+            s.divider = 1 if gated else 0
+            s.decim = 0
+            dt = self.dt(s.divider)
+            cores = []
+            for core in ("A", "B"):
+                caps = [self._codes(ch, self.now() + i * 1.37e-4 + np.arange(500) * dt * 2, core, s).astype(np.float64)
+                        for i in range(convs)]
+                allc = np.concatenate(caps)
+                cores.append(P.CalProbeCore(float(allc.mean()), float(allc.std()),
+                                            float(np.sqrt(np.mean([c.var() for c in caps]))), int(allc.min()),
+                                            int(allc.max()), int(np.sum((allc == 0) | (allc == 255)))))
+            return P.CalProbePoint(0, pwm, 1 if gated else 0, convs, (cores[0], cores[1]))
+
+        def mean(p: P.CalProbePoint) -> float:
+            return (p.cores[0].mean + p.cores[1].mean) / 2
+
+        hi, lo = measure(500, True, 2), measure(1200, True, 2)
+        slope = (mean(lo) - mean(hi)) / 700.0  # codes per PWM count (negative)
+        pts: list[P.CalProbePoint] = [hi, lo]
+        centre = int(round(500 + (128.0 - mean(hi)) / slope)) if slope else 0
+        if slope >= 0 or not 0 < centre < 2000:
+            return P.CalProbeResp(ch, rng, 4, 0, 1, 0, flags | P.CALP_NO_CENTRE, 0, 0, 0, 0, 0, 0,
+                                  self._cal_points(pts), 0)
+        sl, sh = measure(centre - 150, True, 4), measure(centre + 150, True, 4)
+        gslope = (mean(sh) - mean(sl)) / 300.0
+        zero = int(round(centre + (128.0 - (mean(sl) + mean(sh)) / 2) / gslope)) if gslope else centre
+        d = int(min(120, max(8, round(12 / abs(gslope))))) if gslope else 120
+
+        def pair(gated: bool, convs: int) -> P.CalProbePoint:
+            a, b = measure(zero - d, gated, convs), measure(zero + d, gated, convs)
+            cores = tuple(P.CalProbeCore((x.mean + y.mean) / 2, math.sqrt((x.rms ** 2 + y.rms ** 2) / 2),
+                                         math.sqrt((x.rms_within ** 2 + y.rms_within ** 2) / 2), min(x.lo, y.lo),
+                                         max(x.hi, y.hi), x.clipped + y.clipped)
+                          for x, y in zip(a.cores, b.cores))
+            return P.CalProbePoint(0, zero, a.cls, convs * 2, (cores[0], cores[1]))
+
+        pts += [sl, sh, pair(True, 8), pair(False, 64), measure(zero + 150, False, 64), measure(zero - 150, False, 64)]
+        rc, fp, fcls, fcore, val, within = 0, 0xFF, 0, 0, 0, 0
+        forced = getattr(self, "cal_probe_fail", None)
+        for i, p in enumerate(pts[2:], 2):
+            for k, c in enumerate(p.cores):
+                if rc:
+                    break
+                if c.clipped:
+                    rc, val = 5, c.clipped
+                elif c.rms * 16 > P.CAL_NOISE_LIMIT16:
+                    rc, val = 6, int(round(c.rms * 16))
+                if rc:
+                    fp, fcls, fcore, within = i, p.cls, k, int(round(c.rms_within * 16))
+        if forced is not None:
+            fp, rc = forced
+            fcls, fcore, val, within = pts[fp].cls, 1, int(round(pts[fp].cores[1].rms * 16)), \
+                int(round(pts[fp].cores[1].rms_within * 16))
+        return P.CalProbeResp(ch, rng, rc, fp, fcls, fcore, flags, val, within, centre, zero, 0, 0,
+                              self._cal_points(pts), d)
+
+    @staticmethod
+    def _cal_points(pts: list[P.CalProbePoint]) -> list[P.CalProbePoint]:
+        empty = P.CalProbeCore(0.0, 0.0, 0.0, 0, 0, 0)
+        out = [P.CalProbePoint(i, p.pwm, p.cls, p.conversions, p.cores) for i, p in enumerate(pts)]
+        return out + [P.CalProbePoint(i, 0, 0, 0, (empty, empty)) for i in range(len(out), 8)]
+
+    def _cmd_bode_ctrl(self, req: P.Frame) -> P.Frame:
+        return self._ok(req, self.bode.ctrl(P.BodeCtrlReq.unpack(req.payload)))
+
+    def _cmd_read_bode(self, req: P.Frame) -> P.Frame:
+        r = P.ReadBodeReq.unpack(req.payload)
+        return self._ok(req, self.bode.read(r.first, r.count))
+
+    def internal_request(self, frame: P.Frame) -> P.Frame:
+        """A request of the simulated firmware's own Bode engine (``_LoopLink``): executed like a host request but
+        without touching the duplicate cache, and WAIT blocks here instead of becoming the host's deferred request.
+        Raises ``_BodeAbort`` once when the sweep was aborted (BODE_CTRL abort, view closed, a host ARM)."""
+        self.bode.check_abort()
+        if frame.cmd == P.Cmd.WAIT:
+            (tmo,) = struct.unpack_from("<I", frame.payload + bytes(4))
+            deadline = time.monotonic() + min(tmo, 10000) / 1000.0
+            while True:
+                with self.lock:
+                    self.tick()
+                    self.bode.check_abort()
+                    if self.acq_state not in (P.AcqState.ARMED, P.AcqState.TRIGGERED) or \
+                            time.monotonic() >= deadline:
+                        return self._ok(frame, self.status_bytes())
+                time.sleep(0.0005)
+        with self.lock:
+            saved, self._internal = self.last_resp, True
+            try:
+                resp = self.handle(frame)
+            finally:
+                self._internal, self.last_resp = False, saved
+        if resp is None:
+            raise RuntimeError(f"internal {frame.cmd_name()} became deferred")
+        return resp
+
     def _cmd_get_battery(self, req: P.Frame) -> P.Frame:
         return self._ok(req, P.BatteryResp(18, 0, 41, 0).pack())
 
@@ -2220,6 +2413,8 @@ class Device:
             raise _DevErr(P.Status.E_STATE, 0, "already ARMED; STOP first")
         if self.spec.seq and self.seq_setting.mode != P.SEQ_OFF and self._seq_fit(self.seq_setting) != P.SEQ_FIT_OK:
             raise _DevErr(P.Status.E_STATE, 3, "sequencer setting no longer fits the geometry (GET_SEQ byte 16)")
+        if not self._internal and self.bode.running:
+            self.bode.host_armed()  # 1.20: the PC took over the acquisition (reason 5)
         self.arm()
         return self._ok(req, self.status_bytes())
 
@@ -2641,7 +2836,10 @@ class Device:
         r = P.HealthResp(usb_state=3, usb_flags=0x1B, usb_power=0x50, usb_faddr=5, since_config_ms=up,
                          cp15=0x0005107D, power_on=self.power_on, minutes=self.minutes_stored + up // 60000,
                          uptime_ms=up & 0xFFFFFFFF, life_flags=self.life_flags, last_end=self.last_end,
-                         settings_flags=1 if self.settings_changed else 0, settings_eval_ms=400)
+                         settings_flags=1 if self.settings_changed else 0, settings_eval_ms=400,
+                         enc_mode=self.spec.enc_mode, enc_last33=self.enc_last33, enc_flags=self.enc_flags,
+                         enc_boot33=P.ENC33_GOOD if self.spec.enc_mode == 2 else 0, enc_bad=self.enc_bad,
+                         enc_recovered=self.enc_recovered, enc_checked=self.enc_checked)
         rec = self.restart_record
         if rec is not None:
             r.rec_flags = 1 | (2 if self.restart_record_this_power_on else 0)
@@ -3065,6 +3263,326 @@ def _split_reset(data: bytes) -> list[tuple[bytes, bool]]:
         out.append((data[:i], False))
         out.append((b"", True))
         data = data[i + 7:]
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The on-device Bode plot (protocol 1.20, docs/protocol.md row 60)
+
+
+class _BodeAbort(Exception):
+    def __init__(self, reason: int):
+        super().__init__(f"bode sweep aborted (reason {reason})")
+        self.reason = reason
+
+
+class _BodeStop(Exception):
+    pass
+
+
+class _LoopLink:
+    """In-process link from the simulated firmware's Bode engine to its own command handlers."""
+
+    def __init__(self, dev: "Device"):
+        self.dev = dev
+        self.parser = P.FrameParser(max_payload=P.MAX_REQUEST_PAYLOAD)
+        self.out = bytearray()
+
+    @property
+    def description(self) -> str:
+        return "sim-internal"
+
+    def write(self, data: bytes) -> None:
+        for ev in self.parser.feed(data):
+            if isinstance(ev, P.Frame):
+                self.out += self.dev.internal_request(ev).encode()
+
+    def read(self, max_bytes: int, timeout: float) -> bytes:
+        if not self.out:
+            time.sleep(min(timeout, 0.001))
+            return b""
+        b = bytes(self.out[:max_bytes])
+        del self.out[:max_bytes]
+        return b
+
+    def flush_input(self) -> None:
+        self.out.clear()
+
+    def close(self) -> None:
+        pass
+
+
+#: device speed-up over the host tool's estimate (no USB round trip per point; fw-bode, row 60: about 2-3 x)
+BODE_DEVICE_SPEEDUP = 2.5
+
+
+class SimBode:
+    """The firmware's Bode view and sweep engine (protocol 1.20) for the simulator. A sweep is the host tool's
+    ``BodeRunner`` driving this device through ``_LoopLink`` (bode_sweep.c is a port of it: the same plan, ranging,
+    splice and flags), in a thread; READ_BODE packs its results into rows. The view saves the settings when it opens and
+    gives them back when it closes (a sweep leaves its own settings, as on the scope)."""
+
+    def __init__(self, dev: "Device"):
+        self.dev = dev
+        self.shown = False
+        self.repeat = False
+        self.sweep_id = 0
+        self.state = 0
+        self.reason = 0
+        self.thru_sweep = False
+        self.exhausted = 0
+        #: settings in effect (the screen's, or the host's with BODE_CTRL flags bit 0)
+        self.start_hz, self.stop_hz, self.points, self.settle, self.ch2_mode = 100.0, 1e6, 50, 1, 0
+        self.background = True
+        self.plans: list = []
+        self.results: dict[int, Any] = {}
+        self.current = -1
+        self.switches = 0
+        self.t_start = 0.0
+        self.t_end: float | None = None
+        self.thru: Any = None
+        self.thru_key: tuple | None = None
+        self.thru_applied = False
+        self.stop_req = False
+        self.abort_reason = 0
+        self.abort_raised = False
+        self.thread: threading.Thread | None = None
+        self.saved: tuple | None = None
+        self.prev_display = P.DisplayMode.SCOPE
+
+    @property
+    def running(self) -> bool:
+        return self.state == 1
+
+    def key(self) -> tuple:
+        return (round(min(self.start_hz, self.stop_hz), 2), round(max(self.start_hz, self.stop_hz), 2), self.points)
+
+    def check_abort(self) -> None:
+        if self.abort_reason and not self.abort_raised:
+            self.abort_raised = True
+            raise _BodeAbort(self.abort_reason)
+
+    def host_armed(self) -> None:
+        """A host ARM (not the engine's) ends the sweep with reason 5; the engine's capture in flight is dropped."""
+        d = self.dev
+        self.abort_reason, self.abort_raised = 5, False
+        if d.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
+            d.acq_state = P.AcqState.ABORTED
+            d._pending_capture = None
+
+    def estimate_ms(self) -> int:
+        from . import bode as BD
+
+        try:
+            plans = BD.plan_sweep(self.start_hz, self.stop_hz, self.points)
+        except ValueError:
+            return 0
+        est = BD.estimate_duration(plans, BD.SETTLE_PRESETS[P.BODE_SETTLES[self.settle]], self.background,
+                                   self.ch2_mode == 0)
+        return int(est / BODE_DEVICE_SPEEDUP * 1000)
+
+    # --- the view -------------------------------------------------------------------------------------------
+
+    def open(self) -> None:
+        d = self.dev
+        if self.shown:
+            return
+        self.shown = True
+        self.saved = (d.settings.copy(), d.run_state)
+        self.prev_display = d.display_mode
+        d.display_mode = P.DisplayMode.BODE
+
+    def close(self) -> None:
+        d = self.dev
+        self._end_thread(6)
+        if not self.shown:
+            return
+        self.shown = False
+        self.repeat = False
+        if self.saved is not None:
+            d.settings = self.saved[0].copy()
+            d._set_run_state(self.saved[1])
+        d.display_mode = self.prev_display if self.prev_display != P.DisplayMode.BODE else P.DisplayMode.SCOPE
+
+    def _end_thread(self, reason: int) -> None:
+        th = self.thread
+        if th is None or not th.is_alive():
+            return
+        self.abort_reason, self.abort_raised = reason, False
+        self.repeat = False
+        if th is not threading.current_thread():
+            d = self.dev
+            d.lock.release()  # the engine thread takes the lock for every request
+            try:
+                th.join(30)
+            finally:
+                d.lock.acquire()
+
+    # --- BODE_CTRL / READ_BODE ------------------------------------------------------------------------------
+
+    def ctrl(self, r: P.BodeCtrlReq) -> bytes:
+        if r.action > P.BODE_CLOSE:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "action 0..10")
+        if r.flags & P.BODE_F_SETTINGS:
+            a, b = r.start_chz * 10, r.stop_chz * 10  # mHz
+            if r.settle >= 4:
+                raise _DevErr(P.Status.E_BAD_ARG, 1, "settle 0..3")
+            if r.ch2_mode > 1:
+                raise _DevErr(P.Status.E_BAD_ARG, 2, "CH2 range mode 0..1")
+            if not (1000 <= a <= 10_000_000_000 and 1000 <= b <= 10_000_000_000):
+                raise _DevErr(P.Status.E_BAD_ARG, 3, "start / stop 1 Hz .. 10 MHz")
+            if not 1 <= r.points <= 200:
+                raise _DevErr(P.Status.E_BAD_ARG, 4, "points 1..200")
+            self.start_hz, self.stop_hz, self.points = r.start_chz / 100.0, r.stop_chz / 100.0, r.points
+            self.settle, self.ch2_mode = r.settle, r.ch2_mode
+            self.background = not r.flags & P.BODE_F_NO_BACKGROUND
+        act = r.action
+        if act in (P.BODE_RUN, P.BODE_REPEAT, P.BODE_THRU_MEASURE, P.BODE_OPEN):
+            self.open()
+        if act in (P.BODE_RUN, P.BODE_REPEAT, P.BODE_THRU_MEASURE):
+            if self.running:
+                raise _DevErr(P.Status.E_STATE, 2, "a sweep is running")
+            self.repeat = act == P.BODE_REPEAT
+            self._start(act == P.BODE_THRU_MEASURE)
+        elif act == P.BODE_STOP:
+            self.repeat = False
+            self.stop_req = True
+        elif act == P.BODE_ABORT:
+            self._end_thread(6)
+        elif act in (P.BODE_THRU_ON, P.BODE_THRU_OFF):
+            if self.thru is None:
+                raise _DevErr(P.Status.E_STATE, 4, "no thru calibration")
+            self.thru_applied = act == P.BODE_THRU_ON
+        elif act == P.BODE_THRU_CLEAR:
+            self.thru, self.thru_key, self.thru_applied = None, None, False
+        elif act == P.BODE_CLOSE:
+            self.close()
+        return self.header() + struct.pack("<II", self.estimate_ms(), 0)
+
+    def header(self) -> bytes:
+        thru = 0
+        if self.running and self.thru_sweep:
+            thru = 1
+        elif self.thru is not None:
+            thru = 2 if self.thru_key == self.key() else 3
+        if self.t_start:
+            elapsed = ((self.t_end if self.t_end is not None else time.monotonic()) - self.t_start) * 1000
+        else:
+            elapsed = 0
+        view = (1 if self.shown else 0) | (2 if self.repeat else 0) | (4 if self.thru_sweep else 0) | \
+            ((self.exhausted & 3) << 3)
+        return P.BodeHeader(self.sweep_id, self.state, self.reason, view, thru | (0x80 if self.thru_applied else 0),
+                            len(self.plans), len(self.results), self.current if self.running else -1, self.settle,
+                            self.ch2_mode, int(round(self.start_hz * 100)), int(round(self.stop_hz * 100)),
+                            self.points, self.switches, int(elapsed)).pack()
+
+    def read(self, first: int, count: int) -> bytes:
+        if count == 0 or count > P.BODE_MAX_ROWS:
+            count = P.BODE_MAX_ROWS
+        out = bytearray(self.header())
+        for i in range(first, min(len(self.plans), first + count)):
+            out += self._row(i)
+        return bytes(out)
+
+    def _row(self, i: int) -> bytes:
+        from . import bode as BD
+
+        pp = self.plans[i]
+        f_chz = int(round(pp.f_actual * 100))
+        pr = self.results.get(pp.m)
+        if pr is None:
+            return P.BodeRow(pp.m, f_chz, flags=P.BODE_ROW_NOT_MEASURED).pack()
+        if self.thru_applied and self.thru is not None and not self.thru_sweep:
+            pr = replace(pr, flags=list(pr.flags))
+            self.thru.apply(pr)
+
+        def centi(x: float) -> int:
+            return max(-32768, min(32767, int(round(x * 100)))) if math.isfinite(x) else -32768
+
+        ph = centi(pr.phase_deg)
+        return P.BodeRow(pp.m, f_chz, centi(pr.mag_db), 18000 if ph == -18000 else ph,
+                         centi(BD.db(abs(pr.x1) / math.sqrt(2))), centi(BD.db(abs(pr.x2) / math.sqrt(2))),
+                         pr.ch1_range, pr.ch2_range, P.bode_flags_from_names(pr.flags, pr.retries > 0)).pack()
+
+    # --- the engine -----------------------------------------------------------------------------------------
+
+    def _start(self, thru_measure: bool) -> None:
+        from . import bode as BD
+
+        try:
+            plans = BD.plan_sweep(self.start_hz, self.stop_hz, self.points)
+        except ValueError:
+            self.state, self.reason = 4, 4
+            raise _DevErr(P.Status.E_BAD_ARG, 3, "no frequency in the range") from None
+        self.sweep_id += 1
+        self.plans, self.results = plans, {}
+        self.state, self.reason, self.current, self.switches, self.exhausted = 1, 0, 0, 0, 0
+        self.thru_sweep = thru_measure
+        self.stop_req, self.abort_reason, self.abort_raised = False, 0, False
+        self.t_start, self.t_end = time.monotonic(), None
+        self.thread = threading.Thread(target=self._work, args=(self.sweep_id, thru_measure), name="sim-bode",
+                                       daemon=True)
+        self.thread.start()
+
+    def _work(self, sid: int, thru_measure: bool) -> None:
+        from . import bode as BD
+        from .scope import Scope
+        from .transport import Transport
+
+        eng, d = self, self.dev
+        state, reason = 2, 0
+        runner = None
+        try:
+            sc = Scope(Transport(_LoopLink(d), resync=False))
+            sc.t._seq = 0x8000  # far from the host's sequence numbers
+            sc.identify()
+
+            class Runner(BD.BodeRunner):
+                def _restore(self, sv: Any) -> list[str]:
+                    return []  # the view gives the settings back when it closes
+
+                def _result(self, pp: Any, ms: Any, retries: int) -> Any:
+                    pr = super()._result(pp, ms, retries)
+                    eng.results[pp.m] = pr
+                    return pr
+
+            def progress(i: int, n: int, text: str) -> None:
+                eng.current = i
+                eng.switches = runner.switches if runner is not None else 0
+                if eng.stop_req:
+                    raise _BodeStop()
+
+            scale = d.cfg.time_scale
+            runner = Runner(sc, settle=P.BODE_SETTLES[self.settle], ch2_range=P.BODE_CH2_MODES[self.ch2_mode],
+                            background=self.background, busy_retry_s=0.0, progress=progress,
+                            sleep=(lambda x: time.sleep(x * scale)) if scale > 0 else (lambda x: None))
+            res = runner.run(self.plans, None, "thru" if thru_measure else "measure")
+            if res.stopped_early:
+                state, reason = 4, 2
+        except _BodeStop:
+            state, reason = 3, 6
+        except _BodeAbort as e:
+            state, reason = (4, 5) if e.reason == 5 else (3, 6)
+        except BD.BodeError as e:
+            state, reason = 4, 3 if "saturated" in str(e) else 2
+        except Exception:  # noqa: BLE001 - the engine reports an error state, the simulator keeps running
+            log.exception("sim bode engine")
+            state, reason = 4, 2
+        with d.lock:
+            if self.sweep_id != sid:
+                return
+            if runner is not None:
+                self.switches = runner.switches
+                self.exhausted = sum(1 << c for c in runner._offset_exhausted)
+            if thru_measure and state == 2:
+                pts = [self.results[pp.m] for pp in self.plans if pp.m in self.results]
+                self.thru = BD.ThruCal.from_sweep(BD.SweepResult(pts, 0.0, "auto"), "device", (1.0, 1.0))
+                self.thru_key, self.thru_applied = self.key(), True
+            self.state, self.reason, self.t_end, self.current = state, reason, time.monotonic(), -1
+            again = self.repeat and state == 2 and not thru_measure
+        if again:
+            with d.lock:
+                if self.repeat and self.shown and not self.running:
+                    self._start(False)
 
 
 def start_simulator(cfg: SimConfig | None = None, host: str = "127.0.0.1", port: int = 0) -> SimServer:

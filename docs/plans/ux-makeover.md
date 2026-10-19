@@ -6,6 +6,12 @@ Owner decisions are marked **(owner)**. The diagnostics and settings screens com
 `docs/plans/diagnostics-review.md`; the mockups of every new screen live in the Design artifact linked from
 `docs/plans/task-queue.md` ("Diagnostics view redesign").
 
+**Mockups, 2026-10-19 evening:** the makeover artifact (revision 28) belongs to a previous login and is not reachable from the
+current session; the Frequency response mode boards, the main-menu icon candidates and the Spectrum board with the slider row are
+on the artifact "1013D Bode mode" https://claude.ai/artifact/DfydC8HJgnemUw3EHenTGP (design: `docs/plans/bode-ui.md`). The
+artboard HTML and the generators (gen_ux: common.py, boards.py, bode.py, bode_v2.py, bode_final.py, bode_icon.py,
+patch_spectrum_slider.py) live in the coordinator session's scratchpad; copy them into docs/mockups/ before that session ends.
+
 ## 1. Vocabulary
 
 - **Mode**: changes what is measured and which controls exist. Scope, Spectrum analyser, Bode plot (when it ships).
@@ -21,7 +27,8 @@ Same column, same rows, same style. Top to bottom:
 
 1. Scope
 2. Spectrum analyser
-3. Bode plot (only once it ships, never a greyed row)
+3. Bode plot (owner decision 2026-10-19 18:45, fw 0.2.68: the third mode row; it left the generator menu. Eight
+   rows at a 52 px pitch. Grey and inert only on bitstreams without the filter and DDS, or in the viewers)
 4. Saved pictures
 5. Saved waveforms
 6. Settings
@@ -76,7 +83,14 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   sets the dBV or dBA unit and which channel Auto analyses, then Scale and Ref level, folded in from the former Axis
   button so both CTRL pages share one geometry **(owner)**); Grid; the CH1 and CH2 V/div steppers; 50 % TRIG. The spectrum strip goes away; Span and Start keep their gestures. The waterfall's and density's
   colour legend is drawn at the top-right of the plot as a readout; the waterfall's time span and the phosphor's wfm/s
-  are cards. The record-position slider is hidden in Spectrum (it shows nothing useful there). Fold-outs open to the
+  are cards. **Spectrum slider (owner, 2026-10-19 19:40)**: the Scope's slider row stays under the plot in Spectrum
+  too, with the same construction and the same drag as the Scope (fw 0.2.64: the window follows the finger). It shows
+  the shown span as a window over 0..fs/2 at the current sample rate: the left edge at start / (fs/2), the width
+  span / (fs/2) of the track. Dragging pans the centre and keeps the span, the same pan as dragging the plot. At full
+  span the window fills the track and there is nothing to pan. To make room the plot becomes 8 divisions of 44 px
+  (y 50..402), the frequency labels sit at y 406, and the cards stay at the Scope's y 426 between plot and slider.
+  The Frequency response mode gets the same row for Start..Stop (`docs/plans/bode-ui.md` section 2). This replaces
+  "the record-position slider is hidden in Spectrum". Fold-outs open to the
   left of the bar over the plot's right edge and close on a second tap of their button, a tap outside, or another
   CTRL button; the waveform viewer's CTRL page stays as today. Display, Grid, persistence and palette are saved with the
   settings and restored at power-on (Grid gets a spare settings word). The one-line header goes away too **(owner)**: its

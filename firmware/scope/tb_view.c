@@ -38,7 +38,7 @@ int tbv_viable(uint32 fs, uint32 fpd, uint32 total)
   if((fs == 0) || (fpd == 0) || (total < 2))
     return 0;
 
-  //At least one sample per division
+  //At least TBV_MIN_SAMPLES_PER_DIV samples per division (fw 0.2.69: ten; one before)
   if((uint64)fs < (uint64)fpd * TBV_MIN_SAMPLES_PER_DIV)
     return 0;
 
@@ -107,6 +107,28 @@ int32 tbv_clamp_pos(int32 pos, uint32 fs, uint32 fpd, uint32 total, uint32 trig)
     return hi;
 
   return pos;
+}
+
+void tbv_set(tbv_tb *s, int32 t, uint32 fs, const uint32 *fpd, uint32 total, uint32 trig)
+{
+  s->tpd = t;
+  s->pos = tbv_clamp_pos(s->pos, fs, fpd[t], total, trig);
+}
+
+int tbv_fit(tbv_tb *s, uint32 fs, const uint32 *fpd, int32 first, int32 last, uint32 total, uint32 trig)
+{
+  int32 t = tbv_snap(fs, fpd, first, last, s->tpd, total);
+
+  if((t >= 0) && (t != s->tpd))
+  {
+    tbv_set(s, t, fs, fpd, total, trig);
+    return 1;
+  }
+
+  if((s->tpd >= first) && (s->tpd <= last))
+    s->pos = tbv_clamp_pos(s->pos, fs, fpd[s->tpd], total, trig);
+
+  return 0;
 }
 
 void tbv_window(int32 trig, int32 pos, uint32 fs, uint32 fpd, uint32 total, int32 *first, int32 *xend)

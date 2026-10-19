@@ -27,6 +27,8 @@
 #include "ui_settings.h"
 #include "ui_ctrl.h"
 #include "ui_meas.h"
+#include "bode_ui.h"
+#include "bode_view.h"
 #include "spectrum.h"
 #include "ctrl_page.h"
 #include "ui_diag_view.h"
@@ -94,8 +96,8 @@ void scope_setup_main_screen(void)
   //Show the user selected move speed
   scope_move_speed(0);
   
-  //Show the icon to white sun or yellow sun-max light
-  scope_maxlight_item(scopesettings.maxlight);      
+  //The sun: yellow at 100 % screen brightness (fw 0.2.68)
+  scope_maxlight_item(0);
 
   //Display the trigger menu select button and the settings
   scope_trigger_settings(0);
@@ -353,12 +355,12 @@ void scope_setup_right_control_menu(void)
     //Main control state so draw the always used buttons; fw 0.2.56: the spectrum leaves the cursor slots empty
     //(ui_p1_shown) until spectrum markers exist; fw 0.2.65: MEASURES opens the spectrum's own list there
     if(ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
-    {
       scope_t_cursor_button(0);
-      scope_v_cursor_button(0);
-    }
 
-    //fw 0.2.66: not in the Bode plot (ui_p1_shown)
+    //fw 0.2.69: Frequency response shows T CURSOR (C1 / C2) and MEASURES, not V CURSOR (ui_p1_shown)
+    if(ui_p1_shown(UI_P1_VCURSOR, ctrl_page_spectrum()))
+      scope_v_cursor_button(0);
+
     if(ui_p1_shown(UI_P1_MEASURES, ctrl_page_spectrum()))
       scope_measures_button(0);
 
@@ -549,15 +551,26 @@ void scope_control_button(int mode)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-//fw 0.2.63 (owner): a two-state button showing the state, a tap changes it (ui_ctrl.h): green "RUN" while running,
-//amber "Stopped" while stopped (red is for destructive actions), black text; orange while touched as every bar button
+//fw 0.2.68 (owner): one run state for the chip and the button (ui_ctrl.h ui_run_view); a host acquisition in progress
+//counts as running (pc_glue_host_busy)
+int scope_run_view(void)
+{
+  return ui_run_view(scopesettings.runstate, (scopesettings.triggermode == 1) && !triggerlong, pc_glue_host_busy());
+}
+
+//What the chip and the button last drew (UI_RUN_*; 0xFF: not drawn), for pc_run_follow
+uint8 scope_run_chip_shown = 0xFF;
+uint8 scope_run_button_shown = 0xFF;
+
+//fw 0.2.68 (owner, reverses 0.2.63): the button shows the ACTION a tap does: green "RUN" while stopped, red "STOP"
+//while running or waiting (white text on red, black on green); orange while touched as every bar button
 void scope_run_stop_button(int mode)
 {
-  int         run = scopesettings.runstate ? 1 : 0;
-  const char *s = ui_run_label[run];
-  PFONTDATA   f = run ? &font_3 : &font_2;
+  int         view = scope_run_view();
+  int         act = (view != UI_RUN_STOP) ? 1 : 0;
+  const char *s = ui_run_action[act];
 
-  display_set_fg_color(mode ? ITEM_ACTIVE_COLOR : run ? GREEN_COLOR : UI_C_AMBER);
+  display_set_fg_color(mode ? ITEM_ACTIVE_COLOR : act ? RED_COLOR : GREEN_COLOR);
 
   //Draw the body of the button
   display_fill_rounded_rect(739, 65, 51, 50, 2);
@@ -566,9 +579,10 @@ void scope_run_stop_button(int mode)
   display_set_fg_color(0x00505050);
   display_draw_rounded_rect(739, 65, 51, 50, 2);
 
-  display_set_fg_color(BLACK_COLOR);
-  display_set_font(f);
-  display_text(765 - ui_text_width(f, s) / 2, 65 + (50 - f->height) / 2, (int8 *)s);
+  display_set_fg_color((act && !mode) ? WHITE_COLOR : BLACK_COLOR);
+  display_set_font(&font_3);
+  display_text(765 - ui_text_width(&font_3, s) / 2, 65 + (50 - font_3.height) / 2, (int8 *)s);
+  scope_run_button_shown = (uint8)view;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -1755,19 +1769,15 @@ void scope_main_return_button(int mode)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//fw 0.2.68: the top bar sun shows the screen brightness (ui_settings.h): yellow at 100 %, white below; magenta while
+//touched (mode 2). 1.00o5 drew it from its max-light flag (mode 0 / 1).
 void scope_maxlight_item(int mode)
 {
    //Draw the black background
    display_set_fg_color(BLACK_COLOR);
    display_fill_rounded_rect(MAXLIGHT_BUTTON_XPOS, MAXLIGHT_BUTTON_YPOS, MAXLIGHT_BUTTON_WIDTH, MAXLIGHT_BUTTON_HEIGHT, 2); 
 
-  if(mode == 0)
-  {
-    //Inactive so white foreground and black background
-    display_set_fg_color(WHITE_COLOR);
-    display_set_bg_color(BLACK_COLOR);
-  }
-  else if(mode == 2)
+  if(mode == 2)
   {
     //Active, magenta rounded button
     display_set_fg_color(MAGENTA_COLOR);
@@ -1776,12 +1786,11 @@ void scope_maxlight_item(int mode)
     display_set_fg_color(BLACK_COLOR);
     display_set_bg_color(MAGENTA_COLOR);
   }
-  else if(mode == 1)
+  else
   {
-    //Active so yellow foreground and black background
-    display_set_fg_color(YELLOW_COLOR);
-    //Active, magenta menu button
-    display_set_bg_color(BLACK_COLOR); 
+    //Yellow sun at maximum, white below, on black
+    display_set_fg_color((scopesettings.screenbrightness >= UI_BRIGHT_MAX) ? YELLOW_COLOR : WHITE_COLOR);
+    display_set_bg_color(BLACK_COLOR);
   }
     
   //Display the icon with the set colors
@@ -1793,61 +1802,43 @@ void scope_maxlight_item(int mode)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void scope_set_maxlight(int mode)
+//fw 0.2.68: a new screen brightness from the sun, the slider or the Settings screen: the backlight, and the sun when
+//`sun` (not while the full-screen Settings page covers the top bar; it redraws the sun when it closes)
+void scope_set_brightness(uint8 value, int sun)
 {
-  if(mode == 0)
-  {
-    scopesettings.maxlight = 0;   //flag set to 0 - no max light
-    //Update the actual screen brightness
-    fpga_set_translated_brightness();
-  }
-  else if(mode == 1)
-  {
-    scopesettings.maxlight = 1;   //flag set to 1 - max light
-    //Update the screen brightness to max
-    fpga_set_backlight_brightness(60000);   //max brightness
-  }
+  scopesettings.screenbrightness = (value > UI_BRIGHT_MAX) ? UI_BRIGHT_MAX : value;
+  fpga_set_translated_brightness();
+
+  if(sun)
+    scope_maxlight_item(0);
+}
+
+//The sun tapped: 100 % and back (ui_bright_sun); the Screen brightness slider opens on the new value
+void scope_brightness_sun(void)
+{
+  scope_set_brightness(ui_bright_sun(scopesettings.screenbrightness, &scopesettings.brightback), 1);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
 void scope_run_stop_text(void)
 {
-  //Check if run or stop mode
-  if(scopesettings.runstate)//ok
-  {
-    //Run mode. Green box
-    if((scopesettings.triggermode == 1)&&(!triggerlong))
-        display_set_fg_color(ORANGE_COLOR); 
-        else display_set_fg_color(GREEN_COLOR);    
-  }
-  else
-  {
-    //Stop mode. Red box
-    display_set_fg_color(RED_COLOR);
-  }
-  
+  int view = scope_run_view();
+
+  //fw 0.2.68: the state (ui_run_view): green RUN, orange WAIT (single shot armed), red STOP
+  display_set_fg_color((view == UI_RUN_STOP) ? RED_COLOR : (view == UI_RUN_WAIT) ? ORANGE_COLOR : GREEN_COLOR);
+
   //Fill the box
   display_fill_rounded_rect(RUN_STOP_TEXT_XPOS, RUN_STOP_TEXT_YPOS, RUN_STOP_TEXT_WIDTH, RUN_STOP_TEXT_HEIGHT, 2);
 
   //Select the font for the text
   display_set_font(&font_3);
 
-  //Check if run or stop mode
-  if(scopesettings.runstate)//ok
-  {
-    //Run mode. Waiting mode. Black text, 
-    display_set_fg_color(BLACK_COLOR);
-    if((scopesettings.triggermode==1)&&(!triggerlong))
-        {display_text(RUN_STOP_TEXT_XPOS + 2, RUN_STOP_TEXT_YPOS + 1, "WAIT");}//3 1
-        else {display_text(RUN_STOP_TEXT_XPOS + 5, RUN_STOP_TEXT_YPOS + 1, "RUN");} //5 1
-  }
-  else
-  {
-    //Stop mode. White text
-    display_set_fg_color(WHITE_COLOR);
-    display_text(RUN_STOP_TEXT_XPOS + 1, RUN_STOP_TEXT_YPOS + 1, "STOP");
-  }
+  //Black text on green and orange, white on red, centred (gives 1.00o5's offsets 1, 5, 2; test_ui)
+  display_set_fg_color((view == UI_RUN_STOP) ? WHITE_COLOR : BLACK_COLOR);
+  display_text(RUN_STOP_TEXT_XPOS + (RUN_STOP_TEXT_WIDTH - ui_text_width(&font_3, ui_run_chip[view])) / 2,
+               RUN_STOP_TEXT_YPOS + 1, (int8 *)ui_run_chip[view]);
+  scope_run_chip_shown = (uint8)view;
   PC_TOPBAR_DRAWN();
 }
 
@@ -2720,37 +2711,23 @@ void scope_open_main_menu(void)
 //----------------------------------------------------------------------------------------------------------------------------------
 //Main menu row icons without a bitmap, drawn in the current colour at the top of the row's button (y)
 
-//Scope: one period of a sine wave (fw 0.2.63, owner; a square wave before), 25 px wide, 22 px high: the rounded
-//17.5 - 10.5 sin(2 pi x / 24) per column, neighbouring columns joined so the 1 px stroke has no gaps
-static void scope_main_menu_wave_icon(uint32 y)
+//Scope: one period of a sine wave over x / y axes (fw 0.2.68, owner), 25 px wide: the axes in a darker grey through
+//the centre (the zero line at y + 19, the vertical at the middle column), then the sine on top, the rounded
+//18.5 - 9.5 sin(2 pi x / 24) per column (2 px shorter than 0.2.63's, which touched the top), neighbouring columns joined
+//so the 1 px stroke has no gaps, in fg (white, black while touched); the axes keep their grey.
+static void scope_main_menu_wave_icon(uint32 y, uint32 fg)
 {
-  static const uint8 sine[25] = { 18, 15, 12, 10, 8, 7, 7, 7, 8, 10, 12, 15, 18, 20, 23, 25, 27, 28, 28, 28, 27, 25, 23,
-                                  20, 18 };
+  static const uint8 sine[25] = { 19, 16, 14, 12, 10, 9, 9, 9, 10, 12, 14, 16, 19, 21, 23, 25, 27, 28, 28, 28, 27, 25, 23,
+                                  21, 19 };
   uint32 x = MAIN_MENU_XPOS + 15, i;
+
+  display_set_fg_color(UI_MM_AXIS_COLOR);
+  display_draw_horz_line(y + 19, x, x + 24);
+  display_draw_vert_line(x + 12, y + 8, y + 29);
+  display_set_fg_color(fg);
 
   for(i = 1; i < sizeof(sine); i++)
     display_draw_line(x + i - 1, y + sine[i - 1], x + i, y + sine[i]);
-}
-
-//Settings: a cogwheel (fw 0.2.63, owner), 21 x 21 px around (cx, cy): a ring from radius 3 to 7, four straight teeth
-//5 px wide out to 10 px and four diagonal ones of the same width out to radius 9.9, drawn pixel by pixel
-static void scope_main_menu_cog_icon(uint32 y)
-{
-  int32 cx = MAIN_MENU_XPOS + 27, cy = y + 18, dx, dy, r2, d1, d2;
-
-  for(dy = -10; dy <= 10; dy++)
-  {
-    for(dx = -10; dx <= 10; dx++)
-    {
-      r2 = dx * dx + dy * dy;
-      d1 = dx - dy;
-      d2 = dx + dy;
-
-      if((r2 > 9) && ((r2 <= 50) || ((dy >= -2) && (dy <= 2)) || ((dx >= -2) && (dx <= 2)) ||
-                      (((d1 * d1 <= 8) || (d2 * d2 <= 8)) && (r2 <= 98))))
-        display_draw_pixel(cx + dx, cy + dy);
-    }
-  }
 }
 
 //Spectrum analyser: a base line with spectral lines (fw 0.2.28)
@@ -2765,6 +2742,21 @@ static void scope_main_menu_spectrum_icon(uint32 y)
     display_draw_vert_line(MAIN_MENU_XPOS + 16 + 2 * i, y + 29 - bars[i], y + 29);
 }
 
+//Frequency response (bode-ui.md 1a, owner, fw 0.2.69): a low-pass magnitude response over an L frame
+static void scope_main_menu_bode_icon(uint32 y, uint32 fg)
+{
+  uint32 x = MAIN_MENU_XPOS + 15;
+
+  display_set_fg_color(UI_MM_AXIS_COLOR);
+  display_draw_vert_line(x, y + 8, y + 29);
+  display_draw_horz_line(y + 29, x, x + 24);
+
+  display_set_fg_color(fg);
+  display_draw_horz_line(y + 12, x + 2, x + 10);
+  display_draw_horz_line(y + 13, x + 11, x + 12);
+  display_draw_line(x + 13, y + 14, x + 24, y + 25);
+}
+
 //One row of the main menu: mode 0 normal, 1 touched (Settings stays yellow while its fold-out is open, as 1.00o5)
 void scope_main_menu_item(int row, int mode)
 {
@@ -2772,21 +2764,24 @@ void scope_main_menu_item(int row, int mode)
   uint32 y  = ui_mm_row_top(row) + UI_MM_BTN_DY;
   uint32 bg = !mode ? DARKGREY_COLOR : (row == UI_MM_SETTINGS) ? YELLOW_COLOR : 0x00CCCCCC;
   uint32 xc = MAIN_MENU_XPOS + 93;
+  uint32 fg;
 
   display_set_fg_color(bg);
   display_fill_rounded_rect(UI_MM_BTN_X, y, UI_MM_BTN_W, UI_MM_BTN_H, 3);
 
-  //Icons with the set colors
-  display_set_fg_color(mode ? BLACK_COLOR : WHITE_COLOR);
+  //Icons with the set colors; fw 0.2.68: the Frequency response row grey where it cannot open (no filter / DDS, the viewer)
+  fg = mode ? BLACK_COLOR : ((row == UI_MM_BODE) && !pc_glue_bode_available()) ? 0x00686868 : WHITE_COLOR;
+  display_set_fg_color(fg);
   display_set_bg_color(bg);
 
   switch(row)
   {
-    case UI_MM_SCOPE:       scope_main_menu_wave_icon(y); break;
+    case UI_MM_SCOPE:       scope_main_menu_wave_icon(y, mode ? BLACK_COLOR : WHITE_COLOR); break;
     case UI_MM_SPECTRUM:    scope_main_menu_spectrum_icon(y); break;
+    case UI_MM_BODE:        scope_main_menu_bode_icon(y, fg); break;
     case UI_MM_PICTURES:    display_copy_icon_use_colors(picture_view_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
     case UI_MM_WAVEFORMS:   display_copy_icon_use_colors(waveform_view_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
-    case UI_MM_SETTINGS:    scope_main_menu_cog_icon(y); break;
+    case UI_MM_SETTINGS:    display_copy_icon_use_colors(Other_settings_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
     case UI_MM_DIAGNOSTICS: display_copy_icon_use_colors(diagnostic_view_icon, MAIN_MENU_XPOS + 15, y + 4, 24, 24); break;
     default:                display_copy_icon_use_colors(usb_icon, MAIN_MENU_XPOS + 18, y + 2, 18, 25); break;
   }
@@ -6107,9 +6102,6 @@ void scope_open_generator_menu(void)
   gen_enable_select(); //gen_source_select();
   gen_freq_select();
   gen_duty_select();
-
-  //fw 0.2.66: the fourth row, Bode plot (bode_view.c)
-  PC_GEN_BODE_DRAW();
   
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1
@@ -6287,12 +6279,8 @@ void scope_system_settings_screen_brightness_item(int mode)
   }
   else
   {    
-    //Set the icon to white sun
-    scope_maxlight_item(0);
-    //switch from max light to user set value
-    scope_set_maxlight(0);
-    
-    //Active so black foreground and yellow background
+    //Active so black foreground and yellow background (fw 0.2.68: the slider shows the brightness as it is, 100 % after
+    //the sun; 1.00o5 left max-light mode here)
     display_set_fg_color(BLACK_COLOR);
     display_set_bg_color(YELLOW_COLOR);
   }
@@ -6858,11 +6846,18 @@ void scope_open_v_cursor_menu(void)
 //shows its place in the row at its top left.
 int scope_measures_mode(void)
 {
+  //fw 0.2.69: Frequency response has its own list (bode_ui.h)
+  if(ctrl_page_spectrum() == 2)
+    return UI_MS_BODE;
+
   return ctrl_page_spectrum() ? UI_MS_SPECTRUM : UI_MS_SCOPE;
 }
 
 uint8 *scope_measures_ranks(int mode, int group)
 {
+  if(mode == UI_MS_BODE)
+    return bode_view_ms_ranks();
+
   if(mode == UI_MS_SPECTRUM)
     return spectrum_cards()->rank[(group < UI_MS_SP_GROUPS) ? group : 0];
 
@@ -6871,6 +6866,9 @@ uint8 *scope_measures_ranks(int mode, int group)
 
 int scope_measures_list_len(int mode)
 {
+  if(mode == UI_MS_BODE)
+    return BU_MS_COUNT;
+
   return (mode == UI_MS_SPECTRUM) ? UI_MS_SP_PER_GROUP : UI_MEAS_COUNT;
 }
 
@@ -6900,7 +6898,7 @@ void scope_measures_menu_cell(int mode, const ui_msm_cell *c)
 {
   int    ch  = c->group & 1;
   int    src = (mode == UI_MS_SCOPE) ? (ch ? scopesettings.source2_measures : scopesettings.source1_measures) : 0;
-  uint32 color = scope_measures_color(ch, src);
+  uint32 color = (mode == UI_MS_BODE) ? 0x00A0A0A0 : scope_measures_color(ch, src);     //fw 0.2.69: neutral grey
   uint8 *rank;
   char   num[4];
 
@@ -6934,6 +6932,11 @@ void scope_measures_menu_cell(int mode, const ui_msm_cell *c)
       display_fill_rect(c->x, c->y, c->w, c->h);
       display_set_fg_color(BLACK_COLOR);
       scope_measures_cell_text(c, &font_2, ui_msm_text(mode, c));
+      break;
+
+    case UI_MSC_EMPTY:
+      display_set_fg_color(DARKGREY_COLOR);
+      display_fill_rect(c->x, c->y, c->w, c->h);
       break;
 
     case UI_MSC_ITEM:
@@ -6990,8 +6993,11 @@ void scope_measures_menu_draw(int mode)
 
   display_set_fg_color(WHITE_COLOR);
   display_draw_rect(UI_MSM_X, top, UI_MSM_W, h);
-  display_draw_vert_line(480, top + 1 + UI_MSM_TITLE_H + 1, chan_bottom);
-  display_draw_vert_line(481, top + 1 + UI_MSM_TITLE_H + 1, chan_bottom);
+  if(mode != UI_MS_BODE)
+  {
+    display_draw_vert_line(480, top + 1 + UI_MSM_TITLE_H + 1, chan_bottom);
+    display_draw_vert_line(481, top + 1 + UI_MSM_TITLE_H + 1, chan_bottom);
+  }
 }
 
 void scope_open_measures_menu(void)

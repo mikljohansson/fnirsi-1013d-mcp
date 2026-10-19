@@ -181,8 +181,6 @@ int main(void)
   //Set battery level to max for next calculations
   scopesettings.batterychargelevel = 20;    
   
-  //Set the user value screen brightness
-  scope_set_maxlight(scopesettings.maxlight);       //1 set max, 0 user value
   
   //Setup the main parts of the screen
   scope_setup_main_screen();

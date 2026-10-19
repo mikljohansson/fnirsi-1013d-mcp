@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Developer</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;background:#000}
+a{color:#9ecbff}a:hover{color:#ffffff}
+</style>
+</helmet>
+<div style="position: relative; width: 800px; height: 480px; box-sizing: border-box; background: #000000; color: #ffffff; font-family: Arial, 'Liberation Sans', sans-serif; font-size: 16px; overflow: hidden">
+<div style="position: absolute; left: 0px; top: 0px; width: 800px; height: 52px; box-sizing: border-box; background: #0b1a33; border-bottom: 1px solid #1f3a66"><div style="position: absolute; left: 12px; top: 13px; font-size: 24px; line-height: 26px; color: #ffffff; white-space: nowrap; ">Developer</div></div>
+<div style="position: absolute; left: 160px; top: 18px; font-size: 13px; line-height: 15px; color: #c9d6ea; white-space: nowrap; ">For firmware work. Normal use needs none of this.</div>
+<a href="Log.dc.html" style="position: absolute; left: 696px; top: 4px; width: 96px; height: 44px; box-sizing: border-box; padding: 0; font: inherit; background: #0f2447; border: 1px solid #1f3a66; border-radius: 4px; color: #e6e6e6; text-decoration: none; display: block"><span style="font-size: 16px">Back</span></a>
+<button type="button" style="position: absolute; left: 12px; top: 68px; width: 776px; height: 52px; box-sizing: border-box; padding: 0; font: inherit; background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; text-align: left"><span style="display: flex; align-items: center; justify-content: space-between; height: 100%; padding: 0 12px; font-size: 16px; color: #e6e6e6"><span style="display: flex; flex-direction: column"><span>Debug overlay</span><span style="font-size: 13px; color: #9a9a9a">Trigger address and touch coordinates over the top bar</span></span><span style="color: #9a9a9a">off</span></span></button>
+<a href="ConfirmFel.dc.html" style="position: absolute; left: 12px; top: 128px; width: 776px; height: 52px; box-sizing: border-box; padding: 0; font: inherit; background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; text-align: left; text-decoration: none; display: block"><span style="display: flex; align-items: center; justify-content: space-between; height: 100%; padding: 0 12px; font-size: 16px; color: #e6e6e6"><span>Enter FEL now</span><span style="color: #ffd262">asks first</span></span></a>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":800,"height":480}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -883,3 +883,70 @@ Newest entries at the bottom. Format: date, who, what, result.
   Owner asked to disconnect the probes for a clean rerun. fw-polish2 dispatched 18:10 (RUN/STOP action button + host state follow,
   spanner icon, sine with axes, time/div snap not applying the manual path, sun icon = brightness slider, wizard Step M of N, Calibration
   tab button row).
+- 2026-10-19 18:35: ROOT CAUSE of the wizard failure found (fw-cal5 diag 0.2.67 b67219c, 7b881451, loaded; probes and post
+  disconnected). CAL_PROBE mode 0 and mode 1 (the wizard's exact on-screen path from the host): CH1 passes all ranges; CH2 fails at the
+  full-rate zero point of range 0 with core A [124..195] rms 11 and core B [127..255] clip 24-89 while the slope points +-40 codes
+  away are clean. Prestrobe (extra MCU strobe before each read) makes it worse, not better. READ_RAW dcoffset sweep at 200 MS/s: CH2
+  both cores show outliers (A max 195, B max 255 with up to 564/6000 rail samples) only while the mean is 126..133, clean at every
+  other mean; CH1 core A once (mean 131, max 213); gated rates clean everywhere. Conclusion: the FPGA's MCU readout path mixes bits
+  of two successive bytes where many bits flip (0x7F/0x80), lane- and build-dependent (0x1535 passed this morning, 0x1537/0x1538 fail;
+  fw-cal5: BRAM dob and o_mcu_data on the unconstrained i_mcu_clk). The wizard parks its zero at exactly 128, the worst code. fpga-gen8
+  redirected: register the output byte and constrain the MCU clock as the first change of 0x1539; fw-cal5: zero measured off-centre
+  as a workaround for all bitstreams, CAL_PROBE kept as protocol 1.21.
+- 2026-10-19 18:50: fw 0.2.67 (fw-cal5 workaround: zero as two points +-12 codes; CAL_PROBE 0x0402 kept, protocol 1.21) merged,
+  pinned backups/fw-0.2.67_086b4738.bin, loaded; CAL_PROBE both all, probes off: still NOISE on CH1 ranges 1 and 3 (core A rms 3.7-3.8,
+  [118..159]) and CH2 ranges 0, 2, 4 (core B rms 3.3-4.6, [115..159]); the other lanes clean (0.5-1.4). So the bit mixing also hits
+  the means near 116 and 140 (0x77/0x78, 0x8F/0x90 boundaries): no firmware workaround; the wizard waits for fpga-gen8's readout
+  fix (0x1539), which 0.3.0 ships as the recommended bitstream. fw 0.2.68 (polish batch 2: RUN/STOP action button following host
+  captures, spanner icon, sine with axes, snap through the manual path, one brightness value, wizard Step M of N, Calibration tab
+  button row, eight-row main menu with the Bode row) merged debd123, pinned backups/fw-0.2.68_8568021d.bin, loaded 18:52.
+  Owner: the mode is named "Frequency response" (ux-bode informed; the implementation batch renames the row).
+- 2026-10-19 19:48: fw 0.2.69 (Frequency response UI from the design, slider row, ten samples per division) merged, pinned
+  backups/fw-0.2.69_8babde3b.bin, loaded on 0x1538. Owner walk-through: firmware/AGENTS.md section 45 (RC and divider).
+- 2026-10-19 19:52: bitstream 0x1539 pinned (fpga-gen8): backups/al3_seg_0x1539_f36c1f7a.bin sha256
+  f36c1f7a0ada876311f5ad5d600f4cb44523165748e96c25bed160a66388ea64, padded backups/al3_seg_0x1539_f36c1f7a_padded.bin sha256
+  22db7b9128e2a12149e5c4f44bc3cb5c22338b40b4e888e97fe9c1a3f571a6b8; in fpga/al3/dist (unbenched), 0x1538 marked withdrawn. Cause of
+  the bit mixing (TD report with i_mcu_clk constrained): o_mcu_data loaded on the rising i_mcu_clk edge, 9.4-10.9 ns pad delay per bit,
+  the MCU read came too early for the slow pads; fix: byte loaded on the falling edge (strobe start) and held, address a falling-edge
+  copy of the pointer, i_mcu_clk 0 setup / 0 hold errors, tb_mcuread all 256 codes clean. Not flashed. Flash session: pre-write dump
+  must equal the 0x1538 padded image 2fc7ea5b...; rollback 0x1538 or 0x1535; checks fpga/al3/README.md section 9 on fw 0.2.69, then
+  the wizard; calibration on 0x1537/0x1538 must be redone.
+- **FPGA flash written with bitstream 0x1539** (20:03-20:06, Sipeed FT2232D on J2, scope on battery, USB unplugged): JEDEC ef 40 14,
+  pre-write double read = the pinned 0x1538 padded image 2fc7ea5b...; wrote backups/al3_seg_0x1539_f36c1f7a_padded.bin: 256 sectors
+  erased, 1105 pages programmed, write verified 22db7b91..., independent verify OK. Power cycle pending; then fw 0.2.69 FEL-load,
+  the 128-boundary probe (CAL_PROBE both all) and the no-write captures, then the wizard.
+- 2026-10-19 20:25: power cycle: the card's 0.2.25 boots FPGA 0x1539; fw 0.2.69 loaded. CAL_PROBE both all: all 12 range
+  measurements OK (zero points at codes about 116 and 140; CH2 A range 0 rms 2.56, a few excursions to 153-157). 30 s no-write run at
+  mean about 130: 218 captures clean (max std 1.1). BUT the dcoffset sweep at 200 MS/s range 0 shows the fault moved, not fixed: CH1
+  core A and CH2 core A garbled while their means are 128..145 (CH1A std 9.9-56.7 with 0/255 hits at dco 0..8; CH2A std 15-90 with up
+  to 396/6000 rail samples at dco 0..20), CH2 B mildly raised (2.2-3.6), CH1 B clean; all cores clean below 127 and above 146. The
+  outlier values (0x00, 0xFF, 0x30, 0x41 at a quiet 0x80..0x90 input) are old/new bit mixes of successive samples; the affected lanes
+  change with every build (0x1535 clean, 0x1537 CH2 A random, 0x1538 CH2 A+B, 0x1539 both A cores). New reading: the FPGA samples the
+  ADC data pins inside their transition window (AD9288 output delay vs the capture edge; board-level, invisible to 0x33), not the MCU
+  readout; fpga-gen8 asked for a datasheet-constrained capture edge or a per-core programmable capture phase with firmware training
+  (0x153A). The wizard may pass on 0x1539 since its zero points avoid the bad band; normal 200 MS/s traces near those codes are still
+  wrong on the A cores.
+- 2026-10-19 20:30: the four-screen calibration wizard passed on 0x1539 / fw 0.2.69 (Zero level with USB out, CH1 gain, CH2
+  gain, Save): the first full calibration on the new wizard and the first valid one since 0x1535. Owner: "the new wizard is great".
+  Owner decision: remove the off-centre zero workaround of 0.2.67 and measure at code 128 again so a bad bitstream fails loudly
+  (fail fast); keep the readout-fault wording in the failure line. Scheduled with the batch after 0x153A lands.
+- 2026-10-19 20:43-20:51: owner wired the RC low-pass (post -> 1 kOhm -> node -> 15 nF -> clips, CH1 on the post side, CH2 on the
+  node) and reported that AUTO SET in Frequency response "kept running, could not stabilise". Host checks over COM10 with the view
+  open (display mode 5, sweep_id 0 since boot): a device single sweep 100 Hz..1 MHz / 50 points / Settle Normal via BODE_CTRL took
+  4.0 s (header estimate 3.7 s for the host's settings; the first BODE_STATUS had reported 245.7 s for "the settings in effect"
+  while showing the same 100 Hz..1 MHz / 50 / Normal: the header and the estimate describe different settings when no sweep has
+  run, queued). REPEAT 1 kHz..200 kHz / 20 points ran 0.45 s per sweep, STOP from the host ended it after the sweep (state stopped,
+  reason 6, view bit 1 cleared, run_state 0). Both work. The table was wrong, though: every row ch1_range 0 and ch2_range 0 (5 V/div),
+  flags clipped + ch1_low on all 50 points, ch2_small above 10 kHz, outliers (+12.5 dB / +57 deg at one point), the floor flat at
+  -30 dB from 400 kHz. The host sweep of the same filter (fnirsi1013d-bode 100 Hz..1 MHz, 25 points) was clean: 25/25 valid, 0.13 dB
+  reference, -3 dB at 10.33 kHz, -45 deg at 12.3 kHz, -34.0 dB at 1 MHz, CH2 0.5 -> 0.2 -> 0.1 V/div. Cause, measured directly
+  (1 kHz square from the post through the filter, 200 MS/s, 1500 samples per core): an A core returns rail values and jumps > 40
+  codes whenever its samples lie in codes 128..145 (CH2 A at 5 V/div: 44 rail samples, 642 jumps, std 58.9 vs 2.2 on B; CH1 A at
+  1 V/div crossing the band: 13 rails, 74 jumps, B 0 / 0), and is clean when they stay outside it. The device engine counts one rail
+  sample as a clip (bode_dsp.c lo < 0.5 / hi > 254.5 codes), backs both channels off to 5 V/div in the pre-scan, and there the whole
+  3 V signal sits inside the band: every point flagged (grey dots on the screen, which is why the owner saw no colours), the curve
+  jumping between repeated sweeps. The host tool ranges by amplitude first and tolerated the few bad samples. So the on-device
+  Frequency response is correct in its mechanics and blocked by the 0x1539 capture fault until 0x153A; fpga-gen8 got the data
+  (the bad codes are 0x80..0x91: bit 7 set, bits 6..5 clear, A cores only). Scope state after the checks: generator off, both
+  channels 1 V/div DC, the Frequency response view still open, no sweep running.
+

@@ -2660,3 +2660,355 @@ never ends (Sweep card stuck, READ_BODE state 1 for long; reason 2 afterwards); 
 (scale per channel wrong: gain16 / uv_q8 / probe); phase drifting with frequency on the divider (record start or core
 order); the generator, V/div or time base not given back on leaving; a relay clicking at every point (bh_channel writes
 only what changed); MEASURES or the cursors reacting in the view; the view drawing over a waveform viewer.
+
+## 43. fw-cal5: the wizard's zero step on FPGA 0x1538, CAL_PROBE (fw 0.2.67, protocol 1.21 provisional, row 61)
+
+Bench fact (coordinator, docs/hardware-status.md 2026-10-19 17:55-18:40). On fw 0.2.64 / FPGA 0x1538 with nothing
+connected, the Zero level step failed every time: "CH1: too much noise, range 1 at 200 MSa/s: core B 7.2 codes, 7.2 per
+capture" and "CH2: the input is not at 0 V". At the same moment host READ_RAW on range 0 at 200 MSa/s was clean.
+
+**Cause, confirmed with CAL_PROBE and a READ_RAW offset sweep.** At 200 MSa/s some FPGA readout lanes mix the bits of two
+successive samples when they straddle 0x7F / 0x80. Outliers up to 255 appear only while a core's mean sits at 126..133
+(CH2 both cores, CH1 core A once). Every other mean is clean, and so is the gated rate. The zero step parked the mean of
+both cores exactly at 128. The host's READ_RAW sat a few codes off it, mostly outside the band.
+- The data are bad in the bus readout, not in the ADC data. The 0x33 encode check cannot see it.
+- The MCU-side early read is ruled out: CAL_PROBE settle 4 changed nothing. The prestrobe A/B made it worse.
+- The fault depends on the lane and on the build: 0x1535 passed in the 0.2.48 flow.
+- The likely cause is a hold race between BRAM dob and o_mcu_data on the unconstrained i_mcu_clk. fpga-gen8 owns the
+  bitstream fix (registered output byte, constrained MCU clock).
+- A Cancel-poll / touch interference theory was checked and ruled out. The touch is on Port A, the FPGA bus on Port E.
+  wiz_poll_cancel runs only between ranges. The host probe passes through the same fpga_done_conversion touch scan.
+
+Branch `worktree-agent-a8a5d87924697dbf0` from main a25987a (0.2.64), merged with origin/main 802c203 (fw-bode 0.2.66 /
+1.20, fw-meas 0.2.65) in ae1187e.
+
+Commits:
+- 28158ea `acal_point`, extremes, `acal_fail_point`, `acal_probe_pack`.
+- 789da66 `cal_range`, the failure note, cal_end's raw divider and time base.
+- 448c08c CAL_PROBE, protocol 1.21, 0.2.67.
+- a651c0c `firmware/tools/cal_probe.py`.
+- cf3f9e2 settle A/B.
+- b67219c prestrobe A/B, mode 1, the E_BUSY fix.
+- e5ccbd3 docs.
+- ae1187e the merge.
+- **c22896c, the fix**.
+- 8802b79 row 61 and the vector.
+- 8329d63 CHANGELOG and README.
+- Then this handoff.
+
+**What was built**
+- **Fix (c22896c).** Each class's zero is no longer measured at the centre PWM. It is the mean of two points d counts on
+  either side of it:
+  - Conversions: 8 per point gated, 64 per point at 200 MSa/s.
+  - d comes from the range's gated slope points, so each point sits 12 codes off 128 (`acal_zero_split`: 8..120 counts;
+    about 27 counts on range 0 of the owner's unit).
+  - In the linear model the mean of the two points is exactly the zero at the centre (`acal_zero_pair`). So the stored
+    zeros, slopes, PWM centres, `acal_correction` (v3), the v4 tracker and GET_CAL mean what they meant. Nothing in the
+    block or the protocol changes for this.
+  - Drift comes from the halves of both points: the level step cancels because both points take equal conversions.
+  - Noise and within-capture RMS are the RMS of the two points' own values.
+  - Cost: 8 gated and 64 full-rate conversions more per range, plus one 60 ms settle. That is about 0.15 s per range.
+- **Readout fault reported as such.** ACAL_E_RESPONSE stays 4 and ACAL_E_TIMING stays 18; the new code is
+  ACAL_E_READOUT = 19.
+  - `cal_range` turns an ACAL_E_CLIP into ACAL_E_READOUT when `acal_readout_fault` holds. That means every clipping
+    point is a 200 MSa/s point, and its gated twin at the same PWM is quiet and within 8 codes of 128. Any gated clip
+    means the cause is the input.
+  - Wizard text: "ADC readout fault near code 128 (FPGA 0x1538): flash the fixed bitstream". Short form: "ADC readout
+    near 128".
+  - With the zero pair the zero points no longer sit at 128, so this mainly catches a unit whose response is far off.
+- **Failure note.** Under a failed channel's result line there is a 13 px line built by `cw_zero_note`, for example
+  "Range 1, 200 MSa/s, zero point, PWM 812: A 130.1 (126..135), B 125.9 (0..255, 12 clip)".
+  - Content: the point (`acal_fail_point`), its PWM, and per core the raw mean, lowest..highest code and samples at 0 or
+    255.
+  - `ui_step.note[2]`: with a note present, the results move to y 148 + 38 i and the note sits 18 px below its result.
+  - Widths are tested at the worst case (PWM 1950, 32000 clipped).
+- **CAL_PROBE 0x0402** (docs/protocol.md row 61, request vector `req_cal_probe`).
+  - Request: u8 channel, u8 hardware range, u8 settle 0..15, u8 prestrobe 0/1, u8 mode 0/1.
+  - Response: 252 bytes. Eight `acal_point`s and the header (rc, fail point, class, core, value, within, centre, zero
+    PWM, encode-check deltas, flags), then the zero split d at 248.
+  - Mode 0: one range through `cal_begin`, the scratch channel, the relay and `cal_range`, then `cal_end`.
+  - Mode 1: the wizard's whole zero step in its screen context. It runs `cw_init`, the dimmed screen and dialog,
+    CW_EV_CALIBRATE and `wiz_run_actions`. The response carries the given channel's last measured range.
+  - Conditions: main loop only, UI stopped (E_STATE detail 1 otherwise), no host capture pending.
+  - The first 1000 bytes of both trace buffers are put back afterwards.
+  - The session's modal watch restarts after the probe (`last_main_ms`, `ui_busy`). Without that, the 0.2.67 diagnostic
+    image answered the next request with E_BUSY. Host test in test_session `test_cal_probe`.
+  - `fpga_read_settle` and `fpga_read_prestrobe` (fpga_control.c) are 0 except inside a probe.
+- `cal_end` now also writes back a raw host divider and the time base, as the class probe does.
+- `firmware/tools/cal_probe.py`: arguments port, CH1 / CH2 / both, ranges, repeats, settle, prestrobe, mode. It stops
+  the UI for the run, prints every point and saves backups/calprobe_*.json.
+
+**Tests**
+- test_adc_cal 59859:
+  - `test_points` covers extremes, the failure point and the 252-byte body.
+  - `test_readout_fault` models the mixing readout (bit 7 new, bits 6..0 of the previous sample when they straddle
+    127.5). The parked point clips, reaches 255 and fails the noise limit. The split pair through the same readout is
+    clean, the zero is within 1/8 code, and drift is under 1/8 code. It also covers the classification rules.
+- test_cal_wizard 664: the note texts and widths, and the READOUT line width.
+- test_session 69865 / 69863.
+- check_vectors OK (94).
+- mcp pytest 398 passed.
+- Warnings: GCC 10 and nommu 36 (sorted list identical to a25987a); GCC 13 / PC_DEBUG 31.
+
+**Images.** From 8329d63, GCC 10, in this worktree's `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin`:
+- 691,200 B, sha256 64159a52b1f8294daf26d1260a8fe74477d520a819ae2922e78a08deb5fc5a0b.
+- nommu 3392db632f86ef3b39d1fc6db2024e17a2cedede139563b7ebfef4cd2531bffe.
+- `#VER fw=0.2.67,proto=1.21`.
+- WSL cannot resolve the worktree's gitdir, so the identity carries no hash; a build on main differs in the identity only.
+- Diagnostic images loaded on the bench before the fix: f17e2d70 (cf3f9e2) and 7b881451 (b67219c), pinned by the
+  coordinator.
+
+**Bench check** (FEL-load only, nothing written before Save; back up SD 700-710 first because Save writes 708 / 709):
+1. `#VER fw=0.2.67,proto=1.21`. Run `python firmware/tools/cal_probe.py COM10 both all` with probes, post and generator
+   off.
+   - Every range OK on both channels.
+   - The "gated zero pair" and "full zero pair" rows print the two points' average as the mean (near 128), with "+- d"
+     about 20-45 counts in the header line, and lowest..highest about 112..144 (both points together).
+   - No clip at any point after the coarse ones.
+2. Mode 1 on both channels: `python firmware/tools/cal_probe.py COM10 CH2 0 1 0 0 1`. CH2 ends at range 5 (index 5) with
+   OK.
+3. The owner runs the wizard: Zero level gives two ticks, then the gain screens and Save. GET_CAL then shows CH2 A - B
+   near the READ_RAW means' difference.
+4. Optional regression check of the classification: none needed on hardware. If a unit still shows "ADC readout fault
+   near code 128", the fault reaches 12 codes off 128: report the note's numbers to fpga-gen8.
+
+**Open**
+- The UI's own 200 MSa/s traces near code 128 still carry the outliers on 0x1538; that is the bitstream fix (fpga-gen8).
+  Once it is flashed:
+  - re-run CAL_PROBE mode 0 with the zero parked: needs a temporary `acal_zero_split` = 0 build, or READ_RAW at dcoffset
+    0, to confirm;
+  - keep the pair anyway (it costs 0.15 s per range and protects any build).
+- mcp (do not edit from this branch): protocol.py `Cmd.CAL_PROBE = 0x0402`, `PROTO_MINOR = 21`, a decoder for the 252
+  bytes (cal_probe.py has one), ACAL_E_READOUT = 19 in its reason names.
+- The 0.2.60 per-capture DATA check (0x1532..0x1537) could also see such outliers as garbled; not relevant on 0x1538
+  (the 0x33 check).
+## 44. fw-polish2: UI polish batch 2 (fw 0.2.68 provisional, protocol 1.20 unchanged)
+
+Branch from main b5698c4 (fw 0.2.65), merged with origin/main twice (f2a0ca2: fw-bode 0.2.66 / protocol 1.20; 15c5e56).
+Brief: the owner's walk-through of 0.2.65 (2026-10-19 18:00), items 1-5, plus the coordinator's item 6 (owner decision
+18:45: Bode plot as a main-menu mode row). User-facing description: firmware/README.md "Screens: UI polish batch 2 (fw
+0.2.68)". Commits: 95c1033 (1 RUN/STOP), ec9f319 (2 icons), a9daba6 (3 time/div snap), d51dcb7 + ee754c7 (4 brightness),
+3dc0ed9 (5 wizard step, Calibration row), 67d5204 (version, CHANGELOG, README), 1972245 (6 Bode row), the merges, this
+handoff. Host tests green (test_ui 1,420,883 checks, test_tb_view 530,790, test_ui_diag 5516, the rest unchanged,
+check_vectors OK, CHANGELOG check OK). Warnings: GCC 10 36 (gcc10 and gcc10-nommu), GCC 13 / PC_DEBUG 31, all in the
+pre-existing places (none new). **Nothing benched.** No protocol change (docs/protocol.md row 34 gains one sentence: the
+screen's STOP during a host single aborts it). **Settings sector:** 1.00o5's max-light byte (OTHER_SETTING_OFFSET, after
+new_autosetup) now holds `0x80 | brightback` (item 4); no new words.
+
+Points for a successor:
+- **1 RUN/STOP.** The owner's picture (chip red STOP, button amber "Stopped", trace updating) is what 0.2.65 showed while
+  the PC captured with ARM: a host single stops the UI (`pc_hal_ui_set_run(0)`, row 34) and the screen shows each host
+  capture, so the scope looked running with both controls saying stopped (`pc_hal_ui_set_run` already redrew both on
+  SET_ACQ_STATE / STOP). Now `ui_run_view(runstate, single_wait, host_busy)` (ui_ctrl.c, pure) is the one state;
+  host_busy (`pc_glue_host_busy`) = a host ARM armed / triggered, or DONE less than `UI_RUN_HOST_HOLD_MS` (1000) ago, so
+  an averaging burst or the host's Bode sweep reads RUN without flicker. `scope_run_stop_text` / `scope_run_stop_button`
+  draw from `scope_run_view()` and record what they drew (`scope_run_chip_shown`, `scope_run_button_shown`);
+  `pc_run_follow` (pc_glue_ui_service, every pass) redraws a stale one (not in the file viewer; the button only on page
+  one and not in the waveform viewer), so every writer is covered without a hook at each. The button shows the action:
+  green "RUN" (black text) while stopped, red "STOP" (white text) otherwise, 16 px font; owner exception recorded in
+  docs/ui-guidelines.md section 3. The tap does what it reads: STOP clears runstate and `pc_glue_host_stop` aborts a host
+  single (`pc_ui_host_stop` -> `pc_host_abort`: ABORTED, a pending WAIT answers E_ABORTED); before, a tap during a host
+  single started the UI's RUN. Chip text is centred (equals 1.00o5's offsets 1 / 5 / 2; test_ui checks it). Known: at a
+  host ARM the chip shows STOP for one pass (pc_hal_ui_set_run(0) draws before acq_state is ARMED), then RUN.
+- **2 Icons.** Settings: `Other_settings_icon` at (MAIN_MENU_XPOS + 15, y + 6); the drawn cogwheel is gone. Scope: sine
+  at y + 9..28 of the button (18.5 - 9.5 sin), axes `UI_MM_AXIS_COLOR` 0x707070 at y + 19 and x + 12, drawn first.
+- **3 Time/div snap.** I could not find, by reading, a state the 0.2.65 snap left different from a manual ACQ-menu set:
+  the ACQ menu's time/div box only set `timeperdiv` and clamped the trigger point, which is what the snap did; 0x0E and
+  the geometry are written at every arm. Done as briefed anyway: `tbv_set` / `tbv_fit` (tb_view.c, pure; tbv_fit calls
+  tbv_set) and `acq_view_set` (index + trigger point, then `display_data_done = 1` while running so the next pass arms a
+  fresh conversion instead of reading the one armed with the old geometry), used by both `acq_view_set_tb` (the ACQ
+  box) and `acq_view_fit`. test_tb_view `test_snap_is_manual_set` sweeps every rate x depth x trigger sample x start
+  time/div x trigger point: fit == set, the result viable and inside the limits, a second fit / set a no-op (nothing in
+  this state can cycle). **Inference to check on the bench:** if the owner's "by hand" was a plot tap,
+  `scope_set_timebase` in RUN also sets the sample rate from `time_per_div_sample_rate` (10 us/div -> 10 MSa/s), so the
+  "fix" was a rate change, and the cycling belongs to the high rate with deep memory (candidates: the full-rate capture
+  check's discard / re-arm, enc_heal; the firmware auto deadline with an untriggered window), not to the snap.
+  Walk-through step 6 tells them apart.
+- **4 Brightness.** 1.00o5 kept `maxlight` (flag) beside `screenbrightness`: the sun wrote 60000 (= 100 % in
+  `fpga_set_translated_brightness`'s 560 v + 4000) or the translated value, and opening the slider switched max light
+  off. Now `screenbrightness` is the only value and `brightback` (was the `maxlight` field) what the sun returns to. Pure
+  model in ui_settings.c: `ui_bright_sun` (at 100: back, or 20 when back is 100; else remember and 100),
+  `ui_bright_byte` / `ui_bright_load` (0x80 | back; an old byte 1 = max light on loads as 100 % with back = the old slider
+  value; > 100 heals to 20). `scope_set_brightness(v, sun)` (menu.c) writes the backlight and redraws the sun (not from
+  the full-screen Settings page, which redraws it on exit when the value changed). Sun yellow at 100 %, white below. The
+  owner's "two fixed values" read as 1.00o5's pair: maximum and the slider's value.
+- **5** `wiz_dlg.step` ("Step M of N": 4 with the generator, 3 without, the save screen then being step 3) is set next to
+  the title in `wiz_build` (cal_wiz_ui.c title line only; fw-cal5's measurement code untouched). Calibration tab:
+  `UD_CAL_BTN_X(i)` / `UD_CAL_BTN_W` 185, row at `UD_BTN_Y` 420, trim line and note at `UD_CAL_TEXT_Y` 374 / 394.
+- **6 Bode row.** `UI_MM_BODE` 2, eight rows, `UI_MM_PITCH` 52, `UI_MM_BTN_DY` 9 (button 131 x 35 unchanged, 8 px to the
+  separator), `MAIN_MENU_HEIGHT` 416 (y 46..461). `ui_mm_choose` row Bode: bode 1, spectrum 0, phosphor 0, roll_off in
+  roll mode, no roll note (the note is the spectrum view's). `pc_glue_main_menu_mode` closes the view on any other mode
+  row and opens it after the spectrum / phosphor / roll changes. Grey icon and label, tap ignored (the menu stays open)
+  while `bode_view_available()` is 0. Removed: the generator menu's fourth row (`GEN_MENU_HEIGHT` back to 169,
+  `bode_gen_row_*`, `PC_GEN_BODE_*`, `bode_view_request` and `bv.req`). Per the coordinator the Bode view's right bar and
+  CTRL page are untouched (ux-bode mockup, separate batch). Section 42's walk-through enters the view with Menu > Bode
+  plot now.
+
+Answers for the owner:
+- **1.00o5's "Pro" trace style was not Linear.** `scope_display_channel_pro_trace` (removed in 8d508cd, polish batch 1
+  item e) took, per screen column, the minimum and the maximum of all samples falling in that column and drew two
+  polylines: max to the previous column's max, min to the previous column's min, with no vertical line between them.
+  Peak takes the same min / max per column but fills it with a vertical line (a solid band); Linear draws one sample per
+  column. So Pro = Peak's envelope as two outlines. It looks like Linear when a column holds one sample or less (zoomed
+  in) or the signal is clean (both outlines within a pixel); on noise or a fast signal compressed into the screen it
+  showed the band's top and bottom edges. (It stored two points per column, overflowing the 730-entry point buffers
+  until fw-acq's 0.2.64 fix.)
+- **Atlan's quick-settings fold-out and its Other settings (menu.c at 9cc599c^), and where each control is now:**
+
+| was (fold-out) | now |
+|---|---|
+| Screen brightness (slider) | fold-out Screen brightness (same slider); Settings > Display > Screen brightness (- / +); one value with the top bar sun since 0.2.68 |
+| Grid brightness (slider) | fold-out Grid brightness; Settings > Display > Grid brightness |
+| Other settings (the sub-menu below) | fold-out Other settings opens the full-screen Settings page |
+| Baseline calibration (then 1.00o5's input calibration boxes, 300 mV .. 15 V) | Diagnostics > Calibration > Calibrate (the wizard) and Volts calibration (the six DC levels); Clear calibration beside them |
+| X-Y mode display | CTRL page > Display > X-Y |
+| Notification confirmation | Settings > Controls > File message timeout ("wait for a tap" / "0.7 s") |
+| RTC settings: Time & Date (hour, minute, day, month, year, RTC on / off) | fold-out Time and date (same editor, with the clock module); Settings > Clock > Clock and Time and date |
+| (trigger 50 % row: commented out in Atlan, never shown) | CTRL page 50 % TRIG |
+
+| was (Other settings) | now |
+|---|---|
+| Boot menu, Default start (PECO / FNIRSI / FEL) | Settings > Start-up > At power-on: Open firmware / Boot menu, then open firmware / Boot menu, then stock firmware. FEL: ENTER_FEL from the PC, the boot menu's FEL, Diagnostics > Developer > Enter FEL |
+| New autosetup | Settings > Controls > Auto setup (improved / stock) |
+| Lock move cursors | Settings > Controls > Cursors (move together / move freely) |
+| DC shift calibration | Diagnostics > Calibration > DC shift trim (the trim itself on the CTRL page while on) |
+| USB-Serial mode | removed: the build forces CDC (`PC_FORCE_CDC`); the setting did nothing visible |
+| Dev mode | no switch; the flag stays in the sector, Diagnostics > Developer offers "Debug overlay / Switch off" only while it is set |
+| Add a tag to BMP | Settings > Files > Stamp screenshots with (time / file name / nothing) |
+| Load Ref on start | Settings > Files > Reference traces at power-on |
+
+  Nothing of the two menus is lost except USB-Serial mode (no effect in this build) and the Dev mode switch (by the
+  0.2.63 decision).
+
+**Bench walk-through (owner, coordinator on COM10; FEL load, no SD writes)** - `#VER fw=0.2.68,proto=1.20`. CH1 on the
+1 kHz calibration square, 1X, DC, Auto trigger, Scope view.
+1. RUN/STOP: running, the chip reads green RUN and the right-bar button red "STOP" (white text). Tap: chip red STOP,
+   button green "RUN". Tap: back. Trigger mode Single: chip orange WAIT, button red "STOP"; after the capture both show
+   stopped (chip STOP, button RUN).
+2. From the MCP: `scope_acquisition_control` "stop": both change at once; "run": both change back. Then several
+   `scope_capture` calls (or `scope_averaged_capture` n=16): while the PC captures, chip RUN and button STOP, steady;
+   about 1 s after the last capture both show stopped. During an averaged capture tap STOP on the screen: the host call
+   reports an aborted capture, the scope stays stopped. Repeat 1-2 with Diagnostics open (Back shows the right state) and
+   in the spectrum view.
+3. Menu: eight rows (Scope, Spectrum analyser, Bode plot, Saved pictures, Saved waveforms, Settings, Diagnostics, USB
+   drive), nothing clipped at the bottom, every label inside its button. Scope icon: a sine over a grey cross, nothing
+   cut at the top. Settings: the spanner and screwdriver of Other settings. Bode plot: two falling lines. Tap each row
+   near its top and bottom edge: that row reacts.
+4. Bode plot row (0x1538): opens the Bode view; the generator menu has three rows (Power, Frequency, Duty), no Bode row.
+   Menu > Scope leaves the view (generator, channels, time base given back), Menu > Spectrum analyser too. From roll
+   mode, Bode plot switches roll off. In the waveform viewer the row is grey and a tap does nothing (the menu stays open).
+5. Brightness: tap the sun: full bright, the sun yellow. Menu > Settings > Screen brightness: slider and value read
+   100 %. Drag to 40 %: the sun turns white as the value leaves 100. Close; sun: 100 %; sun again: 40 %. Other settings
+   page: Screen brightness - / + changes the same value; Back: the sun matches (yellow only at 100). Power-cycle at 100 %
+   set by the sun: comes up at 100 %, the next sun tap returns to 40 %.
+6. Time/div snap (owner's repro): ACQ menu, a slow time/div at a low rate with deep memory, then a high rate: the
+   notice "Time/div set to X for this rate"; close the menu, watch 10 s: expected stable. If it still cycles: note the
+   ACQ menu's rate, then set time/div by hand in the **ACQ menu** (5 us, then 10 us). If that does not settle it but a
+   **plot tap** does, read the rate after the tap (plot taps in RUN couple the rate to the time/div): the cause is then
+   the rate / depth combination, not the snap (successor note, item 3).
+7. Diagnostics > Calibration: four equal buttons on the bottom row: Calibrate (green), DC shift trim (grey / green),
+   Volts calibration, Clear calibration (red) at the right. Tap DC shift trim: "On: CTRL on the scope opens the trim."
+   above the row. Calibrate: the wizard's title line ends in "Step 1 of 4" (Continue: 2, 3, 4 of 4); Cancel.
+Bug indicators: chip and button disagreeing; the button reading STOP with the scope idle for more than a second; a STOP
+tap during a host capture that starts the UI's RUN; a main-menu tap selecting the neighbouring row; a Bode row in the
+generator menu; the sun yellow below 100 % or the slider not at 100 % after the sun; the snapped time/div cycling.
+
+## 45. fw-fr: Frequency response mode UI, ten samples per division (fw 0.2.69 provisional, protocol 1.21 unchanged)
+
+Branch from main 71b026e (fw 0.2.68), merged with origin/main several times (bode-ui.md's final decisions e4452d9, 4b86769,
+the icon de14622, the slider be0c93e / 6d849f6). Brief: implement docs/plans/bode-ui.md with the owner's decisions of
+2026-10-19 evening (they override the document's earlier drafts; the document now records them), plus the tb_view
+viability rule. User-facing description: firmware/README.md "Frequency response". Commits: 070e250 (ten samples per
+division), 7772b64 (`bode_auto_span`), bbf12f1 (`bode_ui.c`, MEASURES list, ui_p1_shown, menu row name), 5d262b7 (the
+view), 70d3dec (wiring, 0.2.69), then docs and this handoff. Host tests all green (test_ui 1,423,013 checks incl. the new
+test_bode_scales / readout / cards / texts, test_bode_sweep 199 incl. test_auto_span, test_tb_view 580,345, test_bode.py,
+check_vectors, CHANGELOG check). Warnings GCC 10 36 (gcc10 and gcc10-nommu), none in the new or changed code; bode_ui.c is
+clean with the host tests' -Wall -Wextra -Werror, bode_view.c with arm-none-eabi-gcc -Wall -Wextra. **Nothing benched.**
+**No protocol change** (the CSV and the cursors are screen-only; docs/protocol.md names display mode 5 "Frequency
+response"). **Settings words claimed: 213..215** (the MEASURES list: 0xE000 marker and three 4-bit ranks in 213, four in
+214, three in 215; anything else gives the defaults); word 220 gains bits 3..4 (Display variant), 5 (cursors), 6
+(frequency axis), bit 7 must be clear (an erased word reads 0xFFFF). 216..218 stay free.
+
+Points for a successor:
+- **bode_ui.c/.h** (pure): the chart geometry (pane y 60..396, six divisions of 56 px; labels y 400; cards y 426; slider
+  452..471), `bu_scale_pick` (the first division that holds the data with the free top division, else the first that
+  holds it at all: bode-ui.md 9 C3, so 55 or 60 dB of data goes to 20 dB/div), log / linear x, `bu_lin_step`, the
+  readout rows (`bu_readout`: C1, C2, C2-C1; a BODE_F_BAD point shows its reason instead of the phase and greys its row
+  and the difference; spliced points are valid), the MEASURES list (`bu_ms_*`, ranks as ui_meas.c's), `bu_card_text`
+  (no sweep / sweeping / not found / the value; Thru applied green, stale amber), the warning table `bu_warn[]` (all
+  <= 50 characters, test_ui checks), the instruction, the slider maths (`bu_slider_x` of a step index, `bu_slider_shift`).
+- **bode_view.c**: one `draw_all` into displaybuffertmp (pane, labels, curves, markers, the measured point's line,
+  cursors, warning or instruction, cards, slider). `table_state`: FILLING only while running with unmeasured points
+  (markers hidden; cards "sweeping"); a stopped partial table counts as complete. AUTO SET: `bv_auto_start` (aborts a
+  running sweep, turns the thru's Apply off for the overview and gives it back), `bv_auto_finish` in the service when the
+  overview ends (STOPPED = cancelled), a second tap aborts. Single sweep while RUN repeats sets `bv.single` (the sweep in
+  progress becomes the last). Cursors: `bv.cur[2]` re-placed (a third / two thirds of the axis) whenever invalid or
+  outside the span; reset when the plan changes. Slider: `slider_drag` (blocking while the finger is down, as the other
+  plot drags), `bv.drag` makes the axis follow the settings; release restarts or runs one sweep. CSV: `bode_view_save`
+  (24 KB static buffer, `bode/FRnnnnn.CSV` with FA_CREATE_NEW from 00001; its own file message box in the stock style).
+- **Wiring**: menu.c (`scope_main_menu_bode_icon(y, fg)` from bode-ui.md 1a; V CURSOR drawn separately from T CURSOR;
+  MEASURES `UI_MS_BODE`: neutral Select All / Clear, two `UI_MSC_EMPTY` places, no channel split), statemachine.c (T
+  CURSOR and SAVE WAVE in the mode; the grey row's reason drawn at the top middle, it stays until the trace area redraws),
+  pc_hal_scope.c (words 213..215 restore, `bode_view_defaults` from `pc_glue_settings_defaults`, the mode's roll note),
+  scope_functions.c (words 213..215 saved).
+- **Not done (queue them):** (1) the top bar in this mode, bode-ui.md section 7: ACQ chip "Set by / the sweep", the
+  generator chip showing the tone being measured (the engine writes the FPGA generator directly; `fpgasettings.gen_freq`
+  is untouched, so the chip shows the user's generator), the menus' notes. (2) The Spectrum view's slider (bode-ui.md /
+  ux-makeover: window = shown span over 0..fs/2, drag pans the centre, plot 8 divisions of 44 px y 50..402, labels y 406,
+  cards y 426): not started. (3) A cancelled AUTO SET leaves the partial overview on screen; the design says the previous
+  table comes back (the engine has no copy; it needs one of `pts` + `plans` + `cfg` + `np`, about 25 KB). (4) Move fast
+  does not change the cursor drag step (cursors snap to points). (5) The MEASURES menu's changes show at the view's next
+  redraw (at most 1 s), not at once. (6) The overview's Q is a lower bound when the band is narrower than its point
+  spacing; such tanks get half a decade and Settle Resonant, a Q 50 tank on the overview may need a manual narrower span.
+- **Ten samples per division** (tb_view.h `TBV_MIN_SAMPLES_PER_DIV` 10): 200 MSa/s now reaches 50 ns/div; 20, 10, 5 ns/div
+  are never viable (the ACQ menu greys them, a tap zoom or SET_TIMEBASE snaps to 50 ns/div with the notice). The spectrum's
+  time bases 32..34 share 200 MSa/s with 31, so its rate never depended on them. test_tb_view: 74 cells now differ from
+  1.00o5's table (71 below ten samples).
+
+**Bench walk-through (owner, coordinator on COM10; FEL load only, no SD writes; parts: the RC 1 kOhm / 15 nF ceramic and
+the 991 / 102 Ohm divider; wiring A, DUT ground on both probe ground clips; x1 probes)** - FEL-load
+(`sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`), `#VER fw=0.2.69,proto=1.21`.
+1. Ten samples per division: Scope, ACQ menu, 100 kSa/s: the time/div boxes below 100 us are grey; from 10 us/div the
+   rate change snaps to 100 us/div with "Time/div set to 100us for this rate". 200 MSa/s: 50 ns/div is the fastest box.
+2. Menu: the third row reads "Frequency" over "response", the icon a flat line, a knee and a 45 degree roll-off over a
+   grey L. On a 0x1532 bitstream (or in the waveform viewer) the row is grey; a tap shows "Frequency response needs FPGA
+   0x1534 or later" ("Leave the waveform viewer first") in orange at the top middle; the menu stays open.
+3. Open it (0x1538): STOP, the empty pane 100 Hz .. 1 MHz with "+10 dB" .. "-40" in cyan on the left and "+135 deg" ..
+   in pink on the right, the orange two-line instruction at the top middle, cards "-3dB no sweep", "Peak no sweep",
+   "Q no sweep", "Level no sweep", the slider's window over 100 Hz .. 1 MHz. Right bar: CTRL, RUN (green), AUTO SET,
+   T CURSOR, (empty), MEASURES, SAVE PIC, SAVE WAVE. CTRL: Display "Overlay", Sweep "50 pt", Thru "None", Grid at the
+   fourth slot; nothing below.
+4. RC (post -> 1 kOhm -> junction -> 15 nF -> clips; CH1 on the post side, CH2 on the junction): AUTO SET. "Auto..." and
+   the Sweep card "auto n/20" over 100 Hz .. 10 MHz (about 2 s, more if the 15 ms per capture is optimistic); then the
+   axis becomes 1 kHz .. 200 kHz, RUN (red STOP button, chip RUN), Settle Normal, CH2 Auto; the cards read "sweeping"
+   until the table is complete, then "-3dB" near 11 kHz (the host read 11.3 kHz on this capacitor), "Level" near 0 dB,
+   "Peak" / "Q" "not found". The magnitude stays below the top division (the top label one division above the data).
+5. T CURSOR: C1 and C2 flags above the pane at a third and two thirds; the readout box at the bottom left lists C1, C2
+   and C2-C1 (f white, dB cyan, deg pink). Drag a flag: its cursor follows, snapping to points; a tap in the plot moves
+   the nearer cursor. Put C1 near 1 kHz and C2 near 100 kHz: about 0 / -19 dB, the C2-C1 row about -19 dB / -80 deg. A
+   grey (flagged) point under a cursor shows its reason instead of the phase. T CURSOR again: both go.
+6. Slider: drag the window right by about a decade: Start / Stop step together (CTRL > Sweep shows them), the axis follows
+   with the old points inside the span; release: the sweep restarts at the new span (RUN repeats). STOP, drag back:
+   release runs one sweep and returns to STOP. During AUTO SET's overview a drag does nothing.
+7. CTRL > Display: Overlaid (green), Magnitude only (the phase curve and the right labels go), Phase only; Frequency
+   axis: Log -> Linear (1-2-5 labels, the points bunch at the left over 1 kHz .. 200 kHz), back to Log. CTRL > Sweep:
+   Single sweep reads "about N s"; while RUN repeats, tap it: "running, then STOP" and the sweep in progress is the last.
+8. MEASURES: "Frequency response measurements", Select All / Clear in grey, the ten items in three rows, -3dB 1, Peak 2,
+   Q 3, Level 4. Select BW and Ph45: their cards follow (Ph45 on a pink block). Select All: "+5 more" in the sixth place.
+9. SAVE WAVE: "Sweep table saved" / "bode/FR00001.CSV"; a second save: FR00002. On the PC (USB drive) the file has the
+   `#` lines and one row per point; compare with READ_BODE (section 42 step 9's script). Before any sweep: "Nothing to
+   save: run a sweep first".
+10. Divider (991 / 102): AUTO SET: "No corner from 100 Hz to 10 MHz: span kept" for 5 s, RUN at the kept span, flat
+    -20.6 dB / 0 deg (5 dB per division, the data in the second division). CH2 tip off the DUT (on the ground clip):
+    AUTO SET ends with "No response: CH2 tip on the DUT output?" and STOP. AUTO SET, then tap it again during the
+    overview: "Auto set cancelled: settings kept", STOP.
+11. Thru as in section 42 step 5 (Thru card applied green; change Points: stale amber and "Thru does not match this
+    sweep: measure again"). During AUTO SET's overview the thru is not applied; afterwards its Apply is back.
+12. Power cycle: Display variant, frequency axis, cursors on / off, Start / Stop / Points / Settle / CH2 range and the
+    MEASURES choice are kept. Settings > Restore default settings: Overlaid, Log, cursors off, 100 Hz .. 1 MHz / 50,
+    the default cards. Leave via Menu > Scope: everything given back as in section 42 step 8.
+Bug indicators: data drawn in the top division while the scale had room; a curve in the wrong colour or a label column on
+the wrong side; markers while "sweeping"; a cursor reading between points; the readout box beyond x 262; the slider window
+off the track or a drag that changes the span's width; a sweep that does not restart on release; AUTO SET changing
+settings after a cancel; a CSV row count different from the measured points; the T CURSOR / SAVE WAVE buttons acting on
+the scope's cursors / waveform files in this mode; a time/div under ten samples per division offered anywhere.

@@ -369,6 +369,12 @@ void pc_ui_pass_mark(pc_session *s, int n)
     s->first_mark[n] = (pc_hal_ms() - s->first_poll_at) + 1;
 }
 
+//fw 0.2.68: the screen's STOP during a host single (the button reads STOP while one runs): abort it
+void pc_ui_host_stop(pc_session *s)
+{
+  pc_host_abort(s);
+}
+
 int pc_ui_arm_allowed(pc_session *s)
 {
   return !s->ui_hold;
@@ -2792,6 +2798,57 @@ static int h_read_spectrum(pc_session *s, const uint8_t *req, uint32_t len, uint
   return PC_OK;
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// CAL_PROBE (1.21 provisional, fw 0.2.67): u8 channel, u8 hardware range 0..5, u8 settle (0..15 extra data-port reads
+// per sample), u8 prestrobe (0, 1: a write strobe before each sample strobe); settle and prestrobe are A/B tests of the
+// readout, 0 = the wizard's; u8 mode (0 one range, 1 the whole zero step in the wizard's screen context, both channels,
+// the response for channel's last measured range). The calibration wizard's zero step for
+// that range, exactly as the wizard measures it (cal_wiz_ui.c cal_range), nothing stored; about 1 s, main loop only.
+// The UI must be stopped (SET_ACQ_STATE 0) and no host capture pending; the FPGA gets the UI's settings back afterwards
+
+static int h_cal_probe(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  pc_hw_ui u;
+  int32_t  n;
+
+  (void)len;
+
+  if(req[0] > 1)
+    return pc_error(s, PC_E_BAD_ARG, 0, "channel");
+
+  if(req[1] >= ACAL_RANGES)
+    return pc_error(s, PC_E_BAD_ARG, 1, "range 0..5");
+
+  if(req[2] > 15)
+    return pc_error(s, PC_E_BAD_ARG, 2, "settle 0..15");
+
+  if(req[3] > 1)
+    return pc_error(s, PC_E_BAD_ARG, 3, "prestrobe 0..1");
+
+  if(req[4] > 1)
+    return pc_error(s, PC_E_BAD_ARG, 4, "mode 0..1");
+
+  if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
+    return pc_error(s, PC_E_STATE, 0, "host capture pending");
+
+  pc_hal_ui_read(&u);
+
+  if(u.run)
+    return pc_error(s, PC_E_STATE, 1, "UI running: SET_ACQ_STATE 0 first");
+
+  n = pc_hal_cal_probe(req[0], req[1], req[2], req[3], req[4], resp);
+
+  //It ran for seconds inside this main-loop poll: the modal watch must not count that as a modal screen afterwards
+  s->last_main_ms = pc_hal_ms();
+  s->ui_busy      = 0;
+
+  if(n < 0)
+    return pc_error(s, PC_E_INTERNAL, 0, "cal probe");
+
+  *rl = (uint32_t)n;
+  return PC_OK;
+}
+
 //BODE_CTRL (1.20): u8 action, u8 flags (bit 0 the settings below apply, bit 1 no background captures), u8 settle 0..3,
 //u8 CH2 range mode (0 auto, 1 hold), u32 start cHz, u32 stop cHz, u16 points 1..200, u16 0. Answers the READ_BODE header
 //and u32 the estimated duration of a sweep in ms, u32 0 (docs/protocol.md row 60)
@@ -2880,6 +2937,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_SET_GEN,      0,                            PC_CAP_GENERATOR_DDS, h_set_gen },
   { PC_CMD_GET_CAL,      0,                            0, h_get_cal },
   { PC_CMD_READ_SCREEN,  0,                            PC_CAP_SCREENSHOT, NULL },   //BENCH: T9 before it gets a handler
+  { PC_CMD_CAL_PROBE,    0,                            0, h_cal_probe },
   { PC_CMD_DEBUG_FPGA,   0,                            PC_CAP_DEBUG_RAW, h_debug_fpga },
   { PC_CMD_ENTER_FEL,    0,                            PC_CAP_ENTER_FEL, h_enter_fel },
   { PC_CMD_FFT_BENCH,    F_BASIC,                      0, h_fft_bench },

@@ -804,6 +804,8 @@ uint32 isqrt(uint32 n) {
 //----------------------------------------------------------------------------------------------------------------------------------
 
 uint32 fpga_divider;
+uint8  fpga_read_settle;
+uint8  fpga_read_prestrobe;
 static uint32 fpga_dither = 1;
 
 void fpga_channel_correction(PCHANNELSETTINGS settings, acal_corr *c)
@@ -1156,6 +1158,8 @@ void fpga_read_adc_data(PCHANNELSETTINGS settings)
   register int32  clip_lo = settings->clip_lo;
   register int32  clip_hi = settings->clip_hi;
   const int16 *src = pc_decim_src;      //decimation filter: samples already read and converted (pc_glue_decim_read)
+  register uint32 settle = fpga_read_settle;
+  register uint32 pre    = fpga_read_prestrobe;
   
   //static uint64 global_sample_counter = 0;
   
@@ -1179,7 +1183,25 @@ void fpga_read_adc_data(PCHANNELSETTINGS settings)
     }
     else
     {
+      //CAL_PROBE A/B tests (fw 0.2.67): a write strobe first (no read, no address step), and the port read again
+      //after the strobe, the last read taken
+      if(pre)
+      {
+        FPGA_DATA_WRITE();
+        FPGA_PULSE_CLK();
+        FPGA_DATA_READ();
+      }
+
       FPGA_PULSE_CLK();
+
+      if(settle)
+      {
+        register uint32 i;
+
+        for(i=0;i<settle;i++)
+          (void)FPGA_GET_DATA();
+      }
+
       sample = FPGA_GET_DATA();
     }
     

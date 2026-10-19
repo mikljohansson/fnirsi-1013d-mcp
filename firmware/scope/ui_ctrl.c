@@ -8,11 +8,12 @@
 int ui_p1_shown(int slot, int spectrum)
 {
   //fw 0.2.65: MEASURES opens the spectrum's own list there; the cursor slots stay empty
-  if(spectrum && ((slot == UI_P1_TCURSOR) || (slot == UI_P1_VCURSOR)))
+  if((spectrum == 1) && ((slot == UI_P1_TCURSOR) || (slot == UI_P1_VCURSOR)))
     return 0;
 
-  //fw 0.2.66: the Bode plot (spectrum = 2) has no measurement list either: its cards are fixed
-  if((spectrum == 2) && (slot == UI_P1_MEASURES))
+  //fw 0.2.69: Frequency response (spectrum = 2): T CURSOR shows the frequency cursors C1 and C2, MEASURES the mode's
+  //list; there is no level cursor (V CURSOR empty)
+  if((spectrum == 2) && (slot == UI_P1_VCURSOR))
     return 0;
 
   return (slot >= UI_P1_CTRL) && (slot <= UI_P1_SAVEWAVE);
@@ -131,7 +132,16 @@ int ui_fold_dir(const ui_fold *f, uint32 x)
 //----------------------------------------------------------------------------------------------------------------------------------
 
 const char *const ui_acq_pass_label = "Pass time";
-const char *const ui_run_label[2]    = { "Stopped", "RUN" };
+const char *const ui_run_chip[3]     = { "STOP", "RUN", "WAIT" };
+const char *const ui_run_action[2]   = { "RUN", "STOP" };
+
+int ui_run_view(int runstate, int single_wait, int host_busy)
+{
+  if(runstate)
+    return single_wait ? UI_RUN_WAIT : UI_RUN_RUN;
+
+  return host_busy ? UI_RUN_RUN : UI_RUN_STOP;
+}
 
 const char *const ui_trace_names[UI_TRACE_COUNT]         = { "Linear", "Dots", "Peak" };
 const char *const ui_view_names[2]                       = { "Normal", "X-Y" };

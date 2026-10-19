@@ -32,7 +32,7 @@ CMDS = {
     "SET_SEQ": 0x020E, "GET_SEQ": 0x020F, "READ_SEQ": 0x0210, "BODE_CTRL": 0x0211, "READ_BODE": 0x0212,
     "SD_INFO": 0x0500, "SD_READ_SECTORS": 0x0501, "SD_STAGE": 0x0502, "SD_WRITE_SECTORS": 0x0503,
     "SAVE_REPORT": 0x0504,
-    "GET_GEN": 0x0300, "SET_GEN": 0x0301, "GET_CAL": 0x0400, "READ_SCREEN": 0x0401,
+    "GET_GEN": 0x0300, "SET_GEN": 0x0301, "GET_CAL": 0x0400, "READ_SCREEN": 0x0401, "CAL_PROBE": 0x0402,
     "DEBUG_FPGA": 0x0F00, "ENTER_FEL": 0x0F01,
 }
 
@@ -110,6 +110,9 @@ REQUESTS = [
     ("BODE_CTRL", struct.pack("<BBBBIIHH", 1, 1, 1, 0, 10_000, 100_000_000, 50, 0),
      "1.20: run one Bode sweep, settings apply: Normal settle, CH2 auto, 100 Hz (10,000 cHz) .. 1 MHz, 50 points"),
     ("READ_BODE", struct.pack("<HHI", 0, 0, 0), "1.20: the Bode header and every row that fits"),
+    # appended (fw 0.2.67)
+    ("CAL_PROBE", bytes([1, 0, 0, 0, 0]),
+     "1.21 (provisional): the wizard's zero measurement of CH2, hardware range 0 (5 V/div), wizard readout, one range"),
 ]
 
 

@@ -46,6 +46,7 @@ typedef struct
   const char *result[2];            //0 or "" for none
   uint8       result_icon[2];       //0 none, 1 tick, 2 warning, 3 pending
   uint8       result_colour[2];     //UD_C_*
+  const char *note[2];              //0 or "": a small line under result i (fw 0.2.67: a zero step failure's numbers)
   const char *left;                 //"Cancel"
   const char *right;                //the action, 0 for none
   uint8       right_style;          //UI_ACT_*

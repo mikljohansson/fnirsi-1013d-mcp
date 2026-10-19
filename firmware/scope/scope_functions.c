@@ -20,6 +20,7 @@
 #include "spec_fmt.h"
 #include "ui_fmt.h"
 #include "ui_meas.h"
+#include "ui_settings.h"
 #include "spectrum.h"
 #include "variables.h"
 
@@ -6196,7 +6197,7 @@ void scope_reset_config_data(void)
   scopesettings.average_mode     = 0;   //No average displayed data
   scopesettings.ACQ_trace        = 0;   //Linear trace
   scopesettings.new_autosetup    = 1;   //New auto setup
-  scopesettings.maxlight         = 0;   //Max light disable
+  scopesettings.brightback       = UI_BRIGHT_DEFAULT;   //the sun returns to 20 % (fw 0.2.68)
   scopesettings.ref1             = 0;   //ref1 waveform disable
   scopesettings.ref2             = 0;   //ref2 waveform disable
   scopesettings.ref3             = 0;   //ref3 waveform disable
@@ -6324,7 +6325,7 @@ void scope_save_config_data(void)
   *ptr++ = scopesettings.average_mode;
   *ptr++ = scopesettings.ACQ_trace;
   *ptr++ = scopesettings.new_autosetup;
-  *ptr++ = scopesettings.maxlight;
+  *ptr++ = ui_bright_byte(scopesettings.brightback);    //fw 0.2.68: 0x80 | value (1.00o5: the max-light flag)
   *ptr++ = scopesettings.ref1;     
   *ptr++ = scopesettings.ref2;    
   *ptr++ = scopesettings.ref3;       
@@ -6443,6 +6444,10 @@ void scope_save_config_data(void)
   //Bode plot sweep settings (fw 0.2.66)
   settingsworkbuffer[PC_SETTING_WORD_BODE0] = pc_glue_bode_setting_word(0);
   settingsworkbuffer[PC_SETTING_WORD_BODE1] = pc_glue_bode_setting_word(1);
+  //Frequency response MEASURES list (fw 0.2.69, words 213..215)
+  settingsworkbuffer[PC_SETTING_WORD_BODE_MS]     = pc_glue_bode_setting_word(2);
+  settingsworkbuffer[PC_SETTING_WORD_BODE_MS + 1] = pc_glue_bode_setting_word(3);
+  settingsworkbuffer[PC_SETTING_WORD_BODE_MS + 2] = pc_glue_bode_setting_word(4);
   //Unit life record, words 224..255 (fw 0.2.52, pc_diag.c)
   PC_SETTINGS_STORE(settingsworkbuffer);
   
@@ -6545,7 +6550,7 @@ void scope_restore_config_data(void)
     scopesettings.average_mode     = *ptr++; 
     scopesettings.ACQ_trace      = *ptr++;
     scopesettings.new_autosetup    = *ptr++;
-    scopesettings.maxlight         = *ptr++;
+    ui_bright_load(*ptr++, &scopesettings.screenbrightness, &scopesettings.brightback);
     scopesettings.ref1             = *ptr++;     
     scopesettings.ref2             = *ptr++;     
     scopesettings.ref3             = *ptr++;     

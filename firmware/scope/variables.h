@@ -186,7 +186,7 @@
 #define MAIN_MENU_XPOS            2
 #define MAIN_MENU_YPOS           46
 #define MAIN_MENU_WIDTH         147
-#define MAIN_MENU_HEIGHT        413   //UI_MM_H
+#define MAIN_MENU_HEIGHT        416   //UI_MM_H (fw 0.2.68: 8 rows of 52 px)
 
 //Menu system settings
 #define SYSTEM_MENU_XPOS                     150
@@ -346,8 +346,8 @@ int pc_glue_sys_menu_height(void);
 #define GEN_MENU_XPOS                      508//GEN_BUTTON_XPOS-100//28
 #define GEN_MENU_YPOS                       48//46
 #define GEN_MENU_WIDTH                     220//210//166
-#define GEN_MENU_HEIGHT                    225     //4 rows: Power, Freq, Duty (no DAC: no Wave / Ampl / Offset / Phase),
-                                                   //fw 0.2.66 Bode plot
+#define GEN_MENU_HEIGHT                    169     //3 rows: Power, Freq, Duty (no DAC: no Wave / Ampl / Offset / Phase);
+                                                   //fw 0.2.68: Bode plot moved to the main menu
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Battery button and menu
@@ -639,7 +639,7 @@ struct tagScopeSettings
   uint8 ACQ_trace;            //flag for choice trace. 0-linear, 1-peak, 2-sine x
   
   uint8 new_autosetup;        //flag switch between old and 1-new autosetup
-  uint8 maxlight;             //flag switch between user setting backlight or 1-max backlight
+  uint8 brightback;           //fw 0.2.68: the screen brightness the top bar sun returns to (was the max-light flag)
   uint8 ref_on_startup;       //flag on reference waveforms on startup, 1 active
   
   uint8 lockcursors;          //flag for lock move cursors

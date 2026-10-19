@@ -41,7 +41,8 @@ fnirsi1013d-mcp --sim "--variant al3 --signal decay:tau=80us"   # a server on th
 
 Files the server writes go to a per-user directory, `~/.fnirsi1013d` (`%USERPROFILE%\.fnirsi1013d` on
 Windows): `data/<date>/*.npz` (waveforms), `data/cal/<serial>.json` (per-unit voltage calibration),
-`data/bode/thru/` (Bode thru calibrations) and `logs/audit.jsonl`. `FNIRSI_MCP_HOME` or `--home` moves the whole
+`data/bode/thru/` (Bode thru calibrations), `reports/<date>/` (`scope_report`'s PNG and HTML pages) and
+`logs/audit.jsonl`. `FNIRSI_MCP_HOME` or `--home` moves the whole
 directory; `FNIRSI_MCP_DATA_DIR` / `--data-dir` and `FNIRSI_MCP_AUDIT_LOG` / `--audit-log` move one part (table
 below). Nothing is written inside the installed package.
 
@@ -86,6 +87,7 @@ fnirsi1013d-sim --variant al3 --port 5555 --signal decay:tau=80us
 | `--variant al3x`, `--ext SIGNAL` | AL3 with the external trigger (0x1533): trigger source EXT on the calibration pin, fed by `--ext` (default: CH2's signal), 3.3 V logic, 22 ns latency |
 | `--variant al3f` | AL3 0x1535: as al3d plus the CIC compensation FIR (protocol 1.11, caps FIR): CIC on N / 2, the 15 RTL taps, 250 ns latency |
 | `--variant al3d` | AL3 0x1534: EXT trigger plus the decimation filter (protocol 1.9, caps DECIM): boxcar / CIC2 / CIC3 model with 16-bit samples, the 120 ns pipeline latency and the EXT latency correction (no device averaging) |
+| `--variant al3e` | AL3 0x1538: al3s plus the per-capture encode self-check (protocol 1.19, caps ENC_CHECK, features bit 5): GET_HEALTH 88..103 count every full-rate capture; test hooks `Device.enc_bad_next` (garbled, re-taken clean, event 21) and `enc_unrecovered_next` (accepted garbled: GET_HEALTH 90 bit 2, last 0x33 = 0x77) |
 | `--variant al3s` | AL3 0x1536: al3f plus the sequencer (protocol 1.17, caps SEQ): segment runs (slots, table entries with 5 ns timestamps, circular runs, STOP, READ_RAW addr_mode 3) and averaging runs (positions, exact lane sums, 16-bit u32 sums) on one continuous signal timeline. A run is modelled record by record in a background thread (about 8 ms per legacy record of a 1 kHz signal at 200 MSa/s); averaging runs of more than 128 records (16 with 16-bit records) scale the sums of the first ones, so the simulated noise stops falling there |
 | `--signal SPEC` | CH1 signal; CH2 defaults to the matching TX gate (decay) or a sync square (sine/square) |
 | `--ch1 SPEC`, `--ch2 SPEC` | per-channel signals |
@@ -121,6 +123,10 @@ without SHARED_MODE) the old protocol 1.2 LOCAL/REMOTE model with snapshot and
 restore, watchdog, user tap (`Device.user_tap()`), DTR drop (TCP close); deferred WAIT and ACQUIRE_AVG with
 control requests in between; the duplicate-request cache; E_BAD_CRC, E_BAD_LEN, E_VERSION, E_BUSY and the rest;
 the `#VER` / `#LOCAL` probe; TEST_PATTERN; READ_SCREEN; a DEBUG_FPGA register model with the stale first byte.
+The on-device Bode plot (protocol 1.20, every variant with the filter and the generator): BODE_CTRL / READ_BODE and
+display mode 5 by `SimBode`, which runs the host tool's `BodeRunner` against the device through an in-process link
+(the firmware's engine is a port of it), so a device sweep of `dut_in` / `dut_out` agrees with a host sweep; a host
+ARM during it ends it (reason 5).
 
 ## MCP server
 
@@ -215,7 +221,7 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 |---|---|---|
 | `scope_info` | 0 | firmware, protocol, FPGA variant, serial, capabilities, memory limits |
 | `scope_profile` | 0 | static capability profile, live values, unverified facts, standing caveats |
-| `scope_status` | 0 | mode, display_mode (scope / spectrum view, protocol 1.7), run_state (RUN/STOP/SINGLE), settings_seq, latest capture id and origin, host capture state, battery, link statistics; from protocol 1.17 the bitstream's features and the acquisition menu's Average (`ui_averaging` off / software / hardware, records per hardware run) |
+| `scope_status` | 0 | mode, display_mode (scope / spectrum / waterfall / density / phosphor / bode), run_state (RUN/STOP/SINGLE), settings_seq, latest capture id and origin, host capture state, battery, link statistics; from protocol 1.17 the bitstream's features and the acquisition menu's Average (`ui_averaging` off / software / hardware, records per hardware run); features `enc_check` (1.19) and `bode` (1.20) |
 | `scope_get_config` | 0 | channels, timebase, trigger and generator in physical units |
 | `scope_read_calibration` | 0 | offset centres, gains, A/B compensation, volts per code per range |
 | `scope_screenshot` | 0 | PNG of the 800x480 screen |
@@ -234,13 +240,15 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_set_channel` | 2 | range, coupling, offset, probe, invert; relay changes limited to 5 per second |
 | `scope_event_log` | 0 | the scope's last 128 USB / link events with device ms (protocol >= 1.5), the pre-reset snapshot and (fw >= 0.2.24) the bus-level ring |
 | `scope_sd_info` | 0 | SD card size, partition, write window, eGON headers at 16/80/750 (optionally checksum-verified); fw >= 0.2.2; from fw 0.2.52 the identity of the image the card boots and whether it is the running one |
-| `scope_health` | 0 | fw >= 0.2.52: USB state now, MMU / caches, power-on number, operating hours, settings save state, the stored restart record, in words |
+| `scope_health` | 0 | fw >= 0.2.52: USB state now, MMU / caches, power-on number, operating hours, settings save state, the stored restart record, in words; fw >= 0.2.62 (1.19) `encode_check`: the full-rate capture check (mode, last 0x33 byte and failing pins, captures checked / garbled / re-taken) |
 | `scope_save_report` | 1 | fw >= 0.2.52: the scope writes its diagnostics report to `reports/` on its SD card; returns the file name |
 | `scope_calibration_info` | 0 | scaling in effect per channel, the scope's calibration (v1 / v2, flags, current correction, stored per-core zeros per clock class), calibration file and its fitted zero / slope / gain per range and core |
+| `scope_cal_probe` | 2 | fw >= 0.2.67 (protocol 1.21, diagnostic): the calibration wizard's zero measurement of one channel and range on the scope (verdict, failing point, per point and core mean / RMS / extremes / clipped); nothing stored |
 | `scope_calibrate_volts` | 2 | a known DC voltage on every range: fits 0 V code, volts per code and offset slope per range and ADC core, saves the calibration file |
 | `scope_generator` | 3 | calibration-pin square wave; confirmation token to enable |
 | `scope_self_test_loopback` | 3 | generator into CH1: frequency, duty, swing (the output is not ground-referenced), bench tests T4, T5, T7; token |
-| `scope_bode_sweep` | 3 | frequency response CH2 / CH1 of a passive DUT on the calibration post: stepped clean-edge tones, coherent 16-bit records, single-bin DFT; magnitude, phase, markers, thru calibration, CH2 auto-ranging; token (below) |
+| `scope_bode_sweep` | 3 | frequency response CH2 / CH1 of a passive DUT on the calibration post: stepped clean-edge tones, coherent 16-bit records, single-bin DFT; magnitude, phase, markers, thru calibration, CH2 auto-ranging; `where='device'` (fw >= 0.2.66) lets the scope run it and show the plot; token (below) |
+| `scope_report` | 0 | a saved result (`.npz` / Bode `.json`, or `latest`) as a PNG plot (matplotlib, extra `plot`) and a self-contained HTML page (plot, table, caveats, command) under `<home>/reports/<date>/`; touches no scope (below) |
 | `scope_raw_fpga` | 4 | raw FPGA bus operations (DEBUG_RAW builds); needs `FNIRSI_MCP_ENABLE_RAW=1` and a token |
 | `scope_enter_fel` | 4 | reboot into FEL; needs `FNIRSI_MCP_ENABLE_RAW=1` and a token |
 
@@ -339,8 +347,40 @@ The simulator's `dut_in` / `dut_out` signals are the input and output node of an
 network on the generator through `rs` (1 kOhm), against the probe ground, with a 30 MHz front end; `gain` and
 `delay` on one channel model a probe mismatch for thru-calibration tests.
 
-Not yet: the harmonic fast mode, the impedance mode (`z_series_ohm`), a PNG plot, CH1 re-ranging during a sweep,
-the on-device view (design steps D1-D5).
+**On the scope: `where='device'`** (firmware 0.2.66+, protocol 1.20, BODE_CTRL 0x0211 / READ_BODE 0x0212). The
+scope's own engine (fw-bode, bode_sweep.c: the same planner, ranging, splice and flags) runs the sweep and draws the
+Bode plot; the tool sends BODE_CTRL action 1 with the settings (or 5 for `thru_cal='measure'`), polls READ_BODE until
+the state leaves `running` (progress per point), reads the 20-byte rows, recomputes `f_actual` from the DDS period M,
+maps the row flags to the names above (bit 14 = a retry) and returns the same structure as the host sweep plus
+`device` (sweep id, state, reason, thru state, view). The device has no SNR / leakage / code levels per row (flags
+only; `snr_db` is null). Limits: the four settle presets, `ch2_range` 'auto' or 'fixed' (hold: CH2's range at the
+start), DC coupling. Thru: `'measure'` (kept on the scope until power-off and stored here as for the host), `'device'`
+(the scope's copy), a stored name (applied on the host to the raw rows). The Bode view stays on the screen (the
+scope's own acquisition is off; capture tools then add a caveat) unless `close_view=true`, which also gives the
+scope's settings back. A host capture during a device sweep ends it (READ_BODE reason 5). Library:
+`bode.device_sweep(scope, start, stop, points, ...)`, `Scope.bode_ctrl` / `read_bode`.
+
+**Plots.** `scope_report` (below) on `files.npz` draws magnitude and phase over log f with the -3 dB marker; flagged
+points are hollow.
+
+Not yet: the harmonic fast mode, the impedance mode (`z_series_ohm`), CH1 re-ranging during a sweep.
+
+## Reports: `scope_report` and `python -m fnirsi1013d.report`
+
+The tools measure; `scope_report` presents a result for the person. Input: a result file a tool returned (`file`,
+`files.npz`, a Bode `.json`) or `latest` (the newest `.npz` in the data directory). Output, under
+`<home>/reports/<date>/`: `<stem>.png` (matplotlib; `uv pip install "fnirsi1013d[plot]"`, included in `dev`) and
+`<stem>.html`, one file with the PNG embedded as base64, the result table, the summary (Bode markers, fit quality,
+captures averaged), every caveat the tool recorded plus `caveats`, and the generating command (`command`, or the tool
+and the arguments recorded in the file). No scripts, fonts or CDNs: it opens offline, follows the light / dark
+preference and can be published as is (in Claude Code with the Artifact tool). Without matplotlib the page says why
+there is no plot and carries the numbers. Kinds: capture / fetch, averaged capture, decay fit (with the residual),
+segments (overlaid), host FFT, the scope's spectrum, Bode (host or device).
+
+```bash
+python -m fnirsi1013d.report latest                      # newest result under ~/.fnirsi1013d/data
+python -m fnirsi1013d.report path/to/123456_789_decay.npz --title "Coil A, 8 mm steel" --caveat "probe x10"
+```
 
 ## Firmware dev loop: `fnirsi1013d-flash`
 

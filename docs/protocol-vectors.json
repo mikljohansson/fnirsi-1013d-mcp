@@ -57,6 +57,7 @@
   "SET_GEN": 769,
   "GET_CAL": 1024,
   "READ_SCREEN": 1025,
+  "CAL_PROBE": 1026,
   "DEBUG_FPGA": 3840,
   "ENTER_FEL": 3841
  },
@@ -6203,6 +6204,32 @@
      "flags": 0,
      "len": 8,
      "payload": "0000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_cal_probe",
+   "description": "1.21 (provisional): the wizard's zero measurement of CH2, hardware range 0 (5 V/div), wizard readout, one range",
+   "hex": "a513010002043400000005000000ea880100000000adde42fb",
+   "frames": [
+    {
+     "cmd": 1026,
+     "seq": 52,
+     "status": 0,
+     "flags": 0,
+     "len": 5,
+     "payload": "0100000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 1026,
+     "seq": 52,
+     "status": 0,
+     "flags": 0,
+     "len": 5,
+     "payload": "0100000000",
      "event": "frame"
     }
    ]
