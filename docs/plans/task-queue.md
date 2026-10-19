@@ -102,6 +102,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
     axis the FFT already computes, no extra FFT (lands with the Spectrum slider). Frequency response: a 400-byte copy of
     AUTO SET's overview in `bv_auto_finish`, drawn fitted to the rows, nothing before the first AUTO SET. Shared pure
     `slider_ov.c` with host tests; bench pass_ms on / off. Owner questions in section 10 E first.
+  Owner decisions 21:20 (docs/plans/slider-overview.md section 10 F): dimmed outside / full inside; tap-to-jump as a fast follow
+  batch right after; simple lifetime rule for the Frequency response overview; Scope overlaid, enabled channels only; the window
+  takes the frame's whole inside (18 px, 14 overview rows), not 14 px. The Scope's stock thumbnail becomes this drawing (no second
+  one). Dispatch after fw-freq2 merges (same files: bode_view.c, spectrum.c); regenerate the boards to 18 px in the same batch.
 - **Frequency response chart follow-ups** (owner 10-19 20:50, after the bench of the device sweep on the RC low-pass; batch
   fw-freq2 together with the follow-ups listed under fw-freq): (a) a Trace style button on the mode's CTRL page like the Scope's,
   Lines (default) / Dots, same fold-out construction; today valid points are joined and coloured per axis and flagged points are

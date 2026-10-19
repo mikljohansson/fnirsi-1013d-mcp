@@ -370,3 +370,19 @@ used 5. The Spectrum track does the same.
 5. **Window height.** Keep the 14 px window with a 12-row overview inside its lines (as drawn), or make the window as
    tall as the frame's inside (18 px) for a 14-row overview? **Recommendation: keep 14 px.** The Scope's construction
    stays as the owner has used it since fw 0.2.64, and the window's lines never cross the data.
+
+### F. Owner decisions (2026-10-19 21:20, walked through one by one)
+
+1. Colours: dimmed channel colour outside the window, full colour inside **(owner)**. The Scope's existing full-yellow
+   thumbnail changes to this so the three modes look the same.
+2. Tap to jump: yes, as a fast follow right after the overview batch (a tap outside the window centres it on the tap)
+   **(owner)**.
+3. Frequency response overview lifetime: the simple rule, kept until the next AUTO SET or power-off; no disagreement check
+   **(owner)**.
+4. Scope channels: overlaid on the plot's own scale, enabled channels only; the owner will look at it on the bench and may
+   change it **(owner)**.
+5. Window height: not 14 px. Use the whole inside of the frame (18 px window, 14 overview rows): "backwards compat doesn't
+   matter, maximize the available space; it'll be difficult enough to cram both traces in there" **(owner)**. Sections 2 and
+   9 and the boards are to be regenerated to 18 px by the firmware batch's designer pass (the geometry in section 2 is now
+   superseded on this point).
+
