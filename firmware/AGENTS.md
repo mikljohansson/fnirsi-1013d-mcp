@@ -3366,7 +3366,7 @@ track after a jump at the ends; a jump from the area beside the cards; a Spectru
 time base change; a Frequency response overview before the first AUTO SET or after Restore defaults; pass_ms up by more
 than about 1 ms at 16,382 samples.
 
-**Addendum: decision 7, fw-over2 (fw 0.2.74 provisional, branch fw-over2).** The owner looked at 0.2.73 on the unit
+**Addendum: decision 7, fw-over2 (fw 0.2.74, branch fw-over2).** The owner looked at 0.2.73 on the unit
 (2026-10-19 22:15) and revised the geometry (slider-overview.md 10 F item 7, section 2 as built): the track's line at
 y 452 is gone and the row is all track, x 2..727 by y 452..471 (`SOV_Y` 452, `SOV_H` 20; `SOV_LINE_Y` removed). The
 window is a box again: `sov_draw_window` draws, last, a 1 px black margin (y 452 and y 471 over x - 1..x + w, columns
