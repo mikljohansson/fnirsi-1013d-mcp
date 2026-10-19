@@ -24,9 +24,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   the edges grow and snap back at 3-4 Hz; CIC alone shows a clean square). Known property: fpga/al3/README.md section 4 gives
   6-9 % step overshoot for the CIC + half-band FIR chain (flat to fo/4, sharp cut-off = Gibbs ringing on a non-band-limited edge);
   the pulsing is the edge sliding across the decimated sample grid (DDS 1 kHz vs the decimated rate), inference until simulated.
-  fpga-gen6 asked to simulate a sliding-edge square through the 0x1535 chain and quantify. Decision for the owner: keep CIC2+FIR as
+  fpga-gen6 asked to simulate a sliding-edge square through the 0x1535 chain and quantify. Decided (owner 10-19 14:10): keep CIC2+FIR as
   the default in Spectrum (flat passband, alias rejection) and make CIC2 without FIR the default for the Scope trace, with the Filter
-  box per mode, or keep one default and document the ringing.
+  box per mode; goes into the ACQ coupling batch. Owner also sees the upper spectrum "wag" pass to pass on the same square: fpga-gen6 asked to quantify bin variation vs edge phase (image terms in the transition band, hypothesis).
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
