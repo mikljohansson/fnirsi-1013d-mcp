@@ -14,7 +14,7 @@ import enum
 import struct
 import zlib
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Iterator
+from typing import Any, ClassVar, Iterable, Iterator
 
 # ---------------------------------------------------------------------------------------------------------
 # Constants (section 4)
@@ -37,8 +37,9 @@ PROTO_MAJOR = 1
 #: averaging: caps SEQ, SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW addr_mode 3), the features word and UI Average state in
 #: GET_STATUS 44..47 (48 bytes) and GET_DECIM 32..35, GET_CAPTURE_INFO 96 bytes; 1.18 (fw 0.2.61, row 57): full-rate
 #: capture check, link counters 62-63, event types 21 / 22; 1.19 (fw 0.2.62, FPGA 0x1538, row 58): every full-rate
-#: capture checked, caps ENC_CHECK, features bit 5, GET_HEALTH 104 bytes
-PROTO_MINOR = 19
+#: capture checked, caps ENC_CHECK, features bit 5, GET_HEALTH 104 bytes; 1.20 (fw 0.2.66, row 60): the on-device Bode
+#: plot (BODE_CTRL / READ_BODE, display_mode 5, features bit 6)
+PROTO_MINOR = 20
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -98,6 +99,8 @@ class Cmd(enum.IntEnum):
     SET_SEQ = 0x020E  # protocol 1.17, fw 0.2.58, cap SEQ: sequencer setting for host ARM (segments / averaging)
     GET_SEQ = 0x020F  # protocol 1.17: the setting, its fit with the next ARM, FPGA status, the latest run
     READ_SEQ = 0x0210  # protocol 1.17: segment table or averaged record of the latest run
+    BODE_CTRL = 0x0211  # protocol 1.20, fw 0.2.66, cap DECIM: start / stop the on-device Bode sweep, the view, thru
+    READ_BODE = 0x0212  # protocol 1.20: the Bode sweep's header and its 20-byte rows
     GET_GEN = 0x0300
     SET_GEN = 0x0301
     GET_CAL = 0x0400
@@ -208,6 +211,7 @@ class Features(enum.IntFlag):
     SEGMENTS = 1 << 3  # 0x1536+
     HW_AVERAGE = 1 << 4  # 0x1536+
     ENC_CHECK = 1 << 5  # 0x1538+ (protocol 1.19)
+    BODE = 1 << 6  # protocol 1.20: what the on-device Bode plot needs (DECIM and GENERATOR_DDS: AL3 0x1534+)
 
 
 def feature_names(features: int) -> list[str]:
@@ -243,6 +247,8 @@ CMD_CAP: dict[Cmd, Caps] = {
     Cmd.SET_SEQ: Caps.SEQ,
     Cmd.GET_SEQ: Caps.SEQ,
     Cmd.READ_SEQ: Caps.SEQ,
+    Cmd.BODE_CTRL: Caps.DECIM,
+    Cmd.READ_BODE: Caps.DECIM,
 }
 
 
@@ -309,6 +315,8 @@ class DisplayMode(enum.IntEnum):
     DENSITY = 3
     #: 1.13 (fw 0.2.46): the digital phosphor view (traces graded from per-pixel hit counts; data unchanged)
     PHOSPHOR = 4
+    #: 1.20 (fw 0.2.66): the Bode plot (the scope's own acquisition is off; READ_BODE reads the table)
+    BODE = 5
 
 
 class UiBusy(enum.IntEnum):
@@ -2021,6 +2029,201 @@ def pack_spectrum(h: SpectrumHeader, levels: "list[int] | tuple[int, ...]") -> b
     return h.pack() + struct.pack(f"<{len(levels)}h", *(int(v) for v in levels))
 
 
+# --- on-device Bode plot (protocol 1.20, section 14 row 60) ---------------------------------------------------
+
+#: BODE_CTRL actions
+BODE_STATUS, BODE_RUN, BODE_REPEAT, BODE_STOP, BODE_ABORT, BODE_THRU_MEASURE, BODE_THRU_ON, BODE_THRU_OFF, \
+    BODE_THRU_CLEAR, BODE_OPEN, BODE_CLOSE = range(11)
+#: BODE_CTRL flags: bit 0 the request's settings apply (to this and later host sweeps), bit 1 no background captures
+BODE_F_SETTINGS = 0x01
+BODE_F_NO_BACKGROUND = 0x02
+#: settle presets (byte 2) in the host tool's names, and their periods (bode.SETTLE_PRESETS)
+BODE_SETTLES = ("fast", "normal", "resonant", "high_q")
+#: CH2 range mode (byte 3): 0 auto, 1 hold (CH2's range when the sweep starts = the host tool's 'fixed')
+BODE_CH2_MODES = ("auto", "fixed")
+#: READ_BODE header state / reason
+BODE_STATES = ("idle", "running", "done", "stopped", "error")
+BODE_REASONS = {0: None, 1: "the FPGA did not become ready", 2: "no capture within twice the record time + 1 s",
+                3: "CH2 saturated by a DC level with the CH2 range held", 4: "no frequency in the range",
+                5: "the PC armed its own capture during the sweep", 6: "stopped",
+                7: "no decimation filter or no DDS generator on this bitstream"}
+#: READ_BODE header byte 7 bits 0-6
+BODE_THRU_STATES = ("none", "being measured", "valid", "stale")
+#: READ_BODE row flag bits in the host tool's flag names (bode.py); bit 14 "retried" is the host's retry count, bit 15
+#: marks a row not measured in the latest sweep (the rest of the row 0)
+BODE_ROW_FLAGS = ("ch1_clipped", "clipped", "ch2_overload", "ch1_low", "ch2_small", "low_snr", "near_floor",
+                  "unsettled", "incoherent", "spliced", "fir_off", "no_cal", "cal_range", "cal_flagged")
+BODE_ROW_RETRIED = 0x4000
+BODE_ROW_NOT_MEASURED = 0x8000
+BODE_HDR_BYTES = 32
+BODE_ROW_BYTES = 20
+#: rows that fit one READ_BODE answer (count 0 asks for them)
+BODE_MAX_ROWS = (MAX_RESPONSE_PAYLOAD - BODE_HDR_BYTES) // BODE_ROW_BYTES
+
+
+@dataclass
+class BodeCtrlReq(Payload):
+    """BODE_CTRL request, 16 bytes: u8 action, u8 flags, u8 settle (0..3), u8 CH2 range mode (0 auto, 1 hold), u32
+    start cHz, u32 stop cHz (1 Hz .. 10 MHz, either order), u16 points (1..200), u16 0."""
+
+    FIELDS = [("action", "B"), ("flags", "B"), ("settle", "B"), ("ch2_mode", "B"), ("start_chz", "I"),
+              ("stop_chz", "I"), ("points", "H"), ("_r0", "2x")]
+    action: int = BODE_STATUS
+    flags: int = 0
+    settle: int = 1
+    ch2_mode: int = 0
+    start_chz: int = 0
+    stop_chz: int = 0
+    points: int = 0
+
+    @classmethod
+    def make(cls, action: int, start_hz: float | None = None, stop_hz: float | None = None, points: int = 50,
+             settle: int = 1, ch2_mode: int = 0, background: bool = True) -> "BodeCtrlReq":
+        """With ``start_hz`` / ``stop_hz`` the settings apply (flags bit 0); without, the screen's settings are used."""
+        if start_hz is None or stop_hz is None:
+            return cls(action, 0 if background else BODE_F_NO_BACKGROUND)
+        return cls(action, BODE_F_SETTINGS | (0 if background else BODE_F_NO_BACKGROUND), settle, ch2_mode,
+                   int(round(start_hz * 100)), int(round(stop_hz * 100)), points)
+
+
+@dataclass
+class BodeHeader(Payload):
+    """READ_BODE response header (also the first 32 bytes of the BODE_CTRL answer)."""
+
+    FIELDS = [("sweep_id", "I"), ("state", "B"), ("reason", "B"), ("view", "B"), ("thru", "B"), ("planned", "H"),
+              ("measured", "H"), ("current", "h"), ("settle", "B"), ("ch2_mode", "B"), ("start_chz", "I"),
+              ("stop_chz", "I"), ("points", "H"), ("switches", "H"), ("elapsed_ms", "I")]
+    #: increments with every start; 0 = none since boot
+    sweep_id: int = 0
+    state: int = 0
+    reason: int = 0
+    #: bit 0 the view shows, bit 1 RUN repeats sweeps, bit 2 this sweep is a thru measurement, bits 3-4 CH1 / CH2's
+    #: offset reached the PWM limit
+    view: int = 0
+    #: bits 0-6 BODE_THRU_STATES, bit 7 applied
+    thru: int = 0
+    planned: int = 0
+    measured: int = 0
+    #: the point being measured (-1 none)
+    current: int = -1
+    settle: int = 1
+    ch2_mode: int = 0
+    start_chz: int = 0
+    stop_chz: int = 0
+    points: int = 0
+    #: CH2 range switches in this sweep
+    switches: int = 0
+    #: ms since the sweep started (its duration once it ended)
+    elapsed_ms: int = 0
+
+    V_SHOWN: ClassVar[int] = 0x01
+    V_REPEAT: ClassVar[int] = 0x02
+    V_THRU_SWEEP: ClassVar[int] = 0x04
+    V_CH1_OFFSET_LIMIT: ClassVar[int] = 0x08
+    V_CH2_OFFSET_LIMIT: ClassVar[int] = 0x10
+
+    @property
+    def state_name(self) -> str:
+        return BODE_STATES[self.state] if self.state < len(BODE_STATES) else f"state {self.state}"
+
+    @property
+    def reason_text(self) -> str | None:
+        return BODE_REASONS.get(self.reason, f"reason {self.reason}")
+
+    @property
+    def thru_state(self) -> str:
+        t = self.thru & 0x7F
+        return BODE_THRU_STATES[t] if t < len(BODE_THRU_STATES) else f"thru {t}"
+
+    @property
+    def thru_applied(self) -> bool:
+        return bool(self.thru & 0x80)
+
+    @property
+    def running(self) -> bool:
+        return self.state == 1
+
+
+@dataclass
+class BodeCtrlResp(Payload):
+    """BODE_CTRL response, 40 bytes: the READ_BODE header, u32 the estimated duration of a sweep with the settings in
+    effect (ms), u32 0."""
+
+    FIELDS = [("header", "32s"), ("estimate_ms", "I"), ("_r0", "4x")]
+    header: bytes = bytes(32)
+    estimate_ms: int = 0
+
+    @property
+    def hdr(self) -> BodeHeader:
+        return BodeHeader.unpack(self.header)
+
+
+@dataclass
+class ReadBodeReq(Payload):
+    """READ_BODE request, 8 bytes: u16 first row, u16 count (0 or more than fit = all that fit), u32 0."""
+
+    FIELDS = [("first", "H"), ("count", "H"), ("_r0", "4x")]
+    first: int = 0
+    count: int = 0
+
+
+@dataclass
+class BodeRow(Payload):
+    """One READ_BODE row, 20 bytes."""
+
+    FIELDS = [("m", "I"), ("f_chz", "I"), ("mag_cdb", "h"), ("phase_cdeg", "h"), ("v1_cdbv", "h"), ("v2_cdbv", "h"),
+              ("ch1_range", "B"), ("ch2_range", "B"), ("flags", "H")]
+    #: stimulus period in 50 MHz DDS clocks (f = round(2^32 / M) x 50 MHz / 2^32 exactly)
+    m: int = 0
+    #: that f in cHz, rounded
+    f_chz: int = 0
+    #: |H| in centi-dB, arg H in centi-degrees (-180 .. +180]
+    mag_cdb: int = 0
+    phase_cdeg: int = 0
+    #: the fundamentals at the probe tips in centi-dBV RMS (probe factor included; V2 with the splice)
+    v1_cdbv: int = 0
+    v2_cdbv: int = 0
+    ch1_range: int = 0
+    ch2_range: int = 0
+    flags: int = 0
+
+    @property
+    def measured(self) -> bool:
+        return not self.flags & BODE_ROW_NOT_MEASURED
+
+    @property
+    def f_hz(self) -> float:
+        """The exact stimulus frequency from M (the f_chz field is rounded)."""
+        inc = ((1 << 32) + self.m // 2) // self.m if self.m else 0
+        return inc * GEN_CLOCK_HZ / 2 ** 32
+
+    @property
+    def flag_names(self) -> list[str]:
+        return [n for i, n in enumerate(BODE_ROW_FLAGS) if self.flags >> i & 1]
+
+    @property
+    def retried(self) -> bool:
+        return bool(self.flags & BODE_ROW_RETRIED)
+
+
+def bode_flags_from_names(names: Iterable[str], retried: bool = False) -> int:
+    """The row flag word for host flag names (unknown names are ignored)."""
+    f = 0
+    for n in names:
+        if n in BODE_ROW_FLAGS:
+            f |= 1 << BODE_ROW_FLAGS.index(n)
+    return f | (BODE_ROW_RETRIED if retried else 0)
+
+
+def parse_read_bode(payload: bytes) -> tuple[BodeHeader, list[BodeRow]]:
+    """READ_BODE: the 32-byte header, then 20-byte rows (as many as the answer holds)."""
+    h = BodeHeader.unpack(payload[:BODE_HDR_BYTES])
+    n = max(0, len(payload) - BODE_HDR_BYTES) // BODE_ROW_BYTES
+    rows = [BodeRow.unpack(payload[BODE_HDR_BYTES + BODE_ROW_BYTES * i: BODE_HDR_BYTES + BODE_ROW_BYTES * (i + 1)])
+            for i in range(n)]
+    return h, rows
+
+
 @dataclass
 class FftBenchEntry(Payload):
     """One FFT_BENCH entry (protocol 1.6, 24 bytes; section 14 row 44). Times in us."""
@@ -2988,7 +3191,7 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.GET_CAPTURE_INFO: 0, Cmd.GET_EVENT_LOG: 0, Cmd.SD_INFO: 4, Cmd.SD_READ_SECTORS: 8, Cmd.SD_STAGE: 8, Cmd.SD_WRITE_SECTORS: 16,
     Cmd.READ_SPECTRUM: ReadSpectrumReq.size(), Cmd.GET_DECIM: 0, Cmd.SET_DECIM: SetDecimReq.size(),
     Cmd.GET_HEALTH: 0, Cmd.SAVE_REPORT: 0, Cmd.SET_SEQ: SetSeqReq.size(), Cmd.GET_SEQ: 0,
-    Cmd.READ_SEQ: ReadSeqReq.size(),
+    Cmd.READ_SEQ: ReadSeqReq.size(), Cmd.BODE_CTRL: BodeCtrlReq.size(), Cmd.READ_BODE: ReadBodeReq.size(),
 }
 
 

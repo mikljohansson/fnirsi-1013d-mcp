@@ -291,6 +291,8 @@ class Session:
                 notes.append(SPECTRUM_VIEW_NOTE)
             elif st.display_mode == P.DisplayMode.PHOSPHOR:
                 notes.append(PHOSPHOR_VIEW_NOTE)
+            elif st.display_mode == P.DisplayMode.BODE:
+                notes.append(BODE_VIEW_NOTE)
             notes += self.enc_notes(s)
             return notes
         if st.control == P.Control.REMOTE:
@@ -439,6 +441,9 @@ PHOSPHOR_VIEW_NOTE = ("the scope's screen shows its phosphor view: the person se
 SPECTRUM_VIEW_NOTE = ("the scope's screen shows its spectrum view: the person at the scope sees the spectrum of each "
                       "capture, not the trace (the data returned here are unaffected; scope_spectrum reads what the "
                       "screen shows)")
+BODE_VIEW_NOTE = ("the scope's screen shows its Bode plot (protocol 1.20): the scope's own acquisition is off; a host "
+                  "capture ends a device sweep in progress (READ_BODE reason 5). The person leaves it with Menu > "
+                  "Scope; scope_bode_sweep(where='device', close_view=true) closes it and gives the settings back")
 
 
 def _spectrum_cross_check(s: Scope, ch: str, sp: Spectrum) -> dict[str, Any]:
@@ -1054,8 +1059,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     async def scope_status() -> dict[str, Any]:
         """Mode ('collaborative': shared with the person at the scope; 'exclusive' on legacy firmware with
         LOCAL/REMOTE), display_mode (what the trace area shows: scope, spectrum, waterfall, density (protocol
-        1.7, the spectrum view and its sub-views) or phosphor (1.13); a number for a mode this host does not know),
-        from protocol 1.17 the bitstream's features (ext_trigger, decim, fir, segments, hw_average) and the
+        1.7, the spectrum view and its sub-views), phosphor (1.13) or bode (1.20, the scope's Bode plot); a number for
+        a mode this host does not know), from protocol 1.17 the bitstream's features (ext_trigger, decim, fir,
+        segments, hw_average; enc_check 1.19; bode 1.20) and the
         acquisition menu's Average (ui_averaging off / software / hardware, hardware_averaging, records per run),
         run_state (RUN / STOP / SINGLE), settings_seq (changes whenever anyone changes a setting),
         the latest capture's id and origin (host / ui_run / ui_single), the host capture state, trigger address,
@@ -2765,10 +2771,21 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                                       "points less than 20 dB above it 'near_floor'")] = True,
         max_duration_s: Annotated[float, Field(gt=0, le=3600, description="refuse sweeps estimated longer")] = 120.0,
         inline_max: Annotated[int, Field(ge=0, le=200, description="rows of the table returned inline")] = 200,
+        where: Annotated[Literal["host", "device"], Field(description="'host': this server drives every capture "
+                         "(any firmware with the filter); 'device': the scope runs the sweep itself (firmware 0.2.66+, "
+                         "protocol 1.20; about 2-3 x faster, the person sees the Bode plot on the screen) and this "
+                         "tool polls and reads its table. Same result structure, so the two compare point by "
+                         "point")] = "host",
+        close_view: Annotated[bool, Field(description="where='device': close the scope's Bode view afterwards "
+                                                      "(gives the scope's settings back); default: it stays on the "
+                                                      "screen")] = False,
         confirm_token: Annotated[str | None, Field(description="token from the confirmation response")] = None,
     ) -> dict[str, Any]:
         """Frequency response H(f) = CH2 / CH1 of a passive DUT driven by the calibration-pin generator (stepped
-        single tone, docs/plans/bode-design.md). Wiring: post -> DUT input with the CH1 tip there, CH2 tip on the DUT
+        single tone, docs/plans/bode-design.md). where='device' (firmware 0.2.66+): the scope's own Bode engine runs
+        the same plan and rules (BODE_CTRL / READ_BODE) and this tool returns its table in the same structure; the
+        device knows the settle presets only, ch2_range 'auto' or 'fixed', DC coupling; thru_cal there: 'measure'
+        (stored on the scope and here), 'device' (the scope's stored thru) or a stored name (applied here). Wiring: post -> DUT input with the CH1 tip there, CH2 tip on the DUT
         output, DUT ground on the probe ground clips (wiring A; bench 2026-10-19: the same H as the USB-ground wiring
         within 0.4 dB). Wiring B (DUT ground on the USB shell, clips open) puts the DUT 1.24 V below the probe
         reference: use ch2_coupling='ac' there, or CH2 saturates on 0.1 and 0.2 V/div. Per point the generator
@@ -2791,7 +2808,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         sweep and gives them back afterwards."""
         args = {"start": start, "stop": stop, "points": points, "settle": settle, "ch2_range": ch2_range,
                 "ch2_coupling": ch2_coupling, "thru_cal": thru_cal, "thru_name": thru_name, "background": background,
-                "max_duration_s": max_duration_s, "inline_max": inline_max}
+                "max_duration_s": max_duration_s, "inline_max": inline_max, "where": where, "close_view": close_view}
+        on_device = where == "device"
         thru_dir = Path(cfg.data_dir) / "bode" / "thru"
 
         def safe(name: str) -> str:
@@ -2812,8 +2830,20 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                  "(FNIRSI_MCP_GEN_MAX_HZ)")
             settle_p = BD.parse_settle(settle)
             BD.BodeRunner._parse_ch2(ch2_range)  # validate before asking for a token
+            if on_device:
+                try:
+                    BD.device_settle_code(settle)
+                    BD.device_ch2_code(ch2_range)
+                except ValueError as e:
+                    raise ToolError(f"scope_bode_sweep(where='device'): {e}") from None
+                if ch2_coupling != "dc":
+                    raise ToolError("scope_bode_sweep(where='device'): the scope's sweep keeps CH2 DC coupled; use "
+                                    "where='host' for ch2_coupling='ac'")
+                if s.info.proto_minor < 20:
+                    raise ToolError("scope_bode_sweep(where='device') needs firmware 0.2.66 or later (protocol 1.20, "
+                                    f"this scope speaks 1.{s.info.proto_minor}); where='host' works here")
             cal = None
-            if thru_cal is not None and thru_cal != "measure":
+            if thru_cal is not None and thru_cal not in ("measure", "device" if on_device else "measure"):
                 path = thru_dir / f"{safe(thru_cal)}.json"
                 if not path.is_file():
                     raise ToolError(f"scope_bode_sweep: no thru calibration {thru_cal!r}; stored: "
@@ -2829,7 +2859,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             if not s.info.caps & P.Caps.DECIM:
                 raise ToolError("scope_bode_sweep: needs the decimation filter (FPGA 0x1534+, best 0x1535 with the "
                                 "FIR); this bitstream would alias the stimulus harmonics at the slower rates")
-            summary = (f"calibration pin will output a 3.1 Vpp square (through 1 kOhm) stepped over {len(plans)} "
+            summary = (("the scope runs the sweep itself and shows its Bode plot: " if on_device else "") +
+                       f"calibration pin will output a 3.1 Vpp square (through 1 kOhm) stepped over {len(plans)} "
                        f"frequencies {fmt_si(plans[0].f_actual, 'Hz', 4)} .. {fmt_si(plans[-1].f_actual, 'Hz', 4)}, "
                        f"about {est:.0f} s; both channels set to DC coupling, ranges and offsets changed and "
                        "restored afterwards. Only for a passive DUT (or a buffered input) on the post: if the pin is "
@@ -2845,10 +2876,19 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 except Exception:  # noqa: BLE001 - progress is best effort
                     pass
 
-            runner = BD.BodeRunner(s, settle=settle_p, ch2_range=ch2_range, background=background,
-                                   relay_wait=sess.relay_slot, progress=progress, ch2_coupling=ch2_coupling)
-            res = runner.run(plans, cal, role="thru" if thru_cal == "measure" else "measure")
-            out: dict[str, Any] = {"ok": True}
+            if on_device:
+                try:
+                    res = BD.device_sweep(s, f0, f1, points, settle=settle, ch2_range=str(ch2_range).lower(),
+                                          background=background, thru=cal if cal is not None else thru_cal,
+                                          close_view=close_view, progress=progress)
+                except BD.BodeError as e:
+                    raise ToolError(f"scope_bode_sweep(where='device'): {e}") from None
+                s.invalidate()  # the scope's sweep changed the channels, the time base and the trigger
+            else:
+                runner = BD.BodeRunner(s, settle=settle_p, ch2_range=ch2_range, background=background,
+                                       relay_wait=sess.relay_slot, progress=progress, ch2_coupling=ch2_coupling)
+                res = runner.run(plans, cal, role="thru" if thru_cal == "measure" else "measure")
+            out: dict[str, Any] = {"ok": True, "where": where}
             if not sess.bode_wiring_shown:
                 out["connection"] = BD.CONNECTION_TEXT
                 sess.bode_wiring_shown = True
@@ -2864,9 +2904,13 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                            "splices": res.splices},
                 "timing": {"duration_s": round(res.duration_s, 2), "estimate_s": round(res.estimate_s, 2)},
             })
+            if on_device:
+                out["device"] = {k: res.meta.get(k) for k in ("sweep_id", "state", "reason", "thru", "thru_applied",
+                                                              "view_shown")}
             now = _dt.datetime.now()
             d = Path(cfg.data_dir) / now.strftime("%Y-%m-%d")
-            stem = f"{now.strftime('%H%M%S_%f')[:-3]}_bode{'_thru' if thru_cal == 'measure' else ''}"
+            stem = (f"{now.strftime('%H%M%S_%f')[:-3]}_bode{'_device' if on_device else ''}"
+                    f"{'_thru' if thru_cal == 'measure' else ''}")
             files = {"csv": res.write_csv(d / f"{stem}.csv"), "json": res.write_json(d / f"{stem}.json")}
             meta = {**res.to_json(), "table": None}
             files["npz"] = sess.save_npz("bode", res.arrays(), meta)
@@ -2875,11 +2919,15 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 name = safe(thru_name) if thru_name else now.strftime("thru_%Y%m%d_%H%M%S")
                 tc = BD.ThruCal.from_sweep(res, name, tuple(res.meta["probes"]))
                 out["thru_cal"] = {"stored_as": name, "file": tc.save(thru_dir / f"{name}.json"),
-                                   "use": f"pass thru_cal='{name}' with the same start, stop and points",
+                                   "use": f"pass thru_cal='{name}' with the same start, stop and points" +
+                                          (" (or thru_cal='device' for the copy the scope keeps until power-off)"
+                                           if on_device else ""),
                                    "mismatch_db": [round(BD.db(abs(p.h_raw)), 4) for p in res.points],
                                    "mismatch_deg": [round(p.phase_deg, 3) for p in res.points]}
             elif cal is not None:
                 out["thru_cal"] = {"applied": cal.name, "created": cal.created}
+            elif thru_cal == "device":
+                out["thru_cal"] = {"applied": "the scope's stored thru", "state": res.meta.get("thru")}
             cav = list(notes) + res.caveats + BD.result_caveats(res)
             if res.role == "thru":
                 cav.append("thru calibration: both probes must have been on the DUT input node; |H| should be "
