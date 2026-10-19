@@ -19,6 +19,7 @@
 #include "spectrum.h"
 #include "phosphor.h"
 #include "spec_fmt.h"
+#include "bode_view.h"
 
 #define CP_XC               (UI_BAR_X + UI_BAR_W / 2)
 #define CP_EDGE_COLOR       0x00505050
@@ -28,9 +29,10 @@
 //fold-out opens and put back when it closes
 #define CP_SAVE_X           (UI_FOLD_RIGHT - 228)
 
+//fw 0.2.66: the Bode plot leaves the same page-one slots empty as the spectrum (no cursors or measurement list)
 int ctrl_page_spectrum(void)
 {
-  return spectrum_mode() != SPECTRUM_MODE_SCOPE;
+  return (spectrum_mode() != SPECTRUM_MODE_SCOPE) || bode_view_active();
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -141,6 +143,13 @@ static void cp_stepper(PCHANNELSETTINGS s, uint32 y, int pressed)
 
 void ctrl_page_draw(void)
 {
+  //fw 0.2.66: the Bode plot's page (Sweep, Thru, Grid; bode_view.c)
+  if(bode_view_active())
+  {
+    bode_ctrl_draw();
+    return;
+  }
+
   cp_display_button(0);
   cp_analysis_button(0);
   cp_grid_button(0);
@@ -548,6 +557,13 @@ static void cp_stepper_tap(PCHANNELSETTINGS s, uint32 y, int up)
 void ctrl_page_touch(void)
 {
   int sp = ctrl_page_spectrum();
+
+  //fw 0.2.66: the Bode plot's page
+  if(bode_view_active())
+  {
+    bode_ctrl_touch();
+    return;
+  }
 
   display_set_screen_buffer((uint16 *)maindisplaybuffer);
 

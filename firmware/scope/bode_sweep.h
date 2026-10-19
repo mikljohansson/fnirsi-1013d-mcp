@@ -173,6 +173,14 @@ void   bode_thru_apply(bode_eng *e, int on);
 void   bode_thru_clear(bode_eng *e);
 int    bode_is_thru_sweep(const bode_eng *e);
 
+//READ_BODE / BODE_CTRL bodies (docs/protocol.md section 14 row 60): the 32-byte header and 20-byte rows, little-endian.
+//view: bit 0 the Bode view shows, bit 1 RUN repeats sweeps.
+#define BODE_HDR_BYTES        32
+#define BODE_ROW_BYTES        20
+#define BODE_ROW_NOT_MEASURED 0x8000    //row flags: the point was not measured in the latest sweep
+void   bode_proto_header(const bode_eng *e, uint8 view, uint8 *p);
+uint32 bode_proto_rows(const bode_eng *e, uint32 first, uint32 max, uint8 *p);   //rows written
+
 //Sizes for the target's static instance
 struct bode_eng
 {

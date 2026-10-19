@@ -3201,6 +3201,13 @@ void handle_generator_menu_touch(void)
             scope_generator_settings(0);
           }
         }
+        //fw 0.2.66: the fourth row, Bode plot: the mode opens (or closes) once the menu has closed
+        else if(PC_GEN_BODE_HIT())
+        {
+          tp_i2c_wait_for_touch_release();
+          close_open_gen_menus(1);
+          return;
+        }
         //====================================================================================================
         //Wait until touch is released before checking on a new position
         //tp_i2c_wait_for_touch_release(); // doplnik pre kr=azdy prikaz zvlast

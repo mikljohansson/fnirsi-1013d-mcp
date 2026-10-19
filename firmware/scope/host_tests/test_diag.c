@@ -455,7 +455,7 @@ static void test_report(void)
   T_EQ(strlen(mock.report), written);
 
   has("FNIRSI-1013D-AI diagnostics report\r\n");
-  has("Firmware running: " PC_FW_VERSION ", protocol 1.18, git 0x00000000 of 2026-10-19 12:00:00 UTC");
+  has("Firmware running: " PC_FW_VERSION ", protocol 1.20, git 0x00000000 of 2026-10-19 12:00:00 UTC");
   has("Card image (sector 750): unknown");
   has("FPGA: version word 0x1535, variant 2");
   has("USB serial: 1013D-0001");

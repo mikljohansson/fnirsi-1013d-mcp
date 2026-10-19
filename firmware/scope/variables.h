@@ -346,7 +346,8 @@ int pc_glue_sys_menu_height(void);
 #define GEN_MENU_XPOS                      508//GEN_BUTTON_XPOS-100//28
 #define GEN_MENU_YPOS                       48//46
 #define GEN_MENU_WIDTH                     220//210//166
-#define GEN_MENU_HEIGHT                    169     //3 rows: Power, Freq, Duty (no DAC: no Wave / Ampl / Offset / Phase)
+#define GEN_MENU_HEIGHT                    225     //4 rows: Power, Freq, Duty (no DAC: no Wave / Ampl / Offset / Phase),
+                                                   //fw 0.2.66 Bode plot
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Battery button and menu

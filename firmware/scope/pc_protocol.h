@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            18    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            20    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -37,6 +37,9 @@
                                         //      bytes (features, UI average), GET_DECIM 36, GET_CAPTURE_INFO 96 (fw 0.2.58)
                                         //1.18: GET_LINK_STATS 62-63 and event type 21: full-rate capture
                                         //      garbled after a rate change, recovered (fw 0.2.61)
+                                        //1.20 (provisional numbering; fw-enc holds 1.19): the on-device Bode
+                                        //      plot: BODE_CTRL / READ_BODE, GET_STATUS display_mode 5, features
+                                        //      bit 5 (fw 0.2.66)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
@@ -93,6 +96,8 @@
 #define PC_CMD_SET_SEQ            0x020E     //1.17: sequencer setting for host ARM: segments / hardware averaging (0x1536+)
 #define PC_CMD_GET_SEQ            0x020F     //1.17: sequencer setting, fit and FPGA status
 #define PC_CMD_READ_SEQ           0x0210     //1.17: segment table or averaged record of the latest sequencer run
+#define PC_CMD_BODE_CTRL          0x0211     //1.20: on-device Bode sweep: settings, run / stop, thru calibration
+#define PC_CMD_READ_BODE          0x0212     //1.20: the Bode table of the latest sweep
 #define PC_CMD_SD_INFO            0x0500     //1.3: card size, partition start, write window, eGON headers
 #define PC_CMD_SD_READ_SECTORS    0x0501     //1.3: up to 128 sectors
 #define PC_CMD_SD_STAGE           0x0502     //1.3: bytes into the 64 KiB write staging buffer
@@ -153,6 +158,7 @@
 #define PC_FEAT_W_FIR                 0x0004       //0x1535+
 #define PC_FEAT_W_SEGMENTS            0x0008       //0x1536+
 #define PC_FEAT_W_HW_AVERAGE          0x0010       //0x1536+
+#define PC_FEAT_W_BODE                0x0020       //1.20: on-device Bode plot (decimation filter and DDS: 0x1534+)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Decoded header

@@ -6098,6 +6098,9 @@ void scope_open_generator_menu(void)
   gen_enable_select(); //gen_source_select();
   gen_freq_select();
   gen_duty_select();
+
+  //fw 0.2.66: the fourth row, Bode plot (bode_view.c)
+  PC_GEN_BODE_DRAW();
   
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1

@@ -922,3 +922,73 @@ int bode_point_get(const bode_eng *e, int i, bode_point *out)
 
   return 1;
 }
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// READ_BODE / BODE_CTRL bodies (docs/protocol.md section 14 row 60)
+
+static void put16(uint8 *p, uint32 v) { p[0] = (uint8)v; p[1] = (uint8)(v >> 8); }
+static void put32(uint8 *p, uint32 v) { put16(p, v); put16(p + 2, v >> 16); }
+
+//mdB / mdeg -> centi, rounded half away from zero, clamped to int16
+static int16 centi(int32 v)
+{
+  v = (v >= 0) ? (v + 5) / 10 : -((-v + 5) / 10);
+  return (int16)((v > 32767) ? 32767 : (v < -32768) ? -32768 : v);
+}
+
+void bode_proto_header(const bode_eng *e, uint8 view, uint8 *p)
+{
+  uint32 i;
+
+  for(i = 0; i < BODE_HDR_BYTES; i++)
+    p[i] = 0;
+
+  put32(p + 0, e->sweep_id);
+  p[4] = e->state;
+  p[5] = e->err;
+  p[6] = (uint8)((view & 0x03) | (e->thru_sweep ? 0x04 : 0) | ((e->exhausted & 3) << 3));
+  p[7] = (uint8)(bode_thru_state(e) | (e->thru.applied ? 0x80 : 0));
+  put16(p + 8, (uint32)e->np);
+  put16(p + 10, (uint32)bode_done_count(e));
+  put16(p + 12, (uint32)(uint16)(int16)bode_current(e));
+  p[14] = e->cfg.settle;
+  p[15] = e->cfg.ch2_mode;
+  put32(p + 16, (uint32)((e->cfg.start_mhz + 5) / 10));
+  put32(p + 20, (uint32)((e->cfg.stop_mhz + 5) / 10));
+  put16(p + 24, e->cfg.points);
+  put16(p + 26, e->switches);
+  put32(p + 28, bode_elapsed_ms(e));
+}
+
+uint32 bode_proto_rows(const bode_eng *e, uint32 first, uint32 max, uint8 *p)
+{
+  uint32 i, n = 0;
+
+  for(i = first; (i < (uint32)e->np) && (n < max); i++, n++, p += BODE_ROW_BYTES)
+  {
+    bode_point pt;
+    uint32 k;
+
+    for(k = 0; k < BODE_ROW_BYTES; k++)
+      p[k] = 0;
+
+    put32(p + 0, e->plans[i].m);
+    put32(p + 4, (uint32)((e->plans[i].f_mhz + 5) / 10));
+
+    if(!bode_point_get(e, (int)i, &pt))
+    {
+      put16(p + 18, BODE_ROW_NOT_MEASURED);
+      continue;
+    }
+
+    put16(p + 8,  (uint32)(uint16)centi(pt.h_mdb));
+    put16(p + 10, (uint32)(uint16)centi(pt.h_mdeg));
+    put16(p + 12, (uint32)(uint16)centi(pt.v1_mdb - 3010));     //peak -> rms
+    put16(p + 14, (uint32)(uint16)centi(pt.v2_mdb - 3010));
+    p[16] = pt.r1;
+    p[17] = pt.r2;
+    put16(p + 18, pt.flags);
+  }
+
+  return n;
+}
