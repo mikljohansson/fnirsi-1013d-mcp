@@ -2789,6 +2789,41 @@ static int h_read_spectrum(pc_session *s, const uint8_t *req, uint32_t len, uint
   return PC_OK;
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// CAL_PROBE (1.21 provisional, fw 0.2.67): u8 channel, u8 hardware range 0..5. The calibration wizard's zero step for
+// that range, exactly as the wizard measures it (cal_wiz_ui.c cal_range), nothing stored; about 1 s, main loop only.
+// The UI must be stopped (SET_ACQ_STATE 0) and no host capture pending; the FPGA gets the UI's settings back afterwards
+
+static int h_cal_probe(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  pc_hw_ui u;
+  int32_t  n;
+
+  (void)len;
+
+  if(req[0] > 1)
+    return pc_error(s, PC_E_BAD_ARG, 0, "channel");
+
+  if(req[1] >= ACAL_RANGES)
+    return pc_error(s, PC_E_BAD_ARG, 1, "range 0..5");
+
+  if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
+    return pc_error(s, PC_E_STATE, 0, "host capture pending");
+
+  pc_hal_ui_read(&u);
+
+  if(u.run)
+    return pc_error(s, PC_E_STATE, 1, "UI running: SET_ACQ_STATE 0 first");
+
+  n = pc_hal_cal_probe(req[0], req[1], resp);
+
+  if(n < 0)
+    return pc_error(s, PC_E_INTERNAL, 0, "cal probe");
+
+  *rl = (uint32_t)n;
+  return PC_OK;
+}
+
 static const pc_cmd_entry pc_cmds[] =
 {
   { PC_CMD_PING,         F_BUSY | F_CONTROL | F_BASIC, 0, h_ping },
@@ -2832,6 +2867,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_SET_GEN,      0,                            PC_CAP_GENERATOR_DDS, h_set_gen },
   { PC_CMD_GET_CAL,      0,                            0, h_get_cal },
   { PC_CMD_READ_SCREEN,  0,                            PC_CAP_SCREENSHOT, NULL },   //BENCH: T9 before it gets a handler
+  { PC_CMD_CAL_PROBE,    0,                            0, h_cal_probe },
   { PC_CMD_DEBUG_FPGA,   0,                            PC_CAP_DEBUG_RAW, h_debug_fpga },
   { PC_CMD_ENTER_FEL,    0,                            PC_CAP_ENTER_FEL, h_enter_fel },
   { PC_CMD_FFT_BENCH,    F_BASIC,                      0, h_fft_bench },
