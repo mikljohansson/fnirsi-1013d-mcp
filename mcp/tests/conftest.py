@@ -23,6 +23,12 @@ def make_cfg(**kw) -> SimConfig:
     return SimConfig(**kw)
 
 
+@pytest.fixture(autouse=True)
+def _user_home(tmp_path_factory, monkeypatch):
+    """Nothing a test runs may write into the real per-user home (~/.fnirsi1013d)."""
+    monkeypatch.setenv("FNIRSI_MCP_HOME", str(tmp_path_factory.mktemp("home")))
+
+
 @pytest.fixture
 def sim_factory():
     servers = []

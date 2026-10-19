@@ -27,8 +27,10 @@ from pathlib import Path
 from typing import Any
 
 from . import protocol as P
+from .paths import checkout_path
 
-DEFAULT_PATH = Path(__file__).resolve().parents[3] / "docs" / "protocol-vectors.json"
+#: docs/protocol-vectors.json of the checkout this package runs from, None for an installed wheel (pass --file)
+DEFAULT_PATH: Path | None = checkout_path("docs", "protocol-vectors.json")
 
 
 def _decoded(f: P.Frame) -> dict[str, Any]:
@@ -166,7 +168,7 @@ def build_host_vectors_1_3() -> list[dict[str, Any]]:
     return v
 
 
-def check_file(path: Path = DEFAULT_PATH) -> list[str]:
+def check_file(path: Path) -> list[str]:
     """Return mismatches between the Python parsers and the file."""
     doc = json.loads(path.read_text(encoding="utf-8"))
     errs = []
@@ -184,10 +186,16 @@ def check_file(path: Path = DEFAULT_PATH) -> list[str]:
 
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--file", type=Path, default=DEFAULT_PATH)
+    ap.add_argument("--file", type=Path, default=DEFAULT_PATH,
+                    help="the vectors file (default: docs/protocol-vectors.json of the checkout, when run from one)")
     ap.add_argument("--merge", action="store_true", help="add host vectors with new names (keeps the rest)")
     ap.add_argument("--check", action="store_true", help="check the Python parsers against the file")
     a = ap.parse_args(argv)
+    if a.file is None:
+        ap.error("--file is required: no repository checkout around this package to take "
+                 "docs/protocol-vectors.json from")
+    if not a.file.is_file():
+        ap.error(f"--file {a.file}: no such file")
     if a.merge:
         doc = json.loads(a.file.read_text(encoding="utf-8"))
         names = {x["name"] for x in doc["vectors"]}

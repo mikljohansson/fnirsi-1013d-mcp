@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from . import protocol as P
+from .paths import checkout_dir, checkout_path
 from .sdcard import IMAGE_SECTOR, WRITE_SECTORS, SdCard, SdError, check_image, image_version
 from .transport import (PIDCODES_TEST_PIDS, PIDCODES_VID, DeviceError, Transport, TransportError, list_candidates,
                         open_link, parse_ver)
@@ -48,12 +49,14 @@ from .transport import (PIDCODES_TEST_PIDS, PIDCODES_VID, DeviceError, Transport
 FEL_VID_PID = "1f3a:efe8"
 LOAD_ADDR = 0x7FFFFFE0
 EXEC_ADDR = 0x80000000
-REPO = Path(__file__).resolve().parents[3]
 #: ENTER_FEL attempts. The firmware answers OK before it reboots, and a request lost on the way in (fw <= 0.1.5
 #: RX-ring bug, ~4 % of requests) is harmless to resend, so each attempt is a fresh request (new seq).
 ENTER_FEL_ATTEMPTS = 3
 ENTER_FEL_INTERVAL_S = 1.0
-DEFAULT_IMAGE = REPO / "firmware" / "scope" / "build-gcc10-pc" / "fnirsi_1013d.bin"
+#: the checkout's `make gcc10` output when running from a checkout and it was built, else None (--image required)
+DEFAULT_IMAGE: Path | None = checkout_path("firmware", "scope", "build-gcc10-pc", "fnirsi_1013d.bin")
+#: SD backups of a checkout (gitignored); None for an installed wheel (--backup-dir required for card writes)
+DEFAULT_BACKUP_DIR: Path | None = checkout_dir("backups", "sdcard")
 
 
 class FlashError(Exception):
@@ -119,7 +122,7 @@ def parse_usbipd_list(text: str) -> list[UsbipdDevice]:
 
 
 class Flasher:
-    def __init__(self, *, port: str = "auto", image: Path = DEFAULT_IMAGE, no_fel: bool = False,
+    def __init__(self, *, port: str = "auto", image: Path | None = None, no_fel: bool = False,
                  sha256: str | None = None,
                  distro: str = "Ubuntu", fel_timeout: float = 20.0, port_timeout: float = 15.0,
                  sunxi_fel: str = "sunxi-fel", windows: bool | None = None, runner: Runner = run_cmd,
@@ -129,7 +132,7 @@ class Flasher:
                  stage_delay_ms: float = 0.0, port_return_s: float = 15.0, piece_attempts: int = 4,
                  write_sectors: int = WRITE_SECTORS):
         self.port = port
-        self.image = Path(image)
+        self.image = Path(image) if image is not None else None
         self.sha256 = sha256.lower() if sha256 else None
         self.no_fel = no_fel
         self.distro = distro
@@ -144,7 +147,7 @@ class Flasher:
         self.persist = persist or persist_only
         self.persist_only = persist_only
         self.restore_file = Path(restore) if restore else None
-        self.backup_dir = Path(backup_dir) if backup_dir else REPO / "backups" / "sdcard"
+        self.backup_dir = Path(backup_dir) if backup_dir else DEFAULT_BACKUP_DIR
         self.force = force
         self.stage_delay_s = stage_delay_ms / 1000.0
         #: how long to wait for the serial port to come back after a USB drop during a card write
@@ -180,6 +183,8 @@ class Flasher:
     # --- steps ---------------------------------------------------------------------------------------------
 
     def check_image(self) -> None:
+        if self.image is None:
+            raise FlashError("no scope image: pass --image", 2)
         if not self.image.is_file():
             raise FlashError(f"image {self.image} not found; build it (firmware/README.md) or pass --image", 2)
         data = self.image.read_bytes()
@@ -421,6 +426,8 @@ class Flasher:
         return t, sd, resends
 
     def persist_image(self) -> None:
+        if self.backup_dir is None:
+            raise FlashError("no backup directory: pass --backup-dir (the sectors are backed up before the write)", 2)
         data = self.image.read_bytes()
         if data != getattr(self, "_image_bytes", data):
             raise FlashError(f"{self.image} changed after it was checked; rerun", 2)
@@ -547,7 +554,9 @@ def main(argv: list[str] | None = None) -> None:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", default=os.environ.get("FNIRSI_MCP_PORT", "auto"),
                     help="scope serial port (default: auto-detect 1209:0001)")
-    ap.add_argument("--image", type=Path, default=DEFAULT_IMAGE, help=f"scope image (default {DEFAULT_IMAGE})")
+    ap.add_argument("--image", type=Path, default=DEFAULT_IMAGE,
+                    help="scope image (default: firmware/scope/build-gcc10-pc/fnirsi_1013d.bin of the checkout, "
+                    f"when run from one and built; now {DEFAULT_IMAGE or 'none'})")
     ap.add_argument("--no-fel", action="store_true", help="the scope is already in FEL; skip ENTER_FEL")
     ap.add_argument("--sha256", help="expected image sha256 (full or prefix); refuse to load anything else")
     ap.add_argument("--distro", default="Ubuntu", help="WSL distribution with sunxi-tools (Windows only)")
@@ -559,7 +568,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--persist-only", action="store_true", help="only write the image to the card through the running "
                     "firmware (no FEL)")
     ap.add_argument("--restore", type=Path, metavar="BACKUP", help="write a --persist backup file back to the card")
-    ap.add_argument("--backup-dir", type=Path, help="where SD backups go (default: <repo>/backups/sdcard)")
+    ap.add_argument("--backup-dir", type=Path, help="where SD backups go (default: backups/sdcard of the "
+                    "checkout, when run from one; required otherwise for --persist / --persist-only)")
     ap.add_argument("--stage-delay-ms", type=float, default=0.0, help="pause between SD_STAGE pieces (bench throttle)")
     ap.add_argument("--write-sectors", type=int, default=WRITE_SECTORS, help="sectors per SD_WRITE (1..128; "
                     "the write blocks the scope's main loop, ~4 s for 128 on fw 0.2.3)")
@@ -568,6 +578,12 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--force", action="store_true", help="persist even if the image's version differs from the "
                     "running firmware's #VER")
     a = ap.parse_args(argv)
+    if a.image is None and not a.restore:
+        ap.error("--image is required: no checkout build (firmware/scope/build-gcc10-pc/fnirsi_1013d.bin) around "
+                 "this package")
+    if a.backup_dir is None and DEFAULT_BACKUP_DIR is None and (a.persist or a.persist_only):
+        ap.error("--backup-dir is required for card writes when not running from a repository checkout (the SD "
+                 "sectors are backed up there before anything is written)")
     f = Flasher(port=a.port, image=a.image, no_fel=a.no_fel, sha256=a.sha256, distro=a.distro, sunxi_fel=a.sunxi_fel,
                 fel_timeout=a.fel_timeout, port_timeout=a.port_timeout, persist=a.persist,
                 persist_only=a.persist_only, restore=a.restore, backup_dir=a.backup_dir, force=a.force,

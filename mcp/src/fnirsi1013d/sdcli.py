@@ -5,7 +5,8 @@
     fnirsi1013d-sd write image.bin --sector 750 --dry-run
     fnirsi1013d-sd write image.bin --sector 750 --yes    # asks to type the confirmation, backs up first
 
-``write`` backs up the target sectors to ``backups/sdcard/sd_<first>-<end>_<time>.bin`` (verified), stages and
+``write`` backs up the target sectors to ``<backup dir>/sd_<first>-<end>_<time>.bin`` (verified; ``--backup-dir``,
+default ``backups/sdcard`` of the repository checkout when run from one, required otherwise), stages and
 writes 128-sector pieces (stage CRC and the card's read-back CRC checked), then reads everything back and
 compares. Sectors 16-79 (bootloader) need ``--boot``, 708-710 (calibration, settings, boot mode) ``--config``.
 Writing changes what the scope boots: only with the lead's ack and the owner present (AGENTS.md bench rules).
@@ -22,11 +23,13 @@ from pathlib import Path
 from typing import Callable
 
 from . import protocol as P
+from .paths import checkout_dir
 from .sdcard import SdError, plan_write
 from .scope import Scope
 from .transport import DeviceError, TransportError
 
-REPO = Path(__file__).resolve().parents[3]
+#: SD backups of a checkout (gitignored); None for an installed wheel (--backup-dir required for writes)
+DEFAULT_BACKUP_DIR: Path | None = checkout_dir("backups", "sdcard")
 MAGIC_NAMES = {0: "none", 1: "eGON.BT0", 2: "eGON.EXE"}
 CHECK_NAMES = {0: "not checked", 1: "checksum ok", 2: "checksum BAD", 3: "length invalid"}
 
@@ -72,6 +75,8 @@ def run(argv: list[str] | None = None, *, scope_factory: Callable[[str], Scope] 
     pw.add_argument("--config", action="store_true", help="allow sectors 708-710")
     pw.add_argument("--dry-run", action="store_true", help="check the window and flags only, write nothing")
     pw.add_argument("--yes", action="store_true", help="required for a real write (then type the confirmation)")
+    pw.add_argument("--backup-dir", type=Path, help="where the backup of the target sectors goes (default: "
+                    "backups/sdcard of the checkout, when run from one; required otherwise)")
     a = ap.parse_args(argv)
     t0 = time.monotonic()
 
@@ -84,6 +89,10 @@ def run(argv: list[str] | None = None, *, scope_factory: Callable[[str], Scope] 
             return fail(f"{a.file} not found", 2)
         if not a.dry_run and not a.yes:
             return fail("a real write needs --yes (try --dry-run first)", 2)
+        backup_dir = a.backup_dir or backup_dir or DEFAULT_BACKUP_DIR
+        if backup_dir is None and not a.dry_run:
+            return fail("pass --backup-dir: not running from a repository checkout, and the target sectors are "
+                        "backed up before the write", 2)
     try:
         s = (scope_factory or (lambda url: Scope.connect(url)))(_port(a.port))
     except (SdError, TransportError) as e:
@@ -110,8 +119,8 @@ def run(argv: list[str] | None = None, *, scope_factory: Callable[[str], Scope] 
         want = f"WRITE {plan.sectors}@{a.sector}"
         if confirm(f"type '{want}' to write the card: ").strip() != want:
             return fail("not confirmed; nothing written", 2)
-        bdir = backup_dir or REPO / "backups" / "sdcard"
-        bpath = bdir / f"sd_{a.sector}-{a.sector + plan.sectors}_{time.strftime('%Y%m%d-%H%M%S')}.bin"
+        assert backup_dir is not None
+        bpath = backup_dir / f"sd_{a.sector}-{a.sector + plan.sectors}_{time.strftime('%Y%m%d-%H%M%S')}.bin"
         bk = s.sd_card().backup(a.sector, plan.sectors, bpath)
         out(f"backup verified: {bk.path} sha256 {bk.sha256}")
         res = s.sd_write(data, a.sector, flags, progress=lambda d, n: out(f"written {d}/{n} B"))

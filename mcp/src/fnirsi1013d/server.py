@@ -44,6 +44,7 @@ from pydantic import Field
 from . import analysis as A
 from . import bode as BD
 from . import protocol as P
+from .paths import user_home
 from .scope import (CHANNEL_NAMES, SCALING_CAVEAT, Capture, CaptureContext, Scope, Spectrum, channel_index,
                     settings_diff)
 from .transport import DeviceError, TransportError
@@ -58,11 +59,6 @@ T = TypeVar("T")
 # Configuration
 
 
-def _default_mcp_dir() -> Path:
-    # src/fnirsi1013d/server.py -> mcp/
-    return Path(__file__).resolve().parents[2]
-
-
 @dataclass
 class ServerConfig:
     port: str = "auto"
@@ -70,8 +66,9 @@ class ServerConfig:
     enable_raw: bool = False
     gen_max_hz: float = 1_000_000.0
     gen_max_duty: float = 50.0
-    data_dir: Path = field(default_factory=lambda: _default_mcp_dir() / "data")
-    audit_log: Path | None = field(default_factory=lambda: _default_mcp_dir() / "logs" / "audit.jsonl")
+    #: .npz output, per-unit calibration, Bode thru calibrations (default <home>/data, paths.user_home())
+    data_dir: Path = field(default_factory=lambda: user_home() / "data")
+    audit_log: Path | None = field(default_factory=lambda: user_home() / "logs" / "audit.jsonl")
     watchdog_s: int = 15
     relay_changes_per_s: int = 5
     token_ttl_s: float = 120.0
@@ -90,9 +87,14 @@ class ServerConfig:
     cal_file: Path | None = None
 
     @classmethod
-    def from_env(cls, **override: Any) -> "ServerConfig":
+    def from_env(cls, home: Path | None = None, **override: Any) -> "ServerConfig":
+        """Defaults, then ``home`` (``--home``; else FNIRSI_MCP_HOME / ~/.fnirsi1013d), then the FNIRSI_MCP_*
+        variables, then the non-None ``override`` values (command-line arguments)."""
         e = os.environ
         cfg = cls()
+        if home is not None:
+            cfg.data_dir = Path(home) / "data"
+            cfg.audit_log = Path(home) / "logs" / "audit.jsonl"
         cfg.port = e.get("FNIRSI_MCP_PORT", cfg.port)
         cfg.max_tier = int(e.get("FNIRSI_MCP_MAX_TIER", cfg.max_tier))
         cfg.enable_raw = e.get("FNIRSI_MCP_ENABLE_RAW", "0") not in ("0", "", "false", "False")
@@ -2917,14 +2919,46 @@ def preload_native_modules() -> None:
         pass
 
 
+def tool_list(cfg: ServerConfig) -> list[tuple[str, int, str]]:
+    """(name, tier, title) of every tool ``cfg`` registers; builds the server without connecting."""
+    import asyncio
+    import re
+
+    mcp, sess = build_server(cfg)
+    try:
+        tools = asyncio.run(mcp.list_tools())
+    finally:
+        sess.close()
+    out = []
+    for t in tools:
+        m = re.search(r"Safety tier (\d)\.", t.description or "")
+        if m is None:
+            raise RuntimeError(f"tool {t.name} has no safety tier in its description")
+        out.append((t.name, int(m.group(1)), t.title or ""))
+    return out
+
+
+def print_tools(cfg: ServerConfig) -> None:
+    tools = tool_list(cfg)
+    for name, tier, title in tools:
+        print(f"{name:32s} tier {tier}  {title}")
+    print(f"{len(tools)} tools (max tier {cfg.max_tier}{', raw enabled' if cfg.enable_raw else ''})")
+    print(f"data dir:  {Path(cfg.data_dir).resolve()}")
+    print(f"audit log: {Path(cfg.audit_log).resolve() if cfg.audit_log else 'off'}")
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="fnirsi1013d-mcp", description="MCP server for the FNIRSI 1013D oscilloscope")
     ap.add_argument("--port", help="COM5, /dev/ttyACM0, tcp://localhost:5555 (simulator) or auto "
                                    "(env FNIRSI_MCP_PORT)")
     ap.add_argument("--max-tier", type=int, help="highest safety tier exposed (env FNIRSI_MCP_MAX_TIER, default 3)")
     ap.add_argument("--enable-raw", action="store_true", default=None, help="allow tier 4 (raw FPGA, FEL)")
-    ap.add_argument("--data-dir", type=Path, help="where .npz files go (env FNIRSI_MCP_DATA_DIR)")
-    ap.add_argument("--audit-log", type=Path, help="JSONL audit log (env FNIRSI_MCP_AUDIT_LOG)")
+    ap.add_argument("--home", type=Path, help="per-user directory for data/ and logs/audit.jsonl (env "
+                    "FNIRSI_MCP_HOME, default ~/.fnirsi1013d)")
+    ap.add_argument("--data-dir", type=Path, help="where .npz files, calibrations and Bode thru files go (env "
+                    "FNIRSI_MCP_DATA_DIR, default <home>/data)")
+    ap.add_argument("--audit-log", type=Path, help="JSONL audit log (env FNIRSI_MCP_AUDIT_LOG, default "
+                    "<home>/logs/audit.jsonl; empty string in the env disables it)")
     ap.add_argument("--cal-file", type=Path, help="per-unit voltage calibration file (env FNIRSI_MCP_CAL_FILE; "
                     "default <data-dir>/cal/<serial>.json, loaded if present)")
     ap.add_argument("--max-response", type=int, help="largest response payload requested in one frame; larger "
@@ -2933,12 +2967,18 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--sim", metavar="SIM_ARGS", help="start an in-process simulator and connect to it, e.g. "
                     "--sim \"--variant al3 --signal decay:tau=80us\" (overrides --port; for development)")
     ap.add_argument("--transport", choices=("stdio", "streamable-http"), default="stdio")
+    ap.add_argument("--list-tools", action="store_true", help="print the tools this configuration registers "
+                    "(name, tier, title), the data dir and the audit log, and exit without opening a port")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO if a.verbose else logging.WARNING, stream=sys.stderr,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    cfg = ServerConfig.from_env(port=a.port, max_tier=a.max_tier, enable_raw=a.enable_raw, data_dir=a.data_dir,
-                                audit_log=a.audit_log, max_response=a.max_response, cal_file=a.cal_file)
+    cfg = ServerConfig.from_env(home=a.home, port=a.port, max_tier=a.max_tier, enable_raw=a.enable_raw,
+                                data_dir=a.data_dir, audit_log=a.audit_log, max_response=a.max_response,
+                                cal_file=a.cal_file)
+    if a.list_tools:
+        print_tools(cfg)
+        return
     preload_native_modules()
     sim = None
     if a.sim is not None:
