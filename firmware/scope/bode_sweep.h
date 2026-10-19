@@ -62,6 +62,8 @@
 #define BODE_ERR_HOST         5     //the PC armed its own capture during the sweep
 #define BODE_ERR_STOP         6     //stopped (STOP, leaving the view, BODE_CTRL stop)
 #define BODE_ERR_NO_HW        7     //no decimation filter or no DDS generator on this bitstream
+#define BODE_ERR_READOUT      8     //fw 0.2.70: the pre-scan ended at 5 V/div still clipping with a fundamental under 20
+                                    //codes: the ADC readout returns rail values (a capture fault, not the signal)
 
 //Thru calibration state
 #define BODE_THRU_NONE        0
@@ -144,7 +146,8 @@ bode_eng *bode_engine(void);                                  //the target's ins
 //Start a sweep with cfg (thru: the sweep is a thru measurement). The CH2 range for Hold is hold_r2 (the channel's
 //hardware range now). Returns 0, or BODE_ERR_PLAN.
 int    bode_start(bode_eng *e, const bode_cfg *cfg, int thru, int hold_r2);
-//Stop after the point in progress (STOP), or at once (abort: leaving the view)
+//Stop after the capture in progress (STOP: the point keeps that capture's result, no re-centring, retry or range change
+//follows; fw 0.2.70, before: after the whole point), or at once (abort: leaving the view)
 void   bode_stop(bode_eng *e, int abort);
 //Main loop: advance the sweep; returns 1 when something changed that the display should show (a point, the state)
 int    bode_step(bode_eng *e);
@@ -179,6 +182,8 @@ int    bode_is_thru_sweep(const bode_eng *e);
 #define BODE_ROW_BYTES        20
 #define BODE_ROW_NOT_MEASURED 0x8000    //row flags: the point was not measured in the latest sweep
 void   bode_proto_header(const bode_eng *e, uint8 view, uint8 *p);
+//fw 0.2.70: the header's settings fields (bytes 14..25: settle, CH2 range mode, start, stop, requested points) from c
+void   bode_proto_settings(const bode_cfg *c, uint8 *p);
 uint32 bode_proto_rows(const bode_eng *e, uint32 first, uint32 max, uint8 *p);   //rows written
 
 //The CTRL page's Start / Stop steps (fw 0.2.66): index i is {1, 2, 5}[i % 3] x 10^(i / 3) Hz, 0 = 1 Hz .. 21 = 10 MHz
@@ -192,8 +197,8 @@ uint64 bode_step_mhz(int i);
 //  low- or high-pass with a -3 dB crossing fc: fc / 10 .. 10 fc
 //  resonant (or a phase through both +45 and -45 deg): f0 / 10 .. 10 f0 for Q <= 2, f0 / sqrt(10) .. f0 sqrt(10) for
 //  Q <= 10, f0 (1 -+ 4 / Q) above; Settle Normal for Q <= 7, Resonant for Q <= 34, High Q above
-//  a band narrower than two overview point spacings is not resolved (its Q reads low): at least the half decade and
-//  Settle Resonant
+//  a band narrower than two point spacings is not resolved (its Q reads low): Q at least 1 / (2 ln r) for points r
+//  apart and at least 2, Settle one preset up (fw 0.2.70; AUTO SET measures such a band again, bode_auto_zoom)
 //  still changing at the low end (the first two valid points differ by more than 1 dB or 5 deg): Start 10 Hz
 //The span is snapped outwards to the steps. BODE_AS_FLAT: no corner, the span is kept; BODE_AS_NO_RESPONSE: every
 //measured point is near the floor or under the noise, the span is kept.
@@ -206,10 +211,34 @@ typedef struct
   uint8  start_i, stop_i, settle;
   uint32 q_x100;              //the Q used (0: none)
   uint64 f0_mhz;              //the corner or resonance found (0: none)
+  uint8  coarse;              //fw 0.2.70: the band was narrower than two point spacings (Q a lower bound)
 } bode_autospan;
+
+//fw 0.2.70: an unresolved band (coarse) is measured again on finer passes around f0 before the span is set (pass 2
+//f0 / sqrt(10) .. f0 sqrt(10), pass 3 f0 / 1.1 .. f0 x 1.1, pass 4 f0 / 1.03 .. f0 x 1.03, 20 points each): after
+//`passes` passes (1 = the overview) the settings of the next one, 1; 0 when the span can be set (resolved, or
+//BODE_AUTO_PASSES done)
+#define BODE_AUTO_PASSES      4
+int    bode_auto_zoom(const bode_autospan *a, int passes, bode_cfg *c);
 
 int    bode_auto_span(const uint64 *f_mhz, const int32 *mag_mdb, const int32 *ph_mdeg, const uint16 *flags,
                       const uint8 *have, int n, int start_i, int stop_i, bode_autospan *out);
+
+//fw 0.2.70: a copy of the table (the plan, the points, the settings and the outcome of the latest sweep), so a cancelled
+//AUTO SET gives the previous table back (bode-ui.md 3.2 step 6). Restore only while no sweep runs.
+typedef struct
+{
+  bode_cfg   cfg;
+  bode_plan  plans[BODE_MAX_POINTS];
+  bode_point pts[BODE_MAX_POINTS];
+  int        np;
+  uint8      state, err, exhausted;
+  uint16     switches;
+  uint32     t0, t_end;
+} bode_snap;
+
+void   bode_snap_save(const bode_eng *e, bode_snap *s);
+void   bode_snap_restore(bode_eng *e, const bode_snap *s);
 
 //Sizes for the target's static instance
 struct bode_eng

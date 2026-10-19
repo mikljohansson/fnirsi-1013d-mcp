@@ -23,6 +23,7 @@ typedef struct
   double gain2;               //CH2 front-end gain mismatch
   double window_v[6];         //DC beyond this pins the front end of a range (0 = no limit)
   int    thru;                //CH2 on the DUT input too
+  int    rail[2];             //fw 0.2.70: a readout fault: every rail-th sample of the channel reads 255 (0: none)
 
   //State
   uint32 now;
@@ -213,6 +214,12 @@ static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
       }
     }
   }
+
+  //A readout fault (FPGA 0x1539's A cores): rail values whatever the input
+  for(c = 0; c < 2; c++)
+    if(d->rail[c])
+      for(i = 0; i < total; i += (uint32)d->rail[c])
+        d->buf[c][i] = 0xFF00;
 
   for(c = 0; c < 2; c++)
   {
@@ -444,6 +451,14 @@ static void test_stop_and_steps(void)
   T_EQ(bode_state(&eng), BODE_ST_STOPPED);
   T_EQ(D.gen, 0);
 
+  //fw 0.2.70: STOP during the pre-scan ends the sweep after that capture, nothing measured
+  T_EQ(bode_start(&eng, &c, 0, 3), 0);
+  bode_stop(&eng, 0);
+  run(&eng, 600000);
+  T_EQ(bode_state(&eng), BODE_ST_STOPPED);
+  T_EQ(bode_error(&eng), BODE_ERR_STOP);
+  T_EQ(D.gen, 0);
+
   //An arm failure ends the sweep with the error
   D.fail_arm = 1;
   T_EQ(bode_start(&eng, &c, 0, 3), 0);
@@ -451,6 +466,76 @@ static void test_stop_and_steps(void)
   T_EQ(bode_state(&eng), BODE_ST_ERROR);
   T_EQ(bode_error(&eng), BODE_ERR_ARM);
   D.fail_arm = 0;
+}
+
+//fw 0.2.70 (owner's fail-fast rule): a readout that returns rail values at 5 V/div ends the sweep with
+//BODE_ERR_READOUT instead of a table of clipped points; a healthy readout never trips it
+static void test_readout_fault(void)
+{
+  bode_cfg c = cfg(1000, 100e3, 10, BODE_SETTLE_FAST, BODE_CH2_AUTO);
+  int ch;
+
+  for(ch = 0; ch < 2; ch++)
+  {
+    dut_rc(&D);
+    D.rail[ch] = 97;
+    bode_init(&eng, &HW);
+    T_EQ(bode_start(&eng, &c, 0, 3), 0);
+    run(&eng, 600000);
+    printf("  readout fault on CH%d: state %d, reason %d, ranges %d / %d, %d points measured\n", ch + 1,
+           bode_state(&eng), bode_error(&eng), D.range[0], D.range[1], bode_done_count(&eng));
+    T_EQ(bode_state(&eng), BODE_ST_ERROR);
+    T_EQ(bode_error(&eng), BODE_ERR_READOUT);
+    T_EQ(D.range[ch], 0);
+    T_EQ(bode_done_count(&eng), 0);
+    T_EQ(D.gen, 0);
+  }
+
+  dut_rc(&D);
+  bode_init(&eng, &HW);
+  T_EQ(bode_start(&eng, &c, 0, 3), 0);
+  run(&eng, 600000);
+  T_EQ(bode_state(&eng), BODE_ST_DONE);
+}
+
+//fw 0.2.70: a cancelled AUTO SET gives the previous table back (bode_snap)
+static void test_snap(void)
+{
+  static bode_snap snap;
+  bode_cfg a = cfg(1000, 100e3, 10, BODE_SETTLE_FAST, BODE_CH2_AUTO), b = cfg(100, 10e6, 20, BODE_SETTLE_FAST, BODE_CH2_AUTO);
+  bode_point p0, p1;
+  int i, same = 1;
+
+  dut_rc(&D);
+  bode_init(&eng, &HW);
+  T_EQ(bode_start(&eng, &a, 0, 3), 0);
+  run(&eng, 600000);
+  T_EQ(bode_state(&eng), BODE_ST_DONE);
+  bode_snap_save(&eng, &snap);
+  bode_point_get(&eng, 3, &p0);
+
+  //The overview runs and is cancelled part way
+  T_EQ(bode_start(&eng, &b, 0, 3), 0);
+  while(bode_done_count(&eng) < 4)
+  {
+    bode_step(&eng);
+    D.now++;
+  }
+  bode_snap_restore(&eng, &snap);
+  T_EQ(bode_count(&eng), 20);              //not while running
+  bode_stop(&eng, 1);
+  bode_snap_restore(&eng, &snap);
+
+  T_EQ(bode_state(&eng), BODE_ST_DONE);
+  T_EQ(bode_count(&eng), 10);
+  T_EQ(bode_done_count(&eng), 10);
+  T_EQ(bode_last_cfg(&eng)->stop_mhz, a.stop_mhz);
+  T_EQ(bode_current(&eng), -1);
+  T_TRUE(bode_point_get(&eng, 3, &p1));
+  same = (p0.h_mdb == p1.h_mdb) && (p0.h_mdeg == p1.h_mdeg) && (p0.flags == p1.flags);
+  for(i = 0; i < 10; i++)
+    same = same && (bode_plans(&eng)[i].m == snap.plans[i].m);
+  T_TRUE(same);
 }
 
 static void test_thru(void)
@@ -615,6 +700,32 @@ static int synth(double f0, double f1, int n, double fr, double q, double k, uin
   return n;
 }
 
+//AUTO SET's passes on a synthetic tank: the overview, then bode_auto_zoom's passes until the span can be set
+static void auto_passes(double fr, double q, bode_autospan *a, int *passes)
+{
+  static uint64 f[BODE_MAX_POINTS];
+  static int32  m[BODE_MAX_POINTS], ph[BODE_MAX_POINTS];
+  static uint16 fl[BODE_MAX_POINTS];
+  static uint8  have[BODE_MAX_POINTS];
+  bode_cfg zc;
+  double lo = 100, hi = 1e7;
+  int n;
+
+  for(*passes = 1; ; (*passes)++)
+  {
+    n = synth(lo, hi, 20, fr, q, 1.0, f, m, ph, fl, have);
+    T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, a), BODE_AS_SPAN);
+    printf("  tank Q %.1f at %.0f Hz, pass %d (%.0f .. %.0f Hz): f0 %.0f Hz, Q %.2f, coarse %d, steps %d..%d, settle %d\n",
+           q, fr, *passes, lo, hi, a->f0_mhz / 1000.0, a->q_x100 / 100.0, a->coarse, a->start_i, a->stop_i, a->settle);
+    if(!bode_auto_zoom(a, *passes, &zc))
+      break;
+    T_EQ(zc.points, 20);
+    T_EQ(zc.settle, (*passes == 1) ? BODE_SETTLE_RESONANT : BODE_SETTLE_HIGHQ);
+    lo = zc.start_mhz / 1000.0;
+    hi = zc.stop_mhz / 1000.0;
+  }
+}
+
 static void test_auto_span(void)
 {
   static uint64 f[BODE_MAX_POINTS];
@@ -622,6 +733,7 @@ static void test_auto_span(void)
   static uint16 fl[BODE_MAX_POINTS];
   static uint8  have[BODE_MAX_POINTS];
   bode_autospan a;
+  bode_cfg zc;
   int n, i, r;
 
   //The steps: 1 Hz, 10 Hz, 5 MHz, 10 MHz
@@ -683,6 +795,40 @@ static void test_auto_span(void)
   T_EQ(a.stop_i, 15);
   T_EQ(a.settle, BODE_SETTLE_HIGHQ);
 
+  //fw 0.2.70, the sharp-tank rule (AUTO SET's passes): Q 50 at 15.3 kHz is resolved on pass 3 (1 % apart), then the
+  //design's rule f0 (1 -+ 4 / Q) on the steps and Settle High Q; Q 8.1 on pass 2 or 3 with Settle Resonant; Q 120 on
+  //pass 4
+  auto_passes(15300, 50, &a, &r);
+  T_TRUE(r >= 3);
+  T_EQ(a.coarse, 0);
+  T_TRUE(fabs(a.f0_mhz / 1000.0 / 15300.0 - 1) < 0.01);
+  T_TRUE(fabs(a.q_x100 / 100.0 / 50 - 1) < 0.2);
+  T_EQ(a.settle, BODE_SETTLE_HIGHQ);
+  T_TRUE(bode_step_mhz(a.start_i) <= a.f0_mhz * (1 - 4.0 / 50));
+  T_TRUE(bode_step_mhz(a.stop_i) >= a.f0_mhz * (1 + 4.0 / 50));
+  T_EQ(a.start_i, 12);                    //10 kHz .. 20 kHz
+  T_EQ(a.stop_i, 13);
+
+  auto_passes(50300, 8.1, &a, &r);
+  T_EQ(a.coarse, 0);
+  T_TRUE(fabs(a.q_x100 / 100.0 / 8.1 - 1) < 0.15);
+  T_EQ(a.settle, BODE_SETTLE_RESONANT);
+
+  auto_passes(15300, 120, &a, &r);
+  T_EQ(r, 4);
+  T_EQ(a.coarse, 0);
+  T_TRUE(fabs(a.q_x100 / 100.0 / 120 - 1) < 0.2);
+  T_EQ(a.settle, BODE_SETTLE_HIGHQ);
+
+  //A resolved band needs no pass; the passes stop at BODE_AUTO_PASSES
+  a.coarse = 0;
+  a.f0_mhz = 15300000;
+  T_EQ(bode_auto_zoom(&a, 1, &zc), 0);
+  a.coarse = 1;
+  T_EQ(bode_auto_zoom(&a, BODE_AUTO_PASSES, &zc), 0);
+  T_EQ(bode_auto_zoom(&a, 3, &zc), 1);
+  T_EQ(zc.start_mhz, 15300000ull * 1000 / 1030);
+
   //Q 20: Settle Resonant
   n = synth(10e3, 250e3, 200, 50000, 20, 1.0, f, m, ph, fl, have);
   bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a);
@@ -715,6 +861,8 @@ int main(void)
   test_hold();
   test_wiring_b();
   test_stop_and_steps();
+  test_readout_fault();
+  test_snap();
   test_thru();
   test_divider_floor();
   test_auto_span();
