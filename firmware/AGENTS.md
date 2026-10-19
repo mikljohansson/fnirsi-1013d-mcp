@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-**Current state (coordinator merge, 2026-10-19 14:50): latest build fw 0.2.52, protocol 1.16** = main with fw-ui1 (UX makeover
+**Current state (coordinator merge, 2026-10-19 13:50): latest build fw 0.2.52, protocol 1.16** = main with fw-ui1 (UX makeover
 step 1: main menu, USB drive screen, top bar, Display row, strips, measurement cards; section 29) and fw-readers (diagnostics
 readers: GET_HEALTH, card image identity, calibration provenance, unit life record, SAVE_REPORT; section 30) merged. Running in
 parallel: fw-ui2 (step 2), fw-ui3 (step 3), fw-touch1, fw-seg (0x1536, protocol 1.17). 

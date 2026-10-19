@@ -6,7 +6,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- **ACQ: sample rate vs time/div coupling** (owner 10-19 14:30, 1 kHz cal signal: after changing the sample rate in the ACQ menu
+- **ACQ: sample rate vs time/div coupling** (owner 10-19 13:44, 1 kHz cal signal: after changing the sample rate in the ACQ menu
   the old time/div stays selected although drawn grey; the trace is cut off, zeros show past the record end, the slider scrolls
   before the trace, the shape changes). Cause: Atlan design, statemachine.c handle_acquisition_menu_touch sets the FPGA rate without
   touching timeperdiv, the time/div tap in the menu sets only the display scale, viable_time_per_div[29][35] (variables.c:430) only
@@ -24,7 +24,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
   dead band, tap zones that keep the V/div and time-base tap bands but avoid the slider and cards (owner 10-19: keep the tap bands), after UI step 2; batch 3 = no blocking touch loop, needs an MCP soak). Owner decision
-  2026-10-19 13:45 **(owner)**: the channel pointers at the left edge of the grid become drag handles, "handles shown on screen are
+  2026-10-19 13:20 **(owner)**: the channel pointers at the left edge of the grid become drag handles, "handles shown on screen are
   draggable"; the on-trace grab stays as a secondary path with a nearest-enabled-object rule. Owner reproduced: with CH2 dragged to
   the bottom CH1 can be picked up again, but only when the drag starts exactly on the invisible zero line.
 - [x] **Spectrum Auto redesign** (owner, 10-18): deterministic probe procedure independent of the current state: probe
@@ -189,7 +189,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Dispatched
 
-- Swarm started 10-19 14:05 after step 1 merged (owner: ship the whole roadmap before the announcement, one big splash; front-load
+- Swarm started 10-19 13:40 after step 1 merged (owner: ship the whole roadmap before the announcement, one big splash; front-load
   everything that needs no hardware). Provisional firmware numbers, renumbered at merge: fw-readers 0.2.52 / protocol 1.16,
   fw-ui2 0.2.53 (step 2: CTRL fold-outs, steppers, strips to cards, chips, ACQ Display row removed), fw-touch1 0.2.54 (touch-review
   c1), fw-ui3 0.2.55 (step 3: settings fold-out trim, Settings screen, delete dialog), fw-seg 0.2.56 / protocol 1.17 rows 70+
@@ -197,24 +197,24 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   0x1537 if the FPGA is at fault), docs-gen3 (Sonnet: protocol tidy, README timings, roadmap.md, announcement draft,
   release-readiness.md). Queued behind them: fw-ui4 (step 4, needs fw-readers), Measurements v2 (needs step 2), touch batches 2-3,
   mcp 1.16/1.17, Bode device steps (after the owner's Bode bench), 0.3.0 release.
-- fw-touch1 (done 15:05, about 200k tokens, retired): merged as fw 0.2.54 (touch_pick.c handles column, first-touch pick, nearest
+- fw-touch1 (done 13:54, about 200k tokens, retired): merged as fw 0.2.54 (touch_pick.c handles column, first-touch pick, nearest
   switched-on channel, shared clamped channel+trigger move, EXT fix, clamps 6..396; test_touch_pick 538 checks); images pinned
   backups/fw-0.2.54_05a126f7.bin and fw-0.2.54-nommu_572784ed.bin; walk-through firmware/AGENTS.md section 32; not loaded.
   Provisional numbers are kept as final (merge order differs from numeric order; 0.2.53 = fw-ui2 lands later).
-- docs-gen3 (done 15:00, about 230k tokens, retired): merged 6f1ea23 (protocol tidy, README MMU timings, roadmap.md rewrite,
+- docs-gen3 (done 13:54, about 230k tokens, retired): merged 6f1ea23 (protocol tidy, README MMU timings, roadmap.md rewrite,
   announcement.md draft, release-readiness.md with 12 findings -> queued item).
-- fw-readers (done 14:45, about 465k tokens, retired): merged 72eacb3 as fw 0.2.52 / protocol 1.16 (row 55: GET_HEALTH 0x000A,
+- fw-readers (done 13:48, about 465k tokens, retired): merged 72eacb3 as fw 0.2.52 / protocol 1.16 (row 55: GET_HEALTH 0x000A,
   SD_INFO image identity, GET_CAL 356 B with provenance, SAVE_REPORT 0x0504, power-on count in settings words 224..255, sector 709
   written once per boot); images pinned backups/fw-0.2.52_cd8bf6fc.bin and fw-0.2.52-nommu_372267eb.bin; host tests green;
   bench checks in firmware/AGENTS.md section 30; not loaded. fw-ui4 dispatched on it; mcp-gen4 told to add 1.16 after 1.15.
-- fw-ui1 (done 14:00, about 365k tokens, retired): step 1 merged 9cc599c as fw 0.2.51, images pinned backups/fw-0.2.51_acf88fee.bin
+- fw-ui1 (done 13:35, about 365k tokens, retired): step 1 merged 9cc599c as fw 0.2.51, images pinned backups/fw-0.2.51_acf88fee.bin
   and fw-0.2.51-nommu_e011d597.bin, host tests 1513 checks OK; bench walk-through in firmware/AGENTS.md section 29, not yet loaded.
   Was: UI makeover step 1 (menu rows, USB drive screen, version string out, Phosphor/X-Y
   Display box in ACQ as the interim, strips without Scope/Auto, AUTO SET = spectrum Auto, cards in the final scheme with standard
   names, phosphor warnings top-middle); fw 0.2.51.
 - fw-readers (worktree, Opus, started 10-19 13:15): the diagnostics data readers (USB link state, card image identity, calibration
   provenance, power-on count and minutes, persisted restart record, save state, CP15 word, SAVE_REPORT); fw 0.2.52, protocol 1.16.
-- fw-touch-review (done 13:55, about 220k tokens, kept for questions): docs/plans/touch-review.md merged c179c49 (20 defects, fix batches); was an adversarial code review of the Scope and Spectrum touch interactions
+- fw-touch-review (done 13:28, about 220k tokens, kept for questions): docs/plans/touch-review.md merged c179c49 (20 defects, fix batches); was an adversarial code review of the Scope and Spectrum touch interactions
   (channel drag hit zones, tap-to-zoom, cursors, trigger pointers, spectrum gestures, GT911 read path) after the owner found
   CH1 unmovable while CH2 drags and no drag on the left-edge CH handles; output docs/plans/touch-review.md, fixes as a later batch.
 - fw-usb2 (done 11:20, about 355k tokens, retired): 0.2.49 merged; bench pending (section 27).
