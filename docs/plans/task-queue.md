@@ -142,7 +142,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   in one paragraph in docs/ui-guidelines.md first (what changes, what is kept), then implement. Owner 22:22 **(owner)**: the zoom must be one
   monotonic ladder that never gets stuck: from either end (200 MSa/s at the fastest viable time/div; the slowest rate at the slowest
   time/div before roll) the next tap in that direction does nothing and the opposite direction works at once; no cell reachable by
-  zooming that cannot be left by zooming; host test walks the ladder both ways from both ends at every starting rate.
+  zooming that cannot be left by zooming; host test walks the ladder both ways from both ends at every starting rate. Owner 22:24: "weird state" = a rate and time/div
+  pair that makes no sense together after stepping to an end and back; so the invariant is on the pair: after any tap sequence the
+  rate is the ladder's rate for that time/div (highest rate whose record covers ten divisions with at least ten samples per
+  division), a hand-picked ACQ rate holds only until the next zoom step; the test asserts the pair after every sequence.
 - **AUTO SET in Frequency response fails about 60 % on 0x1539** (owner 22:20): expected from the capture fault (pre-scan clips at
   5 V/div); re-test on 0x153A before any engine change.
 - **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
