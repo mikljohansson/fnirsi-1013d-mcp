@@ -110,16 +110,20 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   device and it never resumed: RESUME interrupt never fires. Decode the event log (types 2/3 fields of row 50), check MUSB resume
   handling (INTRUSBE resume bit, POWER.Resume, PHY), and the F1C100s USB PHY suspend behaviour; bench with `fnirsi1013d-soak --mode reopen
   --idle 1800`. Overnight 10-minute idles never suspended (36 stayed 1); the long idle did.
-- [ ] **Diagnostics view redesign** (owner 10-19; design proposal https://claude.ai/artifact/M3udheReCiHLQmASaY5qZr, artboards "Diagnostics"
-  and "Calibration detail" at 800x480; owner verdict pending): header with fw version, git hash + commit time, protocol, FPGA "AL3A10 0x1535,
-  EXT trigger, CIC+FIR" (drop "fw: PECO"); four status tiles (Power: battery V, charging, temperature; Processor: pass_ms, cache state,
-  uptime, restarts; USB link: speed, host connected, CRC errors, suspends/resumes; SD card: boots fw x, settings/calibration saved); a
-  Calibration panel with v3 date, status chips (zeros verified, gains measured, drift warning), per-channel zero split A-B per class, gains
-  A/B per class, noise, lever/range, live tracking; a detail screen with the per-range PWM centres, volts factors and zeros; the start-up
-  toggles as labelled buttons showing their value; bottom bar Calibrate (opens the wizard), Settings to defaults, Restore calibration, Reset
-  calibration (confirm before acting), Back. Remove the stock ADC-compensation/DC-shift tables (unused with v3). Colour = state, no on/off words.
-  Needs: battery voltage/charging state and temperature readers (exist), uptime and restart count (GET_LINK_STATS), USB speed/CRC from the
-  transport, SD boot version (read sector 750 header), tracking values (v4). Next firmware generation after fw-cal3.
+- [ ] **Diagnostics view redesign, revision 2** (owner 10-19; adversarial review docs/plans/diagnostics-review.md d95ce0b; design
+  https://claude.ai/artifact/M3udheReCiHLQmASaY5qZr, artboards Status / Calibration / Log / Settings): Diagnostics becomes a main-loop
+  display mode with three pages by header buttons; Status = identity lines (fw, git, time, protocol, serial, MMU state; FPGA word + features),
+  four tiles with verdict words (Firmware: running vs card image; Restarts; USB: connected, bad frames, suspends, reconnects; Battery level
+  of 20 + charging + RTC temperature when fitted), one calibration verdict line per channel against the review's provisional limits,
+  provenance (FPGA word, fw build, uptime and power-on count at calibration), buttons Calibrate (wizard) and Save report; Calibration page =
+  per-range table (PWM centre, volts factor as % from default, zeros A/B per class), corrected gain mismatch, noise vs limits, DC shift
+  model inputs, actions Check on post, Undo last calibration, DC shift trim, Clear calibration (confirmed); Log page = decoded event log,
+  restart record (persisted), SD state, timing; Settings screen (from Other settings) = Display, Controls, Files, Clock, Start-up rows with
+  values as words, Restore default settings (confirmed, keeps calibration, no boot-byte write); "fw: PECO" and the 1.00o5 tables removed;
+  fonts 13/16/24 px, buttons >= 44 px, hit area = drawn area. Needs the readers of review section 4 (USB link state, card image identity,
+  calibration provenance in the block, power-on counter, persisted restart record, save-state, post check, previous block for Undo, CP15
+  word, FPGA build hash). Also from the review: "USB connection" -> "USB drive / SD card" with an explanatory screen; first-run screen;
+  remove the USB-Serial and Dev mode toggles. Owner decisions pending on the menu tree (modes vs variants). Next firmware generation.
 - [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s): deterministic test with
   GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
 - [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md
