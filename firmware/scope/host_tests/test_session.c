@@ -1738,8 +1738,8 @@ static void test_fft_bench(void)
 static void test_cal_probe(void)
 {
   extern uint32_t mock_cal_probe_calls;
-  extern uint8_t  mock_cal_probe_ch, mock_cal_probe_range, mock_cal_probe_settle;
-  uint8_t p[3];
+  extern uint8_t  mock_cal_probe_ch, mock_cal_probe_range, mock_cal_probe_settle, mock_cal_probe_pre, mock_cal_probe_mode;
+  uint8_t p[5];
   resp_t  r;
 
   setup(0x1538);
@@ -1763,17 +1763,32 @@ static void test_cal_probe(void)
   r = req(PC_CMD_CAL_PROBE, p, 3);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock_cal_probe_calls, 0);
 
-  //Settle reads: passed on, echoed in the flags
-  p[0] = 0; p[1] = 0; p[2] = 3;
-  r = req(PC_CMD_CAL_PROBE, p, 3);
-  T_EQ(r.h.status, 0); T_EQ(mock_cal_probe_settle, 3); T_EQ(r.p[7], 0x30);
+  p[2] = 0; p[3] = 2;
+  r = req(PC_CMD_CAL_PROBE, p, 4);
+  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock_cal_probe_calls, 0);
+
+  p[3] = 0; p[4] = 2;
+  r = req(PC_CMD_CAL_PROBE, p, 5);
+  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock_cal_probe_calls, 0);
+
+  //Settle reads, the write strobe and the wizard mode: passed on, echoed in the flags
+  p[0] = 0; p[1] = 0; p[2] = 3; p[3] = 1; p[4] = 1;
+  r = req(PC_CMD_CAL_PROBE, p, 5);
+  T_EQ(r.h.status, 0); T_EQ(mock_cal_probe_settle, 3); T_EQ(mock_cal_probe_pre, 1); T_EQ(mock_cal_probe_mode, 1);
+  T_EQ(r.p[7], 0x3C);
+
+  //Bench 2026-10-19 (0.2.67 diagnostic image): the probe runs 1.5 s inside one main-loop poll; the next request found
+  //the session "UI busy" and got E_BUSY. Now a request right after it is answered (here from a BUSY poll, as the
+  //scope's own wait loops poll the link)
+  r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_BUSY);
+  T_EQ(r.h.status, 0); T_EQ(r.p[3], PC_UI_IDLE);
   mock_cal_probe_calls = 0;
 
-  //CH2, range 3, two bytes (settle 0): the packed measurement
+  //CH2, range 3, two bytes (settle and prestrobe 0): the packed measurement
   p[0] = 1; p[1] = 3;
   r = req(PC_CMD_CAL_PROBE, p, 2);
   T_EQ(r.h.status, 0); T_EQ(r.len, ACAL_PROBE_BYTES); T_EQ(r.len, 248);
-  T_EQ(mock_cal_probe_calls, 1); T_EQ(mock_cal_probe_ch, 1); T_EQ(mock_cal_probe_range, 3); T_EQ(mock_cal_probe_settle, 0);
+  T_EQ(mock_cal_probe_calls, 1); T_EQ(mock_cal_probe_ch, 1); T_EQ(mock_cal_probe_range, 3); T_EQ(mock_cal_probe_settle, 0); T_EQ(mock_cal_probe_pre, 0); T_EQ(mock_cal_probe_mode, 0);
   T_EQ(r.p[0], 1); T_EQ(r.p[1], 3); T_EQ(pc_get_u16(r.p + 2), 0); T_EQ(r.p[4], ACAL_PT_NONE);
   T_EQ(pc_get_u16(r.p + 16), 800); T_EQ(pc_get_u16(r.p + 18), 812);
   T_EQ(pc_get_u16(r.p + 24 + 28 * ACAL_PT_F_ZERO), 812); T_EQ(r.p[24 + 28 * ACAL_PT_F_ZERO + 3], 64);

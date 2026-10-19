@@ -331,9 +331,11 @@ void     pc_hal_enc_retry(void);                             //[FPGA] before a r
 void     pc_hal_enc_note(uint8_t why, const eh_note *n);     //count a check, log event 21 when n->done
 
 //CAL_PROBE (fw 0.2.67, MAIN, UI stopped): the calibration wizard's zero measurement of one channel and hardware range
-//(cal_wiz_ui.c), nothing stored; settle extra data-port reads per sample (fpga_read_settle, 0 = the wizard's readout);
-//writes ACAL_PROBE_BYTES (adc_cal.h) and returns that length, -1 for a bad argument
-int32_t  pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t *dst);
+//(cal_wiz_ui.c), nothing stored; settle extra data-port reads per sample (fpga_read_settle), prestrobe a write strobe
+//before each sample strobe (fpga_read_prestrobe), both 0 = the wizard's readout; mode 0 one range, 1 the whole zero
+//step in the wizard's screen context (range ignored, the response has ch's last measured range); writes
+//ACAL_PROBE_BYTES (adc_cal.h) and returns that length, -1 for a bad argument
+int32_t  pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t prestrobe, uint8_t mode, uint8_t *dst);
 
 //Calibration provenance (sector 708 bytes 432..487): ACAL_PROV_* state and the stored bytes (zeros when none)
 int      pc_hal_cal_prov(uint8_t *raw);

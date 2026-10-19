@@ -198,6 +198,13 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
   return rc;
 }
 
+//The last range cal_channel measured per channel, for CAL_PROBE in the wizard's context
+static acal_point cal_last_pt[2][ACAL_POINTS];
+static acal_fail  cal_last_fail[2];
+static int32_t    cal_last_centre[2], cal_last_pwm[2];
+static uint8      cal_last_r[2];
+static uint8      cal_last_garbled[2];
+
 //Zero step of one channel: every range (cal_range) and the store. *match16: the worst |drift A - drift B| of the zero
 //points over ranges and classes (summary); *fail and *fail_r: where a failed range failed (the result line and its note)
 static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail *fail, uint32_t *fail_r)
@@ -224,6 +231,13 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
     timer0_delay(60);
 
     rc = cal_range(r, &m, pt, &centre, fail);
+
+    memcpy(cal_last_pt[ch], pt, sizeof(pt));
+    cal_last_fail[ch]    = *fail;
+    cal_last_centre[ch]  = centre;
+    cal_last_pwm[ch]     = (centre < 0) ? -1 : m.pwm;
+    cal_last_r[ch]       = (uint8)r;
+    cal_last_garbled[ch] = fpga_enc_garbled;
 
     if((rc == ACAL_E_RESPONSE) || (rc == ACAL_E_TIMING))
       return rc;
@@ -413,56 +427,6 @@ static void cal_end(uint32 gen)
   fpga_set_trigger_mode();
 
   fpga_trace_who = FPGA_WHO_UI;
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-//CAL_PROBE (fw 0.2.67, protocol 1.21 provisional, docs/protocol.md section 14 row 61): the zero step of one channel and
-//range from the host, through the wizard's own set-up, scratch channel and cal_range, then the UI's settings back
-//(cal_end). Nothing is stored. The scratch channel reads into the UI's trace buffer: its first 1000 bytes are kept and
-//put back, so a stopped trace stays as it was. MAIN context, UI stopped (the session checks)
-
-static uint8 cal_probe_keep[1000];
-
-int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t *dst)
-{
-  acal_range_meas m;
-  acal_point      pt[ACAL_POINTS];
-  acal_fail       fail;
-  pc_hw_enc       e0, e1;
-  int32_t         centre;
-  uint8           flags = 0, *tb;
-  int             rc;
-
-  if((ch > 1) || (range >= ACAL_RANGES) || (settle > 15))
-    return -1;
-
-  tb = ch ? (uint8 *)channel2tracebuffer : (uint8 *)channel1tracebuffer;
-  memcpy(cal_probe_keep, tb, sizeof(cal_probe_keep));
-  pc_hal_enc_state(&e0);
-
-  cal_begin();
-  fpga_read_settle = settle;
-  cal_scratch_channel(ch);
-  calibrationsettings.samplevoltperdiv = range;
-  fpga_set_channel_voltperdiv(&calibrationsettings);
-  timer0_delay(60);
-
-  rc = cal_range(range, &m, pt, &centre, &fail);
-
-  if(fpga_enc_garbled)
-    flags |= ACAL_PROBE_GARBLED;
-  if(centre < 0)
-    flags |= ACAL_PROBE_NOCENTRE;
-
-  flags |= (uint8)(settle << 4);
-  fpga_read_settle = 0;
-  cal_end(0);
-
-  memcpy(tb, cal_probe_keep, sizeof(cal_probe_keep));
-  pc_hal_enc_state(&e1);
-
-  return (int32_t)acal_probe_pack(dst, ch, range, rc, flags, centre, (centre < 0) ? -1 : m.pwm, e1.bad - e0.bad,
-                                  e1.recovered - e0.recovered, &fail, pt);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -847,4 +811,108 @@ uint32 cal_wizard_run(void)
 
   ui_dlg_bg_end();
   return written;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//CAL_PROBE (fw 0.2.67, protocol 1.21 provisional, docs/protocol.md section 14 row 61): the zero step from the host through
+//the wizard's own code, nothing stored. Mode 0: one channel and range (cal_begin, the scratch channel, the relay, cal_range,
+//cal_end). Mode 1: the whole zero step as the wizard runs it after a Calibrate tap, in its screen context: the dimmed
+//screen and the step dialog, the progress lines, the Cancel polls, both channels, every range (wiz_run_actions); the
+//response then has the given channel's last measured range (the failing one, or range 6 when it passed). The scratch
+//channel reads into the UI's trace buffers: their first 1000 bytes are put back, so a stopped trace stays as it was.
+//MAIN context, UI stopped (the session checks)
+
+static uint8 cal_probe_keep[2][1000];
+
+int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t prestrobe, uint8_t mode, uint8_t *dst)
+{
+  acal_range_meas m;
+  acal_point      pt[ACAL_POINTS];
+  acal_fail       fail;
+  pc_hw_enc       e0, e1;
+  int32_t         centre, pwm;
+  uint8           flags = 0;
+  int             rc;
+
+  if((ch > 1) || (range >= ACAL_RANGES) || (settle > 15) || (prestrobe > 1) || (mode > 1))
+    return -1;
+
+  memcpy(cal_probe_keep[0], channel1tracebuffer, sizeof(cal_probe_keep[0]));
+  memcpy(cal_probe_keep[1], channel2tracebuffer, sizeof(cal_probe_keep[1]));
+  pc_hal_enc_state(&e0);
+
+  fpga_read_settle    = settle;
+  fpga_read_prestrobe = prestrobe;
+
+  if(mode == 0)
+  {
+    cal_begin();
+    cal_scratch_channel(ch);
+    calibrationsettings.samplevoltperdiv = range;
+    fpga_set_channel_voltperdiv(&calibrationsettings);
+    timer0_delay(60);
+
+    rc  = cal_range(range, &m, pt, &centre, &fail);
+    pwm = (centre < 0) ? -1 : m.pwm;
+
+    if(fpga_enc_garbled)
+      flags |= ACAL_PROBE_GARBLED;
+
+    cal_end(0);
+  }
+  else
+  {
+    //What a Calibrate tap on screen 1 does (cal_wizard_run): the dialog over the dimmed screen, the ZERO action
+    memset(cal_last_pt, 0, sizeof(cal_last_pt));
+    memset(cal_last_fail, 0, sizeof(cal_last_fail));
+    cal_last_fail[0].point = cal_last_fail[1].point = ACAL_PT_NONE;
+    cal_last_centre[0] = cal_last_centre[1] = -1;
+    cal_last_pwm[0] = cal_last_pwm[1] = -1;
+    cal_last_r[0] = cal_last_r[1] = 0;
+    cal_last_garbled[0] = cal_last_garbled[1] = 0;
+
+    cw_init(&wiz, fpgasettings.fw_FPGA == 2);
+    wiz_abort = 0;
+    wiz_usb   = 0;
+    ui_dlg_bg_begin();
+    wiz_show();
+    cw_event(&wiz, CW_EV_CALIBRATE);
+    wiz_run_actions();
+
+    rc = wiz.zero_rc[ch];
+
+    //A passed channel: its last range was range 6 (index 5); a cancelled run reports CW_RC_CANCELLED (-1)
+    if(wiz.zero_st[ch] == CW_Z_NONE)
+      rc = CW_RC_CANCELLED;
+
+    wiz_show();
+    timer0_delay(500);
+    ui_dlg_bg_end();
+    cw_init(&wiz, fpgasettings.fw_FPGA == 2);
+
+    memcpy(pt, cal_last_pt[ch], sizeof(pt));
+    fail   = cal_last_fail[ch];
+    centre = cal_last_centre[ch];
+    pwm    = cal_last_pwm[ch];
+    range  = cal_last_r[ch];
+
+    if(cal_last_garbled[ch])
+      flags |= ACAL_PROBE_GARBLED;
+
+    flags |= ACAL_PROBE_WIZARD;
+  }
+
+  if(centre < 0)
+    flags |= ACAL_PROBE_NOCENTRE;
+
+  flags |= (uint8)((settle << 4) | (prestrobe ? ACAL_PROBE_PRESTROBE : 0));
+  fpga_read_settle    = 0;
+  fpga_read_prestrobe = 0;
+
+  memcpy(channel1tracebuffer, cal_probe_keep[0], sizeof(cal_probe_keep[0]));
+  memcpy(channel2tracebuffer, cal_probe_keep[1], sizeof(cal_probe_keep[1]));
+  pc_hal_enc_state(&e1);
+
+  return (int32_t)acal_probe_pack(dst, ch, range, rc, flags, centre, pwm, e1.bad - e0.bad, e1.recovered - e0.recovered,
+                                  &fail, pt);
 }

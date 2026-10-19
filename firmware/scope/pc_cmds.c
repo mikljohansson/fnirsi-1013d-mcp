@@ -2791,7 +2791,9 @@ static int h_read_spectrum(pc_session *s, const uint8_t *req, uint32_t len, uint
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // CAL_PROBE (1.21 provisional, fw 0.2.67): u8 channel, u8 hardware range 0..5, u8 settle (0..15 extra data-port reads
-// per sample, an A/B test of the readout; 0 = the wizard's). The calibration wizard's zero step for
+// per sample), u8 prestrobe (0, 1: a write strobe before each sample strobe); settle and prestrobe are A/B tests of the
+// readout, 0 = the wizard's; u8 mode (0 one range, 1 the whole zero step in the wizard's screen context, both channels,
+// the response for channel's last measured range). The calibration wizard's zero step for
 // that range, exactly as the wizard measures it (cal_wiz_ui.c cal_range), nothing stored; about 1 s, main loop only.
 // The UI must be stopped (SET_ACQ_STATE 0) and no host capture pending; the FPGA gets the UI's settings back afterwards
 
@@ -2811,6 +2813,12 @@ static int h_cal_probe(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
   if(req[2] > 15)
     return pc_error(s, PC_E_BAD_ARG, 2, "settle 0..15");
 
+  if(req[3] > 1)
+    return pc_error(s, PC_E_BAD_ARG, 3, "prestrobe 0..1");
+
+  if(req[4] > 1)
+    return pc_error(s, PC_E_BAD_ARG, 4, "mode 0..1");
+
   if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
     return pc_error(s, PC_E_STATE, 0, "host capture pending");
 
@@ -2819,7 +2827,11 @@ static int h_cal_probe(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
   if(u.run)
     return pc_error(s, PC_E_STATE, 1, "UI running: SET_ACQ_STATE 0 first");
 
-  n = pc_hal_cal_probe(req[0], req[1], req[2], resp);
+  n = pc_hal_cal_probe(req[0], req[1], req[2], req[3], req[4], resp);
+
+  //It ran for seconds inside this main-loop poll: the modal watch must not count that as a modal screen afterwards
+  s->last_main_ms = pc_hal_ms();
+  s->ui_busy      = 0;
 
   if(n < 0)
     return pc_error(s, PC_E_INTERNAL, 0, "cal probe");
