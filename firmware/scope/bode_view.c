@@ -9,7 +9,8 @@
 //   x   6..726  the frequency axis, Log (decades with 2 and 5 lines) or Linear (1-2-5 steps); labels at y 400
 //   y 342..393  the C1 / C2 readout box at the bottom left (x 10..261)
 //   y 426..447  the cards chosen through MEASURES
-//   y 452..471  the slider: Start..Stop over 1 Hz .. 10 MHz; a drag pans the span and sweeps it
+//   y 452..471  the slider: Start..Stop over 1 Hz .. 10 MHz; a drag pans the span and sweeps it; fw 0.2.72: AUTO SET's
+//               overview in the track (slider_ov.h), kept until the next AUTO SET or power-off
 // Before the first sweep the pane shows one two-line instruction. Integer only: mdB, mdeg, mHz.
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -19,6 +20,7 @@
 #include "bode_dsp.h"
 #include "bode_sweep.h"
 #include "bode_ui.h"
+#include "slider_ov_draw.h"
 #include "types.h"
 #include "variables.h"
 #include "display_lib.h"
@@ -101,6 +103,20 @@ static bv_state bv = { .start_i = 6, .stop_i = 18, .points_i = 2, .settle = BODE
 
 //fw 0.2.71: the table before AUTO SET's overview, given back when it is cancelled (bode-ui.md 3.2 step 6)
 static bode_snap as_snap;
+
+//fw 0.2.72 (slider-overview.md section 5, owner 10 F item 3): AUTO SET's overview, drawn in the slider track. `ov` is the
+//last completed AUTO SET's (none after power-on or Restore default settings); `ov_new` is the one of the AUTO SET
+//running, taken when its overview pass completes and made `ov` when AUTO SET ends (a cancel drops it)
+typedef struct
+{
+  int    n;
+  uint64 f[AUTO_POINTS];
+  int32  m[AUTO_POINTS], p[AUTO_POINTS];
+  uint8  ok[AUTO_POINTS], have[AUTO_POINTS];
+} bv_overview;
+
+static bv_overview ov, ov_new;
+static uint8       ov_new_ok;
 
 //The MEASURES list (bu_ms_defaults: -3dB, Peak, Q, Level)
 static uint8 bv_ms[BU_MS_COUNT] = { 4, 1, 0, 2, 3, 0, 0, 0, 0, 0 };
@@ -406,6 +422,7 @@ static void bv_auto_cancel(void)
 
   bode_stop(e, 1);
   bv.autoset = 0;
+  ov_new_ok = 0;
   bv.was_running = 0;
   bv.single = 0;
   bode_thru_apply(e, bv.as_thru);
@@ -422,6 +439,34 @@ static uint64   p_f[BODE_MAX_POINTS];
 static int32    p_m[BODE_MAX_POINTS], p_p[BODE_MAX_POINTS], p_x[BODE_MAX_POINTS];
 static uint8    p_ok[BODE_MAX_POINTS], p_have[BODE_MAX_POINTS], p_vis[BODE_MAX_POINTS];
 static uint16   p_flags[BODE_MAX_POINTS];
+
+static void gather(void);
+
+//The overview pass has completed: the shown points into ov_new
+static void ov_take(void)
+{
+  int i;
+
+  gather();
+  ov_new.n = (n_pts < AUTO_POINTS) ? n_pts : AUTO_POINTS;
+  for(i = 0; i < ov_new.n; i++)
+  {
+    ov_new.f[i]    = p_f[i];
+    ov_new.m[i]    = p_m[i];
+    ov_new.p[i]    = p_p[i];
+    ov_new.ok[i]   = p_ok[i];
+    ov_new.have[i] = p_have[i];
+  }
+  ov_new_ok = 1;
+}
+
+//AUTO SET has ended (not cancelled): its overview replaces the old one
+static void ov_commit(void)
+{
+  if(ov_new_ok)
+    ov = ov_new;
+  ov_new_ok = 0;
+}
 
 static void gather(void)
 {
@@ -462,6 +507,8 @@ static void bv_auto_finish(void)
 
   if(bode_state(e) != BODE_ST_DONE)
   {
+    //An error in a sharp-tank pass: the overview pass had completed, so it counts
+    ov_commit();
     bv.autoset = 0;
     bode_thru_apply(e, bv.as_thru);
     if(scopesettings.runstate)
@@ -470,6 +517,8 @@ static void bv_auto_finish(void)
   }
 
   gather();
+  if(bv.autoset == 1)
+    ov_take();
   r = bode_auto_span(p_f, p_m, p_p, p_flags, p_have, n_pts, bv.start_i, bv.stop_i, &a);
 
   //fw 0.2.71, the sharp-tank rule: a band narrower than two point spacings is measured again around f0 (at most
@@ -483,6 +532,7 @@ static void bv_auto_finish(void)
   }
 
   bv.autoset = 0;
+  ov_commit();
   bode_thru_apply(e, bv.as_thru);
 
   if(r == BODE_AS_NO_RESPONSE)
@@ -1098,10 +1148,77 @@ static void draw_cards(int table)
     card(ui_ms_card_x(0, fit), NOTE_COLOR, ui_ms_more_text(more, extra), WHITE_COLOR, "more");
 }
 
-//The slider row: the Scope's frame, the window Start..Stop (the overview's span while AUTO SET runs)
+//fw 0.2.72: an overview in the track (slider-overview.md section 5): the magnitude, or the phase in Phase only, fitted to
+//the track's rows (only the shape counts: the track has no scale); valid points joined as on the chart (not across a
+//flagged point, the phase not across a wrap), a flagged point one grey pixel. Columns on the slider's log scale.
+static void draw_overview(int n, const uint64 *f, const int32 *v, const uint8 *ok, const uint8 *have, int32 wx, int32 ww)
+{
+  int    phase = (bv.show == BU_SHOW_PHASE), i, any = 0;
+  uint32 full = phase ? PHASE_COLOR : CHANNEL2_COLOR, dim = phase ? SOV_PHASE_DIM : SOV_CH2_DIM;
+  int32  vmax = 0, vmin = 0, pc = -1, pr = -1, pv = 0, lo, hi;
+
+  //The fit over the valid points, or over the flagged ones when none is valid
+  for(i = 0; i < n; i++)
+    if(have[i] && ok[i])
+    {
+      if(!any || (v[i] > vmax)) vmax = v[i];
+      if(!any || (v[i] < vmin)) vmin = v[i];
+      any = 1;
+    }
+
+  if(!any)
+    for(i = 0; i < n; i++)
+      if(have[i])
+      {
+        if(!any || (v[i] > vmax)) vmax = v[i];
+        if(!any || (v[i] < vmin)) vmin = v[i];
+        any = 1;
+      }
+
+  for(i = 0; i < n; i++)
+  {
+    int32 c, r;
+
+    if(!have[i])
+      continue;
+
+    c = sov_col(bu_slider_x_mhz(f[i]));
+    r = sov_row_fit(v[i], vmax, vmin);
+
+    if(!ok[i])
+    {
+      sov_draw_run(c, r, r, FLAG_COLOR, FLAG_COLOR, wx, ww);
+      pc = -1;
+      continue;
+    }
+
+    if((pc >= 0) && (c > pc) && (!phase || (((v[i] - pv) < 180000) && ((pv - v[i]) < 180000))))
+    {
+      int32 x, prev = pr;
+
+      for(x = pc + 1; x <= c; x++)
+      {
+        int32 rr = sov_lerp(pc, pr, c, r, x);
+
+        sov_join(prev, rr, &lo, &hi);
+        sov_draw_run(x, lo, hi, full, dim, wx, ww);
+        prev = rr;
+      }
+    }
+    else
+      sov_draw_run(c, r, r, full, dim, wx, ww);
+
+    pc = c;
+    pr = r;
+    pv = v[i];
+  }
+}
+
+//The slider row: the line, the overview, the window Start..Stop (the overview's span while AUTO SET runs)
 static void draw_slider(void)
 {
   int32 x0 = bu_slider_x(bv.start_i), x1 = bu_slider_x(bv.stop_i);
+  int   phase = (bv.show == BU_SHOW_PHASE);
 
   //AUTO SET: the span of the pass running
   if(bv.autoset)
@@ -1112,9 +1229,18 @@ static void draw_slider(void)
     x1 = bu_slider_x_mhz(c->stop_mhz);
   }
 
-  display_set_fg_color(WHITE_COLOR);
-  display_draw_rect(BU_SL_FRAME_X, BU_SL_FRAME_Y, BU_SL_FRAME_W, BU_SL_FRAME_H);
-  display_draw_rect((uint32)x0, BU_SL_WIN_Y, (uint32)(x1 - x0), BU_SL_WIN_H);
+  sov_draw_row();
+
+  //The overview pass running: its points so far, as they come; a sharp-tank pass: the overview it started from; else
+  //the last completed AUTO SET's (none before the first)
+  if(bv.autoset == 1)
+    draw_overview(n_pts, p_f, phase ? p_p : p_m, p_ok, p_have, x0, x1 - x0);
+  else if(bv.autoset && ov_new_ok)
+    draw_overview(ov_new.n, ov_new.f, phase ? ov_new.p : ov_new.m, ov_new.ok, ov_new.have, x0, x1 - x0);
+  else if(ov.n)
+    draw_overview(ov.n, ov.f, phase ? ov.p : ov.m, ov.ok, ov.have, x0, x1 - x0);
+
+  sov_draw_window(x0, x1 - x0);
 }
 
 static void draw_instruction(void)
@@ -2183,6 +2309,7 @@ void bode_view_defaults(void)
   bv.cursor_on = 0;
   bv.trace     = BU_TRACE_LINES;
   host_cfg_valid = 0;
+  ov.n = 0;                               //fw 0.2.72: no AUTO SET overview after Restore default settings
   bu_ms_defaults(bv_ms);
   bv.dirty = 1;
 }

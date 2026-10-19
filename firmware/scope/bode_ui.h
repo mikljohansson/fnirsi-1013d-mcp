@@ -107,12 +107,6 @@ char *bu_fmt_fdiff(char *t, int64 dmhz);
 //indices 0..BODE_STEPS - 1) and stops at the ends.
 #define BU_SL_X               2            //= SOV_X
 #define BU_SL_W               726          //= SOV_W
-#define BU_SL_FRAME_X         2
-#define BU_SL_FRAME_Y         452
-#define BU_SL_FRAME_W         726
-#define BU_SL_FRAME_H         20
-#define BU_SL_WIN_Y           455
-#define BU_SL_WIN_H           14
 #define BU_SL_HIT_Y            450          //a touch from here down takes the slider
 
 int32 bu_slider_x(int step);                                 //track x of a Start / Stop step
