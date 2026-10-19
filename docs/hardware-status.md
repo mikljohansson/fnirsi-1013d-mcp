@@ -753,9 +753,16 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 2026-10-19 15:02: RC sweep with the thru applied (backups/bode/rc1_15n_thru.json; an earlier run at 15:00 was taken with the
   resistor unplugged and is void): 30/30 valid, -3 dB about 11 kHz; the deviation is unchanged (112 kHz -17.9 dB / -70 deg vs -20.5 /
   -85 ideal; 202 kHz -22.4 / -70 vs -25.6 / -87). Next: resistive divider, then another capacitor.
-- 2026-10-19 15:10: Bode divider 991 / 102 Ohm, wiring B, thru applied, CH2 fixed at 0.5 V/div
+- 2026-10-19 15:05: Bode divider 991 / 102 Ohm, wiring B, thru applied, CH2 fixed at 0.5 V/div
   (backups/bode/div_991_102_fixed05.json): -20.62 to -20.43 dB (expected -20.60), phase -0.2 to +1.4 deg over 1 kHz to 300 kHz,
   28/30 valid. The tool is proven flat; the RC deviation above 20 kHz belongs to the 15 nF ceramic capacitor (to be confirmed with a
   second part). BUG found: with CH2 set to 0.1 V/div at the start (auto range chose it, or --ch2-range 0.1) CH2 reads 48 uV rms on a
   68 mV signal (div_991_102_thru.json all points, div_point_01.json), while 0.2 and 0.5 V/div read -20.58 / -20.22 dB correctly
   (div_point_02.json, div_point_05.json); in the RC sweeps 0.1 V/div reached by a mid-sweep range switch (splice) read correctly.
+- 2026-10-19 15:15: RC with the second 15 nF ceramic (backups/bode/rc1_15n_cap2_thru.json): same bend, 5 % larger C.
+  Apparent shunt element from H (R = 991): cap 1 C_eff 14.7 nF at 1 kHz falling to 9.8 nF at 200 kHz, tan delta 0.03 rising to 0.29;
+  cap 2 16.0 -> 11.3 nF, tan delta 0.04 -> 0.26. Both parts the same type, so this is either the dielectric (strong dispersion and
+  loss, unusually large for a ceramic) or a measurement effect that a resistive divider cannot show. Discriminators queued: high-pass
+  with the same parts, an electrolytic low-pass (different dielectric), and mcp-gen5's DC-saturation hypothesis for the 0.1 V/div
+  blank (wiring B puts the DUT about -1.24 V below the probe reference VRF1; the divider output sat at about -1.15 V, the RC at
+  -0.46 V).
