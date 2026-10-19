@@ -702,6 +702,10 @@ was found (commit not identified).
   markers and Q, quality flags, background floor, CH2 auto-ranging with the splice, thru calibration, CSV / JSON /
   NPZ. Planner, DFT and markers in f0940ee (plan vectors docs/bode-plan-vectors.json), runner and CLI in 363f676,
   the tool in d3a16bb. The simulator has an RC / series RLC DUT on the generator (1d46cf8). Not benched yet.
+- Added: protocol 1.15 calibration v4 (fw 0.2.50, 5f6bc0d). GET_CAL parses 288 bytes; the volts model takes the
+  tracked full-rate A - B (d, e) and common mode (cm) out of READ_RAW and 16-bit samples as the scope does in its own
+  readouts, re-reading GET_CAL at most a second old; `scope_calibration_info` shows the tracker and the class probe in
+  words (tracking / frozen / idle, age, d, e, q, cm). The simulator models the drift (`SimConfig.v4`).
 
 ### Tooling, FPGA and documentation
 

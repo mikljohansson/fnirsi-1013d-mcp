@@ -105,7 +105,7 @@ path. |
   (incl. usb_irq_polled). Exit 0 clean / 1 failure, drop or restart / 2 cannot start. Tested on the simulator
   only; the lead runs it on the bench.
 
-## Protocol support (host = simulator = vectors): 1.13, fw 0.2.46
+## Protocol support (host = simulator = vectors): 1.15, fw 0.2.50
 
 `P.PROTO_MINOR` follows the highest section 14 row implemented. The simulator always speaks the newest protocol
 (shared mode); `--legacy` gives 1.2.
@@ -123,6 +123,8 @@ path. |
 | 1.11 | 0.2.44+ | 0x1535 FIR: caps bit 16 FIR, SET_DECIM / GET_DECIM flags bit 3, 0x29 bits 6 / 5 (`DECIM_FIR_EN` / `DECIM_FIR_ACT`), gain (N/2)^K and S + 1 while active (`decim_config(..., has=DECIM_HAS_FIR)`, `DecimConfig.from_status`), filter names `cic2+fir` (`parse_decim_filter`) |
 | 1.12 | 0.2.45+ | calibration v3, GET_CAL 256 bytes: `CalResp.v3`, `zero16_at` / `zero_at` (firmware rounding), per-class `slope_codes`, `gain_corr` / `gain_q16`, `gain16_full`, the next readout's `gain_a/b`, `off_a/b`, `gain16`; `parse_adc_cal_block` decodes the v3 block (`adc_cal_v3` vectors). The `adc_cal` (v2) vectors section is unused by mcp; fw-gen7 removes it |
 | 1.13 | 0.2.46+ | GET_STATUS display_mode 2 waterfall / 3 density (spectrum sub-views; READ_SPECTRUM works) / 4 phosphor; capture tools add the spectrum or phosphor caveat (`Session.ensure_control`). The host decodes no settings words (210 included) |
+| 1.14 | 0.2.49+ | GET_LINK_STATS n = 62 (60 `usb_inferred_resumes`, 61 `usb_soft_reconnects`), event type 20 `usb_soft_disconnect` (reason, back-off level, suspends; fw-usb2, f3763cc) |
+| 1.15 | 0.2.50+ | calibration v4 (row 54): GET_CAL 288 bytes, `CalResp.track_*` / `cm_*`, `has_tracker` (by length; 256 / 248 / 72 still parse), `TRACK_*` flags; the volts model takes the tracked d, e (8-bit full class) and cm (full class, 8-bit and 16-bit) out; conversions re-read GET_CAL when the cached answer is over `CAL_TRACK_AGE_S` (1 s) old; `scope_calibration_info` `tracking` (state, values, `in_words`) |
 
 GET_LINK_STATS counts (named by the count field): 27 (0.1.4-0.1.7), 29 (0.2.0-0.2.1), 31 (0.2.2-0.2.3),
 35 (0.2.4), 41 (0.2.5-0.2.6), 47 (0.2.7-0.2.11), 48 (0.2.12-0.2.16, usb_irq_polled), 49 (0.2.17-0.2.18,
@@ -143,7 +145,12 @@ Per channel and ADC core (A = 0x20/0x22, low byte in layout 2; B = 0x21/0x23), i
    `T + G_k (raw - z_k)` (T = `cal_target`), inverted by `volts_compensated`. 16-bit samples: mean raw code
    `m = out x 2^S / gain`, volts `(m - mean z) x harmonic mean of g_A, g_B` (`volts_mean_raw`), firmware 8-bit codes
    `T + gain16 (m - mean z)` (`codes_mean_raw`, inverse `volts_wide_codes`). Source string
-   `scope calibration v3 (full|gated clock)`.
+   `scope calibration v3 (full|gated clock)`. **v4** (protocol 1.15, row 54, full class only, from GET_CAL 256..287):
+   the 8-bit v3 code c of core A becomes `c - (d + e (c - 128)) / 2 - cm`, of core B `c + (d + e (c - 128)) / 2 - cm`
+   (`ChannelScale._v4_code`, in `codes_from_raw` and `volts_raw`); 16-bit codes `- cm` (`codes_mean_raw`,
+   `volts_mean_raw`). READ_TRACE codes carry v4 already (`volts_compensated` uses them as they are). q is shown, not
+   applied (as the firmware). Source string `, v4 tracking (A-B .., cm ..)`. Simulator: `SimConfig.v4` = per channel
+   (d, e, q, cm) of true full-class drift with a converged tracker (GET_CAL reports and the readouts take out d, e, cm).
 2. **Per-unit JSON** (`<data_dir>/cal/<serial>.json`, below): with v3 in use it contributes only its gated per-core
    gains, carried to the class by `G_k[c] / G_k[gated]` (`, unit-calibration gains` in the source); its zeros are
    ignored. Without v3 it supplies zeros, slopes and gains for the ranges it covers.
@@ -195,7 +202,7 @@ cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `te
 `test_sdcard` (SD commands, persist, resume after drops, restore, CLI), `test_ext_trigger`, `test_soak`,
 `test_fir` (1.11 FIR maths / sim / tool, suspend event fields, soak reopen mode), `test_cal_v3` (1.12 GET_CAL 256, `adc_cal_v3` block vectors, volts on both cores and classes, GET_CAL's next-readout
 gain / offset vs the host model, unit file gated gains only, scope_calibration_info),
-`test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH), `test_decim` (1.9: maths vs
+`test_cal_v4` (1.15 GET_CAL 288, v4 volts on raw / WIDE / trace codes vs the simulator's drift, GET_CAL re-read, tracker words), `test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH), `test_decim` (1.9: maths vs
 the firmware vectors, wire layouts, simulator noise / volts / trigger / EXT latency, `scope_set_decimation`),
 `test_bode` (planner rules and vectors, DFT, a synthetic RC through dithered 8-bit at 200 MSa/s, gates, markers,
 thru cal), `test_bode_sim` (the DUT model, the runner end to end: RC, thru, fixed range, floor, legacy and CIC2

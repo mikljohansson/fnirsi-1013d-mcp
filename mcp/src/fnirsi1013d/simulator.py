@@ -376,6 +376,10 @@ class SimConfig:
                                                                               ((1.0, 1.0), (1.0, 1.0)))
     #: protocol 1.12: a bound calibration v3 block measured from this model (GET_CAL version 3, corrected traces)
     cal_v3: bool = False
+    #: protocol 1.15 (with cal_v3): the full-rate class drifted after the calibration, per channel (d, e, q, cm) in
+    #: corrected codes: core A reads + (d + e x + q x^2) / 2 + cm, core B - (d + e x + q x^2) / 2 + cm (x = code - 128);
+    #: the firmware's tracker is modelled as converged (it reports and takes out d, e and cm; q is reported only)
+    v4: tuple[tuple[float, float, float, float], tuple[float, float, float, float]] | None = None
 
 
 def make_egon_image(size: int, kind: bytes = b"eGON.EXE", fill: int = 0, version: str | None = None) -> bytes:
@@ -632,10 +636,21 @@ class Device:
             zero = 128.0 + self.cfg.offset_slope * cs.dcoffset
         g = self.cfg.core_gain[ch]
         if core is None:  # filtered: the ADCs run at full rate, both cores weigh equally
-            return zero + v / vpl * (g[0][0] + g[0][1]) / 2 + \
+            out = zero + v / vpl * (g[0][0] + g[0][1]) / 2 + \
                 (self.raw_zero_offset(ch, 0, 0) + self.raw_zero_offset(ch, 1, 0)) / 2
+            if self.cfg.v4 is not None:  # the A - B parts cancel in the mean of the cores; cm stays
+                g_ref = (g[1][0] + g[1][1]) / 2
+                out = out + self.cfg.v4[ch][3] * (g[0][0] + g[0][1]) / 2 / g_ref
+            return out
         k, cls = (0 if core == "A" else 1), self._clock_class(settings)
-        return zero + v / vpl * g[cls][k] + self.raw_zero_offset(ch, k, cls)
+        out = zero + v / vpl * g[cls][k] + self.raw_zero_offset(ch, k, cls)
+        if self.cfg.v4 is not None and cls == P.CAL_CLASS_FULL:
+            d, e, q, cm = self.cfg.v4[ch]
+            g_ref = (g[1][0] + g[1][1]) / 2
+            x = (P.cal_target(cs.dcoffset, cal.dc_shift_value) - 128) + v / vpl * g_ref
+            s = 1 if k == 0 else -1
+            out = out + (s * (d + e * x + q * x * x) / 2 + cm) * g[0][k] / g_ref  # corrected codes -> raw codes
+        return out
 
     def raw_zero_offset(self, ch: int, core: int, cls: int) -> float:
         """Model: the raw 0 V code of a core minus the offset formula's zero, for clock class cls (1 = gated)."""
@@ -689,6 +704,15 @@ class Device:
             out["frac"].append(d16 - 16 * (d16 // 16))
         out["gain16"] = tb.gain16_full()
         out["corr16"] = P._rdiv(t16 * 131072 - out["gain16"] * (zf[0] + zf[1]), 131072)
+        if self.cfg.v4 is not None:  # 1.15: the tracker folded into the readouts (row 54)
+            d, e, _q, cm = self.cfg.v4[ch]
+            dq, eq, cmq = round(d * 256) / 256, round(e * 2 ** 24) / 2 ** 24, round(cm * 256) / 256
+            out["corr16"] -= round(16 * cmq)
+            if cls == P.CAL_CLASS_FULL:  # c' = c (1 - s e / 2) - s (d - 128 e) / 2 - cm
+                for k, s in ((0, 1), (1, -1)):
+                    f = 1 - s * eq / 2
+                    out["gain"][k] = round(out["gain"][k] * f)
+                    out["off"][k] = round(out["off"][k] * f - 65536 * (s * (dq - 128 * eq) / 2 + cmq))
         return out
 
     def _corr16(self, ch: int, settings: Settings) -> tuple[int, int]:
@@ -2041,6 +2065,14 @@ class Device:
         r.off_a, r.off_b = v["off"]
         r.gain16, r.corr16 = v["gain16"], v["corr16"]
         r.cal_zero_q8 = v["t16"] * 16
+        if self.cfg.v4 is not None:
+            d, e, q, cm = self.cfg.v4[ch]
+            r.track_flags = (P.TRACK_RECORD | P.TRACK_E | P.TRACK_Q | P.TRACK_LAST_USABLE | P.TRACK_PROBE_DATA |
+                             P.TRACK_PROBE_VALID | (P.TRACK_APPLIES if cls == P.CAL_CLASS_FULL and
+                                                    not self.decim_config(s).k else 0))
+            r.track_d_q8, r.track_e_q24, r.track_q_q24 = round(d * 256), round(e * 2 ** 24), round(q * 2 ** 24)
+            r.track_age_ms, r.track_records, r.track_last_pairs, r.track_spread16 = 40, 512, 2100, 16 * 30
+            r.cm_q8, r.cm_probes, r.cm_age_ms = round(cm * 256), 6, 12000
         return r
 
     def _cmd_get_cal(self, req: P.Frame) -> P.Frame:
