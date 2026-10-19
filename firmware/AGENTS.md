@@ -2660,3 +2660,125 @@ never ends (Sweep card stuck, READ_BODE state 1 for long; reason 2 afterwards); 
 (scale per channel wrong: gain16 / uv_q8 / probe); phase drifting with frequency on the divider (record start or core
 order); the generator, V/div or time base not given back on leaving; a relay clicking at every point (bh_channel writes
 only what changed); MEASURES or the cursors reacting in the view; the view drawing over a waveform viewer.
+
+## 43. fw-cal5: the wizard's zero step on FPGA 0x1538, CAL_PROBE (fw 0.2.67, protocol 1.21 provisional, row 61)
+
+Bench fact (coordinator, docs/hardware-status.md 2026-10-19 17:55-18:40). On fw 0.2.64 / FPGA 0x1538 with nothing
+connected, the Zero level step failed every time: "CH1: too much noise, range 1 at 200 MSa/s: core B 7.2 codes, 7.2 per
+capture" and "CH2: the input is not at 0 V". At the same moment host READ_RAW on range 0 at 200 MSa/s was clean.
+
+**Cause, confirmed with CAL_PROBE and a READ_RAW offset sweep.** At 200 MSa/s some FPGA readout lanes mix the bits of two
+successive samples when they straddle 0x7F / 0x80. Outliers up to 255 appear only while a core's mean sits at 126..133
+(CH2 both cores, CH1 core A once). Every other mean is clean, and so is the gated rate. The zero step parked the mean of
+both cores exactly at 128. The host's READ_RAW sat a few codes off it, mostly outside the band.
+- The data are bad in the bus readout, not in the ADC data. The 0x33 encode check cannot see it.
+- The MCU-side early read is ruled out: CAL_PROBE settle 4 changed nothing. The prestrobe A/B made it worse.
+- The fault depends on the lane and on the build: 0x1535 passed in the 0.2.48 flow.
+- The likely cause is a hold race between BRAM dob and o_mcu_data on the unconstrained i_mcu_clk. fpga-gen8 owns the
+  bitstream fix (registered output byte, constrained MCU clock).
+- A Cancel-poll / touch interference theory was checked and ruled out. The touch is on Port A, the FPGA bus on Port E.
+  wiz_poll_cancel runs only between ranges. The host probe passes through the same fpga_done_conversion touch scan.
+
+Branch `worktree-agent-a8a5d87924697dbf0` from main a25987a (0.2.64), merged with origin/main 802c203 (fw-bode 0.2.66 /
+1.20, fw-meas 0.2.65) in ae1187e.
+
+Commits:
+- 28158ea `acal_point`, extremes, `acal_fail_point`, `acal_probe_pack`.
+- 789da66 `cal_range`, the failure note, cal_end's raw divider and time base.
+- 448c08c CAL_PROBE, protocol 1.21, 0.2.67.
+- a651c0c `firmware/tools/cal_probe.py`.
+- cf3f9e2 settle A/B.
+- b67219c prestrobe A/B, mode 1, the E_BUSY fix.
+- e5ccbd3 docs.
+- ae1187e the merge.
+- **c22896c, the fix**.
+- 8802b79 row 61 and the vector.
+- 8329d63 CHANGELOG and README.
+- Then this handoff.
+
+**What was built**
+- **Fix (c22896c).** Each class's zero is no longer measured at the centre PWM. It is the mean of two points d counts on
+  either side of it:
+  - Conversions: 8 per point gated, 64 per point at 200 MSa/s.
+  - d comes from the range's gated slope points, so each point sits 12 codes off 128 (`acal_zero_split`: 8..120 counts;
+    about 27 counts on range 0 of the owner's unit).
+  - In the linear model the mean of the two points is exactly the zero at the centre (`acal_zero_pair`). So the stored
+    zeros, slopes, PWM centres, `acal_correction` (v3), the v4 tracker and GET_CAL mean what they meant. Nothing in the
+    block or the protocol changes for this.
+  - Drift comes from the halves of both points: the level step cancels because both points take equal conversions.
+  - Noise and within-capture RMS are the RMS of the two points' own values.
+  - Cost: 8 gated and 64 full-rate conversions more per range, plus one 60 ms settle. That is about 0.15 s per range.
+- **Readout fault reported as such.** ACAL_E_RESPONSE stays 4 and ACAL_E_TIMING stays 18; the new code is
+  ACAL_E_READOUT = 19.
+  - `cal_range` turns an ACAL_E_CLIP into ACAL_E_READOUT when `acal_readout_fault` holds. That means every clipping
+    point is a 200 MSa/s point, and its gated twin at the same PWM is quiet and within 8 codes of 128. Any gated clip
+    means the cause is the input.
+  - Wizard text: "ADC readout fault near code 128 (FPGA 0x1538): flash the fixed bitstream". Short form: "ADC readout
+    near 128".
+  - With the zero pair the zero points no longer sit at 128, so this mainly catches a unit whose response is far off.
+- **Failure note.** Under a failed channel's result line there is a 13 px line built by `cw_zero_note`, for example
+  "Range 1, 200 MSa/s, zero point, PWM 812: A 130.1 (126..135), B 125.9 (0..255, 12 clip)".
+  - Content: the point (`acal_fail_point`), its PWM, and per core the raw mean, lowest..highest code and samples at 0 or
+    255.
+  - `ui_step.note[2]`: with a note present, the results move to y 148 + 38 i and the note sits 18 px below its result.
+  - Widths are tested at the worst case (PWM 1950, 32000 clipped).
+- **CAL_PROBE 0x0402** (docs/protocol.md row 61, request vector `req_cal_probe`).
+  - Request: u8 channel, u8 hardware range, u8 settle 0..15, u8 prestrobe 0/1, u8 mode 0/1.
+  - Response: 252 bytes. Eight `acal_point`s and the header (rc, fail point, class, core, value, within, centre, zero
+    PWM, encode-check deltas, flags), then the zero split d at 248.
+  - Mode 0: one range through `cal_begin`, the scratch channel, the relay and `cal_range`, then `cal_end`.
+  - Mode 1: the wizard's whole zero step in its screen context. It runs `cw_init`, the dimmed screen and dialog,
+    CW_EV_CALIBRATE and `wiz_run_actions`. The response carries the given channel's last measured range.
+  - Conditions: main loop only, UI stopped (E_STATE detail 1 otherwise), no host capture pending.
+  - The first 1000 bytes of both trace buffers are put back afterwards.
+  - The session's modal watch restarts after the probe (`last_main_ms`, `ui_busy`). Without that, the 0.2.67 diagnostic
+    image answered the next request with E_BUSY. Host test in test_session `test_cal_probe`.
+  - `fpga_read_settle` and `fpga_read_prestrobe` (fpga_control.c) are 0 except inside a probe.
+- `cal_end` now also writes back a raw host divider and the time base, as the class probe does.
+- `firmware/tools/cal_probe.py`: arguments port, CH1 / CH2 / both, ranges, repeats, settle, prestrobe, mode. It stops
+  the UI for the run, prints every point and saves backups/calprobe_*.json.
+
+**Tests**
+- test_adc_cal 59859:
+  - `test_points` covers extremes, the failure point and the 252-byte body.
+  - `test_readout_fault` models the mixing readout (bit 7 new, bits 6..0 of the previous sample when they straddle
+    127.5). The parked point clips, reaches 255 and fails the noise limit. The split pair through the same readout is
+    clean, the zero is within 1/8 code, and drift is under 1/8 code. It also covers the classification rules.
+- test_cal_wizard 664: the note texts and widths, and the READOUT line width.
+- test_session 69865 / 69863.
+- check_vectors OK (94).
+- mcp pytest 398 passed.
+- Warnings: GCC 10 and nommu 36 (sorted list identical to a25987a); GCC 13 / PC_DEBUG 31.
+
+**Images.** From 8329d63, GCC 10, in this worktree's `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin`:
+- 691,200 B, sha256 64159a52b1f8294daf26d1260a8fe74477d520a819ae2922e78a08deb5fc5a0b.
+- nommu 3392db632f86ef3b39d1fc6db2024e17a2cedede139563b7ebfef4cd2531bffe.
+- `#VER fw=0.2.67,proto=1.21`.
+- WSL cannot resolve the worktree's gitdir, so the identity carries no hash; a build on main differs in the identity only.
+- Diagnostic images loaded on the bench before the fix: f17e2d70 (cf3f9e2) and 7b881451 (b67219c), pinned by the
+  coordinator.
+
+**Bench check** (FEL-load only, nothing written before Save; back up SD 700-710 first because Save writes 708 / 709):
+1. `#VER fw=0.2.67,proto=1.21`. Run `python firmware/tools/cal_probe.py COM10 both all` with probes, post and generator
+   off.
+   - Every range OK on both channels.
+   - The "gated zero pair" and "full zero pair" rows print the two points' average as the mean (near 128), with "+- d"
+     about 20-45 counts in the header line, and lowest..highest about 112..144 (both points together).
+   - No clip at any point after the coarse ones.
+2. Mode 1 on both channels: `python firmware/tools/cal_probe.py COM10 CH2 0 1 0 0 1`. CH2 ends at range 5 (index 5) with
+   OK.
+3. The owner runs the wizard: Zero level gives two ticks, then the gain screens and Save. GET_CAL then shows CH2 A - B
+   near the READ_RAW means' difference.
+4. Optional regression check of the classification: none needed on hardware. If a unit still shows "ADC readout fault
+   near code 128", the fault reaches 12 codes off 128: report the note's numbers to fpga-gen8.
+
+**Open**
+- The UI's own 200 MSa/s traces near code 128 still carry the outliers on 0x1538; that is the bitstream fix (fpga-gen8).
+  Once it is flashed:
+  - re-run CAL_PROBE mode 0 with the zero parked: needs a temporary `acal_zero_split` = 0 build, or READ_RAW at dcoffset
+    0, to confirm;
+  - keep the pair anyway (it costs 0.15 s per range and protects any build).
+- mcp (do not edit from this branch): protocol.py `Cmd.CAL_PROBE = 0x0402`, `PROTO_MINOR = 21`, a decoder for the 252
+  bytes (cal_probe.py has one), ACAL_E_READOUT = 19 in its reason names.
+- The 0.2.60 per-capture DATA check (0x1532..0x1537) could also see such outliers as garbled; not relevant on 0x1538
+  (the 0x33 check).
