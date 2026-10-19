@@ -795,3 +795,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   The wizard computes something larger than the real noise: fw-cal4 dispatched (fw 0.2.60). COM10 flapped for about a minute after
   the USB replug (device seen, port not openable), then fine.
 - 2026-10-19 16:06: owner: select, save and delete in Saved pictures and Saved waveforms work on 0.2.59 (new delete dialog).
+- 2026-10-19 16:20: wizard noise root cause: with the calibration post still wired to the breadboard (probes unplugged), repeated
+  200 MS/s captures show CH1 core B 19-30 codes RMS (60-code excursions) and CH2 core A 6-17 codes on ranges 0-1, far over the
+  3-code limit; at 2 MS/s 0.1-0.5 codes. With only USB connected: 0.5-2.0 codes per core on all six ranges at both rates, generator
+  on or off, std of capture means < 0.26, excursions < 10 codes. The wizard arithmetic is correct (fw-cal4 host check); the zero
+  step must be run with nothing on the post, which the instruction did not say. fw-cal4 narrowed to the failure line with numbers
+  and the instruction text. Owner: Log page works (scroll, save to card); Developer debug overlay flickers (1.00o5 per-pass redraw).

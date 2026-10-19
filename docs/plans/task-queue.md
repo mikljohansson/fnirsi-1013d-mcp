@@ -50,7 +50,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   message waits for a tap or times out); (j) Diagnostics uses the Settings screen's header/tab design; battery indicator drawn
   over the Diagnostics page (not over Settings); (k) Calibration tab: "DC shift trim off" becomes the button's state, drop the
   "Needs a DC supply up to 15V" hedge; (l) wizard: "Step N of 6" moves to the top right of the title line; (m) Waterfall / Density
-  show one channel (by design since 0.2.32; say so in the Display fold-out or allow CH1+CH2?).
+  show one channel (by design since 0.2.32; say so in the Display fold-out or allow CH1+CH2?). (n) Developer page "Debug overlay" is 1.00o5's per-pass debug box (right middle, flickers, raw numbers): either make it a static, labelled overlay drawn once per pass without clearing, or drop it (owner: "not sure what it is supposed to do"). (o) Zero level instruction names the calibration post too (fw-cal4, 0.2.60).
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
