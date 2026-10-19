@@ -750,3 +750,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   Wiring A and wiring B gave the same H within 0.4 dB, so the return-path error predicted in bode-design 2.5 is not visible on a
   1 kOhm / 15 nF DUT. Next: the RC with the thru applied, then a 910 / 100 Ohm divider (flat -20.8 dB, 0 deg expected) to separate
   a measurement error from a capacitor property, then a second capacitor.
+- 2026-10-19 15:02: RC sweep with the thru applied (backups/bode/rc1_15n_thru.json; an earlier run at 15:00 was taken with the
+  resistor unplugged and is void): 30/30 valid, -3 dB about 11 kHz; the deviation is unchanged (112 kHz -17.9 dB / -70 deg vs -20.5 /
+  -85 ideal; 202 kHz -22.4 / -70 vs -25.6 / -87). Next: resistive divider, then another capacitor.
