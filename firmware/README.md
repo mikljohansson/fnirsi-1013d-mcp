@@ -599,6 +599,22 @@ period" while the record has fewer than three crossings. What the values mean is
 Vrms includes DC). A new unit, and the DEFAULT button, show Freq, Vpp and Vavg on each enabled channel (in the table's
 order: Vavg, Vpp, Freq); 1.00o5 set none.
 
+### Touch on the scope plot (fw 0.2.54)
+
+`scan_for_touch` (statemachine.c) decides at the touch-down point; geometry in `touch_pick.c` (pure, host-tested in
+`host_tests/test_touch_pick.c`). In the normal display the left 44 px (x 0..43) are a handle column: CH1, CH2 and the
+eight reference pointers each own the 44 rows around their tip (`scope_pointer_top(position) + 6`, the clamped
+position the pointer is drawn at), the nearest switched-on pointer wins and a tie goes to the one drawn on top (draw
+order CH1, CH2, ref1..ref8). A drag that starts there moves that pointer vertically; a tap there does nothing. Right of
+the column, as before: a drag within 30 px of a channel's zero line (`448 - traceposition`; with volt cursors on
+not in x 310..410) moves the nearest enabled channel (a tie to CH2), vertically only; then the trigger level (x > 660),
+the time cursors, the volt cursors, and otherwise a horizontal drag moves the trigger point. A tap (under 200 ms,
+within 2 px) away from the pointers keeps 1.00o5's zones (time/div left and right, V/div in the top and bottom bands).
+A channel drag moves the trigger level on that channel (CH1 for source 0, CH2 for 1, never for EXT) by the same delta,
+limited so both stay in the drag range 6..396. Trace positions written by the auto setup and by a settings load are
+limited to that range too. In X-Y every drag moves CH1 with x and CH2 with y. Planned (touch review batches 2-3): the
+trace body as a grab target, an 8 px dead band, no taps on cards and handles, a non-blocking touch loop.
+
 ### Spectrum view (`spectrum.c`, fw 0.2.28)
 
 A display mode of the main loop, not a modal menu, so the MCP's polling and the shared screen keep working (plan:
