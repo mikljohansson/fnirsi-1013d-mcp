@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Current diagnostics screen</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#000}
+a{color:#9ecbff}a:hover{color:#ffffff}
+</style>
+</helmet>
+<div style="width: 800px; height: 480px; box-sizing: border-box; background: #000000; color: #d0d0d0; font-family: 'IBM Plex Mono', monospace; font-size: 12px; position: relative; overflow: hidden">
+
+  <div style="position: absolute; left: 20px; top: 14px; color: #ffffff">v0.2.48 git 73d8e66c</div>
+  <div style="position: absolute; left: 300px; top: 14px; color: #2fb55a">Temperature  31 C</div>
+  <div style="position: absolute; left: 430px; top: 52px; color: #ffffff">fw: PECO</div>
+
+  <div style="position: absolute; left: 20px; top: 70px; color: #ffffff">Channel 1</div>
+  <div style="position: absolute; left: 20px; top: 92px">ADc comp</div>
+  <div style="position: absolute; left: 20px; top: 108px">-3    3</div>
+  <div style="position: absolute; left: 20px; top: 122px">DC offset</div>
+  <div style="position: absolute; left: 20px; top: 138px">0</div>
+  <div style="position: absolute; left: 20px; top: 152px">DC shift</div>
+  <div style="position: absolute; left: 20px; top: 168px">870</div>
+  <div style="position: absolute; left: 20px; top: 183px">100</div>
+  <div style="position: absolute; left: 20px; top: 198px">59136</div>
+
+  <div style="position: absolute; left: 150px; top: 92px">Offset</div>
+  <div style="position: absolute; left: 150px; top: 108px">867   5V</div>
+  <div style="position: absolute; left: 150px; top: 123px">862</div>
+  <div style="position: absolute; left: 150px; top: 138px">870</div>
+  <div style="position: absolute; left: 150px; top: 153px">865</div>
+  <div style="position: absolute; left: 150px; top: 168px">870</div>
+  <div style="position: absolute; left: 150px; top: 183px">865</div>
+  <div style="position: absolute; left: 150px; top: 198px">865   50mV</div>
+
+  <div style="position: absolute; left: 260px; top: 92px">Calibration input</div>
+  <div style="position: absolute; left: 260px; top: 108px">10021</div>
+  <div style="position: absolute; left: 260px; top: 123px">9987</div>
+  <div style="position: absolute; left: 260px; top: 138px">10010</div>
+  <div style="position: absolute; left: 260px; top: 153px">9995</div>
+  <div style="position: absolute; left: 260px; top: 168px">10032</div>
+  <div style="position: absolute; left: 260px; top: 183px">10008</div>
+  <div style="position: absolute; left: 260px; top: 198px">10008</div>
+
+  <div style="position: absolute; left: 20px; top: 222px; color: #ffffff">Channel 2</div>
+  <div style="position: absolute; left: 20px; top: 244px">ADc comp</div>
+  <div style="position: absolute; left: 20px; top: 260px">0    0</div>
+  <div style="position: absolute; left: 20px; top: 274px">DC offset</div>
+  <div style="position: absolute; left: 20px; top: 290px">0</div>
+  <div style="position: absolute; left: 20px; top: 304px">DC shift</div>
+  <div style="position: absolute; left: 20px; top: 320px">855</div>
+  <div style="position: absolute; left: 20px; top: 335px">100</div>
+  <div style="position: absolute; left: 20px; top: 350px">32512</div>
+
+  <div style="position: absolute; left: 150px; top: 244px">Offset</div>
+  <div style="position: absolute; left: 150px; top: 260px">854   5V</div>
+  <div style="position: absolute; left: 150px; top: 275px">849</div>
+  <div style="position: absolute; left: 150px; top: 290px">857</div>
+  <div style="position: absolute; left: 150px; top: 305px">852</div>
+  <div style="position: absolute; left: 150px; top: 320px">857</div>
+  <div style="position: absolute; left: 150px; top: 335px">852</div>
+  <div style="position: absolute; left: 150px; top: 350px">852   50mV</div>
+
+  <div style="position: absolute; left: 260px; top: 244px">Calibration input</div>
+  <div style="position: absolute; left: 260px; top: 260px">9994</div>
+  <div style="position: absolute; left: 260px; top: 275px">10012</div>
+  <div style="position: absolute; left: 260px; top: 290px">9990</div>
+  <div style="position: absolute; left: 260px; top: 305px">10005</div>
+  <div style="position: absolute; left: 260px; top: 320px">10019</div>
+  <div style="position: absolute; left: 260px; top: 335px">9998</div>
+  <div style="position: absolute; left: 260px; top: 350px">9998</div>
+
+  <div style="position: absolute; left: 430px; top: 92px; color: #c8c8c8; line-height: 16px">cal v3  flags 0x0F<br>CH1 full A 0.9993 B 1.0126<br>    gated A 1.0004 B 0.9993<br>CH2 full A 1.0161 B 1.0067<br>    gated A 1.0107 B 0.9895<br>range 2  lever 88.0 / 88.6</div>
+
+  <div style="position: absolute; left: 600px; top: 42px; width: 180px; display: flex; flex-direction: column; gap: 12px">
+    <div style="height: 28px; background: #0f2a5a; display: flex; align-items: center; padding: 0 8px; color: #ffffff">New autosetup</div>
+    <div style="height: 28px; background: #0f2a5a; display: flex; align-items: center; padding: 0 8px; color: #ffffff">DC shift calibration</div>
+    <div style="height: 28px; background: #0f2a5a; display: flex; align-items: center; padding: 0 8px; color: #ffffff">Boot menu</div>
+    <div style="height: 28px; background: #0f2a5a; display: flex; align-items: center; padding: 0 8px; color: #ffffff">Default start</div>
+    <div style="height: 28px; background: #0f2a5a; display: flex; align-items: center; padding: 0 8px; color: #ffffff">Lock move cursors</div>
+  </div>
+
+  <div style="position: absolute; left: 37px; top: 385px; color: #ffffff">Settings</div>
+  <div style="position: absolute; left: 150px; top: 370px; color: #ffffff; line-height: 15px">Reset or restore<br>of calibration data</div>
+  <div style="position: absolute; left: 30px; top: 410px; width: 90px; height: 40px; background: #0f2a5a; color: #ffffff; display: flex; align-items: center; justify-content: center">DEFAULT</div>
+  <div style="position: absolute; left: 130px; top: 410px; width: 90px; height: 40px; background: #0f2a5a; color: #ffffff; display: flex; align-items: center; justify-content: center">RESTORE</div>
+  <div style="position: absolute; left: 230px; top: 410px; width: 90px; height: 40px; background: #0f2a5a; color: #ffffff; display: flex; align-items: center; justify-content: center">RESET</div>
+  <div style="position: absolute; left: 363px; top: 390px; color: #ffffff">RESTORE</div>
+  <div style="position: absolute; left: 473px; top: 390px; color: #ffffff">RESET</div>
+  <div style="position: absolute; right: 20px; bottom: 16px; color: #777777; font-size: 11px">approximation of the 0.2.48 screen, from menu.c</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":800,"height":480}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

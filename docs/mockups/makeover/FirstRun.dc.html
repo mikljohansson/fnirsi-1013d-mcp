@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>First start</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;background:#000}
+a{color:#9ecbff}a:hover{color:#ffffff}
+</style>
+</helmet>
+<div style="position: relative; width: 800px; height: 480px; box-sizing: border-box; background: #000000; color: #ffffff; font-family: Arial, 'Liberation Sans', sans-serif; font-size: 16px; overflow: hidden">
+<div style="position: absolute; left: 0px; top: 0px; width: 800px; height: 52px; box-sizing: border-box; background: #0b1a33; border-bottom: 1px solid #1f3a66"><div style="position: absolute; left: 14px; top: 13px; font-size: 24px; line-height: 26px; color: #ffffff; white-space: nowrap; ">First start</div></div>
+<div style="position: absolute; left: 24px; top: 66px; font-size: 13px; line-height: 15px; color: #c9c9c9; white-space: nowrap; ">Open firmware 0.2.50, git cdc7e2f, protocol 1.15. FPGA AL3A10, bitstream 0x1535.</div>
+<svg width="18" height="18" viewBox="0 0 18 18" style="position: absolute; left: 24px; top: 104px"><polyline points="2,9 7,14 16,3" fill="none" stroke="#35c26a" stroke-width="3"></polyline></svg>
+<div style="position: absolute; left: 52px; top: 104px; font-size: 16px; line-height: 18px; color: #ffffff; white-space: nowrap; ">FPGA recognised: bitstream 0x1535 with external trigger and CIC+FIR filters.</div>
+<svg width="18" height="18" viewBox="0 0 18 18" style="position: absolute; left: 24px; top: 140px"><polyline points="2,9 7,14 16,3" fill="none" stroke="#35c26a" stroke-width="3"></polyline></svg>
+<div style="position: absolute; left: 52px; top: 140px; font-size: 16px; line-height: 18px; color: #ffffff; white-space: nowrap; ">No saved settings on the card: defaults used.</div>
+<svg width="18" height="18" viewBox="0 0 18 18" style="position: absolute; left: 24px; top: 176px"><circle cx="9" cy="9" r="8" fill="#ffd262"></circle><rect x="8" y="4" width="2" height="6" fill="#000000"></rect><rect x="8" y="12" width="2" height="2" fill="#000000"></rect></svg>
+<div style="position: absolute; left: 52px; top: 176px; font-size: 16px; line-height: 18px; color: #ffd262; white-space: nowrap; ">Calibration missing: readings may be several % off.</div>
+<div style="position: absolute; left: 24px; top: 222px; width: 752px; height: 1px; box-sizing: border-box; background: #333333"></div>
+<div style="position: absolute; left: 24px; top: 240px; font-size: 16px; line-height: 18px; color: #ffffff; white-space: nowrap; ">Calibrate after the scope has been on for 5 minutes.</div>
+<div style="position: absolute; left: 24px; top: 264px; font-size: 16px; line-height: 18px; color: #ffffff; white-space: nowrap; ">The zero step takes 8 seconds and needs no probes.</div>
+<div style="position: absolute; left: 24px; top: 288px; font-size: 16px; line-height: 18px; color: #ffffff; white-space: nowrap; ">The gain step needs a probe on the calibration post and the open FPGA bitstream.</div>
+<div style="position: absolute; left: 24px; top: 324px; font-size: 13px; line-height: 15px; color: #bbbbbb; white-space: nowrap; ">Later opens the scope. Calibrate is in Menu, Diagnostics.</div>
+<a href="Scope.dc.html" style="position: absolute; left: 24px; top: 404px; width: 160px; height: 52px; box-sizing: border-box; padding: 0; font: inherit; background: #333333; border: 1px solid #606060; border-radius: 4px; color: #ffffff; text-decoration: none; display: block"><span style="display: flex; align-items: center; justify-content: center; height: 100%; font-size: 16px">Later</span></a>
+<a href="Wizard1.dc.html" style="position: absolute; left: 576px; top: 404px; width: 200px; height: 52px; box-sizing: border-box; padding: 0; font: inherit; background: #1b4d2e; border: 1px solid #2f8a52; border-radius: 4px; color: #ffffff; text-decoration: none; display: block"><span style="display: flex; align-items: center; justify-content: center; height: 100%; font-size: 16px">Calibrate now</span></a>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":800,"height":480}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
