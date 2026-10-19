@@ -46,6 +46,9 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   (0x80 | value); an older sector with max light on loads as 100 %.
 - Calibration wizard: "Step M of N" on the title line. Diagnostics > Calibration: the four buttons in one bottom
   row, Clear calibration last (3dc0ed9).
+- Main menu: Bode plot is the third mode row (owner decision; 1972245), entered and left like Scope and Spectrum
+  analyser; eight rows at 52 px. The generator menu's "Bode plot" row is gone. Grey on bitstreams without the filter
+  and DDS.
 
 #### 0.2.66 - 2026-10-19 (protocol 1.20, docs/protocol.md section 14 row 60)
 
