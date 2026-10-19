@@ -21,7 +21,7 @@ ALL_TOOLS = {
     "scope_fetch_waveform", "scope_acquisition_control", "scope_averaged_capture", "scope_capture_and_fft",
     "scope_decay_fit", "scope_measure", "scope_generator", "scope_self_test_loopback", "scope_bode_sweep",
     "scope_raw_fpga", "scope_health", "scope_save_report", "scope_capture_segments",
-    "scope_enter_fel", "scope_report",
+    "scope_enter_fel", "scope_report", "scope_cal_probe",
 }
 
 

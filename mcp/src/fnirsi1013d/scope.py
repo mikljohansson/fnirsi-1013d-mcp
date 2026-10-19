@@ -918,14 +918,17 @@ class Scope:
         return hdr, rows[:want] if want >= 0 else rows
 
     def cal_probe(self, channel: int, range_index: int, *, settle: int = 0, prestrobe: int = 0,
-                  mode: int = 0) -> bytes:
-        """CAL_PROBE (protocol 1.21, PROVISIONAL stub): run the calibration wizard's zero measurement of one channel
-        and hardware range on the scope (nothing stored) and return the raw answer; the layout is not final, so it is
-        not decoded here. Needs the UI stopped (SET_ACQ_STATE 0) and no host capture armed."""
+                  mode: int = 0) -> P.CalProbeResp:
+        """CAL_PROBE (protocol 1.21, row 61): run the calibration wizard's zero measurement of one channel and
+        hardware range on the scope (nothing stored; about 1 s, mode 1 the whole zero step, about 15 s). Needs the
+        UI stopped (SET_ACQ_STATE 0, else E_STATE detail 1) and no host capture armed (detail 0)."""
         if self.info.proto_minor < 21:
             raise DeviceError(P.Cmd.CAL_PROBE, P.Status.E_UNKNOWN_CMD, 0, "needs protocol 1.21 (firmware >= 0.2.67)")
-        return self._req(P.Cmd.CAL_PROBE, P.CalProbeReq(channel, range_index, settle, prestrobe, mode).pack(),
-                         timeout=30.0 if mode else 5.0)
+        r = P.CalProbeResp.unpack(self._req(P.Cmd.CAL_PROBE, P.CalProbeReq(channel, range_index, settle, prestrobe,
+                                                                           mode).pack(),
+                                            timeout=30.0 if mode else 5.0))
+        self.invalidate()  # cal_end puts the settings back; the caches may have seen the scratch channel
+        return r
 
     def fft_bench(self, reps: int = 3) -> P.FftBench:
         """FFT_BENCH (protocol 1.6, fw 0.2.27): time the on-scope FFT on the CH1 trace buffer, ``reps`` 1-16 runs per

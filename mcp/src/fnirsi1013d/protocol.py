@@ -38,8 +38,9 @@ PROTO_MAJOR = 1
 #: GET_STATUS 44..47 (48 bytes) and GET_DECIM 32..35, GET_CAPTURE_INFO 96 bytes; 1.18 (fw 0.2.61, row 57): full-rate
 #: capture check, link counters 62-63, event types 21 / 22; 1.19 (fw 0.2.62, FPGA 0x1538, row 58): every full-rate
 #: capture checked, caps ENC_CHECK, features bit 5, GET_HEALTH 104 bytes; 1.20 (fw 0.2.66, row 60): the on-device Bode
-#: plot (BODE_CTRL / READ_BODE, display_mode 5, features bit 6)
-PROTO_MINOR = 20
+#: plot (BODE_CTRL / READ_BODE, display_mode 5, features bit 6); 1.21 (fw 0.2.67, row 61, provisional numbering):
+#: CAL_PROBE, the calibration wizard's zero measurement from the host
+PROTO_MINOR = 21
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -105,9 +106,8 @@ class Cmd(enum.IntEnum):
     SET_GEN = 0x0301
     GET_CAL = 0x0400
     READ_SCREEN = 0x0401
-    #: protocol 1.21 (provisional, fw-cal5, fw 0.2.67): the calibration wizard's zero measurement of one channel and
-    #: range, nothing stored. STUB: the row (section 14 row 61) has not landed on main; the host sends the request and
-    #: returns the raw answer (``Scope.cal_probe``), no decoder until the layout is final
+    #: protocol 1.21 (row 61, provisional numbering; fw 0.2.67): the calibration wizard's zero measurement of one
+    #: channel and range, nothing stored (no capability bit; older firmware answers E_UNKNOWN_CMD)
     CAL_PROBE = 0x0402
     SD_INFO = 0x0500  # protocol 1.3, fw 0.2.2, cap SD_SECTORS
     SD_READ_SECTORS = 0x0501
@@ -2212,9 +2212,9 @@ class BodeRow(Payload):
 
 @dataclass
 class CalProbeReq(Payload):
-    """CAL_PROBE request (protocol 1.21, PROVISIONAL, fw-cal5's draft row 61): u8 channel, u8 hardware range 0..5, u8
-    settle reads 0..15, u8 prestrobe 0 / 1, u8 mode (0 one range, 1 the whole wizard zero step). The 248-byte answer is
-    not decoded yet."""
+    """CAL_PROBE request (protocol 1.21, row 61): u8 channel, u8 hardware range 0..5 (0 = 5 V/div, the wizard's
+    "range 1"), u8 settle reads 0..15 (extra data-port reads before the sampled read), u8 prestrobe 0 / 1, u8 mode (0
+    one range, 1 the whole wizard zero step in its screen context, both channels, every range: about 15 s)."""
 
     FIELDS = [("channel", "B"), ("range", "B"), ("settle", "B"), ("prestrobe", "B"), ("mode", "B")]
     channel: int = 0
@@ -2222,6 +2222,146 @@ class CalProbeReq(Payload):
     settle: int = 0
     prestrobe: int = 0
     mode: int = 0
+
+
+#: CAL_PROBE rc (ACAL_* of adc_cal.h); -1 = mode 1 cancelled on the screen
+ACAL_RESULTS = {0: "OK", 4: "RESPONSE", 5: "CLIP", 6: "NOISE", 7: "ZERO", 8: "SPREAD", 9: "SLOPE", 10: "DRIFT",
+                11: "CLASS", 18: "TIMING", 19: "READOUT", -1: "CANCELLED"}
+ACAL_RESULT_TEXT = {
+    0: "passed", 4: "no response to the offset (the input is not at 0 V, or the front end does not move)",
+    5: "the input is not at 0 V: a sample at code 0 or 255", 6: "too much noise", 7: "zero out of range",
+    8: "the cores' zeros are too far apart", 9: "offset slope out of range", 10: "the zero drifted between captures",
+    11: "the gated and full-rate classes disagree", 18: "ADC capture timing: the 200 MSa/s data stays garbled",
+    19: "samples at 0 / 255 only at 200 MSa/s with the gated twin point quiet near 128: the FPGA 0x1538 readout fault",
+    -1: "cancelled on the screen"}
+#: CAL_PROBE point order (row 61)
+CAL_PROBE_POINTS = ("coarse high (PWM 500)", "coarse low (PWM 1200)", "gated slope low (centre - 150)",
+                    "gated slope high (centre + 150)", "gated zero (pair)", "full-rate zero (pair)",
+                    "full-rate high (+150)", "full-rate low (-150)")
+CAL_PROBE_BYTES = 252
+#: CAL_PROBE flags (byte 7)
+CALP_GARBLED, CALP_NO_CENTRE, CALP_PRESTROBE, CALP_MODE1 = 0x01, 0x02, 0x04, 0x08
+#: the wizard's noise limit (RMS about the mean of all conversions, 1/16 code)
+CAL_NOISE_LIMIT16 = 48
+_CALP_HDR = struct.Struct("<BBhBBBBiIHHHH")
+_CALP_CORE = struct.Struct("<iHHBBH")
+
+
+@dataclass
+class CalProbeCore:
+    """One core of a CAL_PROBE point (codes, not 1/16)."""
+
+    mean: float
+    rms: float
+    rms_within: float
+    lo: int
+    hi: int
+    clipped: int
+
+
+@dataclass
+class CalProbePoint:
+    index: int
+    pwm: int
+    cls: int
+    conversions: int
+    cores: tuple[CalProbeCore, CalProbeCore]
+
+    @property
+    def name(self) -> str:
+        return CAL_PROBE_POINTS[self.index] if self.index < len(CAL_PROBE_POINTS) else f"point {self.index}"
+
+    @property
+    def measured(self) -> bool:
+        return self.conversions > 0
+
+
+@dataclass
+class CalProbeResp:
+    """CAL_PROBE response, 252 bytes (protocol 1.21, row 61)."""
+
+    channel: int
+    range: int
+    rc: int
+    fail_point: int
+    fail_class: int
+    fail_core: int
+    flags: int
+    fail_value: int
+    fail_within16: int
+    coarse_centre: int
+    zero_pwm: int
+    enc_bad: int
+    enc_recovered: int
+    points: list[CalProbePoint]
+    split_d: int = 0
+
+    @property
+    def settle_reads(self) -> int:
+        return self.flags >> 4
+
+    @property
+    def result(self) -> str:
+        return ACAL_RESULTS.get(self.rc, f"rc {self.rc}")
+
+    @classmethod
+    def unpack(cls, b: bytes) -> "CalProbeResp":
+        if len(b) < 248:
+            raise ValueError(f"CAL_PROBE answer of {len(b)} bytes (needs 248 or 252)")
+        h = _CALP_HDR.unpack_from(b, 0)
+        pts = []
+        for i in range(8):
+            o = 24 + 28 * i
+            pwm, c, n = struct.unpack_from("<HBB", b, o)
+            cores = []
+            for k in range(2):
+                m, r, w, lo, hi, cl = _CALP_CORE.unpack_from(b, o + 4 + 12 * k)
+                cores.append(CalProbeCore(m / 16, r / 16, w / 16, lo, hi, cl))
+            pts.append(CalProbePoint(i, pwm, c, n, (cores[0], cores[1])))
+        split = struct.unpack_from("<H", b, 248)[0] if len(b) >= 250 else 0
+        return cls(*h, pts, split)
+
+    def pack(self) -> bytes:
+        out = bytearray(_CALP_HDR.pack(self.channel, self.range, self.rc, self.fail_point, self.fail_class,
+                                       self.fail_core, self.flags, self.fail_value, self.fail_within16,
+                                       self.coarse_centre, self.zero_pwm, self.enc_bad, self.enc_recovered))
+        for p in self.points:
+            out += struct.pack("<HBB", p.pwm, p.cls, p.conversions)
+            for c in p.cores:
+                out += _CALP_CORE.pack(int(round(c.mean * 16)), min(0xFFFF, int(round(c.rms * 16))),
+                                       min(0xFFFF, int(round(c.rms_within * 16))), c.lo, c.hi, min(0xFFFF, c.clipped))
+        out += struct.pack("<HH", self.split_d, 0)
+        return bytes(out)
+
+    def describe(self) -> dict[str, Any]:
+        """The answer in words: the verdict, the failing point and every measured point per core."""
+        fail = None
+        if self.rc not in (0, -1) and self.fail_point != 0xFF:
+            fail = {"point": CAL_PROBE_POINTS[self.fail_point] if self.fail_point < 8 else self.fail_point,
+                    "class": "gated" if self.fail_class else "full rate", "core": "AB"[self.fail_core & 1],
+                    "value": self.fail_value, "within_capture_rms_codes": round(self.fail_within16 / 16, 3)}
+            if self.rc in (6, 10):
+                fail["value_codes"] = round(self.fail_value / 16, 3)
+        pts = []
+        for p in self.points:
+            if not p.measured:
+                continue
+            pts.append({"point": p.name, "pwm": p.pwm, "class": "gated" if p.cls else "full rate",
+                        "conversions": p.conversions,
+                        **{f"core_{'AB'[k]}": {"mean": round(c.mean, 3), "rms": round(c.rms, 3),
+                                                "rms_within": round(c.rms_within, 3), "lowest": c.lo,
+                                                "highest": c.hi, "clipped": c.clipped,
+                                                "noisy": round(c.rms * 16) > CAL_NOISE_LIMIT16}
+                           for k, c in enumerate(p.cores)}})
+        return {"channel": f"CH{self.channel + 1}", "range": self.range,
+                "volts_per_div": RANGE_VOLTS_PER_DIV[self.range] if self.range < 6 else None,
+                "result": self.result, "text": ACAL_RESULT_TEXT.get(self.rc, ""), "failure": fail,
+                "coarse_centre_pwm": self.coarse_centre or None, "zero_pwm": self.zero_pwm or None,
+                "zero_split_pwm": self.split_d or None, "settle_reads": self.settle_reads,
+                "prestrobe": bool(self.flags & CALP_PRESTROBE), "whole_zero_step": bool(self.flags & CALP_MODE1),
+                "full_rate_accepted_garbled": bool(self.flags & CALP_GARBLED),
+                "coarse_centre_failed": bool(self.flags & CALP_NO_CENTRE),
+                "encode_check": {"garbled": self.enc_bad, "recovered": self.enc_recovered}, "points": pts}
 
 
 def bode_flags_from_names(names: Iterable[str], retried: bool = False) -> int:

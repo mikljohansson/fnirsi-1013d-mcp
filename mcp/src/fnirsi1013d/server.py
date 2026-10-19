@@ -1156,6 +1156,51 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 "Calibration is done on the scope's UI; these values are read-only from here.", SCALING_CAVEAT]}
         return await run("scope_read_calibration", 0, {}, go)
 
+    @register(2, title="Calibration wizard zero probe (diagnostic)")
+    async def scope_cal_probe(
+        channel: Annotated[Literal["CH1", "CH2"], Field(description="channel")] = "CH1",
+        range_index: Annotated[int, Field(ge=0, le=5, description="hardware range 0..5 (0 = 5 V/div, the wizard's "
+                                                                   "'range 1'; 5 = 0.1 V/div)")] = 0,
+        whole_step: Annotated[bool, Field(description="run the wizard's whole zero step on the screen (both "
+                                                      "channels, every range, about 15 s; the answer is this "
+                                                      "channel's failing or last range)")] = False,
+        settle_reads: Annotated[int, Field(ge=0, le=15, description="A/B test of the bus readout: extra data-port "
+                                                                     "reads before each sampled read")] = 0,
+        prestrobe: Annotated[bool, Field(description="A/B test: a data-write strobe before each sample strobe")] = False,
+    ) -> dict[str, Any]:
+        """Diagnostic (firmware 0.2.67+, protocol 1.21, provisional): the scope runs its calibration wizard's zero
+        measurement of one channel and range and returns what the wizard saw: the verdict (OK, CLIP, NOISE, ZERO,
+        SPREAD, SLOPE, DRIFT, CLASS, TIMING, READOUT), the failing point, class and core, and per point (coarse, gated
+        slope and zero, full-rate zero and slope) per core the mean, RMS, extremes and clipped samples. Nothing is
+        stored; the relays click and the scope's settings come back afterwards. Needs the inputs at 0 V (probes off
+        or shorted) like the wizard. The scope's own acquisition is stopped for it (STOP; RUN is restored after)."""
+        args = {"channel": channel, "range_index": range_index, "whole_step": whole_step,
+                "settle_reads": settle_reads, "prestrobe": prestrobe}
+
+        def go() -> dict[str, Any]:
+            s = sess.get_scope()
+            if s.info.proto_minor < 21:
+                raise ToolError(f"scope_cal_probe needs firmware 0.2.67 or later (protocol 1.21; this scope speaks "
+                                f"1.{s.info.proto_minor})")
+            notes = sess.ensure_control()
+            was_run = bool(s.shared and s.status().run_state == P.RunState.RUN)
+            if was_run:
+                s.set_acq_state(False)
+            sess.relay_slot()
+            try:
+                r = s.cal_probe(CHANNEL_NAMES.index(channel), range_index, settle=settle_reads,
+                                prestrobe=int(prestrobe), mode=int(whole_step))
+            finally:
+                if was_run:
+                    s.set_acq_state(True)
+            d = r.describe()
+            cav = list(notes) + ["CAL_PROBE is a diagnostic of protocol 1.21 (provisional numbering): the layout may "
+                                 "still change"]
+            if was_run:
+                cav.append("the scope's acquisition was stopped for the probe and set running again")
+            return {"ok": True, **d, "caveats": cav}
+        return await run("scope_cal_probe", 2, args, go)
+
     @register(0, title="Voltage scaling in effect", read_only=True, idempotent=True)
     async def scope_calibration_info() -> dict[str, Any]:
         """Which code-to-volts conversion is in effect per channel (the scope's calibration v3, the per-unit

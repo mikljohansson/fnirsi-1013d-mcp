@@ -127,19 +127,49 @@ def test_health_tool_and_capture_caveat(sim_factory, tmp_path):
     anyio.run(main)
 
 
-def test_cal_probe_stub(sim_factory):
-    """Protocol 1.21 CAL_PROBE is provisional (fw-cal5): the request packs, the client refuses below 1.21, the
-    simulator (1.20) answers E_UNKNOWN_CMD like older firmware."""
+def test_cal_probe(sim_factory, tmp_path):
+    """Protocol 1.21 (row 61, provisional numbering): CAL_PROBE request vector, the 252-byte answer, the simulator's
+    wizard model (OK on a quiet input, NOISE on a signal, the E_STATE / E_BAD_ARG rules) and scope_cal_probe."""
     from fnirsi1013d.transport import DeviceError
     import pytest
+    from test_server import client_for
 
-    assert P.Cmd.CAL_PROBE == 0x0402 and P.CalProbeReq(1, 5, 2, 1, 0).pack() == bytes([1, 5, 2, 1, 0])
-    with Scope.connect(sim_factory().url) as s:
-        with pytest.raises(DeviceError, match="1.21"):
-            s.cal_probe(0, 1)
+    assert P.Cmd.CAL_PROBE == 0x0402 and P.CalProbeReq(1, 0).pack() == frame_payload("req_cal_probe")
+    srv = sim_factory(signal="zero")
+    with Scope.connect(srv.url) as s:
+        assert s.info.proto_minor >= 21
         with pytest.raises(DeviceError) as e:
-            s.t.request(P.Cmd.CAL_PROBE, P.CalProbeReq().pack())
-        assert e.value.status == P.Status.E_UNKNOWN_CMD
+            s.cal_probe(0, 1)
+        assert (e.value.status, e.value.detail) == (P.Status.E_STATE, 1)  # the UI runs
+        s.set_acq_state(False)
+        for req, det in (((2, 0), 0), ((0, 6), 1)):
+            with pytest.raises(DeviceError) as e:
+                s.cal_probe(*req)
+            assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, det)
+        r = s.cal_probe(1, 2, settle=3, prestrobe=1)
+        assert (r.channel, r.range, r.result, r.fail_point, r.settle_reads) == (1, 2, "OK", 0xFF, 3)
+        assert r.flags & P.CALP_PRESTROBE and 8 <= r.split_d <= 120 and 0 < r.zero_pwm < 2000
+        raw = r.pack()
+        assert len(raw) == P.CAL_PROBE_BYTES and P.CalProbeResp.unpack(raw).pack() == raw
+        pts = [p for p in r.points if p.measured]
+        assert [p.conversions for p in pts] == [2, 2, 4, 4, 16, 128, 64, 64]
+        assert abs(pts[5].cores[0].mean - 128) < 2 and pts[5].cores[1].mean - pts[5].cores[0].mean == \
+            pytest.approx(-2.0, abs=0.3)  # CH2's core B offset in the model
+        d = r.describe()
+        assert d["channel"] == "CH2" and d["volts_per_div"] == 1.0 and d["failure"] is None
+        assert d["points"][5]["point"] == "full-rate zero (pair)" and not d["points"][5]["core_A"]["noisy"]
+        whole = s.cal_probe(0, 0, mode=1)
+        assert whole.range == 5 and whole.flags & P.CALP_MODE1 and whole.rc == 0
+    noisy = sim_factory(signal="sine:freq=10kHz,amp=0.2")
+
+    async def main():
+        async with client_for(noisy, tmp_path) as c:
+            r = await c.call("scope_cal_probe", channel="CH1", range_index=3)
+            assert r["result"] == "NOISE" and r["failure"]["class"] in ("gated", "full rate")
+            assert r["text"] == "too much noise" and r["failure"]["value_codes"] > 3
+            assert any("stopped for the probe" in x for x in r["caveats"])
+            assert (await c.call("scope_status"))["run_state"] == "RUN"
+    anyio.run(main)
 
 
 def test_health_wire_layout_offsets():

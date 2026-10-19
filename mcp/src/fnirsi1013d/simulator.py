@@ -2139,8 +2139,99 @@ class Device:
         return self._ok(req, P.pack_spectrum(h, lv[first: first + n].tolist()))
 
     def _cmd_cal_probe(self, req: P.Frame) -> P.Frame:
-        # protocol 1.21 is provisional (fw-cal5): the simulator speaks 1.20 and answers like older firmware
-        raise _DevErr(P.Status.E_UNKNOWN_CMD, 0, f"cmd 0x{req.cmd:04X}")
+        """Protocol 1.21 (row 61): the wizard's zero measurement of one channel and range, on the model's front end
+        (offset formula, per-core zero errors, the channel's signal and noise). Checks modelled: CLIP (a sample at 0 or
+        255 in a fine point) and NOISE (RMS about the mean over 3 codes); ``cal_probe_fail`` = (point, rc) forces a
+        failure for host tests."""
+        r = P.CalProbeReq.unpack(req.payload)
+        for v, lim, det in ((r.channel, 1, 0), (r.range, 5, 1), (r.settle, 15, 2), (r.prestrobe, 1, 3), (r.mode, 1, 4)):
+            if v > lim:
+                raise _DevErr(P.Status.E_BAD_ARG, det, "channel / range / settle / prestrobe / mode")
+        if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
+            raise _DevErr(P.Status.E_STATE, 0, "a host capture is armed")
+        if self.shared and self.run_state == P.RunState.RUN:
+            raise _DevErr(P.Status.E_STATE, 1, "the UI acquisition runs: SET_ACQ_STATE 0 first")
+        flags = (r.settle << 4) | (P.CALP_PRESTROBE if r.prestrobe else 0) | (P.CALP_MODE1 if r.mode else 0)
+        if r.mode:
+            out = None
+            for rng in range(6):
+                out = self._cal_probe_range(r.channel, rng, flags)
+                if out.rc:
+                    break
+            assert out is not None
+        else:
+            out = self._cal_probe_range(r.channel, r.range, flags)
+        return self._ok(req, out.pack())
+
+    def _cal_probe_range(self, ch: int, rng: int, flags: int) -> P.CalProbeResp:
+        cal = self.cal[ch]
+
+        def measure(pwm: int, gated: bool, convs: int) -> P.CalProbePoint:
+            s = self.settings.copy()
+            s.channels[ch].range = rng
+            s.channels[ch].coupling = 0
+            s.channels[ch].dcoffset = pwm - cal.dc_calibration_offset[rng]
+            s.divider = 1 if gated else 0
+            s.decim = 0
+            dt = self.dt(s.divider)
+            cores = []
+            for core in ("A", "B"):
+                caps = [self._codes(ch, self.now() + i * 1.37e-4 + np.arange(500) * dt * 2, core, s).astype(np.float64)
+                        for i in range(convs)]
+                allc = np.concatenate(caps)
+                cores.append(P.CalProbeCore(float(allc.mean()), float(allc.std()),
+                                            float(np.sqrt(np.mean([c.var() for c in caps]))), int(allc.min()),
+                                            int(allc.max()), int(np.sum((allc == 0) | (allc == 255)))))
+            return P.CalProbePoint(0, pwm, 1 if gated else 0, convs, (cores[0], cores[1]))
+
+        def mean(p: P.CalProbePoint) -> float:
+            return (p.cores[0].mean + p.cores[1].mean) / 2
+
+        hi, lo = measure(500, True, 2), measure(1200, True, 2)
+        slope = (mean(lo) - mean(hi)) / 700.0  # codes per PWM count (negative)
+        pts: list[P.CalProbePoint] = [hi, lo]
+        centre = int(round(500 + (128.0 - mean(hi)) / slope)) if slope else 0
+        if slope >= 0 or not 0 < centre < 2000:
+            return P.CalProbeResp(ch, rng, 4, 0, 1, 0, flags | P.CALP_NO_CENTRE, 0, 0, 0, 0, 0, 0,
+                                  self._cal_points(pts), 0)
+        sl, sh = measure(centre - 150, True, 4), measure(centre + 150, True, 4)
+        gslope = (mean(sh) - mean(sl)) / 300.0
+        zero = int(round(centre + (128.0 - (mean(sl) + mean(sh)) / 2) / gslope)) if gslope else centre
+        d = int(min(120, max(8, round(12 / abs(gslope))))) if gslope else 120
+
+        def pair(gated: bool, convs: int) -> P.CalProbePoint:
+            a, b = measure(zero - d, gated, convs), measure(zero + d, gated, convs)
+            cores = tuple(P.CalProbeCore((x.mean + y.mean) / 2, math.sqrt((x.rms ** 2 + y.rms ** 2) / 2),
+                                         math.sqrt((x.rms_within ** 2 + y.rms_within ** 2) / 2), min(x.lo, y.lo),
+                                         max(x.hi, y.hi), x.clipped + y.clipped)
+                          for x, y in zip(a.cores, b.cores))
+            return P.CalProbePoint(0, zero, a.cls, convs * 2, (cores[0], cores[1]))
+
+        pts += [sl, sh, pair(True, 8), pair(False, 64), measure(zero + 150, False, 64), measure(zero - 150, False, 64)]
+        rc, fp, fcls, fcore, val, within = 0, 0xFF, 0, 0, 0, 0
+        forced = getattr(self, "cal_probe_fail", None)
+        for i, p in enumerate(pts[2:], 2):
+            for k, c in enumerate(p.cores):
+                if rc:
+                    break
+                if c.clipped:
+                    rc, val = 5, c.clipped
+                elif c.rms * 16 > P.CAL_NOISE_LIMIT16:
+                    rc, val = 6, int(round(c.rms * 16))
+                if rc:
+                    fp, fcls, fcore, within = i, p.cls, k, int(round(c.rms_within * 16))
+        if forced is not None:
+            fp, rc = forced
+            fcls, fcore, val, within = pts[fp].cls, 1, int(round(pts[fp].cores[1].rms * 16)), \
+                int(round(pts[fp].cores[1].rms_within * 16))
+        return P.CalProbeResp(ch, rng, rc, fp, fcls, fcore, flags, val, within, centre, zero, 0, 0,
+                              self._cal_points(pts), d)
+
+    @staticmethod
+    def _cal_points(pts: list[P.CalProbePoint]) -> list[P.CalProbePoint]:
+        empty = P.CalProbeCore(0.0, 0.0, 0.0, 0, 0, 0)
+        out = [P.CalProbePoint(i, p.pwm, p.cls, p.conversions, p.cores) for i, p in enumerate(pts)]
+        return out + [P.CalProbePoint(i, 0, 0, 0, (empty, empty)) for i in range(len(out), 8)]
 
     def _cmd_bode_ctrl(self, req: P.Frame) -> P.Frame:
         return self._ok(req, self.bode.ctrl(P.BodeCtrlReq.unpack(req.payload)))
