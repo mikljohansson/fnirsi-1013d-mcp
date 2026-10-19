@@ -4,7 +4,12 @@ Anlogic AL3A10LG144C7 FPGA of the owner's FNIRSI 1013D (JTAG IDCODE 0x18006C31, 
 W25Q80DV, JEDEC `ef 40 14`). Read `CLAUDE.md` at the repo root first; its flashing rules override anything here.
 
 State on 2026-10-19:
-- `src/` holds version word **0x1536** (fpga-gen5): 0x1535 plus segmented capture and hardware averaging (cmds 0x57-0x5D,
+- `src/` holds version word **0x1537** (fpga-gen6): 0x1536 with two determinism fixes and no interface change. Section
+  "0x1537 status" below; `README.md` "Changes" section 7.
+  - Built as `out/FPGA-seg-0x1537.bin`, sha256 `426a3784...3b17`, pinned in `backups/al3_seg_0x1537_426a3784.bin`;
+    padded flash image `backups/al3_seg_0x1537_426a3784_padded.bin`, sha256 `febc9299...e1f1`. **Not flashed.** A
+    firmware that knows 0x1536 runs it unchanged.
+- 0x1536 (fpga-gen5, the previous `src/`): 0x1535 plus segmented capture and hardware averaging (cmds 0x57-0x5D,
   reads 0x2A-0x32; `README.md` "Changes" section 6, design note `docs/plans/segmented-capture.md`). With 0x57 = 0 it is
   cycle-identical to 0x1535 (git e2aec2e, the tb's `REF1535_REV`).
   - Built as `out/FPGA-seg.bin`, sha256 `4eaf6811...b48b`, pinned in `backups/al3_seg_0x1536_4eaf6811.bin`; padded flash
@@ -53,7 +58,7 @@ State on 2026-10-19:
 | Path | What |
 |---|---|
 | `src/` | Atlan4's AL3 TD project with our changes: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc` (pins), `zaklad.sdc` (clocks), `FPGA.al` (TD project, holds `<UCode>`), `al_ip/` (PLL and sample-memory IP), `FPGA commands.txt` (command table, current). Upstream material, licence unstated, attributed to Atlan4. Unmodified original: git a947e78. |
-| `tb/` | iverilog testbench, `run.sh [seed]`, six steps (the sixth: `tb_seg.v` against our 0x1535, `REF1535_REV`, checked by `seg_model.py`; `mutate_seg.py` runs its 21 mutants), first four: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir`, `long` or `seg` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs, `tb_seg.v` the same through `SEG_P1`. |
+| `tb/` | iverilog testbench, `run.sh [seed]`, eight steps (7: `tb_trigpos.v`, trigger position determinism with an AD9288 pipeline model; 8: `tb_seqcontract.v`, the firmware's sequencer byte sequences, transcript `contract_0x1537.txt`; `edge_phase.py`: FIR overshoot / DDS beat / spectrum versus edge phase; `REF_SRC_DIR` for worktrees; the sixth: `tb_seg.v` against our 0x1535, `REF1535_REV`, checked by `seg_model.py`; `mutate_seg.py` runs its 21 mutants), first four: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir`, `long` or `seg` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs, `tb_seg.v` the same through `SEG_P1`. |
 | `out/` | Named bitstreams for the bench (gitignored `*.bin`): `FPGA-ext-trigger.bin` (0x1533), `FPGA-decim.bin` (0x1534), `FPGA-fir.bin` (0x1535), `FPGA-seg.bin` (0x1536). |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the stock FNIRSI design (0x1432), GPL-3.0. Same pin map. Use it for "what did stock do" questions. |
 | `bitstreams/` | Prebuilt images, gitignored except `README.md` (provenance and sha256). |
@@ -88,8 +93,8 @@ wsl -d Ubuntu -- python3 -I /mnt/d/src/fnirsi-1013d-ai/fpga/al3/td/compare_bin.p
 - Wall clock is 11 to 16 s (about 35 s for 0x1534). On failure it exits non-zero and prints "BUILD FAILED" with the first errors.
 - Overrides: `TD_HOME`, `TD_SHIM`, `FLOW` (`atlan` default, `donwulff`), `SRC_REV` (git revision of `src/`); the
   first argument is the work dir.
-- Current `src/` (0x1536) gives `build/FPGA.bin` sha256 `4eaf6811814c58e1f00e648b97e7a608bb5ca387fb036f21714e91667959b48b`
-  (two builds in different work dirs, same hash; about 60 s). 0x1535 (`SRC_REV=e2aec2e`) gave
+- Current `src/` (0x1537) gives `build/FPGA.bin` sha256 `426a3784883b82c9c9f42870584e64d1d082cdcb38c8b62db143e161e2633b17`
+  (two builds in different work dirs, same hash; about 60 s). 0x1536 (`SRC_REV=27c0c75`) gave `4eaf6811814c58e1f00e648b97e7a608bb5ca387fb036f21714e91667959b48b`. 0x1535 (`SRC_REV=e2aec2e`) gave
   `5040a2aeede071019bca0ffee47d765b87d980e1e47ca01ac32cb875c839aa96`. 0x1534 (`SRC_REV=6d4c8ad`) gave `83140510dfbfef56cc5ed15d70866e6bc52c407a41fd0ea480e8993df5b820c1`.
   0x1533 (`SRC_REV=2839258`) gave `a96567031872ae99bd40f0722a111a08da0f6381b6c710b70998af784a341216`.
 - Testbench: install iverilog once as root (`wsl -d Ubuntu -u root -- apt-get install -y iverilog`, done 2026-10-18),
@@ -306,6 +311,65 @@ Decimation filter (0x1534), open items:
 - Next design: 0x1535, a CIC compensation FIR as the intended default mode (owner direction): built, see below and
   `README.md` section 5. 0x1534 is accepted by the coordinator (2026-10-18) and is
   being flashed with fw 0.2.33.
+
+## 0x1537 status (fpga-gen6, 2026-10-19)
+
+Brief: the bench's trigger position scatter at decimated rates (task queue), a firmware contract testbench for 0x1536
+(fw-seg, protocol 1.17), and the +FIR edge-horn / spectrum-wag study. Everything is in `README.md`: section 7 (findings,
+fix, build, bench checks), section 6 "Firmware contract", and section 4 after the 6-9 % headroom bullet (edge phase).
+
+**Commits** (branch of 9cc599c): tb_trigpos d3c548e, RTL f114734 + c15981e (timing), contract c5039be, edge_phase.py
+0727b8f, docs in the last commit.
+
+**Findings.**
+- The FPGA trigger detector, decimator and FIR are deterministic.
+- Two 0x1532..0x1536 faults are fixed in 0x1537:
+  - **The config race.** 0x0B and the slot mask loaded only on write clock edges inside the reset. Fix: `ssr_d` also
+    loads them on the first edge after the release.
+  - **The A/B order flip.** The encode and write clock toggles sampled the async-written divider compare at different
+    edges. Fix: the encodes follow `swc_enc_n`, a register copy of the write clock.
+- Firmware-side findings, sent to fw-seg and recorded in the task queue:
+  - legacy EXT is +10..+11 samples late: the AD9288 pipeline is 4 words, and no shift is applied for K = 0;
+  - `fpga_swap_trigger_channel` overwrites EXT;
+  - the readouts without the dummy strobe are one word late.
+
+**Tests.**
+- `tb/run.sh` has eight steps now. 7 = `tb_trigpos.v`, about 3 minutes at 6 runs per case. 8 = `tb_seqcontract.v`,
+  under a minute; its transcript must equal `tb/contract_0x1537.txt`.
+- All pass on seeds 12345 and 3. `tb_trigpos.v` also passes with `+seed=7` and `+pl=0`.
+- On 0x1536, tb_trigpos fails 36 of 882 checks (A/B order, legacy spread, R1, R2). The contract transcript of 0x1536 equals 0x1537's except the
+  version byte.
+- **Timing.**
+  - Two things moved the first 0x1537 build out of `clk_200MHz` timing: the encode flops on the write clock's own net,
+    and the sequencer's 36-fanout Q_RUN select (-0.48 ns).
+  - `/* synthesis keep */` on a plain copy made it worse: +130 LUT, 20 errors.
+  - The inverted copy `swc_enc_n` (packed with `sample_write_clock` in one slice), plus `q_seg` and the post-pass
+    preload, give 0 errors. The worst path is the old half-cycle path at +0.035 ns.
+
+**Edge study** (`tb/edge_phase.py`, numpy):
+- +FIR overshoot is 0.45..6.9 % depending on the edge phase; the CIC alone has none.
+- The 1 kHz DDS square (inc 85,899, 999.995973 Hz) sweeps the 1 MSa/s grid at 4.03 Hz: the owner's 3-4 Hz horns.
+- It is pure sampled Gibbs ringing of the composite filter.
+- The spectrum's bin beat above fo/4 comes from the odd-harmonic images, and it is larger with the CIC alone than with
+  +FIR.
+
+**Open.**
+- Flashing 0x1537 and the bench checks of section 7: T3/T4/T5, EXT loopback with 0x15 logging, alternating pretriggers at
+  100 kSa/s.
+- Firmware:
+  - legacy EXT shift (4 words in the model; confirm on the bench);
+  - interleave order and the 0x53 swap bit from T4 on 0x1537 (core A earlier in the model);
+  - keep EXT in `fpga_swap_trigger_channel`;
+  - the arm order on 0x1532..0x1535;
+  - a dummy strobe in the 16-bit / UI readouts, or a documented one-word shift.
+- Filter defaults per mode, a coordinator decision with the edge study as input.
+
+**Tool notes.**
+- WSL git cannot read a worktree created by Windows git (`.git` points at `D:/...`). `run.sh` takes `REF_SRC_DIR=<dir>`
+  with `<rev>.v` files exported by Windows git (`git show <rev>:fpga/al3/src/zaklad.v`).
+- `cross` is a SystemVerilog keyword (iverilog -g2012): do not use it as a variable name.
+- Do not edit `tb/run.sh` while a `run.sh` is running: bash reads the script as it goes.
+- `tb_trigpos.v` `+order=1` shows the firmware workaround on 0x1536. It removes the 0x0B race, not the A/B flip.
 
 ## 0x1536 status (fpga-gen5, 2026-10-19)
 

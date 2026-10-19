@@ -175,8 +175,18 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   on 0.2.48 (docs/hardware-status.md 08:10). Update the spectrum section's numbers. Next firmware agent.
 - [ ] **"Confirm to delete?" dialog**: its two buttons sit 11 px apart (ux-review); apply the dialog rule (44 px, 16 px apart, primary right).
   UI batch step 1.
-- [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s): deterministic test with
-  GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
+- [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s). FPGA side done (fpga-gen6,
+  tb/tb_trigpos.v, fpga/al3/README.md "Changes" section 7). The trigger detector, decimator and FIR are deterministic: an
+  ADC trigger lands at the same record index in every run, and EXT within one output sample. Two FPGA faults of
+  0x1532..0x1536 are fixed in 0x1537 (backups/al3_seg_0x1537_426a3784*.bin, not flashed): (a) a 0x0B (or 0x57/0x59)
+  written in the last write clock period before 0x01 = 0 was ignored at slow legacy rates, shifting the record by
+  (old - new pre) words; (b) the A/B core order within a word flipped on random 0x0D / 0x53 writes. Firmware items
+  (inference, see section 7):
+  - legacy EXT captures land +10..+11 samples late (AD9288 4-cycle pipeline, no EXT shift for K = 0; pc_hal_scope.c:806-814);
+  - fpga_swap_trigger_channel (fpga_control.c:454-484, statemachine.c:1846) overwrites the EXT source when a channel is
+    toggled, a likely cause of the bench's EXT -> CH1 switch;
+  - fpga_read_decim_data and the 1.00o5 readout have no dummy strobe and read one word late.
+  Remaining: bench re-measure on 0x1537 with GET_CAPTURE_INFO and 0x15 writes logged.
 - [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md
   section 4; XY mode could get intensity grading from the same map.
 - [x] **Bode / frequency response** (owner priority 3): design docs/plans/bode-design.md; host tool done (H1-H3 above); device steps D1-D5 queued.
@@ -221,6 +231,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   0x1537 if the FPGA is at fault), docs-gen3 (Sonnet: protocol tidy, README timings, roadmap.md, announcement draft,
   release-readiness.md). Queued behind them: fw-ui4 (step 4, needs fw-readers), Measurements v2 (needs step 2), touch batches 2-3,
   mcp 1.16/1.17, Bode device steps (after the owner's Bode bench), 0.3.0 release.
+- fpga-gen6 (done 15:20, about 555k tokens, retired): FPGA not deterministic on 0x1532-0x1536 (pretrigger/slot-mask write race
+  at slow rates, A/B core-order flip on divider writes); both fixed in 0x1537, built deterministically, pinned
+  backups/al3_seg_0x1537_426a3784.bin (sha 426a3784...) + padded febc9299..., NOT flashed; tb_trigpos (882 checks, 36 fail on
+  0x1536), tb_seqcontract (1.17 byte sequences, transcript tb/contract_0x1537.txt); FIR edge study: overshoot 0.45-6.9 % vs edge
+  phase, the 1 kHz DDS drifts 4.03 ns/period = 4.03 Hz beat at 1 MS/s (the owner's 3-4 Hz), spectrum wag is image beating in
+  fo/4..fo/2, CIC alone worse than +FIR there. Firmware follow-ups: EXT shift in legacy mode (+10 samples late), keep EXT in
+  fpga_swap_trigger_channel, dummy strobe in the two screen readouts (one word late). Flash 0x1537 (supersedes 0x1536) with the
+  owner; bench checks fpga/al3/README.md section 7.
 - fw-ui4 (done 14:42, about 620k tokens, retired): merged and renumbered to fw 0.2.59 (Diagnostics as a main-loop page: Status,
   Calibration, Log, Developer; four-screen wizard; first-run screen; old diagnostics and start-up screens removed; fw-ui3 interim
   rows removed; ui_diag.c, ui_dlg.c, ui_diag_view.c, test_ui_diag); images pinned backups/fw-0.2.59_4ba89469.bin and

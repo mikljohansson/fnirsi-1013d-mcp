@@ -2,7 +2,7 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
-// fnirsi-1013d-mcp changes (version word 0x1536, see fpga/al3/README.md "Changes"):
+// fnirsi-1013d-mcp changes (version word 0x1537, see fpga/al3/README.md "Changes"):
 //  - 0x1533: external trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
 //    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
 //    Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
@@ -19,6 +19,11 @@
 //    each record: segment mode stores each record in its own slot of the sample memory and logs
 //    a trigger offset and a timestamp per segment; averaging mode adds each triggered record into
 //    a 2048 x 64 accumulator. With 0x57 = 0 (power-on) the design is cycle-identical to 0x1535.
+//  - 0x1537: the pretrigger (0x0B) and the segment slot mask (0x57/0x59) also load on the first
+//    write clock edge after the release of 0x01, so values written just before the release apply
+//    at slow rates too (before, only write clock edges during the reset loaded them). The ADC encode
+//    toggles follow the write clock, so the A/B order within a word can no longer flip on a divider
+//    or 0x53 write. Otherwise cycle-identical to 0x1536.
 //-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
@@ -615,6 +620,10 @@ module fnirsi_1013D
   reg        seq_rq_d = 0;
   reg        seq_rst_q = 0;
   reg        swc_rise_q = 0;               //swc_rise one clk_200MHz cycle later: write clock signals are settled
+  //0x1537: the MCU sampling reset one write clock edge later. Registers that load MCU settings while the
+  //reset is on also load on the first edge after its release, so a setting written in the last write clock
+  //period before the release still applies (0x1532..0x1536 kept the older value at slow rates)
+  reg        ssr_d = 0;
   wire       seq_rst_c   = seq_rq_s & ~seq_rq_d;
   wire       cap_rst     = sample_system_reset | seq_rst_c;
   wire       cap_rst200  = sample_system_reset | (swc_rise_q & seq_rst_q);
@@ -815,23 +824,36 @@ freq_generator_dds_pwm u_freq
 //-------------------------------------------------------------------------------------
 //Sample write clock
 
+  //swc_enc_n: the complement of sample_write_clock in a register of its own for the encode flops, so the write
+  //clock's fanout and its half-cycle path into sampling_triggered stay as in 0x1536
+  reg swc_enc_n = 1;
+
+  //0x1537: the B encode toggles to the complement of the write clock (its inverted copy swc_enc_n) instead of its own
+  //complement. In steady state that is the same thing (encB equals sample_write_clock between enables), so the pins are
+  //unchanged. But the enable is a combinational compare against the MCU-written divider: a 0x0D or 0x53 write
+  //that changes it between this edge and the write clock's sampling edge made the two flops disagree once,
+  //and up to 0x1536 that swapped which core is the earlier sample of a word until the next such accident
+  //(fpga/al3/README.md "Changes" section 7). Now the next enable restores the relation.
   always @(negedge clk_ADC)	//clk_ADC   clk_RAM
     begin
       if(sample_clock_enable == 1)
         begin
-          adc1_encB <= ~adc1_encB;
-          adc2_encB <= ~adc2_encB;
+          adc1_encB <= swc_enc_n;
+          adc2_encB <= swc_enc_n;
 
           //The A and B clocks are inverted versions of each other
-          adc1_encA <= adc1_encB;
-          adc2_encA <= adc2_encB;
+          adc1_encA <= ~swc_enc_n;
+          adc2_encA <= ~swc_enc_n;
         end
     end
 
   always @(negedge clk_200MHz)//clk_200MHz  clk_RAM
     begin
       if(sample_clock_enable == 1)
-        sample_write_clock <= ~sample_write_clock;
+        begin
+          sample_write_clock <= ~sample_write_clock;
+          swc_enc_n          <= ~swc_enc_n;
+        end
     end
 
 // ---------------------------------------------------
@@ -1083,7 +1105,9 @@ assign sampling_enable = ~(
 
   always @(posedge sample_write_clock)
     begin
-      if(cap_rst == 1)
+      ssr_d <= sample_system_reset;
+
+      if((cap_rst == 1) || (ssr_d == 1))              //0x1537: also on the first edge after the release
         trigger_read_address <= pretrigger_samples;   //Starting point in memory
       else if((sampling_half_way == 1)&&(sampling_enable == 1)&&swc_adv)
         trigger_read_address <= trigger_read_address + 1;
@@ -1136,7 +1160,7 @@ assign sampling_enable = ~(
       seq_rst_q  <= seq_rst_c;
       seq_wrap_s <= seq_wrap;
 
-      if(sample_system_reset == 1)
+      if((sample_system_reset == 1) || (ssr_d == 1))  //0x1537: also on the first edge after the release
         begin
           seg_mask_s <= (seq_mode == 2'd1) ? seg_mask_m : 13'h1FFF;
           seg_base_s <= 0;
@@ -1196,6 +1220,7 @@ assign sampling_enable = ~(
   reg [12:0] sn_ta = 0;
   reg [39:0] sn_ts = 0;
   reg [1:0]  q_mode = 0;                   //mode of the run, 0 = none
+  reg        q_seg = 0;                    //q_mode == 1, as a register (0x1537: one LUT level less in Q_RUN)
   reg        q_circ = 0, q_fmt16 = 0;
   reg        q_active = 0, q_done = 0, q_ovf = 0, q_last = 0, q_first = 1;
   reg [11:0] q_n1 = 0;                     //segments or positions - 1
@@ -1301,11 +1326,21 @@ assign sampling_enable = ~(
           if(pp_z)
             pp_i <= 0;
         end
+      else if(~q_post)
+        begin
+          //0x1537: the post-pass start values are preloaded every clock while no post-pass runs (before, Q_RUN
+          //loaded them on the clock that starts the pass, a 36-fanout select at the end of the state decode)
+          pp_ma   <= pp_start;
+          pp_aa   <= q_base[10:0];
+          pp_left <= q_total - 13'd1;
+          pp_z    <= (q_total == 13'd1);
+        end
 
       if(q_rs2)
         begin
           q_st     <= q_mode_on ? Q_RUN : Q_IDLE;
           q_mode   <= q_mode_on ? seq_mode : 2'd0;
+          q_seg    <= (seq_mode == 2'd1);
           q_active <= q_mode_on;
           q_circ   <= q_mode_on & seq_circ;
           q_fmt16  <= q_mode_on & dec_on;
@@ -1347,16 +1382,12 @@ assign sampling_enable = ~(
           Q_RUN:
             if(~sn_swe)
               begin
-                if(q_mode == 2'd1)
+                if(q_seg)
                   q_st <= Q_TAB;
                 else if(sn_trig)
                   begin
                     q_post  <= 1;
                     pp_i    <= 1;
-                    pp_ma   <= pp_start;
-                    pp_aa   <= q_base[10:0];
-                    pp_left <= q_total - 13'd1;
-                    pp_z    <= (q_total == 13'd1);
                     q_st    <= Q_POST;
                   end
                 else
@@ -1423,7 +1454,7 @@ assign sampling_enable = ~(
               end
             else
               begin
-                if(q_mode == 2'd1)
+                if(q_seg)
                   begin
                     tab_we <= 1;
                     tab_a  <= q_idx[10:0];
@@ -1904,7 +1935,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h36;
+                    o_mcu_data <= 8'h37;
                 endcase
               end
 

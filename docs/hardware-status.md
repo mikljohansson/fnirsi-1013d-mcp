@@ -779,3 +779,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   -20.56 / 84.6 ideal). Low-pass and high-pass describe one and the same lossy, dispersive capacitor, and the divider was flat:
   the Bode tool is accepted; the deviation is the cheap ceramic (owner: AliExpress parts, likely Y5V class). Bode bench closed;
   open follow-ups are in the tool (overload flag, wiring A as default) with mcp-gen5.
+- 2026-10-19 15:28: fpga-gen6 pinned bitstream 0x1537 (0x1536 + pretrigger race fix + core-order fix): backups/
+  al3_seg_0x1537_426a3784.bin sha256 426a3784883b82c9c9f42870584e64d1d082cdcb38c8b62db143e161e2633b17, padded 1 MiB image
+  febc92997ee6605090d5581aabc9c240986fa82defdc24d40aca01566dbfe1f1. Not flashed; the flash session (programmer on J2, scope on
+  battery, USB unplugged, owner present) now targets 0x1537 instead of 0x1536; rollback stays al3_fir_0x1535 padded 5ade9e75.
+  fw 0.2.59 FEL load started 15:22: ENTER_FEL acknowledged, the boot ROM device appeared on busid 7-4 (behind the hub), not bound
+  for WSL; owner asked to run usbipd bind --hardware-id 1f3a:efe8 once as admin; scope waiting in FEL.

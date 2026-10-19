@@ -172,6 +172,15 @@ Version word from FPGA command 0x06 (two bytes, high first) [V `S100 fpga_contro
 1.00o5 does not recognise 0x1732 (it sets `fw_FPGA = 0`) [V `S100 fpga_control.c:204-206`]; v1 firmware adds
 it. The owner's AL3 unit runs whichever bitstream is in its 25Q80; the host must not assume 0x1532.
 
+AL3 minor versions (variant 2, decoded as `(v & 0xFFF0) == 0x1530`, v >= 0x1532): 0x1533 EXT trigger, 0x1534 decimation
+filter, 0x1535 FIR, 0x1536 segmented capture and averaging, **0x1537** the same interface with two fixes and no new
+command (fpga/al3/README.md "Changes" section 7): (1) 0x0B and the segment slot mask (0x57/0x59) written just before
+0x01 = 0 now apply at every rate (0x1532..0x1536 kept the previous value when no write clock edge came between the write
+and the release, i.e. at slow legacy rates); (2) the A/B core order within a word is fixed (on 0x1532..0x1536 a 0x0D or
+0x53 write could swap it until the next such write, so caps bit 12 INTERLEAVE_UNVERIFIED and the 0x53 swap bit are only
+meaningful from 0x1537 on). Feature bits for 0x1537 are those of 0x1536 (EXT_TRIGGER, DECIM, FIR, and SEQ where the
+firmware has it); a firmware that knows 0x1536 runs 0x1537 unchanged.
+
 ## 6. Control model
 
 ### 6.1 LOCAL / REMOTE ownership [D]

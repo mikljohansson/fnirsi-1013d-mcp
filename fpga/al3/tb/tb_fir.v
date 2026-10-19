@@ -70,6 +70,10 @@ module tb;
 
   wire [14:0] out_dut = {d_e1A, d_e1B, d_e2A, d_e2B, d_o1, d_r11, d_r12, d_r13, d_ac1, d_o2, d_r21, d_r22, d_r23, d_ac2, d_pwm};
   wire [14:0] out_ref = {r_e1A, r_e1B, r_e2A, r_e2B, r_o1, r_r11, r_r12, r_r13, r_ac1, r_o2, r_r21, r_r22, r_r23, r_ac2, r_pwm};
+  // 0x1537: the four encode pins are not compared. The references flip their A/B encode polarity when an
+  // asynchronous 0x0D / 0x53 write lands between the two enable samples; 0x1537 repairs it at the next enable
+  // (README "Changes" section 7). The ADC data here do not depend on the encodes; tb_trigpos.v checks the order.
+  wire [14:0] out_cmp_mask = 15'h07FF;
 
   wire [71:0] st_dut = {dut.trigger_address, dut.trigger_read_address, dut.sample_write_address,
                         dut.sampling_triggered, dut.sample_write_enable, dut.sampling_half_way,
@@ -111,7 +115,7 @@ module tb;
       #1;
       if (eq_on) begin
         eq_samples = eq_samples + 1;
-        if (out_dut !== out_ref || st_dut !== st_ref || pad_dut !== pad_ref || dc_dut !== dc_ref) begin
+        if ((out_dut & out_cmp_mask) !== (out_ref & out_cmp_mask) || st_dut !== st_ref || pad_dut !== pad_ref || dc_dut !== dc_ref) begin
           eq_mismatch = eq_mismatch + 1;
           if (eq_mismatch <= 10)
             $display("MISMATCH t=%0t out %h/%h st %h/%h dc %h/%h pad %b/%b", $time, out_dut, out_ref, st_dut, st_ref,
@@ -599,7 +603,7 @@ module tb;
     // Version word and the 0x29 FIR bits (byte 0 bit 6 = 0x56 bit 0, bit 5 = FIR active)
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h1536, "cmd 0x06 reads 0x1536");
+    check(rd16_d == 16'h1537, "cmd 0x06 reads 0x1537");
     check(rd16_r == 16'h1534, "reference cmd 0x06 reads 0x1534");
     ok29 = 1;
     wr1(8'h56, 8'h00); wr1(8'h53, 8'h07); wr1(8'h54, 8'h0C); wr4(8'h0D, 32'd14); #200;

@@ -14,7 +14,12 @@
 #   6. tb_seg.v against our 0x1535 (REF1535_REV, default e2aec2e): sequencer off equivalence, then
 #      segment and averaging runs (0x1536), logged and checked by seg_model.py. SEG_P1 (default 12)
 #      sets the number of random equivalence captures of its first phase.
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg runs one testbench.
+#   7. tb_trigpos.v (0x1537): trigger position determinism with an AD9288 pipeline model, the firmware's
+#      byte sequences, shuffled cases (K = 0..3, FIR, dividers 0..399, CH1 / EXT) and random phases, then
+#      the configuration race at slow legacy rates. TRIGPOS_RUNS (default 6) runs per case.
+#   8. tb_seqcontract.v: the firmware's sequencer byte sequences (protocol 1.17) against the simulated FPGA; the
+#      transcript must equal tb/contract_0x1537.txt (the reference for the firmware's host tests).
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -30,8 +35,9 @@ ONLY=${ONLY:-all}
 mkdir -p "$WORK"
 command -v iverilog >/dev/null || { echo "iverilog not installed"; exit 1; }
 # Reference: the file at a git revision with every module renamed to <name>_ref (pll/sample_memory stay shared)
+# REF_SRC_DIR=<dir> takes <dir>/<rev>.v instead of git (a git worktree made on Windows is not readable from WSL git)
 mkref() {
-  git -c safe.directory='*' -C "$REPO" show "$1:fpga/al3/src/zaklad.v" \
+  { if [ -n "$REF_SRC_DIR" ]; then cat "$REF_SRC_DIR/$1.v"; else git -c safe.directory='*' -C "$REPO" show "$1:fpga/al3/src/zaklad.v"; fi; } \
     | sed -E 's/\b(clockdivider|pwmcounter|freq_generator_dds_pwm|decim_chan|fir_chan|fnirsi_1013D)\b/\1_ref/g' > "$2"
 }
 compile() {  # <out.vvp> <ref.v> <tb.v>
@@ -74,6 +80,18 @@ if [ "$ONLY" = all ] || [ "$ONLY" = seg ]; then
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_seg.log" || RC=1
   python3 -I "$HERE/seg_model.py" check "$WORK/seg.log" | tee "$WORK/model_seg.log"
   grep -q -- '-> PASS' "$WORK/model_seg.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = trigpos ]; then
+  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_trigpos.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_trigpos.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_trigpos.vvp" +seed=$SEED +runs=${TRIGPOS_RUNS:-6} +logfile="$WORK/trigpos.log" | tee "$WORK/sim_trigpos.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_trigpos.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = contract ]; then
+  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_seqcontract.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_seqcontract.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_seqcontract.vvp" +transcript="$WORK/contract.txt" | tee "$WORK/sim_contract.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_contract.log" || RC=1
+  if cmp -s "$WORK/contract.txt" "$HERE/contract_0x1537.txt"; then echo "contract transcript = tb/contract_0x1537.txt"
+  else echo "contract transcript differs from tb/contract_0x1537.txt"; RC=1; fi
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
 [ $RC -eq 0 ] && echo "ALL PASS (seed $SEED)" || echo "SOMETHING FAILED (seed $SEED)"

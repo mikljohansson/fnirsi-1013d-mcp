@@ -1,9 +1,9 @@
 # fpga/al3 - Anlogic AL3A10LG144C7 project
 
 Status 2026-10-19: **TD 4.6.8 SP1 runs headless in WSL and rebuilds Atlan4's design byte-identical to his shipped
-`.bin`** (see "Rebuild results", setup in `TD_SETUP.md`). `src/` carries our changes up to version word 0x1536:
+`.bin`** (see "Rebuild results", setup in `TD_SETUP.md`). `src/` carries our changes up to version word 0x1537:
 external trigger (0x1533), decimation filter (0x1534), compensation FIR (0x1535), segmented capture and hardware
-averaging (0x1536); section "Changes" at the end. Atlan4's original stays buildable with `SRC_REV=a947e78`. Nothing
+averaging (0x1536), deterministic record start and A/B order (0x1537); section "Changes" at the end. Atlan4's original stays buildable with `SRC_REV=a947e78`. Nothing
 has been flashed from this folder.
 
 ## Contents
@@ -11,7 +11,7 @@ has been flashed from this folder.
 | Path | What |
 |---|---|
 | `src/` | Atlan4's AL3 TD project, sources only: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc`, `zaklad.sdc`, `FPGA.al`, `al_ip/` (PLL and sample-memory IP: `.v`, `.ipc`, sim models), plus `FPGA commands.txt` (Atlan4's command table, updated). Copied from `D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\FPGA AL3\FPGA AL3S10\` (unmodified at commit a947e78, version 0x1532). `zaklad.v` and `zaklad.adc` now carry the changes listed in "Changes" (version 0x1533). Build outputs (`*.db`, `*.area`, `*.timing`, `*.bit`, `*.bin`) were left out. |
-| `tb/` | iverilog testbenches and reference models: `run.sh` (six steps, `ONLY=ext/decim/fir/long/seg`), `tb_ext_trigger.v`, `tb_decim.v`, `tb_fir.v`, `tb_long.v`, `tb_seg.v`, `cic_model.py`, `seg_model.py`, `mutate_seg.py`, `sim_models.v` (behavioural PLL, sample memory, `AL_LOGIC_BRAM`). See "Changes". |
+| `tb/` | iverilog testbenches and reference models: `run.sh` (eight steps, `ONLY=ext/decim/fir/long/seg/trigpos/contract`), `tb_ext_trigger.v`, `tb_decim.v`, `tb_fir.v`, `tb_long.v`, `tb_seg.v`, `tb_trigpos.v`, `tb_seqcontract.v` (+ its transcript `contract_0x1537.txt`), `edge_phase.py`, `cic_model.py`, `seg_model.py`, `mutate_seg.py`, `sim_models.v` (behavioural PLL, sample memory, `AL_LOGIC_BRAM`). See "Changes". |
 | `out/` | Named bitstreams for the bench, gitignored (`*.bin`). Hashes are recorded in "Changes". |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the **stock** FNIRSI design (version 0x1432), TD 5.0.28716 project. Sources only (`source/`, `al_ip/`, `Original_1013D.al`); his prebuilt `.bit` was left out. Licence GPL-3.0 (`LICENSE-GPL3`, repo `pecostm32/Anlogic_AL3-10_Analyzing`). |
 | `bitstreams/` | Prebuilt images, on disk only, with provenance and sha256 in `bitstreams/README.md`. Git ignores everything there except that README. |
@@ -682,6 +682,64 @@ section is a design study (`tb/fir_design.py report`, numpy only, 18-bit quantis
 - Scaling: FIR input 18 bit (the CIC output shifted to 17 bits). Coefficients sum to 2^17, and sum |h| is 1.35 to
   1.84. The output is acc >> 17, clamped to 0 .. 65535.
 - Headroom: the step overshoot and undershoot of the chain is 6 to 9 %, so the FIR mode needs the recommended shift + 1.
+- **Overshoot against edge phase, and the "horns" that grow and snap back** (fpga-gen6, 2026-10-19, bench report: the
+  1 kHz calibration square shows horns with any +FIR filter that grow and snap back at about 3 to 4 Hz, clean with the
+  CIC alone).
+  - **Method.** `tb/edge_phase.py step | beat | fft`, numpy, in WSL. It uses the bit-exact model of `cic_model.py`
+    (boxcar^K CIC, shift and clamp, the 15 FIR taps with their rounding and clamp). The input is the 200 MSa/s ADC
+    stream of an edge through a first-order front end (tau 5.3 ns, about 30 MHz), rounded to 8 bits. The edge is swept
+    over one output period in 200 steps (5 ns at 1 MSa/s, 0.5 ns at 10 MSa/s).
+  - **Overshoot.** The 64 -> 192 step shows the shape without clamping, in 8-bit codes:
+
+| Filter | 1 MSa/s (N 200): overshoot over the phases | 10 MSa/s (N 20) | ringing below the top after the peak | settling to +-1 code |
+|---|---|---|---|---|
+| boxcar, CIC2, CIC3 | 0 at every phase | 0 | 0 | 1 output sample (CIC3: 2) |
+| boxcar + FIR | 0.6 .. 6.7 % (0.8 .. 8.5 codes) | 0.6 .. 6.6 % | 0.4 .. 1.9 % | 3 output samples |
+| CIC2 + FIR | 0.45 .. 6.6 % (0.6 .. 8.4 codes) | 0.5 .. 6.5 % | 0.3 .. 1.7 % | 3 |
+| CIC3 + FIR | 0.45 .. 6.9 % (0.6 .. 8.8 codes) | 0.4 .. 6.8 % | 0.3 .. 1.8 % | 3 |
+
+  - **Pre-shoot.** The same size appears below the base before the edge, because the FIR is symmetric. With a full-scale
+    0 -> 255 step the pre-shoot clamps at code 0 (the FIR output clamp), and the overshoot is 0.46 .. 6.6 % (1.2 .. 16.8
+    codes). The 16-bit word keeps that peak; the S + 1 headroom covers it.
+  - **Phase dependence.** CIC2 + FIR at 1 MSa/s, overshoot % at edge phase 0, 1/8, ... 7/8 of the output period:
+    3.1, 4.7, 5.8, 6.5, 6.6, 5.4, 2.4, 1.3. The 6-9 % above is the peak of the continuous step response; what a capture
+    shows is that response sampled at the edge's phase on the output grid.
+  - **Gibbs ringing, not a stage artefact.** The chain is linear and time-invariant up to the final decimation (CIC by
+    N/2, then the FIR, then keeping every second FIR output). Output sample m is therefore exactly the composite step
+    response at m T - te. The variation is the sampled ringing of that composite response. The CIC by N/2 has no
+    overshoot of its own, and the decimate-by-2 adds no phase dependence beyond choosing the sampling instants. A CIC
+    alone has a monotonic step response, so the edge only moves and no horn appears.
+  - **The beat.** `fpga_set_generator_freq` writes inc = floor(f 2^32 / 50 MHz).
+    - 1 kHz: inc 85,899, f = 999.995973 Hz, period 1,000,004.027 ns. Each period the edge advances 4.027 ns on the output
+      grid, so it sweeps the whole 1 us grid of 1 MSa/s at **4.03 Hz**, in 20 ns steps of the DDS clock. Captured at any
+      pass rate above about 8 /s, the horns grow over 0.25 s and snap back: the reported 3 to 4 Hz.
+    - At 10 MSa/s the sweep is 40.3 Hz, seen aliased through the pass rate: for example 4.3 Hz at 12 passes/s, 0.27 Hz at
+      10 or 20 passes/s.
+    - A 10 kHz square sweeps a 1 MSa/s grid at 0.53 Hz, 100 kHz at 0.07 Hz.
+  - **Spectrum.** 4096-point Hann FFT of the decimated square: 1 kHz at 1 MSa/s, and 10 kHz at 10 MSa/s (same harmonic
+    geometry, because 4096 samples hold less than half a 1 kHz period at 10 MSa/s). 24 edge phases over one output
+    period, 64 -> 192 codes. The table gives the spread of each odd harmonic's bin magnitude over the phases (median /
+    90th percentile / max):
+
+| Region | CIC2 | CIC2 + FIR |
+|---|---|---|
+| below fo/4 | 0.03 / 0.3 / 0.5 dB | 0.00 / 0.02 / 0.03 dB |
+| fo/4 .. 3fo/8 | 1.4 / 2.9 / 3.4 dB | 0.1 / 0.4 / 0.6 dB |
+| 3fo/8 .. fo/2 | 8.4 / 21 / 33 dB | 3.7 / 16 / 32 dB |
+
+    (1 MSa/s and 10 MSa/s agree within 0.1 dB except the max near fo/2.) The hypothesis holds in form. fo / f_square is
+    even (1000), so the image of odd harmonic h, at fo - h f, is itself an odd harmonic and lands in the same bin. Its
+    phase relative to the wanted line rotates with the edge position, so the bin beats, most where the two have similar
+    levels, near fo/2. **The CIC alone varies more than CIC + FIR** in every region: it lets more of the image through
+    (alias rejection about 21 dB against about 34 dB with the FIR at the band edge). Below fo/4 the variation is
+    negligible with either filter. The wag in the upper part of the spectrum is this image beat, sweeping at the same
+    4.03 Hz on the 1 kHz DDS square at 1 MSa/s.
+  - **For the default filter decision.**
+    - +FIR gives a flatter passband and a steadier spectrum, but up to 6.9 % edge overshoot whose visible size depends
+      on the edge phase.
+    - The CIC alone gives clean edges and more image beat above fo/4.
+    - A per-mode default could be: CIC for the time-domain view, CIC + FIR for the spectrum view. The 4.03 Hz flicker is
+      specific to a DDS square at 1 MSa/s: its period is 4.03 ns longer than an exact multiple of the 1 us grid.
 - Group delay in output samples: (T - 1) / 4 for the FIR (3.5 at T = 15, 7.5 at T = 31) plus K (N / 2 - 1) / (2 N)
   (about K / 4) for the CIC, plus the pipeline latency in write clocks. The tb would report it the same way as the
   12-write-clock latency of 0x1534.
@@ -1131,7 +1189,7 @@ stock dump):
    The run should take 256 pulse periods, with count 256 and untriggered 0. A longer run means pulses fell into
    the dead time (record + about 7.5 us here).
 
-**Firmware support** (fw-seq, fw 0.2.58 provisional, protocol 1.17 provisional; `firmware/README.md` section 5
+**Firmware support** (fw-seq, fw 0.2.58, protocol 1.17; `firmware/README.md` section 5
 "Segmented capture and hardware averaging", `docs/protocol.md` section 14 row 56; not benched):
 - caps bit 17 SEQ on 0x1536..0x153F; GET_STATUS bytes 44-45 report the features (EXT, DECIM, FIR, SEGMENTS, HW_AVERAGE).
 - Arm order on 0x1536: 0x0B, 0x0C and 0x57..0x5C before 0x01 = 1 (fpga-gen6's finding: the write-clock registers
@@ -1140,7 +1198,204 @@ stock dump):
 - Host: SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW addr_mode 3 (segment-relative), STOP = 0x5D then 0x1A = 0.
 - UI: the acquisition menu's Average runs an averaging run of 2..64 records for legacy records that fit the
   accumulator (3000-sample depth); everything else keeps the software average.
-- Bench plan with the flash session, the checks of this section and the rollback: `firmware/AGENTS.md` section 33.
+- Bench plan with the flash session, the checks of this section and the rollback: `firmware/AGENTS.md` section 35.
+
+**Firmware contract** (fpga-gen6, 2026-10-19; `tb/tb_seqcontract.v`, `run.sh` step 8, `ONLY=contract`). The testbench
+replays, strobe by strobe, the sequencer byte sequences of fw-seg's protocol 1.17 firmware (fw 0.2.56+ branch, commit
+65abebf; `pc_hal_arm`, `pc_seq_hw.c`, `h_read_seq`, `h_read_raw`) against the simulated FPGA. It writes every strobe to
+a transcript, `tb/contract_0x1537.txt` (1,791 lines, deterministic; 0x1536 gives the same file except the version
+byte). The firmware's host tests can log their HAL calls in the same format and diff them. Format, one strobe per line:
+`C xx` command write, `W xx` data write, `R xx` data read (the byte a correct FPGA returns), `D xx` the discarded dummy
+strobe after a pointer write, `# ...` step labels. Polling loops are labelled `# poll` and shown once, because their
+length depends on timing. The sequences (multi-byte values high byte first):
+
+| Step | Bytes |
+|---|---|
+| ARM 1 | K >= 1 or changed: 0x53, 0x56, 0x54, 0x55 as on 0x1535, then the settle wait |
+| ARM 2-3 | 0x0F = 00; 0x1A = 01 (normal / single) or 00 (a sequencer run in auto mode: the FPGA's 0x0E time-out) |
+| ARM 4 | 0x0B pre words, 0x0C total words, **before** the reset (avoids the 0x1532..0x1536 race of section 7) |
+| ARM 5 | mode != 0: 0x57 = mode \| circular << 2, 0x58 count, 0x59 m, 0x5A N (65536 = 0000; segments: 0000, unused), 0x5B 00, 0x5C ceil(hold-off ns / 5). Mode 0: 0x57 = 00 only if the last value written was not 0 (the readout below writes 0x02) |
+| ARM 6 | 0x01 = 01, poll 0x05 bit 0 (bounded) |
+| ARM 7-8 | 0x0B, 0x0C again, 0x0E (4 B), 0x01 = 00 |
+| Poll | 0x0A, then 0x18, every main-loop pass |
+| Done | 0x2A (8 B), read again until two reads agree (at most 4); 0x0F = 01; 0x14 (2 B) |
+| Table (READ_SEQ 0) | for b = 0..7: 0x1F = first & 0x7FF, cmd 0x2B + b, one dummy strobe, count reads (entry first + i, byte b) |
+| READ_RAW addr_mode 3 | the entry: 8 x (0x1F = s, cmd 0x2B + b, dummy, 1 read); start = s 2^m + ((offset - pre + j) mod 2^m); per core 0x1F = start, cmd 0x20 + core, dummy, reads up to the slot end; on wrap 0x1F = s 2^m, cmd, dummy, the rest |
+| Average (READ_SEQ 1) | 0x5B = S, 0x57 = 0x02 \| raw << 3 (outside the reset: S and raw are live, the mode of the run is latched), then per channel c one pass per byte: legacy 4c..4c+3, 16-bit 4c, 4c+1 (raw: 4c..4c+3) |
+| STOP | 0x5D = 01, then 0x1A = 00, then poll 0x0A |
+
+Scenarios and their checks (12 checks, all pass on 0x1536 and 0x1537):
+- **S**: legacy segments at 20 MSa/s, CH1 rising, 4 segments, m = 6, pre 10, total 40. Expected: 0x2A byte 0 = 0x81,
+  count 4, 0 untriggered; every entry valid and triggered; the step at record index pre + 1 in every slot; the last
+  entry's offset = 0x14 mod 2^m.
+- **SR**: READ_RAW addr_mode 3 of segment 2, both CH1 cores; equals the slot word for word.
+- **A**: legacy averaging at 10 MSa/s, EXT, N = 4. 0x2A byte 0 = 0x82. Lane CH1A at S = 2 equals the record; raw = 4 x the
+  record.
+- **F**: 16-bit averaging, CIC2 + FIR at N = 20, CH1, 2 positions x 8. 0x2A byte 0 = 0x92, count 16. L0 at S = 3 equals the
+  single record in both positions; the raw CH1 sum = 8 x the record.
+- **P**: circular segments, stopped with 0x5D = 1 and 0x1A = 0. Overflow set, count 6, and the slot being refilled
+  (entry 2) reads invalid.
+
+Answer to fw-seg's question: rewriting 0x57 at readout time, outside the reset, is safe on 0x1536 and 0x1537. `q_mode` and
+`q_mask` latch only while the synchronised reset is high; `seg_mask_s` loads only in the reset (0x1537: also on the first
+write clock edge after a release). The readout view uses the latched mode and the live raw bit. The firmware must count
+that write when it decides whether a later plain arm needs 0x57 = 00. Its tracker does.
+
+### 7. Trigger position at decimated rates; version 0x1537 (fpga-gen6, 2026-10-19)
+
+Task-queue item "Trigger position varies by run at decimated rates". The bench (2026-10-18, bitstream 0x1533, fw 0.2.21)
+measured the CH1 edge against `pretrigger_samples` of host captures at 1 MSa/s (legacy, divider 199). EXT gave +11/+12 us
+in the first 10 captures after EXT was selected, then -1.0 us in 17 captures. CH1 gave +2/+3 us in one run and -1.0 us
+in another. Each value was stable within a run. Question: is the FPGA deterministic?
+
+**Testbench** `tb/tb_trigpos.v` (`run.sh` step 7, `ONLY=trigpos`; `+runs=N` per case, `+pl=N` ADC pipeline, `+order=1`
+writes 0x0B/0x0C before the reset).
+- **ADC model.** A behavioural AD9288: each core samples on the rising edge of its encode pin and outputs the value `pl`
+  encode cycles later (default 4, the datasheet's pipeline delay; `research/notes/hack-repo-hardware-fpga.md`). The
+  testbench keeps each value's sampling instant, so every stored legacy sample has a known true time.
+- **Stimulus.** A step on CH1 (40 -> 210, CH2 the complement) and the same step on the EXT pad (loopback), at a random
+  instant after the pretrigger has filled.
+- **MCU side.** The firmware's byte sequences: `pc_hal_arm`, `pc_dec_apply` with its settle wait, `pc_hal_acq_poll`,
+  `pc_hal_acq_finish`, READ_RAW with the dummy strobe, and the readout without it. Strobe periods vary per capture
+  (41, 97, 174, 298 ns).
+- **Cases.** 27 cases in shuffled order: legacy at D = 0, 9, 199 and 399; K = 1..3 with and without the FIR at N = 200
+  (1 MSa/s); CIC2 / CIC2+FIR / CIC3+FIR at N = 20 and N = 64; CIC2 at N = 4; boxcar at N = 2. Sources CH1 and EXT.
+  Pretrigger 24, 36 or 48 words. Each run therefore starts at a random phase of the write clock, the decimation counter
+  and the signal, and most runs follow a change of rate, filter or source.
+- **Measured per run.** 0x14 over the bus against the register; the record read over the bus against the sample memory;
+  the step's index in the record relative to the pretrigger written to 0x0B; for legacy, the edge time against core A's
+  sample at word `pre`; for 16-bit, the time from the edge to the memory write of the crossing sample and the
+  interpolated crossing.
+- **Phase 2.** Directed checks of the configuration race (R1, R2 below).
+
+**Results** (seed 12345, 8 runs per case, 216 captures; also seed 7 and `+pl=0`; all pass on 0x1537). Offsets are the
+step's record index minus the trigger point: legacy in samples (2 per word), 16-bit in output samples. ns: legacy, edge
+minus core A's sample at word `pre`; 16-bit, edge to the memory write of the crossing sample.
+
+| Mode | N / rate | CH1 offset | CH1 ns | EXT offset | EXT ns |
+|---|---|---|---|---|---|
+| legacy | 200 MSa/s (D 0) | +1..+2 (A word +1) | 0.6..7.7 of 10 | +7 (word +4) | 30.8..34.3 |
+| legacy | 20 MSa/s (D 9) | +1..+2 (word +1) | 5.6..76.5 of 100 | +9..+11 (word +5..+6) | 439..529 |
+| legacy | 1 MSa/s (D 199) | +1..+2 (word +1) | 218..1765 of 2000 | +10..+11 (word +5..+6) | 9137..10945 |
+| boxcar | 1 MSa/s (N 200) | +1 | 1004..1510 of 1000 | +1..+2 | 687..1626 |
+| boxcar + FIR | N 200 | +1 | 4050..4941 | +5 | 4165..4968 |
+| CIC2 | N 200 | +1 | 1195..2142 | +2..+3 | 1576..2116 |
+| CIC2 + FIR | N 200 | +1 | 4318..5200 | +5..+6 | 4446..5102 |
+| CIC3 | N 200 | +1 | 1829..2464 | +2..+3 | 1816..2547 |
+| CIC3 + FIR | N 200 | +1 | 4594..5509 | +5..+6 | 4734..5461 |
+| CIC2 / CIC2 + FIR | 10 MSa/s (N 20) | +1 / +1 | 268..354 / 705..783 | - / +7..+8 | - / 692..782 |
+| CIC3 + FIR | N 64 | +1 | 1650..1962 | +6 | 1650..1929 |
+| CIC2 | N 4 | +1 | 180..198 | +8..+9 | 180..197 |
+
+With `+pl=0` (no ADC pipeline) legacy EXT moves to +2..+3 samples at 1 MSa/s and -1..-2 at 200 MSa/s. The 16-bit rows
+change by under 0.1 sample.
+
+**Findings.**
+1. **The trigger detector, the decimator and the FIR are deterministic.** An ADC trigger on the 16-bit stream puts the
+   crossing at the same record index (+1, the 0x14 convention) in every run, at every K, N and FIR setting. The time
+   from the edge to the stored sample spreads by less than one output period. That is the sample-grid quantisation:
+   the decimation counter is free-running and is never reset. EXT spreads by at most one output sample, for the same
+   reason. The record start (0x14 - pre) is exact, and READ_RAW returns the record word for word.
+2. **Record pointer race (0x1532..0x1536, fixed in 0x1537).** The trigger read address is preloaded from 0x0B only on
+   write clock edges while 0x01 = 1. The firmware writes 0x0B/0x0C/0x0E after the 0x05 poll, then releases. If no write
+   clock edge falls between the 0x0B write and the release, the previous pretrigger stays, and the record start is off
+   by (old pre - new pre) words. A write clock period is 10 (D + 1) ns at K = 0: 2 us at 1 MSa/s, 20 us at 100 kSa/s.
+   About 10 strobes lie between the 0x0B write and the release, so the race needs a changed pretrigger, a legacy
+   divider and fast strobes. Phase 1 on 0x1536 hit it in 2 + 2 of 8 runs at D 199 (CH1 / EXT) and 6 of 8 at D 399; the record offsets
+   ranged from -38 to +58 samples.
+   - R1 (0x0B written right after a write clock edge, D 399, pre 30 then 50): on 0x1536 the step moved to pre - 5 and
+     pre + 21; on 0x1537 it is at pre + 1 both times.
+   - The segment slot mask (0x57/0x59) had the same race. R2 (segment run after a modes-off arm, configured in the same
+     window): on 0x1536 segment 1 never reached slot 1; on 0x1537 it writes 47 words there.
+   - Fix: `ssr_d` (the MCU reset one write clock later) also loads both on the first edge after the release.
+   - Firmware workaround for older bitstreams: write 0x0B/0x0C (and 0x57..0x5C) before 0x01 = 1. fw-seg's protocol 1.17
+     arm does so on 0x1536+.
+3. **A/B core order flips (0x1532..0x1536, fixed in 0x1537).** The encode toggles (negedge `clk_ADC`) and the write clock
+   toggle (negedge `clk_200MHz`, 1.25 ns earlier) sample the same combinational enable, `divider < counter`. A 0x0D or
+   0x53 write that changes the compare between those two instants makes them disagree once. From then on, core B's
+   sample of a word lies half a word before core A's instead of after it, until the next such accident. On 0x1536, in
+   phase 1, the measured B - A offset flipped between +5 / -5 ns at 200 MSa/s, +-50 ns at 20 MSa/s and +-1000 ns at
+   1 MSa/s from one configuration change to the next, and the legacy CH1 offset spread by 2 samples.
+   - Consequence: the firmware's fixed interleave (B before A, PC_INTERLEAVE_ORDER 0) and the 0x53 swap bit are right
+     only by chance after any rate or filter change. A wrong order gives a one-sample zigzag at edges and moves the edge
+     by one sample. For K >= 2 it also mis-weights the polyphase prefilter.
+   - Fix: the encodes take the complement of the write clock (`swc_enc_n`, a register copy) instead of their own
+     complement. That is the same thing in steady state, so the pins are unchanged, and any disagreement is repaired
+     at the next enable.
+   - On 0x1537 the order is constant. In the model, core A is the earlier sample of each word (B - A = +half a word).
+     That is the opposite of the 1.00o5 convention, so bench T4 should settle it on hardware.
+4. **The ADC pipeline delays legacy EXT captures by 4 words.** EXT triggers at the pin, while the data come out of the
+   AD9288 4 encode cycles late. One encode cycle is one word at every legacy rate: 8 samples, 8 us at 1 MSa/s, 400 ns
+   at 20 MSa/s. The firmware applies no EXT shift in legacy mode (`pc_glue_decim_pre_words` returns samples / 2 for
+   K = 0, `pc_hal_scope.c:806-814`; `pc_decim_ext_shift` returns 0 for K = 0, `pc_decim.c:178`). So the edge lands
+   +10..+11 samples after the trigger point instead of +1..+2. With the 16-bit filters the same 4 cycles are 40 ns at
+   100 MSa/s per core, under 0.1 output sample. There the firmware's EXT shift leaves the edge at +1..+2, in line with
+   the ADC trigger.
+5. **The readout without the dummy strobe is one word late.** `fpga_read_decim_data` (`fpga_control.c:1591-1620`, the
+   16-bit UI readout) and the 1.00o5 `fpga_read_sample_data` (`fpga_control.c:838-854`, the UI and READ_TRACE) return
+   mem[S], mem[S], mem[S+1], ...: the first word twice, then everything one word late. READ_RAW (`pc_hal_read_core`,
+   `pc_hal_scope.c:506-538`, dummy strobe, read_lag 0) is exact. This is checked in every run against the sim memory
+   model, whose read port latches on `i_mcu_clk` like the TD block RAM; bench T3 confirms it on hardware.
+
+**What explains the bench scatter** (inference; the FPGA side is settled by the simulation above, the attribution is not):
+- **EXT +11/+12 us, then -1.0 us.** +11/+12 us is the legacy EXT position of finding 4 (+10..+11 samples at 1 MSa/s,
+  plus 1 to 2 samples for the A/B order and the measurement convention). -1.0 us is where a CH1 level trigger puts the
+  edge. A likely way the FPGA's source returned to CH1 while the host still assumed EXT is the 1.00o5 channel-enable
+  handler. `fpga_swap_trigger_channel` (`fpga_control.c:454-484`, called from the channel menu, `statemachine.c:1846`)
+  sets `triggerchannel` to 0 or 1 and writes 0x15 whenever only one channel is enabled. That overwrites EXT (2). A
+  loopback square triggers on CH1 just as well, so the captures still looked fine.
+- **CH1 +2/+3 us in one run, -1.0 in another.** Candidates:
+  - the A/B order flip of finding 3 (one sample, constant until the next rate change);
+  - the pretrigger race of finding 2 (whole words, when the pretrigger changed between a UI conversion and a host
+    capture);
+  - the one-word-late readout of finding 5, if the two runs used READ_TRACE and READ_RAW respectively.
+  Each is stable within a run and changes between runs, as observed.
+- **Re-measure on 0x1537** with GET_CAPTURE_INFO logged next to the measured edge (source, trigger_addr,
+  capture_start_word, divider). Also log every 0x15 write.
+
+**0x1537** (`src/zaklad.v`; the version word is the only interface change):
+- `ssr_d`: 0x0B and the slot mask also load on the first write clock edge after the release of 0x01 (finding 2).
+- The encode flops follow `swc_enc_n`, an inverted register copy of the write clock (finding 3). The copy keeps the
+  write clock's own fanout, and with it the half-cycle path into `sampling_triggered`, as in 0x1536.
+- Timing only, same behaviour:
+  - `q_seg` registers `q_mode == 1`;
+  - the post-pass start values (`pp_ma`, `pp_aa`, `pp_left`, `pp_z`) preload every clock while no pass runs, instead of
+    loading on the Q_RUN exit. The first 0x1537 build missed `clk_200MHz` by 0.48 ns on that 36-fanout select.
+- With configuration written outside the race window, 0x1537 is cycle-identical to 0x1536, except the encode pins
+  after a reference bitstream's A/B flip. The equivalence steps (1, 2, 4, 6) therefore no longer compare the four
+  encode pins (`out_cmp_mask`; their ADC stimulus does not depend on them). `tb_trigpos.v` checks the A/B order
+  instead: core B half a word from core A, with the same sign in every legacy run. Tests:
+  - `tb/run.sh` passes all steps on seeds 12345 and 3: the equivalence phases against 0x1532..0x1535 and the 0x1536
+    segment and averaging checks with `seg_model.py`.
+  - On 0x1536, `tb_trigpos.v` fails 36 of 882 checks at 6 runs per case: the A/B order in 23 legacy runs, 6 legacy
+    cases' position spread, 5 records shifted by the pretrigger race, R1 and R2.
+
+**Build** (TD 4.6.8 SP1, `./build.sh`, about 60 s; deterministic, two work dirs gave the same hash):
+
+| | 0x1536 | 0x1537 |
+|---|---|---|
+| LUT / reg | 4445 / 3817 | 4569 / 3820 |
+| BRAM9K / BRAM32K / M18x18 | 48 / 2 / 2 | same |
+| `clk_200MHz` | +0.282 ns | 0 errors, +0.035 ns: the known half-cycle path `sample_write_clock` (negedge) to `sampling_triggered` (+0.03 to +0.7 ns across builds since 0x1533); next worst +0.316 ns |
+| `sample_write_clock` | +0.481 ns | 0 errors (period 9.248 ns of 10) |
+| `clkc[1]` / `clkc[0]` | 6 / 52 errors | 3 / 53 errors: the same structural enable crossing and SDC artefact |
+
+| File | Bytes | sha256 |
+|---|---|---|
+| `out/FPGA-seg-0x1537.bin` (= `build/FPGA.bin` of commit c15981e, = `backups/al3_seg_0x1537_426a3784.bin`) | 282,898 | `426a3784883b82c9c9f42870584e64d1d082cdcb38c8b62db143e161e2633b17` |
+| `backups/al3_seg_0x1537_426a3784_padded.bin` (0xFF to 1 MiB, flash image) | 1,048,576 | `febc92997ee6605090d5581aabc9c240986fa82defdc24d40aca01566dbfe1f1` |
+
+Header words as before (`cc55aa33 f0000006 18006c31`), user code 0x0056. **Not flashed.** A firmware that knows 0x1536
+runs it unchanged (AL3 family decode, protocol.md section 5.1).
+
+**Bench checks** (with the owner; never flash without the verified stock dump):
+1. T3 / T4 / T5 on 0x1537:
+   - the dummy-strobe lag;
+   - the A/B order: core A earlier in the model; check that it stays the same across rate changes;
+   - the CH1 edge position against GET_CAPTURE_INFO, at 1 MSa/s legacy and with CIC2 + FIR.
+2. EXT loopback at 1 MSa/s legacy: the edge at about +10 samples (finding 4) in every capture; then toggle a channel in
+   the UI and watch whether 0x15 leaves EXT.
+3. Slow legacy rate (100 kSa/s), host captures alternating two pretriggers: the edge stays at pre + 1..2.
 
 ## Device facts from the datasheet
 
