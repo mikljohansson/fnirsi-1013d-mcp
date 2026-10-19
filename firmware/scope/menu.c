@@ -1806,7 +1806,7 @@ void scope_set_brightness(uint8 value, int sun)
     scope_maxlight_item(0);
 }
 
-//The sun tapped: 100 % and back (ui_bright_sun); an open Screen brightness slider follows
+//The sun tapped: 100 % and back (ui_bright_sun); the Screen brightness slider opens on the new value
 void scope_brightness_sun(void)
 {
   scope_set_brightness(ui_bright_sun(scopesettings.screenbrightness, &scopesettings.brightback), 1);
