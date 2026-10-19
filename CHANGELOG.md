@@ -33,12 +33,13 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
 
 #### 0.2.60 - 2026-10-19 (protocol 1.17 unchanged)
 
-- Changed: when the calibration wizard's Zero level step fails on noise or drift, the result line names the range, the
-  sample rate and the ADC core with the measured values, e.g. "CH1: too much noise, range 6 at 2 MSa/s: core B 3.3
-  codes, 1.1 per capture". "Per capture" is the noise inside one capture. The difference from the total is what moved
-  between captures, such as pickup on an open input. This shows on the bench why the 0.2.59 wizard reported "too much
-  noise" on the owner's unit. The limit (3 codes) and the measurement are the same as in 0.2.48. The measurement path
-  was checked against 0.2.48 and with host tests (27556e8; `firmware/AGENTS.md` section 36).
+- Fixed: the calibration wizard's Zero level step failed with "too much noise" on the owner's unit because a wire from
+  the calibration post to a breadboard was still connected, and the old instruction asked only for the probes and the
+  USB cable to be removed. The instruction now says to disconnect everything, including anything on the calibration
+  post. The measurement and the 3-code limit are the same as in 0.2.48 (`firmware/AGENTS.md` section 36).
+- Changed: a noise or drift failure in the Zero level step names the range, the sample rate and the ADC core with the
+  measured values, e.g. "CH1: too much noise, range 6 at 2 MSa/s: core B 3.3 codes, 1.1 per capture". "Per capture" is
+  the noise inside one capture. The difference from the total is what moved between captures (27556e8).
 
 #### 0.2.59 - 2026-10-19 (protocol 1.17 unchanged)
 

@@ -6,7 +6,7 @@
 //
 // Four screens, one modal flow, the same two buttons on every screen (Cancel left, the action right):
 //
-//   1 Zero level  probes and USB unplugged: zeros, offset slopes and PWM centres of both channels (adc_cal.h)
+//   1 Zero level  nothing connected (probes, post, USB): zeros, offset slopes and PWM centres of both channels (adc_cal.h)
 //   2 CH1 gain    CH1 probe at 1X on the calibration post (bitstreams with the generator; else one "not possible" screen)
 //   3 CH2 gain    the same for CH2
 //   4 Done        the summary per channel; Save calibration writes, Cancel (on any screen) writes nothing

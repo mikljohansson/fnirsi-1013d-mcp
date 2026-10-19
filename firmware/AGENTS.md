@@ -2034,43 +2034,49 @@ runs on 0x1535 unchanged (step 2), so no firmware rollback is needed.
 
 ## 36. fw-calnoise: the wizard's "too much noise" on 0.2.59 (fw 0.2.60, protocol unchanged)
 
-Bench fact (owner, 2026-10-19 15:45, 0.2.59 in RAM, FPGA 0x1535): the Zero level step failed "too much noise" on both
-channels most of the time, probes and USB unplugged; 0.2.48's base calibration passed in the morning (stored noise
-0.6-1.3 codes). Coordinator's host numbers right after (USB in, generator off, one 3000-sample READ_RAW per core at
-200 MSa/s legacy): raw std 0.5-1.1 codes per core, 2.1 worst (CH2 range 0).
+Bench fact (owner, 2026-10-19 15:45, 0.2.59 in RAM, FPGA 0x1535): the Zero level step failed with "too much noise" on
+both channels in most runs, with probes and USB unplugged. 0.2.48's base calibration had passed in the morning (stored
+noise 0.6-1.3 codes).
 
-Findings (by reading and host tests; nothing benched yet):
-- Not the merge. `cal_result` / `cal_measure` / `cal_channel` are byte-for-byte 0.2.48's `scope_do_baseline_calibration`
-  path (moved by fw-cal3, untouched by fw-ui4 except the Cancel polls between ranges). `acal_rms16` over the merged
-  halves is the per-core RMS about the merged mean: n merged, cores never pooled, 1/16 code compared with 48, the noise
-  check runs before the drift check. Host: the coordinator's numbers with a 0.3-code drift between halves give 9-35 /16,
-  the drift adds about 0.02 code (test_adc_cal `test_zero_noise_bench`).
-- Not the state. Calibration conversions run legacy (K = 0: `pc_dec_ui_arm` is only set by the UI acquisition), the
-  16-bit read returns early for `calibrationsettings`, the v4 hooks skip it, 0x1536 seq is off on 0x1535, the FPGA write
-  address resets to 0 at every conversion so the read at 100..600 is always fresh. `cal_begin` differs from 0.2.48 only by
-  a menu redraw and CH1/CH2 dcoffset = 0, neither used by the scratch channel; the Diagnostics / first-run entries reach
-  the same `cal_wizard_run`. The generator is not touched by the zero step (as in 0.2.48; default on at 1 kHz in 709).
-- What the check measures that the host capture does not: the RMS pools 8 gated (2 MSa/s, 250 us each) or 64 full-rate
-  conversions over 0.1-0.5 s, so it includes what moves between conversions (50 Hz pickup on the open BNCs, offset-PWM
-  ripple phase, drift) and any rare readout glitch (one 64-code outlier per 500 samples alone is 2.9 codes). A
-  15 us host capture sees neither. Inference: the afternoon environment (Bode bench, cables, hands near the open BNCs)
-  is the most likely difference from the morning; unproven.
+**Cause (coordinator's bench, 16:05): a wire from the calibration post to the owner's breadboard (Bode RC filter) was
+still connected.** The 0.2.59 text did not ask for it to be removed. 24 x 1000-sample captures, probes unplugged:
+- Wire on the post, 200 MSa/s legacy: CH1 core B within-capture std 19-30 codes with 50-60-code excursions on every
+  range; CH2 core A 6-17 codes on ranges 0-1. At 2 MSa/s 0.1-0.5 codes.
+- Only the USB cable connected: 0.5-2.0 codes per core on every range (CH2 range 0 the worst, 1.6-2.0). Std of the
+  capture means under 0.26, max excursion under 10 codes. The generator on or off makes no difference.
 
-Built (27556e8): `acal_acc.convsq` + `acal_rms16_within` (RMS about each conversion's own mean), `acal_range_check`
-(the store's checks with an `acal_fail`: class, core, value, within16), `cw_zero_detail`, and the result line for noise
-and drift: "CH1: too much noise, range 6 at 2 MSa/s: core B 3.3 codes, 1.1 per capture" / "CH2: zero still moving,
-range 1 at 200 MSa/s: core A 0.8 code" (fits the dialog, test_cal_wizard). Limit unchanged: 3 codes of the same
-quantity 0.2.48 checked. Range on the line is 1-based like the progress line (range 1 = 5 V/div, 6 = 0.1 V/div).
+Ruled out (by reading and host tests):
+- The merge. `cal_result` / `cal_measure` / `cal_channel` are byte-for-byte the path of 0.2.48's
+  `scope_do_baseline_calibration`. fw-cal3 moved it; fw-ui4 added only the Cancel polls between ranges. `acal_rms16`
+  over the merged halves is the per-core RMS about the merged mean: n is merged, the cores are never pooled, the value
+  is in 1/16 code and compared with 48, and the noise check runs before the drift check. With the host std per core and
+  a 0.3-code drift between the halves, the host test gives 9-35/16; the drift adds about 0.02 code
+  (test_adc_cal `test_zero_noise_bench`).
+- The acquisition state. Calibration conversions run legacy: K = 0, because `pc_dec_ui_arm` is set only by the UI
+  acquisition. The 16-bit read returns early for `calibrationsettings`, and the v4 hooks skip it. The 0x1536 sequencer
+  is off on 0x1535. The FPGA write address resets to 0 at every conversion, so the read at 100..600 is always fresh.
+- The entry point. `cal_begin` differs from 0.2.48 only by a menu redraw and CH1/CH2 dcoffset = 0; the scratch channel
+  uses neither. The Diagnostics and first-run entries reach the same `cal_wizard_run`.
+- Limit unchanged: 3 codes of the same quantity 0.2.48 checked. The RMS pools 8 gated or 64 full-rate conversions, so
+  it includes variation between captures as well as noise inside them. The new line shows both.
 
-Bench check (owner): run Zero level with probes and USB unplugged and read the lines.
-- Per capture about the coordinator's 0.5-2 codes, total above 3: something moves between conversions. Pickup on the
-  open input scales with sensitivity (range 6 is 50 x range 1) and shows mostly at 2 MSa/s; offset-PWM ripple is
-  range-independent and shows at 200 MSa/s. Retry with both BNCs shorted (shorting caps or 50 Ohm terminators) and
-  hands and cables away: passing then means pickup, not firmware; the wizard text could then ask for shorted inputs.
-- Per capture as large as the total: noise inside the captures. Compare with a host READ_RAW std at that range and
-  rate (coordinator's method): host normal but the line large means the firmware readout path (bus glitches), host
-  large too means the front end.
-- If it passes: GET_CAL noise bytes give the stored per-class / core / range totals to compare with the morning.
-Open: a decision on the zero step's input condition (open vs shorted) and whether the noise check should use the
-within-capture RMS (the drift check, 0.5 code between halves, already guards the zero's mean against slow movement).
-Image (GCC 10, MMU) and nommu built from the merge commit; hashes in the coordinator's report.
+Built:
+- 27556e8: `acal_acc.convsq` and `acal_rms16_within` (RMS about each conversion's own mean).
+- `acal_range_check`: the store's checks with an `acal_fail` (class, core, value, within16). `acal_range_store` uses it.
+- `cw_zero_detail`, and the noise and drift result lines, for example "CH1: too much noise, range 6 at 2 MSa/s:
+  core B 3.3 codes, 1.1 per capture" and "CH2: zero still moving, range 1 at 200 MSa/s: core A 0.8 code". The range is
+  1-based like the progress line (range 1 = 5 V/div).
+- The Zero level instruction now reads "Disconnect everything from the device: both probes, anything on the /
+  calibration post, and the USB cable. Tap Calibrate."
+- test_cal_wizard checks the lines and their widths in the 16 px font. test_adc_cal checks the bench numbers, a
+  +-3-code move between conversions (fails, 1.1 per capture) and a 64-code glitch per conversion (fails, within as
+  large).
+
+Bench check (owner), not run yet:
+1. Run Zero level with the new text followed: it should pass on both channels.
+2. Then put the wire back on the post and run it again. The line should name a 200 MSa/s failure with "per capture"
+   about as large as the total: noise inside the captures, as the coordinator measured.
+3. If a run ever fails with a large total but a small "per capture" value, something moved between the captures:
+   pickup on the open input, which shows mostly at 2 MSa/s on the sensitive ranges 5-6, or a drift.
+Open: the zero step does not detect a load on the post by itself. The noise check caught it only because the wire
+carried noise; a quiet wire would pass with a shifted zero.

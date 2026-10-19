@@ -297,7 +297,8 @@ const char *cw_title(const cal_wiz *w)
 //The owner's screens (plan 6a), broken by hand for the 16 px font
 const char *cw_instruction(const cal_wiz *w, int line)
 {
-  static const char *zero[2] = { "Fully disconnect both probes and the USB cable from the device.", "Tap Calibrate." };
+  static const char *zero[2] = { "Disconnect everything from the device: both probes, anything on the",
+                                 "calibration post, and the USB cable. Tap Calibrate." };
   static const char *ch1[2]  = { "Plug the CH1 probe back in and connect it to the calibration post.",
                                  "Set it to 1X on the handle. Tap Calibrate." };
   static const char *ch2[2]  = { "Plug the CH2 probe in and connect it to the calibration post.",

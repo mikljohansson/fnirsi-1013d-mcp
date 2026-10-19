@@ -12,6 +12,7 @@ extern FONTDATA font_3;
 
 //The result line's room: the 640 px step dialog, 24 px margins, the 28 px icon column (ui_dlg_step_draw)
 #define RESULT_W   (640 - 48 - 28)
+#define LINE_W     (640 - 48)
 
 #define SPAN_X1    1408         //88 codes at range 2: x1 probe on the post
 #define SPAN_X10    141         //8.8 codes: x10 probe (measured at range 5)
@@ -481,8 +482,10 @@ static void test_texts(void)
 
   //The owner's instructions (plan 6a), one per screen, pre-broken
   cw_init(&w, 1);
-  T_STR(cw_instruction(&w, 0), "Fully disconnect both probes and the USB cable from the device.");
-  T_STR(cw_instruction(&w, 1), "Tap Calibrate.");
+  T_STR(cw_instruction(&w, 0), "Disconnect everything from the device: both probes, anything on the");
+  T_STR(cw_instruction(&w, 1), "calibration post, and the USB cable. Tap Calibrate.");
+  T_TRUE(ui_text_width(&font_3, cw_instruction(&w, 0)) <= LINE_W);         //fw 0.2.60: a wire on the post failed it
+  T_TRUE(ui_text_width(&font_3, cw_instruction(&w, 1)) <= LINE_W);
   T_STR(cw_instruction(&w, 2), "");
   w.state = CW_GAIN;
   T_STR(cw_instruction(&w, 0), "Plug the CH1 probe back in and connect it to the calibration post.");
