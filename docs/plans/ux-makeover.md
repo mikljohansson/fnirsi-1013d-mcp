@@ -6,6 +6,12 @@ Owner decisions are marked **(owner)**. The diagnostics and settings screens com
 `docs/plans/diagnostics-review.md`; the mockups of every new screen live in the Design artifact linked from
 `docs/plans/task-queue.md` ("Diagnostics view redesign").
 
+**Mockups, 2026-10-19 evening:** the makeover artifact (revision 28) belongs to a previous login and is not reachable from the
+current session; the Frequency response mode boards, the main-menu icon candidates and the Spectrum board with the slider row are
+on the artifact "1013D Bode mode" https://claude.ai/artifact/DfydC8HJgnemUw3EHenTGP (design: `docs/plans/bode-ui.md`). The
+artboard HTML and the generators (gen_ux: common.py, boards.py, bode.py, bode_v2.py, bode_final.py, bode_icon.py,
+patch_spectrum_slider.py) live in the coordinator session's scratchpad; copy them into docs/mockups/ before that session ends.
+
 ## 1. Vocabulary
 
 - **Mode**: changes what is measured and which controls exist. Scope, Spectrum analyser, Bode plot (when it ships).
