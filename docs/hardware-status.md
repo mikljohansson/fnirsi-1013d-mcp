@@ -985,4 +985,17 @@ Newest entries at the bottom. Format: date, who, what, result.
   jump) built with GCC 10 and pinned backups/fw-0.2.73_ad7b7e24.bin (sha256
   ad7b7e24dc929dc180adaa6ed72fff11d5c0a0e7fa0288dc063546e30b4c59fa); host tests and vectors green. To load when the scope is
   free of menus; then B1 / B2 / B6 of section 48 and the overview walk-through of section 49 (pass_ms first).
+- 2026-10-19 22:07-22:12: fw 0.2.73 loaded from the boot menu's FEL (the MCP server held COM10 after this session's tool calls, so
+  ENTER_FEL could not be sent; `fnirsi1013d-flash --no-fel`), `#VER fw=0.2.73,proto=1.22,fpga=0x1539`. Section 48 host-side checks:
+  B1 caps 0x7EC4B, bit 12 (order unverified) clear, bit 11 (read lag unverified) set, GET_LINK_STATS 68 entries ending in
+  adc_fullrate_by_data: pass. B6: 40 rate toggles 200 MSa/s <-> 100 MSa/s with a host capture each: enc_checked 128 -> 231,
+  enc_bad 0, recovered 0 (0.2.64 re-took 112 of 5798): pass. B2 (generator 1 kHz on CH1, trigger CH1 rising, pretrigger 200 of
+  1000): at 1 MSa/s plain the READ_RAW and READ_TRACE mid-level crossings agree within 0.55 sample over five captures (0.2.69: two
+  samples apart); with CIC2+FIR at 1 MSa/s identical to the hundredth; at 200 MSa/s the crossings disagree by up to 19 samples
+  both ways, which is the 0x1539 A-core fault on the slow 1 kHz edge (codes 128..145 crossed on every edge), not the lag: repeat
+  after 0x153A. B2 accepted at the decimated rates; caps bit 11 stays until the 200 MSa/s repeat. Scope view at 1 MSa/s, 100 us/div,
+  1 V/div both channels: GET_STATUS pass_ms 18 (max 111 at start-up) with the overview drawn (0.2.48 bench: 15 ms median without
+  it; the section 49 limit is +1 ms, so measure again against a build with the envelope skipped before deciding on the cache).
+  Screenshot scratchpad screen_2208_scope_overview_1kHz.png: the track holds both channels' envelopes over the whole record in
+  their colours. B3, B4, B5, B7 and the overview walk-through (section 49) wait for the owner.
 
