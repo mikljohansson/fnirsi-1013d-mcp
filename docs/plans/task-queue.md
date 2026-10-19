@@ -61,13 +61,23 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   200 MS/s and re-arm when it is set (no data check needed); on 0x1532-0x1537 run the data check on every full-rate arm instead of
   only after 0x0D. Fix the stored core-order convention (interleave tracker A-B model, 0x53 swap bit) to what 0x1538 guarantees.
   fw-cal4 retired at 400k (handoff section 37); new agent.
-- **Documentation site and write-ups** (owner 10-19 17:30): docs/ stays the single source, published with MkDocs Material via a
+- [~] **Documentation site and write-ups** (owner 10-19 17:30): docs/ stays the single source, published with MkDocs Material via a
   GitHub Pages workflow; three shelves: user guide (install, first run, calibration, each screen with a screenshot, generator),
   agent guide (MCP setup, measurement guide, worked examples with plots), engineering articles (calibration story, the ADC
   encode-phase fault, decimation filters and FIR, MMU and FFT, Bode design and bench, UX makeover). Tooling: tools/screenshots.py
   drives the scope through each state over USB (scope_screenshot) and saves named PNGs for reproducible screenshots; plots from
   MCP data saved with their generating command. Order: site skeleton + screenshot tool + user guide before the announcement
   (after the polish batch lands so the screens are final); articles at any pace. Dispatch a docs agent after fw-polish merges.
+  Done (branch docs-site, docs agent): [x] site skeleton (mkdocs.yml, User guide / Agent guide / Engineering nav, docs/guide/*,
+  docs/articles/index.md, docs/agent-setup.md), [x] .github/workflows/docs.yml (Pages deploy, no secret) and the `docs` CI job
+  (`mkdocs build --strict`), [x] tools/screenshots.py (+ `--simulator`, mcp/tests/test_screenshots.py). Owner, once: Settings >
+  Pages > Source: GitHub Actions (docs/releasing.md section 6). Remains: (1) screenshots on the unit once fw-screen (READ_SCREEN
+  handler) lands: `python tools/screenshots.py --port COM10 --generator` for the automatic states, then the manual states one
+  by one with the screen opened by hand (`--only spectrum`, diagnostics, settings, usb-drive, first-start, calibration-zero,
+  generator, saved-pictures, saved-waveforms); check that READ_SCREEN works while a menu is open; (2) the user guide text per
+  screen after fw 0.2.70 (every page carries a "to be written after fw 0.2.70" note); (3) the six articles in
+  docs/articles/index.md; (4) agent guide worked examples with plots and the command that made each; (5) README screenshot block
+  can point at docs/screenshots/*.png.
 - [~] **FPGA ADC data capture window (was: MCU-readout bit mixing)** (0x1539 flashed 20:06: readout fixed, capture window still wrong on the A cores; 0x153A = programmable capture phase + training, fpga-gen8) (root cause of the wizard failure, bench 18:35; 0x1539 fix by fpga-gen8 first, features after; fw-cal5 workaround: zero measured off-centre; a flash session follows). Was: **Wizard measurement setup fault** (fw-cal5 running, 10-19 18:00): zero step fails on 0x1538 with clean host data; see
   hardware-status 17:55. Deliverable includes a host-triggerable dry run so the coordinator can verify without the owner.
 - [x] **Frequency response mode UI** (0.2.69, bench pending; follow-ups above) (design docs/plans/bode-ui.md + artifact DfydC8HJgnemUw3EHenTGP; owner 19:15: variant 2 one pane two y axes without legend, "calibration post" in the instruction, frequency axis Log/Linear in the Display fold-out, two flagged cursors C1/C2 with the bottom-left readout box and delta row kept (19:25), Display variants Overlaid / Magnitude / Phase; questions 1-5 per the coordinator's recommendations; fw-freq dispatched as 0.2.69 together with the 10 samples/div viability minimum). Was: **Bode mode UI redesign** (owner 10-19 18:50: fw-bode remapped RUN/STOP and AUTO SET to sweep control, which breaks the fixed

@@ -1,0 +1,2 @@
+# The documentation site (mkdocs.yml, docs/): pip install -r tools/requirements-docs.txt; mkdocs build --strict
+mkdocs-material==9.7.7

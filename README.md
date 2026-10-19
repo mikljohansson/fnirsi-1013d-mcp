@@ -6,6 +6,8 @@
 
 Open firmware, FPGA changes and an MCP server for the FNIRSI 1013D tablet oscilloscope.
 
+Documentation site: <https://mikljohansson.github.io/fnirsi-1013d-mcp/> (user guide, agent guide, engineering; built from `docs/`).
+
 It replaces the scope application of the FNIRSI 1013D (Anlogic AL3A10 variant) with an open firmware that runs from
 the SD card, and adds a USB protocol and an MCP server so that an AI agent (Claude Code, Codex, anything that speaks
 MCP) can configure, capture and analyse while you keep using the touch screen. The stock firmware in the MCU flash is

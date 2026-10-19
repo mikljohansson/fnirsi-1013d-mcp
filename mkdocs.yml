@@ -1,0 +1,77 @@
+# Documentation site: docs/ is the single source, published to GitHub Pages by .github/workflows/docs.yml.
+# Local preview: pip install -r tools/requirements-docs.txt && mkdocs serve   (build check: mkdocs build --strict)
+site_name: FNIRSI 1013D open firmware
+site_description: Open firmware, FPGA and MCP tooling for the FNIRSI 1013D tablet oscilloscope
+site_url: https://mikljohansson.github.io/fnirsi-1013d-mcp/
+repo_url: https://github.com/mikljohansson/fnirsi-1013d-mcp
+repo_name: mikljohansson/fnirsi-1013d-mcp
+edit_uri: edit/main/docs/
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.details
+
+hooks:
+  - tools/mkdocs_hooks.py
+
+# Links from docs/ to repository files outside the site (firmware/, mcp/, plans/ ...) are rewritten to GitHub by
+# the hook; a link that is missing everywhere stays a warning and fails the strict build.
+validation:
+  omitted_files: info
+  absolute_links: info
+  unrecognized_links: warn
+
+# Working papers stay on GitHub (the hook links there); keep in step with EXCLUDED in tools/mkdocs_hooks.py.
+exclude_docs: |
+  plans/
+  mockups/
+  *.json
+
+nav:
+  - Home: index.md
+  - User guide:
+      - Install: guide/install.md
+      - Hardware preparation: hardware-prep.md
+      - First run: guide/first-run.md
+      - Calibration: guide/calibration.md
+      - The screens: guide/screens.md
+      - Generator: guide/generator.md
+      - Release 0.3.0: release-notes/0.3.0.md
+      - Glossary: glossary.md
+  - Agent guide:
+      - Setup: agent-setup.md
+      - MCP tools and safety tiers: mcp-tools.md
+      - Measurement guide: agent-measurement-guide.md
+  - Engineering:
+      - Articles: articles/index.md
+      - Protocol: protocol.md
+      - UI guidelines: ui-guidelines.md
+      - Flashing the FPGA from the MCU: fpga-flash-from-mcu.md
+      - Releasing: releasing.md
+      - Bench log: hardware-status.md

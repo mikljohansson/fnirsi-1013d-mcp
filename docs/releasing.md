@@ -15,6 +15,7 @@ Workflows: `.github/workflows/ci.yml`, `.github/workflows/release.yml`, the comp
 | mcp | ubuntu-24.04 and windows-latest, Python 3.12 and 3.13 | `pip install -e mcp[dev]`, then ruff with the selection from `mcp/AGENTS.md`, then pytest |
 | wheel | ubuntu-24.04 and windows-latest, Python 3.12 | `python -m build mcp` exactly as `release.yml` builds it, then `.github/scripts/wheel_smoke.py`: the wheel installed into a fresh venv outside the checkout, `fnirsi1013d-mcp --list-tools`, an MCP stdio session on the simulator, files under `FNIRSI_MCP_HOME`, clear errors for the checkout-only inputs |
 | docs-lint | ubuntu-24.04 | `docs/protocol-vectors.json` against the Python checker and the C checker; `CHANGELOG.md` structure; `tools/bitstreams.py check` (the committed FPGA bitstreams against `fpga/al3/dist/manifest.json` and `BITSTREAMS.md`) |
+| docs | ubuntu-24.04 | `mkdocs build --strict` on `mkdocs.yml` and `docs/` (pinned in `tools/requirements-docs.txt`): a broken link or a page missing from the site fails |
 
 The firmware job runs these steps in order:
 
@@ -290,6 +291,23 @@ release job requests `contents: write` in `release.yml`, so no repository settin
 
 The repository contains a vendored third-party binary,
 `research/tools/vendor/capstone/lib/capstone.dll`, of about 7 MB. Check its licence notice.
+
+### The documentation site (GitHub Pages)
+
+`docs/` is built with MkDocs Material (`mkdocs.yml`) and published at https://mikljohansson.github.io/fnirsi-1013d-mcp/
+by `.github/workflows/docs.yml` on every push to main that touches `docs/`, `mkdocs.yml` or the docs tooling. It uses
+the official `actions/upload-pages-artifact` and `actions/deploy-pages`, which need no secret and no deploy branch.
+
+**One-time setup by the owner** (a repository admin; the workflow cannot do it): GitHub repository Settings > Pages >
+Build and deployment > Source: **GitHub Actions**. Until that is set the Docs workflow's deploy job fails with
+"Pages not enabled" while its build job still passes; after setting it, run the workflow once from the Actions tab
+(Docs > Run workflow) or push any change under `docs/`. The site URL appears in the deploy job and under Settings >
+Pages.
+
+Local preview: `pip install -r tools/requirements-docs.txt`, then `mkdocs serve` (and `mkdocs build --strict` as CI runs
+it). Links from `docs/` to files outside the site (`../firmware/README.md`, `plans/`) are rewritten to GitHub by
+`tools/mkdocs_hooks.py`; screenshots are `![caption](screenshot:NAME)` lines that show the picture
+`docs/screenshots/NAME.png` (taken by `tools/screenshots.py`) or a "Screenshot pending" note.
 
 ## 7. Checklist from the first runs on GitHub (2026-10-18)
 
