@@ -55,8 +55,8 @@ $(OUT)/test_cal_wizard: test_cal_wizard.c test_util.h $(SRC)/cal_wiz.c $(SRC)/ca
 	$(CC) $(CFLAGS) -o $@ test_cal_wizard.c $(SRC)/cal_wiz.c $(SRC)/adc_cal.c
 
 # Screens: card formatting and fit with the device's font tables, main menu rows and mode rule (fw 0.2.51)
-UI_SRCS := $(SRC)/ui_fmt.c $(SRC)/ui_menu.c $(SRC)/font_2.c $(SRC)/font_3.c
-$(OUT)/test_ui: test_ui.c test_util.h $(UI_SRCS) $(SRC)/ui_fmt.h $(SRC)/ui_menu.h | $(OUT)
+UI_SRCS := $(SRC)/ui_fmt.c $(SRC)/ui_menu.c $(SRC)/ui_ctrl.c $(SRC)/font_2.c $(SRC)/font_3.c
+$(OUT)/test_ui: test_ui.c test_util.h $(UI_SRCS) $(SRC)/ui_fmt.h $(SRC)/ui_menu.h $(SRC)/ui_ctrl.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_ui.c $(UI_SRCS)
 
 $(OUT)/test_phosphor: test_phosphor.c test_util.h $(SRC)/phos_map.c $(SRC)/phos_map.h | $(OUT)
