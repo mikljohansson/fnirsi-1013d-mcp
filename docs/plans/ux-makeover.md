@@ -182,6 +182,14 @@ wizard (Cancel left, Calibrate / Continue / Save calibration right), confirmatio
 the first-run screen (Later left, Calibrate now right). Red is reserved for destructive actions (Clear calibration); Enter FEL is green, since a
 power cycle boots the card as usual.
 
+## 6c. How to read the mockups **(owner, 2026-10-19, implementation go)**
+
+The mockups are the UX and the design-language vision, not a pixel specification: implement the flows, the placement
+and the behaviour they show with the device's existing drawing language (its fonts, button shapes, colours), and do not
+shoehorn them in pixel for pixel. The new full-screen pages (Diagnostics, Settings, wizard, first run, USB drive,
+confirmations) keep the mockups' look: black ground, outlined cards and buttons, the state words in colour. The
+calibration wizard is tested in its redesigned four-screen form, not in the fw 0.2.50 interim one.
+
 ## 7. Implementation order
 
 1. Main menu rows and the USB drive screen text (small, no new data).
