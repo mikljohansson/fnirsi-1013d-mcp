@@ -502,21 +502,22 @@ static void test_foldout(void)
   int    rtc, n;
   uint32 x, y;
 
-  T_EQ(ui_fo_rows(1, ids), 5);
+  //fw 0.2.63: File message timeout is in Settings > Controls only
+  T_EQ(ui_fo_rows(1, ids), 4);
   T_EQ(ids[0], UI_FO_SCREEN);
   T_EQ(ids[1], UI_FO_GRID);
-  T_EQ(ids[2], UI_FO_FILEMSG);
-  T_EQ(ids[3], UI_FO_TIME);
-  T_EQ(ids[4], UI_FO_OTHER);
-  T_EQ(ui_fo_rows(0, ids), 4);
+  T_EQ(ids[2], UI_FO_TIME);
   T_EQ(ids[3], UI_FO_OTHER);
-  T_EQ(ui_fo_height(1), 295);
-  T_EQ(ui_fo_height(0), 236);
+  T_EQ(ui_fo_rows(0, ids), 3);
+  T_EQ(ids[2], UI_FO_OTHER);
+  T_EQ(ui_fo_height(1), 236);
+  T_EQ(ui_fo_height(0), 177);
   T_EQ(ui_fo_row_top(0, UI_FO_TIME), 0);
   T_EQ(ui_fo_row_top(1, UI_FO_SCREEN), 46);     //the brightness sliders open beside rows 0 and 1 (y 46, 104)
   T_EQ(ui_fo_row_top(1, UI_FO_GRID), 105);
-  T_EQ(ui_fo_row_top(1, UI_FO_OTHER), 282);
-  T_EQ(ui_fo_row_top(0, UI_FO_OTHER), 223);
+  T_EQ(ui_fo_row_top(1, UI_FO_TIME), 164);
+  T_EQ(ui_fo_row_top(1, UI_FO_OTHER), 223);
+  T_EQ(ui_fo_row_top(0, UI_FO_OTHER), 164);
 
   for(rtc = 0; rtc < 2; rtc++)
   {

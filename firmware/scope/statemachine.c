@@ -1221,21 +1221,6 @@ void handle_main_menu_touch(void)
             gridbrightnessopen = 1;
           }
         }
-        //File message timeout (1.00o5's notification confirmation): a tap toggles wait for a tap / 0.7 s
-        else if(row == UI_FO_FILEMSG)
-        {
-          //Close any of the sub menus if open
-          close_open_menus(0);
-
-          //Toggle the file message timeout and show it while touched
-          scopesettings.confirmationmode ^= 1;
-          scope_system_settings_filemsg_item(1);
-
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release();
-
-          scope_system_settings_filemsg_item(0);
-        }
         //Time and date: 1.00o5's editor beside the fold-out
         else if(row == UI_FO_TIME)
         {

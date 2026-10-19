@@ -26,14 +26,14 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 //The fold-out beside the main menu: 1.00o5's column (x 150, 244 wide, from y 46, one row per 59 px), its rows top to
 //bottom. Time and date only with a clock module. (fw 0.2.55-0.2.56 had an interim Baseline calibration row; fw 0.2.59
-//moved it to Diagnostics, Calibrate.)
+//moved it to Diagnostics, Calibrate. fw 0.2.63 (owner): File message timeout left the fold-out, it is set once and
+//lives in Settings > Controls only.)
 
 #define UI_FO_SCREEN          0
 #define UI_FO_GRID            1
-#define UI_FO_FILEMSG         2
-#define UI_FO_TIME            3
-#define UI_FO_OTHER           4
-#define UI_FO_MAX_ROWS        5
+#define UI_FO_TIME            2
+#define UI_FO_OTHER           3
+#define UI_FO_MAX_ROWS        4
 
 #define UI_FO_X               150
 #define UI_FO_TOP             46
@@ -41,7 +41,7 @@
 #define UI_FO_PITCH           59
 
 int    ui_fo_rows(int rtc, uint8 *ids);              //the shown rows' ids, top to bottom; returns the count
-uint32 ui_fo_height(int rtc);                        //rows x pitch (295 with the clock module, 236 without)
+uint32 ui_fo_height(int rtc);                        //rows x pitch (236 with the clock module, 177 without)
 uint32 ui_fo_row_top(int rtc, int id);               //first y of the row's hit area, 0 for a row not shown
 int    ui_fo_row_at(int rtc, uint32 x, uint32 y);    //the row id under a touch, -1 outside (rows are contiguous)
 

@@ -14,7 +14,6 @@ int ui_fo_rows(int rtc, uint8 *ids)
 
   ids[n++] = UI_FO_SCREEN;
   ids[n++] = UI_FO_GRID;
-  ids[n++] = UI_FO_FILEMSG;
 
   if(rtc)
     ids[n++] = UI_FO_TIME;

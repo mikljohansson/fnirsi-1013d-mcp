@@ -6254,7 +6254,6 @@ void scope_open_system_settings_menu(void)
   //Display the menu items
   scope_system_settings_screen_brightness_item(0);
   scope_system_settings_grid_brightness_item(0);
-  scope_system_settings_filemsg_item(0);
 
   if(sys_fo_rtc())
     scope_system_settings_RTC_settings_item(0);
@@ -6461,15 +6460,6 @@ static void sys_fo_row(int id, int mode, const uint8 *icon, uint32 iconh, const 
 void scope_system_settings_other_settings_item(int mode)
 {
   sys_fo_row(UI_FO_OTHER, mode, Other_settings_icon, 24, "Other", "settings", 0);
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-//File message timeout: 1.00o5's "Notification confirmation" (scopesettings.confirmationmode), which decides whether
-//file messages such as "Failed to create file" wait for a tap or close after 0.7 s
-void scope_system_settings_filemsg_item(int mode)
-{
-  sys_fo_row(UI_FO_FILEMSG, mode, confirmation_icon, 24, "File message", "timeout", scopesettings.confirmationmode ? "tap" : "0.7 s");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
