@@ -31,7 +31,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.70-screen - 2026-10-19 (protocol 1.21, unchanged; provisional number, branch fw-screen)
+#### 0.2.70 - 2026-10-19 (protocol 1.21, unchanged)
 
 - READ_SCREEN (0x0401) is built: the SCREENSHOT capability is set and `scope_screenshot` returns the panel's 800 x 480
   RGB565 framebuffer (`maindisplaybuffer`) in 12 requests of 40 rows; E_BAD_ARG for rows outside 0..480, E_OVERFLOW

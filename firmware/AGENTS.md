@@ -4,7 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
-**Branch fw-screen (2026-10-19): fw 0.2.70-screen provisional, protocol 1.21 unchanged: READ_SCREEN built (cap SCREENSHOT), section 46.**
+**Branch fw-screen (2026-10-19): fw 0.2.70, protocol 1.21 unchanged: READ_SCREEN built (cap SCREENSHOT), section 46.**
 **Branch fw-bode (2026-10-19): fw 0.2.66, protocol 1.20 (row 60): the Bode plot on the device (bode_dsp / bode_sweep / bode_view / pc_bode, BODE_CTRL / READ_BODE), section 42.**
 **Branch fw-polish1 (2026-10-19): fw 0.2.63 provisional, protocol unchanged: UI polish batch 1 (owner's walk-through of 0.2.59, items a-q), section 39.**
 **Branch fw-ui4 (2026-10-19): fw 0.2.59 provisional, protocol unchanged: UX makeover step 4 (Diagnostics as a main-loop
@@ -215,7 +215,7 @@ Unverified (caps UNVERIFIED bits stay set until they pass; `BENCH: Tn` comments 
 T1 ZLP (passed on Windows and Linux), T2 throughput (1.0 MB/s LOCAL, 2.35 MB/s REMOTE on Windows, >1 MB/s Linux),
 T3 read_lag / stale first byte (DEBUG_FPGA image), T4 A/B interleave order (generator loopback, 200 MS/s),
 T5 trigger_addr alignment, T6 0x18 after auto timeout, T7 FORCE via 0x1A=0 (PC_DEBUG), T8 volts per code with a DC
-reference on every range, T9 RGB565 framebuffer (READ_SCREEN built in 0.2.70-screen, section 46), T10 stock trigger core (needs the stock
+reference on every range, T9 RGB565 framebuffer (READ_SCREEN built in 0.2.70, section 46), T10 stock trigger core (needs the stock
 bitstream restored from backups/). Procedures: protocol section 12, README section 5 checklist.
 
 ## 8. Version ladder (bench-relevant images)
@@ -3014,7 +3014,7 @@ off the track or a drag that changes the span's width; a sweep that does not res
 settings after a cancel; a CSV row count different from the measured points; the T CURSOR / SAVE WAVE buttons acting on
 the scope's cursors / waveform files in this mode; a time/div under ten samples per division offered anywhere.
 
-## 46. READ_SCREEN (fw-screen, fw 0.2.70-screen provisional, protocol 1.21 unchanged)
+## 46. READ_SCREEN (fw-screen, fw 0.2.70, protocol 1.21 unchanged)
 
 Branch `fw-screen` from main 6c1e5bc. Commits: 350823e (handler, HAL, cap, host test, vectors on both sides,
 mcp/tests/test_read_screen.py), 59d93d8 (scope_screenshot description), then docs and this section. PC_FW_VERSION not

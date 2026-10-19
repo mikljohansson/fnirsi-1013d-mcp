@@ -345,6 +345,6 @@ from there and moves items to "Dispatched". Add host items you discover there, n
 5. Metal-detector tools (lock-in amplitude/phase, PI target comparison, ground balance, monitor); the Bode work
    covers the sweep.
 6. Adopt ACQUIRE_AVG / READ_SCREEN / READ_LIVE when the firmware ships them (simulator has them). READ_SCREEN built
-   in firmware (fw 0.2.70-screen, branch fw-screen, firmware/AGENTS.md section 46), bench pending (T9);
+   in firmware (fw 0.2.70, branch fw-screen, firmware/AGENTS.md section 46), bench pending (T9);
    `scope_screenshot` needs no change, tests/test_read_screen.py checks the wire format against the vectors.
 7. GET_BAD_FRAME (0x0008) decode and dump on E_BAD_CRC (the cmd id is in `Cmd`, no client method yet).
