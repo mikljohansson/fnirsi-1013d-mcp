@@ -70,6 +70,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   (after the polish batch lands so the screens are final); articles at any pace. Dispatch a docs agent after fw-polish merges.
 - **FPGA MCU-readout bit mixing near code 128** (root cause of the wizard failure, bench 18:35; 0x1539 fix by fpga-gen8 first, features after; fw-cal5 workaround: zero measured off-centre; a flash session follows). Was: **Wizard measurement setup fault** (fw-cal5 running, 10-19 18:00): zero step fails on 0x1538 with clean host data; see
   hardware-status 17:55. Deliverable includes a host-triggerable dry run so the coordinator can verify without the owner.
+- **Bode mode UI redesign** (owner 10-19 18:50: fw-bode remapped RUN/STOP and AUTO SET to sweep control, which breaks the fixed
+  right-bar meanings; a designer (ux-bode, Opus) is producing the Bode mode mockup: action page with the standard slot meanings,
+  CTRL page with Display / Sweep / Thru / Grid, cards via MEASURES, docs/plans/bode-ui.md with the control map and a self-review).
+  Then a firmware batch implements it; until then the Bode view keeps its interim controls (menu row moves in polish batch 2).
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
@@ -144,7 +148,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   d3a16bb, simulator-tested, bench pending in "MCP / host"): MCP tool `scope_bode_sweep` host-driven with the existing
   commands (SET_GEN raw 50 MHz / M tones, SET_DECIM CIC3+FIR, coherent READ_RAW layout 2, single-bin DFT), thru-calibration, fixed range
   first, then down-ranging; bench first on an RC low-pass R 1.6 kOhm / C 10 nF (fc 9.95 kHz) with DUT ground on the USB shell.
-- [ ] **Bode analyser, device steps D1-D5** after the host version proves the numbers: display mode with magnitude/phase panes,
+- [x] **Bode analyser, device steps D1-D5** (fw-bode 0.2.66 merged 18:20; owner 18:45: Bode plot is a main-menu mode row after Spectrum analyser at a 52 px pitch, eight rows, removed from the generator pop-over -> fw-polish2 item 6; the earlier "entry from the generator menu" note is superseded). Was: after the host version proves the numbers: display mode with magnitude/phase panes,
   BODE_CTRL / READ_BODE. Owner decision: entry from the generator menu (the main menu has no eighth row).
 - [ ] **docs/protocol.md tidy** (docs-gen1 findings): row 32 says GET_STATUS bytes 42-43 are zero while rows 41/45 define ext_flags and
   display_mode there (add a "superseded" note); row 49 calls CIC+FIR the eventual default while CIC2 is the default since 0.2.44; row 51
