@@ -1,5 +1,8 @@
 # Frequency response mode: UI design (the Bode plot screen)
 
+Regenerating the boards: in the coordinating session's scratchpad `gen_ux/`, run `python bode_final.py <dir>` (every Frequency response board), `python bode_icon.py <dir>` (menu icon) and `python boards.py <dir> Spectrum` after `patch_spectrum_slider.py` (the Spectrum slider).
+The generators import `common.py`, `boards.py`, `bode.py` and `bode_v2.py` from the same folder; publish `<dir>`'s files to the Design artifact linked below.
+
 The screens of the Frequency response mode, redesigned to follow `docs/ui-guidelines.md` after fw-bode's interim UI
 (fw 0.2.66, `firmware/AGENTS.md` section 42). The owner rejected that UI on 2026-10-19 (18:50): it remapped RUN/STOP and
 AUTO SET to sweep control and was entered from the generator menu. CTRL kept its meaning in fw 0.2.66: its page
@@ -127,8 +130,10 @@ The chart **(owner)**: one pane over the trace area, two y axes, no legend.
 
 **The slider: Start..Stop over the sweepable range (owner).**
 
-- **Track**: 100 Hz .. 10 MHz on a log scale over the 720 px inside the track, the range the owner named. The window
-  spans Start..Stop on the same scale; 5 kHz .. 500 kHz draws x 250..538.
+- **Track**: 1 Hz .. 10 MHz on a log scale, seven decades over the 720 px inside the track (about 103 px per decade)
+  **(coordinator, owner to veto)**. That is the Sweep fold-out's full range for Start and Stop, so the window never
+  runs off the track. The window spans Start..Stop on the same scale: 5 kHz .. 500 kHz draws x 385..591, the default
+  100 Hz .. 1 MHz x 211..622.
 - **Drag**: the window follows the finger. Start and Stop move together by whole steps of the 1-2-5 table, the same
   number of steps each. That keeps their ratio exactly when the span is a whole number of decades, and within one step
   otherwise. Both stop at the track ends, so the window never changes width by being pushed.
@@ -142,9 +147,8 @@ The chart **(owner)**: one pane over the trace area, two y axes, no legend.
 - **Consequences**: the new span is a screen change, so the host's exact settings stop applying (`host_cfg_valid` = 0).
   A thru for the old span turns stale, and its card and warning say so. Start and Stop are saved in word 219 as from
   the fold-out.
-- **Edge case**: a Start below 100 Hz (the fold-out allows 1 Hz) pins the window's left edge to the track's left end.
-  It is drawn without its left border, so the window reads as running off the track. Owner question 7.
-- **During AUTO SET's overview** the window spans the whole track (100 Hz .. 10 MHz) and dragging is ignored.
+- **During AUTO SET's overview** the window spans the overview's 100 Hz .. 10 MHz (x 211..725), and dragging is
+  ignored.
 
 The row costs the pane 12 px (two px per division) and moves the cards up to the Scope's y 426. The C1 / C2 readout box
 moves with the pane's bottom, to y 342..394.
@@ -451,7 +455,7 @@ The guidelines say that where a mode drives a top-bar control, the button shows 
 
 | Control | Does | Firmware today (0.2.68) | Change |
 |---|---|---|---|
-| Slider row | Start..Stop over 100 Hz .. 10 MHz; drag pans both, then re-sweeps | none (no slider in the mode) | the Scope's slider row at y 452..472 drawn from Start / Stop; the drag handler (fw 0.2.64's follow-the-finger rule) steps both indices together; on release `bode_stop(e, 1)` and `bv_start`, single when stopped; pane to six divisions of 56 px, labels y 400, cards y 426 (section 2) **(owner)** |
+| Slider row | Start..Stop over 1 Hz .. 10 MHz (log); drag pans both, then re-sweeps | none (no slider in the mode) | the Scope's slider row at y 452..472 drawn from Start / Stop; the drag handler (fw 0.2.64's follow-the-finger rule) steps both indices together; on release `bode_stop(e, 1)` and `bv_start`, single when stopped; pane to six divisions of 56 px, labels y 400, cards y 426 (section 2) **(owner)** |
 | Main menu row | opens the mode | `ui_mm_labels[UI_MM_BODE]` "Bode plot"; grey and inert when `bode_view_available()` is 0; two parallel lines as the icon | label "Frequency" / "response"; the low-pass icon of section 1a; a tap on the grey row shows the reason (section 6); entry in roll mode shows the roll note |
 | RUN/STOP | continuous sweeps / stop after the point | `bode_view_service`: RUN starts `bv_start(0, 0)` and repeats; STOP gives `bode_stop(e, 0)` | none (the meaning stays; section 3.1) |
 | AUTO SET | auto span and range, then RUN | `bode_view_autoset` = one sweep (`bv_start(1, 0)`); `bode_view_auto_running` | overview plus `bode_auto_span` (section 3.2); "Auto..." and the cancel as now |
@@ -613,5 +617,5 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
 6. Answered **(owner)**: variant 2's chart without the legend; cursors C1 and C2 with the readout box at the bottom
    left, the overlap accepted; Display Overlaid / Magnitude only / Phase only, no two-pane layout; Frequency axis Log /
    Linear in the Display fold-out.
-7. A Start below the slider's 100 Hz left end: let the window run off the track as drawn, extend the track to
-   1 Hz (the fold-out's lowest Start; the window gets narrower for the same span), or limit Start to 100 Hz?
+7. Answered **(coordinator, owner to veto)**: the track covers the fold-out's full 1 Hz .. 10 MHz, so a Start below
+   100 Hz stays on the track. A given span draws narrower than on a 100 Hz track.
