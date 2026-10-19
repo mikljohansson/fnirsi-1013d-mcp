@@ -139,7 +139,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   scope where time/div drives the rate: zooming out past the record lowers the rate (memory depth kept), zooming in past ten samples
   per division raises it; the ACQ menu's rate chips stay for a manual choice and the snap notice stays. Apply the same rule to the
   time/div chips in the ACQ menu and to SET_TIMEBASE where the host asks for a time/div (docs/protocol.md note). Design the rule
-  in one paragraph in docs/ui-guidelines.md first (what changes, what is kept), then implement.
+  in one paragraph in docs/ui-guidelines.md first (what changes, what is kept), then implement. Owner 22:22 **(owner)**: the zoom must be one
+  monotonic ladder that never gets stuck: from either end (200 MSa/s at the fastest viable time/div; the slowest rate at the slowest
+  time/div before roll) the next tap in that direction does nothing and the opposite direction works at once; no cell reachable by
+  zooming that cannot be left by zooming; host test walks the ladder both ways from both ends at every starting rate.
 - **AUTO SET in Frequency response fails about 60 % on 0x1539** (owner 22:20): expected from the capture fault (pre-scan clips at
   5 V/div); re-test on 0x153A before any engine change.
 - **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
