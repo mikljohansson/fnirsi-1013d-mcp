@@ -1012,7 +1012,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   bf551df436311cf039c8450147af08bea663881f2e22f368733c3d96770e63d7), FEL-loaded 22:39 by ENTER_FEL
   (`#VER fw=0.2.76,proto=1.22,fpga=0x1539`). Owner walk-through: firmware/AGENTS.md section 50 (tap in the track, zoom across
   the range at 3k / 6k / 16k memory with a tap at each end, hand-picked rate then zoom, ACQ time/div boxes, STOP notice, roll).
-- 2026-10-19 22:45: owner on 0.2.76: the Scope track tap works, the zoom ladder "seems to work great". Two reports: (1) after
+- 2026-10-19 22:45-22:52: owner on 0.2.76: the Scope track tap works, the zoom ladder "seems to work great". Two reports: (1) after
   switching Filter from Off to a filter and back to Off, the memory depths above 6000 stay hidden in the ACQ menu (queued). (2) At
   200 MSa/s and 2 us/div on the RC filter, CH2 shows large noise at the same point of the pulse. Host dump at the owner's settings
   (both channels 1 V/div DC, divider 0, filter off; scratchpad dump_2245_200MSs.npz, screen_2245_ch2_noise.png): CH2 core A has
