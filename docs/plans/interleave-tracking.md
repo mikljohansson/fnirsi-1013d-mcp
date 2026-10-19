@@ -56,8 +56,10 @@ polynomials, in integer arithmetic (no float):
     d = t0 - q m2 - e mu
 
 **Identifiability** (what the accumulated signal allows):
-- q only when w >= 256 codes^4 (x visits at least three separated levels: a sine of +-30 codes, or a quiet input
-  followed by a square within a few tau); else q is held at its last value (start 0).
+- q only when w >= 65536 codes^4 and w >= v^2 / 4 (x visits at least three separated levels: a sine of about +-27
+  codes or more, or a quiet input followed by a square within a few tau; a sine or three equal levels give about
+  v^2 / 2, two noisy levels far less); else q is held at its last value (start 0). The first draft's 256 codes^4 let
+  the noise within the post square's two levels (w about 3600) pull q towards 0 (host test check c).
 - e only when v >= 64 codes^2 (spread >= 8 codes RMS); else held. A quiet input (generator off, probes shorted) tracks
   the offset only.
 - d always, with the held q and e.
