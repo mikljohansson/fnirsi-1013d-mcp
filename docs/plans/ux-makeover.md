@@ -73,8 +73,8 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
 - **Right bar, CTRL page, Spectrum** **(owner)**: CTRL; Display (fold-out: Spectrum, Waterfall, Density, each with an
   icon, the same button name and slot as in Scope); Analysis (fold-out: FFT
   length, Window, Average, Reset, and first of all **Analyse: CH1 / CH2 / both**, today's strip channel selector that also
-  sets the dBV or dBA unit and which channel Auto analyses); Axis (fold-out: Scale, Ref level); Grid; the CH1 and CH2 V/div
-  steppers; 50 % TRIG. The spectrum strip goes away; Span and Start keep their gestures. The waterfall's and density's
+  sets the dBV or dBA unit and which channel Auto analyses, then Scale and Ref level, folded in from the former Axis
+  button so both CTRL pages share one geometry **(owner)**); Grid; the CH1 and CH2 V/div steppers; 50 % TRIG. The spectrum strip goes away; Span and Start keep their gestures. The waterfall's and density's
   colour legend is drawn at the top-right of the plot as a readout; the waterfall's time span and the phosphor's wfm/s
   are cards. The record-position slider is hidden in Spectrum (it shows nothing useful there). Fold-outs open to the
   left of the bar over the plot's right edge and close on a second tap of their button, a tap outside, or another
@@ -186,7 +186,7 @@ power cycle boots the card as usual.
 
 1. Main menu rows and the USB drive screen text (small, no new data).
 2. The CTRL pages (Display fold-outs with icons and the phosphor parameters, Trace style, Grid, the steppers; Display,
-   Analysis with Analyse, Axis in Spectrum), the strips and the spectrum header removed with their readouts as cards,
+   Analyse with the channel selector, Scale and Ref level in Spectrum), the strips and the spectrum header removed with their readouts as cards,
    Trace style out of ACQ, AUTO SET as the spectrum's Auto, hidden right-bar slots in Spectrum, warnings top-middle,
    the version string out of the top bar, the top bar chips and the measurement cards rebuilt.
 3. Settings fold-out trim and the full Settings screen.
