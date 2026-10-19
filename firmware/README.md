@@ -957,21 +957,52 @@ Where the controls of 1.00o5's Other settings menu went (the menu is gone):
 | Load Ref on start | Settings > Files > Reference traces at power-on |
 | RTC On/Off (RTC editor) | still in the editor; also Settings > Clock > Clock |
 
+### Screens: UI polish batch 2 (fw 0.2.68)
+
+The owner's walk-through of 0.2.65 (2026-10-19 18:00). What changed:
+
+- RUN/STOP: one run state (`ui_run_view`, ui_ctrl.h) for the top bar chip and the right bar button. It is the UI's
+  run state, its single-shot wait, and a host acquisition in progress: a host ARM armed or triggered, or one that
+  finished less than 1 s ago, so a burst of host captures (averaging, a Bode sweep) reads RUN instead of flickering.
+  The chip shows the state (green RUN, orange WAIT for an armed single, red STOP). The button shows the action a tap
+  does (owner, reverses 0.2.63): green "RUN" while stopped, red "STOP" with white text while running or waiting (an owner
+  exception to red-is-destructive, `docs/ui-guidelines.md` section 3). Every main-loop pass redraws whichever of the two
+  shows a stale state (`pc_run_follow`), whoever changed it: the screen, a finished single shot, the host's RUN, STOP or
+  ARM. STOP during a host acquisition aborts the host single (its WAIT answers E_ABORTED) and the UI stays stopped
+  (before, a tap there started the UI's own RUN).
+- Main menu: Settings shows the spanner and screwdriver of the Other settings row (the drawn cogwheel read as a star).
+  The Scope sine is 2 px shorter (y 9..28 of the row's button; it reached the top before) and drawn over x / y axes
+  through its centre in a darker grey (0x707070).
+- Time/div snap after a sample rate, memory or Filter change: the snap now takes the same path as choosing the time/div
+  by hand in the ACQ menu (`acq_view_set_tb` and `acq_view_fit` share `acq_view_set`: the index, the trigger point kept
+  inside the record, then a fresh UI conversion). test_tb_view checks that the state after a snap equals the state
+  after a manual set of the same index, for every rate, depth, trigger sample, start time/div and trigger point.
+- Screen brightness is one setting: the top bar's sun switches to 100 % and back to the value it came from; the
+  fold-out's slider and the Settings screen's - / + show and set the same value. The sun is yellow at 100 % and white
+  below, and follows the slider. 1.00o5 kept a separate max-light flag: the sun switched the backlight to maximum while
+  the slider kept showing (and, when opened, restored) the stored value. The settings sector keeps the value the sun
+  returns to in 1.00o5's max-light byte as 0x80 | value; an older sector with the flag on loads as 100 %.
+- Calibration wizard: "Step M of N" at the right end of the title line (four screens, three on a bitstream without the
+  generator).
+- Diagnostics > Calibration: Calibrate, DC shift trim, Volts calibration and Clear calibration are one row at the
+  bottom (y 420, as on the other tabs), four 185 x 44 px buttons 12 px apart across the page, Clear calibration last.
+  The trim's "On: CTRL on the scope opens the trim." and the page's note sit above the row.
+
 ### Screens: UI polish batch 1 (fw 0.2.63)
 
 The owner's walk-through of 0.2.59 (`docs/plans/task-queue.md` "UI polish batch 1", items a-q). The sections above say
 what each screen does; this is what changed:
 
-- Main menu icons: Settings is a cogwheel (21 x 21 px, drawn pixel by pixel: a ring and eight teeth), Scope one period of
-  a sine wave (25 px, 1 px stroke). The 1.00o5 bitmaps `system_settings_icon` and `confirmation_icon` are gone.
+- Main menu icons: Settings was a drawn cogwheel (replaced by the Other settings spanner in 0.2.68), Scope one period of
+  a sine wave (25 px, 1 px stroke; axes behind it since 0.2.68). The 1.00o5 bitmaps `system_settings_icon` and
+  `confirmation_icon` are gone.
 - CTRL page: Grid is a whole-button toggle (green on, grey off, the word "Grid"). Trace style is grey and does nothing in
   X-Y (the Lissajous has its own line). The Display fold-out's X-Y icon is a figure 8 leaning right. Trace style offers
   Linear, Dots, Peak: 1.00o5's Pro drew the per-column minimum and maximum as two outlines without the fill between
   them; on a normal signal both lie within a pixel and it looked like Linear, on a busy one it showed Peak's band
   without the fill. A saved 3 loads as Linear.
-- RUN/STOP (right bar) shows the state: green "RUN" while running (a tap stops), amber "Stopped" (13 px font) while
-  stopped (a tap runs); red stays for destructive actions. It is redrawn when the PC starts or stops the acquisition
-  (`pc_hal_ui_set_run`; it stayed green before). The top bar's RUN / WAIT / STOP chip is unchanged.
+- RUN/STOP (right bar) showed the state: green "RUN" while running, amber "Stopped" while stopped. Replaced in 0.2.68
+  (the button shows the action, the chip the state; see "UI polish batch 2").
 - Spectrum Display fold-out, Waterfall and Density: a Channel row (CH1 / CH2) names the channel the history shows; a tap
   takes the other one (with Analyse CH1 + CH2 both spectra stay computed and the history follows the choice; with a
   single-channel Analyse, Analyse follows). Grey when the other channel is off. Not saved, like Analyse. One history at

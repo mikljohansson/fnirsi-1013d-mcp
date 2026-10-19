@@ -31,6 +31,22 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.68 - 2026-10-19 (protocol 1.19, unchanged; provisional number)
+
+- UI polish batch 2 (firmware/README.md "Screens: UI polish batch 2"). RUN/STOP follows the host (95c1033): the top bar
+  chip and the right bar button take one run state that includes a host acquisition in progress, and every pass redraws
+  a stale one; the chip reads RUN while the PC captures. The button now shows the action: green "RUN" while stopped,
+  red "STOP" while running (owner exception to red-is-destructive). STOP during a host capture aborts it.
+- Main menu: Settings uses the Other settings spanner icon; the Scope sine is 2 px shorter, over grey axes (ec9f319).
+- The time/div snap after a sample rate change takes the same path as a manual time/div choice, with a host test
+  that both leave the same state (a9daba6). Owner report: after the snap the trace cycled until time/div was set by
+  hand once. Bench to confirm.
+- Screen brightness: the sun and the brightness slider are one setting (d51dcb7). The sun toggles 100 % and the value
+  it came from; the slider shows the current value. The settings sector's max-light byte now holds that value
+  (0x80 | value); an older sector with max light on loads as 100 %.
+- Calibration wizard: "Step M of N" on the title line. Diagnostics > Calibration: the four buttons in one bottom
+  row, Clear calibration last (3dc0ed9).
+
 #### 0.2.65 - 2026-10-19 (protocol 1.19, unchanged)
 
 - Measurements v2 (8749ffe; firmware/README.md "Screens: Measurements v2"). MEASURES now opens a list per mode: the
