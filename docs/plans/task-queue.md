@@ -131,7 +131,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - **Slider track geometry revision** (owner 10-19 22:11 after seeing 0.2.73, slider-overview.md decision 7): the window is a box
   again (four 1 px borders, 1 px margin), overview full colour inside and dimmed outside; the track's top border line removed (the
   plot pane's outline is the separation); all three modes; boards regenerated. Dispatch fw-over2 at once (small).
-- **Scope tap-to-jump and zoom stepping** (owner 10-19 22:20 on 0.2.73; fw-zoom dispatched): (a) a tap in the Scope's slider
+- [x] **Scope tap-to-jump and zoom stepping** (fw 0.2.76, bench pending) (owner 10-19 22:20 on 0.2.73): (a) a tap in the Scope's slider
   track outside the window does nothing (Spectrum works): find why the Scope path is not reached (the tap bands / extended drag
   area / the record-position slider handler order) and fix it with a host test. (b) Tap zoom on the plot: the left side (zoom out)
   does nothing where the slower time/div is not viable at the current rate or exceeds the record, while the right side zooms in.
@@ -387,6 +387,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   sweep. Open (queue): the simulator lacks reason 8 and the new header rule (mcp item); a single sweep started from the CTRL page
   leaves the bar on that page where RUN/STOP is not visible (owner to decide: jump back to page one?); after a sweep the generator
   chip shows the user's generator although the pin is off. Loaded 21:30 as backups/fw-0.2.71_1264e26c.bin; walk-through pending.
+- fw-zoom (done 22:35, about 240k tokens, merged 22:38 as fw 0.2.76, pinned backups/fw-0.2.76_bf551df4.bin, loaded 22:39, handoff
+  firmware/AGENTS.md section 50 with the bench list): Scope slider tap jumps at touch-down (0.2.73 only jumped after a 6 px move);
+  zoom ladder: each tap or ACQ time/div box sets the time/div with the fastest rate whose record covers ten divisions at ten or
+  more samples per division at the current memory depth, a hand-picked rate holds until the next zoom step, ends 50 ns/div at
+  200 MSa/s and 200 ms/div at 1 kSa/s, taps at an end do nothing; test_acq_view walks every cell at nine depths. Agent choices
+  for the owner: stopped / waveform viewer keep the record's rate and show "Stopped: press RUN to zoom further" at the limit; a
+  tap no longer crosses into or out of roll (the ACQ mode button does); SET_TIMEBASE by UI index unchanged (protocol.md note).
 - fw-spec (done 22:31, about 70k tokens, merged 22:33 as fw 0.2.75, pinned backups/fw-0.2.75_4b9907dc.bin, not loaded: goes on
   the unit with fw-zoom): Waterfall and Density legends removed (spectrum.c spec_draw_legend gone), section 51.
 - fw-over2 (done 22:17, about 120k tokens, merged as fw 0.2.74, loaded 22:19): decision 7 geometry in all three modes, boards

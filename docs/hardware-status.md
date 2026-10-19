@@ -1006,4 +1006,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   (the ten-samples-per-division viability or the record length blocking the slower time/div at the current rate; owner wants the
   zoom to step the sample rate and time/div together "so it pretty much just works"); AUTO SET in Frequency response worked for
   some points and failed for about 60 % (the 0x1539 A-core fault through the pre-scan ranging, as at 20:51; recheck on 0x153A).
+- 2026-10-19 22:33-22:39: fw 0.2.75 (Spectrum legends removed) pinned backups/fw-0.2.75_4b9907dc.bin (sha256
+  4b9907dcc7ffc47042765f541118f9e1b35747800e273eed130b1e53b1a394fa, never loaded); fw 0.2.76 (fw-zoom: Scope slider tap at
+  touch-down, the zoom ladder) pinned backups/fw-0.2.76_bf551df4.bin (sha256
+  bf551df436311cf039c8450147af08bea663881f2e22f368733c3d96770e63d7), FEL-loaded 22:39 by ENTER_FEL
+  (`#VER fw=0.2.76,proto=1.22,fpga=0x1539`). Owner walk-through: firmware/AGENTS.md section 50 (tap in the track, zoom across
+  the range at 3k / 6k / 16k memory with a tap at each end, hand-picked rate then zoom, ACQ time/div boxes, STOP notice, roll).
 
