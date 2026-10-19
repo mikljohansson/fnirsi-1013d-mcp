@@ -2623,9 +2623,18 @@ void handle_acquisition_menu_touch(void)
             if((xtouch >= x) && (xtouch <= x + 68) && (ytouch >= y) && (ytouch <= y + 20))
             {
               //Set the new time per div, the trigger point kept inside the record (fw 0.2.68: acq_view_set_tb, the
-              //path the snap after a rate change takes too)
-              if(!acq_view_set_tb(((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i))
+              //path the snap after a rate change takes too). fw 0.2.75: running or in Single, the ladder's rate for it
+              //comes with it (docs/ui-guidelines.md section 2, "Time/div drives the sample rate")
+              int r = acq_view_set_tb(((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i);
+
+              if(!r)
                 break;
+
+              if(r == ACQ_SET_RATE)
+              {
+                fpga_set_sample_rate(scopesettings.samplerate);
+                scope_acquisition_speed_select();
+              }
 
               //Display the new setting
               scope_acquisition_timeperdiv_select();

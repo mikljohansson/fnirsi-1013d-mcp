@@ -84,31 +84,64 @@ static void scope_tap_voltdiv(PCHANNELSETTINGS settings, int more)
   if(scopesettings.runstate) match_volt_per_div_settings(settings);
 }
 
+//fw 0.2.75: one tap zoom step, dir -1 slower, +1 faster (docs/ui-guidelines.md section 2, "Time/div drives the sample
+//rate"). Short mode: while a new record can be taken (running, or a Single shot re-armed by a tap in the plot's upper
+//half, 1.00o5's rule) the time/div and the ladder's rate for it (acq_view_zoom); stopped or in the viewer, the next
+//time/div the record can show. The ends are plain stops. Roll mode keeps 1.00o5's steps through its own time bases;
+//a tap never crosses the roll boundary (the ACQ menu's mode button does).
+static void scope_tap_zoom(int dir)
+{
+  int   rate_free, r;
+  int32 t;
+
+  if(scopesettings.long_mode)
+  {
+    //Roll: 50 s .. 100 ms/div (20 and 50 ms/div only in the viewer: a running scope maps them out of roll)
+    t = (int32)scopesettings.timeperdiv + dir;
+
+    if((t < 0) || (t > (scopesettings.waveviewmode ? 10 : 8)))
+      return;
+
+    scopesettings.timeperdiv = (uint8)t;
+    scope_set_timebase();
+    return;
+  }
+
+  rate_free = !scopesettings.waveviewmode &&
+              (scopesettings.runstate || ((scopesettings.triggermode == 1) && (previousytouch < 240)));
+
+  if((r = acq_view_zoom(dir, rate_free)) == 0)
+    return;
+
+  scopesettings.display_data_done = 1;
+  fpga_set_time_base(scopesettings.timeperdiv);
+
+  if(rate_free)
+  {
+    if(r == ACQ_SET_RATE)
+      fpga_set_sample_rate(scopesettings.samplerate);
+
+    //Single: the tap re-arms one shot at the new setting (1.00o5)
+    if(scopesettings.triggermode == 1)
+    {
+      scopesettings.runstate = 1;
+      scope_run_stop_text();
+    }
+
+    scope_preset_values();
+  }
+
+  scope_acqusition_settings(0);
+}
+
 //A tap on the empty plot (fw 0.2.64: the bands of touch_pick.h: 1.00o5's V/div and time base bands, kept by the owner,
 //off the record slider row and off the measurement cards)
 void scope_adjust_timebase_and_voltdiv (void)
 {
-  uint8 min = 0;
-  uint8 max = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1);
-
-  if ((scopesettings.long_mode) && (scopesettings.waveviewmode)) {min = 0;   max = 10;}
-  if ((!scopesettings.long_mode) &&(scopesettings.waveviewmode)) {min = 11;  max = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1); }
-
   switch(touch_tap_zone(previousxtouch, previousytouch, scope_tap_bottom(0), scope_tap_bottom(1)))
   {
-    case TAP_TB_SLOWER:
-      //Go up in time by taking one of the setting
-      if(scopesettings.timeperdiv > min)
-        scopesettings.timeperdiv--;
-      scope_set_timebase();
-      break;
-
-    case TAP_TB_FASTER:
-      //Go down in time by adding one to the setting
-      if(scopesettings.timeperdiv < max)
-        scopesettings.timeperdiv++;
-      scope_set_timebase();
-      break;
+    case TAP_TB_SLOWER: scope_tap_zoom(-1); break;
+    case TAP_TB_FASTER: scope_tap_zoom(1);  break;
 
     case TAP_CH1_MORE: scope_tap_voltdiv(&scopesettings.channel1, 1); break;
     case TAP_CH1_LESS: scope_tap_voltdiv(&scopesettings.channel1, 0); break;
@@ -116,7 +149,7 @@ void scope_adjust_timebase_and_voltdiv (void)
     case TAP_CH2_LESS: scope_tap_voltdiv(&scopesettings.channel2, 0); break;
   }
 }
-    
+
 //----------------------------------------------------------------------------------------------------------------------------------
   
   void scope_set_timebase(void)

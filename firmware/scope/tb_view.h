@@ -66,6 +66,19 @@ void tbv_set(tbv_tb *s, int32 t, uint32 fs, const uint32 *fpd, uint32 total, uin
 //otherwise (or with none viable) only the trigger point is kept inside the record, return 0
 int tbv_fit(tbv_tb *s, uint32 fs, const uint32 *fpd, int32 first, int32 last, uint32 total, uint32 trig);
 
+//fw 0.2.75, time/div drives the sample rate (docs/ui-guidelines.md section 2, "Time/div drives the sample rate"). The
+//ladder pairs every time/div with one rate: the fastest of rates[0..nrates-1] (sample_rate[], fastest first) at which
+//the time/div is viable for a record of `total` samples (the record covers the ten divisions with at least
+//TBV_MIN_SAMPLES_PER_DIV samples a division). Returns the index into rates[], -1 when no rate makes `fpd` viable.
+int32 tbv_ladder_rate(uint32 fpd, const uint32 *rates, int32 nrates, uint32 total);
+
+//One zoom step from time/div index t (dir < 0 slower, dir > 0 faster): the nearest index of fpd[first..last] in that
+//direction that has a ladder rate in rates[0..nrates-1]; -1 at the end of the ladder (the step changes nothing). From
+//a time/div no rate can show, with none further that way: the nearest one the other way (the ladder's end). With
+//one rate (nrates 1: a stopped record's rate) it steps through the time/divs that rate can show.
+int32 tbv_zoom_step(int32 t, int dir, const uint32 *fpd, int32 first, int32 last, const uint32 *rates, int32 nrates,
+                    uint32 total);
+
 //The drawn window for trigger sample `trig` and trigger point `pos`: the first sample shown (kept inside the record)
 //and the end column (exclusive; TBV_X_END unless the record ends inside the trace area)
 void tbv_window(int32 trig, int32 pos, uint32 fs, uint32 fpd, uint32 total, int32 *first, int32 *xend);
