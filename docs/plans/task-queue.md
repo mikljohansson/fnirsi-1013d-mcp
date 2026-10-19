@@ -335,7 +335,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   .github/workflows/docs.yml (Pages deploy, no secret) + ci.yml docs job, tools/screenshots.py (--list, --simulator, --port,
   --only, --generator opt-in) with a simulator test. Owner once: Settings > Pages > Source: GitHub Actions (releasing.md section 6).
   Remains: screenshots on the unit after fw-screen, per-screen guide text after 0.2.70, the six articles, agent worked examples.
-- fw-screen (done 21:10, about 195k tokens, merged as fw 0.2.70): READ_SCREEN handler (maindisplaybuffer rows, MAIN only so a
+- fw-screen (done 21:10, about 195k tokens, merged as fw 0.2.70; T9 passed 21:11, 0.22 s per screen): READ_SCREEN handler (maindisplaybuffer rows, MAIN only so a
   modal menu answers E_BUSY), SCREENSHOT cap on every known bitstream, vectors, host test, mcp test; bench T9 pending
   (firmware/AGENTS.md section 46).
 - ux-overview (done 21:12, about 235k tokens, merged): docs/plans/slider-overview.md (overview in the 12 rows inside the window,
@@ -343,6 +343,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   runs, Frequency response keeps a 400-byte copy of the AUTO SET overview), boards regenerated (Scope boards now show the fw
   0.2.64 to-scale window), five owner questions in section 10 E (colours, tap to jump, stale overview, two channels, window
   height; recommendations: dimmed/full, yes later, simple rule, overlaid, keep 14 px). Firmware item queued under "Bottom scroll bar".
+  Coordinator note 21:12: the Scope's record slider already draws the whole record as a thumbnail (stock behaviour, visible on the
+  0.2.70 screenshot); the firmware batch aligns Spectrum and Frequency response with that drawing instead of adding a second one.
 - fpga-gen8 (done 20:57, about 834k tokens, retired; handoff = the last section of fpga/al3/AGENTS.md on branch
   worktree-agent-ac1eb52dff7a62fc7, commits 19d9a5c WIP + e924eba handoff, not merged: main keeps the 0x1539 sources until 0x153A is
   benched). Delivered 0x1539 (flashed 20:06). Found: AD9288 data valid from tPD 6 ns max to tV 2 ns min, so at 200 MS/s each core

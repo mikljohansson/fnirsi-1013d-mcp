@@ -949,4 +949,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   Frequency response is correct in its mechanics and blocked by the 0x1539 capture fault until 0x153A; fpga-gen8 got the data
   (the bad codes are 0x80..0x91: bit 7 set, bits 6..5 clear, A cores only). Scope state after the checks: generator off, both
   channels 1 V/div DC, the Frequency response view still open, no sweep running.
+- 2026-10-19 21:09-21:11: fw 0.2.70 (READ_SCREEN merged and numbered) built with GCC 10, pinned backups/fw-0.2.70_be2518d8.bin
+  (sha256 be2518d833d7eb20f54197b131e25d6b448da80c689a68d180d3edd3f4f62aac), loaded hands-free with fnirsi1013d-flash (ENTER_FEL,
+  busid 9-2, 10.4 s end to end), `#VER fw=0.2.70,proto=1.21,fpga=0x1539`, caps 0x7FC4B (SCREENSHOT bit 6 set). T9 passed: a full
+  800x480 screenshot in 0.22 s, colours right (CH1 yellow, CH2 cyan, ACQ green, STOP red), bars and grid intact, no tearing
+  (scratchpad screen_2111_fw0270_t9.png). The FEL reload left the scope in the Scope view at 1 MSa/s, 1 V/div both channels,
+  nothing on the inputs ("No trigger" warning). Noted on the screenshot: the Scope's record slider already draws the whole record
+  as a thumbnail in its track (stock behaviour), so the slider-overview design's Scope part exists in substance; the batch should
+  align the two modes with it rather than add a second drawing.
 
