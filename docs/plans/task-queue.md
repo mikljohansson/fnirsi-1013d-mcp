@@ -9,7 +9,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
-  dead band, tap zones, after UI step 2; batch 3 = no blocking touch loop, needs an MCP soak). Owner decision
+  dead band, tap zones that keep the V/div and time-base tap bands but avoid the slider and cards (owner 10-19: keep the tap bands), after UI step 2; batch 3 = no blocking touch loop, needs an MCP soak). Owner decision
   2026-10-19 13:45 **(owner)**: the channel pointers at the left edge of the grid become drag handles, "handles shown on screen are
   draggable"; the on-trace grab stays as a secondary path with a nearest-enabled-object rule. Owner reproduced: with CH2 dragged to
   the bottom CH1 can be picked up again, but only when the drag starts exactly on the invisible zero line.

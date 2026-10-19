@@ -39,9 +39,10 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   measurements; Spectrum: peak, level, RBW and the spectrum set). The record-position slider row under the grid stays.
 - **Warnings**: top-middle of the plot in every mode, one line stating the consequence and the action ("CH1 overrange:
   increase V+"). Readouts such as wfm/s go with the parameters they belong to, never into a warning.
-- **No parameter has two homes.** If a value is reachable from two places they are the same setting (the V/div chips in
-  the channel menu and the steppers on the CTRL page both set `displayvoltperdiv`), and the second place exists only
-  for speed while watching the trace.
+- **One setting, several homes is fine when each home earns its place.** A value reachable from two places is the same
+  setting (the V/div chips in the channel menu, the steppers on the CTRL page and the tap bands at the top and bottom of the plot
+  all set `displayvoltperdiv`). The rule is good UX, not strictness: a quick path that helps while watching the trace stays;
+  a duplicate that only adds clutter goes (owner, 2026-10-19).
 
 ## 3. How things look
 
