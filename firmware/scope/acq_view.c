@@ -134,6 +134,25 @@ int acq_view_set_tb(uint32 timeperdiv)
   return acq_view_set_pair((int32)timeperdiv, acq_view_rate_free());
 }
 
+int32 acq_view_tb_for_rate(uint32 r)
+{
+  int32 t, best = -1, cur = (int32)scopesettings.timeperdiv;
+
+  if(r >= ACQ_RATES)
+    return -1;
+
+  for(t = ACQ_TB_FIRST; t <= ACQ_TB_LAST; t++)
+    if((tbv_ladder_rate(frequency_per_div[t], sample_rate, ACQ_RATES, fpgasettings.totalsamples) == (int32)r) &&
+       ((best < 0) || (((t > cur) ? t - cur : cur - t) < ((best > cur) ? best - cur : cur - best))))
+      best = t;
+
+  if(best < 0)
+    best = tbv_snap(sample_rate[r], frequency_per_div, ACQ_TB_FIRST, ACQ_TB_LAST,
+                    ((cur < ACQ_TB_FIRST) || (cur > ACQ_TB_LAST)) ? ACQ_TB_FIRST : cur, fpgasettings.totalsamples);
+
+  return best;
+}
+
 static void acq_notice_set(const char *head, const char *mid, const char *tail);
 
 int acq_view_zoom(int dir, int rate_free)

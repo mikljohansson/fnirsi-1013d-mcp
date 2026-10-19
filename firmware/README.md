@@ -1105,7 +1105,8 @@ Screen (fw 0.2.56; fw 0.2.71 per ux-makeover.md "Spectrum slider"): plot y 50..4
 stop labels and ten fixed divisions before); the cards at y 426 (peak frequency and level per channel, RBW; "Screens"
 above); the slider row at y 452..471 in the Scope's construction: the shown span as a window over the axis 0 ..
 min(fs/2, 25 MHz) (the window fills the track at the full span), a drag pans the centre with the span kept (the window
-follows the finger, as the Scope's record slider). The waterfall's and density's colour legend sits inside the plot's
+follows the finger, as the Scope's record slider; since fw 0.2.77 a pan step can change the rate and so the track's
+scale: the finger's travel keeps the scale the track had at touch-down). The waterfall's and density's colour legend sits inside the plot's
 top right (y 72). The info line and the strip went in 0.2.56. Since 0.2.73 the track shows the whole axis's spectrum
 (below, "Slider track overview") and a tap outside the window centres it there.
 Each plot column shows the highest bin it covers, so narrow lines survive at 720 columns; zoomed in past one bin per
@@ -1118,11 +1119,11 @@ Display fold-out):
 | row | values | tap |
 |---|---|---|
 | Analyse | CH1, CH2, CH1 + CH2 (only enabled channels) | next |
-| FFT length | 1024 .. the largest power of two the record holds, at most 4096 (2048 at depth 3000) | next, wraps |
+| FFT length | 1024 .. the largest power of two the record holds, at most 4096 (2048 at depth 3000); "2048 (record)" when the record holds less than the length chosen (fw 0.2.77) | next, wraps |
 | Window | Hann, flat top, rect | next |
 | Scale | 5, 10, 20 dB/div | next |
 | Ref level | -100 .. +60 dBV at the top line, one division per step | left half (-) down, right half (+) up |
-| Reset | back to the defaults: 2048 points, Hann, 10 dB/div, ref 0 dBV, full span, Spectrum | once |
+| Reset | back to the defaults: 2048 points, Hann, 10 dB/div, ref 0 dBV, the current rate's whole axis (fw 0.2.77), Spectrum | once |
 | Display (its own fold-out) | Spectrum, Waterfall, Density (fw 0.2.32) | choose |
 
 Auto (sets FFT length, window, scale, ref level and span from the signal, rules below) is the right bar's AUTO SET
@@ -1151,16 +1152,15 @@ rows are stored as RGB565 (drawn with memcpy bursts) and the counts as words wit
 MMU (0.2.48) every uncached pixel access cost about 90 cycles. Memory: 484 KB waterfall + 726 KB density (.bss).
 
 Axis cap (fw 0.2.36, owner): the view shows at most `PC_SPECTRUM_FMAX_HZ` = 25 MHz (spectrum.h), or fs/2 when that
-is lower; at 200 MS/s the full span is 0-25 MHz and zoom, pan and Auto stay inside it. The front end rolls off near
+is lower; the span ladder's whole axis is 0-25 MHz (at 50 MSa/s since fw 0.2.77) and zoom, pan and Auto stay inside it. The front end rolls off near
 30 MHz, so above 25 MHz there would only be artefacts. The info line still states the sample rate, and READ_SPECTRUM
 still returns every bin up to fs/2.
 
 Gestures on the plot (fw 0.2.35, the scope view's rules from `scan_for_touch` in statemachine.c): a touch that stays
-within 2 px and ends within 200 ms is a tap; left of the plot centre zooms the span out one step (x 2), right of it
-zooms in (/ 2, down to 1/64 of the Nyquist range), keeping the centre, like the time/div taps in the scope view. A
-touch that moves more than 2 px is a drag: the spectrum follows the finger horizontally (start frequency, in
-1/65536 of the Nyquist range) and is redrawn while dragging; at full span there is nothing to pan. Start, centre and
-stop frequencies are the labels under the plot.
+within 2 px and ends within 200 ms is a tap; left of the plot centre widens the span one ladder step, right of it
+narrows it, keeping the centre, like the time/div taps in the scope view. A touch that moves more than 2 px is a drag:
+the spectrum follows the finger horizontally (the centre moves, in mHz) and is redrawn while dragging; at the whole
+axis there is nothing to pan. Each tap and each drag move is a step of the span ladder below.
 
 Header and averaging (fw 0.2.40-0.2.42, owner; since 0.2.56 the header's readouts are cards, see "Screens"): per
 shown channel its peak frequency and level, the RBW and, in the waterfall, the time its rows span. No fs or N (they are
@@ -1176,18 +1176,36 @@ power: on noise it reads about 2.5 dB low (log of the mean vs mean of the log), 
 display; use the host for calibrated noise power. The waterfall and density views take the unaveraged records. The
 averaging mode persists with the other settings (word 209 bits 12-14; ref in bits 0-11).
 
-Span and sample rate (fw 0.2.39, owner: like a spectrum analyser): the span drives the scope's time base (the same
-setting the scope view uses, short time bases only). A zoom-out tap with the whole axis shown steps to the next
-faster rate, until fs/2 reaches 25 MHz (50 MS/s, 2 us/div); a zoom-in tap at a span of fs/16 or less (N/16 bins; fw 0.2.41, 0.2.39 used 64 bins) steps
-to the next slower rate instead, keeping the centre frequency and halving the span in Hz, provided the new axis
-still holds the window (otherwise the plain zoom continues to 1/64 of the axis). After a rate change the view waits
-for the first capture at the new rate ("Waiting for a capture at the new sample rate") and the histories clear.
+Span and sample rate, the zoom ladder (fw 0.2.77, owner 2026-10-19 23:09; the rule is docs/ui-guidelines.md section 2
+"Span drives the sample rate"; `spec_ladder.c`, host-tested by `host_tests/test_spec_zoom.c`). The view is a cell: a
+span from the ladder 1, 2, 5 Hz .. 10, 20 MHz, then the whole axis 0 .. 25 MHz, about a centre kept inside 0 .. 25 MHz.
+A tap steps the span one cell about the centre, a drag (plot or slider) or a tap in the slider's track moves the
+centre. After every such step, while a new record can be taken (running, or Single), the rate is set from the stop
+frequency (centre + span / 2): the slowest UI rate (200 MSa/s .. 500 Sa/s) whose fs / 2 covers it and whose capture of
+N samples (the FFT length in use) takes at most 2.048 s (`spl_rate`). The rate is the scope's own setting, written with
+the time/div the Scope's ladder pairs with it (`acq_view_tb_for_rate`), so going back to the Scope shows a ladder pair.
+The pair is a function of the cell, whatever taps and pans led there; a cell from 0 Hz holds between a quarter and a
+half of the N bins. Ends, plain stops (a tap there changes nothing, the other direction works at once): zooming out
+ends at the whole axis at 50 MSa/s; zooming in ends where the next span would need a rate whose capture exceeds
+2.048 s or would hold fewer than 16 bins. In numbers: from the whole axis (centre 12.5 MHz, 50 MSa/s) the narrowest
+span is 1 MHz at N 1024, 500 kHz at 2048, 200 kHz at 4096; at 0 Hz it is 10 Hz at 500 Sa/s (N 1024: the slowest rate
+takes 2.048 s, then 16 bins end it), 500 Hz at 1 kSa/s (N 2048), 1 kHz at 2 kSa/s (N 4096). A pan that moves the stop
+across a rate boundary moves the rate (1 kHz span at 1.5 .. 2.5 kHz runs at 5 kSa/s; 100 Hz up, 10 kSa/s). After a
+rate change the view waits for the first capture at the new rate ("Waiting for a capture at the new rate") and the
+histories clear. A rate picked in the ACQ menu (or by the host) holds until the next zoom or pan step; the view then
+shows the cell on that rate's axis as far as it reaches (the Span and Center cards show what is drawn), and the next
+step takes the ladder's rate. Changing the FFT length does not change the rate; the next step uses the new N. Stopped
+(the record on screen is fixed), zoom and pan stay on the record's rate and axis, and where the ladder would go on the
+warning line says "Stopped: press RUN to zoom further" for 4 s. Entering the view keeps the last cell if the rate is
+still the ladder's for it, else shows the current rate's whole axis without changing the rate (at 100 and 200 MSa/s
+the whole axis's rate is 50 MSa/s, taken at the first step). Before 0.2.77 (fw 0.2.39-0.2.76) zoom in halved the span
+on the same rate and changed the rate only below N/16 bins, and zoom out changed it only past the whole axis.
 
 Persistence (fw 0.2.39): FFT length, window, scale and ref level are saved in settings-sector words 208 (0x5E00
 marker, window, scale, length) and 209 (ref, int16), with everything else, by 1.00o5's power-off interrupt (the only
 place 1.00o5 writes the settings sector, apart from a failed load; not in the picture / waveform viewers, not on
 ENTER_FEL or a battery that dies). Not restored: the display mode (the scope boots into the scope view), channel,
-span and start; the variant (Spectrum / Waterfall / Density) is restored since fw 0.2.56 (word 211). The Filter choice (fw-decim, word 207) is saved the same way.
+span and centre; the variant (Spectrum / Waterfall / Density) is restored since fw 0.2.56 (word 211). The Filter choice (fw-decim, word 207) is saved the same way.
 
 Auto (fw 0.2.42, owner: deterministic, identical presses give identical settings): a fixed probe procedure that
 does not depend on the state it starts from, about 1-2 s, "Auto..." on AUTO SET and the plot meanwhile, any touch
@@ -1201,14 +1219,18 @@ so). Steps:
    0 with fewer than 3 periods in the record) and f_hi = the highest bin above both peak - 40 dB and median + 10 dB.
 3. Period search: while f0 = 0, step 10x slower (three time base steps) per record until 3 periods fit or the
    slowest short time base.
-4. Derive from (f0, f_hi) only: span = max(1.25 f_hi, 20 f0), at most 25 MHz; rate = the slowest whose fs/2 >= 1.25
-   span; with f0 > 0 slower still until RBW = 1.5 fs / N <= f0 / 4, the span then trimmed to 0.8 fs/2.
+4. Derive from (f0, f_hi) only, on the span ladder (fw 0.2.77, `spl_auto`): the narrowest ladder span from 0 Hz at
+   least max(1.25 f_hi, 20 f0) (the whole axis above 20 MHz); with f0 > 0 one span narrower at a time while RBW =
+   1.5 fs / N > f0 / 4 at the ladder's rate for it, never past the zoom-in end; the rate is the ladder's for the cell.
+   (Before 0.2.77: rate = slowest with fs/2 >= 1.25 span, slower for RBW, span trimmed to 0.8 fs/2.)
 5. Confirm with 2 records at that rate; if the band seen there is less than half the probe's (the probe sees edges
    and noise far up) and that asks for another rate, one refinement with 2 more records.
 6. Final: ref = the first multiple of the scale at least 3 dB above the peak, scale 5 / 10 / 20 dB/div by whether
-   peak - floor + 10 dB fits 8 divisions, span from 0 (the narrowest zoom step holding it), averaging 4.
-Expected for the 1 kHz square at depth 3000 (N = 2048): probe f0 = 0, the search finds 1 kHz at 500 kSa/s, the
-RBW rule (<= 250 Hz) picks 200 kSa/s, span about 80 kHz: the comb fills the plot. At depth 6000 (N = 4096) 500 kSa/s.
+   peak - floor + 10 dB fits 8 divisions, the cell from step 4 and its rate, averaging 4. The result is a cell of
+   the ladder, so taps from it go on along the ladder.
+Expected for the 1 kHz square at depth 3000 (N = 2048), derived from the rules (not benched on 0.2.77): probe f0 = 0,
+the search finds 1 kHz at 500 kSa/s, the RBW rule (<= 250 Hz) narrows to 100 kHz from 0 at 200 kSa/s (half the axis
+of bins): the comb fills the plot. At depth 6000 (N = 4096) 200 kHz at 500 kSa/s.
 
 Warnings (fw 0.2.42, owner: consequence and action, one short line each, centred over the top of the plot in orange,
 only while they apply; "MSa/s" everywhere as in the top bar):
@@ -1219,6 +1241,7 @@ only while they apply; "MSa/s" everywhere as in the top bar):
 | Aliasing possible: set Acquisition > Filter | below 200 MSa/s with the Filter off (0x1534+); "use a faster time base" without the filter |
 | Stopped: press RUN to fill the view | stopped in a history view, or no record yet |
 | Auto needs RUN: press RUN / Auto needs trigger mode Auto or Normal | Auto pressed while stopped / in single mode |
+| Stopped: press RUN to zoom further | 4 s after a zoom tap while stopped where the record's rate ends the zoom but the ladder would go on (fw 0.2.77) |
 | Waiting for a capture at the new rate | after a span-driven rate change, until the first record at the new rate |
 | No trigger: check the trigger level | the latest record was an auto time-out (fw 0.2.41) |
 | No channel enabled: switch on CH1 or CH2 | centre of the plot, both channels off |
@@ -1242,7 +1265,7 @@ Redraws in the spectrum view (fw 0.2.44): the only 1.00o5 routine that paints th
 spectrum's own span / Auto steps through `pc_hal_timebase_write`). It cleared the trace area and painted grid, cursors and
 pointers over the spectrum, strip included, until the next pass. It now starts with `PC_SPECTRUM_DISPLAY()`: in the
 spectrum view it redraws the spectrum and returns (trace buffers kept). `spectrum_display` has a re-entry guard (a time
-base change from inside a draw redraws through the same path), and `spec_tb_set` sets its wait state before the write, so
+base change from inside a draw redraws through the same path), and `spec_tb_write` (fw 0.2.77; `spec_tb_set` before) sets its wait state before the write, so
 that redraw shows the new axis without the old spectra. Audit of the other host-driven redraws (SET_CHANNEL, SET_TRIGGER,
 SET_GEN, RUN/STOP, the MCP chip): they draw only top-bar buttons (y < 46) and never touch the trace area or the right
 column. Not host-testable (scope_functions.c and spectrum.c drawing are target-only); bench: spectrum view on, then

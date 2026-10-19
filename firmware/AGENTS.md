@@ -711,7 +711,7 @@ section 14 rows 44 (FFT_BENCH) and 45 (READ_SPECTRUM, GET_STATUS byte 43).
   base, or 200 MHz / N with the 0x1534 filter (16-bit records via `pc_hal_trace16`, `fx_fft_run_u16`); axis capped at
   `PC_SPECTRUM_FMAX_HZ` (spectrum.h); gestures as the scope view (2 px / 200 ms: tap left/right = span out/in, drag =
   pan); span drives the time base past the ends (`spec_zoom`, `spec_tb_set` via pc_hal_timebase_write, then
-  `spec.wait` until a capture at the new rate); Auto is a 3-stage state machine (`spec_auto_start` / `spec_auto_step`);
+  `spec.wait` until a capture at the new rate; fw 0.2.77 replaced this with the span ladder, section 52); Auto is a 3-stage state machine (`spec_auto_start` / `spec_auto_step`);
   Average field (`spec_acc`, keyed restart); waterfall rows RGB565, density count + last-hit capture index (no fading
   pass). Persisted at power-off: FFT length, window, scale (word 208), ref + averaging (word 209); not the mode.
   A host capture with a raw divider is labelled with the UI rate (row 45).
@@ -3477,3 +3477,102 @@ the Scope's track that does not jump; a jump from y 436..449.
 
 Owner 2026-10-19 22:28: spectrum.c lost `spec_draw_legend` and `INFO_Y1` (Waterfall and Density colour legends); the
 warning line at the plot's top middle and the rest of both variants are unchanged. No test checked the legend texts.
+
+## 52. fw-spzoom: the Spectrum's zoom ladder, span drives the sample rate (fw 0.2.77 provisional, protocol 1.22 unchanged)
+
+Branch `fw-spzoom` from main 25fa3e6 (fw 0.2.76). Brief: docs/plans/task-queue.md "Spectrum zoom ladder" (owner 10-19
+23:09, "let's try your recommendation"); coordinator 23:2x: option (a), the plain rule (the full axis runs at 50 MSa/s,
+not 200 MSa/s as the queue item said; fixed there). Commits: 4a85e8a (the rule, docs/ui-guidelines.md section 2 "Span
+drives the sample rate", queue wording), 3ec9e17 (spec_ladder.c/.h, acq_view_tb_for_rate, host_tests/test_spec_zoom.c,
+test_acq_view.c test_tb_for_rate), 52c1c76 (spectrum.c), d49f9b6 (README "Spectrum view", CHANGELOG), then this
+section. Image of d49f9b6 (GCC 10): `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 741,376 B, sha256
+91946f1598b9b0489606072588c6385b89a419ce34385883aeeca4af86ba316f (a later commit differs only in the identity).
+Warnings GCC 10 36, GCC 13 31, as on main; none in the changed files; gcc10-nommu builds. Host tests all green (new
+test_spec_zoom 685,416 checks; test_acq_view 1,900,576). **Nothing benched. No protocol change, no settings word,
+PC_FW_VERSION not bumped** (the coordinator bumps at merge).
+
+1. **The rule** (spec_ladder.c, pure, no globals): a cell = span index 0..23 (1, 2, 5 Hz .. 10, 20 MHz; 23 = the whole
+   axis 0 .. 25 MHz, `SPL_FULL`) + centre in mHz, kept inside 0 .. axis (`spl_fit`). `spl_rate(stop, log2n, rates, n)`
+   = the slowest of `sample_rate[0..17]` with fs/2 >= stop and N/fs <= 2.048 s (`SPL_TMAX_MS`). `spl_ok` = the zoom-in
+   test: stop inside the axis, the slowest *covering* rate's capture within 2.048 s, and the span >= 16 bins
+   (`SPL_MIN_BINS`) at it. `spl_zoom` steps the span about the centre (in only to an ok cell; out to the whole axis, or
+   with one rate to the widest span its axis holds), `spl_pan` moves the centre, `spl_from_axis` = the cell that shows
+   a rate's whole axis (entry, Reset), `spl_auto` = Auto's cell, `spl_bins` = the bins that draw a cell on an axis (floor
+   of the start, the last bin at or past the stop, >= 8, clamped to the axis when a hand rate does not cover it).
+   A rates table of one entry is a stopped record: its axis, no capture-time limit.
+2. **Ends in numbers** (test_end_numbers): zoom out ends at the whole axis, centre 12.5 MHz, 50 MSa/s. From there zoom
+   in keeps 12.5 MHz and 50 MSa/s and ends at 1 MHz (N 1024), 500 kHz (2048), 200 kHz (4096): 16 bins of 50 MHz / N.
+   At 0 Hz the narrowest cell is 10 Hz at 500 Sa/s (N 1024: the slowest rate already takes 2.048 s, then 16 bins end
+   it), 500 Hz at 1 kSa/s (N 2048), 1 kHz at 2 kSa/s (N 4096): there the 2.048 s capture ends it, as the owner asked.
+   A cell from 0 Hz holds 40-50 % of the N bins (1-2-5 spans on 1-2.5-5 Nyquist steps; tested, "a quarter to a half").
+   A pan can reach a cell narrower than the zoom-in end (zoomed in at a high centre, then panned down): `spl_rate`
+   holds the rate at the 2.048 s floor there, so no capture ever exceeds 2.048 s at N.
+3. **spectrum.c**: `spec.zoom` / `spec.start` (power-of-two fractions of the current rate's axis) are gone; `spec.cell`
+   + `spec.cell_set`. `spec_view` = `spec_view_full` (whole axis) + `spl_bins`; Auto's stages draw the whole axis.
+   `spec_zoom`: `spl_zoom` over `spec_rates()` (all 18 rates when `acq_view_rate_free()`, else the record's one), then
+   `spec_cell_apply` = `spec_rate_set(spl_rate(stop))` while free. `spec_rate_set(r)` writes the rate with
+   `acq_view_tb_for_rate(r)` (the Scope ladder's time/div for r nearest the current one, else tbv_snap at r) through
+   `spec_tb_write` -> `pc_hal_timebase_write` (its `acq_view_fit` then never snaps; the wait state as before). Plot drag:
+   centre0 - dx x span / 720 (Move slow / 5); slider drag and tap to jump: dx x (axis at touch-down) / 726, so a pan
+   that changes the rate (and the track's scale) mid-drag keeps the finger's frequency step. Stopped: a zoom the record
+   ends but the ladder would continue sets "Stopped: press RUN to zoom further" (4 s, warning line, in the else-if chain
+   after "press RUN to fill the view"). Entry keeps the cell when the rate is still the ladder's for it, else
+   `spec_cell_from_rate` (the current rate's whole axis, no rate change; at 100 / 200 MSa/s the rule's rate is 50 MSa/s
+   and the first step takes it). Span / Center cards show the cell (exact 1-2-5) while `spl_bins` holds all of it,
+   else what is drawn. FFT length row: "2048 (record)" when the record limits the choice.
+4. **Auto**: probes unchanged (50 MSa/s at TB 26 via `spec_tb_set`, the 10x period search by time base index); derive
+   is `spl_auto` (narrowest span from 0 >= max(1.25 f_hi, 20 f0), narrower while RBW > f0 / 4, never past the zoom-in
+   end) and the rate `spl_rate` of it; finish sets the cell and the rate (the time-out path may change the rate then).
+   Its result is a ladder cell (test_auto). Expected on the 1 kHz square (derived, not benched): N 2048 100 kHz from 0
+   at 200 kSa/s, N 4096 200 kHz at 500 kSa/s (0.2.76: about 80 kHz at 200 kSa/s).
+5. **Hand rate** (rule 4): the Spectrum has no "Set by" chip (only Frequency response has "Set by / the sweep", fw
+   0.2.71); its ACQ menu is the Scope's, rate boxes included. A rate set there or by the host holds; the view draws the
+   cell on that axis as far as it reaches; the next zoom or pan step takes `spl_rate`. Kept as is.
+
+Decisions to confirm with the owner / not done:
+- **Option (b)**, the one-line alternative the coordinator named: the whole axis (or any stop at 25 MHz) at 200 MSa/s
+  instead of 50 MSa/s: in `spl_rate`, `if((n > 1) && (stop >= SPL_FMAX_MHZ)) return 0;` (and test_spec_zoom's 50 MSa/s
+  expectations, test_rate / test_walks / test_end_numbers, move to index 0).
+- **The Time card is the waterfall's history span**, not the capture time the brief mentioned; nothing shows N / fs.
+  If the owner wants it, a card "Capture" = N / fs (ui_meas.h kinds) is the place.
+- **Capture time is N / fs as the owner put it; the record actually takes depth / fs.** At 16k memory and 2 kSa/s
+  (N 4096) a record takes 8 s although N / fs = 2.048 s. Using `fpgasettings.totalsamples` instead of N in
+  `spl_time_ok` is the fix if the bench shows long waits.
+- Changing the FFT length (or the memory depth) does not change the rate; the next step uses the new N.
+- A drag across rate boundaries blanks the view at each crossing ("Waiting for a capture at the new rate") until a
+  capture arrives; the touch loop blocks, so the new spectrum shows after the finger lifts (as before).
+- Auto's probe and period search still go by 1.00o5 time base indices; the snap notice of `acq_view_fit` could arm
+  there (as on 0.2.76).
+- Section 20's "span drives the time base past the ends (`spec_zoom`, `spec_tb_set`)" is history; this section is
+  current.
+
+**Bench walk-through (owner, coordinator on COM10; FEL load only)** - FEL-load (`sunxi-fel -p write 0x7FFFFFE0
+build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`), `#VER fw=0.2.76,...` (version not bumped). CH1 on the 1 kHz
+calibration post; Spectrum analyser, RUN, trigger Auto; MEASURES with Span, Center, RBW on the cards.
+1. Whole range at N 2048 (memory 3000): Reset (whole axis of the current rate), tap left until nothing changes: Span
+   "25.00MHz", Center "12.50MHz", ACQ chip 50 MSa/s; one more left tap: nothing. Tap right repeatedly: 20, 10, 5, 2, 1
+   MHz, 500 kHz about 12.5 MHz, the rate stays 50 MSa/s; one more: nothing; left works at once. Drag the slider window
+   to the left end: the rate falls as the stop falls (each crossing waits for a capture). Taps keep the centre, so to
+   reach the 0 Hz end tap right and drag the window back to the left end after each tap: 200 kHz .. 500 Hz from 0
+   with the rate following (500 Hz at 1 kSa/s, about 2 s per capture), then a tap right changes nothing. Without the
+   drags the end comes at 16 bins of the rate the centre needs (centre 250 kHz: 5 kHz at 500 kSa/s). Tap left back to
+   the whole axis: every step's rate is the slowest whose half covers the stop (chip vs Span + Center).
+2. Repeat at N 1024 (FFT length) and N 4096 (memory 6k or 16k): from the whole axis the end is 1 MHz / 200 kHz; at 0 Hz
+   10 Hz at 500 Sa/s / 1 kHz at 2 kSa/s. With N 4096 at 3000 memory the FFT row reads "2048 (record)".
+3. Pan across a rate boundary: 1 kHz span centred at 2 kHz (5 kSa/s); drag the plot right-to-left a little (stop past
+   2.5 kHz): the chip goes to 10 kSa/s and "Waiting for a capture at the new rate" shows until the next capture.
+4. Hand rate: ACQ menu, pick 200 MSa/s while showing 10 kHz from 0 (20 kSa/s): the view shows the same span on the
+   200 MSa/s axis (cards may read the drawn span), nothing else changes; close the menu, tap right: the ladder's rate
+   (20 kSa/s for 5 kHz about 5 kHz), not 200 MSa/s.
+5. STOP, then tap right: zooms on the record's rate down to 16 bins; tap left: up to the record's axis, then "Stopped:
+   press RUN to zoom further" (4 s) where the running ladder would go on; the chip never changes while stopped. RUN:
+   the next tap continues on the ladder.
+6. AUTO SET on the 1 kHz square: "Auto...", then a span from 0 Hz in the 1-2-5 ladder (100 kHz at 200 kSa/s with N
+   2048 expected); one tap left / right from there moves one ladder step with the rule's rate.
+7. Cards and labels: at every step the Span and Center cards read 1-2-5 values and the frequency labels' first / last
+   grid lines sit at the ends of the span; RBW = 1.5 (Hann) x fs / N. Waterfall and Density: the same taps and pans,
+   the history clears at each rate change, no stale rows.
+Bug indicators: a rate that is not the slowest covering the stop after a step; a capture over about 2 s at N while
+running; a tap at an end that changes anything; an end the other direction cannot leave; the chip changing while
+stopped; Span / Center off the 1-2-5 values while the rate covers the span; the slider window off the track; a time/div
+snap notice in the Scope after using the Spectrum.

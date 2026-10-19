@@ -161,7 +161,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   stop frequency as the slowest rate whose fs/2 covers it (best RBW for free; the (span, rate) pair is a function of the span, so
   reversible like the Scope ladder); FFT length stays the user's (Analysis fold-out, default 2048), so the span always holds
   between a quarter and a half of the bins; a hand-picked ACQ rate holds until the next zoom or pan step; ends: the full 25 MHz
-  axis at 200 MSa/s, and zooming in stops where the capture time N/fs would exceed about 2 s; a pan that moves the stop across a
+  axis at 50 MSa/s (coordinator 10-19: plain rule, the stop's rate; 200 MSa/s was a slip), and zooming in stops where the capture time N/fs would exceed about 2 s; a pan that moves the stop across a
   rate boundary moves the rate too. Owner observation on 0.2.76: zoom in never changes the rate today, only zoom out does. Rule
   written into ui-guidelines.md first; host test walks the ladder both ways from both ends at every FFT length, asserting the pair.
 - **Host commands leave the modal menus** (owner 10-19 23:27: "avoid locking up the device from the perspective of the MCP server
