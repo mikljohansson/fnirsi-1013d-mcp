@@ -716,3 +716,9 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 2026-10-19 14:27: fw 0.2.58 (0x1536 support on 0.2.56; merge of fw-seg) built with GCC 10, MMU image sha256
   2f9c36f97bd4576c2d8010e7e78c92ca0dd1c8cf01303e2e0a40d9e9a47d642a, nommu 887f1a0406545735f82803fd588ee79566658cadb258853478a4a869a48f62a5,
   pinned in backups/. Runs on 0x1535 unchanged (host-visible: GET_STATUS 48 bytes). Now the image to load next. Not loaded.
+- 2026-10-19 14:35: Bode sweep 2 on the RC 1 kOhm / 15 nF, CH2 now on the R-C junction, wiring A (both clips on the ground
+  rail), backups/bode/rc1_15n_clips_2.json: 30/30 valid, low-pass, +0.08 dB at 1 kHz, -3 dB at 11.3 kHz (expected 10.6 kHz), two CH2
+  range splices. Above 30 kHz the slope is shallower than one pole and the phase flattens at -71 deg (300 kHz: -24.6 dB / -70 deg vs
+  -29.0 / -88 expected): consistent with about 50-60 Ohm in the capacitor's return path, i.e. the stimulus current returning through
+  the probe clips and R71 (100 Ohm) as bode-design 2.5 predicts (inference). Next: wiring B (DUT ground to the USB shell, clips open),
+  then a thru calibration with both probes on the input.
