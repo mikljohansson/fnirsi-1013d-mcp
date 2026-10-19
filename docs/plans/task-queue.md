@@ -282,6 +282,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   BITSTREAMS.md and tools/bitstreams.py check in CI; release.yml attaches them, accepts vX.Y.Z-rcN pre-release tags, takes release
   notes from docs/release-notes/X.Y.Z.md (0.3.0 draft with placeholders); releasing.md fixed; README rewritten; release-checklist.md).
   Open: add 0x1538 as recommended when pinned and benched; owner decisions: attach older bitstreams, AI credits wording (F12).
+- mcp-gen6 (done 19:05, about 500k tokens, retired; handoff mcp/AGENTS.md): protocols 1.19 (encode_check in scope_health, events
+  21/22), 1.20 (scope_bode_sweep where=device, close_view), 1.21 (scope_cal_probe, 252-byte decoder), fnirsi1013d.report +
+  scope_report (PNG + offline HTML), guide 7a "Presenting results", simulator variants al3e; pushed 2fb610e, CI 39290741852 green.
+  Bench left: scope_health on 0x1538, device vs host Bode sweep on the RC and divider (expect 0.05 dB / 0.3 deg), scope_cal_probe.
 - fw-cal5 (done 18:45, about 490k tokens, retired): 0.2.67 merged (off-centre zero, CAL_PROBE, readout fault named); the
   workaround is insufficient on 0x1538 (hardware-status 18:50): the wizard waits for 0x1539. fw-polish2 (done 18:50, about 400k,
   retired): 0.2.68 merged; walk-through firmware/AGENTS.md section 44. Owner 18:55: the mode row is "Frequency response".
