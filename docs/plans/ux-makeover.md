@@ -97,6 +97,13 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   readouts become measurement cards in the bottom row like the scope's ("[1] Peak: 1.000kHz", "[1] Level: +2.7dBV",
   "RBW: 146Hz" with a grey chip), chosen through MEASURES like the scope's cards; the filter tag is not shown (it is a
   setting, visible in ACQ). Warnings keep the top-middle position.
+- **Slider-track overview (owner, 2026-10-19 20:00; design `docs/plans/slider-overview.md`, awaiting approval)**: the
+  slider row in all three modes draws the whole in its track, in the twelve rows y 456..467 inside the window's lines.
+  Scope: the record's min / max envelope. Spectrum: the spectrum over 0..fs/2 that the FFT already computes. Frequency
+  response: AUTO SET's 20-point overview, nothing before the first AUTO SET. It is dimmed outside the window and in full
+  colour inside it, the window is drawn over it unchanged, and touch does not change. Boards: the Scope, Spectrum and
+  Frequency response boards, plus makeover/ScopeOverview (a deep record zoomed into one decay). The open owner questions
+  are in the design's section 10 E.
 - **ACQ dropdown** **(owner)**: Sample rate, Time per division, Memory, Roll, Average, Filter. Acquisition only: Trace
   style leaves it. With the Filter on, depths above 6000 are not offered (filtered records hold at most 8190 samples).
 - **Trigger dropdown**: unchanged (mode, edge, channel, position, Always 50 %). 50 % TRIG on the CTRL page sets the
