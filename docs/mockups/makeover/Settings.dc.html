@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;background:#000}
+a{color:#9ecbff}a:hover{color:#ffffff}
+</style>
+</helmet>
+<div style="width: 800px; height: 480px; box-sizing: border-box; background: #000000; color: #e6e6e6; font-family: Verdana, 'DejaVu Sans', sans-serif; font-size: 16px; display: flex; flex-direction: column; overflow: hidden">
+
+  <div style="height: 52px; box-sizing: border-box; padding: 4px 8px; display: flex; align-items: center; gap: 8px; background: #0b1a33; border-bottom: 1px solid #1f3a66">
+    <div style="font-size: 24px; color: #ffffff; padding: 0 8px 0 4px">Settings</div>
+    <div style="font-size: 13px; color: #c9d6ea">Device settings. Channel, trigger, time base and filter stay in their own menus.</div>
+    <button type="button" style="margin-left: auto; height: 44px; min-width: 96px; padding: 0 16px; background: #0f2447; border: 1px solid #1f3a66; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px">Back</button>
+  </div>
+
+  <div style="flex: 1 1 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; padding: 8px 12px 0 12px; box-sizing: border-box; align-content: start">
+
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <div style="font-size: 13px; color: #9a9a9a; padding: 4px 0 0 2px">Display</div>
+      <button type="button" style="display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 12px; background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px; text-align: left">
+        <span>Screen brightness</span><span style="color: #35c26a">70 %</span>
+      </button>
+      <button type="button" style="display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 12px; background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px; text-align: left">
+        <span>Grid brightness</span><span style="color: #35c26a">40 %</span>
+      </button>
+
+      <div style="font-size: 13px; color: #9a9a9a; padding: 6px 0 0 2px">Controls</div>
+      <button type="button" style="display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 12px; background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px; text-align: left">
+        <span>File message timeout</span><span style="color: #35c26a">0.7 s</span>
+      </button>
+      <button type="button" style="display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 12px; background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px; text-align: left">
+        <span>Cursors</span><span style="color: #35c26a">move freely</span>
+      </button>
+      <button type="button" style="display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 12px; background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px; text-align: left">
+        <span>Auto setup</span><span style="color: #35c26a">improved</span>
+      </button>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <div style="font-size: 13px; color: #9a9a9a; padding: 4px 0 0 2px">Files</div>
+      <button type="button" style="display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 12px; background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px; text-align: left">
+        <span>Stamp screenshots with</span><span style="color: #35c26a">time</span>
+      </button>
+      <button type="button" style="display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 12px; background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px; text-align: left">
+        <span>Reference traces at power-on</span><span style="color: #9a9a9a">not loaded</span>
+      </button>
+
+      <div style="font-size: 13px; color: #9a9a9a; padding: 6px 0 0 2px">Clock</div>
+      <button type="button" style="display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 12px; background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px; text-align: left">
+        <span>Clock</span><span style="color: #35c26a">shown</span>
+      </button>
+      <button type="button" style="display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 12px; background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px; text-align: left">
+        <span>Time and date</span><span style="color: #35c26a">2026-10-19 11:30</span>
+      </button>
+
+      <div style="font-size: 13px; color: #9a9a9a; padding: 6px 0 0 2px">Start-up</div>
+      <button type="button" style="display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 12px; background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px; text-align: left">
+        <span>At power-on</span><span style="color: #35c26a">Open firmware</span>
+      </button>
+    </div>
+  </div>
+
+  <div style="height: 60px; box-sizing: border-box; padding: 8px 12px; display: flex; gap: 12px; align-items: center">
+    <button type="button" style="height: 44px; min-width: 200px; padding: 0 18px; background: #0f2447; border: 1px solid #1f3a66; border-radius: 4px; color: #e6e6e6; font: inherit; font-size: 16px">Restore default settings</button>
+    <div style="font-size: 13px; color: #9a9a9a">Asks first. Keeps the calibration and the start-up choice.</div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":800,"height":480}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -1,5 +1,8 @@
 # Frequency response mode: UI design (the Bode plot screen)
 
+Regenerating the boards: in the coordinating session's scratchpad `gen_ux/`, run `python bode_final.py <dir>` (every Frequency response board), `python bode_icon.py <dir>` (menu icon) and `python boards.py <dir> Spectrum` after `patch_spectrum_slider.py` (the Spectrum slider).
+The generators import `common.py`, `boards.py`, `bode.py` and `bode_v2.py` from the same folder; publish `<dir>`'s files to the Design artifact linked below.
+
 The screens of the Frequency response mode, redesigned to follow `docs/ui-guidelines.md` after fw-bode's interim UI
 (fw 0.2.66, `firmware/AGENTS.md` section 42). The owner rejected that UI on 2026-10-19 (18:50): it remapped RUN/STOP and
 AUTO SET to sweep control and was entered from the generator menu. CTRL kept its meaning in fw 0.2.66: its page
@@ -113,14 +116,42 @@ The call site in `scope_main_menu_item` passes the fg it already computed, as it
 
 The chart **(owner)**: one pane over the trace area, two y axes, no legend.
 
-- **Pane**: y 60..408, six divisions of 58 px, x 6..726. There are no separate magnitude and phase panes any more;
+- **Pane**: y 60..396, six divisions of 56 px, x 6..726 (58 px before the slider row came). There are no separate
+  magnitude and phase panes any more;
   fw 0.2.66's `MAG_*` / `PH_*` geometry goes.
 - **Left axis, magnitude**: labels at x 9 in the magnitude colour (CH2 cyan), the top one with its unit ("10 dB").
 - **Right axis, phase**: labels right-aligned at x 723 in the phase colour (`PHASE_COLOR`), the top one with its unit
   ("+135 deg"). Each curve is drawn in its axis label's colour, which is how a reader tells them apart.
 - **Frequency axis**: Log (default) with decade lines and 2 and 5 sub-lines, or Linear (section 4.1). Labels sit at
-  y 413 in grey.
-- **Cards**: at y 446 (`UI_MS_SPEC_Y`), as in Spectrum. There is no record-position slider in this mode.
+  y 400 in grey.
+- **Cards**: at y 426 (`UI_MS_SCOPE_Y`), as in the Scope, between the plot and the slider.
+- **Slider row (owner, 2026-10-19 19:40)**: y 452..472, the Scope's record-position slider in the same construction
+  (rect 2, 452, 726 x 20; the window a 14 px box at y 455) and the same drag (fw 0.2.64: the window follows the finger).
+
+**The slider: Start..Stop over the sweepable range (owner).**
+
+- **Track**: 1 Hz .. 10 MHz on a log scale, seven decades over the 720 px inside the track (about 103 px per decade)
+  **(coordinator, owner to veto)**. That is the Sweep fold-out's full range for Start and Stop, so the window never
+  runs off the track. The window spans Start..Stop on the same scale: 5 kHz .. 500 kHz draws x 385..591, the default
+  100 Hz .. 1 MHz x 211..622.
+- **Drag**: the window follows the finger. Start and Stop move together by whole steps of the 1-2-5 table, the same
+  number of steps each. That keeps their ratio exactly when the span is a whole number of decades, and within one step
+  otherwise. Both stop at the track ends, so the window never changes width by being pushed.
+- **While dragging**: the frequency axis and its labels follow, and points of the current table that fall inside the
+  new span stay drawn (they are measurements). Nothing is swept yet.
+- **On release, a sweep in progress restarts at the new span.** The point in progress is dropped (`bode_stop(e, 1)`),
+  the table is cleared and the sweep starts again from the new Start. RUN keeps repeating at the new span.
+- **On release while stopped**, one sweep runs at the new span, as Single sweep does, and the run state goes back to
+  STOP at its end. A pan asks for data at the new span, and a stopped table at the old span would no longer match the
+  axis.
+- **Consequences**: the new span is a screen change, so the host's exact settings stop applying (`host_cfg_valid` = 0).
+  A thru for the old span turns stale, and its card and warning say so. Start and Stop are saved in word 219 as from
+  the fold-out.
+- **During AUTO SET's overview** the window spans the overview's 100 Hz .. 10 MHz (x 211..725), and dragging is
+  ignored.
+
+The row costs the pane 12 px (two px per division) and moves the cards up to the Scope's y 426. The C1 / C2 readout box
+moves with the pane's bottom, to y 342..394.
 
 **Scales and the top division.** Both axes are chosen from the data, and both keep the top division (y 60..118) free
 of data when they can. That division holds the warning line without covering the curves.
@@ -155,7 +186,7 @@ with no joining line.
 
 **Cursor readout (owner: the box at the bottom left, as variant 2 drew it).**
 
-- **Box**: grey, x 10..262, y 356..408, inside the pane's bottom left, the position of the DPOS350P's readout. It shows
+- **Box**: grey, x 10..262, y 342..394, inside the pane's bottom left, the position of the DPOS350P's readout. It shows
   while T CURSOR is on.
 - **Overlap**: it may cover part of the response, such as a low skirt or the lowest dB label. The owner accepts that,
   and the cursors can be moved or switched off.
@@ -424,6 +455,7 @@ The guidelines say that where a mode drives a top-bar control, the button shows 
 
 | Control | Does | Firmware today (0.2.68) | Change |
 |---|---|---|---|
+| Slider row | Start..Stop over 1 Hz .. 10 MHz (log); drag pans both, then re-sweeps | none (no slider in the mode) | the Scope's slider row at y 452..472 drawn from Start / Stop; the drag handler (fw 0.2.64's follow-the-finger rule) steps both indices together; on release `bode_stop(e, 1)` and `bv_start`, single when stopped; pane to six divisions of 56 px, labels y 400, cards y 426 (section 2) **(owner)** |
 | Main menu row | opens the mode | `ui_mm_labels[UI_MM_BODE]` "Bode plot"; grey and inert when `bode_view_available()` is 0; two parallel lines as the icon | label "Frequency" / "response"; the low-pass icon of section 1a; a tap on the grey row shows the reason (section 6); entry in roll mode shows the roll note |
 | RUN/STOP | continuous sweeps / stop after the point | `bode_view_service`: RUN starts `bv_start(0, 0)` and repeats; STOP gives `bode_stop(e, 0)` | none (the meaning stays; section 3.1) |
 | AUTO SET | auto span and range, then RUN | `bode_view_autoset` = one sweep (`bv_start(1, 0)`); `bode_view_auto_running` | overview plus `bode_auto_span` (section 3.2); "Auto..." and the cancel as now |
@@ -585,3 +617,5 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
 6. Answered **(owner)**: variant 2's chart without the legend; cursors C1 and C2 with the readout box at the bottom
    left, the overlap accepted; Display Overlaid / Magnitude only / Phase only, no two-pane layout; Frequency axis Log /
    Linear in the Display fold-out.
+7. Answered **(coordinator, owner to veto)**: the track covers the fold-out's full 1 Hz .. 10 MHz, so a Start below
+   100 Hz stays on the track. A given span draws narrower than on a 100 Hz track.

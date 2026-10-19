@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Confirm FEL</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;background:#000}
+a{color:#9ecbff}a:hover{color:#ffffff}
+</style>
+</helmet>
+<div style="position: relative; width: 800px; height: 480px; box-sizing: border-box; background: #000000; color: #ffffff; font-family: Arial, 'Liberation Sans', sans-serif; font-size: 16px; overflow: hidden">
+<div style="position: absolute; left: 0px; top: 0px; width: 800px; height: 52px; box-sizing: border-box; background: #0b1a33; border-bottom: 1px solid #1f3a66"><div style="position: absolute; left: 12px; top: 13px; font-size: 24px; line-height: 26px; color: #ffffff; white-space: nowrap; ">Developer</div></div>
+<button type="button" style="position: absolute; left: 12px; top: 68px; width: 776px; height: 52px; box-sizing: border-box; padding: 0; font: inherit; background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; text-align: left"><span style="display: flex; align-items: center; justify-content: space-between; height: 100%; padding: 0 12px; font-size: 16px; color: #e6e6e6"><span style="display: flex; flex-direction: column"><span>Debug overlay</span><span style="font-size: 13px; color: #9a9a9a">Trigger address and touch coordinates over the top bar</span></span><span style="color: #9a9a9a">off</span></span></button>
+<button type="button" style="position: absolute; left: 12px; top: 128px; width: 776px; height: 52px; box-sizing: border-box; padding: 0; font: inherit; background: #0d0d0d; border: 1px solid #262626; border-radius: 4px; text-align: left"><span style="display: flex; align-items: center; justify-content: space-between; height: 100%; padding: 0 12px; font-size: 16px; color: #e6e6e6"><span>Enter FEL now</span><span style="color: #ffd262">asks first</span></span></button>
+<div style="position: absolute; left: 0px; top: 0px; width: 800px; height: 480px; box-sizing: border-box; background: rgba(0, 0, 0, 0.65)"></div>
+<div style="position: absolute; left: 130px; top: 80px; width: 540px; height: 320px; box-sizing: border-box; background: #181818; border: 1px solid #606060; border-radius: 4px"><div style="position: absolute; left: 24px; top: 22px; font-size: 24px; line-height: 26px; color: #ffffff; white-space: nowrap; ">Enter FEL now?</div><div style="position: absolute; left: 24px; top: 66px; font-size: 16px; line-height: 18px; color: #ffffff; white-space: nowrap; ">The scope restarts into the USB boot loader at once.</div><div style="position: absolute; left: 24px; top: 90px; font-size: 16px; line-height: 18px; color: #ffffff; white-space: nowrap; ">The screen stays dark until a PC loads firmware with sunxi-fel.</div><div style="position: absolute; left: 24px; top: 114px; font-size: 16px; line-height: 18px; color: #ffffff; white-space: nowrap; ">A power cycle boots the card as usual.</div><a href="Developer.dc.html" style="position: absolute; left: 24px; top: 232px; width: 260px; height: 64px; box-sizing: border-box; padding: 0; font: inherit; background: #1f3a66; border: 2px solid #9ecbff; border-radius: 4px; color: #ffffff; text-decoration: none; display: block"><span style="display: flex; align-items: center; justify-content: center; height: 100%; font-size: 24px">Cancel</span></a><button type="button" style="position: absolute; left: 326px; top: 252px; width: 190px; height: 44px; box-sizing: border-box; padding: 0; font: inherit; background: #1b4d2e; border: 1px solid #2f8a52; border-radius: 4px; color: #ffffff"><span style="display: flex; align-items: center; justify-content: center; height: 100%; font-size: 16px">Enter FEL</span></button></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":800,"height":480}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -80,6 +80,12 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   so the interpolated trace wobbles at about 1 Hz; no trigger jitter: the edge index is stable). fw-acq's rule allows one sample
   per division; raise the minimum to about 10 samples per division (10 px per sample) so such zooms are unavailable and the snap
   picks a viable time/div; one constant in tb_view.c plus the host test. Next firmware batch.
+- **Bottom scroll bar in Spectrum and Frequency response** (owner 10-19 19:40): the Scope's record slider construction under the
+  plot of both modes; Spectrum: the span as a window over 0..fs/2, drag pans the centre; Frequency response: Start..Stop as a window
+  over 100 Hz..10 MHz on the log axis, drag pans both and re-sweeps. Designer (ux-bode) updates the boards and bode-ui.md /
+  ux-makeover.md first; firmware batch after fw-freq lands (spectrum.c and bode_view.c).
+- [x] **Preserve the mockup sources** (docs/mockups/ committed 19:50): copy the gen_ux generators and the artboard HTML from the coordinator's scratchpad into
+  docs/mockups/ (committed) before the session ends; the makeover artifact itself is on a previous login (ux-makeover.md note).
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
@@ -282,6 +288,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   BITSTREAMS.md and tools/bitstreams.py check in CI; release.yml attaches them, accepts vX.Y.Z-rcN pre-release tags, takes release
   notes from docs/release-notes/X.Y.Z.md (0.3.0 draft with placeholders); releasing.md fixed; README rewritten; release-checklist.md).
   Open: add 0x1538 as recommended when pinned and benched; owner decisions: attach older bitstreams, AI credits wording (F12).
+- ux-bode (done 19:55, designer, retired): Frequency response mode design (artifact DfydC8HJgnemUw3EHenTGP, docs/plans/bode-ui.md
+  6d849f6: chart, cursors, Display variants, icon, slider rows for Spectrum and Frequency response, track 1 Hz..10 MHz).
 - mcp-gen6 (done 19:05, about 500k tokens, retired; handoff mcp/AGENTS.md): protocols 1.19 (encode_check in scope_health, events
   21/22), 1.20 (scope_bode_sweep where=device, close_view), 1.21 (scope_cal_probe, 252-byte decoder), fnirsi1013d.report +
   scope_report (PNG + offline HTML), guide 7a "Presenting results", simulator variants al3e; pushed 2fb610e, CI 39290741852 green.
