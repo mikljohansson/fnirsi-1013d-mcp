@@ -322,6 +322,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   fpga-gen9 (Fable, branch fpga-gen9 from fpga-gen8's branch, owner 20:55): adversarial review of the AL3 capture path, clocking,
   constraints and the TD initial-value finding, then finish 0x153A (build, every testbench, tb_adccap, contract transcript, docs,
   images for pinning, dist entry, firmware notes); 0x153B = the features branch gen8-features-wip afterwards.
+- docs-site (done 21:05, about 180k tokens, merged): mkdocs.yml + Material, docs/index.md, guide/ and articles/ skeletons,
+  agent-setup.md, tools/mkdocs_hooks.py (GitHub links for files outside the site, `![..](screenshot:NAME)` placeholders),
+  .github/workflows/docs.yml (Pages deploy, no secret) + ci.yml docs job, tools/screenshots.py (--list, --simulator, --port,
+  --only, --generator opt-in) with a simulator test. Owner once: Settings > Pages > Source: GitHub Actions (releasing.md section 6).
+  Remains: screenshots on the unit after fw-screen, per-screen guide text after 0.2.70, the six articles, agent worked examples.
 - fpga-gen8 (done 20:57, about 834k tokens, retired; handoff = the last section of fpga/al3/AGENTS.md on branch
   worktree-agent-ac1eb52dff7a62fc7, commits 19d9a5c WIP + e924eba handoff, not merged: main keeps the 0x1539 sources until 0x153A is
   benched). Delivered 0x1539 (flashed 20:06). Found: AD9288 data valid from tPD 6 ns max to tV 2 ns min, so at 200 MS/s each core
