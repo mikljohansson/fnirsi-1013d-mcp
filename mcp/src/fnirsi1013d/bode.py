@@ -1298,6 +1298,10 @@ def result_from_device(hdr: P.BodeHeader, rows: list[P.BodeRow], *, probes: tupl
             res.caveats.append(f"CH{ch}: offset range exhausted (the trace could not be centred within the offset "
                                "PWM's 0..2000): the DC level is beyond this range's window; see the ch2_overload / "
                                "clipped flags")
+    if hdr.reason == 8:
+        res.caveats.append("the scope's ADC readout returns rail values (fw 0.2.70 stops the sweep rather than produce a "
+                           "flagged table): run the encode check in Diagnostics (scope_health) and check the FPGA "
+                           "bitstream before trusting any capture")
     if hdr.reason == 3:
         res.caveats.append("CH2's front end is saturated on the held range (a flat record: a DC level against the "
                            "probe reference beyond this range's input window). Remedy: wiring A (DUT ground on the "
