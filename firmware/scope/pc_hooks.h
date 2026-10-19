@@ -82,8 +82,7 @@ uint16 pc_glue_ui_setting_word(void);            //settings sector word 211 (sco
 
 //fw 0.2.66: the Bode plot (bode_view.c), a mode opened from the generator menu
 int    pc_glue_bode_pass(void);                  //scope_acquire_trace_data: 1 = the Bode plot shows (no UI acquisition)
-void   pc_glue_gen_bode_draw(void);              //generator menu: draw its fourth row, "Bode plot"
-int    pc_glue_gen_bode_hit(void);               //generator menu: a tap on that row (ytouch): 1 = taken, close the menu
+int    pc_glue_bode_available(void);             //fw 0.2.68: the main menu's Bode plot row can open the view
 uint16 pc_glue_bode_setting_word(int i);         //settings sector words 219, 220 (scope_save_config_data)
 void   pc_glue_view_opening(void);               //the picture / waveform viewer is about to open: the Bode plot ends
 
@@ -112,8 +111,6 @@ void   pc_glue_view_opening(void);               //the picture / waveform viewer
 #define PC_SCOPE_PASS()         pc_glue_scope_pass()
 #define PC_SCOPE_WARNING()      pc_glue_scope_warning()
 #define PC_BODE_PASS()          do { if(pc_glue_bode_pass()) return; } while(0)
-#define PC_GEN_BODE_DRAW()      pc_glue_gen_bode_draw()
-#define PC_GEN_BODE_HIT()       pc_glue_gen_bode_hit()
 #define PC_VIEW_OPENING()       pc_glue_view_opening()
 
 //fw 0.2.58 (0x1536 sequencer, pc_seq_hw.h): fpga_do_conversion writes the geometry and the sequencer registers before

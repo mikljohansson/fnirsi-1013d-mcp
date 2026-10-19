@@ -21,7 +21,8 @@ Same column, same rows, same style. Top to bottom:
 
 1. Scope
 2. Spectrum analyser
-3. Bode plot (only once it ships, never a greyed row)
+3. Bode plot (owner decision 2026-10-19 18:45, fw 0.2.68: the third mode row; it left the generator menu. Eight
+   rows at a 52 px pitch. Grey and inert only on bitstreams without the filter and DDS, or in the viewers)
 4. Saved pictures
 5. Saved waveforms
 6. Settings

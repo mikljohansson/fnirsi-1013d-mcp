@@ -71,7 +71,7 @@ static const char *const ch2_names[2] = { "Auto", "Hold" };
 
 typedef struct
 {
-  uint8  active, req;               //req: 1 open, 2 close at the next pass
+  uint8  active;
   uint8  start_i, stop_i, points_i, settle, ch2;
   uint8  single, was_running, last_run;
   uint8  dirty, auto_shown;
@@ -149,11 +149,6 @@ int bode_view_available(void)
 {
   return ((pc_glue_caps() & (PC_CAP_DECIM | PC_CAP_GENERATOR_DDS)) == (PC_CAP_DECIM | PC_CAP_GENERATOR_DDS)) &&
          !scopesettings.waveviewmode;
-}
-
-void bode_view_request(int open)
-{
-  bv.req = open ? 1 : 2;
 }
 
 static void bv_draw_bar_button(void)
@@ -316,17 +311,6 @@ void bode_view_service(void)
   bode_eng *e = bode_engine();
   uint32 t0;
   int run;
-
-  if(bv.req == 1)
-  {
-    bv.req = 0;
-    bode_view_open();
-  }
-  else if(bv.req == 2)
-  {
-    bv.req = 0;
-    bode_view_close();
-  }
 
   if(!bv.active)
     return;
@@ -1395,43 +1379,6 @@ void bode_ctrl_touch(void)
       tp_i2c_wait_for_touch_release();
       break;
   }
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-// The generator menu's fourth row (GEN_MENU_YPOS + 168 .. + 224): "Bode plot" with Open / Close, or why it is missing
-
-void bode_gen_row_draw(void)
-{
-  uint32 y = GEN_MENU_YPOS + 168;
-  int    ok = bode_view_available();
-
-  display_set_fg_color(BLACK_COLOR);
-  display_draw_horz_line(y - 2, GEN_MENU_XPOS + 10, GEN_MENU_XPOS + GEN_MENU_WIDTH - 10);
-
-  display_set_fg_color(ok ? WHITE_COLOR : NOTE_COLOR);
-  text_at(&font_3, GEN_MENU_XPOS + 10, y + 20, "Bode plot");
-
-  if(!ok)
-  {
-    display_set_fg_color(NOTE_COLOR);
-    text_r(&font_2, GEN_MENU_XPOS + GEN_MENU_WIDTH - 10, y + 22, scopesettings.waveviewmode ? "Not in the viewer" :
-                                                                  "FPGA 0x1534+");
-    return;
-  }
-
-  display_set_fg_color(bv.active ? ITEM_ACTIVE_COLOR : GREY_COLOR);
-  display_fill_rounded_rect(GEN_MENU_XPOS + 120, y + 10, 88, 36, 3);
-  display_set_fg_color(bv.active ? BLACK_COLOR : WHITE_COLOR);
-  text_c(&font_3, GEN_MENU_XPOS + 164, y + 20, bv.active ? "Close" : "Open");
-}
-
-int bode_gen_row_hit(uint32 y)
-{
-  if((y < GEN_MENU_YPOS + 172) || (y > GEN_MENU_YPOS + 220) || !bode_view_available())
-    return 0;
-
-  bode_view_request(!bv.active);
-  return 1;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

@@ -913,7 +913,7 @@ void handle_main_menu_touch(void)
     //Check if there is touch
     if(havetouch)
     {
-      //Check if touch within the menu field: the rows' hit areas are contiguous, one 59 px pitch each (ui_menu.h)
+      //Check if touch within the menu field: the rows' hit areas are contiguous, one 52 px pitch each (ui_menu.h)
       if((row = ui_mm_row_at(xtouch, ytouch)) >= 0)
       {
         //Check if on system settings
@@ -1045,7 +1045,12 @@ void handle_main_menu_touch(void)
           //Need to exit the loop here
           return;
         }
-        //Scope or Spectrum analyser: the mode rows (pc_glue_main_menu_mode carries out ui_mm_choose)
+        //fw 0.2.68: Bode plot where the bitstream lacks the filter and the DDS (or in the waveform viewer): grey, inert
+        else if((row == UI_MM_BODE) && !pc_glue_bode_available())
+        {
+          tp_i2c_wait_for_touch_release();
+        }
+        //Scope, Spectrum analyser or Bode plot: the mode rows (pc_glue_main_menu_mode carries out ui_mm_choose)
         else
         {
           //Close any other open menu
@@ -3119,13 +3124,6 @@ void handle_generator_menu_touch(void)
             //Set the button inactive
             scope_generator_settings(0);
           }
-        }
-        //fw 0.2.66: the fourth row, Bode plot: the mode opens (or closes) once the menu has closed
-        else if(PC_GEN_BODE_HIT())
-        {
-          tp_i2c_wait_for_touch_release();
-          close_open_gen_menus(1);
-          return;
         }
         //====================================================================================================
         //Wait until touch is released before checking on a new position

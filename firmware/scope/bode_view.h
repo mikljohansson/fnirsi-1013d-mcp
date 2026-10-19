@@ -4,8 +4,8 @@
 // (bode_sweep.c) drives the generator, the channels and the captures; the trace area shows the magnitude and phase panes
 // over a log frequency axis with the markers, the cards show the cursor's f, |H| and phase and the -3 dB frequency, and the
 // right bar's CTRL page holds Sweep (start, stop, points, settle, CH2 range, run) and Thru (measure, apply, clear).
-// Entered from the generator menu's "Bode plot" row (owner); left through the main menu (Scope, Spectrum analyser) or the
-// same row. RUN repeats sweeps, STOP ends after the point in progress, AUTO SET runs one sweep. Everything the view changed
+// Entered from the main menu's "Bode plot" row (fw 0.2.68, owner; the generator menu's fourth row before); left through
+// the main menu's other mode rows (Scope, Spectrum analyser). RUN repeats sweeps, STOP ends after the point in progress, AUTO SET runs one sweep. Everything the view changed
 // (generator, channels, time base, trigger source, RUN / STOP) is given back on leaving.
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -19,11 +19,10 @@
 
 int    bode_view_active(void);
 int    bode_view_available(void);   //the bitstream has the decimation filter and the DDS, no viewer is open
-void   bode_view_request(int open); //generator menu row: open or close at the next main-loop pass
 void   bode_view_open(void);
 void   bode_view_close(void);
 
-//Main loop (pc_glue_ui_service): pending open / close, the engine, RUN / STOP, the repeat, redraws
+//Main loop (pc_glue_ui_service): the engine, RUN / STOP, the repeat, redraws
 void   bode_view_service(void);
 //scope_acquire_trace_data: 1 while the view shows (it drew; the UI acquisition is skipped)
 int    bode_view_pass(void);
@@ -38,10 +37,6 @@ int    bode_view_auto_running(void);
 //The CTRL page in the view (ctrl_page.c hands it over)
 void   bode_ctrl_draw(void);
 void   bode_ctrl_touch(void);
-
-//The generator menu's fourth row (menu.c draws, statemachine.c taps)
-void   bode_gen_row_draw(void);
-int    bode_gen_row_hit(uint32 y);
 
 //Settings sector words 219 and 220 (start, stop, points; settle, CH2 range)
 uint16 bode_view_setting_word(int i);

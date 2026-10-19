@@ -1618,8 +1618,7 @@ int pc_glue_autoset_running(void)  { return bode_view_auto_running() || spectrum
 
 //fw 0.2.66: scope_acquire_trace_data while the Bode plot shows: no UI acquisition, the view's drawing instead
 int pc_glue_bode_pass(void)        { return bode_view_pass(); }
-void pc_glue_gen_bode_draw(void)   { bode_gen_row_draw(); }
-int pc_glue_gen_bode_hit(void)     { return bode_gen_row_hit(ytouch); }
+int pc_glue_bode_available(void)   { return bode_view_available(); }
 uint16 pc_glue_bode_setting_word(int i) { return bode_view_setting_word(i); }
 void pc_glue_view_opening(void)    { if(bode_view_active()) bode_view_close(); }
 
@@ -1658,14 +1657,14 @@ void pc_glue_main_menu_mode(int row)
   ui_mm_action a;
   int          sp;
 
-  //fw 0.2.66: the Bode plot (opened from the generator menu) ends on either mode row; Scope then needs nothing more
-  if(bode_view_active())
-    bode_view_close();
-
   sp = pc_spectrum_on();
 
   if(!ui_mm_choose(row, sp, scopesettings.long_mode != 0, phosphor_switch(), &a))
     return;
+
+  //fw 0.2.68: the Bode plot is the main menu's third mode row; any other mode row ends it (it gives its settings back)
+  if(!a.bode && bode_view_active())
+    bode_view_close();
 
   if(a.roll_off)
   {
@@ -1688,6 +1687,9 @@ void pc_glue_main_menu_mode(int row)
 
   if(a.warn_roll)
     spectrum_note_roll_off();
+
+  if(a.bode && !bode_view_active())
+    bode_view_open();
 }
 
 //The right bar differs between the modes (empty slots, the CTRL page's items): redrawn whenever the spectrum view

@@ -670,10 +670,11 @@ The first step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 1 
 `docs/ui-guidelines.md`). Pure parts in `ui_menu.c` (row table, hit areas, mode rule) and `ui_fmt.c` (text widths,
 card values, names), host-tested in `host_tests/test_ui.c` against the device's own font tables.
 
-Main menu (Menu button, top left): seven rows, always all of them, top to bottom Scope, Spectrum analyser, Saved
-pictures, Saved waveforms, Settings, Diagnostics, USB drive (were Picture view, Waveform view, System settings,
-Diagnostic view, USB connection; Phosphor display left the menu). No marker for the current mode. Each row is one
-59 px hit area from y 46 (row n: 46 + 59 n .. 104 + 59 n), the button drawn inside it; the column is 413 px high.
+Main menu (Menu button, top left): eight rows since fw 0.2.68 (seven before), always all of them, top to bottom Scope,
+Spectrum analyser, Bode plot (0.2.68), Saved pictures, Saved waveforms, Settings, Diagnostics, USB drive (were Picture
+view, Waveform view, System settings, Diagnostic view, USB connection; Phosphor display left the menu). No marker for
+the current mode. Each row is one 52 px hit area from y 46 (row n: 46 + 52 n .. 97 + 52 n; 59 px before 0.2.68), the
+35 px button drawn 9 px below its top; the column is 416 px high.
 Scope leaves the spectrum view (and brings the phosphor variant back if it was on); Spectrum analyser enters it. In
 roll mode Spectrum analyser switches Roll off first (time base 20, the acquisition menu's Roll box does the same) and
 the spectrum's warning line says "Roll off for the spectrum" for 5 s; going back to Scope does not switch Roll on again.
@@ -1305,12 +1306,13 @@ that can drive the post). With the DUT ground on the USB shell instead (wiring B
 reference and saturates CH2 on 0.1 and 0.2 V/div: CH2 range Auto steps up by itself (flag ch2_overload), Hold stops with
 a warning.
 
-**Entering and leaving.** The generator menu (top bar) has a fourth row, "Bode plot", with Open; in the view it reads
-Close. The main menu's Scope or Spectrum analyser row also leaves the view. On entry the view takes the generator, both
+**Entering and leaving.** The main menu's third row, "Bode plot" (fw 0.2.68, owner; the generator menu's fourth row in
+0.2.66-0.2.67), enters the view through `ui_mm_choose` like the other modes; the Scope or Spectrum analyser row leaves
+it. The row is grey and does nothing on bitstreams without the filter and DDS, or in the viewers. On entry the view takes the generator, both
 channels (enabled, DC coupled, ranges and offsets of the sweep), the time base (raw dividers) and RUN / STOP; an EXT
 trigger is set to CH1 (the pin is the generator's) with a note. Leaving gives every one of them back as it was. Nothing
 is driven until a sweep starts: entering shows the wiring and STOP. Not available on bitstreams without the decimation
-filter (the row reads "FPGA 0x1534+") or in the picture / waveform viewers; roll mode is switched off on entry.
+filter and DDS or in the picture / waveform viewers; roll mode is switched off on entry.
 
 **Screen** (trace area): the magnitude pane (y 60..276, 6 divisions; 5, 10 or 20 dB per division and the top line chosen
 from the data), the phase pane (y 292..408, +180..-180 deg at 90 deg per division), a shared log frequency axis from
@@ -1372,11 +1374,11 @@ mcp's to add.
 
 **Files**: `bode_dsp.c/.h` (planner, DFT, levels, CORDIC, markers; host_tests/test_bode.py against the host tool and the
 plan vectors), `bode_sweep.c/.h` (the engine behind a `bode_hw` table, the READ_BODE codec; host_tests/test_bode_sweep.c
-on a DUT model), `bode_view.c/.h` (the mode, drawing, CTRL page, generator menu row, BODE_CTRL actions), `pc_bode.c`
+on a DUT model), `bode_view.c/.h` (the mode, drawing, CTRL page, BODE_CTRL actions), `pc_bode.c`
 (the scope's `bode_hw`: raw divider, the arm with this capture's filter configuration, the 1.00o5 readout and its
-scales). Hooks: `PC_BODE_PASS` at the top of `scope_acquire_trace_data`, `PC_GEN_BODE_DRAW` / `PC_GEN_BODE_HIT` in the
-generator menu, the spectrum glue (`pc_glue_spectrum_display / touch`, `pc_glue_autoset`) asks the view first,
-`ctrl_page_draw / touch` hand the page over, `pc_glue_main_menu_mode` closes the view, `pc_right_bar_follow` follows it.
+scales). Hooks: `PC_BODE_PASS` at the top of `scope_acquire_trace_data`, the main menu's Bode row (`pc_glue_bode_available`,
+`pc_glue_main_menu_mode` opens and closes the view; fw 0.2.68), the spectrum glue (`pc_glue_spectrum_display / touch`, `pc_glue_autoset`) asks the view first,
+`ctrl_page_draw / touch` hand the page over, `pc_right_bar_follow` follows it.
 Memory: about 95 KB more `.bss` (the engine's tables and DFT scratch, 32 KB of legacy record copies), 54 KB more code.
 
 **Limits / not built**: CH2 is always DC coupled (the host tool's `ch2_coupling='ac'` for wiring B is not on the device);

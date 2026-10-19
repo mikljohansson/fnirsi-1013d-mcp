@@ -8,7 +8,7 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
 
 ## 1. Vocabulary
 
-- **Mode**: changes what is measured and which controls exist. Scope, Spectrum analyser, Bode plot (when it ships).
+- **Mode**: changes what is measured and which controls exist. Scope, Spectrum analyser, Bode plot (fw 0.2.68).
   Modes exclude each other and are chosen from the main menu, which is the only way between them.
 - **Variant**: changes how the same measurement is shown. Scope: Normal, Phosphor, X-Y. Spectrum: Spectrum,
   Waterfall, Density. Variants live in the mode's Display control, never in the main menu.
@@ -19,8 +19,10 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
 
 ## 2. Where things live
 
-- **Main menu** (left column): modes first, utilities below, the row that takes the scope off-line (USB drive) last.
-  No marker for the current mode: the screen shows it. No greyed rows for features that do not exist yet.
+- **Main menu** (left column): modes first (Scope, Spectrum analyser, Bode plot), utilities below (Saved pictures, Saved
+  waveforms, Settings, Diagnostics), the row that takes the scope off-line (USB drive) last; eight rows at 52 px (fw
+  0.2.68). No marker for the current mode: the screen shows it. No greyed rows for features that do not exist yet (the
+  Bode row is grey only where the hardware cannot run it: no filter / DDS bitstream, or in a viewer).
 - **Top bar**: hardware state and global tools, identical in every mode: Menu, CH1, CH2, brightness, ACQ, Move fast,
   Trigger, Generator, battery, MCP chip. No version string (Diagnostics has it). Where a mode drives one of these
   itself (the spectrum's Span sets the time base), the button shows the value and its menu says so instead of fighting

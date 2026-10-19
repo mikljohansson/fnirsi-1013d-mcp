@@ -2740,6 +2740,18 @@ static void scope_main_menu_spectrum_icon(uint32 y)
     display_draw_vert_line(MAIN_MENU_XPOS + 16 + 2 * i, y + 29 - bars[i], y + 29);
 }
 
+//Bode plot (fw 0.2.68, owner): two sloping lines, magnitude above phase, as a low-pass reads: flat, then falling
+static void scope_main_menu_bode_icon(uint32 y)
+{
+  uint32 x = MAIN_MENU_XPOS + 15;
+
+  display_draw_line(x, y + 8, x + 10, y + 8);
+  display_draw_line(x + 10, y + 8, x + 24, y + 22);
+  display_draw_line(x, y + 15, x + 5, y + 15);
+  display_draw_line(x + 5, y + 15, x + 19, y + 29);
+  display_draw_line(x + 19, y + 29, x + 24, y + 29);
+}
+
 //One row of the main menu: mode 0 normal, 1 touched (Settings stays yellow while its fold-out is open, as 1.00o5)
 void scope_main_menu_item(int row, int mode)
 {
@@ -2751,14 +2763,15 @@ void scope_main_menu_item(int row, int mode)
   display_set_fg_color(bg);
   display_fill_rounded_rect(UI_MM_BTN_X, y, UI_MM_BTN_W, UI_MM_BTN_H, 3);
 
-  //Icons with the set colors
-  display_set_fg_color(mode ? BLACK_COLOR : WHITE_COLOR);
+  //Icons with the set colors; fw 0.2.68: the Bode plot row grey where it cannot open (no filter / DDS, the viewer)
+  display_set_fg_color(mode ? BLACK_COLOR : ((row == UI_MM_BODE) && !pc_glue_bode_available()) ? 0x00686868 : WHITE_COLOR);
   display_set_bg_color(bg);
 
   switch(row)
   {
     case UI_MM_SCOPE:       scope_main_menu_wave_icon(y, mode ? BLACK_COLOR : WHITE_COLOR); break;
     case UI_MM_SPECTRUM:    scope_main_menu_spectrum_icon(y); break;
+    case UI_MM_BODE:        scope_main_menu_bode_icon(y); break;
     case UI_MM_PICTURES:    display_copy_icon_use_colors(picture_view_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
     case UI_MM_WAVEFORMS:   display_copy_icon_use_colors(waveform_view_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
     case UI_MM_SETTINGS:    display_copy_icon_use_colors(Other_settings_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
@@ -6082,9 +6095,6 @@ void scope_open_generator_menu(void)
   gen_enable_select(); //gen_source_select();
   gen_freq_select();
   gen_duty_select();
-
-  //fw 0.2.66: the fourth row, Bode plot (bode_view.c)
-  PC_GEN_BODE_DRAW();
   
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1
