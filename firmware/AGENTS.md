@@ -1,7 +1,9 @@
 # firmware/ handoff for agents
 
-**Branch fw-ui2 (2026-10-19): fw 0.2.56 (provisional), protocol 1.16 unchanged: UX makeover step 2 (CTRL page with
-fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips), section 33.**
+**Current state (coordinator merge, 2026-10-19 14:35): latest build fw 0.2.58, protocol 1.17** = main with fw-ui2 (UX makeover
+step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
+section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
+section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
 **Branch fw-ui3 (2026-10-19): fw 0.2.55 provisional, protocol 1.16 unchanged: UX makeover step 3 (Settings fold-out
 trimmed, full Settings screen, confirmation dialog), section 31.**
 **Current state (coordinator merge, 2026-10-19 13:50): latest build fw 0.2.52, protocol 1.16** = main with fw-ui1 (UX makeover
@@ -256,6 +258,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.48 | b1922c3 | 2f768fd9 | MMU + D-cache on (flat map, DDR / SRAM write-back, framebuffer write-through, restart record and peripherals strongly ordered), clean + off at _reset and ENTER_FEL, GET_LINK_STATS 58-59 fault status / address (fw-mmu, section 26) | built, host-tested (test_mmu); A/B image `make gcc10-nommu` 0.2.48-nommu sha256 45e03f7f; bench sequence in section 26 |
 | 0.2.49 | c477faa | 90f460d6 | USB suspend watch in the 1 ms tick (pc_usbw.c): inferred resume (SOFs, EP0 setup, EP2 OUT while suspended) acts, soft reconnect (SoftConn off 1 s) after a retry storm or 15 min suspended, GET_LINK_STATS 60-61, event type 20, SUSPEND before RESUME in the ISR (protocol 1.14, row 53; fw-usb2, section 27) | built, host-tested (test_usbw 90 checks); A/B `make gcc10-nommu` sha256 f5f377ea; bench plan in section 27 |
 | 0.2.56 | 5255516 | 7729e4fe | UX makeover step 2 (fw-ui2, section 33; provisional number): CTRL page in both modes (Display fold-out with icons and the Phosphor switch with Persistence / Palette / Clear / wfm/s, Trace style or Analyse with Scale and Ref level, Grid switch, compact V+ / CH / V- steppers, 50 % TRIG in Scope), ACQ menu acquisition only, phosphor and spectrum strips and spectrum header gone (spectrum cards Peak / Level / RBW / Time), empty cursor and measures slots in Spectrum, warning line in every scope variant, top bar chips one construction, settings word 211 | built, host-tested (test_ui 6672 checks); bench walk-through in section 33 |
+| 0.2.58 | 3934ea3 | 6bbd7598 | FPGA 0x1536 sequencer (fw-seq, section 35; provisional number): caps bit 17 SEQ, 0x0B / 0x0C / 0x57-0x5C before the reset, UI Average as a hardware run of 2-64 records for legacy records that fit, SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW addr_mode 3, GET_STATUS 48 (features, UI Average), GET_DECIM 36, GET_CAPTURE_INFO 96 (protocol 1.17, row 56) | built, host-tested (test_seq 732, test_session 69705); nommu fc8fc081; flash plan in section 35 |
 | 0.2.55 | e01f775 | 6f100098 | UX makeover step 3 (fw-ui3, section 31; provisional number): fold-out Screen / Grid brightness, File message timeout, Time and date, Baseline calibration (interim), Other settings; full Settings screen (`ui_settings.c` / `ui_settings_ui.c`) with At power-on 0 / 4 / 5 written on Back, Restore default settings behind a confirmation (boot byte kept, CDC kept); Other settings menu, USB-Serial and Dev mode rows removed; delete confirmation as the dialog pattern | built, host-tested (test_ui 1,431,758 checks); bench walk-through in section 31 |
 | 0.2.54 | f9fcac6 | a4f0c832 | touch fix batch 1 (fw-touch1, section 32; provisional number): left pointers are drag handles (`touch_pick.c`, 44 px boxes, nearest / on-top pick), pick at touch-down, nearest enabled zero line, no trigger-point move in a channel drag, channel + trigger level share one clamped delta, EXT no longer follows CH2, traceposition 6..396 in the new auto setup and at load |
 | 0.2.51 | 8f5bf16 | 38580def | UX makeover step 1 (fw-ui1, section 29): main menu Scope / Spectrum analyser / Saved pictures / Saved waveforms / Settings / Diagnostics / USB drive with one 59 px hit area per row, Spectrum in roll mode switches Roll off; USB drive screen text + Exit; no top-bar version; Display row Normal / Phosphor / X-Y in the acquisition menu (X-Y out of System settings); strips without Scope / Auto, AUTO SET = spectrum Auto; phosphor warnings top-middle; cards with chip, scope-maker names, 4 significant digits, defaults Freq / Vpp / Vavg | built, host-tested (test_ui 1513 checks); bench walk-through in section 29 |
@@ -1807,3 +1810,117 @@ Bug indicators: a stepper half acting on the other channel or the wrong directio
 the panel on the plot (stopped scope); AUTO SET painted over Analyse; the right bar showing Scope items in the spectrum
 or empty slots in the scope after a mode change; the warning line in the waveform viewer; cards overlapping the
 frequency labels; Phosphor switch on but no graded picture in the scope view outside roll mode.
+## 35. fw-seq: FPGA 0x1536 segmented capture and hardware averaging (fw 0.2.58 provisional, protocol 1.17, row 56 provisional)
+
+Version 0.2.58 as assigned by the coordinator (main: 0.2.56 fw-ui2, 0.2.57 fw-ui4); protocol 1.17 with the row kept at
+**70** as briefed (main's last row is 55; renumber to 56 at the merge if preferred). Branch
+`worktree-agent-adad2198a41835255` from main 9cc599c (0.2.51), merged with origin/main 57924e0 (0.2.55, protocol
+1.16). Commits: e6bbc10 (pc_seq.c maths + test_seq + seq_check), 65abebf (HAL, UI averaging, protocol 1.17, mock,
+test_session, vectors), 32a80ed (protocol.md row 56), f10ccf4 (CHANGELOG, READMEs, design-note status), 7bfd267
+(docs/plans/phosphor-fast-capture.md), b4453bb (merge of main), 29c55ac (two GCC warnings), then this handoff. Then 246bc52 (merge of main), 3934ea3 (renumbered 0.2.58). Image from
+3934ea3 (#VER fw=0.2.58 proto=1.17): `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 548,352 B, sha256
+6bbd7598cfb473b5226e34a9a18bf808f1795ac6f02158c0cd368316eb954dfe, ELF
+ad1c1597c87441eb6c8bd26056229cf259227d75a13e910c477d0fb232b8c8dc; A/B `make gcc10-nommu` sha256
+fc8fc081016d13d7320152845e684bc9c7bf01ea53ac6ab156c799b7ddedb191. Not pinned in backups/. **Nothing benched, nothing
+flashed.** Host tests all green (test_seq 732, test_session 69705 / 69703, test_diag 462, check_vectors OK with 90 frames,
+163 decim, 73 seq cases). Warnings: clean GCC 10 / nommu 36, GCC 13 / PC_DEBUG 31, sorted lists identical to a clean build
+of origin/main 57924e0. No settings words or sector bytes claimed (none needed: the UI averaging picks N itself).
+
+Spec: docs/protocol.md section 14 row 56; user-facing and file map: firmware/README.md section 5 "Segmented capture and
+hardware averaging"; FPGA: fpga/al3/README.md section 6 (+ "Firmware support"), docs/plans/segmented-capture.md.
+
+**What was decided and why**
+- One cap bit, SEQ (17), for both modes (one bitstream feature); a features word in GET_STATUS 44-45 (and GET_DECIM
+  32-33) so a host sees EXT / DECIM / FIR / SEGMENTS / HW_AVERAGE without decoding caps; GET_STATUS 46-47 = the UI Average
+  state (0 off, 1 software, 2 hardware) and log2 N. All answered without FPGA access (ISR safe).
+- Host interface follows design note section 7 with changes: S and raw are per read (READ_SEQ), not in SET_SEQ, because
+  the FPGA applies them live; READ_SEQ has its own header; segments are read with READ_RAW addr_mode 3 so all three
+  layouts work; STOP ends a run as DONE (a circular run has no other end) instead of ABORTED.
+- Arm order on 0x1536: 0x0B / 0x0C and 0x57-0x5C before 0x01 = 1 (fpga-gen6 confirmed the race in simulation: a 0x0B in
+  the last write clock before the release is ignored, and 0x57 / 0x59 written last in the window left the slot mask at
+  1FFF). 0x57 = 0 is written whenever the tracked last value (`seq_57`, 0xFF after boot) is not 0; the READ_SEQ view write
+  (0x57 = 0x02 | raw) updates the tracker, so the next plain arm writes 0 (fpga-gen6's caveat).
+- UI averaging only for legacy records that fit the accumulator: the UI depths start at 3000 samples, so 16-bit records
+  (1 word per sample) never fit 2046 words. With the default filter (CIC2+FIR) that means hardware averaging only at
+  200 MSa/s or with the filter off. A UX follow-up could offer a 2000-sample depth (or cap the depth) while Average is on;
+  `pc_seq_ui_conversion` would then need the 16-bit lane path (L0 / L2, u32 sums, a 64-bit mean).
+- The averaged UI record is read with the dummy strobe (exact, as pc_hal_read_core). fpga-gen6 found that the 1.00o5
+  readout and `fpga_read_decim_data` (no dummy strobe) return mem[S], mem[S], mem[S+1], ...: one word late. So an averaged
+  UI record sits one word (2 samples) earlier than a single UI record at the same settings; the software trigger
+  refinement re-centres both. Not changed here (it is the 1.00o5 readout, all records); queue the fix for the UI readout.
+
+**Points a successor needs**
+- Files: `pc_seq.c/.h` (pure), `pc_seq_hw.c/.h` (target: pc_hal_seq_* and the UI run), handlers in pc_cmds.c section
+  "Sequencer". Edits in shared files are small: `fpga_control.c` (one hook before 0x01 = 1), `scope_functions.c` (`PC_SW_AVERAGE()`
+  appended to the two software-average conditions), `pc_hal_scope.c` (glue calls), `pc_hooks.h` (two macros). UI agents
+  editing scope_display_trace_data: keep the `PC_SW_AVERAGE()` term.
+- `pc_hal_arm` gained `const pc_seq_cfg *sq` (NULL on bitstreams without SEQ; mode 0 = plain capture). Every new arm path
+  must go through `pc_seq_hw_pre_reset` on 0x1536, or a stale mode turns a capture into a run.
+- The firmware auto time-out must never run during a run (it writes 0x1A = 0 between records): host runs use the FPGA's
+  0x0E in auto mode, UI runs have their own deadline (`pc_seq_ui_service`).
+
+**Flash session plan (owner with the coordinator; agents never flash)**
+1. Backups: the stock FPGA flash dump exists (`backups/2026-10-18_fpga-25q80-stock.bin`, sha256 90f65f08...0d253).
+   Before writing, dump the flash as it is now (0x1535): `python firmware/tools/spiflash_d2xx.py read -o
+   backups/<date>_fpga-25q80-0x1535-before-1536.bin --twice`; its sha256 must equal the 0x1535 padded image
+   `backups/al3_fir_0x1535_5040a2ae_padded.bin` (sha256 5ade9e755211fe65...), the rollback image. The tool also keeps its
+   own double-read pre-write backup.
+2. FEL-load this image on the running 0x1535 first (`sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe
+   0x80000000`). Check `#VER` fw=0.2.58 proto=1.17; GET_INFO caps without bit 17; GET_STATUS length 48, bytes 44-45 = 0x0007,
+   46 = 0 (Average off) / 1 (Average on); SET_SEQ answers E_UNSUPPORTED; a normal ARM / WAIT / READ_RAW as on 0.2.55. This
+   is the "older bitstream unchanged" check.
+3. Flash 0x1536: `python firmware/tools/spiflash_d2xx.py probe` (expect `ef 40 14`), then `python
+   firmware/tools/spiflash_d2xx.py write -i backups/al3_seg_0x1536_4eaf6811_padded.bin --yes` (padded sha256 66866c84...7408;
+   the tool asks for the JEDEC ID and verifies by read-back). Scope on battery, no USB, as in fpga/al3/AGENTS.md
+   "Flashing this unit". Power-cycle.
+4. Verify: Diagnostics shows FPGA version 0x1536; FEL-load the image again (or boot it), `#VER` ...fpga=0x1536; GET_INFO
+   caps has bit 17 (0x20000); GET_STATUS bytes 44-45 = 0x001F; GET_SEQ answers 48 bytes with byte 24 = 0x00 (no run yet).
+   Log hashes and results in docs/hardware-status.md.
+5. Modes off (fpga/al3/README.md section 6 check 1): the 0x1535 bench checks (legacy 200 MSa/s, CIC, CIC+FIR, EXT) give
+   the same pictures and GET_DECIM read-back as on 0x1535; UI with Average off looks unchanged.
+6. UI averaging: CH1 on the calibration pin, 1 kHz square, 200 MSa/s time base (filter irrelevant there), Average on:
+   GET_STATUS 46 = 2, 47 = 6 (64 records); the trace is visibly less noisy than with Average off; the edges stay where they
+   were (no shift beyond a sample); `pass_ms` within a few ms of Average off. Filter off at 1 MSa/s: 47 = 3 (8 records).
+   CIC2 at 1 MSa/s: 46 = 1 (software, as before). Auto mode with the probe unplugged: the trace free-runs (single records)
+   and comes back to 2 once the signal triggers. Normal mode, no signal: waits as before.
+7. Segments (README check 2), host: SET_TRIGGER CH1 rising, normal, pretrigger 32, total 240 samples (legacy 200 MSa/s:
+   16 / 120 words); SET_SEQ mode 1, m 7, count 32, hold-off 0; ARM; WAIT. GET_CAPTURE_INFO 76 = 1, 80 = 32, 84 = 0. READ_SEQ
+   table: timestamps 100 us +/- 10 ns apart with the generator at 10 kHz (difference 20000 units); every segment via READ_RAW
+   addr_mode 3 crosses the level at record index 32 (or the T5 convention). With the generator at 10 kHz: run time about
+   3.2 ms.
+8. Circular + STOP: SET_SEQ flags 1, count 4, m 7 on a 1 kHz square; ARM; after about 1 s STOP; WAIT returns DONE; GET_CAPTURE_INFO
+   77 = 0x07 (circular, stopped, wrapped), 80 about 1000; READ_SEQ of 64 entries: valid entries with timestamps 1 ms apart, one
+   invalid (the slot being refilled).
+9. Averaging (README checks 5 and 6): input shorted, legacy 200 MSa/s, EXT or auto; SET_SEQ mode 2, count 1, N 1: READ_SEQ
+   S 0 must equal READ_RAW of the same capture word for word (core A lane = 0x20 byte, B = 0x21) - the mirror check, the one
+   hardware risk the testbench cannot cover. Then N 256, S 8: rms of the averaged record about 1/16 of N 1. 16-bit: CIC2+FIR at
+   10 MSa/s, count 2, N 1000, READ_SEQ S 0xFF: sums / 1000 match the single-shot shape.
+10. PI case (README check 7), when the detector is at hand.
+Rollback: `spiflash_d2xx.py write -i backups/al3_fir_0x1535_5040a2ae_padded.bin --yes` (sha256 5ade9e75...; or the stock
+dump); 0.2.58
+runs on 0x1535 unchanged (step 2), so no firmware rollback is needed.
+
+**For the mcp agent (do not edit mcp/ from this branch)**
+- protocol.py: `Cmd.SET_SEQ = 0x020E`, `GET_SEQ = 0x020F`, `READ_SEQ = 0x0210` (cap SEQ), `Caps.SEQ = 1 << 17`;
+  StatusResp fields `features` (u16 at 44), `ui_average` (u8 46: 0 off, 1 software, 2 hardware), `ui_average_log2n` (u8 47);
+  DecimState the same at 32..35; CaptureInfo 76..95 (seq_mode, seq_flags, m, fmt16, count, untriggered, count requested, N,
+  hold-off ns); SetSeqReq (16 B), SeqState (48 B), ReadSeqReq (12 B) + header (16 B); ReadRawReq addr_mode 3; table entry
+  decode (ts 39..0 x 5 ns, offset 52..40, triggered 53, valid 63). Vectors to decode: `resp_get_seq_segments_done`,
+  `resp_read_seq_table`, `resp_get_status_1_17`, requests `req_set_seq*`, `req_read_seq*`, `req_read_raw_segment_5`.
+- client: `set_seq`, `get_seq`, `read_seq_table`, `read_seq_average(ch_mask, shift|raw)`, `read_segment(seg, layout)`; ARM / WAIT
+  / STOP as today (STOP keeps a run's data).
+- tools: `scope_capture_segments(count, length, pre, holdoff_us, circular, max_wait_s)` -> per segment timestamp (s), triggered,
+  data per channel in volts (READ_RAW mode 3 + the usual conversion; 16-bit via GET_DECIM gain); `scope_capture_averaged(n,
+  positions, length, pre)` -> mean per channel in volts (legacy: lane x 2^S / N per core then the per-core correction; 16-bit:
+  sum / N then the row 47 / 49 conversion), both refusing with the GET_SEQ fit code; `scope_status` gains `hardware_averaging`
+  (byte 46 == 2), the log2 N, and the features list. The simulator needs SET_SEQ / GET_SEQ / READ_SEQ and addr_mode 3.
+
+**Open / for the coordinator**
+- fpga-gen6 findings that hold for 0x1532-0x1536 (fixed in their 0x1537, not built yet): (1) the A/B order inside a word can
+  flip after a 0x0D or 0x53 write and stays flipped until the next such write, so PC_INTERLEAVE_ORDER and the swap bit are
+  right by chance (bench T4); (2) the 1.00o5 readout and `fpga_read_decim_data` are one word late (see above); (3) on
+  0x1532-0x1535 the 0x0B-in-reset race at slow legacy rates still exists (I kept their arm order byte-identical as the brief
+  asked): moving 0x0B / 0x0C before 0x01 = 1 there too is a one-line change in `pc_hal_arm` / `fpga_do_conversion`; queue it.
+- 0x1537 will need the version rule only (`pc_variant_from_version` already maps 0x1537..0x153F to SEQ).
+- Phosphor fast capture: design in docs/plans/phosphor-fast-capture.md (hundreds of wfm/s at fast time bases), not built.
+- UI 16-bit hardware averaging (see "decided" above) and an Average count setting are UX decisions for the owner.

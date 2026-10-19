@@ -102,6 +102,13 @@ uint16 pc_glue_ui_setting_word(void);            //settings sector word 211 (sco
 #define PC_SCOPE_PASS()         pc_glue_scope_pass()
 #define PC_SCOPE_WARNING()      pc_glue_scope_warning()
 
+//fw 0.2.58 (0x1536 sequencer, pc_seq_hw.h): fpga_do_conversion writes the geometry and the sequencer registers before
+//the sampling reset; the software average is skipped while the traces hold a hardware average
+void   pc_seq_ui_pre_reset(void);
+int    pc_seq_sw_average(void);
+#define PC_SEQ_PRE_RESET()      pc_seq_ui_pre_reset()
+#define PC_SW_AVERAGE()         && pc_seq_sw_average()
+
 
 //Protocol 1.3 has no snapshot to restore: the power-off save stores the live settings as 1.00o5 does. fw 0.2.52: the
 //save that follows closes the session in the unit life record (pc_diag.c)

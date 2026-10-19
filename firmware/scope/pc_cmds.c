@@ -137,7 +137,7 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
     case 0x153A: case 0x153B: case 0x153C: case 0x153D: case 0x153E: case 0x153F:
       //AL3 family, later minors: 0x1533 adds the EXT trigger on the calibration pin (fpga/al3/README.md), 0x1534 the
       //decimation filter with 16-bit samples (cmds 0x53-0x55, read 0x29; pc_decim.h), 0x1535 the CIC compensation FIR
-      //(cmd 0x56)
+      //(cmd 0x56), 0x1536 the sequencer
       v->variant    = 2;
       v->ring_words = 8192;
       v->max_total  = 16382;
@@ -148,6 +148,10 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
 
       if(version >= 0x1535)
         v->caps |= PC_CAP_FIR;                                                       //BENCH: FIR
+
+      //0x1536: the sequencer (segmented capture, hardware averaging; cmds 0x57-0x5D, reads 0x2A-0x32; pc_seq.h)
+      if(version >= 0x1536)
+        v->caps |= PC_CAP_SEQ;                                                       //BENCH: SEQ
       break;
 
     case 0x1632:
@@ -434,6 +438,26 @@ static uint8_t pc_run_state(pc_session *s)
   return (t.ui_mode == 1) ? PC_RUN_SINGLE : PC_RUN_RUN;
 }
 
+//1.17: what the running bitstream has (GET_STATUS 44, GET_DECIM 32)
+static uint16_t pc_features(const pc_session *s)
+{
+  uint16_t f = 0;
+
+  if(s->var.caps & PC_CAP_EXT_TRIGGER) f |= PC_FEAT_W_EXT_TRIGGER;
+  if(s->var.caps & PC_CAP_DECIM)       f |= PC_FEAT_W_DECIM;
+  if(s->var.caps & PC_CAP_FIR)         f |= PC_FEAT_W_FIR;
+  if(s->var.caps & PC_CAP_SEQ)         f |= PC_FEAT_W_SEGMENTS | PC_FEAT_W_HW_AVERAGE;
+
+  return f;
+}
+
+//1.17: features word, the UI's Average state and log2 of its records per hardware run (no FPGA access)
+static void pc_features_body(pc_session *s, uint8_t *p)
+{
+  pc_put_u16(p, pc_features(s));
+  pc_hal_ui_average(p + 2, p + 3);
+}
+
 static uint32_t pc_status_body(pc_session *s, uint8_t *p)
 {
   uint32_t now = pc_hal_ms();
@@ -456,7 +480,7 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
   if(c1.overload)         flags |= 0x40;
   if(c2.overload)         flags |= 0x80;
 
-  memset(p, 0, 44);
+  memset(p, 0, 48);
   p[0] = PC_SHARED;
   p[1] = s->acq_state;
   p[2] = flags;
@@ -480,7 +504,8 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
   p[41] = s->capture_id ? s->cap.origin : 0;
   p[42] = s->ext_flags;                         //1.4: EXT pin (bit0 level, bit1 generator on, bit2 edge since arm)
   p[43] = pc_hal_display_mode();                //1.7: 0 scope, 1 spectrum view; 2 / 3 waterfall / density; 1.13: 4 phosphor
-  return 44;
+  pc_features_body(s, p + 44);                  //1.17: features, UI Average (0 off, 1 software, 2 hardware), log2 N
+  return 48;
 }
 
 //Correction for the channel's current settings (adc_cal.h): calibration data v3 when loaded and bound, with the v4
@@ -1195,15 +1220,47 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //----------------------------------------------------------------------------------------------------------------------------------
 // Acquisition handlers
 
+//Geometry the next host ARM writes: the trigger settings (stock: fixed 1500 / 3000), the decimation filter for them,
+//the EXT latency shift, and the pretrigger / total words (one sample per word in the 16-bit layout)
+static void pc_arm_geometry(pc_session *s, pc_hw_trigger *t, pc_decim_cfg *dc, uint16_t *pre_w, uint16_t *tot_w,
+                            uint16_t *ext_shift)
+{
+  int wide;
+
+  pc_hal_trigger_read(t);
+
+  if(!(s->var.caps & PC_CAP_PROG_TRIGGER_POS))
+  {
+    //Stock: fixed 750 / 1500 word geometry
+    t->pretrigger = 1500;
+    t->total      = 3000;
+  }
+
+  //1.9: decimation filter for this capture; the 16-bit layout has one sample per ring word
+  pc_decim_next(s, t->total, dc);
+  wide = dc->k != 0;
+
+  //EXT trigger: the stored data lag the edge (pc_decim_ext_shift), so fewer pretrigger words put the edge back at
+  //sample `pretrigger` of the capture
+  *ext_shift = (uint16_t)((t->source == 2) ? pc_decim_ext_shift(dc) : 0);
+  if(*ext_shift > t->pretrigger)
+    *ext_shift = t->pretrigger;
+
+  *pre_w = wide ? (uint16_t)(t->pretrigger - *ext_shift) : t->pretrigger / 2;
+  *tot_w = wide ? t->total : t->total / 2;
+}
+
 //ARM (1.3): host single capture. The UI acquisition stops (the screen shows STOP), the host's own ARM sequence runs
-//as in 1.2, and at DONE the capture is built into the trace buffers, which the UI then shows.
+//as in 1.2, and at DONE the capture is built into the trace buffers, which the UI then shows. 1.17: with a SET_SEQ
+//setting it arms a sequencer run (segments or hardware averaging) instead; DONE is the end of the whole run.
 static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   pc_hw_trigger t;
   pc_hw_ui u;
   pc_decim_cfg dc;
-  uint16_t pre_w, tot_w;
+  uint16_t pre_w, tot_w, ext;
   int prog = (s->var.caps & PC_CAP_PROG_TRIGGER_POS) != 0;
+  int seq  = (s->var.caps & PC_CAP_SEQ) && (s->seq.mode != PC_SEQ_OFF);
 
   (void)req; (void)len;
 
@@ -1214,6 +1271,15 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
 
   if(u.long_mode)
     return pc_error(s, PC_E_STATE, 2, "UI long time base");
+
+  //1.17: the sequencer setting must fit the geometry this arm writes (SET_TRIGGER / SET_DECIM may have changed since)
+  if(seq)
+  {
+    pc_arm_geometry(s, &t, &dc, &pre_w, &tot_w, &ext);
+
+    if(pc_seq_fit(&s->seq, pre_w, tot_w, dc.k != 0) != PC_SEQ_FIT_OK)
+      return pc_error(s, PC_E_STATE, 3, "SET_SEQ setting does not fit the trigger geometry (GET_SEQ byte 16)");
+  }
 
   //Stop the UI loop from arming its own conversions; its next RUN starts afresh
   if(u.run)
@@ -1230,33 +1296,18 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
     s->settle_pending = 0;
   }
 
-  pc_hal_trigger_read(&t);
-
-  if(!prog)
-  {
-    //Stock: fixed 750 / 1500 word geometry
-    t.pretrigger = 1500;
-    t.total      = 3000;
-  }
-
-  //1.9: decimation filter for this capture; the 16-bit layout has one sample per ring word
-  pc_decim_next(s, t.total, &dc);
-  s->cap_wide = dc.k != 0;
-
-  //EXT trigger: the stored data lag the edge (pc_decim_ext_shift), so fewer pretrigger words put the edge back at
-  //sample `pretrigger` of the capture
-  s->cap_ext_shift = (uint16_t)((t.source == 2) ? pc_decim_ext_shift(&dc) : 0);
-  if(s->cap_ext_shift > t.pretrigger)
-    s->cap_ext_shift = t.pretrigger;
-
-  pre_w = s->cap_wide ? (uint16_t)(t.pretrigger - s->cap_ext_shift) : t.pretrigger / 2;
-  tot_w = s->cap_wide ? t.total : t.total / 2;
+  pc_arm_geometry(s, &t, &dc, &pre_w, &tot_w, &ext);
+  s->cap_wide      = dc.k != 0;
+  s->cap_ext_shift = ext;
 
   //2.-5. conversion start with a bounded ready wait                                  BENCH: T6 (stock 0x0F semantics)
+  //A sequencer run in auto mode uses the FPGA's own time-out (0x0E): untriggered segments are recorded as such, and
+  //averaging skips untriggered records; the firmware auto time-out would end the whole run
   s->ring_valid = 0;
+  s->seq_stop   = 0;
 
-  if(pc_hal_arm(pre_w, tot_w, pc_auto_timeout(s, t.total), prog, (t.ui_mode != 0) || prog,
-                (s->var.caps & PC_CAP_DECIM) ? &dc : NULL))
+  if(pc_hal_arm(pre_w, tot_w, pc_auto_timeout(s, t.total), prog, (t.ui_mode != 0) || (prog && !seq),
+                (s->var.caps & PC_CAP_DECIM) ? &dc : NULL, (s->var.caps & PC_CAP_SEQ) ? &s->seq : NULL))
   {
     s->acq_state = PC_ACQ_ABORTED;
     return pc_error(s, PC_E_FPGA, 0, "0x05 not ready");
@@ -1264,6 +1315,21 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
 
   pc_capture_latch(s, &s->cap_next, PC_ORIGIN_HOST, t.pretrigger, t.total);
   s->ui_started = 0;
+
+  if(seq)
+  {
+    pc_capture *c = &s->cap_next;
+
+    c->seq_mode        = s->seq.mode;
+    c->seq_flags       = s->seq.flags & PC_SEQ_F_CIRCULAR;
+    c->seq_m           = s->seq.m;
+    c->seq_fmt16       = (uint8_t)(dc.k != 0);
+    c->seq_count       = s->seq.count;
+    c->seq_n           = s->seq.n;
+    c->seq_holdoff_ns  = s->seq.holdoff_ns;
+    c->seq_pre_words   = pre_w;
+    c->seq_total_words = tot_w;
+  }
 
   s->acq_state        = PC_ACQ_ARMED;
   s->fpga_done        = 0;
@@ -1276,7 +1342,7 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   s->cap_divider      = s->cap_next.divider;
 
   //Auto mode in firmware on Atlan bitstreams (armed normal above): an explicit host time-out (samples) counts too
-  s->fw_auto     = (uint8_t)(prog && (t.ui_mode == 0));
+  s->fw_auto     = (uint8_t)(prog && (t.ui_mode == 0) && !seq);
   s->host_forced = 0;
   s->auto_ms     = pc_auto_deadline_ms(t.total, s->cap_divider);
   if(s->auto_timeout_cfg)
@@ -1309,6 +1375,18 @@ static int h_stop(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp
   pc_hw_ui u;
 
   (void)req; (void)len;
+
+  //1.17: a sequencer run is ended, not abandoned: no further restarts (0x5D), a record waiting for a trigger ends now;
+  //the run then completes as DONE with what it holds (a circular run needs this to end at all)
+  if(((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED)) && s->cap_next.seq_mode)
+  {
+    if(!s->seq_stop)
+      pc_hal_seq_stop();
+
+    s->seq_stop = 1;
+    *rl = pc_status_body(s, resp);
+    return PC_OK;
+  }
 
   s->acq_state = PC_ACQ_ABORTED;
   pc_complete_deferred(s, PC_E_ABORTED);
@@ -1348,7 +1426,7 @@ static int h_get_capture_info(pc_session *s, const uint8_t *req, uint32_t len, u
   if(s->capture_id == 0)
     return pc_error(s, PC_E_STATE, 0, "no capture");
 
-  memset(resp, 0, 76);
+  memset(resp, 0, 96);
   pc_put_u32(resp,      c->capture_id);
   pc_put_u32(resp + 4,  c->seq);
   resp[8] = c->origin;
@@ -1389,7 +1467,18 @@ static int h_get_capture_info(pc_session *s, const uint8_t *req, uint32_t len, u
   pc_put_u16(resp + 70, c->ext_shift);    //EXT + K >= 1: pretrigger words written = pretrigger - this (rounded latency)
   pc_put_u32(resp + 72, c->decim_n);
 
-  *rl = 76;
+  //1.17: sequencer run (0 = a single capture)
+  resp[76] = c->seq_mode;
+  resp[77] = c->seq_flags;
+  resp[78] = c->seq_m;
+  resp[79] = c->seq_fmt16;
+  pc_put_u32(resp + 80, c->seq_done);
+  pc_put_u16(resp + 84, c->seq_untrig);
+  pc_put_u16(resp + 86, c->seq_count);
+  pc_put_u32(resp + 88, c->seq_n);
+  pc_put_u32(resp + 92, c->seq_holdoff_ns);
+
+  *rl = 96;
   return PC_OK;
 }
 
@@ -1415,6 +1504,46 @@ static int h_wait(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp
   return PC_DEFERRED;
 }
 
+//One core of READ_RAW: the ring (slot_len 0), or a segment slot of slot_len words at slot_base, wrapping at its end
+static void pc_raw_core(pc_session *s, uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,
+                        uint32_t slot_base, uint32_t slot_len)
+{
+  uint32_t n;
+
+  if(!slot_len)
+  {
+    pc_hal_read_core(core, start, count, dst, stride, s->var.ring_words, s->var.read_lag);
+    return;
+  }
+
+  n = slot_len - start;
+  if(n > count)
+    n = count;
+
+  pc_hal_read_core(core, slot_base + start, n, dst, stride, s->var.ring_words, s->var.read_lag);
+
+  if(count > n)
+    pc_hal_read_core(core, slot_base, count - n, dst + n * stride, stride, s->var.ring_words, s->var.read_lag);
+}
+
+//Segment table entry (accumulator word idx) of the latest segment run
+static uint64_t pc_seq_entry_read(uint32_t idx)
+{
+  uint8_t b[8];
+  uint32_t i;
+
+  for(i=0;i<8;i++)
+    pc_hal_seq_read((uint8_t)i, idx, 1, b + i, 1);
+
+  return pc_get_u64(b);
+}
+
+//The latest capture is a sequencer run of this mode whose data the FPGA still holds (no arm since)
+static int pc_seq_held(pc_session *s, uint8_t mode)
+{
+  return s->capture_id && s->ring_valid && (s->cap.origin == PC_ORIGIN_HOST) && (s->cap.seq_mode == mode);
+}
+
 static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   uint8_t  mask   = req[0];
@@ -1424,17 +1553,48 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   int32_t  addr   = (int32_t)pc_get_u32(req + 4);
   uint32_t count  = pc_get_u32(req + 8);
   uint32_t ring   = s->var.ring_words;
-  uint32_t ncores = 0, i, start, total;
+  uint32_t ncores = 0, i, start = 0, total;
+  uint32_t slot_base = 0, slot_len = 0;
   int64_t  base;
   uint8_t *d;
 
   (void)len;
 
   if((mask == 0) || (mask & 0xF0)) return pc_error(s, PC_E_BAD_ARG, 0, "core_mask");
-  if(mode > 2)                     return pc_error(s, PC_E_BAD_ARG, 1, "addr_mode");
+  if((mode > 3) || ((mode == 3) && !(s->var.caps & PC_CAP_SEQ)))
+                                   return pc_error(s, PC_E_BAD_ARG, 1, "addr_mode");
   if(layout > 2)                   return pc_error(s, PC_E_BAD_ARG, 2, "layout");
   if(flags & ~0x01)                return pc_error(s, PC_E_BAD_ARG, 3, "flags");
   if((count == 0) || (count > ring)) return pc_error(s, PC_E_BAD_ARG, 8, "count 1..ring_words");
+
+  //1.17 addr_mode 3: segment-relative, address = segment << 16 | word offset from that segment's record start
+  if(mode == 3)
+  {
+    pc_seq_cfg    sc;
+    pc_seq_entry  e;
+    uint32_t      seg = ((uint32_t)addr >> 16) & 0xFFFF;
+
+    if(!pc_seq_held(s, PC_SEQ_SEGMENTS))
+      return pc_error(s, PC_E_STATE, 4, "no segment run held (READ_SEQ / GET_SEQ)");
+
+    sc.mode  = PC_SEQ_SEGMENTS;
+    sc.flags = s->cap.seq_flags & PC_SEQ_F_CIRCULAR;
+    sc.m     = s->cap.seq_m;
+    sc.count = s->cap.seq_count;
+
+    if(seg >= pc_seq_slots(&sc))   return pc_error(s, PC_E_BAD_ARG, 4, "segment");
+    slot_len = 1u << sc.m;
+    if(count > slot_len)           return pc_error(s, PC_E_BAD_ARG, 8, "count 1..slot words");
+
+    pc_seq_entry_decode(pc_seq_entry_read(seg), &e);
+    if(!e.valid)                   return pc_error(s, PC_E_STATE, 5, "segment not recorded");
+
+    slot_base = seg << sc.m;
+    start     = (pc_seq_seg_word(sc.m, seg, e.offset, s->cap.seq_pre_words, (uint32_t)addr & 0xFFFF)) - slot_base;
+    ring      = slot_len;
+  }
+  else if(!(flags & 0x01) && (mode != 0) && pc_seq_held(s, PC_SEQ_SEGMENTS))
+    return pc_error(s, PC_E_STATE, 4, "segment run: addr_mode 3");
 
   if((layout >= 1) && ((((mask & 0x03) != 0) && ((mask & 0x03) != 0x03)) || (((mask & 0x0C) != 0) && ((mask & 0x0C) != 0x0C))))
     return pc_error(s, PC_E_BAD_ARG, 2, "layout 1/2 needs both cores");
@@ -1442,7 +1602,7 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   //1.3: the latest finished capture of any origin, while the ring still holds it. flags bit 0 (ANY) reads the ring as
   //it is. In RUN the UI has usually armed the next capture already: wait for it (at most PC_HOLD_MS) and keep the UI
   //from re-arming until this request is answered.
-  if(!(flags & 0x01))
+  if(!(flags & 0x01) && (mode != 3))
   {
     pc_hw_ui u;
 
@@ -1485,12 +1645,16 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   if((total > PC_MAX_RESPONSE_PAYLOAD) || (total > s->tx_cap - PC_HDR_SIZE - PC_CRC_SIZE))
     return pc_error(s, PC_E_OVERFLOW, 0, "response too large");
 
-  //Modular start (P-7.5): never the 1.00o5 "T + 7441" shortcut
-  base  = (mode == 0) ? 0 : ((mode == 1) ? s->capture_start : s->trigger_addr);
-  start = pc_ring_mod(base + addr, ring);
+  //Modular start (P-7.5): never the 1.00o5 "T + 7441" shortcut. Mode 3: relative to the segment's slot (start_word in
+  //the header is the absolute word, ring_words the slot length)
+  if(mode != 3)
+  {
+    base  = (mode == 0) ? 0 : ((mode == 1) ? s->capture_start : s->trigger_addr);
+    start = pc_ring_mod(base + addr, ring);
+  }
 
   pc_put_u32(resp, s->capture_id);
-  pc_put_u16(resp + 4, (uint16_t)start);
+  pc_put_u16(resp + 4, (uint16_t)(slot_base + start));
   pc_put_u16(resp + 6, (uint16_t)ring);
   pc_put_u32(resp + 8, count);
   resp[12] = mask;
@@ -1507,7 +1671,7 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
     {
       if(mask & (1 << i))
       {
-        pc_hal_read_core((uint8_t)i, start, count, d, 1, ring, s->var.read_lag);
+        pc_raw_core(s, (uint8_t)i, start, count, d, 1, slot_base, slot_len);
         d += count;
       }
     }
@@ -1520,8 +1684,8 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
     {
       if(mask & (3 << (2 * i)))
       {
-        pc_hal_read_core((uint8_t)(2 * i),     start, count, d,     2, ring, s->var.read_lag);
-        pc_hal_read_core((uint8_t)(2 * i + 1), start, count, d + 1, 2, ring, s->var.read_lag);
+        pc_raw_core(s, (uint8_t)(2 * i),     start, count, d,     2, slot_base, slot_len);
+        pc_raw_core(s, (uint8_t)(2 * i + 1), start, count, d + 1, 2, slot_base, slot_len);
         d += 2 * count;
       }
     }
@@ -1533,8 +1697,8 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
       if(mask & (3 << (2 * i)))
       {
         //core A = 2i (0x20/0x22), core B = 2i + 1 (0x21/0x23)
-        pc_hal_read_core((uint8_t)(2 * i + 1), start, count, d + (PC_INTERLEAVE_ORDER ? 1 : 0), 2, ring, s->var.read_lag);
-        pc_hal_read_core((uint8_t)(2 * i),     start, count, d + (PC_INTERLEAVE_ORDER ? 0 : 1), 2, ring, s->var.read_lag);
+        pc_raw_core(s, (uint8_t)(2 * i + 1), start, count, d + (PC_INTERLEAVE_ORDER ? 1 : 0), 2, slot_base, slot_len);
+        pc_raw_core(s, (uint8_t)(2 * i),     start, count, d + (PC_INTERLEAVE_ORDER ? 0 : 1), 2, slot_base, slot_len);
         d += 2 * count;
       }
     }
@@ -1562,6 +1726,10 @@ static int h_read_trace(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
 
   if((chm == 0) || (chm & ~0x03)) return pc_error(s, PC_E_BAD_ARG, 0, "ch_mask");
   if(flags & ~0x07)               return pc_error(s, PC_E_BAD_ARG, 1, "flags");
+
+  //1.17: a segment run has no single record in the ring order the trace readout assumes
+  if(s->capture_id && (s->cap.origin == PC_ORIGIN_HOST) && (s->cap.seq_mode == PC_SEQ_SEGMENTS))
+    return pc_error(s, PC_E_STATE, 5, "segment run: READ_RAW addr_mode 3");
 
   if(s->capture_id && (s->cap.origin == PC_ORIGIN_HOST) && (s->trace_capture_id == s->capture_id))
   {
@@ -1734,7 +1902,7 @@ static uint32_t pc_decim_body(pc_session *s, uint8_t *p)
   pc_decim_next(s, t.total, &next);
   pc_hal_decim_current(&cur, &written);
 
-  memset(p, 0, 32);
+  memset(p, 0, 36);
   p[0] = set & 3;                                       //UI Filter: 0 off, 1 boxcar, 2 CIC2, 3 CIC3
   p[1] = (uint8_t)((set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR)) >> 2);   //flags: bit 0 core-order swap, bits 1 / 2
                                                         //falling-edge A / B, bit 3 FIR (1.11)
@@ -1751,7 +1919,8 @@ static uint32_t pc_decim_body(pc_session *s, uint8_t *p)
   pc_put_u16(p + 28, PC_DECIM_MAX_TOTAL);
   p[30] = next.why;                                     //why the effective K is lower than requested
   p[31] = (uint8_t)((t.source == 2) ? pc_decim_ext_shift(&next) : 0);   //EXT latency shift the next arm applies
-  return 32;
+  pc_features_body(s, p + 32);                          //1.17: as GET_STATUS 44..47
+  return 36;
 }
 
 static int h_get_decim(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
@@ -1785,6 +1954,224 @@ static int h_set_decim(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
   pc_settings_track(s);
 
   *rl = pc_decim_body(s, resp);
+  return PC_OK;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Sequencer (1.17, bitstream 0x1536+, pc_seq.h): segmented capture and hardware averaging for host ARM
+
+//GET_SEQ / SET_SEQ response, 48 bytes
+static uint32_t pc_seq_body(pc_session *s, uint8_t *p)
+{
+  pc_hw_trigger t;
+  pc_decim_cfg  dc;
+  uint16_t      pre_w, tot_w, ext;
+  uint8_t       raw[8];
+  pc_seq_status st;
+
+  pc_arm_geometry(s, &t, &dc, &pre_w, &tot_w, &ext);
+  pc_hal_seq_status(raw);
+  pc_seq_status_decode(raw, &st);
+
+  memset(p, 0, 48);
+  p[0] = s->seq.mode;
+  p[1] = s->seq.flags;
+  p[2] = s->seq.m;
+  pc_put_u16(p + 4, s->seq.count);
+  pc_put_u16(p + 6, (uint16_t)(s->seq.n & 0xFFFF));             //0 = 65536
+  pc_put_u32(p + 8, s->seq.holdoff_ns);
+  pc_put_u32(p + 12, pc_seq_holdoff_units(s->seq.holdoff_ns));   //5 ns units written to 0x5C
+  p[16] = pc_seq_fit(&s->seq, pre_w, tot_w, dc.k != 0);          //0 = the next ARM can run it
+  p[17] = (uint8_t)(dc.k != 0);                                  //next ARM records in the 16-bit layout
+  pc_put_u16(p + 18, pre_w);
+  pc_put_u16(p + 20, tot_w);
+  pc_put_u16(p + 22, (uint16_t)pc_seq_max_count(&s->seq, tot_w));
+  p[24] = st.flags;                                              //FPGA 0x2A now
+  p[25] = st.state;
+  pc_put_u16(p + 26, st.index);
+  pc_put_u32(p + 28, st.count);
+  pc_put_u16(p + 32, st.untriggered);
+  p[34] = (uint8_t)(pc_seq_held(s, PC_SEQ_SEGMENTS) || pc_seq_held(s, PC_SEQ_AVERAGE));
+
+  //The latest capture, if it is a sequencer run
+  if(s->capture_id && s->cap.seq_mode)
+  {
+    pc_put_u32(p + 36, s->cap.capture_id);
+    pc_put_u32(p + 40, s->cap.seq_done);
+    pc_put_u16(p + 44, s->cap.seq_untrig);
+    p[46] = s->cap.seq_mode;
+    p[47] = s->cap.seq_flags;
+  }
+
+  return 48;
+}
+
+static int h_get_seq(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  (void)req; (void)len;
+  *rl = pc_seq_body(s, resp);
+  return PC_OK;
+}
+
+//SET_SEQ: u8 mode (0 off, 1 segments, 2 averaging), u8 flags (bit 0 circular segments), u8 m (segments: slot 2^m words,
+//5..12), u8 0, u16 count (segments, or averaging positions), u16 N (averaging: records per position, 0 = 65536),
+//u32 hold-off ns, u32 0. The next host ARM runs it. Checked against the current trigger geometry here and again at ARM.
+static int h_set_seq(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  pc_hw_trigger t;
+  pc_decim_cfg  dc;
+  pc_seq_cfg    c;
+  uint16_t      pre_w, tot_w, ext;
+
+  (void)len;
+
+  c.mode       = req[0];
+  c.flags      = req[1];
+  c.m          = req[2];
+  c.count      = pc_get_u16(req + 4);
+  c.n          = pc_get_u16(req + 6) ? pc_get_u16(req + 6) : PC_SEQ_MAX_N;
+  c.holdoff_ns = pc_get_u32(req + 8);
+
+  if(c.mode == PC_SEQ_OFF)
+    c.flags = c.m = 0, c.count = 0, c.n = 0, c.holdoff_ns = 0;
+  if(c.mode == PC_SEQ_AVERAGE)
+    c.m = 0;
+  if(c.mode == PC_SEQ_SEGMENTS)
+    c.n = 0;
+
+  pc_arm_geometry(s, &t, &dc, &pre_w, &tot_w, &ext);
+
+  switch(pc_seq_fit(&c, pre_w, tot_w, dc.k != 0))
+  {
+    case PC_SEQ_FIT_OK:    break;
+    case PC_SEQ_FIT_MODE:  return pc_error(s, PC_E_BAD_ARG, 0, "mode 0..2");
+    case PC_SEQ_FIT_FLAGS: return pc_error(s, PC_E_BAD_ARG, 1, "flags");
+    case PC_SEQ_FIT_M:     return pc_error(s, PC_E_BAD_ARG, 2, "m 5..12");
+    case PC_SEQ_FIT_COUNT: return pc_error(s, PC_E_BAD_ARG, 4, "count");
+    case PC_SEQ_FIT_N:     return pc_error(s, PC_E_BAD_ARG, 6, "N (8-bit records: 1..257)");
+    case PC_SEQ_FIT_TOTAL: return pc_error(s, PC_E_STATE, 5, "trigger total too long: SET_TRIGGER first");
+    default:               return pc_error(s, PC_E_STATE, 6, "pretrigger >= total: SET_TRIGGER first");
+  }
+
+  s->seq = c;
+  *rl = pc_seq_body(s, resp);
+  return PC_OK;
+}
+
+//READ_SEQ: u8 what (0 segment table, 1 averaged record), u8 ch_mask (what 1), u8 S (what 1: readout shift 0..31, 0xFF
+//the sums), u8 0, u16 first, u16 count (entries or words), u32 0. 16-byte header, then the data (docs/protocol.md
+//row 56).
+static int h_read_seq(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint8_t  what  = req[0];
+  uint8_t  chm   = req[1];
+  uint8_t  sh    = req[2];
+  uint32_t first = pc_get_u16(req + 4);
+  uint32_t count = pc_get_u16(req + 6);
+  const pc_capture *c = &s->cap;
+  uint32_t limit, total, i, b, bytes = 0, nch = 0;
+  int      raw = 0;
+  uint8_t *d;
+
+  (void)len;
+
+  if(what > 1)                         return pc_error(s, PC_E_BAD_ARG, 0, "what 0..1");
+  if((what == 1) && ((chm == 0) || (chm & ~0x03)))
+                                       return pc_error(s, PC_E_BAD_ARG, 1, "ch_mask");
+  if((what == 1) && (sh > 31) && (sh != 0xFF))
+                                       return pc_error(s, PC_E_BAD_ARG, 2, "S 0..31 or 0xFF");
+  if(req[3])                           return pc_error(s, PC_E_BAD_ARG, 3, "flags");
+
+  if(!s->capture_id || !c->seq_mode || (c->origin != PC_ORIGIN_HOST))
+    return pc_error(s, PC_E_STATE, 0, "no sequencer run");
+
+  if(!s->ring_valid)
+    return pc_error(s, PC_E_STATE, 1, "armed since: run overwritten");
+
+  if(c->seq_mode != (what ? PC_SEQ_AVERAGE : PC_SEQ_SEGMENTS))
+    return pc_error(s, PC_E_STATE, 2, "the run is of the other mode");
+
+  if(what == 0)
+  {
+    pc_seq_cfg sc;
+
+    sc.mode  = PC_SEQ_SEGMENTS;
+    sc.flags = c->seq_flags & PC_SEQ_F_CIRCULAR;
+    sc.m     = c->seq_m;
+    sc.count = c->seq_count;
+    limit    = pc_seq_slots(&sc);
+    bytes    = 8;
+    nch      = 1;
+  }
+  else
+  {
+    limit = (uint32_t)c->seq_count * c->seq_total_words;
+    raw   = c->seq_fmt16 && (sh == 0xFF);
+
+    for(i=0;i<2;i++)
+      if(chm & (1 << i))
+        nch++;
+
+    //legacy: two u16 lanes (core A, core B) per word; 16-bit: one u16, or one u32 sum (raw)
+    bytes = c->seq_fmt16 ? (raw ? 4 : 2) : 4;
+  }
+
+  if(first >= limit)                   return pc_error(s, PC_E_BAD_ARG, 4, "first");
+  if((count == 0) || (count > limit - first))
+                                       return pc_error(s, PC_E_BAD_ARG, 6, "count");
+
+  total = 16 + count * bytes * nch;
+  if((total > PC_MAX_RESPONSE_PAYLOAD) || (total > s->tx_cap - PC_HDR_SIZE - PC_CRC_SIZE))
+    return pc_error(s, PC_E_OVERFLOW, 0, "response too large");
+
+  memset(resp, 0, 16);
+  pc_put_u32(resp, c->capture_id);
+  pc_put_u16(resp + 4, (uint16_t)first);
+  pc_put_u16(resp + 6, (uint16_t)count);
+  resp[8]  = what;
+  resp[9]  = (uint8_t)((c->seq_fmt16 ? 0x01 : 0) | (raw ? 0x02 : 0));
+  resp[10] = what ? ((c->seq_fmt16 || (sh != 0xFF)) ? sh : 0) : c->seq_m;
+  resp[11] = what ? chm : 0;
+  pc_put_u16(resp + 12, c->seq_pre_words);
+  pc_put_u16(resp + 14, c->seq_total_words);
+  d = resp + 16;
+
+  if(what == 0)
+  {
+    //Entry i = bytes 0..7 of accumulator word first + i, little-endian
+    for(b=0;b<8;b++)
+      pc_hal_seq_read((uint8_t)b, first, count, d + b, 8);
+  }
+  else
+  {
+    //Readout shift and raw mode act at read time (0x5B, 0x57 bit 3); legacy raw = the 16-bit lane sums = S 0
+    pc_hal_seq_view((uint8_t)(PC_SEQ_AVERAGE | (raw ? PC_SEQ_57_RAW : 0)), (sh == 0xFF) ? 0 : sh);
+
+    for(i=0;i<2;i++)
+    {
+      if(!(chm & (1 << i)))
+        continue;
+
+      if(!c->seq_fmt16)
+      {
+        //Core A lane (L0 / L2), then core B lane (L1 / L3), u16 each
+        for(b=0;b<4;b++)
+          pc_hal_seq_read((uint8_t)(4 * i + b), first, count, d + (b >> 1) * 2 * count + (b & 1), 2);
+
+        d += 4 * count;
+      }
+      else
+      {
+        //L0 / L2 (u16), or the 32-bit sum in bytes 0..3 / 4..7
+        for(b=0;b<bytes;b++)
+          pc_hal_seq_read((uint8_t)(4 * i + b), first, count, d + b, bytes);
+
+        d += bytes * count;
+      }
+    }
+  }
+
+  *rl = total;
   return PC_OK;
 }
 
@@ -2398,6 +2785,9 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_READ_SPECTRUM, F_BASIC,                     0, h_read_spectrum },
   { PC_CMD_GET_DECIM,    0,                            PC_CAP_DECIM, h_get_decim },
   { PC_CMD_SET_DECIM,    0,                            PC_CAP_DECIM, h_set_decim },
+  { PC_CMD_SET_SEQ,      0,                            PC_CAP_SEQ, h_set_seq },
+  { PC_CMD_GET_SEQ,      0,                            PC_CAP_SEQ, h_get_seq },
+  { PC_CMD_READ_SEQ,     0,                            PC_CAP_SEQ, h_read_seq },
   { PC_CMD_SD_INFO,      F_BASIC,                      PC_CAP_SD_SECTORS, h_sd_info },
   { PC_CMD_SD_READ_SECTORS, F_BASIC,                   PC_CAP_SD_SECTORS, h_sd_read },
   { PC_CMD_SD_STAGE,     F_BUSY | F_BASIC,             PC_CAP_SD_SECTORS, h_sd_stage },   //memory copy only: timer poll
@@ -2705,6 +3095,26 @@ static void pc_acq_service(pc_session *s)
   if(s->host_forced)
     trig = 0;
 
+  //1.17: a sequencer run is triggered once it holds a triggered segment or record (0x18 is the current record's)
+  if(s->cap_next.seq_mode && done)
+  {
+    uint8_t raw[8];
+    pc_seq_status st;
+
+    pc_hal_seq_status(raw);
+    pc_seq_status_decode(raw, &st);
+    s->cap_next.seq_done   = st.count;
+    s->cap_next.seq_untrig = st.untriggered;
+
+    if(s->seq_stop)
+      s->cap_next.seq_flags |= 0x02;
+
+    if(st.flags & PC_SEQ_ST_OVERFLOW)
+      s->cap_next.seq_flags |= 0x04;
+
+    trig = (s->cap_next.seq_mode == PC_SEQ_SEGMENTS) ? (st.count > st.untriggered) : (st.count != 0);
+  }
+
   s->fpga_triggered = (uint8_t)trig;
   s->fpga_done      = (uint8_t)done;
 
@@ -2720,10 +3130,14 @@ static void pc_acq_service(pc_session *s)
     uint32_t pre_samples = s->cap_wide ? (uint32_t)s->cap_pre_words + s->cap_ext_shift : (uint32_t)s->cap_pre_words * 2;
     uint8_t  mask;
 
-    //Into the trace buffers for the enabled channels, so the UI shows the capture (it redraws every pass)
+    //Into the trace buffers for the enabled channels, so the UI shows the capture (it redraws every pass). An averaging
+    //run leaves its last record in the ring as a normal capture; a segment run has none (the screen keeps its traces)
     pc_hal_channel_read(0, &c1);
     pc_hal_channel_read(1, &c2);
     mask = (uint8_t)((c1.enable ? 0x01 : 0) | (c2.enable ? 0x02 : 0));
+
+    if(s->cap_next.seq_mode == PC_SEQ_SEGMENTS)
+      mask = 0;
 
     if(mask && (samples <= pc_hal_trace_capacity()))
       s->trace_sw_index = pc_hal_trace_build(start, samples, pre_samples, mask);

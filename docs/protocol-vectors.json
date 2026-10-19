@@ -43,6 +43,9 @@
   "GET_CAPTURE_INFO": 521,
   "GET_DECIM": 524,
   "SET_DECIM": 525,
+  "SET_SEQ": 526,
+  "GET_SEQ": 527,
+  "READ_SEQ": 528,
   "SD_INFO": 1280,
   "SD_READ_SECTORS": 1281,
   "SD_STAGE": 1282,
@@ -3925,6 +3928,1190 @@
    "hex": "4657494431303133302e322e353200000000000000000000cdab34121a0a130c22380110"
   }
  },
+ "seq": {
+  "notes": "1.17 sequencer (FPGA 0x1536), checked against pc_seq.c by seq_check (check_vectors.py --seq-checker). fit: args mode flags m count n pre_words total_words wide -> fit code (0 ok, 1 mode, 2 flags, 3 m, 4 count, 5 total, 6 pre, 7 N), max count, table slots, 0x57, 0x58, 0x5A. Segments: m 5..12, count <= 8192 >> m, total + 2 <= 2^m, pre < total; averaging: N 1..65536 (legacy <= 257), total <= 2046, count x total <= 2048. hold: ns -> 5 ns units, rounded up. entry: u64 -> timestamp (bits 39..0), offset (52..40), triggered (53), valid (63). segw: m s offset pre j -> sample memory word s 2^m + ((offset - pre + j) mod 2^m). plan (UI averaging): total pre divider -> N (largest power of two 2..64 with N (record + dead) <= 40 ms, word = 10 (D + 1) ns, dead = total x 5 + 40 + (2 + pre) word + 100 ns; 0 = software) and the run in us, rounded up. avg: sum c gain off -> corrected code of the mean: m8 = floor((sum x 256 + floor(c / 2)) / c), code = clamp((m8 x gain + off x 256 + 2^23) >> 24, 0, 255).",
+  "cases": [
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     7,
+     32,
+     0,
+     16,
+     120,
+     0
+    ],
+    "out": [
+     0,
+     64,
+     32,
+     1,
+     32,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     7,
+     32,
+     0,
+     16,
+     126,
+     0
+    ],
+    "out": [
+     0,
+     64,
+     32,
+     1,
+     32,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     7,
+     32,
+     0,
+     16,
+     127,
+     0
+    ],
+    "out": [
+     5,
+     64,
+     32,
+     1,
+     32,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     7,
+     32,
+     0,
+     120,
+     120,
+     0
+    ],
+    "out": [
+     6,
+     64,
+     32,
+     1,
+     32,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     1,
+     7,
+     4,
+     0,
+     16,
+     120,
+     0
+    ],
+    "out": [
+     0,
+     64,
+     64,
+     5,
+     4,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     2,
+     7,
+     4,
+     0,
+     16,
+     120,
+     0
+    ],
+    "out": [
+     2,
+     64,
+     4,
+     1,
+     4,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     12,
+     2,
+     0,
+     100,
+     4000,
+     1
+    ],
+    "out": [
+     0,
+     2,
+     2,
+     1,
+     2,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     12,
+     3,
+     0,
+     100,
+     4000,
+     1
+    ],
+    "out": [
+     4,
+     2,
+     3,
+     1,
+     3,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     13,
+     1,
+     0,
+     1,
+     20,
+     0
+    ],
+    "out": [
+     3,
+     0,
+     1,
+     1,
+     1,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     0,
+     0,
+     0,
+     1,
+     20,
+     0
+    ],
+    "out": [
+     3,
+     0,
+     0,
+     1,
+     0,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     2,
+     0,
+     0,
+     1,
+     257,
+     750,
+     1500,
+     0
+    ],
+    "out": [
+     0,
+     1,
+     0,
+     2,
+     1,
+     257
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     2,
+     0,
+     0,
+     1,
+     258,
+     750,
+     1500,
+     0
+    ],
+    "out": [
+     7,
+     1,
+     0,
+     2,
+     1,
+     258
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     2,
+     0,
+     0,
+     1,
+     65536,
+     750,
+     1500,
+     1
+    ],
+    "out": [
+     0,
+     1,
+     0,
+     2,
+     1,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     2,
+     0,
+     0,
+     1,
+     0,
+     750,
+     1500,
+     1
+    ],
+    "out": [
+     7,
+     1,
+     0,
+     2,
+     1,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     2,
+     0,
+     0,
+     2,
+     16,
+     50,
+     1024,
+     1
+    ],
+    "out": [
+     0,
+     2,
+     0,
+     2,
+     2,
+     16
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     2,
+     0,
+     0,
+     2,
+     16,
+     50,
+     1025,
+     1
+    ],
+    "out": [
+     4,
+     1,
+     0,
+     2,
+     2,
+     16
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     2,
+     0,
+     0,
+     1,
+     16,
+     50,
+     2047,
+     1
+    ],
+    "out": [
+     5,
+     0,
+     0,
+     2,
+     1,
+     16
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     2,
+     1,
+     0,
+     1,
+     16,
+     50,
+     1000,
+     1
+    ],
+    "out": [
+     2,
+     2,
+     0,
+     2,
+     1,
+     16
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     3,
+     0,
+     0,
+     1,
+     1,
+     1,
+     10,
+     0
+    ],
+    "out": [
+     1,
+     0,
+     0,
+     3,
+     1,
+     1
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     9999,
+     0,
+     0
+    ],
+    "out": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     5,
+     256,
+     0,
+     4,
+     30,
+     0
+    ],
+    "out": [
+     0,
+     256,
+     256,
+     1,
+     256,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     5,
+     256,
+     0,
+     4,
+     30,
+     1
+    ],
+    "out": [
+     0,
+     256,
+     256,
+     1,
+     256,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     6,
+     128,
+     0,
+     4,
+     62,
+     0
+    ],
+    "out": [
+     0,
+     128,
+     128,
+     1,
+     128,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     6,
+     128,
+     0,
+     4,
+     62,
+     1
+    ],
+    "out": [
+     0,
+     128,
+     128,
+     1,
+     128,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     7,
+     64,
+     0,
+     4,
+     126,
+     0
+    ],
+    "out": [
+     0,
+     64,
+     64,
+     1,
+     64,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     7,
+     64,
+     0,
+     4,
+     126,
+     1
+    ],
+    "out": [
+     0,
+     64,
+     64,
+     1,
+     64,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     8,
+     32,
+     0,
+     4,
+     254,
+     0
+    ],
+    "out": [
+     0,
+     32,
+     32,
+     1,
+     32,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     8,
+     32,
+     0,
+     4,
+     254,
+     1
+    ],
+    "out": [
+     0,
+     32,
+     32,
+     1,
+     32,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     9,
+     16,
+     0,
+     4,
+     510,
+     0
+    ],
+    "out": [
+     0,
+     16,
+     16,
+     1,
+     16,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     9,
+     16,
+     0,
+     4,
+     510,
+     1
+    ],
+    "out": [
+     0,
+     16,
+     16,
+     1,
+     16,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     10,
+     8,
+     0,
+     4,
+     1022,
+     0
+    ],
+    "out": [
+     0,
+     8,
+     8,
+     1,
+     8,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     10,
+     8,
+     0,
+     4,
+     1022,
+     1
+    ],
+    "out": [
+     0,
+     8,
+     8,
+     1,
+     8,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     11,
+     4,
+     0,
+     4,
+     2046,
+     0
+    ],
+    "out": [
+     0,
+     4,
+     4,
+     1,
+     4,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     11,
+     4,
+     0,
+     4,
+     2046,
+     1
+    ],
+    "out": [
+     0,
+     4,
+     4,
+     1,
+     4,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     12,
+     2,
+     0,
+     4,
+     4094,
+     0
+    ],
+    "out": [
+     0,
+     2,
+     2,
+     1,
+     2,
+     0
+    ]
+   },
+   {
+    "op": "fit",
+    "args": [
+     1,
+     0,
+     12,
+     2,
+     0,
+     4,
+     4094,
+     1
+    ],
+    "out": [
+     0,
+     2,
+     2,
+     1,
+     2,
+     0
+    ]
+   },
+   {
+    "op": "hold",
+    "args": [
+     0
+    ],
+    "out": [
+     0
+    ]
+   },
+   {
+    "op": "hold",
+    "args": [
+     1
+    ],
+    "out": [
+     1
+    ]
+   },
+   {
+    "op": "hold",
+    "args": [
+     4
+    ],
+    "out": [
+     1
+    ]
+   },
+   {
+    "op": "hold",
+    "args": [
+     5
+    ],
+    "out": [
+     1
+    ]
+   },
+   {
+    "op": "hold",
+    "args": [
+     6
+    ],
+    "out": [
+     2
+    ]
+   },
+   {
+    "op": "hold",
+    "args": [
+     999
+    ],
+    "out": [
+     200
+    ]
+   },
+   {
+    "op": "hold",
+    "args": [
+     1000
+    ],
+    "out": [
+     200
+    ]
+   },
+   {
+    "op": "hold",
+    "args": [
+     1001
+    ],
+    "out": [
+     201
+    ]
+   },
+   {
+    "op": "hold",
+    "args": [
+     4294967295
+    ],
+    "out": [
+     858993459
+    ]
+   },
+   {
+    "op": "entry",
+    "args": [
+     "803fffffffffffff"
+    ],
+    "out": [
+     1099511627775,
+     8191,
+     1,
+     1
+    ]
+   },
+   {
+    "op": "entry",
+    "args": [
+     "8020050000004e20"
+    ],
+    "out": [
+     20000,
+     5,
+     1,
+     1
+    ]
+   },
+   {
+    "op": "entry",
+    "args": [
+     "40000000000000"
+    ],
+    "out": [
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   {
+    "op": "entry",
+    "args": [
+     "80005d00075bcd15"
+    ],
+    "out": [
+     123456789,
+     93,
+     0,
+     1
+    ]
+   },
+   {
+    "op": "segw",
+    "args": [
+     7,
+     3,
+     10,
+     16,
+     0
+    ],
+    "out": [
+     506
+    ]
+   },
+   {
+    "op": "segw",
+    "args": [
+     7,
+     3,
+     10,
+     16,
+     5
+    ],
+    "out": [
+     511
+    ]
+   },
+   {
+    "op": "segw",
+    "args": [
+     7,
+     3,
+     10,
+     16,
+     6
+    ],
+    "out": [
+     384
+    ]
+   },
+   {
+    "op": "segw",
+    "args": [
+     7,
+     31,
+     89,
+     16,
+     110
+    ],
+    "out": [
+     4023
+    ]
+   },
+   {
+    "op": "segw",
+    "args": [
+     12,
+     1,
+     4095,
+     0,
+     1
+    ],
+    "out": [
+     4096
+    ]
+   },
+   {
+    "op": "segw",
+    "args": [
+     5,
+     255,
+     0,
+     31,
+     30
+    ],
+    "out": [
+     8191
+    ]
+   },
+   {
+    "op": "plan",
+    "args": [
+     1500,
+     750,
+     0
+    ],
+    "out": [
+     64,
+     1931
+    ]
+   },
+   {
+    "op": "plan",
+    "args": [
+     1500,
+     750,
+     1
+    ],
+    "out": [
+     64,
+     3372
+    ]
+   },
+   {
+    "op": "plan",
+    "args": [
+     1500,
+     750,
+     199
+    ],
+    "out": [
+     8,
+     36094
+    ]
+   },
+   {
+    "op": "plan",
+    "args": [
+     1500,
+     750,
+     1999
+    ],
+    "out": [
+     0,
+     0
+    ]
+   },
+   {
+    "op": "plan",
+    "args": [
+     2046,
+     750,
+     0
+    ],
+    "out": [
+     64,
+     2455
+    ]
+   },
+   {
+    "op": "plan",
+    "args": [
+     2047,
+     750,
+     0
+    ],
+    "out": [
+     0,
+     0
+    ]
+   },
+   {
+    "op": "plan",
+    "args": [
+     1500,
+     1500,
+     0
+    ],
+    "out": [
+     0,
+     0
+    ]
+   },
+   {
+    "op": "plan",
+    "args": [
+     1500,
+     375,
+     39
+    ],
+    "out": [
+     32,
+     24271
+    ]
+   },
+   {
+    "op": "plan",
+    "args": [
+     1500,
+     1250,
+     99
+    ],
+    "out": [
+     8,
+     22078
+    ]
+   },
+   {
+    "op": "avg",
+    "args": [
+     201,
+     2,
+     65536,
+     0
+    ],
+    "out": [
+     101
+    ]
+   },
+   {
+    "op": "avg",
+    "args": [
+     401,
+     4,
+     131072,
+     0
+    ],
+    "out": [
+     201
+    ]
+   },
+   {
+    "op": "avg",
+    "args": [
+     765,
+     3,
+     70000,
+     1048576
+    ],
+    "out": [
+     255
+    ]
+   },
+   {
+    "op": "avg",
+    "args": [
+     0,
+     3,
+     65536,
+     -1048576
+    ],
+    "out": [
+     0
+    ]
+   },
+   {
+    "op": "avg",
+    "args": [
+     65280,
+     256,
+     65536,
+     0
+    ],
+    "out": [
+     255
+    ]
+   },
+   {
+    "op": "avg",
+    "args": [
+     12345,
+     97,
+     67000,
+     -150000
+    ],
+    "out": [
+     128
+    ]
+   },
+   {
+    "op": "avg",
+    "args": [
+     6431,
+     64,
+     64000,
+     300000
+    ],
+    "out": [
+     103
+    ]
+   },
+   {
+    "op": "avg",
+    "args": [
+     128,
+     1,
+     65536,
+     32767
+    ],
+    "out": [
+     128
+    ]
+   },
+   {
+    "op": "avg",
+    "args": [
+     128,
+     1,
+     65536,
+     32768
+    ],
+    "out": [
+     129
+    ]
+   }
+  ]
+ },
  "vectors": [
   {
    "name": "req_ping",
@@ -4551,13 +5738,91 @@
    ]
   },
   {
+   "name": "req_set_seq",
+   "description": "1.17: 32 segments in slots of 2^7 words, hold-off 1000 ns (FPGA 0x1536)",
+   "hex": "a51301000e022200000010000000812f0100070020000000e803000000000000b58ff25e",
+   "frames": [
+    {
+     "cmd": 526,
+     "seq": 34,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "0100070020000000e803000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 526,
+     "seq": 34,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "0100070020000000e803000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_get_seq",
+   "description": "1.17: sequencer setting, fit for the next ARM, FPGA 0x2A status, latest run",
+   "hex": "a51301000f022300000000000000b01c",
+   "frames": [
+    {
+     "cmd": 527,
+     "seq": 35,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": ""
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 527,
+     "seq": 35,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": "",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_read_seq",
+   "description": "1.17: segment table entries 0..31",
+   "hex": "a51301001002240000000c000000bd5600000000000020000000000059c3797c",
+   "frames": [
+    {
+     "cmd": 528,
+     "seq": 36,
+     "status": 0,
+     "flags": 0,
+     "len": 12,
+     "payload": "000000000000200000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 528,
+     "seq": 36,
+     "status": 0,
+     "flags": 0,
+     "len": 12,
+     "payload": "000000000000200000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
    "name": "req_get_link_stats",
    "description": "1.2: link counters",
-   "hex": "a5130100070022000000000000004fd7",
+   "hex": "a5130100070025000000000000005710",
    "frames": [
     {
      "cmd": 7,
-     "seq": 34,
+     "seq": 37,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -4567,7 +5832,7 @@
    "device_events": [
     {
      "cmd": 7,
-     "seq": 34,
+     "seq": 37,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -4579,11 +5844,11 @@
   {
    "name": "req_get_bad_frame",
    "description": "1.2: last request with a payload CRC error",
-   "hex": "a5130100080023000000000000002dc6",
+   "hex": "a513010008002600000000000000938e",
    "frames": [
     {
      "cmd": 8,
-     "seq": 35,
+     "seq": 38,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -4593,7 +5858,7 @@
    "device_events": [
     {
      "cmd": 8,
-     "seq": 35,
+     "seq": 38,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -4605,11 +5870,11 @@
   {
    "name": "req_get_event_log",
    "description": "1.5: the last 64 USB / link events with ms timestamps",
-   "hex": "a513010009002400000000000000706e",
+   "hex": "a51301000900270000000000000005a6",
    "frames": [
     {
      "cmd": 9,
-     "seq": 36,
+     "seq": 39,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -4619,7 +5884,7 @@
    "device_events": [
     {
      "cmd": 9,
-     "seq": 36,
+     "seq": 39,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -4631,11 +5896,11 @@
   {
    "name": "req_sd_info",
    "description": "1.3: card, partition, write window, eGON headers, VERIFY checksums",
-   "hex": "a51301000005250000000400000090b10100000079b8f899",
+   "hex": "a513010000052800000004000000f4e70100000079b8f899",
    "frames": [
     {
      "cmd": 1280,
-     "seq": 37,
+     "seq": 40,
      "status": 0,
      "flags": 0,
      "len": 4,
@@ -4645,7 +5910,7 @@
    "device_events": [
     {
      "cmd": 1280,
-     "seq": 37,
+     "seq": 40,
      "status": 0,
      "flags": 0,
      "len": 4,
@@ -4657,11 +5922,11 @@
   {
    "name": "req_sd_read_sectors",
    "description": "1.3: sectors 750..877",
-   "hex": "a5130100010526000000080000009259ee02000080000000284fbe89",
+   "hex": "a5130100010529000000080000005080ee02000080000000284fbe89",
    "frames": [
     {
      "cmd": 1281,
-     "seq": 38,
+     "seq": 41,
      "status": 0,
      "flags": 0,
      "len": 8,
@@ -4671,7 +5936,7 @@
    "device_events": [
     {
      "cmd": 1281,
-     "seq": 38,
+     "seq": 41,
      "status": 0,
      "flags": 0,
      "len": 8,
@@ -4683,11 +5948,11 @@
   {
    "name": "req_sd_stage",
    "description": "1.3: 4 bytes at stage offset 512",
-   "hex": "a51301000205270000000c0000007f65000200000400000065474f4e7dd25b38",
+   "hex": "a513010002052a0000000c0000001b33000200000400000065474f4e7dd25b38",
    "frames": [
     {
      "cmd": 1282,
-     "seq": 39,
+     "seq": 42,
      "status": 0,
      "flags": 0,
      "len": 12,
@@ -4697,7 +5962,7 @@
    "device_events": [
     {
      "cmd": 1282,
-     "seq": 39,
+     "seq": 42,
      "status": 0,
      "flags": 0,
      "len": 12,
@@ -4709,11 +5974,11 @@
   {
    "name": "req_sd_write_sectors",
    "description": "1.3: stage[0, 64 KiB) to sector 750, stage crc32 0x1C291CA3 (example value), magic 'SDWR'",
-   "hex": "a5130100030528000000100000006d87ee02000080000000a31c291c534457524f457fbe",
+   "hex": "a513010003052b00000010000000184fee02000080000000a31c291c534457524f457fbe",
    "frames": [
     {
      "cmd": 1283,
-     "seq": 40,
+     "seq": 43,
      "status": 0,
      "flags": 0,
      "len": 16,
@@ -4723,7 +5988,7 @@
    "device_events": [
     {
      "cmd": 1283,
-     "seq": 40,
+     "seq": 43,
      "status": 0,
      "flags": 0,
      "len": 16,
@@ -4735,11 +6000,11 @@
   {
    "name": "req_get_gen",
    "description": "",
-   "hex": "a5130100000329000000000000005e30",
+   "hex": "a513010000032c00000000000000e078",
    "frames": [
     {
      "cmd": 768,
-     "seq": 41,
+     "seq": 44,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -4749,7 +6014,7 @@
    "device_events": [
     {
      "cmd": 768,
-     "seq": 41,
+     "seq": 44,
      "status": 0,
      "flags": 0,
      "len": 0,
@@ -4761,11 +6026,11 @@
   {
    "name": "req_set_gen",
    "description": "enable, 10 kHz (10,000,000 mHz), 50.00 %",
-   "hex": "a513010001032a0000001400000038460701000080969800000000008813000000000000303ee14d",
+   "hex": "a513010001032d0000001400000020810701000080969800000000008813000000000000303ee14d",
    "frames": [
     {
      "cmd": 769,
-     "seq": 42,
+     "seq": 45,
      "status": 0,
      "flags": 0,
      "len": 20,
@@ -4775,7 +6040,7 @@
    "device_events": [
     {
      "cmd": 769,
-     "seq": 42,
+     "seq": 45,
      "status": 0,
      "flags": 0,
      "len": 20,
@@ -4787,11 +6052,11 @@
   {
    "name": "req_get_cal",
    "description": "CH1",
-   "hex": "a513010000042b00000001000000e778008def02d2",
+   "hex": "a513010000042e000000010000005930008def02d2",
    "frames": [
     {
      "cmd": 1024,
-     "seq": 43,
+     "seq": 46,
      "status": 0,
      "flags": 0,
      "len": 1,
@@ -4801,7 +6066,7 @@
    "device_events": [
     {
      "cmd": 1024,
-     "seq": 43,
+     "seq": 46,
      "status": 0,
      "flags": 0,
      "len": 1,
@@ -4813,11 +6078,11 @@
   {
    "name": "req_read_screen",
    "description": "rows 0..39",
-   "hex": "a513010001042c00000004000000ff6c00002800b671197c",
+   "hex": "a513010001042f000000040000008aa400002800b671197c",
    "frames": [
     {
      "cmd": 1025,
-     "seq": 44,
+     "seq": 47,
      "status": 0,
      "flags": 0,
      "len": 4,
@@ -4827,7 +6092,7 @@
    "device_events": [
     {
      "cmd": 1025,
-     "seq": 44,
+     "seq": 47,
      "status": 0,
      "flags": 0,
      "len": 4,
@@ -4839,11 +6104,11 @@
   {
    "name": "req_debug_fpga",
    "description": "write command 0x06, read 2 bytes (FPGA version)",
-   "hex": "a5130100000f2d000000050000006636010106030295f75082",
+   "hex": "a5130100000f3000000005000000b65d010106030295f75082",
    "frames": [
     {
      "cmd": 3840,
-     "seq": 45,
+     "seq": 48,
      "status": 0,
      "flags": 0,
      "len": 5,
@@ -4853,7 +6118,7 @@
    "device_events": [
     {
      "cmd": 3840,
-     "seq": 45,
+     "seq": 48,
      "status": 0,
      "flags": 0,
      "len": 5,
@@ -4865,11 +6130,11 @@
   {
    "name": "req_enter_fel",
    "description": "magic 'FEL_' little-endian",
-   "hex": "a5130100010f2e00000004000000e2e75f46454c61875934",
+   "hex": "a5130100010f310000000400000094035f46454c61875934",
    "frames": [
     {
      "cmd": 3841,
-     "seq": 46,
+     "seq": 49,
      "status": 0,
      "flags": 0,
      "len": 4,
@@ -4879,7 +6144,7 @@
    "device_events": [
     {
      "cmd": 3841,
-     "seq": 46,
+     "seq": 49,
      "status": 0,
      "flags": 0,
      "len": 4,
@@ -5285,6 +6550,132 @@
      "event": "frame"
     }
    ]
+  },
+  {
+   "name": "req_set_seq_average_256",
+   "description": "1.17: hardware averaging, 1 position, N 256 (legacy records: N <= 257)",
+   "hex": "a51301000e023c00000010000000248c020000000100000100000000000000001a36c5e7",
+   "frames": [
+    {
+     "cmd": 526,
+     "seq": 60,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "02000000010000010000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 526,
+     "seq": 60,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "02000000010000010000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_read_seq_average_raw",
+   "description": "1.17: averaged record, CH1 + CH2, the sums (S 0xFF), words 0..999",
+   "hex": "a513010010023d0000000c00000000320103ff000000e803000000002ad86225",
+   "frames": [
+    {
+     "cmd": 528,
+     "seq": 61,
+     "status": 0,
+     "flags": 0,
+     "len": 12,
+     "payload": "0103ff000000e80300000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 528,
+     "seq": 61,
+     "status": 0,
+     "flags": 0,
+     "len": 12,
+     "payload": "0103ff000000e80300000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_read_raw_segment_5",
+   "description": "1.17: READ_RAW addr_mode 3: CH1 both cores interleaved, segment 5 (address 5 << 16 | 0), 120 words",
+   "hex": "a513010004023e00000010000000439703030100000005007800000000000000c9359dd0",
+   "frames": [
+    {
+     "cmd": 516,
+     "seq": 62,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "03030100000005007800000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 516,
+     "seq": 62,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "03030100000005007800000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "resp_get_seq_segments_done",
+   "description": "1.17 GET_SEQ response (48 bytes): 32 segments m 7, hold-off 1000 ns = 200 x 5 ns, fits (pre 16 / total 120 words, 64 slots), FPGA 0x2A done + mode 1, 32 completed, 1 untriggered; held run = capture 9",
+   "hex": "a51301010f023f0000003000000013c40100070020000000e8030000c800000000001000780040008107000020000000010001000900000020000000010001006c82f991",
+   "frames": [
+    {
+     "cmd": 527,
+     "seq": 63,
+     "status": 0,
+     "flags": 1,
+     "len": 48,
+     "payload": "0100070020000000e8030000c80000000000100078004000810700002000000001000100090000002000000001000100"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_read_seq_table",
+   "description": "1.17 READ_SEQ table response: 16-byte header (capture 9, first 0, count 2, m 7, pre 16, total 120), then u64 entries: bits 39..0 timestamp in 5 ns (0, 100 us), 52..40 trigger offset in the slot (0, 7), 53 triggered, 63 valid",
+   "hex": "a5130101100240000000200000005d74090000000000020000000700100078000000000000002080204e000000072080f75e91fc",
+   "frames": [
+    {
+     "cmd": 528,
+     "seq": 64,
+     "status": 0,
+     "flags": 1,
+     "len": 32,
+     "payload": "090000000000020000000700100078000000000000002080204e000000072080"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_get_status_1_17",
+   "description": "1.17 GET_STATUS tail (48 bytes; 0..43 as 1.13, zero here): 44 u16 features 0x1F (EXT, DECIM, FIR, SEGMENTS, HW_AVERAGE = FPGA 0x1536), 46 UI Average 2 = hardware, 47 log2 N = 6 (64 records per displayed record)",
+   "hex": "a51301010300410000003000000017cb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000001f000206eb33a721",
+   "frames": [
+    {
+     "cmd": 3,
+     "seq": 65,
+     "status": 0,
+     "flags": 1,
+     "len": 48,
+     "payload": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000001f000206"
+    }
+   ],
+   "device_events": []
   },
   {
    "name": "ascii_ver",

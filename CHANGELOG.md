@@ -31,7 +31,27 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.56 - 2026-10-19 (protocol 1.16, unchanged; number provisional, the coordinator renumbers at the merge)
+#### 0.2.58 - 2026-10-19 (protocol 1.17, docs/protocol.md section 14 row 56)
+
+Support for the AL3 bitstream 0x1536 (segmented capture and hardware averaging, fpga-gen5; not flashed yet).
+Built on 0.2.55 / protocol 1.16 and numbered 0.2.58 by the coordinator (0.2.56 is fw-ui2, 0.2.57 fw-ui4); the
+protocol row number (56) is provisional, the coordinator renumbers it at the merge. Spec: `docs/protocol.md` section 14 row 56; README section 5 "Segmented
+capture and hardware averaging". Nothing is benched.
+
+- Added: version word 0x1536..0x153F gives caps bit 17 SEQ. Older bitstreams see no new FPGA command (65abebf).
+- Added: the acquisition menu's Average uses the FPGA's averaging on 0x1536 when the record fits its accumulator
+  (legacy records at the 3000-sample depth: filter off or 200 MSa/s): each displayed record is the mean of 2 to 64
+  records (as many as fit 40 ms) instead of the per-pass software average. Other cases keep the software average
+  (65abebf).
+- Added: SET_SEQ / GET_SEQ / READ_SEQ (0x020E-0x0210) and READ_RAW addr_mode 3: host ARM runs N segments with a
+  40-bit timestamp per segment, or averages N records per position (up to 65536 with the filter on); STOP ends a
+  run and keeps its data (65abebf).
+- Changed: GET_STATUS is 48 bytes (bytes 44-47: the bitstream's features word and the UI Average state), GET_DECIM 36
+  bytes, GET_CAPTURE_INFO 96 bytes (the run of the capture) (65abebf).
+- Changed: on 0x1536 the arm writes 0x0B / 0x0C and the sequencer registers before the sampling reset, so the
+  write-clock side loads them at every rate (65abebf).
+
+#### 0.2.56 - 2026-10-19 (protocol 1.16, unchanged)
 
 The second step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 2; rules in `docs/ui-guidelines.md`;
 README section 5 "Screens: CTRL page, fold-outs, chips, warnings, spectrum cards").
@@ -62,7 +82,7 @@ README section 5 "Screens: CTRL page, fold-outs, chips, warnings, spectrum cards
 - Settings sector: word 210 bit 3 holds the Phosphor switch, word 211 (0xC700) Grid and the spectrum's Display
   variant.
 
-#### 0.2.55 - 2026-10-19 (protocol 1.16, unchanged; provisional number, the coordinator renumbers at merge)
+#### 0.2.55 - 2026-10-19 (protocol 1.16, unchanged)
 
 Step 3 of the UX makeover (`docs/plans/ux-makeover.md` section 5; README section 5 "Settings").
 
@@ -82,7 +102,7 @@ Step 3 of the UX makeover (`docs/plans/ux-makeover.md` section 5; README section
 - Changed: "Confirm to delete?" became the confirmation dialog: "Delete from the SD card?", Cancel left and Delete
   right in red, 160 x 44 px buttons 16 px apart (was NO / YES, 74 x 50 px, 11 px apart) (24743a7).
 
-#### 0.2.54 - 2026-10-19 (protocol 1.16, unchanged; provisional number)
+#### 0.2.54 - 2026-10-19 (protocol 1.16, unchanged)
 
 Touch fix batch 1 (`docs/plans/touch-review.md` section c1; defects 1, 3, 4, 5, 8, 9, 10 and part of 19).
 

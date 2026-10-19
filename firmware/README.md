@@ -506,6 +506,58 @@ Bench (nothing verified on hardware; bitstream not yet flashed): 0x29 read-back 
 100 kHz with skipping and is attenuated with boxcar / CIC (plan F1); trigger on CH1 with the 16-bit level at
 several rates; the swap bit (T4 dependency); settling after a time base change (first capture clean).
 
+### Segmented capture and hardware averaging (FPGA 0x1536, fw 0.2.58, protocol 1.17)
+
+fpga-gen5's AL3 bitstream 0x1536 adds a sequencer in front of the unchanged 0x1535 capture logic (fpga/al3/README.md
+section 6, docs/plans/segmented-capture.md): **segment mode** restarts the capture after each record into the next
+slot of 2^m words and logs a 40-bit timestamp and the trigger offset per segment; **averaging mode** adds each
+triggered record (pretrigger included) into a 2048 x 64 accumulator. Writes 0x57-0x5D, reads 0x2A (status) and
+0x2B-0x32 (bytes of the view word at the 0x1F pointer). On 0x1532-0x1535 none of this is written (caps bit 17 SEQ).
+
+- Files: `pc_seq.c/.h` (pure maths, host-tested: fit rules, register bytes, status and table layouts, slot
+  addresses, the UI averaging plan, the exact rounded mean), `pc_seq_hw.c/.h` (target: the pc_hal.h sequencer
+  functions and the UI averaging), handlers in `pc_cmds.c` ("Sequencer"). Hooks: `PC_SEQ_PRE_RESET()` in
+  `fpga_do_conversion` before 0x01 = 1, `PC_SW_AVERAGE()` in the two software-average conditions of
+  `scope_display_trace_data`; glue calls in `pc_glue_decim_conversion`, `pc_glue_decim_read`, `pc_glue_ui_capture_addr`,
+  `pc_glue_ui_capture`, `pc_glue_poll_main`, `pc_hal_trace_build`, `pc_hal_arm`.
+- Arm order on 0x1536: 0x0B / 0x0C and the sequencer registers are written **before** 0x01 = 1 (and 0x0B / 0x0C again in
+  the reset window as before). Reason (fpga-gen6, RTL reading): `trigger_read_address` and the slot mask are
+  write-clock registers that load only on write-clock edges while 0x01 = 1; at slow legacy rates (2 us per write clock
+  at 1 MSa/s) the reset window can pass without an edge. The 0x05 poll guarantees edges in reset. 0x57 = 0 is written
+  for every capture that is not a run while the FPGA may hold another mode (always the first arm after boot: an MCU
+  restart leaves the FPGA running). Bitstreams before 0x1536 keep the 0.2.51 order byte for byte.
+- **UI hardware averaging.** The acquisition menu's Average (1.00o5: auto or normal trigger mode, not the waveform viewer,
+  not roll) used to average every display pass, trace = (trace + previous) / 2, whether a new record came or not. On
+  0x1536 a UI conversion whose record is legacy (filter off, or 200 MSa/s) and fits the accumulator (the 3000-sample
+  depth = 1500 words; total <= 2046 words) is one averaging run of N records: the largest power of two in 2..64 with
+  N x (record + dead time) <= 40 ms (`pc_seq_ui_plan`; 64 at 200 MSa/s, 8 at 1 MSa/s, none at 100 kSa/s and slower).
+  The readout takes the four lane sums of the channel (S = 0, 4 bus passes of 1500 words, about 1.8 ms) and feeds
+  `fpga_read_adc_data` the corrected code of the mean per core (`pc_seq_avg_code`: mean in Q8 by an exact reciprocal,
+  then the core's gain / offset, rounded), so trace, measurements, software trigger, spectrum and phosphor take it as a
+  normal record; the software average is skipped for it (`pc_seq_sw_average`). 16-bit records (always 3000+ samples,
+  over the 2046-word accumulator) and slow rates keep the software average. GET_STATUS byte 46 tells which (0 off,
+  1 software, 2 hardware), byte 47 log2 N.
+- Deadline (`pc_seq_ui_service`, main loop): a run not done after max(100 ms, two records) + its run time is stopped
+  (0x5D = 1, then 0x1A = 0) once it holds a record, and shows the mean of what it has. Auto mode without any trigger:
+  the run is stopped empty, the record shown is the sample memory's (untriggered, as the firmware auto mode of 0.2.41
+  shows), and the next UI conversions are single records until one triggers. Normal mode with no record yet keeps
+  waiting, as a normal-mode capture does. The firmware auto time-out never runs during a UI run (it would end a record
+  between the records of a run).
+- Host (protocol row 56): SET_SEQ sets a run for the next host ARM (segments: m, count, circular, hold-off; averaging:
+  positions, N, hold-off), checked against the trigger geometry at SET_SEQ and at ARM; DONE is the end of the run;
+  STOP ends a run as DONE (0x5D, 0x1A = 0) and keeps its data; GET_SEQ reports the setting, its fit, the FPGA status
+  and the latest run; READ_SEQ returns the table (u64 entries) or the averaged record (lane sums >> S, or u32 sums for
+  16-bit records); READ_RAW addr_mode 3 reads segment s relative to its record start, wrapping at the slot end. A segment
+  run builds no trace (READ_TRACE E_STATE 5); an averaging run's last record is a normal capture in the ring.
+- Memory (GCC 10, against main at 0.2.55): .text +11,888 bytes, .bss +8,228 (`ui_lane` 8 KiB), image 536,576 -> 548,352 bytes.
+- Host tests: `test_seq.c` (fit limits from the README, every m, register bytes, entry bit positions, slot wrap, the
+  plan at the table rates, `pc_seq_udiv` exact for every c 1..256 at all multiples below 2^24, `pc_seq_avg_code` equal
+  to the per-sample correction for constant records), `test_session.c` `test_seq_older_bitstreams` / `test_seq_segments`
+  / `test_seq_average` against a mock sequencer that applies the FPGA's view rules (shift, clamp, raw), `seq_check.c`
+  for the `seq` vector section.
+- Not host-testable (target only, read against zaklad.v): the bus sequences in `pc_seq_hw.c`, the UI run and its
+  deadline. Bench plan: firmware/AGENTS.md section 33.
+
 ### FFT core (`fx_fft.c`, protocol builds)
 
 Fixed-point real-input FFT for the spectrum analyser (plan: `docs/plans/dpos350p-features.md` 1.2). No libc, no float:

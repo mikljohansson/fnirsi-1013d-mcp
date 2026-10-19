@@ -37,6 +37,7 @@
 #include "ui_settings.h"
 #include "ui_fmt.h"
 #include "ui_ctrl.h"
+#include "pc_seq_hw.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -396,7 +397,7 @@ static void pc_dec_apply(const pc_decim_cfg *c);
 static uint8  pc_ui_auto;                             //defined with the firmware auto mode below
 
 int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal,
-               const pc_decim_cfg *dc)
+               const pc_decim_cfg *dc, const pc_seq_cfg *sq)
 {
   uint32 n = 0;
 
@@ -417,6 +418,13 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
   //Configured trigger mode again: FORCE leaves 0x1A in auto
   fpga_write_cmd(0x1A);
   fpga_write_byte(normal ? 0x01 : 0x00);
+
+  //Sequencer (0x1536+): geometry and run setting before the reset (pc_seq_hw.c); a host capture ends a UI averaging run
+  if(sq && prog)
+  {
+    pc_seq_ui_conversion(0, dc, 0);
+    pc_seq_hw_pre_reset(sq, pre_words, total_words);
+  }
 
   //Reset the sample system and wait for ready, bounded
   fpga_write_cmd(0x01);
@@ -554,6 +562,7 @@ int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t
   //Its interleave is B before A (fpga_read_sample_data), so READ_TRACE follows the 1.00o5 convention.
   scopesettings.nofsamples  = total_samples / 2;
   scopesettings.samplecount = total_samples;
+  pc_seq_trace_replaced();
 
   if(ch_mask & 0x01)
     fpga_read_sample_data(&scopesettings.channel1, start_word);
@@ -772,6 +781,11 @@ void pc_glue_decim_conversion(void)
       pc_ui_auto_ms = pc_auto_deadline_ms(scopesettings.samplecount, d);
     }
   }
+
+  //Average on a 0x1536 bitstream: this UI conversion may be a hardware averaging run, which has its own deadline
+  //(pc_seq_ui_service; the firmware time-out must never end a record between the records of a run)
+  if(pc_seq_ui_conversion(ui, &c, pc_dec_div()))
+    pc_ui_auto = 0;
 }
 
 //Main loop: give up on a trigger that did not come in time
@@ -841,6 +855,14 @@ void pc_glue_decim_read(void *settings, uint32 start)
     return;
 
   pc_dec_raw_n[ch] = 0;
+
+  //0x1536 UI averaging run: the corrected codes of the mean, both passes from memory as for the 16-bit path
+  if(pc_seq_ui_feed(settings, pc_dec_feed, scopesettings.nofsamples * 2))
+  {
+    pc_decim_src    = &pc_dec_feed[1];
+    pc_dec_even_src = &pc_dec_feed[0];
+    return;
+  }
 
   if(!pc_dec_cur.k)
     return;
@@ -1896,6 +1918,7 @@ void pc_glue_init(void)
     pc_diag_boot(pc_restart_info[0] ? v : 0);
   }
   pc_session_init(&pc_sess);
+  pc_seq_hw_init((pc_sess.var.caps & PC_CAP_SEQ) != 0);
   pc_ready = 1;
   pc_ui_fix_settings();
 
@@ -1911,6 +1934,7 @@ void pc_glue_poll_main(void)
     pc_poll(&pc_sess, PC_CTX_MAIN);
 
   pc_ui_auto_service();
+  pc_seq_ui_service();
 }
 
 void pc_glue_poll_busy(void)
@@ -1991,6 +2015,9 @@ void pc_glue_ui_capture_addr(uint32 addr)
     //A record the firmware time-out ended is untriggered, whatever 0x18 says now
     if(pc_ui_forced)
       pc_sess.ui_trig = 0;
+
+    //An averaging run is triggered when it holds a record (0x18 is the last record's)
+    pc_seq_ui_done(&pc_sess.ui_trig);
   }
 
   pc_scope_untrig = (!pc_ui_forced && (!pc_ready || pc_sess.ui_trig || scopesettings.triggermode)) ? 0 : 1;
@@ -2001,6 +2028,7 @@ void pc_glue_ui_capture_addr(uint32 addr)
 
 void pc_glue_ui_capture(void)
 {
+  pc_seq_ui_read_done();
   spectrum_new_data();
   phosphor_new_data();
 

@@ -242,9 +242,20 @@ void pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable)
 static int mock_polls;
 
 int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal,
-               const pc_decim_cfg *dc)
+               const pc_decim_cfg *dc, const pc_seq_cfg *sq)
 {
   mock.fpga_ops++;
+
+  if(sq)
+  {
+    //As pc_seq_hw.c: written before the reset; the clk_200 side latches mode and format at the release
+    mock.seq_arms++;
+    mock.seq_cfg      = *sq;
+    mock.seq_run_mode = sq->mode;
+    mock.seq_fmt16    = (uint8_t)(sq->mode && dc && dc->k);
+    mock.seq_57       = pc_seq_cmd57(sq, 0);
+    mock.seq_shift    = 0;
+  }
 
   if(dc)
   {
@@ -297,6 +308,51 @@ void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst
   for(i=0;i<count;i++)
     dst[i * stride] = mock.ring[core][(start + i) % ring_words];
 }
+
+//Sequencer: the FPGA's view of an accumulator word (zaklad.v seq_view)
+static uint64_t mock_seq_view(uint64_t a)
+{
+  uint8_t s = mock.seq_shift & 31;
+  uint64_t v = 0;
+  int i;
+
+  if((mock.seq_run_mode == 1) || (mock.seq_57 & PC_SEQ_57_RAW))
+    return a;
+
+  if(mock.seq_fmt16)
+  {
+    for(i=0;i<2;i++)
+    {
+      uint64_t t = ((a >> (32 * i)) & 0xFFFFFFFFull) >> s;
+      v |= (uint64_t)((t > 0xFFFF) ? 0xFFFF : t) << (32 * i);
+    }
+    return v;
+  }
+
+  for(i=0;i<4;i++)
+    v |= (uint64_t)((s >= 16) ? 0 : (((a >> (16 * i)) & 0xFFFF) >> s)) << (16 * i);
+
+  return v;
+}
+
+void pc_hal_seq_status(uint8_t raw[8])  { mock.fpga_ops++; mock.seq_status_reads++; memcpy(raw, mock.seq_status, 8); }
+void pc_hal_seq_stop(void)              { mock.fpga_ops++; mock.seq_stops++; mock.seq_status[0] |= PC_SEQ_ST_DONE; mock_polls = 1000000; mock.polls_to_done = 0; }
+void pc_hal_seq_view(uint8_t mode57, uint8_t shift) { mock.fpga_ops++; mock.seq_views++; mock.seq_57 = mode57; mock.seq_shift = shift; }
+
+void pc_hal_seq_read(uint8_t byte, uint32_t first, uint32_t count, uint8_t *dst, uint32_t stride)
+{
+  uint32_t i;
+
+  assert(byte < 8);
+  assert(first + count <= 2048);
+  mock.fpga_ops++;
+  mock.seq_reads++;
+
+  for(i=0;i<count;i++)
+    dst[i * stride] = (uint8_t)(mock_seq_view(mock.acc[first + i]) >> (8 * byte));
+}
+
+void pc_hal_ui_average(uint8_t *state, uint8_t *log2n) { *state = mock.ui_avg_state; *log2n = mock.ui_avg_log2n; }
 
 void    pc_hal_fpga_write_cmd(uint8_t cmd)   { mock.fpga_ops++; if(mock.ndebug_cmds < 16) mock.debug_cmds[mock.ndebug_cmds++] = 0x100 | cmd; }
 void    pc_hal_fpga_write_data(uint8_t data) { mock.fpga_ops++; if(mock.ndebug_cmds < 16) mock.debug_cmds[mock.ndebug_cmds++] = 0x200 | data; }
