@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-polish1 (2026-10-19): fw 0.2.63 provisional, protocol unchanged: UI polish batch 1 (owner's walk-through of 0.2.59, items a-q), section 39.**
 **Branch fw-ui4 (2026-10-19): fw 0.2.59 provisional, protocol unchanged: UX makeover step 4 (Diagnostics as a main-loop
 display mode with Status, Calibration, Log, Developer; the four-screen calibration wizard; the first-run screen), section 34.**
 **Branch fw-ui3 (2026-10-19): fw 0.2.55 provisional, protocol 1.16 unchanged: UX makeover step 3 (Settings fold-out
@@ -2154,3 +2155,101 @@ Open:
 - Bench: read GET_LINK_STATS 62-63 and GET_EVENT_LOG types 21/22 after a wizard run and after toggling the time base
   to 200 MSa/s a few times. Expect 21 entries with small `a` (recovered), and 22 entries showing who wrote what
   before each.
+
+## 39. fw-polish1: UI polish batch 1 (fw 0.2.63 provisional, protocol unchanged)
+
+Branch from main 8f8687a (fw 0.2.61), merged with origin/main a179408 in bc32b8b. Brief: `docs/plans/task-queue.md` "UI
+polish batch 1" items a-p plus the coordinator's item q; rules `docs/ui-guidelines.md`; user-facing description README
+section 5 "Screens: UI polish batch 1 (fw 0.2.63)" (and the older Screens sections corrected where they changed). One
+commit per item: f58ff29 (a), 70da62a (q), bcb3007 (b), f71ede6 (c), d513498 (d), 8d508cd (e), cf37f5d (f), 1fb05fd (g),
+2830fc2 (h), 1ecaef3 (i), ba116cf (j), d4345e8 (k), eb51787 (l), 6c82e0c (m), 32d17a9 (n), b1fe1fc (p), then the version /
+CHANGELOG / README commit, the merge, this handoff. Image from bc32b8b (GCC 10): `firmware/scope/build-gcc10-pc/
+fnirsi_1013d.bin` in the worktree, 606,720 B, sha256 28b15dcdda21112caa49aee81b6b0c394977259784e44b7952ed47ce59d8f475, ELF
+76852f3281c1a5e26fe5732e3eedbd58c880ff5207bc091649b30134e478f82e; nommu bin
+21c80a58cf7851bef4b4d39943761613e98fa27559982cc743941ab1bec5a656 (`#VER` fw=0.2.63, proto=1.18). A build of the handoff
+commit differs only in the identity. **Nothing benched.** Host tests all green (test_ui 1,418,459, test_ui_diag 4880,
+test_cal_wizard 648, test_session 69707 / 69705, check_vectors OK). GCC 10 warnings 36 (gcc10 and gcc10-nommu), sorted
+line-number-free list identical to 8f8687a. No settings words, no protocol change. Version: 0.2.63 as briefed (0.2.62 is
+fw-enc's); the coordinator renumbers if needed.
+
+Decisions (owner may veto each):
+- (e) **Pro removed.** `scope_display_channel_pro_trace` drew, per screen column, the minimum and the maximum of the
+  samples in that column as two separate polylines (min to previous min, max to previous max), with no vertical fill
+  between them. Zoomed in (fewer samples than pixels) min = max and it is Linear with held samples; on a clean signal the
+  outlines lie within a pixel and it looks like Linear; on a noisy or fast signal it shows Peak's band as an outline. Not
+  distinct enough to keep: three styles. `pc_ui_fix_settings` maps a saved 3 to Linear; the draw switch's default is now
+  Linear (`_old`, the same function as case 0; the default called a different, unused-elsewhere linear variant).
+- (n) **Debug overlay switch removed, flag kept.** `dev_mode` draws "DEV mode" at (670, 50), the raw 0x14 trigger
+  address at (500, 10) over the top bar (cleared and redrawn every capture: the flicker), the trigger position
+  (`scope_test_trigerposition_value`) and touch coordinates in the generator and keypad menus. Raw FPGA numbers that a
+  user cannot act on, and the PC already gets the trigger address in every capture record. The flag stays in the
+  settings sector; the Developer page shows a "Debug overlay / Switch off" row only while it is set, so units that turned
+  it on with 0.2.59-0.2.62 can turn it off. (After switching it off the top-bar number at x 500 stays until the top bar
+  is next redrawn, e.g. by opening a dropdown.)
+- (p) **RUN/STOP wording: green "RUN" while running, amber (0xFFD262, the Diagnostics "Check" colour) "Stopped" while
+  stopped**, black text both. "Stopped" reads as a state where "STOP" reads as a command. It is in the 13 px font
+  (47 px wide): "STOPPED" is 62 px in the 16 px font and 50 px in the 13 px one, wider than the 51 px button allows.
+  Touched: orange as every bar button. The top bar's RUN / WAIT / STOP chip (red STOP) is unchanged: say if it should
+  follow (one line in `scope_run_stop_text`). `pc_hal_ui_set_run` now redraws the button too (page one, not in the
+  viewer); the single-shot stop in scope_functions.c already did.
+- (j) The Diagnostics header takes the Settings screen's: black band (`RGB_HEADER` 0) with the 0x262626 rule, Back at x
+  692. The tabs keep their look (the unselected ones already were the Settings Back button's colours; the shown one is the
+  lighter blue with the double edge). The first-run screen shares the header band.
+- (k) DC shift trim: new button style `UD_B_ON` (green 0x145A2E / 0x35C26A) while on, `UD_B_GREY` while off; the line
+  "On: CTRL on the scope opens the trim." (amber) only while on.
+- (m) The history channel: `spec_hist_pick` (not saved, like Analyse). With Analyse = CH1 + CH2 both spectra stay
+  computed and the pick chooses the history; with a single-channel Analyse the pick sets Analyse (`spec.recompute`), since
+  only analysed channels have spectra. The row exists only in Waterfall and Density, below a separator; a tap toggles and
+  keeps the fold-out open. Auto's channel (`spec_auto_ch`) still follows Analyse only. Two histories at once: later
+  (needs a second `wf_rows` / `dens` history and a split-plot or overlay design).
+- (f) Pass time moved under the Memory column's rule (x 312, y 218 of the menu), "Pass time" grey and "NN ms" white,
+  geometry in `ui_ctrl.h` (`UI_ACQ_PASS_*`), test_ui checks it lies in the empty part of the column and the texts fit.
+- (g) Root cause: `handle_main_menu_touch` hit-tests every touch sample afresh. A drag that left the slider's 58 px band
+  (y 46..104 / 105..163) went to the final else (close everything), or into a fold-out row or a main-menu row (x < 150,
+  which switches the mode). Now `drag` remembers the slider the touch started on and feeds every sample to
+  `scope_move_slider` (which clamps x) until release.
+- (h) The Restore dialog body is two lines broken where the next word does not fit; test_ui checks every dialog for that.
+- (l) `ui_step.step`: drawn right-aligned on the title line in the 16 px font, soft grey. Only the volts calibration uses
+  it (the calibration wizard's four screens have titles, no step count).
+- (a, q, c) Icons drawn in code: cogwheel per pixel (ring r 3..7, four straight 5 px teeth to 10 px, four diagonal ones to
+  r 9.9), sine as 25 column values joined by lines, X-Y as 24 points of a lemniscate turned 55 degrees. The
+  `system_settings_icon` and `confirmation_icon` bitmaps are gone.
+- (o) Checked: the zero step's first instruction line is 433 px in the 16 px font (592 available), the second shorter;
+  test_cal_wizard checks both.
+
+Not touched (other agents' areas): enc_heal / fpga_control arm paths, the ACQ dropdown handlers and
+`handle_acquisition_menu_touch`, `scan_for_touch` and the drag handlers, `spectrum_touch`, the measurement cards and the
+spectrum card set, the bode view.
+
+**Bench walk-through (owner, coordinator on COM10; FEL load, no SD writes needed)**
+1. FEL-load, `#VER fw=0.2.63`. Menu: the Scope row shows one period of a sine wave, the Settings row a cogwheel; both
+   in white, black while touched (Settings yellow while its fold-out is open).
+2. CTRL page: Grid is a green button reading "Grid"; tap: grey, the grid lines go; tap: green, back. No slide switch.
+3. Display: the X-Y row's icon is a figure 8 leaning right. Choose X-Y: the Trace style button turns grey (label and
+   value), a tap on it does nothing. Normal: it is white / pale yellow again and opens.
+4. Trace style: Linear, Dots, Peak only. (Optional: with Pro saved by 0.2.62, power-cycle into 0.2.63: Linear.)
+5. ACQ menu: "Memory" header, then the depth chips with nothing between them; under the column's rule at the right:
+   "Pass time" and "NN ms" on two lines, nothing overlapping.
+6. Menu > Settings: Screen brightness, Grid brightness, (Time and date), Other settings; no File message timeout. Open
+   Screen brightness, drag the slider and let the finger wander up and down well outside the slider's band and over the
+   fold-out and the main menu: the slider follows x, the fold-out stays open, no row reacts. Release, then tap outside:
+   it closes. Same for Grid brightness.
+7. Other settings: the header reads "Settings" and Back only; nothing beside Restore default settings; Controls has File
+   message timeout (tap flips "wait for a tap" / "0.7 s"). Restore default settings: the dialog body is two lines, the
+   first nearly the box's width. Cancel.
+8. Menu > Diagnostics: black header like Settings (grey rule under it), Back at the same place as on Settings; no
+   battery icon over the header's right end for a minute (it is current again after Back). Calibration tab: DC shift
+   trim button grey, no "DC shift trim off." line, no "Needs a DC supply up to 15 V."; tap: green with "On: CTRL on the
+   scope opens the trim."; tap: grey. Developer tab: only Enter FEL now (unless the flag was on: then a "Debug overlay /
+   Switch off" row above it; tap removes it).
+9. Calibration tab > Volts calibration: the dialog title line reads "Volts calibration" at the left and "Step 1 of 6" at
+   the right; the second line "Tap Calibrate.". Cancel.
+10. Spectrum analyser > CTRL > Display: Spectrum, Waterfall, Density only. Choose Waterfall, open Display again: a line
+   and "Channel CH1" (Analyse CH1 + CH2 or CH1). Tap: "CH2", the waterfall restarts with CH2's history; Analyse keeps
+   CH1 + CH2 (or follows to CH2 when it was CH1). Switch CH2 off: the row is grey and inert, showing CH1.
+11. RUN/STOP: running, the button is green "RUN"; tap: amber "Stopped"; tap: green "RUN". From the MCP:
+   `scope_acquisition_control` action "stop": the button turns amber "Stopped" at once, and green on action "run". Same with Diagnostics open (Back shows the
+   right state) and in the spectrum view.
+Bug indicators: a slider drag that closes the fold-out or switches the mode; RUN/STOP and the top bar chip disagreeing on
+run vs stop; the battery icon on the Diagnostics header; the Trace style fold-out opening in X-Y; a Pro row; the pass
+time overlapping a chip; text past the edge of the RUN/STOP or Grid button.
