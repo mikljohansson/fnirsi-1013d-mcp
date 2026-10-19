@@ -105,7 +105,7 @@ uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (sco
 
 //fw 0.2.48 (pc_mmu.h): main, right after 1.00o5's cache enables and before interrupts: flat page table, MMU on, so the
 //D-cache and the write buffer take effect
-#if PC_PROTOCOL && PC_MMU
+#if PC_MMU
 #include "pc_mmu.h"
 #define PC_MMU_ENABLE()         pc_mmu_enable()
 #else
