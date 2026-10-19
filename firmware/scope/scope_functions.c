@@ -3,6 +3,7 @@
 #include "menu.h"
 #include "test.h"
 #include "scope_functions.h"
+#include "touch_pick.h"
 #include "acal_live.h"
 #include "statemachine.h"
 #include "touchpanel.h"
@@ -332,18 +333,7 @@ void scope_draw_pointers(void)
     if(scopesettings.xymodedisplay == 0)
     {
       //y position for the channel 1 trace center pointer.
-      position = 442 - scopesettings.channel1.traceposition;//441
-
-      //Limit on the top of the displayable region
-      if(position < 49)//44
-      {
-        position = 49;
-      }
-      //Limit on the bottom of the displayable region
-      else if(position > 442)//441
-      {
-        position = 442;
-      }
+      position = scope_pointer_top(scopesettings.channel1.traceposition);
 
       //Draw the pointer
       display_left_pointer(2, position, '1');
@@ -373,18 +363,7 @@ void scope_draw_pointers(void)
   if(scopesettings.channel2.enable)
   {
     //y position for the channel 2 trace center pointer
-    position = 442 - scopesettings.channel2.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.channel2.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(CHANNEL2_COLOR);
@@ -402,18 +381,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref1)
   {
     //y position for the ref 1 trace center pointer
-    position = 442 - scopesettings.ch_ref1.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref1.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref1.color);
@@ -430,18 +398,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref2)
   {
     //y position for the ref 2 trace center pointer
-    position = 442 - scopesettings.ch_ref2.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref2.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref2.color);
@@ -458,18 +415,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref3)
   {
     //y position for the ref 3 trace center pointer
-    position = 442 - scopesettings.ch_ref3.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref3.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref3.color);
@@ -486,18 +432,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref4)
   {
     //y position for the ref 4 trace center pointer
-    position = 442 - scopesettings.ch_ref4.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref4.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref4.color);
@@ -514,18 +449,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref5)
   {
     //y position for the ref 1 trace center pointer
-    position = 442 - scopesettings.ch_ref5.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref5.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref5.color);
@@ -542,18 +466,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref6)
   {
     //y position for the ref 2 trace center pointer
-    position = 442 - scopesettings.ch_ref6.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref6.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref6.color);
@@ -570,18 +483,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref7)
   {
     //y position for the ref 3 trace center pointer
-    position = 442 - scopesettings.ch_ref7.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref7.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref7.color);
@@ -598,18 +500,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref8)
   {
     //y position for the ref 4 trace center pointer
-    position = 442 - scopesettings.ch_ref8.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref8.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref8.color);
@@ -657,18 +548,7 @@ void scope_draw_pointers(void)
     
     //-----------------------------------------------------
     //y position for the trigger level pointer
-    position = 442 - scopesettings.triggerverticalposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.triggerverticalposition);
 
     //Need to reset the fore ground color
     //Select the channel based on the current trigger color
@@ -1742,6 +1622,7 @@ void scope_do_auto_setup_old(void)
 void scope_do_auto_setup_new(void)
 {   
   PCHANNELSETTINGS settings;
+  int32  position;
   
   register uint32 multiply;
 
@@ -1971,38 +1852,28 @@ void scope_do_auto_setup_new(void)
     center = settings->centerDC+73;
 
     //Adjust the center line based on targeted center
+    //fw 0.2.54: computed in int32 and limited to the drag range 6..396 (an inverted channel's uint16 subtraction wrapped,
+    //its addition had no upper limit; such a channel's pointer sat clamped at the top and could not be grabbed)
     if(center < center1)
     {
       //Calculate a new trace offset
-      //settings->traceposition += ((center1 - center)*112)/100;  //120 mensie cislo posuva hore priebeh
-      if (settings->invert) settings->traceposition -= ((center1 - center)*settings->dc_shift_center)/100; 
-        else settings->traceposition += ((center1 - center)*settings->dc_shift_center)/100;  //120 mensie cislo posuva hore priebeh
-      
-      //Make sure it is not out of range
-      if(settings->traceposition > 399)//385
-      {
-          settings->traceposition = 399;
-      }
+      offset = ((center1 - center)*settings->dc_shift_center)/100;
+
+      if(settings->invert) position = (int32)settings->traceposition - (int32)offset;
+        else position = (int32)settings->traceposition + (int32)offset;
     }
     else
     {
       //Calculate the needed offset
-      //offset = ((center - center1)*112)/100;    //110
-        offset = ((center - center1)*settings->dc_shift_center)/100;    //110
-       
-      //Check if current setting large enough to subtract the offset
-      if(settings->traceposition > offset)
-      {
-          //Take of the found offset (of inverting ON or OFF)
-          if (settings->invert) settings->traceposition += offset; else settings->traceposition -= offset;
-      }
-      else
-      {
-          //Limit on zero
-          settings->traceposition = 0;
-      }
+      offset = ((center - center1)*settings->dc_shift_center)/100;
+
+      //Take of the found offset (of inverting ON or OFF)
+      if(settings->invert) position = (int32)settings->traceposition + (int32)offset;
+        else position = (int32)settings->traceposition - (int32)offset;
     }
-    
+
+    settings->traceposition = scope_trace_clamp(position);
+
     //Write the new offset to the FPGA
     settings->dcoffset = (center1 - (settings->traceposition))*2;
    }//end dc copuling 
@@ -2030,38 +1901,28 @@ void scope_do_auto_setup_new(void)
    if(!settings->coupling)
    {
     //Adjust the center line based on targeted center
+    //fw 0.2.54: computed in int32 and limited to the drag range 6..396 (an inverted channel's uint16 subtraction wrapped,
+    //its addition had no upper limit; such a channel's pointer sat clamped at the top and could not be grabbed)
     if(center < center2)
     {
-        //Calculate a new trace offset
-        //settings->traceposition += ((center2 - center)*112)/100;
-        if (settings->invert) settings->traceposition -= ((center2 - center)*settings->dc_shift_center)/100;
-            else settings->traceposition += ((center2 - center)*settings->dc_shift_center)/100;
-      
-        //Make sure it is not out of range
-        if(settings->traceposition > 399)//385
-        {
-            settings->traceposition = 399;
-        }
+      //Calculate a new trace offset
+      offset = ((center2 - center)*settings->dc_shift_center)/100;
+
+      if(settings->invert) position = (int32)settings->traceposition - (int32)offset;
+        else position = (int32)settings->traceposition + (int32)offset;
     }
     else
     {
       //Calculate the needed offset
-      //offset = ((center - center2)*112)/100;
       offset = ((center - center2)*settings->dc_shift_center)/100;
-       
-      //Check if current setting large enough to subtract the offset
-      if(settings->traceposition > offset)
-      {
-          //Take of the found offset (of inverting ON or OFF)
-          if (settings->invert) settings->traceposition += offset; else settings->traceposition -= offset;
-      }
-      else
-      {
-          //Limit on zero
-          settings->traceposition = 0;
-      }
+
+      //Take of the found offset (of inverting ON or OFF)
+      if(settings->invert) position = (int32)settings->traceposition + (int32)offset;
+        else position = (int32)settings->traceposition - (int32)offset;
     }
-    
+
+    settings->traceposition = scope_trace_clamp(position);
+
     //Write the new offset to the FPGA
     settings->dcoffset = (center2 - (settings->traceposition))*2;
    }//end dc copuling 
@@ -4150,7 +4011,8 @@ void scope_restore_setup_from_file(void)
   scopesettings.channel1.coupling          = ptr[index++];
   scopesettings.channel1.magnification     = ptr[index++];
   scopesettings.channel1.V_A               = ptr[index++];
-  scopesettings.channel1.traceposition     = ptr[index++];
+  //fw 0.2.54: limited to the drag range 6..396 (an out-of-range value made the channel ungrabbable)
+  scopesettings.channel1.traceposition     = scope_trace_clamp((int32)ptr[index++]);
   scopesettings.channel1.min               = ptr[index++];
   scopesettings.channel1.max               = ptr[index++];
   scopesettings.channel1.average           = ptr[index++];
@@ -4176,7 +4038,8 @@ void scope_restore_setup_from_file(void)
   scopesettings.channel2.coupling          = ptr[index++];
   scopesettings.channel2.magnification     = ptr[index++];
   scopesettings.channel2.V_A               = ptr[index++];
-  scopesettings.channel2.traceposition     = ptr[index++];
+  //fw 0.2.54: limited to the drag range 6..396 (an out-of-range value made the channel ungrabbable)
+  scopesettings.channel2.traceposition     = scope_trace_clamp((int32)ptr[index++]);
   scopesettings.channel2.min               = ptr[index++];
   scopesettings.channel2.max               = ptr[index++];
   scopesettings.channel2.average           = ptr[index++];
@@ -6162,8 +6025,8 @@ void scope_save_configuration_data(void)
   //Write it to the flash
   //sys_spi_flash_write(0x001FD000, (uint8 *)settingsworkbuffer, sizeof(settingsworkbuffer));
 #else
-  //Write the data to its sector on the SD card
-  sd_card_write(SETTINGS_SECTOR, 1, (uint8 *)settingsworkbuffer);
+  //Write the data to its sector on the SD card; the result for the diagnostics (fw 0.2.52)
+  PC_SETTINGS_SAVED(sd_card_write(SETTINGS_SECTOR, 1, (uint8 *)settingsworkbuffer));
 #endif
 }
 
@@ -6284,6 +6147,9 @@ void scope_load_input_calibration_data(void)
         adc_cal_loaded = 0;
         calibrationfail = 1;    //Ready to input calibration
     }
+
+    //Calibration provenance as stored (fw 0.2.52, pc_diag.c)
+    PC_CAL_LOADED((uint8 *)buffer);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -6323,6 +6189,9 @@ void scope_save_input_calibration_data(void)
     if(adc_cal_loaded)
       acal_pack(adc_cal, (uint8 *)buffer + ACAL_SECTOR_OFFSET);
 
+    //Calibration provenance after the block, stamped when the block is new (fw 0.2.52, pc_diag.c)
+    PC_CAL_SAVE((uint8 *)buffer);
+
      //Calculate a checksum over the settings data
     for(index=8;index<60;index++)   //40
     {
@@ -6343,7 +6212,6 @@ void scope_save_input_calibration_data(void)
 void scope_reset_config_data(void)
 {
   uint32 index;
-  uint32 *ptr = STARTUP_CONFIG_ADDRESS;     //for save and load boot menu settings
   
   //Load a default configuration in case of settings in flash being corrupted
    
@@ -6473,9 +6341,8 @@ void scope_reset_config_data(void)
   
   
   //----------------------------------------------------------------------------
-  ptr[0] = 4;  //PECO + menu //value for default start firmware (0-pepco,1-fnirsi, 2-FEL, <3 skip menu)
-  //SAVE the display configuration sector from DRAM to SDcart   //save boot menu and default start
-  sd_card_write(DISPLAY_CONFIG_SECTOR, 1, (uint8 *)0x81BFFC00);
+  //fw 0.2.55: the boot-mode byte (sector 710) is no longer written here: the start-up choice is kept (Settings >
+  //At power-on), as Restore default settings says
   
   //----------------------------------------------------------------------------
   //Load input calibration value 
@@ -6674,6 +6541,8 @@ void scope_save_config_data(void)
   settingsworkbuffer[PC_SETTING_WORD_SPEC1] = pc_glue_spectrum_setting_word(1);
   //Phosphor view settings (persistence, palette)
   settingsworkbuffer[PC_SETTING_WORD_PHOS] = pc_glue_phosphor_setting_word();
+  //Unit life record, words 224..255 (fw 0.2.52, pc_diag.c)
+  PC_SETTINGS_STORE(settingsworkbuffer);
   
   
 //-----------------------------------------------------------------
@@ -6719,7 +6588,8 @@ void scope_restore_config_data(void)
     scopesettings.channel1.displayvoltperdiv = *ptr++;
     scopesettings.channel1.samplevoltperdiv  = *ptr++;
     scopesettings.channel1.fftenable         = *ptr++;
-    scopesettings.channel1.traceposition     = *ptr++;
+    //fw 0.2.54: limited to the drag range 6..396 (an out-of-range value made the channel ungrabbable)
+    scopesettings.channel1.traceposition     = scope_trace_clamp((int32)*ptr++);
     scopesettings.channel1.triggerverticalposition= *ptr++;
     scopesettings.channel1.dcoffset          = *ptr++;
     scopesettings.channel1.invert            = *ptr++;
@@ -6735,7 +6605,8 @@ void scope_restore_config_data(void)
     scopesettings.channel2.displayvoltperdiv = *ptr++;
     scopesettings.channel2.samplevoltperdiv  = *ptr++;
     scopesettings.channel2.fftenable         = *ptr++;
-    scopesettings.channel2.traceposition     = *ptr++;
+    //fw 0.2.54: limited to the drag range 6..396 (an out-of-range value made the channel ungrabbable)
+    scopesettings.channel2.traceposition     = scope_trace_clamp((int32)*ptr++);
     scopesettings.channel2.triggerverticalposition= *ptr++; 
     scopesettings.channel2.dcoffset          = *ptr++;
     scopesettings.channel2.invert            = *ptr++;

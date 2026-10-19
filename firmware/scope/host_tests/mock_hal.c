@@ -11,7 +11,7 @@
 mock_state mock;
 mock_resp  mock_resps[MOCK_MAX_RESP];
 uint32_t   mock_nresps;
-const uint32_t pc_fw_build = 0;   //build_id.c on the target
+const pc_image_id pc_image_ident = { PC_ID_MAGIC0, PC_ID_MAGIC1, "0.0.0-host", 0, { 26, 10, 19, 12, 0, 0 }, 1, 16 };   //build_id.c on the target
 
 static uint8_t mock_tx[PC_MAX_RESPONSE_FRAME + 16] __attribute__((aligned(4)));
 static uint8_t mock_sd[MOCK_SD_SECTORS * 512] __attribute__((aligned(4)));
@@ -105,6 +105,20 @@ void mock_reset(uint16_t fpga_version)
   pc_put_u32(mock_sd + 0x1BE + 8, 2048);
   mock_sd_image(16, "eGON.BT0", 8);
   mock_sd_image(750, "eGON.EXE", 750);
+  pc_ident_invalidate();
+
+  //Diagnostics readers (1.16)
+  mock.usb.state = PC_USB_CONFIGURED;
+  mock.usb.flags = PC_USBF_HIGH_SPEED | PC_USBF_CONFIGURED | PC_USBF_DTR | PC_USBF_SOFTCONN;
+  mock.usb.power = 0x70;
+  mock.usb.faddr = 5;
+  mock.usb.since_config_ms = 4000;
+  mock.cp15 = 0x0005107Du;
+  mock.life.power_on = 12;
+  mock.life.minutes  = 2225;
+  mock.life.life_flags = PC_LIFEF_FOUND | PC_LIFEF_BOOT_WRITE | PC_LIFEF_VALID;
+  mock.life.last_end = PC_LIFE_END_SAVED;
+  mock.life.last_save = 1;
 }
 
 void mock_sd_image(uint32_t sector, const char *magic, uint32_t sectors)
@@ -527,6 +541,46 @@ void     pc_hal_link_stats(uint32_t *v) { uint32_t i; for(i=0;i<PC_TSTAT_COUNT;i
 void     pc_hal_usb_events(uint32_t *v) { uint32_t i; for(i=0;i<PC_USBEV_COUNT;i++) v[i] = 2000 + i; }
 void     pc_hal_rx_debug(uint32_t *v)   { uint32_t i; for(i=0;i<PC_RXDBG_COUNT;i++) v[i] = 3000 + i; }
 uint32_t pc_hal_boot_splash_ms(void)   { return 5000; }
+
+//Diagnostics readers (1.16)
+static char mock_report_buf[70000];
+
+void     pc_hal_usb_state(pc_hw_usb *u)  { *u = mock.usb; }
+uint32_t pc_hal_cp15_control(void)       { return mock.cp15; }
+void     pc_hal_life(pc_hw_life *l)      { *l = mock.life; }
+void     pc_hal_life_clear_restart(void) { mock.life.rst.valid = 0; mock.life_clears++; }
+void     pc_hal_restart_test(void)       { mock.restart_tests++; }
+
+int pc_hal_cal_prov(uint8_t *raw)
+{
+  memcpy(raw, mock.prov_raw, ACAL_PROV_BYTES);
+  return mock.prov_state;
+}
+
+int pc_hal_report_write(const char *text, uint32_t len, uint32_t power_on, char *name, uint32_t name_max)
+{
+  static const char base[] = "reports/report-00000-00.txt";
+  uint32_t i, p = power_on;
+
+  mock.report_writes++;
+
+  if(mock.report_fail)
+    return mock.report_fail;
+
+  assert(len < sizeof(mock_report_buf));
+  memcpy(mock_report_buf, text, len);
+  mock_report_buf[len] = 0;
+  mock.report     = mock_report_buf;
+  mock.report_len = len;
+
+  assert(name_max > sizeof(base));
+  memcpy(name, base, sizeof(base));
+
+  for(i=0;i<5;i++, p/=10)
+    name[19 - i] = (char)('0' + p % 10);
+
+  return 0;
+}
 
 uint8_t  mock_display_mode;
 int32_t  mock_spec_total = -1;          //bins in the mock spectrum, -1 = none shown

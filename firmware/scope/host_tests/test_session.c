@@ -795,7 +795,7 @@ static void test_cal_battery_pattern(void)
 
   setup(0x1532);
   r = req(PC_CMD_GET_CAL, "\1", 1);
-  T_EQ(r.h.status, 0); T_EQ(r.len, 288); T_EQ(r.p[0], 1);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_CAL_RESP_LEN); T_EQ(r.p[0], 1);
   T_EQ(pc_get_u16(r.p + 4 + 2 * 6), 1060); T_EQ(pc_get_u32(r.p + 20 + 4 * 6), 7600000);
   T_EQ((int16_t)pc_get_u16(r.p + 48), 2); T_EQ((int16_t)pc_get_u16(r.p + 50), -1);
   T_EQ(pc_get_u32(r.p + 60), 385);
@@ -838,7 +838,7 @@ static void test_cal_battery_pattern(void)
     acal_gain_carry(0, &c->cal2);
 
     r = req(PC_CMD_GET_CAL, "", 1);
-    T_EQ(r.len, 288);
+    T_EQ(r.len, PC_CAL_RESP_LEN);
     T_EQ(r.p[72], 3); T_EQ(r.p[73], 1 | 2 | 4);
     //T = 128 - 100 x 100 / 385 = 103; A: 2094 + round(-17308 x 100 / 4096) = 2094 - 423 = 1671, to 1648: -23 sixteenths
     T_EQ((int16_t)pc_get_u16(r.p + 74), -2); T_EQ(r.p[78], 9);
@@ -894,7 +894,7 @@ static void test_cal_battery_pattern(void)
       mock.decim_written = 0;
 
       r = req(PC_CMD_GET_CAL, "", 1);
-      T_EQ(r.len, 288);
+      T_EQ(r.len, PC_CAL_RESP_LEN);
       T_EQ(r.p[256], 0x01 | 0x02 | 0x08 | 0x20 | 0x40); T_EQ(r.p[257], 0);
       T_EQ((int16_t)pc_get_u16(r.p + 258), 437); T_EQ((int32_t)pc_get_u32(r.p + 260), 503316);
       T_EQ((int32_t)pc_get_u32(r.p + 264), -9500); T_EQ(pc_get_u32(r.p + 268), 1234);
@@ -1404,7 +1404,7 @@ static void test_sd(void)
 
   //SD_INFO: card, partition, write window, stage size, the three eGON headers
   r = req(PC_CMD_SD_INFO, "\x01", 1);
-  T_EQ(r.h.status, 0); T_EQ(r.len, 64);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_SD_INFO_LEN); T_EQ(r.p[64], PC_ID_NOT_READ);
   T_EQ(pc_get_u32(r.p), MOCK_SD_SECTORS); T_EQ(pc_get_u32(r.p + 4), 2048); T_EQ(pc_get_u32(r.p + 8), 2048);
   T_EQ(pc_get_u32(r.p + 12), 65536);
   T_EQ(pc_get_u32(r.p + 16), 16);  T_EQ(r.p[20], 1); T_EQ(r.p[21], 1); T_EQ(pc_get_u32(r.p + 24), 8 * 512);
@@ -1415,7 +1415,7 @@ static void test_sd(void)
   T_EQ(r.p[53], 2);
   r = req(PC_CMD_SD_INFO, "\x00", 1);
   T_EQ(r.p[53], 0); T_EQ(r.p[52], 2);                           //not checked without VERIFY
-  r = req(PC_CMD_SD_INFO, "\x02", 1);
+  r = req(PC_CMD_SD_INFO, "\x04", 1);
   T_EQ(r.h.status, PC_E_BAD_ARG);
 
   //SD_READ_SECTORS
@@ -2713,8 +2713,49 @@ static void test_seq_average(void)
   T_EQ(pc_get_u16(r.p + 16), 0xFFFF);                              //clamped at S 0
 }
 
+//1.16 (row 55): GET_HEALTH in every poll context, CLEAR_RESTART, SD_INFO IDENT, SAVE_REPORT on the wire
+static void test_diag_wire(void)
+{
+  resp_t r;
+
+  setup(0x1535);
+  mock.life.rst.valid = 1;
+  mock.life.rst.type  = 4;
+
+  r = req_ctx(PC_CMD_GET_HEALTH, 0, 0, PC_CTX_ISR);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_HEALTH_LEN); T_EQ(r.p[4], PC_USB_CONFIGURED); T_EQ(r.p[44], 1);
+  T_EQ(pc_get_u32(r.p + 16), 0x0005107Du);
+  r = req_ctx(PC_CMD_GET_HEALTH, "\x01", 1, PC_CTX_BUSY);
+  T_EQ(r.h.status, 0); T_EQ(r.p[44], 1); T_EQ(r.p[45], 4);       //the answer still shows the record ...
+  T_EQ(mock.life_clears, 1); T_EQ(mock.life.rst.valid, 0);     //... then it is cleared
+  r = req(PC_CMD_GET_HEALTH, "\x02", 1);
+  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.life_clears, 1);
+  r = req(PC_CMD_GET_HEALTH, "\x80", 1);
+#if PC_DEBUG
+  T_EQ(r.h.status, 0);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_EQ(mock.restart_tests, 1);
+#else
+  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.restart_tests, 0);
+#endif
+
+  r = req(PC_CMD_SD_INFO, "\x02", 1);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_SD_INFO_LEN); T_EQ(r.p[64], PC_ID_UNKNOWN); T_EQ(pc_get_u32(r.p + 96), 750 * 512);
+
+  r = req(PC_CMD_SAVE_REPORT, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 56); T_EQ(pc_get_u32(r.p), mock.report_len); T_EQ(pc_get_u16(r.p + 6), 27);
+  T_EQ(memcmp(r.p + 8, "reports/report-00012-00.txt", 28), 0);
+  mock.report_fail = 8;
+  r = req(PC_CMD_SAVE_REPORT, 0, 0);
+  T_EQ(r.h.status, PC_E_IO); T_EQ(pc_get_u16(r.p), 8);
+  mock.sd_sectors = 0;
+  r = req(PC_CMD_SAVE_REPORT, 0, 0);
+  T_EQ(r.h.status, PC_E_IO); T_EQ(pc_get_u16(r.p), 0);
+}
+
 int main(void)
 {
+  test_diag_wire();
   test_info();
   test_shared_basics();
   test_ascii_ver();

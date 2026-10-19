@@ -68,7 +68,13 @@ SRCS += cal_wiz.c cal_wiz_ui.c
 # Calibration v4: interleave tracking and the class probe (pure maths in acal_track.c, host_tests/test_acal_track.c)
 SRCS += acal_track.c acal_live.c
 # Screens (fw 0.2.51): card formatting, main menu rows and mode rule (pure C, host_tests/test_ui.c)
-SRCS += ui_fmt.c ui_menu.c
+# fw 0.2.55: the Settings fold-out and screen tables (ui_settings.c, pure C, host_tests/test_ui.c), the screen and the
+# confirmation dialog on the device (ui_settings_ui.c)
+SRCS += ui_fmt.c ui_menu.c ui_settings.c ui_settings_ui.c
+# Plot touch geometry (fw 0.2.54): pointer position, handle and channel pick (pure C, host_tests/test_touch_pick.c)
+SRCS += touch_pick.c
+# fw 0.2.52 diagnostics readers (protocol row 55)
+SRCS += pc_life.c pc_ident.c pc_report.c pc_diag.c
 # 0x1536 sequencer (fw 0.2.56): segmented capture and hardware averaging (maths in pc_seq.c, host_tests/test_seq.c)
 SRCS += pc_seq.c pc_seq_hw.c
 # Last: the identity data (build_id.c), so its bytes are the only ones a new commit changes.

@@ -63,6 +63,7 @@ def main():
     ap.add_argument("--vectors", default=os.path.join(here, "..", "..", "..", "docs", "protocol-vectors.json"))
     ap.add_argument("--decim-checker", help="decim_check binary (pc_decim.c): cross-check the decim section")
     ap.add_argument("--adc-cal-checker", help="test_adc_cal binary (adc_cal.c): cross-check the adc_cal block")
+    ap.add_argument("--diag-checker", help="test_diag binary (pc_life.c, adc_cal.c, pc_ident.h): cross-check diag_layouts")
     ap.add_argument("--seq-checker", help="seq_check binary (pc_seq.c): cross-check the seq section (1.17)")
     args = ap.parse_args()
 
@@ -172,7 +173,19 @@ def main():
     elif args.adc_cal_checker:
         fail("adc_cal_v3 section missing")
 
-    # 7. sequencer maths (1.17): pc_seq.c against the vectors' Python reference
+    # 7. diagnostics layouts (1.16): life record words, calibration provenance, image identity against the C packers
+    if args.diag_checker and "diag_layouts" in data:
+        out = subprocess.run([args.diag_checker, "--layouts"], capture_output=True, text=True, check=True).stdout
+        got = dict(ln.split() for ln in out.splitlines() if ln.strip())
+        for k in ("life", "prov", "ident"):
+            if got.get(k) != data["diag_layouts"][k]["hex"]:
+                fail(f"diag_layouts {k}: C packs {got.get(k)}, expected {data['diag_layouts'][k]['hex']}")
+            else:
+                print(f"diag_layouts {k}: identical to the C layout")
+    elif args.diag_checker:
+        fail("diag_layouts section missing")
+
+    # 8. sequencer maths (1.17): pc_seq.c against the vectors' Python reference
     if args.seq_checker and "seq" in data:
         cases = data["seq"]["cases"]
         text = "".join(c["op"] + " " + " ".join(str(a) for a in c["args"]) + "\n" for c in cases)

@@ -33,7 +33,7 @@ PROTO_MAJOR = 1
 #: (caps FIR, SET_DECIM flags bit 3, 0x29 bits 6 / 5); 1.12 (fw 0.2.45): calibration data v3 (per-core, per-class
 #: gains), GET_CAL 256 bytes (v2 blocks are no longer used); 1.13 (fw 0.2.46): phosphor view, display_mode 4; 1.14
 #: (fw 0.2.49): USB suspend watch, link counters 60-61, event type 20
-PROTO_MINOR = 14
+PROTO_MINOR = 15
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -1746,6 +1746,16 @@ CAL_BOUND = 0x02  # bound to the current PWM centres (dc_calibration_offset[0..5
 CAL_GATED = 0x04  # the current divider is gated (legacy divider >= 1): the gated class applies
 CAL_GAINS_MEASURED = 0x08  # 1.12: gains measured for this channel (gain_range != 0xFF)
 CAL_GAINS_KEPT = 0x10  # 1.12: the gains were carried over from an earlier calibration
+#: GET_CAL byte 256 track_flags (protocol 1.15, row 54)
+TRACK_RECORD = 0x01  # a record was accepted since the reset (boot or a calibration)
+TRACK_E = 0x02  # e identifiable at the last solve (spread of x >= 8 codes RMS)
+TRACK_Q = 0x04  # q identifiable at the last solve
+TRACK_LAST_USABLE = 0x08  # the last offered record was usable
+TRACK_APPLIES = 0x10  # applies to the channel's next 8-bit readout (v3 bound, full class, last arm legacy K = 0)
+TRACK_PROBE_DATA = 0x20  # a valid class probe since the reset
+TRACK_PROBE_VALID = 0x40  # the last class probe was valid
+#: GET_CAL ages: none since the reset
+CAL_AGE_NONE = 0xFFFFFFFF
 #: clock classes (row 48): 0 full rate (legacy divider 0 and every filtered capture), 1 gated (legacy divider >= 1)
 CAL_CLASS_FULL = 0
 CAL_CLASS_GATED = 1
@@ -1775,9 +1785,11 @@ def cal_target(dcoffset: int, dc_shift_value: int) -> int:
 @dataclass
 class CalResp(Payload):
     """GET_CAL: 72 bytes up to protocol 1.9; 1.12 (fw 0.2.45, row 51): 256 bytes with the calibration v3 state, the
-    next readout's per-core gains and offsets, and the channel's stored v3 block. (1.10-1.11 sent a 248-byte v2
-    layout, which this host no longer decodes: ``cal_version`` 2 is refused by the volts model.) Older firmware: the
-    tail reads 0 (``cal_version`` 0)."""
+    next readout's per-core gains and offsets, and the channel's stored v3 block; 1.15 (fw 0.2.50, row 54): 288 bytes,
+    the v4 tracker (A - B = d + e x + q x^2 of the full-rate cores, and the full class's common mode cm against the
+    gated class) from byte 256, and gain_a .. off_b / corr16 then include it. (1.10-1.11 sent a 248-byte v2 layout,
+    which this host no longer decodes: ``cal_version`` 2 is refused by the volts model.) Shorter answers parse with
+    the missing tail zero; ``nbytes`` is the length received (0 for a locally built one)."""
 
     FIELDS = [("channel", "B"), ("_r0", "3x"), ("dc_calibration_offset", "7H"), ("_r1", "2x"),
               ("input_calibration", "7i"), ("adc_a_comp", "h"), ("adc_b_comp", "h"), ("dc_shift_center", "I"),
@@ -1786,7 +1798,9 @@ class CalResp(Payload):
               ("frac_b", "B"), ("cal_zero_q8", "i"), ("corr16", "i"), ("cal_shift", "i"), ("gain_a", "I"),
               ("gain_b", "I"), ("off_a", "i"), ("off_b", "i"), ("gain16", "I"), ("pwm", "6H"), ("zero", "24h"),
               ("slope", "24h"), ("noise", "24B"), ("gain", "4H"), ("gain_range", "B"), ("gain_flags", "B"),
-              ("gain_lever", "H")]
+              ("gain_lever", "H"), ("track_flags", "B"), ("_r2", "x"), ("track_d_q8", "h"), ("track_e_q24", "i"),
+              ("track_q_q24", "i"), ("track_age_ms", "I"), ("track_records", "I"), ("track_last_pairs", "H"),
+              ("track_spread16", "H"), ("cm_q8", "h"), ("cm_probes", "H"), ("cm_age_ms", "I")]
     channel: int = 0
     dc_calibration_offset: tuple[int, ...] = field(default_factory=lambda: (0,) * 7)
     input_calibration: tuple[int, ...] = field(default_factory=lambda: (0,) * 7)
@@ -1830,11 +1844,58 @@ class CalResp(Payload):
     gain_range: int = CAL_GAIN_NONE
     gain_flags: int = 0
     gain_lever: int = 0
+    #: 1.15 (row 54): TRACK_* bits; d (1/256 code), e and q (Q24) of A - B = d + e x + q x^2 (x = code - 128; d and e
+    #: applied in the full class, q only reported); age (ms, CAL_AGE_NONE = none since the reset), accepted records,
+    #: usable pairs of the last offered record, RMS spread of the accumulated x (1/16 code); the full class's common
+    #: mode against the gated class (1/256 code, subtracted by the readouts), valid probes and the last one's age
+    track_flags: int = 0
+    track_d_q8: int = 0
+    track_e_q24: int = 0
+    track_q_q24: int = 0
+    track_age_ms: int = CAL_AGE_NONE
+    track_records: int = 0
+    track_last_pairs: int = 0
+    track_spread16: int = 0
+    cm_q8: int = 0
+    cm_probes: int = 0
+    cm_age_ms: int = CAL_AGE_NONE
+    nbytes: int = field(default=0, compare=False)
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "CalResp":
+        r = super().unpack(data)
+        r.nbytes = len(data)
+        return r
 
     @property
     def v3(self) -> bool:
         """Calibration v3 in use for this channel."""
         return self.cal_version == 3
+
+    @property
+    def has_tracker(self) -> bool:
+        """The answer carries the 1.15 tracker block (288 bytes or more)."""
+        return self.nbytes >= 288
+
+    @property
+    def track_d(self) -> float:
+        """A - B offset at code 128 the full-class readouts take out, codes."""
+        return self.track_d_q8 / 256.0
+
+    @property
+    def track_e(self) -> float:
+        """A - B slope (codes per code) the full-class readouts take out."""
+        return self.track_e_q24 / 16777216.0
+
+    @property
+    def track_q(self) -> float:
+        """The bow estimate (codes per code^2), reported, not applied."""
+        return self.track_q_q24 / 16777216.0
+
+    @property
+    def track_cm(self) -> float:
+        """Full-class common mode against the gated class, codes (subtracted from full-class codes)."""
+        return self.cm_q8 / 256.0
 
     @staticmethod
     def _i(cls_: int, core: int, rng: int) -> int:

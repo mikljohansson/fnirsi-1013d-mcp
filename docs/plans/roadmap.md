@@ -1,123 +1,136 @@
-# Roadmap (owner-approved 2026-10-18)
+# Roadmap to 0.3.0
 
-Order of work after the current firmware/MCP queues. Each item names the directory, the acceptance test and
-the bench steps the owner must be present for. Items are small enough for one agent task each.
+Epic-level view of what is left before the first public release, v0.3.0. The task queue (`docs/plans/task-queue.md`)
+holds the individual items with their bench facts; this file groups them into epics, orders them and says what has to
+be true before the tag. Dates are 2026. State as of 2026-10-19 evening: firmware 0.2.51 (main 9cc599c), protocol 1.15,
+FPGA bitstreams up to 0x1536 built, the owner's unit runs 0x1534.
 
-## 0. In flight (gen-2 agents)
+**Owner decision 2026-10-19: everything on this list ships before the announcement. One big splash, no follow-up
+posts.** The announcement draft is `docs/plans/announcement.md`; the tag-day checks are
+`docs/plans/release-readiness.md`. Nothing below is a "maybe later": an item either lands and is benched, or it is
+removed from the list by the owner.
 
-- firmware: back-pressure request corruption (hdr_crc under rx_stalls), SD_STAGE from the ISR, hide unsupported
-  UI (generator SINE/TRGL, RTC/temperature when no DS3231, 1014D remnants; switches in Other settings), our
-  version string on the diagnostics screen, MCP chip drawn by the top-bar routine, startup init trim (1.5 s).
-- mcp: persist resume after a link drop, GET_LINK_STATS decoder alignment, Claude Code skill + Codex guide.
-- ci-release: GitHub Actions CI, release workflow, CHANGELOG, releasing guide.
+Status words: **done** (merged and benched), **built** (merged, host-tested, bench pending), **in flight** (an agent
+is working on it), **next** (designed or specified, not started), **owner** (needs the owner at the bench).
 
-## 1. First public release (v0.3.0)
+## 1. In flight
 
-- All item-0 fixes benched; firmware persisted to the card; a 30-minute soak with the MCP server polling.
-- README demo material: a photo/clip of the MCP chip and a shared-control session; FPGA flashing caution.
-- Tag v0.3.0; verify the attached hashes against a FEL load.
-- Announce: EEVblog thread first, then r/oscilloscopes, r/embedded or r/electronics, r/ClaudeAI.
+| Epic | State | What is left | Where |
+|---|---|---|---|
+| UX makeover, steps 1-4 | step 1 done in code (fw 0.2.51: main menu rows, USB drive screen, Display row, measurement cards in the stock scheme, strips without Scope/Auto, AUTO SET = spectrum Auto); steps 2-4 next, one agent generation each | step 2 CTRL pages with fold-outs, strips and spectrum header gone, top bar chips rebuilt, warnings top-middle; step 3 Settings fold-out trim and full Settings screen; step 4 Diagnostics as a display mode (Status / Calibration / Log / Developer), first-run screen, ENTER_FEL from the menu. Open design questions: look of the new full-screen pages, short CTRL labels, main-menu row height once Bode ships | `docs/plans/ux-makeover.md`, `ux-review.md`, `docs/ui-guidelines.md`; mockups are the acceptance reference |
+| Diagnostics data readers | in flight (fw-readers, fw 0.2.52, protocol 1.16) | USB link state, card image identity, calibration provenance, power-on count and minutes, persisted restart record, save state, CP15 word, SAVE_REPORT; they feed the step 4 Diagnostics pages | `docs/plans/diagnostics-review.md` section 4 |
+| Touch fixes, batches 1-3 | batch 1 specified, starts after UI step 1 (now) | batch 1: channel pointers become drag handles ("handles shown on screen are draggable"), pick at first touch, no tap on a handle, clamp 6..396; batch 2 after UI step 2: trace grab by nearest object, dead band, tap zones that keep the V/div and time-base bands; batch 3: no blocking touch loop, needs an MCP soak | `docs/plans/touch-review.md` section c1 |
+| USB idle robustness | built (fw 0.2.49: suspend watch, inferred resume that acts, soft reconnect after a retry storm or 15 minutes suspended; protocol 1.14); bench pending | the long idle (port closed 30 min or more, see `fnirsi1013d-soak --mode reopen --idle 1800`) must end with the device still on the bus; plan in `firmware/AGENTS.md` section 27. The earlier failure: closed 08:40-10:20, device gone from the bus | `docs/hardware-status.md` 2026-10-19 10:20 |
 
-## 2. External trigger (FPGA + firmware + MCP)
+## 2. Built, awaiting bench
 
-Status 2026-10-18 evening: DONE on the bench. FPGA 0x1533 flashed (fpga/al3, backups/al3_ext-trigger_0x1533_a9656703.bin), firmware 0.2.9+
-(trigger menu EXT, SET_TRIGGER source 2, generator interlock, GET_STATUS EXT flags), MCP scope_set_trigger(source="EXT"). Loopback via the
-generator: 10/10 triggered, -50 ns at 20 MS/s. Open: a test with an external 3.3 V source referenced to the USB ground (the probe ground
-sits on VRF1, +1.24 V; see fpga/al3/README.md "Changes" 2), and the host-capture trigger-position variance at decimated rates.
+All of these are merged. The bench lists name the exact steps; most need the owner (probes, DMM, calibration post).
 
+| Epic | Firmware / protocol | Bench still to do |
+|---|---|---|
+| Calibration v3 and v4 plus the wizard | v3 per-core, per-clock-class gain (0.2.45, GET_CAL 256 bytes); v4 background tracking of the full-rate A - B mismatch, class probe, the one-screen calibration wizard (0.2.50, protocol 1.15, GET_CAL 288 bytes) | `firmware/README.md` 6.3 (gain step: gains per class, the +-1.0045 V check against the DMM, fs/2 spur at least 15 dB down) and 6.4 / 6.5 (wizard flow, tracker convergence, diagnostics lines). Open questions behind it: gain per range (README 6.3 step 7, 80 bytes free to store per range), CH2 range-5 zero drift, CH2 +1.0..1.5 codes at range 6 after calibration, the overnight zero step at 03:48 |
+| Digital phosphor | 0.2.46, protocol 1.13 | visual steps (`firmware/AGENTS.md` section 24, README "Phosphor view"); pass time in and out of the view; with the MMU the scope view pass is 15 ms median |
+| Spectrum analyser with the compensation FIR | spectrum view 0.2.28 onward; decimation filter 0.2.30; FIR firmware support 0.2.44 (protocol 1.11); default Filter CIC2+FIR since 0.2.48 | FPGA 0x1535 is flashed on the owner's unit (2026-10-19 10:33, read-back verified) and benched: GET_DECIM bytes 26-27 = 0xE2 0x01 at 10 MSa/s, alias rejection with the FIR 78-83 dB below the fundamental against 19 / 37 / 56 dB without it. Left: the owner's verdict on the Auto redesign and the warnings, and the DEFAULT button check on the final build |
+| Generator menu | hit-area fix (0.2.44) | tap every row of the generator, trigger and acquisition menus; no removed action reachable |
+| MMU and D-cache | 0.2.48; benched 2026-10-19 08:10 (CP15 0x0005107D; FFT 4096 points 10.96 to 2.72 ms; scope view pass 30 to 15 ms) | owner's screen coherence verdict is in ("seems to work"); touch, soak, SD save and restore, ENTER_FEL round trips (section 26 steps 4-9) |
+| Bode analyser, host tool | steps H1-H3: `scope_bode_sweep`, `fnirsi1013d-bode` (mcp-gen4), simulator-tested | bench on the RC low-pass R 1.6 kOhm / C 10 nF (fc 9.95 kHz) with the DUT ground on the USB shell: floor, skew, coherence, wiring A/B; record in `docs/hardware-status.md` (procedure `mcp/AGENTS.md` "Bode bench") |
+| Reproducible builds, dead-code purge | done (fw 0.2.47: identity as data from git, hidden options removed, `PC_PROTOCOL` always on) | none; the release check in `docs/releasing.md` section 1 |
 
-- FPGA (fpga/al3, Anlogic TD headless): make the calibration pin an input when `gen_out_enable=0` (it is
-  already hi-Z then), add a trigger source "EXT" (command 0x15 value 2), edge select, 2-stage synchroniser;
-  keep version word 0x15xx with a new minor nibble so firmware can detect it; keep 0x1532 behaviour otherwise.
-- Firmware: trigger source EXT in the UI trigger menu (hidden unless the FPGA advertises it) and in SET_TRIGGER.
-- MCP: `scope_trigger(source="ext")`; tool descriptions.
-- Bench: generator from a second source (the owner's detector MCU or the bench supply's TTL out) into the calib
-  pin, captures aligned to it; flash via spiflash_d2xx.py with the stock backup at hand.
+## 3. Next epics
 
-## 3. Deeper memory (FPGA + firmware + MCP)
+Each is a coherent block for one agent generation (firmware plus MCP where noted). Order below is the suggested
+order; independent blocks can run in parallel in separate worktrees.
 
-- FPGA: use the AL3's 2 spare 32k blocks + remaining 9k blocks (target >= 12,288 x 32 words = 24,576 samples
-  per channel); widen pretrigger/total/trigger_addr/read_offset registers to 16 bits (new high-byte commands or
-  wider fields; document in FPGA commands.txt); timing closure stays >= 200 MHz with margin (pipeline the
-  sample-rate divider while at it).
-- Firmware: memory-depth table per FPGA version; buffers already 16k-word aligned, extend; UI memory menu.
-- MCP: max_total_samples from GET_INFO (already dynamic).
-- Bench: full-depth captures byte-identical across re-reads; T3/T5 geometry checks at the new depth.
+1. **Measurements v2** (after the UI batch lands, `docs/plans/ux-makeover.md` section 3a, `ux-review.md` section 6).
+   Per-mode MEASURES lists with default cards (a new unit shows none today), the cheap on-device set (rise and
+   fall, overshoot, top and base, CH1-CH2 delay, phase and gain, cursor-gated statistics, PI decay tau; spectrum H2,
+   H3, THD, SFDR, noise floor, band power, OBW), AC RMS beside Vrms, the standard names (Period, +Width, -Width,
+   +Duty, -Duty) and the "Freg" fix. Acceptance: each measurement agrees with the host analysis of the same
+   capture within the stated tolerance.
+2. **FPGA 0x1536 firmware support and the flash session** (`fpga/al3/README.md` section 6,
+   `docs/plans/segmented-capture.md`). Commands 0x57-0x5D, reads 0x2B-0x32 through the 0x1F pointer, the segment
+   table (valid, triggered, trigger offset, 40-bit 5 ns timestamp), averaging with positions P and shift S;
+   capture modes "Segments" and "Average N", capture-info fields, READ_RAW layouts for a segment set and the
+   averaged record; MCP `scope_capture_segments` and `scope_capture_averaged`. The bitstream is pinned
+   (`backups/al3_seg_0x1536_4eaf6811.bin`, padded 66866c84) but not flashed; firmware support comes first because
+   the bench check 5 (an N = 1 average equals the memory's record) needs both. **Owner**: one flash session with
+   the programmer for 0x1535 and 0x1536 together (backup of the 25Q80 first, read-back verify), then the check
+   list of the two README sections.
+3. **Phosphor fast capture** (design study in `firmware/AGENTS.md` section 24). The view draws one record per pass
+   (about 30 waveforms per second at the old pass time); a capture loop that reads several records per pass
+   raises the rate. Measure `pass_ms` in the view first; with the MMU the pass is half as long, so the study
+   starts from the new numbers. Acceptance: waveforms per second with the view on, on the bench.
+4. **Bode, device steps D1-D5** (`docs/plans/bode-design.md`), only after the host version proves the numbers.
+   Display mode with magnitude and phase panes, BODE_CTRL / READ_BODE; entry from the generator menu (the main
+   menu has no eighth row). Host follow-ups from the bench: CH1 re-ranging when CH1 drops below 20 codes, the
+   harmonic fast mode, the impedance mode (coil L, Q and SRF for the detector), an optional PNG plot.
 
-## 4. On-scope averaging and FFT (firmware)
+## 4. Small items that ship with the above
 
-Defaults decision (owner, 2026-10-18 evening): the default acquisition mode becomes CIC + compensation FIR (FPGA 0x1535, after 0x1534
-is benched); until then Off. Other defaults: memory depth 3000, spectrum 2048 points / Hann / 10 dB/div with Auto on entry, phosphor off,
-generator off at boot, trigger CH1 rising auto, collaborative USB on, a discreet hint to run base calibration when v2 data is absent.
-Owner's order (2026-10-18 evening): spectrum analyser first, then digital phosphor, then Bode; the 3D waterfall is dropped; on-device
-features have priority, host (MCP) analysis tools on exported captures are welcome alongside. FPGA decimation filter (boxcar/CIC, 16-bit
-samples, version 0x1534) in work by fpga-gen3 as the foundation for clean spectra and higher resolution at slow time bases.
-Detailed design and step plan for the FFT/spectrum analyser, Bode plots and digital phosphor: `docs/plans/dpos350p-features.md`
-(2026-10-18). Note from that study: kiss_fft is not vendored in firmware/scope (only in Atlan's extracted tree, float-based); a small
-purpose-written Q15 FFT is proposed instead.
+Listed so none is forgotten; each is one commit to one afternoon.
 
-- ACQUIRE_AVG (cap exists, not built): N captures accumulated on the scope with edge alignment, returned as
-  16-bit means; useful for the detector loop at 9 captures/s.
-- FFT: fixed-point radix-2 (kiss_fft is already vendored in Atlan's tree: `kiss_fft*.c` from v0.025y1) on
-  up to 4096 points, a spectrum view in the UI and READ_FFT over the protocol.
-- Bench: compare against the host FFT; CPU time per frame (pass_ms).
+- "Confirm to delete?" dialog: buttons 44 px high, 16 px apart, primary on the right (UI step 1 or 2).
+- Trigger position varies by run at decimated rates (+11 us / -1 us at 1 MSa/s): deterministic test with
+  GET_CAPTURE_INFO logging.
+- Open-input and EXT bench tests 1-4 (`fpga/al3/README.md` "Changes" section 2): needs an external 3.3 V source
+  referenced to the USB ground.
+- Owner verdicts outstanding from 0.2.40 / 0.2.41: Roll / Average / Filter box layout and the pass-time label, Max
+  hold, the overrange warning.
+- CHANGELOG hygiene before the tag: the 0.2.x entries are out of order around 0.2.46-0.2.50, and the "Plan for
+  the first tag" block must go (`docs/plans/release-readiness.md`).
+- Morning bench items from the queue that are not covered by the epics above: CH2 range-5 zero drift, the overnight
+  zero step, the persisted release candidate after a soak.
 
-## 5. Calibration in firmware (in work: fw-cal, worktree branch fw-cal, started 2026-10-18 evening)
+## 5. Release 0.3.0
 
-Visible symptom (2026-10-18, spectrum view): a spur at the Nyquist bin (fs/2), ~18 dB above the noise floor on CH1, because the two
-interleaved ADC cores differ in zero (A 130.9 vs B 125.6 codes on the owner's unit) and the sample-skipping decimation alternates cores.
-Per-core zero correction in firmware removes it everywhere; the boxcar/CIC modes also cancel it (both cores summed).
+The announcement point. Gate, in order (details and the tick list in `docs/plans/release-readiness.md`):
 
-- Base calibration stores measured per-core zero and the PWM slope; on-screen volts use them; export via
-  GET_CAL so the host model and the screen agree. Owner re-runs base calibration once.
-- Built (fw 0.2.43, protocol 1.10, branch fw-cal): zeros per core in two clock classes (the legacy divider gates the
-  ADC clock and moves the zero; filtered captures run at full rate), dithered sub-code correction, GET_CAL export.
-  Bench list: firmware/README.md section 6.2.
+1. Every epic in sections 1-3 is merged and its bench list is ticked in `docs/hardware-status.md`, or the owner has
+   explicitly removed the item.
+2. The FPGA bitstreams the release depends on are flashed on the owner's unit and benched: 0x1534 and 0x1535 are
+   (0x1535 since 2026-10-19), 0x1536 is not yet. Decide how users get them (open point in the readiness list: bitstream files are not in git and not
+   attached to releases today).
+3. Version bump to 0.3.0 in `firmware/scope/pc_cmds.h` and `mcp/pyproject.toml`, a curated `## [0.3.0]` section in
+   `CHANGELOG.md` (the release notes), `release: v0.3.0` commit, CI green.
+4. A release candidate persisted to the SD card and a 30-minute soak with the MCP server polling
+   (`fnirsi1013d-soak`), plus the long idle check.
+5. Demo material for the announcement: screenshots of the main views (`scope_screenshot`), a shared-control session
+   with the MCP chip visible, a short clip.
+6. Tag `v0.3.0`, wait for `release.yml`, then check the attached hashes against a FEL load (`docs/releasing.md`
+   section 4) and note the result in `docs/hardware-status.md`.
+7. Post the announcement once (EEVblog thread, the subreddits named in the draft, the repository README banner).
 
-## 5b. Memory depth and readout (firmware + FPGA), owner request 2026-10-18
+## 6. After the announcement (not promised)
 
-- Memory depth default stays 3000 (owner, after seeing the UI slow down at long memory); show the resulting pass time next to the
-  selector so the update-rate trade-off is visible (pass 35-75 ms at 3000 samples today, ~9 passes/s at full depth).
-- Make depth cheap: read only the on-screen window for the display pass and the full record for the host/FFT; faster FPGA readout if
-  the bus allows (0.3 us per sample byte today). Shares work with the digital-phosphor fast loop.
+Ideas that stay in the repository for later and are not part of the one-splash plan. Detail of each lives in the older roadmap text in git history (commit 9cc599c and earlier) and in
+`docs/plans/dpos350p-features.md`.
 
-## 6. Smaller community wishes (firmware)
+- Deeper memory: use the AL3's spare block RAM for about 24,576 samples per channel, wider pretrigger and total
+  registers, memory-depth table per FPGA version.
+- Advanced triggers (pulse width, runt, window, timeout, Nth edge), peak-detect acquisition, streaming data logger,
+  pulse pattern generator with trigger output, hardware measurements, serial decode, mask testing, PRBS output.
+- Trigger on both ADC cores, a 200 MHz DDS clock for a finer generator.
+- CSV export of the on-screen trace, a dot display mode, triggered sweeps slower than 10 ms/div.
+- Invite testers with EF2L45 and EP4CE6 units; those paths are inherited from Atlan4 and untested here.
 
-- Screenshot over USB (READ_SCREEN; RGB565 framebuffer, ~768 kB, 0.4 s at 2 MB/s).
-- CSV export of the on-screen trace to the SD card.
-- Dot display mode; triggered sweeps slower than 10 ms/div; hold-off and roll mode in the 1.00 line.
+## 7. Not pursued
 
-## 7. Later / research
+Equivalent-time sampling beyond 200 MS/s (the front end is 30 MHz), logic-analyser channels (no spare pins reach a
+connector), hardware FFT (the MCU does 4096 points in 2.7 ms).
 
-- Trigger on both ADC cores or sub-sample interpolation (FPGA).
-- 200 MHz DDS clock for a finer generator (FPGA).
-- Frequency-response analysis tool on the host using the square-wave generator's harmonics (limited).
-- EF2L45 / EP4CE6 owners: untested paths; invite testers after the release.
+## 8. FPGA-headroom features (numbering kept for the references in `bode-design.md` and `ux-makeover.md`)
 
-## 8. FPGA-headroom features, prioritised (owner approved all, 2026-10-18 evening)
+Resources free after 0x1535: about 7,000 LUTs, 200 kbit block RAM, one PLL, one M18x18. All of this is after the
+announcement, except item 1, which is the 0x1536 epic of section 3. D = metal-detector value, C = community value.
 
-Order after the spectrum analyser (done), digital phosphor (next) and Bode (then). Rationale in brackets: D = metal-detector value,
-C = community value, $ = cost. Resources free after 0x1535: ~7,000 LUTs, ~200 kbit block RAM, one PLL, one M18x18.
-
-1. **Segmented capture + hardware averaging** (FPGA + firmware + MCP) [D high: one segment per TX pulse with the dead time skipped,
-   coherent averaging of the decay at full rate; C high; $ medium]. Segments of 128-2048 samples, up to the RAM; trigger per segment;
-   16-bit accumulators for N averaged records; readout of one segment set or the averaged record; MCP `scope_capture_segments`,
-   `scope_capture_averaged`.
-2. **Advanced triggers** (FPGA + firmware + MCP) [D: Nth edge / pulse-width on the TX train; C high; $ low]: pulse width, runt, window,
-   timeout, Nth edge, time-based hold-off; trigger menu grows a "Type" selector; SET_TRIGGER gains type + parameters.
-3. **Peak-detect acquisition** (FPGA + firmware) [C high: glitch capture at slow time bases; D medium; $ low]: min/max per decimation
-   window in the two bytes of the 16-bit word; a Filter choice "Peak"; trace drawn as min/max band.
-4. **Streaming data logger** (FPGA FIFO + firmware + MCP) [D high: whole sweeps; C unique; $ medium-high]: continuous 16-bit filtered
-   samples at <= ~1 MS/s into the 32 MB DDR (30 s at 500 kS/s), roll display with history and zoom, host download/streaming.
-5. **Pulse pattern generator + trigger output** (FPGA + firmware + MCP) [D high: drive the TX stage, sync external gear; $ low-medium]:
-   per-pulse widths/gaps, bursts, frequency sweeps for Bode; trigger-out pulse mode on the shared pin.
-6. **Hardware measurements** (FPGA + firmware) [C medium; $ low]: 200 MS/s frequency/period counter, pulse width, duty, min/max as
-   always-on readouts.
-   They feed the existing bottom-row measurement cards (Measures menu, twelve per channel); the cards also get a spectrum-mode
-   set (peak frequency and level per channel, THD) in the UX makeover (docs/plans/ux-makeover.md section 3).
-7. **Software features on the new data** [C medium; $ low each]: 4-digit DVM readout at CIC rates (after calibration v2), serial decode
-   (UART/I2C/SPI) from analog captures, mask/pass-fail testing on the phosphor map.
-8. **PRBS / noise output** for impulse and noise-based frequency response [later].
-
-Not pursued: equivalent-time sampling beyond 200 MS/s (30 MHz front end), logic-analyser channels (no spare pins reach a connector),
-hardware FFT (the MCU does 4096 points in 11 ms).
+1. Segmented capture and hardware averaging [D high, C high]: built as 0x1536, firmware support is section 3 item 2.
+2. Advanced triggers [D: Nth edge, pulse width on the TX train; C high]: a "Type" selector in the trigger menu.
+3. Peak-detect acquisition [C high: glitch capture at slow time bases]: min and max per decimation window.
+4. Streaming data logger [D high, C unique]: continuous 16-bit filtered samples up to about 1 MS/s into the 32 MB DDR.
+5. Pulse pattern generator and trigger output [D high: drive the TX stage]: per-pulse widths and gaps, bursts,
+   frequency sweeps for Bode.
+6. Hardware measurements [C medium]: 200 MS/s frequency and period counter, pulse width, duty, min and max as
+   always-on readouts feeding the measurement cards.
+7. Software features on the new data [C medium]: 4-digit DVM readout at CIC rates, serial decode, mask testing on
+   the phosphor map.
+8. PRBS or noise output for impulse and noise-based frequency response.

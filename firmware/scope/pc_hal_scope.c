@@ -34,6 +34,7 @@
 #include "spec_fmt.h"
 #include "acal_live.h"
 #include "ui_menu.h"
+#include "ui_settings.h"
 #include "ui_fmt.h"
 #include "pc_seq_hw.h"
 
@@ -56,7 +57,7 @@ static uint16        pc_fpga_word;
 
 extern DISPLAYDATA   displaydata;           //display_lib.c: current buffer, colours, font
 extern uint32        cardsectors;           //sd_card_interface.c: card size from the CSD, 0 = no card
-extern const uint8_t  pc_build_time[6];     //build_id.c: commit time (UTC) yy, mm, dd, hh, mm, ss
+//pc_build_time: build_id.c via pc_cmds.h
 
 //SD_STAGE / SD_WRITE_SECTORS staging buffer (protocol section 14 row 40)
 static uint8         pc_sd_stage_buf[65536] __attribute__((aligned(4)));
@@ -82,6 +83,8 @@ static void pc_draw_end(const DISPLAYDATA *save)
 
 static void pc_ext_generator_off(void);
 static void pc_restart_clear(void);
+void pc_diag_boot(const uint32_t *restart_v);    //pc_diag.c (fw 0.2.52)
+void pc_diag_service(void);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -962,6 +965,12 @@ void pc_glue_settings_defaults(void)
 {
   pc_dec_setting = PC_DECIM_DEFAULT;
 
+#if PC_FORCE_CDC
+  //The defaults say mass storage (USB_CH340 0); this build's USB stays CDC, also after Restore default settings (the
+  //USB drive screen's exit re-initialises USB from this flag)
+  USB_CH340 = 1;
+#endif
+
   if(pc_dec_has() && (pc_dec_setting & 3))
     pc_dec_fit_memory();
 }
@@ -1735,10 +1744,11 @@ void pc_glue_acq_display_tap(void)
   pc_glue_acq_display_draw();
 }
 
-//System settings menu height (variables.h SYSTEM_MENU_HEIGHT): Time & Date is the last row, 59 px
+//System settings menu height (variables.h SYSTEM_MENU_HEIGHT): the fold-out rows of ui_settings.h, Time and date only
+//with the clock module
 int pc_glue_sys_menu_height(void)
 {
-  return (pc_ready && !pc_rtc_present) ? (SYSTEM_MENU_HEIGHT_FULL - 59) : SYSTEM_MENU_HEIGHT_FULL;
+  return (int)ui_fo_height(pc_glue_ui_has(PC_FEAT_RTC));
 }
 
 //Battery level for the indicator: a running average (x16, 1/8 per pass), then the 1.00o5 rule on it (level only drops
@@ -1895,6 +1905,17 @@ void pc_glue_init(void)
   //Version word from FPGA command 0x06, read once (main() read it already; this read has no side effect)
   pc_fpga_word = fpga_get_version();
   pc_restart_check();
+
+  //fw 0.2.52: unit life record (power-on count, restart record kept over power cycles), one write of sector 709
+  {
+    uint32_t v[10], i;
+
+    for(i=0;i<8;i++)
+      v[i] = pc_restart_info[i];
+    v[8] = pc_fault_info[0];
+    v[9] = pc_fault_info[1];
+    pc_diag_boot(pc_restart_info[0] ? v : 0);
+  }
   pc_session_init(&pc_sess);
   pc_seq_hw_init((pc_sess.var.caps & PC_CAP_SEQ) != 0);
   pc_ready = 1;
@@ -1939,6 +1960,9 @@ void pc_glue_ui_service(void)
   if(pc_ready)
     pc_ui_service(&pc_sess);
 
+  //fw 0.2.52: settings changed since the last save, once per second
+  pc_diag_service();
+
   //Roll mode or a viewer ends the spectrum view and the phosphor view
   spectrum_service();
   phosphor_service();
@@ -1950,6 +1974,10 @@ void pc_glue_ui_service(void)
                     (!pc_ready || (!pc_sess.ui_hold && (pc_sess.acq_state != PC_ACQ_ARMED) &&
                                    (pc_sess.acq_state != PC_ACQ_TRIGGERED))));
 }
+
+//fw 0.2.52 (pc_diag.c): the session for the report, the DS3231 for the calibration provenance
+pc_session *pc_glue_session(void) { return &pc_sess; }
+int pc_glue_rtc_present(void)     { return pc_rtc_present; }
 
 void pc_glue_pass_mark(int n)
 {

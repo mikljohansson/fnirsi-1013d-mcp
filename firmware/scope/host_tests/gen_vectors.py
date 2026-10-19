@@ -23,7 +23,7 @@ MAX_REQUEST_PAYLOAD = 492
 CMDS = {
     "PING": 0x0001, "GET_INFO": 0x0002, "GET_STATUS": 0x0003, "SET_REMOTE": 0x0004,
     "GET_BATTERY": 0x0005, "TEST_PATTERN": 0x0006, "GET_LINK_STATS": 0x0007, "GET_BAD_FRAME": 0x0008,
-    "GET_EVENT_LOG": 0x0009,
+    "GET_EVENT_LOG": 0x0009, "GET_HEALTH": 0x000A,
     "GET_CHANNEL": 0x0100, "SET_CHANNEL": 0x0101, "GET_TIMEBASE": 0x0102, "SET_TIMEBASE": 0x0103,
     "GET_TRIGGER": 0x0104, "SET_TRIGGER": 0x0105,
     "ARM": 0x0200, "FORCE": 0x0201, "STOP": 0x0202, "WAIT": 0x0203, "READ_RAW": 0x0204,
@@ -31,6 +31,7 @@ CMDS = {
     "SET_ACQ_STATE": 0x0208, "GET_CAPTURE_INFO": 0x0209, "GET_DECIM": 0x020C, "SET_DECIM": 0x020D,
     "SET_SEQ": 0x020E, "GET_SEQ": 0x020F, "READ_SEQ": 0x0210,
     "SD_INFO": 0x0500, "SD_READ_SECTORS": 0x0501, "SD_STAGE": 0x0502, "SD_WRITE_SECTORS": 0x0503,
+    "SAVE_REPORT": 0x0504,
     "GET_GEN": 0x0300, "SET_GEN": 0x0301, "GET_CAL": 0x0400, "READ_SCREEN": 0x0401,
     "DEBUG_FPGA": 0x0F00, "ENTER_FEL": 0x0F01,
 }
@@ -305,6 +306,46 @@ def adc_cal_v3_section():
     }
 
 
+# fw 0.2.52 (protocol 1.16, row 55): the three new stored layouts, packed here with struct and checked against the C
+# packers (test_diag --layouts) by check_vectors.py. Same inputs as host_tests/test_diag.c layout_*().
+def diag_layouts_section():
+    life = {"flags": 1, "power_on": 12, "minutes": 2225,
+            "restart": {"type": 4, "restarts": 2, "power_on": 11, "exc_lr": 0x80012348, "spsr": 0x6000001F,
+                        "exc_sp": 0x81F00000, "reset_lr": 0x80000020, "reset_sp": 0x81F80000,
+                        "reset_cpsr": 0x600000D3, "fsr": 0x8, "far": 0xDEADBEEF, "minutes": 2100}}
+    r = life["restart"]
+    w = struct.pack("<HHIIHHHHI", 0x11FE, life["flags"], life["power_on"], life["minutes"], 1, r["restarts"], r["type"], 0,
+                    r["power_on"])
+    w += struct.pack("<10I", r["exc_lr"], r["spsr"], r["exc_sp"], r["reset_lr"], r["reset_sp"], r["reset_cpsr"], r["fsr"],
+                     r["far"], r["minutes"], 0)
+    assert len(w) == 64
+    prov = {"build": 0x8614032A, "version": "0.2.52", "fpga": 0x1535, "what": 0x0F, "rtc": 1, "uptime_ms": 420000,
+            "power_on": 12, "minutes": 2225, "time": [26, 10, 19, 12, 34, 56]}
+    p = struct.pack("<IHHI16sHBBIII6BH", 0x56525041, 1, 56, prov["build"], prov["version"].encode(), prov["fpga"],
+                    prov["what"], prov["rtc"], prov["uptime_ms"], prov["power_on"], prov["minutes"], *prov["time"], 0)
+    p += struct.pack("<I", zlib.crc32(p))
+    assert len(p) == 56
+    ident = {"version": "0.2.52", "build": 0x1234ABCD, "time": [26, 10, 19, 12, 34, 56], "proto": [1, 16]}
+    i = struct.pack("<II16sI6BBB", 0x44495746, 0x33313031, ident["version"].encode(), ident["build"], *ident["time"],
+                    *ident["proto"])
+    assert len(i) == 36
+    return {
+        "notes": "Protocol 1.16 (row 55) stored layouts, little-endian. life: settings sector 709 words 224..255 as "
+                 "bytes (u16 marker 0x11FE, u16 flags (bit 0 session open), u32 power_on, u32 operating minutes, u16 "
+                 "restart flags (bit 0 stored), u16 restarts, u16 exception type, u16 0, u32 power_on of the record, "
+                 "u32 exception LR, SPSR, exception SP, reset LR, reset SP, reset CPSR, fault status, fault address, "
+                 "operating minutes at the record, u32 0). prov: sector 708 bytes 432..487 (u32 'APRV', u16 version 1, "
+                 "u16 length 56, u32 build, char[16] version, u16 FPGA word, u8 what (bit 0 CH1 zeros, 1 CH1 gains, 2 "
+                 "CH2 zeros, 3 CH2 gains), u8 rtc, u32 uptime_ms, u32 power_on, u32 minutes, u8[6] time, u16 0, u32 "
+                 "zlib.crc32 of the 52 bytes before). ident: the image identity record linked last in fw 0.2.52+ "
+                 "(u32 'FWID', u32 '1013', char[16] version, u32 build, u8[6] commit time, u8 proto_major, u8 "
+                 "proto_minor).",
+        "life": dict(life, hex=w.hex()),
+        "prov": dict(prov, hex=p.hex()),
+        "ident": dict(ident, hex=i.hex()),
+    }
+
+
 def build():
     vectors = []
 
@@ -473,6 +514,7 @@ def build():
             "cases": decim_cases(),
         },
         "adc_cal_v3": adc_cal_v3_section(),
+        "diag_layouts": diag_layouts_section(),
         "seq": {
             "notes": "1.17 sequencer (FPGA 0x1536), checked against pc_seq.c by seq_check (check_vectors.py --seq-checker). "
                      "fit: args mode flags m count n pre_words total_words wide -> fit code (0 ok, 1 mode, 2 flags, 3 m, "
