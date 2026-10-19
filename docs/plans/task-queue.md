@@ -15,7 +15,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   unavailable, clamp the record slider to the record, derive viability from the real record length (memory depth) instead of the
   table, apply the same rule to SET_TIMEBASE / the protocol path, and check the resampling and zero-fill code for the exact
   cut-off and scroll behaviour.
-- **Release 0.3.0 readiness fixes** (docs/plans/release-readiness.md, 12 findings by docs-gen3): attach our FPGA bitstreams
+- [x] **Release 0.3.0 readiness fixes** (rel-gen1 10-19 17:35; remaining: 0x1538 entry, screenshots, tested-on list, known issues in docs/release-notes/0.3.0.md) (was: docs/plans/release-readiness.md, 12 findings by docs-gen3): attach our FPGA bitstreams
   (0x1533-0x1536, our own build of GPL sources) to the GitHub release with sha256 and the flash procedure, make the mcp wheel work
   outside a checkout (data/log dirs, .mcp.json example without the Windows venv path and COM10), write release notes separate from
   the CHANGELOG dev diary, fix docs/releasing.md step 1, dry-run release.yml on a scratch tag or fork, refresh README.md (Status, tool
@@ -263,6 +263,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - mcp-gen5 (done 15:40, about 565k tokens, retired; handoff mcp/AGENTS.md): protocol 1.17 host side pushed 2097181 (CI 39258110694), Bode follow-ups pushed 514182f (CI 39260053987, 398 tests):
   wiring A default with the bench numbers, ch2_overload flag + auto range step-up + fixed-range failure text, --ch2-coupling ac,
   offset-range-exhausted caveat, simulator models the pinned front end. Next for mcp: 1.17 on the unit after the 0x1537 flash.
+- rel-gen1 (done 17:35, about 265k tokens, retired): merged (bitstreams 0x1533-0x1537 in fpga/al3/dist with manifest.json,
+  BITSTREAMS.md and tools/bitstreams.py check in CI; release.yml attaches them, accepts vX.Y.Z-rcN pre-release tags, takes release
+  notes from docs/release-notes/X.Y.Z.md (0.3.0 draft with placeholders); releasing.md fixed; README rewritten; release-checklist.md).
+  Open: add 0x1538 as recommended when pinned and benched; owner decisions: attach older bitstreams, AI credits wording (F12).
 - Second swarm started 10-19 17:15 (owner: no deadline, do everything that needs no hardware; advanced features are MCP-first,
   device UI only for trigger types, peak detect, hardware counter). Provisional numbers: fw-enc 0.2.62 / protocol 1.19 (encode
   self-check on 0x1538, data check on every full-rate arm), fw-polish 0.2.63 (UI polish batch 1 a-p), fw-acq 0.2.64 (ACQ coupling,
