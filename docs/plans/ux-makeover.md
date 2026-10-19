@@ -58,8 +58,9 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   rather than "Trace" so it cannot be confused with Trace style; with
   Phosphor chosen the same fold-out shows Persistence, Palette, Clear, so there is no phosphor strip); Trace style
   (fold-out: Linear, Dots, Peak, Pro; moved out of ACQ); Grid (toggle, in every mode); the CH1 and CH2 V/div
-  **steppers** (owner): each one and a half slots, 90 px: a 24 px grey "+" bar, a 42 px centre in the channel colour
-  reading "1: 500mV" with "/div" small, a 24 px grey "-" bar; the + and - hit areas extend into their half of the
+  **steppers** (owner): each one and a half slots, 90 px: a 24 px grey bar reading "V+", a 42 px centre in the channel
+  colour reading "CH1" or "CH2" (the value is in the top bar chip), a 24 px grey bar reading "V-": the stock V+ CH1 V-
+  controls, compact; the + and - hit areas extend into their half of the
   centre so each gets about 45 px of touch; they step `displayvoltperdiv` exactly as the channel menu's chips do (same
   setting, the stepper is the quick way while watching the trace); 50 % TRIG (action, as today). That fills the eight
   slots exactly.
