@@ -31,6 +31,17 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.77 (provisional, not bumped yet; protocol 1.22, unchanged)
+
+- Spectrum zoom: span drives the sample rate (docs/ui-guidelines.md section 2, owner 2026-10-19 23:09). The span steps
+  through 1-2-5 values (1 Hz .. 20 MHz, then the whole 0 .. 25 MHz axis) about the centre; a drag or the slider pans
+  the centre. After every zoom or pan step, while running or in Single, the rate is the slowest whose fs/2 covers the
+  stop frequency (centre + span/2) and whose capture of N samples takes at most 2.048 s, so zooming in now lowers the
+  rate and zooming out raises it, and a pan across a rate boundary moves the rate. The ends are plain stops: the whole
+  axis at 50 MSa/s; zooming in stops where the next span would need a capture over 2.048 s or hold fewer than 16 bins.
+  A rate picked in the ACQ menu holds until the next step. Stopped, the record keeps its rate ("Stopped: press RUN to
+  zoom further"). AUTO SET picks a ladder cell from 0 Hz. The Span and Center cards show the cell; the FFT length row
+  reads "(record)" when the record limits it (52c1c76, ladder and tests 3ec9e17, rule 4a85e8a).
 #### 0.2.76 - 2026-10-19 (protocol 1.22, unchanged)
 
 - Scope slider: a still tap in the track outside the window now jumps the window there, as in the Spectrum. 0.2.73 ran
