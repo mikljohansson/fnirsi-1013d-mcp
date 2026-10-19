@@ -45,8 +45,8 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) (`.mcp
   Captures add a caveat while a spectrum or phosphor view is on: pass it on.
 - Quick numbers: `scope_measure`.
 - Frequency response of a passive DUT on the calibration post: `scope_bode_sweep` (guide section 3b). Wiring
-  before anything: CH1 tip on the DUT input, CH2 on the output, DUT ground on the USB shell, probe ground clips
-  open. Thru calibration first (`thru_cal='measure'`, both probes on the DUT input), then the DUT with that name.
+  before anything: CH1 tip on the DUT input, CH2 on the output, DUT ground on the probe ground clips (wiring A;
+  USB-shell ground only with `ch2_coupling='ac'`). Thru calibration first (`thru_cal='measure'`, both probes on the DUT input), then the DUT with that name.
   Report f_actual, the markers, the calibration used, and leave flagged points (near_floor, clipped, unsettled) out.
 
 ## The screen is shared

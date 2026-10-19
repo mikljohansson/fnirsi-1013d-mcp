@@ -18,7 +18,7 @@ to be measured. "Codes" are 8-bit ADC LSB.
 | Frequency set | Always 50 MHz / M for integer M (no DDS pattern tones). Costs nothing below 500 kHz (step < 1 %); 2 % steps at 1 MHz, 10 % at 5 MHz. |
 | Range | 1 Hz to about 2 MHz useful with x1 probes, about 5 MHz with x10 on CH1; the spectrum's 25 MHz cap is not reached. |
 | Accuracy (estimate) | +-0.1 dB / +-0.5 deg to -30 dB with thru calibration; +-1 dB at about -55 dB (CH2 at 100 mV/div sees one code); floor set by crosstalk and the ground return, to be measured. |
-| Biggest risk (new) | **Ground return**: if the DUT returns the stimulus current through a probe ground clip, it flows through R71 (100 Ohm) into VRF1 and adds a common error to both channels. Wire the DUT ground to the scope's USB ground and leave the clips open (section 2.5). Bench item 1. |
+| Biggest risk (new) | **Ground return**: if the DUT returns the stimulus current through a probe ground clip, it flows through R71 (100 Ohm) into VRF1 and adds a common error to both channels. Wire the DUT ground to the scope's USB ground and leave the clips open (section 2.5). Bench item 1. **Bench 2026-10-19: not observed (both wirings within 0.4 dB); wiring A (clips) is the default now, section 2.5.** |
 | Sweep time, 50 points 100 Hz-1 MHz | about 3 s host-driven, about 2 s on the device today (section 3.7). The lowest decade dominates: 10 Hz-100 kHz takes about 12 s either way. |
 | Order | Host tool `scope_bode_sweep` first (no firmware change), bench it on an RC low-pass at 10 kHz, then the on-device view. |
 
@@ -231,6 +231,13 @@ The stimulus current must return to the FPGA's ground. Where it flows decides wh
 
 Bench item 1 measures the difference directly: the same RC low-pass in both wirings, and CH2 placed on the DUT
 ground node (it then reads e itself).
+
+**Bench 2026-10-19 (the reasoning above is kept; the measurement overrules it).** Bench 2026-10-19 (fw 0.2.50, `backups/bode/`): on a 1 kOhm / 15 nF RC, wiring A and wiring B gave the same H within 0.4 dB from 1 kHz to 300 kHz (rc1_15n_clips_2.json vs rc1_15n_usbgnd.json); in wiring B the floor was -80 dB, the thru +0.3 dB, and a 991 / 102 Ohm divider read flat -20.5 dB / 0 +-1.4 deg. The R71 return error did not show. Wiring B costs the 1.24 V between the grounds: with DC coupling it saturated CH2 on 0.1 and 0.2 V/div (a flat record the offset cannot reach). The predicted
+return error needs Z_ret comparable to the DUT; with the shell capacitors and the TL432 holding VRF1 it stayed below
+the 0.4 dB the two wirings differ by. Wiring A (DUT ground on the probe clips) is now the documented default, wiring
+B the alternative with `ch2_coupling='ac'`; the tool flags a saturated CH2 (`ch2_overload`: a flat record, or a tone
+that vanishes on a more sensitive range at the same frequency), steps an auto range back up and stops a fixed range
+with that remedy (mcp-gen5).
 
 ### 2.6 Phase
 

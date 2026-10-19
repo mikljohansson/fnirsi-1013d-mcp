@@ -242,6 +242,14 @@ F,E9,B023 --line-length 120 src tests`; vectors: `python -m fnirsi1013d.vectors 
 
 ## Bode bench (for the coordinator; design 6.3)
 
+**Done 2026-10-19 (docs/hardware-status.md):** wiring A and B agree within 0.4 dB, floor -80 dB, thru +0.3 dB, divider
+flat; wiring A (clips on the DUT ground) is the default now. Wiring B's 1.24 V DC saturated CH2 on 0.1 / 0.2 V/div with a
+flat record the offset loop had centred: `ch2_overload` (flat record, or a tone collapse against the range-1 prescan
+/ the previous range at the same frequency), auto steps up, fixed stops, `ch2_coupling='ac'`, offset exhaustion is a
+caveat (simulator: `SimConfig.frontend_window_v`, pinned samples lose their noise). Open: the 15 nF RC reads an
+apparent C falling 14.7 -> 9.8 nF and tan delta rising to 0.29 by 200 kHz while the divider is flat; the coordinator's
+high-pass with the same parts decides dielectric vs measurement. The procedure below is the original plan.
+
 DUT: RC low-pass, R = 1.60 kOhm 1 %, C = 10.0 nF film or C0G (fc 9.95 kHz). CH1 x1 on the RC input (the post), CH2 x1
 on the output. Generator off before wiring. `--port COM10` (or the MCP tool with the same arguments; it asks for a
 token). Every run prints the table, the markers and the caveats; keep the `--json` files in `backups/bode/`.

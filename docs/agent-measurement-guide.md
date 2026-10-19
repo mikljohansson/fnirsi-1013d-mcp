@@ -140,10 +140,12 @@ networks, coil plus capacitor tanks fed through a resistor). It needs an AL3 bit
 (0x1534+) and drives the pin, so it is tier 3 with a confirmation token.
 
 1. **Wiring first, ask the person to do it and confirm.** Post to the DUT input; CH1 tip on the DUT input (not the
-   post side of an added resistor unless that is what you want to measure); CH2 tip on the DUT output. DUT ground on
-   the scope's USB ground (USB connector shell); **both probe ground clips left open** (section 5: a return through a
-   clip runs the stimulus current through R71 into the probe reference and corrupts both channels). The first sweep
-   of a session returns this as `connection`: show it to the person.
+   post side of an added resistor unless that is what you want to measure); CH2 tip on the DUT output; **the DUT
+   ground on the probe ground clips** (wiring A, the default since the bench of 2026-10-19 showed the same H as the
+   USB-ground wiring within 0.4 dB). Only for a DUT that must not see the probe reference: DUT ground on the USB
+   shell with both clips open (wiring B), and then `ch2_coupling='ac'`, because the DUT sits 1.24 V below the probe
+   reference and saturates CH2 on 0.1 / 0.2 V/div (flag `ch2_overload`). The first sweep of a session returns this
+   as `connection`: show it to the person.
 2. **Never** on a coil being driven, a MOSFET drain, a powered circuit or anything that can drive the post. A PI
    detector's coil can be measured only unpowered and disconnected from its driver, through a series resistor.
 3. **Thru calibration** once per session and probe setup: both probes on the DUT input, `thru_cal='measure'`,

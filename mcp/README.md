@@ -286,10 +286,12 @@ different slope. Time is
 Host-driven frequency-response analyser (docs/plans/bode-design.md, steps H1-H3; `bode.py`). Needs an AL3 bitstream
 with the decimation filter (0x1534+, best 0x1535 with the FIR) and the generator.
 
-**Wiring.** Calibration post to the DUT input, CH1 tip on the DUT input, CH2 tip on the DUT output. DUT ground to
-the scope's USB ground (USB connector shell or a USB breakout's GND), **both probe ground clips open**: a return
-through a clip pushes the stimulus current through R71 (100 Ohm) into the probe reference VRF1 and adds a common
-error to both channels (design 2.5). Passive DUTs or buffered inputs only; the post has nothing but R21 (1 kOhm)
+**Wiring.** Calibration post to the DUT input, CH1 tip on the DUT input, CH2 tip on the DUT output. **Wiring A
+(default): the DUT ground on the probe ground clips.** Wiring B, for a DUT that must not see the probe reference: the
+DUT ground on the scope's USB ground (USB shell), both clips open; the DUT then sits 1.24 V below the probe reference,
+so pass `ch2_coupling='ac'` (`--ch2-coupling ac`) or keep CH2 at 0.5 V/div and above. Never both. Bench 2026-10-19 (fw 0.2.50, `backups/bode/`): on a 1 kOhm / 15 nF RC, wiring A and wiring B gave the same H within 0.4 dB from 1 kHz to 300 kHz (rc1_15n_clips_2.json vs rc1_15n_usbgnd.json); in wiring B the floor was -80 dB, the thru +0.3 dB, and a 991 / 102 Ohm divider read flat -20.5 dB / 0 +-1.4 deg. The R71 return error did not show. Wiring B costs the 1.24 V between the grounds: with DC coupling it saturated CH2 on 0.1 and 0.2 V/div (a flat record the offset cannot reach).
+A saturated CH2 is flagged `ch2_overload` (left out of the markers); auto ranging steps CH2 back up, a fixed range
+stops with the remedy, and an offset that runs out of PWM range is a caveat. Passive DUTs or buffered inputs only; the post has nothing but R21 (1 kOhm)
 between the DUT and the FPGA pad. H = CH2 / CH1 at the DUT input node, so it does not depend on the 1 kOhm source; a
 filter specified for a 50 / 600 Ohm source shows its V2 / V1, not its insertion response.
 

@@ -818,6 +818,12 @@ was found (commit not identified).
   Windows, then `--list-tools` and an MCP stdio session on the simulator (`.github/scripts/wheel_smoke.py`).
 - Changed: install and Claude Code / Codex setup for a wheel user, `.mcp.json.example` in place of the tracked
   `.mcp.json` (ef8aa30).
+- Fixed: Bode sweep with CH2 saturated by the DUT's DC level (bench 2026-10-19: wiring B puts the DUT 1.24 V below the
+  probe reference; on 0.1 V/div the record was flat and centred, and the sweep reported empty points). The point is
+  now flagged `ch2_overload`, auto ranging steps CH2 back up, a fixed range stops with the remedy, `ch2_coupling='ac'`
+  (`--ch2-coupling ac`) is new, and an offset that runs out of PWM range is a caveat instead of an exception. Wiring A
+  (DUT ground on the probe clips) is the documented default after the bench showed both wirings within 0.4 dB
+  (416f536).
 - Added: protocol 1.17 host side (fw 0.2.58, FPGA 0x1536; 4699593, docs 6bd09aa). `scope_capture_segments` takes many
   triggers in one FPGA run with 5 ns timestamps (circular runs, STOP keeps what the run has), `scope_averaged_capture`
   gains `hardware=true` (records summed in the FPGA, read as exact sums), `scope_status` shows the bitstream's features
