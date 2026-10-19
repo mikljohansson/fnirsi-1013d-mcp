@@ -291,7 +291,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - fw-freq (done 19:45, about 475k tokens, retired; handoff firmware/AGENTS.md section 45): Frequency response UI merged as fw 0.2.69
   (one-pane dual-axis chart, Display variants + Log/Linear axis, C1/C2 cursors with the box, AUTO SET overview span, Single sweep,
   CSV via SAVE WAVE, ten-item MEASURES, slider row, menu icon, "Frequency / response" row; ten samples per division rule; words
-  213..215, 220); pinned backups/fw-0.2.69_8babde3b.bin, loaded 19:48. Follow-up batch: top bar in this mode (ACQ chip "Set by the
+  213..215, 220); pinned backups/fw-0.2.69_8babde3b.bin, loaded 19:48. Follow-up batch (owner 10-19 20:00 adds: a single sweep must be visible as running with STOP cancelling it after the point, today STOP has no effect; the Spectrum slider; a mini overview drawn in the slider track where the data exists: the record's min/max envelope in Scope, the full-span spectrum in Spectrum, the AUTO SET overview in Frequency response, design first): top bar in this mode (ACQ chip "Set by the
   sweep", generator chip shows the tone), the Spectrum slider, cancelled AUTO SET restores the previous table, Move fast for
   cursors, MEASURES change immediate, sharp-tank overview span.
 - ux-bode (done 19:55, designer, retired): Frequency response mode design (artifact DfydC8HJgnemUw3EHenTGP, docs/plans/bode-ui.md
