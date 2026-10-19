@@ -334,9 +334,10 @@ void acal_atlan_comps(const acal_channel *c, int16_t *comp_a, int16_t *comp_b)
 
 void acal_acc_add(acal_acc *a, const uint8_t *buf, uint32_t count, uint32_t stride)
 {
-  uint32_t sum = 0, sq = 0, clip = 0, v;
+  uint32_t sum = 0, sq = 0, clip = 0, v, n = count;
 
-  a->n += count;
+  if(n == 0)
+    return;
 
   //sq stays below 2^32 for count <= 66,000 (255^2 x count); callers pass at most a few thousand
   while(count--)
@@ -348,8 +349,10 @@ void acal_acc_add(acal_acc *a, const uint8_t *buf, uint32_t count, uint32_t stri
     clip += (v == 0) || (v == 255);
   }
 
+  a->n       += n;
   a->sum     += sum;
   a->sumsq   += sq;
+  a->convsq  += ((uint64_t)sum * sum + n / 2) / n;
   a->clipped += clip;
 }
 
@@ -358,6 +361,7 @@ void acal_acc_merge(acal_acc *a, const acal_acc *b)
   a->n       += b->n;
   a->sum     += b->sum;
   a->sumsq   += b->sumsq;
+  a->convsq  += b->convsq;
   a->clipped += b->clipped;
 }
 
@@ -366,17 +370,9 @@ int32_t acal_mean16(const acal_acc *a)
   return a->n ? (int32_t)(((uint64_t)a->sum * 16 + a->n / 2) / a->n) : 0;
 }
 
-uint32_t acal_rms16(const acal_acc *a)
+static uint32_t acal_isqrt64(uint64_t x)
 {
-  uint64_t n = a->n, x, r = 0, bit = (uint64_t)1 << 62;
-  uint64_t s2;
-
-  if(n < 2)
-    return 0;
-
-  //256 x variance = 256 x (n sumsq - sum^2) / n^2, then the integer square root
-  s2 = (uint64_t)a->sum * a->sum;
-  x  = (n * a->sumsq > s2) ? ((n * a->sumsq - s2) * 256 + n * n / 2) / (n * n) : 0;
+  uint64_t r = 0, bit = (uint64_t)1 << 62;
 
   while(bit > x)
     bit >>= 2;
@@ -395,6 +391,29 @@ uint32_t acal_rms16(const acal_acc *a)
   }
 
   return (uint32_t)r;
+}
+
+uint32_t acal_rms16(const acal_acc *a)
+{
+  uint64_t n = a->n, s2;
+
+  if(n < 2)
+    return 0;
+
+  //256 x variance = 256 x (n sumsq - sum^2) / n^2, then the integer square root
+  s2 = (uint64_t)a->sum * a->sum;
+  return acal_isqrt64((n * a->sumsq > s2) ? ((n * a->sumsq - s2) * 256 + n * n / 2) / (n * n) : 0);
+}
+
+uint32_t acal_rms16_within(const acal_acc *a)
+{
+  uint64_t n = a->n;
+
+  if(n < 2)
+    return 0;
+
+  //256 x (sumsq - sum over conversions of sum_c^2 / n_c) / n (convsq rounds each term: under 0.5 / n_c of a code^2)
+  return acal_isqrt64((a->sumsq > a->convsq) ? ((a->sumsq - a->convsq) * 256 + n / 2) / n : 0);
 }
 
 int32_t acal_interp_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t mean16_hi)
@@ -416,13 +435,29 @@ int32_t acal_centre_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32
   return ((p < ACAL_PWM_MIN) || (p > ACAL_PWM_MAX)) ? -1 : p;
 }
 
-int acal_range_store(const acal_range_meas *m, acal_channel *c, uint8_t r)
+static void acal_fail_at(acal_fail *f, uint32_t cl, uint32_t k, int32_t value, uint32_t within16)
+{
+  if(f)
+  {
+    f->cls      = (uint8_t)cl;
+    f->core     = (uint8_t)k;
+    f->value    = value;
+    f->within16 = within16;
+  }
+}
+
+static int32_t acal_slope_q16(const acal_range_meas *m, uint32_t cl, uint32_t k)
+{
+  //(1/16 code) / count -> Q16: x 4096
+  return rdiv((m->mean16_hi[cl][k] - m->mean16_lo[cl][k]) * 4096, m->pwm_hi - m->pwm_lo);
+}
+
+int acal_range_check(const acal_range_meas *m, acal_fail *f)
 {
   int32_t  slope[ACAL_CLASSES][2];
   uint32_t k, cl;
 
-  if(r >= ACAL_RANGES)
-    return ACAL_E_ZERO;
+  acal_fail_at(f, 0, 0, 0, 0);
 
   if(m->clipped)
     return ACAL_E_CLIP;
@@ -435,35 +470,71 @@ int acal_range_store(const acal_range_meas *m, acal_channel *c, uint8_t r)
     for(k=0;k<2;k++)
     {
       if(m->noise16[cl][k] > ACAL_MAX_NOISE16)
+      {
+        acal_fail_at(f, cl, k, (int32_t)m->noise16[cl][k], m->within16[cl][k]);
         return ACAL_E_NOISE;
+      }
 
       if(iabs(m->drift16[cl][k]) > ACAL_MAX_DRIFT16)
+      {
+        acal_fail_at(f, cl, k, m->drift16[cl][k], m->within16[cl][k]);
         return ACAL_E_DRIFT;
+      }
 
-      //(1/16 code) / count -> Q16: x 4096
-      slope[cl][k] = rdiv((m->mean16_hi[cl][k] - m->mean16_lo[cl][k]) * 4096, m->pwm_hi - m->pwm_lo);
+      slope[cl][k] = acal_slope_q16(m, cl, k);
 
       if((slope[cl][k] < ACAL_SLOPE_MIN_Q16) || (slope[cl][k] > ACAL_SLOPE_MAX_Q16))
+      {
+        acal_fail_at(f, cl, k, slope[cl][k], 0);
         return ACAL_E_SLOPE;
+      }
     }
 
     if(iabs(slope[cl][0] - slope[cl][1]) > ACAL_MAX_DSLOPE_Q16)
+    {
+      acal_fail_at(f, cl, 0, slope[cl][0] - slope[cl][1], 0);
       return ACAL_E_SLOPE;
+    }
   }
 
   for(cl=0;cl<ACAL_CLASSES;cl++)
   {
     for(k=0;k<2;k++)
       if(iabs(m->zero16[cl][k] - 2048) > ACAL_MAX_ZERO_DEV16)
+      {
+        acal_fail_at(f, cl, k, m->zero16[cl][k] - 2048, 0);
         return ACAL_E_ZERO;
+      }
 
     if(iabs(m->zero16[cl][0] - m->zero16[cl][1]) > ACAL_MAX_SPREAD16)
+    {
+      acal_fail_at(f, cl, 0, m->zero16[cl][0] - m->zero16[cl][1], 0);
       return ACAL_E_SPREAD;
+    }
   }
 
   for(k=0;k<2;k++)
     if(iabs(m->zero16[ACAL_FULL][k] - m->zero16[ACAL_GATED][k]) > ACAL_MAX_CLASS16)
+    {
+      acal_fail_at(f, ACAL_FULL, k, m->zero16[ACAL_FULL][k] - m->zero16[ACAL_GATED][k], 0);
       return ACAL_E_CLASS;
+    }
+
+  return ACAL_OK;
+}
+
+int acal_range_store(const acal_range_meas *m, acal_channel *c, uint8_t r)
+{
+  uint32_t k, cl;
+  int      rc;
+
+  if(r >= ACAL_RANGES)
+    return ACAL_E_ZERO;
+
+  rc = acal_range_check(m, 0);
+
+  if(rc != ACAL_OK)
+    return rc;
 
   c->pwm[r] = (uint16_t)m->pwm;
 
@@ -471,7 +542,7 @@ int acal_range_store(const acal_range_meas *m, acal_channel *c, uint8_t r)
   {
     for(k=0;k<2;k++)
     {
-      c->slope[cl][k][r] = (int16_t)slope[cl][k];
+      c->slope[cl][k][r] = (int16_t)acal_slope_q16(m, cl, k);
       c->zero[cl][k][r]  = (int16_t)m->zero16[cl][k];
       c->noise[cl][k][r] = (uint8_t)m->noise16[cl][k];
     }

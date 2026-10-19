@@ -6,6 +6,12 @@
 
 #include "test_util.h"
 #include "cal_wiz.h"
+#include "ui_fmt.h"
+
+extern FONTDATA font_3;
+
+//The result line's room: the 640 px step dialog, 24 px margins, the 28 px icon column (ui_dlg_step_draw)
+#define RESULT_W   (640 - 48 - 28)
 
 #define SPAN_X1    1408         //88 codes at range 2: x1 probe on the post
 #define SPAN_X10    141         //8.8 codes: x10 probe (measured at range 5)
@@ -217,6 +223,57 @@ static void test_zero_fail_retry(void)
   cw_zero_result(&w, rc_ok, match_ok);
   check_buttons(&w, B(CW_EV_CANCEL) | B(CW_EV_CONTINUE));
   T_EQ(logged(CW_ACT_ZERO), 2);
+}
+
+//fw 0.2.60: a noise or drift failure names the range, rate and core with the values; without a detail (or for the
+//other reasons) the plain words stay. The lines fit the dialog in the 16 px font
+static void test_zero_fail_detail(void)
+{
+  cal_wiz   w;
+  int       rc[2] = { ACAL_E_NOISE, ACAL_E_DRIFT };
+  acal_fail f0 = { ACAL_GATED, ACAL_CORE_B, 52, 17 }, f1 = { ACAL_FULL, ACAL_CORE_A, -13, 18 };
+  acal_fail fw = { ACAL_FULL, ACAL_CORE_B, 1600, 1600 };
+  char      t[96];
+
+  cw_init(&w, 1);
+  ev(&w, CW_EV_CALIBRATE);
+  take(&w);
+  cw_zero_detail(&w, 0, 5, &f0);
+  cw_zero_detail(&w, 1, 0, &f1);
+  cw_zero_result(&w, rc, match_ok);
+  cw_zero_line(&w, 0, t);
+  T_STR(t, "CH1: too much noise, range 6 at 2 MSa/s: core B 3.3 codes, 1.1 per capture");
+  T_TRUE(ui_text_width(&font_3, t) <= RESULT_W);
+  cw_zero_line(&w, 1, t);
+  T_STR(t, "CH2: zero still moving, range 1 at 200 MSa/s: core A 0.8 code");
+  T_TRUE(ui_text_width(&font_3, t) <= RESULT_W);
+
+  //The widest numbers: 100.0 codes at 200 MSa/s
+  ev(&w, CW_EV_CALIBRATE);
+  take(&w);
+  cw_zero_detail(&w, 1, 5, &fw);
+  rc[1] = ACAL_E_NOISE;
+  cw_zero_result(&w, rc, match_ok);
+  cw_zero_line(&w, 1, t);
+  T_STR(t, "CH2: too much noise, range 6 at 200 MSa/s: core B 100.0 codes, 100.0 per capture");
+  T_TRUE(ui_text_width(&font_3, t) <= RESULT_W);
+
+  //CH1 got no detail in this run (a Calibrate clears it): the plain words
+  cw_zero_line(&w, 0, t);
+  T_STR(t, "CH1: too much noise: unplug the probe and USB");
+
+  //Details only outside a running zero step are ignored
+  cw_zero_detail(&w, 0, 3, &f0);
+  T_EQ(w.zero_det[0], 0);
+
+  //Other reasons keep their words
+  ev(&w, CW_EV_CALIBRATE);
+  take(&w);
+  cw_zero_detail(&w, 0, 2, &f0);
+  rc[0] = ACAL_E_ZERO;
+  cw_zero_result(&w, rc, match_ok);
+  cw_zero_line(&w, 0, t);
+  T_STR(t, "CH1: the zero level is out of range");
 }
 
 static void test_gain_nosignal_and_fail(void)
@@ -475,6 +532,7 @@ int main(void)
 {
   test_happy_path();
   test_zero_fail_retry();
+  test_zero_fail_detail();
   test_gain_nosignal_and_fail();
   test_gain_unavailable();
   test_cancel_everywhere();

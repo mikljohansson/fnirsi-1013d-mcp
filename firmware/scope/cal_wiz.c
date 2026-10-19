@@ -104,8 +104,10 @@ int cw_event(cal_wiz *w, int ev)
       if(ev == CW_EV_CALIBRATE)
       {
         //Both channels again, also after one of them passed (the two belong to one moment)
-        w->zero_st[0] = CW_Z_NONE;
-        w->zero_st[1] = CW_Z_NONE;
+        w->zero_st[0]  = CW_Z_NONE;
+        w->zero_st[1]  = CW_Z_NONE;
+        w->zero_det[0] = 0;
+        w->zero_det[1] = 0;
         cw_act(w, CW_ZERO_RUN, CW_ACT_ZERO, 0);
       }
       else
@@ -166,6 +168,19 @@ void cw_zero_result(cal_wiz *w, const int rc[2], const uint32_t match16[2])
   }
 
   cw_act(w, CW_ZERO, CW_ACT_NONE, 0);
+}
+
+void cw_zero_detail(cal_wiz *w, uint32_t ch, uint32_t range, const acal_fail *f)
+{
+  if((w->state != CW_ZERO_RUN) || (ch > 1))
+    return;
+
+  w->zero_det[ch]      = 1;
+  w->zero_r[ch]        = (uint8_t)range;
+  w->zero_cls[ch]      = f->cls;
+  w->zero_core[ch]     = f->core;
+  w->zero_val[ch]      = f->value;
+  w->zero_within16[ch] = f->within16;
 }
 
 void cw_level_result(cal_wiz *w, int32_t span16)
@@ -247,6 +262,12 @@ static char *cw_uint(char *p, uint32_t v)
 
   *p = 0;
   return p;
+}
+
+//1/16 code -> tenths of a code, rounded
+static uint32_t cw_tenths16(uint32_t v16)
+{
+  return (v16 * 10 + 8) / 16;
 }
 
 char *cw_fmt_tenths(char *p, uint32_t v)
@@ -344,6 +365,26 @@ char *cw_zero_line(const cal_wiz *w, uint32_t ch, char *p)
 
     case CW_Z_FAIL:
       p = cw_ch(p, ch);
+
+      //Noise and drift (fw 0.2.60): where, and the numbers that tell pickup between conversions from noise inside them
+      if(w->zero_det[ch] && ((w->zero_rc[ch] == ACAL_E_NOISE) || (w->zero_rc[ch] == ACAL_E_DRIFT)))
+      {
+        int32_t v = w->zero_val[ch];
+
+        p = cw_str(p, (w->zero_rc[ch] == ACAL_E_NOISE) ? ": too much noise, range " : ": zero still moving, range ");
+        p = cw_uint(p, w->zero_r[ch] + 1u);
+        p = cw_str(p, (w->zero_cls[ch] == ACAL_FULL) ? " at 200 MSa/s: core " : " at 2 MSa/s: core ");
+        p = cw_str(p, w->zero_core[ch] ? "B " : "A ");
+        p = cw_fmt_tenths(p, cw_tenths16((uint32_t)((v < 0) ? -v : v)));
+
+        if(w->zero_rc[ch] == ACAL_E_DRIFT)
+          return cw_str(p, " code");
+
+        p = cw_str(p, " codes, ");
+        p = cw_fmt_tenths(p, cw_tenths16(w->zero_within16[ch]));
+        return cw_str(p, " per capture");
+      }
+
       p = cw_str(p, ": ");
       return cw_str(p, cw_reason_text(w->zero_rc[ch]));
 

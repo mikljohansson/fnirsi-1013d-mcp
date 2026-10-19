@@ -77,8 +77,11 @@ static void cal_measure(uint32 r, int32 pwm, uint32 settle_ms, uint32 convs, aca
   }
 }
 
-//Both halves of a measurement merged: mean, noise and clipped samples per core, drift between the halves
-static void cal_result(acal_acc acc[2][2], int32_t *mean16, int32_t *drift16, uint32_t *noise16, uint32_t *clipped)
+//Both halves of a measurement merged: mean, noise and clipped samples per core, drift between the halves. noise16 is
+//the RMS about the mean of all the conversions (the checked value), within16 the RMS inside the conversions (reported
+//with a noise or drift failure: the difference is what moved between conversions)
+static void cal_result(acal_acc acc[2][2], int32_t *mean16, int32_t *drift16, uint32_t *noise16, uint32_t *within16,
+                       uint32_t *clipped)
 {
   uint32 k;
   acal_acc all;
@@ -95,6 +98,9 @@ static void cal_result(acal_acc acc[2][2], int32_t *mean16, int32_t *drift16, ui
     if(noise16)
       noise16[k] = acal_rms16(&all);
 
+    if(within16)
+      within16[k] = acal_rms16_within(&all);
+
     *clipped += all.clipped;
   }
 }
@@ -102,8 +108,9 @@ static void cal_result(acal_acc acc[2][2], int32_t *mean16, int32_t *drift16, ui
 //Zero step of one channel (inputs open or shorted): per hardware range the PWM centre where the mean of both cores reads
 //128, the offset slope of each core from two PWM points 150 counts either side and its zero at that centre, each with
 //the ADC clock gated (2 MSa/s, every legacy time base but 200 MSa/s) and at full rate (200 MSa/s, every filtered
-//capture). *match16: the worst |drift A - drift B| of the zero points over ranges and classes (summary)
-static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16)
+//capture). *match16: the worst |drift A - drift B| of the zero points over ranges and classes (summary); *fail and
+//*fail_r: where a failed range check failed (the result line)
+static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail *fail, uint32_t *fail_r)
 {
   acal_acc        acc[2][2];
   acal_range_meas m;
@@ -112,12 +119,15 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16)
   int             rc;
 
   *match16 = 0;
+  memset(fail, 0, sizeof(*fail));
+  *fail_r = 0;
 
   for(r=0;r<ACAL_RANGES;r++)
   {
     if(wiz_progress(ch, r))
       return CW_RC_CANCELLED;
 
+    *fail_r = r;
     calibrationsettings.samplevoltperdiv = r;
     fpga_set_channel_voltperdiv(&calibrationsettings);
     timer0_delay(60);
@@ -127,10 +137,10 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16)
 
     //Coarse centre from two far points (clipping there only biases the estimate)
     cal_measure(r, CAL_PWM_HIGHCODE, 30, 2, acc);
-    cal_result(acc, mean, 0, 0, &unused);
+    cal_result(acc, mean, 0, 0, 0, &unused);
     hi = (mean[0] + mean[1]) / 2;
     cal_measure(r, CAL_PWM_LOWCODE, 30, 2, acc);
-    cal_result(acc, mean, 0, 0, &unused);
+    cal_result(acc, mean, 0, 0, 0, &unused);
     lo = (mean[0] + mean[1]) / 2;
 
     p = acal_centre_pwm(CAL_PWM_HIGHCODE, hi, CAL_PWM_LOWCODE, lo);
@@ -142,27 +152,29 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16)
     m.pwm_lo = p - CAL_FINE_STEP;
     m.pwm_hi = p + CAL_FINE_STEP;
     cal_measure(r, m.pwm_lo, 60, 4, acc);
-    cal_result(acc, m.mean16_lo[ACAL_GATED], 0, 0, &m.clipped);
+    cal_result(acc, m.mean16_lo[ACAL_GATED], 0, 0, 0, &m.clipped);
     cal_measure(r, m.pwm_hi, 60, 4, acc);
-    cal_result(acc, m.mean16_hi[ACAL_GATED], 0, 0, &m.clipped);
+    cal_result(acc, m.mean16_hi[ACAL_GATED], 0, 0, 0, &m.clipped);
 
     //Centre refined on the slope points, then the zeros there in both clock classes
     m.pwm = acal_interp_pwm(m.pwm_lo, (m.mean16_lo[ACAL_GATED][0] + m.mean16_lo[ACAL_GATED][1]) / 2, m.pwm_hi,
                             (m.mean16_hi[ACAL_GATED][0] + m.mean16_hi[ACAL_GATED][1]) / 2);
 
     cal_measure(r, m.pwm, 60, 8, acc);
-    cal_result(acc, m.zero16[ACAL_GATED], m.drift16[ACAL_GATED], m.noise16[ACAL_GATED], &m.clipped);
+    cal_result(acc, m.zero16[ACAL_GATED], m.drift16[ACAL_GATED], m.noise16[ACAL_GATED], m.within16[ACAL_GATED],
+               &m.clipped);
 
     //Full rate: a 1000-sample readout spans 5 us of the 40 us offset-PWM ripple period, so each conversion sees one
     //ripple phase; 64 conversions (about 70 ms) average it out (bench 0.2.43: 8 left 0.2-0.4 code). The full-rate
     //slope points too: the cores' gains differ per class, and so may their offset slopes
     cal_set_rate(CAL_RATE_FULL);
     cal_measure(r, m.pwm, 30, 64, acc);
-    cal_result(acc, m.zero16[ACAL_FULL], m.drift16[ACAL_FULL], m.noise16[ACAL_FULL], &m.clipped);
+    cal_result(acc, m.zero16[ACAL_FULL], m.drift16[ACAL_FULL], m.noise16[ACAL_FULL], m.within16[ACAL_FULL],
+               &m.clipped);
     cal_measure(r, m.pwm_hi, 60, 64, acc);
-    cal_result(acc, m.mean16_hi[ACAL_FULL], 0, 0, &m.clipped);
+    cal_result(acc, m.mean16_hi[ACAL_FULL], 0, 0, 0, &m.clipped);
     cal_measure(r, m.pwm_lo, 60, 64, acc);
-    cal_result(acc, m.mean16_lo[ACAL_FULL], 0, 0, &m.clipped);
+    cal_result(acc, m.mean16_lo[ACAL_FULL], 0, 0, 0, &m.clipped);
 
     for(cl=0;cl<ACAL_CLASSES;cl++)
     {
@@ -173,7 +185,10 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16)
         *match16 = (uint32_t)d;
     }
 
-    rc = acal_range_store(&m, c, (uint8)r);
+    rc = acal_range_check(&m, fail);
+
+    if(rc == ACAL_OK)
+      rc = acal_range_store(&m, c, (uint8)r);
 
     if(rc != ACAL_OK)
       return rc;
@@ -220,7 +235,7 @@ static void cal_gain_level(uint32 r, int32 pwm, uint32 rate, uint32 settle_ms, u
   cal_set_rate(rate);
   cal_gen_level(high);
   cal_measure(r, pwm, settle_ms, convs, acc);
-  cal_result(acc, mean16, 0, 0, clipped);
+  cal_result(acc, mean16, 0, 0, 0, clipped);
 }
 
 //Level check: both levels at range 2 (gated, 2 conversions each). Returns the span (1/16 code, mean of both cores; it
@@ -543,7 +558,8 @@ static void wiz_commit(void)
 //Returns 1 when Save wrote the calibration
 static uint32 wiz_run_actions(void)
 {
-  uint32_t match[2] = { 0, 0 };
+  uint32_t match[2] = { 0, 0 }, fail_r;
+  acal_fail fail;
   int      rc[2];
   uint32   ch, written = 0;
   uint8    ach;
@@ -576,7 +592,8 @@ static uint32 wiz_run_actions(void)
           {
             cal_scratch_channel(ch);
             memset(&wiz_new[ch], 0, sizeof(acal_channel));
-            rc[ch] = cal_channel(&wiz_new[ch], ch, &match[ch]);
+            rc[ch] = cal_channel(&wiz_new[ch], ch, &match[ch], &fail, &fail_r);
+            cw_zero_detail(&wiz, ch, fail_r, &fail);
           }
 
           wiz_zrc[ch]      = rc[ch];

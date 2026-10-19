@@ -73,6 +73,12 @@ typedef struct
   int16_t  zero_rc[2];            //ACAL_* of the last zero step
   int16_t  gain_rc[2];            //ACAL_* of the last gain measurement
   uint16_t match16[2];            //zero step: worst |drift A - drift B| over ranges and classes, 1/16 code
+  uint8_t  zero_det[2];           //cw_zero_detail given for this run
+  uint8_t  zero_r[2];             //zero step failure: the range (0..5), class and core of the failing value,
+  uint8_t  zero_cls[2];           //the value (acal_fail) and the RMS inside the conversions (cw_zero_detail)
+  uint8_t  zero_core[2];
+  int32_t  zero_val[2];
+  uint32_t zero_within16[2];
 } cal_wiz;
 
 void cw_init(cal_wiz *w, int al3);
@@ -90,6 +96,9 @@ int  cw_take(cal_wiz *w, uint8_t *ch);
 
 //Results of the actions (ignored in any other state, e.g. after a Cancel during the measurement)
 void cw_zero_result(cal_wiz *w, const int rc[2], const uint32_t match16[2]);
+//Where a channel's zero step failed (range 0..5, acal_range_check's acal_fail), given before cw_zero_result; the noise
+//and drift result lines name the range, rate and core with the values (fw 0.2.60)
+void cw_zero_detail(cal_wiz *w, uint32_t ch, uint32_t range, const acal_fail *f);
 void cw_level_result(cal_wiz *w, int32_t span16);    //gated span at ACAL_GAIN_PROBE_RANGE, 1/16 code
 void cw_gain_result(cal_wiz *w, int rc);
 

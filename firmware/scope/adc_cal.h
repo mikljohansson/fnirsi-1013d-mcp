@@ -168,6 +168,7 @@ typedef struct
   uint32_t n;
   uint32_t sum;
   uint64_t sumsq;
+  uint64_t convsq;                        //sum over the acal_acc_add calls (one conversion each) of sum^2 / count
   uint32_t clipped;                       //samples at 0 or 255
 } acal_acc;
 
@@ -175,6 +176,10 @@ void     acal_acc_add(acal_acc *a, const uint8_t *buf, uint32_t count, uint32_t 
 void     acal_acc_merge(acal_acc *a, const acal_acc *b);
 int32_t  acal_mean16(const acal_acc *a);  //round(16 x mean)
 uint32_t acal_rms16(const acal_acc *a);   //16 x RMS about the mean
+//16 x RMS about each conversion's own mean (each acal_acc_add call one conversion): the noise inside a capture, without
+//what moves between conversions (offset-PWM ripple phase, mains pickup on an open input, drift). acal_rms16 squared is
+//this squared plus the variance of the conversion means (fw 0.2.60: the zero step reports both when a check fails)
+uint32_t acal_rms16_within(const acal_acc *a);
 
 //Coarse centre: PWM where the mean of both cores reads 128, from the means (1/16 code) at two PWM values. -1 when the
 //response is under ACAL_MIN_RESPONSE or the result is outside ACAL_PWM_MIN..ACAL_PWM_MAX
@@ -190,11 +195,25 @@ typedef struct
   int32_t  mean16_lo[ACAL_CLASSES][2], mean16_hi[ACAL_CLASSES][2];
   int32_t  zero16[ACAL_CLASSES][2];
   int32_t  drift16[ACAL_CLASSES][2];      //second half minus first half of the zero-point conversions
-  uint32_t noise16[ACAL_CLASSES][2];
+  uint32_t noise16[ACAL_CLASSES][2];      //acal_rms16 of the zero-point conversions (the checked value)
+  uint32_t within16[ACAL_CLASSES][2];     //acal_rms16_within of the same conversions (reported only)
   uint32_t clipped;                       //clipped samples over all points
 } acal_range_meas;
 
-//Checks m and stores it as range r of c: ACAL_OK or the first ACAL_E_* that applies (c unchanged then)
+//Where a range check failed (fw 0.2.60, the wizard's result line): class and core of the failing value and the value.
+//Noise: noise16, with within16; drift: drift16; slope: Q16 (or the A - B difference); zero: zero16 - 2048; spread: A - B;
+//class: full - gated (1/16 code). Clip: all zero
+typedef struct
+{
+  uint8_t  cls, core;
+  int32_t  value;
+  uint32_t within16;
+} acal_fail;
+
+//Checks m: ACAL_OK or the first ACAL_E_* that applies, with *f (may be 0) saying where
+int      acal_range_check(const acal_range_meas *m, acal_fail *f);
+
+//Checks m (acal_range_check) and stores it as range r of c: ACAL_OK or the first ACAL_E_* (c unchanged then)
 int      acal_range_store(const acal_range_meas *m, acal_channel *c, uint8_t r);
 
 //----------------------------------------------------------------------------------------------------------------------------------

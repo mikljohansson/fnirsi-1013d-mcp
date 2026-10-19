@@ -51,8 +51,8 @@ $(OUT)/test_adc_cal: test_adc_cal.c test_util.h $(SRC)/adc_cal.c $(SRC)/adc_cal.
 $(OUT)/test_acal_track: test_acal_track.c test_util.h $(SRC)/acal_track.c $(SRC)/acal_track.h $(SRC)/adc_cal.c $(SRC)/adc_cal.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_acal_track.c $(SRC)/acal_track.c $(SRC)/adc_cal.c -lm
 
-$(OUT)/test_cal_wizard: test_cal_wizard.c test_util.h $(SRC)/cal_wiz.c $(SRC)/cal_wiz.h $(SRC)/adc_cal.c $(SRC)/adc_cal.h | $(OUT)
-	$(CC) $(CFLAGS) -o $@ test_cal_wizard.c $(SRC)/cal_wiz.c $(SRC)/adc_cal.c
+$(OUT)/test_cal_wizard: test_cal_wizard.c test_util.h $(SRC)/cal_wiz.c $(SRC)/cal_wiz.h $(SRC)/adc_cal.c $(SRC)/adc_cal.h $(SRC)/ui_fmt.c $(SRC)/ui_fmt.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_cal_wizard.c $(SRC)/cal_wiz.c $(SRC)/adc_cal.c $(SRC)/ui_fmt.c $(SRC)/font_2.c $(SRC)/font_3.c $(SRC)/font_5.c
 
 # Screens: card formatting and fit with the device's font tables, main menu rows and mode rule (fw 0.2.51), the Settings
 # fold-out, screen and confirmation dialog (fw 0.2.55), the CTRL page, fold-outs, warnings and spectrum cards (fw 0.2.56)

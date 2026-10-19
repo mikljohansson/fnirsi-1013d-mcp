@@ -402,6 +402,127 @@ static void test_measurement(void)
   T_STR(acal_reason_text(99), "no calibration data");
 }
 
+//The zero step's noise figure against the bench (fw 0.2.60, 0.2.59 wizard "too much noise"). cal_measure / cal_result
+//of cal_wiz_ui.c on synthetic readouts: convs conversions of 500 samples per core (core A odd, core B even), first and
+//second half in separate accumulators, merged per core. level16 / sd16 / move16 in 1/16 code; move16 is a per-conversion
+//offset that alternates in sign (what moves between conversions: ripple phase, mains pickup), glitch a code added to one
+//sample of core A per conversion
+typedef struct { uint32_t noise16[2], within16[2]; int32_t mean16[2], drift16[2]; } zero_meas;
+
+static zero_meas zero_sim(uint32_t convs, const int32_t level16[2], const int32_t sd16[2], int32_t drift16,
+                          int32_t move16, int32_t glitch)
+{
+  uint8_t   buf[1000];
+  acal_acc  acc[2][2], all;
+  zero_meas z;
+  uint32_t  i, j, h, k;
+
+  memset(acc, 0, sizeof(acc));
+
+  for(i=0;i<convs;i++)
+  {
+    h = (i >= convs / 2);
+
+    for(j=0;j<1000;j++)
+    {
+      k = (j & 1) ? 0 : 1;                                    //odd core A, even core B
+      buf[j] = (uint8_t)adc((level16[k] + (h ? drift16 : 0) + ((i & 1) ? move16 : -move16)) * 64, sd16[k] * 64);
+    }
+
+    if(glitch)
+      buf[501] = (uint8_t)(buf[501] + glitch);
+
+    acal_acc_add(&acc[h][0], buf + 1, 500, 2);
+    acal_acc_add(&acc[h][1], buf, 500, 2);
+  }
+
+  for(k=0;k<2;k++)
+  {
+    all = acc[0][k];
+    acal_acc_merge(&all, &acc[1][k]);
+    z.mean16[k]   = acal_mean16(&all);
+    z.drift16[k]  = acal_mean16(&acc[1][k]) - acal_mean16(&acc[0][k]);
+    z.noise16[k]  = acal_rms16(&all);
+    z.within16[k] = acal_rms16_within(&all);
+  }
+
+  return z;
+}
+
+static void test_zero_noise_bench(void)
+{
+  //Coordinator 2026-10-19 15:50, fw 0.2.59, probes off, raw std per core (codes) and means: CH1 range 3 A 0.50 B 1.11
+  //(131.4 / 128.1), CH2 range 0 A 1.66 B 2.10 (129.8 / 130.1), the worst
+  static const int32_t ch1_lvl[2] = { 2102, 2050 }, ch1_sd[2] = { 8, 18 };
+  static const int32_t ch2_lvl[2] = { 2077, 2082 }, ch2_sd[2] = { 27, 34 };
+  acal_range_meas m;
+  acal_fail       f;
+  zero_meas       z;
+  uint32_t        k, convs;
+
+  rng = 4242;
+
+  //Both halves merged with a 0.3-code drift between them: per core RMS of the samples (plus the 1/sqrt(12) of the
+  //rounding), the cores never pooled, the drift adds nothing measurable, within = total; far under the 3-code limit
+  for(convs=8;convs<=64;convs+=56)
+  {
+    z = zero_sim(convs, ch1_lvl, ch1_sd, 5, 0, 0);
+    T_TRUE(z.noise16[0] >= 8 && z.noise16[0] <= 11);          //0.50 code and the rounding: 0.58
+    T_TRUE(z.noise16[1] >= 17 && z.noise16[1] <= 20);         //1.11 -> 1.15
+    T_TRUE(z.mean16[0] >= 2100 && z.mean16[0] <= 2108);
+    T_TRUE(z.mean16[1] >= 2048 && z.mean16[1] <= 2056);
+
+    for(k=0;k<2;k++)
+    {
+      T_TRUE(z.noise16[k] < ACAL_MAX_NOISE16);
+      T_TRUE(z.noise16[k] - z.within16[k] <= 1);
+      T_TRUE(z.drift16[k] >= 3 && z.drift16[k] <= 7);
+    }
+
+    z = zero_sim(convs, ch2_lvl, ch2_sd, 5, 0, 0);
+    T_TRUE(z.noise16[0] >= 26 && z.noise16[0] <= 30);
+    T_TRUE(z.noise16[1] >= 33 && z.noise16[1] <= 37);
+    T_TRUE(z.noise16[1] < ACAL_MAX_NOISE16);
+  }
+
+  //What does trip the limit: +-3 codes moving between conversions (pickup on the open input, ripple). The total
+  //reads 3.2 codes, inside a capture it is still the bench's 1.1: the result line shows both
+  z = zero_sim(64, ch1_lvl, ch1_sd, 0, 48, 0);
+  T_TRUE(z.noise16[1] > ACAL_MAX_NOISE16);
+  T_TRUE(z.within16[1] >= 17 && z.within16[1] <= 20);
+
+  //A bus glitch of 64 codes on one sample in 500 per conversion: 2.9 codes RMS, inside the captures as well
+  z = zero_sim(64, ch1_lvl, ch1_sd, 0, 0, 64);
+  T_TRUE(z.noise16[0] >= 44 && z.noise16[0] <= 50);
+  T_TRUE(z.noise16[0] - z.within16[0] <= 2);
+
+  //acal_range_check says where: class, core, value, within
+  memset(&m, 0, sizeof(m));
+  m.pwm_lo = 753; m.pwm_hi = 1053; m.pwm = 903;
+  for(k=0;k<2;k++)
+  {
+    m.mean16_lo[ACAL_GATED][k] = m.mean16_lo[ACAL_FULL][k] = 2048 + 634;
+    m.mean16_hi[ACAL_GATED][k] = m.mean16_hi[ACAL_FULL][k] = 2048 - 634;
+    m.zero16[ACAL_GATED][k] = m.zero16[ACAL_FULL][k] = 2048;
+    m.noise16[ACAL_GATED][k] = m.noise16[ACAL_FULL][k] = 18;
+    m.within16[ACAL_GATED][k] = m.within16[ACAL_FULL][k] = 17;
+  }
+  T_EQ(acal_range_check(&m, &f), ACAL_OK);
+  T_EQ(f.value, 0);
+  m.noise16[ACAL_FULL][1] = 52;
+  T_EQ(acal_range_check(&m, &f), ACAL_E_NOISE);
+  T_EQ(f.cls, ACAL_FULL); T_EQ(f.core, 1); T_EQ(f.value, 52); T_EQ(f.within16, 17);
+  m.noise16[ACAL_FULL][1] = 18;
+  m.drift16[ACAL_GATED][0] = -11;
+  T_EQ(acal_range_check(&m, &f), ACAL_E_DRIFT);
+  T_EQ(f.cls, ACAL_GATED); T_EQ(f.core, 0); T_EQ(f.value, -11);
+  m.drift16[ACAL_GATED][0] = 0;
+  m.zero16[ACAL_FULL][0] = 2048 + 300;
+  T_EQ(acal_range_check(&m, &f), ACAL_E_ZERO);
+  T_EQ(f.cls, ACAL_FULL); T_EQ(f.core, 0); T_EQ(f.value, 300);
+  T_EQ(acal_range_check(&m, 0), ACAL_E_ZERO);
+}
+
 //Gain step pieces: range choice, centring, the store checks, carry-over
 static void test_gain_step(void)
 {
@@ -933,6 +1054,7 @@ int main(int argc, char **argv)
   test_round_pair();
   test_correction();
   test_measurement();
+  test_zero_noise_bench();
   test_gain_step();
   test_bench_model();
   test_end_to_end();
