@@ -58,7 +58,6 @@ void scope_display_channel_linear_trace(PCHANNELSETTINGS settings);
 void scope_display_channel_linear_trace_old(PCHANNELSETTINGS settings);
 void scope_display_channel_dots_trace(PCHANNELSETTINGS settings);
 void scope_display_channel_peak_trace(PCHANNELSETTINGS settings);
-void scope_display_channel_pro_trace(PCHANNELSETTINGS settings);
 
 void scope_display_channel_sinx_trace(PCHANNELSETTINGS settings);
 

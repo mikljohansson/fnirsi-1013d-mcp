@@ -101,13 +101,13 @@ int    ui_fold_dir(const ui_fold *f, uint32 x);              //two-way rows: -1 
 #define UI_FOLD_TEXT_X        90
 
 //Value names, as the fold-outs and the CTRL buttons show them
-#define UI_TRACE_COUNT        4
+#define UI_TRACE_COUNT        3     //fw 0.2.63: 1.00o5's "Pro" (min / max outlines, no fill) removed, see README
 #define UI_VIEW_NORMAL        0
 #define UI_VIEW_XY            1
 #define UI_SPEC_VIEW_COUNT    3
 #define UI_PERSIST_COUNT      4
 
-extern const char *const ui_trace_names[UI_TRACE_COUNT];         //Linear, Dots, Peak, Pro (scopesettings.ACQ_trace)
+extern const char *const ui_trace_names[UI_TRACE_COUNT];         //Linear, Dots, Peak (scopesettings.ACQ_trace)
 extern const char *const ui_view_names[2];                        //Normal, X-Y
 extern const char *const ui_spec_view_names[UI_SPEC_VIEW_COUNT];  //Spectrum, Waterfall, Density
 extern const char *const ui_spec_chan_names[3];                   //CH1, CH2, CH1 + CH2

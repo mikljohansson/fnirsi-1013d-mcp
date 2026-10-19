@@ -1801,6 +1801,10 @@ static void pc_ui_fix_settings(void)
   if(pc_dec_has() && (pc_dec_setting & 3))
     pc_dec_fit_memory();
 
+  //Trace style 3 was 1.00o5's "Pro", removed in fw 0.2.63: a sector saved with it draws Linear
+  if(scopesettings.ACQ_trace >= UI_TRACE_COUNT)
+    scopesettings.ACQ_trace = 0;
+
   //Spectrum view settings (fw 0.2.39); the display mode itself is not restored: the scope boots into the scope view
   spectrum_settings_restore(settingsworkbuffer[PC_SETTING_WORD_SPEC0], settingsworkbuffer[PC_SETTING_WORD_SPEC1]);
 

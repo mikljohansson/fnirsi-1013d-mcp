@@ -2258,12 +2258,10 @@ void scope_display_trace_data(void)
         case 1: scope_display_channel_dots_trace(&scopesettings.channel1); break;
                 //Peak x trace mode
         case 2: scope_display_channel_peak_trace(&scopesettings.channel1); break;
-                //Pro x trace mode
-        case 3: scope_display_channel_pro_trace(&scopesettings.channel1); break;     
                 //Sine x trace mode
         //case 4: scope_display_channel_peak_trace(&scopesettings.channel1); break;
         
-        default: scope_display_channel_linear_trace(&scopesettings.channel1); break;   
+        default: scope_display_channel_linear_trace_old(&scopesettings.channel1); break;   
       }
                 
                       
@@ -2305,12 +2303,10 @@ void scope_display_trace_data(void)
         case 1: scope_display_channel_dots_trace(&scopesettings.channel2); break;
                 //Peak x trace mode
         case 2: scope_display_channel_peak_trace(&scopesettings.channel2); break;
-                //Pro x trace mode
-        case 3: scope_display_channel_pro_trace(&scopesettings.channel2); break;     
                 //Sine x trace mode
         //case 4: scope_display_channel_peak_trace(&scopesettings.channel1); break;
         
-        default: scope_display_channel_linear_trace(&scopesettings.channel2); break;   
+        default: scope_display_channel_linear_trace_old(&scopesettings.channel2); break;   
       }
               
         //scope_display_channel_linear_trace(&scopesettings.channel2);
@@ -2863,62 +2859,6 @@ void scope_display_channel_peak_trace(PCHANNELSETTINGS settings)//2
     }
 }
 //==============================================================================
-void scope_display_channel_pro_trace(PCHANNELSETTINGS settings)//3
-{
-    double inputindex = disp_first_sample;
-    register int32 xpos = disp_xstart;
-
-    register PDISPLAYPOINTS tracepoints = settings->tracepoints;
-    settings->noftracepoints = 0;
-
-    int32 last_ymin = 0, last_ymax = 0;
-    int first_pixel = 1;
-
-    for (; xpos < disp_xend; xpos++)
-    {
-        int32 sample_max = INT32_MIN;
-        int32 sample_min = INT32_MAX;
-
-        // Rozsah vzoriek pre tento pixel
-        double end_index = inputindex + disp_sample_step;
-        int start_idx = (int)inputindex;
-        int end_idx_int = (int)end_index;
-
-        if (end_idx_int == start_idx) end_idx_int++; // aspoň jedna vzorka
-
-        // Peak-detector
-        for (int i = start_idx; i < end_idx_int; i++)
-        {
-            int32 s = scope_get_y_sample(settings, i);
-            if (s > sample_max) sample_max = s;
-            if (s < sample_min) sample_min = s;
-        }
-
-        // Ulož body do tracepoints
-        tracepoints->x = xpos;
-        tracepoints->y = sample_max;
-        tracepoints++;
-        tracepoints->x = xpos;
-        tracepoints->y = sample_min;
-        tracepoints++;
-        settings->noftracepoints += 2;
-
-        // Profesionálne vykreslenie:
-        // Spoj min-max segment s predchádzajúcim pixelom
-        if (!first_pixel)
-        {   // Horná línia
-            display_draw_line(xpos - 1, last_ymax, xpos, sample_max);
-            // Dolná línia
-            display_draw_line(xpos - 1, last_ymin, xpos, sample_min);
-        }
-        else first_pixel = 0;
-
-        last_ymax = sample_max;
-        last_ymin = sample_min;
-
-        inputindex += disp_sample_step;
-    }
-}
 //==============================================================================
 
 void scope_display_channel_sinx_trace1(PCHANNELSETTINGS settings)
