@@ -2,7 +2,7 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
-// fnirsi-1013d-mcp changes (version word 0x1535, see fpga/al3/README.md "Changes"):
+// fnirsi-1013d-mcp changes (version word 0x1536, see fpga/al3/README.md "Changes"):
 //  - 0x1533: external trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
 //    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
 //    Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
@@ -14,6 +14,11 @@
 //  - 0x1535: CIC compensation FIR (command 0x56 bit 0, read-back in 0x29 byte 0 bits 6/5).
 //    For K >= 1 and N >= 16 with N a multiple of 4 the CIC decimates by N / 2 and a 15-tap
 //    symmetric FIR decimates by 2 (flat to fo/4). Otherwise, and with 0x56 = 0, it is 0x1534.
+//  - 0x1536: segmented capture and hardware averaging (commands 0x57-0x5D, reads 0x2A-0x32,
+//    docs/plans/segmented-capture.md). A sequencer restarts the unchanged capture logic after
+//    each record: segment mode stores each record in its own slot of the sample memory and logs
+//    a trigger offset and a timestamp per segment; averaging mode adds each triggered record into
+//    a 2048 x 64 accumulator. With 0x57 = 0 (power-on) the design is cycle-identical to 0x1535.
 //-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
@@ -331,6 +336,103 @@ endfunction
 endmodule
 
 //-------------------------------------------------------------------------------------
+//Sequencer RAMs (0x1536), TD logic block RAM macros as the IP generator writes them.
+//Accumulator / segment table: 2048 x 64, written and read on clk_200MHz, read output registered.
+//Record mirror: 2048 x 32 copy of the sample memory's write side (written on the write clock),
+//read on clk_200MHz by the averaging post-pass, read output registered.
+
+module seq_acc_ram
+(
+  input  wire        clk,
+  input  wire        we,
+  input  wire [10:0] wa,
+  input  wire [63:0] wd,
+  input  wire [10:0] ra,
+  output wire [63:0] rd
+);
+  AL_LOGIC_BRAM #( .DATA_WIDTH_A(64),
+        .DATA_WIDTH_B(64),
+        .ADDR_WIDTH_A(11),
+        .ADDR_WIDTH_B(11),
+        .DATA_DEPTH_A(2048),
+        .DATA_DEPTH_B(2048),
+        .MODE("PDPW"),
+        .REGMODE_A("NOREG"),
+        .REGMODE_B("OUTREG"),
+        .WRITEMODE_A("NORMAL"),
+        .WRITEMODE_B("NORMAL"),
+        .RESETMODE("SYNC"),
+        .IMPLEMENT("9K(FAST)"),
+        .INIT_FILE("NONE"),
+        .FILL_ALL("NONE"))
+      inst(
+        .dia(wd),
+        .dib({64{1'b0}}),
+        .addra(wa),
+        .addrb(ra),
+        .cea(we),
+        .ceb(1'b1),
+        .ocea(1'b0),
+        .oceb(1'b1),
+        .clka(clk),
+        .clkb(clk),
+        .wea(1'b1),
+        .bea(1'b0),
+        .web(1'b0),
+        .beb(1'b0),
+        .rsta(1'b0),
+        .rstb(1'b0),
+        .doa(),
+        .dob(rd));
+endmodule
+
+module seq_mirror_ram
+(
+  input  wire        clka,
+  input  wire        cea,
+  input  wire [10:0] wa,
+  input  wire [31:0] wd,
+  input  wire        clkb,
+  input  wire [10:0] ra,
+  output wire [31:0] rd
+);
+  AL_LOGIC_BRAM #( .DATA_WIDTH_A(32),
+        .DATA_WIDTH_B(32),
+        .ADDR_WIDTH_A(11),
+        .ADDR_WIDTH_B(11),
+        .DATA_DEPTH_A(2048),
+        .DATA_DEPTH_B(2048),
+        .MODE("PDPW"),
+        .REGMODE_A("NOREG"),
+        .REGMODE_B("OUTREG"),
+        .WRITEMODE_A("NORMAL"),
+        .WRITEMODE_B("NORMAL"),
+        .RESETMODE("SYNC"),
+        .IMPLEMENT("32K"),
+        .INIT_FILE("NONE"),
+        .FILL_ALL("NONE"))
+      inst(
+        .dia(wd),
+        .dib({32{1'b0}}),
+        .addra(wa),
+        .addrb(ra),
+        .cea(cea),
+        .ceb(1'b1),
+        .ocea(1'b0),
+        .oceb(1'b1),
+        .clka(clka),
+        .clkb(clkb),
+        .wea(1'b1),
+        .bea(1'b0),
+        .web(1'b0),
+        .beb(1'b0),
+        .rsta(1'b0),
+        .rstb(1'b0),
+        .doa(),
+        .dob(rd));
+endmodule
+
+//-------------------------------------------------------------------------------------
 //Not implemented in this version is the I2C interface part.
 
 module fnirsi_1013D
@@ -494,6 +596,29 @@ module fnirsi_1013D
 
   reg        fir_en = 0;                   //Command 0x56 bit 0: CIC compensation FIR (0x1535)
 
+  //Segmented capture and averaging (0x1536), written by the MCU while 0x01 = 1
+  reg [1:0]  seq_mode = 0;                 //Command 0x57 bits 1..0: 0 off, 1 segments, 2 averaging, 3 off
+  reg        seq_circ = 0;                 //Command 0x57 bit 2: circular segments (until stopped)
+  reg        seq_raw = 0;                  //Command 0x57 bit 3: raw accumulator readout
+  reg [11:0] seq_count = 12'd1;            //Command 0x58: segments, or averaging positions
+  reg [3:0]  seg_m = 4'd7;                 //Command 0x59: segment slot = 2^m words
+  reg [15:0] avg_n = 16'd1;                //Command 0x5A: records per position (0 = 65536)
+  reg [4:0]  avg_shift = 0;                //Command 0x5B: readout shift
+  reg [31:0] seq_hold = 0;                 //Command 0x5C: hold-off, 5 ns units
+  reg        seq_stop = 0;                 //Command 0x5D bit 0: no further restarts (cleared by 0x01 = 1)
+
+  //Restart of the capture logic by the sequencer: seq_rst_c is high for one write clock and acts on
+  //the write clock edge at its end, like the MCU sampling reset; seq_rst_q follows one write clock
+  //later and resets the clk_200MHz side (sampling_triggered, ext_pending) 7.5 ns after that edge.
+  //Both are 0 while the sequencer is idle (0x57 = 0), so cap_rst = sample_system_reset.
+  reg        seq_rq_s = 0;                 //Sequencer restart request, sampled on the write clock
+  reg        seq_rq_d = 0;
+  reg        seq_rst_q = 0;
+  reg        swc_rise_q = 0;               //swc_rise one clk_200MHz cycle later: write clock signals are settled
+  wire       seq_rst_c   = seq_rq_s & ~seq_rq_d;
+  wire       cap_rst     = sample_system_reset | seq_rst_c;
+  wire       cap_rst200  = sample_system_reset | (swc_rise_q & seq_rst_q);
+
   wire dec_on = (dec_order != 2'd0);
 
   wire [15:0] dec_out1;                    //Decimated 16-bit samples (CIC, or FIR when fir_act)
@@ -599,7 +724,7 @@ freq_generator_dds_pwm u_freq
       else if(ext_rise | ext_fall)
         ext_activity <= 1;
 
-      if(sample_system_reset == 1)
+      if(cap_rst200 == 1)
         ext_pending <= 0;
       else if(trigger_check_enable & ext_edge)
         ext_pending <= 1;
@@ -665,11 +790,19 @@ freq_generator_dds_pwm u_freq
 
 //---------------------------------------------------------------------------
 //Memory part
+//0x1536: in segment mode the write address is folded into the current segment slot
+//(seg_mask_s = slot size - 1, seg_base_s = slot start); otherwise the mask is all ones and the
+//address passes unchanged. The record mirror takes the same data and write enable.
+
+  wire [31:0] sample_dia = dec_on ? { dec_out2, dec_out1 } : { i_adc2B_d, i_adc2A_d, i_adc1B_d, i_adc1A_d };
+  reg  [12:0] seg_mask_s = 13'h1FFF;
+  reg  [12:0] seg_base_s = 0;
+  wire [12:0] sample_write_address_phys = (sample_write_address & seg_mask_s) | (seg_base_s & ~seg_mask_s);
 
   sample_memory samples
   (
-    .dia   (dec_on ? { dec_out2, dec_out1 } : { i_adc2B_d, i_adc2A_d, i_adc1B_d, i_adc1A_d }),
-    .addra (sample_write_address),
+    .dia   (sample_dia),
+    .addra (sample_write_address_phys),
     .clka  (sample_write_clock),
     .cea   (sample_write_enable & swc_adv),
 
@@ -829,7 +962,7 @@ freq_generator_dds_pwm u_freq
 
   always @(posedge sample_write_clock)
     begin
-      if(sample_system_reset == 1)
+      if(cap_rst == 1)
         sample_write_address <= 0;
       else if(swc_adv)
         sample_write_address <= sample_write_address + 1;
@@ -844,7 +977,7 @@ freq_generator_dds_pwm u_freq
 
   always @(posedge sample_write_clock) 
     begin
-      if(sample_system_reset == 1)
+      if(cap_rst == 1)
         time_base_cnt <= 0;
       else if(swc_adv)
         time_base_cnt <= time_base_cnt + 1;
@@ -858,7 +991,7 @@ freq_generator_dds_pwm u_freq
 
   always @(posedge sample_write_clock)
     begin
-      if(sample_system_reset == 1)
+      if(cap_rst == 1)
         sample_write_enable <= 1;                //Enable the writing on reset
       else if((sampling_enable == 0) && swc_adv)
         sample_write_enable <= 0;                //Disable it when enough samples have been gathered
@@ -907,7 +1040,7 @@ assign sampling_enable = ~(
 
 
   always @(posedge clk_200MHz) begin			//clk_RAM  sample_write_clock
-    if(sample_system_reset == 1) begin
+    if(cap_rst200 == 1) begin
         sampling_triggered <= 0;
         trigger_detect_enable <= 0;
     end else if(trigger_check_enable == 1) begin
@@ -919,7 +1052,7 @@ assign sampling_enable = ~(
 //------------------------------------------------
 
   always @(posedge sample_write_clock) begin	//clk_200MHz clk_RAM  sample_write_clock clk_ADC90 clk_ADC
-    if (sample_system_reset) 
+    if (cap_rst) 
        begin
          trigger_previous <= 0;
          trigger_data     <= 0;
@@ -939,7 +1072,7 @@ assign sampling_enable = ~(
 
   always @(posedge sample_write_clock)
     begin
-      if(sample_system_reset == 1)
+      if(cap_rst == 1)
         sampling_half_way <= 0;
       else
         sampling_half_way <= swc_adv ? ((sample_write_address >= pretrigger_samples) || sampling_half_way) : sampling_half_way;
@@ -950,7 +1083,7 @@ assign sampling_enable = ~(
 
   always @(posedge sample_write_clock)
     begin
-      if(sample_system_reset == 1)
+      if(cap_rst == 1)
         trigger_read_address <= pretrigger_samples;   //Starting point in memory
       else if((sampling_half_way == 1)&&(sampling_enable == 1)&&swc_adv)
         trigger_read_address <= trigger_read_address + 1;
@@ -961,7 +1094,7 @@ assign sampling_enable = ~(
 
   always @(posedge sample_write_clock)
     begin
-      if(sample_system_reset == 1)
+      if(cap_rst == 1)
         trigger_address <= 0;
         
      else if((sampling_triggered == 0) && swc_adv)
@@ -971,6 +1104,401 @@ assign sampling_enable = ~(
        end
 
     end
+
+//-------------------------------------------------------------------------------------
+//Segmented capture and averaging (0x1536), write clock side
+//The sequencer (clk_200MHz, below) raises seq_req to restart the capture logic; the rising edge of
+//its sampled copy is the one-write-clock pulse seq_rst_c (in cap_rst). In segment mode the slot
+//base moves on by one slot at each restart, or back to slot 0 when the sequencer set seq_wrap.
+//ts_cnt counts 5 ns units from the release of the MCU sampling reset: 2 (D + 1) per write clock
+//edge, D the effective divider (0 with K >= 1). For the record that just ended, ts_cap holds
+//ts_cnt from the last edge that latched trigger_address and seq_trig holds sampling_triggered as of
+//the last word written. Both are taken one write clock late from registered copies (st_s, adv_d,
+//swe_d, ts_d) of exactly what the trigger_address logic saw, so sampling_triggered gains one load
+//only; swe_d is what the sequencer watches, so its snapshot is consistent.
+
+  reg        seq_req = 0;                  //clk_200MHz: restart request (sequencer)
+  reg        seq_wrap = 0;                 //clk_200MHz: the restart goes to slot 0
+  reg        seq_wrap_s = 0;
+  reg [33:0] ts_inc = 34'd2;
+  reg [39:0] ts_cnt = 0;
+  reg [39:0] ts_d = 0;
+  reg [39:0] ts_cap = 0;
+  reg        st_s = 0, adv_d = 0, swe_d = 0;
+  reg        seq_trig = 0;
+
+  wire [12:0] seg_mask_m = (seg_m >= 4'd13) ? 13'h1FFF : ~(13'h1FFF << seg_m);
+
+  always @(posedge sample_write_clock)
+    begin
+      seq_rq_s   <= seq_req;
+      seq_rq_d   <= seq_rq_s;
+      seq_rst_q  <= seq_rst_c;
+      seq_wrap_s <= seq_wrap;
+
+      if(sample_system_reset == 1)
+        begin
+          seg_mask_s <= (seq_mode == 2'd1) ? seg_mask_m : 13'h1FFF;
+          seg_base_s <= 0;
+        end
+      else if(seq_rst_c)
+        seg_base_s <= seq_wrap_s ? 13'd0 : seg_base_s + seg_mask_s + 13'd1;
+
+      ts_inc <= { {1'b0, sample_rate_divider_eff} + 33'd1, 1'b0 };
+      if(sample_system_reset == 1)
+        ts_cnt <= 0;
+      else
+        ts_cnt <= ts_cnt + {6'd0, ts_inc};
+
+      st_s  <= sampling_triggered;
+      adv_d <= swc_adv;
+      swe_d <= sample_write_enable;
+      ts_d  <= ts_cnt;
+
+      if(~st_s & adv_d & swe_d)
+        ts_cap <= ts_d;
+
+      if(swe_d)
+        seq_trig <= st_s;
+    end
+
+//-------------------------------------------------------------------------------------
+//Sequencer (0x1536), clk_200MHz
+//Write clock signals are read through sn_* snapshots taken on the clk_200MHz edge 7.5 ns after a
+//write clock rise (swc_rise_q): they have settled by then (multicycle 2 in zaklad.sdc) and hold
+//until the next rise, so the snapshot is never taken while they change. The MCU sampling reset and
+//0x5D are synchronised. The configuration (0x57-0x5C, 0x0B, 0x0C, 0x53) is latched while 0x01 = 1.
+//  IDLE  modes off at the last 0x01 (0x57 = 0 or 3): nothing happens, 0x0A as before
+//  WEN   a restart was requested: wait until the capture logic runs again
+//  RUN   a record is in progress; it has ended when sample_write_enable falls
+//  POST  averaging: add the record (from the mirror) into the accumulator, one word per clock
+//  TAB   segments: write the table entry
+//  NEXT  slot / position advanced; done or stop ends the run; segments: invalidate the entry of
+//        the slot about to be refilled
+//  HOLD  hold-off, then the restart request
+//  DONE  run complete or stopped (0x0A = 1)
+//For 200 MHz every decision uses registers only: increments and compares (q_*_nx, q_*_end, pp_z,
+//pp_busy, pp_start) are computed every clock from values that change at most once per record.
+//Post-pass pipeline: the mirror and accumulator reads issued with pp_i, BRAM latch (pp_v1),
+//output register (pp_v2), pp_x / pp_acc (pp_v3), 17-bit lane sums (pp_v4), carry or saturation
+//into the write register (aw_we), written on the next clock. 16-bit format: two 32-bit lanes
+//(CH1, CH2), no saturation needed (65535 x 65536 < 2^32); legacy: four 16-bit lanes (CH1A, CH1B,
+//CH2A, CH2B), each saturating at 65535. The first record of each position is written, not added.
+//Table entries take the write port through tab_we / tab_a / tab_d one clock after TAB and NEXT.
+
+  localparam Q_IDLE = 3'd0, Q_WEN  = 3'd1, Q_RUN  = 3'd2, Q_POST = 3'd3,
+             Q_TAB  = 3'd4, Q_NEXT = 3'd5, Q_HOLD = 3'd6, Q_DONE = 3'd7;
+
+  reg [2:0]  q_st = Q_IDLE;
+  reg        q_rs1 = 0, q_rs2 = 0;         //synchronised MCU sampling reset
+  reg        q_sp1 = 0, q_sp2 = 0;         //synchronised stop (0x5D)
+  reg        sn_swe = 0, sn_trig = 0;      //write clock snapshots
+  reg [12:0] sn_ta = 0;
+  reg [39:0] sn_ts = 0;
+  reg [1:0]  q_mode = 0;                   //mode of the run, 0 = none
+  reg        q_circ = 0, q_fmt16 = 0;
+  reg        q_active = 0, q_done = 0, q_ovf = 0, q_last = 0, q_first = 1;
+  reg [11:0] q_n1 = 0;                     //segments or positions - 1
+  reg [16:0] q_ntgt = 0;                   //records per position
+  reg [16:0] q_pass = 0, q_pass_nx = 0;    //completed passes over all positions
+  reg        q_pass_end = 0;               //q_pass + 1 == q_ntgt
+  reg [12:0] q_total = 0, q_pre = 0, q_mask = 0;
+  reg [31:0] q_hold = 0, q_hc = 0;
+  reg        q_hz = 0;
+  reg [11:0] q_idx = 0, q_idx_nx = 0;      //next slot or position
+  reg        q_idx_end = 0;                //q_idx == q_n1
+  reg [12:0] q_base = 0, q_base_nx = 0;    //accumulator word of the position
+  reg [23:0] q_cnt = 0, q_cnt_nx = 0;      //segments completed / records accumulated
+  reg [15:0] q_untrig = 0, q_untrig_nx = 0;//untriggered records (saturating)
+
+  reg        q_post = 0;                   //the accumulator read port belongs to the post-pass
+  reg        pp_i = 0, pp_z = 0, pp_busy = 0;
+  reg [12:0] pp_left = 0;
+  reg [10:0] pp_start = 0;
+  reg [10:0] pp_ma = 0, pp_aa = 0;
+  reg        pp_v1 = 0, pp_v2 = 0, pp_v3 = 0, pp_v4 = 0;
+  reg [10:0] pp_a1 = 0, pp_a2 = 0, pp_a3 = 0, pp_a4 = 0;
+  reg [31:0] pp_x = 0;
+  reg [63:0] pp_acc = 0;
+  reg [16:0] pp_s0 = 0, pp_s1 = 0, pp_s2 = 0, pp_s3 = 0;
+
+  reg        tab_we = 0;                   //table entry write request
+  reg [10:0] tab_a = 0;
+  reg [63:0] tab_d = 0;
+
+  reg        aw_we = 0;                    //accumulator write port
+  reg [10:0] aw_a = 0;
+  reg [63:0] aw_d = 0;
+
+  wire [31:0] mir_q;
+  wire [63:0] acc_q;
+
+  wire [15:0] pp_xa0 = q_fmt16 ? pp_x[15:0]  : { 8'd0, pp_x[7:0] };
+  wire [15:0] pp_xa1 = q_fmt16 ? 16'd0       : { 8'd0, pp_x[15:8] };
+  wire [15:0] pp_xa2 = q_fmt16 ? pp_x[31:16] : { 8'd0, pp_x[23:16] };
+  wire [15:0] pp_xa3 = q_fmt16 ? 16'd0       : { 8'd0, pp_x[31:24] };
+
+  function [15:0] pp_sat(input [16:0] s);
+    pp_sat = s[16] ? 16'hFFFF : s[15:0];
+  endfunction
+
+  wire [15:0] pp_w1 = pp_s1[15:0] + { 15'd0, pp_s0[16] };
+  wire [15:0] pp_w3 = pp_s3[15:0] + { 15'd0, pp_s2[16] };
+  wire [63:0] pp_w  = q_fmt16 ? { pp_w3, pp_s2[15:0], pp_w1, pp_s0[15:0] }
+                              : { pp_sat(pp_s3), pp_sat(pp_s2), pp_sat(pp_s1), pp_sat(pp_s0) };
+
+  wire        q_mode_on = (seq_mode == 2'd1) || (seq_mode == 2'd2);
+
+  always @(posedge clk_200MHz)
+    begin
+      swc_rise_q <= swc_rise;
+      q_rs1 <= sample_system_reset;
+      q_rs2 <= q_rs1;
+      q_sp1 <= seq_stop;
+      q_sp2 <= q_sp1;
+
+      if(swc_rise_q)
+        begin
+          sn_swe  <= swe_d;
+          sn_trig <= seq_trig;
+          sn_ta   <= trigger_address;
+          sn_ts   <= ts_cap;
+        end
+
+      //values the decisions below use, one clock ahead
+      q_cnt_nx    <= q_cnt + 24'd1;
+      q_untrig_nx <= q_untrig + { 15'd0, ~&q_untrig };
+      q_idx_nx    <= q_idx + 12'd1;
+      q_idx_end   <= (q_idx == q_n1);
+      q_base_nx   <= q_base + q_total;
+      q_pass_nx   <= q_pass + 17'd1;
+      q_pass_end  <= (q_pass_nx == q_ntgt);
+      pp_start    <= sn_ta[10:0] - q_pre[10:0];
+      pp_busy     <= pp_i | pp_v1 | pp_v2 | pp_v3 | pp_v4 | aw_we;
+
+      //post-pass pipeline and the write port
+      pp_v1  <= pp_i;  pp_a1 <= pp_aa;
+      pp_v2  <= pp_v1; pp_a2 <= pp_a1;
+      pp_v3  <= pp_v2; pp_a3 <= pp_a2;
+      pp_x   <= mir_q;
+      pp_acc <= q_first ? 64'd0 : acc_q;
+      pp_v4  <= pp_v3; pp_a4 <= pp_a3;
+      pp_s0  <= { 1'b0, pp_acc[15:0] }  + { 1'b0, pp_xa0 };
+      pp_s1  <= { 1'b0, pp_acc[31:16] } + { 1'b0, pp_xa1 };
+      pp_s2  <= { 1'b0, pp_acc[47:32] } + { 1'b0, pp_xa2 };
+      pp_s3  <= { 1'b0, pp_acc[63:48] } + { 1'b0, pp_xa3 };
+      aw_we  <= pp_v4 | tab_we;
+      aw_a   <= tab_we ? tab_a : pp_a4;
+      aw_d   <= tab_we ? tab_d : pp_w;
+      tab_we <= 0;
+
+      if(pp_i)
+        begin
+          pp_ma <= pp_ma + 11'd1;
+          pp_aa <= pp_aa + 11'd1;
+          pp_left <= pp_left - 13'd1;
+          pp_z <= (pp_left == 13'd1);
+          if(pp_z)
+            pp_i <= 0;
+        end
+
+      if(q_rs2)
+        begin
+          q_st     <= q_mode_on ? Q_RUN : Q_IDLE;
+          q_mode   <= q_mode_on ? seq_mode : 2'd0;
+          q_active <= q_mode_on;
+          q_circ   <= q_mode_on & seq_circ;
+          q_fmt16  <= q_mode_on & dec_on;
+          q_n1     <= seq_count - 12'd1;
+          q_ntgt   <= (avg_n == 16'd0) ? 17'h10000 : { 1'b0, avg_n };
+          q_total  <= total_samples;
+          q_pre    <= pretrigger_samples;
+          q_mask   <= seg_mask_m;
+          q_hold   <= seq_hold;
+          q_done   <= 0;
+          q_ovf    <= 0;
+          q_last   <= 0;
+          q_first  <= 1;
+          q_pass   <= 0;
+          q_idx    <= 0;
+          q_base   <= 0;
+          q_cnt    <= 0;
+          q_untrig <= 0;
+          q_post   <= 0;
+          pp_i     <= 0;
+          seq_req  <= 0;
+          seq_wrap <= 0;
+        end
+      else
+        case(q_st)
+          Q_WEN:
+            if(q_sp2)
+              begin
+                seq_req <= 0;
+                q_done  <= 1;
+                q_st    <= Q_DONE;
+              end
+            else if(sn_swe)
+              begin
+                seq_req <= 0;
+                q_st    <= Q_RUN;
+              end
+
+          Q_RUN:
+            if(~sn_swe)
+              begin
+                if(q_mode == 2'd1)
+                  q_st <= Q_TAB;
+                else if(sn_trig)
+                  begin
+                    q_post  <= 1;
+                    pp_i    <= 1;
+                    pp_ma   <= pp_start;
+                    pp_aa   <= q_base[10:0];
+                    pp_left <= q_total - 13'd1;
+                    pp_z    <= (q_total == 13'd1);
+                    q_st    <= Q_POST;
+                  end
+                else
+                  begin
+                    q_untrig <= q_untrig_nx;
+                    q_st     <= Q_NEXT;
+                  end
+              end
+            else if(q_sp2 & ~sampling_triggered)
+              begin
+                q_done <= 1;
+                q_st   <= Q_DONE;
+              end
+
+          Q_POST:
+            if(~pp_i & ~pp_busy)
+              begin
+                q_post <= 0;
+                q_cnt  <= q_cnt_nx;
+                if(q_idx_end)
+                  begin
+                    q_idx   <= 0;
+                    q_base  <= 0;
+                    q_first <= 0;
+                    q_pass  <= q_pass_nx;
+                    q_last  <= q_pass_end;
+                  end
+                else
+                  begin
+                    q_idx  <= q_idx_nx;
+                    q_base <= q_base_nx;
+                  end
+                q_st <= Q_NEXT;
+              end
+
+          Q_TAB:
+            begin
+              tab_we <= 1;
+              tab_a  <= q_idx[10:0];
+              tab_d  <= { 1'b1, 9'd0, sn_trig, sn_ta & q_mask, sn_ts };
+              q_cnt  <= q_cnt_nx;
+              if(~sn_trig)
+                q_untrig <= q_untrig_nx;
+              if(q_idx_end)
+                begin
+                  q_idx    <= 0;
+                  seq_wrap <= 1;
+                  q_ovf    <= q_ovf | q_circ;
+                  q_last   <= ~q_circ;
+                end
+              else
+                begin
+                  q_idx    <= q_idx_nx;
+                  seq_wrap <= 0;
+                end
+              q_st <= Q_NEXT;
+            end
+
+          Q_NEXT:
+            if(q_last | q_sp2)
+              begin
+                q_done <= 1;
+                q_st   <= Q_DONE;
+              end
+            else
+              begin
+                if(q_mode == 2'd1)
+                  begin
+                    tab_we <= 1;
+                    tab_a  <= q_idx[10:0];
+                    tab_d  <= 64'd0;
+                  end
+                q_hc <= q_hold;
+                q_hz <= 0;
+                q_st <= Q_HOLD;
+              end
+
+          Q_HOLD:
+            if(q_sp2)
+              begin
+                q_done <= 1;
+                q_st   <= Q_DONE;
+              end
+            else if(q_hz)
+              begin
+                seq_req <= 1;
+                q_st    <= Q_WEN;
+              end
+            else
+              begin
+                q_hc <= q_hc - 32'd1;
+                q_hz <= (q_hc[31:1] == 31'd0);
+              end
+
+          default: ;
+        endcase
+    end
+
+  seq_acc_ram acc_ram
+  (
+    .clk (clk_200MHz),
+    .we  (aw_we),
+    .wa  (aw_a),
+    .wd  (aw_d),
+    .ra  (q_post ? pp_aa : sample_read_offset[10:0]),
+    .rd  (acc_q)
+  );
+
+  seq_mirror_ram mirror_ram
+  (
+    .clka (sample_write_clock),
+    .cea  (sample_write_enable & swc_adv),
+    .wa   (sample_write_address[10:0]),
+    .wd   (sample_dia),
+    .clkb (clk_200MHz),
+    .ra   (pp_ma),
+    .rd   (mir_q)
+  );
+
+  //MCU view of the accumulator word at the read pointer (0x2B..0x32): segment table and raw mode
+  //as stored; legacy lanes >> S; 16-bit lanes min(65535, sum >> S) in L0 (CH1) and L2 (CH2).
+  //seq_lat takes it on every i_mcu_clk edge, like the sample memory's own read register.
+  function [15:0] seq_sh16(input [15:0] v, input [4:0] s);
+    seq_sh16 = s[4] ? 16'd0 : (v >> s[3:0]);
+  endfunction
+
+  function [15:0] seq_sh32(input [31:0] v, input [4:0] s);
+    reg [31:0] t;
+    begin
+      t = v >> s;
+      seq_sh32 = (|t[31:16]) ? 16'hFFFF : t[15:0];
+    end
+  endfunction
+
+  wire [63:0] seq_view = ((q_mode == 2'd1) | seq_raw) ? acc_q :
+                         q_fmt16 ? { 16'd0, seq_sh32(acc_q[63:32], avg_shift), 16'd0, seq_sh32(acc_q[31:0], avg_shift) } :
+                                   { seq_sh16(acc_q[63:48], avg_shift), seq_sh16(acc_q[47:32], avg_shift),
+                                     seq_sh16(acc_q[31:16], avg_shift), seq_sh16(acc_q[15:0], avg_shift) };
+
+  reg [63:0] seq_lat = 0;
+  always @(posedge i_mcu_clk)
+    seq_lat <= seq_view;
 
 //=====================================================================================
 
@@ -1023,8 +1551,10 @@ assign sampling_enable = ~(
       else if((((mcu_command == 8'h0B) | (mcu_command == 8'h0C) | (mcu_command == 8'h0D) | (mcu_command == 8'h0E) 
               | (mcu_command == 8'h1B) | (mcu_command == 8'h1F)
               | (mcu_command == 8'h32) | (mcu_command == 8'h35) | (mcu_command == 8'h38) | (mcu_command == 8'h3C)
-              | (mcu_command == 8'h51) | (mcu_command == 8'h52) | (mcu_command == 8'h55)) & i_mcu_rws) |
-              (((mcu_command == 8'h06) | (mcu_command == 8'h14) | (mcu_command == 8'h29) | (mcu_command == 8'h41)) & ~i_mcu_rws))
+              | (mcu_command == 8'h51) | (mcu_command == 8'h52) | (mcu_command == 8'h55)
+              | (mcu_command == 8'h58) | (mcu_command == 8'h5A) | (mcu_command == 8'h5C)) & i_mcu_rws) |
+              (((mcu_command == 8'h06) | (mcu_command == 8'h14) | (mcu_command == 8'h29) | (mcu_command == 8'h41)
+              | (mcu_command == 8'h2A)) & ~i_mcu_rws))
         mcu_state <= mcu_state + 1;
     end
 
@@ -1033,7 +1563,8 @@ assign sampling_enable = ~(
 
   always @(posedge i_mcu_clk)
     begin
-      if((i_mcu_dcs == 0) & (i_mcu_rws == 0) & ((mcu_command == 8'h20) | (mcu_command == 8'h21) | (mcu_command == 8'h22) | (mcu_command == 8'h23)))
+      if((i_mcu_dcs == 0) & (i_mcu_rws == 0) & ((mcu_command == 8'h20) | (mcu_command == 8'h21) | (mcu_command == 8'h22) | (mcu_command == 8'h23)
+         | ((mcu_command >= 8'h2B) & (mcu_command <= 8'h32))))
         begin       
           sample_read_offset = sample_read_offset + 1;
         end
@@ -1060,7 +1591,11 @@ assign sampling_enable = ~(
           case(mcu_command)
             //Setting the sampling reset state
             8'h01:
-              sample_system_reset <= io_mcu_data[0];
+              begin
+                sample_system_reset <= io_mcu_data[0];
+                if(io_mcu_data[0])
+                  seq_stop <= 0;
+              end
               
             //Loading of the two bytes of the pretrigger_samples (set_trigger_point) high byte first
             8'h0B:
@@ -1288,6 +1823,63 @@ assign sampling_enable = ~(
                 endcase
               end
 
+            //Segmented capture and averaging (0x1536); write while 0x01 = 1
+            8'h57:
+              begin
+                seq_mode <= io_mcu_data[1:0];
+                seq_circ <= io_mcu_data[2];
+                seq_raw  <= io_mcu_data[3];
+              end
+
+            //Segments or averaging positions, two bytes high byte first (12 bits used)
+            8'h58:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    seq_count[11:8] <= io_mcu_data[3:0];
+                  4'h1:
+                    seq_count[7:0] <= io_mcu_data;
+                endcase
+              end
+
+            //Segment slot size: 2^m words
+            8'h59:
+              seg_m <= io_mcu_data[3:0];
+
+            //Records per averaging position, two bytes high byte first (0 = 65536)
+            8'h5A:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    avg_n[15:8] <= io_mcu_data;
+                  4'h1:
+                    avg_n[7:0] <= io_mcu_data;
+                endcase
+              end
+
+            //Averaging readout shift
+            8'h5B:
+              avg_shift <= io_mcu_data[4:0];
+
+            //Hold-off in 5 ns units, four bytes high byte first
+            8'h5C:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    seq_hold[31:24] <= io_mcu_data;
+                  4'h1:
+                    seq_hold[23:16] <= io_mcu_data;
+                  4'h2:
+                    seq_hold[15:8] <= io_mcu_data;
+                  4'h3:
+                    seq_hold[7:0] <= io_mcu_data;
+                endcase
+              end
+
+            //Stop the run: no further restarts (cleared by 0x01 = 1)
+            8'h5D:
+              seq_stop <= io_mcu_data[0];
+
           endcase
         end
     end
@@ -1312,15 +1904,16 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h35;
+                    o_mcu_data <= 8'h36;
                 endcase
               end
 
             //Reading of the sampling done state
             //When sampling finishes the writing is disabled. Enabled again with a reset.
             //Can't determine how the original does this, but for the software to work it needs to be inverted
+            //0x1536: for a run armed in segment or averaging mode, the run is done
             8'h0A:
-              o_mcu_data[0] <= ~sample_write_enable;
+              o_mcu_data[0] <= q_active ? q_done : ~sample_write_enable;
 
             //Reading of the trigger address needs loading of high byte first
             8'h14:
@@ -1387,6 +1980,47 @@ assign sampling_enable = ~(
                     o_mcu_data <= { 2'b0, dec_shift };
                 endcase
               end
+
+            //Sequencer status (0x1536), 8 bytes: flags, count (3 bytes), untriggered (2), state and index (2)
+            8'h2A:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    o_mcu_data <= { q_done, q_ovf, q_active & ~q_done, q_fmt16, seq_raw, q_circ, q_mode };
+                  4'h1:
+                    o_mcu_data <= q_cnt[23:16];
+                  4'h2:
+                    o_mcu_data <= q_cnt[15:8];
+                  4'h3:
+                    o_mcu_data <= q_cnt[7:0];
+                  4'h4:
+                    o_mcu_data <= q_untrig[15:8];
+                  4'h5:
+                    o_mcu_data <= q_untrig[7:0];
+                  4'h6:
+                    o_mcu_data <= { q_st, 1'b0, q_idx[11:8] };
+                  4'h7:
+                    o_mcu_data <= q_idx[7:0];
+                endcase
+              end
+
+            //Accumulator / segment table word at the read pointer, bytes 0..7 (0x1536)
+            8'h2B:
+              o_mcu_data <= seq_lat[7:0];
+            8'h2C:
+              o_mcu_data <= seq_lat[15:8];
+            8'h2D:
+              o_mcu_data <= seq_lat[23:16];
+            8'h2E:
+              o_mcu_data <= seq_lat[31:24];
+            8'h2F:
+              o_mcu_data <= seq_lat[39:32];
+            8'h30:
+              o_mcu_data <= seq_lat[47:40];
+            8'h31:
+              o_mcu_data <= seq_lat[55:48];
+            8'h32:
+              o_mcu_data <= seq_lat[63:56];
 
             //Reading of the touch panel address needs loading of high byte first
             8'h41:

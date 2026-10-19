@@ -1,13 +1,15 @@
 // Copy of Atlan4's "FPGA commands.txt" (D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\), updated
 // for fpga/al3/src/zaklad.v of fnirsi-1013d-mcp. Changes against Atlan4's file:
-//  - 0x06 returns 0x15 0x35 (0x1535; 0x1534 = decimation filter without the FIR, 0x1533 = EXT trigger only; Atlan4's 0x1532 AL3 design returns 0x15 0x32,
-//    his file still shows 0x14).
+//  - 0x06 returns 0x15 0x36 (0x1536; 0x1535 = without segments/averaging, 0x1534 = decimation filter without the FIR,
+//    0x1533 = EXT trigger only; Atlan4's 0x1532 AL3 design returns 0x15 0x32, his file still shows 0x14).
 //  - 0x15 takes data[1:0]: 0 = CH1, 1 = CH2, 2 = EXT (calibration pin P133), 3 = reserved (acts as EXT).
 //  - 0x28 (new read): external trigger status.
 //  - 0x53, 0x54, 0x55 (new writes), 0x29 (new read): decimation filter (0x1534). With 0x53 = 0 (power-on)
 //    the design behaves exactly as 0x1533.
 //  - 0x56 (new write), 0x29 byte 0 bits 6/5: CIC compensation FIR (0x1535). With 0x56 = 0 (power-on) the
 //    design behaves exactly as 0x1534.
+//  - 0x57..0x5D (new writes), 0x2A..0x32 (new reads): segmented capture and hardware averaging (0x1536). With
+//    0x57 = 0 (power-on) the design behaves exactly as 0x1535; 0x0A then reads as before.
 //  - 0x0B, 0x0C, 0x1F high bytes: zaklad.v takes io_mcu_data[5:0] into [12:8] (bit 5 is dropped by the
 //    13-bit register); this file showed [4:0].
 // Multi-byte values are high byte first. Details: fpga/al3/README.md, section "Changes".
@@ -25,11 +27,13 @@
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h35;       //0x1535 = AL3 with external trigger, decimation filter and FIR
+                    o_mcu_data <= 8'h36;       //0x1536 = AL3 with external trigger, decimation filter, FIR, segments, averaging
             
             //When sampling finishes the writing is disabled. Enabled again with a reset.
             8'h0A: //Reading of the sampling done state
-                    o_mcu_data[0] <= ~sample_write_enable;
+                    o_mcu_data[0] <= q_active ? q_done : ~sample_write_enable;
+                    //0x1536: after an arm with 0x57 mode 1 or 2, bit0 = the whole run is done (all segments or
+                    //all averages, or stopped); otherwise ~sample_write_enable as before
 
             8'h14: //Reading of the trigger address needs loading of high byte first
                   4'h0:
@@ -90,6 +94,38 @@
                     //bits 1..0 = K (0x53)
                   4'h1:
                     o_mcu_data <= { 2'b0, dec_shift };   //output shift (0x54)
+
+            8'h2A: //Sequencer status (0x1536), 8 bytes
+                  4'h0:
+                    o_mcu_data <= { q_done, q_ovf, q_running, q_fmt16, seq_raw, q_circ, q_mode };
+                    //bit7 run done (0x0A), bit6 circular segments wrapped at least once, bit5 running,
+                    //bit4 records are 16-bit (0x53 K >= 1 at the arm), bit3 raw readout (0x57 bit 3, live),
+                    //bit2 circular, bits 1..0 mode of the run armed last (0 = none: 0x57 was 0 or 3)
+                  4'h1..4'h3:
+                    o_mcu_data <= q_cnt[23:16], q_cnt[15:8], q_cnt[7:0];
+                    //segments completed, or records accumulated (all positions)
+                  4'h4..4'h5:
+                    o_mcu_data <= q_untrig[15:8], q_untrig[7:0];
+                    //untriggered records (auto time-out): segments stored with triggered = 0, or averaging
+                    //records skipped; saturates at 65535
+                  4'h6..4'h7:
+                    o_mcu_data <= { q_st[2:0], 1'b0, q_idx[11:8] }, q_idx[7:0];
+                    //sequencer state (0 idle, 1 restart, 2 record, 3 post-pass, 4 table, 5 next, 6 hold-off,
+                    //7 done) and the slot / position the next record goes to.
+                    //The count can change between its bytes while running: read twice and compare.
+
+            8'h2B..8'h32: //Accumulator / segment table word at the read pointer (0x1536), bytes 0..7
+                    o_mcu_data <= seq_lat[8 * (cmd - 0x2B) +: 8];
+                    //Same pointer and pipeline as 0x20..0x23: set it with 0x1F (bits 10..0 used), one dummy read,
+                    //then each read advances the pointer by one word. View word:
+                    //  segment mode, or 0x57 bit 3 raw: the stored 64-bit word
+                    //    segment table entry s: [39:0] timestamp (5 ns units from the first write clock edge
+                    //    after 0x01 = 0), [52:40] trigger offset in the slot (trigger_address mod 2^m),
+                    //    [53] triggered, [63] valid
+                    //    raw averaging, legacy: four 16-bit sums CH1A, CH1B, CH2A, CH2B; 16-bit: CH1 sum [31:0],
+                    //    CH2 sum [63:32]
+                    //  averaging, legacy: lanes [15:0] CH1A, [31:16] CH1B, [47:32] CH2A, [63:48] CH2B = sum >> S
+                    //  averaging, 16-bit: [15:0] min(65535, CH1 sum >> S), [47:32] min(65535, CH2 sum >> S), rest 0
 
             8'h41: //Reading of the touch panel address needs loading of high byte first
                   4'h0:
@@ -262,5 +298,49 @@
 
             8'h56: //CIC compensation FIR, 1 byte
                     fir_en <= io_mcu_data[0];       //1 = FIR on where eligible; bits 7..1 reserved, write 0
+
+//---------------------------------------------------------------------------------------
+// Segmented capture and hardware averaging (0x1536). Details: fpga/al3/README.md "Changes" section 6 and
+// docs/plans/segmented-capture.md. Write 0x57..0x5C while 0x01 = 1 (they are latched there); 0x0B, 0x0C,
+// 0x0E, 0x15..0x1A and 0x53..0x56 apply to every record of the run. A run ends with 0x0A = 1.
+// Segments: 0x58 slots of 2^m words (0x59), slot s at words s * 2^m; per segment a normal capture with
+// pretrigger 0x0B and total 0x0C (total <= 2^m - 2), then a table entry (read 0x2B..0x32 word s), the
+// hold-off 0x5C and an automatic restart. Averaging: each triggered record (pretrigger included) is added
+// into accumulator words p * total .. p * total + total - 1, p = record index mod 0x58 positions,
+// 0x5A records per position; positions * total <= 2048, total <= 2046. Untriggered records are skipped.
+
+            8'h57: //Sequencer mode, 1 byte
+                    seq_mode <= io_mcu_data[1:0];   //0 off (power-on), 1 segments, 2 averaging, 3 off (reserved)
+                    seq_circ <= io_mcu_data[2];     //segments: circular, wrap at 0x58 and run until 0x5D
+                    seq_raw  <= io_mcu_data[3];     //averaging readout: raw sums (live, also after the run)
+                                                    //bits 7..4 write 0
+
+            8'h58: //Segments or averaging positions, 2 bytes high byte first
+                  4'h0:
+                    seq_count[11:8] <= io_mcu_data[3:0];
+                  4'h1:
+                    seq_count[7:0] <= io_mcu_data;  //segments 1 .. 8192 >> m, positions 1 .. 2048 / total
+
+            8'h59: //Segment slot size, 1 byte
+                    seg_m <= io_mcu_data[3:0];      //slot = 2^m words, m = 5 .. 12
+
+            8'h5A: //Records per averaging position, 2 bytes high byte first
+                  4'h0:
+                    avg_n[15:8] <= io_mcu_data;
+                  4'h1:
+                    avg_n[7:0] <= io_mcu_data;      //1 .. 65535, 0 = 65536; legacy lanes clamp at 65535 above N = 257
+
+            8'h5B: //Averaging readout shift, 1 byte
+                    avg_shift <= io_mcu_data[4:0];  //S, live: the record can be read again with another S
+
+            8'h5C: //Hold-off, 4 bytes high byte first, 5 ns units
+                  4'h0..4'h3:
+                    seq_hold[31:24], [23:16], [15:8], [7:0] <= io_mcu_data;
+                    //wait from the end of a segment's table write / a record's post-pass to the restart
+
+            8'h5D: //Stop, 1 byte
+                    seq_stop <= io_mcu_data[0];     //1 = no further restarts: an untriggered record in progress is
+                                                    //abandoned (its slot entry stays invalid), a triggered one
+                                                    //completes; then 0x0A = 1. Cleared by 0x01 = 1.
 
 //=======================================================================================
