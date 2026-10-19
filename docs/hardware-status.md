@@ -841,3 +841,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   0x1535 today 129.8 / 130.1 and 130.4 / 130.4), CH1 A 131.0 / B 127.7 unchanged. Chip 2's cores arrive in the other order on
   0x1537, so the stored per-core zeros land on the wrong cores. Both agents informed (fw-cal4: robust zero step, check-retry heal,
   write log; fpga-gen7: deterministic order equal to 0x1535 plus a status read, 0x1538). Bench paused for the owner.
+- 2026-10-19 16:48: fw 0.2.61 (merge 65aded6, sha 4593c43f..., pinned backups/fw-0.2.61_4593c43f.bin, protocol 1.18 row 57:
+  full-rate encode check-and-retry after 0x0D writes, counters 62/63, events 21/22) FEL-loaded on 0x1537. Experiment for fpga-gen7:
+  divider 99 held 30 s, one 0x0D=0 write, then 1221 host captures in 60 s with no other writes (event log: only the arm's 0x01
+  resets, caller host, every 48 ms). CH2 core A bad (14-30 codes) in about 40 % of captures in every 4 s bucket, randomly
+  interleaved with clean ones (median 0.50), CH1 clean, CH2 A-B mean a constant -3.0 codes. So on 0x1537 chip 2's encode phase is
+  re-resolved at every sampling reset with about 40 % failure: a marginal flop (fpga-gen7: encA setup slack -0.209 ns at TT 85C),
+  not a write race and not a thermal drift within a minute. 0.2.61's check does not fire here because no 0x0D write precedes the
+  arms: the check must run on every full-rate arm. 0x1538 (stateless encode from the write clock + self-check flag) in progress.
