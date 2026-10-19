@@ -701,3 +701,6 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 2026-10-19 13:55: fw 0.2.54 (touch fixes batch 1 on 0.2.52; merge of fw-touch1) built with GCC 10, MMU image sha256
   05a126f77cfb8750958959e50132252b6abc94fe5ccaa3efb946467b914c6ba6, nommu 572784ed5b6160f599682576a0fd5f8f0d014013f3b68eadd49e498edc50a419,
   pinned in backups/. This is the image to load for the next owner session (steps 1 + readers + touch handles). Not loaded.
+- 2026-10-19 14:07: fw 0.2.55 (UI step 3 Settings on 0.2.54; merge of fw-ui3) built with GCC 10, MMU image sha256
+  89c1e94794fc19a13897459ec564092bf9fa3068ef7628dce6e017f9db56b17b, nommu 1dc9b165990bcf5c647af1e68b1319bdef26c1d2e552685868994a0b5c17b7aa,
+  pinned in backups/. Now the image to load next (steps 1 + 3, readers, touch handles). Not loaded.
