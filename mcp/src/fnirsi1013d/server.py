@@ -337,6 +337,12 @@ class Session:
         if h.enc_flags & P.ENC_CONVENTION_BAD:
             out.append(f"the FPGA's encode convention check failed at boot (0x33 = 0x{h.enc_boot33:02X}): full-rate "
                        "core order is unknown; see scope_health")
+        if h.has_capture and h.cap_flags & P.CAPF_FLAGGED:  # 1.24: the 0x153A self-check
+            cores = ", ".join(f"{n} {h.cap_counts[P.CAP_CORES.index(n)]} outliers"
+                              for n in P.cap_core_names(h.cap_flagged))
+            out.append(f"the scope's last 200 MSa/s capture was flagged by the ADC capture self-check ({cores}): a "
+                       "full-rate result may hold wrong samples on that core; run the calibration wizard (it trains "
+                       "the capture stages) and check scope_health")
         return out
 
     # tokens ---------------------------------------------------------------------------------------------
@@ -698,6 +704,9 @@ def _health_words(d: dict[str, Any], h: P.HealthResp) -> list[str]:
             w.append(f"full-rate capture check ({e['mode']}): {e['text']}; {e['captures_checked']} captures checked "
                      f"since boot, {e['captures_bad']} found garbled, {e['captures_recovered']} of those re-taken "
                      "clean" + (f", last 0x33 = {e['last_33']}" if e["last_33"] else ""))
+    c = d.get("capture_stages")
+    if c is not None and c["has_stages"]:  # protocol 1.24
+        w.append(f"ADC {c['text']}")
     return w
 
 
@@ -1236,6 +1245,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                    "loaded": cal is not None, "live": live, "scope_calibration": scope_cal}
             if cals[0].has_provenance:
                 out["calibration_provenance"] = _provenance_summary(cals[0], s.info)
+            if cals[0].has_capture:  # protocol 1.24: the stored FPGA 0x153A capture stages
+                out["capture_stages"] = cals[0].describe_capture()
             if cal is not None:
                 out.update({
                     "unit": cal.unit, "points": len(cal.points),
@@ -1410,7 +1421,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         saved, and the stored restart record (an exception that restarted the firmware; it survives power cycles
         until cleared at the scope); from protocol 1.19 (fw 0.2.62) ``encode_check``: how 200 MSa/s captures are
         checked for a garbled ADC core (record data on AL3 0x1532..0x1537, the FPGA's self-check 0x33 on 0x1538+),
-        the last 0x33 byte with the failing pins, captures checked / found garbled / re-taken clean. Returns the
+        the last 0x33 byte with the failing pins, captures checked / found garbled / re-taken clean; from protocol
+        1.24 (fw 0.2.79, FPGA 0x153A) ``capture_stages``: the per-core ADC capture stages in effect (trained or the
+        power-on default), the last outlier counts and the cores the self-check flagged. Returns the
         values and ``in_words``. Use it first when the scope restarted, the link dropped, settings seem lost or a
         full-rate capture looks garbled on one core, and include it in a fault report."""
         def go() -> dict[str, Any]:

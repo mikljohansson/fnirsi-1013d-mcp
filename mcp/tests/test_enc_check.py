@@ -27,7 +27,7 @@ def test_health_1_19_vector():
     assert len(raw) == 104 and h.length == 104 and h.has_enc_check
     assert (h.enc_mode, h.enc_last33, h.enc_flags, h.enc_boot33) == (2, 0x77, 0x05, 0xF6)
     assert (h.enc_bad, h.enc_recovered, h.enc_checked) == (3, 2, 1200)
-    assert h.pack() == raw
+    assert h.pack()[:104] == raw and not h.has_capture and h.describe()["capture_stages"] is None
     e = h.describe()["encode_check"]
     assert e["mode"] == "FPGA read 0x33" and e["last_33"] == "0x77" and e["boot_33"] == "0xF6"
     assert e["last_33_bad_pins"] == ["CH2 A"] and e["last_capture_accepted_bad"]
@@ -124,7 +124,7 @@ def test_simulator_counts_full_rate_captures(sim_factory):
         assert s.info.caps & P.Caps.ENC_CHECK and s.info.proto_minor >= 19
         assert s.status().features & P.Features.ENC_CHECK
         h = s.health()
-        assert h.length == 104 and (h.enc_mode, h.enc_checked, h.enc_boot33) == (2, 0, 0xF6)
+        assert h.length == 124 and h.layout == 2 and (h.enc_mode, h.enc_checked, h.enc_boot33) == (2, 0, 0xF6)
         assert h.describe_enc()["text"] == "encode check, no 200 MSa/s capture yet"
         s.set_timebase(divider=0)
         assert s.capture(["CH1"]) is not None

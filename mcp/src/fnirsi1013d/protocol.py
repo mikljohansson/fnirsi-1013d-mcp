@@ -39,8 +39,11 @@ PROTO_MAJOR = 1
 #: capture check, link counters 62-63, event types 21 / 22; 1.19 (fw 0.2.62, FPGA 0x1538, row 58): every full-rate
 #: capture checked, caps ENC_CHECK, features bit 5, GET_HEALTH 104 bytes; 1.20 (fw 0.2.66, row 60): the on-device Bode
 #: plot (BODE_CTRL / READ_BODE, display_mode 5, features bit 6); 1.21 (fw 0.2.67, row 61, provisional numbering):
-#: CAL_PROBE, the calibration wizard's zero measurement from the host
-PROTO_MINOR = 23
+#: CAL_PROBE, the calibration wizard's zero measurement from the host; 1.22 (fw 0.2.72, row 62): the FPGA bus contract,
+#: link counters 64-67; 1.23 (fw 0.2.78, row 63): requests close the modal screens; 1.24 (fw 0.2.79, row 64,
+#: provisional numbering): FPGA 0x153A capture stages (caps CAPTURE_STAGES, features bit 7, GET_HEALTH 124 bytes
+#: layout 2, GET_CAL 364 bytes, event 23, EXT shifts 12 / 14 legacy samples)
+PROTO_MINOR = 24
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -205,6 +208,8 @@ class Caps(enum.IntFlag):
     SEQ = 1 << 17
     #: protocol 1.19 (FPGA 0x1538+): the per-capture encode self-check, FPGA read 0x33
     ENC_CHECK = 1 << 18
+    #: protocol 1.24 (FPGA 0x153A+): per-core ADC capture stage (0x63), outlier counters (0x36)
+    CAPTURE_STAGES = 1 << 19
 
 
 class Features(enum.IntFlag):
@@ -217,6 +222,7 @@ class Features(enum.IntFlag):
     HW_AVERAGE = 1 << 4  # 0x1536+
     ENC_CHECK = 1 << 5  # 0x1538+ (protocol 1.19)
     BODE = 1 << 6  # protocol 1.20: what the on-device Bode plot needs (DECIM and GENERATOR_DDS: AL3 0x1534+)
+    CAPTURE_STAGES = 1 << 7  # 0x153A+ (protocol 1.24): ADC capture stages and outlier counters
 
 
 def feature_names(features: int) -> list[str]:
@@ -1801,6 +1807,9 @@ DECIM_SET_FIR = 0x20
 DECIM_FIR_MIN_N = 16
 #: decim_config capability levels: bitstream without the filter, 0x1534 (boxcar / CIC), 0x1535+ (plus the FIR)
 DECIM_HAS_NONE, DECIM_HAS_CIC, DECIM_HAS_FIR = 0, 1, 2
+#: or-ed into ``has`` (1.24, FPGA 0x153A+ capture stages): the ADC data reach the memory 4 words (divider 0) / 3 words
+#: later against EXT (legacy shift 12 / 14 samples, K >= 1 lag + 40 ns), and 0x53 bits 3 / 4 are written 0
+DECIM_HAS_CAPSTAGES = 0x10
 #: largest capture (samples) in the 16-bit layout
 DECIM_MAX_TOTAL = 8190
 #: exactness 255 x N^K < 2^48: CIC3 up to N = 10,334, CIC2 up to 1,050,630
@@ -1846,10 +1855,14 @@ def decim_to_code(out: int, scale_q24: int, corr16: int) -> int:
     return max(0, min(255, v))
 
 
-def ext_shift_legacy(divider: int) -> int:
+def ext_shift_legacy(divider: int, cap: bool = False) -> int:
     """1.22 (fw 0.2.72): EXT trigger in the legacy 8-bit layout, samples (two per word) by which the stored data lag
     the edge: the AD9288's 4-encode pipeline is 4 words at every legacy rate, 2 at divider 0 where the EXT
-    synchroniser takes most of a 10 ns word (fpga/al3/README.md section 7 finding 4, tb_trigpos model numbers)."""
+    synchroniser takes most of a 10 ns word (fpga/al3/README.md section 7 finding 4, tb_trigpos model numbers).
+    1.24 (fw 0.2.79, ``cap`` = FPGA 0x153A+ capture stages): 12 at divider 0, 14 above (the IOB capture and the stage
+    pick take 4 / 3 words more)."""
+    if cap:
+        return 14 if divider else 12
     return 8 if divider else 4
 
 
@@ -1867,6 +1880,8 @@ class DecimConfig:
     gain: int = 1
     fir_en: bool = False
     fir: bool = False
+    #: 1.24: FPGA 0x153A+ capture stages (DECIM_HAS_CAPSTAGES): the EXT shifts are longer
+    cap: bool = False
 
     @property
     def mode(self) -> int:
@@ -1906,20 +1921,20 @@ class DecimConfig:
     @property
     def ext_shift(self) -> int:
         """EXT trigger: output samples by which the stored data lag the edge, rounded: 120 ns + K (N - 1) 2.5 ns;
-        with the FIR 250 ns + 17.5 N ns + 1.25 K (N - 2) ns."""
+        with the FIR 250 ns + 17.5 N ns + 1.25 K (N - 2) ns; 40 ns more on FPGA 0x153A+ (``cap``, 1.24)."""
         if not self.k or not self.n:
             return 0
         if self.fir:
-            lag, period = 1000 + 70 * self.n + 5 * self.k * (self.n - 2), 20 * self.n
+            lag, period = 1000 + 70 * self.n + 5 * self.k * (self.n - 2) + (160 if self.cap else 0), 20 * self.n
         else:
-            lag, period = 240 + self.k * (self.n - 1) * 5, self.n * 10
+            lag, period = 240 + self.k * (self.n - 1) * 5 + (80 if self.cap else 0), self.n * 10
         return (lag + period // 2) // period
 
     def ext_shift_at(self, divider: int) -> int:
         """1.22 (fw 0.2.72): the EXT shift of a capture at this divider in samples of its layout: ext_shift with the
         filter, else the legacy one (ext_shift_legacy). Pretrigger words written: pretrigger - shift (16-bit) or
         (pretrigger - shift) / 2 (legacy); GET_CAPTURE_INFO 70 and GET_DECIM 31 report it, at most the pretrigger."""
-        return self.ext_shift if self.k else ext_shift_legacy(divider)
+        return self.ext_shift if self.k else ext_shift_legacy(divider, self.cap)
 
     @property
     def settle_us(self) -> int:
@@ -1945,11 +1960,16 @@ def decim_fir_eligible(n: int) -> bool:
 def decim_config(k_req: int, flags: int, divider: int, total_samples: int, has: int = DECIM_HAS_CIC) -> DecimConfig:
     """pc_decim_config: the configuration an arm writes for the Filter setting ``k_req`` (0-3), ``flags``
     (DECIM_FLAGS bits, plus DECIM_SET_FIR), the 0x0D divider, the capture length and the bitstream's level
-    (DECIM_HAS_*). With the FIR active the CIC decimates by M = N / 2: gain M^K, S one higher, exactness on M."""
+    (DECIM_HAS_*, | DECIM_HAS_CAPSTAGES on 0x153A+). With the FIR active the CIC decimates by M = N / 2: gain M^K,
+    S one higher, exactness on M."""
     k, n = k_req & 3, decim_n(divider)
+    cap = bool(has & DECIM_HAS_CAPSTAGES)
+    has &= ~DECIM_HAS_CAPSTAGES
     if has == DECIM_HAS_NONE:
-        return DecimConfig(why=6)
-    c = DecimConfig(flags=flags & DECIM_FLAGS, fir_en=has >= DECIM_HAS_FIR and bool(flags & DECIM_SET_FIR))
+        return DecimConfig(why=6, cap=cap)
+    c = DecimConfig(flags=flags & DECIM_FLAGS, fir_en=has >= DECIM_HAS_FIR and bool(flags & DECIM_SET_FIR), cap=cap)
+    if cap:  # 0x153A: bits 3 / 4 select nothing (they read back in 0x29), kept 0
+        c.flags &= ~(DECIM_NEG_A | DECIM_NEG_B)
     if k == 0:
         c.why = 1
         return c
@@ -2338,7 +2358,9 @@ class CalProbePoint:
 
 @dataclass
 class CalProbeResp:
-    """CAL_PROBE response, 252 bytes (protocol 1.21, row 61)."""
+    """CAL_PROBE response, 252 bytes (protocol 1.21, row 61). ``split_d`` (bytes 248..249) is the zero split of
+    fw 0.2.67-0.2.78 (the zero measured as two points either side of the centre PWM); always 0 since fw 0.2.79,
+    where the wizard measures the zero at the centre again (row 64)."""
 
     channel: int
     range: int
@@ -2633,7 +2655,8 @@ class CalResp(Payload):
               ("track_q_q24", "i"), ("track_age_ms", "I"), ("track_records", "I"), ("track_last_pairs", "H"),
               ("track_spread16", "H"), ("cm_q8", "h"), ("cm_probes", "H"), ("cm_age_ms", "I"),
               ("prov_state", "B"), ("_r3", "3x"), ("prov", "56s"), ("prov_power_ons_since", "I"),
-              ("prov_minutes_since", "I")]
+              ("prov_minutes_since", "I"), ("cap_trailer", "B"), ("cap_flags", "B"), ("cap_stored", "H"),
+              ("cap_stored_fpga", "H"), ("cap_value", "H")]
     channel: int = 0
     dc_calibration_offset: tuple[int, ...] = field(default_factory=lambda: (0,) * 7)
     input_calibration: tuple[int, ...] = field(default_factory=lambda: (0,) * 7)
@@ -2699,6 +2722,14 @@ class CalResp(Payload):
     prov: bytes = bytes(56)
     prov_power_ons_since: int = CAL_AGE_NONE
     prov_minutes_since: int = CAL_AGE_NONE
+    #: 1.24 (row 64, 356..363): the stored FPGA 0x153A capture stages (sector 708 bytes 488..503): trailer state
+    #: (CAP_TRAILER_STATES), flags (CAPF_HAS | CAPF_TRAINED | CAPF_OTHER), the stored 0x63 value and the FPGA version
+    #: word it was trained on (0 unless valid), the 0x63 value in effect
+    cap_trailer: int = 0
+    cap_flags: int = 0
+    cap_stored: int = 0
+    cap_stored_fpga: int = 0
+    cap_value: int = 0
     nbytes: int = field(default=0, compare=False)
 
     @classmethod
@@ -2721,6 +2752,41 @@ class CalResp(Payload):
     def has_provenance(self) -> bool:
         """The answer carries the 1.16 provenance block (356 bytes)."""
         return self.nbytes >= 356
+
+    @property
+    def has_capture(self) -> bool:
+        """The answer carries the 1.24 capture stage fields (364 bytes)."""
+        return self.nbytes >= 364
+
+    def describe_capture(self) -> dict[str, Any] | None:
+        """356..363 (protocol 1.24) in words; None for an older answer."""
+        if not self.has_capture:
+            return None
+        f = self.cap_flags
+        st = CAP_TRAILER_STATES.get(self.cap_trailer, f"state {self.cap_trailer}")
+        out: dict[str, Any] = {"has_stages": bool(f & CAPF_HAS), "stored": st,
+                               "stored_value": f"0x{self.cap_stored:04X}" if self.cap_trailer == 1 else None,
+                               "stored_stages": cap_stages_text(self.cap_stored) if self.cap_trailer == 1 else None,
+                               "stored_fpga": f"0x{self.cap_stored_fpga:04X}" if self.cap_trailer == 1 else None,
+                               "in_effect": f"0x{self.cap_value:04X}" if f & CAPF_HAS else None,
+                               "trained": bool(f & CAPF_TRAINED), "stored_for_other_bitstream": bool(f & CAPF_OTHER)}
+        if self.cap_trailer == 1:
+            text = (f"capture stages {out['stored_stages']} stored with the calibration (trained on FPGA "
+                    f"0x{self.cap_stored_fpga:04X})")
+        elif self.cap_trailer == 2:
+            text = "a capture stage trailer is on the card but its CRC or version is wrong"
+        else:
+            text = "no capture stages stored with the calibration"
+        if f & CAPF_HAS:
+            if f & CAPF_TRAINED:
+                text += "; in effect"
+            elif f & CAPF_OTHER:
+                text += (f"; not applied on this bitstream, {cap_stages_text(self.cap_value)} in effect: run the "
+                         "calibration wizard")
+            else:
+                text += f"; {cap_stages_text(self.cap_value)} in effect (untrained)"
+        out["text"] = text
+        return out
 
     def provenance(self) -> "Provenance | None":
         """The stored provenance when prov_state is 1 (valid), else None."""
@@ -2940,6 +3006,72 @@ def enc33_bad_pins(b: int) -> list[str]:
     return [name for bit, name in ENC33_PINS if not b >> bit & 1]
 
 
+#: protocol 1.24 (fw 0.2.79, row 64): FPGA 0x153A capture stages. GET_HEALTH 106 / GET_CAL 357 flags
+CAPF_HAS = 0x01  # the bitstream has the capture stages (0x153A+)
+CAPF_TRAINED = 0x02  # the stored value for this bitstream is in effect (else the power-on 0x08E4 or an unsaved one)
+CAPF_READ = 0x04  # outlier counts were read after a full-rate capture since boot
+CAPF_FLAGGED = 0x08  # the last read flagged a core
+CAPF_OTHER = 0x10  # a stored value exists for another bitstream (not applied: recalibrate)
+#: 0x63 at power-on: CH1 A 4, CH1 B 4, CH2 A 3, CH2 B 4, B cores by their own encode
+CAP_POWER_ON = 0x08E4
+#: the 0x36 order of the cores; flag masks use bit i = core i
+CAP_CORES = ("CH1 A", "CH1 B", "CH2 A", "CH2 B")
+#: self-check: a core is flagged when its outlier count exceeds its chip partner's by more than this
+CAP_EXCESS_LIMIT = 8
+#: GET_CAL 356: the stored value's trailer (sector 708 bytes 488..503)
+CAP_TRAILER_STATES = {0: "none", 1: "valid", 2: "bad"}
+CAP_TRAILER_MAGIC = b"ACAP"
+CAP_TRAILER_OFFSET = 488
+_CAP_TRAILER = struct.Struct("<4sHHHHI")
+
+
+def cap_stage(v: int, core: int) -> int:
+    """Stage (0..7) of core (CAP_CORES order) in a 0x63 value."""
+    return (v >> (3 * core)) & 7
+
+
+def cap_stages_text(v: int, ch: int | None = None) -> str:
+    """'CH1 A4 B4, CH2 A3 B4' as the scope writes it (cs_text); ch 0 / 1 gives one channel. ' A-clk' follows a B core
+    timed by its chip's A encode (0x63 bit 12 / 13)."""
+    if ch is None:
+        return f"{cap_stages_text(v, 0)}, {cap_stages_text(v, 1)}"
+    t = f"CH{ch + 1} A{cap_stage(v, 2 * ch)} B{cap_stage(v, 2 * ch + 1)}"
+    return t + (" A-clk" if v & (0x1000 << ch) else "")
+
+
+def cap_core_names(mask: int) -> list[str]:
+    return [n for i, n in enumerate(CAP_CORES) if mask >> i & 1]
+
+
+def cap_excess(counts: Iterable[int]) -> list[int]:
+    """Per core its outlier count minus its chip partner's (0 when below), as cs_excess."""
+    c = list(counts)
+    return [max(0, c[i] - c[i ^ 1]) for i in range(4)]
+
+
+def cap_flagged(counts: Iterable[int]) -> int:
+    """The cores whose excess is above CAP_EXCESS_LIMIT, as a mask (cs_flagged)."""
+    return sum(1 << i for i, e in enumerate(cap_excess(counts)) if e > CAP_EXCESS_LIMIT)
+
+
+def pack_cap_trailer(value: int, fpga: int) -> bytes:
+    """Sector 708 bytes 488..503: u32 'ACAP', u16 version 1, u16 length 16, u16 the 0x63 value, u16 the FPGA version
+    word it was trained on, u32 zlib.crc32 of the 12 bytes before (cs_trailer_pack)."""
+    head = struct.pack("<4sHHHH", CAP_TRAILER_MAGIC, 1, 16, value, fpga)
+    return head + struct.pack("<I", zlib.crc32(head))
+
+
+def parse_cap_trailer(b: bytes) -> tuple[int, int, int]:
+    """(state, value, fpga) of a stored trailer (cs_trailer_unpack): state 0 none (no magic), 1 valid, 2 bad (magic
+    present, version, length or CRC wrong); value and fpga are 0 unless valid."""
+    if len(b) < 16 or b[:4] != CAP_TRAILER_MAGIC:
+        return 0, 0, 0
+    _m, ver, length, v, fpga, crc = _CAP_TRAILER.unpack_from(b, 0)
+    if ver != 1 or length != 16 or crc != zlib.crc32(b[:12]):
+        return 2, 0, 0
+    return 1, v, fpga
+
+
 #: callers of event types 21 / 22 (b >> 12, protocol rows 57 / 58)
 FPGA_CALLERS = {0: "UI", 1: "host", 2: "calibration wizard", 3: "v4 class probe", 4: "check"}
 #: event type 21 reasons (a >> 5 & 3, protocol 1.19)
@@ -2949,7 +3081,9 @@ ENC_REASONS = {0: "check after a rate write", 1: "record data check", 2: "FPGA 0
 @dataclass
 class HealthResp(Payload):
     """GET_HEALTH response, 96 bytes (protocol 1.16, row 55), 104 bytes from 1.19 (row 58: the full-rate encode check
-    in 88..103; a 96-byte answer reads them as 0 and ``has_enc_check`` is False)."""
+    in 88..103; a 96-byte answer reads them as 0 and ``has_enc_check`` is False), 124 bytes and layout 2 from 1.24
+    (row 64: the FPGA 0x153A capture stages in 104..123; a shorter answer reads them as 0 and ``has_capture`` is
+    False)."""
 
     FIELDS = [("layout", "B"), ("_r0", "x"), ("length", "H"), ("usb_state", "B"), ("usb_flags", "B"),
               ("usb_power", "B"), ("usb_faddr", "B"), ("suspend_ms", "I"), ("since_config_ms", "I"), ("cp15", "I"),
@@ -2959,9 +3093,11 @@ class HealthResp(Payload):
               ("rec_exc_lr", "I"), ("rec_spsr", "I"), ("rec_exc_sp", "I"), ("rec_reset_lr", "I"),
               ("rec_reset_sp", "I"), ("rec_reset_cpsr", "I"), ("rec_fsr", "I"), ("rec_far", "I"),
               ("rec_minutes", "I"), ("enc_mode", "B"), ("enc_last33", "B"), ("enc_flags", "B"),
-              ("enc_boot33", "B"), ("enc_bad", "I"), ("enc_recovered", "I"), ("enc_checked", "I")]
-    layout: int = 1
-    length: int = 104
+              ("enc_boot33", "B"), ("enc_bad", "I"), ("enc_recovered", "I"), ("enc_checked", "I"),
+              ("cap_value", "H"), ("cap_flags", "B"), ("cap_flagged", "B"), ("cap_counts", "4H"), ("cap_reads", "I"),
+              ("cap_flagged_n", "I")]
+    layout: int = 2
+    length: int = 124
     usb_state: int = 3
     usb_flags: int = 0
     usb_power: int = 0
@@ -3000,10 +3136,59 @@ class HealthResp(Payload):
     enc_bad: int = 0
     enc_recovered: int = 0
     enc_checked: int = 0
+    #: protocol 1.24 (bytes 104..123): the 0x63 value in effect (0 without the stages), flags (CAPF_*), the cores
+    #: flagged by the last read (bit i = CAP_CORES[i]), the last 0x36 outlier counts (CH1 A, CH1 B, CH2 A, CH2 B),
+    #: full-rate captures whose counts were read, of those with a flagged core
+    cap_value: int = 0
+    cap_flags: int = 0
+    cap_flagged: int = 0
+    cap_counts: tuple[int, ...] = (0, 0, 0, 0)
+    cap_reads: int = 0
+    cap_flagged_n: int = 0
 
     @property
     def has_enc_check(self) -> bool:
         return self.length >= 104
+
+    @property
+    def has_capture(self) -> bool:
+        """The answer carries the 1.24 capture stage block (layout 2, 124 bytes)."""
+        return self.layout >= 2 and self.length >= 124
+
+    def describe_capture(self) -> dict[str, Any] | None:
+        """Bytes 104..123 (protocol 1.24) in words; None for an older answer."""
+        if not self.has_capture:
+            return None
+        f = self.cap_flags
+        if not f & CAPF_HAS:
+            return {"has_stages": False, "text": "no ADC capture stages on this bitstream (FPGA 0x153A and later)"}
+        v = self.cap_value
+        if f & CAPF_TRAINED:
+            source = "trained"
+        elif v == CAP_POWER_ON:
+            source = "power-on default"
+        else:
+            source = "not stored (a training not saved yet)"
+        read = bool(f & CAPF_READ)
+        counts = dict(zip(CAP_CORES, self.cap_counts)) if read else None
+        flagged = cap_core_names(self.cap_flagged) if read else []
+        out: dict[str, Any] = {
+            "has_stages": True, "value": f"0x{v:04X}", "stages": cap_stages_text(v), "source": source,
+            "stored_for_other_bitstream": bool(f & CAPF_OTHER), "last_counts": counts, "flagged_cores": flagged,
+            "captures_read": self.cap_reads, "captures_flagged": self.cap_flagged_n}
+        if not read:
+            state = "no 200 MSa/s capture read yet"
+        elif f & CAPF_FLAGGED:
+            state = ", ".join(f"{n}: {self.cap_counts[CAP_CORES.index(n)]} outliers" for n in flagged)
+        else:
+            state = "capture clean"
+        text = f"capture stages {out['stages']} ({source}); {state}"
+        if self.cap_flagged_n:
+            text += f"; {self.cap_flagged_n} of {self.cap_reads} full-rate captures flagged since boot"
+        if f & CAPF_OTHER:
+            text += "; a value stored for another bitstream is not applied: run the calibration wizard"
+        out["text"] = text
+        return out
 
     def describe_enc(self) -> dict[str, Any] | None:
         """Bytes 88..103 (protocol 1.19) in words; None for a 1.16..1.18 answer (96 bytes)."""
@@ -3073,7 +3258,7 @@ class HealthResp(Payload):
                    "registers": {k: f"0x{getattr(self, 'rec_' + k):08X}" for k in
                                  ("exc_lr", "spsr", "exc_sp", "reset_lr", "reset_sp", "reset_cpsr", "fsr", "far")}}
         return {"usb": usb, "cpu": cpu, "life": life, "settings": settings, "restart_record": rec,
-                "encode_check": self.describe_enc()}
+                "encode_check": self.describe_enc(), "capture_stages": self.describe_capture()}
 
 
 @dataclass
@@ -3207,7 +3392,7 @@ EVENT_TYPES = {1: "bus_reset", 2: "suspend", 3: "resume", 4: "disconnect", 5: "e
                7: "set_configuration", 8: "clear_halt", 9: "dtr", 10: "rx_ring_full", 11: "rx_release",
                12: "tx_flushed", 13: "tx_aborted", 14: "usb_irq_polled", 15: "restart", 16: "usb_init_state",
                17: "tx_abort_txcsr", 18: "tx_abort_frame", 19: "usb_postinit_state", 20: "usb_soft_disconnect",
-               21: "adc_fullrate_garbled", 22: "fpga_write"}
+               21: "adc_fullrate_garbled", 22: "fpga_write", 23: "adc_capture"}
 #: event types the fw 0.2.24 bus-level ring keeps (PC_EVBUS_TYPES)
 BUS_EVENT_TYPES = frozenset({1, 2, 3, 4, 7, 8, 12, 13, 15, 16, 17, 18, 20})
 #: PHY tuning bits as fw 0.2.25 writes them (event 19 fields 4/5: bit 0 PHY 0x0C, bits 1-5 PHY 0x20-0x24, bits 6-7
@@ -3327,6 +3512,12 @@ class DeviceEvent:
         if t == 22:  # 1.18: an FPGA write of 0x0D, 0x53, 0x56 or 0x01 = 1; b = caller << 12 | value (12 bits)
             who = FPGA_CALLERS.get(b >> 12, f"caller {b >> 12}")
             return f"fpga_write 0x{a:02X} = {b & 0xFFF}{'+' if b & 0xFFF == 0xFFF else ''} by {who}"
+        if t == 23:  # 1.24: FPGA 0x153A capture stages; a bit 4 = a training ended
+            cores = ", ".join(cap_core_names(a & 0x0F))
+            if a & 0x10:
+                end = f"no clean stage for {cores}, kept" if a & 0x0F else "now"
+                return f"adc_capture training ended: {end} {cap_stages_text(b)} (0x{b:04X})"
+            return f"adc_capture self-check flagged {cores or 'no core'}: {b} outliers beyond the chip partner"
         return self.name
 
 
