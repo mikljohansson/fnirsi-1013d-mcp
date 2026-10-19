@@ -2600,14 +2600,10 @@ void handle_acquisition_menu_touch(void)
             //Check if touch within this bounding box (fw 0.2.64: a grey, not viable, time/div cannot be chosen)
             if((xtouch >= x) && (xtouch <= x + 68) && (ytouch >= y) && (ytouch <= y + 20))
             {
-              if(!acq_view_tb_ok(((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i))
+              //Set the new time per div, the trigger point kept inside the record (fw 0.2.68: acq_view_set_tb, the
+              //path the snap after a rate change takes too)
+              if(!acq_view_set_tb(((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i))
                 break;
-
-              //Set the new time per div
-              scopesettings.timeperdiv = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i;
-
-              //The trigger point stays inside the record
-              acq_view_clamp_pos();
 
               //Display the new setting
               scope_acquisition_timeperdiv_select();

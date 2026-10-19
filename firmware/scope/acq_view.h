@@ -27,6 +27,10 @@ int acq_view_tb_ok(uint32 timeperdiv);
 //point inside the record. Returns 1 when the time/div changed. Does nothing in long mode.
 int acq_view_fit(int notice);
 
+//Set time/div index `timeperdiv` by hand (the ACQ menu's box, fw 0.2.68): the same path the snap takes. Returns 0 and
+//changes nothing when it is not viable now (acq_view_tb_ok) or in long mode.
+int acq_view_set_tb(uint32 timeperdiv);
+
 //Keep the trigger point inside the record (short mode)
 void acq_view_clamp_pos(void);
 
