@@ -10,7 +10,8 @@ Steps, all with the working directory in a temporary directory and FNIRSI_MCP_HO
 3. ``fnirsi1013d-mcp --list-tools`` exits 0, lists scope_status and reports the data dir under FNIRSI_MCP_HOME;
 4. an MCP stdio session with ``fnirsi1013d-mcp --sim ...`` (what Claude Code runs): initialize, list the tools,
    scope_status, scope_set_timebase (audited) and scope_capture, whose .npz must land in <home>/data and whose
-   audit line in <home>/logs/audit.jsonl; nothing may be written inside the venv;
+   audit line in <home>/logs/audit.jsonl, and scope_report on it (the page under <home>/reports; the plain wheel has
+   no matplotlib, so the page must say why there is no plot); nothing may be written inside the venv;
 5. the checkout-only inputs fail with their clear message: ``python -m fnirsi1013d.vectors --check`` without
    --file, ``fnirsi1013d-bench`` without --bench-link.
 Exit 0 when every step passed. No scope or serial port is touched.
@@ -58,7 +59,9 @@ async def main():
                 await call("scope_set_timebase", sample_rate="10MS/s")
                 cap = await call("scope_capture")
                 print("capture file:", cap["file"])
-                print("RESULT " + json.dumps({"file": cap["file"]}))
+                rep = await call("scope_report", source=cap["file"])
+                print("report:", rep["html"], rep["png"] or rep["plot_note"])
+                print("RESULT " + json.dumps({"file": cap["file"], "html": rep["html"], "png": rep["png"]}))
 
 anyio.run(main)
 '''
@@ -128,6 +131,11 @@ def main() -> int:
         npz = Path(res["file"]).resolve()
         if not (npz.is_file() and npz.is_relative_to(home / "data")):
             fail(f"capture file {npz} is not under {home / 'data'}")
+        page = Path(res["html"]).resolve()
+        if not (page.is_file() and page.is_relative_to(home / "reports")):
+            fail(f"report page {page} is not under {home / 'reports'}")
+        if res["png"] is None and "matplotlib is not installed" not in page.read_text(encoding="utf-8"):
+            fail("report without matplotlib does not say why it has no plot")
         audit = home / "logs" / "audit.jsonl"
         if not (audit.is_file() and "scope_set_timebase" in audit.read_text(encoding="utf-8")):
             fail(f"no audit line for scope_set_timebase in {audit}")

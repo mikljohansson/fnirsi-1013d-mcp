@@ -1365,6 +1365,54 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             return {"ok": True, **d, "in_words": _health_words(d, h)}
         return await run("scope_health", 0, {}, go)
 
+    @register(0, title="Report: plot and HTML page of a result")
+    async def scope_report(
+        source: Annotated[str, Field(description="'latest' (the newest result this server saved) or the .npz path a "
+                                                 "tool returned (files.npz / file / path); a path relative to the "
+                                                 "data directory works too")] = "latest",
+        title: Annotated[str | None, Field(description="page and plot title (default: the kind and file name)")] = None,
+        command: Annotated[str | None, Field(description="the command that produced the result, shown on the page "
+                                                         "(default: the tool and the arguments recorded in the "
+                                                         "file)")] = None,
+        caveats: Annotated[list[str] | None, Field(description="caveats to add (the tool's own recorded caveats "
+                                                               "are included)")] = None,
+        plot: Annotated[bool, Field(description="draw the PNG (needs matplotlib)")] = True,
+    ) -> dict[str, Any]:
+        """Present a saved result to the person: a PNG plot and a self-contained HTML page (the plot embedded, the
+        result table, the caveats and the generating command; no scripts or CDNs, works offline, light and dark).
+        Works for scope_capture / scope_read_capture, scope_averaged_capture, scope_decay_fit,
+        scope_capture_segments, scope_capture_and_fft, scope_spectrum and scope_bode_sweep (host or device) results.
+        Files go to <home>/reports/<date>/ (FNIRSI_MCP_HOME, default ~/.fnirsi1013d). Without matplotlib (pip
+        install "fnirsi1013d[plot]") there is no PNG and the page carries the numbers only. Touches no scope.
+
+        Showing it: Claude Code renders the PNG when you Read the file; the HTML page can be published with the
+        Artifact tool (or opened in a browser). Pass the caveats on with the numbers."""
+        args = {"source": source, "title": title, "command": command, "caveats": caveats, "plot": plot}
+
+        def go() -> dict[str, Any]:
+            from . import report as R
+
+            try:
+                if source == "latest":
+                    src = R.latest_result(cfg.data_dir)
+                else:
+                    src = Path(source).expanduser()
+                    if not src.is_absolute() and not src.is_file():
+                        src = Path(cfg.data_dir) / src
+                res = R.build_report(src, title=title, command=command, caveats=caveats,
+                                     out_dir=user_home() / "reports" / _dt.date.today().isoformat(), plot=plot)
+            except R.ReportError as e:
+                raise ToolError(f"scope_report: {e}") from None
+            show = ["Claude Code: Read the PNG file to see the plot (and show it to the person)",
+                    "publish the HTML page with the Artifact tool, or give the person its path to open in a browser"]
+            if res["png"] is None:
+                show = show[1:]
+            return {"ok": True, "kind": res["kind"], "title": res["title"], "source": res["source"],
+                    "png": res["png"], "html": res["html"], "summary": res["summary"],
+                    "table": res["rows"][:50], "caveats": res["caveats"], "command": res["command"],
+                    "plot_note": res["plot_note"], "how_to_show": show}
+        return await run("scope_report", 0, args, go)
+
     @register(1, title="Save a diagnostics report on the scope")
     async def scope_save_report() -> dict[str, Any]:
         """Ask the scope to write its diagnostics report to its SD card (firmware 0.2.52+, protocol 1.16, cap
@@ -2912,7 +2960,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             stem = (f"{now.strftime('%H%M%S_%f')[:-3]}_bode{'_device' if on_device else ''}"
                     f"{'_thru' if thru_cal == 'measure' else ''}")
             files = {"csv": res.write_csv(d / f"{stem}.csv"), "json": res.write_json(d / f"{stem}.json")}
-            meta = {**res.to_json(), "table": None}
+            meta = {**res.to_json(), "table": None, "kind": "bode", "args": args, "json": files["json"]}
             files["npz"] = sess.save_npz("bode", res.arrays(), meta)
             out["files"] = files
             if thru_cal == "measure":
