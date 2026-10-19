@@ -726,6 +726,11 @@ was found (commit not identified).
   tracked full-rate A - B (d, e) and common mode (cm) out of READ_RAW and 16-bit samples as the scope does in its own
   readouts, re-reading GET_CAL at most a second old; `scope_calibration_info` shows the tracker and the class probe in
   words (tracking / frozen / idle, age, d, e, q, cm). The simulator models the drift (`SimConfig.v4`).
+- Added: protocol 1.16 diagnostics readers (fw 0.2.52, b830434; protocol row 55, 8614032). `scope_health` (GET_HEALTH: USB state,
+  CP15, unit life, settings state, the stored restart record, in words), `scope_sd_info` reports the card image's
+  identity and whether it is the running build, `scope_calibration_info` the calibration provenance, and
+  `scope_save_report` has the scope write its report file to the card. Codecs for the stored layouts are checked
+  against the `diag_layouts` vectors; the simulator answers all four.
 
 ### Tooling, FPGA and documentation
 

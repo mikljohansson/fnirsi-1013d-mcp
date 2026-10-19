@@ -166,7 +166,9 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_decay_fit` | 1 | edge-aligned average, then `exp`, `exp+offset`, `exp2` or `power` fit after the TX edge; tau, R^2, sample points |
 | `scope_set_channel` | 2 | range, coupling, offset, probe, invert; relay changes limited to 5 per second |
 | `scope_event_log` | 0 | the scope's last 128 USB / link events with device ms (protocol >= 1.5), the pre-reset snapshot and (fw >= 0.2.24) the bus-level ring |
-| `scope_sd_info` | 0 | SD card size, partition, write window, eGON headers at 16/80/750 (optionally checksum-verified); fw >= 0.2.2 |
+| `scope_sd_info` | 0 | SD card size, partition, write window, eGON headers at 16/80/750 (optionally checksum-verified); fw >= 0.2.2; from fw 0.2.52 the identity of the image the card boots and whether it is the running one |
+| `scope_health` | 0 | fw >= 0.2.52: USB state now, MMU / caches, power-on number, operating hours, settings save state, the stored restart record, in words |
+| `scope_save_report` | 1 | fw >= 0.2.52: the scope writes its diagnostics report to `reports/` on its SD card; returns the file name |
 | `scope_calibration_info` | 0 | scaling in effect per channel, the scope's calibration (v1 / v2, flags, current correction, stored per-core zeros per clock class), calibration file and its fitted zero / slope / gain per range and core |
 | `scope_calibrate_volts` | 2 | a known DC voltage on every range: fits 0 V code, volts per code and offset slope per range and ADC core, saves the calibration file |
 | `scope_generator` | 3 | calibration-pin square wave; confirmation token to enable |
