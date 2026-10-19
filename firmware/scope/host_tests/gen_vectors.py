@@ -525,6 +525,22 @@ def build():
         "READ_SCREEN E_BAD_ARG (row >= 480, nrows 0 or row + nrows > 480): detail 0, text",
         [decoded(CMDS["READ_SCREEN"], 68, ep, status=4, flags=FLAG_RESPONSE)])
 
+    # 5d. Protocol 1.23 (fw 0.2.77, section 14 row 63): requests close the modal UI; E_BUSY keeps only a hold reason
+    ls = [0] * 70
+    ls[68:70] = [4, 1]
+    lb = struct.pack("<HH", 70, 0) + struct.pack("<70I", *ls)
+    f = frame(CMDS["GET_LINK_STATS"], 69, lb, flags=FLAG_RESPONSE)
+    add("resp_get_link_stats_1_23", f, [],
+        "1.23 GET_LINK_STATS response (70 counters; 0..67 zero here): 68 requests that closed the scope's modal screens "
+        "(menus, fold-outs, dialogs) to run, 4; 69 E_BUSY answers instead (a hold reason or the 1.5 s time-out), 1",
+        [decoded(CMDS["GET_LINK_STATS"], 69, lb, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 3) + b"calibration measurement running"
+    f = frame(CMDS["SET_CHANNEL"], 70, ep, status=7, flags=FLAG_RESPONSE)
+    add("resp_e_busy_cal_1_23", f, [],
+        "1.23 E_BUSY while the calibration wizard measures: detail 3 (2 the UI did not reach the main screen in 1.5 s, "
+        "4 file save in progress, 5 USB drive mode), then the reason text",
+        [decoded(CMDS["SET_CHANNEL"], 70, ep, status=7, flags=FLAG_RESPONSE)])
+
     # 6. ASCII probe (section 10)
     add("ascii_ver", b"#VER\n", [{"event": "ascii", "line": "VER"}], "#VER probe")
     add("ascii_local_crlf", b"#LOCAL\r\n", [{"event": "ascii", "line": "LOCAL"}], "#LOCAL with CR LF (the LF is junk)")

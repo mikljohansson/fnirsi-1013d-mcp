@@ -187,10 +187,13 @@ def test_stop_abort_host_arm_and_errors(sim_factory):
         s.bode_ctrl(P.BODE_CLOSE)
         assert not s.bode_ctrl().hdr.view & 1 and s.status().display_mode == P.DisplayMode.SCOPE
         srv.device.ui_busy = True
+        srv.device.ui_hold = P.BusyDetail.SAVE  # 1.23: only a step that must finish keeps E_BUSY
         with pytest.raises(DeviceError) as e:
             s.bode_ctrl()
-        assert e.value.status == P.Status.E_BUSY
-        srv.device.ui_busy = False
+        assert e.value.status == P.Status.E_BUSY and e.value.detail == P.BusyDetail.SAVE
+        srv.device.ui_hold = 0
+        assert s.bode_ctrl().hdr is not None  # a menu alone closes for it
+        assert s.status().ui_busy == 0
     with Scope.connect(_sim(sim_factory, variant="al3x").url) as s:
         assert not s.status().features & P.Features.BODE
         with pytest.raises(B.BodeError, match="decimation filter"):

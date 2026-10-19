@@ -588,6 +588,23 @@ async def test_waits_while_the_scope_is_starting(sim_factory, tmp_path):
         assert "still starting" in await c.fails("scope_set_timebase", divider=19)
 
 
+async def test_menu_open_on_the_scope(sim_factory, tmp_path):
+    """Protocol 1.23 (fw 0.2.77): a tool call closes a menu open on the scope and says so; older firmware: the
+    person has to close it (ToolError)."""
+    srv = sim_factory()
+    srv.device.ui_busy = True
+    async with client_for(srv, tmp_path) as c:
+        r = await c.call("scope_set_timebase", divider=9)
+        assert r["applied"]["divider"] == 9
+        assert any("Host command: menu closed" in x for x in r["caveats"])
+    assert not srv.device.ui_busy and srv.device.ui_yields == 1
+    old = sim_factory(proto_minor=22)
+    old.device.ui_busy = True
+    async with client_for(old, tmp_path) as c:
+        msg = await c.fails("scope_set_timebase", divider=9)
+        assert "close it on the scope" in msg and "before 0.2.77" in msg
+
+
 async def test_screenshot_without_cap_says_so(sim_factory, tmp_path):
     async with client_for(sim_factory(caps_override=0x1C03), tmp_path) as c:
         desc = next(t for t in (await c.session.list_tools()).tools if t.name == "scope_screenshot").description

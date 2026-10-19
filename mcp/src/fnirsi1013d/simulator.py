@@ -381,6 +381,9 @@ class SimConfig:
     ui_capture_period_s: float = 0.05
     #: legacy exclusive LOCAL/REMOTE firmware (protocol 1.2, no SHARED_MODE)
     legacy: bool = False
+    #: protocol minor the shared-mode model reports (None: P.PROTO_MINOR); below P.YIELD_MINOR (23) it models firmware
+    #: before 0.2.77, where a request while a menu is open gets E_BUSY instead of closing it
+    proto_minor: int | None = None
     #: front-end zero error per channel and core (codes added to the raw code), like the owner's unit (T8: the
     #: cores sit 5 codes apart, the stored compensation corrects 4)
     zero_error: tuple[tuple[float, float], tuple[float, float]] = ((0.0, 0.0), (0.0, 0.0))
@@ -523,7 +526,13 @@ class Device:
                     Calibration(adc_b_comp=-round(self.cfg.core_b_offset[1]))]
         self.snapshot: Settings | None = None
         self.control = P.Control.LOCAL
+        #: a modal screen is open on the scope (GET_STATUS ui_busy; 2 = STARTING). Protocol 1.23: a request that needs the
+        #: main loop closes it (every modal screen by its cancel path) unless ui_hold names a step that must finish
         self.ui_busy = False
+        #: 1.23: P.BusyDetail.CAL / SAVE / USB_DRIVE while such a step runs (E_BUSY with it), 0 none
+        self.ui_hold = 0
+        self.ui_yields = 0  # requests that closed the modal screens (firmware GET_LINK_STATS 68)
+        self.ui_yield_refused = 0  # E_BUSY answers instead (69)
         self.remote_flags = 0
         self.watchdog_s = 0
         self.last_frame_at = clock()
@@ -1741,7 +1750,23 @@ class Device:
 
     @property
     def proto_minor(self) -> int:
-        return P.PROTO_MINOR if self.shared else 2  # fw 0.2.12 = 1.5 (1.2 model in legacy)
+        if not self.shared:
+            return 2  # fw 0.2.12 = 1.5 (1.2 model in legacy)
+        return P.PROTO_MINOR if self.cfg.proto_minor is None else self.cfg.proto_minor
+
+    def _ui_yield(self) -> Callable[[P.Frame], P.Frame] | None:
+        """A request that needs the main loop while the UI is modal. Protocol 1.23 (fw 0.2.77): the modal screens close by
+        their cancel paths and it runs (None), unless a step holds them (E_BUSY with the reason); STARTING: the main loop
+        is not up yet (E_BUSY detail 2 after the firmware's 1.5 s). Older firmware: E_BUSY "UI busy"."""
+        if self.proto_minor < P.YIELD_MINOR:
+            return lambda req: self._err(req, P.Status.E_BUSY, 0, "UI busy")
+        why = self.ui_hold or (P.BusyDetail.NO_YIELD if self.ui_busy == P.UiBusy.STARTING else 0)
+        if why:
+            self.ui_yield_refused += 1
+            return lambda req: self._err(req, P.Status.E_BUSY, int(why), P.BUSY_TEXTS[why])
+        self.ui_busy = False
+        self.ui_yields += 1
+        return None
 
     def capture_info(self) -> P.CaptureInfo:
         s = self.capture_settings
@@ -1904,7 +1929,9 @@ class Device:
             if self.deferred is not None and cmd not in P.CONTROL_CMDS:
                 return self._done(req, self._err(req, P.Status.E_BUSY, 0, "deferred request pending"))
             if self.ui_busy and cmd not in P.BUSY_ALLOWED:
-                return self._done(req, self._err(req, P.Status.E_BUSY, 0, "UI is modal"))
+                refused = self._ui_yield()
+                if refused is not None:
+                    return self._done(req, refused(req))
             if not self.shared and cmd not in P.LOCAL_ALLOWED and self.control != P.Control.REMOTE:
                 return self._done(req, self._err(req, P.Status.E_NOT_REMOTE, 0, "acquire REMOTE first"))
             need = P.CMD_CAP.get(cmd)

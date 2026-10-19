@@ -229,7 +229,7 @@ class Flasher:
             except DeviceError as e:
                 if e.status != P.Status.E_BUSY:
                     raise FlashError(f"ENTER_FEL refused: {e}", 3) from e
-                last = "E_BUSY (a scope menu is open: close it)"
+                last = f"E_BUSY ({P.busy_hint(e.detail, e.text)})"
             except TransportError as e:
                 last = str(e)
             # The OK may have been lost after the scope executed ENTER_FEL (seen on 0.1.5): look for the boot ROM
@@ -255,7 +255,8 @@ class Flasher:
         if ver and ver.startswith("#OK"):
             raise FlashError(f"ENTER_FEL got no answer after {ENTER_FEL_ATTEMPTS} attempts ({last}) and the scope "
                              f"still runs firmware {parse_ver(ver).get('fw', old_fw)} ({ver}); nothing was loaded. "
-                             "Close any scope menu and rerun, or use the boot menu and --no-fel", 3)
+                             "Close any scope menu or dialog (firmware before 0.2.77) and rerun, or use the boot menu and "
+                             "--no-fel", 3)
         self.step(f"ENTER_FEL unanswered after {ENTER_FEL_ATTEMPTS} attempts but #VER is silent: assuming the scope "
                   "rebooted into FEL")
 
