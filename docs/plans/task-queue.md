@@ -204,6 +204,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   0x1537 if the FPGA is at fault), docs-gen3 (Sonnet: protocol tidy, README timings, roadmap.md, announcement draft,
   release-readiness.md). Queued behind them: fw-ui4 (step 4, needs fw-readers), Measurements v2 (needs step 2), touch batches 2-3,
   mcp 1.16/1.17, Bode device steps (after the owner's Bode bench), 0.3.0 release.
+- mcp-gen4 (done 14:25, about 570k tokens, retired): Bode host tool, protocol 1.15 and 1.16 host side; handoff mcp/AGENTS.md 1cb17e0
+  (open item 0 = the mcp release-readiness items). mcp-gen5 dispatched 14:27 on those items; 1.17 after fw-seg merges.
 - fw-ui2 (done 14:19, about 510k tokens, retired): merged 68fc8a0 and renumbered to fw 0.2.56 (CTRL page with Display / Trace style or
   Analyse / Grid / steppers / 50 % TRIG, fold-outs, strips and header gone, spectrum cards, chips, warnings in every variant,
   ACQ acquisition only, settings word 210 bit 3 + word 211); images pinned backups/fw-0.2.56_35b2c2f6.bin and
