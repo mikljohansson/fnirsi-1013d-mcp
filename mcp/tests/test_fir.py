@@ -42,6 +42,13 @@ def test_filter_names_and_status_decoding():
     ((2, 0, 0), "suspend"),
     ((3, 0x60, 2500), "resume after 2500 ms suspended, RESUME interrupt, POWER 0x60"),
     ((3, 0xE0, 40), "resume after 40 ms suspended, inferred from SOFs (no RESUME interrupt), POWER 0x60"),
+    # fw 0.2.49: a bits 6-5 = cause (0 SOFs, 1 EP0 setup, 2 EP2 OUT), bits 4-0 = POWER bits 4-0
+    ((3, 0x90, 12), "resume after 12 ms suspended, inferred from SOFs (no RESUME interrupt), POWER bits 0x10"),
+    ((3, 0xA0, 7), "resume after 7 ms suspended, inferred from an EP0 setup (no RESUME interrupt), POWER bits 0x00"),
+    ((3, 0xD2, 9), "resume after 9 ms suspended, inferred from an EP2 OUT packet (no RESUME interrupt), POWER bits 0x12"),
+    ((20, 0x42, 900), "usb_soft_disconnect (long suspend) after 900 s suspended, 4 suspends, back-off level 0"),
+    ((20, 0x35, 10), "usb_soft_disconnect (retry storm) after 10 s suspended, 3 suspends, back-off level 1"),
+    ((20, 0x02, 0xFFFF), "usb_soft_disconnect (long suspend) after >= 65535 s suspended, 0 suspends, back-off level 0"),
 ])
 def test_suspend_event_fields(ev, text):
     assert P.DeviceEvent(0, *ev).describe() == text
