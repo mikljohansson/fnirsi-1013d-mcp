@@ -5,8 +5,9 @@ the window shows where the view sits in the whole. In Scope it is the record's m
 and the window is the part on screen. In Spectrum it is the spectrum over 0..fs/2, and the window is the shown span. In
 Frequency response it is AUTO SET's overview sweep over 100 Hz .. 10 MHz, and the window is Start..Stop.
 
-This is the design (ux-overview, 2026-10-19). The firmware batch follows once the owner approves it
-(`docs/plans/task-queue.md`, under "Bottom scroll bar"). The mockups are the acceptance reference (section 9). They
+This is the design (ux-overview, 2026-10-19); fw 0.2.73 (fw-over) built it with the owner's decisions of section 10 F,
+which override the drafts below where they differ (sections 2 and 9 are updated to the build; handoff and bench
+walk-through: `firmware/AGENTS.md` section 49). The mockups are the acceptance reference (section 9). They
 follow `docs/ui-guidelines.md`, the slider paragraphs of `docs/plans/ux-makeover.md` and `docs/plans/bode-ui.md`
 section 2. Facts about the firmware are cited to the source files at fw 0.2.69. Estimates are marked as such.
 
@@ -23,43 +24,50 @@ over it exactly as today, and touch does not change.
 
 ## 2. Geometry and colours (all three modes)
 
-The row is the Scope's record-position slider, unchanged (`menu.c` `scope_draw_grid`, `tb_view.h`):
+**As built in fw 0.2.73** (owner decisions 10 F items 5 and 6, 2026-10-19 21:20 and 21:36; firmware `slider_ov.h`). The
+row keeps only what parts it from the plot; everything else is track:
 
 | Part | Pixels | Source |
 |---|---|---|
-| Frame | rect x 2..727, y 452..471 (`display_draw_rect(2, 452, 726, 20)`) | TBV_SLIDER_FRAME_*, BU_SL_FRAME_* |
-| Track | x 4..723, 720 columns | TBV_SLIDER_X / _W, BU_SL_X / _W |
-| Window | rect x .. x + w - 1, y 455..468 (14 px) | `tbv_slider`, `bu_slider_x` |
-| **Overview (new)** | **x 4..723, one column per track pixel; the twelve rows y 456..467** | this design |
+| Line | y 452, x 2..727 (white): parts the track from the plot above, which has no bottom line of its own when Grid is off | `SOV_LINE_Y`, `sov_draw_row` |
+| Track | x 2..727 (726 columns) and y 453..471 (19 rows): the old frame's 18 inside rows plus its bottom row; the frame's left, right and bottom lines are gone | `SOV_X` / `SOV_W` / `SOV_Y` / `SOV_H`; `TBV_SLIDER_X` / `_W` and `BU_SL_X` / `_W` follow |
+| Window | two vertical lines, 1 px each (white), at its left edge x and its right edge x + w - 1, over y 453..471; no top or bottom line | `sov_draw_window` |
+| Overview | every track pixel: one column per track pixel, all 19 rows | `sov_draw_run` |
+| Hit area | unchanged: the Scope y 436..479 over x 2..727, the Spectrum and Frequency response y 450 down | `TBV_SLIDER_HIT_Y`, `BU_SL_HIT_Y` |
 
-- **Rows.** The overview fills y 456..467, inside the window's top line (y 455) and bottom line (y 468). The window's
-  horizontal lines therefore never cross the data; only its two vertical edges do, one column each. Rows 453..454 and
-  469..470 stay black, so the frame keeps a clear gap. The alternative is a window as tall as the frame's inside with
-  14 rows of overview (owner question 5).
+The count: fw 0.2.71's frame was rect x 2..727, y 452..471 (`display_draw_rect(2, 452, 726, 20)`), the window a 14 px
+rect at y 455 on a track x 4..723. Without the frame's sides and bottom the free columns are x 2..727 (726) and the free
+rows y 453..471 (19). The track the window maps grew from 720 to 726 px with it, so the window, the drags and
+`bu_slider_x` scale by 726 / 720 (a 10 px drag at 25 MSa/s, 1 ms/div, 3000 samples moves 82 samples, was 83;
+`bu_slider_x(6)`, 100 Hz, is x 209, was 210).
+
+- **Rows.** The overview uses all 19 rows. Only the window's two edge lines cross it, one column each.
 - **Columns.** Column x stands for the part of the whole that maps to track pixel x. The window uses the same mapping,
-  so the window lies exactly over the part the plot shows.
+  so the window lies exactly over the part the plot shows. A frequency at the track's right end (10 MHz in Frequency
+  response, x 728 by the formula) is drawn on the last column, 727.
 - **Colours.** Outside the window the overview is drawn in the channel colour at half intensity: CH1 0x808000, CH2
   0x008080. In Frequency response it uses the magnitude colour (CH2 cyan, `bode_view.c`) or the phase colour
-  (`PHASE_COLOR` 0xFF80FF -> 0x804080) in the same way. Inside the window it is drawn in the full colour. A flagged
-  Frequency response point is `FLAG_COLOR` grey, as on the chart. All three dim colours are exact in RGB565.
+  (`PHASE_COLOR` 0xFF80FF -> 0x804080) in the same way. Between the window's edge lines (edges included) it is drawn in
+  the full colour. A flagged Frequency response point is `FLAG_COLOR` grey, as on the chart. All three dim colours are
+  exact in RGB565.
   - **Why not grey.** Grey means "not available" (ui-guidelines section 3), so a grey overview would read as missing
     data. It would also lose which channel is which.
   - **Why not full colour everywhere.** The whole track would then compete with the plot and with the window. The
     bright part is the window's content, the same part the plot shows above it, so the window reads even before the eye
-    finds its 1 px frame.
+    finds its two lines.
   - **Why dimmed and not hidden** outside the window. The part outside the window is the reason for the feature.
-- **Drawing order.** The frame first, then the overview (CH2 first and CH1 over it, the traces' order), then the window
-  rect last, in the colour the firmware draws it in today (`WHITE_COLOR`; the mockups have always drawn the frame and the
-  window grey, which stays as it was).
-- **Fonts.** Nothing in the track is text. A 13 px glyph does not fit the 12 rows, so there are no labels, no scale
-  and no "no data" line (section 7).
+- **Drawing order.** The row black and the line, then the overview (CH2 first and CH1 over it, the traces' order), then
+  the window's two edge lines last, in white (the mockups draw the line and the edges grey, LG1 / LG2, as they always
+  drew the frame and the window).
+- **Fonts.** Nothing in the track is text: no labels, no scale and no "no data" line (section 7).
 
-**Shared code (firmware batch).** A pure module, `slider_ov.c/.h`, that the host tests can build:
+**Shared code (`slider_ov.c/.h`, pure, host_tests/test_slider_ov.c; drawing in `slider_ov_draw.c`):**
 
-- the column ranges of a whole of n items (samples or bins), each with one item of overlap for joining;
-- the row of a value against a top and a bottom, clipped to 0..11;
-- the vertical run per column of a line through points;
-- the inside-window test.
+- the item range of each column of a whole of n items (samples or bins), each with one item of overlap for joining
+  (`sov_items`, and `sov_cols` stepping through the columns without a division per column);
+- the row of a value on a linear scale or fitted (`sov_row`, `sov_row_fit`), clipped to 0..18;
+- the vertical run per column of a line through points (`sov_lerp`, `sov_join`);
+- the inside-window test (`sov_inside`) and tap to jump (`sov_jump`, section 6).
 
 Each view gathers its data with it and draws runs with `display_draw_vert_line`, a run in the dim or the full colour by
 the column's place against the window.
@@ -75,7 +83,8 @@ the column's place against the window.
 - a column run is drawn from its min row to its max row.
 
 **Vertical scale.** The plot's own scale, squeezed: screen y 49..448 (what `scope_get_y_sample` returns, clipped as it
-clips) maps to the rows by row = 456 + (y - 49) x 12 / 400. That is one and a half rows per division. The track is
+clips) maps to the rows by row = 453 + (y - 49) x 19 / 400. That is 2.4 rows per division (fw 0.2.73; 1.5 in the 12-row
+draft). The track is
 therefore the plot zoomed out to the whole record. A signal clipped on the plot is clipped in the track, and a signal
 under a division peak to peak is a flat line, as it is a thin trace on the plot.
 
@@ -220,8 +229,10 @@ shows where the resonance sits against the span chosen by hand, and that is the 
   - The plot follows as today: the Scope's trace, the Spectrum's span, the Frequency response axis with the old
     points inside the new span.
   - Nothing is recomputed; only the row is redrawn.
-- **A tap on the overview** outside the window does nothing, as today. Jumping the window to a tapped place is owner
-  question 2.
+- **A tap on the overview** outside the window: in fw 0.2.73 (owner, 10 F item 2) a touch-down on the row (y 450
+  down) outside the window centres the window on it, kept on the track (`sov_jump`), and the drag goes on from there;
+  the release ends as a drag release (Scope scrolled, Spectrum panned, Frequency response re-sweeps or runs one sweep).
+  The Scope's extended drag area above the row (y 436..449, beside the cards) never jumps.
 - **Frequency response during AUTO SET.** A drag is ignored, as today, while the overview fills in.
 
 ## 7. Empty states
@@ -267,20 +278,20 @@ says why there is no data, so the track does not repeat it, and a 13 px line doe
 ## 9. Mockups
 
 Generated by `docs/mockups/gen_ux` (`common.py`: `slider_row`, `ov_svg`, `ov_line_runs`, `scope_square_overview`;
-`boards.py`: `spectrum_overview`, `pi_board`; `bode_final.py`: `track_x`, `fr_overview`, `fr_slider`):
+`boards.py`: `spectrum_overview`, `pi_board`; `bode_final.py`: `track_x`, `fr_overview`, `fr_slider`), regenerated for
+the geometry of section 2 (fw 0.2.73: the line at y 452, the 19-row track x 2..727, the window as two edge lines):
 
 | Board | Shows |
 |---|---|
-| makeover/Scope (and every board drawn on the Scope view) | the 1 kHz square's record (3000 samples at 500 kSa/s) in the track. The window is now fw 0.2.64's to-scale window (x 190, 347 px) instead of 1.00o5's fixed 181 px box. Six periods, three of them bright under the window |
+| makeover/Scope (and every board drawn on the Scope view) | the 1 kHz square's record (3000 samples at 500 kSa/s) in the track. The window is fw 0.2.64's to-scale window on the 726 px track (x 189, 350 px) instead of 1.00o5's fixed 181 px box. Six periods, three of them bright between the window's edges |
 | makeover/Phosphor, ScopeCtrlDisplay | the same record, CH1 only |
-| **makeover/ScopeOverview (new)** | a pulse-induction coil (CH1) and its TX gate (CH2, the trigger), 15000-sample record at 5 MSa/s and 10 us/div: the window is 35 px over the middle pulse's decay, and the other two pulses show dimmed in the track |
+| **makeover/ScopeOverview** | a pulse-induction coil (CH1) and its TX gate (CH2, the trigger), 15000-sample record at 5 MSa/s and 10 us/div: the window is 35 px over the middle pulse's decay, and the other two pulses show dimmed in the track |
 | makeover/Spectrum, SpectrumCtrl*, frequency-response/SpectrumSlider | 0..100 kHz in the track (the square's odd harmonics), the window over 0..50 kHz in full colour |
 | frequency-response/Main, BodeCursors, BodeSingle, BodeCtrl*, BodeMeasures | the tank's AUTO SET overview (20 points; the five below -58 dB flagged and grey) with the window over the hand-set 5 kHz .. 500 kHz. These boards assume that AUTO SET ran before the span was set by hand |
 | frequency-response/BodeFirst | no overview: AUTO SET has not run |
 | frequency-response/BodeAuto | the overview at 12 of 20 points, filling in under the 100 Hz .. 10 MHz window |
 
-The frequency-response track now starts at x 4 as `BU_SL_X` does (host test `bu_slider_x(6) == 210`); the earlier boards
-used 5. The Spectrum track does the same.
+The frequency-response and Spectrum tracks start at x 2 as `BU_SL_X` does (host test `bu_slider_x(6) == 209`).
 
 ## 10. Adversarial self-review
 
@@ -384,5 +395,11 @@ used 5. The Spectrum track does the same.
 5. Window height: not 14 px. Use the whole inside of the frame (18 px window, 14 overview rows): "backwards compat doesn't
    matter, maximize the available space; it'll be difficult enough to cram both traces in there" **(owner)**. Sections 2 and
    9 and the boards are to be regenerated to 18 px by the firmware batch's designer pass (the geometry in section 2 is now
-   superseded on this point).
+   superseded on this point). Superseded in turn by item 6.
+6. Track geometry (2026-10-19 21:36): give the traces every pixel row of the track. The row loses the frame's bottom,
+   left and right lines and keeps only the line at y 452 that parts it from the plot; the window is no longer a box but
+   its left and right edges, 1 px each in full colour over the track's full height, with no top or bottom line and no
+   margin between the row and the window; the overview is full colour between the edges and dimmed outside them; the
+   drag hit areas stay as they were **(owner)**. Built in fw 0.2.73: the track x 2..727 (726 columns) by y 453..471 (19
+   rows), section 2.
 

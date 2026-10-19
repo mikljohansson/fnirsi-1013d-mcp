@@ -127,6 +127,8 @@ The chart **(owner)**: one pane over the trace area, two y axes, no legend.
 - **Cards**: at y 426 (`UI_MS_SCOPE_Y`), as in the Scope, between the plot and the slider.
 - **Slider row (owner, 2026-10-19 19:40)**: y 452..472, the Scope's record-position slider in the same construction
   (rect 2, 452, 726 x 20; the window a 14 px box at y 455) and the same drag (fw 0.2.64: the window follows the finger).
+  fw 0.2.73 (slider-overview.md section 2): the row is a line at y 452 over a track x 2..727 / y 453..471, the window
+  its two edge lines, AUTO SET's overview in the track, and a tap outside the window centres it there.
 
 **The slider: Start..Stop over the sweepable range (owner).**
 
