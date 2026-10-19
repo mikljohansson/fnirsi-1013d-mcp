@@ -16,6 +16,7 @@ static int t_failures = 0;
   if(_a != _b) { t_failures++; printf("%s:%d: FAIL %s == %s (%lld != %lld)\n", __FILE__, __LINE__, #a, #b, _a, _b); } } while(0)
 
 #define T_TRUE(a) T_EQ(!!(a), 1)
+#define T_FALSE(a) T_EQ(!!(a), 0)
 
 #define T_MEM(a, b, n) do { t_checks++; if(memcmp((a), (b), (n))) { t_failures++; \
   printf("%s:%d: FAIL memory %s != %s (%u bytes)\n", __FILE__, __LINE__, #a, #b, (unsigned)(n)); } } while(0)

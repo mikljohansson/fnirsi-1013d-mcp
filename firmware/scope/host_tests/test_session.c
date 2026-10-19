@@ -165,7 +165,7 @@ static void test_info(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, 76);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 22); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 23); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
   T_EQ(pc_get_u16(r.p + 8), 0x1532); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS), PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED), PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED);
@@ -275,7 +275,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.22,fpga=0x1532");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.23,fpga=0x1532");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -998,19 +998,25 @@ static void test_busy_context(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 1);
 
-  //When no MAIN poll came for PC_MODAL_MS the UI is modal: E_BUSY, and ui_busy in GET_STATUS
-  mock_clear_resps();
+  //When no MAIN poll came for PC_MODAL_MS the UI is modal: ui_busy in GET_STATUS; the safe set is still answered
   mock.now += PC_MODAL_MS + 1;
-  seq = next_seq++;
-  push_frame(PC_CMD_SET_CHANNEL, seq, "\0\x01\0\x03", 4);
-  pc_poll(&S, PC_CTX_BUSY);
-  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, PC_E_BUSY); T_EQ(mock.ch_writes, 0);
   r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_BUSY);
-  T_EQ(r.p[3], PC_UI_MODAL);
+  T_EQ(r.p[3], PC_UI_MODAL); T_FALSE(pc_ui_yield_pending(&S));
   r = req_ctx(PC_CMD_GET_BATTERY, 0, 0, PC_CTX_BUSY);
   T_EQ(r.h.status, 0);
   r = req_ctx(PC_CMD_GET_CAPTURE_INFO, 0, 0, PC_CTX_BUSY);
   T_EQ(r.h.status, PC_E_STATE);                                  //answered (no capture yet), not E_BUSY
+  T_FALSE(pc_ui_yield_pending(&S));
+
+  //1.23: anything else asks the modal UI to yield (no E_BUSY, no FPGA access) and the next MAIN poll answers it
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_SET_CHANNEL, seq, "\0\x01\0\x03", 4);
+  pc_poll(&S, PC_CTX_BUSY);
+  T_EQ(mock_nresps, 0); T_EQ(mock.ch_writes, 0); T_TRUE(pc_ui_yield_pending(&S));
+  pc_poll(&S, PC_CTX_MAIN);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0); T_EQ(mock.ch_writes, 1);
+  T_FALSE(pc_ui_yield_pending(&S));
 
   //STARTING: USB is up but the main loop has not finished its first pass
   mock_reset(0x1532);
@@ -1036,10 +1042,168 @@ static void test_busy_context(void)
   r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
   T_EQ(r.p[3], PC_UI_IDLE);
   r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
-  T_EQ(pc_get_u16(r.p), 68); T_EQ(pc_get_u32(r.p + 4 + 4 * 28), 4800);       //duration of the first pass
+  T_EQ(pc_get_u16(r.p), 70); T_EQ(pc_get_u32(r.p + 4 + 4 * 28), 4800);       //duration of the first pass
   T_EQ(pc_get_u32(r.p + 4 + 4 * 29), 1200 + 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 30), 1500 + 1);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 31), 30 + 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 32), 1500 + 1);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 33), 4800 + 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 34), 4800 + 1);
+}
+
+//1.23 (fw 0.2.77, docs/protocol.md section 14 row 63): host requests close the modal screens. The mock UI runs its
+//innermost modal loop (mock_ui_modal_pass: the touch scan's BUSY poll, then the yield check) with the timer poll beside
+//it; the main loop's MAIN poll comes only once every screen has closed.
+static uint32_t ui_run_modal(uint32_t max_ms)
+{
+  uint32_t t;
+
+  for(t = 0; (t < max_ms) && mock.ui_modal; t++)
+  {
+    mock.now++;
+    pc_poll(&S, PC_CTX_ISR);
+    mock_ui_modal_pass(&S);
+    mock_tx_release();
+  }
+
+  return t;
+}
+
+static uint32_t link_counter(int i)
+{
+  resp_t r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
+
+  T_EQ(pc_get_u16(r.p), PC_LINK_COUNTERS);
+  return pc_get_u32(r.p + 4 + 4 * i);
+}
+
+static void busy_with_hold(uint8_t why, const char *text)
+{
+  resp_t   r;
+  uint16_t seq;
+  uint32_t refused = link_counter(69), writes = mock.ch_writes;
+
+  mock.ui_modal  = 1;
+  mock.ui_hold   = why;
+  mock.ui_cancels = 0;
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_SET_CHANNEL, seq, "\0\x01\0\x03", 4);
+  ui_run_modal(5);
+
+  //E_BUSY at once with the reason as detail and text; the screen stays open, nothing yields
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, PC_E_BUSY); T_EQ(pc_get_u16(r.p), why);
+  T_EQ(r.len, 2 + strlen(text)); T_TRUE(!memcmp(r.p + 2, text, strlen(text)));
+  T_EQ(mock.ui_modal, 1); T_EQ(mock.ui_cancels, 0); T_EQ(mock.ch_writes, writes); T_FALSE(pc_ui_yield_pending(&S));
+  T_EQ(link_counter(69), refused + 1);
+
+  //The step ends: the next request yields as usual
+  mock.ui_hold = 0;
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_GET_CHANNEL, seq, "\0", 1);
+  ui_run_modal(50);
+  T_EQ(mock.ui_modal, 0); T_EQ(mock.ui_cancels, 1); T_EQ(mock_nresps, 0);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0);
+  mock.now += PC_MODAL_MS + 1;
+}
+
+static void test_modal_yield(void)
+{
+  resp_t   r;
+  uint16_t seq;
+  uint32_t t, yields;
+
+  setup(0x1532);
+  yields = link_counter(68);
+  T_EQ(yields, 0); T_EQ(link_counter(69), 0);
+
+  //A menu with a fold-out over it, the user idle in it: no request, nothing closes
+  mock.ui_modal = 2;
+  t = ui_run_modal(PC_MODAL_MS + 50);
+  T_EQ(t, PC_MODAL_MS + 50); T_EQ(mock.ui_modal, 2); T_EQ(mock.ui_cancels, 0);
+
+  //Commands answered from the ISR never yield: GET_STATUS reports the modal UI truthfully
+  r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
+  T_EQ(r.h.status, 0); T_EQ(r.p[3], PC_UI_MODAL);
+  r = req_ctx(PC_CMD_PING, "y", 1, PC_CTX_ISR);
+  T_EQ(r.h.status, 0);
+  r = req_ctx(PC_CMD_GET_HEALTH, 0, 0, PC_CTX_ISR);
+  T_EQ(r.h.status, 0);
+  T_FALSE(pc_ui_yield_pending(&S)); T_EQ(mock.ui_modal, 2);
+
+  //SET_CHANNEL: both screens unwind by their cancel paths, innermost first, then the main loop answers it
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_SET_CHANNEL, seq, "\0\x01\0\x03", 4);
+  t = ui_run_modal(100);
+  T_TRUE(t <= 3);
+  T_EQ(mock.ui_modal, 0); T_EQ(mock.ui_cancels, 2);
+  T_EQ(mock_nresps, 0); T_EQ(mock.ch_writes, 0);                 //nothing ran outside the main loop
+  T_TRUE(pc_ui_yield_pending(&S));
+  push_frame(PC_CMD_GET_STATUS, next_seq++, 0, 0);               //queued behind the request: answered after it
+  pc_poll(&S, PC_CTX_ISR);
+  pc_poll(&S, PC_CTX_ISR);
+  T_EQ(mock_nresps, 0);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0); T_EQ(mock.ch_writes, 1);
+  T_FALSE(pc_ui_yield_pending(&S));
+  pc_poll(&S, PC_CTX_MAIN);
+  T_EQ(link_counter(68), yields + 1); T_EQ(link_counter(69), 0);
+
+  //After the answer a screen opened again stays open (the MAIN poll cleared the request)
+  mock.ui_modal = 1;
+  mock.ui_cancels = 0;
+  mock.now += PC_MODAL_MS + 1;
+  ui_run_modal(20);
+  T_EQ(mock.ui_modal, 1); T_EQ(mock.ui_cancels, 0);
+
+  //The exceptions: E_BUSY with the reason, the screen stays
+  busy_with_hold(PC_BUSY_CAL, "calibration measurement running");
+  busy_with_hold(PC_BUSY_SAVE, "file save in progress");
+  busy_with_hold(PC_BUSY_USB_DRIVE, "USB drive mode");
+
+  //A hold that starts after the request asked to yield (the wizard's Calibrate tapped at that moment): E_BUSY then
+  mock.ui_modal = 1;
+  mock.ui_cancels = 0;
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_SET_CHANNEL, seq, "\0\x01\0\x03", 4);
+  pc_poll(&S, PC_CTX_ISR);
+  T_TRUE(pc_ui_yield_pending(&S));
+  mock.ui_hold = PC_BUSY_CAL;
+  T_FALSE(pc_ui_yield_pending(&S));
+  ui_run_modal(3);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, PC_E_BUSY); T_EQ(pc_get_u16(r.p), PC_BUSY_CAL);
+  T_EQ(mock.ui_modal, 1);
+  mock.ui_hold = 0;
+
+  //A UI pass with no yield check (auto set, a step that must finish): E_BUSY detail 2 after PC_YIELD_MS
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_SET_CHANNEL, seq, "\0\x01\0\x03", 4);
+  for(t = 0; (t < PC_YIELD_MS + 10) && !mock_nresps; t++)
+  {
+    mock.now++;
+    pc_poll(&S, PC_CTX_ISR);
+    pc_poll(&S, PC_CTX_BUSY);
+    mock_tx_release();
+  }
+  T_TRUE(t >= PC_YIELD_MS); T_TRUE(t <= PC_YIELD_MS + 2);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, PC_E_BUSY); T_EQ(pc_get_u16(r.p), PC_BUSY_NO_YIELD);
+  T_TRUE(!memcmp(r.p + 2, "UI did not return to the main screen", 36));
+  T_FALSE(pc_ui_yield_pending(&S)); T_EQ(mock.ch_writes, 1);
+  T_EQ(mock.ui_modal, 1);
+
+  //Not modal (the main loop runs): requests wait for it, nothing yields
+  pc_poll(&S, PC_CTX_MAIN);
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_GET_CHANNEL, seq, "\0", 1);
+  pc_poll(&S, PC_CTX_ISR);
+  pc_poll(&S, PC_CTX_BUSY);
+  T_FALSE(pc_ui_yield_pending(&S)); T_EQ(mock_nresps, 0);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0);
+  mock.ui_modal = 0;
 }
 
 static void test_isr_context(void)
@@ -1054,7 +1218,8 @@ static void test_isr_context(void)
   r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
   T_EQ(r.h.status, 0); T_EQ(r.len, 48); T_EQ(r.p[0], PC_SHARED);
 
-  //...and leaves everything else for the main loop, never E_BUSY, however long the main loop takes
+  //...and leaves everything else for the main loop: no E_BUSY while the main loop runs (1.23: a modal UI is asked to
+  //yield and E_BUSY comes only after PC_MODAL_MS + PC_YIELD_MS without a MAIN poll, test_modal_yield)
   mock_clear_resps();
   push_frame(PC_CMD_SET_CHANNEL, 2000, "\0\x01\0\x03", 4);
   for(k=0;k<1000;k++)
@@ -1520,7 +1685,7 @@ static void test_ext_trigger(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
-  T_EQ(r.p[1], 22);                                             //proto 1.22
+  T_EQ(r.p[1], 23);                                             //proto 1.23
 
   //Generator on, then EXT: the generator goes off
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -1644,7 +1809,7 @@ static void test_fast_path_no_fpga(void)
     T_EQ(r.p[42], 0x06);                                         //the cached byte, no 0x28 read
   }
 
-  //FPGA requests queued while only fast polls run (UI not modal, then modal: E_BUSY from BUSY polls)
+  //FPGA requests queued while only fast polls run (UI not modal, then modal: 1.23 the yield request, session state only)
   for(k=0;k<2;k++)
   {
     mock_clear_resps();
@@ -2023,7 +2188,7 @@ static void test_fel_reset_stall(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 22);                                             //proto_minor 1.22
+  T_EQ(r.p[1], 23);                                             //proto_minor 1.23
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -2088,7 +2253,7 @@ static void test_fel_reset_stall(void)
   setup(0x1532);
   mock.enc.bad = 7100; mock.enc.recovered = 7101;
   r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
-  T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 68); T_EQ(r.len, 4 + 68 * 4);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 70); T_EQ(r.len, 4 + 70 * 4);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 49), 6000); T_EQ(pc_get_u32(r.p + 4 + 4 * 56), 6007);   //restart record
   T_EQ(pc_get_u32(r.p + 4 + 4 * 57), 0);                         //retired (usb_irq_races, fw 0.2.20)
   T_EQ(pc_get_u32(r.p + 4 + 4 * 47), 0);                         //retired (usb_irq_polled, fw 0.2.12-0.2.20)
@@ -2538,7 +2703,7 @@ static void test_decim_fir_protocol(void)
   setup(0x1535);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_DECIM | PC_CAP_FIR), PC_CAP_DECIM | PC_CAP_FIR);
-  T_EQ(r.p[1], 22);
+  T_EQ(r.p[1], 23);
   set_trigger(0x30, 0, 0, 0, 0, 3000, 6000, 0, 0, &r);
   T_EQ(r.h.status, 0);
   memset(p, 0, 4); p[0] = 2; p[1] = 0x08;
@@ -2674,7 +2839,7 @@ static void test_seq_segments(void)
 
   setup(0x1536);
   r = req(PC_CMD_GET_INFO, 0, 0);
-  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 22);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 23);
   r = status();
   T_EQ(r.len, 48); T_EQ(pc_get_u16(r.p + 44), 0x5F); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
   mock.ui_avg_state = 2; mock.ui_avg_log2n = 6;
@@ -3034,7 +3199,7 @@ static void test_enc_check(void)
   T_EQ(mock.enc_status_reads, 2); T_EQ(mock.enc.replaced, 2);
   //GET_LINK_STATS 64-67 (1.22): rate writes, filter writes, sampling resets, captures judged by their data
   r = req(PC_CMD_GET_LINK_STATS, 0, 0);
-  T_EQ(pc_get_u16(r.p), 68); T_EQ(r.len, 4 + 4 * 68);
+  T_EQ(pc_get_u16(r.p), 70); T_EQ(r.len, 4 + 4 * 70);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 64), mock.fpga_rate_writes); T_TRUE(mock.fpga_rate_writes >= 1);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 65), mock.fpga_filter_writes);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 66), mock.arms); T_EQ(pc_get_u32(r.p + 4 + 4 * 67), 2);
@@ -3226,6 +3391,7 @@ int main(void)
 {
   test_diag_wire();
   test_info();
+  test_modal_yield();
   test_shared_basics();
   test_ascii_ver();
   test_channel();

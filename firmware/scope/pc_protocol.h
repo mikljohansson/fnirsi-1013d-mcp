@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            22    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            23    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -47,6 +47,8 @@
                                         //1.22 (provisional numbering): FPGA bus contract (fw 0.2.72): READ_TRACE
                                         //      exact (dummy strobe), legacy EXT shift, GET_LINK_STATS 68 counters,
                                         //      GET_EVENT_LOG flags bits 2:1 (the type 22 trace level)
+                                        //1.23 (provisional numbering): host requests close the modal screens
+                                        //      instead of E_BUSY; E_BUSY details 2-5, GET_LINK_STATS 70 (fw 0.2.77)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4

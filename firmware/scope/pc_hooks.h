@@ -37,6 +37,20 @@ void pc_glue_init(void);              //after the settings are loaded, before us
 void pc_glue_poll_main(void);         //top of the main loop
 void pc_glue_poll_busy(void);         //UI busy loops and touch scans: no FPGA access
 void pc_glue_poll_isr(void);          //1 ms timer interrupt: safe commands and the TX pump only
+
+//fw 0.2.77 (protocol 1.23, docs/ui-guidelines.md section 4): a host request that needs the main loop closes the modal
+//screens. Every modal loop (menus, fold-outs, dialogs, the Settings screen, the file viewers, the first-run screen, the
+//wizard between steps) checks PC_UI_YIELD() once per iteration, after its touch scan, and when it is 1 leaves by its own
+//cancel path (a dialog = Cancel / No, a menu or fold-out = closed, a screen = Back / Exit / Later); never by a path that
+//writes something the user did not confirm. Steps that must finish set a hold reason (E_BUSY with it, no yield):
+//prev = pc_glue_ui_hold(PC_HOLD_*); ...; pc_glue_ui_hold(prev). The codes are the E_BUSY details (pc_cmds.h PC_BUSY_*).
+#define PC_HOLD_CAL           3     //a calibration measurement (wizard step, volts calibration step)
+#define PC_HOLD_SAVE          4     //a file save (SAVE PIC / SAVE WAVE, the report, the Bode CSV)
+#define PC_HOLD_USB_DRIVE     5     //the USB drive screen (the serial port is gone anyway)
+int  pc_glue_ui_yield(void);          //1: a host request waits for the base screen: leave by the cancel path
+int  pc_glue_ui_hold(int why);        //set the hold reason (0 none), returns the previous one
+const char *pc_glue_yield_note(void); //"Host command: menu closed" for UI_YIELD_NOTE_MS after a yield, else 0
+#define PC_UI_YIELD()           pc_glue_ui_yield()
 void pc_glue_ui_service(void);        //main loop, after the MAIN poll: MCP indicator
 int  pc_glue_ui_arm_allowed(void);    //0 while a host READ_RAW waits for the UI capture in flight
 int  pc_glue_host_busy(void);         //fw 0.2.68: a host acquisition in progress (the RUN/STOP chip and button read RUN)

@@ -7,6 +7,7 @@
 #include <assert.h>
 
 #include "mock_hal.h"
+#include "pc_cmds.h"
 
 mock_state mock;
 mock_resp  mock_resps[MOCK_MAX_RESP];
@@ -504,6 +505,23 @@ uint32_t pc_hal_settings_fingerprint(void)
 }
 
 void pc_hal_indicator(int state) { mock.indicator = state; mock.indicator_draws++; }
+uint8_t pc_hal_ui_hold(void) { return mock.ui_hold; }
+
+int mock_ui_modal_pass(void *session)
+{
+  pc_session *s = (pc_session *)session;
+
+  pc_poll(s, PC_CTX_BUSY);
+
+  if(mock.ui_modal && pc_ui_yield_pending(s))
+  {
+    mock.ui_modal--;
+    mock.ui_cancels++;
+    return 1;
+  }
+
+  return 0;
+}
 
 //----------------------------------------------------------------------------------------------------------------------------------
 

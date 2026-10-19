@@ -541,6 +541,13 @@ static void test_warnings(void)
   //Every warning fits the 726 px plot in the 13 px font
   s = "X-Y needs both channels: switch on CH1 and CH2";
   T_TRUE(ui_text_width(&font_2, s) <= 700);
+
+  //fw 0.2.77: the note after a host request closed the menus (at most 50 characters, one line in every mode's warning
+  //slot: the Scope's 13 px line, the Frequency response's)
+  T_STR(ui_yield_note, "Host command: menu closed");
+  T_TRUE(strlen(ui_yield_note) <= 50);
+  T_TRUE(ui_text_width(&font_2, ui_yield_note) <= 700);
+  T_TRUE(ui_text_width(&font_3, ui_yield_note) <= 500);
 }
 
 static void test_spec_cards(void)
