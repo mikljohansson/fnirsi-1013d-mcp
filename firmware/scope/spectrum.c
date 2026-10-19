@@ -3,8 +3,8 @@
 //   fw 0.2.27: FFT_BENCH (C2). fw 0.2.28: the spectrum display mode (S1).
 //
 // Layout of the trace area while the mode is on (x 2..729, y 48..479; fw 0.2.71, ux-makeover.md "Spectrum slider"):
-//   y  50..402  plot, 8 divisions of 44 px (x 6..726); warnings at its top middle; the waterfall's and density's colour
-//               legend inside its top right (y 72)
+//   y  50..402  plot, 8 divisions of 44 px (x 6..726); warnings at its top middle (fw 0.2.75: the waterfall's and
+//               density's colour legend removed, owner)
 //               vertical grid lines at the 1-2-5 frequency steps of the span, labelled (bode_ui.h bu_fgrid, the grid
 //               rule of ui-guidelines.md section 3); horizontal at the labelled dB divisions
 //   y 406       the frequency labels under their lines
@@ -163,7 +163,6 @@ uint32 spectrum_bench(uint8 *out, uint32 reps)
 #define PLOT_Y                50
 #define PLOT_H                352
 #define PLOT_YDIV             8
-#define INFO_Y1               (PLOT_Y + 22)   //the colour legend, under the warning line
 #define FLABEL_Y              406
 #define CARDS_Y               UI_MS_SPEC_Y    //from here to the slider: the cards; touches there do nothing
 
@@ -1157,38 +1156,6 @@ static void spec_draw_density(void)
   }
 }
 
-//Colour legend above the plot's top right (a readout): bottom level, the palette, top level
-static void spec_draw_legend(const SPECVIEW *v, int ch)
-{
-  char   t[24], *p;
-  uint32 x, y, x0 = PLOT_X + PLOT_W - 40 - 128;
-
-  if(!spec_pal_ok)
-    spec_palette();
-
-  for(y = INFO_Y1 + 2; y < INFO_Y1 + 11; y++)
-    for(x = 0; x < 128; x++)
-      displaybuffertmp[y * 800 + x0 + x] = (spec.view == VIEW_DENSITY) ? dens_pal[40 + ((2 * x * 215) >> 8)] : spec_pal[2 * x];
-
-  //Density: rare / old on the left, frequent on the right (white)
-  if(spec.view == VIEW_DENSITY)
-  {
-    display_set_font(&font_2);
-    display_set_fg_color(0x00A0A0A0);
-    text_right(x0 - 4, INFO_Y1, "rare or old");
-    display_text(x0 + 132, INFO_Y1, (int8 *)"frequent");
-    return;
-  }
-
-  display_set_font(&font_2);
-  display_set_fg_color(0x00A0A0A0);
-  fmt_int(t, (v->top - PLOT_YDIV * v->cdb_per_div) / 100);
-  text_right(x0 - 4, INFO_Y1, t);
-  p = fmt_int(t, v->top / 100);
-  fmt_str(p, spec_frame[ch].unit_amps ? " dBA" : " dBV");
-  display_text(x0 + 132, INFO_Y1, (int8 *)t);
-}
-
 //----------------------------------------------------------------------------------------------------------------------------------
 // Parameters as the CTRL page's Analyse fold-out shows them (fw 0.2.56; the strip before): value names from ui_ctrl.h
 
@@ -1497,7 +1464,6 @@ static int spectrum_display_body(void)
   else if(spec.have[hch])
   {
     peak[hch] = spec_find_peak(&v, spec_db[hch]);
-    spec_draw_legend(&v, hch);
   }
 
   spec_draw_cards(&v, peak, hch, bin_mhz);
