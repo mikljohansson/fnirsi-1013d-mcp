@@ -274,7 +274,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   60+ (Bode on the device D1-D5), rel-gen1 (bitstream distribution, releasing.md, README rewrite, release checklist). Waiting for
   0x1538 to merge: fpga-gen8 (trigger types, peak detect, hardware counter: 0x1539), then the pulse pattern generator and the
   streaming logger design; mcp-gen6 (1.19 / 1.20 host side, result presentation helpers) after fw-enc / fw-bode land.
-- fpga-gen7 (running, 10-19 16:40-): 0x1537 leaves ADC chip 2 in a bad encode phase after a write in the scope's arm sequence (bench
+- fpga-gen7 (done 17:30, about 355k tokens, retired): 0x1538 merged (stateless encode, B-first guaranteed, read 0x33 self-check,
+  tb_encphase; root cause of 0x1537 = encA setup slack -0.209 ns, of 0x1535 = async enable race); pinned backups/
+  al3_seg_0x1538_0c24ecf6.bin + padded 2fc7ea5b..., in fpga/al3/dist as unbenched; bench checks fpga/al3/README.md section 8. Was: 0x1537 leaves ADC chip 2 in a bad encode phase after a write in the scope's arm sequence (bench
   16:33-16:40); reproduce in simulation, fix as 0x1538 with a phase self-check, pin, handoff.
 - fw-cal4 (done 16:45, about 400k tokens, retired; handoff section 37): 0.2.60 (failure line, instruction) and 0.2.61 (encode check-and-retry after 0x0D, write trace events, protocol 1.18) merged. Was: running 10-19 15:50-: 0.2.60 merged (failure line with range/rate/core and RMS numbers, instruction names the post;
   pinned backups/fw-0.2.60_27634587.bin, loaded 16:18). Now on the real fault: the wizard's 200 MS/s class reads one garbage core
