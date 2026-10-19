@@ -2031,3 +2031,46 @@ runs on 0x1535 unchanged (step 2), so no firmware rollback is needed.
 - 0x1537 will need the version rule only (`pc_variant_from_version` already maps 0x1537..0x153F to SEQ).
 - Phosphor fast capture: design in docs/plans/phosphor-fast-capture.md (hundreds of wfm/s at fast time bases), not built.
 - UI 16-bit hardware averaging (see "decided" above) and an Average count setting are UX decisions for the owner.
+
+## 36. fw-calnoise: the wizard's "too much noise" on 0.2.59 (fw 0.2.60, protocol unchanged)
+
+Bench fact (owner, 2026-10-19 15:45, 0.2.59 in RAM, FPGA 0x1535): the Zero level step failed "too much noise" on both
+channels most of the time, probes and USB unplugged; 0.2.48's base calibration passed in the morning (stored noise
+0.6-1.3 codes). Coordinator's host numbers right after (USB in, generator off, one 3000-sample READ_RAW per core at
+200 MSa/s legacy): raw std 0.5-1.1 codes per core, 2.1 worst (CH2 range 0).
+
+Findings (by reading and host tests; nothing benched yet):
+- Not the merge. `cal_result` / `cal_measure` / `cal_channel` are byte-for-byte 0.2.48's `scope_do_baseline_calibration`
+  path (moved by fw-cal3, untouched by fw-ui4 except the Cancel polls between ranges). `acal_rms16` over the merged
+  halves is the per-core RMS about the merged mean: n merged, cores never pooled, 1/16 code compared with 48, the noise
+  check runs before the drift check. Host: the coordinator's numbers with a 0.3-code drift between halves give 9-35 /16,
+  the drift adds about 0.02 code (test_adc_cal `test_zero_noise_bench`).
+- Not the state. Calibration conversions run legacy (K = 0: `pc_dec_ui_arm` is only set by the UI acquisition), the
+  16-bit read returns early for `calibrationsettings`, the v4 hooks skip it, 0x1536 seq is off on 0x1535, the FPGA write
+  address resets to 0 at every conversion so the read at 100..600 is always fresh. `cal_begin` differs from 0.2.48 only by
+  a menu redraw and CH1/CH2 dcoffset = 0, neither used by the scratch channel; the Diagnostics / first-run entries reach
+  the same `cal_wizard_run`. The generator is not touched by the zero step (as in 0.2.48; default on at 1 kHz in 709).
+- What the check measures that the host capture does not: the RMS pools 8 gated (2 MSa/s, 250 us each) or 64 full-rate
+  conversions over 0.1-0.5 s, so it includes what moves between conversions (50 Hz pickup on the open BNCs, offset-PWM
+  ripple phase, drift) and any rare readout glitch (one 64-code outlier per 500 samples alone is 2.9 codes). A
+  15 us host capture sees neither. Inference: the afternoon environment (Bode bench, cables, hands near the open BNCs)
+  is the most likely difference from the morning; unproven.
+
+Built (27556e8): `acal_acc.convsq` + `acal_rms16_within` (RMS about each conversion's own mean), `acal_range_check`
+(the store's checks with an `acal_fail`: class, core, value, within16), `cw_zero_detail`, and the result line for noise
+and drift: "CH1: too much noise, range 6 at 2 MSa/s: core B 3.3 codes, 1.1 per capture" / "CH2: zero still moving,
+range 1 at 200 MSa/s: core A 0.8 code" (fits the dialog, test_cal_wizard). Limit unchanged: 3 codes of the same
+quantity 0.2.48 checked. Range on the line is 1-based like the progress line (range 1 = 5 V/div, 6 = 0.1 V/div).
+
+Bench check (owner): run Zero level with probes and USB unplugged and read the lines.
+- Per capture about the coordinator's 0.5-2 codes, total above 3: something moves between conversions. Pickup on the
+  open input scales with sensitivity (range 6 is 50 x range 1) and shows mostly at 2 MSa/s; offset-PWM ripple is
+  range-independent and shows at 200 MSa/s. Retry with both BNCs shorted (shorting caps or 50 Ohm terminators) and
+  hands and cables away: passing then means pickup, not firmware; the wizard text could then ask for shorted inputs.
+- Per capture as large as the total: noise inside the captures. Compare with a host READ_RAW std at that range and
+  rate (coordinator's method): host normal but the line large means the firmware readout path (bus glitches), host
+  large too means the front end.
+- If it passes: GET_CAL noise bytes give the stored per-class / core / range totals to compare with the morning.
+Open: a decision on the zero step's input condition (open vs shorted) and whether the noise check should use the
+within-capture RMS (the drift check, 0.5 code between halves, already guards the zero's mean against slow movement).
+Image (GCC 10, MMU) and nommu built from the merge commit; hashes in the coordinator's report.
