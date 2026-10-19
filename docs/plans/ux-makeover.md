@@ -96,7 +96,8 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq, Period (was Cycle), +Width, -Width (were Time+, Time-), +Duty, -Duty (were
   Duty+, Duty-); the "Freg" typo goes with it. Values are formatted to fit the card (four significant digits and a
   unit). The spectrum's cards use the same scheme: [Peak] 1.000kHz and [Level] +2.7dBV in the channel colour, [RBW]
-  146Hz with a neutral grey block. The record-position slider row under the grid stays in every mode. Roadmap,
+  146Hz with a neutral grey block. Cards stay 118 x 22 px (three per channel per row fit the 726 px plot; the name
+  block without padding leaves about 22 px of margin for "Freq 1.000kHz"). The record-position slider row under the grid stays in every mode. Roadmap,
   not now: a spectrum card set (peak frequency and level per channel, THD) and the FPGA hardware measurements of
   docs/plans/roadmap.md section 8 item 6 feeding the same cards.
 - **Warnings**: top-middle of the plot in every mode (y 70), stating consequence and
