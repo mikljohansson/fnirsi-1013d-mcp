@@ -4835,18 +4835,21 @@ void move_trigger_point_position(void)
   positionlimitH = (((fpgasettings.settriggerpoint) )*( disp_xpos_per_sample));//+15;
   positionlimitL = (((-(fpgasettings.totalsamples-fpgasettings.settriggerpoint-1400)) ) * (disp_xpos_per_sample));//1450
 
-  //Limit it on the trace portion of the screen
-  
-  if(position > positionlimitH)//712
+  //Limit it on the trace portion of the screen (fw 0.2.64: long mode only; short mode uses the record's limits below,
+  //1.00o5's 1400-sample margin stopped the window short of the record's end)
+  if(scopesettings.long_mode)
   {
-    //And not above 712;
-    position = positionlimitH;
-  }
+    if(position > positionlimitH)//712
+    {
+      //And not above 712;
+      position = positionlimitH;
+    }
         
-  if(position < positionlimitL)//2
-  {
-    //So not below 2
-    position = positionlimitL;
+    if(position < positionlimitL)//2
+    {
+      //So not below 2
+      position = positionlimitL;
+    }
   }
   
   //Update the current position
