@@ -31,6 +31,18 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.67 - 2026-10-19 (protocol 1.21 provisional, docs/protocol.md section 14 row 61; 0.2.65-0.2.66 / 1.20 are other branches)
+
+- Added: CAL_PROBE (0x0402), the calibration wizard's zero measurement from the host through the wizard's own code
+  (`cal_range`), nothing stored: one channel and range (mode 0), or the whole zero step in the wizard's screen context
+  (mode 1). It returns all eight measurement points with PWM, per-core mean, RMS, RMS inside the captures,
+  lowest / highest code and clipped samples, plus A/B switches for the FPGA bus readout (settle reads, a write strobe
+  before each sample strobe). `firmware/tools/cal_probe.py` runs it and decodes it (28158ea, 448c08c, cf3f9e2, b67219c).
+- Changed: a failed channel in the wizard's Zero level step gets a small note under its result line: range, rate,
+  measurement point, PWM, and per core the raw mean with its lowest..highest code and clipped samples (789da66).
+- Fixed: the wizard's measurement batch writes a raw host divider (SET_TIMEBASE raw) and the time base back
+  afterwards, as the class probe does (789da66).
+
 #### 0.2.64 - 2026-10-19 (protocol 1.18 unchanged; provisional number)
 
 - Fixed: after a sample-rate change in the ACQ menu the old time/div stayed although drawn grey, so the trace was cut

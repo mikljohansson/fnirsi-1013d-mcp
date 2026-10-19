@@ -1731,6 +1731,18 @@ CH1 and the Skip button are gone with the per-channel screens.
 5. New run, Cancel during the zero step's measurement: it stops within about a second and nothing changed. Stray
    touches off the two buttons do nothing on every screen.
 
+**Failure note and CAL_PROBE (fw 0.2.67, protocol 1.21 provisional, row 61).** A channel that fails the Zero level
+step gets a second, small line under its result (13 px font; the two results move up to make room): "Range 1, 200
+MSa/s, zero point, PWM 812: A 130.1 (126..135), B 125.9 (101..152)", or for a clip "..., B 150.0 (0..255, 12 clip)".
+It names the measurement point the failure was found at (`acal_fail_point`: a clip at the first point after the
+coarse ones with a sample at 0 or 255, noise and drift at the zero point of the failing class, a missing response at
+the coarse high point), its PWM, and per core the raw mean, the lowest and highest code and the samples at 0 or 255.
+The zero step of one range is `cal_range` (cal_wiz_ui.c), shared by the wizard and CAL_PROBE, which records all eight
+points (`acal_point`, ACAL_PT_*: coarse 500 / 1200, gated centre -150 / +150 / centre, 200 MSa/s centre / +150 / -150).
+CAL_PROBE runs it from the host with the UI stopped (mode 0, about 1 s), or runs the whole zero step exactly as a
+Calibrate tap does, over the dimmed screen with the dialog, progress and Cancel polls (mode 1, about 15 s);
+`python firmware/tools/cal_probe.py COM10 both all` prints every point. Nothing is stored.
+
 **Full-rate capture check (fw 0.2.61, per capture since fw 0.2.62, `enc_heal.h`).** Every 200 MSa/s conversion of the
 zero and gain steps is checked before the wizard reads it, like every other full-rate capture (section 5 "Full-rate
 capture check"): on FPGA 0x1538 by the FPGA's own encode check (read 0x33), on 0x1532..0x1537 by the RMS of core B
