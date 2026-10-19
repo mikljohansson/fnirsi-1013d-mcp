@@ -821,3 +821,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   every 30 s, the wizard twice per range. The fw-cal4 arithmetic hypothesis and my stale-mode hypothesis are both ruled out.
   Actions: fw 0.2.61 (fw-cal4) adds a phase check-and-heal (re-toggle 0x0D) before full-rate measurements and after rate changes
   on 0x1532-0x1536, plus a Diagnostics notice; the 0x1537 flash session is the real fix and is now needed before the release.
+- **FPGA flash written with bitstream 0x1537** (16:27-16:31, Sipeed FT2232D on J2, scope on battery, USB unplugged): probe
+  W25Q80DV ef 40 14; pre-write double read backups/20261019-162658-pre-0x1537.bin sha256 5ade9e75... = the pinned 0x1535 padded image
+  (rollback image confirmed); wrote backups/al3_seg_0x1537_426a3784_padded.bin: 256 sectors erased, 1105 pages programmed, write
+  verified febc9299..., independent verify OK over 1048576 bytes. Power cycle pending; then #VER must show fpga=0x1537 and the
+  encode-phase host test (alternate 0x0D, READ_RAW at divider 0) must stay clean.
