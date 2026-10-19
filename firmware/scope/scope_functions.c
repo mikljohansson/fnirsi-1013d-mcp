@@ -621,49 +621,10 @@ void scope_acquire_trace_data(void)
       display_decimal(500, 10, data);
     }
     
-    if(fpgasettings.fw_FPGA == 1)
-    {
-      if(data < 750)
-      {
-        //Less then 750 make it bigger
-        data = data + 3345;
-      }
-      else
-      {
-        //More then 750 make it smaller
-        data = data - 750; 
-      }
-    }
-
-    
-    if(fpgasettings.fw_FPGA == 2) //fpga AL3 or EP4
-    {
-       if(data < (fpgasettings.settriggerpoint/2))
-       {
-         //Less then 750 make it bigger
-         data = data + 7441;
-       }
-       else
-       {
-         //More then 750 make it smaller
-         data = data - (fpgasettings.settriggerpoint/2); 
-       }   
-    }
-    
-    if(fpgasettings.fw_FPGA == 3) //fpga EF2
-    {   
-      if(data < (fpgasettings.settriggerpoint/2))
-      {
-          data = data + 5393;
-      }
-      else
-      {
-          data = data - (fpgasettings.settriggerpoint/2);
-      }
-    }
-
-    //16-bit layout (decimation filter on): one sample per word, start = (0x14 - pretrigger) mod 8192
-    data = pc_glue_decim_ui_start(data);
+    //Record start = (0x14 - the pretrigger words written to 0x0B) mod the ring (fw 0.2.70, pc_glue_ui_read_start). 1.00o5
+    //wrapped with fixed constants (stock + 3345, AL3 + 7441, EF2 + 5393 = ring - 751): one word off on stock and
+    //(751 - pretrigger) words off on AL3 / EF2 whenever the trigger address lay within the pretrigger of the ring start
+    data = pc_glue_ui_read_start(data);
     
     //display_decimal(550, 20, data);
 

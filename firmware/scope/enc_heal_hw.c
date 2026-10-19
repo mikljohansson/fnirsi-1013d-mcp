@@ -121,7 +121,7 @@ void fpga_encode_new_conversion(void)
 int fpga_encode_after_capture(void)
 {
   static const eh_io io = { 0, eh_hw_status, eh_hw_read };
-  uint32   pre, start;
+  uint32   start;
   uint32_t value;
   eh_note  n;
   int      bad, rearm;
@@ -131,9 +131,8 @@ int fpga_encode_after_capture(void)
   if((eh_st.mode == EH_MODE_NONE) || (fpga_divider != 0) || ((eh_st.mode == EH_MODE_DATA) && pc_seq_ui_running()))
     return 0;
 
-  //The record as fpga_do_conversion set it up: 0x0B = settriggerpoint / 2 words before 0x14
-  pre   = (fpgasettings.settriggerpoint / 2) % EH_RING;
-  start = (eh_st.mode == EH_MODE_DATA) ? (fpga_prepare_for_transfer() + EH_RING - pre) % EH_RING : 0;
+  //The record as fpga_do_conversion set it up and the UI reads it: the 0x0B words before 0x14
+  start = (eh_st.mode == EH_MODE_DATA) ? pc_glue_ui_read_start(fpga_prepare_for_transfer()) : 0;
   bad   = eh_check(&io, eh_st.mode, start, fpgasettings.totalsamples / 2, &value);
 
   rearm = eh_cap_step(&eh_ui, bad, value, &n);

@@ -26,6 +26,7 @@
 #include "pc_cmds.h"
 #include "pc_seq.h"
 #include "pc_seq_hw.h"
+#include "fpga_bus.h"
 
 static uint8  seq_has;                  //bitstream with the sequencer
 static uint8  seq_57 = 0xFF;            //0x57 as last written; 0xFF unknown (an MCU restart leaves the FPGA running)
@@ -58,18 +59,13 @@ void pc_seq_hw_init(int has)
   seq_has = (uint8)(has != 0);
 }
 
-void pc_seq_hw_pre_reset(const pc_seq_cfg *c, uint16 pre_words, uint16 total_words)
+void pc_seq_hw_pre_reset(const pc_seq_cfg *c)
 {
   if(!seq_has)
     return;
 
-  //Geometry before the reset too: 0x0B feeds a write-clock register that loads only on write-clock edges while 0x01 = 1
-  //(fpga-gen6, RTL reading); the 0x05 poll then guarantees edges in reset at every rate. Written again in the window.
-  fpga_write_cmd(0x0B);
-  fpga_write_short(pre_words);
-  fpga_write_cmd(0x0C);
-  fpga_write_short(total_words);
-
+  //The slot mask (0x57 / 0x59) loads only on write-clock edges while 0x01 = 1 on 0x1536 (fpga-gen6): written before the
+  //reset, as the geometry is on every bitstream since fw 0.2.70 (fpga_arm_reset, fpga_bus.h)
   if(c && c->mode)
   {
     seq_57 = pc_seq_cmd57(c, 0);
@@ -127,15 +123,8 @@ void pc_hal_seq_view(uint8_t mode57, uint8_t shift)
 
 void pc_hal_seq_read(uint8_t byte, uint32_t first, uint32_t count, uint8_t *dst, uint32_t stride)
 {
-  fpga_write_cmd(0x1F);
-  fpga_write_short((uint16)(first & (PC_SEQ_ACC_WORDS - 1)));
-  fpga_write_cmd((uint8)(0x2B + (byte & 7)));
-
-  FPGA_BUS_DIR_IN();
-  FPGA_DATA_READ();
-
-  //One dummy strobe: the view word is latched one i_mcu_clk edge after the pointer moves (as 0x20..0x23)
-  FPGA_PULSE_CLK();
+  //The view word is latched one i_mcu_clk edge after the pointer moves, as 0x20..0x23: the same dummy strobe (fpga_bus.h)
+  fpga_read_start((uint8_t)(0x2B + (byte & 7)), (uint16_t)(first & (PC_SEQ_ACC_WORDS - 1)));
 
   while(count--)
   {
@@ -207,8 +196,7 @@ void pc_seq_ui_pre_reset(void)
   c.n          = ui_n;
   c.holdoff_ns = 0;
 
-  pc_seq_hw_pre_reset(&c, (uint16)pc_glue_decim_pre_words(fpgasettings.settriggerpoint),
-                      (uint16)pc_glue_decim_words(fpgasettings.totalsamples));
+  pc_seq_hw_pre_reset(&c);
 }
 
 void pc_seq_ui_service(void)

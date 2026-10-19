@@ -120,7 +120,6 @@ void   fpga_set_decim_shift(uint8 shift);
 void   fpga_set_decim_level(uint16 level);
 void   fpga_set_decim_fir(uint8 enable);
 uint16 fpga_get_decim_state(void);
-void   fpga_read_decim_data(uint8 cmdlo, uint8 cmdhi, uint32 start, uint32 count, uint16 *dst);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 

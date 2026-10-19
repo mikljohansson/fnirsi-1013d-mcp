@@ -41,6 +41,7 @@
 #include "ui_diag_view.h"
 #include "acq_view.h"
 #include "bode_view.h"
+#include "fpga_bus.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -411,7 +412,7 @@ static uint8  pc_ui_auto;                             //defined with the firmwar
 int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal,
                const pc_decim_cfg *dc, const pc_seq_cfg *sq)
 {
-  uint32 n = 0;
+  fpga_arm_cfg arm;
 
   //Trigger level from the marker, as every UI conversion does (scope_acquire_trace_data)
   fpga_set_trigger_level();
@@ -431,44 +432,22 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
   fpga_write_cmd(0x1A);
   fpga_write_byte(normal ? 0x01 : 0x00);
 
-  //Sequencer (0x1536+): geometry and run setting before the reset (pc_seq_hw.c); a host capture ends a UI averaging run
+  //Sequencer (0x1536+): run setting before the reset (pc_seq_hw.c); a host capture ends a UI averaging run
   if(sq && prog)
   {
     pc_seq_ui_conversion(0, dc, 0);
-    pc_seq_hw_pre_reset(sq, pre_words, total_words);
+    pc_seq_hw_pre_reset(sq);
   }
 
-  //Reset the sample system and wait for ready, bounded
-  fpga_write_cmd(0x01);
-  fpga_write_byte(0x01);
-  fpga_write_cmd(0x05);
-
-  while((fpga_read_byte() & 1) == 0)
-  {
-    if(++n >= PC_READY_POLLS)
-    {
-      fpga_write_cmd(0x01);
-      fpga_write_byte(0x00);
-      return -1;
-    }
-  }
-
-  //Geometry while in reset (1.00o5: "send when the system is in reset")
-  if(prog)
-  {
-    fpga_write_cmd(0x0B);
-    fpga_write_short(pre_words);
-    fpga_write_cmd(0x0C);
-    fpga_write_short(total_words);
-  }
-
-  fpga_write_cmd(0x0E);
-  fpga_write_int(auto_timeout);
-
-  //Release
-  fpga_write_cmd(0x01);
-  fpga_write_byte(0x00);
-  return 0;
+  //Sampling reset (fpga_bus.h): geometry before the reset and inside it, bounded ready wait, 0x0E, release
+  arm.geometry     = (uint8_t)(prog != 0);
+  arm.pre_words    = pre_words;
+  arm.total_words  = total_words;
+  arm.write_0e     = 1;
+  arm.auto_timeout = auto_timeout;
+  arm.max_polls    = PC_READY_POLLS;
+  arm.idle         = 0;
+  return fpga_arm_reset(&arm);
 }
 
 void pc_hal_acq_poll(int *done, int *triggered)
@@ -530,35 +509,8 @@ void pc_hal_force(void)
 void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,
                       uint32_t ring_words, uint8_t read_lag)
 {
-  while(count)
-  {
-    //Never rely on the FPGA read pointer wrapping (EF2 wraps at 6144): restart at the ring end
-    uint32 n = ring_words - start;
-
-    if(n > count)
-      n = count;
-
-    //BENCH: T3 - pointer + read_lag, then one dummy strobe for the stale pipeline byte
-    fpga_write_cmd(0x1F);
-    fpga_write_short((uint16)((start + read_lag) % ring_words));
-    fpga_write_cmd(0x20 + core);
-
-    FPGA_BUS_DIR_IN();
-    FPGA_DATA_READ();
-
-    FPGA_PULSE_CLK();
-
-    count -= n;
-
-    while(n--)
-    {
-      FPGA_PULSE_CLK();
-      *dst = FPGA_GET_DATA();
-      dst += stride;
-    }
-
-    start = 0;
-  }
+  //BENCH: T3 - pointer + read_lag, the dummy strobe(s) of the bitstream's contract (fpga_bus.h), ring end restart
+  fpga_read_lane((uint8_t)(0x20 + core), (start + read_lag) % ring_words, count, dst, stride, ring_words);
 }
 
 void pc_hal_fpga_write_cmd(uint8_t cmd)   { fpga_write_cmd(cmd); }
@@ -570,8 +522,8 @@ uint8_t pc_hal_fpga_read_data(void)       { return fpga_read_byte(); }
 
 int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t pretrigger_samples, uint8_t ch_mask)
 {
-  //The 1.00o5 readout (no dummy read, so the output matches what the UI shows: P-7.4)   BENCH: T3, T4
-  //Its interleave is B before A (fpga_read_sample_data), so READ_TRACE follows the 1.00o5 convention.
+  //The UI readout (fpga_read_sample_data; since fw 0.2.70 with the dummy strobe, so exact like READ_RAW: P-7.4)
+  //BENCH: T3, T4. Its interleave is B before A, so READ_TRACE follows the 1.00o5 convention.
   scopesettings.nofsamples  = total_samples / 2;
   scopesettings.samplecount = total_samples;
   pc_seq_trace_replaced();
@@ -648,7 +600,6 @@ static pc_decim_cfg  pc_dec_cur;                      //what the FPGA runs (k = 
 static uint8         pc_dec_written;                  //pc_dec_cur was written at least once
 static uint8         pc_dec_dirty;                    //0x0D changed since the last write
 static uint32        pc_dec_divider = 0xFFFFFFFF;     //last 0x0D value written
-static uint16        pc_dec_ui_addr;                  //0x14 of the last UI capture
 static uint16        pc_dec_raw[2][PC_DEC_RING];      //16-bit samples of the last readout per channel
 static uint32        pc_dec_raw_n[2];                 //their count, 0 = that readout was 8-bit
 static int16         pc_dec_feed[PC_DEC_RING + 2];    //converted samples for fpga_read_adc_data
@@ -853,12 +804,21 @@ uint32 pc_glue_decim_pre_words(uint32 samples)
   return (samples > shift) ? samples - shift : 0;
 }
 
-uint32 pc_glue_decim_ui_start(uint32 start)
+uint32 pc_glue_ui_read_start(uint32 addr)
 {
-  if(!pc_dec_cur.k)
-    return start;
+  uint32 ring, pre;
 
-  return (uint32)(pc_dec_ui_addr + PC_DEC_RING - (pc_glue_decim_pre_words(fpgasettings.settriggerpoint) % PC_DEC_RING)) % PC_DEC_RING;
+  //The ring and the pretrigger words the conversion wrote to 0x0B (stock: its fixed 750); 16-bit layout: one sample per
+  //word, in the same 8192-word ring
+  switch(fpgasettings.fw_FPGA)
+  {
+    case 1:  ring = 4096;        pre = 750;                                                       break;
+    case 2:  ring = PC_DEC_RING; pre = pc_glue_decim_pre_words(fpgasettings.settriggerpoint);    break;
+    case 3:  ring = 6144;        pre = pc_glue_decim_pre_words(fpgasettings.settriggerpoint);    break;
+    default: return addr;        //not recognised by 1.00o5 (EP4, unknown): the raw address, as before
+  }
+
+  return fpga_ring_start(addr, pre, ring);
 }
 
 void pc_glue_decim_read(void *settings, uint32 start)
@@ -2162,8 +2122,6 @@ void pc_glue_ui_capture_start(void)
 
 void pc_glue_ui_capture_addr(uint32 addr)
 {
-  pc_dec_ui_addr = (uint16)addr;
-
   if(pc_ready)
   {
     pc_ui_capture_addr(&pc_sess, (uint16_t)addr);

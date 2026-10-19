@@ -12,9 +12,9 @@
 
 void   pc_seq_hw_init(int has);                 //pc_glue_init: the bitstream has the sequencer (caps SEQ)
 
-//Before 0x01 = 1 (pc_hal_arm, fpga_do_conversion): 0x0B, 0x0C and the sequencer registers, so that the write-clock side
-//loads them during the reset at every rate; c = NULL or mode 0: 0x57 = 0 when the FPGA may still hold another mode
-void   pc_seq_hw_pre_reset(const pc_seq_cfg *c, uint16 pre_words, uint16 total_words);
+//Before 0x01 = 1 (pc_hal_arm, fpga_do_conversion): the sequencer registers, so that the write-clock side loads them during
+//the reset at every rate (0x0B / 0x0C: fpga_arm_reset); c = NULL or mode 0: 0x57 = 0 when the FPGA may still hold another mode
+void   pc_seq_hw_pre_reset(const pc_seq_cfg *c);
 
 //UI acquisition (pc_hal_scope.c glue)
 int    pc_seq_ui_conversion(int ui, const pc_decim_cfg *c, uint32 divider);  //1: this conversion is a hardware run

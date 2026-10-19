@@ -67,6 +67,8 @@ SRCS += pc_protocol.c pc_cmds.c pc_transport.c pc_hal_scope.c fx_fft.c fx_fft_ta
 SRCS += cal_wiz.c cal_wiz_ui.c
 # fw 0.2.61: full-rate capture check and retry after rate changes (pure part host-tested in test_enc_heal.c)
 SRCS += enc_heal.c enc_heal_hw.c
+# fw 0.2.70: bus contract per bitstream, readout start with the dummy strobe, sampling reset order (host_tests/test_fpga_bus.c)
+SRCS += fpga_bus.c
 # Calibration v4: interleave tracking and the class probe (pure maths in acal_track.c, host_tests/test_acal_track.c)
 SRCS += acal_track.c acal_live.c
 # Screens (fw 0.2.51): card formatting, main menu rows and mode rule (pure C, host_tests/test_ui.c)
