@@ -189,22 +189,44 @@ static void test_long(void)
   run(24u * 3600u * 1000u, 0);
   T_EQ(n_disc, 1); T_EQ(n_conn, 1);
 
-  //The host wakes and enumerates the device again: the long rule is armed again
+  //The host wakes and enumerates the device again: the long rule is armed again, with twice the wait (no application
+  //opened the port since the last long reconnect)
   host_enumerates();
-  T_EQ(n_resumed, 0);
+  T_EQ(n_resumed, 0); T_EQ(W.long_level, 1); T_EQ(pc_usbw_long_wait(&W), 2 * PC_USBW_LONG_MS);
   host_suspends();
-  run(PC_USBW_LONG_MS, 0);
-  T_EQ(n_disc, 2); T_EQ(W.reconnects, 2);
+  t0 = now;
+  run(2 * PC_USBW_LONG_MS, 0);
+  T_EQ(n_disc, 2); T_EQ(W.reconnects, 2); T_EQ(t_disc - t0, 2 * PC_USBW_LONG_MS);
   run(PC_USBW_OFF_MS, 0);
   T_EQ(n_conn, 2);
 
+  //An awake host that keeps suspending the idle device: 15, 30, 60, ... min, capped at 2^5 x 15 min = 8 h
+  W.long_level = PC_USBW_LONG_LEVEL_MAX;
+  host_enumerates();
+  host_suspends();
+  t0 = now;
+  run(PC_USBW_LONG_MS << PC_USBW_LONG_LEVEL_MAX, 0);
+  T_EQ(n_disc, 3); T_EQ(t_disc - t0, PC_USBW_LONG_MS << PC_USBW_LONG_LEVEL_MAX); T_EQ(W.long_level, PC_USBW_LONG_LEVEL_MAX);
+  run(PC_USBW_OFF_MS, 0);
+
+  //An application opens the port (DTR up): back to 15 min
+  host_enumerates();
+  pc_usbw_dtr_up(&W);
+  T_EQ(W.long_level, 0);
+  host_suspends();
+  t0 = now;
+  run(PC_USBW_LONG_MS, 0);
+  T_EQ(n_disc, 4); T_EQ(t_disc - t0, PC_USBW_LONG_MS);
+  run(PC_USBW_OFF_MS, 0);
+
   //Resumed in time: no reconnect
   host_enumerates();
+  pc_usbw_dtr_up(&W);
   host_suspends();
   run(PC_USBW_LONG_MS - 10, 0);
   sof = 1;
   run(PC_USBW_LONG_MS, 0);
-  T_EQ(n_disc, 2); T_EQ(n_resumed, 1);
+  T_EQ(n_disc, 4); T_EQ(n_resumed, 1);
 }
 
 static void test_storm(void)

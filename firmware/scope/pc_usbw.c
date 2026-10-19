@@ -69,9 +69,19 @@ int pc_usbw_activity(pc_usbw *w, uint8_t cause)
   return 1;
 }
 
+void pc_usbw_dtr_up(pc_usbw *w)
+{
+  w->long_level = 0;
+}
+
 uint32_t pc_usbw_storm_wait(const pc_usbw *w)
 {
   return PC_USBW_STORM_QUIET_MS << w->level;
+}
+
+uint32_t pc_usbw_long_wait(const pc_usbw *w)
+{
+  return PC_USBW_LONG_MS << w->long_level;
 }
 
 int pc_usbw_tick(pc_usbw *w, uint32_t now, uint16_t frame)
@@ -115,8 +125,13 @@ int pc_usbw_tick(pc_usbw *w, uint32_t now, uint16_t frame)
     if(w->level < PC_USBW_LEVEL_MAX)
       w->level++;
   }
-  else if(w->enumerated && (dt >= PC_USBW_LONG_MS))
+  else if(w->enumerated && (dt >= pc_usbw_long_wait(w)))
+  {
     w->why = PC_USBW_WHY_LONG;
+
+    if(w->long_level < PC_USBW_LONG_LEVEL_MAX)
+      w->long_level++;
+  }
   else
     return PC_USBW_NONE;
 

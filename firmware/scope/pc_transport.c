@@ -552,7 +552,7 @@ static void pc_usb_inferred(uint8 cause)
 void pc_usb_watch_tick(void)
 {
   uint16 frame;
-  uint32 age;
+  uint32 age, lvl;
   int    act;
 
   if(!pc_uw.susp && !pc_uw.off)
@@ -569,11 +569,12 @@ void pc_usb_watch_tick(void)
     pc_usb_inferred(PC_USBW_CAUSE_FRAME);
   else if(act == PC_USBW_DISCONNECT)
   {
-    //Type 20: a = reason | back-off level (max 3) << 2 | strikes (max 15) << 4, b = s suspended
+    //Type 20: a = reason | back-off level of that rule after this reconnect (max 3) << 2 | strikes (max 15) << 4,
+    //b = s suspended
     age = (pc_hal_ms() - pc_uw.susp_ms) / 1000;
+    lvl = (pc_uw.why == PC_USBW_WHY_STORM) ? pc_uw.level : pc_uw.long_level;
     pc_evlog_add(PC_EVT_SOFT_DISCONNECT,
-                 (uint8)(pc_uw.why | (((pc_uw.level > 3) ? 3 : pc_uw.level) << 2) |
-                         (((pc_uw.strikes > 15) ? 15 : pc_uw.strikes) << 4)),
+                 (uint8)(pc_uw.why | (((lvl > 3) ? 3 : lvl) << 2) | (((pc_uw.strikes > 15) ? 15 : pc_uw.strikes) << 4)),
                  (uint16)((age > 65535) ? 65535 : age));
     *USBC_REG_PCTL &= ~USBC_BP_POWER_D_SOFT_CONNECT;
     usb_connect = 0;
@@ -851,6 +852,9 @@ void pc_usb_dtr(uint8 dtr)
   }
   else if(!pc_dtr && dtr)
   {
+    //fw 0.2.49: an application uses the port: the suspend watch's long rule starts from 15 min again
+    pc_usbw_dtr_up(&pc_uw);
+
     //A new host connection must not receive the tail of a frame meant for the previous one
     pc_tx_flush();
     pc_link_events |= PC_LINK_DTR_UP;

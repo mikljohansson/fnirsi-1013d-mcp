@@ -16,12 +16,16 @@
 //    inferred) and then PC_USBW_STORM_QUIET_MS of silence. A host retrying a port reset produces a suspend per attempt
 //    (at high speed the reset's SE0 is first seen as 3 ms of idle); when it gives up, the bus goes quiet. The wait
 //    doubles with every storm reconnect that is not followed by a successful enumeration (at most 2^PC_USBW_LEVEL_MAX).
-//  - long: suspended for PC_USBW_LONG_MS after a host enumerated the device. Once per enumeration: a reconnect clears
-//    that, so a host that is asleep (or a pulled cable, which also reads as suspend with VBUS forced valid) costs one
-//    reconnect, not one per period.
+//  - long: suspended for PC_USBW_LONG_MS << long_level after a host enumerated the device. Once per enumeration (a
+//    reconnect disarms it until the next SET_CONFIGURATION), so a host that is asleep (or a pulled cable, which also
+//    reads as suspend with VBUS forced valid) costs one reconnect, not one per period. long_level counts long
+//    reconnects since an application last opened the port (DTR 0 -> 1), so a host that is awake, enumerates the
+//    reconnected device and suspends it again (Windows selective suspend of an idle port) is reconnected after 15,
+//    30, 60 ... min, at most every 8 h, instead of every 15 min.
 // A normal suspend never meets the storm rule (one suspend, then resume or reset). The long rule cannot tell a long
 // legitimate suspend (PC asleep, port closed) from an abandoned device; it costs one re-enumeration then, which the
-// host sees as the device unplugged and plugged in while nothing had the port open.
+// host sees as the device unplugged and plugged in while nothing had the port open. An open port never meets it
+// while the PC is awake: the host keeps polling the bulk IN endpoint, so the bus is not suspended.
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #ifndef PC_USBW_H
@@ -33,7 +37,8 @@
 #define PC_USBW_STORM_SUSPENDS   3u
 #define PC_USBW_STORM_QUIET_MS   10000u       //x 2^level
 #define PC_USBW_LEVEL_MAX        6u           //storm wait at most 640 s
-#define PC_USBW_LONG_MS          900000u      //15 min
+#define PC_USBW_LONG_MS          900000u      //15 min, x 2^long_level
+#define PC_USBW_LONG_LEVEL_MAX   5u           //long wait at most 8 h
 
 //Inferred resume causes (type 3 a bits 6-5). 3 is what fw 0.2.44-0.2.48 logged (a = 0x80 | POWER bits 6-0, SoftConn and
 //HS enable always set): the frame number moved
@@ -59,6 +64,7 @@ typedef struct
   uint8_t  strikes;       //suspends since the last proof of life (saturates at 255)
   uint8_t  level;         //storm back-off level
   uint8_t  why;           //reason of the last DISCONNECT (for the log)
+  uint8_t  long_level;    //long-rule back-off level (reset by DTR 0 -> 1)
   uint16_t susp_frame;    //frame number at the suspend
   uint32_t susp_ms;       //time of the suspend (or of the reconnect)
   uint32_t off_ms;        //time of the soft disconnect
@@ -72,7 +78,9 @@ void     pc_usbw_resume(pc_usbw *w);                                //RESUME int
 void     pc_usbw_reset(pc_usbw *w);                                 //bus reset or disconnect interrupt
 void     pc_usbw_configured(pc_usbw *w);                            //SET_CONFIGURATION
 int      pc_usbw_activity(pc_usbw *w, uint8_t cause);               //EP0 setup / EP2 OUT: 1 = this ended a suspend
+void     pc_usbw_dtr_up(pc_usbw *w);                                //DTR 0 -> 1: an application opened the port
 int      pc_usbw_tick(pc_usbw *w, uint32_t now, uint16_t frame);    //every ms: PC_USBW_*
 uint32_t pc_usbw_storm_wait(const pc_usbw *w);                      //current storm quiet time, ms
+uint32_t pc_usbw_long_wait(const pc_usbw *w);                       //current long-suspend limit, ms
 
 #endif /* PC_USBW_H */
