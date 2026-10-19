@@ -864,3 +864,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   backups/al3_seg_0x1538_0c24ecf6_padded.bin: 256 sectors erased, 1105 pages programmed, write verified 2fc7ea5b..., independent
   verify run after. Power cycle pending; then fw 0.2.64 (merge ed06e7e, GCC 10 sha 8caacb31...) FEL-load and the README section 8
   checks (0x33 = 0xF6 per capture, no garbled core over 1000+ captures, CH2 A-B near 0, wizard zero step both channels).
+- 2026-10-19 17:50: power cycle: the card's 0.2.25 boots FPGA 0x1538; fw 0.2.64 FEL-loaded (#VER fw=0.2.64 proto=1.19 fpga=0x1538).
+  Encode checks on 0x1538: rate toggles 99/1/3999 <-> 0, 40 trials each: 0 garbled captures, max core std 0.93; 60 s no-write run:
+  1233 captures, 0 garbled, max std 1.44. GET_HEALTH 88..103: mode 2 (0x33 flag), last 0x33 0xF6, boot 0x33 0xF6 convention OK;
+  112 captures flagged by 0x33 and re-taken out of 5798 checked (event log read next). Raw core means: CH1 A-B +5.0 (3.3 on 0x1535),
+  CH2 A-B -2.6 (0.5 on 0x1535; -3.3 on 0x1537): the per-core offsets differ from the 0x1535 state, so the unit needs a recalibration
+  on 0x1538 (the wizard measures per core). Wizard run next.
