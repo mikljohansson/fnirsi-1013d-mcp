@@ -53,6 +53,9 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
 
 #### 0.2.48 - 2026-10-19 (protocol 1.13)
 
+- Changed: the default acquisition Filter (new settings sectors and the DEFAULT button) is CIC2+FIR instead of CIC2, after the
+  0x1535 alias bench (78-83 dB rejection with the FIR); on bitstreams without the FIR the setting acts as CIC2 (coordinator, pc_decim.h).
+
 - Changed: the MMU is on, so the D-cache and the write buffer finally take effect (the C bit was set since 1.00o5 but
   does nothing with the MMU off). Flat 1:1 map: DDR and SRAM A write-back, the scanned framebuffer write-through,
   peripherals, boot ROM and the restart record strongly ordered. Caches are cleaned and switched off at every restart

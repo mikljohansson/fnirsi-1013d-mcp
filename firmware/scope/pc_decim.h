@@ -52,8 +52,9 @@
 #define PC_DECIM_HAS_FIR      2         //0x1535+: plus the compensation FIR
 
 //Filter setting of new settings (no valid settings word 207, or the DEFAULT button): CIC2 (owner, after the 0x1534
-//bench). CIC + FIR (PC_DECIM_CIC2 | PC_DECIM_SET_FIR) becomes the default once 0x1535 is benched; change it here only.
-#define PC_DECIM_DEFAULT      PC_DECIM_CIC2
+//bench). CIC2 + FIR is the default since 0x1535 was benched (2026-10-19: alias rejection 78-83 dB); on bitstreams without
+//the FIR the bit is ignored (pc_dec_mode_eff) and the setting acts as CIC2. Change it here only.
+#define PC_DECIM_DEFAULT      (PC_DECIM_CIC2 | PC_DECIM_SET_FIR)
 
 //FIR eligibility: N >= 16 (the 15-tap FIR needs N/2 write clocks per output) and N a multiple of 4
 #define PC_DECIM_FIR_MIN_N    16u
