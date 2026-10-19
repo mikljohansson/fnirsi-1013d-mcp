@@ -181,6 +181,36 @@ int    bode_is_thru_sweep(const bode_eng *e);
 void   bode_proto_header(const bode_eng *e, uint8 view, uint8 *p);
 uint32 bode_proto_rows(const bode_eng *e, uint32 first, uint32 max, uint8 *p);   //rows written
 
+//The CTRL page's Start / Stop steps (fw 0.2.66): index i is {1, 2, 5}[i % 3] x 10^(i / 3) Hz, 0 = 1 Hz .. 21 = 10 MHz
+#define BODE_STEPS            22
+#define BODE_START_MAX        20          //5 MHz
+#define BODE_STOP_MIN         3           //10 Hz
+uint64 bode_step_mhz(int i);
+
+//AUTO SET's span (fw 0.2.69, docs/plans/bode-ui.md 3.2): from an overview sweep (100 Hz .. 10 MHz, 20 points; f, H and
+//flags of n points, have[i] = measured) the Start / Stop step indices and the Settle preset.
+//  low- or high-pass with a -3 dB crossing fc: fc / 10 .. 10 fc
+//  resonant (or a phase through both +45 and -45 deg): f0 / 10 .. 10 f0 for Q <= 2, f0 / sqrt(10) .. f0 sqrt(10) for
+//  Q <= 10, f0 (1 -+ 4 / Q) above; Settle Normal for Q <= 7, Resonant for Q <= 34, High Q above
+//  a band narrower than two overview point spacings is not resolved (its Q reads low): at least the half decade and
+//  Settle Resonant
+//  still changing at the low end (the first two valid points differ by more than 1 dB or 5 deg): Start 10 Hz
+//The span is snapped outwards to the steps. BODE_AS_FLAT: no corner, the span is kept; BODE_AS_NO_RESPONSE: every
+//measured point is near the floor or under the noise, the span is kept.
+#define BODE_AS_SPAN          0
+#define BODE_AS_FLAT          1
+#define BODE_AS_NO_RESPONSE   2
+
+typedef struct
+{
+  uint8  start_i, stop_i, settle;
+  uint32 q_x100;              //the Q used (0: none)
+  uint64 f0_mhz;              //the corner or resonance found (0: none)
+} bode_autospan;
+
+int    bode_auto_span(const uint64 *f_mhz, const int32 *mag_mdb, const int32 *ph_mdeg, const uint16 *flags,
+                      const uint8 *have, int n, int start_i, int stop_i, bode_autospan *out);
+
 //Sizes for the target's static instance
 struct bode_eng
 {
