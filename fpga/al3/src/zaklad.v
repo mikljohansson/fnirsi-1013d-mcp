@@ -824,8 +824,12 @@ freq_generator_dds_pwm u_freq
 //-------------------------------------------------------------------------------------
 //Sample write clock
 
-  //0x1537: the B encode toggles to the complement of the write clock instead of its own complement. In
-  //steady state that is the same thing (encB equals sample_write_clock between enables), so the pins are
+  //swc_enc_n: the complement of sample_write_clock in a register of its own for the encode flops, so the write
+  //clock's fanout and its half-cycle path into sampling_triggered stay as in 0x1536
+  reg swc_enc_n = 1;
+
+  //0x1537: the B encode toggles to the complement of the write clock (its inverted copy swc_enc_n) instead of its own
+  //complement. In steady state that is the same thing (encB equals sample_write_clock between enables), so the pins are
   //unchanged. But the enable is a combinational compare against the MCU-written divider: a 0x0D or 0x53 write
   //that changes it between this edge and the write clock's sampling edge made the two flops disagree once,
   //and up to 0x1536 that swapped which core is the earlier sample of a word until the next such accident
@@ -834,19 +838,22 @@ freq_generator_dds_pwm u_freq
     begin
       if(sample_clock_enable == 1)
         begin
-          adc1_encB <= ~sample_write_clock;
-          adc2_encB <= ~sample_write_clock;
+          adc1_encB <= swc_enc_n;
+          adc2_encB <= swc_enc_n;
 
           //The A and B clocks are inverted versions of each other
-          adc1_encA <= sample_write_clock;
-          adc2_encA <= sample_write_clock;
+          adc1_encA <= ~swc_enc_n;
+          adc2_encA <= ~swc_enc_n;
         end
     end
 
   always @(negedge clk_200MHz)//clk_200MHz  clk_RAM
     begin
       if(sample_clock_enable == 1)
-        sample_write_clock <= ~sample_write_clock;
+        begin
+          sample_write_clock <= ~sample_write_clock;
+          swc_enc_n          <= ~swc_enc_n;
+        end
     end
 
 // ---------------------------------------------------
@@ -1213,6 +1220,7 @@ assign sampling_enable = ~(
   reg [12:0] sn_ta = 0;
   reg [39:0] sn_ts = 0;
   reg [1:0]  q_mode = 0;                   //mode of the run, 0 = none
+  reg        q_seg = 0;                    //q_mode == 1, as a register (0x1537: one LUT level less in Q_RUN)
   reg        q_circ = 0, q_fmt16 = 0;
   reg        q_active = 0, q_done = 0, q_ovf = 0, q_last = 0, q_first = 1;
   reg [11:0] q_n1 = 0;                     //segments or positions - 1
@@ -1318,11 +1326,21 @@ assign sampling_enable = ~(
           if(pp_z)
             pp_i <= 0;
         end
+      else if(~q_post)
+        begin
+          //0x1537: the post-pass start values are preloaded every clock while no post-pass runs (before, Q_RUN
+          //loaded them on the clock that starts the pass, a 36-fanout select at the end of the state decode)
+          pp_ma   <= pp_start;
+          pp_aa   <= q_base[10:0];
+          pp_left <= q_total - 13'd1;
+          pp_z    <= (q_total == 13'd1);
+        end
 
       if(q_rs2)
         begin
           q_st     <= q_mode_on ? Q_RUN : Q_IDLE;
           q_mode   <= q_mode_on ? seq_mode : 2'd0;
+          q_seg    <= (seq_mode == 2'd1);
           q_active <= q_mode_on;
           q_circ   <= q_mode_on & seq_circ;
           q_fmt16  <= q_mode_on & dec_on;
@@ -1364,16 +1382,12 @@ assign sampling_enable = ~(
           Q_RUN:
             if(~sn_swe)
               begin
-                if(q_mode == 2'd1)
+                if(q_seg)
                   q_st <= Q_TAB;
                 else if(sn_trig)
                   begin
                     q_post  <= 1;
                     pp_i    <= 1;
-                    pp_ma   <= pp_start;
-                    pp_aa   <= q_base[10:0];
-                    pp_left <= q_total - 13'd1;
-                    pp_z    <= (q_total == 13'd1);
                     q_st    <= Q_POST;
                   end
                 else
@@ -1440,7 +1454,7 @@ assign sampling_enable = ~(
               end
             else
               begin
-                if(q_mode == 2'd1)
+                if(q_seg)
                   begin
                     tab_we <= 1;
                     tab_a  <= q_idx[10:0];
