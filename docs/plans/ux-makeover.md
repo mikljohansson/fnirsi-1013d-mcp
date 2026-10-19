@@ -56,12 +56,12 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   AUTO SET shows "Auto..." while the spectrum's Auto runs and a second tap cancels it (today's strip behaviour kept).
   The waveform viewer keeps its previous / next / delete substitutions. The CTRL button is highlighted while page two is
   shown, as today.
-- **Right bar, CTRL page, Scope** **(owner)**, top to bottom: CTRL; Display (fold-out: Normal, Phosphor, X-Y; "Normal"
-  rather than "Trace" so it cannot be confused with Trace style; with
-  Phosphor chosen the same fold-out shows Persistence, Palette, Clear, so there is no phosphor strip); Trace style
+- **Right bar, CTRL page, Scope** **(owner)**, top to bottom: CTRL; Display (fold-out: the view, Normal or X-Y, each
+  with an icon; below it a **Phosphor** switch, the same slide toggle as in the channel menus, and while it is on the
+  rows Persistence, Palette, Clear; so phosphor drawing combines with either view as the firmware allows today); Trace style
   (fold-out: Linear, Dots, Peak, Pro; moved out of ACQ); Grid (toggle, in every mode); the CH1 and CH2 V/div
-  Display fold-out rows carry a small icon each (owner): a clean trace line for Normal, a soft graded trace for
-  Phosphor, a Lissajous loop for X-Y; the
+  Display fold-out rows carry a small icon each (owner): a clean trace line for Normal, a Lissajous loop for X-Y; the
+  Phosphor switch row carries a soft graded trace icon; the
   **steppers** (owner): about 82 px each: a 28 px grey bar reading "V+", a 26 px centre in the channel colour reading
   "CH1" or "CH2" (one text line; the value is in the top bar chip), a 28 px grey bar reading "V-": the stock V+ CH1 V-
   controls, compact; each bar's hit area runs to the middle of the centre (about 41 px); the + and - hit areas extend into their half of the
