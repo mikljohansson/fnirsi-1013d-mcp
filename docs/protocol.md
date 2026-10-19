@@ -217,6 +217,36 @@ byte on the falling edge, the start of the strobe, so it is settled before the M
 read pointer, the dummy strobe after 0x1F and the 1.00o5 one-word lag are unchanged; asynchronous status reads are
 sampled at the start of the strobe instead of its end. Calibrations taken on 0x1537 / 0x1538 should be redone.
 
+**0x153A** (fpga/al3/README.md "Changes" section 10) has the interface and feature bits of 0x1539 plus the ADC capture
+registers; a firmware that knows 0x1539 runs it unchanged, but the data latency changed (below). 0x1532..0x1539 sampled
+the ADC pins straight into the write-clock domain at an instant set by placement; each core's data is only settled for
+T - 4 ns per encode period T (AD9288 tV 2 ns min, tPD 6 ns max), so every build garbled some core near codes where many
+bits flip (bench 2026-10-19: 0x1538 CH2 A + B, 0x1539 both A cores at 128..145). 0x153A samples every pin in an IOB DDR
+register on the 200 MHz clock and takes, per core, one of six 2.5 ns stages against the write clock edge the core is
+encoded on (A: falling, B: rising), so the capture instant no longer depends on placement or on the sample rate, and a
+word holds the B sample encoded T/2 before its A sample (B first) at every rate.
+- **Write 0x63**, two bytes high first: bits 2:0 CH1 A stage, 5:3 CH1 B, 8:6 CH2 A, 11:9 CH2 B (stage k = the pins
+  5 + 2.5 k ns before the core's edge; 3 and 4 are the allowed pair, 2 and 5 reserves), bit 12 / 13 = CH1 B / CH2 B
+  timed by the chip's A encode (AD9288 data-align mode; 0 = by its own encode). Power-on 0x08E4 (CH1 A 4, CH1 B 4,
+  CH2 A 3, CH2 B 4, own encode), the best stage per core from TD's numbers for the build. Write it before 0x01 = 1.
+- **Write 0x64**, one byte: outlier threshold in codes, power-on 8.
+- **Read 0x36**, 10 bytes: the 0x63 value (2), then 16-bit outlier counts of CH1 A, CH1 B, CH2 A, CH2 B, high byte
+  first: words (from the third after the release of 0x01) whose sample differs from the core's previous word by more
+  than the threshold, counted while the capture writes, cleared by 0x01 = 1. A quiet input at a good stage gives 0; a
+  core captured inside its transition gives about every word (rail values 0 / 255 and jumps, the bench's symptom).
+- **Self-check and training** (the calibration wizard's zero step at code 128, the worst code, is the natural place):
+  with a quiet input, for each core try stages 3 and 4 (then 2 and 5 if neither is clean), 8k words at 200 MSa/s each,
+  read 0x36; keep the stage with a zero count whose neighbours are clean too, else the clean one; if no stage of the
+  pair is clean for a B core, try bit 12 / 13 set (data-align mode); write the result to 0x63 and store it with the
+  calibration. Read 0x36 after normal full-rate captures to flag a bad core (non-zero on a quiet input).
+- **Latency**: the legacy data reach the memory 4 words later than on 0x1539 at 200 MSa/s and 3 words later at
+  divided rates (in time: 40 ns more at the full-rate write clock, so the K >= 1 EXT lag grows by 40 ns); EXT is not
+  delayed. tb_trigpos (fpga/al3/tb) prints the offsets per case: legacy EXT at 200 MSa/s +14..15 samples (0x1538:
+  +6..7), at D 9 +16..17, at D 199 +17..18; CH1 level +2..3 at every rate (unchanged: trigger and data move
+  together). `pc_decim_ext_shift` and the legacy EXT table must follow.
+- 0x53 bits 3 / 4 read back in 0x29 but select nothing; keep them 0. Reads 0x24..0x27 return the pin as the IOB
+  register took it (liveness only). 0x33 is unchanged.
+
 ## 6. Control model
 
 ### 6.1 LOCAL / REMOTE ownership [D]
