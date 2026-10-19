@@ -31,10 +31,25 @@
 #include "variables.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
+//fw 0.2.54: a drag distance in screen units, divided by 5 when Move is slow
+
+static int32 touch_drag_delta(int32 distance)
+{
+  if(scopesettings.movespeed)
+  {
+    distance /= 5;
+  }
+
+  return distance;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
 //touch handler
 
 void touch_handler(void)
 {
+  int32 delta;
+
   //Check on touch state
   if(touchstate == TOUCH_STATE_INACTIVE)
   {
@@ -72,8 +87,8 @@ void touch_handler(void)
         case TOUCH_STATE_MOVE_CHANNEL_2:
           previous_channel_2_offset = scopesettings.channel2.traceposition;
 
-          //Check if trigger on this channel and if so save it's current offset
-          if(scopesettings.triggerchannel)
+          //Check if trigger on this channel and if so save it's current offset (fw 0.2.54: 1 only, 2 is EXT)
+          if(scopesettings.triggerchannel == 1)
           {
             previous_trigger_level_offset = scopesettings.triggerverticalposition;
           }
@@ -169,32 +184,51 @@ void touch_handler(void)
     switch(touchstate & TOUCH_STATE_MASK)
     {
       case TOUCH_STATE_X_Y_MODE:
-        change_channel_1_offset();
-        change_channel_2_offset();
+        //x moves channel 1, y moves channel 2
+        change_channel_1_offset(touch_drag_delta((int32)xtouch - (int32)previousxtouch));
+        change_channel_2_offset(touch_drag_delta((int32)previousytouch - (int32)ytouch));
         break;
 
+      //fw 0.2.54: a channel and the trigger level on it (triggerchannel 1 for CH2; 2 is EXT) move by one delta, limited so
+      //both stay in the drag range: the level keeps its distance to the trace (its voltage) at the edges
       case TOUCH_STATE_MOVE_CHANNEL_1:
-        if(scopesettings.channel1.enable) change_channel_1_offset();
-
-        //Check if trigger on this channel and if so move it accordingly
-        if(scopesettings.triggerchannel == 0)
+        if(scopesettings.channel1.enable)
         {
-          change_trigger_level_offset();
+          delta = touch_drag_delta((int32)previousytouch - (int32)ytouch);
+
+          if(scopesettings.triggerchannel == 0)
+          {
+            delta = touch_shared_delta(delta, previous_channel_1_offset, previous_trigger_level_offset, TRACE_POS_MIN, TRACE_POS_MAX);
+            change_channel_1_offset(delta);
+            change_trigger_level_offset(delta);
+          }
+          else
+          {
+            change_channel_1_offset(delta);
+          }
         }
         break;
 
       case TOUCH_STATE_MOVE_CHANNEL_2:
-        if(scopesettings.channel2.enable) change_channel_2_offset();
-
-        //Check if trigger on this channel and if so move it accordingly
-        if(scopesettings.triggerchannel)
+        if(scopesettings.channel2.enable)
         {
-          change_trigger_level_offset();
+          delta = touch_drag_delta((int32)previousytouch - (int32)ytouch);
+
+          if(scopesettings.triggerchannel == 1)
+          {
+            delta = touch_shared_delta(delta, previous_channel_2_offset, previous_trigger_level_offset, TRACE_POS_MIN, TRACE_POS_MAX);
+            change_channel_2_offset(delta);
+            change_trigger_level_offset(delta);
+          }
+          else
+          {
+            change_channel_2_offset(delta);
+          }
         }
         break;
 
       case TOUCH_STATE_MOVE_TRIGGER_LEVEL:
-        change_trigger_level_offset();
+        change_trigger_level_offset(touch_drag_delta((int32)previousytouch - (int32)ytouch));
         break;
 
       case TOUCH_STATE_MOVE_TIME_CURSOR_LEFT:
@@ -5604,137 +5638,40 @@ void change_channel_1_HW_offset(void)
 //-----------------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void change_channel_1_offset(void)
+void change_channel_1_offset(int32 delta)
 {
-  int32 diff;
-  int32 position;
+  //fw 0.2.54: the drag distance comes from touch_handler (y in normal display, x in X-Y)
+  scopesettings.channel1.traceposition = scope_trace_clamp((int32)previous_channel_1_offset + delta);
 
-  //Calculate the distance to move the setting with based on the display mode
-  if(scopesettings.xymodedisplay == 0)
-  {
-    //For normal display use y displacement
-    diff = ytouch - previousytouch;
-  }
-  else
-  {
-    //For x-y mode display use x displacement
-    diff = previousxtouch - xtouch;
-  }
-
-  //Make it based on move speed
-  if(scopesettings.movespeed)
-  {
-    //For slow divide by 5
-    diff /= 5;
-  }
-
-  //Calculate the new position
-  position = (int32)previous_channel_1_offset - diff;
-
-  //Limit it on the trace portion of the screen
-  if(position < 6)
-  {
-    //So not below 6
-    position = 6;
-  }
-  else if(position > 396)//394
-  {
-    //And not above 394;
-    position = 396;//394
-  }
-    //position = 396-position;//add********
-  //Update the current position
-  scopesettings.channel1.traceposition = position;
-  
   //Write it to the FPGA
-  fpga_set_channel_offset(&scopesettings.channel1); 
-  
+  fpga_set_channel_offset(&scopesettings.channel1);
+
   //Skope mode & long time base - set other values and clear view area
   if((!scopesettings.waveviewmode) && scopesettings.long_mode) scope_preset_values();
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void change_channel_2_offset(void)
+void change_channel_2_offset(int32 delta)
 {
-  int32 diff;
-  int32 position;
-
-  //Calculate the distance to move the setting with
-  diff = ytouch - previousytouch;
-
-  //Make it based on move speed
-  if(scopesettings.movespeed)
-  {
-    //For slow divide by 5
-    diff /= 5;
-  }
-
-  //Calculate the new position
-  position = (int32)previous_channel_2_offset - diff;
-
-  //Limit it on the trace portion of the screen
-  if(position < 6)
-  {
-    //So not below 6
-    position = 6;
-  }
-  else if(position > 396)//394
-  {
-    //And not above 394;
-    position = 396;//394
-  }
-
-  //Update the current position
-  scopesettings.channel2.traceposition = position;
+  scopesettings.channel2.traceposition = scope_trace_clamp((int32)previous_channel_2_offset + delta);
 
   //Write it to the FPGA
-  fpga_set_channel_offset(&scopesettings.channel2); 
-  
+  fpga_set_channel_offset(&scopesettings.channel2);
+
   //Scope mode & long time base - set other values and clear view area
-  if((!scopesettings.waveviewmode) && scopesettings.long_mode) scope_preset_values(); 
+  if((!scopesettings.waveviewmode) && scopesettings.long_mode) scope_preset_values();
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void change_trigger_level_offset(void)
+void change_trigger_level_offset(int32 delta)
 {
-  int32 diff;
-  int32 position;
+  scopesettings.triggerverticalposition = scope_trace_clamp((int32)previous_trigger_level_offset + delta);
 
-  //Calculate the distance to move the setting with
-  diff = ytouch - previousytouch;
-
-  //Make it based on move speed
-  if(scopesettings.movespeed)
-  {
-    //For slow divide by 5
-    diff /= 5;
-  }
-
-  //Calculate the new position
-  position = (int32)previous_trigger_level_offset - diff;
-
-  //Limit it on the trace portion of the screen
-  if(position < 6)
-  {
-    //So not below 6
-    position = 6;
-  }
-  else if(position > 396)//394
-  {
-    //And not above 394;
-    position = 396;//394
-  }
-
-  //Update the current position
-  scopesettings.triggerverticalposition = position;
-  
-  //if(!scopesettings.long_mode || scopesettings.triggermode) scopesettings.triggerverticalposition = position;
-  
   //Skope mode & long time base & no auto mode - set other values and clear view area
   if((!scopesettings.waveviewmode) && scopesettings.long_mode && scopesettings.triggermode) scope_preset_values();
-  
+
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
