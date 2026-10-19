@@ -31,7 +31,20 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### Next (fw-cal3, version set at the merge)
+#### 0.2.50 - 2026-10-19 (protocol 1.14)
+
+- Added: calibration v4, background tracking of the full-rate interleave mismatch. Every 8-bit 200 MSa/s record of a
+  calibrated channel (UI or host) feeds a per-channel fit of core A - B = d + e x + q x^2 from neighbouring sample
+  pairs on flat parts of the signal (edges and energy near fs/2 are rejected); d and e are applied symmetrically in
+  the full-rate class (no per-sample cost, the mean of the cores and the filtered path unchanged), q is reported.
+  A 1.7-code step falls under 0.1 code in about 37 s of 200 MSa/s use (7cfc7f7; maths and host test 260144d).
+- Added: full-class common-mode tracking. A class probe (about 100 ms: gated, full-rate, gated conversions on the
+  live input, front end untouched) runs per channel at most every 30 s while the scope or spectrum view runs with a
+  quiet input and no host capture; the full-rate class (200 MSa/s and every filtered capture) is pulled back onto
+  the stable gated zero (93087b2).
+- Added: GET_CAL answers 288 bytes; bytes 84 and 92..107 report what the next readout applies, 256..287 the tracker
+  and probe state (protocol row 53, 5f6bc0d). The diagnostics view shows "Track d .. e .. q .. age" and "Class cm
+  .. age" per channel, grey until they ran (4cd60f7).
 
 - Changed: the base calibration is one full-screen wizard (System settings > Baseline calibration), replacing the
   fold-out box and the separate gain prompt: step 1 zero (probes and USB unplugged, warns when a USB host is
@@ -39,7 +52,7 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   check first ("No signal on CH1: tip on the post?"), the CH2 gain measured at once when its probe is already on the
   post, step 3 a summary in plain words. Retry and Skip per step, Cancel at any step writes nothing, Done saves only
   what changed and shows the one success message. The trigger mode is restored after the calibration (it was left
-  in Auto) and the channels' offsets are no longer zeroed. firmware/README.md section 6.4 (commit pending).
+  in Auto) and the channels' offsets are no longer zeroed. firmware/README.md section 6.4 (48e5737).
 
 #### 0.2.47 - 2026-10-19 (protocol 1.13, unchanged)
 

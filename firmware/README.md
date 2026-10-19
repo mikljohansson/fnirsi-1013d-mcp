@@ -1288,3 +1288,83 @@ action (Start / Measure / Next / Done, green) x 620; touch areas the same x rang
 5. New run: Skip step 1 (zero kept), Skip CH1, Measure CH2: Done saves 708 only (709 unchanged), CH1 unchanged.
 6. New run, Skip, Skip, Skip, Done: "Calibration unchanged", nothing written. Stray touches anywhere off the buttons
    do nothing in every step. Stock bitstream (if at hand): step 2 shows the AL3 note.
+
+### 6.5 Calibration v4: background interleave tracking (fw 0.2.50, protocol 1.14)
+
+Design and numbers: docs/plans/interleave-tracking.md; wire: protocol row 53. Files: `acal_track.c/.h` (pure C: the
+A - B estimator and fit, the class-probe check and the apply functions; `host_tests/test_acal_track.c`), `acal_live.c/.h`
+(the per-channel state, the readout hooks, the class-probe scheduler).
+
+**Why.** The gated class (every legacy time base but 200 MSa/s) keeps the one-time v3 calibration for hours. The
+full-rate class (200 MSa/s and every filtered capture: both cores at 100 MHz, interleaved) does not: on the bench the
+core A/B gain ratio read 1.033, 1.013 and 1.000 within a night, the A/B zero split moved 1.1 code within 15 minutes, a
+bow of about 1 code at 35-50 codes from mid-scale came and went, and both cores rose 0.7-0.8 code in two hours against
+the gated class. Symptoms: a 1-2 code sample-by-sample split and an fs/2 spur at 200 MSa/s, and a filtered zero 0.7 code
+off.
+
+**A - B tracker.** Every 8-bit full-rate readout of CH1 / CH2 with a bound v3 block (UI records and host captures, at
+most one per 50 ms per channel) is offered to the channel's tracker after the readout. Each interior sample is compared
+with the mean of its two neighbours from the other core where all three are within 4..251 and the neighbours differ by
+at most 6 codes (flat parts: plateaus, slow slopes, a quiet input); a record counts with at least 256 such pairs and at
+most 1/8 dropped for slope (edges and energy near fs/2 are rejected: a 40 MHz sine is never accepted). The sums go into
+moments with forgetting 1/256 per record (tau 256 records, 12.8 s at the 50 ms gate) and a least-squares fit gives
+A - B = d + e x + q x^2 (x = code - 128). d is always updated, e only with at least 8 codes RMS of signal spread, q only
+when the signal visited three separated levels; otherwise the last value is held. d and e are applied in the full class
+only, half to each core with opposite signs (folded into the readout's per-core gain and offset: no cost per sample);
+the mean of the cores, and with it the filtered path, the volts and the trigger level, is unchanged. q is estimated and
+shown, not applied.
+
+Host-test numbers (`test_acal_track`, a drifting two-core model with the v3 correction, dither, clamp and rail rule):
+a 1.7-code step of core A falls under 0.1 code (split and fs/2 amplitude) from 736 records on (36.8 s, 2.9 tau); a 3 %
+gain ramp leaves under 0.1 code at +-40 codes 1 tau after the ramp ends; noise floor of d 0.0012 code (quiet input) to
+0.004 code (sine), of e 4e-5; a quiet input holds e. Bow: the fit finds q within 2 % of the model and e unbiased by it;
+the residual it leaves is q x^2, for a bow of 1 code at 42 codes 0.66 code at -35 and 1.6 codes at +53 (the post
+square's levels), 0 at mid-scale.
+
+**Class probe.** The tracker cannot see the common mode of the full class (it keeps the mean of the cores). The only
+stable reference is the gated class, so a probe compares the two on the live input: with the channel's relays, offset
+PWM and coupling as they are, 8 conversions at 2 MSa/s, 64 at 200 MSa/s (they spread over the 25 kHz offset-PWM ripple),
+8 at 2 MSa/s again, about 100 ms, through a private raw scratch channel (the screen's traces stay). c = corrected mean
+of both cores at full rate minus the mean of the two gated parts; valid when every part's RMS per core is at most 2
+codes, nothing clips, the gated parts agree within 0.3 code and |c| <= 8 codes. The first valid probe after a reset sets
+cm = c, later ones move it by a quarter; cm is subtracted from both cores in the full class (8-bit) and from corr16 (the
+16-bit path: every filtered capture, the spectrum view, the 16-bit trigger level; it is added after the conversion, so it
+does not depend on N, K or the FIR gain). It runs per channel at most every 30 s (the first 5 s after boot) and only
+when nothing else is going on: RUN, scope or spectrum view, no menu (it runs from the main loop), no UI conversion in
+flight, no host capture armed or triggered, no READ_RAW hold, the channel on and its last record quiet (RMS <= 2 codes).
+A periodic signal never qualifies; cm then holds (its age grows). Cost: one missed screen update, and the FPGA ring no
+longer holds the last UI capture (as after any calibration conversion). `EXTRA_CFLAGS=-DPC_CAL_CLASS_PROBE=0` builds it
+out (cm then stays 0).
+
+**Not tracked.** The gated class (it is the reference; a step like the 03:48 one, -1.7 code on CH2 core A in both
+classes, stays in the gated class until the next calibration: the full class follows it relative to the gated class),
+16-bit readouts as tracker input (they weigh both cores equally, the split cancels), the calibration's own conversions.
+Nothing is persisted: tracker and cm restart from the stored v3 values at boot and after the wizard's Done.
+
+**The one-time gain step stays.** The tracker sees only A - B of full-rate records. The full class against the gated
+class (1.1 % on the bench, what every filtered capture reads with) and the gated gains come only from the step, and it
+gives the tracker its starting point.
+
+**Readout.** GET_CAL 288 bytes (row 53): 256 flags, d, e, q, ages, counts, cm; bytes 84 and 92..107 include v4.
+Diagnostics view (System settings > Diagnostic), per channel under its calibration block: "Track d +0.12 e +0.31% q
++0.6@40 3s" (applied A - B offset in codes and slope in percent, the bow as its effect at 40 codes, age of the last
+accepted record) and "Class cm +0.70 (4) 12s" (common mode subtracted, valid probes, age); grey until they ran.
+
+**Bench** (owner with the coordinator on COM10; FEL load only, nothing written to the card):
+
+1. Wizard: the walk-through of section 6.4 (steps 1-6). After Done, GET_CAL bytes 256..287 are reset (flags 0, ages
+   0xFFFFFFFF) and the diagnostics lines are grey.
+2. Shorted inputs (BNC caps or probe tip to ground clip), DC, range 2, dcoffset 0, 200 MSa/s, 30 minutes, then CIC2+FIR
+   at 1 MSa/s for 10 minutes. Every minute: GET_CAL CH1 and CH2 (flags, d, e, q, age, records, cm, cm_probes, cm_age)
+   and 4 x READ_TRACE. Expect: track flags bit 0 within a second, bit 1 clear (quiet: e held), cm_probes counting about
+   twice a minute, cm moving to the full-class drift (0.7-0.8 code after two hours on the bench, smaller fresh after a
+   calibration); corrected A - B (mean of odd minus mean of even trace positions) within 0.1 code throughout; after the
+   switch to CIC2+FIR the trace mean within 0.15 code of 128.
+3. +1 V and -1 V (DMM-measured) on CH1 range 2, 200 MSa/s, 30 minutes each. Expect A - B within 0.1 code at both
+   polarities after 1 minute, the fs/2 spur in the spectrum view at the floor (record the level), cm unchanged by the
+   level (the probe is input-independent for DC). Record e and q (q x 1600 = the bow at 40 codes in the diagnostics
+   line) at both polarities and once with the calibration-post square (generator on, 1 kHz): q there tells whether the
+   bow correction (design section 6) is worth building.
+4. Negative checks: a 40 MHz signal or the post square at 200 MSa/s with fast edges must not move d (records rejected or
+   few pairs; `last_pairs`), a running sine must not trigger class probes (cm_age grows), opening a menu or arming a
+   host single stops probes, and a probe never shows as a glitch in the trace (the screen just skips one update).
