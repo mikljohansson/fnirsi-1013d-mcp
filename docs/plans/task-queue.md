@@ -128,7 +128,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   generator although the pin is off (fw-freq2 open item): show "off" or the user's setting as the engine leaves it. (c) The
   warning "CH1 level low: the DUT loads the 1 kOhm source" also appears when the pre-scan ranged CH1 too coarse (0x1539 fault):
   name both causes or pick by range. mcp: the simulator lacks reason 8 and the header-before-first-sweep rule.
-- **Slider track geometry revision** (owner 10-19 22:15 after seeing 0.2.73, slider-overview.md decision 7): the window is a box
+- **Slider track geometry revision** (owner 10-19 22:11 after seeing 0.2.73, slider-overview.md decision 7): the window is a box
   again (four 1 px borders, 1 px margin), overview full colour inside and dimmed outside; the track's top border line removed (the
   plot pane's outline is the separation); all three modes; boards regenerated. Dispatch fw-over2 at once (small).
 - **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
