@@ -1051,4 +1051,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   EXT offsets, warm run). Firmware side (fw-cap dispatched): detect 0x153A, EXT offsets (+4 words at 200 MSa/s, +3 divided;
   K >= 1 +40 ns), 0x53 bits 3/4 inert, training via 0x63 / 0x64 / 0x36 at code 128 stored with the calibration, 0x36 in
   GET_HEALTH and Diagnostics, wizard zero back at 128.
+- 2026-10-20 01:09: fw 0.2.79 (fw-cap: 0x153A capture stages, training, self-check, EXT offsets; wizard zero at 128; protocol 1.24)
+  merged, built with GCC 10 and pinned backups/fw-0.2.79_7188c5cf.bin (sha256
+  7188c5cf84670fbde11da2f4790cd84ba1b952df45afeb475a4fb3ba90bb42ad); firmware host tests, vectors, mcp ruff and 443 pytest green.
+  Morning order: FEL-load 0.2.79 on 0x1539 first (the wizard must now fail loudly there: readout fault near 128, the fail-fast
+  check), then the 0x153A flash session, then firmware/AGENTS.md section 54 / fpga/al3/README.md section 10 items 1..7.
 

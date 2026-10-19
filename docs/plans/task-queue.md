@@ -193,7 +193,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   capture path, clocking, constraints) against the bench record, then finish 0x153A.
 - [x] **Preserve the mockup sources** (docs/mockups/ committed 19:50): copy the gen_ux generators and the artboard HTML from the coordinator's scratchpad into
   docs/mockups/ (committed) before the session ends; the makeover artifact itself is on a previous login (ux-makeover.md note).
-- **Wizard zero point back at code 128** (owner 10-19 20:30, fail fast): revert 0.2.67's two-point off-centre zero, measure at the
+- [x] **Wizard zero point back at code 128** (fw 0.2.79, bench pending) (owner 10-19 20:30, fail fast): revert 0.2.67's two-point off-centre zero, measure at the
   centre PWM so a bitstream with the capture fault fails the wizard loudly; keep the "ADC readout fault near code 128" wording and
   the CAL_PROBE command; host test updated. Do it in the firmware batch that follows 0x153A (so the wizard keeps passing on the
   owner's unit).
@@ -423,7 +423,16 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   review" and "0x153A status"; images pinned, dist entry unbenched): see hardware-status 00:30. Next for the FPGA: flash + bench;
   0x153B = gen8-features-wip (trigger types, peak detect, counter) on top of this design; wanted: pipeline the divider compare,
   encodes into IOB ODDRs, zero the simulation-only initial values.
-- fw-cap (Opus, branch fw-cap, dispatched 00:35, fw 0.2.79 provisional): firmware for 0x153A (detection, EXT offsets, training
+- fw-cap (done 01:05, about 400k tokens plus a helper agent for the docs / mcp commits, merged 01:09 as fw 0.2.79 / protocol 1.24
+  row 64, handoff firmware/AGENTS.md section 54, pinned backups/fw-0.2.79_7188c5cf.bin, not loaded: scope off; the morning's FEL
+  image): caps bit 19 CAPTURE_STAGES / features bit 7 on 0x153A..0x153F; training in the wizard's zero step (stages 2..5 per core
+  at code 128, 8000 words each, clean = 0x36 count 0, pick 3 or 4 with a clean neighbour, B retried with the reference bit, no
+  clean stage = "ADC readout fault near code 128: check the FPGA bitstream"), stored in sector 708 bytes 488..503 with its own
+  version (zero / gain block unchanged), written at boot when trained on the running bitstream; relative self-check after each
+  full-rate capture (a core more than 8 outliers above its chip partner is flagged; both cores of a chip garbling at once is
+  caught only by the wizard); GET_HEALTH 124 bytes layout 2, GET_CAL 364 bytes, event type 23; EXT offsets 12 / 14 legacy
+  samples on 0x153A; wizard zero at 128 (0.2.67 workaround removed). Not testable from firmware: the reference-bit test (needs
+  raw 0x63 writes from a host script). Was: (Opus, branch fw-cap, dispatched 00:35): firmware for 0x153A (detection, EXT offsets, training
   with 0x63 / 0x64 / 0x36 stored with the calibration, 0x36 in GET_HEALTH and Diagnostics, 0x53 bits 3/4) and the wizard zero
   point back at code 128.
 - fw-yield (done 10-19 23:50, about 420k tokens, merged 2026-10-20 00:02 as fw 0.2.78 / protocol 1.23 row 63, handoff firmware/AGENTS.md
