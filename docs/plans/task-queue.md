@@ -131,6 +131,17 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - **Slider track geometry revision** (owner 10-19 22:11 after seeing 0.2.73, slider-overview.md decision 7): the window is a box
   again (four 1 px borders, 1 px margin), overview full colour inside and dimmed outside; the track's top border line removed (the
   plot pane's outline is the separation); all three modes; boards regenerated. Dispatch fw-over2 at once (small).
+- **Scope tap-to-jump and zoom stepping** (owner 10-19 22:20 on 0.2.73; fw-zoom dispatched): (a) a tap in the Scope's slider
+  track outside the window does nothing (Spectrum works): find why the Scope path is not reached (the tap bands / extended drag
+  area / the record-position slider handler order) and fix it with a host test. (b) Tap zoom on the plot: the left side (zoom out)
+  does nothing where the slower time/div is not viable at the current rate or exceeds the record, while the right side zooms in.
+  Owner: the zoom should step the sample rate together with the time/div so the result is always viable and intuitive, like a bench
+  scope where time/div drives the rate: zooming out past the record lowers the rate (memory depth kept), zooming in past ten samples
+  per division raises it; the ACQ menu's rate chips stay for a manual choice and the snap notice stays. Apply the same rule to the
+  time/div chips in the ACQ menu and to SET_TIMEBASE where the host asks for a time/div (docs/protocol.md note). Design the rule
+  in one paragraph in docs/ui-guidelines.md first (what changes, what is kept), then implement.
+- **AUTO SET in Frequency response fails about 60 % on 0x1539** (owner 22:20): expected from the capture fault (pre-scan clips at
+  5 V/div); re-test on 0x153A before any engine change.
 - **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
   SCREENSHOT bit 6, simulator has it, `Scope.read_screen` reads 40 rows per request) but the firmware handler is NULL
   (pc_cmds.c "BENCH: T9"). Implement it in all builds: rows of the live framebuffer as RGB565, the header per protocol.md, the
@@ -366,6 +377,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   sweep. Open (queue): the simulator lacks reason 8 and the new header rule (mcp item); a single sweep started from the CTRL page
   leaves the bar on that page where RUN/STOP is not visible (owner to decide: jump back to page one?); after a sweep the generator
   chip shows the user's generator although the pin is off. Loaded 21:30 as backups/fw-0.2.71_1264e26c.bin; walk-through pending.
+- fw-over2 (done 22:17, about 120k tokens, merged as fw 0.2.74, loaded 22:19): decision 7 geometry in all three modes, boards
+  regenerated, addendum in firmware/AGENTS.md section 49.
 - fw-over (done 21:50, about 335k tokens, merged 21:53 as fw 0.2.73, handoff firmware/AGENTS.md section 49, pinned backups/fw-0.2.73_ad7b7e24.bin, not loaded): the slider-track overview per the owner's decisions
   (18 px window, 14 rows, dimmed/full, Scope envelope replacing the stock thumbnail, Spectrum from the existing FFT, Frequency
   response AUTO SET copy), then tap-to-jump as the fast follow on the same branch; boards regenerated to 18 px.

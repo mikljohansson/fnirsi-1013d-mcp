@@ -998,4 +998,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   it; the section 49 limit is +1 ms, so measure again against a build with the envelope skipped before deciding on the cache).
   Screenshot scratchpad screen_2208_scope_overview_1kHz.png: the track holds both channels' envelopes over the whole record in
   their colours. B3, B4, B5, B7 and the overview walk-through (section 49) wait for the owner.
+- 2026-10-19 22:11-22:20: owner on 0.2.73: the two-line window of decision 6 "doesn't work quite well"; decision 7 (window box with
+  margin back, track top line removed) built by fw-over2 and merged as fw 0.2.74 (pinned backups/fw-0.2.74_11f6d6dc.bin, sha256
+  11f6d6dce031a0a6c9a0709ac0b8a2e463e68446f9c42e6bf2dc20c807586ee2; track y 452..471, 20 rows, box 18 px, 16 rows inside),
+  FEL-loaded 22:19 by ENTER_FEL (`#VER fw=0.2.74,proto=1.22,fpga=0x1539`). Owner findings on 0.2.73: tap to jump in the Scope's
+  track does nothing, works in Spectrum; a tap on the left of the Scope plot no longer zooms out while the right side zooms in
+  (the ten-samples-per-division viability or the record length blocking the slower time/div at the current rate; owner wants the
+  zoom to step the sample rate and time/div together "so it pretty much just works"); AUTO SET in Frequency response worked for
+  some points and failed for about 60 % (the 0x1539 A-core fault through the pre-scan ranging, as at 20:51; recheck on 0x153A).
 
