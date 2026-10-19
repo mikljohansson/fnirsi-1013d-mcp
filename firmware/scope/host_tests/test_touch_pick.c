@@ -211,11 +211,97 @@ static void test_shared_delta(void)
   T_EQ(touch_shared_delta(5, 0, 0, 6, 396), 5);
 }
 
+//fw 0.2.64 (touch batch 2): distance to the drawn trace
+static void test_trace_distance(void)
+{
+  TOUCH_XY lin[4] = { { 100, 200 }, { 101, 200 }, { 102, 300 }, { 103, 300 } };   //a square edge between 101 and 102
+  TOUCH_XY peak[4] = { { 200, 150 }, { 200, 250 }, { 201, 160 }, { 201, 240 } };  //Peak style: max, min per column
+  TOUCH_XY sparse[2] = { { 300, 100 }, { 320, 300 } };                           //2 px per... a slow edge over 20 columns
+
+  //On the flat part, above and below
+  T_EQ(trace_distance(lin, 4, 100, 200), 0);
+  T_EQ(trace_distance(lin, 4, 100, 190), 10);
+  T_EQ(trace_distance(lin, 4, 100, 215), 15);
+
+  //On the edge: the whole vertical span counts
+  T_EQ(trace_distance(lin, 4, 101, 250), 0);
+  T_EQ(trace_distance(lin, 4, 102, 299), 0);
+  T_EQ(trace_distance(lin, 4, 102, 310), 10);
+
+  //No trace in those columns
+  T_EQ(trace_distance(lin, 4, 110, 200), -1);
+  T_EQ(trace_distance(lin, 0, 100, 200), -1);
+
+  //Peak style: the band between max and min
+  T_EQ(trace_distance(peak, 4, 200, 200), 0);
+  T_EQ(trace_distance(peak, 4, 201, 140), 10);
+  T_EQ(trace_distance(peak, 4, 200, 260), 10);
+
+  //Interpolated between sparse points: at column 310 the line is at y 200, columns 309..311 span 190..210
+  T_EQ(trace_distance(sparse, 2, 310, 200), 0);
+  T_EQ(trace_distance(sparse, 2, 310, 230), 20);
+  T_EQ(trace_distance(sparse, 2, 310, 170), 20);
+}
+
+static void test_channel_near(void)
+{
+  //CH1 zero line at row 248 (position 200), its square wave drawn 100 px higher: grabbable on the wave
+  T_EQ(pick_channel_near(1, 200, 5, 0, 0, -1, 150), 1);
+  //Only the zero line (trace far away): 1.00o5 behaviour within the larger radius
+  T_EQ(pick_channel_near(1, 200, 200, 0, 0, -1, 248 + 40), 1);
+  T_EQ(pick_channel_near(1, 200, 200, 0, 0, -1, 248 + 41), 0);
+  //A trace within 40 px of the touch
+  T_EQ(pick_channel_near(1, 200, 40, 0, 0, -1, 100), 1);
+  T_EQ(pick_channel_near(1, 200, 41, 0, 0, -1, 100), 0);
+  //Nearest of two, a tie to CH2, a switched-off channel never
+  T_EQ(pick_channel_near(1, 200, 10, 1, 100, 20, 120), 1);
+  T_EQ(pick_channel_near(1, 200, 10, 1, 100, 10, 120), 2);
+  T_EQ(pick_channel_near(1, 200, 30, 0, 100, 0, 120), 1);
+  T_EQ(pick_channel_near(0, 200, 0, 0, 100, 0, 120), 0);
+}
+
+static void test_tap_zones(void)
+{
+  //No cards: 1.00o5's bands, contiguous, up to the grid's bottom
+  T_EQ(touch_tap_zone(100, 60, 449, 449), TAP_CH1_MORE);
+  T_EQ(touch_tap_zone(500, 99, 449, 449), TAP_CH2_MORE);
+  T_EQ(touch_tap_zone(100, 100, 449, 449), TAP_TB_SLOWER);
+  T_EQ(touch_tap_zone(500, 368, 449, 449), TAP_TB_FASTER);
+  T_EQ(touch_tap_zone(100, 369, 449, 449), TAP_CH1_LESS);
+  T_EQ(touch_tap_zone(500, 448, 449, 449), TAP_CH2_LESS);
+
+  //Nothing on the record slider row, below the grid, at the centre line, outside the plot
+  T_EQ(touch_tap_zone(100, 449, 449, 449), TAP_NONE);
+  T_EQ(touch_tap_zone(100, 460, 449, 449), TAP_NONE);
+  T_EQ(touch_tap_zone(360, 200, 449, 449), TAP_NONE);
+  T_EQ(touch_tap_zone(2, 200, 449, 449), TAP_NONE);
+  T_EQ(touch_tap_zone(720, 200, 449, 449), TAP_NONE);
+  T_EQ(touch_tap_zone(100, 49, 449, 449), TAP_NONE);
+
+  //Cards on the left half (two rows: top 402): the band moves up above them; the right half is unchanged
+  T_EQ(touch_cards_top(0), 449);
+  T_EQ(touch_cards_top(3), 426);
+  T_EQ(touch_cards_top(4), 402);
+  T_EQ(touch_cards_top(12), 354);
+  T_EQ(touch_tap_zone(100, 410, 402, 449), TAP_NONE);
+  T_EQ(touch_tap_zone(100, 401, 402, 449), TAP_CH1_LESS);
+  T_EQ(touch_tap_zone(100, 322, 402, 449), TAP_CH1_LESS);
+  T_EQ(touch_tap_zone(100, 321, 402, 449), TAP_TB_SLOWER);
+  T_EQ(touch_tap_zone(500, 410, 402, 449), TAP_CH2_LESS);
+
+  //Dead band and the moved threshold
+  T_TRUE(TOUCH_DEAD_BAND >= 6);
+  T_TRUE(TOUCH_MOVED < TOUCH_DEAD_BAND);
+}
+
 int main(void)
 {
   test_pointer_geometry();
   test_left_column();
   test_channel_line();
   test_shared_delta();
+  test_trace_distance();
+  test_channel_near();
+  test_tap_zones();
   return t_report("test_touch_pick");
 }

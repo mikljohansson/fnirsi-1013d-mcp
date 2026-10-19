@@ -37,145 +37,82 @@
 #include <math.h>
 //----------------------------------------------------------------------------------------------------------------------------------
 
-//void scope_adjust_timebase(void)
+//fw 0.2.64: the first row the lower V/div tap band may not use on a half: the top of that half's measurement cards (as
+//scope_display_measurements draws them), else the grid's bottom
+static int32 scope_tap_bottom(int half)
+{
+  uint8  *m = scopesettings.measuresstate[half];
+  uint32  i, n = 0;
+  int     shown;
+
+  if(half == 0)
+    shown = (scopesettings.channel1.enable || scopesettings.ref1 || scopesettings.ref2 || scopesettings.ref3 || scopesettings.ref4) &&
+            !scopesettings.hide_values_CH1 && !scopesettings.long_mode;
+  else
+    shown = (scopesettings.channel2.enable || scopesettings.ref5 || scopesettings.ref6 || scopesettings.ref7 || scopesettings.ref8) &&
+            !scopesettings.hide_values_CH2 && !scopesettings.long_mode;
+
+  if(shown)
+    for(i = 0; i < 12; i++)
+      if(m[i])
+        n++;
+
+  return touch_cards_top(n);
+}
+
+//V/div one step on a tap band
+static void scope_tap_voltdiv(PCHANNELSETTINGS settings, int more)
+{
+  //Only if channel is enabled
+  if(!settings->enable)
+    return;
+
+  if(more && (settings->displayvoltperdiv < 6))
+    settings->displayvoltperdiv++;
+  else if(!more && (settings->displayvoltperdiv > 0))
+    settings->displayvoltperdiv--;
+  else
+    return;
+
+  //Show the change on the screen
+  scope_channel_settings(settings, 0);
+
+  //Only update the FPGA in run mode
+  //For waveform view mode the stop state is forced and can't be changed
+  if(scopesettings.runstate) match_volt_per_div_settings(settings);
+}
+
+//A tap on the empty plot (fw 0.2.64: the bands of touch_pick.h: 1.00o5's V/div and time base bands, kept by the owner,
+//off the record slider row and off the measurement cards)
 void scope_adjust_timebase_and_voltdiv (void)
 {
-  uint8 min;
-  uint8 max;
-    
-  //Check if touch within the trace display region
-  if((previousxtouch > 2) && (previousxtouch < 720) && (previousytouch > 50) && (previousytouch < 470))
+  uint8 min = 0;
+  uint8 max = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1);
+
+  if ((scopesettings.long_mode) && (scopesettings.waveviewmode)) {min = 0;   max = 10;}
+  if ((!scopesettings.long_mode) &&(scopesettings.waveviewmode)) {min = 11;  max = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1); }
+
+  switch(touch_tap_zone(previousxtouch, previousytouch, scope_tap_bottom(0), scope_tap_bottom(1)))
   {
+    case TAP_TB_SLOWER:
+      //Go up in time by taking one of the setting
+      if(scopesettings.timeperdiv > min)
+        scopesettings.timeperdiv--;
+      scope_set_timebase();
+      break;
 
-  
-    if ((scopesettings.long_mode) && (scopesettings.waveviewmode)) {min = 0;   max = 10;}
-    if ((!scopesettings.long_mode) &&(scopesettings.waveviewmode)) {min = 11;  max = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1); }
-    if(!scopesettings.waveviewmode) {min = 0;  max = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1); }
-      
-      //Check if touch on the left of the center line
-    //if(previousxtouch < 358)
-    if(previousxtouch < 358)
-    {   
-      if((previousytouch > 100)&&(previousytouch < 370))
-      {
-        //Short time base
-        //Check if not already on the highest setting (200mS/div)
-        //Long time base
-        //Check if not already on the highest setting (50s/div)
-        if(scopesettings.timeperdiv > min)
-        {
-          //Go up in time by taking one of the setting
-          scopesettings.timeperdiv--;
-        }
-        scope_set_timebase();
-      }
-      
-      if(previousytouch < 100)
-      { 
-        //Only if channel is enabled
-        if(scopesettings.channel1.enable)
-        {
-          //Check if setting not already on max
-          if(scopesettings.channel1.displayvoltperdiv < 6)
-          {
-              //Step up to the next setting. (Lowering the setting)
-              scopesettings.channel1.displayvoltperdiv++;
+    case TAP_TB_FASTER:
+      //Go down in time by adding one to the setting
+      if(scopesettings.timeperdiv < max)
+        scopesettings.timeperdiv++;
+      scope_set_timebase();
+      break;
 
-              //Show the change on the screen
-              scope_channel_settings(&scopesettings.channel1, 0);
-
-              //Only update the FPGA in run mode
-              //For waveform view mode the stop state is forced and can't be changed
-              if(scopesettings.runstate) match_volt_per_div_settings(&scopesettings.channel1);
-          }
-        }
-      }
-      
-      if(previousytouch > 370)
-      {
-       //Only if channel is enabled
-       if(scopesettings.channel1.enable)
-       {
-         //Check if setting not already on min
-         if(scopesettings.channel1.displayvoltperdiv > 0)
-         {
-             //Step down to the next setting. (Increasing the setting)
-             scopesettings.channel1.displayvoltperdiv--;
-
-             //Show the change on the screen
-             scope_channel_settings(&scopesettings.channel1, 0);
-
-             //Only update the FPGA in run mode
-             //For waveform view mode the stop state is forced and can't be changed
-             if(scopesettings.runstate) match_volt_per_div_settings(&scopesettings.channel1);
-         }
-       }
-      }
-
-    }
-    //Check if touch on the right of the center line
-    else if(previousxtouch > 362)
-    { 
-      if((previousytouch > 100)&&(previousytouch < 370))
-      { //Long time base
-        //Check if not already on the lowest setting (100ms/div)
-        //Short time base
-        //Check if not already on the lowest setting (5nS/div)
-        if(scopesettings.timeperdiv < max)
-        {
-          //Go down in time by adding one to the setting
-          scopesettings.timeperdiv++;
-        }    
-        scope_set_timebase();
-      }
-      
-      if(previousytouch < 100)
-      { 
-        //Only if channel is enabled
-        if(scopesettings.channel2.enable)
-        {
-          //Check if setting not already on max
-          if(scopesettings.channel2.displayvoltperdiv < 6)
-          {
-              //Step up to the next setting. (Lowering the setting)
-              scopesettings.channel2.displayvoltperdiv++;
-
-              //Show the change on the screen
-              scope_channel_settings(&scopesettings.channel2, 0);
-
-              //Only update the FPGA in run mode
-              //For waveform view mode the stop state is forced and can't be changed
-              if(scopesettings.runstate) match_volt_per_div_settings(&scopesettings.channel2);
-          }
-        }
-      }
-      
-      if(previousytouch > 370)
-      {
-       //Only if channel is enabled
-       if(scopesettings.channel2.enable)
-       {
-         //Check if setting not already on min
-         if(scopesettings.channel2.displayvoltperdiv > 0)
-         {
-             //Step down to the next setting. (Increasing the setting)
-             scopesettings.channel2.displayvoltperdiv--;
-
-             //Show the change on the screen
-             scope_channel_settings(&scopesettings.channel2, 0);
-
-             //Only update the FPGA in run mode
-             //For waveform view mode the stop state is forced and can't be changed
-             if(scopesettings.runstate) match_volt_per_div_settings(&scopesettings.channel2);
-         }
-       }
-      }
-    }
-  
-    //scope_set_timebase();
-    
+    case TAP_CH1_MORE: scope_tap_voltdiv(&scopesettings.channel1, 1); break;
+    case TAP_CH1_LESS: scope_tap_voltdiv(&scopesettings.channel1, 0); break;
+    case TAP_CH2_MORE: scope_tap_voltdiv(&scopesettings.channel2, 1); break;
+    case TAP_CH2_LESS: scope_tap_voltdiv(&scopesettings.channel2, 0); break;
   }
-  
 }
     
 //----------------------------------------------------------------------------------------------------------------------------------
