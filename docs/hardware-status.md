@@ -870,3 +870,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   112 captures flagged by 0x33 and re-taken out of 5798 checked (event log read next). Raw core means: CH1 A-B +5.0 (3.3 on 0x1535),
   CH2 A-B -2.6 (0.5 on 0x1535; -3.3 on 0x1537): the per-core offsets differ from the 0x1535 state, so the unit needs a recalibration
   on 0x1538 (the wizard measures per core). Wizard run next.
+- 2026-10-19 17:55: wizard Zero level on 0.2.64 / 0x1538, nothing connected: still fails every time, now "CH1: too much noise,
+  range 1 at 200MSa/s: core B 7.2 codes, 7.2 per capture" (6-8 across runs) and "CH2: the input is not at 0 V" (clip). Host READ_RAW
+  at the same range and moment: 0.6-2.0 codes per core, no clipping, 0x33 0xF6. So the wizard's own conversion setup differs from
+  every other path (offset PWM / relay / settle on the coarsest range suspected); the four-screen wizard has never completed on
+  hardware; the 0.2.48 one-screen flow did. fw-cal5 dispatched (fix + host-triggerable dry run). Bench paused.
