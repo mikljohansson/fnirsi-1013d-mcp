@@ -108,6 +108,24 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
 - No start-up messages that lower trust; the first-run screen says what to do and offers Later.
 - Long-running screens (Diagnostics) run in the main loop so the PC protocol keeps working; only calibration and
   confirmations are modal.
+- **Host commands leave the modal screens** (owner, 2026-10-19 23:27: "if the agent sends commands it just exits all
+  modals, since that wouldn't be destructive; just exiting to the base screen"; fw 0.2.77, protocol 1.23). A host
+  request that needs the main loop while a menu, fold-out, dialog or screen is open does not get E_BUSY: every modal
+  loop checks `PC_UI_YIELD()` once per iteration and leaves by its own cancel path, nested ones one after the other,
+  until the base screen is reached and the main loop answers the request. A confirmation answers Cancel / No, a menu
+  or fold-out closes as a tap outside it does, Settings and its time page go Back, the file browser and the viewers
+  Return, a file message is dismissed, the first-run screen answers Later, the calibration wizard and the volts
+  calibration Cancel between steps (nothing written). The yield never takes a path that writes something the user
+  did not confirm (the generator keypad closes without the typed number); what the user already changed stays, as
+  with the cancel path itself. The warning line at the top middle says "Host command: menu closed" for 4 s (white,
+  ahead of the warnings; Frequency response in its warning line).
+- **What does not yield** keeps E_BUSY with the reason as its detail and text, so the host can say why: a calibration
+  measurement in progress (the wizard's steps and Save, a volts calibration step), a file save in progress (SAVE PIC,
+  SAVE WAVE, the Frequency response CSV, the Diagnostics report), USB drive mode. A new modal loop adds the yield
+  check after its touch scan; a new step that must finish wraps itself in `pc_glue_ui_hold`. A UI pass with no yield
+  check that takes longer than 1.5 s (auto set, a slow capture) answers E_BUSY "UI did not return to the main
+  screen". Commands answered from the timer interrupt (PING, GET_INFO, GET_STATUS, GET_BATTERY, GET_HEALTH, the link
+  counters and the event log) never close anything.
 
 ## 5. Process
 
