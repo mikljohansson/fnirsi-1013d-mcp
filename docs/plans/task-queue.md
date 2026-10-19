@@ -123,7 +123,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   commands 0x57-0x5D, reads 0x2B-0x32 via the 0x1F pointer, segment table (64-bit entries: valid, triggered, trigger offset, 40-bit
   5 ns timestamp), averaging with positions P and shift S at readout; firmware capture modes "Segments" and "Average N" with capture-info
   fields, READ_RAW layouts for a segment set and the averaged record; MCP `scope_capture_segments` / `scope_capture_averaged`; bench check 5
-  (an N = 1 average equals the memory's record) first after flashing. Next firmware generation + mcp-gen4/5.
+  (an N = 1 average equals the memory's record) first after flashing. Next firmware generation + mcp-gen4/5. Firmware: fw-seg, 0.2.58;
+  MCP host side: mcp-gen5 4699593 (`scope_capture_segments`, `scope_averaged_capture(hardware=true)`, simulator al3s).
 - [ ] **Overnight zero step at 03:48** (docs/hardware-status.md 04:00): after 4.4 h flat, CH2 core A moved -1.7 codes (B unchanged) and CH1
   both cores +0.5 within one 10-minute interval, persisting. Morning: battery/charger state, recalibrate on 0.2.48, re-check the CH2 A/B
   split; if per-core zeros move with temperature or supply, consider a periodic zero re-check (needs an input-independent method) or a
@@ -187,6 +188,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   1.6 kOhm / 10 nF RC; record the floor, skew and the wiring verdict in docs/hardware-status.md.
 - [ ] **Bode follow-ups** (after the bench): CH1 re-ranging when CH1 drops below 20 codes (resonant input nodes), the harmonic fast
   mode (design 1.3), the impedance mode z_series_ohm (design 2.4, coil L / Q / SRF for the detector), an optional PNG plot.
+- [ ] **1.17 on the unit, host side** (mcp-gen5, after the owner's 0x1536 flash and firmware/AGENTS.md section 35 checks 7-9): run
+  `scope_capture_segments` (10 kHz generator: intervals 100 us +- 10 ns, every segment crossing at the pretrigger point) and
+  `scope_averaged_capture(hardware=true)` against host averaging of the same signal (means within 0.1 code, N = 1 equal to READ_RAW);
+  then make `hardware` default to auto when the record fits, add it to `scope_decay_fit`, and drop the "not yet verified" caveats.
 - [ ] **Version bump to 0.3.0** in mcp/pyproject.toml and firmware PC_FW_VERSION, CHANGELOG section, release notes
   (mcp-gen3 item 4) when the owner gives the go for v0.3.0.
 - [x] **Alias residual model check** (fpga-gen4): the 100 kHz residual is the DDS generator's own spur. The DDS clock is 50 MHz, so a
