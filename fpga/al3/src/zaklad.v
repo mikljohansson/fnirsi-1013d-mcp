@@ -2,7 +2,7 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
-// fnirsi-1013d-mcp changes (version word 0x1538, see fpga/al3/README.md "Changes"):
+// fnirsi-1013d-mcp changes (version word 0x1539, see fpga/al3/README.md "Changes"):
 //  - 0x1533: external trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
 //    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
 //    Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
@@ -31,6 +31,13 @@
 //    and the encode flops load it with no enable (3.75 ns paths): encB = write clock, encA = its
 //    complement, 1.25 ns later, at every rate and after any write (0x1535's normal state). Read
 //    0x33 reports a sticky encode self-check. Otherwise cycle-identical to 0x1537.
+//  - 0x1539: MCU readout timing. The read byte (o_mcu_data) is loaded on the falling edge of
+//    i_mcu_clk (the start of the MCU's strobe) instead of the rising edge, and the sample memory's
+//    read address is a copy of the read pointer taken on that falling edge. Every byte reaches the
+//    pins about 10 ns after the strobe starts and holds until the next strobe starts, so the MCU,
+//    which samples the bus after it raises the clock, always reads a settled byte; there is no
+//    same-edge path left on i_mcu_clk in the read path. Byte values, pointer advance and the dummy
+//    strobe are unchanged; zaklad.sdc constrains i_mcu_clk. Otherwise cycle-identical to 0x1538.
 //-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
@@ -513,6 +520,7 @@ module fnirsi_1013D
   wire prev_less_equal_lev;        //Signal active when the previous sample is less then or equal to the set trigger level
 
   wire [12:0] sample_read_address;
+  reg  [12:0] sample_read_addr_n = 0;      //0x1539: the read pointer, copied on the falling edge of i_mcu_clk
   
   wire [12:0] addr_delta;
 
@@ -711,7 +719,9 @@ freq_generator_dds_pwm u_freq
   reg ext_level_prev = 0;                  //Filtered EXT level one clock earlier
   reg ext_activity = 0;                    //An EXT edge was seen since the last sampling reset
   reg ext_pending = 0;                     //Selected EXT edge seen, waiting for the next sample write clock
-  reg swc_prev = 0;                        //sample_write_clock one clk_200MHz cycle earlier
+  reg sce_q     = 0;                       //0x1538, see "Sample write clock" (declared here for swc_rose)
+  reg swc_sh    = 0;                       //copy of sample_write_clock, loaded from it (a difference lasts one clock)
+  reg swc_rose = 0;                        //0x1539: the write clock rises on the next falling clk_200MHz edge (or rose on the last)
 
   wire ext_rise = ext_level & ~ext_level_prev;
   wire ext_fall = ~ext_level & ext_level_prev;
@@ -719,8 +729,17 @@ freq_generator_dds_pwm u_freq
   //Selected edge per command 0x16 (0 = rising, 1 = falling), only when EXT is the source
   wire ext_edge = trigger_ext & (trigger_edge ? ext_fall : ext_rise);
 
-  //Rising edge of sample_write_clock (it toggles on the falling edge of clk_200MHz)
-  wire swc_rise = sample_write_clock & ~swc_prev;
+  //Rising edge of sample_write_clock (it toggles on the falling edge of clk_200MHz), for the clk_200MHz edge after it.
+  //0x1539: predicted one clock ahead on the rising clk_200MHz edge before that falling edge, from the write clock copy
+  //swc_sh and the enable look-ahead sce_q, exactly as enc_nxt predicts the write clock for the encodes (read 0x33 bit 1
+  //checks that prediction). It is high from the rising edge before the write clock rises to the rising edge after it,
+  //so every rising clk_200MHz edge sees the value 0x1538's sample_write_clock & ~swc_prev had there, from a register
+  //on the same clock: the half-cycle path from the write clock flop into sampling_triggered (0x1538 +0.22 ns, -0.14
+  //and -0.34 ns in two 0x1539 trial builds) is gone.
+  always @(posedge clk_200MHz)
+    swc_rose <= ~swc_sh & sce_q;
+
+  wire swc_rise = swc_rose;
 
   //With the decimation filter on, only after an edge that wrote an output sample
   //(swc_adv_q is constant 1 with K = 0; one LUT4 like the 0x1533 term)
@@ -733,7 +752,6 @@ freq_generator_dds_pwm u_freq
       ext_level      <= (ext_sync[1] & ext_hist[0]) | (ext_sync[1] & ext_hist[1]) | (ext_hist[0] & ext_hist[1]);
       ext_level_prev <= ext_level;
 
-      swc_prev       <= sample_write_clock;
 
       if(sample_system_reset == 1)
         ext_activity <= 0;
@@ -844,8 +862,6 @@ freq_generator_dds_pwm u_freq
   //0x1537 loaded its copy swc_enc_n across the 1.25 ns window from negedge clk_200MHz to negedge clk_ADC; the A path
   //(through an inverter) missed it by 0.21 ns in TD's report, so an A encode could be right, one clock late (A
   //sampling with B) or metastable (fpga/al3/README.md "Changes" section 8).
-  reg sce_q     = 0;
-  reg swc_sh    = 0;                       //copy of sample_write_clock, loaded from it (a difference lasts one clock)
   reg enc_nxt   = 0;                       //sample_write_clock after the next falling clk_200MHz edge
   reg enc_nxt_n = 1;                       //its complement, a flop of its own (no LUT in front of the encA flops)
 
@@ -1253,7 +1269,9 @@ assign sampling_enable = ~(
 //into the write register (aw_we), written on the next clock. 16-bit format: two 32-bit lanes
 //(CH1, CH2), no saturation needed (65535 x 65536 < 2^32); legacy: four 16-bit lanes (CH1A, CH1B,
 //CH2A, CH2B), each saturating at 65535. The first record of each position is written, not added.
-//Table entries take the write port through tab_we / tab_a / tab_d one clock after TAB and NEXT.
+//Table entries take the write port through tab_we / tab_a / tab_d one clock after TAB and NEXT. 0x1539: tab_a and tab_d
+//load every clock (the entry of the current snapshot and slot) and tab_z marks the invalidating write of NEXT, so the
+//state decode no longer drives the enables of 75 table registers (a clk_200MHz path that missed by 0.5 ns in a build).
 
   localparam Q_IDLE = 3'd0, Q_WEN  = 3'd1, Q_RUN  = 3'd2, Q_POST = 3'd3,
              Q_TAB  = 3'd4, Q_NEXT = 3'd5, Q_HOLD = 3'd6, Q_DONE = 3'd7;
@@ -1273,7 +1291,8 @@ assign sampling_enable = ~(
   reg [16:0] q_pass = 0, q_pass_nx = 0;    //completed passes over all positions
   reg        q_pass_end = 0;               //q_pass + 1 == q_ntgt
   reg [12:0] q_total = 0, q_pre = 0, q_mask = 0;
-  reg [31:0] q_hold = 0, q_hc = 0;
+  reg [32:0] q_hold = 0, q_hc = 0;        //0x1539: hold-off - 2 and its count, 33-bit signed: q_hc < 0 <=> 0x1538's
+                                           //q_hc[31:1] == 0, so q_hz is the sign bit instead of a 31-bit compare
   reg        q_hz = 0;
   reg [11:0] q_idx = 0, q_idx_nx = 0;      //next slot or position
   reg        q_idx_end = 0;                //q_idx == q_n1
@@ -1295,6 +1314,7 @@ assign sampling_enable = ~(
   reg        tab_we = 0;                   //table entry write request
   reg [10:0] tab_a = 0;
   reg [63:0] tab_d = 0;
+  reg        tab_z = 0;                    //the table write is the zero entry of NEXT
 
   reg        aw_we = 0;                    //accumulator write port
   reg [10:0] aw_a = 0;
@@ -1359,8 +1379,10 @@ assign sampling_enable = ~(
       pp_s3  <= { 1'b0, pp_acc[63:48] } + { 1'b0, pp_xa3 };
       aw_we  <= pp_v4 | tab_we;
       aw_a   <= tab_we ? tab_a : pp_a4;
-      aw_d   <= tab_we ? tab_d : pp_w;
+      aw_d   <= tab_we ? (tab_z ? 64'd0 : tab_d) : pp_w;
       tab_we <= 0;
+      tab_a  <= q_idx[10:0];
+      tab_d  <= { 1'b1, 9'd0, sn_trig, sn_ta & q_mask, sn_ts };
 
       if(pp_i)
         begin
@@ -1394,7 +1416,7 @@ assign sampling_enable = ~(
           q_total  <= total_samples;
           q_pre    <= pretrigger_samples;
           q_mask   <= seg_mask_m;
-          q_hold   <= seq_hold;
+          q_hold   <= { 1'b0, seq_hold } - 33'd2;
           q_done   <= 0;
           q_ovf    <= 0;
           q_last   <= 0;
@@ -1471,8 +1493,7 @@ assign sampling_enable = ~(
           Q_TAB:
             begin
               tab_we <= 1;
-              tab_a  <= q_idx[10:0];
-              tab_d  <= { 1'b1, 9'd0, sn_trig, sn_ta & q_mask, sn_ts };
+              tab_z  <= 0;
               q_cnt  <= q_cnt_nx;
               if(~sn_trig)
                 q_untrig <= q_untrig_nx;
@@ -1502,8 +1523,7 @@ assign sampling_enable = ~(
                 if(q_seg)
                   begin
                     tab_we <= 1;
-                    tab_a  <= q_idx[10:0];
-                    tab_d  <= 64'd0;
+                    tab_z  <= 1;
                   end
                 q_hc <= q_hold;
                 q_hz <= 0;
@@ -1523,8 +1543,8 @@ assign sampling_enable = ~(
               end
             else
               begin
-                q_hc <= q_hc - 32'd1;
-                q_hz <= (q_hc[31:1] == 31'd0);
+                q_hc <= q_hc - 33'd1;
+                q_hz <= q_hc[32];
               end
 
           default: ;
@@ -1580,7 +1600,13 @@ assign sampling_enable = ~(
 
   //Select the address and clock source based on the sample read enbale setting
 
-  assign sample_read_address = sample_read_enable ? sample_read_offset : sample_read_offset;
+  //0x1539: the memory's read port (rising edge of i_mcu_clk) takes the read pointer through sample_read_addr_n, a copy
+  //made on the falling edge before it. The port reads the same address as before (the pointer as it was before that
+  //rising edge), but the pointer's own update on that rising edge can no longer race the port's address register.
+  always @(negedge i_mcu_clk)
+    sample_read_addr_n <= sample_read_offset;
+
+  assign sample_read_address = sample_read_addr_n;
 
   assign sample_read_clock   = sample_read_enable ? i_mcu_clk : i_mcu_clk;
 
@@ -1961,10 +1987,16 @@ assign sampling_enable = ~(
     end
 
 //-------------------------------------------------------------------------------------
-//For reading data the requested byte is loaded into a register on the positive edge
-//of the i_mcu_clk signal. 
+//For reading data the requested byte is loaded into a register on the falling edge of the i_mcu_clk
+//signal (0x1539; before, on the rising edge). The MCU sets i_mcu_rws / i_mcu_dcs before it pulls the clock
+//low and samples the bus after it raised it again, so the byte is on the pins (clock pad to data pad about
+//10 ns) before the rising edge and holds until the next strobe starts. The values are the ones the rising
+//edge loaded before: mcu_state, mcu_command, the read pointer and the memory output all changed on the
+//previous rising edge, the memory output (read port on the rising edge) half a strobe before this edge.
+//0x1532..0x1538 loaded the byte on the same rising edge after which the MCU samples it, so a read that came
+//sooner than about 10 ns after that edge saw a mix of the old and the new byte (bench, 0x1538).
 
-  always @(posedge i_mcu_clk)
+  always @(negedge i_mcu_clk)
     begin
       if((i_mcu_dcs == 0) & (i_mcu_rws == 0))    //Only handled when data and read
         begin
@@ -1980,7 +2012,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h38;
+                    o_mcu_data <= 8'h39;
                 endcase
               end
 

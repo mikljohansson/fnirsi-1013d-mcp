@@ -14,7 +14,7 @@ C 17
 W 80
 C 06
 R 15
-R 38
+R 39
 #
 # === S: legacy segments, D = 9, CH1, 4 segments, m = 6, pre 10, total 40, hold-off 0
 # ARM 1: filter (0x53, 0x56, 0x54, 0x55) and the settle wait

@@ -1044,6 +1044,10 @@ was found (commit not identified).
 - Added: T8 calibration bench helpers (b712f6c, 133767f, 27e368e).
 - Added: AL3 FPGA project sources and a headless Anlogic TD flow. The flow rebuilds Atlan4's 0x1532
   bitstream byte-identical (e790a7d, 42c79dc).
+- Fixed: FPGA 0x1539 (b4bd8b0): sample bytes read back near code 128, and across any code boundary where several
+  bits change, could come back as a mix of two successive bytes on some ADC cores (0x1532..0x1538: the FPGA changed
+  the byte on the clock edge right before the MCU read it, about 10 ns too late). The byte now changes at the start
+  of each bus strobe. No firmware change; calibrations taken on 0x1537 / 0x1538 should be redone.
 - Added: protocol specification, MCP tool surface, hardware preparation guide and roadmap (9d32933,
   1bd4179, a947e78).
 - Added: CI and release workflows, `tools/make_release_sd_package.py` and `docs/releasing.md`.

@@ -34,7 +34,7 @@ MUTATIONS = [
     ("untriggered_added", "                else if(sn_trig)\n                  begin\n                    q_post  <= 1;",
      "                else if(1'b1)\n                  begin\n                    q_post  <= 1;"),
     ("holdoff_ignored", "            else if(q_hz)\n", "            else if(1'b1)\n"),
-    ("no_invalidate", "                    tab_d  <= 64'd0;", "                    tab_d  <= aw_d;"),
+    ("no_invalidate", "                    tab_z  <= 1;", "                    tab_z  <= 0;"),
     ("done_leaks", "o_mcu_data[0] <= q_active ? q_done : ~sample_write_enable;", "o_mcu_data[0] <= q_done | ~sample_write_enable;"),
     ("clamp16_off", "seq_sh32 = (|t[31:16]) ? 16'hFFFF : t[15:0];", "seq_sh32 = t[15:0];"),
     ("drain_early", "            if(~pp_i & ~pp_busy)", "            if(~pp_i)"),

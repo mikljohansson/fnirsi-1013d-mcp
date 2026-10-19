@@ -4,7 +4,11 @@ Anlogic AL3A10LG144C7 FPGA of the owner's FNIRSI 1013D (JTAG IDCODE 0x18006C31, 
 W25Q80DV, JEDEC `ef 40 14`). Read `CLAUDE.md` at the repo root first; its flashing rules override anything here.
 
 State on 2026-10-19:
-- `src/` holds version word **0x1538** (fpga-gen7): 0x1537 with the encode flops on timing-met, stateless paths and the
+- `src/` holds version word **0x1539** (fpga-gen8): 0x1538 with the MCU read byte loaded on the falling edge of
+  `i_mcu_clk` (the bench's mixed-byte readout fault), `i_mcu_clk` constrained, two timing refactors. Section "0x1539
+  status" below; `README.md` "Changes" section 9. Built as `build/FPGA.bin` sha256 `f36c1f7a...ea64`, pinned in
+  `backups/al3_seg_0x1539_f36c1f7a.bin` and `..._padded.bin` (`22db7b91...a6b8`). **Not flashed.**
+- 0x1538 (fpga-gen7, the previous `src/`): 0x1537 with the encode flops on timing-met, stateless paths and the
   new read 0x33 (encode self-check). Section "0x1538 status" below; `README.md` "Changes" section 8.
   - Built as `out/FPGA-seg-0x1538.bin`, sha256 `0c24ecf6...dbbbd`, pinned in `backups/al3_seg_0x1538_0c24ecf6.bin`;
     padded flash image `backups/al3_seg_0x1538_0c24ecf6_padded.bin`, sha256 `2fc7ea5b...1087`. **Not flashed.**
@@ -317,6 +321,71 @@ Decimation filter (0x1534), open items:
 - Next design: 0x1535, a CIC compensation FIR as the intended default mode (owner direction): built, see below and
   `README.md` section 5. 0x1534 is accepted by the coordinator (2026-10-18) and is
   being flashed with fw 0.2.33.
+
+## 0x1539 status (fpga-gen8, 2026-10-19)
+
+Brief (coordinator, priority change): the bench readout fault on 0x1538 (fw 0.2.67 diagnostics): bytes read near code 128,
+and across any boundary where several bits flip (0x8F / 0x90, 0x77 / 0x78), came back as mixes of two successive bytes on
+CH1 A and CH2 B. Fix it first and ship it alone; the trigger / peak / counter features follow as 0x153A. Everything is in
+`README.md` "Changes" section 9.
+
+**Root cause** (TD report of the 0x1538 build with `i_mcu_clk` declared, `report_timing` on `FPGA_pr.db`, scratch scripts
+of the `t5.sh` pattern below):
+- `o_mcu_data` loaded on the rising edge of `i_mcu_clk`, and `fpga_read_byte` reads the port right after that edge.
+- Clock pad to data pads 9.4..10.9 ns at TT 85 C (3.4 ns clock insertion, flop, 2.5 ns routing, 4.7 ns output buffer),
+  different per bit: a read sooner than that gets a mix. Placement decides the slow lanes.
+- In the FPGA the read path was a same-edge pipeline on an unconstrained clock (memory read port and `o_mcu_data` on one
+  edge; the read pointer into the memory's address register, hold +0.38 ns). No violation at TT, nothing constrained.
+
+**Fix**: `o_mcu_data` on the falling edge (strobe start), the memory's read address through `sample_read_addr_n` (falling
+edge copy of the pointer), `i_mcu_clk` declared in `zaklad.sdc` as its own asynchronous group. Byte values, pointer
+advance, dummy strobe and the 1.00o5 lag are unchanged; asynchronous status reads sample at the strobe start. Two timing
+refactors with no functional change: `swc_rise` is the predicted register `swc_rose` (`~swc_sh & sce_q` on the rising
+edge), which removes the half-cycle path into `sampling_triggered` (the 0x1534..0x1538 lottery); the sequencer's table
+registers load every clock (`tab_z` marks NEXT's zero write) and the hold-off counter is 33-bit signed (`q_hz` = sign).
+
+**Build**: 4575 LUT / 3833 reg. `clk_200MHz` 0 errors (+0.260 ns, a sequencer path), `sample_write_clock`, `clkc[1]`
+and `i_mcu_clk` (setup and hold) 0 errors, `clkc[0]` 58 (SDC artefact). `build/FPGA.bin` sha256 `f36c1f7a...ea64`, the
+same from three work dirs; pinned `backups/al3_seg_0x1539_f36c1f7a.bin` and `..._padded.bin` (`22db7b91...a6b8`).
+**Not flashed.** fw 0.2.62+ runs it unchanged (AL3 0x153x decode, caps as 0x1538).
+
+**Tests**: `tb/run.sh` has a tenth step, `mcuread.sh` / `tb_mcuread.v` (swept MCU strobe timing, per-bit pad delays,
+all 256 codes; 0x1539 clean everywhere, the 0x1538 reference mixed whenever read before the slowest pad). The equivalence
+steps' references get the falling-edge read block (`mkref`, `REF_READ_EDGE`). Contract `tb/contract_0x1539.txt` = 0x1538's
+except the version byte. All ten steps pass on seeds 12345 (2317 s) and 3 (1622 s): 38 + 98 + 154 + 8 + 50 checks, both cic_model checks, seg_model 22 runs, tb_trigpos 882, contract 12 (transcript equal), encphase (plain and 3.5 ns 400 each, the late-A variant caught), mcuread 70 + 26.
+
+**Manifest entry for `fpga/al3/dist`** (the coordinator adds it):
+
+```json
+{
+ "version": "0x1539",
+ "file": "al3-0x1539.bin",
+ "size": 282898,
+ "sha256": "f36c1f7a0ada876311f5ad5d600f4cb44523165748e96c25bed160a66388ea64",
+ "flash_image_sha256": "22db7b9128e2a12149e5c4f44bc3cb5c22338b40b4e888e97fe9c1a3f571a6b8",
+ "source_commit": "b4bd8b04a001d9107444344cc45266e9afe95e07",
+ "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
+ "min_firmware": "0.2.62",
+ "features": ["external trigger", "decimation filter", "CIC compensation FIR", "segmented capture",
+              "hardware averaging", "encode self-check", "settled MCU readout"],
+ "status": "unbenched",
+ "bench": ""
+}
+```
+
+**Open**: flashing and `README.md` section 9's bench checks 1..5 (the fw 0.2.67 diagnostics run, the calibration wizard,
+a slow edge through 128); `docs/hardware-status.md` after flashing; redo calibrations taken on 0x1537 / 0x1538.
+
+**Tool notes**:
+- The isolation guard of a worktree agent refuses Bash commands it cannot parse (heredocs, `cd` + git, long pipes, even
+  `cat >> file`); write scripts and edit helpers to the scratchpad with the Write tool and run them. PowerShell mangles
+  `$`, `|` and quotes passed to `wsl -- bash -c`: put everything in a script file.
+- TD 4.6.8: `report_timing` has no `-hold` option (hold checks are in the same report); the PLL-derived clocks
+  (`main_clock/pll_inst.clkc[0]`) cannot be named in an SDC (`get_clocks` fails at `read_sdc`), so use
+  `set_clock_groups -asynchronous -group [get_clocks i_mcu_clk]`, which covers them.
+- Timing of a placed design with another SDC: copy `FPGA_pr.db`, `import_device`, `import_db`, `read_sdc`,
+  `report_timing -ep_num 400 -path_num 1`; `set_output_delay -clock i_mcu_clk 0 [get_ports {io_mcu_data[*]}]` gives the
+  clock-pad-to-data-pad delays.
 
 ## 0x1538 status (fpga-gen7, 2026-10-19)
 

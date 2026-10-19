@@ -466,7 +466,7 @@ module tb;
     // Version word and geometry register
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h1538, "cmd 0x06 reads 0x1538");
+    check(rd16_d == 16'h1539, "cmd 0x06 reads 0x1539");
     check(rd16_r == 16'h1533, "reference cmd 0x06 reads 0x1533");
     wr1(8'h53, 8'h00); wr1(8'h54, 8'h00);
     rd2(8'h29);
@@ -642,7 +642,7 @@ module tb;
     refd.adc1_encA = dut.adc1_encA; refd.adc1_encB = dut.adc1_encB;
     refd.adc2_encA = dut.adc2_encA; refd.adc2_encB = dut.adc2_encB;
     refd.sample_rate_counter = dut.sample_rate_counter;
-    refd.swc_prev = dut.swc_prev;
+    refd.swc_prev = dut.sample_write_clock;               // 0x1539 has no swc_prev: it held the write clock of this edge
     adc_mode = 3; flat_val = 8'd20;
     wr1(8'h15, 8'h00);
     wr1(8'h17, 8'd128);

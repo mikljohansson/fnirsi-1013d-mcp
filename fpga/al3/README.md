@@ -1540,6 +1540,99 @@ showed the CH2 A fault of section 8; run these on 0x1538 together with section 8
 6. Warm the FPGA (hair dryer, a few seconds), then repeat 2. 0x1537's fault depended on the operating point; 0x1538
    must not.
 
+### 9. MCU readout timing; version 0x1539 (fpga-gen8, 2026-10-19)
+
+**Bench** (fw 0.2.67 diagnostics on 0x1538, nothing connected, 200 MSa/s legacy; `docs/hardware-status.md` 2026-10-19
+18:25-18:35):
+- With a core's mean near 128 the bytes read back contain outliers: CH2 core A up to 195 (std up to 17), CH2 core B at
+  255 (37..564 of 6000 samples at 0 / 255), CH1 core A once 213. Ten codes either side of 128 every core reads clean.
+- With the means at about 116 and 140 (the calibration's two-point zero) CH1 A reads [117..159] and CH2 B [115..159]
+  (RMS 1.6..4.6), while CH1 B and CH2 A stay clean. 159 = 0x9F and 113 = 0x71 are mixes across the 0x8F / 0x90 and
+  0x77 / 0x78 boundaries: any pair of successive bytes that differ in several bits can come back mixed, on the lanes
+  whose pads are slowest.
+- Gated 2 MSa/s (16-bit) captures read clean; an extra write strobe before each read changes nothing.
+
+**Cause** (TD's report of the 0x1538 build with `i_mcu_clk` declared as a clock, `report_timing` on `FPGA_pr.db`):
+- `o_mcu_data` was loaded on the rising edge of `i_mcu_clk`, the edge the MCU makes when it raises the clock, and
+  `fpga_read_byte` reads the port right after that edge (`FPGA_PULSE_CLK()` then `FPGA_GET_DATA()`).
+- From the clock pad to the data pads the byte takes **9.4 to 10.9 ns** (TT 1.10 V 85 C): 3.4 ns of clock insertion
+  (pad, BUFG), the flop, about 2.5 ns of routing (the flops are not in the IOBs) and 4.7 ns of output buffer, different
+  per bit. A port read sooner than that after the edge sees some bits of the new byte and the rest of the previous one.
+  Which bits are late is a matter of placement, which is why 0x1535 passed the calibration and 0x1537 / 0x1538 fail it.
+  The rate dependence is an inference: the 100 MHz write clock and the encodes switching at full rate slow the pads.
+- Inside the FPGA the read path was a same-edge pipeline on an unconstrained clock: the sample memory's read port and
+  `o_mcu_data` on the same rising edge (memory output from the previous strobe into `o_mcu_data`), and the read pointer
+  (`sample_read_offset`) changing on the edge that the memory's address register samples it (hold +0.38 ns in the
+  0x1538 report, the only margin). TD found no violation at TT, but nothing constrained it either.
+
+**Fix in 0x1539** (`src/zaklad.v`):
+- `o_mcu_data` loads on the **falling** edge of `i_mcu_clk`, the start of the strobe. The MCU sets `i_mcu_rws` /
+  `i_mcu_dcs` before it pulls the clock low and reads after it raised it, so the byte is on the pads (8.7 to 10.0 ns
+  after the falling edge in the 0x1539 build) before the rising edge and stays there until the next strobe starts. A
+  read at any time after the rising edge returns the whole byte: the full byte changes at one edge that comes a whole
+  low phase before the MCU looks.
+- The memory's read port keeps the rising edge, its address is `sample_read_addr_n`, a copy of the read pointer taken
+  on the falling edge. Every path in the read path now has half a strobe: pointer (rising) to address copy (falling),
+  address copy to the read port (rising), memory output to `o_mcu_data` (falling).
+- The byte values do not change: the falling edge of strobe k sees `mcu_state`, `mcu_command`, the read pointer and the
+  memory output exactly as the rising edge of strobe k did before (all of them change on rising edges only). The read
+  pointer still advances on the rising edge of each read strobe, the dummy strobe after 0x1F is still needed, and the
+  1.00o5 readout without it is still one word late. The one difference: asynchronous values (0x05, 0x0A, 0x18, the
+  live pins 0x24..0x27, 0x28, 0x2A, 0x33, 0x14 while a capture runs) are sampled at the start of the strobe instead of
+  its end, a few tens of ns earlier.
+- `zaklad.sdc` declares `i_mcu_clk` (40 ns, shorter than any firmware strobe) as its own asynchronous clock group.
+- Two timing changes with no functional effect, made to close `clk_200MHz` again after the read path moved:
+  - `swc_rise`, the write clock's rise for the EXT trigger and the sequencer snapshots, is now the register `swc_rose`,
+    predicted on the rising `clk_200MHz` edge before the write clock rises (`~swc_sh & sce_q`, the same look-ahead
+    `enc_nxt` uses, checked by read 0x33 bit 1). It has the value 0x1538's `sample_write_clock & ~swc_prev` had at
+    every rising edge, and the half-cycle path from the write clock flop into `sampling_triggered` (the "lottery" of
+    0x1534..0x1538) is gone.
+  - The sequencer's table registers `tab_a` / `tab_d` load every clock, with `tab_z` marking NEXT's invalidating write
+    (before, the state decode drove the enables of 75 registers), and the hold-off counter is 33-bit signed so that
+    `q_hz` is its sign bit instead of a 31-bit compare.
+
+**Tests** (`tb/run.sh`, ten steps):
+- New step 10, `tb/mcuread.sh` with `tb/tb_mcuread.v`: the firmware's read sequences (READ_RAW with the dummy strobe,
+  the 1.00o5 readout without it, 0x06) against a sample memory holding 0x7F / 0x80, a ramp through all 256 codes,
+  0x00 / 0xFF and random bytes, with per-bit pad delays from TD's report (9.5..11.0 ns), the clock low for 12..150 ns
+  and the port read 0..40 ns after the rising edge. 0x1539 returns every byte at every point. The 0x1538 reference
+  (`REF1538_REV`, ce943bf) returns mixed bytes at every point read sooner than the slowest pad (the bench mechanism)
+  and none after it.
+- The equivalence steps compare against references whose read always block is moved to the falling edge too (`mkref`
+  in `run.sh`, `REF_READ_EDGE=pos` to disable), so asynchronous status and live-pin reads are sampled at the same
+  instant; everything else is compared exactly as before.
+- The contract transcript `tb/contract_0x1539.txt` equals 0x1538's except the version byte (one line).
+- `tb_decim.v` copies the write clock into the reference's `swc_prev` (0x1539 has no `swc_prev`); `mutate_seg.py`'s
+  `no_invalidate` mutant now clears `tab_z`.
+
+**Build** (TD 4.6.8 SP1, `./build.sh`; two work dirs gave the same hash):
+
+| | 0x1538 | 0x1539 |
+|---|---|---|
+| LUT / reg | 4634 / 3828 | 4575 / 3833 |
+| `clk_200MHz` | +0.220 ns | 0 errors, min period 4.740 ns (+0.260 ns, a sequencer path; the half-cycle path is gone) |
+| `sample_write_clock` | 9.480 ns | 0 errors, 9.560 ns |
+| `clkc[1]` | 0 errors | 0 errors, 2.420 ns |
+| `i_mcu_clk` | not constrained | 0 errors (setup and hold); read path: memory to `o_mcu_data` +11.4 ns of 20, pointer to read address +16.8 ns |
+| `clkc[0]` | 58 errors | 58 errors, the same SDC artefact |
+
+| File | Bytes | sha256 |
+|---|---|---|
+| `build/FPGA.bin` (= `backups/al3_seg_0x1539_f36c1f7a.bin`; three work dirs, same hash) | 282,898 | `f36c1f7a0ada876311f5ad5d600f4cb44523165748e96c25bed160a66388ea64` |
+| `backups/al3_seg_0x1539_f36c1f7a_padded.bin` (0xFF to 1 MiB, flash image) | 1,048,576 | `22db7b9128e2a12149e5c4f44bc3cb5c22338b40b4e888e97fe9c1a3f571a6b8` |
+
+**Firmware**: none needed. fw 0.2.62 and later decode 0x1539 as AL3 with the features of 0x1538 (`pc_cmds.c`,
+`enc_heal.c`). Calibration taken on 0x1537 / 0x1538 with outliers in it should be redone on 0x1539.
+
+**Bench checks** (with the owner; never flash without the verified stock dump):
+1. 0x06 reads 0x1539; 0x33 reads 0xF6 after a 200 MSa/s capture.
+2. The fw 0.2.67 diagnostics run that failed: means near 128 and at the two-point zero (about 116 / 140), every core,
+   ranges 0..5: no outliers, RMS as the clean cores (0.5..1.4).
+3. The calibration wizard passes on CH1 and CH2.
+4. 1000+ back-to-back 200 MSa/s captures (as 0x1538 check 2): no capture with a core's std above 5.
+5. A slow edge through 128 (the calibration pin through an RC, or a DC sweep with the offset): the samples step by one
+   code, no 0x?F / 0x?0 mixes.
+
 ## Device facts from the datasheet
 
 Source: Anlogic "AL3 series FPGA datasheet" DS001 v1.3 (Sept 2017, Chinese, owner's download `AL3A10LG144.pdf`, 84 pages).
