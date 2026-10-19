@@ -50,9 +50,10 @@ class SdCard:
         #: pause between SD_STAGE requests (each already waits for its answer); bench throttle
         self.stage_delay_s = stage_delay_s
 
-    def info(self, verify: bool = False) -> P.SdInfo:
-        r = self.t.request(P.Cmd.SD_INFO, bytes([P.SD_FLAG_VERIFY if verify else 0, 0, 0, 0]),
-                           timeout=WRITE_TIMEOUT_S if verify else None)
+    def info(self, verify: bool = False, identify: bool = False) -> P.SdInfo:
+        """SD_INFO; ``identify`` (protocol 1.16): the card image's identity (a scan of the image the first time)."""
+        flags = (P.SD_FLAG_VERIFY if verify else 0) | (P.SD_FLAG_IDENT if identify else 0)
+        r = self.t.request(P.Cmd.SD_INFO, bytes([flags, 0, 0, 0]), timeout=WRITE_TIMEOUT_S if flags else None)
         return P.SdInfo.unpack(r.payload)
 
     def read(self, sector: int, count: int) -> bytes:

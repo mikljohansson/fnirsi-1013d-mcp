@@ -44,6 +44,8 @@ SCALING_CAVEAT = ("Absolute volts use the per-unit calibration when one covers t
                   "with a known DC voltage fixes the zero per range and ADC core.")
 
 
+#: SAVE_REPORT writes a file of a few tens of KiB through FatFs
+SAVE_REPORT_TIMEOUT_S = 15.0
 #: protocol 1.15: the oldest GET_CAL a conversion uses (the v4 tracker's values move with the full-rate cores)
 CAL_TRACK_AGE_S = 1.0
 
@@ -388,6 +390,15 @@ class Scope:
             return None
         return P.parse_event_log(self._req(P.Cmd.GET_EVENT_LOG, bytes([P.EVENT_LOG_REARM]) if rearm else b""))
 
+    def health(self, clear_restart: bool = False) -> P.HealthResp | None:
+        """GET_HEALTH (protocol 1.16; answers also while a menu is modal): USB state now, CP15, unit life, settings
+        state and the stored restart record, or None on older firmware. ``clear_restart``: clear the stored record
+        after this answer (which still shows it)."""
+        if self.info.proto_minor < 16:
+            return None
+        return P.HealthResp.unpack(self._req(P.Cmd.GET_HEALTH,
+                                             bytes([P.HEALTH_CLEAR_RESTART]) if clear_restart else b""))
+
     def battery(self) -> P.BatteryResp:
         return P.BatteryResp.unpack(self._req(P.Cmd.GET_BATTERY))
 
@@ -574,10 +585,19 @@ class Scope:
                               "(firmware >= 0.2.2)")
         return SdCard(self.t)
 
-    def sd_info(self, verify: bool = False) -> P.SdInfo:
-        """SD_INFO: card size, partition start, write window, eGON headers at 16, 80, 750 (VERIFY: checksums)."""
+    def sd_info(self, verify: bool = False, identify: bool = False) -> P.SdInfo:
+        """SD_INFO: card size, partition start, write window, eGON headers at 16, 80, 750 (VERIFY: checksums);
+        ``identify`` (protocol 1.16): the identity of the image the card boots (``SdInfo.ident``; ignored before)."""
         with self.lock:
-            return self.sd_card().info(verify)
+            return self.sd_card().info(verify, identify and self.info.proto_minor >= 16)
+
+    def save_report(self) -> P.SaveReportResp:
+        """SAVE_REPORT (protocol 1.16, cap SD_SECTORS): the firmware writes reports/report-PPPPP-NN.txt on the card's
+        FAT partition (identity, life, USB, counters, event log, calibration in words) and answers the name."""
+        if self.info.proto_minor < 16:
+            raise DeviceError(P.Cmd.SAVE_REPORT, P.Status.E_UNKNOWN_CMD, 0, "SAVE_REPORT needs protocol 1.16 "
+                              "(firmware 0.2.52)")
+        return P.SaveReportResp.unpack(self._req(P.Cmd.SAVE_REPORT, timeout=SAVE_REPORT_TIMEOUT_S))
 
     def sd_read(self, sector: int, count: int) -> bytes:
         """SD_READ_SECTORS in pieces of 128, each CRC-checked."""

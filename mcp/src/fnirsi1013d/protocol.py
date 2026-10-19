@@ -33,7 +33,7 @@ PROTO_MAJOR = 1
 #: (caps FIR, SET_DECIM flags bit 3, 0x29 bits 6 / 5); 1.12 (fw 0.2.45): calibration data v3 (per-core, per-class
 #: gains), GET_CAL 256 bytes (v2 blocks are no longer used); 1.13 (fw 0.2.46): phosphor view, display_mode 4; 1.14
 #: (fw 0.2.49): USB suspend watch, link counters 60-61, event type 20
-PROTO_MINOR = 15
+PROTO_MINOR = 16
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -70,6 +70,7 @@ class Cmd(enum.IntEnum):
     GET_LINK_STATS = 0x0007  # protocol 1.2
     GET_BAD_FRAME = 0x0008  # protocol 1.2, fw 0.1.5
     GET_EVENT_LOG = 0x0009  # protocol 1.5, fw 0.2.12: last 64 USB/link events
+    GET_HEALTH = 0x000A  # protocol 1.16, fw 0.2.52: USB state now, CP15, unit life, the stored restart record
     GET_CHANNEL = 0x0100
     SET_CHANNEL = 0x0101
     GET_TIMEBASE = 0x0102
@@ -97,6 +98,7 @@ class Cmd(enum.IntEnum):
     SD_READ_SECTORS = 0x0501
     SD_STAGE = 0x0502
     SD_WRITE_SECTORS = 0x0503
+    SAVE_REPORT = 0x0504  # protocol 1.16, fw 0.2.52, cap SD_SECTORS: write reports/report-PPPPP-NN.txt on the card
     DEBUG_FPGA = 0x0F00
     ENTER_FEL = 0x0F01
     FFT_BENCH = 0x0F02  # protocol 1.6, fw 0.2.27: time the on-scope FFT (main loop, any bitstream)
@@ -113,7 +115,7 @@ LOCAL_ALLOWED = frozenset(
 )
 #: Commands accepted while the UI is modal (LOCAL_BUSY, section 6.1).
 BUSY_ALLOWED = frozenset({Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.GET_BATTERY, Cmd.GET_LINK_STATS,
-                          Cmd.GET_EVENT_LOG})
+                          Cmd.GET_EVENT_LOG, Cmd.GET_HEALTH})
 #: Control requests allowed while a deferred request is pending (section 3.2).
 #: SET_ACQ_STATE (1.3) is a control request too: RUN/STOP while a WAIT is pending aborts it (E_ABORTED).
 CONTROL_CMDS = frozenset({Cmd.GET_STATUS, Cmd.STOP, Cmd.SET_REMOTE, Cmd.PING, Cmd.SET_ACQ_STATE})
@@ -204,6 +206,7 @@ CMD_CAP: dict[Cmd, Caps] = {
     Cmd.SD_READ_SECTORS: Caps.SD_SECTORS,
     Cmd.SD_STAGE: Caps.SD_SECTORS,
     Cmd.SD_WRITE_SECTORS: Caps.SD_SECTORS,
+    Cmd.SAVE_REPORT: Caps.SD_SECTORS,
     Cmd.GET_DECIM: Caps.DECIM,
     Cmd.SET_DECIM: Caps.DECIM,
 }
@@ -913,6 +916,7 @@ SD_STAGE_MAX_CHUNK = 484
 SD_MAX_SECTORS = 128
 SD_WRITE_MAGIC = 0x52574453  # 'SDWR'
 SD_FLAG_VERIFY = 0x01
+SD_FLAG_IDENT = 0x02  # protocol 1.16: identify the image at sector 750 (or reuse the cached identity)
 SD_WR_CONFIG = 0x01  # allow sectors 708-710
 SD_WR_BOOT = 0x02  # allow sectors 16-79
 SD_EGON_NONE, SD_EGON_BT0, SD_EGON_EXE = 0, 1, 2
@@ -931,26 +935,85 @@ class SdHeaderInfo(Payload):
 
 @dataclass
 class SdInfo:
-    """SD_INFO response (64 bytes): card, partition, write window, eGON headers at sectors 16, 80 and 750."""
+    """SD_INFO response: 64 bytes (card, partition, write window, eGON headers at sectors 16, 80 and 750); 112 from
+    protocol 1.16 with the card image's identity (``ident``, None on older firmware)."""
 
     card_sectors: int
     part_start: int
     write_end: int
     stage_bytes: int
     headers: list[SdHeaderInfo]
+    ident: "SdIdent | None" = None
 
     def pack(self) -> bytes:
         return struct.pack("<IIII", self.card_sectors, self.part_start, self.write_end, self.stage_bytes) + \
-            b"".join(h.pack() for h in self.headers)
+            b"".join(h.pack() for h in self.headers) + (self.ident.pack() if self.ident is not None else b"")
 
     @classmethod
     def unpack(cls, data: bytes) -> "SdInfo":
+        n = len(data)
         data = bytes(data) + b"\0" * max(0, 64 - len(data))
         a, b, c, d = struct.unpack_from("<IIII", data)
-        return cls(a, b, c, d, [SdHeaderInfo.unpack(data[16 + 16 * i: 32 + 16 * i]) for i in range(3)])
+        ident = SdIdent.unpack(data[64:112]) if n >= 112 else None
+        return cls(a, b, c, d, [SdHeaderInfo.unpack(data[16 + 16 * i: 32 + 16 * i]) for i in range(3)], ident)
 
     def header(self, sector: int) -> SdHeaderInfo | None:
         return next((h for h in self.headers if h.sector == sector), None)
+
+
+#: SD_INFO byte 64 ident_state (protocol 1.16)
+SD_IDENT_STATES = {0: "not read yet", 1: "identity record", 2: "commit hash and time from the build tail",
+                   3: "version string only", 4: "unknown (no identity in the image)",
+                   5: "no eGON.EXE image at sector 750, implausible length or read error"}
+SD_IDENT_RUNNING = 0x01  # ident flags bit 0: the card image is the running image
+
+
+def _time6(t: tuple[int, ...]) -> str | None:
+    """yy mm dd hh mm ss (UTC) as ISO text; None for zeros."""
+    if not any(t):
+        return None
+    return f"20{t[0]:02d}-{t[1]:02d}-{t[2]:02d}T{t[3]:02d}:{t[4]:02d}:{t[5]:02d}Z"
+
+
+@dataclass
+class SdIdent(Payload):
+    """SD_INFO bytes 64..111 (protocol 1.16, row 55): the identity of the eGON.EXE image at sector 750."""
+
+    FIELDS = [("state", "B"), ("flags", "B"), ("proto_major", "B"), ("proto_minor", "B"), ("version", "16s"),
+              ("build", "I"), ("time", "6B"), ("_r0", "2x"), ("image_length", "I"), ("ident_ms", "I"), ("_r1", "8x")]
+    state: int = 0
+    flags: int = 0
+    proto_major: int = 0
+    proto_minor: int = 0
+    version: bytes = bytes(16)
+    build: int = 0
+    time: tuple[int, ...] = field(default_factory=lambda: (0,) * 6)
+    image_length: int = 0
+    ident_ms: int = 0
+
+    @property
+    def version_str(self) -> str:
+        return _cstr(self.version)
+
+    @property
+    def time_str(self) -> str | None:
+        return _time6(self.time)
+
+    @property
+    def running(self) -> bool:
+        return bool(self.flags & SD_IDENT_RUNNING)
+
+    def describe(self) -> str:
+        if self.state in (0, 4, 5):
+            return SD_IDENT_STATES.get(self.state, f"state {self.state}")
+        parts = [f"fw {self.version_str or '?'}"]
+        if self.build:
+            parts.append(f"build {self.build:08x}")
+        if self.time_str:
+            parts.append(f"committed {self.time_str}")
+        if self.proto_minor:
+            parts.append(f"protocol {self.proto_major}.{self.proto_minor}")
+        return ", ".join(parts) + f" ({SD_IDENT_STATES[self.state]})"
 
 
 @dataclass
@@ -1800,7 +1863,9 @@ class CalResp(Payload):
               ("slope", "24h"), ("noise", "24B"), ("gain", "4H"), ("gain_range", "B"), ("gain_flags", "B"),
               ("gain_lever", "H"), ("track_flags", "B"), ("_r2", "x"), ("track_d_q8", "h"), ("track_e_q24", "i"),
               ("track_q_q24", "i"), ("track_age_ms", "I"), ("track_records", "I"), ("track_last_pairs", "H"),
-              ("track_spread16", "H"), ("cm_q8", "h"), ("cm_probes", "H"), ("cm_age_ms", "I")]
+              ("track_spread16", "H"), ("cm_q8", "h"), ("cm_probes", "H"), ("cm_age_ms", "I"),
+              ("prov_state", "B"), ("_r3", "3x"), ("prov", "56s"), ("prov_power_ons_since", "I"),
+              ("prov_minutes_since", "I")]
     channel: int = 0
     dc_calibration_offset: tuple[int, ...] = field(default_factory=lambda: (0,) * 7)
     input_calibration: tuple[int, ...] = field(default_factory=lambda: (0,) * 7)
@@ -1859,6 +1924,13 @@ class CalResp(Payload):
     cm_q8: int = 0
     cm_probes: int = 0
     cm_age_ms: int = CAL_AGE_NONE
+    #: 1.16 (row 55): calibration provenance: 0 none on the card, 1 valid, 2 present but unreadable; the stored
+    #: 56 bytes (sector 708 bytes 432..487, parse_provenance); power-ons and operating minutes since (CAL_AGE_NONE =
+    #: unknown)
+    prov_state: int = 0
+    prov: bytes = bytes(56)
+    prov_power_ons_since: int = CAL_AGE_NONE
+    prov_minutes_since: int = CAL_AGE_NONE
     nbytes: int = field(default=0, compare=False)
 
     @classmethod
@@ -1876,6 +1948,17 @@ class CalResp(Payload):
     def has_tracker(self) -> bool:
         """The answer carries the 1.15 tracker block (288 bytes or more)."""
         return self.nbytes >= 288
+
+    @property
+    def has_provenance(self) -> bool:
+        """The answer carries the 1.16 provenance block (356 bytes)."""
+        return self.nbytes >= 356
+
+    def provenance(self) -> "Provenance | None":
+        """The stored provenance when prov_state is 1 (valid), else None."""
+        if self.prov_state != 1:
+            return None
+        return parse_provenance(self.prov)
 
     @property
     def track_d(self) -> float:
@@ -1947,6 +2030,218 @@ class AdcCalChannel:
     gain_range: int
     gain_flags: int
     gain_lever: int
+
+
+# --- protocol 1.16 stored layouts (row 55; docs/protocol-vectors.json diag_layouts) ---------------------------
+
+PROV_MAGIC = 0x56525041  # 'APRV'
+IDENT_MAGIC = (0x44495746, 0x33313031)  # 'FWID', '1013'
+LIFE_MARKER = 0x11FE
+_PROV = struct.Struct("<IHHI16sHBBIII6BH")
+#: provenance 'what' bits: the parts the calibration wrote
+PROV_WHAT = ((0x01, "CH1 zeros"), (0x02, "CH1 gains"), (0x04, "CH2 zeros"), (0x08, "CH2 gains"))
+#: exception types of the restart record (row 38)
+EXCEPTION_TYPES = ("jump to the image entry", "undefined instruction", "SWI", "prefetch abort", "data abort",
+                   "reserved vector", "FIQ")
+
+
+@dataclass
+class Provenance:
+    """Calibration provenance (sector 708 bytes 432..487, GET_CAL 292..347)."""
+
+    build: int
+    version: str
+    fpga: int
+    what: int
+    rtc: bool
+    uptime_ms: int
+    power_on: int
+    minutes: int
+    time: tuple[int, ...]
+
+    @property
+    def parts(self) -> list[str]:
+        return [n for b, n in PROV_WHAT if self.what & b]
+
+    @property
+    def time_str(self) -> str | None:
+        return _time6(self.time) if self.rtc else None
+
+
+def parse_provenance(b: bytes) -> Provenance:
+    """The 56-byte trailer; ValueError on a wrong magic, version, length or CRC."""
+    if len(b) < 56:
+        raise ValueError("provenance shorter than 56 bytes")
+    v = _PROV.unpack_from(b)
+    magic, ver, length = v[0], v[1], v[2]
+    if magic != PROV_MAGIC or ver != 1 or length != 56:
+        raise ValueError(f"not a provenance trailer (magic 0x{magic:08X}, version {ver}, length {length})")
+    (crc,) = struct.unpack_from("<I", b, 52)
+    if crc != zlib.crc32(bytes(b[:52])):
+        raise ValueError("provenance CRC mismatch")
+    return Provenance(v[3], _cstr(v[4]), v[5], v[6], bool(v[7]), v[8], v[9], v[10], tuple(v[11:17]))
+
+
+def pack_provenance(p: Provenance) -> bytes:
+    body = _PROV.pack(PROV_MAGIC, 1, 56, p.build, p.version.encode(), p.fpga, p.what, int(p.rtc), p.uptime_ms,
+                      p.power_on, p.minutes, *p.time, 0)
+    return body + struct.pack("<I", zlib.crc32(body))
+
+
+@dataclass
+class ImageIdentity:
+    """The identity record fw 0.2.52+ links last in the image (36 bytes)."""
+
+    version: str
+    build: int
+    time: tuple[int, ...]
+    proto: tuple[int, int]
+
+
+_IDENT = struct.Struct("<II16sI6BBB")
+
+
+def parse_ident_record(b: bytes) -> ImageIdentity:
+    v = _IDENT.unpack_from(b)
+    if (v[0], v[1]) != IDENT_MAGIC:
+        raise ValueError("not an identity record")
+    return ImageIdentity(_cstr(v[2]), v[3], tuple(v[4:10]), (v[10], v[11]))
+
+
+def pack_ident_record(i: ImageIdentity) -> bytes:
+    return _IDENT.pack(*IDENT_MAGIC, i.version.encode(), i.build, *i.time, *i.proto)
+
+
+_LIFE = struct.Struct("<HHIIHHHHI10I")
+
+
+def parse_life_record(b: bytes) -> dict[str, Any]:
+    """Settings sector 709 words 224..255 (64 bytes): the unit-life record and the stored restart record."""
+    v = _LIFE.unpack_from(b)
+    if v[0] != LIFE_MARKER:
+        raise ValueError(f"no life record (marker 0x{v[0]:04X})")
+    rec = None
+    if v[4] & 1:
+        rec = {"type": v[6], "restarts": v[5], "power_on": v[8], "exc_lr": v[9], "spsr": v[10], "exc_sp": v[11],
+               "reset_lr": v[12], "reset_sp": v[13], "reset_cpsr": v[14], "fsr": v[15], "far": v[16],
+               "minutes": v[17]}
+    return {"flags": v[1], "power_on": v[2], "minutes": v[3], "restart": rec}
+
+
+def pack_life_record(d: dict[str, Any]) -> bytes:
+    r = d.get("restart")
+    if r is None:
+        return _LIFE.pack(LIFE_MARKER, d["flags"], d["power_on"], d["minutes"], 0, 0, 0, 0, 0, *([0] * 10))
+    return _LIFE.pack(LIFE_MARKER, d["flags"], d["power_on"], d["minutes"], 1, r["restarts"], r["type"], 0,
+                      r["power_on"], r["exc_lr"], r["spsr"], r["exc_sp"], r["reset_lr"], r["reset_sp"],
+                      r["reset_cpsr"], r["fsr"], r["far"], r["minutes"], 0)
+
+
+#: GET_HEALTH request flags (protocol 1.16)
+HEALTH_CLEAR_RESTART = 0x01
+HEALTH_RESTART_TEST = 0x80  # PC_DEBUG builds only (caps DEBUG_RAW)
+USB_STATES = ("off", "reconnecting", "not configured", "configured", "suspended")
+USB_STATE_TEXT = (
+    "off: USB switched off by other code (mass-storage mode or ENTER_FEL)",
+    "reconnecting: the suspend watch's soft disconnect is in progress",
+    "not configured: pull-up on, no SET_CONFIGURATION since the last bus reset (no host, a charge-only cable or "
+    "enumeration in progress)",
+    "configured: enumerated, bus active",
+    "suspended: the bus went idle (host asleep, selective suspend, or the cable pulled)")
+LAST_END = ("unknown (no life record)", "settings saved at power-off",
+            "ended without a power-off save (warm restart, power lost, a viewer open at power-off or the write failed)")
+
+
+@dataclass
+class HealthResp(Payload):
+    """GET_HEALTH response, 96 bytes (protocol 1.16, row 55)."""
+
+    FIELDS = [("layout", "B"), ("_r0", "x"), ("length", "H"), ("usb_state", "B"), ("usb_flags", "B"),
+              ("usb_power", "B"), ("usb_faddr", "B"), ("suspend_ms", "I"), ("since_config_ms", "I"), ("cp15", "I"),
+              ("power_on", "I"), ("minutes", "I"), ("uptime_ms", "I"), ("life_flags", "B"), ("last_end", "B"),
+              ("settings_flags", "B"), ("saves", "B"), ("last_save_result", "i"), ("settings_eval_ms", "I"),
+              ("rec_flags", "B"), ("rec_type", "B"), ("rec_restarts", "H"), ("rec_power_on", "I"),
+              ("rec_exc_lr", "I"), ("rec_spsr", "I"), ("rec_exc_sp", "I"), ("rec_reset_lr", "I"),
+              ("rec_reset_sp", "I"), ("rec_reset_cpsr", "I"), ("rec_fsr", "I"), ("rec_far", "I"),
+              ("rec_minutes", "I"), ("_r1", "8x")]
+    layout: int = 1
+    length: int = 96
+    usb_state: int = 3
+    usb_flags: int = 0
+    usb_power: int = 0
+    usb_faddr: int = 0
+    suspend_ms: int = 0
+    since_config_ms: int = 0xFFFFFFFF
+    cp15: int = 0
+    power_on: int = 0
+    minutes: int = 0
+    uptime_ms: int = 0
+    life_flags: int = 0
+    last_end: int = 0
+    settings_flags: int = 0
+    saves: int = 0
+    last_save_result: int = 1
+    settings_eval_ms: int = 0
+    rec_flags: int = 0
+    rec_type: int = 0
+    rec_restarts: int = 0
+    rec_power_on: int = 0
+    rec_exc_lr: int = 0
+    rec_spsr: int = 0
+    rec_exc_sp: int = 0
+    rec_reset_lr: int = 0
+    rec_reset_sp: int = 0
+    rec_reset_cpsr: int = 0
+    rec_fsr: int = 0
+    rec_far: int = 0
+    rec_minutes: int = 0
+
+    def describe(self) -> dict[str, Any]:
+        """The answer in words and units (what the Diagnostics pages show)."""
+        uf = self.usb_flags
+        usb = {"state": USB_STATES[self.usb_state] if self.usb_state < len(USB_STATES) else self.usb_state,
+               "text": USB_STATE_TEXT[self.usb_state] if self.usb_state < len(USB_STATE_TEXT) else "",
+               "high_speed": bool(uf & 1), "configured": bool(uf & 2), "suspended": bool(uf & 4),
+               "port_open": bool(uf & 8), "soft_connect": bool(uf & 16), "power_reg": f"0x{self.usb_power:02X}",
+               "address": self.usb_faddr, "suspended_s": round(self.suspend_ms / 1000, 3) if self.suspend_ms else 0,
+               "since_configured_s": None if self.since_config_ms == 0xFFFFFFFF else
+               round(self.since_config_ms / 1000, 3)}
+        c = self.cp15
+        cpu = {"cp15_control": f"0x{c:08X}", "mmu": bool(c & 1), "dcache": bool(c & 4), "icache": bool(c & 0x1000)}
+        lf, sf = self.life_flags, self.settings_flags
+        boot_write = "succeeded" if lf & 2 else "failed" if lf & 4 else "none (the settings sector was not valid)"
+        life = {"power_on": self.power_on or None, "operating_hours": round(self.minutes / 60, 2),
+                "uptime_s": round(self.uptime_ms / 1000, 1), "life_record_found": bool(lf & 1),
+                "settings_sector_valid_at_boot": bool(lf & 8), "boot_write": boot_write,
+                "previous_power_on_ended": LAST_END[self.last_end] if self.last_end < 3 else self.last_end}
+        settings = {"changed_since_saved": bool(sf & 1), "last_save_failed": bool(sf & 2),
+                    "saves_this_power_on": self.saves,
+                    "last_save_result": None if self.last_save_result == 1 else self.last_save_result,
+                    "evaluated_s_ago": round(self.settings_eval_ms / 1000, 1)}
+        rec = None
+        if self.rec_flags & 1:
+            t = self.rec_type
+            rec = {"from_this_power_on": bool(self.rec_flags & 2),
+                   "exception": EXCEPTION_TYPES[t] if t < len(EXCEPTION_TYPES) else f"type {t}",
+                   "restarts": self.rec_restarts, "power_on": self.rec_power_on,
+                   "operating_hours": round(self.rec_minutes / 60, 2),
+                   "registers": {k: f"0x{getattr(self, 'rec_' + k):08X}" for k in
+                                 ("exc_lr", "spsr", "exc_sp", "reset_lr", "reset_sp", "reset_cpsr", "fsr", "far")}}
+        return {"usb": usb, "cpu": cpu, "life": life, "settings": settings, "restart_record": rec}
+
+
+@dataclass
+class SaveReportResp(Payload):
+    """SAVE_REPORT response, 56 bytes (protocol 1.16)."""
+
+    FIELDS = [("bytes_written", "I"), ("_r0", "2x"), ("name_len", "H"), ("name", "48s")]
+    bytes_written: int = 0
+    name_len: int = 0
+    name: bytes = b""
+
+    @property
+    def name_str(self) -> str:
+        return _cstr(self.name)
 
 
 ADC_CAL_MAGIC = b"ACAL"
@@ -2245,6 +2540,7 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.READ_SCREEN: ReadScreenReq.size(), Cmd.ENTER_FEL: 4, Cmd.SET_ACQ_STATE: SetAcqStateReq.size(),
     Cmd.GET_CAPTURE_INFO: 0, Cmd.GET_EVENT_LOG: 0, Cmd.SD_INFO: 4, Cmd.SD_READ_SECTORS: 8, Cmd.SD_STAGE: 8, Cmd.SD_WRITE_SECTORS: 16,
     Cmd.READ_SPECTRUM: ReadSpectrumReq.size(), Cmd.GET_DECIM: 0, Cmd.SET_DECIM: SetDecimReq.size(),
+    Cmd.GET_HEALTH: 0, Cmd.SAVE_REPORT: 0,
 }
 
 
