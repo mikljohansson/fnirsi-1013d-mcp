@@ -130,3 +130,41 @@ sine at 1 MHz, the post square (-35 / +53) and mixes. Checks: a 1.7-code step an
 is rejected; the noise floor; the 16-bit numbers unchanged.
 
 Bench (owner): firmware/README.md section 6.4.
+
+## 8. Common-mode drift of the full-rate class (bench 2026-10-19 10:26-10:50)
+
+Shorted inputs, range 2, two hours after the v3 calibration: gated class 128.0 +- 0.1 on both cores of both
+channels for 10 minutes; full-rate raw CH1 A 132.5 / B 128.5 against stored 131.6 / 127.7 (A - B still right within
+0.2 code, **both cores +0.8**); CIC2 and CIC2+FIR read 128.67 (CH1) / 128.78 (CH2) at 0 V, the same shift. The A - B
+tracker of section 2 cannot see this (it keeps the mean of the cores). The only stable reference on the board is the
+gated class, so the full-class zero is tracked **relative to the gated class**: c = mean_full - mean_gated of the same
+input, both after the v3 correction (0 right after calibration).
+
+**Methods evaluated.**
+- (a) Signal-based, from the UI's own records: the UI captures in one class at a time (its time base), so a full and
+  a gated record of the same input exist only if the firmware inserts one; that is (b) with extra steps.
+- (b) Class probe on the live input: with the channel's relays and offset PWM unchanged, take gated, full, gated
+  conversions back to back (8 at 2 MSa/s, 64 at 200 MSa/s for the 25 kHz offset-PWM ripple, 8 at 2 MSa/s; about
+  100 ms) and compare the corrected means. Input-independent as long as the input does not change during those
+  100 ms: the corrected gains of both classes are equal (v3), so a DC level gives the same c as 0 V. **Valid** when
+  each part's RMS is <= 2 codes and the two gated means agree within 0.3 code (quiet or DC input, nothing moving).
+  A periodic signal is not usable: a 5 us full-rate record samples one phase, so 64 of them leave about
+  sigma / 8 (3.5 codes for a +-40 code sine).
+- (c) Input-independent through the hardware: there is no relay that grounds the ADC input (the AC relay still passes
+  the signal's AC part and its settling takes seconds; inference from the schematics, research/notes), and moving
+  the offset PWM adds to the input rather than replacing it. Not possible without the user's help; the wizard's zero
+  step remains the absolute reference.
+Chosen: (b). Run per channel at most every 30 s (and 5 s after boot) while RUN, the scope or spectrum view is up, no
+menu is open, no host capture is in flight and the channel's last UI record was quiet (RMS <= 2 codes); it costs one
+missed screen update (100 ms). c is low-passed over 4 accepted probes (EMA 1/4) and applied to both cores of the
+full class (8-bit off_k and the 16-bit corr16 by +16 c, so every filtered capture and the spectrum view follow).
+Noise of one probe: the full-rate mean of 64 x 1000 samples is ripple-limited at about 0.1 code (bench: 8 conversions
+left 0.2-0.4); after the EMA about 0.05 code.
+
+**Residuals expected.** Slow common-mode drift (0.7-0.8 code in 2 hours): tracked to about 0.1 code within two
+minutes of quiet input; with a never-quiet input c holds its last value (age in GET_CAL). A 03:48-type step (CH2
+core A -1.7 code in **both** classes, persisting): in the full class the A - B tracker removes the split (36 s at
+200 MSa/s use) and the class probe follows the common part (-0.85) relative to the gated class; the gated class itself
+is the reference, so its split (1.7 code, A - B) and mean (-0.85) stay until the next calibration. A gated A - B
+tracker (the section 2 estimator on gated records, a second state per channel) would remove the gated split too; not
+built (one event in 9 hours of logging), queued if it recurs.
