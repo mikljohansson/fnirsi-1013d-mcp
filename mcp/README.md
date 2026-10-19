@@ -238,7 +238,7 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_spectrum` | 0 | the spectrum the scope's own spectrum view shows (READ_SPECTRUM, fw >= 0.2.28): bins, rate, bin width, window, ENBW/RBW, gain, peaks; `cross_check` recomputes it on the host from the same capture |
 | `scope_decay_fit` | 1 | edge-aligned average, then `exp`, `exp+offset`, `exp2` or `power` fit after the TX edge; tau, R^2, sample points |
 | `scope_set_channel` | 2 | range, coupling, offset, probe, invert; relay changes limited to 5 per second |
-| `scope_event_log` | 0 | the scope's last 128 USB / link events with device ms (protocol >= 1.5), the pre-reset snapshot and (fw >= 0.2.24) the bus-level ring |
+| `scope_event_log` | 0 | the scope's last 128 USB / link events with device ms (protocol >= 1.5), the pre-reset snapshot and (fw >= 0.2.24) the bus-level ring; `fpga_trace` (fw >= 0.2.70) switches the FPGA write trace (event 22) on or off |
 | `scope_sd_info` | 0 | SD card size, partition, write window, eGON headers at 16/80/750 (optionally checksum-verified); fw >= 0.2.2; from fw 0.2.52 the identity of the image the card boots and whether it is the running one |
 | `scope_health` | 0 | fw >= 0.2.52: USB state now, MMU / caches, power-on number, operating hours, settings save state, the stored restart record, in words; fw >= 0.2.62 (1.19) `encode_check`: the full-rate capture check (mode, last 0x33 byte and failing pins, captures checked / garbled / re-taken) |
 | `scope_save_report` | 1 | fw >= 0.2.52: the scope writes its diagnostics report to `reports/` on its SD card; returns the file name |

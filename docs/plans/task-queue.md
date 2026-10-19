@@ -30,7 +30,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - **Hardware averaging with the default filter** (fw-seg, owner decision): with CIC2+FIR every slower time base falls back to the
   software average because the smallest memory depth (3000) does not fit the FPGA averaging memory; a 2000-sample depth while
   Average is on would make it work. Decide after the 0x1536 flash session.
-- **FPGA bus contract fixes on 0x1532-0x1536** (fpga-gen6 findings via fw-seg, section 35 open items): the A/B core order within a
+- [x] **FPGA bus contract fixes on 0x1532-0x1536** (fw-bus, branch fw-bus, fw 0.2.70 provisional / protocol 1.22, firmware/AGENTS.md section 46; bench list there, not benched: dummy strobe in every readout, arm order on every bitstream, legacy EXT shift, EXT kept on channel toggles, core order from 0x33) (was: fpga-gen6 findings via fw-seg, section 35 open items): the A/B core order within a
   word can flip after a sample-rate or filter change (interleave right by chance until bench test T4), the screen readout returns
   data one word late (averaged trace sits 2 samples earlier), writes inside the sampling-reset window can be lost at slow rates on
   the older arm order. Firmware fix batch after fpga-gen6 reports; bench with the owner.
@@ -56,7 +56,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   0x1537 fixes it in hardware. Plan: firmware/AGENTS.md section 35 (adapted to 0x1537: backups/al3_seg_0x1537_426a3784_padded.bin
   sha febc9299...), checks fpga/al3/README.md section 7, rollback al3_fir_0x1535 padded 5ade9e75. Community note for the
   announcement: units on the stock or 0x1532-0x1536 bitstreams get the firmware heal (0.2.61) but should flash 0x1537.
-- [x] **Full-rate encode check on every arm** (0.2.62 benched on 0x1538 17:50: 0 garbled captures in 1353; refinement queued: a rate write sets the 0x33 sticky flag once and costs a re-arm, 112 of 5798; clear it on 0x0D or skip the first check after a rate write; and the type 22 write trace floods the 128-entry event ring, make it a debug level) (was: (fw-enc dispatched 10-19 16:58 as fw 0.2.62 with fpga-gen7's 0x1538 interface: read 0x33 after every 200 MS/s capture, bit 0 = discard and re-arm, bits 3:2 = 01 order guaranteed B-first, 0xF6 = good; data check on every full-rate arm for 0x1532-0x1537): 0.2.61 checks only after a 0x0D write; the bench shows the bad
+- [x] **Full-rate encode check on every arm** (0.2.62 benched on 0x1538 17:50: 0 garbled captures in 1353; refinement queued: a rate write sets the 0x33 sticky flag once and costs a re-arm, 112 of 5798; clear it on 0x0D or skip the first check after a rate write; and the type 22 write trace floods the 128-entry event ring, make it a debug level; done on branch fw-bus: the bitstream clears bit 0 only at 0x01 = 1, so a capture with a rate / filter write after its reset is judged by its data; type 22 off by default, GET_EVENT_LOG flags switch it, counters GET_LINK_STATS 64-67) (was: (fw-enc dispatched 10-19 16:58 as fw 0.2.62 with fpga-gen7's 0x1538 interface: read 0x33 after every 200 MS/s capture, bit 0 = discard and re-arm, bits 3:2 = 01 order guaranteed B-first, 0xF6 = good; data check on every full-rate arm for 0x1532-0x1537): 0.2.61 checks only after a 0x0D write; the bench shows the bad
   phase is re-rolled at every sampling reset on 0x1537 (40 % of arms). On 0x1538 read the self-check status flag after each arm at
   200 MS/s and re-arm when it is set (no data check needed); on 0x1532-0x1537 run the data check on every full-rate arm instead of
   only after 0x0D. Fix the stored core-order convention (interleave tracker A-B model, 0x53 swap bit) to what 0x1538 guarantees.
@@ -258,7 +258,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   - fpga_swap_trigger_channel (fpga_control.c:454-484, statemachine.c:1846) overwrites the EXT source when a channel is
     toggled, a likely cause of the bench's EXT -> CH1 switch;
   - fpga_read_decim_data and the 1.00o5 readout have no dummy strobe and read one word late.
-  Remaining: bench re-measure on 0x1537 with GET_CAPTURE_INFO and 0x15 writes logged.
+  Remaining: bench re-measure on 0x1537 with GET_CAPTURE_INFO and 0x15 writes logged. The three firmware items are built on
+  branch fw-bus (fw 0.2.70; firmware/AGENTS.md section 46 bench items B2, B4, B5); re-measure on 0x1539 with that image.
 - [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md
   section 4; XY mode could get intensity grading from the same map.
 - [x] **Bode / frequency response** (owner priority 3): design docs/plans/bode-design.md; host tool done (H1-H3 above); device steps D1-D5 queued.
