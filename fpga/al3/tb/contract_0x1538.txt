@@ -57,7 +57,7 @@ C 01
 W 01
 C 05
 # poll 0x05: R lines until bit 0 = 1
-R 37
+R 39
 # ARM 7: 0x0B, 0x0C again, 0x0E time-out
 C 0b
 W 00
@@ -75,9 +75,9 @@ C 01
 W 00
 # poll: C 0a, R, C 18, R per main-loop pass until 0x0A bit 0 = 1 (last pass shown)
 C 0a
-R 37
+R 39
 C 18
-R 37
+R 39
 # DONE: 0x2A (8 bytes) until two reads agree
 C 2a
 R 81
@@ -339,27 +339,27 @@ R 28
 R 28
 R 28
 R 28
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
-R d2
 R 28
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
+R d2
 R 28
 R 28
 R 28
@@ -560,7 +560,7 @@ R 28
 R 28
 R 28
 R 28
-R d2
+R 28
 R d2
 R d2
 R d2
@@ -708,7 +708,7 @@ R d7
 R d7
 R d7
 R d7
-R 2d
+R d7
 R 2d
 R 2d
 R 2d
@@ -861,7 +861,7 @@ R a0
 R a0
 R a0
 R a0
-R 48
+R a0
 R 48
 R 48
 R 48
@@ -898,7 +898,7 @@ R 00
 R 00
 R 00
 R 00
-R 03
+R 00
 R 03
 R 03
 R 03
@@ -1009,7 +1009,7 @@ R 5c
 R 5c
 R 5c
 R 5c
-R b4
+R 5c
 R b4
 R b4
 R b4
@@ -1046,7 +1046,7 @@ R 03
 R 03
 R 03
 R 03
-R 00
+R 03
 R 00
 R 00
 R 00
