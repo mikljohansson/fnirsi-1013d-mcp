@@ -27,6 +27,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   fpga-gen6 asked to simulate a sliding-edge square through the 0x1535 chain and quantify. Decided (owner 10-19 14:10): keep CIC2+FIR as
   the default in Spectrum (flat passband, alias rejection) and make CIC2 without FIR the default for the Scope trace, with the Filter
   box per mode; goes into the ACQ coupling batch. Owner also sees the upper spectrum "wag" pass to pass on the same square: fpga-gen6 asked to quantify bin variation vs edge phase (image terms in the transition band, hypothesis).
+- **Hardware averaging with the default filter** (fw-seg, owner decision): with CIC2+FIR every slower time base falls back to the
+  software average because the smallest memory depth (3000) does not fit the FPGA averaging memory; a 2000-sample depth while
+  Average is on would make it work. Decide after the 0x1536 flash session.
+- **FPGA bus contract fixes on 0x1532-0x1536** (fpga-gen6 findings via fw-seg, section 35 open items): the A/B core order within a
+  word can flip after a sample-rate or filter change (interleave right by chance until bench test T4), the screen readout returns
+  data one word late (averaged trace sits 2 samples earlier), writes inside the sampling-reset window can be lost at slow rates on
+  the older arm order. Firmware fix batch after fpga-gen6 reports; bench with the owner.
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
@@ -204,6 +211,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   0x1537 if the FPGA is at fault), docs-gen3 (Sonnet: protocol tidy, README timings, roadmap.md, announcement draft,
   release-readiness.md). Queued behind them: fw-ui4 (step 4, needs fw-readers), Measurements v2 (needs step 2), touch batches 2-3,
   mcp 1.16/1.17, Bode device steps (after the owner's Bode bench), 0.3.0 release.
+- fw-seg (done 14:25, about 575k tokens, retired): merged 4905934 as fw 0.2.58 / protocol 1.17 (row 56, renumbered from the
+  provisional 70; handoff section 35): caps bit 17 SEQ, SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW segment mode, GET_STATUS 48 B with
+  a features word, GET_DECIM 36, GET_CAPTURE_INFO 96, UI Average as a hardware run where the record fits; images pinned
+  backups/fw-0.2.58_2f9c36f9.bin and fw-0.2.58-nommu_887f1a04.bin; flash session plan in section 35; design note
+  docs/plans/phosphor-fast-capture.md. Not loaded.
 - mcp-gen4 (done 14:25, about 570k tokens, retired): Bode host tool, protocol 1.15 and 1.16 host side; handoff mcp/AGENTS.md 1cb17e0
   (open item 0 = the mcp release-readiness items). mcp-gen5 dispatched 14:27 on those items; 1.17 after fw-seg merges.
 - fw-ui2 (done 14:19, about 510k tokens, retired): merged 68fc8a0 and renumbered to fw 0.2.56 (CTRL page with Display / Trace style or

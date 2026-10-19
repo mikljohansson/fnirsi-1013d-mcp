@@ -39,3 +39,6 @@ research/tools/vendor/
 
 # agent worktrees (local)
 .claude/worktrees/
+
+# the owner's local Claude Code MCP config (tracked example: .mcp.json.example)
+.mcp.json

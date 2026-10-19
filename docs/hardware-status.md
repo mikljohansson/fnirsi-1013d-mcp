@@ -713,3 +713,6 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 2026-10-19 14:21: fw 0.2.56 (UI step 2 on 0.2.55; merge of fw-ui2) built with GCC 10, MMU image sha256
   35b2c2f6b1c35207673e164b45663e4b9489a0699c50304821c5025a98ac970f, nommu a406ed19c47a8db5bca57ca03aba1632fc57a41c69a7283c85f74061f90ec012,
   pinned in backups/. Now the image to load next (steps 1-3, readers, touch handles). Not loaded.
+- 2026-10-19 14:27: fw 0.2.58 (0x1536 support on 0.2.56; merge of fw-seg) built with GCC 10, MMU image sha256
+  2f9c36f97bd4576c2d8010e7e78c92ca0dd1c8cf01303e2e0a40d9e9a47d642a, nommu 887f1a0406545735f82803fd588ee79566658cadb258853478a4a869a48f62a5,
+  pinned in backups/. Runs on 0x1535 unchanged (host-visible: GET_STATUS 48 bytes). Now the image to load next. Not loaded.
