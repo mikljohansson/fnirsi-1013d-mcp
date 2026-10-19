@@ -788,3 +788,9 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 2026-10-19 15:35: fw 0.2.59 (4ba89469) loaded into RAM over FEL (owner bound 1f3a:efe8 for usbipd by hardware id; the scope
   now hangs off the original socket, busid 9-2): #VER fw=0.2.59 proto=1.17 fpga=0x1535. First boot of a firmware that writes sector
   709 at boot. Owner walk-through of UI steps 1-4, readers and touch handles starts (firmware/AGENTS.md sections 29, 31-35).
+- 2026-10-19 15:50: owner walk-through of 0.2.59: menu, chips, handles, CTRL page, spectrum, Settings, Diagnostics all work;
+  polish list queued (UI polish batch 1). Wizard Zero level step FAILS: "too much noise" on both channels most runs, one channel
+  passes sometimes (probes and USB unplugged as instructed). Host check with probes unplugged, USB plugged, 200 MS/s raw per core:
+  std 0.5-1.1 codes (CH2 range 0: 1.7-2.1), raw A-B mean offset CH1 about 3.5 codes, CH2 0.5-1.5; limit is 3 codes RMS per core.
+  The wizard computes something larger than the real noise: fw-cal4 dispatched (fw 0.2.60). COM10 flapped for about a minute after
+  the USB replug (device seen, port not openable), then fine.
