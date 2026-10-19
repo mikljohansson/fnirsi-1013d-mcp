@@ -930,3 +930,23 @@ Newest entries at the bottom. Format: date, who, what, result.
   gain, Save): the first full calibration on the new wizard and the first valid one since 0x1535. Owner: "the new wizard is great".
   Owner decision: remove the off-centre zero workaround of 0.2.67 and measure at code 128 again so a bad bitstream fails loudly
   (fail fast); keep the readout-fault wording in the failure line. Scheduled with the batch after 0x153A lands.
+- 2026-10-19 20:43-20:51: owner wired the RC low-pass (post -> 1 kOhm -> node -> 15 nF -> clips, CH1 on the post side, CH2 on the
+  node) and reported that AUTO SET in Frequency response "kept running, could not stabilise". Host checks over COM10 with the view
+  open (display mode 5, sweep_id 0 since boot): a device single sweep 100 Hz..1 MHz / 50 points / Settle Normal via BODE_CTRL took
+  4.0 s (header estimate 3.7 s for the host's settings; the first BODE_STATUS had reported 245.7 s for "the settings in effect"
+  while showing the same 100 Hz..1 MHz / 50 / Normal: the header and the estimate describe different settings when no sweep has
+  run, queued). REPEAT 1 kHz..200 kHz / 20 points ran 0.45 s per sweep, STOP from the host ended it after the sweep (state stopped,
+  reason 6, view bit 1 cleared, run_state 0). Both work. The table was wrong, though: every row ch1_range 0 and ch2_range 0 (5 V/div),
+  flags clipped + ch1_low on all 50 points, ch2_small above 10 kHz, outliers (+12.5 dB / +57 deg at one point), the floor flat at
+  -30 dB from 400 kHz. The host sweep of the same filter (fnirsi1013d-bode 100 Hz..1 MHz, 25 points) was clean: 25/25 valid, 0.13 dB
+  reference, -3 dB at 10.33 kHz, -45 deg at 12.3 kHz, -34.0 dB at 1 MHz, CH2 0.5 -> 0.2 -> 0.1 V/div. Cause, measured directly
+  (1 kHz square from the post through the filter, 200 MS/s, 1500 samples per core): an A core returns rail values and jumps > 40
+  codes whenever its samples lie in codes 128..145 (CH2 A at 5 V/div: 44 rail samples, 642 jumps, std 58.9 vs 2.2 on B; CH1 A at
+  1 V/div crossing the band: 13 rails, 74 jumps, B 0 / 0), and is clean when they stay outside it. The device engine counts one rail
+  sample as a clip (bode_dsp.c lo < 0.5 / hi > 254.5 codes), backs both channels off to 5 V/div in the pre-scan, and there the whole
+  3 V signal sits inside the band: every point flagged (grey dots on the screen, which is why the owner saw no colours), the curve
+  jumping between repeated sweeps. The host tool ranges by amplitude first and tolerated the few bad samples. So the on-device
+  Frequency response is correct in its mechanics and blocked by the 0x1539 capture fault until 0x153A; fpga-gen8 got the data
+  (the bad codes are 0x80..0x91: bit 7 set, bits 6..5 clear, A cores only). Scope state after the checks: generator off, both
+  channels 1 V/div DC, the Frequency response view still open, no sweep running.
+

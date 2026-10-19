@@ -84,6 +84,27 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   plot of both modes; Spectrum: the span as a window over 0..fs/2, drag pans the centre; Frequency response: Start..Stop as a window
   over 100 Hz..10 MHz on the log axis, drag pans both and re-sweeps. Designer (ux-bode) updates the boards and bode-ui.md /
   ux-makeover.md first; firmware batch after fw-freq lands (spectrum.c and bode_view.c).
+- **Frequency response chart follow-ups** (owner 10-19 20:50, after the bench of the device sweep on the RC low-pass; batch
+  fw-freq2 together with the follow-ups listed under fw-freq): (a) a Trace style button on the mode's CTRL page like the Scope's,
+  Lines (default) / Dots, same fold-out construction; today valid points are joined and coloured per axis and flagged points are
+  grey loose dots, which is what the owner saw because the 0x1539 capture fault flagged every point (hardware-status 20:51); keep
+  the grey for flagged points. (b) Grid lines that mean something: on the log frequency axis vertical lines at the decades (minor
+  at 2 and 5 when the span is narrow enough to need them), on the linear axis at the label steps; horizontal lines at the dB and
+  degree divisions the labels name; the Spectrum view's grid the same way (vertical at its frequency labels, horizontal at its
+  dB/div); state the rule in ui-guidelines.md section 3. (c) BODE_STATUS consistency: with no sweep since boot the header
+  reported the engine's defaults (100 Hz..1 MHz / 50 / Normal) while the estimate (245.7 s) was computed for the view's own
+  settings; report one set (the settings in effect, cfg_now) in both. (d) Ranging robustness: the engine treats one rail sample
+  as a clip and ranged both channels to 5 V/div on a bitstream with the A-core fault; decide with the owner's fail-fast rule in
+  mind: either leave it (0x153A removes the cause) or stop the sweep with a "readout fault" reason when the pre-scan clips at
+  5 V/div with a fundamental under 20 codes, instead of producing a flagged table. (e) The estimate text of Single sweep must
+  use the same settings as (c).
+- **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
+  SCREENSHOT bit 6, simulator has it, `Scope.read_screen` reads 40 rows per request) but the firmware handler is NULL
+  (pc_cmds.c "BENCH: T9"). Implement it in all builds: rows of the live framebuffer as RGB565, the header per protocol.md, the
+  capability bit set; host test against the vectors; bench: `scope_screenshot` on the unit equals the screen (T9).
+- **FPGA review on a Fable agent** (owner 10-19 20:55: "might want to use a Fable agent to review and fix the FPGA code"):
+  fpga-gen8 retires at 810k tokens with its 0x153A handoff; fpga-gen9 runs on Fable: review the AL3 design end to end (ADC
+  capture path, clocking, constraints) against the bench record, then finish 0x153A.
 - [x] **Preserve the mockup sources** (docs/mockups/ committed 19:50): copy the gen_ux generators and the artboard HTML from the coordinator's scratchpad into
   docs/mockups/ (committed) before the session ends; the makeover artifact itself is on a previous login (ux-makeover.md note).
 - **Wizard zero point back at code 128** (owner 10-19 20:30, fail fast): revert 0.2.67's two-point off-centre zero, measure at the
