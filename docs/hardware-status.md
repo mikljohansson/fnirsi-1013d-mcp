@@ -656,3 +656,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   128.78 (CH2) by the row 51 formula in every CIC mode; the firmware 8-bit trace shows 129.0 (all samples round alike). The 0.7-code
   offset is the full-rate class zero having drifted +0.8 code as a common mode of both cores since the 08:15 calibration (raw full
   A/B 132.5/128.5 vs stored 131.6/127.7), while the gated class reads 128.0 exactly: passed to fw-cal3 for the v4 design.
+- **FIR alias bench** (11:05, CH1 on the post, range 3, generator 892.857 kHz = 50 MHz / 56 clean-edge square, 2.8 Vpp, fundamental
+  +1.8 dBV; 1 MSa/s, N 200, alias lands at 107.1 kHz; Hann FFT of 3000 host samples, 3 captures; backups/fir_alias_bench_20261019.json):
+  boxcar -17.0 dBV, boxcar+FIR -81.2; CIC2 -35.6, CIC2+FIR -76.1; CIC3 -54.0, CIC3+FIR -80.8 (noise floor about -92 dBV). fpga-gen4's
+  model predicted -16.1 / -34.7 / -53.3 without and -71.5 / -83.5 / -82.8 with the FIR for a 3.1 Vpp square: the CIC rows match within
+  1 dB, the FIR rows within 2-7 dB of a floor-limited measurement. **Alias rejection with the FIR: 78-83 dB below the fundamental** in
+  every order, against 19 / 37 / 56 dB without it. 0x1535 is fully benched; CIC2+FIR can become the default.
