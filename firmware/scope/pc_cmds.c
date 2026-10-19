@@ -187,6 +187,9 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
   //Protocol 1.3: shared control with the UI, no LOCAL/REMOTE; SD sector access (no FPGA involved)
   v->caps |= PC_CAP_SHARED_MODE | PC_CAP_SD_SECTORS;
 
+  //fw 0.2.70: READ_SCREEN reads the framebuffer (no FPGA involved)                                BENCH: T9
+  v->caps |= PC_CAP_SCREENSHOT;
+
 #if PC_DEBUG
   v->caps |= PC_CAP_DEBUG_RAW;
 
@@ -751,8 +754,8 @@ static int h_get_info(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   for(i=0;(i<sizeof(sn) - 1) && (i<16);i++)
     resp[56 + i] = (uint8_t)sn[i];
 
-  pc_put_u16(resp + 72, 800);
-  pc_put_u16(resp + 74, 480);
+  pc_put_u16(resp + 72, PC_SCREEN_WIDTH);
+  pc_put_u16(resp + 74, PC_SCREEN_HEIGHT);
   *rl = 76;
   return PC_OK;
 }
@@ -2892,6 +2895,30 @@ static int h_read_bode(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
   return PC_OK;
 }
 
+//READ_SCREEN (fw 0.2.70): u16 row, u16 nrows. u16 width, u16 row, u16 nrows, u16 format 1 (RGB565 little-endian), then the
+//rows from the framebuffer the panel shows. MAIN only: a screenshot never sees a UI pass half drawn (a modal menu: E_BUSY)
+static int h_read_screen(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint32_t row = pc_get_u16(req), n = pc_get_u16(req + 2);
+  uint32_t total = 8 + n * PC_SCREEN_WIDTH * 2;
+
+  (void)len;
+
+  if((row >= PC_SCREEN_HEIGHT) || (n == 0) || (row + n > PC_SCREEN_HEIGHT))
+    return pc_error(s, PC_E_BAD_ARG, 0, "rows outside 0..480");
+
+  if((total > PC_MAX_RESPONSE_PAYLOAD) || (total > s->tx_cap - PC_HDR_SIZE - PC_CRC_SIZE))
+    return pc_error(s, PC_E_OVERFLOW, 2, "at most 41 rows per request");
+
+  pc_put_u16(resp,     PC_SCREEN_WIDTH);
+  pc_put_u16(resp + 2, row);
+  pc_put_u16(resp + 4, n);
+  pc_put_u16(resp + 6, 1);
+  pc_hal_screen_rows(row, n, resp + 8);                                              //BENCH: T9
+  *rl = total;
+  return PC_OK;
+}
+
 static const pc_cmd_entry pc_cmds[] =
 {
   { PC_CMD_PING,         F_BUSY | F_CONTROL | F_BASIC, 0, h_ping },
@@ -2936,7 +2963,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_GET_GEN,      0,                            0, h_get_gen },
   { PC_CMD_SET_GEN,      0,                            PC_CAP_GENERATOR_DDS, h_set_gen },
   { PC_CMD_GET_CAL,      0,                            0, h_get_cal },
-  { PC_CMD_READ_SCREEN,  0,                            PC_CAP_SCREENSHOT, NULL },   //BENCH: T9 before it gets a handler
+  { PC_CMD_READ_SCREEN,  F_BASIC,                      PC_CAP_SCREENSHOT, h_read_screen },   //BENCH: T9
   { PC_CMD_CAL_PROBE,    0,                            0, h_cal_probe },
   { PC_CMD_DEBUG_FPGA,   0,                            PC_CAP_DEBUG_RAW, h_debug_fpga },
   { PC_CMD_ENTER_FEL,    0,                            PC_CAP_ENTER_FEL, h_enter_fel },

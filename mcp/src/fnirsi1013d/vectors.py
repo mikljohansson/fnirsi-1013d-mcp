@@ -133,6 +133,11 @@ def build_host_vectors() -> list[dict[str, Any]]:
                   "frame, a false 4-byte header start, frame, lone 0xA5 then silence (partial dropped)"))
     v.append(_vec("host_ascii_63_chars", b"#" + b"Y" * 63 + b"\n",
                   "longest accepted line: 63 characters after '#' (one more is ascii_overflow)"))
+    v.append(_vec("host_req_read_screen_tail", _f(P.Cmd.READ_SCREEN, 42, P.ReadScreenReq(440, 40).pack()).encode(),
+                  "READ_SCREEN rows 440..479 (the last of the 12 requests of a full screen)"))
+    v.append(_vec("host_resp_read_screen_e_overflow", _f(P.Cmd.READ_SCREEN, 43,
+                  P.error_payload(2, "at most 41 rows per request"), P.Status.E_OVERFLOW, R).encode(),
+                  "READ_SCREEN E_OVERFLOW detail 2: more rows than fit one response (42 x 1600 + 8 > 66560)"))
     v += build_host_vectors_1_3()
     return v
 

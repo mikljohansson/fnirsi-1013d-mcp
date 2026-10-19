@@ -1603,6 +1603,16 @@ uint8_t pc_hal_display_mode(void)
   return phosphor_mode() ? PHOSPHOR_DISPLAY_MODE : (uint8_t)spectrum_mode();
 }
 
+//fw 0.2.70: READ_SCREEN. maindisplaybuffer is what DEBE layer 0 scans (sys_init_display); views that draw into
+//displaybuffertmp copy into it, so this is what the panel shows. With the MMU on its pages are write-through (pc_mmu.c,
+//firmware/AGENTS.md section 26): the CPU's cached copy equals DDR, a read needs no cache maintenance
+typedef char pc_screen_geometry_check[((SCREEN_WIDTH == PC_SCREEN_WIDTH) && (SCREEN_HEIGHT == PC_SCREEN_HEIGHT)) ? 1 : -1];
+
+void pc_hal_screen_rows(uint32_t row, uint32_t nrows, uint8_t *dst)
+{
+  memcpy(dst, (const uint16 *)maindisplaybuffer + row * SCREEN_WIDTH, nrows * SCREEN_WIDTH * 2);
+}
+
 int32_t pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t *hdr, uint8_t *levels)
 {
   return spectrum_read(ch, first, max_bins, hdr, levels);
