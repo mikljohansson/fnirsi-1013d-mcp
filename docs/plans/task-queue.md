@@ -296,6 +296,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## MCP / host
 
+- **Server releases the serial port when idle** (coordinator 10-19 22:08): on collaborative firmware the MCP server keeps COM10 open
+  from the first tool call until the server exits (`Server.scope`, `drop_connection` only on a transport error), so the coordinator's
+  own scripts and `fnirsi1013d-flash` get PermissionError on COM10 after any MCP tool call in the same session, and a FEL reload needs
+  the device to vanish first. Close the port after N s without tool calls (default 30 s, env FNIRSI_MCP_IDLE_CLOSE_S, 0 = hold) and
+  reopen lazily on the next call; keep the legacy REMOTE idle rule; tests with the simulator; note it in mcp/README.md and the
+  agent guide ("the port is free while no tool runs").
+
 - [x] **scope_status docstring** (docs-gen1): names all five display modes (mcp-gen4, with the Bode docs commit).
 - [x] **Bode bench session** (10-19 14:35-15:25: RC low-pass and high-pass consistent to 0.14 dB / 1 deg, floor -80 dB, thru +0.3 dB, divider flat: tool accepted; capacitor dispersion is the part; DC overload in wiring B found, wiring A recommended) (was: RC 1k/15n, floor -80 dB, thru +0.3 dB, divider flat -20.5 dB: tool proven; RC capacitor deviation open; 0.1 V/div bug found) (mcp-gen4 hand-off; procedure in mcp/AGENTS.md "Bode bench"): wiring A/B, thru, floor, coherence, the
   1.6 kOhm / 10 nF RC; record the floor, skew and the wiring verdict in docs/hardware-status.md.
