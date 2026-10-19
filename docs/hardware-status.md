@@ -962,7 +962,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   Of that item: scope_health done, scope_cal_probe done 20:25, the device-vs-host Frequency response comparison is blocked by the
   A-core capture fault until 0x153A (20:51 entry); the poll interval and elapsed_ms (445 ms per 20-point sweep, estimate 935 ms)
   were checked at 20:44.
-- 2026-10-19 21:26-21:36: fw 0.2.71 (fw-freq2 merged: Frequency response follow-ups, Spectrum slider, grid rule, Trace style,
+- 2026-10-19 21:26-21:28: fw 0.2.71 (fw-freq2 merged: Frequency response follow-ups, Spectrum slider, grid rule, Trace style,
   READ_BODE reason 8) built with GCC 10, pinned backups/fw-0.2.71_1264e26c.bin (sha256
   1264e26c75fb4ee5046b233fe5a9956e40cc68cdb29272f5bdd640949361dc72), host test suite green on the merged tree, FEL-loaded 21:26
   (`#VER fw=0.2.71,proto=1.21,fpga=0x1539`). BODE_OPEN from the host: the header now reports the view's own settings, 1 Hz ..

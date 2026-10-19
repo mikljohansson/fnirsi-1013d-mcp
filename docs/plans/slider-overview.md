@@ -385,7 +385,7 @@ used 5. The Spectrum track does the same.
    matter, maximize the available space; it'll be difficult enough to cram both traces in there" **(owner)**. Sections 2 and
    9 and the boards are to be regenerated to 18 px by the firmware batch's designer pass (the geometry in section 2 is now
    superseded on this point).
-6. Track geometry (owner, 21:36): the outer container loses its bottom, left and right 1 px borders and the 1 px margin; the
+6. Track geometry (owner, 21:28): the outer container loses its bottom, left and right 1 px borders and the 1 px margin; the
    window is not a box but a left and a right border only, 1 px each in full colour, full track height; the overview uses every
    row and column between and beside them, full colour inside the borders, dimmed outside **(owner)**. Supersedes decision 5's
    row count; fw-over works out the exact rows and writes them here.
