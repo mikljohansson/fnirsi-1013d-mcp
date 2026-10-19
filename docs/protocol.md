@@ -636,6 +636,11 @@ bytes reserved, u32 `value`. Response: TIMEBASE.
   the response's `timeperdiv_index` is the applied one. SET_TRIGGER pretrigger / total refit the UI time/div the same
   way. The acquisition Filter (GET_DECIM / SET_DECIM filter and FIR bits) is kept per display mode: Scope and Spectrum
   each have their own (defaults CIC2 and CIC2+FIR); the commands read and write the mode on screen.
+- Since fw 0.2.75 (wire format unchanged): the screen's tap zoom and ACQ time/div boxes pick the rate from a ladder
+  (the fastest rate whose record covers the trace area with at least ten samples per division; docs/ui-guidelines.md
+  section 2). Mode 0 does not: it already picks a rate for every index, the table above (100 samples per division
+  down to 500 ns, viable for any record of 1450 samples or more), and keeps it so hosts and the simulator see the same
+  rate for an index. A host that wants the screen's pair reads it back with GET_TIMEBASE after a zoom.
 
 | UI index | Time/div | N | Rate per channel |
 |---|---|---|---|
