@@ -1165,7 +1165,6 @@ extern FONTDATA font_5;
 //Icons
 //----------------------------------------------------------------------------------------------------------------------------------
 
-extern const uint8 system_settings_icon[];
 extern const uint8 Other_settings_icon[];
 extern const uint8 Right_drop_menu_icon[];
 //extern const uint8 Right_drop_menu_icon1[];

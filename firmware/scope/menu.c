@@ -2745,6 +2745,27 @@ static void scope_main_menu_wave_icon(uint32 y)
   display_draw_horz_line(y + 28, x + 18, x + 25);
 }
 
+//Settings: a cogwheel (fw 0.2.63, owner), 21 x 21 px around (cx, cy): a ring from radius 3 to 7, four straight teeth
+//5 px wide out to 10 px and four diagonal ones of the same width out to radius 9.9, drawn pixel by pixel
+static void scope_main_menu_cog_icon(uint32 y)
+{
+  int32 cx = MAIN_MENU_XPOS + 27, cy = y + 18, dx, dy, r2, d1, d2;
+
+  for(dy = -10; dy <= 10; dy++)
+  {
+    for(dx = -10; dx <= 10; dx++)
+    {
+      r2 = dx * dx + dy * dy;
+      d1 = dx - dy;
+      d2 = dx + dy;
+
+      if((r2 > 9) && ((r2 <= 50) || ((dy >= -2) && (dy <= 2)) || ((dx >= -2) && (dx <= 2)) ||
+                      (((d1 * d1 <= 8) || (d2 * d2 <= 8)) && (r2 <= 98))))
+        display_draw_pixel(cx + dx, cy + dy);
+    }
+  }
+}
+
 //Spectrum analyser: a base line with spectral lines (fw 0.2.28)
 static void scope_main_menu_spectrum_icon(uint32 y)
 {
@@ -2778,7 +2799,7 @@ void scope_main_menu_item(int row, int mode)
     case UI_MM_SPECTRUM:    scope_main_menu_spectrum_icon(y); break;
     case UI_MM_PICTURES:    display_copy_icon_use_colors(picture_view_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
     case UI_MM_WAVEFORMS:   display_copy_icon_use_colors(waveform_view_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
-    case UI_MM_SETTINGS:    display_copy_icon_use_colors(system_settings_icon, MAIN_MENU_XPOS + 19, y + 5, 15, 25); break;
+    case UI_MM_SETTINGS:    scope_main_menu_cog_icon(y); break;
     case UI_MM_DIAGNOSTICS: display_copy_icon_use_colors(diagnostic_view_icon, MAIN_MENU_XPOS + 15, y + 4, 24, 24); break;
     default:                display_copy_icon_use_colors(usb_icon, MAIN_MENU_XPOS + 18, y + 2, 18, 25); break;
   }
