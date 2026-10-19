@@ -662,3 +662,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   model predicted -16.1 / -34.7 / -53.3 without and -71.5 / -83.5 / -82.8 with the FIR for a 3.1 Vpp square: the CIC rows match within
   1 dB, the FIR rows within 2-7 dB of a floor-limited measurement. **Alias rejection with the FIR: 78-83 dB below the fundamental** in
   every order, against 19 / 37 / 56 dB without it. 0x1535 is fully benched; CIC2+FIR can become the default.
+- 11:00 the owner pressed DEFAULT in the diagnostics view: "Settings do default!!!" and the Filter box then reads CIC2+FIR (default verified).
+  Owner remarks: the view shows the unused stock compensation tables and "fw: PECO" for the FPGA; redesign proposal published as a Design
+  artifact (https://claude.ai/artifact/M3udheReCiHLQmASaY5qZr) and queued.
+- 11:25 fw-usb2's 0.2.49 merged (502d90d): suspend watch every 1 ms (pc_usbw.c), inferred resume from SOFs/EP0/EP2 traffic acts like RESUME,
+  soft reconnect (D+ pull-up off 1 s) after a suspend storm or 15 min suspended, GET_LINK_STATS n = 62 (60 inferred resumes, 61 soft
+  reconnects), event type 20, protocol 1.14. Pinned backups/fw-0.2.49_53559995.bin and fw-0.2.49-nommu_e83461ce.bin. Host tests 9/9,
+  vectors OK, mcp 360 passed. fw-usb2 found the selective-suspend GUID in the guide/skill wrong (…53bb50f7e206 vs the real
+  …53bb8f07e226) and fixed it; this laptop's active plan: selective suspend **disabled on AC, enabled on DC** (powercfg /Q), so the 10:20
+  loss happened with the host setting off on mains.
