@@ -149,6 +149,12 @@ to Done, so the zero level can still be saved; and the stock volts-per-range cal
 since Clear never touches the volts factors and a unit that lost them needs that procedure. Firmware: fw 0.2.50's wizard (README 6.4) has the steps
 and checks; its copy, its two-probe gain step and its Skip go, the per-channel gain screens and the final Save come.
 
+## 6b. Buttons in dialogs **(owner)**
+
+The default or primary action sits on the right, the secondary or dismissing one on the left, in every dialog: the
+wizard (Cancel left, Calibrate / Continue / Save calibration right), confirmations (Cancel left, the action right) and
+the first-run screen (Later left, Calibrate now right).
+
 ## 7. Implementation order
 
 1. Main menu rows and the USB drive screen text (small, no new data).
