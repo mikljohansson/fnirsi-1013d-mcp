@@ -32,7 +32,10 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #define PC_FW_VERSION     "0.2.53" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
 #endif
 
-extern const uint32_t pc_fw_build;    //short git hash of the build (build_id.c; host tests: mock_hal.c)
+//The build identity record (build_id.c, pc_ident.h; host tests: mock_hal.c)
+#include "pc_ident.h"
+#define pc_fw_build       (pc_image_ident.build)          //short git hash of the build
+#define pc_build_time     (pc_image_ident.time)           //commit time (UTC) yy, mm, dd, hh, mm, ss
 
 #ifndef PC_SERIAL
 #define PC_SERIAL         "1013D-0001"
@@ -272,6 +275,7 @@ typedef struct
   uint16_t   pass_max_ms;       //maximum since the previous GET_STATUS
 
   uint8_t    fel_pending;       //ENTER_FEL answered: jump once the response has left
+  uint8_t    restart_pending;   //PC_DEBUG GET_HEALTH flag 0x80 answered: restart from RAM once the response has left
 
   //SD write staging buffer (HAL owned)
   uint8_t   *sd_stage;
@@ -305,6 +309,18 @@ void     pc_ui_capture_start(pc_session *s);              //fpga_do_conversion s
 void     pc_ui_capture_addr(pc_session *s, uint16_t addr);//0x14 read of the finished UI capture
 void     pc_ui_capture_done(pc_session *s);               //the UI read and processed it
 void     pc_ui_pass_mark(pc_session *s, int n);            //main loop stage n (0..3) reached, kept for the first pass
+
+//Diagnostics (fw 0.2.52, protocol row 55): the GET_LINK_STATS counters (returns n), the GET_HEALTH body (96 bytes),
+//one channel's GET_CAL body (PC_CAL_RESP_LEN bytes), the SD_INFO body (112 bytes; ident: identify the card image,
+//MAIN context; returns 0, or 1 without a card). The report: pc_report.h
+#define PC_LINK_COUNTERS  62
+#define PC_HEALTH_LEN     96
+#define PC_CAL_RESP_LEN   356     //72 bytes up to 1.9, 248 in 1.10-1.11 (v2), 256 in 1.12-1.13 (v3), 288 in 1.14-1.15 (v4)
+#define PC_SD_INFO_LEN    112     //64 before 1.16
+uint32_t pc_link_counters(pc_session *s, uint32_t *v);
+void     pc_health_body(uint8_t *p);
+void     pc_cal_body(int ch, uint8_t *resp);
+int      pc_sd_info_body(pc_session *s, int verify, int ident, uint8_t *resp, uint8_t *scratch, uint32_t scratch_bytes);
 
 //Exposed for tests
 void     pc_variant_from_version(uint16_t version, pc_variant *v);

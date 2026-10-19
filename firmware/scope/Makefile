@@ -69,6 +69,10 @@ SRCS += cal_wiz.c cal_wiz_ui.c
 SRCS += acal_track.c acal_live.c
 # Screens (fw 0.2.51, 0.2.53): cards, main menu, CTRL page and fold-outs (pure C, host_tests/test_ui.c)
 SRCS += ui_fmt.c ui_menu.c ui_ctrl.c ctrl_page.c
+# Plot touch geometry (fw 0.2.54): pointer position, handle and channel pick (pure C, host_tests/test_touch_pick.c)
+SRCS += touch_pick.c
+# fw 0.2.52 diagnostics readers (protocol row 55)
+SRCS += pc_life.c pc_ident.c pc_report.c pc_diag.c
 # Last: the identity data (build_id.c), so its bytes are the only ones a new commit changes.
 SRCS += build_id.c
 PC_DEFS := -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FIFO_MAP=$(PC_FIFO_MAP) \

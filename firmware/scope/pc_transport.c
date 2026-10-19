@@ -114,6 +114,8 @@ static void pc_evlog_add(uint8 type, uint8 a, uint16 b)
     pc_evbus[pc_evbus_n++ & (PC_EVBUS_SIZE - 1)] = *en;
 }
 static volatile uint8  pc_ep2_configured;    //SET_CONFIGURATION set up EP2 since the last bus reset
+static volatile uint32 pc_cfg_ms;            //fw 0.2.52: time of the last SET_CONFIGURATION (GET_HEALTH 12)
+static volatile uint8  pc_cfg_seen;
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // IRQ masking (CPSR I bit), nests safely
@@ -584,6 +586,33 @@ void pc_usb_watch_tick(void)
     *USBC_REG_PCTL |= USBC_BP_POWER_D_SOFT_CONNECT;
 }
 
+//USB link state now (fw 0.2.52, GET_HEALTH 4..15, protocol row 55). VBUS is forced valid (ISCR), so a pulled cable is
+//not visible: after a host enumerated the device it reads as a suspend.
+void pc_hal_usb_state(pc_hw_usb *u)
+{
+  uint32 cpsr = pc_irq_save();
+  uint8  power = *USBC_REG_PCTL;
+
+  u->power = power;
+  u->faddr = *USBC_REG_FADDR;
+  u->flags = (uint8)(((power & USBC_BP_POWER_D_HIGH_SPEED_FLAG) ? PC_USBF_HIGH_SPEED : 0) |
+                     (pc_ep2_configured ? PC_USBF_CONFIGURED : 0) | (pc_uw.susp ? PC_USBF_SUSPENDED : 0) |
+                     (pc_dtr ? PC_USBF_DTR : 0) | ((power & USBC_BP_POWER_D_SOFT_CONNECT) ? PC_USBF_SOFTCONN : 0));
+  u->suspended_ms    = pc_uw.susp ? (pc_hal_ms() - pc_uw.susp_ms) : 0;
+  u->since_config_ms = pc_cfg_seen ? (pc_hal_ms() - pc_cfg_ms) : 0xFFFFFFFFu;
+
+  if(pc_uw.off)
+    u->state = PC_USB_RECONNECTING;
+  else if(!(power & USBC_BP_POWER_D_SOFT_CONNECT))
+    u->state = PC_USB_OFF;
+  else if(!pc_ep2_configured)
+    u->state = PC_USB_UNCONFIGURED;
+  else
+    u->state = pc_uw.susp ? PC_USB_SUSPENDED : PC_USB_CONFIGURED;
+
+  pc_irq_restore(cpsr);
+}
+
 void pc_hal_usb_watch(uint32_t *v)
 {
   v[0] = pc_uw.inferred;
@@ -652,6 +681,8 @@ void pc_usb_log_init_state(void)
 void pc_usb_isr_configured(void)
 {
   pc_ep2_configured = 1;
+  pc_cfg_ms   = pc_hal_ms();
+  pc_cfg_seen = 1;
   pc_evlog_add(PC_EVT_CONFIGURED, 0, 0);
   pc_usbw_configured(&pc_uw);
 }

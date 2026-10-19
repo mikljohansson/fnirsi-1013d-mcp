@@ -588,7 +588,62 @@ def _scope_cal_summary(c: P.CalResp) -> dict[str, Any]:
             "gains_measured_on_range": c.gain_range if measured else None,
             "gain_lever_codes": _r6(c.gain_lever / 16) if measured else None,
             "gains_carried_over": bool(c.gain_flags & 1)}
+    if c.has_tracker:
+        out["tracking"] = _tracker_summary(c)
     return out
+
+
+def _age_text(ms: int) -> str:
+    if ms == P.CAL_AGE_NONE:
+        return "never since the reset"
+    s = ms / 1000
+    return f"{s:.1f} s ago" if s < 120 else f"{s / 60:.1f} min ago" if s < 7200 else f"{s / 3600:.1f} h ago"
+
+
+#: a tracker that has not accepted a record for this long is reported as frozen
+TRACK_FROZEN_S = 60.0
+
+
+def _tracker_summary(c: P.CalResp) -> dict[str, Any]:
+    """GET_CAL bytes 256..287 (protocol 1.15, row 54) in words: the full-rate A - B tracker and the class probe."""
+    f = c.track_flags
+    words = []
+    if not f & P.TRACK_RECORD:
+        state = "idle"
+        words.append("no record accepted since the reset (boot or the last calibration): the stored v3 values alone "
+                     "apply")
+    elif c.track_age_ms != P.CAL_AGE_NONE and c.track_age_ms / 1000 > TRACK_FROZEN_S:
+        state = "frozen"
+        words.append(f"frozen: the last accepted record was {_age_text(c.track_age_ms)}; the values are held")
+    else:
+        state = "tracking"
+        words.append(f"tracking: {c.track_records} records, the last {_age_text(c.track_age_ms)}")
+    if f & P.TRACK_RECORD and not f & P.TRACK_LAST_USABLE:
+        words.append(f"the last offered record was not usable ({c.track_last_pairs} pairs: needs >= 256 samples "
+                     "within 4..251 on gentle slopes; fast edges or energy near fs/2 reject it, as does the scope "
+                     "not running at 200 MSa/s with the filter off)")
+    if f & P.TRACK_RECORD and not f & P.TRACK_E:
+        words.append(f"slope e held: the input's spread of codes is {c.track_spread16 / 16:.1f} RMS (< 8 needed)")
+    if not f & P.TRACK_APPLIES:
+        words.append("not applied to this channel's next 8-bit readout (needs a bound v3 calibration, 200 MSa/s and "
+                     "the filter off at the last arm); cm still applies to full-rate and filtered readouts")
+    if f & P.TRACK_PROBE_DATA:
+        cm = f"common mode {c.track_cm:+.2f} code from {c.cm_probes} probes, the last {_age_text(c.cm_age_ms)}"
+        if not f & P.TRACK_PROBE_VALID:
+            cm += " (the last probe was not valid: the value is held)"
+        words.append(cm)
+    else:
+        words.append("no valid class probe since the reset: cm = 0 (a probe needs a quiet input on this channel, the "
+                     "scope running with no menu open and no host capture in flight)")
+    return {"state": state, "applies_to_next_8bit_readout": bool(f & P.TRACK_APPLIES),
+            "d_codes": _r6(c.track_d), "e": _r6(c.track_e),
+            "q_per_code2": _r6(c.track_q), "q_identified": bool(f & P.TRACK_Q),
+            "e_identified": bool(f & P.TRACK_E), "records": c.track_records,
+            "age_s": None if c.track_age_ms == P.CAL_AGE_NONE else round(c.track_age_ms / 1000, 1),
+            "last_pairs": c.track_last_pairs, "spread_codes": round(c.track_spread16 / 16, 2),
+            "cm_codes": _r6(c.track_cm), "cm_probes": c.cm_probes,
+            "cm_age_s": None if c.cm_age_ms == P.CAL_AGE_NONE else round(c.cm_age_ms / 1000, 1),
+            "in_words": words}
 
 
 def _decim_summary(st: P.DecimState) -> dict[str, Any]:
