@@ -11,7 +11,7 @@
 //   y 426..447  the cards (fw 0.2.56; chosen through MEASURES since 0.2.65, ui_meas.h): peak, level, THD, noise per
 //               channel, RBW, span, centre, the waterfall's time span
 //   y 452..471  the slider: the shown span as a window over the axis 0 .. min(fs/2, 25 MHz) (the Scope's construction);
-//               a drag pans the centre, the span kept
+//               a drag pans the centre, the span kept; fw 0.2.72: the whole axis's spectrum in the track (slider_ov.h)
 // The parameters are on the CTRL page (ctrl_page.c: Display, Analyse); the strip and the header line went in fw 0.2.56.
 // Integer only (no FPU): levels in centi-dB, frequencies in mHz (uint64).
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -34,6 +34,7 @@
 #include "ui_fmt.h"
 #include "ui_meas.h"
 #include "bode_ui.h"
+#include "slider_ov_draw.h"
 
 #include <string.h>
 
@@ -634,8 +635,8 @@ static void spec_draw_freq_labels(const SPECVIEW *v, uint64 bin_mhz)
   }
 }
 
-//fw 0.2.71 (ux-makeover.md "Spectrum slider"): the Scope's slider row (frame 2, 452, 726 x 20; the window a 14 px box at
-//y 455 on the track x 4..723): the shown span as a window over the axis
+//fw 0.2.71 (ux-makeover.md "Spectrum slider"): the Scope's slider row (fw 0.2.72: slider_ov.h, the track x 2..727 and
+//y 453..471, the window its two edge lines): the shown span as a window over the axis
 static void spec_slider_window(const SPECVIEW *v, int32 *x, int32 *w)
 {
   int64 xx = BU_SL_X + ((int64)v->first * BU_SL_W) / v->half, ww = ((int64)v->span * BU_SL_W) / v->half;
@@ -651,14 +652,54 @@ static void spec_slider_window(const SPECVIEW *v, int32 *x, int32 *w)
   *w = (int32)ww;
 }
 
-static void spec_draw_slider(const SPECVIEW *v)
+//fw 0.2.72 (slider-overview.md section 4): the spectrum over the whole axis 0 .. half in the track, from the bins the
+//FFT already computed (no extra FFT): each column the highest bin it covers (the plot's rule), on the plot's ref level and
+//dB/div, joined as a line; dimmed outside the window wx, ww
+static void spec_draw_overview(const SPECVIEW *v, const int16 *db, uint32 full, uint32 dim, int32 wx, int32 ww)
+{
+  int32  c, prev = -1, lo, hi;
+  uint32 k;
+
+  //32-bit maths per column (no divide instruction on the target): half <= 2048
+  for(c = 0; c < SOV_W; c++)
+  {
+    uint32 k0 = ((uint32)c * v->half) / SOV_W, k1 = ((uint32)(c + 1) * v->half) / SOV_W;
+    int32  m = db[k0], r;
+
+    for(k = k0 + 1; k < k1; k++)
+      if(db[k] > m)
+        m = db[k];
+
+    r = sov_row(m, v->top, v->top - PLOT_YDIV * v->cdb_per_div);
+    sov_join(prev, r, &lo, &hi);
+    sov_draw_run(SOV_X + c, lo, hi, full, dim, wx, ww);
+    prev = r;
+  }
+}
+
+static void spec_draw_slider(const SPECVIEW *v, int hch)
 {
   int32 x, w;
+  int   ch;
 
   spec_slider_window(v, &x, &w);
-  display_set_fg_color(WHITE_COLOR);
-  display_draw_rect(BU_SL_FRAME_X, BU_SL_FRAME_Y, BU_SL_FRAME_W, BU_SL_FRAME_H);
-  display_draw_rect((uint32)x, BU_SL_WIN_Y, (uint32)w, BU_SL_WIN_H);
+  sov_draw_row();
+
+  //Nothing while waiting for a record at a new rate: the spectrum held belongs to the old axis
+  if(!spec.wait)
+  {
+    if(spec.view == VIEW_SPECTRUM)
+    {
+      //As shown (averaged or held), CH2 first so CH1 is on top
+      for(ch = 1; ch >= 0; ch--)
+        if(spec.have[ch])
+          spec_draw_overview(v, spec_db[ch], ch ? CHANNEL2_COLOR : CHANNEL1_COLOR, ch ? SOV_CH2_DIM : SOV_CH1_DIM, x, w);
+    }
+    else if(spec.have[hch])
+      spec_draw_overview(v, spec_raw[hch], hch ? CHANNEL2_COLOR : CHANNEL1_COLOR, hch ? SOV_CH2_DIM : SOV_CH1_DIM, x, w);
+  }
+
+  sov_draw_window(x, w);
 }
 
 //The trace of one channel; returns the bin of its highest level in the span (DC bins skipped)
@@ -1450,7 +1491,7 @@ static int spectrum_display_body(void)
   }
 
   spec_draw_cards(&v, peak, hch, bin_mhz);
-  spec_draw_slider(&v);
+  spec_draw_slider(&v, hch);
 
   display_set_source_buffer(displaybuffertmp);
   display_set_screen_buffer((uint16 *)maindisplaybuffer);
