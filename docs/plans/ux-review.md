@@ -19,6 +19,17 @@ well, but they still overflow at the device's font widths, show values that need
 verdicts between pages. The worst functional gap is calibration: "Clear calibration" also wipes the volts-per-range
 factors, and nothing in the new flow restores them.
 
+## 0. Status after the plan correction (2026-10-19 afternoon)
+
+The owner rewrote `ux-makeover.md` sections 3-4 and added 6a while this review was written: the top bar (minus the
+version string), the right bar and both CTRL pages stay as today in Scope; the strips stay in the slider row without
+their Scope field and the spectrum's Auto (AUTO SET runs it); measurement cards stay; Phosphor and X-Y become a Display
+box in the ACQ dropdown; the wizard becomes four screens without Skip. Findings about the first boards' right bar,
+CTRL page, bottom row and strips are marked **Superseded** below and kept so the reasoning stays visible. Resolved by
+the correction: L1, L3, L4, L5, L6, L12, L16, L17, L21, L23, I2, the right-bar rows of 2.2-2.4 and section 3, and
+decisions D1-D5, D8 and D13. Still open: L2, L7-L11, L13-L15, L18-L20, L22, L24, I1, I3-I5, the diagnostics rows of
+2.2-2.4, and the new findings N2-N7 in section 2.5 (N1 is resolved by revision 3 of the boards).
+
 ## 1. Lost functions
 
 Every control, readout, gesture or screen that exists today and has no place in the boards or the plan, worst first.
@@ -27,29 +38,29 @@ affected by the new layout.
 
 | # | Today (where) | What it does | In the boards / plan | Where it should go, or why it can go |
 |---|---|---|---|---|
-| L1 | CTRL page: CH1 V+ / V-, CH2 V+ / V- (`scope_setup_right_control_menu` state 1, `scope_channel_sensitivity_control`; touch in `handle_right_volts_div_menu_touch`, y 93-155, 178-238, 258-320, 343-403) | One-tap V/div change per channel without opening a menu; the reason CTRL exists in 1.00o5 | Gone. ScopeCtrl's eight slots are all parameters | Keep on the Scope CTRL page (D2). For a stock user this is the most used button pair after RUN/STOP |
+| L1 | CTRL page: CH1 V+ / V-, CH2 V+ / V- (`scope_setup_right_control_menu` state 1, `scope_channel_sensitivity_control`; touch in `handle_right_volts_div_menu_touch`, y 93-155, 178-238, 258-320, 343-403) | One-tap V/div change per channel without opening a menu; the reason CTRL exists in 1.00o5 | Gone. ScopeCtrl's eight slots are all parameters | **Superseded** (plan section 3 keeps it as today). Was: Keep on the Scope CTRL page (D2). For a stock user this is the most used button pair after RUN/STOP  |
 | L2 | Volts-per-range ("input divider") calibration with an external DC source: "Set 300mV DC and press OK" .. "Set 15V DC" (`menu.c` `scope_show_Input_calibration` .. `scope_show_calibrating_15V_text`; started after the wizard when `calibrationfail`, `statemachine.c` "if(cal_wizard_run() && calibrationfail)") | Sets `input_calibration[]`, the volts factor per range. Due when sector 708 did not load (`scope_load_input_calibration_data`, default branch) and after RESET | No board. Wizard1-3 have three steps; FirstRun says calibration "takes about two minutes and needs both probes and the calibration post" | A fourth wizard step, shown only when due, that says it needs an adjustable DC source up to 15 V; and Clear calibration stops resetting the volts factors (I1) |
-| L3 | Record-position slider under the grid, y 452-472 (`scope_draw_grid`, `kurzor_position` window of 181 or 223 px) | Shows which part of the record is on screen; follows the trigger point drag | The bottom row at y 453-477 now holds measurements | Keep it. The phosphor strip reuses that row today (`scope_functions.c` "the phosphor strip over the grid's record-position slider"); once the strips move to the CTRL page the row is the slider's again |
-| L4 | Measurement tiles: up to 12 per channel, CH1 block and CH2 block at x 366, 3 per row, rows growing upward from y 426 (`scope_display_channel_measurements`); source per channel = the channel or REF1-4 / REF5-8; per-channel Hide (`scope_open_measures_menu`) | Up to 24 simultaneous readouts, of live or reference traces | The bottom row shows 4 values of CH1 in one line; no CH2, no REF source, no Hide | Keep the tiles in the plot as today. One line holds about 6 values of one channel at the drawn spacing, so it cannot replace them |
-| L5 | Move fast / slow, top bar x 496 (`scope_move_speed`; touch in `scan_for_touch`, MOVE_FAST range) | Drag speed of traces, cursors and levels, toggled while positioning | Plan: Settings, Controls, "move speed". Settings board: no such row. Top bar: the slot x 491-546 is left empty | Keep it in the top bar where the boards leave its slot empty. It is toggled mid-drag; three taps deep it is useless (D5) |
-| L6 | Waveform viewer mode of the scope screen: Next wave / Prev wave / Delete wave in the RUN, AUTO and SAVE WAVE slots, Show grid on the CTRL page, MENU turned into a return arrow (`scope_setup_right_control_menu` waveviewmode branches, `scope_main_return_button`) | Browsing saved waveforms with the live-scope controls | No board. The new order puts RUN in slot 1 and Save waveform in slot 7, so the viewer's substitutions land elsewhere | Draw the viewer's bar (D8). Recommendation: today's substitutions in today's slots |
+| L3 | Record-position slider under the grid, y 452-472 (`scope_draw_grid`, `kurzor_position` window of 181 or 223 px) | Shows which part of the record is on screen; follows the trigger point drag | The bottom row at y 453-477 now holds measurements | **Superseded** (plan section 3 keeps it as today). Was: Keep it. The phosphor strip reuses that row today (`scope_functions.c` "the phosphor strip over the grid's record-position slider"); once the strips move to the CTRL page the row is the slider's again  |
+| L4 | Measurement tiles: up to 12 per channel, CH1 block and CH2 block at x 366, 3 per row, rows growing upward from y 426 (`scope_display_channel_measurements`); source per channel = the channel or REF1-4 / REF5-8; per-channel Hide (`scope_open_measures_menu`) | Up to 24 simultaneous readouts, of live or reference traces | The bottom row shows 4 values of CH1 in one line; no CH2, no REF source, no Hide | **Superseded** (plan section 3 keeps it as today). Was: Keep the tiles in the plot as today. One line holds about 6 values of one channel at the drawn spacing, so it cannot replace them  |
+| L5 | Move fast / slow, top bar x 496 (`scope_move_speed`; touch in `scan_for_touch`, MOVE_FAST range) | Drag speed of traces, cursors and levels, toggled while positioning | Plan: Settings, Controls, "move speed". Settings board: no such row. Top bar: the slot x 491-546 is left empty | **Superseded** (plan section 3 keeps it as today). Was: Keep it in the top bar where the boards leave its slot empty. It is toggled mid-drag; three taps deep it is useless (D5)  |
+| L6 | Waveform viewer mode of the scope screen: Next wave / Prev wave / Delete wave in the RUN, AUTO and SAVE WAVE slots, Show grid on the CTRL page, MENU turned into a return arrow (`scope_setup_right_control_menu` waveviewmode branches, `scope_main_return_button`) | Browsing saved waveforms with the live-scope controls | No board. The new order puts RUN in slot 1 and Save waveform in slot 7, so the viewer's substitutions land elsewhere | **Superseded** (plan section 3 keeps it as today). Was: Draw the viewer's bar (D8). Recommendation: today's substitutions in today's slots  |
 | L7 | File browser right bar: Return, Select all, Select, Delete, Page up, Page down (`scope_setup_right_file_menu`); item view bottom bar: return, delete, previous, next, file name or RTC stamp (`scope_setup_bottom_file_menu`); "Confirm to delete?" NO / YES (`handle_confirm_delete`) | Managing saved pictures and waveforms | No board; the plan only renames the rows | Keep, but bring "Confirm to delete?" to the new confirmation pattern: its NO and YES are 74 x 50 px, 11 px apart |
 | L8 | DC shift calibration pages (Other settings "DC shift calibration" on, then CTRL: right bar states 2-4 show centre, size and value per channel, V+/V- adjust them, "Next page", "END cal." saves through `scope_save_input_calibration_data`) | Manual trim of the trace offset scaling while watching the live trace | Plan and Calibration board: a "DC shift trim" button on the Diagnostics Calibration page | The trim needs the live trace. Launch it from Diagnostics but run it on the scope screen, as today |
 | L9 | Calibration v4 tracking lines in today's diagnostics: "Track d .. e .. q .. age" and "Class cm .. (n) age" per channel (`menu.c` `scope_diagnostic_v4`; README 6.5 "Readout") | The live A-B and common-mode corrections of fw 0.2.50 | The Calibration board has none. The previous review said not to draw tracking "until it exists"; it exists since 0.2.50 | One line per channel on the Calibration page, in words: "Tracking: A-B +0.12 code, slope +0.31 %, 3 s ago" |
 | L10 | Phosphor in X-Y (README "Phosphor view": "XY mode works the same way with one map") | Graded X-Y persistence | ScopeCtrl's Display cycles Trace / Phosphor / X-Y, so phosphor X-Y is no longer reachable | X-Y as its own toggle beside Display, or a fourth Display value (D7) |
 | L11 | RTC On/Off (`scope_system_settings_ONOFF_RTC_item`, touch y 405-470 of the RTC menu) | Shows the clock in the top bar; stamps file names and FAT times | Neither the fold-out nor the Settings screen has it | Settings, Clock: "Show clock and stamp files: on / off" |
-| L12 | RTC clock in the top bar at x 123, y 3 (`fnirsi_1013d_scope.c` "READ and show RTC time"; the MCP chip borrows the slot while a host is connected, `pc_hal_scope.c` `pc_draw_chip_into`) | Time of day | The plan's top-bar list omits it; the boards show only MCP | Keep the shared slot and say so in the plan |
+| L12 | RTC clock in the top bar at x 123, y 3 (`fnirsi_1013d_scope.c` "READ and show RTC time"; the MCP chip borrows the slot while a host is connected, `pc_hal_scope.c` `pc_draw_chip_into`) | Time of day | The plan's top-bar list omits it; the boards show only MCP | **Superseded** (plan section 3 keeps it as today). Was: Keep the shared slot and say so in the plan  |
 | L13 | RTC editor: hour, minute, day, month, year with < > buttons (RTC menu) | Setting the clock | Fold-out and Settings show a "Time and date" row; no editor board | Keep today's editor; the plan should say the row opens it |
 | L14 | Dev mode (Other settings): "DEV mode" at 670,50, trigger position values, raw trigger address over the top bar at 500,10 (`scope_functions.c`), touch coordinates in the generator and keypad menus (`scope_test_TP`); it also lets a stock or FEL "Default start" skip the boot menu (`statemachine.c` `close_open_menus`: "if (dev_mode == 0) ... boot_menu_start \|= 0x04") | Developer overlay, and an unguarded boot path | Settings board: "Developer options (FEL start, debug overlay): Diagnostics, Log page." The Log board has nothing of the kind | Draw the developer page or record that the overlay is dropped; the boot side effect is D11 |
 | L15 | Default start = FEL (sector 710) | Bench loop without the boot menu | Plan: "FEL only in a developer section"; no board has one | The developer page of L14, with a confirmation saying the next power-on shows a black screen until a PC runs sunxi-fel |
-| L16 | ACQ tab state: orange tab and "Long" in roll mode, "avg" with averaging (`scope_acqusition_settings`) | Roll and averaging visible from any page | A plain green "ACQ" tab; Roll and Average show only on the CTRL page | Keep the tab marks; roll changes everything on the screen and must be visible on the actions page |
-| L17 | Battery percentage inside the icon when not charging (`scope_battery_status`, `display_decimal(708, 4, level*5)`) | Charge level as a number | The icon only | Keep, or drop on purpose; the previous review called the scale coarse, so dropping is defensible |
+| L16 | ACQ tab state: orange tab and "Long" in roll mode, "avg" with averaging (`scope_acqusition_settings`) | Roll and averaging visible from any page | A plain green "ACQ" tab; Roll and Average show only on the CTRL page | **Superseded** (plan section 3 keeps it as today). Was: Keep the tab marks; roll changes everything on the screen and must be visible on the actions page  |
+| L17 | Battery percentage inside the icon when not charging (`scope_battery_status`, `display_decimal(708, 4, level*5)`) | Charge level as a number | The icon only | **Superseded** (plan section 3 keeps it as today). Was: Keep, or drop on purpose; the previous review called the scale coarse, so dropping is defensible  |
 | L18 | Touch test "Xtouch / Ytouch" on today's diagnostics (`scope_open_diagnostic_view`) | Checking the GT911 mapping | On no Diagnostics page | The developer page of L14, or drop |
 | L19 | USB screen: leave by tapping the scope picture (x 90-250, y 210-320); refusal "Not allowed! Please unmount disk in PC first!" while mounted (`scope_setup_usb_screen`, `scope_display_error`) | Safe exit from mass storage | UsbDrive board: an Exit button bottom right, no refused state | Keep and draw the refusal ("Eject the drive on the PC first"); keep the picture tappable for one release |
 | L20 | Restore screen state "Need input calibration procedure !" (`scope_setup_restore_screen`, `calibrationfail`) | Says the volts factors are defaults | FirstRun has one "Calibration missing" line | FirstRun says when the DC-source step (L2) will be needed |
-| L21 | Spectrum strip Ref level: left half of the field steps down, right half up (README "Spectrum view" field table) | Two-way ref level over -100..+60 dBV | A 62 px "Ref level" button; the boards do not say how it goes down | Halves of 62 px are 31 px targets: give it an up/down pop-up, or a drag on the dB axis |
+| L21 | Spectrum strip Ref level: left half of the field steps down, right half up (README "Spectrum view" field table) | Two-way ref level over -100..+60 dBV | A 62 px "Ref level" button; the boards do not say how it goes down | **Superseded** (plan section 3 keeps it as today). Was: Halves of 62 px are 31 px targets: give it an up/down pop-up, or a drag on the dB axis  |
 | L22 | Spectrum span: tap left/right of the plot centre zooms, drag pans (README "Gestures on the plot") | The only span control | Plan section 3 names "the spectrum's Span" as if it were a control; no board has one | Keep the gestures and say in the plan that span has no button, or add Span to the CTRL page |
-| L23 | Pass time "pass NN ms" under the acquisition menu's Memory header (README "Pass time in the acquisition menu") | The cost of a memory depth, where it is chosen | ScopeCtrl duplicates Memory depth without it | Memory depth in the ACQ menu only (D2), or the pass time on the button |
+| L23 | Pass time "pass NN ms" under the acquisition menu's Memory header (README "Pass time in the acquisition menu") | The cost of a memory depth, where it is chosen | ScopeCtrl duplicates Memory depth without it | **Superseded** (plan section 3 keeps it as today). Was: Memory depth in the ACQ menu only (D2), or the pass time on the button  |
 | L24 | Hidden but live touch areas on today's diagnostics: New autosetup, DC shift calibration, Boot menu, Default start, Lock move cursors at x 328-378, y 30-220 (`handle_diagnostic_view_touch`; their drawing is commented out) | A blind tap changes the boot mode | Not in the boards (correct) | The main-loop rewrite must not carry these hit areas over; until then they are a hazard on today's screen |
 
 Kept implicitly (the plan says these stay in their menus; no board shows them): the channel menu (Open CH, Invert,
@@ -76,7 +87,7 @@ external DC procedure (L2), which most owners cannot run. Change: Clear calibrat
 centres and keeps the volts factors; if it must clear them, the confirmation says "The volts-per-range factors also
 return to defaults. Restoring them needs an adjustable DC supply up to 15 V."
 
-**I2. The right bar contradicts the plan's first paragraph.** Plan: "positions of the top bar, right bar and plot stay
+**I2. Superseded (plan section 3 keeps the right bar). The right bar contradicted the plan's first paragraph.** Plan: "positions of the top bar, right bar and plot stay
 as stock users know them". Today: 8 slots of 51 x 50 px at a 60 px pitch, CTRL at the top (y 5), then RUN/STOP 65,
 AUTO SET 125, T CURSOR 185, V CURSOR 245, MEASURES 305, SAVE PIC 365, SAVE WAVE 425 (`menu.c` button functions). Boards:
 9 slots of 62 x 48 px at a 53 px pitch, CTRL at the bottom (y 428), RUN/STOP 4, AUTO 57, Time cursors 110, Volt cursors
@@ -115,24 +126,24 @@ drop the rule; with dev mode removed (plan section 5) the rule alone decides it.
 | Status, "Cores agree 0.2 code at 0 V", updating once a second | The wizard computes the zero step's worst A-B at calibration time (README 6.4); the docs do not say the block stores it; nothing measures it live at 0 V | Label it "at calibration" and store it, or show the v4 tracker's d with its age |
 | Calibration, Undo last calibration and Check on post; Status and Log, Save report to card; Log, restart record "keeps them on the card through a power cycle" | Readers 8, 7, an SD text writer and reader 5; none exists | Mark as new work |
 | Scope, warning "CH1 overrange: increase V/div" and Vpp "clipped" | README documents overrange warnings only for the spectrum and phosphor views; the scope view has no warning line and the measurement code no clipped state (`scope_display_vpp`) | New feature; say so in plan step 2 |
-| Spectrum, Marker "peak", dB cursor, "Save spectrum" (CSV) | The peak triangle is always drawn (`spectrum.c` `spec_glyph_marker`); there is no spectrum cursor and no CSV writer (the only "csv" in the tree is a commented-out call in `menu.c`) | Per the plan's own rule ("a slot a mode cannot use stays empty"), leave these slots empty until built |
-| Scope and Spectrum, Grid button | Grid on/off exists only in the waveform viewer (`scope_draw_grid` is skipped only when `waveviewmode` and not `gridenable`); the live view always draws it, grid brightness 0 hides it | New function; drop it and free the ninth slot (D1) |
+| **Superseded** by the corrected plan. Spectrum, Marker "peak", dB cursor, "Save spectrum" (CSV); the plan now hides those slots until the features exist | The peak triangle is always drawn (`spectrum.c` `spec_glyph_marker`); there is no spectrum cursor and no CSV writer (the only "csv" in the tree is a commented-out call in `menu.c`) | Per the plan's own rule ("a slot a mode cannot use stays empty"), leave these slots empty until built |
+| **Superseded** by the corrected plan. Scope and Spectrum, Grid button (GRID stays a viewer-only button) | Grid on/off exists only in the waveform viewer (`scope_draw_grid` is skipped only when `waveviewmode` and not `gridenable`); the live view always draws it, grid brightness 0 hides it | New function; drop it and free the ninth slot (D1) |
 | FirstRun, "An amber Uncalibrated chip stays in the top bar" | No board shows where; the top bar's only free space is the Move fast slot | Place it or drop the sentence |
 | Spectrum, ACQ "500KSa/s 200us/div" with "RBW 146 Hz" and a 0-100 kHz axis | RBW = 1.5 fs / N (README "Auto" step 4): 146 Hz at N 2048 is about 200 kSa/s; 500 kSa/s would show 0-250 kHz at full span | Fix the sample data; the canvas note says "ACQ shows the rate the span chose" |
 
 ### 2.3 Severity 2: contradictions between boards and with the plan
 
-- **Phosphor parameters.** Plan section 4: "Phosphor variant adds to Scope CTRL" Persistence, Palette and Clear in
+- **Superseded** by the corrected plan. **Phosphor parameters.** Plan section 4: "Phosphor variant adds to Scope CTRL" Persistence, Palette and Clear in
   rows 1-3, and "each slot keeps its place and meaning across modes". ScopeCtrlPhosphor instead replaces Roll (slot 4)
   with Persist and Trace style (slot 5) with Palette, and puts Clear in slot 8. The board's choice is the sensible one
   (roll mode and the Trace selector do not apply in phosphor: README "Phosphor view"); fix the plan's table.
-- **Variant selector slot.** Scope's variant (Display) is CTRL slot 1, Spectrum's (View) slot 7; Average is slot 3 in
+- **Superseded** by the corrected plan. **Variant selector slot.** Scope's variant (Display) is CTRL slot 1, Spectrum's (View) slot 7; Average is slot 3 in
   Scope and slot 6 in Spectrum. That breaks the plan's slot rule. Put View in slot 1 and Average in slot 3 of
   SpectrumCtrl.
-- **50 % trigger.** Plan section 3 lists "trigger 50 %" on the actions page; the section 4 table and the boards put it
+- **Superseded** by the corrected plan. **50 % trigger.** Plan section 3 lists "trigger 50 %" on the actions page; the section 4 table and the boards put it
   on CTRL slot 7. Today it is on the CTRL page at y 425 (`scope_50_percent_trigger_button`). Keep it on CTRL and fix
   section 3.
-- **wfm/s.** Plan section 3: "readouts such as wfm/s stay with the parameters". ScopeCtrlPhosphor draws "66 wfm/s" in
+- **Superseded** by the corrected plan. **wfm/s.** Plan section 3: "readouts such as wfm/s stay with the parameters". ScopeCtrlPhosphor draws "66 wfm/s" in
   the bottom row at x 652, where CH2's measurements would go.
 - **Warnings against the spectrum header.** The Scope warning sits at x 122-602, y 62-88. The spectrum's header line
   is at y 50 and 18 px tall. With warnings top-middle in every mode they overlap the header in the spectrum
@@ -147,7 +158,7 @@ drop the rule; with dev mode removed (plan section 5) the rule alone decides it.
   previous review's 1 % limit and not marked. CH1's "1.3 % full" is also above that limit, and Wizard3 reports the
   same 1.3 % as a success. README 6.4 defines the wizard's gain number as the full-class |G_A / G_B - 1| before
   correction, so either the Calibration page's word "corrected" is wrong or the number is a different quantity (D14).
-- **Wizard boards against the implemented wizard.** README 6.4 (fw 0.2.50): full screen, grey frame 10,10,780,460,
+- **Superseded** by the corrected plan. Section 6a redefines the wizard; N3 has what remains. **Wizard boards against the implemented wizard.** README 6.4 (fw 0.2.50): full screen, grey frame 10,10,780,460,
   buttons 150 x 52 at y 400 (Cancel x 30, Skip x 230, Retry x 430, main action x 620); step 1 offers Skip when a bound
   block exists and shows an orange USB warning; step 2's no-signal state offers Retry / Skip / Cancel, no Measure.
   Wizard1-3 draw a 650 x 420 panel over a live-looking scope (top bar, warning and right bar visible) with buttons at
@@ -178,47 +189,90 @@ boards is line-breaking work the boards hide.
 | Status, provenance line (113 characters) | 754 px | 757 px | Shorten |
 | Calibration, column header "Zero A / B gated" | 92 px column | 107 px | "Zero gated" with "A / B" as a sub-header |
 | Calibration, "0.13 gated, 2.1 full Check (limits 0.3 / 1.0)", "centre 870, size 100, value 59136 (model inputs)", "range 2, lever 88 codes, both levels seen" | 236 px | 275-322 px | Two lines each, or shorter words |
-| ScopeCtrl / SpectrumCtrl values in font_3, today's right-bar font (`scope_control_button`): "10 dB/div", "Ref level", "Waterfall", "CH1 + CH2" (firmware text, `spectrum.c`) | 62 px button with a 1 px border and rounded corners | 64 px | font_2 and short forms: "10dB", "Ref", "Wfall", "1+2" |
-| The same values in font_2, as drawn | 62 px | 60 px | Fits with no margin; acceptable only without the border |
+| **Superseded** by the corrected plan. ScopeCtrl / SpectrumCtrl values in font_3, today's right-bar font (`scope_control_button`): "10 dB/div", "Ref level", "Waterfall", "CH1 + CH2" (firmware text, `spectrum.c`) | 62 px button with a 1 px border and rounded corners | 64 px | font_2 and short forms: "10dB", "Ref", "Wfall", "1+2" |
+| **Superseded** by the corrected plan. The same values in font_2, as drawn | 62 px | 60 px | Fits with no margin; acceptable only without the border |
 | Main menu, "Spectrum analyser" with today's row icon (label at x 60, `scope_main_menu_*`) | 147 px column | about 181 px | The board drops the icons; if they stay, two lines as today |
 
 Checked and inside their boxes: the Scope top bar, the main menu rows without icons, the fold-out, the Settings rows
 (2 x 358 px), the Wizard texts, Confirm, FirstRun and UsbDrive.
 
+### 2.5 New findings against the corrected plan
+
+**N1. The Display box does not fit the ACQ dropdown as drawn today.** The dropdown is 380 x 386 px at x 250
+(`variables.h` ACQ_MENU_*). Its left part holds the sample-rate grid (y 8-155), a row of three 90 x 40 boxes at y 163
+(Roll, Average, Filter; `scope_open_acquisition_menu`) and the time-per-division grid from y 216. Its right column
+(x 315-369) holds Memory (from y 33, 36 px pitch) and Trace (y 241-374, four 54 x 25 boxes;
+`scope_acquisition_trace_select`). There is no free 54 px column and no free 90 x 40 box for a three-value Display
+selector (inference from those coordinates). Options: widen the dropdown by one 64 px column (it can grow to x 730),
+or make Display a fourth box in the y 163 row by narrowing the three boxes to 68 px (font_3 "Average" is 50 px).
+Revision 3 of the boards (AcqMenu) takes the first option: the box is 464 px wide (x 250-714, clear of the right bar
+at 730) with a Display column of three 68 x 44 boxes at x 638. That fits. The firmware change is ACQ_MENU_WIDTH plus
+the screen save/restore and touch area it sizes, and the column's touch handling in `handle_acquisition_menu_touch`.
+
+**N7. AcqMenu (revision 3) shows memory depths the firmware hides in that state.** It draws Filter = CIC2+FIR and
+offers 9000, 12000 and 15000 under Memory. With the Filter on, those depths are hidden because the 16-bit layout holds
+at most 8190 samples (README "Removed and hidden menu options"). Draw the board with them hidden, or with the Filter
+off.
+
+**N2. Display = Trace / Phosphor / X-Y still loses phosphor X-Y (L10), and roll mode needs a rule.** Phosphor works in
+X-Y today (README "Phosphor view"). Roll mode excludes phosphor and the spectrum (README "Removed and hidden menu
+options"). With Display and Roll in the same dropdown, the plan must say what Roll on does while Display is Phosphor.
+Recommendation: Roll on sets Display to Trace and hides the Phosphor value, per the hide-what-cannot-work rule.
+
+**N3. Wizard section 6a without Skip blocks units it cannot fully calibrate.** fw 0.2.50's step 2 on a non-AL3
+bitstream says "The gain step needs the AL3 FPGA: gains kept." and goes on (README 6.4); the stock bitstream 0x1432
+has no generator to hold post levels (commands 0x50-0x52). Section 6a has no Skip and no such branch, so a public user
+on the stock bitstream can only Cancel and never saves even the zero step. Change: without the generator, screens 2
+and 3 become one line "Gain needs the AL3 FPGA: earlier gains kept" with Continue. Section 6a still has no
+volts-per-range step either (L2, I1, I3).
+
+**N4. Plan section 5 still lists "move speed" under Settings, Controls** while section 3 keeps Move fast in the top
+bar. Give it one home: the top bar.
+
+**N5. Plan section 5 still says "confirmation prompts"** for the file-message timeout (I4), and still removes Dev mode
+without saying what replaces the boot-menu rule that depends on it (I5, L14).
+
+**N6. Plan section 4 ("Only these" visible changes) is incomplete.** Not listed: Diagnostics as a main-loop screen
+with three pages, what Clear calibration clears (I1), the new wizard (6a), "Restore default settings" no longer
+writing the boot byte, the USB drive screen, and the spectrum's AUTO SET meaning. Each changes what an existing user
+sees or gets.
+
 ## 3. Risky changes for existing users
 
 | Change | Habit that breaks | Worth it? |
 |---|---|---|
-| CTRL from the top slot to the bottom, every action shifted up | A habit tap on CTRL (y 5-55) now hits RUN/STOP and stops the acquisition; a tap on RUN/STOP (y 65-115) now hits AUTO (y 57-105) and runs auto setup, which throws away V/div, time base and trigger; SAVE PIC (y 365-415) lands on Save waveform or Grid | **No.** The two worst outcomes are destructive and silent. Keep today's eight slots, pitch and order (D1) |
-| CH1/CH2 V+/V- removed from CTRL | A V/div change needs the channel menu: 3 taps instead of 1 | **No** (L1) |
-| 50 % TRIG from y 425 to y 322 | A habit tap lands on Memory depth or Trace style | No; with D1 it stays at slot 8 |
-| ACQ-menu items duplicated on the CTRL page (Filter, Average, Roll, Trace style, Memory depth) | Two homes for one setting; the spectrum warning "Aliasing possible: set Acquisition > Filter" names one of them | Only if the ACQ menu loses them; otherwise no (D2) |
+| **Superseded** by the corrected plan. CTRL from the top slot to the bottom, every action shifted up | A habit tap on CTRL (y 5-55) now hits RUN/STOP and stops the acquisition; a tap on RUN/STOP (y 65-115) now hits AUTO (y 57-105) and runs auto setup, which throws away V/div, time base and trigger; SAVE PIC (y 365-415) lands on Save waveform or Grid | **No.** The two worst outcomes are destructive and silent. Keep today's eight slots, pitch and order (D1) |
+| **Superseded** by the corrected plan. CH1/CH2 V+/V- removed from CTRL | A V/div change needs the channel menu: 3 taps instead of 1 | **No** (L1) |
+| **Superseded** by the corrected plan. 50 % TRIG from y 425 to y 322 | A habit tap lands on Memory depth or Trace style | No; with D1 it stays at slot 8 |
+| **Superseded** by the corrected plan. ACQ-menu items duplicated on the CTRL page (Filter, Average, Roll, Trace style, Memory depth) | Two homes for one setting; the spectrum warning "Aliasing possible: set Acquisition > Filter" names one of them | Only if the ACQ menu loses them; otherwise no (D2) |
 | Main menu: Spectrum row 1 to 2, Phosphor row removed, Settings row 3 to 5, Picture view 4 to 3, Waveform view 5 to 4 (today `pc_glue_main_menu_items`, `scope_main_menu_*`) | Settings and the viewers move; Diagnostics and USB keep rows 6 and 7 | Yes. A one-time cost, and the risky USB row stays last |
 | Spectrum row hidden in roll mode (README "Removed and hidden menu options") under a fixed new order | Rows below it move up by one, only in roll mode | No: keep the row and leave roll mode on entry (D10) |
 | Phosphor from a menu row to CTRL > Display | One more tap, but reachable from the screen | Yes |
-| Spectrum fields from the strip to the CTRL page | One more tap (CTRL) per change; the plot gains the strip's row | Yes |
-| Move fast out of the top bar | The speed toggle mid-drag becomes unreachable | **No** (L5) |
+| **Superseded** by the corrected plan. Spectrum fields from the strip to the CTRL page | One more tap (CTRL) per change; the plot gains the strip's row | Yes |
+| **Superseded** by the corrected plan. Move fast out of the top bar | The speed toggle mid-drag becomes unreachable | **No** (L5) |
 | Fold-out: Baseline calibration and X-Y mode leave, Other settings moves to the last row | Calibrate becomes Menu > Diagnostics > Calibrate, the same tap count | Yes, with Other settings kept at row 3 |
 | USB drive exit from the picture to a button at bottom right | The first exit attempt misses | Yes, if the picture stays tappable for a release |
+| Spectrum: AUTO SET runs the spectrum Auto; T CURSOR, V CURSOR, MEASURES and SAVE WAVE hidden (plan section 3) | Today AUTO SET in the spectrum view runs the scope auto setup (1.00o5 right column, README "Spectrum view"); a user who relied on that loses it there | Yes: one Auto per screen, and the hidden slots keep their places |
+| X-Y from System settings and Phosphor from the main menu to a Display box in ACQ | X-Y users look in the fold-out, phosphor users in the menu | Yes, if N1 and N2 are solved |
 | "Notification confirmation" renamed "Confirmation prompts" | Users switch it off to silence messages and believe they switched off safety prompts, or the reverse | **No**, rename (I4) |
-| Measurements from in-plot tiles to a one-line bottom row | CH2 and REF measurements and anything beyond about 6 values disappear | **No** (L4) |
+| **Superseded** by the corrected plan. Measurements from in-plot tiles to a one-line bottom row | CH2 and REF measurements and anything beyond about 6 values disappear | **No** (L4) |
 
 ## 4. Open decisions for the owner
 
-1. **D1 Right bar geometry.** Recommendation: keep today's eight slots at a 60 px pitch with CTRL on top and today's
+1. **Superseded** by the corrected plan. **D1 Right bar geometry.** Recommendation: keep today's eight slots at a 60 px pitch with CTRL on top and today's
    order (CTRL, RUN/STOP, AUTO, T cursor, V cursor, Measures, Save picture, Save waveform), drop the live Grid button,
    and map the spectrum's analogues onto the same slots.
-2. **D2 What the Scope CTRL page holds.** Recommendation: CH1 V+/V-, CH2 V+/V- and 50 % trigger as today, plus Display
+2. **Superseded** by the corrected plan. **D2 What the Scope CTRL page holds.** Recommendation: CH1 V+/V-, CH2 V+/V- and 50 % trigger as today, plus Display
    in the remaining slot; Filter, Average, Roll, Trace style and Memory depth stay only in the ACQ menu with its pass
    time, so no setting has two homes.
-3. **D3 Phosphor parameters without free Scope CTRL slots** (follows from D2). Recommendation: keep a one-line
+3. **Superseded** by the corrected plan. **D3 Phosphor parameters without free Scope CTRL slots** (follows from D2). Recommendation: keep a one-line
    phosphor strip in the slider row while phosphor is on, which today's users already know.
-4. **D4 Measurements.** Recommendation: keep today's tiles in the plot and the record-position slider under it.
-5. **D5 Move fast.** Recommendation: keep it in the top-bar slot at x 496 that the boards already leave empty.
+4. **Superseded** by the corrected plan. **D4 Measurements.** Recommendation: keep today's tiles in the plot and the record-position slider under it.
+5. **Superseded** by the corrected plan. **D5 Move fast.** Recommendation: keep it in the top-bar slot at x 496 that the boards already leave empty.
 6. **D6 What Clear calibration clears.** Recommendation: zeros, gains and the v3 block only, keeping the volts
    factors, and a DC-source step in the wizard for units where `calibrationfail` is set.
 7. **D7 X-Y and phosphor.** Recommendation: X-Y as its own toggle next to Display, so phosphor X-Y keeps working.
-8. **D8 Waveform viewer bar.** Recommendation: draw a board for it with today's substitutions in today's slots.
+8. **Superseded** by the corrected plan. **D8 Waveform viewer bar.** Recommendation: draw a board for it with today's substitutions in today's slots.
 9. **D9 Visual language of the new screens.** Recommendation: stock palette and bitmap fonts for Diagnostics,
    Settings, Confirm, FirstRun and USB drive, or strike "not a visual redesign" from the plan; do not ship both.
 10. **D10 Spectrum row in roll mode.** Recommendation: always show it and switch roll off on entry with a warning
@@ -228,7 +282,7 @@ Checked and inside their boxes: the Scope top bar, the main menu rows without ic
     confirmation.
 12. **D12 Bode row.** Eight rows of 59 px need 472 px below y 46; 434 px are there. Recommendation: decide now to
     shrink the rows to 54 px when Bode ships, so the rows move once, not twice.
-13. **D13 Spectrum actions that do not exist (Marker, dB cursor, Save spectrum).** Recommendation: draw the slots empty
+13. **Superseded** by the corrected plan. **D13 Spectrum actions that do not exist (Marker, dB cursor, Save spectrum).** Recommendation: draw the slots empty
     until each feature is built, per the plan's own rule.
 14. **D14 Which calibration quantity and limit each page shows.** Recommendation: one table of quantities (mismatch
     measured at calibration, residual after correction, live tracker value) with one limit each, used by the wizard
