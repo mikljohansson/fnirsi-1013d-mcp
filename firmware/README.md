@@ -664,7 +664,8 @@ Step 4 of the UX makeover (`docs/plans/ux-makeover.md` sections 6-6c and 7; rule
 `docs/plans/diagnostics-review.md`). Pure parts in `ui_diag.c` (each page as boxes, texts and buttons built from the
 protocol bodies; host-tested in `host_tests/test_ui_diag.c` with the real 13, 16 and 24 px fonts), drawing and dialogs in
 `ui_dlg.c`, the display mode and the actions in `ui_diag_view.c`. The full-screen pages keep the mockups' look: black
-ground, outlined boxes and buttons, a dark blue header band, the state words in colour (green OK, amber Check, red Fault,
+ground, outlined boxes and buttons, the Settings screen's black header with a grey rule (0.2.59-0.2.62: a dark blue
+band), the state words in colour (green OK, amber Check, red Fault,
 grey not available; the word always next to the colour).
 
 **Diagnostics** (Menu > Diagnostics) is a display mode of the main loop, not a modal screen: the main loop keeps polling
@@ -673,7 +674,8 @@ scope's (no acquisition, no scope touch handling, no clock, no class probe). The
 GET_LINK_STATS and the card image identity and redrawn once a second ("Updates every second"). The scope screen is kept
 in `displaybuffer2`; whatever the PC changes meanwhile (and the MCP chip, the battery icon) is drawn there
 (`ui_diag_scope_buffer`, used by `pc_draw_begin`), so Back returns to the current scope screen. Header: "Diagnostics",
-the page tabs Status, Calibration, Log, Developer (112 x 44 at x 160, 280, 400, 520) and Back (96 x 44 at x 696).
+the page tabs Status, Calibration, Log, Developer (112 x 44 at x 160, 280, 400, 520) and Back (96 x 44 at x 692, where the
+Settings screen has it; x 696 before 0.2.63).
 
 - **Status**: the identity line (fw, git hash, commit time, protocol, USB serial, MMU and caches from the CP15 word), the
   FPGA line (chip, bitstream word and features; amber "FPGA stock bitstream 0x1432: no generator, no filter; gain
@@ -696,7 +698,8 @@ the page tabs Status, Calibration, Log, Developer (112 x 44 at x 160, 280, 400, 
   noise, the v4 tracking ("Tracking A-B +0.12 code, slope +0.31 %, 3 s ago", "Full-rate offset +0.70 code, 4 probes,
   12 s ago", grey until they ran), the DC shift values and whether the 1.00o5 core compensations are in use. Buttons:
   Calibrate, DC shift trim (1.00o5's manual trim of the trace scale, `dc_shift_cal`, not saved: while on, CTRL on the
-  scope opens the trim pages; was in Settings 0.2.55-0.2.56 and Other settings before), Volts calibration (the 1.00o5
+  scope opens the trim pages; was in Settings 0.2.55-0.2.56 and Other settings before; since 0.2.63 the button is green
+  while on, grey while off, with "On: CTRL on the scope opens the trim." beside it only while on), Volts calibration (the 1.00o5
   input-divider calibration as a step dialog: both inputs on one DC supply,
   300 mV, 600 mV, 1.5 V, 3 V, 7.5 V, 15 V, retry on "No reading near ...", Save calibration writes sector 708, Cancel puts
   the factors back; the scope's channel, time base and trigger settings are restored either way), Clear calibration (red;
@@ -708,8 +711,8 @@ the page tabs Status, Calibration, Log, Developer (112 x 44 at x 160, 280, 400, 
   restart (cause, PC, fault status and address, or the record stored by an earlier power-on); SD card (the card image
   against the running one, card size, settings changed or saved); Unit (power-on number, uptime, operating time, how the
   previous power-on ended, settings sector valid at boot). Save report to card.
-- **Developer**: "For firmware work. Normal use needs none of this." Debug overlay (1.00o5's dev mode: "DEV mode",
-  trigger address and touch coordinates; on green / off grey, saved with the settings) and Enter FEL now (confirmation
+- **Developer**: "For firmware work. Normal use needs none of this." The Debug overlay row (1.00o5's dev
+  mode) only while the flag is set, to switch it off (0.2.63; 0.2.59-0.2.62 had an on / off switch), and Enter FEL now (confirmation
   "The scope restarts into the USB boot loader at once. It waits for a PC to load firmware with sunxi-fel. A power cycle
   boots the card as usual.", green Enter FEL; the ENTER_FEL path, `pc_hal_enter_fel`; the boot-mode byte is not written).
 
@@ -751,8 +754,8 @@ Right bar, page two = the CTRL page (CTRL highlighted as before), the same order
 | slot (y) | Scope | Spectrum |
 |---|---|---|
 | 65 | Display, value Normal / X-Y / Phos / XY Ph: fold-out | Display, value Spec / Wfall / Density: fold-out |
-| 125 | Trace style, value Linear / Dots / Peak / Pro: fold-out | Analyse, value the FFT length ("2048 pt"): fold-out |
-| 185 | Grid: a switch (green = grid lines on) | Grid (the plot's dots; the level labels stay) |
+| 125 | Trace style, value Linear / Dots / Peak: fold-out (grey and inert in X-Y since 0.2.63) | Analyse, value the FFT length ("2048 pt"): fold-out |
+| 185 | Grid: the whole button toggles (green = grid lines on, grey = off; 0.2.56-0.2.62 a slide switch) | Grid (the plot's dots; the level labels stay) |
 | 244..325 | V+ / CH1 / V- stepper | the same |
 | 334..415 | V+ / CH2 / V- stepper | the same |
 | 425 | 50 % TRIG | empty |
@@ -772,8 +775,8 @@ at its ends and each half of the row steps that way. The plot under the panel is
 | fold-out | rows |
 |---|---|
 | Display (Scope) | Normal, X-Y (with icons: a clean trace, a Lissajous loop) / a line / Phosphor switch (graded-trace icon; second line the records per second "55 wfm/s", or "Not in roll mode" greyed) and, while it is on, Persistence (0.2 s, 1 s, 5 s, Infinite; a step clears), Palette (Mono, Heat), Clear (clears and closes) |
-| Trace style (Scope) | Linear, Dots, Peak, Pro (1.00o5's `ACQ_trace`, saved as before; it left the acquisition menu) |
-| Display (Spectrum) | Spectrum, Waterfall, Density (icons: bars, colour stripes, graded dots); saved in word 211 |
+| Trace style (Scope) | Linear, Dots, Peak (1.00o5's `ACQ_trace`, saved as before; it left the acquisition menu; Pro removed in 0.2.63) |
+| Display (Spectrum) | Spectrum, Waterfall, Density (icons: bars, colour stripes, graded dots); saved in word 211; in Waterfall and Density a line and Channel (CH1 / CH2, since 0.2.63) |
 | Analyse (Spectrum) | Analyse (CH1, CH2, CH1 + CH2: the shown channel, the dBV / dBA unit and Auto's channel), FFT length, Window, Average / a line / Scale, Ref level (- / +), Reset |
 
 Phosphor is a switch, not a view: it combines with Normal or X-Y (phosphor drawing in X-Y is back after 0.2.51), is
@@ -811,14 +814,13 @@ dialog are drawn and run in `ui_settings_ui.c`; the fold-out is drawn in `menu.c
 from the same table.
 
 Settings fold-out (Menu > Settings), 59 px rows from y 46, contiguous hit areas: Screen brightness and Grid
-brightness (sliders beside the fold-out, as before), File message timeout (1.00o5's "Notification confirmation",
-`confirmationmode`: a tap toggles; the chip reads "tap" when file messages such as "Failed to create file" wait for a
-tap, "0.7 s" when they close by themselves), Time and date (only with a DS3231; opens 1.00o5's editor beside the
-fold-out with hours .. year and RTC On/Off) and Other settings (opens the Settings screen). 295 px high, 236 px
-without a DS3231. (0.2.55-0.2.56 had an interim Baseline calibration row here: fw 0.2.59 moved it to Diagnostics >
+brightness (sliders beside the fold-out, as before; since 0.2.63 a drag that starts on a slider stays with it until the
+finger lifts), Time and date (only with a DS3231; opens 1.00o5's editor beside the fold-out with hours .. year and RTC
+On/Off) and Other settings (opens the Settings screen). 236 px high, 177 px without a DS3231. (0.2.55-0.2.62 also had
+File message timeout here; since 0.2.63 it is in Settings > Controls only.) (0.2.55-0.2.56 had an interim Baseline calibration row here: fw 0.2.59 moved it to Diagnostics >
 Calibrate, together with the 1.00o5 volts-calibration boxes that opened beside the fold-out after the wizard.)
 
-Settings screen (fold-out > Other settings): a modal full-screen page like the menus (the PC protocol answers E_BUSY
+Settings screen (fold-out > Other settings; a header with the title and Back only, since 0.2.63): a modal full-screen page like the menus (the PC protocol answers E_BUSY
 while it is open), black ground, outlined 48 px rows in two columns, the value of each row on its right in the state
 colour (green in use, grey off or not available, amber needs attention). Back (top right) returns to the scope as it
 was. Every row is an existing setting, saved at power-off as before unless noted:
@@ -840,7 +842,7 @@ The start-up row never writes FEL (2) or the updater (3); a byte that holds one 
 which only the loader tool writes) is shown in amber ("FEL, no boot menu", "Boot menu, then FEL", "Updater", "Stock
 firmware, no boot menu") and the next tap sets Open firmware. The stock image is offered only with the boot menu.
 
-Restore default settings (bottom left): asks first ("Restore default settings?" with the consequence: channels,
+Restore default settings (bottom left, no note beside it since 0.2.63): asks first ("Restore default settings?" with the consequence on two full lines: channels,
 trigger, time base, display and these settings go back to their defaults, the calibration and the start-up choice are
 kept). Restore runs `scope_reset_config_data` (sector 709's settings to defaults, the calibration reloaded from sector
 708), sets the hardware up from them as at power-on and rebuilds the scope screen. Since 0.2.55
@@ -862,10 +864,40 @@ Where the controls of 1.00o5's Other settings menu went (the menu is gone):
 | Lock move cursors | Settings > Controls > Cursors |
 | DC shift calibration | Diagnostics > Calibration > DC shift trim (fw 0.2.59; Settings > Calibration in 0.2.55-0.2.56) |
 | USB-Serial mode | removed: the build forces CDC at boot (`PC_FORCE_CDC`), the flag did nothing visible |
-| Dev mode | Diagnostics > Developer > Debug overlay (fw 0.2.59; the flag stays in the settings sector with its effects: trigger address overlay, touch coordinates). Its exception to the boot-menu rule is gone: At power-on writes exactly the chosen value |
+| Dev mode | a developer flag only (fw 0.2.63; Diagnostics > Developer > Debug overlay 0.2.59-0.2.62): stays in the settings sector with its effects (trigger address overlay, touch coordinates); the Developer page offers to switch it off while it is set. Its exception to the boot-menu rule is gone: At power-on writes exactly the chosen value |
 | Add a tag to BMP | Settings > Files > Stamp screenshots with |
 | Load Ref on start | Settings > Files > Reference traces at power-on |
 | RTC On/Off (RTC editor) | still in the editor; also Settings > Clock > Clock |
+
+### Screens: UI polish batch 1 (fw 0.2.63)
+
+The owner's walk-through of 0.2.59 (`docs/plans/task-queue.md` "UI polish batch 1", items a-q). The sections above say
+what each screen does; this is what changed:
+
+- Main menu icons: Settings is a cogwheel (21 x 21 px, drawn pixel by pixel: a ring and eight teeth), Scope one period of
+  a sine wave (25 px, 1 px stroke). The 1.00o5 bitmaps `system_settings_icon` and `confirmation_icon` are gone.
+- CTRL page: Grid is a whole-button toggle (green on, grey off, the word "Grid"). Trace style is grey and does nothing in
+  X-Y (the Lissajous has its own line). The Display fold-out's X-Y icon is a figure 8 leaning right. Trace style offers
+  Linear, Dots, Peak: 1.00o5's Pro drew the per-column minimum and maximum as two outlines without the fill between
+  them; on a normal signal both lie within a pixel and it looked like Linear, on a busy one it showed Peak's band
+  without the fill. A saved 3 loads as Linear.
+- RUN/STOP (right bar) shows the state: green "RUN" while running (a tap stops), amber "Stopped" (13 px font) while
+  stopped (a tap runs); red stays for destructive actions. It is redrawn when the PC starts or stops the acquisition
+  (`pc_hal_ui_set_run`; it stayed green before). The top bar's RUN / WAIT / STOP chip is unchanged.
+- Spectrum Display fold-out, Waterfall and Density: a Channel row (CH1 / CH2) names the channel the history shows; a tap
+  takes the other one (with Analyse CH1 + CH2 both spectra stay computed and the history follows the choice; with a
+  single-channel Analyse, Analyse follows). Grey when the other channel is off. Not saved, like Analyse. One history at
+  a time; both channels' histories at once is a later step.
+- Settings fold-out without File message timeout; the brightness sliders keep a drag until release (a finger drifting
+  off the 58 px slider band closed the fold-out or hit a main-menu row). Settings screen without the header hedge and
+  the note beside Restore; the Restore dialog's two lines fill the dialog's width (test_ui checks no line could take
+  the next word).
+- Diagnostics: the Settings screen's header (black, grey rule, Back at x 692), also on the first-run screen. The
+  battery icon is drawn into the kept scope screen while Diagnostics shows (it was drawn over the page's header).
+  Calibration page: the DC shift trim button is green while on, grey while off; "Needs a DC supply up to 15 V." is gone.
+  Developer page: the Debug overlay switch is gone (the row shows only while the flag is set, to switch it off).
+- Volts calibration step dialog: "Step N of 6" at the right end of the title line; the second line reads "Tap Calibrate.".
+- ACQ menu: the pass time sits in the Memory column under its rule, "Pass time" and "NN ms" on two lines.
 
 ### Touch on the scope plot (fw 0.2.54)
 
@@ -1090,7 +1122,7 @@ Limits:
   Infinite). The fast loop of the design study (window readout, several records per frame) is a later step.
 - Saving a waveform in the view keeps the thumbnail of the last scope-view trace (the waveform data itself is saved
   as usual); a screenshot (picture save, READ_SCREEN) shows the graded picture.
-- The Trace selector (Linear / Dots / Peak / Pro) does not apply in the view: records are always drawn as joined
+- The Trace selector (Linear / Dots / Peak) does not apply in the view: records are always drawn as joined
   min/max columns.
 
 Settings: persistence and palette are saved with everything else at power-off (settings word 210, 0x9A00 marker;
@@ -1118,8 +1150,9 @@ occasional miss) and otherwise shows it with the warning "untriggered (auto time
 
 ### Pass time in the acquisition menu (fw 0.2.38)
 
-Owner: the cost of a longer record shows where it is chosen. Under the acquisition menu's "Memory" header the menu
-shows "pass NN ms", the main-loop pass time (GET_STATUS `pass_ms`) of the last pass before the menu opened. The menu
+Owner: the cost of a longer record shows where it is chosen. In the acquisition menu's Memory column, under its rule
+(since 0.2.63; between the "Memory" header and the first depth chip before, where it collided with both), the menu
+shows "Pass time" and "NN ms", the main-loop pass time (GET_STATUS `pass_ms`) of the last pass before the menu opened. The menu
 is modal and nothing captures while it is open, so a newly chosen depth shows its cost the next time the menu opens.
 Drawn by the `PC_MASK_ACQ_MEMORY` glue after every memory-depth draw (`pc_hal_scope.c`).
 
