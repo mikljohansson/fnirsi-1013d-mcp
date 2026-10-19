@@ -180,7 +180,9 @@ def main():
              # fw 0.2.20: ticks that found the real USB IRQ pending where the old fallback served; retired since 0.2.21
              'usb_irq_races '
              # fw 0.2.48+: fault status (DFSR / IFSR) and fault address (FAR) of the restart's abort
-             'restart_fault_status restart_fault_addr').split()
+             'restart_fault_status restart_fault_addr '
+             # fw 0.2.49+: USB suspend watch: resumes inferred without a RESUME interrupt, soft reconnects
+             'usb_inferred_resumes usb_soft_reconnects').split()
     st, body, _ = L.request(0x0007)
     if st == 0 and body:
         n = struct.unpack_from('<H', body)[0]

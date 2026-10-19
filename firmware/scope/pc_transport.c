@@ -19,6 +19,7 @@
 #include "pc_hal.h"
 #include "interrupt.h"
 #include "ccu_control.h"
+#include "pc_usbw.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -42,11 +43,12 @@ static volatile uint8  pc_dtr;
 
 //USB suspend state (fw 0.2.44). A suspend is a state, not a link reset: the host keeps the configuration and the line
 //state over a suspend / resume, and a port reset (which the MUSB reports as suspend first: the SE0 looks idle) still
-//resets the link when its RESET interrupt arrives.
-static volatile uint8  pc_usb_suspended;
-static volatile uint32 pc_usb_susp_ms;
-static volatile uint16 pc_usb_susp_frame;
-static uint32          pc_usb_watch_ms;
+//resets the link when its RESET interrupt arrives. fw 0.2.49: the state lives in the suspend watch (pc_usbw.h), which
+//also infers resumes the core does not report and reconnects a device the host abandoned. Written only with IRQs off.
+static pc_usbw pc_uw;
+
+extern uint32 usb_connect;                  //usb_interface.c (1.00o5): set by RESET / RESUME, cleared by SUSPEND
+static void pc_usb_inferred(uint8 cause);
 
 //Link counters for GET_LINK_STATS (order = pc_hal_link_stats, docs/protocol.md section 14)
 static volatile uint32 pc_ts[PC_TSTAT_COUNT];
@@ -187,6 +189,10 @@ static uint32 pc_rx_drain_fifo(void)
 
 void pc_usb_isr_rx(void)
 {
+  //fw 0.2.49: an OUT packet while marked suspended: the resume was not reported
+  if(pc_usbw_activity(&pc_uw, PC_USBW_CAUSE_EP2))
+    pc_usb_inferred(PC_USBW_CAUSE_EP2);
+
   if(*USBC_REG_RXCSR & USBC_BP_RXCSR_D_SENT_STALL)
     *USBC_REG_RXCSR &= ~(USBC_BP_RXCSR_D_SENT_STALL | USBC_BP_RXCSR_D_SEND_STALL);
 
@@ -477,7 +483,7 @@ void pc_usb_isr_link(void)
 //ms since the last suspend, at most 65535
 static uint16 pc_usb_susp_age(void)
 {
-  uint32 d = pc_hal_ms() - pc_usb_susp_ms;
+  uint32 d = pc_hal_ms() - pc_uw.susp_ms;
 
   return (uint16)((d > 65535) ? 65535 : d);
 }
@@ -495,8 +501,8 @@ void pc_usb_isr_event(uint8 ev)
 
     if((ev == PC_USB_EV_BUS_RESET) || (ev == PC_USB_EV_DISCONNECT))
     {
-      pc_evlog_add(type[ev], pc_usb_suspended, pc_usb_suspended ? pc_usb_susp_age() : 0);
-      pc_usb_suspended = 0;
+      pc_evlog_add(type[ev], pc_uw.susp, pc_uw.susp ? pc_usb_susp_age() : 0);
+      pc_usbw_reset(&pc_uw);
     }
   }
 
@@ -511,51 +517,76 @@ void pc_usb_isr_suspend(void)
 
   pc_usb_ev[PC_USB_EV_SUSPEND]++;
   pc_evlog_add(PC_EVT_SUSPEND, (uint8)*USBC_REG_PCTL, frame);
-
-  pc_usb_suspended  = 1;
-  pc_usb_susp_ms    = pc_hal_ms();
-  pc_usb_susp_frame = frame;
+  pc_usbw_suspend(&pc_uw, pc_hal_ms(), frame);
 }
 
-//Type 3 (fw 0.2.44): a = POWER (bit 7 set: inferred by pc_usb_main_service, no RESUME interrupt), b = ms suspended.
-//Counter 37 counts RESUME interrupts only.
-static void pc_usb_resumed(uint8 power)
+//The configuration is kept over a suspend: no SET_CONFIGURATION follows to unmask EP2 OUT
+static void pc_usb_resumed(void)
 {
-  pc_evlog_add(PC_EVT_RESUME, power, pc_usb_susp_age());
-  pc_usb_suspended = 0;
-
-  //The configuration is kept: no SET_CONFIGURATION follows to unmask EP2 OUT
   if(pc_ep2_configured)
     *USBC_REG_INTRXE |= USBC_INTRX_FLAG_EP2;
 }
 
+//Type 3 (fw 0.2.44): a = POWER, b = ms suspended. Counter 37 counts RESUME interrupts only.
 void pc_usb_isr_resume(void)
 {
   pc_usb_ev[PC_USB_EV_RESUME]++;
-  pc_usb_resumed((uint8)(*USBC_REG_PCTL & 0x7F));
+  pc_evlog_add(PC_EVT_RESUME, (uint8)(*USBC_REG_PCTL & 0x7F), pc_uw.susp ? pc_usb_susp_age() : 0);
+  pc_usbw_resume(&pc_uw);
+  pc_usb_resumed();
 }
 
-//Main loop, every pass (fw 0.2.44): a device that is still marked suspended while the frame number moves on again
-//(SOFs arrive) was resumed without a RESUME interrupt; log that (type 3, a bit 7, with POWER: bit 1 = the core's
-//suspend mode) so the bench can tell a missed resume from a host that never suspended. Checked every 20 ms.
-void pc_usb_main_service(void)
+//Inferred resume (fw 0.2.49, counter 60): type 3 with a = 0x80 | cause << 5 | POWER bits 4-0 (bit 4 high-speed mode,
+//bit 1 the core's suspend mode), b = ms suspended. Acts like the RESUME interrupt: the session is live again.
+static void pc_usb_inferred(uint8 cause)
 {
-  uint32 now = pc_hal_ms(), cpsr;
-  uint8  power;
-  uint16 frame;
+  pc_evlog_add(PC_EVT_RESUME, (uint8)(0x80 | (cause << 5) | (*USBC_REG_PCTL & 0x1F)), pc_usb_susp_age());
+  usb_connect = 1;
+  pc_usb_resumed();
+}
 
-  if(!pc_usb_suspended || ((now - pc_usb_watch_ms) < 20))
+//Timer interrupt, every ms (fw 0.2.49; 0.2.44 checked from the main loop every 20 ms and only logged). Runs the suspend
+//watch (pc_usbw.h): an inferred resume when the frame number moves while suspended, a soft disconnect (SoftConn off,
+//link reset, type 20) when the host seems to have abandoned the device, and the reconnect PC_USBW_OFF_MS later. IRQs
+//are off here (no nesting); pc_usb_isr_link saves and restores EPIND itself.
+void pc_usb_watch_tick(void)
+{
+  uint16 frame;
+  uint32 age;
+  int    act;
+
+  if(!pc_uw.susp && !pc_uw.off)
     return;
 
-  pc_usb_watch_ms = now;
-  cpsr  = pc_irq_save();
-  power = (uint8)*USBC_REG_PCTL;
+  //USB switched off by other code (MSC switch, ENTER_FEL): leave it alone
+  if(!pc_uw.off && !(*USBC_REG_PCTL & USBC_BP_POWER_D_SOFT_CONNECT))
+    return;
+
   frame = (uint16)(*USBC_REG_FRNUM & 0x07FF);
+  act   = pc_usbw_tick(&pc_uw, pc_hal_ms(), frame);
 
-  if(pc_usb_suspended && (frame != pc_usb_susp_frame))
-    pc_usb_resumed((uint8)(0x80 | (power & 0x7F)));
+  if(act == PC_USBW_RESUMED)
+    pc_usb_inferred(PC_USBW_CAUSE_FRAME);
+  else if(act == PC_USBW_DISCONNECT)
+  {
+    //Type 20: a = reason | back-off level (max 3) << 2 | strikes (max 15) << 4, b = s suspended
+    age = (pc_hal_ms() - pc_uw.susp_ms) / 1000;
+    pc_evlog_add(PC_EVT_SOFT_DISCONNECT,
+                 (uint8)(pc_uw.why | (((pc_uw.level > 3) ? 3 : pc_uw.level) << 2) |
+                         (((pc_uw.strikes > 15) ? 15 : pc_uw.strikes) << 4)),
+                 (uint16)((age > 65535) ? 65535 : age));
+    *USBC_REG_PCTL &= ~USBC_BP_POWER_D_SOFT_CONNECT;
+    usb_connect = 0;
+    pc_usb_isr_link();
+  }
+  else if(act == PC_USBW_CONNECT)
+    *USBC_REG_PCTL |= USBC_BP_POWER_D_SOFT_CONNECT;
+}
 
-  pc_irq_restore(cpsr);
+void pc_hal_usb_watch(uint32_t *v)
+{
+  v[0] = pc_uw.inferred;
+  v[1] = pc_uw.reconnects;
 }
 
 void pc_hal_usb_events(uint32_t *v)
@@ -621,6 +652,7 @@ void pc_usb_isr_configured(void)
 {
   pc_ep2_configured = 1;
   pc_evlog_add(PC_EVT_CONFIGURED, 0, 0);
+  pc_usbw_configured(&pc_uw);
 }
 
 void pc_usb_isr_setup(uint32 d0, uint32 d1)
@@ -630,6 +662,10 @@ void pc_usb_isr_setup(uint32 d0, uint32 d1)
 
   (void)d1;
   pc_usb_ev[PC_USB_EV_SETUP]++;
+
+  //fw 0.2.49: a setup while marked suspended is bus activity: the resume was not reported
+  if(pc_usbw_activity(&pc_uw, PC_USBW_CAUSE_EP0))
+    pc_usb_inferred(PC_USBW_CAUSE_EP0);
 
   //fw 0.2.24: pyserial repeats GET_LINE_CODING about five times per open; counter 39 still counts every setup
   if(pc_evlog_n && (key == last_key) && ((now - last_ms) < PC_SETUP_REPEAT_MS))
@@ -836,6 +872,7 @@ void pc_transport_reset(void)
   pc_rx_stalled = 0;
   pc_dtr        = 0;
   pc_link_events |= PC_LINK_RESET;
+  pc_usbw_init(&pc_uw);              //fw 0.2.49: CDC (re)start or MSC switch: no suspend, no pending reconnect
 
   pc_irq_restore(cpsr);
 }
@@ -854,7 +891,7 @@ uint32_t pc_hal_link_take_events(void)
 //valid) is not an active connection, but its DTR comes back with the resume
 int pc_hal_dtr(void)
 {
-  return pc_dtr && !pc_usb_suspended;
+  return pc_dtr && !pc_uw.susp && !pc_uw.off;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
