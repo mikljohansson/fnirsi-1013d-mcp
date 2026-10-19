@@ -806,3 +806,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   not (host: 0.5-2.0 codes per core on all ranges, both rates). fw 0.2.60 (fw-cal4, merge of its branch: failure line with range,
   rate, core, total and per-capture RMS; instruction names the post) built 27634587..., pinned backups/fw-0.2.60_27634587.bin, loaded
   into RAM at 16:18 (#VER fw=0.2.60). Owner to run Zero level and read the failure line.
+- 2026-10-19 16:25: 0.2.60 failure lines, nothing connected, USB on: "CH1: range 4 at 200MSa/s: core B, 21.1 codes, 21.0 per
+  capture", "CH2: range 1 at 200MSa/s: core A, 24.4 codes, 24.3 per capture". One core per channel reads about 21-24 codes RMS inside
+  a single 200 MS/s capture inside the wizard, while READ_RAW from the host at 200 MS/s legacy at the same moment gives 0.5-2 codes on
+  every core and range (GET_DECIM: filter 0, fpga_mode 0, fpga_shift 2). The same lanes (CH1 B, CH2 A) showed 19-30 codes from the
+  host once today, right after the Bode run had left the FPGA in mode 225. Hypothesis under test by fw-cal4: the calibration
+  conversion does not force the FPGA decimation / shift registers to legacy, so one byte lane is not an 8-bit sample. The UI filter
+  was left at "off" by my study scripts between 15:55 and 16:25 and is restored to CIC2+FIR now.
