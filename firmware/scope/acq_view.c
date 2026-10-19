@@ -4,6 +4,7 @@
 
 #include "acq_view.h"
 #include "tb_view.h"
+#include "slider_ov.h"
 #include "variables.h"
 
 #include <string.h>
@@ -55,6 +56,21 @@ int32 acq_view_slider_pos(int32 start, int32 dx)
 
   return tbv_clamp_pos(start + tbv_slider_move(dx, fs, fpd, fpgasettings.totalsamples), fs, fpd,
                        fpgasettings.totalsamples, fpgasettings.settriggerpoint);
+}
+
+int32 acq_view_slider_jump(int32 pos, int32 x, int32 y)
+{
+  uint32 fs = acq_fs();
+  int32  sx, sw, dx;
+
+  if(!fs || (scopesettings.timeperdiv < ACQ_TB_FIRST) || (scopesettings.timeperdiv > ACQ_TB_LAST) ||
+     scopesettings.xymodedisplay)
+    return pos;
+
+  tbv_slider(disp_first_sample, fs, frequency_per_div[scopesettings.timeperdiv], fpgasettings.totalsamples, &sx, &sw);
+  dx = sov_jump(x, y, sx, sw);
+
+  return dx ? acq_view_slider_pos(pos, dx) : pos;
 }
 
 //fw 0.2.68: the one way a short-mode time/div is set, by hand (the ACQ menu's box) or by the snap (acq_view_fit): the

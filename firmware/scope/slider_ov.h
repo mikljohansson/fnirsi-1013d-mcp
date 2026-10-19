@@ -65,4 +65,14 @@ int   sov_inside(int32 x, int32 wx, int32 ww);
 //The track column of a position x (clipped to the track)
 int32 sov_col(int32 x);
 
+//Tap to jump (fw 0.2.72, owner 10 F item 2): a touch-down on the slider row (y SOV_TAP_Y and below; not the Scope's
+//extended drag area above it, which borders the cards) outside the window centres the window on the touch; the drag
+//goes on from there, so a tap and a drag end the same way (the Scope scrolls, the Spectrum pans, the Frequency response
+//sweeps the new span)
+#define SOV_TAP_Y       450
+
+//The shift in track pixels that centres a window wx, ww on x, kept on the track; 0 when x is inside the window or the
+//touch is above the row
+int32 sov_jump(int32 x, int32 y, int32 wx, int32 ww);
+
 #endif

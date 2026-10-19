@@ -201,6 +201,112 @@ static void test_inside(void)
   T_EQ(sov_col(300), 300);
 }
 
+//Tap to jump (fw 0.2.72, owner 10 F item 2)
+static void test_jump(void)
+{
+  int32 x, y;
+
+  //Inside the window (edges included), above the row, or a full-width window: no jump
+  T_EQ(sov_jump(100, 460, 100, 50), 0);
+  T_EQ(sov_jump(149, 460, 100, 50), 0);
+  T_EQ(sov_jump(400, SOV_TAP_Y - 1, 100, 50), 0);     //the Scope's extended drag area by the cards: no jump
+  T_EQ(sov_jump(400, 460, SOV_X, SOV_W), 0);
+
+  //Outside: the window's centre lands on the tap
+  T_EQ(sov_jump(400, 460, 100, 50), 400 - 25 - 100);
+  T_EQ(sov_jump(40, SOV_TAP_Y, 300, 50), 40 - 25 - 300);
+  T_EQ(sov_jump(400, 479, 100, 51), 400 - 25 - 100);
+
+  //Near the ends: kept on the track
+  T_EQ(sov_jump(5, 460, 300, 50), SOV_X - 300);
+  T_EQ(sov_jump(727, 460, 100, 50), SOV_X + SOV_W - 50 - 100);
+  T_EQ(sov_jump(900, 460, 100, 50), SOV_X + SOV_W - 50 - 100);
+
+  //Every column and window: the result is on the track and covers the tap (or is at an end)
+  for(x = 0; x < 800; x += 7)
+    for(y = 100; y < 600; y += 37)
+    {
+      int32 wx = SOV_X + y % (SOV_W - (y % 300) - 8), ww = 8 + y % 300, d = sov_jump(x, 470, wx, ww), nx = wx + d;
+
+      T_TRUE(nx >= SOV_X);
+      T_TRUE(nx + ww <= SOV_X + SOV_W);
+      if(d)
+        T_TRUE(sov_inside(sov_col(x), nx, ww));
+    }
+}
+
+//The Scope: the jump through the record maths (acq_view_slider_jump = sov_jump + tbv_slider_move + tbv_clamp_pos) puts
+//the drawn window's centre on the tap within the rounding of the record's steps
+static void test_jump_scope(void)
+{
+  static const uint32 fss[] = { 200000000, 25000000, 5000000, 500000 };
+  static const uint32 fpds[] = { 20000000, 1000000, 100000, 10000 };
+  static const uint32 totals[] = { 3000, 15000, 16382 };
+  unsigned a, b, c;
+  int32 x, jumps = 0;
+
+  for(a = 0; a < 4; a++)
+    for(b = 0; b < 4; b++)
+      for(c = 0; c < 3; c++)
+      {
+        uint32 fs = fss[a], fpd = fpds[b], total = totals[c], trig = total / 2;
+        int32  pos0 = 362, first, xend, sx, sw;
+
+        if(!tbv_viable(fs, fpd, total))
+          continue;
+
+        pos0 = tbv_clamp_pos(pos0, fs, fpd, total, trig);
+        tbv_window((int32)trig, pos0, fs, fpd, total, &first, &xend);
+        tbv_slider(first, fs, fpd, total, &sx, &sw);
+
+        for(x = SOV_X; x < SOV_X + SOV_W; x += 29)
+        {
+          int32 d = sov_jump(x, 460, sx, sw), pos1, nsx, nsw, want;
+
+          if(!d)
+            continue;
+
+          pos1 = tbv_clamp_pos(pos0 + tbv_slider_move(d, fs, fpd, total), fs, fpd, total, trig);
+          tbv_window((int32)trig, pos1, fs, fpd, total, &first, &xend);
+          tbv_slider(first, fs, fpd, total, &nsx, &nsw);
+
+          jumps++;
+          want = sx + d;                              //where sov_jump put it (kept on the track)
+          T_TRUE((nsx - want <= 2) && (want - nsx <= 2));
+          T_TRUE(sov_inside(x, nsx - 2, nsw + 4));
+        }
+      }
+
+  T_TRUE(jumps > 200);
+}
+
+//The Frequency response: the jump in px through bu_slider_shift moves Start / Stop by whole steps so the window covers
+//the tap (span kept, on the track)
+static void test_jump_fr(void)
+{
+  int s0, w, x, jumps = 0;
+
+  for(w = 3; w <= 12; w += 3)
+    for(s0 = 0; s0 + w <= BODE_STEPS - 1; s0 += 2)
+      for(x = SOV_X; x < SOV_X + SOV_W; x += 11)
+      {
+        int32 wx = bu_slider_x(s0), ww = bu_slider_x(s0 + w) - wx, d = sov_jump(x, 460, wx, ww);
+        int   n;
+
+        if(!d)
+          continue;
+
+        jumps++;
+        n = bu_slider_shift(s0, s0 + w, d);
+        T_TRUE(n != 0);
+        T_TRUE((s0 + n >= 0) && (s0 + w + n <= BODE_STEPS - 1));
+        //Covered, but for the nearest-step rounding at the far side (at most one step's width)
+        T_TRUE(sov_inside(x, bu_slider_x(s0 + n) - 60, bu_slider_x(s0 + w + n) - bu_slider_x(s0 + n) + 120));
+      }
+
+  T_TRUE(jumps > 200);
+}
+
 int main(void)
 {
   test_geometry();
@@ -208,5 +314,8 @@ int main(void)
   test_rows();
   test_lines();
   test_inside();
+  test_jump();
+  test_jump_scope();
+  test_jump_fr();
   return t_report("test_slider_ov");
 }

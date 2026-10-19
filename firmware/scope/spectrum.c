@@ -1385,6 +1385,16 @@ int spectrum_display(void)
   return r;
 }
 
+//The view as the next drawing will compute it (spectrum_display_body's steps, without computing a spectrum)
+static void spec_current_view(SPECVIEW *v)
+{
+  int          log2n = spec_log2n(), written;
+  pc_decim_cfg dc;
+
+  pc_hal_decim_current(&dc, &written);
+  spec_view(v, log2n, spec_bin_mhz(spec_fs_mhz(spec_divider(), &dc), log2n));
+}
+
 static int spectrum_display_body(void)
 {
   int     log2n, ch, fresh, hch;
@@ -2173,11 +2183,27 @@ int spectrum_touch(void)
   auto_refused = 0;
 
   //fw 0.2.71: the slider row; the window follows the finger (the span kept, the centre panned), as the Scope's record
-  //slider. At the full span there is nothing to pan.
+  //slider. At the full span there is nothing to pan. fw 0.2.72, tap to jump: a touch-down outside the window centres
+  //the window there first (the window as drawn, sov_jump), then the drag goes on from the new place.
   if(ytouch >= BU_SL_HIT_Y)
   {
     uint32 start0 = spec.start;
-    int32  x0 = xtouch;
+    int32  x0 = xtouch, wx, ww, dx;
+    SPECVIEW v;
+
+    spec_current_view(&v);
+    spec_slider_window(&v, &wx, &ww);
+    dx = sov_jump((int32)xtouch, (int32)ytouch, wx, ww);
+
+    if(dx)
+    {
+      int64 s = (int64)start0 + ((int64)dx * START_STEPS) / BU_SL_W;
+      int64 smax = START_STEPS - (START_STEPS >> spec.zoom);
+
+      s = (s < 0) ? 0 : (s > smax) ? smax : s;
+      spec.start = start0 = (uint32)s;
+      spectrum_display();
+    }
 
     while(havetouch)
     {

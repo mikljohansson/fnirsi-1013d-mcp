@@ -1447,7 +1447,7 @@ static void slider_drag(void)
 {
   bode_eng *e = bode_engine();
   int    s0 = bv.start_i, e0 = bv.stop_i, sh = 0, n;
-  int32  x0 = (int32)xtouch;
+  int32  x0 = (int32)xtouch, jx;
 
   if(bv.autoset)
   {
@@ -1455,11 +1455,15 @@ static void slider_drag(void)
     return;
   }
 
+  //fw 0.2.72, tap to jump: a touch-down outside the window starts the drag as if the window had been dragged to centre
+  //on it (to the nearest steps); the release then sweeps the new span as after a drag
+  jx = sov_jump(x0, (int32)ytouch, bu_slider_x(s0), bu_slider_x(e0) - bu_slider_x(s0));
+
   bv.drag = 1;
 
   while(havetouch)
   {
-    n = bu_slider_shift(s0, e0, (int32)xtouch - x0);
+    n = bu_slider_shift(s0, e0, jx + (int32)xtouch - x0);
 
     if(n != sh)
     {

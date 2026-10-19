@@ -145,3 +145,19 @@ int32 sov_col(int32 x)
   if(x > SOV_X + SOV_W - 1) return SOV_X + SOV_W - 1;
   return x;
 }
+
+int32 sov_jump(int32 x, int32 y, int32 wx, int32 ww)
+{
+  int32 t;
+
+  if((y < SOV_TAP_Y) || (ww >= SOV_W) || sov_inside(x, wx, ww))
+    return 0;
+
+  t = sov_col(x) - ww / 2;
+  if(t < SOV_X)
+    t = SOV_X;
+  if(t + ww > SOV_X + SOV_W)
+    t = SOV_X + SOV_W - ww;
+
+  return t - wx;
+}

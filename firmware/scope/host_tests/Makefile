@@ -82,7 +82,7 @@ $(OUT)/test_tb_view: test_tb_view.c test_util.h $(SRC)/tb_view.c $(SRC)/tb_view.
 	$(CC) $(CFLAGS) -o $@ test_tb_view.c $(SRC)/tb_view.c
 
 # fw 0.2.72: the slider track overview's geometry, against the Scope's and the Frequency response's window maths
-$(OUT)/test_slider_ov: test_slider_ov.c test_util.h $(SRC)/slider_ov.c $(SRC)/slider_ov.h $(SRC)/tb_view.c $(SRC)/tb_view.h $(UI_SRCS) $(SRC)/bode_ui.h | $(OUT)
+$(OUT)/test_slider_ov: test_slider_ov.c test_util.h $(SRC)/acq_view.h $(SRC)/slider_ov.c $(SRC)/slider_ov.h $(SRC)/tb_view.c $(SRC)/tb_view.h $(UI_SRCS) $(SRC)/bode_ui.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_slider_ov.c $(SRC)/slider_ov.c $(SRC)/tb_view.c $(UI_SRCS) -lm
 
 # 0x1536 sequencer maths (fw 0.2.58): fit rules, table entries, slot addresses, UI averaging plan, exact mean
