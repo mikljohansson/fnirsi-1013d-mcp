@@ -795,9 +795,14 @@ Newest entries at the bottom. Format: date, who, what, result.
   The wizard computes something larger than the real noise: fw-cal4 dispatched (fw 0.2.60). COM10 flapped for about a minute after
   the USB replug (device seen, port not openable), then fine.
 - 2026-10-19 16:06: owner: select, save and delete in Saved pictures and Saved waveforms work on 0.2.59 (new delete dialog).
-- 2026-10-19 16:20: wizard noise root cause: with the calibration post still wired to the breadboard (probes unplugged), repeated
+- 2026-10-19 16:12: wizard noise, first reading (WRONG, see 16:18): with the calibration post still wired to the breadboard (probes unplugged), repeated
   200 MS/s captures show CH1 core B 19-30 codes RMS (60-code excursions) and CH2 core A 6-17 codes on ranges 0-1, far over the
   3-code limit; at 2 MS/s 0.1-0.5 codes. With only USB connected: 0.5-2.0 codes per core on all six ranges at both rates, generator
   on or off, std of capture means < 0.26, excursions < 10 codes. The wizard arithmetic is correct (fw-cal4 host check); the zero
   step must be run with nothing on the post, which the instruction did not say. fw-cal4 narrowed to the failure line with numbers
   and the instruction text. Owner: Log page works (scroll, save to card); Developer debug overlay flickers (1.00o5 per-pass redraw).
+- 2026-10-19 16:18: correction: the owner's first wizard attempts also had nothing connected, and the Zero level step fails
+  the same way with USB connected. So the environment is not the cause; the wizard measures something the host READ_RAW study does
+  not (host: 0.5-2.0 codes per core on all ranges, both rates). fw 0.2.60 (fw-cal4, merge of its branch: failure line with range,
+  rate, core, total and per-capture RMS; instruction names the post) built 27634587..., pinned backups/fw-0.2.60_27634587.bin, loaded
+  into RAM at 16:18 (#VER fw=0.2.60). Owner to run Zero level and read the failure line.
