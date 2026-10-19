@@ -1,71 +1,106 @@
 {
-  "comment": "Released AL3A10 bitstreams. Checked by tools/bitstreams.py (CI) and packed into the release by release.yml. Human-readable: BITSTREAMS.md.",
-  "flash_size": 1048576,
-  "bitstreams": [
-    {
-      "version": "0x1533",
-      "file": "al3-0x1533.bin",
-      "size": 282898,
-      "sha256": "a96567031872ae99bd40f0722a111a08da0f6381b6c710b70998af784a341216",
-      "flash_image_sha256": "96159a871de3af57c2174fe1ec66ed14b10fbe2e845c44564e7bda9ed252acae",
-      "source_commit": "526c9694bb241e8053dcca0f28f44ca5b2c16896",
-      "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
-      "min_firmware": "0.2.9",
-      "features": ["external trigger on the calibration pin"],
-      "status": "supported",
-      "bench": "flashed 2026-10-18 19:16, docs/hardware-status.md"
-    },
-    {
-      "version": "0x1534",
-      "file": "al3-0x1534.bin",
-      "size": 282898,
-      "sha256": "83140510dfbfef56cc5ed15d70866e6bc52c407a41fd0ea480e8993df5b820c1",
-      "flash_image_sha256": "c387a15ed11d209deab639d1de84dd3117419d800aed05e032b192650e13c0a0",
-      "source_commit": "6d4c8ad81c5159dbae11316ad1ff157ac037b274",
-      "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
-      "min_firmware": "0.2.30",
-      "features": ["external trigger", "decimation filter: boxcar, CIC2, CIC3, 16-bit samples"],
-      "status": "supported",
-      "bench": "flashed 2026-10-18 21:46, docs/hardware-status.md"
-    },
-    {
-      "version": "0x1535",
-      "file": "al3-0x1535.bin",
-      "size": 282898,
-      "sha256": "5040a2aeede071019bca0ffee47d765b87d980e1e47ca01ac32cb875c839aa96",
-      "flash_image_sha256": "5ade9e755211fe65c6ff492419f3a4a91ec08edc8c16305ce52751baf9d588a5",
-      "source_commit": "e2aec2efb4a23aa6199c67d6741610c113ee56de",
-      "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
-      "min_firmware": "0.2.44",
-      "features": ["external trigger", "decimation filter", "CIC compensation FIR"],
-      "status": "supported",
-      "bench": "flashed 2026-10-19 10:33, docs/hardware-status.md"
-    },
-    {
-      "version": "0x1536",
-      "file": "al3-0x1536.bin",
-      "size": 282898,
-      "sha256": "4eaf6811814c58e1f00e648b97e7a608bb5ca387fb036f21714e91667959b48b",
-      "flash_image_sha256": "66866c84ad4f298c88cfc1072870d44e80832852b53fcbd926e01fcb473f7408",
-      "source_commit": "27c0c75aa9d2a562da3554cb756f0258c0317e6c",
-      "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
-      "min_firmware": "0.2.58",
-      "features": ["external trigger", "decimation filter", "CIC compensation FIR", "segmented capture", "hardware averaging"],
-      "status": "unbenched",
-      "bench": ""
-    },
-    {
-      "version": "0x1537",
-      "file": "al3-0x1537.bin",
-      "size": 282898,
-      "sha256": "426a3784883b82c9c9f42870584e64d1d082cdcb38c8b62db143e161e2633b17",
-      "flash_image_sha256": "febc92997ee6605090d5581aabc9c240986fa82defdc24d40aca01566dbfe1f1",
-      "source_commit": "c15981eccc18402987c582bb188b46ad9e90bd74",
-      "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
-      "min_firmware": "0.2.58",
-      "features": ["as 0x1536", "deterministic record start and A/B order at divided rates"],
-      "status": "withdrawn",
-      "bench": "flashed 2026-10-19 16:27; CH2 core A garbled in about 40 % of full-rate captures (docs/hardware-status.md 16:48)"
-    }
-  ]
+ "comment": "Released AL3A10 bitstreams. Checked by tools/bitstreams.py (CI) and packed into the release by release.yml. Human-readable: BITSTREAMS.md.",
+ "flash_size": 1048576,
+ "bitstreams": [
+  {
+   "version": "0x1533",
+   "file": "al3-0x1533.bin",
+   "size": 282898,
+   "sha256": "a96567031872ae99bd40f0722a111a08da0f6381b6c710b70998af784a341216",
+   "flash_image_sha256": "96159a871de3af57c2174fe1ec66ed14b10fbe2e845c44564e7bda9ed252acae",
+   "source_commit": "526c9694bb241e8053dcca0f28f44ca5b2c16896",
+   "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
+   "min_firmware": "0.2.9",
+   "features": [
+    "external trigger on the calibration pin"
+   ],
+   "status": "supported",
+   "bench": "flashed 2026-10-18 19:16, docs/hardware-status.md"
+  },
+  {
+   "version": "0x1534",
+   "file": "al3-0x1534.bin",
+   "size": 282898,
+   "sha256": "83140510dfbfef56cc5ed15d70866e6bc52c407a41fd0ea480e8993df5b820c1",
+   "flash_image_sha256": "c387a15ed11d209deab639d1de84dd3117419d800aed05e032b192650e13c0a0",
+   "source_commit": "6d4c8ad81c5159dbae11316ad1ff157ac037b274",
+   "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
+   "min_firmware": "0.2.30",
+   "features": [
+    "external trigger",
+    "decimation filter: boxcar, CIC2, CIC3, 16-bit samples"
+   ],
+   "status": "supported",
+   "bench": "flashed 2026-10-18 21:46, docs/hardware-status.md"
+  },
+  {
+   "version": "0x1535",
+   "file": "al3-0x1535.bin",
+   "size": 282898,
+   "sha256": "5040a2aeede071019bca0ffee47d765b87d980e1e47ca01ac32cb875c839aa96",
+   "flash_image_sha256": "5ade9e755211fe65c6ff492419f3a4a91ec08edc8c16305ce52751baf9d588a5",
+   "source_commit": "e2aec2efb4a23aa6199c67d6741610c113ee56de",
+   "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
+   "min_firmware": "0.2.44",
+   "features": [
+    "external trigger",
+    "decimation filter",
+    "CIC compensation FIR"
+   ],
+   "status": "supported",
+   "bench": "flashed 2026-10-19 10:33, docs/hardware-status.md"
+  },
+  {
+   "version": "0x1536",
+   "file": "al3-0x1536.bin",
+   "size": 282898,
+   "sha256": "4eaf6811814c58e1f00e648b97e7a608bb5ca387fb036f21714e91667959b48b",
+   "flash_image_sha256": "66866c84ad4f298c88cfc1072870d44e80832852b53fcbd926e01fcb473f7408",
+   "source_commit": "27c0c75aa9d2a562da3554cb756f0258c0317e6c",
+   "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
+   "min_firmware": "0.2.58",
+   "features": [
+    "external trigger",
+    "decimation filter",
+    "CIC compensation FIR",
+    "segmented capture",
+    "hardware averaging"
+   ],
+   "status": "unbenched",
+   "bench": ""
+  },
+  {
+   "version": "0x1537",
+   "file": "al3-0x1537.bin",
+   "size": 282898,
+   "sha256": "426a3784883b82c9c9f42870584e64d1d082cdcb38c8b62db143e161e2633b17",
+   "flash_image_sha256": "febc92997ee6605090d5581aabc9c240986fa82defdc24d40aca01566dbfe1f1",
+   "source_commit": "c15981eccc18402987c582bb188b46ad9e90bd74",
+   "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
+   "min_firmware": "0.2.58",
+   "features": [
+    "as 0x1536",
+    "deterministic record start and A/B order at divided rates"
+   ],
+   "status": "withdrawn",
+   "bench": "flashed 2026-10-19 16:27; CH2 core A garbled in about 40 % of full-rate captures (docs/hardware-status.md 16:48)"
+  },
+  {
+   "version": "0x1538",
+   "file": "al3-0x1538.bin",
+   "size": 282898,
+   "sha256": "0c24ecf6ff55bc170ce6d7acd1ee4f8afbaf97d73b36e0b7a27a92639d1dbbbd",
+   "flash_image_sha256": "2fc7ea5b2fc925157c02f3f492ee3ac17b6154d7ed27e2c20c2d26e855ac1087",
+   "source_commit": "ce943bfe8c4bcb291d78b3a7ea8ec0d08f9163f8",
+   "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
+   "min_firmware": "0.2.58",
+   "features": [
+    "as 0x1536",
+    "stateless ADC encode (B-first order guaranteed at every rate)",
+    "encode self-check read 0x33"
+   ],
+   "status": "unbenched",
+   "bench": "built 2026-10-19 17:30, all testbench steps pass on seeds 12345 and 3; flash session pending (fpga/al3/README.md section 8)"
+  }
+ ]
 }
