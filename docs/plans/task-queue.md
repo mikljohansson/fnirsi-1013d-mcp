@@ -164,7 +164,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   axis at 200 MSa/s, and zooming in stops where the capture time N/fs would exceed about 2 s; a pan that moves the stop across a
   rate boundary moves the rate too. Owner observation on 0.2.76: zoom in never changes the rate today, only zoom out does. Rule
   written into ui-guidelines.md first; host test walks the ladder both ways from both ends at every FFT length, asserting the pair.
-- **Host commands leave the modal menus** (owner 10-19 23:20: "avoid locking up the device from the perspective of the MCP server
+- **Host commands leave the modal menus** (owner 10-19 23:27: "avoid locking up the device from the perspective of the MCP server
   when it's in menus; if the agent sends commands it just exits all modals, since that wouldn't be destructive; just exiting to
   the base screen"; fw-yield dispatched): today every menu, fold-out and dialog is a modal loop and a host command that needs
   the main loop answers E_BUSY (protocol.md LOCAL_BUSY). New rule: such a command sets a yield flag from the ISR-side receiver;
