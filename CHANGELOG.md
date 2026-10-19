@@ -31,6 +31,25 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.72 - 2026-10-19 (provisional; protocol 1.21, unchanged)
+
+- Slider track overview (docs/plans/slider-overview.md, owner decisions 10-19 21:20 and 21:36): the slider row under
+  the plot keeps only its top line; the track is the whole row, x 2..727 and y 453..471, in the Scope, the Spectrum and
+  the Frequency response, and the window is two 1 px edge lines over its full height. A drag still moves the window with
+  the finger (a 10 px drag is now 82 samples where it was 83: the track is 726 px, was 720) (a5c875e).
+- Scope: the track shows the min / max envelope of each enabled channel over the whole record on the plot's own vertical
+  scale, in full colour inside the window and half intensity outside; not in roll mode, X-Y or the slow-rate branch with
+  1.00o5's fixed window. It replaces the row of yellow "~" glyphs 1.00o5 drew in the track (decoration, not data)
+  (5aa5093).
+- Spectrum: the track shows the spectrum over the whole displayed axis (0 .. fs/2 capped at 25 MHz) from the FFT the
+  view already runs, the shown span in full colour (2044a49).
+- Frequency response: the track shows AUTO SET's overview (magnitude; the phase in Phase only), fitted to the track's
+  height, flagged points grey; kept until the next AUTO SET or power-off, cleared by Restore default settings, nothing
+  before the first AUTO SET; a cancelled AUTO SET keeps the previous one (2b9dad9).
+- Tap to jump: a tap on the slider row outside the window centres the window there (all three modes), and ends like a
+  drag: the Scope scrolls, the Spectrum pans, the Frequency response sweeps the new span. The cards and the band above
+  them keep their taps (b3fa8d2).
+
 #### 0.2.71 - 2026-10-19 (protocol 1.21, unchanged; READ_BODE reason 8)
 
 - Frequency response: a single sweep shows RUN on the chip (never WAIT, whatever the trigger mode) and STOP on the

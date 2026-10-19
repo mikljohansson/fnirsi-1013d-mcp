@@ -1027,9 +1027,11 @@ what each screen does; this is what changed:
 1. **Left handle column** (x 0..43): CH1, CH2 and the eight reference pointers each own the 44 rows around their tip
    (`scope_pointer_top(position) + 6`, the clamped position the pointer is drawn at); the nearest switched-on pointer
    wins, a tie to the one drawn on top (draw order CH1, CH2, ref1..ref8). A drag moves it vertically.
-2. **Record-position slider** (frame x 2..727, y 452..471; hit area from y 450, and up to y 436 when nothing else is
-   near: 44 px): the window follows the finger, dragging right shows later samples (the trace moves left), limited to
-   the record (`acq_view_slider_pos`). Short mode only.
+2. **Record-position slider** (fw 0.2.72: a line at y 452, the track x 2..727 / y 453..471; hit area from y 450, and up
+   to y 436 when nothing else is near: 44 px): the window follows the finger, dragging right shows later samples (the
+   trace moves left), limited to the record (`acq_view_slider_pos`). A touch-down on the row (y 450 down) outside the
+   window first centres the window there (tap to jump, `acq_view_slider_jump`); the extended area above the row never
+   jumps. Short mode only.
 3. **Trigger level pointer** (x > 660, 30 px around its line), only while it is drawn.
 4. The nearest of: a **channel** (CH1 / CH2 switched on, x 44..685), measured to the nearer of its drawn trace
    (`trace_distance` over the polyline as drawn, the Peak / Pro min-max bands included; in the phosphor view only the
@@ -1042,7 +1044,7 @@ slider, trigger level) never tap; on a trace or cursor a tap counts only when th
 the empty plot keep 1.00o5's bands (owner), contiguous now (`touch_tap_zone`): left / right half (x < 358 / > 362),
 y 50..99 V/div one step more sensitive, y 100 up to the lower band time/div slower / faster, the lower band (80 rows)
 V/div less sensitive. The lower band ends at the grid's bottom (449) or at the top of that half's measurement cards
-(rows of three from y 426, 24 px pitch); nothing on the slider row. A channel drag moves the trigger level on that
+(rows of three from y 426, 24 px pitch); on the slider row only the jump above. A channel drag moves the trigger level on that
 channel (CH1 for source 0, CH2 for 1, never for EXT) by the same delta, limited so both stay in 6..396. In X-Y every
 drag moves CH1 with x and CH2 with y. The touch loop still blocks until the finger moves or lifts (touch-review batch 3).
 
@@ -1087,7 +1089,8 @@ stop labels and ten fixed divisions before); the cards at y 426 (peak frequency 
 above); the slider row at y 452..471 in the Scope's construction: the shown span as a window over the axis 0 ..
 min(fs/2, 25 MHz) (the window fills the track at the full span), a drag pans the centre with the span kept (the window
 follows the finger, as the Scope's record slider). The waterfall's and density's colour legend sits inside the plot's
-top right (y 72). The info line and the strip went in 0.2.56.
+top right (y 72). The info line and the strip went in 0.2.56. Since 0.2.72 the track shows the whole axis's spectrum
+(below, "Slider track overview") and a tap outside the window centres it there.
 Each plot column shows the highest bin it covers, so narrow lines survive at 720 columns; zoomed in past one bin per
 column it draws straight lines between bins. A white triangle marks the peak (DC bins skipped). Below 200 MS/s an orange line says
 "no anti-alias filter": the FPGA decimates by skipping samples (until a filtering bitstream lands).
@@ -1229,6 +1232,34 @@ column. Not host-testable (scope_functions.c and spectrum.c drawing are target-o
 SET_TIMEBASE / SET_TRIGGER / SET_GEN in a loop from the host and span taps: the cards row (the strip until 0.2.56)
 must never show grid or pointers.
 
+### Slider track overview (`slider_ov.c`, fw 0.2.72)
+
+The slider row under the plot of the Scope, the Spectrum and the Frequency response (design and owner decisions:
+`docs/plans/slider-overview.md`): a line at y 452 parts it from the plot; the track below is x 2..727 (726 columns, the
+window's mapping) and y 453..471 (19 rows); the window is its two 1 px white edge lines over the track's height. The
+track shows the whole of what the plot shows a part of, in the full colour between the edge lines and at half intensity
+(CH1 0x808000, CH2 0x008080, phase 0x804080) outside them. No text in the track.
+
+- **Scope**: the min / max envelope of each enabled channel over the whole record (CH2, then CH1 over it), on the plot's
+  own scale (`scope_code_to_y`, y 49..448 squeezed into the 19 rows); a column shares its first sample with the one
+  before, so steps join. Drawn every pass after the traces, from the record as drawn (averaged when Average is on). Not in
+  roll mode, X-Y, or the slow-rate branch with 1.00o5's fixed 181 px window. Cost (computed from the GCC 10 code, not
+  measured): about 0.75 ms per pass at 2 x 16382 samples (the sample loop about 0.5 ms, unrolled by four, about 7.5
+  cycles a sample; columns and drawing about 0.25 ms), about 0.35 ms at 2 x 3000; the row of "~" it replaced cost about
+  0.1 ms. Bench: GET_STATUS `pass_ms` against 0.2.71.
+- **Spectrum**: the spectrum over the whole axis 0 .. min(fs/2, 25 MHz) from the bins the FFT already computed, the
+  highest bin per column, on the plot's ref level and dB/div; Spectrum: as shown (averaged or held), both analysed
+  channels; Waterfall / Density: the latest record of the history channel. Nothing while waiting for a record at a new
+  rate. Under 0.1 ms.
+- **Frequency response**: AUTO SET's 20-point overview (magnitude; the phase in Phase only) fitted to the rows, valid
+  points joined, flagged points one grey pixel. Copied when the overview pass completes, shown when AUTO SET ends (any
+  result), kept until the next AUTO SET or power-off; Restore default settings clears it; a cancelled AUTO SET keeps the
+  previous one. During the overview pass the track fills in point by point.
+- **Tap to jump**: a touch-down on the row (y 450 down) outside the window centres the window on it (kept on the track,
+  `sov_jump`), then the drag goes on; on release each mode does what a drag release does (Scope: nothing more, the
+  record is scrolled; Spectrum: panned; Frequency response: the sweep restarts at the new span, or one sweep runs when
+  stopped). Ignored during AUTO SET in Frequency response.
+
 ### Phosphor view (`phosphor.c`, fw 0.2.46)
 
 Digital phosphor (intensity-graded persistence), like the DPOS350P's "digital fluorescent" display: the traces show
@@ -1337,7 +1368,8 @@ span is under three decades, labelled under 1.5 decades, and the linear steps wh
 Lines joins the valid points of each curve, Dots leaves them loose; flagged points are grey loose dots either way. White
 triangles mark the -3 dB crossings, the peak of a resonance and the phase crossings at +-45, +-90, -135 and -180 deg,
 from a complete table only (half a table misleads: a tank's rising skirt reads as a high-pass corner). While sweeping a
-dotted grey line marks the point being measured. Cards at y 426, chosen through MEASURES; the slider row at y 452.
+dotted grey line marks the point being measured. Cards at y 426, chosen through MEASURES; the slider row at y 452
+(since 0.2.72 with AUTO SET's overview in the track and tap to jump; below, "Slider track overview").
 
 **Right bar, first page** (the fixed meanings):
 
