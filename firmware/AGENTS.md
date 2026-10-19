@@ -2660,3 +2660,133 @@ never ends (Sweep card stuck, READ_BODE state 1 for long; reason 2 afterwards); 
 (scale per channel wrong: gain16 / uv_q8 / probe); phase drifting with frequency on the divider (record start or core
 order); the generator, V/div or time base not given back on leaving; a relay clicking at every point (bh_channel writes
 only what changed); MEASURES or the cursors reacting in the view; the view drawing over a waveform viewer.
+## 44. fw-polish2: UI polish batch 2 (fw 0.2.68 provisional, protocol 1.20 unchanged)
+
+Branch from main b5698c4 (fw 0.2.65), merged with origin/main twice (f2a0ca2: fw-bode 0.2.66 / protocol 1.20; 15c5e56).
+Brief: the owner's walk-through of 0.2.65 (2026-10-19 18:00), items 1-5, plus the coordinator's item 6 (owner decision
+18:45: Bode plot as a main-menu mode row). User-facing description: firmware/README.md "Screens: UI polish batch 2 (fw
+0.2.68)". Commits: 95c1033 (1 RUN/STOP), ec9f319 (2 icons), a9daba6 (3 time/div snap), d51dcb7 + ee754c7 (4 brightness),
+3dc0ed9 (5 wizard step, Calibration row), 67d5204 (version, CHANGELOG, README), 1972245 (6 Bode row), the merges, this
+handoff. Host tests green (test_ui 1,420,883 checks, test_tb_view 530,790, test_ui_diag 5516, the rest unchanged,
+check_vectors OK, CHANGELOG check OK). Warnings: GCC 10 36 (gcc10 and gcc10-nommu), GCC 13 / PC_DEBUG 31, all in the
+pre-existing places (none new). **Nothing benched.** No protocol change (docs/protocol.md row 34 gains one sentence: the
+screen's STOP during a host single aborts it). **Settings sector:** 1.00o5's max-light byte (OTHER_SETTING_OFFSET, after
+new_autosetup) now holds `0x80 | brightback` (item 4); no new words.
+
+Points for a successor:
+- **1 RUN/STOP.** The owner's picture (chip red STOP, button amber "Stopped", trace updating) is what 0.2.65 showed while
+  the PC captured with ARM: a host single stops the UI (`pc_hal_ui_set_run(0)`, row 34) and the screen shows each host
+  capture, so the scope looked running with both controls saying stopped (`pc_hal_ui_set_run` already redrew both on
+  SET_ACQ_STATE / STOP). Now `ui_run_view(runstate, single_wait, host_busy)` (ui_ctrl.c, pure) is the one state;
+  host_busy (`pc_glue_host_busy`) = a host ARM armed / triggered, or DONE less than `UI_RUN_HOST_HOLD_MS` (1000) ago, so
+  an averaging burst or the host's Bode sweep reads RUN without flicker. `scope_run_stop_text` / `scope_run_stop_button`
+  draw from `scope_run_view()` and record what they drew (`scope_run_chip_shown`, `scope_run_button_shown`);
+  `pc_run_follow` (pc_glue_ui_service, every pass) redraws a stale one (not in the file viewer; the button only on page
+  one and not in the waveform viewer), so every writer is covered without a hook at each. The button shows the action:
+  green "RUN" (black text) while stopped, red "STOP" (white text) otherwise, 16 px font; owner exception recorded in
+  docs/ui-guidelines.md section 3. The tap does what it reads: STOP clears runstate and `pc_glue_host_stop` aborts a host
+  single (`pc_ui_host_stop` -> `pc_host_abort`: ABORTED, a pending WAIT answers E_ABORTED); before, a tap during a host
+  single started the UI's RUN. Chip text is centred (equals 1.00o5's offsets 1 / 5 / 2; test_ui checks it). Known: at a
+  host ARM the chip shows STOP for one pass (pc_hal_ui_set_run(0) draws before acq_state is ARMED), then RUN.
+- **2 Icons.** Settings: `Other_settings_icon` at (MAIN_MENU_XPOS + 15, y + 6); the drawn cogwheel is gone. Scope: sine
+  at y + 9..28 of the button (18.5 - 9.5 sin), axes `UI_MM_AXIS_COLOR` 0x707070 at y + 19 and x + 12, drawn first.
+- **3 Time/div snap.** I could not find, by reading, a state the 0.2.65 snap left different from a manual ACQ-menu set:
+  the ACQ menu's time/div box only set `timeperdiv` and clamped the trigger point, which is what the snap did; 0x0E and
+  the geometry are written at every arm. Done as briefed anyway: `tbv_set` / `tbv_fit` (tb_view.c, pure; tbv_fit calls
+  tbv_set) and `acq_view_set` (index + trigger point, then `display_data_done = 1` while running so the next pass arms a
+  fresh conversion instead of reading the one armed with the old geometry), used by both `acq_view_set_tb` (the ACQ
+  box) and `acq_view_fit`. test_tb_view `test_snap_is_manual_set` sweeps every rate x depth x trigger sample x start
+  time/div x trigger point: fit == set, the result viable and inside the limits, a second fit / set a no-op (nothing in
+  this state can cycle). **Inference to check on the bench:** if the owner's "by hand" was a plot tap,
+  `scope_set_timebase` in RUN also sets the sample rate from `time_per_div_sample_rate` (10 us/div -> 10 MSa/s), so the
+  "fix" was a rate change, and the cycling belongs to the high rate with deep memory (candidates: the full-rate capture
+  check's discard / re-arm, enc_heal; the firmware auto deadline with an untriggered window), not to the snap.
+  Walk-through step 6 tells them apart.
+- **4 Brightness.** 1.00o5 kept `maxlight` (flag) beside `screenbrightness`: the sun wrote 60000 (= 100 % in
+  `fpga_set_translated_brightness`'s 560 v + 4000) or the translated value, and opening the slider switched max light
+  off. Now `screenbrightness` is the only value and `brightback` (was the `maxlight` field) what the sun returns to. Pure
+  model in ui_settings.c: `ui_bright_sun` (at 100: back, or 20 when back is 100; else remember and 100),
+  `ui_bright_byte` / `ui_bright_load` (0x80 | back; an old byte 1 = max light on loads as 100 % with back = the old slider
+  value; > 100 heals to 20). `scope_set_brightness(v, sun)` (menu.c) writes the backlight and redraws the sun (not from
+  the full-screen Settings page, which redraws it on exit when the value changed). Sun yellow at 100 %, white below. The
+  owner's "two fixed values" read as 1.00o5's pair: maximum and the slider's value.
+- **5** `wiz_dlg.step` ("Step M of N": 4 with the generator, 3 without, the save screen then being step 3) is set next to
+  the title in `wiz_build` (cal_wiz_ui.c title line only; fw-cal5's measurement code untouched). Calibration tab:
+  `UD_CAL_BTN_X(i)` / `UD_CAL_BTN_W` 185, row at `UD_BTN_Y` 420, trim line and note at `UD_CAL_TEXT_Y` 374 / 394.
+- **6 Bode row.** `UI_MM_BODE` 2, eight rows, `UI_MM_PITCH` 52, `UI_MM_BTN_DY` 9 (button 131 x 35 unchanged, 8 px to the
+  separator), `MAIN_MENU_HEIGHT` 416 (y 46..461). `ui_mm_choose` row Bode: bode 1, spectrum 0, phosphor 0, roll_off in
+  roll mode, no roll note (the note is the spectrum view's). `pc_glue_main_menu_mode` closes the view on any other mode
+  row and opens it after the spectrum / phosphor / roll changes. Grey icon and label, tap ignored (the menu stays open)
+  while `bode_view_available()` is 0. Removed: the generator menu's fourth row (`GEN_MENU_HEIGHT` back to 169,
+  `bode_gen_row_*`, `PC_GEN_BODE_*`, `bode_view_request` and `bv.req`). Per the coordinator the Bode view's right bar and
+  CTRL page are untouched (ux-bode mockup, separate batch). Section 42's walk-through enters the view with Menu > Bode
+  plot now.
+
+Answers for the owner:
+- **1.00o5's "Pro" trace style was not Linear.** `scope_display_channel_pro_trace` (removed in 8d508cd, polish batch 1
+  item e) took, per screen column, the minimum and the maximum of all samples falling in that column and drew two
+  polylines: max to the previous column's max, min to the previous column's min, with no vertical line between them.
+  Peak takes the same min / max per column but fills it with a vertical line (a solid band); Linear draws one sample per
+  column. So Pro = Peak's envelope as two outlines. It looks like Linear when a column holds one sample or less (zoomed
+  in) or the signal is clean (both outlines within a pixel); on noise or a fast signal compressed into the screen it
+  showed the band's top and bottom edges. (It stored two points per column, overflowing the 730-entry point buffers
+  until fw-acq's 0.2.64 fix.)
+- **Atlan's quick-settings fold-out and its Other settings (menu.c at 9cc599c^), and where each control is now:**
+
+| was (fold-out) | now |
+|---|---|
+| Screen brightness (slider) | fold-out Screen brightness (same slider); Settings > Display > Screen brightness (- / +); one value with the top bar sun since 0.2.68 |
+| Grid brightness (slider) | fold-out Grid brightness; Settings > Display > Grid brightness |
+| Other settings (the sub-menu below) | fold-out Other settings opens the full-screen Settings page |
+| Baseline calibration (then 1.00o5's input calibration boxes, 300 mV .. 15 V) | Diagnostics > Calibration > Calibrate (the wizard) and Volts calibration (the six DC levels); Clear calibration beside them |
+| X-Y mode display | CTRL page > Display > X-Y |
+| Notification confirmation | Settings > Controls > File message timeout ("wait for a tap" / "0.7 s") |
+| RTC settings: Time & Date (hour, minute, day, month, year, RTC on / off) | fold-out Time and date (same editor, with the clock module); Settings > Clock > Clock and Time and date |
+| (trigger 50 % row: commented out in Atlan, never shown) | CTRL page 50 % TRIG |
+
+| was (Other settings) | now |
+|---|---|
+| Boot menu, Default start (PECO / FNIRSI / FEL) | Settings > Start-up > At power-on: Open firmware / Boot menu, then open firmware / Boot menu, then stock firmware. FEL: ENTER_FEL from the PC, the boot menu's FEL, Diagnostics > Developer > Enter FEL |
+| New autosetup | Settings > Controls > Auto setup (improved / stock) |
+| Lock move cursors | Settings > Controls > Cursors (move together / move freely) |
+| DC shift calibration | Diagnostics > Calibration > DC shift trim (the trim itself on the CTRL page while on) |
+| USB-Serial mode | removed: the build forces CDC (`PC_FORCE_CDC`); the setting did nothing visible |
+| Dev mode | no switch; the flag stays in the sector, Diagnostics > Developer offers "Debug overlay / Switch off" only while it is set |
+| Add a tag to BMP | Settings > Files > Stamp screenshots with (time / file name / nothing) |
+| Load Ref on start | Settings > Files > Reference traces at power-on |
+
+  Nothing of the two menus is lost except USB-Serial mode (no effect in this build) and the Dev mode switch (by the
+  0.2.63 decision).
+
+**Bench walk-through (owner, coordinator on COM10; FEL load, no SD writes)** - `#VER fw=0.2.68,proto=1.20`. CH1 on the
+1 kHz calibration square, 1X, DC, Auto trigger, Scope view.
+1. RUN/STOP: running, the chip reads green RUN and the right-bar button red "STOP" (white text). Tap: chip red STOP,
+   button green "RUN". Tap: back. Trigger mode Single: chip orange WAIT, button red "STOP"; after the capture both show
+   stopped (chip STOP, button RUN).
+2. From the MCP: `scope_acquisition_control` "stop": both change at once; "run": both change back. Then several
+   `scope_capture` calls (or `scope_averaged_capture` n=16): while the PC captures, chip RUN and button STOP, steady;
+   about 1 s after the last capture both show stopped. During an averaged capture tap STOP on the screen: the host call
+   reports an aborted capture, the scope stays stopped. Repeat 1-2 with Diagnostics open (Back shows the right state) and
+   in the spectrum view.
+3. Menu: eight rows (Scope, Spectrum analyser, Bode plot, Saved pictures, Saved waveforms, Settings, Diagnostics, USB
+   drive), nothing clipped at the bottom, every label inside its button. Scope icon: a sine over a grey cross, nothing
+   cut at the top. Settings: the spanner and screwdriver of Other settings. Bode plot: two falling lines. Tap each row
+   near its top and bottom edge: that row reacts.
+4. Bode plot row (0x1538): opens the Bode view; the generator menu has three rows (Power, Frequency, Duty), no Bode row.
+   Menu > Scope leaves the view (generator, channels, time base given back), Menu > Spectrum analyser too. From roll
+   mode, Bode plot switches roll off. In the waveform viewer the row is grey and a tap does nothing (the menu stays open).
+5. Brightness: tap the sun: full bright, the sun yellow. Menu > Settings > Screen brightness: slider and value read
+   100 %. Drag to 40 %: the sun turns white as the value leaves 100. Close; sun: 100 %; sun again: 40 %. Other settings
+   page: Screen brightness - / + changes the same value; Back: the sun matches (yellow only at 100). Power-cycle at 100 %
+   set by the sun: comes up at 100 %, the next sun tap returns to 40 %.
+6. Time/div snap (owner's repro): ACQ menu, a slow time/div at a low rate with deep memory, then a high rate: the
+   notice "Time/div set to X for this rate"; close the menu, watch 10 s: expected stable. If it still cycles: note the
+   ACQ menu's rate, then set time/div by hand in the **ACQ menu** (5 us, then 10 us). If that does not settle it but a
+   **plot tap** does, read the rate after the tap (plot taps in RUN couple the rate to the time/div): the cause is then
+   the rate / depth combination, not the snap (successor note, item 3).
+7. Diagnostics > Calibration: four equal buttons on the bottom row: Calibrate (green), DC shift trim (grey / green),
+   Volts calibration, Clear calibration (red) at the right. Tap DC shift trim: "On: CTRL on the scope opens the trim."
+   above the row. Calibrate: the wizard's title line ends in "Step 1 of 4" (Continue: 2, 3, 4 of 4); Cancel.
+Bug indicators: chip and button disagreeing; the button reading STOP with the scope idle for more than a second; a STOP
+tap during a host capture that starts the UI's RUN; a main-menu tap selecting the neighbouring row; a Bode row in the
+generator menu; the sun yellow below 100 % or the slider not at 100 % after the sun; the snapped time/div cycling.
