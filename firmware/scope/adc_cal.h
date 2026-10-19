@@ -258,6 +258,7 @@ void     acal_fail_point(const acal_point pt[ACAL_POINTS], int rc, acal_fail *f)
 #define ACAL_PROBE_BYTES     (24 + 28 * ACAL_POINTS)
 #define ACAL_PROBE_GARBLED   0x01         //flags: a full-rate capture was accepted garbled after the re-arms
 #define ACAL_PROBE_NOCENTRE  0x02         //flags: the coarse centre failed, no fine points
+                                          //flags bits 7:4: the request's settle reads (0 = the wizard's readout)
 
 uint32_t acal_probe_pack(uint8_t *dst, uint8_t ch, uint8_t range, int rc, uint8_t flags, int32_t centre, int32_t pwm,
                          uint32_t enc_bad, uint32_t enc_recovered, const acal_fail *f, const acal_point pt[ACAL_POINTS]);

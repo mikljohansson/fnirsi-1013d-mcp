@@ -100,6 +100,8 @@ void   fpga_prepare_correction(PCHANNELSETTINGS settings);                //the 
 extern uint8 fpga_trace_who;
 
 extern uint32 fpga_divider;     //last 0x0D value written (clock class of the zero correction)
+//fw 0.2.67, CAL_PROBE A/B test: extra reads of the data port after each sample strobe before the sampled one (0 normal)
+extern uint8  fpga_read_settle;
 void   fpga_read_adc_data(PCHANNELSETTINGS settings);
 
 uint16 fpga_average_trace_data(PCHANNELSETTINGS settings);  //For long time base

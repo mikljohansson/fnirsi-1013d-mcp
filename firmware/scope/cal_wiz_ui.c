@@ -423,7 +423,7 @@ static void cal_end(uint32 gen)
 
 static uint8 cal_probe_keep[1000];
 
-int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t *dst)
+int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t *dst)
 {
   acal_range_meas m;
   acal_point      pt[ACAL_POINTS];
@@ -433,7 +433,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t *dst)
   uint8           flags = 0, *tb;
   int             rc;
 
-  if((ch > 1) || (range >= ACAL_RANGES))
+  if((ch > 1) || (range >= ACAL_RANGES) || (settle > 15))
     return -1;
 
   tb = ch ? (uint8 *)channel2tracebuffer : (uint8 *)channel1tracebuffer;
@@ -441,6 +441,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t *dst)
   pc_hal_enc_state(&e0);
 
   cal_begin();
+  fpga_read_settle = settle;
   cal_scratch_channel(ch);
   calibrationsettings.samplevoltperdiv = range;
   fpga_set_channel_voltperdiv(&calibrationsettings);
@@ -453,6 +454,8 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t *dst)
   if(centre < 0)
     flags |= ACAL_PROBE_NOCENTRE;
 
+  flags |= (uint8)(settle << 4);
+  fpga_read_settle = 0;
   cal_end(0);
 
   memcpy(tb, cal_probe_keep, sizeof(cal_probe_keep));

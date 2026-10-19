@@ -2790,7 +2790,8 @@ static int h_read_spectrum(pc_session *s, const uint8_t *req, uint32_t len, uint
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// CAL_PROBE (1.21 provisional, fw 0.2.67): u8 channel, u8 hardware range 0..5. The calibration wizard's zero step for
+// CAL_PROBE (1.21 provisional, fw 0.2.67): u8 channel, u8 hardware range 0..5, u8 settle (0..15 extra data-port reads
+// per sample, an A/B test of the readout; 0 = the wizard's). The calibration wizard's zero step for
 // that range, exactly as the wizard measures it (cal_wiz_ui.c cal_range), nothing stored; about 1 s, main loop only.
 // The UI must be stopped (SET_ACQ_STATE 0) and no host capture pending; the FPGA gets the UI's settings back afterwards
 
@@ -2807,6 +2808,9 @@ static int h_cal_probe(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
   if(req[1] >= ACAL_RANGES)
     return pc_error(s, PC_E_BAD_ARG, 1, "range 0..5");
 
+  if(req[2] > 15)
+    return pc_error(s, PC_E_BAD_ARG, 2, "settle 0..15");
+
   if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
     return pc_error(s, PC_E_STATE, 0, "host capture pending");
 
@@ -2815,7 +2819,7 @@ static int h_cal_probe(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
   if(u.run)
     return pc_error(s, PC_E_STATE, 1, "UI running: SET_ACQ_STATE 0 first");
 
-  n = pc_hal_cal_probe(req[0], req[1], resp);
+  n = pc_hal_cal_probe(req[0], req[1], req[2], resp);
 
   if(n < 0)
     return pc_error(s, PC_E_INTERNAL, 0, "cal probe");

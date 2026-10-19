@@ -629,8 +629,8 @@ int32_t pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t 
 
 //CAL_PROBE (fw 0.2.67): the arguments, the call count, and a canned measurement (zero point A 130.0 / B 126.0 at PWM 812)
 uint32_t mock_cal_probe_calls;
-uint8_t  mock_cal_probe_ch, mock_cal_probe_range;
-int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t *dst)
+uint8_t  mock_cal_probe_ch, mock_cal_probe_range, mock_cal_probe_settle;
+int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t *dst)
 {
   acal_point pt[ACAL_POINTS];
   acal_fail  f;
@@ -638,6 +638,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t *dst)
   mock_cal_probe_calls++;
   mock_cal_probe_ch    = ch;
   mock_cal_probe_range = range;
+  mock_cal_probe_settle = settle;
 
   memset(pt, 0, sizeof(pt));
   memset(&f, 0, sizeof(f));
@@ -647,7 +648,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t *dst)
   pt[ACAL_PT_F_ZERO].convs     = 64;
   pt[ACAL_PT_F_ZERO].mean16[0] = 130 * 16;
   pt[ACAL_PT_F_ZERO].mean16[1] = 126 * 16;
-  return (int32_t)acal_probe_pack(dst, ch, range, 0, 0, 800, 812, 0, 0, &f, pt);
+  return (int32_t)acal_probe_pack(dst, ch, range, 0, (uint8_t)(settle << 4), 800, 812, 0, 0, &f, pt);
 }
 
 uint32_t mock_fft_bench_reps;
