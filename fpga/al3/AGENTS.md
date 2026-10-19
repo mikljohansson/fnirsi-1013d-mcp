@@ -797,3 +797,99 @@ commands.txt, protocol.md) are **not written yet** for the capture fix.
 4. Consider making the encode pads fixed (ODDR in the IOB) so the margins no longer depend on placement.
 5. Rebase `gen8-features-wip` onto it as 0x153B (its tests: tb_trigtypes, tb_peak, tb_counter; its README section 10
    becomes 11).
+
+## 0x153A review, fpga-gen9 (2026-10-19)
+
+Review of the capture path as left in 19d9a5c (line numbers of `src/zaklad.v` at that commit), the clocking, the
+constraints, the MCU side and the power-on values, before the design was changed. Sources: the AD9288 datasheet
+(`D:\src\FNIRSI-1013D-1014D-Hack\IC's\AD9288.pdf`, table 1 and figures 2-4), pecostm32's 1013D schematic (the
+AD9288 note "The data align mode is enabled (S1, S2 inputs high)"), TD re-timings of the placed 0x1538 and 0x1539
+builds with zero I/O delays (`~/al3-gen7-1538`, `~/g8/final`; script pattern `tb/capture_report.sh`), gen8's 0x153A
+build `~/g8/w/cE`, and the bench entries of 2026-10-19 16:25 to 20:51 in `docs/hardware-status.md`.
+
+### What is right in 19d9a5c
+- The diagnosis: 0x1532..0x1539 sample the ADC pins straight into the write-clock domain at an instant set by
+  placement (pad + route 3.4..4.7 ns against a 2.49 ns write clock insertion). Re-timed 0x1539 numbers: the sample
+  memory needs each pad stable over about [R - 2.7, R - 0.3] ns (CH1 A), [R - 3.1, R - 1.0] (CH1 B), [R - 2.7, R - 0.5]
+  (CH2 A), [R - 2.9, R - 1.0] (CH2 B), R = the write clock edge; the encode pads switch 6.73 / 6.98 ns (B) and
+  7.35 / 7.85 ns (A, after the falling edge) after R. With the datasheet window [encode + 6, next encode + 2] the A
+  cores need stability from R - 1.35 / R - 0.85 on, which they do not get: A bad, B clean, both chips: exactly the bench.
+  0x1538 re-timed the same way puts CH2 B 0.8 ns past the end of its window and CH1 A 0.4 ns before the start of its
+  window: CH2 A + B bad, CH1 A occasionally, as benched. So the capture-window reading is confirmed by numbers, not only
+  by the symptom.
+- IOB DDR input registers on `clk_200MHz` (835-868): the pad-to-register path is fixed (1.22 ns, clock insertion
+  0.94 ns, aperture about -0.11 .. +0.12 ns around the clock edge for every pin, cE report), so the sampling instants no
+  longer move with placement. The 2.5 ns grid (q2, q1, d2, d1, dd2, dd1 = pins 5 .. 17.5 ns before an edge) is the
+  right resolution for a 6 ns worst-case window: for any window position one grid point has >= 1.75 ns on both sides.
+- A per-core stage register (0x63) with outlier counters (0x36) and threshold (0x64) is the right shape: the firmware
+  can find the clean stage on the unit and a wrong default fails loudly at code 128. Storing the registers XOR their
+  power-on value is the right answer to TD ignoring initial values.
+- The MCU side of 0x1539 (read byte on the falling edge, address copy, `i_mcu_clk` as an asynchronous clock group)
+  stands; nothing in the capture change touches it.
+- `swc_rose` (748-751), the encode look-ahead (948-965) and `sce_q` (1020-1021) are sound: the encodes are a function
+  of the write clock with 3.75 ns paths, B = write clock, A = complement.
+
+### What is wrong or fragile
+1. **The A stages are only right at some sample rates.** Stage k samples the pins 5 + 2.5 k ns before a rising write
+   clock edge R. Core B is encoded on the rising edge, so its data window relative to R does not depend on the rate
+   (the window of the sample encoded at R - T is [R - T + 13.3, R + 9.3] at every T = 10 (D + 1) ns; stages 3 and 4 sit
+   inside it with 1.7 .. 1.8 ns at every T). Core A is encoded on the **falling** edge, T/2 before R, so its window
+   relative to R moves with T: [R - T/2 + 13.1, R + T/2 + 9.1]. Stages 1 and 2 (R - 7.5, R - 10) are inside the right
+   window only for T = 10, 20 and >= 50 ns. At T = 30 (D = 2, about 67 MSa/s, not in the firmware table) they take the
+   A sample of the previous period (A then leads B: wrong order, clean data). At **T = 40 (D = 3, 50 MSa/s, in the
+   firmware's rate table)** both stages sit in the A data transition [R - 10.9, R - 6.9]: garbled A cores at 50 MSa/s,
+   by construction and at every corner. 0x1539 captured at about R - 1.5, which is inside the T = 40 window
+   ([R - 6.9, R + 29.1]), so this fault is new in 19d9a5c. The fix is to reference the A capture to the falling write
+   clock edge, which the A encode is made from (see the design below).
+2. **The pick is a half-cycle path** (890-906): the six stage buses are launched on the rising `clk_200MHz` edge and the
+   6:1 mux has to land in `adc*_w` on the write clock edge 2.5 ns later; slack +0.123 ns at TT 85 C in the cE build.
+   TD reports one corner. A 2.5 ns path with 0.12 ns of margin is the same class of fault as 0x1537's encode flop
+   (-0.21 ns) and the 0x1534..0x1538 "lottery": it may hold on this build and fail on the next, or on a cold unit.
+   The pick must sit between two registers of the same clock edge with a whole period.
+3. **The B window model is an assumption, and the schematic contradicts it.** 19d9a5c (and this review's numbers
+   above) take the B data to follow the B encode (AD9288 figure 3, data align off). pecostm32's schematic says
+   S1 = S2 = high, which per table 4 of the datasheet is "Data Align Enabled: Channel B data is delayed a 1/2 clock
+   cycle, available on the rising edge of Clock A" (figure 4): then the B data would transition together with the A
+   data, 6 .. 12 ns after the **A** encode. The re-timed 0x1538 / 0x1539 lane patterns fit only the align-off model
+   (align-on would make CH1 B, whose pad paths are the longest, worse than CH1 A on 0x1539; the bench has it clean),
+   so align-off is what this unit does, with tV about 2.5 .. 2.8 ns and tPD about 5.2 ns at the bench's operating
+   point (inference from fitting the four lane results; the datasheet limits stay the design basis). The design must
+   not bet on it: the B cores get a selectable reference edge (B encode or A encode), training settles it, and a wrong
+   default fails loudly rather than shifting data.
+4. **Margins are TT numbers.** The encode path (flop 1.07 ns insertion + 0.15 + 0.86 .. 0.90 ns route + 3.42 ns pad,
+   6.7 .. 7.9 ns after R) is the only placement- and PVT-dependent term; the IOB sampling instant is tied to the clock
+   edge within 0.3 ns. A +-1 ns PVT swing of the encode path (inference: about +-15 %) leaves 0.6 .. 0.9 ns at the
+   fixed default stage against the datasheet window, and the best of two stages 2.5 ns apart keeps >= 1.75 ns for a
+   window drift of -2.3 .. +2.7 ns. So the honest claim is design goal (b): selectable per core, self-checked, with
+   >= 1.6 ns at the defaults at TT against the worst-case datasheet window; not (a), a guaranteed worst-corner margin.
+5. **No I/O constraints on the ADC pins in the build SDC** (`zaklad.sdc`), as before; `tb/capture_io.sdc` is only used
+   for the margin report. A `set_input_delay` cannot express "one of six stages must be inside a moving window", and
+   with the IOB registers there is nothing for the placer to move, so the report (exit code on < 1 ns) stays the gate.
+   The encode outputs stay fabric flops (TD does not pack them into IOBs with the 0x33 check on their nets, gen8), so
+   the report must be re-run for every build and the power-on stages set from it.
+6. **Power-on values.** TD 4.6.8 configures every flop to 0 (gen8's byte-identical builds). Registers whose Verilog
+   initial value is not 0 and therefore differs on hardware until written: `gen_out_enable = 1` (565; the firmware
+   writes 0x50..0x52 together in `fpga_on_off_generator`, so the generator is off until then, not 1 kHz),
+   `clk_out_divider = 85899`, `clk_out_duty` (566-567), `pretrigger_samples = 750`, `total_samples = 1500` (611-612;
+   written before every capture), `seq_count = 1`, `seg_m = 7`, `avg_n = 1` (632-634; `avg_n` = 0 means 65536 records,
+   only reachable with 0x57 != 0, which the firmware writes together with 0x58..0x5B), `adc*_encA = 1` (662-665;
+   reloaded every clock), `swc_adv_q = 1` (660; right after one write clock), `enc_nxt_n = 1`, `enc_ok = F`,
+   `enc_pred_ok = 1` (949, 982-983; reloaded every clock), `seg_mask_s = 1FFF` (915; loaded at the first 0x01 = 1;
+   before that every write goes to address 0, harmless), `ts_inc = 2` (1322; reloaded every clock), `q_first = 1`
+   (1402; set at the first reset). Nothing the firmware relies on at boot depends on an initial value; the comments
+   that call these power-on values are wrong and the iverilog runs differ from the hardware until the first writes.
+   The 0x53 bits (`dec_*`, 619-622), `trigger_mode` and `cap_sel_x` / `cap_thr_x` are 0 in both worlds.
+7. **0x53 bits 3 / 4** (`dec_neg_a`, `dec_neg_b`; `decim_chan` 181-192): with registered data they select the same
+   value on either edge: dead logic that still costs 32 flops and reads back in 0x29. Keep the bits readable, remove
+   the registers.
+8. Smaller: the live reads 0x24..0x27 return `adc_q1` (the pin at the rising `clk_200MHz` edge), which is not a
+   stage any core uses; fine for a liveness read, documented as such. The outlier counter's first two words of a
+   capture are skipped (`oc_v`), right. The 0x36 read returns `cap_sel` as written, right.
+
+### Verdict
+Keep the IOB registers, the 2.5 ns grid, the per-core stage register, the outlier counters and the XOR coding.
+Change the structure: capture the A cores against the falling write clock edge and the B cores against the rising
+edge (or, selectably, the falling one), stage registers in the write-clock domain loaded by wire-only paths from the
+`clk_200MHz` chain, the pick a full write clock period after them, `adc*_w` fed by wire-only paths. The word
+association (B first by T/2) then holds at every rate by construction (shown in README section 10), and the only
+half-period paths left are register-to-register wires.
