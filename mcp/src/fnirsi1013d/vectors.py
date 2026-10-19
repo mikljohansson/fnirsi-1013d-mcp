@@ -185,7 +185,7 @@ def check_file(path: Path) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="python -m fnirsi1013d.vectors", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--file", type=Path, default=DEFAULT_PATH,
                     help="the vectors file (default: docs/protocol-vectors.json of the checkout, when run from one)")
     ap.add_argument("--merge", action="store_true", help="add host vectors with new names (keeps the rest)")

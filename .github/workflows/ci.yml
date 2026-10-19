@@ -1,6 +1,6 @@
-# CI: firmware (GCC 10 + GCC 13 builds, host tests), mcp (ruff + pytest on
-# Linux and Windows), shared protocol vectors. Also called by release.yml (workflow_call), which then
-# downloads the firmware-image artifact. docs/releasing.md describes both workflows.
+# CI: firmware (GCC 10 + GCC 13 builds, host tests), mcp (ruff + pytest on Linux and Windows, the wheel in a
+# fresh venv), shared protocol vectors. Also called by release.yml (workflow_call), which then downloads the
+# firmware-image artifact. docs/releasing.md describes both workflows.
 name: CI
 
 on:
@@ -73,6 +73,35 @@ jobs:
       - name: pytest (simulator over TCP and stdio subprocesses; no hardware)
         timeout-minutes: 10
         run: python -m pytest -q -p no:cacheprovider
+
+  wheel:
+    # The wheel as a user gets it (built like release.yml does), installed into a fresh venv outside the checkout:
+    # fnirsi1013d-mcp --list-tools, an MCP stdio session against the in-process simulator, files under
+    # FNIRSI_MCP_HOME, clear errors for the checkout-only inputs (.github/scripts/wheel_smoke.py).
+    name: mcp wheel in a fresh venv (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUNBUFFERED: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Build the wheel (as release.yml)
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build mcp --outdir dist
+      - name: Install into a fresh venv and run the server from it
+        run: python .github/scripts/wheel_smoke.py --wheel dist/fnirsi1013d-*.whl
 
   docs-lint:
     name: protocol vectors and CHANGELOG
