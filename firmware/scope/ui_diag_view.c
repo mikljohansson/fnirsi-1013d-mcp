@@ -536,7 +536,7 @@ static void ud_touch(void)
       break;
 
     case UD_ID_OVERLAY:
-      dev_mode ^= 1;
+      dev_mode = 0;
       break;
 
     case UD_ID_DCSHIFT:

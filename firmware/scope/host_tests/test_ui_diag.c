@@ -349,15 +349,19 @@ static void test_pages(void)
   T_TRUE(has_text("Operating time 37 h 5 min."));
   T_EQ(ud_hit(&pg, 230, 430), UD_ID_OLDER);
 
-  //Developer page: the two rows
+  //Developer page (fw 0.2.63): Enter FEL; the Debug overlay row only while the developer flag is set, to switch it off
   ud_build(&pg, UD_PAGE_DEV, &in, 0);
-  T_EQ(ud_hit(&pg, 400, 100), UD_ID_OVERLAY);
-  T_EQ(ud_hit(&pg, 400, 170), UD_ID_FEL);
-  T_EQ(pg.btn[pg.nbtn - 2].note_colour, UD_C_DIM);         //off
+  T_EQ(ud_hit(&pg, 400, 100), UD_ID_FEL);
+  T_EQ(ud_hit(&pg, 400, 170), UD_ID_NONE);
+  T_TRUE(!has_text("Developer flag: raw trigger address and touch coordinates on the scope"));
   in.dev_mode = 1;
   ud_build(&pg, UD_PAGE_DEV, &in, 0);
-  T_STR(pg.btn[pg.nbtn - 2].note, "on");
-  T_EQ(pg.btn[pg.nbtn - 2].note_colour, UD_C_OK);
+  check_layout("dev flag", 0);
+  T_EQ(ud_hit(&pg, 400, 100), UD_ID_OVERLAY);
+  T_EQ(ud_hit(&pg, 400, 170), UD_ID_FEL);
+  T_STR(pg.btn[pg.nbtn - 2].note, "Switch off");
+  T_EQ(pg.btn[pg.nbtn - 2].note_colour, UD_C_WARN);
+  in.dev_mode = 0;
 
   //Header: tabs and Back on every page, the shown one highlighted
   for(p=0;p<UD_PAGES;p++)

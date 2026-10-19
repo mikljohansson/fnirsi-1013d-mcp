@@ -1362,27 +1362,36 @@ static void ud_page_log(ud_page *pg, const ud_input *in, const ud_note *note)
 //----------------------------------------------------------------------------------------------------------------------------------
 // Developer page
 
+//fw 0.2.63 (owner, item n): the Debug overlay switch is gone. 1.00o5's dev_mode draws raw numbers (the FPGA's trigger
+//address over the top bar, the trigger position, touch coordinates in two menus) that mean nothing to a user and that
+//the PC reads through the protocol anyway; the flag stays in the settings for firmware work. A unit that switched it
+//on with 0.2.59-0.2.62 gets a row to switch it off, shown only while the flag is set.
 static void ud_page_dev(ud_page *pg, const ud_input *in)
 {
   ud_button *b;
+  int        y = 86;
 
   ud_txt(pg, 12, 62, 776, UD_F_SMALL, UD_C_SOFT, "For firmware work. Normal use needs none of this.");
 
-  b = ud_btn(pg, 12, 86, 776, 56, UD_B_ROW, UD_ID_OVERLAY, "Debug overlay");
-  if(b)
+  if(in->dev_mode)
   {
-    b->note = in->dev_mode ? "on" : "off";
-    b->note_colour = in->dev_mode ? UD_C_OK : UD_C_DIM;
+    b = ud_btn(pg, 12, y, 776, 56, UD_B_ROW, UD_ID_OVERLAY, "Debug overlay");
+    if(b)
+    {
+      b->note = "Switch off";
+      b->note_colour = UD_C_WARN;
+    }
+    ud_txt(pg, 24, y + 30, 640, UD_F_SMALL, UD_C_DIM, "Developer flag: raw trigger address and touch coordinates on the scope");
+    y += 64;
   }
-  ud_txt(pg, 24, 86 + 30, 640, UD_F_SMALL, UD_C_DIM, "Trigger address and touch coordinates over the top bar");
 
-  b = ud_btn(pg, 12, 150, 776, 56, UD_B_ROW, UD_ID_FEL, "Enter FEL now");
+  b = ud_btn(pg, 12, y, 776, 56, UD_B_ROW, UD_ID_FEL, "Enter FEL now");
   if(b)
   {
     b->note = "asks first";
     b->note_colour = UD_C_WARN;
   }
-  ud_txt(pg, 24, 150 + 30, 640, UD_F_SMALL, UD_C_DIM, "Restart into the USB boot loader (sunxi-fel); the card is not touched");
+  ud_txt(pg, 24, y + 30, 640, UD_F_SMALL, UD_C_DIM, "Restart into the USB boot loader (sunxi-fel); the card is not touched");
 }
 
 void ud_build(ud_page *pg, int page, const ud_input *in, const ud_note *note)
