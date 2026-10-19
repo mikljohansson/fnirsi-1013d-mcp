@@ -729,3 +729,8 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 2026-10-19 14:42: fw 0.2.59 (UI step 4 on 0.2.58; merge of fw-ui4) built with GCC 10, MMU image sha256
   4ba894692d3cdbe92341bbd65cdd5cadd27c16cb68c5db3b8aeb2cddeca39736, nommu 24151796e999fc4105736f786e4eeae33c0948bacab2f6cc74af03ef329b082d,
   602,112 B, pinned in backups/. The complete makeover image: load this one next. Not loaded.
+- 2026-10-19 14:45: Bode sweep 4, same RC, ground rail wired to the shell of a 30 cm USB extension between hub and scope
+  (backups/bode/rc1_15n_usbgnd.json): identical to the clip-grounded sweeps within 0.4 dB (300 kHz -25.0 dB / -68 deg). Either the
+  earlier ground wires (clips, BNC shell) were still attached so the return path did not change, or the extension shell is not bonded
+  to USB GND. Next: remove every other ground wire; and the direct test of the return-error theory: CH2 tip on the ground rail with
+  wiring A (bode-design 2.5 predicts about -21 dB rising with frequency if the 100 Ohm R71 path carries the return current).
