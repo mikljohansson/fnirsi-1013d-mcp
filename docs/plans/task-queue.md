@@ -88,6 +88,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   both cores +0.5 within one 10-minute interval, persisting. Morning: battery/charger state, recalibrate on 0.2.48, re-check the CH2 A/B
   split; if per-core zeros move with temperature or supply, consider a periodic zero re-check (needs an input-independent method) or a
   warm-up note in the calibration procedure.
+- [ ] **Calibration v4: background interleave-mismatch tracking** (10-19 morning, docs/hardware-status.md 08:30): the full-rate core
+  offset and gain relationship changes over hours (3.3 % gain mismatch last night, 0 % now; zero split 3.9 vs 5.0 codes within 15 min of
+  calibration; the 03:48 overnight step), so v3's one-time full-class gains/zeros go stale while the gated class stays within 0.3 code.
+  Standard interleaved-ADC fix: estimate offset mismatch (mean A - mean B) and gain mismatch (std A / std B, or the fs/2 spur power) from
+  live records when the signal is band-limited (no energy near fs/2 and enough samples), low-pass the estimates over many records, and apply
+  them on top of the stored zeros/gains in the full-rate class only. Design first (fw-cal3): detection of valid records, convergence time,
+  interaction with the 16-bit path and the spectrum view, a diagnostics readout of the tracked mismatch, host test with a drifting model.
+  Owner decision needed on whether the one-time v3 gain step stays (it still fixes the class gain ratio and the gated class).
 - [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s): deterministic test with
   GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
 - [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md

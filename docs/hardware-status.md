@@ -630,3 +630,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   B 1.0067, gated A 1.0107 B 0.9895, gain16 1.0114. Raw gated zeros at the PWM centre: CH1 A 131.0 B 125.1-125.4, CH2 A 128.0 B
   128.0-128.25; full CH1 A 131.3-131.75 B 127.5-127.8, CH2 A/B 129.3-129.75. Note: the CH1 full-rate A/B gain ratio from the post
   step is 1.013, smaller than the 1.033 the +-1 V DMM bench gave; the +-1 V check decides which is right.
+- 08:30 post-level check under v3 (CH1 on the post, range 2, dcoffset 0; CH2 reading 0 V, apparently off the post), MMU and -nommu
+  images identical (backups/calv3_postlevel_*.json): classes agree (CH1 full mean 93.57, gated 93.48, CIC2 93.58 at -1.19 V); gated
+  cores agree (A-B -0.14..-0.39); **full-rate CH1 A-B +1.4..+1.6 at the low level, +0.29 at the high level** (generator duty 1.0, +1.87 V).
+  Raw A-B: full +5.0 at both -34 and +53 codes (so equal core gains now), gated +5.3..+5.5; the stored full zeros say A-B 3.9, the gated
+  5.8. Generator off (pin tri-state) vs driven low: identical, so source impedance is not the cause. Reading: within 15 minutes of the
+  calibration the full-rate core relationship differs from what the zero and gain steps measured (zero split off by 1.1 code, gain
+  mismatch 1.3 % then vs 0 % now; last night 3.3 % with the opposite sign of today's residual). The full-rate (interleaved) class is not
+  stable enough for a one-time calibration; the gated class is. Next: 10-minute full-rate zero log with shorted inputs; design a
+  background interleave-mismatch estimator (queue).
