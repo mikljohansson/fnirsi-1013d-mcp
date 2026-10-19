@@ -253,19 +253,19 @@ def scope_plot(warning="CH1 overrange: increase V/div"):
 
 
 # ---------------------------------------------------------------- the slider row and its overview (docs/plans/slider-overview.md)
-# fw 0.2.73 (owner 10-19 21:36, slider-overview.md 10 F item 6; firmware slider_ov.h): one line at y 452 over x 2..727
-# parts the track from the plot (no frame sides or bottom); the track is x 2..727 (726 columns, TBV_SLIDER_X / _W,
-# BU_SL_X / _W) and y 453..471 (19 rows); the window is two 1 px lines, its left and right edges, over the track's full
-# height. The overview uses every row and column: dimmed outside the window, full colour inside it; the edges are drawn
-# last, over it.
-OV_X, OV_W, OV_Y, OV_ROWS = 2, 726, 453, 19
-WIN_Y, WIN_H = 453, 19
+# fw 0.2.74 (owner 10-19 22:15, slider-overview.md 10 F item 7; firmware slider_ov.h): the track has no frame or line of
+# its own (the plot pane's outline is the separation); it is x 2..727 (726 columns, TBV_SLIDER_X / _W, BU_SL_X / _W) by
+# y 452..471 (20 rows) and the overview is mapped on all 20 rows, dimmed outside the window. The window is a box of 1 px
+# lines (x, x + w - 1 over y 453..470; y 453 and y 470) with a 1 px black margin around it (y 452, y 471, x - 1, x + w),
+# drawn last over the overview, so inside its lines (y 454..469, 16 rows) the overview shows in the full colour.
+OV_X, OV_W, OV_Y, OV_ROWS = 2, 726, 452, 20
+WIN_Y, WIN_H = 453, 18
 DIM = {CH1: "#808000", CH2: "#008080"}     # the channel colours at half intensity (outside the window)
 OV_FLAG = "#707070"                         # bode_view.c FLAG_COLOR: a flagged Frequency response point
 
 
 def ov_row(frac):
-    """the overview row of a fraction 0 (top of the plot) .. 1 (bottom), clipped to the 19 rows"""
+    """the overview row of a fraction 0 (top of the plot) .. 1 (bottom), clipped to the 20 rows"""
     return max(OV_Y, min(OV_Y + OV_ROWS - 1, OV_Y + int(frac * OV_ROWS)))
 
 
@@ -306,13 +306,17 @@ def ov_svg(win_x, win_w, layers):
 
 
 def slider_row(win_x=189, win_w=350, layers=()):
-    """the record-position slider under the grid (menu.c scope_draw_slider_row, fw 0.2.73: the line at y 452, the
-    overview in the track y 453..471, the window's two edge lines; fw 0.2.64 tbv_slider window). The Scope boards'
+    """the record-position slider under the grid (menu.c scope_draw_slider_row, fw 0.2.74: the overview in the track
+    y 452..471, the window a box with a 1 px margin; fw 0.2.64 tbv_slider window). The Scope boards'
     window: 3000 samples at 500 kSa/s, 200 us/div, the trigger at the record's middle on the centre line: first sample
     776 -> x 2 + 776 x 726 / 3000 = 189, 1449 samples on screen -> 350 px"""
-    return (box(2, 452, 726, 1, f"background: {LG1}") + (ov_svg(win_x, win_w, layers) if layers else "") +
-            box(win_x, WIN_Y, 1, WIN_H, f"background: {LG2}") +
-            box(win_x + win_w - 1, WIN_Y, 1, WIN_H, f"background: {LG2}"))
+    ml, mr = max(OV_X, win_x - 1), min(OV_X + OV_W - 1, win_x + win_w)
+    margin = (box(ml, OV_Y, mr - ml + 1, 1, "background: #000000") +
+              box(ml, OV_Y + OV_ROWS - 1, mr - ml + 1, 1, "background: #000000") +
+              (box(ml, OV_Y, 1, OV_ROWS, "background: #000000") if ml < win_x else "") +
+              (box(mr, OV_Y, 1, OV_ROWS, "background: #000000") if mr > win_x + win_w - 1 else ""))
+    return ((ov_svg(win_x, win_w, layers) + margin if layers else "") +
+            box(win_x, WIN_Y, win_w, WIN_H, f"border: 1px solid {LG2}"))
 
 
 def scope_square_overview(chans, total=3000):
@@ -320,7 +324,7 @@ def scope_square_overview(chans, total=3000):
     falling at 500 k + 250; on the plot x = (sample - 776) / 2, EDGES above). chans: [(colour, zero_y, px_per_v)] in
     drawing order (CH2 first, CH1 over it, as the traces). Each column covers total / 726 samples plus the previous
     column's last one (so the columns join); its min and max go
-    through the plot's own y mapping (screen y 49..448, clipped as scope_get_y_sample clips) to the 19 rows"""
+    through the plot's own y mapping (screen y 49..448, clipped as scope_get_y_sample clips) to the 20 rows"""
     layers = []
     for colour, zero, ppv in chans:
         hi, lo = max(1.0, zero - 1.87 * ppv), zero + 1.19 * ppv

@@ -33,7 +33,7 @@ OVERVIEW = [(f, *B.h_bp(f), B.h_bp(f)[0] > -58) for f in OVERVIEW_F]
 
 
 def fr_overview(pts):
-    """docs/plans/slider-overview.md: the overview AUTO SET kept, its magnitude only, fitted to the 19 rows (the
+    """docs/plans/slider-overview.md: the overview AUTO SET kept, its magnitude only, fitted to the 20 rows (the
     highest valid point on the top row, the lowest on the bottom row; the track has no labels, so only the shape
     counts); valid points joined by a line in the magnitude colour, a flagged point a single grey pixel without a
     joining line (as on the chart), clipped to the rows"""
@@ -62,8 +62,8 @@ def fr_overview(pts):
 
 
 def fr_slider(f0, f1, overview=None):
-    """Start..Stop as a window over 1 Hz..10 MHz on the log axis, the Scope slider's construction (fw 0.2.73: the line
-    at y 452, the track y 453..471, the window's two edge lines); dragging moves Start and Stop together by whole steps
+    """Start..Stop as a window over 1 Hz..10 MHz on the log axis, the Scope slider's construction (fw 0.2.74: the track
+    y 452..471, the window a box with a 1 px margin); dragging moves Start and Stop together by whole steps
     and re-sweeps, a tap outside the window centres it there. With the overview AUTO SET kept drawn in the track
     (x 209..727: 100 Hz .. 10 MHz), nothing before the first AUTO SET"""
     x0, x1 = round(track_x(f0)), round(track_x(f1))
