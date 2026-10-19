@@ -317,7 +317,8 @@ static void auto_range(bode_eng *e, const bode_meas *m, int coll)
 {
   int r = e->range[1];
 
-  if(e->cfg.ch2_mode != BODE_CH2_AUTO)
+  //STOP: the point keeps this result, no range change follows
+  if((e->cfg.ch2_mode != BODE_CH2_AUTO) || e->stop_req)
   {
     next_point(e);
     return;
@@ -422,6 +423,12 @@ static void on_prescan(bode_eng *e, const bode_meas *m)
   int    c, t[2];
   const bode_plan *pp = &e->plans[0];
 
+  if(e->stop_req)
+  {
+    finish(e, BODE_ST_STOPPED, BODE_ERR_STOP);
+    return;
+  }
+
   e->ref2      = *m;
   e->have_ref2 = 1;
   e->v_dc[0]   = m->c[0].mean_uv;
@@ -451,6 +458,19 @@ static void on_prescan(bode_eng *e, const bode_meas *m)
   measure(e, PH_VERIFY, pp, settle_periods[e->cfg.settle] * 10);
 }
 
+//Range 0 (5 V/div) and still clipped, the fundamental under CH1_LOW (20 codes); CH2 only when it is not a flat record (a
+//DC overload has its own rule)
+static int readout_fault(bode_eng *e, const bode_meas *m)
+{
+  int c;
+
+  for(c = 0; c < 2; c++)
+    if((e->range[c] == 0) && m->c[c].clipped && (m->c[c].code_mdb < CH1_LOW_MDB) && !((c == 1) && flat2(m, 0)))
+      return 1;
+
+  return 0;
+}
+
 static void on_verify(bode_eng *e, const bode_meas *m)
 {
   int over = (e->range[1] != 1) && flat2(m, collapsed(&e->ref2, m));
@@ -461,6 +481,15 @@ static void on_verify(bode_eng *e, const bode_meas *m)
   if(over && (e->cfg.ch2_mode == BODE_CH2_HOLD))
   {
     finish(e, BODE_ST_ERROR, BODE_ERR_OVERLOAD);
+    return;
+  }
+
+  //fw 0.2.71 (owner's fail-fast rule): 5 V/div (the last range down) still clipping with a fundamental under 20 codes
+  //cannot be the post's 3.1 Vpp (about 10 codes there): the readout returns rail values. The sweep ends rather than
+  //producing a flagged table (bench 2026-10-19 20:51, FPGA 0x1539's A-core fault).
+  if(readout_fault(e, m))
+  {
+    finish(e, BODE_ST_ERROR, BODE_ERR_READOUT);
     return;
   }
 
@@ -481,9 +510,15 @@ static void on_verify(bode_eng *e, const bode_meas *m)
   if(!changed)
     changed = recentre(e, m);
 
-  if(changed && (e->iter < 4))
+  if(changed && (e->iter < 4) && !e->stop_req)
   {
     measure(e, PH_VERIFY, &e->plans[0], settle_periods[e->cfg.settle] * 10);
+    return;
+  }
+
+  if(e->stop_req)
+  {
+    finish(e, BODE_ST_STOPPED, BODE_ERR_STOP);
     return;
   }
 
@@ -507,6 +542,12 @@ static void on_bg(bode_eng *e, const bode_cap *cap)
 
     bode_dft_level(&e->plans[i], cap->x[1], &raw);
     e->bg_mdb[i][e->range[1] % 6] = (raw <= BODE_MDB_FLOOR / 2) ? BODE_MDB_FLOOR : raw + cpr_mdb + cap->s[1].volt_mdb;
+  }
+
+  if(e->stop_req)
+  {
+    finish(e, BODE_ST_STOPPED, BODE_ERR_STOP);
+    return;
   }
 
   gen_set(e, pp, 1);
@@ -534,14 +575,14 @@ static void on_measure(bode_eng *e, const bode_meas *m)
       if(stop)
         return;
 
-      if((e->phase == PH_POINT) && recentre(e, m))
+      if((e->phase == PH_POINT) && !e->stop_req && recentre(e, m))
       {
         e->retries++;
         measure(e, PH_RECENTRE, pp, point_settle(e));
         return;
       }
 
-      if(bode_unsettled(m))
+      if(bode_unsettled(m) && !e->stop_req)
       {
         e->retries++;
         measure(e, PH_RETRY, pp, settle_periods[e->cfg.settle] * 20);
@@ -556,6 +597,12 @@ static void on_measure(bode_eng *e, const bode_meas *m)
       return;
 
     case PH_UP_PREV:
+      if(e->stop_req)
+      {
+        finish(e, BODE_ST_STOPPED, BODE_ERR_STOP);
+        return;
+      }
+
       //The previous point on the new range: the splice scales every later point onto the sweep's first range
       if(!m->c[0].clipped && !m->c[1].clipped && (m->c[1].lvl_mdb > BODE_MDB_FLOOR))
       {
@@ -571,7 +618,7 @@ static void on_measure(bode_eng *e, const bode_meas *m)
 
     case PH_UP_POINT:
       //Still clipped or saturated: one more range up while there is one; else this is the point's result
-      if((m->c[1].clipped || flat2(m, 0)) && (e->range[1] > 0) && (e->switches < MAX_SWITCHES))
+      if((m->c[1].clipped || flat2(m, 0)) && (e->range[1] > 0) && (e->switches < MAX_SWITCHES) && !e->stop_req)
       {
         up_step(e, m, 0);
         return;
@@ -792,6 +839,52 @@ int bode_step(bode_eng *e)
   return 1;
 }
 
+void bode_snap_save(const bode_eng *e, bode_snap *s)
+{
+  int i;
+
+  s->cfg = e->cfg;
+  s->np  = e->np;
+
+  for(i = 0; i < BODE_MAX_POINTS; i++)
+  {
+    s->plans[i] = e->plans[i];
+    s->pts[i]   = e->pts[i];
+  }
+
+  s->state     = e->state;
+  s->err       = e->err;
+  s->exhausted = e->exhausted;
+  s->switches  = e->switches;
+  s->t0        = e->t0;
+  s->t_end     = e->t_end;
+}
+
+void bode_snap_restore(bode_eng *e, const bode_snap *s)
+{
+  int i;
+
+  if(e->state == BODE_ST_RUNNING)
+    return;
+
+  e->cfg = s->cfg;
+  e->np  = s->np;
+
+  for(i = 0; i < BODE_MAX_POINTS; i++)
+  {
+    e->plans[i] = s->plans[i];
+    e->pts[i]   = s->pts[i];
+  }
+
+  e->state     = s->state;
+  e->err       = s->err;
+  e->exhausted = s->exhausted;
+  e->switches  = s->switches;
+  e->t0        = s->t0;
+  e->t_end     = s->t_end;
+  e->idx       = -1;
+}
+
 uint8 bode_state(const bode_eng *e)        { return e->state; }
 uint8 bode_error(const bode_eng *e)        { return e->err; }
 uint32 bode_sweep_id(const bode_eng *e)    { return e->sweep_id; }
@@ -936,6 +1029,15 @@ static int16 centi(int32 v)
   return (int16)((v > 32767) ? 32767 : (v < -32768) ? -32768 : v);
 }
 
+void bode_proto_settings(const bode_cfg *c, uint8 *p)
+{
+  p[14] = c->settle;
+  p[15] = c->ch2_mode;
+  put32(p + 16, (uint32)((c->start_mhz + 5) / 10));
+  put32(p + 20, (uint32)((c->stop_mhz + 5) / 10));
+  put16(p + 24, c->points);
+}
+
 void bode_proto_header(const bode_eng *e, uint8 view, uint8 *p)
 {
   uint32 i;
@@ -951,11 +1053,7 @@ void bode_proto_header(const bode_eng *e, uint8 view, uint8 *p)
   put16(p + 8, (uint32)e->np);
   put16(p + 10, (uint32)bode_done_count(e));
   put16(p + 12, (uint32)(uint16)(int16)bode_current(e));
-  p[14] = e->cfg.settle;
-  p[15] = e->cfg.ch2_mode;
-  put32(p + 16, (uint32)((e->cfg.start_mhz + 5) / 10));
-  put32(p + 20, (uint32)((e->cfg.stop_mhz + 5) / 10));
-  put16(p + 24, e->cfg.points);
+  bode_proto_settings(&e->cfg, p);
   put16(p + 26, e->switches);
   put32(p + 28, bode_elapsed_ms(e));
 }
@@ -1026,6 +1124,7 @@ int bode_auto_span(const uint64 *f, const int32 *m, const int32 *p, const uint16
   o->settle  = BODE_SETTLE_NORMAL;
   o->q_x100  = 0;
   o->f0_mhz  = 0;
+  o->coarse  = 0;
 
   if(n > BODE_MAX_POINTS)
     n = BODE_MAX_POINTS;
@@ -1074,13 +1173,23 @@ int bode_auto_span(const uint64 *f, const int32 *m, const int32 *p, const uint16
     else if(fa && fb && (fa != fb))
       q = (uint32)((f0 * 100) / ((fa > fb) ? fa - fb : fb - fa));
 
-    //A band narrower than two point spacings is not resolved: its Q reads low (a lower bound). Then at least half a
-    //decade either side and at least Settle Resonant (the overview's 20 points over five decades are 1.8x apart: a
-    //Q 8 tank's band is an eighth of f0)
-    if((a >= 0) && (n > 1) && (mk.n3db == 2) &&
-       ((bode_log2_q32(mk.f3db_mhz[1]) - bode_log2_q32(mk.f3db_mhz[0])) <
-        2 * ((bode_log2_q32(f[n - 1]) - bode_log2_q32(f[0])) / (n - 1))))
-      coarse = 1;
+    //A band narrower than two point spacings is not resolved: its Q reads low. The true Q is then at least what two
+    //spacings allow, 1 / (2 ln r) for points r apart, and at least 2 (half a decade either side); Settle one preset up
+    //from that (the overview's 20 points over five decades are 1.8x apart: a Q 8 tank's band is an eighth of f0;
+    //fw 0.2.71: AUTO SET then measures the band on finer passes, bode_auto_zoom)
+    if((a >= 0) && (n > 1) && (mk.n3db == 2))
+    {
+      int64 sp = (bode_log2_q32(f[n - 1]) - bode_log2_q32(f[0])) / (n - 1);
+
+      if((sp > 0) && ((bode_log2_q32(mk.f3db_mhz[1]) - bode_log2_q32(mk.f3db_mhz[0])) < 2 * sp))
+      {
+        uint64 lb = ((uint64)7213 << 32) / ((uint64)sp * 100);      //100 / (2 ln 2 log2 r)
+
+        coarse = 1;
+        if(q < lb)
+          q = (uint32)((lb < 100000) ? lb : 100000);
+      }
+    }
 
     if(coarse && (q <= 200))
       q = 201;
@@ -1104,12 +1213,13 @@ int bode_auto_span(const uint64 *f, const int32 *m, const int32 *p, const uint16
     }
 
     o->settle = (q <= 700) ? BODE_SETTLE_NORMAL : (q <= 3400) ? BODE_SETTLE_RESONANT : BODE_SETTLE_HIGHQ;
-    if(coarse && (o->settle == BODE_SETTLE_NORMAL))
-      o->settle = BODE_SETTLE_RESONANT;
+    if(coarse && (o->settle < BODE_SETTLE_HIGHQ))
+      o->settle++;
 
     //A band-pass always rises at its low end: the still-changing rule is for the other shapes
     changing = 0;
     o->q_x100 = q;
+    o->coarse = (uint8)coarse;
   }
   else if(((mk.shape == BODE_SHAPE_LOWPASS) || (mk.shape == BODE_SHAPE_HIGHPASS)) && mk.n3db)
   {
@@ -1148,4 +1258,34 @@ int bode_auto_span(const uint64 *f, const int32 *m, const int32 *p, const uint16
   o->start_i = (uint8)start_i;
   o->stop_i  = (uint8)stop_i;
   return BODE_AS_SPAN;
+}
+
+//fw 0.2.71 (bode-ui.md 3.2, the sharp-tank rule): the next of AUTO SET's passes for an unresolved band, each 20 points
+//around the f0 found so far: pass 2 f0 / sqrt(10) .. f0 sqrt(10) (12.9 % apart, Settle Resonant), pass 3 f0 / 1.1 ..
+//f0 x 1.1 (1.0 % apart, Settle High Q), pass 4 f0 / 1.03 .. f0 x 1.03 (0.3 %, High Q). A band is resolved when it spans
+//two point spacings: up to Q 50 on pass 3, Q 160 on pass 4. Returns 1 with the next pass's settings, 0 when the span can
+//be set (resolved, or four passes done).
+int bode_auto_zoom(const bode_autospan *a, int passes, bode_cfg *c)
+{
+  static const uint16 ratio_x1000[3] = { 3162, 1100, 1030 };
+  uint64 lo, hi;
+  uint32 r;
+
+  if(!a->coarse || !a->f0_mhz || (passes < 1) || (passes >= BODE_AUTO_PASSES))
+    return 0;
+
+  r  = ratio_x1000[passes - 1];
+  lo = (a->f0_mhz * 1000) / r;
+  hi = (a->f0_mhz * r) / 1000;
+
+  if(lo < BODE_FMIN_MHZ) lo = BODE_FMIN_MHZ;
+  if(hi > BODE_FMAX_MHZ) hi = BODE_FMAX_MHZ;
+
+  c->start_mhz  = lo;
+  c->stop_mhz   = hi;
+  c->points     = 20;
+  c->settle     = (passes == 1) ? BODE_SETTLE_RESONANT : BODE_SETTLE_HIGHQ;
+  c->ch2_mode   = BODE_CH2_AUTO;
+  c->background = 1;
+  return 1;
 }

@@ -40,7 +40,7 @@ void ui_ms_scope_defaults(uint8 *rank12);
 
 #define UI_MS_PITCH           120
 #define UI_MS_SCOPE_Y         426
-#define UI_MS_SPEC_Y          446
+#define UI_MS_SPEC_Y          426                   //fw 0.2.71: the Scope's row (the slider row under it)
 #define UI_MS_ROW_CARDS       6
 
 int    ui_ms_fit(int n, int cap, int *more);        //value cards drawn (n or cap - 1); *more = the "+N" count or 0

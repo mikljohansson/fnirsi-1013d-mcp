@@ -625,6 +625,13 @@ void scan_for_touch(void)
       //Set the button inactive
       scope_acqusition_settings(0);
 
+      //fw 0.2.71 (bode-ui.md 7): in Frequency response the dropdown is one line and no controls
+      if(bode_view_active())
+      {
+        bode_view_top_note(0);
+        return;
+      }
+
       //Save the screen rectangle where the menu will be displayed
       display_set_destination_buffer(displaybuffer1);
       display_copy_rect_from_screen(ACQ_MENU_XPOS, ACQ_MENU_YPOS, ACQ_MENU_WIDTH, ACQ_MENU_HEIGHT);
@@ -718,6 +725,13 @@ void scan_for_touch(void)
 
       //Set the button inactive
       scope_generator_settings(0);
+
+      //fw 0.2.71 (bode-ui.md 7): while a frequency response sweep drives the generator, its dropdown says so
+      if(bode_view_gen_tone(0))
+      {
+        bode_view_top_note(1);
+        return;
+      }
 
       //Save the screen rectangle where the menu will be displayed
       display_set_destination_buffer(displaybuffer1);
@@ -3511,6 +3525,10 @@ void handle_right_basic_menu_touch(void)
     //Restore the screen when done
     display_set_source_buffer(displaybuffer2);
     display_copy_rect_to_screen(UI_MSM_X, ui_msm_top(scope_measures_mode()), UI_MSM_W, ui_msm_height(scope_measures_mode()));
+
+    //fw 0.2.71: Frequency response draws its cards with the plot: the new choice shows at once, not at the next redraw
+    if(bode_view_active())
+      bode_view_display();
   }
   //Check if save picture button is touched
   else if((ytouch >= 363) && (ytouch <= 417))
@@ -4030,6 +4048,10 @@ void handle_measures_menu_touch(void)
 
       for(i = 0; i < n; i++)
         scope_measures_menu_cell(mode, &cells[i]);
+
+      //fw 0.2.71: Frequency response's cards left of the menu follow at once
+      if(mode == UI_MS_BODE)
+        bode_view_cards_refresh();
     }
 
     //Wait until touch is released before checking on a new position

@@ -27,6 +27,13 @@ def frame_payload(name: str) -> bytes:
     return bytes.fromhex(v["frames"][0]["payload"])
 
 
+def test_reason_readout_fault():
+    # fw 0.2.71: reason 8 ends a sweep whose pre-scan clipped at 5 V/div with a small fundamental (a readout fault)
+    h = P.BodeHeader(state=4, reason=8)
+    assert h.state_name == "error"
+    assert h.reason_text.startswith("ADC readout fault")
+
+
 def _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, **kw):
     kw.setdefault("variant", "al3f")
     kw.setdefault("noise_lsb", 1.0)

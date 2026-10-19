@@ -9,6 +9,7 @@ const char *const bu_show_names[BU_SHOW_COUNT]  = { "Overlaid", "Magnitude only"
 const char *const bu_show_values[BU_SHOW_COUNT] = { "Overlay", "Mag", "Phase" };
 const char *const bu_axis_names[2]              = { "Log", "Linear" };
 const char *const bu_axis_row                   = "Frequency axis";
+const char *const bu_trace_names[BU_TRACE_COUNT] = { "Lines", "Dots" };
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Text helpers (no libc)
@@ -215,6 +216,67 @@ uint64 bu_lin_step(uint64 f0, uint64 f1)
   }
 }
 
+//The grid rule (bode_ui.h)
+static int bu_fgrid_lin(uint64 f0, uint64 f1, bu_gline *g)
+{
+  uint64 st = bu_lin_step(f0, f1), f = ((f0 + st - 1) / st) * st;
+  int    n = 0, i;
+
+  for(; (f <= f1) && (n < BU_GRID_MAX); f += st)
+  {
+    g[n].f = f;
+    g[n].major = 1;
+    g[n].label = 1;
+    n++;
+  }
+
+  if(n > 6)
+    for(i = 1; i < n; i += 2)
+      g[i].label = 0;
+
+  return n;
+}
+
+int bu_fgrid(uint64 f0, uint64 f1, int linear, bu_gline *g)
+{
+  static const uint8 sub[3] = { 1, 2, 5 };
+  uint64 dec;
+  int    n = 0, k, minors, labels;
+
+  if(f1 < f0)
+  {
+    uint64 t = f0;
+
+    f0 = f1;
+    f1 = t;
+  }
+
+  if(linear || !f0)
+    return bu_fgrid_lin(f0, f1, g);
+
+  minors = (f1 < 1000 * f0);
+  labels = (f1 < 30 * f0);
+
+  for(dec = 1; (dec <= f1) && (n < BU_GRID_MAX); dec *= 10)
+    for(k = 0; (k < 3) && (n < BU_GRID_MAX); k++)
+    {
+      uint64 f = dec * sub[k];
+
+      if((f < f0) || (f > f1) || (k && !minors))
+        continue;
+
+      g[n].f = f;
+      g[n].major = (uint8)!k;
+      g[n].label = (uint8)(!k || labels);
+      n++;
+    }
+
+  if(n < 2)
+    return bu_fgrid_lin(f0, f1, g);
+
+  return n;
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------
 //Slider
 
@@ -226,6 +288,18 @@ int32 bu_slider_x(int step)
   if(step > BODE_STEPS - 1) step = BODE_STEPS - 1;
 
   return BU_SL_X + (int32)(((uint32)BU_SL_W * (1000u * (uint32)(step / 3) + sub[step % 3]) + 3500) / 7000);
+}
+
+//1 Hz .. 10 MHz over the track: seven decades, log2 of the frequency in Q32 against log2 of 1 Hz
+int32 bu_slider_x_mhz(uint64 mhz)
+{
+  int64 l0 = bode_log2_q32(BODE_FMIN_MHZ), l1 = bode_log2_q32(BODE_FMAX_MHZ), lf;
+
+  if(mhz < BODE_FMIN_MHZ) mhz = BODE_FMIN_MHZ;
+  if(mhz > BODE_FMAX_MHZ) mhz = BODE_FMAX_MHZ;
+
+  lf = bode_log2_q32(mhz);
+  return BU_SL_X + (int32)(((lf - l0) * BU_SL_W + (l1 - l0) / 2) / (l1 - l0));
 }
 
 int bu_slider_shift(int start0, int stop0, int32 dx)
@@ -500,6 +574,7 @@ const char *const bu_warn[BU_W_COUNT] =
   "Frequency response needs FPGA 0x1534 or later",
   "Leave the waveform viewer first",
   "Sweep table not saved: check the SD card",
+  "ADC readout fault: see Diagnostics",
 };
 
 const char *const bu_instruction[2] =
@@ -520,6 +595,11 @@ char *bu_warn_floor(char *t, int n)
 }
 
 const char *const bu_single_running = "running, then STOP";
+
+const char *const bu_acq_chip[2] = { "Set by", "the sweep" };
+const char *const bu_acq_note    = "The sweep sets the sample rate for each point";
+const char *const bu_gen_note    = "Driven by the frequency response sweep";
+const char *const bu_trig_note   = "Not used by the sweep";
 
 char *bu_estimate_text(char *t, uint32 ms)
 {

@@ -45,6 +45,12 @@ extern const char *const bu_show_values[BU_SHOW_COUNT];    //Display button: "Ov
 extern const char *const bu_axis_names[2];                 //"Log", "Linear"
 extern const char *const bu_axis_row;                      //"Frequency axis"
 
+//fw 0.2.71: Trace style (the CTRL page, settings word 216): valid points joined (Lines, default) or loose (Dots)
+#define BU_TRACE_LINES        0
+#define BU_TRACE_DOTS         1
+#define BU_TRACE_COUNT        2
+extern const char *const bu_trace_names[BU_TRACE_COUNT];   //"Lines", "Dots"
+
 //One axis scale: the top line's value and the value per division (mdB or mdeg). The first division of divs[] (in
 //increasing order) that holds mn..mx in five divisions under a free top division; else the first that holds it in six;
 //nothing fits: the last division, top above the maximum (the low end is clipped).
@@ -66,6 +72,25 @@ int32 bu_x_lin(uint64 f0, uint64 f1, uint64 f);
 
 //Linear axis grid: the 1-2-5 step (mHz) that gives at most 10 lines over f0..f1 (and at least one when the span allows)
 uint64 bu_lin_step(uint64 f0, uint64 f1);
+
+//fw 0.2.71, the grid rule (docs/ui-guidelines.md section 3: a grid line sits at a value its axis names). The vertical
+//lines of a frequency axis f0..f1 (mHz), low to high:
+//  linear: every bu_lin_step step; each labelled, or every other one (the first, third, ...) when there are more than six
+//  log:    every decade (major, labelled); the 2 and 5 lines (minor) when the span is under three decades (f1 < 1000 f0),
+//          labelled when it is under 1.5 decades (f1 < 30 f0); a span holding fewer than two such lines takes the linear
+//          steps (all major)
+//Majors are drawn with dots every 3 px, minors every 8 px. The Spectrum view uses the linear rule for its axis.
+#define BU_GRID_MAX           24
+#define BU_GRID_DOTS_MAJOR    3
+#define BU_GRID_DOTS_MINOR    8
+
+typedef struct
+{
+  uint64 f;                   //mHz
+  uint8  major, label;
+} bu_gline;
+
+int    bu_fgrid(uint64 f0, uint64 f1, int linear, bu_gline *g);   //lines written (<= BU_GRID_MAX)
 
 //Short frequency label: 3 significant digits at most, no trailing zeros, "", "k", "M": 100000 -> "100", 2.5e6 -> "2.5k"
 char *bu_freq_short(char *t, uint64 mhz);
@@ -90,6 +115,7 @@ char *bu_fmt_fdiff(char *t, int64 dmhz);
 #define BU_SL_HIT_Y           450          //a touch from here down takes the slider
 
 int32 bu_slider_x(int step);                                 //track x of a Start / Stop step
+int32 bu_slider_x_mhz(uint64 mhz);                           //track x of any frequency (AUTO SET's passes)
 //Steps to shift Start / Stop (start0 < stop0) for a drag of dx px from where it began: the window's left edge follows
 //the finger to the nearest step, both ends kept on the track
 int   bu_slider_shift(int start0, int stop0, int32 dx);
@@ -208,7 +234,8 @@ int bu_card_text(int item, const bu_card_in *in, char *t);
 #define BU_W_NEEDS_FPGA       16
 #define BU_W_NOT_IN_VIEWER    17
 #define BU_W_SAVE_FAILED      18
-#define BU_W_COUNT            19
+#define BU_W_READOUT          19      //fw 0.2.71: BODE_ERR_READOUT
+#define BU_W_COUNT            20
 
 extern const char *const bu_warn[BU_W_COUNT];
 extern const char *const bu_instruction[2];
@@ -216,6 +243,23 @@ extern const char *const bu_instruction[2];
 //"N points not settled: choose a longer Settle", "N points near the floor: shown grey" (N >= 1)
 char *bu_warn_unsettled(char *t, int n);
 char *bu_warn_floor(char *t, int n);
+
+//fw 0.2.71, the top bar in this mode (bode-ui.md section 7). The ACQ chip's grey box reads "Set by" over "the sweep"
+//(font_2 at the chip's value column, x + 38 of the 103 px chip); a tap on the ACQ chip, or on the generator chip while a
+//sweep runs, opens a one-line note (16 px, a box BU_NOTE_H tall at y 48: the ACQ's from x BU_NOTE_ACQ_X, the
+//generator's ending at x BU_NOTE_GEN_XR) that any tap closes; the trigger menu gains a grey 13 px line at its bottom.
+extern const char *const bu_acq_chip[2];
+extern const char *const bu_acq_note;                     //"The sweep sets the sample rate for each point"
+extern const char *const bu_gen_note;                     //"Driven by the frequency response sweep"
+extern const char *const bu_trig_note;                    //"Not used by the sweep"
+#define BU_ACQ_CHIP_TEXT_X    38
+#define BU_ACQ_CHIP_W         103
+#define BU_NOTE_ACQ_X         250
+#define BU_NOTE_GEN_XR        728
+#define BU_NOTE_Y             48
+#define BU_NOTE_H             40
+#define BU_NOTE_PAD           12
+#define BU_TRIG_NOTE_H        24          //added to the trigger menu's height in this mode
 
 //Single sweep's second line: "about 3 s", "about 45 s", "about 2 min", or the running text
 extern const char *const bu_single_running;               //"running, then STOP"

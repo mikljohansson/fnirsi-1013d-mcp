@@ -3044,3 +3044,115 @@ CH1): the PNG must match the panel (grid, trace colours: CH1 yellow, CH2 cyan, t
 with a photo of the screen; that is **T9**. Wrong colours (red and blue swapped, or a byte-swapped mess) = the format
 assumption; a shifted or torn picture = row stride. Repeat in the spectrum view, the phosphor view, Frequency response
 and Diagnostics. With a menu open: E_BUSY (expected). Time a full screenshot (about 1 s expected on Windows).
+## 47. fw-freq2: Frequency response follow-ups, Spectrum slider, the grid rule (fw 0.2.71, protocol 1.21 unchanged, row 60 reason 8)
+
+Branch `fw-freq2` from main 6c1e5bc (fw 0.2.69). Brief: the fw-freq follow-ups (section 45 "Not done" 1-6), the owner's
+10-19 20:00 single-sweep report, the queue item "Frequency response chart follow-ups" (a)-(e) and the Spectrum slider.
+Commits: 92821ad (engine), 84a2d65 (bode_ui: grid rule, texts), 4d6c0e6 (the view and its wiring), 3d76e14 (Spectrum),
+92ed2b9 (mcp reason 8), 02a9f1b (version, CHANGELOG, docs), then this handoff. Image of 02a9f1b (GCC 10):
+`firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 722,432 B, sha256
+211fd38cb2cab80b7a6f24e281fe32f45a128c6bbce39525173aad511b238627 (a later commit differs only in the identity).
+Warnings GCC 10 36 (gcc10 and gcc10-nommu), GCC 13 31, as on 6c1e5bc; none in the new code. Host tests all green
+(test_ui 1,432,070 incl. test_bode_grid, test_bode_sweep 272, test_tb_view 580,345, test_bode.py, check_vectors, the
+CHANGELOG check); mcp: test_bode_device 7 passed, ruff clean; the full mcp run had one failure,
+tests/test_report.py::test_reports_for_every_kind (a report's `png` is None in the main checkout's venv; it touches no
+bode code: check it in CI). **Nothing benched.** **No protocol version change**: READ_BODE / BODE_CTRL gain reason 8 and
+the header-before-the-first-sweep rule (docs/protocol.md row 60). **Settings word claimed: 216** (0xB200 | Trace style
+bit 0; anything else reads Lines). 217..218 stay free.
+
+What landed (by brief item):
+1. **Single sweep visible and cancellable.** Reading the 0.2.69 code I found no path where STOP is ignored; what made
+   it look ignored: (a) `scope_run_view` showed WAIT (orange) on the chip during any sweep while the Scope's trigger mode
+   was Single; (b) a re-sweep of the same plan counted as a complete table, so cards and markers looked settled; (c)
+   `bode_stop(e, 0)` let the point in progress run all its re-centring, settle retries and CH2 range steps (on a bad
+   readout that is many captures, seconds at low frequencies). Now: the chip reads RUN in this mode (menu.c
+   `scope_run_view` ignores the trigger there), a single sweep's cards read "sweeping" until its table is complete
+   (`table_state`: `bv.single` and `bode_done_count < n`), and STOP ends the sweep after the capture in progress (the
+   point keeps that capture's result; a STOP in the pre-scan, the verify loop or a background capture ends there). The
+   root cause was not reproduced: if the owner still sees STOP ignored, note whether the chip read WAIT and whether
+   the Sweep card kept counting.
+2. **Spectrum slider** (spectrum.c): plot y 50..402 (8 x 44 px), labels y 406, cards y 426 (`UI_MS_SPEC_Y`), the slider
+   at y 452..471 as the Scope's. The track is the displayed axis 0 .. min(fs/2, 25 MHz), not fs/2: the view caps its
+   axis at 25 MHz, and with fs/2 the window could never reach past a quarter at 200 MSa/s (ux-makeover.md says so now).
+   A drag moves `spec.start` by dx x START_STEPS / 720 (window follows the finger, no Move-fast scaling, as the Scope's
+   slider). The colour legend of Waterfall / Density moved into the plot's top right (y 72). `HIST_H` follows `PLOT_H`
+   (352 rows; about 29 KB more history).
+3. **Top bar** (bode-ui.md 7, texts and boxes in `bode_ui.h`): ACQ chip "Set by / the sweep"; its tap opens a one-line
+   box ("The sweep sets the sample rate for each point", x 250, y 48, 40 px) that any tap closes. The generator chip
+   shows the point's tone (duty 50 %, green edge) from `bode_view_gen_tone`, refreshed by `bv_gen_chip` in `draw_all`
+   (so at most every 150 ms while sweeping); while sweeping its tap opens "Driven by the frequency response sweep"
+   (right-aligned at x 728) instead of the menu; stopped it is the user's generator and menu (as before the first
+   sweep). Trigger menu: `TRIGGER_MENU_HEIGHT` is an expression now (variables.h declares `bode_view_active`), 24 px
+   taller in the mode, the grey line at y +282.
+4. **Cancelled AUTO SET restores the table**: `bode_snap` (bode_sweep.h, about 25 KB static `as_snap` in bode_view.c),
+   saved in `bv_auto_start` after a running sweep is aborted; `bv_auto_cancel` (second tap, STOP, a host stop, leaving
+   the mode) restores it. An error during a pass keeps the pass's points and its warning (not restored).
+5. **Move fast** sets the cursor drag step (`bode_view_touch`: slow = a fifth of the finger's travel from the flag's own
+   position, or from the touch point in the plot); **MEASURES** changes show at once (`bode_view_cards_refresh` redraws
+   the cards left of the open menu after each tap, statemachine.c redraws the view when it closes); **sharp tank**: the
+   design's rule f0 (1 -+ 4 / Q) needs a measured Q, so an unresolved band (narrower than two point spacings) now takes
+   Q >= 1 / (2 ln r) and Settle one preset up, and AUTO SET runs up to three more passes around f0 (`bode_auto_zoom`:
+   f0 / sqrt(10) .. f0 sqrt(10) Resonant, / 1.1 .. x 1.1 and / 1.03 .. x 1.03 High Q, 20 points) until resolved. Model:
+   Q 50 at 15.3 kHz -> pass 3, Q 46, 10 kHz .. 20 kHz, High Q; Q 120 -> pass 4. Rule written in bode-ui.md 3.2 and
+   README.
+6. **Chart follow-ups**: (a) Trace style Lines / Dots at y 245 (Grid moved to y 305), the Scope's construction, choice
+   rows without icons; flagged points always grey loose dots. (b) `bu_fgrid` (bode_ui.c) is the grid rule for both
+   modes, written into docs/ui-guidelines.md section 3; horizontal lines were already at the labelled divisions. (c)
+   `bv_header`: with sweep id 0 the header's settings fields are `cfg_now` (`bode_proto_settings`), the same settings
+   the estimate and the Single sweep row use. (d) **Readout fault** (decided per the brief: fail fast): `on_verify`
+   ends the sweep with BODE_ERR_READOUT (8) when a channel at range 0 (5 V/div) is clipped with its fundamental under
+   CH1_LOW (20 codes; CH2 only when the record is not flat). Warning "ADC readout fault: see Diagnostics"; mcp
+   BODE_REASONS[8] and a caveat in `bode.device_sweep`. The mcp simulator (SimBode) does not produce reason 8 and still
+   reports its engine defaults before the first sweep (it never did otherwise in tests). (e) Single sweep's "about N s"
+   was already `cfg_now`; now the header matches it.
+
+Not done / for the next agent (queue them):
+- The mini overview drawn in the slider tracks (owner 20:00, "design first"): not designed, not built.
+- The mcp simulator's SimBode: reason 8 and the header-before-first-sweep rule (only if a test needs them).
+- A Single sweep started from the CTRL page leaves the bar on the CTRL page, where RUN/STOP is not visible (the chip
+  shows RUN); the owner may want the bar to return to page one. Ask before changing.
+- The generator chip after a sweep shows the user's generator although the engine left the pin off (as 0.2.69); the
+  view gives the generator back only on leaving.
+- Spectrum: the slider has no Move-fast scaling (as the Scope's); touches at y 426..449 (the cards) do nothing (from
+  y 436 before), y 450 down take the slider.
+
+**Bench walk-through (owner, coordinator on COM10; FEL load only, no SD writes; parts: the RC 1 kOhm / 15 nF ceramic,
+the 991 / 102 Ohm divider, a tank if one is at hand; wiring A; x1 probes; on 0x1539 expect item 9's fault)** - FEL-load
+(`sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`), `#VER fw=0.2.71,proto=1.21`.
+1. Spectrum analyser: the plot ends at y 402, frequency labels under vertical grid lines at round frequencies
+   ("0Hz", "5MHz", ... at full span), the cards at the Scope's height, the slider frame under them with the window filling
+   the track at full span. Tap the right half of the plot twice (zoom in): the window shrinks to a quarter; drag it: the
+   spectrum pans with the finger, the labels move to the new round steps; at the track's ends it stops. Waterfall: the
+   colour legend inside the plot's top right.
+2. Scope: ACQ chip and trigger menu unchanged (no "Set by", no extra line).
+3. Frequency response: ACQ chip reads "Set by" / "the sweep"; tap it: one line "The sweep sets the sample rate for each
+   point", any tap closes it, nothing else changes. Trigger chip: its menu has "Not used by the sweep" at the bottom.
+   Generator chip: the user's generator; its menu opens normally while stopped.
+4. RC low-pass: CTRL > Sweep > Single sweep. The button reads STOP (red), the chip RUN (also with the Scope's trigger
+   mode set to Single beforehand), the cards "sweeping", the generator chip steps through the tones (50 %); tap the
+   generator chip during the sweep: "Driven by the frequency response sweep". At the end: STOP on the chip, RUN on the
+   button, the cards show values, the generator chip back to the user's. Single sweep again (same plan): the cards read
+   "sweeping" again until it ends. During a single sweep tap STOP: it ends within one capture (well under a second above
+   1 kHz), the measured points stay, chip STOP.
+5. CTRL page: Display, Sweep, Thru, Trace style ("Lines") at the fourth slot, Grid at the fifth. Trace style > Dots:
+   the curves become loose dots; Lines joins them again; grey (flagged) points never joined. Power cycle: kept.
+6. Grid: Log 100 Hz .. 1 MHz: decade lines only, labelled; Start 1 kHz Stop 200 kHz: the 2 and 5 lines appear (sparser
+   dots), unlabelled; Start 20 kHz Stop 100 kHz: 20k, 50k, 100k lines, all labelled; Linear: lines at each label.
+7. AUTO SET on the RC, then tap AUTO SET again during the overview: "Auto set cancelled: settings kept" and the table
+   from step 4 is back (same curve, same cards). AUTO SET, then STOP during the overview: the same. A tank (Q 20..50):
+   AUTO SET runs the overview and then one to three narrower passes (the slider window shrinks around the resonance,
+   the Sweep card "auto n/20" each time), then RUN on a span close around f0 with Settle Resonant (Q up to 34) or High Q; Peak and Q cards near
+   the tank's values.
+8. T CURSOR, then Move fast off (slow): dragging a flag moves its cursor a fifth of the finger's travel, point by point;
+   Move fast on: it follows the finger. MEASURES: select BW: its card appears at once on the left (if it lands left of
+   the menu) and everything shows as soon as the menu closes.
+9. On 0x1539 (A-core fault): RUN on the RC: the sweep stops within the pre-scan with "ADC readout fault: see
+   Diagnostics" (READ_BODE state 4, reason 8), no flagged table. On a clean bitstream (0x153A or 0x1535) the RC sweeps
+   normally (bench 20:51's host sweep: -3 dB near 10.3 kHz).
+10. Host: right after boot, open the view (BODE_CTRL action 9) and send action 0: the header's settle / start / stop /
+   points equal the screen's Sweep settings and the estimate matches the Single sweep row's "about N s".
+Bug indicators: WAIT on the chip in this mode; STOP taking more than one capture; a cancelled AUTO SET leaving the
+overview's points or axis; the generator chip stuck on a tone after a sweep; the ACQ chip reading "Set by" outside the
+mode or the trigger menu's extra strip there; spectrum labels overlapping or a grid line without a label slot; the
+slider window off the track or changing width while dragged; Trace style not saved; a readout fault on a clean
+bitstream (the rule would be too tight: 5 V/div, clipped, fundamental under 20 codes).

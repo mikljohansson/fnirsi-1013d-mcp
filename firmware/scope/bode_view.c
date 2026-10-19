@@ -72,6 +72,7 @@ typedef struct
   uint8  active;
   uint8  start_i, stop_i, points_i, settle, ch2;
   uint8  show, axis, cursor_on;
+  uint8  trace;                     //fw 0.2.71: BU_TRACE_LINES, BU_TRACE_DOTS (settings word 216)
   uint8  single, was_running, last_run;
   uint8  dirty, auto_shown;
   uint8  drag;                      //the slider is being dragged: the axis follows Start / Stop
@@ -81,8 +82,10 @@ typedef struct
   uint32 note_ms;
   uint8  no_response;               //AUTO SET found only the floor (until the next sweep)
 
+  uint32 gen_shown;                 //fw 0.2.71: the tone the generator chip shows (Hz), 0 = the user's generator
+
   //AUTO SET
-  uint8  autoset;                   //1 while the overview runs
+  uint8  autoset;                   //the pass running: 1 the overview, 2..BODE_AUTO_PASSES the sharp-tank passes; 0 none
   uint8  as_thru;                   //the thru's Apply before the overview
 
   //What the view gives back
@@ -95,6 +98,9 @@ typedef struct
 //Defaults: 100 Hz .. 1 MHz, 50 points, Normal settle, CH2 Auto, Overlaid, Log, cursors off
 static bv_state bv = { .start_i = 6, .stop_i = 18, .points_i = 2, .settle = BODE_SETTLE_NORMAL, .ch2 = BODE_CH2_AUTO,
                        .cur = { -1, -1 }, .note = NOTE_NONE };
+
+//fw 0.2.71: the table before AUTO SET's overview, given back when it is cancelled (bode-ui.md 3.2 step 6)
+static bode_snap as_snap;
 
 //The MEASURES list (bu_ms_defaults: -3dB, Peak, Q, Level)
 static uint8 bv_ms[BU_MS_COUNT] = { 4, 1, 0, 2, 3, 0, 0, 0, 0, 0 };
@@ -186,6 +192,15 @@ static void bv_draw_bar_button(void)
   displaydata = save;
 }
 
+static void bv_draw_acq_chip(void)
+{
+  DISPLAYDATA save = displaydata;
+
+  display_set_screen_buffer((uint16 *)maindisplaybuffer);
+  scope_acqusition_settings(0);
+  displaydata = save;
+}
+
 void bode_view_open(void)
 {
   pc_hw_trigger t;
@@ -237,6 +252,7 @@ void bode_view_open(void)
     pc_hal_ui_set_run(0);
 
   bv.active      = 1;
+  bv.gen_shown   = 0;
   bv.single      = 0;
   bv.autoset     = 0;
   bv.was_running = 0;
@@ -245,6 +261,9 @@ void bode_view_open(void)
   bv.cur[0] = bv.cur[1] = -1;
   bv.dirty       = 1;
   bv.drawn_ms    = timer0ticks - 1000;
+
+  //fw 0.2.71: the ACQ chip reads "Set by / the sweep" while the view shows
+  bv_draw_acq_chip();
 }
 
 void bode_view_close(void)
@@ -257,9 +276,12 @@ void bode_view_close(void)
 
   bode_stop(bode_engine(), 1);
 
-  //An overview cut short gives the thru's Apply back
+  //An overview cut short gives the thru's Apply and the previous table back
   if(bv.autoset)
+  {
     bode_thru_apply(bode_engine(), bv.as_thru);
+    bode_snap_restore(bode_engine(), &as_snap);
+  }
 
   bv.autoset = 0;
   bv.active  = 0;
@@ -277,6 +299,7 @@ void bode_view_close(void)
   }
 
   pc_hal_timebase_write(&bv.s_tb, 0);
+  bv_draw_acq_chip();
 
   //EXT back (it switches the generator off: it was off with EXT anyway)
   pc_hal_trigger_read(&t);
@@ -353,6 +376,9 @@ static void bv_auto_start(void)
   if(bode_state(e) == BODE_ST_RUNNING)
     bode_stop(e, 1);
 
+  //The table as it is, for a cancel
+  bode_snap_save(e, &as_snap);
+
   bv.as_thru = e->thru.applied;
   bode_thru_apply(e, 0);
 
@@ -371,6 +397,23 @@ static void bv_auto_start(void)
     bv.autoset = 0;
     bode_thru_apply(e, bv.as_thru);
   }
+}
+
+//A cancelled AUTO SET (a second tap, STOP, leaving): the previous table and the thru's Apply come back, STOP
+static void bv_auto_cancel(void)
+{
+  bode_eng *e = bode_engine();
+
+  bode_stop(e, 1);
+  bv.autoset = 0;
+  bv.was_running = 0;
+  bv.single = 0;
+  bode_thru_apply(e, bv.as_thru);
+  bode_snap_restore(e, &as_snap);
+  if(scopesettings.runstate)
+    pc_hal_ui_set_run(0);
+  bv.last_run = 0;
+  note_set(BU_W_AUTO_CANCEL);
 }
 
 //The points as shown (thru applied when on)
@@ -406,16 +449,21 @@ static void bv_auto_finish(void)
 {
   bode_eng *e = bode_engine();
   bode_autospan a;
+  bode_cfg zc;
   int r;
 
-  bv.autoset = 0;
-  bode_thru_apply(e, bv.as_thru);
+  //Stopped (STOP, the host): cancelled, the previous table back. Failed: the settings are kept, the pass's points and
+  //its error's warning show.
+  if(bode_state(e) == BODE_ST_STOPPED)
+  {
+    bv_auto_cancel();
+    return;
+  }
 
-  //Stopped (STOP, the host) or failed: the settings are kept; an error shows its own warning
   if(bode_state(e) != BODE_ST_DONE)
   {
-    if(bode_state(e) == BODE_ST_STOPPED)
-      note_set(BU_W_AUTO_CANCEL);
+    bv.autoset = 0;
+    bode_thru_apply(e, bv.as_thru);
     if(scopesettings.runstate)
       pc_hal_ui_set_run(0);
     return;
@@ -423,6 +471,19 @@ static void bv_auto_finish(void)
 
   gather();
   r = bode_auto_span(p_f, p_m, p_p, p_flags, p_have, n_pts, bv.start_i, bv.stop_i, &a);
+
+  //fw 0.2.71, the sharp-tank rule: a band narrower than two point spacings is measured again around f0 (at most
+  //BODE_AUTO_PASSES passes) before the span is set
+  if((r == BODE_AS_SPAN) && bode_auto_zoom(&a, bv.autoset, &zc))
+  {
+    bv.autoset++;
+    bv_start_cfg(&zc, 1, 0);
+    if(bode_state(e) == BODE_ST_RUNNING)
+      return;
+  }
+
+  bv.autoset = 0;
+  bode_thru_apply(e, bv.as_thru);
 
   if(r == BODE_AS_NO_RESPONSE)
   {
@@ -532,24 +593,12 @@ void bode_view_service(void)
 
 int bode_view_autoset(void)
 {
-  bode_eng *e = bode_engine();
-
   if(!bv.active)
     return 0;
 
-  //A second tap cancels: the overview ends at once, the settings were not changed
+  //A second tap cancels: the overview ends at once, the settings were not changed, the previous table comes back
   if(bv.autoset)
-  {
-    bode_stop(e, 1);
-    bv.autoset = 0;
-    bv.was_running = 0;
-    bv.single = 0;
-    bode_thru_apply(e, bv.as_thru);
-    if(scopesettings.runstate)
-      pc_hal_ui_set_run(0);
-    bv.last_run = 0;
-    note_set(BU_W_AUTO_CANCEL);
-  }
+    bv_auto_cancel();
   else
     bv_auto_start();
 
@@ -694,60 +743,25 @@ static void draw_grid(const bv_axes *a)
       display_draw_horz_dots(BU_Y + i * BU_DIV, BU_PX, BU_PX + BU_PW, 4);
   }
 
-  if(a->linear)
+  //fw 0.2.71, the grid rule (bode_ui.h bu_fgrid, ui-guidelines.md section 3): lines at the frequencies the axis names
   {
-    //1-2-5 steps of the span; a label on every line, or every other one when they would crowd
-    uint64 st = bu_lin_step(a->f0, a->f1), f = ((a->f0 + st - 1) / st) * st;
-    uint32 n = (uint32)((a->f1 - f) / st) + 1, k = 0;
+    bu_gline g[BU_GRID_MAX];
+    int      n = bu_fgrid(a->f0, a->f1, a->linear, g), k;
 
-    for(; f <= a->f1; f += st, k++)
+    for(k = 0; k < n; k++)
     {
-      int32 x = x_of(a, f);
+      int32 x = x_of(a, g[k].f);
 
       if(scopesettings.gridenable)
       {
         display_set_fg_color(gc);
-        display_draw_vert_dots((uint32)x, BU_Y, BU_Y + BU_H, 3);
+        display_draw_vert_dots((uint32)x, BU_Y, BU_Y + BU_H, g[k].major ? BU_GRID_DOTS_MAJOR : BU_GRID_DOTS_MINOR);
       }
 
-      if((n <= 6) || !(k & 1))
+      if(g[k].label)
       {
-        freq_label(t, f);
+        freq_label(t, g[k].f);
         freq_label_at(x, t);
-      }
-    }
-  }
-  else
-  {
-    uint64 dec;
-
-    //Decades (dots every 3 px) with the 2 and 5 lines (every 8 px), and their labels
-    for(dec = 1000; dec <= 10000000000ull; dec *= 10)
-    {
-      static const uint8 sub[3] = { 1, 2, 5 };
-      int k;
-
-      for(k = 0; k < 3; k++)
-      {
-        uint64 f = dec * sub[k];
-        int32  x;
-
-        if((f < a->f0) || (f > a->f1))
-          continue;
-
-        x = x_of(a, f);
-
-        if(scopesettings.gridenable)
-        {
-          display_set_fg_color(gc);
-          display_draw_vert_dots((uint32)x, BU_Y, BU_Y + BU_H, k ? 8 : 3);
-        }
-
-        if(!k)
-        {
-          freq_label(t, f);
-          freq_label_at(x, t);
-        }
       }
     }
   }
@@ -782,6 +796,8 @@ static void dot(int32 x, int32 y)
   display_fill_rect((uint32)(x - 1), (uint32)(y - 1), 3, 3);
 }
 
+//Valid points in the axis colour, joined in order (Trace style Lines) or loose (Dots); flagged points always loose grey
+//dots (fw 0.2.71, owner: a grey dot is a point that does not count)
 static void draw_curve(const bu_scale *s, const int32 *v, uint32 color, int wraps)
 {
   int   i, prev = -1;
@@ -807,7 +823,8 @@ static void draw_curve(const bu_scale *s, const int32 *v, uint32 color, int wrap
 
     y = bu_scale_y(s, v[i]);
 
-    if((prev >= 0) && (!wraps || (((v[i] - v[prev]) < 180000) && ((v[prev] - v[i]) < 180000))))
+    if((bv.trace == BU_TRACE_LINES) && (prev >= 0) &&
+       (!wraps || (((v[i] - v[prev]) < 180000) && ((v[prev] - v[i]) < 180000))))
       display_draw_line((uint32)px, (uint32)py, (uint32)p_x[i], (uint32)y);
     dot(p_x[i], y);
 
@@ -951,6 +968,7 @@ static const char *warning(char *buf)
       case BODE_ERR_TIMEOUT:  return bu_warn[BU_W_TIMEOUT];
       case BODE_ERR_HOST:     return bu_warn[BU_W_HOST];
       case BODE_ERR_PLAN:     return bu_warn[BU_W_PLAN];
+      case BODE_ERR_READOUT:  return bu_warn[BU_W_READOUT];
       default:                break;
     }
   }
@@ -1007,8 +1025,11 @@ static int table_state(void)
   for(i = 0; i < n_pts; i++)
     have += p_have[i];
 
+  //fw 0.2.71: a single sweep fills its table anew (the cards read "sweeping" until it ends); RUN's repeats overwrite a
+  //complete table point by point
   if(bode_state(bode_engine()) == BODE_ST_RUNNING)
-    return (have < n_pts) ? BU_TABLE_FILLING : BU_TABLE_COMPLETE;
+    return ((have < n_pts) || (bv.single && (bode_done_count(bode_engine()) < n_pts))) ? BU_TABLE_FILLING :
+                                                                                         BU_TABLE_COMPLETE;
 
   return have ? BU_TABLE_COMPLETE : BU_TABLE_NONE;
 }
@@ -1080,7 +1101,16 @@ static void draw_cards(int table)
 //The slider row: the Scope's frame, the window Start..Stop (the overview's span while AUTO SET runs)
 static void draw_slider(void)
 {
-  int32 x0 = bu_slider_x(bv.autoset ? AUTO_START_I : bv.start_i), x1 = bu_slider_x(bv.autoset ? AUTO_STOP_I : bv.stop_i);
+  int32 x0 = bu_slider_x(bv.start_i), x1 = bu_slider_x(bv.stop_i);
+
+  //AUTO SET: the span of the pass running
+  if(bv.autoset)
+  {
+    const bode_cfg *c = bode_last_cfg(bode_engine());
+
+    x0 = bu_slider_x_mhz(c->start_mhz);
+    x1 = bu_slider_x_mhz(c->stop_mhz);
+  }
 
   display_set_fg_color(WHITE_COLOR);
   display_draw_rect(BU_SL_FRAME_X, BU_SL_FRAME_Y, BU_SL_FRAME_W, BU_SL_FRAME_H);
@@ -1094,6 +1124,69 @@ static void draw_instruction(void)
   text_c(&font_3, BU_WARN_XC, BU_Y + 24, bu_instruction[1]);
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// The top bar in this mode (fw 0.2.71, bode-ui.md 7)
+
+int bode_view_gen_tone(uint32 *hz)
+{
+  bode_eng *e = bode_engine();
+  int i;
+
+  if(!bv.active || (bode_state(e) != BODE_ST_RUNNING) || ((i = bode_current(e)) < 0))
+    return 0;
+
+  if(hz)
+    *hz = (uint32)((bode_plans(e)[i].f_mhz + 500) / 1000);
+
+  return 1;
+}
+
+//The generator chip follows the tone (called with the plot's redraw, so at most every REDRAW_MS while sweeping)
+static void bv_gen_chip(void)
+{
+  DISPLAYDATA save;
+  uint32 hz = 0;
+
+  if(!bode_view_gen_tone(&hz) || !hz)
+    hz = 0;
+
+  if(hz == bv.gen_shown)
+    return;
+
+  bv.gen_shown = hz;
+  save = displaydata;
+  display_set_screen_buffer((uint16 *)maindisplaybuffer);
+  scope_generator_settings(0);
+  displaydata = save;
+}
+
+void bode_view_top_note(int which)
+{
+  const char *t = which ? bu_gen_note : bu_acq_note;
+  uint32 w = ui_text_width(&font_3, t) + 2 * BU_NOTE_PAD;
+  uint32 x = which ? BU_NOTE_GEN_XR - w : BU_NOTE_ACQ_X;
+
+  display_set_screen_buffer((uint16 *)maindisplaybuffer);
+  display_set_destination_buffer(displaybuffer1);
+  display_copy_rect_from_screen(x, BU_NOTE_Y, w, BU_NOTE_H);
+
+  display_set_fg_color(DARKGREY_COLOR);
+  display_fill_rect(x, BU_NOTE_Y, w, BU_NOTE_H);
+  display_set_fg_color(LIGHTGREY_COLOR);
+  display_draw_rect(x, BU_NOTE_Y, w, BU_NOTE_H);
+  display_set_fg_color(WHITE_COLOR);
+  text_at(&font_3, x + BU_NOTE_PAD, BU_NOTE_Y + (BU_NOTE_H - 16) / 2, t);
+
+  //Any tap closes it (and does nothing else), as a tap outside a dropdown
+  do
+    tp_i2c_read_status();
+  while(!havetouch);
+  tp_i2c_wait_for_touch_release();
+
+  display_set_source_buffer(displaybuffer1);
+  display_copy_rect_to_screen(x, BU_NOTE_Y, w, BU_NOTE_H);
+}
+
 static void bv_clear(void)
 {
   uint32 y;
@@ -1102,7 +1195,8 @@ static void bv_clear(void)
     memset(&displaybuffertmp[y * 800 + 2], 0, 728 * 2);
 }
 
-static void draw_all(void)
+//Everything into displaybuffertmp, then the rectangle x, y, w, h of it to the screen (the whole trace area normally)
+static void draw_all_rect(uint32 rx, uint32 ry, uint32 rw, uint32 rh)
 {
   bode_eng *e = bode_engine();
   bv_axes a;
@@ -1160,13 +1254,33 @@ static void draw_all(void)
 
   draw_cards(table);
   draw_slider();
+  bv_gen_chip();
 
   display_set_source_buffer(displaybuffertmp);
   display_set_screen_buffer((uint16 *)maindisplaybuffer);
-  display_copy_rect_to_screen(2, 48, 728, 432);
+  display_copy_rect_to_screen(rx, ry, rw, rh);
 
   bv.dirty    = 0;
   bv.drawn_ms = timer0ticks;
+}
+
+static void draw_all(void)
+{
+  draw_all_rect(2, 48, 728, 432);
+}
+
+//fw 0.2.71: while the MEASURES menu is open, the cards left of it follow each change
+void bode_view_cards_refresh(void)
+{
+  DISPLAYDATA save;
+
+  if(!bv.active || scopesettings.waveviewmode)
+    return;
+
+  save = displaydata;
+  draw_all_rect(2, BU_CARDS_Y, UI_MSM_X - 2, UI_CARD_H);
+  displaydata = save;
+  bv.dirty = 1;
 }
 
 int bode_view_display(void)
@@ -1256,7 +1370,7 @@ static void slider_drag(void)
 int bode_view_touch(void)
 {
   bv_axes a;
-  int k;
+  int k, flag = 0;
 
   if(!bv.active)
     return 0;
@@ -1294,23 +1408,34 @@ int bode_view_touch(void)
     if(ytouch < BU_FLAG_Y + BU_FLAG_H / 2 + BU_FLAG_HIT)
     {
       if(d0 <= BU_FLAG_HIT)
-        k = 0;
+        k = 0, flag = 1;
       else if(d1 <= BU_FLAG_HIT)
-        k = 1;
+        k = 1, flag = 1;
     }
   }
 
-  while(havetouch)
+  //fw 0.2.71: Move fast sets the drag step as on every plot. Fast: the cursor follows the finger. Slow: it moves a fifth
+  //of the finger's travel from where the drag began (a flag: the cursor's own position; the plot: the touch point, so a
+  //tap still moves the nearer cursor there). Either way it snaps to measured points.
   {
-    int c = nearest((int32)xtouch);
+    int32 x0 = (int32)xtouch, from = x0;
 
-    if((c >= 0) && (c != bv.cur[k]))
+    if(flag)
+      from = p_x[bv.cur[k]];
+
+    while(havetouch)
     {
-      bv.cur[k] = c;
-      bode_view_display();
-    }
+      int32 dx = (int32)xtouch - x0;
+      int   c = nearest(from + (scopesettings.movespeed ? dx / 5 : dx));
 
-    tp_i2c_read_status();
+      if((c >= 0) && (c != bv.cur[k]))
+      {
+        bv.cur[k] = c;
+        bode_view_display();
+      }
+
+      tp_i2c_read_status();
+    }
   }
 
   return 1;
@@ -1501,7 +1626,8 @@ void bode_view_save(void)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// CTRL page (bode-ui.md 4): Display (y 65), Sweep (y 125), Thru (y 185), Grid (y 245); the stepper and 50 % slots stay
+// CTRL page (bode-ui.md 4): Display (y 65), Sweep (y 125), Thru (y 185), Trace style (y 245, fw 0.2.71), Grid (y 305);
+// the rest of the stepper and the 50 % slots stay
 // empty (the sweep ranges both channels itself; CH2's Hold range is the CH2 menu's V/div)
 
 #define CP_XC             (UI_BAR_X + UI_BAR_W / 2)
@@ -1511,7 +1637,8 @@ void bode_view_save(void)
 #define CP_DISPLAY_Y      65
 #define CP_SWEEP_Y        125
 #define CP_THRU_Y         185
-#define CP_GRID_Y         245
+#define CP_TRACE_Y        245         //fw 0.2.71: Trace style (the Scope's construction), Grid moved down a slot
+#define CP_GRID_Y         305
 
 #define ROW_CHOICE        0
 #define ROW_SWITCH        1
@@ -1523,6 +1650,7 @@ void bode_view_save(void)
 #define FOLD_DISPLAY      0
 #define FOLD_SWEEP        1
 #define FOLD_THRU         2
+#define FOLD_TRACE        3
 
 typedef struct
 {
@@ -1588,6 +1716,17 @@ static void thru_button(int active)
   cp_value_button(CP_THRU_Y, "Thru", thru_text(), active);
 }
 
+//Trace style as the Scope's button: "Trace" over "style", the value under them
+static void trace_button(int active)
+{
+  cp_button(CP_TRACE_Y, active);
+  display_set_fg_color(active ? BLACK_COLOR : WHITE_COLOR);
+  text_c(&font_2, CP_XC, CP_TRACE_Y + 4, "Trace");
+  text_c(&font_2, CP_XC, CP_TRACE_Y + 17, "style");
+  display_set_fg_color(active ? BLACK_COLOR : PALEYELLOW_COLOR);
+  text_c(&font_2, CP_XC, CP_TRACE_Y + 32, bu_trace_names[bv.trace % BU_TRACE_COUNT]);
+}
+
 //Grid as in the other modes (fw 0.2.63): a whole-button toggle, green on, grey off
 static void grid_button(int active)
 {
@@ -1606,6 +1745,7 @@ void bode_ctrl_draw(void)
   display_button(0);
   sweep_button(0);
   thru_button(0);
+  trace_button(0);
   grid_button(0);
 }
 
@@ -1666,6 +1806,14 @@ static void build(bv_fold *d)
       bu_estimate_text(r->value, bode_estimate_ms(&c));
     }
   }
+  else if(d->id == FOLD_TRACE)
+  {
+    d->title = "Trace style";
+    anchor = CP_TRACE_Y;
+
+    for(i = 0; i < BU_TRACE_COUNT; i++)
+      add(d, ROW_CHOICE, bu_trace_names[i])->on = (uint8)(bv.trace == i);
+  }
   else
   {
     uint8 ts = bode_thru_state(e);
@@ -1719,7 +1867,7 @@ static void row_draw(const bv_row *r, uint32 rx, uint32 ry, uint32 rw)
     case ROW_CHOICE:
       row_icon(r->icon, rx + 10, ry + 12);
       display_set_fg_color(chosen ? BLACK_COLOR : WHITE_COLOR);
-      text_at(&font_3, rx + 46, ty, r->label);
+      text_at(&font_3, rx + (r->icon ? 46 : 14), ty, r->label);
       break;
 
     case ROW_SWITCH:
@@ -1803,6 +1951,12 @@ static int fold_tap(bv_fold *d, int row, int dir)
 
     bv.axis ^= 1;
     return 0;
+  }
+
+  if(d->id == FOLD_TRACE)
+  {
+    bv.trace = (uint8)row;
+    return 1;
   }
 
   if(d->id == FOLD_SWEEP)
@@ -1945,6 +2099,8 @@ void bode_ctrl_touch(void)
   else if((ytouch >= 180) && (ytouch < 240))
     fold_run(FOLD_THRU, thru_button);
   else if((ytouch >= 240) && (ytouch < 300))
+    fold_run(FOLD_TRACE, trace_button);
+  else if((ytouch >= 300) && (ytouch < 360))
   {
     grid_button(1);
     tp_i2c_wait_for_touch_release();
@@ -1958,10 +2114,14 @@ void bode_ctrl_touch(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Settings sector words 219 (0xB000 | start << 7 | stop << 2 | points), 220 (0xB100 | settle | CH2 range << 2 | Display
-// variant << 3 | cursors << 5 | frequency axis << 6) and the MEASURES words 213..215 (bode_ui.h)
+// variant << 3 | cursors << 5 | frequency axis << 6), 216 (fw 0.2.71: 0xB200 | Trace style) and the MEASURES words
+// 213..215 (bode_ui.h)
 
 uint16 bode_view_setting_word(int i)
 {
+  if(i == 2)
+    return (uint16)(0xB200 | (bv.trace & 1));
+
   if(i == 0)
     return (uint16)(0xB000 | ((bv.start_i & 0x1F) << 7) | ((bv.stop_i & 0x1F) << 2) | (bv.points_i & 3));
 
@@ -1969,8 +2129,11 @@ uint16 bode_view_setting_word(int i)
                   ((bv.axis & 1) << 6));
 }
 
-void bode_view_settings_restore(uint16 w0, uint16 w1)
+void bode_view_settings_restore(uint16 w0, uint16 w1, uint16 w2)
 {
+  //Word 216 (fw 0.2.71): 0xB200 | Trace style; bits 1..7 clear
+  bv.trace = ((w2 & 0xFFFE) == 0xB200) ? (uint8)(w2 & 1) : BU_TRACE_LINES;
+
   if((w0 & 0xF000) == 0xB000)
   {
     uint8 a = (uint8)((w0 >> 7) & 0x1F), b = (uint8)((w0 >> 2) & 0x1F);
@@ -2018,6 +2181,7 @@ void bode_view_defaults(void)
   bv.show      = BU_SHOW_OVERLAY;
   bv.axis      = BU_AXIS_LOG;
   bv.cursor_on = 0;
+  bv.trace     = BU_TRACE_LINES;
   host_cfg_valid = 0;
   bu_ms_defaults(bv_ms);
   bv.dirty = 1;
@@ -2070,6 +2234,25 @@ static void bv_auto_drop(void)
   {
     bv.autoset = 0;
     bode_thru_apply(bode_engine(), bv.as_thru);
+  }
+}
+
+//The READ_BODE header. fw 0.2.71: before the first sweep since boot (sweep id 0) its settings fields (settle, CH2 range
+//mode, start, stop, requested points) are the settings in effect (cfg_now), the ones BODE_CTRL's estimate and the Single
+//sweep row's "about N s" describe; after a sweep they are that sweep's (bench 2026-10-19 20:51: the engine's defaults
+//showed beside an estimate for other settings)
+static void bv_header(uint8 *p)
+{
+  bode_eng *e = bode_engine();
+
+  bode_proto_header(e, (uint8)((bv.active ? 1 : 0) | ((scopesettings.runstate && !bv.single) ? 2 : 0)), p);
+
+  if(!bode_sweep_id(e))
+  {
+    bode_cfg c;
+
+    cfg_now(&c);
+    bode_proto_settings(&c, p);
   }
 }
 
@@ -2190,7 +2373,7 @@ int bode_view_ctrl(const uint8 *req, uint8 *resp, uint16 *detail)
   //Header, then the estimated duration of a sweep with the current settings
   cfg_now(&c);
 
-  bode_proto_header(e, (uint8)((bv.active ? 1 : 0) | ((scopesettings.runstate && !bv.single) ? 2 : 0)), resp);
+  bv_header(resp);
   resp[32] = resp[33] = resp[34] = resp[35] = 0;
   {
     uint32 est = bode_estimate_ms(&c);
@@ -2205,6 +2388,6 @@ uint32 bode_view_read(uint32 first, uint32 max_rows, uint8 *resp)
 {
   bode_eng *e = bode_engine();
 
-  bode_proto_header(e, (uint8)((bv.active ? 1 : 0) | ((scopesettings.runstate && !bv.single) ? 2 : 0)), resp);
+  bv_header(resp);
   return BODE_HDR_BYTES + BODE_ROW_BYTES * bode_proto_rows(e, first, max_rows, resp + BODE_HDR_BYTES);
 }

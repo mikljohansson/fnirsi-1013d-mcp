@@ -1632,7 +1632,10 @@ int pc_glue_autoset_running(void)  { return bode_view_auto_running() || spectrum
 //fw 0.2.66: scope_acquire_trace_data while the Bode plot shows: no UI acquisition, the view's drawing instead
 int pc_glue_bode_pass(void)        { return bode_view_pass(); }
 int pc_glue_bode_available(void)   { return bode_view_available(); }
-uint16 pc_glue_bode_setting_word(int i) { return (i < 2) ? bode_view_setting_word(i) : bode_view_ms_word(i - 2); }
+uint16 pc_glue_bode_setting_word(int i)
+{
+  return (i < 2) ? bode_view_setting_word(i) : (i < 5) ? bode_view_ms_word(i - 2) : bode_view_setting_word(2);
+}
 void pc_glue_view_opening(void)    { if(bode_view_active()) bode_view_close(); }
 
 //fw 0.2.66 (pc_bode.c): the running bitstream's capabilities, the ring size, a host capture in flight, and the ring
@@ -2014,7 +2017,8 @@ static void pc_ui_fix_settings(void)
   pc_ui_setting_restore(settingsworkbuffer[PC_SETTING_WORD_UI]);
 
   //fw 0.2.66: the Bode plot's sweep settings (words 219, 220); the mode itself is not restored
-  bode_view_settings_restore(settingsworkbuffer[PC_SETTING_WORD_BODE0], settingsworkbuffer[PC_SETTING_WORD_BODE1]);
+  bode_view_settings_restore(settingsworkbuffer[PC_SETTING_WORD_BODE0], settingsworkbuffer[PC_SETTING_WORD_BODE1],
+                             settingsworkbuffer[PC_SETTING_WORD_BODE2]);
   //fw 0.2.69: its MEASURES list (words 213..215; no marker: the defaults)
   bode_view_ms_restore(&settingsworkbuffer[PC_SETTING_WORD_BODE_MS]);
 

@@ -41,21 +41,27 @@ int    bode_view_auto_running(void);
 void   bode_view_tcursor(void);
 //SAVE WAVE in the view: the sweep table as bode/FR00001.CSV (bode-ui.md 3.3)
 void   bode_view_save(void);
-//The MEASURES list's ranks (bode_ui.h BU_MS_*)
+//The MEASURES list's ranks (bode_ui.h BU_MS_*); the cards left of the open menu drawn again after a change
 uint8 *bode_view_ms_ranks(void);
+void   bode_view_cards_refresh(void);
 //Why the main menu's row is grey (bode_view_available() is 0): a warning text
 const char *bode_view_unavailable_text(void);
 //Entered from roll mode: the roll note
 void   bode_view_note_roll(void);
 
+//fw 0.2.71, the top bar (bode-ui.md 7): 1 while a sweep runs, with the tone being measured in Hz (hz may be 0); the
+//one-line note a tap on the ACQ chip (0) or, while sweeping, on the generator chip (1) opens; any tap closes it
+int    bode_view_gen_tone(uint32 *hz);
+void   bode_view_top_note(int which);
+
 //The CTRL page in the view (ctrl_page.c hands it over)
 void   bode_ctrl_draw(void);
 void   bode_ctrl_touch(void);
 
-//Settings sector words 219 and 220 (start, stop, points; settle, CH2 range, Display variant, cursors, frequency axis) and
-//the MEASURES words 213..215 (bode_ui.h); the defaults (Restore default settings)
+//Settings sector words 219 and 220 (start, stop, points; settle, CH2 range, Display variant, cursors, frequency axis),
+//216 (fw 0.2.71: Trace style; i 2) and the MEASURES words 213..215 (bode_ui.h); the defaults (Restore default settings)
 uint16 bode_view_setting_word(int i);
-void   bode_view_settings_restore(uint16 w0, uint16 w1);
+void   bode_view_settings_restore(uint16 w0, uint16 w1, uint16 w2);
 uint16 bode_view_ms_word(int i);
 void   bode_view_ms_restore(const uint16 *w3);
 void   bode_view_defaults(void);

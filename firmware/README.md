@@ -846,8 +846,8 @@ record was an auto time-out, while running). The spectrum keeps its own list (be
 warnings.
 
 Strips gone: the phosphor strip (its fields are in the Display fold-out) and the spectrum strip and header line (the
-fields are in the Display and Analyse fold-outs, the readouts are cards). The spectrum's cards sit in one row at y 446
-(where the scope's slider row is; the slider has no meaning there), built like the scope's cards (`scope_draw_card`):
+fields are in the Display and Analyse fold-outs, the readouts are cards). The spectrum's cards sit in one row at y 426
+(fw 0.2.71: the Scope's row, the slider row under them; y 446 before), built like the scope's cards (`scope_draw_card`):
 per shown channel [Peak] 1.000kHz and [Level] +2.7dBV in the channel colour, then [RBW] 146.5Hz and, in the waterfall,
 [Time] 12.30s (the time its rows span) with a light grey chip; at most six. The decimation filter tag is no longer shown
 (the acquisition menu has it). The waterfall's and density's colour legend stays above the plot's top right. Since 0.2.65
@@ -871,7 +871,7 @@ The model is pure C in `ui_meas.c` (host-tested in `host_tests/test_ui.c`); `sco
   chosen card); a 1.00o5 image reading ours sees the same choice.
 - **Fit.** The cards keep to one row and no longer stack upward over the trace: the Scope's at y 426, CH1 three from x 5
   (six, the whole row, while the CH2 block is not shown: CH2 off with no reference trace, or Hide), CH2 three from x 366;
-  the spectrum's six from x 5 at y 446. With more chosen than fit, the last place reads "+N more" (N the cards not shown)
+  the spectrum's six from x 5 at y 426 (446 before fw 0.2.71). With more chosen than fit, the last place reads "+N more" (N the cards not shown)
   in the block's colour, so nothing is dropped silently.
 - **Spectrum values.** Peak, Level and RBW as before. THD: the power in the three bins around each harmonic 2..10 (each
   searched within n k +- (n / 2 + 1) bins of n times the peak bin, narrowed so neighbours never share a bin) against the
@@ -1080,8 +1080,14 @@ on the plot go to its gestures (`PC_SPECTRUM_TOUCH`); the top bar and the MCP ch
 spectrum's slots and CTRL page (fw 0.2.56, "Screens" above). Each new capture (UI or host) is transformed once; settings changes recompute from the held buffer,
 so a stopped capture can be re-examined. Roll mode or a viewer ends the view.
 
-Screen (fw 0.2.56): plot of 10 x 8 divisions with dBV labels (dBA in A mode), start / centre / stop frequency labels,
-and the cards (peak frequency and level per channel, RBW; "Screens" above). The info line and the strip went in 0.2.56.
+Screen (fw 0.2.56; fw 0.2.71 per ux-makeover.md "Spectrum slider"): plot y 50..402, 8 divisions of 44 px with dBV labels
+(dBA in A mode); vertical grid lines at the 1-2-5 frequency steps of the span with their labels under them at y 406
+("2.5kHz"; every other one labelled when more than six; the grid rule, docs/ui-guidelines.md section 3; start / centre /
+stop labels and ten fixed divisions before); the cards at y 426 (peak frequency and level per channel, RBW; "Screens"
+above); the slider row at y 452..471 in the Scope's construction: the shown span as a window over the axis 0 ..
+min(fs/2, 25 MHz) (the window fills the track at the full span), a drag pans the centre with the span kept (the window
+follows the finger, as the Scope's record slider). The waterfall's and density's colour legend sits inside the plot's
+top right (y 72). The info line and the strip went in 0.2.56.
 Each plot column shows the highest bin it covers, so narrow lines survive at 720 columns; zoomed in past one bin per
 column it draws straight lines between bins. A white triangle marks the peak (DC bins skipped). Below 200 MS/s an orange line says
 "no anti-alias filter": the FPGA decimates by skipping samples (until a filtering bitstream lands).
@@ -1323,8 +1329,12 @@ starts: entering shows STOP and, until the first point, one orange instruction a
 dB on the left (labels in CH2 cyan, the top one "10 dB"), phase in degrees on the right (labels in pink, "+135 deg"); no
 legend, each curve in its axis colour. Magnitude scales at 5, 10 or 20 dB per division, phase at 45 or 90 deg, both
 chosen from the data so that the top division stays free (the warning line lives there) whenever the data then still
-fits. The frequency axis runs from Start to Stop: Log (decade lines with 2 and 5 lines, labels "100", "1k") or Linear
-(1-2-5 steps of the span; display only, the points stay log spaced). Flagged points are grey without lines. White
+fits. The frequency axis runs from Start to Stop: Log (labels "100", "1k") or Linear (1-2-5 steps of the span; display
+only, the points stay log spaced). Grid lines (fw 0.2.71, the grid rule of docs/ui-guidelines.md section 3, `bu_fgrid`):
+horizontal at the labelled divisions; Log: every decade (dense dots, labelled), the 2 and 5 lines (sparse dots) when the
+span is under three decades, labelled under 1.5 decades, and the linear steps when fewer than two such lines fall inside
+(a tight span around a tank); Linear: every step, labelled (every other one when more than six). Trace style (fw 0.2.71):
+Lines joins the valid points of each curve, Dots leaves them loose; flagged points are grey loose dots either way. White
 triangles mark the -3 dB crossings, the peak of a resonance and the phase crossings at +-45, +-90, -135 and -180 deg,
 from a complete table only (half a table misleads: a tank's rising skirt reads as a high-pass corner). While sweeping a
 dotted grey line marks the point being measured. Cards at y 426, chosen through MEASURES; the slider row at y 452.
@@ -1333,16 +1343,17 @@ dotted grey line marks the point being measured. Cards at y 426, chosen through 
 
 | slot | here |
 |---|---|
-| RUN/STOP | RUN: sweeps repeat, each overwriting the table point by point. STOP: the sweep ends after the point in progress, the points stay |
-| AUTO SET | an overview sweep (100 Hz .. 10 MHz, 20 points, Settle Fast, CH2 Auto, the thru off for it; "Auto..." and the Sweep card "auto n/20"), then Start / Stop / Settle / CH2 range Auto from it (`bode_auto_span`), then RUN. A second tap cancels: "Auto set cancelled: settings kept". Flat: "No corner from 100 Hz to 10 MHz: span kept" and RUN; only floor: "No response: CH2 tip on the DUT output?" and STOP |
-| T CURSOR | cursors C1 and C2: dotted lines with flags above the pane, placed at a third and two thirds of the axis, snapped to measured points (never interpolated). Drag a flag to move its cursor; a tap or drag in the plot moves the nearer one. The readout box at the bottom left (x 10..261, y 342..393, over the response, owner): C1, C2 and C2-C1, f white, level cyan, phase pink; a flagged point shows its reason (unsettled, near floor, CH2 clipped, overload, ...) instead of the phase and its row and the difference turn grey |
+| RUN/STOP | RUN: sweeps repeat, each overwriting the table point by point. STOP: the sweep ends after the capture in progress (fw 0.2.71; after the whole point before), the points stay. A single sweep (Single sweep, a host BODE_CTRL run) shows STOP on the button and RUN on the chip while it runs (never WAIT, whatever the trigger mode) and its cards read "sweeping" until it ends; a tap on STOP ends it the same way |
+| AUTO SET | an overview sweep (100 Hz .. 10 MHz, 20 points, Settle Fast, CH2 Auto, the thru off for it; "Auto..." and the Sweep card "auto n/20"), then Start / Stop / Settle / CH2 range Auto from it (`bode_auto_span`), then RUN. A band the overview cannot resolve (fw 0.2.71, the sharp-tank rule) is measured again around f0 first: f0 / sqrt(10) .. f0 sqrt(10) (Settle Resonant), f0 / 1.1 .. f0 x 1.1 and f0 / 1.03 .. f0 x 1.03 (High Q), 20 points each, until resolved (`bode_auto_zoom`). A second tap, or STOP, cancels: the previous table comes back (fw 0.2.71), "Auto set cancelled: settings kept". Flat: "No corner from 100 Hz to 10 MHz: span kept" and RUN; only floor: "No response: CH2 tip on the DUT output?" and STOP |
+| T CURSOR | cursors C1 and C2: dotted lines with flags above the pane, placed at a third and two thirds of the axis, snapped to measured points (never interpolated). Drag a flag to move its cursor; a tap or drag in the plot moves the nearer one. Move fast sets the drag step (fw 0.2.71): fast, the cursor follows the finger; slow, it moves a fifth of the finger's travel. The readout box at the bottom left (x 10..261, y 342..393, over the response, owner): C1, C2 and C2-C1, f white, level cyan, phase pink; a flagged point shows its reason (unsettled, near floor, CH2 clipped, overload, ...) instead of the phase and its row and the difference turn grey |
 | V CURSOR | empty (no level cursor in this mode) |
-| MEASURES | "Frequency response measurements": Select All, Clear, Level, -3dB, BW, Peak, Q, Ph45, Ph90, Ph180, Sweep, Thru. Defaults -3dB, Peak, Q, Level (owner). Magnitude cards on a cyan block, phase cards pink, Sweep and Thru neutral grey. "no sweep" before any, "sweeping" while a new table fills, "not found" when the marker is not there; Thru "applied" green, "stale" amber, "off" / "none" grey. More than six chosen: "+N more" in the sixth place |
+| MEASURES | "Frequency response measurements": Select All, Clear, Level, -3dB, BW, Peak, Q, Ph45, Ph90, Ph180, Sweep, Thru. Defaults -3dB, Peak, Q, Level (owner). A change shows at once (fw 0.2.71: the cards left of the open menu follow each tap, all of them when it closes). Magnitude cards on a cyan block, phase cards pink, Sweep and Thru neutral grey. "no sweep" before any, "sweeping" while a new table fills, "not found" when the marker is not there; Thru "applied" green, "stale" amber, "off" / "none" grey. More than six chosen: "+N more" in the sixth place |
 | SAVE PIC | screenshot |
 | SAVE WAVE | the sweep table as `bode/FR00001.CSV` (the next free number): `#` lines with the firmware, the bitstream, Start, Stop, Points, Settle, CH2 range, thru, elapsed ms, then `f_hz,mag_db,phase_deg,v1_db,v2_db,range1,range2,flags` per measured point (READ_BODE's fields, flags as the host's names joined by `|`). Without points: "Nothing to save: run a sweep first". Saved waveforms does not list these files; read them on a PC (USB drive) |
 
-**CTRL page**: Display (y 65), Sweep (y 125), Thru (y 185), Grid (y 245; lower than in the other modes, accepted by the
-owner); the stepper and 50 % TRIG slots stay empty (the sweep ranges both channels itself).
+**CTRL page**: Display (y 65), Sweep (y 125), Thru (y 185), Trace style (y 245, fw 0.2.71), Grid (y 305; lower than in
+the other modes, accepted by the owner); the rest of the stepper and the 50 % TRIG slots stay empty (the sweep ranges both
+channels itself).
 
 | button | fold-out rows | values |
 |---|---|---|
@@ -1357,10 +1368,11 @@ owner); the stepper and 50 % TRIG slots stay empty (the sweep ranges both channe
 | Thru ("None", "On", "Off", "Stale", "Meas.") | Measure thru | one sweep with both probe tips on the DUT input; stored (RAM) and applied |
 | | Apply (switch) | divide the thru out of the sweeps (second line: matches this sweep / other sweep settings / none measured) |
 | | Clear | forget it |
+| Trace style ("Lines", "Dots"; the Scope's construction) | Lines, Dots | Lines (default): the valid points of each curve joined; Dots: loose. Flagged points are grey loose dots in both |
 | Grid | | the grid dots, as in the other modes |
 
 **Slider row** (owner, the Scope's construction at y 452..471): the track is 1 Hz .. 10 MHz on a log scale, the window
-Start..Stop (the overview's span during AUTO SET). Dragging moves Start and Stop together by whole 1-2-5 steps, both kept
+Start..Stop (the span of AUTO SET's pass while it runs). Dragging moves Start and Stop together by whole 1-2-5 steps, both kept
 on the track; the axis follows and points inside the new span stay drawn. On release a sweep in progress restarts at the
 new span (the point in progress dropped, the table cleared; RUN keeps repeating), and while stopped one sweep runs there.
 The host's exact settings stop applying, a thru for the old span turns stale. Ignored during AUTO SET's overview.
@@ -1370,7 +1382,16 @@ overloaded by DC: set CH2 range Auto", "Sweep stopped: no capture started; tap R
 "Sweep stopped: the PC took over", "No frequency in this range: change Start or Stop"), "Thru sweep: both probe tips on
 the DUT input", AUTO SET's results, "CH2 overrange: set CH2 range Auto or raise V/div", "CH1 level low: the DUT loads the
 1 kOhm source", "N points not settled: choose a longer Settle", "N points near the floor: shown grey", "Thru does not
-match this sweep: measure again", "DC level beyond the offset range: AC-couple DUT", and the 5 s notes (EXT, roll).
+match this sweep: measure again", "DC level beyond the offset range: AC-couple DUT", "ADC readout fault: see
+Diagnostics" (fw 0.2.71, READ_BODE reason 8: the pre-scan reached 5 V/div with a channel still clipping and its
+fundamental under 20 codes, which the post's 3.1 Vpp cannot do; the owner's fail-fast rule, so a capture fault ends the
+sweep instead of producing a table of flagged points), and the 5 s notes (EXT, roll).
+
+**Top bar in this mode** (fw 0.2.71, bode-ui.md section 7): the ACQ chip reads "Set by" over "the sweep" and its dropdown
+is one line, "The sweep sets the sample rate for each point"; while a sweep runs the generator chip shows the tone
+being measured (duty 50 %, green edge; with the plot's redraw, at most every 150 ms; the background captures' generator-off
+moments are not shown) and a tap on it shows "Driven by the frequency response sweep" instead of the menu (stopped, the
+chip and the menu are the user's generator); the trigger menu adds a grey "Not used by the sweep" at its bottom.
 
 **A sweep** (bode_sweep.c, the host tool's runner): the plan (f = 50 MHz / M; CIC3 + FIR at N = 16 x 2^k below 1.5 MHz with
 257..512 samples per period below 24 kHz, legacy 200 MSa/s above; a coherent record of at least 8 periods and 2048
@@ -1387,8 +1408,11 @@ dominate).
 **AUTO SET's span** (`bode_auto_span`, bode_sweep.c, host_tests/test_bode_sweep.c): a low- or high-pass with a -3 dB
 crossing fc gets fc / 10 .. 10 fc; a resonance (or a phase through both +45 and -45 deg) f0 / 10 .. 10 f0 for Q <= 2,
 half a decade either side for Q <= 10, f0 (1 -+ 4 / Q) above, Settle Normal for Q <= 7, Resonant for Q <= 34, High Q
-above; a band narrower than two overview point spacings is not resolved (its Q reads low), so it gets at least half a
-decade and Settle Resonant; a response still changing at 100 Hz moves Start to 10 Hz. The span is snapped outwards to
+above; a band narrower than two point spacings is not resolved (its Q reads low): its Q is taken as at least
+1 / (2 ln r) for points r apart and at least 2, Settle one preset up, and AUTO SET measures it again on finer passes
+(fw 0.2.71, `bode_auto_zoom`: f0 / sqrt(10) .. f0 sqrt(10), f0 / 1.1 .. f0 x 1.1, f0 / 1.03 .. f0 x 1.03, 20 points each;
+on the model a Q 50 tank at 15.3 kHz is resolved on the third pass as Q 46 -> 10 kHz .. 20 kHz, High Q; Q 120 on the
+fourth); a response still changing at 100 Hz moves Start to 10 Hz. The span is snapped outwards to
 the 1-2-5 steps. On the DUT model: RC 1600 Ohm / 10 nF -> 500 Hz .. 100 kHz; the owner's 1 kOhm / 15 nF -> 1 kHz ..
 200 kHz; the 991 / 102 Ohm divider: flat, span kept; a Q 8.1 tank at 50.3 kHz -> 10 kHz .. 200 kHz, Settle Resonant.
 
@@ -1399,11 +1423,13 @@ no_cal, cal_range, cal_flagged are informative.
 **Host.** BODE_CTRL starts, stops and configures sweeps and the thru calibration and opens / closes the view; READ_BODE
 reads the table (|H|, phase, V1, V2, ranges, flags per point, the M of each point). GET_STATUS byte 43 = 5 (Frequency
 response) while the view shows; the features word's bit 6 says the bitstream can do it. A host sweep ends an AUTO SET
-overview. Protocol unchanged in 0.2.69 (the CSV and the cursors are screen-only).
+overview. Protocol unchanged in 0.2.69 (the CSV and the cursors are screen-only). fw 0.2.71: reason 8 (the readout
+fault), and before the first sweep since boot the header's settings fields are the settings in effect, the same ones the
+estimate describes (docs/protocol.md row 60).
 
 **Settings**: Start, Stop, Points (word 219, 0xB000), Settle, CH2 range, the Display variant (bits 3..4), the cursors
 (bit 5) and the frequency axis (bit 6) (word 220, 0xB100), the MEASURES list (words 213..215, 0xE000 marker in 213,
-4-bit ranks) are saved at power-off; Restore default settings resets them. The view itself is not restored (the scope
+4-bit ranks) and the Trace style (fw 0.2.71, word 216, 0xB200 | bit 0) are saved at power-off; Restore default settings resets them. The view itself is not restored (the scope
 boots into the scope view), and the thru calibration is not saved.
 
 **Files**: `bode_dsp.c/.h` (planner, DFT, levels, CORDIC, markers; host_tests/test_bode.py against the host tool and the
