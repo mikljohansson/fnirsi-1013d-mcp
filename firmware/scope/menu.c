@@ -34,6 +34,7 @@
 #include "ctrl_page.h"
 #include "ui_diag_view.h"
 #include "tb_view.h"
+#include "slider_ov_draw.h"
 #include "acq_view.h"
 
 //USB drive screen: the Exit button (fw 0.2.51)
@@ -7337,65 +7338,120 @@ void scope_adjust_timebase(void)
 */
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void scope_draw_grid(void)
+//fw 0.2.72 (slider-overview.md): the min / max envelope of one channel's whole record in the slider track, one column per
+//track pixel, on the plot's own vertical scale (scope_code_to_y squeezed into the track's rows), dimmed outside the window
+//wx, ww. The column's codes first, then a row table for the codes that occur (the conversion divides; the sample loop
+//does not).
+static void scope_slider_envelope(PCHANNELSETTINGS s, uint32 full, uint32 dim, int32 wx, int32 ww)
 {
-  uint32 color;
-  register uint32 i;
-   
-  uint32 kurzor_position;
-  
-  //Set the color for drawing
-  display_set_fg_color(WHITE_COLOR);
-  //draw stvorec pre posuvanie buffra
-  //Draw the edge
-  //display_draw_rect(2, 451, 726, 20);//46 404
-  //display_draw_rect(2, 452, 726, 20);//46 404
-  display_draw_rect(2, 452, 726, 20);//46 404
-  
+  static uint8 lo[SOV_W], hi[SOV_W];
+  static int8  row[256];
+  uint32 n = fpgasettings.totalsamples, a, b, gmin = 255, gmax = 0;
+  const uint8 *buf = s->tracebuffer;
+  sov_cols it;
+  int32 c;
+
+  if(n > MAX_SAMPLE_BUFFER_SIZE)
+    n = MAX_SAMPLE_BUFFER_SIZE;
+  if(n < 2)
+    return;
+
+  sov_cols_start(&it, n);
+
+  for(c = 0; c < SOV_W; c++)
+  {
+    const uint8 *q, *e;
+    uint32 l, h;
+
+    sov_cols_next(&it, &a, &b);
+    q = buf + a;
+    e = buf + b;
+    l = h = *q;
+
+    //Four loads before their compares: the ARM926's byte-load latency stays hidden (about 6 cycles a sample)
+    while(q + 4 <= e)
+    {
+      uint32 v0 = q[1], v1 = q[2], v2 = q[3], v3 = q[4];
+
+      q += 4;
+      if(v0 < l) l = v0;
+      if(v0 > h) h = v0;
+      if(v1 < l) l = v1;
+      if(v1 > h) h = v1;
+      if(v2 < l) l = v2;
+      if(v2 > h) h = v2;
+      if(v3 < l) l = v3;
+      if(v3 > h) h = v3;
+    }
+
+    while(q < e)
+    {
+      uint32 v = *++q;
+
+      if(v < l) l = v;
+      if(v > h) h = v;
+    }
+
+    lo[c] = (uint8)l;
+    hi[c] = (uint8)h;
+    if(l < gmin) gmin = l;
+    if(h > gmax) gmax = h;
+  }
+
+  //Screen y 49..448 (the plot's 400 rows) into the track's rows
+  for(a = gmin; a <= gmax; a++)
+    row[a] = (int8)sov_row(scope_code_to_y(s, (int32)a), 49, 449);
+
+  for(c = 0; c < SOV_W; c++)
+    sov_draw_run(SOV_X + c, row[hi[c]], row[lo[c]], full, dim, wx, ww);
+}
+
+//The record-position slider row (fw 0.2.72, slider_ov.h): the line, the overview of each enabled channel (CH2 first, CH1
+//over it) and the window's edges. No overview in roll mode, in 1.00o5's branch for the slow sample rates (its fixed
+//181 px window does not map the record) or in X-Y (no time axis). It replaces 1.00o5's row of yellow "~" in the track.
+void scope_draw_slider_row(void)
+{
+  int32 sx, sw;
+
+  sov_draw_row();
+
   //fw 0.2.64: the window shows the part of the record on screen, to scale (tb_view.c); 1.00o5 drew a fixed 181 px window
   //at first sample / 30
   if(!scopesettings.long_mode && (scopesettings.samplerate < 18) && (scopesettings.timeperdiv < 35))
   {
-    int32 sx, sw;
-
     tbv_slider(disp_first_sample, sample_rate[scopesettings.samplerate], frequency_per_div[scopesettings.timeperdiv],
                fpgasettings.totalsamples, &sx, &sw);
-    display_draw_rect(sx, 455, sw, 14);
+
+    if(!scopesettings.xymodedisplay)
+    {
+      if(scopesettings.channel2.enable)
+        scope_slider_envelope(&scopesettings.channel2, CHANNEL2_COLOR, SOV_CH2_DIM, sx, sw);
+      if(scopesettings.channel1.enable)
+        scope_slider_envelope(&scopesettings.channel1, CHANNEL1_COLOR, SOV_CH1_DIM, sx, sw);
+    }
   }
   else
   {
     if (disp_first_sample>scopesettings.samplecount)   disp_first_sample=scopesettings.samplecount;
 
-    kurzor_position = ((disp_first_sample*100)/3000)+4;
-    display_draw_rect(kurzor_position, 455, 181, 14);//181
+    sx = ((disp_first_sample*100)/3000)+4;
+    sw = 181;
   }
-  
-  /*
-   
-     kurzor_position = (disp_first_sample/6)+4;
-  //if (kurzor_position > 686) kurzor_position = 686; //600 ma byt
-  if (kurzor_position > 545) kurzor_position = 545; //600 ma byt
-  //Draw the edge
-  //display_draw_rect(kurzor_position, 455, 40, 14);
-  display_draw_rect(kurzor_position, 455, 223, 14);//181
-   */
-  
-  //Set the color for drawing
-  display_set_fg_color(YELLOW_COLOR);
-  
-  //Display the text
-  display_set_font(&font_3);//3
-  
-  //Draw the ticks on the x line
-    for(i=4;i<722;i+=5)         //722 krok 5
-    {
-      //display_draw_vert_line(i, 247, 251);
-      display_text(i, 453, "~");    //452
-    }
-    
-    //-********************************************************
-  
-// */
+
+  sov_draw_window(sx, sw);
+}
+
+void scope_draw_grid(void)
+{
+  scope_draw_slider_row();
+  scope_draw_grid_lines();
+}
+
+void scope_draw_grid_lines(void)
+{
+  uint32 color;
+  register uint32 i;
+
   //Only draw the grid when something will show (not in the original code), and not while Grid is off (fw 0.2.56: the CTRL
   //page's Grid; the record-position slider above stays)
   if((scopesettings.gridbrightness > 3) && scopesettings.gridenable)
