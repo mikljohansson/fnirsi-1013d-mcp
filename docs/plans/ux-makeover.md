@@ -53,10 +53,14 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
 - **Right bar, CTRL page, Scope** **(owner)**, top to bottom: CTRL; Display (fold-out: Normal, Phosphor, X-Y; "Normal"
   rather than "Trace" so it cannot be confused with Trace style; with
   Phosphor chosen the same fold-out shows Persistence, Palette, Clear, so there is no phosphor strip); Trace style
-  (fold-out: Linear, Dots, Peak, Pro; moved out of ACQ); Grid (toggle, in every mode); CH1 V/div (fold-out: value,
-  +, -; replaces V+ CH1 V-); CH2 V/div (same); 50 % TRIG (action, as today); one spare slot.
+  (fold-out: Linear, Dots, Peak, Pro; moved out of ACQ); Grid (toggle, in every mode); the CH1 and CH2 V/div
+  **steppers** (owner): each one and a half slots, 90 px: a 24 px grey "+" bar, a 42 px centre in the channel colour
+  reading "1: 500mV" with "/div" small, a 24 px grey "-" bar; the + and - hit areas extend into their half of the
+  centre so each gets about 45 px of touch; they step `displayvoltperdiv` exactly as the channel menu's chips do (same
+  setting, the stepper is the quick way while watching the trace); 50 % TRIG (action, as today). That fills the eight
+  slots exactly.
 - **Right bar, CTRL page, Spectrum** **(owner)**: CTRL; View (Spectrum, Waterfall, Density); Analysis (fold-out: FFT
-  length, Window, Average, Reset); Axis (fold-out: Scale, Ref level); Grid; CH1 V/div; CH2 V/div; 50 % TRIG. The
+  length, Window, Average, Reset); Axis (fold-out: Scale, Ref level); Grid; the CH1 and CH2 V/div steppers; 50 % TRIG. The
   spectrum strip goes away; Span and Start keep their gestures and the one-line header stays as a readout.
 - **ACQ dropdown** **(owner)**: Sample rate, Time per division, Memory, Roll, Average, Filter. Acquisition only: Trace
   style leaves it. With the Filter on, depths above 6000 are not offered (filtered records hold at most 8190 samples).
