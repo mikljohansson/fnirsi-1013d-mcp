@@ -903,3 +903,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   Owner: the mode is named "Frequency response" (ux-bode informed; the implementation batch renames the row).
 - 2026-10-19 19:48: fw 0.2.69 (Frequency response UI from the design, slider row, ten samples per division) merged, pinned
   backups/fw-0.2.69_8babde3b.bin, loaded on 0x1538. Owner walk-through: firmware/AGENTS.md section 45 (RC and divider).
+- 2026-10-19 19:52: bitstream 0x1539 pinned (fpga-gen8): backups/al3_seg_0x1539_f36c1f7a.bin sha256
+  f36c1f7a0ada876311f5ad5d600f4cb44523165748e96c25bed160a66388ea64, padded backups/al3_seg_0x1539_f36c1f7a_padded.bin sha256
+  22db7b9128e2a12149e5c4f44bc3cb5c22338b40b4e888e97fe9c1a3f571a6b8; in fpga/al3/dist (unbenched), 0x1538 marked withdrawn. Cause of
+  the bit mixing (TD report with i_mcu_clk constrained): o_mcu_data loaded on the rising i_mcu_clk edge, 9.4-10.9 ns pad delay per bit,
+  the MCU read came too early for the slow pads; fix: byte loaded on the falling edge (strobe start) and held, address a falling-edge
+  copy of the pointer, i_mcu_clk 0 setup / 0 hold errors, tb_mcuread all 256 codes clean. Not flashed. Flash session: pre-write dump
+  must equal the 0x1538 padded image 2fc7ea5b...; rollback 0x1538 or 0x1535; checks fpga/al3/README.md section 9 on fw 0.2.69, then
+  the wizard; calibration on 0x1537/0x1538 must be redone.
