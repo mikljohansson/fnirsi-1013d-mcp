@@ -52,10 +52,12 @@ research/atlan4-extracted/, research/dpos350p/   extracted archives (gitignored,
 firmware/scope/        scope application (base: Atlan4 v1.00o5, ported to a plain Makefile)
 firmware/bootloader/   bootloader/updater work (later)
 firmware/tools/        mksunxi, flashfilepacker, SD image + FEL load scripts
-fpga/al3/              Anlogic TD project for the AL3A10 (base: Atlan4 zaklad.v)
+fpga/al3/              Anlogic TD project for the AL3A10 (base: Atlan4 zaklad.v); dist/ holds the released
+                       bitstreams with manifest.json and BITSTREAMS.md (checked by tools/bitstreams.py)
 mcp/                   Python MCP server + serial client library + host-side analysis
 docs/                  hardware-prep.md, protocol.md, mcp-tools.md, agent-measurement-guide.md, releasing.md,
-                       fpga-flash-from-mcu.md, hardware-status.md (bench log), plans/ (task-queue.md first)
+                       fpga-flash-from-mcu.md, hardware-status.md (bench log), plans/ (task-queue.md first),
+                       release-notes/ (user-facing notes per release)
 ```
 
 Reference checkouts (read-only, outside this repo, never build inside them):
@@ -124,7 +126,8 @@ GitHub Actions run `.github/workflows/ci.yml` on every push and pull request to 
 the GCC 10, GCC 13 and PC_DEBUG builds, host tests, the
 mcp ruff and pytest runs on Linux and Windows, and both protocol-vector checkers. Keep those commands
 green locally before pushing. A `vX.Y.Z` tag runs `release.yml`. The tag must equal `PC_FW_VERSION`
-and the mcp version, and `CHANGELOG.md` needs a matching section. Atlan4's binary-only bootloader and
+and the mcp version, `CHANGELOG.md` needs a matching section and `docs/release-notes/X.Y.Z.md` holds the
+release notes; a `vX.Y.Z-rcN` tag is a dry run. Releases attach the bitstreams in `fpga/al3/dist`. Atlan4's binary-only bootloader and
 updater are never attached; `tools/make_release_sd_package.py` fetches them on the user's machine.
 Procedure, FEL hash check and the GPL reasoning: `docs/releasing.md`. Add user-visible changes to
 `CHANGELOG.md` under Unreleased, citing the commit.

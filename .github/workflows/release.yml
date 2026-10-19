@@ -1,5 +1,6 @@
-# Release on a vX.Y.Z tag: version checks, the full CI (reusable), then a GitHub release with the scope
-# image, the SD package tools, the mcp wheel and sdist, SHA256SUMS and notes from CHANGELOG.md.
+# Release on a vX.Y.Z tag (or a vX.Y.Z-rcN dry run): version checks, the full CI (reusable), then a GitHub
+# release with the scope image, the SD package tools, the mcp wheel and sdist, the FPGA bitstreams from
+# fpga/al3/dist, SHA256SUMS and notes from docs/release-notes/X.Y.Z.md.
 # Atlan4's binary-only bootloader and updater are NOT attached (docs/releasing.md, GPL note).
 name: Release
 
@@ -24,9 +25,11 @@ jobs:
       prerelease: ${{ steps.meta.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v5
-      - name: Tag = firmware version = mcp version; CHANGELOG section present
+      - name: Tag = firmware version = mcp version; CHANGELOG section and release notes present
         id: meta
         run: python3 .github/scripts/release_meta.py --tag "$GITHUB_REF_NAME" --notes release-notes.md >> "$GITHUB_OUTPUT"
+      - name: FPGA bitstreams consistent, one benched recommended image, BITSTREAMS.md final
+        run: python3 -I tools/bitstreams.py check --release
       - uses: actions/upload-artifact@v6
         with:
           name: release-notes
@@ -78,6 +81,9 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build mcp --outdir dist
 
+      - name: FPGA bitstreams (raw and 1 MiB flash image per version) and BITSTREAMS.md
+        run: python3 -I tools/bitstreams.py pack --out dist
+
       - name: SD package tools (fetch Atlan's bootloader + updater on the user's machine)
         run: |
           mkdir -p "$RUNNER_TEMP/sdtools"
@@ -103,6 +109,9 @@ jobs:
             echo "- \`fnirsi_1013d-sdtools-$VERSION.zip\`: builds a full SD package on your machine from Atlan4's"
             echo "  v1.00o5 package (bootloader v0.8 + updater, fetched from Atlan4's repository) and this image."
             echo "- \`fnirsi1013d-$VERSION-*.whl\`, \`fnirsi1013d-$VERSION.tar.gz\`: the MCP server and host library."
+            echo "- \`fnirsi_1013d-fpga-al3-0x15xx.bin\`, \`...-flash1m.bin\`: FPGA bitstreams for the AL3A10 variant, raw"
+            echo "  and padded to the 1 MiB config flash. Which one to use, how to flash it and how to roll back:"
+            echo "  \`BITSTREAMS.md\` (attached)."
             echo ""
             echo "Install and verification: docs/releasing.md and firmware/README.md in the repository."
             echo ""
@@ -119,6 +128,6 @@ jobs:
           flags=()
           if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
           gh release create "$GITHUB_REF_NAME" dist/* \
-            --title "fnirsi-1013d-mcp $VERSION" \
+            --title "fnirsi-1013d-mcp ${GITHUB_REF_NAME#v}" \
             --notes-file notes/release-notes.md \
             --verify-tag "${flags[@]}"
