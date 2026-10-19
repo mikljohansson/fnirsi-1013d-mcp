@@ -20,15 +20,52 @@ V.V_DIV, V.RO_Y, B.FL_Y, B.CARDS_Y = 56, 342, 400, 426
 TRACK_F0, TRACK_F1 = 1.0, 1e7         # the Sweep fold-out's full range, 1 Hz..10 MHz (coordinator, owner to veto)
 
 
-def fr_slider(f0, f1):
+def track_x(f):
+    """bu_slider_x for any frequency: x 4..723 is 1 Hz .. 10 MHz on a log scale (BU_SL_X 4, BU_SL_W 720)"""
+    span = math.log10(TRACK_F1) - math.log10(TRACK_F0)
+    return OV_X + (math.log10(min(max(f, TRACK_F0), TRACK_F1)) - math.log10(TRACK_F0)) / span * OV_W
+
+
+# AUTO SET's overview (bode-ui.md 3.2): 20 points 100 Hz .. 10 MHz; on the tank the points below -58 dB are flagged
+OVERVIEW_F = B.log_points(100, 1e7, 20)
+OVERVIEW = [(f, *B.h_bp(f), B.h_bp(f)[0] > -58) for f in OVERVIEW_F]
+
+
+def fr_overview(pts):
+    """docs/plans/slider-overview.md: the overview AUTO SET kept, its magnitude only, fitted to the twelve rows (the
+    highest valid point on the top row, the lowest on the bottom row; the track has no labels, so only the shape
+    counts); valid points joined by a line in the magnitude colour, a flagged point a single grey pixel without a
+    joining line (as on the chart), clipped to the rows"""
+    valid = [p[1] for p in pts if p[3]] or [0.0]
+    mx, mn = max(valid), min(valid)
+
+    def row(db):
+        return max(OV_Y, min(OV_Y + OV_ROWS - 1, OV_Y + round((mx - db) / max(mx - mn, 1.0) * (OV_ROWS - 1))))
+
+    layers, seg = [], []
+    flags = []
+    for f, db, ph, ok in pts:
+        if ok:
+            seg.append((round(track_x(f)), row(db)))
+        else:
+            if len(seg) > 1:
+                layers.append((CH2, DIM[CH2], ov_line_runs(seg)))
+            seg = []
+            x = round(track_x(f))
+            flags.append((x, row(db), row(db)))
+    if len(seg) > 1:
+        layers.append((CH2, DIM[CH2], ov_line_runs(seg)))
+    if flags:
+        layers.append((OV_FLAG, OV_FLAG, flags))
+    return layers
+
+
+def fr_slider(f0, f1, overview=None):
     """Start..Stop as a window over 1 Hz..10 MHz on the log axis, the Scope slider's construction (rect 2,452,726,20,
-    the window 14 px high at y 455); dragging moves Start and Stop together by whole steps and re-sweeps"""
-    import math as _m
-    span = _m.log10(TRACK_F1) - _m.log10(TRACK_F0)
-    x0 = 5 + (_m.log10(max(f0, TRACK_F0)) - _m.log10(TRACK_F0)) / span * 720
-    x1 = 5 + (_m.log10(min(f1, TRACK_F1)) - _m.log10(TRACK_F0)) / span * 720
-    return (box(2, 452, 726, 20, f"border: 1px solid {LG1}") +
-            box(round(x0), 455, round(x1 - x0), 14, f"border: 1px solid {LG2}"))
+    the window 14 px high at y 455); dragging moves Start and Stop together by whole steps and re-sweeps. With the
+    overview AUTO SET kept drawn in the track (x 210..723: 100 Hz .. 10 MHz), nothing before the first AUTO SET"""
+    x0, x1 = round(track_x(f0)), round(track_x(f1))
+    return slider_row(x0, x1 - x0, overview or ())
 
 
 LANE_Y = V.V_Y          # top division y 60..118: no data (headroom on both axes, section 2 of bode-ui.md)
@@ -90,7 +127,7 @@ def view(right, cursors=False, warn=True, cards=None):
                                    f"{p2[2] - p1[2]:+.1f}deg")]))
     if warn:
         body.append(B.warn("2 points not settled: choose a longer Settle"))
-    body += [B.bode_cards(cards or B.CARD_DEFAULTS_DONE(ref, fl)), fr_slider(*B.SPAN), right]
+    body += [B.bode_cards(cards or B.CARD_DEFAULTS_DONE(ref, fl)), fr_slider(*B.SPAN, fr_overview(OVERVIEW)), right]
     return "\n".join(body)
 
 
@@ -124,7 +161,7 @@ def board_single():
     cards = [("Level", "sweeping", CH2, B.NOTE), ("-3dB", "sweeping", CH2, B.NOTE), ("Peak", "sweeping", CH2, B.NOTE),
              ("Q", "sweeping", CH2, B.NOTE), ("Sweep", f"{n}/100", B.NEUTRAL, "#ffffff"), ("Thru", "applied", B.NEUTRAL, GREEN)]
     body = [B.bode_topbar(run="RUN", gen=B.fmt_f(B.FREQS[n]), ch1="1V/div", ch2="200mV/div"),
-            chart(a, pts, markers=False, current=B.FREQS[n]), B.bode_cards(cards), fr_slider(*B.SPAN),
+            chart(a, pts, markers=False, current=B.FREQS[n]), B.bode_cards(cards), fr_slider(*B.SPAN, fr_overview(OVERVIEW)),
             B.bode_actions(running=True)]
     B.write_board("BodeSingle.dc.html", "Frequency response, single sweep running", "\n".join(body))
 
@@ -138,7 +175,7 @@ def board_auto():
              ("Q", "sweeping", CH2, B.NOTE), ("Sweep", f"auto {n}/20", B.NEUTRAL, "#ffffff"),
              ("Thru", "applied", B.NEUTRAL, GREEN)]
     body = [B.bode_topbar(run="RUN", gen=B.fmt_f(fr[n]), ch1="1V/div", ch2="200mV/div"),
-            chart(a, pts, markers=False, current=fr[n]), B.bode_cards(cards), fr_slider(100, 1e7),
+            chart(a, pts, markers=False, current=fr[n]), B.bode_cards(cards), fr_slider(100, 1e7, fr_overview(pts)),
             B.bode_actions(auto_running=True)]
     B.write_board("BodeAuto.dc.html", "Frequency response, AUTO SET running", "\n".join(body))
 

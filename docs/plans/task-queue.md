@@ -94,6 +94,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   plot of both modes; Spectrum: the span as a window over 0..fs/2, drag pans the centre; Frequency response: Start..Stop as a window
   over 100 Hz..10 MHz on the log axis, drag pans both and re-sweeps. Designer (ux-bode) updates the boards and bode-ui.md /
   ux-makeover.md first; firmware batch after fw-freq lands (spectrum.c and bode_view.c).
+  - **Slider-track overview, firmware batch after the design is approved** (owner 10-19 20:00; design
+    `docs/plans/slider-overview.md` by ux-overview, boards in docs/mockups): a mini overview in the twelve rows y 456..467
+    of the slider track, dimmed outside the window, full colour inside, the window and touch unchanged. Scope: per-record
+    min / max envelope of the whole record (2880 B, about 0.33 ms at 16382 samples, estimate; `scope_code_to_y` factored
+    out of `scope_get_y_sample`; none in roll mode, the legacy branch or X-Y). Spectrum: `spec_columns` over the whole
+    axis the FFT already computes, no extra FFT (lands with the Spectrum slider). Frequency response: a 400-byte copy of
+    AUTO SET's overview in `bv_auto_finish`, drawn fitted to the rows, nothing before the first AUTO SET. Shared pure
+    `slider_ov.c` with host tests; bench pass_ms on / off. Owner questions in section 10 E first.
 - **Frequency response chart follow-ups** (owner 10-19 20:50, after the bench of the device sweep on the RC low-pass; batch
   fw-freq2 together with the follow-ups listed under fw-freq): (a) a Trace style button on the mode's CTRL page like the Scope's,
   Lines (default) / Dots, same fold-out construction; today valid points are joined and coloured per axis and flagged points are
