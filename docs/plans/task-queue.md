@@ -148,7 +148,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   division), a hand-picked ACQ rate holds only until the next zoom step; the test asserts the pair after every sequence.
 - **AUTO SET in Frequency response fails about 60 % on 0x1539** (owner 22:20): expected from the capture fault (pre-scan clips at
   5 V/div); re-test on 0x153A before any engine change.
-- **Spectrum: remove the colour legends** (owner 10-19 22:28 **(owner)**; fw-spec dispatched): the Density legend (blue -> red ->
+- [x] **Spectrum: remove the colour legends** (fw 0.2.75) (owner 10-19 22:28 **(owner)**): the Density legend (blue -> red ->
   white is understood) and the Waterfall legend with its dB marks go (spectrum.c spec_draw_legend, ux-makeover.md "colour legend
   inside the plot's top right"); nobody measures from those views. Boards and ux-makeover.md updated; the warning line keeps its
   place.
@@ -387,6 +387,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   sweep. Open (queue): the simulator lacks reason 8 and the new header rule (mcp item); a single sweep started from the CTRL page
   leaves the bar on that page where RUN/STOP is not visible (owner to decide: jump back to page one?); after a sweep the generator
   chip shows the user's generator although the pin is off. Loaded 21:30 as backups/fw-0.2.71_1264e26c.bin; walk-through pending.
+- fw-spec (done 22:31, about 70k tokens, merged 22:33 as fw 0.2.75, pinned backups/fw-0.2.75_4b9907dc.bin, not loaded: goes on
+  the unit with fw-zoom): Waterfall and Density legends removed (spectrum.c spec_draw_legend gone), section 51.
 - fw-over2 (done 22:17, about 120k tokens, merged as fw 0.2.74, loaded 22:19): decision 7 geometry in all three modes, boards
   regenerated, addendum in firmware/AGENTS.md section 49.
 - fw-over (done 21:50, about 335k tokens, merged 21:53 as fw 0.2.73, handoff firmware/AGENTS.md section 49, pinned backups/fw-0.2.73_ad7b7e24.bin, not loaded): the slider-track overview per the owner's decisions
