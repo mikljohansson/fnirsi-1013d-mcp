@@ -8262,100 +8262,17 @@ void scope_hide_measures_menu_item(void)
 
 void scope_measures_menu_item(int channel, int item)
 {
-  uint16  xpos;
-  uint16  ypos;
-  char   *text;
+  //fw 0.2.51: the names of the cards (ui_fmt.h measurement_names), centred in their 62 px cells: four per row, rows
+  //at y 316, 376 and 437, CH1 from x 232 and CH2 from x 482
+  static const uint16 row_y[3] = { 316, 376, 437 };
+  const char *text;
+  uint32 xc;
 
-  //Set the x position offset for the given channel
-  if(channel == 0)
-  {
-    //Channel 1 is on the left side
-    xpos = 232;
-  }
-  else
-  {
-    //Channel 2 is on the right side
-    xpos = 482;
-  }
+  if((item < 0) || (item >= UI_MEAS_COUNT))
+    return;
 
-  //Set the text and the position for the given item
-  switch(item)
-  {
-    case 0:
-      text  = "Vmax";
-      xpos += 15;
-      ypos  = 316;
-      break;
-
-    case 1:
-      text  = "Vmin";
-      xpos += 79;
-      ypos  = 316;
-      break;
-
-    case 2:
-      text  = "Vavg";
-      xpos += 141;
-      ypos  = 316;
-      break;
-
-    case 3:
-      text  = "Vrms";
-      xpos += 203;
-      ypos  = 316;
-      break;
-
-    case 4:
-      text  = "Vpp";
-      xpos += 19;
-      ypos  = 376;
-      break;
-
-    case 5:
-      text  = "Vp";
-      xpos += 86;
-      ypos  = 376;
-      break;
-
-    case 6:
-      text  = "Freq";
-      xpos += 143;
-      ypos  = 376;
-      break;
-
-    case 7:
-      text  = "Cycle";
-      xpos += 201;
-      ypos  = 376;
-      break;
-
-    case 8:
-      text  = "Tim+";
-      xpos += 17;
-      ypos  = 437;
-      break;
-
-    case 9:
-      text  = "Tim-";
-      xpos += 80;
-      ypos  = 437;
-      break;
-
-    case 10:
-      text  = "Duty+";
-      xpos += 138;
-      ypos  = 437;
-      break;
-
-    case 11:
-      text  = "Duty-";
-      xpos += 202;
-      ypos  = 437;
-      break;
-
-    default:
-      return;
-  }
+  text = measurement_names[item];
+  xc   = (channel ? 482 : 232) + 31 + 62 * (item & 3);
 
   //Check if item is on or off
   if(scopesettings.measuresstate[channel][item] == 0)
@@ -8371,7 +8288,7 @@ void scope_measures_menu_item(int channel, int item)
 
   //Display the text
   display_set_font(&font_3);
-  display_text(xpos, ypos, text);
+  display_text(xc - ui_text_width(&font_3, text) / 2, row_y[item >> 2], (int8 *)text);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

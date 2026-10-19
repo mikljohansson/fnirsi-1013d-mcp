@@ -17,6 +17,7 @@
 #include "usb_interface.h"
 #include "pc_hooks.h"
 #include "spec_fmt.h"
+#include "ui_fmt.h"
 #include "variables.h"
 
 #include "sin_cos_math.h"
@@ -3631,51 +3632,51 @@ void scope_display_channel_measurements(PCHANNELSETTINGS settings, uint8 *measur
   x  = xstart;
   xe = xstart + 359;
   y  = 426; //456 move up - long base
-  
+
   //Process the twelve possible measurements for this channel
   for(i=0;i<12;i++)
   {
     //Check if the current one is enabled
     if(measuresstate[i])
     {
-      //Set gray background for the measurements tile
+      //fw 0.2.51 card (docs/ui-guidelines.md section 3, chips): the grey card, the name in a chip of the source's colour
+      //drawn over it (full card height, as wide as the name plus 3 px each side, rounded only on its outer left
+      //corners, so the join has no notch), the value 6 px after the chip; all in the 13 px font
+      uint32 cw = ui_card_chip_w(&font_2, measurement_names[i]);
+
       display_set_fg_color(GREY_COLOR);
+      display_fill_rounded_rect(x, y, UI_CARD_W, UI_CARD_H, 2);
 
-      //Fill rounded rectangle for the tile
-      display_fill_rounded_rect(x, y, 118, 22, 2);
-
-      //Set the channel color for the name part
       display_set_fg_color(color);
-      
-      //Fill rounded rectangle for the name part
-      display_fill_rounded_rect(x + 3, y + 3, 45, 16, 2);
-      
-      //Use black text and font_0 for the name
+      display_fill_rounded_rect(x, y, cw, UI_CARD_H, 2);
+      display_fill_rect(x + cw - 2, y, 2, UI_CARD_H);
+
+      //Name in black
+      display_set_font(&font_2);
       display_set_fg_color(BLACK_COLOR);
-      display_set_font(&font_0);
-      display_text(x + 6, y + 3, (char *)measurement_names[i]);
+      display_text(x + UI_CARD_PAD, y + 4, (char *)measurement_names[i]);
 
       //Measurement in white text
       display_set_fg_color(WHITE_COLOR);
-      
+
       //Erase any previous text
       measurementtext[0] = 0;
-      
+
       //Display the data for this measurement
       measurementfunctions[i](settings);
-      
+
       //Display the formated data
-      display_text(x + 55, y + 3, measurementtext);
+      display_text(x + cw + UI_CARD_GAP, y + 4, measurementtext);
 
       //Select next column
       x += 120;
-      
+
       //Check if past the last for this row
       if(x > xe)
       {
         //Back to beginning of the rows
         x = xstart;
-        
+
         //Up to the row above
         y -= 24;
       }
@@ -3730,128 +3731,69 @@ void scope_display_vp(PCHANNELSETTINGS settings)
   //Determine the two absolute extremes
   int32 min = 128 - settings->min;
   int32 max = settings->max - 128;
-  
+
   //Display the biggest of the two
-  if(min > max)
-  {
-    //Use the below the center value when it is the biggest
-    scope_display_voltage(settings, min);
-  }
-  else
-  {
-    //Use the above the center value when it is the biggest
-    scope_display_voltage(settings, max);
-  }
+  scope_display_voltage(settings, (min > max) ? min : max);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
+//fw 0.2.51: the timing measurements with four significant digits (ui_fmt_sig4); with fewer than three crossings in the
+//record they read "no period" (was "xxxHz" / "xxxs" / "xx%")
 
 void scope_display_freq(PCHANNELSETTINGS settings)
 {
   if(settings->frequencyvalid)
-  {
-    //Format the frequency for displaying
-    scope_print_value(measurementtext, settings->frequency, freq_calc_data[scopesettings.samplerate].freq_scale, "", "Hz");
-  }
+    ui_fmt_sig4(measurementtext, settings->frequency, freq_calc_data[scopesettings.samplerate].freq_scale, "Hz");
   else
-  {
-    strcpy(measurementtext, "xxxHz");
-  }
+    strcpy(measurementtext, UI_MEAS_NO_PERIOD);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
+
+//A time in samples (Q16) with the sample rate's time scale
+static void scope_display_time(PCHANNELSETTINGS settings, uint32 samples_q16)
+{
+  if(settings->frequencyvalid)
+    ui_fmt_sig4(measurementtext, (int32)(((uint64)samples_q16 * time_calc_data[scopesettings.samplerate].mul_factor) >> 16),
+                time_calc_data[scopesettings.samplerate].time_scale, "s");
+  else
+    strcpy(measurementtext, UI_MEAS_NO_PERIOD);
+}
 
 void scope_display_cycle(PCHANNELSETTINGS settings)
 {
-  //Only when the frequency is valid calculate the time
-  if(settings->frequencyvalid)
-   // if((settings->frequencyvalid)||(settings->enable))
-  {
-    //Format the time for displaying
-    scope_print_value(measurementtext, (((uint64)settings->periodtime * time_calc_data[scopesettings.samplerate].mul_factor) >> 16), time_calc_data[scopesettings.samplerate].time_scale, "", "s");
-    //scope_print_value(measurementtext, ((uint64)settings->periodtime * time_calc_data[scopesettings.samplerate].mul_factor), time_calc_data[scopesettings.samplerate].time_scale, "", "s");
-    
-  }
-  else
-  {
-    strcpy(measurementtext, "xxxs");
-  }
+  scope_display_time(settings, settings->periodtime);
 }
-
-//----------------------------------------------------------------------------------------------------------------------------------
 
 void scope_display_time_plus(PCHANNELSETTINGS settings)
 {
-  //Only when the frequency is valid calculate the time
-  if(settings->frequencyvalid)
-  {
-    //Format the time for displaying
-    scope_print_value(measurementtext, (((uint64)settings->hightime * time_calc_data[scopesettings.samplerate].mul_factor) >> 16), time_calc_data[scopesettings.samplerate].time_scale, "", "s");
-    //scope_print_value(measurementtext, ((uint64)settings->hightime * time_calc_data[scopesettings.samplerate].mul_factor), time_calc_data[scopesettings.samplerate].time_scale, "", "s");
-  }
-  else
-  {
-    strcpy(measurementtext, "xxxs");
-  }
+  scope_display_time(settings, settings->hightime);
 }
-
-//----------------------------------------------------------------------------------------------------------------------------------
 
 void scope_display_time_min(PCHANNELSETTINGS settings)
 {
-  //Only when the frequency is valid calculate the time
-  if(settings->frequencyvalid)
-  {
-    //Format the time for displaying
-    scope_print_value(measurementtext, (((uint64)settings->lowtime * time_calc_data[scopesettings.samplerate].mul_factor) >> 16), time_calc_data[scopesettings.samplerate].time_scale, "", "s");
-    //scope_print_value(measurementtext, ((uint64)settings->lowtime * time_calc_data[scopesettings.samplerate].mul_factor), time_calc_data[scopesettings.samplerate].time_scale, "", "s");
-  }
-  else
-  {
-    strcpy(measurementtext, "xxxs");
-  }
+  scope_display_time(settings, settings->lowtime);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
+
+//A part of the period in hundredths of a percent
+static void scope_display_duty(PCHANNELSETTINGS settings, uint32 part)
+{
+  if(settings->frequencyvalid && settings->periodtime)
+    ui_fmt_sig4_fixed(measurementtext, (int32)(((uint64)part * 10000) / settings->periodtime), "%");
+  else
+    strcpy(measurementtext, UI_MEAS_NO_PERIOD);
+}
 
 void scope_display_duty_plus(PCHANNELSETTINGS settings)
 {
-  char *buffer;
-  
-  //Only when the frequency is valid calculate the time
-  if(settings->frequencyvalid)
-  {
-    //Format the time for displaying
-    buffer = scope_print_decimal(measurementtext, (((uint64)settings->hightime * 1000) / settings->periodtime), 1, 0);
-    
-    //Add the duty cycle sign
-    strcpy(buffer, "%"); 
-  }
-  else
-  {
-    strcpy(measurementtext, "xx%");
-  }
+  scope_display_duty(settings, settings->hightime);
 }
-
-//----------------------------------------------------------------------------------------------------------------------------------
 
 void scope_display_duty_min(PCHANNELSETTINGS settings)
 {
-  char *buffer;
-
-  //Only when the frequency is valid calculate the time
-  if(settings->frequencyvalid)
-  {
-    //Format the time for displaying
-    buffer = scope_print_decimal(measurementtext, (((uint64)settings->lowtime * 1000) / settings->periodtime), 1, 0);
-
-    //Add the duty cycle sign
-    strcpy(buffer, "%");  
-  }
-  else
-  {
-    strcpy(measurementtext, "xx%");
-  }
+  scope_display_duty(settings, settings->lowtime);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -3894,9 +3836,8 @@ void scope_display_voltage(PCHANNELSETTINGS settings, int32 value)
   //Multiply with the scaling factor for the channel settings
   volts *= vcd->mul_factor;
 
-  //Format the voltage for displaying
-  if(settings->V_A == 0) scope_print_value(measurementtext, volts, vcd->volt_scale, "", "V");
-    else scope_print_value(measurementtext, volts, vcd->volt_scale, "", "A");
+  //Format the voltage for displaying (fw 0.2.51: four significant digits, ui_fmt.h)
+  ui_fmt_sig4(measurementtext, volts, vcd->volt_scale, settings->V_A ? "A" : "V");
   
 }
 
@@ -6401,7 +6342,7 @@ void scope_save_input_calibration_data(void)
 
 void scope_reset_config_data(void)
 {
-  //uint32 index;
+  uint32 index;
   uint32 *ptr = STARTUP_CONFIG_ADDRESS;     //for save and load boot menu settings
   
   //Load a default configuration in case of settings in flash being corrupted
@@ -6452,9 +6393,22 @@ void scope_reset_config_data(void)
   scopesettings.source1_measures = 0;
   scopesettings.source2_measures = 0;
     
-  //Enable some default measurements
+  //Enable some default measurements (fw 0.2.51: Freq, Vpp and Vavg on each channel; 1.00o5 set none)
   scopesettings.hide_values_CH1 = 0;
   scopesettings.hide_values_CH2 = 0;
+
+  for(index = 0; index < UI_MEAS_COUNT; index++)
+  {
+    scopesettings.measuresstate[0][index] = 0;
+    scopesettings.measuresstate[1][index] = 0;
+  }
+
+  for(index = 0; index < 2; index++)
+  {
+    scopesettings.measuresstate[index][UI_MEAS_FREQ] = 1;
+    scopesettings.measuresstate[index][UI_MEAS_VPP]  = 1;
+    scopesettings.measuresstate[index][UI_MEAS_VAVG] = 1;
+  }
 
   //Turn time cursor off and set some default positions
   scopesettings.timecursorsenable   = 0;
