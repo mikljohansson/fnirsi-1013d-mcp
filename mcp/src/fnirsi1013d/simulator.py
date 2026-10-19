@@ -4,7 +4,10 @@ It models what the host can observe through docs/protocol.md:
 
 - FPGA variants (section 5.1): ``stock`` 0x1432 (4096-word ring, fixed 1500/3000 geometry, no generator,
   only part of the ring fresh after a capture), ``al3`` 0x1532 (8192-word ring, 16382 samples per channel,
-  programmable pre-trigger/total, DDS generator), ``ef2`` 0x1632 (6144 words), ``ep4`` 0x1732.
+  programmable pre-trigger/total, DDS generator), ``ef2`` 0x1632 (6144 words), ``ep4`` 0x1732; the AL3 line
+  ``al3x`` 0x1533 (EXT), ``al3d`` 0x1534 (decimation), ``al3f`` 0x1535 (FIR), ``al3s`` 0x1536 (sequencer),
+  ``al3e`` 0x1538 (the per-capture encode check, protocol 1.19: GET_HEALTH 88..103, event 21; hooks
+  ``Device.enc_bad_next`` / ``enc_unrecovered_next``).
 - The sample ring (section 7.2): four 8-bit cores, one word per write clock (2 dt), core B before core A in
   time by default (``--true-order`` changes the physical order so the host can test T4 handling), core B
   offset against core A (compensated by the calibration values), trigger on core A only with 2-dt
@@ -80,6 +83,16 @@ class VariantSpec:
     fir: bool = False
     #: bitstream 0x1536: plus the sequencer, segmented capture and hardware averaging (protocol 1.17)
     seq: bool = False
+    #: bitstream 0x1538: plus the per-capture encode self-check, FPGA read 0x33 (protocol 1.19)
+    enc_check: bool = False
+
+    @property
+    def enc_mode(self) -> int:
+        """GET_HEALTH 88 (protocol 1.19): 2 the FPGA's 0x33 check (0x1538+), 1 the record data check (AL3
+        0x1532..0x1537), 0 none."""
+        if self.enc_check:
+            return 2
+        return 1 if self.variant == P.FpgaVariant.AL3 and 0x1532 <= self.version_word <= 0x1537 else 0
 
 
 #: EXT trigger path latency from the pin (fpga-gen2 simulation: 20-25 ns)
@@ -101,6 +114,8 @@ VARIANTS = {
                         fir=True),
     "al3s": VariantSpec("al3s", 0x1536, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True,
                         fir=True, seq=True),
+    "al3e": VariantSpec("al3e", 0x1538, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True,
+                        fir=True, seq=True, enc_check=True),
     "ef2": VariantSpec("ef2", 0x1632, P.FpgaVariant.EF2, 6144, 12286, True, True),
     "ep4": VariantSpec("ep4", 0x1732, P.FpgaVariant.EP4, 6144, 12286, True, True),
 }
@@ -606,6 +621,15 @@ class Device:
         self.run: dict | None = None
         #: the FPGA still holds that run (no arm since)
         self.run_held = False
+        #: protocol 1.19 full-rate encode check (GET_HEALTH 88..103): counters and the last 0x33 byte; test hooks
+        #: ``enc_bad_next`` (the next n full-rate captures are found garbled and re-taken clean after ``enc_rearms``
+        #: re-arms) and ``enc_unrecovered_next`` (the next n stay garbled after 16 re-arms and are accepted, flagged)
+        self.enc_checked = self.enc_bad = self.enc_recovered = 0
+        self.enc_last33 = 0
+        self.enc_flags = 0
+        self.enc_bad_next = 0
+        self.enc_unrecovered_next = 0
+        self.enc_rearms = 1
 
     # --- capabilities -------------------------------------------------------------------------------
 
@@ -630,6 +654,8 @@ class Device:
             c &= ~P.Caps.DEVICE_AVERAGE  # the averaging model is 8-bit only (the firmware has no ACQUIRE_AVG)
         if self.spec.seq:
             c |= P.Caps.SEQ
+        if self.spec.enc_check:
+            c |= P.Caps.ENC_CHECK
         return int(c) & ~self.cfg.caps_clear
 
     @property
@@ -637,7 +663,8 @@ class Device:
         """GET_STATUS 44-45 (protocol 1.17): from the bitstream, not the caps."""
         sp = self.spec
         return ((P.Features.EXT_TRIGGER if sp.ext_trigger else 0) | (P.Features.DECIM if sp.decim else 0) |
-                (P.Features.FIR if sp.fir else 0) | (P.Features.SEGMENTS | P.Features.HW_AVERAGE if sp.seq else 0))
+                (P.Features.FIR if sp.fir else 0) | (P.Features.SEGMENTS | P.Features.HW_AVERAGE if sp.seq else 0) |
+                (P.Features.ENC_CHECK if sp.enc_check else 0))
 
     def ui_average_state(self) -> tuple[int, int]:
         """GET_STATUS 46 / 47 (protocol 1.17): the acquisition menu's Average (``ui_average`` test hook): 0 off; 2 with
@@ -1399,11 +1426,41 @@ class Device:
         self.capture_ext_edge = bool(pc.get("ext_edge", False))
         self.run = pc.get("run")
         self.run_held = self.run is not None
+        if self.run is None and self.capture_divider == 0 and not self.capture_decim.k:
+            self._enc_check(origin)
         if origin == P.CaptureOrigin.HOST:
             self.acq_state = P.AcqState.DONE
             self._pending_capture = None
             if self.shared:
                 self.run_state = P.RunState.STOP  # a host single leaves the UI in STOP (collaborative plan)
+
+    def _enc_check(self, origin: int) -> None:
+        """Protocol 1.19: the firmware checks every 200 MSa/s capture (legacy layout) before anything reads it; a
+        garbled one is re-armed (up to 16 times) and only the accepted capture is seen. Counters, the 0x33 byte and
+        event 21 as the firmware keeps them (the capture data in the model is always clean)."""
+        mode = self.spec.enc_mode
+        if not mode:
+            return
+        self.enc_checked += 1
+        bad = 0x77  # 0x33 with CH2 A wrong (the mock HAL's enc33_bad)
+        caller = 0 if origin != P.CaptureOrigin.HOST else 1
+        value = bad if mode == 2 else 320  # the 0x33 byte, or the residual in 1/16 code (20 codes)
+        last = P.ENC33_GOOD
+        self.enc_flags &= ~P.ENC_LAST_BAD
+        if self.enc_unrecovered_next > 0:
+            self.enc_unrecovered_next -= 1
+            self.enc_bad += 1
+            self.enc_flags |= P.ENC_LAST_BAD
+            self.log_event(21, 0x80 | (mode << 5) | 16, caller << 12 | value)
+            last = bad
+        elif self.enc_bad_next > 0:
+            self.enc_bad_next -= 1
+            self.enc_bad += 1
+            self.enc_recovered += 1
+            self.log_event(21, (mode << 5) | min(31, self.enc_rearms), caller << 12 | value)
+        if mode == 2:
+            self.enc_last33 = last
+            self.enc_flags |= P.ENC_READ
 
     # --- collaborative mode: the simulated UI --------------------------------------------------------------
 
@@ -2641,7 +2698,10 @@ class Device:
         r = P.HealthResp(usb_state=3, usb_flags=0x1B, usb_power=0x50, usb_faddr=5, since_config_ms=up,
                          cp15=0x0005107D, power_on=self.power_on, minutes=self.minutes_stored + up // 60000,
                          uptime_ms=up & 0xFFFFFFFF, life_flags=self.life_flags, last_end=self.last_end,
-                         settings_flags=1 if self.settings_changed else 0, settings_eval_ms=400)
+                         settings_flags=1 if self.settings_changed else 0, settings_eval_ms=400,
+                         enc_mode=self.spec.enc_mode, enc_last33=self.enc_last33, enc_flags=self.enc_flags,
+                         enc_boot33=P.ENC33_GOOD if self.spec.enc_mode == 2 else 0, enc_bad=self.enc_bad,
+                         enc_recovered=self.enc_recovered, enc_checked=self.enc_checked)
         rec = self.restart_record
         if rec is not None:
             r.rec_flags = 1 | (2 if self.restart_record_this_power_on else 0)

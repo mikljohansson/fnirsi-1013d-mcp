@@ -35,8 +35,10 @@ PROTO_MAJOR = 1
 #: (fw 0.2.49): USB suspend watch, link counters 60-61, event type 20; 1.15 (fw 0.2.50): calibration v4; 1.16
 #: (fw 0.2.52): diagnostics readers; 1.17 (fw 0.2.58, FPGA 0x1536, row 56): sequencer (segmented capture, hardware
 #: averaging: caps SEQ, SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW addr_mode 3), the features word and UI Average state in
-#: GET_STATUS 44..47 (48 bytes) and GET_DECIM 32..35, GET_CAPTURE_INFO 96 bytes
-PROTO_MINOR = 17
+#: GET_STATUS 44..47 (48 bytes) and GET_DECIM 32..35, GET_CAPTURE_INFO 96 bytes; 1.18 (fw 0.2.61, row 57): full-rate
+#: capture check, link counters 62-63, event types 21 / 22; 1.19 (fw 0.2.62, FPGA 0x1538, row 58): every full-rate
+#: capture checked, caps ENC_CHECK, features bit 5, GET_HEALTH 104 bytes
+PROTO_MINOR = 19
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -193,6 +195,8 @@ class Caps(enum.IntFlag):
     FIR = 1 << 16
     #: protocol 1.17 (FPGA 0x1536+): sequencer, segmented capture and hardware averaging
     SEQ = 1 << 17
+    #: protocol 1.19 (FPGA 0x1538+): the per-capture encode self-check, FPGA read 0x33
+    ENC_CHECK = 1 << 18
 
 
 class Features(enum.IntFlag):
@@ -203,6 +207,7 @@ class Features(enum.IntFlag):
     FIR = 1 << 2  # 0x1535+
     SEGMENTS = 1 << 3  # 0x1536+
     HW_AVERAGE = 1 << 4  # 0x1536+
+    ENC_CHECK = 1 << 5  # 0x1538+ (protocol 1.19)
 
 
 def feature_names(features: int) -> list[str]:
@@ -2494,9 +2499,36 @@ LAST_END = ("unknown (no life record)", "settings saved at power-off",
             "ended without a power-off save (warm restart, power lost, a viewer open at power-off or the write failed)")
 
 
+#: GET_HEALTH 88 (protocol 1.19): how the firmware checks full-rate captures
+ENC_MODES = {0: "none", 1: "record data", 2: "FPGA read 0x33"}
+ENC_MODE_TEXT = {0: "no check (stock, EF2 or EP4 bitstream)",
+                 1: "record data: core B against its core A neighbours over the first 250 words (AL3 0x1532..0x1537)",
+                 2: "FPGA self-check, read 0x33 after every capture (AL3 0x1538+)"}
+#: GET_HEALTH 90 flags (protocol 1.19)
+ENC_READ = 0x01  # a 0x33 byte was read since boot
+ENC_CONVENTION_BAD = 0x02  # 0x33 bits 3:2 at boot were not 01
+ENC_LAST_BAD = 0x04  # the last checked capture was accepted garbled after 16 re-arms
+ENC_ORDER_DIFFERS = 0x08  # core order differs from the convention (0x1537: recalibrate after flashing 0x1538)
+#: FPGA read 0x33 bits 7..4: the last pin check {CH2 A, CH2 B, CH1 A, CH1 B}, 1 = right; a good capture reads 0xF6
+ENC33_PINS = ((7, "CH2 A"), (6, "CH2 B"), (5, "CH1 A"), (4, "CH1 B"))
+ENC33_GOOD = 0xF6
+
+
+def enc33_bad_pins(b: int) -> list[str]:
+    """The ADC pins whose encode check failed in a 0x33 byte (bit 0 = 1 means the capture failed)."""
+    return [name for bit, name in ENC33_PINS if not b >> bit & 1]
+
+
+#: callers of event types 21 / 22 (b >> 12, protocol rows 57 / 58)
+FPGA_CALLERS = {0: "UI", 1: "host", 2: "calibration wizard", 3: "v4 class probe", 4: "check"}
+#: event type 21 reasons (a >> 5 & 3, protocol 1.19)
+ENC_REASONS = {0: "check after a rate write", 1: "record data check", 2: "FPGA 0x33", 3: "boot convention check"}
+
+
 @dataclass
 class HealthResp(Payload):
-    """GET_HEALTH response, 96 bytes (protocol 1.16, row 55)."""
+    """GET_HEALTH response, 96 bytes (protocol 1.16, row 55), 104 bytes from 1.19 (row 58: the full-rate encode check
+    in 88..103; a 96-byte answer reads them as 0 and ``has_enc_check`` is False)."""
 
     FIELDS = [("layout", "B"), ("_r0", "x"), ("length", "H"), ("usb_state", "B"), ("usb_flags", "B"),
               ("usb_power", "B"), ("usb_faddr", "B"), ("suspend_ms", "I"), ("since_config_ms", "I"), ("cp15", "I"),
@@ -2505,9 +2537,10 @@ class HealthResp(Payload):
               ("rec_flags", "B"), ("rec_type", "B"), ("rec_restarts", "H"), ("rec_power_on", "I"),
               ("rec_exc_lr", "I"), ("rec_spsr", "I"), ("rec_exc_sp", "I"), ("rec_reset_lr", "I"),
               ("rec_reset_sp", "I"), ("rec_reset_cpsr", "I"), ("rec_fsr", "I"), ("rec_far", "I"),
-              ("rec_minutes", "I"), ("_r1", "8x")]
+              ("rec_minutes", "I"), ("enc_mode", "B"), ("enc_last33", "B"), ("enc_flags", "B"),
+              ("enc_boot33", "B"), ("enc_bad", "I"), ("enc_recovered", "I"), ("enc_checked", "I")]
     layout: int = 1
-    length: int = 96
+    length: int = 104
     usb_state: int = 3
     usb_flags: int = 0
     usb_power: int = 0
@@ -2537,6 +2570,55 @@ class HealthResp(Payload):
     rec_fsr: int = 0
     rec_far: int = 0
     rec_minutes: int = 0
+    #: protocol 1.19 (bytes 88..103): check mode, the last 0x33 byte, flags (ENC_*), 0x33 at boot, captures found
+    #: garbled (= link counter 62), of those recovered by a re-arm (= 63), full-rate captures checked since boot
+    enc_mode: int = 0
+    enc_last33: int = 0
+    enc_flags: int = 0
+    enc_boot33: int = 0
+    enc_bad: int = 0
+    enc_recovered: int = 0
+    enc_checked: int = 0
+
+    @property
+    def has_enc_check(self) -> bool:
+        return self.length >= 104
+
+    def describe_enc(self) -> dict[str, Any] | None:
+        """Bytes 88..103 (protocol 1.19) in words; None for a 1.16..1.18 answer (96 bytes)."""
+        if not self.has_enc_check:
+            return None
+        f = self.enc_flags
+        read = bool(f & ENC_READ)
+        out: dict[str, Any] = {
+            "mode": ENC_MODES.get(self.enc_mode, f"mode {self.enc_mode}"),
+            "mode_text": ENC_MODE_TEXT.get(self.enc_mode, ""),
+            "last_33": f"0x{self.enc_last33:02X}" if read else None,
+            "last_33_bad_pins": enc33_bad_pins(self.enc_last33) if read and self.enc_last33 & 1 else [],
+            "boot_33": f"0x{self.enc_boot33:02X}" if self.enc_mode == 2 else None,
+            "convention_bad": bool(f & ENC_CONVENTION_BAD), "last_capture_accepted_bad": bool(f & ENC_LAST_BAD),
+            "core_order_differs": bool(f & ENC_ORDER_DIFFERS),
+            "captures_checked": self.enc_checked, "captures_bad": self.enc_bad,
+            "captures_recovered": self.enc_recovered,
+            "captures_accepted_bad_or_abandoned": max(0, self.enc_bad - self.enc_recovered)}
+        if self.enc_mode == 0:
+            text = "full-rate captures are not checked on this bitstream"
+        elif f & ENC_CONVENTION_BAD:
+            text = f"unknown encode convention, 0x33 = 0x{self.enc_boot33:02X} at boot"
+        elif self.enc_checked == 0:
+            text = "encode check, no 200 MSa/s capture yet"
+        elif f & ENC_LAST_BAD:
+            pins = ", ".join(out["last_33_bad_pins"]) or "a core"
+            text = (f"the last full-rate capture was accepted garbled after 16 re-arms ({pins}): treat 200 MSa/s data "
+                    "since then as suspect")
+        elif read and self.enc_last33 & 1:
+            text = f"encode check failed on {', '.join(out['last_33_bad_pins']) or 'a pin'}"
+        else:
+            text = "encode check OK" + (f", {self.enc_bad} captures re-taken" if self.enc_bad else "")
+        if f & ENC_ORDER_DIFFERS:
+            text += "; ADC core order differs from the convention: recalibrate after flashing 0x1538"
+        out["text"] = text
+        return out
 
     def describe(self) -> dict[str, Any]:
         """The answer in words and units (what the Diagnostics pages show)."""
@@ -2569,7 +2651,8 @@ class HealthResp(Payload):
                    "operating_hours": round(self.rec_minutes / 60, 2),
                    "registers": {k: f"0x{getattr(self, 'rec_' + k):08X}" for k in
                                  ("exc_lr", "spsr", "exc_sp", "reset_lr", "reset_sp", "reset_cpsr", "fsr", "far")}}
-        return {"usb": usb, "cpu": cpu, "life": life, "settings": settings, "restart_record": rec}
+        return {"usb": usb, "cpu": cpu, "life": life, "settings": settings, "restart_record": rec,
+                "encode_check": self.describe_enc()}
 
 
 @dataclass
@@ -2669,8 +2752,8 @@ LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     # fw 0.2.49 (62 counters): USB resumes inferred without a RESUME interrupt (frame number moving, EP0 setup or EP2
     # OUT packet while suspended), soft reconnects of the suspend watch (protocol row 53)
     "usb_inferred_resumes", "usb_soft_reconnects",
-    # fw 0.2.61 (64 counters, protocol 1.18 row 57): full-rate capture checks after a rate change that found a garbled
-    # ADC core, and of those recovered by the retries
+    # fw 0.2.61 (64 counters, protocol 1.18 row 57): full-rate capture checks that found a garbled ADC core, and of
+    # those recovered by the retries; per capture since fw 0.2.62 (1.19 row 58: = GET_HEALTH 92 / 96)
     "adc_fullrate_bad", "adc_fullrate_recovered")
 
 #: restart_exc_type / event 15 a (fw 0.2.19)
@@ -2793,6 +2876,24 @@ class DeviceEvent:
             return f"tx_abort_txcsr POWER 0x{a:02X} TXCSR 0x{b:04X} {pkt}"
         if t == 18:
             return (f"tx_abort_frame tx_irq_enabled {a & 1} zlp_pending {(a >> 1) & 1} frame {b & 0x7FF}")
+        if t == 21:  # 1.19: a = reason << 5 | re-arms (bit 7 not recovered), b = caller << 12 | value
+            reason, value = (a >> 5) & 3, b & 0xFFF
+            who = FPGA_CALLERS.get(b >> 12, f"caller {b >> 12}")
+            if reason == 3:
+                return f"adc_fullrate_garbled boot convention check: 0x33 = 0x{value:02X} (bits 3:2 != 01)"
+            if reason == 2:
+                what = f"0x33 = 0x{value:02X} ({', '.join(enc33_bad_pins(value)) or 'no pin'} wrong)"
+            elif reason == 1:
+                what = f"residual {value / 16:.2f} codes"
+            else:
+                what = f"value {value}"
+            n = a & 0x1F
+            end = "NOT recovered (accepted garbled)" if a & 0x80 else "recovered"
+            return (f"adc_fullrate_garbled ({ENC_REASONS[reason]}, {who}): {what}, {n}{'+' if n == 31 else ''} "
+                    f"re-arm(s), {end}")
+        if t == 22:  # 1.18: an FPGA write of 0x0D, 0x53, 0x56 or 0x01 = 1; b = caller << 12 | value (12 bits)
+            who = FPGA_CALLERS.get(b >> 12, f"caller {b >> 12}")
+            return f"fpga_write 0x{a:02X} = {b & 0xFFF}{'+' if b & 0xFFF == 0xFFF else ''} by {who}"
         return self.name
 
 

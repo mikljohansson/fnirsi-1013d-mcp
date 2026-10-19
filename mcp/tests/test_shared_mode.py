@@ -12,8 +12,8 @@ from fnirsi1013d.transport import DeviceError
 
 def test_caps_version_and_status_body(sim, transport):
     info = P.InfoResp.unpack(transport.request(P.Cmd.GET_INFO).payload)
-    assert info.caps & P.Caps.SHARED_MODE and info.proto_minor == P.PROTO_MINOR == 17
-    assert transport.ascii("#VER").split(",")[3] == "proto=1.17"
+    assert info.caps & P.Caps.SHARED_MODE and info.proto_minor == P.PROTO_MINOR >= 19
+    assert transport.ascii("#VER").split(",")[3] == f"proto=1.{P.PROTO_MINOR}"
     body = transport.request(P.Cmd.GET_STATUS).payload
     assert len(body) == 48
     st = P.StatusResp.unpack(body)

@@ -123,7 +123,7 @@ def test_status_features_and_ui_average(sim_factory):
     s = Scope.connect(srv.url)
     try:
         st = s.status()
-        assert st.features == 0x1F and st.ui_average == 0 and s.info.proto_minor == 17
+        assert st.features == 0x1F and st.ui_average == 0 and s.info.proto_minor >= 17
         assert s.info.caps & P.Caps.SEQ
         s.set_timebase(divider=0)
         s.set_trigger(pretrigger_samples=1500, total_samples=3000)

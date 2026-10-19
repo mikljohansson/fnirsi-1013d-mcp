@@ -286,9 +286,13 @@ class Session:
             raise ToolError("scope UI is in a modal screen (menu, calibration or USB storage); close it on the "
                             "scope and retry")
         if s.shared:
+            notes = []
             if st.display_mode in (1, 2, 3):
-                return [SPECTRUM_VIEW_NOTE]
-            return [PHOSPHOR_VIEW_NOTE] if st.display_mode == P.DisplayMode.PHOSPHOR else []
+                notes.append(SPECTRUM_VIEW_NOTE)
+            elif st.display_mode == P.DisplayMode.PHOSPHOR:
+                notes.append(PHOSPHOR_VIEW_NOTE)
+            notes += self.enc_notes(s)
+            return notes
         if st.control == P.Control.REMOTE:
             s.remote = True
             return []
@@ -305,6 +309,29 @@ class Session:
         self.expect_remote = True
         notes.append("remote_acquired: " + LEGACY_NOTE.format(idle=self.cfg.legacy_idle_release_s))
         return notes
+
+    @staticmethod
+    def enc_notes(s: Scope) -> list[str]:
+        """Protocol 1.19: a caveat while the scope's last full-rate capture was accepted garbled (GET_HEALTH 90 bit
+        2, cleared by the next good one) or its encode convention check failed at boot."""
+        if s.info.proto_minor < 19:
+            return []
+        try:
+            h = s.health()
+        except (DeviceError, TransportError):
+            return []
+        if h is None or not h.has_enc_check:
+            return []
+        out = []
+        if h.enc_flags & P.ENC_LAST_BAD:
+            pins = ", ".join(P.enc33_bad_pins(h.enc_last33)) if h.enc_flags & P.ENC_READ else ""
+            out.append("the scope's last 200 MSa/s capture was accepted garbled after 16 re-arms (encode check"
+                       f"{': ' + pins if pins else ''}); a full-rate (200 MSa/s, filter off) result may be garbled "
+                       "on one ADC core: repeat it and check scope_health")
+        if h.enc_flags & P.ENC_CONVENTION_BAD:
+            out.append(f"the FPGA's encode convention check failed at boot (0x33 = 0x{h.enc_boot33:02X}): full-rate "
+                       "core order is unknown; see scope_health")
+        return out
 
     # tokens ---------------------------------------------------------------------------------------------
 
@@ -651,6 +678,14 @@ def _health_words(d: dict[str, Any], h: P.HealthResp) -> list[str]:
         w.append(f"stored restart record: {r['exception']} in {when} ({r['restarts']} restarts, at "
                  f"{r['operating_hours']} h; exception LR {r['registers']['exc_lr']}, fault address "
                  f"{r['registers']['far']}); it stays until cleared from the scope's Diagnostics")
+    e = d.get("encode_check")
+    if e is not None:  # protocol 1.19
+        if e["mode"] == "none":
+            w.append("full-rate capture check: none on this bitstream")
+        else:
+            w.append(f"full-rate capture check ({e['mode']}): {e['text']}; {e['captures_checked']} captures checked "
+                     f"since boot, {e['captures_bad']} found garbled, {e['captures_recovered']} of those re-taken "
+                     "clean" + (f", last 0x33 = {e['last_33']}" if e["last_33"] else ""))
     return w
 
 
@@ -1309,8 +1344,11 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         now (configured, suspended, reconnecting, high speed, port open), the CPU's MMU / cache state, the unit's
         life (power-on number, operating hours, uptime, how the previous power-on ended), whether the settings are
         saved, and the stored restart record (an exception that restarted the firmware; it survives power cycles
-        until cleared at the scope). Returns the values and ``in_words``. Use it first when the scope restarted,
-        the link dropped or settings seem lost, and include it in a fault report."""
+        until cleared at the scope); from protocol 1.19 (fw 0.2.62) ``encode_check``: how 200 MSa/s captures are
+        checked for a garbled ADC core (record data on AL3 0x1532..0x1537, the FPGA's self-check 0x33 on 0x1538+),
+        the last 0x33 byte with the failing pins, captures checked / found garbled / re-taken clean. Returns the
+        values and ``in_words``. Use it first when the scope restarted, the link dropped, settings seem lost or a
+        full-rate capture looks garbled on one core, and include it in a fault report."""
         def go() -> dict[str, Any]:
             s = sess.get_scope()
             h = s.health()
