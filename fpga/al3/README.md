@@ -1,16 +1,17 @@
 # fpga/al3 - Anlogic AL3A10LG144C7 project
 
-Status 2026-10-18: **TD 4.6.8 SP1 runs headless in WSL and rebuilds Atlan4's design byte-identical to his shipped
-`.bin`** (see "Rebuild results", setup in `TD_SETUP.md`). `src/` now carries our first change, the external trigger
-on the calibration pin (version word 0x1533, section "Changes" at the end). Atlan4's original stays buildable with
-`SRC_REV=a947e78`. Nothing has been flashed from this folder.
+Status 2026-10-19: **TD 4.6.8 SP1 runs headless in WSL and rebuilds Atlan4's design byte-identical to his shipped
+`.bin`** (see "Rebuild results", setup in `TD_SETUP.md`). `src/` carries our changes up to version word 0x1536:
+external trigger (0x1533), decimation filter (0x1534), compensation FIR (0x1535), segmented capture and hardware
+averaging (0x1536); section "Changes" at the end. Atlan4's original stays buildable with `SRC_REV=a947e78`. Nothing
+has been flashed from this folder.
 
 ## Contents
 
 | Path | What |
 |---|---|
 | `src/` | Atlan4's AL3 TD project, sources only: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc`, `zaklad.sdc`, `FPGA.al`, `al_ip/` (PLL and sample-memory IP: `.v`, `.ipc`, sim models), plus `FPGA commands.txt` (Atlan4's command table, updated). Copied from `D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\FPGA AL3\FPGA AL3S10\` (unmodified at commit a947e78, version 0x1532). `zaklad.v` and `zaklad.adc` now carry the changes listed in "Changes" (version 0x1533). Build outputs (`*.db`, `*.area`, `*.timing`, `*.bit`, `*.bin`) were left out. |
-| `tb/` | iverilog testbench: `run.sh`, `tb_ext_trigger.v`, `sim_models.v` (behavioural PLL and sample memory). See "Changes". |
+| `tb/` | iverilog testbenches and reference models: `run.sh` (six steps, `ONLY=ext/decim/fir/long/seg`), `tb_ext_trigger.v`, `tb_decim.v`, `tb_fir.v`, `tb_long.v`, `tb_seg.v`, `cic_model.py`, `seg_model.py`, `mutate_seg.py`, `sim_models.v` (behavioural PLL, sample memory, `AL_LOGIC_BRAM`). See "Changes". |
 | `out/` | Named bitstreams for the bench, gitignored (`*.bin`). Hashes are recorded in "Changes". |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the **stock** FNIRSI design (version 0x1432), TD 5.0.28716 project. Sources only (`source/`, `al_ip/`, `Original_1013D.al`); his prebuilt `.bit` was left out. Licence GPL-3.0 (`LICENSE-GPL3`, repo `pecostm32/Anlogic_AL3-10_Analyzing`). |
 | `bitstreams/` | Prebuilt images, on disk only, with provenance and sha256 in `bitstreams/README.md`. Git ignores everything there except that README. |
@@ -870,6 +871,265 @@ dump):
    around the edge (linear phase), with no clipping at the recommended shift.
 5. EXT timing: EXT and CH1 driven from the same edge. The CH1 edge in the record should sit at trigger_address +
    0.5 + lag / Tout (+/- 0.5 sample) with the lag formula above.
+
+### 6. Segmented capture and hardware averaging (version 0x1536, 2026-10-19)
+
+Roadmap section 8 item 1. The design note with the reasoning and the firmware/MCP proposal is
+`docs/plans/segmented-capture.md`. A sequencer restarts the unchanged capture logic after each record:
+- **segment mode** stores each record in its own slot of the sample memory and logs a trigger offset and a
+  40-bit timestamp per segment;
+- **averaging mode** adds each triggered record (pretrigger included) into a 2048 x 64 accumulator.
+
+With 0x57 = 0 (power-on), or 3, the design is cycle-identical to 0x1535; the testbench proves it against 0x1535
+from git. A "word" below is one memory word, as for 0x0B/0x0C/0x14: one A/B pair per channel in legacy mode
+(K = 0), one 16-bit sample per channel with K >= 1.
+
+**Protocol** (also in `src/FPGA commands.txt`; multi-byte values high byte first). Write 0x57..0x5C while 0x01 = 1:
+they are latched there, together with 0x0B, 0x0C and 0x53.
+
+| Cmd | Dir | Meaning |
+|---|---|---|
+| 0x06 | read, 2 B | 0x15 0x36. |
+| 0x57 | write, 1 B | bits 1..0 mode: 0 off (power-on), 1 segments, 2 averaging, 3 reserved (off). bit 2 circular segments. bit 3 raw averaging readout (live). Bits 7..4 write 0. |
+| 0x58 | write, 2 B | segments (1 .. 8192 >> m) or averaging positions (1 .. 2048 / total), 12 bits. |
+| 0x59 | write, 1 B | bits 3..0 m: segment slot = 2^m words, m = 5..12. |
+| 0x5A | write, 2 B | N, records per position (1..65535, 0 = 65536). |
+| 0x5B | write, 1 B | bits 4..0 S, averaging readout shift (live). |
+| 0x5C | write, 4 B | hold-off, 5 ns units: wait after a segment's table write or a record's post-pass before the restart. |
+| 0x5D | write, 1 B | bit 0 stop: no further restarts. An untriggered record in progress is abandoned, a triggered one completes. Cleared by 0x01 = 1. |
+| 0x0A | read, 1 B | bit 0: after an arm in mode 1 or 2, the run is done (all segments, all averages, or stopped). Otherwise unchanged. |
+| 0x2A | read, 8 B | status: byte 0 {7 done, 6 overflow, 5 running, 4 16-bit records, 3 raw, 2 circular, 1..0 mode of the run}; bytes 1..3 count; bytes 4..5 untriggered; bytes 6..7 {15..13 state, 11..0 next slot or position}. |
+| 0x2B..0x32 | read, 1 B each | byte 0..7 of the 64-bit view word at the 0x1F read pointer (bits 10..0); each read advances the pointer, with the same one-strobe pipeline as 0x20..0x23 (dummy read after 0x1F). |
+
+**Segment mode.**
+- **Slots.** Slot s holds physical words s 2^m .. s 2^m + 2^m - 1. The capture logic runs on its usual virtual
+  address. The slot is a ring of 2^m words, and the virtual address modulo 2^m is the word in the slot.
+- **Per segment.** Each segment is a normal capture: pretrigger fill, trigger (CH1/CH2 level, EXT, or the auto
+  time-out), post-trigger words. Then the sequencer:
+  1. writes the table entry;
+  2. waits the hold-off;
+  3. restarts the capture logic at the next slot.
+- **Rules.** `total <= 2^m - 2`, because 2 more words are written after the record window (measured in every run).
+  `pre < total`. The hardware checks neither.
+- **One-shot run:** done after 0x58 segments.
+- **Circular run:** the slot index wraps until 0x5D. The overflow bit is set at the first wrap. At each restart
+  the entry of the slot about to be refilled is cleared to 0 (invalid), so after a stop every valid entry
+  describes complete data.
+- **Capacity:** 2^m words x segments <= 8192.
+  - In legacy mode: 128 segments of 128 samples per channel (m = 6) up to 4 of 4096 (m = 11).
+  - In 16-bit mode: 64 of 128 (m = 7) up to 4 of 2048 (m = 11).
+  - The full table for m = 5..12 is in the design note.
+- **Table entry** (accumulator word s, read through 0x2B..0x32):
+
+| Bits | Field |
+|---|---|
+| 39..0 | timestamp, 5 ns units: 2 (D + 1) per write clock edge (D = effective divider, 0 with K >= 1), from the first write clock edge after the release of 0x01 to the edge that latched trigger_address; 40 bit = 5,497 s |
+| 52..40 | trigger offset in the slot: trigger_address mod 2^m (convention of 0x14) |
+| 53 | 1 = triggered, 0 = the segment ended on the auto time-out (offset = pre mod 2^m) |
+| 62..54 | 0 |
+| 63 | valid |
+
+- **Reading a segment.** Segment s, record index j (0 .. total - 1) is at physical word
+  `s 2^m + ((offset - pre + j) mod 2^m)`.
+- **Status.** The count is segments completed; untriggered counts the entries with bit 53 = 0.
+
+**Averaging mode.**
+- **Run structure.** Triggered record k goes to position k mod P (P = 0x58). It is added into accumulator words
+  p total .. p total + total - 1.
+  - After N records per position (0x5A), the run is done.
+  - Untriggered records (auto time-out) are skipped and counted.
+  - The first record of each position is written, not added, so no clear is needed.
+  - Rules: P x total <= 2048, total <= 2046.
+- **Lanes:**
+
+| Records (0x53 at the arm) | Accumulator word | Exact up to | Readout lanes (16 bit each, bytes 0-1 / 2-3 / 4-5 / 6-7) |
+|---|---|---|---|
+| legacy (K = 0) | four 16-bit sums CH1A, CH1B, CH2A, CH2B, each clamping at 65535 | N = 257 | sum >> S in all four (S 0..15; 16+ gives 0) |
+| 16-bit (K >= 1) | CH1 and CH2 as 32-bit sums; no overflow possible (65535 x 65536 < 2^32) | N = 65536 | L0 = min(65535, CH1 sum >> S), L2 = min(65535, CH2 sum >> S), L1 = L3 = 0 |
+
+  - With 0x57 bit 3 (raw) the readout is the accumulator word itself.
+  - S and raw act at readout time, so the record can be read again with another S.
+- **Sample memory after the run.** It still holds the last record as a normal capture (0x14 its trigger_address).
+  After a stop, the abandoned record keeps running in the background.
+
+**Timing of a run** (measured by `tb_seg.v`; "word" = word period):
+- **Re-arm time**, from the last word of a record to the trigger being enabled again, is about
+  hold-off + pre x word + 1 to 3 write clocks + 50 ns.
+  - Averaging: about total x 5 ns (the post-pass) + pre x word + 100 ns.
+    Measured: total 20 / 400 / 500 at 10 ns words and pre 4 / 30 / 40 gave 0.24 / 2.4 / 3.0 us.
+    Total 100 at 100 ns words and pre 10 gave 1.6 us.
+  - Measured (hold-off 0 unless stated):
+
+| Word | pre | hold-off | re-arm time |
+|---|---|---|---|
+| 10 ns (200 MSa/s legacy, or boxcar N = 2) | 6 | 0 | 130 ns |
+| 10 ns | 30 | 1 us | 1.36 us |
+| 20 ns | 4 / 12 / 20 | 2 us / 0 / 0 | 2.18 / 0.34 / 0.48 us |
+| 40 ns | 10 / 20 | 0 | 0.56 / 0.96 us |
+| 100 ns | 10 / 20 | 0 | 1.1-1.4 / 2.4 us |
+| 320 ns (CIC3 + FIR, N = 64) | 6 | 0.5 us | 2.56 us |
+
+- **Timestamp against the EXT edge.** The timestamp lies 22 to 32 ns after the EXT edge at 10 ns words (the
+  EXT input latency of section 1). It lies up to word + 22 ns after the edge at slower rates, because the trigger
+  latches on the next word edge. Seeds 12345 and 3, 56 EXT segments each.
+- **Trigger offset against the write address at the edge:** that address - 1, +0 to +3 words. That is the 0x1533
+  convention plus the EXT latency at fast rates.
+
+**Design** (`src/zaklad.v`, blocks "Segmented capture and averaging", modules `seq_acc_ram`, `seq_mirror_ram`):
+- **Restart.**
+  - The sequencer runs on `clk_200MHz` and raises `seq_req`. Its sampled copy gives a one-write-clock pulse
+    `seq_rst_c`.
+  - `cap_rst = sample_system_reset | seq_rst_c` replaces the MCU reset in every capture register: write address,
+    time base, write enable, trigger data, half-way, trigger read address, trigger address.
+  - `cap_rst200` resets `sampling_triggered`, `trigger_detect_enable` and `ext_pending`. It acts on the
+    `clk_200MHz` edge 7.5 ns after the restart edge, before the next write clock edge.
+  - The decimator, FIR, divider, generator and `ext_activity` are never restarted.
+- **Remap.** `sample_write_address_phys = (address & mask) | (slot base & ~mask)`. The mask is all ones unless the
+  last arm was in segment mode. The slot base moves on at each restart, or goes back to 0 on the sequencer's
+  wrap flag.
+- **Timestamp.**
+  - `ts_cnt` (40 bit) adds 2 (D + 1) per write clock edge.
+  - `ts_cap` is taken one write clock late, from registered copies of the signals that latch trigger_address,
+    so that `sampling_triggered` gains only one load.
+- **Snapshots.** The sequencer reads write-clock signals only through snapshots taken 7.5 ns after a write-clock
+  rise (`swc_rise_q`). They are settled by then (multicycle 2) and stable until the next rise.
+- **Pipelined decisions.** Every sequencer decision uses registers only: increments and compares are precomputed
+  every clock. That is what closes 200 MHz.
+- **Record mirror.**
+  - 2048 x 32 in the two EMB32K (`AL_LOGIC_BRAM`, `IMPLEMENT "32K"`). It takes the sample memory's write port
+    signals (same `dia`, `cea`, address bits 10..0).
+  - The post-pass reads it from `(trigger_address - pre) mod 2048`, one word per 5 ns, through a 7-stage pipeline
+    into the accumulator: 16 EMB9K, 2048 x 64, registered read.
+  - The legacy lanes saturate. The 16-bit lanes add the upper half with the carry one stage later.
+  - The MCU reads the accumulator through the same port, address-muxed, and `seq_lat` latches it on every
+    `i_mcu_clk` edge like the sample memory's read register.
+- **MCU side.** 0x2B..0x32 reads also advance `sample_read_offset` (old firmware never reads them). 0x01 = 1 clears
+  0x5D.
+
+**Build** (TD 4.6.8 SP1, `./build.sh`; corner TT 1.10 V 85 C):
+
+| | 0x1535 | 0x1536 |
+|---|---|---|
+| LUT / reg / LE | 3082 / 2716 / 3501 | 4445 / 3817 / 4959 (51 % of TD's 8640 LUT sites) |
+| BRAM9K / BRAM32K | 32 of 48 / 0 of 2 | 48 of 48 / 2 of 2 |
+| M18x18, pads, IOB regs | 2 of 3, 60, 13 OREG + 1 IREG | same |
+| `clk_200MHz` | 4.676 ns, slack +0.324 ns | 4.718 ns, 0 errors, slack +0.282 ns. The worst path is the existing `sample_write_clock` toggle; the worst new path (post-pass address, sequencer counters) has +0.38 ns |
+| `sample_write_clock` | 0 errors, +0.677 ns | 0 errors, +0.481 ns: the existing `sampling_triggered` crossing into trigger_address |
+| `clkc[1]`, `clkc[0]` | 6 / 52 errors | 6 errors TNS -15.9 / 52 errors TNS -135.0: the same structural and SDC-artefact paths as before |
+
+The first build had 81 `clk_200MHz` errors, down to -1.12 ns. They came from sequencer decisions computed
+combinationally: wide compares, increments and state-decoded write muxes. Precomputing them fixed it.
+
+**Bitstream** (`out/FPGA-seg.bin`; deterministic): two builds in different work dirs gave the same hash.
+
+| File | Bytes | sha256 |
+|---|---|---|
+| `out/FPGA-seg.bin` (= `build/FPGA.bin` of commit 27c0c75, = `backups/al3_seg_0x1536_4eaf6811.bin`) | 282,898 | `4eaf6811814c58e1f00e648b97e7a608bb5ca387fb036f21714e91667959b48b` |
+| `backups/al3_seg_0x1536_4eaf6811_padded.bin` (0xFF to 1 MiB, flash image) | 1,048,576 | `66866c84ad4f298c88cfc1072870d44e80832852b53fcbd926e01fcb473f7408` |
+
+Header words as before (`cc55aa33 f0000006 18006c31`), user code 0x0056.
+
+**Testbench** (`tb/run.sh`, step 6, `ONLY=seg`; `tb_seg.v` against 0x1535 from git, `REF1535_REV` e2aec2e; then
+`seg_model.py check` on its log). Six steps now; the sixth takes 5 to 7 minutes (`SEG_P1=2` about 2 to 5).
+- **Phase 1** (sequencer off): 12 random captures (`SEG_P1`).
+  - Settings: K = 0..3, FIR eligible or not, trigger source CH1/CH2/EXT, generator and EXT noise. 0x57 is written
+    with mode 0 or 3 and random flag bits, and 0x58..0x5D with random values. 0x2A is read (not compared).
+  - Compared every ns: pins, capture registers, decimator, the memory write port (data, address, enable), every bus
+    read (0x0A included), the whole memory after each capture. The sequencer must stay idle.
+  - Result: 0 mismatches.
+- **Phase 2**, 11 segment runs. Each logs every memory write (virtual and physical address), the restart edges, the
+  EXT edges, the re-arm and record-end instants, the table read over the bus and the slots.
+  - S1: legacy 10 MSa/s, 6 x 64 words.
+  - S2: 200 MSa/s, 8 x 128, hold-off 1 us.
+  - S3: hold-off 2 us against pulses every 0.6-0.75 us.
+  - S4: circular 4 x 128, 7 pulses, stop.
+  - S5: one-shot stopped after 3 of 8.
+  - S6: CIC2 at N = 4.
+  - S7: CIC2 + FIR at N = 20.
+  - S8: CIC3 + FIR at N = 64.
+  - S9: boxcar at N = 2, 16 x 32 words.
+  - S10: auto time-out, 4 untriggered.
+  - S11: CH1 level trigger. In every segment the record crosses the level at index pre + delta0, where delta0 is
+    measured on a normal capture.
+- **Phase 3**, 11 averaging runs. Each logs the record from the sample memory when its post-pass starts; the
+  accumulator is read over the bus at several S, clamped and raw.
+  - A1: N = 1, the mirror check.
+  - A2: legacy N = 8.
+  - A3: 3 positions x 5.
+  - A4: a second run with other data.
+  - A5: 300 x 255 clamps, 300 x 200 = 60000 exactly.
+  - A6: CIC2 + FIR, 2 positions x 16.
+  - A7: boxcar N = 2.
+  - A8: auto mode, untriggered records skipped (3 to 5 per run).
+  - A9: CH1 step: the averaged record crosses at pre + delta0.
+  - A10: stop after 3 of 50.
+- **Phase 4**: resync, 6 random captures, 0 mismatches.
+- **Result:** 50 checks, 0 failed. `seg_model.py` checks all 22 runs (4,650 accumulator words read back, 67 table
+  entries, about 10,100 logged writes) with 0 failures, on seeds 12345 and 3. Measured on the way:
+  - exactly 2 words are written after a record window (hence total <= 2^m - 2 and total <= 2046);
+  - trigger offset = write address at the EXT edge - 1, +0 to +3 words;
+  - re-arm times as tabulated above;
+  - averaging re-arm about total x 5 ns + pre x word + 100 ns.
+- The four earlier steps pass unchanged against 0x1532, 0x1533 and 0x1534. Only their version checks moved to 0x1536,
+  and `mkref` also renames `fir_chan`.
+
+**Mutation runs** (`python3 -I tb/mutate_seg.py`, each mutant one textual change, `ONLY=seg SEG_P1=2`). 20 of 21 fail as they should:
+
+| # | Mutation | Caught by |
+|---|---|---|
+| 1 | remap off (physical = virtual address) | CH1 trigger position per segment (S11), model remap |
+| 2 | slot base does not advance | same |
+| 3 | circular run never wraps | model remap (writes beyond the 4 slots) |
+| 4 | trigger offset not masked to the slot | model table |
+| 5 | timestamp taken at every edge, not only output edges | **not caught: equivalent** (see below) |
+| 6 | timestamp without the one-edge delay of ts_d | model timestamp window (141 ns after the edge at 100 ns words) |
+| 7 | `sampling_triggered` not reset at the restart | circular run never completes (S4) |
+| 8 | `ext_pending` not reset at the restart | S4: segments trigger on a stale edge, run never completes |
+| 9 | first record added to old contents | A5 (second run at 200 x 300 reads more than 60000) |
+| 10 | legacy lanes wrap instead of clamping | A5 |
+| 11 | 16-bit lanes without the carry into the upper half | model (16-bit sums) |
+| 12 | post-pass start one word late | A9 trigger position in the averaged record, model |
+| 13 | positions share one accumulator block | model (position base) |
+| 14 | untriggered records accumulated | A8 |
+| 15 | hold-off ignored | model hold-off check |
+| 16 | slot about to be refilled not invalidated | model table, S4 |
+| 17 | 0x0A = done for every arm (modes off unaffected, so equivalent there) | S1 status |
+| 18 | 16-bit readout clamp missing | model (S = 0 readout) |
+| 19 | post-pass ends before the pipeline drained | A5, model |
+| 20 | 0x2B..0x32 reads do not advance the pointer | S4 table read |
+| 21 | run ends after the first pass (N ignored) | A2 |
+
+Mutation 5 is equivalent: with K >= 1 the trigger reaches `sampling_triggered` only right after an output edge (ADC and
+EXT paths alike), so the last untriggered edge before a trigger is always an output edge. The `adv_d` term stays as
+documentation of the intent. Mutants 7 and 8 do not fail a check directly; they hang their run until the poll limit,
+which costs about 5 minutes each.
+
+**Bench checks** (coordinator with the owner; needs firmware that knows 0x1536; never flash without the verified
+stock dump):
+1. **Modes off.** Repeat the 0x1535 checks (sections 3 and 5): legacy at 200 MSa/s, CIC, FIR, EXT, plus
+   0x2A byte 0 = 0. The sample memory address now goes through the remap LUT.
+2. **Segments, generator loopback.**
+   - Setup: generator 10 kHz square into CH1, trigger CH1 rising, legacy 200 MSa/s, m = 7, 32 segments, pre 16,
+     total 120.
+   - Every segment's record crosses the level at record index pre + 1 (or the 0x1533 convention found in T5).
+   - Timestamp differences are 100 us +/- 10 ns.
+3. **EXT segments.** EXT from a TTL source (section 2 wiring), 8 segments with hold-off 0. The timestamps match
+   the source's pulse spacing. With a hold-off longer than the spacing, every other pulse is skipped.
+4. **Circular and stop.** Circular run on a 1 kHz square, stop after about 1 s. The overflow bit is set, the count
+   is about 1000, and the slot about to be refilled reads invalid.
+5. **Averaging, noise.**
+   - Shorted input, legacy 200 MSa/s, auto mode with the EXT pin pulsed, N = 1 and N = 256, S = 8.
+   - The rms of the averaged record should fall by about 16 against N = 1, until the ADC's own patterns
+     dominate.
+   - The N = 1 averaged record must equal the sample memory's record word for word. That is the mirror capture
+     check: the mirror BRAMs sit at a different place on the ADC buses.
+6. **Averaging, 16-bit.**
+   - CIC2 + FIR at N = 20, P = 2 positions, the generator square triggering CH1 on alternate edges (rising and
+     falling through two runs).
+   - The positions average separately, and the 16-bit readout at S = log2 N equals the single-shot shape.
+7. **Pulse-induction case.** The detector's TX gate on EXT, 16-bit CIC at 20 MSa/s, total 1000, pre 50, N = 256.
+   The run should take 256 pulse periods, with count 256 and untriggered 0. A longer run means pulses fell into
+   the dead time (record + about 7.5 us here).
 
 ## Device facts from the datasheet
 

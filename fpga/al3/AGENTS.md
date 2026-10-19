@@ -3,7 +3,14 @@
 Anlogic AL3A10LG144C7 FPGA of the owner's FNIRSI 1013D (JTAG IDCODE 0x18006C31, config flash Winbond
 W25Q80DV, JEDEC `ef 40 14`). Read `CLAUDE.md` at the repo root first; its flashing rules override anything here.
 
-State on 2026-10-18:
+State on 2026-10-19:
+- `src/` holds version word **0x1536** (fpga-gen5): 0x1535 plus segmented capture and hardware averaging (cmds 0x57-0x5D,
+  reads 0x2A-0x32; `README.md` "Changes" section 6, design note `docs/plans/segmented-capture.md`). With 0x57 = 0 it is
+  cycle-identical to 0x1535 (git e2aec2e, the tb's `REF1535_REV`).
+  - Built as `out/FPGA-seg.bin`, sha256 `4eaf6811...b48b`, pinned in `backups/al3_seg_0x1536_4eaf6811.bin`; padded flash
+    image `backups/al3_seg_0x1536_4eaf6811_padded.bin`, sha256 `66866c84...7408`. **Not flashed**; needs firmware that
+    knows 0x1536 (a 0x153x-aware firmware that never writes 0x57 sees 0x1535).
+  - Uses every block RAM (48 EMB9K, 2 EMB32K): the "deeper memory" item below now needs a trade (section "0x1536 status").
 - The unit's FPGA flash holds Atlan4's AL3 bitstream (version word 0x1532), written and verified by read-back
   (`docs/hardware-status.md`). The stock image is backed up.
 - TD 4.6.8 SP1 runs headless in WSL. `SRC_REV=a947e78 ./build.sh` rebuilds Atlan4's original **byte-identical**
@@ -46,8 +53,8 @@ State on 2026-10-18:
 | Path | What |
 |---|---|
 | `src/` | Atlan4's AL3 TD project with our changes: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc` (pins), `zaklad.sdc` (clocks), `FPGA.al` (TD project, holds `<UCode>`), `al_ip/` (PLL and sample-memory IP), `FPGA commands.txt` (command table, current). Upstream material, licence unstated, attributed to Atlan4. Unmodified original: git a947e78. |
-| `tb/` | iverilog testbench, `run.sh [seed]`, four steps: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir` or `long` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs. |
-| `out/` | Named bitstreams for the bench (gitignored `*.bin`): `FPGA-ext-trigger.bin` (0x1533), `FPGA-decim.bin` (0x1534), `FPGA-fir.bin` (0x1535). |
+| `tb/` | iverilog testbench, `run.sh [seed]`, six steps (the sixth: `tb_seg.v` against our 0x1535, `REF1535_REV`, checked by `seg_model.py`; `mutate_seg.py` runs its 21 mutants), first four: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir`, `long` or `seg` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs, `tb_seg.v` the same through `SEG_P1`. |
+| `out/` | Named bitstreams for the bench (gitignored `*.bin`): `FPGA-ext-trigger.bin` (0x1533), `FPGA-decim.bin` (0x1534), `FPGA-fir.bin` (0x1535), `FPGA-seg.bin` (0x1536). |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the stock FNIRSI design (0x1432), GPL-3.0. Same pin map. Use it for "what did stock do" questions. |
 | `bitstreams/` | Prebuilt images, gitignored except `README.md` (provenance and sha256). |
 | `build.sh`, `build.tcl` | Headless TD 4.6.8 build (replay of Atlan4's GUI command sequence). `SRC_REV=<rev>` builds `src/` from git. |
@@ -81,15 +88,17 @@ wsl -d Ubuntu -- python3 -I /mnt/d/src/fnirsi-1013d-ai/fpga/al3/td/compare_bin.p
 - Wall clock is 11 to 16 s (about 35 s for 0x1534). On failure it exits non-zero and prints "BUILD FAILED" with the first errors.
 - Overrides: `TD_HOME`, `TD_SHIM`, `FLOW` (`atlan` default, `donwulff`), `SRC_REV` (git revision of `src/`); the
   first argument is the work dir.
-- Current `src/` (0x1535) gives `build/FPGA.bin` sha256 `5040a2aeede071019bca0ffee47d765b87d980e1e47ca01ac32cb875c839aa96`
-  (two builds in different work dirs, same hash). 0x1534 (`SRC_REV=6d4c8ad`) gave `83140510dfbfef56cc5ed15d70866e6bc52c407a41fd0ea480e8993df5b820c1`.
+- Current `src/` (0x1536) gives `build/FPGA.bin` sha256 `4eaf6811814c58e1f00e648b97e7a608bb5ca387fb036f21714e91667959b48b`
+  (two builds in different work dirs, same hash; about 60 s). 0x1535 (`SRC_REV=e2aec2e`) gave
+  `5040a2aeede071019bca0ffee47d765b87d980e1e47ca01ac32cb875c839aa96`. 0x1534 (`SRC_REV=6d4c8ad`) gave `83140510dfbfef56cc5ed15d70866e6bc52c407a41fd0ea480e8993df5b820c1`.
   0x1533 (`SRC_REV=2839258`) gave `a96567031872ae99bd40f0722a111a08da0f6381b6c710b70998af784a341216`.
 - Testbench: install iverilog once as root (`wsl -d Ubuntu -u root -- apt-get install -y iverilog`, done 2026-10-18),
-  then run `wsl -d Ubuntu -- bash /mnt/d/src/fnirsi-1013d-ai/fpga/al3/tb/run.sh [seed]`. It takes 6 to 12 minutes
+  then run `wsl -d Ubuntu -- bash /mnt/d/src/fnirsi-1013d-ai/fpga/al3/tb/run.sh [seed]`. It takes about 17 minutes with step 6 (seed 12345: 1038 s)
   (the first three steps about 25 s, `tb_fir.v` the rest) and ends with `ALL PASS (seed N)`: 38 checks (tb_ext_trigger),
   98 checks (tb_decim), about 1,870 samples in `cic_model: ... -> PASS`, 154 checks (tb_fir) and about 1,540 FIR
-  samples in the second `cic_model` line, then 8 checks (tb_long, about 5 minutes more). `ONLY=fir` runs only the FIR
-  step. Any change to `zaklad.v` must keep it passing. The equivalence phases prove that CH1/CH2
+  samples in the second `cic_model` line, then 8 checks (tb_long, about 5 minutes more), then `tb_seg.v` (50 checks,
+  5 to 7 minutes) and `seg_model: 22 runs, 0 failures -> PASS`. `ONLY=fir` runs only the FIR step, `ONLY=seg` only the
+  0x1536 step (`SEG_P1=2` for a quick run, about 2 to 5 minutes). Any change to `zaklad.v` must keep it passing. The equivalence phases prove that CH1/CH2
   match 0x1532 and that K = 0 (including EXT) matches 0x1533.
 - Run testbench work from PowerShell (`wsl -d Ubuntu -- bash <script>`). Git Bash rewrites `/mnt/...` arguments.
   Concurrent runs need different `SIM_WORK` directories.
@@ -239,9 +248,17 @@ References:
   `fir_act`, `dec_sv[0]` also fires at `dec_pc == fir_hp` (P/2), `dec_t` tags the `dec_pc == 0` strobes, the FIR loads
   on `dec_t[7]`, `dec_wr` = `fir_done1` and `dec_out1/2` = the FIR outputs. With `fir_act` = 0 all of these reduce to
   0x1534.
-- Command codes still free in the decoders (checked 2026-10-18, after 0x1535): writes 0x02-0x0A, 0x10-0x14, 0x18,
-  0x19, 0x1C-0x1E, 0x20-0x31, 0x39-0x3B, 0x3D-0x4F, 0x57 and up; reads 0x01-0x04, 0x07-0x09, 0x0B-0x13, 0x15-0x17,
-  0x19-0x1F, 0x2A-0x40, 0x42 and up. Stock firmware wrote 0x28 (roll mode) and Donwulff says stock used 0x24/0x26
+- Sequencer (0x1536), blocks "Segmented capture and averaging" after the trigger-address capture:
+  - write-clock side: the restart pulse `seq_rst_c` (in `cap_rst`, which replaced `sample_system_reset` in every
+    capture register), the segment slot remap `sample_write_address_phys`, the 40-bit timestamp `ts_cnt` / `ts_cap`;
+  - `clk_200MHz` side: the state machine `q_st` (reads write-clock signals only through the `sn_*` snapshots taken on
+    `swc_rise_q`), the post-pass pipeline `pp_*` from the record mirror `seq_mirror_ram` (2 EMB32K) into
+    `seq_acc_ram` (16 EMB9K), the table writes `tab_*`, and `cap_rst200` for `sampling_triggered` / `ext_pending`;
+  - MCU side: 0x57-0x5D, 0x2A status, 0x2B-0x32 through `seq_lat` (latched on every `i_mcu_clk` edge like the sample
+    memory's read register; the reads also advance `sample_read_offset`); 0x0A reports the whole run.
+- Command codes still free in the decoders (checked 2026-10-19, after 0x1536): writes 0x02-0x0A, 0x10-0x14, 0x18,
+  0x19, 0x1C-0x1E, 0x20-0x31, 0x39-0x3B, 0x3D-0x4F, 0x5E and up; reads 0x01-0x04, 0x07-0x09, 0x0B-0x13, 0x15-0x17,
+  0x19-0x1F, 0x33-0x40, 0x42 and up. Stock firmware wrote 0x28 (roll mode) and Donwulff says stock used 0x24/0x26
   differently, so prefer 0x2A and up, or 0x57 and up, for new codes.
 
 ## Wanted next (priority order)
@@ -259,7 +276,10 @@ Do not edit `src/` in place without keeping Atlan4's original reproducible (the 
      An EXT source must be referenced to USB/digital ground, or shifted down about 1.2 V (series red LED) when it
      shares the probe ground. Linking the two grounds sags VRF1 and shifts all traces. `README.md` "Changes"
      section 2 has the trace, limits and bench tests 0 to 4.
-2. **Deeper sample memory.** 16 BRAM9K and both BRAM32K blocks are free (about 12k to 15.8k words possible).
+2. **Deeper sample memory.** Since 0x1536 every block RAM is in use (accumulator 16 EMB9K, record mirror 2 EMB32K).
+   Deeper memory now needs one of: drop the mirror and re-clock the sample memory's read port to `clk_200MHz` with an
+   `i_mcu_clk` output register (frees both EMB32K, about 2k more words; the post-pass then reads the sample memory),
+   or halve the accumulator (frees 8 EMB9K, 2k words). Before 0x1536: 16 BRAM9K and both BRAM32K were free.
    The address registers (`pretrigger_samples`, `total_samples`, `trigger_address`, `sample_read_offset`) are
    13 bit with the high byte taking `[4:0]`. Widen them to 16 bit (the wire format already carries 16 bits),
    replace power-of-two wrap with explicit end-address wrap, and update the firmware ring arithmetic.
@@ -286,6 +306,78 @@ Decimation filter (0x1534), open items:
 - Next design: 0x1535, a CIC compensation FIR as the intended default mode (owner direction): built, see below and
   `README.md` section 5. 0x1534 is accepted by the coordinator (2026-10-18) and is
   being flashed with fw 0.2.33.
+
+## 0x1536 status (fpga-gen5, 2026-10-19)
+
+Roadmap section 8 item 1, segmented capture and hardware averaging.
+
+**Commits.**
+- Design note `docs/plans/segmented-capture.md`: bcccd92.
+- RTL: 27c0c75.
+- Testbench: e66c884.
+- Docs: `README.md` "Changes" section 6 and `src/FPGA commands.txt`.
+
+**Results.**
+- `tb/run.sh` passes. `ONLY=seg` passes for seeds 12345 and 3.
+- `mutate_seg.py`: 20 of 21 mutants are caught. The 21st (`ts_every_edge`) is equivalent: with K >= 1 the trigger is
+  only applied right after an output edge, so the timestamp capture does not need the `adv_d` term.
+- Build: 4445 LUT / 3817 reg, every block RAM. `clk_200MHz` +0.282 ns (worst new path +0.38 ns), `sample_write_clock`
+  +0.48 ns, the known `clkc[0]` / `clkc[1]` paths unchanged. Deterministic hash `4eaf6811...`.
+
+**What the firmware agent needs** (register map: `README.md` section 6; proposed protocol: design note section 7):
+- **Detect.** Version 0x1536..0x153F, proposed caps bit 17 SEQ.
+- **Arm.**
+  - The usual sequence. Inside the 0x01 = 1 window, after 0x0B/0x0C/0x0E, write 0x57, 0x58, 0x59 (segments), 0x5A
+    and 0x5B (averaging), and 0x5C.
+  - 0x01 = 0 starts the run. Every record of the run uses the trigger, mode, divider and filter settings as for a
+    single capture.
+- **Done and stop.**
+  - 0x0A = 1 means the whole run is done.
+  - STOP / FORCE: write 0x5D = 1. Add 0x1A = 0 if a waiting record must end now. Then wait for 0x0A.
+  - The firmware's own auto timeout (v0.2.41) must not write 0x1A = 0 between records of a run.
+- **Progress.** 0x2A, 8 bytes: done, overflow, running, count, untriggered, state and next index. Read it twice
+  while running.
+- **Readout.** Write 0x1F, do one dummy strobe, then read 0x2B + b for byte b of each 64-bit word. Each read advances
+  the pointer, exactly like 0x20..0x23. One pass per byte, so a 16-bit lane costs 2 passes.
+  - Segment table entry s: [39:0] timestamp (5 ns), [52:40] trigger offset in the slot, [53] triggered, [63] valid.
+  - Averaging: legacy lanes L0..L3 = CH1A, CH1B, CH2A, CH2B, each sum >> S. 16-bit: L0 = CH1, L2 = CH2, each
+    min(65535, sum >> S). Raw (0x57 bit 3): the sums. S and raw can be changed after the run and the record read
+    again.
+- **Segment data.** Segment s, record index j is sample memory word `s 2^m + ((offset - pre + j) mod 2^m)`. Read it
+  with the existing 0x1F / 0x20..0x23 path. Layouts as for single captures: legacy A/B pairs, or 16-bit.
+- **Limits** the firmware must enforce:
+  - segments: m = 5..12, count <= 8192 >> m, total <= 2^m - 2, pre < total;
+  - averaging: positions x total <= 2048, total <= 2046; N <= 257 for exact legacy sums (above that the lanes clamp
+    at 65535).
+- **Conversions.**
+  - Legacy average code = L x 2^S / N.
+  - 16-bit average = L x 2^S / N, then the existing 16-bit rule (gain from GET_DECIM, corr16).
+  - Timestamp seconds = ts x 5e-9. Timestamps are taken on the write-clock edge that latched trigger_address: 22 to
+    30 ns after an EXT edge at 200 MSa/s, up to one word later at slower rates.
+- **EXT latency shift** (`pc_decim_ext_shift`) applies per record as for single captures. It is part of the
+  pretrigger value written to 0x0B.
+
+**Open.**
+- Firmware and MCP support.
+- Flashing, and the bench checks of `README.md` section 6. Check 5, the N = 1 average against the sample memory, is
+  the one hardware risk the testbench cannot cover: the mirror samples the raw ADC buses in other BRAMs.
+
+**Possible next steps.**
+- Per-position trigger edge (bipolar TX: alternate rising and falling).
+- A stop that also halts the abandoned record.
+- Wider legacy lanes: 24 bit would need 96-bit words and does not fit the RAM.
+- Ideas for a later generation:
+  - with the deeper-memory trade (item 2), records of 4k words in 16-bit mode;
+  - the third M18x18 is still free.
+
+**Tool notes from this generation.**
+- Git Bash `sed -i` strips CR: `tb/tb_ext_trigger.v` and `README.md` are CRLF. Edit them with Python on bytes and
+  check with `file`.
+- PowerShell mangles `|` in arguments passed to `wsl`. Long heredocs with quotes fail in Git Bash; write a script
+  with the Write tool instead.
+- More timing endpoints: re-run `report_timing -ep_num 120` on `~/al3-build/FPGA_pr.db`, as described under "Reading
+  the reports". TD names many registers `regNN_bM`; the net names in the path (for example `q_pass[1]`) tell which
+  ones they are.
 
 ## 0x1535 status (fpga-gen4, 2026-10-18)
 

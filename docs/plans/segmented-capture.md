@@ -5,7 +5,7 @@ decay after it (tens to hundreds of microseconds) is the signal. Dead time betwe
 coherent averaging of many decays at full rate is what buys sensitivity. Community case: multi-event capture with
 per-event timestamps, and noise reduction by averaging.
 
-Status: design (fpga-gen5, 2026-10-19). Section 9 gets the measured numbers after the build and the testbench.
+Status: built and verified in simulation as designed (fpga-gen5, 2026-10-19), not flashed. Section 9 has the results.
 Facts about the existing design come from `fpga/al3/README.md` sections 3 and 5 and `fpga/al3/AGENTS.md`. Statements
 marked "inference" are not measured.
 
@@ -260,4 +260,27 @@ passes, because it does not touch the new commands).
 
 ## 9. Results
 
-Filled in after the build (fpga/al3/README.md section 6 holds the full tables).
+The full tables are in `fpga/al3/README.md` "Changes" section 6.
+
+**Bitstream.** `out/FPGA-seg.bin`, sha256 `4eaf6811...b48b`, pinned in `backups/` with the padded image
+`66866c84...7408`. The build is deterministic.
+
+**Resources and timing:**
+
+| Item | Value |
+|---|---|
+| LUT / reg | 4445 / 3817 (+1363 / +1101) |
+| Block RAM | all 48 EMB9K and 2 EMB32K |
+| `clk_200MHz` | +0.282 ns (an existing path); worst new path +0.38 ns |
+| `sample_write_clock` | +0.48 ns |
+
+The first build missed 200 MHz by 1.1 ns because sequencer decisions were computed combinationally. Precomputing
+every increment and compare into registers fixed it.
+
+**Testbench.** `tb/run.sh` step 6: 50 checks, and `seg_model.py` checks 22 runs, 0 failures. The equivalence with
+0x1535 holds when the modes are off. 20 of 21 mutants are caught; the 21st is equivalent.
+
+**Measured behaviour:**
+- 2 words are written after a record window, so `total <= L - 2`.
+- Re-arm time is about hold-off + pre x word + 1 to 3 write clocks + 50 ns. Averaging adds the post-pass.
+- Timestamps lie 22 to 32 ns after an EXT edge at 200 MSa/s, and up to one word later at slower rates.
