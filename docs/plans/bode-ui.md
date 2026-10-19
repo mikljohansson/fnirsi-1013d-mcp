@@ -657,7 +657,7 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
 
 ## 10. Owner verdicts on the unit (2026-10-19)
 
-- 23:15, fw 0.2.76 **(owner)**: while stopped, a slider pan runs one sweep on release to fill the new span (the button shows STOP
+- 23:13, fw 0.2.76 **(owner)**: while stopped, a slider pan runs one sweep on release to fill the new span (the button shows STOP
   during it and returns to RUN afterwards): "keep the automatic filling of points as it is today; let's keep it for now and see".
   The coordinator had offered the Scope-consistent alternative (stopped = nothing runs, "Stopped: press RUN to sweep this span");
   not taken.
