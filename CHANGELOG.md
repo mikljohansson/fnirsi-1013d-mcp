@@ -31,6 +31,15 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.74 - 2026-10-19 (protocol unchanged; provisional number)
+
+- Slider track geometry, owner decision 7 (docs/plans/slider-overview.md section 2 and 10 F item 7, after looking at
+  0.2.73 on the unit): the window is a box again, 1 px white lines on all four sides with a 1 px black margin around
+  it, and the track's own top line at y 452 is gone (the plot pane's outline is the separation). The track is x 2..727
+  by y 452..471 (20 rows, was 19); the overview is mapped on all 20 rows, dimmed outside the box and in full colour
+  inside its lines (y 454..469, 16 rows). Same in the Scope, the Spectrum and the Frequency response; tap to jump, the
+  drags and the hit areas are unchanged (de8f49c, mockups 9e8ffdd).
+
 #### 0.2.73 - 2026-10-19 (protocol 1.21, unchanged)
 
 - Slider track overview (docs/plans/slider-overview.md, owner decisions 10-19 21:20 and 21:36): the slider row under

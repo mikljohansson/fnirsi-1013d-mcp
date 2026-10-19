@@ -3365,3 +3365,17 @@ y 472..479 or left of x 2 / right of x 727 in the row; a frame line on the left,
 track after a jump at the ends; a jump from the area beside the cards; a Spectrum overview from the old axis after a
 time base change; a Frequency response overview before the first AUTO SET or after Restore defaults; pass_ms up by more
 than about 1 ms at 16,382 samples.
+
+**Addendum: decision 7, fw-over2 (fw 0.2.74 provisional, branch fw-over2).** The owner looked at 0.2.73 on the unit
+(2026-10-19 22:15) and revised the geometry (slider-overview.md 10 F item 7, section 2 as built): the track's line at
+y 452 is gone and the row is all track, x 2..727 by y 452..471 (`SOV_Y` 452, `SOV_H` 20; `SOV_LINE_Y` removed). The
+window is a box again: `sov_draw_window` draws, last, a 1 px black margin (y 452 and y 471 over x - 1..x + w, columns
+x - 1 and x + w over the track; clipped to x 2..727) and then 1 px white lines at y 453 / y 470 (`SOV_WIN_Y` 453,
+`SOV_WIN_H` 18) and at x / x + w - 1. The views are unchanged: the overview is still mapped on all `SOV_H` rows with
+`sov_draw_run` (full colour for `sov_inside` columns, dimmed outside), and the box and margin cover rows 0, 1, 18, 19
+over the window's columns, so the full-colour part is x + 1..x + w - 2 by y 454..469 (16 rows) and the scale is the same
+on both sides. The Scope's mapping is now row = (y - 49) x 20 / 400 (2.5 rows a division). Hit areas, tap to jump and
+the horizontal mapping (726 px) unchanged; test_ui / test_tb_view needed no new numbers, test_slider_ov has the new
+geometry and the 20-row values. Bench: as step 1 above but no line at y 452, the window a white box with a black ring
+around it, the overview over y 452..471 outside the box; a trace at the plot's top or bottom edge is visible only
+outside the window. Not benched.

@@ -24,41 +24,43 @@ over it exactly as today, and touch does not change.
 
 ## 2. Geometry and colours (all three modes)
 
-**As built in fw 0.2.73** (owner decisions 10 F items 5 and 6, 2026-10-19 21:20 and 21:36; firmware `slider_ov.h`). The
-row keeps only what parts it from the plot; everything else is track:
+**As built in fw 0.2.74** (owner decision 10 F item 7, 2026-10-19 22:15, over items 5 and 6; firmware `slider_ov.h`).
+The row has no frame or line of its own (the plot pane's outline above is the separation); all of it is track, and the
+window is a box again:
 
 | Part | Pixels | Source |
 |---|---|---|
-| Line | y 452, x 2..727 (white): parts the track from the plot above, which has no bottom line of its own when Grid is off | `SOV_LINE_Y`, `sov_draw_row` |
-| Track | x 2..727 (726 columns) and y 453..471 (19 rows): the old frame's 18 inside rows plus its bottom row; the frame's left, right and bottom lines are gone | `SOV_X` / `SOV_W` / `SOV_Y` / `SOV_H`; `TBV_SLIDER_X` / `_W` and `BU_SL_X` / `_W` follow |
-| Window | two vertical lines, 1 px each (white), at its left edge x and its right edge x + w - 1, over y 453..471; no top or bottom line | `sov_draw_window` |
-| Overview | every track pixel: one column per track pixel, all 19 rows | `sov_draw_run` |
+| Track | x 2..727 (726 columns) and y 452..471 (20 rows): the old frame's 18 inside rows plus its top and bottom rows; all four frame lines are gone (fw 0.2.73's line at y 452 too) | `SOV_X` / `SOV_W` / `SOV_Y` / `SOV_H`; `TBV_SLIDER_X` / `_W` and `BU_SL_X` / `_W` follow |
+| Window | a box of 1 px white lines: x and x + w - 1 over y 453..470, y 453 and y 470 over x..x + w - 1 (as fw 0.2.64 .. 0.2.72, now 18 px tall); a 1 px black margin around it (y 452 and y 471 over x - 1..x + w, columns x - 1 and x + w over y 452..471, clipped to the track) | `SOV_WIN_Y` / `SOV_WIN_H`, `sov_draw_window` |
+| Overview | one column per track pixel, mapped on all 20 rows (y 452..471). Outside the box and its margin: all 20 rows, dimmed. Inside the box's lines (x + 1..x + w - 2 by y 454..469, 16 rows): full colour. The box's lines and margin hide rows 0, 1, 18 and 19 (y 452, 453, 470, 471) over the window's columns | `sov_draw_run`, then `sov_draw_window` over it |
 | Hit area | unchanged: the Scope y 436..479 over x 2..727, the Spectrum and Frequency response y 450 down | `TBV_SLIDER_HIT_Y`, `BU_SL_HIT_Y` |
 
 The count: fw 0.2.71's frame was rect x 2..727, y 452..471 (`display_draw_rect(2, 452, 726, 20)`), the window a 14 px
-rect at y 455 on a track x 4..723. Without the frame's sides and bottom the free columns are x 2..727 (726) and the free
-rows y 453..471 (19). The track the window maps grew from 720 to 726 px with it, so the window, the drags and
+rect at y 455 on a track x 4..723. Without the frame's four lines the free columns are x 2..727 (726) and the free rows
+y 452..471 (20; fw 0.2.73 kept the top line and had 19, y 453..471). The window box takes the 1 px margin and its line
+at the top (y 452, 453) and at the bottom (y 471, 470), which leaves 16 rows inside it (y 454..469). In fw 0.2.73
+the track the window maps grew from 720 to 726 px with it, so the window, the drags and
 `bu_slider_x` scale by 726 / 720 (a 10 px drag at 25 MSa/s, 1 ms/div, 3000 samples moves 82 samples, was 83;
 `bu_slider_x(6)`, 100 Hz, is x 209, was 210).
 
-- **Rows.** The overview uses all 19 rows. Only the window's two edge lines cross it, one column each.
+- **Rows.** The overview is mapped on all 20 rows and drawn on all of them outside the window. Over the window's
+  columns the box's lines and margin cover rows 0, 1, 18 and 19, so a trace at the very top or bottom of the plot shows
+  there only outside the window (it does not jump: the scale is the same on both sides).
 - **Columns.** Column x stands for the part of the whole that maps to track pixel x. The window uses the same mapping,
   so the window lies exactly over the part the plot shows. A frequency at the track's right end (10 MHz in Frequency
   response, x 728 by the formula) is drawn on the last column, 727.
 - **Colours.** Outside the window the overview is drawn in the channel colour at half intensity: CH1 0x808000, CH2
   0x008080. In Frequency response it uses the magnitude colour (CH2 cyan, `bode_view.c`) or the phase colour
-  (`PHASE_COLOR` 0xFF80FF -> 0x804080) in the same way. Between the window's edge lines (edges included) it is drawn in
-  the full colour. A flagged Frequency response point is `FLAG_COLOR` grey, as on the chart. All three dim colours are
+  (`PHASE_COLOR` 0xFF80FF -> 0x804080) in the same way. Inside the window's box it is drawn in the full colour. A flagged Frequency response point is `FLAG_COLOR` grey, as on the chart. All three dim colours are
   exact in RGB565.
   - **Why not grey.** Grey means "not available" (ui-guidelines section 3), so a grey overview would read as missing
     data. It would also lose which channel is which.
   - **Why not full colour everywhere.** The whole track would then compete with the plot and with the window. The
     bright part is the window's content, the same part the plot shows above it, so the window reads even before the eye
-    finds its two lines.
+    finds its box.
   - **Why dimmed and not hidden** outside the window. The part outside the window is the reason for the feature.
-- **Drawing order.** The row black and the line, then the overview (CH2 first and CH1 over it, the traces' order), then
-  the window's two edge lines last, in white (the mockups draw the line and the edges grey, LG1 / LG2, as they always
-  drew the frame and the window).
+- **Drawing order.** The row black, then the overview (CH2 first and CH1 over it, the traces' order), then the window
+  last: its black margin, then its box in white (the mockups draw the box grey, LG2, as they always drew the window).
 - **Fonts.** Nothing in the track is text: no labels, no scale and no "no data" line (section 7).
 
 **Shared code (`slider_ov.c/.h`, pure, host_tests/test_slider_ov.c; drawing in `slider_ov_draw.c`):**
@@ -83,8 +85,8 @@ the column's place against the window.
 - a column run is drawn from its min row to its max row.
 
 **Vertical scale.** The plot's own scale, squeezed: screen y 49..448 (what `scope_get_y_sample` returns, clipped as it
-clips) maps to the rows by row = 453 + (y - 49) x 19 / 400. That is 2.4 rows per division (fw 0.2.73; 1.5 in the 12-row
-draft). The track is
+clips) maps to the rows by row = 452 + (y - 49) x 20 / 400. That is 2.5 rows per division (fw 0.2.74; 2.4 in fw 0.2.73,
+1.5 in the 12-row draft). The track is
 therefore the plot zoomed out to the whole record. A signal clipped on the plot is clipped in the track, and a signal
 under a division peak to peak is a flat line, as it is a thin trace on the plot.
 
@@ -279,7 +281,8 @@ says why there is no data, so the track does not repeat it, and a 13 px line doe
 
 Generated by `docs/mockups/gen_ux` (`common.py`: `slider_row`, `ov_svg`, `ov_line_runs`, `scope_square_overview`;
 `boards.py`: `spectrum_overview`, `pi_board`; `bode_final.py`: `track_x`, `fr_overview`, `fr_slider`), regenerated for
-the geometry of section 2 (fw 0.2.73: the line at y 452, the 19-row track x 2..727, the window as two edge lines):
+the geometry of section 2 (fw 0.2.74, decision 7: the 20-row track x 2..727 / y 452..471 with no line, the window a
+box with a 1 px margin):
 
 | Board | Shows |
 |---|---|
@@ -405,5 +408,8 @@ The frequency-response and Spectrum tracks start at x 2 as `BU_SL_X` does (host 
 7. Track geometry, second look on the unit (owner, 2026-10-19 22:15, fw 0.2.73 on screen): decision 6 does not work well; put the
    window box back as a box with all four 1 px borders and the 1 px margin around it, with the overview inside the box in full
    colour and outside it dimmed. The track's own top border line goes: the plot pane's outline is the separation. The overview
-   keeps every other row the removed container borders freed **(owner)**. fw-over2 writes the resulting rows here.
+   keeps every other row the removed container borders freed **(owner)**. Built in fw 0.2.74 (fw-over2): the track x 2..727
+   by y 452..471 (20 rows, the overview mapped on all of them and drawn on all of them outside the box); the box's lines
+   at y 453 and 470 and at x and x + w - 1, its 1 px margin at y 452, y 471, x - 1 and x + w; the overview in full
+   colour inside the lines, y 454..469 (16 rows); hit areas unchanged (section 2).
 
