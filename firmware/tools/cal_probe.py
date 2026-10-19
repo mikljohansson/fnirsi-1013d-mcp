@@ -19,15 +19,15 @@ import time
 from fnirsi1013d.scope import Scope
 
 CAL_PROBE = 0x0402
-POINTS = ["coarse hi (500)", "coarse lo (1200)", "gated lo", "gated hi", "gated zero", "full zero", "full hi", "full lo"]
-RC = {-1: "CANCELLED", 0: "OK", 4: "RESPONSE", 5: "CLIP", 6: "NOISE", 7: "ZERO", 8: "SPREAD", 9: "SLOPE", 10: "DRIFT", 11: "CLASS",
+POINTS = ["coarse hi (500)", "coarse lo (1200)", "gated lo", "gated hi", "gated zero pair", "full zero pair", "full hi", "full lo"]
+RC = {-1: "CANCELLED", 0: "OK", 19: "READOUT", 4: "RESPONSE", 5: "CLIP", 6: "NOISE", 7: "ZERO", 8: "SPREAD", 9: "SLOPE", 10: "DRIFT", 11: "CLASS",
       18: "TIMING"}
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 def decode(b: bytes) -> dict:
-    if len(b) != 248:
-        raise ValueError(f"CAL_PROBE answered {len(b)} bytes, expected 248")
+    if len(b) != 252:
+        raise ValueError(f"CAL_PROBE answered {len(b)} bytes, expected 252")
     ch, rng, rc, fpt, fcls, fcore, flags, fval, fwithin, centre, pwm, ebad, erec = struct.unpack_from(
         "<BBhBBBBiIHHHH", b, 0)
     pts = []
@@ -40,7 +40,8 @@ def decode(b: bytes) -> dict:
             cores.append(dict(mean=mean16 / 16, rms=rms16 / 16, within=within16 / 16, lo=lo, hi=hi, clipped=clip))
         pts.append(dict(name=POINTS[i], pwm=ppwm, cls="full" if cls == 0 else "gated", convs=convs, A=cores[0],
                         B=cores[1]))
-    return dict(channel=ch + 1, range=rng, rc=rc, rc_name=RC.get(rc, str(rc)),
+    split = struct.unpack_from("<H", b, 248)[0]
+    return dict(channel=ch + 1, zero_split=split, range=rng, rc=rc, rc_name=RC.get(rc, str(rc)),
                 fail_point=None if fpt == 0xFF else POINTS[fpt], fail_class="full" if fcls == 0 else "gated",
                 fail_core="AB"[fcore & 1], fail_value=fval, fail_within16=fwithin, garbled=bool(flags & 1),
                 no_centre=bool(flags & 2), settle=flags >> 4, prestrobe=bool(flags & 4), wizard=bool(flags & 8), centre_pwm=centre, zero_pwm=pwm, enc_flagged=ebad, enc_recovered=erec,
@@ -50,7 +51,7 @@ def decode(b: bytes) -> dict:
 def show(d: dict) -> None:
     print(f"CH{d['channel']} range {d['range']} ({d['range'] + 1} in the wizard): {d['rc_name']}"
           f"  fail point {d['fail_point']} class {d['fail_class']} core {d['fail_core']} value {d['fail_value']}"
-          f" within {d['fail_within16'] / 16:.1f}  centre {d['centre_pwm']} zero PWM {d['zero_pwm']}"
+          f" within {d['fail_within16'] / 16:.1f}  centre {d['centre_pwm']} zero PWM {d['zero_pwm']} +- {d['zero_split']}"
           f"  settle {d['settle']} prestrobe {int(d['prestrobe'])} wizard {int(d['wizard'])}  enc flagged {d['enc_flagged']} recovered {d['enc_recovered']}{'  GARBLED' if d['garbled'] else ''}")
     for p in d["points"]:
         if not p["convs"]:
