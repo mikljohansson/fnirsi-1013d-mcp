@@ -179,15 +179,11 @@ command (fpga/al3/README.md "Changes" section 7): (1) 0x0B and the segment slot 
 and the release, i.e. at slow legacy rates); (2) the A/B core order within a word is fixed (on 0x1532..0x1536 a 0x0D or
 0x53 write could swap it until the next such write, so caps bit 12 INTERLEAVE_UNVERIFIED and the 0x53 swap bit are only
 meaningful from 0x1537 on). Feature bits for 0x1537 are those of 0x1536 (EXT_TRIGGER, DECIM, FIR, and SEQ where the
-firmware has it); a firmware that knows 0x1536 runs 0x1537 unchanged. **0x1538** (fpga-gen7) derives the encodes
-from the write clock at every rate and after any write, guarantees the core order (core B the earlier sample, the
-convention of section 7.3) and checks the encode pins itself: FPGA read 0x33 (caps bit 18 ENC_CHECK, row 58). On the
-bench 0x1537 had chip 1's cores in the opposite order (CH1 A-B means swapped against 0x1535) and chip 2's phase decided
-by a marginal flop at every sampling reset; calibration taken on 0x1535 fits 0x1538, calibration taken on 0x1537 must
-be redone.
+firmware has it); a firmware that knows 0x1536 runs 0x1537 unchanged.
 
 **0x1538** (fpga/al3/README.md "Changes" section 8) has the same interface plus one optional read. Feature bits are as
-for 0x1537, and a firmware that knows 0x1536 runs it unchanged.
+for 0x1537 plus caps bit 18 ENC_CHECK (fw 0.2.62, protocol 1.19, row 58: the firmware reads 0x33 after every 200 MSa/s
+capture and re-arms a bad one), and a firmware that knows 0x1536 runs it unchanged.
 - On 0x1537 the A encode flop missed timing. At 200 MSa/s one A core sampled correctly, one clock late (together with
   B) or with a metastable clock, differently from arm to arm. On the owner's unit that was CH2 A.
 - 0x1538 makes the encodes a stateless function of the write clock with timing met. At every rate and after any write,
@@ -200,8 +196,9 @@ Read 0x33 is the encode self-check, one byte:
 - bits 3:2: 01 = convention 1;
 - bits 7:4: the last pin check {CH2 A, CH2 B, CH1 A, CH1 B}.
 
-A good capture reads 0xF6. The firmware can read it after a capture and re-arm when bit 0 is set. Older AL3 bitstreams do
-not decode read 0x33.
+A good capture reads 0xF6. fw 0.2.62 reads it after every 200 MSa/s capture and re-arms when bit 0 is set (row 58), and
+checks bits 3:2 = 01 once at boot. Older AL3 bitstreams do not decode read 0x33 (fw 0.2.62 checks their full-rate
+captures from the data instead).
 
 Core order per bitstream:
 
