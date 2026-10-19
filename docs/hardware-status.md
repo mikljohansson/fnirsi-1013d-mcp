@@ -915,3 +915,14 @@ Newest entries at the bottom. Format: date, who, what, result.
   pre-write double read = the pinned 0x1538 padded image 2fc7ea5b...; wrote backups/al3_seg_0x1539_f36c1f7a_padded.bin: 256 sectors
   erased, 1105 pages programmed, write verified 22db7b91..., independent verify OK. Power cycle pending; then fw 0.2.69 FEL-load,
   the 128-boundary probe (CAL_PROBE both all) and the no-write captures, then the wizard.
+- 2026-10-19 20:25: power cycle: the card's 0.2.25 boots FPGA 0x1539; fw 0.2.69 loaded. CAL_PROBE both all: all 12 range
+  measurements OK (zero points at codes about 116 and 140; CH2 A range 0 rms 2.56, a few excursions to 153-157). 30 s no-write run at
+  mean about 130: 218 captures clean (max std 1.1). BUT the dcoffset sweep at 200 MS/s range 0 shows the fault moved, not fixed: CH1
+  core A and CH2 core A garbled while their means are 128..145 (CH1A std 9.9-56.7 with 0/255 hits at dco 0..8; CH2A std 15-90 with up
+  to 396/6000 rail samples at dco 0..20), CH2 B mildly raised (2.2-3.6), CH1 B clean; all cores clean below 127 and above 146. The
+  outlier values (0x00, 0xFF, 0x30, 0x41 at a quiet 0x80..0x90 input) are old/new bit mixes of successive samples; the affected lanes
+  change with every build (0x1535 clean, 0x1537 CH2 A random, 0x1538 CH2 A+B, 0x1539 both A cores). New reading: the FPGA samples the
+  ADC data pins inside their transition window (AD9288 output delay vs the capture edge; board-level, invisible to 0x33), not the MCU
+  readout; fpga-gen8 asked for a datasheet-constrained capture edge or a per-core programmable capture phase with firmware training
+  (0x153A). The wizard may pass on 0x1539 since its zero points avoid the bad band; normal 200 MS/s traces near those codes are still
+  wrong on the A cores.

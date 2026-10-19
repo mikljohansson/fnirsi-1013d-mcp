@@ -116,8 +116,8 @@
     "MCU readout byte loaded on the strobe start and held (fixes bit mixing near code boundaries)",
     "i_mcu_clk constrained"
    ],
-   "status": "unbenched",
-   "bench": "built 2026-10-19 19:50, tb 10 steps pass on seeds 12345 and 3 incl. tb_mcuread (all 256 codes, swept strobe timing); flash session pending (fpga/al3/README.md section 9)"
+   "status": "withdrawn",
+   "bench": "built 2026-10-19 19:50, tb 10 steps pass on seeds 12345 and 3 incl. tb_mcuread (all 256 codes, swept strobe timing); flash session pending (fpga/al3/README.md section 9); flashed 2026-10-19 20:06: CAL_PROBE passes, but both A cores still garbled at means 128..145 at 200 MS/s (hardware-status 20:25): the ADC data capture window, not the readout; superseded by 0x153A"
   }
  ]
 }
