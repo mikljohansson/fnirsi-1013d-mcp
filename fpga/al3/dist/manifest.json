@@ -99,8 +99,25 @@
     "stateless ADC encode (B-first order guaranteed at every rate)",
     "encode self-check read 0x33"
    ],
+   "status": "withdrawn",
+   "bench": "built 2026-10-19 17:30, all testbench steps pass on seeds 12345 and 3; flash session pending (fpga/al3/README.md section 8); flashed 2026-10-19 17:46: encode clean, but the MCU readout mixes bytes near multi-bit code boundaries (hardware-status 18:35): superseded by 0x1539"
+  },
+  {
+   "version": "0x1539",
+   "file": "al3-0x1539.bin",
+   "size": 282898,
+   "sha256": "f36c1f7a0ada876311f5ad5d600f4cb44523165748e96c25bed160a66388ea64",
+   "flash_image_sha256": "22db7b9128e2a12149e5c4f44bc3cb5c22338b40b4e888e97fe9c1a3f571a6b8",
+   "source_commit": "b4bd8b04a001d9107444344cc45266e9afe95e07",
+   "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
+   "min_firmware": "0.2.62",
+   "features": [
+    "as 0x1538",
+    "MCU readout byte loaded on the strobe start and held (fixes bit mixing near code boundaries)",
+    "i_mcu_clk constrained"
+   ],
    "status": "unbenched",
-   "bench": "built 2026-10-19 17:30, all testbench steps pass on seeds 12345 and 3; flash session pending (fpga/al3/README.md section 8)"
+   "bench": "built 2026-10-19 19:50, tb 10 steps pass on seeds 12345 and 3 incl. tb_mcuread (all 256 codes, swept strobe timing); flash session pending (fpga/al3/README.md section 9)"
   }
  ]
 }

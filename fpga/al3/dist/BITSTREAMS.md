@@ -19,6 +19,7 @@ programmer on the config-flash header and a verified backup first.
 | 0x1535 | supported | compensation FIR after the CIC (boxcar+FIR, CIC2+FIR, CIC3+FIR at 10 MSa/s and slower) | 0.2.44 and later | flashed 2026-10-19; alias of a 892.857 kHz square at 1 MSa/s -76.1 dBV with CIC2+FIR |
 | 0x1536 | unbenched | segmented capture and hardware averaging (sequencer in front of the 0x1535 capture logic) | 0.2.58 and later | built and simulated, never flashed |
 | 0x1537 | withdrawn, not attached | deterministic record start and A/B order at divided rates | 0.2.58 and later | flashed 2026-10-19: CH2 core A garbled in about 40 % of full-rate captures |
+| 0x1539 | unbenched (flash session pending) | MCU readout byte loaded on the strobe start and held; fixes the bit mixing of 0x1537/0x1538 near multi-bit code boundaries; i_mcu_clk constrained | 0.2.62 | not yet; checks in fpga/al3/README.md section 9 |
 | 0x1538 | unbenched (flash session pending) | stateless ADC encode: core order B-first guaranteed at every rate and after any write; self-check read 0x33 (0xF6 = good); fixes the encode-phase race of 0x1532-0x1536 and the marginal flop of 0x1537 | 0.2.58 (0.2.62 reads 0x33) | not yet; checks in fpga/al3/README.md section 8 |
 
 **Use the recommended image**, which is the newest one. The older images are attached for comparison and for
@@ -50,6 +51,7 @@ Release assets, per version (0x1537 is not attached):
 | 0x1535 | `5040a2aeede071019bca0ffee47d765b87d980e1e47ca01ac32cb875c839aa96` | `5ade9e755211fe65c6ff492419f3a4a91ec08edc8c16305ce52751baf9d588a5` | e2aec2e |
 | 0x1536 | `4eaf6811814c58e1f00e648b97e7a608bb5ca387fb036f21714e91667959b48b` | `66866c84ad4f298c88cfc1072870d44e80832852b53fcbd926e01fcb473f7408` | 27c0c75 |
 | 0x1537 | `426a3784883b82c9c9f42870584e64d1d082cdcb38c8b62db143e161e2633b17` | `febc92997ee6605090d5581aabc9c240986fa82defdc24d40aca01566dbfe1f1` | c15981e |
+| 0x1539 | f36c1f7a0ada876311f5ad5d600f4cb44523165748e96c25bed160a66388ea64 | 22db7b9128e2a12149e5c4f44bc3cb5c22338b40b4e888e97fe9c1a3f571a6b8 | b4bd8b04a001 |
 | 0x1538 | 0c24ecf6ff55bc170ce6d7acd1ee4f8afbaf97d73b36e0b7a27a92639d1dbbbd | 2fc7ea5b2fc925157c02f3f492ee3ac17b6154d7ed27e2c20c2d26e855ac1087 | ce943bfe8c4b |
 
 `SHA256SUMS` on the release page lists the same values. Check before you write anything:
