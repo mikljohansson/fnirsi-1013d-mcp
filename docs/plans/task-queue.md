@@ -156,6 +156,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   depths above 6000 are hidden (the 16-bit record halves the memory, correct); switching back to Filter Off leaves them hidden until
   something else redraws. Recompute the memory chips' availability from the filter state on every Filter change and redraw the
   column; host test. Next ACQ-menu batch.
+- **Spectrum zoom ladder** (owner 10-19 22:58 **(owner)**: "let's try your recommendation"; fw-spzoom dispatched): span is the
+  parameter in 1-2-5 steps around the centre (tap right narrows, tap left widens, drag pans); the sample rate is derived from the
+  stop frequency as the slowest rate whose fs/2 covers it (best RBW for free; the (span, rate) pair is a function of the span, so
+  reversible like the Scope ladder); FFT length stays the user's (Analysis fold-out, default 2048), so the span always holds
+  between a quarter and a half of the bins; a hand-picked ACQ rate holds until the next zoom or pan step; ends: the full 25 MHz
+  axis at 200 MSa/s, and zooming in stops where the capture time N/fs would exceed about 2 s; a pan that moves the stop across a
+  rate boundary moves the rate too. Owner observation on 0.2.76: zoom in never changes the rate today, only zoom out does. Rule
+  written into ui-guidelines.md first; host test walks the ladder both ways from both ends at every FFT length, asserting the pair.
 - **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
   SCREENSHOT bit 6, simulator has it, `Scope.read_screen` reads 40 rows per request) but the firmware handler is NULL
   (pc_cmds.c "BENCH: T9"). Implement it in all builds: rows of the live framebuffer as RGB565, the header per protocol.md, the
