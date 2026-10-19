@@ -301,6 +301,10 @@ void ui_dlg_step_draw(const ui_step *d)
 
   ui_dlg_text(x, y + 20, UD_F_HEAD, UD_C_TITLE, d->title);
 
+  //The step count at the top right, on the title line (owner, fw 0.2.63; it ended the second line before)
+  if(d->step && d->step[0])
+    ui_dlg_text(UI_STEP_X + UI_STEP_W - 24 - (int)ui_text_width(&font_3, d->step), y + 26, UD_F_BODY, UD_C_SOFT, d->step);
+
   for(i=0;i<2;i++)
     if(d->line[i] && d->line[i][0])
       ui_dlg_text(x, y + 64 + 24 * i, UD_F_BODY, UD_C_TITLE, d->line[i]);
