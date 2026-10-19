@@ -830,3 +830,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   caps features 31 (SEQ bit set). Encode-phase test on 0x1537 (alternate 0x0D 99/1/3999 <-> 0, 40 trials each, READ_RAW 1000 at
   divider 0): CH1 both cores clean in all 120 trials (max 1.16 codes), but CH2 core A bad in 35, 36 and 11 of 40 trials at 32-34
   codes within-RMS. 0x1537 made the phase deterministic and the second ADC chip now mostly sits in the wrong one. Flag study next.
+- 2026-10-19 16:40: 0x1537 follow-up: static divider-0 captures clean 20/20; after a 0x0D write 99 -> 0 the capture is clean at
+  0 ms delay (0/20) but bad at 5 ms (7/20), 20 ms (18/20), 50-300 ms (13-16/20), CH2 core A only, and persistent until the next
+  write (a second capture stays bad). So a write in the scope's own loop between the host write and the capture sets the bad phase
+  deterministically on 0x1537 for ADC chip 2; on 0x1535 it was random on chip 1. SET_DECIM flags do not matter; divider 1 static
+  shows CH2 A 55 codes with constant B lanes (layout of that mode, parked). fpga-gen7 dispatched (0x1538), fw-cal4 redirected
+  (check-retry heal + bus write instrumentation). Note: an accidental host STOP (sequencer stop) was sent at 16:38; harmless.

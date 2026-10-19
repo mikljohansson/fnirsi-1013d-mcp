@@ -251,6 +251,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - mcp-gen5 (done 15:40, about 565k tokens, retired; handoff mcp/AGENTS.md): protocol 1.17 host side pushed 2097181 (CI 39258110694), Bode follow-ups pushed 514182f (CI 39260053987, 398 tests):
   wiring A default with the bench numbers, ch2_overload flag + auto range step-up + fixed-range failure text, --ch2-coupling ac,
   offset-range-exhausted caveat, simulator models the pinned front end. Next for mcp: 1.17 on the unit after the 0x1537 flash.
+- fpga-gen7 (running, 10-19 16:40-): 0x1537 leaves ADC chip 2 in a bad encode phase after a write in the scope's arm sequence (bench
+  16:33-16:40); reproduce in simulation, fix as 0x1538 with a phase self-check, pin, handoff.
 - fw-cal4 (running, 10-19 15:50-): 0.2.60 merged (failure line with range/rate/core and RMS numbers, instruction names the post;
   pinned backups/fw-0.2.60_27634587.bin, loaded 16:18). Now on the real fault: the wizard's 200 MS/s class reads one garbage core
   per channel (CH1 B, CH2 A, 21-24 codes RMS) while host READ_RAW is clean; FPGA mode/shift state hypothesis; fix as 0.2.61.
