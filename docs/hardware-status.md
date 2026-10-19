@@ -859,3 +859,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   flashed. Flash session plan: as 16:27 (programmer on J2, battery, USB out); pre-write dump must equal the 0x1537 padded image
   febc9299...; rollback to 0x1535 padded 5ade9e75... or 0x1537 febc9299...; then the README section 8 checks on fw 0.2.61 (no-write
   1000-capture run clean, CH2 A-B mean near 0, wizard zero step on both channels) and 0x33 once fw 0.2.62 is loaded.
+- **FPGA flash written with bitstream 0x1538** (17:43-17:46, Sipeed FT2232D on J2, scope on battery, USB unplugged): JEDEC ef 40 14,
+  pre-write double read backups/20261019-174328-pre-0x1538.bin sha256 febc9299... = the pinned 0x1537 padded image; wrote
+  backups/al3_seg_0x1538_0c24ecf6_padded.bin: 256 sectors erased, 1105 pages programmed, write verified 2fc7ea5b..., independent
+  verify run after. Power cycle pending; then fw 0.2.64 (merge ed06e7e, GCC 10 sha 8caacb31...) FEL-load and the README section 8
+  checks (0x33 = 0xF6 per capture, no garbled core over 1000+ captures, CH2 A-B near 0, wizard zero step both channels).
