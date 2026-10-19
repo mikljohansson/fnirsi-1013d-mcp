@@ -285,13 +285,30 @@ def test_busy_scope_stops_with_a_partial_table(sim_factory):
 
     def progress(i, n, text):
         if i == 3:
-            srv.device.ui_busy = True  # the person opened a menu on the scope
+            srv.device.ui_busy = True  # the person started the calibration wizard's measurement on the scope
+            srv.device.ui_hold = P.BusyDetail.CAL
 
     with Scope.connect(srv.url) as s:
         res = _run(s, plans, progress=progress)
         srv.device.ui_busy = False
-    assert len(res.points) == 3 and "E_BUSY" in res.stopped_early
+        srv.device.ui_hold = 0
+    assert len(res.points) == 3 and "E_BUSY" in res.stopped_early and "calibration" in res.stopped_early
     assert any("could not restore" in c for c in res.caveats)
+
+
+def test_menu_opened_during_a_sweep_closes(sim_factory):
+    """Protocol 1.23 (fw 0.2.78): a menu the person opens during a host sweep is closed by the next request."""
+    srv = _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, noise_lsb=0.5)
+    plans = B.plan_sweep(30e3, 300e3, 6)
+
+    def progress(i, n, text):
+        if i == 3:
+            srv.device.ui_busy = True
+
+    with Scope.connect(srv.url) as s:
+        res = _run(s, plans, progress=progress)
+    assert len(res.points) == 6 and not res.stopped_early
+    assert srv.device.ui_yields >= 1 and not srv.device.ui_busy
 
 
 def test_runner_refuses_without_the_filter_and_restores_ext(sim_factory):

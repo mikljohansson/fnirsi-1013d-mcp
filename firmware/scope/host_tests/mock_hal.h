@@ -85,6 +85,11 @@ typedef struct
   int      last_run_set;
   int      indicator;             //last pc_hal_indicator state
   uint32_t indicator_draws;
+  uint8_t  ui_hold;               //1.23: pc_hal_ui_hold (PC_BUSY_CAL / _SAVE / _USB_DRIVE, 0 none)
+  //1.23: the mock UI's modal screens, nested (a menu, a fold-out over it, a dialog over that). mock_ui_modal_pass runs one
+  //iteration of the innermost one as every firmware modal loop does: the touch scan (a BUSY poll), then PC_UI_YIELD
+  uint8_t  ui_modal;              //modal screens open (0 = the base screen, the main loop runs)
+  uint32_t ui_cancels;            //screens left by their cancel path because a host request waited
 
   //SD card
   uint8_t  *sd;                     //MOCK_SD_SECTORS x 512
@@ -139,6 +144,10 @@ extern mock_state mock;
 
 void mock_reset(uint16_t fpga_version);
 void mock_rx_push(const uint8_t *data, uint32_t len);
+
+//1.23: one iteration of the innermost modal loop (see ui_modal): BUSY poll, then leave by the cancel path when a host
+//request waits for the base screen. Returns 1 when that screen closed
+int  mock_ui_modal_pass(void *session);
 void mock_tx_release(void);
 void mock_sd_image(uint32_t sector, const char *magic, uint32_t sectors);   //eGON header + valid checksum
 

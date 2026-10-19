@@ -175,7 +175,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   in progress, USB drive mode (not on the serial port anyway). Commands that answer from the ISR (PING, GET_INFO, GET_STATUS,
   GET_BATTERY, GET_HEALTH, BODE_STATUS) never yield. Design paragraph in ui-guidelines.md and protocol.md section 14 row first,
   host test with the mock UI, mcp client/server: drop the "close it on the scope and retry" advice where the firmware yields
-  (keep it for older firmware by version).
+  (keep it for older firmware by version). Built on branch fw-yield (fw 0.2.78 / protocol 1.23,
+  firmware/AGENTS.md section 53); bench list there.
+- **Spectrum: the "Host command: menu closed" note** (fw-yield follow-up, after fw-spzoom lands): spectrum.c
+  `spec_draw_warnings` gains `if(pc_glue_yield_note()) p = fmt_str(p, ...)` first, so the note shows in the Spectrum
+  view as it does in Scope and Frequency response (firmware/AGENTS.md section 53).
 - **Spectrum ladder follow-ups** (fw-spzoom handoff, section 52): (a) show the capture time N/fs somewhere (the Time card is the
   waterfall's history span); (b) make the 2 s zoom-in limit use the real capture time memory depth/fs, or cap the memory depth in
   the Spectrum; (c) re-derive the rate when the FFT length or memory depth changes, not only at the next zoom/pan step. With the

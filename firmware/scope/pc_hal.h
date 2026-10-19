@@ -188,6 +188,9 @@ void     pc_hal_ui_read(pc_hw_ui *u);
 void     pc_hal_ui_set_run(int run);             //[UI] as the RUN/STOP button; the next UI pass arms afresh
 uint32_t pc_hal_settings_fingerprint(void);      //hash of the capture-relevant UI settings (protocol section 14)
 void     pc_hal_indicator(int state);            //[UI] MCP chip in the top bar: 0 off, 1 on, 2 pulse
+//1.23 (fw 0.2.78): what keeps the UI from yielding to a host request now: 0 nothing (the modal loops leave by their
+//cancel paths), else the E_BUSY detail PC_BUSY_CAL / PC_BUSY_SAVE / PC_BUSY_USB_DRIVE. A memory read: any context
+uint8_t  pc_hal_ui_hold(void);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Transport (pc_transport.c on the target). Safe in every context.

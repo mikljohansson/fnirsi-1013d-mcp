@@ -31,6 +31,20 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.78 - 2026-10-19 (protocol 1.23, docs/protocol.md section 14 row 63)
+
+- Host commands leave the scope's menus (owner 23:27; docs/ui-guidelines.md section 4, docs/protocol.md section 14
+  row 63): a request that needs the main loop while a menu, fold-out, dialog or screen is open no longer gets E_BUSY.
+  Every modal loop leaves by its own cancel path (a menu closes, a dialog answers Cancel, Settings goes Back, the file
+  viewers Return, the first-run screen Later, the calibration wizard Cancel between steps, nothing written), nested
+  ones one after the other, then the request is answered and the screen says "Host command: menu closed" for 4 s.
+  E_BUSY stays, with the reason as detail and text, while a calibration measurement or a file save runs, in USB drive
+  mode, and when the UI does not reach its main screen within 1.5 s. GET_LINK_STATS 68-69 count yields and refusals
+  (0493025, 888324c).
+- MCP: the "close it on the scope and retry" advice only for firmware before 0.2.78; on 0.2.78+ a tool says in its
+  caveats that a menu was closed, and E_BUSY messages give the scope's reason. The simulator yields the same way
+  (0f63317).
+
 #### 0.2.77 - 2026-10-19 (protocol 1.22, unchanged)
 
 - Spectrum zoom: span drives the sample rate (docs/ui-guidelines.md section 2, owner 2026-10-19 23:09). The span steps

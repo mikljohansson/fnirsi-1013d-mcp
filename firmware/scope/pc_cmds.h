@@ -29,7 +29,7 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #else
 #define PC_FW_VERSION_MMU ""
 #endif
-#define PC_FW_VERSION     "0.2.77" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
+#define PC_FW_VERSION     "0.2.78" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
 #endif
 
 //The build identity record (build_id.c, pc_ident.h; host tests: mock_hal.c)
@@ -50,11 +50,26 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 // Poll contexts (plan section 5.2)
 
 #define PC_CTX_MAIN       0     //top of the main loop, between UI passes: may touch the FPGA and the UI
-#define PC_CTX_BUSY       1     //inside a UI busy loop: answers PING/GET_INFO/GET_STATUS/GET_BATTERY only, no FPGA
-#define PC_CTX_ISR        2     //1 ms timer interrupt: same safe set and the TX pump, never E_BUSY, never the UI/FPGA
+#define PC_CTX_BUSY       1     //inside a UI busy loop: answers the F_BUSY set only, no FPGA (1.23: the yield request)
+#define PC_CTX_ISR        2     //1 ms timer interrupt: same safe set and the TX pump (1.23: the yield request), never the UI/FPGA
 
-//Time without a MAIN poll after which the UI counts as modal (LOCAL_BUSY): other requests then get E_BUSY
+//Time without a MAIN poll after which the UI counts as modal (LOCAL_BUSY). Before protocol 1.23 other requests then got
+//E_BUSY; since 1.23 (fw 0.2.78, docs/protocol.md section 14 row 63) such a request asks the UI to yield: every modal
+//loop leaves by its cancel path down to the base screen (PC_UI_YIELD in pc_hooks.h) and the main loop answers it
 #define PC_MODAL_MS       250
+
+//1.23: a request waiting for the UI to yield gets E_BUSY detail PC_BUSY_NO_YIELD when no main-loop pass comes in this
+//time (a long UI pass that has no yield check: auto set, a slow capture, a step that must finish)
+#define PC_YIELD_MS       1500
+
+//E_BUSY detail (1.23). 0: a deferred request is pending (and, before 1.23, a modal UI); 1: READ_RAW, the UI capture in
+//flight did not finish (PC_HOLD_MS). 2..5: the UI did not yield; the reason is also the text
+#define PC_BUSY_UI        0
+#define PC_BUSY_CAPTURE   1
+#define PC_BUSY_NO_YIELD  2     //"UI did not return to the main screen"
+#define PC_BUSY_CAL       3     //"calibration measurement running" (wizard step, volts calibration step)
+#define PC_BUSY_SAVE      4     //"file save in progress"
+#define PC_BUSY_USB_DRIVE 5     //"USB drive mode"
 
 //GET_STATUS control byte. 1.3 has one behaviour, shared control (1.2 used 0 LOCAL, 1 REMOTE)
 #define PC_SHARED         2
@@ -312,6 +327,12 @@ typedef struct
   uint32_t   held;              //polls that left a request queued for the main loop
   uint32_t   isr_skipped;       //timer-tick polls skipped because another poll was running
 
+  //1.23 (fw 0.2.78): a request that needs the main loop while the UI is modal asks the UI to leave its modal screens
+  uint8_t    yield_req;         //set from the ISR / BUSY poll, read by the modal loops (pc_hal), cleared by the MAIN poll
+  uint32_t   yield_ms;          //when it was set (PC_YIELD_MS)
+  uint32_t   yields;            //requests that asked the UI to yield (GET_LINK_STATS 68)
+  uint32_t   yield_refused;     //E_BUSY answers instead: a hold reason or the yield time-out (GET_LINK_STATS 69)
+
   //Last request with a payload CRC error, exactly as received (header + payload + CRC), for GET_BAD_FRAME
   uint32_t   bad_count;
   uint32_t   bad_len;
@@ -333,11 +354,13 @@ void     pc_ui_capture_start(pc_session *s);              //fpga_do_conversion s
 void     pc_ui_capture_addr(pc_session *s, uint16_t addr);//0x14 read of the finished UI capture
 void     pc_ui_capture_done(pc_session *s);               //the UI read and processed it
 void     pc_ui_pass_mark(pc_session *s, int n);            //main loop stage n (0..3) reached, kept for the first pass
+int      pc_ui_yield_pending(const pc_session *s);        //1.23: 1 while a request waits for the modal UI to close
+                                                          //(and nothing holds it): modal loops leave by their cancel path
 
 //Diagnostics (fw 0.2.52, protocol row 55): the GET_LINK_STATS counters (returns n), the GET_HEALTH body (96 bytes),
 //one channel's GET_CAL body (PC_CAL_RESP_LEN bytes), the SD_INFO body (112 bytes; ident: identify the card image,
 //MAIN context; returns 0, or 1 without a card). The report: pc_report.h
-#define PC_LINK_COUNTERS  68
+#define PC_LINK_COUNTERS  70
 #define PC_HEALTH_LEN     104
 #define PC_CAL_RESP_LEN   356     //72 bytes up to 1.9, 248 in 1.10-1.11 (v2), 256 in 1.12-1.13 (v3), 288 in 1.14-1.15 (v4)
 #define PC_SD_INFO_LEN    112     //64 before 1.16

@@ -69,7 +69,7 @@ def test_event_types_21_and_22_in_words():
         list(names).index("adc_fullrate_bad") + 1 == list(names).index("adc_fullrate_recovered")
     # 1.22 (fw 0.2.72): 68 counters, 64..67 the FPGA writes and the captures judged by their data
     names = P.link_stats_names(68)
-    assert len(names) == 68 and names[64:68] == ("fpga_rate_writes", "fpga_filter_writes", "fpga_sampling_resets",
+    assert len(names) >= 68 and names[64:68] == ("fpga_rate_writes", "fpga_filter_writes", "fpga_sampling_resets",
                                                   "adc_fullrate_by_data")
 
 
@@ -85,6 +85,20 @@ def test_event_log_fpga_trace_switch(sim_factory):
     assert P.parse_event_log(P.pack_event_log(log)).fpga_trace is True
     stats = P.parse_link_stats(frame_payload("resp_get_link_stats_1_22"))
     assert (stats["fpga_rate_writes"], stats["fpga_sampling_resets"], stats["adc_fullrate_by_data"]) == (41, 5803, 112)
+
+
+def test_ui_yield_wire():
+    """1.23 (fw 0.2.78): link counters 68-69 and the E_BUSY reasons, against docs/protocol-vectors.json."""
+    names = P.link_stats_names(70)
+    assert len(names) == 70 and names[68:70] == ("ui_yields", "ui_yield_refused")
+    stats = P.parse_link_stats(frame_payload("resp_get_link_stats_1_23"))
+    assert (stats["ui_yields"], stats["ui_yield_refused"]) == (4, 1)
+    body = frame_payload("resp_e_busy_cal_1_23")
+    detail = struct.unpack_from("<H", body)[0]
+    text = body[2:].decode()
+    assert detail == P.BusyDetail.CAL and text == P.BUSY_TEXTS[P.BusyDetail.CAL]
+    assert "calibration" in P.busy_hint(detail, text)
+    assert "close it" in P.busy_hint(0, "UI busy") and "deferred" in P.busy_hint(0, "deferred request pending")
 
 
 def test_event_log_tool_fpga_trace(sim_factory, tmp_path):

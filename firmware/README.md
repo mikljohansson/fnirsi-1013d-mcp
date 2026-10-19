@@ -377,6 +377,14 @@ Hooks in the 1.00o5 code (up to 0.2.46 all under `#if PC_PROTOCOL`, since 0.2.47
   active.
 - `touchpanel.c`: a BUSY poll in `tp_i2c_read_status()`. Every modal menu loop and the MSC screen
   scan the touch panel, so the link answers PING, GET_INFO, GET_STATUS and GET_BATTERY there.
+- Every modal loop (fw 0.2.78, protocol 1.23): `PC_UI_YIELD()` after its touch scan. A request that needs the main
+  loop while the UI is modal sets the session's yield flag (timer poll or BUSY poll, `pc_cmds.c` `pc_ui_yield`); each
+  loop then leaves by its own cancel path (a menu or fold-out closes, a dialog answers Cancel / No, a screen Back /
+  Exit / Later, the wizard between steps Cancel) down to the base screen, where the MAIN poll answers the request and
+  the warning line shows "Host command: menu closed" for 4 s. Steps that must finish set a hold reason
+  (`pc_glue_ui_hold(PC_HOLD_CAL / _SAVE / _USB_DRIVE)`): the request then gets E_BUSY with it (details 3, 4, 5); a
+  UI pass with no yield check that outlasts 1.5 s gives E_BUSY detail 2 (`docs/ui-guidelines.md` section 4,
+  `docs/protocol.md` section 14 row 63).
 - `fpga_control.c`: a BUSY poll every 65,536 polls of the 0x05 ready wait. The UI wait stays
   unbounded, so UI acquisition behaves exactly as 1.00o5. `fpga_do_conversion` ends with
   `PC_UI_CAPTURE_START()`: the ring no longer holds the last capture, and a host single is aborted.
@@ -821,7 +829,7 @@ hides the waveform viewer's grid; the record-position slider under the grid alwa
 
 Fold-outs: a panel left of the bar over the plot's right edge (x up to 727, never over the bar), a grey title, rows of
 44 px at a 50 px pitch; the button stays orange while its panel is open. Modal like the top bar's dropdowns (the trace
-pauses, the PC gets E_BUSY after 250 ms): a tap outside the panel closes it and does nothing else; a choice row (green
+pauses; a PC request closes it, fw 0.2.78; before, the PC got E_BUSY after 250 ms): a tap outside the panel closes it and does nothing else; a choice row (green
 when chosen) closes it; value rows step to the next value and keep it open; a two-way row (Ref level) has - and + boxes
 at its ends and each half of the row steps that way. The plot under the panel is put back on close.
 
@@ -915,8 +923,8 @@ On/Off) and Other settings (opens the Settings screen). 236 px high, 177 px with
 File message timeout here; since 0.2.63 it is in Settings > Controls only.) (0.2.55-0.2.56 had an interim Baseline calibration row here: fw 0.2.59 moved it to Diagnostics >
 Calibrate, together with the 1.00o5 volts-calibration boxes that opened beside the fold-out after the wizard.)
 
-Settings screen (fold-out > Other settings; a header with the title and Back only, since 0.2.63): a modal full-screen page like the menus (the PC protocol answers E_BUSY
-while it is open), black ground, outlined 48 px rows in two columns, the value of each row on its right in the state
+Settings screen (fold-out > Other settings; a header with the title and Back only, since 0.2.63): a modal full-screen page like the menus (a PC request leaves it as Back
+does, fw 0.2.78; before, the PC protocol answered E_BUSY while it was open), black ground, outlined 48 px rows in two columns, the value of each row on its right in the state
 colour (green in use, grey off or not available, amber needs attention). Back (top right) returns to the scope as it
 was. Every row is an existing setting, saved at power-off as before unless noted:
 
@@ -1666,7 +1674,8 @@ sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
    and GET_CHANNEL / TIMEBASE / TRIGGER / CAL, and compare with the screen. The UI keeps running, and
    the green MCP chip shows directly above the RUN/STOP chip while the port is open (steady, no
    pulse; the RTC clock is hidden meanwhile). Open a menu: GET_STATUS must
-   answer with `ui_busy` = 1, and SET_CHANNEL must give E_BUSY.
+   answer with `ui_busy` = 1; SET_CHANNEL closes the menu ("Host command: menu closed") and is answered (fw 0.2.78;
+   E_BUSY before).
 5. **Link tests T1, T2.** TEST_PATTERN lengths 492, 495, 496, 1008 and 4076, 1000 times each,
    with no timeouts (ZLP). Then 65,536 bytes x 200: record MB/s in `docs/hardware-status.md`.
 6. **Shared control (protocol 1.3, plan acceptance).** Change the timebase on the touch screen:

@@ -302,14 +302,46 @@ def test_ui_busy(sim_factory):
         assert e.value.status == P.Status.E_BUSY
 
 
-def test_ui_busy_shared(sim_factory):
+def test_ui_busy_shared_closes_the_menu(sim_factory):
+    """Protocol 1.23 (fw 0.2.78): a request that needs the main loop closes the scope's modal screens and runs."""
     srv = sim_factory()
     srv.device.ui_busy = True
     with Scope.connect(srv.url) as s:
-        assert s.status().ui_busy == 1
+        assert s.info.proto_minor >= P.YIELD_MINOR
+        assert s.status().ui_busy == 1  # answered from the ISR: nothing closes
+        assert srv.device.ui_yields == 0
+        s.set_timebase(divider=3)
+        assert s.status().ui_busy == 0 and srv.device.ui_yields == 1
+        assert s.get_timebase(cached=False).divider == 3
+
+
+@pytest.mark.parametrize("why", [P.BusyDetail.CAL, P.BusyDetail.SAVE, P.BusyDetail.USB_DRIVE])
+def test_ui_busy_shared_hold(sim_factory, why):
+    """1.23: a calibration measurement, a file save or USB drive mode keep E_BUSY, with the reason."""
+    srv = sim_factory()
+    srv.device.ui_busy = True
+    srv.device.ui_hold = why
+    with Scope.connect(srv.url) as s:
+        with pytest.raises(DeviceError) as e:
+            s.set_timebase(divider=3)
+        assert e.value.status == P.Status.E_BUSY and e.value.detail == why
+        assert e.value.text == P.BUSY_TEXTS[why] and P.busy_hint(why) in str(e.value)
+        assert s.status().ui_busy == 1 and srv.device.ui_yield_refused == 1
+        srv.device.ui_hold = 0
+        s.set_timebase(divider=3)  # the step ended: the menu closes for the next one
+        assert s.status().ui_busy == 0
+
+
+def test_ui_busy_before_1_23(sim_factory):
+    """Firmware before 0.2.78: E_BUSY while a menu is open; the advice is to close it."""
+    srv = sim_factory(proto_minor=22)
+    srv.device.ui_busy = True
+    with Scope.connect(srv.url) as s:
         with pytest.raises(DeviceError) as e:
             s.set_timebase(divider=3)  # a menu is open: SET_* is E_BUSY, there is nothing to take
-        assert e.value.status == P.Status.E_BUSY
+        assert e.value.status == P.Status.E_BUSY and e.value.detail == 0
+        assert "close it" in str(e.value)
+        assert s.status().ui_busy == 1
 
 
 def test_device_average_matches_host(sim_factory):

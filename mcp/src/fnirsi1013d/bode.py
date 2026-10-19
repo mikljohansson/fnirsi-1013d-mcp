@@ -1202,8 +1202,9 @@ class BodeRunner:
                         res.points.append(pr)
                 except DeviceError as e:
                     if e.status == P.Status.E_BUSY:
-                        res.stopped_early = (f"the scope answered E_BUSY twice at {pp.f_actual:.6g} Hz (a menu is "
-                                             f"open on the scope?); {len(res.points)} of {len(plans)} points measured")
+                        res.stopped_early = (f"the scope answered E_BUSY twice at {pp.f_actual:.6g} Hz "
+                                             f"({P.busy_hint(e.detail, e.text)}); {len(res.points)} of {len(plans)} "
+                                             "points measured")
                         break
                     raise
                 prev = (pp, pr)
@@ -1345,7 +1346,7 @@ def device_sweep(scope: Any, start: float, stop: float, points: int, *, settle: 
             return s.bode_ctrl(req)
         except DeviceError as e:
             if e.status == P.Status.E_BUSY:
-                raise BodeError("the scope answered E_BUSY: a menu is open on the scope; close it and retry") from e
+                raise BodeError(f"the scope answered E_BUSY: {P.busy_hint(e.detail, e.text)}") from e
             if e.status == P.Status.E_STATE and e.detail == 1:
                 raise BodeError("the Bode view is not available: a picture or waveform viewer is open on the scope") \
                     from e

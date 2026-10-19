@@ -686,7 +686,10 @@ static uint32 wiz_run_actions(void)
   int      rc[2];
   uint32   ch, written = 0;
   uint8    ach;
-  int      act;
+  int      act, hold;
+
+  //fw 0.2.78: a measurement or the Save write runs to its end; a host request meanwhile gets E_BUSY with the reason
+  hold = pc_glue_ui_hold(PC_HOLD_CAL);
 
   while((act = cw_take(&wiz, &ach)) != CW_ACT_NONE)
   {
@@ -784,6 +787,7 @@ static uint32 wiz_run_actions(void)
     wiz_gen     = 0;
   }
 
+  pc_glue_ui_hold(hold);
   return written;
 }
 
@@ -818,6 +822,15 @@ uint32 cal_wizard_run(void)
     }
 
     tp_i2c_read_status();
+
+    //fw 0.2.78: between steps a host request cancels the wizard as Cancel does, nothing written (protocol 1.23); while
+    //a step measures (wiz_run_actions) the hold answers it E_BUSY "calibration measurement running" instead
+    if(PC_UI_YIELD())
+    {
+      cw_event(&wiz, CW_EV_CANCEL);
+      written |= wiz_run_actions();
+      continue;
+    }
 
     if(!havetouch)
       continue;

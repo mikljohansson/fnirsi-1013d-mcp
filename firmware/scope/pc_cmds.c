@@ -832,9 +832,10 @@ static int h_get_battery(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //USB events (fw 0.2.5: bus resets, suspends, resumes, disconnects, EP0 setups, malformed EP0 setups), RX back-pressure
 //(fw 0.2.7: stalls from the ISR, releases, re-stalls inside a release, releases with no packet waiting, largest
 //RXCOUNT, RXCOUNT > 512), fw 0.2.12: USB interrupts served by the timer poll (lost IRQs), fw 0.2.17: boot splash ms + 1, fw 0.2.19: restart record (8), fw 0.2.20: USB IRQ races, fw 0.2.48: fault status + address, fw 0.2.49: USB inferred resumes, soft reconnects, fw 0.2.61: full-rate checks bad, recovered,
-//fw 0.2.72: FPGA rate writes, filter writes, sampling resets, full-rate captures on 0x1538+ judged by their data
+//fw 0.2.72: FPGA rate writes, filter writes, sampling resets, full-rate captures on 0x1538+ judged by their data;
+//fw 0.2.78: requests that asked the modal UI to yield, E_BUSY answers instead (hold reason or time-out)
 typedef char pc_link_counters_check[(PC_TSTAT_COUNT + 26 + PC_USBEV_COUNT + PC_RXDBG_COUNT + PC_RESTART_COUNT + 1 +
-                                     PC_FAULT_COUNT + PC_USBW_COUNT + PC_ENCH_COUNT + PC_FPGAW_COUNT + 1 ==
+                                     PC_FAULT_COUNT + PC_USBW_COUNT + PC_ENCH_COUNT + PC_FPGAW_COUNT + 1 + 2 ==
                                      PC_LINK_COUNTERS) ? 1 : -1];
 
 uint32_t pc_link_counters(pc_session *s, uint32_t *v)
@@ -872,6 +873,8 @@ uint32_t pc_link_counters(pc_session *s, uint32_t *v)
     n += PC_FPGAW_COUNT;   //64-66 (fw 0.2.72): 0x0D, 0x53 / 0x56, 0x01 = 1 writes (fpga_bus.h)
     v[n++] = e.replaced;   //67: full-rate captures on 0x1538+ judged by their data after such a write (eh_capture_mode)
   }
+  v[n++] = s->yields;      //68-69 (fw 0.2.78, 1.23): requests that asked the modal UI to yield, E_BUSY answers instead
+  v[n++] = s->yield_refused;
   return n;
 }
 
@@ -1724,7 +1727,7 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
       if((int32_t)(pc_hal_ms() - s->hold_deadline) < 0)
         return PC_HOLD;
 
-      return pc_error(s, PC_E_BUSY, 1, "UI capture running");
+      return pc_error(s, PC_E_BUSY, PC_BUSY_CAPTURE, "UI capture running");
     }
 
     if(s->capture_id == 0)
@@ -2943,7 +2946,7 @@ static int h_read_bode(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
 }
 
 //READ_SCREEN (fw 0.2.70): u16 row, u16 nrows. u16 width, u16 row, u16 nrows, u16 format 1 (RGB565 little-endian), then the
-//rows from the framebuffer the panel shows. MAIN only: a screenshot never sees a UI pass half drawn (a modal menu: E_BUSY)
+//rows from the framebuffer the panel shows. MAIN only: a screenshot never sees a UI pass half drawn (a modal menu yields first, 1.23)
 static int h_read_screen(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   uint32_t row = pc_get_u16(req), n = pc_get_u16(req + 2);
@@ -3153,6 +3156,57 @@ static int pc_ascii(pc_session *s, int ev)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
+// 1.23 (fw 0.2.78, docs/protocol.md section 14 row 63): a request for the main loop while the UI is modal. Instead of E_BUSY
+// it asks the UI to yield (yield_req, read by every modal loop through pc_hal_scope.c) and stays queued; the modal loops
+// leave by their cancel paths and the MAIN poll answers it. E_BUSY only while a step that must not be cancelled runs
+// (pc_hal_ui_hold: a calibration measurement, a file save, USB drive mode), or when no main-loop pass came within
+// PC_YIELD_MS. Session state and a memory read only: safe from the timer interrupt. Returns 0 (keep it queued) or the
+// E_BUSY status.
+
+static const char *pc_busy_text(uint8_t why)
+{
+  switch(why)
+  {
+    case PC_BUSY_CAL:       return "calibration measurement running";
+    case PC_BUSY_SAVE:      return "file save in progress";
+    case PC_BUSY_USB_DRIVE: return "USB drive mode";
+    default:                return "UI did not return to the main screen";
+  }
+}
+
+static int pc_ui_yield(pc_session *s)
+{
+  uint8_t  why = pc_hal_ui_hold();
+  uint32_t now = pc_hal_ms();
+
+  if(!why)
+  {
+    if(!s->yield_req)
+    {
+      s->yield_ms  = now;
+      s->yield_req = 1;
+      s->yields++;
+      return 0;
+    }
+
+    if((now - s->yield_ms) < PC_YIELD_MS)
+      return 0;
+
+    why = PC_BUSY_NO_YIELD;
+  }
+
+  s->yield_req = 0;
+  s->yield_refused++;
+  return pc_error(s, PC_E_BUSY, why, pc_busy_text(why));
+}
+
+int pc_ui_yield_pending(const pc_session *s)
+{
+  //Set from the timer interrupt: read it from memory every time
+  return *(volatile const uint8_t *)&s->yield_req && !pc_hal_ui_hold();
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
 // Dispatch of one parser event. Returns 1 when handled, 0 when it must wait for the MAIN context.
 
 static int pc_dispatch(pc_session *s, int ctx)
@@ -3235,12 +3289,15 @@ static int pc_dispatch(pc_session *s, int ctx)
   }
   else if((ctx != PC_CTX_MAIN) && !(e->flags & F_BUSY))
   {
-    //The timer-tick poll leaves these for the main loop. A BUSY poll does the same unless the UI is modal (no main-loop
-    //pass for PC_MODAL_MS), then it answers E_BUSY.
-    if((ctx == PC_CTX_ISR) || !s->ui_busy)
+    //The timer-tick and BUSY polls leave these for the main loop. While the UI is modal (no main-loop pass for
+    //PC_MODAL_MS) they ask it to yield (1.23; before, a BUSY poll answered E_BUSY "UI busy")
+    if(!s->ui_busy)
       return 0;
 
-    st = pc_error(s, PC_E_BUSY, 0, "UI busy");
+    st = pc_ui_yield(s);
+
+    if(st == 0)
+      return 0;
   }
   else if(s->def_active && !(e->flags & F_CONTROL))
   {
@@ -3559,6 +3616,7 @@ void pc_poll(pc_session *s, int ctx)
 
     s->last_main_ms = now;
     s->ui_busy      = 0;
+    s->yield_req    = 0;        //1.23: the UI is back at the base screen; the request waiting for it is answered below
 
     pc_settings_track(s);
 

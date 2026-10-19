@@ -112,7 +112,7 @@ class DeviceError(Exception):
             cname = P.Cmd(cmd).name
         except ValueError:
             cname = f"0x{cmd:04X}"
-        hint = P.STATUS_HINTS.get(status, "")
+        hint = P.busy_hint(detail, text) if status == P.Status.E_BUSY else P.STATUS_HINTS.get(status, "")
         msg = f"{cname} failed: {sname}"
         if text:
             msg += f" ({text})"

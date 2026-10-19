@@ -20,6 +20,7 @@
 #include "phosphor.h"
 #include "spec_fmt.h"
 #include "bode_view.h"
+#include "pc_hooks.h"
 
 #define CP_XC               (UI_BAR_X + UI_BAR_W / 2)
 #define CP_EDGE_COLOR       0x00505050
@@ -529,6 +530,10 @@ static void cp_fold_run(int id, void (*button)(int))
   while(1)
   {
     tp_i2c_read_status();
+
+    //fw 0.2.78: a host request closes it as a tap outside does (protocol 1.23)
+    if(PC_UI_YIELD())
+      break;
 
     if(!havetouch)
       continue;

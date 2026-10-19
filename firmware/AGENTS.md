@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-yield (2026-10-19): fw 0.2.78, protocol 1.23 (row 63), both provisional: host commands close the modal screens (every modal loop leaves by its cancel path; E_BUSY only for a calibration measurement, a file save, USB drive mode or a 1.5 s time-out), section 53.**
 **Branch fw-screen (2026-10-19): fw 0.2.70, protocol 1.21 unchanged: READ_SCREEN built (cap SCREENSHOT), section 46.**
 **Branch fw-bus (2026-10-19): fw 0.2.72, protocol 1.22 (row 62): FPGA bus contract (dummy strobe in every readout, geometry before the reset, legacy EXT shift, encode check after async writes, type 22 trace level, core order from 0x33), section 48.**
 **Branch fw-bode (2026-10-19): fw 0.2.66, protocol 1.20 (row 60): the Bode plot on the device (bode_dsp / bode_sweep / bode_view / pc_bode, BODE_CTRL / READ_BODE), section 42.**
@@ -3576,3 +3577,93 @@ Bug indicators: a rate that is not the slowest covering the stop after a step; a
 running; a tap at an end that changes anything; an end the other direction cannot leave; the chip changing while
 stopped; Span / Center off the 1-2-5 values while the rate covers the span; the slider window off the track; a time/div
 snap notice in the Scope after using the Spectrum.
+## 53. fw-yield: host commands leave the modal screens (fw 0.2.78, protocol 1.23, row 63)
+
+Branch `fw-yield` from main dd46518 (fw 0.2.76). Owner 2026-10-19 23:27 (task queue "Host commands leave the modal
+menus"): "if the agent sends commands it just exits all modals, since that wouldn't be destructive; just exiting to
+the base screen". Rule: `docs/ui-guidelines.md` section 4 (two bullets); wire: `docs/protocol.md` section 14 row 63,
+the LOCAL_BUSY row of 6.1, the 8.1 E_BUSY line, section 9. Commits: 0493025 (session, glue, hooks, note string, host
+tests), 888324c (the modal loops), 0f63317 (mcp, simulator, vectors), then the docs and this handoff. **Nothing
+benched.** Host tests green (test_session 70093 / 70091 with the new `test_modal_yield`, test_ui, test_diag,
+check_vectors); mcp ruff clean, pytest green except `test_report` (needs matplotlib, not in the local venv).
+
+**Mechanism** (`pc_cmds.c` `pc_ui_yield`, `pc_ui_yield_pending`):
+- A request without F_BUSY that reaches the dispatcher from the timer poll or a BUSY poll while `ui_busy` (no MAIN
+  poll for PC_MODAL_MS 250 ms) no longer gets E_BUSY "UI busy". If `pc_hal_ui_hold()` is 0 it sets
+  `pc_session.yield_req` (+ `yield_ms`, counter `yields` = GET_LINK_STATS 68) and stays queued (`pending_ev`, re-run
+  every tick). The MAIN poll clears `yield_req` and answers the request. With a hold reason, or when no MAIN poll comes
+  within PC_YIELD_MS 1500 ms of the flag, it answers E_BUSY detail 3/4/5 (the hold) or 2 ("UI did not return to the
+  main screen"), counter `yield_refused` = 69. GET_LINK_STATS 70 counters (pc_report.c names `ui_yields`,
+  `ui_yield_refused`). PROTO_MINOR 23. Detail 1 ("UI capture running", READ_RAW) and 0 ("deferred request pending")
+  as before.
+- Glue (`pc_hal_scope.c`, next to `pc_glue_poll_isr`): `pc_glue_ui_yield()` = `PC_UI_YIELD()` (1 while
+  `pc_ui_yield_pending`: flag set and no hold; it also starts the note), `pc_glue_ui_hold(why)` returns the previous
+  reason (nest-safe: `prev = pc_glue_ui_hold(PC_HOLD_SAVE); ...; pc_glue_ui_hold(prev)`), `pc_hal_ui_hold()`,
+  `pc_glue_yield_note()` = `ui_yield_note` ("Host command: menu closed", ui_ctrl.c, test_ui checks <= 50 chars and the
+  width) for UI_YIELD_NOTE_MS 4000 ms after the last yield. PC_HOLD_* in pc_hooks.h equal PC_BUSY_* in pc_cmds.h
+  (compile-time check in pc_hal_scope.c).
+- The note: Scope (`pc_glue_scope_warning`, white, ahead of the warnings and the snap notice; not in the waveform
+  viewer) and Frequency response (`bode_view.c` `warning()`, first). **Not in the Spectrum view** (spectrum.c belonged
+  to fw-spzoom while this ran): one line in `spec_draw_warnings`, `if(pc_glue_yield_note()) p = fmt_str(p, ...)`,
+  is a follow-up (task queue). Diagnostics shows no note (it is a main-loop mode; its own dialogs yield).
+
+**Modal loops changed** (each checks `PC_UI_YIELD()` right after its touch scan and takes its own cancel path):
+- statemachine.c: main menu + Settings fold-out, brightness sliders, RTC fold-out (`close_open_menus(1)`), channel
+  menu with ref / math sub menus (`close_open_channel_menus(settings, 1)`), ACQ menu (return), trigger menu
+  (`close_open_trigger_menus(1)`), generator menu (`close_open_gen_menus(1)`), the generator keypad (puts the current
+  frequency / duty back into the buffer first: its caller applies the buffer after any exit, 1.00o5 applied the typed
+  number even on a tap outside), Measures (return), the file browser (`scope_preset_values`, as Return), the picture
+  viewer (Return), the waveform viewer loop inside the browser (`waveviewmode = 0`, as the menu button's return).
+- ctrl_page.c `cp_fold_run`, bode_view.c `fold_run` (CTRL fold-outs: closed as a tap outside), bode_view.c
+  `bode_view_top_note` (closed) and `file_message` (dismissed, hold released while it waits).
+- ui_settings_ui.c: `ui_confirm` (Cancel; covers the viewer's delete, Restore default settings), `ui_settings_run`
+  (Back: the boot byte is written if it changed, as Back does: the person changed it), `run_time_page` (Back).
+- ui_dlg.c `ui_dlg_confirm` (Cancel: Clear calibration, Enter FEL). ui_diag_view.c: `ud_volts_flow` between steps
+  (Cancel: the factors go back), `ui_first_run` (Later). cal_wiz_ui.c `cal_wizard_run` between steps (CW_EV_CANCEL,
+  CW_ACT_DISCARD: nothing written). scope_functions.c `scope_display_file_status_message` (dismissed; hold released
+  while it waits, since the file operation is over).
+
+**Holds (E_BUSY with the reason instead):** cal_wiz_ui.c `wiz_run_actions` (every measurement action and the Save
+commit), ui_diag_view.c the volts calibration's `scope_input_calibration` step (3); statemachine.c SAVE PIC / SAVE
+WAVE / the Frequency response CSV, ui_diag_view.c `ud_save_report` (4); menu.c `scope_setup_usb_screen` (5).
+
+**Not changed, and why:** the USB drive screen (exception; the serial port is gone there anyway); the touch-drag loops
+(`while(havetouch)` in scan_for_touch, bode_view.c, spectrum.c: the finger is on the glass, they end on release);
+`tp_i2c_wait_for_touch_release` waits; test.c (timed waits); Diagnostics, Spectrum, Frequency response (main-loop
+modes, the request is answered there without closing anything); auto set and slow UI captures (no modal loop: the
+request waits for the main loop, E_BUSY detail 2 after 1.5 s). BODE_CTRL (every action, also status) and READ_BODE
+have no F_BUSY flag, so they close a menu like any main-loop command.
+
+**Simulator and host** (0f63317): `protocol.py` `YIELD_MINOR`, `BusyDetail`, `BUSY_TEXTS`, `busy_hint` (DeviceError's
+E_BUSY hint), link names 68-69; `server.py` `ensure_control` proceeds with `MENU_CLOSED_NOTE` on 1.23 and raises the
+old "close it on the scope" error below it; the simulator's `cfg.proto_minor` (below 23 = old behaviour), `ui_hold`,
+`ui_yields`, `ui_yield_refused` (its GET_LINK_STATS stays the 31-counter 1.2 layout, as before).
+
+**Bench list** (owner present, coordinator on COM10; `fnirsi1013d-bench` or the MCP tools; `#VER` fw=0.2.78
+proto=1.23):
+1. Main menu open, idle 1 s: `scope_status` shows ui_busy 1 and the menu stays. `scope_set_timebase`: the menu closes,
+   "Host command: menu closed" white at the top middle for about 4 s, the tool answers with the menu caveat, the
+   time base changed.
+2. The same with each: Settings fold-out; the brightness slider open; channel menu CH1 and CH2 (also with the ref menu
+   open); ACQ; trigger; generator; the generator keypad with a half-typed frequency (closes, the generator keeps the
+   old frequency); Measures; the CTRL page's Display and Trace style fold-outs; Settings screen (and its Time and date
+   page); Saved pictures browser; a picture open; Saved waveforms with a waveform open (back to the scope, settings as
+   before the viewer); the Clear calibration and Enter FEL dialogs (Cancel: nothing cleared, no FEL); the delete
+   confirmation in a viewer (nothing deleted). Frequency response: its Display / Sweep / Thru fold-outs and the ACQ
+   note (the note in its warning line).
+3. Nested: main menu > Settings fold-out > Other settings (the Settings screen) > a host command: all three close,
+   one note, the command answered. CH1 menu with its ref sub menu open: both close.
+4. Wizard: Diagnostics > Calibrate, on screen 1 send a command: the wizard closes (nothing written, Diagnostics
+   stays). Start the zero step, send a command while "Measuring...": E_BUSY "calibration measurement running"
+   (detail 3) until the step ends; then the next command cancels the wizard between steps.
+5. SAVE WAVE with the file message on (Settings > File message: asks first), send a command during the write: E_BUSY
+   "file save in progress" or, once the message waits, the message is dismissed and the command answered.
+6. First run (a card without calibration, or Clear calibration then power-cycle): the first-run screen; a command
+   answers it with Later.
+7. `GET_LINK_STATS` 68 counts the yields, 69 the E_BUSY answers; GET_STATUS ui_busy stays truthful (1 while modal).
+8. Auto set running (a long one at a slow time base), a SET_* sent at once: answered after it or E_BUSY detail 2 "UI
+   did not return to the main screen" after 1.5 s, never a hang.
+Bug indicators: a dialog that took its action (a deletion, a cleared calibration, FEL) on a host command; the keypad's
+typed number applied; a menu that stays open while the command times out; a screen left half drawn (a fold-out's
+panel or a menu's background not restored); the note stuck on screen; a second menu opened later closing at once
+without a host command.

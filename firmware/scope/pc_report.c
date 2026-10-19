@@ -238,7 +238,7 @@ static const char *pc_counter_names[PC_LINK_COUNTERS] =
   "restart_exc_type", "restart_exc_lr", "restart_exc_spsr", "restart_exc_sp", "restart_reset_lr", "restart_reset_sp",
   "restart_reset_cpsr", "retired_57", "restart_fault_status", "restart_fault_address", "usb_resumes_inferred",
   "usb_soft_reconnects", "adc_fullrate_bad", "adc_fullrate_recovered", "fpga_rate_writes", "fpga_filter_writes",
-  "fpga_sampling_resets", "adc_fullrate_by_data"
+  "fpga_sampling_resets", "adc_fullrate_by_data", "ui_yields", "ui_yield_refused"
 };
 
 static void sec_identity(pc_text *t, pc_session *s, const uint8_t *sd, int sd_ok, const uint8_t *h)

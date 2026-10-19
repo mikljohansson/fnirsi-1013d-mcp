@@ -899,7 +899,7 @@ class Scope:
 
     def bode_ctrl(self, req: P.BodeCtrlReq | int = P.BODE_STATUS) -> P.BodeCtrlResp:
         """BODE_CTRL: start / stop a device sweep, open / close the Bode view, the thru calibration (an action number
-        or a ``BodeCtrlReq``). E_BUSY while a scope menu is open; E_STATE detail 1 view not available, 2 a sweep runs
+        or a ``BodeCtrlReq``). E_BUSY while a scope menu is open (firmware before 0.2.78; 1.23 closes it); E_STATE detail 1 view not available, 2 a sweep runs
         already, 4 no thru measured."""
         if self.info.proto_minor < 20:
             raise DeviceError(P.Cmd.BODE_CTRL, P.Status.E_UNKNOWN_CMD, 0, "needs protocol 1.20 (firmware >= 0.2.66)")

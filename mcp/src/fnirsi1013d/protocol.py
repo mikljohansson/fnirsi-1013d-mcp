@@ -40,7 +40,7 @@ PROTO_MAJOR = 1
 #: capture checked, caps ENC_CHECK, features bit 5, GET_HEALTH 104 bytes; 1.20 (fw 0.2.66, row 60): the on-device Bode
 #: plot (BODE_CTRL / READ_BODE, display_mode 5, features bit 6); 1.21 (fw 0.2.67, row 61, provisional numbering):
 #: CAL_PROBE, the calibration wizard's zero measurement from the host
-PROTO_MINOR = 22
+PROTO_MINOR = 23
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -128,7 +128,8 @@ LOCAL_ALLOWED = frozenset(
         Cmd.READ_SCREEN, Cmd.ENTER_FEL,
     }
 )
-#: Commands accepted while the UI is modal (LOCAL_BUSY, section 6.1).
+#: Commands answered while the UI is modal (LOCAL_BUSY, section 6.1). Before protocol 1.23 every other command got
+#: E_BUSY then; since 1.23 (fw 0.2.78) the others close the scope's modal screens and run (YIELD_MINOR).
 BUSY_ALLOWED = frozenset({Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.GET_BATTERY, Cmd.GET_LINK_STATS,
                           Cmd.GET_EVENT_LOG, Cmd.GET_HEALTH})
 #: Control requests allowed while a deferred request is pending (section 3.2).
@@ -165,7 +166,7 @@ STATUS_HINTS: dict[int, str] = {
     Status.E_BAD_ARG: "a field is out of range",
     Status.E_UNSUPPORTED: "not available on this FPGA bitstream or firmware build",
     Status.E_NOT_REMOTE: "command needs REMOTE ownership; acquire the remote session first",
-    Status.E_BUSY: "scope UI is in a modal screen, or a deferred request is already pending",
+    Status.E_BUSY: "the scope cannot take the request now (see busy_hint for the reason)",
     Status.E_STATE: "wrong acquisition state (e.g. read before the capture is DONE)",
     Status.E_FPGA: "FPGA did not become ready",
     Status.E_ABORTED: "request ended by STOP, release or watchdog",
@@ -321,6 +322,51 @@ class DisplayMode(enum.IntEnum):
     PHOSPHOR = 4
     #: 1.20 (fw 0.2.66): the Bode plot (the scope's own acquisition is off; READ_BODE reads the table)
     BODE = 5
+
+
+#: Protocol 1.23 (fw 0.2.78, docs/protocol.md section 14 row 63): a request that needs the scope's main loop while a menu,
+#: fold-out, dialog or screen is open closes them by their cancel paths (the screen says "Host command: menu closed") and
+#: is answered; E_BUSY only with one of the BusyDetail reasons. Older firmware answered E_BUSY detail 0 while any menu was
+#: open, and the person had to close it.
+YIELD_MINOR = 23
+
+
+class BusyDetail(enum.IntEnum):
+    """E_BUSY detail (protocol 1.23; before, 0 for a modal UI as well as a pending deferred request)."""
+
+    UI = 0  #: a deferred request is pending; before 1.23 also "a menu is open on the scope" (text "UI busy")
+    CAPTURE = 1  #: READ_RAW: the UI capture in flight did not finish within 1 s
+    NO_YIELD = 2  #: the UI did not get back to its main screen within 1.5 s
+    CAL = 3  #: a calibration measurement runs (wizard step, volts calibration step)
+    SAVE = 4  #: a file save is in progress
+    USB_DRIVE = 5  #: USB drive mode
+
+
+#: The firmware's E_BUSY texts per detail (1.23)
+BUSY_TEXTS: dict[int, str] = {
+    BusyDetail.CAPTURE: "UI capture running",
+    BusyDetail.NO_YIELD: "UI did not return to the main screen",
+    BusyDetail.CAL: "calibration measurement running",
+    BusyDetail.SAVE: "file save in progress",
+    BusyDetail.USB_DRIVE: "USB drive mode",
+}
+
+
+def busy_hint(detail: int, text: str = "") -> str:
+    """What an E_BUSY means and what to do, from its detail and text (protocol 1.23 details; older firmware's
+    detail 0 "UI busy" = a menu open on the scope)."""
+    if text.startswith("deferred"):
+        return "a deferred request (WAIT) is already pending; wait for its answer"
+    return {
+        BusyDetail.CAPTURE: "the scope's own capture in flight did not finish within 1 s; retry",
+        BusyDetail.NO_YIELD: "the scope's UI did not get back to its main screen within 1.5 s (auto set, a slow capture "
+                             "or a step that has to finish); retry",
+        BusyDetail.CAL: "the scope is measuring for its calibration; wait until the step ends (the person can press "
+                        "Cancel on the scope), then retry",
+        BusyDetail.SAVE: "the scope is writing a file to its SD card; retry in a moment",
+        BusyDetail.USB_DRIVE: "the scope is in USB drive mode; the person leaves it with Exit on the scope",
+    }.get(detail, "a menu or dialog is open on the scope (firmware before 0.2.78, protocol < 1.23): ask the person "
+                  "to close it, then retry")
 
 
 class UiBusy(enum.IntEnum):
@@ -3134,7 +3180,10 @@ LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     # only at trace level 1, GET_EVENT_LOG flags bits 2:1): 0x0D rate, 0x53 / 0x56 filter, 0x01 = 1 sampling resets;
     # then the full-rate captures on FPGA 0x1538+ judged by their data instead of read 0x33 because such a write came
     # after their sampling reset (0x33 bit 0 is sticky until the next reset)
-    "fpga_rate_writes", "fpga_filter_writes", "fpga_sampling_resets", "adc_fullrate_by_data")
+    "fpga_rate_writes", "fpga_filter_writes", "fpga_sampling_resets", "adc_fullrate_by_data",
+    # fw 0.2.78 (70 counters, protocol 1.23 row 63): requests that closed the scope's modal screens (menus, dialogs) to
+    # run, and E_BUSY answers instead (a calibration measurement, a file save, USB drive mode, or the 1.5 s time-out)
+    "ui_yields", "ui_yield_refused")
 
 #: restart_exc_type / event 15 a (fw 0.2.19)
 RESTART_EXC_TYPES = {0: "jump to entry", 1: "undefined", 2: "SWI", 3: "prefetch abort", 4: "data abort",

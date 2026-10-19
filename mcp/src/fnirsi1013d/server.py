@@ -270,8 +270,9 @@ class Session:
     # control --------------------------------------------------------------------------------------------
 
     def ensure_control(self) -> list[str]:
-        """Make the scope accept SET_*/ARM/READ_*. Collaborative firmware (SHARED_MODE): nothing to take; only a
-        modal menu blocks. Legacy firmware: acquire REMOTE if needed. Returns caveats describing what happened."""
+        """Make the scope accept SET_*/ARM/READ_*. Collaborative firmware (SHARED_MODE): nothing to take; a modal menu
+        blocks only before protocol 1.23 (fw 0.2.78 closes it for the request). Legacy firmware: acquire REMOTE if
+        needed. Returns caveats describing what happened."""
         s = self.get_scope()
         self.last_tool = time.monotonic()
         st = s.status()
@@ -282,11 +283,14 @@ class Session:
         if st.ui_busy == P.UiBusy.STARTING:
             raise ToolError(f"the scope is still starting after {self.cfg.starting_wait_s:g} s (first UI pass not "
                             "finished); check the screen and retry")
+        menu_note = []
         if st.ui_busy:
-            raise ToolError("scope UI is in a modal screen (menu, calibration or USB storage); close it on the "
-                            "scope and retry")
+            if not s.shared or s.info.proto_minor < P.YIELD_MINOR:
+                raise ToolError("scope UI is in a modal screen (menu, calibration or USB storage); close it on the "
+                                "scope and retry (firmware before 0.2.78; newer firmware closes it by itself)")
+            menu_note.append(MENU_CLOSED_NOTE)
         if s.shared:
-            notes = []
+            notes = menu_note
             if st.display_mode in (1, 2, 3):
                 notes.append(SPECTRUM_VIEW_NOTE)
             elif st.display_mode == P.DisplayMode.PHOSPHOR:
@@ -438,6 +442,9 @@ class _Held:
 #: caveat while the scope shows its phosphor view (protocol 1.13, display_mode 4)
 PHOSPHOR_VIEW_NOTE = ("the scope's screen shows its phosphor view: the person sees a persistence picture of many "
                       "captures (a host single is added once); the data returned here are unaffected")
+#: Protocol 1.23 (fw 0.2.78): a menu, fold-out or dialog was open; the request closed it by its cancel path
+MENU_CLOSED_NOTE = ("a menu or dialog was open on the scope: the firmware closed it for this request without applying "
+                    "anything in it (the screen says 'Host command: menu closed'); tell the person if they were using it")
 SPECTRUM_VIEW_NOTE = ("the scope's screen shows its spectrum view: the person at the scope sees the spectrum of each "
                       "capture, not the trace (the data returned here are unaffected; scope_spectrum reads what the "
                       "screen shows)")
@@ -1471,8 +1478,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         identity of the running and the card image, unit life, USB state, battery, restart counters and the stored
         restart record, every link counter by name, the decoded event log and both channels' calibration in words.
         The same file as the Diagnostics "Save report" button. Returns the file name and size; the person reads it
-        from the card (USB mass-storage mode or a card reader). Changes no settings; fails with 'menu open' while a
-        scope menu is modal."""
+        from the card (USB mass-storage mode or a card reader). Changes no settings. A menu open on the scope is closed
+        for it (firmware 0.2.78+, protocol 1.23); older firmware fails with E_BUSY until the person closes it."""
         def go() -> dict[str, Any]:
             s = sess.get_scope()
             if not s.profile().has(P.Caps.SD_SECTORS) or s.info.proto_minor < 16:
@@ -1497,9 +1504,10 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     async def scope_screenshot() -> Image:
         """PNG image of the scope's 800x480 screen. Only on firmware that reports the SCREENSHOT capability
         (check scope_info caps first): firmware 0.2.70 and later have READ_SCREEN; older builds do not, and this
-        tool then fails at once with "no SCREENSHOT capability". 768,000 bytes in 12 requests, about 1 s over USB;
-        while a menu is open on the scope it fails with E_BUSY. Pixel format RGB565 is unverified on the unit (T9):
-        if colours look wrong, say so."""
+        tool then fails at once with "no SCREENSHOT capability". 768,000 bytes in 12 requests, about 1 s over USB.
+        A menu open on the scope is closed first (firmware 0.2.78+, protocol 1.23), so the picture shows the base
+        screen; older firmware fails with E_BUSY while a menu is open. Pixel format RGB565 is unverified on the unit
+        (T9): if colours look wrong, say so."""
         def go() -> bytes:
             s = sess.get_scope()
             if not s.profile().has(P.Caps.SCREENSHOT):

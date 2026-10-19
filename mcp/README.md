@@ -261,7 +261,9 @@ capture (`capture_settings` in the result). Every capture carries the `settings_
 (`scope_averaged_capture`, `scope_decay_fit`, `scope_capture_and_fft`) pin their settings to one `settings_seq`;
 when someone changes a setting at the scope during the run, the run starts again with the new settings and
 `restarts` (plus a caveat) says after how many captures and what changed. After 5 restarts the tool gives up.
-A SET_* while a scope menu is open fails with "modal screen" (E_BUSY), as before.
+A SET_* while a scope menu is open closes the menu first on firmware 0.2.78+ (protocol 1.23: every modal screen
+leaves by its cancel path, the tool's caveat says so); E_BUSY then only while the scope measures for its calibration,
+saves a file or is a USB drive, with that reason. Older firmware fails with "modal screen" (E_BUSY), as before.
 
 **Legacy firmware** (no SHARED_MODE, protocol <= 1.2) keeps the exclusive model: every tier 1+ tool takes REMOTE
 when needed and says so in `caveats`, the touch UI is frozen while the host holds it, and a tap on the banner makes
@@ -330,7 +332,8 @@ gain, skew, probe mismatch). Points measured on other ranges than the calibratio
 
 **Time.** About 40 ms per point plus the settle and record time: 50 points 1 kHz-1 MHz about 3 s, 100 Hz-1 MHz about
 5 s, 10 Hz-100 kHz about 27 s (the low decade dominates). The tool refuses sweeps estimated above `max_duration_s`
-(120 s). E_BUSY (a menu open on the scope) is retried once, then the sweep stops with the partial table. Every
+(120 s). E_BUSY (older firmware: a menu open on the scope; 0.2.78+: a calibration measurement or a file save on the
+scope) is retried once, then the sweep stops with the partial table. Every
 setting (generator words, filter, channels, time base, trigger incl. EXT, RUN) is given back.
 
 **Files.** `.csv` (the table), `.json` (table, summary, splices, caveats, metadata) and `.npz` (`f_requested`,
@@ -505,7 +508,8 @@ the package).
 package's own transport and prints the table `firmware/scope/host_tests/fft_bench.py` prints: per N and memory
 (DDR, on-chip SRAM) the plan init, run min/max and dB conversion times in ms, the peak bin and its level in dB re
 1 code RMS, plus the CP15 cache bits and the device uptime before/after. The scope's UI pass waits for the run
-(about 0.15 s at 3 reps); a scope menu open makes it fail with E_BUSY. Needs no repository checkout.
+(about 0.15 s at 3 reps); a scope menu open makes it fail with E_BUSY on firmware
+before 0.2.78 (newer firmware closes the menu). Needs no repository checkout.
 
 ## Tests
 

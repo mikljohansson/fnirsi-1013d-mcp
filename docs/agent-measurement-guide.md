@@ -178,8 +178,9 @@ calibration, about +-1 dB near -55 dB. The ground-return error is not removed by
 On collaborative firmware the person at the scope can change any setting at any time; the last change wins. Every
 capture carries the `settings_seq` it was taken under. Long runs (averaging, decay fit, FFT) restart when a
 setting changes mid-run and say so in `restarts` / caveats: report it, and if it keeps happening, ask the person
-to leave the knobs alone (the tool gives up after 5 restarts). A menu open on the scope makes setting changes fail
-with "modal screen" (E_BUSY): ask them to close it. Leave the scope as you found it where reasonable (RUN, the
+to leave the knobs alone (the tool gives up after 5 restarts). A menu open on the scope is closed by your next request on
+firmware 0.2.78+ (protocol 1.23; the caveat says so and the screen shows "Host command: menu closed"): tell the person
+if they were using it. Older firmware fails with "modal screen" (E_BUSY): ask them to close it. Leave the scope as you found it where reasonable (RUN, the
 user's range) and say what you changed.
 
 ## 5. Grounds: the probe ground is not the USB ground
@@ -271,7 +272,8 @@ How to show them:
 
 | Symptom | Meaning / fix |
 |---|---|
-| "modal screen", E_BUSY | a menu is open on the scope: ask the person to close it, retry |
+| "modal screen", E_BUSY detail 0 | firmware before 0.2.78 with a menu open on the scope: ask the person to close it, retry |
+| E_BUSY "calibration measurement running" / "file save in progress" / "USB drive mode" | the scope is in a step that must finish (0.2.78+): wait and retry, or ask the person (USB drive: Exit) |
 | the scope restarted, the link dropped, settings look lost, or "is the right firmware on it?" | fw 0.2.52+: `scope_health` (USB state, power-on number, how the previous power-on ended, unsaved settings, a stored restart record with the exception type) and `scope_sd_info` (`card_image`: what the card boots and whether that is the running build, e.g. after a FEL load). For a fault report ask for `scope_save_report` and tell the person the file name on the card; quote `in_words` rather than raw registers |
 | volts drift at 200 MSa/s or filtered captures read a little off hours after calibrating | fw 0.2.50+ tracks it: `scope_calibration_info` `tracking` says whether the tracker and the class probe have run (the probe needs a quiet input with the scope running and no menu); `calibration_provenance` says when and by which build the scope was calibrated |
 | "still starting" | the scope just booted (about 5 s after a FEL load); the server waits up to 10 s |
