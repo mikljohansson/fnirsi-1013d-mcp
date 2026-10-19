@@ -70,7 +70,8 @@ SRCS += acal_track.c acal_live.c
 # Screens (fw 0.2.51): card formatting, main menu rows and mode rule (pure C, host_tests/test_ui.c)
 # fw 0.2.55: the Settings fold-out and screen tables (ui_settings.c, pure C, host_tests/test_ui.c), the screen and the
 # confirmation dialog on the device (ui_settings_ui.c)
-SRCS += ui_fmt.c ui_menu.c ui_settings.c ui_settings_ui.c
+# fw 0.2.53: the CTRL page and its fold-outs (ui_ctrl.c pure, host_tests/test_ui.c; ctrl_page.c on the device)
+SRCS += ui_fmt.c ui_menu.c ui_settings.c ui_settings_ui.c ui_ctrl.c ctrl_page.c
 # Plot touch geometry (fw 0.2.54): pointer position, handle and channel pick (pure C, host_tests/test_touch_pick.c)
 SRCS += touch_pick.c
 # fw 0.2.52 diagnostics readers (protocol row 55)

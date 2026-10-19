@@ -289,12 +289,9 @@ void scope_adjust_timebase_and_voltdiv (void)
   scope_display_trace_data();
   }
     
-    //Check if not in waveform view mode (Scope mode) with grid disabled
-    if((!scopesettings.waveviewmode) || (scopesettings.gridenable))
-    {
-        //Draw the grid lines and dots based on the grid brightness setting
-        scope_draw_grid();
-    }
+    //The record-position slider, and the grid lines and dots unless Grid is off (fw 0.2.53: the CTRL page's Grid in
+    //every mode; it was the waveform viewer's Show grid only)
+    scope_draw_grid();
     
     //Draw the cursors with their measurement displays
     scope_draw_time_cursors();
@@ -303,9 +300,6 @@ void scope_adjust_timebase_and_voltdiv (void)
     
     //Draw the signal center, trigger level and trigger position pointers
     scope_draw_pointers();
-
-    //PC protocol build: the phosphor strip over the grid's record-position slider
-    PC_PHOSPHOR_STRIP();
      
     //Copy it to the actual screen buffer
     display_set_source_buffer(displaybuffertmp);//1
@@ -2103,6 +2097,9 @@ void scope_display_trace_data(void)
 
   //PC protocol build: the spectrum view draws the trace area instead
   PC_SPECTRUM_DISPLAY();
+
+  //fw 0.2.53: the overrange flags of this record for the warning line (the channel blocks below clear them)
+  PC_SCOPE_PASS();
   
   //See if it is possible to rework this to fixed point. A 32 bit mantissa is not accurate enough though
 
@@ -2221,12 +2218,8 @@ void scope_display_trace_data(void)
   display_fill_rect(2, 48, 728, 432);
   //display_fill_rect(2, 44, 728, 434);       //opravit rozmery
 
-  //Check if not in waveform view mode (Scope mode) with grid disabled
-  if((!scopesettings.waveviewmode) || (scopesettings.gridenable))
-  {
-    //Draw the grid lines and dots based on the grid brightness setting
-    scope_draw_grid();
-  }
+  //The record-position slider, and the grid lines and dots unless Grid is off (fw 0.2.53, as in scope_preset_values)
+  scope_draw_grid();
 
   //Check if scope is in normal display mode
   if(scopesettings.xymodedisplay == 0)
@@ -2405,6 +2398,9 @@ void scope_display_trace_data(void)
       display_text(488, 70, filenameRTC);   //500 48 , 490 58
       } else display_text(555, 70, thumbnaildata->filename); //550 48 //display_text(555, 70, viewfilename); //550 48
   }
+
+  //fw 0.2.53: the warning line at the top middle of the plot, in every variant (not in the viewer)
+  PC_SCOPE_WARNING();
   
   //Copy it to the actual screen buffer
   display_set_source_buffer(displaybuffertmp);//1
@@ -3485,6 +3481,29 @@ const MEASUREMENTFUNCTION measurementfunctions[12] =
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//Measurement card (fw 0.2.51, docs/ui-guidelines.md section 3, chips): the grey card, the name in a chip of the source's
+//colour drawn over it (full card height, as wide as the name plus 3 px each side, rounded only on its outer left
+//corners, so the join has no notch), the value 6 px after the chip; all in the 13 px font
+void scope_draw_card(uint32 x, uint32 y, uint32 color, const char *name, const char *value)
+{
+  uint32 cw = ui_card_chip_w(&font_2, name);
+
+  display_set_fg_color(GREY_COLOR);
+  display_fill_rounded_rect(x, y, UI_CARD_W, UI_CARD_H, 2);
+
+  display_set_fg_color(color);
+  display_fill_rounded_rect(x, y, cw, UI_CARD_H, 2);
+  display_fill_rect(x + cw - 2, y, 2, UI_CARD_H);
+
+  //Name in black, value in white
+  display_set_font(&font_2);
+  display_set_fg_color(BLACK_COLOR);
+  display_text(x + UI_CARD_PAD, y + 4, (int8 *)name);
+
+  display_set_fg_color(WHITE_COLOR);
+  display_text(x + cw + UI_CARD_GAP, y + 4, (int8 *)value);
+}
+
 void scope_display_channel_measurements(PCHANNELSETTINGS settings, uint8 *measuresstate, uint32 xstart, uint32 color)
 {
   int i;
@@ -3500,34 +3519,14 @@ void scope_display_channel_measurements(PCHANNELSETTINGS settings, uint8 *measur
     //Check if the current one is enabled
     if(measuresstate[i])
     {
-      //fw 0.2.51 card (docs/ui-guidelines.md section 3, chips): the grey card, the name in a chip of the source's colour
-      //drawn over it (full card height, as wide as the name plus 3 px each side, rounded only on its outer left
-      //corners, so the join has no notch), the value 6 px after the chip; all in the 13 px font
-      uint32 cw = ui_card_chip_w(&font_2, measurement_names[i]);
-
-      display_set_fg_color(GREY_COLOR);
-      display_fill_rounded_rect(x, y, UI_CARD_W, UI_CARD_H, 2);
-
-      display_set_fg_color(color);
-      display_fill_rounded_rect(x, y, cw, UI_CARD_H, 2);
-      display_fill_rect(x + cw - 2, y, 2, UI_CARD_H);
-
-      //Name in black
-      display_set_font(&font_2);
-      display_set_fg_color(BLACK_COLOR);
-      display_text(x + UI_CARD_PAD, y + 4, (char *)measurement_names[i]);
-
-      //Measurement in white text
-      display_set_fg_color(WHITE_COLOR);
-
       //Erase any previous text
       measurementtext[0] = 0;
 
       //Display the data for this measurement
       measurementfunctions[i](settings);
 
-      //Display the formated data
-      display_text(x + cw + UI_CARD_GAP, y + 4, measurementtext);
+      //The card (fw 0.2.51; scope_draw_card since 0.2.53, the spectrum's cards use it too)
+      scope_draw_card(x, y, color, measurement_names[i], measurementtext);
 
       //Select next column
       x += 120;
@@ -6539,8 +6538,10 @@ void scope_save_config_data(void)
   //Spectrum view settings (FFT length, window, scale, ref level)
   settingsworkbuffer[PC_SETTING_WORD_SPEC0] = pc_glue_spectrum_setting_word(0);
   settingsworkbuffer[PC_SETTING_WORD_SPEC1] = pc_glue_spectrum_setting_word(1);
-  //Phosphor view settings (persistence, palette)
+  //Phosphor view settings (persistence, palette, the switch)
   settingsworkbuffer[PC_SETTING_WORD_PHOS] = pc_glue_phosphor_setting_word();
+  //Grid and the spectrum's Display variant (fw 0.2.53)
+  settingsworkbuffer[PC_SETTING_WORD_UI] = pc_glue_ui_setting_word();
   //Unit life record, words 224..255 (fw 0.2.52, pc_diag.c)
   PC_SETTINGS_STORE(settingsworkbuffer);
   

@@ -304,10 +304,7 @@ int pc_glue_sys_menu_height(void);
 #define ACQ_MENU_XPOS                      250//ACQ_BUTTON_XPOS
 #define ACQ_MENU_YPOS                       48//46
 #define ACQ_MENU_WIDTH                     380//304
-#define ACQ_MENU_HEIGHT                    432   //fw 0.2.51: 386 + the Display row (until the CTRL page's Display fold-out)
-#define ACQ_MENU_BODY_H                    386   //1.00o5's part above the Display row
-#define ACQ_DISPLAY_Y                      390   //Display row: Normal / Phosphor / X-Y boxes, y offset in the menu
-#define ACQ_DISPLAY_H                       36
+#define ACQ_MENU_HEIGHT                    386   //fw 0.2.53: 1.00o5's height again (the 0.2.51 Display row went to CTRL)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Move fast button
@@ -1090,8 +1087,6 @@ extern const int8 acquisition_speed_text_x_offsets[29];//18
 extern const int8 *memory_deep_texts[5];
 extern const int8 memory_deep_texts_x_offsets[5];
 
-extern const int8 *trace_texts[4];//18
-extern const int8 trace_texts_x_offsets[4];//18
 
 extern const int8 *keyboard_texts[20];//18
 extern const int8 keyboard_texts_x_offsets[20];//18

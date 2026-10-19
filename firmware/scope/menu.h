@@ -139,7 +139,6 @@ void scope_acquisition_ACQ_mode_select(void);
 void scope_acquisition_Average_mode_select(void);
 
 void scope_acquisition_memory_deep_select(void);
-void scope_acquisition_trace_select(void);
 //----------------------------------------------------------------------
 
 void scope_open_trigger_menu(void);

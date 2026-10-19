@@ -1,5 +1,7 @@
 # firmware/ handoff for agents
 
+**Branch fw-ui2 (2026-10-19): fw 0.2.53 (provisional), protocol 1.16 unchanged: UX makeover step 2 (CTRL page with
+fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips), section 33.**
 **Branch fw-ui3 (2026-10-19): fw 0.2.55 provisional, protocol 1.16 unchanged: UX makeover step 3 (Settings fold-out
 trimmed, full Settings screen, confirmation dialog), section 31.**
 **Current state (coordinator merge, 2026-10-19 13:50): latest build fw 0.2.52, protocol 1.16** = main with fw-ui1 (UX makeover
@@ -49,7 +51,10 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
                            (host_tests/test_cal_wizard.c; section 27)
   cal_wiz_ui.c             the wizard's full-screen view, touch loop and the zero / gain measurements (section 27)
   phos_map.c/.h            phosphor hit-count map: rasteriser, decay, render, palettes. Pure C, host-buildable (section 24)
-  phosphor.c/.h            phosphor view (main menu row 7, strip, hooks in scope_display_trace_data; section 24)
+  phosphor.c/.h            phosphor view (the Display fold-out's switch since 0.2.53; hooks in scope_display_trace_data;
+                           section 24, 33)
+  ui_ctrl.c/.h             CTRL page geometry, fold-outs, value names, warning line, spectrum cards. Pure C (test_ui; 33)
+  ctrl_page.c/.h           the CTRL page and its fold-outs: drawing and the modal touch loops (section 33)
   pc_mmu.c/.h              flat page table (builder + walk host-buildable), MMU enable; pc_mmu_off in start.s (section 26)
   host_tests/              test_protocol.c, test_rx_ring.c, test_session.c (+ mock_hal.c FPGA/transport model), vector_check.c,
                            check_vectors.py, gen_vectors.py, bench_link.py (pyserial, bench only)
@@ -250,6 +255,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.46 | 1b6359f | cdba5b51 | digital phosphor view (main menu row 7; Persistence / Palette / Clear strip; XY), GET_STATUS byte 43 = 4 (protocol 1.13, row 52), settings word 210 (fw-phosphor, section 24) | built, host-tested (test_phosphor 95 checks); bench steps in section 24 |
 | 0.2.48 | b1922c3 | 2f768fd9 | MMU + D-cache on (flat map, DDR / SRAM write-back, framebuffer write-through, restart record and peripherals strongly ordered), clean + off at _reset and ENTER_FEL, GET_LINK_STATS 58-59 fault status / address (fw-mmu, section 26) | built, host-tested (test_mmu); A/B image `make gcc10-nommu` 0.2.48-nommu sha256 45e03f7f; bench sequence in section 26 |
 | 0.2.49 | c477faa | 90f460d6 | USB suspend watch in the 1 ms tick (pc_usbw.c): inferred resume (SOFs, EP0 setup, EP2 OUT while suspended) acts, soft reconnect (SoftConn off 1 s) after a retry storm or 15 min suspended, GET_LINK_STATS 60-61, event type 20, SUSPEND before RESUME in the ISR (protocol 1.14, row 53; fw-usb2, section 27) | built, host-tested (test_usbw 90 checks); A/B `make gcc10-nommu` sha256 f5f377ea; bench plan in section 27 |
+| 0.2.53 | 5255516 | 7729e4fe | UX makeover step 2 (fw-ui2, section 33; provisional number): CTRL page in both modes (Display fold-out with icons and the Phosphor switch with Persistence / Palette / Clear / wfm/s, Trace style or Analyse with Scale and Ref level, Grid switch, compact V+ / CH / V- steppers, 50 % TRIG in Scope), ACQ menu acquisition only, phosphor and spectrum strips and spectrum header gone (spectrum cards Peak / Level / RBW / Time), empty cursor and measures slots in Spectrum, warning line in every scope variant, top bar chips one construction, settings word 211 | built, host-tested (test_ui 6672 checks); bench walk-through in section 33 |
 | 0.2.55 | e01f775 | 6f100098 | UX makeover step 3 (fw-ui3, section 31; provisional number): fold-out Screen / Grid brightness, File message timeout, Time and date, Baseline calibration (interim), Other settings; full Settings screen (`ui_settings.c` / `ui_settings_ui.c`) with At power-on 0 / 4 / 5 written on Back, Restore default settings behind a confirmation (boot byte kept, CDC kept); Other settings menu, USB-Serial and Dev mode rows removed; delete confirmation as the dialog pattern | built, host-tested (test_ui 1,431,758 checks); bench walk-through in section 31 |
 | 0.2.54 | f9fcac6 | a4f0c832 | touch fix batch 1 (fw-touch1, section 32; provisional number): left pointers are drag handles (`touch_pick.c`, 44 px boxes, nearest / on-top pick), pick at touch-down, nearest enabled zero line, no trigger-point move in a channel drag, channel + trigger level share one clamped delta, EXT no longer follows CH2, traceposition 6..396 in the new auto setup and at load |
 | 0.2.51 | 8f5bf16 | 38580def | UX makeover step 1 (fw-ui1, section 29): main menu Scope / Spectrum analyser / Saved pictures / Saved waveforms / Settings / Diagnostics / USB drive with one 59 px hit area per row, Spectrum in roll mode switches Roll off; USB drive screen text + Exit; no top-bar version; Display row Normal / Phosphor / X-Y in the acquisition menu (X-Y out of System settings); strips without Scope / Auto, AUTO SET = spectrum Auto; phosphor warnings top-middle; cards with chip, scope-maker names, 4 significant digits, defaults Freq / Vpp / Vavg | built, host-tested (test_ui 1513 checks); bench walk-through in section 29 |
@@ -1704,3 +1710,100 @@ display, both channels on, CH1 trigger, Move fast (not slow) unless noted.
 Bug indicators: a pointer drag moving a different pointer than the one under the finger; the trigger level moving
 with EXT; a tap on a pointer changing time/div or V/div; a channel stuck after AUTO SET with Invert; the level jumping
 at the first drag step.
+
+## 33. fw-ui2: UX makeover step 2 (fw 0.2.53 provisional, protocol 1.16 unchanged)
+
+Branch from main 9cc599c (fw 0.2.51), merged with main d31ee84 (0.2.52 readers, 0.2.54 touch) in 2ebef4d and with main
+33cd1b5 (0.2.55 settings, fw-ui3) in 5255516. Plan:
+`docs/plans/ux-makeover.md` section 7 step 2; rules `docs/ui-guidelines.md`; user-facing description README section 5
+"Screens: CTRL page, fold-outs, chips, warnings, spectrum cards". Commits, one topic each: 93f1b68 (`ui_ctrl.c/.h`, the
+card formatters in `ui_fmt.c`, test_ui), aaa0613 (top bar chips), a41ca39 (CTRL page, fold-outs, strips and header out,
+warnings, ACQ menu, settings word 211), e1900ff (0.2.53, CHANGELOG, README), 2ebef4d (merge), f372581 (AUTO SET label
+only on page one), cf2cbf6 (handoff), 5255516 (merge of main with fw-ui3's 0.2.55), then this note. Bench image from
+5255516 (step 2 on top of 0.2.55): `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 543,744 B, sha256
+7729e4fe970f3fb634f5d600191c3cc873587edb9fd6ffb604b21f4e64cc69c8, ELF
+a79ad696068a3d3d5641d78710b86b5556ec0d83661f07a1dfc2ed36ce08324d (nommu bin 16bb691e..., ELF d73204cc...). The
+pre-merge image from f372581 was a182ba84 (536,576 B). **Nothing benched.** Host
+tests green (test_ui 6672 checks on the branch, 1,436,917 with fw-ui3's settings tests after the merge). GCC 10
+warnings 36, GCC 13 / PC_DEBUG 31, upstream only; the
+new files are clean with -Wall -Wextra. No protocol change: GET_STATUS byte 43 keeps its meaning (4 = phosphor drawn,
+now also in X-Y). Settings words: 210 bit 3 (the Phosphor switch), 211 (0xC700: bit 0 Grid, bits 1-2 the spectrum's
+Display variant); 212..223 stay free.
+
+Points for a successor:
+- **Files**: `ui_ctrl.c/.h` (pure: page-two items and hit areas `ui_ctrl_item_at`, page-one slots `ui_p1_shown`,
+  fold-out layout and hits `ui_fold_*`, the value-name tables, `ui_display_value`, `ui_scope_warning`, the spectrum
+  card set `ui_spec_cards`); `ctrl_page.c/.h` (target: drawing, the modal fold-out loop `cp_fold_run`, the steppers,
+  Grid, 50 % TRIG). menu.c `scope_setup_right_control_menu` calls `ctrl_page_draw` for page two outside the viewer;
+  statemachine.c `handle_right_volts_div_menu_touch` hands page two to `ctrl_page_touch`; the viewer's page two and the
+  DC shift states 2-4 still run 1.00o5's code below it (old V+ / V- at `voltdivypos`, Show grid, Next page / END cal.).
+- **Fold-outs** are modal loops like the top bar dropdowns: the trace area x 500..727 is saved in `displaybuffer2`
+  and put back on close, then the whole page is redrawn (a value can show on two buttons: Reset sets the Display
+  variant). Choice rows close, value rows step and stay, Ref level is the one two-way row (left half down), a tap
+  outside closes and is consumed. The wfm/s line in the Phosphor row is a snapshot taken when the panel is drawn.
+- **Phosphor switch** (phosphor.c `phos.wanted`, `phosphor_switch` / `phosphor_set_switch`): the picture is drawn while
+  the switch is on, the scope view shows and `phosphor_available()`; `phosphor_service` turns it off in roll mode and
+  the viewers and back on after. The spectrum keeps it off without touching the switch (`pc_glue_main_menu_mode`
+  passes `phosphor_switch()` to `ui_mm_choose`). `pc_phos_wanted`, `pc_display_variant`, the 0.2.51 Display row
+  (`pc_glue_acq_display_*`, `ACQ_MENU_BODY_H`, `ACQ_DISPLAY_*`), the strip (`phosphor_strip`, `phosphor_touch`,
+  `PC_PHOSPHOR_STRIP`) and `phos.over` are gone; `phosphor_param_text/step`, `phosphor_wfm_text` feed the fold-out.
+- **Warnings**: `PC_SCOPE_PASS()` at the start of `scope_display_trace_data` latches the ADoverload flags (the channel
+  blocks clear them), `PC_SCOPE_WARNING()` before the copy to the screen draws `ui_scope_warning` at (366 centre, y 69)
+  in font_2 orange, not in the viewer; the untriggered flag is `pc_scope_untrig` from `pc_glue_ui_capture_addr`. The
+  spectrum keeps `spec_draw_warnings`.
+- **Spectrum**: the strip (`F_*`, `spec_draw_strip`, `spec_field_value`) and the header (`spec_draw_header`,
+  `spec_text_at`, `spec_glyph_marker`) are gone; `spec_draw_cards` draws `ui_spec_cards` with `scope_draw_card` (the
+  scope cards' helper, factored out of `scope_display_channel_measurements`) at y 446; touches below y 436 do nothing.
+  `spectrum_param_text/step` (`SPEC_P_*`, a step ends a running Auto) and `spectrum_view/set_view` feed the fold-outs.
+  The grid dots follow `gridenable`, the level labels stay. `spec_autoset_button` draws only on page one.
+- **Grid** is `scopesettings.gridenable` in every mode now (1.00o5 used it only in the viewer): `scope_draw_grid` always
+  draws the record-position slider and the lines only when it is on; both callers in scope_functions.c call it
+  unconditionally. Restored from word 211 by `pc_ui_fix_settings`; 1.00o5's load still sets 1 first.
+- **Right bar follows the mode**: `pc_right_bar_follow` in `pc_glue_ui_service` redraws the bar when the spectrum view
+  starts or ends (main menu, roll mode, viewer, Auto), in `maindisplaybuffer`.
+- **Deviations from the brief / mockups, on purpose**: Scale and Ref level are below a separator in the Analyse
+  fold-out (the plan's owner text and the SpectrumCtrlAnalysis board; there is no free slot for an Axis button, and the
+  spectrum's 50 % slot stays empty). Grid shows a slide switch, not "on" (guidelines: a toggle never reads on / off).
+  MEASURES is an empty slot in Spectrum (the spectrum's own list is Measurements v2; the cards are a fixed set). The
+  Display button values are abbreviations that fit 47 px ("Phos", "XY Ph", "Spec", "Wfall"; test_ui checks the widths).
+- **Lost or open until later steps**: the spectrum's MEASURES list and THD card (Measurements v2); one-tap phosphor
+  Clear (now CTRL, Display, Clear, accepted by the owner); a live wfm/s while working (it shows only in the fold-out;
+  a card is the review's suggestion A8); the viewer's and DC shift pages keep 1.00o5's look; the Settings fold-out and
+  screen are step 3 (fw-ui3, 0.2.55, merged here); fold-outs pause the trace and the PC (E_BUSY after 250 ms)
+  like every dropdown.
+
+**Bench walk-through (owner, coordinator on COM10)**
+1. FEL-load the image, `#VER` fw=0.2.53 proto=1.16. Top bar: CH1, CH2, ACQ and the trigger chip each a grey box with
+   the coloured block on the left, no dark notch at the join; touch each chip: white box, menu opens as before.
+2. CTRL: page two reads Display (Normal), Trace style (Linear), Grid (switch, green), the CH1 stepper (grey V+, yellow
+   CH1, grey V-), the CH2 stepper (cyan), 50 % TRIG. Tap V+ / V- near their outer edges and near the middle of the
+   CH1 / CH2 block: the upper half of the block is V+, the lower V-; the top bar chip's V/div follows. CH2 off: its
+   centre is grey and the stepper does nothing. 50 % TRIG sets the level as before.
+3. Grid: the grid lines go, the record-position slider under the plot stays; power-cycle: Grid stays off.
+4. Display: a panel left of the bar with Normal (green), X-Y, a line, the Phosphor switch row. X-Y: closes, the
+   Lissajous shows. Display again, Phosphor on: Persistence, Palette, Clear appear, the second line of the Phosphor
+   row reads "NN wfm/s" after reopening. Close by tapping the plot: the plot under the panel is back, the button reads
+   "XY Ph", the X-Y figure is graded (phosphor in X-Y is back). Normal: "Phos", the graded traces; Clear empties the
+   picture and closes. Persistence / Palette step in place.
+5. Roll mode on (ACQ menu): Display shows the Phosphor row grey with "Not in roll mode"; Roll off: the picture comes
+   back by itself.
+6. Trace style: Linear / Dots / Peak / Pro, the chosen one green; a choice closes and applies. The ACQ menu has no
+   Trace column and no Display row (386 px high).
+7. Warnings in Normal: unplug the probe with a small V/div or overdrive CH1: "CH1 overrange: increase V/div" orange at
+   the top middle; Auto trigger with no edge: "No trigger: check the trigger level"; X-Y with CH2 off: "X-Y needs both
+   channels: switch on CH1 and CH2"; both off: "No channel enabled...".
+8. Menu > Spectrum analyser: page one shows CTRL, RUN/STOP, AUTO SET, three empty slots, SAVE PIC, SAVE WAVE; no strip,
+   no header line; cards at the bottom: [Peak] and [Level] per shown channel in its colour, [RBW] with a light grey
+   chip. Page two: Display (Spec), Analyse (2048 pt), Grid, the steppers, an empty bottom slot.
+9. Analyse: Analyse CH1 / CH2 / CH1 + CH2, FFT length, Window, Average, a line, Scale, Ref level with - and + (left
+   half down, right half up), Reset; values change in place, the plot follows after closing; the Analyse button shows
+   the new FFT length. Display: Waterfall: a fourth card [Time] counting up; Density: the legend top right.
+10. AUTO SET in the spectrum, then CTRL during "Auto...": the Analyse button is not overwritten; back to page one: AUTO
+   SET reads correctly. Menu > Scope: page one shows the cursor / measures buttons again, page two the Scope items.
+11. Power-cycle with Phosphor on and the spectrum in Waterfall: the scope boots graded, Spectrum analyser opens in
+   Waterfall. Settings > Restore default settings (0.2.55): Normal, Phosphor off, Grid on, Spectrum.
+12. Waveform viewer: page two is 1.00o5's (V+ / V-, Show grid).
+Bug indicators: a stepper half acting on the other channel or the wrong direction; a fold-out leaving a stripe of
+the panel on the plot (stopped scope); AUTO SET painted over Analyse; the right bar showing Scope items in the spectrum
+or empty slots in the scope after a mode change; the warning line in the waveform viewer; cards overlapping the
+frequency labels; Phosphor switch on but no graded picture in the scope view outside roll mode.

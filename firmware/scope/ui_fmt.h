@@ -22,6 +22,12 @@ char *ui_fmt_sig4(char *p, int32 value, uint32 scale, const char *unit);
 //The same without a prefix (scale 4 kept), for percentages: 5000 with "%" -> "50.00%"
 char *ui_fmt_sig4_fixed(char *p, int32 value, const char *unit);
 
+//A frequency in mHz (the spectrum's unit) with four significant digits: 146484 -> "146.5Hz", 1000000 -> "1.000Hz"
+char *ui_fmt_mhz(char *p, uint64 mhz);
+
+//A level in centi-dB with one decimal and a sign, then the unit: 270 -> "+2.7dBV", -10000 -> "-100.0dBV", 4 -> "0.0dBV"
+char *ui_fmt_cdb(char *p, int32 cdb, const char *unit);
+
 //Measurement card: UI_CARD_W x UI_CARD_H, the name in a chip of the source's colour (name + UI_CARD_PAD each side, full
 //card height), the value UI_CARD_GAP after the chip; a card fits when the value ends UI_CARD_PAD before the right edge
 #define UI_CARD_W          118

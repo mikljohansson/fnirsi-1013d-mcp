@@ -3,10 +3,11 @@
 //   fw 0.2.27: FFT_BENCH (C2). fw 0.2.28: the spectrum display mode (S1).
 //
 // Layout of the trace area while the mode is on (x 2..729, y 48..479):
-//   y  50, 64   info lines: sample rate, N, window, RBW; peak readouts in the channel colours
-//   y  80..416  plot, 10 x 8 divisions of 72 x 42 px (x 6..726)
-//   y 419       frequency labels: start, centre, stop
-//   y 436..479  parameter strip: one tap field per setting
+//   y  50       the waterfall's and density's colour legend at the right
+//   y  66..410  plot, 10 x 8 divisions of 72 x 43 px (x 6..726); warnings at its top middle
+//   y 413       frequency labels: start, centre, stop
+//   y 446..467  the cards (fw 0.2.53): peak and level per channel, RBW, the waterfall's time span
+// The parameters are on the CTRL page (ctrl_page.c: Display, Analyse); the strip and the header line went in fw 0.2.53.
 // Integer only (no FPU): levels in centi-dB, frequencies in mHz (uint64).
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -23,6 +24,8 @@
 #include "scope_functions.h"
 #include "menu.h"
 #include "pc_hooks.h"
+#include "ui_ctrl.h"
+#include "ui_fmt.h"
 
 #include <string.h>
 
@@ -154,8 +157,7 @@ uint32 spectrum_bench(uint8 *out, uint32 reps)
 #define PLOT_YDIV             8
 #define INFO_Y1               50
 #define FLABEL_Y              413
-#define STRIP_Y               436
-#define STRIP_H               44
+#define CARDS_Y               436         //below: the cards; touches there do nothing
 
 #define ZOOM_MAX              6           //span down to 1/64 of the Nyquist range
 #define START_STEPS           65536u      //start position in 1/65536 of the Nyquist range (fine enough to drag)
@@ -554,11 +556,15 @@ static void spec_draw_grid(const SPECVIEW *v)
 
   display_set_fg_color(spec_grid_color());
 
-  for(i = 0; i <= PLOT_YDIV; i++)
-    display_draw_horz_dots(PLOT_Y + i * (PLOT_H / PLOT_YDIV), PLOT_X, PLOT_X + PLOT_W, 4);
+  //fw 0.2.53: the dots follow the CTRL page's Grid; the level labels stay (the axis)
+  if(scopesettings.gridenable)
+  {
+    for(i = 0; i <= PLOT_YDIV; i++)
+      display_draw_horz_dots(PLOT_Y + i * (PLOT_H / PLOT_YDIV), PLOT_X, PLOT_X + PLOT_W, 4);
 
-  for(i = 0; i <= PLOT_XDIV; i++)
-    display_draw_vert_dots(PLOT_X + i * (PLOT_W / PLOT_XDIV), PLOT_Y, PLOT_Y + PLOT_H, 4);
+    for(i = 0; i <= PLOT_XDIV; i++)
+      display_draw_vert_dots(PLOT_X + i * (PLOT_W / PLOT_XDIV), PLOT_Y, PLOT_Y + PLOT_H, 4);
+  }
 
   //Level labels under each line
   display_set_font(&font_2);
@@ -661,73 +667,54 @@ static uint32 spec_draw_trace(const SPECVIEW *v, const int16 *db, uint32 color)
   return peak;
 }
 
-//Text at x, returns the x after it
-static uint32 spec_text_at(uint32 x, uint32 y, const char *t)
+//The cards in the bottom row (fw 0.2.53, owner; the one-line header before): per shown channel its peak frequency and
+//level in the channel colour, then the resolution bandwidth and, in the waterfall, the time its rows span, with a
+//neutral chip (ui_spec_cards). The decimation filter tag is not shown: the filter lives in the acquisition menu.
+static void spec_draw_cards(const uint32 *peak, int hch, uint64 bin_mhz)
 {
-  display_text(x, y, (int8 *)t);
-  return x + text_width(t);
-}
-
-//The peak marker glyph (font_2 has no triangle): 7 px wide, in the current colour; returns its advance
-static uint32 spec_glyph_marker(uint32 x, uint32 y)
-{
-  uint32 r;
-
-  for(r = 0; r < 4; r++)
-    display_draw_horz_line(y + 5 + r, x + 3 - r, x + 3 + r);
-
-  return 10;
-}
-
-static const char *spec_avg_names[] = { "", "Avg 4", "Avg 16", "Avg 64", "Max" };
-
-//The one header line (owner, fw 0.2.40-0.2.42), left to right: per shown channel its peak "CH1 ^ 977 Hz  +2.7 dBV" in
-//the channel colour, then "RBW 732 Hz", the decimation filter tag ("CIC3", "CIC3+FIR" while the FIR is active, no N;
-//k bits 1:0 the order, bit 2 the FIR; the filter lives in the acquisition
-//menu) and, in the waterfall, the time its rows span. Nothing that repeats a strip field (no fs, N or averaging).
-static void spec_draw_header(const uint32 *peak, int hch, int k, uint64 bin_mhz)
-{
-  char   t[48], *p;
-  uint32 x = PLOT_X;
-  int    ch;
-
-  display_set_font(&font_2);
+  ui_spec_card c[UI_SC_MAX];
+  uint8        shown[2];
+  char         t[24];
+  int          n, i, ch;
 
   for(ch = 0; ch < 2; ch++)
+    shown[ch] = spec.have[ch] && peak[ch] && ((spec.view == VIEW_SPECTRUM) || (ch == hch));
+
+  n = ui_spec_cards(shown, (spec.view == VIEW_WATERFALL) && (wf_count > 1), c);
+
+  for(i = 0; i < n; i++)
   {
-    if(!spec.have[ch] || !peak[ch] || ((spec.view != VIEW_SPECTRUM) && (ch != hch)))
-      continue;
+    uint32 color = LIGHTGREY2_COLOR;
 
-    display_set_fg_color(ch ? CHANNEL2_COLOR : CHANNEL1_COLOR);
-    x = spec_text_at(x, INFO_Y1, ch ? "CH2 " : "CH1 ");
-    x += spec_glyph_marker(x, INFO_Y1);
-    p = fmt_freq(t, bin_mhz * peak[ch]);
-    p = fmt_str(p, "  ");
-    p = fmt_c1(p, spec_db[ch][peak[ch]]);
-    fmt_str(p, spec_frame[ch].unit_amps ? " dBA" : " dBV");
-    x = spec_text_at(x, INFO_Y1, t) + 18;
-  }
+    ch = c[i].ch;
 
-  display_set_fg_color(0x00C0C0C0);
-  p = fmt_str(t, "RBW ");
-  fmt_freq(p, (bin_mhz * fx_enbw_milli(spec.window) + 500) / 1000);
-  x = spec_text_at(x, INFO_Y1, t) + 18;
+    switch(c[i].kind)
+    {
+      case UI_SC_PEAK:
+        ui_fmt_mhz(t, bin_mhz * peak[ch]);
+        color = ch ? CHANNEL2_COLOR : CHANNEL1_COLOR;
+        break;
 
-  if(k & 3)
-  {
-    static const char *names[] = { "", "boxcar", "CIC2", "CIC3", "", "boxcar+FIR", "CIC2+FIR", "CIC3+FIR" };
+      case UI_SC_LEVEL:
+        ui_fmt_cdb(t, spec_db[ch][peak[ch]], spec_frame[ch].unit_amps ? "dBA" : "dBV");
+        color = ch ? CHANNEL2_COLOR : CHANNEL1_COLOR;
+        break;
 
-    x = spec_text_at(x, INFO_Y1, names[k & 7]) + 12;
-  }
+      case UI_SC_RBW:
+        ui_fmt_mhz(t, (bin_mhz * fx_enbw_milli(spec.window) + 500) / 1000);
+        break;
 
-  //Waterfall: the time the visible rows span, oldest at the bottom
-  if((spec.view == VIEW_WATERFALL) && (wf_count > 1))
-  {
-    uint32 oldest = (wf_head + HIST_H - wf_count) % HIST_H;
+      default:
+      {
+        uint32 oldest = (wf_head + HIST_H - wf_count) % HIST_H;
 
-    p = fmt_c1(t, (int32)((timer0ticks - wf_ms[oldest]) / 10));
-    fmt_str(p, " s of rows");
-    spec_text_at(x + 6, INFO_Y1, t);
+        //Hundredths of a second: four significant digits ("12.30s")
+        ui_fmt_sig4(t, (int32)((timer0ticks - wf_ms[oldest]) / 10), 4, "s");
+        break;
+      }
+    }
+
+    scope_draw_card(ui_spec_card_x(i), UI_SC_Y, color, ui_sc_names[c[i].kind], t);
   }
 }
 
@@ -1015,7 +1002,7 @@ static void spec_draw_density(void)
   }
 }
 
-//Colour legend in the second info line, right side: bottom level, the palette, top level
+//Colour legend above the plot's top right (a readout): bottom level, the palette, top level
 static void spec_draw_legend(const SPECVIEW *v, int ch)
 {
   char   t[24], *p;
@@ -1048,99 +1035,55 @@ static void spec_draw_legend(const SPECVIEW *v, int ch)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Parameter strip: one tap field per setting. "<" / ">" fields step down on the left half and up on the right half.
+// Parameters as the CTRL page's Analyse fold-out shows them (fw 0.2.53; the strip before): value names from ui_ctrl.h
 
-#define F_CHANNEL   0
-#define F_FFT       1
-#define F_WINDOW    2
-#define F_SCALE     3
-#define F_REF       4
-#define F_AVG       5
-#define F_RESET     6
-#define F_VIEW      7
-#define F_COUNT     8               //fw 0.2.51: Auto is AUTO SET on the right bar, Scope the main menu's row
-
-static const char *spec_field_label[F_COUNT] = { "Channel", "FFT length", "Window", "Scale", "Ref level", "Average", "", "View" };
-static const uint8 spec_field_twoway[F_COUNT] = { 0, 0, 0, 0, 1, 0, 0, 0 };
-
-#define FIELD_W     (PLOT_W / F_COUNT)
-
-static void spec_field_value(int f, char *t, int log2n, uint64 bin_mhz)
+void spectrum_param_text(int p, char *t)
 {
-  static const char *wins[] = { "Rect", "Hann", "Flat top" };
-  char    *p;
+  char *q;
 
-  (void)bin_mhz;
-
-  switch(f)
+  switch(p)
   {
-    case F_CHANNEL:
-      fmt_str(t, (spec.channel == SPEC_CH_BOTH) ? "CH1 + CH2" : spec.channel ? "CH2" : "CH1");
+    case SPEC_P_CHANNEL:
+      fmt_str(t, ui_spec_chan_names[spec.channel % 3]);
       break;
 
-    case F_FFT:
-      fmt_uint(t, 1u << log2n);
+    case SPEC_P_FFT:
+      fmt_uint(t, 1u << spec_log2n());
       break;
 
-    case F_WINDOW:
-      fmt_str(t, wins[spec.window]);
+    case SPEC_P_WINDOW:
+      fmt_str(t, ui_spec_window_names[spec.window % 3]);
       break;
 
-    case F_SCALE:
-      p = fmt_uint(t, spec_scales[spec.scale]);
-      fmt_str(p, " dB/div");
+    case SPEC_P_AVG:
+      fmt_str(t, ui_spec_avg_names[spec.avg % 5]);
       break;
 
-    case F_REF:
-      p = fmt_int(t, spec.ref);
-      fmt_str(p, spec_frame[spec.channel == 1].unit_amps ? " dBA" : " dBV");
+    case SPEC_P_SCALE:
+      q = fmt_uint(t, spec_scales[spec.scale]);
+      fmt_str(q, " dB/div");
       break;
 
-    case F_AVG:
-      fmt_str(t, spec.avg ? ((spec.avg == 4) ? "Max hold" : spec_avg_names[spec.avg] + 4) : "Off");
-      break;
-
-    case F_RESET:
-      fmt_str(t, "Reset");
+    case SPEC_P_REF:
+      q = fmt_int(t, spec.ref);
+      fmt_str(q, spec_frame[spec.channel == 1].unit_amps ? " dBA" : " dBV");
       break;
 
     default:
-      fmt_str(t, (spec.view == VIEW_WATERFALL) ? "Waterfall" : (spec.view == VIEW_DENSITY) ? "Density" : "Spectrum");
+      t[0] = 0;
       break;
   }
 }
 
-static void spec_draw_strip(int log2n, uint64 bin_mhz)
+int spectrum_view(void)
 {
-  char t[24];
-  int  f;
+  return spec.view;
+}
 
-  display_set_fg_color(DARKGREY_COLOR);
-  display_fill_rect(2, STRIP_Y, 728, STRIP_H);
-
-  for(f = 0; f < F_COUNT; f++)
-  {
-    uint32 x = PLOT_X + f * FIELD_W;
-
-    display_set_fg_color(GREY_COLOR);
-    display_draw_rounded_rect(x + 1, STRIP_Y + 3, FIELD_W - 3, STRIP_H - 6, 3);
-
-    display_set_font(&font_2);
-    display_set_fg_color(0x00A0A0A0);
-    text_center(x + FIELD_W / 2, STRIP_Y + 6, (char *)spec_field_label[f]);
-
-    //Two-way fields: the left half steps down, the right half up; the hints sit on the label line
-    if(spec_field_twoway[f])
-    {
-      display_text(x + 6, STRIP_Y + 6, (int8 *)"<");
-      text_right(x + FIELD_W - 6, STRIP_Y + 6, ">");
-    }
-
-    spec_field_value(f, t, log2n, bin_mhz);
-    display_set_font(&font_3);
-    display_set_fg_color(WHITE_COLOR);
-    text_center(x + FIELD_W / 2, STRIP_Y + (spec_field_label[f][0] ? 20 : 14), t);
-  }
+void spectrum_set_view(int v)
+{
+  if((v >= VIEW_SPECTRUM) && (v <= VIEW_DENSITY))
+    spec.view = (uint8)v;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -1163,8 +1106,15 @@ static void spec_autoset_button(void)
   DISPLAYDATA save = displaydata;
 
   auto_shown = spec.active && spec.autostage;
-  display_set_screen_buffer((uint16 *)maindisplaybuffer);
-  scope_auto_set_button(0);
+
+  //Only on page one: on the CTRL page the slot holds Analyse (fw 0.2.53), in the waveform viewer Next wave; page one
+  //redraws the label when it returns
+  if((scopesettings.rightmenustate == 0) && !scopesettings.waveviewmode)
+  {
+    display_set_screen_buffer((uint16 *)maindisplaybuffer);
+    scope_auto_set_button(0);
+  }
+
   displaydata = save;
 }
 
@@ -1358,9 +1308,7 @@ static int spectrum_display_body(void)
     spec_draw_legend(&v, hch);
   }
 
-  spec_draw_header(peak, hch, dc.k | (dc.fir ? 4 : 0), bin_mhz);
-
-  spec_draw_strip(log2n, bin_mhz);
+  spec_draw_cards(peak, hch, bin_mhz);
 
   display_set_source_buffer(displaybuffertmp);
   display_set_screen_buffer((uint16 *)maindisplaybuffer);
@@ -1627,7 +1575,7 @@ static int spec_analyse(const SPECVIEW *v, int32 *P, int32 *F, uint32 *lo, uint3
 #define AUTO_TIMEOUT_MS       4000
 
 static uint32 auto_t0, auto_count;
-static uint8  auto_refused;               //1: stopped, 2: single mode (warning while the strip shows it)
+static uint8  auto_refused;               //1: stopped, 2: single mode (warning until the next touch or Auto)
 
 //Fundamental of the analysed channel's record in mHz (0 = no periodicity seen)
 static uint64 spec_f0_mhz(int ch, uint64 fs_mhz)
@@ -1919,8 +1867,8 @@ static void spec_auto_step(void)
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 // Settings that survive a power cycle (fw 0.2.39): FFT length, window, scale and ref level in two spare words of the
-// settings sector (709), saved where 1.00o5 saves everything (power-off interrupt). Not restored: the display mode
-// (boot into the scope view), channel, span, start, view.
+// settings sector (709), saved where 1.00o5 saves everything (power-off interrupt). Since fw 0.2.53 the variant (view)
+// too, in word 211 (pc_hal_scope.c). Not restored: the display mode (boot into the scope view), channel, span, start.
 
 uint16 spectrum_settings_word(int i)
 {
@@ -1951,14 +1899,20 @@ void spectrum_settings_restore(uint16 w0, uint16 w1)
     spec.avg = (uint8)avg;
 }
 
-static void spec_step_field(int f, int up)
+//A tap on a row of the Analyse fold-out (fw 0.2.53; a strip field before): the one-way rows step to the next value, Ref
+//level steps by a division down (dir < 0) or up. Like any touch on the view it ends a running Auto.
+void spectrum_param_step(int p, int dir)
 {
   int log2n = spec_log2n();
   int lmax = (spec_log2n_max() < LOG2N_VIEW_MAX) ? spec_log2n_max() : LOG2N_VIEW_MAX;
+  int up = dir > 0;
 
-  switch(f)
+  spec.autostage = 0;
+  auto_refused = 0;
+
+  switch(p)
   {
-    case F_CHANNEL:
+    case SPEC_P_CHANNEL:
       //Cycle through what is enabled: CH1, CH2, both
       do { spec.channel = (spec.channel + 1) % 3; }
       while(((spec.channel == SPEC_CH_BOTH) && !(spec_ch_on(0) && spec_ch_on(1))) ||
@@ -1966,38 +1920,34 @@ static void spec_step_field(int f, int up)
       spec.recompute = 1;
       break;
 
-    case F_FFT:
+    case SPEC_P_FFT:
       //1024 .. the longest the record holds (at most 4096), then back to 1024
       spec.log2n = (log2n >= lmax) ? ((lmax > 10) ? 10 : lmax) : log2n + 1;
       spec.recompute = 1;
       break;
 
-    case F_WINDOW:
+    case SPEC_P_WINDOW:
       spec.window = (spec.window == FX_WIN_HANN) ? FX_WIN_FLATTOP : (spec.window == FX_WIN_FLATTOP) ? FX_WIN_RECT : FX_WIN_HANN;
       spec.recompute = 1;
       break;
 
-    case F_SCALE:
+    case SPEC_P_SCALE:
       spec.scale = (spec.scale + 1) % sizeof(spec_scales);
       break;
 
-    case F_REF:
+    case SPEC_P_REF:
       spec.ref += up ? spec_scales[spec.scale] : -spec_scales[spec.scale];
       if(spec.ref < REF_MIN) spec.ref = REF_MIN;
       if(spec.ref > REF_MAX) spec.ref = REF_MAX;
       break;
 
-    case F_AVG:
+    case SPEC_P_AVG:
       spec.avg = (spec.avg + 1) % 5;
       spec.recompute = 1;                    //restart the average now, also when stopped
       break;
 
-    case F_RESET:
+    case SPEC_P_RESET:
       spec_defaults();
-      break;
-
-    case F_VIEW:
-      spec.view = (spec.view + 1) % 3;
       break;
   }
 }
@@ -2026,7 +1976,7 @@ int spectrum_auto_running(void)
   return spec.active && spec.autostage;
 }
 
-//Touches in the trace area. Strip: one tap per field. Plot: the scope view's gestures (scan_for_touch in
+//Touches in the trace area (fw 0.2.53: the cards row below the plot does nothing). Plot: the scope view's gestures (scan_for_touch in
 //statemachine.c): a touch that stays within 2 px and ends within 200 ms is a tap, left of the centre = zoom the span
 //out, right of it = zoom in; a touch that moves more than 2 px is a drag, and a horizontal drag pans the start
 //frequency (the spectrum follows the finger), redrawn while dragging.
@@ -2039,17 +1989,8 @@ int spectrum_touch(void)
   spec.autostage = 0;
   auto_refused = 0;
 
-  if(ytouch >= STRIP_Y)
+  if(ytouch >= CARDS_Y)
   {
-    if((xtouch >= PLOT_X) && (xtouch < PLOT_X + PLOT_W))
-    {
-      int    f = (xtouch - PLOT_X) / FIELD_W;
-      uint32 x = (xtouch - PLOT_X) % FIELD_W;
-
-      if(f < F_COUNT)
-        spec_step_field(f, x >= FIELD_W / 2);
-    }
-
     tp_i2c_wait_for_touch_release();
     return 1;
   }

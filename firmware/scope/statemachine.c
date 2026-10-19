@@ -22,6 +22,8 @@
 #include "menu.h"
 #include "ui_menu.h"
 #include "ui_settings.h"
+#include "ui_ctrl.h"
+#include "ctrl_page.h"
 #include "touch_pick.h"
 #include "test.h"
 
@@ -2878,43 +2880,14 @@ void handle_acquisition_menu_touch(void)
               //scope_acqusition_settings(0);
               
               scope_acquisition_memory_deep_select();
-              //scope_acquisition_trace_select();
               break;
             }
           }
         }
         
         //======================================================================
-        //fw 0.2.51: Display row (Normal / Phosphor / X-Y) under 1.00o5's menu
-        else if((ytouch >= ACQ_MENU_YPOS + ACQ_DISPLAY_Y) && (ytouch < ACQ_MENU_YPOS + ACQ_DISPLAY_Y + ACQ_DISPLAY_H))
-        {
-          PC_ACQ_DISPLAY_TAP();
-        }
-        //Check on trace being set
-        else if((ytouch >= ACQ_MENU_YPOS + 241) && (ytouch <= ACQ_MENU_YPOS + ACQ_MENU_BODY_H) && (xtouch >= ACQ_MENU_XPOS + 304) && (xtouch <= ACQ_MENU_XPOS + ACQ_MENU_WIDTH))
-        {
-          //Check on the different bounding boxes for the separate settings
-          for(i=0;i<(sizeof(trace_texts) / sizeof(int8 *));i++)  
-          {
-            //Calculate the coordinates for this setting        
-            x = 315 + ACQ_MENU_XPOS;
-            y = (i * 36) +  241 + ACQ_MENU_YPOS;//228
-
-            //Check if touch within this bounding box
-            if((xtouch >= x) && (xtouch <= x + 54) && (ytouch >= y) && (ytouch <= y + 25))
-            {
-              //Set the new trace
-              scopesettings.ACQ_trace= i;
-
-              //Display the new setting
-              scope_acquisition_trace_select();
-              
-              break;
-            }
-          }
-        }
-        
-        
+        //fw 0.2.53: the acquisition menu holds acquisition only; Trace style and the Display variants (the 0.2.51 Display
+        //row) are on the CTRL page (ctrl_page.c)
         //======================================================================     
         
       //------------------------------------------------------------------------
@@ -3565,6 +3538,10 @@ void handle_keyboard_menu_touch(void)
 
 void handle_right_basic_menu_touch(void)
 {
+  //fw 0.2.53: the spectrum's empty slots (T CURSOR, V CURSOR, MEASURES; ui_p1_shown) do nothing
+  if((ytouch >= 183) && (ytouch <= 357) && !ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
+    return;
+
   //Check if run/stop or page up button is touched
   if((ytouch >= 63) && (ytouch <= 117))
   {
@@ -3834,6 +3811,13 @@ void handle_right_basic_menu_touch(void)
 
 void handle_right_volts_div_menu_touch(void)
 {
+  //fw 0.2.53: page two is the CTRL page (ctrl_page.c); below, the waveform viewer's page and the DC shift pages
+  if((scopesettings.rightmenustate == 1) && !scopesettings.waveviewmode)
+  {
+    ctrl_page_touch();
+    return;
+  }
+
   //Check if channel 1 V+ button is touched
   if((ytouch >= 93) && (ytouch <= 155))//78 - 140
   {

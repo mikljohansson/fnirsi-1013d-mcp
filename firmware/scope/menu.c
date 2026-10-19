@@ -25,6 +25,8 @@
 #include "ui_fmt.h"
 #include "ui_menu.h"
 #include "ui_settings.h"
+#include "ui_ctrl.h"
+#include "ctrl_page.h"
 
 //USB drive screen: the Exit button (fw 0.2.51)
 #define USB_EXIT_X     610
@@ -384,10 +386,15 @@ void scope_setup_right_control_menu(void)
   //Check in which state the right menu is in
   if(scopesettings.rightmenustate == 0)
   {
-    //Main control state so draw the always used buttons
-    scope_t_cursor_button(0);
-    scope_v_cursor_button(0);
-    scope_measures_button(0);
+    //Main control state so draw the always used buttons; fw 0.2.53: the spectrum leaves the cursor and measurement
+    //slots empty (ui_p1_shown) until spectrum markers and its own measurement list exist
+    if(ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
+    {
+      scope_t_cursor_button(0);
+      scope_v_cursor_button(0);
+      scope_measures_button(0);
+    }
+
     scope_save_picture_button(0);
 
     //Check if in wave view mode (Scope mode)
@@ -406,25 +413,18 @@ void scope_setup_right_control_menu(void)
       scope_save_wave_button(0);
     }
   }
-  //else
-  //Check in which RIGHT sensitivity menu
+  //fw 0.2.53: page two is the CTRL page (Display, Trace style or Analyse, Grid, the steppers, 50 % TRIG; ctrl_page.c).
+  //The waveform viewer keeps 1.00o5's page: V+ / V- per channel and Show grid.
   if(scopesettings.rightmenustate == 1)
   {
-    //Channel sensitivity state
-    scope_channel_sensitivity_control(&scopesettings.channel1, 0, 0);
-    scope_channel_sensitivity_control(&scopesettings.channel2, 0, 0);
-
-    //Check if in wave view mode (Scope mode)
     if(scopesettings.waveviewmode)
     {
-      //Wave view mode
+      scope_channel_sensitivity_control(&scopesettings.channel1, 0, 0);
+      scope_channel_sensitivity_control(&scopesettings.channel2, 0, 0);
       scope_show_grid_button(0);
-    }    
-    else
-    {
-      //Main control mode
-      scope_50_percent_trigger_button(0);
     }
+    else
+      ctrl_page_draw();
   }
    //Check in which DC shift calibration set menu - center position on signal
   if(scopesettings.rightmenustate == 2)
@@ -1912,49 +1912,39 @@ void scope_run_stop_text(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//fw 0.2.53 top bar chip (docs/ui-guidelines.md section 3): the grey parameter box over the whole chip, then the coloured
+//block drawn over its left end, rounded only on its outer corners, so the join has no notch. The box is white while the
+//chip is touched (1.00o5's active look), grey otherwise.
+static void scope_chip(uint32 x, uint32 block_w, uint32 w, uint32 block, int active)
+{
+  display_set_fg_color(active ? WHITE_COLOR : LIGHTGREY_COLOR);
+  display_fill_rounded_rect(x, CH_BUTTON_YPOS, w, CH_BUTTON_HEIGHT, 2);
+
+  display_set_fg_color(block);
+  display_fill_rounded_rect(x, CH_BUTTON_YPOS, block_w, CH_BUTTON_HEIGHT, 2);
+  display_fill_rect(x + block_w - 2, CH_BUTTON_YPOS, 2, CH_BUTTON_HEIGHT);
+}
+
 void scope_channel_settings(PCHANNELSETTINGS settings, int mode)
 {
   int8 **vdtext = 0;
+  uint32 block;
 
   //Clear the area first
   display_set_fg_color(BLACK_COLOR);
   display_fill_rounded_rect(settings->buttonxpos, CH_BUTTON_YPOS, CH_BUTTON_BG_WIDTH, CH_BUTTON_BG_HEIGHT, 2);
 
-  //Check if channel is enabled or disabled
+  //Block colour: grey while the channel is off (light grey touched), the channel colour while on (black when inverted),
+  //the touched colour while touched
   if(settings->enable == 0)
-  {
-    //Disabled so off colors
-    //Check if inactive or active
-    if(mode == 0)
-    {
-      //Inactive, grey menu button
-      display_set_fg_color(GREY_COLOR);
-    }
-    else
-    {
-      //Active, light grey menu button
-      display_set_fg_color(LIGHTGREY2_COLOR);//0x00BBBBBB
-    }
-  }
+    block = mode ? LIGHTGREY2_COLOR : GREY_COLOR;
+  else if(mode == 0)
+    block = settings->invert ? BLACK_COLOR : settings->color;
   else
-  {
-    //Enabled so on colors
-    //Check if inactive or active
-    if(mode == 0)
-    {
-      //Inactive, channel 1 color menu button (inactive & invert channel = black button)
-      if (settings->invert) { display_set_fg_color(BLACK_COLOR);}
-        else { display_set_fg_color(settings->color);  }// ak invert black
-    }
-    else
-    {
-      //Active, blue menu button
-      display_set_fg_color(settings->touchedcolor);
-    }
-  }
+    block = settings->touchedcolor;
 
-  //Fill the button
-  display_fill_rounded_rect(settings->buttonxpos, CH_BUTTON_YPOS, CH_BUTTON_WIDTH, CH_BUTTON_HEIGHT, 2);
+  //fw 0.2.53: the chip construction (grey box, block over it, no notch)
+  scope_chip(settings->buttonxpos, CH_BUTTON_WIDTH, CH_BUTTON_BG_WIDTH, block, mode != 0);
 
   //Select the font for the text
   display_set_font(&font_2);
@@ -1962,7 +1952,7 @@ void scope_channel_settings(PCHANNELSETTINGS settings, int mode)
   //Check if inactive or active
   if(mode == 0)
   {
-    //Inactive, black text (inactive & invert channel = yellow text)
+    //Inactive, black text (inactive & invert channel = yellow text in a yellow outline)
     if ((settings->invert)&&(settings->enable)) {display_set_fg_color(settings->color); display_draw_rounded_rect(settings->buttonxpos, CH_BUTTON_YPOS, CH_BUTTON_WIDTH, CH_BUTTON_HEIGHT, 2);}
         else display_set_fg_color(BLACK_COLOR);//zlty text ak inver kanal
   }
@@ -1970,9 +1960,6 @@ void scope_channel_settings(PCHANNELSETTINGS settings, int mode)
   {
     //Active, white text
     display_set_fg_color(WHITE_COLOR);
-
-    //Fill the settings background
-    display_fill_rounded_rect(settings->buttonxpos + 30, CH_BUTTON_YPOS, CH_BUTTON_BG_WIDTH - 30, CH_BUTTON_BG_HEIGHT, 2);
   }
 
   //Display the channel identifier text
@@ -2086,38 +2073,15 @@ void scope_acqusition_settings(int mode)
   display_set_fg_color(BLACK_COLOR);
   display_fill_rounded_rect(ACQ_BUTTON_XPOS, ACQ_BUTTON_YPOS, ACQ_BUTTON_BG_WIDTH, ACQ_BUTTON_BG_HEIGHT, 2);
 
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive, short time base green menu button, if long time base orange
-    if (scopesettings.long_mode) display_set_fg_color(ORANGE_COLOR); else display_set_fg_color(GREEN_COLOR);
-  }
-  else
-  {
-    //Active, magenta menu button
-    display_set_fg_color(MAGENTA_COLOR);
-  }
-
-  //Fill the button
-  display_fill_rounded_rect(ACQ_BUTTON_XPOS, ACQ_BUTTON_YPOS, ACQ_BUTTON_WIDTH, ACQ_BUTTON_HEIGHT, 2);
+  //fw 0.2.53: the chip construction. Block: green for the short time bases, orange in roll mode, magenta while touched
+  scope_chip(ACQ_BUTTON_XPOS, ACQ_BUTTON_WIDTH, ACQ_BUTTON_BG_WIDTH,
+             mode ? MAGENTA_COLOR : scopesettings.long_mode ? ORANGE_COLOR : GREEN_COLOR, mode != 0);
 
   //Select the font for the text
   display_set_font(&font_2);
 
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive, black text
-    display_set_fg_color(BLACK_COLOR);
-  }
-  else
-  {
-    //Active, white text
-    display_set_fg_color(WHITE_COLOR);
-
-    //Fill the settings background
-    display_fill_rounded_rect(ACQ_BUTTON_XPOS + 30, ACQ_BUTTON_YPOS, ACQ_BUTTON_BG_WIDTH - 30, ACQ_BUTTON_BG_HEIGHT, 2);
-  }
+  //Black text in the block, white while touched
+  display_set_fg_color(mode ? WHITE_COLOR : BLACK_COLOR);
 
   //Display the acquisition identifier text
   if (scopesettings.long_mode)
@@ -2332,40 +2296,16 @@ void scope_trigger_settings(int mode)
   display_set_fg_color(BLACK_COLOR); //LIGHTGREY_COLOR       
   display_fill_rounded_rect(TRIGGER_BUTTON_XPOS, TRIGGER_BUTTON_YPOS, TRIGGER_BUTTON_BG_WIDTH, TRIGGER_BUTTON_BG_HEIGHT, 2);
 
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive, green menu button
-    display_set_fg_color(TRIGGER_COLOR);
-  }
-  else
-  {
-    //Active, magenta menu button
-    display_set_fg_color(MAGENTA_COLOR);
-  }
-
-  //Fill the button left side
-  display_fill_rounded_rect(TRIGGER_BUTTON_XPOS, TRIGGER_BUTTON_YPOS, TRIGGER_BUTTON_WIDTH, TRIGGER_BUTTON_HEIGHT, 2);
+  //fw 0.2.53: the chip construction (one grey box behind the green block, no notch; it had its own rounded box before).
+  //Block green, magenta while touched
+  scope_chip(TRIGGER_BUTTON_XPOS, TRIGGER_BUTTON_WIDTH, TRIGGER_BUTTON_BG_WIDTH, mode ? MAGENTA_COLOR : TRIGGER_COLOR, mode != 0);
 
   //Select the font for the text
   display_set_font(&font_4);
 
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive, black text
-    display_set_fg_color(LIGHTGREY_COLOR);
-  }
-  else
-  {
-    //Active, white text
-    display_set_fg_color(WHITE_COLOR);
-  }
-  
-  //Fill the settings background
-  //display_fill_rounded_rect(TRIGGER_BUTTON_XPOS+31, TRIGGER_BUTTON_YPOS, 48, 35, 2);//591 5 48 35
-  display_fill_rounded_rect(TRIGGER_BUTTON_XPOS+TRIGGER_BUTTON_WIDTH, TRIGGER_BUTTON_YPOS, 48, 35, 2);//31+48 79
-  
+  //"T" and the edge symbol in the box colour: dark grey on the block, white while touched
+  display_set_fg_color(mode ? WHITE_COLOR : LIGHTGREY_COLOR);
+
   //Display the channel identifier text
   display_text(TRIGGER_BUTTON_XPOS+12, TRIGGER_BUTTON_YPOS+10, "T");
 
@@ -5122,7 +5062,7 @@ void scope_open_acquisition_menu(void)
   //display_set_fg_color(BLACK_COLOR);
   display_draw_horz_line(ACQ_MENU_YPOS +  211, ACQ_MENU_XPOS + 8, ACQ_MENU_XPOS + ACQ_MENU_WIDTH - 8);//-84
   
-  display_draw_vert_line(ACQ_MENU_XPOS +  304, ACQ_MENU_YPOS + 8, ACQ_MENU_YPOS + ACQ_MENU_BODY_H - 8);
+  display_draw_vert_line(ACQ_MENU_XPOS +  304, ACQ_MENU_YPOS + 8, ACQ_MENU_YPOS + ACQ_MENU_HEIGHT - 8);
 
   //Main texts in white
   display_set_fg_color(WHITE_COLOR);
@@ -5139,7 +5079,6 @@ void scope_open_acquisition_menu(void)
   display_text(ACQ_MENU_XPOS + 317, ACQ_MENU_YPOS +   8, "Memory"); //tab +6   
   //display_text(ACQ_MENU_XPOS + 324, ACQ_MENU_YPOS +   20, "deep"); //tab +6 
 
-  display_text(ACQ_MENU_XPOS + 325, ACQ_MENU_YPOS +   216, "Trace"); //tab +6 //323   
   
     //**********************************************************
   
@@ -5181,8 +5120,7 @@ void scope_open_acquisition_menu(void)
   PC_UI_MASK(PC_MASK_ACQ_FILTER);    //the decimation Filter box (bitstream 0x1534+) in 1.00o5's Long memory slot
 
   scope_acquisition_memory_deep_select();
-  scope_acquisition_trace_select();
-  PC_ACQ_DISPLAY_DRAW();             //fw 0.2.51: Display row (Normal / Phosphor / X-Y) under 1.00o5's menu
+  //fw 0.2.53: acquisition only; Trace style and the Display variants are on the CTRL page
 
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1
@@ -5484,62 +5422,6 @@ void scope_acquisition_memory_deep_select(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void scope_acquisition_trace_select(void)
-{                  
-  //Select the font for the texts
-  //display_set_font(&font_3);
-
-  //Set dark grey color for the boxes behind the not selected texts
-  //display_set_fg_color(DARKGREY_COLOR);
-  
-  //*********************
-  uint32 c,i,x,y;
-
-  //Select the font for the texts
-  display_set_font(&font_2);
-
-  //Set middle grey color for the boxes behind the not selected texts & highlight the selected item
-  display_set_fg_color(MIDLEGREY_COLOR);
-      
-  //Clear the boxes for the not selected items
-  for(i=0;i<(sizeof(trace_texts) / sizeof(int8 *));i++)
-  {
-
-    x = 315 + ACQ_MENU_XPOS;
-    y = (i * 36) +  241 + ACQ_MENU_YPOS;//228
-
-    //Set yellow color for the box behind the selected text
-    if(i == (scopesettings.ACQ_trace)) display_set_fg_color(ORANGE_COLOR); else display_set_fg_color(MIDLEGREY_COLOR);
-      
-    display_fill_rounded_rect(x, y, 54, 25, 2);//53
-  }
-
-  for(i=0;i<(sizeof(trace_texts) / sizeof(int8 *));i++)
-  {
-    //Settings displayed from smallest to highest value
-    c = (i);
-
-    //Check if the current text is the selected on
-    if(c != ((scopesettings.ACQ_trace)))
-    {
-      //Available but viable not selected texts in white
-      display_set_fg_color(WHITE_COLOR);
-    }
-    else
-    {
-      //Selected texts in black
-      display_set_fg_color(BLACK_COLOR);
-    }
-
-    //Calculate the position of this text
-    x = 315 + trace_texts_x_offsets[c];
-    y = (c * 36) +  246; //+5
-
-    //Display the text from the table
-    display_text(ACQ_MENU_XPOS + x, ACQ_MENU_YPOS + y, (int8 *)trace_texts[c]);
-  }
-}
-  
 //----------------------------------------------------------------------------------------------------------------------------------
 
 void scope_open_trigger_menu(void)
@@ -8443,8 +8325,9 @@ void scope_draw_grid(void)
     //-********************************************************
   
 // */
-  //Only draw the grid when something will show (not in the original code)
-  if(scopesettings.gridbrightness > 3)
+  //Only draw the grid when something will show (not in the original code), and not while Grid is off (fw 0.2.53: the CTRL
+  //page's Grid; the record-position slider above stays)
+  if((scopesettings.gridbrightness > 3) && scopesettings.gridenable)
   {
     //Calculate a grey shade based on the grid brightness setting
     color = (scopesettings.gridbrightness * 255) / 100;

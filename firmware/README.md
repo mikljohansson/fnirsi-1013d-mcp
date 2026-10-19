@@ -569,7 +569,7 @@ dBFS here is relative to the bin of a full-scale sine. The level error includes 
 log2/dB conversion alone is within 1.6e-5 octaves (0.005 dB). Bin-centred full-scale tone: within 0.02 dB of
 39.07 dB on all windows; flat-top half a bin off: within 0.05 dB.
 
-### Screens: main menu, USB drive, Display row, measurement cards (fw 0.2.51)
+### Screens: main menu, USB drive, measurement cards (fw 0.2.51)
 
 The first step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 1 plus the cards; rules in
 `docs/ui-guidelines.md`). Pure parts in `ui_menu.c` (row table, hit areas, mode rule) and `ui_fmt.c` (text widths,
@@ -593,12 +593,8 @@ to CDC (PC control) and re-syncs the file lists.
 
 Top bar: no version string any more (the diagnostics view keeps the full identity).
 
-Acquisition menu, Display row (until the CTRL page's Display fold-out exists): a row of three boxes under 1.00o5's
-menu (which grew from 386 to 432 px): Normal, Phosphor, X-Y, the chosen one orange. X-Y is 1.00o5's X-Y mode (saved at
-power-off as before, it moved here from System settings), Phosphor the phosphor view below (not saved, the scope boots
-in Normal or X-Y). Chosen while the spectrum shows, Phosphor waits for the main menu's Scope row. Phosphor drawing in
-X-Y (possible since 0.2.46 by switching X-Y on in the phosphor view) is not offered by the row: it returns with the
-Display fold-out's Phosphor switch.
+Acquisition menu, Display row (0.2.51 only): Normal / Phosphor / X-Y under the acquisition menu until the CTRL page's
+Display fold-out existed; 0.2.53 replaced it (below).
 
 Measurement cards (Measures on the right bar; up to twelve per channel): Atlan's 118 x 22 cards in the bottom rows
 (CH1 from x 5, CH2 from x 366, three per row, rows upward from y 426), each a grey card with the measurement name in a
@@ -611,6 +607,74 @@ its own is not padded (a value held as 0.50 V reads "500mV", not "500.0mV"). Fre
 period" while the record has fewer than three crossings. What the values mean is unchanged (whole-record statistics;
 Vrms includes DC). A new unit, and the DEFAULT button, show Freq, Vpp and Vavg on each enabled channel (in the table's
 order: Vavg, Vpp, Freq); 1.00o5 set none.
+
+### Screens: CTRL page, fold-outs, chips, warnings, spectrum cards (fw 0.2.53)
+
+The second step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 2; rules in `docs/ui-guidelines.md`).
+Geometry, hit areas, the value names, the warning texts and the spectrum's card set are pure C in `ui_ctrl.c`
+(host-tested in `host_tests/test_ui.c`, also that every text fits its box in the device's fonts); `ctrl_page.c` draws
+and runs the touch loops.
+
+Right bar, page one (both modes): CTRL, RUN/STOP, AUTO SET, T CURSOR, V CURSOR, MEASURES, SAVE PIC, SAVE WAVE in
+1.00o5's slots. In the spectrum view T CURSOR, V CURSOR and MEASURES are empty (no spectrum markers or spectrum
+measurement list yet) and AUTO SET runs the spectrum's Auto (fw 0.2.51). The bar is redrawn whenever the spectrum view
+starts or ends.
+
+Right bar, page two = the CTRL page (CTRL highlighted as before), the same order in both modes:
+
+| slot (y) | Scope | Spectrum |
+|---|---|---|
+| 65 | Display, value Normal / X-Y / Phos / XY Ph: fold-out | Display, value Spec / Wfall / Density: fold-out |
+| 125 | Trace style, value Linear / Dots / Peak / Pro: fold-out | Analyse, value the FFT length ("2048 pt"): fold-out |
+| 185 | Grid: a switch (green = grid lines on) | Grid (the plot's dots; the level labels stay) |
+| 244..325 | V+ / CH1 / V- stepper | the same |
+| 334..415 | V+ / CH2 / V- stepper | the same |
+| 425 | 50 % TRIG | empty |
+
+Steppers: 82 px, a 28 px grey V+ bar, a 26 px centre in the channel colour reading CH1 or CH2 (grey while the channel
+is off; the value is in the top bar chip), a 28 px grey V- bar. V+ takes y 240..284 and V- 285..329 (CH2: 330..374 and
+375..420), so each gets 45 px of touch: the bar, its half of the centre and its half of the gap. They step
+`displayvoltperdiv` as 1.00o5's CTRL page did (V+ = the next smaller V/div). Grid is saved (settings word 211) and also
+hides the waveform viewer's grid; the record-position slider under the grid always shows.
+
+Fold-outs: a panel left of the bar over the plot's right edge (x up to 727, never over the bar), a grey title, rows of
+44 px at a 50 px pitch; the button stays orange while its panel is open. Modal like the top bar's dropdowns (the trace
+pauses, the PC gets E_BUSY after 250 ms): a tap outside the panel closes it and does nothing else; a choice row (green
+when chosen) closes it; value rows step to the next value and keep it open; a two-way row (Ref level) has - and + boxes
+at its ends and each half of the row steps that way. The plot under the panel is put back on close.
+
+| fold-out | rows |
+|---|---|
+| Display (Scope) | Normal, X-Y (with icons: a clean trace, a Lissajous loop) / a line / Phosphor switch (graded-trace icon; second line the records per second "55 wfm/s", or "Not in roll mode" greyed) and, while it is on, Persistence (0.2 s, 1 s, 5 s, Infinite; a step clears), Palette (Mono, Heat), Clear (clears and closes) |
+| Trace style (Scope) | Linear, Dots, Peak, Pro (1.00o5's `ACQ_trace`, saved as before; it left the acquisition menu) |
+| Display (Spectrum) | Spectrum, Waterfall, Density (icons: bars, colour stripes, graded dots); saved in word 211 |
+| Analyse (Spectrum) | Analyse (CH1, CH2, CH1 + CH2: the shown channel, the dBV / dBA unit and Auto's channel), FFT length, Window, Average / a line / Scale, Ref level (- / +), Reset |
+
+Phosphor is a switch, not a view: it combines with Normal or X-Y (phosphor drawing in X-Y is back after 0.2.51), is
+saved (word 210 bit 3), stays on while the spectrum shows (Scope brings the picture back) and pauses in roll mode and
+the viewers. Settings sector word 211 (0xC700 marker): bit 0 Grid, bits 1-2 the spectrum's Display variant; the DEFAULT
+button sets Normal, Phosphor off, Spectrum, Grid on.
+
+Acquisition menu: acquisition only again (sample rate, time per division, memory, Roll, Average, Filter; 386 px as in
+1.00o5). The Trace boxes and the 0.2.51 Display row left it.
+
+Top bar chips: CH1, CH2, ACQ and the trigger are built the same way: a grey box (0x333333) over the whole chip, the
+coloured block drawn over its left end with only its outer corners rounded, so the join has no notch (the trigger chip
+had its own rounded box). Block colours as before: channel colour (grey when off, black outlined when inverted), ACQ
+green (orange in roll mode), trigger green; touched chips keep 1.00o5's white box.
+
+Warnings: one line at the top middle of the plot in orange, consequence and action, in every scope variant (Normal,
+X-Y, Phosphor; not in the viewer), the most urgent one only: "No channel enabled: switch on CH1 or CH2", "X-Y needs both
+channels: switch on CH1 and CH2", "CHn overrange: increase V/div", "No trigger: check the trigger level" (the latest
+record was an auto time-out, while running). The spectrum keeps its own list (below). Readouts such as wfm/s are never
+warnings.
+
+Strips gone: the phosphor strip (its fields are in the Display fold-out) and the spectrum strip and header line (the
+fields are in the Display and Analyse fold-outs, the readouts are cards). The spectrum's cards sit in one row at y 446
+(where the scope's slider row is; the slider has no meaning there), built like the scope's cards (`scope_draw_card`):
+per shown channel [Peak] 1.000kHz and [Level] +2.7dBV in the channel colour, then [RBW] 146.5Hz and, in the waterfall,
+[Time] 12.30s (the time its rows span) with a light grey chip; at most six. The decimation filter tag is no longer shown
+(the acquisition menu has it). The waterfall's and density's colour legend stays above the plot's top right.
 
 ### Settings: fold-out, Settings screen, confirmations (fw 0.2.55)
 
@@ -699,25 +763,28 @@ trace body as a grab target, an 8 px dead band, no taps on cards and handles, a 
 A display mode of the main loop, not a modal menu, so the MCP's polling and the shared screen keep working (plan:
 `docs/plans/dpos350p-features.md` 2b). Main menu, row "Spectrum analyser"; the row "Scope" returns (fw 0.2.51; in roll
 mode the row switches Roll off first, see "Screens" above). While on, `scope_display_trace_data` (hook `PC_SPECTRUM_DISPLAY`) draws the trace area itself and touches
-in it go to the strip (`PC_SPECTRUM_TOUCH`); the top bar, the MCP chip and the right column (RUN/STOP, AUTO, menus)
-are 1.00o5's. Each new capture (UI or host) is transformed once; settings changes recompute from the held buffer,
+on the plot go to its gestures (`PC_SPECTRUM_TOUCH`); the top bar and the MCP chip are 1.00o5's, the right bar shows the
+spectrum's slots and CTRL page (fw 0.2.53, "Screens" above). Each new capture (UI or host) is transformed once; settings changes recompute from the held buffer,
 so a stopped capture can be re-examined. Roll mode or a viewer ends the view.
 
-Screen: info line (sample rate, N, RBW; peak frequency and level per channel in its colour), plot of 10 x 8
-divisions with dBV labels (dBA in A mode), start / centre / stop frequency labels, and the strip. Each plot column
-shows the highest bin it covers, so narrow lines survive at 720 columns; zoomed in past one bin per column it draws
-straight lines between bins. A white triangle marks the peak (DC bins skipped). Below 200 MS/s an orange line says
+Screen (fw 0.2.53): plot of 10 x 8 divisions with dBV labels (dBA in A mode), start / centre / stop frequency labels,
+and the cards (peak frequency and level per channel, RBW; "Screens" above). The info line and the strip went in 0.2.53.
+Each plot column shows the highest bin it covers, so narrow lines survive at 720 columns; zoomed in past one bin per
+column it draws straight lines between bins. A white triangle marks the peak (DC bins skipped). Below 200 MS/s an orange line says
 "no anti-alias filter": the FPGA decimates by skipping samples (until a filtering bitstream lands).
 
-| field | values | tap |
+Parameters, in the CTRL page's Analyse fold-out since fw 0.2.53 (a strip under the plot before; View is the
+Display fold-out):
+
+| row | values | tap |
 |---|---|---|
-| Channel | CH1, CH2, CH1 + CH2 (only enabled channels) | next |
+| Analyse | CH1, CH2, CH1 + CH2 (only enabled channels) | next |
 | FFT length | 1024 .. the largest power of two the record holds, at most 4096 (2048 at depth 3000) | next, wraps |
 | Window | Hann, flat top, rect | next |
 | Scale | 5, 10, 20 dB/div | next |
-| Ref level | -100 .. +60 dBV at the top line, one division per step | left half down, right half up |
+| Ref level | -100 .. +60 dBV at the top line, one division per step | left half (-) down, right half (+) up |
 | Reset | back to the defaults: 2048 points, Hann, 10 dB/div, ref 0 dBV, full span, Spectrum | once |
-| View | Spectrum, Waterfall, Density (fw 0.2.32) | next |
+| Display (its own fold-out) | Spectrum, Waterfall, Density (fw 0.2.32) | choose |
 
 Auto (sets FFT length, window, scale, ref level and span from the signal, rules below) is the right bar's AUTO SET
 while the view shows (fw 0.2.51; a strip field before): the button reads "Auto..." while it runs, and a second tap, or
@@ -726,18 +793,18 @@ any touch on the plot, cancels it. Leaving the view ends it.
 With the 0x1534 decimation filter on (fw 0.2.34) the view transforms the filter's 16-bit record (`pc_hal_trace16`)
 instead of the 8-bit trace, with the filter's rate 200 MHz / N (N = 2 (floor(D / 2) + 1), so even dividers differ from
 the time base's D + 1), one 16-bit unit = `scale_q24` / 2^24 codes for the dBV term, and the zero code moved into the
-16-bit domain; the first info line then carries the filter's order as a short tag ("CIC3"; owner: no N on the screen,
-READ_SPECTRUM has it) and the orange aliasing warning is not shown. Not benched (the bitstream is not flashed yet).
+16-bit domain; the orange aliasing warning is not shown (the info line's filter tag went with the line in 0.2.53;
+READ_SPECTRUM reports the filter). Not benched (the bitstream is not flashed yet).
 
 Waterfall and density (fw 0.2.32) show one channel (CH1 unless only CH2 is selected or on). Waterfall: each new
 capture adds one row at the top (the plot holds 336), coloured over the plot's 8 divisions from the bottom line
-(black) to the ref level (white), the colour legend on the second info line, the time the rows span on the first.
+(black) to the ref level (white), the colour legend above the plot's top right, the time the rows span on a card.
 Density (fw 0.2.35): each capture's spectrum line adds hits to a 720 x 336 grid. A cell keeps an 8-bit count and the
 16-bit index of the capture of its last hit; a hit decays the count to now (exp(-age / 16 captures), Q8 table) and
 adds 32 (saturating), drawing decays it the same way, so the persistence is uniform in time and position with no
 fading pass (0.2.33's one-stripe-per-capture fade showed as a band sweeping down the screen). A cell hit in every
 capture saturates white; one hit in 10 % of captures sits around dark red; a cell 256 captures old is cleared when
-drawn. Colour ramp (legend "rare or old" .. "frequent" on the second info line): black, dark blue, red, yellow,
+drawn. Colour ramp (legend "rare or old" .. "frequent" above the plot's top right): black, dark blue, red, yellow,
 white. The level grid and labels stay.
 Both histories clear when anything that changes what a column or level means changes (FFT length, window, span,
 start, ref, scale, sample rate, channel), so a view never mixes axes; in STOP they wait for RUN and say so. The
@@ -756,10 +823,9 @@ touch that moves more than 2 px is a drag: the spectrum follows the finger horiz
 1/65536 of the Nyquist range) and is redrawn while dragging; at full span there is nothing to pan. Start, centre and
 stop frequencies are the labels under the plot.
 
-Header and averaging (fw 0.2.40-0.2.42, owner): one header line, left to right: per shown channel its peak "CH1 ^
-977 Hz +2.7 dBV" in the channel colour, "RBW 732 Hz", the decimation filter tag ("CIC3"; the averaging is not repeated,
-the strip's Average field shows it) and, in the waterfall, the time its rows span; the colour legend sits at the right end in the
-history views. No fs or N (they are the time base and the FFT-length field). Warnings appear centred over the top of
+Header and averaging (fw 0.2.40-0.2.42, owner; since 0.2.53 the header's readouts are cards, see "Screens"): per
+shown channel its peak frequency and level, the RBW and, in the waterfall, the time its rows span. No fs or N (they are
+the time base and the FFT length). Warnings appear centred over the top of
 the plot in orange only while they apply: "CHn overrange", "no anti-alias filter below 200 MS/s" (decimated without
 the 0x1534 filter), "Stopped: RUN fills the view" (history views, or no record). The plot is 8 divisions of 43 px.
 Average field: Off, 4, 16, 64 (exponential average of the dB levels over a growing count up to that many captures,
@@ -782,10 +848,10 @@ Persistence (fw 0.2.39): FFT length, window, scale and ref level are saved in se
 marker, window, scale, length) and 209 (ref, int16), with everything else, by 1.00o5's power-off interrupt (the only
 place 1.00o5 writes the settings sector, apart from a failed load; not in the picture / waveform viewers, not on
 ENTER_FEL or a battery that dies). Not restored: the display mode (the scope boots into the scope view), channel,
-span, start and view. The Filter choice (fw-decim, word 207) is saved the same way.
+span and start; the variant (Spectrum / Waterfall / Density) is restored since fw 0.2.53 (word 211). The Filter choice (fw-decim, word 207) is saved the same way.
 
 Auto (fw 0.2.42, owner: deterministic, identical presses give identical settings): a fixed probe procedure that
-does not depend on the state it starts from, about 1-2 s, "Auto..." in the field and the plot meanwhile, any touch
+does not depend on the state it starts from, about 1-2 s, "Auto..." on AUTO SET and the plot meanwhile, any touch
 cancels, gives up after 4 s with what it has. It needs RUN and trigger mode Auto or Normal (otherwise a warning says
 so). Steps:
 1. Probe: 50 MSa/s (2 us/div), the longest FFT the record holds up to 4096, Hann, averaging 4, trigger source = the
@@ -841,7 +907,8 @@ base change from inside a draw redraws through the same path), and `spec_tb_set`
 that redraw shows the new axis without the old spectra. Audit of the other host-driven redraws (SET_CHANNEL, SET_TRIGGER,
 SET_GEN, RUN/STOP, the MCP chip): they draw only top-bar buttons (y < 46) and never touch the trace area or the right
 column. Not host-testable (scope_functions.c and spectrum.c drawing are target-only); bench: spectrum view on, then
-SET_TIMEBASE / SET_TRIGGER / SET_GEN in a loop from the host and span taps: the strip must never show grid or pointers.
+SET_TIMEBASE / SET_TRIGGER / SET_GEN in a loop from the host and span taps: the cards row (the strip until 0.2.53)
+must never show grid or pointers.
 
 ### Phosphor view (`phosphor.c`, fw 0.2.46)
 
@@ -850,11 +917,12 @@ how often each pixel was hit by recent records, so jitter, rare glitches, a modu
 cycles of a toggling signal are visible at once with their relative frequency. Design and cost arithmetic:
 `docs/plans/phosphor-design.md`.
 
-Chosen in the acquisition menu's Display row (fw 0.2.51; the main menu's "Phosphor display" row and the strip's
-"Scope" field before): Phosphor on, Normal or X-Y off. The spectrum and phosphor views exclude each other; the main
-menu's Scope row returns to the phosphor view when it was on before the spectrum. Not available in roll mode or in the
-picture / waveform viewers (the view ends). It is a main-loop display mode: RUN/STOP,
-trigger, time base, channel menus, cursors, measurements and the MCP keep working as in the scope view.
+Switched by the Phosphor switch in the CTRL page's Display fold-out (fw 0.2.53; the acquisition menu's Display row in
+0.2.51, the main menu's "Phosphor display" row and the strip's "Scope" field before); it combines with Normal or X-Y.
+The spectrum and phosphor views exclude each other; the switch stays on while the spectrum shows, so the main menu's
+Scope row brings the picture back. Not available in roll mode or in the picture / waveform viewers (the picture pauses
+and comes back when they end). It is a main-loop display mode: RUN/STOP, trigger, time base, channel menus, cursors,
+measurements and the MCP keep working as in the scope view.
 
 What changes: only the CH1 / CH2 traces. Each channel has a map of hit counts (one byte per pixel of the 728 x 400
 trace area); every new record adds its line to the map (all samples on screen, each column from its lowest to its
@@ -863,16 +931,17 @@ with the persistence time. Grid, cursors, cursor readouts, measurement tiles, th
 MATH traces are drawn as in the scope view, on top of the map. Where both channels light the same pixel the brighter
 one is shown (CH1 on ties). XY mode works the same way with one map (CH1 against CH2).
 
-Strip (one line under the grid, where the record-position slider is in the scope view):
+Parameters, in the Display fold-out under the Phosphor switch since fw 0.2.53 (a strip over the record-position slider
+before; the slider shows again):
 
-| field | values | tap |
+| row | values | tap |
 |---|---|---|
 | Persistence | 0.2 s, 1 s (default), 5 s, Infinite | next value; clears the picture |
 | Palette | Mono (channel colour, brightness by hit rate), Heat (dark blue, blue, cyan, green, yellow, red, white) | toggles |
 | Clear | | clears the picture |
 
-At the right end the strip shows the records added per second ("28 wfm/s"). Warnings (fw 0.2.51: at the top middle of
-the plot in orange, as in the spectrum view; at the strip's right end before) while they apply: "CHn overrange:
+The Phosphor row's second line shows the records added per second ("28 wfm/s"; at the strip's right end before 0.2.53).
+Warnings (the scope view's warning line at the top middle of the plot since fw 0.2.53, "Screens" above) while they apply: "CHn overrange:
 increase V/div" (the latest record clipped), "No trigger: check the trigger level" (the latest record was an auto
 time-out), "No channel enabled: switch on CH1 or CH2".
 
