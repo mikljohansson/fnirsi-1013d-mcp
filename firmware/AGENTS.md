@@ -270,6 +270,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.51 | 8f5bf16 | 38580def | UX makeover step 1 (fw-ui1, section 29): main menu Scope / Spectrum analyser / Saved pictures / Saved waveforms / Settings / Diagnostics / USB drive with one 59 px hit area per row, Spectrum in roll mode switches Roll off; USB drive screen text + Exit; no top-bar version; Display row Normal / Phosphor / X-Y in the acquisition menu (X-Y out of System settings); strips without Scope / Auto, AUTO SET = spectrum Auto; phosphor warnings top-middle; cards with chip, scope-maker names, 4 significant digits, defaults Freq / Vpp / Vavg | built, host-tested (test_ui 1513 checks); bench walk-through in section 29 |
 | 0.2.50 | e871c50 | 1b55efc2 | calibration wizard (one modal three-step flow, 48e5737) and calibration v4: A - B interleave tracker applied in the full class, full-class common-mode class probe, GET_CAL 288 bytes, diagnostics lines (protocol 1.14, row 53; fw-cal3, section 28) | built, host-tested; bench lists README 6.4 and 6.5 |
 | 0.2.52 | c8f874b | e0968392 | diagnostics readers (fw-readers, section 30): GET_HEALTH 0x000A (USB state, CP15, power-on count, operating minutes, settings save state, stored restart record), unit life record in settings words 224..255 with one sector-709 write per boot, image identity record + SD_INFO IDENT (112 bytes), calibration provenance in sector 708 432..487 + GET_CAL 356 bytes, SAVE_REPORT 0x0504 (protocol 1.16, row 55) | built, host-tested (test_diag 462 checks); bench list in section 30 |
+| 0.2.65 | 37714c3 | 1de13bd1 | Measurements v2 (fw-meas, section 41; provisional number): MEASURES list per mode (Scope twelve per channel, Spectrum Peak / Level / THD / Noise per channel + RBW / Span / Center / Time in words 221..223), chosen display order (defaults Freq, Vpp, Vavg), one card row with "+N more", MEASURES menu with title and 44 px rows, card source hook for an FPGA counter | built, host-tested (test_ui 1,420,237 checks); bench list in section 41 |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -2154,3 +2155,78 @@ Open:
 - Bench: read GET_LINK_STATS 62-63 and GET_EVENT_LOG types 21/22 after a wizard run and after toggling the time base
   to 200 MSa/s a few times. Expect 21 entries with small `a` (recovered), and 22 entries showing who wrote what
   before each.
+
+## 41. fw-meas: Measurements v2 (fw 0.2.65 provisional, protocol unchanged)
+
+Branch from main 8f8687a (fw 0.2.61), merged with main a179408 in 37714c3 (no firmware changes on main in between).
+Plan `docs/plans/ux-makeover.md` section 3a, `docs/plans/ux-review.md` section 6 part B, task-queue "Measurements v2";
+user-facing description firmware/README.md "Screens: Measurements v2 (fw 0.2.65)". Commits: 8749ffe (code and tests),
+f0837c5 (0.2.65, CHANGELOG, README, ui-guidelines names), 37714c3 (merge), then this handoff. Bench images from 37714c3:
+`firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 615,424 B, sha256
+1de13bd1cc04f6d637bbd60bb250eaa8ea59caedaab7720fff2a10215bb4f7d2 (ELF 538ae1a7...); nommu
+873377a33663d3b41769217f875c3445fef4063fc248ed037bb550ba02180605 (ELF 6e7a5681...). Not pinned in backups/.
+**Nothing benched.** Host tests green (test_ui 1,420,237 checks). Warnings: GCC 10 36, GCC 13 / PC_DEBUG 31, the same
+line-number-free lists as 8f8687a; ui_meas.c is clean with -Wall -Wextra -Werror.
+
+**Settings words claimed: 221 (spectrum view cards), 222 (CH2 spectrum cards), 223 (CH1 spectrum cards)**, each 0xA000 in
+bits 12-15 and four 3-bit ranks from bit 0 (`ui_meas.h` UI_MS_SPEC_WORD_*). fw-acq holds 212 (spectrum Filter, 0xD500).
+213..220 stay free; 224..255 are the life record. The Scope's choice needs no new word: its ranks are 1.00o5's
+`measuresstate` bytes (MEASUREMENT_SETTING_OFFSET), which 1.00o5 treats as on / off.
+
+Points for a successor:
+- **Model** (`ui_meas.c/.h`, pure): a list is an array of ranks (0 off, else the place in the row, ties by index).
+  `ui_ms_order` gives the display order, `ui_ms_toggle` puts a new item last and closes gaps, `ui_ms_select_all` keeps
+  the chosen order; every change renumbers 1..k first, so garbage ranks heal on the next tap. Wave files and reference
+  files carry the ranks in the measuresstate bytes as before (harmless).
+- **Fit**: one row only (the 1.00o5 stacking upward over the trace is gone). `ui_ms_scope_cap`: CH1 3, or 6 when the
+  CH2 block is not shown; CH2 3 from x 366. `ui_ms_fit`: with more chosen than places the last place is "+N more" in the
+  block's colour. Spectrum: 6 places from x 5 at y 446, the "+N" with a neutral chip.
+- **Scope cards** (`scope_display_measurements`, `scope_display_channel_measurements(ch, cap)`, `scope_measures_source`
+  in scope_functions.c): block rule as 1.00o5 (channel or one of its references on, Hide off, not in roll mode).
+- **Spectrum cards** (spectrum.c `spec_draw_cards`, `spectrum_cards()` the selection; the card set left ui_ctrl.c):
+  THD (`ui_ms_thd`, spec_db, whole axis `v.half`, harmonics 2..10, fundamental bin >= 5, "f0 too low" / "f0 too high"),
+  Noise (`ui_ms_noise_cdb`, spec_raw = the latest record unaveraged, over the shown span, median + 1.59 dB, at the RBW),
+  Span and Center from the view. The THD sums three bins per tone, so it is window-shape approximate (Hann scalloping
+  cancels in the ratio); the 8-bit floor is about 0.3 %. Not done from the review's tier 2: sub-bin peak, H2 / H3, SFDR,
+  SNR, band power, OBW; Scope rise / fall, top / base, overshoot, CH1-CH2 delay / phase / gain, AC RMS, gated statistics,
+  PI tau. They fit the same lists: add an item to the table (Scope list is full at 12 per channel in the menu's three
+  rows: a fourth row or a second page is needed, and `measuresstate[ch][12]` grows into a spare word block).
+- **Card source hook** (`ui_ms_set_source(item, fn)` / `ui_ms_get_source`): only live-channel Scope cards ask it;
+  documented in ui_meas.h and README. The FPGA counter driver should register in `pc_glue_init` (or wherever caps are
+  read) when its caps bit is set, write with `ui_fmt_sig4` into the 20-byte text, and never touch the bus from it.
+- **MEASURES menu** (menu.c `scope_measures_menu_draw` / `_cell`, statemachine.c `handle_measures_menu_touch`, geometry
+  `ui_msm_*`): box x 232..730, ending y 477; Scope top y 223 (title + 5 rows), Spectrum top y 313 (title + 3 rows). Cells
+  are 48-124 px wide (4-5 per half; the guideline's 80 px minimum is not met by the stock four-per-half item grid, kept
+  on purpose), 44 px tall; hit areas include the separators, so every tap under the title is a cell (test_ui sweeps
+  every pixel). Redraws cells in place after a change (no black flash). `ui_p1_shown` now shows MEASURES in the
+  spectrum; `handle_right_basic_menu_touch` blocks only y 183..297 there.
+- Names: "Center" (scope makers' spelling, as the guidelines ask for measurement names); the frequency labels under the
+  plot keep their own wording.
+
+**Bench walk-through (owner, coordinator on COM10)**
+1. FEL-load the image, `#VER` fw=0.2.65 proto unchanged (1.18). Scope with the 1 kHz calibration signal on CH1, CH2 on.
+2. Settings > Restore default settings (or DEFAULT): the cards read Freq, Vpp, Vavg left to right on CH1 (x 5) and on
+   CH2 (x 366), one row at y 426, nothing above it.
+3. MEASURES: the box slides in, title "Scope measurements", a source row (CH1 filled yellow, Ref 1-4 grey), Select All /
+   Clear / Hide in yellow, twelve names in three rows (Vmax ... -Duty), the same for CH2 on the right; Freq, Vpp, Vavg
+   white with 1, 2, 3 at their top left. Tap Vmax on CH1: it turns white with 4. Tap Vpp: it goes grey, Vavg reads 2 and
+   Vmax 3. Tap outside: the menu closes, the plot under it is back; the CH1 cards read Freq, Vavg, Vmax.
+4. Overflow: MEASURES, Select All on CH1, close: CH1 shows two cards and a third "+10 more" (CH2 on). Switch CH2 off
+   (and no Ref 5-8 shown): CH1 shows five cards and "+7 more" across the whole row. Hide on CH2 with CH2 on does the same.
+5. Hide CH1: the Hide cell turns orange; close: no CH1 cards. Hide again: back. Ref 1 as source (with a saved
+   reference shown): the source cell fills in the reference's colour, the cards follow its colour and values.
+6. Power-cycle: the order from step 3 is kept (Freq, Vavg, Vmax).
+7. Menu > Spectrum analyser: the right bar shows MEASURES (T CURSOR and V CURSOR slots empty). Cards: CH1 Peak, Level,
+   THD, CH2 Peak, Level, RBW (both channels in the Spectrum view). THD on the 1 kHz square wave reads about 40-48 %
+   (odd harmonics 1/3, 1/5 ... up to the 10th: sqrt(1/9 + 1/25 + 1/49 + 1/81) = 43 %); on a sine from a generator
+   below 1 %. Peak below bin 5 (very slow span): "f0 too low"; a tone near the top of the axis: "f0 too high".
+8. MEASURES in the spectrum: title "Spectrum measurements", per channel the label, Select All, Clear and Peak / Level /
+   THD / Noise, below them RBW / Span / Center / Time across the whole width. Turn on Noise for CH1: it reads a level a
+   few tens of dB below the peak; Span / Center match the frequency labels under the plot (start / centre / stop).
+   With more than six chosen the sixth place reads "+N more".
+9. Display > Waterfall: CH1 cards and RBW, then Time counting up. Power-cycle: the spectrum's choice is kept (words
+   221..223). Restore default settings: back to the defaults of step 7.
+10. Waveform viewer: MEASURES opens the Scope list.
+Bug indicators: a menu tap acting on the neighbouring cell; a stripe of the menu left on the plot after closing; cards
+stacking above y 426; a "+N" count that does not add up to the chosen count; THD changing wildly with the Window
+choice on a clean tone; MEASURES doing nothing in the spectrum.
