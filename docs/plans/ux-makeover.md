@@ -44,8 +44,12 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
 - **Top bar**: unchanged except the version string goes (it lives in Diagnostics) **(owner)**. Move fast stays.
 - **Right bar, first page** (both modes): CTRL, RUN/STOP, AUTO SET, T CURSOR, V CURSOR, MEASURES, SAVE PIC, SAVE WAVE
   in today's slots. In Spectrum, AUTO SET runs the spectrum's Auto; T CURSOR, V CURSOR, MEASURES and SAVE WAVE stay
-  empty until spectrum markers and export exist. The waveform viewer keeps its previous / next / delete substitutions.
-- **Right bar, CTRL page, Scope** **(owner)**, top to bottom: CTRL; Display (fold-out: Trace, Phosphor, X-Y; with
+  empty until spectrum markers exist; SAVE WAVE stays, it saves the time record behind the spectrum, which works today.
+  AUTO SET shows "Auto..." while the spectrum's Auto runs and a second tap cancels it (today's strip behaviour kept).
+  The waveform viewer keeps its previous / next / delete substitutions. The CTRL button is highlighted while page two is
+  shown, as today.
+- **Right bar, CTRL page, Scope** **(owner)**, top to bottom: CTRL; Display (fold-out: Normal, Phosphor, X-Y; "Normal"
+  rather than "Trace" so it cannot be confused with Trace style; with
   Phosphor chosen the same fold-out shows Persistence, Palette, Clear, so there is no phosphor strip); Trace style
   (fold-out: Linear, Dots, Peak, Pro; moved out of ACQ); Grid (toggle, in every mode); CH1 V/div (fold-out: value,
   +, -; replaces V+ CH1 V-); CH2 V/div (same); 50 % TRIG (action, as today); one spare slot.
@@ -61,7 +65,9 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   Cycle, Time+, Time-, Duty+, Duty-; `scopesettings.measuresstate`, drawn by `scope_display_measurements`); the
   ticked ones appear as cards, CH1's from the left and CH2's from the middle (x 366), stacking upward over the plot.
   Card scheme **(owner)**: the stock one, a small chip in the channel colour with the digit 1 or 2 in black, then
-  "Metric: value" in white on a dark grey rounded card ("[1] VPP: 2.40V"); today's Atlan drawing changes to that and
+  "Metric: value" in white on a dark grey rounded card ("[1] Vpp: 2.40V"); the metric names are the firmware's table
+  (Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq, Cycle, Time+, Time-, Duty+, Duty-) and values are formatted to fit the card's
+  about 92 px of text (four significant digits and a unit, "500us" not "500.0us"); today's Atlan drawing changes to that and
   the "Freg" label typo is fixed with it. The record-position slider row under the grid stays in every mode. Roadmap,
   not now: a spectrum card set (peak frequency and level per channel, THD) and the FPGA hardware measurements of
   docs/plans/roadmap.md section 8 item 6 feeding the same cards.
@@ -88,8 +94,11 @@ Settings screen; the USB drive screen text. Everything else keeps its place and 
   module on/off, time and date; RTC only), Start-up (one row "At power-on" with the values "Open firmware", "Boot menu,
   then open firmware", "Boot menu, then stock firmware": the stock image always comes with the boot menu), and "Restore
   default settings" with a confirmation that says it keeps the calibration and no longer writes the boot-mode byte. The
-  USB-Serial toggle is removed (the build forces CDC). Dev mode and FEL start move to a developer page in Diagnostics
-  (Log page, behind a confirmation): the trigger debug overlay and "start FEL at next power-on".
+  USB-Serial toggle is removed (the build forces CDC). Dev mode moves to a developer page in Diagnostics (from the Log
+  page): "Debug overlay" (today's dev mode: trigger address and touch coordinates drawn over the top bar) as a toggle,
+  and "Enter FEL now" behind a confirmation, which does what the USB command ENTER_FEL does (reboot into the USB boot
+  loader at once, the card untouched); the boot-mode byte is never written for FEL from the UI, since boot mode 2
+  would start FEL on every power-on.
 
 ## 6. Diagnostics (design artboards Status, Calibration, Log)
 
@@ -112,7 +121,10 @@ sentences: each screen is a title, one instruction, a progress or result line, a
 | 3 | CH2 gain | "Plug the CH2 probe in and connect it to the calibration post. Set it to 1X on the handle. Tap Calibrate." | as screen 2 for CH2 | Cancel, Calibrate (becomes Continue) |
 | 4 | Done | the plain-word summary per channel (cores matched to x code, gain mismatch y %) | | Cancel, Save calibration |
 
-Cancel on any screen leaves without writing anything. There is no Skip: a channel that cannot be measured is reported on
+Screen 1 shows "USB is connected: unplug it before Calibrate" in amber while a host is attached. While a step runs the
+action button reads "Measuring..." and is greyed; Cancel stays. The Done screen is the success message in plain words,
+one line per channel ("CH1 calibrated: cores matched, gain mismatch 1.3 %"), no jargon. The dimmed scope behind the
+dialog is frozen (no live trace, no warning). Cancel on any screen leaves without writing anything. There is no Skip: a channel that cannot be measured is reported on
 its screen and the user decides between retrying and Cancel. Two exceptions the firmware needs: on a bitstream without
 the generator (stock 0x1432) the gain screens say "Gain calibration needs the open FPGA bitstream" and Continue leads
 to Done, so the zero level can still be saved; and the stock volts-per-range calibration (external DC source,
