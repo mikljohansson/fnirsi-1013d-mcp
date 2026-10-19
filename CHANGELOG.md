@@ -31,6 +31,23 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.62 - 2026-10-19 (protocol 1.19, docs/protocol.md section 14 row 58)
+
+- Fixed: on FPGA 0x1537 CH2 core A was garbled in about 40 % of 200 MSa/s captures, with no register write in
+  between, and 0.2.61's check (after rate writes only) missed it. Every 200 MSa/s capture is now checked before
+  anything reads it (screen, READ_RAW, calibration wizard, class probe) and re-taken when garbled, up to 16 times. On
+  0x1532..0x1537 the check reads 250 words of the record (about 0.3 ms); the extra check conversion after each rate
+  write is gone (9e7e53d).
+- Added: support for FPGA 0x1538, which guarantees the core order (core B first) and checks its ADC encodes itself.
+  The firmware reads its status byte (0x33) after every 200 MSa/s capture and checks the encode convention at boot.
+  New caps bit 18 ENC_CHECK and features bit 5 (9e7e53d).
+- Added: GET_HEALTH grows to 104 bytes with the check's mode, the last 0x33 byte, flags, and counts of captures
+  checked, found bad and recovered. Event type 21 now carries the reason (data check, 0x33, boot convention), the
+  number of re-arms and the caller (9e7e53d).
+- Changed: Diagnostics FPGA line: 0x1537 in amber, "ADC core order differs: recalibrate after flashing 0x1538";
+  0x1538 "encode check OK" or the failing pins; 0x1532..0x1536 now say "fixed in 0x1538" (9e7e53d).
+- Changed: the READ_RAW / READ_TRACE interleave order is fixed at core B first (`interleave_order` 0) (9e7e53d).
+
 #### 0.2.61 - 2026-10-19 (protocol 1.18, docs/protocol.md section 14 row 57)
 
 - Fixed: after a sample-rate change the FPGA can garble one ADC core's 200 MSa/s data. This happens randomly on AL3

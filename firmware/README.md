@@ -556,6 +556,45 @@ triggered record (pretrigger included) into a 2048 x 64 accumulator. Writes 0x57
 - Not host-testable (target only, read against zaklad.v): the bus sequences in `pc_seq_hw.c`, the UI run and its
   deadline. Bench plan: firmware/AGENTS.md section 33.
 
+### Full-rate capture check (FPGA 0x1538, fw 0.2.62, protocol 1.19)
+
+Why: on AL3 0x1532..0x1536 a 0x0D or 0x53 write can leave one ADC chip's encode clocks half a word out of phase with
+the RAM write clock; at 200 MSa/s one core of that chip is then captured while its outputs change, until the next such
+write (fpga/al3/README.md "Findings" item 3). 0x1537 made that deterministic but left chip 2's phase to a marginal flop
+that is re-resolved at every sampling reset: on the bench CH2 core A was garbled in about 40 % of host arms with no
+register write in between (docs/hardware-status.md, 2026-10-19 16:48). 0.2.61 checked only after 0x0D writes and
+missed that. 0x1538 (fpga-gen7) drives the encodes from the write clock at every rate (encB = the write clock, encA
+its complement, core B the earlier sample: `PC_INTERLEAVE_ORDER` 0, now fixed) and checks its own pins.
+
+What the firmware does (`enc_heal.c/.h` pure, `enc_heal_hw.c` target, `pc_acq_service` in pc_cmds.c for host ARM):
+- Every capture at divider 0 (200 MSa/s; always the legacy 8-bit layout) is checked before anything reads it:
+  the UI readout, the calibration wizard, the v4 class probe, the 1.00o5 calibration and auto setup (all through
+  `fpga_done_conversion`) and host ARM (`pc_acq_service`, before READ_RAW / READ_TRACE can see it).
+- 0x1538..0x153F: FPGA read 0x33; bit 0 set means an encode check failed since the last 0x01 = 1. One bus byte.
+- 0x1532..0x1537: the residual of 0.2.61 on the record's first 250 words per channel, read from the ring the readout
+  reads anyway (1000 bus bytes, about 0.3 ms, no extra conversion): per channel the RMS of core B against the mean of
+  its two core A neighbours; above 8 codes the capture is bad (bench: 1.3 codes clean, 14-34 garbled).
+- A bad capture is discarded and the same conversion re-armed (on 0x1532..0x1536 after 0x0D = 1, 0, since there only a
+  rate write re-rolls the phase), at most `EH_MAX_TRIES` (16) times; then the last one is accepted and flagged. The UI
+  keeps showing the previous trace meanwhile; in normal or single mode a re-arm waits for the next trigger.
+- Not checked: other rates, stock / EF2 / EP4 bitstreams, and 0x1536 / 0x1537 sequencer runs (segments and lane sums
+  are not samples; 0x1538's flag covers a whole run).
+- At boot on 0x1538 the firmware reads 0x33 once and requires bits 3:2 = 01 (convention 1); otherwise GET_HEALTH 90
+  bit 1, event 21 reason 3 and an amber Diagnostics line.
+- Reporting: GET_LINK_STATS 62 (captures found bad) and 63 (recovered by a re-arm); GET_HEALTH 88..103 (mode, last
+  0x33, flags, 0x33 at boot, bad, recovered, checked); event 21 per capture that needed re-arms (a = reason << 5 |
+  re-arms, bit 7 not recovered; b = caller << 12 | first value); the report file's "Full-rate capture check" line;
+  Diagnostics FPGA line: 0x1532..0x1536 amber "ADC capture timing race, fixed in 0x1538", 0x1537 amber "ADC core order
+  differs: recalibrate after flashing 0x1538", 0x1538 "encode check OK" (", N captures re-taken"), or amber "encode
+  check failed on CH2 A, ..." with the pins 0x33 bits 7:4 report wrong. Protocol: docs/protocol.md row 58.
+- Cost: on 0x1538 one bus byte per full-rate capture; on 0x1532..0x1537 about 0.3 ms per full-rate capture plus the
+  re-arms (0x1537: about 0.67 re-arms per capture on average). The 0.2.61 check after each rate write, which took one
+  extra conversion, is gone.
+- Host tests: `test_enc_heal.c` (modes, residual, both checks against a mock FPGA, the re-arm bound, 0x1537's 40 %
+  statistics, event fields), `test_session.c` `test_enc_check` (0x33 good / bad sequences through ARM / WAIT, the bound,
+  GET_HEALTH, a failed re-arm, 0x1537 and 0x1535 data checks, stock unchecked), `test_ui_diag.c` (the FPGA lines),
+  `test_diag.c` (report line, event 21 text). The UI path (`fpga_encode_after_capture`) is target-only.
+
 ### FFT core (`fx_fft.c`, protocol builds)
 
 Fixed-point real-input FFT for the spectrum analyser (plan: `docs/plans/dpos350p-features.md` 1.2). No libc, no float:
@@ -1619,12 +1658,14 @@ CH1 and the Skip button are gone with the per-channel screens.
 5. New run, Cancel during the zero step's measurement: it stops within about a second and nothing changed. Stray
    touches off the two buttons do nothing on every screen.
 
-**Full-rate capture check (fw 0.2.61, `enc_heal.h`).** Each full-rate point of the zero and gain steps is preceded by
-a check that both channels' 200 MSa/s data is sane. After a 0x0D write the FPGA can deliver one core's samples
-garbled (AL3 0x1532..0x1536 at random; CH2 core A on 0x1537). The check computes the RMS of core B against its core A
-neighbours. Above 8 codes it re-writes 0x0D and checks again, up to 16 times. If the data never recovers, the line
-reads "ADC capture timing: the 200 MSa/s data stays garbled". The same check runs after any rate write, before the
-next UI conversion and before a host ARM. GET_LINK_STATS 62-63 and event types 21-22 report it (protocol row 57).
+**Full-rate capture check (fw 0.2.61, per capture since fw 0.2.62, `enc_heal.h`).** Every 200 MSa/s conversion of the
+zero and gain steps is checked before the wizard reads it, like every other full-rate capture (section 5 "Full-rate
+capture check"): on FPGA 0x1538 by the FPGA's own encode check (read 0x33), on 0x1532..0x1537 by the RMS of core B
+against its core A neighbours. A garbled capture is discarded and the conversion re-armed, up to 16 times. If one
+stays garbled, the range fails with "ADC capture timing: the 200 MSa/s data stays garbled" (ACAL_E_TIMING). The
+wizard's zero step reads raw codes per core, so it passes on 0x1537 and 0x1538 alike; the stored per-core zeros and
+gains of a calibration taken on 0x1537 are on the wrong cores of chip 1 once 0x1538 is flashed (Diagnostics says so on
+0x1537): calibrate again after flashing 0x1538. Calibration from 0x1535 fits 0x1538.
 
 ### 6.5 Calibration v4: background interleave tracking (fw 0.2.50, protocol 1.15)
 
