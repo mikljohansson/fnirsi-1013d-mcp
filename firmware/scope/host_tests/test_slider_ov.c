@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// test_slider_ov.c - the slider track overview's geometry (slider_ov.c, fw 0.2.73; docs/plans/slider-overview.md): the
+// test_slider_ov.c - the slider track overview's geometry (slider_ov.c, fw 0.2.73, decision 7 in fw 0.2.74; docs/plans/slider-overview.md): the
 // track the three modes share, the column ranges with their join, rows, line runs, the inside-window test.
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -8,23 +8,27 @@
 #include "tb_view.h"
 #include "bode_ui.h"
 
-//The three modes map the same track (owner 10-19 21:36: the whole row, no frame sides)
+//The three modes map the same track (owner 10-19 22:15, decision 7: the whole row, no frame or line; the window a box
+//with a 1 px margin)
 static void test_geometry(void)
 {
   T_EQ(SOV_X, 2);
   T_EQ(SOV_W, 726);
-  T_EQ(SOV_Y, 453);
-  T_EQ(SOV_H, 19);
-  T_EQ(SOV_Y + SOV_H - 1, 471);                       //the old frame's bottom row is track now
-  T_EQ(SOV_LINE_Y, SOV_Y - 1);
+  T_EQ(SOV_Y, 452);                                   //the old frame's top line is track now
+  T_EQ(SOV_H, 20);
+  T_EQ(SOV_Y + SOV_H - 1, 471);                       //and its bottom line
+  T_EQ(SOV_WIN_Y, SOV_Y + 1);                         //the box under the 1 px margin
+  T_EQ(SOV_WIN_Y + SOV_WIN_H, SOV_Y + SOV_H - 1);     //and above it
+  T_EQ(SOV_WIN_Y + 1, 454);                           //the box's inside: y 454..469, 16 rows
+  T_EQ(SOV_WIN_Y + SOV_WIN_H - 2, 469);
   T_EQ(TBV_SLIDER_X, SOV_X);
   T_EQ(TBV_SLIDER_W, SOV_W);
   T_EQ(BU_SL_X, SOV_X);
   T_EQ(BU_SL_W, SOV_W);
   T_EQ(TBV_SLIDER_FRAME_X, SOV_X);                    //the hit area keeps covering the whole track
   T_EQ(TBV_SLIDER_FRAME_X + TBV_SLIDER_FRAME_W, SOV_X + SOV_W);
-  T_TRUE(TBV_SLIDER_HIT_Y < SOV_LINE_Y);
-  T_TRUE(BU_SL_HIT_Y < SOV_LINE_Y);
+  T_TRUE(TBV_SLIDER_HIT_Y < SOV_Y);
+  T_TRUE(BU_SL_HIT_Y < SOV_Y);
   T_TRUE(SOV_Y + SOV_H <= 480);
 }
 
@@ -110,12 +114,12 @@ static void test_rows(void)
 {
   int32 y, prev = 0;
 
-  //The Scope: screen y 49..448 onto the 19 rows, top to bottom, every row used, clipped outside
+  //The Scope: screen y 49..448 onto the 20 rows, top to bottom, every row used, clipped outside
   T_EQ(sov_row(49, 49, 449), 0);
   T_EQ(sov_row(448, 49, 449), SOV_H - 1);
   T_EQ(sov_row(10, 49, 449), 0);
   T_EQ(sov_row(479, 49, 449), SOV_H - 1);
-  T_EQ(sov_row(249, 49, 449), 9);                     //the centre line: the middle row
+  T_EQ(sov_row(249, 49, 449), 10);                    //the centre line: the middle row
   for(y = 49; y <= 448; y++)
   {
     int32 r = sov_row(y, 49, 449);
@@ -135,7 +139,7 @@ static void test_rows(void)
   //Fitted
   T_EQ(sov_row_fit(-3000, -3000, -60000), 0);
   T_EQ(sov_row_fit(-60000, -3000, -60000), SOV_H - 1);
-  T_EQ(sov_row_fit(-31500, -3000, -60000), 9);
+  T_EQ(sov_row_fit(-31500, -3000, -60000), 10);
   T_EQ(sov_row_fit(7, 7, 7), SOV_H / 2);
   T_EQ(sov_row_fit(100, 50, 0), 0);
   T_EQ(sov_row_fit(-100, 50, 0), SOV_H - 1);

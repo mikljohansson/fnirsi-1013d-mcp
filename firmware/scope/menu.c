@@ -7406,8 +7406,8 @@ static void scope_slider_envelope(PCHANNELSETTINGS s, uint32 full, uint32 dim, i
     sov_draw_run(SOV_X + c, row[hi[c]], row[lo[c]], full, dim, wx, ww);
 }
 
-//The record-position slider row (fw 0.2.73, slider_ov.h): the line, the overview of each enabled channel (CH2 first, CH1
-//over it) and the window's edges. No overview in roll mode, in 1.00o5's branch for the slow sample rates (its fixed
+//The record-position slider row (fw 0.2.73, slider_ov.h): the track, the overview of each enabled channel (CH2 first, CH1
+//over it) and the window box. No overview in roll mode, in 1.00o5's branch for the slow sample rates (its fixed
 //181 px window does not map the record) or in X-Y (no time axis). It replaces 1.00o5's row of yellow "~" in the track.
 void scope_draw_slider_row(void)
 {

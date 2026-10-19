@@ -1,14 +1,15 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 // slider_ov.h - the overview in the slider track under the plot (fw 0.2.73, docs/plans/slider-overview.md).
 //
-// The slider row of the Scope, the Spectrum and the Frequency response (owner 2026-10-19 21:36, section 10 F item 6):
-//   y 452          one line over x 2..727 that parts the track from the plot above it (the old frame's top; its left,
-//                  right and bottom lines are gone)
-//   y 453..471     the track: 19 rows over x 2..727, 726 columns; the overview uses all of it
-//   the window     two vertical lines, 1 px each, at its left and right edge over the track's full height; the overview
-//                  between them in the full colour, outside them in the dimmed colour
+// The slider row of the Scope, the Spectrum and the Frequency response (owner 2026-10-19 22:15, section 10 F item 7):
+//   y 452..471     the track: 20 rows over x 2..727, 726 columns, no line or frame of its own (the old frame's four
+//                  lines are all gone; the plot pane's outline above is the separation). The overview is mapped on all
+//                  20 rows and drawn dimmed outside the window's box
+//   the window     a box, 1 px white lines at x and x + w - 1 over y 453..470 and at y 453 and y 470 over x..x + w - 1,
+//                  with a 1 px black margin around it (y 452, y 471, x - 1, x + w; clipped to the track); the overview
+//                  inside its lines (x + 1..x + w - 2 by y 454..469, 16 rows) in the full colour
 // Column x stands for the part of the whole (record, axis, 1 Hz .. 10 MHz) that maps to track pixel x, the same mapping
-// as the window's (tbv_slider, bu_slider_x, the Spectrum's window). Row 0 is the top row (y 453).
+// as the window's (tbv_slider, bu_slider_x, the Spectrum's window). Row 0 is the top row (y 452).
 //
 // Pure C (host_tests/test_slider_ov.c); the drawing helpers are in slider_ov_draw.c.
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -18,11 +19,12 @@
 
 #include "types.h"
 
-#define SOV_LINE_Y      452       //the line between the plot and the track
 #define SOV_X           2         //first track column
 #define SOV_W           726       //track columns, x 2..727
-#define SOV_Y           453       //top track row
-#define SOV_H           19        //track rows, y 453..471
+#define SOV_Y           452       //top track row
+#define SOV_H           20        //track rows, y 452..471
+#define SOV_WIN_Y       453       //the window box's top line (under the 1 px margin)
+#define SOV_WIN_H       18        //the box's height, lines included: y 453..470; inside it y 454..469
 
 //The dimmed colours (half intensity, exact in RGB565): CH1 yellow, CH2 cyan, the Frequency response phase pink
 #define SOV_CH1_DIM     0x00808000
