@@ -80,6 +80,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   so the interpolated trace wobbles at about 1 Hz; no trigger jitter: the edge index is stable). fw-acq's rule allows one sample
   per division; raise the minimum to about 10 samples per division (10 px per sample) so such zooms are unavailable and the snap
   picks a viable time/div; one constant in tb_view.c plus the host test. Next firmware batch.
+- **Bottom scroll bar in Spectrum and Frequency response** (owner 10-19 19:40): the Scope's record slider construction under the
+  plot of both modes; Spectrum: the span as a window over 0..fs/2, drag pans the centre; Frequency response: Start..Stop as a window
+  over 100 Hz..10 MHz on the log axis, drag pans both and re-sweeps. Designer (ux-bode) updates the boards and bode-ui.md /
+  ux-makeover.md first; firmware batch after fw-freq lands (spectrum.c and bode_view.c).
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
