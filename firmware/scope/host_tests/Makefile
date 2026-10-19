@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/pc_seq.c $(SRC)/adc_cal.
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/pc_seq.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h $(SRC)/pc_ident.h $(SRC)/pc_report.h $(SRC)/pc_life.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag
 
 $(OUT):
 	mkdir -p $@
@@ -77,6 +77,10 @@ $(OUT)/test_diag: test_diag.c test_util.h $(CMDS_DEPS) | $(OUT)
 $(OUT)/test_touch_pick: test_touch_pick.c test_util.h $(SRC)/touch_pick.c $(SRC)/touch_pick.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_touch_pick.c $(SRC)/touch_pick.c
 
+# The record behind the trace (fw 0.2.64): time/div viability from the record length, window, slider
+$(OUT)/test_tb_view: test_tb_view.c test_util.h $(SRC)/tb_view.c $(SRC)/tb_view.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_tb_view.c $(SRC)/tb_view.c
+
 # 0x1536 sequencer maths (fw 0.2.58): fit rules, table entries, slot addresses, UI averaging plan, exact mean
 $(OUT)/test_seq: test_seq.c test_util.h $(SRC)/pc_seq.c $(SRC)/pc_seq.h $(SRC)/adc_cal.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_seq.c $(SRC)/pc_seq.c
@@ -132,6 +136,7 @@ test: all
 	$(OUT)/test_ui
 	$(OUT)/test_ui_diag
 	$(OUT)/test_touch_pick
+	$(OUT)/test_tb_view
 	$(OUT)/test_seq
 	$(OUT)/test_phosphor
 	$(OUT)/test_mmu

@@ -1071,7 +1071,6 @@ extern const uint8 time_per_div_sample_rate_15k[35];//33
 
 extern const uint8 sample_rate_time_per_div[18];//18
 //extern const uint8 viable_time_per_div[18][24];
-extern const uint8 viable_time_per_div[29][35];//18 a 33
 
 //extern const int8 *L_time_div_texts[9];
 

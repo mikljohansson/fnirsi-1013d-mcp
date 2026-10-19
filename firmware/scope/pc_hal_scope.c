@@ -40,6 +40,7 @@
 #include "ui_ctrl.h"
 #include "pc_seq_hw.h"
 #include "ui_diag_view.h"
+#include "acq_view.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -233,6 +234,9 @@ void pc_hal_timebase_write(const pc_hw_timebase *t, int raw)
     scopesettings.timeperdiv = t->timeperdiv;
     scopesettings.samplerate = t->samplerate;
     scopesettings.long_mode  = 0;
+    //fw 0.2.64: the same rule as the ACQ menu: a time/div that does not fit the record at this rate is snapped (the
+    //response's timeperdiv_index shows it) and the trigger point kept inside the record (acq_view.c)
+    acq_view_fit(1);
     fpga_set_time_base(scopesettings.timeperdiv);
     fpga_set_sample_rate(scopesettings.samplerate);
 
@@ -342,8 +346,13 @@ void pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask)
   if(mask & PC_TRG_TOTAL)
     fpgasettings.totalsamples = t->total;
 
+  //fw 0.2.64: a new record length or trigger sample: the time/div and the trigger point follow it (acq_view.c)
+  if(mask & (PC_TRG_PRE | PC_TRG_TOTAL))
+    acq_view_fit(1);
+
   //Show it: trigger button, RUN/WAIT colour of the run chip
   pc_draw_begin(&save);
+  scope_acqusition_settings(0);
   scope_trigger_settings(0);
   scope_run_stop_text();
   pc_draw_end(&save);
@@ -1027,7 +1036,10 @@ void pc_hal_decim_set(uint8_t setting)
   pc_dec_flags   = setting & PC_DECIM_FLAGS;
 
   if(pc_dec_setting & 3)
+  {
     pc_dec_fit_memory();
+    acq_view_fit(1);
+  }
 
   //The next UI pass arms a fresh conversion with it
   scopesettings.display_data_done = 1;
@@ -1647,8 +1659,19 @@ void pc_glue_scope_warning(void)
   w.xy      = scopesettings.xymodedisplay ? 1 : 0;
 
   t = ui_scope_warning(&w);
+
+  //fw 0.2.64: no warning: the snap notice of acq_view.c for a few seconds ("Time/div set to 1us for this rate"), white
   if(!*t)
+  {
+    t = acq_view_notice();
+    if(!t)
+      return;
+
+    display_set_font(&font_2);
+    display_set_fg_color(WHITE_COLOR);
+    display_text(366 - ui_text_width(&font_2, t) / 2, 69, (int8 *)t);
     return;
+  }
 
   display_set_font(&font_2);
   display_set_fg_color(ORANGE_COLOR);
@@ -1883,6 +1906,9 @@ void pc_glue_poll_busy(void)
     pc_poll(&pc_sess, PC_CTX_BUSY);
     fpga_trace_who = who;
   }
+
+  //fw 0.2.64: a sector written by an older firmware may hold a time/div that does not fit its rate and record
+  acq_view_fit(0);
 }
 
 void pc_glue_poll_isr(void)

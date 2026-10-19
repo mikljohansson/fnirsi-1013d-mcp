@@ -25,6 +25,8 @@
 #include "ui_ctrl.h"
 #include "ctrl_page.h"
 #include "touch_pick.h"
+#include "tb_view.h"
+#include "acq_view.h"
 #include "ui_diag_view.h"
 #include "test.h"
 
@@ -2618,6 +2620,10 @@ void handle_acquisition_menu_touch(void)
                 //This way the sampling is actually done with the set speed, but the display stays at the set time per div
                 fpga_set_sample_rate(i);
 
+                //fw 0.2.64: unless the time/div no longer fits the record at this rate: then the nearest one that does,
+                //with a notice at the top of the plot (acq_view.c)
+                acq_view_fit(1);
+
                 //Display the new setting
                 scope_acquisition_speed_select();
 
@@ -2656,8 +2662,14 @@ void handle_acquisition_menu_touch(void)
           }    
             
           //Filter selector (bitstream 0x1534+) in 1.00o5's Long memory slot: Off, Boxcar, CIC2, CIC3 (+ FIR on 0x1535+)
+          //fw 0.2.64: a filter shortens the record to 8190 samples (16-bit layout): the time/div follows
           if((xtouch >= ACQ_MENU_XPOS + 204) && (xtouch <= ACQ_MENU_XPOS + 294) && pc_glue_ui_has(PC_FEAT_DECIM))
+          {
             pc_glue_decim_tap();
+            acq_view_fit(1);
+            scope_acquisition_timeperdiv_select();
+            scope_acqusition_settings(0);
+          }
         }        
         //======================================================================
         //Check on time per div being set
@@ -2670,11 +2682,17 @@ void handle_acquisition_menu_touch(void)
             x = ((i & 3) * 72) + 10 + ACQ_MENU_XPOS;
             y = ((i >> 2) * 23) + 241 + ACQ_MENU_YPOS;  //191
 
-            //Check if touch within this bounding box
+            //Check if touch within this bounding box (fw 0.2.64: a grey, not viable, time/div cannot be chosen)
             if((xtouch >= x) && (xtouch <= x + 68) && (ytouch >= y) && (ytouch <= y + 20))
             {
+              if(!acq_view_tb_ok(((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i))
+                break;
+
               //Set the new time per div
               scopesettings.timeperdiv = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i;
+
+              //The trigger point stays inside the record
+              acq_view_clamp_pos();
 
               //Display the new setting
               scope_acquisition_timeperdiv_select();
@@ -2710,6 +2728,11 @@ void handle_acquisition_menu_touch(void)
               //scope_acqusition_settings(0);
               
               scope_acquisition_memory_deep_select();
+
+              //fw 0.2.64: a shorter record may no longer fill the trace area at this time/div
+              acq_view_fit(1);
+              scope_acquisition_timeperdiv_select();
+              scope_acqusition_settings(0);
               break;
             }
           }
@@ -4924,6 +4947,9 @@ void move_trigger_point_position(void)
   
   //Update the current position
   scopesettings.triggerhorizontalposition = position;
+
+  //fw 0.2.64: in short mode the limits come from the record (the window cannot scroll past either end of it)
+  acq_view_clamp_pos();
   
   //if(!scopesettings.long_mode || scopesettings.triggermode) scopesettings.triggerhorizontalposition = position;
   

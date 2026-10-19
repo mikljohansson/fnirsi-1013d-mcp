@@ -23,6 +23,8 @@
 #include "variables.h"
 
 #include "sin_cos_math.h"
+#include "tb_view.h"
+#include "acq_view.h"
 #include "ref_and_math.h"
 /*
 //sinx
@@ -236,6 +238,11 @@ void scope_adjust_timebase_and_voltdiv (void)
     
     //if((scopesettings.triggermode == 1)) 
         //scope_display_trace_data();
+
+    //fw 0.2.64: a time/div kept at the record's rate (stopped, viewer) stops where the record no longer fills the trace
+    //area or a division holds less than one sample; the trigger point stays inside the record (acq_view.c)
+    if(!scopesettings.long_mode && acq_view_fit(1))
+      fpga_set_time_base(scopesettings.timeperdiv);
   
     //Show he new setting on the display
     scope_acqusition_settings(0);
@@ -2147,56 +2154,70 @@ void scope_display_trace_data(void)
   //This gives the step size for going through the samples. Is also the linear interleaving step for the y direction
   disp_sample_step = 1.0 / disp_xpos_per_sample;
 
-  //The displayable x range is based on the number of samples and the number of x positions needed per sample
-  //Halved to allow trigger position to be in the center
-  //double xrange = (scopesettings.samplecount * disp_xpos_per_sample);// / 2.0;
-  double xrange = (fpgasettings.totalsamples * disp_xpos_per_sample);// / 2.0;
-
-  //x range needs to be at least 1 pixel
-  if(xrange < 1.0)
+  //fw 0.2.64: in short mode the window comes from the record (tb_view.c): the first sample shown stays inside the record,
+  //and when the record is shorter than the trace area the trace starts at the left edge and ends where the record ends
+  //(1.00o5 clamped only the start, so the trace shifted against the trigger point and zeros were drawn past the end)
+  if(!scopesettings.long_mode && (scopesettings.samplerate < 18) && (scopesettings.timeperdiv < 35))
   {
-    xrange = 1.0;
+    tbv_window((int32)disp_trigger_index, triggerposition, sample_rate[scopesettings.samplerate],
+               frequency_per_div[scopesettings.timeperdiv], fpgasettings.totalsamples, &disp_first_sample, &disp_xend);
+    disp_xstart = TBV_X_FIRST;
   }
-  else if(xrange > fpgasettings.totalsamples)
-   // else if(xrange > 725.0)
+  else
   {
-    //Limit on max screen pixels to avoid disp_xend becoming 0x80000000 due to overflow
-    xrange = fpgasettings.totalsamples;// - fpgasettings.settriggerpoint;//725.0;//comment
-  }
 
-  //Calculate the start and end x coordinates
-  disp_xstart = triggerposition - xrange;
-  disp_xend = triggerposition + xrange;
-  //disp_xend = xrange - triggerposition;
-  //disp_xend = 1500;
+    //The displayable x range is based on the number of samples and the number of x positions needed per sample
+    //Halved to allow trigger position to be in the center
+    //double xrange = (scopesettings.samplecount * disp_xpos_per_sample);// / 2.0;
+    double xrange = (fpgasettings.totalsamples * disp_xpos_per_sample);// / 2.0;
+
+    //x range needs to be at least 1 pixel
+    if(xrange < 1.0)
+    {
+      xrange = 1.0;
+    }
+    else if(xrange > fpgasettings.totalsamples)
+     // else if(xrange > 725.0)
+    {
+      //Limit on max screen pixels to avoid disp_xend becoming 0x80000000 due to overflow
+      xrange = fpgasettings.totalsamples;// - fpgasettings.settriggerpoint;//725.0;//comment
+    }
+
+    //Calculate the start and end x coordinates
+    disp_xstart = triggerposition - xrange;
+    disp_xend = triggerposition + xrange;
+    //disp_xend = xrange - triggerposition;
+    //disp_xend = 1500;
   
-  //Limit on actual start of trace display
-  if(disp_xstart < 3)
-  {
-    disp_xstart = 3;
+    //Limit on actual start of trace display
+    if(disp_xstart < 3)
+    {
+      disp_xstart = 3;
+    }
+
+    //And limit on the actual end of the trace display
+    if(disp_xend > 727)//725
+    {
+      disp_xend = 727;
+    }
+  
+    //And limit for long view the trace display
+    if(disp_xend < 1)
+    {
+      disp_xend = 1;
+    }
+  
+    //Determine first sample to use based on a full screen worth of samples and the trigger position in relation to the number of pixels on the screen
+    disp_first_sample = disp_trigger_index - (((725.0 / disp_xpos_per_sample) * triggerposition) / 725.0) - 1;
+    //disp_first_sample = disp_trigger_index - (((727.0 / disp_xpos_per_sample) * triggerposition) / 727.0) - 1;
+
+    //If below the first sample limit it on the first sample
+    if(disp_first_sample < 0)
+    {
+      disp_first_sample = 0;
+    }
   }
 
-  //And limit on the actual end of the trace display
-  if(disp_xend > 727)//725
-  {
-    disp_xend = 727;
-  }
-  
-  //And limit for long view the trace display
-  if(disp_xend < 1)
-  {
-    disp_xend = 1;
-  }
-  
-  //Determine first sample to use based on a full screen worth of samples and the trigger position in relation to the number of pixels on the screen
-  disp_first_sample = disp_trigger_index - (((725.0 / disp_xpos_per_sample) * triggerposition) / 725.0) - 1;
-  //disp_first_sample = disp_trigger_index - (((727.0 / disp_xpos_per_sample) * triggerposition) / 727.0) - 1;
-
-  //If below the first sample limit it on the first sample
-  if(disp_first_sample < 0)
-  {
-    disp_first_sample = 0;
-  }
 /*
   //This makes sure no reading outside the buffer can occur
   if(disp_sample_step > ((scopesettings.samplecount) / 2))
@@ -2700,7 +2721,8 @@ void scope_display_channel_linear_trace_old(PCHANNELSETTINGS settings)  //povodn
   }
 
   //When step less then 1 the last pixel needs to be interpolated between current sample and next sample.
-  if(disp_sample_step < 1.0)
+  //fw 0.2.64: only when the trace runs to the right edge; a record that ends inside the trace area has no next sample
+  if((disp_sample_step < 1.0) && (disp_xend >= TBV_X_END))
   {
     //Calculate the scaler for the last y value based on the x distance from the last drawn position to the end of the screen
     //divided by the x distance it takes to where the next position should be drawn (Number of x steps per sample)
@@ -2791,7 +2813,8 @@ void scope_display_channel_dots_trace(PCHANNELSETTINGS settings)//1
   }
 
   //When step less then 1 the last pixel needs to be interpolated between current sample and next sample.
-  if(disp_sample_step < 1.0)
+  //fw 0.2.64: only when the trace runs to the right edge; a record that ends inside the trace area has no next sample
+  if((disp_sample_step < 1.0) && (disp_xend >= TBV_X_END))
   {
     //Calculate the scaler for the last y value based on the x distance from the last drawn position to the end of the screen
     //divided by the x distance it takes to where the next position should be drawn (Number of x steps per sample)
