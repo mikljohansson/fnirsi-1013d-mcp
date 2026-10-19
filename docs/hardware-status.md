@@ -976,4 +976,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   the new grid (decades with 2 and 5 lines), the ACQ chip "Set by / the sweep", the generator chip on the last tone, the slider
   window over 100 Hz .. 1 MHz. The on-device mode stays blocked by the capture fault for real use; the walk-through of section 47
   waits for 0x153A. Scope state: Frequency response view open, STOP, generator off.
+- 2026-10-19 21:47: fw 0.2.72 (fw-bus merged: dummy strobe in every FPGA readout, EXT shift, arm order, encode check by data, core
+  order from 0x33; protocol 1.22) built with GCC 10 and pinned backups/fw-0.2.72_7f85890e.bin (sha256
+  7f85890e4bb312cfcc288b00613b9cdd9289d32d8650c34c63d8593cf6fb9950); host test suite and 100 protocol vectors green. Not loaded
+  yet: the scope answered E_BUSY at 21:33 (a menu open on the unit). Bench list B1-B8 in firmware/AGENTS.md section 48; B1, B2
+  (READ_TRACE vs READ_RAW edge), B3 and B6 (rate toggles, GET_HEALTH bad count) are host-side.
 

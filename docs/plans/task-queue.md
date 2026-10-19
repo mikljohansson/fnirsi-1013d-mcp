@@ -356,9 +356,18 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   sweep. Open (queue): the simulator lacks reason 8 and the new header rule (mcp item); a single sweep started from the CTRL page
   leaves the bar on that page where RUN/STOP is not visible (owner to decide: jump back to page one?); after a sweep the generator
   chip shows the user's generator although the pin is off. Loaded 21:30 as backups/fw-0.2.71_1264e26c.bin; walk-through pending.
-- fw-over (Opus, branch fw-over, dispatched 21:30, fw 0.2.72 provisional): the slider-track overview per the owner's decisions
+- fw-over (Opus, branch fw-over, dispatched 21:30, fw 0.2.73 provisional, section 49): the slider-track overview per the owner's decisions
   (18 px window, 14 rows, dimmed/full, Scope envelope replacing the stock thumbnail, Spectrum from the existing FFT, Frequency
   response AUTO SET copy), then tap-to-jump as the fast follow on the same branch; boards regenerated to 18 px.
+- fw-bus (done 21:40, about 515k tokens, merged 21:47 as fw 0.2.72 / protocol 1.22 row 62, handoff firmware/AGENTS.md section 48,
+  bench list B1-B8 there): fpga_bus.c with a per-version dummy-strobe table (every readout one word late on every bitstream, 0x1539
+  and stock included; traces and READ_TRACE move two samples earlier and match READ_RAW), exact record-start wrap, EXT shift at
+  plain rates (4 words, 2 at 200 MSa/s; GET_CAPTURE_INFO byte 70, GET_DECIM byte 31), EXT kept on channel toggles, 0x0B/0x0C
+  before the reset (model: 425/600 lost pretriggers before, 0/11000 after), encode check judges 0x1538+ captures with a rate or
+  filter write by their data (no blind re-arm), event type 22 off after boot (GET_EVENT_LOG flags bits 2:1), GET_LINK_STATS 68
+  counters, caps bit 12 cleared on 0x1538+ only when boot 0x33 says B first. Open: EXT shift at dividers 1-8 extrapolated (B5
+  measures), caps bit 11 (read lag unverified) to clear after B2, docs/mcp-tools.md not regenerated for scope_event_log fpga_trace.
+  Pinned backups/fw-0.2.72_7f85890e.bin; load and B1/B2/B6 by the coordinator when the scope is free of menus.
 - fw-screen (done 21:10, about 195k tokens, merged as fw 0.2.70; T9 passed 21:11, 0.22 s per screen): READ_SCREEN handler (maindisplaybuffer rows, MAIN only so a
   modal menu answers E_BUSY), SCREENSHOT cap on every known bitstream, vectors, host test, mcp test; bench T9 pending
   (firmware/AGENTS.md section 46).
