@@ -5114,7 +5114,7 @@ void scope_open_acquisition_menu(void)
   //display_set_fg_color(BLACK_COLOR);
   display_draw_horz_line(ACQ_MENU_YPOS +  211, ACQ_MENU_XPOS + 8, ACQ_MENU_XPOS + ACQ_MENU_WIDTH - 8);//-84
   
-  display_draw_vert_line(ACQ_MENU_XPOS +  304, ACQ_MENU_YPOS + 8, ACQ_MENU_YPOS + ACQ_MENU_HEIGHT - 8);
+  display_draw_vert_line(ACQ_MENU_XPOS +  304, ACQ_MENU_YPOS + 8, ACQ_MENU_YPOS + ACQ_MENU_BODY_H - 8);
 
   //Main texts in white
   display_set_fg_color(WHITE_COLOR);
@@ -5174,6 +5174,7 @@ void scope_open_acquisition_menu(void)
 
   scope_acquisition_memory_deep_select();
   scope_acquisition_trace_select();
+  PC_ACQ_DISPLAY_DRAW();             //fw 0.2.51: Display row (Normal / Phosphor / X-Y) under 1.00o5's menu
 
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1
@@ -6371,7 +6372,7 @@ void scope_open_system_settings_menu(void)
 
   for(y=SYSTEM_MENU_YPOS+58;y<SYSTEM_MENU_HEIGHT;y+=59)//350
   {
-    display_draw_horz_line(y, SYSTEM_MENU_XPOS+9, SYSTEM_MENU_HEIGHT_FULL-28);
+    display_draw_horz_line(y, SYSTEM_MENU_XPOS+9, SYSTEM_MENU_XPOS+235);
   }
 
   //Display the menu items
@@ -6381,7 +6382,6 @@ void scope_open_system_settings_menu(void)
   scope_system_settings_other_settings_item(0);
   
   scope_system_settings_calibration_item(0);
-  scope_system_settings_x_y_mode_item(0);
   scope_system_settings_confirmation_item(0);
   if(1 PC_UI_HAS(PC_FEAT_RTC)) scope_system_settings_RTC_settings_item(0);
 
@@ -6893,30 +6893,6 @@ void scope_system_settings_calibration_item(int mode)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void scope_system_settings_x_y_mode_item(int mode)
-{
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Set the colors for white foreground and grey background
-    display_set_fg_color(WHITE_COLOR);
-    display_set_bg_color(DARKGREY_COLOR);
-
-    //Display the icon with the set colors
-    display_copy_icon_use_colors(x_y_mode_display_icon, SYSTEM_MENU_XPOS+21, 299, 24, 24);//176//+21 299
-
-    //Display the text
-    display_set_font(&font_3);
-    display_text(SYSTEM_MENU_XPOS+147, 295, "X-Y mode");//100//223
-    display_text(SYSTEM_MENU_XPOS+155, 311, "display");//108//231
-  }
-
-  //Show the state
-  scope_display_slide_button(SYSTEM_MENU_XPOS+70, 300, scopesettings.xymodedisplay, MAGENTA_COLOR);//+21//+176//326 299
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
 void scope_system_settings_confirmation_item(int mode)
 {
   //Check if inactive or active
@@ -6927,16 +6903,16 @@ void scope_system_settings_confirmation_item(int mode)
     display_set_bg_color(DARKGREY_COLOR);
 
     //Display the icon with the set colors
-    display_copy_icon_use_colors(confirmation_icon, SYSTEM_MENU_XPOS+21, 358, 24, 24);//80//202 358
+    display_copy_icon_use_colors(confirmation_icon, SYSTEM_MENU_XPOS+21, 299, 24, 24);//fw 0.2.51: X-Y's row
 
     //Display the text
     display_set_font(&font_3);
-    display_text(SYSTEM_MENU_XPOS+142, 354, "Notification");//94//217
-    display_text(SYSTEM_MENU_XPOS+138, 370, "confirmation");//90//213
+    display_text(SYSTEM_MENU_XPOS+142, 295, "Notification");
+    display_text(SYSTEM_MENU_XPOS+138, 311, "confirmation");
   }
 
   //Show the state
-  scope_display_slide_button(SYSTEM_MENU_XPOS+70, 359, scopesettings.confirmationmode, GREEN_COLOR);//+15 358
+  scope_display_slide_button(SYSTEM_MENU_XPOS+70, 300, scopesettings.confirmationmode, GREEN_COLOR);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -6956,7 +6932,7 @@ void scope_system_settings_RTC_settings_item(int mode)//set
   }
 
   //Draw the background
-  display_fill_rounded_rect(SYSTEM_MENU_XPOS+9, 410, 226, 38, 3);//401 36
+  display_fill_rounded_rect(SYSTEM_MENU_XPOS+9, 351, 226, 38, 3);//fw 0.2.51: one row up (was 410)
 
   //Check if inactive or active
   if(mode == 0)
@@ -6973,14 +6949,14 @@ void scope_system_settings_RTC_settings_item(int mode)//set
   }
 
   //Display the icon with the set colors
-  display_copy_icon_use_colors(RTC_icon, SYSTEM_MENU_XPOS+21, 417, 24, 24);//171
-  display_copy_icon_use_colors(Right_drop_menu_icon, SYSTEM_MENU_XPOS+202, 417, 24, 24);//211
+  display_copy_icon_use_colors(RTC_icon, SYSTEM_MENU_XPOS+21, 358, 24, 24);
+  display_copy_icon_use_colors(Right_drop_menu_icon, SYSTEM_MENU_XPOS+202, 358, 24, 24);
   
 
   //Display the text
   display_set_font(&font_3);
-  display_text(241, 413, "RTC settings");       //250// 241 413
-  display_text(213, 429, "Time & Date settings");//222//220 429
+  display_text(241, 354, "RTC settings");
+  display_text(213, 370, "Time & Date settings");
   
   //Read time for RTC
   get_fattime();

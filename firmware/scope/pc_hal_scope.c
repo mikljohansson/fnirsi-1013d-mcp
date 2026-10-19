@@ -34,6 +34,7 @@
 #include "spec_fmt.h"
 #include "acal_live.h"
 #include "ui_menu.h"
+#include "ui_fmt.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -1635,6 +1636,79 @@ void pc_glue_main_menu_mode(int row)
 
   if(a.warn_roll)
     spectrum_note_roll_off();
+}
+
+//The scope's Display variant (fw 0.2.51): Normal, Phosphor or X-Y. A temporary row in the acquisition menu until the
+//CTRL page's Display fold-out exists (docs/plans/ux-makeover.md section 3); X-Y moved here from System settings.
+//X-Y is 1.00o5's xymodedisplay (saved at power-off as before); Phosphor is the phosphor view (not saved, as before).
+#define PC_DISP_NORMAL        0
+#define PC_DISP_PHOSPHOR      1
+#define PC_DISP_XY            2
+
+static const char *pc_disp_names[3] = { "Normal", "Phosphor", "X-Y" };
+
+static int pc_display_variant(void)
+{
+  if(scopesettings.xymodedisplay)
+    return PC_DISP_XY;
+
+  return (pc_spectrum_on() ? pc_phos_wanted : phosphor_mode()) ? PC_DISP_PHOSPHOR : PC_DISP_NORMAL;
+}
+
+//Box i of the row: 84 x 36 from x 100 of the menu, 8 px apart
+static uint32 pc_disp_box_x(int i)
+{
+  return ACQ_MENU_XPOS + 100 + 92 * i;
+}
+
+void pc_glue_acq_display_draw(void)
+{
+  uint16    fg = displaydata.fg_color;
+  PFONTDATA font = displaydata.font;
+  uint32    y = ACQ_MENU_YPOS + ACQ_DISPLAY_Y;
+  int       i, v = pc_display_variant();
+
+  display_set_fg_color(BLACK_COLOR);
+  display_draw_horz_line(ACQ_MENU_YPOS + ACQ_MENU_BODY_H - 2, ACQ_MENU_XPOS + 8, ACQ_MENU_XPOS + ACQ_MENU_WIDTH - 8);
+
+  display_set_font(&font_3);
+  display_set_fg_color(WHITE_COLOR);
+  display_text(ACQ_MENU_XPOS + 14, y + 10, "Display");
+
+  //The selection as the Trace boxes show it: orange with black text, the others grey with white text
+  for(i = 0; i < 3; i++)
+  {
+    uint32 x = pc_disp_box_x(i);
+
+    display_set_fg_color((i == v) ? ORANGE_COLOR : MIDLEGREY_COLOR);
+    display_fill_rounded_rect(x, y, 84, ACQ_DISPLAY_H, 2);
+    display_set_fg_color((i == v) ? BLACK_COLOR : WHITE_COLOR);
+    display_text(x + (84 - ui_text_width(&font_3, pc_disp_names[i])) / 2, y + 10, (int8 *)pc_disp_names[i]);
+  }
+
+  displaydata.fg_color = fg;
+  displaydata.font     = font;
+}
+
+void pc_glue_acq_display_tap(void)
+{
+  int i;
+
+  for(i = 0; i < 3; i++)
+    if((xtouch >= pc_disp_box_x(i)) && (xtouch < pc_disp_box_x(i) + 84))
+      break;
+
+  if(i == 3)
+    return;
+
+  scopesettings.xymodedisplay = (i == PC_DISP_XY) ? 1 : 0;
+  pc_phos_wanted = (i == PC_DISP_PHOSPHOR) ? 1 : 0;
+
+  //In the spectrum the variant waits for the Scope row; in the scope it applies now (phosphor clears its map)
+  if(!pc_spectrum_on() && (phosphor_mode() != pc_phos_wanted))
+    phosphor_set_active(pc_phos_wanted);
+
+  pc_glue_acq_display_draw();
 }
 
 //System settings menu height (variables.h SYSTEM_MENU_HEIGHT): Time & Date is the last row, 59 px

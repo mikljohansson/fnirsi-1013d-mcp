@@ -192,7 +192,7 @@
 #define SYSTEM_MENU_XPOS                     150
 #define SYSTEM_MENU_YPOS          MAIN_MENU_YPOS//46
 #define SYSTEM_MENU_WIDTH                    244
-#define SYSTEM_MENU_HEIGHT_FULL              413
+#define SYSTEM_MENU_HEIGHT_FULL              354   //fw 0.2.51: the X-Y row went to the acquisition menu's Display row
 //fw 0.2.13: one row (59 px) shorter when no DS3231 answered at boot (Time & Date is the last row)
 int pc_glue_sys_menu_height(void);
 #define SYSTEM_MENU_HEIGHT                   (pc_glue_sys_menu_height())
@@ -311,7 +311,10 @@ int pc_glue_sys_menu_height(void);
 #define ACQ_MENU_XPOS                      250//ACQ_BUTTON_XPOS
 #define ACQ_MENU_YPOS                       48//46
 #define ACQ_MENU_WIDTH                     380//304
-#define ACQ_MENU_HEIGHT                    386
+#define ACQ_MENU_HEIGHT                    432   //fw 0.2.51: 386 + the Display row (until the CTRL page's Display fold-out)
+#define ACQ_MENU_BODY_H                    386   //1.00o5's part above the Display row
+#define ACQ_DISPLAY_Y                      390   //Display row: Normal / Phosphor / X-Y boxes, y offset in the menu
+#define ACQ_DISPLAY_H                       36
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Move fast button

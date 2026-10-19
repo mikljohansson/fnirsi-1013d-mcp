@@ -185,7 +185,6 @@ void scope_system_settings_other_settings_ref_on_start_item(void);
 //void scope_system_settings_other_settings_ine_mark_item(void);
 
 void scope_system_settings_calibration_item(int mode);
-void scope_system_settings_x_y_mode_item(int mode);
 void scope_system_settings_confirmation_item(int mode);
 void scope_system_settings_RTC_settings_item(int mode);
 void scope_open_RTC_settings_menu(void);
