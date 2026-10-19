@@ -43,6 +43,7 @@
 #define UD_B_TAB_ON      4        //the page shown
 #define UD_B_GREY        5        //Later, Cancel in the wizard
 #define UD_B_ROW         6        //a full-width settings row (Developer page): the outlined box is the button
+#define UD_B_ON          7        //a toggle that is on: green (fw 0.2.63; off is UD_B_GREY), the label stays the same
 
 //Button ids
 #define UD_ID_NONE        0

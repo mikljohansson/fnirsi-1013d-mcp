@@ -308,15 +308,31 @@ static void test_pages(void)
   T_TRUE(has_text("Full-rate offset +0.70 code, 4 probes, 12 s ago"));
   T_TRUE(has_text("DC shift: centre 870, size 100, value 59136"));
   T_TRUE(has_text("1.00o5 core compensations: not used (v3 in use)"));
-  T_TRUE(has_text("Needs a DC supply up to 15 V."));
-  T_TRUE(has_text("DC shift trim off."));
+  //fw 0.2.63: no supply hedge; the DC shift trim's state is the button's colour, no "off" line
+  T_TRUE(!has_text("Needs a DC supply up to 15 V."));
+  T_TRUE(!has_text("DC shift trim off."));
+  T_TRUE(!has_text("On: CTRL on the scope opens the trim."));
   T_EQ(ud_hit(&pg, 170, 380), UD_ID_DCSHIFT);
+  {
+    uint32_t b;
+
+    for(b = 0; b < pg.nbtn; b++)
+      if(pg.btn[b].id == UD_ID_DCSHIFT)
+        T_EQ(pg.btn[b].style, UD_B_GREY);
+  }
   T_EQ(ud_hit(&pg, 20, 440), UD_ID_VOLTS);
   T_EQ(ud_hit(&pg, 700, 440), UD_ID_CLEAR);
   T_EQ(ud_hit(&pg, 20, 380), UD_ID_CALIBRATE);
   in.dc_shift = 1;
   ud_build(&pg, UD_PAGE_CAL, &in, 0);
-  T_EQ(text_colour("DC shift trim on: CTRL on the scope opens it."), UD_C_WARN);
+  T_EQ(text_colour("On: CTRL on the scope opens the trim."), UD_C_WARN);
+  {
+    uint32_t b;
+
+    for(b = 0; b < pg.nbtn; b++)
+      if(pg.btn[b].id == UD_ID_DCSHIFT)
+        T_EQ(pg.btn[b].style, UD_B_ON);
+  }
   strcpy(note.text, "Calibration cleared: run Calibrate.");
   note.colour = UD_C_WARN;
   ud_build(&pg, UD_PAGE_CAL, &in, &note);

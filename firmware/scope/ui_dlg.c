@@ -105,6 +105,7 @@ static void ui_dlg_look(int style, ui_btn_look *l)
     case UD_B_DANGER:  l->fill = 0x004D1B1B; l->edge = 0x00A33A3A; l->text = 0x00FFD0D0; break;
     case UD_B_TAB_ON:  l->fill = 0x001F3A66; l->edge = 0x009ECBFF; l->text = WHITE_COLOR; l->edge2 = 1; break;
     case UD_B_GREY:    l->fill = 0x00333333; l->edge = 0x00606060; l->text = WHITE_COLOR; break;
+    case UD_B_ON:      l->fill = 0x00145A2E; l->edge = 0x0035C26A; l->text = WHITE_COLOR; break;
     case UD_B_ROW:     l->fill = RGB_CARD;   l->edge = RGB_CARD_EDGE; break;
     default:           l->fill = 0x000F2447; l->edge = 0x001F3A66; break;          //neutral, tab
   }
