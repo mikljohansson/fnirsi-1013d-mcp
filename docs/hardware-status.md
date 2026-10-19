@@ -704,3 +704,9 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 2026-10-19 14:07: fw 0.2.55 (UI step 3 Settings on 0.2.54; merge of fw-ui3) built with GCC 10, MMU image sha256
   89c1e94794fc19a13897459ec564092bf9fa3068ef7628dce6e017f9db56b17b, nommu 1dc9b165990bcf5c647af1e68b1319bdef26c1d2e552685868994a0b5c17b7aa,
   pinned in backups/. Now the image to load next (steps 1 + 3, readers, touch handles). Not loaded.
+- 2026-10-19 14:20: two-hour idle USB soak on 0.2.50 stopped after about 65 min of idle (13:12 to 14:17) to free COM10 for the
+  owner's Bode bench; no reopen check was made, so the long-idle question stays open: rerun overnight. Windows AC selective suspend
+  restored to 0 (DC stays 1). First Bode sweep, RC low-pass 1 kOhm / 15 nF (fc 10.6 kHz) with both probe clips on the breadboard ground
+  rail (wiring A), 1 kHz to 300 kHz 30 points, backups/bode/rc1_15n_clips.json: V1 1.36 Vrms at 1 kHz falling to 0.68 Vrms at 100 kHz
+  (the RC loads the 1 kOhm source as expected, so the R and C are on the post correctly), but V2 only 25 mV rms falling to 9 mV,
+  H about -33 to -37 dB flat: CH2 is not reading the R-C junction (floating tip or probe switch). Owner asked to put CH2 on the input.
