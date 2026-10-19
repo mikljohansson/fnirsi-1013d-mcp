@@ -45,8 +45,8 @@ from . import analysis as A
 from . import bode as BD
 from . import protocol as P
 from .paths import user_home
-from .scope import (CHANNEL_NAMES, SCALING_CAVEAT, Capture, CaptureContext, Scope, Spectrum, channel_index,
-                    settings_diff)
+from .scope import (CHANNEL_NAMES, SCALING_CAVEAT, Capture, CaptureContext, Scope, ScopeError, SeqError,
+                    Spectrum, channel_index, settings_diff)
 from .transport import DeviceError, TransportError
 from .calibration import UnitCalibration, describe as describe_cal
 from .units import fmt_si, parse_quantity
@@ -950,7 +950,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         except DeviceError as e:
             sess.audit(tool, tier, args, f"error: {e}")
             raise ToolError(_err_text(tool, e)) from e
-        except (TransportError, ValueError) as e:
+        except (TransportError, ValueError, ScopeError) as e:
             sess.audit(tool, tier, args, f"error: {e}")
             raise ToolError(_err_text(tool, e)) from e
         applied = result.get("applied") if isinstance(result, dict) else None
@@ -1011,7 +1011,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                              "programmable_trigger_position": p.programmable, "generator": p.has_generator,
                              "device_averaging": p.has(P.Caps.DEVICE_AVERAGE), "force": p.has(P.Caps.FORCE_TRIGGER),
                              "screenshot": p.has(P.Caps.SCREENSHOT), "ext_trigger": p.has(P.Caps.EXT_TRIGGER),
-                             "caps": p.caps},
+                             "segments_and_hardware_averaging": p.has(P.Caps.SEQ), "caps": p.caps},
                     "unverified": unverified, "caveats": STANDING_CAVEATS}
         return await run("scope_profile", 0, {}, go)
 
@@ -1020,6 +1020,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         """Mode ('collaborative': shared with the person at the scope; 'exclusive' on legacy firmware with
         LOCAL/REMOTE), display_mode (what the trace area shows: scope, spectrum, waterfall, density (protocol
         1.7, the spectrum view and its sub-views) or phosphor (1.13); a number for a mode this host does not know),
+        from protocol 1.17 the bitstream's features (ext_trigger, decim, fir, segments, hw_average) and the
+        acquisition menu's Average (ui_averaging off / software / hardware, hardware_averaging, records per run),
         run_state (RUN / STOP / SINGLE), settings_seq (changes whenever anyone changes a setting),
         the latest capture's id and origin (host / ui_run / ui_single), the host capture state, trigger address,
         battery, and on legacy firmware the watchdog and exit_reason. Cheap; use it to poll."""
@@ -1047,6 +1049,12 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 extra = {"mode": "collaborative", "display_mode": disp, "run_state": P.RunState(st.run_state).name,
                          "settings_seq": st.settings_seq, "capture_settings_seq": st.capture_settings_seq,
                          "capture_origin": P.CaptureOrigin(st.capture_origin).name.lower()}
+                if s.info.proto_minor >= 17:  # 1.17: the bitstream's features and the acquisition menu's Average
+                    extra["features"] = P.feature_names(st.features)
+                    extra["ui_averaging"] = P.UI_AVERAGE_NAMES.get(st.ui_average, st.ui_average)
+                    extra["hardware_averaging"] = st.ui_average == 2
+                    if st.ui_average == 2:
+                        extra["ui_averaging_records"] = 1 << st.ui_average_log2n
             else:
                 extra = {"mode": "exclusive (legacy firmware)"}
             return {"ok": True, **extra, **extra_ext, "control": _control_name(st),
@@ -1780,7 +1788,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     async def _averaged(ctx: Context | None, *, n: int, chans: list[str], w: tuple[float, float] | None,
                         align: str, align_channel: str | None, align_level: float | None, align_edge: str | None,
                         timeout_s: float, reject_clipped: bool, on_device: bool | None,
-                        tool: str) -> dict[str, Any]:
+                        tool: str, hardware: bool = False) -> dict[str, Any]:
         """Shared engine of averaged_capture / decay_fit / capture_and_fft-like loops. Holds the session lock
         across the whole run (other tools wait).
 
@@ -1802,7 +1810,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                               align_channel=align_channel, align_level=align_level,
                                               align_edge=align_edge, timeout_s=timeout_s,
                                               reject_clipped=reject_clipped, on_device=on_device, tool=tool,
-                                              notes=notes)
+                                              notes=notes, hardware=hardware)
                 except _SettingsChanged as sc:
                     new = await anyio.to_thread.run_sync(s.capture_context)
                     changed = settings_diff(cctx.settings_key(), new.settings_key())
@@ -1841,7 +1849,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                             w: tuple[float, float] | None, align: str, align_channel: str | None,
                             align_level: float | None, align_edge: str | None, timeout_s: float,
                             reject_clipped: bool, on_device: bool | None, tool: str,
-                            notes: list[str]) -> dict[str, Any]:
+                            notes: list[str], hardware: bool = False) -> dict[str, Any]:
         """One attempt of the averaging run with settings ``cctx``. Raises _SettingsChanged."""
         notes = list(notes)
         trig = cctx.trigger
@@ -1850,6 +1858,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         a, cnt = _sample_window(s, w)
         prof = s.profile()
         shared = s.shared
+        if hardware:
+            return await _hw_averaged_run(s, cctx, n=n, chans=chans, a=a, cnt=cnt, align=align,
+                                          timeout_s=timeout_s, reject_clipped=reject_clipped, tool=tool, notes=notes)
         dev_fits = 16 + 2 * cnt * len(chans) <= s.response_limit
         use_dev = (prof.has(P.Caps.DEVICE_AVERAGE) and align == "hardware" and on_device is not False
                    and not reject_clipped and dev_fits)
@@ -1967,6 +1978,47 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 "noise_single": float(np.median(noise_est)) if noise_est else None,
                 "notes": notes, "dt": dt, "edge_shifts": np.array(shifts) if shifts else None}
 
+    async def _hw_averaged_run(s: Scope, cctx: CaptureContext, *, n: int, chans: list[str], a: int, cnt: int,
+                               align: str, timeout_s: float, reject_clipped: bool, tool: str,
+                               notes: list[str]) -> dict[str, Any]:
+        """Protocol 1.17 hardware averaging: one run of n records summed in the FPGA (bitstream 0x1536)."""
+        if not s.profile().has(P.Caps.SEQ):
+            raise ToolError(f"{tool}: hardware averaging needs FPGA bitstream 0x1536 and firmware 0.2.58 or later "
+                            "(caps SEQ); use hardware=false")
+        if align != "hardware":
+            raise ToolError(f"{tool}: hardware averaging aligns on the hardware trigger only; use align='hardware'")
+        if reject_clipped:
+            notes.append("hardware averaging: clipped records cannot be rejected (the FPGA sums every triggered "
+                         "record); check the clipped flag of the mean and the range")
+        trig = cctx.trigger
+        word_s = cctx.timebase.dt * (1 if cctx.decim is not None and cctx.decim.k else 2)
+        est = n * (trig.total_words * word_s + P.seq_dead_ns(trig.total_words, trig.pretrigger_words,
+                                                             int(word_s * 1e9)) * 1e-9)
+        try:
+            run = await anyio.to_thread.run_sync(
+                lambda: s.capture_hw_average(chans, n, timeout_s=timeout_s + 2 * est + 1.0))
+        except SeqError as e:
+            raise ToolError(f"{tool}: {e}. Hardware averaging takes records up to 2046 words (4092 samples 8-bit, "
+                            "2046 with the decimation filter) and at most 257 records with 8-bit samples; shorten "
+                            "total_samples with scope_set_trigger, lower n, or use hardware=false") from None
+        if s.shared and run.capture_info.header.settings_seq != cctx.settings_seq:
+            raise _SettingsChanged(0, run.capture_info.header.settings_seq)
+        cap = run.positions[0]
+        tt = (a + np.arange(cnt) - trig.pretrigger_samples) * cctx.timebase.dt
+        means = {c: cap.channels[c].volts[a: a + cnt] for c in chans}
+        clipped = {c: cap.channels[c].clipped[a: a + cnt] for c in chans}
+        notes = notes + list(run.notes) + [
+            "hardware averaging (FPGA 0x1536, protocol 1.17): the mean of the records summed in the FPGA, read as "
+            "exact sums; not yet verified on the unit against READ_RAW (bench check 9 of firmware/AGENTS.md "
+            "section 35)"]
+        if any(v.any() for v in clipped.values()):
+            notes.append("the mean sits at a rail in some samples (clipped records): raise volts_per_div")
+        used = run.records[0]
+        return {"mode": "hardware", "t": tt, "mean": means, "std": None, "clipped_any": None, "n_used": used,
+                "n_dropped": run.run.untriggered, "drop_reasons": {"untriggered": run.run.untriggered},
+                "noise_single": None, "notes": notes, "dt": cctx.timebase.dt, "edge_shifts": None,
+                "capture_id": run.capture_id}
+
     def _avg_summary(res: dict[str, Any], chans: list[str]) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for c in chans:
@@ -1999,6 +2051,10 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                                           "window")] = True,
         on_device: Annotated[bool | None, Field(description="use the firmware's ACQUIRE_AVG when available and "
                                                             "align='hardware' (default: auto)")] = None,
+        hardware: Annotated[bool, Field(description="average in the FPGA (bitstream 0x1536, protocol 1.17): one "
+                            "run sums n records without reading each one, so it is much faster; align='hardware' "
+                            "only, records up to 2046 words, n <= 257 with 8-bit samples (65536 with the decimation "
+                            "filter); no per-sample std. Not yet verified on the unit")] = False,
     ) -> dict[str, Any]:
         """Average n triggered captures: the main tool for detector work. Returns per channel statistics of the
         mean waveform, the per-sample standard deviation, n_used, n_dropped with reasons, noise per sample
@@ -2014,13 +2070,14 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         and what changed (gives up after 5 restarts). The scope screen shows the host captures."""
         args = {"n": n, "channels": channels, "window": window, "align": align, "align_channel": align_channel,
                 "align_level": align_level, "timeout_s": timeout_s, "reject_clipped": reject_clipped,
-                "on_device": on_device}
+                "on_device": on_device, "hardware": hardware}
         try:
             chans = _channels_arg(channels, ["CH1"])
             w = _window_arg(window)
             res = await _averaged(ctx, n=n, chans=chans, w=w, align=align, align_channel=align_channel,
                                   align_level=_q(align_level, "V"), align_edge=None, timeout_s=timeout_s,
-                                  reject_clipped=reject_clipped, on_device=on_device, tool="scope_averaged_capture")
+                                  reject_clipped=reject_clipped, on_device=on_device, tool="scope_averaged_capture",
+                                  hardware=hardware)
         except (DeviceError, TransportError, ValueError) as e:
             sess.audit("scope_averaged_capture", 1, args, f"error: {e}")
             raise ToolError(_err_text("scope_averaged_capture", e)) from e
@@ -2059,6 +2116,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         cav = list(res["notes"])
         cav.append("Averaging reduces random noise by sqrt(n) but not the A/B interleave mismatch, the 8-bit "
                    "quantisation of a noise-free signal, or trigger jitter (up to 2 / fs with hardware alignment).")
+        if res["mode"] == "hardware":
+            out["capture_id"] = res["capture_id"]
         if align == "edge":
             cav.append("edge alignment needs a clean edge on align_channel with at least 3 samples on the slope")
         if res["n_dropped"]:
@@ -2069,6 +2128,101 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         out["caveats"] = cav + [SCALING_CAVEAT]
         sess.audit("scope_averaged_capture", 1, args, "ok", {"n_used": res["n_used"], "file": path})
         return out
+
+    @register(1, title="Segmented capture")
+    async def scope_capture_segments(
+        count: Annotated[int, Field(ge=1, le=256, description="segments (records) to capture; each is one "
+                                    "trigger. At most 8192 / slot words (the slot is the record rounded up to a "
+                                    "power of two)")] = 16,
+        channels: Annotated[list[str] | None, Field(description="channels to read, default ['CH1']")] = None,
+        holdoff: Annotated[float | str, Field(description="seconds to wait after each segment before re-arming, "
+                           "e.g. '10us' (rounded up to 5 ns)")] = 0.0,
+        circular: Annotated[bool, Field(description="keep refilling the slots until timeout_s, then stop: the "
+                            "table holds the latest segments (count is ignored: every slot is used)")] = False,
+        timeout_s: Annotated[float, Field(gt=0, le=60, description="the run is stopped after this long; it keeps "
+                             "the segments it has (circular: the run time)")] = 2.0,
+    ) -> dict[str, Any]:
+        """Segmented capture (FPGA bitstream 0x1536, firmware 0.2.58+, protocol 1.17): the FPGA re-arms itself
+        after every trigger and stores `count` records with the live trigger and record length
+        (scope_set_trigger total_samples / pretrigger), each with a 5 ns trigger timestamp, without the host
+        reading in between (re-arm in about hold-off + pretrigger + a few clocks). Use it for bursts, pulse
+        trains and per-pulse detector captures: timing between events plus every waveform.
+
+        Returns per segment the trigger time relative to the first one, the interval to the previous one, whether
+        it triggered (auto mode records untriggered segments) and per channel min / max / mean / Vpp; interval
+        statistics; and a .npz with t (record time axis), <CH>_volts as (segments, samples), timestamps_s,
+        triggered and slots. Records must fit a slot of at most 4096 words minus 2 (8190 samples 8-bit, 4094 with
+        the decimation filter). Not yet verified on the unit."""
+        args = {"count": count, "channels": channels, "holdoff": holdoff, "circular": circular,
+                "timeout_s": timeout_s}
+
+        def go() -> dict[str, Any]:
+            notes = sess.ensure_control()
+            s = sess.get_scope()
+            if not s.profile().has(P.Caps.SEQ):
+                raise ToolError("scope_capture_segments needs FPGA bitstream 0x1536 and firmware 0.2.58 or later "
+                                "(caps SEQ)")
+            chans = _channels_arg(channels, ["CH1"])
+            hold = _q(holdoff, "s") or 0.0
+            if not 0 <= hold <= 20.0:
+                raise ToolError("holdoff must be 0..20 s")
+            try:
+                run = s.capture_segments(chans, count, holdoff_ns=int(math.ceil(hold * 1e9)), circular=circular,
+                                         timeout_s=timeout_s)
+            except SeqError as e:
+                raise ToolError(f"scope_capture_segments: {e}. Shorten total_samples with scope_set_trigger or "
+                                "lower count") from None
+            segs = [g for g in run.segments if g.capture is not None]
+            if not segs:
+                return {"ok": False, "segments": 0, "caveats": notes + run.notes + [
+                    f"no segment within {timeout_s} s: check the trigger with scope_get_config, use mode='auto', "
+                    "or raise timeout_s"]}
+            segs.sort(key=lambda g: g.entry.timestamp)
+            t0 = segs[0].t_trigger
+            ts = np.array([g.t_trigger - t0 for g in segs])
+            first = segs[0].capture
+            assert first is not None
+            arrays: dict[str, np.ndarray] = {"t": first.t, "timestamps_s": ts,
+                                             "triggered": np.array([g.entry.triggered for g in segs]),
+                                             "slots": np.array([g.slot for g in segs])}
+            rows = []
+            for g, tt in zip(segs, ts):
+                cap = g.capture
+                assert cap is not None
+                row: dict[str, Any] = {"slot": g.slot, "t": _r6(float(tt)), "triggered": g.entry.triggered}
+                for c in chans:
+                    st = A.stats(cap.channels[c].volts)
+                    row[c] = {k: _r6(st[k]) for k in ("min", "max", "mean", "vpp") if k in st}
+                rows.append(row)
+            for c in chans:
+                arrays[f"{c}_volts"] = np.stack([g.capture.channels[c].volts for g in segs]).astype(np.float32)
+                arrays[f"{c}_clipped"] = np.stack([g.capture.channels[c].clipped for g in segs])
+            r = run.run
+            meta = {"kind": "segments", "args": args, "capture_id": run.capture_id, "dt": first.dt,
+                    "pretrigger_samples": first.pretrigger_samples, "total_samples": first.total_samples,
+                    "run": r.to_dict(), "channels": {c: first.channels[c].config.to_dict() for c in chans},
+                    "scaling": SCALING_CAVEAT}
+            path = sess.save_npz("segments", arrays, meta)
+            dts = np.diff(ts)
+            out: dict[str, Any] = {
+                "ok": True, "capture_id": run.capture_id, "segments": len(segs), "requested": r.requested,
+                "completed": r.count, "untriggered": r.untriggered, "circular": bool(r.flags & P.SEQ_RUN_CIRCULAR),
+                "stopped": bool(r.flags & P.SEQ_RUN_STOPPED), "wrapped": bool(r.flags & P.SEQ_RUN_WRAPPED),
+                "slot_words": 1 << r.m, "dt": _r6(first.dt), "samples_per_segment": first.n,
+                "interval_s": {"mean": _r6(float(dts.mean())), "min": _r6(float(dts.min())),
+                               "max": _r6(float(dts.max()))} if dts.size else None,
+                "file": path}
+            out["table" if len(rows) <= 64 else "table_first_64"] = rows[:64]
+            cav = list(run.notes)
+            if r.flags & P.SEQ_RUN_STOPPED and not r.flags & P.SEQ_RUN_CIRCULAR:
+                cav.append(f"stopped after {timeout_s} s with {r.count} of {r.requested} segments")
+            if r.untriggered:
+                cav.append(f"{r.untriggered} segment(s) ended on the auto time-out: not synchronised to the signal")
+            cav.append("timestamps: 5 ns resolution from the run start (one trigger-latch uncertainty of a write "
+                       "clock); segmented capture is not yet verified on the unit")
+            out["caveats"] = notes + cav + STANDING_CAVEATS
+            return out
+        return await run("scope_capture_segments", 1, args, go)
 
     @register(1, title="Capture and FFT")
     async def scope_capture_and_fft(

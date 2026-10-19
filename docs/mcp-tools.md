@@ -36,7 +36,7 @@ Package layout in `mcp/`: `fnirsi/protocol.py` (frame codec, CRCs, structs), `fn
 | Tier | Name | What it changes | Examples | Default |
 |---|---|---|---|---|
 | 0 | READ_ONLY | nothing | `scope_info`, `scope_profile`, `scope_status`, `get_config`, `fetch_waveform` (LOCAL), `read_calibration`, `screenshot` | allowed |
-| 1 | ACQUIRE | FPGA acquisition registers only (sample rate, trigger, memory geometry, arming); no effect outside the scope; takes the UI away from the person at the scope | `remote_session`, `set_timebase`, `set_trigger`, `capture`, `acquisition_control`, `averaged_capture`, `capture_and_fft`, `decay_fit`, `measure` | allowed |
+| 1 | ACQUIRE | FPGA acquisition registers only (sample rate, trigger, memory geometry, arming); no effect outside the scope; takes the UI away from the person at the scope | `remote_session`, `set_timebase`, `set_trigger`, `capture`, `acquisition_control`, `averaged_capture`, `capture_segments`, `capture_and_fft`, `decay_fit`, `measure` | allowed |
 | 2 | FRONT_END | relays (range, AC/DC) and the offset PWM; audible clicks, relay wear, a small transient at the input when AC coupling switches | `set_channel` | allowed, rate-limited to 5 relay changes per second by the server |
 | 3 | OUTPUT | drives the calibration pin (3.3 V logic square wave). If that pin is wired into the detector (e.g. as a TX gate drive), this switches real coil current | `generator`, `self_test_loopback` | needs a confirmation token; off at server start |
 | 4 | RAW | arbitrary FPGA bus writes, rebooting into FEL | `raw_fpga`, `enter_fel` | disabled unless `FNIRSI_MCP_ENABLE_RAW=1`; needs a confirmation token |
@@ -223,12 +223,31 @@ Caveat on `force`: "Only available once verified on this FPGA variant; otherwise
 | `timeout_s` | float | 1.0 | per capture; timeouts are dropped and counted |
 | `reject_clipped` | bool | true | drop captures with clipped samples in the window |
 | `on_device` | bool | auto | use ACQUIRE_AVG when the firmware has it and `align="hardware"` |
+| `hardware` | bool | false | protocol 1.17 (bitstream 0x1536, fw >= 0.2.58): one FPGA averaging run sums the `n` records (SET_SEQ mode 2, READ_SEQ sums), no per-record transfer; `align="hardware"` only, records up to 2046 words, `n` <= 257 with 8-bit samples (65536 with the decimation filter); no per-sample std; refused with the GET_SEQ fit reason when the geometry does not fit. Opt-in until bench check 9 (firmware/AGENTS.md section 35) has compared it with READ_RAW on the unit |
 
 Returns mean waveform (file), per-sample standard deviation (file), `n_used`, `n_dropped` with reasons,
 estimated noise per sample before/after, effective resolution estimate, timing (captures per second).
 Caveats: "Averaging reduces random noise by sqrt(n) but not the A/B interleave mismatch, the 8-bit
 quantisation of a noise-free signal, or trigger jitter (up to 2 / fs with hardware alignment).",
 "edge alignment needs a clean edge on align_channel with at least 3 samples on the slope".
+
+**`capture_segments`** (tier 1, protocol 1.17, bitstream 0x1536, fw >= 0.2.58). Segmented capture: the FPGA re-arms
+itself after every trigger and stores `count` records of the live trigger geometry (`set_trigger` total and
+pretrigger) in slots of 2^m words (the smallest slot that holds the record plus 2 words), each with a trigger
+timestamp in 5 ns units; the host reads the table and every segment afterwards (READ_SEQ, READ_RAW addr_mode 3).
+
+| Param | Type | Default | Notes |
+|---|---|---|---|
+| `count` | int | 16 | 1..256, at most 8192 / slot words |
+| `channels` | list | `["CH1"]` | |
+| `holdoff` | float s | 0 | wait after each segment before re-arming (5 ns steps) |
+| `circular` | bool | false | refill every slot until `timeout_s`, then STOP: the table holds the latest segments |
+| `timeout_s` | float | 2.0 | the run is ended with STOP after this long and keeps what it has |
+
+Returns `segments`, `completed`, `untriggered`, `stopped`, `wrapped`, `slot_words`, interval statistics, a table
+(slot, time from the first trigger, triggered, per channel min / max / mean / Vpp; the first 64 rows) and a `.npz`
+with `t`, `<CH>_volts` (segments x samples), `<CH>_clipped`, `timestamps_s`, `triggered`, `slots`. Untriggered
+segments (auto mode) are flagged. The sequencer setting is cleared after every run, so later captures are plain.
 
 **`capture_and_fft`** (tier 1).
 

@@ -78,6 +78,8 @@ class VariantSpec:
     decim: bool = False
     #: bitstream 0x1535: plus the CIC compensation FIR (protocol 1.11)
     fir: bool = False
+    #: bitstream 0x1536: plus the sequencer, segmented capture and hardware averaging (protocol 1.17)
+    seq: bool = False
 
 
 #: EXT trigger path latency from the pin (fpga-gen2 simulation: 20-25 ns)
@@ -97,6 +99,8 @@ VARIANTS = {
     "al3d": VariantSpec("al3d", 0x1534, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True),
     "al3f": VariantSpec("al3f", 0x1535, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True,
                         fir=True),
+    "al3s": VariantSpec("al3s", 0x1536, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True,
+                        fir=True, seq=True),
     "ef2": VariantSpec("ef2", 0x1632, P.FpgaVariant.EF2, 6144, 12286, True, True),
     "ep4": VariantSpec("ep4", 0x1732, P.FpgaVariant.EP4, 6144, 12286, True, True),
 }
@@ -591,6 +595,13 @@ class Device:
         self.cal_prov_bad = False
         self.ident_cache: P.SdIdent | None = None
         self.reports: dict[str, str] = {}
+        #: protocol 1.17: the acquisition menu's Average (test hook; GET_STATUS 46 / 47), the host sequencer setting
+        #: (a SetSeqReq; mode 0 = plain captures) and the latest capture's run (a dict from simulate_run, or None)
+        self.ui_average = False
+        self.seq_setting = P.SetSeqReq()
+        self.run: dict | None = None
+        #: the FPGA still holds that run (no arm since)
+        self.run_held = False
 
     # --- capabilities -------------------------------------------------------------------------------
 
@@ -613,7 +624,28 @@ class Device:
         if self.spec.fir:
             c |= P.Caps.FIR
             c &= ~P.Caps.DEVICE_AVERAGE  # the averaging model is 8-bit only (the firmware has no ACQUIRE_AVG)
+        if self.spec.seq:
+            c |= P.Caps.SEQ
         return int(c) & ~self.cfg.caps_clear
+
+    @property
+    def features(self) -> int:
+        """GET_STATUS 44-45 (protocol 1.17): from the bitstream, not the caps."""
+        sp = self.spec
+        return ((P.Features.EXT_TRIGGER if sp.ext_trigger else 0) | (P.Features.DECIM if sp.decim else 0) |
+                (P.Features.FIR if sp.fir else 0) | (P.Features.SEGMENTS | P.Features.HW_AVERAGE if sp.seq else 0))
+
+    def ui_average_state(self) -> tuple[int, int]:
+        """GET_STATUS 46 / 47 (protocol 1.17): the acquisition menu's Average (``ui_average`` test hook): 0 off; 2 with
+        log2 N when a 0x1536 bitstream averages the UI's legacy record in hardware (pc_seq_ui_plan); else 1."""
+        if not self.ui_average:
+            return 0, 0
+        Pw, Tw, _ = self.geometry()
+        if self.spec.seq and not self.decim_config().k:
+            n, _us = P.seq_ui_plan(Tw, Pw, self.settings.divider)
+            if n:
+                return 2, n.bit_length() - 1
+        return 1, 0
 
     # --- time ---------------------------------------------------------------------------------------
 
@@ -969,6 +1001,335 @@ class Device:
         res.update(ring=None, triggered=False, auto_timeout=False, t_trigger=None, t_done=None)
         return res
 
+    # --- sequencer (protocol 1.17, FPGA 0x1536) -------------------------------------------------------------
+
+    #: exact simulation of at most this many averaged records (8-bit / 16-bit records; a 16-bit record costs a filter
+    #: model); longer runs scale the sums of these, so the simulated noise of the mean stops falling there
+    SEQ_SIM_MAX_RECORDS = 128
+    SEQ_SIM_MAX_RECORDS_WIDE = 16
+
+    def _seq_fit(self, sq: P.SetSeqReq, settings: Settings | None = None) -> int:
+        Pw, Tw, _ = self.geometry(settings)
+        return P.seq_fit(sq.mode, sq.flags, sq.m, sq.count, sq.n, Pw, Tw, self.decim_config(settings).k > 0)
+
+    def _segment_run_latest(self) -> bool:
+        return self.run is not None and self.run["mode"] == P.SEQ_SEGMENTS
+
+    def simulate_run(self, settings: Settings, sq: P.SetSeqReq) -> dict:
+        """A sequencer run on one continuous signal timeline (word 0 = the release of the FPGA reset). Returns a
+        pending-capture dict: ``finish(elapsed_s, stopped)`` builds the ring and the run for the records done by then
+        (``t_done`` None when the run never ends by itself: circular, or normal mode without triggers)."""
+        Pw, Tw, auto_to = self.geometry(settings)
+        dt = self.dt(settings.divider)
+        dec = self.decim_config(settings)
+        wide = dec.k > 0
+        wp = dec.n * 5e-9 if wide else 2 * dt
+        t0 = self.pyrng.uniform(0.0, 10.0)
+        seed = self.pyrng.randrange(1 << 62)
+        tr = settings.trigger
+        src = 0 if tr.source == 0 else 2
+        ext = tr.source == 2
+        if ext:
+            tr = replace(tr, level=128)
+        elif wide:
+            tr = replace(tr, level=P.decim_level16(tr.level, dec.gain, dec.shift))
+
+        def make_words(k0: int, n: int) -> np.ndarray:
+            return self._dwords(t0, k0, n, settings, seed, dec) if wide else self._words(t0, k0, n, dt, settings, seed)
+
+        def trig_samples(k0: int, n: int) -> np.ndarray:
+            if ext:
+                return self._ext_words(t0, k0, n, dt, settings, dec)
+            if wide:
+                return self._decim_samples(src // 2, t0, k0, n, settings, seed, dec)
+            # core A of the source channel only (as _words computes it)
+            k = np.arange(k0, k0 + n, dtype=np.float64)
+            ta = t0 + 2 * k * dt + (dt if self.cfg.true_order == "b_first" else 0.0)
+            nz = self._noise(seed, k0, n)
+            return self._codes(src // 2, ta, "A", settings, None if nz is None else nz[src])
+
+        auto = tr.mode == 0
+        limit = auto_to if auto else 1 << 21
+
+        def find(k_from: int) -> int:
+            prev = int(trig_samples(k_from - 1, 1)[0])
+            k = k_from
+            step = 2048  # most runs trigger within a period: start small, then widen
+            while k < k_from + limit:
+                n = min(step, k_from + limit - k)
+                a = trig_samples(k, n)
+                idx = self._find_trigger(a, prev, tr)
+                if idx >= 0:
+                    return k + idx
+                prev = int(a[-1])
+                k += n
+                step = min(2 * step, 65536)
+            return -1
+
+        hold_w = math.ceil(P.seq_holdoff_units(sq.holdoff_ns) * 5e-9 / wp - 1e-9)
+        base = {"divider": settings.divider, "Pw": Pw, "Tw": Tw, "settings": settings.copy(), "seq": self.settings_seq,
+                "decim": dec, "samples": (settings.trigger.pretrigger_samples, settings.trigger.total_samples),
+                "auto_timeout": False, "trigger_addr": Pw % self.spec.ring_words}
+        if sq.mode == P.SEQ_SEGMENTS:
+            return self._simulate_segments(sq, base, make_words, find, auto, auto_to, Pw, Tw, wp, hold_w, wide)
+        return self._simulate_average(sq, base, make_words, find, auto, auto_to, Pw, Tw, wp, hold_w, wide)
+
+    def _simulate_segments(self, sq, base, make_words, find, auto, auto_to, Pw, Tw, wp, hold_w, wide) -> dict:
+        m, circular = sq.m, bool(sq.flags & P.SEQ_F_CIRCULAR)
+        slot_w = 1 << m
+        slots = P.seq_slots(sq.mode, sq.flags, m, sq.count)
+        target = slots + slots // 2 + 1 if circular else sq.count  # a circular run wraps once in the model
+        segs: list[tuple[int, int, bool, float]] = []  # slot fill start word, trigger word, triggered, end time
+        k = 0
+        ends = True
+        for _ in range(target):
+            kt = find(k + Pw)
+            trig = kt >= 0
+            if not trig:
+                if not auto:
+                    ends = False
+                    break
+                kt = k + Pw + auto_to
+            end = kt - Pw + Tw + P.SEQ_TAIL
+            segs.append((k, kt, trig, end * wp))
+            k = end + hold_w
+        ends = ends and not circular
+
+        def finish(elapsed: float, stopped: bool) -> dict:
+            done = [s for s in segs if s[3] <= elapsed]
+            ring = self.ring.copy()
+            entries = [0] * slots
+            for i, (k0, kt, trig, _end) in enumerate(done):
+                s = i % slots
+                off = (kt - k0) % slot_w
+                words = make_words(kt - Pw, Tw)
+                pos = s * slot_w + (off - Pw + np.arange(Tw)) % slot_w
+                ring[:, pos] = words
+                entries[s] = P.SeqEntry(int(round(kt * wp / 5e-9)), off, trig, True).encode()
+            n = len(done)
+            fl = 0
+            if circular:
+                fl |= P.SEQ_RUN_CIRCULAR
+                entries[n % slots] &= ~(1 << 63)  # the slot being refilled
+                if n >= slots:
+                    fl |= P.SEQ_RUN_WRAPPED
+            if stopped:
+                fl |= P.SEQ_RUN_STOPPED
+            run = {"mode": P.SEQ_SEGMENTS, "run_flags": fl, "m": m, "wide": wide, "count": n,
+                   "untriggered": min(0xFFFF, sum(1 for s in done if not s[2])), "requested": sq.count, "n": 0,
+                   "holdoff_ns": sq.holdoff_ns, "entries": entries, "slots": slots, "Pw": Pw, "Tw": Tw}
+            return {**base, "ring": ring, "run": run, "triggered": any(s[2] for s in done)}
+
+        out = {**base, "finish": finish, "run": True, "ring": None, "triggered": False,
+               "t_trigger": segs[0][1] * wp if segs and segs[0][2] else None,
+               "t_done": segs[-1][3] if ends and segs else None}
+        if ends:
+            out.update(finish(math.inf, False))
+        return out
+
+    def _simulate_average(self, sq, base, make_words, find, auto, auto_to, Pw, Tw, wp, hold_w, wide) -> dict:
+        npos, n = sq.count, sq.n
+        total = npos * n
+        cap = self.SEQ_SIM_MAX_RECORDS_WIDE if wide else self.SEQ_SIM_MAX_RECORDS
+        exact = min(total, max(npos, cap // npos * npos))
+        dead_w = math.ceil(P.seq_dead_ns(Tw, Pw, int(round(wp * 1e9))) * 1e-9 / wp - 1e-9)
+        recs: list[tuple[np.ndarray, float]] = []  # per accumulated record: lanes (cores or 16-bit channels), end time
+        untrig: list[float] = []
+        k = 0
+        attempts = 0
+        while len(recs) < exact and attempts < 4 * exact + 16:
+            attempts += 1
+            kt = find(k + Pw)
+            if kt < 0:
+                if not auto:
+                    break
+                k = k + Pw + auto_to  # an untriggered record is skipped
+                untrig.append(k * wp)
+                continue
+            w = make_words(kt - Pw, Tw).astype(np.int64)
+            if wide:
+                w = np.stack([w[0] | (w[1] << 8), w[2] | (w[3] << 8)])
+            end = kt - Pw + Tw
+            recs.append((w, end * wp))
+            k = end + dead_w + hold_w
+        ends = len(recs) >= exact
+        period = recs[-1][1] / len(recs) if recs else 0.0
+
+        def finish(elapsed: float, stopped: bool) -> dict:
+            if elapsed == math.inf and ends:
+                r = total
+            else:
+                r = sum(1 for x in recs if x[1] <= elapsed)
+                if r == len(recs) and ends and period > 0:
+                    r = min(total, max(r, int(elapsed / period)))
+            lanes = 2 if wide else 4
+            sums = np.zeros((lanes, npos, Tw), np.int64)
+            use = min(r, len(recs))
+            for i in range(use):
+                sums[:, i % npos] += recs[i][0]
+            if r > use:  # beyond the exact records: scale per position
+                for p in range(npos):
+                    have = use // npos + (1 if p < use % npos else 0)
+                    want = r // npos + (1 if p < r % npos else 0)
+                    if have:
+                        sums[:, p] = np.rint(sums[:, p] * (want / have)).astype(np.int64)
+            ring = self.ring.copy()
+            if use:
+                last = recs[use - 1][0]
+                if wide:
+                    for ch in (0, 1):
+                        ring[2 * ch, :Tw] = last[ch] & 0xFF
+                        ring[2 * ch + 1, :Tw] = last[ch] >> 8
+                else:
+                    ring[:, :Tw] = last
+            run = {"mode": P.SEQ_AVERAGE, "run_flags": P.SEQ_RUN_STOPPED if stopped else 0, "m": 0, "wide": wide,
+                   "count": r, "untriggered": min(0xFFFF, sum(1 for x in untrig if x <= elapsed)), "requested": npos,
+                   "n": n, "holdoff_ns": sq.holdoff_ns, "sums": sums, "slots": 0, "Pw": Pw, "Tw": Tw}
+            return {**base, "ring": ring, "run": run, "triggered": r > 0}
+
+        out = {**base, "finish": finish, "run": True, "ring": None, "triggered": False,
+               "t_trigger": recs[0][1] if recs else None,
+               "t_done": (recs[-1][1] if exact == total else period * total) if ends else None}
+        if ends:
+            out.update(finish(math.inf, False))
+        return out
+
+    def _stop_run(self, pc: dict) -> dict:
+        """STOP during a run: the records done by now (model time), flag stopped."""
+        scale = self.cfg.time_scale
+        elapsed = (self.now() - self.arm_time) / scale if scale > 0 else math.inf
+        if pc.get("t_done") is not None and elapsed >= pc["t_done"]:
+            return pc
+        return pc["finish"](elapsed, True)
+
+    def seq_state(self) -> P.SeqState:
+        sq = self.seq_setting
+        Pw, Tw, _ = self.geometry()
+        wide = self.decim_config().k > 0
+        r = self.run
+        st = cnt = unt = 0
+        pc = self._pending_capture
+        if pc is not None and "run" in pc and self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
+            st = P.SEQ_ST_RUNNING | (sq.mode & 3) | (P.SEQ_ST_FMT16 if wide else 0)
+        elif r is not None and self.run_held:
+            st = P.SEQ_ST_DONE | r["mode"] | (P.SEQ_ST_FMT16 if r["wide"] else 0) | \
+                (P.SEQ_ST_CIRCULAR if r["run_flags"] & P.SEQ_RUN_CIRCULAR else 0) | \
+                (P.SEQ_ST_OVERFLOW if r["run_flags"] & P.SEQ_RUN_WRAPPED else 0)
+            cnt, unt = r["count"], r["untriggered"]
+        return P.SeqState(sq.mode, sq.flags, sq.m, sq.count, sq.n_raw, sq.holdoff_ns,
+                          P.seq_holdoff_units(sq.holdoff_ns), self._seq_fit(sq), int(wide), Pw, Tw,
+                          P.seq_max_count(sq.mode, sq.m, Tw), st, 0, 0, cnt & 0xFFFFFF, unt, int(self.run_held),
+                          self.capture_id if r is not None else 0, r["count"] if r else 0,
+                          r["untriggered"] if r else 0, r["mode"] if r else 0, r["run_flags"] if r else 0)
+
+    def _cmd_get_seq(self, req: P.Frame) -> P.Frame:
+        return self._ok(req, self.seq_state().pack())
+
+    def _cmd_set_seq(self, req: P.Frame) -> P.Frame:
+        r = P.SetSeqReq.unpack(req.payload)
+        fit = self._seq_fit(r)
+        bad = {P.SEQ_FIT_MODE: 0, P.SEQ_FIT_FLAGS: 1, P.SEQ_FIT_M: 2, P.SEQ_FIT_COUNT: 4, P.SEQ_FIT_N: 6}
+        if fit in bad:
+            raise _DevErr(P.Status.E_BAD_ARG, bad[fit], P.SEQ_FIT_NAMES[fit])
+        if fit in (P.SEQ_FIT_TOTAL, P.SEQ_FIT_PRE):
+            raise _DevErr(P.Status.E_STATE, fit, P.SEQ_FIT_NAMES[fit] + ": SET_TRIGGER first")
+        self.seq_setting = r if r.mode != P.SEQ_OFF else P.SetSeqReq()
+        return self._ok(req, self.seq_state().pack())
+
+    def _held_run(self, mode: int) -> dict:
+        r = self.run
+        if r is None:
+            raise _DevErr(P.Status.E_STATE, 0, "the latest capture is not a run")
+        if not self.run_held:
+            raise _DevErr(P.Status.E_STATE, 1, "armed since: the run is gone")
+        if r["mode"] != mode:
+            raise _DevErr(P.Status.E_STATE, 2, "the run is of the other mode")
+        return r
+
+    def _cmd_read_seq(self, req: P.Frame) -> P.Frame:
+        q = P.ReadSeqReq.unpack(req.payload)
+        if q.what > 1:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "what 0 table, 1 averaged record")
+        if q.what == P.SEQ_READ_TABLE:
+            r = self._held_run(P.SEQ_SEGMENTS)
+            if q.first >= r["slots"]:
+                raise _DevErr(P.Status.E_BAD_ARG, 4, f"first {q.first} >= {r['slots']} slots")
+            if q.count < 1 or q.first + q.count > r["slots"]:
+                raise _DevErr(P.Status.E_BAD_ARG, 6, "count")
+            body = struct.pack(f"<{q.count}Q", *r["entries"][q.first: q.first + q.count])
+            hdr = P.ReadSeqHeader(self.capture_id, q.first, q.count, 0, P.SEQ_FMT_WIDE if r["wide"] else 0, r["m"], 0,
+                                  r["Pw"], r["Tw"])
+        else:
+            if not 1 <= q.ch_mask <= 3:
+                raise _DevErr(P.Status.E_BAD_ARG, 1, "ch_mask")
+            if q.shift > 31 and q.shift != P.SEQ_SHIFT_SUMS:
+                raise _DevErr(P.Status.E_BAD_ARG, 2, "S 0..31 or 0xFF")
+            r = self._held_run(P.SEQ_AVERAGE)
+            words = r["requested"] * r["Tw"]
+            if q.first >= words:
+                raise _DevErr(P.Status.E_BAD_ARG, 4, f"first {q.first} >= {words} words")
+            if q.count < 1 or q.first + q.count > words:
+                raise _DevErr(P.Status.E_BAD_ARG, 6, "count")
+            sums = r["sums"].reshape(r["sums"].shape[0], -1)[:, q.first: q.first + q.count]
+            blocks = []
+            if r["wide"]:
+                u32 = q.shift == P.SEQ_SHIFT_SUMS
+                fmt = P.SEQ_FMT_WIDE | (P.SEQ_FMT_U32 if u32 else 0)
+                applied = q.shift
+                for ch in (0, 1):
+                    if q.ch_mask & (1 << ch):
+                        v = sums[ch]
+                        blocks.append(v.astype("<u4").tobytes() if u32 else
+                                      np.minimum(65535, v >> q.shift).astype("<u2").tobytes())
+            else:
+                fmt = 0
+                applied = 0 if q.shift == P.SEQ_SHIFT_SUMS else q.shift
+                for ch in (0, 1):
+                    if q.ch_mask & (1 << ch):
+                        for core in (2 * ch, 2 * ch + 1):
+                            blocks.append(np.minimum(65535, sums[core] >> applied).astype("<u2").tobytes())
+            body = b"".join(blocks)
+            hdr = P.ReadSeqHeader(self.capture_id, q.first, q.count, 1, fmt, applied, q.ch_mask, r["Pw"], r["Tw"])
+        if 16 + len(body) > P.MAX_RESPONSE_PAYLOAD:
+            raise _DevErr(P.Status.E_OVERFLOW, 0, f"{16 + len(body)} > {P.MAX_RESPONSE_PAYLOAD}")
+        return self._ok(req, hdr.pack() + body)
+
+    def _read_raw_segment(self, req: P.Frame, r: P.ReadRawReq) -> P.Frame:
+        """READ_RAW addr_mode 3: address = segment << 16 | word offset from the segment's record start."""
+        run = self.run
+        if run is None or run["mode"] != P.SEQ_SEGMENTS or not self.run_held:
+            raise _DevErr(P.Status.E_STATE, 4, "no held segment run")
+        addr = r.address & 0xFFFFFFFF
+        seg, off = addr >> 16, addr & 0xFFFF
+        slot_w = 1 << run["m"]
+        if seg >= run["slots"]:
+            raise _DevErr(P.Status.E_BAD_ARG, 4, f"segment {seg} >= {run['slots']} slots")
+        if not 1 <= r.count <= slot_w:
+            raise _DevErr(P.Status.E_BAD_ARG, 8, f"count {r.count} not in 1..{slot_w}")
+        e = P.SeqEntry.decode(run["entries"][seg])
+        if not e.valid:
+            raise _DevErr(P.Status.E_STATE, 5, f"segment {seg} holds no record")
+        ncores = bin(r.core_mask).count("1")
+        if 16 + r.count * ncores > P.MAX_RESPONSE_PAYLOAD:
+            raise _DevErr(P.Status.E_OVERFLOW, 0, f"{16 + r.count * ncores} > {P.MAX_RESPONSE_PAYLOAD}")
+        first = (e.offset - run["Pw"] + off) % slot_w
+        idx = seg * slot_w + (first + np.arange(r.count)) % slot_w
+        cores = [c for c in range(4) if r.core_mask & (1 << c)]
+        data = {c: self.ring[c, idx] for c in cores}
+        blocks = []
+        if r.layout == 0:
+            blocks = [data[c].tobytes() for c in cores]
+        else:
+            for ch in (0, 1):
+                if r.core_mask & (3 << (2 * ch)):
+                    il = np.empty(2 * r.count, dtype=np.uint8)
+                    lo, hi = (data[2 * ch], data[2 * ch + 1]) if r.layout == 2 else (data[2 * ch + 1], data[2 * ch])
+                    il[0::2], il[1::2] = lo, hi
+                    blocks.append(il.tobytes())
+        hdr = P.ReadRawHeader(self.capture_id, seg * slot_w + first, slot_w, r.count, r.core_mask, r.layout,
+                              int(self.acq_state), self.cfg.fw_read_lag)
+        return self._ok(req, hdr.pack() + b"".join(blocks))
+
     # --- state machine -------------------------------------------------------------------------------
 
     def tick(self) -> None:
@@ -982,7 +1343,7 @@ class Device:
             if self.control not in (P.Control.REMOTE, P.Control.SHARED):
                 return
             pc = self._pending_capture
-            if pc is None or self.acq_state not in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
+            if pc is None or self.acq_state not in (P.AcqState.ARMED, P.AcqState.TRIGGERED) or pc.get("computing"):
                 return
             scale = self.cfg.time_scale
             if pc["t_trigger"] is not None and now >= self.arm_time + scale * pc["t_trigger"]:
@@ -1016,6 +1377,8 @@ class Device:
             self.capture_settings_seq = P.SEQ_INVALID
         self.capture_origin = int(origin)
         self.capture_ext_edge = bool(pc.get("ext_edge", False))
+        self.run = pc.get("run")
+        self.run_held = self.run is not None
         if origin == P.CaptureOrigin.HOST:
             self.acq_state = P.AcqState.DONE
             self._pending_capture = None
@@ -1133,10 +1496,37 @@ class Device:
         self.fpga_triggered = False
         self.fpga_done = False
         self.auto_timeout_flag = False
-        self._pending_capture = self.simulate_capture(self.settings)
+        self.run_held = False
+        if self.spec.seq and self.seq_setting.mode != P.SEQ_OFF:
+            self._start_run(self.settings.copy(), self.seq_setting)
+        else:
+            self._pending_capture = self.simulate_capture(self.settings)
         if self.spec.decim:
-            self.decim_written = self._pending_capture["decim"]
+            self.decim_written = self.decim_config()
         self.tick()
+
+    def _start_run(self, settings: Settings, sq: P.SetSeqReq) -> None:
+        """A run is modelled record by record, which takes long for many records: off the request path, like the
+        FPGA. Until the model is ready the run is armed (``computing``); STOP waits for it."""
+        gen = self.arm_count
+        self._pending_capture = {"run": True, "computing": True, "t_trigger": None, "t_done": None}
+
+        def work() -> None:
+            pc = self.simulate_run(settings, sq)
+            with self.lock:
+                if self.arm_count == gen and self._pending_capture is not None and \
+                        self._pending_capture.get("computing"):
+                    self._pending_capture = pc
+                    self.tick()
+
+        self._run_thread = threading.Thread(target=work, name="sim-seq-run", daemon=True)
+        self._run_thread.start()
+
+    def wait_run_model(self, timeout: float = 60.0) -> None:
+        """Test helper and STOP: wait until the pending run's model is computed."""
+        th = getattr(self, "_run_thread", None)
+        if th is not None and th is not threading.current_thread():
+            th.join(timeout)
 
     def force(self) -> None:
         pc = self.simulate_capture(self.settings, forced=True)
@@ -1232,7 +1622,8 @@ class Device:
             exit_reason=0, pass_ms=self.pass_ms, pass_max_ms=self.pass_max_ms, settings_seq=self.settings_seq,
             capture_settings_seq=self.capture_settings_seq if self.capture_id else P.SEQ_INVALID,
             run_state=int(self.run_state), capture_origin=self.capture_origin if self.capture_id else 0,
-            ext_flags=self._ext_flags(now), display_mode=int(self.display_mode))
+            ext_flags=self._ext_flags(now), display_mode=int(self.display_mode), features=int(self.features),
+            ui_average=self.ui_average_state()[0], ui_average_log2n=self.ui_average_state()[1])
 
     def _ext_flags(self, now: float) -> int:
         if not self.caps & P.Caps.EXT_TRIGGER:
@@ -1243,7 +1634,7 @@ class Device:
             | (int(P.ExtFlags.EDGE_SEEN) if getattr(self, "capture_ext_edge", False) and self.ring_valid else 0)
 
     def status_bytes(self) -> bytes:
-        """GET_STATUS body as this firmware sends it: 32 bytes in the legacy (protocol 1.2) model, 44 in 1.3."""
+        """GET_STATUS body as this firmware sends it: 32 bytes in the legacy (protocol 1.2) model, 48 in 1.17."""
         b = self.status().pack()
         return b if self.shared else b[:32]
 
@@ -1272,7 +1663,15 @@ class Device:
                                               cc.offset_pwm, cc.uv_per_lsb_q8, cc.zero_code_q8))
         d = self.capture_decim
         return P.CaptureInfo(h, chans, d.status, d.shift, (min(d.ext_shift, pre) if tr.source == 2 else 0),
-                             d.n, has_decim=True)
+                             d.n, has_decim=True, run=self.run_info())
+
+    def run_info(self) -> P.SeqRunInfo:
+        """GET_CAPTURE_INFO 76..95 (protocol 1.17) of the latest capture."""
+        r = self.run
+        if r is None:
+            return P.SeqRunInfo()
+        return P.SeqRunInfo(r["mode"], r["run_flags"], r["m"], int(r["wide"]), r["count"], r["untriggered"],
+                            r["requested"], r["n"], r["holdoff_ns"])
 
     def info(self) -> P.InfoResp:
         sp = self.spec
@@ -1609,7 +2008,8 @@ class Device:
         return P.DecimState(s.decim & 3, (s.decim & (P.DECIM_FLAGS | P.DECIM_SET_FIR)) >> 2, nxt.status, nxt.shift, nxt.n, nxt.gain,
                             s.divider, nxt.rate(s.divider), last.status if last else 0xFF, last.shift if last else 0,
                             last.status if last else 0, last.shift if last else 0, P.DECIM_MAX_TOTAL, nxt.why,
-                            nxt.ext_shift if s.trigger.source == 2 else 0)
+                            nxt.ext_shift if s.trigger.source == 2 else 0, int(self.features),
+                            *self.ui_average_state())
 
     def _cmd_get_decim(self, req: P.Frame) -> P.Frame:
         return self._ok(req, self.decim_state().pack())
@@ -1798,6 +2198,8 @@ class Device:
     def _cmd_arm(self, req: P.Frame) -> P.Frame:
         if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
             raise _DevErr(P.Status.E_STATE, 0, "already ARMED; STOP first")
+        if self.spec.seq and self.seq_setting.mode != P.SEQ_OFF and self._seq_fit(self.seq_setting) != P.SEQ_FIT_OK:
+            raise _DevErr(P.Status.E_STATE, 3, "sequencer setting no longer fits the geometry (GET_SEQ byte 16)")
         self.arm()
         return self._ok(req, self.status_bytes())
 
@@ -1808,6 +2210,20 @@ class Device:
         return self._ok(req, self.status_bytes())
 
     def _cmd_stop(self, req: P.Frame) -> P.Frame:
+        pc = self._pending_capture
+        if pc is not None and pc.get("computing"):
+            self.lock.release()  # the model thread stores its result under the lock
+            try:
+                self.wait_run_model()
+            finally:
+                self.lock.acquire()
+            pc = self._pending_capture
+        if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED) and pc is not None and "run" in pc:
+            # 1.17: STOP ends a run (0x5D = 1, 0x1A = 0): DONE with what it holds, flag "stopped"
+            self._complete(self._stop_run(pc))
+            if self.shared:
+                self.run_state = P.RunState.STOP
+            return self._ok(req, self.status_bytes())
         if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
             self.acq_state = P.AcqState.ABORTED
             self._pending_capture = None
@@ -1880,6 +2296,10 @@ class Device:
                 bits = (r.core_mask >> (2 * ch)) & 3
                 if bits not in (0, 3):
                     raise _DevErr(P.Status.E_BAD_ARG, 0, "layout 1 needs both cores of each selected channel")
+        if r.addr_mode == P.ReadRawReq.ADDR_SEGMENT:
+            return self._read_raw_segment(req, r)
+        if r.addr_mode in (1, 2) and self._segment_run_latest():
+            raise _DevErr(P.Status.E_STATE, 4, "the latest capture is a segment run: READ_RAW addr_mode 3")
         if not 1 <= r.count <= R:
             raise _DevErr(P.Status.E_BAD_ARG, 8, f"count {r.count} not in 1..{R}")
         ncores = bin(r.core_mask).count("1")
@@ -1929,6 +2349,8 @@ class Device:
         s = self.settings
         if self.shared:
             self._check_capture_readable()
+            if self._segment_run_latest():
+                raise _DevErr(P.Status.E_STATE, 5, "the latest capture is a segment run (no trace)")
             origin = self.capture_origin  # 1.3: the CaptureOrigin codes
             s = self.capture_settings
         elif self.control == P.Control.LOCAL:

@@ -86,6 +86,7 @@ fnirsi1013d-sim --variant al3 --port 5555 --signal decay:tau=80us
 | `--variant al3x`, `--ext SIGNAL` | AL3 with the external trigger (0x1533): trigger source EXT on the calibration pin, fed by `--ext` (default: CH2's signal), 3.3 V logic, 22 ns latency |
 | `--variant al3f` | AL3 0x1535: as al3d plus the CIC compensation FIR (protocol 1.11, caps FIR): CIC on N / 2, the 15 RTL taps, 250 ns latency |
 | `--variant al3d` | AL3 0x1534: EXT trigger plus the decimation filter (protocol 1.9, caps DECIM): boxcar / CIC2 / CIC3 model with 16-bit samples, the 120 ns pipeline latency and the EXT latency correction (no device averaging) |
+| `--variant al3s` | AL3 0x1536: al3f plus the sequencer (protocol 1.17, caps SEQ): segment runs (slots, table entries with 5 ns timestamps, circular runs, STOP, READ_RAW addr_mode 3) and averaging runs (positions, exact lane sums, 16-bit u32 sums) on one continuous signal timeline. A run is modelled record by record in a background thread (about 8 ms per legacy record of a 1 kHz signal at 200 MSa/s); averaging runs of more than 128 records (16 with 16-bit records) scale the sums of the first ones, so the simulated noise stops falling there |
 | `--signal SPEC` | CH1 signal; CH2 defaults to the matching TX gate (decay) or a sync square (sine/square) |
 | `--ch1 SPEC`, `--ch2 SPEC` | per-channel signals |
 | `--noise L` | Gaussian noise per ADC core, LSB rms (default 1.0, about 2 LSB as on the real unit) |
@@ -214,7 +215,7 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 |---|---|---|
 | `scope_info` | 0 | firmware, protocol, FPGA variant, serial, capabilities, memory limits |
 | `scope_profile` | 0 | static capability profile, live values, unverified facts, standing caveats |
-| `scope_status` | 0 | mode, display_mode (scope / spectrum view, protocol 1.7), run_state (RUN/STOP/SINGLE), settings_seq, latest capture id and origin, host capture state, battery, link statistics |
+| `scope_status` | 0 | mode, display_mode (scope / spectrum view, protocol 1.7), run_state (RUN/STOP/SINGLE), settings_seq, latest capture id and origin, host capture state, battery, link statistics; from protocol 1.17 the bitstream's features and the acquisition menu's Average (`ui_averaging` off / software / hardware, records per hardware run) |
 | `scope_get_config` | 0 | channels, timebase, trigger and generator in physical units |
 | `scope_read_calibration` | 0 | offset centres, gains, A/B compensation, volts per code per range |
 | `scope_screenshot` | 0 | PNG of the 800x480 screen |
@@ -225,7 +226,8 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_set_trigger` | 1 | source, edge, level (volts or code), mode, pre-trigger, total samples, auto timeout |
 | `scope_capture` | 1 | host single capture (the screen shows it, the scope stays in STOP); statistics, file, inline samples or preview |
 | `scope_acquisition_control` | 1 | arm / wait / force / stop / run (RUN/STOP shared with the scope's button) |
-| `scope_averaged_capture` | 1 | n captures averaged, hardware or edge alignment, on-device averaging when available; restarts when a setting is changed at the scope |
+| `scope_averaged_capture` | 1 | n captures averaged, hardware or edge alignment, on-device averaging when available; `hardware=true` sums the n records in the FPGA in one run (bitstream 0x1536, fw >= 0.2.58; records up to 2046 words, n <= 257 with 8-bit samples); restarts when a setting is changed at the scope |
+| `scope_capture_segments` | 1 | segmented capture (bitstream 0x1536, fw >= 0.2.58): the FPGA re-arms after every trigger and keeps `count` records with 5 ns trigger timestamps (or refills them until `timeout_s` with `circular`); per segment time, interval, triggered, min / max / mean / Vpp; `.npz` with every record |
 | `scope_capture_and_fft` | 1 | averaged amplitude spectrum, peaks in dBV and dBc, noise floor, THD |
 | `scope_spectrum` | 0 | the spectrum the scope's own spectrum view shows (READ_SPECTRUM, fw >= 0.2.28): bins, rate, bin width, window, ENBW/RBW, gain, peaks; `cross_check` recomputes it on the host from the same capture |
 | `scope_decay_fit` | 1 | edge-aligned average, then `exp`, `exp+offset`, `exp2` or `power` fit after the TX edge; tau, R^2, sample points |

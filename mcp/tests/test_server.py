@@ -20,7 +20,7 @@ ALL_TOOLS = {
     "scope_set_channel", "scope_calibrate_volts", "scope_set_timebase", "scope_set_decimation", "scope_set_trigger", "scope_capture",
     "scope_fetch_waveform", "scope_acquisition_control", "scope_averaged_capture", "scope_capture_and_fft",
     "scope_decay_fit", "scope_measure", "scope_generator", "scope_self_test_loopback", "scope_bode_sweep",
-    "scope_raw_fpga", "scope_health", "scope_save_report",
+    "scope_raw_fpga", "scope_health", "scope_save_report", "scope_capture_segments",
     "scope_enter_fel",
 }
 

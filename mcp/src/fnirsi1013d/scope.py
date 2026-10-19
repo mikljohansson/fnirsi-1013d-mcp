@@ -255,6 +255,62 @@ def volts_to_code(v: float, cfg: P.ChannelConfig) -> float:
     return v / (cfg.volts_per_lsb * cfg.probe_factor) + cfg.zero_code
 
 
+@dataclass
+class Segment:
+    """One slot of a segment run (protocol 1.17): its table entry and, when it was read, its record."""
+
+    slot: int
+    entry: P.SeqEntry
+    capture: Capture | None = None
+
+    @property
+    def t_trigger(self) -> float:
+        """Seconds from the run's start (the release of the FPGA reset) to this segment's trigger."""
+        return self.entry.seconds
+
+
+@dataclass
+class SegmentRun:
+    """A finished segment run: the capture's GET_CAPTURE_INFO (``run`` = the run fields), every table slot in slot
+    order, and the segments read."""
+
+    capture_id: int
+    capture_info: P.CaptureInfo
+    entries: list[P.SeqEntry]
+    segments: list[Segment]
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def run(self) -> P.SeqRunInfo:
+        assert self.capture_info.run is not None
+        return self.capture_info.run
+
+
+@dataclass
+class AveragedRun:
+    """A finished hardware-averaging run (protocol 1.17): one Capture per position holding the mean record, and the
+    records accumulated per position."""
+
+    capture_id: int
+    capture_info: P.CaptureInfo
+    positions: list[Capture]
+    records: list[int]
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def run(self) -> P.SeqRunInfo:
+        assert self.capture_info.run is not None
+        return self.capture_info.run
+
+
+class SeqError(ScopeError):
+    """A sequencer setting does not fit the next capture's geometry (GET_SEQ fit code)."""
+
+    def __init__(self, fit: int, msg: str):
+        super().__init__(msg)
+        self.fit = fit
+
+
 class Scope:
     """Synchronous, thread-safe client. All methods map 1:1 to protocol commands except the convenience
     methods ``capture``, ``read_capture`` and ``acquire_average``."""
@@ -939,20 +995,22 @@ class Scope:
     def _read_capture(self, chans: list[int], start_sample: int, count: int | None, keep_raw: bool,
                       st: P.StatusResp | None, trig: P.Trigger, tb: P.Timebase, cfgs: dict[int, P.ChannelConfig],
                       ci: P.CaptureInfo | None, expect_id: int | None = None,
-                      dec: P.DecimConfig | None = None) -> Capture:
+                      dec: P.DecimConfig | None = None, seg: int | None = None) -> Capture:
+        """``seg`` (1.17): read segment ``seg`` of the held segment run (READ_RAW addr_mode 3) instead of the capture."""
         total = trig.total_samples
         if count is None:
             count = total - start_sample
         if start_sample < 0 or count <= 0 or start_sample + count > total:
             raise ValueError(f"sample window {start_sample}+{count} outside 0..{total}")
         if dec is not None and dec.k:
-            return self._read_capture16(chans, start_sample, count, st, trig, tb, cfgs, ci, expect_id, dec)
+            return self._read_capture16(chans, start_sample, count, st, trig, tb, cfgs, ci, expect_id, dec, seg)
         w0 = start_sample // 2
         w1 = (start_sample + count + 1) // 2
         mask = 0
         for c in chans:
             mask |= 3 << (2 * c)
-        hdr, cores = self.read_raw(mask, addr_mode=P.ReadRawReq.ADDR_CAPTURE, address=w0, count=w1 - w0)
+        mode, base = (P.ReadRawReq.ADDR_CAPTURE, 0) if seg is None else (P.ReadRawReq.ADDR_SEGMENT, seg << 16)
+        hdr, cores = self.read_raw(mask, addr_mode=mode, address=base | w0, count=w1 - w0)
         if expect_id is not None and hdr.capture_id != expect_id:
             raise CaptureChanged(f"expected capture {expect_id}, READ_RAW returned {hdr.capture_id}")
         if st is None:
@@ -997,12 +1055,13 @@ class Scope:
 
     def _read_capture16(self, chans: list[int], start_sample: int, count: int, st: P.StatusResp | None,
                         trig: P.Trigger, tb: P.Timebase, cfgs: dict[int, P.ChannelConfig], ci: P.CaptureInfo | None,
-                        expect_id: int | None, dec: P.DecimConfig) -> Capture:
+                        expect_id: int | None, dec: P.DecimConfig, seg: int | None = None) -> Capture:
         """1.9: a decimated capture through READ_RAW layout 2 (one u16 sample per word, words = samples)."""
         mask = 0
         for c in chans:
             mask |= 3 << (2 * c)
-        hdr, data = self.read_raw(mask, addr_mode=P.ReadRawReq.ADDR_CAPTURE, address=start_sample, count=count,
+        mode, base = (P.ReadRawReq.ADDR_CAPTURE, 0) if seg is None else (P.ReadRawReq.ADDR_SEGMENT, seg << 16)
+        hdr, data = self.read_raw(mask, addr_mode=mode, address=base | start_sample, count=count,
                                   layout=P.ReadRawReq.LAYOUT_WIDE)
         if expect_id is not None and hdr.capture_id != expect_id:
             raise CaptureChanged(f"expected capture {expect_id}, READ_RAW returned {hdr.capture_id}")
@@ -1080,3 +1139,233 @@ class Scope:
                 self.stop()
             return None
         return self.read_capture(channels, start_sample, count, keep_raw=keep_raw, st=st, ctx=ctx)
+
+    # --- sequencer (protocol 1.17, cap SEQ, FPGA 0x1536) -----------------------------------------------------
+
+    def get_seq(self) -> P.SeqState:
+        """GET_SEQ: the setting, its fit with the next ARM's geometry, the FPGA status, the latest run."""
+        return P.SeqState.unpack(self._req(P.Cmd.GET_SEQ))
+
+    def set_seq(self, mode: int, *, flags: int = 0, m: int = 0, count: int = 0, n: int = 0,
+                holdoff_ns: int = 0) -> P.SeqState:
+        """SET_SEQ: the sequencer setting the next host ARMs use (mode 0 clears it). Not saved; the UI never uses it."""
+        req = P.SetSeqReq.make(mode, flags, m, count, n, holdoff_ns)
+        return P.SeqState.unpack(self._req(P.Cmd.SET_SEQ, req.pack()))
+
+    def _read_seq(self, req: P.ReadSeqReq) -> tuple[P.ReadSeqHeader, bytes]:
+        data = self._req(P.Cmd.READ_SEQ, req.pack())
+        return P.ReadSeqHeader.unpack(data), data[16:]
+
+    def read_seq_table(self, first: int = 0, count: int | None = None) -> tuple[P.ReadSeqHeader, list[P.SeqEntry]]:
+        """READ_SEQ what 0: the segment table entries ``first`` .. (default: every slot of the held run), split into
+        several requests when needed."""
+        if count is None:
+            run = self.capture_info().run
+            count = (run.slots if run is not None else 0) - first
+        per = max(1, (self.response_limit - 16) // 8)
+        entries: list[P.SeqEntry] = []
+        hdr0: P.ReadSeqHeader | None = None
+        done = 0
+        while done < count:
+            n = min(per, count - done)
+            hdr, body = self._read_seq(P.ReadSeqReq(P.SEQ_READ_TABLE, 0, 0, first + done, n))
+            if hdr0 is not None and hdr.capture_id != hdr0.capture_id:
+                raise CaptureChanged(f"run {hdr0.capture_id} was replaced by {hdr.capture_id} during READ_SEQ")
+            hdr0 = hdr0 or hdr
+            entries += [P.SeqEntry.decode(e) for e in np.frombuffer(body, "<u8", hdr.count).tolist()]
+            done += n
+        if hdr0 is None:
+            raise ScopeError("read_seq_table: nothing to read (count 0)")
+        hdr0.count = count
+        return hdr0, entries
+
+    def read_seq_average(self, channels: Iterable[int | str] = ("CH1",), shift: int = P.SEQ_SHIFT_SUMS,
+                         first: int = 0, count: int | None = None
+                         ) -> tuple[P.ReadSeqHeader, dict[int, np.ndarray | tuple[np.ndarray, np.ndarray]]]:
+        """READ_SEQ what 1: the averaged record of the held run, words ``first`` .. (default: positions x total).
+        Legacy records: {channel: (core A lanes, core B lanes)} as u16 (``shift`` 0xFF or 0: the sums); 16-bit records:
+        {channel: samples} as u16 (min(65535, sum >> S)) or u32 sums (``shift`` 0xFF)."""
+        chans = sorted({channel_index(c) for c in channels})
+        mask = sum(1 << c for c in chans)
+        if count is None:
+            ci = self.capture_info()
+            if ci.run is None or ci.run.mode != P.SEQ_AVERAGE:
+                raise ScopeError("read_seq_average: the latest capture is not an averaging run")
+            count = ci.run.requested * ci.trigger().total_words - first
+        per = max(1, (self.response_limit - 16) // (4 * len(chans)))  # 4 bytes per word and channel at most
+        parts: list[dict[int, Any]] = []
+        hdr0: P.ReadSeqHeader | None = None
+        done = 0
+        while done < count:
+            n = min(per, count - done)
+            hdr, body = self._read_seq(P.ReadSeqReq(P.SEQ_READ_AVERAGE, mask, shift, first + done, n))
+            if hdr0 is not None and hdr.capture_id != hdr0.capture_id:
+                raise CaptureChanged(f"run {hdr0.capture_id} was replaced by {hdr.capture_id} during READ_SEQ")
+            hdr0 = hdr0 or hdr
+            out: dict[int, Any] = {}
+            off = 0
+            for c in chans:
+                if hdr.format & P.SEQ_FMT_WIDE:
+                    dt = "<u4" if hdr.format & P.SEQ_FMT_U32 else "<u2"
+                    out[c] = np.frombuffer(body, dt, hdr.count, off).copy()
+                    off += hdr.count * np.dtype(dt).itemsize
+                else:
+                    a = np.frombuffer(body, "<u2", hdr.count, off).copy()
+                    b = np.frombuffer(body, "<u2", hdr.count, off + 2 * hdr.count).copy()
+                    out[c] = (a, b)
+                    off += 4 * hdr.count
+            parts.append(out)
+            done += n
+        if hdr0 is None:
+            raise ScopeError("read_seq_average: nothing to read (count 0)")
+        hdr0.count = count
+        if len(parts) == 1:
+            return hdr0, parts[0]
+        merged: dict[int, Any] = {}
+        for c in chans:
+            if isinstance(parts[0][c], tuple):
+                merged[c] = (np.concatenate([p[c][0] for p in parts]), np.concatenate([p[c][1] for p in parts]))
+            else:
+                merged[c] = np.concatenate([p[c] for p in parts])
+        return hdr0, merged
+
+    def read_segment(self, slot: int, channels: Iterable[int | str] = ("CH1",), ci: P.CaptureInfo | None = None,
+                     entry: P.SeqEntry | None = None) -> Capture:
+        """One segment of the held segment run as a Capture (READ_RAW addr_mode 3; the record starts at the pretrigger
+        words before its trigger), converted with the run's settings."""
+        ci = ci or self.capture_info()
+        if ci.run is None or ci.run.mode != P.SEQ_SEGMENTS:
+            raise ScopeError("read_segment: the latest capture is not a segment run")
+        h = ci.header
+        chans = [channel_index(c) for c in channels]
+        trig = ci.trigger()
+        triggered = entry.triggered if entry is not None else True
+        st = P.StatusResp(acq_state=P.AcqState.DONE, capture_id=h.capture_id, capture_settings_seq=h.settings_seq,
+                          capture_origin=h.origin,
+                          flags=P.StatusFlags.FPGA_TRIGGERED if triggered else P.StatusFlags.AUTO_TIMEOUT)
+        return self._read_capture(chans, 0, trig.total_samples, False, st, trig, ci.timebase(),
+                                  {c: ci.channel_config(c) for c in chans}, ci, expect_id=h.capture_id, dec=ci.decim,
+                                  seg=slot)
+
+    def _seq_geometry(self) -> P.SeqState:
+        st = self.get_seq()
+        if not st.total_words:
+            raise ScopeError("the next capture has no geometry (total words 0)")
+        return st
+
+    def _run(self, timeout_s: float, cancel: Callable[[], bool] | None) -> P.StatusResp:
+        """ARM a run and wait for its DONE. At the timeout the run is ended with STOP (it keeps what it has)."""
+        self.arm()
+        st = self.wait(timeout_s, cancel=cancel)
+        if st.acq_state != P.AcqState.DONE and st.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
+            self.stop()
+            st = self.wait(5.0)
+        return st
+
+    def capture_segments(self, channels: Iterable[int | str] = ("CH1",), count: int = 16, *, m: int | None = None,
+                         holdoff_ns: int = 0, circular: bool = False, timeout_s: float = 2.0,
+                         cancel: Callable[[], bool] | None = None, read: bool = True) -> SegmentRun:
+        """A segment run with the live trigger and geometry: ``count`` records into slots of 2^m words (default: the
+        smallest slot that holds the record), each with its trigger timestamp. ``circular``: the slots are refilled
+        until ``timeout_s``, then STOP ends the run (the table holds the latest ones). A run not finished at
+        ``timeout_s`` is ended with STOP and keeps the segments it has. The setting is cleared afterwards."""
+        g = self._seq_geometry()
+        if m is None:
+            m = max(P.SEQ_M_MIN, (g.total_words + P.SEQ_TAIL - 1).bit_length())
+        flags = P.SEQ_F_CIRCULAR if circular else 0
+        fit = P.seq_fit(P.SEQ_SEGMENTS, flags, m, count, 0, g.pre_words, g.total_words, bool(g.wide))
+        if fit != P.SEQ_FIT_OK:
+            raise SeqError(fit, f"segments do not fit: {P.SEQ_FIT_NAMES[fit]} (record {g.total_words} words, "
+                                f"pretrigger {g.pre_words}, m {m}, count {count}; at most "
+                                f"{P.seq_max_count(P.SEQ_SEGMENTS, m, g.total_words)} segments of 2^{m} words)")
+        try:
+            st = self.set_seq(P.SEQ_SEGMENTS, flags=flags, m=m, count=count, holdoff_ns=holdoff_ns)
+            if st.fit != P.SEQ_FIT_OK:
+                raise SeqError(st.fit, f"segments do not fit: {st.fit_text}")
+            done = self._run(timeout_s, cancel)
+        finally:
+            self.set_seq(P.SEQ_OFF)
+        if done.acq_state != P.AcqState.DONE:
+            raise ScopeError(f"the segment run did not end (acq_state {P.AcqState(done.acq_state).name})")
+        ci = self.capture_info()
+        if ci.run is None or ci.run.mode != P.SEQ_SEGMENTS or ci.header.capture_id != done.capture_id:
+            raise CaptureChanged("the latest capture is not this segment run (replaced before it was read)")
+        notes: list[str] = []
+        if ci.run.flags & P.SEQ_RUN_STOPPED and not circular:
+            notes.append(f"the run did not finish within {timeout_s} s and was ended with STOP "
+                         f"({ci.run.count} of {ci.run.requested} segments)")
+        chans = [channel_index(c) for c in channels]
+        slots = ci.run.slots
+        _, entries = self.read_seq_table(0, slots) if slots else (None, [])
+        segs = []
+        for i, e in enumerate(entries):
+            cap = self.read_segment(i, chans, ci, e) if read and e.valid else None
+            segs.append(Segment(i, e, cap))
+        if ci.run.untriggered:
+            notes.append(f"{ci.run.untriggered} segment(s) ended on the auto time-out (not triggered)")
+        return SegmentRun(ci.header.capture_id, ci, entries, segs, notes)
+
+    def capture_hw_average(self, channels: Iterable[int | str] = ("CH1",), n: int = 64, *, positions: int = 1,
+                           holdoff_ns: int = 0, timeout_s: float = 5.0,
+                           cancel: Callable[[], bool] | None = None) -> AveragedRun:
+        """A hardware-averaging run with the live trigger and geometry: ``n`` records per position summed in the
+        FPGA (record k goes to position k mod ``positions``), read as exact sums and converted to the mean in volts. A
+        run not finished at ``timeout_s`` is ended with STOP and averages what it has. The setting is cleared
+        afterwards."""
+        g = self._seq_geometry()
+        fit = P.seq_fit(P.SEQ_AVERAGE, 0, 0, positions, n, g.pre_words, g.total_words, bool(g.wide))
+        if fit != P.SEQ_FIT_OK:
+            raise SeqError(fit, f"hardware averaging does not fit: {P.SEQ_FIT_NAMES[fit]} (record {g.total_words} "
+                                f"words, pretrigger {g.pre_words}, positions {positions}, N {n}, "
+                                f"{'16-bit' if g.wide else '8-bit'} records)")
+        try:
+            st = self.set_seq(P.SEQ_AVERAGE, count=positions, n=n, holdoff_ns=holdoff_ns)
+            if st.fit != P.SEQ_FIT_OK:
+                raise SeqError(st.fit, f"hardware averaging does not fit: {st.fit_text}")
+            done = self._run(timeout_s, cancel)
+        finally:
+            self.set_seq(P.SEQ_OFF)
+        if done.acq_state != P.AcqState.DONE:
+            raise ScopeError(f"the averaging run did not end (acq_state {P.AcqState(done.acq_state).name})")
+        notes: list[str] = []
+        ci = self.capture_info()
+        run = ci.run
+        if run is None or run.mode != P.SEQ_AVERAGE or ci.header.capture_id != done.capture_id:
+            raise CaptureChanged("the latest capture is not this averaging run (replaced before it was read)")
+        if run.count == 0:
+            raise ScopeError("the averaging run holds no record (no trigger)")
+        chans = [channel_index(c) for c in channels]
+        npos = run.requested
+        recs = [run.count // npos + (1 if p < run.count % npos else 0) for p in range(npos)]
+        if run.count < n * npos:
+            notes.append(f"the run did not finish within {timeout_s} s and was ended with STOP: {run.count} of "
+                         f"{n * npos} records accumulated")
+        _, data = self.read_seq_average(chans, P.SEQ_SHIFT_SUMS, 0, npos * ci.trigger().total_words)
+        caps = [self._averaged_capture(ci, chans, data, p, recs[p]) for p in range(npos)]
+        return AveragedRun(ci.header.capture_id, ci, caps, recs, notes)
+
+    def _averaged_capture(self, ci: P.CaptureInfo, chans: list[int], data: dict[int, Any], p: int,
+                          records: int) -> Capture:
+        """Position p of an averaging run's sums as a Capture of mean codes and volts."""
+        trig, tb, dec, h = ci.trigger(), ci.timebase(), ci.decim, ci.header
+        tw = trig.total_words
+        sl = slice(p * tw, (p + 1) * tw)
+        out: dict[str, ChannelData] = {}
+        for c in chans:
+            cfg = ci.channel_config(c)
+            if dec is not None:
+                mean16 = data[c][sl].astype(np.float64) / max(records, 1)
+                out[CHANNEL_NAMES[c]] = self._channel16(c, cfg, mean16, dec)
+                continue
+            a, b = (x[sl].astype(np.float64) / max(records, 1) for x in data[c])
+            sc = self.scale(c, cfg, P.cal_clock_class(tb.divider, False))
+            order = self.info.interleave_order
+            codes = interleave(sc.codes_from_raw(a, "A"), sc.codes_from_raw(b, "B"), order)
+            volts = interleave(sc.volts_raw(a, "A"), sc.volts_raw(b, "B"), order)
+            clipped = interleave((a <= 0.5) | (a >= 254.5), (b <= 0.5) | (b >= 254.5), order)
+            if cfg.invert:
+                volts = -volts
+            out[CHANNEL_NAMES[c]] = ChannelData(CHANNEL_NAMES[c], codes, volts, clipped, cfg, scale=sc)
+        return Capture(h.capture_id, tb.dt, tb.divider, 0, trig.pretrigger_samples, trig.total_samples, records > 0,
+                       False, out, trig, ORIGIN_NAMES.get(h.origin, "host"), P.AcqState.DONE, h.settings_seq, ci,
+                       decim=dec)

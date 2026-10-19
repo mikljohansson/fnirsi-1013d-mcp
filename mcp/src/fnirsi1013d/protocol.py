@@ -32,8 +32,11 @@ PROTO_MAJOR = 1
 #: 1.10 (fw 0.2.43): calibration data v2, GET_CAL 248 bytes; 1.11 (fw 0.2.44, FPGA 0x1535): CIC compensation FIR
 #: (caps FIR, SET_DECIM flags bit 3, 0x29 bits 6 / 5); 1.12 (fw 0.2.45): calibration data v3 (per-core, per-class
 #: gains), GET_CAL 256 bytes (v2 blocks are no longer used); 1.13 (fw 0.2.46): phosphor view, display_mode 4; 1.14
-#: (fw 0.2.49): USB suspend watch, link counters 60-61, event type 20
-PROTO_MINOR = 16
+#: (fw 0.2.49): USB suspend watch, link counters 60-61, event type 20; 1.15 (fw 0.2.50): calibration v4; 1.16
+#: (fw 0.2.52): diagnostics readers; 1.17 (fw 0.2.58, FPGA 0x1536, row 56): sequencer (segmented capture, hardware
+#: averaging: caps SEQ, SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW addr_mode 3), the features word and UI Average state in
+#: GET_STATUS 44..47 (48 bytes) and GET_DECIM 32..35, GET_CAPTURE_INFO 96 bytes
+PROTO_MINOR = 17
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -90,6 +93,9 @@ class Cmd(enum.IntEnum):
     READ_SPECTRUM = 0x020A  # protocol 1.7, fw 0.2.28: the spectrum the scope's spectrum view shows (main loop)
     GET_DECIM = 0x020C  # protocol 1.9, fw 0.2.30, cap DECIM: decimation filter setting and state
     SET_DECIM = 0x020D  # protocol 1.9: the decimation filter (the UI's acquisition Filter setting)
+    SET_SEQ = 0x020E  # protocol 1.17, fw 0.2.58, cap SEQ: sequencer setting for host ARM (segments / averaging)
+    GET_SEQ = 0x020F  # protocol 1.17: the setting, its fit with the next ARM, FPGA status, the latest run
+    READ_SEQ = 0x0210  # protocol 1.17: segment table or averaged record of the latest run
     GET_GEN = 0x0300
     SET_GEN = 0x0301
     GET_CAL = 0x0400
@@ -185,6 +191,26 @@ class Caps(enum.IntFlag):
     DECIM = 1 << 15
     #: protocol 1.11 (FPGA 0x1535+): CIC compensation FIR after the decimation filter
     FIR = 1 << 16
+    #: protocol 1.17 (FPGA 0x1536+): sequencer, segmented capture and hardware averaging
+    SEQ = 1 << 17
+
+
+class Features(enum.IntFlag):
+    """GET_STATUS bytes 44-45 / GET_DECIM 32-33 features word (protocol 1.17): what the bitstream can do."""
+
+    EXT_TRIGGER = 1 << 0  # 0x1533+
+    DECIM = 1 << 1  # 0x1534+
+    FIR = 1 << 2  # 0x1535+
+    SEGMENTS = 1 << 3  # 0x1536+
+    HW_AVERAGE = 1 << 4  # 0x1536+
+
+
+def feature_names(features: int) -> list[str]:
+    return [f.name.lower() for f in Features if features & f and f.name]
+
+
+#: GET_STATUS byte 46 (protocol 1.17): the acquisition menu's Average
+UI_AVERAGE_NAMES = {0: "off", 1: "software", 2: "hardware"}
 
 
 def caps_names(caps: int) -> list[str]:
@@ -209,6 +235,9 @@ CMD_CAP: dict[Cmd, Caps] = {
     Cmd.SAVE_REPORT: Caps.SD_SECTORS,
     Cmd.GET_DECIM: Caps.DECIM,
     Cmd.SET_DECIM: Caps.DECIM,
+    Cmd.SET_SEQ: Caps.SEQ,
+    Cmd.GET_SEQ: Caps.SEQ,
+    Cmd.READ_SEQ: Caps.SEQ,
 }
 
 
@@ -739,14 +768,15 @@ class InfoResp(Payload):
 @dataclass
 class StatusResp(Payload):
     """GET_STATUS response body: 28 bytes in protocol 1.0, 32 in 1.1 (pass_ms, pass_max_ms appended; a 1.0
-    device leaves them 0), 44 in 1.3 (settings_seq, capture_settings_seq, run_state, capture_origin). Also
-    returned by SET_REMOTE, ARM, FORCE, STOP, WAIT and SET_ACQ_STATE."""
+    device leaves them 0), 44 in 1.3 (settings_seq, capture_settings_seq, run_state, capture_origin), 48 in 1.17
+    (features, UI Average). Also returned by SET_REMOTE, ARM, FORCE, STOP, WAIT and SET_ACQ_STATE."""
 
     FIELDS = [("control", "B"), ("acq_state", "B"), ("flags", "B"), ("ui_busy", "B"), ("capture_id", "I"),
               ("trigger_addr", "H"), ("capture_start_word", "H"), ("ms_since_arm", "I"), ("uptime_ms", "I"),
               ("watchdog_remaining_s", "H"), ("battery_level", "B"), ("exit_reason", "B"), ("reserved", "I"),
               ("pass_ms", "H"), ("pass_max_ms", "H"), ("settings_seq", "I"), ("capture_settings_seq", "I"),
-              ("run_state", "B"), ("capture_origin", "B"), ("ext_flags", "B"), ("display_mode", "B")]
+              ("run_state", "B"), ("capture_origin", "B"), ("ext_flags", "B"), ("display_mode", "B"),
+              ("features", "H"), ("ui_average", "B"), ("ui_average_log2n", "B")]
     control: int = 0
     acq_state: int = 0
     flags: int = 0
@@ -775,6 +805,12 @@ class StatusResp(Payload):
     ext_flags: int = 0
     #: 1.7: DisplayMode (0 before 1.7)
     display_mode: int = 0
+    #: 1.17: Features of the bitstream (0 before 1.17)
+    features: int = 0
+    #: 1.17: the acquisition menu's Average: 0 off, 1 software, 2 hardware (UI_AVERAGE_NAMES)
+    ui_average: int = 0
+    #: 1.17: log2 of the records per UI hardware-averaging run (ui_average 2 only)
+    ui_average_log2n: int = 0
 
     @property
     def shared(self) -> bool:
@@ -839,7 +875,8 @@ class CaptureChannelInfo(Payload):
 
 @dataclass
 class CaptureInfo:
-    """Decoded GET_CAPTURE_INFO (68 bytes; 76 from protocol 1.9 with the capture's decimation filter)."""
+    """Decoded GET_CAPTURE_INFO (68 bytes; 76 from protocol 1.9 with the capture's decimation filter; 96 from 1.17
+    with the capture's sequencer run, ``run``)."""
 
     header: CaptureInfoHeader
     channels: list[CaptureChannelInfo]
@@ -849,13 +886,17 @@ class CaptureInfo:
     ext_shift: int = 0
     decim_n: int = 0
     has_decim: bool = False
+    #: 1.17: the capture's sequencer run (bytes 76..95; ``run.mode`` 0 = a single capture), None before 1.17
+    run: "SeqRunInfo | None" = None
 
     SIZE: ClassVar[int] = 36 + 2 * 16
 
     def pack(self) -> bytes:
         out = self.header.pack() + b"".join(c.pack() for c in self.channels)
-        if self.has_decim:
+        if self.has_decim or self.run is not None:
             out += struct.pack("<BBHI", self.decim_mode, self.decim_shift, self.ext_shift, self.decim_n)
+        if self.run is not None:
+            out += self.run.pack()
         return out
 
     @classmethod
@@ -866,7 +907,14 @@ class CaptureInfo:
         if len(data) >= 76:
             ci.decim_mode, ci.decim_shift, ci.ext_shift, ci.decim_n = struct.unpack_from("<BBHI", data, 68)
             ci.has_decim = True
+        if len(data) >= 96:
+            ci.run = SeqRunInfo.unpack(data[76:96])
         return ci
+
+    @property
+    def is_run(self) -> bool:
+        """1.17: the capture is a sequencer run (segments or hardware averaging)."""
+        return self.run is not None and self.run.mode != SEQ_OFF
 
     @property
     def decim(self) -> "DecimConfig | None":
@@ -906,6 +954,293 @@ class CaptureInfo:
             for k in ("enable", "range", "coupling", "invert", "probe_index", "offset_pwm"):
                 d[f"CH{i + 1}.{k}"] = getattr(c, k)
         return d
+
+
+# Sequencer (protocol 1.17, fw 0.2.58, FPGA 0x1536, section 14 row 56): segmented capture and hardware averaging.
+# The maths mirror firmware/scope/pc_seq.c and are checked against the "seq" section of docs/protocol-vectors.json.
+# A "word" is a memory word as for 0x0B / 0x0C: one A/B pair per channel (legacy), one 16-bit sample with the filter.
+
+SEQ_OFF, SEQ_SEGMENTS, SEQ_AVERAGE = 0, 1, 2
+SEQ_MODE_NAMES = {SEQ_OFF: "off", SEQ_SEGMENTS: "segments", SEQ_AVERAGE: "averaging"}
+SEQ_F_CIRCULAR = 0x01  # SET_SEQ flags bit 0 (segments only)
+SEQ_F_VALID = 0x01
+SEQ_M_MIN, SEQ_M_MAX = 5, 12
+SEQ_WORDS = 8192  # sample memory
+SEQ_ACC_WORDS = 2048  # accumulator (= segment table)
+SEQ_TAIL = 2  # words written after a record window: total <= 2^m - 2
+SEQ_AVG_MAX_TOTAL = 2046
+SEQ_LEGACY_MAX_N = 257  # legacy 16-bit lane sums are exact up to 255 x 257 = 65535
+SEQ_MAX_N = 65536
+#: GET_CAPTURE_INFO 77 / GET_SEQ 47 run flags
+SEQ_RUN_CIRCULAR, SEQ_RUN_STOPPED, SEQ_RUN_WRAPPED = 0x01, 0x02, 0x04
+#: FPGA 0x2A byte 0 (GET_SEQ byte 24)
+SEQ_ST_DONE, SEQ_ST_OVERFLOW, SEQ_ST_RUNNING, SEQ_ST_FMT16, SEQ_ST_RAW, SEQ_ST_CIRCULAR = 0x80, 0x40, 0x20, 0x10, 8, 4
+#: READ_SEQ what
+SEQ_READ_TABLE, SEQ_READ_AVERAGE = 0, 1
+#: READ_SEQ S value for the plain sums
+SEQ_SHIFT_SUMS = 0xFF
+#: READ_SEQ header format bits
+SEQ_FMT_WIDE, SEQ_FMT_U32 = 0x01, 0x02
+#: GET_SEQ byte 16 / SET_SEQ refusals: why a setting does not fit the next arm's geometry
+SEQ_FIT_OK, SEQ_FIT_MODE, SEQ_FIT_FLAGS, SEQ_FIT_M, SEQ_FIT_COUNT, SEQ_FIT_TOTAL, SEQ_FIT_PRE, SEQ_FIT_N = range(8)
+SEQ_FIT_NAMES = {
+    SEQ_FIT_OK: "fits",
+    SEQ_FIT_MODE: "unknown mode",
+    SEQ_FIT_FLAGS: "unknown flags, or circular outside segment mode",
+    SEQ_FIT_M: "segment slot exponent m outside 5..12",
+    SEQ_FIT_COUNT: "count 0, more segments than 8192 >> m, or positions x total words > 2048",
+    SEQ_FIT_TOTAL: "record too long: segments need total words <= 2^m - 2, averaging total words <= 2046",
+    SEQ_FIT_PRE: "pretrigger must be shorter than the record",
+    SEQ_FIT_N: "records per position N outside 1..65536 (at most 257 with 8-bit records)",
+}
+#: UI hardware averaging (pc_seq_ui_plan)
+SEQ_UI_BUDGET_US, SEQ_UI_MAX_N, SEQ_UI_MIN_N = 40000, 64, 2
+
+
+@dataclass
+class SetSeqReq(Payload):
+    """SET_SEQ request, 16 bytes (protocol 1.17). ``n`` 65536 is sent as 0."""
+
+    FIELDS = [("mode", "B"), ("flags", "B"), ("m", "B"), ("_r0", "x"), ("count", "H"), ("n_raw", "H"),
+              ("holdoff_ns", "I"), ("_r1", "4x")]
+    mode: int = 0
+    flags: int = 0
+    m: int = 0
+    count: int = 0
+    n_raw: int = 0
+    holdoff_ns: int = 0
+
+    @classmethod
+    def make(cls, mode: int, flags: int = 0, m: int = 0, count: int = 0, n: int = 0,
+             holdoff_ns: int = 0) -> "SetSeqReq":
+        return cls(mode, flags, m, count, n & 0xFFFF, holdoff_ns)
+
+    @property
+    def n(self) -> int:
+        return self.n_raw or (SEQ_MAX_N if self.mode == SEQ_AVERAGE else 0)
+
+
+@dataclass
+class SeqRunInfo(Payload):
+    """GET_CAPTURE_INFO bytes 76..95 (protocol 1.17): the capture's sequencer run."""
+
+    FIELDS = [("mode", "B"), ("flags", "B"), ("m", "B"), ("wide", "B"), ("count", "I"), ("untriggered", "H"),
+              ("requested", "H"), ("n", "I"), ("holdoff_ns", "I")]
+    #: 0 = a single capture, SEQ_SEGMENTS, SEQ_AVERAGE
+    mode: int = 0
+    #: SEQ_RUN_CIRCULAR / STOPPED / WRAPPED
+    flags: int = 0
+    m: int = 0
+    #: 1 = 16-bit records
+    wide: int = 0
+    #: segments completed / records accumulated at DONE (a circular run counts beyond the slots)
+    count: int = 0
+    untriggered: int = 0
+    #: segments / positions requested
+    requested: int = 0
+    n: int = 0
+    holdoff_ns: int = 0
+
+    @property
+    def slots(self) -> int:
+        """Table slots that may hold entries."""
+        if self.mode != SEQ_SEGMENTS:
+            return 0
+        return SEQ_WORDS >> self.m if self.flags & SEQ_RUN_CIRCULAR else self.requested
+
+
+@dataclass
+class SeqState(Payload):
+    """GET_SEQ response (and SET_SEQ's), 48 bytes (protocol 1.17)."""
+
+    FIELDS = [("mode", "B"), ("flags", "B"), ("m", "B"), ("_r0", "x"), ("count", "H"), ("n_raw", "H"),
+              ("holdoff_ns", "I"), ("holdoff_units", "I"), ("fit", "B"), ("wide", "B"), ("pre_words", "H"),
+              ("total_words", "H"), ("max_count", "H"), ("fpga_status", "B"), ("seq_state", "B"),
+              ("next_index", "H"), ("fpga_count", "I"), ("fpga_untriggered", "H"), ("held", "B"), ("_r1", "x"),
+              ("run_capture_id", "I"), ("run_count", "I"), ("run_untriggered", "H"), ("run_mode", "B"),
+              ("run_flags", "B")]
+    #: the setting (applies to host ARM only, not saved)
+    mode: int = 0
+    flags: int = 0
+    m: int = 0
+    count: int = 0
+    n_raw: int = 0
+    holdoff_ns: int = 0
+    #: hold-off in 5 ns units as written to 0x5C
+    holdoff_units: int = 0
+    #: SEQ_FIT_* of the setting with the next ARM's geometry
+    fit: int = 0
+    #: 1 = the next ARM records 16-bit samples
+    wide: int = 0
+    #: the next ARM's pretrigger / total words
+    pre_words: int = 0
+    total_words: int = 0
+    #: largest count for the mode (8192 >> m segments, 2048 / total positions)
+    max_count: int = 0
+    #: FPGA 0x2A byte 0 now (SEQ_ST_*, bits 1..0 mode of the run)
+    fpga_status: int = 0
+    seq_state: int = 0
+    next_index: int = 0
+    fpga_count: int = 0
+    fpga_untriggered: int = 0
+    #: 1 = the FPGA still holds the latest capture's run (no arm since)
+    held: int = 0
+    #: the latest capture if it is a run (else 0), its count at DONE, untriggered, mode and flags
+    run_capture_id: int = 0
+    run_count: int = 0
+    run_untriggered: int = 0
+    run_mode: int = 0
+    run_flags: int = 0
+
+    @property
+    def n(self) -> int:
+        return self.n_raw or (SEQ_MAX_N if self.mode == SEQ_AVERAGE else 0)
+
+    @property
+    def fit_text(self) -> str:
+        return SEQ_FIT_NAMES.get(self.fit, f"fit code {self.fit}")
+
+
+@dataclass
+class ReadSeqReq(Payload):
+    """READ_SEQ request, 12 bytes (protocol 1.17): what (SEQ_READ_TABLE / SEQ_READ_AVERAGE), channel mask and S
+    (averaged record), first entry or word, count."""
+
+    FIELDS = [("what", "B"), ("ch_mask", "B"), ("shift", "B"), ("_r0", "x"), ("first", "H"), ("count", "H"),
+              ("_r1", "4x")]
+    what: int = 0
+    ch_mask: int = 0
+    shift: int = 0
+    first: int = 0
+    count: int = 0
+
+
+@dataclass
+class ReadSeqHeader(Payload):
+    """READ_SEQ response header, 16 bytes."""
+
+    FIELDS = [("capture_id", "I"), ("first", "H"), ("count", "H"), ("what", "B"), ("format", "B"),
+              ("m_or_shift", "B"), ("ch_mask", "B"), ("pre_words", "H"), ("total_words", "H")]
+    capture_id: int = 0
+    first: int = 0
+    count: int = 0
+    what: int = 0
+    #: SEQ_FMT_WIDE (16-bit records), SEQ_FMT_U32 (u32 sums)
+    format: int = 0
+    #: what 0: m; what 1: the S applied (0xFF for 16-bit sums; legacy 0xFF reads as S 0)
+    m_or_shift: int = 0
+    ch_mask: int = 0
+    pre_words: int = 0
+    total_words: int = 0
+
+
+@dataclass(frozen=True)
+class SeqEntry:
+    """A segment table entry: timestamp in 5 ns units since the release of 0x01 (40 bits), trigger offset in the
+    slot (trigger_address mod 2^m), triggered (0: ended on the auto time-out), valid (0: never written, or the slot a
+    circular run was refilling)."""
+
+    timestamp: int
+    offset: int
+    triggered: bool
+    valid: bool
+
+    @classmethod
+    def decode(cls, e: int) -> "SeqEntry":
+        return cls(e & 0xFFFFFFFFFF, (e >> 40) & 0x1FFF, bool((e >> 53) & 1), bool(e >> 63))
+
+    def encode(self) -> int:
+        return ((self.timestamp & 0xFFFFFFFFFF) | ((self.offset & 0x1FFF) << 40) | (int(self.triggered) << 53) |
+                (int(self.valid) << 63))
+
+    @property
+    def seconds(self) -> float:
+        return self.timestamp * 5e-9
+
+
+def seq_max_count(mode: int, m: int, total_words: int) -> int:
+    """pc_seq_max_count: 8192 >> m segments, or 2048 / total positions (0 when out of range)."""
+    if mode == SEQ_SEGMENTS:
+        return SEQ_WORDS >> m if SEQ_M_MIN <= m <= SEQ_M_MAX else 0
+    if mode == SEQ_AVERAGE:
+        return 0 if total_words == 0 or total_words > SEQ_AVG_MAX_TOTAL else SEQ_ACC_WORDS // total_words
+    return 0
+
+
+def seq_fit(mode: int, flags: int, m: int, count: int, n: int, pre_words: int, total_words: int,
+            wide: bool) -> int:
+    """pc_seq_fit: SEQ_FIT_* of a setting against the next arm's geometry (words) and record format."""
+    if mode > SEQ_AVERAGE:
+        return SEQ_FIT_MODE
+    if flags & ~SEQ_F_VALID or (flags & SEQ_F_CIRCULAR and mode != SEQ_SEGMENTS):
+        return SEQ_FIT_FLAGS
+    if mode == SEQ_OFF:
+        return SEQ_FIT_OK
+    if mode == SEQ_SEGMENTS:
+        if not SEQ_M_MIN <= m <= SEQ_M_MAX:
+            return SEQ_FIT_M
+        if count == 0 or count > SEQ_WORDS >> m:
+            return SEQ_FIT_COUNT
+        if total_words + SEQ_TAIL > 1 << m:
+            return SEQ_FIT_TOTAL
+    else:
+        if n == 0 or n > SEQ_MAX_N or (not wide and n > SEQ_LEGACY_MAX_N):
+            return SEQ_FIT_N
+        if total_words > SEQ_AVG_MAX_TOTAL:
+            return SEQ_FIT_TOTAL
+        if count == 0 or count * total_words > SEQ_ACC_WORDS:
+            return SEQ_FIT_COUNT
+    if total_words == 0 or pre_words >= total_words:
+        return SEQ_FIT_PRE
+    return SEQ_FIT_OK
+
+
+def seq_holdoff_units(ns: int) -> int:
+    """Hold-off in 5 ns units, rounded up."""
+    return (ns + 4) // 5
+
+
+def seq_cmd57(mode: int, flags: int, raw: bool = False) -> int:
+    return (mode & 3) | (0x04 if mode == SEQ_SEGMENTS and flags & SEQ_F_CIRCULAR else 0) | (0x08 if raw else 0)
+
+
+def seq_slots(mode: int, flags: int, m: int, count: int) -> int:
+    """Table slots that may hold entries: count, or 8192 >> m for a circular run."""
+    if mode != SEQ_SEGMENTS:
+        return 0
+    return SEQ_WORDS >> m if flags & SEQ_F_CIRCULAR else count
+
+
+def seq_seg_word(m: int, s: int, offset: int, pre_words: int, j: int) -> int:
+    """Segment s: sample-memory word of record index j, from the table offset and the pretrigger words."""
+    return (s << m) + ((offset - pre_words + j) & ((1 << m) - 1))
+
+
+def seq_dead_ns(total_words: int, pre_words: int, word_ns: int) -> int:
+    """Dead time per averaged record: post-pass (total x 5 + 40 ns) + restart (2 words) + pretrigger fill + 100 ns."""
+    return total_words * 5 + 40 + (2 + pre_words) * word_ns + 100
+
+
+def seq_ui_plan(total_words: int, pre_words: int, divider: int) -> tuple[int, int]:
+    """pc_seq_ui_plan: (records N per UI averaging run, run time in us rounded up); N 0 = software averaging."""
+    word_ns = 10 * (divider + 1)
+    if total_words == 0 or total_words > SEQ_AVG_MAX_TOTAL or pre_words >= total_words or word_ns > 1_000_000:
+        return 0, 0
+    rec_ns = total_words * word_ns + seq_dead_ns(total_words, pre_words, word_ns)
+    n = SEQ_UI_MAX_N
+    while n >= SEQ_UI_MIN_N and n * rec_ns > SEQ_UI_BUDGET_US * 1000:
+        n >>= 1
+    if n < SEQ_UI_MIN_N:
+        return 0, 0
+    return n, (n * rec_ns + 999) // 1000
+
+
+def seq_avg_code(lane_sum: int, c: int, gain: int, off: int) -> int:
+    """pc_seq_avg_code: corrected 8-bit code of an averaged legacy lane (sum of c raw core codes) through the core's
+    Q16 correction (code = (raw x gain + off) / 65536), from the mean in Q8, rounded, clamped 0..255."""
+    m8 = (lane_sum * 256 + c // 2) // c
+    v = (m8 * gain + (off << 8) + (1 << 23)) >> 24
+    return max(0, min(255, v))
 
 
 # SD sector commands (protocol 1.3, fw 0.2.2, section 14 row 40)
@@ -1301,6 +1636,8 @@ class ReadRawReq(Payload):
     ADDR_ABSOLUTE: ClassVar[int] = 0
     ADDR_CAPTURE: ClassVar[int] = 1
     ADDR_TRIGGER: ClassVar[int] = 2
+    #: 1.17: segment-relative, address = segment << 16 | word offset from the segment's record start
+    ADDR_SEGMENT: ClassVar[int] = 3
     #: layouts: 0 per core, 1 both cores of a channel interleaved, 2 (1.9) u16 per word (low byte core A)
     LAYOUT_CORES: ClassVar[int] = 0
     LAYOUT_INTERLEAVED: ClassVar[int] = 1
@@ -1575,11 +1912,12 @@ class SetDecimReq(Payload):
 
 @dataclass
 class DecimState(Payload):
-    """GET_DECIM / SET_DECIM response, 32 bytes."""
+    """GET_DECIM / SET_DECIM response, 32 bytes; 36 from protocol 1.17 (features, UI Average as GET_STATUS 44..47)."""
 
     FIELDS = [("filter", "B"), ("flags", "B"), ("next_mode", "B"), ("next_shift", "B"), ("next_n", "I"),
               ("next_gain", "Q"), ("divider", "I"), ("rate_hz", "I"), ("last_mode", "B"), ("last_shift", "B"),
-              ("fpga_mode", "B"), ("fpga_shift", "B"), ("max_total", "H"), ("why", "B"), ("ext_shift", "B")]
+              ("fpga_mode", "B"), ("fpga_shift", "B"), ("max_total", "H"), ("why", "B"), ("ext_shift", "B"),
+              ("features", "H"), ("ui_average", "B"), ("ui_average_log2n", "B")]
     #: the setting: 0 off, 1 boxcar, 2 CIC2, 3 CIC3
     filter: int = 0
     #: SetDecimReq flag bits
@@ -1603,6 +1941,10 @@ class DecimState(Payload):
     why: int = 0
     #: EXT latency shift (samples) the next arm applies with the current source
     ext_shift: int = 0
+    #: 1.17: as GET_STATUS 44..47
+    features: int = 0
+    ui_average: int = 0
+    ui_average_log2n: int = 0
 
     @property
     def next(self) -> DecimConfig:
@@ -2540,7 +2882,8 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.READ_SCREEN: ReadScreenReq.size(), Cmd.ENTER_FEL: 4, Cmd.SET_ACQ_STATE: SetAcqStateReq.size(),
     Cmd.GET_CAPTURE_INFO: 0, Cmd.GET_EVENT_LOG: 0, Cmd.SD_INFO: 4, Cmd.SD_READ_SECTORS: 8, Cmd.SD_STAGE: 8, Cmd.SD_WRITE_SECTORS: 16,
     Cmd.READ_SPECTRUM: ReadSpectrumReq.size(), Cmd.GET_DECIM: 0, Cmd.SET_DECIM: SetDecimReq.size(),
-    Cmd.GET_HEALTH: 0, Cmd.SAVE_REPORT: 0,
+    Cmd.GET_HEALTH: 0, Cmd.SAVE_REPORT: 0, Cmd.SET_SEQ: SetSeqReq.size(), Cmd.GET_SEQ: 0,
+    Cmd.READ_SEQ: ReadSeqReq.size(),
 }
 
 

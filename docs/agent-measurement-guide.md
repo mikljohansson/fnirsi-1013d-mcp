@@ -50,7 +50,16 @@ descriptions are authoritative. Server setup: `mcp/README.md`.
   that capture (`capture_settings`). Changes nothing.
 - `scope_averaged_capture`: when the noise matters (signal features below ~2 LSB, decay tails): averaging n captures
   lowers random noise by about sqrt(n). `align='edge'` with `align_channel` on the TX gate removes trigger jitter.
-  16-64 for a quick look, 256+ for fits. It reports drops (no trigger, clipped) and `restarts`.
+  16-64 for a quick look, 256+ for fits. It reports drops (no trigger, clipped) and `restarts`. On a 0x1536
+  bitstream (`scope_status` `features` lists `hw_average`) `hardware=true` sums the records in the FPGA in one run:
+  much faster for many records, but only with `align='hardware'`, records up to 2046 words (4092 samples 8-bit) and
+  n <= 257 for 8-bit samples, and without the per-sample std or clipped-record rejection. It is not yet verified
+  on the unit: say so when you report numbers from it.
+- `scope_capture_segments` (0x1536, `features` lists `segments`): many triggers in one go, each record with a 5 ns
+  timestamp, the FPGA re-arming itself in well under a microsecond plus `holdoff`. Use it for pulse trains, bursts and
+  per-pulse detector captures (timing jitter between pulses, the decay of every pulse). Set the record length with
+  `scope_set_trigger` first (short records give more segments: 8192 / slot words); `circular=true` keeps the latest
+  ones until `timeout_s`. Untriggered segments (auto mode) are flagged. Not yet verified on the unit.
 - `scope_decay_fit`: PI decays: averaged, edge-aligned, fit window after the edge (`t_start` past the flyback,
   `t_end` before the noise floor), `exp`, `exp+offset`, `exp2` or `power`. Check `r2`, residuals and caveats.
 - `scope_capture_and_fft`: spectra; `flattop` window for amplitudes, `hann` for resolution.
@@ -198,7 +207,8 @@ Every waveform is saved as `.npz` (path in `file`); load with `numpy.load(path)`
 | Tool | Arrays |
 |---|---|
 | capture / fetch | `t` (s, 0 = trigger), `CH1_volts`, `CH1_codes`, `CH1_clipped` (and `_raw_a` / `_raw_b` with raw=true; decimated captures: `CH1_samples16`, codes are fractional) |
-| averaged_capture | `t`, `CH1_mean`, `CH1_std`, `CH1_clipped_any`, `edge_shifts_samples` |
+| averaged_capture | `t`, `CH1_mean`, `CH1_std`, `CH1_clipped_any`, `edge_shifts_samples` (`hardware=true`: `t`, `CH1_mean`) |
+| capture_segments | `t` (s, 0 = each segment's trigger), `CH1_volts` (segments x samples), `CH1_clipped`, `timestamps_s` (from the first trigger), `triggered`, `slots` |
 | decay_fit | `t` (s after the edge), `data`, `fit`, `residual`, `fit_mask`, `excluded`, `std` |
 | capture_and_fft | `f` (Hz), `amplitude_vrms` |
 | bode_sweep | `f_actual` (Hz), complex `h` (after splice and thru cal), `h_raw`, `x1` / `x2` (volts peak), `mag_db`, `phase_deg`, `ch1_range` / `ch2_range`, `snr_db`, `valid`; also `.csv` and `.json` (`files`) |

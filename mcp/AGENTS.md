@@ -1,4 +1,4 @@
-# mcp/ handoff for agents (mcp-gen4 -> mcp-gen5, 2026-10-19; mcp-gen4 retired after protocol 1.16)
+# mcp/ handoff for agents (mcp-gen5, 2026-10-19: wheel readiness and protocol 1.17; mcp-gen4 retired after 1.16)
 
 Python host library, device simulator, MCP server and bench CLIs for the FNIRSI 1013D open firmware's USB protocol.
 Read first: `../AGENTS.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec; **section 14 is how
@@ -28,6 +28,11 @@ should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those
   (`"\n"` becomes a newline), and a heredoc whose text holds triple quotes or apostrophes can fail as a whole ("unexpected
   EOF"). Files are LF except `../docs/plans/task-queue.md` (CRLF: keep it, or the commit rewrites every line); on Windows write with `write_bytes(... .encode())`. Windows Python does not resolve
   `/c/Users/...` paths: pass `C:/Users/...`. The session scratchpad is shared with other agents: prefix your files.
+- **Worktrees have no venv**: an agent worktree (`.claude/worktrees/...`) needs its own `uv venv mcp/.venv` and
+  `uv pip install --python mcp/.venv -e "mcp[dev]"` (gitignored); the tracked `.mcp.json` is gone (owner's local file,
+  `.mcp.json.example` is the template), so worktrees have no MCP servers either.
+- Writing patch scripts: never pass the environment on a command line or print it (it holds API keys); the wheel
+  smoke script hands the env to its client through the process environment for that reason.
 - **Venv reinstall gotcha**: `uv pip install --python .venv -e ".[dev]"` fails ("Access denied") while any
   `fnirsi1013d-*.exe` is running (the owner's MCP session, the lead's bench), and uv may already have removed
   other .exe files. Rerun when nothing runs; meanwhile `python -m fnirsi1013d.<module>` works for every CLI.
@@ -47,7 +52,8 @@ path. |
 | `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points, least-squares zero / 1/gain / PWM slope per channel-range-core, channel model `zero = Z + slope x dcoffset`), `channel_scale`, T8 importer CLI. |
 | `analysis.py` | Stats, frequency, edges, Welford averager, FFT, decay fits, sample points, `scope_fft_db` (float model of the on-scope FFT), `compare_spectra`, `decim_noise_n` / `decim_bits`. |
 | `simulator.py` | `Device` (protocol state machine, FPGA ring, shared mode, legacy mode, SD card, EXT trigger, event log) + `SimServer` (TCP) with test hooks. CLI `fnirsi1013d-sim`. |
-| `server.py` | FastMCP server `fnirsi1013d-mcp`, 29 tools (list with tiers in README.md). |
+| `server.py` | FastMCP server `fnirsi1013d-mcp`, 28 tools up to tier 3, 30 with tier 4 (list with tiers in README.md); `--list-tools` prints them with the data dir and audit log without opening a port. |
+| `paths.py` | Per-user home (`FNIRSI_MCP_HOME`, default `~/.fnirsi1013d`: `data/`, `logs/audit.jsonl`) and the checkout detection (`checkout()`, `checkout_path()` only when the file exists, `checkout_dir()`): the CLIs default to repository files only when run from a checkout, else the argument is required. |
 | `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 attempts, FEL-device check between), usbipd, sunxi-fel RAM load, `#VER`; `--persist` / `--persist-only` / `--restore` (SD sector 750 via the firmware). |
 | `sdcard.py` | SD access (`SdCard`: checked reads, verified backups, staged 32-sector writes, compare), `plan_write`, `check_image`, `image_version`. |
 | `sdcli.py` | `fnirsi1013d-sd` info / read / write (`--dry-run`, `--yes` + typed confirmation, backup first). |
@@ -85,7 +91,17 @@ path. |
   CH1 is ranged once by the pre-scan (no re-ranging when CH1 falls, flag `ch1_low` instead); background captures are
   per (N, CH2 range), lazily, not once per N; the 50 ms relay settle is a host sleep after every range or offset move.
   `mode` (harmonic fast mode), `z_series_ohm` and the PNG are not implemented (task queue "Bode follow-ups").
-- **`fnirsi1013d-sim`**: `--variant stock|al3|ef2|ep4|al3x|al3d|al3f`, `--legacy`, `--ext`, `--ui-period`,
+- **Packaging** (mcp-gen5): the wheel works outside a checkout; `.github/scripts/wheel_smoke.py` (CI job `wheel`, Linux and
+  Windows) builds it, installs it into a fresh venv in a temp dir, runs `--list-tools` and an MCP stdio session on
+  `--sim` with a capture, and checks that files land under `FNIRSI_MCP_HOME` and nothing inside the venv. The server's
+  data dir / audit log default to `~/.fnirsi1013d`; the owner's local `.mcp.json` sets `FNIRSI_MCP_DATA_DIR=mcp/data`
+  (calibration file there). `vectors --file`, `fnirsi1013d-flash --image / --backup-dir`, `fnirsi1013d-sd write
+  --backup-dir`, `fnirsi1013d-bench --bench-link` are required outside a checkout and refuse with a message.
+- **Sequencer** (protocol 1.17, mcp-gen5): `scope_capture_segments` and `scope_averaged_capture(hardware=true)` (opt-in until
+  the unit agrees with READ_RAW; task queue "1.17 on the unit, host side"). Both check the fit with GET_SEQ's geometry
+  first, end a run with STOP at the timeout (the run keeps what it has), and always clear the setting afterwards so later
+  plain ARMs are captures. Simulator only so far.
+- **`fnirsi1013d-sim`**: `--variant stock|al3|ef2|ep4|al3x|al3d|al3f|al3s`, `--legacy`, `--ext`, `--ui-period`,
   `--caps`, ... al3x = 0x1533 (EXT trigger); al3d = 0x1534 (EXT + decimation: sub-sampled boxcar^K of the noise-free
   core-mean code plus output noise with the exact kernel variance, seeded per word block, 16-bit ring layout,
   16-bit trigger level, 120 ns latency, EXT latency shift; no device averaging); al3f = 0x1535 (al3d plus the FIR:
@@ -105,7 +121,7 @@ path. |
   (incl. usb_irq_polled). Exit 0 clean / 1 failure, drop or restart / 2 cannot start. Tested on the simulator
   only; the lead runs it on the bench.
 
-## Protocol support (host = simulator = vectors): 1.16, fw 0.2.52
+## Protocol support (host = simulator = vectors): 1.17, fw 0.2.58
 
 `P.PROTO_MINOR` follows the highest section 14 row implemented. The simulator always speaks the newest protocol
 (shared mode); `--legacy` gives 1.2.
@@ -126,6 +142,7 @@ path. |
 | 1.14 | 0.2.49+ | GET_LINK_STATS n = 62 (60 `usb_inferred_resumes`, 61 `usb_soft_reconnects`), event type 20 `usb_soft_disconnect` (reason, back-off level, suspends; fw-usb2, f3763cc) |
 | 1.15 | 0.2.50+ | calibration v4 (row 54): GET_CAL 288 bytes, `CalResp.track_*` / `cm_*`, `has_tracker` (by length; 256 / 248 / 72 still parse), `TRACK_*` flags; the volts model takes the tracked d, e (8-bit full class) and cm (full class, 8-bit and 16-bit) out; conversions re-read GET_CAL when the cached answer is over `CAL_TRACK_AGE_S` (1 s) old; `scope_calibration_info` `tracking` (state, values, `in_words`) |
 | 1.16 | 0.2.52+ | row 55: GET_HEALTH 0x000A (`HealthResp`, 96 bytes, fast timeout class, allowed while modal; `describe()`; flags CLEAR_RESTART / RESTART_TEST), SD_INFO flag IDENT (`SdInfo.ident` = `SdIdent`, 112 bytes; the scope caches it until a write reaches sector 750), GET_CAL 356 bytes (`prov_state`, `prov`, `provenance()` -> `Provenance`, power-ons / minutes since), SAVE_REPORT 0x0504 (`SaveReportResp`, 15 s timeout); stored layouts `parse/pack_life_record`, `parse/pack_provenance`, `parse/pack_ident_record` = the `diag_layouts` vectors; tools `scope_health`, `scope_save_report`, `scope_sd_info` `card_image`, `scope_calibration_info` `calibration_provenance`. Simulator: `Device.power_on`, `minutes_stored`, `restart_record`, `cal_prov` / `cal_prov_bad`, `ident_cache`, `reports`; `make_egon_image(ident=)`; `SIM_BUILD` / `SIM_BUILD_TIME` = the running build |
+| 1.17 | 0.2.58+ | row 56 (FPGA 0x1536, caps SEQ): GET_STATUS 48 bytes (`features` = `Features` flags, `ui_average` 0 off / 1 software / 2 hardware, `ui_average_log2n`), GET_DECIM 36 (same 4 bytes), GET_CAPTURE_INFO 96 (`CaptureInfo.run` = `SeqRunInfo`, `is_run`), SET_SEQ / GET_SEQ (`SetSeqReq.make`, `SeqState` incl. fit, next geometry, FPGA status, held run), READ_SEQ (`ReadSeqReq`, `ReadSeqHeader`; table of u64 `SeqEntry`, averaged record as u16 lanes / u16 or u32 sums), READ_RAW `ADDR_SEGMENT` (3); maths `seq_fit` / `seq_max_count` / `seq_holdoff_units` / `seq_cmd57` / `seq_slots` / `seq_seg_word` / `seq_dead_ns` / `seq_ui_plan` / `seq_avg_code` = all 73 `seq` vector cases. Client: `get_seq`, `set_seq`, `read_seq_table`, `read_seq_average`, `read_segment`, `capture_segments` -> `SegmentRun`, `capture_hw_average` -> `AveragedRun` (`SeqError` with the fit code). Simulator `al3s`: runs modelled in a background thread on one signal timeline (`simulate_run`, `_simulate_segments` / `_simulate_average`, `finish(elapsed, stopped)`), STOP ends a run, circular runs wrap once, averaging beyond 128 records (16 wide) scales the exact sums; `Device.ui_average` hook. Tools `scope_capture_segments`, `scope_averaged_capture(hardware=)`, `scope_status` features / ui_averaging |
 
 GET_LINK_STATS counts (named by the count field): 27 (0.1.4-0.1.7), 29 (0.2.0-0.2.1), 31 (0.2.2-0.2.3),
 35 (0.2.4), 41 (0.2.5-0.2.6), 47 (0.2.7-0.2.11), 48 (0.2.12-0.2.16, usb_irq_polled), 49 (0.2.17-0.2.18,
@@ -183,7 +200,8 @@ measured from that truth.
 
 ## Calibration file
 
-Per unit at `<data_dir>/cal/<serial>.json` (default data dir `mcp/data`, gitignored), loaded at connect,
+Per unit at `<data_dir>/cal/<serial>.json` (default data dir `~/.fnirsi1013d/data`; the owner's `.mcp.json` points it at
+`mcp/data`, gitignored), loaded at connect,
 `--cal-file` / `FNIRSI_MCP_CAL_FILE` override, written by `scope_calibrate_volts`, shown by
 `scope_calibration_info`. The owner's `mcp/data/cal/1013D-0001.json` (69 points) is rebuilt with
 `python -m fnirsi1013d.calibration --unit 1013D-0001 --out data/cal/1013D-0001.json --import
@@ -194,7 +212,7 @@ range-independent; 0 V at dcoffset 0: CH1 A 132.47 / B 127.14, CH2 A 128.80 / B 
 firmware gains). The firmware formula assumes 128 on the compensated mean. Grounds: the probe ground is VRF1,
 +1.24 V over the USB ground (fpga/al3/README.md); the calibration output reads -1.24 / +1.9 V against it by design.
 
-## Tests (`tests/`, 376, about 75 s)
+## Tests (`tests/`, 395, about 85 s)
 
 `test_protocol` (codec, structs, vectors, link stats/event log), `test_transport` (incl. the scripted-link deferred
 cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `test_shared_mode` (1.3),
@@ -203,7 +221,7 @@ cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `te
 `test_sdcard` (SD commands, persist, resume after drops, restore, CLI), `test_ext_trigger`, `test_soak`,
 `test_fir` (1.11 FIR maths / sim / tool, suspend event fields, soak reopen mode), `test_cal_v3` (1.12 GET_CAL 256, `adc_cal_v3` block vectors, volts on both cores and classes, GET_CAL's next-readout
 gain / offset vs the host model, unit file gated gains only, scope_calibration_info),
-`test_diag` (1.16 stored layouts vs `diag_layouts`, GET_HEALTH / SD identity / provenance / SAVE_REPORT layouts and simulator, the tools), `test_cal_v4` (1.15 GET_CAL 288, v4 volts on raw / WIDE / trace codes vs the simulator's drift, GET_CAL re-read, tracker words), `test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH), `test_decim` (1.9: maths vs
+`test_paths` (outside-a-checkout defaults and refusals, `--list-tools`), `test_seq` (1.17: maths vs the `seq` vectors, wire layouts vs the firmware frames, segment / circular / STOP / auto runs, averaging legacy and 16-bit with positions, fit errors, the tools), `test_diag` (1.16 stored layouts vs `diag_layouts`, GET_HEALTH / SD identity / provenance / SAVE_REPORT layouts and simulator, the tools), `test_cal_v4` (1.15 GET_CAL 288, v4 volts on raw / WIDE / trace codes vs the simulator's drift, GET_CAL re-read, tracker words), `test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH), `test_decim` (1.9: maths vs
 the firmware vectors, wire layouts, simulator noise / volts / trigger / EXT latency, `scope_set_decimation`),
 `test_bode` (planner rules and vectors, DFT, a synthetic RC through dithered 8-bit at 200 MSa/s, gates, markers,
 thru cal), `test_bode_sim` (the DUT model, the runner end to end: RC, thru, fixed range, floor, legacy and CIC2
@@ -278,20 +296,12 @@ there, `--merge --check`, never change an existing vector's bytes.
 Pending work for every agent lives in `../docs/plans/task-queue.md` (section "MCP / host"); the coordinator dispatches
 from there and moves items to "Dispatched". Add host items you discover there, not only here.
 
-0. **Next for mcp-gen5 (dispatched by the lead 2026-10-19, not started by mcp-gen4): the mcp items of the release
-   readiness batch**, `../docs/plans/release-readiness.md` (docs-gen3's findings on the mcp wheel):
-   - the installed package must work outside a repo checkout: default data and log directories under the user's home
-     or a configurable path (today `ServerConfig.data_dir` defaults to `mcp/data` via `_default_mcp_dir()` in
-     server.py, `vectors.DEFAULT_PATH` and the Bode `--write-vectors` default assume `../docs`; `bench.py` wraps
-     `../firmware/scope/host_tests/bench_link.py`, `flash.py` / `sdcli.py` look for images and `../backups/` by repo
-     path): inputs by argument, repo paths only as a fallback when running from a checkout;
-   - the tracked `.mcp.json` has a hard-coded Windows venv path and COM10: replace it with a documented example
-     (keep the owner's working local config out of git, e.g. `.mcp.local.json` or a gitignored copy; ask the lead
-     before touching the owner's file);
-   - `pip install fnirsi1013d` from a wheel plus one documented command gives a working MCP server (build the wheel
-     in CI or locally with `uv build`, install it into a fresh venv outside the repo, start `fnirsi1013d-mcp --sim`
-     and list the tools; a test or CI step that does exactly that keeps it working).
-   Protocol 1.17 (fw-seg, segmented capture, rows from 70 provisional) waits until the lead says it is merged.
+0. **1.17 on the unit** (task queue "1.17 on the unit, host side"): after the owner flashes 0x1536 and the firmware checks
+   7-9 of `../firmware/AGENTS.md` section 35 pass, run `scope_capture_segments` and `scope_averaged_capture(hardware=true)`
+   on the bench (coordinator holds COM10), then default `hardware` to auto where the record fits, add it to
+   `scope_decay_fit`, and drop the "not yet verified" caveats. The release-readiness items of the wheel are done
+   (8ea8886 paths, 0e1d36b wheel smoke + CI job, ef8aa30 docs + `.mcp.json.example`; the coordinator untracked the owner's
+   `.mcp.json` in 508f0c5).
 1. **Bode: bench results in, then the follow-ups.** Host steps H1-H3 are done (1d46cf8 simulator DUT, f0940ee H1,
    363f676 runner and CLI, d3a16bb tool, docs commit after). Read the coordinator's bench numbers (procedure below)
    against the design's expectations; if the wiring verdict (section 2.5) or the floor changes the advice, fix

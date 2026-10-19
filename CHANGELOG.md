@@ -818,6 +818,11 @@ was found (commit not identified).
   Windows, then `--list-tools` and an MCP stdio session on the simulator (`.github/scripts/wheel_smoke.py`).
 - Changed: install and Claude Code / Codex setup for a wheel user, `.mcp.json.example` in place of the tracked
   `.mcp.json` (ef8aa30).
+- Added: protocol 1.17 host side (fw 0.2.58, FPGA 0x1536; 4699593, docs 6bd09aa). `scope_capture_segments` takes many
+  triggers in one FPGA run with 5 ns timestamps (circular runs, STOP keeps what the run has), `scope_averaged_capture`
+  gains `hardware=true` (records summed in the FPGA, read as exact sums), `scope_status` shows the bitstream's features
+  and the UI's Average. The client decodes GET_STATUS 48, GET_DECIM 36 and GET_CAPTURE_INFO 96 bytes and the sequencer
+  commands; the simulator has a 0x1536 variant (`al3s`). Not yet run on the unit.
 
 ### Tooling, FPGA and documentation
 
