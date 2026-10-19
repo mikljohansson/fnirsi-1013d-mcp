@@ -153,7 +153,8 @@ and checks; its copy, its two-probe gain step and its Skip go, the per-channel g
 
 The default or primary action sits on the right, the secondary or dismissing one on the left, in every dialog: the
 wizard (Cancel left, Calibrate / Continue / Save calibration right), confirmations (Cancel left, the action right) and
-the first-run screen (Later left, Calibrate now right).
+the first-run screen (Later left, Calibrate now right). Red is reserved for destructive actions (Clear calibration); Enter FEL is green, since a
+power cycle boots the card as usual.
 
 ## 7. Implementation order
 
