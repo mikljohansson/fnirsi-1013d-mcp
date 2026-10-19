@@ -1,6 +1,7 @@
 // Copy of Atlan4's "FPGA commands.txt" (D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\), updated
 // for fpga/al3/src/zaklad.v of fnirsi-1013d-mcp. Changes against Atlan4's file:
-//  - 0x06 returns 0x15 0x36 (0x1536; 0x1535 = without segments/averaging, 0x1534 = decimation filter without the FIR,
+//  - 0x06 returns 0x15 0x37 (0x1537 = 0x1536 with the record-start and A/B-order fixes, no new command; 0x1536 = with
+//    segments/averaging; 0x1535 = without segments/averaging, 0x1534 = decimation filter without the FIR,
 //    0x1533 = EXT trigger only; Atlan4's 0x1532 AL3 design returns 0x15 0x32, his file still shows 0x14).
 //  - 0x15 takes data[1:0]: 0 = CH1, 1 = CH2, 2 = EXT (calibration pin P133), 3 = reserved (acts as EXT).
 //  - 0x28 (new read): external trigger status.
@@ -27,7 +28,7 @@
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h36;       //0x1536 = AL3 with external trigger, decimation filter, FIR, segments, averaging
+                    o_mcu_data <= 8'h37;       //0x1537 = AL3 with external trigger, decimation filter, FIR, segments, averaging
             
             //When sampling finishes the writing is disabled. Enabled again with a reset.
             8'h0A: //Reading of the sampling done state
