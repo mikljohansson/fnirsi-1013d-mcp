@@ -70,11 +70,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   (after the polish batch lands so the screens are final); articles at any pace. Dispatch a docs agent after fw-polish merges.
 - **FPGA MCU-readout bit mixing near code 128** (root cause of the wizard failure, bench 18:35; 0x1539 fix by fpga-gen8 first, features after; fw-cal5 workaround: zero measured off-centre; a flash session follows). Was: **Wizard measurement setup fault** (fw-cal5 running, 10-19 18:00): zero step fails on 0x1538 with clean host data; see
   hardware-status 17:55. Deliverable includes a host-triggerable dry run so the coordinator can verify without the owner.
-- [~] **Frequency response mode UI** (design docs/plans/bode-ui.md + artifact DfydC8HJgnemUw3EHenTGP; owner 19:15: variant 2 one pane two y axes without legend, "calibration post" in the instruction, frequency axis Log/Linear in the Display fold-out, two flagged cursors C1/C2 with the bottom-left readout box and delta row kept (19:25), Display variants Overlaid / Magnitude / Phase; questions 1-5 per the coordinator's recommendations; fw-freq dispatched as 0.2.69 together with the 10 samples/div viability minimum). Was: **Bode mode UI redesign** (owner 10-19 18:50: fw-bode remapped RUN/STOP and AUTO SET to sweep control, which breaks the fixed
+- [x] **Frequency response mode UI** (0.2.69, bench pending; follow-ups above) (design docs/plans/bode-ui.md + artifact DfydC8HJgnemUw3EHenTGP; owner 19:15: variant 2 one pane two y axes without legend, "calibration post" in the instruction, frequency axis Log/Linear in the Display fold-out, two flagged cursors C1/C2 with the bottom-left readout box and delta row kept (19:25), Display variants Overlaid / Magnitude / Phase; questions 1-5 per the coordinator's recommendations; fw-freq dispatched as 0.2.69 together with the 10 samples/div viability minimum). Was: **Bode mode UI redesign** (owner 10-19 18:50: fw-bode remapped RUN/STOP and AUTO SET to sweep control, which breaks the fixed
   right-bar meanings; a designer (ux-bode, Opus) is producing the Bode mode mockup: action page with the standard slot meanings,
   CTRL page with Display / Sweep / Thru / Grid, cards via MEASURES, docs/plans/bode-ui.md with the control map and a self-review).
   Then a firmware batch implements it; until then the Bode view keeps its interim controls (menu row moves in polish batch 2).
-- [~] **Time/div viability: minimum samples per division** (in fw-freq's batch) (owner 10-19 19:00, bench: 100 kS/s with 10 us/div = one sample per
+- [x] **Time/div viability: minimum samples per division** (0.2.69: 10 per division, 200 MS/s down to 50 ns/div) (owner 10-19 19:00, bench: 100 kS/s with 10 us/div = one sample per
   division; host captures show the 1 kHz edge spread over the CIC2 step response (93, 108, 145, 155, 161) with the edge samples
   drifting 108 -> 103 -> 99 between captures as the DDS 1 kHz (999.996 Hz, 4 ns per period) creeps across the 10 us sample grid,
   so the interpolated trace wobbles at about 1 Hz; no trigger jitter: the edge index is stable). fw-acq's rule allows one sample
@@ -288,6 +288,12 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   BITSTREAMS.md and tools/bitstreams.py check in CI; release.yml attaches them, accepts vX.Y.Z-rcN pre-release tags, takes release
   notes from docs/release-notes/X.Y.Z.md (0.3.0 draft with placeholders); releasing.md fixed; README rewritten; release-checklist.md).
   Open: add 0x1538 as recommended when pinned and benched; owner decisions: attach older bitstreams, AI credits wording (F12).
+- fw-freq (done 19:45, about 475k tokens, retired; handoff firmware/AGENTS.md section 45): Frequency response UI merged as fw 0.2.69
+  (one-pane dual-axis chart, Display variants + Log/Linear axis, C1/C2 cursors with the box, AUTO SET overview span, Single sweep,
+  CSV via SAVE WAVE, ten-item MEASURES, slider row, menu icon, "Frequency / response" row; ten samples per division rule; words
+  213..215, 220); pinned backups/fw-0.2.69_8babde3b.bin, loaded 19:48. Follow-up batch: top bar in this mode (ACQ chip "Set by the
+  sweep", generator chip shows the tone), the Spectrum slider, cancelled AUTO SET restores the previous table, Move fast for
+  cursors, MEASURES change immediate, sharp-tank overview span.
 - ux-bode (done 19:55, designer, retired): Frequency response mode design (artifact DfydC8HJgnemUw3EHenTGP, docs/plans/bode-ui.md
   6d849f6: chart, cursors, Display variants, icon, slider rows for Spectrum and Frequency response, track 1 Hz..10 MHz).
 - mcp-gen6 (done 19:05, about 500k tokens, retired; handoff mcp/AGENTS.md): protocols 1.19 (encode_check in scope_health, events

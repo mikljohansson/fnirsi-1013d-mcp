@@ -901,3 +901,5 @@ Newest entries at the bottom. Format: date, who, what, result.
   captures, spanner icon, sine with axes, snap through the manual path, one brightness value, wizard Step M of N, Calibration tab
   button row, eight-row main menu with the Bode row) merged debd123, pinned backups/fw-0.2.68_8568021d.bin, loaded 18:52.
   Owner: the mode is named "Frequency response" (ux-bode informed; the implementation batch renames the row).
+- 2026-10-19 19:48: fw 0.2.69 (Frequency response UI from the design, slider row, ten samples per division) merged, pinned
+  backups/fw-0.2.69_8babde3b.bin, loaded on 0x1538. Owner walk-through: firmware/AGENTS.md section 45 (RC and divider).
