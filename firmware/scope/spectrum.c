@@ -2,12 +2,16 @@
 // spectrum.c - on-scope spectrum analyser (protocol builds only, see spectrum.h).
 //   fw 0.2.27: FFT_BENCH (C2). fw 0.2.28: the spectrum display mode (S1).
 //
-// Layout of the trace area while the mode is on (x 2..729, y 48..479):
-//   y  50       the waterfall's and density's colour legend at the right
-//   y  66..410  plot, 10 x 8 divisions of 72 x 43 px (x 6..726); warnings at its top middle
-//   y 413       frequency labels: start, centre, stop
-//   y 446..467  the cards (fw 0.2.56; chosen through MEASURES since 0.2.65, ui_meas.h): peak, level, THD, noise per
+// Layout of the trace area while the mode is on (x 2..729, y 48..479; fw 0.2.70, ux-makeover.md "Spectrum slider"):
+//   y  50..402  plot, 8 divisions of 44 px (x 6..726); warnings at its top middle; the waterfall's and density's colour
+//               legend inside its top right (y 72)
+//               vertical grid lines at the 1-2-5 frequency steps of the span, labelled (bode_ui.h bu_fgrid, the grid
+//               rule of ui-guidelines.md section 3); horizontal at the labelled dB divisions
+//   y 406       the frequency labels under their lines
+//   y 426..447  the cards (fw 0.2.56; chosen through MEASURES since 0.2.65, ui_meas.h): peak, level, THD, noise per
 //               channel, RBW, span, centre, the waterfall's time span
+//   y 452..471  the slider: the shown span as a window over the axis 0 .. min(fs/2, 25 MHz) (the Scope's construction);
+//               a drag pans the centre, the span kept
 // The parameters are on the CTRL page (ctrl_page.c: Display, Analyse); the strip and the header line went in fw 0.2.56.
 // Integer only (no FPU): levels in centi-dB, frequencies in mHz (uint64).
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -29,6 +33,7 @@
 #include "ui_ctrl.h"
 #include "ui_fmt.h"
 #include "ui_meas.h"
+#include "bode_ui.h"
 
 #include <string.h>
 
@@ -154,13 +159,12 @@ uint32 spectrum_bench(uint8 *out, uint32 reps)
 
 #define PLOT_X                6
 #define PLOT_W                720
-#define PLOT_Y                66
-#define PLOT_H                344
-#define PLOT_XDIV             10
+#define PLOT_Y                50
+#define PLOT_H                352
 #define PLOT_YDIV             8
-#define INFO_Y1               50
-#define FLABEL_Y              413
-#define CARDS_Y               436         //below: the cards; touches there do nothing
+#define INFO_Y1               (PLOT_Y + 22)   //the colour legend, under the warning line
+#define FLABEL_Y              406
+#define CARDS_Y               UI_MS_SPEC_Y    //from here to the slider: the cards; touches there do nothing
 
 #define ZOOM_MAX              6           //span down to 1/64 of the Nyquist range
 #define START_STEPS           65536u      //start position in 1/65536 of the Nyquist range (fine enough to drag)
@@ -552,21 +556,33 @@ static uint32 spec_grid_color(void)
   return (c << 16) | (c << 8) | c;
 }
 
+//fw 0.2.70, the grid rule (bode_ui.h bu_fgrid, linear): the frequencies of the vertical lines and labels
+static uint64 spec_fa, spec_fb;
+
+static int32 spec_fx(uint64 f)
+{
+  return PLOT_X + (int32)(((f - spec_fa) * PLOT_W) / ((spec_fb > spec_fa) ? spec_fb - spec_fa : 1));
+}
+
 static void spec_draw_grid(const SPECVIEW *v)
 {
+  bu_gline g[BU_GRID_MAX];
   char   t[24];
   uint32 i;
+  int    n, k;
 
   display_set_fg_color(spec_grid_color());
 
-  //fw 0.2.56: the dots follow the CTRL page's Grid; the level labels stay (the axis)
+  //fw 0.2.56: the dots follow the CTRL page's Grid; the level labels stay (the axis). fw 0.2.70: horizontal at the
+  //labelled divisions, vertical at the labelled frequency steps
   if(scopesettings.gridenable)
   {
     for(i = 0; i <= PLOT_YDIV; i++)
       display_draw_horz_dots(PLOT_Y + i * (PLOT_H / PLOT_YDIV), PLOT_X, PLOT_X + PLOT_W, 4);
 
-    for(i = 0; i <= PLOT_XDIV; i++)
-      display_draw_vert_dots(PLOT_X + i * (PLOT_W / PLOT_XDIV), PLOT_Y, PLOT_Y + PLOT_H, 4);
+    n = bu_fgrid(spec_fa, spec_fb, 1, g);
+    for(k = 0; k < n; k++)
+      display_draw_vert_dots((uint32)spec_fx(g[k].f), PLOT_Y, PLOT_Y + PLOT_H, BU_GRID_DOTS_MAJOR);
   }
 
   //Level labels under each line
@@ -583,21 +599,66 @@ static void spec_draw_grid(const SPECVIEW *v)
   }
 }
 
+//fw 0.2.70: the labels of the grid's lines (the start / centre / stop labels before), "2.5kHz", clamped inside the plot
 static void spec_draw_freq_labels(const SPECVIEW *v, uint64 bin_mhz)
 {
-  char t[24];
+  bu_gline g[BU_GRID_MAX];
+  char   t[24];
+  int    n, k;
+
+  spec_fa = bin_mhz * v->first;
+  spec_fb = bin_mhz * (v->first + v->span);
 
   display_set_font(&font_2);
   display_set_fg_color(0x00A0A0A0);
 
-  fmt_freq(t, bin_mhz * v->first);
-  display_text(PLOT_X, FLABEL_Y, (int8 *)t);
+  n = bu_fgrid(spec_fa, spec_fb, 1, g);
 
-  fmt_freq(t, bin_mhz * v->first + (bin_mhz * v->span) / 2);
-  text_center(PLOT_X + PLOT_W / 2, FLABEL_Y, t);
+  for(k = 0; k < n; k++)
+  {
+    int32 x, w;
 
-  fmt_freq(t, bin_mhz * (v->first + v->span));
-  text_right(PLOT_X + PLOT_W, FLABEL_Y, t);
+    if(!g[k].label)
+      continue;
+
+    fmt_str(bu_freq_short(t, g[k].f), "Hz");
+    x = spec_fx(g[k].f);
+    w = (int32)text_width(t);
+
+    if(x - w / 2 < PLOT_X)
+      display_text(PLOT_X, FLABEL_Y, (int8 *)t);
+    else if(x + w / 2 > PLOT_X + PLOT_W)
+      text_right(PLOT_X + PLOT_W, FLABEL_Y, t);
+    else
+      text_center((uint32)x, FLABEL_Y, t);
+  }
+}
+
+//fw 0.2.70 (ux-makeover.md "Spectrum slider"): the Scope's slider row (frame 2, 452, 726 x 20; the window a 14 px box at
+//y 455 on the track x 4..723): the shown span as a window over the axis
+static void spec_slider_window(const SPECVIEW *v, int32 *x, int32 *w)
+{
+  int64 xx = BU_SL_X + ((int64)v->first * BU_SL_W) / v->half, ww = ((int64)v->span * BU_SL_W) / v->half;
+
+  if(ww < 8)
+    ww = 8;
+  if(ww > BU_SL_W)
+    ww = BU_SL_W;
+  if(xx + ww > BU_SL_X + BU_SL_W)
+    xx = BU_SL_X + BU_SL_W - ww;
+
+  *x = (int32)xx;
+  *w = (int32)ww;
+}
+
+static void spec_draw_slider(const SPECVIEW *v)
+{
+  int32 x, w;
+
+  spec_slider_window(v, &x, &w);
+  display_set_fg_color(WHITE_COLOR);
+  display_draw_rect(BU_SL_FRAME_X, BU_SL_FRAME_Y, BU_SL_FRAME_W, BU_SL_FRAME_H);
+  display_draw_rect((uint32)x, BU_SL_WIN_Y, (uint32)w, BU_SL_WIN_H);
 }
 
 //The trace of one channel; returns the bin of its highest level in the span (DC bins skipped)
@@ -1351,6 +1412,7 @@ static int spectrum_display_body(void)
 
   display_set_screen_buffer(displaybuffertmp);
   spec_clear();
+  spec_draw_freq_labels(&v, bin_mhz);
 
   if(spec.view == VIEW_WATERFALL)
     spec_draw_waterfall();
@@ -1361,7 +1423,6 @@ static int spectrum_display_body(void)
     spec_draw_grid(&v);
   }
 
-  spec_draw_freq_labels(&v, bin_mhz);
   spec_draw_warnings(dc.k, fs_mhz, hch);
 
   if(((!spec.have[0] && !spec.have[1]) || ((spec.view == VIEW_WATERFALL) && !wf_count)) && scopesettings.runstate)
@@ -1389,6 +1450,7 @@ static int spectrum_display_body(void)
   }
 
   spec_draw_cards(&v, peak, hch, bin_mhz);
+  spec_draw_slider(&v);
 
   display_set_source_buffer(displaybuffertmp);
   display_set_screen_buffer((uint16 *)maindisplaybuffer);
@@ -2068,6 +2130,32 @@ int spectrum_touch(void)
   //Any touch ends a running Auto (AUTO SET starts a new one) and clears its refusal warning
   spec.autostage = 0;
   auto_refused = 0;
+
+  //fw 0.2.70: the slider row; the window follows the finger (the span kept, the centre panned), as the Scope's record
+  //slider. At the full span there is nothing to pan.
+  if(ytouch >= BU_SL_HIT_Y)
+  {
+    uint32 start0 = spec.start;
+    int32  x0 = xtouch;
+
+    while(havetouch)
+    {
+      int64 s = (int64)start0 + (((int64)xtouch - x0) * START_STEPS) / BU_SL_W;
+      int64 smax = START_STEPS - (START_STEPS >> spec.zoom);
+
+      s = (s < 0) ? 0 : (s > smax) ? smax : s;
+
+      if((uint32)s != spec.start)
+      {
+        spec.start = (uint32)s;
+        spectrum_display();
+      }
+
+      tp_i2c_read_status();
+    }
+
+    return 1;
+  }
 
   if(ytouch >= CARDS_Y)
   {
