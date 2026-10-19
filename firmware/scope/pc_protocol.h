@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            23    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            24    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -49,6 +49,8 @@
                                         //      GET_EVENT_LOG flags bits 2:1 (the type 22 trace level)
                                         //1.23 (provisional numbering): host requests close the modal screens
                                         //      instead of E_BUSY; E_BUSY details 2-5, GET_LINK_STATS 70 (fw 0.2.78)
+                                        //1.24 (provisional numbering): FPGA 0x153A capture stages: caps bit 19,
+                                        //      GET_HEALTH 124 bytes (layout 2), GET_CAL 364, event 23 (fw 0.2.79)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
@@ -162,6 +164,7 @@
 #define PC_CAP_FIR                    (1u << 16)   //1.11: CIC compensation FIR, SET_DECIM flags bit 3 (FPGA 0x1535+)
 #define PC_CAP_SEQ                    (1u << 17)   //1.17: sequencer: segmented capture, hardware averaging (FPGA 0x1536+)
 #define PC_CAP_ENC_CHECK              (1u << 18)   //1.19: the FPGA checks the ADC encodes per capture, read 0x33 (0x1538+)
+#define PC_CAP_CAPTURE_STAGES         (1u << 19)   //1.24: per-core ADC capture stage 0x63, outlier counters 0x36 (0x153A+)
 
 //GET_STATUS bytes 44-45 / GET_DECIM bytes 32-33 (1.17): what the running bitstream has
 #define PC_FEAT_W_EXT_TRIGGER         0x0001       //0x1533+
@@ -171,6 +174,7 @@
 #define PC_FEAT_W_HW_AVERAGE          0x0010       //0x1536+
 #define PC_FEAT_W_ENC_CHECK           0x0020       //0x1538+ (1.19)
 #define PC_FEAT_W_BODE                0x0040       //1.20: on-device Bode plot (decimation filter and DDS: 0x1534+)
+#define PC_FEAT_W_CAPTURE             0x0080       //1.24: ADC capture stages and outlier counters (0x153A+)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Decoded header

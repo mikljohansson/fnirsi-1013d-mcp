@@ -7,6 +7,7 @@
 
 #include <string.h>
 
+#include "cap_hw.h"
 #include "types.h"
 #include "fnirsi_1013d_scope.h"
 #include "fpga_control.h"
@@ -627,7 +628,7 @@ static uint32 pc_dec_div(void)
 static void pc_dec_config(pc_decim_cfg *c, uint8 set)
 {
   pc_decim_config(set & 3, (uint8)(pc_dec_flags | (set & PC_DECIM_SET_FIR)), pc_dec_div(), fpgasettings.totalsamples,
-                  pc_dec_has(), c);
+                  pc_dec_has() | ((pc_sess.var.caps & PC_CAP_CAPTURE_STAGES) ? PC_DECIM_HAS_CAPSTAGES : 0), c);
 }
 
 //Write c to the FPGA (only what changed, the 16-bit level always) and wait for the filter to settle
@@ -2029,6 +2030,8 @@ void pc_glue_init(void)
   //fw 0.2.62: the full-rate capture check of this bitstream (enc_heal.h); 0x1538+: the 0x33 encode convention, which
   //the session reads for its core-order cap (fw 0.2.72, pc_variant_core_order), so first
   fpga_encode_init(pc_fpga_word);
+  //fw 0.2.79: 0x153A capture stages, the stored value when it was trained on this bitstream (cap_hw.c)
+  fpga_capture_init(pc_fpga_word);
   pc_session_init(&pc_sess);
   pc_seq_hw_init((pc_sess.var.caps & PC_CAP_SEQ) != 0);
   pc_ready = 1;

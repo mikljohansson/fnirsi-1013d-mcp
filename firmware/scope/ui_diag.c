@@ -3,6 +3,7 @@
 // Host-tested: host_tests/test_ui.c (every text inside its box with the real font tables, the buttons, the verdicts).
 //----------------------------------------------------------------------------------------------------------------------------------
 
+#include "cap_stage.h"
 #include "ui_diag.h"
 #include "ui_fmt.h"
 #include "pc_protocol.h"
@@ -55,6 +56,8 @@ extern FONTDATA font_5;
 #define H_ENC_FLAGS  90
 #define H_ENC_BOOT   91
 #define H_ENC_BAD    92
+#define H_CAP        104          //1.24: u16 0x63, u8 flags, u8 flagged cores, u16[4] counts, u32 reads, u32 flagged
+#define C_CAP        356          //1.24: u8 trailer state, u8 flags, u16 stored, u16 its FPGA word, u16 in effect
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Small text writers (each returns the end, NUL-terminated)
@@ -1178,6 +1181,64 @@ static void ud_cal_channel(ud_page *pg, const ud_input *in, uint32_t ch)
   ud_txt(pg, x0, yy, 362, UD_F_SMALL, UD_C_SOFT, t);
 }
 
+//fw 0.2.79: FPGA 0x153A capture stages (GET_HEALTH 104..123, GET_CAL 356..363): the stages in effect, where they come
+//from, and the self-check of the last 200 MSa/s capture as a residual against its limit (a core's outliers beyond its
+//chip partner's, cap_stage.h). 0 when the bitstream has no stages (nothing shown)
+static int ud_cap_line(const ud_input *in, char *p)
+{
+  const uint8_t *h = in->health + H_CAP;
+  uint16_t cnt[CS_CORES], ex[CS_CORES];
+  uint32_t k, n = 0;
+  int colour = UD_C_SOFT;
+
+  if(!(h[2] & PC_CAPF_HAS))
+    return 0;
+
+  p = s_str(p, "ADC capture stages ");
+  p = cs_text(p, (uint16_t)g16(h));
+
+  if(h[2] & PC_CAPF_TRAINED)
+    p = s_str(p, " (trained): ");
+  else if(h[2] & PC_CAPF_OTHER)
+  {
+    p = s_str(p, " (trained on ");
+    p = s_hex(p, g16(in->cal[0] + C_CAP + 4), 4);
+    p = s_str(p, ": calibrate): ");
+    colour = UD_C_WARN;
+  }
+  else
+    p = s_str(p, " (not trained: calibrate): ");
+
+  if(!(h[2] & PC_CAPF_READ))
+  {
+    s_str(p, "no 200 MSa/s capture yet");
+    return colour;
+  }
+
+  if(!(h[2] & PC_CAPF_FLAGGED))
+  {
+    s_str(p, "capture clean");
+    return colour;
+  }
+
+  for(k=0;k<CS_CORES;k++)
+    cnt[k] = (uint16_t)g16(h + 4 + 2 * k);
+
+  cs_excess(cnt, ex);
+
+  for(k=0;k<CS_CORES;k++)
+    if(h[3] & (1u << k))
+    {
+      if(n++)
+        p = s_str(p, ", ");
+      p = cs_core_name(p, k);
+      p = s_str(p, ": ");
+      p = s_plural(p, ex[k], "outlier", "outliers");
+    }
+
+  return UD_C_WARN;
+}
+
 static const char *ud_block_state(const uint8_t *c)
 {
   if(c[C_VERSION] == 3)
@@ -1218,11 +1279,25 @@ static void ud_page_cal(ud_page *pg, const ud_input *in, const ud_note *note)
   ud_btn(pg, UD_CAL_BTN_X(2), UD_BTN_Y, UD_CAL_BTN_W, UD_BTN_H, UD_B_NEUTRAL, UD_ID_VOLTS, "Volts calibration");
   ud_btn(pg, UD_CAL_BTN_X(3), UD_BTN_Y, UD_CAL_BTN_W, UD_BTN_H, UD_B_DANGER, UD_ID_CLEAR, "Clear calibration");
 
-  if(in->dc_shift)
-    ud_txt(pg, 12, UD_CAL_TEXT_Y, 776, UD_F_SMALL, UD_C_WARN, "On: CTRL on the scope opens the trim.");
+  //fw 0.2.79: the 0x153A capture line first, then the trim's line and the note, 15 px apart (the row starts at 420)
+  {
+    int y = UD_CAL_TEXT_Y, c = ud_cap_line(in, t);
 
-  if(note && note->text[0])
-    ud_txt(pg, 12, UD_CAL_TEXT_Y + 20, 776, UD_F_SMALL, note->colour, note->text);
+    if(c)
+    {
+      ud_txt(pg, 12, y, 776, UD_F_SMALL, c, t);
+      y += 15;
+    }
+
+    if(in->dc_shift)
+    {
+      ud_txt(pg, 12, y, 776, UD_F_SMALL, UD_C_WARN, "On: CTRL on the scope opens the trim.");
+      y += 15;
+    }
+
+    if(note && note->text[0])
+      ud_txt(pg, 12, y, 776, UD_F_SMALL, note->colour, note->text);
+  }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

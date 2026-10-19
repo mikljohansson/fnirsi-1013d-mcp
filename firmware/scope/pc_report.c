@@ -6,6 +6,7 @@
 #pragma GCC optimize ("Os")
 
 #include <string.h>
+#include "cap_stage.h"
 #include "pc_report.h"
 #include "pc_ident.h"
 
@@ -309,6 +310,33 @@ static void sec_identity(pc_text *t, pc_session *s, const uint8_t *sd, int sd_ok
   pc_text_str(t, " words, caps ");
   pc_text_hex(t, s->var.caps, 8);
   pc_text_nl(t);
+
+  //1.24: FPGA 0x153A capture stages (GET_HEALTH 104..123, cap_stage.h)
+  if(h[106] & PC_CAPF_HAS)
+  {
+    char     c[48];
+    uint32_t k;
+
+    cs_text(c, (uint16_t)(h[104] | (h[105] << 8)));
+    pc_text_str(t, "ADC capture stages (0x63): ");
+    pc_text_str(t, c);
+    pc_text_str(t, (h[106] & PC_CAPF_TRAINED) ? ", trained" : ((h[106] & PC_CAPF_OTHER) ? ", power-on (stored for another bitstream)" :
+                                                                                     ", power-on (not trained)"));
+    pc_text_str(t, "; last 0x36 counts");
+
+    for(k=0;k<4;k++)
+    {
+      pc_text_str(t, " ");
+      pc_text_udec(t, (uint32_t)(h[108 + 2 * k] | (h[109 + 2 * k] << 8)));
+    }
+
+    pc_text_str(t, (h[106] & PC_CAPF_READ) ? "" : " (none read yet)");
+    pc_text_str(t, ", captures read ");
+    pc_text_udec(t, (uint32_t)(h[116] | (h[117] << 8) | (h[118] << 16) | ((uint32_t)h[119] << 24)));
+    pc_text_str(t, ", flagged ");
+    pc_text_udec(t, (uint32_t)(h[120] | (h[121] << 8) | (h[122] << 16) | ((uint32_t)h[123] << 24)));
+    pc_text_nl(t);
+  }
 
   //1.19: the full-rate capture check (GET_HEALTH 88..103, enc_heal.h)
   {
@@ -892,6 +920,39 @@ void pc_report_event(pc_text *t, const uint8_t *e)
 
       pc_text_str(t, ", by ");
       pc_text_str(t, ((b >> 12) < 5) ? pc_who[b >> 12] : "?");
+      break;
+    }
+    case 23:
+    {
+      char c[48];
+      uint32_t k, n = 0;
+
+      if(a & 0x10)
+      {
+        cs_text(c, b);
+        pc_text_str(t, (a & 0x0F) ? "capture stage training failed, no clean stage for" : "capture stages trained: ");
+        if(!(a & 0x0F))
+          pc_text_str(t, c);
+      }
+      else
+      {
+        pc_text_str(t, "capture outliers on");
+      }
+
+      for(k=0;k<4;k++)
+        if(a & (1u << k))
+        {
+          cs_core_name(c, k);
+          pc_text_str(t, n++ ? ", " : " ");
+          pc_text_str(t, c);
+        }
+
+      if(!(a & 0x10))
+      {
+        pc_text_str(t, ", ");
+        pc_text_udec(t, b);
+        pc_text_str(t, " beyond the chip partner");
+      }
       break;
     }
     case 22:

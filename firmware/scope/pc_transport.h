@@ -106,11 +106,15 @@ void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
                                     //retries, bit 7 not recovered; b = the larger residual of the first check, 1/16 code
 #define PC_EVT_FPGA_WRITE     22    //fw 0.2.61, an FPGA write of 0x0D, 0x53, 0x56 or 0x01 = 1: a = command, b = caller
                                     //(FPGA_WHO_*) << 12 | value (saturated at 0xFFF)
+#define PC_EVT_FPGA_CAPTURE   23    //fw 0.2.79, FPGA 0x153A capture stages (cap_hw.c): a bits 3:0 cores flagged by the
+                                    //self-check (bit 0 CH1 A .. 3 CH2 B), b = the largest excess; a bit 4 set: a
+                                    //training ended, bits 3:0 the cores without a clean stage, b = the 0x63 value in effect
 #define PC_EVT_RESTART        15    //fw 0.2.19, at boot after a restart from RAM: a = exception type, b = low PC bits
 
 void pc_usb_log_restart(uint8 type, uint16 pc);
 void pc_usb_log_fpga_heal(uint8 a, uint16 b);              //type 21 (enc_heal_hw.c)
 void pc_usb_log_fpga_write(uint8 a, uint16 b);             //type 22 (fpga_control.c)
+void pc_usb_log_fpga_capture(uint8 a, uint16 b);           //type 23 (cap_hw.c)
 void pc_usb_log_init_state(void);                          //usb_device_init: controller state found (type 16)
 void pc_usb_phy_pre(void);                                 //usb_device_init: PHY tuning bits before the writes
 void pc_usb_log_post_init(void);                           //usb_device_init: state at the end (type 19)

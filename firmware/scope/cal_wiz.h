@@ -58,6 +58,11 @@
 #define CW_G_NOSIG         2      //level check: no probe on the post
 #define CW_G_FAIL          3      //measurement failed (gain_rc)
 
+//Capture stage training (fw 0.2.79, FPGA 0x153A, cap_stage.h): the first thing of each channel's zero step
+#define CW_C_NONE          0      //not run (no capture stages in this bitstream, or not reached)
+#define CW_C_DONE          1      //trained: cap_v holds the stages
+#define CW_C_FAIL          2      //a core has no clean stage (cap_bad): the channel fails with ACAL_E_READOUT
+
 //A measurement stopped by Cancel (the glue's result code; never an ACAL_* code)
 #define CW_RC_CANCELLED    (-1)
 
@@ -80,6 +85,9 @@ typedef struct
   int32_t  zero_val[2];
   uint32_t zero_within16[2];
   acal_fail zero_f[2];            //fw 0.2.67: the whole detail (point, PWM, raw per-core numbers) for the note line
+  uint8_t  cap_st[2];             //fw 0.2.79: FPGA 0x153A capture stage training of the channel's cores (CW_C_*)
+  uint8_t  cap_bad[2];            //cores without a clean stage (cap_stage.h order: bit 0 CH1 A .. bit 3 CH2 B)
+  uint16_t cap_v[2];              //the 0x63 value after the channel's training
 } cal_wiz;
 
 void cw_init(cal_wiz *w, int al3);
@@ -100,6 +108,9 @@ void cw_zero_result(cal_wiz *w, const int rc[2], const uint32_t match16[2]);
 //Where a channel's zero step failed (range 0..5, acal_range_check's acal_fail), given before cw_zero_result; the noise
 //and drift result lines name the range, rate and core with the values (fw 0.2.60)
 void cw_zero_detail(cal_wiz *w, uint32_t ch, uint32_t range, const acal_fail *f);
+//fw 0.2.79: the capture stage training of channel ch in this zero step (CW_C_*, the 0x63 value, the cores without a clean
+//stage), given before cw_zero_detail; a passed channel's note then names its stages ("Capture stages: CH1 A4 B4")
+void cw_cap_result(cal_wiz *w, uint32_t ch, int st, uint16_t v, uint8_t bad);
 void cw_level_result(cal_wiz *w, int32_t span16);    //gated span at ACAL_GAIN_PROBE_RANGE, 1/16 code
 void cw_gain_result(cal_wiz *w, int rc);
 
@@ -121,7 +132,8 @@ char *cw_progress(char *p, uint32_t ch, uint32_t range);                        
 char *cw_zero_line(const cal_wiz *w, uint32_t ch, char *p);                        //screen 1 result ("" when none)
 //fw 0.2.67: the small line under a failed channel's result: where (range, rate, point), the PWM and the raw per-core
 //means with their extremes and clipped samples, e.g. "Range 1, 200 MSa/s, zero point, PWM 812: A 130.1 (126..135),
-//B 125.9 (0..255, 12 clip)". "" when the channel passed or no point was measured
+//B 125.9 (0..255, 12 clip)"; fw 0.2.79: "Capture stages: CH1 A4 B4" under a passed channel that trained them,
+//"Capture stages: no clean stage for CH2 A" under one whose training failed. "" otherwise
 char *cw_zero_note(const cal_wiz *w, uint32_t ch, char *p);
 char *cw_gain_line(const cal_wiz *w, char *p);                                     //screens 2-3 result ("" when none)
 char *cw_done_line(const cal_wiz *w, uint32_t ch, const acal_channel *c, char *p); //screen 4, one per channel

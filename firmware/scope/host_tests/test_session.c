@@ -9,6 +9,7 @@
 #include <stdlib.h>
 
 #include "pc_cmds.h"
+#include "cap_stage.h"
 #include "mock_hal.h"
 #include "test_util.h"
 
@@ -165,7 +166,7 @@ static void test_info(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, 76);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 23); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 24); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
   T_EQ(pc_get_u16(r.p + 8), 0x1532); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS), PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED), PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED);
@@ -275,7 +276,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.23,fpga=0x1532");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.24,fpga=0x1532");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -1685,7 +1686,7 @@ static void test_ext_trigger(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
-  T_EQ(r.p[1], 23);                                             //proto 1.23
+  T_EQ(r.p[1], 24);                                             //proto 1.23
 
   //Generator on, then EXT: the generator goes off
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -2072,7 +2073,7 @@ static void test_cal_probe(void)
   //CH2, range 3, two bytes (settle and prestrobe 0): the packed measurement
   p[0] = 1; p[1] = 3;
   r = req(PC_CMD_CAL_PROBE, p, 2);
-  T_EQ(r.h.status, 0); T_EQ(r.len, ACAL_PROBE_BYTES); T_EQ(r.len, 252); T_EQ(pc_get_u16(r.p + 248), 27);
+  T_EQ(r.h.status, 0); T_EQ(r.len, ACAL_PROBE_BYTES); T_EQ(r.len, 252); T_EQ(pc_get_u16(r.p + 248), 0);
   T_EQ(mock_cal_probe_calls, 1); T_EQ(mock_cal_probe_ch, 1); T_EQ(mock_cal_probe_range, 3); T_EQ(mock_cal_probe_settle, 0); T_EQ(mock_cal_probe_pre, 0); T_EQ(mock_cal_probe_mode, 0);
   T_EQ(r.p[0], 1); T_EQ(r.p[1], 3); T_EQ(pc_get_u16(r.p + 2), 0); T_EQ(r.p[4], ACAL_PT_NONE);
   T_EQ(pc_get_u16(r.p + 16), 800); T_EQ(pc_get_u16(r.p + 18), 812);
@@ -2188,7 +2189,7 @@ static void test_fel_reset_stall(void)
   setup(0x1532);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 23);                                             //proto_minor 1.23
+  T_EQ(r.p[1], 24);                                             //proto_minor 1.23
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -2703,7 +2704,7 @@ static void test_decim_fir_protocol(void)
   setup(0x1535);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_DECIM | PC_CAP_FIR), PC_CAP_DECIM | PC_CAP_FIR);
-  T_EQ(r.p[1], 23);
+  T_EQ(r.p[1], 24);
   set_trigger(0x30, 0, 0, 0, 0, 3000, 6000, 0, 0, &r);
   T_EQ(r.h.status, 0);
   memset(p, 0, 4); p[0] = 2; p[1] = 0x08;
@@ -2839,7 +2840,7 @@ static void test_seq_segments(void)
 
   setup(0x1536);
   r = req(PC_CMD_GET_INFO, 0, 0);
-  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 23);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 24);
   r = status();
   T_EQ(r.len, 48); T_EQ(pc_get_u16(r.p + 44), 0x5F); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
   mock.ui_avg_state = 2; mock.ui_avg_log2n = 6;
@@ -3023,6 +3024,65 @@ static resp_t enc_capture(void)
   return wait_done(1000);
 }
 
+//fw 0.2.79 (protocol 1.24): FPGA 0x153A capture stages: caps bit 19 and features bit 7 on 0x153A only, the EXT shifts
+//4 / 3 words later, 0x53 bits 3 / 4 kept 0, GET_HEALTH 104..123 (layout 2), GET_CAL 356..363, 0x36 read after full-rate
+//host captures
+static void test_capture_stages(void)
+{
+  resp_t       r;
+  pc_decim_cfg c;
+  int          has;
+
+  setup(0x1539);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_CAPTURE_STAGES, 0);
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  T_EQ(pc_get_u16(r.p + 44) & PC_FEAT_W_CAPTURE, 0);
+  r = req(PC_CMD_GET_HEALTH, 0, 0);
+  T_EQ(pc_get_u16(r.p + 104), 0); T_EQ(r.p[106], 0);
+  T_EQ(pc_decim_has_caps(PC_CAP_FIR | PC_CAP_DECIM), PC_DECIM_HAS_FIR);
+  mock.polls_to_trigger = 1; mock.polls_to_done = 1;
+  enc_divider(0);
+  enc_capture();
+  T_EQ(mock.cap_checks, 0);
+
+  setup(0x153A);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_CAPTURE_STAGES, PC_CAP_CAPTURE_STAGES);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_ENC_CHECK, PC_CAP_ENC_CHECK);
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  T_EQ(pc_get_u16(r.p + 44), 0xFF);
+  r = req(PC_CMD_GET_HEALTH, 0, 0);
+  T_EQ(r.len, PC_HEALTH_LEN); T_EQ(r.p[0], 2);
+  T_EQ(pc_get_u16(r.p + 104), CS_PO); T_EQ(r.p[106], PC_CAPF_HAS); T_EQ(pc_get_u32(r.p + 116), 0);
+  mock.polls_to_trigger = 1; mock.polls_to_done = 1;
+  enc_divider(0);
+  enc_capture();
+  T_EQ(mock.cap_checks, 1);
+  mock.cap.cnt[2] = 37; mock.cap.flagged = 0x04; mock.cap.flags |= PC_CAPF_FLAGGED; mock.cap.flagged_n = 1;
+  r = req(PC_CMD_GET_HEALTH, 0, 0);
+  T_EQ(r.p[106], PC_CAPF_HAS | PC_CAPF_READ | PC_CAPF_FLAGGED); T_EQ(r.p[107], 0x04);
+  T_EQ(pc_get_u16(r.p + 112), 37); T_EQ(pc_get_u32(r.p + 116), 1); T_EQ(pc_get_u32(r.p + 120), 1);
+
+  //GET_CAL: the stored trailer and the value in effect
+  mock.cap.trailer = CS_T_VALID; mock.cap.stored = 0x0924; mock.cap.stored_fpga = 0x153A; mock.cap.value = 0x0924;
+  mock.cap.flags |= PC_CAPF_TRAINED;
+  r = req(PC_CMD_GET_CAL, (const uint8_t *)"\x01", 1);
+  T_EQ(r.len, 364); T_EQ(r.p[356], CS_T_VALID); T_EQ(r.p[357], PC_CAPF_HAS | PC_CAPF_TRAINED);
+  T_EQ(pc_get_u16(r.p + 358), 0x0924); T_EQ(pc_get_u16(r.p + 360), 0x153A); T_EQ(pc_get_u16(r.p + 362), 0x0924);
+
+  //EXT shifts: legacy 12 samples at divider 0 and 14 above (0x1539: 4 / 8); K >= 1 40 ns more
+  has = pc_decim_has_caps(PC_CAP_FIR | PC_CAP_DECIM | PC_CAP_CAPTURE_STAGES);
+  T_EQ(has, PC_DECIM_HAS_FIR | PC_DECIM_HAS_CAPSTAGES);
+  pc_decim_config(0, PC_DECIM_NEG_A | PC_DECIM_NEG_B | PC_DECIM_SWAP, 19, 3000, has, &c);
+  T_EQ(c.cap, 1); T_EQ(c.flags, PC_DECIM_SWAP);                 //bits 3 / 4 inert on 0x153A: written 0
+  T_EQ(pc_decim_ext_shift_at(&c, 19), 14); T_EQ(pc_decim_ext_shift_at(&c, 0), 12); T_EQ(pc_decim_ext_shift_at(&c, 1999), 14);
+  pc_decim_config(1, 0, 1, 3000, has, &c);   T_EQ(pc_decim_ext_shift(&c), 16);       //(240 + 5 + 80) / 20 = 16.25 (0x1539: 12)
+  pc_decim_config(2, 0, 19, 3000, has, &c);  T_EQ(pc_decim_ext_shift(&c), 3);        //(240 + 95 + 80) / 200 = 2.08
+  pc_decim_config(0, PC_DECIM_NEG_A, 19, 3000, PC_DECIM_HAS_FIR, &c);
+  T_EQ(c.cap, 0); T_EQ(c.flags, PC_DECIM_NEG_A); T_EQ(pc_decim_ext_shift_at(&c, 19), 8);
+}
+
 static void test_enc_check(void)
 {
   resp_t   r;
@@ -3111,7 +3171,7 @@ static void test_enc_check(void)
   r = req(PC_CMD_GET_LINK_STATS, 0, 0);
   T_EQ(pc_get_u32(r.p + 4 + 4 * 62), 1); T_EQ(pc_get_u32(r.p + 4 + 4 * 63), 1);
   r = req(PC_CMD_GET_HEALTH, 0, 0);
-  T_EQ(r.len, 104); T_EQ(pc_get_u16(r.p + 2), 104);
+  T_EQ(r.len, 124); T_EQ(pc_get_u16(r.p + 2), 124); T_EQ(r.p[0], 2);
   T_EQ(r.p[88], EH_MODE_FLAG); T_EQ(r.p[89], EH_33_GOOD); T_EQ(r.p[90], PC_ENCF_READ); T_EQ(r.p[91], EH_33_GOOD);
   T_EQ(pc_get_u32(r.p + 92), 1); T_EQ(pc_get_u32(r.p + 96), 1); T_EQ(pc_get_u32(r.p + 100), 1 + 3);
 
@@ -3428,6 +3488,7 @@ int main(void)
   test_seq_segments();
   test_seq_average();
   test_enc_check();
+  test_capture_stages();
   test_bode();
   mock_clear_resps();
   return t_report("test_session");

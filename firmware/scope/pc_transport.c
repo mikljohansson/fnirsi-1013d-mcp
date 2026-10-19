@@ -651,6 +651,14 @@ void pc_usb_log_fpga_heal(uint8 a, uint16 b)
   pc_irq_restore(cpsr);
 }
 
+void pc_usb_log_fpga_capture(uint8 a, uint16 b)
+{
+  uint32 cpsr = pc_irq_save();
+
+  pc_evlog_add(PC_EVT_FPGA_CAPTURE, a, b);
+  pc_irq_restore(cpsr);
+}
+
 void pc_usb_log_fpga_write(uint8 a, uint16 b)
 {
   uint32 cpsr = pc_irq_save();

@@ -3,6 +3,7 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "cal_wiz.h"
+#include "cap_stage.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -342,7 +343,7 @@ const char *cw_reason_text(int rc)
     case ACAL_E_GAIN_CLASS: return "the gain differs between sample rates";
     case ACAL_E_GAIN_NONE:  return "no generator in this FPGA bitstream";
     case ACAL_E_TIMING:     return "ADC capture timing: the 200 MSa/s data stays garbled";
-    case ACAL_E_READOUT:    return "ADC readout fault near code 128 (FPGA 0x1538): flash the fixed bitstream";
+    case ACAL_E_READOUT:    return "ADC readout fault near code 128: check the FPGA bitstream";
     case CW_RC_CANCELLED:   return "cancelled";
     default:                return "measurement failed";
   }
@@ -431,11 +432,43 @@ static char *cw_core_note(char *p, const acal_fail *f, uint32_t k)
   return cw_str(p, ")");
 }
 
+void cw_cap_result(cal_wiz *w, uint32_t ch, int st, uint16_t v, uint8_t bad)
+{
+  if(ch > 1)
+    return;
+
+  w->cap_st[ch]  = (uint8_t)st;
+  w->cap_v[ch]   = v;
+  w->cap_bad[ch] = bad;
+}
+
 char *cw_zero_note(const cal_wiz *w, uint32_t ch, char *p)
 {
   const acal_fail *f = &w->zero_f[ch];
+  uint32_t k, n = 0;
 
   *p = 0;
+
+  if((ch <= 1) && (w->zero_st[ch] == CW_Z_PASS) && (w->cap_st[ch] == CW_C_DONE))
+  {
+    p = cw_str(p, "Capture stages: ");
+    return cs_text_ch(p, w->cap_v[ch], ch);
+  }
+
+  if((ch <= 1) && (w->zero_st[ch] == CW_Z_FAIL) && (w->cap_st[ch] == CW_C_FAIL))
+  {
+    p = cw_str(p, "Capture stages: no clean stage for ");
+
+    for(k=0;k<CS_CORES;k++)
+      if(w->cap_bad[ch] & (1u << k))
+      {
+        if(n++)
+          p = cw_str(p, ", ");
+        p = cs_core_name(p, k);
+      }
+
+    return p;
+  }
 
   if((ch > 1) || (w->zero_st[ch] != CW_Z_FAIL) || !w->zero_det[ch] || (f->point >= ACAL_POINTS))
     return p;

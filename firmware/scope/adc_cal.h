@@ -254,31 +254,13 @@ void     acal_point_set(acal_point *p, int32_t pwm, uint32_t cls, uint32_t convs
 //(ACAL_E_TIMING: the full-rate zero point). ACAL_PT_NONE when that point was not measured
 void     acal_fail_point(const acal_point pt[ACAL_POINTS], int rc, acal_fail *f);
 
-//Zero point split (fw 0.2.67; bench 2026-10-19 on FPGA 0x1538: at 200 MSa/s some readout lanes mix the bits of successive
-//samples when they straddle 0x7F / 0x80, giving outliers up to the rails while the mean sits at 126..133, clean everywhere
-//else). The zero at the centre PWM is not measured there but as the mean of two points d counts either side, where the
-//level is about ACAL_ZERO_SPLIT16 away from 128: in the linear model raw = z + slope x (pwm - centre) the mean of the two
-//is exactly z at the centre, so the stored zero, slope and PWM and every correction built from them (v3, v4) are what
-//they were. d from the gated slope points of the same range (m->pwm_lo / hi, mean16_lo / hi), clamped
-int32_t  acal_zero_split(const acal_range_meas *m);
-
-//The zero point of one class from its two split points' accumulators [half][core]: per core the mean of the two means,
-//drift from the halves of both (equal conversions per point, so the level step cancels), noise16 / within16 the RMS of
-//the two points' own values, clipped samples added to *clipped
-void     acal_zero_pair(const acal_acc lo[2][2], const acal_acc hi[2][2], int32_t zero16[2], int32_t drift16[2],
-                        uint32_t noise16[2], uint32_t within16[2], uint32_t *clipped);
-
-//The same as one acal_point (pwm = the centre; mean, RMS and within as acal_zero_pair; extremes and clipped of both)
-void     acal_point_set_pair(acal_point *p, int32_t pwm, uint32_t cls, uint32_t convs, const acal_acc lo[2][2],
-                             const acal_acc hi[2][2]);
-
 //A failed range check with ACAL_E_CLIP that is the readout fault rather than the input: every full-rate point with a
 //clipped sample has a gated twin at the same PWM (F_ZERO / G_ZERO, F_HI / G_HI, F_LO / G_LO) without one whose mean of
 //both cores is within ACAL_READOUT_NEAR16 of 128. Returns 1 for the fault (the caller reports ACAL_E_READOUT)
 int      acal_readout_fault(const acal_point pt[ACAL_POINTS]);
 
 //CAL_PROBE response (protocol 1.21 provisional, docs/protocol.md section 14 row 61): ACAL_PROBE_BYTES; bytes 248..249 the
-//zero split d in PWM counts (0 none), 250..251 reserved
+//zero split d of fw 0.2.67-0.2.78 (0 since 0.2.79: the zero is measured at the centre again), 250..251 reserved
 #define ACAL_PROBE_BYTES     (24 + 28 * ACAL_POINTS + 4)
 #define ACAL_PROBE_GARBLED   0x01         //flags: a full-rate capture was accepted garbled after the re-arms
 #define ACAL_PROBE_NOCENTRE  0x02         //flags: the coarse centre failed, no fine points
@@ -287,8 +269,7 @@ int      acal_readout_fault(const acal_point pt[ACAL_POINTS]);
                                           //flags bits 7:4: the request's settle reads (0 = the wizard's readout)
 
 uint32_t acal_probe_pack(uint8_t *dst, uint8_t ch, uint8_t range, int rc, uint8_t flags, int32_t centre, int32_t pwm,
-                         uint32_t enc_bad, uint32_t enc_recovered, const acal_fail *f, const acal_point pt[ACAL_POINTS],
-                         int32_t split);
+                         uint32_t enc_bad, uint32_t enc_recovered, const acal_fail *f, const acal_point pt[ACAL_POINTS]);
 
 //Checks m (acal_range_check) and stores it as range r of c: ACAL_OK or the first ACAL_E_* (c unchanged then)
 int      acal_range_store(const acal_range_meas *m, acal_channel *c, uint8_t r);
@@ -336,9 +317,6 @@ const char *acal_reason_text(int reason);                     //failure box text
 #define ACAL_SLOPE_MAX_Q16   (-13107)     //-0.20
 #define ACAL_MAX_DSLOPE_Q16  1311         //|slope A - slope B| <= 0.02 codes per count, per class
 #define ACAL_MAX_DRIFT16     8            //zero point settled: halves agree within 0.5 code
-#define ACAL_ZERO_SPLIT16    (12 * 16)    //fw 0.2.67: the zero is measured 12 codes either side of 128 (acal_zero_split)
-#define ACAL_ZERO_SPLIT_MIN  8            //.. in PWM counts, at least
-#define ACAL_ZERO_SPLIT_MAX  120          //.. and at most
 #define ACAL_READOUT_NEAR16  (8 * 16)     //acal_readout_fault: a gated mean within 8 codes of 128
 #define ACAL_GAIN_MAX_SPAN16 (120 * 16)   //range choice: the levels at most 120 codes apart (+-60 about 128)
 #define ACAL_GAIN_MIN_LEVER16 (40 * 16)   //gated span below 40 codes: no probe on the post (or x10 at range 5 too small)
@@ -367,6 +345,7 @@ const char *acal_reason_text(int reason);                     //failure box text
 #define ACAL_E_GAIN_NONE     17           //no generator in this bitstream (stock FPGA)
 #define ACAL_E_TIMING        18           //full-rate capture still garbled after the retries (enc_heal.h)
 #define ACAL_E_READOUT       19           //fw 0.2.67: samples at 0 / 255 only at full rate with the level near code 128
-                                          //(FPGA 0x1538 readout fault, acal_readout_fault)
+                                          //(acal_readout_fault); fw 0.2.79: also a 0x153A core with no clean
+                                          //capture stage (cap_stage.h)
 
 #endif /* ADC_CAL_H */

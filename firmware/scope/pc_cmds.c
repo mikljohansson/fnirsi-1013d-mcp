@@ -14,6 +14,7 @@
 #include "pc_hal.h"
 #include "pc_report.h"
 #include "pc_ident.h"
+#include "cap_stage.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Dispatch table
@@ -156,6 +157,11 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
       //0x1538: encodes from the write clock, core order guaranteed B first, checked per capture (read 0x33, enc_heal.h)
       if(version >= 0x1538)
         v->caps |= PC_CAP_ENC_CHECK;                                                 //BENCH: 0x1538
+
+      //0x153A: ADC pins through IOB registers, per-core capture stage (0x63), outlier counters (0x36), 4 / 3 words more
+      //ADC latency against EXT (cap_stage.h, pc_decim_ext_shift_at)
+      if(cs_has(version))
+        v->caps |= PC_CAP_CAPTURE_STAGES;                                            //BENCH: 0x153A
       break;
 
     case 0x1632:
@@ -294,8 +300,15 @@ static void pc_decim_next(pc_session *s, uint32_t total, pc_decim_cfg *c)
 
   pc_hal_timebase_read(&tb);
   pc_decim_config(set & 3, set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR), s->tb_raw ? s->tb_divider : tb.divider, total,
-                  (s->var.caps & PC_CAP_FIR) ? PC_DECIM_HAS_FIR : ((s->var.caps & PC_CAP_DECIM) ? PC_DECIM_HAS_CIC :
-                  PC_DECIM_HAS_NONE), c);
+                  pc_decim_has_caps(s->var.caps), c);
+}
+
+//PC_DECIM_HAS_* for pc_decim_config from the caps, with PC_DECIM_HAS_CAPSTAGES on 0x153A+ (the EXT shifts and 0x53 bits 3 / 4)
+int pc_decim_has_caps(uint32_t caps)
+{
+  int has = (caps & PC_CAP_FIR) ? PC_DECIM_HAS_FIR : ((caps & PC_CAP_DECIM) ? PC_DECIM_HAS_CIC : PC_DECIM_HAS_NONE);
+
+  return (caps & PC_CAP_CAPTURE_STAGES) ? (has | PC_DECIM_HAS_CAPSTAGES) : has;
 }
 
 //EXT trigger: samples by which the stored data lag the edge (pc_decim_ext_shift_at: the filter's latency with K >= 1, the
@@ -499,6 +512,7 @@ static uint16_t pc_features(const pc_session *s)
   if(s->var.caps & PC_CAP_FIR)         f |= PC_FEAT_W_FIR;
   if(s->var.caps & PC_CAP_SEQ)         f |= PC_FEAT_W_SEGMENTS | PC_FEAT_W_HW_AVERAGE;
   if(s->var.caps & PC_CAP_ENC_CHECK)   f |= PC_FEAT_W_ENC_CHECK;
+  if(s->var.caps & PC_CAP_CAPTURE_STAGES) f |= PC_FEAT_W_CAPTURE;
   if((s->var.caps & PC_CAP_DECIM) && (s->var.caps & PC_CAP_GENERATOR_DDS))
                                        f |= PC_FEAT_W_BODE;
 
@@ -910,7 +924,7 @@ void pc_health_body(uint8_t *p)
   pc_hal_enc_state(&e);
 
   memset(p, 0, PC_HEALTH_LEN);
-  p[0] = 1;
+  p[0] = 2;                                //layout 2 since 1.24 (124 bytes)
   pc_put_u16(p + 2, PC_HEALTH_LEN);
   p[4] = u.state;
   p[5] = u.flags;
@@ -954,6 +968,23 @@ void pc_health_body(uint8_t *p)
   pc_put_u32(p + 92,  e.bad);
   pc_put_u32(p + 96,  e.recovered);
   pc_put_u32(p + 100, e.checked);
+
+  //1.24: FPGA 0x153A capture stages and the outlier counters after the last full-rate capture (cap_stage.h)
+  {
+    pc_hw_cap c;
+    uint32_t  k;
+
+    pc_hal_cap_state(&c);
+    pc_put_u16(p + 104, c.value);
+    p[106] = c.flags;
+    p[107] = c.flagged;
+
+    for(k=0;k<4;k++)
+      pc_put_u16(p + 108 + 2 * k, c.cnt[k]);
+
+    pc_put_u32(p + 116, c.reads);
+    pc_put_u32(p + 120, c.flagged_n);
+  }
 }
 
 #if PC_DEBUG
@@ -2445,6 +2476,18 @@ void pc_cal_body(int ch, uint8_t *resp)
     pc_put_u32(resp + 348, ons);
     pc_put_u32(resp + 352, mins);
   }
+
+  //1.24: the trained FPGA 0x153A capture stages stored with the calibration (sector 708 bytes 488..503)
+  {
+    pc_hw_cap cp;
+
+    pc_hal_cap_state(&cp);
+    resp[356] = cp.trailer;
+    resp[357] = (uint8_t)(cp.flags & (PC_CAPF_HAS | PC_CAPF_TRAINED | PC_CAPF_OTHER));
+    pc_put_u16(resp + 358, cp.stored);
+    pc_put_u16(resp + 360, cp.stored_fpga);
+    pc_put_u16(resp + 362, cp.value);
+  }
 }
 
 static int h_get_cal(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
@@ -3375,7 +3418,13 @@ static int pc_enc_rearm(pc_session *s, uint32_t start)
   pc_hal_enc_note((uint8_t)((mode == EH_MODE_FLAG) ? EH_WHY_FLAG : EH_WHY_DATA), &n);
 
   if(act != EH_REARM)
+  {
+    //fw 0.2.79: 0x153A's outlier counters of the accepted capture (the self-check, cap_stage.h)
+    if(s->var.caps & PC_CAP_CAPTURE_STAGES)
+      pc_hal_cap_check();
+
     return 0;
+  }
 
   pc_hal_enc_retry();
 
