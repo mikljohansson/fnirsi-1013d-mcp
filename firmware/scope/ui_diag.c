@@ -1186,7 +1186,9 @@ static const char *ud_block_state(const uint8_t *c)
   return (c[C_FLAGS] & F_LOADED) ? "not bound to the offsets" : "none";
 }
 
-#define UD_CAL_ROW1   374
+#define UD_CAL_BTN_W    185                             //(776 - 3 x 12) / 4
+#define UD_CAL_BTN_X(i) (12 + (i) * (UD_CAL_BTN_W + 12))    //12, 209, 406, 603 (the last ends at 788)
+#define UD_CAL_TEXT_Y   374                             //under the channel blocks (y 96..366), over the row (420)
 
 static void ud_page_cal(ud_page *pg, const ud_input *in, const ud_note *note)
 {
@@ -1206,19 +1208,21 @@ static void ud_page_cal(ud_page *pg, const ud_input *in, const ud_note *note)
   ud_cal_channel(pg, in, 0);
   ud_cal_channel(pg, in, 1);
 
-  //Two rows of service actions: Calibrate and the DC shift trim (1.00o5's manual trim of the trace scale, run on the
-  //scope's CTRL page while on), then the volts calibration and, apart at the right, Clear calibration
-  ud_btn(pg, 12, UD_CAL_ROW1, 140, UD_BTN_H, UD_B_PRIMARY, UD_ID_CALIBRATE, "Calibrate");
-  //fw 0.2.63 (owner): the button's colour is the switch's state (green on, grey off); the line beside it only while on
-  ud_btn(pg, 164, UD_CAL_ROW1, 180, UD_BTN_H, in->dc_shift ? UD_B_ON : UD_B_GREY, UD_ID_DCSHIFT, "DC shift trim");
+  //fw 0.2.68 (owner): the service actions in one row at the bottom, as on the other tabs (UD_BTN_Y), four equal 44 px
+  //buttons 12 px apart across the page: Calibrate, the DC shift trim (1.00o5's manual trim of the trace scale, run on
+  //the scope's CTRL page while on; green on, grey off), Volts calibration, and last Clear calibration. The trim's line
+  //(only while on) and the page's note sit between the channel blocks and the row.
+  ud_btn(pg, UD_CAL_BTN_X(0), UD_BTN_Y, UD_CAL_BTN_W, UD_BTN_H, UD_B_PRIMARY, UD_ID_CALIBRATE, "Calibrate");
+  ud_btn(pg, UD_CAL_BTN_X(1), UD_BTN_Y, UD_CAL_BTN_W, UD_BTN_H, in->dc_shift ? UD_B_ON : UD_B_GREY, UD_ID_DCSHIFT,
+         "DC shift trim");
+  ud_btn(pg, UD_CAL_BTN_X(2), UD_BTN_Y, UD_CAL_BTN_W, UD_BTN_H, UD_B_NEUTRAL, UD_ID_VOLTS, "Volts calibration");
+  ud_btn(pg, UD_CAL_BTN_X(3), UD_BTN_Y, UD_CAL_BTN_W, UD_BTN_H, UD_B_DANGER, UD_ID_CLEAR, "Clear calibration");
+
   if(in->dc_shift)
-    ud_txt(pg, 356, UD_CAL_ROW1 + 6, 432, UD_F_SMALL, UD_C_WARN, "On: CTRL on the scope opens the trim.");
+    ud_txt(pg, 12, UD_CAL_TEXT_Y, 776, UD_F_SMALL, UD_C_WARN, "On: CTRL on the scope opens the trim.");
 
   if(note && note->text[0])
-    ud_txt(pg, 356, UD_CAL_ROW1 + 24, 432, UD_F_SMALL, note->colour, note->text);
-
-  ud_btn(pg, 12, UD_BTN_Y + 6, 180, UD_BTN_H, UD_B_NEUTRAL, UD_ID_VOLTS, "Volts calibration");
-  ud_btn(pg, 612, UD_BTN_Y + 6, 176, UD_BTN_H, UD_B_DANGER, UD_ID_CLEAR, "Clear calibration");
+    ud_txt(pg, 12, UD_CAL_TEXT_Y + 20, 776, UD_F_SMALL, note->colour, note->text);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

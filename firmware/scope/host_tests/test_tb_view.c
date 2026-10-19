@@ -166,6 +166,60 @@ static void test_snap(void)
   T_EQ(tbv_snap(200000000, fpd, 11, 34, 19, 2), -1);
 }
 
+//fw 0.2.68 (owner: after a rate change the snapped time/div cycled until it was set by hand once): the snap is a
+//manual set of the snapped value. Every rate, depth, trigger sample, start time/div and trigger point: the state after
+//tbv_fit equals the state after tbv_set with the same index from the same start; the result is viable with the trigger
+//point inside the record; a second fit, and a manual set of the value already set, change nothing.
+static void test_snap_is_manual_set(void)
+{
+  static const int32 starts[] = { -100000, -2000, 0, 3, 362, 700, 726, 5000, 100000 };
+  int r, d, k, t, p;
+
+  for(r = 0; r < 18; r++)
+    for(d = 0; d < NDEPTH; d++)
+      for(k = 0; k < 3; k++)
+      {
+        uint32 total = depths[d];
+        uint32 trig  = (k == 0) ? total / 4 : (k == 1) ? total / 2 : total - 1000;
+
+        for(t = 11; t <= 34; t++)
+          for(p = 0; p < (int)(sizeof(starts) / sizeof(starts[0])); p++)
+          {
+            tbv_tb a, b, c;
+            int32  lo, hi;
+            int    ch;
+
+            a.tpd = b.tpd = t;
+            a.pos = b.pos = starts[p];
+
+            ch = tbv_fit(&a, rate[r], fpd, 11, 34, total, trig);
+
+            if(!ch)
+            {
+              //Viable (or nothing is): only the trigger point is clamped, as a manual set of the same index does
+              T_EQ(a.tpd, t);
+              tbv_set(&b, t, rate[r], fpd, total, trig);
+              T_EQ(a.pos, b.pos);
+              continue;
+            }
+
+            tbv_set(&b, a.tpd, rate[r], fpd, total, trig);
+            T_EQ(a.tpd, b.tpd);
+            T_EQ(a.pos, b.pos);
+            T_TRUE(tbv_viable(rate[r], fpd[a.tpd], total));
+            tbv_pos_limits(rate[r], fpd[a.tpd], total, trig, &lo, &hi);
+            T_TRUE((a.pos >= lo) && (a.pos <= hi));
+
+            c = a;
+            T_EQ(tbv_fit(&c, rate[r], fpd, 11, 34, total, trig), 0);
+            T_EQ(c.tpd, a.tpd);
+            T_EQ(c.pos, a.pos);
+            tbv_set(&c, a.tpd, rate[r], fpd, total, trig);
+            T_EQ(c.pos, a.pos);
+          }
+      }
+}
+
 static void test_limits_and_window(void)
 {
   int r, t, k, x;
@@ -300,6 +354,7 @@ int main(void)
   test_viability();
   test_against_old_table();
   test_snap();
+  test_snap_is_manual_set();
   test_limits_and_window();
   test_slider();
   return t_report("test_tb_view");

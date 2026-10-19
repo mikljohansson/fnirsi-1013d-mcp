@@ -148,6 +148,20 @@ int ui_set_value(int row, const ui_set_state *s, char *buf);
 //Brightness step: 5 per tap, held to 0..100
 uint8 ui_set_step(uint8 v, int up);
 
+//Screen brightness (fw 0.2.68, owner: the top bar's sun and the Screen brightness slider are one setting).
+//scopesettings.screenbrightness is the one value (0..100 %, what the backlight shows; the slider and the Settings
+//screen show and set it). The sun toggles between 100 % and the value it came from (1.00o5's pair: its sun switched
+//the backlight to maximum and back to the slider's value, through a separate flag the slider did not show).
+//scopesettings.brightback keeps that value; the settings sector holds it in 1.00o5's max-light byte as 0x80 | value.
+#define UI_BRIGHT_MAX         100
+#define UI_BRIGHT_DEFAULT     20    //1.00o5's default screen brightness
+#define UI_BRIGHT_SECTOR_NEW  0x80  //the max-light byte holds 0x80 | brightback (1.00o5: 0 or 1, the max-light flag)
+//The sun tapped at brightness cur: the new brightness; *back is what the next tap returns to
+uint8  ui_bright_sun(uint8 cur, uint8 *back);
+//The settings sector's byte for brightback, and the load (1.00o5's flag 1: the backlight was at maximum)
+uint16 ui_bright_byte(uint8 back);
+void   ui_bright_load(uint16 byte, uint8 *cur, uint8 *back);
+
 //----------------------------------------------------------------------------------------------------------------------------------
 //At power-on: the boot-mode byte (README section 3). The screen offers three values, in this cycle:
 //Open firmware (0), Boot menu, then open firmware (4), Boot menu, then stock firmware (5). The stock image always comes

@@ -369,6 +369,12 @@ void pc_ui_pass_mark(pc_session *s, int n)
     s->first_mark[n] = (pc_hal_ms() - s->first_poll_at) + 1;
 }
 
+//fw 0.2.68: the screen's STOP during a host single (the button reads STOP while one runs): abort it
+void pc_ui_host_stop(pc_session *s)
+{
+  pc_host_abort(s);
+}
+
 int pc_ui_arm_allowed(pc_session *s)
 {
   return !s->ui_hold;

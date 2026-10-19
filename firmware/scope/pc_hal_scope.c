@@ -1618,8 +1618,7 @@ int pc_glue_autoset_running(void)  { return bode_view_auto_running() || spectrum
 
 //fw 0.2.66: scope_acquire_trace_data while the Bode plot shows: no UI acquisition, the view's drawing instead
 int pc_glue_bode_pass(void)        { return bode_view_pass(); }
-void pc_glue_gen_bode_draw(void)   { bode_gen_row_draw(); }
-int pc_glue_gen_bode_hit(void)     { return bode_gen_row_hit(ytouch); }
+int pc_glue_bode_available(void)   { return bode_view_available(); }
 uint16 pc_glue_bode_setting_word(int i) { return bode_view_setting_word(i); }
 void pc_glue_view_opening(void)    { if(bode_view_active()) bode_view_close(); }
 
@@ -1658,14 +1657,14 @@ void pc_glue_main_menu_mode(int row)
   ui_mm_action a;
   int          sp;
 
-  //fw 0.2.66: the Bode plot (opened from the generator menu) ends on either mode row; Scope then needs nothing more
-  if(bode_view_active())
-    bode_view_close();
-
   sp = pc_spectrum_on();
 
   if(!ui_mm_choose(row, sp, scopesettings.long_mode != 0, phosphor_switch(), &a))
     return;
+
+  //fw 0.2.68: the Bode plot is the main menu's third mode row; any other mode row ends it (it gives its settings back)
+  if(!a.bode && bode_view_active())
+    bode_view_close();
 
   if(a.roll_off)
   {
@@ -1688,11 +1687,79 @@ void pc_glue_main_menu_mode(int row)
 
   if(a.warn_roll)
     spectrum_note_roll_off();
+
+  if(a.bode && !bode_view_active())
+    bode_view_open();
 }
 
 //The right bar differs between the modes (empty slots, the CTRL page's items): redrawn whenever the spectrum view
 //starts or ends, whatever started or ended it (main menu, roll mode, a viewer, the host)
 static uint8 pc_bar_spectrum;
+
+//fw 0.2.68 (owner): a host acquisition in progress shows as RUN (ui_ctrl.h ui_run_view): a host ARM armed or triggered,
+//or one that finished less than UI_RUN_HOST_HOLD_MS ago (a burst of host captures holds RUN). A host STOP or
+//SET_ACQ_STATE aborts the single (ABORTED), so STOP shows at once.
+static uint8  pc_host_seen;
+static uint32 pc_host_seen_ms;
+
+int pc_glue_host_busy(void)
+{
+  if(!pc_ready)
+    return 0;
+
+  if((pc_sess.acq_state == PC_ACQ_ARMED) || (pc_sess.acq_state == PC_ACQ_TRIGGERED))
+  {
+    pc_host_seen    = 1;
+    pc_host_seen_ms = timer0ticks;
+    return 1;
+  }
+
+  if(pc_host_seen && (pc_sess.acq_state == PC_ACQ_DONE) && ((timer0ticks - pc_host_seen_ms) < UI_RUN_HOST_HOLD_MS))
+    return 1;
+
+  pc_host_seen = 0;
+  return 0;
+}
+
+//The RUN/STOP button reads STOP during a host acquisition: a tap ends it (the host's WAIT answers E_ABORTED) and the
+//UI stays stopped
+void pc_glue_host_stop(void)
+{
+  if(pc_ready)
+    pc_ui_host_stop(&pc_sess);
+
+  pc_host_seen = 0;
+}
+
+//fw 0.2.68: the chip and the button follow the run state, whoever changed it (host RUN / STOP / ARM, a single shot that
+//completed, the UI); each pass redraws whichever shows a stale value. Not in the file viewer; the button only on page
+//one and not in the waveform viewer (its slot holds the previous / next buttons there).
+static void pc_run_follow(void)
+{
+  DISPLAYDATA save;
+  int         view = scope_run_view();
+  int         chip, btn;
+
+  if(viewactive != VIEW_NOT_ACTIVE)
+    return;
+
+  chip = (scope_run_chip_shown != 0xFF) && (scope_run_chip_shown != view);
+  btn  = (scopesettings.rightmenustate == 0) && !scopesettings.waveviewmode && (scope_run_button_shown != 0xFF) &&
+         (scope_run_button_shown != view);
+
+  if(!chip && !btn)
+    return;
+
+  pc_draw_begin(&save);
+
+  if(chip)
+    scope_run_stop_text();
+
+  if(btn)
+    scope_run_stop_button(0);
+
+  pc_draw_end(&save);
+}
 
 static void pc_right_bar_follow(void)
 {
@@ -2046,6 +2113,7 @@ void pc_glue_ui_service(void)
   bode_view_service();
   pc_right_bar_follow();
   pc_dec_follow_mode();
+  pc_run_follow();
 
   //Calibration v4 class probe (acal_live.c): only in the scope and spectrum views (the phosphor view's record rate would
   //see the gap; not while Diagnostics shows), never while a host capture is armed or triggered (the probe resets the sample system) or the host

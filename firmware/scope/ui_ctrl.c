@@ -131,7 +131,16 @@ int ui_fold_dir(const ui_fold *f, uint32 x)
 //----------------------------------------------------------------------------------------------------------------------------------
 
 const char *const ui_acq_pass_label = "Pass time";
-const char *const ui_run_label[2]    = { "Stopped", "RUN" };
+const char *const ui_run_chip[3]     = { "STOP", "RUN", "WAIT" };
+const char *const ui_run_action[2]   = { "RUN", "STOP" };
+
+int ui_run_view(int runstate, int single_wait, int host_busy)
+{
+  if(runstate)
+    return single_wait ? UI_RUN_WAIT : UI_RUN_RUN;
+
+  return host_busy ? UI_RUN_RUN : UI_RUN_STOP;
+}
 
 const char *const ui_trace_names[UI_TRACE_COUNT]         = { "Linear", "Dots", "Peak" };
 const char *const ui_view_names[2]                       = { "Normal", "X-Y" };

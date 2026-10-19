@@ -29,7 +29,7 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #else
 #define PC_FW_VERSION_MMU ""
 #endif
-#define PC_FW_VERSION     "0.2.67" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
+#define PC_FW_VERSION     "0.2.68" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
 #endif
 
 //The build identity record (build_id.c, pc_ident.h; host tests: mock_hal.c)
@@ -328,6 +328,7 @@ int      pc_ui_chip_shown(const pc_session *s);           //1 while the chip occ
 
 //UI acquisition hooks (scope_functions.c / fpga_control.c, main-loop code)
 int      pc_ui_arm_allowed(pc_session *s);                //0 while a READ_RAW waits for the UI capture in flight
+void     pc_ui_host_stop(pc_session *s);                  //fw 0.2.68: the screen's STOP aborts a host single
 void     pc_ui_capture_start(pc_session *s);              //fpga_do_conversion started a conversion
 void     pc_ui_capture_addr(pc_session *s, uint16_t addr);//0x14 read of the finished UI capture
 void     pc_ui_capture_done(pc_session *s);               //the UI read and processed it

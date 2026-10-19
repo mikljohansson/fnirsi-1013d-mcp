@@ -102,6 +102,10 @@ static void test_menu(void)
   T_STR(ui_mm_labels[UI_MM_SCOPE].line1, "Scope");
   T_STR(ui_mm_labels[UI_MM_SPECTRUM].line1, "Spectrum");
   T_STR(ui_mm_labels[UI_MM_SPECTRUM].line2, "analyser");
+  T_STR(ui_mm_labels[UI_MM_BODE].line1, "Bode plot");       //fw 0.2.68: the third mode row (owner)
+  T_EQ(UI_MM_BODE, UI_MM_SPECTRUM + 1);
+  T_EQ(UI_MM_PICTURES, UI_MM_BODE + 1);
+  T_EQ(UI_MM_ROWS, 8);
   T_STR(ui_mm_labels[UI_MM_PICTURES].line2, "pictures");
   T_STR(ui_mm_labels[UI_MM_WAVEFORMS].line2, "waveforms");
   T_STR(ui_mm_labels[UI_MM_SETTINGS].line1, "Settings");
@@ -117,7 +121,8 @@ static void test_menu(void)
   }
 
   //Hit areas: contiguous, one pitch each, every y of the column maps to exactly the row drawn there
-  T_EQ(UI_MM_H, 413);
+  T_EQ(UI_MM_H, 416);
+  T_EQ(UI_MM_PITCH, 52);
   T_TRUE(UI_MM_TOP + UI_MM_H <= 480);
   for(y = 0; y < 480; y++)
   {
@@ -140,17 +145,20 @@ static void test_menu(void)
     T_EQ(ui_mm_row_at(UI_MM_BTN_X + UI_MM_BTN_W - 1, ui_mm_row_top(row) + UI_MM_BTN_DY + UI_MM_BTN_H - 1), row);
   }
 
-  //1.00o5's separators at 104 / 163 / 222 / 281 end rows 0..3; the old hit areas this replaces had gaps there
-  T_EQ(ui_mm_row_at(80, 104), 0);
-  T_EQ(ui_mm_row_at(80, 105), 1);
-  T_EQ(ui_mm_row_at(80, 458), UI_MM_USB);
-  T_EQ(ui_mm_row_at(80, 459), -1);
+  //fw 0.2.68: eight rows of 52 px, the separators at 97 / 149 / ... end rows 0..6; the button keeps 35 px with at least
+  //8 px to the separator below and 9 px to the one above
+  T_EQ(ui_mm_row_at(80, 97), 0);
+  T_EQ(ui_mm_row_at(80, 98), 1);
+  T_EQ(ui_mm_row_at(80, 461), UI_MM_USB);
+  T_EQ(ui_mm_row_at(80, 462), -1);
+  T_TRUE(UI_MM_BTN_DY + UI_MM_BTN_H + 8 <= UI_MM_PITCH);
+  T_TRUE(UI_MM_BTN_H >= 35);
 
   //Left and right edges of the column
-  T_EQ(ui_mm_row_at(1, 100), -1);
-  T_EQ(ui_mm_row_at(2, 100), 0);
-  T_EQ(ui_mm_row_at(148, 100), 0);
-  T_EQ(ui_mm_row_at(149, 100), -1);
+  T_EQ(ui_mm_row_at(1, 60), -1);
+  T_EQ(ui_mm_row_at(2, 60), 0);
+  T_EQ(ui_mm_row_at(148, 60), 0);
+  T_EQ(ui_mm_row_at(149, 60), -1);
 }
 
 static void test_choose(void)
@@ -187,6 +195,25 @@ static void test_choose(void)
       T_EQ(a.roll_off, 0);
       T_EQ(a.warn_roll, 0);
     }
+
+  //fw 0.2.68: Bode plot from the scope, the spectrum, roll mode: the other modes off, Roll off (no spectrum roll note)
+  for(sp = 0; sp < 2; sp++)
+    for(roll = 0; roll < 2; roll++)
+      for(ph = 0; ph < 2; ph++)
+      {
+        T_EQ(ui_mm_choose(UI_MM_BODE, sp, roll, ph, &a), 1);
+        T_EQ(a.bode, 1);
+        T_EQ(a.spectrum, 0);
+        T_EQ(a.phosphor, 0);
+        T_EQ(a.roll_off, roll);
+        T_EQ(a.warn_roll, 0);
+
+        //Scope and Spectrum end it
+        T_EQ(ui_mm_choose(UI_MM_SCOPE, sp, roll, ph, &a), 1);
+        T_EQ(a.bode, 0);
+        T_EQ(ui_mm_choose(UI_MM_SPECTRUM, sp, roll, ph, &a), 1);
+        T_EQ(a.bode, 0);
+      }
 
   //Utility rows are not mode rows
   for(sp = 0; sp < 2; sp++)
@@ -299,9 +326,63 @@ static void test_ctrl_page(void)
     T_STR(ui_display_value(1, 0, 1), "Spec");
   }
 
-  //RUN/STOP labels fit the 51 px button with 2 px margins (fw 0.2.63): "RUN" in the 16 px font, "Stopped" in the 13 px
-  T_TRUE(ui_text_width(&font_3, ui_run_label[1]) <= UI_BAR_W - 4);
-  T_TRUE(ui_text_width(&font_2, ui_run_label[0]) <= UI_BAR_W - 4);
+  //RUN/STOP (fw 0.2.68): the action labels fit the 51 px button with 2 px margins in the 16 px font, the chip texts the
+  //38 px chip at 1.00o5's offsets; one view for both: running or a host acquisition is RUN, a UI single armed is WAIT
+  {
+    int r, w, h;
+
+    T_TRUE(ui_text_width(&font_3, ui_run_action[0]) <= UI_BAR_W - 4);
+    T_TRUE(ui_text_width(&font_3, ui_run_action[1]) <= UI_BAR_W - 4);
+    T_STR(ui_run_action[0], "RUN");
+    T_STR(ui_run_action[1], "STOP");
+    for(r = 0; r < 3; r++)
+      T_TRUE(ui_text_width(&font_3, ui_run_chip[r]) <= 38 - 2);
+    T_EQ((38 - ui_text_width(&font_3, ui_run_chip[UI_RUN_STOP])) / 2, 1);   //centred = 1.00o5's offsets 1, 5, 2
+    T_EQ((38 - ui_text_width(&font_3, ui_run_chip[UI_RUN_RUN])) / 2, 5);
+    T_EQ((38 - ui_text_width(&font_3, ui_run_chip[UI_RUN_WAIT])) / 2, 2);
+    for(r = 0; r < 2; r++)
+      for(w = 0; w < 2; w++)
+        for(h = 0; h < 2; h++)
+          T_EQ(ui_run_view(r, w, h), r ? (w ? UI_RUN_WAIT : UI_RUN_RUN) : (h ? UI_RUN_RUN : UI_RUN_STOP));
+    T_STR(ui_run_chip[UI_RUN_STOP], "STOP");
+    T_STR(ui_run_chip[UI_RUN_RUN], "RUN");
+    T_STR(ui_run_chip[UI_RUN_WAIT], "WAIT");
+  }
+
+  //Screen brightness (fw 0.2.68): the sun goes to 100 % and back to where it came from; a value set at 100 by the slider
+  //goes back to the remembered one (or the default); the sector byte round-trips; 1.00o5's flag migrates
+  {
+    uint8  cur, back = 0, v;
+    uint16 b;
+
+    for(v = 0; v < 100; v++)
+    {
+      back = 77;
+      cur  = ui_bright_sun(v, &back);
+      T_EQ(cur, 100);
+      T_EQ(back, v);
+      T_EQ(ui_bright_sun(cur, &back), v);
+    }
+    back = 100;
+    T_EQ(ui_bright_sun(100, &back), UI_BRIGHT_DEFAULT);
+    back = 35;
+    T_EQ(ui_bright_sun(100, &back), 35);
+
+    for(v = 0; v <= 100; v++)
+    {
+      b = ui_bright_byte(v);
+      T_TRUE(b & UI_BRIGHT_SECTOR_NEW);
+      cur = 60;
+      ui_bright_load(b, &cur, &back);
+      T_EQ(cur, 60);
+      T_EQ(back, (v < 100) ? v : UI_BRIGHT_DEFAULT);
+    }
+
+    cur = 40;  ui_bright_load(1, &cur, &back);  T_EQ(cur, 100);  T_EQ(back, 40);      //1.00o5 max light on
+    cur = 40;  ui_bright_load(0, &cur, &back);  T_EQ(cur, 40);   T_EQ(back, 40);      //off
+    cur = 100; ui_bright_load(1, &cur, &back);  T_EQ(cur, 100);  T_EQ(back, UI_BRIGHT_DEFAULT);
+    cur = 250; ui_bright_load(0, &cur, &back);  T_EQ(cur, UI_BRIGHT_DEFAULT);
+  }
 
   //ACQ menu pass time (fw 0.2.63): inside the Memory column right of its rule at x 304 and left of the menu's edge at
   //380, below the rule at y 211 and above the bottom edge (386 - 8); the label and the widest value fit its width

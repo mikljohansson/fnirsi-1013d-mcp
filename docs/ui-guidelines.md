@@ -8,7 +8,7 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
 
 ## 1. Vocabulary
 
-- **Mode**: changes what is measured and which controls exist. Scope, Spectrum analyser, Bode plot (when it ships).
+- **Mode**: changes what is measured and which controls exist. Scope, Spectrum analyser, Bode plot (fw 0.2.68).
   Modes exclude each other and are chosen from the main menu, which is the only way between them.
 - **Variant**: changes how the same measurement is shown. Scope: Normal, Phosphor, X-Y. Spectrum: Spectrum,
   Waterfall, Density. Variants live in the mode's Display control, never in the main menu.
@@ -19,8 +19,10 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
 
 ## 2. Where things live
 
-- **Main menu** (left column): modes first, utilities below, the row that takes the scope off-line (USB drive) last.
-  No marker for the current mode: the screen shows it. No greyed rows for features that do not exist yet.
+- **Main menu** (left column): modes first (Scope, Spectrum analyser, Bode plot), utilities below (Saved pictures, Saved
+  waveforms, Settings, Diagnostics), the row that takes the scope off-line (USB drive) last; eight rows at 52 px (fw
+  0.2.68). No marker for the current mode: the screen shows it. No greyed rows for features that do not exist yet (the
+  Bode row is grey only where the hardware cannot run it: no filter / DDS bitstream, or in a viewer).
 - **Top bar**: hardware state and global tools, identical in every mode: Menu, CH1, CH2, brightness, ACQ, Move fast,
   Trigger, Generator, battery, MCP chip. No version string (Diagnostics has it). Where a mode drives one of these
   itself (the spectrum's Span sets the time base), the button shows the value and its menu says so instead of fighting
@@ -63,7 +65,9 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   into the neighbouring block. Everything drawn as a handle (the channel and reference pointers at the left edge, the trigger pointers, the cursors) is draggable from the handle itself; grabbing the trace is the secondary way (owner, 2026-10-19).
 - **Dialogs**: a title, one instruction, a progress or result line, two buttons. Primary or confirming action on the
   right, dismissing one on the left. Red only for destructive actions (Clear calibration); everything else green or
-  blue. A destructive action always confirms with a sentence that states the consequence. A modal dialog owns the
+  blue. **Owner exception (2026-10-19, fw 0.2.68): the RUN/STOP button** shows the action a tap does, as on bench
+  scopes: green "RUN" while stopped, red "STOP" while running or waiting. The top bar chip beside the trigger shows the
+  state (STOP / RUN / WAIT); both follow one run state, whoever changed it (the screen, a single shot, the host). A destructive action always confirms with a sentence that states the consequence. A modal dialog owns the
   screen: taps outside it do nothing, only its buttons leave it.
 - **Look**: the stock palette and shapes (black ground, dark blue buttons, pale yellow active, channel colours). The
   makeover reorganises; it does not restyle.

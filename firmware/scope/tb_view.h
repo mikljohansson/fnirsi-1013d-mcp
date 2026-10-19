@@ -49,6 +49,21 @@ void tbv_pos_limits(uint32 fs, uint32 fpd, uint32 total, uint32 trig, int32 *lo,
 //pos limited to tbv_pos_limits
 int32 tbv_clamp_pos(int32 pos, uint32 fs, uint32 fpd, uint32 total, uint32 trig);
 
+//The time/div index and trigger point column that a time/div change writes (fw 0.2.68). A manual set (the ACQ menu's
+//box) and the snap after a rate, memory or Filter change go through tbv_set, so both leave the same state.
+typedef struct
+{
+  int32 tpd;                             //time/div index into fpd[]
+  int32 pos;                             //trigger point column (scopesettings.triggerhorizontalposition)
+} tbv_tb;
+
+//Time/div index t chosen: the trigger point kept inside the record
+void tbv_set(tbv_tb *s, int32 t, uint32 fs, const uint32 *fpd, uint32 total, uint32 trig);
+
+//The snap: when s->tpd is not viable, tbv_set with the nearest viable index of fpd[first..last] and return 1;
+//otherwise (or with none viable) only the trigger point is kept inside the record, return 0
+int tbv_fit(tbv_tb *s, uint32 fs, const uint32 *fpd, int32 first, int32 last, uint32 total, uint32 trig);
+
 //The drawn window for trigger sample `trig` and trigger point `pos`: the first sample shown (kept inside the record)
 //and the end column (exclusive; TBV_X_END unless the record ends inside the trace area)
 void tbv_window(int32 trig, int32 pos, uint32 fs, uint32 fpd, uint32 total, int32 *first, int32 *xend);
