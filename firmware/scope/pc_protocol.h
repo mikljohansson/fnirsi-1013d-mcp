@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            15    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            16    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -30,6 +30,8 @@
                                         //1.14: USB suspend watch, link counters 60-61, event type 20 (fw 0.2.49)
                                         //1.15: calibration v4 tracking (A - B, full-class common mode), GET_CAL 288
                                         //      bytes (fw 0.2.50)
+                                        //1.16: diagnostics readers: GET_HEALTH, card image identity, calibration
+                                        //      provenance, SAVE_REPORT (fw 0.2.52)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
@@ -63,6 +65,7 @@
 #define PC_CMD_GET_LINK_STATS     0x0007     //1.2: link counters (firmware 0.1.4)
 #define PC_CMD_GET_BAD_FRAME      0x0008     //1.2: last request that failed its payload CRC, as received
 #define PC_CMD_GET_EVENT_LOG      0x0009     //1.5: the last 64 USB / link events with timestamps
+#define PC_CMD_GET_HEALTH         0x000A     //1.16: USB state, CP15, unit life, settings save state, stored restart
 #define PC_CMD_GET_CHANNEL        0x0100
 #define PC_CMD_SET_CHANNEL        0x0101
 #define PC_CMD_GET_TIMEBASE       0x0102
@@ -86,6 +89,7 @@
 #define PC_CMD_SD_READ_SECTORS    0x0501     //1.3: up to 128 sectors
 #define PC_CMD_SD_STAGE           0x0502     //1.3: bytes into the 64 KiB write staging buffer
 #define PC_CMD_SD_WRITE_SECTORS   0x0503     //1.3: staged sectors to the card, read back and verified
+#define PC_CMD_SAVE_REPORT        0x0504     //1.16: diagnostics report text file on the card
 #define PC_CMD_GET_GEN            0x0300
 #define PC_CMD_SET_GEN            0x0301
 #define PC_CMD_GET_CAL            0x0400

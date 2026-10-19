@@ -44,6 +44,10 @@ SCALING_CAVEAT = ("Absolute volts use the per-unit calibration when one covers t
                   "with a known DC voltage fixes the zero per range and ADC core.")
 
 
+#: protocol 1.15: the oldest GET_CAL a conversion uses (the v4 tracker's values move with the full-rate cores)
+CAL_TRACK_AGE_S = 1.0
+
+
 def channel_index(ch: str | int) -> int:
     if isinstance(ch, int):
         if ch in (0, 1):
@@ -263,6 +267,7 @@ class Scope:
         self._info: P.InfoResp | None = None
         self._chan: dict[int, P.ChannelConfig] = {}
         self._cal: dict[int, P.CalResp] = {}
+        self._cal_t: dict[int, float] = {}
         self._tb: P.Timebase | None = None
         self._trig: P.Trigger | None = None
         #: legacy (no SHARED_MODE) only: REMOTE held by this client
@@ -606,7 +611,8 @@ class Scope:
         current time base and filter), else the per-unit calibration when it covers the range, else the firmware's
         uv_per_lsb / zero_code."""
         c = channel_index(ch)
-        cal = self.get_cal(c)
+        # 1.15: the scope keeps tracking the full-rate cores; conversions use GET_CAL at most CAL_TRACK_AGE_S old
+        cal = self.get_cal(c, max_age=CAL_TRACK_AGE_S if self.info.proto_minor >= 15 else None)
         if clock_class is None:
             clock_class = self.current_clock_class() if cal.v3 else P.CAL_CLASS_GATED
         return channel_scale(c, cfg or self.get_channel(c), cal, self.unit_cal, clock_class)
@@ -616,10 +622,13 @@ class Scope:
         dec = self.get_decim().next.k if self.info.caps & P.Caps.DECIM else 0
         return P.cal_clock_class(self.get_timebase().divider, dec > 0)
 
-    def get_cal(self, ch: int | str, cached: bool = True) -> P.CalResp:
+    def get_cal(self, ch: int | str, cached: bool = True, max_age: float | None = None) -> P.CalResp:
+        """GET_CAL, cached; ``max_age`` (s): re-read when the cached answer is older (the v4 tracker moves)."""
         c = channel_index(ch)
-        if not cached or c not in self._cal:
+        now = time.monotonic()
+        if not cached or c not in self._cal or (max_age is not None and now - self._cal_t.get(c, 0.0) > max_age):
             self._cal[c] = P.CalResp.unpack(self._req(P.Cmd.GET_CAL, bytes((c,))))
+            self._cal_t[c] = now
         return self._cal[c]
 
     # --- generator ---------------------------------------------------------------------------------------

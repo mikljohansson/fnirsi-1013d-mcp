@@ -31,7 +31,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.55 - 2026-10-19 (protocol 1.15, unchanged; provisional number, the coordinator renumbers at merge)
+#### 0.2.55 - 2026-10-19 (protocol 1.16, unchanged; provisional number, the coordinator renumbers at merge)
 
 Step 3 of the UX makeover (`docs/plans/ux-makeover.md` section 5; README section 5 "Settings").
 
@@ -50,6 +50,44 @@ Step 3 of the UX makeover (`docs/plans/ux-makeover.md` section 5; README section
   and keeps USB in CDC mode (66a3a70).
 - Changed: "Confirm to delete?" became the confirmation dialog: "Delete from the SD card?", Cancel left and Delete
   right in red, 160 x 44 px buttons 16 px apart (was NO / YES, 74 x 50 px, 11 px apart) (24743a7).
+
+#### 0.2.54 - 2026-10-19 (protocol 1.16, unchanged; provisional number)
+
+Touch fix batch 1 (`docs/plans/touch-review.md` section c1; defects 1, 3, 4, 5, 8, 9, 10 and part of 19).
+
+- Fixed: the CH1, CH2 and reference pointers at the left edge of the plot are drag handles. A drag that starts within
+  a 44 px box around a pointer (x 0..43) moves it; the nearest switched-on pointer wins, a tie goes to the one drawn on
+  top (CH1, CH2, ref1..ref8 draw in that order). A tap on a pointer does nothing (it used to change the time base).
+  Pointers pinned at the top or bottom edge are grabbed where they are drawn (4bec0ff; geometry host-tested in
+  test_touch_pick, 4a3753b).
+- Fixed: the zero-line grab on the plot picks the nearest enabled channel (a disabled CH2 no longer blocks CH1; a tie
+  goes to CH2), reads the touch-down point rather than the point after the first move, and no longer shifts the
+  trigger point with the x component of a channel drag (4bec0ff).
+- Fixed: dragging a channel moves the trigger level on it by the same amount, limited so both stay on the grid: the
+  level keeps its voltage when the trace hits an edge. With the EXT trigger source the level no longer follows CH2
+  (ca7372a).
+- Fixed: the new auto setup with Invert on could put a trace position outside the grid (a wrapped subtraction or an
+  unlimited addition) and loaded settings were not range-checked; both are limited to the drag range 6..396 now, so a
+  channel can always be grabbed and the first drag no longer jumps (d94f09a).
+
+#### 0.2.52 - 2026-10-19 (protocol 1.16, docs/protocol.md section 14 row 55)
+
+- Added: GET_HEALTH (0x000A, answered in every context, also while a menu is open) reports the USB link state now
+  (configured, suspended, not configured = no PC, high speed, port open), the CP15 control word (MMU and caches), the
+  power-on count and operating time, how the previous power-on ended (settings saved at power-off or not), whether
+  the settings changed since the last save, and a stored restart record (b830434).
+- Added: the restart record (exception, PC, fault registers) is copied into the settings sector at the boot after a
+  crash restart, so it survives a power cycle until it is cleared (GET_HEALTH flag 0x01) (b830434).
+- Added: power-on count and operating minutes in spare settings words 224..255; the firmware writes sector 709 once
+  per boot to keep them and the restart record (b830434).
+- Added: every image carries an identity record at its end; SD_INFO flag 0x02 reads the version, git hash and commit
+  time of the image the card boots (also for 0.2.47-0.2.51, and the version alone for older images) (b830434).
+- Added: calibration provenance (firmware, FPGA word, uptime, power-on count and operating minutes at calibration;
+  DS3231 time when fitted) after the calibration block in sector 708; GET_CAL is 356 bytes (b830434).
+- Added: SAVE_REPORT (0x0504) writes `reports/report-<power-on>-<n>.txt` to the card with identity, counters, the
+  decoded event log, the restart records and the calibration in words; the Diagnostics "Save report" button will
+  call the same function (b830434).
+- Added: PC_DEBUG builds restart from RAM on GET_HEALTH flag 0x80, to bench the stored restart record (c8f874b).
 
 #### 0.2.51 - 2026-10-19 (protocol 1.15, unchanged)
 
@@ -684,6 +722,10 @@ was found (commit not identified).
   markers and Q, quality flags, background floor, CH2 auto-ranging with the splice, thru calibration, CSV / JSON /
   NPZ. Planner, DFT and markers in f0940ee (plan vectors docs/bode-plan-vectors.json), runner and CLI in 363f676,
   the tool in d3a16bb. The simulator has an RC / series RLC DUT on the generator (1d46cf8). Not benched yet.
+- Added: protocol 1.15 calibration v4 (fw 0.2.50, 5f6bc0d). GET_CAL parses 288 bytes; the volts model takes the
+  tracked full-rate A - B (d, e) and common mode (cm) out of READ_RAW and 16-bit samples as the scope does in its own
+  readouts, re-reading GET_CAL at most a second old; `scope_calibration_info` shows the tracker and the class probe in
+  words (tracking / frozen / idle, age, d, e, q, cm). The simulator models the drift (`SimConfig.v4`).
 
 ### Tooling, FPGA and documentation
 

@@ -1,9 +1,12 @@
 # firmware/ handoff for agents
 
-**Branch fw-ui1 (2026-10-19): fw 0.2.51, protocol 1.15 unchanged: UX makeover step 1 (main menu, USB drive screen, top
-bar, Display row, strips, measurement cards), section 29.** **Current state (coordinator merge, 2026-10-19): latest build fw 0.2.50, protocol 1.15** (fw-cal3's calibration wizard, interleave
+**Current state (coordinator merge, 2026-10-19 13:50): latest build fw 0.2.52, protocol 1.16** = main with fw-ui1 (UX makeover
+step 1: main menu, USB drive screen, top bar, Display row, strips, measurement cards; section 29) and fw-readers (diagnostics
+readers: GET_HEALTH, card image identity, calibration provenance, unit life record, SAVE_REPORT; section 30) merged. Running in
+parallel: fw-ui2 (step 2), fw-ui3 (step 3), fw-touch1, fw-seg (0x1536, protocol 1.17). 
+**Previous state (coordinator merge, 2026-10-19): latest build fw 0.2.50, protocol 1.15** (fw-cal3's calibration wizard, interleave
 tracking and class probe, **section 28**, merged on fw-usb2's 0.2.49 USB suspend watch, **section 27**; the merge renumbered fw-cal3's
-protocol change from 1.14 / row 53 to 1.15 / row 54 because fw-usb2 took 1.14 / row 53) on fw-mmu's 0.2.48 (MMU + D-cache, section 26).
+protocol change from 1.14 / row 53 to 1.15 / row 54 because fw-usb2 took 1.14 / row 53) on fw-mmu's 0.2.48 (MMU + D-cache, section 26) on fw-gen7's 0.2.47 (dead-code purge,
 reproducible images, 16-bit trigger level fix; protocol 1.13 unchanged) on 0.2.46 (protocol 1.13: digital phosphor view,
 section 24) on fw-cal2's 0.2.45 (protocol 1.12: calibration data v3, a gain per ADC core and clock class from a gain step at the
 calibration post, **section 23**) on fw-gen6's 0.2.44 (protocol 1.11: FPGA 0x1535 FIR support, spectrum strip repaint fix,
@@ -245,8 +248,10 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.46 | 1b6359f | cdba5b51 | digital phosphor view (main menu row 7; Persistence / Palette / Clear strip; XY), GET_STATUS byte 43 = 4 (protocol 1.13, row 52), settings word 210 (fw-phosphor, section 24) | built, host-tested (test_phosphor 95 checks); bench steps in section 24 |
 | 0.2.48 | b1922c3 | 2f768fd9 | MMU + D-cache on (flat map, DDR / SRAM write-back, framebuffer write-through, restart record and peripherals strongly ordered), clean + off at _reset and ENTER_FEL, GET_LINK_STATS 58-59 fault status / address (fw-mmu, section 26) | built, host-tested (test_mmu); A/B image `make gcc10-nommu` 0.2.48-nommu sha256 45e03f7f; bench sequence in section 26 |
 | 0.2.49 | c477faa | 90f460d6 | USB suspend watch in the 1 ms tick (pc_usbw.c): inferred resume (SOFs, EP0 setup, EP2 OUT while suspended) acts, soft reconnect (SoftConn off 1 s) after a retry storm or 15 min suspended, GET_LINK_STATS 60-61, event type 20, SUSPEND before RESUME in the ISR (protocol 1.14, row 53; fw-usb2, section 27) | built, host-tested (test_usbw 90 checks); A/B `make gcc10-nommu` sha256 f5f377ea; bench plan in section 27 |
+| 0.2.54 | f9fcac6 | a4f0c832 | touch fix batch 1 (fw-touch1, section 32; provisional number): left pointers are drag handles (`touch_pick.c`, 44 px boxes, nearest / on-top pick), pick at touch-down, nearest enabled zero line, no trigger-point move in a channel drag, channel + trigger level share one clamped delta, EXT no longer follows CH2, traceposition 6..396 in the new auto setup and at load |
 | 0.2.51 | 8f5bf16 | 38580def | UX makeover step 1 (fw-ui1, section 29): main menu Scope / Spectrum analyser / Saved pictures / Saved waveforms / Settings / Diagnostics / USB drive with one 59 px hit area per row, Spectrum in roll mode switches Roll off; USB drive screen text + Exit; no top-bar version; Display row Normal / Phosphor / X-Y in the acquisition menu (X-Y out of System settings); strips without Scope / Auto, AUTO SET = spectrum Auto; phosphor warnings top-middle; cards with chip, scope-maker names, 4 significant digits, defaults Freq / Vpp / Vavg | built, host-tested (test_ui 1513 checks); bench walk-through in section 29 |
 | 0.2.50 | e871c50 | 1b55efc2 | calibration wizard (one modal three-step flow, 48e5737) and calibration v4: A - B interleave tracker applied in the full class, full-class common-mode class probe, GET_CAL 288 bytes, diagnostics lines (protocol 1.14, row 53; fw-cal3, section 28) | built, host-tested; bench lists README 6.4 and 6.5 |
+| 0.2.52 | c8f874b | e0968392 | diagnostics readers (fw-readers, section 30): GET_HEALTH 0x000A (USB state, CP15, power-on count, operating minutes, settings save state, stored restart record), unit life record in settings words 224..255 with one sector-709 write per boot, image identity record + SD_INFO IDENT (112 bytes), calibration provenance in sector 708 432..487 + GET_CAL 356 bytes, SAVE_REPORT 0x0504 (protocol 1.16, row 55) | built, host-tested (test_diag 462 checks); bench list in section 30 |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -1432,3 +1437,165 @@ Points for a successor:
 Bug indicators: a main-menu tap opening the neighbouring row; the ACQ menu's Display row not reacting or the Trace
 boxes reacting to it; AUTO SET stuck on "Auto..."; a card value running past the card edge; the System settings
 fold-out leaving a stripe of the old X-Y row; roll mode back on after Scope.
+## 30. fw-readers: diagnostics readers (fw 0.2.52, protocol 1.16, row 55)
+
+Branch `fw-readers` from main d8d5a62 (0.2.50): 8614032 (protocol row 55, spec first), b830434 (code, host tests,
+vectors), c8f874b (PC_DEBUG restart test, GET_HEALTH flag 0x80), then docs and this handoff. Image from c8f874b (GCC 10):
+`firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 528,896 B, sha256
+e09683929d643f850012f3dbd354fd9ab04aea7ab17796dc824a56c5e5382851 (identity c8f874b; a build of a later commit
+differs only in the identity record). PC_DEBUG image (`build-dbg`, for bench check 3) sha256
+fdc3b1b99ebe8ea16d0c82ca8cc812c9739f7ec3003444a3767835f46616d72b. Not pinned in backups/. **Nothing benched.** Host tests all
+green (test_diag 462, test_session 69009 / 69007, check_vectors incl. `diag_layouts`); warnings GCC 10 36, GCC 13 31,
+PC_DEBUG 31 (counts as on 0.2.50, none in the new files). Images: GCC 10 +24.5 KB over 0.2.50 (pc_report.c is built
+`#pragma GCC optimize ("Os")`: at -O3 the inlined text helpers made it 120 KB).
+
+**Files.** `pc_life.c/.h` (pure: settings words 224..255 pack/unpack, boot logic, 1.00o5 checksum), `pc_ident.c/.h`
+(identity record type, card reader with cache, legacy tail, `#VER` text scanner; host-buildable through pc_hal_sd_read),
+`pc_report.c/.h` (text builder, the report from the protocol bodies; host-buildable), `pc_diag.c` (target: life state,
+boot write, dirty check, provenance stamping, CP15, FatFs report file, `pc_glue_*` entry points), `adc_cal.c/.h`
+(`acal_prov` pack/unpack/what), `build_id.c` (one object `pc_image_ident`; `pc_fw_build` / `pc_build_time` are now
+macros in pc_cmds.h), pc_transport.c (`pc_hal_usb_state`), pc_cmds.c (GET_HEALTH, SD_INFO 112, GET_CAL 356, SAVE_REPORT;
+`pc_link_counters`, `pc_health_body`, `pc_cal_body`, `pc_sd_info_body` exported). Hooks (pc_hooks.h): PC_SETTINGS_STORE
+and PC_SETTINGS_SAVED in scope_functions.c's settings save, PC_CAL_LOADED / PC_CAL_SAVE in the sector 708 load / save,
+PC_POWER_OFF now `pc_glue_power_off`. pc_hal_scope.c: `pc_diag_boot` after `pc_restart_check` in `pc_glue_init`,
+`pc_diag_service` in `pc_glue_ui_service`, accessors `pc_glue_session`, `pc_glue_rtc_present`.
+
+**Decisions.**
+- One new command for the live state (GET_HEALTH, 96 bytes, F_BUSY: works while Diagnostics is modal) instead of slots
+  spread over GET_INFO / GET_STATUS / GET_LINK_STATS; GET_LINK_STATS stays n = 62.
+- Provenance is a separate trailer after the v3 block, not a v3 -> v4 block bump: 0.2.45-0.2.51 keep reading the card
+  (a bump would have made the owner's fallback images uncalibrated). Stamped by comparing the block on save with the
+  one loaded / last saved (`acal_prov_what`), so cal_wiz_ui.c needed no change and a DC-shift trim or volts calibration
+  keeps the provenance. Per block, not per channel; `what` says which parts the last calibration wrote.
+- Power-on count = cold boots (power-on or FEL load); a warm restart is the same power-on. Operating minutes = stored
+  base + uptime; minutes since the last save are lost when a power-on ends without one (crash, flat battery).
+- The boot write of sector 709 (only when it loaded valid) makes the count, the session-open flag and the restart
+  record survive a crash plus power cycle. One extra SD write per boot; the 1.00o5 words are written exactly as loaded.
+- "Changed since the last save" rebuilds the buffer as the save would (`scope_save_config_data`, harmless: the
+  power-off save does the same first) once per second in the main loop and compares a CRC of words 2..223 with the
+  last load / save. Stale while a menu is modal (byte 40 gives the age).
+- Card identity: fw 0.2.52+ ends with a 36-byte record (magic 'FWID' '1013'); 0.2.47-0.2.51 end with GCC 10's
+  time[6], pad[2], build (verified on the 0.2.48, 0.2.49, 0.2.50 and 0.2.50-nommu backups with `test_diag --image`);
+  older images only by the `#OK,FNIRSI-1013D-AI,fw=` text (0.2.11, 0.2.25, 0.2.46 checked). Full scan costs one read
+  of the image (as VERIFY); cached until SD_WRITE_SECTORS reaches sector 750.
+- USB "disconnected": VBUS is forced valid (ISCR), so a pulled cable is indistinguishable from a suspend once
+  configured; state 2 "not configured" is the defined no-PC state.
+
+**For the UI agent (Diagnostics pages, later generation).** `const pc_card_id *pc_glue_card_ident(void)` (pc_ident.h;
+first call reads the card, MAIN context), `int pc_glue_save_report(char *name, uint32 name_max)` (0 or FRESULT, MAIN),
+`void pc_glue_health(uint8 *body96)` (the GET_HEALTH body; decode per row 55), `pc_cal_body(ch, buf356)` for the
+calibration page incl. provenance. Firmware tile: `pc_image_ident` (running) vs `pc_glue_card_ident()` (`same`).
+
+**Not done / notes for the next agent.**
+- Post-based calibration check (diagnostics-review section 4 item 7): not built. fw-cal3's class probe covers the
+  full-vs-gated common mode only; a check at the post (both levels, both classes, A - B residual and gain agreement
+  against the provisional limits of review finding 6) needs the generator and its own modal step.
+- "Undo last calibration" storage: sector 711 is, by inference, unused by the Atlan boot chain (README section 3 lists
+  708-710 and 750; the updater's update.h defines 16, 80, 708-710, 750); verify against the updater 0.02v binary and
+  the v0.8 bootloader before writing there. The 708 provenance trailer leaves 488..511 free (24 bytes).
+- FPGA build identity: the fpga agent's (0x2A+ taken by segmented capture on 0x1536).
+- mcp: parse GET_HEALTH, SD_INFO 64..111 (+ flag 0x02), GET_CAL 288..355, SAVE_REPORT; MCP tool returning the report
+  as JSON (review finding 8).
+
+**Bench checks** (coordinator + owner; FEL load, the card keeps 0.2.25)
+1. Load, `#VER fw=0.2.52,proto=1.16`. GET_HEALTH: byte 4 = 3 (configured), byte 5 bit 0 = 1 (high speed), bit 3 = 1
+   with the port open; 16 = 0x0005107D; 32 bit 3 (709 valid) and bit 1 (boot write ok); 20 power_on = 1 on the first
+   boot with 0.2.52 (no life record yet), 33 last_end = 0. SD_INFO flags 0x02: 64 = 3, version "0.2.25", proto 1.5,
+   build 0, 65 = 0, 100 = scan ms (expect well under 1 s). The card is untouched except sector 709 (boot write).
+2. Settings: GET_HEALTH 34 bit 0 = 0; change V/div on the scope; within ~1 s bit 0 = 1. Power off with the button and
+   on again (the card boots 0.2.25, which keeps words 224..255), FEL-load 0.2.52 again: power_on = 2, 33 = 1 (saved at
+   power-off). Pull no battery for this. With 0.2.25 in between, 0.2.25's own power-off save also keeps the record.
+3. Forced restart: load the PC_DEBUG image (`make PC_DEBUG=1 BUILD=build-dbg`, #VER 0.2.52, caps DEBUG_RAW) and send
+   GET_HEALTH with flag 0x80: after the answer it jumps to the image entry (type 0 restart). After the reboot (about
+   2 s, USB re-enumerates): GET_LINK_STATS 49 = 1, 50 = 0; GET_HEALTH 44 = 3 (stored, this power-on), 45 = 0, 46 = 1,
+   64 = the LR at entry (in `pc_hal_restart_test`'s caller chain, map with the ELF), power_on unchanged, 33 = 2.
+   Power off with the button, on, FEL-load 0.2.52 again: 44 = 1 (earlier power-on), 48 = the old power_on. Clear with
+   GET_HEALTH flag 0x01, power off/on (or any save): 44 = 0. ENTER_FEL is not a restart (it clears the DDR record).
+4. Calibration: run the wizard (Done). GET_CAL 288 = 1, 292..347: 'APRV', build b8304340 (or the loaded build), FPGA
+   word, what = 0x0F after zeros + both gains, uptime_ms at Done, power_on; 348 = 0 and 352 = 0 right after. A
+   DC-shift "End" keeps the same trailer; `fnirsi1013d-sd read 708 1` shows it at 432..487.
+5. SAVE_REPORT: answer `reports/report-0000N-00.txt`; open the file on a PC (card in a reader, or USB drive mode):
+   identity lines, "Card image (sector 750): 0.2.25 ...", counters, event log in words, calibration in words.
+6. Regression: `fnirsi1013d-bench` and the soak as on 0.2.50; pass_ms unchanged (the 1 Hz dirty check rebuilds 256
+   words).
+
+
+
+## 32. fw-touch1: touch fix batch 1 (fw 0.2.54 provisional, protocol 1.16 unchanged)
+
+Branch from main 9cc599c (fw 0.2.51). Spec: `docs/plans/touch-review.md` sections (b) and (c1); rule
+`docs/ui-guidelines.md` section 3 "Touch" (handles drawn on screen are draggable). Commits: 4a3753b (`touch_pick.c/.h`,
+`host_tests/test_touch_pick.c`, both Makefiles), 4bec0ff (drawing through `scope_pointer_top`, `scan_for_touch`
+handles and pick), ca7372a (`touch_handler` shared delta, `triggerchannel == 1`), d94f09a (traceposition clamps),
+f9fcac6 (0.2.54, CHANGELOG, README section 5 "Touch on the scope plot"), then this handoff. Image from f9fcac6:
+`firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 504,832 B, sha256
+a4f0c832079364cc2d5f91f04dfd6546b816f0a8ff336138884b7c75e0f72347, ELF
+52f9cf983405116adadb4500e55b228655a87f6267ff6f858acdf1c1c4a27a94 (nommu bin eefe9a4e...). **Nothing benched.** Host
+tests green (test_touch_pick 538 checks, the rest unchanged). GCC 10 warnings 36, line-number-free list identical to
+9cc599c; the new files are clean with the host tests' -Wall -Wextra -Werror. No settings words, no protocol change.
+
+What changed, by defect number of the review:
+- **1, 12 (refs)**: `scan_left_handle()` (statemachine.c, above `scan_for_touch`) builds the ten pointers (CH1, CH2,
+  ref1..ref8, draw order of `scope_draw_pointers`) and calls the pure `pick_left_handle()`: x 0..43 (`HANDLE_W`), rows
+  tip - 22 .. tip + 21 with tip = `scope_pointer_top(position) + POINTER_TIP_DY` (the clamped drawn top + 6), nearest
+  switched-on pointer, `<=` so a tie goes to the later-drawn one. Normal display only (`xymodedisplay == 0`). It runs at
+  the touch-down point, before the blocking loop; a lift without displacement on a handle returns without the tap
+  action; a drag sets `touchstate` to the handle's state alone. The old x < 60 ref block is deleted; the
+  `distance_ch_ref_*` globals in variables.c are now unused (left in place to keep the merge with fw-ui2/fw-ui3 small).
+- **Drawing**: CH1 / CH2 / ref / trigger level pointers use `scope_pointer_top()` (touch_pick.c) instead of eleven copies
+  of the 49..442 clamp. The X-Y CH1 top pointer and the H marker are unchanged.
+- **3, 4 (hit maths)**: the zero-line grab calls `pick_channel_line()` (int32, zero row `448 - position`, radius
+  `CHANNEL_GRAB_RADIUS` 30 as 1.00o5, only enabled channels, tie to CH2). Its x range starts at `HANDLE_W` (was > 60);
+  with volt cursors on it still skips x 310..410 (batch 2).
+- **5**: every pick in the plot branch (channels, trigger level, time and volt cursors) reads `previousxtouch` /
+  `previousytouch`. The drag maths still measure from that point, so nothing else moved.
+- **8**: channel grabs no longer carry `TOUCH_STATE_MOVE_TRIGGER_POINT`; the fallback (no object) still pans the
+  trigger point.
+- **9, 10**: `touch_handler` computes `touch_drag_delta()` once (Move slow /5, same truncation as before) and, when the
+  level follows the channel (`triggerchannel == 0` for CH1, `== 1` for CH2; 2 = EXT never follows), limits it with
+  `touch_shared_delta()` (both starts clamped first, so the limits never cross). `change_channel_1_offset`,
+  `change_channel_2_offset`, `change_trigger_level_offset` now take the delta (statemachine.h); X-Y passes x for CH1 and
+  y for CH2 as before. The snapshot at grab time also tests `== 1` for CH2.
+- **4, 19 (writers)**: `scope_do_auto_setup_new` computes the DC adjustment in int32 (`position`) and stores
+  `scope_trace_clamp(position)`; `dcoffset` follows from the clamped value as before. `scope_restore_config_data` and
+  `scope_restore_setup_from_file` clamp CH1 / CH2 `traceposition`. Not done (not in c1): `scope_do_auto_setup_old`
+  still writes 0 / 399, and the new auto setup's two-channel spread (+100 / -100 after the DC block) can leave 398 or
+  1..5; both are grabbable now (the pick uses the clamped drawn position) and jump into range on the first drag step.
+- Left for batch 2 / 3 as briefed: trace-body grab and radius 40, 8 px dead band, tap zones (the owner keeps the hidden
+  V/div bands), hidden objects (the trigger level hit while its pointer is hidden, X-Y moving disabled channels),
+  locked cursors, the blocking loop, the second GT911 reader, long-mode presets per step, spectrum pan.
+- Merge note: fw-ui2 edits the right-bar handlers in statemachine.c and fw-ui3 the settings fold-out; this branch only
+  touches `touch_handler`, `scan_for_touch`'s plot branch, the three `change_*` functions, `scope_draw_pointers`, the new
+  auto setup's DC blocks and the two loaders. Both Makefiles gained one SRCS / test line each.
+
+**Bench walk-through (owner, coordinator on COM10)** - FEL-load the image, `#VER` fw=0.2.54 proto=1.16. Normal
+display, both channels on, CH1 trigger, Move fast (not slow) unless noted.
+1. Defect 1, pointer is not a handle. Old repro: drag the yellow "1" pointer up: nothing moved. Now: touch the "1"
+   pointer and drag up and down: CH1 follows the finger; the same for "2". A touch up to about 20 px above or below the
+   pointer, within the left 44 px, still grabs it.
+2. Defect 3, nearest enabled. Old repro: drag CH2 to about 10 px below CH1, switch CH2 off in its menu, touch 5-10 px
+   below CH1's line and drag: nothing moved. Now: CH1 moves (both from its pointer and from the line on the plot). With
+   CH2 on and parked exactly on CH1: the drag moves CH2 (drawn on top); move it away and CH1 is reachable again.
+3. Owner's report (CH2 at the bottom, CH1 only from its zero line): CH1 now drags from its pointer at any height; on the
+   plot the zero-line grab is unchanged (the trace body follows in batch 2).
+4. Defect 5, pick after the move. Old repro: a quick upward flick starting on a channel's zero line often moved the
+   trigger point. Now: the flick moves the channel.
+5. Defect 8, H marker shifts. Old repro: drag CH1 up with a diagonal stroke: the H marker moved. Now: the H marker
+   stays; a drag on empty plot still moves it horizontally.
+6. Defect 9, level drifts. Old repro: CH1 trigger, level about one division above the trace, drag CH1 to the top and
+   back: the level ended on the trace. Now: the drag stops when the level reaches the top, and back down the level is
+   still one division above the trace (same trigger voltage).
+7. Defect 10, EXT follows CH2 (bitstream 0x1533+). Old repro: trigger source EXT, drag CH2: the level moved. Now: it
+   stays. With source CH2 it follows as before.
+8. Defect 4, auto setup with Invert (needs a DC input). Old repro: Settings > new auto setup, CH1 Invert on, DC
+   coupling, a positive DC input, AUTO SET: the CH1 pointer sat at the top and could not be dragged. Now: the pointer
+   is inside the grid (position 6..396) and drags from the pointer and from its line. Also: a settings sector or a
+   saved waveform setup with an out-of-range position loads with the pointer on the grid.
+9. Taps. A brisk tap on a pointer changes nothing (it used to change the time base). Taps elsewhere keep the 1.00o5
+   zones: left / right half time/div, top / bottom bands V/div.
+10. References: Ref menu, show two references at different heights; each drags from its own pointer (the nearer one when
+   their boxes overlap, the later-numbered one when they coincide). Touches at x 44..60 no longer reach the refs.
+11. X-Y: any drag moves CH1 with x and CH2 with y, as before; the left column is not a handle column there.
+Bug indicators: a pointer drag moving a different pointer than the one under the finger; the trigger level moving
+with EXT; a tap on a pointer changing time/div or V/div; a channel stuck after AUTO SET with Invert; the level jumping
+at the first drag step.

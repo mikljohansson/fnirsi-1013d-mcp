@@ -42,7 +42,7 @@ def test_spec_example_frames(hexstr, frame):
     (P.ChannelConfig, 24), (P.SetChannelReq, 12), (P.Timebase, 16), (P.SetTimebaseReq, 8), (P.Trigger, 28),
     (P.SetTriggerReq, 24), (P.ReadRawReq, 16), (P.ReadRawHeader, 16), (P.ReadTraceReq, 12),
     (P.ReadTraceHeader, 32), (P.TraceChannelMeta, 16), (P.ReadLiveReq, 4), (P.AcquireAvgReq, 20),
-    (P.AcquireAvgHeader, 16), (P.Gen, 24), (P.SetGenReq, 20), (P.CalResp, 256), (P.ReadScreenReq, 4),
+    (P.AcquireAvgHeader, 16), (P.Gen, 24), (P.SetGenReq, 20), (P.CalResp, 288), (P.ReadScreenReq, 4),
     (P.ReadScreenHeader, 8), (P.SetAcqStateReq, 4), (P.CaptureInfoHeader, 36), (P.CaptureChannelInfo, 16)])
 def test_struct_sizes_match_spec(cls, size):
     assert cls.size() == size

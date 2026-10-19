@@ -62,7 +62,7 @@ across checkout paths (the 0.2.44 images in `docs/hardware-status.md`). The rele
 ## 2. Cutting a release
 
 The firmware and the mcp package share one version. The first tag is planned as v0.3.0
-(`CHANGELOG.md`, `docs/plans/roadmap.md` section 1).
+(`CHANGELOG.md`, `docs/plans/roadmap.md` section 5).
 
 1. Bump the version in two places:
    - `firmware/scope/pc_cmds.h`: both `PC_FW_VERSION` lines, `"X.Y.Z"` and `"X.Y.Z-m1"`.

@@ -690,3 +690,14 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 13:05 fw 0.2.50 (e54d29df, MMU) FEL-loaded: #VER fw=0.2.50 proto=1.15 fpga=0x1535; GET_CAL 288 bytes, version 3, flags 0x0F on both
   channels (the 08:15 v3 block is still read), tracker flags 0x00 (no full-rate records yet), pass_ms 15. Wizard walk-through with the
   owner next (README 6.4).
+
+- 2026-10-19 13:37: fw 0.2.51 (UI makeover step 1, merge 9cc599c) built with GCC 10, MMU image sha256 acf88fee1005c1c70ef5793293200eaa3b1e5b18d1ab3a7ea092e1818da83664,
+  nommu e011d59776ad1c0cc41c9b0be55e0be8668bd90dbbe916495868e2db99ee571a, pinned in backups/. Not loaded: the scope still runs 0.2.50 in RAM with
+  the two-hour idle USB soak on COM10 (ends about 15:12). Walk-through for the owner: firmware/AGENTS.md section 29.
+- 2026-10-19 13:50: fw 0.2.52 (diagnostics readers, merge 72eacb3) built with GCC 10, MMU image sha256
+  cd8bf6fc27d1d5cf9cdd733f9d2721b024d6a73b0004d393166965c5132d65ef, nommu 372267eb7917580ce0274f381bb02245b503c8ee1f6076dcdb108d2c4a752e5f,
+  pinned in backups/. Not loaded (soak still on COM10). Note for the owner before loading: from 0.2.52 the firmware writes SD sector 709
+  (settings) once at every boot when the sector loaded valid; SD sectors 700-710 are backed up (backups/), the stock boot chain is untouched.
+- 2026-10-19 13:55: fw 0.2.54 (touch fixes batch 1 on 0.2.52; merge of fw-touch1) built with GCC 10, MMU image sha256
+  05a126f77cfb8750958959e50132252b6abc94fe5ccaa3efb946467b914c6ba6, nommu 572784ed5b6160f599682576a0fd5f8f0d014013f3b68eadd49e498edc50a419,
+  pinned in backups/. This is the image to load for the next owner session (steps 1 + readers + touch handles). Not loaded.

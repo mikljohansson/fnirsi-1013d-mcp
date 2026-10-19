@@ -63,6 +63,7 @@ def main():
     ap.add_argument("--vectors", default=os.path.join(here, "..", "..", "..", "docs", "protocol-vectors.json"))
     ap.add_argument("--decim-checker", help="decim_check binary (pc_decim.c): cross-check the decim section")
     ap.add_argument("--adc-cal-checker", help="test_adc_cal binary (adc_cal.c): cross-check the adc_cal block")
+    ap.add_argument("--diag-checker", help="test_diag binary (pc_life.c, adc_cal.c, pc_ident.h): cross-check diag_layouts")
     args = ap.parse_args()
 
     with open(args.vectors) as fh:
@@ -170,6 +171,18 @@ def main():
             print("adc_cal_v3: sector block identical to acal_pack")
     elif args.adc_cal_checker:
         fail("adc_cal_v3 section missing")
+
+    # 7. diagnostics layouts (1.16): life record words, calibration provenance, image identity against the C packers
+    if args.diag_checker and "diag_layouts" in data:
+        out = subprocess.run([args.diag_checker, "--layouts"], capture_output=True, text=True, check=True).stdout
+        got = dict(ln.split() for ln in out.splitlines() if ln.strip())
+        for k in ("life", "prov", "ident"):
+            if got.get(k) != data["diag_layouts"][k]["hex"]:
+                fail(f"diag_layouts {k}: C packs {got.get(k)}, expected {data['diag_layouts'][k]['hex']}")
+            else:
+                print(f"diag_layouts {k}: identical to the C layout")
+    elif args.diag_checker:
+        fail("diag_layouts section missing")
 
     if fails:
         print(f"{fails} FAILURES")
