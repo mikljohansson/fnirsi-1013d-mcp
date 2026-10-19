@@ -1584,15 +1584,19 @@ int pc_glue_spectrum_display(void) { return spectrum_display(); }
 int pc_glue_spectrum_touch(void)   { return spectrum_touch() || phosphor_touch(); }
 int pc_glue_main_menu_height(void) { return spectrum_available() ? 410 : 292; }
 
+//With the two view rows on top (owner, 10-19) the five 1.00o5 rows sit two rows (118 px) lower
+int pc_glue_main_menu_dy(void)     { return spectrum_available() ? 118 : 0; }
+
 int  pc_glue_phosphor_on(void)          { return phosphor_owns_traces(); }
 void pc_glue_phosphor_draw(void)        { phosphor_draw(); }
 int  pc_glue_phosphor_xy(uint32 index)  { return phosphor_xy(index); }
 void pc_glue_phosphor_strip(void)       { phosphor_strip(); }
 
-//Rows 6 (y 343..400) and 7 (y 402..459)
+//The spectrum row (y 46..105) and the phosphor row (y 106..163) are the first two rows (fw 0.2.50); the 1.00o5 rows
+//follow at MAIN_MENU_DY, from y 164 on
 int pc_glue_main_menu_row6(uint32 y)
 {
-  return spectrum_available() && (y >= 343) && (y <= 459);
+  return spectrum_available() && (y >= 46) && (y <= 163);
 }
 
 //The row in the style of the other five: icon (spectrum bars), two text lines naming where a tap goes
@@ -1603,16 +1607,16 @@ static void pc_main_menu_spectrum_item(int mode)
   int    on = (spectrum_mode() != SPECTRUM_MODE_SCOPE);
 
   display_set_fg_color(mode ? 0x00CCCCCC : DARKGREY_COLOR);
-  display_fill_rounded_rect(9, 354, 131, 35, 3);
+  display_fill_rounded_rect(9, 59, 131, 35, 3);
 
   display_set_fg_color(mode ? BLACK_COLOR : WHITE_COLOR);
-  display_draw_horz_line(384, MAIN_MENU_XPOS + 15, MAIN_MENU_XPOS + 40);
+  display_draw_horz_line(89, MAIN_MENU_XPOS + 15, MAIN_MENU_XPOS + 40);
   for(i = 0; i < sizeof(bars); i++)
-    display_draw_vert_line(MAIN_MENU_XPOS + 16 + 2 * i, 383 - bars[i], 383);
+    display_draw_vert_line(MAIN_MENU_XPOS + 16 + 2 * i, 88 - bars[i], 88);
 
   display_set_font(&font_3);
-  display_text(60, 355, on ? (int8 *)"Scope" : (int8 *)"Spectrum");
-  display_text(60, 371, on ? (int8 *)"view" : (int8 *)"analyzer");
+  display_text(60, 60, on ? (int8 *)"Scope" : (int8 *)"Spectrum");
+  display_text(60, 76, on ? (int8 *)"view" : (int8 *)"analyzer");
 }
 
 //Row 7: icon (three square-wave edges in fading greys, like an intensity-graded trace)
@@ -1623,22 +1627,22 @@ static void pc_main_menu_phosphor_item(int mode)
   int    on = phosphor_mode();
 
   display_set_fg_color(mode ? 0x00CCCCCC : DARKGREY_COLOR);
-  display_fill_rounded_rect(9, 413, 131, 35, 3);
+  display_fill_rounded_rect(9, 116, 131, 35, 3);
 
   for(i = 0; i < 3; i++)
   {
     uint32 xe = x0 + 10 + 2 * i;
 
     display_set_fg_color(mode ? (i == 2 ? BLACK_COLOR : 0x00707070) : shade[i]);
-    display_draw_horz_line(441, x0, xe);
-    display_draw_vert_line(xe, 421, 441);
-    display_draw_horz_line(421, xe, x0 + 25);
+    display_draw_horz_line(144, x0, xe);
+    display_draw_vert_line(xe, 124, 144);
+    display_draw_horz_line(124, xe, x0 + 25);
   }
 
   display_set_fg_color(mode ? BLACK_COLOR : WHITE_COLOR);
   display_set_font(&font_3);
-  display_text(60, 414, on ? (int8 *)"Scope" : (int8 *)"Phosphor");
-  display_text(60, 430, on ? (int8 *)"view" : (int8 *)"display");
+  display_text(60, 117, on ? (int8 *)"Scope" : (int8 *)"Phosphor");
+  display_text(60, 133, on ? (int8 *)"view" : (int8 *)"display");
 }
 
 void pc_glue_main_menu_items(void)
@@ -1646,6 +1650,7 @@ void pc_glue_main_menu_items(void)
   if(!spectrum_available())
     return;
 
+  //Separators: 1.00o5 draws 104 / 163 / 222 / 281; with its rows moved down the full set is these plus 340 / 399
   display_set_fg_color(BLACK_COLOR);
   display_draw_horz_line(340, 9, 140);
   display_draw_horz_line(399, 9, 140);
@@ -1655,7 +1660,7 @@ void pc_glue_main_menu_items(void)
 
 void pc_glue_main_menu_touch(void)
 {
-  if(ytouch <= 400)
+  if(ytouch <= 105)
   {
     int on = (spectrum_mode() == SPECTRUM_MODE_SCOPE);
 

@@ -408,7 +408,7 @@ screen save/restore and the touch area. What depends on the running hardware is 
 | Filter selector (in 1.00o5's Long memory slot) | acquisition menu | bitstream without DECIM (all but AL3 0x1534+) | the decimation filter exists only in fpga/al3 0x1534 (fw 0.2.30, "Decimation filter" below) |
 | memory depth 9000, 12000, 15000 | acquisition menu | Filter on (0x1534+) | the 16-bit layout holds one sample per ring word: at most 8190 samples |
 | EXT trigger source | trigger menu | bitstream without EXT_TRIGGER (all but AL3 0x1533+) | the input exists only in fpga/al3 0x1533 (calibration pin, 3.3 V logic referenced to the scope's USB ground, not the probe ground, which sits ~1.24 V above it); selecting it switches the generator off |
-| Spectrum analyzer row | main menu | roll mode, viewers (fw 0.2.28) | the roll-mode trace path does not run the spectrum hook; the menu is one row shorter then |
+| Spectrum analyzer and Phosphor display rows | main menu | roll mode, viewers (fw 0.2.28 / 0.2.46) | the roll-mode trace path does not run the spectrum hook; the menu is two rows shorter then and starts with System settings |
 | Time & Date settings (RTC submenu) | system settings | no DS3231 answers at boot | the clock, file stamps and FAT times would read garbage |
 | Temperature (diagnostics screen) | diagnostics | no DS3231 answers at boot | it is the DS3231's temperature register; without the module it read "99" |
 
@@ -560,7 +560,7 @@ log2/dB conversion alone is within 1.6e-5 octaves (0.005 dB). Bin-centred full-s
 ### Spectrum view (`spectrum.c`, fw 0.2.28)
 
 A display mode of the main loop, not a modal menu, so the MCP's polling and the shared screen keep working (plan:
-`docs/plans/dpos350p-features.md` 2b). Main menu, sixth row "Spectrum analyzer" (hidden in roll mode, where the
+`docs/plans/dpos350p-features.md` 2b). Main menu, first row "Spectrum analyzer" (the two view rows head the menu since fw 0.2.50; hidden in roll mode, where the
 trace path is different); in the view the row reads "Scope view" and a tap returns. The strip's "Scope" field does
 the same. While on, `scope_display_trace_data` (hook `PC_SPECTRUM_DISPLAY`) draws the trace area itself and touches
 in it go to the strip (`PC_SPECTRUM_TOUCH`); the top bar, the MCP chip and the right column (RUN/STOP, AUTO, menus)
@@ -709,7 +709,7 @@ how often each pixel was hit by recent records, so jitter, rare glitches, a modu
 cycles of a toggling signal are visible at once with their relative frequency. Design and cost arithmetic:
 `docs/plans/phosphor-design.md`.
 
-Entered and left like the spectrum view: main menu, seventh row "Phosphor display" (the row reads "Scope view" while
+Entered and left like the spectrum view: main menu, second row "Phosphor display" (the row reads "Scope view" while
 it is on), or the strip's "Scope" field. The spectrum and phosphor views exclude each other. Not offered in roll mode
 or in the picture / waveform viewers (the rows are hidden and the view ends). It is a main-loop display mode: RUN/STOP,
 trigger, time base, channel menus, cursors, measurements and the MCP keep working as in the scope view.

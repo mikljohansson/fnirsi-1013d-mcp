@@ -2814,7 +2814,7 @@ void scope_main_menu_system_settings(int mode)
   }
 
   //Draw the background
-  display_fill_rounded_rect(9, 59, 131, 35, 3);
+  display_fill_rounded_rect(9, 59 + MAIN_MENU_DY, 131, 35, 3);
 
   //Check if inactive or active
   if(mode == 0)
@@ -2831,13 +2831,13 @@ void scope_main_menu_system_settings(int mode)
   }
 
   //Display the icon with the set colors
-  display_copy_icon_use_colors(system_settings_icon, MAIN_MENU_XPOS+19, 64, 15, 25);//21
+  display_copy_icon_use_colors(system_settings_icon, MAIN_MENU_XPOS+19, 64 + MAIN_MENU_DY, 15, 25);//21
   //display_copy_icon_use_colors(Right_drop_menu_icon, MAIN_MENU_XPOS+110, 65, 24, 24);//211
 
   //Display the text
   display_set_font(&font_3);
-  display_text(69, 60, "System");
-  display_text(68, 76, "settings");
+  display_text(69, 60 + MAIN_MENU_DY, "System");
+  display_text(68, 76 + MAIN_MENU_DY, "settings");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -2857,7 +2857,7 @@ void scope_main_menu_picture_view(int mode)
   }
 
   //Draw the background
-  display_fill_rounded_rect(9, 116, 131, 35, 3);
+  display_fill_rounded_rect(9, 116 + MAIN_MENU_DY, 131, 35, 3);
 
   //Check if inactive or active
   if(mode == 0)
@@ -2874,12 +2874,12 @@ void scope_main_menu_picture_view(int mode)
   }
 
   //Display the icon with the set colors
-  display_copy_icon_use_colors(picture_view_icon, MAIN_MENU_XPOS+15, 122, 24, 24);
+  display_copy_icon_use_colors(picture_view_icon, MAIN_MENU_XPOS+15, 122 + MAIN_MENU_DY, 24, 24);
 
   //Display the text
   display_set_font(&font_3);
-  display_text(73, 119, "Picture");
-  display_text(79, 135, "view");
+  display_text(73, 119 + MAIN_MENU_DY, "Picture");
+  display_text(79, 135 + MAIN_MENU_DY, "view");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -2899,7 +2899,7 @@ void scope_main_menu_waveform_view(int mode)
   }
 
   //Draw the background
-  display_fill_rounded_rect(9, 175, 131, 35, 3);
+  display_fill_rounded_rect(9, 175 + MAIN_MENU_DY, 131, 35, 3);
 
   //Check if inactive or active
   if(mode == 0)
@@ -2916,12 +2916,12 @@ void scope_main_menu_waveform_view(int mode)
   }
 
   //Display the icon with the set colors
-  display_copy_icon_use_colors(waveform_view_icon, MAIN_MENU_XPOS+15, 181, 24, 24);
+  display_copy_icon_use_colors(waveform_view_icon, MAIN_MENU_XPOS+15, 181 + MAIN_MENU_DY, 24, 24);
 
   //Display the text
   display_set_font(&font_3);
-  display_text(62, 178, "Waveform");
-  display_text(79, 194, "view");
+  display_text(62, 178 + MAIN_MENU_DY, "Waveform");
+  display_text(79, 194 + MAIN_MENU_DY, "view");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -2941,7 +2941,7 @@ void scope_main_menu_diagnostic_view(int mode)
   }
 
   //Draw the background
-  display_fill_rounded_rect(9, 235, 131, 35, 3);
+  display_fill_rounded_rect(9, 235 + MAIN_MENU_DY, 131, 35, 3);
 
   //Check if inactive or active
   if(mode == 0)
@@ -2958,13 +2958,13 @@ void scope_main_menu_diagnostic_view(int mode)
   }
 
   //Display the icon with the set colors
-  display_copy_icon_use_colors(diagnostic_view_icon, MAIN_MENU_XPOS+15, 239, 24, 24);
+  display_copy_icon_use_colors(diagnostic_view_icon, MAIN_MENU_XPOS+15, 239 + MAIN_MENU_DY, 24, 24);
 
   //diagnostic_view_icon
   //Display the text
   display_set_font(&font_3);
-  display_text(60, 237, "Diagnostic");
-  display_text(79, 253, "view");
+  display_text(60, 237 + MAIN_MENU_DY, "Diagnostic");
+  display_text(79, 253 + MAIN_MENU_DY, "view");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -2984,7 +2984,7 @@ void scope_main_menu_usb_connection(int mode)
   }
 
   //Draw the background
-  display_fill_rounded_rect(9, 295, 131, 35, 3);
+  display_fill_rounded_rect(9, 295 + MAIN_MENU_DY, 131, 35, 3);
 
   //Check if inactive or active
   if(mode == 0)
@@ -3001,12 +3001,12 @@ void scope_main_menu_usb_connection(int mode)
   }
 
   //Display the icon with the set colors
-  display_copy_icon_use_colors(usb_icon, MAIN_MENU_XPOS+18, 297, 18, 25);//20
+  display_copy_icon_use_colors(usb_icon, MAIN_MENU_XPOS+18, 297 + MAIN_MENU_DY, 18, 25);//20
 
   //Display the text
   display_set_font(&font_3);
-  display_text(80, 296, "USB");
-  display_text(60, 312, "connection");
+  display_text(80, 296 + MAIN_MENU_DY, "USB");
+  display_text(60, 312 + MAIN_MENU_DY, "connection");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

@@ -1051,7 +1051,7 @@ void handle_main_menu_touch(void)
       if((xtouch >= MAIN_MENU_XPOS) && (xtouch <= MAIN_MENU_XPOS + MAIN_MENU_WIDTH) && (ytouch >= MAIN_MENU_YPOS) && (ytouch <= MAIN_MENU_YPOS + MAIN_MENU_HEIGHT))
       {
         //Check if on system settings
-        if((ytouch >= 46) && (ytouch <= 105))
+        if((ytouch >= 46 + MAIN_MENU_DY) && (ytouch <= 105 + MAIN_MENU_DY))
         {
           //Check if already open
           if(systemsettingsmenuopen == 0)
@@ -1077,7 +1077,7 @@ void handle_main_menu_touch(void)
           }
         }
         //Check if on picture view
-        else if((ytouch >= 107) && (ytouch <= 164))
+        else if((ytouch >= 107 + MAIN_MENU_DY) && (ytouch <= 164 + MAIN_MENU_DY))
         {
           //Close any other open menu
           close_open_menus(1);
@@ -1098,7 +1098,7 @@ void handle_main_menu_touch(void)
           return;
         }
         //Check if on waveform view
-        else if((ytouch >= 166) && (ytouch <= 223))//+57
+        else if((ytouch >= 166 + MAIN_MENU_DY) && (ytouch <= 223 + MAIN_MENU_DY))//+57
         {
           //Close any other open menu
           close_open_menus(1);
@@ -1119,7 +1119,7 @@ void handle_main_menu_touch(void)
           return;
         }
         //Check if on diagnostic_screen
-        else if((ytouch >= 225) && (ytouch <= 282))//278
+        else if((ytouch >= 225 + MAIN_MENU_DY) && (ytouch <= 282 + MAIN_MENU_DY))//278
         {
           //Close any other open menu
           close_open_menus(1);
@@ -1158,7 +1158,7 @@ void handle_main_menu_touch(void)
           
         }
         //Check if on USB connection
-        else if((ytouch >= 284) && (ytouch <= 341))
+        else if((ytouch >= 284 + MAIN_MENU_DY) && (ytouch <= 341 + MAIN_MENU_DY))
         {
           //Close any other open menu
           close_open_menus(1);
