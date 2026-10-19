@@ -924,7 +924,7 @@ uint16 pc_glue_phosphor_setting_word(void)
 
 uint16 pc_glue_decim_setting_word(void)
 {
-  //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (PC_DECIM_DEFAULT). Bits
+  //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (the defaults). Bits
   //3-4: the hidden falling-edge capture settings (SET_DECIM only); bit 5: FIR (fw 0.2.44)
   return (uint16)(0xDE00 | (pc_dec_flags & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)) | (pc_dec_set_mode[0] & (PC_DECIM_SET_FIR | 3)));
 }
@@ -1846,7 +1846,7 @@ static void pc_ui_fix_settings(void)
     scopesettings.triggerchannel = 0;
 
   //Acquisition Filter (decimation, 0x1534+): kept in a spare settings word; a sector without a valid word (new
-  //settings, or one written before 0.2.30) keeps PC_DECIM_DEFAULT. With it on the 16-bit layout limits the memory
+  //settings, or one written before 0.2.30) keeps the per-mode defaults. With it on the 16-bit layout limits the memory
   //depth.
   //fw 0.2.64: per mode. Word 207 is the Scope's, word 212 (0xD500 marker) the Spectrum's. A sector of 0.2.30..0.2.63 has
   //one Filter for both: the old default (CIC2 + FIR) becomes the new per-mode defaults, any other choice is kept for both.
