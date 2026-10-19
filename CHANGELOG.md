@@ -31,6 +31,31 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.70 - 2026-10-19 (protocol 1.21, unchanged; READ_BODE reason 8; provisional number)
+
+- Frequency response: a single sweep shows RUN on the chip (never WAIT, whatever the trigger mode) and STOP on the
+  button, its cards read "sweeping" until its table is complete, and STOP ends any sweep after the capture in progress
+  (no re-centring, retry or range step follows; a STOP in the pre-scan ends there), owner 10-19 20:00 (92821ad,
+  4d6c0e6).
+- Frequency response: a pre-scan that reaches 5 V/div with a channel still clipping and its fundamental under 20 codes
+  ends the sweep with "ADC readout fault: see Diagnostics", READ_BODE reason 8 (the owner's fail-fast rule; on 0x1539
+  the A cores' rail values gave a table of flagged points), mcp BODE_REASONS 8 with a caveat (92821ad, 4d6c0e6, 92ed2b9).
+- Frequency response AUTO SET: a cancel (second tap, STOP, leaving) gives the previous table back; a band the overview
+  cannot resolve is measured again on finer passes around f0 (f0 / sqrt(10) .. f0 sqrt(10), / 1.1 .. x 1.1, / 1.03 ..
+  x 1.03; 20 points each) before the span and Settle are set: a Q 50 tank gets f0 (1 -+ 4 / Q) and High Q instead of
+  half a decade (92821ad, 4d6c0e6).
+- Frequency response top bar (bode-ui.md 7): ACQ chip "Set by / the sweep" with a one-line dropdown; the generator chip
+  shows the tone being measured, its dropdown "Driven by the frequency response sweep" while sweeping; the trigger menu
+  adds "Not used by the sweep" (84a2d65, 4d6c0e6).
+- Frequency response CTRL page: Trace style Lines (default) / Dots at y 245 (the Scope's construction; flagged points
+  stay grey loose dots), Grid moves to y 305; settings word 216 (84a2d65, 4d6c0e6).
+- Grid lines mean something (docs/ui-guidelines.md section 3, `bu_fgrid`): log axes at the decades with 2 and 5 lines
+  under three decades, linear axes at the label steps, in Frequency response and Spectrum (84a2d65, 4d6c0e6, 3d76e14).
+- Spectrum: the slider row under the plot (the shown span as a window over 0 .. min(fs/2, 25 MHz), a drag pans the
+  centre), plot y 50..402 in 8 divisions of 44 px, labels at y 406, cards at the Scope's y 426 (3d76e14).
+- Frequency response: Move fast sets the cursor drag step; MEASURES changes show at once; before the first sweep the
+  READ_BODE header's settings fields are the settings in effect, the ones the estimate describes (4d6c0e6).
+
 #### 0.2.69 - 2026-10-19 (protocol 1.21, unchanged; provisional number)
 
 - Frequency response mode (the on-device Bode plot) redesigned per docs/plans/bode-ui.md and the owner's final decisions

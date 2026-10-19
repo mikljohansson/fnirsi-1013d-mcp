@@ -71,6 +71,13 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   scopes: green "RUN" while stopped, red "STOP" while running or waiting. The top bar chip beside the trigger shows the
   state (STOP / RUN / WAIT); both follow one run state, whoever changed it (the screen, a single shot, the host). A destructive action always confirms with a sentence that states the consequence. A modal dialog owns the
   screen: taps outside it do nothing, only its buttons leave it.
+- **Grid lines mean something** (owner, 2026-10-19 20:50; fw 0.2.70). A grid line sits at a value its axis names.
+  Level axes: a horizontal line at every labelled division (dB, deg, V). Frequency axes, Linear: a vertical line at every
+  1-2-5 step of the span (at most ten), each labelled, or every other one when there are more than six. Log: a line at
+  every decade (dense dots, labelled); the 2 and 5 lines (sparse dots) when the span is under three decades, labelled
+  when it is under 1.5 decades; a span holding fewer than two such lines takes the linear steps. Labels sit under their
+  lines (clamped inside the plot at its edges). The lines follow Grid; the labels stay. One function draws the rule
+  (`bode_ui.c` `bu_fgrid`, host-tested), used by Frequency response and Spectrum. No fixed divisions on a frequency axis.
 - **Look**: the stock palette and shapes (black ground, dark blue buttons, pale yellow active, channel colours). The
   makeover reorganises; it does not restyle.
 

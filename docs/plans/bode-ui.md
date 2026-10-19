@@ -233,8 +233,13 @@ Details that follow from the run-state rule:
 
 - **Single sweep** shows chip RUN and button STOP while it runs. At its end the state goes back to STOP. The chip
   shows the state only; whether the run ends after this sweep is said in the Sweep fold-out's Single sweep row.
+  **(fw 0.2.70, owner 20:00: "STOP has no effect" during a single sweep)** The chip never reads WAIT in this mode
+  (the trigger mode does not apply), and the cards read "sweeping" until the single sweep's table is complete.
 - **STOP during a sweep** clears the run state at once, so the button reads RUN and the chip STOP straight away. The
-  engine finishes the point in progress and keeps it (`bode_stop(e, 0)`). At 10 Hz that point can take about a second.
+  engine finishes the capture in progress and the point keeps that capture's result (`bode_stop(e, 0)`); **fw 0.2.70**:
+  no re-centring, settle retry or CH2 range change follows a STOP, and a STOP in the pre-scan or a background capture
+  ends the sweep there (before, the whole point with its retries and range steps ran on, which could take many
+  captures on a bad readout). At 10 Hz one capture can take about a second.
 - **A host SET_ACQ_STATE run** starts continuous sweeps, as today. A host sweep started with BODE_CTRL shows RUN through
   `ui_run_view`'s host_busy.
 
@@ -250,6 +255,17 @@ Details that follow from the run-state rule:
    - RESONANT, or a phase that passes both +45 and -45 deg: f0 is the peak, or else the 0 deg crossing. Start <= f0 / 10
      and Stop >= 10 f0 for Q <= 2. Half a decade either side for Q <= 10. Above that, the tightest step pair holding
      f0 (1 +- 4 / Q).
+   - **The sharp-tank rule (fw 0.2.70).** The rule above needs Q, and a band narrower than two point spacings is not
+     resolved: its -3 dB crossings interpolate across one gap and Q reads low (the overview's points are 1.8x apart, so
+     anything above Q of about 1 is unresolved there). Such a band's Q is taken as at least 1 / (2 ln r) for points r
+     apart (and at least 2), its Settle one preset up, and AUTO SET measures it again on finer passes around the f0
+     found so far before it sets anything: pass 2 f0 / sqrt(10) .. f0 sqrt(10) (12.9 % apart, Settle Resonant), pass 3
+     f0 / 1.1 .. f0 x 1.1 (1.0 % apart, High Q), pass 4 f0 / 1.03 .. f0 x 1.03 (0.3 %, High Q), 20 points each
+     (`bode_auto_zoom`). It stops at the first resolved pass; then the rule above applies with the measured Q. A Q 50
+     tank resolves on pass 3, Q 160 on pass 4; a sharper band takes pass 4's lower bound. The slider shows each pass's
+     span, the Sweep card "auto n/20". On the DUT model: Q 50 at 15.3 kHz reads Q 46 on pass 3 -> 10 kHz .. 20 kHz,
+     High Q; Q 8.1 at 50.3 kHz resolves on pass 3 as 8.1 -> 10 kHz .. 200 kHz, Resonant (fw 0.2.69 gave such tanks
+     half a decade and Settle Resonant, so a Q 50 tank needed a manual narrower span).
    - Still changing at the overview's low end, meaning the first two valid points differ by more than 1 dB or 5 deg:
      Start becomes 10 Hz.
    - FLAT or NONE: the span is kept. The note reads "No corner from 100 Hz to 10 MHz: span kept" for 5 s.
@@ -261,7 +277,10 @@ Details that follow from the run-state rule:
    cards come from the first real sweep.
 5. Changed Start or Stop makes a thru stale. Its card turns amber and the Thru warning appears.
 6. **Cancel**: a second tap during the overview aborts it with `bode_stop(e, 1)`, restores the previous table and
-   settings, and returns to STOP. The note reads "Auto set cancelled: settings kept".
+   settings, and returns to STOP. The note reads "Auto set cancelled: settings kept". **fw 0.2.70**: the previous table
+   is a copy taken when AUTO SET starts (`bode_snap`: plan, points, settings, state; about 25 KB); STOP, a second tap and
+   leaving the mode all give it back; an error during a pass (a timeout, the readout fault) keeps the pass's points
+   and shows its warning instead.
 
 Implementation: a pure `bode_auto_span(const bode_markers *, overview points, &start_i, &stop_i, &settle)` in
 `bode_dsp.c`, host-tested in `host_tests/test_bode.py`, plus a state in `bode_view_autoset` / `bode_view_service`.
@@ -290,8 +309,9 @@ The guideline order is Display, the mode's analysis controls, Grid, the steppers
 | 65 | Display | Overlay, Mag, Phase | Display fold-out |
 | 125 | Sweep | the points ("100 pt") | Sweep fold-out |
 | 185 | Thru | None, On, Off, Stale, Meas. (as today) | Thru fold-out |
-| 245 | Grid | on / off (the toggle of every mode) | |
-| 244..416 | empty | | |
+| 245 | Trace style (fw 0.2.70) | Lines, Dots | Trace style fold-out: two rows, as the Scope's |
+| 305 | Grid (fw 0.2.70; 245 before) | on / off (the toggle of every mode) | |
+| 360..416 | empty | | |
 | 425 | empty | | |
 
 **The steppers stay empty.** The sweep ranges CH1 itself at every sweep's pre-scan, and CH2 too in Auto. A CH1 stepper
@@ -301,6 +321,11 @@ nothing. The Hold range belongs to the channel's own home, the CH2 chip's menu, 
 `displayvoltperdiv`. There are no volts on any axis here.
 
 **50 % TRIG stays empty.** A sweep's captures use the FPGA auto mode with no trigger level.
+
+**Trace style (owner, 2026-10-19 20:50; fw 0.2.70).** The Scope's button ("Trace" / "style" / the value) and fold-out
+(choice rows without icons): Lines (default) joins each curve's valid points in its axis colour; Dots leaves them loose.
+Flagged points are grey loose dots in both, so a point that does not count never looks joined. It is how the plot is
+shown, so it sits with the analysis controls before Grid (guideline order); saved in settings word 216 (0xB200 | bit 0).
 
 ### 4.1 Display fold-out
 
@@ -411,6 +436,7 @@ In 13 px (`font_2`, what `bode_view.c` uses) it is narrower still.
 | Auto set cancelled: settings kept | AUTO SET second tap, note | new |
 | Nothing to save: run a sweep first | SAVE WAVE without points | new |
 | Frequency response needs FPGA 0x1534 or later | tap on the grey main-menu row | new: fw 0.2.68's grey row is inert and says nothing |
+| ADC readout fault: see Diagnostics | BODE_ERR_READOUT (fw 0.2.70): the pre-scan reached 5 V/div with a channel still clipping and its fundamental under 20 codes | new (owner's fail-fast rule, bench 20:51: 0x1539's A cores returned rail values and every point came out flagged) |
 
 **Before the first sweep (owner: one short instruction).** fw 0.2.66 draws five centred white lines in 16 px
 (`font_3`) at y 150..254 over the empty panes (`bode_view.c` `draw_connection`):
@@ -450,6 +476,13 @@ The guidelines say that where a mode drives a top-bar control, the button shows 
   background captures' generator-off moments are not shown. Before the first sweep it shows the user's generator, as
   today. Its menu says "Driven by the frequency response sweep" while a sweep runs.
 - **Trigger chip** is unchanged; its dropdown adds "Not used by the sweep".
+
+**Built in fw 0.2.70** (`bode_ui.h` has the texts and boxes, test_ui checks them): the ACQ chip draws "ACQ" in its green
+block and "Set by" / "the sweep" in its value column; its dropdown is a box at x 250, y 48, 40 px tall with the one line
+in 16 px, which any tap closes. The generator chip follows the point being measured with the plot's redraw (duty 50 %,
+green edge); while a sweep runs a tap on it opens the same kind of box, right-aligned at x 728, with "Driven by the
+frequency response sweep"; stopped, the chip and the menu are the user's generator, as before the first sweep. The
+trigger menu is 24 px taller in this mode, with "Not used by the sweep" in grey 13 px at its bottom.
 
 ## 8. Control map: what the implementation batch changes in fw 0.2.68
 
