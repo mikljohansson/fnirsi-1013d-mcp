@@ -813,3 +813,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   host once today, right after the Bode run had left the FPGA in mode 225. Hypothesis under test by fw-cal4: the calibration
   conversion does not force the FPGA decimation / shift registers to legacy, so one byte lane is not an 8-bit sample. The UI filter
   was left at "off" by my study scripts between 15:55 and 16:25 and is restored to CIC2+FIR now.
+- 2026-10-19 16:30: ROOT CAUSE of the wizard failure, and a general 200 MS/s fault on 0x1535: fpga-gen6's encode-phase race
+  (fpga/al3/README.md Findings 3, fixed in 0x1537). Host test: alternate 0x0D divider 99 <-> 0 (and 1 <-> 0), READ_RAW 1000 samples at
+  divider 0 after each change: CH1 core B bimodal, 15/30 and 12/30 trials at 15-29 codes within-RMS versus 1.1 otherwise, CH1 core A
+  0.5 -> 1.6 in the same trials; CH2 clean in these 60 trials but flipped earlier (wizard: CH2 core A 24 codes). So about half of all
+  full-rate captures after a rate change carry one metastable core on the current bitstream; the v4 class probe toggles the rate
+  every 30 s, the wizard twice per range. The fw-cal4 arithmetic hypothesis and my stale-mode hypothesis are both ruled out.
+  Actions: fw 0.2.61 (fw-cal4) adds a phase check-and-heal (re-toggle 0x0D) before full-rate measurements and after rate changes
+  on 0x1532-0x1536, plus a Diagnostics notice; the 0x1537 flash session is the real fix and is now needed before the release.
