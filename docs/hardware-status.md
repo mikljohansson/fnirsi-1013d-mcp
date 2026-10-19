@@ -591,3 +591,19 @@ Newest entries at the bottom. Format: date, who, what, result.
 - Boot test of fw-0.2.48-nommu_1cce7858 at 01:17 (between logger rounds, 0.2.44 reloaded after): #VER fw=0.2.48-nommu proto=1.13,
   census 300 PINGs 0 failures 0.95 ms, GET_INFO 76 bytes with the commit hash d3a22472 at byte 52, GET_LINK_STATS 244 bytes (60 counters),
   pass_ms 35, host capture of both channels OK. The purge batch boots and answers; the MMU image is still untested (morning, owner present).
+
+### 2026-10-19 04:00: overnight log, rounds 0-28 (fw 0.2.44, inputs shorted, scope on charger)
+
+- **USB reopen after 10 minutes idle with the port closed: 29/29 successful**, no errors, GET_LINK_STATS counter 36 (suspends) = 1 and
+  37 (resumes) = 0 all night, identical to round 0: with the port closed Windows never suspended the device, so the pre-0.2.44
+  "suspend -> bus_reset" at reopen was the port reset's lead-in, as fw-gen6 read it. The idle-port drop item is closed on 0.2.44.
+- **Zeros, rounds 0-26 (23:16-03:38, 4.4 h):** flat. Gated CH1 A/B 127.95-128.03 / 127.84-128.24, CH2 129.07-129.32 / 128.91-129.23; raw
+  gated CH2 A 129.64-129.88, B 128.10-128.42; CIC2 CH1 127.68-127.87, CH2 129.22-129.47; full-rate within the 8-conversion ripple band.
+  CH2 stayed about +1.2 codes above 128 with the cores together (same as right after the recalibration): a stable channel offset at
+  range 6 with shorted input, not drift.
+- **Step at 03:48 (round 27), persisting at 03:58 (round 28):** CH1 both cores +0.47 (gated 128.47/128.60, full 128.02/128.75, CIC2
+  128.32); CH2 raw core A -1.7 (129.8 -> 128.0) with core B unchanged (128.2), so corrected CH2 A/B 127.48/129.08 gated and 127.43/130.20
+  full (A-B -1.6 / -2.8). Status flags (CHARGING always set, FPGA/auto bits toggling) show no change at the step; no restart (counter 49 =
+  0); nothing was done on the bench. A per-core offset step on CH2's ADC plus a common +0.5 on CH1 within one 10-minute interval: cause
+  unknown (candidates: battery charge termination / supply step, ADC temperature step, a relay or reference settling event). Morning
+  check: read the battery/charger state, recalibrate on 0.2.48, and watch whether the CH2 A/B split returns.
