@@ -1967,7 +1967,8 @@ about 2 more ALU instructions for the min / max of the rail rule. Pass time expe
 u16 pwm[6], i16 zero[class][core][range], i16 slope[class][core][range], u8 noise[class][core][range], u16
 gain[class][core] (Q15), u8 gain_range (0xFF never measured), u8 gain_flags (bit 0 kept), u16 gain_lever (1/16 code);
 CRC-32. v2 blocks are not read (version check): after loading 0.2.45 the scope runs on the 1.00o5 compensations
-until the base calibration is run again. GET_CAL 256 bytes: protocol section 14 row 51.
+until the base calibration is run again. GET_CAL 256 bytes: protocol section 14 row 51. Sector 708 bytes 432..487 hold
+the provenance trailer (fw 0.2.52, row 55) and bytes 488..503 the FPGA 0x153A capture stages (fw 0.2.79, section 6.4).
 
 **Bench procedure** (coordinator and owner; back up SD sectors 700-710 first, the calibration writes 708 and 709):
 
@@ -2057,21 +2058,32 @@ It names the measurement point the failure was found at (`acal_fail_point`: a cl
 coarse ones with a sample at 0 or 255, noise and drift at the zero point of the failing class, a missing response at
 the coarse high point), its PWM, and per core the raw mean, the lowest and highest code and the samples at 0 or 255.
 The zero step of one range is `cal_range` (cal_wiz_ui.c), shared by the wizard and CAL_PROBE, which records all eight
-points (`acal_point`, ACAL_PT_*: coarse 500 / 1200, gated centre -150 / +150 / the zero pair, 200 MSa/s the zero pair /
-+150 / -150).
+points (`acal_point`, ACAL_PT_*: coarse 500 / 1200, gated centre -150 / +150 / centre, 200 MSa/s centre / +150 /
+-150).
 
-**Zero pair (fw 0.2.67).** The zero of each class is not measured at the centre PWM, where the level sits at code 128,
-but as the mean of two points d PWM counts either side of it (8 conversions each gated, 64 at 200 MSa/s), d from the
-range's gated slope points so each is 12 codes off 128 (`acal_zero_split`, 8..120 counts; about 27 on range 0 of the
-owner's unit, 45 at the nominal 0.26 codes per count). Reason: on FPGA 0x1538 the 200 MSa/s readout of some lanes mixes
-the bits of successive samples that straddle 0x7F / 0x80 (bench 2026-10-19: READ_RAW outliers up to 255 only while a
-core's mean was 126..133, clean everywhere else and at the gated rate), which failed every zero step. In the linear
-model the mean of the two points is the zero at the centre, so the block's zeros, slopes, PWM centres and the
-corrections built on them mean exactly what they meant. Drift comes from the halves of both points (the level step
-cancels), noise and within-capture RMS are the RMS of the two points' own (`acal_zero_pair`). A clip found only at
-200 MSa/s while the gated point at the same PWM is quiet and within 8 codes of 128 reports "ADC readout fault near code
-128 (FPGA 0x1538): flash the fixed bitstream" (ACAL_E_READOUT, `acal_readout_fault`). The UI's own 200 MSa/s traces
-near code 128 still show the outliers on such a bitstream; fpga-gen8's bitstream fixes the readout.
+**Zero at the centre (fw 0.2.79).** The zero of each class is measured at the refined centre PWM, where the level sits
+at code 128 (8 conversions gated, 64 at 200 MSa/s). 0.2.67-0.2.78 measured it as the mean of two points 12 codes either
+side (`acal_zero_split`, CAL_PROBE byte 248) so the step passed on FPGA 0x1538 / 0x1539, whose 200 MSa/s capture garbled
+cores near 0x7F / 0x80; the owner removed that workaround (2026-10-19 20:30, fail fast), so CAL_PROBE byte 248 is always
+0. A clip found only at 200 MSa/s while the gated point at the same PWM is quiet and within 8 codes of 128 reports "ADC
+readout fault near code 128: check the FPGA bitstream" (ACAL_E_READOUT, `acal_readout_fault`): such a bitstream fails
+the step instead of being calibrated around the fault.
+
+**Capture stage training (fw 0.2.79, FPGA 0x153A, protocol 1.24, row 64; `cap_stage.c`, `cap_hw.c`).** On 0x153A each
+channel's zero step starts with the training of its two cores' capture stages (`cal_train`): range 0, the input parked at
+code 128 by the gated centre search, a quiet input required (gated within-capture RMS at most 3 codes, else "too much
+noise"). Each core is tried at stages 2..5 (0x63), one 8000-word 200 MSa/s capture each with the 0x36 outlier counts read
+(threshold 0x64 = 8 codes; a clean stage reads 0). Per core the clean stage of {3, 4} whose outer neighbour is clean too
+is taken (the power-on one when the clean run is symmetric), else the clean one of {3, 4}, else a clean reserve 2 / 5; a
+B core with no clean stage is tried again with its reference bit (0x63 bit 12 / 13, timed by the chip's A encode). A core
+with no clean stage fails the channel with "ADC readout fault near code 128: check the FPGA bitstream"; a passed
+channel's note reads "Capture stages: CH1 A4 B4". Save stores the value with the calibration in sector 708 bytes
+488..503 (u32 'ACAP', u16 version 1, u16 length 16, u16 the 0x63 value, u16 the FPGA version word, u32 CRC-32 of the 12
+bytes before; after the provenance trailer, outside the v3 block, so an older firmware's 708 save clears it); Cancel and
+CAL_PROBE put the previous 0x63 back. At boot (and after a calibration load) 0x64 = 8 and 0x63 = the stored value when it
+was trained on the running bitstream, else the power-on 0x08E4. After every accepted full-rate capture the firmware reads
+0x36 and flags a core whose count exceeds its chip partner's by more than 8 (GET_HEALTH 104..123, event 23). Bench list:
+firmware/AGENTS.md section 54.
 CAL_PROBE runs it from the host with the UI stopped (mode 0, about 1 s), or runs the whole zero step exactly as a
 Calibrate tap does, over the dimmed screen with the dialog, progress and Cancel polls (mode 1, about 15 s);
 `python firmware/tools/cal_probe.py COM10 both all` prints every point (arguments: port, CH1 / CH2 / both, ranges, repeats,
