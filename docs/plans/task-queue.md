@@ -124,6 +124,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   calibration provenance in the block, power-on counter, persisted restart record, save-state, post check, previous block for Undo, CP15
   word, FPGA build hash). Also from the review: "USB connection" -> "USB drive / SD card" with an explanatory screen; first-run screen;
   remove the USB-Serial and Dev mode toggles. Owner decisions pending on the menu tree (modes vs variants). Next firmware generation.
+- [ ] **Measurement cards in the stock scheme** (owner 10-19): chip with the channel digit in the channel colour + "Metric: value" in
+  white, dark grey rounded card; fix the "Freg" label; scope_functions.c scope_display_channel_measurements. Part of the UI batch
+  (docs/plans/ux-makeover.md section 3).
 - [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s): deterministic test with
   GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
 - [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md

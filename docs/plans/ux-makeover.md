@@ -58,8 +58,11 @@ Average and Filter; the Trigger dropdown holds mode, edge, channel, position and
 - **Bottom row**: the measurement cards, as the stock firmware and Atlan's draw them (FNIRSI product photos): the
   Measures button opens the list of up to twelve measurements per channel (Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq,
   Cycle, Time+, Time-, Duty+, Duty-; `scopesettings.measuresstate`, drawn by `scope_display_measurements`), the
-  ticked ones appear as cards in the channel's colour, CH1's from the left and CH2's from the middle, stacking upward
-  over the plot. Unchanged. Roadmap, not now: a spectrum card set (peak frequency and level per channel, THD) and the
+  ticked ones appear as cards, CH1's from the left and CH2's from the middle (x 366), stacking upward over the plot.
+  Card scheme **(owner)**: the stock one, a small chip in the channel colour with the digit 1 or 2 in black, then
+  "Metric: value" in white on a dark grey rounded card ("[1] VPP: 2.40V"); today's Atlan drawing (the metric name in a
+  coloured box, scope_functions.c `scope_display_channel_measurements`) changes to that, and the "Freg" label typo is
+  fixed with it. Otherwise unchanged. Roadmap, not now: a spectrum card set (peak frequency and level per channel, THD) and the
   FPGA hardware measurements of docs/plans/roadmap.md section 8 item 6 feeding the same cards.
 - **Warnings**: top-middle of the plot in every mode, stating consequence and action **(owner)**; readouts such as
   wfm/s and the spectrum's one-line header stay where they are.
