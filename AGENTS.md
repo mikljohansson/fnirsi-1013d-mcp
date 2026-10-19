@@ -106,6 +106,8 @@ Reference checkouts (read-only, outside this repo, never build inside them):
 - Dev loop: `make gcc10` in firmware/scope, boot menu -> FEL (or ENTER_FEL once available), attach the FEL
   device to WSL, `sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`. The SD card
   image is only rewritten for releases.
+- UI work (menus, views, dialogs, the bars) follows `docs/ui-guidelines.md`; the current change list is
+  `docs/plans/ux-makeover.md` and its mockups are the acceptance reference.
 - Shared `main`: update with `git fetch && git merge --ff-only origin/main` (the repo config sets `pull.ff=only`); never
   rebase main (it carries merge commits from agent branches); agents push only their own commits unless the coordinator says so.
 - Small, reviewable commits; one topic per commit. Keep this file and the subdirectory `AGENTS.md` files current when layout or facts change. Agents with very

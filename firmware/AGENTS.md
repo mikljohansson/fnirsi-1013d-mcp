@@ -8,7 +8,8 @@ section 24) on fw-cal2's 0.2.45 (protocol 1.12: calibration data v3, a gain per 
 calibration post, **section 23**) on fw-gen6's 0.2.44 (protocol 1.11: FPGA 0x1535 FIR support, spectrum strip repaint fix,
 Filter default CIC2, USB suspend as a state, section 22); see the ladder (section 8); section 20 (spectrum analyser, auto
 trigger mode) and 21 (calibration v2; its zero model and zero step still hold) still apply. The USB drop story: 0.2.25 PHYCTL fix closed the cold-boot drops; the device lost after a long host suspend (2026-10-19) is handled by 0.2.49's suspend watch, bench pending (section 27). Sections 9-17 below are
-older generations' notes, kept for history. Read the root `AGENTS.md` first, then this file. Details live in `firmware/README.md` (build, SD layout, FEL, memory budget, boot, bring-up
+**Before any UI change** read `docs/ui-guidelines.md` (the rules for modes, bars, CTRL, dialogs, chips, fonts and touch)
+and `docs/plans/ux-makeover.md` (the agreed changes and their mockups). older generations' notes, kept for history. Read the root `AGENTS.md` first, then this file. Details live in `firmware/README.md` (build, SD layout, FEL, memory budget, boot, bring-up
 checklist), `docs/protocol.md` (the spec; section 14 lists every deviation and addition, rows 28-42 are this
 generation's) and `docs/hardware-status.md` (bench log, newest at the bottom). This file does not repeat them.
 
