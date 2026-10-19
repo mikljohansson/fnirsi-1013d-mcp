@@ -31,6 +31,30 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.63 - 2026-10-19 (protocol 1.19, unchanged)
+
+UI polish batch 1, from the owner's walk-through of 0.2.59 (firmware/README.md "Screens: UI polish batch 1"):
+
+- Changed: the main menu's Settings icon is a cogwheel (f58ff29) and the Scope icon a sine wave (70da62a).
+- Changed: CTRL Grid is a whole-button toggle, green on and grey off, without the slide switch (bcb3007). The Display
+  fold-out's X-Y icon is a tilted figure 8 (f71ede6). Trace style is grey and inert in X-Y (d513498).
+- Removed: the Pro trace style. It drew the per-column minimum and maximum as outlines and looked like Linear on a
+  normal signal; a saved Pro loads as Linear (8d508cd).
+- Fixed: the ACQ menu's pass time collided with the Memory header and the first depth chip; it now sits under the
+  column's rule (cf37f5d).
+- Fixed: the Settings fold-out's brightness sliders closed the fold-out when the finger left the slider mid-drag; a
+  drag now stays with its slider until release (1fb05fd).
+- Changed: the Settings screen drops its header hedge and the note beside Restore; the Restore dialog's text fills
+  the dialog's width (2830fc2). File message timeout left the fold-out and is set in Settings > Controls (1ecaef3).
+- Changed: Diagnostics uses the Settings screen's header; fixed the battery icon being drawn over the page (ba116cf).
+  The Calibration page shows the DC shift trim's state as the button colour and drops the DC supply note (d4345e8).
+  The Developer page drops the Debug overlay switch; the flag stays for firmware work (32d17a9).
+- Changed: the volts calibration shows "Step N of 6" at the top right of the title line (eb51787).
+- Added: in Waterfall and Density the Display fold-out names the channel shown and switches between CH1 and CH2
+  (6c82e0c).
+- Changed: RUN/STOP shows the state, green RUN or amber Stopped, and follows a host start or stop; it stayed green
+  when the PC stopped the acquisition (b1fe1fc).
+
 #### 0.2.62 - 2026-10-19 (protocol 1.19, docs/protocol.md section 14 row 58)
 
 - Fixed: on FPGA 0x1537 CH2 core A was garbled in about 40 % of 200 MSa/s captures, with no register write in

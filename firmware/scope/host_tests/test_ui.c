@@ -295,6 +295,19 @@ static void test_ctrl_page(void)
     T_STR(ui_display_value(0, UI_VIEW_XY, 0), "X-Y");
     T_STR(ui_display_value(1, 0, 1), "Spec");
   }
+
+  //RUN/STOP labels fit the 51 px button with 2 px margins (fw 0.2.63): "RUN" in the 16 px font, "Stopped" in the 13 px
+  T_TRUE(ui_text_width(&font_3, ui_run_label[1]) <= UI_BAR_W - 4);
+  T_TRUE(ui_text_width(&font_2, ui_run_label[0]) <= UI_BAR_W - 4);
+
+  //ACQ menu pass time (fw 0.2.63): inside the Memory column right of its rule at x 304 and left of the menu's edge at
+  //380, below the rule at y 211 and above the bottom edge (386 - 8); the label and the widest value fit its width
+  T_TRUE(UI_ACQ_PASS_X > 304);
+  T_TRUE(UI_ACQ_PASS_X + UI_ACQ_PASS_W < 378);
+  T_TRUE(UI_ACQ_PASS_Y > 211);
+  T_TRUE(UI_ACQ_PASS_Y + 32 <= 378);
+  T_TRUE(ui_text_width(&font_2, ui_acq_pass_label) <= UI_ACQ_PASS_W);
+  T_TRUE(ui_text_width(&font_2, "99999 ms") <= UI_ACQ_PASS_W);
 }
 
 //A one-way row: the label at the left, the value at the right, 10 px in (and 30 px to spare between them); a two-way
@@ -493,21 +506,22 @@ static void test_foldout(void)
   int    rtc, n;
   uint32 x, y;
 
-  T_EQ(ui_fo_rows(1, ids), 5);
+  //fw 0.2.63: File message timeout is in Settings > Controls only
+  T_EQ(ui_fo_rows(1, ids), 4);
   T_EQ(ids[0], UI_FO_SCREEN);
   T_EQ(ids[1], UI_FO_GRID);
-  T_EQ(ids[2], UI_FO_FILEMSG);
-  T_EQ(ids[3], UI_FO_TIME);
-  T_EQ(ids[4], UI_FO_OTHER);
-  T_EQ(ui_fo_rows(0, ids), 4);
+  T_EQ(ids[2], UI_FO_TIME);
   T_EQ(ids[3], UI_FO_OTHER);
-  T_EQ(ui_fo_height(1), 295);
-  T_EQ(ui_fo_height(0), 236);
+  T_EQ(ui_fo_rows(0, ids), 3);
+  T_EQ(ids[2], UI_FO_OTHER);
+  T_EQ(ui_fo_height(1), 236);
+  T_EQ(ui_fo_height(0), 177);
   T_EQ(ui_fo_row_top(0, UI_FO_TIME), 0);
   T_EQ(ui_fo_row_top(1, UI_FO_SCREEN), 46);     //the brightness sliders open beside rows 0 and 1 (y 46, 104)
   T_EQ(ui_fo_row_top(1, UI_FO_GRID), 105);
-  T_EQ(ui_fo_row_top(1, UI_FO_OTHER), 282);
-  T_EQ(ui_fo_row_top(0, UI_FO_OTHER), 223);
+  T_EQ(ui_fo_row_top(1, UI_FO_TIME), 164);
+  T_EQ(ui_fo_row_top(1, UI_FO_OTHER), 223);
+  T_EQ(ui_fo_row_top(0, UI_FO_OTHER), 164);
 
   for(rtc = 0; rtc < 2; rtc++)
   {
@@ -769,11 +783,8 @@ static void test_settings_text(void)
   for(i = 0; i < UI_SET_GROUPS; i++)
     T_TRUE(ui_text_width(&font_2, ui_set_groups[i].title) <= UI_SET_ROW_W);
 
-  //Header: the title, the subtitle and Back on one line; Restore and its note on one line
-  T_TRUE(12 + ui_text_width(&font_5, "Settings") + 16 <= 130);
-  T_TRUE(130 + ui_text_width(&font_2, "Channel, trigger, time base and filter stay in their own menus.") < UI_SET_BACK_X - 8);
-  T_TRUE(UI_SET_RESTORE_X + UI_SET_RESTORE_W + 14 +
-         ui_text_width(&font_2, "Asks first. Keeps the calibration and the start-up choice.") <= 788);
+  //Header: the title and Back on one line (fw 0.2.63: no subtitle, no note beside Restore)
+  T_TRUE(12 + ui_text_width(&font_5, "Settings") + 16 <= UI_SET_BACK_X);
   T_TRUE(ui_text_width(&font_3, "Restore default settings") + 24 <= UI_SET_RESTORE_W);
 
   //Time editor: labels left of the - buttons, values between the buttons
@@ -858,6 +869,20 @@ static void test_dialog(void)
 
     for(i = 0; i < t[k]->nlines; i++)
       T_TRUE(ui_text_width(&font_3, t[k]->lines[i]) + 48 <= UI_DLG_W);
+
+    //fw 0.2.63 (owner): the body uses the dialog's width, a line breaks only where the next word would not fit
+    for(i = 0; i + 1 < t[k]->nlines; i++)
+    {
+      char   joined[160];
+      size_t n = strlen(t[k]->lines[i]), w = 0;
+
+      memcpy(joined, t[k]->lines[i], n);
+      joined[n++] = ' ';
+      while(t[k]->lines[i + 1][w] && (t[k]->lines[i + 1][w] != ' '))
+        joined[n++] = t[k]->lines[i + 1][w++];
+      joined[n] = 0;
+      T_TRUE(ui_text_width(&font_3, joined) + 48 > UI_DLG_W);
+    }
   }
 }
 

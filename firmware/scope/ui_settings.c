@@ -14,7 +14,6 @@ int ui_fo_rows(int rtc, uint8 *ids)
 
   ids[n++] = UI_FO_SCREEN;
   ids[n++] = UI_FO_GRID;
-  ids[n++] = UI_FO_FILEMSG;
 
   if(rtc)
     ids[n++] = UI_FO_TIME;
@@ -327,10 +326,9 @@ int ui_time_hit(uint32 x, uint32 y)
 const ui_dlg_text ui_dlg_restore =
 {
   "Restore default settings?",
-  { "Channels, trigger, time base, display and these settings",
-    "go back to their defaults. The calibration and the",
-    "start-up choice are kept." },
-  3, "Cancel", "Restore", 1
+  { "Channels, trigger, time base, display and these settings go back to their",
+    "defaults. Calibration and start-up are kept." },
+  2, "Cancel", "Restore", 1
 };
 
 const ui_dlg_text ui_dlg_delete =

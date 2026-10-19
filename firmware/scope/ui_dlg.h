@@ -40,6 +40,7 @@ void   ui_dlg_bg_end(void);
 typedef struct
 {
   const char *title;
+  const char *step;                 //"Step 2 of 6" at the right end of the title line (fw 0.2.63), 0 for none
   const char *line[2];
   const char *warn;                 //0 or "" for none
   const char *result[2];            //0 or "" for none

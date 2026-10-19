@@ -100,14 +100,27 @@ int    ui_fold_dir(const ui_fold *f, uint32 x);              //two-way rows: -1 
 #define UI_FOLD_TWOWAY_IN     40
 #define UI_FOLD_TEXT_X        90
 
+//RUN/STOP (fw 0.2.63, owner): a two-state button that shows the state, a tap changes it. Running: green, "RUN" in the
+//16 px font. Stopped: amber (needs attention; red is kept for destructive actions, guidelines section 3), "Stopped" in
+//the 13 px font ("STOPPED" is 62 px in the 16 px font and 50 in the 13 px one, too wide for the 51 px button).
+#define UI_C_AMBER            0x00FFD262
+extern const char *const ui_run_label[2];                         //[0] stopped, [1] running
+
+//ACQ menu, Memory column (x 305..377 of the menu, under its rule at y 211): the main-loop pass time, a grey label line
+//and the value under it (fw 0.2.63; it sat between the "Memory" header and the first depth chip before)
+#define UI_ACQ_PASS_X         312
+#define UI_ACQ_PASS_Y         218
+#define UI_ACQ_PASS_W         62
+extern const char *const ui_acq_pass_label;                      //"Pass time"
+
 //Value names, as the fold-outs and the CTRL buttons show them
-#define UI_TRACE_COUNT        4
+#define UI_TRACE_COUNT        3     //fw 0.2.63: 1.00o5's "Pro" (min / max outlines, no fill) removed, see README
 #define UI_VIEW_NORMAL        0
 #define UI_VIEW_XY            1
 #define UI_SPEC_VIEW_COUNT    3
 #define UI_PERSIST_COUNT      4
 
-extern const char *const ui_trace_names[UI_TRACE_COUNT];         //Linear, Dots, Peak, Pro (scopesettings.ACQ_trace)
+extern const char *const ui_trace_names[UI_TRACE_COUNT];         //Linear, Dots, Peak (scopesettings.ACQ_trace)
 extern const char *const ui_view_names[2];                        //Normal, X-Y
 extern const char *const ui_spec_view_names[UI_SPEC_VIEW_COUNT];  //Spectrum, Waterfall, Density
 extern const char *const ui_spec_chan_names[3];                   //CH1, CH2, CH1 + CH2

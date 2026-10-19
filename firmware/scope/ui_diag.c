@@ -310,13 +310,14 @@ static int ud_state_colour(int state)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Header: title, the four page tabs, Back (all 44 px tall)
+// Header: title, the four page tabs, Back (all 44 px tall). fw 0.2.63 (owner): the Settings screen's header, black with
+// a grey rule under it (ui_dlg.c draws the band) and Back at the same place (x 692)
 
 #define UD_HDR_H     52
 #define UD_TAB_X     160
 #define UD_TAB_W     112
 #define UD_TAB_PITCH 120
-#define UD_BACK_X    696
+#define UD_BACK_X    692
 #define UD_BACK_W    96
 #define UD_BTN_Y     420          //bottom button row
 #define UD_BTN_H     44
@@ -1208,15 +1209,15 @@ static void ud_page_cal(ud_page *pg, const ud_input *in, const ud_note *note)
   //Two rows of service actions: Calibrate and the DC shift trim (1.00o5's manual trim of the trace scale, run on the
   //scope's CTRL page while on), then the volts calibration and, apart at the right, Clear calibration
   ud_btn(pg, 12, UD_CAL_ROW1, 140, UD_BTN_H, UD_B_PRIMARY, UD_ID_CALIBRATE, "Calibrate");
-  ud_btn(pg, 164, UD_CAL_ROW1, 180, UD_BTN_H, UD_B_NEUTRAL, UD_ID_DCSHIFT, "DC shift trim");
-  ud_txt(pg, 356, UD_CAL_ROW1 + 6, 432, UD_F_SMALL, in->dc_shift ? UD_C_WARN : UD_C_DIM, in->dc_shift ?
-         "DC shift trim on: CTRL on the scope opens it." : "DC shift trim off.");
+  //fw 0.2.63 (owner): the button's colour is the switch's state (green on, grey off); the line beside it only while on
+  ud_btn(pg, 164, UD_CAL_ROW1, 180, UD_BTN_H, in->dc_shift ? UD_B_ON : UD_B_GREY, UD_ID_DCSHIFT, "DC shift trim");
+  if(in->dc_shift)
+    ud_txt(pg, 356, UD_CAL_ROW1 + 6, 432, UD_F_SMALL, UD_C_WARN, "On: CTRL on the scope opens the trim.");
 
   if(note && note->text[0])
     ud_txt(pg, 356, UD_CAL_ROW1 + 24, 432, UD_F_SMALL, note->colour, note->text);
 
   ud_btn(pg, 12, UD_BTN_Y + 6, 180, UD_BTN_H, UD_B_NEUTRAL, UD_ID_VOLTS, "Volts calibration");
-  ud_txt(pg, 204, UD_BTN_Y + 20, 396, UD_F_SMALL, UD_C_DIM, "Needs a DC supply up to 15 V.");
   ud_btn(pg, 612, UD_BTN_Y + 6, 176, UD_BTN_H, UD_B_DANGER, UD_ID_CLEAR, "Clear calibration");
 }
 
@@ -1423,27 +1424,36 @@ static void ud_page_log(ud_page *pg, const ud_input *in, const ud_note *note)
 //----------------------------------------------------------------------------------------------------------------------------------
 // Developer page
 
+//fw 0.2.63 (owner, item n): the Debug overlay switch is gone. 1.00o5's dev_mode draws raw numbers (the FPGA's trigger
+//address over the top bar, the trigger position, touch coordinates in two menus) that mean nothing to a user and that
+//the PC reads through the protocol anyway; the flag stays in the settings for firmware work. A unit that switched it
+//on with 0.2.59-0.2.62 gets a row to switch it off, shown only while the flag is set.
 static void ud_page_dev(ud_page *pg, const ud_input *in)
 {
   ud_button *b;
+  int        y = 86;
 
   ud_txt(pg, 12, 62, 776, UD_F_SMALL, UD_C_SOFT, "For firmware work. Normal use needs none of this.");
 
-  b = ud_btn(pg, 12, 86, 776, 56, UD_B_ROW, UD_ID_OVERLAY, "Debug overlay");
-  if(b)
+  if(in->dev_mode)
   {
-    b->note = in->dev_mode ? "on" : "off";
-    b->note_colour = in->dev_mode ? UD_C_OK : UD_C_DIM;
+    b = ud_btn(pg, 12, y, 776, 56, UD_B_ROW, UD_ID_OVERLAY, "Debug overlay");
+    if(b)
+    {
+      b->note = "Switch off";
+      b->note_colour = UD_C_WARN;
+    }
+    ud_txt(pg, 24, y + 30, 640, UD_F_SMALL, UD_C_DIM, "Developer flag: raw trigger address and touch coordinates on the scope");
+    y += 64;
   }
-  ud_txt(pg, 24, 86 + 30, 640, UD_F_SMALL, UD_C_DIM, "Trigger address and touch coordinates over the top bar");
 
-  b = ud_btn(pg, 12, 150, 776, 56, UD_B_ROW, UD_ID_FEL, "Enter FEL now");
+  b = ud_btn(pg, 12, y, 776, 56, UD_B_ROW, UD_ID_FEL, "Enter FEL now");
   if(b)
   {
     b->note = "asks first";
     b->note_colour = UD_C_WARN;
   }
-  ud_txt(pg, 24, 150 + 30, 640, UD_F_SMALL, UD_C_DIM, "Restart into the USB boot loader (sunxi-fel); the card is not touched");
+  ud_txt(pg, 24, y + 30, 640, UD_F_SMALL, UD_C_DIM, "Restart into the USB boot loader (sunxi-fel); the card is not touched");
 }
 
 void ud_build(ud_page *pg, int page, const ud_input *in, const ud_note *note)

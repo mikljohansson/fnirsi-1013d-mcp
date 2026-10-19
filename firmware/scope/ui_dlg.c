@@ -14,8 +14,8 @@
 //The mockups' palette (docs/plans/ux-makeover.md 6c)
 #define RGB_CARD        0x000D0D0D
 #define RGB_CARD_EDGE   0x00262626
-#define RGB_HEADER      0x000B1A33
-#define RGB_HEADER_EDGE 0x001F3A66
+#define RGB_HEADER      0x00000000      //fw 0.2.63: the Settings screen's header (ui_settings_ui.c), black with a grey rule
+#define RGB_HEADER_EDGE 0x00262626
 #define RGB_RULE        0x00333333
 #define RGB_PANEL       0x00181818
 #define RGB_PANEL_EDGE  0x00606060
@@ -105,6 +105,7 @@ static void ui_dlg_look(int style, ui_btn_look *l)
     case UD_B_DANGER:  l->fill = 0x004D1B1B; l->edge = 0x00A33A3A; l->text = 0x00FFD0D0; break;
     case UD_B_TAB_ON:  l->fill = 0x001F3A66; l->edge = 0x009ECBFF; l->text = WHITE_COLOR; l->edge2 = 1; break;
     case UD_B_GREY:    l->fill = 0x00333333; l->edge = 0x00606060; l->text = WHITE_COLOR; break;
+    case UD_B_ON:      l->fill = 0x00145A2E; l->edge = 0x0035C26A; l->text = WHITE_COLOR; break;
     case UD_B_ROW:     l->fill = RGB_CARD;   l->edge = RGB_CARD_EDGE; break;
     default:           l->fill = 0x000F2447; l->edge = 0x001F3A66; break;          //neutral, tab
   }
@@ -299,6 +300,10 @@ void ui_dlg_step_draw(const ui_step *d)
   ui_dlg_box(UI_STEP_X, UI_STEP_Y, UI_STEP_W, UI_STEP_H, RGB_PANEL, RGB_PANEL_EDGE, 0);
 
   ui_dlg_text(x, y + 20, UD_F_HEAD, UD_C_TITLE, d->title);
+
+  //The step count at the top right, on the title line (owner, fw 0.2.63; it ended the second line before)
+  if(d->step && d->step[0])
+    ui_dlg_text(UI_STEP_X + UI_STEP_W - 24 - (int)ui_text_width(&font_3, d->step), y + 26, UD_F_BODY, UD_C_SOFT, d->step);
 
   for(i=0;i<2;i++)
     if(d->line[i] && d->line[i][0])

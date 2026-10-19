@@ -169,7 +169,6 @@ void scope_system_settings_grid_brightness_item(int mode);
 void scope_system_settings_grid_brightness_value(void);
 
 void scope_system_settings_other_settings_item(int mode);
-void scope_system_settings_filemsg_item(int mode);
 void scope_system_settings_RTC_settings_item(int mode);
 void scope_open_RTC_settings_menu(void);
 

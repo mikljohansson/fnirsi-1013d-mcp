@@ -125,7 +125,10 @@ int ui_fold_dir(const ui_fold *f, uint32 x)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-const char *const ui_trace_names[UI_TRACE_COUNT]         = { "Linear", "Dots", "Peak", "Pro" };
+const char *const ui_acq_pass_label = "Pass time";
+const char *const ui_run_label[2]    = { "Stopped", "RUN" };
+
+const char *const ui_trace_names[UI_TRACE_COUNT]         = { "Linear", "Dots", "Peak" };
 const char *const ui_view_names[2]                       = { "Normal", "X-Y" };
 const char *const ui_spec_view_names[UI_SPEC_VIEW_COUNT] = { "Spectrum", "Waterfall", "Density" };
 const char *const ui_spec_chan_names[3]                  = { "CH1", "CH2", "CH1 + CH2" };

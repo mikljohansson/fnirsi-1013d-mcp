@@ -27,6 +27,7 @@
 #include "ui_settings.h"
 #include "ui_ctrl.h"
 #include "ctrl_page.h"
+#include "ui_diag_view.h"
 
 //USB drive screen: the Exit button (fw 0.2.51)
 #define USB_EXIT_X     610
@@ -538,26 +539,15 @@ void scope_control_button(int mode)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//fw 0.2.63 (owner): a two-state button showing the state, a tap changes it (ui_ctrl.h): green "RUN" while running,
+//amber "Stopped" while stopped (red is for destructive actions), black text; orange while touched as every bar button
 void scope_run_stop_button(int mode)
-{ 
-  //Check if inactive or active mode
-  if(mode == 0)
-  {
-  //Check if run or stop mode  
-  if(scopesettings.runstate) //ok
-    {//Run mode:Green box
-    display_set_fg_color(GREEN_COLOR);
-    }    
-    else 
-    {//Stop mode:Red box 
-    display_set_fg_color(RED_COLOR);
-    }
-  }
-  else
-  {
-    //Orange color for activated button
-    display_set_fg_color(ITEM_ACTIVE_COLOR);
-  }
+{
+  int         run = scopesettings.runstate ? 1 : 0;
+  const char *s = ui_run_label[run];
+  PFONTDATA   f = run ? &font_3 : &font_2;
+
+  display_set_fg_color(mode ? ITEM_ACTIVE_COLOR : run ? GREEN_COLOR : UI_C_AMBER);
 
   //Draw the body of the button
   display_fill_rounded_rect(739, 65, 51, 50, 2);
@@ -565,25 +555,10 @@ void scope_run_stop_button(int mode)
   //Draw the edge
   display_set_fg_color(0x00505050);
   display_draw_rounded_rect(739, 65, 51, 50, 2);
-        
-  //Check if inactive or active mode
-  if(mode == 0)
-  {
-      //Check if run or stop mode - Run mode: black text 
-    if(scopesettings.runstate) display_set_fg_color(BLACK_COLOR);//ok
-          //Stop mode: white text
-          else display_set_fg_color(WHITE_COLOR);  
-  }
-  else
-  {
-    //Black text color for activated button
-    display_set_fg_color(BLACK_COLOR);
-  }
 
-  //Display the text
-  display_set_font(&font_3);
-  display_text(746, 75, "RUN/");
-  display_text(746, 90, "STOP");
+  display_set_fg_color(BLACK_COLOR);
+  display_set_font(f);
+  display_text(765 - ui_text_width(f, s) / 2, 65 + (50 - f->height) / 2, (int8 *)s);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -2683,10 +2658,12 @@ void scope_battery_status(void)
     }
   }
   //*/
-  //Copy it to the actual screen
+  //Copy it to the actual screen; while Diagnostics shows, to the scope screen kept under it (fw 0.2.63: the icon was
+  //drawn over the Diagnostics header)
   display_set_source_buffer(displaybuffertmp);//1
-  display_set_screen_buffer((uint16 *)maindisplaybuffer);
+  display_set_screen_buffer(ui_diag_scope_buffer());
   display_copy_rect_to_screen(701, 5, 25, 13);//700 5 26 13
+  display_set_screen_buffer((uint16 *)maindisplaybuffer);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -2733,16 +2710,37 @@ void scope_open_main_menu(void)
 //----------------------------------------------------------------------------------------------------------------------------------
 //Main menu row icons without a bitmap, drawn in the current colour at the top of the row's button (y)
 
-//Scope: one period of a square wave
+//Scope: one period of a sine wave (fw 0.2.63, owner; a square wave before), 25 px wide, 22 px high: the rounded
+//17.5 - 10.5 sin(2 pi x / 24) per column, neighbouring columns joined so the 1 px stroke has no gaps
 static void scope_main_menu_wave_icon(uint32 y)
 {
-  uint32 x = MAIN_MENU_XPOS + 15;
+  static const uint8 sine[25] = { 18, 15, 12, 10, 8, 7, 7, 7, 8, 10, 12, 15, 18, 20, 23, 25, 27, 28, 28, 28, 27, 25, 23,
+                                  20, 18 };
+  uint32 x = MAIN_MENU_XPOS + 15, i;
 
-  display_draw_horz_line(y + 28, x, x + 6);
-  display_draw_vert_line(x + 6, y + 7, y + 28);
-  display_draw_horz_line(y + 7, x + 6, x + 18);
-  display_draw_vert_line(x + 18, y + 7, y + 28);
-  display_draw_horz_line(y + 28, x + 18, x + 25);
+  for(i = 1; i < sizeof(sine); i++)
+    display_draw_line(x + i - 1, y + sine[i - 1], x + i, y + sine[i]);
+}
+
+//Settings: a cogwheel (fw 0.2.63, owner), 21 x 21 px around (cx, cy): a ring from radius 3 to 7, four straight teeth
+//5 px wide out to 10 px and four diagonal ones of the same width out to radius 9.9, drawn pixel by pixel
+static void scope_main_menu_cog_icon(uint32 y)
+{
+  int32 cx = MAIN_MENU_XPOS + 27, cy = y + 18, dx, dy, r2, d1, d2;
+
+  for(dy = -10; dy <= 10; dy++)
+  {
+    for(dx = -10; dx <= 10; dx++)
+    {
+      r2 = dx * dx + dy * dy;
+      d1 = dx - dy;
+      d2 = dx + dy;
+
+      if((r2 > 9) && ((r2 <= 50) || ((dy >= -2) && (dy <= 2)) || ((dx >= -2) && (dx <= 2)) ||
+                      (((d1 * d1 <= 8) || (d2 * d2 <= 8)) && (r2 <= 98))))
+        display_draw_pixel(cx + dx, cy + dy);
+    }
+  }
 }
 
 //Spectrum analyser: a base line with spectral lines (fw 0.2.28)
@@ -2778,7 +2776,7 @@ void scope_main_menu_item(int row, int mode)
     case UI_MM_SPECTRUM:    scope_main_menu_spectrum_icon(y); break;
     case UI_MM_PICTURES:    display_copy_icon_use_colors(picture_view_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
     case UI_MM_WAVEFORMS:   display_copy_icon_use_colors(waveform_view_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
-    case UI_MM_SETTINGS:    display_copy_icon_use_colors(system_settings_icon, MAIN_MENU_XPOS + 19, y + 5, 15, 25); break;
+    case UI_MM_SETTINGS:    scope_main_menu_cog_icon(y); break;
     case UI_MM_DIAGNOSTICS: display_copy_icon_use_colors(diagnostic_view_icon, MAIN_MENU_XPOS + 15, y + 4, 24, 24); break;
     default:                display_copy_icon_use_colors(usb_icon, MAIN_MENU_XPOS + 18, y + 2, 18, 25); break;
   }
@@ -6233,7 +6231,6 @@ void scope_open_system_settings_menu(void)
   //Display the menu items
   scope_system_settings_screen_brightness_item(0);
   scope_system_settings_grid_brightness_item(0);
-  scope_system_settings_filemsg_item(0);
 
   if(sys_fo_rtc())
     scope_system_settings_RTC_settings_item(0);
@@ -6440,15 +6437,6 @@ static void sys_fo_row(int id, int mode, const uint8 *icon, uint32 iconh, const 
 void scope_system_settings_other_settings_item(int mode)
 {
   sys_fo_row(UI_FO_OTHER, mode, Other_settings_icon, 24, "Other", "settings", 0);
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-//File message timeout: 1.00o5's "Notification confirmation" (scopesettings.confirmationmode), which decides whether
-//file messages such as "Failed to create file" wait for a tap or close after 0.7 s
-void scope_system_settings_filemsg_item(int mode)
-{
-  sys_fo_row(UI_FO_FILEMSG, mode, confirmation_icon, 24, "File message", "timeout", scopesettings.confirmationmode ? "tap" : "0.7 s");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
