@@ -1033,4 +1033,22 @@ Newest entries at the bottom. Format: date, who, what, result.
   backups/fw-0.2.78_195afb82.bin; firmware host tests, 102 vectors, mcp ruff and 428 pytest green on the merged tree. This is the
   morning's FEL image. Bench list: firmware/AGENTS.md section 53 (each menu / fold-out / dialog / screen closes on a host command
   with the note; wizard mid-measurement keeps E_BUSY detail 3; keypad half-typed keeps the old frequency; counters 68-69).
+- 2026-10-20 00:30: bitstream 0x153A (fpga-gen9, Fable) merged (a0a1bfe) and pinned: backups/al3_cap_0x153A_75e0ef21.bin sha256
+  75e0ef21526248ecc2a7a47231abddf59b77d8075917c460a9630ee97cf3ddde (= fpga/al3/dist/al3-0x153A.bin, status unbenched), padded
+  backups/al3_cap_0x153A_75e0ef21_padded.bin sha256 77672b5a38f2225e98cdecd7de012850121b6343525392d973e41d39b42719d0. Review
+  verdict: gen8's diagnosis confirmed by re-timing the placed 0x1538 / 0x1539 designs with zero I/O delays (0x1539 sampled the
+  A pins 0.8..1.4 ns inside the AD9288 transition); gen8's fix kept but corrected: the A cores are encoded on the falling write
+  clock edge, so their window moves with the sample rate (gen8's stages were right at 200 / 100 MSa/s and inside the A transition
+  at 50 MSa/s), and the 6:1 pick was a half-cycle path with +0.12 ns slack. 0x153A: A cores captured against the falling edge, B
+  against the rising one, stage registers on wire-only 2.5 ns paths, B first by T/2 at every rate by construction, >= 1.33 ns on
+  both sides of the worst-case window at the power-on stages (0x08E4), a wrong stage garbles loudly and the 0x36 counters show
+  it. Timing: clk_200MHz +0.051 ns (Atlan4's divider-compare path, a placement lottery), the other clocks clean. Testbench: eleven
+  steps all pass on seeds 12345 and 3, incl. the new tb_adccap (2274 checks: AD9288 transition model, pad delay 2..12 ns, both
+  corners, both B models, all rates). Flash session (owner present, FT2232D on J2, battery, USB unplugged): the pre-write double
+  read must equal the pinned 0x1539 padded image 22db7b91...; write the 0x153A padded image; rollback = 0x1539 padded; then
+  fw 0.2.78 FEL-load and fpga/al3/README.md section 10 items 1..7 (0x36 zero at a quiet input, the dcoffset sweep 126..146 at
+  200 / 100 / 50 / 20 MSa/s, the RC Frequency response, the wizard at zero 128, training vs 0x08E4 and the reference-bit test,
+  EXT offsets, warm run). Firmware side (fw-cap dispatched): detect 0x153A, EXT offsets (+4 words at 200 MSa/s, +3 divided;
+  K >= 1 +40 ns), 0x53 bits 3/4 inert, training via 0x63 / 0x64 / 0x36 at code 128 stored with the calibration, 0x36 in
+  GET_HEALTH and Diagnostics, wizard zero back at 128.
 

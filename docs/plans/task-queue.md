@@ -78,7 +78,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   screen after fw 0.2.70 (every page carries a "to be written after fw 0.2.70" note); (3) the six articles in
   docs/articles/index.md; (4) agent guide worked examples with plots and the command that made each; (5) README screenshot block
   can point at docs/screenshots/*.png.
-- [~] **FPGA ADC data capture window (was: MCU-readout bit mixing)** (0x1539 flashed 20:06: readout fixed, capture window still wrong on the A cores; 0x153A = programmable capture phase + training, fpga-gen8) (root cause of the wizard failure, bench 18:35; 0x1539 fix by fpga-gen8 first, features after; fw-cal5 workaround: zero measured off-centre; a flash session follows). Was: **Wizard measurement setup fault** (fw-cal5 running, 10-19 18:00): zero step fails on 0x1538 with clean host data; see
+- [x] **FPGA ADC data capture window (was: MCU-readout bit mixing)** (0x153A merged 10-20 00:30, flash pending) (0x1539 flashed 20:06: readout fixed, capture window still wrong on the A cores; 0x153A = programmable capture phase + training, fpga-gen8) (root cause of the wizard failure, bench 18:35; 0x1539 fix by fpga-gen8 first, features after; fw-cal5 workaround: zero measured off-centre; a flash session follows). Was: **Wizard measurement setup fault** (fw-cal5 running, 10-19 18:00): zero step fails on 0x1538 with clean host data; see
   hardware-status 17:55. Deliverable includes a host-triggerable dry run so the coordinator can verify without the owner.
 - [x] **Frequency response mode UI** (0.2.69, bench pending; follow-ups above) (design docs/plans/bode-ui.md + artifact DfydC8HJgnemUw3EHenTGP; owner 19:15: variant 2 one pane two y axes without legend, "calibration post" in the instruction, frequency axis Log/Linear in the Display fold-out, two flagged cursors C1/C2 with the bottom-left readout box and delta row kept (19:25), Display variants Overlaid / Magnitude / Phase; questions 1-5 per the coordinator's recommendations; fw-freq dispatched as 0.2.69 together with the 10 samples/div viability minimum). Was: **Bode mode UI redesign** (owner 10-19 18:50: fw-bode remapped RUN/STOP and AUTO SET to sweep control, which breaks the fixed
   right-bar meanings; a designer (ux-bode, Opus) is producing the Bode mode mockup: action page with the standard slot meanings,
@@ -419,6 +419,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   sweep. Open (queue): the simulator lacks reason 8 and the new header rule (mcp item); a single sweep started from the CTRL page
   leaves the bar on that page where RUN/STOP is not visible (owner to decide: jump back to page one?); after a sweep the generator
   chip shows the user's generator although the pin is off. Loaded 21:30 as backups/fw-0.2.71_1264e26c.bin; walk-through pending.
+- fpga-gen9 (Fable, done 10-20 00:25, about 640k tokens, merged 00:30 as bitstream 0x153A, handoff fpga/al3/AGENTS.md "0x153A
+  review" and "0x153A status"; images pinned, dist entry unbenched): see hardware-status 00:30. Next for the FPGA: flash + bench;
+  0x153B = gen8-features-wip (trigger types, peak detect, counter) on top of this design; wanted: pipeline the divider compare,
+  encodes into IOB ODDRs, zero the simulation-only initial values.
+- fw-cap (Opus, branch fw-cap, dispatched 00:35, fw 0.2.79 provisional): firmware for 0x153A (detection, EXT offsets, training
+  with 0x63 / 0x64 / 0x36 stored with the calibration, 0x36 in GET_HEALTH and Diagnostics, 0x53 bits 3/4) and the wizard zero
+  point back at code 128.
 - fw-yield (done 10-19 23:50, about 420k tokens, merged 2026-10-20 00:02 as fw 0.2.78 / protocol 1.23 row 63, handoff firmware/AGENTS.md
   section 53, pinned backups/fw-0.2.78_195afb82.bin, not loaded: scope off): a main-loop request while the UI is modal sets a yield
   flag, every menu / fold-out / dialog / screen / wizard-between-steps leaves by its cancel path, "Host command: menu closed" 4 s,
