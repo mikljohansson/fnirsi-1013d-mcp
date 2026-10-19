@@ -1911,49 +1911,39 @@ void scope_run_stop_text(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//fw 0.2.53 top bar chip (docs/ui-guidelines.md section 3): the grey parameter box over the whole chip, then the coloured
+//block drawn over its left end, rounded only on its outer corners, so the join has no notch. The box is white while the
+//chip is touched (1.00o5's active look), grey otherwise.
+static void scope_chip(uint32 x, uint32 block_w, uint32 w, uint32 block, int active)
+{
+  display_set_fg_color(active ? WHITE_COLOR : LIGHTGREY_COLOR);
+  display_fill_rounded_rect(x, CH_BUTTON_YPOS, w, CH_BUTTON_HEIGHT, 2);
+
+  display_set_fg_color(block);
+  display_fill_rounded_rect(x, CH_BUTTON_YPOS, block_w, CH_BUTTON_HEIGHT, 2);
+  display_fill_rect(x + block_w - 2, CH_BUTTON_YPOS, 2, CH_BUTTON_HEIGHT);
+}
+
 void scope_channel_settings(PCHANNELSETTINGS settings, int mode)
 {
   int8 **vdtext = 0;
+  uint32 block;
 
   //Clear the area first
   display_set_fg_color(BLACK_COLOR);
   display_fill_rounded_rect(settings->buttonxpos, CH_BUTTON_YPOS, CH_BUTTON_BG_WIDTH, CH_BUTTON_BG_HEIGHT, 2);
 
-  //Check if channel is enabled or disabled
+  //Block colour: grey while the channel is off (light grey touched), the channel colour while on (black when inverted),
+  //the touched colour while touched
   if(settings->enable == 0)
-  {
-    //Disabled so off colors
-    //Check if inactive or active
-    if(mode == 0)
-    {
-      //Inactive, grey menu button
-      display_set_fg_color(GREY_COLOR);
-    }
-    else
-    {
-      //Active, light grey menu button
-      display_set_fg_color(LIGHTGREY2_COLOR);//0x00BBBBBB
-    }
-  }
+    block = mode ? LIGHTGREY2_COLOR : GREY_COLOR;
+  else if(mode == 0)
+    block = settings->invert ? BLACK_COLOR : settings->color;
   else
-  {
-    //Enabled so on colors
-    //Check if inactive or active
-    if(mode == 0)
-    {
-      //Inactive, channel 1 color menu button (inactive & invert channel = black button)
-      if (settings->invert) { display_set_fg_color(BLACK_COLOR);}
-        else { display_set_fg_color(settings->color);  }// ak invert black
-    }
-    else
-    {
-      //Active, blue menu button
-      display_set_fg_color(settings->touchedcolor);
-    }
-  }
+    block = settings->touchedcolor;
 
-  //Fill the button
-  display_fill_rounded_rect(settings->buttonxpos, CH_BUTTON_YPOS, CH_BUTTON_WIDTH, CH_BUTTON_HEIGHT, 2);
+  //fw 0.2.53: the chip construction (grey box, block over it, no notch)
+  scope_chip(settings->buttonxpos, CH_BUTTON_WIDTH, CH_BUTTON_BG_WIDTH, block, mode != 0);
 
   //Select the font for the text
   display_set_font(&font_2);
@@ -1961,7 +1951,7 @@ void scope_channel_settings(PCHANNELSETTINGS settings, int mode)
   //Check if inactive or active
   if(mode == 0)
   {
-    //Inactive, black text (inactive & invert channel = yellow text)
+    //Inactive, black text (inactive & invert channel = yellow text in a yellow outline)
     if ((settings->invert)&&(settings->enable)) {display_set_fg_color(settings->color); display_draw_rounded_rect(settings->buttonxpos, CH_BUTTON_YPOS, CH_BUTTON_WIDTH, CH_BUTTON_HEIGHT, 2);}
         else display_set_fg_color(BLACK_COLOR);//zlty text ak inver kanal
   }
@@ -1969,9 +1959,6 @@ void scope_channel_settings(PCHANNELSETTINGS settings, int mode)
   {
     //Active, white text
     display_set_fg_color(WHITE_COLOR);
-
-    //Fill the settings background
-    display_fill_rounded_rect(settings->buttonxpos + 30, CH_BUTTON_YPOS, CH_BUTTON_BG_WIDTH - 30, CH_BUTTON_BG_HEIGHT, 2);
   }
 
   //Display the channel identifier text
@@ -2085,38 +2072,15 @@ void scope_acqusition_settings(int mode)
   display_set_fg_color(BLACK_COLOR);
   display_fill_rounded_rect(ACQ_BUTTON_XPOS, ACQ_BUTTON_YPOS, ACQ_BUTTON_BG_WIDTH, ACQ_BUTTON_BG_HEIGHT, 2);
 
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive, short time base green menu button, if long time base orange
-    if (scopesettings.long_mode) display_set_fg_color(ORANGE_COLOR); else display_set_fg_color(GREEN_COLOR);
-  }
-  else
-  {
-    //Active, magenta menu button
-    display_set_fg_color(MAGENTA_COLOR);
-  }
-
-  //Fill the button
-  display_fill_rounded_rect(ACQ_BUTTON_XPOS, ACQ_BUTTON_YPOS, ACQ_BUTTON_WIDTH, ACQ_BUTTON_HEIGHT, 2);
+  //fw 0.2.53: the chip construction. Block: green for the short time bases, orange in roll mode, magenta while touched
+  scope_chip(ACQ_BUTTON_XPOS, ACQ_BUTTON_WIDTH, ACQ_BUTTON_BG_WIDTH,
+             mode ? MAGENTA_COLOR : scopesettings.long_mode ? ORANGE_COLOR : GREEN_COLOR, mode != 0);
 
   //Select the font for the text
   display_set_font(&font_2);
 
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive, black text
-    display_set_fg_color(BLACK_COLOR);
-  }
-  else
-  {
-    //Active, white text
-    display_set_fg_color(WHITE_COLOR);
-
-    //Fill the settings background
-    display_fill_rounded_rect(ACQ_BUTTON_XPOS + 30, ACQ_BUTTON_YPOS, ACQ_BUTTON_BG_WIDTH - 30, ACQ_BUTTON_BG_HEIGHT, 2);
-  }
+  //Black text in the block, white while touched
+  display_set_fg_color(mode ? WHITE_COLOR : BLACK_COLOR);
 
   //Display the acquisition identifier text
   if (scopesettings.long_mode)
@@ -2331,40 +2295,16 @@ void scope_trigger_settings(int mode)
   display_set_fg_color(BLACK_COLOR); //LIGHTGREY_COLOR       
   display_fill_rounded_rect(TRIGGER_BUTTON_XPOS, TRIGGER_BUTTON_YPOS, TRIGGER_BUTTON_BG_WIDTH, TRIGGER_BUTTON_BG_HEIGHT, 2);
 
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive, green menu button
-    display_set_fg_color(TRIGGER_COLOR);
-  }
-  else
-  {
-    //Active, magenta menu button
-    display_set_fg_color(MAGENTA_COLOR);
-  }
-
-  //Fill the button left side
-  display_fill_rounded_rect(TRIGGER_BUTTON_XPOS, TRIGGER_BUTTON_YPOS, TRIGGER_BUTTON_WIDTH, TRIGGER_BUTTON_HEIGHT, 2);
+  //fw 0.2.53: the chip construction (one grey box behind the green block, no notch; it had its own rounded box before).
+  //Block green, magenta while touched
+  scope_chip(TRIGGER_BUTTON_XPOS, TRIGGER_BUTTON_WIDTH, TRIGGER_BUTTON_BG_WIDTH, mode ? MAGENTA_COLOR : TRIGGER_COLOR, mode != 0);
 
   //Select the font for the text
   display_set_font(&font_4);
 
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive, black text
-    display_set_fg_color(LIGHTGREY_COLOR);
-  }
-  else
-  {
-    //Active, white text
-    display_set_fg_color(WHITE_COLOR);
-  }
-  
-  //Fill the settings background
-  //display_fill_rounded_rect(TRIGGER_BUTTON_XPOS+31, TRIGGER_BUTTON_YPOS, 48, 35, 2);//591 5 48 35
-  display_fill_rounded_rect(TRIGGER_BUTTON_XPOS+TRIGGER_BUTTON_WIDTH, TRIGGER_BUTTON_YPOS, 48, 35, 2);//31+48 79
-  
+  //"T" and the edge symbol in the box colour: dark grey on the block, white while touched
+  display_set_fg_color(mode ? WHITE_COLOR : LIGHTGREY_COLOR);
+
   //Display the channel identifier text
   display_text(TRIGGER_BUTTON_XPOS+12, TRIGGER_BUTTON_YPOS+10, "T");
 
