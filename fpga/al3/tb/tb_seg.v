@@ -60,14 +60,15 @@ module tb;
     .o_offset_2(d_o2), .o_relay2_1(d_r21), .o_relay2_2(d_r22), .o_relay2_3(d_r23), .o_ac_dc_2(d_ac2),
     .o_pwm_display(d_pwm));
 
-  // 0x153A: the dut registers each core's pins on clk_200MHz at its own phase and hands them to the capture logic one
-  // write clock later (adc*_w). The reference (which takes the pins on the write clock edge) gets exactly those values,
-  // 1 ns after each write clock edge, so both capture the same samples and the comparison below stays exact.
+  // 0x153A: the dut registers each core's pins on clk_200MHz at its own phase and hands them to the capture logic as
+  // adc*_w, loaded on the rising write clock edge. The reference (which takes the pins on that edge) gets exactly those
+  // values 0.2 ns after each edge (shorter than the 0.37 ns phase of the equivalence sampler below), so both capture the
+  // same samples on the same edges and the comparison stays exact.
   reg [7:0] r_adc1A = 0, r_adc1B = 0, r_adc2A = 0, r_adc2B = 0;
-  always @(dut.adc1A_w) r_adc1A <= #1 dut.adc1A_w;
-  always @(dut.adc1B_w) r_adc1B <= #1 dut.adc1B_w;
-  always @(dut.adc2A_w) r_adc2A <= #1 dut.adc2A_w;
-  always @(dut.adc2B_w) r_adc2B <= #1 dut.adc2B_w;
+  always @(dut.adc1A_w) r_adc1A <= #0.2 dut.adc1A_w;
+  always @(dut.adc1B_w) r_adc1B <= #0.2 dut.adc1B_w;
+  always @(dut.adc2A_w) r_adc2A <= #0.2 dut.adc2A_w;
+  always @(dut.adc2B_w) r_adc2B <= #0.2 dut.adc2B_w;
 
   fnirsi_1013D_ref refd (
     .i_xtal(i_xtal), .i_mcu_clk(mcu_clk), .i_mcu_rws(mcu_rws), .i_mcu_dcs(mcu_dcs),
@@ -534,7 +535,7 @@ module tb;
         wr4(8'h5C, $random(seed) & 32'h000003FF);
         wr1(8'h5D, $random(seed));
         wr1(8'h56, 8'h00);
-        wr1(8'h53, {3'd0, rnd2[5:4], rnd[7], kr});
+        wr1(8'h53, {3'd0, 2'b00, rnd[7], kr});        // 0x153A: bits 3 / 4 are inert in the dut, keep the reference equal
         wr1(8'h54, shr);
         wr2(8'h55, (kr == 0) ? $random(seed) : (16'd128 << (rnd2[7:6])) + rnd2[31:20]);
         wr1(8'h15, {6'd0, rnd[9:8]});
