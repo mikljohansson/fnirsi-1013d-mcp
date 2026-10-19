@@ -69,7 +69,8 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   interrupt (`pc_usbw.c`, host test `test_usbw`) now treats SOFs, an EP0 setup or an EP2 OUT packet while suspended
   as a resume (0.2.44 only logged the SOF case, from the main loop), and re-enumerates a device the host abandoned:
   D+ pull-up off for 1 s and on again (soft reconnect), after a host's retry storm went quiet for 10 s (doubling
-  back-off) or 15 min into a suspend, once per enumeration (c20b657, 46d9817, 46f3db2).
+  back-off) or 15 min into a suspend, once per enumeration and doubling up to 8 h until an application opens the
+  port again (c20b657, 46d9817, 46f3db2, e77785c).
 - Added: GET_LINK_STATS counters 60-61 (n = 62): resumes inferred without a RESUME interrupt, soft reconnects;
   event type 20 (soft disconnect: reason, back-off level, suspends, seconds suspended); type 3 a bits 6-5 = what
   ended an inferred resume. Protocol 1.14, section 14 row 53 (3b50641); mcp decodes them (f3763cc).
