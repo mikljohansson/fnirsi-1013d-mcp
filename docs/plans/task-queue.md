@@ -6,6 +6,15 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **ACQ: sample rate vs time/div coupling** (owner 10-19 14:30, 1 kHz cal signal: after changing the sample rate in the ACQ menu
+  the old time/div stays selected although drawn grey; the trace is cut off, zeros show past the record end, the slider scrolls
+  before the trace, the shape changes). Cause: Atlan design, statemachine.c handle_acquisition_menu_touch sets the FPGA rate without
+  touching timeperdiv, the time/div tap in the menu sets only the display scale, viable_time_per_div[29][35] (variables.c:430) only
+  colours the boxes; only plot tap-zoom couples the two via time_per_div_sample_rate. Fix after UI step 2 (fw-ui2 edits the ACQ
+  menu now): snap timeperdiv to the nearest viable value when the rate changes and show the snap, make non-viable boxes
+  unavailable, clamp the record slider to the record, derive viability from the real record length (memory depth) instead of the
+  table, apply the same rule to SET_TIMEBASE / the protocol path, and check the resampling and zero-fill code for the exact
+  cut-off and scroll behaviour.
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
@@ -175,7 +184,17 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Dispatched
 
-- fw-ui1 (worktree, Opus, started 10-19 13:15): UI makeover step 1 (menu rows, USB drive screen, version string out, Phosphor/X-Y
+- Swarm started 10-19 14:05 after step 1 merged (owner: ship the whole roadmap before the announcement, one big splash; front-load
+  everything that needs no hardware). Provisional firmware numbers, renumbered at merge: fw-readers 0.2.52 / protocol 1.16,
+  fw-ui2 0.2.53 (step 2: CTRL fold-outs, steppers, strips to cards, chips, ACQ Display row removed), fw-touch1 0.2.54 (touch-review
+  c1), fw-ui3 0.2.55 (step 3: settings fold-out trim, Settings screen, delete dialog), fw-seg 0.2.56 / protocol 1.17 rows 70+
+  (0x1536 firmware support, phosphor fast-capture design note), fpga-gen6 (trigger determinism testbench, 0x1536 contract tb,
+  0x1537 if the FPGA is at fault), docs-gen3 (Sonnet: protocol tidy, README timings, roadmap.md, announcement draft,
+  release-readiness.md). Queued behind them: fw-ui4 (step 4, needs fw-readers), Measurements v2 (needs step 2), touch batches 2-3,
+  mcp 1.16/1.17, Bode device steps (after the owner's Bode bench), 0.3.0 release.
+- fw-ui1 (done 14:00, about 365k tokens, retired): step 1 merged 9cc599c as fw 0.2.51, images pinned backups/fw-0.2.51_acf88fee.bin
+  and fw-0.2.51-nommu_e011d597.bin, host tests 1513 checks OK; bench walk-through in firmware/AGENTS.md section 29, not yet loaded.
+  Was: UI makeover step 1 (menu rows, USB drive screen, version string out, Phosphor/X-Y
   Display box in ACQ as the interim, strips without Scope/Auto, AUTO SET = spectrum Auto, cards in the final scheme with standard
   names, phosphor warnings top-middle); fw 0.2.51.
 - fw-readers (worktree, Opus, started 10-19 13:15): the diagnostics data readers (USB link state, card image identity, calibration

@@ -6025,8 +6025,8 @@ void scope_save_configuration_data(void)
   //Write it to the flash
   //sys_spi_flash_write(0x001FD000, (uint8 *)settingsworkbuffer, sizeof(settingsworkbuffer));
 #else
-  //Write the data to its sector on the SD card
-  sd_card_write(SETTINGS_SECTOR, 1, (uint8 *)settingsworkbuffer);
+  //Write the data to its sector on the SD card; the result for the diagnostics (fw 0.2.52)
+  PC_SETTINGS_SAVED(sd_card_write(SETTINGS_SECTOR, 1, (uint8 *)settingsworkbuffer));
 #endif
 }
 
@@ -6147,6 +6147,9 @@ void scope_load_input_calibration_data(void)
         adc_cal_loaded = 0;
         calibrationfail = 1;    //Ready to input calibration
     }
+
+    //Calibration provenance as stored (fw 0.2.52, pc_diag.c)
+    PC_CAL_LOADED((uint8 *)buffer);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -6185,6 +6188,9 @@ void scope_save_input_calibration_data(void)
     //Calibration data v2 block (not part of the 1.00o5 checksum; an older firmware's save writes zeros here)
     if(adc_cal_loaded)
       acal_pack(adc_cal, (uint8 *)buffer + ACAL_SECTOR_OFFSET);
+
+    //Calibration provenance after the block, stamped when the block is new (fw 0.2.52, pc_diag.c)
+    PC_CAL_SAVE((uint8 *)buffer);
 
      //Calculate a checksum over the settings data
     for(index=8;index<60;index++)   //40
@@ -6537,6 +6543,8 @@ void scope_save_config_data(void)
   settingsworkbuffer[PC_SETTING_WORD_SPEC1] = pc_glue_spectrum_setting_word(1);
   //Phosphor view settings (persistence, palette)
   settingsworkbuffer[PC_SETTING_WORD_PHOS] = pc_glue_phosphor_setting_word();
+  //Unit life record, words 224..255 (fw 0.2.52, pc_diag.c)
+  PC_SETTINGS_STORE(settingsworkbuffer);
   
   
 //-----------------------------------------------------------------

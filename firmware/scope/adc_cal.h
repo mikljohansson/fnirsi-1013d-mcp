@@ -75,6 +75,40 @@ uint8_t *acal_pack_channel(const acal_channel *c, uint8_t *p);        //one chan
 int      acal_unpack(const uint8_t *block, acal_channel ch[2]);       //ACAL_OK, ACAL_E_MAGIC, ACAL_E_VERSION, ACAL_E_CRC
 uint32_t acal_crc32(const uint8_t *data, uint32_t len);
 
+//Calibration provenance (fw 0.2.52, protocol row 55): sector 708 bytes 432..487, after the v3 block and outside its CRC,
+//so the v3 block and its version stay as 0.2.45-0.2.51 read them. Written with the block when a save carries a block that
+//differs from the one loaded or last saved (a calibration's Done); kept by saves of an unchanged block.
+#define ACAL_PROV_OFFSET     (ACAL_SECTOR_OFFSET + ACAL_BLOCK_BYTES)   //432
+#define ACAL_PROV_MAGIC      0x56525041u  //"APRV"
+#define ACAL_PROV_VERSION    1
+#define ACAL_PROV_BYTES      56
+#define ACAL_PROV_CH1_ZERO   0x01         //what: the parts this calibration wrote
+#define ACAL_PROV_CH1_GAIN   0x02
+#define ACAL_PROV_CH2_ZERO   0x04
+#define ACAL_PROV_CH2_GAIN   0x08
+
+typedef struct
+{
+  uint32_t build;                         //commit hash of the firmware that calibrated
+  char     version[16];                   //its version string (NUL-padded)
+  uint16_t fpga;                          //FPGA version word (command 0x06)
+  uint8_t  what;                          //ACAL_PROV_*
+  uint8_t  rtc;                           //1: time[] is from the DS3231 module
+  uint32_t uptime_ms;
+  uint32_t power_on;                      //unit life record (pc_life.h); 0 = unknown
+  uint32_t minutes;                       //operating minutes; 0 with an unknown record
+  uint8_t  time[6];                       //yy mm dd hh mm ss, zeros without a module
+} acal_prov;
+
+#define ACAL_PROV_NONE       0            //acal_prov_unpack results (GET_CAL byte 288)
+#define ACAL_PROV_VALID      1
+#define ACAL_PROV_BAD        2            //magic present, version or CRC wrong
+
+void     acal_prov_pack(const acal_prov *p, uint8_t *out);                  //ACAL_PROV_BYTES
+int      acal_prov_unpack(const uint8_t *in, acal_prov *p);                 //ACAL_PROV_*; p zeroed unless VALID
+//The parts that differ between two blocks' channels (ACAL_PROV_* bits), 0 = same calibration
+uint8_t  acal_prov_what(const acal_channel old[2], const acal_channel cur[2]);
+
 //1 when c was measured at exactly these PWM centres (cal_offset[0..5])
 int      acal_bound(const acal_channel *c, const uint16_t *cal_offset);
 

@@ -690,3 +690,7 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 13:05 fw 0.2.50 (e54d29df, MMU) FEL-loaded: #VER fw=0.2.50 proto=1.15 fpga=0x1535; GET_CAL 288 bytes, version 3, flags 0x0F on both
   channels (the 08:15 v3 block is still read), tracker flags 0x00 (no full-rate records yet), pass_ms 15. Wizard walk-through with the
   owner next (README 6.4).
+
+- 2026-10-19 14:00: fw 0.2.51 (UI makeover step 1, merge 9cc599c) built with GCC 10, MMU image sha256 acf88fee1005c1c70ef5793293200eaa3b1e5b18d1ab3a7ea092e1818da83664,
+  nommu e011d59776ad1c0cc41c9b0be55e0be8668bd90dbbe916495868e2db99ee571a, pinned in backups/. Not loaded: the scope still runs 0.2.50 in RAM with
+  the two-hour idle USB soak on COM10 (ends about 15:15). Walk-through for the owner: firmware/AGENTS.md section 29.

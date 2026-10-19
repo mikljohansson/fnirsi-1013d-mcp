@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include "pc_hal.h"
 #include "pc_protocol.h"
+#include "pc_ident.h"
 
 #define MOCK_RING_MAX 8192
 #define MOCK_SD_SECTORS 4096                //2 MiB card model, partition at 2048 unless a test changes the MBR
@@ -94,6 +95,19 @@ typedef struct
   uint32_t tx_since;
   uint32_t tx_aborts;
   uint32_t fel_entries;
+
+  //Diagnostics readers (1.16)
+  pc_hw_usb  usb;
+  uint32_t   cp15;
+  pc_hw_life life;
+  uint32_t   life_clears;
+  uint32_t   restart_tests;         //pc_hal_restart_test calls
+  int        prov_state;
+  uint8_t    prov_raw[ACAL_PROV_BYTES];
+  char      *report;                //last report text written (NUL-terminated)
+  uint32_t   report_len;
+  uint32_t   report_writes;
+  int        report_fail;           //FRESULT to return
 } mock_state;
 
 extern mock_state mock;
