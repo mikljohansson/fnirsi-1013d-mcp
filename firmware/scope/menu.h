@@ -89,11 +89,7 @@ void scope_battery_status(void);
 //----------------------------------------------------------------------------------------------------------------------------------
 
 void scope_open_main_menu(void);
-void scope_main_menu_system_settings(int mode);
-void scope_main_menu_picture_view(int mode);
-void scope_main_menu_waveform_view(int mode);
-void scope_main_menu_diagnostic_view(int mode);
-void scope_main_menu_usb_connection(int mode);
+void scope_main_menu_item(int row, int mode);           //fw 0.2.51: row UI_MM_* of ui_menu.h
 //----------------------------------------------------------------------
 void scope_open_channel_menu(PCHANNELSETTINGS settings);
 void scope_channel_enable_select(PCHANNELSETTINGS settings);

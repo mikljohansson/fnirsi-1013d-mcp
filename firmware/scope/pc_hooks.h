@@ -48,10 +48,7 @@ void pc_glue_ui_capture_addr(uint32 addr); //0x14 read of the finished UI captur
 void pc_glue_ui_capture(void);        //UI finished reading a capture
 int  pc_glue_spectrum_display(void);  //fw 0.2.28: spectrum mode drew the trace area (1) instead of the traces
 int  pc_glue_spectrum_touch(void);    //touch in the trace area while the spectrum shows: 1 = handled
-int  pc_glue_main_menu_row6(uint32 y);//main menu: touch on the Spectrum analyzer row
-void pc_glue_main_menu_items(void);   //main menu drawn: add the Spectrum analyzer row
-void pc_glue_main_menu_touch(void);   //Spectrum analyzer row tapped: switch the display mode
-int  pc_glue_main_menu_height(void);  //main menu box height (variables.h MAIN_MENU_HEIGHT)
+void pc_glue_main_menu_mode(int row); //fw 0.2.51: main menu Scope or Spectrum analyser row chosen (ui_menu.h)
 int  pc_glue_phosphor_on(void);       //fw 0.2.46: the phosphor view replaces the CH1 / CH2 polylines
 void pc_glue_phosphor_draw(void);     //after the channel blocks: paint the phosphor maps and the strip
 int  pc_glue_phosphor_xy(uint32 index); //XY branch: 1 = the phosphor view drew it
@@ -91,9 +88,7 @@ uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (sco
 #define PC_SPECTRUM_DISPLAY()   do { if(pc_glue_spectrum_display()) return; } while(0)
 #define PC_SETTINGS_DEFAULTS()  pc_glue_settings_defaults()
 #define PC_SPECTRUM_TOUCH()     do { if(pc_glue_spectrum_touch()) return; } while(0)
-#define PC_MAIN_MENU_ROW6(y)    pc_glue_main_menu_row6(y)
-#define PC_MAIN_MENU_ITEMS()    pc_glue_main_menu_items()
-#define PC_MAIN_MENU_TOUCH()    pc_glue_main_menu_touch()
+#define PC_MAIN_MENU_MODE(row) pc_glue_main_menu_mode(row)
 #define PC_PHOSPHOR_SKIP()      if(!pc_glue_phosphor_on())
 #define PC_PHOSPHOR_DRAW()      pc_glue_phosphor_draw()
 #define PC_PHOSPHOR_XY(i, last) do { if(pc_glue_phosphor_xy(i)) (i) = (last); } while(0)

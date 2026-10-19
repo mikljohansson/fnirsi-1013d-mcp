@@ -20,6 +20,7 @@
 #include "display_lib.h"
 #include "DS3231.h"
 #include "menu.h"
+#include "ui_menu.h"
 #include "test.h"
 
 #include  "ref_and_math.h"
@@ -1037,6 +1038,7 @@ void scan_for_touch(void)
 void handle_main_menu_touch(void)
 {
   uint8 tmp;                            //for set boot mode
+  int   row;                            //fw 0.2.51: main menu row under the touch (ui_menu.h), -1 outside
   
   //Stay in the menu as long as there is no touch outside the menu
   while(1)
@@ -1047,17 +1049,17 @@ void handle_main_menu_touch(void)
     //Check if there is touch
     if(havetouch)
     {
-      //Check if touch within the menu field
-      if((xtouch >= MAIN_MENU_XPOS) && (xtouch <= MAIN_MENU_XPOS + MAIN_MENU_WIDTH) && (ytouch >= MAIN_MENU_YPOS) && (ytouch <= MAIN_MENU_YPOS + MAIN_MENU_HEIGHT))
+      //Check if touch within the menu field: the rows' hit areas are contiguous, one 59 px pitch each (ui_menu.h)
+      if((row = ui_mm_row_at(xtouch, ytouch)) >= 0)
       {
         //Check if on system settings
-        if((ytouch >= 46 + MAIN_MENU_DY) && (ytouch <= 105 + MAIN_MENU_DY))
+        if(row == UI_MM_SETTINGS)
         {
           //Check if already open
           if(systemsettingsmenuopen == 0)
           {
             //Set the button active
-            scope_main_menu_system_settings(1);
+            scope_main_menu_item(UI_MM_SETTINGS, 1);
             //Set the button inactive
             //scope_main_menu_diagnostic_view(0);
             
@@ -1077,13 +1079,13 @@ void handle_main_menu_touch(void)
           }
         }
         //Check if on picture view
-        else if((ytouch >= 107 + MAIN_MENU_DY) && (ytouch <= 164 + MAIN_MENU_DY))
+        else if(row == UI_MM_PICTURES)
         {
           //Close any other open menu
           close_open_menus(1);
 
           //Set the button active
-          scope_main_menu_picture_view(1);
+          scope_main_menu_item(UI_MM_PICTURES, 1);
 
           //Wait until touch is released
           tp_i2c_wait_for_touch_release();
@@ -1098,13 +1100,13 @@ void handle_main_menu_touch(void)
           return;
         }
         //Check if on waveform view
-        else if((ytouch >= 166 + MAIN_MENU_DY) && (ytouch <= 223 + MAIN_MENU_DY))//+57
+        else if(row == UI_MM_WAVEFORMS)
         {
           //Close any other open menu
           close_open_menus(1);
 
           //Set the button active
-          scope_main_menu_waveform_view(1);
+          scope_main_menu_item(UI_MM_WAVEFORMS, 1);
 
           //Wait until touch is released
           tp_i2c_wait_for_touch_release();
@@ -1119,7 +1121,7 @@ void handle_main_menu_touch(void)
           return;
         }
         //Check if on diagnostic_screen
-        else if((ytouch >= 225 + MAIN_MENU_DY) && (ytouch <= 282 + MAIN_MENU_DY))//278
+        else if(row == UI_MM_DIAGNOSTICS)
         {
           //Close any other open menu
           close_open_menus(1);
@@ -1128,7 +1130,7 @@ void handle_main_menu_touch(void)
           //systemsettingsmenuopen = 0;
           
           //Set the button active
-          scope_main_menu_diagnostic_view(1);
+          scope_main_menu_item(UI_MM_DIAGNOSTICS, 1);
           //Set the button inactive
           //scope_main_menu_system_settings(0);
 
@@ -1158,13 +1160,13 @@ void handle_main_menu_touch(void)
           
         }
         //Check if on USB connection
-        else if((ytouch >= 284 + MAIN_MENU_DY) && (ytouch <= 341 + MAIN_MENU_DY))
+        else if(row == UI_MM_USB)
         {
           //Close any other open menu
           close_open_menus(1);
 
           //Set the button active
-          scope_main_menu_usb_connection(1);
+          scope_main_menu_item(UI_MM_USB, 1);
 
           //Wait until touch is released
           tp_i2c_wait_for_touch_release();
@@ -1189,13 +1191,19 @@ void handle_main_menu_touch(void)
           //Need to exit the loop here
           return;
         }
-        //PC protocol build: Spectrum analyzer row (switches the display mode)
-        else if(PC_MAIN_MENU_ROW6(ytouch))
+        //Scope or Spectrum analyser: the mode rows (pc_glue_main_menu_mode carries out ui_mm_choose)
+        else
         {
           //Close any other open menu
           close_open_menus(1);
 
-          PC_MAIN_MENU_TOUCH();
+          //Set the button active
+          scope_main_menu_item(row, 1);
+
+          //Wait until touch is released
+          tp_i2c_wait_for_touch_release();
+
+          PC_MAIN_MENU_MODE(row);
 
           //Need to exit the loop here
           return;

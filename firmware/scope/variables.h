@@ -183,16 +183,12 @@
 #define MENU_BUTTON_HEIGHT     38
 
 //----------------------------------------------------------------------------------------------------------------------------------
-//Main menu (2, 46, 147, 292)
+//Main menu (2, 46, 147, 413): fw 0.2.51 seven rows, always all of them; rows, labels and hit areas in ui_menu.h
 
 #define MAIN_MENU_XPOS            2
 #define MAIN_MENU_YPOS           46
 #define MAIN_MENU_WIDTH         147
-//fw 0.2.28: a sixth row (Spectrum analyzer, 59 px) when the spectrum view is available
-int pc_glue_main_menu_height(void);
-#define MAIN_MENU_HEIGHT        (pc_glue_main_menu_height())
-int pc_glue_main_menu_dy(void);
-#define MAIN_MENU_DY            (pc_glue_main_menu_dy())   //1.00o5 rows moved down under the spectrum / phosphor rows
+#define MAIN_MENU_HEIGHT        413   //UI_MM_H
 
 //Menu system settings
 #define SYSTEM_MENU_XPOS                     150

@@ -731,6 +731,17 @@ static void spec_draw_header(const uint32 *peak, int hch, int k, uint64 bin_mhz)
   }
 }
 
+//fw 0.2.51: choosing the Spectrum analyser row in roll mode switched Roll off; the warning line says so for a while
+#define ROLL_NOTE_MS          5000
+static uint8  roll_note;
+static uint32 roll_note_ms;
+
+void spectrum_note_roll_off(void)
+{
+  roll_note    = 1;
+  roll_note_ms = timer0ticks;
+}
+
 //Warnings (owner, fw 0.2.42), only while they apply, centred over the top of the plot in the warning colour, each
 //saying the consequence and the action (README "Spectrum view" lists them)
 static void spec_draw_warnings(int k, uint64 fs_mhz, int hch)
@@ -739,6 +750,11 @@ static void spec_draw_warnings(int k, uint64 fs_mhz, int hch)
   int    ch;
 
   *p = 0;
+
+  if(roll_note && ((timer0ticks - roll_note_ms) < ROLL_NOTE_MS))
+    p = fmt_str(p, "Roll off for the spectrum   ");
+  else
+    roll_note = 0;
   for(ch = 0; ch < 2; ch++)
     if(spec_ch(ch)->enable && spec_ch(ch)->ADoverload &&
        ((spec.view == VIEW_SPECTRUM) ? ((spec.channel == SPEC_CH_BOTH) || (spec.channel == ch)) : (ch == hch)))

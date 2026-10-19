@@ -33,6 +33,7 @@
 #include "phosphor.h"
 #include "spec_fmt.h"
 #include "acal_live.h"
+#include "ui_menu.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -1579,108 +1580,61 @@ int32_t pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t 
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Spectrum view glue (fw 0.2.28): a sixth main-menu row switches the trace area between the traces and the spectrum.
-// Phosphor view (fw 0.2.46): a seventh row, the same way. The two views exclude each other; both share the
-// availability rule (no roll mode, no viewer), so both rows show or neither.
+// Spectrum view glue (fw 0.2.28) and phosphor view (fw 0.2.46). Since fw 0.2.51 the main menu's mode rows (Scope,
+// Spectrum analyser; ui_menu.h) are the only way between the modes; phosphor is a variant of the scope chosen in the
+// acquisition menu's Display box. The spectrum and phosphor views exclude each other.
 
 int pc_glue_spectrum_display(void) { return spectrum_display(); }
 int pc_glue_spectrum_touch(void)   { return spectrum_touch() || phosphor_touch(); }
-int pc_glue_main_menu_height(void) { return spectrum_available() ? 410 : 292; }
-
-//With the two view rows on top (owner, 10-19) the five 1.00o5 rows sit two rows (118 px) lower
-int pc_glue_main_menu_dy(void)     { return spectrum_available() ? 118 : 0; }
 
 int  pc_glue_phosphor_on(void)          { return phosphor_owns_traces(); }
 void pc_glue_phosphor_draw(void)        { phosphor_draw(); }
 int  pc_glue_phosphor_xy(uint32 index)  { return phosphor_xy(index); }
 void pc_glue_phosphor_strip(void)       { phosphor_strip(); }
 
-//The spectrum row (y 46..105) and the phosphor row (y 106..163) are the first two rows (fw 0.2.50); the 1.00o5 rows
-//follow at MAIN_MENU_DY, from y 164 on
-int pc_glue_main_menu_row6(uint32 y)
+//The Display variant Phosphor, remembered while the spectrum shows so that Scope brings it back
+static uint8 pc_phos_wanted;
+
+static int pc_spectrum_on(void)
 {
-  return spectrum_available() && (y >= 46) && (y <= 163);
+  return spectrum_mode() != SPECTRUM_MODE_SCOPE;
 }
 
-//The row in the style of the other five: icon (spectrum bars), two text lines naming where a tap goes
-static void pc_main_menu_spectrum_item(int mode)
+//Roll off as the acquisition menu's Roll box does (1.00o5 scope_acquisition_ACQ_mode_select): time base 20, its rate
+#define PC_ROLL_OFF_TIMEBASE  20
+
+void pc_glue_main_menu_mode(int row)
 {
-  static const uint8 bars[] = { 4, 7, 22, 9, 5, 14, 4, 6, 10, 3, 5, 2 };
-  uint32 i;
-  int    on = (spectrum_mode() != SPECTRUM_MODE_SCOPE);
+  ui_mm_action a;
+  int          sp = pc_spectrum_on();
 
-  display_set_fg_color(mode ? 0x00CCCCCC : DARKGREY_COLOR);
-  display_fill_rounded_rect(9, 59, 131, 35, 3);
+  if(!sp)
+    pc_phos_wanted = phosphor_mode() ? 1 : 0;
 
-  display_set_fg_color(mode ? BLACK_COLOR : WHITE_COLOR);
-  display_draw_horz_line(89, MAIN_MENU_XPOS + 15, MAIN_MENU_XPOS + 40);
-  for(i = 0; i < sizeof(bars); i++)
-    display_draw_vert_line(MAIN_MENU_XPOS + 16 + 2 * i, 88 - bars[i], 88);
-
-  display_set_font(&font_3);
-  display_text(60, 60, on ? (int8 *)"Scope" : (int8 *)"Spectrum");
-  display_text(60, 76, on ? (int8 *)"view" : (int8 *)"analyzer");
-}
-
-//Row 7: icon (three square-wave edges in fading greys, like an intensity-graded trace)
-static void pc_main_menu_phosphor_item(int mode)
-{
-  static const uint32 shade[3] = { 0x00505050, 0x00909090, 0x00FFFFFF };
-  uint32 i, x0 = MAIN_MENU_XPOS + 15;
-  int    on = phosphor_mode();
-
-  display_set_fg_color(mode ? 0x00CCCCCC : DARKGREY_COLOR);
-  display_fill_rounded_rect(9, 116, 131, 35, 3);
-
-  for(i = 0; i < 3; i++)
-  {
-    uint32 xe = x0 + 10 + 2 * i;
-
-    display_set_fg_color(mode ? (i == 2 ? BLACK_COLOR : 0x00707070) : shade[i]);
-    display_draw_horz_line(144, x0, xe);
-    display_draw_vert_line(xe, 124, 144);
-    display_draw_horz_line(124, xe, x0 + 25);
-  }
-
-  display_set_fg_color(mode ? BLACK_COLOR : WHITE_COLOR);
-  display_set_font(&font_3);
-  display_text(60, 117, on ? (int8 *)"Scope" : (int8 *)"Phosphor");
-  display_text(60, 133, on ? (int8 *)"view" : (int8 *)"display");
-}
-
-void pc_glue_main_menu_items(void)
-{
-  if(!spectrum_available())
+  if(!ui_mm_choose(row, sp, scopesettings.long_mode != 0, pc_phos_wanted, &a))
     return;
 
-  //Separators: 1.00o5 draws 104 / 163 / 222 / 281; with its rows moved down the full set is these plus 340 / 399
-  display_set_fg_color(BLACK_COLOR);
-  display_draw_horz_line(340, 9, 140);
-  display_draw_horz_line(399, 9, 140);
-  pc_main_menu_spectrum_item(0);
-  pc_main_menu_phosphor_item(0);
-}
-
-void pc_glue_main_menu_touch(void)
-{
-  if(ytouch <= 105)
+  if(a.roll_off)
   {
-    int on = (spectrum_mode() == SPECTRUM_MODE_SCOPE);
+    pc_hw_timebase t;
 
-    pc_main_menu_spectrum_item(1);
-    tp_i2c_wait_for_touch_release();
+    t.timeperdiv = PC_ROLL_OFF_TIMEBASE;
+    t.samplerate = time_per_div_sample_rate[PC_ROLL_OFF_TIMEBASE];
+    t.divider    = 0;
+    pc_hal_timebase_write(&t, 0);
+  }
+
+  if(!a.phosphor && phosphor_mode())
     phosphor_set_active(0);
-    spectrum_set_active(on);
-  }
-  else
-  {
-    int on = !phosphor_mode();
 
-    pc_main_menu_phosphor_item(1);
-    tp_i2c_wait_for_touch_release();
-    spectrum_set_active(0);
-    phosphor_set_active(on);
-  }
+  if(a.spectrum != sp)
+    spectrum_set_active(a.spectrum);
+
+  if(a.phosphor && !phosphor_mode())
+    phosphor_set_active(1);
+
+  if(a.warn_roll)
+    spectrum_note_roll_off();
 }
 
 //System settings menu height (variables.h SYSTEM_MENU_HEIGHT): Time & Date is the last row, 59 px
