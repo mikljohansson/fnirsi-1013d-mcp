@@ -985,7 +985,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   jump) built with GCC 10 and pinned backups/fw-0.2.73_ad7b7e24.bin (sha256
   ad7b7e24dc929dc180adaa6ed72fff11d5c0a0e7fa0288dc063546e30b4c59fa); host tests and vectors green. To load when the scope is
   free of menus; then B1 / B2 / B6 of section 48 and the overview walk-through of section 49 (pass_ms first).
-- 2026-10-19 22:07-22:12: fw 0.2.73 loaded from the boot menu's FEL (the MCP server held COM10 after this session's tool calls, so
+- 2026-10-19 22:07-22:09: fw 0.2.73 loaded from the boot menu's FEL (the MCP server held COM10 after this session's tool calls, so
   ENTER_FEL could not be sent; `fnirsi1013d-flash --no-fel`), `#VER fw=0.2.73,proto=1.22,fpga=0x1539`. Section 48 host-side checks:
   B1 caps 0x7EC4B, bit 12 (order unverified) clear, bit 11 (read lag unverified) set, GET_LINK_STATS 68 entries ending in
   adc_fullrate_by_data: pass. B6: 40 rate toggles 200 MSa/s <-> 100 MSa/s with a host capture each: enc_checked 128 -> 231,
