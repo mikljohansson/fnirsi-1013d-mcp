@@ -90,6 +90,22 @@ on post, Undo last calibration, DC shift trim, Clear calibration (confirmed). Lo
 SD state, timing. Details and the readers it needs: `docs/plans/diagnostics-review.md`. The calibration wizard (fw
 0.2.50, README 6.4) is launched from Calibrate.
 
+## 6a. Calibration wizard **(owner, 2026-10-19 afternoon)**
+
+Four screens, one modal flow, the same two buttons on every screen, nothing saved before the last one. No extra
+sentences: each screen is a title, one instruction, a progress or result line, and two buttons.
+
+| Screen | Title | Instruction | Progress / result | Buttons |
+|---|---|---|---|---|
+| 1 | Zero level | "Fully disconnect both probes and the USB cable from the device. Tap Calibrate." | per-channel progress while running, then "Zero level done" (or the one-line reason on failure, Calibrate stays to retry) | Cancel, Calibrate (becomes Continue after success) |
+| 2 | CH1 gain | "Plug the CH1 probe back in and connect it to the calibration post. Set it to 1X on the handle. Tap Calibrate." | progress, then "CH1 gain done" (or "No signal on CH1: tip on the post?" and Calibrate stays) | Cancel, Calibrate (becomes Continue) |
+| 3 | CH2 gain | "Plug the CH2 probe in and connect it to the calibration post. Set it to 1X on the handle. Tap Calibrate." | as screen 2 for CH2 | Cancel, Calibrate (becomes Continue) |
+| 4 | Done | the plain-word summary per channel (cores matched to x code, gain mismatch y %) | | Cancel, Save calibration |
+
+Cancel on any screen leaves without writing anything. There is no Skip: a channel that cannot be measured is reported on
+its screen and the user decides between retrying and Cancel. Firmware: fw 0.2.50's wizard (README 6.4) has the steps
+and checks; its copy, its two-probe gain step and its Skip go, the per-channel gain screens and the final Save come.
+
 ## 7. Implementation order
 
 1. Main menu rows and the USB drive screen text (small, no new data).
