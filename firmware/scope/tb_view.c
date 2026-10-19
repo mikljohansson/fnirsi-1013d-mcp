@@ -38,7 +38,7 @@ int tbv_viable(uint32 fs, uint32 fpd, uint32 total)
   if((fs == 0) || (fpd == 0) || (total < 2))
     return 0;
 
-  //At least one sample per division
+  //At least TBV_MIN_SAMPLES_PER_DIV samples per division (fw 0.2.69: ten; one before)
   if((uint64)fs < (uint64)fpd * TBV_MIN_SAMPLES_PER_DIV)
     return 0;
 

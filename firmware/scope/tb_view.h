@@ -5,7 +5,7 @@
 // trigger point at column `pos` (scopesettings.triggerhorizontalposition) and the first sample shown
 // F = trig - 1 - ceil(pos / xpps), xpps = 50 x (1 / time per div) / sample rate pixels per sample (1.00o5's formula).
 // A time/div is viable for a sample rate when the record (memory depth x sample period) spans the whole trace area and
-// a division holds at least one sample. The functions below derive that from the real record length; they replace
+// a division holds at least TBV_MIN_SAMPLES_PER_DIV samples. The functions below derive that from the real record length; they replace
 // 1.00o5's hand-written viable_time_per_div table (host_tests/test_tb_view.c compares the two).
 //
 // Units: fs = samples per second (sample_rate[]), fpd = divisions per second (frequency_per_div[], 1 / time per div),
@@ -22,7 +22,8 @@
 #define TBV_SPAN_PX              (TBV_X_END - TBV_X_FIRST)       //724: first trace column to the last pixel's end
                                          //(the drawing interpolates the last pixel towards column 727)
 #define TBV_PX_PER_DIV           50
-#define TBV_MIN_SAMPLES_PER_DIV  1       //200 MSa/s at 5 ns/div is exactly one
+#define TBV_MIN_SAMPLES_PER_DIV  10      //fw 0.2.69 (owner, bench: 100 kSa/s at 10 us/div showed one sample per division
+                                         //and a wobbling interpolated edge): 200 MSa/s reaches 50 ns/div
 
 //Record-position slider under the grid: frame x 2..727, y 452..471 (scope_draw_grid); the window moves on a track
 //x 4..723 and is drawn y 455..468. Its hit area is 44 px tall (TBV_SLIDER_HIT_Y..479) over the frame's width.

@@ -84,8 +84,8 @@ static void test_viability(void)
           hi = t;
           n++;
 
-          //Every viable pair: at least one sample per division, the record spans the trace area
-          T_TRUE(rate[r] >= fpd[t]);
+          //Every viable pair: at least ten samples per division (fw 0.2.69), the record spans the trace area
+          T_TRUE(rate[r] >= (uint64)fpd[t] * TBV_MIN_SAMPLES_PER_DIV);
           T_TRUE((int64_t)TBV_SPAN_PX * rate[r] < (int64_t)depths[k] * TBV_PX_PER_DIV * fpd[t]);
         }
       }
@@ -94,16 +94,25 @@ static void test_viability(void)
       T_EQ(n, hi - lo + 1);
     }
 
-    //The coupled rate of every short time/div (plot tap zoom, SET_TIMEBASE mode 0) is viable at every depth
-    for(t = 11; t <= 34; t++)
+    //The coupled rate of every short time/div (plot tap zoom, SET_TIMEBASE mode 0) is viable at every depth down to
+    //50 ns/div (index 31); 20, 10 and 5 ns/div hold fewer than ten samples at any rate (fw 0.2.69) and are never viable
+    for(t = 11; t <= 31; t++)
       T_TRUE(tbv_viable(rate[coupled[t]], fpd[t], depths[k]));
+    for(t = 32; t <= 34; t++)
+      for(r = 0; r < 18; r++)
+        T_TRUE(!tbv_viable(rate[r], fpd[t], depths[k]));
   }
 
-  //Edges at the default depth: 200 MSa/s reaches 1 us/div (200 samples/div) and 5 ns/div (one); 2 us/div would need 400
+  //Edges at the default depth: 200 MSa/s reaches 1 us/div (200 samples/div) and 50 ns/div (ten); 2 us/div would need
+  //400, 20 ns/div holds four (fw 0.2.69; one sample per division was enough before)
   T_TRUE(tbv_viable(200000000, 1000000, 3000));
   T_TRUE(!tbv_viable(200000000, 500000, 3000));
-  T_TRUE(tbv_viable(200000000, 200000000, 3000));
-  T_TRUE(!tbv_viable(100000000, 200000000, 3000));
+  T_TRUE(tbv_viable(200000000, 20000000, 3000));
+  T_TRUE(!tbv_viable(200000000, 50000000, 3000));
+  T_TRUE(!tbv_viable(200000000, 200000000, 3000));
+  //The owner's bench case (2026-10-19): 100 kSa/s at 10 us/div is one sample per division; 100 us/div (ten) is viable
+  T_TRUE(!tbv_viable(100000, 100000, 3000));
+  T_TRUE(tbv_viable(100000, 10000, 3000));
   //Deeper memory: 200 MSa/s at 15000 reaches 5 us/div (1000 samples/div, record 75 div)
   T_TRUE(tbv_viable(200000000, 200000, 15000));
   T_TRUE(!tbv_viable(200000000, 100000, 15000));
@@ -116,7 +125,8 @@ static void test_viability(void)
 //The hand-written table against the derivation at 3000 samples: it is not reproduced, so the table goes. Every cell
 //where they disagree is explained: the table offered 250 samples/div (the record, 3000 / 250 = 12 div, ends before
 //the 14.5 div trace area: zeros past the record end), or withheld 200 samples/div (fits: 15 div), or offered fewer
-//than one sample per division (20 cells: 3 at 250 samples/div, 17 below one sample/div; 4 cells at 200 withheld)
+//than ten samples per division (fw 0.2.69; 74 cells: 3 at 250 samples/div, 71 below ten samples/div; 4 cells at 200
+//withheld; with the one-sample rule of 0.2.64 it was 20 cells, 17 below one sample/div)
 static void test_against_old_table(void)
 {
   int r, t, diff = 0, only_old = 0, only_new = 0;
@@ -136,7 +146,7 @@ static void test_against_old_table(void)
       if(old_viable[r][t])
       {
         only_old++;
-        T_TRUE((spd100 == 25000) || (spd100 < 100));
+        T_TRUE((spd100 == 25000) || (spd100 < 100 * TBV_MIN_SAMPLES_PER_DIV));
       }
       else
       {
@@ -148,7 +158,7 @@ static void test_against_old_table(void)
 
   printf("test_tb_view: derived vs 1.00o5 table at 3000 samples: %d cells differ (%d only in the table, %d only derived)\n",
          diff, only_old, only_new);
-  T_EQ(only_old, 20);
+  T_EQ(only_old, 74);
   T_EQ(only_new, 4);
 }
 
@@ -158,8 +168,10 @@ static void test_snap(void)
   T_EQ(tbv_snap(200000000, fpd, 11, 34, 19, 3000), 27);
   //Already viable: unchanged
   T_EQ(tbv_snap(1000000, fpd, 11, 34, 21, 3000), 21);
-  //500 Sa/s at 5 ns/div: 2 ms/div (index 17, one sample per division)
-  T_EQ(tbv_snap(500, fpd, 11, 34, 34, 3000), 17);
+  //500 Sa/s at 5 ns/div: 20 ms/div (index 14, ten samples per division; fw 0.2.69)
+  T_EQ(tbv_snap(500, fpd, 11, 34, 34, 3000), 14);
+  //The owner's bench case: 100 kSa/s at 10 us/div (index 24) snaps to 100 us/div (index 21)
+  T_EQ(tbv_snap(100000, fpd, 11, 34, 24, 3000), 21);
   //Deeper memory moves the slow end: 200 MSa/s at 15000 samples from 500 us/div to 5 us/div (index 25)
   T_EQ(tbv_snap(200000000, fpd, 11, 34, 19, 15000), 25);
   //Nothing viable (a two-sample record)
