@@ -108,6 +108,16 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   device and it never resumed: RESUME interrupt never fires. Decode the event log (types 2/3 fields of row 50), check MUSB resume
   handling (INTRUSBE resume bit, POWER.Resume, PHY), and the F1C100s USB PHY suspend behaviour; bench with `fnirsi1013d-soak --mode reopen
   --idle 1800`. Overnight 10-minute idles never suspended (36 stayed 1); the long idle did.
+- [ ] **Diagnostics view redesign** (owner 10-19; design proposal https://claude.ai/artifact/M3udheReCiHLQmASaY5qZr, artboards "Diagnostics"
+  and "Calibration detail" at 800x480; owner verdict pending): header with fw version, git hash + commit time, protocol, FPGA "AL3A10 0x1535,
+  EXT trigger, CIC+FIR" (drop "fw: PECO"); four status tiles (Power: battery V, charging, temperature; Processor: pass_ms, cache state,
+  uptime, restarts; USB link: speed, host connected, CRC errors, suspends/resumes; SD card: boots fw x, settings/calibration saved); a
+  Calibration panel with v3 date, status chips (zeros verified, gains measured, drift warning), per-channel zero split A-B per class, gains
+  A/B per class, noise, lever/range, live tracking; a detail screen with the per-range PWM centres, volts factors and zeros; the start-up
+  toggles as labelled buttons showing their value; bottom bar Calibrate (opens the wizard), Settings to defaults, Restore calibration, Reset
+  calibration (confirm before acting), Back. Remove the stock ADC-compensation/DC-shift tables (unused with v3). Colour = state, no on/off words.
+  Needs: battery voltage/charging state and temperature readers (exist), uptime and restart count (GET_LINK_STATS), USB speed/CRC from the
+  transport, SD boot version (read sector 750 header), tracking values (v4). Next firmware generation after fw-cal3.
 - [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s): deterministic test with
   GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
 - [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md
