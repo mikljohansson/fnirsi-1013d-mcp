@@ -607,3 +607,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   0); nothing was done on the bench. A per-core offset step on CH2's ADC plus a common +0.5 on CH1 within one 10-minute interval: cause
   unknown (candidates: battery charge termination / supply step, ADC temperature step, a relay or reference settling event). Morning
   check: read the battery/charger state, recalibrate on 0.2.48, and watch whether the CH2 A/B split returns.
+- Logger stopped 08:04 after 53 rounds (23:16-08:00), 53/53 reopens OK. The 03:48 step held unchanged to the end: gated CH1 128.1-128.6
+  both cores, CH2 corrected A 127.45 / B 128.9-129.1, raw gated CH2 A 128.0 / B 128.1-128.3 (before the step 129.8 / 128.2): CH2's raw
+  cores now agree, so the v2 correction (which expected A 1.6 above B) over-corrects A by 1.6. The owner recalibrates on 0.2.48 this morning.
