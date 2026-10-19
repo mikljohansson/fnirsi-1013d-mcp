@@ -3,6 +3,7 @@
 #include "menu.h"
 #include "test.h"
 #include "scope_functions.h"
+#include "touch_pick.h"
 #include "acal_live.h"
 #include "statemachine.h"
 #include "touchpanel.h"
@@ -332,18 +333,7 @@ void scope_draw_pointers(void)
     if(scopesettings.xymodedisplay == 0)
     {
       //y position for the channel 1 trace center pointer.
-      position = 442 - scopesettings.channel1.traceposition;//441
-
-      //Limit on the top of the displayable region
-      if(position < 49)//44
-      {
-        position = 49;
-      }
-      //Limit on the bottom of the displayable region
-      else if(position > 442)//441
-      {
-        position = 442;
-      }
+      position = scope_pointer_top(scopesettings.channel1.traceposition);
 
       //Draw the pointer
       display_left_pointer(2, position, '1');
@@ -373,18 +363,7 @@ void scope_draw_pointers(void)
   if(scopesettings.channel2.enable)
   {
     //y position for the channel 2 trace center pointer
-    position = 442 - scopesettings.channel2.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.channel2.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(CHANNEL2_COLOR);
@@ -402,18 +381,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref1)
   {
     //y position for the ref 1 trace center pointer
-    position = 442 - scopesettings.ch_ref1.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref1.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref1.color);
@@ -430,18 +398,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref2)
   {
     //y position for the ref 2 trace center pointer
-    position = 442 - scopesettings.ch_ref2.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref2.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref2.color);
@@ -458,18 +415,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref3)
   {
     //y position for the ref 3 trace center pointer
-    position = 442 - scopesettings.ch_ref3.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref3.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref3.color);
@@ -486,18 +432,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref4)
   {
     //y position for the ref 4 trace center pointer
-    position = 442 - scopesettings.ch_ref4.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref4.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref4.color);
@@ -514,18 +449,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref5)
   {
     //y position for the ref 1 trace center pointer
-    position = 442 - scopesettings.ch_ref5.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref5.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref5.color);
@@ -542,18 +466,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref6)
   {
     //y position for the ref 2 trace center pointer
-    position = 442 - scopesettings.ch_ref6.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref6.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref6.color);
@@ -570,18 +483,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref7)
   {
     //y position for the ref 3 trace center pointer
-    position = 442 - scopesettings.ch_ref7.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref7.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref7.color);
@@ -598,18 +500,7 @@ void scope_draw_pointers(void)
   if(scopesettings.ref8)
   {
     //y position for the ref 4 trace center pointer
-    position = 442 - scopesettings.ch_ref8.traceposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)//44
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.ch_ref8.traceposition);
 
     //Set the colors for drawing
     display_set_fg_color(scopesettings.ch_ref8.color);
@@ -657,18 +548,7 @@ void scope_draw_pointers(void)
     
     //-----------------------------------------------------
     //y position for the trigger level pointer
-    position = 442 - scopesettings.triggerverticalposition;//441
-
-    //Limit on the top of the displayable region
-    if(position < 49)
-    {
-      position = 49;
-    }
-    //Limit on the bottom of the displayable region
-    else if(position > 442)//441
-    {
-      position = 442;
-    }
+    position = scope_pointer_top(scopesettings.triggerverticalposition);
 
     //Need to reset the fore ground color
     //Select the channel based on the current trigger color
