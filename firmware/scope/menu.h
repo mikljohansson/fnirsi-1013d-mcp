@@ -8,7 +8,6 @@ void scope_setup_display_lib(void);
 //----------------------------------------------------------------------------------------------------------------------------------
 void scope_setup_main_screen(void);
 
-void scope_setup_restore_screen(void);
 
 void scope_setup_view_screen(void);
 
@@ -201,7 +200,6 @@ void scope_system_settings_year_item(void);
 void scope_system_settings_year_item_value(void);
 void scope_system_settings_ONOFF_RTC_item(void);
 //----------------------------------------------------------------------
-void scope_open_diagnostic_view(void);
 //----------------------------------------------------------------------
 void scope_show_Input_calibration(void);
 void scope_show_calibrating_300mV_text(void);
@@ -231,11 +229,7 @@ int  scope_move_slider(uint16 xpos, uint16 ypos, uint8 *position);
 void scope_display_slide_button(uint16 xpos, uint16 ypos, uint8 state, uint32 color);
 void scope_display_ok_button(uint16 xpos, uint16 ypos, uint8 mode);
 
-void scope_default_button(uint16 xpos, uint16 ypos, uint8 mode);
-void scope_restore_button(uint16 xpos, uint16 ypos, uint8 mode);
-void scope_reset_button(uint16 xpos, uint16 ypos, uint8 mode);
 void scope_boot_button(uint16 xpos, uint16 ypos);
-void scope_exit_button(uint16 xpos, uint16 ypos, uint8 mode);
 
 void scope_display_error(void);
 

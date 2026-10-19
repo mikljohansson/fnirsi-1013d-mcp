@@ -32,7 +32,6 @@ void handle_view_mode_touch(void);       //need to finish this function (trace d
                                          //waveform view functionality also needs to be added to handle_right_basic_menu_touch
 void handle_picture_view_touch(void);
 
-void handle_diagnostic_view_touch(void);
 
 int32 handle_confirm_delete(void);
 

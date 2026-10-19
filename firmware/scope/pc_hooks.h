@@ -35,9 +35,7 @@ int  pc_glue_ui_arm_allowed(void);    //0 while a host READ_RAW waits for the UI
 int  pc_glue_rtc_allowed(void);       //0 while the MCP chip occupies the RTC clock slot
 void pc_glue_pass_mark(int n);        //main loop stage reached (first-pass timing, GET_LINK_STATS)
 int  pc_glue_ui_has(int feature);     //PC_FEAT_*: 1 when the running hardware supports it
-char *pc_glue_version(int form);      //0 "v0.2.7", 1 "fw 0.2.7", 2 full identity line (diagnostics)
 void pc_glue_topbar_drawn(void);      //the top bar / RUN-STOP chip was (re)drawn: put the MCP chip back with it
-void pc_glue_diag_drawn(void);        //diagnostics screen drawn: identity line
 void pc_glue_ext_selected(void);      //EXT trigger chosen in the trigger menu
 void pc_glue_roll_label(void);        //acquisition menu: the long (roll) time base box as a state toggle
 int  pc_glue_battery_level(int raw, int charging, int shown);   //filtered battery level for the indicator
@@ -84,9 +82,7 @@ uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (sco
 #define PC_PASS_MARK(n)         pc_glue_pass_mark(n)
 #define PC_UI_HAS(f)            && pc_glue_ui_has(f)
 #define PC_UI_MASK(m)           pc_glue_ui_mask(m)
-#define PC_UI_VERSION(d, form)  ((int8 *)pc_glue_version(form))
 #define PC_TOPBAR_DRAWN()       pc_glue_topbar_drawn()
-#define PC_DIAG_DRAWN()         pc_glue_diag_drawn()
 #define PC_EXT_SELECTED()       pc_glue_ext_selected()
 #define PC_ROLL_LABEL()         pc_glue_roll_label()
 #define PC_SPECTRUM_DISPLAY()   do { if(pc_glue_spectrum_display()) return; } while(0)

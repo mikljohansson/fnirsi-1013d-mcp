@@ -21,6 +21,7 @@
 #include "DS3231.h"
 #include "menu.h"
 #include "ui_menu.h"
+#include "ui_diag_view.h"
 #include "test.h"
 
 #include  "ref_and_math.h"
@@ -1137,26 +1138,16 @@ void handle_main_menu_touch(void)
           //Wait until touch is released
           tp_i2c_wait_for_touch_release();
  
-          //Restore the main screen before entering the diagnostic_screen
+          //Restore the main screen before entering the diagnostics
           display_set_source_buffer(displaybuffer1);//2 0.26p
-          //display_copy_rect_to_screen(2, 46, 149, 292);//149 233
           display_copy_rect_to_screen(MAIN_MENU_XPOS, MAIN_MENU_YPOS, MAIN_MENU_WIDTH, MAIN_MENU_HEIGHT);//149 233
 
-          //And make a copy of it to return to
-          display_set_destination_buffer(displaybuffer2);
-          display_copy_rect_from_screen(0, 0, 800, 480);
+          //fw 0.2.57: Diagnostics is a display mode of the main loop (ui_diag_view.c), not a modal screen: it keeps the
+          //scope screen to return to and takes over the main loop's passes until Back
+          ui_diag_open();
 
-          //Show the scope diagnostic screen
-          scope_open_diagnostic_view();
-            
-          handle_diagnostic_view_touch();
-            
-          //Copy back the original screen to continue were left of
-          display_set_source_buffer(displaybuffer2);
-          display_copy_rect_to_screen(0, 0, 800, 480);
-  
           //Need to exit the loop here
-          return;  
+          return;
           
         }
         //Check if on USB connection
@@ -5069,225 +5060,6 @@ void handle_picture_view_touch(void)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void handle_diagnostic_view_touch(void)
-{
-  //uint8 tmp;                            //for diagnostic menu
-  //uint32 *ptr = STARTUP_CONFIG_ADDRESS; //for diagnostic menu
-  //boot_menu_start = ptr[0] & 0x07;      //choice 1 for fnirsi firmware, 0 for peco firmware, 2 for FEL mode, 4 view choice menu
-
-  //Stay in this mode as long as the return is not touched
-  while(1)
-  {
-    //Read the touch panel status
-    tp_i2c_read_status();
-
-    //Check if the panel is touched
-    if(havetouch)
-    {
-      //scope_test_TP();
-      //Check if touch button DEFAULT
-      if((xtouch >= 40) && (xtouch <= 90) && (ytouch >= 420) && (ytouch <= 460))//x110-160 370 420 420 460
-        {
-          //Highlight the button DEFAULT
-          scope_restore_button(30, 410, 1);//x50//x100 360 410//550 360  //460 410
-          
-          //Load a default configuration
-          scope_reset_config_data();
-          //scope_save_config_data();
-        
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release();
-        
-          //Go diagnostic info
-          scope_open_diagnostic_view();//scope_diagnostic_screen();
-        
-          //Display the text with font 3 and the red color
-          display_set_fg_color(ORANGE_COLOR);
-          display_set_font(&font_3);
-  
-          //display_text(435, 414, "Reset calibration values !!!");
-          //display_text(75, 390, "Please run BASE CALIBRATION !!!"); //335 390
-          display_text(85, 355, "Settings set do default !!!"); //x90 335 
-        }        
-      //Check if touch button RESTORE
-        else if((xtouch >= 140) && (xtouch <= 190) && (ytouch >= 420) && (ytouch <= 460))//x110-160 370 420 420 460
-        {
-          //Highlight the button RESTORE
-          scope_restore_button(130, 410, 1);//x100 360 410//550 360  //460 410
-        
-          reload_cal_data = 1;
-          //Set stored input calibration values   
-          scope_load_input_calibration_data();
-          reload_cal_data = 0;
-        
-          //Cancel to Input calibration
-          calibrationfail = 0;
-
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release();
-        
-          //Go diagnostic info
-          scope_open_diagnostic_view();//scope_diagnostic_screen();
-        
-          //Display the text with font 3 and the red color
-          display_set_fg_color(RED_COLOR);
-          display_set_font(&font_3);
-  
-          //display_text(435, 414, "Reset calibration values !!!");
-          display_text(60, 355, "Please run BASE CALIBRATION !!!"); //x75 335 390 
-        }
-        //Check if touch button RESET
-        else if((xtouch >= 240) && (xtouch <= 290) && (ytouch >= 420) && (ytouch <= 460))//x210-260 470 520 420 460
-        {
-          //Highlight the button RESET
-          scope_reset_button(230, 410, 1);//x200 460 410//550 360  //460 410
-        
-          //Set default channel calibration values   
-          //Set default channel Input calibration values
-          for(uint8 index=0;index<7;index++)
-            {
-                //Set default Input calibration values
-                scopesettings.channel1.input_calibration[index] = signal_adjusters[index];
-                scopesettings.channel2.input_calibration[index] = signal_adjusters[index];
-           
-                //Set FPGA center level
-                scopesettings.channel1.dc_calibration_offset[index] = 860;
-                scopesettings.channel2.dc_calibration_offset[index] = 860;
-            }
-          
-          //Set default ADC compensation values
-          scopesettings.channel1.adc1compensation = 0;
-          scopesettings.channel1.adc2compensation = 0;
-          scopesettings.channel2.adc1compensation = 0;
-          scopesettings.channel2.adc2compensation = 0; 
-          adc_cal_loaded = 0;
-        
-          //Set default DC shift values  
-          scopesettings.channel1.dc_shift_center  = 112;
-          scopesettings.channel1.dc_shift_size    = 220;
-          scopesettings.channel1.dc_shift_value   = 385;
-    
-          scopesettings.channel2.dc_shift_center  = 112;
-          scopesettings.channel2.dc_shift_size    = 220;
-          scopesettings.channel2.dc_shift_value   = 385;
-        
-          //Ready to Input calibration
-          calibrationfail = 1;
-
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release();
-        
-          //Go diagnostic info
-          scope_open_diagnostic_view();//scope_diagnostic_screen();
-        }
-      /*
-        //Check if touch button NEWAUTOSETUP
-        //else if((ytouch >= 164) && (ytouch <= 221))
-        else if((xtouch >= 328) && (xtouch <= 378) && (ytouch >= 30) && (ytouch <= 60))//588 638 30 60
-        {
-        //Toggle the new_autosetup
-        scopesettings.new_autosetup ^= 1;
-          
-        //Show the state (autosetup button mode)
-        // scope_display_slide_button(588, 40, scopesettings.new_autosetup, GREEN_COLOR);//600 400
-          
-        //Go diagnostic info
-        scope_open_diagnostic_view();//scope_diagnostic_screen();
-          
-        //Wait until touch is released
-        tp_i2c_wait_for_touch_release();
-        }
-        //Check if touch button DC shift calibration
-        //else if((ytouch >= 223) && (ytouch <= 280))
-        else if((xtouch >= 328) && (xtouch <= 378) && (ytouch >= 70) && (ytouch <= 100))//588 638 70 100
-        {    
-        //Toggle the shift_cal
-        dc_shift_cal ^= 1;
-          
-        //Go diagnostic info
-        scope_open_diagnostic_view();//scope_diagnostic_screen();
-            
-        //Wait until touch is released
-        tp_i2c_wait_for_touch_release(); 
-        }
-        //Check if touch button Boot menu
-        //else if((ytouch >= 282) && (ytouch <= 339))
-        else if((xtouch >= 328) && (xtouch <= 378) && (ytouch >= 110) && (ytouch <= 140))//588 638 110 140
-        {
-        //Toggle the Boot_menu
-        tmp = (boot_menu_start & 0x04)>>2;
-        tmp ^= 1;
-        boot_menu_start &= 0x03;
-        boot_menu_start |= tmp<<2;
-            
-        //Go diagnostic info
-        scope_open_diagnostic_view();//scope_diagnostic_screen();
-            
-        //Wait until touch is released
-        tp_i2c_wait_for_touch_release(); 
-        }   
-        
-        //Check if touch button Default start
-        //else if((ytouch >= 341) && (ytouch <= 398))
-        else if((xtouch >= 328) && (xtouch <= 378) && (ytouch >= 150) && (ytouch <= 180))
-        {    
-          
-        //Highlight the button Default start
-        scope_boot_button(328, 160); //588 160 1
-        
-        //Toggle the Default start
-        tmp = (boot_menu_start & 0x03);
-        if (tmp < 2) tmp++; else tmp = 0;  
-        boot_menu_start &= 0x04;
-        boot_menu_start |= tmp;
-               
-        //Go diagnostic info
-        scope_open_diagnostic_view();//scope_diagnostic_screen();
-            
-        //Wait until touch is released
-        tp_i2c_wait_for_touch_release(); 
-        } 
-        //Check if touch button lock cursors
-        else if((xtouch >= 328) && (xtouch <= 378) && (ytouch >= 190) && (ytouch <= 220))//588 638 70 100
-        {    
-        //Toggle the lock cursors
-        scopesettings.lockcursors ^= 1;
-                  
-        //Go diagnostic info
-        scope_open_diagnostic_view();//scope_diagnostic_screen();
-            
-        //Wait until touch is released
-        tp_i2c_wait_for_touch_release(); 
-        }
-      */
-      //**--------------------------------------------------------
-      //Check if touch EXIT button
-      else if((xtouch >= 730) && (xtouch <= 780) && (ytouch >= 430) && (ytouch <= 460))   //700 410 //752 440
-        {
-            //Button for EXIT
-            scope_exit_button(710, 410, 1);
-            //Touched the text field so wait until touch is released and then quit
-            tp_i2c_wait_for_touch_release();
-
-            break;
-        }
-        
-    }
-
-    //Need to wait for touch to release before checking again
-    tp_i2c_wait_for_touch_release();
-  } //end while
-  
-  //------------- save settings diagnostic menu ------------------------
-  //if(boot_menu_start == 1) boot_menu_start = 0x05;              //fnirsi firmware always with boot menu
-  //ptr[0] = boot_menu_start;
-  //SAVE the display configuration sector from DRAM to SDcart   //save boot menu and default start
-  //sd_card_write(DISPLAY_CONFIG_SECTOR, 1, (uint8 *)0x81BFFC00);
-        //-------------------------------------
-}
-
 //----------------------------------------------------------------------------------------------------------------------------------
 
 int32 handle_confirm_delete(void)
