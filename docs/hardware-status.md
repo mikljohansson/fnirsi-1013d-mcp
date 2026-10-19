@@ -870,3 +870,16 @@ Newest entries at the bottom. Format: date, who, what, result.
   112 captures flagged by 0x33 and re-taken out of 5798 checked (event log read next). Raw core means: CH1 A-B +5.0 (3.3 on 0x1535),
   CH2 A-B -2.6 (0.5 on 0x1535; -3.3 on 0x1537): the per-core offsets differ from the 0x1535 state, so the unit needs a recalibration
   on 0x1538 (the wizard measures per core). Wizard run next.
+- 2026-10-19 17:55: wizard Zero level on 0.2.64 / 0x1538, nothing connected: still fails every time, now "CH1: too much noise,
+  range 1 at 200MSa/s: core B 7.2 codes, 7.2 per capture" (6-8 across runs) and "CH2: the input is not at 0 V" (clip). Host READ_RAW
+  at the same range and moment: 0.6-2.0 codes per core, no clipping, 0x33 0xF6. So the wizard's own conversion setup differs from
+  every other path (offset PWM / relay / settle on the coarsest range suspected); the four-screen wizard has never completed on
+  hardware; the 0.2.48 one-screen flow did. fw-cal5 dispatched (fix + host-triggerable dry run). Bench paused.
+- 2026-10-19 18:20: fw-cal5 diagnostic image 0.2.67 / 1.21 (f17e2d70, backups/fw-0.2.67-calprobe_f17e2d70.bin) loaded; CAL_PROBE
+  runs the wizard's own range measurement from the host. With the probes still on the RC filter (generator off): CH1 range 0 and 1
+  pass all 8 points (full zero A 131 rms 1.4, B 128 rms 0.9, no clipping; settle 0 and 4 identical), range 5 reads all zeros (probe on
+  the post, not a bug); CH2 never ran (E_BUSY deferred request after each CH1 probe). So the wizard measurement code is sound from the
+  host while the on-screen wizard fails: screen context suspected (Cancel touch poll during the measurement, display writes, re-arm).
+  Owner asked to disconnect the probes for a clean rerun. fw-polish2 dispatched 18:10 (RUN/STOP action button + host state follow,
+  spanner icon, sine with axes, time/div snap not applying the manual path, sun icon = brightness slider, wizard Step M of N, Calibration
+  tab button row).

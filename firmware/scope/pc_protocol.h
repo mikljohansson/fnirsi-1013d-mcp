@@ -39,7 +39,9 @@
                                         //      garbled after a rate change, recovered (fw 0.2.61)
                                         //1.19: every full-rate capture checked (FPGA 0x1538 read 0x33, caps
                                         //      ENC_CHECK), GET_HEALTH 104 bytes, event 21 reasons (fw 0.2.62)
-                                        //1.20: reserved for fw-bode (fw 0.2.66)
+                                        //1.20: the on-device Bode
+                                        //      plot: BODE_CTRL / READ_BODE, GET_STATUS display_mode 5, features
+                                        //      bit 6 (fw 0.2.66)
                                         //1.21 (provisional numbering): CAL_PROBE, the calibration wizard's zero
                                         //      measurement from the host (fw 0.2.67)
 
@@ -98,6 +100,8 @@
 #define PC_CMD_SET_SEQ            0x020E     //1.17: sequencer setting for host ARM: segments / hardware averaging (0x1536+)
 #define PC_CMD_GET_SEQ            0x020F     //1.17: sequencer setting, fit and FPGA status
 #define PC_CMD_READ_SEQ           0x0210     //1.17: segment table or averaged record of the latest sequencer run
+#define PC_CMD_BODE_CTRL          0x0211     //1.20: on-device Bode sweep: settings, run / stop, thru calibration
+#define PC_CMD_READ_BODE          0x0212     //1.20: the Bode table of the latest sweep
 #define PC_CMD_SD_INFO            0x0500     //1.3: card size, partition start, write window, eGON headers
 #define PC_CMD_SD_READ_SECTORS    0x0501     //1.3: up to 128 sectors
 #define PC_CMD_SD_STAGE           0x0502     //1.3: bytes into the 64 KiB write staging buffer
@@ -161,6 +165,7 @@
 #define PC_FEAT_W_SEGMENTS            0x0008       //0x1536+
 #define PC_FEAT_W_HW_AVERAGE          0x0010       //0x1536+
 #define PC_FEAT_W_ENC_CHECK           0x0020       //0x1538+ (1.19)
+#define PC_FEAT_W_BODE                0x0040       //1.20: on-device Bode plot (decimation filter and DDS: 0x1534+)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Decoded header

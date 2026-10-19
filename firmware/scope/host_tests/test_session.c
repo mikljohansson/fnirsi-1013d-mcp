@@ -2522,9 +2522,9 @@ static void test_seq_older_bitstreams(void)
   r = read_seq(0, 0, 0, 0, 1);         T_EQ(r.h.status, PC_E_UNSUPPORTED);
   r = status();
   T_EQ(r.len, 48);
-  T_EQ(pc_get_u16(r.p + 44), PC_FEAT_W_EXT_TRIGGER | PC_FEAT_W_DECIM | PC_FEAT_W_FIR);
+  T_EQ(pc_get_u16(r.p + 44), PC_FEAT_W_EXT_TRIGGER | PC_FEAT_W_DECIM | PC_FEAT_W_FIR | PC_FEAT_W_BODE);
   r = req(PC_CMD_GET_DECIM, 0, 0);
-  T_EQ(r.len, 36); T_EQ(pc_get_u16(r.p + 32), 0x07);
+  T_EQ(r.len, 36); T_EQ(pc_get_u16(r.p + 32), 0x47);
   r = req(PC_CMD_ARM, 0, 0);
   T_EQ(r.h.status, 0); T_EQ(mock.seq_arms, 0);                  //pc_hal_arm got sq = NULL
   r = wait_done(100);
@@ -2553,12 +2553,12 @@ static void test_seq_segments(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 21);
   r = status();
-  T_EQ(r.len, 48); T_EQ(pc_get_u16(r.p + 44), 0x1F); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
+  T_EQ(r.len, 48); T_EQ(pc_get_u16(r.p + 44), 0x5F); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
   mock.ui_avg_state = 2; mock.ui_avg_log2n = 6;
   r = status();
   T_EQ(r.p[46], 2); T_EQ(r.p[47], 6);
   r = req(PC_CMD_GET_DECIM, 0, 0);
-  T_EQ(pc_get_u16(r.p + 32), 0x1F); T_EQ(r.p[34], 2); T_EQ(r.p[35], 6);
+  T_EQ(pc_get_u16(r.p + 32), 0x5F); T_EQ(r.p[34], 2); T_EQ(r.p[35], 6);
 
   //Default: off; the geometry the next arm writes (legacy: 1500 / 3000 samples = 750 / 1500 words)
   r = req(PC_CMD_GET_SEQ, 0, 0);
@@ -2741,18 +2741,18 @@ static void test_enc_check(void)
   uint32_t arms, reads;
   uint8_t  p[16];
 
-  //0x1538: caps ENC_CHECK, features bit 5; 0x1537 has neither
+  //0x1538: caps ENC_CHECK, features bit 5; 0x1537 has neither (bit 6, the Bode plot, on both)
   setup(0x1538);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_ENC_CHECK, PC_CAP_ENC_CHECK);
   T_EQ(r.p[35], 0);                                             //interleave order: B first
   r = req(PC_CMD_GET_STATUS, 0, 0);
-  T_EQ(pc_get_u16(r.p + 44), 0x3F);
+  T_EQ(pc_get_u16(r.p + 44), 0x7F);
   setup(0x1537);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_ENC_CHECK, 0);
   r = req(PC_CMD_GET_STATUS, 0, 0);
-  T_EQ(pc_get_u16(r.p + 44), 0x1F);
+  T_EQ(pc_get_u16(r.p + 44), 0x5F);
 
   //0x1538, gated rate (divider 19): nothing checked, 0x33 never read
   setup(0x1538);
@@ -2976,6 +2976,65 @@ static void test_diag_wire(void)
   T_EQ(r.h.status, PC_E_IO); T_EQ(pc_get_u16(r.p), 0);
 }
 
+//fw 0.2.66 Bode plot (protocol 1.20, row 60): both commands need the decimation filter (0x1534+); BODE_CTRL passes the
+//request through and turns the HAL's status into the reply; READ_BODE caps the rows to what fits; features bit 5
+static void test_bode(void)
+{
+  extern int      mock_bode_status;
+  extern uint16_t mock_bode_detail;
+  extern uint8_t  mock_bode_req[16];
+  extern uint32_t mock_bode_rows, mock_bode_first, mock_bode_max;
+  uint8_t p[16];
+  resp_t  r;
+
+  setup(0x1533);
+  memset(p, 0, sizeof(p));
+  r = req(PC_CMD_BODE_CTRL, p, 16);
+  T_EQ(r.h.status, PC_E_UNSUPPORTED);
+  r = req(PC_CMD_READ_BODE, p, 8);
+  T_EQ(r.h.status, PC_E_UNSUPPORTED);
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  T_EQ(pc_get_u16(r.p + 44) & PC_FEAT_W_BODE, 0);
+
+  setup(0x1535);
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  T_EQ(pc_get_u16(r.p + 44) & PC_FEAT_W_BODE, PC_FEAT_W_BODE);
+
+  //Run 100 Hz .. 1 MHz, 50 points, Normal, Auto
+  p[0] = 1; p[1] = 1; p[2] = 1; p[3] = 0;
+  pc_put_u32(p + 4, 10000); pc_put_u32(p + 8, 100000000); pc_put_u16(p + 12, 50);
+  mock_bode_status = PC_OK;
+  r = req(PC_CMD_BODE_CTRL, p, 16);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_BODE_CTRL_RESP); T_EQ(pc_get_u32(r.p + 32), 1234);
+  T_MEM(mock_bode_req, p, 16);
+
+  //A short request is zero-extended (action only)
+  r = req(PC_CMD_BODE_CTRL, p, 1);
+  T_EQ(r.h.status, 0); T_EQ(mock_bode_req[1], 0); T_EQ(pc_get_u32(mock_bode_req + 4), 0);
+
+  mock_bode_status = PC_E_BAD_ARG; mock_bode_detail = 4;
+  r = req(PC_CMD_BODE_CTRL, p, 16);
+  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
+  mock_bode_status = PC_E_STATE; mock_bode_detail = 2;
+  r = req(PC_CMD_BODE_CTRL, p, 16);
+  T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 2);
+  mock_bode_status = PC_OK; mock_bode_detail = 0;
+
+  //READ_BODE: all rows, a window, past the end
+  mock_bode_rows = 50;
+  memset(p, 0, sizeof(p));
+  r = req(PC_CMD_READ_BODE, p, 8);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_BODE_HDR + 50 * PC_BODE_ROW); T_EQ(mock_bode_max, (PC_MAX_RESPONSE_PAYLOAD - 32) / 20);
+  T_EQ(pc_get_u32(r.p + PC_BODE_HDR + 49 * PC_BODE_ROW), 1049);
+  pc_put_u16(p, 45); pc_put_u16(p + 2, 3);
+  r = req(PC_CMD_READ_BODE, p, 8);
+  T_EQ(r.len, PC_BODE_HDR + 3 * PC_BODE_ROW); T_EQ(mock_bode_first, 45); T_EQ(pc_get_u32(r.p + PC_BODE_HDR), 1045);
+  pc_put_u16(p, 60); pc_put_u16(p + 2, 0);
+  r = req(PC_CMD_READ_BODE, p, 8);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_BODE_HDR);
+  mock_bode_rows = 0;
+}
+
 int main(void)
 {
   test_diag_wire();
@@ -3015,6 +3074,7 @@ int main(void)
   test_seq_segments();
   test_seq_average();
   test_enc_check();
+  test_bode();
   mock_clear_resps();
   return t_report("test_session");
 }

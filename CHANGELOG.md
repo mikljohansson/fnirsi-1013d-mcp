@@ -31,7 +31,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.67 - 2026-10-19 (protocol 1.21 provisional, docs/protocol.md section 14 row 61; 0.2.65-0.2.66 / 1.20 are other branches)
+#### 0.2.67 - 2026-10-19 (protocol 1.21 provisional, docs/protocol.md section 14 row 61)
 
 - Added: CAL_PROBE (0x0402), the calibration wizard's zero measurement from the host through the wizard's own code
   (`cal_range`), nothing stored: one channel and range (mode 0), or the whole zero step in the wizard's screen context
@@ -42,6 +42,44 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   measurement point, PWM, and per core the raw mean with its lowest..highest code and clipped samples (789da66).
 - Fixed: the wizard's measurement batch writes a raw host divider (SET_TIMEBASE raw) and the time base back
   afterwards, as the class probe does (789da66).
+
+#### 0.2.66 - 2026-10-19 (protocol 1.20, docs/protocol.md section 14 row 60)
+
+- Added: a Bode plot on the scope. The generator menu has a fourth row, "Bode plot": it opens a mode that sweeps the
+  calibration post's square from Start to Stop and plots H = CH2 / CH1 as magnitude and phase over a log frequency axis,
+  with the -3 dB, peak and phase-crossing markers, a cursor (tap or drag on the plot) and cards for f, |H|, phase, the
+  -3 dB frequency (or the peak and Q) and the progress. RUN repeats sweeps, STOP ends after the point in progress, AUTO SET
+  runs one sweep. The CTRL page holds Sweep (Start and Stop in 1-2-5 steps, Points 10 / 20 / 50 / 100, Settle Fast /
+  Normal / Resonant / High Q, CH2 range Auto or Hold, Run sweep) and Thru (measure with both tips on the DUT input, apply,
+  clear). The sweep is the host tool's (`scope_bode_sweep`): the same frequency plan, the pre-scan and ranging, the
+  background capture, the settle retry, CH2 auto-ranging with the splice and the same quality flags, without a PC.
+  Leaving the mode gives the generator, the channels, the time base, the trigger source and RUN / STOP back. The
+  settings are kept in settings words 219-220. The wiring is shown in the plot until the first sweep (DUT ground on the
+  probe ground clips). Needs the decimation filter (AL3 0x1534+). (bode_dsp.c, bode_sweep.c, bode_view.c, pc_bode.c)
+- Added: protocol 1.20, BODE_CTRL (0x0211: settings, run one or repeated sweeps, stop, abort, thru
+  measure / apply / clear, open / close the view; answers the state and the estimated duration) and READ_BODE (0x0212:
+  the table of the latest sweep, 20 bytes per point: the DDS period M, f, |H|, phase, V1, V2, ranges, flags). GET_STATUS
+  `display_mode` 5 = Bode plot; features bit 6 = the bitstream can run it.
+- Tests: `host_tests/test_bode.py` checks the device planner against `docs/bode-plan-vectors.json` and 3300 random plans of
+  the host tool, and the device's H, levels, noise, leakage and half-record check against `measure_pair` on the
+  simulator's RC (within 0.002 dB / 0.002 deg); `host_tests/test_bode_sweep.c` runs the engine on a DUT model (RC,
+  divider, wiring B saturation, Hold, STOP, thru). Two new request vectors (`req_bode_ctrl`, `req_read_bode`).
+
+#### 0.2.65 - 2026-10-19 (protocol 1.19, unchanged)
+
+- Measurements v2 (8749ffe; firmware/README.md "Screens: Measurements v2"). MEASURES now opens a list per mode: the
+  Scope's twelve measurements per channel, and in the Spectrum analyser (where the slot was empty) Peak, Level, THD and
+  Noise per channel plus RBW, Span, Center and Time. The spectrum's choice is saved in settings words 221..223.
+- Cards show in the order they were chosen; the defaults now read Freq, Vpp, Vavg. The menu shows each chosen item's
+  place. Older settings show their cards in table order.
+- The cards keep to one row instead of stacking up over the trace: three per channel (six for CH1 while CH2's block
+  is hidden), six in the spectrum. With more chosen, the last place reads "+N more".
+- New spectrum cards: THD over harmonics 2..10 ("f0 too low" / "f0 too high" when it cannot be measured), the noise
+  floor as the median bin level at the RBW, the shown span and its centre.
+- The MEASURES menu is redrawn in the stock look with a title per mode and 44 px rows; Hide shows in the active
+  colour instead of red.
+- A card source hook (`ui_ms_set_source`) lets a future FPGA frequency / period counter feed the Freq and Period cards
+  without UI changes. Nothing uses it yet.
 
 #### 0.2.64 - 2026-10-19 (protocol 1.18 unchanged; provisional number)
 

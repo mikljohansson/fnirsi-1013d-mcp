@@ -56,7 +56,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   0x1537 fixes it in hardware. Plan: firmware/AGENTS.md section 35 (adapted to 0x1537: backups/al3_seg_0x1537_426a3784_padded.bin
   sha febc9299...), checks fpga/al3/README.md section 7, rollback al3_fir_0x1535 padded 5ade9e75. Community note for the
   announcement: units on the stock or 0x1532-0x1536 bitstreams get the firmware heal (0.2.61) but should flash 0x1537.
-- [~] **Full-rate encode check on every arm** (fw-enc dispatched 10-19 16:58 as fw 0.2.62 with fpga-gen7's 0x1538 interface: read 0x33 after every 200 MS/s capture, bit 0 = discard and re-arm, bits 3:2 = 01 order guaranteed B-first, 0xF6 = good; data check on every full-rate arm for 0x1532-0x1537): 0.2.61 checks only after a 0x0D write; the bench shows the bad
+- [x] **Full-rate encode check on every arm** (0.2.62 benched on 0x1538 17:50: 0 garbled captures in 1353; refinement queued: a rate write sets the 0x33 sticky flag once and costs a re-arm, 112 of 5798; clear it on 0x0D or skip the first check after a rate write; and the type 22 write trace floods the 128-entry event ring, make it a debug level) (was: (fw-enc dispatched 10-19 16:58 as fw 0.2.62 with fpga-gen7's 0x1538 interface: read 0x33 after every 200 MS/s capture, bit 0 = discard and re-arm, bits 3:2 = 01 order guaranteed B-first, 0xF6 = good; data check on every full-rate arm for 0x1532-0x1537): 0.2.61 checks only after a 0x0D write; the bench shows the bad
   phase is re-rolled at every sampling reset on 0x1537 (40 % of arms). On 0x1538 read the self-check status flag after each arm at
   200 MS/s and re-arm when it is set (no data check needed); on 0x1532-0x1537 run the data check on every full-rate arm instead of
   only after 0x0D. Fix the stored core-order convention (interleave tracker A-B model, 0x53 swap bit) to what 0x1538 guarantees.
@@ -68,6 +68,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   drives the scope through each state over USB (scope_screenshot) and saves named PNGs for reproducible screenshots; plots from
   MCP data saved with their generating command. Order: site skeleton + screenshot tool + user guide before the announcement
   (after the polish batch lands so the screens are final); articles at any pace. Dispatch a docs agent after fw-polish merges.
+- **Wizard measurement setup fault** (fw-cal5 running, 10-19 18:00): zero step fails on 0x1538 with clean host data; see
+  hardware-status 17:55. Deliverable includes a host-triggerable dry run so the coordinator can verify without the owner.
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
@@ -267,6 +269,18 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   BITSTREAMS.md and tools/bitstreams.py check in CI; release.yml attaches them, accepts vX.Y.Z-rcN pre-release tags, takes release
   notes from docs/release-notes/X.Y.Z.md (0.3.0 draft with placeholders); releasing.md fixed; README rewritten; release-checklist.md).
   Open: add 0x1538 as recommended when pinned and benched; owner decisions: attach older bitstreams, AI credits wording (F12).
+- fw-bode (done 18:20, about 760k tokens, retired): Bode on the device merged 0fbcf02 as fw 0.2.66 / protocol 1.20 row 60
+  (bode_dsp.c, bode_sweep.c main-loop engine, bode_view.c panes/markers/cards, generator menu row "Bode plot", CTRL Sweep/Thru/Grid,
+  BODE_CTRL 0x0211 / READ_BODE 0x0212 20-byte rows, display mode 5, features bit 6, words 219-220); pinned backups/fw-0.2.66_e2483907.bin;
+  walk-through firmware/AGENTS.md section 42 (RC and divider on the bench). Not loaded (the scope holds the CAL_PROBE image).
+- Third wave 18:25: mcp-gen6 (protocols 1.19-1.21 host side, scope_bode_sweep where=device, fnirsi1013d.report PNG/HTML +
+  scope_report, guide/skill "Presenting results"), fpga-gen8 (0x1539: pulse-width / Nth-edge / timeout triggers, peak detect,
+  200 MHz counter), fw-polish2 (batch 2), fw-cal5 (wizard screen-context fault).
+- Landed from the second swarm by 18:00: fw-enc 0.2.62 (benched on 0x1538: clean), fw-polish 0.2.63 (items a-q; Pro style and
+  the Debug overlay switch removed, RUN/STOP = green RUN / amber Stopped, Waterfall channel row), fw-acq 0.2.64 (viability from
+  the record length, time/div snap notice, slider drag, dead band, per-mode filter words 207/212, Peak/Pro buffer overrun fixed),
+  fw-meas 0.2.65 (per-mode MEASURES, order, +N more, THD/Noise, counter hook, words 221-223). Pinned backups/fw-0.2.6{2,3,4,5}_*.bin;
+  0.2.65 loaded on the scope 17:54. Walk-throughs: firmware/AGENTS.md sections 38-41. Still running: fw-bode, fw-cal5.
 - Second swarm started 10-19 17:15 (owner: no deadline, do everything that needs no hardware; advanced features are MCP-first,
   device UI only for trigger types, peak detect, hardware counter). Provisional numbers: fw-enc 0.2.62 / protocol 1.19 (encode
   self-check on 0x1538, data check on every full-rate arm), fw-polish 0.2.63 (UI polish batch 1 a-p), fw-acq 0.2.64 (ACQ coupling,

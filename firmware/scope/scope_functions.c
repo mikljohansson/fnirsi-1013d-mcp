@@ -19,6 +19,8 @@
 #include "pc_hooks.h"
 #include "spec_fmt.h"
 #include "ui_fmt.h"
+#include "ui_meas.h"
+#include "spectrum.h"
 #include "variables.h"
 
 #include "sin_cos_math.h"
@@ -550,6 +552,9 @@ void scope_calculate_trigger_vertical_position()
 void scope_acquire_trace_data(void)
 {
   uint32 data;
+
+  //fw 0.2.66: while the Bode plot shows, its sweep owns the acquisition and it draws the trace area
+  PC_BODE_PASS();
   
   //PC protocol: no re-arm while a host READ_RAW waits for the capture just finished
   if((scopesettings.runstate)&&(scopesettings.display_data_done)&&(touchstate == 0) PC_UI_ARM_ALLOWED())//runstate ok
@@ -3327,38 +3332,19 @@ void scope_display_cursor_measurements(void)
 
 void scope_display_measurements(void)
 {
-  //Check if channel1 is active and hide measurements is 0-off and set short time base 
-  if((scopesettings.channel1.enable||scopesettings.ref1||scopesettings.ref2||scopesettings.ref3||scopesettings.ref4)
-    &&(!scopesettings.hide_values_CH1)&&(!scopesettings.long_mode))
-  {
-    //Display the enabled measurements if it is active
-    switch (scopesettings.source1_measures)
-    {
-      case 0: scope_display_channel_measurements(&scopesettings.channel1, scopesettings.measuresstate[0], 5, CHANNEL1_COLOR); break;
-      case 1: scope_display_channel_measurements(&scopesettings.ch_ref1,  scopesettings.measuresstate[0], 5, scopesettings.ch_ref1.color); break;
-      case 2: scope_display_channel_measurements(&scopesettings.ch_ref2,  scopesettings.measuresstate[0], 5, scopesettings.ch_ref2.color); break;
-      case 3: scope_display_channel_measurements(&scopesettings.ch_ref3,  scopesettings.measuresstate[0], 5, scopesettings.ch_ref3.color); break;
-      case 4: scope_display_channel_measurements(&scopesettings.ch_ref4,  scopesettings.measuresstate[0], 5, scopesettings.ch_ref4.color); break;
-      default: scope_display_channel_measurements(&scopesettings.channel1, scopesettings.measuresstate[0], 5, CHANNEL1_COLOR); break;
-    }
-  }
+  int shown[2], ch;
 
-  //Check if channel2 is active and hide measurements is 0-off and set short time base 
-  if((scopesettings.channel2.enable||scopesettings.ref5||scopesettings.ref6||scopesettings.ref7||scopesettings.ref8)
-    &&(!scopesettings.hide_values_CH2)&&(!scopesettings.long_mode))
-  {
-    //Display the enabled measurements if it is active
-    switch (scopesettings.source2_measures)
-    {
-      case 0: scope_display_channel_measurements(&scopesettings.channel2, scopesettings.measuresstate[1], 366, CHANNEL2_COLOR); break;
-      case 1: scope_display_channel_measurements(&scopesettings.ch_ref5,  scopesettings.measuresstate[1], 366, scopesettings.ch_ref5.color); break;
-      case 2: scope_display_channel_measurements(&scopesettings.ch_ref6,  scopesettings.measuresstate[1], 366, scopesettings.ch_ref6.color); break;
-      case 3: scope_display_channel_measurements(&scopesettings.ch_ref7,  scopesettings.measuresstate[1], 366, scopesettings.ch_ref7.color); break;
-      case 4: scope_display_channel_measurements(&scopesettings.ch_ref8,  scopesettings.measuresstate[1], 366, scopesettings.ch_ref8.color); break;
-      default: scope_display_channel_measurements(&scopesettings.channel2, scopesettings.measuresstate[1], 366, CHANNEL2_COLOR); break;
-    }
-  }
-  
+  //fw 0.2.65 (Measurements v2): one row of cards per block, CH1's taking the whole row while CH2's is not shown
+  //(ui_ms_scope_cap); a block shows when its channel or one of its reference traces is on and Hide is off, never in
+  //roll mode (1.00o5's rule)
+  shown[0] = (scopesettings.channel1.enable || scopesettings.ref1 || scopesettings.ref2 || scopesettings.ref3 ||
+              scopesettings.ref4) && !scopesettings.hide_values_CH1 && !scopesettings.long_mode;
+  shown[1] = (scopesettings.channel2.enable || scopesettings.ref5 || scopesettings.ref6 || scopesettings.ref7 ||
+              scopesettings.ref8) && !scopesettings.hide_values_CH2 && !scopesettings.long_mode;
+
+  for(ch = 0; ch < 2; ch++)
+    if(shown[ch])
+      scope_display_channel_measurements(ch, ui_ms_scope_cap(ch, shown[ch ^ 1]));
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -3404,44 +3390,60 @@ void scope_draw_card(uint32 x, uint32 y, uint32 color, const char *name, const c
   display_text(x + cw + UI_CARD_GAP, y + 4, (int8 *)value);
 }
 
-void scope_display_channel_measurements(PCHANNELSETTINGS settings, uint8 *measuresstate, uint32 xstart, uint32 color)
+//The source of a channel block: the live channel (source 0) or one of its reference traces (1..4: Ref 1-4 for CH1,
+//Ref 5-8 for CH2), with its colour; 1.00o5's source1_measures / source2_measures
+static PCHANNELSETTINGS scope_measures_source(int ch, uint32 *color)
 {
-  int i;
-  int x,xe,y;
-
-  x  = xstart;
-  xe = xstart + 359;
-  y  = 426; //456 move up - long base
-
-  //Process the twelve possible measurements for this channel
-  for(i=0;i<12;i++)
+  static const PCHANNELSETTINGS refs[2][4] =
   {
-    //Check if the current one is enabled
-    if(measuresstate[i])
-    {
-      //Erase any previous text
-      measurementtext[0] = 0;
+    { &scopesettings.ch_ref1, &scopesettings.ch_ref2, &scopesettings.ch_ref3, &scopesettings.ch_ref4 },
+    { &scopesettings.ch_ref5, &scopesettings.ch_ref6, &scopesettings.ch_ref7, &scopesettings.ch_ref8 }
+  };
+  uint32 src = ch ? scopesettings.source2_measures : scopesettings.source1_measures;
 
-      //Display the data for this measurement
-      measurementfunctions[i](settings);
-
-      //The card (fw 0.2.51; scope_draw_card since 0.2.56, the spectrum's cards use it too)
-      scope_draw_card(x, y, color, measurement_names[i], measurementtext);
-
-      //Select next column
-      x += 120;
-
-      //Check if past the last for this row
-      if(x > xe)
-      {
-        //Back to beginning of the rows
-        x = xstart;
-
-        //Up to the row above
-        y -= 24;
-      }
-    }
+  if((src < 1) || (src > 4))
+  {
+    *color = ch ? CHANNEL2_COLOR : CHANNEL1_COLOR;
+    return ch ? &scopesettings.channel2 : &scopesettings.channel1;
   }
+
+  *color = refs[ch][src - 1]->color;
+  return refs[ch][src - 1];
+}
+
+//fw 0.2.65: the chosen cards of a block in the chosen order (measuresstate holds the display rank, ui_meas.h), as many
+//as the block has places; with more chosen the last place reads "+N more". A live channel's card takes its value from a
+//registered card source (ui_ms_set_source, a future FPGA counter) when there is one, from the record statistics
+//otherwise; a reference trace always from its record.
+void scope_display_channel_measurements(int ch, int cap)
+{
+  PCHANNELSETTINGS settings;
+  uint32       color;
+  uint8        order[UI_MEAS_COUNT];
+  char         more_text[4];
+  int          n, fit, more, i, live;
+  ui_ms_source src;
+
+  settings = scope_measures_source(ch, &color);
+  live     = (settings == &scopesettings.channel1) || (settings == &scopesettings.channel2);
+  n        = ui_ms_order(scopesettings.measuresstate[ch], UI_MEAS_COUNT, order);
+  fit      = ui_ms_fit(n, cap, &more);
+
+  for(i = 0; i < fit; i++)
+  {
+    measurementtext[0] = 0;
+    src = live ? ui_ms_get_source(order[i]) : 0;
+
+    if(src)
+      src(ch, measurementtext);
+    else
+      measurementfunctions[order[i]](settings);
+
+    scope_draw_card(ui_ms_card_x(ch, i), UI_MS_SCOPE_Y, color, measurement_names[order[i]], measurementtext);
+  }
+
+  if(more)
+    scope_draw_card(ui_ms_card_x(ch, fit), UI_MS_SCOPE_Y, color, ui_ms_more_text(more_text, more), "more");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -6110,7 +6112,6 @@ void scope_save_input_calibration_data(void)
 
 void scope_reset_config_data(void)
 {
-  uint32 index;
   
   //Load a default configuration in case of settings in flash being corrupted
    
@@ -6160,22 +6161,14 @@ void scope_reset_config_data(void)
   scopesettings.source1_measures = 0;
   scopesettings.source2_measures = 0;
     
-  //Enable some default measurements (fw 0.2.51: Freq, Vpp and Vavg on each channel; 1.00o5 set none)
+  //Enable some default measurements (fw 0.2.51: Freq, Vpp and Vavg on each channel; 1.00o5 set none). fw 0.2.65: shown
+  //in that order (the bytes hold the display rank), and the spectrum's list back to its defaults
   scopesettings.hide_values_CH1 = 0;
   scopesettings.hide_values_CH2 = 0;
 
-  for(index = 0; index < UI_MEAS_COUNT; index++)
-  {
-    scopesettings.measuresstate[0][index] = 0;
-    scopesettings.measuresstate[1][index] = 0;
-  }
-
-  for(index = 0; index < 2; index++)
-  {
-    scopesettings.measuresstate[index][UI_MEAS_FREQ] = 1;
-    scopesettings.measuresstate[index][UI_MEAS_VPP]  = 1;
-    scopesettings.measuresstate[index][UI_MEAS_VAVG] = 1;
-  }
+  ui_ms_scope_defaults(scopesettings.measuresstate[0]);
+  ui_ms_scope_defaults(scopesettings.measuresstate[1]);
+  ui_ms_spec_defaults(spectrum_cards());
 
   //Turn time cursor off and set some default positions
   scopesettings.timecursorsenable   = 0;
@@ -6443,6 +6436,13 @@ void scope_save_config_data(void)
   settingsworkbuffer[PC_SETTING_WORD_PHOS] = pc_glue_phosphor_setting_word();
   //Grid and the spectrum's Display variant (fw 0.2.56)
   settingsworkbuffer[PC_SETTING_WORD_UI] = pc_glue_ui_setting_word();
+  //The spectrum's MEASURES list (fw 0.2.65, words 221..223)
+  settingsworkbuffer[UI_MS_SPEC_WORD_CH1]  = ui_ms_spec_word(spectrum_cards(), 0);
+  settingsworkbuffer[UI_MS_SPEC_WORD_CH2]  = ui_ms_spec_word(spectrum_cards(), 1);
+  settingsworkbuffer[UI_MS_SPEC_WORD_VIEW] = ui_ms_spec_word(spectrum_cards(), UI_MS_SP_VIEW);
+  //Bode plot sweep settings (fw 0.2.66)
+  settingsworkbuffer[PC_SETTING_WORD_BODE0] = pc_glue_bode_setting_word(0);
+  settingsworkbuffer[PC_SETTING_WORD_BODE1] = pc_glue_bode_setting_word(1);
   //Unit life record, words 224..255 (fw 0.2.52, pc_diag.c)
   PC_SETTINGS_STORE(settingsworkbuffer);
   
@@ -6603,6 +6603,11 @@ void scope_restore_config_data(void)
         scopesettings.measuresstate[channel][index] = *ptr++;
       }
     }
+    //fw 0.2.65: the spectrum's MEASURES list (words 221..223; a word without its marker gives that group's defaults)
+    ui_ms_spec_restore(spectrum_cards(), 0, settingsworkbuffer[UI_MS_SPEC_WORD_CH1]);
+    ui_ms_spec_restore(spectrum_cards(), 1, settingsworkbuffer[UI_MS_SPEC_WORD_CH2]);
+    ui_ms_spec_restore(spectrum_cards(), UI_MS_SP_VIEW, settingsworkbuffer[UI_MS_SPEC_WORD_VIEW]);
+
     //Load reference waveforms
     scope_load_ALLREF_file();
     //--------------------------------------------------------------------------

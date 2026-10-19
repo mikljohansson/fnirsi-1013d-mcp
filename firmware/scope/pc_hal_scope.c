@@ -40,6 +40,7 @@
 #include "pc_seq_hw.h"
 #include "ui_diag_view.h"
 #include "acq_view.h"
+#include "bode_view.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -1592,6 +1593,10 @@ uint32_t pc_hal_fft_bench(uint8_t *dst, uint32_t reps)
 
 uint8_t pc_hal_display_mode(void)
 {
+  //fw 0.2.66: 5 while the Bode plot shows
+  if(bode_view_active())
+    return BODE_DISPLAY_MODE;
+
   return phosphor_mode() ? PHOSPHOR_DISPLAY_MODE : (uint8_t)spectrum_mode();
 }
 
@@ -1605,10 +1610,34 @@ int32_t pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t 
 // Spectrum analyser; ui_menu.h) are the only way between the modes; phosphor is a drawing variant of the scope switched
 // in the CTRL page's Display fold-out (fw 0.2.56, ctrl_page.c). The spectrum and phosphor views exclude each other.
 
-int pc_glue_spectrum_display(void) { return spectrum_display(); }
-int pc_glue_spectrum_touch(void)   { return spectrum_touch(); }
-int pc_glue_autoset(void)          { return spectrum_autoset(); }
-int pc_glue_autoset_running(void)  { return spectrum_auto_running(); }
+//fw 0.2.66: the Bode plot (bode_view.c) is a mode too: it draws the trace area, takes its touches and AUTO SET
+int pc_glue_spectrum_display(void) { return bode_view_display() || spectrum_display(); }
+int pc_glue_spectrum_touch(void)   { return bode_view_touch() || spectrum_touch(); }
+int pc_glue_autoset(void)          { return bode_view_autoset() || spectrum_autoset(); }
+int pc_glue_autoset_running(void)  { return bode_view_auto_running() || spectrum_auto_running(); }
+
+//fw 0.2.66: scope_acquire_trace_data while the Bode plot shows: no UI acquisition, the view's drawing instead
+int pc_glue_bode_pass(void)        { return bode_view_pass(); }
+void pc_glue_gen_bode_draw(void)   { bode_gen_row_draw(); }
+int pc_glue_gen_bode_hit(void)     { return bode_gen_row_hit(ytouch); }
+uint16 pc_glue_bode_setting_word(int i) { return bode_view_setting_word(i); }
+void pc_glue_view_opening(void)    { if(bode_view_active()) bode_view_close(); }
+
+//fw 0.2.66 (pc_bode.c): the running bitstream's capabilities, the ring size, a host capture in flight, and the ring
+//taken by a Bode capture (the PC's last capture is gone)
+uint32 pc_glue_caps(void)          { return pc_ready ? pc_sess.var.caps : 0; }
+uint32 pc_glue_ring_words(void)    { return (pc_ready && pc_sess.var.ring_words) ? pc_sess.var.ring_words : 8192; }
+
+int pc_glue_host_capture(void)
+{
+  return pc_ready && ((pc_sess.acq_state == PC_ACQ_ARMED) || (pc_sess.acq_state == PC_ACQ_TRIGGERED));
+}
+
+void pc_glue_ring_taken(void)
+{
+  if(pc_ready)
+    pc_sess.ring_valid = 0;
+}
 
 int  pc_glue_phosphor_on(void)          { return phosphor_owns_traces(); }
 void pc_glue_phosphor_draw(void)        { phosphor_draw(); }
@@ -1627,7 +1656,13 @@ static int pc_spectrum_on(void)
 void pc_glue_main_menu_mode(int row)
 {
   ui_mm_action a;
-  int          sp = pc_spectrum_on();
+  int          sp;
+
+  //fw 0.2.66: the Bode plot (opened from the generator menu) ends on either mode row; Scope then needs nothing more
+  if(bode_view_active())
+    bode_view_close();
+
+  sp = pc_spectrum_on();
 
   if(!ui_mm_choose(row, sp, scopesettings.long_mode != 0, phosphor_switch(), &a))
     return;
@@ -1662,7 +1697,7 @@ static uint8 pc_bar_spectrum;
 static void pc_right_bar_follow(void)
 {
   DISPLAYDATA save;
-  uint8       sp = (uint8)pc_spectrum_on();
+  uint8       sp = (uint8)(pc_spectrum_on() | (bode_view_active() << 1));   //fw 0.2.66: the Bode plot too
 
   if(sp == pc_bar_spectrum)
     return;
@@ -1894,6 +1929,9 @@ static void pc_ui_fix_settings(void)
   //fw 0.2.56: Grid and the spectrum's Display variant (word 211)
   pc_ui_setting_restore(settingsworkbuffer[PC_SETTING_WORD_UI]);
 
+  //fw 0.2.66: the Bode plot's sweep settings (words 219, 220); the mode itself is not restored
+  bode_view_settings_restore(settingsworkbuffer[PC_SETTING_WORD_BODE0], settingsworkbuffer[PC_SETTING_WORD_BODE1]);
+
   //Memory depth: the largest offered step (3000 x n) the bitstream can capture
   if(fpgasettings.totalsamples > max)
   {
@@ -2003,6 +2041,9 @@ void pc_glue_ui_service(void)
   //Roll mode or a viewer ends the spectrum view and the phosphor view; the right bar follows the mode
   spectrum_service();
   phosphor_service();
+
+  //fw 0.2.66: the Bode plot: a pending open / close, its sweep (a few engine steps per pass), RUN / STOP
+  bode_view_service();
   pc_right_bar_follow();
   pc_dec_follow_mode();
 

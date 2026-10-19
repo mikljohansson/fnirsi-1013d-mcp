@@ -367,4 +367,14 @@ uint8_t  pc_hal_display_mode(void);
 #define PC_SPECTRUM_HDR   32
 int32_t  pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t *hdr, uint8_t *levels);
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// Bode plot (fw 0.2.66, protocol 1.20, docs/protocol.md section 14 row 60; pc_bode.c / bode_view.c). MAIN context.
+// BODE_CTRL: req is the zero-extended 16-byte request; returns a PC status (PC_E_BAD_ARG / PC_E_STATE with *detail) and
+// fills the 40-byte response. READ_BODE: the 32-byte header and up to max_rows 20-byte rows from row first; returns bytes.
+#define PC_BODE_HDR       32
+#define PC_BODE_ROW       20
+#define PC_BODE_CTRL_RESP 40
+int      pc_hal_bode_ctrl(const uint8_t *req, uint8_t *resp, uint16_t *detail);
+uint32_t pc_hal_bode_read(uint32_t first, uint32_t max_rows, uint8_t *resp);
+
 #endif /* PC_HAL_H */

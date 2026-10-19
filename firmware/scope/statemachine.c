@@ -23,6 +23,7 @@
 #include "ui_menu.h"
 #include "ui_settings.h"
 #include "ui_ctrl.h"
+#include "ui_meas.h"
 #include "ctrl_page.h"
 #include "touch_pick.h"
 #include "tb_view.h"
@@ -3138,6 +3139,13 @@ void handle_generator_menu_touch(void)
             scope_generator_settings(0);
           }
         }
+        //fw 0.2.66: the fourth row, Bode plot: the mode opens (or closes) once the menu has closed
+        else if(PC_GEN_BODE_HIT())
+        {
+          tp_i2c_wait_for_touch_release();
+          close_open_gen_menus(1);
+          return;
+        }
         //====================================================================================================
         //Wait until touch is released before checking on a new position
         //tp_i2c_wait_for_touch_release(); // doplnik pre kr=azdy prikaz zvlast
@@ -3305,8 +3313,13 @@ void handle_keyboard_menu_touch(void)
 
 void handle_right_basic_menu_touch(void)
 {
-  //fw 0.2.56: the spectrum's empty slots (T CURSOR, V CURSOR, MEASURES; ui_p1_shown) do nothing
-  if((ytouch >= 183) && (ytouch <= 357) && !ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
+  //fw 0.2.56: the spectrum's empty slots (T CURSOR, V CURSOR; ui_p1_shown) do nothing; fw 0.2.65: MEASURES opens the
+  //spectrum's own list
+  if((ytouch >= 183) && (ytouch <= 297) && !ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
+    return;
+
+  //fw 0.2.66: the Bode plot's empty MEASURES slot does nothing either
+  if((ytouch >= 303) && (ytouch <= 357) && !ui_p1_shown(UI_P1_MEASURES, ctrl_page_spectrum()))
     return;
 
   //Check if run/stop or page up button is touched
@@ -3477,10 +3490,9 @@ void handle_right_basic_menu_touch(void)
     //Button back to inactive state
     scope_measures_button(0);
 
-    //Save the screen rectangle where the menu will be displayed
+    //Save the screen rectangle where the menu will be displayed (fw 0.2.65: its height follows the mode, ui_meas.h)
     display_set_destination_buffer(displaybuffer2);
-    //display_copy_rect_from_screen(231, 263, 501, 215);//499 214
-    display_copy_rect_from_screen(232, 232, 499, 246);//499 214
+    display_copy_rect_from_screen(UI_MSM_X, ui_msm_top(scope_measures_mode()), UI_MSM_W, ui_msm_height(scope_measures_mode()));
 
     //Go and setup the measurements menu
     scope_open_measures_menu();
@@ -3490,8 +3502,7 @@ void handle_right_basic_menu_touch(void)
 
     //Restore the screen when done
     display_set_source_buffer(displaybuffer2);
-    //display_copy_rect_to_screen(231, 263, 501, 215);//499 214
-    display_copy_rect_to_screen(232, 232, 499, 246);//499 214
+    display_copy_rect_to_screen(UI_MSM_X, ui_msm_top(scope_measures_mode()), UI_MSM_W, ui_msm_height(scope_measures_mode()));
   }
   //Check if save picture button is touched
   else if((ytouch >= 363) && (ytouch <= 417))
@@ -3947,29 +3958,18 @@ void handle_right_volts_div_menu_touch(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-const TOUCHCOORDS measures_item_touch_coords[2][12] =
-{
-  {
-    //Channel 1 coordinates are on the left
-    {232, 293, 297, 355}, {295, 355, 297, 355}, {357, 417, 297, 355}, {419, 480, 297, 355},
-    {232, 293, 357, 415}, {295, 355, 357, 415}, {357, 417, 357, 415}, {419, 480, 357, 415},
-    {232, 293, 417, 476}, {295, 355, 417, 476}, {357, 417, 417, 476}, {419, 480, 417, 476},
-  },
-  {
-    //Channel 2 coordinates are on the right
-    {482, 543, 297, 355}, {545, 605, 297, 355}, {607, 667, 297, 355}, {669, 729, 297, 355},
-    {482, 543, 357, 415}, {545, 605, 357, 415}, {607, 667, 357, 415}, {669, 729, 357, 415},
-    {482, 543, 417, 476}, {545, 605, 417, 476}, {607, 667, 417, 476}, {669, 729, 417, 476},
-  }
-};
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
+//fw 0.2.65 (Measurements v2): the MEASURES menu's touch loop (ui_msm_hit). A cell acts on touch and the menu stays; a
+//touch outside the box closes it (consumed). An item toggles (turned on it goes last in the row, ui_ms_toggle); Select
+//All keeps the chosen order and appends the rest in table order; Clear empties the block; a source cell picks the
+//block's source (Scope: the channel or a reference trace); Hide toggles the block. After a change every cell is drawn
+//again (the places shown on the other items move), over their own backgrounds so nothing flashes.
 void handle_measures_menu_touch(void)
 {
-  int channel;
-  int item;
-  int found;
+  ui_msm_cell cells[UI_MSM_CELLS_MAX], c;
+  int    mode = scope_measures_mode(), len = scope_measures_list_len(mode), n, i, r;
+  uint8 *rank;
+
+  n = ui_msm_cells(mode, cells);
 
   //Stay in the menu as long as there is no touch outside the menu
   while(1)
@@ -3977,125 +3977,52 @@ void handle_measures_menu_touch(void)
     //Scan the touch panel for touch
     tp_i2c_read_status();
 
-    //Check if there is touch
-    if(havetouch)
+    if(!havetouch)
+      continue;
+
+    r = ui_msm_hit(mode, xtouch, ytouch, &c);
+
+    if(r < 0)
     {
-      //scope_test_TP();
-      
-      //Check if touch within the menu field
-      if((xtouch >= 232) && (xtouch <= 730) && (ytouch >= 232) && (ytouch <= 477))//231-730 264-477
-      {
-        found = 0;
-        channel = 0;
-
-        //Check the touch positions for the separate items until one is found
-        while((found == 0) && (channel < 2))
-        {
-                   //--------------- Only select ch1 or ch2 and all & clear & hide -------------------------------------------------  
-         //Check press button select all and clear for ch1 a ch2
-         if((ytouch >= 232) && (ytouch <= 264))
-         {
-            if((xtouch >= 235) && (xtouch <= 285))  //ref1 button
-            {scopesettings.source1_measures = 1; scope_source1_measures_menu_item();}
-           
-            if((xtouch >= 295) && (xtouch <= 355))  //ref2 button
-            {scopesettings.source1_measures = 2; scope_source1_measures_menu_item();}
-
-            if((xtouch >= 357) && (xtouch <= 417))  //ref3 button
-            {scopesettings.source1_measures = 3; scope_source1_measures_menu_item();}
-
-            if((xtouch >= 419) && (xtouch <= 480))  //ref4 button
-            {scopesettings.source1_measures = 4; scope_source1_measures_menu_item();}     
-            
-            if((xtouch >= 485) && (xtouch <= 535))  //ref5 button
-            {scopesettings.source2_measures = 1; scope_source2_measures_menu_item();}
-
-            if((xtouch >= 545) && (xtouch <= 605))  //ref6 button
-            {scopesettings.source2_measures = 2; scope_source2_measures_menu_item();} 
-
-            if((xtouch >= 607) && (xtouch <= 667))  //ref7 button  
-            {scopesettings.source2_measures = 3; scope_source2_measures_menu_item();}
-
-            if((xtouch >= 669) && (xtouch <= 729))   //ref8 button 
-            {scopesettings.source2_measures = 4; scope_source2_measures_menu_item();}  
-         }
-         
-         //--------------- Only select ch1 or ch2 and all & clear & hide -------------------------------------------------  
-         //Check press button select all and clear for ch1 a ch2
-         if((ytouch >= 264) && (ytouch <= 295))
-         {
-            if((xtouch >= 235) && (xtouch <= 285))  //ch1 button open menu ch1-ref1-ref2-ref3-ref4
-            {scopesettings.source1_measures = 0; scope_source1_measures_menu_item();}
-           
-            if((xtouch >= 295) && (xtouch <= 355))  //select ALL ch1 button
-            {for (int j=0; j<12;j++) {scopesettings.measuresstate[0][j] = 1;scope_measures_menu_item(0,j);}}
-
-            if((xtouch >= 357) && (xtouch <= 417))  //clear ch1 button
-            {for (int j=0; j<12;j++) {scopesettings.measuresstate[0][j] = 0;scope_measures_menu_item(0,j);}}
-
-            if((xtouch >= 419) && (xtouch <= 480))  //hide ch1
-            { scopesettings.hide_values_CH1 ^= 1; scope_hide_measures_menu_item(); tp_i2c_wait_for_touch_release();}      
-            
-            if((xtouch >= 485) && (xtouch <= 535))  //ch2 button
-            {scopesettings.source2_measures = 0; scope_source2_measures_menu_item();}
-
-            if((xtouch >= 545) && (xtouch <= 605))  //select ALL ch2 button
-            {for (int j=0; j<12;j++) {scopesettings.measuresstate[1][j] = 1;scope_measures_menu_item(1,j);}}
-
-            if((xtouch >= 607) && (xtouch <= 667))  //clear ch2 button   
-            {for (int j=0; j<12;j++) {scopesettings.measuresstate[1][j] = 0;scope_measures_menu_item(1,j);}}
-
-            if((xtouch >= 669) && (xtouch <= 729))
-            { scopesettings.hide_values_CH2 ^= 1; scope_hide_measures_menu_item(); tp_i2c_wait_for_touch_release();}   
-         }
-         //------------------------------------------------------------------------------------------------
-                    
-          item = 0;
-
-          //For each channel 12 items
-          while((found == 0) && (item<12))
-          {
-            //Check if touch is on this item
-            if((xtouch >= measures_item_touch_coords[channel][item].x1) && (xtouch <= measures_item_touch_coords[channel][item].x2) &&
-               (ytouch >= measures_item_touch_coords[channel][item].y1) && (ytouch <= measures_item_touch_coords[channel][item].y2))
-            {
-              //Toggle the item
-              scopesettings.measuresstate[channel][item] ^= 1;
-
-              //There is an array for showing the items on screen. It works on a first come first serve system.
-              //It looks for the first free spot and inserts itself there. This gives a messy image of the two channels interleaving with settings
-              //On disable the list is shifted to fill the gap
-              //For this an items in list counter might be useful
-
-              //A nicer setup is to reserve separate sections per channel on the screen for the enabled items and always show them in a fixed
-              //order. Makes reading them easier
-              
-              //Draw the changed item
-              scope_measures_menu_item(channel, item);
-
-              //Signal item found
-              found = 1;
-            }
-
-            //Next item
-            item++;
-          }
-
-          //Next channel
-          channel++;
-        }
-
-        //Wait until touch is released before checking on a new position
-        tp_i2c_wait_for_touch_release();
-      }
-      else
-      {
-        //Touch outside the menu so wait until touch is released and then quit
-        tp_i2c_wait_for_touch_release();
-
-        return;
-      }
+      //Touch outside the menu so wait until touch is released and then quit
+      tp_i2c_wait_for_touch_release();
+      return;
     }
+
+    if(r > 0)
+    {
+      rank = scope_measures_ranks(mode, c.group);
+
+      switch(c.what)
+      {
+        case UI_MSC_ITEM:   ui_ms_toggle(rank, len, c.index); break;
+        case UI_MSC_ALL:    ui_ms_select_all(rank, len);      break;
+        case UI_MSC_CLEAR:  ui_ms_clear(rank, len);           break;
+
+        case UI_MSC_HIDE:
+          if(c.group)
+            scopesettings.hide_values_CH2 ^= 1;
+          else
+            scopesettings.hide_values_CH1 ^= 1;
+          break;
+
+        case UI_MSC_SOURCE:
+          if(c.group)
+            scopesettings.source2_measures = c.index;
+          else
+            scopesettings.source1_measures = c.index;
+          break;
+
+        default:
+          break;
+      }
+
+      for(i = 0; i < n; i++)
+        scope_measures_menu_cell(mode, &cells[i]);
+    }
+
+    //Wait until touch is released before checking on a new position
+    tp_i2c_wait_for_touch_release();
   }
 }
 
