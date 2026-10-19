@@ -34,7 +34,7 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
 #### 0.2.58 - 2026-10-19 (protocol 1.17, docs/protocol.md section 14 row 56)
 
 Support for the AL3 bitstream 0x1536 (segmented capture and hardware averaging, fpga-gen5; not flashed yet).
-Built on 0.2.55 / protocol 1.16 and numbered 0.2.58 by the coordinator (0.2.56 is fw-ui2, 0.2.57 fw-ui4); the
+Built on 0.2.55 / protocol 1.16 and numbered 0.2.58 by the coordinator (0.2.56 is fw-ui2, 0.2.59 fw-ui4); the
 protocol row number (56) is provisional, the coordinator renumbers it at the merge. Spec: `docs/protocol.md` section 14 row 56; README section 5 "Segmented
 capture and hardware averaging". Nothing is benched.
 
@@ -51,7 +51,7 @@ capture and hardware averaging". Nothing is benched.
 - Changed: on 0x1536 the arm writes 0x0B / 0x0C and the sequencer registers before the sampling reset, so the
   write-clock side loads them at every rate (65abebf).
 
-#### 0.2.57 - 2026-10-19 (protocol 1.16 unchanged; provisional number, renumbered at merge)
+#### 0.2.59 - 2026-10-19 (protocol 1.17 unchanged)
 
 UX makeover step 4 (`docs/plans/ux-makeover.md` sections 6-6c; `firmware/README.md` section 5 "Screens: Diagnostics,
 calibration wizard, first run" and 6.4).

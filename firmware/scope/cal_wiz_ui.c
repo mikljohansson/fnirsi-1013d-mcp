@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// cal_wiz_ui.c - the calibration wizard on the scope (fw 0.2.57, firmware/README.md section 6.4, docs/plans/ux-makeover.md
+// cal_wiz_ui.c - the calibration wizard on the scope (fw 0.2.59, firmware/README.md section 6.4, docs/plans/ux-makeover.md
 // 6a): the step dialog, its touch loop, and the measurements the state machine (cal_wiz.c) asks for. Opened by Calibrate
 // on the Diagnostics pages, Calibrate now on the first-run screen (ui_diag_view.c) and, until the Settings rebuild
 // removes it, System settings > Baseline calibration (statemachine.c). It owns the screen until Cancel or Save

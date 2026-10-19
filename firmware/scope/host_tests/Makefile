@@ -59,7 +59,7 @@ $(OUT)/test_cal_wizard: test_cal_wizard.c test_util.h $(SRC)/cal_wiz.c $(SRC)/ca
 UI_SRCS := $(SRC)/ui_fmt.c $(SRC)/ui_menu.c $(SRC)/ui_settings.c $(SRC)/ui_ctrl.c $(SRC)/font_2.c $(SRC)/font_3.c $(SRC)/font_5.c
 $(OUT)/test_ui: test_ui.c test_util.h $(UI_SRCS) $(SRC)/ui_fmt.h $(SRC)/ui_menu.h $(SRC)/ui_settings.h $(SRC)/ui_ctrl.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_ui.c $(UI_SRCS)
-# fw 0.2.57: the Diagnostics pages and the first-run screen as data (ui_diag.c) with the 13, 16 and 24 px fonts
+# fw 0.2.59: the Diagnostics pages and the first-run screen as data (ui_diag.c) with the 13, 16 and 24 px fonts
 UI_DIAG_SRCS := $(SRC)/ui_diag.c $(SRC)/ui_fmt.c $(SRC)/font_2.c $(SRC)/font_3.c $(SRC)/font_5.c
 $(OUT)/test_ui_diag: test_ui_diag.c test_util.h $(UI_DIAG_SRCS) $(SRC)/ui_diag.h $(SRC)/ui_fmt.h $(SRC)/pc_ident.h $(SRC)/adc_cal.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_ui_diag.c $(UI_DIAG_SRCS)

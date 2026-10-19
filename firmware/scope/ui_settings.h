@@ -25,7 +25,7 @@
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //The fold-out beside the main menu: 1.00o5's column (x 150, 244 wide, from y 46, one row per 59 px), its rows top to
-//bottom. Time and date only with a clock module. (fw 0.2.55-0.2.56 had an interim Baseline calibration row; fw 0.2.57
+//bottom. Time and date only with a clock module. (fw 0.2.55-0.2.56 had an interim Baseline calibration row; fw 0.2.59
 //moved it to Diagnostics, Calibrate.)
 
 #define UI_FO_SCREEN          0

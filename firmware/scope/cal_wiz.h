@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// cal_wiz.h - the calibration wizard's steps (fw 0.2.57, docs/plans/ux-makeover.md section 6a, firmware/README.md section
+// cal_wiz.h - the calibration wizard's steps (fw 0.2.59, docs/plans/ux-makeover.md section 6a, firmware/README.md section
 // 6.4): a state machine with no globals and no hardware, host-buildable (host_tests/test_cal_wizard.c). The target glue
 // (cal_wiz_ui.c) draws the state, turns button touches into events, runs the actions the machine asks for and feeds their
 // results back.

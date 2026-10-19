@@ -4,7 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
-**Branch fw-ui4 (2026-10-19): fw 0.2.57 provisional, protocol unchanged: UX makeover step 4 (Diagnostics as a main-loop
+**Branch fw-ui4 (2026-10-19): fw 0.2.59 provisional, protocol unchanged: UX makeover step 4 (Diagnostics as a main-loop
 display mode with Status, Calibration, Log, Developer; the four-screen calibration wizard; the first-run screen), section 34.**
 **Branch fw-ui3 (2026-10-19): fw 0.2.55 provisional, protocol 1.16 unchanged: UX makeover step 3 (Settings fold-out
 trimmed, full Settings screen, confirmation dialog), section 31.**
@@ -1816,20 +1816,20 @@ Bug indicators: a stepper half acting on the other channel or the wrong directio
 the panel on the plot (stopped scope); AUTO SET painted over Analyse; the right bar showing Scope items in the spectrum
 or empty slots in the scope after a mode change; the warning line in the waveform viewer; cards overlapping the
 frequency labels; Phosphor switch on but no graded picture in the scope view outside roll mode.
-## 34. fw-ui4: UX makeover step 4, Diagnostics, wizard, first run (fw 0.2.57 provisional, protocol unchanged)
+## 34. fw-ui4: UX makeover step 4, Diagnostics, wizard, first run (fw 0.2.59 provisional, protocol unchanged)
 
 Branch `fw-ui4` from main 72eacb3 (0.2.52), merged with main 508f0c5 (0.2.58, protocol 1.17) in 4c38068. Plan:
 `docs/plans/ux-makeover.md` sections 6, 6a-6c, 7 step 4; review `docs/plans/diagnostics-review.md`; user-facing
 description README section 5 "Screens: Diagnostics, calibration wizard, first run" and 6.4. Commits: f95dbee (`ui_diag.c/.h`,
 `host_tests/test_ui_diag.c`, `pc_report_event`), 95f440e (four-screen wizard: `cal_wiz.c/.h` rewritten, `cal_wiz_ui.c`
 dialog part rewritten, `ui_dlg.c/.h`, test_cal_wizard rewritten), 5e8a5db (display mode `ui_diag_view.c/.h`, hooks, old
-screens removed), 6897cf5 (0.2.57, README, CHANGELOG), 4c38068 (merge + the fw-ui3 interim rows out), then this handoff.
+screens removed), 6897cf5 (0.2.59, README, CHANGELOG), 4c38068 (merge + the fw-ui3 interim rows out), then this handoff.
 Image from 4c38068 (GCC 10): `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 602,112 B, sha256
 7efaada392eb22c8a8b8531449d07d7054e4ea41e0593ae9cfdf31e56e06ec08, ELF a28c2705782f033656030cc3488486cacc7c21b215a661d0d7bf459c5d450fe6;
-nommu 6787f60ab1ebb8ecbfdacfbfe9efe065e16b345065f8405dd5a76f1b084a7169 (`#VER` fw=0.2.57, proto=1.17). A build of a later
+nommu 6787f60ab1ebb8ecbfdacfbfe9efe065e16b345065f8405dd5a76f1b084a7169 (`#VER` fw=0.2.59, proto=1.17). A build of a later
 commit differs only in the identity. **Nothing benched.** Host tests all green (test_ui_diag 4862, test_cal_wizard 631,
 test_ui 1418549, test_session 69705 / 69703, check_vectors OK). Warnings GCC 10 36, GCC 13 31, sorted lists identical to
-main 508f0c5; the new files are clean with -Wall -Wextra -Werror (host). Version: kept 0.2.57 as briefed although main is
+main 508f0c5; the new files are clean with -Wall -Wextra -Werror (host). Version: kept 0.2.59 as briefed although main is
 0.2.58: the coordinator renumbers.
 
 **Files.** `ui_diag.c/.h` (pure: each page and the first-run screen as boxes, texts and buttons built from the protocol
@@ -1885,10 +1885,10 @@ screen's Calibration group (`UI_SET_DCSHIFT`; the DC shift trim is on the Diagno
 - The pass time measured by GET_STATUS while Diagnostics shows is the page's pass.
 
 **Bench walk-through (owner, coordinator on COM10; FEL load, back up SD sectors 700-710 first: Save writes 708 and 709)**
-1. FEL-load, `#VER fw=0.2.57,proto=1.17`. On the owner's calibrated unit no first-run screen. Menu > Settings: the
+1. FEL-load, `#VER fw=0.2.59,proto=1.17`. On the owner's calibrated unit no first-run screen. Menu > Settings: the
    fold-out has Screen brightness, Grid brightness, File message timeout, (Time and date), Other settings; no Baseline
    calibration row. Other settings: no Calibration group.
-2. Menu > Diagnostics: the Status page; tile Firmware reads "Reading" for a moment, then Check "Running 0.2.57 from RAM.
+2. Menu > Diagnostics: the Status page; tile Firmware reads "Reading" for a moment, then Check "Running 0.2.59 from RAM.
    A power cycle starts 0.2.25 from the card." (or what the card holds). The uptime line advances every second. With the
    MCP connected: `scope_status` and a capture work while the page shows (no E_BUSY); the USB tile shows "PC connected,
    high speed." Calibration box: verdict and the two rows, the provenance sentence.
@@ -1919,7 +1919,7 @@ than about 2 s; GET_CAL changing after a Cancel.
 
 ## 35. fw-seq: FPGA 0x1536 segmented capture and hardware averaging (fw 0.2.58 provisional, protocol 1.17, row 56 provisional)
 
-Version 0.2.58 as assigned by the coordinator (main: 0.2.56 fw-ui2, 0.2.57 fw-ui4); protocol 1.17 with the row kept at
+Version 0.2.58 as assigned by the coordinator (main: 0.2.56 fw-ui2, 0.2.59 fw-ui4); protocol 1.17 with the row kept at
 **70** as briefed (main's last row is 55; renumber to 56 at the merge if preferred). Branch
 `worktree-agent-adad2198a41835255` from main 9cc599c (0.2.51), merged with origin/main 57924e0 (0.2.55, protocol
 1.16). Commits: e6bbc10 (pc_seq.c maths + test_seq + seq_check), 65abebf (HAL, UI averaging, protocol 1.17, mock,

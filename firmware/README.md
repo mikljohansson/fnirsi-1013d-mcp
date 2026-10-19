@@ -421,7 +421,7 @@ Battery indicator (fw 0.2.13): the level is a running average, and while chargin
 moves 1.25 steps away from the shown value (the raw level followed ADC noise while charging over USB and the last
 column flapped). Off the charger the 1.00o5 rule stays (the level only drops), applied to the average.
 
-Version display: the Diagnostics Status page's identity line (fw 0.2.57; the restore screen until 0.2.56, the top bar
+Version display: the Diagnostics Status page's identity line (fw 0.2.59; the restore screen until 0.2.56, the top bar
 until 0.2.51), from the image's identity record (the same as `#VER` and GET_INFO). Waveform and reference files still store 1.00o5's VERSION_STRING (file format data).
 
 At boot a saved setting that selects a hidden option is corrected: RTC off without a module, EXT trigger -> CH1,
@@ -658,7 +658,7 @@ period" while the record has fewer than three crossings. What the values mean is
 Vrms includes DC). A new unit, and the DEFAULT button, show Freq, Vpp and Vavg on each enabled channel (in the table's
 order: Vavg, Vpp, Freq); 1.00o5 set none.
 
-### Screens: Diagnostics, calibration wizard, first run (fw 0.2.57)
+### Screens: Diagnostics, calibration wizard, first run (fw 0.2.59)
 
 Step 4 of the UX makeover (`docs/plans/ux-makeover.md` sections 6-6c and 7; rules `docs/ui-guidelines.md`; the review
 `docs/plans/diagnostics-review.md`). Pure parts in `ui_diag.c` (each page as boxes, texts and buttons built from the
@@ -687,7 +687,7 @@ the page tabs Status, Calibration, Log, Developer (112 x 44 at x 160, 280, 400, 
   calibration, gains not measured (stock: not possible), gains carried over, calibrated under 5 minutes after power-on,
   a value over its limit; OK otherwise), per channel the class gain ratio full / gated (limit 2 %) and the worst noise
   RMS over the ranges gated (0.3 code) and full (1.0 code), each with OK or Check; the note that the limits are
-  provisional; the provenance sentence ("Calibrated on fw 0.2.57, FPGA 0x1535, 12 min after power-on, 1 power-on ago.",
+  provisional; the provenance sentence ("Calibrated on fw 0.2.59, FPGA 0x1535, 12 min after power-on, 1 power-on ago.",
   or why there is none). Buttons: Calibrate (green), Save report to card (the file name, or "Report not saved: no card",
   ... in place of the hint).
 - **Calibration**: the block state per channel and the provenance; per channel the table per hardware range (PWM centre
@@ -815,7 +815,7 @@ brightness (sliders beside the fold-out, as before), File message timeout (1.00o
 `confirmationmode`: a tap toggles; the chip reads "tap" when file messages such as "Failed to create file" wait for a
 tap, "0.7 s" when they close by themselves), Time and date (only with a DS3231; opens 1.00o5's editor beside the
 fold-out with hours .. year and RTC On/Off) and Other settings (opens the Settings screen). 295 px high, 236 px
-without a DS3231. (0.2.55-0.2.56 had an interim Baseline calibration row here: fw 0.2.57 moved it to Diagnostics >
+without a DS3231. (0.2.55-0.2.56 had an interim Baseline calibration row here: fw 0.2.59 moved it to Diagnostics >
 Calibrate, together with the 1.00o5 volts-calibration boxes that opened beside the fold-out after the wizard.)
 
 Settings screen (fold-out > Other settings): a modal full-screen page like the menus (the PC protocol answers E_BUSY
@@ -860,9 +860,9 @@ Where the controls of 1.00o5's Other settings menu went (the menu is gone):
 | Boot menu (on / off) and Default start (PECO / FNIRSI / FEL) | Settings > Start-up > At power-on (three values; FEL is no longer offered: ENTER_FEL from the PC, the boot menu's FEL button, and the step-4 Developer page's "Enter FEL now") |
 | New autosetup | Settings > Controls > Auto setup |
 | Lock move cursors | Settings > Controls > Cursors |
-| DC shift calibration | Diagnostics > Calibration > DC shift trim (fw 0.2.57; Settings > Calibration in 0.2.55-0.2.56) |
+| DC shift calibration | Diagnostics > Calibration > DC shift trim (fw 0.2.59; Settings > Calibration in 0.2.55-0.2.56) |
 | USB-Serial mode | removed: the build forces CDC at boot (`PC_FORCE_CDC`), the flag did nothing visible |
-| Dev mode | Diagnostics > Developer > Debug overlay (fw 0.2.57; the flag stays in the settings sector with its effects: trigger address overlay, touch coordinates). Its exception to the boot-menu rule is gone: At power-on writes exactly the chosen value |
+| Dev mode | Diagnostics > Developer > Debug overlay (fw 0.2.59; the flag stays in the settings sector with its effects: trigger address overlay, touch coordinates). Its exception to the boot-menu rule is gone: At power-on writes exactly the chosen value |
 | Add a tag to BMP | Settings > Files > Stamp screenshots with |
 | Load Ref on start | Settings > Files > Reference traces at power-on |
 | RTC On/Off (RTC editor) | still in the editor; also Settings > Clock > Clock |
@@ -1337,7 +1337,7 @@ per count), `dc_shift_size` (220) maps it to screen pixels for the trace and the
 holds the base calibration results: words 168-173 CH1 `dc_calibration_offset[0..5]`, 174-179 CH2, 184-187
 `adc1compensation` / `adc2compensation` of CH1 then CH2 (i16). They are taken from the loaded 709 buffer only
 when sector 708's checksum is valid; otherwise defaults (PWM 860, compensation 0, `signal_adjusters`, 174/220/385)
-load and the input calibration is offered again (fw 0.2.57: the first-run screen and the volts calibration on the
+load and the input calibration is offered again (fw 0.2.59: the first-run screen and the volts calibration on the
 Diagnostics Calibration page). Clear calibration there sets the PWM and compensation defaults in RAM (1.00o5's RESET
 without its volts-factor reset; RESTORE is gone). fw 0.2.52: words 224..255 hold the unit life record (power-on count, operating minutes, the
 session-open flag, the restart record kept over power cycles; layout in protocol row 55, `pc_life.c`), stored by every
@@ -1570,7 +1570,7 @@ until the base calibration is run again. GET_CAL 256 bytes: protocol section 14 
     (kept) set, gains unchanged. Again with only the CH1 probe on the post: "Gain calibration failed", "CH2: gain:
     probe on post?", CH1 gains new (bit 4 clear), CH2 kept.
 
-### 6.4 Calibration wizard (fw 0.2.57: four screens, plan section 6a)
+### 6.4 Calibration wizard (fw 0.2.59: four screens, plan section 6a)
 
 Calibrate on the Diagnostics Status and Calibration pages and Calibrate now on the first-run screen open one modal flow
 of four screens. Each is a step
@@ -1676,7 +1676,7 @@ class (1.1 % on the bench, what every filtered capture reads with) and the gated
 gives the tracker its starting point.
 
 **Readout.** GET_CAL 288 bytes (row 54): 256 flags, d, e, q, ages, counts, cm; bytes 84 and 92..107 include v4.
-Diagnostics Calibration page (fw 0.2.57), per channel: "Tracking A-B +0.12 code, slope +0.31 %, 3 s ago" (applied
+Diagnostics Calibration page (fw 0.2.59), per channel: "Tracking A-B +0.12 code, slope +0.31 %, 3 s ago" (applied
 A - B offset and slope, age of the last accepted record) and "Full-rate offset +0.70 code, 4 probes, 12 s ago" (common
 mode subtracted, valid probes, age); grey until they ran. The bow q is in GET_CAL and the saved report.
 

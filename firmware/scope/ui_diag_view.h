@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// ui_diag_view.h - Diagnostics as a display mode of the main loop, its actions, and the first-run screen (fw 0.2.57,
+// ui_diag_view.h - Diagnostics as a display mode of the main loop, its actions, and the first-run screen (fw 0.2.59,
 // docs/plans/ux-makeover.md sections 6-6c, firmware/README.md section 5 "Screens"). The pages are built by ui_diag.c and
 // drawn by ui_dlg.c; this file runs them on the scope.
 //----------------------------------------------------------------------------------------------------------------------------------

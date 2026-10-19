@@ -247,7 +247,7 @@ int main(void)
   //scope_open_measures_menu();
   //while(1);
 
-  //fw 0.2.57: an uncalibrated unit starts with the first-run screen (what was found, Calibrate now or Later); the
+  //fw 0.2.59: an uncalibrated unit starts with the first-run screen (what was found, Calibrate now or Later); the
   //1.00o5 "Load default settings value" screen is gone
   ui_first_run(restore);
 
@@ -261,7 +261,7 @@ int main(void)
     pc_glue_poll_main();
     pc_glue_ui_service();
 
-    //fw 0.2.57: while Diagnostics shows (a display mode, ui_diag_view.c) it does this pass instead of the scope
+    //fw 0.2.59: while Diagnostics shows (a display mode, ui_diag_view.c) it does this pass instead of the scope
     if(ui_diag_pass())
       continue;
 

@@ -6195,7 +6195,7 @@ void gen_duty_select(void)
   
 }
 //fw 0.2.55: the rows come from ui_settings.h: Screen brightness, Grid brightness, File message timeout, Time and date
-//(with a clock module), Other settings (the Settings screen). fw 0.2.57: the interim Baseline calibration row went to
+//(with a clock module), Other settings (the Settings screen). fw 0.2.59: the interim Baseline calibration row went to
 //Diagnostics (Calibrate)
 static int sys_fo_rtc(void)
 {

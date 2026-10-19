@@ -1092,7 +1092,7 @@ void handle_main_menu_touch(void)
           display_set_source_buffer(displaybuffer1);//2 0.26p
           display_copy_rect_to_screen(MAIN_MENU_XPOS, MAIN_MENU_YPOS, MAIN_MENU_WIDTH, MAIN_MENU_HEIGHT);//149 233
 
-          //fw 0.2.57: Diagnostics is a display mode of the main loop (ui_diag_view.c), not a modal screen: it keeps the
+          //fw 0.2.59: Diagnostics is a display mode of the main loop (ui_diag_view.c), not a modal screen: it keeps the
           //scope screen to return to and takes over the main loop's passes until Back
           ui_diag_open();
 

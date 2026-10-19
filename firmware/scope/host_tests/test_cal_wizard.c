@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// test_cal_wizard.c - the calibration wizard's state machine (cal_wiz.c, fw 0.2.57, plan section 6a): the four screens,
+// test_cal_wizard.c - the calibration wizard's state machine (cal_wiz.c, fw 0.2.59, plan section 6a): the four screens,
 // Calibrate turning into Continue, retry after a failure, the stock-bitstream path, Cancel on every screen and during a
 // measurement (never a commit), stray events, and the texts.
 //----------------------------------------------------------------------------------------------------------------------------------

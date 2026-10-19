@@ -72,7 +72,7 @@ static uint8         pc_sd_stage_buf[65536] __attribute__((aligned(4)));
 // Drawing from the protocol (MAIN context, between UI passes). The UI loop keeps its own drawing state in displaydata
 //(buffer, colours, font); save it, draw on the visible screen, put it back.
 
-//fw 0.2.57: while Diagnostics shows, the scope screen it keeps (ui_diag_view.h), so Back returns to the current state
+//fw 0.2.59: while Diagnostics shows, the scope screen it keeps (ui_diag_view.h), so Back returns to the current state
 static void pc_draw_begin(DISPLAYDATA *save)
 {
   *save = displaydata;
@@ -1610,7 +1610,7 @@ static void pc_right_bar_follow(void)
 
   pc_bar_spectrum = sp;
   save = displaydata;
-  display_set_screen_buffer(ui_diag_scope_buffer());           //fw 0.2.57: the kept scope screen under Diagnostics
+  display_set_screen_buffer(ui_diag_scope_buffer());           //fw 0.2.59: the kept scope screen under Diagnostics
   scope_setup_right_control_menu();
   displaydata = save;
 }
@@ -1912,7 +1912,7 @@ void pc_glue_pass_mark(int n)
     pc_ui_pass_mark(&pc_sess, n);
 }
 
-//The RTC clock shares the chip's slot: not drawn while the chip shows, nor over Diagnostics (fw 0.2.57: the pass that
+//The RTC clock shares the chip's slot: not drawn while the chip shows, nor over Diagnostics (fw 0.2.59: the pass that
 //opens it still reaches the clock)
 int pc_glue_rtc_allowed(void)
 {

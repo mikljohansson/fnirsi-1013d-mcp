@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// test_ui_diag.c - the Diagnostics pages and the first-run screen (ui_diag.c, fw 0.2.57): every text fits the space it
+// test_ui_diag.c - the Diagnostics pages and the first-run screen (ui_diag.c, fw 0.2.59): every text fits the space it
 // was laid out for in the device's own fonts (also with long versions and large counters), the buttons meet the 44 x 80
 // rule and do not overlap, the hit areas, the calibration verdict rules and the provenance sentence, the tiles' states.
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -44,7 +44,7 @@ static void healthy(ud_input *in)
   memset(&run, 0, sizeof(run));
   memset(&card, 0, sizeof(card));
 
-  strcpy(run.version, "0.2.57");
+  strcpy(run.version, "0.2.59");
   run.build = 0x1234abcd;
   run.time[0] = 26; run.time[1] = 10; run.time[2] = 19; run.time[3] = 8; run.time[4] = 44;
   run.proto_major = 1;
@@ -52,7 +52,7 @@ static void healthy(ud_input *in)
 
   card.state = PC_ID_RECORD;
   card.same = 1;
-  strcpy(card.version, "0.2.57");
+  strcpy(card.version, "0.2.59");
 
   health[4] = 3;                          //configured
   health[5] = 0x0B;                       //high speed, configured, port open
@@ -108,7 +108,7 @@ static void healthy(ud_input *in)
 
     //Provenance (both channels carry the same)
     c[288] = ACAL_PROV_VALID;
-    memcpy(c + 292 + 12, "0.2.57", 6);
+    memcpy(c + 292 + 12, "0.2.59", 6);
     p16(c + 292 + 28, 0x1535);
     p32(c + 292 + 32, 12 * 60000);
     p32(c + 292 + 36, 11);
@@ -261,9 +261,9 @@ static void test_pages(void)
 
   //Status as the mockup reads
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  T_TRUE(has_text("fw 0.2.57, git 1234abcd, 2026-10-19 08:44 UTC, protocol 1.16, serial 1013D-0001, MMU and caches on"));
+  T_TRUE(has_text("fw 0.2.59, git 1234abcd, 2026-10-19 08:44 UTC, protocol 1.16, serial 1013D-0001, MMU and caches on"));
   T_TRUE(has_text("FPGA AL3A10 bitstream 0x1535: generator, EXT trigger, decimation filter, CIC+FIR"));
-  T_TRUE(has_text("Running 0.2.57"));
+  T_TRUE(has_text("Running 0.2.59"));
   T_TRUE(has_text("the image the card"));
   T_TRUE(has_text("None since power-on."));
   T_TRUE(has_text("Up 1 h 42 min."));
@@ -277,7 +277,7 @@ static void test_pages(void)
   T_TRUE(has_text("1.2 %"));
   T_TRUE(has_text("0.13 code"));
   T_TRUE(has_text("0.75 code"));
-  T_TRUE(has_text("Calibrated on fw 0.2.57, FPGA 0x1535, 12 min after power-on, 1 power-on ago."));
+  T_TRUE(has_text("Calibrated on fw 0.2.59, FPGA 0x1535, 12 min after power-on, 1 power-on ago."));
   T_TRUE(has_text("Updates every second"));
   T_EQ(text_colour("18 of 20"), UD_C_OK);
 
@@ -358,7 +358,7 @@ static void test_stress(void)
   //Long versions, large counters, a restart, everything at its widest: nothing overflows (texts may be cut only where
   //the builder says so, and then still fit)
   healthy(&in);
-  strcpy(run.version, "0.2.57-m1-nommu");
+  strcpy(run.version, "0.2.59-m1-nommu");
   strcpy(card.version, "0.2.50-nommu");
   card.same = 0;
   link[12] = 998;
@@ -389,7 +389,7 @@ static void test_stress(void)
   }
 
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  T_TRUE(has_text("Running 0.2.57-m1-nommu"));
+  T_TRUE(has_text("Running 0.2.59-m1-nommu"));
   T_TRUE(has_text("starts 0.2.50-nommu"));
   T_TRUE(has_text("Details on the Log page."));
   T_TRUE(has_text("Restarted 3 times:"));
@@ -514,20 +514,20 @@ static void test_verdicts(void)
 
   //Provenance
   ud_cal_provenance(&in, t);
-  T_STR(t, "Calibrated on fw 0.2.57, FPGA 0x1535, 12 min after power-on, 1 power-on ago.");
+  T_STR(t, "Calibrated on fw 0.2.59, FPGA 0x1535, 12 min after power-on, 1 power-on ago.");
   p32(cal[0] + 348, 0);
   p32(cal[0] + 292 + 32, 59999);
   ud_cal_provenance(&in, t);
-  T_STR(t, "Calibrated on fw 0.2.57, FPGA 0x1535, under a minute after power-on, this power-on.");
+  T_STR(t, "Calibrated on fw 0.2.59, FPGA 0x1535, under a minute after power-on, this power-on.");
   p32(cal[0] + 348, 7);
   cal[0][292 + 31] = 1;
   cal[0][292 + 44] = 26; cal[0][292 + 45] = 10; cal[0][292 + 46] = 19;
   ud_cal_provenance(&in, t);
-  T_STR(t, "Calibrated on fw 0.2.57, FPGA 0x1535, 2026-10-19, under a minute after power-on, 7 power-ons ago.");
+  T_STR(t, "Calibrated on fw 0.2.59, FPGA 0x1535, 2026-10-19, under a minute after power-on, 7 power-ons ago.");
   p32(cal[0] + 348, 0xFFFFFFFF);
   cal[0][292 + 31] = 0;
   ud_cal_provenance(&in, t);
-  T_STR(t, "Calibrated on fw 0.2.57, FPGA 0x1535, under a minute after power-on.");
+  T_STR(t, "Calibrated on fw 0.2.59, FPGA 0x1535, under a minute after power-on.");
   cal[0][288] = ACAL_PROV_NONE;
   ud_cal_provenance(&in, t);
   T_STR(t, "Calibrated before fw 0.2.52: no record of when.");
@@ -610,7 +610,7 @@ static void test_first_run(void)
   cal[0][73] = cal[1][73] = 0;
   ud_build_first_run(&pg, &in, 1, 0);
   check_layout("first run", 0);
-  T_TRUE(has_text("Open firmware 0.2.57, protocol 1.16. FPGA bitstream 0x1535."));
+  T_TRUE(has_text("Open firmware 0.2.59, protocol 1.16. FPGA bitstream 0x1535."));
   T_TRUE(has_text(UD_ICON_OK "FPGA recognised: AL3A10 bitstream 0x1535: generator, EXT trigger, decimation filter, CIC+FIR"));
   T_TRUE(has_text(UD_ICON_OK "No saved settings on the card: defaults used."));
   T_TRUE(has_text(UD_ICON_WARN "Calibration missing: readings may be several % off."));

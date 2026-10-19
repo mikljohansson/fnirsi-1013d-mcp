@@ -348,7 +348,7 @@ static char *s_cp15(char *p, uint32_t cp15)
   return s_str(p, i ? "on" : "off");
 }
 
-//"fw 0.2.57, git 1234abcd, 2026-10-19 08:44 UTC, protocol 1.16, serial 1013D-0001, MMU and caches on"
+//"fw 0.2.59, git 1234abcd, 2026-10-19 08:44 UTC, protocol 1.16, serial 1013D-0001, MMU and caches on"
 static void ud_identity_line(const ud_input *in, char *p)
 {
   const pc_image_id *r = in->run;

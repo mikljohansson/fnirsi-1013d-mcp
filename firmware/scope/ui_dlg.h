@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// ui_dlg.h - drawing of the full-screen pages and the modal dialogs of the UX makeover (fw 0.2.57): a ud_page (ui_diag.h)
+// ui_dlg.h - drawing of the full-screen pages and the modal dialogs of the UX makeover (fw 0.2.59): a ud_page (ui_diag.h)
 // with the device's fonts and the mockups' look (black ground, outlined boxes and buttons, state words in colour;
 // docs/plans/ux-makeover.md 6c), the dimmed background a dialog owns, the step dialog of the calibration wizard and the
 // volts calibration, and the confirmation dialog (docs/ui-guidelines.md section 3 "Dialogs").

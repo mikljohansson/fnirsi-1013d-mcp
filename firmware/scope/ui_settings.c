@@ -66,7 +66,7 @@ int ui_fo_row_at(int rtc, uint32 x, uint32 y)
 #define C0            UI_SET_COL0_X
 #define C1            UI_SET_COL1_X
 
-//Rows at y 74, 128 | 198, 252, 306 | 376: a group title 18 px above its first row, 6 px between rows. fw 0.2.57: the
+//Rows at y 74, 128 | 198, 252, 306 | 376: a group title 18 px above its first row, 6 px between rows. fw 0.2.59: the
 //interim Calibration group (DC shift trim) went to the Diagnostics Calibration page
 const ui_set_group ui_set_groups[UI_SET_GROUPS] =
 {

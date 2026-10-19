@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// ui_diag_view.c - Diagnostics as a display mode of the main loop (fw 0.2.57, ui_diag_view.h).
+// ui_diag_view.c - Diagnostics as a display mode of the main loop (fw 0.2.59, ui_diag_view.h).
 //
 // Opened from the main menu, it replaces the scope's pass: the main loop keeps polling the PC protocol and servicing
 // the UI, then calls ui_diag_pass instead of the acquisition, the touch handler and the clock. The page is rebuilt from

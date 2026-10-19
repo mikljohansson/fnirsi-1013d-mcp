@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// ui_diag.h - the Diagnostics pages and the first-run screen as data (fw 0.2.57, docs/plans/ux-makeover.md sections 6, 6b,
+// ui_diag.h - the Diagnostics pages and the first-run screen as data (fw 0.2.59, docs/plans/ux-makeover.md sections 6, 6b,
 // 6c; docs/plans/diagnostics-review.md; docs/ui-guidelines.md). Pure C, no globals, host-buildable (host_tests/test_ui.c).
 //
 // The builders turn the protocol bodies the PC sees (GET_HEALTH, GET_CAL, GET_LINK_STATS, the card image identity of
