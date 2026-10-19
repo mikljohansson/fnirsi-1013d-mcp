@@ -409,7 +409,7 @@ screen save/restore and the touch area. What depends on the running hardware is 
 | memory depth 9000, 12000, 15000 | acquisition menu | Filter on (0x1534+) | the 16-bit layout holds one sample per ring word: at most 8190 samples |
 | EXT trigger source | trigger menu | bitstream without EXT_TRIGGER (all but AL3 0x1533+) | the input exists only in fpga/al3 0x1533 (calibration pin, 3.3 V logic referenced to the scope's USB ground, not the probe ground, which sits ~1.24 V above it); selecting it switches the generator off |
 | Time & Date settings (RTC submenu) | system settings | no DS3231 answers at boot | the clock, file stamps and FAT times would read garbage |
-| Temperature (diagnostics screen) | diagnostics | no DS3231 answers at boot | it is the DS3231's temperature register; without the module it read "99" |
+| Temperature (Diagnostics Battery tile) | Diagnostics | no DS3231 answers at boot | it is the DS3231's temperature register; without the module it read "99" |
 
 Relabelled (fw 0.2.10): the acquisition menu's "ACQ / Long mode" box (it named the mode a tap switches to) is drawn
 as a state toggle, "Roll mode" + "on" / "off", green when the long (roll) time base is on, like Average and Long
@@ -421,10 +421,8 @@ Battery indicator (fw 0.2.13): the level is a running average, and while chargin
 moves 1.25 steps away from the shown value (the raw level followed ADC noise while charging over USB and the last
 column flapped). Off the charger the 1.00o5 rule stays (the level only drops), applied to the average.
 
-Version display (fw 0.2.7): the restore screen shows `v<fw>` (the main screen's top bar did too until fw 0.2.51), the diagnostics screen shows
-`fw <fw>` in place of 1.00o5 and a full identity line along its top edge (`FNIRSI-1013D-AI fw .., proto 1.3, base
-Atlan4 1.00o5, git <hash>, built <date>`), all from PC_FW_VERSION / PC_PROTO_* / PC_FW_BUILD (the same as `#VER` and
-GET_INFO). Waveform and reference files still store 1.00o5's VERSION_STRING (file format data).
+Version display: the Diagnostics Status page's identity line (fw 0.2.57; the restore screen until 0.2.56, the top bar
+until 0.2.51), from the image's identity record (the same as `#VER` and GET_INFO). Waveform and reference files still store 1.00o5's VERSION_STRING (file format data).
 
 At boot a saved setting that selects a hidden option is corrected: RTC off without a module, EXT trigger -> CH1,
 memory depth clamped to the largest offered step. The DS3231 is detected by addressing it (0xD0) on the touch
@@ -578,7 +576,7 @@ tapping Exit.") and an Exit button (x 610, y 412, 160 x 52), the only control. A
 storage drive while the screen shows, Exit with the drive still mounted shows "Not allowed!", Exit otherwise returns
 to CDC (PC control) and re-syncs the file lists.
 
-Top bar: no version string any more (the diagnostics view keeps the full identity).
+Top bar: no version string any more (Diagnostics keeps the full identity).
 
 Acquisition menu, Display row (until the CTRL page's Display fold-out exists): a row of three boxes under 1.00o5's
 menu (which grew from 386 to 432 px): Normal, Phosphor, X-Y, the chosen one orange. X-Y is 1.00o5's X-Y mode (saved at
@@ -598,6 +596,81 @@ its own is not padded (a value held as 0.50 V reads "500mV", not "500.0mV"). Fre
 period" while the record has fewer than three crossings. What the values mean is unchanged (whole-record statistics;
 Vrms includes DC). A new unit, and the DEFAULT button, show Freq, Vpp and Vavg on each enabled channel (in the table's
 order: Vavg, Vpp, Freq); 1.00o5 set none.
+
+### Screens: Diagnostics, calibration wizard, first run (fw 0.2.57)
+
+Step 4 of the UX makeover (`docs/plans/ux-makeover.md` sections 6-6c and 7; rules `docs/ui-guidelines.md`; the review
+`docs/plans/diagnostics-review.md`). Pure parts in `ui_diag.c` (each page as boxes, texts and buttons built from the
+protocol bodies; host-tested in `host_tests/test_ui_diag.c` with the real 13, 16 and 24 px fonts), drawing and dialogs in
+`ui_dlg.c`, the display mode and the actions in `ui_diag_view.c`. The full-screen pages keep the mockups' look: black
+ground, outlined boxes and buttons, a dark blue header band, the state words in colour (green OK, amber Check, red Fault,
+grey not available; the word always next to the colour).
+
+**Diagnostics** (Menu > Diagnostics) is a display mode of the main loop, not a modal screen: the main loop keeps polling
+the PC protocol (every command works, also the ones that need the main loop) and does the page's pass instead of the
+scope's (no acquisition, no scope touch handling, no clock, no class probe). The page is rebuilt from GET_HEALTH, GET_CAL,
+GET_LINK_STATS and the card image identity and redrawn once a second ("Updates every second"). The scope screen is kept
+in `displaybuffer2`; whatever the PC changes meanwhile (and the MCP chip, the battery icon) is drawn there
+(`ui_diag_scope_buffer`, used by `pc_draw_begin`), so Back returns to the current scope screen. Header: "Diagnostics",
+the page tabs Status, Calibration, Log, Developer (112 x 44 at x 160, 280, 400, 520) and Back (96 x 44 at x 696).
+
+- **Status**: the identity line (fw, git hash, commit time, protocol, USB serial, MMU and caches from the CP15 word), the
+  FPGA line (chip, bitstream word and features; amber "FPGA stock bitstream 0x1432: no generator, no filter; gain
+  calibration not possible" on the stock bitstream), four tiles with a verdict word and up to four lines: Firmware (OK
+  when the card starts the running image, Check "Running X from RAM. A power cycle starts Y from the card.", no open
+  firmware at sector 750, no card), Restarts (OK "None since power-on. Up 1 h 42 min.", red Fault with the exception and
+  its PC, Check for a record stored by an earlier power-on), USB (configured: OK, or Check with bad frames (counters
+  12-15) or reconnects (61); Suspended; No PC; then bad frames, suspends, reconnects), Battery ("18 of 20", charging,
+  amber "Low: readings and SD writes may fail" below 4 of 20 off the charger, the DS3231 temperature with the module).
+  Calibration box: one verdict (Fault: no calibration block; Check: block not bound to the offsets, FPGA changed since
+  calibration, gains not measured (stock: not possible), gains carried over, calibrated under 5 minutes after power-on,
+  a value over its limit; OK otherwise), per channel the class gain ratio full / gated (limit 2 %) and the worst noise
+  RMS over the ranges gated (0.3 code) and full (1.0 code), each with OK or Check; the note that the limits are
+  provisional; the provenance sentence ("Calibrated on fw 0.2.57, FPGA 0x1535, 12 min after power-on, 1 power-on ago.",
+  or why there is none). Buttons: Calibrate (green), Save report to card (the file name, or "Report not saved: no card",
+  ... in place of the hint).
+- **Calibration**: the block state per channel and the provenance; per channel the table per hardware range (PWM centre
+  in use, amber outside 860 +- 100; volts factor in % from 1.00o5's default, amber beyond 3 %; zeros of core A / B gated
+  and full), the gains per class and core with the range they were measured on (or "carried over", "not measured"), the
+  noise, the v4 tracking ("Tracking A-B +0.12 code, slope +0.31 %, 3 s ago", "Full-rate offset +0.70 code, 4 probes,
+  12 s ago", grey until they ran), the DC shift values and whether the 1.00o5 core compensations are in use. Buttons:
+  Calibrate, Volts calibration (the 1.00o5 input-divider calibration as a step dialog: both inputs on one DC supply,
+  300 mV, 600 mV, 1.5 V, 3 V, 7.5 V, 15 V, retry on "No reading near ...", Save calibration writes sector 708, Cancel puts
+  the factors back; the scope's channel, time base and trigger settings are restored either way), Clear calibration (red;
+  confirmation "Zeros and gains are cleared; the volts-per-range factors are kept. Readings use defaults until you
+  calibrate again. The calibration on the card stops applying at the next power-off.": PWM centres 860, core
+  compensations 0, the v3 block unbound in RAM; sector 709 gets the centres at the next power-off, 708 is not written).
+- **Log**: the event log decoded in words (the report's decoder, `pc_report_event`), newest first, 17 per page with the
+  time since power-on, Older events / Newest events to page through the stored 128; the counters since power-on; Last
+  restart (cause, PC, fault status and address, or the record stored by an earlier power-on); SD card (the card image
+  against the running one, card size, settings changed or saved); Unit (power-on number, uptime, operating time, how the
+  previous power-on ended, settings sector valid at boot). Save report to card.
+- **Developer**: "For firmware work. Normal use needs none of this." Debug overlay (1.00o5's dev mode: "DEV mode",
+  trigger address and touch coordinates; on green / off grey, saved with the settings) and Enter FEL now (confirmation
+  "The scope restarts into the USB boot loader at once. It waits for a PC to load firmware with sunxi-fel. A power cycle
+  boots the card as usual.", green Enter FEL; the ENTER_FEL path, `pc_hal_enter_fel`; the boot-mode byte is not written).
+
+Dialogs own the screen: the screen behind is dimmed to 3/8 and frozen, only their buttons react. Confirmations: a 540 x
+320 panel, the consequence in sentences, a large Cancel left (260 x 64), the action right (190 x 44; red only for Clear).
+
+**First run**: at boot, when the calibration is not bound on both channels, a full screen "First start" replaces 1.00o5's
+"Load default settings value" screen (gone, with its "Need input calibration procedure !" and "RUN baseline calibration
+!"): the identity, three or four checks (FPGA recognised with its features, or the stock exception in amber; settings
+loaded or defaults used; calibration missing or not matching the offsets; the volts calibration missing too when sector
+708 did not load), what calibrating needs, and Later (left: the scope) or Calibrate now (right: the wizard, then the
+volts calibration when it is due). It shows at every boot until the unit is calibrated. A calibrated unit starts with no
+screen at all, also after the settings were reset.
+
+Removed with the 1.00o5 diagnostics screen (where its content went): identity line and "fw <version>" (Status identity
+line); "fw: PECO" / "fw: Fnirsi" and the AL3-A10 / EF2-L45 labels (Status FPGA line); FPGA version (FPGA line); "Total
+samples" (the acquisition menu's memory depth; the stock "Total samples set to 3000" note was a side effect that
+`pc_ui_fix_settings` already covers at boot); temperature (Battery tile, module only); ADC comp, DC offset, DC shift,
+Offset, Calibration input per range (Calibration page: PWM, volts factor, DC shift, core compensations; dcoffset is the
+trace position in the channel menu); "Calibration data: v3 / v1", the per-range zeros, noise, slopes, "now A / B",
+gains, "gain at range", the v4 Track and Class lines (Calibration page; the slopes and the correction in use are in the
+saved report); DEFAULT (Restore default settings on the Settings screen of step 3); RESTORE (dropped: the card always
+holds the last calibration since 0.2.43; "Undo last calibration" is queued); RESET (Clear calibration, which keeps the
+volts factors and confirms); EXIT (Back); the hidden boot-mode and option hit areas at x 328-378 (gone).
 
 ### Spectrum view (`spectrum.c`, fw 0.2.28)
 
@@ -1045,8 +1118,9 @@ per count), `dc_shift_size` (220) maps it to screen pixels for the trace and the
 holds the base calibration results: words 168-173 CH1 `dc_calibration_offset[0..5]`, 174-179 CH2, 184-187
 `adc1compensation` / `adc2compensation` of CH1 then CH2 (i16). They are taken from the loaded 709 buffer only
 when sector 708's checksum is valid; otherwise defaults (PWM 860, compensation 0, `signal_adjusters`, 174/220/385)
-load and the input calibration is offered again. The diagnostic view's RESTORE reloads them (and 708), RESET sets
-the defaults in RAM. fw 0.2.52: words 224..255 hold the unit life record (power-on count, operating minutes, the
+load and the input calibration is offered again (fw 0.2.57: the first-run screen and the volts calibration on the
+Diagnostics Calibration page). Clear calibration there sets the PWM and compensation defaults in RAM (1.00o5's RESET
+without its volts-factor reset; RESTORE is gone). fw 0.2.52: words 224..255 hold the unit life record (power-on count, operating minutes, the
 session-open flag, the restart record kept over power cycles; layout in protocol row 55, `pc_life.c`), stored by every
 save; the firmware writes the sector once per boot when it loaded valid, so the count and a restart record reach the
 card even when the power-on ends without the power-off save.
@@ -1276,65 +1350,55 @@ until the base calibration is run again. GET_CAL 256 bytes: protocol section 14 
     (kept) set, gains unchanged. Again with only the CH1 probe on the post: "Gain calibration failed", "CH2: gain:
     probe on post?", CH1 gains new (bit 4 clear), CH2 kept.
 
-### 6.4 Calibration wizard (fw-cal3)
+### 6.4 Calibration wizard (fw 0.2.57: four screens, plan section 6a)
 
-System settings > Baseline calibration opens one modal, full-screen wizard instead of the fold-out box and the two
-separate prompts. It owns the screen until Cancel or Done (touches outside its buttons do nothing), saves the screen
-under it (`displaybuffer4`) and restores it at the end; the settings redraws run after the restore. Files:
-`cal_wiz.c/.h` (the steps as a pure-C state machine, `host_tests/test_cal_wizard.c`), `cal_wiz_ui.c` (the view, the
-touch loop and the measurements, moved from scope_functions.c because only the wizard uses them).
+Calibrate on the Diagnostics Status and Calibration pages, Calibrate now on the first-run screen and (until the Settings
+rebuild removes the row) System settings > Baseline calibration open one modal flow of four screens. Each is a step
+dialog (640 x 300 at 80, 90) over the dimmed, frozen screen: title, one instruction, a result or progress line, Cancel
+left (160 x 52) and the action right (180 x 52). Nothing is written before Save calibration; Cancel on any screen, also
+while a measurement runs, writes nothing. Files: `cal_wiz.c/.h` (the steps as a pure-C state machine,
+`host_tests/test_cal_wizard.c`), `cal_wiz_ui.c` (the dialog, the touch loop and the measurements), `ui_dlg.c` (drawing).
 
-**Steps** (header "Step n of 3" and a title):
+| Screen | Title | Instruction | Result | Action |
+|---|---|---|---|---|
+| 1 | Zero level | "Fully disconnect both probes and the USB cable from the device." / "Tap Calibrate." | per channel "CH1: measuring range 3 of 6" while it runs, then "CH1: zero level done" or the reason in words | Calibrate, Continue once both channels passed |
+| 2 | CH1 gain | "Plug the CH1 probe back in and connect it to the calibration post." / "Set it to 1X on the handle. Tap Calibrate." | "CH1: checking the signal on the post", "CH1: measuring the gain, about 1 s", then "CH1 gain done", "No signal on CH1: tip on the post?" or the reason | Calibrate, Continue once passed |
+| 3 | CH2 gain | "Plug the CH2 probe in and connect it to the calibration post." / the same | as screen 2 for CH2 | Calibrate, Continue once passed |
+| 4 | Done | | per channel "CH1 calibrated: cores matched to 0.1 code, gain mismatch 1.3 %" | Save calibration |
 
-1. Zero. "Unplug both probes and the USB cable." Start / Skip / Cancel; Skip only when a v3 block bound to both
-   channels' PWM centres exists. A USB host is detected from the MUSB frame number (moving over 3 ms = attached and
-   not suspended, checked twice a second while step 1 shows): an orange warning "USB is connected: the PC ground can
-   shift the zero by about a code. Unplug it, or Start anyway." (Start is not refused). While it runs: "Measuring CH1
-   range 3 of 6". Both channels are always measured; result lines: a green tick and "CH1: cores matched to 0.1 code",
-   or the reason in red (`acal_reason_text`). Then Next (only when both passed) / Retry / Skip / Cancel. Nothing is
-   applied unless both channels pass.
-2. Gain, one channel at a time (AL3 bitstream; otherwise "The gain step needs the AL3 FPGA: gains kept." and Next).
-   "Plug in the CH1 probe at x1 and hold its tip on the calibration post." Measure / Skip / Cancel. Measure first
-   checks the level (both post levels at range 2, gated, 2 conversions each): when the span predicts under 40 codes
-   on the range the measurement would use (`cw_level_ok`: a x1 probe gives 88 codes at range 2, a x10 probe 88 at
-   range 5) the step says "No signal on CH1: tip on the post?" with Retry / Skip / Cancel; otherwise it measures
-   (README 6.3). Other failures show the reason with Retry / Skip / Cancel. After CH1 passes, CH2's level is checked
-   silently: a second probe already on the post is measured at once (its result line still shows), else the CH2 prompt
-   follows. Skip keeps the channel's earlier gains (carried over with flag KEPT when the zeros are new, GET_CAL flags
-   bit 4; "gain not measured" when there never were any). After CH2: Next / Cancel.
-3. Summary per channel, e.g. "CH1: cores matched to 0.1 code, gain 1.3 %", "CH2: zero kept, gain kept", and the date
-   when a DS3231 answers and the RTC is on. Done / Cancel. "Cores matched" is the zero step's worst |drift A - drift
-   B| over ranges and classes (one decimal, at least 0.1); "gain" the full-class |G_A / G_B - 1| in percent.
+While a measurement runs the action reads "Measuring..." greyed; Cancel stays live (checked between the measurement
+points, about once a second; the measurement stops at the next one). A failure keeps Calibrate (retry); there is no Skip.
+Screen 1 shows "USB is connected: unplug it before Calibrate" in amber while a host is attached (the MUSB frame number
+moves; checked twice a second; Calibrate is not refused). Both channels are always measured in the zero step; nothing
+is used unless both pass. On a bitstream without the generator (stock 0x1432) screen 2 says "Gain calibration needs the
+open FPGA bitstream." / "Continue keeps the gains and saves the zero level." and Continue leads to Done. "Cores matched"
+is the zero step's worst |drift A - drift B| over ranges and classes (one decimal, at least 0.1), "gain mismatch" the
+full-class |G_A / G_B - 1| the correction now removes; without a gain step the line says "earlier gains kept" (carried
+with flag KEPT, GET_CAL flags bit 4) or "gains not measured".
 
-Retry never redoes an earlier step. Cancel at any step writes nothing: the measurements work on copies (new zeros,
-a working block per channel). Done commits: new zeros: PWM centres (`dc_calibration_offset[0..6]`), the 1.00o5
-compensations, the block, sectors 708 and 709 (as the 0.2.45 base calibration did); only new gains: the block and
-708; nothing new: nothing. Then "Calibration saved" (or "Calibration unchanged") for 1.2 s, the only success
-message, and `cal_wizard_committed()` (weak, empty: the calibration v4 tracker reset). With 1.00o5's input-divider
-calibration due (`calibrationfail`), Done hands over to its box beside the menu as before; otherwise the menus close.
-Each measurement batch restores the channels, sample rate, trigger mode (now restored, was left in Auto) and, after
-the gain step, the generator; the channels' dcoffset is no longer zeroed by the calibration.
+Save calibration writes the PWM centres (`dc_calibration_offset[0..6]`), the 1.00o5 compensations, the block, sectors
+708 and 709 (as the 0.2.45 base calibration did), then `cal_wizard_committed()` (the v4 tracker reset); the dialog
+closes and the screen under it comes back. With the volts factors missing (`calibrationfail`, sector 708 did not load)
+the Diagnostics and first-run callers go on to the volts calibration (section 5 "Screens: Diagnostics"); the System
+settings row still hands over to 1.00o5's boxes. Each measurement batch restores the channels, sample rate, trigger mode
+and, after a gain step, the generator.
 
-**Layout** (800 x 480, black, grey frame 10,10,780,460, rule at y 62): header font_5 at (30, 26) and (200, 26); body
-font_3 lines at x 40, y 84 and 108; USB warning y 146 and 168; progress y 214; result lines y 256 and 292 (tick at
-x 40, text at x 66); note y 336. Buttons 150 x 52 at y 400, Cancel x 30, Skip x 230, Retry x 430, the step's main
-action (Start / Measure / Next / Done, green) x 620; touch areas the same x ranges, y 392..459. The view is drawn in
-`displaybuffertmp` and copied, so a step change shows no black frame; pressed buttons turn light grey.
+The level check (both post levels at range 2, gated, 2 conversions each) and the measurements are fw 0.2.50's
+(`cw_level_ok`: a x1 probe gives 88 codes at range 2, a x10 probe 88 at range 5; README 6.3); the silent CH2 check after
+CH1 and the Skip button are gone with the per-channel screens.
 
-**Bench** (owner; back up SD sectors 700-710 first, Done writes 708 and 709):
+**Bench** (owner; back up SD sectors 700-710 first, Save writes 708 and 709):
 
-1. USB connected, open the wizard: step 1 with the orange warning; unplug USB: the warning goes within a second.
-   Cancel: the screen comes back exactly as before, GET_CAL unchanged.
-2. Probes off, Start: "Measuring CH1 range 1 of 6" .. "CH2 range 6 of 6" (about 8 s), two green ticks with the
-   match numbers, Next.
-3. Measure with no probe on the post: "No signal on CH1: tip on the post?". Probe x1 on the post, Retry: the CH1 line
-   with a tick, then the CH2 prompt (CH2 probe not on the post). Put both probes on the post and repeat via Cancel
-   and a new run: CH2 is measured without its prompt.
-4. Summary, Done: "Calibration saved", menus close; GET_CAL both channels flags bit 3 set, bit 4 clear, sector 709's
-   centres equal the block's pwm[].
-5. New run: Skip step 1 (zero kept), Skip CH1, Measure CH2: Done saves 708 only (709 unchanged), CH1 unchanged.
-6. New run, Skip, Skip, Skip, Done: "Calibration unchanged", nothing written. Stray touches anywhere off the buttons
-   do nothing in every step. Stock bitstream (if at hand): step 2 shows the AL3 note.
+1. Menu > Diagnostics > Calibrate with USB connected: screen 1 with the amber USB line; unplug USB: it goes within a
+   second. Cancel: the Diagnostics page comes back, GET_CAL unchanged (after USB is plugged in again).
+2. Probes and USB off, Calibrate: "CH1: measuring range 1 of 6" .. "CH2: measuring range 6 of 6" (about 8 s; the button
+   reads "Measuring..."), then two ticks "CH1: zero level done", "CH2: zero level done", Continue.
+3. Screen 2 with no probe on the post: Calibrate gives "No signal on CH1: tip on the post?", Calibrate stays. CH1 x1 on
+   the post: Calibrate, "CH1 gain done", Continue. Screen 3 the same for CH2.
+4. Done: two lines in the channel colours; Save calibration: the dialog closes; the Status page shows the calibration
+   OK (or Check with the reason) and the provenance of this power-on; GET_CAL flags bit 3 set, bit 4 clear.
+5. New run, Cancel during the zero step's measurement: it stops within about a second and nothing changed. Stray
+   touches off the two buttons do nothing on every screen.
 
 ### 6.5 Calibration v4: background interleave tracking (fw 0.2.50, protocol 1.15)
 
@@ -1393,14 +1457,14 @@ class (1.1 % on the bench, what every filtered capture reads with) and the gated
 gives the tracker its starting point.
 
 **Readout.** GET_CAL 288 bytes (row 54): 256 flags, d, e, q, ages, counts, cm; bytes 84 and 92..107 include v4.
-Diagnostics view (System settings > Diagnostic), per channel under its calibration block: "Track d +0.12 e +0.31% q
-+0.6@40 3s" (applied A - B offset in codes and slope in percent, the bow as its effect at 40 codes, age of the last
-accepted record) and "Class cm +0.70 (4) 12s" (common mode subtracted, valid probes, age); grey until they ran.
+Diagnostics Calibration page (fw 0.2.57), per channel: "Tracking A-B +0.12 code, slope +0.31 %, 3 s ago" (applied
+A - B offset and slope, age of the last accepted record) and "Full-rate offset +0.70 code, 4 probes, 12 s ago" (common
+mode subtracted, valid probes, age); grey until they ran. The bow q is in GET_CAL and the saved report.
 
 **Bench** (owner with the coordinator on COM10; FEL load only, nothing written to the card):
 
-1. Wizard: the walk-through of section 6.4 (steps 1-6). After Done, GET_CAL bytes 256..287 are reset (flags 0, ages
-   0xFFFFFFFF) and the diagnostics lines are grey.
+1. Wizard: the walk-through of section 6.4 (steps 1-5). After Save calibration, GET_CAL bytes 256..287 are reset
+   (flags 0, ages 0xFFFFFFFF) and the Calibration page's tracking lines are grey.
 2. Shorted inputs (BNC caps or probe tip to ground clip), DC, range 2, dcoffset 0, 200 MSa/s, 30 minutes, then CIC2+FIR
    at 1 MSa/s for 10 minutes. Every minute: GET_CAL CH1 and CH2 (flags, d, e, q, age, records, cm, cm_probes, cm_age)
    and 4 x READ_TRACE. Expect: track flags bit 0 within a second, bit 1 clear (quiet: e held), cm_probes counting about

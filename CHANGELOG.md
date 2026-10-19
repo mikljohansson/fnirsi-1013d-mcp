@@ -31,6 +31,29 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.57 - 2026-10-19 (protocol 1.16 unchanged; provisional number, renumbered at merge)
+
+UX makeover step 4 (`docs/plans/ux-makeover.md` sections 6-6c; `firmware/README.md` section 5 "Screens: Diagnostics,
+calibration wizard, first run" and 6.4).
+
+- Changed: Diagnostics (Menu > Diagnostics) is a display mode of the main loop with the pages Status, Calibration, Log
+  and Developer and a Back button. The PC protocol keeps working while it shows (the old screen was modal: main-loop
+  commands answered E_BUSY), and the values update once a second. Status: the identity line (fw, git, commit time,
+  protocol, serial, MMU and caches), the FPGA line, verdict tiles for Firmware (running image against the card's),
+  Restarts, USB and Battery, the calibration verdict with the class gain ratio and the noise against provisional
+  limits, and where the calibration came from; Calibrate and Save report to card. Calibration: the numbers per range
+  and channel, the gains, the v4 tracking; Calibrate, Volts calibration, Clear calibration (keeps the volts factors,
+  asks first). Log: the event log in words, restarts, SD card and unit counters. Developer: Debug overlay and Enter FEL
+  now (asks first, nothing written to the card) (f95dbee, 5e8a5db).
+- Changed: the calibration wizard is four screens (Zero level, CH1 gain, CH2 gain, Done) in one modal dialog over the
+  dimmed scope: Cancel left, Calibrate right turning into Continue after a pass, retry after a failure, no Skip, Save
+  calibration on the last screen; Cancel writes nothing, also during a measurement (95f440e).
+- Added: an uncalibrated unit starts with a first-run screen (what was found, what calibrating needs, Later or
+  Calibrate now) (5e8a5db).
+- Removed: 1.00o5's "Load default settings value" start-up screen and the old diagnostics screen with its DEFAULT,
+  RESTORE and RESET buttons and the hidden boot-mode touch areas; where each value went is listed in
+  `firmware/README.md` section 5 (5e8a5db).
+
 #### 0.2.52 - 2026-10-19 (protocol 1.16, docs/protocol.md section 14 row 55)
 
 - Added: GET_HEALTH (0x000A, answered in every context, also while a menu is open) reports the USB link state now
