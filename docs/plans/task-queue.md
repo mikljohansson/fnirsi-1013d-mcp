@@ -156,7 +156,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   depths above 6000 are hidden (the 16-bit record halves the memory, correct); switching back to Filter Off leaves them hidden until
   something else redraws. Recompute the memory chips' availability from the filter state on every Filter change and redraw the
   column; host test. Next ACQ-menu batch.
-- **Spectrum zoom ladder** (owner 10-19 22:58 **(owner)**: "let's try your recommendation"; fw-spzoom dispatched): span is the
+- **Spectrum zoom ladder** (owner 10-19 23:09 **(owner)**: "let's try your recommendation"; fw-spzoom dispatched): span is the
   parameter in 1-2-5 steps around the centre (tap right narrows, tap left widens, drag pans); the sample rate is derived from the
   stop frequency as the slowest rate whose fs/2 covers it (best RBW for free; the (span, rate) pair is a function of the span, so
   reversible like the Scope ladder); FFT length stays the user's (Analysis fold-out, default 2048), so the span always holds
