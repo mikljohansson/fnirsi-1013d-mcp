@@ -1725,7 +1725,7 @@ better of the two stages for any window drift of -2.3 .. +2.7 ns. So the design 
 capture phase is selectable per core and self-checked, and a wrong default garbles loudly (rails and jumps, counted)
 instead of shifting data; it does not guarantee a worst-corner margin without training (goal (a)).
 
-**Tests** (`tb/run.sh`, eleven steps; all pass on seeds 12345 and 3, counts in AGENTS.md "0x153A status"):
+**Tests** (`tb/run.sh`, eleven steps; all pass on seeds 12345 and 3: 38 + 98 + 154 + 8 + 50 + 882 + 12 + 400 + 400 + 70 + 26 + 2274 checks, both cic_model checks and seg_model 22 runs; counts per step in AGENTS.md "0x153A status"):
 - New step 11, `tb/tb_adccap.v`: a behavioural AD9288 per core (samples numbered, bus in random garbage from tV to tPD
   after the output edge, the chip's pipeline of 4, own-encode or data-align output timing, the encode pins through a
   pad delay). Phase 1: every rate D in {0, 1, 2, 3, 4, 9, 19}, stages 2..5, both B references, both align models:

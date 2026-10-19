@@ -364,10 +364,11 @@ coordinator pins both in `backups/` before any flash. **Not flashed.** Three bui
 changes the placement) gave 4.659 / 5.065 (2 errors, fixed by the `pp_xa*` retiming) / 4.949 ns on `clk_200MHz`: the
 divider-compare lottery is real; rebuild after any source change and read the summary before pinning.
 
-**Tests** (`tb/run.sh`, eleven steps, seeds 12345 and 3): see the counts at the end of this section (updated when the
-full runs finished). Individually on the final source: ext 38, decim 98 + cic_model 1879 samples, contract 12
-(`contract_0x153A.txt` equal), mcuread 70 + 26, encphase 400 + 400 (+ the 3.9 ns variant caught), trigpos 882, long 8,
-adccap 2274 (1414 quick), fir and seg as below.
+**Tests** (`tb/run.sh`, eleven steps): **ALL PASS on seeds 12345 (3469 s, two runs in parallel) and 3 (3012 s)**: ext 38,
+decim 98 + cic_model 1879 / 1877 samples, fir 154 + cic_model 1542 / 1539, long 8, seg 50 + seg_model 22 runs, trigpos
+882, contract 12 (`contract_0x153A.txt` equal), encphase 400 + 400 (the 3.9 ns CH2 A variant caught), mcuread 70 + 26,
+adccap 2274. The references for the equivalence steps get `dut.adc*_w` as pins 0.2 ns after each write clock edge and
+0x53 bits 3 / 4 clear (inert in 0x153A); tb_fir's EXT lag formula carries the +42.5 ns pair centre of the new capture.
 
 **Firmware notes (for the firmware agents):**
 - Detect 0x153A as AL3 with the 0x1539 features; nothing has to be written for a working capture (power-on stages).
