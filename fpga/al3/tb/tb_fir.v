@@ -519,7 +519,7 @@ module tb;
       set_fir(kk, swap, sh, divider, 1'b1);
       setup_capture(2'd0, 1'b0, 1'b0, divider, 13'd10, total);
       wr4(8'h0E, {19'd0, total});                        // auto mode: stops after about total samples
-      $fdisplay(logf, "C %0d %0d %0d %0d %0d %0d 1", kk, divider, swap, sh, negab[0], negab[1]);
+      $fdisplay(logf, "C %0d %0d %0d %0d 0 0 1", kk, divider, swap, sh);   // 0x153A: 0x53 bits 3 / 4 are inert
       check(dut.fir_act === 1'b1, "FIR engaged for the logged capture");
       log_on = 1;
       start_capture;

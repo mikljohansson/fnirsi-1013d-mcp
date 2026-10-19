@@ -10,7 +10,8 @@
 // later (+pl, default 4 = the datasheet's pipeline delay), 3.3 ns after the encode edge. The testbench keeps the
 // sampling instant of every value next to it, so each stored legacy sample has a known true time.
 // The analog input is a step (CH1 LO -> HI, CH2 its complement) at a random instant te; the EXT pad carries the
-// same step (generator loopback).
+// same step (generator loopback). 0x153A: the sampling-instant tags are carried through a shadow of the dut's
+// capture pipeline, so the monitor knows the instant of every stored sample (see the monitors below).
 //
 // Every capture copies the firmware's MCU byte sequence (pc_hal_arm, pc_dec_apply, pc_hal_acq_poll,
 // pc_hal_acq_finish, pc_hal_read_core with its dummy strobe, and fpga_read_decim_data / the 1.00o5 readout without
@@ -114,6 +115,39 @@ module tb;
   //---------------------------------------------------------------------------------
   // Monitors
 
+  // 0x153A: the tags follow the dut's capture pipeline (fpga/al3/README.md "Changes" section 10): IOB DDR register
+  // on clk_200MHz (q2 = pin at the falling edge, q1 = at the rising edge, both out on the rising edge), two more
+  // rising-edge stages, the stage registers on the write clock edges (A and the A-referenced B on the falling edge,
+  // B on the rising edge), the per-core pick one write clock later on the same edge, then adc*_w on the rising edge.
+  // twA / twB are the sampling instants of dut.adc1A_w / dut.adc1B_w; a change of the dut's pipeline must be
+  // mirrored here (tb_adccap.v checks the dut's word association independently).
+  reg [63:0] tA_c0 = 0, tA_q2 = 0, tA_t0 = 0, tA_q1 = 0, tA_d1 = 0, tA_d2 = 0, tA_dd1 = 0, tA_dd2 = 0;
+  reg [63:0] tB_c0 = 0, tB_q2 = 0, tB_t0 = 0, tB_q1 = 0, tB_d1 = 0, tB_d2 = 0, tB_dd1 = 0, tB_dd2 = 0;
+  reg [63:0] tsA [0:5];
+  reg [63:0] tsB [0:5];
+  reg [63:0] tsBf [0:5];
+  reg [63:0] ta_m = 0, tb_m = 0, tbf_m = 0, twA = 0, twB = 0;
+  integer    tsi;
+  initial for (tsi = 0; tsi < 6; tsi = tsi + 1) begin tsA[tsi] = 0; tsB[tsi] = 0; tsBf[tsi] = 0; end
+  wire [2:0] selA = (dut.cap_sel[2:0] > 3'd5) ? 3'd5 : dut.cap_sel[2:0];
+  wire [2:0] selB = (dut.cap_sel[5:3] > 3'd5) ? 3'd5 : dut.cap_sel[5:3];
+  always @(negedge dut.clk_200MHz) begin tA_c0 <= tagA; tB_c0 <= tagB; end
+  always @(posedge dut.clk_200MHz) begin
+    tA_q2 <= tA_c0; tA_t0 <= tagA; tA_q1 <= tA_t0; tA_d1 <= tA_q1; tA_d2 <= tA_q2; tA_dd1 <= tA_d1; tA_dd2 <= tA_d2;
+    tB_q2 <= tB_c0; tB_t0 <= tagB; tB_q1 <= tB_t0; tB_d1 <= tB_q1; tB_d2 <= tB_q2; tB_dd1 <= tB_d1; tB_dd2 <= tB_d2;
+  end
+  always @(negedge dut.sample_write_clock) begin
+    tsA[0] <= tA_q2; tsA[1] <= tA_q1; tsA[2] <= tA_d2; tsA[3] <= tA_d1; tsA[4] <= tA_dd2; tsA[5] <= tA_dd1;
+    tsBf[0] <= tB_q2; tsBf[1] <= tB_q1; tsBf[2] <= tB_d2; tsBf[3] <= tB_d1; tsBf[4] <= tB_dd2; tsBf[5] <= tB_dd1;
+    ta_m <= tsA[selA]; tbf_m <= tsBf[selB];
+  end
+  always @(posedge dut.sample_write_clock) begin
+    tsB[0] <= tB_q2; tsB[1] <= tB_q1; tsB[2] <= tB_d2; tsB[3] <= tB_d1; tsB[4] <= tB_dd2; tsB[5] <= tB_dd1;
+    tb_m <= tsB[selB];
+    twA <= ta_m;
+    twB <= dut.cap_sel[12] ? tbf_m : tb_m;
+  end
+
   // every memory write: its time and (legacy) the sampling instants of the A and B values it stores
   reg [63:0] wt [0:8191];
   reg [63:0] wA [0:8191];
@@ -121,8 +155,8 @@ module tb;
   always @(posedge dut.sample_write_clock)
     if (dut.sample_write_enable & dut.swc_adv) begin
       wt[dut.sample_write_address_phys] = $realtime * 1000.0;
-      wA[dut.sample_write_address_phys] = tagA;
-      wB[dut.sample_write_address_phys] = tagB;
+      wA[dut.sample_write_address_phys] = twA;
+      wB[dut.sample_write_address_phys] = twB;
     end
 
   // the analog edge: its instant and the write address at that moment

@@ -437,7 +437,9 @@ module tb;
       set_decim(kk, swap, sh, divider);
       setup_capture(2'd0, 1'b0, 1'b0, divider, 13'd10, total);
       wr4(8'h0E, {19'd0, total});                        // auto mode: stops after about total samples
-      $fdisplay(logf, "C %0d %0d %0d %0d %0d %0d", kk, divider, swap, sh, negab[0], negab[1]);
+      // 0x153A: 0x53 bits 3 / 4 select nothing any more (the decimator gets registered samples), so the model
+      // sees neg = 0 whatever was written; the negab runs below only prove the bits are inert
+      $fdisplay(logf, "C %0d %0d %0d %0d 0 0", kk, divider, swap, sh);
       log_on = 1;
       start_capture;
       wait_done(400000);

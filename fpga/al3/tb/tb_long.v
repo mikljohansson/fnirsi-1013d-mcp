@@ -47,9 +47,9 @@ module tb;
   wire [15:0] cz, cr, fz, fr;
   wire        dz, dr;
 
-  decim_chan dz_c (.clk(clk), .in_a(in_a), .in_b(in_b), .order(order), .swap(1'b0), .neg_a(1'b0), .neg_b(1'b0),
+  decim_chan dz_c (.clk(clk), .in_a(in_a), .in_b(in_b), .order(order), .swap(1'b0),
                    .shift(shift), .sv(dec_sv[5:0]), .out(cz));
-  decim_chan dr_c (.clk(clk), .in_a(in_a), .in_b(in_b), .order(order), .swap(1'b0), .neg_a(1'b0), .neg_b(1'b0),
+  decim_chan dr_c (.clk(clk), .in_a(in_a), .in_b(in_b), .order(order), .swap(1'b0),
                    .shift(shift), .sv(dec_sv[5:0]), .out(cr));
   fir_chan   fz_c (.clk(clk), .order(order), .shift_in(dec_sv[6]), .load(dec_t[7]), .x(cz), .out(fz), .done(dz));
   fir_chan   fr_c (.clk(clk), .order(order), .shift_in(dec_sv[6]), .load(dec_t[7]), .x(cr), .out(fr), .done(dr));

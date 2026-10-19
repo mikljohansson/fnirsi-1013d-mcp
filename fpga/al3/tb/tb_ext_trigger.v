@@ -567,7 +567,11 @@ module tb;
     ext_addr = rd16_d[12:0];
     $display("step: CH1 trigger_address - edge = %0d, EXT trigger_address - edge = %0d",
              $signed(adc_addr - wa_at_edge), $signed(ext_addr - wa_at_edge));
-    check(ext_addr - wa_at_edge == adc_addr - wa_at_edge, "EXT and CH1 level trigger on the same step give the same trigger_address offset");
+    // 0x153A: the ADC data reaches the trigger compare and the memory 2.5 T + 15 ns after the pins (A core, stage 4;
+    // fpga/al3/README.md "Changes" section 10), EXT is not delayed: at divider 49 (T = 500 ns) CH1 triggers 1265 ns = 2.53
+    // words later than EXT, i.e. 2 or 3 words depending on where the step falls in the word (0x1532..0x1539: the same word)
+    check((adc_addr - ext_addr == 13'd2) || (adc_addr - ext_addr == 13'd3),
+          "EXT and CH1 level trigger on the same step: CH1 2 or 3 words later than EXT at divider 49 (0x153A data latency)");
     step_mode = 0;
 
     //-------------------------------------------------------------------------------

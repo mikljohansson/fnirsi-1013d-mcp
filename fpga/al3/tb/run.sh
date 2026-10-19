@@ -1,5 +1,5 @@
 #!/bin/bash
-# Simulate fpga/al3/src/zaklad.v with iverilog (in WSL). Five steps, all must pass:
+# Simulate fpga/al3/src/zaklad.v with iverilog (in WSL). Eleven steps, all must pass:
 #   1. tb_ext_trigger.v against Atlan4's original (REF_REV, default a947e78 = 0x1532): CH1/CH2
 #      equivalence and the external trigger.
 #   2. tb_decim.v against our 0x1533 (REF1533_REV, default 2839258): K = 0 equivalence including
@@ -18,14 +18,17 @@
 #      byte sequences, shuffled cases (K = 0..3, FIR, dividers 0..399, CH1 / EXT) and random phases, then
 #      the configuration race at slow legacy rates. TRIGPOS_RUNS (default 6) runs per case.
 #   8. tb_seqcontract.v: the firmware's sequencer byte sequences (protocol 1.17) against the simulated FPGA; the
-#      transcript must equal tb/contract_0x1539.txt (the reference for the firmware's host tests).
+#      transcript must equal tb/contract_0x153A.txt (the reference for the firmware's host tests).
 #   9. encphase.sh MODE=check (0x1538): tb_encphase.v, the encode pins against the write clock after the firmware's
 #      UI and host arm sequences at swept write phases, plain and with delay-annotated encode flop inputs, and the
 #      0x33 self-check catching a late CH2 A flop.
 #  10. mcuread.sh (0x1539): tb_mcuread.v, the MCU readout with the firmware's read sequences at swept strobe timing and
 #      per-bit pad delays: every byte right at every sample time after the rising edge; the 0x1538 reference
 #      (REF1538_REV, default ce943bf) shows the bench's mixed bytes when the MCU samples sooner than the pad delay.
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread runs one testbench.
+#  11. tb_adccap.v (0x153A): the ADC capture stages against a behavioural AD9288 whose buses are in transition from tV
+#      to tPD after the encode (own encode, or the A encode in data-align mode), encode pad delay swept: clean exactly
+#      where the window formula says, outlier counters exact, B first by T/2 at every rate with the matching reference.
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -104,8 +107,8 @@ if [ "$ONLY" = all ] || [ "$ONLY" = contract ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_seqcontract.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_seqcontract.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_seqcontract.vvp" +transcript="$WORK/contract.txt" | tee "$WORK/sim_contract.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_contract.log" || RC=1
-  if cmp -s "$WORK/contract.txt" "$HERE/contract_0x1539.txt"; then echo "contract transcript = tb/contract_0x1539.txt"
-  else echo "contract transcript differs from tb/contract_0x1539.txt"; RC=1; fi
+  if cmp -s "$WORK/contract.txt" "$HERE/contract_0x153A.txt"; then echo "contract transcript = tb/contract_0x153A.txt"
+  else echo "contract transcript differs from tb/contract_0x153A.txt"; RC=1; fi
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = encphase ]; then
   MODE=check SIM_WORK="$WORK" DUT="$DUT" bash "$HERE/encphase.sh" "$SEED" | tee "$WORK/sim_encphase.log"
@@ -115,6 +118,11 @@ if [ "$ONLY" = all ] || [ "$ONLY" = mcuread ]; then
   SIM_WORK="$WORK" DUT="$DUT" bash "$HERE/mcuread.sh" "$SEED" > "$WORK/sim_mcuread_all.log" 2>&1 || true
   grep -E 'sweep points|RESULT' "$WORK/sim_mcuread_all.log"
   grep -q 'mcuread: PASS' "$WORK/sim_mcuread_all.log" && echo "mcuread: PASS" || { echo "mcuread: FAIL"; RC=1; }
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = adccap ]; then
+  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_adccap.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_adccap.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_adccap.vvp" +seed=$SEED | tee "$WORK/sim_adccap.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_adccap.log" || RC=1
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
 [ $RC -eq 0 ] && echo "ALL PASS (seed $SEED)" || echo "SOMETHING FAILED (seed $SEED)"
