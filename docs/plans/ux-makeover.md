@@ -41,8 +41,9 @@ to the plot; its CTRL page holds how the plot is shown and computed; the bottom 
 cards and the record-position slider). Every mode reads the same way and no parameter has two homes. Fold-outs make
 the space: a CTRL button that holds a value opens a small panel beside the bar with the value and its choices or + / -.
 
-- **Top bar**: unchanged except the version string goes (it lives in Diagnostics) and Move fast moves to Settings,
-  Controls ("Drag speed: fast / slow") **(owner, 2026-10-19 afternoon)**; its slot at x 496 stays empty.
+- **Top bar**: unchanged except the version string goes (it lives in Diagnostics) **(owner)**. Move fast stays in its
+  slot: it is a modifier for dragging on the plot in every mode, a global tool by the rule above (owner, after weighing a
+  collapsed Save button to make room on the right bar: not worth a tap on every save).
 - **Right bar, first page** (both modes): CTRL, RUN/STOP, AUTO SET, T CURSOR, V CURSOR, MEASURES, SAVE PIC, SAVE WAVE
   in today's slots. In Spectrum, AUTO SET runs the spectrum's Auto; T CURSOR, V CURSOR, MEASURES and SAVE WAVE stay
   empty until spectrum markers exist; SAVE WAVE stays, it saves the time record behind the spectrum, which works today.
@@ -91,7 +92,7 @@ Settings screen; the USB drive screen text. Everything else keeps its place and 
   (to Scope's Display variant).
 - **Other settings** opens the full Settings screen (design artboard "Settings"): Display (screen and grid brightness),
   Controls (file message timeout, which is what 1.00o5's "confirmation" toggle really sets; cursors locked or free; auto
-  setup variant; drag speed fast / slow, today's Move fast button), Files (screenshot stamp, reference traces at power-on), Clock (RTC
+  setup variant), Files (screenshot stamp, reference traces at power-on), Clock (RTC
   module on/off, time and date; RTC only), Start-up (one row "At power-on" with the values "Open firmware", "Boot menu,
   then open firmware", "Boot menu, then stock firmware": the stock image always comes with the boot menu), and "Restore
   default settings" with a confirmation that says it keeps the calibration and no longer writes the boot-mode byte. The
