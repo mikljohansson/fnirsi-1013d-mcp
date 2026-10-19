@@ -69,6 +69,9 @@ SRCS += cal_wiz.c cal_wiz_ui.c
 SRCS += acal_track.c acal_live.c
 # Screens (fw 0.2.51): card formatting, main menu rows and mode rule (pure C, host_tests/test_ui.c)
 SRCS += ui_fmt.c ui_menu.c
+# fw 0.2.57: Diagnostics pages and the first-run screen (ui_diag.c pure, host_tests/test_ui.c), their drawing and dialogs
+# (ui_dlg.c) and the display mode (ui_diag_view.c)
+SRCS += ui_diag.c ui_dlg.c
 # fw 0.2.52 diagnostics readers (protocol row 55)
 SRCS += pc_life.c pc_ident.c pc_report.c pc_diag.c
 # Last: the identity data (build_id.c), so its bytes are the only ones a new commit changes.

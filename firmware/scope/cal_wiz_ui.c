@@ -1,11 +1,13 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// cal_wiz_ui.c - the calibration wizard on the scope (firmware/README.md section 6.4): the full-screen view, its touch
-// loop, and the measurements the state machine (cal_wiz.c) asks for. System settings > Baseline calibration opens it
-// (statemachine.c); it owns the screen until Cancel or Done and restores it afterwards.
+// cal_wiz_ui.c - the calibration wizard on the scope (fw 0.2.57, firmware/README.md section 6.4, docs/plans/ux-makeover.md
+// 6a): the step dialog, its touch loop, and the measurements the state machine (cal_wiz.c) asks for. Opened by Calibrate
+// on the Diagnostics pages, Calibrate now on the first-run screen (ui_diag_view.c) and, until the Settings rebuild
+// removes it, System settings > Baseline calibration (statemachine.c). It owns the screen until Cancel or Save
+// calibration and restores it afterwards.
 //
 // The measurement helpers (zero step and gain step of calibration data v3, adc_cal.h, README 6.3) moved here from
 // scope_functions.c: only the wizard uses them, and keeping them static next to their one caller avoids exporting a
-// dozen cal_* functions. They work on copies: nothing reaches adc_cal / sectors 708 and 709 before Done.
+// dozen cal_* functions. They work on copies: nothing reaches adc_cal / sectors 708 and 709 before Save calibration.
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "types.h"
@@ -22,6 +24,7 @@
 #include "variables.h"
 #include "adc_cal.h"
 #include "cal_wiz.h"
+#include "ui_dlg.h"
 
 #include <string.h>
 
@@ -40,7 +43,8 @@ static const uint8 cal_cmds[2][5] = { { 0x33, 0x32, 0x20, 0x21, 0x34 }, { 0x36, 
 static uint8 cal_backup_invert[2];
 static uint8 cal_backup_trigger;
 
-static void wiz_progress(uint32 ch, uint32 r);
+static int wiz_progress(uint32 ch, uint32 r);       //1: Cancel was tapped
+static int wiz_poll_cancel(void);
 
 static void cal_set_rate(uint32 rate)
 {
@@ -111,7 +115,8 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16)
 
   for(r=0;r<ACAL_RANGES;r++)
   {
-    wiz_progress(ch, r);
+    if(wiz_progress(ch, r))
+      return CW_RC_CANCELLED;
 
     calibrationsettings.samplevoltperdiv = r;
     fpga_set_channel_voltperdiv(&calibrationsettings);
@@ -257,6 +262,9 @@ static int cal_gain_measure(acal_channel *c, int32_t span16, int32_t mid16)
 
   for(l=0;l<3;l++)
   {
+    if(wiz_poll_cancel())
+      return CW_RC_CANCELLED;
+
     cal_gain_level(r, pwm, CAL_RATE_GATED, l ? 30 : 100, 8, l == 1, m.mean16[ACAL_GATED][l], &m.clipped);
     cal_gain_level(r, pwm, CAL_RATE_FULL, 30, 64, l == 1, m.mean16[ACAL_FULL][l], &m.clipped);
   }
@@ -322,142 +330,32 @@ static void cal_end(uint32 gen)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-//The wizard
+//The wizard (docs/plans/ux-makeover.md 6a): one step dialog over the dimmed, frozen screen (ui_dlg.h)
 
 static cal_wiz      wiz;
 static acal_channel wiz_new[2];         //zero step result (both channels)
-static acal_channel wiz_work[2];        //what Done commits (CW_ACT_PREPARE, then the gain step)
+static acal_channel wiz_work[2];        //what Save commits (CW_ACT_PREPARE, then the gain screens)
 static int32_t      wiz_span[2];        //level check: span and midpoint for the measurement after it
 static int32_t      wiz_mid[2];
 static uint8        wiz_usb;            //a USB host was seen at the last check
 static uint8        wiz_session;        //FPGA in the measurement set-up (cal_begin)
 static uint8        wiz_gen;            //the generator was used in this session
-
-//Layout: header, body lines (font_3), progress line, two result lines, a note, four button slots at the bottom
-#define WIZ_TEXT_X        40
-#define WIZ_LINE1_Y       84
-#define WIZ_LINE2_Y      108
-#define WIZ_WARN_Y       146
-#define WIZ_PROG_Y       214
-#define WIZ_RES_Y        256
-#define WIZ_RES_DY        36
-#define WIZ_NOTE_Y       336
-#define WIZ_BTN_Y        400
-#define WIZ_BTN_W        150
-#define WIZ_BTN_H         52
-
-static const uint16 wiz_slot_x[4] = { 30, 230, 430, 620 };
-
-//Slot of an event's button: Cancel left, Skip, Retry, the step's primary action right
-static uint32 wiz_slot(int ev)
-{
-  switch(ev)
-  {
-    case CW_EV_CANCEL: return 0;
-    case CW_EV_SKIP:   return 1;
-    case CW_EV_RETRY:  return 2;
-    default:           return 3;
-  }
-}
+static uint8        wiz_abort;          //Cancel tapped while a measurement ran
+static ui_step      wiz_dlg;            //what is on the screen
+static char         wiz_res[2][96];     //the result lines
+static int8         wiz_zrc_seen[2];    //zero step in progress: channels finished (1) and their result
+static int          wiz_zrc[2];
 
 static const char *wiz_label(int ev)
 {
   switch(ev)
   {
-    case CW_EV_START:   return "Start";
-    case CW_EV_MEASURE: return "Measure";
-    case CW_EV_RETRY:   return "Retry";
-    case CW_EV_SKIP:    return "Skip";
-    case CW_EV_NEXT:    return "Next";
-    case CW_EV_DONE:    return "Done";
-    default:            return "Cancel";
+    case CW_EV_CALIBRATE: return "Calibrate";
+    case CW_EV_CONTINUE:  return "Continue";
+    case CW_EV_SAVE:      return "Save calibration";
+    case CW_EV_MEASURING: return "Measuring...";
+    default:              return 0;
   }
-}
-
-static uint32 wiz_text_width(PFONTDATA font, const char *s)
-{
-  PFONTINFORMATION info;
-  uint32           w = 0, c;
-
-  for(;*s;s++)
-  {
-    c = (uint8)*s;
-
-    for(info=(PFONTINFORMATION)font->fontinformation;info;info=info->next_info)
-    {
-      if((c >= info->first_char) && (c <= info->last_char))
-      {
-        w += info->fontmetrics[c - info->first_char].width;
-        break;
-      }
-    }
-  }
-
-  return w;
-}
-
-static void wiz_text(uint32 x, uint32 y, uint32 colour, const char *s)
-{
-  display_set_fg_color(colour);
-  display_text(x, y, (int8 *)s);
-}
-
-//Pressed: light fill, black label; the primary action green, the others grey
-static void wiz_button(int ev, uint32 pressed)
-{
-  uint32      x = wiz_slot_x[wiz_slot(ev)];
-  const char *t = wiz_label(ev);
-
-  display_set_fg_color(pressed ? 0x00CCCCCC : ((wiz_slot(ev) == 3) ? 0x00007A00 : GREY_COLOR));
-  display_fill_rounded_rect(x, WIZ_BTN_Y, WIZ_BTN_W, WIZ_BTN_H, 3);
-  display_set_fg_color(LIGHTGREY1_COLOR);
-  display_draw_rounded_rect(x, WIZ_BTN_Y, WIZ_BTN_W, WIZ_BTN_H, 3);
-
-  display_set_font(&font_3);
-  wiz_text(x + (WIZ_BTN_W - wiz_text_width(&font_3, t)) / 2, WIZ_BTN_Y + 18, pressed ? BLACK_COLOR : WHITE_COLOR, t);
-}
-
-//The shown button under (x, y), -1 for none. Touch areas: the button rectangles, 8 pixels taller above and below
-static int wiz_hit(uint32 x, uint32 y)
-{
-  uint32 x0;
-  int    ev;
-
-  if((y < WIZ_BTN_Y - 8) || (y >= WIZ_BTN_Y + WIZ_BTN_H + 8))
-    return -1;
-
-  for(ev=0;ev<CW_EVENTS;ev++)
-  {
-    x0 = wiz_slot_x[wiz_slot(ev)];
-
-    if(cw_button(&wiz, ev) && (x >= x0) && (x < x0 + WIZ_BTN_W))
-      return ev;
-  }
-
-  return -1;
-}
-
-//Check mark, 16 x 16, green
-static void wiz_tick(uint32 x, uint32 y)
-{
-  uint32 i;
-
-  display_set_fg_color(GREEN_COLOR);
-
-  for(i=0;i<3;i++)
-  {
-    display_draw_line(x, y + 7 + i, x + 5, y + 12 + i);
-    display_draw_line(x + 5, y + 12 + i, x + 15, y + 1 + i);
-  }
-}
-
-//Result line: tick and text (passed), a red reason (failed) or grey text (skipped)
-static void wiz_result(uint32 y, uint32 tick, uint32 colour, const char *t)
-{
-  if(tick)
-    wiz_tick(WIZ_TEXT_X, y);
-
-  wiz_text(WIZ_TEXT_X + 26, y, colour, t);
 }
 
 //USB host attached and not suspended: the MUSB frame number moves (1 ms frames)
@@ -469,260 +367,166 @@ static uint8 wiz_usb_host(void)
   return (*USBC_REG_FRNUM & 0x7FF) != f;
 }
 
-static void wiz_draw_usb(void)
+static void wiz_result(uint32 i, int icon, int colour)
 {
-  display_set_fg_color(BLACK_COLOR);
-  display_fill_rect(20, WIZ_WARN_Y - 2, 760, 48);
-
-  if(wiz_usb && (wiz.state <= CW_ZERO_RESULT))
-  {
-    display_set_font(&font_3);
-    wiz_text(WIZ_TEXT_X, WIZ_WARN_Y, ORANGE_COLOR, "USB is connected: the PC ground can shift the zero by about a code.");
-
-    if(wiz.state != CW_ZERO_RUN)
-      wiz_text(WIZ_TEXT_X, WIZ_WARN_Y + 22, ORANGE_COLOR, (wiz.state == CW_ZERO_PROMPT) ? "Unplug it, or Start anyway." :
-                                                          "Unplug it and Retry, or go on anyway.");
-  }
+  wiz_dlg.result[i]        = wiz_res[i];
+  wiz_dlg.result_icon[i]   = (uint8)icon;
+  wiz_dlg.result_colour[i] = (uint8)colour;
 }
 
-//Progress line, redrawn on its own while a measurement runs
-static void wiz_draw_progress(const char *t)
+//The dialog for the machine's state; progress lines (zero step, gain step) are filled by the measurement callbacks
+static void wiz_build(void)
 {
-  display_set_fg_color(BLACK_COLOR);
-  display_fill_rect(20, WIZ_PROG_Y - 2, 760, 22);
-  display_set_font(&font_3);
-  wiz_text(WIZ_TEXT_X, WIZ_PROG_Y, LIGHTGREY2_COLOR, t);
-}
-
-static void wiz_progress(uint32 ch, uint32 r)
-{
-  char t[40];
-
-  cw_progress(t + 10, ch, r);
-  memcpy(t, "Measuring ", 10);
-  wiz_draw_progress(t);
-}
-
-static char *wiz_chtext(char *p, const char *a, uint32 ch, const char *b)
-{
-  while(*a) *p++ = *a++;
-  *p++ = 'C';
-  *p++ = 'H';
-  *p++ = (char)('1' + ch);
-  while(*b) *p++ = *b++;
-  *p = 0;
-  return p;
-}
-
-//"Date 2026-10-19" when a DS3231 answers and the RTC is on, else nothing
-static uint32 wiz_date(char *p)
-{
-  if(!(pc_glue_ui_has(PC_FEAT_RTC) && onoffRTC))
-    return 0;
-
-  get_fattime();
-  memcpy(p, "Date 20yy-mm-dd", 16);
-  p[7]  = (char)('0' + (year / 10) % 10);
-  p[8]  = (char)('0' + year % 10);
-  p[10] = (char)('0' + (month / 10) % 10);
-  p[11] = (char)('0' + month % 10);
-  p[13] = (char)('0' + (day / 10) % 10);
-  p[14] = (char)('0' + day % 10);
-  return 1;
-}
-
-static void wiz_draw_step1(void)
-{
-  char   t[80];
+  int    a = cw_action_button(&wiz);
   uint32 ch;
 
-  wiz_text(WIZ_TEXT_X, WIZ_LINE1_Y, WHITE_COLOR, "Unplug both probes and the USB cable.");
-  wiz_text(WIZ_TEXT_X, WIZ_LINE2_Y, LIGHTGREY2_COLOR,
-           "Both channels, all six ranges, about 8 s. Nothing is saved before Done.");
-  wiz_draw_usb();
-  display_set_font(&font_3);
-
-  if(wiz.state == CW_ZERO_RESULT)
-  {
-    for(ch=0;ch<2;ch++)
-    {
-      cw_zero_line(&wiz, ch, t);
-      wiz_result(WIZ_RES_Y + ch * WIZ_RES_DY, wiz.zero_st[ch] == CW_Z_PASS,
-                 (wiz.zero_st[ch] == CW_Z_PASS) ? WHITE_COLOR : RED_COLOR, t);
-    }
-
-    if((wiz.zero_st[0] != CW_Z_PASS) || (wiz.zero_st[1] != CW_Z_PASS))
-      wiz_text(WIZ_TEXT_X, WIZ_NOTE_Y, LIGHTGREY2_COLOR, wiz.prior ?
-               "Nothing is applied unless both channels pass: Retry, or Skip to keep the earlier zeros." :
-               "Nothing is applied unless both channels pass: check the inputs and Retry.");
-  }
-}
-
-static void wiz_draw_step2(void)
-{
-  char   t[80];
-  uint32 ch, y = WIZ_RES_Y;
+  wiz_dlg.title    = cw_title(&wiz);
+  wiz_dlg.line[0]  = cw_instruction(&wiz, 0);
+  wiz_dlg.line[1]  = cw_instruction(&wiz, 1);
+  wiz_dlg.warn     = (wiz_usb && (cw_screen(&wiz) == 1)) ? "USB is connected: unplug it before Calibrate" : "";
+  wiz_dlg.left     = "Cancel";
+  wiz_dlg.right    = wiz_label(a);
+  wiz_dlg.right_style = (a == CW_EV_MEASURING) ? UI_ACT_DISABLED : UI_ACT_PRIMARY;
+  wiz_dlg.result[0] = wiz_dlg.result[1] = "";
+  wiz_res[0][0] = wiz_res[1][0] = 0;
 
   switch(wiz.state)
   {
-    case CW_GAIN_NA:
-      wiz_text(WIZ_TEXT_X, WIZ_LINE1_Y, WHITE_COLOR, "The gain step needs the AL3 FPGA: gains kept.");
-      return;
-
-    case CW_GAIN_NOSIG:
-      wiz_chtext(t, "No signal on ", wiz.ch, ": tip on the post?");
-      wiz_text(WIZ_TEXT_X, WIZ_LINE1_Y, ORANGE_COLOR, t);
-      wiz_text(WIZ_TEXT_X, WIZ_LINE2_Y, LIGHTGREY2_COLOR,
-               "Check that the probe is at x1 and touches the post, then Retry.");
+    case CW_ZERO:
+      for(ch=0;ch<2;ch++)
+      {
+        cw_zero_line(&wiz, ch, wiz_res[ch]);
+        wiz_result(ch, (wiz.zero_st[ch] == CW_Z_PASS) ? 1 : 2, (wiz.zero_st[ch] == CW_Z_PASS) ? UD_C_TITLE : UD_C_WARN);
+      }
       break;
 
-    case CW_GAIN_FAIL:
-      cw_gain_line(&wiz, wiz.ch, &wiz_work[wiz.ch], t);
-      wiz_text(WIZ_TEXT_X, WIZ_LINE1_Y, RED_COLOR, t);
-      wiz_text(WIZ_TEXT_X, WIZ_LINE2_Y, LIGHTGREY2_COLOR, "Retry, or Skip to keep this channel's earlier gains.");
+    case CW_GAIN:
+      cw_gain_line(&wiz, wiz_res[0]);
+      wiz_result(0, (wiz.gain_st[wiz.ch] == CW_G_PASS) ? 1 : 2,
+                 (wiz.gain_st[wiz.ch] == CW_G_PASS) ? UD_C_TITLE : UD_C_WARN);
       break;
 
-    case CW_GAIN_RESULT:
-      wiz_text(WIZ_TEXT_X, WIZ_LINE1_Y, WHITE_COLOR, "Gain step done.");
+    case CW_DONE:
+      for(ch=0;ch<2;ch++)
+      {
+        cw_done_line(&wiz, ch, &wiz_work[ch], wiz_res[ch]);
+        wiz_result(ch, 1, ch ? UD_C_CH2 : UD_C_CH1);
+      }
       break;
 
     default:
-      //Prompt and the measurements: the instruction for the channel in focus (the silent CH2 check has none)
-      if(!wiz.auto2)
-      {
-        wiz_chtext(t, "Plug in the ", wiz.ch, " probe at x1 and hold its tip on the calibration post.");
-        wiz_text(WIZ_TEXT_X, WIZ_LINE1_Y, WHITE_COLOR, t);
-        wiz_text(WIZ_TEXT_X, WIZ_LINE2_Y, LIGHTGREY2_COLOR,
-                 "The ground clip is not needed. Skip keeps this channel's earlier gains.");
-      }
       break;
   }
+}
 
-  //Measured and skipped channels (a failure is the line above)
-  for(ch=0;ch<2;ch++)
+static void wiz_show(void)
+{
+  wiz_build();
+  ui_dlg_step_draw(&wiz_dlg);
+}
+
+//A measurement runs: Cancel stays live. Checked between the measurement points (about once a second); the press shows
+//at once, the measurement stops at the next point
+static int wiz_poll_cancel(void)
+{
+  if(wiz_abort)
+    return 1;
+
+  tp_i2c_read_status();
+
+  if(havetouch && (ui_dlg_step_hit(&wiz_dlg, xtouch, ytouch) == 1))
   {
-    if((wiz.gain_st[ch] == CW_G_PASS) || (wiz.gain_st[ch] == CW_G_SKIP))
+    ui_dlg_step_press(&wiz_dlg, 1);
+    ui_dlg_release();
+    wiz_abort = 1;
+  }
+
+  return wiz_abort;
+}
+
+//Zero step progress: "CH1: zero level done" for a finished channel, "CH2: measuring range 3 of 6" for the running one
+static int wiz_progress(uint32 ch, uint32 r)
+{
+  uint32 i;
+
+  for(i=0;i<2;i++)
+  {
+    if(wiz_zrc_seen[i])
     {
-      cw_gain_line(&wiz, ch, &wiz_work[ch], t);
-      wiz_result(y, wiz.gain_st[ch] == CW_G_PASS, (wiz.gain_st[ch] == CW_G_PASS) ? WHITE_COLOR : LIGHTGREY2_COLOR, t);
-      y += WIZ_RES_DY;
+      char *p = wiz_res[i];
+
+      p[0] = 'C';
+      p[1] = 'H';
+      p[2] = (char)('1' + i);
+      p[3] = 0;
+
+      if(wiz_zrc[i] == ACAL_OK)
+        memcpy(p + 3, ": zero level done", 18);
+      else
+      {
+        memcpy(p + 3, ": ", 3);
+        strcpy(p + 5, cw_reason_text(wiz_zrc[i]));
+      }
+
+      wiz_result(i, (wiz_zrc[i] == ACAL_OK) ? 1 : 2, (wiz_zrc[i] == ACAL_OK) ? UD_C_TITLE : UD_C_WARN);
     }
+    else if(i == ch)
+    {
+      cw_progress(wiz_res[i], ch, r);
+      wiz_result(i, 3, UD_C_TEXT);
+    }
+    else
+      wiz_dlg.result[i] = "";
   }
 
-  if(wiz.state == CW_GAIN_LEVEL_RUN)
-  {
-    wiz_chtext(t, wiz.auto2 ? "Checking whether " : "Checking the signal on ", wiz.ch, wiz.auto2 ? " sees the post" : "");
-    wiz_draw_progress(t);
-  }
-  else if(wiz.state == CW_GAIN_MEAS_RUN)
-  {
-    wiz_chtext(t, "Measuring the ", wiz.ch, " gain, about 1 s");
-    wiz_draw_progress(t);
-  }
+  ui_dlg_step_draw(&wiz_dlg);
+  return wiz_poll_cancel();
 }
 
-static void wiz_draw_step3(void)
+//Gain step progress, one line
+static void wiz_gain_progress(uint32 ch, int measuring)
 {
-  char   t[80];
-  uint32 ch;
+  char *p = wiz_res[0];
 
-  if(wiz.zero_new || (wiz.gain_st[0] == CW_G_PASS) || (wiz.gain_st[1] == CW_G_PASS))
-    wiz_text(WIZ_TEXT_X, WIZ_LINE1_Y, WHITE_COLOR, "Done saves this calibration, Cancel keeps the earlier one.");
-  else
-    wiz_text(WIZ_TEXT_X, WIZ_LINE1_Y, WHITE_COLOR, "Nothing changed: the calibration stays as it was.");
-
-  for(ch=0;ch<2;ch++)
-  {
-    cw_summary_line(&wiz, ch, &wiz_work[ch], t);
-    wiz_text(WIZ_TEXT_X, WIZ_LINE2_Y + 20 + ch * WIZ_RES_DY, ch ? CHANNEL2_COLOR : CHANNEL1_COLOR, t);
-  }
-
-  if(wiz_date(t))
-    wiz_text(WIZ_TEXT_X, WIZ_LINE2_Y + 20 + 2 * WIZ_RES_DY, LIGHTGREY2_COLOR, t);
+  p[0] = 'C';
+  p[1] = 'H';
+  p[2] = (char)('1' + ch);
+  strcpy(p + 3, measuring ? ": measuring the gain, about 1 s" : ": checking the signal on the post");
+  wiz_result(0, 3, UD_C_TEXT);
+  wiz_dlg.result[1] = "";
+  ui_dlg_step_draw(&wiz_dlg);
 }
 
-//The whole view, drawn off screen and copied (no black frame in between)
-static void wiz_draw(void)
-{
-  static const char *titles[3] = { "Zero offsets", "Core gains", "Summary" };
-  char t[16];
-  int  step = cw_step(&wiz), ev;
-
-  display_set_screen_buffer(displaybuffertmp);
-  display_set_fg_color(BLACK_COLOR);
-  display_fill_rect(0, 0, 800, 480);
-  display_set_fg_color(LIGHTGREY1_COLOR);
-  display_draw_rounded_rect(10, 10, 780, 460, 3);
-  display_draw_horz_line(62, 20, 780);
-
-  memcpy(t, "Step n of 3", 12);
-  t[5] = (char)('0' + step);
-  display_set_font(&font_5);
-  wiz_text(30, 26, LIGHTGREY2_COLOR, t);
-  wiz_text(200, 26, WHITE_COLOR, titles[step - 1]);
-
-  display_set_font(&font_3);
-
-  if(step == 1)
-    wiz_draw_step1();
-  else if(step == 2)
-    wiz_draw_step2();
-  else
-    wiz_draw_step3();
-
-  for(ev=0;ev<CW_EVENTS;ev++)
-    if(cw_button(&wiz, ev))
-      wiz_button(ev, 0);
-
-  if(wiz.state == CW_ZERO_RUN)
-    wiz_draw_progress("Measuring");
-
-  display_set_screen_buffer((uint16 *)maindisplaybuffer);
-  display_set_source_buffer(displaybuffertmp);
-  display_copy_rect_to_screen(0, 0, 800, 480);
-}
-
-//CW_ACT_PREPARE: the working copy for steps 2-3. New zeros take the previous block's measured gains (acal_gain_carry,
-//flag KEPT) until the gain step measures new ones; skipped zeros keep the whole block
+//CW_ACT_PREPARE: the working copy for screens 2-4. The new zeros take the previous block's measured gains
+//(acal_gain_carry, flag KEPT) until the gain screens measure new ones
 static void wiz_prepare(void)
 {
   uint32 ch;
 
   for(ch=0;ch<2;ch++)
   {
-    if(wiz.zero_new)
-    {
-      wiz_work[ch] = wiz_new[ch];
-      acal_gain_carry(adc_cal_loaded ? &adc_cal[ch] : 0, &wiz_work[ch]);
-    }
-    else
-      wiz_work[ch] = adc_cal[ch];
+    wiz_work[ch] = wiz_new[ch];
+    acal_gain_carry(adc_cal_loaded ? &adc_cal[ch] : 0, &wiz_work[ch]);
   }
 }
 
-//CW_ACT_COMMIT. New zeros: the PWM centres and the 1.00o5 compensations (for older firmware too), the block, sectors 708
-//(block) and 709 (the centres it is bound to); only gains: the block and 708; nothing changed: nothing written
-static uint32 wiz_commit(void)
+//CW_ACT_COMMIT: the PWM centres and the 1.00o5 compensations (for older firmware too), the blocks, sectors 708 (blocks)
+//and 709 (the centres they are bound to)
+static void wiz_commit(void)
 {
   PCHANNELSETTINGS chs[2] = { &scopesettings.channel1, &scopesettings.channel2 };
   uint32           ch, r;
 
-  if(!wiz.commit_zero && !wiz.commit_gain)
-    return 0;
-
   for(ch=0;ch<2;ch++)
   {
-    if(wiz.commit_zero)
-    {
-      for(r=0;r<ACAL_RANGES;r++)
-        chs[ch]->dc_calibration_offset[r] = wiz_work[ch].pwm[r];
+    for(r=0;r<ACAL_RANGES;r++)
+      chs[ch]->dc_calibration_offset[r] = wiz_work[ch].pwm[r];
 
-      chs[ch]->dc_calibration_offset[6] = chs[ch]->dc_calibration_offset[5];
-      acal_atlan_comps(&wiz_work[ch], &chs[ch]->adc1compensation, &chs[ch]->adc2compensation);
+    chs[ch]->dc_calibration_offset[6] = chs[ch]->dc_calibration_offset[5];
+    acal_atlan_comps(&wiz_work[ch], &chs[ch]->adc1compensation, &chs[ch]->adc2compensation);
 
-      //The new centre into the FPGA
-      fpga_set_channel_offset(chs[ch]);
-    }
+    //The new centre into the FPGA
+    fpga_set_channel_offset(chs[ch]);
 
     adc_cal[ch] = wiz_work[ch];
   }
@@ -730,19 +534,16 @@ static uint32 wiz_commit(void)
   adc_cal_loaded = 1;
 
   scope_save_input_calibration_data();
-
-  if(wiz.commit_zero)
-    scope_save_configuration_data();
+  scope_save_configuration_data();
 
   cal_wizard_committed();
-  return 1;
 }
 
 //Runs the pending actions (a measurement result can ask for the next one), then the FPGA back to the UI's settings.
-//Returns 1 when a commit wrote something
+//Returns 1 when Save wrote the calibration
 static uint32 wiz_run_actions(void)
 {
-  uint32_t match[2];
+  uint32_t match[2] = { 0, 0 };
   int      rc[2];
   uint32   ch, written = 0;
   uint8    ach;
@@ -752,7 +553,7 @@ static uint32 wiz_run_actions(void)
   {
     if((act == CW_ACT_ZERO) || (act == CW_ACT_GAIN_LEVEL) || (act == CW_ACT_GAIN_MEASURE))
     {
-      wiz_draw();
+      wiz_build();
 
       if(!wiz_session)
       {
@@ -764,15 +565,28 @@ static uint32 wiz_run_actions(void)
     switch(act)
     {
       case CW_ACT_ZERO:
-        //Both channels, even when CH1 fails (both reasons shown); nothing is used unless both pass
+        //Both channels (both results shown); nothing is used unless both pass
+        wiz_zrc_seen[0] = wiz_zrc_seen[1] = 0;
+
         for(ch=0;ch<2;ch++)
         {
-          cal_scratch_channel(ch);
-          memset(&wiz_new[ch], 0, sizeof(acal_channel));
-          rc[ch] = cal_channel(&wiz_new[ch], ch, &match[ch]);
+          rc[ch] = CW_RC_CANCELLED;
+
+          if(!wiz_abort)
+          {
+            cal_scratch_channel(ch);
+            memset(&wiz_new[ch], 0, sizeof(acal_channel));
+            rc[ch] = cal_channel(&wiz_new[ch], ch, &match[ch]);
+          }
+
+          wiz_zrc[ch]      = rc[ch];
+          wiz_zrc_seen[ch] = 1;
         }
 
-        cw_zero_result(&wiz, rc, match);
+        if(wiz_abort)
+          cw_event(&wiz, CW_EV_CANCEL);
+        else
+          cw_zero_result(&wiz, rc, match);
         break;
 
       case CW_ACT_PREPARE:
@@ -781,9 +595,14 @@ static uint32 wiz_run_actions(void)
 
       case CW_ACT_GAIN_LEVEL:
         wiz_gen = 1;
+        wiz_gain_progress(ach, 0);
         cal_scratch_channel(ach);
         wiz_span[ach] = cal_gain_check(&wiz_work[ach], &wiz_mid[ach]);
-        cw_level_result(&wiz, wiz_span[ach]);
+
+        if(wiz_poll_cancel())
+          cw_event(&wiz, CW_EV_CANCEL);
+        else
+          cw_level_result(&wiz, wiz_span[ach]);
         break;
 
       case CW_ACT_GAIN_MEASURE:
@@ -791,18 +610,25 @@ static uint32 wiz_run_actions(void)
         acal_channel t = wiz_work[ach];
 
         wiz_gen = 1;
+        wiz_gain_progress(ach, 1);
         cal_scratch_channel(ach);
         rc[0] = cal_gain_measure(&t, wiz_span[ach], wiz_mid[ach]);
 
-        if(rc[0] == ACAL_OK)
-          wiz_work[ach] = t;
+        if(wiz_abort)
+          cw_event(&wiz, CW_EV_CANCEL);
+        else
+        {
+          if(rc[0] == ACAL_OK)
+            wiz_work[ach] = t;
 
-        cw_gain_result(&wiz, rc[0]);
+          cw_gain_result(&wiz, rc[0]);
+        }
         break;
       }
 
       case CW_ACT_COMMIT:
-        written = wiz_commit();
+        wiz_commit();
+        written = 1;
         break;
 
       default:
@@ -821,27 +647,24 @@ static uint32 wiz_run_actions(void)
   return written;
 }
 
+//The modal wizard. Owns the screen until Cancel or Save calibration and restores it; returns 1 when it saved
 uint32 cal_wizard_run(void)
 {
-  PFONTDATA   font = &font_5;
-  const char *msg;
-  uint32      written = 0, tick;
-  int         ev, last = -1;
+  uint32 written = 0, tick;
+  int    hit, ev;
 
-  //The screen as it is (menus open), restored at the end
-  display_set_destination_buffer(displaybuffer4);
-  display_copy_rect_from_screen(0, 0, 800, 480);
+  cw_init(&wiz, fpgasettings.fw_FPGA == 2);
+  wiz_abort = 0;
+  wiz_usb   = wiz_usb_host();
+  tick      = timer0_get_ticks();
 
-  cw_init(&wiz, adc_cal_loaded && acal_bound(&adc_cal[0], scopesettings.channel1.dc_calibration_offset) &&
-                acal_bound(&adc_cal[1], scopesettings.channel2.dc_calibration_offset), fpgasettings.fw_FPGA == 2);
-  wiz_usb = wiz_usb_host();
-  tick    = timer0_get_ticks();
-  wiz_draw();
+  ui_dlg_bg_begin();
+  wiz_show();
 
   while(wiz.state != CW_END)
   {
-    //Step 1: the USB warning follows the cable (checked twice a second, redrawn only when it changes)
-    if((wiz.state <= CW_ZERO_RESULT) && (timer0_get_ticks() - tick >= 500))
+    //Screen 1: the USB warning follows the cable (checked twice a second, redrawn only when it changes)
+    if((cw_screen(&wiz) == 1) && (timer0_get_ticks() - tick >= 500))
     {
       uint8 usb = wiz_usb_host();
 
@@ -850,7 +673,7 @@ uint32 cal_wizard_run(void)
       if(usb != wiz_usb)
       {
         wiz_usb = usb;
-        wiz_draw_usb();
+        wiz_show();
       }
     }
 
@@ -859,44 +682,27 @@ uint32 cal_wizard_run(void)
     if(!havetouch)
       continue;
 
-    //Only the shown buttons react; anything else waits for the release and does nothing
-    ev = wiz_hit(xtouch, ytouch);
+    //Only the two buttons react; anything else waits for the release and does nothing (the dialog owns the screen)
+    hit = ui_dlg_step_hit(&wiz_dlg, xtouch, ytouch);
 
-    if(ev < 0)
+    if(!hit)
     {
-      tp_i2c_wait_for_touch_release();
+      ui_dlg_release();
       continue;
     }
 
-    wiz_button(ev, 1);
-    tp_i2c_wait_for_touch_release();
+    ui_dlg_step_press(&wiz_dlg, hit);
+    ui_dlg_release();
 
-    last = ev;
+    ev = (hit == 1) ? CW_EV_CANCEL : cw_action_button(&wiz);
+    wiz_abort = 0;
     cw_event(&wiz, ev);
-    written = wiz_run_actions();
+    written |= wiz_run_actions();
 
     if(wiz.state != CW_END)
-      wiz_draw();
+      wiz_show();
   }
 
-  //One message at the end, after Done
-  if(last == CW_EV_DONE)
-  {
-    msg = written ? "Calibration saved" : "Calibration unchanged";
-    display_set_fg_color(BLACK_COLOR);
-    display_fill_rect(20, 70, 760, 390);
-    display_set_font(font);
-    wiz_text((800 - wiz_text_width(font, msg)) / 2, 220, written ? GREEN_COLOR : WHITE_COLOR, msg);
-    timer0_delay(1200);
-  }
-
-  display_set_source_buffer(displaybuffer4);
-  display_copy_rect_to_screen(0, 0, 800, 480);
-
-  //Redraws of the settings only now, over the restored screen
-  scope_acqusition_settings(0);
-  scope_channel_settings(&scopesettings.channel1, 0);
-  scope_channel_settings(&scopesettings.channel2, 0);
-
-  return(last == CW_EV_DONE);
+  ui_dlg_bg_end();
+  return written;
 }
