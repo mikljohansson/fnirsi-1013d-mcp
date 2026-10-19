@@ -69,20 +69,25 @@ Average and Filter; the Trigger dropdown holds mode, edge, channel, position and
 
 ## 4. Visible changes for an existing user
 
-Only these: the main menu order (section 2), the Display box in ACQ, the strips without their Scope and Auto fields,
-the version string gone from the top bar, Baseline calibration and X-Y gone from the Settings fold-out, and the new
-Diagnostics and Settings screens. Everything else keeps its place and its meaning.
+The main menu order (section 2); the Display box in ACQ; the strips without their Scope and Auto fields; AUTO SET
+running the spectrum's Auto in that mode; the version string gone from the top bar; Baseline calibration and X-Y gone
+from the Settings fold-out; the measurement cards in the stock chip scheme; the new Diagnostics screens with Calibrate,
+Undo, Clear (zeros and gains only, volts factors kept) and the developer page; the new four-screen wizard; the full
+Settings screen; the USB drive screen text. Everything else keeps its place and its meaning.
 
 ## 5. Settings **(owner)**
 
 - The **Settings fold-out** keeps its shape and its most common rows: screen brightness, grid brightness, confirmation
   prompts, time and date (RTC module only), Other settings. Baseline calibration leaves it (to Diagnostics); X-Y leaves it
   (to Scope's Display variant).
-- **Other settings** opens the full Settings screen (design artboard "Settings"): Display, Controls (confirmation
-  prompts, cursors locked or free, auto setup variant, move speed), Files (screenshot stamp, reference traces at
-  power-on), Clock (RTC only), Start-up (one row "At power-on": open firmware / boot menu then open firmware / stock
-  firmware; FEL only in a developer section), and "Restore default settings" with a confirmation that says it keeps the
-  calibration and no longer writes the boot-mode byte. The USB-Serial and Dev mode toggles are removed (review 2).
+- **Other settings** opens the full Settings screen (design artboard "Settings"): Display (screen and grid brightness),
+  Controls (file message timeout, which is what 1.00o5's "confirmation" toggle really sets; cursors locked or free; auto
+  setup variant; move speed stays in the top bar), Files (screenshot stamp, reference traces at power-on), Clock (RTC
+  module on/off, time and date; RTC only), Start-up (one row "At power-on" with the values "Open firmware", "Boot menu,
+  then open firmware", "Boot menu, then stock firmware": the stock image always comes with the boot menu), and "Restore
+  default settings" with a confirmation that says it keeps the calibration and no longer writes the boot-mode byte. The
+  USB-Serial toggle is removed (the build forces CDC). Dev mode and FEL start move to a developer page in Diagnostics
+  (Log page, behind a confirmation): the trigger debug overlay and "start FEL at next power-on".
 
 ## 6. Diagnostics (design artboards Status, Calibration, Log)
 
@@ -106,7 +111,11 @@ sentences: each screen is a title, one instruction, a progress or result line, a
 | 4 | Done | the plain-word summary per channel (cores matched to x code, gain mismatch y %) | | Cancel, Save calibration |
 
 Cancel on any screen leaves without writing anything. There is no Skip: a channel that cannot be measured is reported on
-its screen and the user decides between retrying and Cancel. Firmware: fw 0.2.50's wizard (README 6.4) has the steps
+its screen and the user decides between retrying and Cancel. Two exceptions the firmware needs: on a bitstream without
+the generator (stock 0x1432) the gain screens say "Gain calibration needs the open FPGA bitstream" and Continue leads
+to Done, so the zero level can still be saved; and the stock volts-per-range calibration (external DC source,
+`scope_input_calibration`) stays reachable as a service action "Volts calibration" on the Diagnostics Calibration page,
+since Clear never touches the volts factors and a unit that lost them needs that procedure. Firmware: fw 0.2.50's wizard (README 6.4) has the steps
 and checks; its copy, its two-probe gain step and its Skip go, the per-channel gain screens and the final Save come.
 
 ## 7. Implementation order
