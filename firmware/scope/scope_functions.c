@@ -2143,8 +2143,9 @@ void scope_display_trace_data(void)
   display_fill_rect(2, 48, 728, 432);
   //display_fill_rect(2, 44, 728, 434);       //opravit rozmery
 
-  //The record-position slider, and the grid lines and dots unless Grid is off (fw 0.2.56, as in scope_preset_values)
-  scope_draw_grid();
+  //The grid lines and dots unless Grid is off (fw 0.2.56, as in scope_preset_values); the record-position slider row
+  //with its overview after the traces (fw 0.2.73: from the record as drawn, after the averaging below)
+  scope_draw_grid_lines();
 
   //Check if scope is in normal display mode
   if(scopesettings.xymodedisplay == 0)
@@ -2293,6 +2294,9 @@ void scope_display_trace_data(void)
     }
   }
 
+  //fw 0.2.73: the slider row, the record's overview and the window (slider-overview.md)
+  scope_draw_slider_row();
+
   //Draw the cursors with their measurement displays
   scope_draw_time_cursors();
   scope_draw_volt_cursors();
@@ -2302,7 +2306,7 @@ void scope_display_trace_data(void)
   scope_draw_pointers();
 
   //Show the enabled measurements on the screen
-  scope_display_measurements();  
+  scope_display_measurements();
 
   //Check if in waveform view
   if(scopesettings.waveviewmode)
@@ -2386,11 +2390,20 @@ int32 scope_get_x_sample(PCHANNELSETTINGS settings, int32 index)
 
 int32 scope_get_y_sample(PCHANNELSETTINGS settings, int32 index)
 {
+  //fw 0.2.73: the code-to-screen part is scope_code_to_y (the slider track's overview uses it too)
+  if (math_sample) return scope_code_to_y(settings, scopesettings.math_tracebuffer[index]);
+  return scope_code_to_y(settings, settings->tracebuffer[index]);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+
+//Screen y (49..448) of an 8-bit sample code on the channel's trace scale (V/div, position, offset), clipped as the trace
+int32 scope_code_to_y(PCHANNELSETTINGS settings, int32 code)
+{
   register int32 sample;
-  
-  if (math_sample) sample = (int32)scopesettings.math_tracebuffer[index] - 128;
+
   //Center adjust the sample
-  else sample = (int32)settings->tracebuffer[index] - 128;
+  sample = code - 128;
 
 
     //Get the sample and adjust the data for the correct voltage per div setting

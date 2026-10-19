@@ -393,9 +393,9 @@ def spectrum_strip():
 
 
 def spectrum_slider(start_khz=0.0, span_khz=SPAN_KHZ, nyq_khz=NYQ_KHZ):
-    """the Scope's slider row (menu.c: rect 2,452,726,20; the window box 14 px high at y 455) with the shown span as a
-    window over 0..fs/2: left edge at start / (fs/2), width span / (fs/2) of the 720 px inside the track; dragging it
-    pans the centre, the span stays (owner)"""
+    """the Scope's slider row (fw 0.2.73: the line at y 452, the track x 2..727 / y 453..471, the window's two edge
+    lines) with the shown span as a window over 0..fs/2: left edge at start / (fs/2), width span / (fs/2) of the 726 px
+    track; dragging it pans the centre, the span stays (owner); a tap outside it centres it there"""
     x0 = OV_X + start_khz / nyq_khz * OV_W
     w = max(span_khz / nyq_khz * OV_W, 8)
     return slider_row(round(x0), round(w), [(CH1, DIM[CH1], spectrum_overview(nyq_khz))])
@@ -404,7 +404,7 @@ def spectrum_slider(start_khz=0.0, span_khz=SPAN_KHZ, nyq_khz=NYQ_KHZ):
 def spectrum_overview(nyq_khz):
     """the overview (docs/plans/slider-overview.md): the spectrum the FFT already holds over the whole axis 0..fs/2,
     one column per track pixel taking the highest bin it covers (spec_columns over all bins), on the plot's own
-    ref level and dB per division squeezed into the twelve rows; drawn as a line, as the trace"""
+    ref level and dB per division squeezed into the 19 rows; drawn as a line, as the trace"""
     ref, scale = 10.0, 10.0
     rnd = random.Random(11)
     pts = []

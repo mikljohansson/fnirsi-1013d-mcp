@@ -3248,3 +3248,120 @@ analysis as A; s = Scope.connect("COM10")`.
   (hot path with the correction).
 - acal_track's A - B model drops sloped pairs, so a flipped order on 0x1532..0x1536 affects it little; not gated.
 - mcp: `scope_event_log` gained `fpga_trace`; docs/mcp-tools.md was not regenerated.
+
+## 49. fw-over: the slider track overview and tap to jump (fw 0.2.73, protocol 1.21 unchanged)
+
+Branch `fw-over` from main 113ec80 (fw 0.2.71; not merged with main since: fw-bus took 0.2.72 / protocol 1.22 and
+section 48 there, so this branch renumbered itself to 0.2.73 and this section is 49). Brief: docs/plans/slider-overview.md
+with the owner's decisions of section 10 F (items 1-5, 21:20) and item 6 (21:36: the track takes the whole row, the
+window is two edge lines), then tap to jump. Commits: a5c875e (slider_ov module, track geometry, tests), 5aa5093
+(Scope), 2044a49 (Spectrum), 2b9dad9 (Frequency response), b3fa8d2 (tap to jump, batch 2), 9f51633 (version, CHANGELOG,
+README), d12e414 (mockups regenerated), 2e51d53 (renumbered to 0.2.73), 07b9459 (plans), then this section. Image of
+07b9459 (GCC 10): `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 726,528 B, sha256
+4e9899457b984b24f5efebfd8f4afa12368d50b29201a3a6a462d932cf65b0b8 (a later commit differs only in the identity).
+Warnings GCC 10 36 (gcc10 and gcc10-nommu), GCC 13 31, as on 113ec80; none in the new or changed code. Host tests all
+green (new test_slider_ov 70,809 checks; test_ui and test_tb_view with the new track numbers; CHANGELOG check).
+**Nothing benched. No protocol change, no settings word.**
+
+**Files touched (for the merge with fw-bus):** new slider_ov.c/.h, slider_ov_draw.c/.h, host_tests/test_slider_ov.c;
+changed menu.c (scope_draw_grid split into scope_draw_slider_row + scope_draw_grid_lines, scope_slider_envelope; the
+"~" row gone), menu.h, scope_functions.c (scope_code_to_y factored out of scope_get_y_sample; scope_display_trace_data
+draws the grid lines first and the slider row after the traces), scope_functions.h, spectrum.c (spec_draw_slider,
+spec_draw_overview, spec_current_view, the slider touch), bode_view.c (the overview copy, draw_overview / draw_slider,
+slider_drag), acq_view.c/.h (acq_view_slider_jump), statemachine.c (the jump at touch-down), tb_view.h and bode_ui.h
+(TBV_SLIDER_X/W, BU_SL_X/W = 2 / 726; BU_SL_FRAME_* and BU_SL_WIN_* removed), pc_cmds.h (version), both Makefiles,
+host_tests/test_ui.c and test_tb_view.c (new numbers), CHANGELOG.md (a 0.2.73 heading above 0.2.71: put it above main's
+0.2.72), firmware/README.md, docs/plans (slider-overview, ux-makeover, bode-ui), docs/mockups (generators and boards).
+None of the FPGA readout paths fw-bus changed: the overview reads the trace buffers after readout.
+
+What landed:
+1. **The "stock thumbnail" was not data.** hardware-status 21:09 read the Scope's track as a record thumbnail. It is
+   1.00o5's decoration: `scope_draw_grid` printed "~" in yellow every 5 px along y 453 (`display_text(i, 453, "~")`),
+   identical with no signal. It is gone, replaced by the overview (no second drawing).
+2. **Geometry** (slider_ov.h; owner item 6): a white line at y 452 over x 2..727, the track x 2..727 (726 columns) by
+   y 453..471 (19 rows: the old frame's 18 inside rows plus its bottom row), the window two 1 px white lines at x and
+   x + w - 1 over the track's height. The window maps on the 726 px track in all three modes (`TBV_SLIDER_X/W`,
+   `BU_SL_X/W`), so a drag moves 726 / 720 of what it did (10 px at 25 MSa/s, 1 ms/div, 3000 samples: 82 samples, was
+   83; `bu_slider_x(6)` 209, was 210). Hit areas unchanged (the Scope y 436..479 over x 2..727, the others y 450 down).
+3. **Scope** (menu.c `scope_slider_envelope`): per enabled channel (CH2 then CH1) the min / max code of each column over
+   `fpgasettings.totalsamples` (`sov_cols`: a column shares its first sample with the one before, so steps join), the
+   codes through `scope_code_to_y` (a 256-entry row table for the codes that occur) into the 19 rows (y 49..448 ->
+   row (y - 49) x 19 / 400). Drawn every pass, after the traces (the averaged record when Average is on), because the
+   view redraws the trace every pass anyway (scope_acquire_trace_data ends in scope_display_trace_data): no cache, no
+   stale overview. None in roll mode, X-Y, or the slow-rate branch (sample rate index >= 18 or time base >= 35, 1.00o5's
+   181 px window, now drawn as two edge lines too).
+4. **Spectrum** (spec_draw_overview): the highest bin per column over 0 .. v->half (the displayed axis, capped at
+   25 MHz) of `spec_db` (Spectrum: CH2 then CH1 as shown) or `spec_raw[hch]` (Waterfall / Density), on ref level and
+   dB/div (`sov_row` straight from centi-dB), joined as a line; nothing while `spec.wait`.
+5. **Frequency response**: `ov_take` copies the overview pass's points (`gather`) when it completes (in `bv_auto_finish`
+   with `bv.autoset == 1`) into `ov_new`; `ov_commit` makes it `ov` when AUTO SET ends with any result (span set, "No
+   corner", "No response", or an error in a sharp-tank pass); `bv_auto_cancel` drops `ov_new` (the old `ov` stays);
+   `bode_view_defaults` (Restore default settings) clears `ov`; power-on: empty. Track: the overview pass's live points
+   while it runs, `ov_new` during the sharp-tank passes, else `ov`. Magnitude, or the phase in Phase only, fitted
+   (`sov_row_fit` over the valid points; over the flagged ones when none is valid), columns `sov_col(bu_slider_x_mhz(f))`
+   (10 MHz on column 727), valid points joined (`sov_lerp` + `sov_join`; not across a flagged point; the phase not
+   across a wrap), flagged points one grey (FLAG_COLOR) pixel.
+6. **Tap to jump** (batch 2, `sov_jump`): a touch-down at y >= 450 outside the window shifts the window so its centre is
+   on the touch (kept on the track), then the ordinary drag continues from there, so the release does what a drag
+   release does. Scope: `acq_view_slider_jump` at touch-down in touch_handler (through `tbv_slider_move` /
+   `tbv_clamp_pos`), `previous_trigger_point_position` snapshotted after it. Spectrum: `spec.start` from the drawn window
+   (`spec_current_view` + `spec_slider_window`), one redraw, then the drag loop. Frequency response: `slider_drag` adds
+   the jump to the finger's travel (`bu_slider_shift`), so the release restarts the sweep or runs one, as a drag does;
+   still ignored during AUTO SET. The Scope's extended area y 436..449 (beside the cards) never jumps: the cards and the
+   band above them keep their taps (touch batch 2, section 40).
+
+**Cost** (computed from the GCC 10 code at 600 MHz with the D-cache on; not measured): the Scope's sample loop is
+unrolled by four (4 byte loads then 16 compare / conditional moves: about 7.5 cycles a sample plus about 1.5 for cache
+line fills) = about 0.5 ms for 2 x 16,382 samples, 0.09 ms for 2 x 3000; per column (726 per channel: the iterator, the
+row table, one `display_draw_vert_line` run with its colour) about 0.2-0.25 ms for both channels; total about 0.75 ms
+per pass at 16,382 and 0.35 ms at 3000, against the design's 0.33 ms estimate for the sample loop alone (the design
+counted 6 instructions a sample and no drawing). The removed "~" row cost about 0.1 ms. Spectrum under 0.1 ms;
+Frequency response nothing measurable. All under the design's 1 ms revisit line, but **measure pass_ms**: if the Scope's
+cost matters, cache the column codes per record (the record changes only on a capture, a host capture shown, a viewer
+load or an averaging pass) or draw runs straight into the frame buffer.
+
+Not done / for the next agent:
+- No bench yet: pass_ms on / off is the first thing to measure (walk-through step 2).
+- `scope_code_to_y` has no host test (scope_functions.c is target-only); the refactor is a mechanical move of
+  `scope_get_y_sample`'s arithmetic (same expressions, the code passed in instead of read by index).
+- The mockups draw the line and the window edges grey (LG1 / LG2), the firmware white, as before.
+
+**Bench walk-through (owner, coordinator on COM10; FEL load only, no SD writes; CH1 on the calibration post, CH2 free;
+for step 6 the RC 1 kOhm / 15 nF or a tank)** - FEL-load (`sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin
+exe 0x80000000`), `#VER fw=0.2.73,...`.
+1. Scope, 1 kHz square on CH1, 500 kSa/s, 200 us/div, 3000 samples: under the plot a white line at y 452 and the track
+   below it down to y 471 with no frame sides or bottom; the square's envelope in the track, yellow between the window's
+   two white edge lines and dark yellow outside; no "~" row. CH2 on (free input): a flat cyan line at its zero level
+   under CH1's. CH2 off: gone. Move CH1's position: the envelope moves in the track with the trace; change V/div: it
+   grows or shrinks as the trace does; clip the trace at the top of the plot: the envelope clips on the top row.
+2. Cost: GET_STATUS `pass_ms` (median of 20) at 3000 samples and at 16,382 samples (Memory 16k), both channels on, and
+   once with fw 0.2.71 (or 0.2.72) for the same settings: expected about +0.3 ms and +0.7 ms. More than 1 ms over:
+   report it (cache per record).
+3. Deep record, 16,382 samples, 5 MSa/s, a fast time base (window narrow, at least 8 px): the record's other periods
+   dimmed outside the window; drag the window: the bright part follows the window column by column, the envelope itself
+   does not move. Tap the track far left of the window: the window jumps to centre on the finger (at the track's end
+   when the tap is near it), the trace shows that part; tap inside the window: nothing jumps (a drag works as before).
+   Tap just above the line, beside the cards (y about 440): no jump; taps on cards do nothing, the band above them still
+   steps V/div. Move slow: a drag after the jump moves a fifth of the finger.
+4. Roll mode (time base 50 ms/div or slower), X-Y and a sample rate in 1.00o5's branch: no overview; the window is two
+   edge lines (roll: as 1.00o5's box position). Waveform viewer: the loaded record's envelope. Average on: the averaged
+   record's envelope (smoother noise).
+5. Spectrum (square on CH1): the whole axis's harmonics in the track; zoom in one step (tap right of centre): the
+   window halves, the left half bright; drag it: the spectrum pans, the track's content stays and only the bright part
+   moves; tap the track to the right of the window: the window centres there and the spectrum pans to it. Change the
+   time base: the track empties until the new spectrum arrives. Waterfall: the history channel's latest record.
+6. Frequency response: on entry after power-on the track is empty (no overview before AUTO SET). AUTO SET on the RC: the
+   track fills point by point under the 100 Hz .. 10 MHz window; afterwards the overview stays (magnitude, fitted to the
+   track's height) with the window over the chosen span, bright inside. CTRL > Display > Phase only: the track shows the
+   phase (pink). Drag the window and release: re-sweep as before; tap the track outside the window: the window centres
+   there by whole steps and the sweep restarts (RUN) or one sweep runs (STOP). AUTO SET again and cancel it (second tap)
+   during the overview: the previous overview comes back with the previous table. Settings > Restore default settings:
+   the overview is gone. Power cycle: gone. On the 0x1539 bitstream (readout fault) a sweep ends at once and AUTO SET
+   ends with "ADC readout fault": the previous overview stays.
+Bug indicators: the overview crossing the window's edge lines in the wrong colour (bright outside or dim inside); a
+dim / bright boundary one or more columns off a window edge; the Scope thumbnail drawn twice (a "~" row or an envelope
+over a second one); the envelope not following V/div or position; an overview in roll mode or X-Y; anything drawn at
+y 472..479 or left of x 2 / right of x 727 in the row; a frame line on the left, right or bottom; the window off the
+track after a jump at the ends; a jump from the area beside the cards; a Spectrum overview from the old axis after a
+time base change; a Frequency response overview before the first AUTO SET or after Restore defaults; pass_ms up by more
+than about 1 ms at 16,382 samples.

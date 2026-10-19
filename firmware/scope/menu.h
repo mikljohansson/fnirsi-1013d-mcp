@@ -224,6 +224,8 @@ void scope_display_error(void);
 //----------------------------------------------------------------------------------------------------------------------------------
 
 void scope_draw_grid(void);
+void scope_draw_grid_lines(void);
+void scope_draw_slider_row(void);
 //void scope_draw_pointers(void);
 void scope_draw_time_cursors(void);
 void scope_draw_volt_cursors(void);

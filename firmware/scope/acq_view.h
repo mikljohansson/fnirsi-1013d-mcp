@@ -37,6 +37,10 @@ void acq_view_clamp_pos(void);
 //The trigger point after a finger move of dx px along the record-position slider, from `start`
 int32 acq_view_slider_pos(int32 start, int32 dx);
 
+//fw 0.2.73, tap to jump: the trigger point position that centres the slider window on a touch-down at x, y outside it
+//(slider_ov.h sov_jump; the position unchanged inside the window, above the row, or with no to-scale window)
+int32 acq_view_slider_jump(int32 pos, int32 x, int32 y);
+
 //The snap notice to draw now, or 0; the first call after a snap starts its ACQ_NOTICE_MS
 const char *acq_view_notice(void);
 

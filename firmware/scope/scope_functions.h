@@ -52,6 +52,7 @@ void scope_display_trace_data(void);
 
 int32 scope_get_x_sample(PCHANNELSETTINGS settings, int32 index);
 int32 scope_get_y_sample(PCHANNELSETTINGS settings, int32 index);
+int32 scope_code_to_y(PCHANNELSETTINGS settings, int32 code);
 
 void scope_display_channel_linear_trace(PCHANNELSETTINGS settings);
 

@@ -82,6 +82,8 @@ SRCS += ui_meas.c
 SRCS += touch_pick.c
 # fw 0.2.64: the record behind the trace, time/div viability, slider (pure C, host_tests/test_tb_view.c); the ACQ glue
 SRCS += tb_view.c acq_view.c
+# fw 0.2.73: the slider track overview (slider_ov.c pure, host_tests/test_slider_ov.c; slider_ov_draw.c draws)
+SRCS += slider_ov.c slider_ov_draw.c
 # fw 0.2.59: Diagnostics pages and the first-run screen (ui_diag.c pure, host_tests/test_ui.c), their drawing and dialogs
 # (ui_dlg.c) and the display mode (ui_diag_view.c)
 SRCS += ui_diag.c ui_dlg.c ui_diag_view.c

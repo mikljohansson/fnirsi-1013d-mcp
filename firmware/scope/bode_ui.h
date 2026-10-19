@@ -101,18 +101,13 @@ char *bu_fmt_deg(char *t, int32 mdeg);
 char *bu_fmt_fdiff(char *t, int64 dmhz);
 
 //----------------------------------------------------------------------------------------------------------------------------------
-//The slider row (owner, bode-ui.md section 2): the Scope's construction (frame 2, 452, 726 x 20; the window a 14 px box
-//at y 455). The track x 4..723 is 1 Hz .. 10 MHz on a log scale (seven decades); the window spans Start..Stop. A drag
-//moves Start and Stop together by whole 1-2-5 steps (bode_step_mhz indices 0..BODE_STEPS - 1) and stops at the ends.
-#define BU_SL_FRAME_X         2
-#define BU_SL_FRAME_Y         452
-#define BU_SL_FRAME_W         726
-#define BU_SL_FRAME_H         20
-#define BU_SL_X               4
-#define BU_SL_W               720
-#define BU_SL_WIN_Y           455
-#define BU_SL_WIN_H           14
-#define BU_SL_HIT_Y           450          //a touch from here down takes the slider
+//The slider row (owner, bode-ui.md section 2; fw 0.2.73 slider_ov.h): the Scope's construction (a line at y 452, the
+//track x 2..727 / y 453..471, the window its two edge lines). The track is 1 Hz .. 10 MHz on a log scale (seven
+//decades); the window spans Start..Stop. A drag moves Start and Stop together by whole 1-2-5 steps (bode_step_mhz
+//indices 0..BODE_STEPS - 1) and stops at the ends.
+#define BU_SL_X               2            //= SOV_X
+#define BU_SL_W               726          //= SOV_W
+#define BU_SL_HIT_Y            450          //a touch from here down takes the slider
 
 int32 bu_slider_x(int step);                                 //track x of a Start / Stop step
 int32 bu_slider_x_mhz(uint64 mhz);                           //track x of any frequency (AUTO SET's passes)

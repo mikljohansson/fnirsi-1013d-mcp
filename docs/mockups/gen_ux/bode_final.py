@@ -14,14 +14,15 @@ import boards  # noqa
 from common import *  # noqa
 
 # the slider row under the plot (owner, 2026-10-19 19:40), as the Scope's: the pane shrinks to six divisions of 56 px
-# (y 60..396), frequency labels at y 400, the cards at y 426 (the Scope's), the slider y 452..472, the C1 / C2 box at
+# (y 60..396), frequency labels at y 400, the cards at y 426 (the Scope's), the slider y 452..471, the C1 / C2 box at
 # the pane's bottom left y 342..394
 V.V_DIV, V.RO_Y, B.FL_Y, B.CARDS_Y = 56, 342, 400, 426
 TRACK_F0, TRACK_F1 = 1.0, 1e7         # the Sweep fold-out's full range, 1 Hz..10 MHz (coordinator, owner to veto)
 
 
 def track_x(f):
-    """bu_slider_x for any frequency: x 4..723 is 1 Hz .. 10 MHz on a log scale (BU_SL_X 4, BU_SL_W 720)"""
+    """bu_slider_x for any frequency: x 2..728 is 1 Hz .. 10 MHz on a log scale (BU_SL_X 2, BU_SL_W 726; a point at
+    10 MHz is drawn on the last column, 727, as sov_col clips it)"""
     span = math.log10(TRACK_F1) - math.log10(TRACK_F0)
     return OV_X + (math.log10(min(max(f, TRACK_F0), TRACK_F1)) - math.log10(TRACK_F0)) / span * OV_W
 
@@ -32,7 +33,7 @@ OVERVIEW = [(f, *B.h_bp(f), B.h_bp(f)[0] > -58) for f in OVERVIEW_F]
 
 
 def fr_overview(pts):
-    """docs/plans/slider-overview.md: the overview AUTO SET kept, its magnitude only, fitted to the twelve rows (the
+    """docs/plans/slider-overview.md: the overview AUTO SET kept, its magnitude only, fitted to the 19 rows (the
     highest valid point on the top row, the lowest on the bottom row; the track has no labels, so only the shape
     counts); valid points joined by a line in the magnitude colour, a flagged point a single grey pixel without a
     joining line (as on the chart), clipped to the rows"""
@@ -46,12 +47,12 @@ def fr_overview(pts):
     flags = []
     for f, db, ph, ok in pts:
         if ok:
-            seg.append((round(track_x(f)), row(db)))
+            seg.append((min(round(track_x(f)), OV_X + OV_W - 1), row(db)))
         else:
             if len(seg) > 1:
                 layers.append((CH2, DIM[CH2], ov_line_runs(seg)))
             seg = []
-            x = round(track_x(f))
+            x = min(round(track_x(f)), OV_X + OV_W - 1)
             flags.append((x, row(db), row(db)))
     if len(seg) > 1:
         layers.append((CH2, DIM[CH2], ov_line_runs(seg)))
@@ -61,9 +62,10 @@ def fr_overview(pts):
 
 
 def fr_slider(f0, f1, overview=None):
-    """Start..Stop as a window over 1 Hz..10 MHz on the log axis, the Scope slider's construction (rect 2,452,726,20,
-    the window 14 px high at y 455); dragging moves Start and Stop together by whole steps and re-sweeps. With the
-    overview AUTO SET kept drawn in the track (x 210..723: 100 Hz .. 10 MHz), nothing before the first AUTO SET"""
+    """Start..Stop as a window over 1 Hz..10 MHz on the log axis, the Scope slider's construction (fw 0.2.73: the line
+    at y 452, the track y 453..471, the window's two edge lines); dragging moves Start and Stop together by whole steps
+    and re-sweeps, a tap outside the window centres it there. With the overview AUTO SET kept drawn in the track
+    (x 209..727: 100 Hz .. 10 MHz), nothing before the first AUTO SET"""
     x0, x1 = round(track_x(f0)), round(track_x(f1))
     return slider_row(x0, x1 - x0, overview or ())
 

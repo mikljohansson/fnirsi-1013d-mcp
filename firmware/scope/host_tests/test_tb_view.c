@@ -341,9 +341,9 @@ static void test_slider(void)
   T_EQ(x, TBV_SLIDER_X);
 
   //Drag right: later samples, the trigger point moves left; the whole track moves by the whole record
-  d = tbv_slider_move(10, 25000000, 1000000, 3000);                //2 px per sample: 10 px = 41.7 samples = 83 px
-  T_EQ(d, -83);
-  T_EQ(tbv_slider_move(-10, 25000000, 1000000, 3000), 83);
+  d = tbv_slider_move(10, 25000000, 1000000, 3000);                //2 px per sample: 10 px = 41.3 samples = 82 px
+  T_EQ(d, -82);                                                    //(fw 0.2.73: the track is 726 px)
+  T_EQ(tbv_slider_move(-10, 25000000, 1000000, 3000), 82);
   T_EQ(tbv_slider_move(0, 25000000, 1000000, 3000), 0);
   T_EQ(tbv_slider_move(TBV_SLIDER_W, 25000000, 1000000, 3000), -6000);
 
