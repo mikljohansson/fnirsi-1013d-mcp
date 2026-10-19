@@ -962,4 +962,18 @@ Newest entries at the bottom. Format: date, who, what, result.
   Of that item: scope_health done, scope_cal_probe done 20:25, the device-vs-host Frequency response comparison is blocked by the
   A-core capture fault until 0x153A (20:51 entry); the poll interval and elapsed_ms (445 ms per 20-point sweep, estimate 935 ms)
   were checked at 20:44.
+- 2026-10-19 21:26-21:36: fw 0.2.71 (fw-freq2 merged: Frequency response follow-ups, Spectrum slider, grid rule, Trace style,
+  READ_BODE reason 8) built with GCC 10, pinned backups/fw-0.2.71_1264e26c.bin (sha256
+  1264e26c75fb4ee5046b233fe5a9956e40cc68cdb29272f5bdd640949361dc72), host test suite green on the merged tree, FEL-loaded 21:26
+  (`#VER fw=0.2.71,proto=1.21,fpga=0x1539`). BODE_OPEN from the host: the header now reports the view's own settings, 1 Hz ..
+  10 kHz / 50 / Normal, estimate 245.7 s, which is where the 20:43 "245 s" came from (the owner's slider play had left Start at
+  1 Hz; the 20:43 header showed the engine defaults instead, fixed by 0.2.71). A host-settings sweep 100 Hz .. 1 MHz / 50 ran
+  to the end in 4.3 s (reason 0): this time the pre-scan landed CH1 at 2.5 V/div and CH2 at 2.5 .. 0.5 V/div, so the readout-fault
+  stop (reason 8, which needs 5 V/div) did not trigger; 17 clean points, the rest ch1_low / ch2_small / clipped, the curve drawn in
+  colour and joined where valid and as grey dots where flagged, "CH1 level low: the DUT loads the 1 kOhm source" at the top
+  (misleading here: the cause is the fault-driven ranging, not the DUT), cards -3dB 9.355 kHz, Level +1.55 dB (host: 10.33 kHz,
+  +0.13 dB; the 13-code CH1 fundamental at 2.5 V/div explains both). The screenshot (scratchpad screen_2135_fr_after_run.png) shows
+  the new grid (decades with 2 and 5 lines), the ACQ chip "Set by / the sweep", the generator chip on the last tone, the slider
+  window over 100 Hz .. 1 MHz. The on-device mode stays blocked by the capture fault for real use; the walk-through of section 47
+  waits for 0x153A. Scope state: Frequency response view open, STOP, generator off.
 
