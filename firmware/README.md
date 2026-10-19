@@ -441,6 +441,12 @@ read 0x29. Latency 120 ns pin to memory for every K and N, the sample centred K 
 divider D, so the odd dividers of `sample_rate_settings` give the same rates as before; the FPGA stores
 min(65535, y >> S), y = filter output with gain N^K. On 0x1532/0x1533 none of this is written (caps bit 15 DECIM).
 
+Filter per mode (fw 0.2.64, owner): the Scope view defaults to CIC2 without the FIR (the FIR's 6-9 % step overshoot
+pulses on a square wave), the Spectrum view to CIC2+FIR. Each mode keeps its own setting (`pc_dec_set_mode[2]`,
+`PC_DECIM_DEFAULT_SCOPE` / `_SPEC` in pc_decim.h): settings word 207 the Scope's, word 212 (0xD500 marker) the
+Spectrum's. The Filter box, the arm and SET_DECIM / GET_DECIM act on the mode on screen. A 0.2.30..0.2.63 sector with
+the old single default (CIC2+FIR) loads as the new defaults; any other saved choice is kept for both modes.
+
 - Maths, `pc_decim.c` (integer, host-tested): S = max(0, bitlen(255 x N^K) - 16), so full scale uses the top bit of
   16; exactness 255 x N^K < 2^48 makes CIC3 fall back to CIC2 above N = 10334 (slower than 20 kSa/s) and CIC2 to
   boxcar above N = 1,050,630 (not reached by the table); legacy at divider 0 (200 MSa/s: K >= 1 would give N = 2)
@@ -867,21 +873,55 @@ Where the controls of 1.00o5's Other settings menu went (the menu is gone):
 | Load Ref on start | Settings > Files > Reference traces at power-on |
 | RTC On/Off (RTC editor) | still in the editor; also Settings > Clock > Clock |
 
-### Touch on the scope plot (fw 0.2.54)
+### Touch on the scope plot (fw 0.2.54, batch 2 in 0.2.64)
 
-`scan_for_touch` (statemachine.c) decides at the touch-down point; geometry in `touch_pick.c` (pure, host-tested in
-`host_tests/test_touch_pick.c`). In the normal display the left 44 px (x 0..43) are a handle column: CH1, CH2 and the
-eight reference pointers each own the 44 rows around their tip (`scope_pointer_top(position) + 6`, the clamped
-position the pointer is drawn at), the nearest switched-on pointer wins and a tie goes to the one drawn on top (draw
-order CH1, CH2, ref1..ref8). A drag that starts there moves that pointer vertically; a tap there does nothing. Right of
-the column, as before: a drag within 30 px of a channel's zero line (`448 - traceposition`; with volt cursors on
-not in x 310..410) moves the nearest enabled channel (a tie to CH2), vertically only; then the trigger level (x > 660),
-the time cursors, the volt cursors, and otherwise a horizontal drag moves the trigger point. A tap (under 200 ms,
-within 2 px) away from the pointers keeps 1.00o5's zones (time/div left and right, V/div in the top and bottom bands).
-A channel drag moves the trigger level on that channel (CH1 for source 0, CH2 for 1, never for EXT) by the same delta,
-limited so both stay in the drag range 6..396. Trace positions written by the auto setup and by a settings load are
-limited to that range too. In X-Y every drag moves CH1 with x and CH2 with y. Planned (touch review batches 2-3): the
-trace body as a grab target, an 8 px dead band, no taps on cards and handles, a non-blocking touch loop.
+`scan_for_touch` (statemachine.c) picks once, at the touch-down point (`scan_plot_pick`); geometry in `touch_pick.c`
+(pure, host-tested in `host_tests/test_touch_pick.c`). Normal display, in this order:
+
+1. **Left handle column** (x 0..43): CH1, CH2 and the eight reference pointers each own the 44 rows around their tip
+   (`scope_pointer_top(position) + 6`, the clamped position the pointer is drawn at); the nearest switched-on pointer
+   wins, a tie to the one drawn on top (draw order CH1, CH2, ref1..ref8). A drag moves it vertically.
+2. **Record-position slider** (frame x 2..727, y 452..471; hit area from y 450, and up to y 436 when nothing else is
+   near: 44 px): the window follows the finger, dragging right shows later samples (the trace moves left), limited to
+   the record (`acq_view_slider_pos`). Short mode only.
+3. **Trigger level pointer** (x > 660, 30 px around its line), only while it is drawn.
+4. The nearest of: a **channel** (CH1 / CH2 switched on, x 44..685), measured to the nearer of its drawn trace
+   (`trace_distance` over the polyline as drawn, the Peak / Pro min-max bands included; in the phosphor view only the
+   zero line) and its zero line, within 40 px, a tie to CH2; the **time cursors** (30 px in x) and **volt cursors**
+   (30 px in y, x > 60), a tie to the cursor.
+5. Nothing: a horizontal drag pans the trigger point (limited to the record in short mode).
+
+A touch becomes a drag after 6 px (`TOUCH_DEAD_BAND`); a lift inside that within 250 ms is a tap. Handles (pointers,
+slider, trigger level) never tap; on a trace or cursor a tap counts only when the finger moved 2 px or less. Taps on
+the empty plot keep 1.00o5's bands (owner), contiguous now (`touch_tap_zone`): left / right half (x < 358 / > 362),
+y 50..99 V/div one step more sensitive, y 100 up to the lower band time/div slower / faster, the lower band (80 rows)
+V/div less sensitive. The lower band ends at the grid's bottom (449) or at the top of that half's measurement cards
+(rows of three from y 426, 24 px pitch); nothing on the slider row. A channel drag moves the trigger level on that
+channel (CH1 for source 0, CH2 for 1, never for EXT) by the same delta, limited so both stay in 6..396. In X-Y every
+drag moves CH1 with x and CH2 with y. The touch loop still blocks until the finger moves or lifts (touch-review batch 3).
+
+Spectrum view: the pan divides by 5 when Move is slow and uses the same dead band and tap time. CTRL fold-out rows act
+on release, only when the finger is still on the row; a tap outside closes the fold-out and does nothing else.
+
+### Time/div, sample rate and the record (fw 0.2.64)
+
+The trace is a window onto the record: 50 px per division over columns 3..726, the trigger point at column
+`triggerhorizontalposition`, first sample `trig - 1 - ceil(pos / xpps)` (1.00o5's formula). `tb_view.c` (pure,
+`host_tests/test_tb_view.c`) derives from the real record length (`fpgasettings.totalsamples` x sample period):
+
+- a time/div is **viable** at a rate when the record spans the 724 px trace area and a division holds at least one
+  sample (at 3000 samples: up to 207 samples/div, so 200 MSa/s reaches 1 us/div; 15000 samples reach 5 us/div);
+  1.00o5's hand-written `viable_time_per_div` table is gone (it offered 250 samples/div, a record shorter than the
+  screen: zeros past its end; the test lists the 24 cells that differ);
+- the **trigger point limits** that keep the window inside the record, the **drawn window** (the first sample clamped
+  into the record; a record shorter than the screen is drawn from the left edge and stops at its end), and the
+  **slider** to scale (window width = the part on screen).
+
+`acq_view.c` applies one rule for every writer: the ACQ menu (a rate change snaps the time/div to the nearest viable
+one and shows "Time/div set to X for this rate" in white at the top middle for 4 s after it is first drawn; grey
+time/div boxes cannot be chosen; memory depth and Filter changes refit), the plot's tap zoom while stopped (it stops
+at the record's limits), the host's SET_TIMEBASE mode 0, SET_TRIGGER pretrigger / total and SET_DECIM, and the
+settings load. Long (roll) mode is left as it was.
 
 ### Spectrum view (`spectrum.c`, fw 0.2.28)
 

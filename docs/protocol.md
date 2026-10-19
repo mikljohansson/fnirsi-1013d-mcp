@@ -583,6 +583,12 @@ bytes reserved, u32 `value`. Response: TIMEBASE.
   for deep memory settings [V `S100 variables.c:403-418`]; the protocol always uses the first table and
   reports the resulting N, so hosts should prefer raw dividers.
 - Raw divider: any u32. The UI table spans N = 0 (200 MS/s) to 399999 (500 S/s).
+- Since fw 0.2.64 (wire format unchanged): the UI keeps its time/div viable for the rate and the record (the record
+  spans the 724 px trace area, at least one sample per division; `firmware/scope/tb_view.h`). Mode 0 sets the index's
+  rate and, when the index does not fit the current record length (SET_TRIGGER total), the nearest index that does;
+  the response's `timeperdiv_index` is the applied one. SET_TRIGGER pretrigger / total refit the UI time/div the same
+  way. The acquisition Filter (GET_DECIM / SET_DECIM filter and FIR bits) is kept per display mode: Scope and Spectrum
+  each have their own (defaults CIC2 and CIC2+FIR); the commands read and write the mode on screen.
 
 | UI index | Time/div | N | Rate per channel |
 |---|---|---|---|

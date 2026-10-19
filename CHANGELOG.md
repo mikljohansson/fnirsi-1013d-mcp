@@ -31,6 +31,26 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.64 - 2026-10-19 (protocol 1.18 unchanged; provisional number)
+
+- Fixed: after a sample-rate change in the ACQ menu the old time/div stayed although drawn grey, so the trace was cut
+  off, zeros showed past the record end, the slider scrolled before the trace and the shape changed (owner, 1 kHz
+  cal signal). The time/div is now viable by rule, derived from the record length (the record spans the trace area,
+  at least one sample per division) instead of 1.00o5's table; a rate change snaps it to the nearest viable value and
+  says "Time/div set to X for this rate"; grey boxes cannot be chosen; memory depth and Filter changes, the plot's tap
+  zoom while stopped, SET_TIMEBASE, SET_TRIGGER pretrigger / total and SET_DECIM follow the same rule (5718015).
+- Fixed: the trace window stays inside the record, and a record shorter than the screen stops at its end instead of
+  drawing zeros; the trigger point drag reaches both ends of the record (5718015, d1f303f).
+- Changed: the acquisition Filter is kept per mode (owner): Scope defaults to CIC2 without the FIR (no pulsing step
+  overshoot on a square wave), Spectrum to CIC2+FIR; settings word 212. Old settings with the old default load as the
+  new defaults; another saved choice is kept for both modes (5818b5b).
+- Fixed: the Peak and Pro trace styles wrote past the 730-point trace buffers (29d61f1).
+- Added: the record-position slider under the grid is drawn to scale and can be dragged (the window follows the
+  finger); a channel can be grabbed on its drawn trace within 40 px, not only on its zero line; a 6 px dead band
+  before a drag; handles never tap and a stroke on a trace does not change the time base; the tap bands stay but
+  avoid the slider row and the measurement cards (b620113).
+- Changed: the spectrum's pan honours Move slow; CTRL fold-out rows act on release (f690e42).
+
 #### 0.2.61 - 2026-10-19 (protocol 1.18, docs/protocol.md section 14 row 57)
 
 - Fixed: after a sample-rate change the FPGA can garble one ADC core's 200 MSa/s data. This happens randomly on AL3

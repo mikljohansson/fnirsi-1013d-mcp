@@ -2154,3 +2154,87 @@ Open:
 - Bench: read GET_LINK_STATS 62-63 and GET_EVENT_LOG types 21/22 after a wizard run and after toggling the time base
   to 200 MSa/s a few times. Expect 21 entries with small `a` (recovered), and 22 entries showing who wrote what
   before each.
+
+## 40. fw-acqtouch: ACQ time/div coupling, Filter per mode, touch batch 2 (fw 0.2.64 provisional, protocol unchanged)
+
+Branch from main 8f8687a (fw 0.2.61). Briefs: docs/plans/task-queue.md "ACQ: sample rate vs time/div coupling", "FIR
+step overshoot pulsing" (owner decision: Filter per mode) and "Touch fixes batch 2"; docs/plans/touch-review.md (b), (c),
+(d). Commits: 5718015 (tb_view / acq_view, ACQ menu, display window, slider drawing, host paths), 5818b5b (Filter per
+mode, word 212), 29d61f1 (trace point buffers), b620113 (touch batch 2), f690e42 (spectrum pan, fold-outs on release),
+d1f303f (trigger point drag limits), then docs and this handoff. Images: IMAGES_PLACEHOLDER. **Nothing benched.**
+Host tests green (test_tb_view 57750 checks, test_touch_pick 584, the rest unchanged). GCC 10 warnings 36, sorted
+line-number-free list identical to 8f8687a. **Settings word 212 claimed** (0xD500 marker, the Spectrum's Filter; 207 is
+the Scope's); 213..223 stay free. No protocol change (wire formats unchanged; docs/protocol.md SET_TIMEBASE notes the
+snapped index in the response and the per-mode Filter).
+
+Points for a successor:
+- **tb_view.c/.h** (pure): the trace window maths. A time/div is viable when `724 x fs < total x 50 x fpd` (the record
+  covers columns 3..727, the last pixel's interpolation included) and `fs >= fpd` (one sample per division; 200 MSa/s
+  at 5 ns/div is exactly one). `tbv_window` keeps 1.00o5's first-sample formula (trig - 1 - ceil(pos / xpps)) and
+  clamps it into the record; a record shorter than the screen draws from column 3 to `3 + ceil(total x xpps)`.
+  `tbv_pos_limits` are the trigger point columns that keep the window inside the record for the nominal trigger sample
+  (`fpgasettings.settriggerpoint`); a software trigger found off the nominal point is handled by the window clamp. The
+  test compares with 1.00o5's table: 24 cells differ at 3000 samples (3 at 250 samples/div and 17 below one sample/div
+  offered by the table; 4 at 200 samples/div withheld by it), so the table was removed.
+- **acq_view.c/.h** (target glue): `acq_view_fit(notice)` snaps the time/div (short mode, indices 11..34) and clamps the
+  trigger point; called from the ACQ menu (rate, memory, Filter), `scope_set_timebase` (after the tap zoom; re-writes
+  0x0E when it snapped), `pc_hal_timebase_write` mode 0, `pc_hal_trigger_write` (pre / total), `pc_hal_decim_set`,
+  `pc_dec_follow_mode` and `pc_ui_fix_settings`. The notice is a static string drawn by `pc_glue_scope_warning` when no
+  warning shows, white, 4 s from its first draw (a long stay in the ACQ menu does not eat it). `acq_view_tb_ok` greys and
+  blocks the ACQ time/div boxes (all unavailable in long mode, as 1.00o5's table rows 18-28 were).
+- **Display**: `scope_display_trace_data` uses `tbv_window` in short mode (long mode keeps 1.00o5's xrange code); the
+  last-pixel interpolation of the Linear and Dots styles runs only when the trace reaches the right edge.
+  `scope_draw_grid` draws the slider window to scale (`tbv_slider`, min 8 px). `move_trigger_point_position` applies
+  1.00o5's limits only in long mode (their 1400-sample margin stopped the window short of the record's end).
+- **Filter per mode** (pc_hal_scope.c): `pc_dec_setting` is a macro for `pc_dec_set_mode[spectrum_mode() !=
+  SPECTRUM_MODE_SCOPE]`; `pc_dec_follow_mode` (in `pc_glue_ui_service`) fits the memory to 8190 and refits the time/div
+  when the new mode's filter is on. Defaults in pc_decim.h (`PC_DECIM_DEFAULT_SCOPE` CIC2, `PC_DECIM_DEFAULT_SPEC`
+  CIC2+FIR, `PC_DECIM_DEFAULT_OLD` for the migration: an old sector holding exactly the old default gets the new
+  per-mode defaults, any other choice is kept for both modes).
+- **Touch** (statemachine.c `scan_plot_pick`; touch_pick.c `trace_distance`, `pick_channel_near`, `touch_tap_zone`,
+  `touch_cards_top`): one pick at touch-down; TOUCH_STATE_MOVE_RECORD (0x12) for the slider, with
+  `previous_trigger_point_position` snapshotted. The card geometry used by the tap bands copies
+  `scope_display_channel_measurements` (rows of three from y 426, pitch 24): **if fw-meas changes the cards' layout,
+  update `CARDS_*` in touch_pick.h and `scope_tap_bottom` in scope_functions.c.** The H marker has no handle box of its
+  own (review rule 5, not in this batch). The `distance_*` globals in variables.c are unused.
+- **Not done**: touch-review batch 3 (the blocking touch loop, one GT911 reader, long-mode presets per drag step, the host
+  race) did not fall out of this work: the plot still blocks in `scan_for_touch` until the finger moves 6 px or lifts.
+  Spectrum plot taps still have no y bound (defect 20, header / label taps). Locked cursors (defect 13) and X-Y moving
+  switched-off channels (defect 11) unchanged.
+- Peak / Pro overflow: those styles store two points per column (up to 1448) and the buffers had 730 entries;
+  `TRACE_POINTS_MAX` 1460 now (inference: this corrupted the neighbouring point buffers whenever Peak or Pro was on).
+
+**Bench walk-through (owner, coordinator on COM10)** - FEL-load, `#VER fw=0.2.64,proto=1.18`. CH1 on the 1 kHz
+calibration square, 1X, DC, 1 V/div, Auto trigger, memory 3000, Scope view.
+1. ACQ menu, owner's repro: 500 us/div at 500 KSa/s, then tap 200 MSa/s. The time/div box jumps to 1 us (green); the
+   boxes 2 us .. 200 ms read grey and do nothing when tapped; close the menu: "Time/div set to 1us for this rate" in
+   white at the top middle for about 4 s; the trace fills the screen, no flat zero line at the right, the slider window
+   spans almost the whole bar.
+2. Back to 500 KSa/s: 1 us is below one sample per division there, so it snaps to 2 us with the notice.
+   At 500 KSa/s the white range is 2 us .. 200 us; 500 us is grey now (250 samples/div did not fit 3000 samples: the old
+   table offered it and drew zeros past the record). Memory 15000: the white range reaches 2 ms.
+3. 1 MSa/s at 200 us/div (200 samples/div, newly allowed): the record fills the screen.
+4. Slider: 200 MSa/s, 50 ns/div (window about 35 px). Drag the window right: it follows the finger, the trace moves left,
+   the H marker leaves the screen and shows as the side pointer; at the end of the bar the window stops (no zeros, never
+   past the record end); drag back: it stops where the record starts. Move slow: a fifth of the finger. A tap on the
+   slider does nothing.
+5. Drag on empty plot (no trace near): the H marker pans as before and stops at the record's ends.
+6. Trace grab: 1 ms/div, the square about 1 division above its zero line. Touch the top of the square (not the zero line)
+   and drag down: CH1 moves. 30 px above the square's top: still grabs (40 px); 50 px: the trigger point pans instead.
+   Peak trace style: the same on the band.
+7. Taps: a still, brisk tap left of centre mid-plot: time/div one step slower; a 4 px wobble still counts as a tap; a
+   brisk stroke on the trace (moved, under 250 ms): nothing changes. Tap on a pointer, the slider or the trigger level
+   pointer: nothing. Measures: four cards for CH1 (two rows): taps on the cards do nothing; the 80 px band just above
+   them steps CH1 V/div less sensitive; nothing happens on the slider row.
+8. Stopped zoom: STOP at 200 MSa/s 1 us/div, tap the left time band (slower): it stays at 1 us with the notice (2 us would
+   not fit the record); tap right down to 5 ns: works; one more does nothing.
+9. Filter per mode: ACQ menu in Scope reads "CIC2" on the first boot of 0.2.64 (a sector with the old default); the 1 kHz
+   square shows no pulsing horns. Menu > Spectrum analyser, ACQ menu: "CIC2+FIR". Set Spectrum to CIC3, back to Scope:
+   still CIC2. Power-cycle: both kept. GET_DECIM in each mode shows that mode's value.
+10. Host: SET_TRIGGER total 1000, then SET_TIMEBASE index 19 (500 us): the response's timeperdiv_index is 20 (200 us) and
+   the scope shows the notice.
+11. Spectrum: zoom in (tap right), drag to pan with Move slow: a fifth of the speed. CTRL > Analyse: touch a row, slide off
+   it and lift: nothing; lift on it: it acts. A tap outside the fold-out only closes it.
+Bug indicators: a grey time/div box that can be chosen; zeros or a flat line at the right edge at a white time/div; the
+trace jumping against the H marker when the rate changes; the slider window moving the wrong way or past the bar; a tap
+on the cards changing V/div; the Spectrum's Filter changing the Scope's.
