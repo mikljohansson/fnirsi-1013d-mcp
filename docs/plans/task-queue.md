@@ -34,6 +34,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   word can flip after a sample-rate or filter change (interleave right by chance until bench test T4), the screen readout returns
   data one word late (averaged trace sits 2 samples earlier), writes inside the sampling-reset window can be lost at slow rates on
   the older arm order. Firmware fix batch after fpga-gen6 reports; bench with the owner.
+- **CH2 at 0.1 V/div reads nothing when set at the start of a Bode sweep** (bench 10-19 15:10, docs/hardware-status.md): the
+  initial / fixed range path gives 48 uV on a 68 mV signal while 0.2 and 0.5 V/div are right and 0.1 reached by the mid-sweep
+  switch is right too. Suspects: the initial SET_CHANNEL sequence for range 0.1 (relay / offset / trace position not applied, or the
+  software-zoom boundary), or the host picking the wrong range index. mcp-gen5 to find the sequence difference; coordinator
+  reproduces on the device with READ_RAW at 0.1 V/div. Also check the scope screen at 100 mV/div.
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
@@ -178,7 +183,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 ## MCP / host
 
 - [x] **scope_status docstring** (docs-gen1): names all five display modes (mcp-gen4, with the Bode docs commit).
-- [ ] **Bode bench session** (mcp-gen4 hand-off; procedure in mcp/AGENTS.md "Bode bench"): wiring A/B, thru, floor, coherence, the
+- [~] **Bode bench session** (10-19 14:35-15:10: RC 1k/15n, floor -80 dB, thru +0.3 dB, divider flat -20.5 dB: tool proven; RC capacitor deviation open; 0.1 V/div bug found) (mcp-gen4 hand-off; procedure in mcp/AGENTS.md "Bode bench"): wiring A/B, thru, floor, coherence, the
   1.6 kOhm / 10 nF RC; record the floor, skew and the wiring verdict in docs/hardware-status.md.
 - [ ] **Bode follow-ups** (after the bench): CH1 re-ranging when CH1 drops below 20 codes (resonant input nodes), the harmonic fast
   mode (design 1.3), the impedance mode z_series_ohm (design 2.4, coil L / Q / SRF for the detector), an optional PNG plot.
