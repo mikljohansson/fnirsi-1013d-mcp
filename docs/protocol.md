@@ -454,7 +454,7 @@ required GET_INFO capability bit.
 | 0x0300 | GET_GEN | yes | - | no | generator state |
 | 0x0301 | SET_GEN | no | GENERATOR_DDS | no | enable, frequency, duty |
 | 0x0400 | GET_CAL | yes | - | no | calibration constants |
-| 0x0401 | READ_SCREEN | yes | SCREENSHOT | no | framebuffer rows; not built, E_UNSUPPORTED (row 18; `pc_cmds.c` handler table) |
+| 0x0401 | READ_SCREEN | yes | SCREENSHOT | no | framebuffer rows; built in fw 0.2.70-screen (cap set on every known bitstream; before: E_UNSUPPORTED, row 18) |
 | 0x0402 | CAL_PROBE | (1.21) | - | no | the calibration wizard's zero measurement of one channel and range, nothing stored (section 14 row 61, provisional) |
 | 0x0F00 | DEBUG_FPGA | no | DEBUG_RAW | no | raw FPGA bus operations (debug builds only) |
 | 0x0F01 | ENTER_FEL | no | ENTER_FEL | no | reboot into the boot ROM's FEL mode |
@@ -898,6 +898,12 @@ There is no SET_CAL in v1 [D]: calibration stays a UI procedure so a host bug ca
 u16 `nrows`, u16 `format` (1 = RGB565 little-endian [U]), then `nrows x width x 2` bytes from the
 framebuffer `maindisplaybuffer` [V `S100 fnirsi_1013d_scope.c:81`]. 40 rows (64,000 bytes) fit one
 response; a full screen is 12 requests, 768,000 bytes.
+Built in fw 0.2.70-screen (`h_read_screen`, `pc_hal_screen_rows`): `maindisplaybuffer` is the buffer DEBE layer 0
+scans (views drawn in `displaybuffertmp` are copied into it), so the rows are what the panel shows. Main loop only:
+while a modal menu is open the request gets E_BUSY. Errors (as the simulator): E_BAD_ARG detail 0 for `row` >= 480,
+`nrows` 0 or `row + nrows` > 480; E_OVERFLOW detail 2 above 41 rows (8 + 42 x 1600 > 66,560). Vectors:
+`req_read_screen`, `resp_read_screen_last_row`, `resp_read_screen_bad_arg`, `host_req_read_screen_tail`,
+`host_resp_read_screen_e_overflow`.
 
 ### 8.8 Debug commands
 
@@ -974,7 +980,7 @@ All tests run in REMOTE mode with DEBUG_RAW enabled, on the owner's AL3 unit, fi
 | T6 | 0x18 behaviour on auto timeout | auto mode, no signal: check 0x18 = 0 at DONE |
 | T7 | FORCE via 0x1A = 0 | normal mode, no signal, ARM, FORCE: DONE within 1 ms |
 | T8 | voltage scaling 8.5 | known DC (e.g. 1.000 V reference) on every range; compare computed volts |
-| T9 | RGB565 framebuffer format | READ_SCREEN vs a photo of the screen |
+| T9 | RGB565 framebuffer format | READ_SCREEN (fw 0.2.70-screen) vs a photo of the screen: `scope_screenshot` |
 | T10 | stock trigger core | stock FPGA: signal on CH1 with B-only glitch; check whether it triggers |
 
 ## 13. Example frames
@@ -1025,7 +1031,7 @@ differs from or fills a gap in sections 1-13. Hosts written against this documen
 | 15 | CHANNEL_CONFIG `range` | `samplevoltperdiv` (what the hardware does); SET_CHANNEL range sets display and sample V/div equal. uv_per_lsb_q8 uses input_calibration[range] and mul_factor[1x][range] | 8.3 |
 | 16 | SET_CHANNEL offset | the resulting PWM value (centre + dcoffset) must be 0..2000 whenever offset or range is in the mask, else E_BAD_ARG detail 3 | the PWM period is 2000 counts |
 | 17 | READ_TRACE | 1.2: REMOTE needs a DONE capture (E_STATE otherwise); 1.3: row 36. Channels are built on demand and the build is reused per capture. `sw_trigger_index` is -1 unless 20 <= pretrigger and pretrigger + 64 <= total (the 1.00o5 search window) | |
-| 18 | Not built in v0.1.1 | READ_LIVE, ACQUIRE_AVG, READ_SCREEN: caps 0, E_UNSUPPORTED. DEBUG_FPGA and FORCE exist only in `PC_DEBUG=1` builds, which set DEBUG_RAW and FORCE_TRIGGER (FORCE before test T7) | phase 2/3 of the plan; fail closed |
+| 18 | Not built in v0.1.1 | READ_LIVE, ACQUIRE_AVG, READ_SCREEN: caps 0, E_UNSUPPORTED (READ_SCREEN built in fw 0.2.70-screen, cap SCREENSHOT). DEBUG_FPGA and FORCE exist only in `PC_DEBUG=1` builds, which set DEBUG_RAW and FORCE_TRIGGER (FORCE before test T7) | phase 2/3 of the plan; fail closed |
 | 19 | USB identity | VID:PID 0x1209:0x0001 (pid.codes test PID, development only), bcdDevice 0x0100, manufacturer `fnirsi-1013d-ai`, product `FNIRSI 1013D`, serial `1013D-0001` on every unit (GET_INFO `serial` is the same string) | per-unit serial and a real PID are plan phase 3 |
 | 20 | `min_total_samples` | 80 on variants with PROG_TRIGGER_POS (not checked against the FPGA; the 1.00o5 UI never goes below 3000); 3000 (= max) on the stock bitstream | stock geometry is fixed [U] |
 | 21 | `#LOCAL` | 1.2: releases with the acquire-time KEEP_SETTINGS flag; ASCII lines count as traffic for the watchdog. 1.3: `#OK`, no effect | |
