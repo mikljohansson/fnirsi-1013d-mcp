@@ -1353,6 +1353,7 @@ static void test_bode_scales(void)
 {
   bu_scale s, p;
   char t[24];
+  int i;
 
   //Magnitude: a low-pass from 0 to -40 dB: 10 dB / div, the top raised to +10 (the top division free)
   bu_scale_mag(0, -40000, &s);
@@ -1404,6 +1405,22 @@ static void test_bode_scales(void)
   T_EQ(bu_lin_step(20000000, 100000000), 10000000ull);
   T_EQ(bu_lin_step(100000, 1000000000), 100000000ull);
   T_EQ(bu_lin_step(5000000, 500000000), 50000000ull);
+
+  //The slider: 1 Hz .. 10 MHz over the track; the design's spans; a drag shifts both ends by whole steps, kept on it
+  T_EQ(bu_slider_x(0), BU_SL_X);
+  T_EQ(bu_slider_x(BODE_STEPS - 1), BU_SL_X + BU_SL_W);
+  T_EQ(bu_slider_x(11), 384);                      //5 kHz (the design says about 385)
+  T_EQ(bu_slider_x(17), 590);                      //500 kHz
+  T_EQ(bu_slider_x(6), 210);                       //100 Hz
+  for(i = 1; i < BODE_STEPS; i++)
+    T_TRUE(bu_slider_x(i) > bu_slider_x(i - 1));
+  T_EQ(bu_slider_shift(6, 18, 0), 0);
+  T_EQ(bu_slider_shift(6, 18, 10), 0);
+  T_EQ(bu_slider_shift(6, 18, 25), 1);
+  T_EQ(bu_slider_shift(6, 18, 1000), 3);           //Stop at 10 MHz
+  T_EQ(bu_slider_shift(6, 18, -1000), -6);         //Start at 1 Hz
+  T_EQ(bu_slider_shift(6, 18, 103), 3);            //one decade
+  T_TRUE(BU_SL_HIT_Y > BU_CARDS_Y + UI_CARD_H);
 
   //Short labels and values
   T_STR((bu_freq_short(t, 100000), t), "100");

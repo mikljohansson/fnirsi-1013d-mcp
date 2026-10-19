@@ -13,19 +13,21 @@
 #include "bode_sweep.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
-//The chart: one pane x 6..726, y 60..408, six divisions of 58 px shared by both y axes. Magnitude labels at the left
+//The chart: one pane x 6..726, y 60..396, six divisions of 56 px shared by both y axes. Magnitude labels at the left
 //(x 9, CH2 cyan, the top one with " dB"), phase labels right-aligned at x 723 (the phase colour, the top one with
-//" deg"), frequency labels at y 413. The top division (y 60..118) is kept free of data when the scale allows it: the
-//warning line (y 69, centred at x 366) lives there.
+//" deg"), frequency labels at y 400, the cards at y 426 (the Scope's row), the slider row at y 452..471. The top
+//division (y 60..116) is kept free of data when the scale allows it: the warning line (y 69, centred at x 366) lives
+//there.
 #define BU_PX                 6
 #define BU_PW                 720
 #define BU_Y                  60
-#define BU_DIV                58
+#define BU_DIV                56
 #define BU_NDIV               6
 #define BU_H                  (BU_NDIV * BU_DIV)
 #define BU_LABEL_L_X          9
 #define BU_LABEL_R_X          723
-#define BU_FL_Y               413
+#define BU_FL_Y               400
+#define BU_CARDS_Y            426
 #define BU_WARN_XC            366
 #define BU_WARN_Y             69
 #define BU_WARN_MAX           50          //characters (at most 355 px in 16 px; font_2 is narrower)
@@ -74,9 +76,28 @@ char *bu_fmt_deg(char *t, int32 mdeg);
 char *bu_fmt_fdiff(char *t, int64 dmhz);
 
 //----------------------------------------------------------------------------------------------------------------------------------
+//The slider row (owner, bode-ui.md section 2): the Scope's construction (frame 2, 452, 726 x 20; the window a 14 px box
+//at y 455). The track x 4..723 is 1 Hz .. 10 MHz on a log scale (seven decades); the window spans Start..Stop. A drag
+//moves Start and Stop together by whole 1-2-5 steps (bode_step_mhz indices 0..BODE_STEPS - 1) and stops at the ends.
+#define BU_SL_FRAME_X         2
+#define BU_SL_FRAME_Y         452
+#define BU_SL_FRAME_W         726
+#define BU_SL_FRAME_H         20
+#define BU_SL_X               4
+#define BU_SL_W               720
+#define BU_SL_WIN_Y           455
+#define BU_SL_WIN_H           14
+#define BU_SL_HIT_Y           450          //a touch from here down takes the slider
+
+int32 bu_slider_x(int step);                                 //track x of a Start / Stop step
+//Steps to shift Start / Stop (start0 < stop0) for a drag of dx px from where it began: the window's left edge follows
+//the finger to the nearest step, both ends kept on the track
+int   bu_slider_shift(int start0, int stop0, int32 dx);
+
+//----------------------------------------------------------------------------------------------------------------------------------
 //Cursors C1 and C2 (T CURSOR): flags above the pane (24 x 13 at y 47, "C1" / "C2" in black on the cursor colour; hit
 //area 44 x 44 around the flag), dotted lines through the pane. The readout box at the bottom left of the pane (variant 2,
-//owner): x 10..261, y 356..407, grey, rows C1, C2, C2-C1 in 13 px at a 16 px pitch: the name in the cursor colour (the
+//owner): x 10..261, y 342..393, grey, rows C1, C2, C2-C1 in 13 px at a 16 px pitch: the name in the cursor colour (the
 //difference row white), f white, the level in the magnitude colour, the phase in the phase colour; a flagged point shows
 //its reason in grey instead of the phase, and the difference row is then grey.
 #define BU_FLAG_W             24
@@ -84,7 +105,7 @@ char *bu_fmt_fdiff(char *t, int64 dmhz);
 #define BU_FLAG_Y             47
 #define BU_FLAG_HIT           22          //half of the 44 px hit area
 #define BU_RO_X               10
-#define BU_RO_Y               356
+#define BU_RO_Y               342
 #define BU_RO_W               252
 #define BU_RO_H               52
 #define BU_RO_ROW0            3

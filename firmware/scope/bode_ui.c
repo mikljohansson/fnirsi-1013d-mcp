@@ -216,6 +216,39 @@ uint64 bu_lin_step(uint64 f0, uint64 f1)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
+//Slider
+
+int32 bu_slider_x(int step)
+{
+  static const uint16 sub[3] = { 0, 301, 699 };     //log10 of 1, 2, 5 in thousandths
+
+  if(step < 0) step = 0;
+  if(step > BODE_STEPS - 1) step = BODE_STEPS - 1;
+
+  return BU_SL_X + (int32)(((uint32)BU_SL_W * (1000u * (uint32)(step / 3) + sub[step % 3]) + 3500) / 7000);
+}
+
+int bu_slider_shift(int start0, int stop0, int32 dx)
+{
+  int32 target = bu_slider_x(start0) + dx, bd = 0x7FFFFFFF;
+  int   i, best = start0;
+
+  for(i = 0; i + (stop0 - start0) <= BODE_STEPS - 1; i++)
+  {
+    int32 d = bu_slider_x(i) - target;
+
+    if(d < 0) d = -d;
+    if(d < bd)
+    {
+      bd = d;
+      best = i;
+    }
+  }
+
+  return best - start0;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
 //Cursor readout
 
 const char *bu_flag_reason(uint16 f)
