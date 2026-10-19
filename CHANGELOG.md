@@ -1044,6 +1044,14 @@ was found (commit not identified).
 - Added: T8 calibration bench helpers (b712f6c, 133767f, 27e368e).
 - Added: AL3 FPGA project sources and a headless Anlogic TD flow. The flow rebuilds Atlan4's 0x1532
   bitstream byte-identical (e790a7d, 42c79dc).
+- Fixed: FPGA 0x153A (f735fae): at 200 MSa/s one or two ADC cores per chip returned rail values and old/new bit mixes
+  whenever their samples lay in codes 128..145 (0x1537..0x1539; the lanes changed with every build). The FPGA sampled the
+  ADC pins at a placement-dependent instant inside the AD9288's 4 ns data transition. Every pin is now captured in an IOB
+  register at a selectable 2.5 ns stage per core, referenced to the write clock edge the core is encoded on, so the
+  capture is placement- and rate-independent and the word is B first by T/2 at every rate; outlier counters (read 0x36)
+  and the stage register 0x63 let the firmware self-check and train the capture at a quiet input. Legacy data are 4 words
+  (200 MSa/s) / 3 words later than on 0x1539 and EXT is not delayed: the firmware's EXT offsets must follow
+  (fpga/al3/README.md section 10, docs/protocol.md 5.1). Not flashed yet.
 - Fixed: FPGA 0x1539 (b4bd8b0): sample bytes read back near code 128, and across any code boundary where several
   bits change, could come back as a mix of two successive bytes on some ADC cores (0x1532..0x1538: the FPGA changed
   the byte on the clock edge right before the MCU read it, about 10 ns too late). The byte now changes at the start
