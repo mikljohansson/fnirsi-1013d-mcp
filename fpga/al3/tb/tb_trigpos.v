@@ -63,6 +63,8 @@ module tb;
   // Bookkeeping
 
   integer errors = 0, checks = 0;
+  real    dab;                                          // legacy: core B's sampling instant - core A's in a word (ns)
+  integer dab_sign = 0;
   integer seed;
   integer logf;
 
@@ -255,7 +257,7 @@ module tb;
   reg [7:0]  rbB [0:8191];
   reg [7:0]  smp [0:16383];
   reg [63:0] stt [0:16383];
-  integer    mem_bad, nd_bad, o_s, wcross, is_legacy;
+  integer    mem_bad, nd_bad, ord_bad, o_s, wcross, is_legacy;
   real       tns, fx, lat;
   reg        bus_ta_ok;
 
@@ -340,7 +342,7 @@ module tb;
   // where the step lies in the record
   task analyse(input integer c, input integer pre_w, input integer tot_w);
     begin
-      ci = -1; cw = -1; o_s = 0; wcross = 0; tns = 0; fx = 0; lat = 0;
+      ci = -1; cw = -1; o_s = 0; wcross = 0; tns = 0; fx = 0; lat = 0; ord_bad = 0;
       if (is_legacy) begin
         // core A crossing (the trigger compares core A only)
         for (i = 1; i < tot_w && cw < 0; i = i + 1)
@@ -361,8 +363,8 @@ module tb;
         for (i = 0; i < 2 * tot_w; i = i + 1)
           if (stt[i] < te) begin
             ci = ci + 1;
-            if (smp[i] >= 8'd128) mem_bad = mem_bad + 1;     // a sample before the edge reads HI
-          end else if (smp[i] < 8'd128) mem_bad = mem_bad + 1;
+            if (smp[i] >= 8'd128) ord_bad = ord_bad + 1;     // a sample before the edge reads HI
+          end else if (smp[i] < 8'd128) ord_bad = ord_bad + 1;
         if (ci == 0 || ci == 2 * tot_w) ci = -1;
         o_s = ci - 2 * pre_w;
         wcross = cw - pre_w;
@@ -395,9 +397,17 @@ module tb;
       $fdisplay(logf, "RUN case %0d K %0d fir %0d D %0d src %0d pre %0d tot %0d stb %0.0f stale %0d ta %0d wa_edge %0d trig %0d ci %0d off %0d wcross %0d tns %0.2f fx %0.3f lat %0.1f membad %0d ndbad %0d dab %0.2f",
                 c, c_k[c], c_fir[c], c_d[c], c_src[c], pre_w, tot_w, stb, stale_pre, ta, wa_edge, trig, ci, o_s, wcross,
                 tns, fx, lat, mem_bad, nd_bad, (wB[(start + pre_w) & 8191] * 1.0 - wA[(start + pre_w) & 8191]) / 1000.0);
+      // A/B order: core B's sample of a word lies half a word after (or before) core A's, the same way in every run
+      if (is_legacy) begin
+        dab = (wB[(start + pre_w) & 8191] * 1.0 - wA[(start + pre_w) & 8191]) / 1000.0;
+        if (dab_sign == 0) dab_sign = (dab > 0) ? 1 : -1;
+        check(((dab > 0) ? 1 : -1) == dab_sign && (dab * dab_sign > 0.5 * tw_ns - 0.5) && (dab * dab_sign < 0.5 * tw_ns + 0.5),
+              "legacy A/B order: core B half a word from core A, same sign in every run");
+      end
       check(done == 1 && trig == 1 && ci > 0, "capture triggered and the step is in the record");
       check(bus_ta_ok, "0x14 over the bus equals trigger_address");
       check(mem_bad == 0, "READ_RAW with the dummy strobe returns the record exactly");
+      check(ord_bad == 0, "legacy: every record sample taken before the edge reads LO, every later one HI");
       check(nd_bad == 0, "the readout without the dummy strobe returns the record one word late");
     end
   endtask
