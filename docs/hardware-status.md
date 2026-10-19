@@ -893,3 +893,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   fw-cal5: BRAM dob and o_mcu_data on the unconstrained i_mcu_clk). The wizard parks its zero at exactly 128, the worst code. fpga-gen8
   redirected: register the output byte and constrain the MCU clock as the first change of 0x1539; fw-cal5: zero measured off-centre
   as a workaround for all bitstreams, CAL_PROBE kept as protocol 1.21.
+- 2026-10-19 18:50: fw 0.2.67 (fw-cal5 workaround: zero as two points +-12 codes; CAL_PROBE 0x0402 kept, protocol 1.21) merged,
+  pinned backups/fw-0.2.67_086b4738.bin, loaded; CAL_PROBE both all, probes off: still NOISE on CH1 ranges 1 and 3 (core A rms 3.7-3.8,
+  [118..159]) and CH2 ranges 0, 2, 4 (core B rms 3.3-4.6, [115..159]); the other lanes clean (0.5-1.4). So the bit mixing also hits
+  the means near 116 and 140 (0x77/0x78, 0x8F/0x90 boundaries): no firmware workaround; the wizard waits for fpga-gen8's readout
+  fix (0x1539), which 0.3.0 ships as the recommended bitstream. fw 0.2.68 (polish batch 2: RUN/STOP action button following host
+  captures, spanner icon, sine with axes, snap through the manual path, one brightness value, wizard Step M of N, Calibration tab
+  button row, eight-row main menu with the Bode row) merged debd123, pinned backups/fw-0.2.68_8568021d.bin, loaded 18:52.
+  Owner: the mode is named "Frequency response" (ux-bode informed; the implementation batch renames the row).
