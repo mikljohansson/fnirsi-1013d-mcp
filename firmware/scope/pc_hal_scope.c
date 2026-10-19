@@ -1567,6 +1567,7 @@ int pc_glue_bode_pass(void)        { return bode_view_pass(); }
 void pc_glue_gen_bode_draw(void)   { bode_gen_row_draw(); }
 int pc_glue_gen_bode_hit(void)     { return bode_gen_row_hit(ytouch); }
 uint16 pc_glue_bode_setting_word(int i) { return bode_view_setting_word(i); }
+void pc_glue_view_opening(void)    { if(bode_view_active()) bode_view_close(); }
 
 //fw 0.2.66 (pc_bode.c): the running bitstream's capabilities, the ring size, a host capture in flight, and the ring
 //taken by a Bode capture (the PC's last capture is gone)

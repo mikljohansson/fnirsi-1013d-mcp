@@ -80,6 +80,7 @@ int    pc_glue_bode_pass(void);                  //scope_acquire_trace_data: 1 =
 void   pc_glue_gen_bode_draw(void);              //generator menu: draw its fourth row, "Bode plot"
 int    pc_glue_gen_bode_hit(void);               //generator menu: a tap on that row (ytouch): 1 = taken, close the menu
 uint16 pc_glue_bode_setting_word(int i);         //settings sector words 220, 221 (scope_save_config_data)
+void   pc_glue_view_opening(void);               //the picture / waveform viewer is about to open: the Bode plot ends
 
 #define PC_BUSY_POLL()          pc_glue_poll_busy()
 #define PC_TIMER_TICK()         pc_glue_poll_isr()
@@ -108,6 +109,7 @@ uint16 pc_glue_bode_setting_word(int i);         //settings sector words 220, 22
 #define PC_BODE_PASS()          do { if(pc_glue_bode_pass()) return; } while(0)
 #define PC_GEN_BODE_DRAW()      pc_glue_gen_bode_draw()
 #define PC_GEN_BODE_HIT()       pc_glue_gen_bode_hit()
+#define PC_VIEW_OPENING()       pc_glue_view_opening()
 
 //fw 0.2.58 (0x1536 sequencer, pc_seq_hw.h): fpga_do_conversion writes the geometry and the sequencer registers before
 //the sampling reset; the software average is skipped while the traces hold a hardware average

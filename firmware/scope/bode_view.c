@@ -231,6 +231,7 @@ void bode_view_close(void)
 
   bode_stop(bode_engine(), 1);
   bv.active = 0;
+  display_set_screen_buffer(ui_diag_scope_buffer());
 
   //Channels (range, offset, coupling, enable), the display V/div (software zoom), the time base, the trigger source,
   //the generator, RUN / STOP
@@ -934,7 +935,8 @@ int bode_view_display(void)
 {
   DISPLAYDATA save;
 
-  if(!bv.active)
+  //A viewer draws its own traces (the view closes when one opens; this is the guard)
+  if(!bv.active || scopesettings.waveviewmode)
     return 0;
 
   save = displaydata;
@@ -945,7 +947,7 @@ int bode_view_display(void)
 
 int bode_view_pass(void)
 {
-  if(!bv.active)
+  if(!bv.active || scopesettings.waveviewmode)
     return 0;
 
   //While sweeping at most every REDRAW_MS; a point, the state or a setting changed: now; idle: once a second

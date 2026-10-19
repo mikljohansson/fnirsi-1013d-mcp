@@ -108,6 +108,9 @@ void scope_setup_main_screen(void)
 
 void scope_setup_view_screen(void)
 {
+  //fw 0.2.66: the Bode plot ends first, so the viewer saves (and later restores) the user's settings, not the sweep's
+  PC_VIEW_OPENING();
+
   //Switch to view mode so disallow saving of settings on power down
   viewactive = VIEW_ACTIVE;
 
