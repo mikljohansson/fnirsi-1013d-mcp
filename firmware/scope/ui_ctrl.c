@@ -8,11 +8,12 @@
 int ui_p1_shown(int slot, int spectrum)
 {
   //fw 0.2.65: MEASURES opens the spectrum's own list there; the cursor slots stay empty
-  if(spectrum && ((slot == UI_P1_TCURSOR) || (slot == UI_P1_VCURSOR)))
+  if((spectrum == 1) && ((slot == UI_P1_TCURSOR) || (slot == UI_P1_VCURSOR)))
     return 0;
 
-  //fw 0.2.66: the Bode plot (spectrum = 2) has no measurement list either: its cards are fixed
-  if((spectrum == 2) && (slot == UI_P1_MEASURES))
+  //fw 0.2.69: Frequency response (spectrum = 2): T CURSOR shows the frequency cursors C1 and C2, MEASURES the mode's
+  //list; there is no level cursor (V CURSOR empty)
+  if((spectrum == 2) && (slot == UI_P1_VCURSOR))
     return 0;
 
   return (slot >= UI_P1_CTRL) && (slot <= UI_P1_SAVEWAVE);

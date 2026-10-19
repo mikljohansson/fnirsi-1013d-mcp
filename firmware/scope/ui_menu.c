@@ -8,7 +8,7 @@ const ui_mm_label ui_mm_labels[UI_MM_ROWS] =
 {
   { "Scope",       ""          },
   { "Spectrum",    "analyser"  },
-  { "Bode plot",   ""          },
+  { "Frequency",   "response"  },
   { "Saved",       "pictures"  },
   { "Saved",       "waveforms" },
   { "Settings",    ""          },
@@ -59,6 +59,7 @@ int ui_mm_choose(int row, int spectrum_on, int roll_on, int phosphor_wanted, ui_
     a->bode      = 1;
     a->phosphor  = 0;
     a->roll_off  = roll_on ? 1 : 0;
+    a->warn_roll = roll_on ? 1 : 0;           //fw 0.2.69: "Roll off for the frequency response"
     return 1;
   }
 

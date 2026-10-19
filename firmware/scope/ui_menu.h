@@ -3,7 +3,7 @@
 // choosing a mode row does. Pure C, no globals, host-buildable (host_tests/test_ui.c). menu.c draws the rows from the
 // table, statemachine.c hit-tests with it, the glue (pc_hal_scope.c) carries out ui_mm_choose's actions.
 //
-// Rows, top to bottom: modes first (Scope, Spectrum analyser, Bode plot; fw 0.2.68, owner: Bode left the generator
+// Rows, top to bottom: modes first (Scope, Spectrum analyser, Frequency response; fw 0.2.68, owner: Bode left the generator
 // menu), utilities below, the row that takes the scope off-line last. Every row is always shown (the Spectrum and Bode
 // rows also in roll mode; Bode grey and inert where the bitstream lacks the filter and DDS); no current-mode marker.
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -58,7 +58,7 @@ typedef struct
   uint8 bode;                 //1: the Bode plot on, 0: off
   uint8 phosphor;             //1: the phosphor view on, 0: off
   uint8 roll_off;             //1: switch Roll off first
-  uint8 warn_roll;            //1: show "Roll off for the spectrum" once
+  uint8 warn_roll;            //1: show the roll note once (the spectrum's, or the frequency response's)
 } ui_mm_action;
 
 //Returns 0 for a row that is not a mode row (nothing to do here)

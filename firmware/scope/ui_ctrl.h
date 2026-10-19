@@ -26,7 +26,7 @@
 #define UI_P1_SAVEPIC         6
 #define UI_P1_SAVEWAVE        7
 
-int ui_p1_shown(int slot, int spectrum);     //spectrum: 0 Scope, 1 Spectrum, 2 Bode plot (fw 0.2.66)
+int ui_p1_shown(int slot, int spectrum);     //spectrum: 0 Scope, 1 Spectrum, 2 Frequency response (fw 0.2.66)
 
 //CTRL page (page two), the same order in every mode: Display, the mode's analysis control (Trace style in Scope,
 //Analyse in Spectrum), Grid, the V+ / CH / V- steppers of both channels, 50 % TRIG (Scope only; the slot stays empty in
