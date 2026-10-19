@@ -77,7 +77,14 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   sets the dBV or dBA unit and which channel Auto analyses, then Scale and Ref level, folded in from the former Axis
   button so both CTRL pages share one geometry **(owner)**); Grid; the CH1 and CH2 V/div steppers; 50 % TRIG. The spectrum strip goes away; Span and Start keep their gestures. The waterfall's and density's
   colour legend is drawn at the top-right of the plot as a readout; the waterfall's time span and the phosphor's wfm/s
-  are cards. The record-position slider is hidden in Spectrum (it shows nothing useful there). Fold-outs open to the
+  are cards. **Spectrum slider (owner, 2026-10-19 19:40)**: the Scope's slider row stays under the plot in Spectrum
+  too, with the same construction and the same drag as the Scope (fw 0.2.64: the window follows the finger). It shows
+  the shown span as a window over 0..fs/2 at the current sample rate: the left edge at start / (fs/2), the width
+  span / (fs/2) of the track. Dragging pans the centre and keeps the span, the same pan as dragging the plot. At full
+  span the window fills the track and there is nothing to pan. To make room the plot becomes 8 divisions of 44 px
+  (y 50..402), the frequency labels sit at y 406, and the cards stay at the Scope's y 426 between plot and slider.
+  The Frequency response mode gets the same row for Start..Stop (`docs/plans/bode-ui.md` section 2). This replaces
+  "the record-position slider is hidden in Spectrum". Fold-outs open to the
   left of the bar over the plot's right edge and close on a second tap of their button, a tap outside, or another
   CTRL button; the waveform viewer's CTRL page stays as today. Display, Grid, persistence and palette are saved with the
   settings and restored at power-on (Grid gets a spare settings word). The one-line header goes away too **(owner)**: its
