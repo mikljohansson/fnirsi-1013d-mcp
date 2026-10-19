@@ -14,7 +14,10 @@
 #   6. tb_seg.v against our 0x1535 (REF1535_REV, default e2aec2e): sequencer off equivalence, then
 #      segment and averaging runs (0x1536), logged and checked by seg_model.py. SEG_P1 (default 12)
 #      sets the number of random equivalence captures of its first phase.
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg runs one testbench.
+#   7. tb_trigpos.v (0x1537): trigger position determinism with an AD9288 pipeline model, the firmware's
+#      byte sequences, shuffled cases (K = 0..3, FIR, dividers 0..399, CH1 / EXT) and random phases, then
+#      the configuration race at slow legacy rates. TRIGPOS_RUNS (default 6) runs per case.
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -74,6 +77,11 @@ if [ "$ONLY" = all ] || [ "$ONLY" = seg ]; then
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_seg.log" || RC=1
   python3 -I "$HERE/seg_model.py" check "$WORK/seg.log" | tee "$WORK/model_seg.log"
   grep -q -- '-> PASS' "$WORK/model_seg.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = trigpos ]; then
+  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_trigpos.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_trigpos.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_trigpos.vvp" +seed=$SEED +runs=${TRIGPOS_RUNS:-6} +logfile="$WORK/trigpos.log" | tee "$WORK/sim_trigpos.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_trigpos.log" || RC=1
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
 [ $RC -eq 0 ] && echo "ALL PASS (seed $SEED)" || echo "SOMETHING FAILED (seed $SEED)"
