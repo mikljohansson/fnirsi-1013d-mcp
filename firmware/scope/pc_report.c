@@ -318,11 +318,13 @@ static void sec_identity(pc_text *t, pc_session *s, const uint8_t *sd, int sd_ok
     pc_text_str(t, "Full-rate capture check: ");
     pc_text_str(t, mode[(h[88] < 3) ? h[88] : 0]);
 
-    if(h[88] == EH_MODE_FLAG)
+    //fw 0.2.70: an unknown convention at boot moves the check to the record data (and leaves the core order unverified)
+    if((h[88] == EH_MODE_FLAG) || (h[90] & PC_ENCF_CONV_BAD))
     {
       pc_text_str(t, ", 0x33 at boot ");
       pc_text_hex(t, h[91], 2);
-      pc_text_str(t, (h[90] & PC_ENCF_CONV_BAD) ? " (UNKNOWN encode convention)" : " (convention 1, B first)");
+      pc_text_str(t, (h[90] & PC_ENCF_CONV_BAD) ? " (UNKNOWN encode convention: core order unverified)" :
+                                                   " (convention 1, B first)");
       pc_text_str(t, ", last ");
 
       if(h[90] & PC_ENCF_READ)

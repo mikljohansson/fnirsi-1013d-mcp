@@ -664,6 +664,8 @@ class Device:
             c |= P.Caps.SEQ
         if self.spec.enc_check:
             c |= P.Caps.ENC_CHECK
+            if not self.cfg.legacy:  # fw 0.2.70 (1.22): read 0x33 at boot reported convention 1, the order is known
+                c &= ~P.Caps.INTERLEAVE_UNVERIFIED
         return int(c) & ~self.cfg.caps_clear
 
     @property

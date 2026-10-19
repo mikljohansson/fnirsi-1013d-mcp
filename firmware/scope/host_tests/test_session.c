@@ -2812,6 +2812,37 @@ static void test_enc_check(void)
   r = req(PC_CMD_GET_STATUS, 0, 0);
   T_EQ(pc_get_u16(r.p + 44), 0x5F);
 
+  //fw 0.2.70, core order: verified (caps bit 12 clear) only where the bitstream reported convention 1 at boot
+  setup(0x1538);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_INTERLEAVE_UNVERIFIED, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_READ_LAG_UNVERIFIED, PC_CAP_READ_LAG_UNVERIFIED);   //T3 still open
+  setup(0x1539);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_INTERLEAVE_UNVERIFIED, 0);
+  setup(0x1537);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_INTERLEAVE_UNVERIFIED, PC_CAP_INTERLEAVE_UNVERIFIED);
+  setup(0x1535);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_INTERLEAVE_UNVERIFIED, PC_CAP_INTERLEAVE_UNVERIFIED);
+  //0x1538 that read another convention at boot (enc_heal_hw.c: flag, data check): unverified, captures judged by data
+  mock_reset(0x1538);
+  mock.enc.boot33 = 0xF2; mock.enc.flags = PC_ENCF_CONV_BAD; mock.enc.mode = EH_MODE_DATA;
+  pc_session_init(&S);
+  pc_poll(&S, PC_CTX_MAIN);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_INTERLEAVE_UNVERIFIED, PC_CAP_INTERLEAVE_UNVERIFIED);
+  mock.polls_to_trigger = 1; mock.polls_to_done = 1;
+  enc_divider(0);
+  r = enc_capture();
+  T_EQ(r.p[1], PC_ACQ_DONE); T_EQ(mock.enc_status_reads, 0); T_EQ(mock.enc_last_why, EH_WHY_DATA);
+  //...and the session never decides from the version alone: a 0x1538 whose boot byte is bad without the flag
+  mock_reset(0x1538);
+  mock.enc.boot33 = 0xF2;
+  pc_session_init(&S);
+  T_EQ(S.var.caps & PC_CAP_INTERLEAVE_UNVERIFIED, PC_CAP_INTERLEAVE_UNVERIFIED);
+
   //0x1538, gated rate (divider 19): nothing checked, 0x33 never read
   setup(0x1538);
   mock.polls_to_trigger = 1; mock.polls_to_done = 1;

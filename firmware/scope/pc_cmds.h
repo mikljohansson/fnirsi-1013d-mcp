@@ -348,6 +348,7 @@ int      pc_sd_info_body(pc_session *s, int verify, int ident, uint8_t *resp, ui
 
 //Exposed for tests
 void     pc_variant_from_version(uint16_t version, pc_variant *v);
+void     pc_variant_core_order(pc_variant *v);          //clears INTERLEAVE_UNVERIFIED when 0x33 confirmed the order at boot
 uint32_t pc_gen_phase_from_mhz(uint64_t freq_mhz);
 uint64_t pc_gen_mhz_from_phase(uint32_t phase_inc);
 uint32_t pc_gen_thr_from_bp(uint32_t duty_bp);

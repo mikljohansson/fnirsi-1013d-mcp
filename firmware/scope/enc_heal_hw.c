@@ -119,7 +119,11 @@ void fpga_encode_init(uint16_t fpga_version)
 
     if(!eh_conv_ok(eh_st.boot33))
     {
+      //fw 0.2.70: nothing assumes then. The core order stays unverified (caps bit 12, pc_variant_core_order) and the
+      //full-rate captures are judged by their data (order-independent) instead of by a self-check whose convention
+      //the firmware does not know
       eh_st.flags |= PC_ENCF_CONV_BAD;
+      eh_st.mode   = EH_MODE_DATA;
       pc_usb_log_fpga_heal(eh_event_a(EH_WHY_CONV, 0, 0), eh_event_b(fpga_trace_who, eh_st.boot33));
     }
   }

@@ -196,6 +196,25 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
 #endif
 }
 
+//Core order within a word (P-7.3, rows 58 and 62): the firmware's fixed convention (PC_INTERLEAVE_ORDER 0, core B the
+//earlier sample: READ_RAW / READ_TRACE interleave, acal_track's A - B model, the 0x53 swap bit clear) is verified only on
+//a bitstream that reports it: 0x1538+ whose read 0x33 at boot had bits 3:2 = 01 (enc_heal_hw.c, before the session
+//starts). Everywhere else caps bit 12 INTERLEAVE_UNVERIFIED stays set: 0x1532..0x1536 can flip the order on a rate write
+//(their full-rate captures are checked by the order-independent data residual), 0x1537 has chip 1 the other way round
+//(GET_HEALTH 90 bit 3), a 0x1538+ with another convention is flagged (90 bit 1) and checked by its data.
+void pc_variant_core_order(pc_variant *v)
+{
+  pc_hw_enc e;
+
+  if(!(v->caps & PC_CAP_ENC_CHECK))
+    return;
+
+  pc_hal_enc_state(&e);
+
+  if((e.mode == EH_MODE_FLAG) && eh_conv_ok(e.boot33) && !(e.flags & PC_ENCF_CONV_BAD))
+    v->caps &= ~PC_CAP_INTERLEAVE_UNVERIFIED;
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // Shared control
 
@@ -3453,6 +3472,7 @@ void pc_session_init(pc_session *s)
   s->tx = pc_hal_tx_buffer(&s->tx_cap);
   s->sd_stage = pc_hal_sd_stage(&s->sd_stage_cap);
   pc_variant_from_version(pc_hal_fpga_version(), &s->var);
+  pc_variant_core_order(&s->var);
   s->acq_state    = PC_ACQ_IDLE;
   s->last_main_ms = pc_hal_ms();
   s->init_ms      = s->last_main_ms;

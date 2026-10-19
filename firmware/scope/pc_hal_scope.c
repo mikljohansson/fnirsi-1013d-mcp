@@ -2009,11 +2009,11 @@ void pc_glue_init(void)
     v[9] = pc_fault_info[1];
     pc_diag_boot(pc_restart_info[0] ? v : 0);
   }
+  //fw 0.2.62: the full-rate capture check of this bitstream (enc_heal.h); 0x1538+: the 0x33 encode convention, which
+  //the session reads for its core-order cap (fw 0.2.70, pc_variant_core_order), so first
+  fpga_encode_init(pc_fpga_word);
   pc_session_init(&pc_sess);
   pc_seq_hw_init((pc_sess.var.caps & PC_CAP_SEQ) != 0);
-
-  //fw 0.2.62: the full-rate capture check of this bitstream (enc_heal.h); 0x1538+: the 0x33 encode convention
-  fpga_encode_init(pc_fpga_word);
   pc_ready = 1;
   pc_ui_fix_settings();
 
