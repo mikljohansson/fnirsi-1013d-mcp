@@ -39,6 +39,18 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   switch is right too. Suspects: the initial SET_CHANNEL sequence for range 0.1 (relay / offset / trace position not applied, or the
   software-zoom boundary), or the host picking the wrong range index. mcp-gen5 to find the sequence difference; coordinator
   reproduces on the device with READ_RAW at 0.1 V/div. Also check the scope screen at 100 mV/div.
+- **UI polish batch 1** (owner walk-through of fw 0.2.59, 10-19 15:30-, items as reported; dispatch one Opus agent when the
+  walk-through ends): (a) main menu Settings icon = a cogwheel; (b) CTRL Grid: the whole button is the toggle (grey off, green on),
+  no slide switch inside; (c) X-Y icon = a tilted figure 8, not an oval; (d) Trace style disabled (grey) in X-Y where it does not
+  apply; (e) explain or rename "Pro" trace style (looks like Linear); (f) ACQ menu Memory column: "memory pass .." text collides
+  with "Memory" and the first depth chip; (g) Settings fold-out brightness sliders sometimes close the menu mid-drag (touch
+  leaving the slider box counts as outside?); (h) Settings screen: drop the "Channel, trigger, time base ..." header hedge and the
+  "Asks first. Keeps the calibration ..." hint; Restore dialog body uses the dialog width (no needless line breaks); (i) review
+  whether "File message timeout" deserves a fold-out slot (owner question; it is 1.00o5's Notification confirmation = the file-saved
+  message waits for a tap or times out); (j) Diagnostics uses the Settings screen's header/tab design; battery indicator drawn
+  over the Diagnostics page (not over Settings); (k) Calibration tab: "DC shift trim off" becomes the button's state, drop the
+  "Needs a DC supply up to 15V" hedge; (l) wizard: "Step N of 6" moves to the top right of the title line; (m) Waterfall / Density
+  show one channel (by design since 0.2.32; say so in the Display fold-out or allow CH1+CH2?).
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
