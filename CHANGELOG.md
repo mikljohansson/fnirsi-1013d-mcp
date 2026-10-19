@@ -31,6 +31,37 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.53 - 2026-10-19 (protocol 1.15, unchanged; number provisional, the coordinator renumbers at the merge)
+
+The second step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 2; rules in `docs/ui-guidelines.md`;
+README section 5 "Screens: CTRL page, fold-outs, chips, warnings, spectrum cards").
+
+- Changed: the right bar's second page is the CTRL page in both modes: Display, Trace style (Scope) or Analyse
+  (Spectrum), Grid, compact V+ / CH1 / V- and V+ / CH2 / V- steppers with 45 px of touch per half, 50 % TRIG (Scope;
+  the slot is empty in Spectrum). Buttons that hold a value show it and open a fold-out beside the bar; a tap outside
+  closes it. The waveform viewer's page keeps 1.00o5's V+ / V- and Show grid (a41ca39; geometry and texts host-tested
+  in test_ui, 93f1b68).
+- Changed: Display fold-outs with icons. Scope: Normal or X-Y, and a Phosphor switch with Persistence, Palette, Clear
+  and the wfm/s readout under it. Phosphor combines with X-Y again (lost in 0.2.51) and is saved; it pauses in roll
+  mode ("Not in roll mode") and comes back after. Spectrum: Spectrum, Waterfall, Density, saved (a41ca39).
+- Changed: the spectrum's parameters are in the Analyse fold-out (Analyse CH1 / CH2 / both, FFT length, Window,
+  Average, Scale, Ref level with - / +, Reset); Scale and Ref level sit below a line in the same fold-out, so both
+  CTRL pages keep one geometry (a41ca39).
+- Added: Grid on the CTRL page in every mode (a switch, saved); the record-position slider always shows (a41ca39).
+- Removed: the phosphor strip, the spectrum strip and the spectrum header line. The spectrum's readouts are cards in
+  the bottom row built like the scope's: Peak and Level per channel, RBW, and the waterfall's time span; the filter
+  tag is no longer shown (a41ca39).
+- Removed: Trace style and the 0.2.51 Display row from the acquisition menu, which holds acquisition only again
+  (a41ca39).
+- Changed: in the spectrum view T CURSOR, V CURSOR and MEASURES are empty slots; the right bar follows the mode
+  (a41ca39).
+- Changed: the warning line (overrange, no trigger, no channel, X-Y needs both channels) shows at the top middle of
+  the plot in Normal and X-Y too, not only with Phosphor (a41ca39).
+- Changed: the top bar chips CH1, CH2, ACQ and the trigger share one construction: a grey box with the coloured block
+  over its left end, no notch (aaa0613).
+- Settings sector: word 210 bit 3 holds the Phosphor switch, word 211 (0xC700) Grid and the spectrum's Display
+  variant.
+
 #### 0.2.51 - 2026-10-19 (protocol 1.15, unchanged)
 
 The first step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 1 plus the measurement cards; rules in
