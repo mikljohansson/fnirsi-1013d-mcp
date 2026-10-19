@@ -23,8 +23,11 @@
 #include "ui_menu.h"
 #include "ui_settings.h"
 #include "ui_ctrl.h"
+#include "ui_meas.h"
 #include "ctrl_page.h"
 #include "touch_pick.h"
+#include "tb_view.h"
+#include "acq_view.h"
 #include "ui_diag_view.h"
 #include "test.h"
 
@@ -63,8 +66,8 @@ void touch_handler(void)
     //When movement of object initiated previous settings need to be saved for updating
     if(touchstate)
     {
-      //Check if the trigger point position can be moved
-      if(touchstate & TOUCH_STATE_MOVE_TRIGGER_POINT)
+      //Check if the trigger point position can be moved (fw 0.2.64: also by the record slider)
+      if((touchstate & TOUCH_STATE_MOVE_TRIGGER_POINT) || ((touchstate & TOUCH_STATE_MASK) == TOUCH_STATE_MOVE_RECORD))
       {
         //Save the current position for it
         previous_trigger_point_position = scopesettings.triggerhorizontalposition;
@@ -235,6 +238,13 @@ void touch_handler(void)
         change_trigger_level_offset(touch_drag_delta((int32)previousytouch - (int32)ytouch));
         break;
 
+      //fw 0.2.64: the record slider's window follows the finger (dragging right shows later samples, the trace moves
+      //left), limited to the record
+      case TOUCH_STATE_MOVE_RECORD:
+        scopesettings.triggerhorizontalposition = acq_view_slider_pos(previous_trigger_point_position,
+                                                                      touch_drag_delta((int32)xtouch - (int32)previousxtouch));
+        break;
+
       case TOUCH_STATE_MOVE_TIME_CURSOR_LEFT:
         move_left_time_cursor_position();
         //for lock cursors
@@ -324,13 +334,133 @@ static uint8 scan_left_handle(int32 x, int32 y)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
+//fw 0.2.64 (touch batch 2): the distance from (x, y) to a channel's drawn trace, -1 when it has none there (phosphor view:
+//the map replaces the polyline, so only the zero line counts)
+
+static int32 scan_trace_distance(PCHANNELSETTINGS c, int32 x, int32 y)
+{
+  if(!c->enable || pc_glue_phosphor_on() || !c->tracepoints || (c->noftracepoints == 0))
+    return -1;
+
+  return trace_distance((const TOUCH_XY *)c->tracepoints, (c->noftracepoints <= TRACE_POINTS_MAX) ? c->noftracepoints : TRACE_POINTS_MAX, x, y);
+}
+
+//The object under the touch-down point in the normal display, as a TOUCH_STATE_MOVE_* (0 = none: a drag pans the trigger
+//point). *handle is set for the handles, which never take a tap: the left pointers, the record slider, the trigger level.
+//Order: the left handle column; the slider row; the trigger level pointer; then the nearest of the channels (drawn trace
+//or zero line, TRACE_GRAB_RADIUS) and the cursors (30 px; a tie to the cursor, drawn on top); last the slider's
+//extended hit area (y TBV_SLIDER_HIT_Y..449) when nothing else is near.
+
+static uint8 scan_plot_pick(int32 x, int32 y, uint8 *handle)
+{
+  uint8 pick = 0;
+  int32 best = 0x7FFFFFFF, d, dl, dr;
+  int   slider_ok = !scopesettings.long_mode && (x >= TBV_SLIDER_FRAME_X) && (x < TBV_SLIDER_FRAME_X + TBV_SLIDER_FRAME_W);
+
+  *handle = 1;
+
+  if((pick = scan_left_handle(x, y)) != 0)
+    return pick;
+
+  if(slider_ok && (y >= TBV_SLIDER_FRAME_Y - 2))
+    return TOUCH_STATE_MOVE_RECORD;
+
+  //Trigger level pointer at the right edge, only while it is drawn (scope_draw_pointers)
+  if((x > 660) && (!scopesettings.long_mode || scopesettings.triggermode))
+  {
+    d = y - (448 - (int32)scopesettings.triggerverticalposition);
+
+    if((d > -30) && (d < 30))
+      return TOUCH_STATE_MOVE_TRIGGER_LEVEL;
+  }
+
+  *handle = 0;
+
+  //Channels: drawn trace or zero line
+  if((x >= HANDLE_W) && (x < 686))
+  {
+    uint32 ch = pick_channel_near(scopesettings.channel1.enable, scopesettings.channel1.traceposition,
+                                  scan_trace_distance(&scopesettings.channel1, x, y),
+                                  scopesettings.channel2.enable, scopesettings.channel2.traceposition,
+                                  scan_trace_distance(&scopesettings.channel2, x, y), y);
+
+    if(ch)
+    {
+      PCHANNELSETTINGS c = (ch == 1) ? &scopesettings.channel1 : &scopesettings.channel2;
+      int32 t = scan_trace_distance(c, x, y);
+
+      d = y - (448 - (int32)c->traceposition);
+      if(d < 0)
+        d = -d;
+      if((t >= 0) && (t < d))
+        d = t;
+
+      best = d;
+      pick = (ch == 1) ? TOUCH_STATE_MOVE_CHANNEL_1 : TOUCH_STATE_MOVE_CHANNEL_2;
+    }
+  }
+
+  //Time cursors: the left one when strictly nearer (1.00o5)
+  if(scopesettings.timecursorsenable)
+  {
+    dl = x - (int32)scopesettings.timecursor1position;
+    dr = x - (int32)scopesettings.timecursor2position;
+    if(dl < 0) dl = -dl;
+    if(dr < 0) dr = -dr;
+
+    if((dl < 30) && (dl < dr) && (dl <= best))
+    {
+      best = dl;
+      pick = TOUCH_STATE_MOVE_TIME_CURSOR_LEFT;
+    }
+    else if((dr < 30) && (dr <= best))
+    {
+      best = dr;
+      pick = TOUCH_STATE_MOVE_TIME_CURSOR_RIGHT;
+    }
+  }
+
+  //Volt cursors: the top one when strictly nearer (1.00o5)
+  if(scopesettings.voltcursorsenable && (x > 60))
+  {
+    dl = y - (int32)scopesettings.voltcursor1position;
+    dr = y - (int32)scopesettings.voltcursor2position;
+    if(dl < 0) dl = -dl;
+    if(dr < 0) dr = -dr;
+
+    if((dl < 30) && (dl < dr) && (dl <= best))
+    {
+      best = dl;
+      pick = TOUCH_STATE_MOVE_VOLT_CURSOR_TOP;
+    }
+    else if((dr < 30) && (dr <= best))
+    {
+      best = dr;
+      pick = TOUCH_STATE_MOVE_VOLT_CURSOR_BOTTOM;
+    }
+  }
+
+  if(pick)
+    return pick;
+
+  //The slider's hit area is 44 px tall: its upper part, when nothing else is near
+  if(slider_ok && (y >= TBV_SLIDER_HIT_Y))
+  {
+    *handle = 1;
+    return TOUCH_STATE_MOVE_RECORD;
+  }
+
+  return 0;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
 //Top menu bar ranges from 0,0 to 730,46        //44
 //Right menu bar ranges from 730,0 to 800,480
 
 void scan_for_touch(void)
 {
-  uint32 offset;
-  uint8  handle;
+  uint8  handle = 0, pick;
+  uint32 moved;
 
   //Read the touch panel status
   tp_i2c_read_status();
@@ -702,10 +832,13 @@ void scan_for_touch(void)
     previousxtouch = xtouch;
     previousytouch = ytouch;
 
-    //fw 0.2.54: a pointer at the left edge under the touch-down point (picked here, before the finger moves)
-    handle = (scopesettings.xymodedisplay == 0) ? scan_left_handle(previousxtouch, previousytouch) : 0;
+    //fw 0.2.64: the object under the touch-down point, picked before the finger moves (handles, slider, trace, level,
+    //cursors; scan_plot_pick)
+    pick = (scopesettings.xymodedisplay == 0) ? scan_plot_pick(previousxtouch, previousytouch, &handle) : 0;
+    moved = 0;
 
-    //Wait for touch to end and detect movement within the trace display section
+    //Wait for touch to end and detect movement within the trace display section (still a blocking loop: touch-review
+    //batch 3 replaces it)
     while(havetouch)
     {
       //Scan the touch panel for touch
@@ -714,40 +847,15 @@ void scan_for_touch(void)
       //Check if there still is touch
       if(havetouch)
       {
-        //Calculate the absolute x displacement
-        if(xtouch < previousxtouch)
-        {
-          xtouchdisplacement = previousxtouch - xtouch;
-        }
-        else
-        {
-          xtouchdisplacement = xtouch - previousxtouch;
-        }
+        xtouchdisplacement = (xtouch < previousxtouch) ? previousxtouch - xtouch : xtouch - previousxtouch;
+        ytouchdisplacement = (ytouch < previousytouch) ? previousytouch - ytouch : ytouch - previousytouch;
+        maxdisplacement    = (xtouchdisplacement > ytouchdisplacement) ? xtouchdisplacement : ytouchdisplacement;
 
-        //Calculate the absolute y displacement
-        if(ytouch < previousytouch)
-        {
-          ytouchdisplacement = previousytouch - ytouch;
-        }
-        else
-        {
-          ytouchdisplacement = ytouch - previousytouch;
-        }
+        if(maxdisplacement > moved)
+          moved = maxdisplacement;
 
-        //Check which of the two is the biggest
-        if(xtouchdisplacement > ytouchdisplacement)
-        {
-          //Use the x displacement
-          maxdisplacement = xtouchdisplacement;
-        }
-        else
-        {
-          //Use the y displacement
-          maxdisplacement = ytouchdisplacement;
-        }
-
-        //Check if moved more than 2 pixels
-        if(maxdisplacement > 2)
+        //fw 0.2.64: a dead band of TOUCH_DEAD_BAND px (was 2) so finger jitter on a tap does not become a drag
+        if(maxdisplacement > TOUCH_DEAD_BAND)
         {
           //Signal a movement of touch
           touchstate = TOUCH_STATE_HAVE_DISPLACEMENT;
@@ -761,12 +869,10 @@ void scan_for_touch(void)
     //Check if no big displacement detected. If there was, touchstate will not be zero
     if(touchstate == 0)
     {
-      //See if it was short touch for time base change. Needs to be less then 200mS for that
-      //fw 0.2.54: a tap on a pointer does nothing
-      if((handle == 0) && ((timer0_get_ticks() - previoustimerticks) < 200))
+      //A short touch is a tap on the plot's bands. Never on a handle (pointers, slider, trigger level); on a trace or a
+      //cursor only when the finger did not move (fw 0.2.64: a brisk stroke on a trace changed the time base)
+      if(((timer0_get_ticks() - previoustimerticks) < TOUCH_TAP_MS) && !handle && (!pick || (moved <= TOUCH_MOVED)))
       {
-        //Change the time base setting
-        //scope_adjust_timebase();
         scope_adjust_timebase_and_voltdiv();
       }
 
@@ -774,212 +880,13 @@ void scan_for_touch(void)
       return;
     }
 
-    //fw 0.2.54: a drag that started on a pointer moves it (vertical only, the trigger point stays)
-    if(handle)
-    {
-      touchstate = handle;
-      return;
-    }
-
-    //Check if there is displacement that needs to be processed for trace and cursor movement
-    //fw 0.2.54: every pick below is made at the touch-down point (previousxtouch, previousytouch), not after the move
-    if(touchstate)
-    {
-      //scope_test_TP();
-      //Check if display in normal mode
-      if(scopesettings.xymodedisplay == 0)
-      {
-        //Calculate absolute distances for the active traces and cursors
-        
-        //-----Check on x higher 60 & below 660 to decide early on which trace to move
-        //Check on x higher 0 & below 660 to decide early on which trace to move
-        //if(((xtouch > 60)&&(xtouch < 310))||((xtouch > 410)&&(xtouch < 660)))
-       // if (((scopesettings.voltcursorsenable == 1) && ((xtouch > 60 && xtouch < 310) || (xtouch > 410 && xtouch < 660))) ||
-        //      (scopesettings.voltcursorsenable == 0 && (xtouch > 0 && xtouch < 660))) 
-              //(scopesettings.voltcursorsenable == 0 && (xtouch > 60 && xtouch < 660))) 
-      //fw 0.2.54: from the handle column's edge (x < HANDLE_W is the pointers'), the nearest switched-on zero line, a tie
-      //to CH2 (touch_pick.c); a channel drag no longer moves the trigger point. The refs are grabbed by their pointers only.
-      if (((scopesettings.voltcursorsenable == 1) && ((previousxtouch >= HANDLE_W && previousxtouch < 310) || (previousxtouch > 410 && previousxtouch < 660))) ||
-              (scopesettings.voltcursorsenable == 0 && (previousxtouch >= HANDLE_W && previousxtouch < 660)))
-        {
-          switch(pick_channel_line(scopesettings.channel1.enable, scopesettings.channel1.traceposition,
-                                   scopesettings.channel2.enable, scopesettings.channel2.traceposition, previousytouch))
-          {
-            case 1:
-              touchstate = TOUCH_STATE_MOVE_CHANNEL_1;
-              return;
-
-            case 2:
-              touchstate = TOUCH_STATE_MOVE_CHANNEL_2;
-              return;
-          }
-        }
-
-        //This bit needs to be skipped for time base 200mS/div - 20mS/div
-        //Hardware trigger seems to be available only from 10mS/div - 10nS/div
-
-        //Check on x above 660 to decide early on move of trigger level offset
-        if(previousxtouch > 660)
-        {
-          //Need to make the trigger level offset in the same orientation as the touch
-          offset = 448 - scopesettings.triggerverticalposition;
-
-          //Check if touch point below the trace
-          if(previousytouch < offset)
-          {
-            //If so take the touch point of the offset for the distance
-            distance_trigger_level = offset - previousytouch;
-          }
-          else
-          {
-            //Otherwise take the offset of the touch point for the distance
-            distance_trigger_level =  previousytouch - offset;
-          }
-
-          //Check if close to trigger level pointer
-          if(distance_trigger_level < 30)
-          {
-            //Signal trigger level is being moved
-            touchstate = TOUCH_STATE_MOVE_TRIGGER_LEVEL;
-
-            //Go and handle it
-            return;
-          }
-        }
-
-        //Check if time cursor is enabled
-        if(scopesettings.timecursorsenable)
-        {
-          //Check if touch point left of the left cursor
-          if(previousxtouch < scopesettings.timecursor1position)
-          {
-            //If so take the touch point of the offset for the distance
-            distance_time_cursor_left = scopesettings.timecursor1position - previousxtouch;
-            //for lock move cursor
-            if(scopesettings.lockcursors) distance_time_cursor_right = scopesettings.timecursor2position - previousxtouch;
-          }
-          else
-          {
-            //Otherwise take the offset of the touch point for the distance
-            distance_time_cursor_left =  previousxtouch - scopesettings.timecursor1position;
-            //for lock move cursor
-            if(scopesettings.lockcursors) distance_time_cursor_right =  previousxtouch - scopesettings.timecursor2position;
-          }
-
-          //Check if touch point left of the right cursor
-          if(previousxtouch < scopesettings.timecursor2position)
-          {
-            //If so take the touch point of the offset for the distance
-            distance_time_cursor_right = scopesettings.timecursor2position - previousxtouch;
-          }
-          else
-          {
-            //Otherwise take the offset of the touch point for the distance
-            distance_time_cursor_right =  previousxtouch - scopesettings.timecursor2position;
-          }
-
-          //Check if touch closer to left cursor then right cursor
-          if((distance_time_cursor_left < 30) && (distance_time_cursor_left < distance_time_cursor_right))
-          {
-            //Signal left time cursor is being moved
-            touchstate = TOUCH_STATE_MOVE_TIME_CURSOR_LEFT;
-            
-            //Go and handle it
-            return;
-          }
-          //Not close to left cursor or closer to right cursor so check if close to right cursor
-          else if(distance_time_cursor_right < 30)
-          {
-            //Signal right time cursor is being moved
-            touchstate = TOUCH_STATE_MOVE_TIME_CURSOR_RIGHT;
-            
-            //Go and handle it
-            return;
-          }
-        }
-
-        //Check if volt cursor is enabled
-        if((scopesettings.voltcursorsenable)&&(previousxtouch > 60))
-        {
-          //Check if touch point under of the bottom cursor
-          //if(previousytouch < scopesettings.voltcursor2position)
-          if(previousytouch < scopesettings.voltcursor2position)
-          {
-            //If so take the touch point of the offset for the distance
-            distance_volt_cursor_bottom = scopesettings.voltcursor2position - previousytouch;
-            //for lock move cursor
-            if(scopesettings.lockcursors) distance_volt_cursor_top = scopesettings.voltcursor1position - previousytouch;
-          }
-          else
-          {
-            //Otherwise take the offset of the touch point for the distance
-            distance_volt_cursor_bottom =  previousytouch - scopesettings.voltcursor2position;
-            //for lock move cursor
-            if(scopesettings.lockcursors) distance_volt_cursor_top =  previousytouch - scopesettings.voltcursor1position;
-          }
-          
-          //Check if touch point under of the top cursor
-          if(previousytouch < scopesettings.voltcursor1position)
-          {
-            //If so take the touch point of the offset for the distance
-            distance_volt_cursor_top = scopesettings.voltcursor1position - previousytouch;
-            //for lock move cursor
-            //if(scopesettings.lockcursors) distance_volt_cursor_bottom = scopesettings.voltcursor2position - previousytouch;
-          }
-          else
-          {
-            //Otherwise take the offset of the touch point for the distance
-            distance_volt_cursor_top =  previousytouch - scopesettings.voltcursor1position;
-            //for lock move cursor
-            //if(scopesettings.lockcursors) distance_volt_cursor_bottom =  previousytouch - scopesettings.voltcursor2position;
-          }
-
-          //Check if touch closer to top cursor then bottom cursor
-          if((distance_volt_cursor_top < 30) && (distance_volt_cursor_top < distance_volt_cursor_bottom))
-          {
-            //Signal top volt cursor is being moved
-            touchstate = TOUCH_STATE_MOVE_VOLT_CURSOR_TOP;
-
-            //Go and handle it
-            return;
-          }
-          //Not close to top cursor or closer to bottom cursor so check if close to bottom cursor
-          else if(distance_volt_cursor_bottom < 30)//30
-          {
-            //Signal bottom volt cursor is being moved
-            touchstate = TOUCH_STATE_MOVE_VOLT_CURSOR_BOTTOM;
-
-            //Go and handle it
-            return;
-          }
-        }
-
-        //Down to here for the skip
-
-        //No other object selected so far then check again on the signal traces
-        //When channel 1 or channel2 or only x movement signal that the trigger point can also be moved.
-        touchstate = TOUCH_STATE_MOVE_TRIGGER_POINT;
-        /*
-        //Check if touch closer to channel 1 center then channel 2 center
-        if((distance_channel_1 < 30) && (distance_channel_1 < distance_channel_2))
-        {
-          //Signal channel 1 trace is being moved
-          touchstate |= TOUCH_STATE_MOVE_CHANNEL_1;
-        }
-        //Not close to channel 1 or closer to channel 2 so check if close to channel 2
-        else if(distance_channel_2 < 30)
-        {
-          //Signal channel 2 trace is being moved
-          touchstate |= TOUCH_STATE_MOVE_CHANNEL_2;
-        }
-        */
-      }
-      else
-      {
-        //Display in x-y mode, so signal this in touchstate
-        touchstate = TOUCH_STATE_X_Y_MODE;
-      }
-    }
+    //A drag moves what was picked at touch-down; X-Y moves both channels; nothing picked pans the trigger point
+    if(scopesettings.xymodedisplay)
+      touchstate = TOUCH_STATE_X_Y_MODE;
+    else if(pick)
+      touchstate = pick;
+    else
+      touchstate = TOUCH_STATE_MOVE_TRIGGER_POINT;
   }
 }
 
@@ -990,12 +897,33 @@ void scan_for_touch(void)
 void handle_main_menu_touch(void)
 {
   int   row;                            //fw 0.2.51: main menu row under the touch (ui_menu.h), -1 outside
-  
+  int   drag = 0;                       //fw 0.2.63: the brightness slider a touch started on (1 screen, 2 grid), 0 none
   //Stay in the menu as long as there is no touch outside the menu
   while(1)
   {
     //Scan the touch panel for touch
     tp_i2c_read_status();
+
+    //fw 0.2.63 (owner): a drag that starts on a brightness slider stays with it until the finger lifts. Before, every
+    //touch sample was hit-tested afresh, so a finger drifting off the slider's box mid-drag counted as a tap outside
+    //(the fold-out closed) or on a main-menu or fold-out row
+    if(!havetouch)
+      drag = 0;
+    else if(drag == 1)
+    {
+      if(scope_move_slider(395, 46, &scopesettings.screenbrightness))
+      {
+        scope_system_settings_screen_brightness_value();
+        fpga_set_translated_brightness();
+      }
+      continue;
+    }
+    else if(drag == 2)
+    {
+      if(scope_move_slider(395, 104, &scopesettings.gridbrightness))
+        scope_system_settings_grid_brightness_value();
+      continue;
+    }
 
     //Check if there is touch
     if(havetouch)
@@ -1200,21 +1128,6 @@ void handle_main_menu_touch(void)
             gridbrightnessopen = 1;
           }
         }
-        //File message timeout (1.00o5's notification confirmation): a tap toggles wait for a tap / 0.7 s
-        else if(row == UI_FO_FILEMSG)
-        {
-          //Close any of the sub menus if open
-          close_open_menus(0);
-
-          //Toggle the file message timeout and show it while touched
-          scopesettings.confirmationmode ^= 1;
-          scope_system_settings_filemsg_item(1);
-
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release();
-
-          scope_system_settings_filemsg_item(0);
-        }
         //Time and date: 1.00o5's editor beside the fold-out
         else if(row == UI_FO_TIME)
         {
@@ -1401,6 +1314,8 @@ void handle_main_menu_touch(void)
       //Check on screen brightness slider opened and being touched
       else if(screenbrightnessopen && (xtouch >= 395) && (xtouch <= 726) && (ytouch >= 46) && (ytouch <= 104))
       {
+        drag = 1;
+
         //Move the slider to a new position and check if there was a change in position
         if(scope_move_slider(395, 46, &scopesettings.screenbrightness))
         {
@@ -1414,6 +1329,8 @@ void handle_main_menu_touch(void)
       //Check on grid brightness slider opened and being touched
       else if(gridbrightnessopen && (xtouch >= 395) && (xtouch <= 726) && (ytouch >= 105) && (ytouch <= 163))
       {
+        drag = 2;
+
         //Move the slider to a new position and check if there was a change in position
         if(scope_move_slider(395, 104, &scopesettings.gridbrightness))
         {
@@ -2618,6 +2535,10 @@ void handle_acquisition_menu_touch(void)
                 //This way the sampling is actually done with the set speed, but the display stays at the set time per div
                 fpga_set_sample_rate(i);
 
+                //fw 0.2.64: unless the time/div no longer fits the record at this rate: then the nearest one that does,
+                //with a notice at the top of the plot (acq_view.c)
+                acq_view_fit(1);
+
                 //Display the new setting
                 scope_acquisition_speed_select();
 
@@ -2656,8 +2577,14 @@ void handle_acquisition_menu_touch(void)
           }    
             
           //Filter selector (bitstream 0x1534+) in 1.00o5's Long memory slot: Off, Boxcar, CIC2, CIC3 (+ FIR on 0x1535+)
+          //fw 0.2.64: a filter shortens the record to 8190 samples (16-bit layout): the time/div follows
           if((xtouch >= ACQ_MENU_XPOS + 204) && (xtouch <= ACQ_MENU_XPOS + 294) && pc_glue_ui_has(PC_FEAT_DECIM))
+          {
             pc_glue_decim_tap();
+            acq_view_fit(1);
+            scope_acquisition_timeperdiv_select();
+            scope_acqusition_settings(0);
+          }
         }        
         //======================================================================
         //Check on time per div being set
@@ -2670,11 +2597,17 @@ void handle_acquisition_menu_touch(void)
             x = ((i & 3) * 72) + 10 + ACQ_MENU_XPOS;
             y = ((i >> 2) * 23) + 241 + ACQ_MENU_YPOS;  //191
 
-            //Check if touch within this bounding box
+            //Check if touch within this bounding box (fw 0.2.64: a grey, not viable, time/div cannot be chosen)
             if((xtouch >= x) && (xtouch <= x + 68) && (ytouch >= y) && (ytouch <= y + 20))
             {
+              if(!acq_view_tb_ok(((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i))
+                break;
+
               //Set the new time per div
               scopesettings.timeperdiv = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i;
+
+              //The trigger point stays inside the record
+              acq_view_clamp_pos();
 
               //Display the new setting
               scope_acquisition_timeperdiv_select();
@@ -2710,6 +2643,11 @@ void handle_acquisition_menu_touch(void)
               //scope_acqusition_settings(0);
               
               scope_acquisition_memory_deep_select();
+
+              //fw 0.2.64: a shorter record may no longer fill the trace area at this time/div
+              acq_view_fit(1);
+              scope_acquisition_timeperdiv_select();
+              scope_acqusition_settings(0);
               break;
             }
           }
@@ -3375,8 +3313,13 @@ void handle_keyboard_menu_touch(void)
 
 void handle_right_basic_menu_touch(void)
 {
-  //fw 0.2.56: the spectrum's empty slots (T CURSOR, V CURSOR, MEASURES; ui_p1_shown) do nothing
-  if((ytouch >= 183) && (ytouch <= 357) && !ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
+  //fw 0.2.56: the spectrum's empty slots (T CURSOR, V CURSOR; ui_p1_shown) do nothing; fw 0.2.65: MEASURES opens the
+  //spectrum's own list
+  if((ytouch >= 183) && (ytouch <= 297) && !ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
+    return;
+
+  //fw 0.2.66: the Bode plot's empty MEASURES slot does nothing either
+  if((ytouch >= 303) && (ytouch <= 357) && !ui_p1_shown(UI_P1_MEASURES, ctrl_page_spectrum()))
     return;
 
   //Check if run/stop or page up button is touched
@@ -3547,10 +3490,9 @@ void handle_right_basic_menu_touch(void)
     //Button back to inactive state
     scope_measures_button(0);
 
-    //Save the screen rectangle where the menu will be displayed
+    //Save the screen rectangle where the menu will be displayed (fw 0.2.65: its height follows the mode, ui_meas.h)
     display_set_destination_buffer(displaybuffer2);
-    //display_copy_rect_from_screen(231, 263, 501, 215);//499 214
-    display_copy_rect_from_screen(232, 232, 499, 246);//499 214
+    display_copy_rect_from_screen(UI_MSM_X, ui_msm_top(scope_measures_mode()), UI_MSM_W, ui_msm_height(scope_measures_mode()));
 
     //Go and setup the measurements menu
     scope_open_measures_menu();
@@ -3560,8 +3502,7 @@ void handle_right_basic_menu_touch(void)
 
     //Restore the screen when done
     display_set_source_buffer(displaybuffer2);
-    //display_copy_rect_to_screen(231, 263, 501, 215);//499 214
-    display_copy_rect_to_screen(232, 232, 499, 246);//499 214
+    display_copy_rect_to_screen(UI_MSM_X, ui_msm_top(scope_measures_mode()), UI_MSM_W, ui_msm_height(scope_measures_mode()));
   }
   //Check if save picture button is touched
   else if((ytouch >= 363) && (ytouch <= 417))
@@ -4017,29 +3958,18 @@ void handle_right_volts_div_menu_touch(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-const TOUCHCOORDS measures_item_touch_coords[2][12] =
-{
-  {
-    //Channel 1 coordinates are on the left
-    {232, 293, 297, 355}, {295, 355, 297, 355}, {357, 417, 297, 355}, {419, 480, 297, 355},
-    {232, 293, 357, 415}, {295, 355, 357, 415}, {357, 417, 357, 415}, {419, 480, 357, 415},
-    {232, 293, 417, 476}, {295, 355, 417, 476}, {357, 417, 417, 476}, {419, 480, 417, 476},
-  },
-  {
-    //Channel 2 coordinates are on the right
-    {482, 543, 297, 355}, {545, 605, 297, 355}, {607, 667, 297, 355}, {669, 729, 297, 355},
-    {482, 543, 357, 415}, {545, 605, 357, 415}, {607, 667, 357, 415}, {669, 729, 357, 415},
-    {482, 543, 417, 476}, {545, 605, 417, 476}, {607, 667, 417, 476}, {669, 729, 417, 476},
-  }
-};
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
+//fw 0.2.65 (Measurements v2): the MEASURES menu's touch loop (ui_msm_hit). A cell acts on touch and the menu stays; a
+//touch outside the box closes it (consumed). An item toggles (turned on it goes last in the row, ui_ms_toggle); Select
+//All keeps the chosen order and appends the rest in table order; Clear empties the block; a source cell picks the
+//block's source (Scope: the channel or a reference trace); Hide toggles the block. After a change every cell is drawn
+//again (the places shown on the other items move), over their own backgrounds so nothing flashes.
 void handle_measures_menu_touch(void)
 {
-  int channel;
-  int item;
-  int found;
+  ui_msm_cell cells[UI_MSM_CELLS_MAX], c;
+  int    mode = scope_measures_mode(), len = scope_measures_list_len(mode), n, i, r;
+  uint8 *rank;
+
+  n = ui_msm_cells(mode, cells);
 
   //Stay in the menu as long as there is no touch outside the menu
   while(1)
@@ -4047,125 +3977,52 @@ void handle_measures_menu_touch(void)
     //Scan the touch panel for touch
     tp_i2c_read_status();
 
-    //Check if there is touch
-    if(havetouch)
+    if(!havetouch)
+      continue;
+
+    r = ui_msm_hit(mode, xtouch, ytouch, &c);
+
+    if(r < 0)
     {
-      //scope_test_TP();
-      
-      //Check if touch within the menu field
-      if((xtouch >= 232) && (xtouch <= 730) && (ytouch >= 232) && (ytouch <= 477))//231-730 264-477
-      {
-        found = 0;
-        channel = 0;
-
-        //Check the touch positions for the separate items until one is found
-        while((found == 0) && (channel < 2))
-        {
-                   //--------------- Only select ch1 or ch2 and all & clear & hide -------------------------------------------------  
-         //Check press button select all and clear for ch1 a ch2
-         if((ytouch >= 232) && (ytouch <= 264))
-         {
-            if((xtouch >= 235) && (xtouch <= 285))  //ref1 button
-            {scopesettings.source1_measures = 1; scope_source1_measures_menu_item();}
-           
-            if((xtouch >= 295) && (xtouch <= 355))  //ref2 button
-            {scopesettings.source1_measures = 2; scope_source1_measures_menu_item();}
-
-            if((xtouch >= 357) && (xtouch <= 417))  //ref3 button
-            {scopesettings.source1_measures = 3; scope_source1_measures_menu_item();}
-
-            if((xtouch >= 419) && (xtouch <= 480))  //ref4 button
-            {scopesettings.source1_measures = 4; scope_source1_measures_menu_item();}     
-            
-            if((xtouch >= 485) && (xtouch <= 535))  //ref5 button
-            {scopesettings.source2_measures = 1; scope_source2_measures_menu_item();}
-
-            if((xtouch >= 545) && (xtouch <= 605))  //ref6 button
-            {scopesettings.source2_measures = 2; scope_source2_measures_menu_item();} 
-
-            if((xtouch >= 607) && (xtouch <= 667))  //ref7 button  
-            {scopesettings.source2_measures = 3; scope_source2_measures_menu_item();}
-
-            if((xtouch >= 669) && (xtouch <= 729))   //ref8 button 
-            {scopesettings.source2_measures = 4; scope_source2_measures_menu_item();}  
-         }
-         
-         //--------------- Only select ch1 or ch2 and all & clear & hide -------------------------------------------------  
-         //Check press button select all and clear for ch1 a ch2
-         if((ytouch >= 264) && (ytouch <= 295))
-         {
-            if((xtouch >= 235) && (xtouch <= 285))  //ch1 button open menu ch1-ref1-ref2-ref3-ref4
-            {scopesettings.source1_measures = 0; scope_source1_measures_menu_item();}
-           
-            if((xtouch >= 295) && (xtouch <= 355))  //select ALL ch1 button
-            {for (int j=0; j<12;j++) {scopesettings.measuresstate[0][j] = 1;scope_measures_menu_item(0,j);}}
-
-            if((xtouch >= 357) && (xtouch <= 417))  //clear ch1 button
-            {for (int j=0; j<12;j++) {scopesettings.measuresstate[0][j] = 0;scope_measures_menu_item(0,j);}}
-
-            if((xtouch >= 419) && (xtouch <= 480))  //hide ch1
-            { scopesettings.hide_values_CH1 ^= 1; scope_hide_measures_menu_item(); tp_i2c_wait_for_touch_release();}      
-            
-            if((xtouch >= 485) && (xtouch <= 535))  //ch2 button
-            {scopesettings.source2_measures = 0; scope_source2_measures_menu_item();}
-
-            if((xtouch >= 545) && (xtouch <= 605))  //select ALL ch2 button
-            {for (int j=0; j<12;j++) {scopesettings.measuresstate[1][j] = 1;scope_measures_menu_item(1,j);}}
-
-            if((xtouch >= 607) && (xtouch <= 667))  //clear ch2 button   
-            {for (int j=0; j<12;j++) {scopesettings.measuresstate[1][j] = 0;scope_measures_menu_item(1,j);}}
-
-            if((xtouch >= 669) && (xtouch <= 729))
-            { scopesettings.hide_values_CH2 ^= 1; scope_hide_measures_menu_item(); tp_i2c_wait_for_touch_release();}   
-         }
-         //------------------------------------------------------------------------------------------------
-                    
-          item = 0;
-
-          //For each channel 12 items
-          while((found == 0) && (item<12))
-          {
-            //Check if touch is on this item
-            if((xtouch >= measures_item_touch_coords[channel][item].x1) && (xtouch <= measures_item_touch_coords[channel][item].x2) &&
-               (ytouch >= measures_item_touch_coords[channel][item].y1) && (ytouch <= measures_item_touch_coords[channel][item].y2))
-            {
-              //Toggle the item
-              scopesettings.measuresstate[channel][item] ^= 1;
-
-              //There is an array for showing the items on screen. It works on a first come first serve system.
-              //It looks for the first free spot and inserts itself there. This gives a messy image of the two channels interleaving with settings
-              //On disable the list is shifted to fill the gap
-              //For this an items in list counter might be useful
-
-              //A nicer setup is to reserve separate sections per channel on the screen for the enabled items and always show them in a fixed
-              //order. Makes reading them easier
-              
-              //Draw the changed item
-              scope_measures_menu_item(channel, item);
-
-              //Signal item found
-              found = 1;
-            }
-
-            //Next item
-            item++;
-          }
-
-          //Next channel
-          channel++;
-        }
-
-        //Wait until touch is released before checking on a new position
-        tp_i2c_wait_for_touch_release();
-      }
-      else
-      {
-        //Touch outside the menu so wait until touch is released and then quit
-        tp_i2c_wait_for_touch_release();
-
-        return;
-      }
+      //Touch outside the menu so wait until touch is released and then quit
+      tp_i2c_wait_for_touch_release();
+      return;
     }
+
+    if(r > 0)
+    {
+      rank = scope_measures_ranks(mode, c.group);
+
+      switch(c.what)
+      {
+        case UI_MSC_ITEM:   ui_ms_toggle(rank, len, c.index); break;
+        case UI_MSC_ALL:    ui_ms_select_all(rank, len);      break;
+        case UI_MSC_CLEAR:  ui_ms_clear(rank, len);           break;
+
+        case UI_MSC_HIDE:
+          if(c.group)
+            scopesettings.hide_values_CH2 ^= 1;
+          else
+            scopesettings.hide_values_CH1 ^= 1;
+          break;
+
+        case UI_MSC_SOURCE:
+          if(c.group)
+            scopesettings.source2_measures = c.index;
+          else
+            scopesettings.source1_measures = c.index;
+          break;
+
+        default:
+          break;
+      }
+
+      for(i = 0; i < n; i++)
+        scope_measures_menu_cell(mode, &cells[i]);
+    }
+
+    //Wait until touch is released before checking on a new position
+    tp_i2c_wait_for_touch_release();
   }
 }
 
@@ -4915,22 +4772,28 @@ void move_trigger_point_position(void)
   positionlimitH = (((fpgasettings.settriggerpoint) )*( disp_xpos_per_sample));//+15;
   positionlimitL = (((-(fpgasettings.totalsamples-fpgasettings.settriggerpoint-1400)) ) * (disp_xpos_per_sample));//1450
 
-  //Limit it on the trace portion of the screen
-  
-  if(position > positionlimitH)//712
+  //Limit it on the trace portion of the screen (fw 0.2.64: long mode only; short mode uses the record's limits below,
+  //1.00o5's 1400-sample margin stopped the window short of the record's end)
+  if(scopesettings.long_mode)
   {
-    //And not above 712;
-    position = positionlimitH;
-  }
+    if(position > positionlimitH)//712
+    {
+      //And not above 712;
+      position = positionlimitH;
+    }
         
-  if(position < positionlimitL)//2
-  {
-    //So not below 2
-    position = positionlimitL;
+    if(position < positionlimitL)//2
+    {
+      //So not below 2
+      position = positionlimitL;
+    }
   }
   
   //Update the current position
   scopesettings.triggerhorizontalposition = position;
+
+  //fw 0.2.64: in short mode the limits come from the record (the window cannot scroll past either end of it)
+  acq_view_clamp_pos();
   
   //if(!scopesettings.long_mode || scopesettings.triggermode) scopesettings.triggerhorizontalposition = position;
   

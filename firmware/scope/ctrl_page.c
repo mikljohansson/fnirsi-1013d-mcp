@@ -29,10 +29,13 @@
 //fold-out opens and put back when it closes
 #define CP_SAVE_X           (UI_FOLD_RIGHT - 228)
 
-//fw 0.2.66: the Bode plot leaves the same page-one slots empty as the spectrum (no cursors or measurement list)
+//fw 0.2.66: 2 in the Bode plot: the cursor slots empty as in the spectrum, and MEASURES too (ui_p1_shown)
 int ctrl_page_spectrum(void)
 {
-  return (spectrum_mode() != SPECTRUM_MODE_SCOPE) || bode_view_active();
+  if(bode_view_active())
+    return 2;
+
+  return spectrum_mode() != SPECTRUM_MODE_SCOPE;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -103,17 +106,32 @@ static void cp_analysis_button(int active)
     fmt_str(t + strlen(t), " pt");
     cp_value_button(UI_CTRL_ANALYSIS_Y, "Analyse", 0, t, active);
   }
+  else if(scopesettings.xymodedisplay)
+  {
+    //X-Y draws the Lissajous with its own line: Trace style does not apply there (fw 0.2.63, owner), grey and inert
+    cp_button(UI_CTRL_ANALYSIS_Y, 0);
+    display_set_fg_color(LIGHTGREY1_COLOR);
+    cp_text_c(&font_2, CP_XC, UI_CTRL_ANALYSIS_Y + 4, "Trace");
+    cp_text_c(&font_2, CP_XC, UI_CTRL_ANALYSIS_Y + 17, "style");
+    cp_text_c(&font_2, CP_XC, UI_CTRL_ANALYSIS_Y + 32, ui_trace_names[scopesettings.ACQ_trace % UI_TRACE_COUNT]);
+  }
   else
     cp_value_button(UI_CTRL_ANALYSIS_Y, "Trace", "style", ui_trace_names[scopesettings.ACQ_trace % UI_TRACE_COUNT], active);
 }
 
-//Grid: a switch, as in the channel menus (colour carries the state, no "on" / "off")
+//Grid (fw 0.2.63, owner): the whole button is the toggle, green with black text while the grid is on, grey with white
+//text while it is off (colour carries the state, the word stays "Grid"); orange while touched
 static void cp_grid_button(int active)
 {
-  cp_button(UI_CTRL_GRID_Y, active);
-  display_set_fg_color(active ? BLACK_COLOR : WHITE_COLOR);
-  cp_text_c(&font_2, CP_XC, UI_CTRL_GRID_Y + 5, "Grid");
-  scope_display_slide_button(UI_BAR_X + 3, UI_CTRL_GRID_Y + 24, scopesettings.gridenable ? 1 : 0, GREEN_COLOR);
+  uint32 fill = active ? ITEM_ACTIVE_COLOR : scopesettings.gridenable ? GREEN_COLOR : GREY_COLOR;
+
+  display_set_fg_color(fill);
+  display_fill_rounded_rect(UI_BAR_X, UI_CTRL_GRID_Y, UI_BAR_W, UI_BTN_H, 2);
+  display_set_fg_color(CP_EDGE_COLOR);
+  display_draw_rounded_rect(UI_BAR_X, UI_CTRL_GRID_Y, UI_BAR_W, UI_BTN_H, 2);
+
+  display_set_fg_color((active || scopesettings.gridenable) ? BLACK_COLOR : WHITE_COLOR);
+  cp_text_c(&font_3, CP_XC, UI_CTRL_GRID_Y + 17, "Grid");
 }
 
 //Stepper (owner): a 28 px grey V+ bar, a 26 px centre in the channel colour (grey while the channel is off), a 28 px V-
@@ -185,7 +203,12 @@ static void cp_icon_trace(uint32 x, uint32 y, uint32 color)
 
 static void cp_icon(int icon, uint32 x, uint32 y)
 {
-  static const uint8 loop[9][2] = { { 1, 14 }, { 5, 6 }, { 11, 2 }, { 18, 3 }, { 22, 7 }, { 19, 14 }, { 13, 18 }, { 6, 18 }, { 1, 14 } };
+  //X-Y (fw 0.2.63, owner): a figure 8 leaning right, the lemniscate x = cos t / (1 + sin^2 t), y = 1.3 sin t cos t /
+  //(1 + sin^2 t) turned by 55 degrees, 24 points
+  static const uint8 loop[25][2] = { { 17, 18 }, { 14, 19 }, { 12, 18 }, { 11, 16 }, { 10, 14 }, { 11, 12 }, { 12, 9 },
+                                     { 12, 7 }, { 13, 5 }, { 12, 3 }, { 11, 1 }, { 9, 0 }, { 6, 1 }, { 4, 4 }, { 4, 6 },
+                                     { 5, 8 }, { 7, 9 }, { 9, 9 }, { 11, 9 }, { 14, 10 }, { 16, 10 }, { 18, 11 },
+                                     { 19, 13 }, { 19, 15 }, { 17, 18 } };
   static const uint8 bars[8]    = { 3, 5, 16, 6, 4, 10, 3, 2 };
   static const uint8 dots[8]    = { 16, 13, 6, 3, 5, 11, 15, 17 };
   static const uint32 stripes[4] = { 0x00000090, 0x000090FF, 0x00FFFF00, 0x00FF4000 };
@@ -199,8 +222,8 @@ static void cp_icon(int icon, uint32 x, uint32 y)
 
     case CP_ICON_XY:
       display_set_fg_color(XYMODE_COLOR);
-      for(i = 0; i < 8; i++)
-        display_draw_line(x + loop[i][0], y + loop[i][1], x + loop[i + 1][0], y + loop[i + 1][1]);
+      for(i = 0; i < 24; i++)
+        display_draw_line(x + 2 + loop[i][0], y + loop[i][1], x + 2 + loop[i + 1][0], y + loop[i + 1][1]);
       break;
 
     case CP_ICON_PHOSPHOR:
@@ -335,6 +358,16 @@ static void cp_build(cp_fold *d)
       d->title = "Display";
       for(i = 0; i < UI_SPEC_VIEW_COUNT; i++)
         cp_add(d, CP_ROW_CHOICE, ui_spec_view_names[i], spectrum_view() == (int)i, CP_ICON_SPECTRUM + i);
+
+      //Waterfall and Density show one channel's history (fw 0.2.63, owner): which one, a tap takes the other one; grey
+      //while the other channel is off
+      if(spectrum_view() != 0)
+      {
+        sep = d->n;
+        r = cp_add(d, CP_ROW_VALUE, "Channel", 0, 0);
+        fmt_str(r->value, ui_spec_chan_names[spectrum_hist_channel()]);
+        r->dim = !spectrum_hist_can_choose(spectrum_hist_channel() ^ 1);
+      }
       break;
 
     default:
@@ -380,9 +413,9 @@ static void cp_row_draw(const cp_row *r, uint32 rx, uint32 ry, uint32 rw)
       break;
 
     case CP_ROW_VALUE:
-      display_set_fg_color(WHITE_COLOR);
+      display_set_fg_color(r->dim ? CP_NOTE_COLOR : WHITE_COLOR);
       cp_text(&font_3, rx + UI_FOLD_VALUE_IN, ty, r->label);
-      display_set_fg_color(PALEYELLOW_COLOR);
+      display_set_fg_color(r->dim ? CP_NOTE_COLOR : PALEYELLOW_COLOR);
       cp_text_r(&font_3, rx + rw - UI_FOLD_VALUE_IN, ty, r->value);
       break;
 
@@ -456,8 +489,15 @@ static int cp_fold_tap(cp_fold *d, int row, int dir)
       return 1;
 
     case CP_F_SPEC_DISPLAY:
-      spectrum_set_view(row);
-      return 1;
+      if(row < UI_SPEC_VIEW_COUNT)
+      {
+        spectrum_set_view(row);
+        return 1;
+      }
+
+      if(!d->r[row].dim)
+        spectrum_set_hist_channel(spectrum_hist_channel() ^ 1);
+      return 0;
 
     default:
       spectrum_param_step(cp_analyse_p[row], (d->r[row].kind == CP_ROW_VALUE2) ? dir : 1);
@@ -501,8 +541,20 @@ static void cp_fold_run(int id, void (*button)(int))
     if(hit >= 0)
     {
       ui_fold old = d.f;
+      uint32  lx = xtouch, ly = ytouch;
 
-      if(cp_fold_tap(&d, hit, ui_fold_dir(&d.f, xtouch)))
+      //fw 0.2.64: a row acts on release, like every other button, and only when the finger is still on it
+      while(havetouch)
+      {
+        lx = xtouch;
+        ly = ytouch;
+        tp_i2c_read_status();
+      }
+
+      if(ui_fold_hit(&d.f, lx, ly) != hit)
+        continue;
+
+      if(cp_fold_tap(&d, hit, ui_fold_dir(&d.f, lx)))
         break;
 
       //Rows may come or go (the Phosphor switch): put the plot back under the old panel, then draw the new one
@@ -574,7 +626,10 @@ void ctrl_page_touch(void)
       break;
 
     case UI_CTRL_ANALYSIS:
-      cp_fold_run(sp ? CP_F_ANALYSE : CP_F_TRACE, cp_analysis_button);
+      if(!sp && scopesettings.xymodedisplay)
+        tp_i2c_wait_for_touch_release();
+      else
+        cp_fold_run(sp ? CP_F_ANALYSE : CP_F_TRACE, cp_analysis_button);
       break;
 
     case UI_CTRL_GRID:

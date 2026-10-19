@@ -159,7 +159,7 @@ static void draw_page(void)
 {
   int i;
 
-  draw_header("Settings", "Channel, trigger, time base and filter stay in their own menus.");
+  draw_header("Settings", 0);
 
   for(i=0;i<UI_SET_GROUPS;i++)
     text_at(ui_set_groups[i].x + 2, ui_set_groups[i].y, C_TEXT_DIM, &font_2, ui_set_groups[i].title);
@@ -169,8 +169,6 @@ static void draw_page(void)
 
   button(UI_SET_RESTORE_X, UI_SET_RESTORE_Y, UI_SET_RESTORE_W, UI_SET_RESTORE_H, "Restore default settings",
          C_BTN_FILL, C_BTN_EDGE, 0);
-  text_at(UI_SET_RESTORE_X + UI_SET_RESTORE_W + 14, UI_SET_RESTORE_Y + 16, C_TEXT_DIM, &font_2,
-          "Asks first. Keeps the calibration and the start-up choice.");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

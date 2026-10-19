@@ -43,7 +43,7 @@ void   bode_ctrl_touch(void);
 void   bode_gen_row_draw(void);
 int    bode_gen_row_hit(uint32 y);
 
-//Settings sector words 220 and 221 (start, stop, points; settle, CH2 range)
+//Settings sector words 219 and 220 (start, stop, points; settle, CH2 range)
 uint16 bode_view_setting_word(int i);
 void   bode_view_settings_restore(uint16 w0, uint16 w1);
 

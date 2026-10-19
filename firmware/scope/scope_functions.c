@@ -9,7 +9,6 @@
 #include "touchpanel.h"
 #include "timer.h"
 #include "fpga_control.h"
-#include "enc_heal.h"
 #include "spi_control.h"
 #include "sd_card_interface.h"
 #include "display_lib.h"
@@ -20,9 +19,13 @@
 #include "pc_hooks.h"
 #include "spec_fmt.h"
 #include "ui_fmt.h"
+#include "ui_meas.h"
+#include "spectrum.h"
 #include "variables.h"
 
 #include "sin_cos_math.h"
+#include "tb_view.h"
+#include "acq_view.h"
 #include "ref_and_math.h"
 /*
 //sinx
@@ -35,145 +38,82 @@
 #include <math.h>
 //----------------------------------------------------------------------------------------------------------------------------------
 
-//void scope_adjust_timebase(void)
+//fw 0.2.64: the first row the lower V/div tap band may not use on a half: the top of that half's measurement cards (as
+//scope_display_measurements draws them), else the grid's bottom
+static int32 scope_tap_bottom(int half)
+{
+  uint8  *m = scopesettings.measuresstate[half];
+  uint32  i, n = 0;
+  int     shown;
+
+  if(half == 0)
+    shown = (scopesettings.channel1.enable || scopesettings.ref1 || scopesettings.ref2 || scopesettings.ref3 || scopesettings.ref4) &&
+            !scopesettings.hide_values_CH1 && !scopesettings.long_mode;
+  else
+    shown = (scopesettings.channel2.enable || scopesettings.ref5 || scopesettings.ref6 || scopesettings.ref7 || scopesettings.ref8) &&
+            !scopesettings.hide_values_CH2 && !scopesettings.long_mode;
+
+  if(shown)
+    for(i = 0; i < 12; i++)
+      if(m[i])
+        n++;
+
+  return touch_cards_top(n);
+}
+
+//V/div one step on a tap band
+static void scope_tap_voltdiv(PCHANNELSETTINGS settings, int more)
+{
+  //Only if channel is enabled
+  if(!settings->enable)
+    return;
+
+  if(more && (settings->displayvoltperdiv < 6))
+    settings->displayvoltperdiv++;
+  else if(!more && (settings->displayvoltperdiv > 0))
+    settings->displayvoltperdiv--;
+  else
+    return;
+
+  //Show the change on the screen
+  scope_channel_settings(settings, 0);
+
+  //Only update the FPGA in run mode
+  //For waveform view mode the stop state is forced and can't be changed
+  if(scopesettings.runstate) match_volt_per_div_settings(settings);
+}
+
+//A tap on the empty plot (fw 0.2.64: the bands of touch_pick.h: 1.00o5's V/div and time base bands, kept by the owner,
+//off the record slider row and off the measurement cards)
 void scope_adjust_timebase_and_voltdiv (void)
 {
-  uint8 min;
-  uint8 max;
-    
-  //Check if touch within the trace display region
-  if((previousxtouch > 2) && (previousxtouch < 720) && (previousytouch > 50) && (previousytouch < 470))
+  uint8 min = 0;
+  uint8 max = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1);
+
+  if ((scopesettings.long_mode) && (scopesettings.waveviewmode)) {min = 0;   max = 10;}
+  if ((!scopesettings.long_mode) &&(scopesettings.waveviewmode)) {min = 11;  max = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1); }
+
+  switch(touch_tap_zone(previousxtouch, previousytouch, scope_tap_bottom(0), scope_tap_bottom(1)))
   {
+    case TAP_TB_SLOWER:
+      //Go up in time by taking one of the setting
+      if(scopesettings.timeperdiv > min)
+        scopesettings.timeperdiv--;
+      scope_set_timebase();
+      break;
 
-  
-    if ((scopesettings.long_mode) && (scopesettings.waveviewmode)) {min = 0;   max = 10;}
-    if ((!scopesettings.long_mode) &&(scopesettings.waveviewmode)) {min = 11;  max = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1); }
-    if(!scopesettings.waveviewmode) {min = 0;  max = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1); }
-      
-      //Check if touch on the left of the center line
-    //if(previousxtouch < 358)
-    if(previousxtouch < 358)
-    {   
-      if((previousytouch > 100)&&(previousytouch < 370))
-      {
-        //Short time base
-        //Check if not already on the highest setting (200mS/div)
-        //Long time base
-        //Check if not already on the highest setting (50s/div)
-        if(scopesettings.timeperdiv > min)
-        {
-          //Go up in time by taking one of the setting
-          scopesettings.timeperdiv--;
-        }
-        scope_set_timebase();
-      }
-      
-      if(previousytouch < 100)
-      { 
-        //Only if channel is enabled
-        if(scopesettings.channel1.enable)
-        {
-          //Check if setting not already on max
-          if(scopesettings.channel1.displayvoltperdiv < 6)
-          {
-              //Step up to the next setting. (Lowering the setting)
-              scopesettings.channel1.displayvoltperdiv++;
+    case TAP_TB_FASTER:
+      //Go down in time by adding one to the setting
+      if(scopesettings.timeperdiv < max)
+        scopesettings.timeperdiv++;
+      scope_set_timebase();
+      break;
 
-              //Show the change on the screen
-              scope_channel_settings(&scopesettings.channel1, 0);
-
-              //Only update the FPGA in run mode
-              //For waveform view mode the stop state is forced and can't be changed
-              if(scopesettings.runstate) match_volt_per_div_settings(&scopesettings.channel1);
-          }
-        }
-      }
-      
-      if(previousytouch > 370)
-      {
-       //Only if channel is enabled
-       if(scopesettings.channel1.enable)
-       {
-         //Check if setting not already on min
-         if(scopesettings.channel1.displayvoltperdiv > 0)
-         {
-             //Step down to the next setting. (Increasing the setting)
-             scopesettings.channel1.displayvoltperdiv--;
-
-             //Show the change on the screen
-             scope_channel_settings(&scopesettings.channel1, 0);
-
-             //Only update the FPGA in run mode
-             //For waveform view mode the stop state is forced and can't be changed
-             if(scopesettings.runstate) match_volt_per_div_settings(&scopesettings.channel1);
-         }
-       }
-      }
-
-    }
-    //Check if touch on the right of the center line
-    else if(previousxtouch > 362)
-    { 
-      if((previousytouch > 100)&&(previousytouch < 370))
-      { //Long time base
-        //Check if not already on the lowest setting (100ms/div)
-        //Short time base
-        //Check if not already on the lowest setting (5nS/div)
-        if(scopesettings.timeperdiv < max)
-        {
-          //Go down in time by adding one to the setting
-          scopesettings.timeperdiv++;
-        }    
-        scope_set_timebase();
-      }
-      
-      if(previousytouch < 100)
-      { 
-        //Only if channel is enabled
-        if(scopesettings.channel2.enable)
-        {
-          //Check if setting not already on max
-          if(scopesettings.channel2.displayvoltperdiv < 6)
-          {
-              //Step up to the next setting. (Lowering the setting)
-              scopesettings.channel2.displayvoltperdiv++;
-
-              //Show the change on the screen
-              scope_channel_settings(&scopesettings.channel2, 0);
-
-              //Only update the FPGA in run mode
-              //For waveform view mode the stop state is forced and can't be changed
-              if(scopesettings.runstate) match_volt_per_div_settings(&scopesettings.channel2);
-          }
-        }
-      }
-      
-      if(previousytouch > 370)
-      {
-       //Only if channel is enabled
-       if(scopesettings.channel2.enable)
-       {
-         //Check if setting not already on min
-         if(scopesettings.channel2.displayvoltperdiv > 0)
-         {
-             //Step down to the next setting. (Increasing the setting)
-             scopesettings.channel2.displayvoltperdiv--;
-
-             //Show the change on the screen
-             scope_channel_settings(&scopesettings.channel2, 0);
-
-             //Only update the FPGA in run mode
-             //For waveform view mode the stop state is forced and can't be changed
-             if(scopesettings.runstate) match_volt_per_div_settings(&scopesettings.channel2);
-         }
-       }
-      }
-    }
-  
-    //scope_set_timebase();
-    
+    case TAP_CH1_MORE: scope_tap_voltdiv(&scopesettings.channel1, 1); break;
+    case TAP_CH1_LESS: scope_tap_voltdiv(&scopesettings.channel1, 0); break;
+    case TAP_CH2_MORE: scope_tap_voltdiv(&scopesettings.channel2, 1); break;
+    case TAP_CH2_LESS: scope_tap_voltdiv(&scopesettings.channel2, 0); break;
   }
-  
 }
     
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -236,6 +176,11 @@ void scope_adjust_timebase_and_voltdiv (void)
     
     //if((scopesettings.triggermode == 1)) 
         //scope_display_trace_data();
+
+    //fw 0.2.64: a time/div kept at the record's rate (stopped, viewer) stops where the record no longer fills the trace
+    //area or a division holds less than one sample; the trigger point stays inside the record (acq_view.c)
+    if(!scopesettings.long_mode && acq_view_fit(1))
+      fpga_set_time_base(scopesettings.timeperdiv);
   
     //Show he new setting on the display
     scope_acqusition_settings(0);
@@ -622,10 +567,6 @@ void scope_acquire_trace_data(void)
     //fpga_set_time_base(scopesettings.timeperdiv); 2.12 move to reset window
 
     //Sampling with trigger circuit enabled (standard memory mode)
-
-    //fw 0.2.61: after a rate write, a full-rate check before the conversion (enc_heal.h; before the decimation arm,
-    //which the next conversion consumes)
-    fpga_encode_check_dirty();
 
     //Decimation filter (0x1534+): this conversion uses the UI's Filter setting
     pc_glue_ui_decim_arm();
@@ -2150,56 +2091,70 @@ void scope_display_trace_data(void)
   //This gives the step size for going through the samples. Is also the linear interleaving step for the y direction
   disp_sample_step = 1.0 / disp_xpos_per_sample;
 
-  //The displayable x range is based on the number of samples and the number of x positions needed per sample
-  //Halved to allow trigger position to be in the center
-  //double xrange = (scopesettings.samplecount * disp_xpos_per_sample);// / 2.0;
-  double xrange = (fpgasettings.totalsamples * disp_xpos_per_sample);// / 2.0;
-
-  //x range needs to be at least 1 pixel
-  if(xrange < 1.0)
+  //fw 0.2.64: in short mode the window comes from the record (tb_view.c): the first sample shown stays inside the record,
+  //and when the record is shorter than the trace area the trace starts at the left edge and ends where the record ends
+  //(1.00o5 clamped only the start, so the trace shifted against the trigger point and zeros were drawn past the end)
+  if(!scopesettings.long_mode && (scopesettings.samplerate < 18) && (scopesettings.timeperdiv < 35))
   {
-    xrange = 1.0;
+    tbv_window((int32)disp_trigger_index, triggerposition, sample_rate[scopesettings.samplerate],
+               frequency_per_div[scopesettings.timeperdiv], fpgasettings.totalsamples, &disp_first_sample, &disp_xend);
+    disp_xstart = TBV_X_FIRST;
   }
-  else if(xrange > fpgasettings.totalsamples)
-   // else if(xrange > 725.0)
+  else
   {
-    //Limit on max screen pixels to avoid disp_xend becoming 0x80000000 due to overflow
-    xrange = fpgasettings.totalsamples;// - fpgasettings.settriggerpoint;//725.0;//comment
-  }
 
-  //Calculate the start and end x coordinates
-  disp_xstart = triggerposition - xrange;
-  disp_xend = triggerposition + xrange;
-  //disp_xend = xrange - triggerposition;
-  //disp_xend = 1500;
+    //The displayable x range is based on the number of samples and the number of x positions needed per sample
+    //Halved to allow trigger position to be in the center
+    //double xrange = (scopesettings.samplecount * disp_xpos_per_sample);// / 2.0;
+    double xrange = (fpgasettings.totalsamples * disp_xpos_per_sample);// / 2.0;
+
+    //x range needs to be at least 1 pixel
+    if(xrange < 1.0)
+    {
+      xrange = 1.0;
+    }
+    else if(xrange > fpgasettings.totalsamples)
+     // else if(xrange > 725.0)
+    {
+      //Limit on max screen pixels to avoid disp_xend becoming 0x80000000 due to overflow
+      xrange = fpgasettings.totalsamples;// - fpgasettings.settriggerpoint;//725.0;//comment
+    }
+
+    //Calculate the start and end x coordinates
+    disp_xstart = triggerposition - xrange;
+    disp_xend = triggerposition + xrange;
+    //disp_xend = xrange - triggerposition;
+    //disp_xend = 1500;
   
-  //Limit on actual start of trace display
-  if(disp_xstart < 3)
-  {
-    disp_xstart = 3;
+    //Limit on actual start of trace display
+    if(disp_xstart < 3)
+    {
+      disp_xstart = 3;
+    }
+
+    //And limit on the actual end of the trace display
+    if(disp_xend > 727)//725
+    {
+      disp_xend = 727;
+    }
+  
+    //And limit for long view the trace display
+    if(disp_xend < 1)
+    {
+      disp_xend = 1;
+    }
+  
+    //Determine first sample to use based on a full screen worth of samples and the trigger position in relation to the number of pixels on the screen
+    disp_first_sample = disp_trigger_index - (((725.0 / disp_xpos_per_sample) * triggerposition) / 725.0) - 1;
+    //disp_first_sample = disp_trigger_index - (((727.0 / disp_xpos_per_sample) * triggerposition) / 727.0) - 1;
+
+    //If below the first sample limit it on the first sample
+    if(disp_first_sample < 0)
+    {
+      disp_first_sample = 0;
+    }
   }
 
-  //And limit on the actual end of the trace display
-  if(disp_xend > 727)//725
-  {
-    disp_xend = 727;
-  }
-  
-  //And limit for long view the trace display
-  if(disp_xend < 1)
-  {
-    disp_xend = 1;
-  }
-  
-  //Determine first sample to use based on a full screen worth of samples and the trigger position in relation to the number of pixels on the screen
-  disp_first_sample = disp_trigger_index - (((725.0 / disp_xpos_per_sample) * triggerposition) / 725.0) - 1;
-  //disp_first_sample = disp_trigger_index - (((727.0 / disp_xpos_per_sample) * triggerposition) / 727.0) - 1;
-
-  //If below the first sample limit it on the first sample
-  if(disp_first_sample < 0)
-  {
-    disp_first_sample = 0;
-  }
 /*
   //This makes sure no reading outside the buffer can occur
   if(disp_sample_step > ((scopesettings.samplecount) / 2))
@@ -2261,12 +2216,10 @@ void scope_display_trace_data(void)
         case 1: scope_display_channel_dots_trace(&scopesettings.channel1); break;
                 //Peak x trace mode
         case 2: scope_display_channel_peak_trace(&scopesettings.channel1); break;
-                //Pro x trace mode
-        case 3: scope_display_channel_pro_trace(&scopesettings.channel1); break;     
                 //Sine x trace mode
         //case 4: scope_display_channel_peak_trace(&scopesettings.channel1); break;
         
-        default: scope_display_channel_linear_trace(&scopesettings.channel1); break;   
+        default: scope_display_channel_linear_trace_old(&scopesettings.channel1); break;   
       }
                 
                       
@@ -2308,12 +2261,10 @@ void scope_display_trace_data(void)
         case 1: scope_display_channel_dots_trace(&scopesettings.channel2); break;
                 //Peak x trace mode
         case 2: scope_display_channel_peak_trace(&scopesettings.channel2); break;
-                //Pro x trace mode
-        case 3: scope_display_channel_pro_trace(&scopesettings.channel2); break;     
                 //Sine x trace mode
         //case 4: scope_display_channel_peak_trace(&scopesettings.channel1); break;
         
-        default: scope_display_channel_linear_trace(&scopesettings.channel2); break;   
+        default: scope_display_channel_linear_trace_old(&scopesettings.channel2); break;   
       }
               
         //scope_display_channel_linear_trace(&scopesettings.channel2);
@@ -2703,7 +2654,8 @@ void scope_display_channel_linear_trace_old(PCHANNELSETTINGS settings)  //povodn
   }
 
   //When step less then 1 the last pixel needs to be interpolated between current sample and next sample.
-  if(disp_sample_step < 1.0)
+  //fw 0.2.64: only when the trace runs to the right edge; a record that ends inside the trace area has no next sample
+  if((disp_sample_step < 1.0) && (disp_xend >= TBV_X_END))
   {
     //Calculate the scaler for the last y value based on the x distance from the last drawn position to the end of the screen
     //divided by the x distance it takes to where the next position should be drawn (Number of x steps per sample)
@@ -2794,7 +2746,8 @@ void scope_display_channel_dots_trace(PCHANNELSETTINGS settings)//1
   }
 
   //When step less then 1 the last pixel needs to be interpolated between current sample and next sample.
-  if(disp_sample_step < 1.0)
+  //fw 0.2.64: only when the trace runs to the right edge; a record that ends inside the trace area has no next sample
+  if((disp_sample_step < 1.0) && (disp_xend >= TBV_X_END))
   {
     //Calculate the scaler for the last y value based on the x distance from the last drawn position to the end of the screen
     //divided by the x distance it takes to where the next position should be drawn (Number of x steps per sample)
@@ -2866,62 +2819,6 @@ void scope_display_channel_peak_trace(PCHANNELSETTINGS settings)//2
     }
 }
 //==============================================================================
-void scope_display_channel_pro_trace(PCHANNELSETTINGS settings)//3
-{
-    double inputindex = disp_first_sample;
-    register int32 xpos = disp_xstart;
-
-    register PDISPLAYPOINTS tracepoints = settings->tracepoints;
-    settings->noftracepoints = 0;
-
-    int32 last_ymin = 0, last_ymax = 0;
-    int first_pixel = 1;
-
-    for (; xpos < disp_xend; xpos++)
-    {
-        int32 sample_max = INT32_MIN;
-        int32 sample_min = INT32_MAX;
-
-        // Rozsah vzoriek pre tento pixel
-        double end_index = inputindex + disp_sample_step;
-        int start_idx = (int)inputindex;
-        int end_idx_int = (int)end_index;
-
-        if (end_idx_int == start_idx) end_idx_int++; // aspoň jedna vzorka
-
-        // Peak-detector
-        for (int i = start_idx; i < end_idx_int; i++)
-        {
-            int32 s = scope_get_y_sample(settings, i);
-            if (s > sample_max) sample_max = s;
-            if (s < sample_min) sample_min = s;
-        }
-
-        // Ulož body do tracepoints
-        tracepoints->x = xpos;
-        tracepoints->y = sample_max;
-        tracepoints++;
-        tracepoints->x = xpos;
-        tracepoints->y = sample_min;
-        tracepoints++;
-        settings->noftracepoints += 2;
-
-        // Profesionálne vykreslenie:
-        // Spoj min-max segment s predchádzajúcim pixelom
-        if (!first_pixel)
-        {   // Horná línia
-            display_draw_line(xpos - 1, last_ymax, xpos, sample_max);
-            // Dolná línia
-            display_draw_line(xpos - 1, last_ymin, xpos, sample_min);
-        }
-        else first_pixel = 0;
-
-        last_ymax = sample_max;
-        last_ymin = sample_min;
-
-        inputindex += disp_sample_step;
-    }
-}
 //==============================================================================
 
 void scope_display_channel_sinx_trace1(PCHANNELSETTINGS settings)
@@ -3435,38 +3332,19 @@ void scope_display_cursor_measurements(void)
 
 void scope_display_measurements(void)
 {
-  //Check if channel1 is active and hide measurements is 0-off and set short time base 
-  if((scopesettings.channel1.enable||scopesettings.ref1||scopesettings.ref2||scopesettings.ref3||scopesettings.ref4)
-    &&(!scopesettings.hide_values_CH1)&&(!scopesettings.long_mode))
-  {
-    //Display the enabled measurements if it is active
-    switch (scopesettings.source1_measures)
-    {
-      case 0: scope_display_channel_measurements(&scopesettings.channel1, scopesettings.measuresstate[0], 5, CHANNEL1_COLOR); break;
-      case 1: scope_display_channel_measurements(&scopesettings.ch_ref1,  scopesettings.measuresstate[0], 5, scopesettings.ch_ref1.color); break;
-      case 2: scope_display_channel_measurements(&scopesettings.ch_ref2,  scopesettings.measuresstate[0], 5, scopesettings.ch_ref2.color); break;
-      case 3: scope_display_channel_measurements(&scopesettings.ch_ref3,  scopesettings.measuresstate[0], 5, scopesettings.ch_ref3.color); break;
-      case 4: scope_display_channel_measurements(&scopesettings.ch_ref4,  scopesettings.measuresstate[0], 5, scopesettings.ch_ref4.color); break;
-      default: scope_display_channel_measurements(&scopesettings.channel1, scopesettings.measuresstate[0], 5, CHANNEL1_COLOR); break;
-    }
-  }
+  int shown[2], ch;
 
-  //Check if channel2 is active and hide measurements is 0-off and set short time base 
-  if((scopesettings.channel2.enable||scopesettings.ref5||scopesettings.ref6||scopesettings.ref7||scopesettings.ref8)
-    &&(!scopesettings.hide_values_CH2)&&(!scopesettings.long_mode))
-  {
-    //Display the enabled measurements if it is active
-    switch (scopesettings.source2_measures)
-    {
-      case 0: scope_display_channel_measurements(&scopesettings.channel2, scopesettings.measuresstate[1], 366, CHANNEL2_COLOR); break;
-      case 1: scope_display_channel_measurements(&scopesettings.ch_ref5,  scopesettings.measuresstate[1], 366, scopesettings.ch_ref5.color); break;
-      case 2: scope_display_channel_measurements(&scopesettings.ch_ref6,  scopesettings.measuresstate[1], 366, scopesettings.ch_ref6.color); break;
-      case 3: scope_display_channel_measurements(&scopesettings.ch_ref7,  scopesettings.measuresstate[1], 366, scopesettings.ch_ref7.color); break;
-      case 4: scope_display_channel_measurements(&scopesettings.ch_ref8,  scopesettings.measuresstate[1], 366, scopesettings.ch_ref8.color); break;
-      default: scope_display_channel_measurements(&scopesettings.channel2, scopesettings.measuresstate[1], 366, CHANNEL2_COLOR); break;
-    }
-  }
-  
+  //fw 0.2.65 (Measurements v2): one row of cards per block, CH1's taking the whole row while CH2's is not shown
+  //(ui_ms_scope_cap); a block shows when its channel or one of its reference traces is on and Hide is off, never in
+  //roll mode (1.00o5's rule)
+  shown[0] = (scopesettings.channel1.enable || scopesettings.ref1 || scopesettings.ref2 || scopesettings.ref3 ||
+              scopesettings.ref4) && !scopesettings.hide_values_CH1 && !scopesettings.long_mode;
+  shown[1] = (scopesettings.channel2.enable || scopesettings.ref5 || scopesettings.ref6 || scopesettings.ref7 ||
+              scopesettings.ref8) && !scopesettings.hide_values_CH2 && !scopesettings.long_mode;
+
+  for(ch = 0; ch < 2; ch++)
+    if(shown[ch])
+      scope_display_channel_measurements(ch, ui_ms_scope_cap(ch, shown[ch ^ 1]));
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -3512,44 +3390,60 @@ void scope_draw_card(uint32 x, uint32 y, uint32 color, const char *name, const c
   display_text(x + cw + UI_CARD_GAP, y + 4, (int8 *)value);
 }
 
-void scope_display_channel_measurements(PCHANNELSETTINGS settings, uint8 *measuresstate, uint32 xstart, uint32 color)
+//The source of a channel block: the live channel (source 0) or one of its reference traces (1..4: Ref 1-4 for CH1,
+//Ref 5-8 for CH2), with its colour; 1.00o5's source1_measures / source2_measures
+static PCHANNELSETTINGS scope_measures_source(int ch, uint32 *color)
 {
-  int i;
-  int x,xe,y;
-
-  x  = xstart;
-  xe = xstart + 359;
-  y  = 426; //456 move up - long base
-
-  //Process the twelve possible measurements for this channel
-  for(i=0;i<12;i++)
+  static const PCHANNELSETTINGS refs[2][4] =
   {
-    //Check if the current one is enabled
-    if(measuresstate[i])
-    {
-      //Erase any previous text
-      measurementtext[0] = 0;
+    { &scopesettings.ch_ref1, &scopesettings.ch_ref2, &scopesettings.ch_ref3, &scopesettings.ch_ref4 },
+    { &scopesettings.ch_ref5, &scopesettings.ch_ref6, &scopesettings.ch_ref7, &scopesettings.ch_ref8 }
+  };
+  uint32 src = ch ? scopesettings.source2_measures : scopesettings.source1_measures;
 
-      //Display the data for this measurement
-      measurementfunctions[i](settings);
-
-      //The card (fw 0.2.51; scope_draw_card since 0.2.56, the spectrum's cards use it too)
-      scope_draw_card(x, y, color, measurement_names[i], measurementtext);
-
-      //Select next column
-      x += 120;
-
-      //Check if past the last for this row
-      if(x > xe)
-      {
-        //Back to beginning of the rows
-        x = xstart;
-
-        //Up to the row above
-        y -= 24;
-      }
-    }
+  if((src < 1) || (src > 4))
+  {
+    *color = ch ? CHANNEL2_COLOR : CHANNEL1_COLOR;
+    return ch ? &scopesettings.channel2 : &scopesettings.channel1;
   }
+
+  *color = refs[ch][src - 1]->color;
+  return refs[ch][src - 1];
+}
+
+//fw 0.2.65: the chosen cards of a block in the chosen order (measuresstate holds the display rank, ui_meas.h), as many
+//as the block has places; with more chosen the last place reads "+N more". A live channel's card takes its value from a
+//registered card source (ui_ms_set_source, a future FPGA counter) when there is one, from the record statistics
+//otherwise; a reference trace always from its record.
+void scope_display_channel_measurements(int ch, int cap)
+{
+  PCHANNELSETTINGS settings;
+  uint32       color;
+  uint8        order[UI_MEAS_COUNT];
+  char         more_text[4];
+  int          n, fit, more, i, live;
+  ui_ms_source src;
+
+  settings = scope_measures_source(ch, &color);
+  live     = (settings == &scopesettings.channel1) || (settings == &scopesettings.channel2);
+  n        = ui_ms_order(scopesettings.measuresstate[ch], UI_MEAS_COUNT, order);
+  fit      = ui_ms_fit(n, cap, &more);
+
+  for(i = 0; i < fit; i++)
+  {
+    measurementtext[0] = 0;
+    src = live ? ui_ms_get_source(order[i]) : 0;
+
+    if(src)
+      src(ch, measurementtext);
+    else
+      measurementfunctions[order[i]](settings);
+
+    scope_draw_card(ui_ms_card_x(ch, i), UI_MS_SCOPE_Y, color, measurement_names[order[i]], measurementtext);
+  }
+
+  if(more)
+    scope_draw_card(ui_ms_card_x(ch, fit), UI_MS_SCOPE_Y, color, ui_ms_more_text(more_text, more), "more");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -6218,7 +6112,6 @@ void scope_save_input_calibration_data(void)
 
 void scope_reset_config_data(void)
 {
-  uint32 index;
   
   //Load a default configuration in case of settings in flash being corrupted
    
@@ -6268,22 +6161,14 @@ void scope_reset_config_data(void)
   scopesettings.source1_measures = 0;
   scopesettings.source2_measures = 0;
     
-  //Enable some default measurements (fw 0.2.51: Freq, Vpp and Vavg on each channel; 1.00o5 set none)
+  //Enable some default measurements (fw 0.2.51: Freq, Vpp and Vavg on each channel; 1.00o5 set none). fw 0.2.65: shown
+  //in that order (the bytes hold the display rank), and the spectrum's list back to its defaults
   scopesettings.hide_values_CH1 = 0;
   scopesettings.hide_values_CH2 = 0;
 
-  for(index = 0; index < UI_MEAS_COUNT; index++)
-  {
-    scopesettings.measuresstate[0][index] = 0;
-    scopesettings.measuresstate[1][index] = 0;
-  }
-
-  for(index = 0; index < 2; index++)
-  {
-    scopesettings.measuresstate[index][UI_MEAS_FREQ] = 1;
-    scopesettings.measuresstate[index][UI_MEAS_VPP]  = 1;
-    scopesettings.measuresstate[index][UI_MEAS_VAVG] = 1;
-  }
+  ui_ms_scope_defaults(scopesettings.measuresstate[0]);
+  ui_ms_scope_defaults(scopesettings.measuresstate[1]);
+  ui_ms_spec_defaults(spectrum_cards());
 
   //Turn time cursor off and set some default positions
   scopesettings.timecursorsenable   = 0;
@@ -6355,7 +6240,7 @@ void scope_reset_config_data(void)
   //Load input calibration value 
   scope_load_input_calibration_data();
   //----------------------------------------------------------------------------  
-  //PC protocol build: acquisition Filter back to PC_DECIM_DEFAULT
+  //PC protocol build: acquisition Filter back to the per-mode defaults
   PC_SETTINGS_DEFAULTS();
 
   restore = 1;      //Flag - view restore text in display
@@ -6543,6 +6428,7 @@ void scope_save_config_data(void)
 
   //Acquisition Filter setting (decimation filter, 0x1534+) in a spare word of the FPGA block
   settingsworkbuffer[PC_SETTING_WORD_DECIM] = pc_glue_decim_setting_word();
+  settingsworkbuffer[PC_SETTING_WORD_DECIM_SPEC] = pc_glue_decim_spec_setting_word();
   //Spectrum view settings (FFT length, window, scale, ref level)
   settingsworkbuffer[PC_SETTING_WORD_SPEC0] = pc_glue_spectrum_setting_word(0);
   settingsworkbuffer[PC_SETTING_WORD_SPEC1] = pc_glue_spectrum_setting_word(1);
@@ -6550,6 +6436,10 @@ void scope_save_config_data(void)
   settingsworkbuffer[PC_SETTING_WORD_PHOS] = pc_glue_phosphor_setting_word();
   //Grid and the spectrum's Display variant (fw 0.2.56)
   settingsworkbuffer[PC_SETTING_WORD_UI] = pc_glue_ui_setting_word();
+  //The spectrum's MEASURES list (fw 0.2.65, words 221..223)
+  settingsworkbuffer[UI_MS_SPEC_WORD_CH1]  = ui_ms_spec_word(spectrum_cards(), 0);
+  settingsworkbuffer[UI_MS_SPEC_WORD_CH2]  = ui_ms_spec_word(spectrum_cards(), 1);
+  settingsworkbuffer[UI_MS_SPEC_WORD_VIEW] = ui_ms_spec_word(spectrum_cards(), UI_MS_SP_VIEW);
   //Bode plot sweep settings (fw 0.2.66)
   settingsworkbuffer[PC_SETTING_WORD_BODE0] = pc_glue_bode_setting_word(0);
   settingsworkbuffer[PC_SETTING_WORD_BODE1] = pc_glue_bode_setting_word(1);
@@ -6713,6 +6603,11 @@ void scope_restore_config_data(void)
         scopesettings.measuresstate[channel][index] = *ptr++;
       }
     }
+    //fw 0.2.65: the spectrum's MEASURES list (words 221..223; a word without its marker gives that group's defaults)
+    ui_ms_spec_restore(spectrum_cards(), 0, settingsworkbuffer[UI_MS_SPEC_WORD_CH1]);
+    ui_ms_spec_restore(spectrum_cards(), 1, settingsworkbuffer[UI_MS_SPEC_WORD_CH2]);
+    ui_ms_spec_restore(spectrum_cards(), UI_MS_SP_VIEW, settingsworkbuffer[UI_MS_SPEC_WORD_VIEW]);
+
     //Load reference waveforms
     scope_load_ALLREF_file();
     //--------------------------------------------------------------------------

@@ -10,6 +10,7 @@
 #define SPECTRUM_H
 
 #include "types.h"
+#include "ui_meas.h"
 
 //Display modes as GET_STATUS byte 43 reports them (protocol section 14 row 45)
 #define SPECTRUM_MODE_SCOPE       0
@@ -48,6 +49,14 @@ int    spectrum_auto_running(void);          //fw 0.2.51: the view's Auto runs (
 int    spectrum_view(void);
 void   spectrum_set_view(int v);
 
+//fw 0.2.63 (owner): the one channel the Waterfall and Density views keep a history of (0 CH1, 1 CH2), shown and chosen
+//in the Display fold-out. With Analyse on CH1 + CH2 the choice picks one of the two; with Analyse on one channel a
+//choice sets Analyse to it (only analysed channels have spectra). A channel that is off cannot be chosen. One history
+//per view for now; a history per channel (both drawn) is a later step.
+int    spectrum_hist_channel(void);
+int    spectrum_hist_can_choose(int ch);
+void   spectrum_set_hist_channel(int ch);
+
 #define SPEC_P_CHANNEL        0             //Analyse: CH1, CH2, CH1 + CH2 (enabled ones; also the dBV / dBA unit, Auto's channel)
 #define SPEC_P_FFT            1
 #define SPEC_P_WINDOW         2
@@ -66,5 +75,8 @@ int32  spectrum_read(int ch, uint32 first, uint32 max_bins, uint8 *hdr, uint8 *l
 //Settings sector words (fw 0.2.39): FFT length, window, scale (word 0) and ref level (word 1)
 uint16 spectrum_settings_word(int i);
 void   spectrum_settings_restore(uint16 w0, uint16 w1);
+
+//fw 0.2.65: the spectrum's MEASURES list (the cards; saved in words 221..223 by scope_save_config_data, ui_meas.h)
+ui_ms_spec *spectrum_cards(void);
 
 #endif

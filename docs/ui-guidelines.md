@@ -54,7 +54,7 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   corners, drawn over a grey box that holds the parameters or the value, so the join has no notch. The block is as wide
   as its text.
 - **Measurement names** as scope makers spell them: Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq, Period, +Width, -Width,
-  +Duty, -Duty, Peak, Level, RBW. Values with four significant digits and a unit, formatted to fit the card.
+  +Duty, -Duty, Peak, Level, RBW, THD, Noise, Span, Center (fw 0.2.65). Values with four significant digits and a unit, formatted to fit the card.
 - **Fonts**: the device has bitmap fonts of 13, 16 and 24 px only (`font_2`, `font_3`, `font_5`), no anti-aliasing,
   no word wrap. 13 px for units and secondary text, 16 px for values and rows, 24 px for headlines. Every line is laid
   out to fit its box at 6.7 px per character (13 px) and 7.1 px (16 px); long sentences are broken by hand.

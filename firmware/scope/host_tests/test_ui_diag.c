@@ -15,7 +15,7 @@
 
 extern FONTDATA font_2, font_3, font_5;
 
-static uint8_t     health[96];
+static uint8_t     health[104];
 static uint8_t     cal[2][356];
 static uint32_t    link[64];
 static pc_image_id run;
@@ -262,13 +262,45 @@ static void test_pages(void)
   //Status as the mockup reads
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
   T_TRUE(has_text("fw 0.2.59, git 1234abcd, 2026-10-19 08:44 UTC, protocol 1.16, serial 1013D-0001, MMU and caches on"));
-  //fw 0.2.61: 0x1532..0x1536 have the ADC capture timing race (amber); 0x1537 lists its features
-  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x1537"));
+  //fw 0.2.61: 0x1532..0x1536 have the ADC capture timing race (amber); fw 0.2.62: 0x1537 the other core order
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x1538"));
   T_EQ(text_colour("FPGA AL3A10 bitstream 0x1535"), UD_C_WARN);
   in.fpga = 0x1537;
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1537: generator, EXT trigger, decimation filter, CIC+FIR"));
-  T_EQ(text_colour("FPGA AL3A10 bitstream 0x1537"), UD_C_SOFT);
+  check_layout("0x1537", 0);
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1537: ADC core order differs: recalibrate after flashing 0x1538"));
+  T_EQ(text_colour("FPGA AL3A10 bitstream 0x1537"), UD_C_WARN);
+
+  //0x1538: the line reads GET_HEALTH 88..103 (the FPGA's 0x33 after the last full-rate capture)
+  in.fpga = 0x1538;
+  health[88] = 2;
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1538: encode check, no 200 MSa/s capture yet"));
+  T_EQ(text_colour("FPGA AL3A10 bitstream 0x1538"), UD_C_SOFT);
+  health[89] = 0xF6; health[90] = 0x01; health[91] = 0xF6;
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1538: encode check OK"));
+  T_EQ(text_colour("FPGA AL3A10 bitstream 0x1538"), UD_C_SOFT);
+  p32(health + 92, 3);
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1538: encode check OK, 3 captures re-taken"));
+  p32(health + 92, 1);
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1538: encode check OK, 1 capture re-taken"));
+  health[89] = 0x67; health[90] = 0x05;                         //CH2 A and CH1 B wrong, accepted after the re-arms
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  check_layout("0x1538 failed", 0);
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1538: encode check failed on CH2 A, CH1 B"));
+  T_EQ(text_colour("FPGA AL3A10 bitstream 0x1538"), UD_C_WARN);
+  health[89] = 0xF7;                                            //failed, pins right (an asynchronous write)
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1538: encode check failed"));
+  T_TRUE(!has_text("failed on"));
+  health[90] = 0x03; health[91] = 0xFA;                         //boot: convention bits 10
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1538: unknown encode convention, 0x33 = 0xfa"));
+  T_EQ(text_colour("FPGA AL3A10 bitstream 0x1538"), UD_C_WARN);
+  memset(health + 88, 0, 16);
   in.fpga = 0x1535;
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
   T_TRUE(has_text("Running 0.2.59"));
@@ -308,15 +340,31 @@ static void test_pages(void)
   T_TRUE(has_text("Full-rate offset +0.70 code, 4 probes, 12 s ago"));
   T_TRUE(has_text("DC shift: centre 870, size 100, value 59136"));
   T_TRUE(has_text("1.00o5 core compensations: not used (v3 in use)"));
-  T_TRUE(has_text("Needs a DC supply up to 15 V."));
-  T_TRUE(has_text("DC shift trim off."));
+  //fw 0.2.63: no supply hedge; the DC shift trim's state is the button's colour, no "off" line
+  T_TRUE(!has_text("Needs a DC supply up to 15 V."));
+  T_TRUE(!has_text("DC shift trim off."));
+  T_TRUE(!has_text("On: CTRL on the scope opens the trim."));
   T_EQ(ud_hit(&pg, 170, 380), UD_ID_DCSHIFT);
+  {
+    uint32_t b;
+
+    for(b = 0; b < pg.nbtn; b++)
+      if(pg.btn[b].id == UD_ID_DCSHIFT)
+        T_EQ(pg.btn[b].style, UD_B_GREY);
+  }
   T_EQ(ud_hit(&pg, 20, 440), UD_ID_VOLTS);
   T_EQ(ud_hit(&pg, 700, 440), UD_ID_CLEAR);
   T_EQ(ud_hit(&pg, 20, 380), UD_ID_CALIBRATE);
   in.dc_shift = 1;
   ud_build(&pg, UD_PAGE_CAL, &in, 0);
-  T_EQ(text_colour("DC shift trim on: CTRL on the scope opens it."), UD_C_WARN);
+  T_EQ(text_colour("On: CTRL on the scope opens the trim."), UD_C_WARN);
+  {
+    uint32_t b;
+
+    for(b = 0; b < pg.nbtn; b++)
+      if(pg.btn[b].id == UD_ID_DCSHIFT)
+        T_EQ(pg.btn[b].style, UD_B_ON);
+  }
   strcpy(note.text, "Calibration cleared: run Calibrate.");
   note.colour = UD_C_WARN;
   ud_build(&pg, UD_PAGE_CAL, &in, &note);
@@ -333,15 +381,19 @@ static void test_pages(void)
   T_TRUE(has_text("Operating time 37 h 5 min."));
   T_EQ(ud_hit(&pg, 230, 430), UD_ID_OLDER);
 
-  //Developer page: the two rows
+  //Developer page (fw 0.2.63): Enter FEL; the Debug overlay row only while the developer flag is set, to switch it off
   ud_build(&pg, UD_PAGE_DEV, &in, 0);
-  T_EQ(ud_hit(&pg, 400, 100), UD_ID_OVERLAY);
-  T_EQ(ud_hit(&pg, 400, 170), UD_ID_FEL);
-  T_EQ(pg.btn[pg.nbtn - 2].note_colour, UD_C_DIM);         //off
+  T_EQ(ud_hit(&pg, 400, 100), UD_ID_FEL);
+  T_EQ(ud_hit(&pg, 400, 170), UD_ID_NONE);
+  T_TRUE(!has_text("Developer flag: raw trigger address and touch coordinates on the scope"));
   in.dev_mode = 1;
   ud_build(&pg, UD_PAGE_DEV, &in, 0);
-  T_STR(pg.btn[pg.nbtn - 2].note, "on");
-  T_EQ(pg.btn[pg.nbtn - 2].note_colour, UD_C_OK);
+  check_layout("dev flag", 0);
+  T_EQ(ud_hit(&pg, 400, 100), UD_ID_OVERLAY);
+  T_EQ(ud_hit(&pg, 400, 170), UD_ID_FEL);
+  T_STR(pg.btn[pg.nbtn - 2].note, "Switch off");
+  T_EQ(pg.btn[pg.nbtn - 2].note_colour, UD_C_WARN);
+  in.dev_mode = 0;
 
   //Header: tabs and Back on every page, the shown one highlighted
   for(p=0;p<UD_PAGES;p++)
@@ -352,6 +404,9 @@ static void test_pages(void)
     T_EQ(ud_hit(&pg, 420, 20), UD_ID_TAB_LOG);
     T_EQ(ud_hit(&pg, 630, 20), UD_ID_TAB_DEV);
     T_EQ(ud_hit(&pg, 700, 20), UD_ID_BACK);
+    T_EQ(ud_hit(&pg, 692, 4), UD_ID_BACK);      //fw 0.2.63: Back where the Settings screen has it (692, 4, 96 x 44)
+    T_EQ(ud_hit(&pg, 787, 47), UD_ID_BACK);
+    T_EQ(ud_hit(&pg, 691, 20), UD_ID_NONE);
     T_EQ(ud_hit(&pg, 100, 20), UD_ID_NONE);
     T_EQ(ud_hit(&pg, 400, 300), UD_ID_NONE);
     T_EQ(pg.btn[p].style, UD_B_TAB_ON);
@@ -619,7 +674,7 @@ static void test_first_run(void)
   ud_build_first_run(&pg, &in, 1, 0);
   check_layout("first run", 0);
   T_TRUE(has_text("Open firmware 0.2.59, protocol 1.16. FPGA bitstream 0x1535."));
-  T_TRUE(has_text(UD_ICON_WARN "FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x1537"));
+  T_TRUE(has_text(UD_ICON_WARN "FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x1538"));
   T_TRUE(has_text(UD_ICON_OK "No saved settings on the card: defaults used."));
   T_TRUE(has_text(UD_ICON_WARN "Calibration missing: readings may be several % off."));
   T_TRUE(!has_text("Volts calibration"));

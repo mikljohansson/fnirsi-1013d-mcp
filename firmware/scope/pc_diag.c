@@ -337,7 +337,7 @@ const pc_card_id *pc_glue_card_ident(void)
 }
 
 //Status page snapshot: the GET_HEALTH body (96 bytes, protocol row 55) and the running image's identity
-void pc_glue_health(uint8 *body96)
+void pc_glue_health(uint8 *body)
 {
-  pc_health_body(body96);
+  pc_health_body(body);
 }

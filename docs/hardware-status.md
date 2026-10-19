@@ -853,3 +853,25 @@ Newest entries at the bottom. Format: date, who, what, result.
   write clock (B earlier, the 1.00o5 convention; 0x1537 had chip 1 reversed and chip 2 marginal), new read 0x33 self-check
   (bit 0 sticky fail since the last 0x01, bits 3:2 = 01 convention, 7:4 pin checks, 0xF6 good); FPGA.bin sha256 0c24ecf6...; full
   testbench run pending, then pinning. Calibration taken on 0x1537 must be redone; 0x1535 calibration fits 0x1538. fw-enc dispatched.
+- 2026-10-19 17:40: bitstream 0x1538 pinned (fpga-gen7): backups/al3_seg_0x1538_0c24ecf6.bin sha256
+  0c24ecf6ff55bc170ce6d7acd1ee4f8afbaf97d73b36e0b7a27a92639d1dbbbd, padded backups/al3_seg_0x1538_0c24ecf6_padded.bin sha256
+  2fc7ea5b2fc925157c02f3f492ee3ac17b6154d7ed27e2c20c2d26e855ac1087; committed as fpga/al3/dist/al3-0x1538.bin (unbenched). Not
+  flashed. Flash session plan: as 16:27 (programmer on J2, battery, USB out); pre-write dump must equal the 0x1537 padded image
+  febc9299...; rollback to 0x1535 padded 5ade9e75... or 0x1537 febc9299...; then the README section 8 checks on fw 0.2.61 (no-write
+  1000-capture run clean, CH2 A-B mean near 0, wizard zero step on both channels) and 0x33 once fw 0.2.62 is loaded.
+- **FPGA flash written with bitstream 0x1538** (17:43-17:46, Sipeed FT2232D on J2, scope on battery, USB unplugged): JEDEC ef 40 14,
+  pre-write double read backups/20261019-174328-pre-0x1538.bin sha256 febc9299... = the pinned 0x1537 padded image; wrote
+  backups/al3_seg_0x1538_0c24ecf6_padded.bin: 256 sectors erased, 1105 pages programmed, write verified 2fc7ea5b..., independent
+  verify run after. Power cycle pending; then fw 0.2.64 (merge ed06e7e, GCC 10 sha 8caacb31...) FEL-load and the README section 8
+  checks (0x33 = 0xF6 per capture, no garbled core over 1000+ captures, CH2 A-B near 0, wizard zero step both channels).
+- 2026-10-19 17:50: power cycle: the card's 0.2.25 boots FPGA 0x1538; fw 0.2.64 FEL-loaded (#VER fw=0.2.64 proto=1.19 fpga=0x1538).
+  Encode checks on 0x1538: rate toggles 99/1/3999 <-> 0, 40 trials each: 0 garbled captures, max core std 0.93; 60 s no-write run:
+  1233 captures, 0 garbled, max std 1.44. GET_HEALTH 88..103: mode 2 (0x33 flag), last 0x33 0xF6, boot 0x33 0xF6 convention OK;
+  112 captures flagged by 0x33 and re-taken out of 5798 checked (event log read next). Raw core means: CH1 A-B +5.0 (3.3 on 0x1535),
+  CH2 A-B -2.6 (0.5 on 0x1535; -3.3 on 0x1537): the per-core offsets differ from the 0x1535 state, so the unit needs a recalibration
+  on 0x1538 (the wizard measures per core). Wizard run next.
+- 2026-10-19 17:55: wizard Zero level on 0.2.64 / 0x1538, nothing connected: still fails every time, now "CH1: too much noise,
+  range 1 at 200MSa/s: core B 7.2 codes, 7.2 per capture" (6-8 across runs) and "CH2: the input is not at 0 V" (clip). Host READ_RAW
+  at the same range and moment: 0.6-2.0 codes per core, no clipping, 0x33 0xF6. So the wizard's own conversion setup differs from
+  every other path (offset PWM / relay / settle on the coarsest range suspected); the four-screen wizard has never completed on
+  hardware; the 0.2.48 one-screen flow did. fw-cal5 dispatched (fix + host-triggerable dry run). Bench paused.

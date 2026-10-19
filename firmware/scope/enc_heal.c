@@ -1,12 +1,33 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// enc_heal.c - check and heal of the AL3 0x1532..0x1536 encode-phase race (enc_heal.h)
+// enc_heal.c - the full-rate capture check and its re-arm bookkeeping (enc_heal.h)
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "enc_heal.h"
 
+int eh_mode(uint16_t fpga_version)
+{
+  if((fpga_version >= 0x1532) && (fpga_version <= 0x1537))
+    return EH_MODE_DATA;
+
+  if((fpga_version >= 0x1538) && (fpga_version <= 0x153F))
+    return EH_MODE_FLAG;
+
+  return EH_MODE_NONE;
+}
+
 int eh_affected(uint16_t fpga_version)
 {
   return (fpga_version >= 0x1532) && (fpga_version <= 0x1536);
+}
+
+int eh_order_differs(uint16_t fpga_version)
+{
+  return fpga_version == 0x1537;
+}
+
+int eh_conv_ok(uint8_t s33)
+{
+  return (s33 & EH_33_CONV_MASK) == EH_33_CONV_1;
 }
 
 static uint32_t eh_isqrt(uint64_t x)
@@ -62,26 +83,78 @@ uint32_t eh_residual16(const uint8_t *buf, uint32_t n)
   return (e < l) ? e : l;
 }
 
-static int eh_pass(const uint32_t res16[2])
+int eh_check(const eh_io *io, int mode, uint32_t start, uint32_t words, uint32_t *value)
 {
-  return (res16[0] <= EH_LIMIT16) && (res16[1] <= EH_LIMIT16);
-}
+  uint8_t  buf[2 * EH_CHECK_PAIRS];
+  uint32_t ch, r, worst = 0;
 
-int eh_run(const eh_ops *o, eh_result *r)
-{
-  r->tries = 0;
-  o->capture(o->ctx, r->res16);
-  r->first16 = (r->res16[0] > r->res16[1]) ? r->res16[0] : r->res16[1];
-  r->bad = !eh_pass(r->res16);
-  r->ok  = !r->bad;
-
-  while(!r->ok && (r->tries < EH_MAX_TRIES))
+  if(mode == EH_MODE_FLAG)
   {
-    o->retry(o->ctx);
-    r->tries++;
-    o->capture(o->ctx, r->res16);
-    r->ok = eh_pass(r->res16);
+    uint8_t s = io->status(io->ctx);
+
+    *value = s;
+    return (s & EH_33_FAILED) != 0;
   }
 
-  return r->ok;
+  if(words > EH_CHECK_PAIRS)
+    words = EH_CHECK_PAIRS;
+
+  //Trace layout: core B (0x21 / 0x23) even, core A (0x20 / 0x22) odd
+  for(ch=0;ch<2;ch++)
+  {
+    io->read(io->ctx, (uint8_t)(2 * ch + 1), start, words, buf, 2);
+    io->read(io->ctx, (uint8_t)(2 * ch), start, words, buf + 1, 2);
+    r = eh_residual16(buf, words);
+
+    if(r > worst)
+      worst = r;
+  }
+
+  *value = worst;
+  return worst > EH_LIMIT16;
+}
+
+void eh_cap_reset(eh_cap *c)
+{
+  c->tries = 0;
+  c->first = 0;
+}
+
+int eh_cap_step(eh_cap *c, int bad, uint32_t value, eh_note *n)
+{
+  n->bad   = (uint8_t)(bad != 0);
+  n->first = (uint8_t)(bad && (c->tries == 0));
+  n->done  = 0;
+  n->ok    = 0;
+  n->tries = c->tries;
+  n->value = c->tries ? c->first : value;
+
+  if(bad && (c->tries == 0))
+    c->first = value;
+
+  if(bad && (c->tries < EH_MAX_TRIES))
+  {
+    c->tries++;
+    return EH_REARM;
+  }
+
+  //Accepted: after failures, an episode for the event log
+  if(bad || c->tries)
+  {
+    n->done = 1;
+    n->ok   = (uint8_t)!bad;
+  }
+
+  eh_cap_reset(c);
+  return EH_ACCEPT;
+}
+
+uint8_t eh_event_a(uint8_t why, uint8_t tries, int ok)
+{
+  return (uint8_t)(((why & 3) << 5) | ((tries > 31) ? 31 : tries) | (ok ? 0 : 0x80));
+}
+
+uint16_t eh_event_b(uint8_t who, uint32_t value)
+{
+  return (uint16_t)(((uint32_t)(who & 15) << 12) | ((value > 0xFFF) ? 0xFFF : value));
 }

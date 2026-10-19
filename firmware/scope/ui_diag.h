@@ -43,6 +43,7 @@
 #define UD_B_TAB_ON      4        //the page shown
 #define UD_B_GREY        5        //Later, Cancel in the wizard
 #define UD_B_ROW         6        //a full-width settings row (Developer page): the outlined box is the button
+#define UD_B_ON          7        //a toggle that is on: green (fw 0.2.63; off is UD_B_GREY), the label stays the same
 
 //Button ids
 #define UD_ID_NONE        0
@@ -111,7 +112,7 @@ typedef struct
 //Everything the pages show, as the firmware has it. Bodies as the protocol returns them (docs/protocol.md row 55).
 typedef struct
 {
-  const uint8_t     *health;          //GET_HEALTH body, 96 bytes
+  const uint8_t     *health;          //GET_HEALTH body, 104 bytes (PC_HEALTH_LEN)
   const uint8_t     *cal[2];          //GET_CAL bodies, 356 bytes each
   const uint32_t    *link;            //GET_LINK_STATS counters
   uint32_t           nlink;

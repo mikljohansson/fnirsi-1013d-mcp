@@ -376,6 +376,10 @@ int pc_glue_sys_menu_height(void);
 //----------------------------------------------------------------------------------------------------------------------------------
 // Sampling system
 
+//fw 0.2.64: trace points per channel: the Peak and Pro styles store two per column (max and min) over 724 columns;
+//1.00o5 sized the buffers 730 and the two styles wrote past them into the next buffer
+#define TRACE_POINTS_MAX                  1460
+
 #define MAX_SAMPLE_BUFFER_SIZE            16382//3000//4095
 //Round up: 16382 / 4 = 4095 words is 2 bytes short of a 16382-sample readout (Donwulff fix, plan section 4)
 #define UINT32_SAMPLE_BUFFER_SIZE         ((MAX_SAMPLE_BUFFER_SIZE + 3) / 4)
@@ -903,7 +907,7 @@ extern uint32 channel1tracebufferAVG[MAX_SAMPLE_BUFFER_SIZE];
 
 //extern uint32 channel1_tmp_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 
-extern DISPLAYPOINTS channel1pointsbuffer[730];
+extern DISPLAYPOINTS channel1pointsbuffer[TRACE_POINTS_MAX];
 //-------------------------------------------------------------
 extern uint32 channel2tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 
@@ -916,7 +920,7 @@ extern uint32 channel2tracebufferAVG[MAX_SAMPLE_BUFFER_SIZE];
 
 //extern uint32 channel2_tmp_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 
-extern DISPLAYPOINTS channel2pointsbuffer[730];
+extern DISPLAYPOINTS channel2pointsbuffer[TRACE_POINTS_MAX];
 //-------------------------------------------------------------
 
 extern uint32 ref1_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
@@ -929,15 +933,15 @@ extern uint32 ref6_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 extern uint32 ref7_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 extern uint32 ref8_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 
-extern DISPLAYPOINTS ref1pointsbuffer[730];      //Buffer to store the x,y positions of the trace on the display
-extern DISPLAYPOINTS ref2pointsbuffer[730];      //Buffer to store the x,y positions of the trace on the display
-extern DISPLAYPOINTS ref3pointsbuffer[730];      //Buffer to store the x,y positions of the trace on the display
-extern DISPLAYPOINTS ref4pointsbuffer[730];      //Buffer to store the x,y positions of the trace on the display
+extern DISPLAYPOINTS ref1pointsbuffer[TRACE_POINTS_MAX];      //Buffer to store the x,y positions of the trace on the display
+extern DISPLAYPOINTS ref2pointsbuffer[TRACE_POINTS_MAX];      //Buffer to store the x,y positions of the trace on the display
+extern DISPLAYPOINTS ref3pointsbuffer[TRACE_POINTS_MAX];      //Buffer to store the x,y positions of the trace on the display
+extern DISPLAYPOINTS ref4pointsbuffer[TRACE_POINTS_MAX];      //Buffer to store the x,y positions of the trace on the display
 
-extern DISPLAYPOINTS ref5pointsbuffer[730];      //Buffer to store the x,y positions of the trace on the display
-extern DISPLAYPOINTS ref6pointsbuffer[730];      //Buffer to store the x,y positions of the trace on the display
-extern DISPLAYPOINTS ref7pointsbuffer[730];      //Buffer to store the x,y positions of the trace on the display
-extern DISPLAYPOINTS ref8pointsbuffer[730];      //Buffer to store the x,y positions of the trace on the display
+extern DISPLAYPOINTS ref5pointsbuffer[TRACE_POINTS_MAX];      //Buffer to store the x,y positions of the trace on the display
+extern DISPLAYPOINTS ref6pointsbuffer[TRACE_POINTS_MAX];      //Buffer to store the x,y positions of the trace on the display
+extern DISPLAYPOINTS ref7pointsbuffer[TRACE_POINTS_MAX];      //Buffer to store the x,y positions of the trace on the display
+extern DISPLAYPOINTS ref8pointsbuffer[TRACE_POINTS_MAX];      //Buffer to store the x,y positions of the trace on the display
 
 extern uint32 math_channel_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 
@@ -1072,7 +1076,6 @@ extern const uint8 time_per_div_sample_rate_15k[35];//33
 
 extern const uint8 sample_rate_time_per_div[18];//18
 //extern const uint8 viable_time_per_div[18][24];
-extern const uint8 viable_time_per_div[29][35];//18 a 33
 
 //extern const int8 *L_time_div_texts[9];
 
@@ -1166,7 +1169,6 @@ extern FONTDATA font_5;
 //Icons
 //----------------------------------------------------------------------------------------------------------------------------------
 
-extern const uint8 system_settings_icon[];
 extern const uint8 Other_settings_icon[];
 extern const uint8 Right_drop_menu_icon[];
 //extern const uint8 Right_drop_menu_icon1[];
@@ -1182,7 +1184,6 @@ extern const uint8 grid_brightness_icon[];
 extern const uint8 trigger_50_percent_icon[];
 extern const uint8 baseline_calibration_icon[];
 extern const uint8 x_y_mode_display_icon[];
-extern const uint8 confirmation_icon[];
 extern const uint8 RTC_icon[];
 extern const uint8 Left_icon[];
 extern const uint8 Right_icon[];

@@ -7,6 +7,7 @@
 #include "pc_hooks.h"
 #include "acal_live.h"
 #include "pc_transport.h"
+#include "enc_heal.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -25,7 +26,6 @@ void fpga_init(void)
 //sampling reset) into the event log, type 22, with the caller (fpga_trace_who): the bench correlates a garbled full-rate
 //capture with the writes before it (firmware/AGENTS.md section 37)
 uint8        fpga_trace_who = FPGA_WHO_UI;
-uint8        fpga_rate_dirty;                 //a 0x0D write since the last full-rate check (enc_heal_hw.c)
 static uint8 fpga_trace_cmd;
 
 static void fpga_trace(uint32 value)
@@ -33,9 +33,6 @@ static void fpga_trace(uint32 value)
   uint8 c = fpga_trace_cmd;
 
   fpga_trace_cmd = 0;
-
-  if((c == 0x0D) && (fpga_trace_who != FPGA_WHO_CHECK))
-    fpga_rate_dirty = 1;
 
   if((c == 0x0D) || (c == 0x53) || (c == 0x56) || ((c == 0x01) && (value == 1)))
     pc_usb_log_fpga_write(c, (uint16)(((uint32)fpga_trace_who << 12) | ((value > 0xFFF) ? 0xFFF : value)));
@@ -652,6 +649,9 @@ void fpga_do_conversion(void)
 { 
   scopesettings.conversion_done = 0;    //flag for conversion, 0-start
 
+  //fw 0.2.62: a new capture for the full-rate check (unless this is its re-arm)
+  fpga_encode_new_conversion();
+
   //Decimation filter (0x1534+): the UI acquisition's setting, legacy (K = 0) for every other caller (calibration,
   //auto setup), written and settled before the sampling reset
   pc_glue_decim_conversion();
@@ -750,6 +750,11 @@ uint8 fpga_done_conversion(void)
     if (((fpga_read_byte() & 1) == 1)) scopesettings.conversion_done = 1;
   }
   
+  //fw 0.2.62: a full-rate capture is checked before anyone reads it; a bad one is discarded and the conversion re-armed
+  //(enc_heal.h, bounded), so every caller's wait loop simply keeps waiting
+  if(scopesettings.conversion_done && fpga_encode_after_capture())
+    scopesettings.conversion_done = 0;
+
   //Scan the touch panel
   tp_i2c_read_status();
   if (havetouch == 1) scopesettings.display_data_done = 1;

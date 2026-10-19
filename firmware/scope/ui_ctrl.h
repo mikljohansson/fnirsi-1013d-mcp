@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// ui_ctrl.h - the right bar's CTRL page, its fold-outs, the warning line and the spectrum's cards (fw 0.2.56, UX makeover
+// ui_ctrl.h - the right bar's CTRL page, its fold-outs, the warning line (fw 0.2.56, UX makeover
 // step 2, docs/plans/ux-makeover.md section 3, docs/ui-guidelines.md sections 2-3). Pure C, no globals, host-buildable
 // (host_tests/test_ui.c): geometry, hit areas, the name tables and the texts. ctrl_page.c draws with them and runs the
 // fold-outs' touch loops; spectrum.c and phosphor.c take their value names from here.
@@ -26,7 +26,7 @@
 #define UI_P1_SAVEPIC         6
 #define UI_P1_SAVEWAVE        7
 
-int ui_p1_shown(int slot, int spectrum);
+int ui_p1_shown(int slot, int spectrum);     //spectrum: 0 Scope, 1 Spectrum, 2 Bode plot (fw 0.2.66)
 
 //CTRL page (page two), the same order in every mode: Display, the mode's analysis control (Trace style in Scope,
 //Analyse in Spectrum), Grid, the V+ / CH / V- steppers of both channels, 50 % TRIG (Scope only; the slot stays empty in
@@ -100,14 +100,27 @@ int    ui_fold_dir(const ui_fold *f, uint32 x);              //two-way rows: -1 
 #define UI_FOLD_TWOWAY_IN     40
 #define UI_FOLD_TEXT_X        90
 
+//RUN/STOP (fw 0.2.63, owner): a two-state button that shows the state, a tap changes it. Running: green, "RUN" in the
+//16 px font. Stopped: amber (needs attention; red is kept for destructive actions, guidelines section 3), "Stopped" in
+//the 13 px font ("STOPPED" is 62 px in the 16 px font and 50 in the 13 px one, too wide for the 51 px button).
+#define UI_C_AMBER            0x00FFD262
+extern const char *const ui_run_label[2];                         //[0] stopped, [1] running
+
+//ACQ menu, Memory column (x 305..377 of the menu, under its rule at y 211): the main-loop pass time, a grey label line
+//and the value under it (fw 0.2.63; it sat between the "Memory" header and the first depth chip before)
+#define UI_ACQ_PASS_X         312
+#define UI_ACQ_PASS_Y         218
+#define UI_ACQ_PASS_W         62
+extern const char *const ui_acq_pass_label;                      //"Pass time"
+
 //Value names, as the fold-outs and the CTRL buttons show them
-#define UI_TRACE_COUNT        4
+#define UI_TRACE_COUNT        3     //fw 0.2.63: 1.00o5's "Pro" (min / max outlines, no fill) removed, see README
 #define UI_VIEW_NORMAL        0
 #define UI_VIEW_XY            1
 #define UI_SPEC_VIEW_COUNT    3
 #define UI_PERSIST_COUNT      4
 
-extern const char *const ui_trace_names[UI_TRACE_COUNT];         //Linear, Dots, Peak, Pro (scopesettings.ACQ_trace)
+extern const char *const ui_trace_names[UI_TRACE_COUNT];         //Linear, Dots, Peak (scopesettings.ACQ_trace)
 extern const char *const ui_view_names[2];                        //Normal, X-Y
 extern const char *const ui_spec_view_names[UI_SPEC_VIEW_COUNT];  //Spectrum, Waterfall, Density
 extern const char *const ui_spec_chan_names[3];                   //CH1, CH2, CH1 + CH2
@@ -132,25 +145,5 @@ typedef struct
 } ui_warn_in;
 
 const char *ui_scope_warning(const ui_warn_in *w);
-
-//Spectrum cards (bottom row; plan section 3a): per shown channel Peak and Level in the channel colour, then RBW and, in
-//the waterfall, the time its rows span, both with a neutral chip. One row from x 5 at a 120 px pitch: six fit.
-#define UI_SC_PEAK            0
-#define UI_SC_LEVEL           1
-#define UI_SC_RBW             2
-#define UI_SC_TIME            3
-#define UI_SC_MAX             6
-#define UI_SC_Y               446
-
-typedef struct
-{
-  uint8 kind;
-  uint8 ch;
-} ui_spec_card;
-
-extern const char *const ui_sc_names[4];                         //Peak, Level, RBW, Time
-
-int    ui_spec_cards(const uint8 shown[2], int time_ok, ui_spec_card *out);
-uint32 ui_spec_card_x(int i);
 
 #endif

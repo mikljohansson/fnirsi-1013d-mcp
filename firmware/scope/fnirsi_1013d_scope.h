@@ -84,6 +84,7 @@
 #define TOUCH_STATE_MOVE_REF6                0x0F
 #define TOUCH_STATE_MOVE_REF7                0x10
 #define TOUCH_STATE_MOVE_REF8                0x11
+#define TOUCH_STATE_MOVE_RECORD              0x12    //fw 0.2.64: the record-position slider under the grid
 
 #define TOUCH_STATE_MASK                     0x1F//0x0F
 

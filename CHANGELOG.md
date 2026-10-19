@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 The firmware (`PC_FW_VERSION` in `firmware/scope/pc_cmds.h`) and the mcp package (`mcp/pyproject.toml`)
 share one version from the first tag on. A release tag `vX.Y.Z` requires both to read `X.Y.Z` and a
-`## [X.Y.Z] - YYYY-MM-DD` section in this file, whose text becomes the release notes. See
+`## [X.Y.Z] - YYYY-MM-DD` section in this file, whose text becomes the release notes. See Since the 0.3.0 release engineering (rel-gen1) the user-facing release notes are written separately in `docs/release-notes/X.Y.Z.md`; this file stays the development log.
 `docs/releasing.md`. Tags below 1.0.0 are published as pre-releases.
 
 ## [Unreleased]
@@ -31,7 +31,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.66 - 2026-10-19 (protocol 1.20 provisional, docs/protocol.md section 14 row 60)
+#### 0.2.66 - 2026-10-19 (protocol 1.20, docs/protocol.md section 14 row 60)
 
 - Added: a Bode plot on the scope. The generator menu has a fourth row, "Bode plot": it opens a mode that sweeps the
   calibration post's square from Start to Stop and plots H = CH2 / CH1 as magnitude and phase over a log frequency axis,
@@ -42,16 +42,93 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   clear). The sweep is the host tool's (`scope_bode_sweep`): the same frequency plan, the pre-scan and ranging, the
   background capture, the settle retry, CH2 auto-ranging with the splice and the same quality flags, without a PC.
   Leaving the mode gives the generator, the channels, the time base, the trigger source and RUN / STOP back. The
-  settings are kept in settings words 220-221. The wiring is shown in the plot until the first sweep (DUT ground on the
+  settings are kept in settings words 219-220. The wiring is shown in the plot until the first sweep (DUT ground on the
   probe ground clips). Needs the decimation filter (AL3 0x1534+). (bode_dsp.c, bode_sweep.c, bode_view.c, pc_bode.c)
-- Added: protocol 1.20 (provisional number), BODE_CTRL (0x0211: settings, run one or repeated sweeps, stop, abort, thru
+- Added: protocol 1.20, BODE_CTRL (0x0211: settings, run one or repeated sweeps, stop, abort, thru
   measure / apply / clear, open / close the view; answers the state and the estimated duration) and READ_BODE (0x0212:
   the table of the latest sweep, 20 bytes per point: the DDS period M, f, |H|, phase, V1, V2, ranges, flags). GET_STATUS
-  `display_mode` 5 = Bode plot; features bit 5 = the bitstream can run it.
+  `display_mode` 5 = Bode plot; features bit 6 = the bitstream can run it.
 - Tests: `host_tests/test_bode.py` checks the device planner against `docs/bode-plan-vectors.json` and 3300 random plans of
   the host tool, and the device's H, levels, noise, leakage and half-record check against `measure_pair` on the
   simulator's RC (within 0.002 dB / 0.002 deg); `host_tests/test_bode_sweep.c` runs the engine on a DUT model (RC,
   divider, wiring B saturation, Hold, STOP, thru). Two new request vectors (`req_bode_ctrl`, `req_read_bode`).
+
+#### 0.2.65 - 2026-10-19 (protocol 1.19, unchanged)
+
+- Measurements v2 (8749ffe; firmware/README.md "Screens: Measurements v2"). MEASURES now opens a list per mode: the
+  Scope's twelve measurements per channel, and in the Spectrum analyser (where the slot was empty) Peak, Level, THD and
+  Noise per channel plus RBW, Span, Center and Time. The spectrum's choice is saved in settings words 221..223.
+- Cards show in the order they were chosen; the defaults now read Freq, Vpp, Vavg. The menu shows each chosen item's
+  place. Older settings show their cards in table order.
+- The cards keep to one row instead of stacking up over the trace: three per channel (six for CH1 while CH2's block
+  is hidden), six in the spectrum. With more chosen, the last place reads "+N more".
+- New spectrum cards: THD over harmonics 2..10 ("f0 too low" / "f0 too high" when it cannot be measured), the noise
+  floor as the median bin level at the RBW, the shown span and its centre.
+- The MEASURES menu is redrawn in the stock look with a title per mode and 44 px rows; Hide shows in the active
+  colour instead of red.
+- A card source hook (`ui_ms_set_source`) lets a future FPGA frequency / period counter feed the Freq and Period cards
+  without UI changes. Nothing uses it yet.
+
+#### 0.2.64 - 2026-10-19 (protocol 1.18 unchanged; provisional number)
+
+- Fixed: after a sample-rate change in the ACQ menu the old time/div stayed although drawn grey, so the trace was cut
+  off, zeros showed past the record end, the slider scrolled before the trace and the shape changed (owner, 1 kHz
+  cal signal). The time/div is now viable by rule, derived from the record length (the record spans the trace area,
+  at least one sample per division) instead of 1.00o5's table; a rate change snaps it to the nearest viable value and
+  says "Time/div set to X for this rate"; grey boxes cannot be chosen; memory depth and Filter changes, the plot's tap
+  zoom while stopped, SET_TIMEBASE, SET_TRIGGER pretrigger / total and SET_DECIM follow the same rule (5718015).
+- Fixed: the trace window stays inside the record, and a record shorter than the screen stops at its end instead of
+  drawing zeros; the trigger point drag reaches both ends of the record (5718015, d1f303f).
+- Changed: the acquisition Filter is kept per mode (owner): Scope defaults to CIC2 without the FIR (no pulsing step
+  overshoot on a square wave), Spectrum to CIC2+FIR; settings word 212. Old settings with the old default load as the
+  new defaults; another saved choice is kept for both modes (5818b5b).
+- Fixed: the Peak and Pro trace styles wrote past the 730-point trace buffers (29d61f1).
+- Added: the record-position slider under the grid is drawn to scale and can be dragged (the window follows the
+  finger); a channel can be grabbed on its drawn trace within 40 px, not only on its zero line; a 6 px dead band
+  before a drag; handles never tap and a stroke on a trace does not change the time base; the tap bands stay but
+  avoid the slider row and the measurement cards (b620113).
+- Changed: the spectrum's pan honours Move slow; CTRL fold-out rows act on release (f690e42).
+
+#### 0.2.63 - 2026-10-19 (protocol 1.19, unchanged)
+
+UI polish batch 1, from the owner's walk-through of 0.2.59 (firmware/README.md "Screens: UI polish batch 1"):
+
+- Changed: the main menu's Settings icon is a cogwheel (f58ff29) and the Scope icon a sine wave (70da62a).
+- Changed: CTRL Grid is a whole-button toggle, green on and grey off, without the slide switch (bcb3007). The Display
+  fold-out's X-Y icon is a tilted figure 8 (f71ede6). Trace style is grey and inert in X-Y (d513498).
+- Removed: the Pro trace style. It drew the per-column minimum and maximum as outlines and looked like Linear on a
+  normal signal; a saved Pro loads as Linear (8d508cd).
+- Fixed: the ACQ menu's pass time collided with the Memory header and the first depth chip; it now sits under the
+  column's rule (cf37f5d).
+- Fixed: the Settings fold-out's brightness sliders closed the fold-out when the finger left the slider mid-drag; a
+  drag now stays with its slider until release (1fb05fd).
+- Changed: the Settings screen drops its header hedge and the note beside Restore; the Restore dialog's text fills
+  the dialog's width (2830fc2). File message timeout left the fold-out and is set in Settings > Controls (1ecaef3).
+- Changed: Diagnostics uses the Settings screen's header; fixed the battery icon being drawn over the page (ba116cf).
+  The Calibration page shows the DC shift trim's state as the button colour and drops the DC supply note (d4345e8).
+  The Developer page drops the Debug overlay switch; the flag stays for firmware work (32d17a9).
+- Changed: the volts calibration shows "Step N of 6" at the top right of the title line (eb51787).
+- Added: in Waterfall and Density the Display fold-out names the channel shown and switches between CH1 and CH2
+  (6c82e0c).
+- Changed: RUN/STOP shows the state, green RUN or amber Stopped, and follows a host start or stop; it stayed green
+  when the PC stopped the acquisition (b1fe1fc).
+
+#### 0.2.62 - 2026-10-19 (protocol 1.19, docs/protocol.md section 14 row 58)
+
+- Fixed: on FPGA 0x1537 CH2 core A was garbled in about 40 % of 200 MSa/s captures, with no register write in
+  between, and 0.2.61's check (after rate writes only) missed it. Every 200 MSa/s capture is now checked before
+  anything reads it (screen, READ_RAW, calibration wizard, class probe) and re-taken when garbled, up to 16 times. On
+  0x1532..0x1537 the check reads 250 words of the record (about 0.3 ms); the extra check conversion after each rate
+  write is gone (9e7e53d).
+- Added: support for FPGA 0x1538, which guarantees the core order (core B first) and checks its ADC encodes itself.
+  The firmware reads its status byte (0x33) after every 200 MSa/s capture and checks the encode convention at boot.
+  New caps bit 18 ENC_CHECK and features bit 5 (9e7e53d).
+- Added: GET_HEALTH grows to 104 bytes with the check's mode, the last 0x33 byte, flags, and counts of captures
+  checked, found bad and recovered. Event type 21 now carries the reason (data check, 0x33, boot convention), the
+  number of re-arms and the caller (9e7e53d).
+- Changed: Diagnostics FPGA line: 0x1537 in amber, "ADC core order differs: recalibrate after flashing 0x1538";
+  0x1538 "encode check OK" or the failing pins; 0x1532..0x1536 now say "fixed in 0x1538" (9e7e53d).
+- Changed: the READ_RAW / READ_TRACE interleave order is fixed at core B first (`interleave_order` 0) (9e7e53d).
 
 #### 0.2.61 - 2026-10-19 (protocol 1.18, docs/protocol.md section 14 row 57)
 

@@ -479,6 +479,18 @@ def build():
         "1.17 GET_STATUS tail (48 bytes; 0..43 as 1.13, zero here): 44 u16 features 0x1F (EXT, DECIM, FIR, SEGMENTS, "
         "HW_AVERAGE = FPGA 0x1536), 46 UI Average 2 = hardware, 47 log2 N = 6 (64 records per displayed record)",
         [decoded(CMDS["GET_STATUS"], 65, st, flags=FLAG_RESPONSE)])
+    hb = bytearray(104)
+    hb[0] = 1
+    hb[2:4] = struct.pack("<H", 104)
+    hb[88:104] = struct.pack("<BBBBIII", 2, 0x77, 0x05, 0xF6, 3, 2, 1200)
+    hb = bytes(hb)
+    f = frame(CMDS["GET_HEALTH"], 66, hb, flags=FLAG_RESPONSE)
+    add("resp_get_health_1_19", f, [],
+        "1.19 GET_HEALTH response (104 bytes; 4..87 as 1.16, zero here): 88 check mode 2 (FPGA read 0x33, bitstream "
+        "0x1538), 89 last 0x33 = 0x77 (bit 0 failed, CH2 A pin wrong), 90 flags 0x05 (bit 0 read, bit 2 the last "
+        "capture accepted garbled), 91 0x33 at boot 0xF6 (convention 1), 92 u32 bad 3, 96 u32 recovered 2, 100 u32 "
+        "checked 1200",
+        [decoded(CMDS["GET_HEALTH"], 66, hb, flags=FLAG_RESPONSE)])
 
     # 6. ASCII probe (section 10)
     add("ascii_ver", b"#VER\n", [{"event": "ascii", "line": "VER"}], "#VER probe")

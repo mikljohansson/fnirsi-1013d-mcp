@@ -1,13 +1,18 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// ui_ctrl.c - the CTRL page's geometry, the fold-outs, the value names, the warning line and the spectrum's card set (see
-// ui_ctrl.h). Host-tested: host_tests/test_ui.c.
+// ui_ctrl.c - the CTRL page's geometry, the fold-outs, the value names and the warning line (see
+// ui_ctrl.h; the spectrum's card set is in ui_meas.c since fw 0.2.65). Host-tested: host_tests/test_ui.c.
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "ui_ctrl.h"
 
 int ui_p1_shown(int slot, int spectrum)
 {
-  if(spectrum && ((slot == UI_P1_TCURSOR) || (slot == UI_P1_VCURSOR) || (slot == UI_P1_MEASURES)))
+  //fw 0.2.65: MEASURES opens the spectrum's own list there; the cursor slots stay empty
+  if(spectrum && ((slot == UI_P1_TCURSOR) || (slot == UI_P1_VCURSOR)))
+    return 0;
+
+  //fw 0.2.66: the Bode plot (spectrum = 2) has no measurement list either: its cards are fixed
+  if((spectrum == 2) && (slot == UI_P1_MEASURES))
     return 0;
 
   return (slot >= UI_P1_CTRL) && (slot <= UI_P1_SAVEWAVE);
@@ -125,7 +130,10 @@ int ui_fold_dir(const ui_fold *f, uint32 x)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-const char *const ui_trace_names[UI_TRACE_COUNT]         = { "Linear", "Dots", "Peak", "Pro" };
+const char *const ui_acq_pass_label = "Pass time";
+const char *const ui_run_label[2]    = { "Stopped", "RUN" };
+
+const char *const ui_trace_names[UI_TRACE_COUNT]         = { "Linear", "Dots", "Peak" };
 const char *const ui_view_names[2]                       = { "Normal", "X-Y" };
 const char *const ui_spec_view_names[UI_SPEC_VIEW_COUNT] = { "Spectrum", "Waterfall", "Density" };
 const char *const ui_spec_chan_names[3]                  = { "CH1", "CH2", "CH1 + CH2" };
@@ -168,38 +176,4 @@ const char *ui_scope_warning(const ui_warn_in *w)
     return "No trigger: check the trigger level";
 
   return "";
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-const char *const ui_sc_names[4] = { "Peak", "Level", "RBW", "Time" };
-
-int ui_spec_cards(const uint8 shown[2], int time_ok, ui_spec_card *out)
-{
-  int n = 0, ch;
-
-  for(ch = 0; ch < 2; ch++)
-    if(shown[ch])
-    {
-      out[n].kind = UI_SC_PEAK;
-      out[n++].ch = (uint8)ch;
-      out[n].kind = UI_SC_LEVEL;
-      out[n++].ch = (uint8)ch;
-    }
-
-  out[n].kind = UI_SC_RBW;
-  out[n++].ch = 0;
-
-  if(time_ok)
-  {
-    out[n].kind = UI_SC_TIME;
-    out[n++].ch = 0;
-  }
-
-  return n;
-}
-
-uint32 ui_spec_card_x(int i)
-{
-  return 5 + 120 * (uint32)i;
 }

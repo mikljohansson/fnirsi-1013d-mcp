@@ -29,6 +29,7 @@
 #include "spec_fmt.h"
 #include "ui_ctrl.h"
 #include "ui_fmt.h"
+#include "ui_meas.h"
 #include "spectrum.h"
 #include "phosphor.h"
 #include "ui_diag_view.h"
@@ -816,39 +817,39 @@ static void draw_cards(void)
   if((bv.cursor >= 0) && (bv.cursor < n_pts) && p_have[bv.cursor])
   {
     ui_fmt_mhz(t, p_f[bv.cursor]);
-    scope_draw_card(ui_spec_card_x(n++), UI_SC_Y, LIGHTGREY2_COLOR, "f", t);
+    scope_draw_card(ui_ms_card_x(0, n++), UI_MS_SPEC_Y, LIGHTGREY2_COLOR, "f", t);
     ui_fmt_cdb(t, (p_m[bv.cursor] >= 0) ? (p_m[bv.cursor] + 5) / 10 : -((-p_m[bv.cursor] + 5) / 10), "dB");
-    scope_draw_card(ui_spec_card_x(n++), UI_SC_Y, CHANNEL2_COLOR, "|H|", t);
+    scope_draw_card(ui_ms_card_x(0, n++), UI_MS_SPEC_Y, CHANNEL2_COLOR, "|H|", t);
     fmt_str(fmt_c1(t, (p_p[bv.cursor] >= 0) ? (p_p[bv.cursor] + 5) / 10 : -((-p_p[bv.cursor] + 5) / 10)), "deg");
-    scope_draw_card(ui_spec_card_x(n++), UI_SC_Y, PHASE_COLOR, "Phase", t);
+    scope_draw_card(ui_ms_card_x(0, n++), UI_MS_SPEC_Y, PHASE_COLOR, "Phase", t);
   }
 
   //The automatic markers: -3 dB, or the peak and Q of a resonance
   if(mk.shape == BODE_SHAPE_RESONANT)
   {
     ui_fmt_mhz(t, mk.peak_mhz);
-    scope_draw_card(ui_spec_card_x(n++), UI_SC_Y, LIGHTGREY2_COLOR, "Peak", t);
+    scope_draw_card(ui_ms_card_x(0, n++), UI_MS_SPEC_Y, LIGHTGREY2_COLOR, "Peak", t);
     if(mk.have_q)
     {
       fmt_c1(t, (int32)mk.q_x100);
-      scope_draw_card(ui_spec_card_x(n++), UI_SC_Y, LIGHTGREY2_COLOR, "Q", t);
+      scope_draw_card(ui_ms_card_x(0, n++), UI_MS_SPEC_Y, LIGHTGREY2_COLOR, "Q", t);
     }
   }
   else if(mk.n3db)
   {
     ui_fmt_mhz(t, mk.f3db_mhz[0]);
-    scope_draw_card(ui_spec_card_x(n++), UI_SC_Y, LIGHTGREY2_COLOR, "-3dB", t);
+    scope_draw_card(ui_ms_card_x(0, n++), UI_MS_SPEC_Y, LIGHTGREY2_COLOR, "-3dB", t);
   }
 
   //Progress
-  if(bode_count(e) && (n < UI_SC_MAX))
+  if(bode_count(e) && (n < UI_MS_ROW_CARDS))
   {
     fmt_uint(fmt_str(fmt_uint(t, (uint32)bode_done_count(e)), "/"), (uint32)bode_count(e));
-    scope_draw_card(ui_spec_card_x(n++), UI_SC_Y, LIGHTGREY2_COLOR, "Sweep", t);
+    scope_draw_card(ui_ms_card_x(0, n++), UI_MS_SPEC_Y, LIGHTGREY2_COLOR, "Sweep", t);
   }
 
-  if(e->thru.measured && e->thru.applied && (n < UI_SC_MAX))
-    scope_draw_card(ui_spec_card_x(n++), UI_SC_Y, (bode_thru_state(e) == BODE_THRU_VALID) ? GREEN_COLOR : ORANGE_COLOR,
+  if(e->thru.measured && e->thru.applied && (n < UI_MS_ROW_CARDS))
+    scope_draw_card(ui_ms_card_x(0, n++), UI_MS_SPEC_Y, (bode_thru_state(e) == BODE_THRU_VALID) ? GREEN_COLOR : ORANGE_COLOR,
                     "Thru", (bode_thru_state(e) == BODE_THRU_VALID) ? "applied" : "stale");
 }
 
@@ -1099,12 +1100,17 @@ static void thru_button(int active)
   cp_value_button(UI_CTRL_ANALYSIS_Y, "Thru", thru_text(), active);
 }
 
+//Grid as in the other modes (fw 0.2.63): a whole-button toggle, green on, grey off
 static void grid_button(int active)
 {
-  cp_button(UI_CTRL_GRID_Y, active);
-  display_set_fg_color(active ? BLACK_COLOR : WHITE_COLOR);
-  text_c(&font_2, CP_XC, UI_CTRL_GRID_Y + 5, "Grid");
-  scope_display_slide_button(UI_BAR_X + 3, UI_CTRL_GRID_Y + 24, scopesettings.gridenable ? 1 : 0, GREEN_COLOR);
+  uint32 fill = active ? ITEM_ACTIVE_COLOR : scopesettings.gridenable ? GREEN_COLOR : GREY_COLOR;
+
+  display_set_fg_color(fill);
+  display_fill_rounded_rect(UI_BAR_X, UI_CTRL_GRID_Y, UI_BAR_W, UI_BTN_H, 2);
+  display_set_fg_color(CP_EDGE_COLOR);
+  display_draw_rounded_rect(UI_BAR_X, UI_CTRL_GRID_Y, UI_BAR_W, UI_BTN_H, 2);
+  display_set_fg_color((active || scopesettings.gridenable) ? BLACK_COLOR : WHITE_COLOR);
+  text_c(&font_3, CP_XC, UI_CTRL_GRID_Y + 17, "Grid");
 }
 
 void bode_ctrl_draw(void)
@@ -1329,8 +1335,20 @@ static void fold_run(int id, void (*button)(int))
     if(hit >= 0)
     {
       ui_fold old = d.f;
+      uint32  lx = xtouch, ly = ytouch;
 
-      if(fold_tap(&d, hit, ui_fold_dir(&d.f, xtouch)))
+      //A row acts on release and only when the finger is still on it (fw 0.2.64, as ctrl_page.c)
+      while(havetouch)
+      {
+        lx = xtouch;
+        ly = ytouch;
+        tp_i2c_read_status();
+      }
+
+      if(ui_fold_hit(&d.f, lx, ly) != hit)
+        continue;
+
+      if(fold_tap(&d, hit, ui_fold_dir(&d.f, lx)))
         break;
 
       build(&d);
@@ -1417,7 +1435,7 @@ int bode_gen_row_hit(uint32 y)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Settings sector words 220 (0xB000 | start << 7 | stop << 2 | points) and 221 (0xB100 | settle | CH2 range << 2)
+// Settings sector words 219 (0xB000 | start << 7 | stop << 2 | points) and 220 (0xB100 | settle | CH2 range << 2)
 
 uint16 bode_view_setting_word(int i)
 {

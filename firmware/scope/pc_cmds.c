@@ -137,7 +137,7 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
     case 0x153A: case 0x153B: case 0x153C: case 0x153D: case 0x153E: case 0x153F:
       //AL3 family, later minors: 0x1533 adds the EXT trigger on the calibration pin (fpga/al3/README.md), 0x1534 the
       //decimation filter with 16-bit samples (cmds 0x53-0x55, read 0x29; pc_decim.h), 0x1535 the CIC compensation FIR
-      //(cmd 0x56), 0x1536 the sequencer
+      //(cmd 0x56), 0x1536 the sequencer, 0x1538 the encode check (read 0x33)
       v->variant    = 2;
       v->ring_words = 8192;
       v->max_total  = 16382;
@@ -152,6 +152,10 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
       //0x1536: the sequencer (segmented capture, hardware averaging; cmds 0x57-0x5D, reads 0x2A-0x32; pc_seq.h)
       if(version >= 0x1536)
         v->caps |= PC_CAP_SEQ;                                                       //BENCH: SEQ
+
+      //0x1538: encodes from the write clock, core order guaranteed B first, checked per capture (read 0x33, enc_heal.h)
+      if(version >= 0x1538)
+        v->caps |= PC_CAP_ENC_CHECK;                                                 //BENCH: 0x1538
       break;
 
     case 0x1632:
@@ -447,6 +451,7 @@ static uint16_t pc_features(const pc_session *s)
   if(s->var.caps & PC_CAP_DECIM)       f |= PC_FEAT_W_DECIM;
   if(s->var.caps & PC_CAP_FIR)         f |= PC_FEAT_W_FIR;
   if(s->var.caps & PC_CAP_SEQ)         f |= PC_FEAT_W_SEGMENTS | PC_FEAT_W_HW_AVERAGE;
+  if(s->var.caps & PC_CAP_ENC_CHECK)   f |= PC_FEAT_W_ENC_CHECK;
   if((s->var.caps & PC_CAP_DECIM) && (s->var.caps & PC_CAP_GENERATOR_DDS))
                                        f |= PC_FEAT_W_BODE;
 
@@ -808,8 +813,13 @@ uint32_t pc_link_counters(pc_session *s, uint32_t *v)
   n += PC_FAULT_COUNT;     //58-59 (fw 0.2.48): fault status, fault address of the restart's abort
   pc_hal_usb_watch(v + n);
   n += PC_USBW_COUNT;      //60-61 (fw 0.2.49): USB resumes inferred, soft reconnects
-  pc_hal_enc_heal(v + n);
-  n += PC_ENCH_COUNT;      //62-63 (fw 0.2.61): full-rate checks bad, recovered (enc_heal.h)
+  {
+    pc_hw_enc e;
+
+    pc_hal_enc_state(&e);
+    v[n++] = e.bad;        //62-63 (fw 0.2.61; every full-rate capture since 0.2.62): captures bad, recovered (enc_heal.h)
+    v[n++] = e.recovered;
+  }
   return n;
 }
 
@@ -832,15 +842,17 @@ static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uin
 }
 
 //GET_HEALTH (protocol 1.16, section 14 row 55): USB state now, CP15 control word, unit life, settings save state and
-//the stored restart record. Memory reads only: any poll context.
+//the stored restart record; 1.19 (row 58): the full-rate capture check. Memory reads only: any poll context.
 void pc_health_body(uint8_t *p)
 {
   pc_hw_usb  u;
   pc_hw_life l;
+  pc_hw_enc  e;
   const pc_life_restart *r = &l.rst;
 
   pc_hal_usb_state(&u);
   pc_hal_life(&l);
+  pc_hal_enc_state(&e);
 
   memset(p, 0, PC_HEALTH_LEN);
   p[0] = 1;
@@ -878,6 +890,15 @@ void pc_health_body(uint8_t *p)
     pc_put_u32(p + 80, r->far);
     pc_put_u32(p + 84, r->minutes);
   }
+
+  //1.19: full-rate capture check (enc_heal.h)
+  p[88] = e.mode;
+  p[89] = e.last33;
+  p[90] = e.flags;
+  p[91] = e.boot33;
+  pc_put_u32(p + 92,  e.bad);
+  pc_put_u32(p + 96,  e.recovered);
+  pc_put_u32(p + 100, e.checked);
 }
 
 #if PC_DEBUG
@@ -1258,6 +1279,13 @@ static void pc_arm_geometry(pc_session *s, pc_hw_trigger *t, pc_decim_cfg *dc, u
 //ARM (1.3): host single capture. The UI acquisition stops (the screen shows STOP), the host's own ARM sequence runs
 //as in 1.2, and at DONE the capture is built into the trace buffers, which the UI then shows. 1.17: with a SET_SEQ
 //setting it arms a sequencer run (segments or hardware averaging) instead; DONE is the end of the whole run.
+//The arm h_arm set up (also the full-rate check's re-arm, pc_enc_rearm)
+static int pc_arm_hw(pc_session *s, uint16_t pre_w, uint16_t tot_w)
+{
+  return pc_hal_arm(pre_w, tot_w, s->arm_auto, s->arm_prog, s->arm_normal,
+                    (s->var.caps & PC_CAP_DECIM) ? &s->arm_dc : NULL, (s->var.caps & PC_CAP_SEQ) ? &s->arm_seq : NULL);
+}
+
 static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   pc_hw_trigger t;
@@ -1310,9 +1338,14 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   //averaging skips untriggered records; the firmware auto time-out would end the whole run
   s->ring_valid = 0;
   s->seq_stop   = 0;
+  s->arm_dc     = dc;
+  s->arm_seq    = s->seq;
+  s->arm_auto   = pc_auto_timeout(s, t.total);
+  s->arm_prog   = (uint8_t)prog;
+  s->arm_normal = (uint8_t)((t.ui_mode != 0) || (prog && !seq));
+  eh_cap_reset(&s->enc_cap);
 
-  if(pc_hal_arm(pre_w, tot_w, pc_auto_timeout(s, t.total), prog, (t.ui_mode != 0) || (prog && !seq),
-                (s->var.caps & PC_CAP_DECIM) ? &dc : NULL, (s->var.caps & PC_CAP_SEQ) ? &s->seq : NULL))
+  if(pc_arm_hw(s, pre_w, tot_w))
   {
     s->acq_state = PC_ACQ_ABORTED;
     return pc_error(s, PC_E_FPGA, 0, "0x05 not ready");
@@ -1701,9 +1734,9 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
     {
       if(mask & (3 << (2 * i)))
       {
-        //core A = 2i (0x20/0x22), core B = 2i + 1 (0x21/0x23)
-        pc_raw_core(s, (uint8_t)(2 * i + 1), start, count, d + (PC_INTERLEAVE_ORDER ? 1 : 0), 2, slot_base, slot_len);
-        pc_raw_core(s, (uint8_t)(2 * i),     start, count, d + (PC_INTERLEAVE_ORDER ? 0 : 1), 2, slot_base, slot_len);
+        //core A = 2i (0x20/0x22), core B = 2i + 1 (0x21/0x23); B first (PC_INTERLEAVE_ORDER 0)
+        pc_raw_core(s, (uint8_t)(2 * i + 1), start, count, d,     2, slot_base, slot_len);
+        pc_raw_core(s, (uint8_t)(2 * i),     start, count, d + 1, 2, slot_base, slot_len);
         d += 2 * count;
       }
     }
@@ -3111,6 +3144,60 @@ static int pc_dispatch(pc_session *s, int ctx)
 //----------------------------------------------------------------------------------------------------------------------------------
 // Host single capture polling (MAIN context)
 
+//fw 0.2.62: every full-rate host capture is checked before READ_RAW can read it (enc_heal.h): 0x1538+ by FPGA read 0x33,
+//0x1532..0x1537 by the B-against-A residual of the record's first words. A bad one is discarded and re-armed with the same
+//setting, at most EH_MAX_TRIES times; then it is accepted (event 21 with bit 7, GET_HEALTH 90 bit 2).
+static uint8_t pc_enc_status(void *ctx)
+{
+  (void)ctx;
+  return pc_hal_enc_status();
+}
+
+static void pc_enc_read(void *ctx, uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride)
+{
+  pc_session *s = (pc_session *)ctx;
+
+  pc_hal_read_core(core, start, count, dst, stride, s->var.ring_words, s->var.read_lag);
+}
+
+//1: the capture was discarded (re-armed, or ABORTED when the re-arm failed)
+static int pc_enc_rearm(pc_session *s, uint32_t start)
+{
+  eh_io    io = { s, pc_enc_status, pc_enc_read };
+  int      mode = eh_mode(s->var.version), bad, act;
+  uint32_t value;
+  eh_note  n;
+
+  if((mode == EH_MODE_NONE) || (s->cap_divider != 0) || s->cap_wide)
+    return 0;
+
+  //Sequencer runs: the data check cannot read lane sums or segments (0x1536 / 0x1537), and a run STOP ended is final
+  if(s->cap_next.seq_mode && ((mode == EH_MODE_DATA) || s->seq_stop))
+    return 0;
+
+  bad = eh_check(&io, mode, start, s->cap_total_words, &value);
+  act = eh_cap_step(&s->enc_cap, bad, value, &n);
+  pc_hal_enc_note((uint8_t)((mode == EH_MODE_FLAG) ? EH_WHY_FLAG : EH_WHY_DATA), &n);
+
+  if(act != EH_REARM)
+    return 0;
+
+  pc_hal_enc_retry();
+
+  if(pc_arm_hw(s, s->cap_pre_words, s->cap_total_words))
+  {
+    s->acq_state = PC_ACQ_ABORTED;
+    return 1;
+  }
+
+  s->acq_state      = PC_ACQ_ARMED;
+  s->fpga_done      = 0;
+  s->fpga_triggered = 0;
+  s->host_forced    = 0;
+  s->arm_ms         = pc_hal_ms();
+  return 1;
+}
+
 static void pc_acq_service(pc_session *s)
 {
   int done, trig;
@@ -3179,6 +3266,9 @@ static void pc_acq_service(pc_session *s)
     uint32_t samples = (uint32_t)s->cap_total_words * (s->cap_wide ? 1 : 2);
     uint32_t pre_samples = s->cap_wide ? (uint32_t)s->cap_pre_words + s->cap_ext_shift : (uint32_t)s->cap_pre_words * 2;
     uint8_t  mask;
+
+    if(pc_enc_rearm(s, start))
+      return;
 
     //Into the trace buffers for the enabled channels, so the UI shows the capture (it redraws every pass). An averaging
     //run leaves its last record in the ring as a normal capture; a segment run has none (the screen keeps its traces)

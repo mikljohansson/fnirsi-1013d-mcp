@@ -58,7 +58,6 @@ void scope_display_channel_linear_trace(PCHANNELSETTINGS settings);
 void scope_display_channel_linear_trace_old(PCHANNELSETTINGS settings);
 void scope_display_channel_dots_trace(PCHANNELSETTINGS settings);
 void scope_display_channel_peak_trace(PCHANNELSETTINGS settings);
-void scope_display_channel_pro_trace(PCHANNELSETTINGS settings);
 
 void scope_display_channel_sinx_trace(PCHANNELSETTINGS settings);
 
@@ -66,7 +65,7 @@ void scope_display_cursor_measurements(void);
 
 void scope_display_measurements(void);
 void scope_draw_card(uint32 x, uint32 y, uint32 color, const char *name, const char *value);   //fw 0.2.56: one measurement card
-void scope_display_channel_measurements(PCHANNELSETTINGS settings, uint8 *measuresstate, uint32 xstart, uint32 color);
+void scope_display_channel_measurements(int ch, int cap);   //fw 0.2.65: block ch (its source, order and places)
 
 void scope_display_vmax(PCHANNELSETTINGS settings);
 void scope_display_vmin(PCHANNELSETTINGS settings);

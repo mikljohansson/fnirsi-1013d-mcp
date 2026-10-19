@@ -10,7 +10,6 @@
 #include "types.h"
 #include "fnirsi_1013d_scope.h"
 #include "fpga_control.h"
-#include "enc_heal.h"
 #include "scope_functions.h"
 #include "power_and_battery.h"
 #include "display_lib.h"
@@ -40,6 +39,7 @@
 #include "ui_ctrl.h"
 #include "pc_seq_hw.h"
 #include "ui_diag_view.h"
+#include "acq_view.h"
 #include "bode_view.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -234,6 +234,9 @@ void pc_hal_timebase_write(const pc_hw_timebase *t, int raw)
     scopesettings.timeperdiv = t->timeperdiv;
     scopesettings.samplerate = t->samplerate;
     scopesettings.long_mode  = 0;
+    //fw 0.2.64: the same rule as the ACQ menu: a time/div that does not fit the record at this rate is snapped (the
+    //response's timeperdiv_index shows it) and the trigger point kept inside the record (acq_view.c)
+    acq_view_fit(1);
     fpga_set_time_base(scopesettings.timeperdiv);
     fpga_set_sample_rate(scopesettings.samplerate);
 
@@ -343,8 +346,13 @@ void pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask)
   if(mask & PC_TRG_TOTAL)
     fpgasettings.totalsamples = t->total;
 
+  //fw 0.2.64: a new record length or trigger sample: the time/div and the trigger point follow it (acq_view.c)
+  if(mask & (PC_TRG_PRE | PC_TRG_TOTAL))
+    acq_view_fit(1);
+
   //Show it: trigger button, RUN/WAIT colour of the run chip
   pc_draw_begin(&save);
+  scope_acqusition_settings(0);
   scope_trigger_settings(0);
   scope_run_stop_text();
   pc_draw_end(&save);
@@ -404,10 +412,6 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
                const pc_decim_cfg *dc, const pc_seq_cfg *sq)
 {
   uint32 n = 0;
-
-  //fw 0.2.61: after a rate write, a full-rate check first (enc_heal.h; the host's legacy mode at divider 0 is the
-  //check's, so pc_dec_apply below writes no 0x53)
-  fpga_encode_check_dirty();
 
   //Trigger level from the marker, as every UI conversion does (scope_acquire_trace_data)
   fpga_set_trigger_level();
@@ -631,11 +635,15 @@ uint32_t pc_hal_trace_capacity(void)
 
 #define PC_DEC_RING       8192
 
-static uint8         pc_dec_setting = PC_DECIM_DEFAULT;   //bits 1:0 requested K (UI Filter), PC_DECIM_SET_FIR;
-                                                      //saved in the settings sector
+//fw 0.2.64: the Filter per mode, [0] Scope, [1] Spectrum (owner): bits 1:0 requested K (UI Filter), PC_DECIM_SET_FIR;
+//saved in the settings sector (words 207 and 212). pc_dec_setting is the current mode's, so the Filter box, the arm,
+//SET_DECIM and GET_DECIM all act on the mode on screen.
+static uint8         pc_dec_set_mode[2] = { PC_DECIM_DEFAULT_SCOPE, PC_DECIM_DEFAULT_SPEC };
+#define pc_dec_setting (pc_dec_set_mode[spectrum_mode() != SPECTRUM_MODE_SCOPE])
 static uint8         pc_dec_flags = PC_INTERLEAVE_ORDER ? PC_DECIM_SWAP : 0;  //0x53 bits 2-4: swap (host only, not
                                                       //saved), falling-edge capture A / B (hidden, saved)
 static uint8         pc_dec_ui_arm;                   //the next fpga_do_conversion is the UI acquisition's
+static uint8         pc_dec_last_ui;                  //the last one was (the full-rate check's re-arm repeats it)
 static pc_decim_cfg  pc_dec_cur;                      //what the FPGA runs (k = 0 until written)
 static uint8         pc_dec_written;                  //pc_dec_cur was written at least once
 static uint8         pc_dec_dirty;                    //0x0D changed since the last write
@@ -742,6 +750,11 @@ void pc_glue_ui_decim_arm(void)
   pc_dec_ui_arm = 1;
 }
 
+void pc_glue_decim_rearm(void)
+{
+  pc_dec_ui_arm = pc_dec_last_ui;
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // Firmware auto mode (fw 0.2.41). The FPGA's auto time-out (0x0E) counts samples (the record length), so at fast rates
 // it expires in microseconds (3000 samples at 10 MS/s = 0.3 ms), before a slow signal's next edge; and 0x18 keeps
@@ -765,7 +778,8 @@ void pc_glue_decim_conversion(void)
   int          ui = pc_dec_ui_arm;
 
   pc_dec_config(&c, pc_dec_ui_arm ? pc_dec_setting : 0);
-  pc_dec_ui_arm = 0;
+  pc_dec_last_ui = pc_dec_ui_arm;
+  pc_dec_ui_arm  = 0;
   pc_dec_apply(&c);
 
   //Trigger mode for this conversion, written before the sampling reset
@@ -913,9 +927,38 @@ uint16 pc_glue_phosphor_setting_word(void)
 
 uint16 pc_glue_decim_setting_word(void)
 {
-  //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (PC_DECIM_DEFAULT). Bits
+  //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (the defaults). Bits
   //3-4: the hidden falling-edge capture settings (SET_DECIM only); bit 5: FIR (fw 0.2.44)
-  return (uint16)(0xDE00 | (pc_dec_flags & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)) | (pc_dec_setting & (PC_DECIM_SET_FIR | 3)));
+  return (uint16)(0xDE00 | (pc_dec_flags & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)) | (pc_dec_set_mode[0] & (PC_DECIM_SET_FIR | 3)));
+}
+
+//Word 212 (fw 0.2.64): the Spectrum's Filter, 0xD500 marker (word 207 holds the Scope's)
+uint16 pc_glue_decim_spec_setting_word(void)
+{
+  return (uint16)(0xD500 | (pc_dec_set_mode[1] & (PC_DECIM_SET_FIR | 3)));
+}
+
+//The mode on screen changed (pc_glue_ui_service): its Filter may need the 16-bit layout's shorter record, and the
+//time/div then follows the record (acq_view.c)
+static uint8 pc_dec_mode_seen;
+static void  pc_dec_fit_memory(void);
+
+static void pc_dec_follow_mode(void)
+{
+  uint8 m = (uint8)(spectrum_mode() != SPECTRUM_MODE_SCOPE);
+
+  if(m == pc_dec_mode_seen)
+    return;
+
+  pc_dec_mode_seen = m;
+
+  if(pc_dec_has() && (pc_dec_setting & 3))
+  {
+    pc_dec_fit_memory();
+    acq_view_fit(0);
+  }
+
+  scopesettings.display_data_done = 1;
 }
 
 static const char *pc_dec_names[8] = { "off", "boxcar", "CIC2", "CIC3", "off", "boxcar+FIR", "CIC2+FIR", "CIC3+FIR" };
@@ -972,7 +1015,8 @@ static void pc_dec_fit_memory(void)
 //The DEFAULT button and a settings sector that failed to load (scope_reset_config_data)
 void pc_glue_settings_defaults(void)
 {
-  pc_dec_setting = PC_DECIM_DEFAULT;
+  pc_dec_set_mode[0] = PC_DECIM_DEFAULT_SCOPE;
+  pc_dec_set_mode[1] = PC_DECIM_DEFAULT_SPEC;
 
 #if PC_FORCE_CDC
   //The defaults say mass storage (USB_CH340 0); this build's USB stays CDC, also after Restore default settings (the
@@ -1028,7 +1072,10 @@ void pc_hal_decim_set(uint8_t setting)
   pc_dec_flags   = setting & PC_DECIM_FLAGS;
 
   if(pc_dec_setting & 3)
+  {
     pc_dec_fit_memory();
+    acq_view_fit(1);
+  }
 
   //The next UI pass arms a fresh conversion with it
   scopesettings.display_data_done = 1;
@@ -1097,6 +1144,11 @@ void pc_hal_ui_set_run(int run)
   //The next UI pass arms a fresh conversion; one in flight is abandoned
   scopesettings.display_data_done = 1;
   scope_run_stop_text();
+
+  //fw 0.2.63 (owner): the right bar's RUN/STOP shows the state too; it stayed green when the host stopped
+  if((scopesettings.rightmenustate == 0) && !scopesettings.waveviewmode)
+    scope_run_stop_button(0);
+
   pc_draw_end(&save);
 }
 
@@ -1463,20 +1515,22 @@ void pc_glue_ui_mask(int menu)
         if(!pc_glue_ui_has(PC_FEAT_MEM_BASE + i))
           pc_mask_rect(ACQ_MENU_XPOS + 313, ACQ_MENU_YPOS + 31 + 36 * i, 58, 29);
 
-      //fw 0.2.38 (owner): the main-loop pass time under the "Memory" header, so the cost of a longer record shows
-      //where it is chosen. It is the last pass before the menu opened (the menu is modal, nothing captures while it
-      //is open), so a new depth shows its cost the next time the menu opens.
+      //fw 0.2.38 (owner): the main-loop pass time in the Memory column, so the cost of a longer record shows where it
+      //is chosen. It is the last pass before the menu opened (the menu is modal, nothing captures while it is open),
+      //so a new depth shows its cost the next time the menu opens. fw 0.2.63: under the column's rule (y 211), two
+      //lines; between the header and the first depth chip it collided with both (owner)
       {
         PFONTDATA font = displaydata.font;
         char t[20], *q;
 
-        display_fill_rect(ACQ_MENU_XPOS + 306, ACQ_MENU_YPOS + 21, 72, 11);
-        q = fmt_str(t, "pass ");
-        q = fmt_uint(q, pc_sess.pass_ms);
+        display_fill_rect(ACQ_MENU_XPOS + UI_ACQ_PASS_X, ACQ_MENU_YPOS + UI_ACQ_PASS_Y, UI_ACQ_PASS_W, 32);
+        q = fmt_uint(t, pc_sess.pass_ms);
         fmt_str(q, " ms");
         display_set_font(&font_2);
         display_set_fg_color(0x00A0A0A0);
-        display_text(ACQ_MENU_XPOS + 314, ACQ_MENU_YPOS + 20, (int8 *)t);
+        display_text(ACQ_MENU_XPOS + UI_ACQ_PASS_X, ACQ_MENU_YPOS + UI_ACQ_PASS_Y, (int8 *)ui_acq_pass_label);
+        display_set_fg_color(WHITE_COLOR);
+        display_text(ACQ_MENU_XPOS + UI_ACQ_PASS_X, ACQ_MENU_YPOS + UI_ACQ_PASS_Y + 16, (int8 *)t);
         display_set_font(font);
       }
       break;
@@ -1682,8 +1736,19 @@ void pc_glue_scope_warning(void)
   w.xy      = scopesettings.xymodedisplay ? 1 : 0;
 
   t = ui_scope_warning(&w);
+
+  //fw 0.2.64: no warning: the snap notice of acq_view.c for a few seconds ("Time/div set to 1us for this rate"), white
   if(!*t)
+  {
+    t = acq_view_notice();
+    if(!t)
+      return;
+
+    display_set_font(&font_2);
+    display_set_fg_color(WHITE_COLOR);
+    display_text(366 - ui_text_width(&font_2, t) / 2, 69, (int8 *)t);
     return;
+  }
 
   display_set_font(&font_2);
   display_set_fg_color(ORANGE_COLOR);
@@ -1825,16 +1890,34 @@ static void pc_ui_fix_settings(void)
     scopesettings.triggerchannel = 0;
 
   //Acquisition Filter (decimation, 0x1534+): kept in a spare settings word; a sector without a valid word (new
-  //settings, or one written before 0.2.30) keeps PC_DECIM_DEFAULT. With it on the 16-bit layout limits the memory
+  //settings, or one written before 0.2.30) keeps the per-mode defaults. With it on the 16-bit layout limits the memory
   //depth.
+  //fw 0.2.64: per mode. Word 207 is the Scope's, word 212 (0xD500 marker) the Spectrum's. A sector of 0.2.30..0.2.63 has
+  //one Filter for both: the old default (CIC2 + FIR) becomes the new per-mode defaults, any other choice is kept for both.
   if((settingsworkbuffer[PC_SETTING_WORD_DECIM] & 0xFFC4) == 0xDE00)
   {
-    pc_dec_setting = (uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_SET_FIR | 3));
-    pc_dec_flags   = (uint8)((pc_dec_flags & PC_DECIM_SWAP) | (settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)));
+    uint8 old = (uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_SET_FIR | 3));
+
+    pc_dec_flags = (uint8)((pc_dec_flags & PC_DECIM_SWAP) | (settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)));
+
+    if((settingsworkbuffer[PC_SETTING_WORD_DECIM_SPEC] & 0xFFDC) == 0xD500)
+    {
+      pc_dec_set_mode[0] = old;
+      pc_dec_set_mode[1] = (uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM_SPEC] & (PC_DECIM_SET_FIR | 3));
+    }
+    else if(old != PC_DECIM_DEFAULT_OLD)
+    {
+      pc_dec_set_mode[0] = old;
+      pc_dec_set_mode[1] = old;
+    }
   }
 
   if(pc_dec_has() && (pc_dec_setting & 3))
     pc_dec_fit_memory();
+
+  //Trace style 3 was 1.00o5's "Pro", removed in fw 0.2.63: a sector saved with it draws Linear
+  if(scopesettings.ACQ_trace >= UI_TRACE_COUNT)
+    scopesettings.ACQ_trace = 0;
 
   //Spectrum view settings (fw 0.2.39); the display mode itself is not restored: the scope boots into the scope view
   spectrum_settings_restore(settingsworkbuffer[PC_SETTING_WORD_SPEC0], settingsworkbuffer[PC_SETTING_WORD_SPEC1]);
@@ -1846,7 +1929,7 @@ static void pc_ui_fix_settings(void)
   //fw 0.2.56: Grid and the spectrum's Display variant (word 211)
   pc_ui_setting_restore(settingsworkbuffer[PC_SETTING_WORD_UI]);
 
-  //fw 0.2.66: the Bode plot's sweep settings (words 220, 221); the mode itself is not restored
+  //fw 0.2.66: the Bode plot's sweep settings (words 219, 220); the mode itself is not restored
   bode_view_settings_restore(settingsworkbuffer[PC_SETTING_WORD_BODE0], settingsworkbuffer[PC_SETTING_WORD_BODE1]);
 
   //Memory depth: the largest offered step (3000 x n) the bitstream can capture
@@ -1862,6 +1945,10 @@ static void pc_ui_fix_settings(void)
     if(fpgasettings.settriggerpoint + 2 > total)
       fpgasettings.settriggerpoint = total / 2;
   }
+
+  //fw 0.2.64: a sector written by an older firmware may hold a time/div that does not fit its rate and record
+  pc_dec_mode_seen = 0;
+  acq_view_fit(0);
 }
 
 void pc_glue_init(void)
@@ -1887,6 +1974,9 @@ void pc_glue_init(void)
   }
   pc_session_init(&pc_sess);
   pc_seq_hw_init((pc_sess.var.caps & PC_CAP_SEQ) != 0);
+
+  //fw 0.2.62: the full-rate capture check of this bitstream (enc_heal.h); 0x1538+: the 0x33 encode convention
+  fpga_encode_init(pc_fpga_word);
   pc_ready = 1;
   pc_ui_fix_settings();
 
@@ -1955,6 +2045,7 @@ void pc_glue_ui_service(void)
   //fw 0.2.66: the Bode plot: a pending open / close, its sweep (a few engine steps per pass), RUN / STOP
   bode_view_service();
   pc_right_bar_follow();
+  pc_dec_follow_mode();
 
   //Calibration v4 class probe (acal_live.c): only in the scope and spectrum views (the phosphor view's record rate would
   //see the gap; not while Diagnostics shows), never while a host capture is armed or triggered (the probe resets the sample system) or the host

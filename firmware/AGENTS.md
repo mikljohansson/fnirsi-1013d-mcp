@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-polish1 (2026-10-19): fw 0.2.63 provisional, protocol unchanged: UI polish batch 1 (owner's walk-through of 0.2.59, items a-q), section 39.**
 **Branch fw-ui4 (2026-10-19): fw 0.2.59 provisional, protocol unchanged: UX makeover step 4 (Diagnostics as a main-loop
 display mode with Status, Calibration, Log, Developer; the four-screen calibration wizard; the first-run screen), section 34.**
 **Branch fw-ui3 (2026-10-19): fw 0.2.55 provisional, protocol 1.16 unchanged: UX makeover step 3 (Settings fold-out
@@ -270,6 +271,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.51 | 8f5bf16 | 38580def | UX makeover step 1 (fw-ui1, section 29): main menu Scope / Spectrum analyser / Saved pictures / Saved waveforms / Settings / Diagnostics / USB drive with one 59 px hit area per row, Spectrum in roll mode switches Roll off; USB drive screen text + Exit; no top-bar version; Display row Normal / Phosphor / X-Y in the acquisition menu (X-Y out of System settings); strips without Scope / Auto, AUTO SET = spectrum Auto; phosphor warnings top-middle; cards with chip, scope-maker names, 4 significant digits, defaults Freq / Vpp / Vavg | built, host-tested (test_ui 1513 checks); bench walk-through in section 29 |
 | 0.2.50 | e871c50 | 1b55efc2 | calibration wizard (one modal three-step flow, 48e5737) and calibration v4: A - B interleave tracker applied in the full class, full-class common-mode class probe, GET_CAL 288 bytes, diagnostics lines (protocol 1.14, row 53; fw-cal3, section 28) | built, host-tested; bench lists README 6.4 and 6.5 |
 | 0.2.52 | c8f874b | e0968392 | diagnostics readers (fw-readers, section 30): GET_HEALTH 0x000A (USB state, CP15, power-on count, operating minutes, settings save state, stored restart record), unit life record in settings words 224..255 with one sector-709 write per boot, image identity record + SD_INFO IDENT (112 bytes), calibration provenance in sector 708 432..487 + GET_CAL 356 bytes, SAVE_REPORT 0x0504 (protocol 1.16, row 55) | built, host-tested (test_diag 462 checks); bench list in section 30 |
+| 0.2.65 | 37714c3 | 1de13bd1 | Measurements v2 (fw-meas, section 41; provisional number): MEASURES list per mode (Scope twelve per channel, Spectrum Peak / Level / THD / Noise per channel + RBW / Span / Center / Time in words 221..223), chosen display order (defaults Freq, Vpp, Vavg), one card row with "+N more", MEASURES menu with title and 44 px rows, card source hook for an FPGA counter | built, host-tested (test_ui 1,420,237 checks); bench list in section 41 |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -1737,7 +1739,7 @@ tests green (test_ui 6672 checks on the branch, 1,436,917 with fw-ui3's settings
 warnings 36, GCC 13 / PC_DEBUG 31, upstream only; the
 new files are clean with -Wall -Wextra. No protocol change: GET_STATUS byte 43 keeps its meaning (4 = phosphor drawn,
 now also in X-Y). Settings words: 210 bit 3 (the Phosphor switch), 211 (0xC700: bit 0 Grid, bits 1-2 the spectrum's
-Display variant); 212..223 stay free.
+Display variant); 212..223 stay free (later claims: 212 fw-acq, 221..223 fw-meas section 41).
 
 Points for a successor:
 - **Files**: `ui_ctrl.c/.h` (pure: page-two items and hit areas `ui_ctrl_item_at`, page-one slots `ui_p1_shown`,
@@ -2154,3 +2156,369 @@ Open:
 - Bench: read GET_LINK_STATS 62-63 and GET_EVENT_LOG types 21/22 after a wizard run and after toggling the time base
   to 200 MSa/s a few times. Expect 21 entries with small `a` (recovered), and 22 entries showing who wrote what
   before each.
+
+## 38. fw-enc: every full-rate capture checked, FPGA 0x1538 read 0x33 (fw 0.2.62, protocol 1.19, row 58)
+
+Bench fact this answers (docs/hardware-status.md 2026-10-19 16:48): on 0x1537 one 0x0D write, then 1221 host captures in
+60 s with no other write: CH2 core A garbled in about 40 % of them, randomly interleaved. Chip 2's phase is re-resolved at
+every sampling reset (a marginal flop), so 0.2.61's check, which ran only after a 0x0D write, never fired. fpga-gen7's
+0x1538 (fpga/al3/README.md "Changes" section 8) drives the encodes statelessly from the write clock and reports a
+per-capture self-check, FPGA read 0x33.
+
+Branch `worktree-agent-a54ba9470daa9c8cd` from main 84ce79f (0.2.61), merged with origin/main a179408 (fpga-gen7's 0x1538,
+rel-gen1). Commits: 9e7e53d (firmware and host tests), 7cebed3 (protocol.md row 58, caps bit 18, vector), 8a5d6dd
+(CHANGELOG, firmware/README.md), the merge, 1b4f763 (protocol 5.1 reconciled with fpga-gen7's paragraph), then this
+handoff. **Nothing benched, nothing flashed.**
+
+**What was built**
+- `enc_heal.c/.h` (pure): `eh_mode` (DATA 0x1532..0x1537, FLAG 0x1538..0x153F, NONE otherwise), `eh_check` (FLAG: read
+  0x33, bit 0 = bad; DATA: 250 words per channel from the record start, 0.2.61's B-against-A-neighbours residual, bad
+  above 8 codes), `eh_cap_step` (re-arm while bad and fewer than EH_MAX_TRIES = 16 re-arms, then accept and flag), event
+  field packers. 0.2.61's `eh_run`, `fpga_encode_heal`, `fpga_encode_check_dirty`, `fpga_rate_dirty` and their extra
+  check conversion are gone.
+- `enc_heal_hw.c` (target): `fpga_encode_init` (pc_glue_init: mode; on 0x1538 one 0x33 read at boot, bits 3:2 must be
+  01, else GET_HEALTH 90 bit 1 and event 21 reason 3), `fpga_encode_after_capture` (called by `fpga_done_conversion` when
+  a conversion is done: check, and on bad `pc_hal_enc_retry` + `pc_glue_decim_rearm` + `fpga_do_conversion`, returning
+  "not done" so every caller's wait loop keeps waiting), `fpga_encode_new_conversion` (top of `fpga_do_conversion`: a new
+  capture unless it is the re-arm), `pc_hal_enc_status` / `_retry` / `_note` / `_state`, `fpga_enc_garbled` (wizard).
+- Host ARM (`pc_acq_service`, pc_cmds.c): `pc_enc_rearm` after `pc_hal_acq_finish`, before the trace build; re-arms with
+  the setting `h_arm` stored (`arm_dc`, `arm_seq`, `arm_auto`, `arm_prog`, `arm_normal`; `pc_arm_hw`), state back to
+  ARMED, `arm_ms` restarted (the firmware auto time-out counts again). A failed re-arm (0x05 never ready) ends ABORTED.
+- Who is checked: every conversion at divider 0 (always K = 0): UI, wizard, v4 class probe, 1.00o5 calibration and
+  auto setup (all through `fpga_done_conversion`), host ARM. Skipped: other dividers, NONE bitstreams, and on DATA
+  bitstreams sequencer runs (UI averaging: `pc_seq_ui_running`; host: `cap_next.seq_mode`); a host run STOP ended is
+  never restarted. FLAG covers a whole run (bit 0 is sticky until the next 0x01 = 1).
+- Re-arm writes: 0x1532..0x1536 re-write 0x0D = 1, 0 (caller CHECK in event 22) before the re-arm, since only a rate
+  write re-rolls their phase; 0x1537 and 0x1538 only re-arm (0x1537 re-resolves at every reset).
+- Wizard (cal_wiz_ui.c): clears `fpga_enc_garbled` before the full-rate points of a range and before each gain level,
+  fails ACAL_E_TIMING when it is set afterwards (a conversion accepted bad after 16 re-arms).
+- Protocol 1.19 (row 58): caps bit 18 ENC_CHECK (0x1538+), features bit 5 (0x0020); GET_HEALTH 104 bytes (88 mode, 89
+  last 0x33, 90 flags: 0 read, 1 convention bad, 2 last capture accepted bad, 3 core order differs (0x1537); 91 0x33 at
+  boot; 92 bad, 96 recovered, 100 checked); GET_LINK_STATS 62-63 now per capture; event 21 a = reason << 5 | re-arms
+  (bit 7 not recovered; reasons 1 data, 2 0x33, 3 boot convention), b = caller << 12 | first value. Vector
+  `resp_get_health_1_19`.
+- `PC_INTERLEAVE_ORDER` is fixed at 0 (no `#ifndef`); the two READ_RAW ternaries and the 0x53 swap default are
+  constants now. acal_track's A - B model and the decimator's swap bit assume B first, which 0x1538 guarantees: nothing
+  else changes. Caps bit 12 INTERLEAVE_UNVERIFIED stays set until T4 on 0x1538 (coordinator's call).
+- Diagnostics: 0x1532..0x1536 amber "ADC capture timing race, fixed in 0x1538"; 0x1537 amber "ADC core order differs:
+  recalibrate after flashing 0x1538"; 0x1538 from GET_HEALTH: "encode check OK" (+ ", N captures re-taken"), amber
+  "encode check failed on CH2 A, CH1 B" (pins with bit 0 in 0x33 bits 7:4), amber "unknown encode convention, 0x33 =
+  0x..", or "encode check, no 200 MSa/s capture yet". Report file: "Full-rate capture check: ..." line, event 21 in words.
+- Mock HAL (host_tests): `enc_bad_arms` (next arms garbled, -1 all), 0x33 per arm (`enc33_bad` 0x77 = CH2 A wrong), a
+  garbled arm fills core 2 (CH2 A) with noise; counters as the target counts. The mock ring is now a triangle (one code
+  per word) so the data check reads it clean; every existing test passed unchanged with it.
+- Tests: test_enc_heal 105 checks, test_session 69800 / 69798 (`test_enc_check`), test_ui_diag 5485, test_diag 471.
+  Warnings: GCC 10 and nommu 36 (sorted list identical to 0.2.61's), GCC 13 / PC_DEBUG 31.
+
+**Decided and why**
+- Data check from the ring, not from the trace buffers: the UI path checks before its readout, so a garbled capture
+  never reaches the screen, the measurements or the 50 % trigger; the cost is 1000 bus bytes (about 0.3 ms) per
+  full-rate capture on 0x1532..0x1537 only. Host READ_RAW reads later (and partially), so it needs the separate read
+  anyway. 0x1538 costs one bus byte.
+- Re-arm inside `fpga_done_conversion` rather than at each of the 12 call sites: the 1.00o5 calibration and auto setup
+  loops, the wizard, the probe and the UI all go through it; the UI keeps its previous trace while re-arming.
+- Normal / single trigger mode: a re-arm waits for the next trigger (a single-shot event caught garbled is lost; the
+  data was useless anyway). Bounded at 16; the 17th bad capture is accepted and flagged (GET_HEALTH 90 bit 2, event 21
+  bit 7, wizard ACAL_E_TIMING).
+- Counters: 62 counts captures whose first check failed (at that moment), 63 those recovered; 62 - 63 = accepted bad or
+  abandoned by a new conversion during the re-arms (no event for an abandoned one).
+
+**Bench check** (owner with the coordinator; FEL load only, nothing written):
+1. On 0x1537 first (it is in the flash): FEL-load 0.2.62, `#VER` fw=0.2.62 proto=1.19 fpga=0x1537. Diagnostics FPGA
+   line amber "ADC core order differs: recalibrate after flashing 0x1538". The 16:48 experiment again (divider 0 held,
+   1221 host captures in 60 s): no READ_RAW with a garbled core (per-core std under 5 codes), GET_HEALTH 92 grows about
+   0.4 per capture, 96 = 92 (all recovered), 100 = captures + re-arms; event 21 entries with a = 0x2N (reason 1, N
+   re-arms), caller host.
+2. Flash 0x1538 (fpga/al3/README.md section 8, the flash session plan in docs/hardware-status.md; padded image
+   `backups/al3_seg_0x1538_0c24ecf6_padded.bin`, sha256 2fc7ea5b...1087), power-cycle, FEL-load 0.2.62: `#VER`
+   fpga=0x1538; GET_INFO caps bit 18 (0x40000); GET_STATUS 44-45 = 0x003F; GET_HEALTH 88 = 2, 91 = 0xF6, 90 bit 1 clear.
+   Diagnostics: "encode check, no 200 MSa/s capture yet", then after one 200 MSa/s capture "encode check OK".
+3. Rate-toggle test on 0x1538: alternate SET_TIMEBASE raw divider 99 / 1 / 3999 <-> 0, 40 trials each, READ_RAW 1000
+   at divider 0 after each: zero garbled captures; GET_HEALTH 92 stays 0 (or 62 = 63 with an occasional async-write
+   miss), 89 = 0xF6.
+4. 60 s back-to-back captures on 0x1538 (divider 0 held, host ARM / WAIT / READ_RAW as fast as possible): zero garbled,
+   counters stable (92 unchanged, 100 = the capture count), no event 21.
+5. UI at 200 MSa/s for a minute, then the time base toggled a few times: the trace clean, GET_HEALTH 92 stable.
+6. Wizard zero step (probes and USB off): both channels pass ("CH1: zero level done", "CH2: zero level done"); then
+   the full calibration (the 0x1537 calibration must be redone), Save; GET_CAL CH2 A-B near 0 as on 0x1535.
+7. If 92 grows on 0x1538: the event 21 b values (0x33 bytes) say which pin; report to fpga-gen7.
+Rollback: FEL-load 0.2.61 (pinned backups/fw-0.2.61_4593c43f.bin); 0.2.62 runs on 0x1535 / 0x1537 as well.
+
+**For the mcp agent (do not edit mcp/ from this branch)**
+- protocol.py: `PROTO_MINOR = 19`; `Caps.ENC_CHECK = 1 << 18`; features bit 5 ENC_CHECK (0x0020) in GET_STATUS 44 /
+  GET_DECIM 32; HealthResp grows to 104 bytes: `enc_mode` (u8 88: 0 none, 1 data, 2 FPGA 0x33), `enc_last33` (u8 89),
+  `enc_flags` (u8 90: 0 read, 1 convention bad, 2 last accepted bad, 3 core order differs), `enc_boot33` (u8 91),
+  `enc_bad` (u32 92), `enc_recovered` (u32 96), `enc_checked` (u32 100); describe() with the 0x33 pins {CH2 A bit 7, CH2
+  B 6, CH1 A 5, CH1 B 4}, 1 = right, 0xF6 good. Event 21 decode: reason (a >> 5) & 3 (1 data, 2 0x33, 3 boot
+  convention), re-arms a & 0x1F, bit 7 not recovered, caller b >> 12 (as type 22), value b & 0xFFF (residual / 16 codes
+  or the 0x33 byte). Link counters 62/63 names unchanged ("captures bad / recovered").
+- Vector to decode: `resp_get_health_1_19`. The simulator should answer GET_HEALTH with 104 bytes.
+- scope_status / diagnostics tool: show the check mode, last 0x33, the three counts; a measurement taken while
+  `enc_flags` bit 2 is set deserves a caveat.
+
+**Open**
+- `docs/plans/task-queue.md` item "Full-rate encode check on every arm": done on this branch pending the bench above.
+- `docs/release-notes/0.3.0.md` (rel-gen1) does not mention 0x1538 or the per-capture check; the coordinator decides.
+- Caps bit 12 INTERLEAVE_UNVERIFIED: clear it for 0x1538 once T4 confirms B first on hardware (one line in
+  `pc_variant_from_version`).
+- 0x1532..0x1536 still re-roll only on rate writes, so their re-arm re-writes 0x0D first (two extra writes per re-arm;
+  0x1535 measured 50 % odds per write, so about one re-arm per bad capture on average).
+- A large signal above about 15 MHz raises the DATA residual (a 100-code 10 MHz sine stays under the limit,
+  test_enc_heal); on 0x1532..0x1537 such a signal could make every full-rate capture re-arm 16 times and be flagged.
+  0x1538 has no such limit.
+## 39. fw-polish1: UI polish batch 1 (fw 0.2.63 provisional, protocol unchanged)
+
+Branch from main 8f8687a (fw 0.2.61), merged with origin/main a179408 in bc32b8b. Brief: `docs/plans/task-queue.md` "UI
+polish batch 1" items a-p plus the coordinator's item q; rules `docs/ui-guidelines.md`; user-facing description README
+section 5 "Screens: UI polish batch 1 (fw 0.2.63)" (and the older Screens sections corrected where they changed). One
+commit per item: f58ff29 (a), 70da62a (q), bcb3007 (b), f71ede6 (c), d513498 (d), 8d508cd (e), cf37f5d (f), 1fb05fd (g),
+2830fc2 (h), 1ecaef3 (i), ba116cf (j), d4345e8 (k), eb51787 (l), 6c82e0c (m), 32d17a9 (n), b1fe1fc (p), then the version /
+CHANGELOG / README commit, the merge, this handoff. Image from bc32b8b (GCC 10): `firmware/scope/build-gcc10-pc/
+fnirsi_1013d.bin` in the worktree, 606,720 B, sha256 28b15dcdda21112caa49aee81b6b0c394977259784e44b7952ed47ce59d8f475, ELF
+76852f3281c1a5e26fe5732e3eedbd58c880ff5207bc091649b30134e478f82e; nommu bin
+21c80a58cf7851bef4b4d39943761613e98fa27559982cc743941ab1bec5a656 (`#VER` fw=0.2.63, proto=1.18). A build of the handoff
+commit differs only in the identity. **Nothing benched.** Host tests all green (test_ui 1,418,459, test_ui_diag 4880,
+test_cal_wizard 648, test_session 69707 / 69705, check_vectors OK). GCC 10 warnings 36 (gcc10 and gcc10-nommu), sorted
+line-number-free list identical to 8f8687a. No settings words, no protocol change. Version: 0.2.63 as briefed (0.2.62 is
+fw-enc's); the coordinator renumbers if needed.
+
+Decisions (owner may veto each):
+- (e) **Pro removed.** `scope_display_channel_pro_trace` drew, per screen column, the minimum and the maximum of the
+  samples in that column as two separate polylines (min to previous min, max to previous max), with no vertical fill
+  between them. Zoomed in (fewer samples than pixels) min = max and it is Linear with held samples; on a clean signal the
+  outlines lie within a pixel and it looks like Linear; on a noisy or fast signal it shows Peak's band as an outline. Not
+  distinct enough to keep: three styles. `pc_ui_fix_settings` maps a saved 3 to Linear; the draw switch's default is now
+  Linear (`_old`, the same function as case 0; the default called a different, unused-elsewhere linear variant).
+- (n) **Debug overlay switch removed, flag kept.** `dev_mode` draws "DEV mode" at (670, 50), the raw 0x14 trigger
+  address at (500, 10) over the top bar (cleared and redrawn every capture: the flicker), the trigger position
+  (`scope_test_trigerposition_value`) and touch coordinates in the generator and keypad menus. Raw FPGA numbers that a
+  user cannot act on, and the PC already gets the trigger address in every capture record. The flag stays in the
+  settings sector; the Developer page shows a "Debug overlay / Switch off" row only while it is set, so units that turned
+  it on with 0.2.59-0.2.62 can turn it off. (After switching it off the top-bar number at x 500 stays until the top bar
+  is next redrawn, e.g. by opening a dropdown.)
+- (p) **RUN/STOP wording: green "RUN" while running, amber (0xFFD262, the Diagnostics "Check" colour) "Stopped" while
+  stopped**, black text both. "Stopped" reads as a state where "STOP" reads as a command. It is in the 13 px font
+  (47 px wide): "STOPPED" is 62 px in the 16 px font and 50 px in the 13 px one, wider than the 51 px button allows.
+  Touched: orange as every bar button. The top bar's RUN / WAIT / STOP chip (red STOP) is unchanged: say if it should
+  follow (one line in `scope_run_stop_text`). `pc_hal_ui_set_run` now redraws the button too (page one, not in the
+  viewer); the single-shot stop in scope_functions.c already did.
+- (j) The Diagnostics header takes the Settings screen's: black band (`RGB_HEADER` 0) with the 0x262626 rule, Back at x
+  692. The tabs keep their look (the unselected ones already were the Settings Back button's colours; the shown one is the
+  lighter blue with the double edge). The first-run screen shares the header band.
+- (k) DC shift trim: new button style `UD_B_ON` (green 0x145A2E / 0x35C26A) while on, `UD_B_GREY` while off; the line
+  "On: CTRL on the scope opens the trim." (amber) only while on.
+- (m) The history channel: `spec_hist_pick` (not saved, like Analyse). With Analyse = CH1 + CH2 both spectra stay
+  computed and the pick chooses the history; with a single-channel Analyse the pick sets Analyse (`spec.recompute`), since
+  only analysed channels have spectra. The row exists only in Waterfall and Density, below a separator; a tap toggles and
+  keeps the fold-out open. Auto's channel (`spec_auto_ch`) still follows Analyse only. Two histories at once: later
+  (needs a second `wf_rows` / `dens` history and a split-plot or overlay design).
+- (f) Pass time moved under the Memory column's rule (x 312, y 218 of the menu), "Pass time" grey and "NN ms" white,
+  geometry in `ui_ctrl.h` (`UI_ACQ_PASS_*`), test_ui checks it lies in the empty part of the column and the texts fit.
+- (g) Root cause: `handle_main_menu_touch` hit-tests every touch sample afresh. A drag that left the slider's 58 px band
+  (y 46..104 / 105..163) went to the final else (close everything), or into a fold-out row or a main-menu row (x < 150,
+  which switches the mode). Now `drag` remembers the slider the touch started on and feeds every sample to
+  `scope_move_slider` (which clamps x) until release.
+- (h) The Restore dialog body is two lines broken where the next word does not fit; test_ui checks every dialog for that.
+- (l) `ui_step.step`: drawn right-aligned on the title line in the 16 px font, soft grey. Only the volts calibration uses
+  it (the calibration wizard's four screens have titles, no step count).
+- (a, q, c) Icons drawn in code: cogwheel per pixel (ring r 3..7, four straight 5 px teeth to 10 px, four diagonal ones to
+  r 9.9), sine as 25 column values joined by lines, X-Y as 24 points of a lemniscate turned 55 degrees. The
+  `system_settings_icon` and `confirmation_icon` bitmaps are gone.
+- (o) Checked: the zero step's first instruction line is 433 px in the 16 px font (592 available), the second shorter;
+  test_cal_wizard checks both.
+
+Not touched (other agents' areas): enc_heal / fpga_control arm paths, the ACQ dropdown handlers and
+`handle_acquisition_menu_touch`, `scan_for_touch` and the drag handlers, `spectrum_touch`, the measurement cards and the
+spectrum card set, the bode view.
+
+**Bench walk-through (owner, coordinator on COM10; FEL load, no SD writes needed)**
+1. FEL-load, `#VER fw=0.2.63`. Menu: the Scope row shows one period of a sine wave, the Settings row a cogwheel; both
+   in white, black while touched (Settings yellow while its fold-out is open).
+2. CTRL page: Grid is a green button reading "Grid"; tap: grey, the grid lines go; tap: green, back. No slide switch.
+3. Display: the X-Y row's icon is a figure 8 leaning right. Choose X-Y: the Trace style button turns grey (label and
+   value), a tap on it does nothing. Normal: it is white / pale yellow again and opens.
+4. Trace style: Linear, Dots, Peak only. (Optional: with Pro saved by 0.2.62, power-cycle into 0.2.63: Linear.)
+5. ACQ menu: "Memory" header, then the depth chips with nothing between them; under the column's rule at the right:
+   "Pass time" and "NN ms" on two lines, nothing overlapping.
+6. Menu > Settings: Screen brightness, Grid brightness, (Time and date), Other settings; no File message timeout. Open
+   Screen brightness, drag the slider and let the finger wander up and down well outside the slider's band and over the
+   fold-out and the main menu: the slider follows x, the fold-out stays open, no row reacts. Release, then tap outside:
+   it closes. Same for Grid brightness.
+7. Other settings: the header reads "Settings" and Back only; nothing beside Restore default settings; Controls has File
+   message timeout (tap flips "wait for a tap" / "0.7 s"). Restore default settings: the dialog body is two lines, the
+   first nearly the box's width. Cancel.
+8. Menu > Diagnostics: black header like Settings (grey rule under it), Back at the same place as on Settings; no
+   battery icon over the header's right end for a minute (it is current again after Back). Calibration tab: DC shift
+   trim button grey, no "DC shift trim off." line, no "Needs a DC supply up to 15 V."; tap: green with "On: CTRL on the
+   scope opens the trim."; tap: grey. Developer tab: only Enter FEL now (unless the flag was on: then a "Debug overlay /
+   Switch off" row above it; tap removes it).
+9. Calibration tab > Volts calibration: the dialog title line reads "Volts calibration" at the left and "Step 1 of 6" at
+   the right; the second line "Tap Calibrate.". Cancel.
+10. Spectrum analyser > CTRL > Display: Spectrum, Waterfall, Density only. Choose Waterfall, open Display again: a line
+   and "Channel CH1" (Analyse CH1 + CH2 or CH1). Tap: "CH2", the waterfall restarts with CH2's history; Analyse keeps
+   CH1 + CH2 (or follows to CH2 when it was CH1). Switch CH2 off: the row is grey and inert, showing CH1.
+11. RUN/STOP: running, the button is green "RUN"; tap: amber "Stopped"; tap: green "RUN". From the MCP:
+   `scope_acquisition_control` action "stop": the button turns amber "Stopped" at once, and green on action "run". Same with Diagnostics open (Back shows the
+   right state) and in the spectrum view.
+Bug indicators: a slider drag that closes the fold-out or switches the mode; RUN/STOP and the top bar chip disagreeing on
+run vs stop; the battery icon on the Diagnostics header; the Trace style fold-out opening in X-Y; a Pro row; the pass
+time overlapping a chip; text past the edge of the RUN/STOP or Grid button.
+## 40. fw-acqtouch: ACQ time/div coupling, Filter per mode, touch batch 2 (fw 0.2.64 provisional, protocol unchanged)
+
+Branch from main 8f8687a (fw 0.2.61). Briefs: docs/plans/task-queue.md "ACQ: sample rate vs time/div coupling", "FIR
+step overshoot pulsing" (owner decision: Filter per mode) and "Touch fixes batch 2"; docs/plans/touch-review.md (b), (c),
+(d). Commits: 5718015 (tb_view / acq_view, ACQ menu, display window, slider drawing, host paths), 5818b5b (Filter per
+mode, word 212), 29d61f1 (trace point buffers), b620113 (touch batch 2), f690e42 (spectrum pan, fold-outs on release),
+d1f303f (trigger point drag limits), then docs and this handoff. Images from merge e626b1b (main a179408 merged, no firmware conflicts): `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin`
+in the worktree, 612,864 B, sha256 8730e6700777fc740803805e18fffef2991d6ae94bc3174566c99572f7493fd7; nommu
+15e82d94dde5d057f1f9a7aa00f711f63612ecf8804f0a8b484551fb8da5545d (a build of a later commit differs only in the identity). **Nothing benched.**
+Host tests green (test_tb_view 57750 checks, test_touch_pick 584, the rest unchanged). GCC 10 warnings 36, sorted
+line-number-free list identical to 8f8687a. **Settings word 212 claimed** (0xD500 marker, the Spectrum's Filter; 207 is
+the Scope's); 213..223 stay free. No protocol change (wire formats unchanged; docs/protocol.md SET_TIMEBASE notes the
+snapped index in the response and the per-mode Filter).
+
+Points for a successor:
+- **tb_view.c/.h** (pure): the trace window maths. A time/div is viable when `724 x fs < total x 50 x fpd` (the record
+  covers columns 3..727, the last pixel's interpolation included) and `fs >= fpd` (one sample per division; 200 MSa/s
+  at 5 ns/div is exactly one). `tbv_window` keeps 1.00o5's first-sample formula (trig - 1 - ceil(pos / xpps)) and
+  clamps it into the record; a record shorter than the screen draws from column 3 to `3 + ceil(total x xpps)`.
+  `tbv_pos_limits` are the trigger point columns that keep the window inside the record for the nominal trigger sample
+  (`fpgasettings.settriggerpoint`); a software trigger found off the nominal point is handled by the window clamp. The
+  test compares with 1.00o5's table: 24 cells differ at 3000 samples (3 at 250 samples/div and 17 below one sample/div
+  offered by the table; 4 at 200 samples/div withheld by it), so the table was removed.
+- **acq_view.c/.h** (target glue): `acq_view_fit(notice)` snaps the time/div (short mode, indices 11..34) and clamps the
+  trigger point; called from the ACQ menu (rate, memory, Filter), `scope_set_timebase` (after the tap zoom; re-writes
+  0x0E when it snapped), `pc_hal_timebase_write` mode 0, `pc_hal_trigger_write` (pre / total), `pc_hal_decim_set`,
+  `pc_dec_follow_mode` and `pc_ui_fix_settings`. The notice is a static string drawn by `pc_glue_scope_warning` when no
+  warning shows, white, 4 s from its first draw (a long stay in the ACQ menu does not eat it). `acq_view_tb_ok` greys and
+  blocks the ACQ time/div boxes (all unavailable in long mode, as 1.00o5's table rows 18-28 were).
+- **Display**: `scope_display_trace_data` uses `tbv_window` in short mode (long mode keeps 1.00o5's xrange code); the
+  last-pixel interpolation of the Linear and Dots styles runs only when the trace reaches the right edge.
+  `scope_draw_grid` draws the slider window to scale (`tbv_slider`, min 8 px). `move_trigger_point_position` applies
+  1.00o5's limits only in long mode (their 1400-sample margin stopped the window short of the record's end).
+- **Filter per mode** (pc_hal_scope.c): `pc_dec_setting` is a macro for `pc_dec_set_mode[spectrum_mode() !=
+  SPECTRUM_MODE_SCOPE]`; `pc_dec_follow_mode` (in `pc_glue_ui_service`) fits the memory to 8190 and refits the time/div
+  when the new mode's filter is on. Defaults in pc_decim.h (`PC_DECIM_DEFAULT_SCOPE` CIC2, `PC_DECIM_DEFAULT_SPEC`
+  CIC2+FIR, `PC_DECIM_DEFAULT_OLD` for the migration: an old sector holding exactly the old default gets the new
+  per-mode defaults, any other choice is kept for both modes).
+- **Touch** (statemachine.c `scan_plot_pick`; touch_pick.c `trace_distance`, `pick_channel_near`, `touch_tap_zone`,
+  `touch_cards_top`): one pick at touch-down; TOUCH_STATE_MOVE_RECORD (0x12) for the slider, with
+  `previous_trigger_point_position` snapshotted. The card geometry used by the tap bands copies
+  `scope_display_channel_measurements` (rows of three from y 426, pitch 24): **if fw-meas changes the cards' layout,
+  update `CARDS_*` in touch_pick.h and `scope_tap_bottom` in scope_functions.c.** The H marker has no handle box of its
+  own (review rule 5, not in this batch). The `distance_*` globals in variables.c are unused.
+- **Not done**: touch-review batch 3 (the blocking touch loop, one GT911 reader, long-mode presets per drag step, the host
+  race) did not fall out of this work: the plot still blocks in `scan_for_touch` until the finger moves 6 px or lifts.
+  Spectrum plot taps still have no y bound (defect 20, header / label taps). Locked cursors (defect 13) and X-Y moving
+  switched-off channels (defect 11) unchanged.
+- Peak / Pro overflow: those styles store two points per column (up to 1448) and the buffers had 730 entries;
+  `TRACE_POINTS_MAX` 1460 now (inference: this corrupted the neighbouring point buffers whenever Peak or Pro was on).
+
+**Bench walk-through (owner, coordinator on COM10)** - FEL-load, `#VER fw=0.2.64,proto=1.18`. CH1 on the 1 kHz
+calibration square, 1X, DC, 1 V/div, Auto trigger, memory 3000, Scope view.
+1. ACQ menu, owner's repro: 500 us/div at 500 KSa/s, then tap 200 MSa/s. The time/div box jumps to 1 us (green); the
+   boxes 2 us .. 200 ms read grey and do nothing when tapped; close the menu: "Time/div set to 1us for this rate" in
+   white at the top middle for about 4 s; the trace fills the screen, no flat zero line at the right, the slider window
+   spans almost the whole bar.
+2. Back to 500 KSa/s: 1 us is below one sample per division there, so it snaps to 2 us with the notice.
+   At 500 KSa/s the white range is 2 us .. 200 us; 500 us is grey now (250 samples/div did not fit 3000 samples: the old
+   table offered it and drew zeros past the record). Memory 15000: the white range reaches 2 ms.
+3. 1 MSa/s at 200 us/div (200 samples/div, newly allowed): the record fills the screen.
+4. Slider: 200 MSa/s, 50 ns/div (window about 35 px). Drag the window right: it follows the finger, the trace moves left,
+   the H marker leaves the screen and shows as the side pointer; at the end of the bar the window stops (no zeros, never
+   past the record end); drag back: it stops where the record starts. Move slow: a fifth of the finger. A tap on the
+   slider does nothing.
+5. Drag on empty plot (no trace near): the H marker pans as before and stops at the record's ends.
+6. Trace grab: 1 ms/div, the square about 1 division above its zero line. Touch the top of the square (not the zero line)
+   and drag down: CH1 moves. 30 px above the square's top: still grabs (40 px); 50 px: the trigger point pans instead.
+   Peak trace style: the same on the band.
+7. Taps: a still, brisk tap left of centre mid-plot: time/div one step slower; a 4 px wobble still counts as a tap; a
+   brisk stroke on the trace (moved, under 250 ms): nothing changes. Tap on a pointer, the slider or the trigger level
+   pointer: nothing. Measures: four cards for CH1 (two rows): taps on the cards do nothing; the 80 px band just above
+   them steps CH1 V/div less sensitive; nothing happens on the slider row.
+8. Stopped zoom: STOP at 200 MSa/s 1 us/div, tap the left time band (slower): it stays at 1 us with the notice (2 us would
+   not fit the record); tap right down to 5 ns: works; one more does nothing.
+9. Filter per mode: ACQ menu in Scope reads "CIC2" on the first boot of 0.2.64 (a sector with the old default); the 1 kHz
+   square shows no pulsing horns. Menu > Spectrum analyser, ACQ menu: "CIC2+FIR". Set Spectrum to CIC3, back to Scope:
+   still CIC2. Power-cycle: both kept. GET_DECIM in each mode shows that mode's value.
+10. Host: SET_TRIGGER total 1000, then SET_TIMEBASE index 19 (500 us): the response's timeperdiv_index is 20 (200 us) and
+   the scope shows the notice.
+11. Spectrum: zoom in (tap right), drag to pan with Move slow: a fifth of the speed. CTRL > Analyse: touch a row, slide off
+   it and lift: nothing; lift on it: it acts. A tap outside the fold-out only closes it.
+Bug indicators: a grey time/div box that can be chosen; zeros or a flat line at the right edge at a white time/div; the
+trace jumping against the H marker when the rate changes; the slider window moving the wrong way or past the bar; a tap
+on the cards changing V/div; the Spectrum's Filter changing the Scope's.
+## 41. fw-meas: Measurements v2 (fw 0.2.65 provisional, protocol unchanged)
+
+Branch from main 8f8687a (fw 0.2.61), merged with main a179408 in 37714c3 (no firmware changes on main in between).
+Plan `docs/plans/ux-makeover.md` section 3a, `docs/plans/ux-review.md` section 6 part B, task-queue "Measurements v2";
+user-facing description firmware/README.md "Screens: Measurements v2 (fw 0.2.65)". Commits: 8749ffe (code and tests),
+f0837c5 (0.2.65, CHANGELOG, README, ui-guidelines names), 37714c3 (merge), then this handoff. Bench images from 37714c3:
+`firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 615,424 B, sha256
+1de13bd1cc04f6d637bbd60bb250eaa8ea59caedaab7720fff2a10215bb4f7d2 (ELF 538ae1a7...); nommu
+873377a33663d3b41769217f875c3445fef4063fc248ed037bb550ba02180605 (ELF 6e7a5681...). Not pinned in backups/.
+**Nothing benched.** Host tests green (test_ui 1,420,237 checks). Warnings: GCC 10 36, GCC 13 / PC_DEBUG 31, the same
+line-number-free lists as 8f8687a; ui_meas.c is clean with -Wall -Wextra -Werror.
+
+**Settings words claimed: 221 (spectrum view cards), 222 (CH2 spectrum cards), 223 (CH1 spectrum cards)**, each 0xA000 in
+bits 12-15 and four 3-bit ranks from bit 0 (`ui_meas.h` UI_MS_SPEC_WORD_*). fw-acq holds 212 (spectrum Filter, 0xD500).
+213..220 stay free; 224..255 are the life record. The Scope's choice needs no new word: its ranks are 1.00o5's
+`measuresstate` bytes (MEASUREMENT_SETTING_OFFSET), which 1.00o5 treats as on / off.
+
+Points for a successor:
+- **Model** (`ui_meas.c/.h`, pure): a list is an array of ranks (0 off, else the place in the row, ties by index).
+  `ui_ms_order` gives the display order, `ui_ms_toggle` puts a new item last and closes gaps, `ui_ms_select_all` keeps
+  the chosen order; every change renumbers 1..k first, so garbage ranks heal on the next tap. Wave files and reference
+  files carry the ranks in the measuresstate bytes as before (harmless).
+- **Fit**: one row only (the 1.00o5 stacking upward over the trace is gone). `ui_ms_scope_cap`: CH1 3, or 6 when the
+  CH2 block is not shown; CH2 3 from x 366. `ui_ms_fit`: with more chosen than places the last place is "+N more" in the
+  block's colour. Spectrum: 6 places from x 5 at y 446, the "+N" with a neutral chip.
+- **Scope cards** (`scope_display_measurements`, `scope_display_channel_measurements(ch, cap)`, `scope_measures_source`
+  in scope_functions.c): block rule as 1.00o5 (channel or one of its references on, Hide off, not in roll mode).
+- **Spectrum cards** (spectrum.c `spec_draw_cards`, `spectrum_cards()` the selection; the card set left ui_ctrl.c):
+  THD (`ui_ms_thd`, spec_db, whole axis `v.half`, harmonics 2..10, fundamental bin >= 5, "f0 too low" / "f0 too high"),
+  Noise (`ui_ms_noise_cdb`, spec_raw = the latest record unaveraged, over the shown span, median + 1.59 dB, at the RBW),
+  Span and Center from the view. The THD sums three bins per tone, so it is window-shape approximate (Hann scalloping
+  cancels in the ratio); the 8-bit floor is about 0.3 %. Not done from the review's tier 2: sub-bin peak, H2 / H3, SFDR,
+  SNR, band power, OBW; Scope rise / fall, top / base, overshoot, CH1-CH2 delay / phase / gain, AC RMS, gated statistics,
+  PI tau. They fit the same lists: add an item to the table (Scope list is full at 12 per channel in the menu's three
+  rows: a fourth row or a second page is needed, and `measuresstate[ch][12]` grows into a spare word block).
+- **Card source hook** (`ui_ms_set_source(item, fn)` / `ui_ms_get_source`): only live-channel Scope cards ask it;
+  documented in ui_meas.h and README. The FPGA counter driver should register in `pc_glue_init` (or wherever caps are
+  read) when its caps bit is set, write with `ui_fmt_sig4` into the 20-byte text, and never touch the bus from it.
+- **MEASURES menu** (menu.c `scope_measures_menu_draw` / `_cell`, statemachine.c `handle_measures_menu_touch`, geometry
+  `ui_msm_*`): box x 232..730, ending y 477; Scope top y 223 (title + 5 rows), Spectrum top y 313 (title + 3 rows). Cells
+  are 48-124 px wide (4-5 per half; the guideline's 80 px minimum is not met by the stock four-per-half item grid, kept
+  on purpose), 44 px tall; hit areas include the separators, so every tap under the title is a cell (test_ui sweeps
+  every pixel). Redraws cells in place after a change (no black flash). `ui_p1_shown` now shows MEASURES in the
+  spectrum; `handle_right_basic_menu_touch` blocks only y 183..297 there.
+- Names: "Center" (scope makers' spelling, as the guidelines ask for measurement names); the frequency labels under the
+  plot keep their own wording.
+
+**Bench walk-through (owner, coordinator on COM10)**
+1. FEL-load the image, `#VER` fw=0.2.65 proto unchanged (1.18). Scope with the 1 kHz calibration signal on CH1, CH2 on.
+2. Settings > Restore default settings (or DEFAULT): the cards read Freq, Vpp, Vavg left to right on CH1 (x 5) and on
+   CH2 (x 366), one row at y 426, nothing above it.
+3. MEASURES: the box slides in, title "Scope measurements", a source row (CH1 filled yellow, Ref 1-4 grey), Select All /
+   Clear / Hide in yellow, twelve names in three rows (Vmax ... -Duty), the same for CH2 on the right; Freq, Vpp, Vavg
+   white with 1, 2, 3 at their top left. Tap Vmax on CH1: it turns white with 4. Tap Vpp: it goes grey, Vavg reads 2 and
+   Vmax 3. Tap outside: the menu closes, the plot under it is back; the CH1 cards read Freq, Vavg, Vmax.
+4. Overflow: MEASURES, Select All on CH1, close: CH1 shows two cards and a third "+10 more" (CH2 on). Switch CH2 off
+   (and no Ref 5-8 shown): CH1 shows five cards and "+7 more" across the whole row. Hide on CH2 with CH2 on does the same.
+5. Hide CH1: the Hide cell turns orange; close: no CH1 cards. Hide again: back. Ref 1 as source (with a saved
+   reference shown): the source cell fills in the reference's colour, the cards follow its colour and values.
+6. Power-cycle: the order from step 3 is kept (Freq, Vavg, Vmax).
+7. Menu > Spectrum analyser: the right bar shows MEASURES (T CURSOR and V CURSOR slots empty). Cards: CH1 Peak, Level,
+   THD, CH2 Peak, Level, RBW (both channels in the Spectrum view). THD on the 1 kHz square wave reads about 40-48 %
+   (odd harmonics 1/3, 1/5 ... up to the 10th: sqrt(1/9 + 1/25 + 1/49 + 1/81) = 43 %); on a sine from a generator
+   below 1 %. Peak below bin 5 (very slow span): "f0 too low"; a tone near the top of the axis: "f0 too high".
+8. MEASURES in the spectrum: title "Spectrum measurements", per channel the label, Select All, Clear and Peak / Level /
+   THD / Noise, below them RBW / Span / Center / Time across the whole width. Turn on Noise for CH1: it reads a level a
+   few tens of dB below the peak; Span / Center match the frequency labels under the plot (start / centre / stop).
+   With more than six chosen the sixth place reads "+N more".
+9. Display > Waterfall: CH1 cards and RBW, then Time counting up. Power-cycle: the spectrum's choice is kept (words
+   221..223). Restore default settings: back to the defaults of step 7.
+10. Waveform viewer: MEASURES opens the Scope list.
+Bug indicators: a menu tap acting on the neighbouring cell; a stripe of the menu left on the plot after closing; cards
+stacking above y 426; a "+N" count that does not add up to the chosen count; THD changing wildly with the Window
+choice on a clean tone; MEASURES doing nothing in the spectrum.

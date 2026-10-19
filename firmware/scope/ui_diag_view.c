@@ -40,7 +40,7 @@
 //pc_diag.c / pc_hal_scope.c (fw 0.2.52 readers, firmware/AGENTS.md section 30)
 const pc_card_id *pc_glue_card_ident(void);
 int               pc_glue_save_report(char *name, uint32 name_max);
-void              pc_glue_health(uint8 *body96);
+void              pc_glue_health(uint8 *body);
 pc_session       *pc_glue_session(void);
 
 static uint8   ud_open;
@@ -364,7 +364,7 @@ static uint32 ud_volts_flow(void)
   static const char *levels[6] = { "300 mV", "600 mV", "1.5 V", "3 V", "7.5 V", "15 V" };
   ud_volts_backup b;
   ui_step d;
-  char   l1[96], l2[40], res[96];
+  char   l1[96], st[16], res[96];
   uint32 step = 0, saved = 0, done = 0;
   int    hit, failed = 0;
 
@@ -374,17 +374,18 @@ static uint32 ud_volts_flow(void)
   while(!done)
   {
     memset(&d, 0, sizeof(d));
-    l1[0] = l2[0] = res[0] = 0;
+    l1[0] = st[0] = res[0] = 0;
     d.title = "Volts calibration";
     d.left  = "Cancel";
 
     if(step < 6)
     {
       ud_cat(ud_cat(ud_cat(l1, "Connect CH1 and CH2 (probes at 1X) to a DC supply set to "), levels[step]), ".");
-      ud_cat(l2, "Step 1 of 6. Tap Calibrate.");
-      l2[5] = (char)('1' + step);
+      ud_cat(st, "Step 1 of 6");
+      st[5] = (char)('1' + step);
+      d.step    = st;
       d.line[0] = l1;
-      d.line[1] = l2;
+      d.line[1] = "Tap Calibrate.";
       d.right   = "Calibrate";
     }
     else
@@ -535,7 +536,7 @@ static void ud_touch(void)
       break;
 
     case UD_ID_OVERLAY:
-      dev_mode ^= 1;
+      dev_mode = 0;
       break;
 
     case UD_ID_DCSHIFT:

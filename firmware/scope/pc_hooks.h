@@ -20,8 +20,9 @@
 #define PC_SETTING_WORD_SPEC1 209   //fw 0.2.39: spectrum view ref level, dBV (int16)
 #define PC_SETTING_WORD_PHOS  210   //fw 0.2.46: phosphor view persistence, palette (0x9A00 marker); 0.2.56: the switch
 #define PC_SETTING_WORD_UI    211   //fw 0.2.56: Grid, the spectrum's Display variant (0xC700 marker)
-#define PC_SETTING_WORD_BODE0 220   //fw 0.2.66: Bode plot start, stop, points (0xB000 marker)
-#define PC_SETTING_WORD_BODE1 221   //fw 0.2.66: Bode plot settle, CH2 range (0xB100 marker)
+#define PC_SETTING_WORD_DECIM_SPEC 212   //fw 0.2.64: the Spectrum's Filter (0xD500 marker; 207 is the Scope's)
+#define PC_SETTING_WORD_BODE0 219   //fw 0.2.66: Bode plot start, stop, points (0xB000 marker)
+#define PC_SETTING_WORD_BODE1 220   //fw 0.2.66: Bode plot settle, CH2 range (0xB100 marker)
 
 //PC_UI_MASK(m) items. Menus are compact (fw 0.2.8, owner: no gaps): what the 1013D lacks is not laid out at all.
 #define PC_MASK_TRIG_CHANNEL  2     //trigger menu: EXT source box (0x1533+)
@@ -63,6 +64,7 @@ extern int16 *pc_decim_src;           //fpga_read_adc_data: converted samples to
 void   pc_glue_divider_written(uint32 divider);   //fpga_set_sample_rate wrote 0x0D
 void   pc_glue_ui_decim_arm(void);    //scope_acquire_trace_data: the next fpga_do_conversion uses the UI filter setting
 void   pc_glue_decim_conversion(void);//fpga_do_conversion, before the sampling reset: write the mode, settle
+void   pc_glue_decim_rearm(void);     //the full-rate check re-arms the last conversion: its filter setting again
 uint32 pc_glue_decim_words(uint32 samples);       //ring words for a sample count (samples / 2, or samples in 16-bit)
 uint32 pc_glue_decim_pre_words(uint32 samples);   //the same for the pretrigger, less the EXT latency shift in 16-bit
 uint32 pc_glue_decim_ui_start(uint32 start);      //UI capture start word: (0x14 - pretrigger) mod 8192 in 16-bit
@@ -70,7 +72,8 @@ void   pc_glue_decim_read(void *settings, uint32 start);   //fpga_read_sample_da
 void   pc_glue_decim_even(void);      //fpga_read_sample_data: second pass takes the even samples
 void   pc_glue_decim_tap(void);       //acquisition menu: Filter box touched
 void   pc_glue_settings_defaults(void); //fw 0.2.44: scope_reset_config_data (DEFAULT button, sector load failure)
-uint16 pc_glue_decim_setting_word(void);         //settings sector word (scope_save_config_data)
+uint16 pc_glue_decim_setting_word(void);         //settings sector word 207, the Scope Filter (scope_save_config_data)
+uint16 pc_glue_decim_spec_setting_word(void);    //fw 0.2.64: word 212, the Spectrum Filter
 uint16 pc_glue_spectrum_setting_word(int i);     //settings sector words 208, 209 (scope_save_config_data)
 uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (scope_save_config_data)
 uint16 pc_glue_ui_setting_word(void);            //settings sector word 211 (scope_save_config_data)
@@ -79,7 +82,7 @@ uint16 pc_glue_ui_setting_word(void);            //settings sector word 211 (sco
 int    pc_glue_bode_pass(void);                  //scope_acquire_trace_data: 1 = the Bode plot shows (no UI acquisition)
 void   pc_glue_gen_bode_draw(void);              //generator menu: draw its fourth row, "Bode plot"
 int    pc_glue_gen_bode_hit(void);               //generator menu: a tap on that row (ytouch): 1 = taken, close the menu
-uint16 pc_glue_bode_setting_word(int i);         //settings sector words 220, 221 (scope_save_config_data)
+uint16 pc_glue_bode_setting_word(int i);         //settings sector words 219, 220 (scope_save_config_data)
 void   pc_glue_view_opening(void);               //the picture / waveform viewer is about to open: the Bode plot ends
 
 #define PC_BUSY_POLL()          pc_glue_poll_busy()
