@@ -217,7 +217,13 @@ static void ud_save_report(void)
   ud_note_set(UD_C_DIM, "Saving the report...", 0);
   ud_draw();
 
-  r = pc_glue_save_report(name, sizeof(name));
+  //fw 0.2.77: a host request meanwhile gets E_BUSY "file save in progress" (protocol 1.23)
+  {
+    int hold = pc_glue_ui_hold(PC_HOLD_SAVE);
+
+    r = pc_glue_save_report(name, sizeof(name));
+    pc_glue_ui_hold(hold);
+  }
 
   if(r == FR_OK)
   {
@@ -413,8 +419,15 @@ static uint32 ud_volts_flow(void)
     ui_dlg_step_draw(&d);
 
     tp_i2c_read_status();
-    while(!havetouch)
+    while(!havetouch && !PC_UI_YIELD())
       tp_i2c_read_status();
+
+    //fw 0.2.77: a host request cancels it between steps as Cancel does: the factors go back (protocol 1.23)
+    if(!havetouch)
+    {
+      done = 1;
+      continue;
+    }
 
     hit = ui_dlg_step_hit(&d, xtouch, ytouch);
 
@@ -442,12 +455,18 @@ static uint32 ud_volts_flow(void)
       d.right_style = UI_ACT_DISABLED;
       ui_dlg_step_draw(&d);
 
-      //1.00o5's step (it draws its own boxes and the top bar: into a spare buffer, the dialog stays)
-      calibrationopen = (uint8)(3 + step);
-      display_set_screen_buffer(displaybuffer3);
-      scope_input_calibration();
-      display_set_screen_buffer((uint16 *)maindisplaybuffer);
-      calibrationopen = 0;
+      //1.00o5's step (it draws its own boxes and the top bar: into a spare buffer, the dialog stays). fw 0.2.77: it
+      //runs to its end; a host request meanwhile gets E_BUSY "calibration measurement running"
+      {
+        int hold = pc_glue_ui_hold(PC_HOLD_CAL);
+
+        calibrationopen = (uint8)(3 + step);
+        display_set_screen_buffer(displaybuffer3);
+        scope_input_calibration();
+        display_set_screen_buffer((uint16 *)maindisplaybuffer);
+        calibrationopen = 0;
+        pc_glue_ui_hold(hold);
+      }
 
       failed = calibrationfail ? 1 : 0;
 
@@ -611,6 +630,13 @@ void ui_first_run(int settings_defaults)
   while(id == UD_ID_NONE)
   {
     tp_i2c_read_status();
+
+    //fw 0.2.77: a host request answers it with Later (protocol 1.23)
+    if(PC_UI_YIELD())
+    {
+      id = UD_ID_LATER;
+      break;
+    }
 
     if(!havetouch)
       continue;

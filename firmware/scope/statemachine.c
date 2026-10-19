@@ -914,6 +914,13 @@ void handle_main_menu_touch(void)
     //Scan the touch panel for touch
     tp_i2c_read_status();
 
+    //fw 0.2.77: a host request closes the menu and its fold-outs as a touch outside does (protocol 1.23)
+    if(PC_UI_YIELD())
+    {
+      close_open_menus(1);
+      return;
+    }
+
     //fw 0.2.63 (owner): a drag that starts on a brightness slider stays with it until the finger lifts. Before, every
     //touch sample was hit-tested afresh, so a finger drifting off the slider's box mid-drag counted as a tap outside
     //(the fold-out closed) or on a main-menu or fold-out row
@@ -1409,6 +1416,13 @@ void handle_channel_menu_touch(PCHANNELSETTINGS settings)
   {
     //Scan the touch panel for touch
     tp_i2c_read_status();
+
+    //fw 0.2.77: a host request closes the menu and its sub menus as a touch outside does (protocol 1.23)
+    if(PC_UI_YIELD())
+    {
+      close_open_channel_menus(settings, 1);
+      return;
+    }
 
     //Check if there is touch
     if(havetouch)
@@ -2522,6 +2536,10 @@ void handle_acquisition_menu_touch(void)
   {   
     //Scan the touch panel for touch
     tp_i2c_read_status();
+
+    //fw 0.2.77: a host request closes the menu as a touch outside does (protocol 1.23)
+    if(PC_UI_YIELD())
+      return;
     
     //Check if there is touch
     if(havetouch)
@@ -2710,6 +2728,13 @@ void handle_trigger_menu_touch(void)
   {
     //Scan the touch panel for touch
     tp_i2c_read_status();
+
+    //fw 0.2.77: a host request closes the menu as a touch outside does (protocol 1.23)
+    if(PC_UI_YIELD())
+    {
+      close_open_trigger_menus(1);
+      return;
+    }
 
     //Check if there is touch
     if(havetouch)
@@ -2973,6 +2998,13 @@ void handle_generator_menu_touch(void)
     //Scan the touch panel for touch
     tp_i2c_read_status();
 
+    //fw 0.2.77: a host request closes the menu as a touch outside does (protocol 1.23)
+    if(PC_UI_YIELD())
+    {
+      close_open_gen_menus(1);
+      return;
+    }
+
     //Check if there is touch
     if(havetouch)
     {
@@ -3202,6 +3234,19 @@ void handle_keyboard_menu_touch(void)
   {   
     //Scan the touch panel for touch
     tp_i2c_read_status();
+
+    //fw 0.2.77: a host request closes the keypad as a touch outside does (protocol 1.23), without the number typed:
+    //the caller applies the buffer, so it gets the current value back
+    if(PC_UI_YIELD())
+    {
+      if(freqmenuopen)
+        buffer_set_number(fpgasettings.gen_freq);
+      else if(dutymenuopen)
+        buffer_set_number(fpgasettings.gen_duty);
+
+      if(freqmenuopen || dutymenuopen) close_open_gen_menus(0);
+      return;
+    }
     
     //Check if there is touch
     if(havetouch)
@@ -3560,8 +3605,13 @@ void handle_right_basic_menu_touch(void)
     //Button back to inactive state
     scope_save_picture_button(0);
     
-    //Save the picture on the SD card
-    scope_save_view_item_file(VIEW_TYPE_PICTURE);
+    //Save the picture on the SD card; fw 0.2.77: a host request meanwhile gets E_BUSY "file save in progress"
+    {
+      int hold = pc_glue_ui_hold(PC_HOLD_SAVE);
+
+      scope_save_view_item_file(VIEW_TYPE_PICTURE);
+      pc_glue_ui_hold(hold);
+    }
   }
   //Check if save or delete wave button is touched
   else if((ytouch >= 423) && (ytouch <= 477))
@@ -3578,11 +3628,16 @@ void handle_right_basic_menu_touch(void)
       //Button back to inactive state
       scope_save_wave_button(0);
 
-      //Save the waveform on the SD card; fw 0.2.69: in Frequency response the sweep table as CSV
+      //Save the waveform on the SD card; fw 0.2.69: in Frequency response the sweep table as CSV. fw 0.2.77: a host
+      //request meanwhile gets E_BUSY "file save in progress"
+      int hold = pc_glue_ui_hold(PC_HOLD_SAVE);
+
       if(bode_view_active())
         bode_view_save();
       else
         scope_save_view_item_file(VIEW_TYPE_WAVEFORM);
+
+      pc_glue_ui_hold(hold);
     }
     else
     {
@@ -4024,6 +4079,10 @@ void handle_measures_menu_touch(void)
     //Scan the touch panel for touch
     tp_i2c_read_status();
 
+    //fw 0.2.77: a host request closes the menu as a touch outside does (protocol 1.23)
+    if(PC_UI_YIELD())
+      return;
+
     if(!havetouch)
       continue;
 
@@ -4099,6 +4158,13 @@ void handle_view_mode_touch(void)
   {
     //Read the touch panel status
     tp_i2c_read_status();
+
+    //fw 0.2.77: a host request leaves the file browser as Return does (protocol 1.23)
+    if(PC_UI_YIELD())
+    {
+      scope_preset_values();
+      return;
+    }
 
     //Check if the panel is touched
     if(havetouch)
@@ -4429,6 +4495,15 @@ void handle_view_mode_touch(void)
                 //waveform view needs to be handled here as long as the flag is set
                 while(scopesettings.waveviewmode)
                 {
+                  //fw 0.2.77: a host request leaves the waveform as the return button does (protocol 1.23); the
+                  //file browser around it then leaves too
+                  if(PC_UI_YIELD())
+                  {
+                    scope_menu_button(0);
+                    scopesettings.waveviewmode = 0;
+                    break;
+                  }
+
                   //Use the main touch handler for waveform view
                   touch_handler();
 
@@ -4465,6 +4540,13 @@ void handle_picture_view_touch(void)
   {
     //Read the touch panel status
     tp_i2c_read_status();
+
+    //fw 0.2.77: a host request leaves the picture as Return does (protocol 1.23)
+    if(PC_UI_YIELD())
+    {
+      viewbottommenustate = VIEW_BOTTON_MENU_HIDE;
+      return;
+    }
 
     //Check if the panel is touched
     if(havetouch)

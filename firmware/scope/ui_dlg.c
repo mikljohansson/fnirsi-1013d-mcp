@@ -407,6 +407,13 @@ int ui_dlg_confirm(const char *title, const char *const *lines, int nlines, cons
   {
     tp_i2c_read_status();
 
+    //fw 0.2.77: a host request answers it with Cancel (protocol 1.23)
+    if(PC_UI_YIELD())
+    {
+      r = 0;
+      break;
+    }
+
     if(!havetouch)
       continue;
 

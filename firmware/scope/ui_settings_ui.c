@@ -3,7 +3,7 @@
 // the confirmation dialog (docs/ui-guidelines.md section 3), drawn and run on the device. The tables, values and hit
 // areas are in ui_settings.c (host-tested).
 //
-// The screen is a modal page like the menus (the PC protocol answers E_BUSY while it is open): it saves the screen in
+// The screen is a modal page like the menus (fw 0.2.77: a host request leaves it as Back does): it saves the screen in
 // displaybuffer4, owns it until Back, and restores it. Changes take effect at once and are saved with the settings at
 // power-off, as before; the start-up choice is written to sector 710 when the screen is left, only if it changed.
 // Restore default settings rebuilds the scope screen instead of restoring the saved one.
@@ -238,6 +238,10 @@ static void run_time_page(void)
   {
     tp_i2c_read_status();
 
+    //fw 0.2.77: a host request leaves the page as Back does (protocol 1.23); the screen around it leaves too
+    if(PC_UI_YIELD())
+      return;
+
     if(!havetouch)
       continue;
 
@@ -348,6 +352,13 @@ int ui_confirm(const ui_dlg_text *t, int restore)
   {
     tp_i2c_read_status();
 
+    //fw 0.2.77: a host request answers the dialog with its cancel button (protocol 1.23)
+    if(PC_UI_YIELD())
+    {
+      hit = UI_DLG_CANCEL;
+      break;
+    }
+
     if(!havetouch)
       continue;
 
@@ -395,6 +406,10 @@ void ui_settings_run(void)
   while(1)
   {
     tp_i2c_read_status();
+
+    //fw 0.2.77: a host request leaves the screen as Back does (protocol 1.23); what was changed here is kept, as with Back
+    if(PC_UI_YIELD())
+      break;
 
     if(!havetouch)
       continue;

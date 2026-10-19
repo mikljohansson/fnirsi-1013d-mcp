@@ -5777,14 +5777,17 @@ void scope_display_file_status_message(int32 msgid, int32 alwayswait)
   //Maybe wait for touch to continue in case of an error message
   if(checkconfirmation)
   {
+    //fw 0.2.77: the file operation is over while the message waits: a host request dismisses it (protocol 1.23)
+    int hold = pc_glue_ui_hold(0);
+
     //wait for touch
     while(1)
     {
       //Read the touch panel status
       tp_i2c_read_status();
 
-      //Check if the panel is touched
-      if(havetouch)
+      //Check if the panel is touched, or a host request waits for the base screen
+      if(havetouch || PC_UI_YIELD())
       {
         //Done so quit the loop
         break;
@@ -5793,6 +5796,8 @@ void scope_display_file_status_message(int32 msgid, int32 alwayswait)
 
     //Need to wait for touch to release before returning
     tp_i2c_wait_for_touch_release();
+
+    pc_glue_ui_hold(hold);
   }
   else
   {

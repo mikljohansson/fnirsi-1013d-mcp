@@ -225,7 +225,7 @@ void scope_setup_usb_screen(void)
     "PC control (MCP) is disconnected until you leave this screen.",
     "Eject the drive on the PC before tapping Exit."
   };
-  int i;
+  int i, usb_drive_hold;
 
   //Clear the whole screen
   display_set_fg_color(BLACK_COLOR);
@@ -293,6 +293,10 @@ void scope_setup_usb_screen(void)
   //Start the USB interface
   usb_device_enable();
 
+  //fw 0.2.77: no host request reaches the scope as a drive (the serial port is gone); should one get through, it gets
+  //E_BUSY "USB drive mode": this screen never closes by itself while the PC may hold the drive (protocol 1.23)
+  usb_drive_hold = pc_glue_ui_hold(PC_HOLD_USB_DRIVE);
+
   //Wait for the user to touch Exit to quit
   while(1)
   {
@@ -331,6 +335,8 @@ void scope_setup_usb_screen(void)
     }
   }
   
+  pc_glue_ui_hold(usb_drive_hold);
+
   //Stop the USB interface
   //usb_device_disable();
 

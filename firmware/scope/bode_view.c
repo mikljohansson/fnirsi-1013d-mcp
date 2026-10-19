@@ -1008,6 +1008,11 @@ static const char *warning(char *buf)
   bode_eng *e = bode_engine();
   int i, unsettled = 0, floor = 0, ch1low = 0, clip2 = 0;
   uint8 st = bode_state(e);
+  const char *yn = pc_glue_yield_note();
+
+  //fw 0.2.77: for a few seconds after a host request closed the fold-outs and dialogs (protocol 1.23)
+  if(yn)
+    return yn;
 
   if(st == BODE_ST_ERROR)
   {
@@ -1303,10 +1308,10 @@ void bode_view_top_note(int which)
   display_set_fg_color(WHITE_COLOR);
   text_at(&font_3, x + BU_NOTE_PAD, BU_NOTE_Y + (BU_NOTE_H - 16) / 2, t);
 
-  //Any tap closes it (and does nothing else), as a tap outside a dropdown
+  //Any tap closes it (and does nothing else), as a tap outside a dropdown; fw 0.2.77: so does a host request
   do
     tp_i2c_read_status();
-  while(!havetouch);
+  while(!havetouch && !PC_UI_YIELD());
   tp_i2c_wait_for_touch_release();
 
   display_set_source_buffer(displaybuffer1);
@@ -1618,14 +1623,18 @@ static void file_message(const char *l1, const char *l2)
   //As the scope's file message: a tap when Settings ask for it, else 0.7 s
   if(scopesettings.confirmationmode)
   {
+    //fw 0.2.77: the file is written while the message waits: a host request dismisses it (protocol 1.23)
+    int hold = pc_glue_ui_hold(0);
+
     while(1)
     {
       tp_i2c_read_status();
-      if(havetouch)
+      if(havetouch || PC_UI_YIELD())
         break;
     }
 
     tp_i2c_wait_for_touch_release();
+    pc_glue_ui_hold(hold);
   }
   else
     timer0_delay(700);
@@ -2171,6 +2180,10 @@ static void fold_run(int id, void (*button)(int))
   while(1)
   {
     tp_i2c_read_status();
+
+    //fw 0.2.77: a host request closes it as a tap outside does (protocol 1.23)
+    if(PC_UI_YIELD())
+      break;
 
     if(!havetouch)
       continue;
