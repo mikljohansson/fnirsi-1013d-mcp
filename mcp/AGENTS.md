@@ -1,4 +1,4 @@
-# mcp/ handoff for agents (mcp-gen4 -> mcp-gen5, 2026-10-19)
+# mcp/ handoff for agents (mcp-gen4 -> mcp-gen5, 2026-10-19; mcp-gen4 retired after protocol 1.16)
 
 Python host library, device simulator, MCP server and bench CLIs for the FNIRSI 1013D open firmware's USB protocol.
 Read first: `../AGENTS.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec; **section 14 is how
@@ -278,6 +278,20 @@ there, `--merge --check`, never change an existing vector's bytes.
 Pending work for every agent lives in `../docs/plans/task-queue.md` (section "MCP / host"); the coordinator dispatches
 from there and moves items to "Dispatched". Add host items you discover there, not only here.
 
+0. **Next for mcp-gen5 (dispatched by the lead 2026-10-19, not started by mcp-gen4): the mcp items of the release
+   readiness batch**, `../docs/plans/release-readiness.md` (docs-gen3's findings on the mcp wheel):
+   - the installed package must work outside a repo checkout: default data and log directories under the user's home
+     or a configurable path (today `ServerConfig.data_dir` defaults to `mcp/data` via `_default_mcp_dir()` in
+     server.py, `vectors.DEFAULT_PATH` and the Bode `--write-vectors` default assume `../docs`; `bench.py` wraps
+     `../firmware/scope/host_tests/bench_link.py`, `flash.py` / `sdcli.py` look for images and `../backups/` by repo
+     path): inputs by argument, repo paths only as a fallback when running from a checkout;
+   - the tracked `.mcp.json` has a hard-coded Windows venv path and COM10: replace it with a documented example
+     (keep the owner's working local config out of git, e.g. `.mcp.local.json` or a gitignored copy; ask the lead
+     before touching the owner's file);
+   - `pip install fnirsi1013d` from a wheel plus one documented command gives a working MCP server (build the wheel
+     in CI or locally with `uv build`, install it into a fresh venv outside the repo, start `fnirsi1013d-mcp --sim`
+     and list the tools; a test or CI step that does exactly that keeps it working).
+   Protocol 1.17 (fw-seg, segmented capture, rows from 70 provisional) waits until the lead says it is merged.
 1. **Bode: bench results in, then the follow-ups.** Host steps H1-H3 are done (1d46cf8 simulator DUT, f0940ee H1,
    363f676 runner and CLI, d3a16bb tool, docs commit after). Read the coordinator's bench numbers (procedure below)
    against the design's expectations; if the wiring verdict (section 2.5) or the floor changes the advice, fix
