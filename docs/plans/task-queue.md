@@ -6,6 +6,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **Touch fixes batch** (after UI step 1 lands; spec = docs/plans/touch-review.md when fw-touch-review delivers it). Owner decision
+  2026-10-19 13:45 **(owner)**: the channel pointers at the left edge of the grid become drag handles, "handles shown on screen are
+  draggable"; the on-trace grab stays as a secondary path with a nearest-enabled-object rule. Owner reproduced: with CH2 dragged to
+  the bottom CH1 can be picked up again, but only when the drag starts exactly on the invisible zero line.
 - [x] **Spectrum Auto redesign** (owner, 10-18): deterministic probe procedure independent of the current state: probe
   at 50 MSa/s in normal trigger mode (2-3 captures, skip untriggered), measure f0 (time-domain period) and the band top
   f_hi (bins above max(peak - 40 dB, median + 10 dB)); span = max(1.25 f_hi, 20 f0) clamped to 25 MHz; rate = slowest

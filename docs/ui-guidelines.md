@@ -59,7 +59,7 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   out to fit its box at 6.7 px per character (13 px) and 7.1 px (16 px); long sentences are broken by hand.
 - **Touch**: new controls are at least 44 px tall and 80 px wide, hit area equal to the drawn area; stock controls keep
   their stock sizes. Pages are reached by visible buttons, never by a swipe. Thin stepper bars extend their hit area
-  into the neighbouring block.
+  into the neighbouring block. Everything drawn as a handle (the channel and reference pointers at the left edge, the trigger pointers, the cursors) is draggable from the handle itself; grabbing the trace is the secondary way (owner, 2026-10-19).
 - **Dialogs**: a title, one instruction, a progress or result line, two buttons. Primary or confirming action on the
   right, dismissing one on the left. Red only for destructive actions (Clear calibration); everything else green or
   blue. A destructive action always confirms with a sentence that states the consequence. A modal dialog owns the
