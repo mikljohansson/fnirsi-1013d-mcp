@@ -911,3 +911,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   copy of the pointer, i_mcu_clk 0 setup / 0 hold errors, tb_mcuread all 256 codes clean. Not flashed. Flash session: pre-write dump
   must equal the 0x1538 padded image 2fc7ea5b...; rollback 0x1538 or 0x1535; checks fpga/al3/README.md section 9 on fw 0.2.69, then
   the wizard; calibration on 0x1537/0x1538 must be redone.
+- **FPGA flash written with bitstream 0x1539** (20:03-20:06, Sipeed FT2232D on J2, scope on battery, USB unplugged): JEDEC ef 40 14,
+  pre-write double read = the pinned 0x1538 padded image 2fc7ea5b...; wrote backups/al3_seg_0x1539_f36c1f7a_padded.bin: 256 sectors
+  erased, 1105 pages programmed, write verified 22db7b91..., independent verify OK. Power cycle pending; then fw 0.2.69 FEL-load,
+  the 128-boundary probe (CAL_PROBE both all) and the no-write captures, then the wizard.
