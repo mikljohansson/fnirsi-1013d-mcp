@@ -339,6 +339,17 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   .github/workflows/docs.yml (Pages deploy, no secret) + ci.yml docs job, tools/screenshots.py (--list, --simulator, --port,
   --only, --generator opt-in) with a simulator test. Owner once: Settings > Pages > Source: GitHub Actions (releasing.md section 6).
   Remains: screenshots on the unit after fw-screen, per-screen guide text after 0.2.70, the six articles, agent worked examples.
+- fw-freq2 (done 21:25, about 455k tokens, merged as fw 0.2.71 with the renumbering, handoff firmware/AGENTS.md section 47):
+  single sweep shows RUN/STOP and "sweeping", STOP ends after the capture in progress; AUTO SET cancel restores the table, sharp
+  tanks get up to three finer passes; top bar chips in the mode; Trace style Lines/Dots (word 216), the grid rule in both modes
+  (ui-guidelines.md section 3); Spectrum slider (window over 0..min(fs/2, 25 MHz), deviation noted in ux-makeover.md); READ_BODE
+  reason 8 "ADC readout fault" when the pre-scan clips at 5 V/div under 20 codes; header = settings in effect before the first
+  sweep. Open (queue): the simulator lacks reason 8 and the new header rule (mcp item); a single sweep started from the CTRL page
+  leaves the bar on that page where RUN/STOP is not visible (owner to decide: jump back to page one?); after a sweep the generator
+  chip shows the user's generator although the pin is off. Loaded 21:30 as backups/fw-0.2.71_1264e26c.bin; walk-through pending.
+- fw-over (Opus, branch fw-over, dispatched 21:30, fw 0.2.72 provisional): the slider-track overview per the owner's decisions
+  (18 px window, 14 rows, dimmed/full, Scope envelope replacing the stock thumbnail, Spectrum from the existing FFT, Frequency
+  response AUTO SET copy), then tap-to-jump as the fast follow on the same branch; boards regenerated to 18 px.
 - fw-screen (done 21:10, about 195k tokens, merged as fw 0.2.70; T9 passed 21:11, 0.22 s per screen): READ_SCREEN handler (maindisplaybuffer rows, MAIN only so a
   modal menu answers E_BUSY), SCREENSHOT cap on every known bitstream, vectors, host test, mcp test; bench T9 pending
   (firmware/AGENTS.md section 46).
