@@ -639,12 +639,20 @@ Newest entries at the bottom. Format: date, who, what, result.
   mismatch 1.3 % then vs 0 % now; last night 3.3 % with the opposite sign of today's residual). The full-rate (interleaved) class is not
   stable enough for a one-time calibration; the gated class is. Next: 10-minute full-rate zero log with shorted inputs; design a
   background interleave-mismatch estimator (queue).
-- 10:26-10:33 shorted-input zero log on 0.2.48-nommu (backups/zero_drift_full_20261019.jsonl, 7 rounds before USB dropped again at
-  10:3x with Windows error 22 while the port was open and active every 30 s; the owner was unplugging the charger and connecting the
-  programmer at that time): full-rate corrected A-B CH1 -0.3..+0.3, CH2 -0.2..-0.04; raw full CH1 A-B +3.7..+4.3 (stored 3.9), CH2 +0.2..
+- 10:26-10:33 shorted-input zero log on 0.2.48-nommu (backups/zero_drift_full_20261019.jsonl, 7 rounds, then the owner unplugged USB to
+  connect the programmer, so the Windows error 22 at 10:3x was the unplug, not a firmware fault): full-rate corrected A-B CH1 -0.3..+0.3, CH2 -0.2..-0.04; raw full CH1 A-B +3.7..+4.3 (stored 3.9), CH2 +0.2..
   +0.3; gated raw CH1 +5.8..+5.9 (stored 5.8). **The v3 zeros are exact at 0 V**; the deviation seen at -1.19 / +1.87 V (raw split 5.0 at
   both) is even in the signal (about a 1-code bow at 35-50 codes from centre), not an offset; last night it was odd (gain-like).
 - **FPGA flash written with the CIC + FIR bitstream 0x1535** (10:33-10:40, Sipeed FT2232D on J2, scope on battery): pre-write dump
   backups/20261019-103324-pre-fir.bin sha256 c387a15e... = the pinned 0x1534 padded image (independent verify OK: rollback image
   confirmed); wrote backups/al3_fir_0x1535_5040a2ae_padded.bin (5ade9e75...), 70 sectors erased, 1105 pages programmed, write verified,
   independent verify OK. Power cycle pending (the card boots 0.2.25, which ran 0x1534 in legacy mode; 0x1535 without 0x56 is the same path).
+- 10:45 power cycle: the card's 0.2.25 boots FPGA **0x1535** (legacy mode) fine; 0.2.48 (9e0954a5) FEL-loaded: #VER fpga=0x1535, caps
+  0x1FC0B (FIR bit 16 set). **FIR bench, shorted inputs, range 2** (backups/fir_bench_0x1535_20261019.json): cic2+fir at 20 MSa/s stays
+  effective cic2 (N 10 not eligible), at 10 MSa/s N 20 S 1 gain 100 effective cic2+fir, at 1 MSa/s N 200 S 7 gain 10000; cic3+fir N 200
+  S 13. GET_DECIM bytes 26-27 (FPGA 0x29 read now, i.e. the registers of the last arm) match fw-gen6's prediction: 0xE2 0x01 for CIC2+FIR
+  at 10 MSa/s, 0x82 0x08 for CIC2 at 1 MSa/s (FIR bits clear), 0xE2 0x07 for CIC2+FIR at 1 MSa/s. Noise (host 16-bit codes, std):
+  CIC2 1 MSa/s 0.054, CIC2+FIR 0.075, CIC3+FIR 0.062; at 10 MSa/s CIC2 0.120, CIC2+FIR 0.126 codes. 16-bit path 0 V: 128.67 (CH1) /
+  128.78 (CH2) by the row 51 formula in every CIC mode; the firmware 8-bit trace shows 129.0 (all samples round alike). The 0.7-code
+  offset is the full-rate class zero having drifted +0.8 code as a common mode of both cores since the 08:15 calibration (raw full
+  A/B 132.5/128.5 vs stored 131.6/127.7), while the gated class reads 128.0 exactly: passed to fw-cal3 for the v4 design.
