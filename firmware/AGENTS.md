@@ -1,6 +1,7 @@
 # firmware/ handoff for agents
 
-**Current state (coordinator merge, 2026-10-19): latest build fw 0.2.50, protocol 1.15** (fw-cal3's calibration wizard, interleave
+**Branch fw-ui1 (2026-10-19): fw 0.2.51, protocol 1.15 unchanged: UX makeover step 1 (main menu, USB drive screen, top
+bar, Display row, strips, measurement cards), section 29.** **Current state (coordinator merge, 2026-10-19): latest build fw 0.2.50, protocol 1.15** (fw-cal3's calibration wizard, interleave
 tracking and class probe, **section 28**, merged on fw-usb2's 0.2.49 USB suspend watch, **section 27**; the merge renumbered fw-cal3's
 protocol change from 1.14 / row 53 to 1.15 / row 54 because fw-usb2 took 1.14 / row 53) on fw-mmu's 0.2.48 (MMU + D-cache, section 26).
 reproducible images, 16-bit trigger level fix; protocol 1.13 unchanged) on 0.2.46 (protocol 1.13: digital phosphor view,
@@ -244,6 +245,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.46 | 1b6359f | cdba5b51 | digital phosphor view (main menu row 7; Persistence / Palette / Clear strip; XY), GET_STATUS byte 43 = 4 (protocol 1.13, row 52), settings word 210 (fw-phosphor, section 24) | built, host-tested (test_phosphor 95 checks); bench steps in section 24 |
 | 0.2.48 | b1922c3 | 2f768fd9 | MMU + D-cache on (flat map, DDR / SRAM write-back, framebuffer write-through, restart record and peripherals strongly ordered), clean + off at _reset and ENTER_FEL, GET_LINK_STATS 58-59 fault status / address (fw-mmu, section 26) | built, host-tested (test_mmu); A/B image `make gcc10-nommu` 0.2.48-nommu sha256 45e03f7f; bench sequence in section 26 |
 | 0.2.49 | c477faa | 90f460d6 | USB suspend watch in the 1 ms tick (pc_usbw.c): inferred resume (SOFs, EP0 setup, EP2 OUT while suspended) acts, soft reconnect (SoftConn off 1 s) after a retry storm or 15 min suspended, GET_LINK_STATS 60-61, event type 20, SUSPEND before RESUME in the ISR (protocol 1.14, row 53; fw-usb2, section 27) | built, host-tested (test_usbw 90 checks); A/B `make gcc10-nommu` sha256 f5f377ea; bench plan in section 27 |
+| 0.2.51 | 8f5bf16 | 38580def | UX makeover step 1 (fw-ui1, section 29): main menu Scope / Spectrum analyser / Saved pictures / Saved waveforms / Settings / Diagnostics / USB drive with one 59 px hit area per row, Spectrum in roll mode switches Roll off; USB drive screen text + Exit; no top-bar version; Display row Normal / Phosphor / X-Y in the acquisition menu (X-Y out of System settings); strips without Scope / Auto, AUTO SET = spectrum Auto; phosphor warnings top-middle; cards with chip, scope-maker names, 4 significant digits, defaults Freq / Vpp / Vavg | built, host-tested (test_ui 1513 checks); bench walk-through in section 29 |
 | 0.2.50 | e871c50 | 1b55efc2 | calibration wizard (one modal three-step flow, 48e5737) and calibration v4: A - B interleave tracker applied in the full class, full-class common-mode class probe, GET_CAL 288 bytes, diagnostics lines (protocol 1.14, row 53; fw-cal3, section 28) | built, host-tested; bench lists README 6.4 and 6.5 |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
@@ -1339,3 +1341,94 @@ GCC 10 36, GCC 13 31, PC_DEBUG 31; acal_track.c / acal_live.c clean with -Wextra
   pair). The tracker un-inverts the buffer itself. Diagnostics CH2 block moved from y 205 to 225 for the two v4 lines.
   Edit scripts and builds: no git together with heredocs in one shell command; Python edits with latin-1 / newline='';
   clean warning lists need clean build dirs (the incremental `build.sh` count is only the recompiled files).
+
+
+## 29. fw-ui1: UX makeover step 1 (fw 0.2.51, protocol 1.15 unchanged)
+
+Branch `fw-ui1` from main d8d5a62. Plan: `docs/plans/ux-makeover.md` section 7 step 1 plus the card work; rules
+`docs/ui-guidelines.md`; user-facing description README section 5 "Screens". Commits, one topic each: 33cc330
+(`ui_fmt.c/.h`, `ui_menu.c/.h`, `host_tests/test_ui.c`; `measurement_names` moved from variables.c to ui_fmt.c),
+04b6f2c (main menu), 1027f90 (USB drive screen), 3c66d85 (top-bar version), 4d74f82 (Display row, X-Y out of System
+settings), 79b6b00 (phosphor strip, warnings), 7ff6c68 (spectrum strip, AUTO SET), 2f1ab97 (cards, Measures menu names,
+defaults), 8f5bf16 (0.2.51, CHANGELOG, README), then this handoff. Image from 8f5bf16: `firmware/scope/build-gcc10-pc/
+fnirsi_1013d.bin` in the worktree, 504,832 B, sha256 38580def064809e1c290a215f5720fd21e07086eb99420895ee3285424599e66,
+ELF 1cf4e7a024b01a1210d77f2f7ef142ea3675ffb71f6a6c0872c150858fc0055f; not pinned in backups/. **Nothing benched.**
+Host tests all green (test_ui 1513 checks, test_session 68983 / 68981, check_vectors OK, test-arm identical).
+Warnings (clean builds, sorted line-number-free lists identical to d8d5a62): GCC 13 31, GCC 10 36; the new files are
+clean with the host tests' -Wall -Wextra -Werror. No protocol change: GET_STATUS byte 43 keeps its meaning (4 =
+phosphor view, 1-3 = spectrum views). No settings words used (211..223 stay free; fw-readers claims 224..255).
+
+Points for a successor:
+- **Main menu** (`ui_menu.h`): the row table (labels, `UI_MM_*` order), `ui_mm_row_at` (one contiguous 59 px hit area
+  per row from y 46, x 2..148; the drawn 131 x 35 button sits inside, test_ui checks every y) and `ui_mm_choose` (the
+  mode rule: Spectrum always offered, `roll_off` + `warn_roll` in roll mode, Scope restores the phosphor variant, Roll
+  never switched back on). menu.c `scope_main_menu_item(row, mode)` draws a row (Settings highlights yellow while its
+  fold-out is open, the others light grey while touched); the Scope icon (a square wave) and the spectrum bars are
+  drawn with lines. statemachine.c `handle_main_menu_touch` dispatches on the row; the mode rows go to
+  `PC_MAIN_MENU_MODE(row)` = `pc_glue_main_menu_mode` (pc_hal_scope.c), which carries out the action: roll off through
+  `pc_hal_timebase_write` with time base 20 (what the acquisition menu's Roll box does), then the phosphor / spectrum
+  switches, then `spectrum_note_roll_off` (spectrum.c warning "Roll off for the spectrum", 5 s). MAIN_MENU_HEIGHT is a
+  constant 413 again; `MAIN_MENU_DY`, `pc_glue_main_menu_height/dy/row6/items/touch` are gone. Bode, when it ships,
+  is a row after Spectrum analyser: add it to the table (the column then needs 472 px: shrink the pitch or the top).
+- **Display variant** (`pc_hal_scope.c`, `pc_glue_acq_display_draw/tap`, hooks `PC_ACQ_DISPLAY_DRAW/TAP`): Normal /
+  Phosphor / X-Y in a row under the acquisition menu (ACQ_MENU_HEIGHT 432, 1.00o5's part ACQ_MENU_BODY_H 386, boxes
+  84 x 36 at ACQ_DISPLAY_Y 390; 36 px is under the guideline's 44, as the neighbouring ACQ boxes; temporary). X-Y =
+  `xymodedisplay` (saved as before), Phosphor = `phosphor_set_active` (not saved, as before). `pc_phos_wanted` keeps the
+  variant while the spectrum shows. Lost until step 2: phosphor drawing in X-Y (phosphor.c still supports it; the
+  fold-out's Phosphor switch brings it back). Step 2 replaces the row by the CTRL page's Display fold-out: delete the
+  row, restore ACQ_MENU_HEIGHT 386, keep `pc_phos_wanted` / `pc_display_variant` as the fold-out's model.
+- **System settings fold-out**: X-Y row removed, Notification confirmation and RTC settings one row up (draw y and
+  touch ranges in menu.c / statemachine.c), SYSTEM_MENU_HEIGHT_FULL 354; the fold-out's touch area now ends at its
+  box (was y 470). The fold-out stays anchored at y 46 while its main-menu row is the fifth (owner to judge; step 3
+  rebuilds it).
+- **Strips**: phosphor F_COUNT 3 (no Scope), warnings via `phos_draw_warning` at (366 centre, y 69) in font_2 orange,
+  wfm/s stays at the strip's right end until step 2 moves it. Spectrum F_COUNT 8 (no Auto, no Scope; FIELD_W 90).
+  `spectrum_autoset` (AUTO SET in the view: start / cancel) and `spectrum_auto_running` behind `PC_AUTOSET()` /
+  `PC_AUTOSET_RUNNING()` in statemachine.c / menu.c `scope_auto_set_button`, which reads "Auto..." (font_2) while it
+  runs; `auto_shown` in spectrum.c redraws the button when Auto ends (end of `spectrum_display_body`) and
+  `spectrum_set_active` ends a running Auto.
+- **Cards** (`scope_display_channel_measurements`, scope_functions.c): `ui_card_chip_w` = name width + 2 x 3 px in
+  font_2, the chip is a rounded rect squared on its right by a 2 px fill so only the outer left corners are round.
+  Values: `ui_fmt_sig4(value_in_hundredths, prefix_index, unit)` rounds to four significant digits, never adds digits
+  the input lacks, picks the prefix; `ui_fmt_sig4_fixed` for % (duty in hundredths of a percent from Q16 times).
+  `scope_display_time` / `scope_display_duty` replace the four near-identical 1.00o5 bodies. `scope_print_value`
+  (3 digits) stays for the cursor readouts. "no period" (`UI_MEAS_NO_PERIOD`) for the timing values without three
+  crossings. Defaults: `scope_reset_config_data` sets Freq, Vpp, Vavg per channel (also on DEFAULT). The cards show
+  in table order (Vavg, Vpp, Freq), not the plan's "Freq, Vpp, Vavg": reordering needs a display order separate from
+  the saved index (later, with the per-mode lists of plan section 3a).
+- Edit tooling that worked here: the worktree isolation refuses shell heredocs and compound commands, so edits go
+  through a Python script in the scratchpad (`ed.py <file> <spec.py>`, latin-1, newline='', unique-match EDITS and
+  RANGES) run from PowerShell, and builds through scripts run with `wsl -d Ubuntu -- bash <script>` (WSL /tmp did not
+  survive between calls; keep logs and the base build under $HOME). The Write tool strips trailing blanks, so never
+  anchor an edit on a 1.00o5 blank line.
+
+**Bench walk-through (owner, coordinator on COM10)**
+1. FEL-load the image, `#VER` fw=0.2.51 proto=1.15. Top bar: no "v0.2.51" text at the right (the diagnostics view
+   still shows the identity line).
+2. Menu: seven rows Scope, Spectrum analyser, Saved pictures, Saved waveforms, Settings, Diagnostics, USB drive, each
+   with an icon, no row marked as current. Tap every row near its top and bottom edge (just below / above the black
+   separator lines): each opens its own function (Settings: the fold-out; Saved pictures / waveforms: the file
+   browsers; Diagnostics: the diagnostics screen; USB drive: step 4); a tap on a separator line belongs to the row above.
+3. Settings fold-out: no X-Y row; Notification confirmation toggles in the fourth slot, RTC settings (with a DS3231)
+   in the fifth; the box ends under them.
+4. USB drive: title "USB drive", the scope and PC picture, the three lines, an Exit button bottom right. With the PC
+   showing the drive, Exit gives "Not allowed!"; eject on the PC, Exit returns to the scope and COM10 comes back.
+5. Spectrum: Menu > Spectrum analyser shows the spectrum (strip: Channel, FFT length, Window, Scale, Ref level,
+   Average, Reset, View; no Auto, no Scope). AUTO SET: reads "Auto..." while running, the view settles; tap AUTO SET
+   during a run: it stops and reads AUTO SET again. Menu > Scope returns to the traces.
+6. Roll: ACQ menu > Roll mode on (slow time base), then Menu > Spectrum analyser: Roll goes off, the spectrum shows
+   with "Roll off for the spectrum" orange at the top middle for about 5 s. Menu > Scope: the scope at time base 20
+   (the short time base the Roll box uses), Roll still off.
+7. ACQ menu: a Display row at the bottom (Normal orange). Phosphor: close the menu, the graded picture with the strip
+   Persistence / Palette / Clear and wfm/s at the right (no Scope field). Unplug the probe or set a too-small V/div:
+   "CH1 overrange: increase V/div" appears top middle, not in the strip. X-Y: the Lissajous (plain, no phosphor),
+   Normal back. Menu > Spectrum analyser from Phosphor, then Menu > Scope: Phosphor again.
+8. Cards: Measures, tick Vmax, Vmin, Vrms, Vp, Freq, Period, +Width, -Width, +Duty, -Duty on CH1 (1 kHz cal signal):
+   names in the yellow chip with no notch at the join and square right corners, values like "1.000kHz", "1.000ms",
+   "500.0us", "50.00%", nothing overflowing the 118 px card. The Measures menu shows the same names centred. Generator
+   off (no edges): the timing cards read "no period". After loading the default settings (the DEFAULT button): CH1 and CH2 show Vavg,
+   Vpp, Freq.
+9. Host: GET_STATUS byte 43 = 0 in Normal and X-Y, 4 in Phosphor, 1-3 in the spectrum views (unchanged meanings).
+Bug indicators: a main-menu tap opening the neighbouring row; the ACQ menu's Display row not reacting or the Trace
+boxes reacting to it; AUTO SET stuck on "Auto..."; a card value running past the card edge; the System settings
+fold-out leaving a stripe of the old X-Y row; roll mode back on after Scope.
