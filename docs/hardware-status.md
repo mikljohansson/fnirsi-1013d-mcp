@@ -926,3 +926,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   readout; fpga-gen8 asked for a datasheet-constrained capture edge or a per-core programmable capture phase with firmware training
   (0x153A). The wizard may pass on 0x1539 since its zero points avoid the bad band; normal 200 MS/s traces near those codes are still
   wrong on the A cores.
+- 2026-10-19 20:30: the four-screen calibration wizard passed on 0x1539 / fw 0.2.69 (Zero level with USB out, CH1 gain, CH2
+  gain, Save): the first full calibration on the new wizard and the first valid one since 0x1535. Owner: "the new wizard is great".
+  Owner decision: remove the off-centre zero workaround of 0.2.67 and measure at code 128 again so a bad bitstream fails loudly
+  (fail fast); keep the readout-fault wording in the failure line. Scheduled with the batch after 0x153A lands.

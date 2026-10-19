@@ -68,7 +68,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   drives the scope through each state over USB (scope_screenshot) and saves named PNGs for reproducible screenshots; plots from
   MCP data saved with their generating command. Order: site skeleton + screenshot tool + user guide before the announcement
   (after the polish batch lands so the screens are final); articles at any pace. Dispatch a docs agent after fw-polish merges.
-- **FPGA MCU-readout bit mixing near code 128** (root cause of the wizard failure, bench 18:35; 0x1539 fix by fpga-gen8 first, features after; fw-cal5 workaround: zero measured off-centre; a flash session follows). Was: **Wizard measurement setup fault** (fw-cal5 running, 10-19 18:00): zero step fails on 0x1538 with clean host data; see
+- [~] **FPGA ADC data capture window (was: MCU-readout bit mixing)** (0x1539 flashed 20:06: readout fixed, capture window still wrong on the A cores; 0x153A = programmable capture phase + training, fpga-gen8) (root cause of the wizard failure, bench 18:35; 0x1539 fix by fpga-gen8 first, features after; fw-cal5 workaround: zero measured off-centre; a flash session follows). Was: **Wizard measurement setup fault** (fw-cal5 running, 10-19 18:00): zero step fails on 0x1538 with clean host data; see
   hardware-status 17:55. Deliverable includes a host-triggerable dry run so the coordinator can verify without the owner.
 - [x] **Frequency response mode UI** (0.2.69, bench pending; follow-ups above) (design docs/plans/bode-ui.md + artifact DfydC8HJgnemUw3EHenTGP; owner 19:15: variant 2 one pane two y axes without legend, "calibration post" in the instruction, frequency axis Log/Linear in the Display fold-out, two flagged cursors C1/C2 with the bottom-left readout box and delta row kept (19:25), Display variants Overlaid / Magnitude / Phase; questions 1-5 per the coordinator's recommendations; fw-freq dispatched as 0.2.69 together with the 10 samples/div viability minimum). Was: **Bode mode UI redesign** (owner 10-19 18:50: fw-bode remapped RUN/STOP and AUTO SET to sweep control, which breaks the fixed
   right-bar meanings; a designer (ux-bode, Opus) is producing the Bode mode mockup: action page with the standard slot meanings,
@@ -86,6 +86,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   ux-makeover.md first; firmware batch after fw-freq lands (spectrum.c and bode_view.c).
 - [x] **Preserve the mockup sources** (docs/mockups/ committed 19:50): copy the gen_ux generators and the artboard HTML from the coordinator's scratchpad into
   docs/mockups/ (committed) before the session ends; the makeover artifact itself is on a previous login (ux-makeover.md note).
+- **Wizard zero point back at code 128** (owner 10-19 20:30, fail fast): revert 0.2.67's two-point off-centre zero, measure at the
+  centre PWM so a bitstream with the capture fault fails the wizard loudly; keep the "ADC readout fault near code 128" wording and
+  the CAL_PROBE command; host test updated. Do it in the firmware batch that follows 0x153A (so the wizard keeps passing on the
+  owner's unit).
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
