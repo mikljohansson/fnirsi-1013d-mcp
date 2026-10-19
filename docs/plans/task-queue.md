@@ -164,6 +164,18 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   axis at 200 MSa/s, and zooming in stops where the capture time N/fs would exceed about 2 s; a pan that moves the stop across a
   rate boundary moves the rate too. Owner observation on 0.2.76: zoom in never changes the rate today, only zoom out does. Rule
   written into ui-guidelines.md first; host test walks the ladder both ways from both ends at every FFT length, asserting the pair.
+- **Host commands leave the modal menus** (owner 10-19 23:20: "avoid locking up the device from the perspective of the MCP server
+  when it's in menus; if the agent sends commands it just exits all modals, since that wouldn't be destructive; just exiting to
+  the base screen"; fw-yield dispatched): today every menu, fold-out and dialog is a modal loop and a host command that needs
+  the main loop answers E_BUSY (protocol.md LOCAL_BUSY). New rule: such a command sets a yield flag from the ISR-side receiver;
+  every modal loop checks it each iteration and leaves by its cancel path (a confirmation = No, a fold-out = closed, a menu =
+  closed, the Settings / Diagnostics screens = Back, the file viewers = Exit) down to the base screen, then the main loop
+  answers the request; the screen shows a short top-middle note "Host command: menu closed". Exceptions, where the command still
+  gets E_BUSY with a reason text: the calibration wizard while a measurement runs (a cancel between steps is fine), a file save
+  in progress, USB drive mode (not on the serial port anyway). Commands that answer from the ISR (PING, GET_INFO, GET_STATUS,
+  GET_BATTERY, GET_HEALTH, BODE_STATUS) never yield. Design paragraph in ui-guidelines.md and protocol.md section 14 row first,
+  host test with the mock UI, mcp client/server: drop the "close it on the scope and retry" advice where the firmware yields
+  (keep it for older firmware by version).
 - **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
   SCREENSHOT bit 6, simulator has it, `Scope.read_screen` reads 40 rows per request) but the firmware handler is NULL
   (pc_cmds.c "BENCH: T9"). Implement it in all builds: rows of the live framebuffer as RGB565, the header per protocol.md, the
