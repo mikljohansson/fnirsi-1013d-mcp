@@ -105,6 +105,10 @@ class Cmd(enum.IntEnum):
     SET_GEN = 0x0301
     GET_CAL = 0x0400
     READ_SCREEN = 0x0401
+    #: protocol 1.21 (provisional, fw-cal5, fw 0.2.67): the calibration wizard's zero measurement of one channel and
+    #: range, nothing stored. STUB: the row (section 14 row 61) has not landed on main; the host sends the request and
+    #: returns the raw answer (``Scope.cal_probe``), no decoder until the layout is final
+    CAL_PROBE = 0x0402
     SD_INFO = 0x0500  # protocol 1.3, fw 0.2.2, cap SD_SECTORS
     SD_READ_SECTORS = 0x0501
     SD_STAGE = 0x0502
@@ -2206,6 +2210,20 @@ class BodeRow(Payload):
         return bool(self.flags & BODE_ROW_RETRIED)
 
 
+@dataclass
+class CalProbeReq(Payload):
+    """CAL_PROBE request (protocol 1.21, PROVISIONAL, fw-cal5's draft row 61): u8 channel, u8 hardware range 0..5, u8
+    settle reads 0..15, u8 prestrobe 0 / 1, u8 mode (0 one range, 1 the whole wizard zero step). The 248-byte answer is
+    not decoded yet."""
+
+    FIELDS = [("channel", "B"), ("range", "B"), ("settle", "B"), ("prestrobe", "B"), ("mode", "B")]
+    channel: int = 0
+    range: int = 0
+    settle: int = 0
+    prestrobe: int = 0
+    mode: int = 0
+
+
 def bode_flags_from_names(names: Iterable[str], retried: bool = False) -> int:
     """The row flag word for host flag names (unknown names are ignored)."""
     f = 0
@@ -3192,6 +3210,7 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.READ_SPECTRUM: ReadSpectrumReq.size(), Cmd.GET_DECIM: 0, Cmd.SET_DECIM: SetDecimReq.size(),
     Cmd.GET_HEALTH: 0, Cmd.SAVE_REPORT: 0, Cmd.SET_SEQ: SetSeqReq.size(), Cmd.GET_SEQ: 0,
     Cmd.READ_SEQ: ReadSeqReq.size(), Cmd.BODE_CTRL: BodeCtrlReq.size(), Cmd.READ_BODE: ReadBodeReq.size(),
+    Cmd.CAL_PROBE: CalProbeReq.size(),
 }
 
 

@@ -2138,6 +2138,10 @@ class Device:
         h = replace(h0, frame=self.spec_frames, first=first, count=n)
         return self._ok(req, P.pack_spectrum(h, lv[first: first + n].tolist()))
 
+    def _cmd_cal_probe(self, req: P.Frame) -> P.Frame:
+        # protocol 1.21 is provisional (fw-cal5): the simulator speaks 1.20 and answers like older firmware
+        raise _DevErr(P.Status.E_UNKNOWN_CMD, 0, f"cmd 0x{req.cmd:04X}")
+
     def _cmd_bode_ctrl(self, req: P.Frame) -> P.Frame:
         return self._ok(req, self.bode.ctrl(P.BodeCtrlReq.unpack(req.payload)))
 

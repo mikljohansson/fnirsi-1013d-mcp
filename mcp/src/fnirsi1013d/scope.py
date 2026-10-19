@@ -917,6 +917,16 @@ class Scope:
             rows += more
         return hdr, rows[:want] if want >= 0 else rows
 
+    def cal_probe(self, channel: int, range_index: int, *, settle: int = 0, prestrobe: int = 0,
+                  mode: int = 0) -> bytes:
+        """CAL_PROBE (protocol 1.21, PROVISIONAL stub): run the calibration wizard's zero measurement of one channel
+        and hardware range on the scope (nothing stored) and return the raw answer; the layout is not final, so it is
+        not decoded here. Needs the UI stopped (SET_ACQ_STATE 0) and no host capture armed."""
+        if self.info.proto_minor < 21:
+            raise DeviceError(P.Cmd.CAL_PROBE, P.Status.E_UNKNOWN_CMD, 0, "needs protocol 1.21 (firmware >= 0.2.67)")
+        return self._req(P.Cmd.CAL_PROBE, P.CalProbeReq(channel, range_index, settle, prestrobe, mode).pack(),
+                         timeout=30.0 if mode else 5.0)
+
     def fft_bench(self, reps: int = 3) -> P.FftBench:
         """FFT_BENCH (protocol 1.6, fw 0.2.27): time the on-scope FFT on the CH1 trace buffer, ``reps`` 1-16 runs per
         size. Main loop only; the UI pass waits for the run (about 0.15 s at 3 reps)."""

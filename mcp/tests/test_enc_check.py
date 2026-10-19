@@ -127,6 +127,21 @@ def test_health_tool_and_capture_caveat(sim_factory, tmp_path):
     anyio.run(main)
 
 
+def test_cal_probe_stub(sim_factory):
+    """Protocol 1.21 CAL_PROBE is provisional (fw-cal5): the request packs, the client refuses below 1.21, the
+    simulator (1.20) answers E_UNKNOWN_CMD like older firmware."""
+    from fnirsi1013d.transport import DeviceError
+    import pytest
+
+    assert P.Cmd.CAL_PROBE == 0x0402 and P.CalProbeReq(1, 5, 2, 1, 0).pack() == bytes([1, 5, 2, 1, 0])
+    with Scope.connect(sim_factory().url) as s:
+        with pytest.raises(DeviceError, match="1.21"):
+            s.cal_probe(0, 1)
+        with pytest.raises(DeviceError) as e:
+            s.t.request(P.Cmd.CAL_PROBE, P.CalProbeReq().pack())
+        assert e.value.status == P.Status.E_UNKNOWN_CMD
+
+
 def test_health_wire_layout_offsets():
     b = P.HealthResp(enc_mode=1, enc_last33=2, enc_flags=3, enc_boot33=4, enc_bad=5, enc_recovered=6,
                      enc_checked=7).pack()
