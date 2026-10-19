@@ -173,6 +173,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   names, phosphor warnings top-middle); fw 0.2.51.
 - fw-readers (worktree, Opus, started 10-19 13:15): the diagnostics data readers (USB link state, card image identity, calibration
   provenance, power-on count and minutes, persisted restart record, save state, CP15 word, SAVE_REPORT); fw 0.2.52, protocol 1.16.
+- fw-touch-review (worktree, Opus, started 10-19 13:40): adversarial code review of the Scope and Spectrum touch interactions
+  (channel drag hit zones, tap-to-zoom, cursors, trigger pointers, spectrum gestures, GT911 read path) after the owner found
+  CH1 unmovable while CH2 drags and no drag on the left-edge CH handles; output docs/plans/touch-review.md, fixes as a later batch.
 - fw-usb2 (done 11:20, about 355k tokens, retired): 0.2.49 merged; bench pending (section 27).
 - fw-cal3 (done 12:15, about 275k tokens, retired): 0.2.50 merged cdc7e2f (wizard, A-B tracker with bow-aware fit, class probe, menu
   reorder); renumbered to protocol 1.15 / row 54 in the merge; bench pending (README 6.4 / 6.5).
