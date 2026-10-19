@@ -58,6 +58,8 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   rather than "Trace" so it cannot be confused with Trace style; with
   Phosphor chosen the same fold-out shows Persistence, Palette, Clear, so there is no phosphor strip); Trace style
   (fold-out: Linear, Dots, Peak, Pro; moved out of ACQ); Grid (toggle, in every mode); the CH1 and CH2 V/div
+  Display fold-out rows carry a small icon each (owner): a clean trace line for Normal, a soft graded trace for
+  Phosphor, a Lissajous loop for X-Y; the
   **steppers** (owner): about 82 px each: a 28 px grey bar reading "V+", a 26 px centre in the channel colour reading
   "CH1" or "CH2" (one text line; the value is in the top bar chip), a 28 px grey bar reading "V-": the stock V+ CH1 V-
   controls, compact; each bar's hit area runs to the middle of the centre (about 41 px); the + and - hit areas extend into their half of the
@@ -66,7 +68,10 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   slots exactly.
 - **Right bar, CTRL page, Spectrum** **(owner)**: CTRL; View (Spectrum, Waterfall, Density); Analysis (fold-out: FFT
   length, Window, Average, Reset); Axis (fold-out: Scale, Ref level); Grid; the CH1 and CH2 V/div steppers; 50 % TRIG. The
-  spectrum strip goes away; Span and Start keep their gestures and the one-line header stays as a readout.
+  spectrum strip goes away; Span and Start keep their gestures. The one-line header goes away too **(owner)**: its
+  readouts become measurement cards in the bottom row like the scope's ("[1] Peak: 1.000kHz", "[1] Level: +2.7dBV",
+  "RBW: 146Hz" with a grey chip), chosen through MEASURES like the scope's cards; the filter tag is not shown (it is a
+  setting, visible in ACQ). Warnings keep the top-middle position.
 - **ACQ dropdown** **(owner)**: Sample rate, Time per division, Memory, Roll, Average, Filter. Acquisition only: Trace
   style leaves it. With the Filter on, depths above 6000 are not offered (filtered records hold at most 8190 samples).
 - **Trigger dropdown**: unchanged (mode, edge, channel, position, Always 50 %). 50 % TRIG on the CTRL page sets the
