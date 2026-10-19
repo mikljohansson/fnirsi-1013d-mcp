@@ -95,14 +95,14 @@ int32 bu_slider_x(int step);                                 //track x of a Star
 int   bu_slider_shift(int start0, int stop0, int32 dx);
 
 //----------------------------------------------------------------------------------------------------------------------------------
-//Cursors C1 and C2 (T CURSOR): flags above the pane (24 x 13 at y 47, "C1" / "C2" in black on the cursor colour; hit
+//Cursors C1 and C2 (T CURSOR): flags above the pane (24 x 13 at y 48, "C1" / "C2" in black on the cursor colour; hit
 //area 44 x 44 around the flag), dotted lines through the pane. The readout box at the bottom left of the pane (variant 2,
 //owner): x 10..261, y 342..393, grey, rows C1, C2, C2-C1 in 13 px at a 16 px pitch: the name in the cursor colour (the
 //difference row white), f white, the level in the magnitude colour, the phase in the phase colour; a flagged point shows
 //its reason in grey instead of the phase, and the difference row is then grey.
 #define BU_FLAG_W             24
 #define BU_FLAG_H             13
-#define BU_FLAG_Y             47
+#define BU_FLAG_Y             48          //the trace area starts at y 48
 #define BU_FLAG_HIT           22          //half of the 44 px hit area
 #define BU_RO_X               10
 #define BU_RO_Y               342
