@@ -383,7 +383,7 @@ int ui_confirm(const ui_dlg_text *t, int restore)
 void ui_settings_run(void)
 {
   DISPLAYDATA save = displaydata;
-  uint8       boot_open, rtc_open = onoffRTC, restored = 0;
+  uint8       boot_open, rtc_open = onoffRTC, maxlight_open = scopesettings.maxlight, restored = 0;
   int         t, part;
   char        v[32];
 
@@ -503,6 +503,10 @@ void ui_settings_run(void)
       display_set_fg_color(BLACK_COLOR);
       display_fill_rect(TIME_TEXT_XPOS, TIME_TEXT_YPOS, TIME_TEXT_WIDTH, TIME_TEXT_HEIGHT);
     }
+
+    //A brightness step leaves the top bar's max-light mode (as the fold-out's slider does): its icon back to normal
+    if(maxlight_open && !scopesettings.maxlight)
+      scope_maxlight_item(0);
   }
 
   //The main menu's caller restores the area under the menu from displaybuffer1: give it what is on screen now
