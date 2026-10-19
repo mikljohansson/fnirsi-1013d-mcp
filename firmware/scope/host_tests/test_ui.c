@@ -295,6 +295,15 @@ static void test_ctrl_page(void)
     T_STR(ui_display_value(0, UI_VIEW_XY, 0), "X-Y");
     T_STR(ui_display_value(1, 0, 1), "Spec");
   }
+
+  //ACQ menu pass time (fw 0.2.63): inside the Memory column right of its rule at x 304 and left of the menu's edge at
+  //380, below the rule at y 211 and above the bottom edge (386 - 8); the label and the widest value fit its width
+  T_TRUE(UI_ACQ_PASS_X > 304);
+  T_TRUE(UI_ACQ_PASS_X + UI_ACQ_PASS_W < 378);
+  T_TRUE(UI_ACQ_PASS_Y > 211);
+  T_TRUE(UI_ACQ_PASS_Y + 32 <= 378);
+  T_TRUE(ui_text_width(&font_2, ui_acq_pass_label) <= UI_ACQ_PASS_W);
+  T_TRUE(ui_text_width(&font_2, "99999 ms") <= UI_ACQ_PASS_W);
 }
 
 //A one-way row: the label at the left, the value at the right, 10 px in (and 30 px to spare between them); a two-way

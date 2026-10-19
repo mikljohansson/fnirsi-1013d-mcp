@@ -1462,20 +1462,22 @@ void pc_glue_ui_mask(int menu)
         if(!pc_glue_ui_has(PC_FEAT_MEM_BASE + i))
           pc_mask_rect(ACQ_MENU_XPOS + 313, ACQ_MENU_YPOS + 31 + 36 * i, 58, 29);
 
-      //fw 0.2.38 (owner): the main-loop pass time under the "Memory" header, so the cost of a longer record shows
-      //where it is chosen. It is the last pass before the menu opened (the menu is modal, nothing captures while it
-      //is open), so a new depth shows its cost the next time the menu opens.
+      //fw 0.2.38 (owner): the main-loop pass time in the Memory column, so the cost of a longer record shows where it
+      //is chosen. It is the last pass before the menu opened (the menu is modal, nothing captures while it is open),
+      //so a new depth shows its cost the next time the menu opens. fw 0.2.63: under the column's rule (y 211), two
+      //lines; between the header and the first depth chip it collided with both (owner)
       {
         PFONTDATA font = displaydata.font;
         char t[20], *q;
 
-        display_fill_rect(ACQ_MENU_XPOS + 306, ACQ_MENU_YPOS + 21, 72, 11);
-        q = fmt_str(t, "pass ");
-        q = fmt_uint(q, pc_sess.pass_ms);
+        display_fill_rect(ACQ_MENU_XPOS + UI_ACQ_PASS_X, ACQ_MENU_YPOS + UI_ACQ_PASS_Y, UI_ACQ_PASS_W, 32);
+        q = fmt_uint(t, pc_sess.pass_ms);
         fmt_str(q, " ms");
         display_set_font(&font_2);
         display_set_fg_color(0x00A0A0A0);
-        display_text(ACQ_MENU_XPOS + 314, ACQ_MENU_YPOS + 20, (int8 *)t);
+        display_text(ACQ_MENU_XPOS + UI_ACQ_PASS_X, ACQ_MENU_YPOS + UI_ACQ_PASS_Y, (int8 *)ui_acq_pass_label);
+        display_set_fg_color(WHITE_COLOR);
+        display_text(ACQ_MENU_XPOS + UI_ACQ_PASS_X, ACQ_MENU_YPOS + UI_ACQ_PASS_Y + 16, (int8 *)t);
         display_set_font(font);
       }
       break;

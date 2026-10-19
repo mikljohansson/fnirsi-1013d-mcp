@@ -100,6 +100,13 @@ int    ui_fold_dir(const ui_fold *f, uint32 x);              //two-way rows: -1 
 #define UI_FOLD_TWOWAY_IN     40
 #define UI_FOLD_TEXT_X        90
 
+//ACQ menu, Memory column (x 305..377 of the menu, under its rule at y 211): the main-loop pass time, a grey label line
+//and the value under it (fw 0.2.63; it sat between the "Memory" header and the first depth chip before)
+#define UI_ACQ_PASS_X         312
+#define UI_ACQ_PASS_Y         218
+#define UI_ACQ_PASS_W         62
+extern const char *const ui_acq_pass_label;                      //"Pass time"
+
 //Value names, as the fold-outs and the CTRL buttons show them
 #define UI_TRACE_COUNT        3     //fw 0.2.63: 1.00o5's "Pro" (min / max outlines, no fill) removed, see README
 #define UI_VIEW_NORMAL        0
