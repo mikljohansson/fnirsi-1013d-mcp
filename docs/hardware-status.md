@@ -639,3 +639,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   mismatch 1.3 % then vs 0 % now; last night 3.3 % with the opposite sign of today's residual). The full-rate (interleaved) class is not
   stable enough for a one-time calibration; the gated class is. Next: 10-minute full-rate zero log with shorted inputs; design a
   background interleave-mismatch estimator (queue).
+- 10:26-10:33 shorted-input zero log on 0.2.48-nommu (backups/zero_drift_full_20261019.jsonl, 7 rounds before USB dropped again at
+  10:3x with Windows error 22 while the port was open and active every 30 s; the owner was unplugging the charger and connecting the
+  programmer at that time): full-rate corrected A-B CH1 -0.3..+0.3, CH2 -0.2..-0.04; raw full CH1 A-B +3.7..+4.3 (stored 3.9), CH2 +0.2..
+  +0.3; gated raw CH1 +5.8..+5.9 (stored 5.8). **The v3 zeros are exact at 0 V**; the deviation seen at -1.19 / +1.87 V (raw split 5.0 at
+  both) is even in the signal (about a 1-code bow at 35-50 codes from centre), not an offset; last night it was odd (gain-like).
+- **FPGA flash written with the CIC + FIR bitstream 0x1535** (10:33-10:40, Sipeed FT2232D on J2, scope on battery): pre-write dump
+  backups/20261019-103324-pre-fir.bin sha256 c387a15e... = the pinned 0x1534 padded image (independent verify OK: rollback image
+  confirmed); wrote backups/al3_fir_0x1535_5040a2ae_padded.bin (5ade9e75...), 70 sectors erased, 1105 pages programmed, write verified,
+  independent verify OK. Power cycle pending (the card boots 0.2.25, which ran 0x1534 in legacy mode; 0x1535 without 0x56 is the same path).
