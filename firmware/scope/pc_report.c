@@ -712,14 +712,11 @@ static void sec_cal_channel(pc_text *t, const uint8_t *c)
   }
 }
 
-static void ev_words(pc_text *t, const uint8_t *e)
+//One event log entry in words (u32 ms, u8 type, u8 a, u16 b; protocol row 42); also the Diagnostics Log page
+void pc_report_event(pc_text *t, const uint8_t *e)
 {
   static const char *cause[4] = { "SOFs again", "EP0 setup", "EP2 OUT packet", "frame number moved" };
   uint32_t type = e[4], a = e[5], b = g16(e + 6);
-
-  pc_text_str(t, "  ");
-  pc_text_udec(t, g32(e));
-  pc_text_str(t, " ms  ");
 
   switch(type)
   {
@@ -830,7 +827,14 @@ static void ev_words(pc_text *t, const uint8_t *e)
       pc_text_hex(t, b, 4);
       break;
   }
+}
 
+static void ev_words(pc_text *t, const uint8_t *e)
+{
+  pc_text_str(t, "  ");
+  pc_text_udec(t, g32(e));
+  pc_text_str(t, " ms  ");
+  pc_report_event(t, e);
   pc_text_nl(t);
 }
 
