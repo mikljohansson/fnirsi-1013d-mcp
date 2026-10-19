@@ -70,6 +70,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   (after the polish batch lands so the screens are final); articles at any pace. Dispatch a docs agent after fw-polish merges.
 - **FPGA MCU-readout bit mixing near code 128** (root cause of the wizard failure, bench 18:35; 0x1539 fix by fpga-gen8 first, features after; fw-cal5 workaround: zero measured off-centre; a flash session follows). Was: **Wizard measurement setup fault** (fw-cal5 running, 10-19 18:00): zero step fails on 0x1538 with clean host data; see
   hardware-status 17:55. Deliverable includes a host-triggerable dry run so the coordinator can verify without the owner.
+- **Bode mode UI redesign** (owner 10-19 18:50: fw-bode remapped RUN/STOP and AUTO SET to sweep control, which breaks the fixed
+  right-bar meanings; a designer (ux-bode, Opus) is producing the Bode mode mockup: action page with the standard slot meanings,
+  CTRL page with Display / Sweep / Thru / Grid, cards via MEASURES, docs/plans/bode-ui.md with the control map and a self-review).
+  Then a firmware batch implements it; until then the Bode view keeps its interim controls (menu row moves in polish batch 2).
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
