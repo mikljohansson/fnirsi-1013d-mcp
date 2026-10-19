@@ -84,7 +84,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   plot of both modes; Spectrum: the span as a window over 0..fs/2, drag pans the centre; Frequency response: Start..Stop as a window
   over 100 Hz..10 MHz on the log axis, drag pans both and re-sweeps. Designer (ux-bode) updates the boards and bode-ui.md /
   ux-makeover.md first; firmware batch after fw-freq lands (spectrum.c and bode_view.c).
-- **Preserve the mockup sources**: copy the gen_ux generators and the artboard HTML from the coordinator's scratchpad into
+- [x] **Preserve the mockup sources** (docs/mockups/ committed 19:50): copy the gen_ux generators and the artboard HTML from the coordinator's scratchpad into
   docs/mockups/ (committed) before the session ends; the makeover artifact itself is on a previous login (ux-makeover.md note).
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
