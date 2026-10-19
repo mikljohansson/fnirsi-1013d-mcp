@@ -14,7 +14,7 @@ import enum
 import struct
 import zlib
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Iterator
+from typing import Any, ClassVar, Iterable, Iterator
 
 # ---------------------------------------------------------------------------------------------------------
 # Constants (section 4)
@@ -35,8 +35,12 @@ PROTO_MAJOR = 1
 #: (fw 0.2.49): USB suspend watch, link counters 60-61, event type 20; 1.15 (fw 0.2.50): calibration v4; 1.16
 #: (fw 0.2.52): diagnostics readers; 1.17 (fw 0.2.58, FPGA 0x1536, row 56): sequencer (segmented capture, hardware
 #: averaging: caps SEQ, SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW addr_mode 3), the features word and UI Average state in
-#: GET_STATUS 44..47 (48 bytes) and GET_DECIM 32..35, GET_CAPTURE_INFO 96 bytes
-PROTO_MINOR = 17
+#: GET_STATUS 44..47 (48 bytes) and GET_DECIM 32..35, GET_CAPTURE_INFO 96 bytes; 1.18 (fw 0.2.61, row 57): full-rate
+#: capture check, link counters 62-63, event types 21 / 22; 1.19 (fw 0.2.62, FPGA 0x1538, row 58): every full-rate
+#: capture checked, caps ENC_CHECK, features bit 5, GET_HEALTH 104 bytes; 1.20 (fw 0.2.66, row 60): the on-device Bode
+#: plot (BODE_CTRL / READ_BODE, display_mode 5, features bit 6); 1.21 (fw 0.2.67, row 61, provisional numbering):
+#: CAL_PROBE, the calibration wizard's zero measurement from the host
+PROTO_MINOR = 21
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -96,10 +100,15 @@ class Cmd(enum.IntEnum):
     SET_SEQ = 0x020E  # protocol 1.17, fw 0.2.58, cap SEQ: sequencer setting for host ARM (segments / averaging)
     GET_SEQ = 0x020F  # protocol 1.17: the setting, its fit with the next ARM, FPGA status, the latest run
     READ_SEQ = 0x0210  # protocol 1.17: segment table or averaged record of the latest run
+    BODE_CTRL = 0x0211  # protocol 1.20, fw 0.2.66, cap DECIM: start / stop the on-device Bode sweep, the view, thru
+    READ_BODE = 0x0212  # protocol 1.20: the Bode sweep's header and its 20-byte rows
     GET_GEN = 0x0300
     SET_GEN = 0x0301
     GET_CAL = 0x0400
     READ_SCREEN = 0x0401
+    #: protocol 1.21 (row 61, provisional numbering; fw 0.2.67): the calibration wizard's zero measurement of one
+    #: channel and range, nothing stored (no capability bit; older firmware answers E_UNKNOWN_CMD)
+    CAL_PROBE = 0x0402
     SD_INFO = 0x0500  # protocol 1.3, fw 0.2.2, cap SD_SECTORS
     SD_READ_SECTORS = 0x0501
     SD_STAGE = 0x0502
@@ -193,6 +202,8 @@ class Caps(enum.IntFlag):
     FIR = 1 << 16
     #: protocol 1.17 (FPGA 0x1536+): sequencer, segmented capture and hardware averaging
     SEQ = 1 << 17
+    #: protocol 1.19 (FPGA 0x1538+): the per-capture encode self-check, FPGA read 0x33
+    ENC_CHECK = 1 << 18
 
 
 class Features(enum.IntFlag):
@@ -203,6 +214,8 @@ class Features(enum.IntFlag):
     FIR = 1 << 2  # 0x1535+
     SEGMENTS = 1 << 3  # 0x1536+
     HW_AVERAGE = 1 << 4  # 0x1536+
+    ENC_CHECK = 1 << 5  # 0x1538+ (protocol 1.19)
+    BODE = 1 << 6  # protocol 1.20: what the on-device Bode plot needs (DECIM and GENERATOR_DDS: AL3 0x1534+)
 
 
 def feature_names(features: int) -> list[str]:
@@ -238,6 +251,8 @@ CMD_CAP: dict[Cmd, Caps] = {
     Cmd.SET_SEQ: Caps.SEQ,
     Cmd.GET_SEQ: Caps.SEQ,
     Cmd.READ_SEQ: Caps.SEQ,
+    Cmd.BODE_CTRL: Caps.DECIM,
+    Cmd.READ_BODE: Caps.DECIM,
 }
 
 
@@ -304,6 +319,8 @@ class DisplayMode(enum.IntEnum):
     DENSITY = 3
     #: 1.13 (fw 0.2.46): the digital phosphor view (traces graded from per-pixel hit counts; data unchanged)
     PHOSPHOR = 4
+    #: 1.20 (fw 0.2.66): the Bode plot (the scope's own acquisition is off; READ_BODE reads the table)
+    BODE = 5
 
 
 class UiBusy(enum.IntEnum):
@@ -2016,6 +2033,355 @@ def pack_spectrum(h: SpectrumHeader, levels: "list[int] | tuple[int, ...]") -> b
     return h.pack() + struct.pack(f"<{len(levels)}h", *(int(v) for v in levels))
 
 
+# --- on-device Bode plot (protocol 1.20, section 14 row 60) ---------------------------------------------------
+
+#: BODE_CTRL actions
+BODE_STATUS, BODE_RUN, BODE_REPEAT, BODE_STOP, BODE_ABORT, BODE_THRU_MEASURE, BODE_THRU_ON, BODE_THRU_OFF, \
+    BODE_THRU_CLEAR, BODE_OPEN, BODE_CLOSE = range(11)
+#: BODE_CTRL flags: bit 0 the request's settings apply (to this and later host sweeps), bit 1 no background captures
+BODE_F_SETTINGS = 0x01
+BODE_F_NO_BACKGROUND = 0x02
+#: settle presets (byte 2) in the host tool's names, and their periods (bode.SETTLE_PRESETS)
+BODE_SETTLES = ("fast", "normal", "resonant", "high_q")
+#: CH2 range mode (byte 3): 0 auto, 1 hold (CH2's range when the sweep starts = the host tool's 'fixed')
+BODE_CH2_MODES = ("auto", "fixed")
+#: READ_BODE header state / reason
+BODE_STATES = ("idle", "running", "done", "stopped", "error")
+BODE_REASONS = {0: None, 1: "the FPGA did not become ready", 2: "no capture within twice the record time + 1 s",
+                3: "CH2 saturated by a DC level with the CH2 range held", 4: "no frequency in the range",
+                5: "the PC armed its own capture during the sweep", 6: "stopped",
+                7: "no decimation filter or no DDS generator on this bitstream"}
+#: READ_BODE header byte 7 bits 0-6
+BODE_THRU_STATES = ("none", "being measured", "valid", "stale")
+#: READ_BODE row flag bits in the host tool's flag names (bode.py); bit 14 "retried" is the host's retry count, bit 15
+#: marks a row not measured in the latest sweep (the rest of the row 0)
+BODE_ROW_FLAGS = ("ch1_clipped", "clipped", "ch2_overload", "ch1_low", "ch2_small", "low_snr", "near_floor",
+                  "unsettled", "incoherent", "spliced", "fir_off", "no_cal", "cal_range", "cal_flagged")
+BODE_ROW_RETRIED = 0x4000
+BODE_ROW_NOT_MEASURED = 0x8000
+BODE_HDR_BYTES = 32
+BODE_ROW_BYTES = 20
+#: rows that fit one READ_BODE answer (count 0 asks for them)
+BODE_MAX_ROWS = (MAX_RESPONSE_PAYLOAD - BODE_HDR_BYTES) // BODE_ROW_BYTES
+
+
+@dataclass
+class BodeCtrlReq(Payload):
+    """BODE_CTRL request, 16 bytes: u8 action, u8 flags, u8 settle (0..3), u8 CH2 range mode (0 auto, 1 hold), u32
+    start cHz, u32 stop cHz (1 Hz .. 10 MHz, either order), u16 points (1..200), u16 0."""
+
+    FIELDS = [("action", "B"), ("flags", "B"), ("settle", "B"), ("ch2_mode", "B"), ("start_chz", "I"),
+              ("stop_chz", "I"), ("points", "H"), ("_r0", "2x")]
+    action: int = BODE_STATUS
+    flags: int = 0
+    settle: int = 1
+    ch2_mode: int = 0
+    start_chz: int = 0
+    stop_chz: int = 0
+    points: int = 0
+
+    @classmethod
+    def make(cls, action: int, start_hz: float | None = None, stop_hz: float | None = None, points: int = 50,
+             settle: int = 1, ch2_mode: int = 0, background: bool = True) -> "BodeCtrlReq":
+        """With ``start_hz`` / ``stop_hz`` the settings apply (flags bit 0); without, the screen's settings are used."""
+        if start_hz is None or stop_hz is None:
+            return cls(action, 0 if background else BODE_F_NO_BACKGROUND)
+        return cls(action, BODE_F_SETTINGS | (0 if background else BODE_F_NO_BACKGROUND), settle, ch2_mode,
+                   int(round(start_hz * 100)), int(round(stop_hz * 100)), points)
+
+
+@dataclass
+class BodeHeader(Payload):
+    """READ_BODE response header (also the first 32 bytes of the BODE_CTRL answer)."""
+
+    FIELDS = [("sweep_id", "I"), ("state", "B"), ("reason", "B"), ("view", "B"), ("thru", "B"), ("planned", "H"),
+              ("measured", "H"), ("current", "h"), ("settle", "B"), ("ch2_mode", "B"), ("start_chz", "I"),
+              ("stop_chz", "I"), ("points", "H"), ("switches", "H"), ("elapsed_ms", "I")]
+    #: increments with every start; 0 = none since boot
+    sweep_id: int = 0
+    state: int = 0
+    reason: int = 0
+    #: bit 0 the view shows, bit 1 RUN repeats sweeps, bit 2 this sweep is a thru measurement, bits 3-4 CH1 / CH2's
+    #: offset reached the PWM limit
+    view: int = 0
+    #: bits 0-6 BODE_THRU_STATES, bit 7 applied
+    thru: int = 0
+    planned: int = 0
+    measured: int = 0
+    #: the point being measured (-1 none)
+    current: int = -1
+    settle: int = 1
+    ch2_mode: int = 0
+    start_chz: int = 0
+    stop_chz: int = 0
+    points: int = 0
+    #: CH2 range switches in this sweep
+    switches: int = 0
+    #: ms since the sweep started (its duration once it ended)
+    elapsed_ms: int = 0
+
+    V_SHOWN: ClassVar[int] = 0x01
+    V_REPEAT: ClassVar[int] = 0x02
+    V_THRU_SWEEP: ClassVar[int] = 0x04
+    V_CH1_OFFSET_LIMIT: ClassVar[int] = 0x08
+    V_CH2_OFFSET_LIMIT: ClassVar[int] = 0x10
+
+    @property
+    def state_name(self) -> str:
+        return BODE_STATES[self.state] if self.state < len(BODE_STATES) else f"state {self.state}"
+
+    @property
+    def reason_text(self) -> str | None:
+        return BODE_REASONS.get(self.reason, f"reason {self.reason}")
+
+    @property
+    def thru_state(self) -> str:
+        t = self.thru & 0x7F
+        return BODE_THRU_STATES[t] if t < len(BODE_THRU_STATES) else f"thru {t}"
+
+    @property
+    def thru_applied(self) -> bool:
+        return bool(self.thru & 0x80)
+
+    @property
+    def running(self) -> bool:
+        return self.state == 1
+
+
+@dataclass
+class BodeCtrlResp(Payload):
+    """BODE_CTRL response, 40 bytes: the READ_BODE header, u32 the estimated duration of a sweep with the settings in
+    effect (ms), u32 0."""
+
+    FIELDS = [("header", "32s"), ("estimate_ms", "I"), ("_r0", "4x")]
+    header: bytes = bytes(32)
+    estimate_ms: int = 0
+
+    @property
+    def hdr(self) -> BodeHeader:
+        return BodeHeader.unpack(self.header)
+
+
+@dataclass
+class ReadBodeReq(Payload):
+    """READ_BODE request, 8 bytes: u16 first row, u16 count (0 or more than fit = all that fit), u32 0."""
+
+    FIELDS = [("first", "H"), ("count", "H"), ("_r0", "4x")]
+    first: int = 0
+    count: int = 0
+
+
+@dataclass
+class BodeRow(Payload):
+    """One READ_BODE row, 20 bytes."""
+
+    FIELDS = [("m", "I"), ("f_chz", "I"), ("mag_cdb", "h"), ("phase_cdeg", "h"), ("v1_cdbv", "h"), ("v2_cdbv", "h"),
+              ("ch1_range", "B"), ("ch2_range", "B"), ("flags", "H")]
+    #: stimulus period in 50 MHz DDS clocks (f = round(2^32 / M) x 50 MHz / 2^32 exactly)
+    m: int = 0
+    #: that f in cHz, rounded
+    f_chz: int = 0
+    #: |H| in centi-dB, arg H in centi-degrees (-180 .. +180]
+    mag_cdb: int = 0
+    phase_cdeg: int = 0
+    #: the fundamentals at the probe tips in centi-dBV RMS (probe factor included; V2 with the splice)
+    v1_cdbv: int = 0
+    v2_cdbv: int = 0
+    ch1_range: int = 0
+    ch2_range: int = 0
+    flags: int = 0
+
+    @property
+    def measured(self) -> bool:
+        return not self.flags & BODE_ROW_NOT_MEASURED
+
+    @property
+    def f_hz(self) -> float:
+        """The exact stimulus frequency from M (the f_chz field is rounded)."""
+        inc = ((1 << 32) + self.m // 2) // self.m if self.m else 0
+        return inc * GEN_CLOCK_HZ / 2 ** 32
+
+    @property
+    def flag_names(self) -> list[str]:
+        return [n for i, n in enumerate(BODE_ROW_FLAGS) if self.flags >> i & 1]
+
+    @property
+    def retried(self) -> bool:
+        return bool(self.flags & BODE_ROW_RETRIED)
+
+
+@dataclass
+class CalProbeReq(Payload):
+    """CAL_PROBE request (protocol 1.21, row 61): u8 channel, u8 hardware range 0..5 (0 = 5 V/div, the wizard's
+    "range 1"), u8 settle reads 0..15 (extra data-port reads before the sampled read), u8 prestrobe 0 / 1, u8 mode (0
+    one range, 1 the whole wizard zero step in its screen context, both channels, every range: about 15 s)."""
+
+    FIELDS = [("channel", "B"), ("range", "B"), ("settle", "B"), ("prestrobe", "B"), ("mode", "B")]
+    channel: int = 0
+    range: int = 0
+    settle: int = 0
+    prestrobe: int = 0
+    mode: int = 0
+
+
+#: CAL_PROBE rc (ACAL_* of adc_cal.h); -1 = mode 1 cancelled on the screen
+ACAL_RESULTS = {0: "OK", 4: "RESPONSE", 5: "CLIP", 6: "NOISE", 7: "ZERO", 8: "SPREAD", 9: "SLOPE", 10: "DRIFT",
+                11: "CLASS", 18: "TIMING", 19: "READOUT", -1: "CANCELLED"}
+ACAL_RESULT_TEXT = {
+    0: "passed", 4: "no response to the offset (the input is not at 0 V, or the front end does not move)",
+    5: "the input is not at 0 V: a sample at code 0 or 255", 6: "too much noise", 7: "zero out of range",
+    8: "the cores' zeros are too far apart", 9: "offset slope out of range", 10: "the zero drifted between captures",
+    11: "the gated and full-rate classes disagree", 18: "ADC capture timing: the 200 MSa/s data stays garbled",
+    19: "samples at 0 / 255 only at 200 MSa/s with the gated twin point quiet near 128: the FPGA 0x1538 readout fault",
+    -1: "cancelled on the screen"}
+#: CAL_PROBE point order (row 61)
+CAL_PROBE_POINTS = ("coarse high (PWM 500)", "coarse low (PWM 1200)", "gated slope low (centre - 150)",
+                    "gated slope high (centre + 150)", "gated zero (pair)", "full-rate zero (pair)",
+                    "full-rate high (+150)", "full-rate low (-150)")
+CAL_PROBE_BYTES = 252
+#: CAL_PROBE flags (byte 7)
+CALP_GARBLED, CALP_NO_CENTRE, CALP_PRESTROBE, CALP_MODE1 = 0x01, 0x02, 0x04, 0x08
+#: the wizard's noise limit (RMS about the mean of all conversions, 1/16 code)
+CAL_NOISE_LIMIT16 = 48
+_CALP_HDR = struct.Struct("<BBhBBBBiIHHHH")
+_CALP_CORE = struct.Struct("<iHHBBH")
+
+
+@dataclass
+class CalProbeCore:
+    """One core of a CAL_PROBE point (codes, not 1/16)."""
+
+    mean: float
+    rms: float
+    rms_within: float
+    lo: int
+    hi: int
+    clipped: int
+
+
+@dataclass
+class CalProbePoint:
+    index: int
+    pwm: int
+    cls: int
+    conversions: int
+    cores: tuple[CalProbeCore, CalProbeCore]
+
+    @property
+    def name(self) -> str:
+        return CAL_PROBE_POINTS[self.index] if self.index < len(CAL_PROBE_POINTS) else f"point {self.index}"
+
+    @property
+    def measured(self) -> bool:
+        return self.conversions > 0
+
+
+@dataclass
+class CalProbeResp:
+    """CAL_PROBE response, 252 bytes (protocol 1.21, row 61)."""
+
+    channel: int
+    range: int
+    rc: int
+    fail_point: int
+    fail_class: int
+    fail_core: int
+    flags: int
+    fail_value: int
+    fail_within16: int
+    coarse_centre: int
+    zero_pwm: int
+    enc_bad: int
+    enc_recovered: int
+    points: list[CalProbePoint]
+    split_d: int = 0
+
+    @property
+    def settle_reads(self) -> int:
+        return self.flags >> 4
+
+    @property
+    def result(self) -> str:
+        return ACAL_RESULTS.get(self.rc, f"rc {self.rc}")
+
+    @classmethod
+    def unpack(cls, b: bytes) -> "CalProbeResp":
+        if len(b) < 248:
+            raise ValueError(f"CAL_PROBE answer of {len(b)} bytes (needs 248 or 252)")
+        h = _CALP_HDR.unpack_from(b, 0)
+        pts = []
+        for i in range(8):
+            o = 24 + 28 * i
+            pwm, c, n = struct.unpack_from("<HBB", b, o)
+            cores = []
+            for k in range(2):
+                m, r, w, lo, hi, cl = _CALP_CORE.unpack_from(b, o + 4 + 12 * k)
+                cores.append(CalProbeCore(m / 16, r / 16, w / 16, lo, hi, cl))
+            pts.append(CalProbePoint(i, pwm, c, n, (cores[0], cores[1])))
+        split = struct.unpack_from("<H", b, 248)[0] if len(b) >= 250 else 0
+        return cls(*h, pts, split)
+
+    def pack(self) -> bytes:
+        out = bytearray(_CALP_HDR.pack(self.channel, self.range, self.rc, self.fail_point, self.fail_class,
+                                       self.fail_core, self.flags, self.fail_value, self.fail_within16,
+                                       self.coarse_centre, self.zero_pwm, self.enc_bad, self.enc_recovered))
+        for p in self.points:
+            out += struct.pack("<HBB", p.pwm, p.cls, p.conversions)
+            for c in p.cores:
+                out += _CALP_CORE.pack(int(round(c.mean * 16)), min(0xFFFF, int(round(c.rms * 16))),
+                                       min(0xFFFF, int(round(c.rms_within * 16))), c.lo, c.hi, min(0xFFFF, c.clipped))
+        out += struct.pack("<HH", self.split_d, 0)
+        return bytes(out)
+
+    def describe(self) -> dict[str, Any]:
+        """The answer in words: the verdict, the failing point and every measured point per core."""
+        fail = None
+        if self.rc not in (0, -1) and self.fail_point != 0xFF:
+            fail = {"point": CAL_PROBE_POINTS[self.fail_point] if self.fail_point < 8 else self.fail_point,
+                    "class": "gated" if self.fail_class else "full rate", "core": "AB"[self.fail_core & 1],
+                    "value": self.fail_value, "within_capture_rms_codes": round(self.fail_within16 / 16, 3)}
+            if self.rc in (6, 10):
+                fail["value_codes"] = round(self.fail_value / 16, 3)
+        pts = []
+        for p in self.points:
+            if not p.measured:
+                continue
+            pts.append({"point": p.name, "pwm": p.pwm, "class": "gated" if p.cls else "full rate",
+                        "conversions": p.conversions,
+                        **{f"core_{'AB'[k]}": {"mean": round(c.mean, 3), "rms": round(c.rms, 3),
+                                                "rms_within": round(c.rms_within, 3), "lowest": c.lo,
+                                                "highest": c.hi, "clipped": c.clipped,
+                                                "noisy": round(c.rms * 16) > CAL_NOISE_LIMIT16}
+                           for k, c in enumerate(p.cores)}})
+        return {"channel": f"CH{self.channel + 1}", "range": self.range,
+                "volts_per_div": RANGE_VOLTS_PER_DIV[self.range] if self.range < 6 else None,
+                "result": self.result, "text": ACAL_RESULT_TEXT.get(self.rc, ""), "failure": fail,
+                "coarse_centre_pwm": self.coarse_centre or None, "zero_pwm": self.zero_pwm or None,
+                "zero_split_pwm": self.split_d or None, "settle_reads": self.settle_reads,
+                "prestrobe": bool(self.flags & CALP_PRESTROBE), "whole_zero_step": bool(self.flags & CALP_MODE1),
+                "full_rate_accepted_garbled": bool(self.flags & CALP_GARBLED),
+                "coarse_centre_failed": bool(self.flags & CALP_NO_CENTRE),
+                "encode_check": {"garbled": self.enc_bad, "recovered": self.enc_recovered}, "points": pts}
+
+
+def bode_flags_from_names(names: Iterable[str], retried: bool = False) -> int:
+    """The row flag word for host flag names (unknown names are ignored)."""
+    f = 0
+    for n in names:
+        if n in BODE_ROW_FLAGS:
+            f |= 1 << BODE_ROW_FLAGS.index(n)
+    return f | (BODE_ROW_RETRIED if retried else 0)
+
+
+def parse_read_bode(payload: bytes) -> tuple[BodeHeader, list[BodeRow]]:
+    """READ_BODE: the 32-byte header, then 20-byte rows (as many as the answer holds)."""
+    h = BodeHeader.unpack(payload[:BODE_HDR_BYTES])
+    n = max(0, len(payload) - BODE_HDR_BYTES) // BODE_ROW_BYTES
+    rows = [BodeRow.unpack(payload[BODE_HDR_BYTES + BODE_ROW_BYTES * i: BODE_HDR_BYTES + BODE_ROW_BYTES * (i + 1)])
+            for i in range(n)]
+    return h, rows
+
+
 @dataclass
 class FftBenchEntry(Payload):
     """One FFT_BENCH entry (protocol 1.6, 24 bytes; section 14 row 44). Times in us."""
@@ -2494,9 +2860,36 @@ LAST_END = ("unknown (no life record)", "settings saved at power-off",
             "ended without a power-off save (warm restart, power lost, a viewer open at power-off or the write failed)")
 
 
+#: GET_HEALTH 88 (protocol 1.19): how the firmware checks full-rate captures
+ENC_MODES = {0: "none", 1: "record data", 2: "FPGA read 0x33"}
+ENC_MODE_TEXT = {0: "no check (stock, EF2 or EP4 bitstream)",
+                 1: "record data: core B against its core A neighbours over the first 250 words (AL3 0x1532..0x1537)",
+                 2: "FPGA self-check, read 0x33 after every capture (AL3 0x1538+)"}
+#: GET_HEALTH 90 flags (protocol 1.19)
+ENC_READ = 0x01  # a 0x33 byte was read since boot
+ENC_CONVENTION_BAD = 0x02  # 0x33 bits 3:2 at boot were not 01
+ENC_LAST_BAD = 0x04  # the last checked capture was accepted garbled after 16 re-arms
+ENC_ORDER_DIFFERS = 0x08  # core order differs from the convention (0x1537: recalibrate after flashing 0x1538)
+#: FPGA read 0x33 bits 7..4: the last pin check {CH2 A, CH2 B, CH1 A, CH1 B}, 1 = right; a good capture reads 0xF6
+ENC33_PINS = ((7, "CH2 A"), (6, "CH2 B"), (5, "CH1 A"), (4, "CH1 B"))
+ENC33_GOOD = 0xF6
+
+
+def enc33_bad_pins(b: int) -> list[str]:
+    """The ADC pins whose encode check failed in a 0x33 byte (bit 0 = 1 means the capture failed)."""
+    return [name for bit, name in ENC33_PINS if not b >> bit & 1]
+
+
+#: callers of event types 21 / 22 (b >> 12, protocol rows 57 / 58)
+FPGA_CALLERS = {0: "UI", 1: "host", 2: "calibration wizard", 3: "v4 class probe", 4: "check"}
+#: event type 21 reasons (a >> 5 & 3, protocol 1.19)
+ENC_REASONS = {0: "check after a rate write", 1: "record data check", 2: "FPGA 0x33", 3: "boot convention check"}
+
+
 @dataclass
 class HealthResp(Payload):
-    """GET_HEALTH response, 96 bytes (protocol 1.16, row 55)."""
+    """GET_HEALTH response, 96 bytes (protocol 1.16, row 55), 104 bytes from 1.19 (row 58: the full-rate encode check
+    in 88..103; a 96-byte answer reads them as 0 and ``has_enc_check`` is False)."""
 
     FIELDS = [("layout", "B"), ("_r0", "x"), ("length", "H"), ("usb_state", "B"), ("usb_flags", "B"),
               ("usb_power", "B"), ("usb_faddr", "B"), ("suspend_ms", "I"), ("since_config_ms", "I"), ("cp15", "I"),
@@ -2505,9 +2898,10 @@ class HealthResp(Payload):
               ("rec_flags", "B"), ("rec_type", "B"), ("rec_restarts", "H"), ("rec_power_on", "I"),
               ("rec_exc_lr", "I"), ("rec_spsr", "I"), ("rec_exc_sp", "I"), ("rec_reset_lr", "I"),
               ("rec_reset_sp", "I"), ("rec_reset_cpsr", "I"), ("rec_fsr", "I"), ("rec_far", "I"),
-              ("rec_minutes", "I"), ("_r1", "8x")]
+              ("rec_minutes", "I"), ("enc_mode", "B"), ("enc_last33", "B"), ("enc_flags", "B"),
+              ("enc_boot33", "B"), ("enc_bad", "I"), ("enc_recovered", "I"), ("enc_checked", "I")]
     layout: int = 1
-    length: int = 96
+    length: int = 104
     usb_state: int = 3
     usb_flags: int = 0
     usb_power: int = 0
@@ -2537,6 +2931,55 @@ class HealthResp(Payload):
     rec_fsr: int = 0
     rec_far: int = 0
     rec_minutes: int = 0
+    #: protocol 1.19 (bytes 88..103): check mode, the last 0x33 byte, flags (ENC_*), 0x33 at boot, captures found
+    #: garbled (= link counter 62), of those recovered by a re-arm (= 63), full-rate captures checked since boot
+    enc_mode: int = 0
+    enc_last33: int = 0
+    enc_flags: int = 0
+    enc_boot33: int = 0
+    enc_bad: int = 0
+    enc_recovered: int = 0
+    enc_checked: int = 0
+
+    @property
+    def has_enc_check(self) -> bool:
+        return self.length >= 104
+
+    def describe_enc(self) -> dict[str, Any] | None:
+        """Bytes 88..103 (protocol 1.19) in words; None for a 1.16..1.18 answer (96 bytes)."""
+        if not self.has_enc_check:
+            return None
+        f = self.enc_flags
+        read = bool(f & ENC_READ)
+        out: dict[str, Any] = {
+            "mode": ENC_MODES.get(self.enc_mode, f"mode {self.enc_mode}"),
+            "mode_text": ENC_MODE_TEXT.get(self.enc_mode, ""),
+            "last_33": f"0x{self.enc_last33:02X}" if read else None,
+            "last_33_bad_pins": enc33_bad_pins(self.enc_last33) if read and self.enc_last33 & 1 else [],
+            "boot_33": f"0x{self.enc_boot33:02X}" if self.enc_mode == 2 else None,
+            "convention_bad": bool(f & ENC_CONVENTION_BAD), "last_capture_accepted_bad": bool(f & ENC_LAST_BAD),
+            "core_order_differs": bool(f & ENC_ORDER_DIFFERS),
+            "captures_checked": self.enc_checked, "captures_bad": self.enc_bad,
+            "captures_recovered": self.enc_recovered,
+            "captures_accepted_bad_or_abandoned": max(0, self.enc_bad - self.enc_recovered)}
+        if self.enc_mode == 0:
+            text = "full-rate captures are not checked on this bitstream"
+        elif f & ENC_CONVENTION_BAD:
+            text = f"unknown encode convention, 0x33 = 0x{self.enc_boot33:02X} at boot"
+        elif self.enc_checked == 0:
+            text = "encode check, no 200 MSa/s capture yet"
+        elif f & ENC_LAST_BAD:
+            pins = ", ".join(out["last_33_bad_pins"]) or "a core"
+            text = (f"the last full-rate capture was accepted garbled after 16 re-arms ({pins}): treat 200 MSa/s data "
+                    "since then as suspect")
+        elif read and self.enc_last33 & 1:
+            text = f"encode check failed on {', '.join(out['last_33_bad_pins']) or 'a pin'}"
+        else:
+            text = "encode check OK" + (f", {self.enc_bad} captures re-taken" if self.enc_bad else "")
+        if f & ENC_ORDER_DIFFERS:
+            text += "; ADC core order differs from the convention: recalibrate after flashing 0x1538"
+        out["text"] = text
+        return out
 
     def describe(self) -> dict[str, Any]:
         """The answer in words and units (what the Diagnostics pages show)."""
@@ -2569,7 +3012,8 @@ class HealthResp(Payload):
                    "operating_hours": round(self.rec_minutes / 60, 2),
                    "registers": {k: f"0x{getattr(self, 'rec_' + k):08X}" for k in
                                  ("exc_lr", "spsr", "exc_sp", "reset_lr", "reset_sp", "reset_cpsr", "fsr", "far")}}
-        return {"usb": usb, "cpu": cpu, "life": life, "settings": settings, "restart_record": rec}
+        return {"usb": usb, "cpu": cpu, "life": life, "settings": settings, "restart_record": rec,
+                "encode_check": self.describe_enc()}
 
 
 @dataclass
@@ -2669,8 +3113,8 @@ LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     # fw 0.2.49 (62 counters): USB resumes inferred without a RESUME interrupt (frame number moving, EP0 setup or EP2
     # OUT packet while suspended), soft reconnects of the suspend watch (protocol row 53)
     "usb_inferred_resumes", "usb_soft_reconnects",
-    # fw 0.2.61 (64 counters, protocol 1.18 row 57): full-rate capture checks after a rate change that found a garbled
-    # ADC core, and of those recovered by the retries
+    # fw 0.2.61 (64 counters, protocol 1.18 row 57): full-rate capture checks that found a garbled ADC core, and of
+    # those recovered by the retries; per capture since fw 0.2.62 (1.19 row 58: = GET_HEALTH 92 / 96)
     "adc_fullrate_bad", "adc_fullrate_recovered")
 
 #: restart_exc_type / event 15 a (fw 0.2.19)
@@ -2793,6 +3237,24 @@ class DeviceEvent:
             return f"tx_abort_txcsr POWER 0x{a:02X} TXCSR 0x{b:04X} {pkt}"
         if t == 18:
             return (f"tx_abort_frame tx_irq_enabled {a & 1} zlp_pending {(a >> 1) & 1} frame {b & 0x7FF}")
+        if t == 21:  # 1.19: a = reason << 5 | re-arms (bit 7 not recovered), b = caller << 12 | value
+            reason, value = (a >> 5) & 3, b & 0xFFF
+            who = FPGA_CALLERS.get(b >> 12, f"caller {b >> 12}")
+            if reason == 3:
+                return f"adc_fullrate_garbled boot convention check: 0x33 = 0x{value:02X} (bits 3:2 != 01)"
+            if reason == 2:
+                what = f"0x33 = 0x{value:02X} ({', '.join(enc33_bad_pins(value)) or 'no pin'} wrong)"
+            elif reason == 1:
+                what = f"residual {value / 16:.2f} codes"
+            else:
+                what = f"value {value}"
+            n = a & 0x1F
+            end = "NOT recovered (accepted garbled)" if a & 0x80 else "recovered"
+            return (f"adc_fullrate_garbled ({ENC_REASONS[reason]}, {who}): {what}, {n}{'+' if n == 31 else ''} "
+                    f"re-arm(s), {end}")
+        if t == 22:  # 1.18: an FPGA write of 0x0D, 0x53, 0x56 or 0x01 = 1; b = caller << 12 | value (12 bits)
+            who = FPGA_CALLERS.get(b >> 12, f"caller {b >> 12}")
+            return f"fpga_write 0x{a:02X} = {b & 0xFFF}{'+' if b & 0xFFF == 0xFFF else ''} by {who}"
         return self.name
 
 
@@ -2887,7 +3349,8 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.GET_CAPTURE_INFO: 0, Cmd.GET_EVENT_LOG: 0, Cmd.SD_INFO: 4, Cmd.SD_READ_SECTORS: 8, Cmd.SD_STAGE: 8, Cmd.SD_WRITE_SECTORS: 16,
     Cmd.READ_SPECTRUM: ReadSpectrumReq.size(), Cmd.GET_DECIM: 0, Cmd.SET_DECIM: SetDecimReq.size(),
     Cmd.GET_HEALTH: 0, Cmd.SAVE_REPORT: 0, Cmd.SET_SEQ: SetSeqReq.size(), Cmd.GET_SEQ: 0,
-    Cmd.READ_SEQ: ReadSeqReq.size(),
+    Cmd.READ_SEQ: ReadSeqReq.size(), Cmd.BODE_CTRL: BodeCtrlReq.size(), Cmd.READ_BODE: ReadBodeReq.size(),
+    Cmd.CAL_PROBE: CalProbeReq.size(),
 }
 
 

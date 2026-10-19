@@ -509,7 +509,7 @@ class PointResult:
                 "ch1_volts_per_div": self.ch1_volts_per_div, "ch2_volts_per_div": self.ch2_volts_per_div,
                 "sample_rate": pp.sample_rate, "filter": self.filter_effective, "fir": self.fir,
                 "snr_db": round(self.snr_db, 1) if math.isfinite(self.snr_db) else None,
-                "ch2_codes": round(self.codes2, 2),
+                "ch2_codes": round(self.codes2, 2) if math.isfinite(self.codes2) else None,
                 "leak_db": round(self.leak_db, 1) if math.isfinite(self.leak_db) else None, "flags": list(self.flags)}
 
 
@@ -1224,6 +1224,179 @@ class BodeRunner:
         res.meta.update({"plan": plan_summary(plans), "background": self.background,
                          "probes": [saved.channels[0].probe_factor, saved.channels[1].probe_factor]})
         return res
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The on-device sweep (protocol 1.20, BODE_CTRL / READ_BODE; firmware/AGENTS.md section 42)
+
+
+def device_settle_code(settle: str | float | int | None) -> int:
+    """BODE_CTRL byte 2 for a settle preset (the device knows only the four presets)."""
+    periods = parse_settle(settle)
+    for i, name in enumerate(P.BODE_SETTLES):
+        if SETTLE_PRESETS[name] == periods:
+            return i
+    raise ValueError(f"settle {settle!r}: the device sweep knows only the presets "
+                     f"{', '.join(f'{n} ({SETTLE_PRESETS[n]})' for n in P.BODE_SETTLES)}")
+
+
+def device_ch2_code(ch2_range: str | float | int) -> int:
+    """BODE_CTRL byte 3: 'auto' 0, 'fixed' 1 (hold: CH2's range when the sweep starts)."""
+    v = str(ch2_range).strip().lower()
+    if v not in P.BODE_CH2_MODES:
+        raise ValueError(f"ch2_range {ch2_range!r}: the device sweep takes 'auto' or 'fixed' (set CH2's V/div first "
+                         "for a fixed range)")
+    return P.BODE_CH2_MODES.index(v)
+
+
+DEVICE_CAVEATS = (
+    "device sweep: the scope measured and ranged by itself (bode_dsp.c, integer DFT on the same plan); the table has "
+    "no SNR, leakage or code levels (the flags carry them), and its noise estimate (period differences) reads a "
+    "slow transient as low_snr where the host says unsettled",)
+
+
+def point_from_row(row: P.BodeRow, pp: PointPlan, probes: tuple[float, float] = (1.0, 1.0)) -> PointResult:
+    """A READ_BODE row as the host tool's PointResult (f from M through the plan; H, V1, V2 from centi-units)."""
+    mag, ph = row.mag_cdb / 100.0, row.phase_cdeg / 100.0
+    h = 10 ** (mag / 20) * complex(math.cos(math.radians(ph)), math.sin(math.radians(ph)))
+    x1 = 10 ** (row.v1_cdbv / 2000.0) * math.sqrt(2) + 0j
+    x2 = 10 ** (row.v2_cdbv / 2000.0) * math.sqrt(2) * complex(math.cos(math.radians(ph)), math.sin(math.radians(ph)))
+    flags = row.flag_names
+    fir = not pp.legacy and pp.fir_expected and "fir_off" not in flags
+    filt = "legacy" if pp.legacy else ("cic3+fir" if fir else "cic3")
+    r1, r2 = min(row.ch1_range, 5), min(row.ch2_range, 5)
+    return PointResult(pp, h, h, x1, x2, row.ch1_range, row.ch2_range, P.RANGE_VOLTS_PER_DIV[r1] * probes[0],
+                       P.RANGE_VOLTS_PER_DIV[r2] * probes[1], math.nan, math.nan, math.nan, math.nan, filt, fir,
+                       flags, None, 1 + 0j, 1 if row.retried else 0)
+
+
+def result_from_device(hdr: P.BodeHeader, rows: list[P.BodeRow], *, probes: tuple[float, float] = (1.0, 1.0),
+                       estimate_s: float = 0.0, started: str = "") -> SweepResult:
+    """The device's table as a SweepResult (the same structure as a host sweep, so the two compare point by point).
+    The plan comes from the header's start / stop / points (the device's planner is the host's ``plan_sweep``); a row
+    whose M is not in it gets its own ``plan_point``."""
+    plans = plan_sweep(hdr.start_chz / 100.0, hdr.stop_chz / 100.0, max(1, hdr.points)) if hdr.start_chz else []
+    by_m = {pp.m: pp for pp in plans}
+    pts = []
+    for r in rows:
+        if not r.measured or not r.m:
+            continue
+        pp = by_m.get(r.m) or plan_point(GEN_CLOCK_HZ / r.m)
+        pts.append(point_from_row(r, pp, probes))
+    role = "thru" if hdr.view & P.BodeHeader.V_THRU_SWEEP else "measure"
+    res = SweepResult(pts, float(SETTLE_PRESETS[P.BODE_SETTLES[hdr.settle]]) if hdr.settle < 4 else math.nan,
+                      P.BODE_CH2_MODES[hdr.ch2_mode] if hdr.ch2_mode < 2 else str(hdr.ch2_mode),
+                      "device" if hdr.thru_applied and role == "measure" else None, role, started,
+                      duration_s=hdr.elapsed_ms / 1000.0, estimate_s=estimate_s, range_switches=hdr.switches)
+    if hdr.state != 2:
+        res.stopped_early = (f"the device sweep ended {hdr.state_name}"
+                             f"{': ' + hdr.reason_text if hdr.reason_text else ''}; {len(pts)} of {hdr.planned} points "
+                             "measured")
+    res.caveats = list(DEVICE_CAVEATS)
+    for bit, ch in ((P.BodeHeader.V_CH1_OFFSET_LIMIT, 1), (P.BodeHeader.V_CH2_OFFSET_LIMIT, 2)):
+        if hdr.view & bit:
+            res.caveats.append(f"CH{ch}: offset range exhausted (the trace could not be centred within the offset "
+                               "PWM's 0..2000): the DC level is beyond this range's window; see the ch2_overload / "
+                               "clipped flags")
+    if hdr.reason == 3:
+        res.caveats.append("CH2's front end is saturated on the held range (a flat record: a DC level against the "
+                           "probe reference beyond this range's input window). Remedy: wiring A (DUT ground on the "
+                           "probe ground clips), ch2_range='auto', or a less sensitive CH2 range")
+    if res.thru_cal == "device":
+        res.caveats.append(f"the scope's own thru calibration was applied (state {hdr.thru_state}): H is divided by "
+                           "the thru's H at the same (M, N) on the scope")
+    res.meta = {"where": "device", "sweep_id": hdr.sweep_id, "state": hdr.state_name, "reason": hdr.reason_text,
+                "thru": hdr.thru_state, "thru_applied": hdr.thru_applied, "view_shown": bool(hdr.view & 1),
+                "plan": plan_summary(plans) if plans else {}, "probes": list(probes)}
+    return res
+
+
+def device_sweep(scope: Any, start: float, stop: float, points: int, *, settle: str | float = "normal",
+                 ch2_range: str = "auto", background: bool = True, thru: str | ThruCal | None = None,
+                 close_view: bool = False, poll_s: float = 0.2, timeout_s: float | None = None,
+                 sleep: Callable[[float], None] = time.sleep,
+                 progress: Callable[[int, int, str], None] | None = None) -> SweepResult:
+    """Run one sweep on the scope (BODE_CTRL action 1 with the settings, or action 5 for ``thru='measure'``), poll
+    READ_BODE until the state leaves 'running', read the rows and return them as a SweepResult. ``thru``: None (the
+    scope's thru is switched off if it was applied, so H is raw), 'device' (apply the scope's stored thru), 'measure'
+    (this sweep measures it: both probe tips on the DUT input) or a host ThruCal (applied here to the raw rows).
+    The Bode view stays open unless ``close_view`` (closing gives the scope's settings back)."""
+    from .transport import DeviceError
+
+    s = scope
+    caps = s.info.caps
+    if s.info.proto_minor < 20:
+        raise BodeError("the device sweep needs firmware 0.2.66 or later (protocol 1.20)")
+    if not caps & P.Caps.DECIM or not caps & P.Caps.GENERATOR_DDS:
+        raise BodeError("the device sweep needs the decimation filter and the DDS generator (FPGA 0x1534+)")
+    settle_code, ch2_code = device_settle_code(settle), device_ch2_code(ch2_range)
+    lo, hi = sorted((float(start), float(stop)))
+    if not (MIN_FREQ_HZ <= lo and hi <= MAX_FREQ_HZ) or not 1 <= points <= 200:
+        raise ValueError(f"device sweep: {lo:g} .. {hi:g} Hz, {points} points (1 Hz .. 10 MHz, 1..200 points)")
+    probes = (s.get_channel(0).probe_factor, s.get_channel(1).probe_factor)
+    notes: list[str] = []
+
+    def ctrl(req: P.BodeCtrlReq | int) -> P.BodeCtrlResp:
+        try:
+            return s.bode_ctrl(req)
+        except DeviceError as e:
+            if e.status == P.Status.E_BUSY:
+                raise BodeError("the scope answered E_BUSY: a menu is open on the scope; close it and retry") from e
+            if e.status == P.Status.E_STATE and e.detail == 1:
+                raise BodeError("the Bode view is not available: a picture or waveform viewer is open on the scope") \
+                    from e
+            if e.status == P.Status.E_STATE and e.detail == 2:
+                raise BodeError("a sweep is already running on the scope (started at the scope?): wait for it or "
+                                "stop it there") from e
+            if e.status == P.Status.E_STATE and e.detail == 4:
+                raise BodeError("no thru calibration on the scope: run thru_cal='measure' first (both probe tips "
+                                "on the DUT input)") from e
+            raise
+
+    st = ctrl(P.BODE_STATUS).hdr
+    if st.running:
+        raise BodeError("a sweep is already running on the scope (started at the scope?): wait for it or stop it there")
+    if thru == "device":
+        ctrl(P.BODE_THRU_ON)
+    elif thru != "measure" and st.thru_applied:
+        ctrl(P.BODE_THRU_OFF)
+        notes.append("the scope's own thru calibration was applied: switched off for this sweep (raw H); it stays "
+                     "stored on the scope (thru_cal='device' applies it)")
+    action = P.BODE_THRU_MEASURE if thru == "measure" else P.BODE_RUN
+    t0 = time.monotonic()
+    started = _dt.datetime.now().isoformat(timespec="seconds")
+    resp = ctrl(P.BodeCtrlReq.make(action, lo, hi, points, settle_code, ch2_code, background))
+    est = resp.estimate_ms / 1000.0
+    sid = resp.hdr.sweep_id
+    limit = timeout_s if timeout_s is not None else 3 * est + 30.0
+    seen = -1
+    while True:
+        hdr, rows = s.read_bode()
+        if hdr.sweep_id != sid:
+            raise BodeError(f"the scope started another sweep (id {hdr.sweep_id}, ours {sid}) while this one ran")
+        if not hdr.running:
+            break
+        if progress is not None and hdr.measured != seen:
+            seen = hdr.measured
+            done = [r for r in rows if r.measured]
+            last = f"{done[-1].f_hz:.6g} Hz {done[-1].mag_cdb / 100:.2f} dB" if done else "starting"
+            progress(hdr.measured, hdr.planned, last)
+        if time.monotonic() - t0 > limit:
+            ctrl(P.BODE_ABORT)
+            raise BodeError(f"the device sweep did not end within {limit:.0f} s (estimate {est:.0f} s): aborted")
+        sleep(poll_s)
+    res = result_from_device(hdr, rows, probes=probes, estimate_s=est, started=started)
+    res.caveats = notes + res.caveats
+    if isinstance(thru, ThruCal):
+        res.thru_cal = thru.name
+        for p in res.points:
+            thru.apply(p)
+    if close_view:
+        res.meta["view_shown"] = bool(ctrl(P.BODE_CLOSE).hdr.view & P.BodeHeader.V_SHOWN)
+    else:
+        res.caveats.append("the scope still shows its Bode plot (its own acquisition is off until the person leaves "
+                           "it: Menu > Scope, or close_view=true)")
+    return res
 
 
 # ---------------------------------------------------------------------------------------------------------

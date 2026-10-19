@@ -888,6 +888,48 @@ class Scope:
                                                P.ReadSpectrumReq(channel_index(ch), first, count).pack()))
         return Spectrum(h, np.asarray(levels, dtype=np.int16))
 
+    # --- on-device Bode plot (protocol 1.20, fw 0.2.66, cap DECIM) ------------------------------------------------
+
+    def bode_ctrl(self, req: P.BodeCtrlReq | int = P.BODE_STATUS) -> P.BodeCtrlResp:
+        """BODE_CTRL: start / stop a device sweep, open / close the Bode view, the thru calibration (an action number
+        or a ``BodeCtrlReq``). E_BUSY while a scope menu is open; E_STATE detail 1 view not available, 2 a sweep runs
+        already, 4 no thru measured."""
+        if self.info.proto_minor < 20:
+            raise DeviceError(P.Cmd.BODE_CTRL, P.Status.E_UNKNOWN_CMD, 0, "needs protocol 1.20 (firmware >= 0.2.66)")
+        if isinstance(req, int):
+            req = P.BodeCtrlReq(req)
+        return P.BodeCtrlResp.unpack(self._req(P.Cmd.BODE_CTRL, req.pack()))
+
+    def read_bode(self, first: int = 0, count: int | None = None) -> tuple[P.BodeHeader, list[P.BodeRow]]:
+        """READ_BODE: the sweep header and rows ``first`` .. (default: every planned row), split into several requests
+        when the response limit asks for it. Rows of points the latest sweep has not measured have ``measured``
+        False."""
+        if self.info.proto_minor < 20:
+            raise DeviceError(P.Cmd.READ_BODE, P.Status.E_UNKNOWN_CMD, 0, "needs protocol 1.20 (firmware >= 0.2.66)")
+        per = max(1, min(P.BODE_MAX_ROWS, (self.response_limit - P.BODE_HDR_BYTES) // P.BODE_ROW_BYTES))
+        hdr, rows = P.parse_read_bode(self._req(P.Cmd.READ_BODE, P.ReadBodeReq(first, min(per, count or per)).pack()))
+        want = hdr.planned - first if count is None else count
+        while len(rows) < want:
+            h2, more = P.parse_read_bode(self._req(P.Cmd.READ_BODE, P.ReadBodeReq(
+                first + len(rows), min(per, want - len(rows))).pack()))
+            if h2.sweep_id != hdr.sweep_id or not more:
+                break
+            rows += more
+        return hdr, rows[:want] if want >= 0 else rows
+
+    def cal_probe(self, channel: int, range_index: int, *, settle: int = 0, prestrobe: int = 0,
+                  mode: int = 0) -> P.CalProbeResp:
+        """CAL_PROBE (protocol 1.21, row 61): run the calibration wizard's zero measurement of one channel and
+        hardware range on the scope (nothing stored; about 1 s, mode 1 the whole zero step, about 15 s). Needs the
+        UI stopped (SET_ACQ_STATE 0, else E_STATE detail 1) and no host capture armed (detail 0)."""
+        if self.info.proto_minor < 21:
+            raise DeviceError(P.Cmd.CAL_PROBE, P.Status.E_UNKNOWN_CMD, 0, "needs protocol 1.21 (firmware >= 0.2.67)")
+        r = P.CalProbeResp.unpack(self._req(P.Cmd.CAL_PROBE, P.CalProbeReq(channel, range_index, settle, prestrobe,
+                                                                           mode).pack(),
+                                            timeout=30.0 if mode else 5.0))
+        self.invalidate()  # cal_end puts the settings back; the caches may have seen the scratch channel
+        return r
+
     def fft_bench(self, reps: int = 3) -> P.FftBench:
         """FFT_BENCH (protocol 1.6, fw 0.2.27): time the on-scope FFT on the CH1 trace buffer, ``reps`` 1-16 runs per
         size. Main loop only; the UI pass waits for the run (about 0.15 s at 3 reps)."""

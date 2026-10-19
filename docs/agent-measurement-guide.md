@@ -160,6 +160,16 @@ networks, coil plus capacitor tanks fed through a resistor). It needs an AL3 bit
    `clipped` and `unsettled` points rather than quoting them; say `ch2_small` points are +-1 dB; say how many range
    splices there were. Pass the caveats on.
 
+6. **On the scope instead (firmware 0.2.66+, protocol 1.20):** `where='device'` lets the scope run the same plan
+   and rules itself (about 2-3 x faster above 1 kHz, no USB round trip per point) and shows the Bode plot on its
+   screen, so the person watches the sweep; the tool polls it and returns the same table, markers and files (the
+   rows carry flags but no SNR / leakage / code levels; `device` holds the sweep id and state). Limits there: the
+   settle presets only, `ch2_range` 'auto' or 'fixed', DC coupling; `thru_cal='measure'` stores the thru on the
+   scope (until power-off) and here, `thru_cal='device'` applies the scope's copy. The view stays on the screen
+   (its own acquisition is off, capture tools then add a caveat) unless `close_view=true`; a host capture during a
+   device sweep ends it. Use it when the person wants to see the plot or the host sweep is too slow; use the host
+   sweep for AC coupling, a V/div of your choice or a custom settle.
+
 Accuracy (design estimate, to be confirmed on the bench): +-0.1 dB / +-0.5 deg down to about -30 dB with the thru
 calibration, about +-1 dB near -55 dB. The ground-return error is not removed by the calibration.
 
@@ -213,7 +223,7 @@ Every waveform is saved as `.npz` (path in `file`); load with `numpy.load(path)`
 | capture_segments | `t` (s, 0 = each segment's trigger), `CH1_volts` (segments x samples), `CH1_clipped`, `timestamps_s` (from the first trigger), `triggered`, `slots` |
 | decay_fit | `t` (s after the edge), `data`, `fit`, `residual`, `fit_mask`, `excluded`, `std` |
 | capture_and_fft | `f` (Hz), `amplitude_vrms` |
-| bode_sweep | `f_actual` (Hz), complex `h` (after splice and thru cal), `h_raw`, `x1` / `x2` (volts peak), `mag_db`, `phase_deg`, `ch1_range` / `ch2_range`, `snr_db`, `valid`; also `.csv` and `.json` (`files`) |
+| bode_sweep | `f_actual` (Hz), complex `h` (after splice and thru cal), `h_raw`, `x1` / `x2` (volts peak), `mag_db`, `phase_deg`, `ch1_range` / `ch2_range`, `snr_db` (NaN for `where='device'`), `valid`; also `.csv` and `.json` (`files`) |
 
 Results with up to 2000 points also carry the samples inline; longer ones a 500-point min/max preview.
 
@@ -225,11 +235,37 @@ Give value, unit and how it was measured (n averaged, sample rate, range, alignm
 - 200 MS/s per channel at most; trigger jitter up to 2 / fs without edge alignment.
 - Analog bandwidth ~30 MHz: rise times below ~12 ns and content above 30 MHz measure the scope.
 - Absolute volts: say which `scaling` applied (`scope calibration v3 ...`, `unit-calibration` or `firmware`).
-- While the scope shows its spectrum, waterfall or phosphor view the capture tools add a caveat. The data are
+- While the scope shows its spectrum, waterfall, phosphor or Bode view the capture tools add a caveat. The data are
   unaffected, but the person sees a different picture than your trace: pass the caveat on.
+- Full-rate (200 MSa/s, filter off) captures: from fw 0.2.62 the scope checks every one for a garbled ADC core and
+  re-takes it (`scope_health` `encode_check`). A caveat "accepted garbled after 16 re-arms" means the last such
+  capture may still be bad: repeat it and report the counts.
 - The calibration pin is a frequency / duty / timing reference, not a voltage reference: it is a ~3.1 Vpp square
   wave referenced to the USB ground, so against the probe ground (VRF1, +1.24 V) it reads about -1.24 / +1.9 V.
 - Pass on dynamic caveats (clipping, auto trigger fired, aliasing, restarts) instead of dropping them.
+
+## 7a. Presenting results
+
+The tools measure and analyse; you present (roadmap: advanced features are MCP features, the agent presents the
+data). For anything the person will look at, call **`scope_report`** on the result: `source` = the `file` (or
+`files.npz`) the measuring tool returned, or `'latest'`; give a `title` and, if the default is unclear, the
+`command` in words. It writes under `<home>/reports/<date>/`:
+
+- a **PNG** (time traces with the std band or clipped samples, decay with fit and residual, spectrum, Bode magnitude
+  and phase with the -3 dB marker and flagged points hollow); needs matplotlib (`pip install "fnirsi1013d[plot]"`),
+  otherwise `png` is null and `plot_note` says why;
+- a **self-contained HTML page**: the plot embedded, the result table, the summary (markers, fit quality), every
+  recorded caveat plus yours, and the generating command. No scripts or CDNs: it opens offline and in dark mode.
+
+How to show them:
+
+- **Claude Code**: Read the PNG path (the Read tool renders images) so you see what the person will see, and say what
+  it shows; then publish the HTML page with the **Artifact** tool (it starts private; it is the person's data, so offer
+  the link rather than sharing it anywhere) or give its path to open in a browser.
+- Other clients (Codex, Desktop): give both paths; paste the summary and the caveats into the reply either way.
+- Always state the numbers and caveats in the reply too: the page supports the answer, it does not replace it.
+- For a comparison (before / after, host vs device Bode) make one report per result and put the numbers side by side
+  in the reply.
 
 ## 8. Troubleshooting
 
@@ -239,6 +275,9 @@ Give value, unit and how it was measured (n averaged, sample rate, range, alignm
 | the scope restarted, the link dropped, settings look lost, or "is the right firmware on it?" | fw 0.2.52+: `scope_health` (USB state, power-on number, how the previous power-on ended, unsaved settings, a stored restart record with the exception type) and `scope_sd_info` (`card_image`: what the card boots and whether that is the running build, e.g. after a FEL load). For a fault report ask for `scope_save_report` and tell the person the file name on the card; quote `in_words` rather than raw registers |
 | volts drift at 200 MSa/s or filtered captures read a little off hours after calibrating | fw 0.2.50+ tracks it: `scope_calibration_info` `tracking` says whether the tracker and the class probe have run (the probe needs a quiet input with the scope running and no menu); `calibration_provenance` says when and by which build the scope was calibrated |
 | "still starting" | the scope just booted (about 5 s after a FEL load); the server waits up to 10 s |
+| the scope's calibration wizard fails its zero step ("too much noise", "the input is not at 0 V") | fw 0.2.67+: `scope_cal_probe(channel, range_index)` runs the wizard's own measurement and returns per point and core what it saw (mean, RMS, extremes, clipped); compare with a host capture at the same range (`scope_capture`, 200 MSa/s). Inputs at 0 V (probes off) as for the wizard |
+| a 200 MSa/s capture shows one core (every other sample) off by tens of codes, or the caveat "accepted garbled" | fw 0.2.62+: `scope_health` `encode_check` (the check mode, the last 0x33 byte and its failing pins, captures checked / garbled / re-taken) and `scope_event_log` (event `adc_fullrate_garbled`). Repeat the capture; on AL3 0x1532..0x1537 the fix is the 0x1538 bitstream |
+| the screen shows a Bode plot, the scope does not acquire | its Bode view is open (`scope_status` display_mode `bode`): the person leaves it with Menu > Scope, or `scope_bode_sweep(where='device', close_view=true)` |
 | cannot connect, port busy / PermissionError | another session holds the serial port (only one may): ask who, never kill it |
 | no device found | wrong COM port (`--port`), scope off or in USB-storage mode, cable; `fnirsi1013d-bench --census 0` checks the link |
 | "no trigger within ..." | level outside the signal, wrong source or edge: `scope_get_config`, try mode `auto` |
