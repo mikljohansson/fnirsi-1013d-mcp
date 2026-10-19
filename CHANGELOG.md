@@ -31,6 +31,19 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.61 - 2026-10-19 (protocol 1.18, docs/protocol.md section 14 row 57)
+
+- Fixed: after a sample-rate change the FPGA can garble one ADC core's 200 MSa/s data. This happens randomly on AL3
+  0x1532..0x1536 and on CH2 core A on 0x1537 (fpga/al3/README.md "Findings" item 3). The wizard failed "too much
+  noise" or "the input is not at 0 V" because of it. The firmware now checks one full-rate capture after every rate
+  write: before the next UI conversion, before a host ARM, and before every full-rate point of the calibration wizard.
+  When a core is garbled it re-writes the rate and checks again, up to 16 times. If the capture never recovers, the
+  wizard says "ADC capture timing: the 200 MSa/s data stays garbled".
+- Added: GET_LINK_STATS counters 62-63 (checks that found a garbled capture, and those that recovered). The event log
+  has two new types: 21 (a garbled capture) and 22 (a trace of every 0x0D, 0x53, 0x56 and 0x01 write, with its
+  caller).
+- Changed: Diagnostics shows the FPGA line of AL3 0x1532..0x1536 in amber: "ADC capture timing race, fixed in 0x1537".
+
 #### 0.2.60 - 2026-10-19 (protocol 1.17 unchanged)
 
 - Changed: the Zero level instruction asks to disconnect everything, including anything on the calibration post.

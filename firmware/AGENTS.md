@@ -2096,3 +2096,61 @@ Bench check: the 0x0D toggle test above. If a core shows about 20 codes "per cap
 race. Pickup on an open input shows as a large total with a small "per capture" value instead.
 Open: the zero step does not detect a load on the post by itself. The noise check caught it only because the wire
 carried noise; a quiet wire would pass with a shifted zero.
+
+## 37. fw-calnoise: full-rate capture check and FPGA write trace (fw 0.2.61, protocol 1.18, row 57)
+
+Confirmed on the bench (coordinator, 2026-10-19 16:20-16:45):
+- **0x1535.** A 0x0D write re-rolls the encode phase at random. CH1 core B was garbled (15-29 codes RMS within a
+  capture) after 15 of 30 changes 99 -> 0 and 12 of 30 changes 1 -> 0; otherwise 1.1. CH1 core A moved with it
+  (0.50 -> 1.6). CH2 had flipped earlier the same day (24-code core A in the wizard).
+- **0x1537** (flashed 16:31). Static 200 MSa/s captures are clean (20/20). After a 0x0D write to divider 0, CH2 core A
+  read 32-34 codes in 35 of 40 trials from 99 or 1, and 11 of 40 from 3999. The bad state does not settle with time
+  (0 ms 0/20, 5 ms 7/20, 20 ms 18/20, 300 ms 16/20). A second capture right after a bad one is also bad, so the state
+  is set by some write between the rate write and the capture and persists until the next one; fpga-gen7 is analysing
+  the bitstream side. At divider 1 static, CH2 A read 55 codes and both B lanes were constant: probably a READ_RAW
+  layout difference of the 100 MSa/s mode, not chased.
+- **0x1537 wizard on 0.2.60.** CH1 passes; CH2 fails "the input is not at 0 V". That text is ACAL_E_CLIP: any sample
+  at code 0 or 255 in any measured point (the gated and full-rate slope points and the zero points; the coarse points
+  are excluded). The 0x1537 garbage (32-34 codes RMS) reaches the rails, and the clip check runs before the noise check.
+  The zero step never compares with the stored zeros: it reads raw codes through the scratch channel. A change of core
+  order or lane mapping (CH2 A-B now 128.7 / 132.0 against about 130 / 130 on 0x1535) cannot fail it. It makes the
+  stored per-lane zeros wrong until a new calibration, which the wizard then measures per lane.
+
+Built (fw 0.2.61):
+- `enc_heal.c/.h` (pure, test_enc_heal):
+  - `eh_residual16`: per channel, the RMS of core B against the mean of its two core A neighbours. It takes the
+    smaller of the two neighbour choices, so it does not depend on core order. Signal and offset cancel; noise leaves
+    about 1.3 codes; a garbled core leaves tens.
+  - `eh_run`: check, then retry up to `EH_MAX_TRIES` (16) above `EH_LIMIT16` (8 codes); `EH_WAIT_MS` (0) after each
+    retry. All three constants are in enc_heal.h only.
+  - `eh_affected` (0x1532..0x1536) only picks the amber Diagnostics line.
+- `enc_heal_hw.c`:
+  - The capture: one conversion, raw scratch channels for both channels, own buffers. Sample counts and trigger mode
+    are restored.
+  - The retry writes 0x0D = 1 and then 0.
+  - Counters 62-63 and event type 21.
+  - `fpga_encode_heal` runs only at divider 0, on every bitstream.
+  - `fpga_encode_check_dirty` runs the check when a 0x0D write happened since the last check (`fpga_rate_dirty`, set by
+    the write trace).
+- Call sites:
+  - the wizard before the full-rate zero points of each range and before each full-rate gain level (ACAL_E_TIMING 18);
+  - the UI acquisition before its decimation arm and conversion (scope_functions.c);
+  - `pc_hal_arm` first.
+- FPGA write trace (fpga_control.c): `fpga_write_cmd` remembers the command, and the next data write logs event 22
+  for 0x0D, 0x53, 0x56 and 0x01 = 1. The caller comes from `fpga_trace_who`: UI by default; host inside pc_poll
+  (all three contexts); CAL between cal_begin and cal_end; PROBE in probe_run; CHECK in the heal.
+- Protocol 1.18: GET_LINK_STATS has 64 counters; mcp protocol.py names them and event types 21/22.
+- Diagnostics: the amber FPGA line on AL3 0x1532..0x1536 (test_ui_diag).
+
+Open:
+- Core order on 0x1537 (fpga-gen6/7). The firmware's fixed lane convention is: tracebuffer odd = 0x20/0x22 ("A"),
+  even = 0x21/0x23 ("B").
+  - Order-independent: the zero step, the check, and the per-lane zeros and gains (a recalibration fixes a mapping
+    change).
+  - Assumes "B is the earlier sample of a pair" (PC_INTERLEAVE_ORDER 0): acal_track's A-B timing model and the
+    decimator's swap bit. Re-check both once fpga-gen7 reports the real order on 0x1538.
+- The UI check costs one extra conversion after each rate write: the class probe every 30 s, time-base changes, the
+  wizard's cal_end. It runs at divider 0 only.
+- Bench: read GET_LINK_STATS 62-63 and GET_EVENT_LOG types 21/22 after a wizard run and after toggling the time base
+  to 200 MSa/s a few times. Expect 21 entries with small `a` (recovered), and 22 entries showing who wrote what
+  before each.

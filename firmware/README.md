@@ -1619,6 +1619,13 @@ CH1 and the Skip button are gone with the per-channel screens.
 5. New run, Cancel during the zero step's measurement: it stops within about a second and nothing changed. Stray
    touches off the two buttons do nothing on every screen.
 
+**Full-rate capture check (fw 0.2.61, `enc_heal.h`).** Each full-rate point of the zero and gain steps is preceded by
+a check that both channels' 200 MSa/s data is sane. After a 0x0D write the FPGA can deliver one core's samples
+garbled (AL3 0x1532..0x1536 at random; CH2 core A on 0x1537). The check computes the RMS of core B against its core A
+neighbours. Above 8 codes it re-writes 0x0D and checks again, up to 16 times. If the data never recovers, the line
+reads "ADC capture timing: the 200 MSa/s data stays garbled". The same check runs after any rate write, before the
+next UI conversion and before a host ARM. GET_LINK_STATS 62-63 and event types 21-22 report it (protocol row 57).
+
 ### 6.5 Calibration v4: background interleave tracking (fw 0.2.50, protocol 1.15)
 
 Design and numbers: docs/plans/interleave-tracking.md; wire: protocol row 54 (1.15; the branch wrote it as row 53 / 1.14). Files: `acal_track.c/.h` (pure C: the
