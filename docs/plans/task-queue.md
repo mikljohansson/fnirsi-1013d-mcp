@@ -184,7 +184,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 ## MCP / host
 
 - [x] **scope_status docstring** (docs-gen1): names all five display modes (mcp-gen4, with the Bode docs commit).
-- [~] **Bode bench session** (10-19 14:35-15:10: RC 1k/15n, floor -80 dB, thru +0.3 dB, divider flat -20.5 dB: tool proven; RC capacitor deviation open; 0.1 V/div bug found) (mcp-gen4 hand-off; procedure in mcp/AGENTS.md "Bode bench"): wiring A/B, thru, floor, coherence, the
+- [x] **Bode bench session** (10-19 14:35-15:25: RC low-pass and high-pass consistent to 0.14 dB / 1 deg, floor -80 dB, thru +0.3 dB, divider flat: tool accepted; capacitor dispersion is the part; DC overload in wiring B found, wiring A recommended) (was: RC 1k/15n, floor -80 dB, thru +0.3 dB, divider flat -20.5 dB: tool proven; RC capacitor deviation open; 0.1 V/div bug found) (mcp-gen4 hand-off; procedure in mcp/AGENTS.md "Bode bench"): wiring A/B, thru, floor, coherence, the
   1.6 kOhm / 10 nF RC; record the floor, skew and the wiring verdict in docs/hardware-status.md.
 - [ ] **Bode follow-ups** (after the bench): CH1 re-ranging when CH1 drops below 20 codes (resonant input nodes), the harmonic fast
   mode (design 1.3), the impedance mode z_series_ohm (design 2.4, coil L / Q / SRF for the detector), an optional PNG plot.

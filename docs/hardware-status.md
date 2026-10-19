@@ -773,3 +773,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   std 23.7 codes, no clipping. Conclusion: a -1.2 V DC input saturates the 0.1 and 0.2 V/div front end ahead of the offset
   injection; the 0.1 V/div "bug" is wiring B's DC, not firmware. Since wiring A measured the same H as B, wiring A (DUT ground on
   the probe clips) becomes the recommended Bode wiring; mcp-gen5 asked to update the tool, docs and add an overload flag.
+- 2026-10-19 15:25: high-pass with the same parts (15 nF cap 2 series, 991 Ohm shunt), wiring A (CH1 clip on the rail, USB
+  ground removed), thru applied, backups/bode/hp_15n_cap2_thru.json: 30/30 valid; matches the prediction 1 - H_lp computed from the
+  low-pass of the same capacitor within 0.14 dB and 1.0 deg at every point (1 kHz -20.23 dB / 81.3 deg vs -20.11 / 82.2 predicted,
+  -20.56 / 84.6 ideal). Low-pass and high-pass describe one and the same lossy, dispersive capacitor, and the divider was flat:
+  the Bode tool is accepted; the deviation is the cheap ceramic (owner: AliExpress parts, likely Y5V class). Bode bench closed;
+  open follow-ups are in the tool (overload flag, wiring A as default) with mcp-gen5.
