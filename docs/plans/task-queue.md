@@ -110,20 +110,16 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   device and it never resumed: RESUME interrupt never fires. Decode the event log (types 2/3 fields of row 50), check MUSB resume
   handling (INTRUSBE resume bit, POWER.Resume, PHY), and the F1C100s USB PHY suspend behaviour; bench with `fnirsi1013d-soak --mode reopen
   --idle 1800`. Overnight 10-minute idles never suspended (36 stayed 1); the long idle did.
-- [ ] **Diagnostics view redesign, revision 2** (owner 10-19; adversarial review docs/plans/diagnostics-review.md d95ce0b; design
-  https://claude.ai/artifact/M3udheReCiHLQmASaY5qZr, artboards Status / Calibration / Log / Settings): Diagnostics becomes a main-loop
-  display mode with three pages by header buttons; Status = identity lines (fw, git, time, protocol, serial, MMU state; FPGA word + features),
-  four tiles with verdict words (Firmware: running vs card image; Restarts; USB: connected, bad frames, suspends, reconnects; Battery level
-  of 20 + charging + RTC temperature when fitted), one calibration verdict line per channel against the review's provisional limits,
-  provenance (FPGA word, fw build, uptime and power-on count at calibration), buttons Calibrate (wizard) and Save report; Calibration page =
-  per-range table (PWM centre, volts factor as % from default, zeros A/B per class), corrected gain mismatch, noise vs limits, DC shift
-  model inputs, actions Check on post, Undo last calibration, DC shift trim, Clear calibration (confirmed); Log page = decoded event log,
-  restart record (persisted), SD state, timing; Settings screen (from Other settings) = Display, Controls, Files, Clock, Start-up rows with
-  values as words, Restore default settings (confirmed, keeps calibration, no boot-byte write); "fw: PECO" and the 1.00o5 tables removed;
-  fonts 13/16/24 px, buttons >= 44 px, hit area = drawn area. Needs the readers of review section 4 (USB link state, card image identity,
-  calibration provenance in the block, power-on counter, persisted restart record, save-state, post check, previous block for Undo, CP15
-  word, FPGA build hash). Also from the review: "USB connection" -> "USB drive / SD card" with an explanatory screen; first-run screen;
-  remove the USB-Serial and Dev mode toggles. Owner decisions pending on the menu tree (modes vs variants). Next firmware generation.
+- [ ] **UI makeover batch** (owner 10-19; plan docs/plans/ux-makeover.md, mockups https://claude.ai/artifact/M3udheReCiHLQmASaY5qZr revision 4,
+  reviews docs/plans/diagnostics-review.md and ux-review.md): step 1 main menu rows + USB drive screen; step 2 CTRL pages with fold-outs
+  (Display Normal/Phosphor/X-Y with the phosphor parameters, Trace style, Grid, V/div per channel; Spectrum View/Analysis/Axis), strips
+  removed, Trace style out of ACQ, AUTO SET as the spectrum Auto, version string and Move fast out of the top bar, warnings top-middle,
+  measurement cards in the stock chip scheme (+ "Freg" fix); step 3 Settings fold-out trim + full Settings screen (drag speed, file
+  message timeout, RTC on/off, At power-on values, restore defaults without the boot byte); step 4 Diagnostics as a display mode with
+  Status / Calibration / Log / Developer pages and the readers of diagnostics-review.md section 4, the four-screen wizard (section 6a),
+  Clear keeps the volts factors, Volts calibration kept as a service action, Enter FEL now via ENTER_FEL, first-run screen. Open owner
+  decisions: look of the new screens (stock palette vs the navy style), short CTRL labels ("Spec", "10dB", "Phos") vs wider buttons,
+  spectrum row in roll mode, main-menu row height when Bode ships. Next firmware generations (one step each).
 - [ ] **Measurement cards in the stock scheme** (owner 10-19): chip with the channel digit in the channel colour + "Metric: value" in
   white, dark grey rounded card; fix the "Freg" label; scope_functions.c scope_display_channel_measurements. Part of the UI batch
   (docs/plans/ux-makeover.md section 3).
