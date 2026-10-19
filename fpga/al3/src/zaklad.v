@@ -2,7 +2,7 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
-// fnirsi-1013d-mcp changes (version word 0x1539, see fpga/al3/README.md "Changes"):
+// fnirsi-1013d-mcp changes (version word 0x153A, see fpga/al3/README.md "Changes"):
 //  - 0x1533: external trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
 //    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
 //    Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
@@ -38,6 +38,17 @@
 //    which samples the bus after it raises the clock, always reads a settled byte; there is no
 //    same-edge path left on i_mcu_clk in the read path. Byte values, pointer advance and the dummy
 //    strobe are unchanged; zaklad.sdc constrains i_mcu_clk. Otherwise cycle-identical to 0x1538.
+//  - 0x153A: ADC data capture. 0x1532..0x1539 took all four ADC buses straight from the pins on the write clock edge,
+//    at an instant set by placement. Each core's data is settled for only T - 4 ns of its encode period T (AD9288 tV
+//    2 ns min, tPD 6 ns max): 6 ns of 10 at 200 MSa/s, and the A and B windows overlap for under 1 ns, so every build
+//    put the capture somewhere else (bench: B cores bad on 0x1538, A cores on 0x1539). Now each pin goes into an IOB
+//    DDR register on clk_200MHz and a short chain, giving the pins as they were 5 .. 17.5 ns before a write clock edge
+//    in 2.5 ns steps; the A cores (encoded on the falling write clock edge) are captured against the falling edge, the
+//    B cores (encoded on the rising edge) against the rising edge, each at the step set in command 0x63 (power-on from
+//    TD's numbers for this build, tb/capture_margins.py; stages 3 and 4 are inside every core's window at every rate).
+//    Cores B stay the earlier sample of a word (by T/2, at every rate). The capture adds write clocks to the ADC data's
+//    latency (legacy data 4 words later than 0x1539 at 200 MSa/s, 3 words at divided rates; K >= 1: 40 ns). Outlier
+//    counters per core (read 0x36, threshold 0x64) let the firmware check every capture and train the steps.
 //-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
@@ -127,9 +138,9 @@ endmodule
 //sv[0] .. sv[5] is the shared valid chain: sv[0] samples the last integrator once per P pairs.
 //For K < 3 the unused integrator and comb stages are plain registers, so the pipeline (and
 //the latency, 12 write clocks from the pin capture to the memory write) is the same for all K.
-//Each core's pins are captured on the rising edge of the write clock (pa/pb, IOB registers) or,
-//with neg_a / neg_b, on the falling edge half a write clock later (na/nb), for the bench to
-//centre the capture in each core's data-valid window.
+//The inputs are the captured samples adc*_w (0x153A), registered on the rising write clock edge;
+//pa/pb take them one clock later. 0x1534..0x1539 had neg_a / neg_b (0x53 bits 3 / 4) to capture the
+//pins on the falling edge instead; the bits still read back in 0x29 but select nothing any more.
 
 module decim_chan
 (
@@ -138,16 +149,13 @@ module decim_chan
   input  wire [7:0]  in_b,        //ADC core B
   input  wire [1:0]  order,       //K, 1..3 (0 behaves as 1; its output is not used)
   input  wire        swap,        //0: core B is the earlier sample of a pair, 1: core A
-  input  wire        neg_a,       //1: capture core A on the falling edge of clk
-  input  wire        neg_b,       //1: capture core B on the falling edge of clk
   input  wire [5:0]  shift,
   input  wire [5:0]  sv,          //valid chain s0 .. s5
   output reg  [15:0] out = 0
 );
 localparam W = 48;
 
-reg [7:0] pa = 0, pb = 0;         //pins on the rising edge
-reg [7:0] na = 0, nb = 0;         //pins on the falling edge (half a clock after pa/pb)
+reg [7:0] pa = 0, pb = 0;         //inputs on the rising edge
 reg [7:0] qa = 0, qb = 0;         //captured pair
 reg [7:0] pe = 0, pl = 0;         //previous pair (earlier, later)
 reg [10:0] f = 0;                 //prefilter output, at most 8 * 255
@@ -169,18 +177,12 @@ wire [7:0] t_pe = k3 ? pe : 8'd0;
 
 wire [W-1:0] fine = sh >> shift[2:0];
 
-  always @(negedge clk)
-    begin
-      na <= in_a;
-      nb <= in_b;
-    end
-
   always @(posedge clk)
     begin
       pa <= in_a;
       pb <= in_b;
-      qa <= neg_a ? na : pa;
-      qb <= neg_b ? nb : pb;
+      qa <= pa;
+      qb <= pb;
       pe <= xe;
       pl <= xl;
       f  <= {3'b0, xl} + {1'b0, t_xe} + {1'b0, t_pl} + {3'b0, t_pe};
@@ -553,6 +555,10 @@ module fnirsi_1013D
   reg [31:0] hold_on_divider = 0;          //For controlling the hold on a large divider
 
   //input wire       i_mcu_rws, 
+  //Initial values in this file are for simulation only: TD 4.6.8 configures every flop to 0 (0x153A notes), so on the
+  //hardware the generator is off and silent until the firmware writes 0x50..0x52 (it does, at boot), and
+  //pretrigger_samples / total_samples / seq_count / seg_m / avg_n are 0 until written (the firmware writes them before
+  //every capture that uses them).
   reg gen_out_enable = 1;
   reg [31:0] clk_out_divider = 85899;      //For controlling the clk out frekvency  1kHz
   reg [31:0] clk_out_duty = 32'h80000000;  //For controlling the clk out duty       50%
@@ -609,8 +615,8 @@ module fnirsi_1013D
   //Decimation filter (0x1534)
   reg [1:0]  dec_order = 0;                //Command 0x53 bits 1..0: 0 = sample skipping (0x1533), 1 = boxcar, 2 = CIC2, 3 = CIC3
   reg        dec_swap = 0;                 //Command 0x53 bit 2: 1 = core A is the earlier sample of a pair
-  reg        dec_neg_a = 0;                //Command 0x53 bit 3: capture the A cores on the falling write clock edge
-  reg        dec_neg_b = 0;                //Command 0x53 bit 4: capture the B cores on the falling write clock edge
+  reg        dec_neg_a = 0;                //Command 0x53 bit 3: read back in 0x29, no effect since 0x153A
+  reg        dec_neg_b = 0;                //Command 0x53 bit 4: read back in 0x29, no effect since 0x153A
   reg [5:0]  dec_shift = 0;                //Command 0x54: output = min(65535, filter >> dec_shift)
   reg [15:0] trigger_level16 = 0;          //Command 0x55: trigger level on the 16-bit samples (K >= 1)
 
@@ -823,12 +829,119 @@ freq_generator_dds_pwm u_freq
   );
 
 //---------------------------------------------------------------------------
+//ADC data capture (0x153A). Every pin goes into an IOB DDR input register (AL_LOGIC_IDDR on clk_200MHz: q2 = the pin at
+//the last falling edge, q1 = at the rising edge 2.5 ns before that, both handed over on the rising edge), followed by two
+//more rising-edge stages. A write clock edge E (either edge: both are falling clk_200MHz edges) then sees the pins as
+//sampled at E - 5 (stage 0, q2), E - 7.5 (1, q1), E - 10 (2), E - 12.5 (3), E - 15 (4) and E - 17.5 ns (5); the IOB
+//registers have a fixed pad delay, so these instants do not move with placement.
+//
+//Each core's data is timed by its own encode (AD9288: valid from tPD max 6 ns after the encode rising edge to tV min
+//2 ns after the next one, i.e. a 4 ns transition once per encode period T = 10 (D + 1) ns at every rate). Core B is
+//encoded on the RISING write clock edge R (encB = write clock, pad 6.7..7.0 ns after R), core A on the FALLING edge F
+//(encA = its complement). So the B pins are stable over [R - T + 13.3, R + 9.3] relative to every rising edge and the
+//A pins over [F - T + 13.1, F + 9.1] relative to every falling edge, whatever T is; stages 3 and 4 (E - 12.5, E - 15)
+//lie inside those at every rate with 1.6..1.9 ns to spare against the datasheet limits (TT numbers of this build,
+//fpga/al3/README.md "Changes" section 10). The A cores are therefore captured against the falling edge and the B cores
+//against the rising edge: stage registers sA (falling) and sB (rising) take the six phases from the clk_200MHz chain
+//(wire-only 2.5 ns paths), the per-core pick (command 0x63, 3 bits per core) is registered one write clock later on the
+//same edge (a_m on the falling edge, b_m on the rising one), and adc*_w takes both on the rising edge: the only
+//half-period paths are register-to-register wires. A word then holds the B sample encoded T/2 before its A sample (B
+//first, as 1.00o5 and 0x1535/0x1538), at every rate, by construction: the A instant is T/2 later than the B instant.
+//
+//If the ADC's data-align mode is on (S1 = S2 = 1 per pecostm32's schematic; the bench of 0x1538/0x1539 fits the
+//align-off timing, so power-on is off), the B data is re-timed by the chip to the A encode: 0x63 bit 12 (CH1) / 13
+//(CH2) then takes the B core from the falling-edge path (sBf, bf_m), where its window is the A core's. Either way the
+//word stays B-first. A wrong stage or reference garbles the core (rail values, jumps) instead of shifting it; the
+//outlier counters (read 0x36, threshold 0x64) count such words per core from 0x01 = 1 through the capture, so the
+//firmware can check every full-rate capture and train the stages at a quiet input.
+
+  wire [31:0] adc_pin = { i_adc2B_d, i_adc2A_d, i_adc1B_d, i_adc1A_d };
+  wire [31:0] adc_q1, adc_q2;
+  reg  [31:0] adc_d1 = 0, adc_d2 = 0, adc_dd1 = 0, adc_dd2 = 0;
+  //Command 0x63 (two bytes high first): bits 2:0 CH1 A stage, 5:3 CH1 B, 8:6 CH2 A, 11:9 CH2 B (stage k = pins
+  //5 + 2.5 k ns before the core's edge, 6 and 7 act as 5), bit 12 CH1 B / bit 13 CH2 B from the A-encode path, bits
+  //15:14 unused. Command 0x64: outlier threshold, codes. TD 4.6.8 ignores Verilog initial values (every flop configures
+  //to 0; a bitstream built with other values here is byte-identical), so the registers hold the value XOR its power-on
+  //value and 0 means the default. Power-on 0x08E4: CH1 A stage 4, CH1 B 4, CH2 A 3, CH2 B 4, B from its own encode (the
+  //stage with the larger margin per core over the builds of README section 10, tb/capture_margins.py).
+  localparam [15:0] CAP_SEL_PO = 16'h08E4;
+  localparam [7:0]  CAP_THR_PO = 8'd8;
+  reg  [15:0] cap_sel_x = 0;
+  reg  [7:0]  cap_thr_x = 0;
+  wire [15:0] cap_sel = cap_sel_x ^ CAP_SEL_PO;
+  wire [7:0]  cap_thr = cap_thr_x ^ CAP_THR_PO;
+
+  genvar adc_i;
+  generate
+    for(adc_i = 0; adc_i < 32; adc_i = adc_i + 1)
+      begin : adc_iddr
+        AL_LOGIC_IDDR #(.SRMODE("SYNC")) iddr (.q1(adc_q1[adc_i]), .q2(adc_q2[adc_i]), .clk(clk_200MHz), .d(adc_pin[adc_i]), .rst(1'b0));
+      end
+  endgenerate
+
+  always @(posedge clk_200MHz)
+    begin
+      adc_d1  <= adc_q1;
+      adc_d2  <= adc_q2;
+      adc_dd1 <= adc_d1;
+      adc_dd2 <= adc_d2;
+    end
+
+  //The six phases per core as a 48-bit bus, stage k in bits [8k+7:8k]; chA = { CH2 A, CH1 A }, chB = { CH2 B, CH1 B }
+  wire [95:0] chA = { adc_dd1[23:16], adc_dd2[23:16], adc_d1[23:16], adc_d2[23:16], adc_q1[23:16], adc_q2[23:16],
+                      adc_dd1[7:0],   adc_dd2[7:0],   adc_d1[7:0],   adc_d2[7:0],   adc_q1[7:0],   adc_q2[7:0] };
+  wire [95:0] chB = { adc_dd1[31:24], adc_dd2[31:24], adc_d1[31:24], adc_d2[31:24], adc_q1[31:24], adc_q2[31:24],
+                      adc_dd1[15:8],  adc_dd2[15:8],  adc_d1[15:8],  adc_d2[15:8],  adc_q1[15:8],  adc_q2[15:8] };
+
+  reg [95:0] sA  = 0;                      //falling write clock edge: the A cores' phases
+  reg [95:0] sBf = 0;                      //falling edge: the B cores' phases (A-encode reference)
+  reg [95:0] sB  = 0;                      //rising edge: the B cores' phases
+
+  function [7:0] cap_pick(input [2:0] sel, input [47:0] s);
+    case(sel)
+      3'd0:    cap_pick = s[7:0];
+      3'd1:    cap_pick = s[15:8];
+      3'd2:    cap_pick = s[23:16];
+      3'd3:    cap_pick = s[31:24];
+      3'd4:    cap_pick = s[39:32];
+      default: cap_pick = s[47:40];
+    endcase
+  endfunction
+
+  reg [15:0] a_m  = 0;                     //falling edge: picked { CH2 A, CH1 A }
+  reg [15:0] bf_m = 0;                     //falling edge: picked { CH2 B, CH1 B }, A-encode reference
+  reg [15:0] b_m  = 0;                     //rising edge: picked { CH2 B, CH1 B }
+
+  always @(negedge sample_write_clock)
+    begin
+      sA   <= chA;
+      sBf  <= chB;
+      a_m  <= { cap_pick(cap_sel[8:6],  sA[95:48]),  cap_pick(cap_sel[2:0], sA[47:0]) };
+      bf_m <= { cap_pick(cap_sel[11:9], sBf[95:48]), cap_pick(cap_sel[5:3], sBf[47:0]) };
+    end
+
+  always @(posedge sample_write_clock)
+    sB <= chB;
+
+  //The captured word, registered on the rising edge; every consumer (sample memory, trigger, decimator, record mirror,
+  //outlier counters) takes it from here and writes or uses it on the next rising edge.
+  reg [7:0] adc1A_w = 0, adc1B_w = 0, adc2A_w = 0, adc2B_w = 0;
+  always @(posedge sample_write_clock)
+    begin
+      b_m     <= { cap_pick(cap_sel[11:9], sB[95:48]), cap_pick(cap_sel[5:3], sB[47:0]) };
+      adc1A_w <= a_m[7:0];
+      adc2A_w <= a_m[15:8];
+      adc1B_w <= cap_sel[12] ? bf_m[7:0]  : b_m[7:0];
+      adc2B_w <= cap_sel[13] ? bf_m[15:8] : b_m[15:8];
+    end
+
+//---------------------------------------------------------------------------
 //Memory part
 //0x1536: in segment mode the write address is folded into the current segment slot
 //(seg_mask_s = slot size - 1, seg_base_s = slot start); otherwise the mask is all ones and the
 //address passes unchanged. The record mirror takes the same data and write enable.
 
-  wire [31:0] sample_dia = dec_on ? { dec_out2, dec_out1 } : { i_adc2B_d, i_adc2A_d, i_adc1B_d, i_adc1A_d };
+  wire [31:0] sample_dia = dec_on ? { dec_out2, dec_out1 } : { adc2B_w, adc2A_w, adc1B_w, adc1A_w };
   reg  [12:0] seg_mask_s = 13'h1FFF;
   reg  [12:0] seg_base_s = 0;
   wire [12:0] sample_write_address_phys = (sample_write_address & seg_mask_s) | (seg_base_s & ~seg_mask_s);
@@ -985,12 +1098,10 @@ freq_generator_dds_pwm u_freq
   decim_chan dec_ch1
   (
     .clk   (sample_write_clock),
-    .in_a  (i_adc1A_d),
-    .in_b  (i_adc1B_d),
+    .in_a  (adc1A_w),
+    .in_b  (adc1B_w),
     .order (dec_order),
     .swap  (dec_swap),
-    .neg_a (dec_neg_a),
-    .neg_b (dec_neg_b),
     .shift (dec_shift),
     .sv    (dec_sv[5:0]),
     .out   (cic_out1)
@@ -999,12 +1110,10 @@ freq_generator_dds_pwm u_freq
   decim_chan dec_ch2
   (
     .clk   (sample_write_clock),
-    .in_a  (i_adc2A_d),
-    .in_b  (i_adc2B_d),
+    .in_a  (adc2A_w),
+    .in_b  (adc2B_w),
     .order (dec_order),
     .swap  (dec_swap),
-    .neg_a (dec_neg_a),
-    .neg_b (dec_neg_b),
     .shift (dec_shift),
     .sv    (dec_sv[5:0]),
     .out   (cic_out2)
@@ -1146,9 +1255,40 @@ assign sampling_enable = ~(
          trigger_previous <= trigger_data;
 
          //current sample (decimation filter on: 16-bit compare result, see dec_trig_ge)
-	     trigger_data <= dec_on ? {8{dec_trig_ge}} : trigger_channel ? i_adc2A_d : i_adc1A_d;
+	     trigger_data <= dec_on ? {8{dec_trig_ge}} : trigger_channel ? adc2A_w : adc1A_w;
        end
   end
+
+//-------------------------------------------------------------------------------------
+//Outlier counters (0x153A, read 0x36): per core, the sample of each write clock edge (adc*_w) against the one of the
+//edge before (oc_p), counted while the capture writes; 0x01 = 1 clears them. Saturating at 65535.
+
+  wire [7:0] oc_c1A = adc1A_w, oc_c1B = adc1B_w, oc_c2A = adc2A_w, oc_c2B = adc2B_w;
+  reg  [7:0] oc_p1A = 0, oc_p1B = 0, oc_p2A = 0, oc_p2B = 0;
+  reg [15:0] oc_1A = 0, oc_1B = 0, oc_2A = 0, oc_2B = 0;
+  reg [1:0]  oc_v = 0;                     //samples of this capture in oc_c / oc_p
+
+  function oc_far(input [7:0] x, input [7:0] y, input [7:0] t);
+    oc_far = ((x > y) ? (x - y) : (y - x)) > t;
+  endfunction
+
+  always @(posedge sample_write_clock)
+    begin
+      oc_p1A <= oc_c1A;  oc_p1B <= oc_c1B;  oc_p2A <= oc_c2A;  oc_p2B <= oc_c2B;
+      if(sample_system_reset == 1)
+        begin
+          oc_1A <= 0; oc_1B <= 0; oc_2A <= 0; oc_2B <= 0;
+          oc_v  <= 0;
+        end
+      else if(sample_write_enable)
+        begin
+          oc_v <= { oc_v[0], 1'b1 };
+          if(oc_v[1] & oc_far(oc_c1A, oc_p1A, cap_thr) & ~&oc_1A) oc_1A <= oc_1A + 16'd1;
+          if(oc_v[1] & oc_far(oc_c1B, oc_p1B, cap_thr) & ~&oc_1B) oc_1B <= oc_1B + 16'd1;
+          if(oc_v[1] & oc_far(oc_c2A, oc_p2A, cap_thr) & ~&oc_2A) oc_2A <= oc_2A + 16'd1;
+          if(oc_v[1] & oc_far(oc_c2B, oc_p2B, cap_thr) & ~&oc_2B) oc_2B <= oc_2B + 16'd1;
+        end
+    end
 
 //-------------------------------------------------------------------------------------
 //Sampling half way detect
@@ -1265,7 +1405,7 @@ assign sampling_enable = ~(
 //For 200 MHz every decision uses registers only: increments and compares (q_*_nx, q_*_end, pp_z,
 //pp_busy, pp_start) are computed every clock from values that change at most once per record.
 //Post-pass pipeline: the mirror and accumulator reads issued with pp_i, BRAM latch (pp_v1),
-//output register (pp_v2), pp_x / pp_acc (pp_v3), 17-bit lane sums (pp_v4), carry or saturation
+//output register (pp_v2), pp_xa* (the lanes, selected by format) / pp_acc (pp_v3), 17-bit lane sums (pp_v4), carry or saturation
 //into the write register (aw_we), written on the next clock. 16-bit format: two 32-bit lanes
 //(CH1, CH2), no saturation needed (65535 x 65536 < 2^32); legacy: four 16-bit lanes (CH1A, CH1B,
 //CH2A, CH2B), each saturating at 65535. The first record of each position is written, not added.
@@ -1307,7 +1447,7 @@ assign sampling_enable = ~(
   reg [10:0] pp_ma = 0, pp_aa = 0;
   reg        pp_v1 = 0, pp_v2 = 0, pp_v3 = 0, pp_v4 = 0;
   reg [10:0] pp_a1 = 0, pp_a2 = 0, pp_a3 = 0, pp_a4 = 0;
-  reg [31:0] pp_x = 0;
+  reg [15:0] pp_xa0 = 0, pp_xa1 = 0, pp_xa2 = 0, pp_xa3 = 0;   //0x153A: the record word's lanes, registered
   reg [63:0] pp_acc = 0;
   reg [16:0] pp_s0 = 0, pp_s1 = 0, pp_s2 = 0, pp_s3 = 0;
 
@@ -1323,10 +1463,6 @@ assign sampling_enable = ~(
   wire [31:0] mir_q;
   wire [63:0] acc_q;
 
-  wire [15:0] pp_xa0 = q_fmt16 ? pp_x[15:0]  : { 8'd0, pp_x[7:0] };
-  wire [15:0] pp_xa1 = q_fmt16 ? 16'd0       : { 8'd0, pp_x[15:8] };
-  wire [15:0] pp_xa2 = q_fmt16 ? pp_x[31:16] : { 8'd0, pp_x[23:16] };
-  wire [15:0] pp_xa3 = q_fmt16 ? 16'd0       : { 8'd0, pp_x[31:24] };
 
   function [15:0] pp_sat(input [16:0] s);
     pp_sat = s[16] ? 16'hFFFF : s[15:0];
@@ -1370,7 +1506,10 @@ assign sampling_enable = ~(
       pp_v1  <= pp_i;  pp_a1 <= pp_aa;
       pp_v2  <= pp_v1; pp_a2 <= pp_a1;
       pp_v3  <= pp_v2; pp_a3 <= pp_a2;
-      pp_x   <= mir_q;
+      pp_xa0 <= q_fmt16 ? mir_q[15:0]  : { 8'd0, mir_q[7:0] };     //0x153A: lane select before the register
+      pp_xa1 <= q_fmt16 ? 16'd0        : { 8'd0, mir_q[15:8] };
+      pp_xa2 <= q_fmt16 ? mir_q[31:16] : { 8'd0, mir_q[23:16] };
+      pp_xa3 <= q_fmt16 ? 16'd0        : { 8'd0, mir_q[31:24] };
       pp_acc <= q_first ? 64'd0 : acc_q;
       pp_v4  <= pp_v3; pp_a4 <= pp_a3;
       pp_s0  <= { 1'b0, pp_acc[15:0] }  + { 1'b0, pp_xa0 };
@@ -1654,9 +1793,9 @@ assign sampling_enable = ~(
               | (mcu_command == 8'h1B) | (mcu_command == 8'h1F)
               | (mcu_command == 8'h32) | (mcu_command == 8'h35) | (mcu_command == 8'h38) | (mcu_command == 8'h3C)
               | (mcu_command == 8'h51) | (mcu_command == 8'h52) | (mcu_command == 8'h55)
-              | (mcu_command == 8'h58) | (mcu_command == 8'h5A) | (mcu_command == 8'h5C)) & i_mcu_rws) |
+              | (mcu_command == 8'h58) | (mcu_command == 8'h5A) | (mcu_command == 8'h5C) | (mcu_command == 8'h63)) & i_mcu_rws) |
               (((mcu_command == 8'h06) | (mcu_command == 8'h14) | (mcu_command == 8'h29) | (mcu_command == 8'h41)
-              | (mcu_command == 8'h2A)) & ~i_mcu_rws))
+              | (mcu_command == 8'h2A) | (mcu_command == 8'h36)) & ~i_mcu_rws))
         mcu_state <= mcu_state + 1;
     end
 
@@ -1897,7 +2036,7 @@ assign sampling_enable = ~(
                 endcase
               end
 
-            //Decimation filter order and core order (0x1534)
+            //Decimation filter order and core order (0x1534); bits 3 / 4 have no effect since 0x153A
             8'h53:
               begin
                 dec_order <= io_mcu_data[1:0];
@@ -1982,6 +2121,23 @@ assign sampling_enable = ~(
             8'h5D:
               seq_stop <= io_mcu_data[0];
 
+            //ADC capture stage per core (0x153A), two bytes high byte first: bits 11:0 = { 2B, 2A, 1B, 1A }, 3 bits
+            //each (stage k = the pins 5 + 2.5 k ns before the core's write clock edge, k = 0..5; 6 and 7 act as 5),
+            //bit 12 / 13 = CH1 B / CH2 B timed by the A encode (ADC data-align mode); power-on 0x08E4
+            8'h63:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    cap_sel_x[15:8] <= io_mcu_data ^ CAP_SEL_PO[15:8];
+                  4'h1:
+                    cap_sel_x[7:0] <= io_mcu_data ^ CAP_SEL_PO[7:0];
+                endcase
+              end
+
+            //Outlier threshold (0x153A), codes
+            8'h64:
+              cap_thr_x <= io_mcu_data ^ CAP_THR_PO;
+
           endcase
         end
     end
@@ -2012,7 +2168,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h39;
+                    o_mcu_data <= 8'h3A;
                 endcase
               end
 
@@ -2057,19 +2213,19 @@ assign sampling_enable = ~(
 
             //Reading of the sample data for channel 1 ADC 1 
             8'h24:
-              o_mcu_data <= i_adc1A_d;
+              o_mcu_data <= adc_q1[7:0];               //0x153A: the pin as the IOB register took it
 
             //Reading of the sample data for channel 1 ADC 2
             8'h25:
-              o_mcu_data <= i_adc1B_d;
+              o_mcu_data <= adc_q1[15:8];               //0x153A: the pin as the IOB register took it
 
             //Reading of the sample data for channel 2 ADC 1
             8'h26:
-              o_mcu_data <= i_adc2A_d;
+              o_mcu_data <= adc_q1[23:16];               //0x153A: the pin as the IOB register took it
 
             //Reading of the sample data for channel 2 ADC 2
             8'h27:
-              o_mcu_data <= i_adc2B_d;
+              o_mcu_data <= adc_q1[31:24];               //0x153A: the pin as the IOB register took it
 
             //Reading of the external trigger status
             //bit0 = filtered EXT pin level, bit1 = generator drives the pin, bit2 = EXT edge since the last reset
@@ -2077,7 +2233,7 @@ assign sampling_enable = ~(
               o_mcu_data <= { 5'b0, ext_activity, gen_out_enable, ext_level };
 
             //Reading of the decimation geometry, two bytes
-            //byte 0: bit7 = 16-bit samples (K >= 1), bit4/bit3 = B/A cores on the falling edge,
+            //byte 0: bit7 = 16-bit samples (K >= 1), bit4/bit3 = 0x53 bits 4/3 as written (no effect since 0x153A),
             //bit2 = core order swap, bits 1..0 = K; byte 1: shift
             8'h29:
               begin
@@ -2117,6 +2273,25 @@ assign sampling_enable = ~(
             //1.25 ns later, as 0x1535 normally ran); bits 7:4 the last pin check {CH2 A, CH2 B, CH1 A, CH1 B}, 1 = right
             8'h33:
               o_mcu_data <= { enc_ok, 2'b01, enc_pred_ok, enc_err };
+
+            //ADC capture (0x153A), 10 bytes: the 0x63 value (2 bytes, high first), then the outlier counts of CH1 A,
+            //CH1 B, CH2 A, CH2 B (16 bits each, high byte first) since the last 0x01 = 1
+            8'h36:
+              begin
+                case(mcu_state)
+                  4'h0: o_mcu_data <= cap_sel[15:8];
+                  4'h1: o_mcu_data <= cap_sel[7:0];
+                  4'h2: o_mcu_data <= oc_1A[15:8];
+                  4'h3: o_mcu_data <= oc_1A[7:0];
+                  4'h4: o_mcu_data <= oc_1B[15:8];
+                  4'h5: o_mcu_data <= oc_1B[7:0];
+                  4'h6: o_mcu_data <= oc_2A[15:8];
+                  4'h7: o_mcu_data <= oc_2A[7:0];
+                  4'h8: o_mcu_data <= oc_2B[15:8];
+                  4'h9: o_mcu_data <= oc_2B[7:0];
+                  default: o_mcu_data <= 8'h00;
+                endcase
+              end
 
             //Accumulator / segment table word at the read pointer, bytes 0..7 (0x1536)
             8'h2B:

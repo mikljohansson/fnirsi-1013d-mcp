@@ -71,3 +71,13 @@ module AL_LOGIC_BRAM #(
   assign dob = (REGMODE_B == "OUTREG") ? q_b : lat_b;
   assign doa = 0;
 endmodule
+
+// AL_LOGIC_IDDR (TD logic DDR input register, 0x153A ADC capture), as TD's sim/al/al_logic_io.v without the global
+// reset: q1 = d at the rising edge, q2 = d at the falling edge, both handed over on the next rising edge.
+module AL_LOGIC_IDDR #(parameter SRMODE = "SYNC") (output q1, output q2, input clk, input d, input rst);
+  reg c0 = 0, c1 = 0, t0 = 0, t1 = 0;
+  always @(negedge clk) c0 <= d;
+  always @(posedge clk) begin c1 <= c0; t0 <= d; t1 <= t0; end
+  assign q1 = t1;
+  assign q2 = c1;
+endmodule

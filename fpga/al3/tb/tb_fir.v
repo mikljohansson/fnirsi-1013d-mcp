@@ -59,9 +59,19 @@ module tb;
     .o_offset_2(d_o2), .o_relay2_1(d_r21), .o_relay2_2(d_r22), .o_relay2_3(d_r23), .o_ac_dc_2(d_ac2),
     .o_pwm_display(d_pwm));
 
+  // 0x153A: the dut registers each core's pins on clk_200MHz at its own phase and hands them to the capture logic as
+  // adc*_w, loaded on the rising write clock edge. The reference (which takes the pins on that edge) gets exactly those
+  // values 0.2 ns after each edge (shorter than the 0.37 ns phase of the equivalence sampler below), so both capture the
+  // same samples on the same edges and the comparison stays exact.
+  reg [7:0] r_adc1A = 0, r_adc1B = 0, r_adc2A = 0, r_adc2B = 0;
+  always @(dut.adc1A_w) r_adc1A <= #0.2 dut.adc1A_w;
+  always @(dut.adc1B_w) r_adc1B <= #0.2 dut.adc1B_w;
+  always @(dut.adc2A_w) r_adc2A <= #0.2 dut.adc2A_w;
+  always @(dut.adc2B_w) r_adc2B <= #0.2 dut.adc2B_w;
+
   fnirsi_1013D_ref refd (
     .i_xtal(i_xtal), .i_mcu_clk(mcu_clk), .i_mcu_rws(mcu_rws), .i_mcu_dcs(mcu_dcs),
-    .i_adc1A_d(adc1A), .i_adc1B_d(adc1B), .i_adc2A_d(adc2A), .i_adc2B_d(adc2B),
+    .i_adc1A_d(r_adc1A), .i_adc1B_d(r_adc1B), .i_adc2A_d(r_adc2A), .i_adc2B_d(r_adc2B),
     .io_mcu_data(bus_ref), .o_1khz_calib(pad_ref),
     .o_adc1_encA(r_e1A), .o_adc1_encB(r_e1B), .o_adc2_encA(r_e2A), .o_adc2_encB(r_e2B),
     .o_offset_1(r_o1), .o_relay1_1(r_r11), .o_relay1_2(r_r12), .o_relay1_3(r_r13), .o_ac_dc_1(r_ac1),
@@ -197,13 +207,13 @@ module tb;
   reg [7:0] n1A = 0, n1B = 0, n2A = 0, n2B = 0;
   realtime wtime [0:8191];                              // time of the last write per address
   always @(negedge dut.sample_write_clock) begin
-    n1A = adc1A; n1B = adc1B; n2A = adc2A; n2B = adc2B;
+    n1A = dut.adc1A_w; n1B = dut.adc1B_w; n2A = dut.adc2A_w; n2B = dut.adc2B_w;   // 0x153A: the decimator's inputs
   end
   always @(posedge dut.sample_write_clock) begin
     edge_n = edge_n + 1;
     if (dut.sample_write_enable & dut.swc_adv) wtime[dut.sample_write_address] = $realtime;
     if (log_on)
-      $fdisplay(logf, "E %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d", edge_n, adc1A, adc1B, adc2A, adc2B,
+      $fdisplay(logf, "E %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d", edge_n, dut.adc1A_w, dut.adc1B_w, dut.adc2A_w, dut.adc2B_w,
                 dut.sample_write_enable & dut.swc_adv, dut.sample_write_address, dut.samples.dia,
                 n1A, n1B, n2A, n2B);
   end
@@ -437,7 +447,7 @@ module tb;
         if (rnd[12] && kr != 0) fir_set_cnt = fir_set_cnt + 1;
         shr = (kr == 0) ? rnd2[13:8] : rec_shift(kr, dv) - ((rnd2[3] && rec_shift(kr, dv) > 0) ? 6'd1 : 6'd0);
         wr1(8'h56, 8'h00);                                  // off while K and the divider change
-        wr1(8'h53, {3'd0, rnd2[5:4], rnd[7], kr});
+        wr1(8'h53, {3'd0, 2'b00, rnd[7], kr});        // 0x153A: bits 3 / 4 are inert in the dut, keep the reference equal
         wr1(8'h54, shr);
         wr2(8'h55, (kr == 0) ? $random(seed) : (16'd128 << (rnd2[7:6])) + rnd2[31:20]);
         wr1(8'h15, {6'd0, rnd[9:8]});                     // CH1, CH2, EXT, EXT
@@ -484,7 +494,12 @@ module tb;
         wr2(8'h1F, {3'd0, rd16_d[12:0]});
         nread = 4 + (rnd[31:30] * 4);
         for (k = 0; k < nread; k = k + 1) rd1(8'h20 + (k % 4));
+        // live ADC pins: the dut returns its IOB registers, the reference its (delayed) pins: not compared; 0x41 then
+        // refills all eight bits of the read register (0x05 / 0x0A / 0x18 keep the others)
+        bus_cmp_on = 0;
         for (k = 0; k < 4; k = k + 1) rd1(8'h24 + k);
+        bus_cmp_on = 1;
+        rd2(8'h41);
         rd1(8'h05);
         disable ext_noise;
         ext_en = 0;
@@ -505,7 +520,7 @@ module tb;
       set_fir(kk, swap, sh, divider, 1'b1);
       setup_capture(2'd0, 1'b0, 1'b0, divider, 13'd10, total);
       wr4(8'h0E, {19'd0, total});                        // auto mode: stops after about total samples
-      $fdisplay(logf, "C %0d %0d %0d %0d %0d %0d 1", kk, divider, swap, sh, negab[0], negab[1]);
+      $fdisplay(logf, "C %0d %0d %0d %0d 0 0 1", kk, divider, swap, sh);   // 0x153A: 0x53 bits 3 / 4 are inert
       check(dut.fir_act === 1'b1, "FIR engaged for the logged capture");
       log_on = 1;
       start_capture;
@@ -521,9 +536,12 @@ module tb;
   // so every stored sample whose filter span lies on the ramp gives the lag directly:
   //   lag = w - t0 - (y / G - ramp_lo) / slope,  w = write time, G = 16-bit gain (m^K / 2^shift).
   // Predicted lag: CIC path 120 + 2.5 K (N - 1) ns, FIR path 250 + 17.5 N + 1.25 K (N - 2) ns
-  // (pipeline in write clocks plus the impulse-response centre). Stimulus artefacts: the pins hold
-  // each value for 7 ns (+3.5 ns) and both cores of a pair are captured at the same edge although the
-  // earlier one stands for 5 ns before it (-2.5 ns), so the measurement should read about +1 ns.
+  // (pipeline in write clocks plus the impulse-response centre), plus the 0x153A capture: the decimator
+  // takes adc*_w one write clock after it loaded, and adc*_w holds the pins from 1.5 T + 5 + 2.5 k (core
+  // A, k = 4: 30 ns) and 2 T + 5 + 2.5 k (core B, k = 4: 35 ns) before that edge, so the pair centre is
+  // 42.5 ns earlier than the pins the 0x1535 model took at the edge (+42.5 in the formula). Stimulus
+  // artefacts: the pins hold each value for 7 ns (+3.5 ns) and the two cores of a pair are 5 ns apart as on
+  // the hardware; the measurement reads about +1 .. +3 ns above the formula (0x1535: about +1 ns).
   // Also reported: where the EXT edge lies in the record, trigger_address + (t0 - w_ta + lag) / Tout,
   // in output samples; t0 - w_ta is the edge phase after the last write (0 .. 1 output periods).
 
@@ -538,7 +556,7 @@ module tb;
       set_fir(kk, 1'b0, sh, divider, fir);
       n_out = 2 * ((divider / 2) + 1);
       tout = 5.0 * n_out;
-      lag_pred = fir ? 250.0 + 17.5 * n_out + 1.25 * kk * (n_out - 2) : 120.0 + 2.5 * kk * (n_out - 1);
+      lag_pred = (fir ? 250.0 + 17.5 * n_out + 1.25 * kk * (n_out - 2) : 120.0 + 2.5 * kk * (n_out - 1)) + 42.5;
       g16 = 1.0;
       for (i = 0; i < kk; i = i + 1) g16 = g16 * (fir ? (divider / 2) + 1 : n_out);
       g16 = g16 / (2.0 ** sh);
@@ -603,7 +621,7 @@ module tb;
     // Version word and the 0x29 FIR bits (byte 0 bit 6 = 0x56 bit 0, bit 5 = FIR active)
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h1539, "cmd 0x06 reads 0x1539");
+    check(rd16_d == 16'h153A, "cmd 0x06 reads 0x153A");
     check(rd16_r == 16'h1534, "reference cmd 0x06 reads 0x1534");
     ok29 = 1;
     wr1(8'h56, 8'h00); wr1(8'h53, 8'h07); wr1(8'h54, 8'h0C); wr4(8'h0D, 32'd14); #200;

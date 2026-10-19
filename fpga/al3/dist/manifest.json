@@ -118,6 +118,25 @@
    ],
    "status": "withdrawn",
    "bench": "built 2026-10-19 19:50, tb 10 steps pass on seeds 12345 and 3 incl. tb_mcuread (all 256 codes, swept strobe timing); flash session pending (fpga/al3/README.md section 9); flashed 2026-10-19 20:06: CAL_PROBE passes, but both A cores still garbled at means 128..145 at 200 MS/s (hardware-status 20:25): the ADC data capture window, not the readout; superseded by 0x153A"
+  },
+  {
+   "version": "0x153A",
+   "file": "al3-0x153A.bin",
+   "size": 282898,
+   "sha256": "75e0ef21526248ecc2a7a47231abddf59b77d8075917c460a9630ee97cf3ddde",
+   "flash_image_sha256": "77672b5a38f2225e98cdecd7de012850121b6343525392d973e41d39b42719d0",
+   "source_commit": "f735fae6db36e30d410e2fd2187f5fe927a38ad8",
+   "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
+   "min_firmware": "0.2.62",
+   "features": [
+    "as 0x1539",
+    "ADC data captured through IOB DDR registers at a selectable 2.5 ns stage per core, against the write clock edge the core is encoded on (fixes the garbled A/B cores near multi-bit code boundaries of 0x1537..0x1539, at every sample rate)",
+    "core order B first by T/2 at every rate by construction",
+    "capture self-check: outlier counters per core (read 0x36), stage and B-reference register 0x63, threshold 0x64",
+    "0x53 bits 3/4 inert; legacy data 4 words (200 MSa/s) / 3 words later than 0x1539, EXT not delayed"
+   ],
+   "status": "unbenched",
+   "bench": "built 2026-10-19 22:19 (fpga-gen9); tb 11 steps pass incl. tb_adccap (AD9288 transition model, pad delay sweep, all rates); capture margins >= 1.33 ns at the power-on stages at TT (fpga/al3/README.md section 10); not flashed; bench checks 1..7 of section 10"
   }
  ]
 }
