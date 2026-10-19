@@ -108,6 +108,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   device and it never resumed: RESUME interrupt never fires. Decode the event log (types 2/3 fields of row 50), check MUSB resume
   handling (INTRUSBE resume bit, POWER.Resume, PHY), and the F1C100s USB PHY suspend behaviour; bench with `fnirsi1013d-soak --mode reopen
   --idle 1800`. Overnight 10-minute idles never suspended (36 stayed 1); the long idle did.
+  fw-usb2 (10-19): 0.2.49 built on branch `fw-usb2` (suspend watch: inferred resume acts, soft reconnect after a retry storm
+  or 15 min suspended, counters 60-61, type 20, protocol 1.14); bench plan in firmware/AGENTS.md section 27.
 - [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s): deterministic test with
   GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
 - [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md
