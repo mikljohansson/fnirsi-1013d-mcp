@@ -1203,7 +1203,7 @@ length depends on timing. The sequences (multi-byte values high byte first):
 | ARM 1 | K >= 1 or changed: 0x53, 0x56, 0x54, 0x55 as on 0x1535, then the settle wait |
 | ARM 2-3 | 0x0F = 00; 0x1A = 01 (normal / single) or 00 (a sequencer run in auto mode: the FPGA's 0x0E time-out) |
 | ARM 4 | 0x0B pre words, 0x0C total words, **before** the reset (avoids the 0x1532..0x1536 race of section 7) |
-| ARM 5 | mode != 0: 0x57 = mode \| circular << 2, 0x58 count, 0x59 m, 0x5A N (65536 = 0000), 0x5B 00, 0x5C ceil(hold-off ns / 5). Mode 0: 0x57 = 00 only if the last value written was not 0 (the readout below writes 0x02) |
+| ARM 5 | mode != 0: 0x57 = mode \| circular << 2, 0x58 count, 0x59 m, 0x5A N (65536 = 0000; segments: 0000, unused), 0x5B 00, 0x5C ceil(hold-off ns / 5). Mode 0: 0x57 = 00 only if the last value written was not 0 (the readout below writes 0x02) |
 | ARM 6 | 0x01 = 01, poll 0x05 bit 0 (bounded) |
 | ARM 7-8 | 0x0B, 0x0C again, 0x0E (4 B), 0x01 = 00 |
 | Poll | 0x0A, then 0x18, every main-loop pass |

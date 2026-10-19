@@ -170,7 +170,7 @@ module tb;
       if (mode != 0) begin
         wr2(8'h58, {4'd0, count});
         wr1(8'h59, {4'd0, m});
-        wr2(8'h5A, n);
+        wr2(8'h5A, n);                                  // segments: the firmware stores N = 0 (unused in mode 1)
         wr1(8'h5B, 8'h00);
         wr4(8'h5C, hold5);
       end
@@ -333,7 +333,7 @@ module tb;
     $fdisplay(tf, "#");
     note("=== S: legacy segments, D = 9, CH1, 4 segments, m = 6, pre 10, total 40, hold-off 0");
     fork
-      fw_arm(2'd0, 1'b0, 6'd0, 16'd0, 1'b1, 13'd10, 13'd40, 2'd1, 1'b0, 12'd4, 4'd6, 16'd1, 32'd0, 32'h00FFFFFF);
+      fw_arm(2'd0, 1'b0, 6'd0, 16'd0, 1'b1, 13'd10, 13'd40, 2'd1, 1'b0, 12'd4, 4'd6, 16'd0, 32'd0, 32'h00FFFFFF);
       begin wait (dut.sample_system_reset === 1'b1); wait (dut.sample_system_reset === 1'b0);
             steps(4, 2500, 4300, 2000); end
     join
@@ -433,7 +433,7 @@ module tb;
     wr1(8'h53, 8'h00);
     wr4(8'h0D, 32'd9);
     fork
-      fw_arm(2'd0, 1'b0, 6'd0, 16'd0, 1'b1, 13'd4, 13'd20, 2'd1, 1'b1, 12'd4, 4'd5, 16'd1, 32'd0, 32'h00FFFFFF);
+      fw_arm(2'd0, 1'b0, 6'd0, 16'd0, 1'b1, 13'd4, 13'd20, 2'd1, 1'b1, 12'd4, 4'd5, 16'd0, 32'd0, 32'h00FFFFFF);
       begin wait (dut.sample_system_reset === 1'b1); wait (dut.sample_system_reset === 1'b0);
             steps(6, 1000, 2500, 1000); end
     join
