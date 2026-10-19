@@ -734,3 +734,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   earlier ground wires (clips, BNC shell) were still attached so the return path did not change, or the extension shell is not bonded
   to USB GND. Next: remove every other ground wire; and the direct test of the return-error theory: CH2 tip on the ground rail with
   wiring A (bode-design 2.5 predicts about -21 dB rising with frequency if the 100 Ohm R71 path carries the return current).
+- 2026-10-19 14:50: correction to sweep 4: the probe grounds were floating during it (owner), so the return current went
+  through the USB extension and the result still matched wiring A: the R71 return-path explanation for the 4 dB / 18 deg deviation at
+  300 kHz is refuted. New hypothesis: a component in phase with V1 added to CH2 (crosstalk / leak, the floor of bode-design 2.3),
+  since the phase sticks at -70 deg while the magnitude runs high. Next: the floor sweep (CH2 tip on the ground rail) and the thru
+  calibration (both tips on the input), wiring B via a second USB cable through the hub.
