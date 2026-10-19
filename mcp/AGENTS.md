@@ -1,4 +1,4 @@
-# mcp/ handoff for agents (mcp-gen5, 2026-10-19: wheel readiness and protocol 1.17; mcp-gen4 retired after 1.16)
+# mcp/ handoff for agents (mcp-gen6, 2026-10-19: protocol 1.19-1.20, reports; mcp-gen5 retired after 1.17)
 
 Python host library, device simulator, MCP server and bench CLIs for the FNIRSI 1013D open firmware's USB protocol.
 Read first: `../AGENTS.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec; **section 14 is how
@@ -52,7 +52,7 @@ path. |
 | `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points, least-squares zero / 1/gain / PWM slope per channel-range-core, channel model `zero = Z + slope x dcoffset`), `channel_scale`, T8 importer CLI. |
 | `analysis.py` | Stats, frequency, edges, Welford averager, FFT, decay fits, sample points, `scope_fft_db` (float model of the on-scope FFT), `compare_spectra`, `decim_noise_n` / `decim_bits`. |
 | `simulator.py` | `Device` (protocol state machine, FPGA ring, shared mode, legacy mode, SD card, EXT trigger, event log) + `SimServer` (TCP) with test hooks. CLI `fnirsi1013d-sim`. |
-| `server.py` | FastMCP server `fnirsi1013d-mcp`, 28 tools up to tier 3, 30 with tier 4 (list with tiers in README.md); `--list-tools` prints them with the data dir and audit log without opening a port. |
+| `server.py` | FastMCP server `fnirsi1013d-mcp`, 30 tools up to tier 3, 32 with tier 4 (`scope_report`, `scope_cal_probe` added) (list with tiers in README.md); `--list-tools` prints them with the data dir and audit log without opening a port. |
 | `paths.py` | Per-user home (`FNIRSI_MCP_HOME`, default `~/.fnirsi1013d`: `data/`, `logs/audit.jsonl`) and the checkout detection (`checkout()`, `checkout_path()` only when the file exists, `checkout_dir()`): the CLIs default to repository files only when run from a checkout, else the argument is required. |
 | `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 attempts, FEL-device check between), usbipd, sunxi-fel RAM load, `#VER`; `--persist` / `--persist-only` / `--restore` (SD sector 750 via the firmware). |
 | `sdcard.py` | SD access (`SdCard`: checked reads, verified backups, staged 32-sector writes, compare), `plan_write`, `check_image`, `image_version`. |
@@ -61,7 +61,8 @@ path. |
 | `bench.py` | `fnirsi1013d-bench`: wraps `../firmware/scope/host_tests/bench_link.py` (fw-gen2's), plus uptime before/after; `--fft` runs FFT_BENCH (`Scope.fft_bench`) itself. |
 | `vectors.py` | Host vectors in `../docs/protocol-vectors.json` (`--check`, `--merge`). |
 | `units.py` | `parse_quantity`, `fmt_si`. |
-| `bode.py` | Host-driven Bode sweep (docs/plans/bode-design.md H1-H3): `plan_point` / `plan_sweep` (M, N, p / q, record, settle; `plan_vectors` = `../docs/bode-plan-vectors.json`), `tone` (rect / Hann), `residual_noise`, `measure_pair` (H, SNR, leakage, half-record check), `markers`, `PointResult` / `SweepResult` (table, CSV, JSON, arrays), `ThruCal`, `BodeRunner` (drives a `Scope`: pre-scan, centring, background, CH2 auto-range with the splice, E_BUSY, restore), `result_caveats`, CLI `fnirsi1013d-bode`. |
+| `report.py` | Result presentation: `load_result` (any `.npz` the tools save, or a Bode `.json`; kind from `meta_json["kind"]` / the arrays), `build_report` -> PNG (matplotlib, optional extra `plot`, in `dev`) + one self-contained HTML page (base64 PNG, table, summary, caveats, command; no scripts / external URLs, tested), `latest_result`, CLI `python -m fnirsi1013d.report`. Tool `scope_report` (tier 0) writes under `<home>/reports/<date>/`. |
+| `bode.py` | Host-driven Bode sweep (docs/plans/bode-design.md H1-H3): `plan_point` / `plan_sweep` (M, N, p / q, record, settle; `plan_vectors` = `../docs/bode-plan-vectors.json`), `tone` (rect / Hann), `residual_noise`, `measure_pair` (H, SNR, leakage, half-record check), `markers`, `PointResult` / `SweepResult` (table, CSV, JSON, arrays), `ThruCal`, `BodeRunner` (drives a `Scope`: pre-scan, centring, background, CH2 auto-range with the splice, E_BUSY, restore), `result_caveats`, CLI `fnirsi1013d-bode`. Device sweep (1.20): `device_sweep` (BODE_CTRL, READ_BODE poll, rows -> `SweepResult`), `result_from_device`, `point_from_row`, `device_settle_code` / `device_ch2_code`. |
 
 ## State of each tool / CLI
 
@@ -90,7 +91,12 @@ path. |
   peak), so an RC swept from 1 kHz reads 1.0075 fc (10.02 kHz for the bench RC, 9.92 kHz with the probe's ~100 pF);
   CH1 is ranged once by the pre-scan (no re-ranging when CH1 falls, flag `ch1_low` instead); background captures are
   per (N, CH2 range), lazily, not once per N; the 50 ms relay settle is a host sleep after every range or offset move.
-  `mode` (harmonic fast mode), `z_series_ohm` and the PNG are not implemented (task queue "Bode follow-ups").
+  `mode` (harmonic fast mode) and `z_series_ohm` are not implemented (task queue "Bode follow-ups"); the PNG is
+  `scope_report`. **`where='device'`** (mcp-gen6, protocol 1.20): `bode.device_sweep`; same result structure plus
+  `device`; presets only, ch2 auto / fixed, DC; thru 'measure' / 'device' / a stored name (host-applied);
+  `close_view`. Rows carry no SNR / leak / codes (NaN, `snr_db` / `ch2_codes` null in the table). Simulator only.
+- **`scope_report`** (mcp-gen6): see the layout table; README "Reports", guide 7a, skill "Presenting results". The
+  Bode `.npz` meta records `kind`, `args` and the `.json` path (the two files have different timestamps).
 - **Packaging** (mcp-gen5): the wheel works outside a checkout; `.github/scripts/wheel_smoke.py` (CI job `wheel`, Linux and
   Windows) builds it, installs it into a fresh venv in a temp dir, runs `--list-tools` and an MCP stdio session on
   `--sim` with a capture, and checks that files land under `FNIRSI_MCP_HOME` and nothing inside the venv. The server's
@@ -121,7 +127,7 @@ path. |
   (incl. usb_irq_polled). Exit 0 clean / 1 failure, drop or restart / 2 cannot start. Tested on the simulator
   only; the lead runs it on the bench.
 
-## Protocol support (host = simulator = vectors): 1.17, fw 0.2.58
+## Protocol support (host = simulator = vectors): 1.21, fw 0.2.67+
 
 `P.PROTO_MINOR` follows the highest section 14 row implemented. The simulator always speaks the newest protocol
 (shared mode); `--legacy` gives 1.2.
@@ -142,6 +148,10 @@ path. |
 | 1.14 | 0.2.49+ | GET_LINK_STATS n = 62 (60 `usb_inferred_resumes`, 61 `usb_soft_reconnects`), event type 20 `usb_soft_disconnect` (reason, back-off level, suspends; fw-usb2, f3763cc) |
 | 1.15 | 0.2.50+ | calibration v4 (row 54): GET_CAL 288 bytes, `CalResp.track_*` / `cm_*`, `has_tracker` (by length; 256 / 248 / 72 still parse), `TRACK_*` flags; the volts model takes the tracked d, e (8-bit full class) and cm (full class, 8-bit and 16-bit) out; conversions re-read GET_CAL when the cached answer is over `CAL_TRACK_AGE_S` (1 s) old; `scope_calibration_info` `tracking` (state, values, `in_words`) |
 | 1.16 | 0.2.52+ | row 55: GET_HEALTH 0x000A (`HealthResp`, 96 bytes, fast timeout class, allowed while modal; `describe()`; flags CLEAR_RESTART / RESTART_TEST), SD_INFO flag IDENT (`SdInfo.ident` = `SdIdent`, 112 bytes; the scope caches it until a write reaches sector 750), GET_CAL 356 bytes (`prov_state`, `prov`, `provenance()` -> `Provenance`, power-ons / minutes since), SAVE_REPORT 0x0504 (`SaveReportResp`, 15 s timeout); stored layouts `parse/pack_life_record`, `parse/pack_provenance`, `parse/pack_ident_record` = the `diag_layouts` vectors; tools `scope_health`, `scope_save_report`, `scope_sd_info` `card_image`, `scope_calibration_info` `calibration_provenance`. Simulator: `Device.power_on`, `minutes_stored`, `restart_record`, `cal_prov` / `cal_prov_bad`, `ident_cache`, `reports`; `make_egon_image(ident=)`; `SIM_BUILD` / `SIM_BUILD_TIME` = the running build |
+| 1.18 | 0.2.61+ | row 57: link counters 62-63 (`adc_fullrate_bad` / `_recovered`), event types 21 / 22 named (decoded in words since 1.19 work) |
+| 1.19 | 0.2.62+ | row 58 (FPGA 0x1538): `Caps.ENC_CHECK` (18), `Features.ENC_CHECK` (5), `HealthResp` 104 bytes (`enc_*`, `has_enc_check` by length, `describe_enc`, `ENC33_PINS`), event 21 (reason / re-arms / caller / value) and 22 in words; `Session.enc_notes` caveat on every tool that calls `ensure_control`. Simulator `al3e`; `_enc_check` per full-rate capture, hooks `enc_bad_next` / `enc_unrecovered_next` / `enc_rearms` |
+| 1.20 | 0.2.66+ | row 60: `Cmd.BODE_CTRL` / `READ_BODE` (cap DECIM), `BodeCtrlReq.make`, `BodeHeader`, `BodeCtrlResp`, `ReadBodeReq`, `BodeRow` (`f_hz` from M, `flag_names` = `BODE_ROW_FLAGS` = the host names in bit order), `parse_read_bode`, `DisplayMode.BODE`, `Features.BODE` (6). `Scope.bode_ctrl` / `read_bode`. Simulator `SimBode`: the host `BodeRunner` in a thread over `_LoopLink` (`Device.internal_request`: no duplicate cache, WAIT blocks in place; `_internal` marks the engine's ARMs so a host ARM ends the sweep, reason 5); the view snapshots `settings` + run state at open and restores at close; thru kept as a `ThruCal`, stale by (start, stop, points); estimate = host estimate / 2.5 |
+| 1.21 | 0.2.67+ | row 61 (provisional numbering): CAL_PROBE 0x0402 (no cap bit): `CalProbeReq` (= vector `req_cal_probe`), `CalProbeResp` 252 bytes (`describe`, `ACAL_RESULTS`, `CAL_PROBE_POINTS`, flags `CALP_*`), `Scope.cal_probe`; tool `scope_cal_probe` (tier 2: stops the UI, RUN again after). Simulator `_cal_probe_range`: the wizard's eight points on the front-end model, CLIP / NOISE checks, `cal_probe_fail` = (point, rc) hook, E_STATE 0 / 1 and E_BAD_ARG 0-4 |
 | 1.17 | 0.2.58+ | row 56 (FPGA 0x1536, caps SEQ): GET_STATUS 48 bytes (`features` = `Features` flags, `ui_average` 0 off / 1 software / 2 hardware, `ui_average_log2n`), GET_DECIM 36 (same 4 bytes), GET_CAPTURE_INFO 96 (`CaptureInfo.run` = `SeqRunInfo`, `is_run`), SET_SEQ / GET_SEQ (`SetSeqReq.make`, `SeqState` incl. fit, next geometry, FPGA status, held run), READ_SEQ (`ReadSeqReq`, `ReadSeqHeader`; table of u64 `SeqEntry`, averaged record as u16 lanes / u16 or u32 sums), READ_RAW `ADDR_SEGMENT` (3); maths `seq_fit` / `seq_max_count` / `seq_holdoff_units` / `seq_cmd57` / `seq_slots` / `seq_seg_word` / `seq_dead_ns` / `seq_ui_plan` / `seq_avg_code` = all 73 `seq` vector cases. Client: `get_seq`, `set_seq`, `read_seq_table`, `read_seq_average`, `read_segment`, `capture_segments` -> `SegmentRun`, `capture_hw_average` -> `AveragedRun` (`SeqError` with the fit code). Simulator `al3s`: runs modelled in a background thread on one signal timeline (`simulate_run`, `_simulate_segments` / `_simulate_average`, `finish(elapsed, stopped)`), STOP ends a run, circular runs wrap once, averaging beyond 128 records (16 wide) scales the exact sums; `Device.ui_average` hook. Tools `scope_capture_segments`, `scope_averaged_capture(hardware=)`, `scope_status` features / ui_averaging |
 
 GET_LINK_STATS counts (named by the count field): 27 (0.1.4-0.1.7), 29 (0.2.0-0.2.1), 31 (0.2.2-0.2.3),
@@ -212,7 +222,7 @@ range-independent; 0 V at dcoffset 0: CH1 A 132.47 / B 127.14, CH2 A 128.80 / B 
 firmware gains). The firmware formula assumes 128 on the compensated mean. Grounds: the probe ground is VRF1,
 +1.24 V over the USB ground (fpga/al3/README.md); the calibration output reads -1.24 / +1.9 V against it by design.
 
-## Tests (`tests/`, 395, about 85 s)
+## Tests (`tests/`, 418, about 120 s)
 
 `test_protocol` (codec, structs, vectors, link stats/event log), `test_transport` (incl. the scripted-link deferred
 cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `test_shared_mode` (1.3),
@@ -223,6 +233,7 @@ cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `te
 gain / offset vs the host model, unit file gated gains only, scope_calibration_info),
 `test_paths` (outside-a-checkout defaults and refusals, `--list-tools`), `test_seq` (1.17: maths vs the `seq` vectors, wire layouts vs the firmware frames, segment / circular / STOP / auto runs, averaging legacy and 16-bit with positions, fit errors, the tools), `test_diag` (1.16 stored layouts vs `diag_layouts`, GET_HEALTH / SD identity / provenance / SAVE_REPORT layouts and simulator, the tools), `test_cal_v4` (1.15 GET_CAL 288, v4 volts on raw / WIDE / trace codes vs the simulator's drift, GET_CAL re-read, tracker words), `test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH), `test_decim` (1.9: maths vs
 the firmware vectors, wire layouts, simulator noise / volts / trigger / EXT latency, `scope_set_decimation`),
+`test_enc_check` (1.19: vector `resp_get_health_1_19`, 96-byte compatibility, words, simulator counters, tool and caveat; CAL_PROBE: vector, round trip, model, tool), `test_bode_device` (1.20: vectors, codecs, device vs host within 0.02 dB / 0.2 deg with the same flags and ranges, thru, STOP / abort / reason 5, the tool), `test_report` (every kind through the tools, offline HTML check, no-matplotlib fallback, CLI),
 `test_bode` (planner rules and vectors, DFT, a synthetic RC through dithered 8-bit at 200 MSa/s, gates, markers,
 thru cal), `test_bode_sim` (the DUT model, the runner end to end: RC, thru, fixed range, floor, legacy and CIC2
 points, a resonance that steps CH2 up and down, E_BUSY, EXT restore, the CLI), `test_bode_tool` (the MCP tool).
@@ -310,6 +321,11 @@ from there and moves items to "Dispatched". Add host items you discover there, n
    `scope_decay_fit`, and drop the "not yet verified" caveats. The release-readiness items of the wheel are done
    (8ea8886 paths, 0e1d36b wheel smoke + CI job, ef8aa30 docs + `.mcp.json.example`; the coordinator untracked the owner's
    `.mcp.json` in 508f0c5).
+0a. **1.19 / 1.20 on the unit** (coordinator holds COM10): `scope_health` on 0x1538 (`encode_check` mode 2, last 0x33
+   0xF6, counts), then `scope_bode_sweep(where='device')` on the divider and the RC of firmware/AGENTS.md 42 steps 3-4
+   next to the same `where='host'` sweep: expect within 0.05 dB / 0.3 deg where both are valid; check the poll
+   interval (0.2 s) and the device's `elapsed_ms` against its estimate; `scope_cal_probe` on both channels at range 0
+   with nothing connected (the bench's 0.2.67 numbers are in docs/hardware-status.md 18:20).
 1. **Bode: bench results in, then the follow-ups.** Host steps H1-H3 are done (1d46cf8 simulator DUT, f0940ee H1,
    363f676 runner and CLI, d3a16bb tool, docs commit after). Read the coordinator's bench numbers (procedure below)
    against the design's expectations; if the wiring verdict (section 2.5) or the floor changes the advice, fix

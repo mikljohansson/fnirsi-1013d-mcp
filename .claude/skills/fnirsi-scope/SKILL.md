@@ -1,6 +1,6 @@
 ---
 name: fnirsi-scope
-description: Run measurements on the FNIRSI 1013D oscilloscope through the fnirsi1013d MCP server (scope_* tools). Use when asked to measure on the scope, use the oscilloscope, capture CH1/CH2, look at a waveform, average captures, measure a metal detector / pulse-induction decay or time constant, take an FFT, measure a frequency response / Bode plot of a filter or tank, or use the scope's generator / calibration pin. Covers session start, choosing range and timebase, averaging, the shared screen, generator safety, reading .npz results, reporting caveats and troubleshooting.
+description: Run measurements on the FNIRSI 1013D oscilloscope through the fnirsi1013d MCP server (scope_* tools). Use when asked to measure on the scope, use the oscilloscope, capture CH1/CH2, look at a waveform, average captures, measure a metal detector / pulse-induction decay or time constant, take an FFT, measure a frequency response / Bode plot of a filter or tank, or use the scope's generator / calibration pin, or plot / present a scope result. Covers session start, choosing range and timebase, averaging, the shared screen, generator safety, reading .npz results, reporting caveats and troubleshooting.
 ---
 
 # Measuring with the FNIRSI 1013D
@@ -16,7 +16,7 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) (`.mcp
    to update the firmware and re-run the base calibration, which the person does at the scope (probes and USB
    unplugged for the zero step, both x1 probes on the calibration post for the gain step). Ask; do not skip it.
 3. `scope_status` + `scope_get_config`: mode (collaborative = shared with the person at the scope), display mode
-   (scope, spectrum, waterfall, density, phosphor), run state, live settings. Never assume your earlier settings
+   (scope, spectrum, waterfall, density, phosphor, bode), run state, live settings. Never assume your earlier settings
    still hold.
 
 ## Choose settings for the signal
@@ -48,6 +48,8 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) (`.mcp
   before anything: CH1 tip on the DUT input, CH2 on the output, DUT ground on the probe ground clips (wiring A;
   USB-shell ground only with `ch2_coupling='ac'`). Thru calibration first (`thru_cal='measure'`, both probes on the DUT input), then the DUT with that name.
   Report f_actual, the markers, the calibration used, and leave flagged points (near_floor, clipped, unsettled) out.
+  `where='device'` (fw 0.2.66+) lets the scope run the sweep and show the plot itself (same result structure; presets
+  only, ch2_range auto/fixed, DC; the view stays open unless `close_view=true`).
 
 ## The screen is shared
 
@@ -80,6 +82,14 @@ capture/fetch: `t` (s, 0 = trigger), `CH1_volts`, `CH1_codes`, `CH1_clipped`; av
 segments: `CH1_volts` (segments x samples), `timestamps_s`, `triggered`;
 decay_fit: `t` (after the edge), `data`, `fit`, `residual`; fft: `f`, `amplitude_vrms`.
 
+## Presenting results
+
+For anything the person should look at: `scope_report(source=<the file the tool returned> or 'latest', title=...)`
+writes a PNG plot and a self-contained HTML page (plot, table, caveats, command; offline, no CDNs) under
+`<home>/reports/<date>/`. In Claude Code, Read the PNG (it renders) and describe what it shows; publish the HTML with
+the Artifact tool (private by default; offer the link) or give the path. No matplotlib: `png` is null, the page has
+the numbers. Always put the numbers and caveats in the reply as well (guide section 7a).
+
 ## Report numbers with their caveats
 
 Value + unit + method (n, sample rate, range, alignment), and: 8-bit ADC (~2 LSB noise, `volts_per_lsb` in every
@@ -95,6 +105,9 @@ referenced to USB ground, so -1.24 / +1.9 V against the probe ground). Keep the 
 | scope restarted, link dropped, settings lost, which firmware? | fw 0.2.52+: `scope_health` (in_words: USB state, power-on, previous end, restart record) and `scope_sd_info` `card_image` (what the card boots vs what runs); `scope_save_report` writes a report file on the card for the person |
 | volts slightly off at 200 MSa/s / filtered, hours after calibrating | `scope_calibration_info`: `tracking` (fw 0.2.50+ v4 tracker state) and `calibration_provenance` (when, by which build) |
 | "still starting" | just booted; the server waits up to 10 s, retry once |
+| the scope's calibration wizard fails its zero step | fw 0.2.67+: `scope_cal_probe(channel, range_index)` shows what the wizard measured (inputs at 0 V) |
+| 200 MSa/s capture with one core garbled, or "accepted garbled" caveat | fw 0.2.62+: `scope_health` `encode_check` and `scope_event_log`; repeat the capture; 0x1538 bitstream fixes 0x1532..0x1537 |
+| screen shows a Bode plot, the scope does not acquire | its Bode view is open: Menu > Scope at the scope, or `scope_bode_sweep(where='device', close_view=true)` |
 | cannot connect / port busy | another session holds the serial port: ask who; never kill it |
 | no device | check the COM port (`--port`), power, USB-storage mode, cable |
 | no trigger | `scope_get_config`; level inside the signal, right source/edge, or mode `auto` |

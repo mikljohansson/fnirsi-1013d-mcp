@@ -994,6 +994,26 @@ was found (commit not identified).
   gains `hardware=true` (records summed in the FPGA, read as exact sums), `scope_status` shows the bitstream's features
   and the UI's Average. The client decodes GET_STATUS 48, GET_DECIM 36 and GET_CAPTURE_INFO 96 bytes and the sequencer
   commands; the simulator has a 0x1536 variant (`al3s`). Not yet run on the unit.
+- Added: protocol 1.19 host side (fw 0.2.62, FPGA 0x1538; 81a1a31). `scope_health` gains `encode_check` (GET_HEALTH
+  104 bytes: how 200 MSa/s captures are checked for a garbled ADC core, the last 0x33 byte and its failing pins,
+  captures checked / garbled / re-taken), capture tools add a caveat while the last full-rate capture was accepted
+  garbled, `scope_event_log` decodes event types 21 and 22 in words, `scope_status` lists the `enc_check` feature.
+  Simulator variant `al3e` (0x1538).
+- Added: protocol 1.20 host side, the on-device Bode sweep (fw 0.2.66; 0a8e94d). `scope_bode_sweep(where='device')`
+  lets the scope run the sweep and show its Bode plot, polls READ_BODE and returns the same table, markers and files
+  as the host sweep (flags mapped to the same names, f recomputed from the DDS period), with the device's thru
+  (`thru_cal='device'`) and `close_view`. Capture tools caveat the Bode view; `scope_status` shows display mode
+  `bode` and the `bode` feature. The simulator runs device sweeps with the host's engine, so device and host agree
+  there within 0.02 dB / 0.2 deg.
+- Added: `scope_report` and `fnirsi1013d.report` (1a3c0aa). A saved result (capture, averaged capture, decay fit,
+  segments, FFT, the scope's spectrum, a host or device Bode sweep) becomes a PNG plot and a self-contained HTML page
+  (plot, table, caveats, the generating command; no scripts or CDNs) under `~/.fnirsi1013d/reports/`. Matplotlib is
+  the optional extra `plot`; without it the page carries the numbers. The guide and the skill tell agents how to
+  show them (section 7a "Presenting results").
+- Added: protocol 1.21 host side, CAL_PROBE (fw 0.2.67, provisional numbering; 516b76a, b3b9c51). `scope_cal_probe`
+  (tier 2, diagnostic) runs the calibration wizard's zero measurement of one channel and range (or the whole zero
+  step) on the scope and returns the verdict, the failing point and per point and core the mean, RMS, extremes and
+  clipped samples; the simulator models the wizard's points with the CLIP and NOISE checks.
 
 ### Tooling, FPGA and documentation
 
