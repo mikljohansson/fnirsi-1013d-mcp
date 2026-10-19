@@ -51,10 +51,14 @@
 #define PC_DECIM_HAS_CIC      1         //0x1534: boxcar / CIC
 #define PC_DECIM_HAS_FIR      2         //0x1535+: plus the compensation FIR
 
-//Filter setting of new settings (no valid settings word 207, or the DEFAULT button): CIC2 (owner, after the 0x1534
-//bench). CIC2 + FIR is the default since 0x1535 was benched (2026-10-19: alias rejection 78-83 dB); on bitstreams without
-//the FIR the bit is ignored (pc_dec_mode_eff) and the setting acts as CIC2. Change it here only.
-#define PC_DECIM_DEFAULT      (PC_DECIM_CIC2 | PC_DECIM_SET_FIR)
+//Filter setting of new settings (no valid settings word, or the DEFAULT button), per mode since fw 0.2.64 (owner,
+//2026-10-19): the Scope trace defaults to CIC2 without the FIR (the FIR's 6-9 % step overshoot pulses on a square wave),
+//the Spectrum to CIC2 + FIR (flat passband, alias rejection 78-83 dB on 0x1535). On bitstreams without the FIR the bit is
+//ignored (pc_dec_mode_eff) and the setting acts as CIC2. Change them here only. PC_DECIM_DEFAULT_OLD is the single
+//default of 0.2.44..0.2.63, used to migrate their settings sectors.
+#define PC_DECIM_DEFAULT_SCOPE  (PC_DECIM_CIC2)
+#define PC_DECIM_DEFAULT_SPEC   (PC_DECIM_CIC2 | PC_DECIM_SET_FIR)
+#define PC_DECIM_DEFAULT_OLD    (PC_DECIM_CIC2 | PC_DECIM_SET_FIR)
 
 //FIR eligibility: N >= 16 (the 15-tap FIR needs N/2 write clocks per output) and N a multiple of 4
 #define PC_DECIM_FIR_MIN_N    16u

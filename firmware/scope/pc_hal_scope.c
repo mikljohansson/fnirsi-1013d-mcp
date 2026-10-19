@@ -639,8 +639,11 @@ uint32_t pc_hal_trace_capacity(void)
 
 #define PC_DEC_RING       8192
 
-static uint8         pc_dec_setting = PC_DECIM_DEFAULT;   //bits 1:0 requested K (UI Filter), PC_DECIM_SET_FIR;
-                                                      //saved in the settings sector
+//fw 0.2.64: the Filter per mode, [0] Scope, [1] Spectrum (owner): bits 1:0 requested K (UI Filter), PC_DECIM_SET_FIR;
+//saved in the settings sector (words 207 and 212). pc_dec_setting is the current mode's, so the Filter box, the arm,
+//SET_DECIM and GET_DECIM all act on the mode on screen.
+static uint8         pc_dec_set_mode[2] = { PC_DECIM_DEFAULT_SCOPE, PC_DECIM_DEFAULT_SPEC };
+#define pc_dec_setting (pc_dec_set_mode[spectrum_mode() != SPECTRUM_MODE_SCOPE])
 static uint8         pc_dec_flags = PC_INTERLEAVE_ORDER ? PC_DECIM_SWAP : 0;  //0x53 bits 2-4: swap (host only, not
                                                       //saved), falling-edge capture A / B (hidden, saved)
 static uint8         pc_dec_ui_arm;                   //the next fpga_do_conversion is the UI acquisition's
@@ -923,7 +926,36 @@ uint16 pc_glue_decim_setting_word(void)
 {
   //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (PC_DECIM_DEFAULT). Bits
   //3-4: the hidden falling-edge capture settings (SET_DECIM only); bit 5: FIR (fw 0.2.44)
-  return (uint16)(0xDE00 | (pc_dec_flags & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)) | (pc_dec_setting & (PC_DECIM_SET_FIR | 3)));
+  return (uint16)(0xDE00 | (pc_dec_flags & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)) | (pc_dec_set_mode[0] & (PC_DECIM_SET_FIR | 3)));
+}
+
+//Word 212 (fw 0.2.64): the Spectrum's Filter, 0xD500 marker (word 207 holds the Scope's)
+uint16 pc_glue_decim_spec_setting_word(void)
+{
+  return (uint16)(0xD500 | (pc_dec_set_mode[1] & (PC_DECIM_SET_FIR | 3)));
+}
+
+//The mode on screen changed (pc_glue_ui_service): its Filter may need the 16-bit layout's shorter record, and the
+//time/div then follows the record (acq_view.c)
+static uint8 pc_dec_mode_seen;
+static void  pc_dec_fit_memory(void);
+
+static void pc_dec_follow_mode(void)
+{
+  uint8 m = (uint8)(spectrum_mode() != SPECTRUM_MODE_SCOPE);
+
+  if(m == pc_dec_mode_seen)
+    return;
+
+  pc_dec_mode_seen = m;
+
+  if(pc_dec_has() && (pc_dec_setting & 3))
+  {
+    pc_dec_fit_memory();
+    acq_view_fit(0);
+  }
+
+  scopesettings.display_data_done = 1;
 }
 
 static const char *pc_dec_names[8] = { "off", "boxcar", "CIC2", "CIC3", "off", "boxcar+FIR", "CIC2+FIR", "CIC3+FIR" };
@@ -980,7 +1012,8 @@ static void pc_dec_fit_memory(void)
 //The DEFAULT button and a settings sector that failed to load (scope_reset_config_data)
 void pc_glue_settings_defaults(void)
 {
-  pc_dec_setting = PC_DECIM_DEFAULT;
+  pc_dec_set_mode[0] = PC_DECIM_DEFAULT_SCOPE;
+  pc_dec_set_mode[1] = PC_DECIM_DEFAULT_SPEC;
 
 #if PC_FORCE_CDC
   //The defaults say mass storage (USB_CH340 0); this build's USB stays CDC, also after Restore default settings (the
@@ -1815,10 +1848,24 @@ static void pc_ui_fix_settings(void)
   //Acquisition Filter (decimation, 0x1534+): kept in a spare settings word; a sector without a valid word (new
   //settings, or one written before 0.2.30) keeps PC_DECIM_DEFAULT. With it on the 16-bit layout limits the memory
   //depth.
+  //fw 0.2.64: per mode. Word 207 is the Scope's, word 212 (0xD500 marker) the Spectrum's. A sector of 0.2.30..0.2.63 has
+  //one Filter for both: the old default (CIC2 + FIR) becomes the new per-mode defaults, any other choice is kept for both.
   if((settingsworkbuffer[PC_SETTING_WORD_DECIM] & 0xFFC4) == 0xDE00)
   {
-    pc_dec_setting = (uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_SET_FIR | 3));
-    pc_dec_flags   = (uint8)((pc_dec_flags & PC_DECIM_SWAP) | (settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)));
+    uint8 old = (uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_SET_FIR | 3));
+
+    pc_dec_flags = (uint8)((pc_dec_flags & PC_DECIM_SWAP) | (settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)));
+
+    if((settingsworkbuffer[PC_SETTING_WORD_DECIM_SPEC] & 0xFFDC) == 0xD500)
+    {
+      pc_dec_set_mode[0] = old;
+      pc_dec_set_mode[1] = (uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM_SPEC] & (PC_DECIM_SET_FIR | 3));
+    }
+    else if(old != PC_DECIM_DEFAULT_OLD)
+    {
+      pc_dec_set_mode[0] = old;
+      pc_dec_set_mode[1] = old;
+    }
   }
 
   if(pc_dec_has() && (pc_dec_setting & 3))
@@ -1847,6 +1894,10 @@ static void pc_ui_fix_settings(void)
     if(fpgasettings.settriggerpoint + 2 > total)
       fpgasettings.settriggerpoint = total / 2;
   }
+
+  //fw 0.2.64: a sector written by an older firmware may hold a time/div that does not fit its rate and record
+  pc_dec_mode_seen = 0;
+  acq_view_fit(0);
 }
 
 void pc_glue_init(void)
@@ -1906,9 +1957,6 @@ void pc_glue_poll_busy(void)
     pc_poll(&pc_sess, PC_CTX_BUSY);
     fpga_trace_who = who;
   }
-
-  //fw 0.2.64: a sector written by an older firmware may hold a time/div that does not fit its rate and record
-  acq_view_fit(0);
 }
 
 void pc_glue_poll_isr(void)
@@ -1940,6 +1988,7 @@ void pc_glue_ui_service(void)
   spectrum_service();
   phosphor_service();
   pc_right_bar_follow();
+  pc_dec_follow_mode();
 
   //Calibration v4 class probe (acal_live.c): only in the scope and spectrum views (the phosphor view's record rate would
   //see the gap; not while Diagnostics shows), never while a host capture is armed or triggered (the probe resets the sample system) or the host
