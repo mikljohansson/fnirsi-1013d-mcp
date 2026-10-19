@@ -256,6 +256,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - mcp-gen5 (done 15:40, about 565k tokens, retired; handoff mcp/AGENTS.md): protocol 1.17 host side pushed 2097181 (CI 39258110694), Bode follow-ups pushed 514182f (CI 39260053987, 398 tests):
   wiring A default with the bench numbers, ch2_overload flag + auto range step-up + fixed-range failure text, --ch2-coupling ac,
   offset-range-exhausted caveat, simulator models the pinned front end. Next for mcp: 1.17 on the unit after the 0x1537 flash.
+- Second swarm started 10-19 17:15 (owner: no deadline, do everything that needs no hardware; advanced features are MCP-first,
+  device UI only for trigger types, peak detect, hardware counter). Provisional numbers: fw-enc 0.2.62 / protocol 1.19 (encode
+  self-check on 0x1538, data check on every full-rate arm), fw-polish 0.2.63 (UI polish batch 1 a-p), fw-acq 0.2.64 (ACQ coupling,
+  per-mode filter default, touch batch 2, spectrum touch), fw-meas 0.2.65 (Measurements v2), fw-bode 0.2.66 / protocol 1.20 rows
+  60+ (Bode on the device D1-D5), rel-gen1 (bitstream distribution, releasing.md, README rewrite, release checklist). Waiting for
+  0x1538 to merge: fpga-gen8 (trigger types, peak detect, hardware counter: 0x1539), then the pulse pattern generator and the
+  streaming logger design; mcp-gen6 (1.19 / 1.20 host side, result presentation helpers) after fw-enc / fw-bode land.
 - fpga-gen7 (running, 10-19 16:40-): 0x1537 leaves ADC chip 2 in a bad encode phase after a write in the scope's arm sequence (bench
   16:33-16:40); reproduce in simulation, fix as 0x1538 with a phase self-check, pin, handoff.
 - fw-cal4 (done 16:45, about 400k tokens, retired; handoff section 37): 0.2.60 (failure line, instruction) and 0.2.61 (encode check-and-retry after 0x0D, write trace events, protocol 1.18) merged. Was: running 10-19 15:50-: 0.2.60 merged (failure line with range/rate/core and RMS numbers, instruction names the post;
