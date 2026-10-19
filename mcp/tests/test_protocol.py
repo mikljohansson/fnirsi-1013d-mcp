@@ -6,11 +6,14 @@ import binascii
 import json
 import random
 import zlib
+from pathlib import Path
 
 import pytest
 
 from fnirsi1013d import protocol as P
 from fnirsi1013d import vectors as V
+
+VECTORS_FILE = Path(__file__).resolve().parents[2] / "docs" / "protocol-vectors.json"
 
 SPEC_FRAMES = [  # docs/protocol.md section 13
     ("a5 13 01 00 02 00 01 00 00 00 00 00 00 00 22 a6", P.Frame(P.Cmd.GET_INFO, 1)),
@@ -129,14 +132,14 @@ def test_scaling_example_from_spec():
 
 
 def test_shared_vectors_file():
-    doc = json.loads(V.DEFAULT_PATH.read_text(encoding="utf-8"))
+    doc = json.loads(VECTORS_FILE.read_text(encoding="utf-8"))
     assert len(doc["vectors"]) >= 20
     assert doc["crc_check"]["crc16_ccitt_false_123456789"] == "29b1"
-    assert V.check_file() == []
+    assert V.check_file(VECTORS_FILE) == []
 
 
 def test_host_vectors_present_and_current():
-    doc = json.loads(V.DEFAULT_PATH.read_text(encoding="utf-8"))
+    doc = json.loads(VECTORS_FILE.read_text(encoding="utf-8"))
     names = {v["name"]: v for v in doc["vectors"]}
     for hv in V.build_host_vectors():
         assert hv["name"] in names, f"{hv['name']} missing: run python -m fnirsi1013d.vectors --merge"

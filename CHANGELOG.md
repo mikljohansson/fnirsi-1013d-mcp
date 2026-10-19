@@ -807,6 +807,17 @@ was found (commit not identified).
   identity and whether it is the running build, `scope_calibration_info` the calibration provenance, and
   `scope_save_report` has the scope write its report file to the card. Codecs for the stored layouts are checked
   against the `diag_layouts` vectors; the simulator answers all four.
+- Changed: the package works installed from the wheel, outside a checkout (8ea8886). The server's data dir and
+  audit log default to the per-user `~/.fnirsi1013d` (`FNIRSI_MCP_HOME` or `--home`; the specific variables and
+  arguments still win) instead of a directory next to the package. The flash image, SD backup dir, `bench_link.py`
+  and vectors file default to the checkout's only when running from one; otherwise `--image`, `--backup-dir`,
+  `--bench-link` and `--file` are required and their absence is reported before the scope is touched.
+  `fnirsi1013d-sd write` gains `--backup-dir`. `fnirsi1013d-mcp --list-tools` prints the tools, the data dir and the
+  audit log without a scope.
+- Added: CI job `wheel` (0e1d36b): the wheel, built as for a release, installed into a fresh venv on Linux and
+  Windows, then `--list-tools` and an MCP stdio session on the simulator (`.github/scripts/wheel_smoke.py`).
+- Changed: install and Claude Code / Codex setup for a wheel user, `.mcp.json.example` in place of the tracked
+  `.mcp.json` (ef8aa30).
 
 ### Tooling, FPGA and documentation
 

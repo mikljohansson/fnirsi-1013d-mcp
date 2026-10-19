@@ -16,7 +16,43 @@ Python tooling for the FNIRSI 1013D open firmware's USB control protocol
 
 ## Install
 
-Python 3.12 or newer. With [uv](https://docs.astral.sh/uv/):
+Python 3.12 or newer on Windows or Linux (macOS should work, the scope is a plain USB CDC serial device, but nobody
+has run it against the hardware there). No driver is needed.
+
+### From a release (users)
+
+Each GitHub release attaches the wheel `fnirsi1013d-X.Y.Z-py3-none-any.whl`. Install it as a tool, which puts
+`fnirsi1013d-mcp` and the other commands on your `PATH` in an environment of their own:
+
+```
+uv tool install https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/download/vX.Y.Z/fnirsi1013d-X.Y.Z-py3-none-any.whl
+# or: pipx install <the same URL>
+# or, into a venv you manage: python -m pip install <the same URL>
+```
+
+Replace `X.Y.Z` with the release (the release page lists the asset). Between releases,
+`uv tool install "git+https://github.com/mikljohansson/fnirsi-1013d-mcp#subdirectory=mcp"` installs main.
+Check it, without a scope:
+
+```
+fnirsi1013d-mcp --list-tools          # the tools, the data dir and the audit log; opens no port
+fnirsi1013d-mcp --sim "--variant al3 --signal decay:tau=80us"   # a server on the built-in simulator (stdio)
+```
+
+Files the server writes go to a per-user directory, `~/.fnirsi1013d` (`%USERPROFILE%\.fnirsi1013d` on
+Windows): `data/<date>/*.npz` (waveforms), `data/cal/<serial>.json` (per-unit voltage calibration),
+`data/bode/thru/` (Bode thru calibrations) and `logs/audit.jsonl`. `FNIRSI_MCP_HOME` or `--home` moves the whole
+directory; `FNIRSI_MCP_DATA_DIR` / `--data-dir` and `FNIRSI_MCP_AUDIT_LOG` / `--audit-log` move one part (table
+below). Nothing is written inside the installed package.
+
+The bench CLIs need their inputs named when they do not run from a checkout: `fnirsi1013d-flash --image <bin>` and
+`--backup-dir <dir>` for `--persist`, `fnirsi1013d-sd write ... --backup-dir <dir>`, `fnirsi1013d-bench
+--bench-link <checkout>/firmware/scope/host_tests/bench_link.py`, `python -m fnirsi1013d.vectors --file
+<protocol-vectors.json>`. Each refuses with a message saying which argument is missing.
+
+### From a checkout (development)
+
+With [uv](https://docs.astral.sh/uv/):
 
 ```
 cd mcp
@@ -24,9 +60,17 @@ uv venv .venv
 uv pip install --python .venv -e ".[dev]"
 ```
 
-Plain venv works too: `python -m venv .venv` then `.venv/Scripts/pip install -e ".[dev]"` (Windows) or
-`.venv/bin/pip install -e ".[dev]"` (Linux/WSL). In WSL keep the venv on the Linux side
-(e.g. `~/.venvs/fnirsi1013d-mcp`), because `mcp/.venv` is the Windows one.
+Plain venv works too: `python -m venv .venv`, then `.venv\Scripts\python -m pip install -e ".[dev]"` (Windows) or
+`.venv/bin/python -m pip install -e ".[dev]"` (Linux). In WSL keep the venv on the Linux side (e.g.
+`~/.venvs/fnirsi1013d-mcp`), because `mcp/.venv` is the Windows one. Run from a checkout, the CLIs default to the
+repository's files where those exist: the `make gcc10` image for `fnirsi1013d-flash`, `backups/sdcard/` for SD
+backups, `firmware/scope/host_tests/bench_link.py`, `docs/protocol-vectors.json`. The server's data dir and audit log
+default to the per-user directory as for a wheel; point `FNIRSI_MCP_DATA_DIR` at `mcp/data` to keep using a
+calibration file there.
+
+`python .github/scripts/wheel_smoke.py` (from the repository root, needs `build`, in the dev extras) builds the
+wheel, installs it into a fresh venv outside the checkout and runs the server from there: `--list-tools`, an MCP
+stdio session on the simulator with a capture, the file locations. CI runs it on Linux and Windows.
 
 The MCP SDK is pinned to `mcp>=1.12,<2`: mcp 2.x renamed FastMCP to MCPServer and changed its API.
 
@@ -97,44 +141,65 @@ count when the `#VER` probe answers `#OK,FNIRSI-1013D-AI,...`.
 | `FNIRSI_MCP_ENABLE_RAW` | 0 | allow tier 4 |
 | `FNIRSI_MCP_GEN_MAX_HZ` | 1000000 | generator frequency ceiling |
 | `FNIRSI_MCP_GEN_MAX_DUTY` | 50 | generator duty ceiling, percent |
-| `FNIRSI_MCP_DATA_DIR` | `mcp/data` | `.npz` output, one folder per day |
-| `FNIRSI_MCP_AUDIT_LOG` | `mcp/logs/audit.jsonl` | JSONL log of every tier 1+ call (empty string disables) |
+| `FNIRSI_MCP_HOME` | `~/.fnirsi1013d` | per-user directory holding `data/` and `logs/` (`--home`) |
+| `FNIRSI_MCP_DATA_DIR` | `<home>/data` | `.npz` output (one folder per day), `cal/`, `bode/thru/` (`--data-dir`) |
+| `FNIRSI_MCP_AUDIT_LOG` | `<home>/logs/audit.jsonl` | JSONL log of every tier 1+ call (`--audit-log`; empty string disables) |
 | `FNIRSI_MCP_LEGACY_IDLE_RELEASE_S` | 60 | legacy firmware only: release REMOTE (keeping the host settings) after this many seconds without a tool call; 0 = hold until exit |
 | `FNIRSI_MCP_CAL_FILE` | `<data dir>/cal/<serial>.json` | per-unit voltage calibration (`--cal-file`), loaded at connect if present, written by `scope_calibrate_volts` |
 | `FNIRSI_MCP_MAX_RESPONSE` | device limit | largest response payload requested at once (`--max-response`); READ_RAW, READ_TRACE and READ_SCREEN are split, and device averaging falls back to the host when its result would not fit |
 
-### Claude Code
+### Claude Code and Codex setup
 
-The repository's [`.mcp.json`](../.mcp.json) registers `fnirsi1013d-sim`, the server with an in-process AL3
-simulator producing an 80 us PI decay on CH1 and the TX gate on CH2, and `fnirsi1013d` on COM10 (Windows venv
-paths, relative to the repository). The skill `.claude/skills/fnirsi-scope/` teaches agents a measurement session
-(body: `docs/agent-measurement-guide.md`).
+The skill `.claude/skills/fnirsi-scope/` (body: [`docs/agent-measurement-guide.md`](../docs/agent-measurement-guide.md))
+teaches an agent a measurement session; with a wheel install, give the agent that guide (copy the skill directory
+into `~/.claude/skills/`, or point Codex at the guide).
 
-Outside the repository, register the server for your user with absolute paths (`--scope user` makes it available
-in every project; the data dir and audit log then also need absolute paths):
+**Claude Code, wheel install.** One command registers the server for your user in every project
+(`fnirsi1013d-mcp` must be on `PATH`, as after `uv tool install`; otherwise give its full path, e.g.
+`<venv>/bin/fnirsi1013d-mcp` or `<venv>\Scripts\fnirsi1013d-mcp.exe`):
 
 ```
-claude mcp add --scope user fnirsi1013d -e FNIRSI_MCP_MAX_TIER=3 -e FNIRSI_MCP_DATA_DIR=D:/src/fnirsi-1013d-ai/mcp/data -e FNIRSI_MCP_AUDIT_LOG=D:/src/fnirsi-1013d-ai/mcp/logs/audit.jsonl -- D:/src/fnirsi-1013d-ai/mcp/.venv/Scripts/fnirsi1013d-mcp.exe --port COM10
-claude mcp add --scope user fnirsi1013d-sim -- D:/src/fnirsi-1013d-ai/mcp/.venv/Scripts/fnirsi1013d-mcp.exe --sim "--variant al3 --signal decay:tau=80us"
+claude mcp add --scope user fnirsi1013d -e FNIRSI_MCP_MAX_TIER=3 -- fnirsi1013d-mcp --port auto
+claude mcp add --scope user fnirsi1013d-sim -- fnirsi1013d-mcp --sim "--variant al3 --signal decay:tau=80us"
 claude mcp list
 ```
 
-The data dir matters: the per-unit voltage calibration is read from `<data dir>/cal/<serial>.json`. In WSL use the
-Linux venv, e.g. `~/.venvs/fnirsi1013d-mcp/bin/fnirsi1013d-mcp --port /dev/ttyACM0`.
+Or per project: copy [`.mcp.json.example`](../.mcp.json.example) to `.mcp.json` in the project and edit it:
 
-### Codex
+```json
+{
+  "mcpServers": {
+    "fnirsi1013d": {
+      "type": "stdio",
+      "command": "<fnirsi1013d-mcp, or its full path>",
+      "args": ["--port", "<auto, COM5 or /dev/ttyACM0>"],
+      "env": { "FNIRSI_MCP_MAX_TIER": "3" }
+    }
+  }
+}
+```
 
-Codex reads MCP servers from `~/.codex/config.toml` (Codex has no skills directory: point it at
-`docs/agent-measurement-guide.md`, which the root `AGENTS.md` links):
+`--port auto` finds the scope (below); name the port when more than one serial device answers. Add
+`"FNIRSI_MCP_HOME": "<dir>"` to `env` to keep the data and audit log somewhere other than `~/.fnirsi1013d`.
+
+**Claude Code, checkout (the owner's workflow).** `.mcp.json` is not tracked: copy `.mcp.json.example` and point
+`command` at the checkout's venv (`mcp/.venv/Scripts/fnirsi1013d-mcp.exe` on Windows, relative paths are resolved
+from the repository root), the port at the scope's (COM10 on the owner's bench), and keep
+`"FNIRSI_MCP_DATA_DIR": "mcp/data"`, `"FNIRSI_MCP_AUDIT_LOG": "mcp/logs/audit.jsonl"` in `env` if the per-unit
+calibration lives in `mcp/data/cal/`. In WSL use the Linux venv, e.g. `~/.venvs/fnirsi1013d-mcp/bin/fnirsi1013d-mcp
+--port /dev/ttyACM0`.
+
+**Codex** reads MCP servers from `~/.codex/config.toml` (Codex has no skills directory: point it at
+`docs/agent-measurement-guide.md`):
 
 ```toml
 [mcp_servers.fnirsi1013d]
-command = "D:/src/fnirsi-1013d-ai/mcp/.venv/Scripts/fnirsi1013d-mcp.exe"
-args = ["--port", "COM10"]
-env = { FNIRSI_MCP_MAX_TIER = "3", FNIRSI_MCP_DATA_DIR = "D:/src/fnirsi-1013d-ai/mcp/data", FNIRSI_MCP_AUDIT_LOG = "D:/src/fnirsi-1013d-ai/mcp/logs/audit.jsonl" }
+command = "fnirsi1013d-mcp"            # or the full path in a venv / checkout
+args = ["--port", "auto"]
+env = { FNIRSI_MCP_MAX_TIER = "3" }
 
 [mcp_servers.fnirsi1013d-sim]
-command = "D:/src/fnirsi-1013d-ai/mcp/.venv/Scripts/fnirsi1013d-mcp.exe"
+command = "fnirsi1013d-mcp"
 args = ["--sim", "--variant al3 --signal decay:tau=80us"]
 ```
 

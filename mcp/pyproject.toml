@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "anyio>=4", "ruff>=0.5"]
+dev = ["pytest>=8", "anyio>=4", "ruff>=0.5", "build>=1"]
 
 [project.scripts]
 fnirsi1013d-mcp = "fnirsi1013d.server:main"

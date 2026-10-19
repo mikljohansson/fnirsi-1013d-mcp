@@ -25,10 +25,11 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+from .paths import checkout_path
 from .transport import PIDCODES_TEST_PIDS, PIDCODES_VID, list_candidates
 
-REPO = Path(__file__).resolve().parents[3]
-BENCH_LINK = REPO / "firmware" / "scope" / "host_tests" / "bench_link.py"
+#: the firmware's bench_link.py in the checkout this package runs from; None for an installed wheel (--bench-link)
+BENCH_LINK: Path | None = checkout_path("firmware", "scope", "host_tests", "bench_link.py")
 
 
 def find_port() -> str:
@@ -38,10 +39,12 @@ def find_port() -> str:
     raise SystemExit("fnirsi1013d-bench: no scope serial port (1209:0001) found; pass --port")
 
 
-def load_bench_link(path: Path = BENCH_LINK):
+def load_bench_link(path: Path | None):
+    if path is None:
+        raise SystemExit("fnirsi1013d-bench: pass --bench-link <checkout>/firmware/scope/host_tests/bench_link.py "
+                         "(the link checks come from the firmware tree; this package was not run from a checkout)")
     if not path.is_file():
-        raise SystemExit(f"fnirsi1013d-bench: {path} not found (needs the repository checkout, not just the "
-                         "installed package)")
+        raise SystemExit(f"fnirsi1013d-bench: {path} not found")
     spec = importlib.util.spec_from_file_location("bench_link", path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
@@ -57,6 +60,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--census", type=int, default=2000,
                     help="PING count of the no-retry census (plus 100 x 64 KiB); 0 = link checks only")
     ap.add_argument("--n", type=int, default=200, help="PING count of the latency check")
+    ap.add_argument("--bench-link", type=Path, default=BENCH_LINK,
+                    help="the firmware's firmware/scope/host_tests/bench_link.py (default: the checkout's, when run "
+                    "from one)")
     ap.add_argument("--fft", action="store_true", help="run FFT_BENCH instead of the link checks (fw 0.2.27+)")
     ap.add_argument("--reps", type=int, default=3, choices=range(1, 17), metavar="1-16",
                     help="FFT_BENCH runs per size (default 3)")
@@ -147,7 +153,7 @@ def main(argv: list[str] | None = None, uptime: Callable[[str], int | None] | No
     if a.fft:
         sys.exit(run_fft_bench(a.port, a.reps))
     args = build_argv(argv)
-    mod = load_bench_link()
+    mod = load_bench_link(a.bench_link)
     port = args[0]
     up = uptime or device_uptime
     before = up(port)
@@ -156,7 +162,7 @@ def main(argv: list[str] | None = None, uptime: Callable[[str], int | None] | No
           flush=True)
     print("bench_link.py " + " ".join(args), flush=True)
     old = sys.argv
-    sys.argv = [str(BENCH_LINK), *args]
+    sys.argv = [str(a.bench_link), *args]
     try:
         rc = mod.main()
     finally:

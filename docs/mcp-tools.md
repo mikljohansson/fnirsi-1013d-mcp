@@ -15,7 +15,8 @@ Taken from the MCP prior art surveyed in `research/notes/web-sources.md` section
   tiers below, two-step confirmation token for tier 3+, JSONL audit log, read-back of applied values,
   fail closed on `E_UNSUPPORTED`.
 - **Arrays go to files, stats come inline** (ikatkov/rigol-mcp). Any waveform longer than 2,000 points is
-  written to an `.npz` file (time vector, volts, raw codes, metadata) under `mcp/data/<date>/`. The tool
+  written to an `.npz` file (time vector, volts, raw codes, metadata) under `<data dir>/<date>/`
+  (default `~/.fnirsi1013d/data`). The tool
   returns statistics, the file path and an optional decimated min/max preview of at most 500 points.
 - **Physical units in, physical units out.** Tools take volts, seconds and hertz, and convert with the
   scope's own calibration (P-8.5). Raw escape fields (`range_index`, `divider`, `level_code`) exist for
@@ -49,8 +50,9 @@ Configuration (environment variables of the server process):
 | `FNIRSI_MCP_ENABLE_RAW` | 0 | allow tier 4 |
 | `FNIRSI_MCP_GEN_MAX_HZ` | 1000000 | generator frequency ceiling |
 | `FNIRSI_MCP_GEN_MAX_DUTY` | 50 | generator duty ceiling in percent (protects a TX stage driven from the pin) |
-| `FNIRSI_MCP_DATA_DIR` | `mcp/data` | where `.npz` files go |
-| `FNIRSI_MCP_AUDIT_LOG` | `mcp/logs/audit.jsonl` | every tier 1+ call: time, tool, args, applied values, result status |
+| `FNIRSI_MCP_HOME` | `~/.fnirsi1013d` | per-user directory for `data/` and `logs/` |
+| `FNIRSI_MCP_DATA_DIR` | `<home>/data` | where `.npz` files, per-unit calibrations and Bode thru files go |
+| `FNIRSI_MCP_AUDIT_LOG` | `<home>/logs/audit.jsonl` | every tier 1+ call: time, tool, args, applied values, result status |
 
 Confirmation tokens: a tier 3/4 call without `confirm_token` does nothing and returns
 `{"confirmation_required": true, "token": "<8 hex>", "summary": "<what will happen>"}`. The token is bound to

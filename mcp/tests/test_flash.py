@@ -222,10 +222,10 @@ def test_bench_wrapper_runs_bench_link_census(sim, monkeypatch, capsys):
     import serial
 
     from fnirsi1013d import bench
-    mod = bench.load_bench_link()
+    mod = bench.load_bench_link(bench.BENCH_LINK)
     mod.serial = types.SimpleNamespace(Serial=lambda port, baud, timeout, write_timeout: serial.serial_for_url(
         port, baudrate=baud, timeout=timeout, write_timeout=write_timeout))
-    monkeypatch.setattr(bench, "load_bench_link", lambda: mod)
+    monkeypatch.setattr(bench, "load_bench_link", lambda path: mod)
     url = sim.url.replace("tcp://", "socket://")
     with pytest.raises(SystemExit) as ei:
         bench.main(["--port", url, "--census", "20", "--n", "10"])
@@ -246,7 +246,7 @@ def test_bench_wrapper_flags_a_device_restart(monkeypatch, capsys):
         @staticmethod
         def main():
             return 0
-    monkeypatch.setattr(bench, "load_bench_link", lambda: Mod)
+    monkeypatch.setattr(bench, "load_bench_link", lambda path: Mod)
     ups = iter([400000, 1500])
     with pytest.raises(SystemExit) as e:
         bench.main(["--port", "COM10", "--census", "0"], uptime=lambda port: next(ups))

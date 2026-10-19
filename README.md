@@ -98,26 +98,26 @@ machine and checks their hashes. See `docs/releasing.md`.
 ### 2. Install the MCP server
 
 ```
-cd mcp
-python -m venv .venv && .venv/Scripts/activate      # or source .venv/bin/activate
-pip install -e .
-fnirsi1013d-mcp --port COM10                         # or /dev/ttyACM0; "auto" finds the scope
+uv tool install <URL of the release's fnirsi1013d-X.Y.Z-py3-none-any.whl>   # or pipx install / pip install
+fnirsi1013d-mcp --list-tools                         # check: the tools and where files go (~/.fnirsi1013d)
+claude mcp add --scope user fnirsi1013d -- fnirsi1013d-mcp --port auto
 ```
 
 The scope enumerates as a USB serial device (VID 0x1209, PID 0x0001, "FNIRSI 1013D"), no driver needed on
-Windows, Linux or macOS.
+Windows or Linux (macOS untested). `--port auto` finds it; `fnirsi1013d-mcp --sim "--variant al3"` runs on the
+built-in simulator without a scope.
 
-**Claude Code**: the repo's `.mcp.json` registers two servers, `fnirsi1013d` (the real scope) and
-`fnirsi1013d-sim` (the simulator). Start Claude Code in the repo and ask it to look at channel 1. Outside the
-repo: `claude mcp add fnirsi1013d -- <repo>/mcp/.venv/Scripts/fnirsi1013d-mcp --port COM10`.
-
-**Codex**: add to `~/.codex/config.toml`:
+**Claude Code** per project: copy `.mcp.json.example` to `.mcp.json` (servers `fnirsi1013d` and
+`fnirsi1013d-sim`) and ask the agent to look at channel 1. **Codex**: `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.fnirsi1013d]
-command = "<repo>/mcp/.venv/Scripts/fnirsi1013d-mcp"
-args = ["--port", "COM10"]
+command = "fnirsi1013d-mcp"
+args = ["--port", "auto"]
 ```
+
+From a checkout (development) and the details: [`mcp/README.md`](mcp/README.md) "Install" and "Claude Code and
+Codex setup".
 
 Both read `AGENTS.md` for project context; `docs/mcp-tools.md` lists every tool with its safety tier.
 
