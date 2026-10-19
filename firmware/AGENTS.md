@@ -1713,7 +1713,8 @@ at the first drag step.
 
 ## 33. fw-ui2: UX makeover step 2 (fw 0.2.53 provisional, protocol 1.16 unchanged)
 
-Branch from main 9cc599c (fw 0.2.51), merged with main d31ee84 (0.2.52 readers, 0.2.54 touch) in 2ebef4d and with main 33cd1b5 (0.2.55 settings, fw-ui3) after this handoff was written. Plan:
+Branch from main 9cc599c (fw 0.2.51), merged with main d31ee84 (0.2.52 readers, 0.2.54 touch) in 2ebef4d and with main
+33cd1b5 (0.2.55 settings, fw-ui3) in 5255516. Plan:
 `docs/plans/ux-makeover.md` section 7 step 2; rules `docs/ui-guidelines.md`; user-facing description README section 5
 "Screens: CTRL page, fold-outs, chips, warnings, spectrum cards". Commits, one topic each: 93f1b68 (`ui_ctrl.c/.h`, the
 card formatters in `ui_fmt.c`, test_ui), aaa0613 (top bar chips), a41ca39 (CTRL page, fold-outs, strips and header out,
@@ -1723,7 +1724,8 @@ only on page one), cf2cbf6 (handoff), 5255516 (merge of main with fw-ui3's 0.2.5
 7729e4fe970f3fb634f5d600191c3cc873587edb9fd6ffb604b21f4e64cc69c8, ELF
 a79ad696068a3d3d5641d78710b86b5556ec0d83661f07a1dfc2ed36ce08324d (nommu bin 16bb691e..., ELF d73204cc...). The
 pre-merge image from f372581 was a182ba84 (536,576 B). **Nothing benched.** Host
-tests green (test_ui 6672 checks on the branch, 1,436,917 with fw-ui3's settings tests after the merge). GCC 10 warnings 36, GCC 13 / PC_DEBUG 31, upstream only; the
+tests green (test_ui 6672 checks on the branch, 1,436,917 with fw-ui3's settings tests after the merge). GCC 10
+warnings 36, GCC 13 / PC_DEBUG 31, upstream only; the
 new files are clean with -Wall -Wextra. No protocol change: GET_STATUS byte 43 keeps its meaning (4 = phosphor drawn,
 now also in X-Y). Settings words: 210 bit 3 (the Phosphor switch), 211 (0xC700: bit 0 Grid, bits 1-2 the spectrum's
 Display variant); 212..223 stay free.
