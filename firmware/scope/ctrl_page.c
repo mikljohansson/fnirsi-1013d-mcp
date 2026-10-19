@@ -492,8 +492,20 @@ static void cp_fold_run(int id, void (*button)(int))
     if(hit >= 0)
     {
       ui_fold old = d.f;
+      uint32  lx = xtouch, ly = ytouch;
 
-      if(cp_fold_tap(&d, hit, ui_fold_dir(&d.f, xtouch)))
+      //fw 0.2.64: a row acts on release, like every other button, and only when the finger is still on it
+      while(havetouch)
+      {
+        lx = xtouch;
+        ly = ytouch;
+        tp_i2c_read_status();
+      }
+
+      if(ui_fold_hit(&d.f, lx, ly) != hit)
+        continue;
+
+      if(cp_fold_tap(&d, hit, ui_fold_dir(&d.f, lx)))
         break;
 
       //Rows may come or go (the Phosphor switch): put the plot back under the old panel, then draw the new one
