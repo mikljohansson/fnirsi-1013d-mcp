@@ -31,6 +31,30 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.51 - 2026-10-19 (protocol 1.15, unchanged)
+
+The first step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 1 plus the measurement cards; rules in
+`docs/ui-guidelines.md`; README section 5 "Screens").
+
+- Changed: the main menu reads Scope, Spectrum analyser, Saved pictures, Saved waveforms, Settings, Diagnostics, USB
+  drive, always all seven rows, with one contiguous 59 px hit area per row (04b6f2c). Phosphor display left the menu.
+  The Spectrum analyser row is also offered in roll mode: it switches Roll off and says "Roll off for the spectrum"
+  in the warning line; Scope does not switch Roll back on.
+- Changed: the USB connection screen is "USB drive": three plain lines on what happens and an Exit button in place of
+  the "Off USB" text; same behaviour (1027f90).
+- Removed: the version string in the top bar; the diagnostics view keeps the identity (3c66d85).
+- Changed: the phosphor view and X-Y mode are chosen in a Display row (Normal / Phosphor / X-Y) under the acquisition
+  menu until the CTRL page's Display fold-out exists; X-Y left the System settings fold-out, whose Notification
+  confirmation and RTC rows moved up one row (4d74f82). Phosphor drawing in X-Y is not offered until then.
+- Removed: the "Scope" fields of the spectrum and phosphor strips and the spectrum strip's Auto field. In the spectrum
+  view AUTO SET runs the spectrum's Auto, reads "Auto..." while it runs and cancels on a second tap (79b6b00, 7ff6c68).
+- Changed: phosphor warnings sit at the top middle of the plot, as in the spectrum view (79b6b00).
+- Changed: measurement cards keep Atlan's layout with the name in a chip built like the top bar chips (full card
+  height, rounded outer left corners, no notch), names as scope makers spell them (Freq, Period, +Width, -Width,
+  +Duty, -Duty instead of Freg, Cycle, Time+, Time-, Duty+, Duty-), four significant digits ("Freq 1.000kHz"), and
+  "no period" instead of "xxx" for timing values without three crossings. A new unit shows Freq, Vpp and Vavg on each
+  channel (2f1ab97; formatting and fit host-tested in test_ui, 33cc330).
+
 #### 0.2.50 - 2026-10-19 (protocol 1.15; the fw-cal3 branch numbered it 1.14 / row 53, the merge renumbered it)
 
 - Added: calibration v4, background tracking of the full-rate interleave mismatch. Every 8-bit 200 MSa/s record of a

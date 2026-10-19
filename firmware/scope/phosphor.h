@@ -1,11 +1,11 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 // phosphor.h - digital phosphor view (protocol builds only; fw 0.2.46, docs/plans/phosphor-design.md)
 //
-// A main-loop display mode like the spectrum view, entered and left from the main menu (row 7) or the strip's "Scope"
-// field. The scope view stays 1.00o5's (grid, cursors, measurements, pointers, REF / MATH); only the CH1 / CH2 traces
+// A main-loop display mode like the spectrum view, the scope's Display variant Phosphor (fw 0.2.51: the acquisition
+// menu's Display row; the main menu's row 7 and the strip's "Scope" field before). The scope view stays 1.00o5's (grid, cursors, measurements, pointers, REF / MATH); only the CH1 / CH2 traces
 // are drawn from per-channel hit-count maps of the recent records (phos_map.c), coloured by how often a pixel was hit.
 // A one-line strip under the grid (y 452..479, where the record-position slider was) holds Persistence, Palette,
-// Clear, Scope and a status field.
+// Clear and the wfm/s readout; warnings go to the top middle of the plot.
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #ifndef PHOSPHOR_H

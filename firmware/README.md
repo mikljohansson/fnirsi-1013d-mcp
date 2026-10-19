@@ -408,7 +408,6 @@ screen save/restore and the touch area. What depends on the running hardware is 
 | Filter selector (in 1.00o5's Long memory slot) | acquisition menu | bitstream without DECIM (all but AL3 0x1534+) | the decimation filter exists only in fpga/al3 0x1534 (fw 0.2.30, "Decimation filter" below) |
 | memory depth 9000, 12000, 15000 | acquisition menu | Filter on (0x1534+) | the 16-bit layout holds one sample per ring word: at most 8190 samples |
 | EXT trigger source | trigger menu | bitstream without EXT_TRIGGER (all but AL3 0x1533+) | the input exists only in fpga/al3 0x1533 (calibration pin, 3.3 V logic referenced to the scope's USB ground, not the probe ground, which sits ~1.24 V above it); selecting it switches the generator off |
-| Spectrum analyzer and Phosphor display rows | main menu | roll mode, viewers (fw 0.2.28 / 0.2.46) | the roll-mode trace path does not run the spectrum hook; the menu is two rows shorter then and starts with System settings |
 | Time & Date settings (RTC submenu) | system settings | no DS3231 answers at boot | the clock, file stamps and FAT times would read garbage |
 | Temperature (diagnostics screen) | diagnostics | no DS3231 answers at boot | it is the DS3231's temperature register; without the module it read "99" |
 
@@ -422,7 +421,7 @@ Battery indicator (fw 0.2.13): the level is a running average, and while chargin
 moves 1.25 steps away from the shown value (the raw level followed ADC noise while charging over USB and the last
 column flapped). Off the charger the 1.00o5 rule stays (the level only drops), applied to the average.
 
-Version display (fw 0.2.7): the main-screen corner and the restore screen show `v<fw>`, the diagnostics screen shows
+Version display (fw 0.2.7): the restore screen shows `v<fw>` (the main screen's top bar did too until fw 0.2.51), the diagnostics screen shows
 `fw <fw>` in place of 1.00o5 and a full identity line along its top edge (`FNIRSI-1013D-AI fw .., proto 1.3, base
 Atlan4 1.00o5, git <hash>, built <date>`), all from PC_FW_VERSION / PC_PROTO_* / PC_FW_BUILD (the same as `#VER` and
 GET_INFO). Waveform and reference files still store 1.00o5's VERSION_STRING (file format data).
@@ -557,12 +556,54 @@ dBFS here is relative to the bin of a full-scale sine. The level error includes 
 log2/dB conversion alone is within 1.6e-5 octaves (0.005 dB). Bin-centred full-scale tone: within 0.02 dB of
 39.07 dB on all windows; flat-top half a bin off: within 0.05 dB.
 
+### Screens: main menu, USB drive, Display row, measurement cards (fw 0.2.51)
+
+The first step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 1 plus the cards; rules in
+`docs/ui-guidelines.md`). Pure parts in `ui_menu.c` (row table, hit areas, mode rule) and `ui_fmt.c` (text widths,
+card values, names), host-tested in `host_tests/test_ui.c` against the device's own font tables.
+
+Main menu (Menu button, top left): seven rows, always all of them, top to bottom Scope, Spectrum analyser, Saved
+pictures, Saved waveforms, Settings, Diagnostics, USB drive (were Picture view, Waveform view, System settings,
+Diagnostic view, USB connection; Phosphor display left the menu). No marker for the current mode. Each row is one
+59 px hit area from y 46 (row n: 46 + 59 n .. 104 + 59 n), the button drawn inside it; the column is 413 px high.
+Scope leaves the spectrum view (and brings the phosphor variant back if it was on); Spectrum analyser enters it. In
+roll mode Spectrum analyser switches Roll off first (time base 20, the acquisition menu's Roll box does the same) and
+the spectrum's warning line says "Roll off for the spectrum" for 5 s; going back to Scope does not switch Roll on again.
+Settings opens the System settings fold-out, which lost its X-Y row (Notification confirmation and RTC settings moved
+up one row; 354 px, 295 px without a DS3231).
+
+USB drive: a header "USB drive", the 1.00o5 picture of the scope and the PC, three lines ("The SD card is now a USB
+drive on the PC.", "PC control (MCP) is disconnected until you leave this screen.", "Eject the drive on the PC before
+tapping Exit.") and an Exit button (x 610, y 412, 160 x 52), the only control. As before: the SD card is a USB mass
+storage drive while the screen shows, Exit with the drive still mounted shows "Not allowed!", Exit otherwise returns
+to CDC (PC control) and re-syncs the file lists.
+
+Top bar: no version string any more (the diagnostics view keeps the full identity).
+
+Acquisition menu, Display row (until the CTRL page's Display fold-out exists): a row of three boxes under 1.00o5's
+menu (which grew from 386 to 432 px): Normal, Phosphor, X-Y, the chosen one orange. X-Y is 1.00o5's X-Y mode (saved at
+power-off as before, it moved here from System settings), Phosphor the phosphor view below (not saved, the scope boots
+in Normal or X-Y). Chosen while the spectrum shows, Phosphor waits for the main menu's Scope row. Phosphor drawing in
+X-Y (possible since 0.2.46 by switching X-Y on in the phosphor view) is not offered by the row: it returns with the
+Display fold-out's Phosphor switch.
+
+Measurement cards (Measures on the right bar; up to twelve per channel): Atlan's 118 x 22 cards in the bottom rows
+(CH1 from x 5, CH2 from x 366, three per row, rows upward from y 426), each a grey card with the measurement name in a
+chip of the source's colour (full card height, the name plus 3 px each side, rounded only on its outer left corners,
+drawn over the card so the join has no notch) and the value 6 px after it, both in the 13 px font. Names as scope
+makers spell them: Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq, Period, +Width, -Width, +Duty, -Duty (1.00o5: Freg, Cycle,
+Time+, Time-, Duty+, Duty-); the Measures menu shows the same names. Values have four significant digits where the
+measurement has them and a unit with prefix ("1.000kHz", "500.0us", "-1.190V", "50.00%"); a value with fewer digits of
+its own is not padded (a value held as 0.50 V reads "500mV", not "500.0mV"). Freq, Period, the widths and the duties read "no
+period" while the record has fewer than three crossings. What the values mean is unchanged (whole-record statistics;
+Vrms includes DC). A new unit, and the DEFAULT button, show Freq, Vpp and Vavg on each enabled channel (in the table's
+order: Vavg, Vpp, Freq); 1.00o5 set none.
+
 ### Spectrum view (`spectrum.c`, fw 0.2.28)
 
 A display mode of the main loop, not a modal menu, so the MCP's polling and the shared screen keep working (plan:
-`docs/plans/dpos350p-features.md` 2b). Main menu, first row "Spectrum analyzer" (the two view rows head the menu since fw 0.2.50; hidden in roll mode, where the
-trace path is different); in the view the row reads "Scope view" and a tap returns. The strip's "Scope" field does
-the same. While on, `scope_display_trace_data` (hook `PC_SPECTRUM_DISPLAY`) draws the trace area itself and touches
+`docs/plans/dpos350p-features.md` 2b). Main menu, row "Spectrum analyser"; the row "Scope" returns (fw 0.2.51; in roll
+mode the row switches Roll off first, see "Screens" above). While on, `scope_display_trace_data` (hook `PC_SPECTRUM_DISPLAY`) draws the trace area itself and touches
 in it go to the strip (`PC_SPECTRUM_TOUCH`); the top bar, the MCP chip and the right column (RUN/STOP, AUTO, menus)
 are 1.00o5's. Each new capture (UI or host) is transformed once; settings changes recompute from the held buffer,
 so a stopped capture can be re-examined. Roll mode or a viewer ends the view.
@@ -580,10 +621,12 @@ straight lines between bins. A white triangle marks the peak (DC bins skipped). 
 | Window | Hann, flat top, rect | next |
 | Scale | 5, 10, 20 dB/div | next |
 | Ref level | -100 .. +60 dBV at the top line, one division per step | left half down, right half up |
-| Auto | sets FFT length, window, scale, ref level and span from the signal (rules below) | once |
 | Reset | back to the defaults: 2048 points, Hann, 10 dB/div, ref 0 dBV, full span, Spectrum | once |
 | View | Spectrum, Waterfall, Density (fw 0.2.32) | next |
-| Scope | | leave the view |
+
+Auto (sets FFT length, window, scale, ref level and span from the signal, rules below) is the right bar's AUTO SET
+while the view shows (fw 0.2.51; a strip field before): the button reads "Auto..." while it runs, and a second tap, or
+any touch on the plot, cancels it. Leaving the view ends it.
 
 With the 0x1534 decimation filter on (fw 0.2.34) the view transforms the filter's 16-bit record (`pc_hal_trace16`)
 instead of the 8-bit trace, with the filter's rate 200 MHz / N (N = 2 (floor(D / 2) + 1), so even dividers differ from
@@ -709,9 +752,10 @@ how often each pixel was hit by recent records, so jitter, rare glitches, a modu
 cycles of a toggling signal are visible at once with their relative frequency. Design and cost arithmetic:
 `docs/plans/phosphor-design.md`.
 
-Entered and left like the spectrum view: main menu, second row "Phosphor display" (the row reads "Scope view" while
-it is on), or the strip's "Scope" field. The spectrum and phosphor views exclude each other. Not offered in roll mode
-or in the picture / waveform viewers (the rows are hidden and the view ends). It is a main-loop display mode: RUN/STOP,
+Chosen in the acquisition menu's Display row (fw 0.2.51; the main menu's "Phosphor display" row and the strip's
+"Scope" field before): Phosphor on, Normal or X-Y off. The spectrum and phosphor views exclude each other; the main
+menu's Scope row returns to the phosphor view when it was on before the spectrum. Not available in roll mode or in the
+picture / waveform viewers (the view ends). It is a main-loop display mode: RUN/STOP,
 trigger, time base, channel menus, cursors, measurements and the MCP keep working as in the scope view.
 
 What changes: only the CH1 / CH2 traces. Each channel has a map of hit counts (one byte per pixel of the 728 x 400
@@ -728,11 +772,11 @@ Strip (one line under the grid, where the record-position slider is in the scope
 | Persistence | 0.2 s, 1 s (default), 5 s, Infinite | next value; clears the picture |
 | Palette | Mono (channel colour, brightness by hit rate), Heat (dark blue, blue, cyan, green, yellow, red, white) | toggles |
 | Clear | | clears the picture |
-| Scope | | leaves the view |
 
-At the right end the strip shows the records added per second ("28 wfm/s") or, in orange while it applies, a warning:
-"CHn overrange: increase V/div" (the latest record clipped), "No trigger: check the trigger level" (the latest record
-was an auto time-out), "No channel enabled: switch on CH1 or CH2".
+At the right end the strip shows the records added per second ("28 wfm/s"). Warnings (fw 0.2.51: at the top middle of
+the plot in orange, as in the spectrum view; at the strip's right end before) while they apply: "CHn overrange:
+increase V/div" (the latest record clipped), "No trigger: check the trigger level" (the latest record was an auto
+time-out), "No channel enabled: switch on CH1 or CH2".
 
 Reading the picture:
 - Persistence is the time a pixel that is no longer hit takes to fade from full to 1/16 brightness. Infinite never

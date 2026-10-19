@@ -3,7 +3,7 @@
 //
 // A main-loop display mode, not a modal menu: the UI loop, the MCP polls and RUN/STOP keep running. While it is on, the
 // trace area (728 x 432 at 2,48) shows the spectrum of each new capture instead of the traces; the top bar and the right
-// column stay 1.00o5's. Entered and left from the main menu (row "Spectrum analyzer") or the strip's "Scope" field.
+// column stay 1.00o5's. Entered and left from the main menu's mode rows (fw 0.2.51: "Spectrum analyser", "Scope").
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #ifndef SPECTRUM_H
