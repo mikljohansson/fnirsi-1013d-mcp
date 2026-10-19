@@ -44,3 +44,6 @@ research/tools/vendor/
 
 # the owner's local Claude Code MCP config (tracked example: .mcp.json.example)
 .mcp.json
+
+# mkdocs build output
+/site/
