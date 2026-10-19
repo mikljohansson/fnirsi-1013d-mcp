@@ -785,3 +785,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   battery, USB unplugged, owner present) now targets 0x1537 instead of 0x1536; rollback stays al3_fir_0x1535 padded 5ade9e75.
   fw 0.2.59 FEL load started 15:22: ENTER_FEL acknowledged, the boot ROM device appeared on busid 7-4 (behind the hub), not bound
   for WSL; owner asked to run usbipd bind --hardware-id 1f3a:efe8 once as admin; scope waiting in FEL.
+- 2026-10-19 15:35: fw 0.2.59 (4ba89469) loaded into RAM over FEL (owner bound 1f3a:efe8 for usbipd by hardware id; the scope
+  now hangs off the original socket, busid 9-2): #VER fw=0.2.59 proto=1.17 fpga=0x1535. First boot of a firmware that writes sector
+  709 at boot. Owner walk-through of UI steps 1-4, readers and touch handles starts (firmware/AGENTS.md sections 29, 31-35).
