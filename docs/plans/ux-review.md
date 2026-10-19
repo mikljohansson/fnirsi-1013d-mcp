@@ -411,3 +411,295 @@ the place for it.
 - **Plan wording:** section 5 still says the Developer page is "behind a confirmation". On the boards the page opens
   directly, and only Start FEL asks first, which is reasonable. Fix the plan's sentence.
 - **Look:** the Developer and ConfirmFel boards use the navy look of the Diagnostics pages, which is open decision D9.
+
+## 6. Final review: every board against plan 990e2f3, and the measurement set
+
+Boards checked: every `*.dc.html` in the design folder as of 12:45 (Scope, ScopeCtrl, ScopeCtrlDisplay, AcqMenu,
+Phosphor, Spectrum, SpectrumCtrl, SpectrumCtrlDisplay, SpectrumCtrlAnalysis, MainMenu, SettingsFoldout, Settings,
+Developer, ConfirmFel, FirstRun, Wizard1-4, Confirm, UsbDrive, Main = Status, Calibration, Log). The plan is
+`ux-makeover.md` at 990e2f3. The board named in the brief as ScopeCtrlVdiv does not exist: the plan replaced the V/div
+fold-out with steppers drawn on ScopeCtrl itself (f9226ff). The board named SpectrumCtrlAxis does not exist either,
+see A6.
+
+### 6.0 Status of the earlier findings
+
+| Finding | Status at 990e2f3 |
+|---|---|
+| L1, L3-L6, L12, L16, L17, L21, L23, I2, D1-D5, D8, D13 | Closed in section 0, and still closed. The steppers replace V+/V- (A3) |
+| L2 volts calibration | Closed: "Volts calibration, needs a DC supply up to 15 V" on the Calibration page |
+| I1 Clear calibration | Closed: Confirm says zeros and gains are cleared and the volts factors kept |
+| I3 FirstRun | Mostly closed: it is honest about the zero and gain steps. Still silent about the volts step when sector 708 was missing (L20) |
+| I4 confirmation name | Closed: "File message timeout". Today's values are "wait for a tap" or 0.7 s (`scope_display_file_status_message`, `timer0_delay(700)`); show exactly those two |
+| I5 stock start-up | Closed: "Boot menu, then stock firmware" |
+| L11 RTC on/off, L14-L15 developer page, L18 touch readout, F1 FEL | Closed: an "RTC module" row, and a Developer page with "Debug overlay" (trigger address and touch coordinates) and "Enter FEL now" (the ENTER_FEL action, boot byte never written) |
+| F2 cards | Half closed: mixed-case names as in the firmware table. The width is still over (A12) |
+| F3-F11 | Closed: Display reads "Normal", the pass time is back in ACQ, the wizard dims a frozen scope, copy is in pre-broken lines, the USB warning and the "Measuring..." state are drawn, AUTO SET shows "Auto..." and cancels, SAVE WAVE stays in the spectrum, CTRL highlighting is in the plan |
+| L7 file browsers, L8 DC shift trim, L9 tracking lines, L13 RTC editor, L19 USB refusal, L20, L24 hidden hit areas, D10 spectrum row in roll mode, D12 Bode row, D14 one limit table | **Still open**, details in A below |
+
+### 6.1 Part A: omissions, contradictions, text widths
+
+Ranked by severity. Each line cites where the function lives today.
+
+**A1. The spectrum has lost its channel selector.** Today the strip's Channel field picks CH1, CH2 or CH1 + CH2 (only
+enabled channels; `spectrum.c` field F_CHANNEL, cycle near line 1934). The choice decides:
+- which channel the plot, the waterfall and the density show;
+- the dBV / dBA unit of the ref level;
+- the channel Auto analyses and triggers on (README "Auto" step 1).
+
+Plan section 3 lists the Analysis fold-out as FFT length, Window, Average, Reset, and SpectrumCtrlAnalysis draws
+exactly those. No other control picks the channel. Put Channel first in the Analysis fold-out, or derive it from the
+enabled channels (both on = both). With both on, the waterfall and density need a stated rule: today they show "CH1
+unless only CH2 is selected or on" (README "Waterfall and density").
+
+**A2. Spectrum cards are "chosen through MEASURES", but MEASURES is empty in the spectrum.** Plan section 3 says the
+spectrum's T CURSOR, V CURSOR and MEASURES slots stay empty, and the Spectrum board shows them empty. The same section
+says the spectrum cards are "chosen through MEASURES like the scope's cards". Keep MEASURES in the spectrum, opening
+the spectrum card list (Part B). Leave only the two cursor slots empty.
+
+**A3. The spectrum CTRL page uses a different pitch from the Scope one.** SpectrumCtrl, SpectrumCtrlDisplay and
+SpectrumCtrlAnalysis draw nine items at a 52 px pitch:
+
+| Item | Spectrum CTRL page | Scope CTRL page (today's pitch) |
+|---|---|---|
+| CTRL | y 2 | y 5 |
+| CH1 stepper | y 262-344 | y 244-326 |
+| CH2 stepper | y 346-428 | y 334-416 |
+| 50 % TRIG | y 430-480 | y 425-475 |
+
+This has two effects:
+- The steppers sit 18 px lower in the spectrum, so the same control moves between modes. That breaks the plan's rule
+  that every mode reads the same way.
+- On the spectrum's own pages CTRL jumps 3 px when the page toggles: page one has it at y 5, page two at y 2.
+
+The spectrum page needs nine slots (CTRL, Display, Analysis, Axis, Grid, two steppers, 50 % TRIG) where Scope needs
+eight. Fix: move Grid into the Axis fold-out ("Axis: Scale, Ref level, Grid"), which leaves eight items, and use
+Scope's pitch.
+
+**A4. The spectrum header's other readouts have no new home.** The plan turns peak frequency, peak level and RBW into
+cards and drops the filter tag on purpose. Three readouts are not placed:
+- The waterfall's "time its rows span".
+- The colour legend at the right end in the waterfall and density views ("rare or old .. frequent"; README "Header
+  and averaging", "Density").
+- The dBA unit in V/A mode on the level cards.
+
+Without the legend a waterfall cannot be read. Draw the legend as a strip at the right edge of the plot in the
+history views, and add the span time as a card.
+
+**A5. The record-position slider in the spectrum.** Plan section 3 keeps the slider row "in every mode", and the
+Spectrum boards draw it at y 452. In the spectrum the window shows which part of the scope's record is on the scope
+screen, which says nothing about the spectrum (inference: the FFT takes the record, not the screen window). Hide it in
+the spectrum, or let it show which part of the record the FFT used when N is less than the record length.
+
+**A6. The Axis fold-out has no board.** SpectrumCtrl shows "Axis 10dB", but no board shows its panel. Ref level steps
+one division at a time from -100 to +60 dBV (README field table). With + and - that is up to 16 taps per change, and it
+replaces today's one-tap halves (L21). Draw it with Scale as choices and Ref level as a stepper. Consider dragging on
+the dB axis labels (x < 40) as a gesture for ref level, mirroring the span drag.
+
+**A7. The Display fold-outs cover the plot, and nothing says how they close.** ScopeCtrlDisplay is a 206 x 396 panel
+at x 528-734, y 52-448. It covers:
+- the trigger-level pointer and its drag zone (x > 660, `scan_for_touch`);
+- the right end of every trace;
+- CH2's third measurement card at x 606.
+
+SpectrumCtrlDisplay (x 528-734, y 40-222) covers the plot's top right. The plan does not say whether a tap on the plot
+closes the panel or drags a trace, or whether the panel closes after a choice.
+
+Recommendation: the panel closes on any touch outside it, and that touch is consumed. A value tap (Normal, Phosphor,
+X-Y) closes it. The phosphor steppers (Persistence, Palette) keep it open.
+
+**A8. Phosphor's readout and Clear went three taps deep.** With the strip gone, the records per second ("55 wfm/s")
+show only while the Display fold-out is open (ScopeCtrlDisplay). The Phosphor board itself shows no phosphor state at
+all. Clear, used every time the setup changes, is now CTRL, Display, Clear: three taps where today it is one. Make
+wfm/s a card with the grey system chip (as RBW in the spectrum), so it is visible while working. For Clear, either
+accept three taps or clear the map automatically on every setting change (it already does for most, README "Reading
+the picture") and leave the button for the rest. The plan should say which; today's one-tap Clear is lost.
+
+**A9. The waveform viewer's CTRL page is undefined.** Today, in the viewer, the CTRL page holds V+/V- (they rescale the
+stored trace) and Show grid in the 50 % TRIG slot (`scope_setup_right_control_menu`, waveviewmode branch). The final
+CTRL page has Display, Trace style, Grid, the steppers and 50 % TRIG. In the viewer:
+- 50 % TRIG has no meaning;
+- Phosphor is not offered in the viewers (README "Phosphor view");
+- whether the steppers still rescale the stored record is unstated.
+
+Plan section 3 says only "the waveform viewer keeps its previous / next / delete substitutions" (page one). Define page
+two for the viewer: the 50 % slot empty, Display limited to Normal and X-Y, the steppers as today.
+
+**A10. Persistence of the new controls is unstated.** Today these are saved at power-off in the settings sector
+(`scope_save_config_data`):
+- `xymodedisplay` (X-Y);
+- `ACQ_trace` (Trace style);
+- `rightmenustate` (which right-bar page shows);
+- the spectrum's FFT length, window, scale, ref level and average (words 208-209);
+- phosphor persistence and palette (word 210).
+
+Not saved today:
+- the phosphor view itself (the scope "boots into the scope view", README "Phosphor view");
+- the spectrum's view, channel and span (README "Persistence");
+- the grid on/off. `gridenable` exists only in the waveform viewer and is not in `scope_save_config_data`, so the live
+  Grid toggle needs a settings word.
+
+One Display control whose X-Y value survives a power cycle while its Phosphor value does not will confuse. State per
+control what is restored, and give Grid a word in 108..119 or 211..255.
+
+**A11. Smaller omissions still open from earlier sections.**
+- **L7, the file browsers.** The browser bar (Return, Select all, Select, Delete, Page up, Page down) and the item
+  bar (return, delete, previous, next, name or RTC stamp) have no board. "Confirm to delete?" still has 74 x 50 px NO
+  and YES buttons 11 px apart (`handle_confirm_delete`), against the plan's own confirmation pattern (section 6b,
+  Cancel left and action right, 16 px apart).
+- **L8, DC shift trim.** It is on the Calibration page, but where it runs is unstated. Today it uses the right bar's
+  V+/V- in CTRL states 2-4 while the live trace shows (`scope_channel_dcshift_value`, "Next page", "END cal.").
+  Recommendation: it opens the scope view with the steppers driving centre, size and value, and a Done button in the
+  50 % slot.
+- **L9, v4 tracking lines.** The Calibration page still has none ("Track d / e / q", "Class cm";
+  `scope_diagnostic_v4`, README 6.5 "Readout").
+- **L13, the RTC editor.** Hour, minute, day, month and year with < > buttons have no board. The fold-out's "Time and
+  date" row needs to say it opens today's editor.
+- **L19, USB drive refusal.** The "Not allowed! Please unmount disk in PC first!" state (`scope_display_error`) is not
+  drawn on UsbDrive.
+- **L20, the volts step at first run.** FirstRun does not say, when sector 708 was missing (`calibrationfail`), that
+  the volts calibration needs a DC supply.
+- **L24, hidden hit areas.** The live but invisible diagnostics toggles at x 328-378, y 30-220 must not survive the
+  rewrite.
+- **"RTC module: on" is the wrong name.** `onoffRTC` does not say whether a module is fitted (that is detected at
+  boot). It switches the top-bar clock and the file time stamps (`fnirsi_1013d_scope.c` RTC block,
+  `scope_setup_bottom_file_menu`). Call it "Clock and file stamps".
+- **The fold-out has one row more than the plan lists.** The plan's fold-out list has five rows; the board adds the
+  RTC row (six rows, 349 px).
+- **No board for the X-Y display or for Phosphor in X-Y.** Today phosphor works in X-Y (README); the exclusive Display
+  values lose it (L10, N2). The owner holds the Display question, but the combination is a function to decide on, not
+  a placement detail.
+- **The Spectrum row in roll mode (D10).** Today it is hidden in roll mode (README "Removed and hidden menu
+  options"). The plan's fixed menu order does not say what happens then.
+- **Log page values.** It still shows "FFT 4096 points 2.7 ms", which nothing measures outside FFT_BENCH builds. The
+  README gives 10.9 ms for 4096 points.
+- **Wizard dimming needs a new routine (inference).** The firmware has no alpha blend in `display_lib.c`. A one-time
+  darken pass over 800 x 480 RGB565 is about 384 k pixel accesses, of the order of 50 ms at the README's 90 cycles per
+  uncached access. That is acceptable once per wizard step, but it is a routine to write.
+
+**A12. Plan text contradicted by itself or the boards.**
+- **Spectrum slots.** Section 3 says "T CURSOR, V CURSOR, MEASURES and SAVE WAVE stay empty ...; SAVE WAVE stays".
+  Delete "and SAVE WAVE" from the first half; the board keeps SAVE WAVE.
+- **Warning position.** Section 3 puts warnings at "y 70, under the spectrum header", but the header is gone (same
+  section). Say "y 70 in every mode".
+- **Section 4 is stale.** It still says "CTRL pages rebuilt around fold-outs (... V/div per channel, and in Spectrum
+  View ...)". V/div is now steppers and View is now Display (ce3ef70, f9226ff).
+- **Section 7 step 2 is stale too.** It still lists "V/div per channel" fold-outs and "View".
+- **Volts calibration function name.** Section 6a names `scope_input_calibration`. The function is
+  `scope_show_Input_calibration`, with the touch flow `calibrationopen` 2-9 in `handle_main_menu_touch`.
+
+**A13. Text that does not fit the device fonts.** Estimated at 6.7 px per character for the 13 px font and 7.1 px for
+the 16 px font.
+
+| Board, text | Space | Width | Fix |
+|---|---|---|---|
+| Scope, Spectrum cards "Freq: 1.000kHz", "Peak: 1.000kHz", "Level: +2.7dBV" (14 characters, font_2) | about 92 px after the chip | about 94 px | Drop the space after the colon ("Freq:1.000kHz", 87 px), or three significant digits for frequencies ("1.00kHz", as the plan's "four significant digits" rule already implies for "500us") |
+| SpectrumCtrl, "Analysis" on a 51 px button (font_2) | 51 px | about 54 px | "Analyse" is 47 px, or "FFT" with the length under it |
+| ScopeCtrl / SpectrumCtrl steppers: V+ and V- bars 28 px, hit areas 41 px (board boxes) | 44 px minimum adopted in `diagnostics-review.md` finding 11 | 41 px | Accept: the plan extends each hit area into half the centre (about 45 px); make the firmware's areas match the plan, not the board's 41 px boxes |
+
+Everything else checked fits: top-bar chips, the main menu rows, the fold-out rows (190-242 px), Settings rows, AcqMenu
+(380 px, with "pass 15 ms" and "Filter on: up to 6000" inside the 70 px memory column), the wizard lines (pre-broken,
+the longest about 480 px in a 582 px box), Confirm, ConfirmFel, Developer, FirstRun and the Calibration button rows
+(about 654 px in two rows, Clear calibration set apart by an automatic margin).
+
+### 6.2 Part B: measurements
+
+#### B1. What the cards show today
+
+| Item | Today (source) |
+|---|---|
+| Metrics | 12 per channel: Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq ("Freg" in the label table), Cycle, Time+, Time-, Duty+, Duty- (`variables.c` `measurement_names`, `scope_functions.c` `measurementfunctions[12]`) |
+| Selection | Per channel, any subset of the 12, saved at power-off (`scopesettings.measuresstate[2][12]`, `MEASUREMENT_SETTING_OFFSET`). The Measures menu is a 499 x 246 box at 232,232 with a source row and the 12 items per channel, plus Select All, Clear and Hide (`scope_open_measures_menu`) |
+| Sources | The CH1 block measures CH1 or one of REF1-4, the CH2 block CH2 or one of REF5-8 (`source1_measures`, `source2_measures`; `scope_display_measurements`). A block shows when its channel or any of its references is on and Hide is off |
+| Layout and count | 118 x 22 tiles, 3 per row per block (CH1 from x 5, CH2 from x 366), rows stacking upward by 24 px from y 426. Up to 4 rows: all 24 metrics fit, covering y 354-448 of the plot. Not drawn in roll mode (`!long_mode`) |
+| Computation | During the readout itself (`fpga_control.c` `fpga_read_sample_data` / `fpga_read_adc_data`), over the whole record (`samplecount`), not the screen window: min, max, sum and sum of squares of the codes, then average, `rms = isqrt(sum((code-128)^2) / n)`, peak-peak, centre |
+| What the volts mean | Vrms is the RMS about 0 V (DC included), not the AC RMS. Vp is the larger of max and min from 0 V. All voltages are at code resolution (1 of 256 over 8 divisions in the 8-bit path; the 16-bit filtered path is finer) |
+| Timing metrics | Rising and falling crossings with hysteresis: centre from `maxDC` and `minDC` plus or minus (peak-peak / 10 + 2) codes. Period, high time and low time are averaged over all whole periods in the record. Freq, Cycle, Time+/- and Duty+/- read "xxx" with fewer than 3 crossings |
+| Cursor readouts | A separate box at 25,49: time cursors give dT and 1/dT ("T", "F"), volt cursors give dV per channel (`scope_display_cursor_measurements`). Not cards |
+
+**Whose implementation.** The 12-metric table, the tile drawing (name in a coloured box, value at x+55, `font_0`), the
+row stacking, the "Freg" typo and the computation in the readout loop are pecostm32's. His tree has them at y 456
+(`D:\src\FNIRSI_1013D_Firmware`, `scope_functions.c` `scope_display_channel_measurements`, `variables.c`
+`measurement_names`). Atlan's 1.00o5 added:
+- the cards' move to y 426, above the record-position slider (comment "456 move up - long base");
+- the reference-trace sources and Hide per channel;
+- hiding in roll mode;
+- the threshold centred on `minDC` / `maxDC` instead of min / max.
+
+The stock FNIRSI firmware is a binary. Its look (a channel chip with the digit, then "Metric: value") is known only
+from product photos, as plan section 3 says. pecostm32 reproduced its metric list. Whether stock computes the same way
+cannot be told from the sources (inference: the same 12 names suggest the same record statistics).
+
+#### B2. Proposed measurement set per mode
+
+The basis: the owner's use is a VLF and pulse-induction metal detector (AGENTS.md). Its time-domain questions are the
+TX pulse (width, repetition, amplitude, flyback peak), the RX decay (level at a delay after the pulse end, time
+constant) and the phase between the TX and RX channels (VLF ground balance). Its frequency-domain questions are the
+tone, its harmonics and the noise floor. The proposal keeps the card scheme and the Measures menu, and adds per-mode
+lists.
+
+**(1) Already computed: needs only a card.**
+
+| Mode | Metric | From |
+|---|---|---|
+| Scope | the 12 above | record statistics |
+| Scope | Vac rms = sqrt(rms^2 - avg^2) | the two existing sums; one isqrt per pass |
+| Scope | Cursor dT, 1/dT, dV as cards on request (the box stays) | `scope_display_cursor_measurements` |
+| Spectrum | Peak frequency and level per channel; RBW | `spectrum.c` header values (the plan already draws these) |
+| Spectrum | Waterfall span time | header value (A4) |
+| Phosphor | Records per second | `phosphor.c` status ("55 wfm/s"; A8) |
+| All | Sample rate, record length | already in the top bar; no card |
+
+**(2) Cheap to add on the device.** One pass over the record (3000-8190 samples) or over the FFT bins (up to 2048),
+integer arithmetic, no `double` (AGENTS.md).
+
+| Mode | Metric | Method and caveat |
+|---|---|---|
+| Scope | Top, Base, Amplitude (top - base) | 256-bin code histogram in the readout loop, mode of the upper and lower halves. Needed for every edge metric |
+| Scope | Rise time, fall time (10-90 %) | Crossing interpolation between top and base. Floor about 12 ns from the ~30 MHz front end and 5 ns per sample at 200 MS/s; show "<15ns" below that |
+| Scope | Overshoot, preshoot (%) | Max and min against top and base |
+| Scope | +Width, -Width per pulse; Pulse count; Burst width | The existing crossings, per edge instead of averaged |
+| Scope | Cycle mean, cycle RMS (whole periods only) | Restrict the sums to the first and last rising crossing. This removes the truncation error of today's whole-record Vavg and Vrms, which is large with few periods on screen, the normal case for slow PI waveforms |
+| Scope | Delay CH1 to CH2, Phase CH1 to CH2 (degrees) | The two channels' rising crossings with the same hysteresis. Phase = 360 x delay / period. The VLF ground-balance number. Also the main card in X-Y |
+| Scope | Gain CH2/CH1 (dB) | Ratio of the AC RMS values. Together with Phase it gives a one-frequency Bode point |
+| Scope | Gated statistics: Vavg, Vrms, Vmax, Vmin between the time cursors | The same sums over the cursor window. For PI: "level at t after the pulse" with the time cursors as gate |
+| Scope | Decay time constant tau | Least-squares fit of ln(v - base) over the cursor gate (fixed-point log table, one pass). The PI target-response number; show its gate on the plot |
+| Scope | Area (V·s) over the gate | Sum x dt. Pulse energy into a known coil |
+| Spectrum | Peak frequency with sub-bin accuracy | Parabolic fit of the log magnitude over 3 bins (Hann: about 0.1 bin) |
+| Spectrum | H2, H3 (dBc) and THD (%) | Bins at 2f and 3f, and up to the 10th harmonic below the axis cap. Needs f0 > 2 RBW and the harmonics inside the span; else "--" |
+| Spectrum | SFDR (dBc) | Highest bin except the fundamental and the DC bins |
+| Spectrum | Noise floor (dBV/rtHz) | Median of the bins, corrected by the window's ENBW and RBW. Must use unaveraged or power-averaged bins: today's dB average reads about 2.5 dB low on noise (README "Header and averaging") |
+| Spectrum | SNR, SINAD | From the fundamental, the harmonics and the noise sum |
+| Spectrum | Band power (dBV) between the start and stop of the view; Occupied bandwidth (99 %) | Parseval sum of the bins with the ENBW correction |
+| Phosphor | Records per second; Hits in the gate (count of records touching a cursor box) | phosphor map counters; the second is the first step towards mask testing (roadmap section 8 item 7) |
+| X-Y | Phase, Gain CH2/CH1 | As in Scope |
+| Bode (when it ships) | f at peak, peak gain; f-3dB low and high, bandwidth, Q = f0 / BW; phase at f0; slope (dB/decade) at both ends; gain and phase margins when a loop is measured | From the sweep table. For coil tuning the key pair is resonance frequency and Q |
+
+**(3) Needs FPGA or hardware work** (roadmap section 8 item 6).
+
+| Metric | Why hardware |
+|---|---|
+| Frequency and period from a 200 MHz counter, reciprocal, gate time selectable | Resolution independent of the record length and time base: 1 kHz to about 7 digits in 1 s, against today's 3-4 digits |
+| Pulse width, duty and edge count over every edge, not only the record's | Catches runts and rare widths between records (the phosphor's 1-in-1000 problem) |
+| Running min / max over all samples, including between records | Peak detect at 200 MS/s regardless of the time base |
+| 4-digit DVM at CIC rates | Roadmap item 7; needs calibration v2+ (done) and a slow filtered path |
+
+**Configuration through MEASURES, per mode.** One Measures menu per mode, with the same layout (source row, list,
+Select All, Clear, Hide) and its own `measuresstate` per mode in the settings sector (spare words 211-255). The source
+row keeps the reference traces in Scope. In Spectrum it chooses CH1, CH2 or both, which also answers A1 if the
+analysed channel follows the card source. The menu's 12 places per channel fit the Scope list (12 today plus 8 from
+category 2, so it needs a second page or a scroll). Spectrum needs about 10, X-Y 2, Bode 8.
+
+**Default card sets (proposal).**
+
+| Mode | CH1 | CH2 (when on) | System chip |
+|---|---|---|---|
+| Scope | Freq, Vpp, Vavg | Freq, Vpp, Phase (CH1 to CH2) | none |
+| Phosphor | Freq, Vpp | Freq, Vpp | wfm/s |
+| Spectrum | Peak, Level, THD | Peak, Level | RBW |
+| X-Y | Phase, Gain | none | none |
+| Bode | f0, Peak, Q, f-3dB | none | none |
+
+Today a new unit shows no cards: `scope_reset_config_data` has the comment "Enable some default measurements" and
+sets none (only the sources and Hide). Defaults per mode give a new user a working screen. Freq,
+Vpp and Vavg are what a bench user reads first, and Phase is the VLF number. Keep the defaults to three cards per
+channel so that they stay in one row and do not cover the trace.
