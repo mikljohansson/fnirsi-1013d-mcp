@@ -31,6 +31,28 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.66 - 2026-10-19 (protocol 1.20 provisional, docs/protocol.md section 14 row 60)
+
+- Added: a Bode plot on the scope. The generator menu has a fourth row, "Bode plot": it opens a mode that sweeps the
+  calibration post's square from Start to Stop and plots H = CH2 / CH1 as magnitude and phase over a log frequency axis,
+  with the -3 dB, peak and phase-crossing markers, a cursor (tap or drag on the plot) and cards for f, |H|, phase, the
+  -3 dB frequency (or the peak and Q) and the progress. RUN repeats sweeps, STOP ends after the point in progress, AUTO SET
+  runs one sweep. The CTRL page holds Sweep (Start and Stop in 1-2-5 steps, Points 10 / 20 / 50 / 100, Settle Fast /
+  Normal / Resonant / High Q, CH2 range Auto or Hold, Run sweep) and Thru (measure with both tips on the DUT input, apply,
+  clear). The sweep is the host tool's (`scope_bode_sweep`): the same frequency plan, the pre-scan and ranging, the
+  background capture, the settle retry, CH2 auto-ranging with the splice and the same quality flags, without a PC.
+  Leaving the mode gives the generator, the channels, the time base, the trigger source and RUN / STOP back. The
+  settings are kept in settings words 220-221. The wiring is shown in the plot until the first sweep (DUT ground on the
+  probe ground clips). Needs the decimation filter (AL3 0x1534+). (bode_dsp.c, bode_sweep.c, bode_view.c, pc_bode.c)
+- Added: protocol 1.20 (provisional number), BODE_CTRL (0x0211: settings, run one or repeated sweeps, stop, abort, thru
+  measure / apply / clear, open / close the view; answers the state and the estimated duration) and READ_BODE (0x0212:
+  the table of the latest sweep, 20 bytes per point: the DDS period M, f, |H|, phase, V1, V2, ranges, flags). GET_STATUS
+  `display_mode` 5 = Bode plot; features bit 5 = the bitstream can run it.
+- Tests: `host_tests/test_bode.py` checks the device planner against `docs/bode-plan-vectors.json` and 3300 random plans of
+  the host tool, and the device's H, levels, noise, leakage and half-record check against `measure_pair` on the
+  simulator's RC (within 0.002 dB / 0.002 deg); `host_tests/test_bode_sweep.c` runs the engine on a DUT model (RC,
+  divider, wiring B saturation, Hold, STOP, thru). Two new request vectors (`req_bode_ctrl`, `req_read_bode`).
+
 #### 0.2.61 - 2026-10-19 (protocol 1.18, docs/protocol.md section 14 row 57)
 
 - Fixed: after a sample-rate change the FPGA can garble one ADC core's 200 MSa/s data. This happens randomly on AL3

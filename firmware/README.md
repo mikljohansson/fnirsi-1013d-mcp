@@ -1103,6 +1103,103 @@ typically 1-4 ms on top of the scope view's pass (30 ms estimated before the MMU
 per pass. Memory: 582 KB of maps in `.bss`; the code-to-row tables and palettes in on-chip SRAM A at 0x0400-0x0FFF.
 Bench check: GET_STATUS `pass_ms` with the view on vs off.
 
+### Bode plot (`bode_view.c`, fw 0.2.66)
+
+Frequency response of a passive two-port (a filter, a divider, a tank) measured on the scope alone: the calibration
+post's DDS square drives the DUT, CH1 reads its input, CH2 its output, and the view plots H = CH2 / CH1 as magnitude and
+phase over a log frequency axis. The same measurement the host tool `scope_bode_sweep` / `fnirsi1013d-bode` makes
+(accepted on the bench 2026-10-19, docs/hardware-status.md 14:35-15:25), with the same frequency plan and the same
+per-point steps, here as a main-loop state machine. Design: `docs/plans/bode-design.md` (sections 1-4, steps D1-D4);
+protocol: `docs/protocol.md` section 14 row 60.
+
+**Wiring** (shown in the plot until the first sweep): calibration post to the DUT input, CH1 tip on the DUT input, CH2 tip
+on the DUT output, the DUT ground on the probe ground clips (wiring A, the bench default since 2026-10-19). The post is a
+3.1 Vpp square through 1 kOhm (R21); H = CH2 / CH1 does not depend on that source as long as CH1 touches the DUT input.
+Passive DUTs or buffered inputs only: the 1 kOhm is the post's only protection (never a coil, a MOSFET drain or anything
+that can drive the post). With the DUT ground on the USB shell instead (wiring B) the DUT sits 1.24 V below the probe
+reference and saturates CH2 on 0.1 and 0.2 V/div: CH2 range Auto steps up by itself (flag ch2_overload), Hold stops with
+a warning.
+
+**Entering and leaving.** The generator menu (top bar) has a fourth row, "Bode plot", with Open; in the view it reads
+Close. The main menu's Scope or Spectrum analyser row also leaves the view. On entry the view takes the generator, both
+channels (enabled, DC coupled, ranges and offsets of the sweep), the time base (raw dividers) and RUN / STOP; an EXT
+trigger is set to CH1 (the pin is the generator's) with a note. Leaving gives every one of them back as it was. Nothing
+is driven until a sweep starts: entering shows the wiring and STOP. Not available on bitstreams without the decimation
+filter (the row reads "FPGA 0x1534+") or in the picture / waveform viewers; roll mode is switched off on entry.
+
+**Screen** (trace area): the magnitude pane (y 60..276, 6 divisions; 5, 10 or 20 dB per division and the top line chosen
+from the data), the phase pane (y 292..408, +180..-180 deg at 90 deg per division), a shared log frequency axis from
+Start to Stop with decade lines, 2 and 5 sub-lines and decade labels ("100", "1k", "10k"). Magnitude in the CH2 colour,
+phase in pink, points as dots joined by lines; flagged points grey without lines. White triangles mark the -3 dB
+crossings (relative to the higher end; for a resonance relative to the peak), the peak of a resonance and the phase
+crossings at +-45, +-90, -135 and -180 deg. While sweeping a dotted grey line marks the point being measured. A tap in
+the plot puts the cursor on the nearest point, a drag moves it. Cards: the cursor's f, |H| and Phase; -3dB (or Peak and
+Q for a resonance); Sweep "measured/planned"; Thru "applied" (green) or "stale" (amber) while a thru calibration is
+divided out. The warning line at the top middle (one at a time, consequence and action): a stopped sweep's reason, "Thru
+sweep: both probe tips on the DUT input", "CH2 overrange: set CH2 range Auto or raise its V/div", "CH1 level low: the DUT
+input loads the 1 kOhm source", "N points not settled: choose a longer Settle", "N points near the floor: shown grey",
+"Thru does not match this sweep: measure Thru again", "Offset limit reached: the DUT's DC level is beyond the range",
+"The trigger was EXT (the generator's pin): set to CH1" (5 s).
+
+**Controls.** RUN repeats sweeps (each overwrites the table point by point); STOP ends the sweep after the point in
+progress and keeps what was measured; AUTO SET runs one sweep (it reads "Auto..." meanwhile; a second tap ends it after the
+point). The right bar's first page shows CTRL, RUN/STOP, AUTO SET, SAVE PIC and SAVE WAVE (the cursor and measurement slots
+are empty, as in the spectrum). The CTRL page:
+
+| button | fold-out rows | values |
+|---|---|---|
+| Sweep ("50 pt") | Start (- / +) | 1 Hz .. 5 MHz in 1-2-5 steps (default 100 Hz) |
+| | Stop (- / +) | 10 Hz .. 10 MHz (default 1 MHz); Start stays below Stop |
+| | Points | 10, 20, 50 (default), 100: log spaced, merged where two round to the same DDS period |
+| | Settle | Fast 3, Normal 10 (default), Resonant 50, High Q 200 periods before each record |
+| | CH2 range | Auto (down-ranging with the splice) or Hold (CH2's range when the sweep starts: set it in the CH2 menu) |
+| | Run sweep / Stop sweep | one sweep (closes the panel) |
+| Thru ("None", "On", "Off", "Stale", "Meas.") | Measure thru | one sweep with both probe tips on the DUT input; stored (RAM) and applied |
+| | Apply (switch) | divide the thru out of the sweeps (second line: matches this sweep / other sweep settings / none measured) |
+| | Clear | forget it |
+| Grid | | the grid dots, as in the other modes |
+
+The stepper and 50 % TRIG slots stay empty: the sweep ranges both channels itself.
+
+**A sweep** (bode_sweep.c, the host tool's runner): the plan (f = 50 MHz / M; CIC3 + FIR at N = 16 x 2^k below 1.5 MHz with
+257..512 samples per period below 24 kHz, legacy 200 MSa/s above; a coherent record of at least 8 periods and 2048
+samples), a pre-scan at the first frequency on range 1 that picks both ranges (85 % of full scale) and centres the
+offsets (up to four checks), then per point: a background capture with the generator off once per rate and CH2 range
+(the near-floor flag), the settle time (three times the preset at the first point and after the generator was off),
+the capture (FPGA auto, pretrigger 0), the single-bin DFT of both channels at the exact DDS frequency, re-centring when a
+record's mean is more than 12 codes off, one retry with twice the settle when the two record halves disagree by more
+than 0.1 dB / 1 deg beyond noise, the flags, and CH2 auto-ranging with the splice. Estimated durations (BODE_CTRL
+answers the estimate; about 15 ms per capture assumed, to be measured): 30 points 1 kHz - 300 kHz about 1.2 s, 50 points
+100 Hz - 1 MHz about 3.7 s, 50 points 10 Hz - 100 kHz about 27 s (the lowest decade's periods and its background capture
+dominate).
+
+**Flags** (READ_BODE bits; grey on the screen when invalid): ch1_clipped, clipped (CH2), ch2_overload, low_snr,
+near_floor, unsettled, incoherent make a point invalid; ch1_low, ch2_small, spliced, fir_off, retried, and with the thru
+no_cal, cal_range, cal_flagged are informative.
+
+**Host.** BODE_CTRL starts, stops and configures sweeps and the thru calibration and opens / closes the view; READ_BODE
+reads the table (|H|, phase, V1, V2, ranges, flags per point, the M of each point). GET_STATUS byte 43 = 5 while the view
+shows; the features word's bit 5 says the bitstream can do it. The MCP side (`where="device"` for scope_bode_sweep) is
+mcp's to add.
+
+**Settings**: Start, Stop, Points, Settle and CH2 range are saved at power-off in settings words 220-221 (markers 0xB000 /
+0xB100); the view itself is not restored (the scope boots into the scope view), and the thru calibration is not saved.
+
+**Files**: `bode_dsp.c/.h` (planner, DFT, levels, CORDIC, markers; host_tests/test_bode.py against the host tool and the
+plan vectors), `bode_sweep.c/.h` (the engine behind a `bode_hw` table, the READ_BODE codec; host_tests/test_bode_sweep.c
+on a DUT model), `bode_view.c/.h` (the mode, drawing, CTRL page, generator menu row, BODE_CTRL actions), `pc_bode.c`
+(the scope's `bode_hw`: raw divider, the arm with this capture's filter configuration, the 1.00o5 readout and its
+scales). Hooks: `PC_BODE_PASS` at the top of `scope_acquire_trace_data`, `PC_GEN_BODE_DRAW` / `PC_GEN_BODE_HIT` in the
+generator menu, the spectrum glue (`pc_glue_spectrum_display / touch`, `pc_glue_autoset`) asks the view first,
+`ctrl_page_draw / touch` hand the page over, `pc_glue_main_menu_mode` closes the view, `pc_right_bar_follow` follows it.
+Memory: about 95 KB more `.bss` (the engine's tables and DFT scratch, 32 KB of legacy record copies), 54 KB more code.
+
+**Limits / not built**: CH2 is always DC coupled (the host tool's `ch2_coupling='ac'` for wiring B is not on the device);
+no harmonic fast mode and no impedance mode (bode-design D5); the screen's markers interpolate linearly in log f (the
+host: a monotone cubic; they agree within the point spacing); the noise estimate is the median of period differences (the
+host: the median over FFT bins), so a transient lasting most of the record reads low_snr rather than unsettled; Diagnostics
+stops a running sweep.
+
 ### Firmware auto trigger mode (fw 0.2.41)
 
 The FPGA's auto time-out (0x0E) counts samples, i.e. one record length: 0.3 ms at 10 MS/s with 3000 samples, so a

@@ -538,11 +538,16 @@ static void test_divider_floor(void)
 
   printf("  divider: %d points within 0.05 dB of %.2f dB\n", bode_count(&eng), want);
 
-  //Estimate: 50 points 100 Hz - 1 MHz in a few seconds (design 3.7: about 2 s on the device)
+  //Estimate: 50 points 100 Hz - 1 MHz in a few seconds (design 3.7: about 2 s on the device without the background
+  //and ranging captures)
   c = cfg(100, 1e6, 50, BODE_SETTLE_NORMAL, BODE_CH2_AUTO);
   printf("  estimate 100 Hz - 1 MHz / 50: %u ms\n", bode_estimate_ms(&c));
   T_TRUE(bode_estimate_ms(&c) > 1000);
   T_TRUE(bode_estimate_ms(&c) < 6000);
+  c = cfg(1000, 300e3, 30, BODE_SETTLE_NORMAL, BODE_CH2_AUTO);
+  printf("  estimate 1 kHz - 300 kHz / 30: %u ms\n", bode_estimate_ms(&c));
+  c = cfg(10, 100e3, 50, BODE_SETTLE_NORMAL, BODE_CH2_AUTO);
+  printf("  estimate 10 Hz - 100 kHz / 50: %u ms\n", bode_estimate_ms(&c));
 }
 
 int main(void)

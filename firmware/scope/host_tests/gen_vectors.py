@@ -29,7 +29,7 @@ CMDS = {
     "ARM": 0x0200, "FORCE": 0x0201, "STOP": 0x0202, "WAIT": 0x0203, "READ_RAW": 0x0204,
     "READ_TRACE": 0x0205, "READ_LIVE": 0x0206, "ACQUIRE_AVG": 0x0207,
     "SET_ACQ_STATE": 0x0208, "GET_CAPTURE_INFO": 0x0209, "GET_DECIM": 0x020C, "SET_DECIM": 0x020D,
-    "SET_SEQ": 0x020E, "GET_SEQ": 0x020F, "READ_SEQ": 0x0210,
+    "SET_SEQ": 0x020E, "GET_SEQ": 0x020F, "READ_SEQ": 0x0210, "BODE_CTRL": 0x0211, "READ_BODE": 0x0212,
     "SD_INFO": 0x0500, "SD_READ_SECTORS": 0x0501, "SD_STAGE": 0x0502, "SD_WRITE_SECTORS": 0x0503,
     "SAVE_REPORT": 0x0504,
     "GET_GEN": 0x0300, "SET_GEN": 0x0301, "GET_CAL": 0x0400, "READ_SCREEN": 0x0401,
@@ -106,6 +106,10 @@ REQUESTS = [
     ("READ_SCREEN", struct.pack("<HH", 0, 40), "rows 0..39"),
     ("DEBUG_FPGA", bytes([1, 1, 0x06, 3, 2]), "write command 0x06, read 2 bytes (FPGA version)"),
     ("ENTER_FEL", struct.pack("<I", 0x4C45465F), "magic 'FEL_' little-endian"),
+    # appended (fw 0.2.66): new requests go at the end so the earlier vectors keep their sequence numbers
+    ("BODE_CTRL", struct.pack("<BBBBIIHH", 1, 1, 1, 0, 10_000, 100_000_000, 50, 0),
+     "1.20: run one Bode sweep, settings apply: Normal settle, CH2 auto, 100 Hz (10,000 cHz) .. 1 MHz, 50 points"),
+    ("READ_BODE", struct.pack("<HHI", 0, 0, 0), "1.20: the Bode header and every row that fits"),
 ]
 
 

@@ -46,6 +46,8 @@
   "SET_SEQ": 526,
   "GET_SEQ": 527,
   "READ_SEQ": 528,
+  "BODE_CTRL": 529,
+  "READ_BODE": 530,
   "SD_INFO": 1280,
   "SD_READ_SECTORS": 1281,
   "SD_STAGE": 1282,
@@ -6149,6 +6151,58 @@
      "flags": 0,
      "len": 4,
      "payload": "5f46454c",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_bode_ctrl",
+   "description": "1.20: run one Bode sweep, settings apply: Normal settle, CH2 auto, 100 Hz (10,000 cHz) .. 1 MHz, 50 points",
+   "hex": "a51301001102320000001000000012d0010101001027000000e1f50532000000a10dd2b7",
+   "frames": [
+    {
+     "cmd": 529,
+     "seq": 50,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "010101001027000000e1f50532000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 529,
+     "seq": 50,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "010101001027000000e1f50532000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_read_bode",
+   "description": "1.20: the Bode header and every row that fits",
+   "hex": "a5130100120233000000080000006ab8000000000000000069df2265",
+   "frames": [
+    {
+     "cmd": 530,
+     "seq": 51,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 530,
+     "seq": 51,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0000000000000000",
      "event": "frame"
     }
    ]
