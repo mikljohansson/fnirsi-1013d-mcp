@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include "pc_decim.h"
 #include "adc_cal.h"
+#include "acal_track.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Front end channel state as the firmware keeps it (CHANNELSETTINGS subset)
@@ -49,6 +50,8 @@ typedef struct
   uint8_t  cal2_loaded;         //sector 708 calibration data v3 block valid (in use only while bound to cal_offset)
   uint32_t divider;             //0x0D value last written (clock class of the correction)
   acal_channel cal2;            //the channel's v3 data (zeros when not loaded)
+  acal_track   trk;             //1.14: calibration v4 A - B tracker of the channel (snapshot, acal_live.c)
+  acal_cm      cm;              //1.14: full-class common mode from the class probe (snapshot)
 } pc_hw_channel;
 
 void     pc_hal_channel_read(int ch, pc_hw_channel *c);

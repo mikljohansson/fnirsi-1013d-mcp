@@ -1,8 +1,8 @@
 # firmware/ handoff for agents
 
-**Current state (2026-10-19): latest build fw 0.2.49** (fw-usb2, branch `fw-usb2`, **section 27**: USB suspend watch,
-inferred resume, soft reconnect after a host abandoned the device; protocol 1.14) on fw-mmu's 0.2.48 (MMU + D-cache,
-section 26) on 0.2.47 (fw-gen7, **section 25**: dead-code purge,
+**Current state (coordinator merge, 2026-10-19): latest build fw 0.2.50, protocol 1.15** (fw-cal3's calibration wizard, interleave
+tracking and class probe, **section 28**, merged on fw-usb2's 0.2.49 USB suspend watch, **section 27**; the merge renumbered fw-cal3's
+protocol change from 1.14 / row 53 to 1.15 / row 54 because fw-usb2 took 1.14 / row 53) on fw-mmu's 0.2.48 (MMU + D-cache, section 26).
 reproducible images, 16-bit trigger level fix; protocol 1.13 unchanged) on 0.2.46 (protocol 1.13: digital phosphor view,
 section 24) on fw-cal2's 0.2.45 (protocol 1.12: calibration data v3, a gain per ADC core and clock class from a gain step at the
 calibration post, **section 23**) on fw-gen6's 0.2.44 (protocol 1.11: FPGA 0x1535 FIR support, spectrum strip repaint fix,
@@ -38,6 +38,9 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
                            host-buildable (section 19)
   adc_cal.c/.h             calibration data v3: per-core zero and gain model, sector 708 block, correction maths,
                            zero and gain step checks. Pure C, host-buildable (sections 21, 23)
+  cal_wiz.c/.h             calibration wizard steps: state machine, actions, summary texts. Pure C, host-buildable
+                           (host_tests/test_cal_wizard.c; section 27)
+  cal_wiz_ui.c             the wizard's full-screen view, touch loop and the zero / gain measurements (section 27)
   phos_map.c/.h            phosphor hit-count map: rasteriser, decay, render, palettes. Pure C, host-buildable (section 24)
   phosphor.c/.h            phosphor view (main menu row 7, strip, hooks in scope_display_trace_data; section 24)
   pc_mmu.c/.h              flat page table (builder + walk host-buildable), MMU enable; pc_mmu_off in start.s (section 26)
@@ -240,6 +243,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.46 | 1b6359f | cdba5b51 | digital phosphor view (main menu row 7; Persistence / Palette / Clear strip; XY), GET_STATUS byte 43 = 4 (protocol 1.13, row 52), settings word 210 (fw-phosphor, section 24) | built, host-tested (test_phosphor 95 checks); bench steps in section 24 |
 | 0.2.48 | b1922c3 | 2f768fd9 | MMU + D-cache on (flat map, DDR / SRAM write-back, framebuffer write-through, restart record and peripherals strongly ordered), clean + off at _reset and ENTER_FEL, GET_LINK_STATS 58-59 fault status / address (fw-mmu, section 26) | built, host-tested (test_mmu); A/B image `make gcc10-nommu` 0.2.48-nommu sha256 45e03f7f; bench sequence in section 26 |
 | 0.2.49 | c477faa | 90f460d6 | USB suspend watch in the 1 ms tick (pc_usbw.c): inferred resume (SOFs, EP0 setup, EP2 OUT while suspended) acts, soft reconnect (SoftConn off 1 s) after a retry storm or 15 min suspended, GET_LINK_STATS 60-61, event type 20, SUSPEND before RESUME in the ISR (protocol 1.14, row 53; fw-usb2, section 27) | built, host-tested (test_usbw 90 checks); A/B `make gcc10-nommu` sha256 f5f377ea; bench plan in section 27 |
+| 0.2.50 | e871c50 | 1b55efc2 | calibration wizard (one modal three-step flow, 48e5737) and calibration v4: A - B interleave tracker applied in the full class, full-class common-mode class probe, GET_CAL 288 bytes, diagnostics lines (protocol 1.14, row 53; fw-cal3, section 28) | built, host-tested; bench lists README 6.4 and 6.5 |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -1262,3 +1266,75 @@ then GET_EVENT_LOG (with the bus ring) and GET_LINK_STATS before anything else.
 (a) only, 0.2.49 already fixes the session side and the loss needs another explanation; if (b) / (c), the soft
 reconnect is the recovery, and the resume path itself remains a candidate for a bus trace (a USB analyser, or Linux
 usbmon on the host side with `echo auto > power/control` to force a selective suspend of the port).
+## 28. fw-cal3: calibration wizard and interleave tracking (fw 0.2.50, protocol 1.15 after the merge; the branch said 1.14 / row 53)
+
+User-facing spec, layout, coordinates and the bench list: README section 6.4. Points for a successor:
+- `cal_wiz.c` is the whole step logic: states CW_*, button events, actions the glue runs (`cw_take`: ZERO, PREPARE,
+  GAIN_LEVEL, GAIN_MEASURE, COMMIT, DISCARD) and results fed back (`cw_zero_result`, `cw_level_result`,
+  `cw_gain_result`). Change behaviour there, with a test in `test_cal_wizard.c`; `cal_wiz_ui.c` only draws and runs.
+- The zero / gain measurement helpers (`cal_channel`, `cal_gain_check` + `cal_gain_measure`, the split of the old
+  `cal_gain_channel`) live static in `cal_wiz_ui.c`; `scope_do_baseline_calibration`, `scope_do_gain_calibration`,
+  `calibration_fail_reason`, `calibrationopen` 1 and 10 and their menu.c boxes are gone. `calibrationopen` 2..9 (the
+  1.00o5 input-divider calibration) is unchanged and is entered after Done while `calibrationfail` is set.
+- Measurements batch: `cal_begin` before the first measurement action of a touch, `cal_end` after the last
+  (channels, sample rate, trigger mode, generator after a gain action). The trigger mode is now restored (the old code
+  left Auto) and the channels' dcoffset is not zeroed any more.
+- `cal_wizard_committed()` (weak, empty, scope_functions.c) runs after Done wrote something: the calibration v4
+  tracker reset belongs there.
+- Skip in step 1 needs a block bound to both channels (`acal_bound`), so step 2 always has zeros; a channel skipped in
+  step 2 keeps what the working copy has (carried gains with flag KEPT after new zeros, or the block's own gains).
+- Screen: saved to `displaybuffer4` (was unused), the view drawn in `displaybuffertmp` and copied.
+
+**Calibration v4 (interleave tracking), as built.** Commits on `fw-cal3` (from d867610): 5f6bc0d (protocol row 53 on the branch, row 54 / 1.15 on main,
+0.2.50, spec first), 7cfc7f7 (tracker wiring, acal_cm pure parts, GET_CAL 288, test_session), 93087b2 (class probe
+scheduler, test_acal_track (j)), 4cd60f7 (diagnostics lines), e871c50 (README 6.5, CHANGELOG, task queue), then this
+handoff. Image from e871c50: `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 502,784 B, sha256
+1b55efc2636f488a41e15a447a0ab99a79a287d4d2972657b7b55e2f263d601c; not pinned in backups/. **Nothing benched.** Host
+tests: test_session 68981 / 68979 (debug), test_acal_track 577, test_adc_cal 59717, test_cal_wizard 1076, all suites
+green, check_vectors OK (81 frames, 163 decim, adc_cal_v3). Warnings (clean builds, sorted lists identical to d867610):
+GCC 10 36, GCC 13 31, PC_DEBUG 31; acal_track.c / acal_live.c clean with -Wextra.
+
+- Files: `acal_track.c/.h` (pure: estimator, solve, `acal_track_apply`, and the class-probe parts `acal_cm_probe`,
+  `acal_cm_apply`, `acal_cm_mean_q8`, `acal_v4_apply` = cm then split), `acal_live.c/.h` (target: `acal_trk[2]`,
+  `acal_cms[2]`, the hooks, `cal_wizard_committed` now defined here, the probe scheduler behind `PC_CAL_CLASS_PROBE`,
+  default 1). Hooks: `fpga_channel_correction` calls `acal_live_apply` (so the readout, the 16-bit trigger level in
+  pc_dec_apply and the diagnostics all see v4), `fpga_prepare_correction` calls `acal_live_prepared` (remembers class and
+  applied d / e), the end of `fpga_read_sample_data` calls `acal_live_record(settings, wide)` (wide = `pc_decim_src` was
+  set after `pc_glue_decim_read`). Reset: `scope_load_input_calibration_data` after the 708 unpack, and Done.
+  `pc_hw_channel` carries `trk` / `cm` snapshots; `pc_channel_corr` (pc_cmds.c) applies `acal_v4_apply`, so GET_CAL 84
+  and 92..107 are "what the next readout applies" (zero_q8 users are unaffected: v4 keeps 0 V at T). mock_hal: set
+  `mock.ch[i].trk` / `.cm`.
+- Wired, host-tested: the estimator and fit (test_acal_track a-i: 1.7-code step under 0.1 code in 36.8 s, gain ramp,
+  bow q within 2 %, noise floor d 0.0012-0.004 code, 40 MHz rejection, rate gate, inversion), the class-probe check / EMA
+  / apply (j), the GET_CAL tail and the gated / full / 16-bit-arm / unbound cases (test_session).
+- Wired, untested on hardware: the readout hooks (record counts, `last_pairs` on real traces, cost per record about
+  50 us), the class probe as a whole (probe_run: raw scratch channel with its own 1000-byte buffer, 8 / 64 / 8
+  conversions, then sample counts, trigger mode, `fpga_set_sample_rate`, a raw host divider written back, time base,
+  trigger mode restored; the UI's next arm re-applies its filter and settles because pc_dec_apply sees the K change),
+  the scheduler gate (`pc_glue_ui_service` passes display mode < 4 and no host ARMED / TRIGGERED / ui_hold;
+  `acal_live_service` adds runstate, `display_data_done`, touchstate, roll / viewer, channel on + bound, last record RMS
+  <= 2 codes). Verified by reading: `pc_glue_ui_service` is only called from the main loop (fnirsi_1013d_scope.c), never
+  inside a modal menu; `display_data_done` = 1 means the UI's last conversion was read and the arm comes later in the
+  same pass. Watch on the bench: pass_ms spikes every 30 s (about 100-170 ms, more with deep memory at 2 MSa/s),
+  the ring no longer holds the last UI capture right after a probe (as after auto setup), no trace glitch.
+- Missing / open: the bow correction (q only reported; design section 6: per-core 256-entry table, decide from the
+  bench q); a gated-class A - B tracker for 03:48-type steps (that step is not tracked: the gated class is the
+  reference; queued only if it recurs); mcp/ parse of GET_CAL 1.15 (tail 256..287, flags, the "never" ages) and its
+  volts model (bytes 92..107 / 84 already include v4, so a host that uses them needs nothing else); README 6.5 bench.
+  GET_CAL is now 288 bytes, above the 256-byte duplicate-cache limit (protocol row 5): a retried GET_CAL runs again
+  (harmless, it only reads).
+- Coordinator's bench facts this rests on (docs/hardware-status.md 2026-10-19): full-class common mode +0.7-0.8 code in
+  2 h while the gated class stays (design section 8); the FIR path benched at 78-83 dB alias rejection and CIC2+FIR
+  becomes the default, so gain16 / corr16 must keep working with the FIR gain (N/2)^K: they do, cm enters corr16 as an
+  additive 1/16-code term after `pc_decim_to_code` (code = out x scale / 2^24 + corr16 / 16), independent of N, K and
+  the FIR; the 03:48-type gated step is not tracked (above).
+- Design-doc change made while building (interleave-tracking.md section 2): q identifiable needs w >= 65536 codes^4
+  **and** w >= v^2 / 4 (the first draft's 256 codes^4 let the noise inside the post square's two levels pull q to 0
+  and bias e; test_acal_track (c)).
+- Gotchas: the main menu reorder 7c62586 put Spectrum / Phosphor first; the system settings fold-out stays anchored at
+  y 46 while its row moved to y 164 (owner to judge). Pre-existing, unfixed: in `fpga_read_adc_data` the core-B rail
+  rule reads `settings->buffer[1]` (core A's code) after it was stored as 255 - code on an inverted channel, so on
+  inverted channels the rule compares mirrored codes near the rails (fix: un-invert `first` or apply invert after the
+  pair). The tracker un-inverts the buffer itself. Diagnostics CH2 block moved from y 205 to 225 for the two v4 lines.
+  Edit scripts and builds: no git together with heredocs in one shell command; Python edits with latin-1 / newline='';
+  clean warning lists need clean build dirs (the incremental `build.sh` count is only the recompiled files).

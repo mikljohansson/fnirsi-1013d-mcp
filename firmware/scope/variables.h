@@ -191,6 +191,8 @@
 //fw 0.2.28: a sixth row (Spectrum analyzer, 59 px) when the spectrum view is available
 int pc_glue_main_menu_height(void);
 #define MAIN_MENU_HEIGHT        (pc_glue_main_menu_height())
+int pc_glue_main_menu_dy(void);
+#define MAIN_MENU_DY            (pc_glue_main_menu_dy())   //1.00o5 rows moved down under the spectrum / phosphor rows
 
 //Menu system settings
 #define SYSTEM_MENU_XPOS                     150
@@ -1158,6 +1160,7 @@ extern uint32 maindisplaybuffer[SCREEN_SIZE / 2];
 extern uint16 displaybuffer1[SCREEN_SIZE];
 extern uint16 displaybuffer2[SCREEN_SIZE];
 extern uint16 displaybuffer3[SCREEN_SIZE];
+extern uint16 displaybuffer4[SCREEN_SIZE];   //calibration wizard: the screen under it
 extern uint16 displaybuffertmp[SCREEN_SIZE];
 
 extern uint16 gradientbuffer[SCREEN_HEIGHT];

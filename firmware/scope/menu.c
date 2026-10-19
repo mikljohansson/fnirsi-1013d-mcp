@@ -7,6 +7,7 @@
 #include "touchpanel.h"
 #include "timer.h"
 #include "fpga_control.h"
+#include "acal_live.h"
 #include "spi_control.h"
 #include "sd_card_interface.h"  //only diagnostic menu?
 #include "display_lib.h"
@@ -2814,7 +2815,7 @@ void scope_main_menu_system_settings(int mode)
   }
 
   //Draw the background
-  display_fill_rounded_rect(9, 59, 131, 35, 3);
+  display_fill_rounded_rect(9, 59 + MAIN_MENU_DY, 131, 35, 3);
 
   //Check if inactive or active
   if(mode == 0)
@@ -2831,13 +2832,13 @@ void scope_main_menu_system_settings(int mode)
   }
 
   //Display the icon with the set colors
-  display_copy_icon_use_colors(system_settings_icon, MAIN_MENU_XPOS+19, 64, 15, 25);//21
+  display_copy_icon_use_colors(system_settings_icon, MAIN_MENU_XPOS+19, 64 + MAIN_MENU_DY, 15, 25);//21
   //display_copy_icon_use_colors(Right_drop_menu_icon, MAIN_MENU_XPOS+110, 65, 24, 24);//211
 
   //Display the text
   display_set_font(&font_3);
-  display_text(69, 60, "System");
-  display_text(68, 76, "settings");
+  display_text(69, 60 + MAIN_MENU_DY, "System");
+  display_text(68, 76 + MAIN_MENU_DY, "settings");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -2857,7 +2858,7 @@ void scope_main_menu_picture_view(int mode)
   }
 
   //Draw the background
-  display_fill_rounded_rect(9, 116, 131, 35, 3);
+  display_fill_rounded_rect(9, 116 + MAIN_MENU_DY, 131, 35, 3);
 
   //Check if inactive or active
   if(mode == 0)
@@ -2874,12 +2875,12 @@ void scope_main_menu_picture_view(int mode)
   }
 
   //Display the icon with the set colors
-  display_copy_icon_use_colors(picture_view_icon, MAIN_MENU_XPOS+15, 122, 24, 24);
+  display_copy_icon_use_colors(picture_view_icon, MAIN_MENU_XPOS+15, 122 + MAIN_MENU_DY, 24, 24);
 
   //Display the text
   display_set_font(&font_3);
-  display_text(73, 119, "Picture");
-  display_text(79, 135, "view");
+  display_text(73, 119 + MAIN_MENU_DY, "Picture");
+  display_text(79, 135 + MAIN_MENU_DY, "view");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -2899,7 +2900,7 @@ void scope_main_menu_waveform_view(int mode)
   }
 
   //Draw the background
-  display_fill_rounded_rect(9, 175, 131, 35, 3);
+  display_fill_rounded_rect(9, 175 + MAIN_MENU_DY, 131, 35, 3);
 
   //Check if inactive or active
   if(mode == 0)
@@ -2916,12 +2917,12 @@ void scope_main_menu_waveform_view(int mode)
   }
 
   //Display the icon with the set colors
-  display_copy_icon_use_colors(waveform_view_icon, MAIN_MENU_XPOS+15, 181, 24, 24);
+  display_copy_icon_use_colors(waveform_view_icon, MAIN_MENU_XPOS+15, 181 + MAIN_MENU_DY, 24, 24);
 
   //Display the text
   display_set_font(&font_3);
-  display_text(62, 178, "Waveform");
-  display_text(79, 194, "view");
+  display_text(62, 178 + MAIN_MENU_DY, "Waveform");
+  display_text(79, 194 + MAIN_MENU_DY, "view");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -2941,7 +2942,7 @@ void scope_main_menu_diagnostic_view(int mode)
   }
 
   //Draw the background
-  display_fill_rounded_rect(9, 235, 131, 35, 3);
+  display_fill_rounded_rect(9, 235 + MAIN_MENU_DY, 131, 35, 3);
 
   //Check if inactive or active
   if(mode == 0)
@@ -2958,13 +2959,13 @@ void scope_main_menu_diagnostic_view(int mode)
   }
 
   //Display the icon with the set colors
-  display_copy_icon_use_colors(diagnostic_view_icon, MAIN_MENU_XPOS+15, 239, 24, 24);
+  display_copy_icon_use_colors(diagnostic_view_icon, MAIN_MENU_XPOS+15, 239 + MAIN_MENU_DY, 24, 24);
 
   //diagnostic_view_icon
   //Display the text
   display_set_font(&font_3);
-  display_text(60, 237, "Diagnostic");
-  display_text(79, 253, "view");
+  display_text(60, 237 + MAIN_MENU_DY, "Diagnostic");
+  display_text(79, 253 + MAIN_MENU_DY, "view");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -2984,7 +2985,7 @@ void scope_main_menu_usb_connection(int mode)
   }
 
   //Draw the background
-  display_fill_rounded_rect(9, 295, 131, 35, 3);
+  display_fill_rounded_rect(9, 295 + MAIN_MENU_DY, 131, 35, 3);
 
   //Check if inactive or active
   if(mode == 0)
@@ -3001,12 +3002,12 @@ void scope_main_menu_usb_connection(int mode)
   }
 
   //Display the icon with the set colors
-  display_copy_icon_use_colors(usb_icon, MAIN_MENU_XPOS+18, 297, 18, 25);//20
+  display_copy_icon_use_colors(usb_icon, MAIN_MENU_XPOS+18, 297 + MAIN_MENU_DY, 18, 25);//20
 
   //Display the text
   display_set_font(&font_3);
-  display_text(80, 296, "USB");
-  display_text(60, 312, "connection");
+  display_text(80, 296 + MAIN_MENU_DY, "USB");
+  display_text(60, 312 + MAIN_MENU_DY, "connection");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -7429,9 +7430,100 @@ static char *fmt_gain(char *p, uint32 q15)
   return p;
 }
 
+//Calibration v4 lines (acal_live.c): text in grey while nothing was tracked yet (never ran / no valid probe)
+#define DIAG_DIM_COLOR  0x00808080
+
+//Rounded n / d, half away from zero, d > 0
+static int32 diag_rdiv(int64 n, int64 d)
+{
+  return (int32)((n >= 0) ? (n + d / 2) / d : -((-n + d / 2) / d));
+}
+
+//v in 10^-dec units, signed: "+0.12", "-1.5"
+static char *fmt_fix(char *p, int32 v, uint32 dec)
+{
+  uint32 a = (uint32)((v < 0) ? -v : v), s = 1, f, i;
+
+  for(i=0;i<dec;i++)
+    s *= 10;
+
+  *p++ = (v < 0) ? '-' : '+';
+  p = fmt_uint(p, a / s);
+
+  if(dec)
+  {
+    f = a % s;
+    *p++ = '.';
+
+    while(s > 1)
+    {
+      s /= 10;
+      *p++ = (char)('0' + (f / s) % 10);
+    }
+  }
+
+  *p = 0;
+  return p;
+}
+
+//Age in s below 2 minutes, then minutes, then hours; "-" for never
+static char *fmt_age(char *p, uint32 have, uint32 ms)
+{
+  uint32 t = ms / 1000;
+
+  if(!have)
+    return fmt_str(p, "-");
+
+  if(t < 120)
+    p = fmt_uint(p, t);
+  else if(t < 7200)
+    p = fmt_uint(p, t / 60);
+  else
+    p = fmt_uint(p, t / 3600);
+
+  *p++ = (t < 120) ? 's' : ((t < 7200) ? 'm' : 'h');
+  *p = 0;
+  return p;
+}
+
+//"Track d +0.12 e +0.31% q +0.6@40 3s": the applied A - B offset (codes) and slope (percent), the bow estimate as its
+//effect at 40 codes from mid-scale, the age of the last accepted record. "Class cm +0.70 (4) 12s": the full-class common
+//mode subtracted, valid probes, age
+static void scope_diagnostic_v4(uint32 ch, uint32 y)
+{
+  const acal_track *t = &acal_trk[ch];
+  const acal_cm    *m = &acal_cms[ch];
+  uint32 now = timer0ticks;
+  char   line[48], *p;
+
+  display_set_fg_color((t->flags & ACAL_TRK_DATA) ? WHITE_COLOR : DIAG_DIM_COLOR);
+  p = fmt_str(line, "Track d ");
+  p = fmt_fix(p, diag_rdiv((int64)t->d_q8 * 100, 256), 2);
+  p = fmt_str(p, " e ");
+  p = fmt_fix(p, diag_rdiv((int64)t->e_q24 * 10000, 16777216), 2);
+  p = fmt_str(p, "% q ");
+  p = fmt_fix(p, diag_rdiv((int64)t->q_q24 * 16000, 16777216), 1);
+  p = fmt_str(p, "@40 ");
+  fmt_age(p, t->flags & ACAL_TRK_DATA, now - t->last_ms);
+  display_text(525, y, (int8 *)line);
+
+  display_set_fg_color((m->flags & ACAL_CM_DATA) ? WHITE_COLOR : DIAG_DIM_COLOR);
+#if PC_CAL_CLASS_PROBE
+  p = fmt_str(line, "Class cm ");
+  p = fmt_fix(p, diag_rdiv((int64)m->cm_q8 * 100, 256), 2);
+  p = fmt_str(p, " (");
+  p = fmt_uint(p, m->probes);
+  p = fmt_str(p, ") ");
+  fmt_age(p, m->flags & ACAL_CM_DATA, now - m->last_ms);
+#else
+  fmt_str(line, "Class probe off (build)");
+#endif
+  display_text(525, y + 15, (int8 *)line);
+}
+
 //Diagnostics, right column: calibration data version and, per channel at its current range, the stored core zeros of
 //both clock classes, their spread, noise and offset slopes, the correction the next readout applies at 0 V, and the core
-//gains per clock class with where they were measured (adc_cal.h)
+//gains per clock class with where they were measured (adc_cal.h), and the calibration v4 tracking (acal_live.c)
 static void scope_diagnostic_adc_cal(void)
 {
   PCHANNELSETTINGS chs[2] = { &scopesettings.channel1, &scopesettings.channel2 };
@@ -7447,7 +7539,7 @@ static void scope_diagnostic_adc_cal(void)
 
   for(ch=0;ch<2;ch++)
   {
-    y = ch ? 205 : 45;
+    y = ch ? 225 : 45;
     c = &adc_cal[ch];
     r = (chs[ch]->samplevoltperdiv < ACAL_RANGES) ? chs[ch]->samplevoltperdiv : ACAL_RANGES - 1;
     fpga_channel_correction(chs[ch], &k);
@@ -7532,6 +7624,9 @@ static void scope_diagnostic_adc_cal(void)
       fmt_str(p, (c->gain_flags & ACAL_GAIN_KEPT) ? " (kept)" : "");
       display_text(525, y + 120, (int8 *)line);
     }
+
+    //Calibration v4: the tracked A - B split and the full-class common mode
+    scope_diagnostic_v4(ch, y + 135);
   }
 }
 
@@ -7818,154 +7913,6 @@ void scope_open_diagnostic_view(void)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_open_calibration_start_text(void)
-{
-  //Save the screen under the baseline calibration start text
-  display_set_destination_buffer(displaybuffer3);//2
-  display_copy_rect_from_screen(CALIBRATION_MENU_XPOS, CALIBRATION_MENU_YPOS, CALIBRATION_MENU_WIDTH, CALIBRATION_MENU_HEIGHT);
-
-  //Setup the text in a separate buffer to be able to slide it onto the screen
-  display_set_screen_buffer(displaybuffertmp);//1
-
-  //Draw the background in yellow //white
-  display_set_fg_color(YELLOW_COLOR);
-  display_fill_rounded_rect(CALIBRATION_MENU_XPOS, CALIBRATION_MENU_YPOS, CALIBRATION_MENU_WIDTH, CALIBRATION_MENU_HEIGHT, 3);
-
-  //Draw the edge in a lighter grey
-  display_set_fg_color(LIGHTGREY_COLOR);
-  display_draw_rounded_rect(CALIBRATION_MENU_XPOS, CALIBRATION_MENU_YPOS, CALIBRATION_MENU_WIDTH, CALIBRATION_MENU_HEIGHT, 3);
-
-  //Display the text in white
-  display_set_fg_color(RED_COLOR);
-  display_set_font(&font_3);
-  display_text(409, 227, "Please unplug");
-  display_text(410, 243, "the probe and");
-  display_text(424, 259, "USB first !");    //409
-
-  //Add the ok button
-  scope_display_ok_button(517, 230, 0);
-
-  //Set source and target for getting it on the actual screen
-  display_set_source_buffer(displaybuffertmp);//1
-  display_set_screen_buffer((uint16 *)maindisplaybuffer);
-
-  //Slide the image onto the actual screen. The speed factor makes it start fast and end slow, Smaller value makes it slower.
-  display_slide_left_rect_onto_screen(CALIBRATION_MENU_XPOS, CALIBRATION_MENU_YPOS, CALIBRATION_MENU_WIDTH, CALIBRATION_MENU_HEIGHT, 63039);
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_show_calibrating_text(void)
-{
-  //Restore the screen from under the calibration start text to get rid of it
-  display_set_source_buffer(displaybuffer3);//2
-  display_copy_rect_to_screen(CALIBRATION_MENU_XPOS, CALIBRATION_MENU_YPOS, CALIBRATION_MENU_WIDTH, CALIBRATION_MENU_HEIGHT);
-
-  //Draw the background in dark grey
-  display_set_fg_color(DARKGREY_COLOR);
-  display_fill_rounded_rect(395, 222, 109, 58, 3);
-
-  //Draw the edge in a lighter grey
-  display_set_fg_color(LIGHTGREY_COLOR);
-  display_draw_rounded_rect(395, 222, 110, 59, 3);
-
-  //Display the text in white
-  display_set_fg_color(WHITE_COLOR);
-  display_set_font(&font_3);
-  //display_text(409, 243, "Calibrating...");
-  display_text(409, 233, "Calibrating...");
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_show_calibration_done_text(void)
-{
-  //Draw the background in dark grey
-  display_set_fg_color(DARKGREY_COLOR);
-  display_fill_rounded_rect(395, 222, 109, 58, 3);
-
-  //Draw the edge in a lighter grey
-  display_set_fg_color(LIGHTGREY_COLOR);
-  display_draw_rounded_rect(395, 222, 110, 59, 3);
-
-  //Display the text in green
-  display_set_fg_color(GREEN_COLOR);
-  display_set_font(&font_3);
-  
-  //scope_save_input_calibration_data();
-          
-  display_text(414, 233, "Calibration");
-  display_text(416, 255, "successful");
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_show_calibration_fail(void)
-{
-  //Draw the background in white
-  display_set_fg_color(WHITE_COLOR);
-  display_fill_rounded_rect(395, 222, 198, 58, 3);//199 59
-
-  //Draw the edge in a lighter grey
-  display_set_fg_color(LIGHTGREY_COLOR);
-  display_draw_rounded_rect(395, 222, 199, 59, 3);
-
-  //Display the text in red
-  display_set_fg_color(RED_COLOR);
-  display_set_font(&font_3);
-  
-  display_text(420, 233, "Offset calibration failed");
-
-  //The reason of the base calibration (old values kept), or the 1.00o5 text
-  if(calibration_fail_reason[0])
-    display_text(405, 255, (int8 *)calibration_fail_reason);
-  else
-    display_text(445, 255, "Check hardware");
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-//Calibration data v3: the gain step's prompt (OK starts it, a touch outside the box skips it) and its result
-
-void scope_show_gain_calibration_text(void)
-{
-  display_set_fg_color(YELLOW_COLOR);
-  display_fill_rounded_rect(395, 222, 198, 58, 3);
-  display_set_fg_color(LIGHTGREY_COLOR);
-  display_draw_rounded_rect(395, 222, 199, 59, 3);
-
-  display_set_fg_color(BLACK_COLOR);
-  display_set_font(&font_3);
-  display_text(404, 227, "Gain: put both");
-  display_text(404, 243, "probes on the");
-  display_text(404, 259, "cal post, OK");
-
-  scope_display_ok_button(517, 230, 0);
-}
-
-void scope_show_gain_calibration_result(uint32 ok)
-{
-  display_set_fg_color(ok ? DARKGREY_COLOR : WHITE_COLOR);
-  display_fill_rounded_rect(395, 222, 198, 58, 3);
-  display_set_fg_color(LIGHTGREY_COLOR);
-  display_draw_rounded_rect(395, 222, 199, 59, 3);
-  display_set_font(&font_3);
-
-  if(ok)
-  {
-    display_set_fg_color(GREEN_COLOR);
-    display_text(430, 233, "Gain calibration");
-    display_text(448, 255, "successful");
-    return;
-  }
-
-  //The first channel's reason; a channel that passed has its new gains (saved), the other keeps its previous ones
-  display_set_fg_color(RED_COLOR);
-  display_text(422, 233, "Gain calibration failed");
-
-  if(calibration_fail_reason[0])
-    display_text(405, 255, (int8 *)calibration_fail_reason);
-}
 
 //-*********************************************************************************
 void scope_show_Input_calibration(void)

@@ -111,6 +111,10 @@ typedef struct
 void     acal_correction(const acal_channel *c, const uint16_t *cal_offset, uint8_t range, uint32_t divider,
                          int16_t dcoffset, int32_t dc_shift_value, int16_t atlan_a, int16_t atlan_b, acal_corr *out);
 
+//Rail-rule limits from gain_a/b and off_a/b: clip_lo = the larger of the two cores' codes for raw 0, clip_hi = the
+//smaller of their codes for raw 255 (acal_correction, and acal_track_apply after it moves the gains and offsets)
+void     acal_clips(acal_corr *c);
+
 //16-bit path: the decimation scale (stored sample -> code, Q24) with the gain16 of the readout folded in
 uint32_t acal_scale(uint32_t scale_q24, uint32_t gain16);
 

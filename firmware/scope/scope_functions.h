@@ -34,10 +34,8 @@ void scope_acquire_trace_data(void);
 
 void scope_process_trigger(uint32 count);   
 
-uint32 scope_do_baseline_calibration(void);
-uint32 scope_gain_calibration_offered(void);   //1 right after a passed zero step on a bitstream with the generator
-uint32 scope_do_gain_calibration(void);        //gain step at the calibration post: 1 when both channels passed
-extern char calibration_fail_reason[40];  //"CH1: <reason>" after a failed base calibration or gain step
+uint32 cal_wizard_run(void);             //cal_wiz_ui.c: the calibration wizard, 1 when it ended with Done
+void   cal_wizard_committed(void);       //called when Done wrote a new calibration (v4 tracker reset)
 void scope_input_calibration(void);
 
 void scope_do_50_percent_trigger_setup(void);

@@ -1051,7 +1051,7 @@ void handle_main_menu_touch(void)
       if((xtouch >= MAIN_MENU_XPOS) && (xtouch <= MAIN_MENU_XPOS + MAIN_MENU_WIDTH) && (ytouch >= MAIN_MENU_YPOS) && (ytouch <= MAIN_MENU_YPOS + MAIN_MENU_HEIGHT))
       {
         //Check if on system settings
-        if((ytouch >= 46) && (ytouch <= 105))
+        if((ytouch >= 46 + MAIN_MENU_DY) && (ytouch <= 105 + MAIN_MENU_DY))
         {
           //Check if already open
           if(systemsettingsmenuopen == 0)
@@ -1077,7 +1077,7 @@ void handle_main_menu_touch(void)
           }
         }
         //Check if on picture view
-        else if((ytouch >= 107) && (ytouch <= 164))
+        else if((ytouch >= 107 + MAIN_MENU_DY) && (ytouch <= 164 + MAIN_MENU_DY))
         {
           //Close any other open menu
           close_open_menus(1);
@@ -1098,7 +1098,7 @@ void handle_main_menu_touch(void)
           return;
         }
         //Check if on waveform view
-        else if((ytouch >= 166) && (ytouch <= 223))//+57
+        else if((ytouch >= 166 + MAIN_MENU_DY) && (ytouch <= 223 + MAIN_MENU_DY))//+57
         {
           //Close any other open menu
           close_open_menus(1);
@@ -1119,7 +1119,7 @@ void handle_main_menu_touch(void)
           return;
         }
         //Check if on diagnostic_screen
-        else if((ytouch >= 225) && (ytouch <= 282))//278
+        else if((ytouch >= 225 + MAIN_MENU_DY) && (ytouch <= 282 + MAIN_MENU_DY))//278
         {
           //Close any other open menu
           close_open_menus(1);
@@ -1158,7 +1158,7 @@ void handle_main_menu_touch(void)
           
         }
         //Check if on USB connection
-        else if((ytouch >= 284) && (ytouch <= 341))
+        else if((ytouch >= 284 + MAIN_MENU_DY) && (ytouch <= 341 + MAIN_MENU_DY))
         {
           //Close any other open menu
           close_open_menus(1);
@@ -1283,10 +1283,11 @@ void handle_main_menu_touch(void)
             othersettingsopen = 1;
           }
         }
-        //Check if on baseline calibration
+        //Check if on baseline calibration: the calibration wizard (cal_wiz_ui.c), which owns the whole screen until
+        //Cancel or Done and restores it
         else if((ytouch >= 223) && (ytouch <= 280))
         {
-          //Check if already open
+          //Check if already open (the input calibration boxes after a wizard run)
           if(calibrationopen == 0)
           {
             //Close any of the sub menus if open
@@ -1298,11 +1299,21 @@ void handle_main_menu_touch(void)
             //Wait until touch is released
             tp_i2c_wait_for_touch_release();
 
-            //Show the start text
-            scope_open_calibration_start_text();
-
-            //Signal the calibration text is opened
-            calibrationopen = 1;
+            //Done while 1.00o5's input-divider calibration is due: its box beside the menu, as before
+            if(cal_wizard_run() && calibrationfail)
+            {
+              display_set_destination_buffer(displaybuffer3);
+              display_copy_rect_from_screen(CALIBRATION_MENU_XPOS, CALIBRATION_MENU_YPOS, CALIBRATION_MENU_WIDTH, CALIBRATION_MENU_HEIGHT);
+              scope_show_Input_calibration();
+              calibrationopen = 2;
+            }
+            else
+            {
+              //Cancel, or Done with nothing more to do: close the menus
+              scope_system_settings_calibration_item(0);
+              close_open_menus(1);
+              return;
+            }
           }
         }
         //Check if on x-y mode display
@@ -1643,56 +1654,6 @@ void handle_main_menu_touch(void)
           //Update the actual grid brightness if needed. There is no direct update of the background!
         }
       }
-      //Check on calibration start text opened and being touched
-      else if((calibrationopen == 1) && (xtouch >= 395) && (xtouch <= 594) && (ytouch >= 223) && (ytouch <= 280))
-      {
-        //Check if touch is on the button
-        if((xtouch >= 517) && (xtouch <= 583) && (ytouch >= 230) && (ytouch <= 272))
-        {
-          //Highlight the button
-          scope_display_ok_button(517, 230, 1);
-
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release();
-
-          //Show the baseline calibration active text
-          scope_show_calibrating_text();
-          ///*
-          //Start the calibration process
-          if(scope_do_baseline_calibration() == 0)//docasne vypnute
-            {
-            //if (dev_mode) display_decimal(500, 400, failflag);
-            //Show the Offset calibration FAILED text
-            scope_show_calibration_fail();
-            //Cancel Input calibration
-            calibrationfail = 0;
-            timer0_delay(1500);
-            } 
-            else
-          //*/  //Show the calibration successful text if all went well
-            scope_show_calibration_done_text();   
-
-          //Signal calibration has been done
-          calibrationopen = 2;
-                    
-          //Calibration data v3: after a passed zero step the gain step at the calibration post comes next (prompt
-          //with OK, calibrationopen 10; a touch outside the box skips it)
-          if(scope_gain_calibration_offered())
-          {
-            timer0_delay(1000);
-            scope_show_gain_calibration_text();
-            calibrationopen = 10;
-            continue;
-          }
-
-          //Close menu if confirmation mode is inactive & calibration is OK, delay 700ms
-          if((!scopesettings.confirmationmode)&&(!calibrationfail)) {timer0_delay(700);close_open_menus(1);return;}
-          
-          timer0_delay(1000);   //700
-          //Show the Input calibration text 
-          if (calibrationfail) scope_show_Input_calibration();  
-        }   
-      }
       //-********************************************************************************************************
       //Check on Input_calibration text opened and OK touched
       else if((calibrationfail) && (calibrationopen == 2) && (xtouch >= 495) && (xtouch <= 594) && (ytouch >= 223) && (ytouch <= 280))
@@ -1814,39 +1775,6 @@ void handle_main_menu_touch(void)
                 }
             } 
       
-      //Calibration data v3: gain step prompt opened and OK touched
-      else if((calibrationopen == 10) && (xtouch >= 395) && (xtouch <= 594) && (ytouch >= 223) && (ytouch <= 280))
-      {
-        if((xtouch >= 517) && (xtouch <= 583) && (ytouch >= 230) && (ytouch <= 272))
-        {
-          //Highlight the button and wait until touch is released
-          scope_display_ok_button(517, 230, 1);
-          tp_i2c_wait_for_touch_release();
-
-          //Measure, then show the result for a moment
-          scope_show_calibrating_text();
-          scope_show_gain_calibration_result(scope_do_gain_calibration());
-          timer0_delay(1500);
-
-          //Then as after the zero step: the input calibration when it is due, else done
-          if(calibrationfail)
-          {
-            scope_show_Input_calibration();
-            calibrationopen = 2;
-          }
-          else
-          {
-            calibrationopen = 9;
-
-            if(!scopesettings.confirmationmode)
-            {
-              timer0_delay(700);
-              close_open_menus(1);
-              return;
-            }
-          }
-        }
-      }
       //-**************************************************************************************************************
       //Check on calibration done text opened and being touched
       else if((calibrationopen == 9) && (xtouch >= 395) && (xtouch <= 580) && (ytouch >= 223) && (ytouch <= 280))  //505    

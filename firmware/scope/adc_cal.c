@@ -149,7 +149,7 @@ void acal_correction(const acal_channel *c, const uint16_t *cal_offset, uint8_t 
 {
   uint32_t hr  = (range < ACAL_RANGES) ? range : ACAL_RANGES - 1;
   uint32_t cls = divider ? ACAL_GATED : ACAL_FULL;
-  int32_t  t16, zc16, zf16[2], d16, k, lo[2], hi[2];
+  int32_t  t16, zc16, zf16[2], d16, k;
   uint32_t g, gf[2];
   int16_t  comp[2];
   uint8_t  frac[2];
@@ -174,8 +174,6 @@ void acal_correction(const acal_channel *c, const uint16_t *cal_offset, uint8_t 
       gf[k]   = acal_gain16(c, ACAL_FULL, k);
       gain[k] = g;
       off[k]  = (int32_t)rdiv64((int64_t)t16 * 65536 - (int64_t)g * zc16, 16);
-      lo[k]   = (int32_t)((int64_t)off[k] >> 16);
-      hi[k]   = (int32_t)(((int64_t)255 * g + off[k]) >> 16);
 
       //the correction at the core's 0 V point, whole codes and sixteenths (GET_CAL, diagnostics)
       d16 = t16 - zc16;
@@ -202,8 +200,6 @@ void acal_correction(const acal_channel *c, const uint16_t *cal_offset, uint8_t 
     {
       gain[k] = 65536;
       off[k]  = (int32_t)comp[k] * 65536;
-      lo[k]   = comp[k];
-      hi[k]   = 255 + comp[k];
     }
 
     out->gain16  = 65536;
@@ -220,8 +216,20 @@ void acal_correction(const acal_channel *c, const uint16_t *cal_offset, uint8_t 
   out->gain_b  = gain[1];
   out->off_a   = off[0];
   out->off_b   = off[1];
-  out->clip_lo = (lo[0] > lo[1]) ? lo[0] : lo[1];
-  out->clip_hi = (hi[0] < hi[1]) ? hi[0] : hi[1];
+
+  acal_clips(out);
+}
+
+void acal_clips(acal_corr *c)
+{
+  //codes of each core for raw 0 and raw 255 (without dither: the floor of the mean)
+  int32_t lo_a = (int32_t)((int64_t)c->off_a >> 16);
+  int32_t lo_b = (int32_t)((int64_t)c->off_b >> 16);
+  int32_t hi_a = (int32_t)(((int64_t)255 * c->gain_a + c->off_a) >> 16);
+  int32_t hi_b = (int32_t)(((int64_t)255 * c->gain_b + c->off_b) >> 16);
+
+  c->clip_lo = (lo_a > lo_b) ? lo_a : lo_b;
+  c->clip_hi = (hi_a < hi_b) ? hi_a : hi_b;
 }
 
 uint32_t acal_scale(uint32_t scale_q24, uint32_t gain16)

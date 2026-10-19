@@ -88,7 +88,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   both cores +0.5 within one 10-minute interval, persisting. Morning: battery/charger state, recalibrate on 0.2.48, re-check the CH2 A/B
   split; if per-core zeros move with temperature or supply, consider a periodic zero re-check (needs an input-independent method) or a
   warm-up note in the calibration procedure.
-- [ ] **Calibration v4: background interleave-mismatch tracking** (10-19 morning, docs/hardware-status.md 08:30): the full-rate core
+- [x] **Calibration v4: background interleave-mismatch tracking** (fw-cal3, fw 0.2.50 / protocol 1.14: A - B tracker, full-class class probe, GET_CAL 288 bytes, diagnostics lines; built and host-tested, bench list firmware/README.md 6.5; the one-time gain step stays, design section 6) (10-19 morning, docs/hardware-status.md 08:30): the full-rate core
   offset and gain relationship changes over hours (3.3 % gain mismatch last night, 0 % now; zero split 3.9 vs 5.0 codes within 15 min of
   calibration; the 03:48 overnight step), so v3's one-time full-class gains/zeros go stale while the gated class stays within 0.3 code.
   Standard interleaved-ADC fix: estimate offset mismatch (mean A - mean B) and gain mismatch (std A / std B, or the fs/2 spur power) from
@@ -96,7 +96,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   them on top of the stored zeros/gains in the full-rate class only. Design first (fw-cal3): detection of valid records, convergence time,
   interaction with the 16-bit path and the spectrum view, a diagnostics readout of the tracked mismatch, host test with a drifting model.
   Owner decision needed on whether the one-time v3 gain step stays (it still fixes the class gain ratio and the gated class).
-- [ ] **Calibration wizard (owner approved 10-19)**: replace the fold-out calibration submenu and the two separate flows with one modal
+- [x] **Calibration wizard (owner approved 10-19)** (fw-cal3, fw 0.2.50: built and host-tested, bench list firmware/README.md 6.4): replace the fold-out calibration submenu and the two separate flows with one modal
   wizard that owns the screen (only Cancel or completion leave it; stray touches do nothing); "Step n of 3" header. Step 1 Zero: "Unplug
   both probes and the USB cable", Start, per-channel progress, result lines with a check mark or a one-line reason. Step 2 Gain, one channel
   at a time: "Plug in the CH1 probe at x1, tip on the calibration post", Measure; the firmware checks the level first ("no signal on CH1:
