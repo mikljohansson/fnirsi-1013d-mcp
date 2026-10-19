@@ -39,6 +39,8 @@ int    spectrum_display(void);               //from scope_display_trace_data: 1 
 int    spectrum_touch(void);                 //touch in the trace area (xtouch, ytouch): 1 = handled
 void   spectrum_service(void);               //every main-loop pass: leave the mode when it is no longer available
 void   spectrum_note_roll_off(void);         //fw 0.2.51: the main menu switched Roll off for the view: say so once
+int    spectrum_autoset(void);               //fw 0.2.51: AUTO SET in the view: start the view's Auto, or cancel it (1 = handled)
+int    spectrum_auto_running(void);          //fw 0.2.51: the view's Auto runs (AUTO SET reads "Auto...")
 
 //READ_SPECTRUM (protocol section 14 row 45): the displayed spectrum of channel ch. Fills the 32-byte header and up to
 //max_bins levels (i16 centi-dBV, from bin first on); returns the number of bins written, or -1 when there is none.

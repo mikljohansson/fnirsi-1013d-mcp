@@ -664,7 +664,14 @@ void scope_auto_set_button(int mode)
     display_set_fg_color(BLACK_COLOR);
   }
 
-  //Display the text
+  //Display the text; fw 0.2.51: "Auto..." while the spectrum view's Auto runs (a tap cancels it)
+  if(PC_AUTOSET_RUNNING())
+  {
+    display_set_font(&font_2);
+    display_text(739 + (51 - ui_text_width(&font_2, "Auto...")) / 2, 143, "Auto...");
+    return;
+  }
+
   display_set_font(&font_3);
   display_text(746, 135, "AUTO");
   display_text(753, 150, "SET");

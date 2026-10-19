@@ -3822,11 +3822,15 @@ void handle_right_basic_menu_touch(void)
       //Wait until touch is released
       tp_i2c_wait_for_touch_release();
 
-      //Button back to inactive state
-      scope_auto_set_button(0);
+      //fw 0.2.51: in the spectrum view the view's own Auto (start, or cancel while it runs); it redraws the button
+      if(!PC_AUTOSET())
+      {
+        //Button back to inactive state
+        scope_auto_set_button(0);
 
-      //Short time base run auto setup
-      if(!scopesettings.long_mode) scope_do_auto_setup();
+        //Short time base run auto setup
+        if(!scopesettings.long_mode) scope_do_auto_setup();
+      }
     }
     else
     {

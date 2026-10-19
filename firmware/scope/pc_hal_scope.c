@@ -1587,6 +1587,8 @@ int32_t pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t 
 
 int pc_glue_spectrum_display(void) { return spectrum_display(); }
 int pc_glue_spectrum_touch(void)   { return spectrum_touch() || phosphor_touch(); }
+int pc_glue_autoset(void)          { return spectrum_autoset(); }
+int pc_glue_autoset_running(void)  { return spectrum_auto_running(); }
 
 int  pc_glue_phosphor_on(void)          { return phosphor_owns_traces(); }
 void pc_glue_phosphor_draw(void)        { phosphor_draw(); }
