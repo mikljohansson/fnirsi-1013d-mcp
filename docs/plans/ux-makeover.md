@@ -41,6 +41,10 @@ to the plot; its CTRL page holds how the plot is shown and computed; the bottom 
 cards and the record-position slider). Every mode reads the same way and no parameter has two homes. Fold-outs make
 the space: a CTRL button that holds a value opens a small panel beside the bar with the value and its choices or + / -.
 
+- **Top bar chips** (owner, 2026-10-19): one construction for CH1, CH2, ACQ and the trigger: a coloured icon block with
+  rounded outer corners (CH1 yellow, CH2 cyan, ACQ and trigger green) and a grey parameter box to its right that is drawn
+  behind the icon block, so the join has no notch and only the chip's outer corners are rounded. Today the trigger's
+  grey box has its own rounded corners and the channel and ACQ chips differ from it.
 - **Top bar**: unchanged except the version string goes (it lives in Diagnostics) **(owner)**. Move fast stays in its
   slot: it is a modifier for dragging on the plot in every mode, a global tool by the rule above (owner, after weighing a
   collapsed Save button to make room on the right bar: not worth a tap on every save).
