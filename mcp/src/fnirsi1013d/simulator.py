@@ -18,7 +18,7 @@ It models what the host can observe through docs/protocol.md:
   quantisation (7.5), auto timeout, ``trigger_addr`` and ``capture_start_word`` modular arithmetic.
 - ``read_lag`` (7.4): ``--hw-read-lag`` is the true FPGA lag, ``--fw-read-lag`` the value the firmware
   applies. When they differ READ_RAW returns data shifted by the difference, like a real mis-set lag.
-  READ_TRACE has the stale first byte per core (1.00o5 behaviour).
+  READ_TRACE has the stale first byte per core before protocol 1.22 (1.00o5 behaviour; fw 0.2.72 reads it exactly).
 - Collaborative (shared) mode, protocol 1.3 (default, cap SHARED_MODE): one live settings set changed by host
   SET_* and by the simulated UI (``Device.ui_set_channel`` / ``ui_set_timebase`` / ``ui_set_trigger``,
   ``ui_press_run`` / ``ui_press_stop``), ``settings_seq``, RUN mode with UI captures every
@@ -587,6 +587,7 @@ class Device:
         self.events: list[P.DeviceEvent] = []
         self.event_total = 0
         self.ev_frozen = False
+        self.fpga_trace = False  # 1.22: event type 22 level (GET_EVENT_LOG flags bits 2:1), off after boot
         self.ev_reset_ms = 0
         self.ev_snapshot: list[P.DeviceEvent] = []
         #: fw 0.2.24 bus-level ring (P.BUS_EVENT_TYPES only, 16 entries)
@@ -663,6 +664,8 @@ class Device:
             c |= P.Caps.SEQ
         if self.spec.enc_check:
             c |= P.Caps.ENC_CHECK
+            if not self.cfg.legacy:  # fw 0.2.72 (1.22): read 0x33 at boot reported convention 1, the order is known
+                c &= ~P.Caps.INTERLEAVE_UNVERIFIED
         return int(c) & ~self.cfg.caps_clear
 
     @property
@@ -884,7 +887,10 @@ class Device:
         if dec is not None and dec.k:
             t = t0 + k * dec.n * 5e-9 - EXT_LATENCY_S  # one output sample per word
         else:
-            t = t0 + 2 * k * dt + dt - EXT_LATENCY_S
+            # Legacy layout: the AD9288 outputs a sample 4 encode cycles (words) after taking it, so the EXT edge is
+            # seen that many words before the data show it (modelled as the firmware's legacy EXT shift, 1.22)
+            lag_words = P.ext_shift_legacy(settings.divider) // 2
+            t = t0 + 2 * (k + lag_words) * dt + dt - EXT_LATENCY_S
         return np.where(sig.eval(t, settings.gen) > EXT_THRESHOLD_V, 255, 0).astype(np.uint8)
 
     def decim_config(self, settings: Settings | None = None) -> P.DecimConfig:
@@ -962,10 +968,20 @@ class Device:
         if not self.spec.programmable:
             return 750, 1500, tr.auto_timeout or 1500
         dec = self.decim_config(s)
+        shift = self.ext_shift_for(dec, s.divider, tr.source, tr.pretrigger_samples)
         if dec.k:
-            shift = min(dec.ext_shift, tr.pretrigger_samples) if tr.source == 2 else 0
             return tr.pretrigger_samples - shift, tr.total_samples, tr.auto_timeout or tr.total_samples
-        return tr.pretrigger_samples // 2, tr.total_samples // 2, tr.auto_timeout or tr.total_samples
+        return (tr.pretrigger_samples - shift) // 2, tr.total_samples // 2, tr.auto_timeout or tr.total_samples
+
+    def ext_shift_for(self, dec: P.DecimConfig, divider: int, source: int, pre: int) -> int:
+        """The EXT shift the firmware applies (pc_ext_shift): the filter latency with K >= 1; 1.22 (fw 0.2.72) also
+        the ADC pipeline in the legacy layout. At most the pretrigger, whole words in the legacy layout."""
+        if source != 2:
+            return 0
+        if not dec.k and self.proto_minor < 22:
+            return 0
+        v = dec.ext_shift_at(divider)
+        return v if v <= pre else (pre if dec.k else pre & ~1)
 
     def simulate_capture(self, settings: Settings, forced: bool = False) -> dict:
         """Run one capture through the FPGA model. Returns a dict with the new ring, trigger address, the
@@ -1747,7 +1763,7 @@ class Device:
             chans.append(P.CaptureChannelInfo(cc.enable, cc.range, cc.coupling, cc.invert, cc.probe_index,
                                               cc.offset_pwm, cc.uv_per_lsb_q8, cc.zero_code_q8))
         d = self.capture_decim
-        return P.CaptureInfo(h, chans, d.status, d.shift, (min(d.ext_shift, pre) if tr.source == 2 else 0),
+        return P.CaptureInfo(h, chans, d.status, d.shift, self.ext_shift_for(d, self.capture_divider, tr.source, pre),
                              d.n, has_decim=True, run=self.run_info())
 
     def run_info(self) -> P.SeqRunInfo:
@@ -1819,7 +1835,7 @@ class Device:
         return lo | (hi.astype(np.uint16) << 8)
 
     def build_trace(self, ch: int, settings: Settings) -> tuple[np.ndarray, int]:
-        """Processed trace of one channel (section 7.6) with the 1.00o5 stale first byte per core. 1.9 decimated
+        """Processed trace of one channel (section 7.6); before 1.22 with the 1.00o5 stale first byte per core. 1.9 decimated
         capture: the converted codes round(sample x 2^S / N^K + (adc_a_comp + adc_b_comp) / 2), 0..255."""
         Pw, Tw = self.capture_geometry
         dec = self.capture_decim
@@ -1832,11 +1848,13 @@ class Device:
         start = self.capture_start_word
         a = self.read_ring(2 * ch, start, Tw, lag_applied=self.cfg.hw_read_lag).astype(np.int16)
         b = self.read_ring(2 * ch + 1, start, Tw, lag_applied=self.cfg.hw_read_lag).astype(np.int16)
-        # stale pipeline byte: the first byte after the pointer write is off by about +-1 code
+        # stale pipeline byte: the first byte after the pointer write is off by about +-1 code. fw 0.2.72 (1.22) makes
+        # the dummy strobe in every readout, so READ_TRACE is exact like READ_RAW
         a = a.copy()
         b = b.copy()
-        a[0] = np.clip(a[0] + 1, 0, 255)
-        b[0] = np.clip(b[0] - 1, 0, 255)
+        if self.proto_minor < 22:
+            a[0] = np.clip(a[0] + 1, 0, 255)
+            b[0] = np.clip(b[0] - 1, 0, 255)
         raw_clip0 = (a == 0) | (b == 0)
         raw_clip255 = (a == 255) | (b == 255)
         cal = self.cal[ch]
@@ -1979,11 +1997,16 @@ class Device:
             raise _DevErr(P.Status.E_UNKNOWN_CMD, 0, "cmd 0x0009")
         now = int((self.now() - self.t_boot) * 1000)
         flags = req.payload[0] if req.payload else 0
-        if flags & ~P.EVENT_LOG_REARM:
+        trace_bits = P.EVENT_LOG_FPGA_TRACE_ON | P.EVENT_LOG_FPGA_TRACE_OFF
+        allowed = P.EVENT_LOG_REARM | (trace_bits if self.proto_minor >= 22 else 0)
+        if (flags & ~allowed) or (flags & trace_bits) == trace_bits:
             raise _DevErr(P.Status.E_BAD_ARG, 0, "flags")
+        if flags & trace_bits:  # 1.22: the FPGA write trace level (event type 22)
+            self.fpga_trace = bool(flags & P.EVENT_LOG_FPGA_TRACE_ON)
         log = P.EventLog(self.event_total, now, list(self.events[-128:]), frozen=self.ev_frozen,
                          reset_ms=self.ev_reset_ms, snapshot=list(self.ev_snapshot), has_snapshot=True,
-                         bus_events=list(self.bus_events), bus_total=self.bus_total, has_bus_ring=True)
+                         bus_events=list(self.bus_events), bus_total=self.bus_total, has_bus_ring=True,
+                         fpga_trace=self.fpga_trace)
         if flags & P.EVENT_LOG_REARM:  # fw 0.2.18: only an explicit re-arm clears the snapshot
             self.ev_frozen, self.ev_snapshot, self.ev_reset_ms = False, [], 0
         return self._ok(req, P.pack_event_log(log))
@@ -2093,7 +2116,8 @@ class Device:
         return P.DecimState(s.decim & 3, (s.decim & (P.DECIM_FLAGS | P.DECIM_SET_FIR)) >> 2, nxt.status, nxt.shift, nxt.n, nxt.gain,
                             s.divider, nxt.rate(s.divider), last.status if last else 0xFF, last.shift if last else 0,
                             last.status if last else 0, last.shift if last else 0, P.DECIM_MAX_TOTAL, nxt.why,
-                            nxt.ext_shift if s.trigger.source == 2 else 0, int(self.features),
+                            self.ext_shift_for(nxt, s.divider, s.trigger.source, s.trigger.pretrigger_samples),
+                            int(self.features),
                             *self.ui_average_state())
 
     def _cmd_get_decim(self, req: P.Frame) -> P.Frame:

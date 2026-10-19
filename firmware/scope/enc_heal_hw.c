@@ -13,6 +13,7 @@
 #include "pc_seq_hw.h"
 #include "pc_transport.h"
 #include "enc_heal.h"
+#include "fpga_bus.h"
 
 #define EH_RING  8192                   //AL3 ring words (every checked bitstream is AL3 0x1532+)
 
@@ -25,6 +26,26 @@ static uint8     eh_rearming;           //fpga_do_conversion called by the re-ar
 void pc_hal_enc_state(pc_hw_enc *e)
 {
   *e = eh_st;
+}
+
+int pc_hal_enc_written(void)
+{
+  return fpga_bus_wr.since_reset;
+}
+
+void pc_hal_fpga_writes(uint32_t *v)
+{
+  v[0] = fpga_bus_wr.rate;
+  v[1] = fpga_bus_wr.filter;
+  v[2] = fpga_bus_wr.resets;
+}
+
+uint8_t pc_hal_fpga_trace(int set)
+{
+  if(set >= 0)
+    fpga_trace_level = (uint8)(set != 0);
+
+  return fpga_trace_level;
 }
 
 uint8_t pc_hal_enc_status(void)
@@ -57,6 +78,10 @@ void pc_hal_enc_retry(void)
 void pc_hal_enc_note(uint8_t why, const eh_note *n)
 {
   eh_st.checked++;
+
+  //0x1538+: judged by the data after a write since the sampling reset (eh_capture_mode)
+  if((why == EH_WHY_DATA) && (eh_st.mode == EH_MODE_FLAG))
+    eh_st.replaced++;
 
   if(n->first)
     eh_st.bad++;
@@ -94,7 +119,11 @@ void fpga_encode_init(uint16_t fpga_version)
 
     if(!eh_conv_ok(eh_st.boot33))
     {
+      //fw 0.2.72: nothing assumes then. The core order stays unverified (caps bit 12, pc_variant_core_order) and the
+      //full-rate captures are judged by their data (order-independent) instead of by a self-check whose convention
+      //the firmware does not know
       eh_st.flags |= PC_ENCF_CONV_BAD;
+      eh_st.mode   = EH_MODE_DATA;
       pc_usb_log_fpga_heal(eh_event_a(EH_WHY_CONV, 0, 0), eh_event_b(fpga_trace_who, eh_st.boot33));
     }
   }
@@ -121,23 +150,23 @@ void fpga_encode_new_conversion(void)
 int fpga_encode_after_capture(void)
 {
   static const eh_io io = { 0, eh_hw_status, eh_hw_read };
-  uint32   pre, start;
+  uint32   start;
   uint32_t value;
   eh_note  n;
   int      bad, rearm;
+  int      mode = eh_capture_mode(eh_st.mode, fpga_bus_wr.since_reset);
 
-  //Full rate only (divider 0 is always the legacy 8-bit layout). A UI averaging run (0x1536 / 0x1537) leaves lane
-  //sums in the ring, not samples: the data check cannot read it; 0x1538's flag covers the whole run
-  if((eh_st.mode == EH_MODE_NONE) || (fpga_divider != 0) || ((eh_st.mode == EH_MODE_DATA) && pc_seq_ui_running()))
+  //Full rate only (divider 0 is always the legacy 8-bit layout). A UI averaging run leaves lane sums in the ring, not
+  //samples: the data check cannot read it (0x1538's flag covers the whole run, unless a rate write came during it)
+  if((mode == EH_MODE_NONE) || (fpga_divider != 0) || ((mode == EH_MODE_DATA) && pc_seq_ui_running()))
     return 0;
 
-  //The record as fpga_do_conversion set it up: 0x0B = settriggerpoint / 2 words before 0x14
-  pre   = (fpgasettings.settriggerpoint / 2) % EH_RING;
-  start = (eh_st.mode == EH_MODE_DATA) ? (fpga_prepare_for_transfer() + EH_RING - pre) % EH_RING : 0;
-  bad   = eh_check(&io, eh_st.mode, start, fpgasettings.totalsamples / 2, &value);
+  //The record as fpga_do_conversion set it up and the UI reads it: the 0x0B words before 0x14
+  start = (mode == EH_MODE_DATA) ? pc_glue_ui_read_start(fpga_prepare_for_transfer()) : 0;
+  bad   = eh_check(&io, mode, start, fpgasettings.totalsamples / 2, &value);
 
   rearm = eh_cap_step(&eh_ui, bad, value, &n);
-  pc_hal_enc_note((eh_st.mode == EH_MODE_FLAG) ? EH_WHY_FLAG : EH_WHY_DATA, &n);
+  pc_hal_enc_note((mode == EH_MODE_FLAG) ? EH_WHY_FLAG : EH_WHY_DATA, &n);
 
   if(rearm != EH_REARM)
     return 0;

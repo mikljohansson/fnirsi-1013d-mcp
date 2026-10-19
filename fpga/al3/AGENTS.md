@@ -508,12 +508,12 @@ fix, build, bench checks), section 6 "Firmware contract", and section 4 after th
 **Open.**
 - Flashing 0x1537 and the bench checks of section 7: T3/T4/T5, EXT loopback with 0x15 logging, alternating pretriggers at
   100 kSa/s.
-- Firmware:
-  - legacy EXT shift (4 words in the model; confirm on the bench);
-  - interleave order and the 0x53 swap bit from T4 on 0x1537 (core A earlier in the model);
+- Firmware (all built in fw 0.2.70 on branch fw-bus, firmware/AGENTS.md section 46, not benched):
+  - legacy EXT shift (4 words in the model; 2 at divider 0; confirm on the bench);
+  - interleave order and the 0x53 swap bit (0x1538+: verified from read 0x33 at boot, caps bit 12);
   - keep EXT in `fpga_swap_trigger_channel`;
-  - the arm order on 0x1532..0x1535;
-  - a dummy strobe in the 16-bit / UI readouts, or a documented one-word shift.
+  - the arm order on 0x1532..0x1535 (0x0B / 0x0C before 0x01 = 1 on every bitstream);
+  - a dummy strobe in the 16-bit / UI readouts (every readout goes through `fpga_read_start`).
 - Filter defaults per mode, a coordinator decision with the edge study as input.
 
 **Tool notes.**

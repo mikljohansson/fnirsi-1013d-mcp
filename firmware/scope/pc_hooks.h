@@ -72,7 +72,7 @@ void   pc_glue_decim_conversion(void);//fpga_do_conversion, before the sampling 
 void   pc_glue_decim_rearm(void);     //the full-rate check re-arms the last conversion: its filter setting again
 uint32 pc_glue_decim_words(uint32 samples);       //ring words for a sample count (samples / 2, or samples in 16-bit)
 uint32 pc_glue_decim_pre_words(uint32 samples);   //the same for the pretrigger, less the EXT latency shift in 16-bit
-uint32 pc_glue_decim_ui_start(uint32 start);      //UI capture start word: (0x14 - pretrigger) mod 8192 in 16-bit
+uint32 pc_glue_ui_read_start(uint32 addr);        //UI record start word: (0x14 - the 0x0B pretrigger words) mod the ring
 void   pc_glue_decim_read(void *settings, uint32 start);   //fpga_read_sample_data: 16-bit read + convert, odd pass
 void   pc_glue_decim_even(void);      //fpga_read_sample_data: second pass takes the even samples
 void   pc_glue_decim_tap(void);       //acquisition menu: Filter box touched

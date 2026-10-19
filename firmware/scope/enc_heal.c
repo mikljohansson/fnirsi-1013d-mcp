@@ -30,6 +30,11 @@ int eh_conv_ok(uint8_t s33)
   return (s33 & EH_33_CONV_MASK) == EH_33_CONV_1;
 }
 
+int eh_capture_mode(int mode, int written)
+{
+  return ((mode == EH_MODE_FLAG) && written) ? EH_MODE_DATA : mode;
+}
+
 static uint32_t eh_isqrt(uint64_t x)
 {
   uint64_t r = 0, bit = (uint64_t)1 << 62;

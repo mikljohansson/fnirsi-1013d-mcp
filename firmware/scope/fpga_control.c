@@ -8,6 +8,7 @@
 #include "acal_live.h"
 #include "pc_transport.h"
 #include "enc_heal.h"
+#include "fpga_bus.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -24,8 +25,11 @@ void fpga_init(void)
 
 //fw 0.2.61: trace of the writes that set the ADC capture state (0x0D rate, 0x53 decimation mode, 0x56 FIR, 0x01 = 1
 //sampling reset) into the event log, type 22, with the caller (fpga_trace_who): the bench correlates a garbled full-rate
-//capture with the writes before it (firmware/AGENTS.md section 37)
+//capture with the writes before it (firmware/AGENTS.md section 37). fw 0.2.72: counted always (fpga_bus_note_write,
+//GET_LINK_STATS 64-66), logged as events only at trace level 1 (GET_EVENT_LOG flags bits 2:1): with the UI running every
+//conversion's 0x01 entry flooded the 128-entry ring within seconds
 uint8        fpga_trace_who = FPGA_WHO_UI;
+uint8        fpga_trace_level;
 static uint8 fpga_trace_cmd;
 
 static void fpga_trace(uint32 value)
@@ -34,7 +38,7 @@ static void fpga_trace(uint32 value)
 
   fpga_trace_cmd = 0;
 
-  if((c == 0x0D) || (c == 0x53) || (c == 0x56) || ((c == 0x01) && (value == 1)))
+  if(fpga_bus_note_write(c, value) && fpga_trace_level)
     pc_usb_log_fpga_write(c, (uint16)(((uint32)fpga_trace_who << 12) | ((value > 0xFFF) ? 0xFFF : value)));
 }
 
@@ -237,6 +241,9 @@ uint16 fpga_get_version(void)
   if(fw_version == 0x1632) fpgasettings.fw_FPGA = 3;  //PECO fw in FPGA EF2
   //AL3 family: 0x1532 and later minors (0x1533 adds the EXT trigger, fpga/al3/README.md); same geometry
   if(((fw_version & 0xFFF0) == 0x1530) && (fw_version >= 0x1532)) fpgasettings.fw_FPGA = 2;
+
+  //fw 0.2.72: the bus contract of this bitstream (readout dummy strobe, geometry before the reset; fpga_bus.h)
+  fpga_bus_init(fw_version);
 
   return(fw_version);
 }
@@ -482,6 +489,11 @@ void fpga_set_trigger_edge(void)
 
 void fpga_swap_trigger_channel(void)
 {
+  //EXT (source 2, 0x1533+) does not depend on which channels are on: keep it (fw 0.2.72; 1.00o5 overwrote it with CH1 /
+  //CH2 whenever one channel was toggled with the other off, fpga/al3/README.md section 7)
+  if(scopesettings.triggerchannel == 2)
+    return;
+
   //Check if channel 1 is disabled or channel 2 is enabled
   if((scopesettings.channel1.enable == 0) || (scopesettings.channel2.enable))
   {
@@ -645,8 +657,17 @@ void fpga_set_long_timebase(uint32 timebase)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+static void fpga_arm_idle(void)
+{
+  //Same unbounded ready wait as 1.00o5 (UI behaviour unchanged), but keep the USB link answering if the FPGA hangs.
+  //The BUSY poll never touches the FPGA bus, so it is safe between these reads.
+  PC_BUSY_POLL();
+}
+
 void fpga_do_conversion(void)
-{ 
+{
+  fpga_arm_cfg arm;
+
   scopesettings.conversion_done = 0;    //flag for conversion, 0-start
 
   //fw 0.2.62: a new capture for the full-rate check (unless this is its re-arm)
@@ -676,52 +697,19 @@ void fpga_do_conversion(void)
   
 
   
-  //0x1536: geometry and sequencer registers before the reset (UI averaging run or 0x57 = 0)
+  //0x1536: sequencer registers before the reset (UI averaging run or 0x57 = 0)
   PC_SEQ_PRE_RESET();
 
-  //Reset the sample system
-  fpga_write_cmd(0x01);
-  fpga_write_byte(0x01);
-  
-  //Send check on ready command
-  fpga_write_cmd(0x05);
-  
-  //Wait for the flag to become 1
-  {
-    //Same unbounded wait as 1.00o5 (UI behaviour unchanged), but keep the USB link answering if the FPGA hangs.
-    //The BUSY poll never touches the FPGA bus, so it is safe between these reads.
-    uint32 polls = 0;
-
-    while((fpga_read_byte() & 1) == 0)
-    {
-      if((++polls & 0xFFFF) == 0)
-        PC_BUSY_POLL();
-    }
-  }
-  
-  //Test again to make sure it was no glitch?????
-  //while((fpga_read_byte() & 1) == 0);
-  
-  //posielat ked je sytem v resete, aby neprepisal udaje zachodu
-  
-  if(fpgasettings.fw_FPGA > 1) 
-  {
-    //Write the command to set the pretrigger_samples to the FPGA
-    fpga_write_cmd(0x0B);
-    //16-bit layout (decimation filter on): one sample per word
-    fpga_write_short(pc_glue_decim_pre_words(fpgasettings.settriggerpoint));
-
-    //Write the command to set the total_samples to the FPGA
-    fpga_write_cmd(0x0C);
-    fpga_write_short(pc_glue_decim_words(fpgasettings.totalsamples));
-
-    //set time to automode
-    fpga_set_time_base(scopesettings.timeperdiv);
-  }
-  
-  //Done with reset
-  fpga_write_cmd(0x01);
-  fpga_write_byte(0x00);
+  //Sampling reset (fpga_bus.h): pretrigger and total words (16-bit layout: one sample per word) before the reset and
+  //again inside it, the time-out for auto mode (fpga_set_time_base's value), unbounded ready wait as 1.00o5
+  arm.geometry     = (uint8_t)(fpgasettings.fw_FPGA > 1);
+  arm.pre_words    = (uint16_t)pc_glue_decim_pre_words(fpgasettings.settriggerpoint);
+  arm.total_words  = (uint16_t)pc_glue_decim_words(fpgasettings.totalsamples);
+  arm.write_0e     = (uint8_t)((fpgasettings.fw_FPGA > 1) && (scopesettings.timeperdiv < (sizeof(timebase_settings) / sizeof(uint32))));
+  arm.auto_timeout = scopesettings.samplecount;
+  arm.max_polls    = 0;
+  arm.idle         = fpga_arm_idle;
+  fpga_arm_reset(&arm);
 
   //PC protocol: a UI conversion started (the ring no longer holds the last capture)
   PC_UI_CAPTURE_START();
@@ -877,13 +865,9 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
     settings->clip_hi = 255;
   }
 
-  //Send command 0x1F to the FPGA followed by the translated data returned from command 0x14
-  fpga_write_cmd(0x1F);
-  fpga_write_short(triggerpoint);
-  
-  //Send a command for getting ADC1 trace data from the FPGA
-  fpga_write_cmd(settings->adc1command);
-  
+  //Pointer, ADC1 (core A) command and the dummy strobe (fpga_bus.h; 1.00o5 read one word late without it)
+  fpga_read_start(settings->adc1command, (uint16_t)triggerpoint);
+
   //Signal no checking on the first ADC when compensating
   settings->checkfirstadc = 0;
   
@@ -950,12 +934,8 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
     settings->state = 0;
   }
   
-  //Send command 0x1F to the FPGA followed by the translated data returned from command 0x14
-  fpga_write_cmd(0x1F);
-  fpga_write_short(triggerpoint);
-  
-  //Send a command for getting ADC2 trace data from the FPGA
-  fpga_write_cmd(settings->adc2command);
+  //Pointer, ADC2 (core B) command and the dummy strobe
+  fpga_read_start(settings->adc2command, (uint16_t)triggerpoint);
 
   //Signal to check the readings of the first ADC on being zero when compensating
   settings->checkfirstadc = 1;
@@ -1646,39 +1626,6 @@ uint16 fpga_get_decim_state(void)
   //bits 1:0 K}, low byte S
   fpga_write_cmd(0x29);
   return(fpga_read_short());
-}
-
-//count 16-bit samples from ring word start: low bytes (cmdlo, 0x20/0x22) then high bytes (cmdhi, 0x21/0x23), each read
-//advancing one word. Same convention as fpga_read_sample_data (no dummy read after 0x1F), so both passes stay aligned.
-void fpga_read_decim_data(uint8 cmdlo, uint8 cmdhi, uint32 start, uint32 count, uint16 *dst)
-{
-  uint32 i;
-
-  fpga_write_cmd(0x1F);
-  fpga_write_short(start);
-  fpga_write_cmd(cmdlo);
-
-  FPGA_BUS_DIR_IN();
-  FPGA_DATA_READ();
-
-  for(i=0;i<count;i++)
-  {
-    FPGA_PULSE_CLK();
-    dst[i] = FPGA_GET_DATA();
-  }
-
-  fpga_write_cmd(0x1F);
-  fpga_write_short(start);
-  fpga_write_cmd(cmdhi);
-
-  FPGA_BUS_DIR_IN();
-  FPGA_DATA_READ();
-
-  for(i=0;i<count;i++)
-  {
-    FPGA_PULSE_CLK();
-    dst[i] |= FPGA_GET_DATA() << 8;
-  }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

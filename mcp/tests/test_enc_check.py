@@ -67,6 +67,40 @@ def test_event_types_21_and_22_in_words():
     names = P.link_stats_names(64)
     assert names[62:64] == ("adc_fullrate_bad", "adc_fullrate_recovered") or \
         list(names).index("adc_fullrate_bad") + 1 == list(names).index("adc_fullrate_recovered")
+    # 1.22 (fw 0.2.72): 68 counters, 64..67 the FPGA writes and the captures judged by their data
+    names = P.link_stats_names(68)
+    assert len(names) == 68 and names[64:68] == ("fpga_rate_writes", "fpga_filter_writes", "fpga_sampling_resets",
+                                                  "adc_fullrate_by_data")
+
+
+def test_event_log_fpga_trace_switch(sim_factory):
+    """1.22: GET_EVENT_LOG flags bits 2:1 switch event type 22 on / off; the response word at 2 says the level."""
+    srv = sim_factory(variant="al3e")
+    with Scope.connect(srv.url) as s:
+        assert s.event_log().fpga_trace is False
+        assert s.event_log(fpga_trace=True).fpga_trace is True and srv.device.fpga_trace
+        assert s.event_log().fpga_trace is True
+        assert s.event_log(fpga_trace=False).fpga_trace is False
+    log = P.EventLog(5, 100, [], fpga_trace=True)
+    assert P.parse_event_log(P.pack_event_log(log)).fpga_trace is True
+    stats = P.parse_link_stats(frame_payload("resp_get_link_stats_1_22"))
+    assert (stats["fpga_rate_writes"], stats["fpga_sampling_resets"], stats["adc_fullrate_by_data"]) == (41, 5803, 112)
+
+
+def test_event_log_tool_fpga_trace(sim_factory, tmp_path):
+    from test_server import client_for
+
+    srv = sim_factory(variant="al3e")
+
+    async def main():
+        async with client_for(srv, tmp_path) as c:
+            r = await c.call("scope_event_log")
+            assert r["fpga_write_trace"] is False
+            r = await c.call("scope_event_log", fpga_trace=True)
+            assert r["fpga_write_trace"] is True and srv.device.fpga_trace
+            r = await c.call("scope_event_log", fpga_trace=False)
+            assert r["fpga_write_trace"] is False
+    anyio.run(main)
 
 
 def test_simulator_counts_full_rate_captures(sim_factory):

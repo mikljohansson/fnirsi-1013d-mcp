@@ -1,0 +1,157 @@
+//----------------------------------------------------------------------------------------------------------------------------------
+// fpga_bus.c - readout start and sampling reset shared by every reader and arm (fpga_bus.h)
+//----------------------------------------------------------------------------------------------------------------------------------
+
+#include "fpga_bus.h"
+
+fpga_bus_contract fpga_bus = { 1, 0, 0 };
+
+void fpga_bus_contract_for(uint16_t version, fpga_bus_contract *c)
+{
+  //Every known read path latches on i_mcu_clk: one dummy strobe after 0x1F (stock measured, AL3 simulated through
+  //0x1539, EF2 / EP4 by their shared Atlan4 Verilog). A future bitstream that drops the lag gets its own entry here.
+  c->read_dummy = 1;
+
+  //Programmable geometry: AL3 family, EF2, EP4 (protocol.md 5.1); written before the reset on all of them
+  c->prog = (uint8_t)((((version & 0xFFF0) == 0x1530) && (version >= 0x1532)) || (version == 0x1632) || (version == 0x1732));
+  c->geometry_early = c->prog;
+}
+
+void fpga_bus_init(uint16_t version)
+{
+  fpga_bus_contract_for(version, &fpga_bus);
+}
+
+void fpga_read_start(uint8_t cmd, uint16_t start_word)
+{
+  uint32_t i;
+
+  fpga_write_cmd(0x1F);
+  fpga_write_short(start_word);
+  fpga_write_cmd(cmd);
+
+  fpga_io_read_mode();
+
+  for(i=0;i<fpga_bus.read_dummy;i++)
+    (void)fpga_io_strobe_read();
+}
+
+void fpga_read_lane(uint8_t cmd, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride, uint32_t ring_words)
+{
+  while(count)
+  {
+    uint32_t n = ring_words - start;
+
+    if(n > count)
+      n = count;
+
+    fpga_read_start(cmd, (uint16_t)start);
+    count -= n;
+
+    while(n--)
+    {
+      *dst = fpga_io_strobe_read();
+      dst += stride;
+    }
+
+    start = 0;
+  }
+}
+
+uint32_t fpga_ring_start(uint32_t addr, uint32_t pre_words, uint32_t ring_words)
+{
+  return (addr % ring_words + ring_words - pre_words % ring_words) % ring_words;
+}
+
+void fpga_read_decim_data(uint8_t cmdlo, uint8_t cmdhi, uint32_t start, uint32_t count, uint16_t *dst)
+{
+  uint32_t i;
+
+  //16-bit samples exist on AL3 only, whose 13-bit read pointer wraps at the 8192-word ring end by itself
+  fpga_read_start(cmdlo, (uint16_t)start);
+
+  for(i=0;i<count;i++)
+    dst[i] = fpga_io_strobe_read();
+
+  fpga_read_start(cmdhi, (uint16_t)start);
+
+  for(i=0;i<count;i++)
+    dst[i] |= (uint16_t)(fpga_io_strobe_read() << 8);
+}
+
+static void fpga_arm_geometry(const fpga_arm_cfg *c)
+{
+  fpga_write_cmd(0x0B);
+  fpga_write_short(c->pre_words);
+  fpga_write_cmd(0x0C);
+  fpga_write_short(c->total_words);
+}
+
+int fpga_arm_reset(const fpga_arm_cfg *c)
+{
+  uint32_t n = 0;
+  int geometry = c->geometry && fpga_bus.prog;
+
+  //Before the reset: the write clock edges the 0x05 poll waits for load 0x0B into the trigger read address (0x1532..0x1536
+  //load it only on edges while 0x01 = 1)
+  if(geometry && fpga_bus.geometry_early)
+    fpga_arm_geometry(c);
+
+  //Reset the sample system and wait for ready
+  fpga_write_cmd(0x01);
+  fpga_write_byte(0x01);
+  fpga_write_cmd(0x05);
+
+  while((fpga_read_byte() & 1) == 0)
+  {
+    n++;
+
+    if(c->max_polls)
+    {
+      if(n >= c->max_polls)
+      {
+        fpga_write_cmd(0x01);
+        fpga_write_byte(0x00);
+        return -1;
+      }
+    }
+    else if(((n & 0xFFFF) == 0) && c->idle)
+      c->idle();
+  }
+
+  //Inside the window as 1.00o5 ("send when the system is in reset")
+  if(geometry)
+    fpga_arm_geometry(c);
+
+  if(c->write_0e)
+  {
+    fpga_write_cmd(0x0E);
+    fpga_write_int(c->auto_timeout);
+  }
+
+  //Release
+  fpga_write_cmd(0x01);
+  fpga_write_byte(0x00);
+  return 0;
+}
+
+fpga_bus_writes fpga_bus_wr;
+
+int fpga_bus_note_write(uint8_t cmd, uint32_t value)
+{
+  if(cmd == 0x0D)
+    fpga_bus_wr.rate++;
+  else if((cmd == 0x53) || (cmd == 0x56))
+    fpga_bus_wr.filter++;
+  else if((cmd == 0x01) && (value == 1))
+  {
+    fpga_bus_wr.resets++;
+    fpga_bus_wr.since_reset = 0;
+    return 1;
+  }
+  else
+    return 0;
+
+  fpga_bus_wr.since_reset = 1;
+  return 1;
+}

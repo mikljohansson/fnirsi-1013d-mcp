@@ -63,6 +63,12 @@ int      eh_order_differs(uint16_t fpga_version);
 //0x33 bits 3:2 say convention 1 (order guaranteed, B first)
 int      eh_conv_ok(uint8_t s33);
 
+//The check for one capture (fw 0.2.72): mode (the bitstream's, enc_heal_hw.c), unless a 0x0D / 0x53 / 0x56 write came
+//after the capture's sampling reset (written, fpga_bus.h). On FLAG bitstreams such a write can make one encode prediction
+//miss and 0x33 bit 0 stays set until the next 0x01 = 1, so that capture is judged by its data instead (bench 0x1538,
+//fw 0.2.64: 112 of 5798 captures re-armed after host rate writes, none garbled)
+int      eh_capture_mode(int mode, int written);
+
 //Residual RMS (1/16 code) of one channel's capture in the trace layout: buf[2i] core B, buf[2i + 1] core A, n pairs.
 //The smaller of the two neighbour choices (B against A[i-1], A[i] or against A[i], A[i+1])
 uint32_t eh_residual16(const uint8_t *buf, uint32_t n);

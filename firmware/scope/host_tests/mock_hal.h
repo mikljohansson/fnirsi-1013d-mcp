@@ -129,6 +129,10 @@ typedef struct
   uint8_t    enc_last_why;
   eh_note    enc_last_note;
   pc_hw_enc  enc;                   //what pc_hal_enc_state answers (counted as the target counts)
+  //fw 0.2.72: FPGA writes (fpga_bus.h): a rate / filter write since the last arm, counters, event 22 level
+  uint8_t    enc_written;
+  uint32_t   fpga_rate_writes, fpga_filter_writes, fpga_resets;
+  uint8_t    fpga_trace;
 } mock_state;
 
 extern mock_state mock;

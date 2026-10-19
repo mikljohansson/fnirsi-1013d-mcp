@@ -237,7 +237,8 @@ static const char *pc_counter_names[PC_LINK_COUNTERS] =
   "rx_restalls", "rx_empty_releases", "rxcount_max", "rxcount_over_512", "retired_47", "boot_splash_ms+1", "restarts",
   "restart_exc_type", "restart_exc_lr", "restart_exc_spsr", "restart_exc_sp", "restart_reset_lr", "restart_reset_sp",
   "restart_reset_cpsr", "retired_57", "restart_fault_status", "restart_fault_address", "usb_resumes_inferred",
-  "usb_soft_reconnects", "adc_fullrate_bad", "adc_fullrate_recovered"
+  "usb_soft_reconnects", "adc_fullrate_bad", "adc_fullrate_recovered", "fpga_rate_writes", "fpga_filter_writes",
+  "fpga_sampling_resets", "adc_fullrate_by_data"
 };
 
 static void sec_identity(pc_text *t, pc_session *s, const uint8_t *sd, int sd_ok, const uint8_t *h)
@@ -317,11 +318,13 @@ static void sec_identity(pc_text *t, pc_session *s, const uint8_t *sd, int sd_ok
     pc_text_str(t, "Full-rate capture check: ");
     pc_text_str(t, mode[(h[88] < 3) ? h[88] : 0]);
 
-    if(h[88] == EH_MODE_FLAG)
+    //fw 0.2.72: an unknown convention at boot moves the check to the record data (and leaves the core order unverified)
+    if((h[88] == EH_MODE_FLAG) || (h[90] & PC_ENCF_CONV_BAD))
     {
       pc_text_str(t, ", 0x33 at boot ");
       pc_text_hex(t, h[91], 2);
-      pc_text_str(t, (h[90] & PC_ENCF_CONV_BAD) ? " (UNKNOWN encode convention)" : " (convention 1, B first)");
+      pc_text_str(t, (h[90] & PC_ENCF_CONV_BAD) ? " (UNKNOWN encode convention: core order unverified)" :
+                                                   " (convention 1, B first)");
       pc_text_str(t, ", last ");
 
       if(h[90] & PC_ENCF_READ)

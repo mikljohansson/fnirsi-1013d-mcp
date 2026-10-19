@@ -199,6 +199,25 @@ void pc_variant_from_version(uint16_t version, pc_variant *v)
 #endif
 }
 
+//Core order within a word (P-7.3, rows 58 and 62): the firmware's fixed convention (PC_INTERLEAVE_ORDER 0, core B the
+//earlier sample: READ_RAW / READ_TRACE interleave, acal_track's A - B model, the 0x53 swap bit clear) is verified only on
+//a bitstream that reports it: 0x1538+ whose read 0x33 at boot had bits 3:2 = 01 (enc_heal_hw.c, before the session
+//starts). Everywhere else caps bit 12 INTERLEAVE_UNVERIFIED stays set: 0x1532..0x1536 can flip the order on a rate write
+//(their full-rate captures are checked by the order-independent data residual), 0x1537 has chip 1 the other way round
+//(GET_HEALTH 90 bit 3), a 0x1538+ with another convention is flagged (90 bit 1) and checked by its data.
+void pc_variant_core_order(pc_variant *v)
+{
+  pc_hw_enc e;
+
+  if(!(v->caps & PC_CAP_ENC_CHECK))
+    return;
+
+  pc_hal_enc_state(&e);
+
+  if((e.mode == EH_MODE_FLAG) && eh_conv_ok(e.boot33) && !(e.flags & PC_ENCF_CONV_BAD))
+    v->caps &= ~PC_CAP_INTERLEAVE_UNVERIFIED;
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // Shared control
 
@@ -279,6 +298,23 @@ static void pc_decim_next(pc_session *s, uint32_t total, pc_decim_cfg *c)
                   PC_DECIM_HAS_NONE), c);
 }
 
+//EXT trigger: samples by which the stored data lag the edge (pc_decim_ext_shift_at: the filter's latency with K >= 1, the
+//ADC pipeline's 4 words in the legacy layout since fw 0.2.72), at most the pretrigger (whole words in the legacy layout)
+static uint16_t pc_ext_shift(uint8_t source, const pc_decim_cfg *d, uint32_t divider, uint32_t pretrigger)
+{
+  uint32_t v;
+
+  if(source != 2)
+    return 0;
+
+  v = pc_decim_ext_shift_at(d, divider);
+
+  if(v > pretrigger)
+    v = d->k ? pretrigger : (pretrigger & ~1u);
+
+  return (uint16_t)v;
+}
+
 //Settings a capture is armed with
 static void pc_capture_latch(pc_session *s, pc_capture *c, uint8_t origin, uint32_t pretrigger, uint32_t total)
 {
@@ -304,19 +340,21 @@ static void pc_capture_latch(pc_session *s, pc_capture *c, uint8_t origin, uint3
   pc_hal_channel_read(1, &c->ch[1]);
 
   //1.9: the decimation filter as written for this capture (the arm wrote it just before)
-  if(s->var.caps & PC_CAP_DECIM)
   {
     pc_decim_cfg d;
     int written;
 
-    pc_hal_decim_current(&d, &written);
-    c->decim       = pc_decim_status(&d);
-    c->decim_shift = d.shift;
-    c->decim_n     = d.n;
-    c->ext_shift   = (uint16_t)((c->source == 2) ? pc_decim_ext_shift(&d) : 0);
+    memset(&d, 0, sizeof(d));
 
-    if(c->ext_shift > pretrigger)
-      c->ext_shift = (uint16_t)pretrigger;
+    if(s->var.caps & PC_CAP_DECIM)
+    {
+      pc_hal_decim_current(&d, &written);
+      c->decim       = pc_decim_status(&d);
+      c->decim_shift = d.shift;
+      c->decim_n     = d.n;
+    }
+
+    c->ext_shift = pc_ext_shift(c->source, &d, c->divider, pretrigger);
   }
 }
 
@@ -356,7 +394,7 @@ static void pc_capture_finish(pc_session *s, pc_capture *c, uint16_t trigger_add
   }
 
   c->trigger_addr  = trigger_addr;
-  c->capture_start = (uint16_t)pc_ring_mod((int64_t)trigger_addr - ((int64_t)pc_cap_words(c, c->pretrigger) - c->ext_shift), s->var.ring_words);
+  c->capture_start = (uint16_t)pc_ring_mod((int64_t)trigger_addr - ((int64_t)pc_cap_words(c, c->pretrigger) - pc_cap_words(c, c->ext_shift)), s->var.ring_words);
   c->capture_id    = ++s->capture_id;
 
   s->trigger_addr  = c->trigger_addr;
@@ -793,9 +831,11 @@ static int h_get_battery(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //-> first pass after battery check, acquisition, touch handler, RTC. The last six are ms + 1, 0 = not reached),
 //USB events (fw 0.2.5: bus resets, suspends, resumes, disconnects, EP0 setups, malformed EP0 setups), RX back-pressure
 //(fw 0.2.7: stalls from the ISR, releases, re-stalls inside a release, releases with no packet waiting, largest
-//RXCOUNT, RXCOUNT > 512), fw 0.2.12: USB interrupts served by the timer poll (lost IRQs), fw 0.2.17: boot splash ms + 1, fw 0.2.19: restart record (8), fw 0.2.20: USB IRQ races, fw 0.2.48: fault status + address, fw 0.2.49: USB inferred resumes, soft reconnects, fw 0.2.61: full-rate checks bad, recovered
+//RXCOUNT, RXCOUNT > 512), fw 0.2.12: USB interrupts served by the timer poll (lost IRQs), fw 0.2.17: boot splash ms + 1, fw 0.2.19: restart record (8), fw 0.2.20: USB IRQ races, fw 0.2.48: fault status + address, fw 0.2.49: USB inferred resumes, soft reconnects, fw 0.2.61: full-rate checks bad, recovered,
+//fw 0.2.72: FPGA rate writes, filter writes, sampling resets, full-rate captures on 0x1538+ judged by their data
 typedef char pc_link_counters_check[(PC_TSTAT_COUNT + 26 + PC_USBEV_COUNT + PC_RXDBG_COUNT + PC_RESTART_COUNT + 1 +
-                                     PC_FAULT_COUNT + PC_USBW_COUNT + PC_ENCH_COUNT == PC_LINK_COUNTERS) ? 1 : -1];
+                                     PC_FAULT_COUNT + PC_USBW_COUNT + PC_ENCH_COUNT + PC_FPGAW_COUNT + 1 ==
+                                     PC_LINK_COUNTERS) ? 1 : -1];
 
 uint32_t pc_link_counters(pc_session *s, uint32_t *v)
 {
@@ -828,6 +868,9 @@ uint32_t pc_link_counters(pc_session *s, uint32_t *v)
     pc_hal_enc_state(&e);
     v[n++] = e.bad;        //62-63 (fw 0.2.61; every full-rate capture since 0.2.62): captures bad, recovered (enc_heal.h)
     v[n++] = e.recovered;
+    pc_hal_fpga_writes(v + n);
+    n += PC_FPGAW_COUNT;   //64-66 (fw 0.2.72): 0x0D, 0x53 / 0x56, 0x01 = 1 writes (fpga_bus.h)
+    v[n++] = e.replaced;   //67: full-rate captures on 0x1538+ judged by their data after such a write (eh_capture_mode)
   }
   return n;
 }
@@ -965,12 +1008,17 @@ static int h_get_event_log(pc_session *s, const uint8_t *req, uint32_t len, uint
 
   (void)len;
 
-  if(req[0] & ~0x01)
+  //Flags: bit 0 re-arm the reset snapshot; bits 2:1 (1.22) the FPGA write trace (event type 22): 0 unchanged, 1 off,
+  //2 on, 3 refused
+  if((req[0] & ~0x07) || ((req[0] & 0x06) == 0x06))
     return pc_error(s, PC_E_BAD_ARG, 0, "flags");
+
+  if(req[0] & 0x06)
+    pc_hal_fpga_trace((req[0] & 0x04) ? 1 : 0);
 
   n = pc_hal_event_log(resp + 12, 128, &total);
   pc_put_u16(resp, (uint16_t)n);
-  pc_put_u16(resp + 2, 0);
+  pc_put_u16(resp + 2, pc_hal_fpga_trace(-1));          //1.22: bit 0 the FPGA write trace is on
   pc_put_u32(resp + 4, total);
   pc_put_u32(resp + 8, pc_hal_ms());
 
@@ -1261,6 +1309,7 @@ static void pc_arm_geometry(pc_session *s, pc_hw_trigger *t, pc_decim_cfg *dc, u
                             uint16_t *ext_shift)
 {
   int wide;
+  pc_hw_timebase tb;
 
   pc_hal_trigger_read(t);
 
@@ -1275,13 +1324,11 @@ static void pc_arm_geometry(pc_session *s, pc_hw_trigger *t, pc_decim_cfg *dc, u
   pc_decim_next(s, t->total, dc);
   wide = dc->k != 0;
 
-  //EXT trigger: the stored data lag the edge (pc_decim_ext_shift), so fewer pretrigger words put the edge back at
-  //sample `pretrigger` of the capture
-  *ext_shift = (uint16_t)((t->source == 2) ? pc_decim_ext_shift(dc) : 0);
-  if(*ext_shift > t->pretrigger)
-    *ext_shift = t->pretrigger;
+  //EXT trigger: the stored data lag the edge, so fewer pretrigger words put the edge back at sample `pretrigger`
+  pc_hal_timebase_read(&tb);
+  *ext_shift = pc_ext_shift(t->source, dc, s->tb_raw ? s->tb_divider : tb.divider, t->pretrigger);
 
-  *pre_w = wide ? (uint16_t)(t->pretrigger - *ext_shift) : t->pretrigger / 2;
+  *pre_w = wide ? (uint16_t)(t->pretrigger - *ext_shift) : (uint16_t)((t->pretrigger - *ext_shift) / 2);
   *tot_w = wide ? t->total : t->total / 2;
 }
 
@@ -1965,7 +2012,7 @@ static uint32_t pc_decim_body(pc_session *s, uint8_t *p)
   p[27] = (uint8_t)rb;
   pc_put_u16(p + 28, PC_DECIM_MAX_TOTAL);
   p[30] = next.why;                                     //why the effective K is lower than requested
-  p[31] = (uint8_t)((t.source == 2) ? pc_decim_ext_shift(&next) : 0);   //EXT latency shift the next arm applies
+  p[31] = (uint8_t)pc_ext_shift(t.source, &next, s->tb_raw ? s->tb_divider : tb.divider, t.pretrigger);   //EXT shift the next arm applies
   pc_features_body(s, p + 32);                          //1.17: as GET_STATUS 44..47
   return 36;
 }
@@ -3249,9 +3296,15 @@ static void pc_enc_read(void *ctx, uint8_t core, uint32_t start, uint32_t count,
 static int pc_enc_rearm(pc_session *s, uint32_t start)
 {
   eh_io    io = { s, pc_enc_status, pc_enc_read };
-  int      mode = eh_mode(s->var.version), bad, act;
+  int      mode, bad, act;
   uint32_t value;
   eh_note  n;
+  pc_hw_enc e;
+
+  //The running bitstream's check (enc_heal_hw.c), by the data when a rate / filter write came after this capture's
+  //sampling reset (eh_capture_mode, fw 0.2.72)
+  pc_hal_enc_state(&e);
+  mode = eh_capture_mode(e.mode, pc_hal_enc_written());
 
   if((mode == EH_MODE_NONE) || (s->cap_divider != 0) || s->cap_wide)
     return 0;
@@ -3349,7 +3402,7 @@ static void pc_acq_service(pc_session *s)
     uint16_t addr  = pc_hal_acq_finish();                                            //BENCH: T5 (trigger_addr alignment)
     uint32_t start = pc_ring_mod((int64_t)addr - s->cap_pre_words, s->var.ring_words);
     uint32_t samples = (uint32_t)s->cap_total_words * (s->cap_wide ? 1 : 2);
-    uint32_t pre_samples = s->cap_wide ? (uint32_t)s->cap_pre_words + s->cap_ext_shift : (uint32_t)s->cap_pre_words * 2;
+    uint32_t pre_samples = (s->cap_wide ? (uint32_t)s->cap_pre_words : (uint32_t)s->cap_pre_words * 2) + s->cap_ext_shift;
     uint8_t  mask;
 
     if(pc_enc_rearm(s, start))
@@ -3446,6 +3499,7 @@ void pc_session_init(pc_session *s)
   s->tx = pc_hal_tx_buffer(&s->tx_cap);
   s->sd_stage = pc_hal_sd_stage(&s->sd_stage_cap);
   pc_variant_from_version(pc_hal_fpga_version(), &s->var);
+  pc_variant_core_order(&s->var);
   s->acq_state    = PC_ACQ_IDLE;
   s->last_main_ms = pc_hal_ms();
   s->init_ms      = s->last_main_ms;

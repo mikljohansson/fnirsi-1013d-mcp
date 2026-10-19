@@ -82,6 +82,12 @@ static void test_modes(void)
   T_EQ(eh_conv_ok(0xF2), 0);
   T_EQ(eh_conv_ok(0xFA), 0);
   T_EQ(eh_conv_ok(0xFE), 0);
+
+  //fw 0.2.72: a rate / filter write after the sampling reset sends a FLAG capture to the data check; the others keep theirs
+  T_EQ(eh_capture_mode(EH_MODE_FLAG, 0), EH_MODE_FLAG);
+  T_EQ(eh_capture_mode(EH_MODE_FLAG, 1), EH_MODE_DATA);
+  T_EQ(eh_capture_mode(EH_MODE_DATA, 1), EH_MODE_DATA);
+  T_EQ(eh_capture_mode(EH_MODE_NONE, 1), EH_MODE_NONE);
 }
 
 static void test_residual(void)

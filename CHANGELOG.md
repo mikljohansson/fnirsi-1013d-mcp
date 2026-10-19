@@ -31,6 +31,24 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.72 - 2026-10-19 (protocol 1.22, docs/protocol.md section 14 row 62)
+
+FPGA bus contract fixes (fw-bus, firmware/AGENTS.md section 48; not benched).
+- Every FPGA readout makes the dummy strobe after the 0x1F pointer write (`fpga_bus.c`). The scope trace, the spectrum,
+  READ_TRACE and the 16-bit trace were one word (two samples) late with a stale first byte on every bitstream, 0x1539
+  included; they now hold the same words as READ_RAW and the averaged trace (5f38d23).
+- The UI record start is (trigger address - pretrigger words) mod the ring. 1.00o5's wrap constants were one word off on
+  stock and up to hundreds of words off on AL3 / EF2 when the trigger address lay near the ring start (5f38d23).
+- The pretrigger and total words are written before the sampling reset as well as inside it, on every bitstream: on
+  0x1532..0x1536 a changed pretrigger was lost at slow rates (record shifted by the difference) (5f38d23).
+- EXT trigger at the plain (unfiltered) rates: the record is shifted by the ADC pipeline (4 words, 2 at 200 MSa/s), so
+  the edge sits at the trigger point instead of 10 samples after it; switching a channel on or off keeps EXT as the
+  source (7833312).
+- On 0x1538+ a capture during which the sample rate or filter was changed is judged by its data instead of being
+  re-taken for the encode self-check's sticky bit; the per-write trace (event 22) is off unless switched on with
+  GET_EVENT_LOG, and the writes are counted in GET_LINK_STATS 64-67 (d6de414).
+- The ADC core order counts as verified (GET_INFO caps bit 12 clear) only on 0x1538+ that report it at boot; a bitstream
+  reporting another convention is flagged and checked by its data (267c1be).
 #### 0.2.71 - 2026-10-19 (protocol 1.21, unchanged; READ_BODE reason 8)
 
 - Frequency response: a single sweep shows RUN on the chip (never WAIT, whatever the trigger mode) and STOP on the
@@ -973,6 +991,10 @@ was found (commit not identified).
 
 ### Host library and MCP server (`mcp/`, package version 0.1.0)
 
+- Added: protocol 1.22 (fw 0.2.72): GET_LINK_STATS counters 64-67, `EventLog.fpga_trace` and
+  `Scope.event_log(fpga_trace=...)`, `scope_event_log(fpga_trace=...)`, `ext_shift_legacy`; the simulator models the
+  ADC pipeline behind a legacy EXT trigger, the trace switch and an exact READ_TRACE (d6de414); 0x1538+ without
+  INTERLEAVE_UNVERIFIED (267c1be).
 - Added: protocol v1 frame codec, serial/TCP transport and device simulator (0d8b40f, cc1c908, d888fb3).
 - Added: high-level client, analysis, FastMCP server and tests (8c80c1e). Also an in-process
   simulator (`--sim`) and the README (a60d35a).

@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/enc_heal.c $(SRC)/pc_decim.c $(SRC)/pc_seq
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/enc_heal.h $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/pc_seq.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h $(SRC)/pc_ident.h $(SRC)/pc_report.h $(SRC)/pc_life.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus
 
 $(OUT):
 	mkdir -p $@
@@ -96,6 +96,11 @@ $(OUT)/bode_cli: bode_cli.c $(BODE_SRCS) $(SRC)/bode_dsp.h $(SRC)/fx_fft.h | $(O
 $(OUT)/test_bode_sweep: test_bode_sweep.c test_util.h $(BODE_SRCS) $(SRC)/bode_sweep.c $(SRC)/bode_sweep.h $(SRC)/bode_dsp.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_bode_sweep.c $(SRC)/bode_sweep.c $(BODE_SRCS) -lm
 
+# fw 0.2.72: the MCU-FPGA bus sequences (fpga_bus.c: readout start, sampling reset order) against a bus-level model of
+# zaklad.v's MCU interface (fpga_model.c)
+$(OUT)/test_fpga_bus: test_fpga_bus.c test_util.h fpga_model.c fpga_model.h $(SRC)/fpga_bus.c $(SRC)/fpga_bus.h | $(OUT)
+	$(CC) $(CFLAGS) -DPC_HOST_TEST -o $@ test_fpga_bus.c fpga_model.c $(SRC)/fpga_bus.c
+
 $(OUT)/test_phosphor: test_phosphor.c test_util.h $(SRC)/phos_map.c $(SRC)/phos_map.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_phosphor.c $(SRC)/phos_map.c
 
@@ -141,6 +146,7 @@ test: all
 	$(OUT)/test_acal_track
 	$(OUT)/test_cal_wizard
 	$(OUT)/test_enc_heal
+	$(OUT)/test_fpga_bus
 	$(OUT)/test_ui
 	$(OUT)/test_ui_diag
 	$(OUT)/test_touch_pick

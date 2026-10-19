@@ -40,7 +40,7 @@ PROTO_MAJOR = 1
 #: capture checked, caps ENC_CHECK, features bit 5, GET_HEALTH 104 bytes; 1.20 (fw 0.2.66, row 60): the on-device Bode
 #: plot (BODE_CTRL / READ_BODE, display_mode 5, features bit 6); 1.21 (fw 0.2.67, row 61, provisional numbering):
 #: CAL_PROBE, the calibration wizard's zero measurement from the host
-PROTO_MINOR = 21
+PROTO_MINOR = 22
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -1800,6 +1800,13 @@ def decim_to_code(out: int, scale_q24: int, corr16: int) -> int:
     return max(0, min(255, v))
 
 
+def ext_shift_legacy(divider: int) -> int:
+    """1.22 (fw 0.2.72): EXT trigger in the legacy 8-bit layout, samples (two per word) by which the stored data lag
+    the edge: the AD9288's 4-encode pipeline is 4 words at every legacy rate, 2 at divider 0 where the EXT
+    synchroniser takes most of a 10 ns word (fpga/al3/README.md section 7 finding 4, tb_trigpos model numbers)."""
+    return 8 if divider else 4
+
+
 @dataclass
 class DecimConfig:
     """Effective decimation for a setting (pc_decim_cfg): order K (0 = legacy 8-bit), flags, shift S, why (DECIM_WHY
@@ -1861,6 +1868,12 @@ class DecimConfig:
         else:
             lag, period = 240 + self.k * (self.n - 1) * 5, self.n * 10
         return (lag + period // 2) // period
+
+    def ext_shift_at(self, divider: int) -> int:
+        """1.22 (fw 0.2.72): the EXT shift of a capture at this divider in samples of its layout: ext_shift with the
+        filter, else the legacy one (ext_shift_legacy). Pretrigger words written: pretrigger - shift (16-bit) or
+        (pretrigger - shift) / 2 (legacy); GET_CAPTURE_INFO 70 and GET_DECIM 31 report it, at most the pretrigger."""
+        return self.ext_shift if self.k else ext_shift_legacy(divider)
 
     @property
     def settle_us(self) -> int:
@@ -3116,7 +3129,12 @@ LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     "usb_inferred_resumes", "usb_soft_reconnects",
     # fw 0.2.61 (64 counters, protocol 1.18 row 57): full-rate capture checks that found a garbled ADC core, and of
     # those recovered by the retries; per capture since fw 0.2.62 (1.19 row 58: = GET_HEALTH 92 / 96)
-    "adc_fullrate_bad", "adc_fullrate_recovered")
+    "adc_fullrate_bad", "adc_fullrate_recovered",
+    # fw 0.2.72 (68 counters, protocol 1.22): FPGA writes that set the capture state, counted (event type 22 lists them
+    # only at trace level 1, GET_EVENT_LOG flags bits 2:1): 0x0D rate, 0x53 / 0x56 filter, 0x01 = 1 sampling resets;
+    # then the full-rate captures on FPGA 0x1538+ judged by their data instead of read 0x33 because such a write came
+    # after their sampling reset (0x33 bit 0 is sticky until the next reset)
+    "fpga_rate_writes", "fpga_filter_writes", "fpga_sampling_resets", "adc_fullrate_by_data")
 
 #: restart_exc_type / event 15 a (fw 0.2.19)
 RESTART_EXC_TYPES = {0: "jump to entry", 1: "undefined", 2: "SWI", 3: "prefetch abort", 4: "data abort",
@@ -3130,6 +3148,10 @@ RESTART_RECORD = ("restarts", "restart_exc_type", "restart_exc_lr", "restart_exc
 #: GET_EVENT_LOG request flags (fw 0.2.18): bit 0 re-arms the reset snapshot after this read (a plain read keeps it;
 #: 0.2.15-0.2.17 re-armed on every read and ignore the byte)
 EVENT_LOG_REARM = 0x01
+#: 1.22 (fw 0.2.72) bits 2:1: the FPGA write trace (event type 22, every 0x0D / 0x53 / 0x56 / 0x01 = 1 write with its
+#: caller) on or off; it is off after boot (the writes are counted in GET_LINK_STATS 64-66 either way); both bits = E_BAD_ARG
+EVENT_LOG_FPGA_TRACE_OFF = 0x02
+EVENT_LOG_FPGA_TRACE_ON = 0x04
 
 #: GET_EVENT_LOG entry types (protocol 1.5, section 14 row 42)
 EVENT_TYPES = {1: "bus_reset", 2: "suspend", 3: "resume", 4: "disconnect", 5: "ep0_setup", 6: "ep0_short_packet",
@@ -3273,6 +3295,8 @@ class EventLog:
     bus_events: list[DeviceEvent] = field(default_factory=list)
     bus_total: int = 0
     has_bus_ring: bool = False
+    #: 1.22 (fw 0.2.72): the FPGA write trace (event type 22) is on (word at byte 2, bit 0)
+    fpga_trace: bool = False
 
 
 def _event(payload: bytes, off: int) -> DeviceEvent:
@@ -3286,10 +3310,10 @@ def parse_event_log(payload: bytes) -> EventLog:
     bus-level ring: u16 k (<= 16), u16 0, u32 bus events since boot, k entries. Older firmware: exactly 12 + 8n."""
     if len(payload) < 12:
         return EventLog(0, 0, [])
-    n, _r, total, now = struct.unpack_from("<HHII", payload)
+    n, flags, total, now = struct.unpack_from("<HHII", payload)
     n = min(n, (len(payload) - 12) // 8)
     ev = [_event(payload, 12 + 8 * i) for i in range(n)]
-    log = EventLog(total, now, ev)
+    log = EventLog(total, now, ev, fpga_trace=bool(flags & 1))
     off = 12 + 8 * n
     if len(payload) >= off + 8:
         m, frozen, reset_ms = struct.unpack_from("<HHI", payload, off)
@@ -3309,7 +3333,7 @@ def parse_event_log(payload: bytes) -> EventLog:
 
 
 def pack_event_log(log: EventLog) -> bytes:
-    out = struct.pack("<HHII", len(log.events), 0, log.total & 0xFFFFFFFF, log.now_ms & 0xFFFFFFFF) + \
+    out = struct.pack("<HHII", len(log.events), int(log.fpga_trace), log.total & 0xFFFFFFFF, log.now_ms & 0xFFFFFFFF) + \
         b"".join(struct.pack("<IBBH", e.ms & 0xFFFFFFFF, e.type, e.a, e.b) for e in log.events)
     if log.has_snapshot:
         out += struct.pack("<HHI", len(log.snapshot), int(log.frozen), log.reset_ms & 0xFFFFFFFF) + \

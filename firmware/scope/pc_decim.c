@@ -194,6 +194,16 @@ uint32_t pc_decim_ext_shift(const pc_decim_cfg *c)
   return (uint32_t)((lag + period / 2) / period);
 }
 
+uint32_t pc_decim_ext_shift_legacy(uint32_t divider)
+{
+  return divider ? 8 : 4;
+}
+
+uint32_t pc_decim_ext_shift_at(const pc_decim_cfg *c, uint32_t divider)
+{
+  return c->k ? pc_decim_ext_shift(c) : pc_decim_ext_shift_legacy(divider);
+}
+
 uint32_t pc_decim_settle_us(const pc_decim_cfg *c)
 {
   uint64_t t;

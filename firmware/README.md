@@ -357,6 +357,7 @@ Files:
 | `scope/pc_transport.c/.h` | USB RX ring, TX pump, ZLP, link events | no |
 | `scope/pc_rx_ring.h` | RX ring copies and the one-FIFO-read-per-packet store | yes (`test_rx_ring`) |
 | `scope/pc_hooks.h` | the hooks in the 1.00o5 files (macros that mark each place) | |
+| `scope/fpga_bus.c/.h` | fw 0.2.72: the bus contract per bitstream, the readout start (dummy strobe), the sampling reset order, the record of rate / filter writes | yes (`test_fpga_bus`, against `host_tests/fpga_model.c`) |
 | `scope/build_id.c` | the build identity as data: commit hash and commit time (section 1, "Reproducible images") | |
 | `scope/host_tests/` | `test_protocol`, `test_rx_ring`, `test_session` (mock FPGA and UI), `check_vectors.py` | |
 | `../docs/protocol-vectors.json` | shared frame vectors (`gen_vectors.py`; the MCP server merges its own) | |
@@ -586,7 +587,12 @@ What the firmware does (`enc_heal.c/.h` pure, `enc_heal_hw.c` target, `pc_acq_se
 - Not checked: other rates, stock / EF2 / EP4 bitstreams, and 0x1536 / 0x1537 sequencer runs (segments and lane sums
   are not samples; 0x1538's flag covers a whole run).
 - At boot on 0x1538 the firmware reads 0x33 once and requires bits 3:2 = 01 (convention 1); otherwise GET_HEALTH 90
-  bit 1, event 21 reason 3 and an amber Diagnostics line.
+  bit 1, event 21 reason 3 and an amber Diagnostics line. Since 0.2.72 that bitstream's captures are then checked by
+  their data (GET_HEALTH 88 = 1), and GET_INFO caps bit 12 (core order unverified) is clear only when the convention was
+  read as 1.
+- 0.2.72: a 0x0D / 0x53 / 0x56 write after a capture's sampling reset (the time base changed while the capture ran)
+  leaves 0x33 bit 0 set until the next reset, so on 0x1538+ that capture is judged by its data instead (`fpga_bus.h`
+  record, `eh_capture_mode`; GET_LINK_STATS 67). The 0.2.62 bench re-took 112 of 5798 captures for that reason.
 - Reporting: GET_LINK_STATS 62 (captures found bad) and 63 (recovered by a re-arm); GET_HEALTH 88..103 (mode, last
   0x33, flags, 0x33 at boot, bad, recovered, checked); event 21 per capture that needed re-arms (a = reason << 5 |
   re-arms, bit 7 not recovered; b = caller << 12 | first value); the report file's "Full-rate capture check" line;

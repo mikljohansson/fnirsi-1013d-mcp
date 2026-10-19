@@ -5,6 +5,7 @@ step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
 **Branch fw-screen (2026-10-19): fw 0.2.70, protocol 1.21 unchanged: READ_SCREEN built (cap SCREENSHOT), section 46.**
+**Branch fw-bus (2026-10-19): fw 0.2.72, protocol 1.22 (row 62): FPGA bus contract (dummy strobe in every readout, geometry before the reset, legacy EXT shift, encode check after async writes, type 22 trace level, core order from 0x33), section 48.**
 **Branch fw-bode (2026-10-19): fw 0.2.66, protocol 1.20 (row 60): the Bode plot on the device (bode_dsp / bode_sweep / bode_view / pc_bode, BODE_CTRL / READ_BODE), section 42.**
 **Branch fw-polish1 (2026-10-19): fw 0.2.63 provisional, protocol unchanged: UI polish batch 1 (owner's walk-through of 0.2.59, items a-q), section 39.**
 **Branch fw-ui4 (2026-10-19): fw 0.2.59 provisional, protocol unchanged: UX makeover step 4 (Diagnostics as a main-loop
@@ -3156,3 +3157,94 @@ overview's points or axis; the generator chip stuck on a tone after a sweep; the
 mode or the trigger menu's extra strip there; spectrum labels overlapping or a grid line without a label slot; the
 slider window off the track or changing width while dragged; Trace style not saved; a readout fault on a clean
 bitstream (the rule would be too tight: 5 V/div, clipped, fundamental under 20 codes).
+## 48. fw-bus: FPGA bus contract fixes (fw 0.2.72, protocol 1.22, row 62)
+
+Branch `fw-bus` from origin/main 6c1e5bc (fw 0.2.69). Brief: the fpga-gen6 contract findings (section 35 "Open", fpga/al3
+README section 7 findings 2, 4, 5), the queue's "FPGA bus fixes (EXT shift in legacy, keep EXT in
+fpga_swap_trigger_channel, dummy strobe in screen readouts)", the "Full-rate encode check" refinement and the core-order
+convention. Commits: 5f38d23 (fpga_bus.c: readout, arm order, UI record start, test_fpga_bus + fpga_model), 7833312
+(legacy EXT shift, EXT kept on channel toggles), d6de414 (encode check after async writes, write counters, type 22 level,
+protocol 1.22, mcp + simulator + vectors), 267c1be (core order from 0x33), then docs and this handoff. **Nothing benched,
+nothing flashed.** Host tests all green (test_fpga_bus 11259, test_session 69956 / 69954, test_enc_heal 109, test_diag
+471, check_vectors OK with 96 frames); mcp pytest 417 passed (test_report's PNG test fails the same way on main in this
+environment), CI ruff selection clean, `fnirsi1013d.vectors --check` ok. Warnings: GCC 13 31, GCC 10 36, sorted lists
+identical to origin/main 6c1e5bc.
+
+**What the bitstreams guarantee and what the firmware now does**
+- Readout: every bitstream we know (stock measured, AL3 0x1532..0x1539 simulated; 0x1539 changed the output edge but
+  kept the read pointer, the dummy strobe and the lag) returns mem[S], mem[S], mem[S + 1] after 0x1F = S without a dummy
+  strobe. `fpga_bus_contract_for(version)` says one dummy strobe for all of them (one table, so a future bitstream that
+  drops the lag gets its own entry), `fpga_bus_init` runs from `fpga_get_version` (the first version read at boot).
+  `fpga_read_start` is now the only way into a readout: the UI trace (`fpga_read_sample_data`, both passes), the 16-bit
+  trace (`fpga_read_decim_data`, moved into fpga_bus.c), READ_RAW / the encode data check (`pc_hal_read_core` ->
+  `fpga_read_lane`) and the sequencer view (`pc_hal_seq_read`). Consequences: the scope trace, the spectrum (it reads the
+  trace buffers), READ_TRACE and the 16-bit trace sit one word (two legacy samples, one 16-bit sample) earlier than on
+  0.2.69, equal to READ_RAW and to the averaged trace; the stale first byte is gone. The software trigger refinement
+  re-centres the screen trace, so the visible effect is small.
+- UI record start: `pc_glue_ui_read_start` = (0x14 - the 0x0B words) mod the ring (`fpga_ring_start`). 1.00o5's branches
+  wrapped with ring - 751 for any pretrigger: one word off on stock, (751 - pre) words off on AL3 / EF2 when 0x14 lay
+  within the pretrigger of the ring start (auto mode with the write address wrapped). The encode data check uses it too.
+- Arm: `fpga_arm_reset` (UI conversion and host ARM): 0x0B / 0x0C before 0x01 = 1 when the bitstream takes them, the 0x05
+  wait (unbounded with the BUSY poll for the UI, PC_READY_POLLS for the host), 0x0B / 0x0C again, 0x0E, release.
+  `pc_seq_hw_pre_reset` keeps only the sequencer registers. Harmless on 0x1537+ (they also load after the release).
+- Legacy EXT: `pc_decim_ext_shift_legacy`: 8 samples (4 words), 4 at divider 0, from tb_trigpos (README section 7 table:
+  EXT word +5..+6 at D 9 / 199, +3.5 at D 0, ADC trigger +1..+1.5). D 1..8 were not simulated. Applied through
+  `pc_decim_ext_shift_at` everywhere the 16-bit shift was (host arm geometry, capture info 70, GET_DECIM 31, the record
+  start, the UI pretrigger words). `fpga_swap_trigger_channel` returns at once for source 2.
+- Encode check: 0x33 bit 0 clears only at 0x01 = 1 (README section 8), so "clear it on 0x0D" is not possible without a
+  new bitstream. `fpga_bus_note_write` (from fpga_control.c's write trace) counts 0x0D, 0x53 / 0x56, 0x01 = 1 and
+  remembers a rate / filter write since the last reset; `eh_capture_mode` then judges a 0x1538+ capture by its record
+  data (order independent) instead of by bit 0. Nothing skipped: a garbled capture is still caught and re-armed.
+  GET_LINK_STATS 64-67 (writes and those data-judged captures, `pc_hw_enc.replaced`). Type 22 is off after boot;
+  GET_EVENT_LOG flags bits 2:1 = 2 on, 1 off (3 = E_BAD_ARG), response word 2 bit 0 = on (`fpga_trace_level`).
+- Core order: `pc_variant_core_order` clears caps bit 12 only on 0x1538+ whose boot 0x33 had bits 3:2 = 01;
+  `fpga_encode_init` now runs before `pc_session_init`. A 0x1538+ reporting another convention keeps bit 12, keeps the
+  amber line / event, and is checked by its data (GET_HEALTH 88 = 1). The host ARM check takes the mode from
+  `pc_hal_enc_state`, not from the version. 0x1532..0x1536: still unverifiable in general (a flipped order shows in the
+  data only for large MHz signals at 200 MSa/s); bit 12 stays set and the Diagnostics amber line says why. The
+  convention itself (PC_INTERLEAVE_ORDER 0, swap bit clear) did not change.
+
+**Bench list** (owner with the coordinator; FEL load only, nothing flashed; unit on 0x1539). Build from the branch head
+(`make gcc10`, the image hash follows the commit). Python: `from fnirsi1013d.scope import Scope; from fnirsi1013d import
+analysis as A; s = Scope.connect("COM10")`.
+- B1 identity: `#VER` fw=0.2.72 proto=1.22 fpga=0x1539. `s.info.caps`: bit 12 (0x1000) clear, bit 11 (0x0800) set.
+  `s.health()`: enc_mode 2, enc_boot33 0xF6, enc_flags bit 1 clear. `s.link_stats()` has 68 entries.
+  Regression sign: bit 12 set on 0x1539 (boot 0x33 read or init order wrong).
+- B2 readout lag (T3 in one step): CH1 on the calibration pin (generator 1 kHz), `s.set_timebase(divider=199)`,
+  `s.set_trigger(source=0, edge=0, mode=1, pretrigger_samples=200, total_samples=1000)`, `cap = s.capture(["CH1"])`,
+  `tr = s.read_trace_capture(["CH1"])`; rising crossing at mid level in `cap.channels["CH1"].volts` and in
+  `tr.channels["CH1"].volts` (`A.find_edge_near(v, mid, "rising", 200, 20)`): equal within 0.5 sample. On 0.2.69 the
+  READ_TRACE edge sat 2 samples later. Repeat at divider 0 and with Filter CIC2+FIR at 1 MSa/s (16-bit: within 0.5
+  output sample; 0.2.69 one sample later). If READ_TRACE is now 2 samples *earlier* than READ_RAW, the bitstream has no
+  lag and its `fpga_bus_contract_for` entry must say read_dummy 0.
+- B3 screen: 200 MSa/s, cal pin, Average off / on (0x1536+ hardware averaging): the edge stays put when toggling
+  Average (0.2.69: two samples apart, section 35). The first two samples of the trace are not a repeated or odd pair.
+  Spectrum view of the 1 kHz square: unchanged.
+- B4 arm order: 100 kSa/s (divider 1999), host captures alternating pretrigger 60 / 100 samples (20 each), CH1 rising on
+  the generator: the edge at pretrigger + 1..3 samples in every capture. On 0x1539 the FPGA already loads after the
+  release, so this is a no-regression check; the race itself shows only on 0x1532..0x1536 (test_fpga_bus reproduces it:
+  the 1.00o5 order loses 425 of 600 changed pretriggers on the model of 0x1535 at D 199..1999).
+- B5 legacy EXT (wiring: fpga/al3/README.md section 2; generator off; the same edge on CH1 and on the post):
+  `s.set_trigger(source=2, edge=0, mode=1, pretrigger_samples=200, total_samples=1000)` with Filter off, at dividers
+  199, 19, 9, 3, 1, 0: `s.capture_info().ext_shift` = 8, 8, 8, 8, 8, 4; the CH1 edge at the pretrigger within +-3
+  samples (0.2.69: +10..+11 at 1 MSa/s). Note the offsets at D 1 and D 3 (not simulated). Then in the UI with EXT
+  selected switch CH2 off and on, then CH1 off and on: the trigger chip stays EXT and `s.get_trigger(cached=False)`
+  source = 2 (0.2.69: CH1 / CH2).
+- B6 encode check after rate writes: UI running at 200 MSa/s, host `s.set_timebase(divider=99)` / `divider=0` 40 times
+  with 0.3 s between: GET_HEALTH enc_bad stays 0 (0.2.64: 112 of 5798 re-taken), link stats `adc_fullrate_by_data`
+  grows by about 40, `fpga_rate_writes` by 80+, no garbled trace. Then 60 s with no writes: `adc_fullrate_by_data`
+  constant, enc_checked grows. Regression sign: enc_bad grows with the toggles, or by_data grows without writes.
+- B7 trace level: `s.event_log()` has no type 22 entries and `fpga_trace` False; `s.event_log(fpga_trace=True)`, one host
+  capture, `s.event_log()`: type 22 entries (0x01 = 1 by host, 0x0D when the time base changed); `fpga_trace=False`
+  stops them; raw flags 0x06 answer E_BAD_ARG.
+- B8 regression: the calibration wizard passes on 0x1539 as at 20:30 (it reads through the dummy strobe now); a host
+  segments run (section 35 step 7, short) and UI averaging work (the sequencer pre-reset lost its own 0x0B / 0x0C
+  writes to `fpga_arm_reset`); a host Bode sweep of the RC as at 20:51.
+
+**Open / for the coordinator**
+- D 1..8 legacy EXT shift values are extrapolated (B5 measures them); 200 MSa/s uses 2 words from the 0x1538 model.
+- Caps bit 11 READ_LAG_UNVERIFIED stays set until B2 is accepted (then clear it for AL3 in `pc_variant_from_version`).
+- `pc_hal_seq_read` keeps its own strobe loop after `fpga_read_start` (same contract); fpga_read_adc_data's loop too
+  (hot path with the correction).
+- acal_track's A - B model drops sloped pairs, so a flipped order on 0x1532..0x1536 affects it little; not gated.
+- mcp: `scope_event_log` gained `fpga_trace`; docs/mcp-tools.md was not regenerated.
