@@ -52,9 +52,18 @@ module tb;
     .o_offset_2(d_o2), .o_relay2_1(d_r21), .o_relay2_2(d_r22), .o_relay2_3(d_r23), .o_ac_dc_2(d_ac2),
     .o_pwm_display(d_pwm));
 
+  // 0x153A: the dut registers each core's pins on clk_200MHz at its own phase and hands them to the capture logic one
+  // write clock later (adc*_w). The reference (which takes the pins on the write clock edge) gets exactly those values,
+  // 1 ns after each write clock edge, so both capture the same samples and the comparison below stays exact.
+  reg [7:0] r_adc1A = 0, r_adc1B = 0, r_adc2A = 0, r_adc2B = 0;
+  always @(dut.adc1A_w) r_adc1A <= #1 dut.adc1A_w;
+  always @(dut.adc1B_w) r_adc1B <= #1 dut.adc1B_w;
+  always @(dut.adc2A_w) r_adc2A <= #1 dut.adc2A_w;
+  always @(dut.adc2B_w) r_adc2B <= #1 dut.adc2B_w;
+
   fnirsi_1013D_ref refd (
     .i_xtal(i_xtal), .i_mcu_clk(mcu_clk), .i_mcu_rws(mcu_rws), .i_mcu_dcs(mcu_dcs),
-    .i_adc1A_d(adc1A), .i_adc1B_d(adc1B), .i_adc2A_d(adc2A), .i_adc2B_d(adc2B),
+    .i_adc1A_d(r_adc1A), .i_adc1B_d(r_adc1B), .i_adc2A_d(r_adc2A), .i_adc2B_d(r_adc2B),
     .io_mcu_data(bus_ref), .o_1khz_calib(pad_ref),
     .o_adc1_encA(r_e1A), .o_adc1_encB(r_e1B), .o_adc2_encA(r_e2A), .o_adc2_encB(r_e2B),
     .o_offset_1(r_o1), .o_relay1_1(r_r11), .o_relay1_2(r_r12), .o_relay1_3(r_r13), .o_ac_dc_1(r_ac1),
@@ -331,7 +340,12 @@ module tb;
         wr2(8'h1F, {3'd0, rd16_d[12:0]});
         nread = 4 + (rnd[31:30] * 4);
         for (k = 0; k < nread; k = k + 1) rd1(8'h20 + (k % 4));
+        // live ADC pins: the dut returns its IOB registers, the reference its (delayed) pins: not compared; 0x41 then
+        // refills all eight bits of the read register (0x05 / 0x0A / 0x18 keep the others)
+        bus_cmp_on = 0;
         for (k = 0; k < 4; k = k + 1) rd1(8'h24 + k);
+        bus_cmp_on = 1;
+        rd2(8'h41);
         rd1(8'h05);
         disable ext_noise;
         ext_en = 0;
@@ -367,7 +381,7 @@ module tb;
     // Version word and status read
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h1539, "cmd 0x06 reads 0x1539");
+    check(rd16_d == 16'h153A, "cmd 0x06 reads 0x153A");
     check(rd16_r == 16'h1532, "reference cmd 0x06 reads 0x1532");
 
     //-------------------------------------------------------------------------------

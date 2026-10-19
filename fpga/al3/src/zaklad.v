@@ -2,7 +2,7 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
-// fnirsi-1013d-mcp changes (version word 0x1539, see fpga/al3/README.md "Changes"):
+// fnirsi-1013d-mcp changes (version word 0x153A, see fpga/al3/README.md "Changes"):
 //  - 0x1533: external trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
 //    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
 //    Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
@@ -38,6 +38,15 @@
 //    which samples the bus after it raises the clock, always reads a settled byte; there is no
 //    same-edge path left on i_mcu_clk in the read path. Byte values, pointer advance and the dummy
 //    strobe are unchanged; zaklad.sdc constrains i_mcu_clk. Otherwise cycle-identical to 0x1538.
+//  - 0x153A: ADC data capture. 0x1532..0x1539 took all four ADC buses straight from the pins on the write clock edge.
+//    At 200 MSa/s the two interleaved cores of a chip are encoded 5 ns apart and each one's data is settled for only
+//    6 ns of its 10 ns period (AD9288 tV 2 ns min, tPD 6 ns max), so a single capture instant has about 0.4 ns of
+//    common valid window: every build put it somewhere else (bench: B cores bad on 0x1538, A cores on 0x1539). Now
+//    each pin goes into an IOB DDR register on clk_200MHz and a short chain, giving the pins as they were 5 .. 17.5 ns
+//    before each write clock edge in 2.5 ns steps, and each core takes the step in the middle of its own valid window
+//    (command 0x63; power-on from TD's numbers for this build, tb/capture_margins.py). Cores B stay the earlier
+//    sample of a word. The capture adds one write clock to the ADC data's latency (EXT edges land one word later). Outlier
+//    counters per core (read 0x36, threshold 0x64) let the firmware check or train the steps.
 //-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
@@ -823,12 +832,86 @@ freq_generator_dds_pwm u_freq
   );
 
 //---------------------------------------------------------------------------
+//ADC data capture (0x153A). Every pin goes into an IOB DDR input register (AL_LOGIC_IDDR on clk_200MHz: q2 = the pin at
+//the last falling edge, q1 = at the rising edge 2.5 ns before that, both handed over on the rising edge), followed by two
+//more rising-edge stages. A write clock edge R (a falling clk_200MHz edge) then sees the pins as sampled at
+//R - 5 (stage 0, q2), R - 7.5 (1, q1), R - 10 (2), R - 12.5 (3), R - 15 (4) and R - 17.5 ns (5); the IOB registers
+//have a fixed pad delay, so these instants do not move with placement. Each core takes the stage set in 0x63 (cap_sel,
+//3 bits per core). Power-on: the A cores stage 1 (R - 7.5), the B cores stage 4 (R - 15), from the timing in
+//fpga/al3/README.md "Changes" section 10: the B cores are encoded with the rising write clock edge and the A cores with
+//the falling one, their encode pins switch 6.7..7.0 ns (B) and 12.4..12.9 ns (A) after R, and the AD9288's data of
+//each core is valid from 6 ns (tPD max) to one encode period + 2 ns (tV min) after its encode: at 200 MSa/s stage 1 is
+//1.9..2.5 ns inside the A window on both sides and stage 4 1.9..2.2 ns inside the B window, worst case; at slower
+//rates the windows only grow. B stays the earlier sample of a word (by 5 ns, or half a word), as in 0x1535 / 0x1538.
+//The outlier counters (read 0x36) count, per core, words whose sample differs from the core's previous one by more
+//than the 0x64 threshold, from 0x01 = 1 through the capture: with a quiet input they stay 0 at a good stage.
+
+  wire [31:0] adc_pin = { i_adc2B_d, i_adc2A_d, i_adc1B_d, i_adc1A_d };
+  wire [31:0] adc_q1, adc_q2;
+  reg  [31:0] adc_d1 = 0, adc_d2 = 0, adc_dd1 = 0, adc_dd2 = 0;
+  //Command 0x63: { 2B, 2A, 1B, 1A } stage, 3 bits each, power-on 4, 1, 4, 2; command 0x64: outlier threshold, power-on
+  //8 codes. TD 4.6.8 ignores Verilog initial values (every flop configures to 0; a bitstream built with other values
+  //here is byte-identical), so the registers hold the value XOR its power-on value and 0 means the default.
+  localparam [11:0] CAP_SEL_PO = 12'h862;
+  localparam [7:0]  CAP_THR_PO = 8'd8;
+  reg  [11:0] cap_sel_x = 0;
+  reg  [7:0]  cap_thr_x = 0;
+  wire [11:0] cap_sel = cap_sel_x ^ CAP_SEL_PO;
+  wire [7:0]  cap_thr = cap_thr_x ^ CAP_THR_PO;
+
+  genvar adc_i;
+  generate
+    for(adc_i = 0; adc_i < 32; adc_i = adc_i + 1)
+      begin : adc_iddr
+        AL_LOGIC_IDDR #(.SRMODE("SYNC")) iddr (.q1(adc_q1[adc_i]), .q2(adc_q2[adc_i]), .clk(clk_200MHz), .d(adc_pin[adc_i]), .rst(1'b0));
+      end
+  endgenerate
+
+  always @(posedge clk_200MHz)
+    begin
+      adc_d1  <= adc_q1;
+      adc_d2  <= adc_q2;
+      adc_dd1 <= adc_d1;
+      adc_dd2 <= adc_d2;
+    end
+
+  function [7:0] cap_pick(input [2:0] sel, input [7:0] s0, input [7:0] s1, input [7:0] s2, input [7:0] s3,
+                          input [7:0] s4, input [7:0] s5);
+    case(sel)
+      3'd0:    cap_pick = s0;
+      3'd1:    cap_pick = s1;
+      3'd2:    cap_pick = s2;
+      3'd3:    cap_pick = s3;
+      3'd4:    cap_pick = s4;
+      default: cap_pick = s5;
+    endcase
+  endfunction
+
+  wire [7:0] adc1A_c = cap_pick(cap_sel[2:0],  adc_q2[7:0],   adc_q1[7:0],   adc_d2[7:0],   adc_d1[7:0],   adc_dd2[7:0],   adc_dd1[7:0]);
+  wire [7:0] adc1B_c = cap_pick(cap_sel[5:3],  adc_q2[15:8],  adc_q1[15:8],  adc_d2[15:8],  adc_d1[15:8],  adc_dd2[15:8],  adc_dd1[15:8]);
+  wire [7:0] adc2A_c = cap_pick(cap_sel[8:6],  adc_q2[23:16], adc_q1[23:16], adc_d2[23:16], adc_d1[23:16], adc_dd2[23:16], adc_dd1[23:16]);
+  wire [7:0] adc2B_c = cap_pick(cap_sel[11:9], adc_q2[31:24], adc_q1[31:24], adc_d2[31:24], adc_d1[31:24], adc_dd2[31:24], adc_dd1[31:24]);
+
+  //The picked samples are registered on every write clock edge (adc*_w, about 4 ns after the stages changed) and every
+  //consumer (sample memory, trigger, decimator, record mirror) takes them from there: a word written on edge R holds
+  //the pins as they were 5 + 2.5 k ns before the previous edge. One write clock more than taking the pins directly, but
+  //the 6:1 pick and the memory's input setup do not fit the 4 ns from a stage change to the next write clock edge.
+  reg [7:0] adc1A_w = 0, adc1B_w = 0, adc2A_w = 0, adc2B_w = 0;
+  always @(posedge sample_write_clock)
+    begin
+      adc1A_w <= adc1A_c;
+      adc1B_w <= adc1B_c;
+      adc2A_w <= adc2A_c;
+      adc2B_w <= adc2B_c;
+    end
+
+//---------------------------------------------------------------------------
 //Memory part
 //0x1536: in segment mode the write address is folded into the current segment slot
 //(seg_mask_s = slot size - 1, seg_base_s = slot start); otherwise the mask is all ones and the
 //address passes unchanged. The record mirror takes the same data and write enable.
 
-  wire [31:0] sample_dia = dec_on ? { dec_out2, dec_out1 } : { i_adc2B_d, i_adc2A_d, i_adc1B_d, i_adc1A_d };
+  wire [31:0] sample_dia = dec_on ? { dec_out2, dec_out1 } : { adc2B_w, adc2A_w, adc1B_w, adc1A_w };
   reg  [12:0] seg_mask_s = 13'h1FFF;
   reg  [12:0] seg_base_s = 0;
   wire [12:0] sample_write_address_phys = (sample_write_address & seg_mask_s) | (seg_base_s & ~seg_mask_s);
@@ -985,8 +1068,8 @@ freq_generator_dds_pwm u_freq
   decim_chan dec_ch1
   (
     .clk   (sample_write_clock),
-    .in_a  (i_adc1A_d),
-    .in_b  (i_adc1B_d),
+    .in_a  (adc1A_w),
+    .in_b  (adc1B_w),
     .order (dec_order),
     .swap  (dec_swap),
     .neg_a (dec_neg_a),
@@ -999,8 +1082,8 @@ freq_generator_dds_pwm u_freq
   decim_chan dec_ch2
   (
     .clk   (sample_write_clock),
-    .in_a  (i_adc2A_d),
-    .in_b  (i_adc2B_d),
+    .in_a  (adc2A_w),
+    .in_b  (adc2B_w),
     .order (dec_order),
     .swap  (dec_swap),
     .neg_a (dec_neg_a),
@@ -1146,9 +1229,40 @@ assign sampling_enable = ~(
          trigger_previous <= trigger_data;
 
          //current sample (decimation filter on: 16-bit compare result, see dec_trig_ge)
-	     trigger_data <= dec_on ? {8{dec_trig_ge}} : trigger_channel ? i_adc2A_d : i_adc1A_d;
+	     trigger_data <= dec_on ? {8{dec_trig_ge}} : trigger_channel ? adc2A_w : adc1A_w;
        end
   end
+
+//-------------------------------------------------------------------------------------
+//Outlier counters (0x153A, read 0x36): per core, the sample of each write clock edge (adc*_w) against the one of the
+//edge before (oc_p), counted while the capture writes; 0x01 = 1 clears them. Saturating at 65535.
+
+  wire [7:0] oc_c1A = adc1A_w, oc_c1B = adc1B_w, oc_c2A = adc2A_w, oc_c2B = adc2B_w;
+  reg  [7:0] oc_p1A = 0, oc_p1B = 0, oc_p2A = 0, oc_p2B = 0;
+  reg [15:0] oc_1A = 0, oc_1B = 0, oc_2A = 0, oc_2B = 0;
+  reg [1:0]  oc_v = 0;                     //samples of this capture in oc_c / oc_p
+
+  function oc_far(input [7:0] x, input [7:0] y, input [7:0] t);
+    oc_far = ((x > y) ? (x - y) : (y - x)) > t;
+  endfunction
+
+  always @(posedge sample_write_clock)
+    begin
+      oc_p1A <= oc_c1A;  oc_p1B <= oc_c1B;  oc_p2A <= oc_c2A;  oc_p2B <= oc_c2B;
+      if(sample_system_reset == 1)
+        begin
+          oc_1A <= 0; oc_1B <= 0; oc_2A <= 0; oc_2B <= 0;
+          oc_v  <= 0;
+        end
+      else if(sample_write_enable)
+        begin
+          oc_v <= { oc_v[0], 1'b1 };
+          if(oc_v[1] & oc_far(oc_c1A, oc_p1A, cap_thr) & ~&oc_1A) oc_1A <= oc_1A + 16'd1;
+          if(oc_v[1] & oc_far(oc_c1B, oc_p1B, cap_thr) & ~&oc_1B) oc_1B <= oc_1B + 16'd1;
+          if(oc_v[1] & oc_far(oc_c2A, oc_p2A, cap_thr) & ~&oc_2A) oc_2A <= oc_2A + 16'd1;
+          if(oc_v[1] & oc_far(oc_c2B, oc_p2B, cap_thr) & ~&oc_2B) oc_2B <= oc_2B + 16'd1;
+        end
+    end
 
 //-------------------------------------------------------------------------------------
 //Sampling half way detect
@@ -1654,9 +1768,9 @@ assign sampling_enable = ~(
               | (mcu_command == 8'h1B) | (mcu_command == 8'h1F)
               | (mcu_command == 8'h32) | (mcu_command == 8'h35) | (mcu_command == 8'h38) | (mcu_command == 8'h3C)
               | (mcu_command == 8'h51) | (mcu_command == 8'h52) | (mcu_command == 8'h55)
-              | (mcu_command == 8'h58) | (mcu_command == 8'h5A) | (mcu_command == 8'h5C)) & i_mcu_rws) |
+              | (mcu_command == 8'h58) | (mcu_command == 8'h5A) | (mcu_command == 8'h5C) | (mcu_command == 8'h63)) & i_mcu_rws) |
               (((mcu_command == 8'h06) | (mcu_command == 8'h14) | (mcu_command == 8'h29) | (mcu_command == 8'h41)
-              | (mcu_command == 8'h2A)) & ~i_mcu_rws))
+              | (mcu_command == 8'h2A) | (mcu_command == 8'h36)) & ~i_mcu_rws))
         mcu_state <= mcu_state + 1;
     end
 
@@ -1982,6 +2096,23 @@ assign sampling_enable = ~(
             8'h5D:
               seq_stop <= io_mcu_data[0];
 
+            //ADC capture stage per core (0x153A), two bytes high byte first: { 2B, 2A, 1B, 1A }, 3 bits each; stage k
+            //samples the pins 5 + 2.5 k ns before the write clock edge (k = 0..5; 6 and 7 act as 5); power-on 0x0862
+            //(CH1 A 2, CH1 B 4, CH2 A 1, CH2 B 4)
+            8'h63:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    cap_sel_x[11:8] <= io_mcu_data[3:0] ^ CAP_SEL_PO[11:8];
+                  4'h1:
+                    cap_sel_x[7:0] <= io_mcu_data ^ CAP_SEL_PO[7:0];
+                endcase
+              end
+
+            //Outlier threshold (0x153A), codes
+            8'h64:
+              cap_thr_x <= io_mcu_data ^ CAP_THR_PO;
+
           endcase
         end
     end
@@ -2012,7 +2143,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h39;
+                    o_mcu_data <= 8'h3A;
                 endcase
               end
 
@@ -2057,19 +2188,19 @@ assign sampling_enable = ~(
 
             //Reading of the sample data for channel 1 ADC 1 
             8'h24:
-              o_mcu_data <= i_adc1A_d;
+              o_mcu_data <= adc_q1[7:0];               //0x153A: the pin as the IOB register took it
 
             //Reading of the sample data for channel 1 ADC 2
             8'h25:
-              o_mcu_data <= i_adc1B_d;
+              o_mcu_data <= adc_q1[15:8];               //0x153A: the pin as the IOB register took it
 
             //Reading of the sample data for channel 2 ADC 1
             8'h26:
-              o_mcu_data <= i_adc2A_d;
+              o_mcu_data <= adc_q1[23:16];               //0x153A: the pin as the IOB register took it
 
             //Reading of the sample data for channel 2 ADC 2
             8'h27:
-              o_mcu_data <= i_adc2B_d;
+              o_mcu_data <= adc_q1[31:24];               //0x153A: the pin as the IOB register took it
 
             //Reading of the external trigger status
             //bit0 = filtered EXT pin level, bit1 = generator drives the pin, bit2 = EXT edge since the last reset
@@ -2117,6 +2248,25 @@ assign sampling_enable = ~(
             //1.25 ns later, as 0x1535 normally ran); bits 7:4 the last pin check {CH2 A, CH2 B, CH1 A, CH1 B}, 1 = right
             8'h33:
               o_mcu_data <= { enc_ok, 2'b01, enc_pred_ok, enc_err };
+
+            //ADC capture (0x153A), 10 bytes: the stages (0x63, 2 bytes), then the outlier counts of CH1 A, CH1 B, CH2 A,
+            //CH2 B (16 bits each, high byte first) since the last 0x01 = 1
+            8'h36:
+              begin
+                case(mcu_state)
+                  4'h0: o_mcu_data <= { 4'd0, cap_sel[11:8] };
+                  4'h1: o_mcu_data <= cap_sel[7:0];
+                  4'h2: o_mcu_data <= oc_1A[15:8];
+                  4'h3: o_mcu_data <= oc_1A[7:0];
+                  4'h4: o_mcu_data <= oc_1B[15:8];
+                  4'h5: o_mcu_data <= oc_1B[7:0];
+                  4'h6: o_mcu_data <= oc_2A[15:8];
+                  4'h7: o_mcu_data <= oc_2A[7:0];
+                  4'h8: o_mcu_data <= oc_2B[15:8];
+                  4'h9: o_mcu_data <= oc_2B[7:0];
+                  default: o_mcu_data <= 8'h00;
+                endcase
+              end
 
             //Accumulator / segment table word at the read pointer, bytes 0..7 (0x1536)
             8'h2B:
