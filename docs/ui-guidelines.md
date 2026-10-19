@@ -47,6 +47,22 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   setting (the V/div chips in the channel menu, the steppers on the CTRL page and the tap bands at the top and bottom of the plot
   all set `displayvoltperdiv`). The rule is good UX, not strictness: a quick path that helps while watching the trace stays;
   a duplicate that only adds clutter goes (owner, 2026-10-19).
+- **Time/div drives the sample rate** (owner, 2026-10-19 22:20-22:24; fw 0.2.75). The Scope's tap zoom (left half of
+  the plot one time/div slower, right half one faster) and the ACQ menu's time/div boxes choose a time/div, and while
+  the scope can take a new record (running, or Single, where the tap re-arms the shot) the rate comes from one ladder:
+  for every time/div the fastest rate whose record, at the memory depth kept, covers the ten divisions with at least
+  ten samples per division (`tb_view.c` `tbv_ladder_rate`). After every zoom step the pair is the ladder's, so going to
+  either end and back never leaves a slow time/div at a fast rate (a record covering a sliver of the screen) or a fast
+  time/div with a handful of samples per division. The ACQ menu's rate boxes stay for a manual choice: a rate set by
+  hand holds until the next zoom step or time/div box, which takes the ladder's rate again; when a rate box makes the
+  time/div impossible (record too short, or under ten samples per division) the time/div snaps and the snap notice says
+  so, as before. The ends are plain stops: zooming in ends at 50 ns/div at 200 MSa/s (20, 10 and 5 ns/div are never
+  viable and stay grey), zooming out ends at 200 ms/div (1 kSa/s at 3000 samples) at the roll boundary, which a tap
+  never crosses (roll is the ACQ menu's mode button; in roll the tap steps 50 s .. 100 ms/div as before); a tap at an
+  end changes nothing and the other direction works at once. Stopped (and in the waveform viewer) the record on screen
+  is fixed and keeps its rate: the zoom steps through the time/divs that record can show, and where the ladder would go
+  on but the record cannot, the tap says "Stopped: press RUN to zoom further"; the time/div boxes it cannot show are
+  grey. The host's SET_TIMEBASE by UI index keeps its documented index-to-rate table (`docs/protocol.md`).
 
 ## 3. How things look
 
