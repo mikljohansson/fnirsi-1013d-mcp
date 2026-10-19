@@ -726,3 +726,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   repeats sweep 2 within 0.5 dB / 1.8 deg at every point (300 kHz -25.1 dB / -68 deg): the BNC shell is the probe reference node,
   so it is wiring A. Owner has no reachable USB ground at the scope; options given: hub / extension socket shell, PC case, or a
   10 kOhm / 1.5 nF DUT to cut the return current ten times.
+- 2026-10-19 14:42: fw 0.2.59 (UI step 4 on 0.2.58; merge of fw-ui4) built with GCC 10, MMU image sha256
+  4ba894692d3cdbe92341bbd65cdd5cadd27c16cb68c5db3b8aeb2cddeca39736, nommu 24151796e999fc4105736f786e4eeae33c0948bacab2f6cc74af03ef329b082d,
+  602,112 B, pinned in backups/. The complete makeover image: load this one next. Not loaded.

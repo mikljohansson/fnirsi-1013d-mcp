@@ -145,7 +145,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   device and it never resumed: RESUME interrupt never fires. Decode the event log (types 2/3 fields of row 50), check MUSB resume
   handling (INTRUSBE resume bit, POWER.Resume, PHY), and the F1C100s USB PHY suspend behaviour; bench with `fnirsi1013d-soak --mode reopen
   --idle 1800`. Overnight 10-minute idles never suspended (36 stayed 1); the long idle did.
-- [ ] **UI makeover batch** (owner 10-19; plan docs/plans/ux-makeover.md, mockups https://claude.ai/artifact/M3udheReCiHLQmASaY5qZr revision 4,
+- [x] **UI makeover batch** (all four steps merged 10-19 by 14:42 as fw 0.2.51/0.2.55/0.2.56/0.2.59, bench pending) (owner 10-19; plan docs/plans/ux-makeover.md, mockups https://claude.ai/artifact/M3udheReCiHLQmASaY5qZr revision 4,
   reviews docs/plans/diagnostics-review.md and ux-review.md): step 1 main menu rows + USB drive screen; step 2 CTRL pages with fold-outs
   (Display Normal/Phosphor/X-Y with the phosphor parameters, Trace style, Grid, V/div per channel; Spectrum View/Analysis/Axis), strips
   removed, Trace style out of ACQ, AUTO SET as the spectrum Auto, version string and Move fast out of the top bar, warnings top-middle,
@@ -211,6 +211,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   0x1537 if the FPGA is at fault), docs-gen3 (Sonnet: protocol tidy, README timings, roadmap.md, announcement draft,
   release-readiness.md). Queued behind them: fw-ui4 (step 4, needs fw-readers), Measurements v2 (needs step 2), touch batches 2-3,
   mcp 1.16/1.17, Bode device steps (after the owner's Bode bench), 0.3.0 release.
+- fw-ui4 (done 14:42, about 620k tokens, retired): merged and renumbered to fw 0.2.59 (Diagnostics as a main-loop page: Status,
+  Calibration, Log, Developer; four-screen wizard; first-run screen; old diagnostics and start-up screens removed; fw-ui3 interim
+  rows removed; ui_diag.c, ui_dlg.c, ui_diag_view.c, test_ui_diag); images pinned backups/fw-0.2.59_4ba89469.bin and
+  fw-0.2.59-nommu_24151796.bin; walk-through firmware/AGENTS.md section 34. Not done: Check on post, Undo last calibration (sector
+  711). UI makeover steps 1-4 are all on main now; the whole bench walk-through (sections 29, 31-35) is one owner session.
 - fw-seg (done 14:25, about 575k tokens, retired): merged 4905934 as fw 0.2.58 / protocol 1.17 (row 56, renumbered from the
   provisional 70; handoff section 35): caps bit 17 SEQ, SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW segment mode, GET_STATUS 48 B with
   a features word, GET_DECIM 36, GET_CAPTURE_INFO 96, UI Average as a hardware run where the record fits; images pinned
