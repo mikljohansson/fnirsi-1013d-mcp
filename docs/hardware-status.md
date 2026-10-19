@@ -981,4 +981,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   7f85890e4bb312cfcc288b00613b9cdd9289d32d8650c34c63d8593cf6fb9950); host test suite and 100 protocol vectors green. Not loaded
   yet: the scope answered E_BUSY at 21:33 (a menu open on the unit). Bench list B1-B8 in firmware/AGENTS.md section 48; B1, B2
   (READ_TRACE vs READ_RAW edge), B3 and B6 (rate toggles, GET_HEALTH bad count) are host-side.
+- 2026-10-19 21:53: fw 0.2.73 (fw-over merged on 0.2.72: slider-track overview in Scope, Spectrum and Frequency response, tap to
+  jump) built with GCC 10 and pinned backups/fw-0.2.73_ad7b7e24.bin (sha256
+  ad7b7e24dc929dc180adaa6ed72fff11d5c0a0e7fa0288dc063546e30b4c59fa); host tests and vectors green. To load when the scope is
+  free of menus; then B1 / B2 / B6 of section 48 and the overview walk-through of section 49 (pass_ms first).
 

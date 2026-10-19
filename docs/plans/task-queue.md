@@ -356,9 +356,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   sweep. Open (queue): the simulator lacks reason 8 and the new header rule (mcp item); a single sweep started from the CTRL page
   leaves the bar on that page where RUN/STOP is not visible (owner to decide: jump back to page one?); after a sweep the generator
   chip shows the user's generator although the pin is off. Loaded 21:30 as backups/fw-0.2.71_1264e26c.bin; walk-through pending.
-- fw-over (Opus, branch fw-over, dispatched 21:30, fw 0.2.73 provisional, section 49): the slider-track overview per the owner's decisions
+- fw-over (done 21:50, about 335k tokens, merged 21:53 as fw 0.2.73, handoff firmware/AGENTS.md section 49, pinned backups/fw-0.2.73_ad7b7e24.bin, not loaded): the slider-track overview per the owner's decisions
   (18 px window, 14 rows, dimmed/full, Scope envelope replacing the stock thumbnail, Spectrum from the existing FFT, Frequency
   response AUTO SET copy), then tap-to-jump as the fast follow on the same branch; boards regenerated to 18 px.
+  Result: track x 2..727 by y 453..471 (19 rows, decision 6), slider_ov.c/.h + slider_ov_draw.c shared by the three modes,
+  the 1.00o5 "~" characters in the Scope track were decoration, not data (removed); Scope envelope about 0.75 ms per pass at
+  2 x 16,382 samples (computed; measure pass_ms on the bench, cache per record if more than 1 ms slower), Spectrum under 0.1 ms,
+  Frequency response negligible; tap-to-jump in all three modes (y 450 and below, outside the window); boards regenerated.
+  Knock-on: the window maps onto 726 px instead of 720 (host tests updated).
 - fw-bus (done 21:40, about 515k tokens, merged 21:47 as fw 0.2.72 / protocol 1.22 row 62, handoff firmware/AGENTS.md section 48,
   bench list B1-B8 there): fpga_bus.c with a per-version dummy-strobe table (every readout one word late on every bitstream, 0x1539
   and stock included; traces and READ_TRACE move two samples earlier and match READ_RAW), exact record-start wrap, EXT shift at
