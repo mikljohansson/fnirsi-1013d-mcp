@@ -181,6 +181,31 @@ and the release, i.e. at slow legacy rates); (2) the A/B core order within a wor
 meaningful from 0x1537 on). Feature bits for 0x1537 are those of 0x1536 (EXT_TRIGGER, DECIM, FIR, and SEQ where the
 firmware has it); a firmware that knows 0x1536 runs 0x1537 unchanged.
 
+**0x1538** (fpga/al3/README.md "Changes" section 8) has the same interface plus one optional read. Feature bits are as
+for 0x1537, and a firmware that knows 0x1536 runs it unchanged.
+- On 0x1537 the A encode flop missed timing. At 200 MSa/s one A core sampled correctly, one clock late (together with
+  B) or with a metastable clock, differently from arm to arm. On the owner's unit that was CH2 A.
+- 0x1538 makes the encodes a stateless function of the write clock with timing met. At every rate and after any write,
+  core B is the earlier sample of each word (encode convention 1, the 1.00o5 / `PC_INTERLEAVE_ORDER` 0 order, and
+  0x1535's normal state).
+
+Read 0x33 is the encode self-check, one byte:
+- bit 0: sticky, a check failed since the last 0x01 = 1;
+- bit 1: the last write-clock prediction was right;
+- bits 3:2: 01 = convention 1;
+- bits 7:4: the last pin check {CH2 A, CH2 B, CH1 A, CH1 B}.
+
+A good capture reads 0xF6. The firmware can read it after a capture and re-arm when bit 0 is set. Older AL3 bitstreams do
+not decode read 0x33.
+
+Core order per bitstream:
+
+| Bitstream | Core order |
+|---|---|
+| 0x1532..0x1536 | B earlier, except after a write that hit the race window |
+| 0x1537 | chip 1 A earlier; chip 2 undefined. Do not calibrate on it. |
+| 0x1538 | B earlier on both chips, always |
+
 ## 6. Control model
 
 ### 6.1 LOCAL / REMOTE ownership [D]

@@ -4,7 +4,13 @@ Anlogic AL3A10LG144C7 FPGA of the owner's FNIRSI 1013D (JTAG IDCODE 0x18006C31, 
 W25Q80DV, JEDEC `ef 40 14`). Read `CLAUDE.md` at the repo root first; its flashing rules override anything here.
 
 State on 2026-10-19:
-- `src/` holds version word **0x1537** (fpga-gen6): 0x1536 with two determinism fixes and no interface change. Section
+- `src/` holds version word **0x1538** (fpga-gen7): 0x1537 with the encode flops on timing-met, stateless paths and the
+  new read 0x33 (encode self-check). Section "0x1538 status" below; `README.md` "Changes" section 8.
+  - Built as `out/FPGA-seg-0x1538.bin`, sha256 `0c24ecf6...dbbbd`, pinned in `backups/al3_seg_0x1538_0c24ecf6.bin`;
+    padded flash image `backups/al3_seg_0x1538_0c24ecf6_padded.bin`, sha256 `2fc7ea5b...1087`. **Not flashed.**
+- The unit's FPGA flash holds **0x1537** since 2026-10-19 (`docs/hardware-status.md`). It boots, but CH2 core A is bad in
+  about 40 % of the 200 MSa/s captures and chip 2's cores are out of order (section "0x1538 status").
+- 0x1537 (fpga-gen6, the previous `src/`): 0x1536 with two determinism fixes and no interface change. Section
   "0x1537 status" below; `README.md` "Changes" section 7.
   - Built as `out/FPGA-seg-0x1537.bin`, sha256 `426a3784...3b17`, pinned in `backups/al3_seg_0x1537_426a3784.bin`;
     padded flash image `backups/al3_seg_0x1537_426a3784_padded.bin`, sha256 `febc9299...e1f1`. **Not flashed.** A
@@ -58,7 +64,7 @@ State on 2026-10-19:
 | Path | What |
 |---|---|
 | `src/` | Atlan4's AL3 TD project with our changes: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc` (pins), `zaklad.sdc` (clocks), `FPGA.al` (TD project, holds `<UCode>`), `al_ip/` (PLL and sample-memory IP), `FPGA commands.txt` (command table, current). Upstream material, licence unstated, attributed to Atlan4. Unmodified original: git a947e78. |
-| `tb/` | iverilog testbench, `run.sh [seed]`, eight steps (7: `tb_trigpos.v`, trigger position determinism with an AD9288 pipeline model; 8: `tb_seqcontract.v`, the firmware's sequencer byte sequences, transcript `contract_0x1537.txt`; `edge_phase.py`: FIR overshoot / DDS beat / spectrum versus edge phase; `REF_SRC_DIR` for worktrees; the sixth: `tb_seg.v` against our 0x1535, `REF1535_REV`, checked by `seg_model.py`; `mutate_seg.py` runs its 21 mutants), first four: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir`, `long` or `seg` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs, `tb_seg.v` the same through `SEG_P1`. |
+| `tb/` | iverilog testbench, `run.sh [seed]`, nine steps (7: `tb_trigpos.v`, trigger position determinism with an AD9288 pipeline model; 8: `tb_seqcontract.v`, the firmware's sequencer byte sequences, transcript `contract_0x1538.txt`; 9: `encphase.sh` with `tb_encphase.v`, the encode pins against the write clock after the firmware's arm sequences, with delay-annotated variants; `edge_phase.py`: FIR overshoot / DDS beat / spectrum versus edge phase; `REF_SRC_DIR` for worktrees; the sixth: `tb_seg.v` against our 0x1535, `REF1535_REV`, checked by `seg_model.py`; `mutate_seg.py` runs its 21 mutants), first four: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir`, `long` or `seg` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs, `tb_seg.v` the same through `SEG_P1`. |
 | `out/` | Named bitstreams for the bench (gitignored `*.bin`): `FPGA-ext-trigger.bin` (0x1533), `FPGA-decim.bin` (0x1534), `FPGA-fir.bin` (0x1535), `FPGA-seg.bin` (0x1536). |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the stock FNIRSI design (0x1432), GPL-3.0. Same pin map. Use it for "what did stock do" questions. |
 | `bitstreams/` | Prebuilt images, gitignored except `README.md` (provenance and sha256). |
@@ -312,6 +318,83 @@ Decimation filter (0x1534), open items:
   `README.md` section 5. 0x1534 is accepted by the coordinator (2026-10-18) and is
   being flashed with fw 0.2.33.
 
+## 0x1538 status (fpga-gen7, 2026-10-19)
+
+Brief: the bench fault on 0x1537 (fw 0.2.60/0.2.61): at 200 MSa/s CH2 core A is bad (std 14..35 codes) in about 40 % of
+the captures, with chip 2's A-B mean shifted by -3 codes. Everything is in `README.md` "Changes" section 8.
+
+**Root cause** (from TD's report, `report_timing -ep_num 40` on the 0x1537 `FPGA_pr.db`):
+- 0x1537's encode flops (falling `clk_ADC`, 1.25 ns after falling `clk_200MHz`) loaded `swc_enc_n` across that 1.25 ns.
+- The A input (through an inverter LUT) had slack -0.209 ns at TT 85 C. The B input had +0.45 ns.
+- So an A encode was right, one clock late (sampling with B: the mean shift) or metastable (the noise), changing from
+  arm to arm. CH2 is the chip that shows it; that is an inference, since the report does not name the chip.
+- The B flops met timing, so 0x1537 ran encB = NOT write clock: the opposite order to 0x1535.
+- 0x1535's encode CE arrived about 2 ns late (the "structural" clkc[1] error), so it toggled one `clk_ADC` edge after the
+  write clock: encB = write clock, core B earlier, as 1.00o5 assumes.
+
+**It was not a write race.** The coordinator's 60 s run without writes (fw 0.2.61 event log) was bad in about 40 % of the
+captures throughout. The brief's "0 ms clean / 50 ms bad" was chance at 20 trials.
+
+**Fix in 0x1538**:
+- `sce_q` registers the enable one clock ahead.
+- `swc_sh` is a write clock copy loaded from the write clock.
+- `enc_nxt` / `enc_nxt_n` on the rising `clk_200MHz` edge hold the write clock after the next falling edge.
+- The encode flops load them with no enable, on 3.75 ns paths. They keep no state of their own, encB = write clock and
+  encA = its complement, at every rate. The capture logic is cycle-identical to 0x1537.
+- Read 0x33: sticky self-check bit 0 (cleared by 0x01 = 1), prediction ok bit 1, convention bits 3:2 = 01, last pin
+  check bits 7:4. A good capture reads 0xF6.
+
+**Commits**: RTL + tb + docs on the gen7 branch (see `git log`).
+
+**Tests**:
+- `tb/run.sh` passes all nine steps on seeds 12345 and 3 (about 26 to 28 minutes each):
+  - 38 + 98 + 154 + 8 + 50 checks;
+  - both `cic_model` checks and `seg_model` (22 runs);
+  - tb_trigpos 882 checks;
+  - the contract (12 checks, transcript equal);
+  - encphase (400 checks each for the plain and the 3.5 ns variants; the 3.9 ns CH2 A variant fails, as it must, through
+    0x33 and the pin checks).
+- `tb_trigpos.v` seed 7 also passes. B - A = -5 / -50 / -1000 / -2000 ns at D 0 / 9 / 199 / 399.
+
+**Build**:
+- 4634 LUT / 3828 reg.
+- 0 errors on `clk_200MHz` (+0.220 ns), `sample_write_clock` and `clkc[1]`. `clkc[0]` has 58 errors (the SDC artefact).
+- Deterministic: two work dirs gave the same hash.
+
+**Timing closure is a lottery around the half-cycle path** (`sample_write_clock` negedge to `sampling_triggered`, 2 ns in
+the SDC's 40 % waveform). Variants built while closing 0x1538:
+- encodes loading straight from the write clock, check on the write clock: -0.26 ns;
+- the same with the check through `enc_ref`: 35 errors, mostly sequencer paths, down to -0.67 ns;
+- without the prediction check: -0.32 ns;
+- without `enc_nxt_n`: -0.28 ns;
+- both of those: -0.19 ns;
+- `swc_sh` without the prediction check: -0.34 ns;
+- `swc_sh` with the prediction on the real write clock: 31 errors;
+- the chosen `swc_sh` + prediction: +0.22 ns.
+
+A real fix for the lottery is item 4 of "Wanted next" (SDC cleanup: the PLL clocks are 50 %, so that path really has
+2.5 ns) or retiming `sampling_triggered`. Variant scripts: the gen7 scratch `mkvar.py` / `variants.sh` pattern (a copy of
+`build.sh`, `build.tcl` and `src/` per variant, built in parallel in separate work dirs, about 3 minutes for three).
+
+**Open**:
+- Flash 0x1538 and run section 8's bench checks 1..6 (0x33 = 0xF6, no bad core over 1000+ captures, CH2 A-B mean back
+  to 0x1535's values, order B-first).
+- Firmware:
+  - optionally read 0x33 after each capture and re-arm on bit 0;
+  - treat bits 3:2 = 01 as "B-first guaranteed";
+  - redo calibration taken on 0x1537.
+- `docs/hardware-status.md` after flashing.
+
+**Tool notes**:
+- `sim_models.v`'s PLL is right: clk1 lags clk0 by 1.25 ns. The first toggle of the `forever` loop comes 2.5 ns after the
+  initial delay. Do not "fix" it.
+- iverilog `-g2012` reserves `expect`, like `cross`.
+- Python `open(..., 'w')` on Windows writes CRLF. A bash script with CRLF fails with `set: -: invalid option`.
+- An isolated worktree agent cannot run `git -C` or `cd` + git in compound commands, and WSL git cannot read a Windows
+  worktree. Export reference revisions with Windows git into a directory and pass `REF_SRC_DIR`.
+- Full timing for one clock: `report_timing -mode FINAL -net_info -ep_num 40 -path_num 1` after
+  `import_device` / `import_db FPGA_pr.db` / `read_sdc zaklad.sdc`.
+
 ## 0x1537 status (fpga-gen6, 2026-10-19)
 
 Brief: the bench's trigger position scatter at decimated rates (task queue), a firmware contract testbench for 0x1536
@@ -335,7 +418,7 @@ fix, build, bench checks), section 6 "Firmware contract", and section 4 after th
 
 **Tests.**
 - `tb/run.sh` has eight steps now. 7 = `tb_trigpos.v`, about 3 minutes at 6 runs per case. 8 = `tb_seqcontract.v`,
-  under a minute; its transcript must equal `tb/contract_0x1537.txt`.
+  under a minute; its transcript had to equal `tb/contract_0x1537.txt` (now `contract_0x1538.txt`, version byte 0x38).
 - All pass on seeds 12345 and 3. `tb_trigpos.v` also passes with `+seed=7` and `+pl=0`.
 - On 0x1536, tb_trigpos fails 36 of 882 checks (A/B order, legacy spread, R1, R2). The contract transcript of 0x1536 equals 0x1537's except the
   version byte.

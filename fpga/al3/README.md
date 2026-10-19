@@ -11,7 +11,7 @@ has been flashed from this folder.
 | Path | What |
 |---|---|
 | `src/` | Atlan4's AL3 TD project, sources only: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc`, `zaklad.sdc`, `FPGA.al`, `al_ip/` (PLL and sample-memory IP: `.v`, `.ipc`, sim models), plus `FPGA commands.txt` (Atlan4's command table, updated). Copied from `D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\FPGA AL3\FPGA AL3S10\` (unmodified at commit a947e78, version 0x1532). `zaklad.v` and `zaklad.adc` now carry the changes listed in "Changes" (version 0x1533). Build outputs (`*.db`, `*.area`, `*.timing`, `*.bit`, `*.bin`) were left out. |
-| `tb/` | iverilog testbenches and reference models: `run.sh` (eight steps, `ONLY=ext/decim/fir/long/seg/trigpos/contract`), `tb_ext_trigger.v`, `tb_decim.v`, `tb_fir.v`, `tb_long.v`, `tb_seg.v`, `tb_trigpos.v`, `tb_seqcontract.v` (+ its transcript `contract_0x1537.txt`), `edge_phase.py`, `cic_model.py`, `seg_model.py`, `mutate_seg.py`, `sim_models.v` (behavioural PLL, sample memory, `AL_LOGIC_BRAM`). See "Changes". |
+| `tb/` | iverilog testbenches and reference models: `run.sh` (nine steps, `ONLY=ext/decim/fir/long/seg/trigpos/contract/encphase`), `tb_ext_trigger.v`, `tb_decim.v`, `tb_fir.v`, `tb_long.v`, `tb_seg.v`, `tb_trigpos.v`, `tb_seqcontract.v` (+ its transcript `contract_0x1538.txt`), `tb_encphase.v` + `encphase.sh`, `edge_phase.py`, `cic_model.py`, `seg_model.py`, `mutate_seg.py`, `sim_models.v` (behavioural PLL, sample memory, `AL_LOGIC_BRAM`). See "Changes". |
 | `out/` | Named bitstreams for the bench, gitignored (`*.bin`). Hashes are recorded in "Changes". |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the **stock** FNIRSI design (version 0x1432), TD 5.0.28716 project. Sources only (`source/`, `al_ip/`, `Original_1013D.al`); his prebuilt `.bit` was left out. Licence GPL-3.0 (`LICENSE-GPL3`, repo `pecostm32/Anlogic_AL3-10_Analyzing`). |
 | `dist/` | The released bitstreams 0x1533 onwards, committed: `al3-0x15xx.bin` (raw bitgen output), `manifest.json` (sha256, padded-image sha256, source commit, minimum firmware, status), `BITSTREAMS.md` (the page attached to each release: which to use, how to flash, rollback). `tools/bitstreams.py check` runs in CI; `release.yml` packs them. Add a version there once it is pinned and benched. |
@@ -1325,6 +1325,9 @@ change by under 0.1 sample.
      at the next enable.
    - On 0x1537 the order is constant. In the model, core A is the earlier sample of each word (B - A = +half a word).
      That is the opposite of the 1.00o5 convention, so bench T4 should settle it on hardware.
+   - Superseded by section 8: the register copy put the encode flops on a 1.25 ns path that the A flop missed by
+     0.21 ns, and the B flops' met path gave the opposite order to 0x1535. 0x1538 restores B-first on both chips with
+     timing met.
 4. **The ADC pipeline delays legacy EXT captures by 4 words.** EXT triggers at the pin, while the data come out of the
    AD9288 4 encode cycles late. One encode cycle is one word at every legacy rate: 8 samples, 8 us at 1 MSa/s, 400 ns
    at 20 MSa/s. The firmware applies no EXT shift in legacy mode (`pc_glue_decim_pre_words` returns samples / 2 for
@@ -1389,14 +1392,153 @@ change by under 0.1 sample.
 Header words as before (`cc55aa33 f0000006 18006c31`), user code 0x0056. **Not flashed.** A firmware that knows 0x1536
 runs it unchanged (AL3 family decode, protocol.md section 5.1).
 
-**Bench checks** (with the owner; never flash without the verified stock dump):
-1. T3 / T4 / T5 on 0x1537:
+**Bench checks** (with the owner; never flash without the verified stock dump). 0x1537 was flashed on 2026-10-19 and
+showed the CH2 A fault of section 8; run these on 0x1538 together with section 8's checks:
+1. T3 / T4 / T5:
    - the dummy-strobe lag;
-   - the A/B order: core A earlier in the model; check that it stays the same across rate changes;
+   - the A/B order: core B earlier on 0x1538 (section 8); check that it stays the same across rate changes;
    - the CH1 edge position against GET_CAPTURE_INFO, at 1 MSa/s legacy and with CIC2 + FIR.
 2. EXT loopback at 1 MSa/s legacy: the edge at about +10 samples (finding 4) in every capture; then toggle a channel in
    the UI and watch whether 0x15 leaves EXT.
 3. Slow legacy rate (100 kSa/s), host captures alternating two pretriggers: the edge stays at pre + 1..2.
+
+### 8. Encode timing of the A cores; version 0x1538 (fpga-gen7, 2026-10-19)
+
+**Bench** (fw 0.2.60/0.2.61, 0x1537, READ_RAW 1000 samples per core at divider 0, inputs open):
+- CH2 core A is bad in about 40 % of the host captures: std 14 to 35 codes, with +-60 excursions. CH1 and CH2 B are clean
+  (std about 0.5).
+- 1221 back-to-back captures over 60 s with no 0x0D / 0x53 / 0x56 write (GET_EVENT_LOG type 22) were bad in 26 to 43 of
+  every 81. There was no time course and no dependence on any write: each arm is a coin toss.
+- The CH2 A-B mean difference is -3.0 to -3.3 codes on 0x1537, in clean and bad captures alike, against about 0 on 0x1535.
+  CH1 reads the same on both. The calibration wizard's zero step fails CH2.
+- On 0x1535 it was CH1 core B that came and went (finding 3 of section 7).
+
+**Cause** (TD's timing report of the 0x1537 build, re-run with `report_timing -ep_num 40` on `FPGA_pr.db`):
+- 0x1537 loaded the encode flops (falling `clk_ADC`) from `swc_enc_n`, a flop on the falling `clk_200MHz` edge.
+  `clk_ADC` lags by 90 degrees, so that path has 1.25 ns.
+- The A flops take `~swc_enc_n` through a LUT. Endpoint `lt0/ucout|lt0/u31.mi[0]` has an arrival of 4.808 ns against a
+  required 4.599 ns: **slack -0.209 ns** at TT 1.10 V 85 C. The B input (`mi[1]`, no LUT) passes with +0.45 ns.
+- So the A encode loads the new value (designed), the value from one clock earlier (A sampling together with B), or
+  goes metastable. Which one it does depends on the silicon, temperature and supply, and it settles anew from capture
+  to capture.
+- Which chip shows it depends on its encode route and capture margin. On this unit it is CH2: the A-B mean shift is the
+  "with B" case, the noise the metastable case. That attribution is an inference; the report does not name the chip.
+- The "write race" reading of the brief does not hold for 0x1537. `swc_enc_n` and `sample_write_clock` sit in one slice
+  (`swc_enc_n_reg|sample_write_clock_reg`), and the encodes at divider 0 are reloaded every clock and keep no state of
+  their own. The bench run without writes agrees.
+- The CE input of the same flops (the 32-bit compare) arrived -2.45 ns late. It was always taken one `clk_ADC` edge
+  later: that is the "structural" clkc[1] error listed since 0x1533.
+- The order follows from the same report:
+  - 0x1532..0x1536: the encodes toggle on that late CE. So in normal running they toggle one `clk_ADC` edge after the
+    write clock, in phase with it. That is encode convention 1 below, and core B is the earlier sample (the 1.00o5
+    convention). Only a write that hit the window between the two clocks flipped it (finding 3).
+  - 0x1537: the B flops met their 1.25 ns path, so encB = NOT write clock. Core A was earlier on chip 1, as the 0x1537
+    model said, and chip 2's A was late or metastable.
+
+**Simulation** (`tb/tb_encphase.v`, `tb/encphase.sh`):
+- The firmware's UI arm (0x0D, 0x53/0x56 when the cached mode changed, 0x0F, 0x57..0x5C, 0x01 = 1, the 0x05 poll,
+  0x0B, 0x0C, 0x0E, 0x01 = 0) and host arm (raw 0x0D, 0x17, then the same). The first strobe of each pair is swept in
+  0.1 ns steps over the 5 ns clock, strobes 41..298 ns.
+- UI dividers 0, 1, 2, 3, 9 and 99 with K = 0 or 2, then the host at divider 0.
+- After each arm, every rising `clk_200MHz` edge checks encB = write clock and encA = its complement.
+- `encphase.sh` also builds variants whose encode flop inputs come through a delay (iverilog has no setup check, so a delay
+  past the window means "the value from one clock earlier"). 50 phases each:
+
+| Design | Result |
+|---|---|
+| 0x1535 (e2aec2e), zero delay | polarity changes in 22 of 50 host captures (the old A/B flip; the zero-delay model sees the CE in time, which the silicon does not) |
+| 0x1537 (c15981e), zero delay | constant, encB = NOT write clock on both chips (convention 0) |
+| 0x1537, CH2 A input 1.45 ns | CH2 A = CH2 B on every check (A samples with B): the bench's clean-but-shifted state |
+| 0x1538, zero delay and all four inputs 3.4..3.5 ns | convention 1 on every check of every pin, 0x33 = 0xF6 after every capture |
+| 0x1538, CH2 A input 3.9 ns (past its 3.75 ns window) | caught: 0x33 bit 0 set, pin checks fail |
+
+**0x1538** (`src/zaklad.v`; RTL in the "Sample write clock" block, read 0x33 in the read mux):
+- `sce_q`: the sample clock enable one clock ahead, as a register (`enable ? divider == 0 : divider <= counter`). It equals
+  the combinational enable whenever the divider is stable.
+- `swc_sh`: a copy of the write clock loaded from it (`swc ^ enable`), so a difference lasts one clock. It keeps the encode
+  loads off the write clock; with them on it, the half-cycle path into `sampling_triggered` missed by 0.17..0.32 ns in
+  four trial builds (one of them also failed 35 sequencer paths).
+- `enc_nxt` / `enc_nxt_n` on the rising `clk_200MHz` edge: `swc_sh ^ sce_q` and its complement, i.e. the write clock after
+  the next falling edge.
+- The encode flops load them on every falling `clk_ADC` edge with no enable. Paths: 2.5 ns into `enc_nxt`, 3.75 ns into the
+  encode flops, no LUT in front of them.
+  - Result: encB = write clock and encA = its complement, 1.25 ns later, at every rate (encode convention 1).
+  - No state of their own: a clock disturbed by an asynchronous 0x0D / 0x53 write (`sce_q` one clock behind) repairs
+    itself on the next one.
+- The write clock and the divider counter still use the combinational enable, so the capture logic is cycle-identical to
+  0x1537. The equivalence steps already mask the encode pins.
+- **Read 0x33**, one byte (write 0x33, the CH1 relays, is unchanged):
+
+| Bit | Meaning |
+|---|---|
+| 0 | sticky: an encode check failed since the last 0x01 = 1 |
+| 1 | the last write clock prediction was right (`swc_sh` = `enc_ref`) |
+| 3:2 | 01 = encode convention 1 (B = write clock, A = complement; core B is the earlier sample of a word) |
+| 7:4 | the last pin check {CH2 A, CH2 B, CH1 A, CH1 B}, 1 = right |
+
+  - On every falling `clk_200MHz` edge, `enc_ref` (the `enc_nxt` of that edge) is compared with each encode flop (3.75 ns
+    after it loaded) and with the write clock copy. A good capture reads **0xF6**.
+  - An asynchronous 0x0D / 0x53 write can make one prediction miss, which is why bit 0 clears on 0x01 = 1. The firmware
+    already writes those before the reset.
+  - The check sees the flops inside the FPGA, not the board.
+- Order the firmware must assume, per bitstream:
+
+| Bitstream | Core order in a word |
+|---|---|
+| 0x1532..0x1536 | B earlier (convention 1) normally; a write in the race window can flip it until the next one |
+| 0x1537 | chip 1 A earlier (convention 0); chip 2 undefined (A late / with B / metastable). Do not calibrate on 0x1537 |
+| 0x1538 | B earlier on both chips, always. 0x33 bits 3:2 = 01 confirm it |
+
+  - In `tb_trigpos.v` (seed 7), B - A = -5 ns at 200 MSa/s, -50 ns at D 9, -1000 ns at D 199 and -2000 ns at D 399, the
+    same sign in every run.
+  - Legacy CH1 offsets move from +1..+2 (0x1537 model) to +2..+3 samples, and EXT at 200 MSa/s from +7 to +6..+7. The
+    16-bit rows do not change.
+  - A calibration taken on 0x1535 fits 0x1538 again; one taken on 0x1537 should be redone.
+
+**Tests.**
+- `tb/run.sh` has a ninth step, `encphase.sh MODE=check`: 0x1538 plain, annotated at 3.4..3.5 ns, and the 3.9 ns CH2 A
+  variant, which must be caught.
+- The contract transcript is now `tb/contract_0x1538.txt`. Its byte sequence (every C / W / # line) equals 0x1537's. The
+  R lines differ in three places:
+  - the version byte;
+  - the stale upper bits of the 0x05 / 0x0A / 0x18 reads (0x39 for 0x37);
+  - 7 bytes of READ_RAW / READ_SEQ data at the step: the testbench's ADC model follows the encode pins, so the core order
+    now matches 0x1538's.
+- `tb/run.sh` passes all nine steps on seeds 12345 and 3 (about 26 to 28 minutes each):
+  - 38 + 98 + 154 + 8 + 50 checks;
+  - both `cic_model` checks and `seg_model` (22 runs);
+  - tb_trigpos 882 checks;
+  - the contract (12 checks, transcript equal);
+  - encphase (400 checks each for the plain and the 3.5 ns variants; the 3.9 ns CH2 A variant fails, as it must, through
+    0x33 and the pin checks).
+
+**Build** (TD 4.6.8 SP1, `./build.sh`; two work dirs gave the same hash):
+
+| | 0x1537 | 0x1538 |
+|---|---|---|
+| LUT / reg | 4569 / 3820 | 4634 / 3828 |
+| `clk_200MHz` | +0.035 ns | 0 errors, min period 4.780 ns (+0.220 ns, the half-cycle path) |
+| `sample_write_clock` | period 9.248 ns | 0 errors, 9.480 ns |
+| `clkc[1]` | 3 errors (CE crossing -2.45 ns, A encode D -0.209 ns) | **0 errors**, 2.197 ns |
+| `clkc[0]` | 53 errors | 58 errors, the same SDC artefact (the net-based `clk_200MHz` analysed against `clkc[0]`'s waveform) |
+
+| File | Bytes | sha256 |
+|---|---|---|
+| `out/FPGA-seg-0x1538.bin` (= `build/FPGA.bin`, = `backups/al3_seg_0x1538_0c24ecf6.bin`) | 282,898 | `0c24ecf6ff55bc170ce6d7acd1ee4f8afbaf97d73b36e0b7a27a92639d1dbbbd` |
+| `backups/al3_seg_0x1538_0c24ecf6_padded.bin` (0xFF to 1 MiB, flash image) | 1,048,576 | `2fc7ea5b2fc925157c02f3f492ee3ac17b6154d7ed27e2c20c2d26e855ac1087` |
+
+**Not flashed.** A firmware that knows 0x1536/0x1537 runs it unchanged (AL3 family decode). Reading 0x33 is optional.
+
+**Bench checks** (with the owner; never flash without the verified stock dump):
+1. 0x06 reads 0x1538; 0x33 reads 0xF6 after a capture at 200 MSa/s.
+2. The bench run above (divider 0, 1000+ back-to-back captures, no writes): no capture with any core's std above 5,
+   and 0x33 = 0xF6 after each one.
+3. CH2 A-B mean back to about 0 (0x1535's values); the wizard's zero step passes CH2.
+4. The same at 100 MSa/s (divider 1) and 20 MSa/s (divider 9), and after rate changes in the UI.
+5. Core order: a fast edge (calibration pin) at 200 MSa/s shows no one-sample zigzag with the firmware's B-first
+   interleave.
+6. Warm the FPGA (hair dryer, a few seconds), then repeat 2. 0x1537's fault depended on the operating point; 0x1538
+   must not.
 
 ## Device facts from the datasheet
 
