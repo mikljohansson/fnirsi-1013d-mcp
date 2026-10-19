@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "ui_diag.h"
+#include "pc_hal.h"
 #include "ui_fmt.h"
 #include "adc_cal.h"
 #include "pc_protocol.h"
@@ -15,8 +16,8 @@
 
 extern FONTDATA font_2, font_3, font_5;
 
-static uint8_t     health[104];
-static uint8_t     cal[2][356];
+static uint8_t     health[124];
+static uint8_t     cal[2][364];
 static uint32_t    link[64];
 static pc_image_id run;
 static pc_card_id  card;
@@ -389,6 +390,27 @@ static void test_pages(void)
   ud_build(&pg, UD_PAGE_CAL, &in, &note);
   check_layout("cal note", 0);
   T_TRUE(has_text("Calibration cleared: run Calibrate."));
+
+  //fw 0.2.79: FPGA 0x153A capture stages: none shown without them; power-on, trained, another bitstream's; the
+  //self-check as a residual against its limit, with the trim line and the note under it (all three lines fit)
+  T_FALSE(has_text("ADC capture"));
+  health[106] = PC_CAPF_HAS; health[104] = 0xE4; health[105] = 0x08;
+  ud_build(&pg, UD_PAGE_CAL, &in, &note);
+  check_layout("cal capture", 0);
+  T_TRUE(has_text("ADC capture stages CH1 A4 B4, CH2 A3 B4 (not trained: calibrate): no 200 MSa/s capture yet"));
+  health[106] = PC_CAPF_HAS | PC_CAPF_TRAINED | PC_CAPF_READ;
+  ud_build(&pg, UD_PAGE_CAL, &in, 0);
+  T_TRUE(has_text("CH2 A3 B4 (trained): capture clean"));
+  T_EQ(text_colour("ADC capture stages CH1 A4 B4, CH2 A3 B4 (trained): capture clean"), UD_C_SOFT);
+  health[106] |= PC_CAPF_FLAGGED; health[107] = 0x04; health[112] = 37;
+  ud_build(&pg, UD_PAGE_CAL, &in, 0);
+  T_EQ(text_colour("ADC capture stages CH1 A4 B4, CH2 A3 B4 (trained): CH2 A: 37 outliers"), UD_C_WARN);
+  health[106] = PC_CAPF_HAS | PC_CAPF_OTHER; cal[0][360] = 0x3B; cal[0][361] = 0x15;
+  ud_build(&pg, UD_PAGE_CAL, &in, &note);
+  check_layout("cal capture other", 0);
+  T_TRUE(has_text("(trained on 0x153b: calibrate): no 200 MSa/s capture yet"));
+  memset(health + 104, 0, 20);
+  memset(cal[0] + 356, 0, 8);
   in.dc_shift = 0;
 
   //Log page

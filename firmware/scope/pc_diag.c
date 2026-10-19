@@ -11,6 +11,7 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include <string.h>
+#include "cap_hw.h"
 #include "types.h"
 #include "variables.h"
 #include "timer.h"
@@ -187,6 +188,9 @@ static uint8        pc_prov_raw[ACAL_PROV_BYTES];
 //PC_CAL_LOADED: end of scope_load_input_calibration_data (buffer = the sector as read)
 void pc_glue_cal_loaded(const uint8 *sector)
 {
+  //fw 0.2.79: the trained 0x153A capture stages after the provenance (bytes 488..503)
+  fpga_capture_loaded(sector);
+
   pc_prov_base_ok = adc_cal_loaded;
 
   if(adc_cal_loaded)
@@ -212,6 +216,9 @@ void pc_glue_cal_save(uint8 *sector)
 {
   static const acal_channel none[2];
   uint8 what, t[7];
+
+  //fw 0.2.79: the trained 0x153A capture stages (bytes 488..503), with or without a v3 block
+  fpga_capture_save(sector);
 
   if(!adc_cal_loaded)
     return;

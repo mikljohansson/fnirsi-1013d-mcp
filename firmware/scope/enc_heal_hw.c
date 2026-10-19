@@ -5,6 +5,7 @@
 // (pc_acq_service in pc_cmds.c) through the pc_hal_enc_* functions here.
 //----------------------------------------------------------------------------------------------------------------------------------
 
+#include "cap_hw.h"
 #include "types.h"
 #include "fpga_control.h"
 #include "variables.h"
@@ -169,7 +170,11 @@ int fpga_encode_after_capture(void)
   pc_hal_enc_note((mode == EH_MODE_FLAG) ? EH_WHY_FLAG : EH_WHY_DATA, &n);
 
   if(rearm != EH_REARM)
+  {
+    //fw 0.2.79: 0x153A's outlier counters of the accepted capture (self-check, cap_hw.c)
+    fpga_capture_check();
     return 0;
+  }
 
   //Discard and re-arm the same conversion (the UI's filter setting again when it was the UI's)
   pc_hal_enc_retry();

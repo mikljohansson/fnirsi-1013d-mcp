@@ -8,6 +8,7 @@
 
 #include "mock_hal.h"
 #include "pc_cmds.h"
+#include "cap_stage.h"
 
 mock_state mock;
 mock_resp  mock_resps[MOCK_MAX_RESP];
@@ -109,6 +110,13 @@ void mock_reset(uint16_t fpga_version)
   mock.enc33_bad  = 0x77;           //CH2 A wrong, check failed
   mock.enc.mode   = (uint8_t)eh_mode(fpga_version);
   mock.enc.boot33 = (mock.enc.mode == EH_MODE_FLAG) ? EH_33_GOOD : 0;
+
+  //0x153A+: the power-on stages in effect, nothing stored (cap_hw.c at boot)
+  if(cs_has(fpga_version))
+  {
+    mock.cap.flags = PC_CAPF_HAS;
+    mock.cap.value = CS_PO;
+  }
 
   fill_ring();
 
@@ -694,7 +702,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
   pt[ACAL_PT_F_ZERO].convs     = 64;
   pt[ACAL_PT_F_ZERO].mean16[0] = 130 * 16;
   pt[ACAL_PT_F_ZERO].mean16[1] = 126 * 16;
-  return (int32_t)acal_probe_pack(dst, ch, range, 0, (uint8_t)((settle << 4) | (prestrobe ? ACAL_PROBE_PRESTROBE : 0) | (mode ? ACAL_PROBE_WIZARD : 0)), 800, 812, 0, 0, &f, pt, 27);
+  return (int32_t)acal_probe_pack(dst, ch, range, 0, (uint8_t)((settle << 4) | (prestrobe ? ACAL_PROBE_PRESTROBE : 0) | (mode ? ACAL_PROBE_WIZARD : 0)), 800, 812, 0, 0, &f, pt);
 }
 
 //fw 0.2.66 Bode plot: the status BODE_CTRL answers, the request it saw; READ_BODE: a header and mock_bode_rows rows
@@ -743,6 +751,8 @@ void     pc_hal_usb_watch(uint32_t *v) { v[0] = 7000; v[1] = 7001; }
 
 //Full-rate capture check: 0x33 per the last arm, counted as enc_heal_hw.c counts
 void     pc_hal_enc_state(pc_hw_enc *e) { *e = mock.enc; }
+void     pc_hal_cap_state(pc_hw_cap *c) { *c = mock.cap; }
+void     pc_hal_cap_check(void) { mock.cap_checks++; mock.cap.reads++; mock.cap.flags |= PC_CAPF_READ; }
 void     pc_hal_enc_retry(void)         { mock.fpga_ops++; mock.enc_retries++; }
 int      pc_hal_enc_written(void)       { return mock.enc_written; }
 

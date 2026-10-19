@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-cap (2026-10-20): fw 0.2.79, protocol 1.24 (row 64), both provisional: FPGA 0x153A capture stages (training in the wizard's zero step, 0x36 self-check, stored with the calibration), EXT offsets, the wizard's zero back at code 128, section 54.**
 **Branch fw-yield (2026-10-19): fw 0.2.78, protocol 1.23 (row 63), both provisional: host commands close the modal screens (every modal loop leaves by its cancel path; E_BUSY only for a calibration measurement, a file save, USB drive mode or a 1.5 s time-out), section 53.**
 **Branch fw-screen (2026-10-19): fw 0.2.70, protocol 1.21 unchanged: READ_SCREEN built (cap SCREENSHOT), section 46.**
 **Branch fw-bus (2026-10-19): fw 0.2.72, protocol 1.22 (row 62): FPGA bus contract (dummy strobe in every readout, geometry before the reset, legacy EXT shift, encode check after async writes, type 22 trace level, core order from 0x33), section 48.**
@@ -3667,3 +3668,92 @@ Bug indicators: a dialog that took its action (a deletion, a cleared calibration
 typed number applied; a menu that stays open while the command times out; a screen left half drawn (a fold-out's
 panel or a menu's background not restored); the note stuck on screen; a second menu opened later closing at once
 without a host command.
+
+## 54. fw-cap: FPGA 0x153A capture stages, the wizard's zero back at 128 (fw 0.2.79, protocol 1.24, row 64, all provisional)
+
+Branch `fw-cap` from origin/main 6125aee (fw 0.2.78, 0x153A merged). Brief: firmware for bitstream 0x153A (fpga/al3/AGENTS.md
+"0x153A status" firmware notes, README section 10) and the owner's fail-fast decision of 2026-10-19 20:30 (task queue
+"Wizard zero point back at code 128"). Commits: 381dd8a (firmware and host tests), then the docs / mcp / vectors commits
+of the helper agent and this handoff. **Nothing benched, nothing flashed** (the scope was off). Host tests all green
+(new test_cap_stage 85, test_session 70133 with `test_capture_stages`, test_ui_diag 6644, test_cal_wizard 672,
+test_adc_cal 59843, check_vectors OK); GCC 13 31 warnings (as main), GCC 10 builds clean in the changed files.
+
+**What was built**
+- `cap_stage.c/.h` (pure): the 0x63 fields (`cs_stage`, `cs_with`, `cs_ref_bit`), `cs_has` (0x153A..0x153F), the training
+  `cs_train_run` (all trained cores at stage s = 2, 3, 4, 5, one capture each, a core is clean at s when its 0x36 count is
+  0; `cs_pick`: of {3, 4} the clean one whose outer neighbour 2 / 5 is clean too, the power-on stage when the clean run is
+  symmetric, else the clean one of {3, 4}, else a clean reserve; a B core with no clean stage is measured again with its
+  chip's reference bit, 0x63 bit 12 / 13; a core with no clean stage at all is CS_E_DIRTY and nothing changes), the
+  self-check (`cs_excess`: a core's count minus its chip partner's, flagged above CS_EXCESS_LIMIT 8), texts ("CH1 A4 B4,
+  CH2 A3 B4", "B4 A-clk" with the reference bit) and the sector 708 trailer 'ACAP' at bytes 488..503 (v1, 16 bytes, the
+  0x63 value, the FPGA word it was trained on, CRC-32). The v3 block and its version are unchanged (0.2.45+ still read
+  the zeros and gains); the brief said "calibration data version bump": the trailer has its own version instead, so an
+  older image keeps the calibration (its own 708 save clears the trailer, as it does the provenance).
+- `cap_hw.c` (target): `fpga_capture_init` (pc_glue_init, after fpga_encode_init) writes 0x64 = 8 and 0x63 = the stored
+  value when it was trained on the running bitstream, else 0x08E4 (always written: a FEL load leaves the FPGA as the
+  previous firmware left it; 0x63 is a plain register, zaklad.v `cap_sel_x`, not touched by the sampling reset, so boot
+  and training are the only writes); `fpga_capture_loaded` / `_save` from pc_diag.c's calibration hooks;
+  `fpga_capture_check` reads 0x36 after every accepted full-rate capture (enc_heal_hw.c for UI / wizard / probe
+  conversions, `pc_hal_cap_check` from pc_cmds.c's host ARM path), flags, event 23 when the flagged set changes;
+  `fpga_capture_train` (self-check off while training; event 23 a = 0x10 | bad cores, b = the value in effect).
+- Detection: caps bit 19 CAPTURE_STAGES, features bit 7 (0x0080) on 0x153A..0x153F (`cs_has`; 0x153B is expected to be
+  gen8-features rebased on this capture). `pc_decim_has_caps` adds PC_DECIM_HAS_CAPSTAGES: legacy EXT shift 12 samples at
+  divider 0 and 14 above (0x1539: 4 / 8, from tb_trigpos: EXT +14..15 / +16..17 / +17..18 against CH1 +2..3), K >= 1 lag
+  + 40 ns; 0x53 bits 3 / 4 masked to 0. fpga_bus.c's contract table needs no new entry (read_dummy 1 for every AL3; gen9's
+  contract transcript for 0x153A equals 0x1539's apart from the version and data bytes).
+- GET_HEALTH 124 bytes, layout byte 2: 104 0x63 in effect, 106 flags (PC_CAPF_HAS, TRAINED, READ, FLAGGED, OTHER), 107
+  flagged cores, 108 the four counts, 116 reads, 120 flagged captures. GET_CAL 364 bytes: 356 trailer state, 357 flags,
+  358 stored value, 360 its FPGA word, 362 value in effect. Event 23. Report file line "ADC capture stages (0x63): ...".
+- Diagnostics, Calibration page, first line under the channel blocks (y 374; the trim line and the note moved 15 px
+  down each): "ADC capture stages CH1 A4 B4, CH2 A3 B4 (trained): capture clean", amber "...: CH2 A: 37 outliers",
+  "(not trained: calibrate)", amber "(trained on 0x153b: calibrate)", "no 200 MSa/s capture yet". Nothing without stages.
+- Wizard (cal_wiz_ui.c): `cal_centre` factored out of `cal_range`; the zero of each class is measured at the refined
+  centre again (8 gated, 64 full-rate conversions; `acal_zero_split`, `acal_zero_pair`, `acal_point_set_pair` and the
+  ACAL_ZERO_SPLIT constants are gone; CAL_PROBE byte 248 is 0). On 0x153A `cal_channel` first runs `cal_train`: range 0,
+  `cal_centre`, the gated slope points' within-capture RMS <= ACAL_MAX_NOISE16 (else ACAL_E_NOISE: a signal counts at
+  every stage), the PWM at the centre, 200 MSa/s, `fpga_capture_train` with `cal_cap_measure` (0x63, an 8000-word
+  conversion through fpga_do_conversion, 0x36). A failed training is ACAL_E_READOUT ("ADC readout fault near code 128:
+  check the FPGA bitstream"); the note says "Capture stages: no clean stage for CH2 A" or, after a pass, "Capture stages:
+  CH1 A4 B4" (cal_wiz.c `cw_cap_result`, test_cal_wizard). Save calls `fpga_capture_commit` before the sector write;
+  Cancel (CW_ACT_DISCARD) and CAL_PROBE mode 1 write the value from before back.
+
+**Known limits (inference, not benched)**
+- The self-check compares the two cores of a chip: both cores of one chip garbled at once (the 0x1538 CH2 pattern) would
+  not be flagged after normal captures. The wizard's training sees it (per-core counts at a quiet input).
+- A large signal near 100 MHz could make the cores' counts differ by itself (amber line without a fault).
+- The training runs at range 0 only; the stages do not depend on the range (the capture is digital), the input level does.
+- cal_probe.py still prints "+- 0" for the zero split.
+
+**Bench list** (owner present, coordinator on COM10; fw 0.2.79 FEL-loaded on the unit with 0x153A flashed per
+fpga/al3/README.md section 10 and docs/hardware-status.md 00:30; back up SD 700-710 before the wizard's Save):
+1. Identity (README 10 item 1): `#VER fw=0.2.79,proto=1.24,fpga=0x153A`; GET_INFO caps bit 19 (0x80000) and bit 18;
+   GET_STATUS 44 = 0x00FF; `s.health()`: layout 2, 104 = 0x08E4, 106 = 0x01 (HAS, not trained); FPGA 0x36 via
+   READ_REG / DEBUG if available reads 0x08E4. After one 200 MSa/s capture with nothing connected: 106 bit 2 set, counts
+   108..115 all 0, 107 = 0; the Calibration page line "(not trained: calibrate): capture clean".
+2. dcoffset sweep at 200 / 100 / 50 / 20 MSa/s, range 0 (README 10 item 2; host): every core clean at means 126..146;
+   GET_HEALTH 120 (flagged) stays 0 at the quiet points.
+3. RC low-pass with the 1 kHz square (item 3): no rails, no jumps; Frequency response unflagged; GET_HEALTH flagged
+   captures 0 (both cores of a chip see the edges alike).
+4. The owner runs the wizard (item 4, on the screen): Zero level shows "Capture stages: CH1 A4 B4" / "CH2 A3 B4" (or a
+   neighbour) under the two ticks, then the gain screens and Save. Then GET_CAL 356 = 1, 358 = the value, 360 = 0x153A,
+   357 bits 0-1; Calibration page "(trained): capture clean"; power-cycle (FEL-load again): 104 = the trained value.
+5. Training cross-check (item 5, coordinator over USB): CAL_PROBE mode 1 on CH1 then CH2 runs the zero step with the
+   training (about 15 s each, nothing stored, 0x63 back afterwards); GET_EVENT_LOG type 23 entries a = 0x10, b = the
+   trained value. The reference-bit test (bit 12 / 13 with each B stage) needs raw 0x63 writes: a PC_DEBUG image or a
+   short host script with DEBUG_FPGA; expected: every B stage counts about every word with the A-encode reference.
+6. EXT offsets (item 6): legacy EXT at dividers 0, 1, 3, 9, 199 with the calibration pin loopback (fw-bus B5 recipe,
+   section 48): `capture_info().ext_shift` 12 at divider 0, 14 above; the CH1 edge at the pretrigger within +-3
+   samples. 16-bit (Filter CIC2+FIR, 1 MSa/s): the edge within 1 output sample.
+7. Warm-up (item 7): hair dryer on the FPGA, repeat 2: counts stay 0; if a core flags, the Calibration line turns amber
+   and event 23 names it; then re-run the wizard (the training should move that core's stage).
+8. Fail-fast check (optional, needs 0x1539 back in the flash, so only if it is reflashed anyway): fw 0.2.79 on 0x1539
+   has no stages; the wizard measures at 128 and is expected to fail CH1 / CH2 with "ADC readout fault near code 128"
+   (the A cores at 128..145): that is the owner's intended behaviour.
+Regression signs: the wizard passing on 0x153A with no "Capture stages" note (cs_has / init order), GET_HEALTH layout 1,
+EXT edges 8 samples early (shift table not followed), the trained value lost after a power cycle (trailer not saved).
+
+**Open**
+- Coordinator: protocol row 64 and the version numbers are provisional; the mcp, vector and doc commits are on this
+  branch (see the commit list); docs/hardware-status.md gets the bench results.
+- 0x153B (gen8-features on top of 0x153A): `cs_has` already covers it; add its own caps when it lands.
+- A per-core absolute check (both cores of a chip) would need a quiet-input moment outside the wizard; not built.

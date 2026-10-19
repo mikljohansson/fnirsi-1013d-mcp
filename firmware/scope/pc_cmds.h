@@ -29,7 +29,7 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #else
 #define PC_FW_VERSION_MMU ""
 #endif
-#define PC_FW_VERSION     "0.2.78" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
+#define PC_FW_VERSION     "0.2.79" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
 #endif
 
 //The build identity record (build_id.c, pc_ident.h; host tests: mock_hal.c)
@@ -361,8 +361,8 @@ int      pc_ui_yield_pending(const pc_session *s);        //1.23: 1 while a requ
 //one channel's GET_CAL body (PC_CAL_RESP_LEN bytes), the SD_INFO body (112 bytes; ident: identify the card image,
 //MAIN context; returns 0, or 1 without a card). The report: pc_report.h
 #define PC_LINK_COUNTERS  70
-#define PC_HEALTH_LEN     104
-#define PC_CAL_RESP_LEN   356     //72 bytes up to 1.9, 248 in 1.10-1.11 (v2), 256 in 1.12-1.13 (v3), 288 in 1.14-1.15 (v4)
+#define PC_HEALTH_LEN     124     //96 in 1.16-1.18, 104 in 1.19-1.23
+#define PC_CAL_RESP_LEN   364     //356 in 1.16-1.23, 72 bytes up to 1.9, 248 in 1.10-1.11 (v2), 256 in 1.12-1.13 (v3), 288 in 1.14-1.15 (v4)
 #define PC_SD_INFO_LEN    112     //64 before 1.16
 uint32_t pc_link_counters(pc_session *s, uint32_t *v);
 void     pc_health_body(uint8_t *p);
@@ -371,7 +371,8 @@ int      pc_sd_info_body(pc_session *s, int verify, int ident, uint8_t *resp, ui
 
 //Exposed for tests
 void     pc_variant_from_version(uint16_t version, pc_variant *v);
-void     pc_variant_core_order(pc_variant *v);          //clears INTERLEAVE_UNVERIFIED when 0x33 confirmed the order at boot
+void     pc_variant_core_order(pc_variant *v);
+int      pc_decim_has_caps(uint32_t caps);           //PC_DECIM_HAS_* (| PC_DECIM_HAS_CAPSTAGES) for pc_decim_config          //clears INTERLEAVE_UNVERIFIED when 0x33 confirmed the order at boot
 uint32_t pc_gen_phase_from_mhz(uint64_t freq_mhz);
 uint64_t pc_gen_mhz_from_phase(uint32_t phase_inc);
 uint32_t pc_gen_thr_from_bp(uint32_t duty_bp);

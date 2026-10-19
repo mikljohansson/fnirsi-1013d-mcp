@@ -75,6 +75,8 @@ void pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t to
   c->scale_q24 = 0;
   c->fir_en    = 0;
   c->fir       = 0;
+  c->cap       = (uint8_t)((has & PC_DECIM_HAS_CAPSTAGES) != 0);
+  has         &= ~PC_DECIM_HAS_CAPSTAGES;
 
   if(has == PC_DECIM_HAS_NONE)
   {
@@ -84,6 +86,10 @@ void pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t to
 
   //Swap and capture edges are written with every mode, the legacy one included
   c->flags = flags & PC_DECIM_FLAGS;
+
+  //0x153A: the decimator gets registered data, bits 3 / 4 select nothing (they read back in 0x29): kept 0
+  if(c->cap)
+    c->flags &= (uint8_t)~(PC_DECIM_NEG_A | PC_DECIM_NEG_B);
 
   //0x56 is written as requested; the FPGA engages the FIR only where it is eligible
   c->fir_en = (has >= PC_DECIM_HAS_FIR) && (flags & PC_DECIM_SET_FIR);
@@ -181,27 +187,30 @@ uint32_t pc_decim_ext_shift(const pc_decim_cfg *c)
   if(c->fir)
   {
     //In units of 0.25 ns: 250 ns = 1000, 17.5 N ns = 70 N, 1.25 K (N - 2) ns = 5 K (N - 2), one period N x 5 ns = 20 N
-    lag    = 1000 + (uint64_t)c->n * 70 + (uint64_t)c->k * (c->n - 2) * 5;
+    lag    = 1000 + (uint64_t)c->n * 70 + (uint64_t)c->k * (c->n - 2) * 5 + (c->cap ? 160 : 0);   //0x153A: + 40 ns
     period = (uint64_t)c->n * 20;
   }
   else
   {
     //In units of 0.5 ns: 120 ns = 240, 2.5 ns = 5, one output period N x 5 ns = 10 N
-    lag    = 240 + (uint64_t)c->k * (c->n - 1) * 5;
+    lag    = 240 + (uint64_t)c->k * (c->n - 1) * 5 + (c->cap ? 80 : 0);                             //0x153A: + 40 ns
     period = (uint64_t)c->n * 10;
   }
 
   return (uint32_t)((lag + period / 2) / period);
 }
 
-uint32_t pc_decim_ext_shift_legacy(uint32_t divider)
+uint32_t pc_decim_ext_shift_legacy(uint32_t divider, int cap)
 {
+  if(cap)
+    return divider ? 14 : 12;
+
   return divider ? 8 : 4;
 }
 
 uint32_t pc_decim_ext_shift_at(const pc_decim_cfg *c, uint32_t divider)
 {
-  return c->k ? pc_decim_ext_shift(c) : pc_decim_ext_shift_legacy(divider);
+  return c->k ? pc_decim_ext_shift(c) : pc_decim_ext_shift_legacy(divider, c->cap);
 }
 
 uint32_t pc_decim_settle_us(const pc_decim_cfg *c)

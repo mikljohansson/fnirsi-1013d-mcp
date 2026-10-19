@@ -363,7 +363,7 @@ static void test_bodies(void)
   mock.now = 123456;
 
   pc_health_body(h);
-  T_EQ(h[0], 1); T_EQ(pc_get_u16(h + 2), PC_HEALTH_LEN);
+  T_EQ(h[0], 2); T_EQ(pc_get_u16(h + 2), PC_HEALTH_LEN);
   T_EQ(h[4], PC_USB_CONFIGURED); T_EQ(h[5], PC_USBF_HIGH_SPEED | PC_USBF_CONFIGURED | PC_USBF_DTR | PC_USBF_SOFTCONN);
   T_EQ(h[6], 0x70); T_EQ(h[7], 5); T_EQ(pc_get_u32(h + 8), 0); T_EQ(pc_get_u32(h + 12), 4000);
   T_EQ(pc_get_u32(h + 16), 0x0005107Du);
@@ -455,7 +455,7 @@ static void test_report(void)
   T_EQ(strlen(mock.report), written);
 
   has("FNIRSI-1013D-AI diagnostics report\r\n");
-  has("Firmware running: " PC_FW_VERSION ", protocol 1.23, git 0x00000000 of 2026-10-19 12:00:00 UTC");
+  has("Firmware running: " PC_FW_VERSION ", protocol 1.24, git 0x00000000 of 2026-10-19 12:00:00 UTC");
   has("Card image (sector 750): unknown");
   has("FPGA: version word 0x1535, variant 2");
   has("USB serial: 1013D-0001");

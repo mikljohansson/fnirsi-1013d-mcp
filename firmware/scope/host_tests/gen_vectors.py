@@ -541,6 +541,21 @@ def build():
         "4 file save in progress, 5 USB drive mode), then the reason text",
         [decoded(CMDS["SET_CHANNEL"], 70, ep, status=7, flags=FLAG_RESPONSE)])
 
+    # 5e. Protocol 1.24 (fw 0.2.79, section 14 row 64): FPGA 0x153A capture stages, GET_HEALTH layout 2 (124 bytes)
+    hb = bytearray(124)
+    hb[0] = 2
+    hb[2:4] = struct.pack("<H", 124)
+    hb[88:104] = struct.pack("<BBBBIII", 2, 0xF6, 0x01, 0xF6, 0, 0, 1200)
+    hb[104:124] = struct.pack("<HBB4HII", 0x08DC, 0x0F, 0x04, 0, 0, 37, 2, 1200, 3)
+    hb = bytes(hb)
+    f = frame(CMDS["GET_HEALTH"], 71, hb, flags=FLAG_RESPONSE)
+    add("resp_get_health_1_24", f, [],
+        "1.24 GET_HEALTH response (124 bytes, byte 0 layout 2; 4..87 as 1.16, zero here; 88..103 as 1.19: mode 2, "
+        "0x33 0xF6, 1200 checked): 104 u16 0x63 in effect 0x08DC (CH1 A4 B3, CH2 A3 B4), 106 flags 0x0F (has the "
+        "stages, trained, counts read, the last read flagged a core), 107 flagged cores 0x04 (CH2 A), 108 u16[4] the "
+        "last 0x36 counts CH1 A 0, CH1 B 0, CH2 A 37, CH2 B 2, 116 u32 captures read 1200, 120 u32 of those flagged 3",
+        [decoded(CMDS["GET_HEALTH"], 71, hb, flags=FLAG_RESPONSE)])
+
     # 6. ASCII probe (section 10)
     add("ascii_ver", b"#VER\n", [{"event": "ascii", "line": "VER"}], "#VER probe")
     add("ascii_local_crlf", b"#LOCAL\r\n", [{"event": "ascii", "line": "LOCAL"}], "#LOCAL with CR LF (the LF is junk)")

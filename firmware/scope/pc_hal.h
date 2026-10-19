@@ -342,6 +342,29 @@ int      pc_hal_enc_written(void);                           //a 0x0D / 0x53 / 0
 void     pc_hal_enc_retry(void);                             //[FPGA] before a re-arm: 0x0D = 1, 0 on 0x1532..0x1536
 void     pc_hal_enc_note(uint8_t why, const eh_note *n);     //count a check, log event 21 when n->done
 
+//fw 0.2.79 (protocol 1.24): FPGA 0x153A capture stages (cap_stage.h, cap_hw.c): GET_HEALTH 104..123, GET_CAL 356..363
+typedef struct
+{
+  uint16_t value;           //0x63 in effect (written at boot and by the wizard's training); 0 without the stages
+  uint8_t  flags;           //PC_CAPF_*
+  uint8_t  flagged;         //cores flagged by the last read (bit 0 CH1 A, 1 CH1 B, 2 CH2 A, 3 CH2 B; cs_flagged)
+  uint16_t cnt[4];          //the last read 0x36 outlier counts, CH1 A, CH1 B, CH2 A, CH2 B
+  uint32_t reads;           //full-rate captures whose counts were read
+  uint32_t flagged_n;       //of those with a flagged core
+  uint8_t  trailer;         //CS_T_* of the stored value (sector 708 bytes 488..503) as loaded or last saved
+  uint16_t stored;          //the stored 0x63 value (0 unless the trailer is valid)
+  uint16_t stored_fpga;     //the FPGA version word it was trained on
+} pc_hw_cap;
+
+#define PC_CAPF_HAS          0x01  //the bitstream has the capture stages (0x153A+)
+#define PC_CAPF_TRAINED      0x02  //the value in effect is a trained one for this bitstream (else the power-on 0x08E4)
+#define PC_CAPF_READ         0x04  //counts were read after a full-rate capture since boot
+#define PC_CAPF_FLAGGED      0x08  //the last read flagged a core
+#define PC_CAPF_OTHER        0x10  //a stored value exists for another bitstream (not applied: recalibrate)
+
+void     pc_hal_cap_state(pc_hw_cap *c);                     //any context
+void     pc_hal_cap_check(void);                             //[FPGA] after a full-rate host capture: read 0x36
+
 //CAL_PROBE (fw 0.2.67, MAIN, UI stopped): the calibration wizard's zero measurement of one channel and hardware range
 //(cal_wiz_ui.c), nothing stored; settle extra data-port reads per sample (fpga_read_settle), prestrobe a write strobe
 //before each sample strobe (fpga_read_prestrobe), both 0 = the wizard's readout; mode 0 one range, 1 the whole zero

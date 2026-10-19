@@ -277,13 +277,13 @@ static void test_zero_fail_detail(void)
   T_STR(t, "CH1: ADC capture timing: the 200 MSa/s data stays garbled");
   T_TRUE(ui_text_width(&font_3, t) <= RESULT_W);
 
-  //fw 0.2.67: the readout fault near code 128 (FPGA 0x1538)
+  //fw 0.2.67: the readout fault near code 128; since 0.2.79 also a 0x153A core with no clean capture stage (fail fast)
   ev(&w, CW_EV_CALIBRATE);
   take(&w);
   rc[0] = ACAL_E_READOUT;
   cw_zero_result(&w, rc, match_ok);
   cw_zero_line(&w, 0, t);
-  T_STR(t, "CH1: ADC readout fault near code 128 (FPGA 0x1538): flash the fixed bitstream");
+  T_STR(t, "CH1: ADC readout fault near code 128: check the FPGA bitstream");
   T_TRUE(ui_text_width(&font_3, t) <= RESULT_W);
 
   //Other reasons keep their words
@@ -357,6 +357,33 @@ static void test_zero_fail_note(void)
   T_STR(t, "");
   cw_zero_note(&w, 1, t);
   T_STR(t, "");
+
+  //fw 0.2.79: FPGA 0x153A capture stages. A passed channel that trained them names them; a channel whose training found
+  //no clean stage fails with the readout wording and names the cores; without the stages (other bitstreams) no note
+  rc[0] = ACAL_OK;
+  rc[1] = ACAL_E_READOUT;
+  ev(&w, CW_EV_CALIBRATE);
+  take(&w);
+  cw_cap_result(&w, 0, CW_C_DONE, 0x08E4, 0);
+  cw_cap_result(&w, 1, CW_C_FAIL, 0x08E4, 0x0C);
+  cw_zero_result(&w, rc, match_ok);
+  cw_zero_note(&w, 0, t);
+  T_STR(t, "Capture stages: CH1 A4 B4");
+  cw_zero_note(&w, 1, t);
+  T_STR(t, "Capture stages: no clean stage for CH2 A, CH2 B");
+  T_TRUE(ui_text_width(&font_2, t) <= RESULT_W);
+  cw_zero_line(&w, 1, t);
+  T_STR(t, "CH2: ADC readout fault near code 128: check the FPGA bitstream");
+  rc[1] = ACAL_OK;
+  ev(&w, CW_EV_CALIBRATE);
+  take(&w);
+  cw_cap_result(&w, 0, CW_C_NONE, 0, 0);
+  cw_cap_result(&w, 1, CW_C_DONE, 0x08E4 | 0x2000, 0);
+  cw_zero_result(&w, rc, match_ok);
+  cw_zero_note(&w, 0, t);
+  T_STR(t, "");
+  cw_zero_note(&w, 1, t);
+  T_STR(t, "Capture stages: CH2 A3 B4 A-clk");
 }
 
 static void test_gain_nosignal_and_fail(void)

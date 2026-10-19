@@ -1116,8 +1116,8 @@ static void test_points(void)
   f.cls = ACAL_FULL; f.core = 1; f.value = 115; f.within16 = 113;
   acal_fail_point(pt, ACAL_E_NOISE, &f);
   memset(b, 0xAA, sizeof(b));
-  n = acal_probe_pack(b, 1, 4, ACAL_E_NOISE, ACAL_PROBE_GARBLED, 800, 812, 3, 2, &f, pt, 27);
-  T_EQ(n, ACAL_PROBE_BYTES); T_EQ(n, 252); T_EQ(b[252], 0xAA); T_EQ(b[248], 27); T_EQ(b[249], 0); T_EQ(b[250], 0);
+  n = acal_probe_pack(b, 1, 4, ACAL_E_NOISE, ACAL_PROBE_GARBLED, 800, 812, 3, 2, &f, pt);
+  T_EQ(n, ACAL_PROBE_BYTES); T_EQ(n, 252); T_EQ(b[252], 0xAA); T_EQ(b[248], 0); T_EQ(b[249], 0); T_EQ(b[250], 0);
   T_EQ(b[0], 1); T_EQ(b[1], 4); T_EQ(b[2], ACAL_E_NOISE); T_EQ(b[3], 0);
   T_EQ(b[4], ACAL_PT_F_ZERO); T_EQ(b[5], ACAL_FULL); T_EQ(b[6], 1); T_EQ(b[7], ACAL_PROBE_GARBLED);
   T_EQ(b[8], 115); T_EQ(b[12], 113);
@@ -1182,17 +1182,17 @@ static void test_readout_fault(void)
 {
   //Range 0 of the bench: zero 127.6 codes at the centre PWM 860, -0.44 codes per count (the READ_RAW sweep)
   const int32_t centre = 860, z1024 = 127 * 1024 + 614, slope1024 = -451;   //-0.44 code per count
-  acal_range_meas m;
-  acal_acc   acc[2][2], acc2[2][2];
+  acal_acc   acc[2][2];
   acal_point pt[ACAL_POINTS];
-  int32_t    zero16[2], drift16[2], d, k;
-  uint32_t   noise16[2], within16[2], clipped = 0;
+  int32_t    k;
+  uint32_t   clipped = 0;
 
 #define LEVEL(pwm) (z1024 + slope1024 * ((pwm) - centre))
   rng = 777;
 
-  //The wizard up to 0.2.66: the zero point parked at the centre, where the level straddles 127.5: rail samples and
-  //several codes of noise (the 17:55 failure lines), while a clean readout of the same level is fine
+  //The zero point parked at the centre, where the level straddles 127.5 (0.2.66 and again since 0.2.79, the owner's
+  //fail-fast decision): a faulty readout gives rail samples and several codes of noise (the 17:55 failure lines) and
+  //fails the step loudly, while a clean readout of the same level is fine
   fault_measure(LEVEL(centre), 64, 1, acc);
   clipped = acc[0][0].clipped + acc[1][0].clipped + acc[0][1].clipped + acc[1][1].clipped;
   T_TRUE(clipped > 0);
@@ -1205,44 +1205,6 @@ static void test_readout_fault(void)
   }
   fault_measure(LEVEL(centre), 64, 0, acc);
   T_EQ(acc[0][0].clipped + acc[1][1].clipped, 0);
-
-  //The split: d from the gated slope points (centre -+ 150), 12 codes either side of 128
-  memset(&m, 0, sizeof(m));
-  m.pwm_lo = centre - 150;
-  m.pwm_hi = centre + 150;
-  m.pwm    = centre;
-  for(k=0;k<2;k++)
-  {
-    m.mean16_lo[ACAL_GATED][k] = LEVEL(m.pwm_lo) / 64;
-    m.mean16_hi[ACAL_GATED][k] = LEVEL(m.pwm_hi) / 64;
-  }
-  d = acal_zero_split(&m);
-  T_TRUE(d >= 26 && d <= 28);                                   //12 codes / 0.44 per count
-
-  //Through the faulty readout both split points are clean, and their mean is the zero at the centre within 1/8 code
-  fault_measure(LEVEL(centre - d), 64, 1, acc);
-  fault_measure(LEVEL(centre + d), 64, 1, acc2);
-  clipped = 0;
-  acal_zero_pair(acc, acc2, zero16, drift16, noise16, within16, &clipped);
-  T_EQ(clipped, 0);
-  for(k=0;k<2;k++)
-  {
-    T_TRUE(iabs_t(zero16[k] - z1024 / 64) <= 2);
-    T_TRUE(noise16[k] < 24);                                    //the 1-code noise and the rounding, not the step
-    T_TRUE(within16[k] < 24);
-    T_TRUE(iabs_t(drift16[k]) <= 2);                            //the step between the points cancels
-  }
-
-  //The point record: the centre's PWM, the pair's mean, extremes of both
-  acal_point_set_pair(&pt[0], centre, ACAL_FULL, 64, acc, acc2);
-  T_EQ(pt[0].pwm, centre); T_EQ(pt[0].mean16[0], zero16[0]); T_EQ(pt[0].rms16[1], noise16[1]);
-  T_TRUE(pt[0].lo[0] < 116 && pt[0].hi[0] > 139);
-
-  //Split limits
-  m.mean16_lo[ACAL_GATED][0] = m.mean16_lo[ACAL_GATED][1] = m.mean16_hi[ACAL_GATED][0];
-  T_EQ(acal_zero_split(&m), ACAL_ZERO_SPLIT_MIN);               //no response: the range check fails it anyway
-  m.mean16_lo[ACAL_GATED][0] = m.mean16_lo[ACAL_GATED][1] = m.mean16_hi[ACAL_GATED][0] + 16;
-  T_EQ(acal_zero_split(&m), ACAL_ZERO_SPLIT_MAX);
 
   //Classification: rail samples only at full rate with the gated twin quiet and near 128 -> the readout fault
   memset(pt, 0, sizeof(pt));

@@ -50,6 +50,8 @@
 #define PC_DECIM_HAS_NONE     0         //bitstream without the filter (0x1533 and older)
 #define PC_DECIM_HAS_CIC      1         //0x1534: boxcar / CIC
 #define PC_DECIM_HAS_FIR      2         //0x1535+: plus the compensation FIR
+#define PC_DECIM_HAS_CAPSTAGES 0x10    //or-ed in: 0x153A+ capture stages (4 / 3 words more ADC latency against EXT, 40 ns
+                                        //at K >= 1; 0x53 bits 3 / 4 inert, written 0)
 
 //Filter setting of new settings (no valid settings word, or the DEFAULT button), per mode since fw 0.2.64 (owner,
 //2026-10-19): the Scope trace defaults to CIC2 without the FIR (the FIR's 6-9 % step overshoot pulses on a square wave),
@@ -90,6 +92,7 @@ typedef struct
   uint32_t n;                 //decimation factor of the whole chain (0 when k = 0); output rate 200 MSa/s / n
   uint64_t gain;              //M^K, M = n (n / 2 with the FIR); 1 when k = 0
   uint32_t scale_q24;         //round(2^(24 + S) / gain): stored sample -> 8-bit ADC code, Q24 (0 when k = 0)
+  uint8_t  cap;               //0x153A+ capture stages (PC_DECIM_HAS_CAPSTAGES): the ADC data reach the memory later
 } pc_decim_cfg;
 
 uint32_t pc_decim_n(uint32_t divider);                                   //2 * (floor(D / 2) + 1)
@@ -118,7 +121,9 @@ uint32_t pc_decim_ext_shift(const pc_decim_cfg *c);
 //lands at word +5..+6 at D 9 and D 199 and at +3.5 at D 0 (the synchroniser's 15-20 ns are most of a 10 ns word there),
 //an ADC trigger at word +1..+1.5. Shift: 4 words, 2 at divider 0. Model numbers; bench check in firmware/AGENTS.md
 //section 48 (D 1..8 not simulated)
-uint32_t pc_decim_ext_shift_legacy(uint32_t divider);
+//0x153A+ (cap): the IOB capture and the stage pick take 4 words more at divider 0 and 3 at divided rates (fpga/al3/README.md
+//section 10, tb_trigpos: legacy EXT +14..15 samples at D 0, +16..17 at D 9, +17..18 at D 199 against CH1 +2..3): 12 / 14
+uint32_t pc_decim_ext_shift_legacy(uint32_t divider, int cap);
 
 //The EXT shift of a capture with configuration c at divider (0x0D): pc_decim_ext_shift for K >= 1, else the legacy one.
 //Samples of the capture's layout; the pretrigger words written are (pretrigger - shift) (16-bit) or / 2 (legacy)

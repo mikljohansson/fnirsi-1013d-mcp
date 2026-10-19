@@ -31,6 +31,26 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.79 - 2026-10-20 (protocol 1.24 provisional, docs/protocol.md section 14 row 64)
+
+- FPGA 0x153A capture stages (firmware/AGENTS.md section 54, docs/protocol.md section 5.1): detected as caps bit 19
+  CAPTURE_STAGES and features bit 7 on 0x153A..0x153F. At boot 0x64 = 8 and 0x63 = the value stored with the
+  calibration when it was trained on the running bitstream, else the power-on 0x08E4. After every accepted 200 MSa/s
+  capture the firmware reads the 0x36 outlier counts and flags a core whose count exceeds its chip partner's by more
+  than 8 (GET_HEALTH grows to 124 bytes, layout 2; event 23; the Diagnostics Calibration line and the report). The
+  calibration wizard trains the stages first in each channel's zero step (code 128, range 0, quiet input checked;
+  stages 2..5 per core, the B reference bit as a fallback); a core with no clean stage fails with "ADC readout fault
+  near code 128: check the FPGA bitstream". Save stores the value in sector 708 bytes 488..503 ('ACAP' trailer; GET_CAL
+  grows to 364 bytes); Cancel and CAL_PROBE put the previous value back (381dd8a).
+- EXT trigger on 0x153A: the legacy shift is 12 samples at 200 MSa/s and 14 at divided rates (4 / 8 before), the
+  filtered lag 40 ns longer; 0x53 bits 3 / 4 are written 0 there (381dd8a).
+- The calibration wizard measures the zero at the centre PWM (code 128) again on every bitstream: 0.2.67's two-point
+  off-centre zero is removed (owner 2026-10-19 20:30, fail fast), CAL_PROBE byte 248 is always 0 (381dd8a).
+- MCP: GET_HEALTH layout 2 and GET_CAL 364 decoded (`HealthResp.describe_capture`, `CalResp.describe_capture`),
+  `scope_health` names the stages and a flagged core, capture tools add a caveat when the last full-rate capture was
+  flagged, event 23 in words; the simulator's `al3c` variant models 0x153A (f519c17). Vector `resp_get_health_1_24`
+  (1d67d8a); docs/protocol.md row 64 (4da103a), firmware/README.md 6.4 (0a3f764).
+
 #### 0.2.78 - 2026-10-19 (protocol 1.23, docs/protocol.md section 14 row 63)
 
 - Host commands leave the scope's menus (owner 23:27; docs/ui-guidelines.md section 4, docs/protocol.md section 14
@@ -1063,6 +1083,11 @@ was found (commit not identified).
 
 ### Host library and MCP server (`mcp/`, package version 0.1.0)
 
+- Added: protocol 1.24 (fw 0.2.79, FPGA 0x153A capture stages): `Caps.CAPTURE_STAGES`, `Features.CAPTURE_STAGES`,
+  `HealthResp` layout 2 (124 bytes: `cap_*`, `has_capture`, `describe_capture`), `CalResp` 364 bytes (the stored
+  stages, `describe_capture`), `pack_cap_trailer` / `parse_cap_trailer`, `cap_stages_text`, event 23 in words,
+  `DECIM_HAS_CAPSTAGES` (the 0x153A EXT shifts), simulator variant `al3c`; `scope_health` and
+  `scope_calibration_info` report the stages, capture tools warn after a flagged full-rate capture (f519c17).
 - Added: protocol 1.22 (fw 0.2.72): GET_LINK_STATS counters 64-67, `EventLog.fpga_trace` and
   `Scope.event_log(fpga_trace=...)`, `scope_event_log(fpga_trace=...)`, `ext_shift_legacy`; the simulator models the
   ADC pipeline behind a legacy EXT trigger, the trace switch and an exact READ_TRACE (d6de414); 0x1538+ without

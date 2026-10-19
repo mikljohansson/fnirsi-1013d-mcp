@@ -7,7 +7,9 @@ It models what the host can observe through docs/protocol.md:
   programmable pre-trigger/total, DDS generator), ``ef2`` 0x1632 (6144 words), ``ep4`` 0x1732; the AL3 line
   ``al3x`` 0x1533 (EXT), ``al3d`` 0x1534 (decimation), ``al3f`` 0x1535 (FIR), ``al3s`` 0x1536 (sequencer),
   ``al3e`` 0x1538 (the per-capture encode check, protocol 1.19: GET_HEALTH 88..103, event 21; hooks
-  ``Device.enc_bad_next`` / ``enc_unrecovered_next``).
+  ``Device.enc_bad_next`` / ``enc_unrecovered_next``), ``al3c`` 0x153A (the ADC capture stages, protocol 1.24:
+  GET_HEALTH 104..123, GET_CAL 356..363, event 23, longer EXT shifts; hooks ``Device.cap_counts_next``,
+  ``cap_stored`` + ``cap_boot()``).
 - The on-device Bode plot (protocol 1.20, BODE_CTRL / READ_BODE, display mode 5) on every bitstream with the filter
   and the generator: ``SimBode`` runs the host tool's ``bode.BodeRunner`` against this device through an in-process
   link (the firmware's bode_sweep.c is a port of it), so device and host sweeps of a ``dut_in`` / ``dut_out`` DUT
@@ -89,6 +91,8 @@ class VariantSpec:
     seq: bool = False
     #: bitstream 0x1538: plus the per-capture encode self-check, FPGA read 0x33 (protocol 1.19)
     enc_check: bool = False
+    #: bitstream 0x153A: plus the per-core ADC capture stages (0x63) and outlier counters (0x36) (protocol 1.24)
+    capture_stages: bool = False
 
     @property
     def enc_mode(self) -> int:
@@ -105,6 +109,8 @@ EXT_LATENCY_S = 22e-9
 #: with the 0x1535 FIR (row 49)
 DECIM_LATENCY_S = 120e-9
 FIR_LATENCY_S = 250e-9
+#: 0x153A: the IOB capture and the stage pick, 40 ns more from pin to memory (4 words at the full-rate write clock)
+CAP_EXTRA_LATENCY_S = 40e-9
 #: decimation model: sub-samples per output period (exact for N <= this)
 DECIM_SUBSAMPLES = 64
 EXT_THRESHOLD_V = 1.65
@@ -120,6 +126,8 @@ VARIANTS = {
                         fir=True, seq=True),
     "al3e": VariantSpec("al3e", 0x1538, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True,
                         fir=True, seq=True, enc_check=True),
+    "al3c": VariantSpec("al3c", 0x153A, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True,
+                        fir=True, seq=True, enc_check=True, capture_stages=True),
     "ef2": VariantSpec("ef2", 0x1632, P.FpgaVariant.EF2, 6144, 12286, True, True),
     "ep4": VariantSpec("ep4", 0x1732, P.FpgaVariant.EP4, 6144, 12286, True, True),
 }
@@ -647,6 +655,18 @@ class Device:
         self.enc_bad_next = 0
         self.enc_unrecovered_next = 0
         self.enc_rearms = 1
+        #: protocol 1.24 capture stages (0x153A, GET_HEALTH 104..123, GET_CAL 356..363): the 0x63 value in effect,
+        #: the stored trailer (None, or (value, fpga version word) as trained), the last 0x36 counts and the
+        #: counters; test hook ``cap_counts_next`` (a list of 4-count tuples the next full-rate captures read; the
+        #: model's captures are clean, 0 outliers, otherwise)
+        self.cap_stored: tuple[int, int] | None = None
+        self.cap_value = 0
+        self.cap_flags = 0
+        self.cap_counts: tuple[int, ...] = (0, 0, 0, 0)
+        self.cap_flagged = 0
+        self.cap_reads = self.cap_flagged_n = 0
+        self.cap_counts_next: list[tuple[int, int, int, int]] = []
+        self.cap_boot()
 
     # --- capabilities -------------------------------------------------------------------------------
 
@@ -675,6 +695,8 @@ class Device:
             c |= P.Caps.ENC_CHECK
             if not self.cfg.legacy:  # fw 0.2.72 (1.22): read 0x33 at boot reported convention 1, the order is known
                 c &= ~P.Caps.INTERLEAVE_UNVERIFIED
+        if self.cap_on:
+            c |= P.Caps.CAPTURE_STAGES
         return int(c) & ~self.cfg.caps_clear
 
     @property
@@ -684,6 +706,7 @@ class Device:
         return ((P.Features.EXT_TRIGGER if sp.ext_trigger else 0) | (P.Features.DECIM if sp.decim else 0) |
                 (P.Features.FIR if sp.fir else 0) | (P.Features.SEGMENTS | P.Features.HW_AVERAGE if sp.seq else 0) |
                 (P.Features.ENC_CHECK if sp.enc_check else 0) |
+                (P.Features.CAPTURE_STAGES if self.cap_on else 0) |
                 (P.Features.BODE if sp.decim and sp.generator else 0))
 
     def ui_average_state(self) -> tuple[int, int]:
@@ -898,7 +921,7 @@ class Device:
         else:
             # Legacy layout: the AD9288 outputs a sample 4 encode cycles (words) after taking it, so the EXT edge is
             # seen that many words before the data show it (modelled as the firmware's legacy EXT shift, 1.22)
-            lag_words = P.ext_shift_legacy(settings.divider) // 2
+            lag_words = P.ext_shift_legacy(settings.divider, self.spec.capture_stages) // 2
             t = t0 + 2 * (k + lag_words) * dt + dt - EXT_LATENCY_S
         return np.where(sig.eval(t, settings.gen) > EXT_THRESHOLD_V, 255, 0).astype(np.uint8)
 
@@ -906,6 +929,8 @@ class Device:
         """The decimation an arm with these settings writes (pc_decim_next)."""
         s = settings or self.settings
         has = P.DECIM_HAS_FIR if self.spec.fir else (P.DECIM_HAS_CIC if self.spec.decim else P.DECIM_HAS_NONE)
+        if self.cap_on:
+            has |= P.DECIM_HAS_CAPSTAGES
         return P.decim_config(s.decim & 3, s.decim & (P.DECIM_FLAGS | P.DECIM_SET_FIR), s.divider,
                               s.trigger.total_samples, has)
 
@@ -927,7 +952,8 @@ class Device:
         L = w.size
         per = 2 * Q if dec.fir else Q  # grid points per output sample
         step = C * 5e-9 / Q
-        t_end0 = t0 + k0 * N * 5e-9 - (FIR_LATENCY_S if dec.fir else DECIM_LATENCY_S)
+        t_end0 = t0 + k0 * N * 5e-9 - (FIR_LATENCY_S if dec.fir else DECIM_LATENCY_S) - \
+            (CAP_EXTRA_LATENCY_S if self.spec.capture_stages else 0.0)
         g = t_end0 - (L - 1) * step + np.arange((n - 1) * per + L) * step
         c = np.clip(self._analog(ch, g, None, settings), 0.0, 255.0)
         mean = np.convolve(c, w, "valid")[::per][:n]
@@ -1467,6 +1493,38 @@ class Device:
             if self.shared:
                 self.run_state = P.RunState.STOP  # a host single leaves the UI in STOP (collaborative plan)
 
+    def cap_boot(self) -> None:
+        """fw 0.2.79 at boot: 0x63 = the stored value when it was trained on this bitstream, else 0x08E4."""
+        if not self.spec.capture_stages:
+            self.cap_value, self.cap_flags = 0, 0
+            return
+        self.cap_flags = P.CAPF_HAS
+        self.cap_value = P.CAP_POWER_ON
+        if self.cap_stored is not None:
+            if self.cap_stored[1] == self.spec.version_word:
+                self.cap_value = self.cap_stored[0]
+                self.cap_flags |= P.CAPF_TRAINED
+            else:
+                self.cap_flags |= P.CAPF_OTHER
+
+    def _cap_check(self, origin: int) -> None:
+        """fw 0.2.79: read 0x36 after every accepted full-rate capture; flag a core whose count exceeds its chip
+        partner's by more than 8; event 23 when the set of flagged cores changes."""
+        if not self.cap_flags & P.CAPF_HAS:
+            return
+        was = self.cap_flagged
+        self.cap_counts = tuple(self.cap_counts_next.pop(0)) if self.cap_counts_next else (0, 0, 0, 0)
+        self.cap_reads += 1
+        self.cap_flags |= P.CAPF_READ
+        self.cap_flagged = P.cap_flagged(self.cap_counts)
+        if not self.cap_flagged:
+            self.cap_flags &= ~P.CAPF_FLAGGED
+            return
+        self.cap_flags |= P.CAPF_FLAGGED
+        self.cap_flagged_n += 1
+        if self.cap_flagged != was:
+            self.log_event(23, self.cap_flagged, max(P.cap_excess(self.cap_counts)))
+
     def _enc_check(self, origin: int) -> None:
         """Protocol 1.19: the firmware checks every 200 MSa/s capture (legacy layout) before anything reads it; a
         garbled one is re-armed (up to 16 times) and only the accepted capture is seen. Counters, the 0x33 byte and
@@ -1494,6 +1552,7 @@ class Device:
         if mode == 2:
             self.enc_last33 = last
             self.enc_flags |= P.ENC_READ
+        self._cap_check(origin)
 
     # --- collaborative mode: the simulated UI --------------------------------------------------------------
 
@@ -1747,6 +1806,13 @@ class Device:
         """GET_STATUS body as this firmware sends it: 32 bytes in the legacy (protocol 1.2) model, 48 in 1.17."""
         b = self.status().pack()
         return b if self.shared else b[:32]
+
+    @property
+    def cap_on(self) -> bool:
+        """Protocol 1.24 (fw 0.2.79): the firmware drives the 0x153A capture stages (caps bit 19, features bit 7, the
+        longer EXT shifts). From the config, not ``proto_minor`` (which needs ``shared``, which needs the caps)."""
+        return self.spec.capture_stages and not self.cfg.legacy and \
+            (self.cfg.proto_minor is None or self.cfg.proto_minor >= 24)
 
     @property
     def proto_minor(self) -> int:
@@ -2802,7 +2868,14 @@ class Device:
 
     def _cmd_get_cal(self, req: P.Frame) -> P.Frame:
         ch = self._channel_arg(req.payload[0])
-        return self._ok(req, self._cal_resp(ch).pack())
+        r = self._cal_resp(ch)
+        if self.proto_minor < 24:
+            return self._ok(req, r.pack()[:356])
+        if self.cap_stored is not None:
+            r.cap_trailer, (r.cap_stored, r.cap_stored_fpga) = 1, self.cap_stored
+        r.cap_flags = self.cap_flags & (P.CAPF_HAS | P.CAPF_TRAINED | P.CAPF_OTHER)
+        r.cap_value = self.cap_value
+        return self._ok(req, r.pack())
 
     def _cmd_read_screen(self, req: P.Frame) -> P.Frame:
         r = P.ReadScreenReq.unpack(req.payload)
@@ -2890,7 +2963,11 @@ class Device:
                          settings_flags=1 if self.settings_changed else 0, settings_eval_ms=400,
                          enc_mode=self.spec.enc_mode, enc_last33=self.enc_last33, enc_flags=self.enc_flags,
                          enc_boot33=P.ENC33_GOOD if self.spec.enc_mode == 2 else 0, enc_bad=self.enc_bad,
-                         enc_recovered=self.enc_recovered, enc_checked=self.enc_checked)
+                         enc_recovered=self.enc_recovered, enc_checked=self.enc_checked,
+                         cap_value=self.cap_value, cap_flags=self.cap_flags, cap_flagged=self.cap_flagged,
+                         cap_counts=self.cap_counts, cap_reads=self.cap_reads, cap_flagged_n=self.cap_flagged_n)
+        if self.proto_minor < 24:  # 1.19-1.23: layout 1, 104 bytes
+            r.layout, r.length = 1, 104
         rec = self.restart_record
         if rec is not None:
             r.rec_flags = 1 | (2 if self.restart_record_this_power_on else 0)
@@ -2898,7 +2975,7 @@ class Device:
                                                                          rec["power_on"], rec["minutes"])
             for k in ("exc_lr", "spsr", "exc_sp", "reset_lr", "reset_sp", "reset_cpsr", "fsr", "far"):
                 setattr(r, "rec_" + k, rec[k])
-        out = self._ok(req, r.pack())
+        out = self._ok(req, r.pack()[:r.length])
         if flags & P.HEALTH_CLEAR_RESTART:
             self.restart_record = None
         if flags & P.HEALTH_RESTART_TEST:

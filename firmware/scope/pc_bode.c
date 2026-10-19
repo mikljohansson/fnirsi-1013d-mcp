@@ -18,6 +18,7 @@
 #include "pc_hal.h"
 #include "pc_protocol.h"
 #include "pc_decim.h"
+#include "pc_cmds.h"
 #include "pc_seq.h"
 #include "adc_cal.h"
 #include "types.h"
@@ -120,7 +121,7 @@ static void bh_info(void *ctx, int c, int r, bode_chinfo *ci)
 static int bh_arm(void *ctx, const bode_plan *pp, uint32 total)
 {
   uint32 caps = pc_glue_caps(), div = bode_divider(pp);
-  int    has = (caps & PC_CAP_FIR) ? PC_DECIM_HAS_FIR : (caps & PC_CAP_DECIM) ? PC_DECIM_HAS_CIC : PC_DECIM_HAS_NONE;
+  int    has = pc_decim_has_caps(caps);
   pc_decim_cfg dc;
   pc_seq_cfg   sq;
 

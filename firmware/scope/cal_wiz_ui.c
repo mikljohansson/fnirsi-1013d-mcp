@@ -27,6 +27,7 @@
 #include "ui_dlg.h"
 #include "enc_heal.h"
 #include "pc_hal.h"
+#include "cap_hw.h"
 
 #include <string.h>
 
@@ -108,33 +109,20 @@ static void cal_result(acal_acc acc[2][2], int32_t *mean16, int32_t *drift16, ui
   }
 }
 
-//One range of the zero step (inputs open or shorted), relay already set: the PWM centre where the mean of both cores
-//reads 128, the offset slope of each core from two PWM points 150 counts either side and its zero at that centre, each
-//with the ADC clock gated (2 MSa/s, every legacy time base but 200 MSa/s) and at full rate (200 MSa/s, every filtered
-//capture). Every point goes into pt (acal_point, ACAL_PT_*), *centre is the coarse centre (-1 when it failed), *split
-//the zero split d (acal_zero_split; 0 when not reached). Returns ACAL_E_RESPONSE, ACAL_E_TIMING, ACAL_E_READOUT or
-//acal_range_check's result with *fail (point fields included). Shared by the wizard and CAL_PROBE (fw 0.2.67), so the
-//host sees exactly the wizard's measurement.
-//
-//fw 0.2.67: the zero of each class is the mean of two points split d counts either side of the centre, 12 codes off
-//128 (acal_zero_split, adc_cal.h): on FPGA 0x1538 the 200 MSa/s readout of some lanes mixes the bits of successive
-//samples straddling 0x7F / 0x80 (bench 2026-10-19), which failed every zero step parked at 128. The linear model makes
-//the mean of the two points the zero at the centre, so nothing stored changes meaning
-static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], int32_t *centre, int32_t *split,
-                     acal_fail *fail)
+//The gated part of one range up to the centre: two coarse points, the centre between them, the slope points 150 counts
+//either side of it and the centre refined on them (m->pwm, m->pwm_lo / hi, m->mean16_lo / hi of the gated class).
+//ACAL_E_RESPONSE when the coarse points do not move; *centre the coarse centre (-1 then)
+static int cal_centre(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], int32_t *centre, acal_fail *fail)
 {
-  acal_acc acc[2][2], acc2[2][2];
-  int32_t  d;
+  acal_acc acc[2][2];
   int32_t  mean[2], hi, lo, p;
   uint32_t unused = 0;
-  int      rc;
 
   memset(m, 0, sizeof(*m));
   memset(pt, 0, ACAL_POINTS * sizeof(acal_point));
   memset(fail, 0, sizeof(*fail));
   fail->point = ACAL_PT_NONE;
   *centre = -1;
-  *split  = 0;
 
   cal_set_rate(CAL_RATE_GATED);
 
@@ -168,18 +156,38 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
   cal_result(acc, m->mean16_hi[ACAL_GATED], 0, 0, 0, &m->clipped);
   acal_point_set(&pt[ACAL_PT_G_HI], m->pwm_hi, ACAL_GATED, 4, acc);
 
-  //Centre refined on the slope points, then the zeros there in both clock classes
+  //Centre refined on the slope points
   m->pwm = acal_interp_pwm(m->pwm_lo, (m->mean16_lo[ACAL_GATED][0] + m->mean16_lo[ACAL_GATED][1]) / 2, m->pwm_hi,
                            (m->mean16_hi[ACAL_GATED][0] + m->mean16_hi[ACAL_GATED][1]) / 2);
+  return ACAL_OK;
+}
 
-  d = acal_zero_split(m);
-  *split = d;
+//One range of the zero step (inputs open or shorted), relay already set: the PWM centre where the mean of both cores
+//reads 128 (cal_centre), the offset slope of each core from two PWM points 150 counts either side and its zero at that
+//centre, each with the ADC clock gated (2 MSa/s, every legacy time base but 200 MSa/s) and at full rate (200 MSa/s, every
+//filtered capture). Every point goes into pt (acal_point, ACAL_PT_*), *centre is the coarse centre (-1 when it failed).
+//Returns ACAL_E_RESPONSE, ACAL_E_TIMING, ACAL_E_READOUT or acal_range_check's result with *fail (point fields included).
+//Shared by the wizard and CAL_PROBE (fw 0.2.67), so the host sees exactly the wizard's measurement.
+//
+//fw 0.2.79 (owner 2026-10-19 20:30, fail fast): the zero is measured at the centre again, where the level straddles
+//0x7F / 0x80 and the most bits flip. 0.2.67-0.2.78 measured it as the mean of two points 12 codes either side to pass on
+//FPGA 0x1538 / 0x1539, whose 200 MSa/s capture garbled cores near 128; a bitstream with that fault now fails the step
+//with "ADC readout fault near code 128" instead of being calibrated around it
+static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], int32_t *centre, acal_fail *fail)
+{
+  acal_acc acc[2][2];
+  int      rc;
 
-  cal_measure(r, m->pwm - d, 60, 8, acc);
-  cal_measure(r, m->pwm + d, 60, 8, acc2);
-  acal_zero_pair(acc, acc2, m->zero16[ACAL_GATED], m->drift16[ACAL_GATED], m->noise16[ACAL_GATED],
-                 m->within16[ACAL_GATED], &m->clipped);
-  acal_point_set_pair(&pt[ACAL_PT_G_ZERO], m->pwm, ACAL_GATED, 8, acc, acc2);
+  rc = cal_centre(r, m, pt, centre, fail);
+
+  if(rc != ACAL_OK)
+    return rc;
+
+  //The zeros at the refined centre, gated
+  cal_measure(r, m->pwm, 60, 8, acc);
+  cal_result(acc, m->zero16[ACAL_GATED], m->drift16[ACAL_GATED], m->noise16[ACAL_GATED], m->within16[ACAL_GATED],
+             &m->clipped);
+  acal_point_set(&pt[ACAL_PT_G_ZERO], m->pwm, ACAL_GATED, 8, acc);
 
   //Full rate: a 1000-sample readout spans 5 us of the 40 us offset-PWM ripple period, so each conversion sees one
   //ripple phase; 64 conversions (about 70 ms) average it out (bench 0.2.43: 8 left 0.2-0.4 code). The full-rate
@@ -189,11 +197,10 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
   //Every full-rate conversion is checked and re-armed when garbled (fpga_done_conversion, enc_heal.h); one that stayed
   //garbled after the re-arms fails the range
   fpga_enc_garbled = 0;
-  cal_measure(r, m->pwm - d, 30, 64, acc);
-  cal_measure(r, m->pwm + d, 60, 64, acc2);
-  acal_zero_pair(acc, acc2, m->zero16[ACAL_FULL], m->drift16[ACAL_FULL], m->noise16[ACAL_FULL], m->within16[ACAL_FULL],
-                 &m->clipped);
-  acal_point_set_pair(&pt[ACAL_PT_F_ZERO], m->pwm, ACAL_FULL, 64, acc, acc2);
+  cal_measure(r, m->pwm, 30, 64, acc);
+  cal_result(acc, m->zero16[ACAL_FULL], m->drift16[ACAL_FULL], m->noise16[ACAL_FULL], m->within16[ACAL_FULL],
+             &m->clipped);
+  acal_point_set(&pt[ACAL_PT_F_ZERO], m->pwm, ACAL_FULL, 64, acc);
   cal_measure(r, m->pwm_hi, 60, 64, acc);
   cal_result(acc, m->mean16_hi[ACAL_FULL], 0, 0, 0, &m->clipped);
   acal_point_set(&pt[ACAL_PT_F_HI], m->pwm_hi, ACAL_FULL, 64, acc);
@@ -217,12 +224,71 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
   return rc;
 }
 
+//fw 0.2.79: one training capture (cap_stage.h): 0x63 = v, CS_TRAIN_WORDS words at 200 MSa/s with the trigger off (the
+//rate and set-up of the zero step), the four 0x36 counts. The UI's record geometry is put back afterwards
+static int cal_cap_measure(void *ctx, uint16_t v, uint16_t cnt[4])
+{
+  uint32 total = fpgasettings.totalsamples;
+
+  (void)ctx;
+  fpga_capture_write(v);
+  fpgasettings.totalsamples = 2 * CS_TRAIN_WORDS;
+  fpga_do_conversion();
+  while(fpga_done_conversion() == 0) PC_BUSY_POLL();
+  fpga_capture_counts(cnt);
+  fpgasettings.totalsamples = total;
+  return 0;
+}
+
+//fw 0.2.79: FPGA 0x153A capture stage training of channel ch's two cores, the first thing of its zero step: range 0, the
+//input parked at code 128 by the gated centre search (the code where most bits flip, so a stage inside the AD9288
+//data transition counts at once), a quiet input checked (a signal would count at every stage), then cs_train_run.
+//ACAL_OK, ACAL_E_RESPONSE / ACAL_E_NOISE (the input), ACAL_E_READOUT (a core without a clean stage: fail fast)
+static int cal_train(uint32 ch, cs_train *t, acal_fail *fail)
+{
+  acal_range_meas m;
+  acal_point      pt[ACAL_POINTS];
+  int32_t         centre;
+  uint32          k, i;
+  int             rc;
+
+  memset(t, 0, sizeof(*t));
+  calibrationsettings.samplevoltperdiv = 0;
+  fpga_set_channel_voltperdiv(&calibrationsettings);
+  timer0_delay(60);
+
+  rc = cal_centre(0, &m, pt, &centre, fail);
+
+  if(rc != ACAL_OK)
+    return rc;
+
+  for(i=ACAL_PT_G_LO;i<=ACAL_PT_G_HI;i++)
+    for(k=0;k<2;k++)
+      if(pt[i].within16[k] > ACAL_MAX_NOISE16)
+      {
+        fail->cls      = ACAL_GATED;
+        fail->core     = (uint8_t)k;
+        fail->value    = (int32_t)pt[i].within16[k];
+        fail->within16 = pt[i].within16[k];
+        return ACAL_E_NOISE;
+      }
+
+  calibrationsettings.dc_calibration_offset[0] = (uint16)m.pwm;
+  fpga_set_channel_offset(&calibrationsettings);
+  timer0_delay(60);
+  cal_set_rate(CAL_RATE_FULL);
+
+  rc = fpga_capture_train((uint8_t)(ch ? 0x0C : 0x03), cal_cap_measure, t);
+  return (rc == CS_OK) ? ACAL_OK : ACAL_E_READOUT;
+}
+
 //The last range cal_channel measured per channel, for CAL_PROBE in the wizard's context
 static acal_point cal_last_pt[2][ACAL_POINTS];
 static acal_fail  cal_last_fail[2];
-static int32_t    cal_last_centre[2], cal_last_pwm[2], cal_last_split[2];
+static int32_t    cal_last_centre[2], cal_last_pwm[2];
 static uint8      cal_last_r[2];
 static uint8      cal_last_garbled[2];
+static uint8      cal_cap_st[2], cal_cap_bad[2];   //fw 0.2.79: the channel's capture stage training (CW_C_*)
 
 //Zero step of one channel: every range (cal_range) and the store. *match16: the worst |drift A - drift B| of the zero
 //points over ranges and classes (summary); *fail and *fail_r: where a failed range failed (the result line and its note)
@@ -230,7 +296,7 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
 {
   acal_range_meas m;
   acal_point      pt[ACAL_POINTS];
-  int32_t         d, centre, split;
+  int32_t         d, centre;
   uint32_t        r, cl;
   int             rc;
 
@@ -238,6 +304,28 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
   memset(fail, 0, sizeof(*fail));
   fail->point = ACAL_PT_NONE;
   *fail_r = 0;
+  cal_cap_st[ch]  = CW_C_NONE;
+  cal_cap_bad[ch] = 0;
+
+  //fw 0.2.79: on FPGA 0x153A the capture stages of this channel's cores first (cal_train), the zeros after them
+  if(fpga_capture_has())
+  {
+    cs_train t;
+
+    if(wiz_progress(ch, 0))
+      return CW_RC_CANCELLED;
+
+    rc = cal_train(ch, &t, fail);
+
+    if(rc != ACAL_OK)
+    {
+      cal_cap_st[ch]  = (rc == ACAL_E_READOUT) ? CW_C_FAIL : CW_C_NONE;
+      cal_cap_bad[ch] = t.bad;
+      return rc;
+    }
+
+    cal_cap_st[ch] = CW_C_DONE;
+  }
 
   for(r=0;r<ACAL_RANGES;r++)
   {
@@ -249,13 +337,12 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
     fpga_set_channel_voltperdiv(&calibrationsettings);
     timer0_delay(60);
 
-    rc = cal_range(r, &m, pt, &centre, &split, fail);
+    rc = cal_range(r, &m, pt, &centre, fail);
 
     memcpy(cal_last_pt[ch], pt, sizeof(pt));
     cal_last_fail[ch]    = *fail;
     cal_last_centre[ch]  = centre;
     cal_last_pwm[ch]     = (centre < 0) ? -1 : m.pwm;
-    cal_last_split[ch]   = split;
     cal_last_r[ch]       = (uint8)r;
     cal_last_garbled[ch] = fpga_enc_garbled;
 
@@ -466,6 +553,7 @@ static char         wiz_res[2][96];     //the result lines
 static char         wiz_note[2][128];   //their notes (a zero step failure's numbers, fw 0.2.67)
 static int8         wiz_zrc_seen[2];    //zero step in progress: channels finished (1) and their result
 static int          wiz_zrc[2];
+static uint16       wiz_cap_start;      //fw 0.2.79: 0x63 when the wizard opened (Cancel puts it back)
 
 static const char *wiz_label(int ev)
 {
@@ -671,6 +759,9 @@ static void wiz_commit(void)
 
   adc_cal_loaded = 1;
 
+  //fw 0.2.79: the trained 0x153A capture stages are stored with the calibration (sector 708 bytes 488..503)
+  fpga_capture_commit();
+
   scope_save_input_calibration_data();
   scope_save_configuration_data();
 
@@ -719,6 +810,7 @@ static uint32 wiz_run_actions(void)
             cal_scratch_channel(ch);
             memset(&wiz_new[ch], 0, sizeof(acal_channel));
             rc[ch] = cal_channel(&wiz_new[ch], ch, &match[ch], &fail, &fail_r);
+            cw_cap_result(&wiz, ch, cal_cap_st[ch], fpga_capture_value(), cal_cap_bad[ch]);
             cw_zero_detail(&wiz, ch, fail_r, &fail);
           }
 
@@ -774,8 +866,12 @@ static uint32 wiz_run_actions(void)
         written = 1;
         break;
 
+      case CW_ACT_DISCARD:
+        //The copies are dropped, nothing was written; a capture stage training goes back to the value before
+        fpga_capture_write(wiz_cap_start);
+        break;
+
       default:
-        //CW_ACT_DISCARD: the copies are dropped, nothing was written
         break;
     }
   }
@@ -800,6 +896,7 @@ uint32 cal_wizard_run(void)
   cw_init(&wiz, fpgasettings.fw_FPGA == 2);
   wiz_abort = 0;
   wiz_usb   = wiz_usb_host();
+  wiz_cap_start = fpga_capture_value();
   tick      = timer0_get_ticks();
 
   ui_dlg_bg_begin();
@@ -877,9 +974,11 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
   acal_point      pt[ACAL_POINTS];
   acal_fail       fail;
   pc_hw_enc       e0, e1;
-  int32_t         centre, pwm, split;
+  int32_t         centre, pwm;
   uint8           flags = 0;
   int             rc;
+
+  uint16          cap0 = fpga_capture_value();
 
   if((ch > 1) || (range >= ACAL_RANGES) || (settle > 15) || (prestrobe > 1) || (mode > 1))
     return -1;
@@ -899,7 +998,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
     fpga_set_channel_voltperdiv(&calibrationsettings);
     timer0_delay(60);
 
-    rc  = cal_range(range, &m, pt, &centre, &split, &fail);
+    rc  = cal_range(range, &m, pt, &centre, &fail);
     pwm = (centre < 0) ? -1 : m.pwm;
 
     if(fpga_enc_garbled)
@@ -915,7 +1014,6 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
     cal_last_fail[0].point = cal_last_fail[1].point = ACAL_PT_NONE;
     cal_last_centre[0] = cal_last_centre[1] = -1;
     cal_last_pwm[0] = cal_last_pwm[1] = -1;
-    cal_last_split[0] = cal_last_split[1] = 0;
     cal_last_r[0] = cal_last_r[1] = 0;
     cal_last_garbled[0] = cal_last_garbled[1] = 0;
 
@@ -942,13 +1040,15 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
     fail   = cal_last_fail[ch];
     centre = cal_last_centre[ch];
     pwm    = cal_last_pwm[ch];
-    split  = cal_last_split[ch];
     range  = cal_last_r[ch];
 
     if(cal_last_garbled[ch])
       flags |= ACAL_PROBE_GARBLED;
 
     flags |= ACAL_PROBE_WIZARD;
+
+    //Nothing stored: a capture stage training of the zero step goes back to the value before (fw 0.2.79)
+    fpga_capture_write(cap0);
   }
 
   if(centre < 0)
@@ -963,5 +1063,5 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
   pc_hal_enc_state(&e1);
 
   return (int32_t)acal_probe_pack(dst, ch, range, rc, flags, centre, pwm, e1.bad - e0.bad, e1.recovered - e0.recovered,
-                                  &fail, pt, split);
+                                  &fail, pt);
 }
