@@ -148,6 +148,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   division), a hand-picked ACQ rate holds only until the next zoom step; the test asserts the pair after every sequence.
 - **AUTO SET in Frequency response fails about 60 % on 0x1539** (owner 22:20): expected from the capture fault (pre-scan clips at
   5 V/div); re-test on 0x153A before any engine change.
+- **Spectrum: remove the colour legends** (owner 10-19 22:28 **(owner)**; fw-spec dispatched): the Density legend (blue -> red ->
+  white is understood) and the Waterfall legend with its dB marks go (spectrum.c spec_draw_legend, ux-makeover.md "colour legend
+  inside the plot's top right"); nobody measures from those views. Boards and ux-makeover.md updated; the warning line keeps its
+  place.
 - **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
   SCREENSHOT bit 6, simulator has it, `Scope.read_screen` reads 40 rows per request) but the firmware handler is NULL
   (pc_cmds.c "BENCH: T9"). Implement it in all builds: rows of the live framebuffer as RGB565, the header per protocol.md, the

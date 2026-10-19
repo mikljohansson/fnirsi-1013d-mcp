@@ -82,7 +82,7 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   length, Window, Average, Reset, and first of all **Analyse: CH1 / CH2 / both**, today's strip channel selector that also
   sets the dBV or dBA unit and which channel Auto analyses, then Scale and Ref level, folded in from the former Axis
   button so both CTRL pages share one geometry **(owner)**); Grid; the CH1 and CH2 V/div steppers; 50 % TRIG. The spectrum strip goes away; Span and Start keep their gestures. The waterfall's and density's
-  colour legend is drawn at the top-right of the plot as a readout; the waterfall's time span and the phosphor's wfm/s
+  colour legend was drawn at the top-right of the plot as a readout (removed, owner 2026-10-19 22:28: the blue -> red -> white scale is understood and nobody measures from Waterfall or Density); the waterfall's time span and the phosphor's wfm/s
   are cards. **Spectrum slider (owner, 2026-10-19 19:40)**: the Scope's slider row stays under the plot in Spectrum
   too, with the same construction and the same drag as the Scope (fw 0.2.64: the window follows the finger). It shows
   the shown span as a window over 0..fs/2 at the current sample rate: the left edge at start / (fs/2), the width
