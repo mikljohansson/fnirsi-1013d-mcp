@@ -382,13 +382,27 @@ class SimConfig:
     v4: tuple[tuple[float, float, float, float], tuple[float, float, float, float]] | None = None
 
 
-def make_egon_image(size: int, kind: bytes = b"eGON.EXE", fill: int = 0, version: str | None = None) -> bytes:
+#: the simulated running build's commit time (yy mm dd hh mm ss, UTC) and hash (GET_INFO fw_build)
+SIM_BUILD_TIME = (26, 10, 19, 1, 2, 3)
+SIM_BUILD = 0x51A0001
+
+
+def make_egon_image(size: int, kind: bytes = b"eGON.EXE", fill: int = 0, version: str | None = None,
+                    ident: P.ImageIdentity | None = None) -> bytes:
     """A minimal eGON image: branch, magic, checksum and 512-aligned length (mksunxi.py rule), then a pattern.
-    ``version``: embed the firmware's ``#VER`` literal (what fnirsi1013d-flash --persist compares)."""
+    ``version``: embed the firmware's ``#VER`` literal (what fnirsi1013d-flash --persist compares). ``ident``: the
+    fw 0.2.52 identity record linked last (the image ends with it, then zero padding to 512)."""
+    raw = size
     size = (size + 511) // 512 * 512
     buf = bytearray(((fill + i * 7) & 0xFF for i in range(size)))
     buf[0:4] = b"\x06\x00\x00\xea"
     buf[4:12] = kind
+    if ident is not None:
+        end = (raw + 3) // 4 * 4
+        if end + 4 > size:
+            end = size - 4
+        buf[end - 36: end] = P.pack_ident_record(ident)
+        buf[end:] = bytes(size - end)
     if version is not None:
         lit = f"#OK,FNIRSI-1013D-AI,fw={version},proto=1.3,fpga=0x".encode() + b"\0"
         buf[64: 64 + len(lit)] = lit
@@ -563,6 +577,20 @@ class Device:
         #: SD card and the 64 KiB write staging buffer (fw 0.2.2)
         self.sd = SimCard()
         self.sd_stage = bytearray(P.SD_STAGE_BYTES)
+        #: protocol 1.16 (row 55): unit life (sector 709 words 224..255), the stored restart record (a
+        #: parse_life_record 'restart' dict or None), the calibration provenance (P.Provenance or None; prov_state 2
+        #: with ``cal_prov_bad``), the card image identity cache and the reports SAVE_REPORT wrote (name -> text)
+        self.power_on = 12
+        self.minutes_stored = 2200
+        self.life_flags = 0x0B  # record found, boot write ok, sector valid
+        self.last_end = 1
+        self.settings_changed = False
+        self.restart_record: dict | None = None
+        self.restart_record_this_power_on = False
+        self.cal_prov: P.Provenance | None = None
+        self.cal_prov_bad = False
+        self.ident_cache: P.SdIdent | None = None
+        self.reports: dict[str, str] = {}
 
     # --- capabilities -------------------------------------------------------------------------------
 
@@ -1253,7 +1281,7 @@ class Device:
             caps=self.caps, gen_clock_hz=P.GEN_CLOCK_HZ if sp.generator else 0,
             max_total_samples=sp.max_total_samples, min_total_samples=80 if sp.programmable else 3000,
             read_lag=self.cfg.fw_read_lag, interleave_order=0, fw_version=self.cfg.fw_version.encode(),
-            fw_build=0x51A0001, serial=self.cfg.serial.encode())
+            fw_build=SIM_BUILD, serial=self.cfg.serial.encode())
 
     def timebase(self) -> P.Timebase:
         s = self.settings
@@ -2073,6 +2101,15 @@ class Device:
             r.track_d_q8, r.track_e_q24, r.track_q_q24 = round(d * 256), round(e * 2 ** 24), round(q * 2 ** 24)
             r.track_age_ms, r.track_records, r.track_last_pairs, r.track_spread16 = 40, 512, 2100, 16 * 30
             r.cm_q8, r.cm_probes, r.cm_age_ms = round(cm * 256), 6, 12000
+        if self.proto_minor >= 16:
+            if self.cal_prov_bad:
+                r.prov_state, r.prov = 2, b"APRV" + bytes(52)
+            elif self.cal_prov is not None:
+                p = self.cal_prov
+                r.prov_state, r.prov = 1, P.pack_provenance(p)
+                now_min = self.minutes_stored + int(self.now() - self.t_boot) // 60
+                r.prov_power_ons_since = self.power_on - p.power_on if self.power_on >= p.power_on else P.CAL_AGE_NONE
+                r.prov_minutes_since = now_min - p.minutes if now_min >= p.minutes else P.CAL_AGE_NONE
         return r
 
     def _cmd_get_cal(self, req: P.Frame) -> P.Frame:
@@ -2115,7 +2152,82 @@ class Device:
         verify = bool(req.payload[0] & P.SD_FLAG_VERIFY)
         info = P.SdInfo(sd.card_sectors, sd.part_start, sd.write_end, P.SD_STAGE_BYTES,
                         [sd.header(s, verify) for s in (16, 80, 750)])
+        if self.proto_minor >= 16:
+            if req.payload[0] & P.SD_FLAG_IDENT:
+                if self.ident_cache is None:
+                    self.ident_cache = self._identify_card_image()
+                    info.ident = self.ident_cache
+                else:
+                    info.ident = P.SdIdent(**{**self.ident_cache.__dict__, "ident_ms": 0})
+            else:
+                info.ident = self.ident_cache or P.SdIdent()
         return self._ok(req, info.pack())
+
+    def _identify_card_image(self) -> P.SdIdent:
+        """Row 55: the identity record in the last 1024 bytes (state 1), else the #VER string (state 3; the sim's
+        images have no 0.2.47-0.2.51 build tail), else unknown (4); 5 without an eGON.EXE at 750."""
+        head = self.sd.read(750, 1)
+        magic, length, _ = P.egon_info(head)
+        if magic != 2 or not 0 < length <= 2048 * 512:
+            return P.SdIdent(state=5, ident_ms=3)
+        img = self.sd.read(750, (length + 511) // 512)[:length]
+        tail = img[-1024:]
+        rec = None
+        for off in range(0, len(tail) - 35, 4):
+            if struct.unpack_from("<II", tail, off) == P.IDENT_MAGIC:
+                rec = P.parse_ident_record(tail[off: off + 36])
+        own = (self.cfg.fw_version, SIM_BUILD, SIM_BUILD_TIME)
+        if rec is not None:
+            running = (rec.version, rec.build, rec.time) == own
+            return P.SdIdent(1, P.SD_IDENT_RUNNING if running else 0, rec.proto[0], rec.proto[1],
+                             rec.version.encode(), rec.build, rec.time, length, 40)
+        i = img.find(b"#OK,FNIRSI-1013D-AI,fw=")
+        if i >= 0:
+            text = img[i: i + 80].split(b"\0", 1)[0].decode("ascii", "replace")
+            fields = dict(x.split("=", 1) for x in text.split(",")[2:] if "=" in x)
+            maj, _, mnr = fields.get("proto", "0.0").partition(".")
+            return P.SdIdent(3, 0, int(maj or 0), int(mnr or 0), fields.get("fw", "").encode(), 0, (0,) * 6, length,
+                             350)
+        return P.SdIdent(4, 0, image_length=length, ident_ms=350)
+
+    def _cmd_get_health(self, req: P.Frame) -> P.Frame:
+        flags = req.payload[0] if req.payload else 0
+        if flags & ~(P.HEALTH_CLEAR_RESTART | P.HEALTH_RESTART_TEST) or \
+                (flags & P.HEALTH_RESTART_TEST and not self.caps & P.Caps.DEBUG_RAW):
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "flags")
+        up = int((self.now() - self.t_boot) * 1000)
+        r = P.HealthResp(usb_state=3, usb_flags=0x1B, usb_power=0x50, usb_faddr=5, since_config_ms=up,
+                         cp15=0x0005107D, power_on=self.power_on, minutes=self.minutes_stored + up // 60000,
+                         uptime_ms=up & 0xFFFFFFFF, life_flags=self.life_flags, last_end=self.last_end,
+                         settings_flags=1 if self.settings_changed else 0, settings_eval_ms=400)
+        rec = self.restart_record
+        if rec is not None:
+            r.rec_flags = 1 | (2 if self.restart_record_this_power_on else 0)
+            r.rec_type, r.rec_restarts, r.rec_power_on, r.rec_minutes = (rec["type"], rec["restarts"],
+                                                                         rec["power_on"], rec["minutes"])
+            for k in ("exc_lr", "spsr", "exc_sp", "reset_lr", "reset_sp", "reset_cpsr", "fsr", "far"):
+                setattr(r, "rec_" + k, rec[k])
+        out = self._ok(req, r.pack())
+        if flags & P.HEALTH_CLEAR_RESTART:
+            self.restart_record = None
+        if flags & P.HEALTH_RESTART_TEST:
+            self.self_restart()
+        return out
+
+    def _cmd_save_report(self, req: P.Frame) -> P.Frame:
+        if not self.sd.present:
+            raise _DevErr(P.Status.E_IO, 0, "no card")
+        for nn in range(100):
+            name = f"reports/report-{self.power_on:05d}-{nn:02d}.txt"
+            if name not in self.reports:
+                break
+        else:
+            raise _DevErr(P.Status.E_IO, 8, "FR_EXIST: 100 reports with this power_on")
+        text = (f"FNIRSI 1013D report\nrunning fw {self.cfg.fw_version} build {SIM_BUILD:08x}\n"
+                f"power-on {self.power_on}\nserial {self.cfg.serial}\n")
+        self.reports[name] = text
+        nb = name.encode()
+        return self._ok(req, P.SaveReportResp(len(text), len(nb), nb).pack())
 
     def _cmd_sd_read_sectors(self, req: P.Frame) -> P.Frame:
         r = P.SdReadReq.unpack(req.payload)
@@ -2161,6 +2273,8 @@ class Device:
         data = bytes(self.sd_stage[: r.count * 512])
         if P.crc32_iso_hdlc(data) != r.crc32:
             raise _DevErr(P.Status.E_BAD_ARG, 8, "stage crc")
+        if last >= 750:
+            self.ident_cache = None  # 1.16: the cached card image identity is stale
         if sd.io_error_next:
             err, sd.io_error_next = sd.io_error_next, 0
             raise _DevErr(P.Status.E_IO, (-err) & 0xFFFF, "driver error")

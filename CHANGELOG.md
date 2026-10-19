@@ -62,6 +62,26 @@ README section 5 "Screens: CTRL page, fold-outs, chips, warnings, spectrum cards
 - Settings sector: word 210 bit 3 holds the Phosphor switch, word 211 (0xC700) Grid and the spectrum's Display
   variant.
 
+#### 0.2.55 - 2026-10-19 (protocol 1.16, unchanged; provisional number, the coordinator renumbers at merge)
+
+Step 3 of the UX makeover (`docs/plans/ux-makeover.md` section 5; README section 5 "Settings").
+
+- Changed: the Settings fold-out holds Screen brightness, Grid brightness, File message timeout (was "Notification
+  confirmation"; the chip shows "tap" or "0.7 s"), Time and date (with a clock module), Baseline calibration (interim
+  until Diagnostics has Calibrate) and Other settings, with contiguous 59 px hit areas (a4664ae, 66a3a70).
+- Added: Other settings opens a full Settings screen: Display, Controls (file message timeout, cursors, auto setup),
+  Files (screenshot stamp, reference traces at power-on), Clock (clock module, a time and date page), Start-up ("At
+  power-on": Open firmware, Boot menu then open firmware, Boot menu then stock firmware) and Restore default settings
+  behind a confirmation that says the calibration and the start-up choice are kept. DC shift trim sits there in an
+  interim Calibration group until Diagnostics takes it (66a3a70).
+- Removed: 1.00o5's Other settings menu with USB-Serial mode (the build forces CDC) and Dev mode (flag kept, back on
+  the Diagnostics developer page later); FEL is no longer a start-up choice in the UI. The dev-mode exception to the
+  boot-menu rule is gone (66a3a70).
+- Changed: restoring default settings (and a settings sector that fails to load) no longer writes the boot-mode byte,
+  and keeps USB in CDC mode (66a3a70).
+- Changed: "Confirm to delete?" became the confirmation dialog: "Delete from the SD card?", Cancel left and Delete
+  right in red, 160 x 44 px buttons 16 px apart (was NO / YES, 74 x 50 px, 11 px apart) (24743a7).
+
 #### 0.2.54 - 2026-10-19 (protocol 1.16, unchanged; provisional number)
 
 Touch fix batch 1 (`docs/plans/touch-review.md` section c1; defects 1, 3, 4, 5, 8, 9, 10 and part of 19).
@@ -737,6 +757,11 @@ was found (commit not identified).
   tracked full-rate A - B (d, e) and common mode (cm) out of READ_RAW and 16-bit samples as the scope does in its own
   readouts, re-reading GET_CAL at most a second old; `scope_calibration_info` shows the tracker and the class probe in
   words (tracking / frozen / idle, age, d, e, q, cm). The simulator models the drift (`SimConfig.v4`).
+- Added: protocol 1.16 diagnostics readers (fw 0.2.52, b830434; protocol row 55, 8614032). `scope_health` (GET_HEALTH: USB state,
+  CP15, unit life, settings state, the stored restart record, in words), `scope_sd_info` reports the card image's
+  identity and whether it is the running build, `scope_calibration_info` the calibration provenance, and
+  `scope_save_report` has the scope write its report file to the card. Codecs for the stored layouts are checked
+  against the `diag_layouts` vectors; the simulator answers all four.
 
 ### Tooling, FPGA and documentation
 

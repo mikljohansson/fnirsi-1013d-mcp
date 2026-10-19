@@ -429,8 +429,8 @@ GET_INFO). Waveform and reference files still store 1.00o5's VERSION_STRING (fil
 At boot a saved setting that selects a hidden option is corrected: RTC off without a module, EXT trigger -> CH1,
 memory depth clamped to the largest offered step. The DS3231 is detected by addressing it (0xD0) on the touch
 panel's I2C bus and sampling the ACK bit [U, bench check: with and without a module]. No option needs a manual switch
-yet (everything above is detected); new hardware mods that cannot be detected get a switch in "Other settings"
-(the menu is full: a second column or page is needed) with the value in a spare settings word (108..119 or 204..255,
+yet (everything above is detected); new hardware mods that cannot be detected get a row on the Settings screen
+(fw 0.2.55, "Settings" above; its two columns are full: a new group needs a second page) with the value in a spare settings word (108..119 or 204..255,
 `scope_save_config_data`; 207 holds the Filter setting since 0.2.30, 208-210 the spectrum and phosphor views, 224..255 the unit life record since 0.2.52, so 211..223 are free), default off. Not changed: trigger positions 25 % / 75 % on the stock bitstream (software
 only there), the generator top-bar button text on stock.
 
@@ -583,7 +583,7 @@ Scope leaves the spectrum view (and brings the phosphor variant back if it was o
 roll mode Spectrum analyser switches Roll off first (time base 20, the acquisition menu's Roll box does the same) and
 the spectrum's warning line says "Roll off for the spectrum" for 5 s; going back to Scope does not switch Roll on again.
 Settings opens the System settings fold-out, which lost its X-Y row (Notification confirmation and RTC settings moved
-up one row; 354 px, 295 px without a DS3231).
+up one row; 354 px, 295 px without a DS3231). Since 0.2.55 the fold-out and the Settings screen below.
 
 USB drive: a header "USB drive", the 1.00o5 picture of the scope and the PC, three lines ("The SD card is now a USB
 drive on the PC.", "PC control (MCP) is disconnected until you leave this screen.", "Eject the drive on the PC before
@@ -675,6 +675,72 @@ fields are in the Display and Analyse fold-outs, the readouts are cards). The sp
 per shown channel [Peak] 1.000kHz and [Level] +2.7dBV in the channel colour, then [RBW] 146.5Hz and, in the waterfall,
 [Time] 12.30s (the time its rows span) with a light grey chip; at most six. The decimation filter tag is no longer shown
 (the acquisition menu has it). The waterfall's and density's colour legend stays above the plot's top right.
+
+### Settings: fold-out, Settings screen, confirmations (fw 0.2.55)
+
+Step 3 of the UX makeover (`docs/plans/ux-makeover.md` section 5, dialogs 6b). Tables, values, hit areas, the start-up
+choice and the dialog layout are pure C in `ui_settings.c` (host-tested in `host_tests/test_ui.c`: every pixel of every
+hit area against the drawn rectangle, every value text against its row in the device's fonts); the screen and the
+dialog are drawn and run in `ui_settings_ui.c`; the fold-out is drawn in `menu.c` and hit-tested in `statemachine.c`
+from the same table.
+
+Settings fold-out (Menu > Settings), 59 px rows from y 46, contiguous hit areas: Screen brightness and Grid
+brightness (sliders beside the fold-out, as before), File message timeout (1.00o5's "Notification confirmation",
+`confirmationmode`: a tap toggles; the chip reads "tap" when file messages such as "Failed to create file" wait for a
+tap, "0.7 s" when they close by themselves), Time and date (only with a DS3231; opens 1.00o5's editor beside the
+fold-out with hours .. year and RTC On/Off), Baseline calibration (the calibration wizard; interim, it moves to
+Diagnostics > Calibrate in step 4) and Other settings (opens the Settings screen). 354 px high, 295 px without a
+DS3231.
+
+Settings screen (fold-out > Other settings): a modal full-screen page like the menus (the PC protocol answers E_BUSY
+while it is open), black ground, outlined 48 px rows in two columns, the value of each row on its right in the state
+colour (green in use, grey off or not available, amber needs attention). Back (top right) returns to the scope as it
+was. Every row is an existing setting, saved at power-off as before unless noted:
+
+| group | row | values | setting |
+|---|---|---|---|
+| Display | Screen brightness | 0..100 %, - / + by 5 | `screenbrightness` (also leaves max-light mode, as the slider does) |
+| Display | Grid brightness | 0..100 %, - / + by 5 | `gridbrightness` |
+| Controls | File message timeout | wait for a tap / 0.7 s | `confirmationmode` |
+| Controls | Cursors | move together / move freely | `lockcursors` |
+| Controls | Auto setup | improved / stock | `new_autosetup` |
+| Calibration (moves to Diagnostics) | DC shift trim | on the CTRL page / not shown | `dc_shift_cal` (not saved, as before); interim until step 4 |
+| Files | Stamp screenshots with | time / file name / nothing | `tag_in_BMP`; time with the clock on, else the file name |
+| Files | Reference traces at power-on | loaded / not loaded | `ref_on_startup` |
+| Clock | Clock | shown / not used / no clock module | `onoffRTC` (top-bar clock, file stamps, FAT times) |
+| Clock | Time and date | 2026-10-19 11:30 / needs the clock / no clock module | opens a page with Hour, Minute, Day, Month, Year and - / + (96 x 44 px); each tap is written to the DS3231 at once |
+| Start-up | At power-on | Open firmware / Boot menu, then open firmware / Boot menu, then stock firmware | boot-mode byte 0 / 4 / 5 (section 3); written to sector 710 on Back, only when changed |
+
+The start-up row never writes FEL (2) or the updater (3); a byte that holds one of them (or 1, stock without the menu,
+which only the loader tool writes) is shown in amber ("FEL, no boot menu", "Boot menu, then FEL", "Updater", "Stock
+firmware, no boot menu") and the next tap sets Open firmware. The stock image is offered only with the boot menu.
+
+Restore default settings (bottom left): asks first ("Restore default settings?" with the consequence: channels,
+trigger, time base, display and these settings go back to their defaults, the calibration and the start-up choice are
+kept). Restore runs `scope_reset_config_data` (sector 709's settings to defaults, the calibration reloaded from sector
+708), sets the hardware up from them as at power-on and rebuilds the scope screen. Since 0.2.55
+`scope_reset_config_data` no longer writes the boot-mode byte (1.00o5 set it to 4 on every reset, also when the
+settings sector failed to load), and in the CDC build the reset keeps USB in CDC mode.
+
+Confirmation dialog (`ui_confirm`): a 520 px box in the middle of the screen, a 24 px title, up to three 16 px lines,
+two 160 x 44 px buttons 16 px apart, the dismissing one left and the action right, red only for a destructive action.
+Only the two buttons react. Used by Restore default settings and by every delete in the file browsers and the
+waveform viewer ("Delete from the SD card?", "This cannot be undone.", Cancel / Delete; was "Confirm to delete?" with
+74 x 50 px NO / YES 11 px apart).
+
+Where the controls of 1.00o5's Other settings menu went (the menu is gone):
+
+| control | now |
+|---|---|
+| Boot menu (on / off) and Default start (PECO / FNIRSI / FEL) | Settings > Start-up > At power-on (three values; FEL is no longer offered: ENTER_FEL from the PC, the boot menu's FEL button, and the step-4 Developer page's "Enter FEL now") |
+| New autosetup | Settings > Controls > Auto setup |
+| Lock move cursors | Settings > Controls > Cursors |
+| DC shift calibration | Settings > Calibration > DC shift trim (interim; Diagnostics in step 4) |
+| USB-Serial mode | removed: the build forces CDC at boot (`PC_FORCE_CDC`), the flag did nothing visible |
+| Dev mode | removed from the UI; the flag stays in the settings sector and keeps its effects (trigger address overlay, touch coordinates) until the step-4 Developer page offers "Debug overlay". Its exception to the boot-menu rule is gone: At power-on writes exactly the chosen value |
+| Add a tag to BMP | Settings > Files > Stamp screenshots with |
+| Load Ref on start | Settings > Files > Reference traces at power-on |
+| RTC On/Off (RTC editor) | still in the editor; also Settings > Clock > Clock |
 
 ### Touch on the scope plot (fw 0.2.54)
 

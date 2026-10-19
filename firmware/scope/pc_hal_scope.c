@@ -34,6 +34,7 @@
 #include "spec_fmt.h"
 #include "acal_live.h"
 #include "ui_menu.h"
+#include "ui_settings.h"
 #include "ui_fmt.h"
 #include "ui_ctrl.h"
 
@@ -943,6 +944,12 @@ void pc_glue_settings_defaults(void)
 {
   pc_dec_setting = PC_DECIM_DEFAULT;
 
+#if PC_FORCE_CDC
+  //The defaults say mass storage (USB_CH340 0); this build's USB stays CDC, also after Restore default settings (the
+  //USB drive screen's exit re-initialises USB from this flag)
+  USB_CH340 = 1;
+#endif
+
   //fw 0.2.53: the Display variants back to Normal and Spectrum (X-Y and Grid are 1.00o5's own defaults)
   phosphor_set_switch(0);
   spectrum_set_view(0);
@@ -1712,10 +1719,11 @@ static void pc_ui_setting_restore(uint16 w)
   spectrum_set_view((w >> 1) & 3);
 }
 
-//System settings menu height (variables.h SYSTEM_MENU_HEIGHT): Time & Date is the last row, 59 px
+//System settings menu height (variables.h SYSTEM_MENU_HEIGHT): the fold-out rows of ui_settings.h, Time and date only
+//with the clock module
 int pc_glue_sys_menu_height(void)
 {
-  return (pc_ready && !pc_rtc_present) ? (SYSTEM_MENU_HEIGHT_FULL - 59) : SYSTEM_MENU_HEIGHT_FULL;
+  return (int)ui_fo_height(pc_glue_ui_has(PC_FEAT_RTC));
 }
 
 //Battery level for the indicator: a running average (x16, 1/8 per pass), then the 1.00o5 rule on it (level only drops

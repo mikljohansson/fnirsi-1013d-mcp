@@ -23,12 +23,12 @@ def test_get_cal_288_layout_and_older_lengths():
     r = P.CalResp(cal_version=3, track_flags=0x5B, track_d_q8=-230, track_e_q24=335544, track_q_q24=-1678,
                   track_age_ms=1234, track_records=77, track_last_pairs=1900, track_spread16=480, cm_q8=192,
                   cm_probes=9, cm_age_ms=0xFFFFFFFF)
-    raw = r.pack()
-    assert len(raw) == 288
+    raw = r.pack()[:288]  # a 1.15 answer (1.16 appends the provenance)
     assert struct.unpack_from("<BxhiiIIHHhHI", raw, 256) == (0x5B, -230, 335544, -1678, 1234, 77, 1900, 480, 192, 9,
                                                               0xFFFFFFFF)
     back = P.CalResp.unpack(raw)
-    assert back.has_tracker and back.nbytes == 288 and back == r
+    assert back.has_tracker and not back.has_provenance and back.nbytes == 288
+    assert back == P.CalResp.unpack(r.pack()[:288]) and back.track_records == 77 and back.cm_age_ms == 0xFFFFFFFF
     assert back.track_d == -230 / 256 and back.track_e == pytest.approx(0.02, abs=1e-7) and back.track_cm == 0.75
     for n in (256, 248, 72):  # 1.12 / 1.10 / 1.9 answers: no tracker, the tail reads zero
         old = P.CalResp.unpack(raw[:n])

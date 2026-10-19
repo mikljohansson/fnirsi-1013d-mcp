@@ -67,8 +67,11 @@ SRCS += pc_protocol.c pc_cmds.c pc_transport.c pc_hal_scope.c fx_fft.c fx_fft_ta
 SRCS += cal_wiz.c cal_wiz_ui.c
 # Calibration v4: interleave tracking and the class probe (pure maths in acal_track.c, host_tests/test_acal_track.c)
 SRCS += acal_track.c acal_live.c
-# Screens (fw 0.2.51, 0.2.53): cards, main menu, CTRL page and fold-outs (pure C, host_tests/test_ui.c)
-SRCS += ui_fmt.c ui_menu.c ui_ctrl.c ctrl_page.c
+# Screens (fw 0.2.51): card formatting, main menu rows and mode rule (pure C, host_tests/test_ui.c)
+# fw 0.2.55: the Settings fold-out and screen tables (ui_settings.c, pure C, host_tests/test_ui.c), the screen and the
+# confirmation dialog on the device (ui_settings_ui.c)
+# fw 0.2.53: the CTRL page and its fold-outs (ui_ctrl.c pure, host_tests/test_ui.c; ctrl_page.c on the device)
+SRCS += ui_fmt.c ui_menu.c ui_settings.c ui_settings_ui.c ui_ctrl.c ctrl_page.c
 # Plot touch geometry (fw 0.2.54): pointer position, handle and channel pick (pure C, host_tests/test_touch_pick.c)
 SRCS += touch_pick.c
 # fw 0.2.52 diagnostics readers (protocol row 55)

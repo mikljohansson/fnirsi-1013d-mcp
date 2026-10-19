@@ -224,6 +224,8 @@ Give value, unit and how it was measured (n averaged, sample rate, range, alignm
 | Symptom | Meaning / fix |
 |---|---|
 | "modal screen", E_BUSY | a menu is open on the scope: ask the person to close it, retry |
+| the scope restarted, the link dropped, settings look lost, or "is the right firmware on it?" | fw 0.2.52+: `scope_health` (USB state, power-on number, how the previous power-on ended, unsaved settings, a stored restart record with the exception type) and `scope_sd_info` (`card_image`: what the card boots and whether that is the running build, e.g. after a FEL load). For a fault report ask for `scope_save_report` and tell the person the file name on the card; quote `in_words` rather than raw registers |
+| volts drift at 200 MSa/s or filtered captures read a little off hours after calibrating | fw 0.2.50+ tracks it: `scope_calibration_info` `tracking` says whether the tracker and the class probe have run (the probe needs a quiet input with the scope running and no menu); `calibration_provenance` says when and by which build the scope was calibrated |
 | "still starting" | the scope just booted (about 5 s after a FEL load); the server waits up to 10 s |
 | cannot connect, port busy / PermissionError | another session holds the serial port (only one may): ask who, never kill it |
 | no device found | wrong COM port (`--port`), scope off or in USB-storage mode, cable; `fnirsi1013d-bench --census 0` checks the link |
