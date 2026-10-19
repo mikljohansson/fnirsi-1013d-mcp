@@ -1,6 +1,7 @@
 // Copy of Atlan4's "FPGA commands.txt" (D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\), updated
 // for fpga/al3/src/zaklad.v of fnirsi-1013d-mcp. Changes against Atlan4's file:
-//  - 0x06 returns 0x15 0x37 (0x1537 = 0x1536 with the record-start and A/B-order fixes, no new command; 0x1536 = with
+//  - 0x06 returns 0x15 0x38 (0x1538 = 0x1537 with the encode timing fix and read 0x33; 0x1537 = 0x1536 with the
+//    record-start and A/B-order fixes, no new command; 0x1536 = with
 //    segments/averaging; 0x1535 = without segments/averaging, 0x1534 = decimation filter without the FIR,
 //    0x1533 = EXT trigger only; Atlan4's 0x1532 AL3 design returns 0x15 0x32, his file still shows 0x14).
 //  - 0x15 takes data[1:0]: 0 = CH1, 1 = CH2, 2 = EXT (calibration pin P133), 3 = reserved (acts as EXT).
@@ -11,6 +12,10 @@
 //    design behaves exactly as 0x1534.
 //  - 0x57..0x5D (new writes), 0x2A..0x32 (new reads): segmented capture and hardware averaging (0x1536). With
 //    0x57 = 0 (power-on) the design behaves exactly as 0x1535; 0x0A then reads as before.
+//  - 0x33 (new read, 0x1538): encode self-check, 1 byte. Bit 0 sticky: a check failed since the last 0x01 = 1;
+//    bit 1: the last write clock prediction was right; bits 3:2 = 01, encode convention 1 (B = write clock, A = its
+//    complement, 1.25 ns later); bits 7:4 the last pin check {CH2 A, CH2 B, CH1 A, CH1 B}, 1 = right. A good arm
+//    reads 0xF6. Write 0x33 (CH1 relays) is unchanged.
 //  - 0x0B, 0x0C, 0x1F high bytes: zaklad.v takes io_mcu_data[5:0] into [12:8] (bit 5 is dropped by the
 //    13-bit register); this file showed [4:0].
 // Multi-byte values are high byte first. Details: fpga/al3/README.md, section "Changes".
@@ -28,7 +33,7 @@
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h37;       //0x1537 = AL3 with external trigger, decimation filter, FIR, segments, averaging
+                    o_mcu_data <= 8'h38;       //0x1538 = AL3 with external trigger, decimation filter, FIR, segments, averaging
             
             //When sampling finishes the writing is disabled. Enabled again with a reset.
             8'h0A: //Reading of the sampling done state
@@ -128,6 +133,9 @@
                     //  averaging, legacy: lanes [15:0] CH1A, [31:16] CH1B, [47:32] CH2A, [63:48] CH2B = sum >> S
                     //  averaging, 16-bit: [15:0] min(65535, CH1 sum >> S), [47:32] min(65535, CH2 sum >> S), rest 0
 
+            8'h33: //Encode self-check (0x1538): { last pin check CH2A, CH2B, CH1A, CH1B, 2'b01, prediction ok, sticky error }
+                    o_mcu_data <= { enc_ok, 2'b01, enc_pred_ok, enc_err };   //0xF6 when all is right
+//---------------------------------------------------------------------------------------
             8'h41: //Reading of the touch panel address needs loading of high byte first
                   4'h0:
                     o_mcu_data <= touch_panel_address[15:8];
