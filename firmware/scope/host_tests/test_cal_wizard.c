@@ -267,6 +267,15 @@ static void test_zero_fail_detail(void)
   cw_zero_detail(&w, 0, 3, &f0);
   T_EQ(w.zero_det[0], 0);
 
+  //fw 0.2.61: a full-rate capture the encode-phase heal could not repair
+  ev(&w, CW_EV_CALIBRATE);
+  take(&w);
+  rc[0] = ACAL_E_TIMING;
+  cw_zero_result(&w, rc, match_ok);
+  cw_zero_line(&w, 0, t);
+  T_STR(t, "CH1: ADC capture timing: the 200 MSa/s data stays garbled");
+  T_TRUE(ui_text_width(&font_3, t) <= RESULT_W);
+
   //Other reasons keep their words
   ev(&w, CW_EV_CALIBRATE);
   take(&w);

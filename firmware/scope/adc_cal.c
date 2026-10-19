@@ -688,6 +688,7 @@ const char *acal_reason_text(int reason)
     case ACAL_E_GAIN_SPLIT: return "gain: cores differ";
     case ACAL_E_GAIN_CLASS: return "gain: clock classes";
     case ACAL_E_GAIN_NONE:  return "gain: no generator";
+    case ACAL_E_TIMING:     return "ADC timing: FPGA race";
     default:                return "no calibration data";
   }
 }

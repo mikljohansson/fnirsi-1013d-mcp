@@ -102,9 +102,15 @@ void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
 #define PC_EVT_USB_POST_INIT  19    //fw 0.2.25, end of usb_device_init, a = field, b = value (protocol section 14 row 43)
 #define PC_EVT_SOFT_DISCONNECT 20   //fw 0.2.49, suspend watch reconnect (row 53): a = reason | level << 2 | strikes << 4,
                                     //b = s suspended
+#define PC_EVT_FPGA_HEAL      21    //fw 0.2.61, full-rate capture garbled after a rate change (enc_heal.h, row 57): a =
+                                    //retries, bit 7 not recovered; b = the larger residual of the first check, 1/16 code
+#define PC_EVT_FPGA_WRITE     22    //fw 0.2.61, an FPGA write of 0x0D, 0x53, 0x56 or 0x01 = 1: a = command, b = caller
+                                    //(FPGA_WHO_*) << 12 | value (saturated at 0xFFF)
 #define PC_EVT_RESTART        15    //fw 0.2.19, at boot after a restart from RAM: a = exception type, b = low PC bits
 
 void pc_usb_log_restart(uint8 type, uint16 pc);
+void pc_usb_log_fpga_heal(uint8 a, uint16 b);              //type 21 (enc_heal_hw.c)
+void pc_usb_log_fpga_write(uint8 a, uint16 b);             //type 22 (fpga_control.c)
 void pc_usb_log_init_state(void);                          //usb_device_init: controller state found (type 16)
 void pc_usb_phy_pre(void);                                 //usb_device_init: PHY tuning bits before the writes
 void pc_usb_log_post_init(void);                           //usb_device_init: state at the end (type 19)

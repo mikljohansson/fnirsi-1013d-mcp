@@ -7,6 +7,7 @@
 #include "ui_fmt.h"
 #include "pc_protocol.h"
 #include "adc_cal.h"
+#include "enc_heal.h"
 
 extern FONTDATA font_2;
 extern FONTDATA font_3;
@@ -408,6 +409,14 @@ static int ud_fpga_line(const ud_input *in, char *p)
   p = s_str(p, chip[in->variant]);
   p = s_str(p, " bitstream ");
   p = s_hex(p, in->fpga, 4);
+
+  //fw 0.2.61: AL3 0x1532..0x1536 can garble one ADC core at 200 MSa/s after a rate change (enc_heal.h,
+  //fpga/al3/README.md "Findings" item 3)
+  if((in->variant == 2) && eh_affected(in->fpga))
+  {
+    s_str(p, ": ADC capture timing race, fixed in 0x1537");
+    return UD_C_WARN;
+  }
 
   if(in->caps & PC_CAP_GENERATOR_DDS)
   {

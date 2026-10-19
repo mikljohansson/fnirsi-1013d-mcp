@@ -6,6 +6,7 @@
 #include "variables.h"
 #include "pc_hooks.h"
 #include "acal_live.h"
+#include "pc_transport.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -20,8 +21,30 @@ void fpga_init(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//fw 0.2.61: trace of the writes that set the ADC capture state (0x0D rate, 0x53 decimation mode, 0x56 FIR, 0x01 = 1
+//sampling reset) into the event log, type 22, with the caller (fpga_trace_who): the bench correlates a garbled full-rate
+//capture with the writes before it (firmware/AGENTS.md section 37)
+uint8        fpga_trace_who = FPGA_WHO_UI;
+uint8        fpga_rate_dirty;                 //a 0x0D write since the last full-rate check (enc_heal_hw.c)
+static uint8 fpga_trace_cmd;
+
+static void fpga_trace(uint32 value)
+{
+  uint8 c = fpga_trace_cmd;
+
+  fpga_trace_cmd = 0;
+
+  if((c == 0x0D) && (fpga_trace_who != FPGA_WHO_CHECK))
+    fpga_rate_dirty = 1;
+
+  if((c == 0x0D) || (c == 0x53) || (c == 0x56) || ((c == 0x01) && (value == 1)))
+    pc_usb_log_fpga_write(c, (uint16)(((uint32)fpga_trace_who << 12) | ((value > 0xFFF) ? 0xFFF : value)));
+}
+
 void fpga_write_cmd(uint8 command)
 {
+  fpga_trace_cmd = command;
+
   //Set the control lines for writing a command
   FPGA_CMD_WRITE();
 
@@ -56,6 +79,9 @@ uint8 fpga_read_cmd(void)
 
 void fpga_write_byte(uint8 data)
 {
+  if(fpga_trace_cmd)
+    fpga_trace(data);
+
   //Set the control lines for writing a command
   FPGA_DATA_WRITE();
 
@@ -90,6 +116,9 @@ uint8 fpga_read_byte(void)
 
 void fpga_write_short(uint16 data)
 {
+  if(fpga_trace_cmd)
+    fpga_trace(data);
+
   //Set the control lines for writing a command
   FPGA_DATA_WRITE();
 
@@ -141,6 +170,9 @@ uint16 fpga_read_short(void)
 
 void fpga_write_int(uint32 data)
 {
+  if(fpga_trace_cmd)
+    fpga_trace(data);
+
   //Set the control lines for writing a command
   FPGA_DATA_WRITE();
 

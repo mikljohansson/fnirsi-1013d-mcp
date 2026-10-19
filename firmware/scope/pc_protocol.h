@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            17    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            18    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -35,6 +35,8 @@
                                         //1.17 (provisional numbering): FPGA 0x1536 sequencer:
                                         //      SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW addr_mode 3, GET_STATUS 48
                                         //      bytes (features, UI average), GET_DECIM 36, GET_CAPTURE_INFO 96 (fw 0.2.58)
+                                        //1.18: GET_LINK_STATS 62-63 and event type 21: full-rate capture
+                                        //      garbled after a rate change, recovered (fw 0.2.61)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4

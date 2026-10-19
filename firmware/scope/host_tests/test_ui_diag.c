@@ -17,7 +17,7 @@ extern FONTDATA font_2, font_3, font_5;
 
 static uint8_t     health[96];
 static uint8_t     cal[2][356];
-static uint32_t    link[62];
+static uint32_t    link[64];
 static pc_image_id run;
 static pc_card_id  card;
 static const int32_t volts_def[7] = { 3600000, 3600000, 3700000, 3700000, 3800000, 3800000, 7600000 };
@@ -262,7 +262,15 @@ static void test_pages(void)
   //Status as the mockup reads
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
   T_TRUE(has_text("fw 0.2.59, git 1234abcd, 2026-10-19 08:44 UTC, protocol 1.16, serial 1013D-0001, MMU and caches on"));
-  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1535: generator, EXT trigger, decimation filter, CIC+FIR"));
+  //fw 0.2.61: 0x1532..0x1536 have the ADC capture timing race (amber); 0x1537 lists its features
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x1537"));
+  T_EQ(text_colour("FPGA AL3A10 bitstream 0x1535"), UD_C_WARN);
+  in.fpga = 0x1537;
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1537: generator, EXT trigger, decimation filter, CIC+FIR"));
+  T_EQ(text_colour("FPGA AL3A10 bitstream 0x1537"), UD_C_SOFT);
+  in.fpga = 0x1535;
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
   T_TRUE(has_text("Running 0.2.59"));
   T_TRUE(has_text("the image the card"));
   T_TRUE(has_text("None since power-on."));
@@ -611,7 +619,7 @@ static void test_first_run(void)
   ud_build_first_run(&pg, &in, 1, 0);
   check_layout("first run", 0);
   T_TRUE(has_text("Open firmware 0.2.59, protocol 1.16. FPGA bitstream 0x1535."));
-  T_TRUE(has_text(UD_ICON_OK "FPGA recognised: AL3A10 bitstream 0x1535: generator, EXT trigger, decimation filter, CIC+FIR"));
+  T_TRUE(has_text(UD_ICON_WARN "FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x1537"));
   T_TRUE(has_text(UD_ICON_OK "No saved settings on the card: defaults used."));
   T_TRUE(has_text(UD_ICON_WARN "Calibration missing: readings may be several % off."));
   T_TRUE(!has_text("Volts calibration"));

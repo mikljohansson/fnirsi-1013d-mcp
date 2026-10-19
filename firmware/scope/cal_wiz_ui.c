@@ -25,6 +25,7 @@
 #include "adc_cal.h"
 #include "cal_wiz.h"
 #include "ui_dlg.h"
+#include "enc_heal.h"
 
 #include <string.h>
 
@@ -168,6 +169,11 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
     //ripple phase; 64 conversions (about 70 ms) average it out (bench 0.2.43: 8 left 0.2-0.4 code). The full-rate
     //slope points too: the cores' gains differ per class, and so may their offset slopes
     cal_set_rate(CAL_RATE_FULL);
+
+    //The rate change may have garbled one core's full-rate capture (enc_heal.h): checked, retried, or failed
+    if(!fpga_encode_heal())
+      return ACAL_E_TIMING;
+
     cal_measure(r, m.pwm, 30, 64, acc);
     cal_result(acc, m.zero16[ACAL_FULL], m.drift16[ACAL_FULL], m.noise16[ACAL_FULL], m.within16[ACAL_FULL],
                &m.clipped);
@@ -226,16 +232,22 @@ static void cal_gen_level(uint32 high)
   fpga_write_int(1);
 }
 
-//Per core means (1/16 code) of convs conversions at one post level, rate and PWM
-static void cal_gain_level(uint32 r, int32 pwm, uint32 rate, uint32 settle_ms, uint32 convs, uint32 high, int32_t *mean16,
-                           uint32_t *clipped)
+//Per core means (1/16 code) of convs conversions at one post level, rate and PWM. 0 when a full-rate capture stayed
+//garbled after the retries (enc_heal.h)
+static int cal_gain_level(uint32 r, int32 pwm, uint32 rate, uint32 settle_ms, uint32 convs, uint32 high, int32_t *mean16,
+                          uint32_t *clipped)
 {
   acal_acc acc[2][2];
 
   cal_set_rate(rate);
+
+  if((rate == CAL_RATE_FULL) && !fpga_encode_heal())
+    return 0;
+
   cal_gen_level(high);
   cal_measure(r, pwm, settle_ms, convs, acc);
   cal_result(acc, mean16, 0, 0, 0, clipped);
+  return 1;
 }
 
 //Level check: both levels at range 2 (gated, 2 conversions each). Returns the span (1/16 code, mean of both cores; it
@@ -281,7 +293,9 @@ static int cal_gain_measure(acal_channel *c, int32_t span16, int32_t mid16)
       return CW_RC_CANCELLED;
 
     cal_gain_level(r, pwm, CAL_RATE_GATED, l ? 30 : 100, 8, l == 1, m.mean16[ACAL_GATED][l], &m.clipped);
-    cal_gain_level(r, pwm, CAL_RATE_FULL, 30, 64, l == 1, m.mean16[ACAL_FULL][l], &m.clipped);
+
+    if(!cal_gain_level(r, pwm, CAL_RATE_FULL, 30, 64, l == 1, m.mean16[ACAL_FULL][l], &m.clipped))
+      return ACAL_E_TIMING;
   }
 
   return acal_gain_store(&m, r, c);
@@ -293,6 +307,8 @@ static void cal_begin(void)
 {
   PCHANNELSETTINGS chs[2] = { &scopesettings.channel1, &scopesettings.channel2 };
   uint32           ch;
+
+  fpga_trace_who = FPGA_WHO_CAL;
 
   cal_backup_trigger = scopesettings.triggermode;
   scopesettings.samplemode  = 0;
@@ -342,6 +358,8 @@ static void cal_end(uint32 gen)
 
   scopesettings.triggermode = cal_backup_trigger;
   fpga_set_trigger_mode();
+
+  fpga_trace_who = FPGA_WHO_UI;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

@@ -620,6 +620,7 @@ uint32_t pc_hal_fft_bench(uint8_t *dst, uint32_t reps)
 void     pc_hal_restart_info(uint32_t *v) { uint32_t i; for(i=0;i<PC_RESTART_COUNT;i++) v[i] = 6000 + i; }
 void     pc_hal_fault_info(uint32_t *v) { v[0] = 0x0805u; v[1] = 0x80123456u; }
 void     pc_hal_usb_watch(uint32_t *v) { v[0] = 7000; v[1] = 7001; }
+void     pc_hal_enc_heal(uint32_t *v) { v[0] = 7100; v[1] = 7101; }
 
 uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total)
 {

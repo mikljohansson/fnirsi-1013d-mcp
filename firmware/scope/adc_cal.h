@@ -284,5 +284,6 @@ const char *acal_reason_text(int reason);                     //failure box text
 #define ACAL_E_GAIN_SPLIT    15           //core gains differ by more than ACAL_GAIN_MAX_SPLIT
 #define ACAL_E_GAIN_CLASS    16           //full-rate / gated gain outside 0.9..1.1
 #define ACAL_E_GAIN_NONE     17           //no generator in this bitstream (stock FPGA)
+#define ACAL_E_TIMING        18           //full-rate capture still garbled after the retries (enc_heal.h)
 
 #endif /* ADC_CAL_H */

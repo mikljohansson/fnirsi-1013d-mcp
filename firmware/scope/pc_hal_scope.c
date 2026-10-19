@@ -10,6 +10,7 @@
 #include "types.h"
 #include "fnirsi_1013d_scope.h"
 #include "fpga_control.h"
+#include "enc_heal.h"
 #include "scope_functions.h"
 #include "power_and_battery.h"
 #include "display_lib.h"
@@ -402,6 +403,10 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
                const pc_decim_cfg *dc, const pc_seq_cfg *sq)
 {
   uint32 n = 0;
+
+  //fw 0.2.61: after a rate write, a full-rate check first (enc_heal.h; the host's legacy mode at divider 0 is the
+  //check's, so pc_dec_apply below writes no 0x53)
+  fpga_encode_check_dirty();
 
   //Trigger level from the marker, as every UI conversion does (scope_acquire_trace_data)
   fpga_set_trigger_level();
@@ -1856,7 +1861,13 @@ void pc_glue_init(void)
 void pc_glue_poll_main(void)
 {
   if(pc_ready)
+  {
+    uint8 who = fpga_trace_who;
+
+    fpga_trace_who = FPGA_WHO_HOST;
     pc_poll(&pc_sess, PC_CTX_MAIN);
+    fpga_trace_who = who;
+  }
 
   pc_ui_auto_service();
   pc_seq_ui_service();
@@ -1865,7 +1876,13 @@ void pc_glue_poll_main(void)
 void pc_glue_poll_busy(void)
 {
   if(pc_ready)
+  {
+    uint8 who = fpga_trace_who;
+
+    fpga_trace_who = FPGA_WHO_HOST;
     pc_poll(&pc_sess, PC_CTX_BUSY);
+    fpga_trace_who = who;
+  }
 }
 
 void pc_glue_poll_isr(void)
@@ -1877,7 +1894,11 @@ void pc_glue_poll_isr(void)
 
   if(pc_ready)
   {
+    uint8 who = fpga_trace_who;
+
+    fpga_trace_who = FPGA_WHO_HOST;
     pc_poll(&pc_sess, PC_CTX_ISR);
+    fpga_trace_who = who;
   }
 }
 

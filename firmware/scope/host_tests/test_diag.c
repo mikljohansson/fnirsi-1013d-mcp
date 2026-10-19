@@ -455,7 +455,7 @@ static void test_report(void)
   T_EQ(strlen(mock.report), written);
 
   has("FNIRSI-1013D-AI diagnostics report\r\n");
-  has("Firmware running: " PC_FW_VERSION ", protocol 1.17, git 0x00000000 of 2026-10-19 12:00:00 UTC");
+  has("Firmware running: " PC_FW_VERSION ", protocol 1.18, git 0x00000000 of 2026-10-19 12:00:00 UTC");
   has("Card image (sector 750): unknown");
   has("FPGA: version word 0x1535, variant 2");
   has("USB serial: 1013D-0001");
@@ -470,7 +470,7 @@ static void test_report(void)
   has("Provenance: calibrated by fw 0.2.52 (git 0x8614032a) on FPGA 0x1535, 7 min after power-on #12, 2026-10-19 12:34:56; "
       "wrote CH1 zeros, CH1 gains, CH2 zeros, CH2 gains; since then 0 power-ons, 0 h 0 min operating time");
   has("  CH1: no v3 calibration");
-  has("Link counters (GET_LINK_STATS, n = 62)");
+  has("Link counters (GET_LINK_STATS, n = 64)");
   has("  49 restarts = ");
   has("  61 usb_soft_reconnects = ");
   has("sector 750: eGON.EXE, length 384000, checksum not checked");
