@@ -2161,7 +2161,9 @@ Branch from main 8f8687a (fw 0.2.61). Briefs: docs/plans/task-queue.md "ACQ: sam
 step overshoot pulsing" (owner decision: Filter per mode) and "Touch fixes batch 2"; docs/plans/touch-review.md (b), (c),
 (d). Commits: 5718015 (tb_view / acq_view, ACQ menu, display window, slider drawing, host paths), 5818b5b (Filter per
 mode, word 212), 29d61f1 (trace point buffers), b620113 (touch batch 2), f690e42 (spectrum pan, fold-outs on release),
-d1f303f (trigger point drag limits), then docs and this handoff. Images: IMAGES_PLACEHOLDER. **Nothing benched.**
+d1f303f (trigger point drag limits), then docs and this handoff. Images from merge e626b1b (main a179408 merged, no firmware conflicts): `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin`
+in the worktree, 612,864 B, sha256 8730e6700777fc740803805e18fffef2991d6ae94bc3174566c99572f7493fd7; nommu
+15e82d94dde5d057f1f9a7aa00f711f63612ecf8804f0a8b484551fb8da5545d (a build of a later commit differs only in the identity). **Nothing benched.**
 Host tests green (test_tb_view 57750 checks, test_touch_pick 584, the rest unchanged). GCC 10 warnings 36, sorted
 line-number-free list identical to 8f8687a. **Settings word 212 claimed** (0xD500 marker, the Spectrum's Filter; 207 is
 the Scope's); 213..223 stay free. No protocol change (wire formats unchanged; docs/protocol.md SET_TIMEBASE notes the
