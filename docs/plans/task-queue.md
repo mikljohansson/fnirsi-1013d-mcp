@@ -159,7 +159,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 ## Dispatched
 
 - fw-usb2 (done 11:20, about 355k tokens, retired): 0.2.49 merged; bench pending (section 27).
-- fw-cal3 (worktree, Opus, started 10-19 10:35): calibration wizard + v4 background interleave-mismatch tracking; fw 0.2.50, protocol 1.14.
+- fw-cal3 (done 12:15, about 275k tokens, retired): 0.2.50 merged cdc7e2f (wizard, A-B tracker with bow-aware fit, class probe, menu
+  reorder); renumbered to protocol 1.15 / row 54 in the merge; bench pending (README 6.4 / 6.5).
 - fpga-gen5 (done 03:50, retired): 0x1536 segmented capture + hardware averaging built, simulated, documented (bcccd92..66232a6); pinned
   backups/al3_seg_0x1536_4eaf6811.bin (+ padded 66866c84); not flashed; needs firmware support first.
 - docs-gen1 (done 01:50): README cb47f8f, guide/skill 4ed5f53, protocol 8d750bb, releasing/hardware-prep aa84507, AGENTS.md 9004569.

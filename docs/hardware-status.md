@@ -671,3 +671,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   vectors OK, mcp 360 passed. fw-usb2 found the selective-suspend GUID in the guide/skill wrong (…53bb50f7e206 vs the real
   …53bb8f07e226) and fixed it; this laptop's active plan: selective suspend **disabled on AC, enabled on DC** (powercfg /Q), so the 10:20
   loss happened with the host setting off on mains.
+- 11:40 bench running unattended: Windows USB selective suspend enabled on AC and DC (was AC off / DC on; to be restored), then
+  `fnirsi1013d-soak --mode capture --duration 1800` on 0.2.49 (MMU) followed by `--mode reopen --duration 10 --idle 1800 --rounds 3`.
+- 12:20 fw-cal3's 0.2.50 merged (cdc7e2f): calibration wizard (modal three-step flow), interleave tracker (A-B offset/gain with a bow-aware
+  fit, applied to the full-rate class), class probe (gated/full/gated conversions on a quiet input, every <= 30 s, corrects the full-class
+  common mode), Spectrum/Phosphor rows at the top of the main menu, GET_CAL 288 bytes. Renumbered in the merge to protocol 1.15 / row 54
+  (fw-usb2 holds 1.14 / row 53). Built on main: backups/fw-0.2.50_e54d29df.bin (MMU), fw-0.2.50-nommu_41c207bb.bin. Host tests 11/11,
+  vectors OK, mcp 360. Not loaded yet: the soak holds the port.
