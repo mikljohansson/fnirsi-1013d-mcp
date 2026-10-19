@@ -209,7 +209,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   interim Baseline calibration row + "Calibration (moves to Diagnostics)" group for fw-ui4 to delete); images pinned
   backups/fw-0.2.55_89c1e947.bin and fw-0.2.55-nommu_1dc9b165.bin; walk-through firmware/AGENTS.md section 31; not loaded.
 - mcp-gen4: protocol 1.15 host side pushed 556ed72 (CI 39248624412 green, 367 tests: GET_CAL 288 tracker fields, volts model with
-  d/e/cm, scope_calibration_info tracking section, simulator v4 drift); now on 1.16 (row 55).
+  d/e/cm, scope_calibration_info tracking section, simulator v4 drift); 1.16 host side pushed 0967b67 + 33cd1b5 (CI 39250138551 green, 376 tests: scope_health, scope_sd_info identify, provenance in calibration info, scope_save_report; health stays read-only, clearing the restart record is the Diagnostics page's job). Next: mcp items of the release readiness batch, then 1.17 when fw-seg merges.
 - fw-touch1 (done 13:54, about 200k tokens, retired): merged as fw 0.2.54 (touch_pick.c handles column, first-touch pick, nearest
   switched-on channel, shared clamped channel+trigger move, EXT fix, clamps 6..396; test_touch_pick 538 checks); images pinned
   backups/fw-0.2.54_05a126f7.bin and fw-0.2.54-nommu_572784ed.bin; walk-through firmware/AGENTS.md section 32; not loaded.

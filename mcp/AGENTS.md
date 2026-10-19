@@ -1,4 +1,4 @@
-# mcp/ handoff for agents (mcp-gen4 -> mcp-gen5, 2026-10-19)
+# mcp/ handoff for agents (mcp-gen4 -> mcp-gen5, 2026-10-19; mcp-gen4 retired after protocol 1.16)
 
 Python host library, device simulator, MCP server and bench CLIs for the FNIRSI 1013D open firmware's USB protocol.
 Read first: `../AGENTS.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec; **section 14 is how
@@ -47,7 +47,7 @@ path. |
 | `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points, least-squares zero / 1/gain / PWM slope per channel-range-core, channel model `zero = Z + slope x dcoffset`), `channel_scale`, T8 importer CLI. |
 | `analysis.py` | Stats, frequency, edges, Welford averager, FFT, decay fits, sample points, `scope_fft_db` (float model of the on-scope FFT), `compare_spectra`, `decim_noise_n` / `decim_bits`. |
 | `simulator.py` | `Device` (protocol state machine, FPGA ring, shared mode, legacy mode, SD card, EXT trigger, event log) + `SimServer` (TCP) with test hooks. CLI `fnirsi1013d-sim`. |
-| `server.py` | FastMCP server `fnirsi1013d-mcp`, 27 tools (list with tiers in README.md). |
+| `server.py` | FastMCP server `fnirsi1013d-mcp`, 29 tools (list with tiers in README.md). |
 | `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 attempts, FEL-device check between), usbipd, sunxi-fel RAM load, `#VER`; `--persist` / `--persist-only` / `--restore` (SD sector 750 via the firmware). |
 | `sdcard.py` | SD access (`SdCard`: checked reads, verified backups, staged 32-sector writes, compare), `plan_write`, `check_image`, `image_version`. |
 | `sdcli.py` | `fnirsi1013d-sd` info / read / write (`--dry-run`, `--yes` + typed confirmation, backup first). |
@@ -105,7 +105,7 @@ path. |
   (incl. usb_irq_polled). Exit 0 clean / 1 failure, drop or restart / 2 cannot start. Tested on the simulator
   only; the lead runs it on the bench.
 
-## Protocol support (host = simulator = vectors): 1.15, fw 0.2.50
+## Protocol support (host = simulator = vectors): 1.16, fw 0.2.52
 
 `P.PROTO_MINOR` follows the highest section 14 row implemented. The simulator always speaks the newest protocol
 (shared mode); `--legacy` gives 1.2.
@@ -125,6 +125,7 @@ path. |
 | 1.13 | 0.2.46+ | GET_STATUS display_mode 2 waterfall / 3 density (spectrum sub-views; READ_SPECTRUM works) / 4 phosphor; capture tools add the spectrum or phosphor caveat (`Session.ensure_control`). The host decodes no settings words (210 included) |
 | 1.14 | 0.2.49+ | GET_LINK_STATS n = 62 (60 `usb_inferred_resumes`, 61 `usb_soft_reconnects`), event type 20 `usb_soft_disconnect` (reason, back-off level, suspends; fw-usb2, f3763cc) |
 | 1.15 | 0.2.50+ | calibration v4 (row 54): GET_CAL 288 bytes, `CalResp.track_*` / `cm_*`, `has_tracker` (by length; 256 / 248 / 72 still parse), `TRACK_*` flags; the volts model takes the tracked d, e (8-bit full class) and cm (full class, 8-bit and 16-bit) out; conversions re-read GET_CAL when the cached answer is over `CAL_TRACK_AGE_S` (1 s) old; `scope_calibration_info` `tracking` (state, values, `in_words`) |
+| 1.16 | 0.2.52+ | row 55: GET_HEALTH 0x000A (`HealthResp`, 96 bytes, fast timeout class, allowed while modal; `describe()`; flags CLEAR_RESTART / RESTART_TEST), SD_INFO flag IDENT (`SdInfo.ident` = `SdIdent`, 112 bytes; the scope caches it until a write reaches sector 750), GET_CAL 356 bytes (`prov_state`, `prov`, `provenance()` -> `Provenance`, power-ons / minutes since), SAVE_REPORT 0x0504 (`SaveReportResp`, 15 s timeout); stored layouts `parse/pack_life_record`, `parse/pack_provenance`, `parse/pack_ident_record` = the `diag_layouts` vectors; tools `scope_health`, `scope_save_report`, `scope_sd_info` `card_image`, `scope_calibration_info` `calibration_provenance`. Simulator: `Device.power_on`, `minutes_stored`, `restart_record`, `cal_prov` / `cal_prov_bad`, `ident_cache`, `reports`; `make_egon_image(ident=)`; `SIM_BUILD` / `SIM_BUILD_TIME` = the running build |
 
 GET_LINK_STATS counts (named by the count field): 27 (0.1.4-0.1.7), 29 (0.2.0-0.2.1), 31 (0.2.2-0.2.3),
 35 (0.2.4), 41 (0.2.5-0.2.6), 47 (0.2.7-0.2.11), 48 (0.2.12-0.2.16, usb_irq_polled), 49 (0.2.17-0.2.18,
@@ -193,7 +194,7 @@ range-independent; 0 V at dcoffset 0: CH1 A 132.47 / B 127.14, CH2 A 128.80 / B 
 firmware gains). The firmware formula assumes 128 on the compensated mean. Grounds: the probe ground is VRF1,
 +1.24 V over the USB ground (fpga/al3/README.md); the calibration output reads -1.24 / +1.9 V against it by design.
 
-## Tests (`tests/`, 354, about 75 s)
+## Tests (`tests/`, 376, about 75 s)
 
 `test_protocol` (codec, structs, vectors, link stats/event log), `test_transport` (incl. the scripted-link deferred
 cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `test_shared_mode` (1.3),
@@ -202,7 +203,7 @@ cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `te
 `test_sdcard` (SD commands, persist, resume after drops, restore, CLI), `test_ext_trigger`, `test_soak`,
 `test_fir` (1.11 FIR maths / sim / tool, suspend event fields, soak reopen mode), `test_cal_v3` (1.12 GET_CAL 256, `adc_cal_v3` block vectors, volts on both cores and classes, GET_CAL's next-readout
 gain / offset vs the host model, unit file gated gains only, scope_calibration_info),
-`test_cal_v4` (1.15 GET_CAL 288, v4 volts on raw / WIDE / trace codes vs the simulator's drift, GET_CAL re-read, tracker words), `test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH), `test_decim` (1.9: maths vs
+`test_diag` (1.16 stored layouts vs `diag_layouts`, GET_HEALTH / SD identity / provenance / SAVE_REPORT layouts and simulator, the tools), `test_cal_v4` (1.15 GET_CAL 288, v4 volts on raw / WIDE / trace codes vs the simulator's drift, GET_CAL re-read, tracker words), `test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH), `test_decim` (1.9: maths vs
 the firmware vectors, wire layouts, simulator noise / volts / trigger / EXT latency, `scope_set_decimation`),
 `test_bode` (planner rules and vectors, DFT, a synthetic RC through dithered 8-bit at 200 MSa/s, gates, markers,
 thru cal), `test_bode_sim` (the DUT model, the runner end to end: RC, thru, fixed range, floor, legacy and CIC2
@@ -277,6 +278,20 @@ there, `--merge --check`, never change an existing vector's bytes.
 Pending work for every agent lives in `../docs/plans/task-queue.md` (section "MCP / host"); the coordinator dispatches
 from there and moves items to "Dispatched". Add host items you discover there, not only here.
 
+0. **Next for mcp-gen5 (dispatched by the lead 2026-10-19, not started by mcp-gen4): the mcp items of the release
+   readiness batch**, `../docs/plans/release-readiness.md` (docs-gen3's findings on the mcp wheel):
+   - the installed package must work outside a repo checkout: default data and log directories under the user's home
+     or a configurable path (today `ServerConfig.data_dir` defaults to `mcp/data` via `_default_mcp_dir()` in
+     server.py, `vectors.DEFAULT_PATH` and the Bode `--write-vectors` default assume `../docs`; `bench.py` wraps
+     `../firmware/scope/host_tests/bench_link.py`, `flash.py` / `sdcli.py` look for images and `../backups/` by repo
+     path): inputs by argument, repo paths only as a fallback when running from a checkout;
+   - the tracked `.mcp.json` has a hard-coded Windows venv path and COM10: replace it with a documented example
+     (keep the owner's working local config out of git, e.g. `.mcp.local.json` or a gitignored copy; ask the lead
+     before touching the owner's file);
+   - `pip install fnirsi1013d` from a wheel plus one documented command gives a working MCP server (build the wheel
+     in CI or locally with `uv build`, install it into a fresh venv outside the repo, start `fnirsi1013d-mcp --sim`
+     and list the tools; a test or CI step that does exactly that keeps it working).
+   Protocol 1.17 (fw-seg, segmented capture, rows from 70 provisional) waits until the lead says it is merged.
 1. **Bode: bench results in, then the follow-ups.** Host steps H1-H3 are done (1d46cf8 simulator DUT, f0940ee H1,
    363f676 runner and CLI, d3a16bb tool, docs commit after). Read the coordinator's bench numbers (procedure below)
    against the design's expectations; if the wiring verdict (section 2.5) or the floor changes the advice, fix
