@@ -31,7 +31,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.53 - 2026-10-19 (protocol 1.16, unchanged; number provisional, the coordinator renumbers at the merge)
+#### 0.2.56 - 2026-10-19 (protocol 1.16, unchanged; number provisional, the coordinator renumbers at the merge)
 
 The second step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 2; rules in `docs/ui-guidelines.md`;
 README section 5 "Screens: CTRL page, fold-outs, chips, warnings, spectrum cards").

@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-**Branch fw-ui2 (2026-10-19): fw 0.2.53 (provisional), protocol 1.16 unchanged: UX makeover step 2 (CTRL page with
+**Branch fw-ui2 (2026-10-19): fw 0.2.56 (provisional), protocol 1.16 unchanged: UX makeover step 2 (CTRL page with
 fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips), section 33.**
 **Branch fw-ui3 (2026-10-19): fw 0.2.55 provisional, protocol 1.16 unchanged: UX makeover step 3 (Settings fold-out
 trimmed, full Settings screen, confirmation dialog), section 31.**
@@ -51,7 +51,7 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
                            (host_tests/test_cal_wizard.c; section 27)
   cal_wiz_ui.c             the wizard's full-screen view, touch loop and the zero / gain measurements (section 27)
   phos_map.c/.h            phosphor hit-count map: rasteriser, decay, render, palettes. Pure C, host-buildable (section 24)
-  phosphor.c/.h            phosphor view (the Display fold-out's switch since 0.2.53; hooks in scope_display_trace_data;
+  phosphor.c/.h            phosphor view (the Display fold-out's switch since 0.2.56; hooks in scope_display_trace_data;
                            section 24, 33)
   ui_ctrl.c/.h             CTRL page geometry, fold-outs, value names, warning line, spectrum cards. Pure C (test_ui; 33)
   ctrl_page.c/.h           the CTRL page and its fold-outs: drawing and the modal touch loops (section 33)
@@ -255,7 +255,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.46 | 1b6359f | cdba5b51 | digital phosphor view (main menu row 7; Persistence / Palette / Clear strip; XY), GET_STATUS byte 43 = 4 (protocol 1.13, row 52), settings word 210 (fw-phosphor, section 24) | built, host-tested (test_phosphor 95 checks); bench steps in section 24 |
 | 0.2.48 | b1922c3 | 2f768fd9 | MMU + D-cache on (flat map, DDR / SRAM write-back, framebuffer write-through, restart record and peripherals strongly ordered), clean + off at _reset and ENTER_FEL, GET_LINK_STATS 58-59 fault status / address (fw-mmu, section 26) | built, host-tested (test_mmu); A/B image `make gcc10-nommu` 0.2.48-nommu sha256 45e03f7f; bench sequence in section 26 |
 | 0.2.49 | c477faa | 90f460d6 | USB suspend watch in the 1 ms tick (pc_usbw.c): inferred resume (SOFs, EP0 setup, EP2 OUT while suspended) acts, soft reconnect (SoftConn off 1 s) after a retry storm or 15 min suspended, GET_LINK_STATS 60-61, event type 20, SUSPEND before RESUME in the ISR (protocol 1.14, row 53; fw-usb2, section 27) | built, host-tested (test_usbw 90 checks); A/B `make gcc10-nommu` sha256 f5f377ea; bench plan in section 27 |
-| 0.2.53 | 5255516 | 7729e4fe | UX makeover step 2 (fw-ui2, section 33; provisional number): CTRL page in both modes (Display fold-out with icons and the Phosphor switch with Persistence / Palette / Clear / wfm/s, Trace style or Analyse with Scale and Ref level, Grid switch, compact V+ / CH / V- steppers, 50 % TRIG in Scope), ACQ menu acquisition only, phosphor and spectrum strips and spectrum header gone (spectrum cards Peak / Level / RBW / Time), empty cursor and measures slots in Spectrum, warning line in every scope variant, top bar chips one construction, settings word 211 | built, host-tested (test_ui 6672 checks); bench walk-through in section 33 |
+| 0.2.56 | 5255516 | 7729e4fe | UX makeover step 2 (fw-ui2, section 33; provisional number): CTRL page in both modes (Display fold-out with icons and the Phosphor switch with Persistence / Palette / Clear / wfm/s, Trace style or Analyse with Scale and Ref level, Grid switch, compact V+ / CH / V- steppers, 50 % TRIG in Scope), ACQ menu acquisition only, phosphor and spectrum strips and spectrum header gone (spectrum cards Peak / Level / RBW / Time), empty cursor and measures slots in Spectrum, warning line in every scope variant, top bar chips one construction, settings word 211 | built, host-tested (test_ui 6672 checks); bench walk-through in section 33 |
 | 0.2.55 | e01f775 | 6f100098 | UX makeover step 3 (fw-ui3, section 31; provisional number): fold-out Screen / Grid brightness, File message timeout, Time and date, Baseline calibration (interim), Other settings; full Settings screen (`ui_settings.c` / `ui_settings_ui.c`) with At power-on 0 / 4 / 5 written on Back, Restore default settings behind a confirmation (boot byte kept, CDC kept); Other settings menu, USB-Serial and Dev mode rows removed; delete confirmation as the dialog pattern | built, host-tested (test_ui 1,431,758 checks); bench walk-through in section 31 |
 | 0.2.54 | f9fcac6 | a4f0c832 | touch fix batch 1 (fw-touch1, section 32; provisional number): left pointers are drag handles (`touch_pick.c`, 44 px boxes, nearest / on-top pick), pick at touch-down, nearest enabled zero line, no trigger-point move in a channel drag, channel + trigger level share one clamped delta, EXT no longer follows CH2, traceposition 6..396 in the new auto setup and at load |
 | 0.2.51 | 8f5bf16 | 38580def | UX makeover step 1 (fw-ui1, section 29): main menu Scope / Spectrum analyser / Saved pictures / Saved waveforms / Settings / Diagnostics / USB drive with one 59 px hit area per row, Spectrum in roll mode switches Roll off; USB drive screen text + Exit; no top-bar version; Display row Normal / Phosphor / X-Y in the acquisition menu (X-Y out of System settings); strips without Scope / Auto, AUTO SET = spectrum Auto; phosphor warnings top-middle; cards with chip, scope-maker names, 4 significant digits, defaults Freq / Vpp / Vavg | built, host-tested (test_ui 1513 checks); bench walk-through in section 29 |
@@ -1711,14 +1711,14 @@ Bug indicators: a pointer drag moving a different pointer than the one under the
 with EXT; a tap on a pointer changing time/div or V/div; a channel stuck after AUTO SET with Invert; the level jumping
 at the first drag step.
 
-## 33. fw-ui2: UX makeover step 2 (fw 0.2.53 provisional, protocol 1.16 unchanged)
+## 33. fw-ui2: UX makeover step 2 (fw 0.2.56 provisional, protocol 1.16 unchanged)
 
 Branch from main 9cc599c (fw 0.2.51), merged with main d31ee84 (0.2.52 readers, 0.2.54 touch) in 2ebef4d and with main
 33cd1b5 (0.2.55 settings, fw-ui3) in 5255516. Plan:
 `docs/plans/ux-makeover.md` section 7 step 2; rules `docs/ui-guidelines.md`; user-facing description README section 5
 "Screens: CTRL page, fold-outs, chips, warnings, spectrum cards". Commits, one topic each: 93f1b68 (`ui_ctrl.c/.h`, the
 card formatters in `ui_fmt.c`, test_ui), aaa0613 (top bar chips), a41ca39 (CTRL page, fold-outs, strips and header out,
-warnings, ACQ menu, settings word 211), e1900ff (0.2.53, CHANGELOG, README), 2ebef4d (merge), f372581 (AUTO SET label
+warnings, ACQ menu, settings word 211), e1900ff (0.2.56, CHANGELOG, README), 2ebef4d (merge), f372581 (AUTO SET label
 only on page one), cf2cbf6 (handoff), 5255516 (merge of main with fw-ui3's 0.2.55), then this note. Bench image from
 5255516 (step 2 on top of 0.2.55): `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 543,744 B, sha256
 7729e4fe970f3fb634f5d600191c3cc873587edb9fd6ffb604b21f4e64cc69c8, ELF
@@ -1773,7 +1773,7 @@ Points for a successor:
   like every dropdown.
 
 **Bench walk-through (owner, coordinator on COM10)**
-1. FEL-load the image, `#VER` fw=0.2.53 proto=1.16. Top bar: CH1, CH2, ACQ and the trigger chip each a grey box with
+1. FEL-load the image, `#VER` fw=0.2.56 proto=1.16. Top bar: CH1, CH2, ACQ and the trigger chip each a grey box with
    the coloured block on the left, no dark notch at the join; touch each chip: white box, menu opens as before.
 2. CTRL: page two reads Display (Normal), Trace style (Linear), Grid (switch, green), the CH1 stepper (grey V+, yellow
    CH1, grey V-), the CH2 stepper (cyan), 50 % TRIG. Tap V+ / V- near their outer edges and near the middle of the

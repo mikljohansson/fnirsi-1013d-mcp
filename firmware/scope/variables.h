@@ -304,7 +304,7 @@ int pc_glue_sys_menu_height(void);
 #define ACQ_MENU_XPOS                      250//ACQ_BUTTON_XPOS
 #define ACQ_MENU_YPOS                       48//46
 #define ACQ_MENU_WIDTH                     380//304
-#define ACQ_MENU_HEIGHT                    386   //fw 0.2.53: 1.00o5's height again (the 0.2.51 Display row went to CTRL)
+#define ACQ_MENU_HEIGHT                    386   //fw 0.2.56: 1.00o5's height again (the 0.2.51 Display row went to CTRL)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Move fast button

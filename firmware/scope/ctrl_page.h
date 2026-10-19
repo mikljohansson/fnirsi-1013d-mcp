@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// ctrl_page.h - the right bar's CTRL page (page two) and its fold-outs (fw 0.2.53, UX makeover step 2; docs/ui-guidelines.md
+// ctrl_page.h - the right bar's CTRL page (page two) and its fold-outs (fw 0.2.56, UX makeover step 2; docs/ui-guidelines.md
 // section 2, docs/plans/ux-makeover.md section 3). Geometry, hit areas and texts are in ui_ctrl.h (host-tested).
 //
 // Top to bottom, the same in every mode: CTRL (menu.c), Display (fold-out: the variants with icons; in Scope also the

@@ -55,7 +55,7 @@ $(OUT)/test_cal_wizard: test_cal_wizard.c test_util.h $(SRC)/cal_wiz.c $(SRC)/ca
 	$(CC) $(CFLAGS) -o $@ test_cal_wizard.c $(SRC)/cal_wiz.c $(SRC)/adc_cal.c
 
 # Screens: card formatting and fit with the device's font tables, main menu rows and mode rule (fw 0.2.51), the Settings
-# fold-out, screen and confirmation dialog (fw 0.2.55), the CTRL page, fold-outs, warnings and spectrum cards (fw 0.2.53)
+# fold-out, screen and confirmation dialog (fw 0.2.55), the CTRL page, fold-outs, warnings and spectrum cards (fw 0.2.56)
 UI_SRCS := $(SRC)/ui_fmt.c $(SRC)/ui_menu.c $(SRC)/ui_settings.c $(SRC)/ui_ctrl.c $(SRC)/font_2.c $(SRC)/font_3.c $(SRC)/font_5.c
 $(OUT)/test_ui: test_ui.c test_util.h $(UI_SRCS) $(SRC)/ui_fmt.h $(SRC)/ui_menu.h $(SRC)/ui_settings.h $(SRC)/ui_ctrl.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_ui.c $(UI_SRCS)

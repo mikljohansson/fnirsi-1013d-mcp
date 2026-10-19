@@ -3,7 +3,7 @@
 //
 // A main-loop display mode, not a modal menu: the UI loop, the MCP polls and RUN/STOP keep running. While it is on, the
 // trace area (728 x 432 at 2,48) shows the spectrum of each new capture instead of the traces; the top bar stays 1.00o5's,
-// the right bar shows the mode's slots (fw 0.2.53). Entered and left from the main menu's mode rows ("Spectrum analyser", "Scope").
+// the right bar shows the mode's slots (fw 0.2.56). Entered and left from the main menu's mode rows ("Spectrum analyser", "Scope").
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #ifndef SPECTRUM_H
@@ -42,7 +42,7 @@ void   spectrum_note_roll_off(void);         //fw 0.2.51: the main menu switched
 int    spectrum_autoset(void);               //fw 0.2.51: AUTO SET in the view: start the view's Auto, or cancel it (1 = handled)
 int    spectrum_auto_running(void);          //fw 0.2.51: the view's Auto runs (AUTO SET reads "Auto...")
 
-//fw 0.2.53: the CTRL page (ctrl_page.c). Display: the variant (0 Spectrum, 1 Waterfall, 2 Density; saved in word 211).
+//fw 0.2.56: the CTRL page (ctrl_page.c). Display: the variant (0 Spectrum, 1 Waterfall, 2 Density; saved in word 211).
 //Analyse: the parameters; a step ends a running Auto. The one-way ones go to the next value, Ref level by a division
 //(dir < 0 down), Reset restores the view's defaults.
 int    spectrum_view(void);

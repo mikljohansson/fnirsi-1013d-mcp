@@ -198,7 +198,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 - Swarm started 10-19 13:40 after step 1 merged (owner: ship the whole roadmap before the announcement, one big splash; front-load
   everything that needs no hardware). Provisional firmware numbers, renumbered at merge: fw-readers 0.2.52 / protocol 1.16,
-  fw-ui2 0.2.53 (step 2: CTRL fold-outs, steppers, strips to cards, chips, ACQ Display row removed), fw-touch1 0.2.54 (touch-review
+  fw-ui2 0.2.56 (step 2: CTRL fold-outs, steppers, strips to cards, chips, ACQ Display row removed), fw-touch1 0.2.54 (touch-review
   c1), fw-ui3 0.2.55 (step 3: settings fold-out trim, Settings screen, delete dialog), fw-seg 0.2.56 / protocol 1.17 rows 70+
   (0x1536 firmware support, phosphor fast-capture design note), fpga-gen6 (trigger determinism testbench, 0x1536 contract tb,
   0x1537 if the FPGA is at fault), docs-gen3 (Sonnet: protocol tidy, README timings, roadmap.md, announcement draft,
@@ -213,7 +213,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - fw-touch1 (done 13:54, about 200k tokens, retired): merged as fw 0.2.54 (touch_pick.c handles column, first-touch pick, nearest
   switched-on channel, shared clamped channel+trigger move, EXT fix, clamps 6..396; test_touch_pick 538 checks); images pinned
   backups/fw-0.2.54_05a126f7.bin and fw-0.2.54-nommu_572784ed.bin; walk-through firmware/AGENTS.md section 32; not loaded.
-  Provisional numbers are kept as final (merge order differs from numeric order; 0.2.53 = fw-ui2 lands later).
+  Provisional numbers are kept as final (merge order differs from numeric order; 0.2.56 = fw-ui2 lands later).
 - docs-gen3 (done 13:54, about 230k tokens, retired): merged 6f1ea23 (protocol tidy, README MMU timings, roadmap.md rewrite,
   announcement.md draft, release-readiness.md with 12 findings -> queued item).
 - fw-readers (done 13:48, about 465k tokens, retired): merged 72eacb3 as fw 0.2.52 / protocol 1.16 (row 55: GET_HEALTH 0x000A,

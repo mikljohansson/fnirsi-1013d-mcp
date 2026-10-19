@@ -2886,7 +2886,7 @@ void handle_acquisition_menu_touch(void)
         }
         
         //======================================================================
-        //fw 0.2.53: the acquisition menu holds acquisition only; Trace style and the Display variants (the 0.2.51 Display
+        //fw 0.2.56: the acquisition menu holds acquisition only; Trace style and the Display variants (the 0.2.51 Display
         //row) are on the CTRL page (ctrl_page.c)
         //======================================================================     
         
@@ -3538,7 +3538,7 @@ void handle_keyboard_menu_touch(void)
 
 void handle_right_basic_menu_touch(void)
 {
-  //fw 0.2.53: the spectrum's empty slots (T CURSOR, V CURSOR, MEASURES; ui_p1_shown) do nothing
+  //fw 0.2.56: the spectrum's empty slots (T CURSOR, V CURSOR, MEASURES; ui_p1_shown) do nothing
   if((ytouch >= 183) && (ytouch <= 357) && !ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
     return;
 
@@ -3811,7 +3811,7 @@ void handle_right_basic_menu_touch(void)
 
 void handle_right_volts_div_menu_touch(void)
 {
-  //fw 0.2.53: page two is the CTRL page (ctrl_page.c); below, the waveform viewer's page and the DC shift pages
+  //fw 0.2.56: page two is the CTRL page (ctrl_page.c); below, the waveform viewer's page and the DC shift pages
   if((scopesettings.rightmenustate == 1) && !scopesettings.waveviewmode)
   {
     ctrl_page_touch();

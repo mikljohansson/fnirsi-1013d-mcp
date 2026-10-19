@@ -18,8 +18,8 @@
 #define PC_SETTING_WORD_DECIM 207
 #define PC_SETTING_WORD_SPEC0 208   //fw 0.2.39: spectrum view FFT length, window, scale (0x5E00 marker)
 #define PC_SETTING_WORD_SPEC1 209   //fw 0.2.39: spectrum view ref level, dBV (int16)
-#define PC_SETTING_WORD_PHOS  210   //fw 0.2.46: phosphor view persistence, palette (0x9A00 marker); 0.2.53: the switch
-#define PC_SETTING_WORD_UI    211   //fw 0.2.53: Grid, the spectrum's Display variant (0xC700 marker)
+#define PC_SETTING_WORD_PHOS  210   //fw 0.2.46: phosphor view persistence, palette (0x9A00 marker); 0.2.56: the switch
+#define PC_SETTING_WORD_UI    211   //fw 0.2.56: Grid, the spectrum's Display variant (0xC700 marker)
 
 //PC_UI_MASK(m) items. Menus are compact (fw 0.2.8, owner: no gaps): what the 1013D lacks is not laid out at all.
 #define PC_MASK_TRIG_CHANNEL  2     //trigger menu: EXT source box (0x1533+)
@@ -55,8 +55,8 @@ int  pc_glue_autoset_running(void);   //fw 0.2.51: the spectrum view's Auto runs
 int  pc_glue_phosphor_on(void);       //fw 0.2.46: the phosphor view replaces the CH1 / CH2 polylines
 void pc_glue_phosphor_draw(void);     //after the channel blocks: paint the phosphor maps
 int  pc_glue_phosphor_xy(uint32 index); //XY branch: 1 = the phosphor view drew it
-void pc_glue_scope_pass(void);        //fw 0.2.53: scope_display_trace_data starts: take the overrange flags
-void pc_glue_scope_warning(void);     //fw 0.2.53: scope_display_trace_data ends: the warning line, top middle
+void pc_glue_scope_pass(void);        //fw 0.2.56: scope_display_trace_data starts: take the overrange flags
+void pc_glue_scope_warning(void);     //fw 0.2.56: scope_display_trace_data ends: the warning line, top middle
 
 //Decimation filter (bitstream 0x1534+, pc_decim.h). With it off or absent every call is a no-op and the 1.00o5 paths run.
 extern int16 *pc_decim_src;           //fpga_read_adc_data: converted samples to take instead of bus reads (0 = bus)

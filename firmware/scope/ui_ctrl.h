@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// ui_ctrl.h - the right bar's CTRL page, its fold-outs, the warning line and the spectrum's cards (fw 0.2.53, UX makeover
+// ui_ctrl.h - the right bar's CTRL page, its fold-outs, the warning line and the spectrum's cards (fw 0.2.56, UX makeover
 // step 2, docs/plans/ux-makeover.md section 3, docs/ui-guidelines.md sections 2-3). Pure C, no globals, host-buildable
 // (host_tests/test_ui.c): geometry, hit areas, the name tables and the texts. ctrl_page.c draws with them and runs the
 // fold-outs' touch loops; spectrum.c and phosphor.c take their value names from here.

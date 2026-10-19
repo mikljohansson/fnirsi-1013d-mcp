@@ -950,7 +950,7 @@ void pc_glue_settings_defaults(void)
   USB_CH340 = 1;
 #endif
 
-  //fw 0.2.53: the Display variants back to Normal and Spectrum (X-Y and Grid are 1.00o5's own defaults)
+  //fw 0.2.56: the Display variants back to Normal and Spectrum (X-Y and Grid are 1.00o5's own defaults)
   phosphor_set_switch(0);
   spectrum_set_view(0);
 
@@ -1597,7 +1597,7 @@ int32_t pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Spectrum view glue (fw 0.2.28) and phosphor view (fw 0.2.46). Since fw 0.2.51 the main menu's mode rows (Scope,
 // Spectrum analyser; ui_menu.h) are the only way between the modes; phosphor is a drawing variant of the scope switched
-// in the CTRL page's Display fold-out (fw 0.2.53, ctrl_page.c). The spectrum and phosphor views exclude each other.
+// in the CTRL page's Display fold-out (fw 0.2.56, ctrl_page.c). The spectrum and phosphor views exclude each other.
 
 int pc_glue_spectrum_display(void) { return spectrum_display(); }
 int pc_glue_spectrum_touch(void)   { return spectrum_touch(); }
@@ -1616,7 +1616,7 @@ static int pc_spectrum_on(void)
 //Roll off as the acquisition menu's Roll box does (1.00o5 scope_acquisition_ACQ_mode_select): time base 20, its rate
 #define PC_ROLL_OFF_TIMEBASE  20
 
-//The phosphor variant is the Display fold-out's Phosphor switch (phosphor_switch, fw 0.2.53): it stays on while the
+//The phosphor variant is the Display fold-out's Phosphor switch (phosphor_switch, fw 0.2.56): it stays on while the
 //spectrum shows, so Scope brings the picture back
 void pc_glue_main_menu_mode(int row)
 {
@@ -1668,7 +1668,7 @@ static void pc_right_bar_follow(void)
   displaydata = save;
 }
 
-//The scope view's warning line (fw 0.2.53; ui_scope_warning): at the top middle of the plot in every variant, the
+//The scope view's warning line (fw 0.2.56; ui_scope_warning): at the top middle of the plot in every variant, the
 //consequence and the action. The overrange flags are taken at the start of the pass, before 1.00o5 clears them.
 static uint8 pc_scope_over[2], pc_scope_untrig;
 
@@ -1703,7 +1703,7 @@ void pc_glue_scope_warning(void)
   display_text(366 - ui_text_width(&font_2, t) / 2, 69, (int8 *)t);
 }
 
-//Settings sector word 211 (fw 0.2.53): 0xC700 marker, bit 0 Grid, bits 1-2 the spectrum's Display variant. The scope's
+//Settings sector word 211 (fw 0.2.56): 0xC700 marker, bit 0 Grid, bits 1-2 the spectrum's Display variant. The scope's
 //variants are kept where they were (X-Y: 1.00o5's word; Phosphor: word 210 bit 3).
 uint16 pc_glue_ui_setting_word(void)
 {
@@ -1853,10 +1853,10 @@ static void pc_ui_fix_settings(void)
   spectrum_settings_restore(settingsworkbuffer[PC_SETTING_WORD_SPEC0], settingsworkbuffer[PC_SETTING_WORD_SPEC1]);
 
   //Phosphor view settings (fw 0.2.46): persistence and palette, the same rule (marker 0x9A00, fields in range); since
-  //fw 0.2.53 also the Phosphor switch
+  //fw 0.2.56 also the Phosphor switch
   phosphor_settings_restore(settingsworkbuffer[PC_SETTING_WORD_PHOS]);
 
-  //fw 0.2.53: Grid and the spectrum's Display variant (word 211)
+  //fw 0.2.56: Grid and the spectrum's Display variant (word 211)
   pc_ui_setting_restore(settingsworkbuffer[PC_SETTING_WORD_UI]);
 
   //Memory depth: the largest offered step (3000 x n) the bitstream can capture

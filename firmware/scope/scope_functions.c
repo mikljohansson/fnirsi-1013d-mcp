@@ -289,7 +289,7 @@ void scope_adjust_timebase_and_voltdiv (void)
   scope_display_trace_data();
   }
     
-    //The record-position slider, and the grid lines and dots unless Grid is off (fw 0.2.53: the CTRL page's Grid in
+    //The record-position slider, and the grid lines and dots unless Grid is off (fw 0.2.56: the CTRL page's Grid in
     //every mode; it was the waveform viewer's Show grid only)
     scope_draw_grid();
     
@@ -2098,7 +2098,7 @@ void scope_display_trace_data(void)
   //PC protocol build: the spectrum view draws the trace area instead
   PC_SPECTRUM_DISPLAY();
 
-  //fw 0.2.53: the overrange flags of this record for the warning line (the channel blocks below clear them)
+  //fw 0.2.56: the overrange flags of this record for the warning line (the channel blocks below clear them)
   PC_SCOPE_PASS();
   
   //See if it is possible to rework this to fixed point. A 32 bit mantissa is not accurate enough though
@@ -2218,7 +2218,7 @@ void scope_display_trace_data(void)
   display_fill_rect(2, 48, 728, 432);
   //display_fill_rect(2, 44, 728, 434);       //opravit rozmery
 
-  //The record-position slider, and the grid lines and dots unless Grid is off (fw 0.2.53, as in scope_preset_values)
+  //The record-position slider, and the grid lines and dots unless Grid is off (fw 0.2.56, as in scope_preset_values)
   scope_draw_grid();
 
   //Check if scope is in normal display mode
@@ -2399,7 +2399,7 @@ void scope_display_trace_data(void)
       } else display_text(555, 70, thumbnaildata->filename); //550 48 //display_text(555, 70, viewfilename); //550 48
   }
 
-  //fw 0.2.53: the warning line at the top middle of the plot, in every variant (not in the viewer)
+  //fw 0.2.56: the warning line at the top middle of the plot, in every variant (not in the viewer)
   PC_SCOPE_WARNING();
   
   //Copy it to the actual screen buffer
@@ -3525,7 +3525,7 @@ void scope_display_channel_measurements(PCHANNELSETTINGS settings, uint8 *measur
       //Display the data for this measurement
       measurementfunctions[i](settings);
 
-      //The card (fw 0.2.51; scope_draw_card since 0.2.53, the spectrum's cards use it too)
+      //The card (fw 0.2.51; scope_draw_card since 0.2.56, the spectrum's cards use it too)
       scope_draw_card(x, y, color, measurement_names[i], measurementtext);
 
       //Select next column
@@ -6540,7 +6540,7 @@ void scope_save_config_data(void)
   settingsworkbuffer[PC_SETTING_WORD_SPEC1] = pc_glue_spectrum_setting_word(1);
   //Phosphor view settings (persistence, palette, the switch)
   settingsworkbuffer[PC_SETTING_WORD_PHOS] = pc_glue_phosphor_setting_word();
-  //Grid and the spectrum's Display variant (fw 0.2.53)
+  //Grid and the spectrum's Display variant (fw 0.2.56)
   settingsworkbuffer[PC_SETTING_WORD_UI] = pc_glue_ui_setting_word();
   //Unit life record, words 224..255 (fw 0.2.52, pc_diag.c)
   PC_SETTINGS_STORE(settingsworkbuffer);

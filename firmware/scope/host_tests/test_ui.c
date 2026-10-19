@@ -1,7 +1,7 @@
 // test_ui.c - the screens' pure parts (fw 0.2.51): card value formatting and card fit with the device's own font tables
 // (ui_fmt.c, font_2.c), the main menu row table, hit areas and mode rule (ui_menu.c), the Settings fold-out and screen
 // (ui_settings.c, fw 0.2.55): rows, hit areas against the drawn rectangles, values, text fit, start-up choice, dialog;
-// the CTRL page, fold-outs, warnings and spectrum cards (ui_ctrl.c, fw 0.2.53).
+// the CTRL page, fold-outs, warnings and spectrum cards (ui_ctrl.c, fw 0.2.56).
 // Run natively.
 
 #include <stdio.h>
@@ -197,7 +197,7 @@ static void test_choose(void)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// fw 0.2.53: CTRL page, fold-outs, value names, warnings, spectrum cards (ui_ctrl.c) and their formatters (ui_fmt.c)
+// fw 0.2.56: CTRL page, fold-outs, value names, warnings, spectrum cards (ui_ctrl.c) and their formatters (ui_fmt.c)
 
 static void test_fmt_spectrum(void)
 {

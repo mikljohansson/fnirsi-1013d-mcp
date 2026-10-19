@@ -537,7 +537,7 @@ const int8 memory_deep_texts_x_offsets[5] =
 
 };
 //----------------------------------------------------------------------------------------------------------------------------------
-//fw 0.2.53: the trace style names moved to ui_ctrl.c (ui_trace_names, the CTRL page's Trace style fold-out)
+//fw 0.2.56: the trace style names moved to ui_ctrl.c (ui_trace_names, the CTRL page's Trace style fold-out)
 //----------------------------------------------------------------------------------------------------------------------------------
 
 const int8 *keyboard_texts[20] =

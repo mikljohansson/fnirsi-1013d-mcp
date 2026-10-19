@@ -6,8 +6,8 @@
 //   y  50       the waterfall's and density's colour legend at the right
 //   y  66..410  plot, 10 x 8 divisions of 72 x 43 px (x 6..726); warnings at its top middle
 //   y 413       frequency labels: start, centre, stop
-//   y 446..467  the cards (fw 0.2.53): peak and level per channel, RBW, the waterfall's time span
-// The parameters are on the CTRL page (ctrl_page.c: Display, Analyse); the strip and the header line went in fw 0.2.53.
+//   y 446..467  the cards (fw 0.2.56): peak and level per channel, RBW, the waterfall's time span
+// The parameters are on the CTRL page (ctrl_page.c: Display, Analyse); the strip and the header line went in fw 0.2.56.
 // Integer only (no FPU): levels in centi-dB, frequencies in mHz (uint64).
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -556,7 +556,7 @@ static void spec_draw_grid(const SPECVIEW *v)
 
   display_set_fg_color(spec_grid_color());
 
-  //fw 0.2.53: the dots follow the CTRL page's Grid; the level labels stay (the axis)
+  //fw 0.2.56: the dots follow the CTRL page's Grid; the level labels stay (the axis)
   if(scopesettings.gridenable)
   {
     for(i = 0; i <= PLOT_YDIV; i++)
@@ -667,7 +667,7 @@ static uint32 spec_draw_trace(const SPECVIEW *v, const int16 *db, uint32 color)
   return peak;
 }
 
-//The cards in the bottom row (fw 0.2.53, owner; the one-line header before): per shown channel its peak frequency and
+//The cards in the bottom row (fw 0.2.56, owner; the one-line header before): per shown channel its peak frequency and
 //level in the channel colour, then the resolution bandwidth and, in the waterfall, the time its rows span, with a
 //neutral chip (ui_spec_cards). The decimation filter tag is not shown: the filter lives in the acquisition menu.
 static void spec_draw_cards(const uint32 *peak, int hch, uint64 bin_mhz)
@@ -1035,7 +1035,7 @@ static void spec_draw_legend(const SPECVIEW *v, int ch)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Parameters as the CTRL page's Analyse fold-out shows them (fw 0.2.53; the strip before): value names from ui_ctrl.h
+// Parameters as the CTRL page's Analyse fold-out shows them (fw 0.2.56; the strip before): value names from ui_ctrl.h
 
 void spectrum_param_text(int p, char *t)
 {
@@ -1107,7 +1107,7 @@ static void spec_autoset_button(void)
 
   auto_shown = spec.active && spec.autostage;
 
-  //Only on page one: on the CTRL page the slot holds Analyse (fw 0.2.53), in the waveform viewer Next wave; page one
+  //Only on page one: on the CTRL page the slot holds Analyse (fw 0.2.56), in the waveform viewer Next wave; page one
   //redraws the label when it returns
   if((scopesettings.rightmenustate == 0) && !scopesettings.waveviewmode)
   {
@@ -1867,7 +1867,7 @@ static void spec_auto_step(void)
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 // Settings that survive a power cycle (fw 0.2.39): FFT length, window, scale and ref level in two spare words of the
-// settings sector (709), saved where 1.00o5 saves everything (power-off interrupt). Since fw 0.2.53 the variant (view)
+// settings sector (709), saved where 1.00o5 saves everything (power-off interrupt). Since fw 0.2.56 the variant (view)
 // too, in word 211 (pc_hal_scope.c). Not restored: the display mode (boot into the scope view), channel, span, start.
 
 uint16 spectrum_settings_word(int i)
@@ -1899,7 +1899,7 @@ void spectrum_settings_restore(uint16 w0, uint16 w1)
     spec.avg = (uint8)avg;
 }
 
-//A tap on a row of the Analyse fold-out (fw 0.2.53; a strip field before): the one-way rows step to the next value, Ref
+//A tap on a row of the Analyse fold-out (fw 0.2.56; a strip field before): the one-way rows step to the next value, Ref
 //level steps by a division down (dir < 0) or up. Like any touch on the view it ends a running Auto.
 void spectrum_param_step(int p, int dir)
 {
@@ -1976,7 +1976,7 @@ int spectrum_auto_running(void)
   return spec.active && spec.autostage;
 }
 
-//Touches in the trace area (fw 0.2.53: the cards row below the plot does nothing). Plot: the scope view's gestures (scan_for_touch in
+//Touches in the trace area (fw 0.2.56: the cards row below the plot does nothing). Plot: the scope view's gestures (scan_for_touch in
 //statemachine.c): a touch that stays within 2 px and ends within 200 ms is a tap, left of the centre = zoom the span
 //out, right of it = zoom in; a touch that moves more than 2 px is a drag, and a horizontal drag pans the start
 //frequency (the spectrum follows the finger), redrawn while dragging.

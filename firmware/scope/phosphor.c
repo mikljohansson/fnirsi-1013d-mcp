@@ -49,7 +49,7 @@ static uint16_t *phos_sram_base(void)
 
 static uint8 phos_ramp[256] __attribute__((aligned(4)));      //codes 0..255, the fake trace buffer for the tables
 
-//fw 0.2.53: no strip. Persistence, Palette, Clear and the wfm/s readout are in the CTRL page's Display fold-out
+//fw 0.2.56: no strip. Persistence, Palette, Clear and the wfm/s readout are in the CTRL page's Display fold-out
 //(ctrl_page.c); the warning line is the scope view's (pc_glue_scope_warning).
 
 static struct
@@ -432,7 +432,7 @@ uint16 phosphor_settings_word(void)
   return (uint16)(0x9A00 | ((phos.wanted & 1) << 3) | ((phos.palette & 1) << 2) | (phos.persist & 3));
 }
 
-//fw 0.2.53: bit 3 is the Phosphor switch (a word written before 0.2.53 has it clear); the picture starts with the first
+//fw 0.2.56: bit 3 is the Phosphor switch (a word written before 0.2.56 has it clear); the picture starts with the first
 //scope pass (phosphor_service)
 void phosphor_settings_restore(uint16 w)
 {

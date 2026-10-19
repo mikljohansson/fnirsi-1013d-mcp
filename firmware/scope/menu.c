@@ -386,7 +386,7 @@ void scope_setup_right_control_menu(void)
   //Check in which state the right menu is in
   if(scopesettings.rightmenustate == 0)
   {
-    //Main control state so draw the always used buttons; fw 0.2.53: the spectrum leaves the cursor and measurement
+    //Main control state so draw the always used buttons; fw 0.2.56: the spectrum leaves the cursor and measurement
     //slots empty (ui_p1_shown) until spectrum markers and its own measurement list exist
     if(ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
     {
@@ -413,7 +413,7 @@ void scope_setup_right_control_menu(void)
       scope_save_wave_button(0);
     }
   }
-  //fw 0.2.53: page two is the CTRL page (Display, Trace style or Analyse, Grid, the steppers, 50 % TRIG; ctrl_page.c).
+  //fw 0.2.56: page two is the CTRL page (Display, Trace style or Analyse, Grid, the steppers, 50 % TRIG; ctrl_page.c).
   //The waveform viewer keeps 1.00o5's page: V+ / V- per channel and Show grid.
   if(scopesettings.rightmenustate == 1)
   {
@@ -1912,7 +1912,7 @@ void scope_run_stop_text(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-//fw 0.2.53 top bar chip (docs/ui-guidelines.md section 3): the grey parameter box over the whole chip, then the coloured
+//fw 0.2.56 top bar chip (docs/ui-guidelines.md section 3): the grey parameter box over the whole chip, then the coloured
 //block drawn over its left end, rounded only on its outer corners, so the join has no notch. The box is white while the
 //chip is touched (1.00o5's active look), grey otherwise.
 static void scope_chip(uint32 x, uint32 block_w, uint32 w, uint32 block, int active)
@@ -1943,7 +1943,7 @@ void scope_channel_settings(PCHANNELSETTINGS settings, int mode)
   else
     block = settings->touchedcolor;
 
-  //fw 0.2.53: the chip construction (grey box, block over it, no notch)
+  //fw 0.2.56: the chip construction (grey box, block over it, no notch)
   scope_chip(settings->buttonxpos, CH_BUTTON_WIDTH, CH_BUTTON_BG_WIDTH, block, mode != 0);
 
   //Select the font for the text
@@ -2073,7 +2073,7 @@ void scope_acqusition_settings(int mode)
   display_set_fg_color(BLACK_COLOR);
   display_fill_rounded_rect(ACQ_BUTTON_XPOS, ACQ_BUTTON_YPOS, ACQ_BUTTON_BG_WIDTH, ACQ_BUTTON_BG_HEIGHT, 2);
 
-  //fw 0.2.53: the chip construction. Block: green for the short time bases, orange in roll mode, magenta while touched
+  //fw 0.2.56: the chip construction. Block: green for the short time bases, orange in roll mode, magenta while touched
   scope_chip(ACQ_BUTTON_XPOS, ACQ_BUTTON_WIDTH, ACQ_BUTTON_BG_WIDTH,
              mode ? MAGENTA_COLOR : scopesettings.long_mode ? ORANGE_COLOR : GREEN_COLOR, mode != 0);
 
@@ -2296,7 +2296,7 @@ void scope_trigger_settings(int mode)
   display_set_fg_color(BLACK_COLOR); //LIGHTGREY_COLOR       
   display_fill_rounded_rect(TRIGGER_BUTTON_XPOS, TRIGGER_BUTTON_YPOS, TRIGGER_BUTTON_BG_WIDTH, TRIGGER_BUTTON_BG_HEIGHT, 2);
 
-  //fw 0.2.53: the chip construction (one grey box behind the green block, no notch; it had its own rounded box before).
+  //fw 0.2.56: the chip construction (one grey box behind the green block, no notch; it had its own rounded box before).
   //Block green, magenta while touched
   scope_chip(TRIGGER_BUTTON_XPOS, TRIGGER_BUTTON_WIDTH, TRIGGER_BUTTON_BG_WIDTH, mode ? MAGENTA_COLOR : TRIGGER_COLOR, mode != 0);
 
@@ -5120,7 +5120,7 @@ void scope_open_acquisition_menu(void)
   PC_UI_MASK(PC_MASK_ACQ_FILTER);    //the decimation Filter box (bitstream 0x1534+) in 1.00o5's Long memory slot
 
   scope_acquisition_memory_deep_select();
-  //fw 0.2.53: acquisition only; Trace style and the Display variants are on the CTRL page
+  //fw 0.2.56: acquisition only; Trace style and the Display variants are on the CTRL page
 
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1
@@ -8325,7 +8325,7 @@ void scope_draw_grid(void)
     //-********************************************************
   
 // */
-  //Only draw the grid when something will show (not in the original code), and not while Grid is off (fw 0.2.53: the CTRL
+  //Only draw the grid when something will show (not in the original code), and not while Grid is off (fw 0.2.56: the CTRL
   //page's Grid; the record-position slider above stays)
   if((scopesettings.gridbrightness > 3) && scopesettings.gridenable)
   {

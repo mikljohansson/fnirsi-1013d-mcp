@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// ctrl_page.c - the right bar's CTRL page and its fold-outs (fw 0.2.53, see ctrl_page.h). Drawing and the touch loops;
+// ctrl_page.c - the right bar's CTRL page and its fold-outs (fw 0.2.56, see ctrl_page.h). Drawing and the touch loops;
 // the geometry, hit areas and texts come from ui_ctrl.c (host_tests/test_ui.c).
 //----------------------------------------------------------------------------------------------------------------------------------
 
