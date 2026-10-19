@@ -120,6 +120,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   mind: either leave it (0x153A removes the cause) or stop the sweep with a "readout fault" reason when the pre-scan clips at
   5 V/div with a fundamental under 20 codes, instead of producing a flagged table. (e) The estimate text of Single sweep must
   use the same settings as (c).
+- **Frequency response small items** (next bode_view.c batch after fw-over lands, so the two do not collide): (a) owner decision
+  10-19 21:32 **(owner)**: a single sweep started from the Sweep fold-out stays on the CTRL page; the Single sweep button changes
+  state to show the sweep running (the same colour/word rule as RUN/STOP: it reads what a tap does, e.g. "Stop sweep" in red with
+  the progress on its second line) and another tap stops it, so the user changes parameters and triggers again without leaving
+  the fold-out; the page-one RUN/STOP keeps showing STOP meanwhile. (b) After a sweep the generator chip shows the user's
+  generator although the pin is off (fw-freq2 open item): show "off" or the user's setting as the engine leaves it. (c) The
+  warning "CH1 level low: the DUT loads the 1 kOhm source" also appears when the pre-scan ranged CH1 too coarse (0x1539 fault):
+  name both causes or pick by range. mcp: the simulator lacks reason 8 and the header-before-first-sweep rule.
 - **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
   SCREENSHOT bit 6, simulator has it, `Scope.read_screen` reads 40 rows per request) but the firmware handler is NULL
   (pc_cmds.c "BENCH: T9"). Implement it in all builds: rows of the live framebuffer as RGB565, the header per protocol.md, the
