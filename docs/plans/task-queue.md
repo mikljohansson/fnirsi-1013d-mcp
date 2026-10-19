@@ -20,10 +20,17 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   outside a checkout (data/log dirs, .mcp.json example without the Windows venv path and COM10), write release notes separate from
   the CHANGELOG dev diary, fix docs/releasing.md step 1, dry-run release.yml on a scratch tag or fork, refresh README.md (Status, tool
   count, FPGA state, Getting started gaps, the proposed outline). Dispatch when an mcp/docs agent is free; before tagging.
+- **FIR step overshoot pulsing on the scope trace** (owner 10-19 14:05, 1 kHz cal square, any +FIR filter: overshoot "horns" at
+  the edges grow and snap back at 3-4 Hz; CIC alone shows a clean square). Known property: fpga/al3/README.md section 4 gives
+  6-9 % step overshoot for the CIC + half-band FIR chain (flat to fo/4, sharp cut-off = Gibbs ringing on a non-band-limited edge);
+  the pulsing is the edge sliding across the decimated sample grid (DDS 1 kHz vs the decimated rate), inference until simulated.
+  fpga-gen6 asked to simulate a sliding-edge square through the 0x1535 chain and quantify. Decision for the owner: keep CIC2+FIR as
+  the default in Spectrum (flat passband, alias rejection) and make CIC2 without FIR the default for the Scope trace, with the Filter
+  box per mode, or keep one default and document the ringing.
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
-  dead band, tap zones that keep the V/div and time-base tap bands but avoid the slider and cards (owner 10-19: keep the tap bands), after UI step 2; batch 3 = no blocking touch loop, needs an MCP soak). Owner decision
+  dead band, record-position slider under the grid draggable (owner 10-19 14:05: dragging the window right scrolls the trace left, the window follows the finger; today the slider has no touch handler, only the trace drag moves the trigger point), tap zones that keep the V/div and time-base tap bands but avoid the slider and cards (owner 10-19: keep the tap bands), after UI step 2; batch 3 = no blocking touch loop, needs an MCP soak). Owner decision
   2026-10-19 13:20 **(owner)**: the channel pointers at the left edge of the grid become drag handles, "handles shown on screen are
   draggable"; the on-trace grab stays as a secondary path with a nearest-enabled-object rule. Owner reproduced: with CH2 dragged to
   the bottom CH1 can be picked up again, but only when the drag starts exactly on the invisible zero line.
