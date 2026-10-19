@@ -97,11 +97,6 @@ void scope_setup_main_screen(void)
 
   //Show the battery charge level and charging indicator
   scope_battery_status();
-  
-  //Show version information
-  display_set_fg_color(WHITE_COLOR);
-  display_set_font(&font_2);
-  display_text(VERSION_STRING_XPOS, VERSION_STRING_YPOS, PC_UI_VERSION(VERSION_STRING+1, 0));
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
