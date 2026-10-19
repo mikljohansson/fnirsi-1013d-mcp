@@ -74,6 +74,12 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   right-bar meanings; a designer (ux-bode, Opus) is producing the Bode mode mockup: action page with the standard slot meanings,
   CTRL page with Display / Sweep / Thru / Grid, cards via MEASURES, docs/plans/bode-ui.md with the control map and a self-review).
   Then a firmware batch implements it; until then the Bode view keeps its interim controls (menu row moves in polish batch 2).
+- **Time/div viability: minimum samples per division** (owner 10-19 19:00, bench: 100 kS/s with 10 us/div = one sample per
+  division; host captures show the 1 kHz edge spread over the CIC2 step response (93, 108, 145, 155, 161) with the edge samples
+  drifting 108 -> 103 -> 99 between captures as the DDS 1 kHz (999.996 Hz, 4 ns per period) creeps across the 10 us sample grid,
+  so the interpolated trace wobbles at about 1 Hz; no trigger jitter: the edge index is stable). fw-acq's rule allows one sample
+  per division; raise the minimum to about 10 samples per division (10 px per sample) so such zooms are unavailable and the snap
+  picks a viable time/div; one constant in tb_view.c plus the host test. Next firmware batch.
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
