@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/enc_heal.c $(SRC)/pc_decim.c $(SRC)/pc_seq
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/enc_heal.h $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/pc_seq.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h $(SRC)/pc_ident.h $(SRC)/pc_report.h $(SRC)/pc_life.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus $(OUT)/test_slider_ov $(OUT)/test_acq_view
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus $(OUT)/test_slider_ov $(OUT)/test_acq_view $(OUT)/test_spec_zoom
 
 $(OUT):
 	mkdir -p $@
@@ -88,6 +88,10 @@ $(OUT)/test_slider_ov: test_slider_ov.c test_util.h $(SRC)/acq_view.h $(SRC)/sli
 # fw 0.2.76: acq_view.c on the host (stub globals, the firmware's tables): the slider tap at touch-down, the zoom ladder
 $(OUT)/test_acq_view: test_acq_view.c test_util.h $(SRC)/acq_view.c $(SRC)/acq_view.h $(SRC)/tb_view.c $(SRC)/tb_view.h $(SRC)/slider_ov.c $(SRC)/slider_ov.h $(SRC)/variables.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_acq_view.c $(SRC)/acq_view.c $(SRC)/tb_view.c $(SRC)/slider_ov.c
+
+# fw 0.2.77: the Spectrum's zoom ladder (span drives the sample rate): walks, pans, hand rates, stopped, Auto's cell
+$(OUT)/test_spec_zoom: test_spec_zoom.c test_util.h $(SRC)/spec_ladder.c $(SRC)/spec_ladder.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_spec_zoom.c $(SRC)/spec_ladder.c
 
 # 0x1536 sequencer maths (fw 0.2.58): fit rules, table entries, slot addresses, UI averaging plan, exact mean
 $(OUT)/test_seq: test_seq.c test_util.h $(SRC)/pc_seq.c $(SRC)/pc_seq.h $(SRC)/adc_cal.h | $(OUT)
@@ -161,6 +165,7 @@ test: all
 	$(OUT)/test_tb_view
 	$(OUT)/test_slider_ov
 	$(OUT)/test_acq_view
+	$(OUT)/test_spec_zoom
 	$(OUT)/test_seq
 	$(OUT)/test_phosphor
 	$(OUT)/test_mmu

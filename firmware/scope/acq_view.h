@@ -54,6 +54,10 @@ int acq_view_set_tb(uint32 timeperdiv);
 //at an end (nothing changed), else ACQ_SET_TB / ACQ_SET_RATE as acq_view_set_tb. Short mode only.
 int acq_view_zoom(int dir, int rate_free);
 
+//fw 0.2.77, the Spectrum's span sets the rate (spec_ladder.h): the short-mode time/div to pair with sample_rate[r]: the
+//one nearest the current time/div whose ladder rate is r, else the nearest viable at r (tbv_snap); -1 when none is
+int32 acq_view_tb_for_rate(uint32 r);
+
 //Keep the trigger point inside the record (short mode)
 void acq_view_clamp_pos(void);
 

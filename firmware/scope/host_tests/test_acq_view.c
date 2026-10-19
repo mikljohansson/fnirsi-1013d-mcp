@@ -403,6 +403,45 @@ static void test_spectrum_tap(void)
   T_EQ(sov_jump(100, SOV_TAP_Y - 1, wx, ww), 0);
 }
 
+//fw 0.2.77: the time/div the Spectrum pairs with the rate its span sets: viable at that rate (no snap, no notice), and
+//the Scope ladder's own time/div for the rate wherever the ladder has one, nearest the current one
+static void test_tb_for_rate(void)
+{
+  uint32 d;
+  int32  r, t, cur, u;
+
+  for(d = 0; d < sizeof(totals) / sizeof(totals[0]); d++)
+    for(r = 0; r < ACQ_RATES; r++)
+      for(cur = ACQ_TB_FIRST; cur <= ACQ_TB_LAST; cur += 3)
+      {
+        int on_ladder = 0;
+
+        state(totals[d], 0, cur, 1);
+        t = acq_view_tb_for_rate((uint32)r);
+
+        for(u = ACQ_TB_FIRST; u <= ACQ_TB_LAST; u++)
+          if(ladder(totals[d], u) == r)
+            on_ladder = 1;
+
+        if(t < 0)
+        {
+          T_EQ(on_ladder, 0);
+          continue;
+        }
+        T_TRUE((t >= ACQ_TB_FIRST) && (t <= ACQ_TB_LAST));
+        T_TRUE(tbv_viable(sample_rate[r], frequency_per_div[t], totals[d]));
+        if(on_ladder)
+        {
+          T_EQ(ladder(totals[d], t), r);
+          for(u = ACQ_TB_FIRST; u <= ACQ_TB_LAST; u++)
+            if(ladder(totals[d], u) == r)
+              T_TRUE(((u > cur) ? u - cur : cur - u) >= ((t > cur) ? t - cur : cur - t));
+        }
+      }
+
+  T_EQ(acq_view_tb_for_rate(ACQ_RATES), -1);
+}
+
 int main(void)
 {
   test_ladder();
@@ -413,6 +452,7 @@ int main(void)
   test_snap_notice();
   test_owner_tap();
   test_spectrum_tap();
+  test_tb_for_rate();
 
   return t_report("test_acq_view");
 }
