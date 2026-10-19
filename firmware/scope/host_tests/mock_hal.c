@@ -601,6 +601,23 @@ int pc_hal_report_write(const char *text, uint32_t len, uint32_t power_on, char 
   return 0;
 }
 
+//READ_SCREEN: a framebuffer whose pixels say where they are (mock_screen_pixel), stored little-endian like the panel's
+uint32_t mock_screen_calls;
+
+//Every byte 0x80..0xFF: no "#" or frame magic inside the vector made from it (resp_read_screen_last_row)
+uint16_t mock_screen_pixel(uint32_t row, uint32_t x) { return (uint16_t)(0x8080 | (x & 0x7F) | (((x >> 7) & 7) << 12) | ((row & 15) << 8)); }
+
+void pc_hal_screen_rows(uint32_t row, uint32_t nrows, uint8_t *dst)
+{
+  uint32_t r, x;
+
+  mock_screen_calls++;
+
+  for(r=row;r<row + nrows;r++)
+    for(x=0;x<PC_SCREEN_WIDTH;x++, dst += 2)
+      pc_put_u16(dst, mock_screen_pixel(r, x));
+}
+
 uint8_t  mock_display_mode;
 int32_t  mock_spec_total = -1;          //bins in the mock spectrum, -1 = none shown
 uint32_t mock_spec_first, mock_spec_max;

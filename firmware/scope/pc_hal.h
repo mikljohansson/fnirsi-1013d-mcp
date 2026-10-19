@@ -368,6 +368,14 @@ uint8_t  pc_hal_display_mode(void);
 int32_t  pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t *hdr, uint8_t *levels);
 
 //----------------------------------------------------------------------------------------------------------------------------------
+// Screen (READ_SCREEN, fw 0.2.70, cap SCREENSHOT). MAIN context. The framebuffer the panel shows (maindisplaybuffer, the only
+// buffer DEBE layer 0 scans): RGB565 little-endian, PC_SCREEN_WIDTH pixels per row, no row padding. Copies rows
+// row .. row + nrows - 1 to dst (the caller checks the range).
+#define PC_SCREEN_WIDTH   800
+#define PC_SCREEN_HEIGHT  480
+void     pc_hal_screen_rows(uint32_t row, uint32_t nrows, uint8_t *dst);
+
+//----------------------------------------------------------------------------------------------------------------------------------
 // Bode plot (fw 0.2.66, protocol 1.20, docs/protocol.md section 14 row 60; pc_bode.c / bode_view.c). MAIN context.
 // BODE_CTRL: req is the zero-extended 16-byte request; returns a PC status (PC_E_BAD_ARG / PC_E_STATE with *detail) and
 // fills the 40-byte response. READ_BODE: the 32-byte header and up to max_rows 20-byte rows from row first; returns bytes.

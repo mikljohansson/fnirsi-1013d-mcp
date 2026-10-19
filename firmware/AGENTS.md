@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-screen (2026-10-19): fw 0.2.70-screen provisional, protocol 1.21 unchanged: READ_SCREEN built (cap SCREENSHOT), section 46.**
 **Branch fw-bode (2026-10-19): fw 0.2.66, protocol 1.20 (row 60): the Bode plot on the device (bode_dsp / bode_sweep / bode_view / pc_bode, BODE_CTRL / READ_BODE), section 42.**
 **Branch fw-polish1 (2026-10-19): fw 0.2.63 provisional, protocol unchanged: UI polish batch 1 (owner's walk-through of 0.2.59, items a-q), section 39.**
 **Branch fw-ui4 (2026-10-19): fw 0.2.59 provisional, protocol unchanged: UX makeover step 4 (Diagnostics as a main-loop
@@ -214,7 +215,7 @@ Unverified (caps UNVERIFIED bits stay set until they pass; `BENCH: Tn` comments 
 T1 ZLP (passed on Windows and Linux), T2 throughput (1.0 MB/s LOCAL, 2.35 MB/s REMOTE on Windows, >1 MB/s Linux),
 T3 read_lag / stale first byte (DEBUG_FPGA image), T4 A/B interleave order (generator loopback, 200 MS/s),
 T5 trigger_addr alignment, T6 0x18 after auto timeout, T7 FORCE via 0x1A=0 (PC_DEBUG), T8 volts per code with a DC
-reference on every range, T9 RGB565 framebuffer (READ_SCREEN not built), T10 stock trigger core (needs the stock
+reference on every range, T9 RGB565 framebuffer (READ_SCREEN built in 0.2.70-screen, section 46), T10 stock trigger core (needs the stock
 bitstream restored from backups/). Procedures: protocol section 12, README section 5 checklist.
 
 ## 8. Version ladder (bench-relevant images)
@@ -3012,3 +3013,34 @@ the wrong side; markers while "sweeping"; a cursor reading between points; the r
 off the track or a drag that changes the span's width; a sweep that does not restart on release; AUTO SET changing
 settings after a cancel; a CSV row count different from the measured points; the T CURSOR / SAVE WAVE buttons acting on
 the scope's cursors / waveform files in this mode; a time/div under ten samples per division offered anywhere.
+
+## 46. READ_SCREEN (fw-screen, fw 0.2.70-screen provisional, protocol 1.21 unchanged)
+
+Branch `fw-screen` from main 6c1e5bc. Commits: 350823e (handler, HAL, cap, host test, vectors on both sides,
+mcp/tests/test_read_screen.py), 59d93d8 (scope_screenshot description), then docs and this section. PC_FW_VERSION not
+bumped (the coordinator numbers it). Host tests green (test_session 69,896 / 69,894 checks, check_vectors 98 vectors,
+Python vector check ok, mcp pytest green apart from test_report, which needs matplotlib, absent from the local venv).
+GCC 13, GCC 10 and PC_DEBUG builds: no warning outside the upstream list. **Nothing benched.**
+
+- `h_read_screen` (pc_cmds.c): u16 row, u16 nrows; E_BAD_ARG detail 0 "rows outside 0..480" for row >= 480, nrows 0 or
+  row + nrows > 480; E_OVERFLOW detail 2 above 41 rows (both as the simulator's `_cmd_read_screen`); then the 8-byte
+  header (800, row, nrows, format 1) and the rows. Flags F_BASIC, not F_BUSY: main loop only, so a screenshot never
+  catches a UI pass half drawn and the 1 ms tick never copies 64 KB; while a modal menu is open the request gets E_BUSY
+  (the agent guide already says so). Cap SCREENSHOT is set with the shared-mode caps on every known bitstream (not on
+  an unknown one, whose caps are 0 by the fail-closed rule).
+- `pc_hal_screen_rows` (pc_hal_scope.c): one memcpy from `maindisplaybuffer` + row x 800, the buffer DEBE layer 0 scans
+  (`sys_init_display`; `DEBE_LAY0_ATT_CTRL1_RGB565`, line width 800 x 16 bits, so no row padding). Views that draw into
+  `displaybuffertmp` copy into it, so it holds what the panel shows. With the MMU on its pages are write-through
+  (section 26): the cached copy equals DDR, no cache maintenance. A compile-time check ties PC_SCREEN_WIDTH / HEIGHT
+  (pc_hal.h) to SCREEN_WIDTH / HEIGHT; GET_INFO bytes 72..75 use the same constants.
+- Mock (host_tests/mock_hal.c): `mock_screen_pixel` puts the x position in every pixel (row mod 16); every byte is
+  0x80..0xFF so the frame vector made from it (`resp_read_screen_last_row`) holds no "#" for the C request parser's
+  ASCII path (a large response frame with "#" in it gives ascii_overflow events in C and none in Python: a known
+  divergence for response frames the device never receives, left alone).
+
+**Bench step (coordinator + owner; FEL load only, no SD writes):** FEL-load `build-gcc10-pc/fnirsi_1013d.bin`, then
+`scope_info`: caps include SCREENSHOT (bit 6). `scope_screenshot` with the scope view running (calibration square on
+CH1): the PNG must match the panel (grid, trace colours: CH1 yellow, CH2 cyan, top bar text, the MCP chip) - compare
+with a photo of the screen; that is **T9**. Wrong colours (red and blue swapped, or a byte-swapped mess) = the format
+assumption; a shifted or torn picture = row stride. Repeat in the spectrum view, the phosphor view, Frequency response
+and Diagnostics. With a menu open: E_BUSY (expected). Time a full screenshot (about 1 s expected on Windows).

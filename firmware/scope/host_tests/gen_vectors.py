@@ -495,6 +495,22 @@ def build():
         "checked 1200",
         [decoded(CMDS["GET_HEALTH"], 66, hb, flags=FLAG_RESPONSE)])
 
+    # 5c. READ_SCREEN (fw 0.2.70, cap SCREENSHOT): the last row of the screen; the pixels are host_tests/mock_hal.c's
+    # mock_screen_pixel, so test_session.c's test_read_screen checks the handler against the same bytes
+    px = b"".join(struct.pack("<H", 0x8080 | (x & 0x7F) | ((x >> 7) << 12) | ((479 & 15) << 8)) for x in range(800))
+    rs = struct.pack("<HHHH", 800, 479, 1, 1) + px
+    f = frame(CMDS["READ_SCREEN"], 67, rs, flags=FLAG_RESPONSE)
+    add("resp_read_screen_last_row", f, [],
+        "READ_SCREEN response for row 479, 1 row (1608 bytes): u16 width 800, u16 row 479, u16 nrows 1, u16 format 1 "
+        "(RGB565 little-endian), then 800 pixels: 0x8080 | (x & 0x7F) | (x >> 7) << 12 | (479 & 15) << 8, every byte "
+        ">= 0x80 (mock_hal.c mock_screen_pixel)",
+        [decoded(CMDS["READ_SCREEN"], 67, rs, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 0) + b"rows outside 0..480"
+    f = frame(CMDS["READ_SCREEN"], 68, ep, status=4, flags=FLAG_RESPONSE)
+    add("resp_read_screen_bad_arg", f, [],
+        "READ_SCREEN E_BAD_ARG (row >= 480, nrows 0 or row + nrows > 480): detail 0, text",
+        [decoded(CMDS["READ_SCREEN"], 68, ep, status=4, flags=FLAG_RESPONSE)])
+
     # 6. ASCII probe (section 10)
     add("ascii_ver", b"#VER\n", [{"event": "ascii", "line": "VER"}], "#VER probe")
     add("ascii_local_crlf", b"#LOCAL\r\n", [{"event": "ascii", "line": "LOCAL"}], "#LOCAL with CR LF (the LF is junk)")

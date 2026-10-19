@@ -258,7 +258,6 @@ static void test_shared_basics(void)
   T_EQ(mock_nresps, 1); T_EQ(mock_resps[0].len, 4); T_MEM(mock_resps[0].data, "#OK\n", 4);
 
   //Not built in this firmware: capability bits are 0 and the commands fail closed
-  r = req(PC_CMD_READ_SCREEN, 0, 0);    T_EQ(r.h.status, PC_E_UNSUPPORTED);
   r = req(PC_CMD_ENTER_FEL, 0, 0);      T_EQ(r.h.status, PC_E_BAD_ARG);   //magic missing; FEL itself in test_fel_reset_stall
   r = req(PC_CMD_ACQUIRE_AVG, 0, 0);    T_EQ(r.h.status, PC_E_UNSUPPORTED);
   r = req(PC_CMD_READ_LIVE, 0, 0);      T_EQ(r.h.status, PC_E_UNSUPPORTED);
@@ -1733,6 +1732,72 @@ static void test_fft_bench(void)
   T_EQ(r.h.status, 0); T_EQ(mock_fft_bench_reps, 1);
 }
 
+//READ_SCREEN (fw 0.2.70, cap SCREENSHOT): rows of the framebuffer the panel shows; the range and size checks match the
+//simulator (mcp simulator.py _cmd_read_screen): E_BAD_ARG outside 0..480 or nrows 0, E_OVERFLOW detail 2 above 41 rows
+static void test_read_screen(void)
+{
+  extern uint32_t mock_screen_calls;
+  extern uint16_t mock_screen_pixel(uint32_t row, uint32_t x);
+  uint8_t q[4];
+  resp_t r;
+  uint32_t row, x, bad;
+
+  setup(0x1532);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SCREENSHOT, PC_CAP_SCREENSHOT);
+  T_EQ(pc_get_u16(r.p + 72), 800); T_EQ(pc_get_u16(r.p + 74), 480);
+
+  //40 rows from 0 (the MCP's request size): header, then 40 x 800 RGB565 little-endian
+  pc_put_u16(q, 0); pc_put_u16(q + 2, 40);
+  r = req(PC_CMD_READ_SCREEN, q, 4);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 8 + 40 * 800 * 2);
+  T_EQ(pc_get_u16(r.p), 800); T_EQ(pc_get_u16(r.p + 2), 0); T_EQ(pc_get_u16(r.p + 4), 40); T_EQ(pc_get_u16(r.p + 6), 1);
+  for(bad=0, row=0;row<40;row++)
+    for(x=0;x<800;x++)
+      bad += pc_get_u16(r.p + 8 + (row * 800 + x) * 2) != mock_screen_pixel(row, x);
+  T_EQ(bad, 0);
+
+  //The last row; 41 rows (the most that fit) at the end of the screen
+  pc_put_u16(q, 479); pc_put_u16(q + 2, 1);
+  r = req(PC_CMD_READ_SCREEN, q, 4);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 8 + 1600); T_EQ(pc_get_u16(r.p + 2), 479); T_EQ(pc_get_u16(r.p + 4), 1);
+  T_EQ(pc_get_u16(r.p + 8 + 799 * 2), mock_screen_pixel(479, 799));
+  pc_put_u16(q, 439); pc_put_u16(q + 2, 41);
+  r = req(PC_CMD_READ_SCREEN, q, 4);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 8 + 41 * 1600); T_EQ(pc_get_u16(r.p + 8), mock_screen_pixel(439, 0));
+
+  //Out of range: row 480, nrows 0, past the last row, row 0xFFFF, an empty request (row 0, nrows 0)
+  mock_screen_calls = 0;
+  pc_put_u16(q, 480); pc_put_u16(q + 2, 1);
+  r = req(PC_CMD_READ_SCREEN, q, 4);   T_EQ(r.h.status, PC_E_BAD_ARG);
+  pc_put_u16(q, 0); pc_put_u16(q + 2, 0);
+  r = req(PC_CMD_READ_SCREEN, q, 4);   T_EQ(r.h.status, PC_E_BAD_ARG);
+  pc_put_u16(q, 470); pc_put_u16(q + 2, 11);
+  r = req(PC_CMD_READ_SCREEN, q, 4);   T_EQ(r.h.status, PC_E_BAD_ARG);
+  pc_put_u16(q, 0xFFFF); pc_put_u16(q + 2, 2);
+  r = req(PC_CMD_READ_SCREEN, q, 4);   T_EQ(r.h.status, PC_E_BAD_ARG);
+  r = req(PC_CMD_READ_SCREEN, 0, 0);   T_EQ(r.h.status, PC_E_BAD_ARG);
+
+  //More than fits one response
+  pc_put_u16(q, 0); pc_put_u16(q + 2, 42);
+  r = req(PC_CMD_READ_SCREEN, q, 4);   T_EQ(r.h.status, PC_E_OVERFLOW); T_EQ(pc_get_u16(r.p), 2);
+  T_EQ(mock_screen_calls, 0);
+
+  //Main loop only: the timer tick leaves it queued, the next MAIN poll answers it
+  mock_clear_resps();
+  pc_put_u16(q, 0); pc_put_u16(q + 2, 1);
+  push_frame(PC_CMD_READ_SCREEN, next_seq, q, 4);
+  pc_poll(&S, PC_CTX_ISR);
+  T_EQ(mock_nresps, 0); T_EQ(mock_screen_calls, 0);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_TRUE(find_resp(next_seq, &r)); T_EQ(r.h.status, 0); T_EQ(mock_screen_calls, 1);
+  next_seq++;
+
+  //No FPGA involved, but an unknown bitstream reports caps 0: fails closed like every capability command
+  setup(0x9999);
+  r = req(PC_CMD_READ_SCREEN, q, 4);   T_EQ(r.h.status, PC_E_UNSUPPORTED);
+}
+
 //CAL_PROBE (1.21 provisional, fw 0.2.67): the wizard's zero measurement of one channel and range, UI stopped, no host
 //capture pending, main loop only
 static void test_cal_probe(void)
@@ -3063,6 +3128,7 @@ int main(void)
   test_event_log();
   test_fel_reset_stall();
   test_fft_bench();
+  test_read_screen();
   test_cal_probe();
   test_fw_auto_timeout();
   test_spectrum();

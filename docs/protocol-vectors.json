@@ -6775,6 +6775,38 @@
    "device_events": []
   },
   {
+   "name": "resp_read_screen_last_row",
+   "description": "READ_SCREEN response for row 479, 1 row (1608 bytes): u16 width 800, u16 row 479, u16 nrows 1, u16 format 1 (RGB565 little-endian), then 800 pixels: 0x8080 | (x & 0x7F) | (x >> 7) << 12 | (479 & 15) << 8, every byte >= 0x80 (mock_hal.c mock_screen_pixel)",
+   "hex": "a513010101044300000048060000c2732003df0101000100808f818f828f838f848f858f868f878f888f898f8a8f8b8f8c8f8d8f8e8f8f8f908f918f928f938f948f958f968f978f988f998f9a8f9b8f9c8f9d8f9e8f9f8fa08fa18fa28fa38fa48fa58fa68fa78fa88fa98faa8fab8fac8fad8fae8faf8fb08fb18fb28fb38fb48fb58fb68fb78fb88fb98fba8fbb8fbc8fbd8fbe8fbf8fc08fc18fc28fc38fc48fc58fc68fc78fc88fc98fca8fcb8fcc8fcd8fce8fcf8fd08fd18fd28fd38fd48fd58fd68fd78fd88fd98fda8fdb8fdc8fdd8fde8fdf8fe08fe18fe28fe38fe48fe58fe68fe78fe88fe98fea8feb8fec8fed8fee8fef8ff08ff18ff28ff38ff48ff58ff68ff78ff88ff98ffa8ffb8ffc8ffd8ffe8fff8f809f819f829f839f849f859f869f879f889f899f8a9f8b9f8c9f8d9f8e9f8f9f909f919f929f939f949f959f969f979f989f999f9a9f9b9f9c9f9d9f9e9f9f9fa09fa19fa29fa39fa49fa59fa69fa79fa89fa99faa9fab9fac9fad9fae9faf9fb09fb19fb29fb39fb49fb59fb69fb79fb89fb99fba9fbb9fbc9fbd9fbe9fbf9fc09fc19fc29fc39fc49fc59fc69fc79fc89fc99fca9fcb9fcc9fcd9fce9fcf9fd09fd19fd29fd39fd49fd59fd69fd79fd89fd99fda9fdb9fdc9fdd9fde9fdf9fe09fe19fe29fe39fe49fe59fe69fe79fe89fe99fea9feb9fec9fed9fee9fef9ff09ff19ff29ff39ff49ff59ff69ff79ff89ff99ffa9ffb9ffc9ffd9ffe9fff9f80af81af82af83af84af85af86af87af88af89af8aaf8baf8caf8daf8eaf8faf90af91af92af93af94af95af96af97af98af99af9aaf9baf9caf9daf9eaf9fafa0afa1afa2afa3afa4afa5afa6afa7afa8afa9afaaafabafacafadafaeafafafb0afb1afb2afb3afb4afb5afb6afb7afb8afb9afbaafbbafbcafbdafbeafbfafc0afc1afc2afc3afc4afc5afc6afc7afc8afc9afcaafcbafccafcdafceafcfafd0afd1afd2afd3afd4afd5afd6afd7afd8afd9afdaafdbafdcafddafdeafdfafe0afe1afe2afe3afe4afe5afe6afe7afe8afe9afeaafebafecafedafeeafefaff0aff1aff2aff3aff4aff5aff6aff7aff8aff9affaaffbaffcaffdaffeafffaf80bf81bf82bf83bf84bf85bf86bf87bf88bf89bf8abf8bbf8cbf8dbf8ebf8fbf90bf91bf92bf93bf94bf95bf96bf97bf98bf99bf9abf9bbf9cbf9dbf9ebf9fbfa0bfa1bfa2bfa3bfa4bfa5bfa6bfa7bfa8bfa9bfaabfabbfacbfadbfaebfafbfb0bfb1bfb2bfb3bfb4bfb5bfb6bfb7bfb8bfb9bfbabfbbbfbcbfbdbfbebfbfbfc0bfc1bfc2bfc3bfc4bfc5bfc6bfc7bfc8bfc9bfcabfcbbfccbfcdbfcebfcfbfd0bfd1bfd2bfd3bfd4bfd5bfd6bfd7bfd8bfd9bfdabfdbbfdcbfddbfdebfdfbfe0bfe1bfe2bfe3bfe4bfe5bfe6bfe7bfe8bfe9bfeabfebbfecbfedbfeebfefbff0bff1bff2bff3bff4bff5bff6bff7bff8bff9bffabffbbffcbffdbffebfffbf80cf81cf82cf83cf84cf85cf86cf87cf88cf89cf8acf8bcf8ccf8dcf8ecf8fcf90cf91cf92cf93cf94cf95cf96cf97cf98cf99cf9acf9bcf9ccf9dcf9ecf9fcfa0cfa1cfa2cfa3cfa4cfa5cfa6cfa7cfa8cfa9cfaacfabcfaccfadcfaecfafcfb0cfb1cfb2cfb3cfb4cfb5cfb6cfb7cfb8cfb9cfbacfbbcfbccfbdcfbecfbfcfc0cfc1cfc2cfc3cfc4cfc5cfc6cfc7cfc8cfc9cfcacfcbcfcccfcdcfcecfcfcfd0cfd1cfd2cfd3cfd4cfd5cfd6cfd7cfd8cfd9cfdacfdbcfdccfddcfdecfdfcfe0cfe1cfe2cfe3cfe4cfe5cfe6cfe7cfe8cfe9cfeacfebcfeccfedcfeecfefcff0cff1cff2cff3cff4cff5cff6cff7cff8cff9cffacffbcffccffdcffecfffcf80df81df82df83df84df85df86df87df88df89df8adf8bdf8cdf8ddf8edf8fdf90df91df92df93df94df95df96df97df98df99df9adf9bdf9cdf9ddf9edf9fdfa0dfa1dfa2dfa3dfa4dfa5dfa6dfa7dfa8dfa9dfaadfabdfacdfaddfaedfafdfb0dfb1dfb2dfb3dfb4dfb5dfb6dfb7dfb8dfb9dfbadfbbdfbcdfbddfbedfbfdfc0dfc1dfc2dfc3dfc4dfc5dfc6dfc7dfc8dfc9dfcadfcbdfccdfcddfcedfcfdfd0dfd1dfd2dfd3dfd4dfd5dfd6dfd7dfd8dfd9dfdadfdbdfdcdfdddfdedfdfdfe0dfe1dfe2dfe3dfe4dfe5dfe6dfe7dfe8dfe9dfeadfebdfecdfeddfeedfefdff0dff1dff2dff3dff4dff5dff6dff7dff8dff9dffadffbdffcdffddffedfffdf80ef81ef82ef83ef84ef85ef86ef87ef88ef89ef8aef8bef8cef8def8eef8fef90ef91ef92ef93ef94ef95ef96ef97ef98ef99ef9aef9bef9cef9def9eef9fef4dc22107",
+   "frames": [
+    {
+     "cmd": 1025,
+     "seq": 67,
+     "status": 0,
+     "flags": 1,
+     "len": 1608,
+     "payload": "2003df0101000100808f818f828f838f848f858f868f878f888f898f8a8f8b8f8c8f8d8f8e8f8f8f908f918f928f938f948f958f968f978f988f998f9a8f9b8f9c8f9d8f9e8f9f8fa08fa18fa28fa38fa48fa58fa68fa78fa88fa98faa8fab8fac8fad8fae8faf8fb08fb18fb28fb38fb48fb58fb68fb78fb88fb98fba8fbb8fbc8fbd8fbe8fbf8fc08fc18fc28fc38fc48fc58fc68fc78fc88fc98fca8fcb8fcc8fcd8fce8fcf8fd08fd18fd28fd38fd48fd58fd68fd78fd88fd98fda8fdb8fdc8fdd8fde8fdf8fe08fe18fe28fe38fe48fe58fe68fe78fe88fe98fea8feb8fec8fed8fee8fef8ff08ff18ff28ff38ff48ff58ff68ff78ff88ff98ffa8ffb8ffc8ffd8ffe8fff8f809f819f829f839f849f859f869f879f889f899f8a9f8b9f8c9f8d9f8e9f8f9f909f919f929f939f949f959f969f979f989f999f9a9f9b9f9c9f9d9f9e9f9f9fa09fa19fa29fa39fa49fa59fa69fa79fa89fa99faa9fab9fac9fad9fae9faf9fb09fb19fb29fb39fb49fb59fb69fb79fb89fb99fba9fbb9fbc9fbd9fbe9fbf9fc09fc19fc29fc39fc49fc59fc69fc79fc89fc99fca9fcb9fcc9fcd9fce9fcf9fd09fd19fd29fd39fd49fd59fd69fd79fd89fd99fda9fdb9fdc9fdd9fde9fdf9fe09fe19fe29fe39fe49fe59fe69fe79fe89fe99fea9feb9fec9fed9fee9fef9ff09ff19ff29ff39ff49ff59ff69ff79ff89ff99ffa9ffb9ffc9ffd9ffe9fff9f80af81af82af83af84af85af86af87af88af89af8aaf8baf8caf8daf8eaf8faf90af91af92af93af94af95af96af97af98af99af9aaf9baf9caf9daf9eaf9fafa0afa1afa2afa3afa4afa5afa6afa7afa8afa9afaaafabafacafadafaeafafafb0afb1afb2afb3afb4afb5afb6afb7afb8afb9afbaafbbafbcafbdafbeafbfafc0afc1afc2afc3afc4afc5afc6afc7afc8afc9afcaafcbafccafcdafceafcfafd0afd1afd2afd3afd4afd5afd6afd7afd8afd9afdaafdbafdcafddafdeafdfafe0afe1afe2afe3afe4afe5afe6afe7afe8afe9afeaafebafecafedafeeafefaff0aff1aff2aff3aff4aff5aff6aff7aff8aff9affaaffbaffcaffdaffeafffaf80bf81bf82bf83bf84bf85bf86bf87bf88bf89bf8abf8bbf8cbf8dbf8ebf8fbf90bf91bf92bf93bf94bf95bf96bf97bf98bf99bf9abf9bbf9cbf9dbf9ebf9fbfa0bfa1bfa2bfa3bfa4bfa5bfa6bfa7bfa8bfa9bfaabfabbfacbfadbfaebfafbfb0bfb1bfb2bfb3bfb4bfb5bfb6bfb7bfb8bfb9bfbabfbbbfbcbfbdbfbebfbfbfc0bfc1bfc2bfc3bfc4bfc5bfc6bfc7bfc8bfc9bfcabfcbbfccbfcdbfcebfcfbfd0bfd1bfd2bfd3bfd4bfd5bfd6bfd7bfd8bfd9bfdabfdbbfdcbfddbfdebfdfbfe0bfe1bfe2bfe3bfe4bfe5bfe6bfe7bfe8bfe9bfeabfebbfecbfedbfeebfefbff0bff1bff2bff3bff4bff5bff6bff7bff8bff9bffabffbbffcbffdbffebfffbf80cf81cf82cf83cf84cf85cf86cf87cf88cf89cf8acf8bcf8ccf8dcf8ecf8fcf90cf91cf92cf93cf94cf95cf96cf97cf98cf99cf9acf9bcf9ccf9dcf9ecf9fcfa0cfa1cfa2cfa3cfa4cfa5cfa6cfa7cfa8cfa9cfaacfabcfaccfadcfaecfafcfb0cfb1cfb2cfb3cfb4cfb5cfb6cfb7cfb8cfb9cfbacfbbcfbccfbdcfbecfbfcfc0cfc1cfc2cfc3cfc4cfc5cfc6cfc7cfc8cfc9cfcacfcbcfcccfcdcfcecfcfcfd0cfd1cfd2cfd3cfd4cfd5cfd6cfd7cfd8cfd9cfdacfdbcfdccfddcfdecfdfcfe0cfe1cfe2cfe3cfe4cfe5cfe6cfe7cfe8cfe9cfeacfebcfeccfedcfeecfefcff0cff1cff2cff3cff4cff5cff6cff7cff8cff9cffacffbcffccffdcffecfffcf80df81df82df83df84df85df86df87df88df89df8adf8bdf8cdf8ddf8edf8fdf90df91df92df93df94df95df96df97df98df99df9adf9bdf9cdf9ddf9edf9fdfa0dfa1dfa2dfa3dfa4dfa5dfa6dfa7dfa8dfa9dfaadfabdfacdfaddfaedfafdfb0dfb1dfb2dfb3dfb4dfb5dfb6dfb7dfb8dfb9dfbadfbbdfbcdfbddfbedfbfdfc0dfc1dfc2dfc3dfc4dfc5dfc6dfc7dfc8dfc9dfcadfcbdfccdfcddfcedfcfdfd0dfd1dfd2dfd3dfd4dfd5dfd6dfd7dfd8dfd9dfdadfdbdfdcdfdddfdedfdfdfe0dfe1dfe2dfe3dfe4dfe5dfe6dfe7dfe8dfe9dfeadfebdfecdfeddfeedfefdff0dff1dff2dff3dff4dff5dff6dff7dff8dff9dffadffbdffcdffddffedfffdf80ef81ef82ef83ef84ef85ef86ef87ef88ef89ef8aef8bef8cef8def8eef8fef90ef91ef92ef93ef94ef95ef96ef97ef98ef99ef9aef9bef9cef9def9eef9fef"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_read_screen_bad_arg",
+   "description": "READ_SCREEN E_BAD_ARG (row >= 480, nrows 0 or row + nrows > 480): detail 0, text",
+   "hex": "a513010101044400040015000000664c0000726f7773206f75747369646520302e2e34383087181008",
+   "frames": [
+    {
+     "cmd": 1025,
+     "seq": 68,
+     "status": 4,
+     "flags": 1,
+     "len": 21,
+     "payload": "0000726f7773206f75747369646520302e2e343830"
+    }
+   ],
+   "device_events": []
+  },
+  {
    "name": "ascii_ver",
    "description": "#VER probe",
    "hex": "235645520a",
@@ -7236,6 +7268,50 @@
      "flags": 1,
      "len": 68,
      "payload": "2d000000110000000101d1194118000013000000180101a00100000020030000803e0000010500000200e803fd0c000000800000010201000100f203e281000000810000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_read_screen_tail",
+   "description": "READ_SCREEN rows 440..479 (the last of the 12 requests of a full screen)",
+   "hex": "a513010001042a0000000400000034ecb8012800f47d1da5",
+   "frames": [
+    {
+     "cmd": 1025,
+     "seq": 42,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "b8012800"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 1025,
+     "seq": 42,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "b8012800",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_read_screen_e_overflow",
+   "description": "READ_SCREEN E_OVERFLOW detail 2: more rows than fit one response (42 x 1600 + 8 > 66560)",
+   "hex": "a513010101042b000c001d0000009d9002006174206d6f737420343120726f7773207065722072657175657374fe16b45f",
+   "frames": [
+    {
+     "cmd": 1025,
+     "seq": 43,
+     "status": 12,
+     "flags": 1,
+     "len": 29,
+     "payload": "02006174206d6f737420343120726f7773207065722072657175657374"
     }
    ],
    "device_events": [],
