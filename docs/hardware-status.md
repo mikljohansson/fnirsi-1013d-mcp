@@ -610,3 +610,15 @@ Newest entries at the bottom. Format: date, who, what, result.
 - Logger stopped 08:04 after 53 rounds (23:16-08:00), 53/53 reopens OK. The 03:48 step held unchanged to the end: gated CH1 128.1-128.6
   both cores, CH2 corrected A 127.45 / B 128.9-129.1, raw gated CH2 A 128.0 / B 128.1-128.3 (before the step 129.8 / 128.2): CH2's raw
   cores now agree, so the v2 correction (which expected A 1.6 above B) over-corrects A by 1.6. The owner recalibrates on 0.2.48 this morning.
+
+### 2026-10-19 morning: 0.2.48 MMU bench (owner present)
+
+- 08:05 loaded fw-0.2.48_14b2dc0f (merged main): boots, USB fine, but FFT_BENCH CP15 = 0x0005107C (MMU off) and the old timings. fw-mmu's
+  own branch image (2f768fd9) loaded next: CP15 0x0005107D, 4096-point DDR FFT 2.91 ms. Cause: pc_hooks.h guarded the enable with
+  `#if PC_PROTOCOL && PC_MMU`; fw-gen7's purge removed -DPC_PROTOCOL, so the merged image compiled the hook away. Fixed 39b98c4.
+- Rebuilt and re-pinned: backups/fw-0.2.48_9e0954a5.bin (MMU) and backups/fw-0.2.48-nommu_d244fa56.bin. Loaded 9e0954a5 at 08:10:
+  **CP15 0x0005107D (MMU 1, D-cache 1, I-cache 1).** FFT_BENCH run times, MMU off (0.2.37/0.2.48 off) -> on:
+  1024 DDR 2.20 -> 0.21 ms, 2048 DDR 4.95 -> 0.68 ms, 4096 DDR 10.96 -> 2.72 ms, 16384 DDR 51.9 -> 33.7 ms (exceeds the 16 KB cache),
+  1024 SRAM 1.03 -> 0.22 ms, 2048 SRAM 2.30 -> 0.66 ms; DDR and SRAM now equal, so SRAM A buffers no longer matter for speed.
+  **pass_ms in the scope view 14-18 ms (median 15), was 30.** Census 500 PINGs 0 failures 0.89 ms. No restart, fault registers 0.
+  Pending: owner's screen coherence check (menus, spectrum, phosphor), touch, soak, SD, ENTER_FEL round trips (section 26 steps 4-9).

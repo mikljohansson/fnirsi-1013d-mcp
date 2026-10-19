@@ -30,9 +30,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   reconnect a second later worked. usb_resumes has been 0 on every build while usb_suspends count: the device never sees or handles the
   resume, so the host resets the port instead. Investigate MUSB suspend/resume (INTRUSB resume enable, POWER.SuspendM/Resume, PHY state
   during suspend, clocks), make resume work, and bench with the soak tool in idle-closed-port mode (open, close, wait 2-5 min, open).
-- [x] **MMU + D-cache** built by fw-mmu as fw 0.2.48 (merged; PC_MMU switch, `make gcc10-nommu` for the A/B image; design
-  docs/plans/mmu-dcache.md; bench sequence firmware/AGENTS.md section 26, only with the owner present: a hang needs a power cycle).
-  Bench pending: FFT_BENCH CP15 word 0x0005107D, DDR FFT rows 2-4x faster, pass_ms per view, screen coherence, soak, SD, ENTER_FEL x3.
+- [x] **MMU + D-cache** fw 0.2.48 (fw-mmu; hook guard fixed 39b98c4 after the purge merge). Benched 10-19 08:10: CP15 0x0005107D, FFT 4096
+  10.96 -> 2.72 ms, 1024 2.20 -> 0.21 ms, scope-view pass_ms 30 -> 15, census clean. Still to bench: screen coherence (owner), touch, soak,
+  SD save/restore, ENTER_FEL round trips (section 26 steps 4-9).
 - [ ] **Dead-code purge** (owner dropped the byte-identical rule 10-18): PC_PROTOCOL always on, hidden-option masks
   replaced by removal (FFT switch, generator Wave/Ampl/Offset/Phase, Long memory, hold-off, 1014D remnants), unused files,
   check-reference target and reference downloads removed from the Makefile/CI/docs. Do after the spectrum/calibration
