@@ -31,7 +31,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.77 (provisional, not bumped yet; protocol 1.22, unchanged)
+#### 0.2.77 - 2026-10-19 (protocol 1.22, unchanged)
 
 - Spectrum zoom: span drives the sample rate (docs/ui-guidelines.md section 2, owner 2026-10-19 23:09). The span steps
   through 1-2-5 values (1 Hz .. 20 MHz, then the whole 0 .. 25 MHz axis) about the centre; a drag or the slider pans

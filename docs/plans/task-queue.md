@@ -156,7 +156,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   depths above 6000 are hidden (the 16-bit record halves the memory, correct); switching back to Filter Off leaves them hidden until
   something else redraws. Recompute the memory chips' availability from the filter state on every Filter change and redraw the
   column; host test. Next ACQ-menu batch.
-- **Spectrum zoom ladder** (owner 10-19 23:09 **(owner)**: "let's try your recommendation"; fw-spzoom dispatched): span is the
+- [x] **Spectrum zoom ladder** (fw 0.2.77, bench pending) (owner 10-19 23:09 **(owner)**: "let's try your recommendation"; fw-spzoom dispatched): span is the
   parameter in 1-2-5 steps around the centre (tap right narrows, tap left widens, drag pans); the sample rate is derived from the
   stop frequency as the slowest rate whose fs/2 covers it (best RBW for free; the (span, rate) pair is a function of the span, so
   reversible like the Scope ladder); FFT length stays the user's (Analysis fold-out, default 2048), so the span always holds
@@ -176,6 +176,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   GET_BATTERY, GET_HEALTH, BODE_STATUS) never yield. Design paragraph in ui-guidelines.md and protocol.md section 14 row first,
   host test with the mock UI, mcp client/server: drop the "close it on the scope and retry" advice where the firmware yields
   (keep it for older firmware by version).
+- **Spectrum ladder follow-ups** (fw-spzoom handoff, section 52): (a) show the capture time N/fs somewhere (the Time card is the
+  waterfall's history span); (b) make the 2 s zoom-in limit use the real capture time memory depth/fs, or cap the memory depth in
+  the Spectrum; (c) re-derive the rate when the FFT length or memory depth changes, not only at the next zoom/pan step. With the
+  next Spectrum batch.
 - **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
   SCREENSHOT bit 6, simulator has it, `Scope.read_screen` reads 40 rows per request) but the firmware handler is NULL
   (pc_cmds.c "BENCH: T9"). Implement it in all builds: rows of the live framebuffer as RGB565, the header per protocol.md, the
@@ -411,6 +415,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   sweep. Open (queue): the simulator lacks reason 8 and the new header rule (mcp item); a single sweep started from the CTRL page
   leaves the bar on that page where RUN/STOP is not visible (owner to decide: jump back to page one?); after a sweep the generator
   chip shows the user's generator although the pin is off. Loaded 21:30 as backups/fw-0.2.71_1264e26c.bin; walk-through pending.
+- fw-spzoom (done 23:35, about 295k tokens, merged 23:40 as fw 0.2.77, handoff firmware/AGENTS.md section 52, not loaded: the
+  scope is off): Spectrum zoom ladder in spec_ladder.c (1-2-5 spans about the centre, rate = slowest whose fs/2 covers the stop
+  with a capture of N samples at most 2.048 s, 16-bin minimum, taps at an end do nothing, stopped keeps the record's rate with
+  the Scope's notice, Auto lands on a ladder cell from 0 Hz, the full axis at 50 MSa/s = option (a)); test_spec_zoom 685,416
+  checks. Open points from the handoff (queue): the Time card shows the waterfall history, nothing shows N/fs; the 2 s limit uses
+  N/fs while a capture really takes memory depth/fs (16k at 2 kSa/s = 8 s); an FFT length or memory change does not re-derive the
+  rate until the next step; option (b) is one line.
 - fw-zoom (done 22:35, about 240k tokens, merged 22:38 as fw 0.2.76, pinned backups/fw-0.2.76_bf551df4.bin, loaded 22:39, handoff
   firmware/AGENTS.md section 50 with the bench list): Scope slider tap jumps at touch-down (0.2.73 only jumped after a 6 px move);
   zoom ladder: each tap or ACQ time/div box sets the time/div with the fastest rate whose record covers ten divisions at ten or

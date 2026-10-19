@@ -3478,7 +3478,7 @@ the Scope's track that does not jump; a jump from y 436..449.
 Owner 2026-10-19 22:28: spectrum.c lost `spec_draw_legend` and `INFO_Y1` (Waterfall and Density colour legends); the
 warning line at the plot's top middle and the rest of both variants are unchanged. No test checked the legend texts.
 
-## 52. fw-spzoom: the Spectrum's zoom ladder, span drives the sample rate (fw 0.2.77 provisional, protocol 1.22 unchanged)
+## 52. fw-spzoom: the Spectrum's zoom ladder, span drives the sample rate (fw 0.2.77, protocol 1.22 unchanged)
 
 Branch `fw-spzoom` from main 25fa3e6 (fw 0.2.76). Brief: docs/plans/task-queue.md "Spectrum zoom ladder" (owner 10-19
 23:09, "let's try your recommendation"); coordinator 23:2x: option (a), the plain rule (the full axis runs at 50 MSa/s,
