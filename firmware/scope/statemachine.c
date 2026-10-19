@@ -21,6 +21,7 @@
 #include "DS3231.h"
 #include "menu.h"
 #include "ui_menu.h"
+#include "ui_settings.h"
 #include "touch_pick.h"
 #include "test.h"
 
@@ -985,7 +986,6 @@ void scan_for_touch(void)
 
 void handle_main_menu_touch(void)
 {
-  uint8 tmp;                            //for set boot mode
   int   row;                            //fw 0.2.51: main menu row under the touch (ui_menu.h), -1 outside
   
   //Stay in the menu as long as there is no touch outside the menu
@@ -1160,11 +1160,11 @@ void handle_main_menu_touch(void)
       
       //**--------------------------------------------------------
       
-      //Check on system settings menu opened and being touched
-      else if(systemsettingsmenuopen && (xtouch >= 150) && (xtouch <= 394) && (ytouch >= 46) && (ytouch <= SYSTEM_MENU_YPOS + SYSTEM_MENU_HEIGHT))
+      //Check on system settings menu opened and being touched (fw 0.2.55: the rows of ui_settings.h, contiguous 59 px)
+      else if(systemsettingsmenuopen && ((row = ui_fo_row_at(pc_glue_ui_has(PC_FEAT_RTC), xtouch, ytouch)) >= 0))
       {
         //Check if on screen brightness
-        if((ytouch >= 47) && (ytouch <= 103))
+        if(row == UI_FO_SCREEN)
         {
           //Check if already open
           if(screenbrightnessopen == 0)
@@ -1186,7 +1186,7 @@ void handle_main_menu_touch(void)
           }
         }
         //Check if on grid brightness
-        else if((ytouch >= 105) && (ytouch <= 162))
+        else if(row == UI_FO_GRID)
         {
           //Check if already open
           if(gridbrightnessopen == 0)
@@ -1207,41 +1207,50 @@ void handle_main_menu_touch(void)
             gridbrightnessopen = 1;
           }
         }
-        //Check if on OTHER SETINGS
-        else if((ytouch >= 164) && (ytouch <= 221))
+        //File message timeout (1.00o5's notification confirmation): a tap toggles wait for a tap / 0.7 s
+        else if(row == UI_FO_FILEMSG)
         {
           //Close any of the sub menus if open
-          //close_open_menus(0);
+          close_open_menus(0);
+
+          //Toggle the file message timeout and show it while touched
+          scopesettings.confirmationmode ^= 1;
+          scope_system_settings_filemsg_item(1);
 
           //Wait until touch is released
-          //tp_i2c_wait_for_touch_release();
+          tp_i2c_wait_for_touch_release();
 
+          scope_system_settings_filemsg_item(0);
+        }
+        //Time and date: 1.00o5's editor beside the fold-out
+        else if(row == UI_FO_TIME)
+        {
           //Check if already open
-          if(othersettingsopen == 0)
+          if(RTCsettingsopen == 0)
           {
             //Close any of the sub menus if open
             close_open_menus(0);
-            
+
             //Set this item active
-            scope_system_settings_other_settings_item(1);
- 
+            scope_system_settings_RTC_settings_item(1);
+
             //Wait until touch is released
             tp_i2c_wait_for_touch_release();
-            
+
             //Save the screen under the menu
             display_set_destination_buffer(displaybuffer3);
-            display_copy_rect_from_screen(OTHER_MENU_XPOS, OTHER_MENU_YPOS, OTHER_MENU_WIDTH, OTHER_MENU_HEIGHT);
-            
-            //Show the other settings menu
-            scope_system_settings_open_other_settings_menu();
+            display_copy_rect_from_screen(RTC_MENU_XPOS, RTC_MENU_YPOS, RTC_MENU_WIDTH, RTC_MENU_HEIGHT);
 
-            //Signal the menu other_settings is opened
-            othersettingsopen = 1;
+            //Show the RTC settings menu
+            scope_open_RTC_settings_menu();
+
+            //Signal the menu RTC_settings is opened
+            RTCsettingsopen = 1;
           }
         }
-        //Check if on baseline calibration: the calibration wizard (cal_wiz_ui.c), which owns the whole screen until
-        //Cancel or Done and restores it
-        else if((ytouch >= 223) && (ytouch <= 280))
+        //Baseline calibration (interim until Diagnostics has Calibrate): the calibration wizard (cal_wiz_ui.c), which
+        //owns the whole screen until Cancel or Done and restores it
+        else if(row == UI_FO_CAL)
         {
           //Check if already open (the input calibration boxes after a wizard run)
           if(calibrationopen == 0)
@@ -1272,167 +1281,27 @@ void handle_main_menu_touch(void)
             }
           }
         }
-        //check on notification confirmation (fw 0.2.51: one row up, X-Y moved to the acquisition menu's Display row)
-        else if((ytouch >= 282) && (ytouch <= 339))
+        //Other settings: the Settings screen (ui_settings_ui.c), modal until Back, then back to the scope
+        else
         {
           //Close any of the sub menus if open
           close_open_menus(0);
 
-          //Toggle the notification confirmation mode
-          scopesettings.confirmationmode ^= 1;
+          //Set this item active
+          scope_system_settings_other_settings_item(1);
 
-          //Show the state
-          scope_system_settings_confirmation_item(1);
-          //scope_display_slide_button(326, 358, scopesettings.confirmationmode, GREEN_COLOR);
-          
           //Wait until touch is released
           tp_i2c_wait_for_touch_release();
-        }
-        //check on RTC settings
-        else if((ytouch >= 341) && (ytouch <= 399) PC_UI_HAS(PC_FEAT_RTC))
-        {
-          //Check if already open
-          if(RTCsettingsopen == 0)
-          {
-            //Close any of the sub menus if open
-            close_open_menus(0);
-            
-            //Set this item active
-            scope_system_settings_RTC_settings_item(1);
 
-            //Wait until touch is released
-            tp_i2c_wait_for_touch_release();
-            
-            //Save the screen under the menu
-            display_set_destination_buffer(displaybuffer3);
-            display_copy_rect_from_screen(RTC_MENU_XPOS, RTC_MENU_YPOS, RTC_MENU_WIDTH, RTC_MENU_HEIGHT);
-            
-            //Show the RTC settings menu
-            scope_open_RTC_settings_menu();
+          //Close the fold-out and put back what was under the main menu, so the screen keeps the clean scope
+          close_open_menus(1);
+          display_set_source_buffer(displaybuffer1);
+          display_copy_rect_to_screen(MAIN_MENU_XPOS, MAIN_MENU_YPOS, MAIN_MENU_WIDTH, MAIN_MENU_HEIGHT);
 
-            //Signal the menu RTC_settings is opened
-            RTCsettingsopen = 1;
-          }
-        }
-      }
-      //****----------------------------------------------------------------------      
-            //****----------------------------------------------------------------------      
-      else if(othersettingsopen && (xtouch >= OTHER_MENU_XPOS) && (xtouch <= OTHER_MENU_XPOS + OTHER_MENU_WIDTH) && (ytouch >= OTHER_MENU_YPOS) && (ytouch <= OTHER_MENU_YPOS + OTHER_MENU_HEIGHT+15))
-      {
-        //Check if touch button Boot menu
-        if((ytouch >= OTHER_MENU_YPOS) && (ytouch <= OTHER_MENU_YPOS + 46))//+59
-        {
-          //Toggle the Boot_menu
-          tmp = (boot_menu_start & 0x04)>>2;
-          tmp ^= 1;
-          boot_menu_start &= 0x03;
-          boot_menu_start |= tmp<<2;
-            
-          //Set this item active
-          scope_system_settings_other_settings_boot_menu_item();
-          //scope_system_settings_other_settings_default_start_item(0);
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-        }
-        //Check if touch default start
-        else if((ytouch >= OTHER_MENU_YPOS + 46) && (ytouch <= OTHER_MENU_YPOS + 92))//59-118
-        {    
-          //Toggle the Default start
-          tmp = (boot_menu_start & 0x03);
-          if (tmp < 2) tmp++; else tmp = 0;  
-          boot_menu_start &= 0x04;
-          boot_menu_start |= tmp;
-                  
-          //Set this item active
-          scope_system_settings_other_settings_default_start_item();
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-        } 
-        //Check if touch button NEWAUTOSETUP 
-        else if((ytouch >= OTHER_MENU_YPOS + 92) && (ytouch <= OTHER_MENU_YPOS + 138))//118-177
-        {    
-          //Toggle the new_autosetup
-          scopesettings.new_autosetup ^= 1;
-          
-          //Set this item active
-          scope_system_settings_other_settings_new_autosetup_item();
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-        }    
-        //Check if touch button lock cursors
-        else if((ytouch >= OTHER_MENU_YPOS + 138) && (ytouch <= OTHER_MENU_YPOS + 184))
-        {
-          //Toggle the lock cursors
-          scopesettings.lockcursors ^= 1;
-                  
-          //Set this item active
-          scope_system_settings_other_settings_lock_cursor_item();
-          
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release();
-        }
-        //Check if touch button DC shift calibration
-        else if((ytouch >= OTHER_MENU_YPOS + 184) && (ytouch <= OTHER_MENU_YPOS + 230))
-        {    
-          //Toggle the shift_cal
-          dc_shift_cal ^= 1;
-          
-          //Set this item active
-          scope_system_settings_other_settings_dc_shift_cal_item();
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-        }
-        //Check if touch button USB CH340 mode
-        else if((ytouch >= OTHER_MENU_YPOS + 230) && (ytouch <= OTHER_MENU_YPOS + 276))
-        {    
-          //Toggle the USB_CH340
-          USB_CH340 ^= 1;
-          
-          //Set this item active
-          scope_system_settings_other_settings_CH340_mode_item();
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-        }
-        //Check if touch button developer mode
-        else if((ytouch >= OTHER_MENU_YPOS + 276) && (ytouch <= OTHER_MENU_YPOS + 322))
-        {    
-          //Toggle the dev_mode
-          dev_mode ^= 1;
-          
-          //Set this item active
-          scope_system_settings_other_settings_dev_mode_item();
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-        }
-        //Check if touch button Add a tag to BMP
-        else if((ytouch >= OTHER_MENU_YPOS + 322) && (ytouch <= OTHER_MENU_YPOS + 368))
-        {    
-          //Toggle the tag_in_BMP
-          tag_in_BMP ^= 1;
-          
-          //Set this item active
-          scope_system_settings_other_settings_BMP_mark_item();
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
-        }
-        //Check if touch button ref_on_start 
-        else if((ytouch >= OTHER_MENU_YPOS + 368) && (ytouch <= OTHER_MENU_YPOS + 425))//413
-        {    
-          //Toggle the ref_on_start
-          scopesettings.ref_on_startup ^= 1;
-          
-          //Set this item active
-          scope_system_settings_other_settings_ref_on_start_item();
-            
-          //Wait until touch is released
-          tp_i2c_wait_for_touch_release(); 
+          ui_settings_run();
+
+          //Need to exit the loop here
+          return;
         }
       }
         //------------------------------------------------------------------------------------------------
@@ -5240,88 +5109,8 @@ void handle_diagnostic_view_touch(void)
 
 int32 handle_confirm_delete(void)
 {
-  int32 choice = 0;
-
-  //Save the screen rectangle where the menu will be displayed
-  display_copy_rect_from_screen(310, 192, 180, 96);
-
-  //display the confirm delete menu
-  //Draw the background in gray
-  display_set_fg_color(0x00202020);
-  display_fill_rounded_rect(310, 192, 179, 95, 3);//180 96
-
-  //Draw the border in a lighter gray
-  display_set_fg_color(LIGHTGREY_COLOR);
-  display_draw_rounded_rect(310, 192, 179, 95, 3);//180 96
-
-  //Draw the buttons
-  display_fill_rounded_rect(320, 228, 74, 50, 2);
-  display_fill_rounded_rect(405, 228, 74, 50, 2);
-
-  //White color for text and use font_3
-  display_set_fg_color(WHITE_COLOR);
-  display_set_font(&font_3);
-  display_text(340, 204, "Confirm to delete?");//204
-  display_text(348, 245, "NO");//246
-  display_text(431, 245, "YES");//246
-
-  //wait for touch
-  while(1)
-  {
-    //Read the touch panel status
-    tp_i2c_read_status();
-
-    //Check if the panel is touched
-    if(havetouch)
-    {
-      //Check if touch is on "NO"
-      if((xtouch >= 324) && (xtouch <= 390) && (ytouch >= 230) && (ytouch <= 276))
-      {
-        //Highlight the button
-        display_set_fg_color(ITEM_ACTIVE_COLOR);
-        display_fill_rounded_rect(320, 228, 74, 50, 2);
-        
-        //With the text in black
-        display_set_fg_color(BLACK_COLOR);
-        display_text(348, 246, "NO");
-        
-        //Set the chosen option
-        choice = VIEW_CONFIRM_DELETE_NO;
-
-        //Done so quit the loop
-        break;
-      }
-      //Else check if touch on "YES"
-      else if((xtouch >= 409) && (xtouch <= 475) && (ytouch >= 230) && (ytouch <= 276))
-      {
-        //Highlight the button
-        display_set_fg_color(ITEM_ACTIVE_COLOR);
-        display_fill_rounded_rect(405, 228, 74, 50, 2);
-        
-        //With the text in black
-        display_set_fg_color(BLACK_COLOR);
-        display_text(431, 246, "YES");
-        
-        //Set the chosen option
-        choice = VIEW_CONFIRM_DELETE_YES;
-
-        //Done so quit the loop
-        break;
-      }
-
-      //Need to wait for touch to release before checking again
-      tp_i2c_wait_for_touch_release();
-    }
-  }
-
-  //Need to wait for touch to release before returning
-  tp_i2c_wait_for_touch_release();
-
-  //Restore the original screen
-  display_copy_rect_to_screen(310, 192, 180, 96);
-
-  //return the choice
-  return(choice);
+  //fw 0.2.55: the confirmation dialog (ui_settings_ui.c); was 74 x 50 px NO / YES 11 px apart
+  return ui_confirm(&ui_dlg_delete, 1) ? VIEW_CONFIRM_DELETE_YES : VIEW_CONFIRM_DELETE_NO;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -5329,7 +5118,6 @@ int32 handle_confirm_delete(void)
 void close_open_menus(uint32 closemain)
 {
   //uint8 tmp;                            //for diagnostic menu
-  uint32 *ptr = STARTUP_CONFIG_ADDRESS; //for diagnostic menu
   //boot_menu_start = ptr[0] & 0x07;      //choice 1 for fnirsi firmware, 0 for peco firmware, 2 for FEL mode, 4 view choice menu
   
   //Only one of these menu's will be opened at any time
@@ -5359,28 +5147,6 @@ void close_open_menus(uint32 closemain)
 
     //Signal it is closed
     gridbrightnessopen = 0;
-  }
-  //Check if the other settings menu is open
-  else if(othersettingsopen)
-  {
-    //Set the button inactive
-    scope_system_settings_other_settings_item(0);
-    //scope_system_settings_RTC_settings_item(0);
-
-    //Restore the screen under the other_settings_menu
-    display_set_source_buffer(displaybuffer3);
-    display_copy_rect_to_screen(OTHER_MENU_XPOS, OTHER_MENU_YPOS, OTHER_MENU_WIDTH, OTHER_MENU_HEIGHT);
-    
-    //----------------------------------- save BOOT settings  ------------------------------------------
-    if(boot_menu_start == 1) boot_menu_start = 0x05;                      //fnirsi firmware always with boot menu
-    if (dev_mode == 0) {if(boot_menu_start > 0) boot_menu_start |= 0x04;} //fnirsi and FEL firmware always with boot menu for user
-    ptr[0] = boot_menu_start;
-    //SAVE the display configuration sector from DRAM to SDcart   //save boot menu and default start
-    sd_card_write(DISPLAY_CONFIG_SECTOR, 1, (uint8 *)0x81BFFC00);
-    //---------------------------------------------------------------------------------------------------
-   
-    //Signal it is closed
-    othersettingsopen = 0;
   }
   //Check if the calibration text is open
   else if(calibrationopen)

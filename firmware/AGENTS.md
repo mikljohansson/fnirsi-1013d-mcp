@@ -1,5 +1,7 @@
 # firmware/ handoff for agents
 
+**Branch fw-ui3 (2026-10-19): fw 0.2.55 provisional, protocol 1.16 unchanged: UX makeover step 3 (Settings fold-out
+trimmed, full Settings screen, confirmation dialog), section 31.**
 **Current state (coordinator merge, 2026-10-19 13:50): latest build fw 0.2.52, protocol 1.16** = main with fw-ui1 (UX makeover
 step 1: main menu, USB drive screen, top bar, Display row, strips, measurement cards; section 29) and fw-readers (diagnostics
 readers: GET_HEALTH, card image identity, calibration provenance, unit life record, SAVE_REPORT; section 30) merged. Running in
@@ -248,6 +250,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.46 | 1b6359f | cdba5b51 | digital phosphor view (main menu row 7; Persistence / Palette / Clear strip; XY), GET_STATUS byte 43 = 4 (protocol 1.13, row 52), settings word 210 (fw-phosphor, section 24) | built, host-tested (test_phosphor 95 checks); bench steps in section 24 |
 | 0.2.48 | b1922c3 | 2f768fd9 | MMU + D-cache on (flat map, DDR / SRAM write-back, framebuffer write-through, restart record and peripherals strongly ordered), clean + off at _reset and ENTER_FEL, GET_LINK_STATS 58-59 fault status / address (fw-mmu, section 26) | built, host-tested (test_mmu); A/B image `make gcc10-nommu` 0.2.48-nommu sha256 45e03f7f; bench sequence in section 26 |
 | 0.2.49 | c477faa | 90f460d6 | USB suspend watch in the 1 ms tick (pc_usbw.c): inferred resume (SOFs, EP0 setup, EP2 OUT while suspended) acts, soft reconnect (SoftConn off 1 s) after a retry storm or 15 min suspended, GET_LINK_STATS 60-61, event type 20, SUSPEND before RESUME in the ISR (protocol 1.14, row 53; fw-usb2, section 27) | built, host-tested (test_usbw 90 checks); A/B `make gcc10-nommu` sha256 f5f377ea; bench plan in section 27 |
+| 0.2.55 | e01f775 | 6f100098 | UX makeover step 3 (fw-ui3, section 31; provisional number): fold-out Screen / Grid brightness, File message timeout, Time and date, Baseline calibration (interim), Other settings; full Settings screen (`ui_settings.c` / `ui_settings_ui.c`) with At power-on 0 / 4 / 5 written on Back, Restore default settings behind a confirmation (boot byte kept, CDC kept); Other settings menu, USB-Serial and Dev mode rows removed; delete confirmation as the dialog pattern | built, host-tested (test_ui 1,431,758 checks); bench walk-through in section 31 |
 | 0.2.54 | f9fcac6 | a4f0c832 | touch fix batch 1 (fw-touch1, section 32; provisional number): left pointers are drag handles (`touch_pick.c`, 44 px boxes, nearest / on-top pick), pick at touch-down, nearest enabled zero line, no trigger-point move in a channel drag, channel + trigger level share one clamped delta, EXT no longer follows CH2, traceposition 6..396 in the new auto setup and at load |
 | 0.2.51 | 8f5bf16 | 38580def | UX makeover step 1 (fw-ui1, section 29): main menu Scope / Spectrum analyser / Saved pictures / Saved waveforms / Settings / Diagnostics / USB drive with one 59 px hit area per row, Spectrum in roll mode switches Roll off; USB drive screen text + Exit; no top-bar version; Display row Normal / Phosphor / X-Y in the acquisition menu (X-Y out of System settings); strips without Scope / Auto, AUTO SET = spectrum Auto; phosphor warnings top-middle; cards with chip, scope-maker names, 4 significant digits, defaults Freq / Vpp / Vavg | built, host-tested (test_ui 1513 checks); bench walk-through in section 29 |
 | 0.2.50 | e871c50 | 1b55efc2 | calibration wizard (one modal three-step flow, 48e5737) and calibration v4: A - B interleave tracker applied in the full class, full-class common-mode class probe, GET_CAL 288 bytes, diagnostics lines (protocol 1.14, row 53; fw-cal3, section 28) | built, host-tested; bench lists README 6.4 and 6.5 |
@@ -1520,6 +1523,108 @@ calibration page incl. provenance. Firmware tile: `pc_image_ident` (running) vs 
    words).
 
 
+
+## 31. fw-ui3: UX makeover step 3, Settings (fw 0.2.55 provisional, protocol 1.16 unchanged)
+
+Branch from main 9cc599c (fw 0.2.51), merged with origin/main (0.2.52 readers, 0.2.54 touch) in e01f775. Plan:
+`docs/plans/ux-makeover.md` section 5 (Settings), 6b (dialog buttons), 6c (full-screen look); rules
+`docs/ui-guidelines.md`; user-facing description README section 5 "Settings: fold-out, Settings screen, confirmations".
+Commits, one topic each: a4664ae (`ui_settings.c/.h` pure tables + `host_tests/test_ui.c` tests), 66a3a70 (fold-out
+trim, `ui_settings_ui.c` Settings screen, 1.00o5 Other settings menu removed, reset without boot byte), 24743a7 (delete
+confirmation), 3e2fec2 (max-light icon), 07bd90d (0.2.55, CHANGELOG, README), e01f775 (merge), then this handoff.
+Image from e01f775: `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 536,576 B, sha256
+6f1000986ea64d7a7b8ed13a22c13dc9995a8e9380aeb3c36dfd69eb968d68aa, ELF
+28d8054ba964ead137bee380414347f19cf2592ec11a905874409942beb17c48 (nommu bin b7cd9404...). **Nothing benched.** Host
+tests green (test_ui 1,431,758 checks: every pixel of the Settings, time-editor and dialog hit areas against the drawn
+rectangles; every row value in the 16 px font against its row). Warnings: GCC 10 36, GCC 13 31, line-number-free lists
+identical to 9cc599c; the new files are clean with -Wextra. No protocol change, no settings words.
+
+Where things are:
+- **Tables** (`ui_settings.h`): fold-out ids `UI_FO_*` and `ui_fo_rows/height/row_top/row_at` (contiguous 59 px rows
+  from y 46, Time and date only with a DS3231); Settings rows `ui_set_rows[]` (label, group, kind STEP / TAP / OPEN,
+  x, y), groups `ui_set_groups[]`, `ui_set_hit` (a STEP row answers only on its 80 x 44 - / + buttons), `ui_set_value`
+  (text + tone: ON green 0x35C26A, OFF grey, WARN orange, NA grey and inert), `ui_boot_next` / `ui_boot_text`, the time
+  editor (`ui_time_hit`), the dialog (`ui_dlg_layout`, `ui_dlg_hit`, texts `ui_dlg_restore`, `ui_dlg_delete`).
+- **Fold-out** (menu.c `scope_open_system_settings_menu`, `sys_fo_row`; statemachine.c `handle_main_menu_touch`
+  switches on `ui_fo_row_at`): `scope_system_settings_filemsg_item` replaces `..._confirmation_item`; the RTC, calibration
+  and Other settings items take their y from the table. `SYSTEM_MENU_HEIGHT` = `pc_glue_sys_menu_height` =
+  `ui_fo_height`. Other settings closes the fold-out, puts back what was under the main menu (displaybuffer1) and runs
+  `ui_settings_run()`, then returns from the menu.
+- **Settings screen** (`ui_settings_ui.c`): modal (menus are), saves the screen in displaybuffer4, `gather()` reads the
+  variables into `ui_set_state`, actions write the variables directly. Back writes the boot byte (uint8 store at
+  0x81BFFC1F, then `sd_card_write(710)`) only when it changed, restores the screen, clears the top-bar clock if it was
+  switched off here, redraws the max-light icon if a brightness step left max light, and copies the main-menu rect
+  into displaybuffer1 (the menu's caller restores that rect afterwards). After Restore default settings it calls
+  `apply_all()` (the FPGA setup of `main`) and `scope_setup_main_screen()` instead of restoring the old picture.
+- **Dialog** `ui_confirm(text, restore)`: saves/restores `displaydata`; with restore=1 the box area goes through
+  displaybuffer4 (so never call it with restore=1 while the Settings screen or the wizard owns displaybuffer4).
+  `handle_confirm_delete` is now one line on top of it.
+- **Removed**: 1.00o5's Other settings menu (`scope_system_settings_open_other_settings_menu` and its nine item
+  functions, `othersettingsopen`, `OTHER_MENU_*`, the boot-byte write in `close_open_menus` with its dev-mode rule),
+  `SYSTEM_MENU_HEIGHT_FULL`, the boot-byte write in `scope_reset_config_data`. `pc_glue_settings_defaults` sets
+  `USB_CH340 = 1` under PC_FORCE_CDC (the reset used to set MSC, and the USB drive screen's exit re-inits from it).
+
+Every removed control and where it went (guidelines section 5):
+
+| was | now |
+|---|---|
+| Fold-out: Notification confirmation (slide toggle) | Fold-out: File message timeout, chip "tap" / "0.7 s"; Settings > Controls |
+| Fold-out: RTC settings | Fold-out: Time and date (same editor); Settings > Clock |
+| Fold-out: Baseline calibration | **interim**, still in the fold-out above Other settings; fw-ui4 moves it to Diagnostics > Calibrate and deletes the row (`UI_FO_CAL`, `scope_system_settings_calibration_item`, the `calibrationopen` 2-9 volts boxes stay with it) |
+| Other settings: Boot menu + Default start | Settings > Start-up > At power-on (0 / 4 / 5); FEL not offered |
+| Other settings: New autosetup | Settings > Controls > Auto setup |
+| Other settings: Lock move cursors | Settings > Controls > Cursors |
+| Other settings: DC shift calibration | **interim** Settings > "Calibration (moves to Diagnostics)" > DC shift trim; fw-ui4 moves it to the Calibration page and deletes `UI_SET_DCSHIFT` and the group (the test's geometry checks follow the table) |
+| Other settings: USB-Serial mode | removed (PC_FORCE_CDC) |
+| Other settings: Dev mode | removed from the UI; `dev_mode` still loaded / saved and still drives the trigger-address overlay and `scope_test_TP`; fw-ui4's Developer page gets "Debug overlay" for it |
+| Other settings: Add a tag to BMP | Settings > Files > Stamp screenshots with (time / file name / nothing) |
+| Other settings: Load Ref on start | Settings > Files > Reference traces at power-on |
+| "Confirm to delete?" NO / YES | the dialog: Cancel left, Delete right (red), 160 x 44 px, 16 px apart |
+| DEFAULT button (diagnostics view, no confirmation) | unchanged (fw-ui4's territory); Settings > Restore default settings is the confirmed path. Both now keep the boot byte |
+
+Not done / for a successor:
+- The Settings screen is modal, not a main-loop mode (guidelines section 4 asks main-loop only for long-running screens).
+- No dimming behind the dialog (the panel library has no blend); the box is drawn over the screen.
+- Brightness - / + step 5 per tap, no auto-repeat while held.
+- The fold-out stays anchored at y 46 while its main-menu row is the fifth (as in step 1).
+- Restore default settings while the spectrum or phosphor view is active rebuilds the scope screen and leaves the view
+  switches alone; not tried on the device.
+- The full-screen colours (0x0D0D0D rows, 0x0F2447 / 0x1F3A66 buttons, 0x35C26A values) are local defines in
+  `ui_settings_ui.c`; fw-ui4's Diagnostics pages should move them to a shared header when they reuse them.
+
+**Bench walk-through (owner, coordinator on COM10)**
+1. FEL-load the image, `#VER` fw=0.2.55 proto=1.16.
+2. Menu > Settings: the fold-out shows Screen brightness, Grid brightness, File message timeout (chip "0.7 s" or "tap"),
+   Time and date (only with a DS3231), Baseline calibration, Other settings; the box ends under Other settings. Tap
+   each row near its top and bottom edge: Screen / Grid open their sliders; File message timeout flips the chip; Time
+   and date opens the hours..year editor; Baseline calibration opens the wizard (Cancel returns).
+3. Other settings: the Settings screen, black, "Settings" top left, Back top right, Display / Controls / Calibration
+   (moves to Diagnostics) on the left, Files / Clock / Start-up on the right, Restore default settings bottom left.
+   Values on the right of each row in green (grey for off, amber for DC shift trim on).
+4. Screen brightness - / +: the backlight steps by 5 %; Grid brightness - / +: the value steps (the grid shows it after
+   Back). A tap on the row outside the buttons does nothing.
+5. Tap File message timeout, Cursors, Auto setup, Stamp screenshots with, Reference traces at power-on, DC shift trim:
+   each flips its value. Back; Menu > Settings > Other settings: the values are as left. Power-cycle: they persist
+   (DC shift trim does not, as before).
+6. Clock: "shown" / "not used" (without a module "no clock module", inert, and Time and date inert too). Clock on:
+   Time and date shows "20yy-mm-dd hh:mm"; tap it: the editor page, - / + change and write at once; Back returns.
+   Clock off: Back to the scope, the top-bar time disappears; clock on: it comes back within a second.
+7. At power-on: cycles Open firmware -> Boot menu, then open firmware -> Boot menu, then stock firmware -> Open
+   firmware. Leave it on "Boot menu, then open firmware", Back, power-cycle: the boot menu shows with PECO
+   preselected. Set "Open firmware": the next power-on goes straight to the open firmware. With the byte at FEL (set
+   by the loader tool) the row reads "Boot menu, then FEL" in amber.
+8. Restore default settings: the dialog "Restore default settings?" with three lines, Cancel left, Restore right in red;
+   taps outside the two buttons do nothing. Cancel: back to the page, nothing changed. Restore: the page shows the
+   defaults (brightness 20 %, grid 25 %, clock not used); Back: the scope screen rebuilt (CH1 on, defaults), the boot
+   menu choice unchanged at the next power-on, calibration unchanged (diagnostics lines), COM10 still there (CDC), and
+   USB drive > Exit still returns to CDC.
+9. Saved pictures: select a file, Delete: "Delete from the SD card?", "This cannot be undone.", Cancel left, Delete
+   right (red), both 44 px tall and 16 px apart; Cancel keeps the file and the browser redraws cleanly; Delete removes
+   it. Same in Saved waveforms and in the waveform viewer's Delete wave.
+Bug indicators: a fold-out tap opening the neighbouring row; the Settings screen leaving parts of itself on the scope
+after Back; the main-menu area showing an old picture after Restore; a row's value overflowing into its label; the
+boot menu appearing (or not) against the At power-on value; a tap between rows or outside the dialog buttons acting;
+COM10 disappearing after Restore default settings; the delete dialog leaving a box behind in the browser.
 
 ## 32. fw-touch1: touch fix batch 1 (fw 0.2.54 provisional, protocol 1.16 unchanged)
 

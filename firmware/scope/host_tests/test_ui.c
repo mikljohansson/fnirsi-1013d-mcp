@@ -1,14 +1,17 @@
 // test_ui.c - the screens' pure parts (fw 0.2.51): card value formatting and card fit with the device's own font tables
-// (ui_fmt.c, font_2.c), the main menu row table, hit areas and mode rule (ui_menu.c). Run natively.
+// (ui_fmt.c, font_2.c), the main menu row table, hit areas and mode rule (ui_menu.c), the Settings fold-out and screen
+// (ui_settings.c, fw 0.2.55): rows, hit areas against the drawn rectangles, values, text fit, start-up choice, dialog.
+// Run natively.
 
 #include <stdio.h>
 #include <string.h>
 
 #include "ui_fmt.h"
 #include "ui_menu.h"
+#include "ui_settings.h"
 #include "test_util.h"
 
-extern FONTDATA font_2, font_3;
+extern FONTDATA font_2, font_3, font_5;
 
 static char b[64];
 
@@ -191,11 +194,404 @@ static void test_choose(void)
   }
 }
 
+static int in_rect(uint32 x, uint32 y, uint32 x0, uint32 y0, uint32 w, uint32 h)
+{
+  return (x >= x0) && (x < x0 + w) && (y >= y0) && (y < y0 + h);
+}
+
+//Fold-out: rows contiguous at 59 px from y 46, Time and date only with the clock module, Other settings last
+static void test_foldout(void)
+{
+  uint8  ids[UI_FO_MAX_ROWS];
+  int    rtc, n;
+  uint32 x, y;
+
+  T_EQ(ui_fo_rows(1, ids), 6);
+  T_EQ(ids[0], UI_FO_SCREEN);
+  T_EQ(ids[1], UI_FO_GRID);
+  T_EQ(ids[2], UI_FO_FILEMSG);
+  T_EQ(ids[3], UI_FO_TIME);
+  T_EQ(ids[4], UI_FO_CAL);
+  T_EQ(ids[5], UI_FO_OTHER);
+  T_EQ(ui_fo_rows(0, ids), 5);
+  T_EQ(ids[3], UI_FO_CAL);
+  T_EQ(ids[4], UI_FO_OTHER);
+  T_EQ(ui_fo_height(1), 354);
+  T_EQ(ui_fo_height(0), 295);
+  T_EQ(ui_fo_row_top(0, UI_FO_TIME), 0);
+  T_EQ(ui_fo_row_top(1, UI_FO_SCREEN), 46);     //the brightness sliders open beside rows 0 and 1 (y 46, 104)
+  T_EQ(ui_fo_row_top(1, UI_FO_GRID), 105);
+  T_EQ(ui_fo_row_top(1, UI_FO_OTHER), 341);
+  T_EQ(ui_fo_row_top(0, UI_FO_OTHER), 282);
+
+  for(rtc = 0; rtc < 2; rtc++)
+  {
+    n = ui_fo_rows(rtc, ids);
+
+    for(y = 0; y < 480; y++)
+      for(x = 140; x < 400; x += 3)
+      {
+        int want = -1;
+
+        if((x >= 150) && (x < 394) && (y >= 46) && (y < 46 + (uint32)n * 59))
+          want = ids[(y - 46) / 59];
+
+        T_EQ(ui_fo_row_at(rtc, x, y), want);
+      }
+  }
+}
+
+//Settings screen: rectangles inside the screen, below the header, not overlapping; 48 px rows, 44 px targets at
+//least 80 px wide; hit area = drawn area at every pixel
+static void test_settings_geometry(void)
+{
+  int    i, j, part;
+  uint32 x, y;
+
+  for(i = 0; i < UI_SET_ROWS; i++)
+  {
+    const ui_set_row *r = &ui_set_rows[i];
+
+    T_TRUE(r->y >= UI_SET_HDR_H);
+    T_TRUE(r->x + UI_SET_ROW_W <= 800);
+    T_TRUE(r->y + UI_SET_ROW_H <= UI_SET_RESTORE_Y);
+    T_TRUE(r->y >= ui_set_groups[r->group].y + 16);     //the 13 px group title clears the row
+    T_EQ(r->x, ui_set_groups[r->group].x);
+
+    for(j = 0; j < UI_SET_ROWS; j++)
+      if(j != i)
+      {
+        const ui_set_row *o = &ui_set_rows[j];
+        int apart = (r->x + UI_SET_ROW_W <= o->x) || (o->x + UI_SET_ROW_W <= r->x) ||
+                    (r->y + UI_SET_ROW_H + 6 <= o->y) || (o->y + UI_SET_ROW_H + 6 <= r->y);
+        T_TRUE(apart);
+      }
+
+    //A group title sits in the gap above its first row, never over another row
+    for(j = 0; j < UI_SET_GROUPS; j++)
+      if((ui_set_groups[j].x == r->x) && (ui_set_groups[j].y + 14 > r->y) && (ui_set_groups[j].y < r->y + UI_SET_ROW_H))
+        T_TRUE(0);
+  }
+
+  T_TRUE(UI_SET_STEP_W >= 80);
+  T_TRUE(UI_SET_STEP_H >= 44);
+  T_TRUE(UI_SET_BACK_H >= 44);
+  T_TRUE(UI_SET_BACK_W >= 80);
+  T_TRUE(UI_SET_RESTORE_H >= 44);
+  T_TRUE(UI_SET_RESTORE_Y + UI_SET_RESTORE_H <= 480);
+
+  for(y = 0; y < 480; y++)
+    for(x = 0; x < 800; x++)
+    {
+      int want = -1, wpart = UI_SET_P_ROW, got;
+
+      if(in_rect(x, y, UI_SET_BACK_X, UI_SET_BACK_Y, UI_SET_BACK_W, UI_SET_BACK_H))
+        want = UI_SET_BACK;
+      else if(in_rect(x, y, UI_SET_RESTORE_X, UI_SET_RESTORE_Y, UI_SET_RESTORE_W, UI_SET_RESTORE_H))
+        want = UI_SET_RESTORE;
+      else
+        for(i = 0; i < UI_SET_ROWS; i++)
+        {
+          const ui_set_row *r = &ui_set_rows[i];
+          uint32 mx = ui_set_minus_x(i);
+
+          if(r->kind != UI_SET_K_STEP)
+          {
+            if(in_rect(x, y, r->x, r->y, UI_SET_ROW_W, UI_SET_ROW_H))
+              want = i;
+          }
+          else if(in_rect(x, y, mx, r->y + 2, UI_SET_STEP_W, UI_SET_STEP_H))
+          {
+            want = i;
+            wpart = UI_SET_P_MINUS;
+          }
+          else if(in_rect(x, y, mx + UI_SET_STEP_W + UI_SET_STEP_GAP, r->y + 2, UI_SET_STEP_W, UI_SET_STEP_H))
+          {
+            want = i;
+            wpart = UI_SET_P_PLUS;
+          }
+        }
+
+      got = ui_set_hit(x, y, &part);
+      T_EQ(got, want);
+
+      if(want >= 0)
+        T_EQ(part, wpart);
+    }
+
+  //The step buttons stay inside their row
+  for(i = 0; i < UI_SET_ROWS; i++)
+    if(ui_set_rows[i].kind == UI_SET_K_STEP)
+      T_TRUE(ui_set_minus_x(i) + 2 * UI_SET_STEP_W + UI_SET_STEP_GAP <= (uint32)ui_set_rows[i].x + UI_SET_ROW_W);
+}
+
+static ui_set_state st0(void)
+{
+  ui_set_state s;
+
+  memset(&s, 0, sizeof(s));
+  s.screen = 70;
+  s.grid = 40;
+  s.rtc_present = 1;
+  s.rtc_on = 1;
+  s.year = 26;
+  s.month = 10;
+  s.day = 9;
+  s.hour = 7;
+  s.minute = 5;
+  return s;
+}
+
+static const char *val(int row, const ui_set_state *s, int tone)
+{
+  T_EQ(ui_set_value(row, s, b), tone);
+  return b;
+}
+
+static void test_settings_values(void)
+{
+  ui_set_state s = st0();
+
+  T_STR(val(UI_SET_SCREEN, &s, UI_SET_T_ON), "70 %");
+  T_STR(val(UI_SET_GRID, &s, UI_SET_T_ON), "40 %");
+  s.screen = 100;
+  s.grid = 0;
+  T_STR(val(UI_SET_SCREEN, &s, UI_SET_T_ON), "100 %");
+  T_STR(val(UI_SET_GRID, &s, UI_SET_T_ON), "0 %");
+
+  T_STR(val(UI_SET_FILEMSG, &s, UI_SET_T_ON), "0.7 s");
+  s.filemsg_wait = 1;
+  T_STR(val(UI_SET_FILEMSG, &s, UI_SET_T_ON), "wait for a tap");
+
+  T_STR(val(UI_SET_CURSORS, &s, UI_SET_T_ON), "move freely");
+  s.cursors_locked = 1;
+  T_STR(val(UI_SET_CURSORS, &s, UI_SET_T_ON), "move together");
+
+  T_STR(val(UI_SET_AUTOSET, &s, UI_SET_T_ON), "stock");
+  s.autoset_new = 1;
+  T_STR(val(UI_SET_AUTOSET, &s, UI_SET_T_ON), "improved");
+
+  T_STR(val(UI_SET_DCSHIFT, &s, UI_SET_T_OFF), "not shown");
+  s.dcshift = 1;
+  T_STR(val(UI_SET_DCSHIFT, &s, UI_SET_T_WARN), "on the CTRL page");
+
+  T_STR(val(UI_SET_STAMP, &s, UI_SET_T_OFF), "nothing");
+  s.stamp = 1;
+  T_STR(val(UI_SET_STAMP, &s, UI_SET_T_ON), "time");
+  s.rtc_on = 0;
+  T_STR(val(UI_SET_STAMP, &s, UI_SET_T_ON), "file name");
+  s.rtc_on = 1;
+  s.rtc_present = 0;
+  T_STR(val(UI_SET_STAMP, &s, UI_SET_T_ON), "file name");
+  s.rtc_present = 1;
+
+  T_STR(val(UI_SET_REFS, &s, UI_SET_T_OFF), "not loaded");
+  s.refs = 1;
+  T_STR(val(UI_SET_REFS, &s, UI_SET_T_ON), "loaded");
+
+  T_STR(val(UI_SET_CLOCK, &s, UI_SET_T_ON), "shown");
+  T_STR(val(UI_SET_TIME, &s, UI_SET_T_ON), "2026-10-09 07:05");
+  s.rtc_on = 0;
+  T_STR(val(UI_SET_CLOCK, &s, UI_SET_T_OFF), "not used");
+  T_STR(val(UI_SET_TIME, &s, UI_SET_T_NA), "needs the clock");
+  s.rtc_present = 0;
+  T_STR(val(UI_SET_CLOCK, &s, UI_SET_T_NA), "no clock module");
+  T_STR(val(UI_SET_TIME, &s, UI_SET_T_NA), "no clock module");
+
+  s.boot = 0;
+  T_STR(val(UI_SET_POWERON, &s, UI_SET_T_ON), "Open firmware");
+  s.boot = 4;
+  T_STR(val(UI_SET_POWERON, &s, UI_SET_T_ON), "Boot menu, then open firmware");
+  s.boot = 5;
+  T_STR(val(UI_SET_POWERON, &s, UI_SET_T_ON), "Boot menu, then stock firmware");
+  s.boot = 6;
+  T_STR(val(UI_SET_POWERON, &s, UI_SET_T_WARN), "Boot menu, then FEL");
+  s.boot = 1;
+  T_STR(val(UI_SET_POWERON, &s, UI_SET_T_WARN), "Stock firmware, no boot menu");
+
+  //Steps
+  T_EQ(ui_set_step(70, 1), 75);
+  T_EQ(ui_set_step(97, 1), 100);
+  T_EQ(ui_set_step(100, 1), 100);
+  T_EQ(ui_set_step(3, 0), 0);
+  T_EQ(ui_set_step(0, 0), 0);
+  T_EQ(ui_set_step(42, 0), 37);
+}
+
+//Start-up: the cycle of the three offered values; anything else (FEL, updater, stock without menu) goes to Open firmware,
+//so FEL and the updater are never written from the screen
+static void test_boot(void)
+{
+  int b, tone, n;
+
+  T_EQ(ui_boot_next(0), 4);
+  T_EQ(ui_boot_next(4), 5);
+  T_EQ(ui_boot_next(5), 0);
+
+  for(b = 0; b < 256; b++)
+  {
+    uint8 v = ui_boot_next((uint8)b);
+    T_TRUE((v == 0) || (v == 4) || (v == 5));
+
+    ui_boot_text((uint8)b, &tone);
+    T_EQ(tone, ((b == 0) || (b == 4) || (b == 5)) ? UI_SET_T_ON : UI_SET_T_WARN);
+  }
+
+  //From anything, three taps reach every offered value
+  for(b = 0; b < 8; b++)
+  {
+    uint8 v = (uint8)b, seen = 0;
+
+    for(n = 0; n < 3; n++)
+    {
+      v = ui_boot_next(v);
+      seen |= (uint8)((v == 0) ? 1 : (v == 4) ? 2 : 4);
+    }
+
+    T_EQ(seen, 7);
+  }
+}
+
+//Every label with the longest value it can show fits its row in the 16 px font (12 px padding each side, 12 px apart);
+//step rows end the value 10 px before the - button; group titles fit the column in the 13 px font
+static void test_settings_text(void)
+{
+  static const uint8 rtc_cases[3][2] = { { 1, 1 }, { 1, 0 }, { 0, 0 } };
+  ui_set_state s;
+  int          i, k, bit, boot;
+
+  for(i = 0; i < UI_SET_ROWS; i++)
+  {
+    const ui_set_row *r = &ui_set_rows[i];
+    uint32 room = (r->kind == UI_SET_K_STEP) ? (ui_set_minus_x(i) - 10 - r->x - 12) : (UI_SET_ROW_W - 24);
+
+    for(k = 0; k < 3; k++)
+      for(bit = 0; bit < 2; bit++)
+        for(boot = 0; boot < 8; boot++)
+        {
+          s = st0();
+          s.rtc_present = rtc_cases[k][0];
+          s.rtc_on = rtc_cases[k][1];
+          s.filemsg_wait = s.cursors_locked = s.autoset_new = s.dcshift = s.stamp = s.refs = (uint8)bit;
+          s.screen = s.grid = 100;
+          s.boot = (uint8)boot;
+          ui_set_value(i, &s, b);
+
+          if(ui_text_width(&font_3, r->label) + 12 + ui_text_width(&font_3, b) > room)
+          {
+            T_TRUE(0);
+            printf("  row %d: \"%s\" + \"%s\" does not fit %u px\n", i, r->label, b, (unsigned)room);
+          }
+        }
+  }
+
+  for(i = 0; i < UI_SET_GROUPS; i++)
+    T_TRUE(ui_text_width(&font_2, ui_set_groups[i].title) <= UI_SET_ROW_W);
+
+  //Header: the title, the subtitle and Back on one line; Restore and its note on one line
+  T_TRUE(12 + ui_text_width(&font_5, "Settings") + 16 <= 130);
+  T_TRUE(130 + ui_text_width(&font_2, "Channel, trigger, time base and filter stay in their own menus.") < UI_SET_BACK_X - 8);
+  T_TRUE(UI_SET_RESTORE_X + UI_SET_RESTORE_W + 14 +
+         ui_text_width(&font_2, "Asks first. Keeps the calibration and the start-up choice.") <= 788);
+  T_TRUE(ui_text_width(&font_3, "Restore default settings") + 24 <= UI_SET_RESTORE_W);
+
+  //Time editor: labels left of the - buttons, values between the buttons
+  for(i = 0; i < UI_TIME_FIELDS; i++)
+    T_TRUE(UI_TIME_LABEL_X + ui_text_width(&font_3, ui_time_labels[i]) + 16 <= UI_TIME_MINUS_X);
+  T_TRUE(ui_text_width(&font_5, "2026") / 2 + 8 <= UI_TIME_VALUE_X - (UI_TIME_MINUS_X + UI_TIME_BTN_W));
+  T_TRUE(UI_TIME_TOP + UI_TIME_FIELDS * UI_TIME_PITCH <= 480);
+  T_TRUE(UI_TIME_TOP >= UI_SET_HDR_H + 16);
+}
+
+static void test_time_hit(void)
+{
+  uint32 x, y;
+  int    f, want;
+
+  T_TRUE(UI_TIME_MINUS_X + UI_TIME_BTN_W <= UI_TIME_VALUE_X - 20);
+  T_TRUE(UI_TIME_PLUS_X >= UI_TIME_VALUE_X + 20);
+  T_TRUE(UI_TIME_BTN_W >= 80);
+  T_TRUE(UI_TIME_BTN_H >= 44);
+
+  for(y = 0; y < 480; y++)
+    for(x = 0; x < 800; x += 2)
+    {
+      want = -1;
+
+      for(f = 0; f < UI_TIME_FIELDS; f++)
+      {
+        uint32 y0 = UI_TIME_TOP + (uint32)f * UI_TIME_PITCH;
+
+        if(in_rect(x, y, UI_TIME_MINUS_X, y0, UI_TIME_BTN_W, UI_TIME_BTN_H))
+          want = f * 2;
+        else if(in_rect(x, y, UI_TIME_PLUS_X, y0, UI_TIME_BTN_W, UI_TIME_BTN_H))
+          want = f * 2 + 1;
+      }
+
+      T_EQ(ui_time_hit(x, y), want);
+    }
+}
+
+//Dialog: buttons 44 px tall, 16 px apart, the dismissing one left, inside the box; only the buttons hit; texts fit
+static void test_dialog(void)
+{
+  const ui_dlg_text *t[2] = { &ui_dlg_restore, &ui_dlg_delete };
+  ui_dlg d;
+  int    lines, i, k, want;
+  uint32 x, y;
+
+  for(lines = 1; lines <= 3; lines++)
+  {
+    ui_dlg_layout(lines, &d);
+
+    T_EQ(d.action_x - (d.cancel_x + UI_DLG_BTN_W), 16);
+    T_TRUE(d.cancel_x < d.action_x);
+    T_EQ(UI_DLG_BTN_H, 44);
+    T_TRUE(d.cancel_x >= d.x + 16);
+    T_TRUE(d.action_x + UI_DLG_BTN_W + 16 <= d.x + d.w);
+    T_TRUE(d.btn_y >= d.y + UI_DLG_LINE0_DY + lines * UI_DLG_LINE_PITCH);
+    T_TRUE(d.btn_y + UI_DLG_BTN_H <= d.y + d.h);
+    T_TRUE(d.y + d.h <= 480);
+
+    for(y = 0; y < 480; y++)
+      for(x = 0; x < 800; x += 2)
+      {
+        want = UI_DLG_NONE;
+
+        if(in_rect(x, y, d.cancel_x, d.btn_y, UI_DLG_BTN_W, UI_DLG_BTN_H))
+          want = UI_DLG_CANCEL;
+        else if(in_rect(x, y, d.action_x, d.btn_y, UI_DLG_BTN_W, UI_DLG_BTN_H))
+          want = UI_DLG_ACTION;
+
+        T_EQ(ui_dlg_hit(&d, x, y), want);
+      }
+  }
+
+  for(k = 0; k < 2; k++)
+  {
+    T_TRUE((t[k]->nlines >= 1) && (t[k]->nlines <= 3));
+    T_TRUE(ui_text_width(&font_5, t[k]->title) + 48 <= UI_DLG_W);
+    T_TRUE(ui_text_width(&font_3, t[k]->cancel) + 16 <= UI_DLG_BTN_W);
+    T_TRUE(ui_text_width(&font_3, t[k]->action) + 16 <= UI_DLG_BTN_W);
+    T_TRUE(t[k]->destructive);
+
+    for(i = 0; i < t[k]->nlines; i++)
+      T_TRUE(ui_text_width(&font_3, t[k]->lines[i]) + 48 <= UI_DLG_W);
+  }
+}
+
 int main(void)
 {
   test_sig4();
   test_cards();
   test_menu();
   test_choose();
+  test_foldout();
+  test_settings_geometry();
+  test_settings_values();
+  test_boot();
+  test_settings_text();
+  test_time_hit();
+  test_dialog();
   return t_report("test_ui");
 }
