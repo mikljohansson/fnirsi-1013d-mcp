@@ -1738,7 +1738,7 @@ tests green (test_ui 6672 checks on the branch, 1,436,917 with fw-ui3's settings
 warnings 36, GCC 13 / PC_DEBUG 31, upstream only; the
 new files are clean with -Wall -Wextra. No protocol change: GET_STATUS byte 43 keeps its meaning (4 = phosphor drawn,
 now also in X-Y). Settings words: 210 bit 3 (the Phosphor switch), 211 (0xC700: bit 0 Grid, bits 1-2 the spectrum's
-Display variant); 212..223 stay free.
+Display variant); 212..223 stay free (later claims: 212 fw-acq, 221..223 fw-meas section 41).
 
 Points for a successor:
 - **Files**: `ui_ctrl.c/.h` (pure: page-two items and hit areas `ui_ctrl_item_at`, page-one slots `ui_p1_shown`,
