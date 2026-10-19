@@ -113,6 +113,8 @@ C = community value, $ = cost. Resources free after 0x1535: ~7,000 LUTs, ~200 kb
    per-pulse widths/gaps, bursts, frequency sweeps for Bode; trigger-out pulse mode on the shared pin.
 6. **Hardware measurements** (FPGA + firmware) [C medium; $ low]: 200 MS/s frequency/period counter, pulse width, duty, min/max as
    always-on readouts.
+   They feed the existing bottom-row measurement cards (Measures menu, twelve per channel); the cards also get a spectrum-mode
+   set (peak frequency and level per channel, THD) in the UX makeover (docs/plans/ux-makeover.md section 3).
 7. **Software features on the new data** [C medium; $ low each]: 4-digit DVM readout at CIC rates (after calibration v2), serial decode
    (UART/I2C/SPI) from analog captures, mask/pass-fail testing on the phosphor map.
 8. **PRBS / noise output** for impulse and noise-based frequency response [later].

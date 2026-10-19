@@ -45,9 +45,15 @@ the drive on the PC first.
   on what is shown (RUN/STOP, AUTO, cursors or markers, measures, save picture, save data, grid, trigger 50 %), the
   second page the parameters of the mode and its variant. Each slot keeps its place and meaning across modes; a slot a
   mode cannot use stays empty rather than showing a control that does nothing.
-- **Bottom row**: readouts only (measurements, the spectrum's one-line header stays at the top of the plot). The
-  spectrum and phosphor parameter strips move into the right bar's CTRL page **(owner)**; the bottom row returns to the
-  plot in every mode.
+- **Bottom row**: the measurement cards, as the stock firmware and Atlan's draw them (owner, 2026-10-19, from the FNIRSI
+  product photos): the Measures button on the right bar opens the list of up to twelve measurements per channel (Vmax,
+  Vmin, Vavg, Vrms, Vpp, Vp, Freq, Cycle, Time+, Time-, Duty+, Duty-; `scopesettings.measuresstate`, drawn by
+  `scope_display_measurements`), and the ticked ones appear as cards in the channel's colour, CH1's from the left and
+  CH2's from the middle, stacking upward over the plot when more than fit one row. This stays exactly as it is; the
+  mockups show it. The spectrum's one-line header stays at the top of the plot as a readout. The spectrum and phosphor
+  parameter strips move into the right bar's CTRL page **(owner)**, so the bottom row is the cards' in every mode.
+  Roadmap, not now: cards for the spectrum mode (peak frequency and level per channel, THD) and the FPGA hardware
+  measurements of docs/plans/roadmap.md section 8 item 6 feeding the same cards at 200 MSa/s.
 - **Warnings**: top-middle of the plot in every mode, stating consequence and action **(owner)**; readouts such as
   wfm/s stay with the parameters.
 
