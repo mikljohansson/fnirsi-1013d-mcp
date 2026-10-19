@@ -13,7 +13,8 @@ Workflows: `.github/workflows/ci.yml`, `.github/workflows/release.yml`, the comp
 |---|---|---|
 | firmware | ubuntu-24.04 | see the list below |
 | mcp | ubuntu-24.04 and windows-latest, Python 3.12 and 3.13 | `pip install -e mcp[dev]`, then ruff with the selection from `mcp/AGENTS.md`, then pytest |
-| docs-lint | ubuntu-24.04 | `docs/protocol-vectors.json` against the Python checker and the C checker; `CHANGELOG.md` structure |
+| wheel | ubuntu-24.04 and windows-latest, Python 3.12 | `python -m build mcp` exactly as `release.yml` builds it, then `.github/scripts/wheel_smoke.py`: the wheel installed into a fresh venv outside the checkout, `fnirsi1013d-mcp --list-tools`, an MCP stdio session on the simulator, files under `FNIRSI_MCP_HOME`, clear errors for the checkout-only inputs |
+| docs-lint | ubuntu-24.04 | `docs/protocol-vectors.json` against the Python checker and the C checker; `CHANGELOG.md` structure; `tools/bitstreams.py check` (the committed FPGA bitstreams against `fpga/al3/dist/manifest.json` and `BITSTREAMS.md`) |
 
 The firmware job runs these steps in order:
 
@@ -62,58 +63,118 @@ across checkout paths (the 0.2.44 images in `docs/hardware-status.md`). The rele
 ## 2. Cutting a release
 
 The firmware and the mcp package share one version. The first tag is planned as v0.3.0
-(`CHANGELOG.md`, `docs/plans/roadmap.md` section 5).
+(`CHANGELOG.md`, `docs/plans/roadmap.md` section 5). The coordinator ticks `docs/plans/release-checklist.md`
+on the way.
 
 1. Bump the version in two places:
-   - `firmware/scope/pc_cmds.h`: both `PC_FW_VERSION` lines, `"X.Y.Z"` and `"X.Y.Z-m1"`.
+   - `firmware/scope/pc_cmds.h`: the one line `#define PC_FW_VERSION "X.Y.Z" PC_FW_VERSION_MAP PC_FW_VERSION_MMU`.
+     Change only the quoted literal; the `-m1` and `-nommu` suffixes are macros of their own builds.
    - `mcp/pyproject.toml`: `version = "X.Y.Z"`.
-2. In `CHANGELOG.md`, move the entries from `## [Unreleased]` into a new section
-   `## [X.Y.Z] - YYYY-MM-DD` below it. Leave `## [Unreleased]` in place and empty. Use the
-   Added / Changed / Fixed / Removed headings. The section text, without the heading, becomes the
-   release notes.
-3. Before committing, run the same checks as CI:
+2. `CHANGELOG.md` stays the developer history. Add a section `## [X.Y.Z] - YYYY-MM-DD` under
+   `## [Unreleased]` and leave `## [Unreleased]` in place and empty. The section must not be empty (the check
+   below), but it is not the release notes, so it can be short: what the release contains, by component, with
+   the commit citations, and where the per-build history is. Do not move the whole dev diary into it.
+3. **Release notes** are a separate, user-facing file, `docs/release-notes/X.Y.Z.md`; its text is the body of
+   the GitHub release. Write it for someone who owns a 1013D and has never seen the repository: what it is,
+   the highlights, the install steps, the caveats before flashing, known issues, credits. No protocol rows, no
+   agent names, no build-by-build history. Start from the previous release's file (for 0.3.0 the draft is
+   there, made from `docs/plans/announcement.md` and the CHANGELOG since 0.2.25). Every `{{placeholder}}`
+   must be filled; `release_meta.py` refuses a file that still has one. The job appends the file list and
+   `SHA256SUMS` to it.
+4. **FPGA bitstreams.** The release attaches the images committed in `fpga/al3/dist/`
+   (`fpga/al3/dist/BITSTREAMS.md`, "Provenance", says why they are committed and not built in CI). For a new
+   bitstream version, before the release commit:
+   - build it from a committed `fpga/al3/src` (`SRC_REV=<commit> ./build.sh`, `fpga/al3/TD_SETUP.md`), flash it
+     on the owner's unit and bench it (`docs/hardware-status.md`);
+   - copy the raw `FPGA.bin` to `fpga/al3/dist/al3-0x15xx.bin` and add an entry to `manifest.json`: size,
+     sha256, the sha256 of the image padded with 0xFF to 1 MiB, the full source commit, the first firmware that
+     uses it, status and the bench record. Exactly one entry is `recommended`; one that must not be used is
+     `withdrawn` (kept in git, not attached);
+   - add its rows to `BITSTREAMS.md` (the "Which one to use" table and the hash table);
+   - run `python3 -I tools/bitstreams.py check --release`. It checks every file against the manifest (size,
+     hash, the AL3A10 header, the padded hash), that `BITSTREAMS.md` names every hash, and for a release that
+     one benched image is recommended and no `{{placeholder}}` is left.
+5. Before committing, run the same checks as CI:
 
    ```
    wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/firmware/scope && make gcc10 && make && make -C host_tests test"
    cd mcp && .venv/Scripts/python -m pytest -q
+   python .github/scripts/wheel_smoke.py
+   python -I tools/bitstreams.py check --release
    ```
 
-   Then check the tag metadata. Exit 0 means the tag will be accepted.
+   Then check the tag metadata. Exit 0 means the tag will be accepted, and `notes.md` is what the release
+   page will show above the file list:
 
    ```
    python .github/scripts/release_meta.py --tag vX.Y.Z --notes notes.md
    ```
 
-4. Commit on main with the subject `release: vX.Y.Z` and push. Wait for CI to pass.
-5. Tag that commit and push the tag:
+6. Commit on main with the subject `release: vX.Y.Z` and push. Wait for CI to pass.
+7. Dry run on that commit (next section). Then tag it and push the tag:
 
    ```
    git tag -a vX.Y.Z -m "fnirsi-1013d-mcp X.Y.Z"
    git push origin vX.Y.Z
    ```
 
+### Dry run: a `-rcN` tag
+
+`release.yml` runs on every tag that matches `v*.*.*`, and `release_meta.py` accepts `vX.Y.Z` and
+`vX.Y.Z-rcN`. An rc tag goes through the same jobs on the same commit and with the same checks against
+`X.Y.Z` (versions, CHANGELOG section, release notes, bitstreams), and its release is always a pre-release
+titled `fnirsi-1013d-mcp X.Y.Z-rcN`. Asset names carry `X.Y.Z`, as they will on the real release. This is the
+way to run the workflow before the real tag, in the real repository with its real permissions; a fork works
+too but tests a different repository's settings.
+
+```
+git tag -a v0.3.0-rc1 -m "fnirsi-1013d-mcp 0.3.0 dry run"
+git push origin v0.3.0-rc1
+gh run watch "$(gh run list --workflow release.yml --limit 1 --json databaseId -q '.[0].databaseId')" --exit-status
+gh release view v0.3.0-rc1                      # the assets, the notes, marked pre-release
+gh release download v0.3.0-rc1 -D rc1 && (cd rc1 && sha256sum -c SHA256SUMS)
+```
+
+Check the release page as a visitor would: the notes, every asset, `BITSTREAMS.md`. Then remove the dry run,
+release first, then the tag:
+
+```
+gh release delete v0.3.0-rc1 --yes
+git push origin :refs/tags/v0.3.0-rc1 && git tag -d v0.3.0-rc1
+```
+
+An rc that failed costs nothing: fix on main, tag `-rc2`. A failed run on the real tag costs a patch version
+(below), which is why the rc comes first.
+
 ### What release.yml does
 
 1. **check**: `release_meta.py` fails the run if any of these hold:
-   - the tag is not `vMAJOR.MINOR.PATCH`;
-   - `PC_FW_VERSION` or the mcp version differs from the tag;
-   - the CHANGELOG section is missing or empty.
-2. **ci**: the whole of `ci.yml` runs as a reusable workflow on the tag commit.
+   - the tag is not `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-rcN`;
+   - `PC_FW_VERSION` or the mcp version differs from `X.Y.Z`;
+   - the CHANGELOG section `[X.Y.Z]` is missing or empty;
+   - `docs/release-notes/X.Y.Z.md` is missing, empty or still has a `{{placeholder}}`.
+
+   Then `tools/bitstreams.py check --release` fails it unless the committed bitstreams match the manifest,
+   exactly one benched image is `recommended` and `BITSTREAMS.md` has no placeholder.
+2. **ci**: the whole of `ci.yml` runs as a reusable workflow on the tag commit, including the `wheel` job.
 3. **publish** first checks that the image is the one CI built for this tag. The artifact's sha256 must
-   still match, and the `#VER` literal in the image must report the tag's version. The job then attaches
+   still match, and the `#VER` literal in the image must report the version. The job then attaches
    these files to a GitHub release:
 
 | file | content |
 |---|---|
 | `fnirsi_1013d-fw-X.Y.Z.bin` | the scope image (eGON.EXE, GCC 10 protocol build) for FEL or SD sector 750 |
 | `fnirsi_1013d-sdtools-X.Y.Z.zip` | `make_release_sd_package.py`, `make_sd_image.py`, `mksunxi.py` |
-| `fnirsi1013d-X.Y.Z-py3-none-any.whl`, `fnirsi1013d-X.Y.Z.tar.gz` | the mcp package (`python -m build mcp`) |
+| `fnirsi1013d-X.Y.Z-py3-none-any.whl`, `fnirsi1013d-X.Y.Z.tar.gz` | the mcp package (`python -m build mcp`, the same build the `wheel` job tested) |
+| `fnirsi_1013d-fpga-al3-0x15xx.bin` | each bitstream in `fpga/al3/dist` except `withdrawn` ones, as bitgen wrote it |
+| `fnirsi_1013d-fpga-al3-0x15xx-flash1m.bin` | the same padded with 0xFF to the 1 MiB config flash, the file users write |
+| `BITSTREAMS.md` | which bitstream to use, firmware versions, how to flash, rollback |
 | `SHA256SUMS` | sha256 of every file above, also printed in the release notes |
 
 Before it publishes, the job runs the SD tools from the zip on a clean runner. They download Atlan4's
 package and build an SD package with the new image, which tests the path users take.
 
-Tags with major version 0 are marked as pre-release. The release is created with
+Tags with major version 0, and every `-rcN` tag, are marked as pre-release. The release is created with
 `gh release create --verify-tag`, so the tag must already exist on GitHub.
 
 If a run fails, fix the cause on main and delete the tag locally and remotely. Then tag the fixed commit.
@@ -144,6 +205,9 @@ Do not move a tag after a release has been published from it. Bump the patch ver
   `make_sd_image.py write` touches only the sectors of the parts you pass, and it backs up the card
   before writing a device. Do not `dd` the whole package from sector 16. That also zeroes sectors
   708-710, which hold calibration, settings and the display/boot-mode byte. Take a full card backup first.
+- **FPGA bitstream** (AL3A10 only, needs a 3.3 V SPI programmer): the attached `BITSTREAMS.md` says which
+  image to use, how to back up and write the config flash with `firmware/tools/spiflash_d2xx.py`, and how
+  to roll back. Write the `-flash1m.bin` file.
 
 ## 4. Checking the attached hashes against a FEL load
 
@@ -185,6 +249,11 @@ offer source we do not have. So this repository never attaches them, and never a
 package that contains them. Instead, `make_release_sd_package.py` fetches them from Atlan4's repository
 on the user's machine. It pins the commit and checks sha256, so users get exactly the files Atlan4
 published, from Atlan4. CI downloads nothing from Atlan4 except in the release job's SD tools test.
+
+Our FPGA bitstreams are different: their source is `fpga/al3/src` in this repository (Atlan4's AL3
+project, GPL-3.0 in his repository, plus our changes), each image names its source commit in
+`fpga/al3/dist/manifest.json`, and the build is deterministic. So releases attach them. Atlan4's own 0x1532
+is not attached; it is a download from his repository.
 
 If Atlan4 publishes the bootloader v0.8 or updater source later:
 

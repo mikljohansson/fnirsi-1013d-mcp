@@ -15,7 +15,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   unavailable, clamp the record slider to the record, derive viability from the real record length (memory depth) instead of the
   table, apply the same rule to SET_TIMEBASE / the protocol path, and check the resampling and zero-fill code for the exact
   cut-off and scroll behaviour.
-- **Release 0.3.0 readiness fixes** (docs/plans/release-readiness.md, 12 findings by docs-gen3): attach our FPGA bitstreams
+- [x] **Release 0.3.0 readiness fixes** (rel-gen1 10-19 17:35; remaining: 0x1538 entry, screenshots, tested-on list, known issues in docs/release-notes/0.3.0.md) (was: docs/plans/release-readiness.md, 12 findings by docs-gen3): attach our FPGA bitstreams
   (0x1533-0x1536, our own build of GPL sources) to the GitHub release with sha256 and the flash procedure, make the mcp wheel work
   outside a checkout (data/log dirs, .mcp.json example without the Windows venv path and COM10), write release notes separate from
   the CHANGELOG dev diary, fix docs/releasing.md step 1, dry-run release.yml on a scratch tag or fork, refresh README.md (Status, tool
@@ -50,7 +50,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   message waits for a tap or times out); (j) Diagnostics uses the Settings screen's header/tab design; battery indicator drawn
   over the Diagnostics page (not over Settings); (k) Calibration tab: "DC shift trim off" becomes the button's state, drop the
   "Needs a DC supply up to 15V" hedge; (l) wizard: "Step N of 6" moves to the top right of the title line; (m) Waterfall / Density
-  show one channel (by design since 0.2.32; say so in the Display fold-out or allow CH1+CH2?). (n) Developer page "Debug overlay" is 1.00o5's per-pass debug box (right middle, flickers, raw numbers): either make it a static, labelled overlay drawn once per pass without clearing, or drop it (owner: "not sure what it is supposed to do"). (o) Zero level instruction names the calibration post too (fw-cal4, 0.2.60). (p) RUN/STOP button: when the host (MCP) stops the acquisition the button stays green as in RUN; redraw it on every host-driven run-state change. Owner proposal: make it a two-state button that shows the current state and the action, green "RUN" while running (tap stops), red "STOP" while stopped (tap starts); check the dialog-colour rule (red = destructive) against this, since here red would mean "stopped", and settle the wording in the mockup before coding.
+  show one channel (by design since 0.2.32; say so in the Display fold-out or allow CH1+CH2?). (n) Developer page "Debug overlay" is 1.00o5's per-pass debug box (right middle, flickers, raw numbers): either make it a static, labelled overlay drawn once per pass without clearing, or drop it (owner: "not sure what it is supposed to do"). (o) Zero level instruction names the calibration post too (fw-cal4, 0.2.60). (q) main menu Scope icon: a clean sine instead of the square wave (owner 17:20; sent to fw-polish). (p) RUN/STOP button: when the host (MCP) stops the acquisition the button stays green as in RUN; redraw it on every host-driven run-state change. Owner proposal: make it a two-state button that shows the current state and the action, green "RUN" while running (tap stops), red "STOP" while stopped (tap starts); check the dialog-colour rule (red = destructive) against this, since here red would mean "stopped", and settle the wording in the mockup before coding.
 - [x] **FLASH 0x1537** (done 10-19 16:31, verified febc9299; power cycle and bench checks next). Was: REQUIRED before 0.3.0. The encode-phase race
   of 0x1532-0x1536 makes about half of the 200 MS/s captures after a rate change carry one metastable ADC core (bench 10-19 16:30);
   0x1537 fixes it in hardware. Plan: firmware/AGENTS.md section 35 (adapted to 0x1537: backups/al3_seg_0x1537_426a3784_padded.bin
@@ -61,6 +61,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   200 MS/s and re-arm when it is set (no data check needed); on 0x1532-0x1537 run the data check on every full-rate arm instead of
   only after 0x0D. Fix the stored core-order convention (interleave tracker A-B model, 0x53 swap bit) to what 0x1538 guarantees.
   fw-cal4 retired at 400k (handoff section 37); new agent.
+- **Documentation site and write-ups** (owner 10-19 17:30): docs/ stays the single source, published with MkDocs Material via a
+  GitHub Pages workflow; three shelves: user guide (install, first run, calibration, each screen with a screenshot, generator),
+  agent guide (MCP setup, measurement guide, worked examples with plots), engineering articles (calibration story, the ADC
+  encode-phase fault, decimation filters and FIR, MMU and FFT, Bode design and bench, UX makeover). Tooling: tools/screenshots.py
+  drives the scope through each state over USB (scope_screenshot) and saves named PNGs for reproducible screenshots; plots from
+  MCP data saved with their generating command. Order: site skeleton + screenshot tool + user guide before the announcement
+  (after the polish batch lands so the screens are final); articles at any pace. Dispatch a docs agent after fw-polish merges.
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
@@ -256,7 +263,20 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - mcp-gen5 (done 15:40, about 565k tokens, retired; handoff mcp/AGENTS.md): protocol 1.17 host side pushed 2097181 (CI 39258110694), Bode follow-ups pushed 514182f (CI 39260053987, 398 tests):
   wiring A default with the bench numbers, ch2_overload flag + auto range step-up + fixed-range failure text, --ch2-coupling ac,
   offset-range-exhausted caveat, simulator models the pinned front end. Next for mcp: 1.17 on the unit after the 0x1537 flash.
-- fpga-gen7 (running, 10-19 16:40-): 0x1537 leaves ADC chip 2 in a bad encode phase after a write in the scope's arm sequence (bench
+- rel-gen1 (done 17:35, about 265k tokens, retired): merged (bitstreams 0x1533-0x1537 in fpga/al3/dist with manifest.json,
+  BITSTREAMS.md and tools/bitstreams.py check in CI; release.yml attaches them, accepts vX.Y.Z-rcN pre-release tags, takes release
+  notes from docs/release-notes/X.Y.Z.md (0.3.0 draft with placeholders); releasing.md fixed; README rewritten; release-checklist.md).
+  Open: add 0x1538 as recommended when pinned and benched; owner decisions: attach older bitstreams, AI credits wording (F12).
+- Second swarm started 10-19 17:15 (owner: no deadline, do everything that needs no hardware; advanced features are MCP-first,
+  device UI only for trigger types, peak detect, hardware counter). Provisional numbers: fw-enc 0.2.62 / protocol 1.19 (encode
+  self-check on 0x1538, data check on every full-rate arm), fw-polish 0.2.63 (UI polish batch 1 a-p), fw-acq 0.2.64 (ACQ coupling,
+  per-mode filter default, touch batch 2, spectrum touch), fw-meas 0.2.65 (Measurements v2), fw-bode 0.2.66 / protocol 1.20 rows
+  60+ (Bode on the device D1-D5), rel-gen1 (bitstream distribution, releasing.md, README rewrite, release checklist). Waiting for
+  0x1538 to merge: fpga-gen8 (trigger types, peak detect, hardware counter: 0x1539), then the pulse pattern generator and the
+  streaming logger design; mcp-gen6 (1.19 / 1.20 host side, result presentation helpers) after fw-enc / fw-bode land.
+- fpga-gen7 (done 17:30, about 355k tokens, retired): 0x1538 merged (stateless encode, B-first guaranteed, read 0x33 self-check,
+  tb_encphase; root cause of 0x1537 = encA setup slack -0.209 ns, of 0x1535 = async enable race); pinned backups/
+  al3_seg_0x1538_0c24ecf6.bin + padded 2fc7ea5b..., in fpga/al3/dist as unbenched; bench checks fpga/al3/README.md section 8. Was: 0x1537 leaves ADC chip 2 in a bad encode phase after a write in the scope's arm sequence (bench
   16:33-16:40); reproduce in simulation, fix as 0x1538 with a phase self-check, pin, handoff.
 - fw-cal4 (done 16:45, about 400k tokens, retired; handoff section 37): 0.2.60 (failure line, instruction) and 0.2.61 (encode check-and-retry after 0x0D, write trace events, protocol 1.18) merged. Was: running 10-19 15:50-: 0.2.60 merged (failure line with range/rate/core and RMS numbers, instruction names the post;
   pinned backups/fw-0.2.60_27634587.bin, loaded 16:18). Now on the real fault: the wizard's 200 MS/s class reads one garbage core
