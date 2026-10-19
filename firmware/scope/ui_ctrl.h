@@ -93,6 +93,13 @@ uint32 ui_fold_row_y(const ui_fold *f, uint32 row);
 int    ui_fold_hit(const ui_fold *f, uint32 x, uint32 y);   //row, UI_FOLD_IN or UI_FOLD_OUT
 int    ui_fold_dir(const ui_fold *f, uint32 x);              //two-way rows: -1 left half (down), +1 right half (up)
 
+//Row layouts (ctrl_page.c draws them; test_ui checks the texts fit): a value row has its label at the left and the value
+//right-aligned, 10 px in; a two-way row has a 30 px - box and + box at its ends (4 px in) and its texts 40 px in; a
+//switch row has the slide switch at the left and its label, with a second grey line under it, from x UI_FOLD_TEXT_X.
+#define UI_FOLD_VALUE_IN      10
+#define UI_FOLD_TWOWAY_IN     40
+#define UI_FOLD_TEXT_X        90
+
 //Value names, as the fold-outs and the CTRL buttons show them
 #define UI_TRACE_COUNT        4
 #define UI_VIEW_NORMAL        0
@@ -108,6 +115,7 @@ extern const char *const ui_spec_window_names[3];                 //Rect, Hann, 
 extern const char *const ui_spec_avg_names[5];                    //Off, 4, 16, 64, Max hold
 extern const char *const ui_persist_names[UI_PERSIST_COUNT];      //0.2 s, 1 s, 5 s, Infinite (PHOS_PERSIST_*)
 extern const char *const ui_palette_names[2];                     //Mono, Heat
+extern const char *const ui_phos_note_roll;                       //why the Phosphor switch is grey in roll mode
 
 //The Display button's value line: the view, and Phosphor when its switch is on (Scope); the variant (Spectrum)
 const char *ui_display_value(int spectrum, int view, int phosphor);

@@ -293,12 +293,20 @@ static void test_ctrl_page(void)
   }
 }
 
-//A one-way row: the label at the left, the value at the right; a two-way row: - and + boxes at the ends (30 px each)
+//A one-way row: the label at the left, the value at the right, 10 px in (and 30 px to spare between them); a two-way
+//row: - and + boxes at the ends, the texts 40 px in
 static int row_fits(const ui_fold *f, const char *label, const char *value, int twoway)
 {
   uint32 w = ui_text_width(&font_3, label) + 12 + ui_text_width(&font_3, value);
 
-  return twoway ? (w + 2 * 34 <= ui_fold_row_w(f)) : (w + 2 * 10 + 30 <= ui_fold_row_w(f));
+  return twoway ? (w + 2 * UI_FOLD_TWOWAY_IN <= ui_fold_row_w(f)) : (w + 2 * UI_FOLD_VALUE_IN + 30 <= ui_fold_row_w(f));
+}
+
+//A switch row: the label (16 px font) and its second line (13 px) from UI_FOLD_TEXT_X
+static int switch_fits(const ui_fold *f, const char *label, const char *note)
+{
+  return (UI_FOLD_TEXT_X + ui_text_width(&font_3, label) + 4 <= ui_fold_row_w(f)) &&
+         (UI_FOLD_TEXT_X + ui_text_width(&font_2, note) + 4 <= ui_fold_row_w(f));
 }
 
 static void check_fold(const ui_fold *f)
@@ -351,7 +359,8 @@ static void test_folds(void)
   T_EQ(f.x, 522);
   T_EQ(f.y, 52);                                      //the mockup's top
   T_EQ(ui_fold_row_y(&f, 2) - ui_fold_row_y(&f, 1), UI_FOLD_PITCH + UI_FOLD_SEP);
-  T_TRUE(row_fits(&f, "Phosphor", "999 wfm/s", 0));
+  T_TRUE(switch_fits(&f, "Phosphor", "999 wfm/s"));
+  T_TRUE(switch_fits(&f, "Phosphor", ui_phos_note_roll));
   for(i = 0; i < UI_PERSIST_COUNT; i++)
     T_TRUE(row_fits(&f, "Persistence", ui_persist_names[i], 0));
   for(i = 0; i < 2; i++)

@@ -2,8 +2,8 @@
 // spectrum.h - on-scope spectrum analyser (protocol builds only; docs/plans/dpos350p-features.md section 2)
 //
 // A main-loop display mode, not a modal menu: the UI loop, the MCP polls and RUN/STOP keep running. While it is on, the
-// trace area (728 x 432 at 2,48) shows the spectrum of each new capture instead of the traces; the top bar and the right
-// column stay 1.00o5's. Entered and left from the main menu's mode rows (fw 0.2.51: "Spectrum analyser", "Scope").
+// trace area (728 x 432 at 2,48) shows the spectrum of each new capture instead of the traces; the top bar stays 1.00o5's,
+// the right bar shows the mode's slots (fw 0.2.53). Entered and left from the main menu's mode rows ("Spectrum analyser", "Scope").
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #ifndef SPECTRUM_H
@@ -41,6 +41,22 @@ void   spectrum_service(void);               //every main-loop pass: leave the m
 void   spectrum_note_roll_off(void);         //fw 0.2.51: the main menu switched Roll off for the view: say so once
 int    spectrum_autoset(void);               //fw 0.2.51: AUTO SET in the view: start the view's Auto, or cancel it (1 = handled)
 int    spectrum_auto_running(void);          //fw 0.2.51: the view's Auto runs (AUTO SET reads "Auto...")
+
+//fw 0.2.53: the CTRL page (ctrl_page.c). Display: the variant (0 Spectrum, 1 Waterfall, 2 Density; saved in word 211).
+//Analyse: the parameters; a step ends a running Auto. The one-way ones go to the next value, Ref level by a division
+//(dir < 0 down), Reset restores the view's defaults.
+int    spectrum_view(void);
+void   spectrum_set_view(int v);
+
+#define SPEC_P_CHANNEL        0             //Analyse: CH1, CH2, CH1 + CH2 (enabled ones; also the dBV / dBA unit, Auto's channel)
+#define SPEC_P_FFT            1
+#define SPEC_P_WINDOW         2
+#define SPEC_P_AVG            3
+#define SPEC_P_SCALE          4
+#define SPEC_P_REF            5
+#define SPEC_P_RESET          6
+void   spectrum_param_text(int p, char *t);
+void   spectrum_param_step(int p, int dir);
 
 //READ_SPECTRUM (protocol section 14 row 45): the displayed spectrum of channel ch. Fills the 32-byte header and up to
 //max_bins levels (i16 centi-dBV, from bin first on); returns the number of bins written, or -1 when there is none.
