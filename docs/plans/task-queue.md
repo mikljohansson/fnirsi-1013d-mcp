@@ -152,6 +152,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   white is understood) and the Waterfall legend with its dB marks go (spectrum.c spec_draw_legend, ux-makeover.md "colour legend
   inside the plot's top right"); nobody measures from those views. Boards and ux-makeover.md updated; the warning line keeps its
   place.
+- **ACQ menu: memory depths above 6000 do not come back after Filter -> Off** (owner 10-19 22:45 on 0.2.76): with a filter on the
+  depths above 6000 are hidden (the 16-bit record halves the memory, correct); switching back to Filter Off leaves them hidden until
+  something else redraws. Recompute the memory chips' availability from the filter state on every Filter change and redraw the
+  column; host test. Next ACQ-menu batch.
 - **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
   SCREENSHOT bit 6, simulator has it, `Scope.read_screen` reads 40 rows per request) but the firmware handler is NULL
   (pc_cmds.c "BENCH: T9"). Implement it in all builds: rows of the live framebuffer as RGB565, the header per protocol.md, the
