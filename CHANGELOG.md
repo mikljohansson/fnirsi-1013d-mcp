@@ -31,6 +31,25 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.52 - 2026-10-19 (protocol 1.16, docs/protocol.md section 14 row 55)
+
+- Added: GET_HEALTH (0x000A, answered in every context, also while a menu is open) reports the USB link state now
+  (configured, suspended, not configured = no PC, high speed, port open), the CP15 control word (MMU and caches), the
+  power-on count and operating time, how the previous power-on ended (settings saved at power-off or not), whether
+  the settings changed since the last save, and a stored restart record (b830434).
+- Added: the restart record (exception, PC, fault registers) is copied into the settings sector at the boot after a
+  crash restart, so it survives a power cycle until it is cleared (GET_HEALTH flag 0x01) (b830434).
+- Added: power-on count and operating minutes in spare settings words 224..255; the firmware writes sector 709 once
+  per boot to keep them and the restart record (b830434).
+- Added: every image carries an identity record at its end; SD_INFO flag 0x02 reads the version, git hash and commit
+  time of the image the card boots (also for 0.2.47-0.2.51, and the version alone for older images) (b830434).
+- Added: calibration provenance (firmware, FPGA word, uptime, power-on count and operating minutes at calibration;
+  DS3231 time when fitted) after the calibration block in sector 708; GET_CAL is 356 bytes (b830434).
+- Added: SAVE_REPORT (0x0504) writes `reports/report-<power-on>-<n>.txt` to the card with identity, counters, the
+  decoded event log, the restart records and the calibration in words; the Diagnostics "Save report" button will
+  call the same function (b830434).
+- Added: PC_DEBUG builds restart from RAM on GET_HEALTH flag 0x80, to bench the stored restart record (c8f874b).
+
 #### 0.2.50 - 2026-10-19 (protocol 1.15; the fw-cal3 branch numbered it 1.14 / row 53, the merge renumbered it)
 
 - Added: calibration v4, background tracking of the full-rate interleave mismatch. Every 8-bit 200 MSa/s record of a

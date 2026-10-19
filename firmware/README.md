@@ -432,7 +432,7 @@ memory depth clamped to the largest offered step. The DS3231 is detected by addr
 panel's I2C bus and sampling the ACK bit [U, bench check: with and without a module]. No option needs a manual switch
 yet (everything above is detected); new hardware mods that cannot be detected get a switch in "Other settings"
 (the menu is full: a second column or page is needed) with the value in a spare settings word (108..119 or 204..255,
-`scope_save_config_data`; 207 holds the Filter setting since 0.2.30), default off. Not changed: trigger positions 25 % / 75 % on the stock bitstream (software
+`scope_save_config_data`; 207 holds the Filter setting since 0.2.30, 208-210 the spectrum and phosphor views, 224..255 the unit life record since 0.2.52, so 211..223 are free), default off. Not changed: trigger positions 25 % / 75 % on the stock bitstream (software
 only there), the generator top-bar button text on stock.
 
 ### Decimation filter (FPGA 0x1534, fw 0.2.30, protocol 1.9)
@@ -995,14 +995,17 @@ per count), `dc_shift_size` (220) maps it to screen pixels for the trace and the
 | 80, 84, 88 | CH1 `dc_shift_center` (u32), `dc_shift_size` (i32), `dc_shift_value` (i32) |
 | 92-95 | 0 |
 | 96, 100, 104 | CH2 the same |
-| 108-511 | 0 (not covered by the checksum; every save rewrites the whole sector from zeros) |
+| 108-511 | 0 (not covered by the checksum; every save rewrites the whole sector from zeros). Open firmware: 128-431 calibration v3 block (6.3), 432-487 calibration provenance (fw 0.2.52, protocol row 55: firmware build and version, FPGA word, what was written, uptime, power-on count and operating minutes at the calibration, DS3231 time when fitted; CRC-32), stamped when a save carries a changed v3 block |
 
 **Sector 709** (settings, u16 words, checksum of words 2..255 in words 0-1, version 0x0100/0x0015 in words 2-3)
 holds the base calibration results: words 168-173 CH1 `dc_calibration_offset[0..5]`, 174-179 CH2, 184-187
 `adc1compensation` / `adc2compensation` of CH1 then CH2 (i16). They are taken from the loaded 709 buffer only
 when sector 708's checksum is valid; otherwise defaults (PWM 860, compensation 0, `signal_adjusters`, 174/220/385)
 load and the input calibration is offered again. The diagnostic view's RESTORE reloads them (and 708), RESET sets
-the defaults in RAM.
+the defaults in RAM. fw 0.2.52: words 224..255 hold the unit life record (power-on count, operating minutes, the
+session-open flag, the restart record kept over power cycles; layout in protocol row 55, `pc_life.c`), stored by every
+save; the firmware writes the sector once per boot when it loaded valid, so the count and a restart record reach the
+card even when the power-on ends without the power-off save.
 
 **Where the compensation is applied.** `fpga_read_adc_data` (every UI readout, READ_TRACE, the calibrations): per
 core `sample = raw + compensation`, clamped to 0..255, overload flags, and in the second (core B) pass a clip-matching

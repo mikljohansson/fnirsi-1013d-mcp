@@ -1,5 +1,9 @@
 # firmware/ handoff for agents
 
+**fw-readers branch (2026-10-19): fw 0.2.52, protocol 1.16** adds the diagnostics readers (GET_HEALTH, card image
+identity, calibration provenance, unit life record, SAVE_REPORT; **section 30**) on main's 0.2.50; fw-ui1's 0.2.51 (UI)
+runs in parallel, expect small merge conflicts in pc_hooks.h and pc_hal_scope.c.
+
 **Current state (coordinator merge, 2026-10-19): latest build fw 0.2.50, protocol 1.15** (fw-cal3's calibration wizard, interleave
 tracking and class probe, **section 28**, merged on fw-usb2's 0.2.49 USB suspend watch, **section 27**; the merge renumbered fw-cal3's
 protocol change from 1.14 / row 53 to 1.15 / row 54 because fw-usb2 took 1.14 / row 53) on fw-mmu's 0.2.48 (MMU + D-cache, section 26).
@@ -245,6 +249,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.48 | b1922c3 | 2f768fd9 | MMU + D-cache on (flat map, DDR / SRAM write-back, framebuffer write-through, restart record and peripherals strongly ordered), clean + off at _reset and ENTER_FEL, GET_LINK_STATS 58-59 fault status / address (fw-mmu, section 26) | built, host-tested (test_mmu); A/B image `make gcc10-nommu` 0.2.48-nommu sha256 45e03f7f; bench sequence in section 26 |
 | 0.2.49 | c477faa | 90f460d6 | USB suspend watch in the 1 ms tick (pc_usbw.c): inferred resume (SOFs, EP0 setup, EP2 OUT while suspended) acts, soft reconnect (SoftConn off 1 s) after a retry storm or 15 min suspended, GET_LINK_STATS 60-61, event type 20, SUSPEND before RESUME in the ISR (protocol 1.14, row 53; fw-usb2, section 27) | built, host-tested (test_usbw 90 checks); A/B `make gcc10-nommu` sha256 f5f377ea; bench plan in section 27 |
 | 0.2.50 | e871c50 | 1b55efc2 | calibration wizard (one modal three-step flow, 48e5737) and calibration v4: A - B interleave tracker applied in the full class, full-class common-mode class probe, GET_CAL 288 bytes, diagnostics lines (protocol 1.14, row 53; fw-cal3, section 28) | built, host-tested; bench lists README 6.4 and 6.5 |
+| 0.2.52 | c8f874b | e0968392 | diagnostics readers (fw-readers, section 30): GET_HEALTH 0x000A (USB state, CP15, power-on count, operating minutes, settings save state, stored restart record), unit life record in settings words 224..255 with one sector-709 write per boot, image identity record + SD_INFO IDENT (112 bytes), calibration provenance in sector 708 432..487 + GET_CAL 356 bytes, SAVE_REPORT 0x0504 (protocol 1.16, row 55) | built, host-tested (test_diag 462 checks); bench list in section 30 |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -1339,3 +1344,85 @@ GCC 10 36, GCC 13 31, PC_DEBUG 31; acal_track.c / acal_live.c clean with -Wextra
   pair). The tracker un-inverts the buffer itself. Diagnostics CH2 block moved from y 205 to 225 for the two v4 lines.
   Edit scripts and builds: no git together with heredocs in one shell command; Python edits with latin-1 / newline='';
   clean warning lists need clean build dirs (the incremental `build.sh` count is only the recompiled files).
+
+## 30. fw-readers: diagnostics readers (fw 0.2.52, protocol 1.16, row 55)
+
+Branch `fw-readers` from main d8d5a62 (0.2.50): 8614032 (protocol row 55, spec first), b830434 (code, host tests,
+vectors), c8f874b (PC_DEBUG restart test, GET_HEALTH flag 0x80), then docs and this handoff. Image from c8f874b (GCC 10):
+`firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 528,896 B, sha256
+e09683929d643f850012f3dbd354fd9ab04aea7ab17796dc824a56c5e5382851 (identity c8f874b; a build of a later commit
+differs only in the identity record). PC_DEBUG image (`build-dbg`, for bench check 3) sha256
+fdc3b1b99ebe8ea16d0c82ca8cc812c9739f7ec3003444a3767835f46616d72b. Not pinned in backups/. **Nothing benched.** Host tests all
+green (test_diag 462, test_session 69009 / 69007, check_vectors incl. `diag_layouts`); warnings GCC 10 36, GCC 13 31,
+PC_DEBUG 31 (counts as on 0.2.50, none in the new files). Images: GCC 10 +24.5 KB over 0.2.50 (pc_report.c is built
+`#pragma GCC optimize ("Os")`: at -O3 the inlined text helpers made it 120 KB).
+
+**Files.** `pc_life.c/.h` (pure: settings words 224..255 pack/unpack, boot logic, 1.00o5 checksum), `pc_ident.c/.h`
+(identity record type, card reader with cache, legacy tail, `#VER` text scanner; host-buildable through pc_hal_sd_read),
+`pc_report.c/.h` (text builder, the report from the protocol bodies; host-buildable), `pc_diag.c` (target: life state,
+boot write, dirty check, provenance stamping, CP15, FatFs report file, `pc_glue_*` entry points), `adc_cal.c/.h`
+(`acal_prov` pack/unpack/what), `build_id.c` (one object `pc_image_ident`; `pc_fw_build` / `pc_build_time` are now
+macros in pc_cmds.h), pc_transport.c (`pc_hal_usb_state`), pc_cmds.c (GET_HEALTH, SD_INFO 112, GET_CAL 356, SAVE_REPORT;
+`pc_link_counters`, `pc_health_body`, `pc_cal_body`, `pc_sd_info_body` exported). Hooks (pc_hooks.h): PC_SETTINGS_STORE
+and PC_SETTINGS_SAVED in scope_functions.c's settings save, PC_CAL_LOADED / PC_CAL_SAVE in the sector 708 load / save,
+PC_POWER_OFF now `pc_glue_power_off`. pc_hal_scope.c: `pc_diag_boot` after `pc_restart_check` in `pc_glue_init`,
+`pc_diag_service` in `pc_glue_ui_service`, accessors `pc_glue_session`, `pc_glue_rtc_present`.
+
+**Decisions.**
+- One new command for the live state (GET_HEALTH, 96 bytes, F_BUSY: works while Diagnostics is modal) instead of slots
+  spread over GET_INFO / GET_STATUS / GET_LINK_STATS; GET_LINK_STATS stays n = 62.
+- Provenance is a separate trailer after the v3 block, not a v3 -> v4 block bump: 0.2.45-0.2.51 keep reading the card
+  (a bump would have made the owner's fallback images uncalibrated). Stamped by comparing the block on save with the
+  one loaded / last saved (`acal_prov_what`), so cal_wiz_ui.c needed no change and a DC-shift trim or volts calibration
+  keeps the provenance. Per block, not per channel; `what` says which parts the last calibration wrote.
+- Power-on count = cold boots (power-on or FEL load); a warm restart is the same power-on. Operating minutes = stored
+  base + uptime; minutes since the last save are lost when a power-on ends without one (crash, flat battery).
+- The boot write of sector 709 (only when it loaded valid) makes the count, the session-open flag and the restart
+  record survive a crash plus power cycle. One extra SD write per boot; the 1.00o5 words are written exactly as loaded.
+- "Changed since the last save" rebuilds the buffer as the save would (`scope_save_config_data`, harmless: the
+  power-off save does the same first) once per second in the main loop and compares a CRC of words 2..223 with the
+  last load / save. Stale while a menu is modal (byte 40 gives the age).
+- Card identity: fw 0.2.52+ ends with a 36-byte record (magic 'FWID' '1013'); 0.2.47-0.2.51 end with GCC 10's
+  time[6], pad[2], build (verified on the 0.2.48, 0.2.49, 0.2.50 and 0.2.50-nommu backups with `test_diag --image`);
+  older images only by the `#OK,FNIRSI-1013D-AI,fw=` text (0.2.11, 0.2.25, 0.2.46 checked). Full scan costs one read
+  of the image (as VERIFY); cached until SD_WRITE_SECTORS reaches sector 750.
+- USB "disconnected": VBUS is forced valid (ISCR), so a pulled cable is indistinguishable from a suspend once
+  configured; state 2 "not configured" is the defined no-PC state.
+
+**For the UI agent (Diagnostics pages, later generation).** `const pc_card_id *pc_glue_card_ident(void)` (pc_ident.h;
+first call reads the card, MAIN context), `int pc_glue_save_report(char *name, uint32 name_max)` (0 or FRESULT, MAIN),
+`void pc_glue_health(uint8 *body96)` (the GET_HEALTH body; decode per row 55), `pc_cal_body(ch, buf356)` for the
+calibration page incl. provenance. Firmware tile: `pc_image_ident` (running) vs `pc_glue_card_ident()` (`same`).
+
+**Not done / notes for the next agent.**
+- Post-based calibration check (diagnostics-review section 4 item 7): not built. fw-cal3's class probe covers the
+  full-vs-gated common mode only; a check at the post (both levels, both classes, A - B residual and gain agreement
+  against the provisional limits of review finding 6) needs the generator and its own modal step.
+- "Undo last calibration" storage: sector 711 is, by inference, unused by the Atlan boot chain (README section 3 lists
+  708-710 and 750; the updater's update.h defines 16, 80, 708-710, 750); verify against the updater 0.02v binary and
+  the v0.8 bootloader before writing there. The 708 provenance trailer leaves 488..511 free (24 bytes).
+- FPGA build identity: the fpga agent's (0x2A+ taken by segmented capture on 0x1536).
+- mcp: parse GET_HEALTH, SD_INFO 64..111 (+ flag 0x02), GET_CAL 288..355, SAVE_REPORT; MCP tool returning the report
+  as JSON (review finding 8).
+
+**Bench checks** (coordinator + owner; FEL load, the card keeps 0.2.25)
+1. Load, `#VER fw=0.2.52,proto=1.16`. GET_HEALTH: byte 4 = 3 (configured), byte 5 bit 0 = 1 (high speed), bit 3 = 1
+   with the port open; 16 = 0x0005107D; 32 bit 3 (709 valid) and bit 1 (boot write ok); 20 power_on = 1 on the first
+   boot with 0.2.52 (no life record yet), 33 last_end = 0. SD_INFO flags 0x02: 64 = 3, version "0.2.25", proto 1.5,
+   build 0, 65 = 0, 100 = scan ms (expect well under 1 s). The card is untouched except sector 709 (boot write).
+2. Settings: GET_HEALTH 34 bit 0 = 0; change V/div on the scope; within ~1 s bit 0 = 1. Power off with the button and
+   on again (the card boots 0.2.25, which keeps words 224..255), FEL-load 0.2.52 again: power_on = 2, 33 = 1 (saved at
+   power-off). Pull no battery for this. With 0.2.25 in between, 0.2.25's own power-off save also keeps the record.
+3. Forced restart: load the PC_DEBUG image (`make PC_DEBUG=1 BUILD=build-dbg`, #VER 0.2.52, caps DEBUG_RAW) and send
+   GET_HEALTH with flag 0x80: after the answer it jumps to the image entry (type 0 restart). After the reboot (about
+   2 s, USB re-enumerates): GET_LINK_STATS 49 = 1, 50 = 0; GET_HEALTH 44 = 3 (stored, this power-on), 45 = 0, 46 = 1,
+   64 = the LR at entry (in `pc_hal_restart_test`'s caller chain, map with the ELF), power_on unchanged, 33 = 2.
+   Power off with the button, on, FEL-load 0.2.52 again: 44 = 1 (earlier power-on), 48 = the old power_on. Clear with
+   GET_HEALTH flag 0x01, power off/on (or any save): 44 = 0. ENTER_FEL is not a restart (it clears the DDR record).
+4. Calibration: run the wizard (Done). GET_CAL 288 = 1, 292..347: 'APRV', build b8304340 (or the loaded build), FPGA
+   word, what = 0x0F after zeros + both gains, uptime_ms at Done, power_on; 348 = 0 and 352 = 0 right after. A
+   DC-shift "End" keeps the same trailer; `fnirsi1013d-sd read 708 1` shows it at 432..487.
+5. SAVE_REPORT: answer `reports/report-0000N-00.txt`; open the file on a PC (card in a reader, or USB drive mode):
+   identity lines, "Card image (sector 750): 0.2.25 ...", counters, event log in words, calibration in words.
+6. Regression: `fnirsi1013d-bench` and the soak as on 0.2.50; pass_ms unchanged (the 1 Hz dirty check rebuilds 256
+   words).
