@@ -25,6 +25,12 @@
 #include "ui_fmt.h"
 #include "ui_menu.h"
 
+//USB drive screen: the Exit button (fw 0.2.51)
+#define USB_EXIT_X     610
+#define USB_EXIT_Y     412
+#define USB_EXIT_W     160
+#define USB_EXIT_H     52
+
 #include <string.h>
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -245,55 +251,83 @@ void scope_setup_view_screen(void)
 
 void scope_setup_usb_screen(void)
 {
+  //fw 0.2.51, "USB drive" (docs/plans/ux-makeover.md section 2, design artboard UsbDrive): the scope and the PC as
+  //1.00o5 drew them, what is going on in three plain lines, and an Exit button
+  static const char *lines[3] =
+  {
+    "The SD card is now a USB drive on the PC.",
+    "PC control (MCP) is disconnected until you leave this screen.",
+    "Eject the drive on the PC before tapping Exit."
+  };
+  int i;
+
   //Clear the whole screen
   display_set_fg_color(BLACK_COLOR);
   display_fill_rect(0, 0, 800, 480);
+
+  //Header bar with the title
+  display_set_fg_color(0x000B1A33);
+  display_fill_rect(0, 0, 800, 52);
+  display_set_fg_color(0x001F3A66);
+  display_draw_horz_line(51, 0, 799);
+  display_set_font(&font_5);
+  display_set_fg_color(WHITE_COLOR);
+  display_text(14, 13, "USB drive");
 
   //Set the light color for the equipment borders
   display_set_fg_color(0x00AAAAAA);
 
   //Draw the computer screen
-  display_fill_rounded_rect(470, 115, 250, 190, 2);
-  display_fill_rect(580, 305, 30, 20);
-  display_fill_rounded_rect(550, 325, 90, 10, 2);
-  display_fill_rect(550, 331, 89, 4);
+  display_fill_rounded_rect(470, 110, 250, 180, 2);
+  display_fill_rect(580, 290, 30, 20);
+  display_fill_rounded_rect(550, 310, 90, 10, 2);
 
   //Draw the scope
-  display_fill_rounded_rect(80, 200, 180, 135, 2);
+  display_fill_rounded_rect(80, 190, 180, 130, 2);
 
   //Draw the cable
-  display_fill_rect(210, 188, 10, 12);
-  display_fill_rect(213, 154, 4, 36);
+  display_fill_rect(210, 178, 10, 12);
+  display_fill_rect(213, 150, 4, 30);
   display_fill_rect(213, 150, 152, 4);
-  display_fill_rect(361, 154, 4, 106);
-  display_fill_rect(361, 260, 98, 4);
-  display_fill_rect(458, 257, 12, 10);
+  display_fill_rect(361, 154, 4, 102);
+  display_fill_rect(361, 252, 98, 4);
+  display_fill_rect(458, 249, 12, 10);
 
   //Fill in the screens with a blue color
   display_set_fg_color(DARKBLUE_COLOR);
-  display_fill_rect(477, 125, 235, 163);
-  display_fill_rect(88, 210, 163, 112);
+  display_fill_rect(477, 119, 236, 162);
+  display_fill_rect(88, 200, 164, 110);
 
   //Draw a dark border around the blue screens
   display_set_fg_color(0x00111111);
-  display_draw_rect(477, 125, 235, 163);
-  display_draw_rect(88, 210, 163, 112);
+  display_draw_rect(477, 119, 236, 162);
+  display_draw_rect(88, 200, 164, 110);
 
-  //Display the text with font 5 and the light color
-  display_set_font(&font_5);
+  //What it means, in the 16 px font
+  display_set_font(&font_3);
   display_set_fg_color(WHITE_COLOR);
-  display_text(130, 254, "Off USB");    //130 bolo
+
+  for(i = 0; i < 3; i++)
+    display_text(40, 342 + 24 * i, (int8 *)lines[i]);
+
+  //The Exit button (USB_EXIT_*), the only control on the screen
+  display_set_fg_color(0x00333333);
+  display_fill_rounded_rect(USB_EXIT_X, USB_EXIT_Y, USB_EXIT_W, USB_EXIT_H, 4);
+  display_set_fg_color(0x00606060);
+  display_draw_rounded_rect(USB_EXIT_X, USB_EXIT_Y, USB_EXIT_W, USB_EXIT_H, 4);
+  display_set_fg_color(WHITE_COLOR);
+  display_text(USB_EXIT_X + (USB_EXIT_W - ui_text_width(&font_3, "Exit")) / 2, USB_EXIT_Y + 18, "Exit");
 
   //Stop the USB interface
   usb_device_disable();
-          
+
   USB_CH340 = 0;      //serial mode OFF, enable MSC
   usb_device_init();
-  
+
   //Start the USB interface
   usb_device_enable();
 
-  //Wait for the user to touch the scope Off USB section to quit
+  //Wait for the user to touch Exit to quit
   while(1)
   {
     //Scan the touch panel for touch
@@ -302,8 +336,8 @@ void scope_setup_usb_screen(void)
     //Check if there is touch
     if(havetouch)
     {
-      //Check if touch within the text field  //Check if touch within the USB OFF button
-      if((xtouch >= 90) && (xtouch <= 250) && (ytouch >= 210) && (ytouch <= 320))
+      //Check if touch within the Exit button
+      if((xtouch >= USB_EXIT_X) && (xtouch < USB_EXIT_X + USB_EXIT_W) && (ytouch >= USB_EXIT_Y) && (ytouch < USB_EXIT_Y + USB_EXIT_H))
       {
         if (mounted_to_PC)
         {
