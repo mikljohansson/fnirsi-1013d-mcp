@@ -778,11 +778,8 @@ static void test_settings_text(void)
   for(i = 0; i < UI_SET_GROUPS; i++)
     T_TRUE(ui_text_width(&font_2, ui_set_groups[i].title) <= UI_SET_ROW_W);
 
-  //Header: the title, the subtitle and Back on one line; Restore and its note on one line
-  T_TRUE(12 + ui_text_width(&font_5, "Settings") + 16 <= 130);
-  T_TRUE(130 + ui_text_width(&font_2, "Channel, trigger, time base and filter stay in their own menus.") < UI_SET_BACK_X - 8);
-  T_TRUE(UI_SET_RESTORE_X + UI_SET_RESTORE_W + 14 +
-         ui_text_width(&font_2, "Asks first. Keeps the calibration and the start-up choice.") <= 788);
+  //Header: the title and Back on one line (fw 0.2.63: no subtitle, no note beside Restore)
+  T_TRUE(12 + ui_text_width(&font_5, "Settings") + 16 <= UI_SET_BACK_X);
   T_TRUE(ui_text_width(&font_3, "Restore default settings") + 24 <= UI_SET_RESTORE_W);
 
   //Time editor: labels left of the - buttons, values between the buttons
@@ -867,6 +864,20 @@ static void test_dialog(void)
 
     for(i = 0; i < t[k]->nlines; i++)
       T_TRUE(ui_text_width(&font_3, t[k]->lines[i]) + 48 <= UI_DLG_W);
+
+    //fw 0.2.63 (owner): the body uses the dialog's width, a line breaks only where the next word would not fit
+    for(i = 0; i + 1 < t[k]->nlines; i++)
+    {
+      char   joined[160];
+      size_t n = strlen(t[k]->lines[i]), w = 0;
+
+      memcpy(joined, t[k]->lines[i], n);
+      joined[n++] = ' ';
+      while(t[k]->lines[i + 1][w] && (t[k]->lines[i + 1][w] != ' '))
+        joined[n++] = t[k]->lines[i + 1][w++];
+      joined[n] = 0;
+      T_TRUE(ui_text_width(&font_3, joined) + 48 > UI_DLG_W);
+    }
   }
 }
 

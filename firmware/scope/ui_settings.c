@@ -327,10 +327,9 @@ int ui_time_hit(uint32 x, uint32 y)
 const ui_dlg_text ui_dlg_restore =
 {
   "Restore default settings?",
-  { "Channels, trigger, time base, display and these settings",
-    "go back to their defaults. The calibration and the",
-    "start-up choice are kept." },
-  3, "Cancel", "Restore", 1
+  { "Channels, trigger, time base, display and these settings go back to their",
+    "defaults. Calibration and start-up are kept." },
+  2, "Cancel", "Restore", 1
 };
 
 const ui_dlg_text ui_dlg_delete =
