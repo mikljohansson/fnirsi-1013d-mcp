@@ -6,7 +6,7 @@ description: Run measurements on the FNIRSI 1013D oscilloscope through the fnirs
 # Measuring with the FNIRSI 1013D
 
 Full guide: `docs/agent-measurement-guide.md`. Tool reference: `docs/mcp-tools.md` (the live tool descriptions win).
-The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) in `.mcp.json`.
+The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) (`.mcp.json`, see `.mcp.json.example`).
 
 ## Start every session
 

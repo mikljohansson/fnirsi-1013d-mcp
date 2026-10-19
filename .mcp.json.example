@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "fnirsi1013d": {
+      "type": "stdio",
+      "command": "fnirsi1013d-mcp",
+      "args": ["--port", "auto"],
+      "env": {
+        "FNIRSI_MCP_MAX_TIER": "3"
+      }
+    },
+    "fnirsi1013d-sim": {
+      "type": "stdio",
+      "command": "fnirsi1013d-mcp",
+      "args": ["--sim", "--variant al3 --signal decay:tau=80us,amp=0.3,period=1ms,width=200us"],
+      "env": {
+        "FNIRSI_MCP_MAX_TIER": "3"
+      }
+    }
+  }
+}
