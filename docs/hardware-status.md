@@ -849,3 +849,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   re-resolved at every sampling reset with about 40 % failure: a marginal flop (fpga-gen7: encA setup slack -0.209 ns at TT 85C),
   not a write race and not a thermal drift within a minute. 0.2.61's check does not fire here because no 0x0D write precedes the
   arms: the check must run on every full-rate arm. 0x1538 (stateless encode from the write clock + self-check flag) in progress.
+- 2026-10-19 16:58: fpga-gen7 interim: 0x1538 RTL builds with 0 timing errors on clk_200MHz (+0.22 ns), encode stateless from the
+  write clock (B earlier, the 1.00o5 convention; 0x1537 had chip 1 reversed and chip 2 marginal), new read 0x33 self-check
+  (bit 0 sticky fail since the last 0x01, bits 3:2 = 01 convention, 7:4 pin checks, 0xF6 good); FPGA.bin sha256 0c24ecf6...; full
+  testbench run pending, then pinning. Calibration taken on 0x1537 must be redone; 0x1535 calibration fits 0x1538. fw-enc dispatched.

@@ -56,7 +56,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   0x1537 fixes it in hardware. Plan: firmware/AGENTS.md section 35 (adapted to 0x1537: backups/al3_seg_0x1537_426a3784_padded.bin
   sha febc9299...), checks fpga/al3/README.md section 7, rollback al3_fir_0x1535 padded 5ade9e75. Community note for the
   announcement: units on the stock or 0x1532-0x1536 bitstreams get the firmware heal (0.2.61) but should flash 0x1537.
-- **Full-rate encode check on every arm** (after 0x1538 lands): 0.2.61 checks only after a 0x0D write; the bench shows the bad
+- [~] **Full-rate encode check on every arm** (fw-enc dispatched 10-19 16:58 as fw 0.2.62 with fpga-gen7's 0x1538 interface: read 0x33 after every 200 MS/s capture, bit 0 = discard and re-arm, bits 3:2 = 01 order guaranteed B-first, 0xF6 = good; data check on every full-rate arm for 0x1532-0x1537): 0.2.61 checks only after a 0x0D write; the bench shows the bad
   phase is re-rolled at every sampling reset on 0x1537 (40 % of arms). On 0x1538 read the self-check status flag after each arm at
   200 MS/s and re-arm when it is set (no data check needed); on 0x1532-0x1537 run the data check on every full-rate arm instead of
   only after 0x0D. Fix the stored core-order convention (interleave tracker A-B model, 0x53 swap bit) to what 0x1538 guarantees.
