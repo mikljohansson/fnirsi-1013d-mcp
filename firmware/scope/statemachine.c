@@ -3139,6 +3139,13 @@ void handle_generator_menu_touch(void)
             scope_generator_settings(0);
           }
         }
+        //fw 0.2.66: the fourth row, Bode plot: the mode opens (or closes) once the menu has closed
+        else if(PC_GEN_BODE_HIT())
+        {
+          tp_i2c_wait_for_touch_release();
+          close_open_gen_menus(1);
+          return;
+        }
         //====================================================================================================
         //Wait until touch is released before checking on a new position
         //tp_i2c_wait_for_touch_release(); // doplnik pre kr=azdy prikaz zvlast
@@ -3309,6 +3316,10 @@ void handle_right_basic_menu_touch(void)
   //fw 0.2.56: the spectrum's empty slots (T CURSOR, V CURSOR; ui_p1_shown) do nothing; fw 0.2.65: MEASURES opens the
   //spectrum's own list
   if((ytouch >= 183) && (ytouch <= 297) && !ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
+    return;
+
+  //fw 0.2.66: the Bode plot's empty MEASURES slot does nothing either
+  if((ytouch >= 303) && (ytouch <= 357) && !ui_p1_shown(UI_P1_MEASURES, ctrl_page_spectrum()))
     return;
 
   //Check if run/stop or page up button is touched

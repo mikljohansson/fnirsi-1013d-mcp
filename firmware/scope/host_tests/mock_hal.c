@@ -627,6 +627,37 @@ int32_t pc_hal_spectrum_read(int ch, uint32_t first, uint32_t max_bins, uint8_t 
   return (int32_t)n;
 }
 
+//fw 0.2.66 Bode plot: the status BODE_CTRL answers, the request it saw; READ_BODE: a header and mock_bode_rows rows
+int      mock_bode_status;
+uint16_t mock_bode_detail;
+uint8_t  mock_bode_req[16];
+uint32_t mock_bode_rows, mock_bode_first, mock_bode_max;
+
+int pc_hal_bode_ctrl(const uint8_t *req, uint8_t *resp, uint16_t *detail)
+{
+  memcpy(mock_bode_req, req, 16);
+  *detail = mock_bode_detail;
+  memset(resp, 0, PC_BODE_CTRL_RESP);
+  resp[4] = 1;                                  //state running
+  pc_put_u32(resp + 32, 1234);                  //estimate
+  return mock_bode_status;
+}
+
+uint32_t pc_hal_bode_read(uint32_t first, uint32_t max_rows, uint8_t *resp)
+{
+  uint32_t n = (first < mock_bode_rows) ? mock_bode_rows - first : 0, i;
+
+  mock_bode_first = first;
+  mock_bode_max   = max_rows;
+  if(n > max_rows)
+    n = max_rows;
+  memset(resp, 0, PC_BODE_HDR + n * PC_BODE_ROW);
+  pc_put_u16(resp + 8, (uint16_t)mock_bode_rows);
+  for(i = 0; i < n; i++)
+    pc_put_u32(resp + PC_BODE_HDR + i * PC_BODE_ROW, 1000 + first + i);
+  return PC_BODE_HDR + n * PC_BODE_ROW;
+}
+
 uint32_t mock_fft_bench_reps;
 uint32_t pc_hal_fft_bench(uint8_t *dst, uint32_t reps)
 {

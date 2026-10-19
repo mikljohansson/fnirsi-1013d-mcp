@@ -525,6 +525,14 @@ protocol minor version, a section 14 row and vectors for the planner, so Python 
 | D4 | BODE_CTRL / READ_BODE, protocol row, mcp `where="device"` | 1 day | host and device tables agree |
 | D5 | Fast (harmonic) mode on both sides, impedance mode on the device, thru cal on the card | 1-2 days | fast-mode points within 0.3 dB of the tone sweep where valid |
 
+**Status 2026-10-19 (fw-bode, fw 0.2.66, protocol 1.20 provisional; not benched):** D1-D4 are built: `bode_dsp.c`
+(planner and DFT, host-tested against H1's plan vectors and `measure_pair`), `bode_sweep.c` (the runner as a main-loop state
+machine), `bode_view.c` (the view; entry from the generator menu, owner), `pc_bode.c`, BODE_CTRL / READ_BODE (protocol row
+60; rows of 20 bytes with the DDS period M and f in cHz, since 10 MHz does not fit a u32 in mHz). Deviations from section 4:
+the strip became the CTRL page's Sweep and Thru fold-outs and the header the cards (UX makeover); AUTO SET runs one sweep;
+no Mode field (the fast mode is D5). The mcp side (`where="device"`) is open. Handoff and bench procedure:
+`firmware/AGENTS.md` section 42.
+
 ### 6.2 Risks
 
 | Risk | Consequence | Mitigation |

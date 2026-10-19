@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-bode (2026-10-19): fw 0.2.66, protocol 1.20 (row 60): the Bode plot on the device (bode_dsp / bode_sweep / bode_view / pc_bode, BODE_CTRL / READ_BODE), section 42.**
 **Branch fw-polish1 (2026-10-19): fw 0.2.63 provisional, protocol unchanged: UI polish batch 1 (owner's walk-through of 0.2.59, items a-q), section 39.**
 **Branch fw-ui4 (2026-10-19): fw 0.2.59 provisional, protocol unchanged: UX makeover step 4 (Diagnostics as a main-loop
 display mode with Status, Calibration, Log, Developer; the four-screen calibration wizard; the first-run screen), section 34.**
@@ -1739,7 +1740,7 @@ tests green (test_ui 6672 checks on the branch, 1,436,917 with fw-ui3's settings
 warnings 36, GCC 13 / PC_DEBUG 31, upstream only; the
 new files are clean with -Wall -Wextra. No protocol change: GET_STATUS byte 43 keeps its meaning (4 = phosphor drawn,
 now also in X-Y). Settings words: 210 bit 3 (the Phosphor switch), 211 (0xC700: bit 0 Grid, bits 1-2 the spectrum's
-Display variant); 212..223 stay free (later claims: 212 fw-acq, 221..223 fw-meas section 41).
+Display variant); 212..223 stay free (later claims: 212 fw-acq, 219..220 fw-bode section 42, 221..223 fw-meas section 41).
 
 Points for a successor:
 - **Files**: `ui_ctrl.c/.h` (pure: page-two items and hit areas `ui_ctrl_item_at`, page-one slots `ui_p1_shown`,
@@ -2522,3 +2523,140 @@ Points for a successor:
 Bug indicators: a menu tap acting on the neighbouring cell; a stripe of the menu left on the plot after closing; cards
 stacking above y 426; a "+N" count that does not add up to the chosen count; THD changing wildly with the Window
 choice on a clean tone; MEASURES doing nothing in the spectrum.
+
+## 42. fw-bode: the Bode plot on the device (fw 0.2.66, protocol 1.20, row 60)
+
+Branch from main 8f8687a (0.2.61), merged with main b5698c4 (0.2.65; fw-enc 1.19 / row 58, fw-polish, fw-acq, fw-meas) in
+429a79e. Design: `docs/plans/bode-design.md` steps D1-D4 (status note under 6.1); user-facing: README section 5 "Bode
+plot"; protocol: `docs/protocol.md` section 14 row 60 and the 8.1 index (0x0211 BODE_CTRL, 0x0212 READ_BODE). Commits:
+626b3f6 (`bode_dsp.c/.h` + host test), 88456d5 (`bode_sweep.c/.h` + host test), 78a43c5 (view, hooks, protocol), 0bb73d4
+(docs, vectors, CHANGELOG), 43c1c9c (viewer guard), 23651a4 (host settings kept), 429a79e (merge), then this handoff.
+Image from 429a79e (GCC 10): `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 679,936 B, sha256
+5dab21cabe79135bcfddaa3196539f2e4a127a81f8e00442709daa856d4a3b14, ELF ebc8539f275ceb3b7fbb564e07c6b77774a7b588032225d63f23111d29b321b9;
+nommu 695908d3616b77b37ff5fd826aea97f304dba199419d940857e215dbd6f9ef5d (`#VER fw=0.2.66,proto=1.20`). A build of a later
+commit differs only in the identity. **Nothing benched.** Host tests all green (test_bode.py: the plan vectors, 3000
+random points and 300 random sweeps equal to the host tool's planner, H within 0.002 dB / 0.002 deg of `measure_pair`;
+test_bode_sweep 160 checks; test_session 69824; test_ui with the new slot rule; check_vectors 93 incl. `req_bode_ctrl`,
+`req_read_bode`; the mcp vectors check passes). Warnings GCC 10 36, GCC 13 / PC_DEBUG 31, nommu 36, sorted line-number-free
+lists identical to 8f8687a; the new files are clean with the host tests' -Wall -Wextra -Werror. Numbers claimed: protocol
+1.20 (main was at 1.19, so it stays), row 60 (59 unused), commands 0x0211 / 0x0212 (0x020B was never assigned: git log -S
+shows only the design doc; left free), features bit 6 (0x0040; bit 5 is fw-enc's ENC_CHECK), GET_STATUS display_mode 5,
+settings words 219-220 (213..218 stay free; 212 fw-acq, 221..223 fw-meas).
+
+**Files.**
+- `bode_dsp.c/.h` (pure, host-tested by `host_tests/test_bode.py` through `bode_cli.c`, needs numpy and imports the host
+  tool's `bode.py` and `simulator.py` from `mcp/src`): the planner (identical integers to `plan_point` / `plan_sweep`, incl.
+  Python's round-half-even at the three places it matters; interior sweep points through a Q32 log2 / exp2 with 64-bit
+  mantissas, so a tie within 1e-9 could differ, none in 3300 random cases), the DFT (2^-34 turn phase grid = phase_inc x N
+  per sample exactly, fx_fft's Q30 quarter-wave table, rect or Hann as the host, mean-corrected sums, record halves, CH1
+  +-1 bin leakage), levels in mdB (fx_log2_q16), angles by a 31-step CORDIC, the noise as the median of period differences
+  (see "Deviations"), the half-record verdict (`bode_unsettled` = the host's rule), markers (-3 dB, resonant peak by the
+  parabola vertex in log f with Q, phase crossings) by linear interpolation in log f.
+- `bode_sweep.c/.h` (pure, `host_tests/test_bode_sweep.c` on a DUT model: RC within 0.004 dB / 0.03 deg, divider, wiring
+  B saturation with Auto and Hold, STOP, abort, arm failure, thru): the host's `BodeRunner` as a continuation-style state
+  machine. Each capture the host makes is a `request` with a phase (PRESCAN, VERIFY, BG, POINT, RECENTRE, RETRY,
+  UP_PREV, UP_POINT, DOWN); `on_measure` is what the host does with that capture's result. `bode_step` does at most one
+  arm or one readout per call. H is kept in polar form (mdB, mdeg): the splice and the thru are additions. The READ_BODE
+  codec (`bode_proto_header / rows`) is here too.
+- `bode_view.c/.h` (target): the mode (open / close with save and restore), the service (pending requests, RUN / STOP
+  edges, the repeat, up to 20 ms of engine steps per main-loop pass), drawing (`draw_all` into `displaybuffertmp`, at most
+  every 150 ms while sweeping), the cursor touch, the CTRL page (its own copy of ctrl_page.c's fold-out loop and row
+  drawing: Sweep and Thru; Grid as ctrl_page.c), the generator menu row, settings words, BODE_CTRL actions.
+- `pc_bode.c` (target): the scope's `bode_hw` (raw divider via `pc_hal_timebase_write(raw)`, `pc_decim_config` CIC3 + FIR
+  with the Filter setting's swap / falling-edge bits, `pc_hal_arm(0, words, total, prog 1, normal 0)` = FPGA auto, the
+  readout by `pc_hal_trace_build` (16-bit words from `pc_hal_trace16`, legacy codes x 256 copied), scales: `acal_scale(
+  scale_q24, gain16)`, corr16, uv_q8 per range as GET_CHANNEL, the probe factor), the engine instance, the pc_hal glue.
+- Hooks: `PC_BODE_PASS` (top of `scope_acquire_trace_data`: no UI acquisition while the view shows), `PC_GEN_BODE_DRAW` /
+  `PC_GEN_BODE_HIT` (generator menu row 4; GEN_MENU_HEIGHT 225), `PC_VIEW_OPENING` (top of `scope_setup_view_screen`: the
+  view closes so the viewer saves the user's settings), `pc_glue_spectrum_display / touch`, `pc_glue_autoset(_running)`
+  ask the view first, `ctrl_page_draw / touch` hand page two over, `ctrl_page_spectrum()` returns 2 in the view
+  (`ui_p1_shown(slot, 2)` also hides MEASURES; menu.c and statemachine.c follow it), `pc_glue_main_menu_mode` closes the
+  view, `pc_right_bar_follow` tracks it, `pc_hal_display_mode` 5, `pc_ui_fix_settings` restores words 219-220,
+  `scope_save_config_data` saves them.
+
+**Decisions and deviations from the design.**
+- The CTRL page replaces the design's strip (UX makeover): Sweep (Start / Stop two-way rows, Points, Settle, CH2 range,
+  Run sweep) in the Display slot, Thru (Measure, Apply switch, Clear) in the analysis slot, Grid; the stepper and 50 %
+  slots empty (the sweep ranges the channels; Hold takes CH2's range from the CH2 menu). The header became the cards
+  (f, |H|, Phase at the cursor; -3dB or Peak + Q; Sweep n/m; Thru applied / stale). No Mode field (harmonic mode is D5).
+- AUTO SET = one sweep (the mode's own auto; "Auto..." while it runs, a second tap ends it after the point). RUN repeats;
+  STOP ends after the point. Entering the view never starts a sweep (the post may be wired to anything): STOP and the wiring.
+- The noise estimate is the median of |x[n] - 2 x[n+p] + x[n+2p]| (time domain, cancels the periodic signal and a linear
+  drift) instead of the host's median over FFT bins: no non-power-of-two FFT on the device. Equal for white noise (tested
+  against the known noise within 1 dB; the host's own estimate reads the drift of a not-quite-coherent 50 Hz record as
+  noise, 35 dB high there). A transient lasting most of the record raises it: such a point reads low_snr where the host
+  says unsettled, and the device does not retry it. Only flags depend on it.
+- READ_BODE rows are 20 bytes (design: 16): u32 M and u32 f in cHz, because 10 MHz does not fit a u32 in mHz. BODE_CTRL
+  start / stop are cHz for the same reason.
+- CH2 always DC coupled (no `ch2_coupling='ac'`); the background capture is on (BODE_CTRL flags bit 1 turns it off).
+- The thru calibration lives in RAM (lost at power-off); stale = start, stop or points differ (ranges are flagged per
+  point, cal_range).
+- Diagnostics aborts a running sweep (no acquisition while it shows); a picture / waveform viewer closes the view first.
+
+**Not done / for the next agent.**
+- mcp: `Cmd.BODE_CTRL` 0x0211 / `Cmd.READ_BODE` 0x0212 (cap DECIM), request / response structs per row 60,
+  `scope_bode_sweep(where="device")` (BODE_CTRL action 1 with flags bit 0, poll READ_BODE until state != 1, then the rows;
+  recompute f_actual from M; the flags' bit order equals the host's flag names), `DisplayMode` 5, features bit 6. A
+  device-vs-host comparison test on the simulator needs the simulator to implement both commands (it could run the C
+  engine's logic in Python, or plan + measure_pair).
+- D5: harmonic fast mode, impedance mode, thru calibration on the card.
+- Restore default settings does not reset the Bode settings words (they keep their values; the marker rule ignores junk).
+- Measured numbers the estimate assumes (15 ms per capture) and the 20 ms engine budget per pass: measure `pass_ms` and a
+  sweep's duration (READ_BODE header bytes 28..31) on the bench.
+
+**Bench walk-through (owner, coordinator on COM10; FEL load only, no SD writes; parts on the bench: the RC 1 kOhm / 15 nF
+ceramic and the 991 / 102 Ohm divider; wiring A: DUT ground on both probe ground clips; x1 probes)**
+1. FEL-load (`sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`), `#VER fw=0.2.66,proto=1.20`.
+   GET_STATUS bytes 44-45 (features) = 0x7F on 0x1538.
+2. Top bar generator chip: the menu has a fourth row "Bode plot" with Open (black line above it). Open: the menu closes,
+   the plot shows the wiring text and empty panes with decade labels 100 .. 1M, RUN/STOP reads Stopped, the generator
+   chip unchanged until a sweep. Right bar page one: CTRL, RUN/STOP, AUTO SET, SAVE PIC, SAVE WAVE (no cursors, no
+   MEASURES). CTRL: Sweep "50 pt", Thru "None", Grid; nothing below. GET_STATUS byte 43 = 5.
+3. Divider 991 / 102 (post -> 991 -> node -> 102 -> ground clips; CH1 on the post side of the 991, CH2 on the node): AUTO SET.
+   Expect about 4 s, the Sweep card counting to 50/50, |H| flat at -20.6 dB (+-0.2 dB to 300 kHz; the host read -20.62 to
+   -20.43), phase 0 +-1.5 deg, no grey points except possibly near 1 MHz; a tap on the plot shows f / |H| / Phase cards.
+   Host: `fnirsi1013d-bode --port COM10 --yes --start 100Hz --stop 1MHz --points 50` (close the view first: Menu > Scope)
+   and compare point by point (expect within 0.05 dB / 0.3 deg where both are valid).
+4. RC 1 kOhm / 15 nF (CH2 on the R-C junction): CTRL > Sweep: Start 1kHz, Stop 500kHz (+ / -), Points 20, Run sweep.
+   Expect the low-pass shape, the -3dB card near 11 kHz (the host read 11.3 kHz on this capacitor; the ideal 10.6 kHz:
+   the ceramic's loss bends it), at 300 kHz about -24.6 dB / -70 deg like the host's rc1_15n_clips_2.json, CH2 splices
+   (the Sweep card stays; READ_BODE flags bit 9 on the splice points). Same plan on the host for the comparison:
+   `--start 1kHz --stop 500kHz --points 20`.
+5. Thru: both probe tips on the RC input node. CTRL > Thru > Measure thru: one sweep with "Thru sweep: both probe tips
+   on the DUT input" at the top; then the Thru button reads "On" and the card "Thru applied". Run sweep again (still both
+   tips on the input): |H| within +-0.03 dB of 0, phase +-0.2 deg (raw mismatch on the bench was +0.15..+0.30 dB). Apply
+   switch off: the raw mismatch shows; Clear: "None". Change Points: the Thru card turns amber "stale" and the warning
+   asks to measure again.
+6. Hold: CH2 menu 0.5 V/div, Sweep > CH2 range Hold, divider sweep: no splices, the CH2 chip stays at 0.5 V/div. RC with
+   Hold at 0.5 V/div: the stopband points under 3 codes are valid but flagged ch2_small (READ_BODE bit 4).
+7. RUN: sweeps repeat, each overwriting point by point; STOP: the sweep ends after the point in progress, the points stay.
+   AUTO SET while sweeping: "Auto..." then the sweep ends after the point.
+8. Leaving: Menu > Scope: the generator is back as before (chip and output), CH1 / CH2 V/div, offsets and coupling as
+   before, the time base as before, RUN/STOP as before; the scope traces return. Enter again: the last table shows; the
+   Sweep settings were kept. Power cycle: the Sweep settings are kept (words 219-220), the thru is not.
+9. Host commands (with the MCP closed; Python, `fnirsi1013d` installed):
+   ```python
+   import struct, time
+   from fnirsi1013d.scope import Scope
+   with Scope.connect("COM10") as s:
+       r = s.t.request(0x0211, struct.pack("<BBBBIIHH", 1, 1, 1, 0, 100000, 50000000, 20, 0)).payload  # 1 kHz-500 kHz/20
+       print("estimate ms", struct.unpack_from("<I", r, 32)[0])
+       while True:
+           h = s.t.request(0x0212, struct.pack("<HHI", 0, 0, 0)).payload
+           if h[4] != 1: break
+           time.sleep(0.2)
+       print("state", h[4], "reason", h[5], "points", struct.unpack_from("<HH", h, 8), "ms", struct.unpack_from("<I", h, 28))
+       for i in range(struct.unpack_from("<H", h, 8)[0]):
+           m, f, db, ph, v1, v2, r1, r2, fl = struct.unpack_from("<IIhhhhBBH", h, 32 + 20 * i)
+           print(f / 100, db / 100, ph / 100, v1 / 100, v2 / 100, r1, r2, hex(fl))
+   ```
+   Expect state 2, the same table as the screen, the elapsed time near the estimate. Action 4 aborts at once, action 10
+   closes the view (everything restored).
+10. Wiring B check of the overload rule (optional): DUT ground on the USB shell, clips open, CH2 0.1 V/div Hold: the sweep
+   stops at once with "CH2 saturated by the DUT's DC level ..."; Auto: CH2 stays on a less sensitive range and the points
+   are valid.
+Bug indicators: any trace or grid of the scope view drawn over the Bode plot (UI acquisition not bypassed); a capture that
+never ends (Sweep card stuck, READ_BODE state 1 for long; reason 2 afterwards); |H| of the divider off by a constant
+(scale per channel wrong: gain16 / uv_q8 / probe); phase drifting with frequency on the divider (record start or core
+order); the generator, V/div or time base not given back on leaving; a relay clicking at every point (bh_channel writes
+only what changed); MEASURES or the cursors reacting in the view; the view drawing over a waveform viewer.

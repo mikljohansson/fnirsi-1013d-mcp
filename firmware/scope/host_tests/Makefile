@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/enc_heal.c $(SRC)/pc_decim.c $(SRC)/pc_seq
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/enc_heal.h $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/pc_seq.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h $(SRC)/pc_ident.h $(SRC)/pc_report.h $(SRC)/pc_life.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep
 
 $(OUT):
 	mkdir -p $@
@@ -88,6 +88,14 @@ $(OUT)/test_seq: test_seq.c test_util.h $(SRC)/pc_seq.c $(SRC)/pc_seq.h $(SRC)/a
 $(OUT)/seq_check: seq_check.c $(SRC)/pc_seq.c $(SRC)/pc_seq.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ seq_check.c $(SRC)/pc_seq.c
 
+# fw 0.2.66: the device Bode maths (planner, DFT, H, markers) against the host tool's numbers (test_bode.py, numpy)
+BODE_SRCS := $(SRC)/bode_dsp.c $(SRC)/fx_fft.c $(SRC)/fx_fft_tables.c
+$(OUT)/bode_cli: bode_cli.c $(BODE_SRCS) $(SRC)/bode_dsp.h $(SRC)/fx_fft.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ bode_cli.c $(BODE_SRCS)
+# the sweep engine (bode_sweep.c) end to end against a DUT model (RC, divider, wiring B saturation, Hold, STOP, thru)
+$(OUT)/test_bode_sweep: test_bode_sweep.c test_util.h $(BODE_SRCS) $(SRC)/bode_sweep.c $(SRC)/bode_sweep.h $(SRC)/bode_dsp.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_bode_sweep.c $(SRC)/bode_sweep.c $(BODE_SRCS) -lm
+
 $(OUT)/test_phosphor: test_phosphor.c test_util.h $(SRC)/phos_map.c $(SRC)/phos_map.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_phosphor.c $(SRC)/phos_map.c
 
@@ -142,7 +150,9 @@ test: all
 	$(OUT)/test_mmu
 	$(OUT)/test_usbw
 	$(OUT)/test_diag
+	$(OUT)/test_bode_sweep
 	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --decim-checker $(OUT)/decim_check --adc-cal-checker $(OUT)/test_adc_cal --diag-checker $(OUT)/test_diag --seq-checker $(OUT)/seq_check --vectors $(VECTORS)
+	$(PYTHON) -I test_bode.py --cli $(OUT)/bode_cli
 	$(PYTHON) -I test_fft.py --cli $(OUT)/fft_cli --tables $(SRC)/fx_fft_tables.c --gen ../../tools/gen_fft_tables.py
 	@if command -v qemu-arm >/dev/null && command -v arm-none-eabi-gcc >/dev/null && [ -x $(ARM_CC10) ]; then \
 	  $(MAKE) --no-print-directory test-arm; else echo "test-arm skipped (needs qemu-arm, arm-none-eabi-gcc + newlib, GCC 10)"; fi
