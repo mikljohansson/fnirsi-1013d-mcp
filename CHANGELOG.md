@@ -31,11 +31,11 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.56 - 2026-10-19 (protocol 1.17, provisional)
+#### 0.2.58 - 2026-10-19 (protocol 1.17, provisional)
 
 Support for the AL3 bitstream 0x1536 (segmented capture and hardware averaging, fpga-gen5; not flashed yet).
-Merged on 0.2.55 / protocol 1.16; the protocol row number (70) is provisional, the coordinator renumbers it at the
-merge. Spec: `docs/protocol.md` section 14 row 70; README section 5 "Segmented
+Built on 0.2.55 / protocol 1.16 and numbered 0.2.58 by the coordinator (0.2.56 is fw-ui2, 0.2.57 fw-ui4); the
+protocol row number (70) is provisional, the coordinator renumbers it at the merge. Spec: `docs/protocol.md` section 14 row 70; README section 5 "Segmented
 capture and hardware averaging". Nothing is benched.
 
 - Added: version word 0x1536..0x153F gives caps bit 17 SEQ. Older bitstreams see no new FPGA command (65abebf).

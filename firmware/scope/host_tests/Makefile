@@ -69,7 +69,7 @@ $(OUT)/test_diag: test_diag.c test_util.h $(CMDS_DEPS) | $(OUT)
 $(OUT)/test_touch_pick: test_touch_pick.c test_util.h $(SRC)/touch_pick.c $(SRC)/touch_pick.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_touch_pick.c $(SRC)/touch_pick.c
 
-# 0x1536 sequencer maths (fw 0.2.56): fit rules, table entries, slot addresses, UI averaging plan, exact mean
+# 0x1536 sequencer maths (fw 0.2.58): fit rules, table entries, slot addresses, UI averaging plan, exact mean
 $(OUT)/test_seq: test_seq.c test_util.h $(SRC)/pc_seq.c $(SRC)/pc_seq.h $(SRC)/adc_cal.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_seq.c $(SRC)/pc_seq.c
 

@@ -75,7 +75,7 @@ SRCS += ui_fmt.c ui_menu.c ui_settings.c ui_settings_ui.c
 SRCS += touch_pick.c
 # fw 0.2.52 diagnostics readers (protocol row 55)
 SRCS += pc_life.c pc_ident.c pc_report.c pc_diag.c
-# 0x1536 sequencer (fw 0.2.56): segmented capture and hardware averaging (maths in pc_seq.c, host_tests/test_seq.c)
+# 0x1536 sequencer (fw 0.2.58): segmented capture and hardware averaging (maths in pc_seq.c, host_tests/test_seq.c)
 SRCS += pc_seq.c pc_seq_hw.c
 # Last: the identity data (build_id.c), so its bytes are the only ones a new commit changes.
 SRCS += build_id.c

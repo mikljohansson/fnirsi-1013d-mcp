@@ -506,7 +506,7 @@ Bench (nothing verified on hardware; bitstream not yet flashed): 0x29 read-back 
 100 kHz with skipping and is attenuated with boxcar / CIC (plan F1); trigger on CH1 with the 16-bit level at
 several rates; the swap bit (T4 dependency); settling after a time base change (first capture clean).
 
-### Segmented capture and hardware averaging (FPGA 0x1536, fw 0.2.56, protocol 1.17)
+### Segmented capture and hardware averaging (FPGA 0x1536, fw 0.2.58, protocol 1.17)
 
 fpga-gen5's AL3 bitstream 0x1536 adds a sequencer in front of the unchanged 0x1535 capture logic (fpga/al3/README.md
 section 6, docs/plans/segmented-capture.md): **segment mode** restarts the capture after each record into the next

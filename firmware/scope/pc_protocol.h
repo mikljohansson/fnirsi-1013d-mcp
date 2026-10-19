@@ -34,7 +34,7 @@
                                         //      provenance, SAVE_REPORT (fw 0.2.52)
                                         //1.17 (provisional numbering): FPGA 0x1536 sequencer:
                                         //      SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW addr_mode 3, GET_STATUS 48
-                                        //      bytes (features, UI average), GET_DECIM 36, GET_CAPTURE_INFO 96 (fw 0.2.56)
+                                        //      bytes (features, UI average), GET_DECIM 36, GET_CAPTURE_INFO 96 (fw 0.2.58)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4

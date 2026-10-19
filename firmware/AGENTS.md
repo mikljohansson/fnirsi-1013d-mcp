@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-**Branch fw-seq (2026-10-19): fw 0.2.56 provisional, protocol 1.17 (row 70 provisional): FPGA 0x1536 segmented capture
+**Branch fw-seq (2026-10-19): fw 0.2.58 provisional, protocol 1.17 (row 70 provisional): FPGA 0x1536 segmented capture
 and hardware averaging (UI Average uses the FPGA where the record fits; SET_SEQ / GET_SEQ / READ_SEQ), section 33; the flash
 session plan for 0x1536 is there.**
 **Branch fw-ui3 (2026-10-19): fw 0.2.55 provisional, protocol 1.16 unchanged: UX makeover step 3 (Settings fold-out
@@ -253,7 +253,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.46 | 1b6359f | cdba5b51 | digital phosphor view (main menu row 7; Persistence / Palette / Clear strip; XY), GET_STATUS byte 43 = 4 (protocol 1.13, row 52), settings word 210 (fw-phosphor, section 24) | built, host-tested (test_phosphor 95 checks); bench steps in section 24 |
 | 0.2.48 | b1922c3 | 2f768fd9 | MMU + D-cache on (flat map, DDR / SRAM write-back, framebuffer write-through, restart record and peripherals strongly ordered), clean + off at _reset and ENTER_FEL, GET_LINK_STATS 58-59 fault status / address (fw-mmu, section 26) | built, host-tested (test_mmu); A/B image `make gcc10-nommu` 0.2.48-nommu sha256 45e03f7f; bench sequence in section 26 |
 | 0.2.49 | c477faa | 90f460d6 | USB suspend watch in the 1 ms tick (pc_usbw.c): inferred resume (SOFs, EP0 setup, EP2 OUT while suspended) acts, soft reconnect (SoftConn off 1 s) after a retry storm or 15 min suspended, GET_LINK_STATS 60-61, event type 20, SUSPEND before RESUME in the ISR (protocol 1.14, row 53; fw-usb2, section 27) | built, host-tested (test_usbw 90 checks); A/B `make gcc10-nommu` sha256 f5f377ea; bench plan in section 27 |
-| 0.2.56 | 29c55ac | 43e11442 | FPGA 0x1536 sequencer (fw-seq, section 33; provisional number): caps bit 17 SEQ, 0x0B / 0x0C / 0x57-0x5C before the reset, UI Average as a hardware run of 2-64 records for legacy records that fit, SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW addr_mode 3, GET_STATUS 48 (features, UI Average), GET_DECIM 36, GET_CAPTURE_INFO 96 (protocol 1.17, row 70) | built, host-tested (test_seq 732, test_session 69705); nommu d72aeba4; flash plan in section 33 |
+| 0.2.58 | 29c55ac | 43e11442 | FPGA 0x1536 sequencer (fw-seq, section 33; provisional number): caps bit 17 SEQ, 0x0B / 0x0C / 0x57-0x5C before the reset, UI Average as a hardware run of 2-64 records for legacy records that fit, SET_SEQ / GET_SEQ / READ_SEQ, READ_RAW addr_mode 3, GET_STATUS 48 (features, UI Average), GET_DECIM 36, GET_CAPTURE_INFO 96 (protocol 1.17, row 70) | built, host-tested (test_seq 732, test_session 69705); nommu d72aeba4; flash plan in section 33 |
 | 0.2.55 | e01f775 | 6f100098 | UX makeover step 3 (fw-ui3, section 31; provisional number): fold-out Screen / Grid brightness, File message timeout, Time and date, Baseline calibration (interim), Other settings; full Settings screen (`ui_settings.c` / `ui_settings_ui.c`) with At power-on 0 / 4 / 5 written on Back, Restore default settings behind a confirmation (boot byte kept, CDC kept); Other settings menu, USB-Serial and Dev mode rows removed; delete confirmation as the dialog pattern | built, host-tested (test_ui 1,431,758 checks); bench walk-through in section 31 |
 | 0.2.54 | f9fcac6 | a4f0c832 | touch fix batch 1 (fw-touch1, section 32; provisional number): left pointers are drag handles (`touch_pick.c`, 44 px boxes, nearest / on-top pick), pick at touch-down, nearest enabled zero line, no trigger-point move in a channel drag, channel + trigger level share one clamped delta, EXT no longer follows CH2, traceposition 6..396 in the new auto setup and at load |
 | 0.2.51 | 8f5bf16 | 38580def | UX makeover step 1 (fw-ui1, section 29): main menu Scope / Spectrum analyser / Saved pictures / Saved waveforms / Settings / Diagnostics / USB drive with one 59 px hit area per row, Spectrum in roll mode switches Roll off; USB drive screen text + Exit; no top-bar version; Display row Normal / Phosphor / X-Y in the acquisition menu (X-Y out of System settings); strips without Scope / Auto, AUTO SET = spectrum Auto; phosphor warnings top-middle; cards with chip, scope-maker names, 4 significant digits, defaults Freq / Vpp / Vavg | built, host-tested (test_ui 1513 checks); bench walk-through in section 29 |
@@ -1709,9 +1709,11 @@ Bug indicators: a pointer drag moving a different pointer than the one under the
 with EXT; a tap on a pointer changing time/div or V/div; a channel stuck after AUTO SET with Invert; the level jumping
 at the first drag step.
 
-## 33. fw-seq: FPGA 0x1536 segmented capture and hardware averaging (fw 0.2.56 provisional, protocol 1.17, row 70 provisional)
+## 33. fw-seq: FPGA 0x1536 segmented capture and hardware averaging (fw 0.2.58 provisional, protocol 1.17, row 70 provisional)
 
-Branch `worktree-agent-adad2198a41835255` from main 9cc599c (0.2.51), merged with origin/main 57924e0 (0.2.55, protocol
+Version 0.2.58 as assigned by the coordinator (main: 0.2.56 fw-ui2, 0.2.57 fw-ui4); protocol 1.17 with the row kept at
+**70** as briefed (main's last row is 55; renumber to 56 at the merge if preferred). Branch
+`worktree-agent-adad2198a41835255` from main 9cc599c (0.2.51), merged with origin/main 57924e0 (0.2.55, protocol
 1.16). Commits: e6bbc10 (pc_seq.c maths + test_seq + seq_check), 65abebf (HAL, UI averaging, protocol 1.17, mock,
 test_session, vectors), 32a80ed (protocol.md row 70), f10ccf4 (CHANGELOG, READMEs, design-note status), 7bfd267
 (docs/plans/phosphor-fast-capture.md), b4453bb (merge of main), 29c55ac (two GCC warnings), then this handoff. Image from
@@ -1763,7 +1765,7 @@ hardware averaging"; FPGA: fpga/al3/README.md section 6 (+ "Firmware support"), 
    `backups/al3_fir_0x1535_5040a2ae_padded.bin` (sha256 5ade9e755211fe65...), the rollback image. The tool also keeps its
    own double-read pre-write backup.
 2. FEL-load this image on the running 0x1535 first (`sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe
-   0x80000000`). Check `#VER` fw=0.2.56 proto=1.17; GET_INFO caps without bit 17; GET_STATUS length 48, bytes 44-45 = 0x0007,
+   0x80000000`). Check `#VER` fw=0.2.58 proto=1.17; GET_INFO caps without bit 17; GET_STATUS length 48, bytes 44-45 = 0x0007,
    46 = 0 (Average off) / 1 (Average on); SET_SEQ answers E_UNSUPPORTED; a normal ARM / WAIT / READ_RAW as on 0.2.55. This
    is the "older bitstream unchanged" check.
 3. Flash 0x1536: `python firmware/tools/spiflash_d2xx.py probe` (expect `ef 40 14`), then `python
@@ -1794,7 +1796,7 @@ hardware averaging"; FPGA: fpga/al3/README.md section 6 (+ "Firmware support"), 
    10 MSa/s, count 2, N 1000, READ_SEQ S 0xFF: sums / 1000 match the single-shot shape.
 10. PI case (README check 7), when the detector is at hand.
 Rollback: `spiflash_d2xx.py write -i backups/al3_fir_0x1535_5040a2ae_padded.bin --yes` (sha256 5ade9e75...; or the stock
-dump); 0.2.56
+dump); 0.2.58
 runs on 0x1535 unchanged (step 2), so no firmware rollback is needed.
 
 **For the mcp agent (do not edit mcp/ from this branch)**

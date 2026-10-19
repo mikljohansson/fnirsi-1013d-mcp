@@ -102,7 +102,7 @@ uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (sco
 #define PC_PHOSPHOR_XY(i, last) do { if(pc_glue_phosphor_xy(i)) (i) = (last); } while(0)
 #define PC_PHOSPHOR_STRIP()     pc_glue_phosphor_strip()
 
-//fw 0.2.56 (0x1536 sequencer, pc_seq_hw.h): fpga_do_conversion writes the geometry and the sequencer registers before
+//fw 0.2.58 (0x1536 sequencer, pc_seq_hw.h): fpga_do_conversion writes the geometry and the sequencer registers before
 //the sampling reset; the software average is skipped while the traces hold a hardware average
 void   pc_seq_ui_pre_reset(void);
 int    pc_seq_sw_average(void);
