@@ -4,7 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
-**Branch fw-cap (2026-10-20): fw 0.2.79, protocol 1.24 (row 64), both provisional: FPGA 0x153A capture stages (training in the wizard's zero step, 0x36 self-check, stored with the calibration), EXT offsets, the wizard's zero back at code 128, section 54.**
+**Branch fw-cap (2026-10-20): fw 0.2.79, protocol 1.24 (row 64): FPGA 0x153A capture stages (training in the wizard's zero step, 0x36 self-check, stored with the calibration), EXT offsets, the wizard's zero back at code 128, section 54.**
 **Branch fw-yield (2026-10-19): fw 0.2.78, protocol 1.23 (row 63), both provisional: host commands close the modal screens (every modal loop leaves by its cancel path; E_BUSY only for a calibration measurement, a file save, USB drive mode or a 1.5 s time-out), section 53.**
 **Branch fw-screen (2026-10-19): fw 0.2.70, protocol 1.21 unchanged: READ_SCREEN built (cap SCREENSHOT), section 46.**
 **Branch fw-bus (2026-10-19): fw 0.2.72, protocol 1.22 (row 62): FPGA bus contract (dummy strobe in every readout, geometry before the reset, legacy EXT shift, encode check after async writes, type 22 trace level, core order from 0x33), section 48.**
@@ -3669,7 +3669,7 @@ typed number applied; a menu that stays open while the command times out; a scre
 panel or a menu's background not restored); the note stuck on screen; a second menu opened later closing at once
 without a host command.
 
-## 54. fw-cap: FPGA 0x153A capture stages, the wizard's zero back at 128 (fw 0.2.79, protocol 1.24, row 64, all provisional)
+## 54. fw-cap: FPGA 0x153A capture stages, the wizard's zero back at 128 (fw 0.2.79, protocol 1.24, row 64)
 
 Branch `fw-cap` from origin/main 6125aee (fw 0.2.78, 0x153A merged). Brief: firmware for bitstream 0x153A (fpga/al3/AGENTS.md
 "0x153A status" firmware notes, README section 10) and the owner's fail-fast decision of 2026-10-19 20:30 (task queue
