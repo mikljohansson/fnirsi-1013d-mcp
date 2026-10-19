@@ -91,6 +91,15 @@ void   fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint);
 void   fpga_channel_correction(PCHANNELSETTINGS settings, acal_corr *c);  //zero correction for the current settings
 void   fpga_prepare_correction(PCHANNELSETTINGS settings);                //the same, into the readout fields
 
+//fw 0.2.61: who writes the FPGA now (event type 22 trace, fpga_control.c)
+#define FPGA_WHO_UI     0         //UI acquisition and menus (default)
+#define FPGA_WHO_HOST   1         //PC protocol commands (pc_poll)
+#define FPGA_WHO_CAL    2         //calibration wizard measurements
+#define FPGA_WHO_PROBE  3         //v4 class probe (acal_live.c)
+#define FPGA_WHO_CHECK  4         //full-rate check (enc_heal_hw.c)
+extern uint8 fpga_trace_who;
+extern uint8 fpga_rate_dirty;     //a 0x0D write since the last full-rate check
+
 extern uint32 fpga_divider;     //last 0x0D value written (clock class of the zero correction)
 void   fpga_read_adc_data(PCHANNELSETTINGS settings);
 

@@ -643,6 +643,22 @@ void pc_usb_log_restart(uint8 type, uint16 pc)
   pc_irq_restore(cpsr);
 }
 
+void pc_usb_log_fpga_heal(uint8 a, uint16 b)
+{
+  uint32 cpsr = pc_irq_save();
+
+  pc_evlog_add(PC_EVT_FPGA_HEAL, a, b);
+  pc_irq_restore(cpsr);
+}
+
+void pc_usb_log_fpga_write(uint8 a, uint16 b)
+{
+  uint32 cpsr = pc_irq_save();
+
+  pc_evlog_add(PC_EVT_FPGA_WRITE, a, b);
+  pc_irq_restore(cpsr);
+}
+
 //USB controller state as usb_device_init finds it (fw 0.2.22): five type 16 entries, a = field.
 //  0: b = POWER << 8 | FADDR            1: b = INTUSBE << 8 | CCU flags (bit 0 OTG reset released, bit 1 OTG bus clock
 //  2: b = EP2 TXCSR                        on, bit 2 PHY reset released, bit 3 PHY clock on)

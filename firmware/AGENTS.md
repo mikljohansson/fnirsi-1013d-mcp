@@ -2038,12 +2038,32 @@ Bench fact (owner, 2026-10-19 15:45, 0.2.59 in RAM, FPGA 0x1535): the Zero level
 both channels in most runs, with probes and USB unplugged. 0.2.48's base calibration had passed in the morning (stored
 noise 0.6-1.3 codes).
 
-**Cause (coordinator's bench, 16:05): a wire from the calibration post to the owner's breadboard (Bode RC filter) was
-still connected.** The 0.2.59 text did not ask for it to be removed. 24 x 1000-sample captures, probes unplugged:
-- Wire on the post, 200 MSa/s legacy: CH1 core B within-capture std 19-30 codes with 50-60-code excursions on every
-  range; CH2 core A 6-17 codes on ranges 0-1. At 2 MSa/s 0.1-0.5 codes.
-- Only the USB cable connected: 0.5-2.0 codes per core on every range (CH2 range 0 the worst, 1.6-2.0). Std of the
-  capture means under 0.26, max excursion under 10 codes. The generator on or off makes no difference.
+**Correction (coordinator, after 16:15).** The step also fails with nothing connected, and with USB connected, on
+0.2.59 and on 0.2.60. The 0.2.60 line reads "CH1: range 4 at 200 MSa/s: core B, 21.1 codes, 21.0 per capture" and
+"CH2: range 1 at 200 MSa/s: core A, 24.4 codes, 24.3 per capture". One core per channel returns about 21-24 codes RMS
+inside a single full-rate capture, while host READ_RAW at 200 MSa/s legacy gives 0.5-2 codes on the same cores most of
+the time. The earlier wire-on-the-post reading (CH1 B 19-30 codes with 50-60-code excursions, CH2 A 6-17, 200 MSa/s
+only, 2 MSa/s clean) showed the same pattern and was not caused by the wire. With only USB connected and a good state:
+0.5-2.0 codes per core, std of the capture means under 0.26, max excursion under 10 codes, generator on or off the same.
+
+Likely cause, not confirmed on the bench: the A/B encode-phase race of 0x1532..0x1536 (fpga/al3/README.md "Findings"
+item 3, fixed in 0x1537). On 0x1535 each ADC chip's encode flops toggle themselves on negedge clk_ADC
+(e2aec2e:zaklad.v:685-695). The RAM write clock toggles 1.25 ns earlier on negedge clk_200MHz, and both sample the
+combinational enable `divider < counter`. A 0x0D or 0x53 write that changes the compare inside that window leaves the
+chip's encodes half a word out of phase with the write clock, until the next such accident; the two chips flip
+independently. At 2 MSa/s the data is stable for microseconds, so either phase reads clean. At 200 MSa/s one core's
+output transition can then fall on the capture edge, which returns metastable bytes on that core only. The odds per write
+grow as the divider nears 0. 0x0D is written every 30 s by the v4 class probe (acal_live.c, since 0.2.50), twice per range
+by the wizard, and many times by the Bode tool.
+Ruled out for this failure: a stale decimation mode. Calibration conversions configure K = 0 with the FIR off
+(pc_glue_decim_conversion), and pc_dec_apply writes 0x53 and 0x56 when its cache differs. Only pc_dec_apply calls
+fpga_set_decim_mode. With dec_on = 0 the RAM takes the raw pins (zaklad.v:806, sample_dia), so a stale 0x54 shift,
+0x55 level or swap/neg bits cannot reach the bytes. With dec_on set (the host study that showed fpga_mode 225), 0x20 /
+0x21 read the low / high byte of dec_out1 and 0x22 / 0x23 those of dec_out2: garbage on every lane, at every rate.
+Decisive bench test: alternate 0x0D between divider 0 and 1 (or a gated rate). After each change, take a 1000-sample
+READ_RAW at divider 0 with fpga_mode 0. If the race is the cause, individual cores switch between about 1 and about 20
+codes RMS, chip by chip. The cure is the 0x1537 bitstream. A firmware re-roll (toggle 0x0D until a full-rate check capture
+is clean) is possible on 0x1535 but not built.
 
 Ruled out (by reading and host tests):
 - The merge. `cal_result` / `cal_measure` / `cal_channel` are byte-for-byte the path of 0.2.48's
@@ -2067,16 +2087,70 @@ Built:
   core B 3.3 codes, 1.1 per capture" and "CH2: zero still moving, range 1 at 200 MSa/s: core A 0.8 code". The range is
   1-based like the progress line (range 1 = 5 V/div).
 - The Zero level instruction now reads "Disconnect everything from the device: both probes, anything on the /
-  calibration post, and the USB cable. Tap Calibrate."
+  calibration post, and the USB cable. Tap Calibrate." It is still right but not the fix: see the correction above.
 - test_cal_wizard checks the lines and their widths in the 16 px font. test_adc_cal checks the bench numbers, a
   +-3-code move between conversions (fails, 1.1 per capture) and a 64-code glitch per conversion (fails, within as
   large).
 
-Bench check (owner), not run yet:
-1. Run Zero level with the new text followed: it should pass on both channels.
-2. Then put the wire back on the post and run it again. The line should name a 200 MSa/s failure with "per capture"
-   about as large as the total: noise inside the captures, as the coordinator measured.
-3. If a run ever fails with a large total but a small "per capture" value, something moved between the captures:
-   pickup on the open input, which shows mostly at 2 MSa/s on the sensitive ranges 5-6, or a drift.
+Bench check: the 0x0D toggle test above. If a core shows about 20 codes "per capture" on the wizard line, that is the
+race. Pickup on an open input shows as a large total with a small "per capture" value instead.
 Open: the zero step does not detect a load on the post by itself. The noise check caught it only because the wire
 carried noise; a quiet wire would pass with a shifted zero.
+
+## 37. fw-calnoise: full-rate capture check and FPGA write trace (fw 0.2.61, protocol 1.18, row 57)
+
+Confirmed on the bench (coordinator, 2026-10-19 16:20-16:45):
+- **0x1535.** A 0x0D write re-rolls the encode phase at random. CH1 core B was garbled (15-29 codes RMS within a
+  capture) after 15 of 30 changes 99 -> 0 and 12 of 30 changes 1 -> 0; otherwise 1.1. CH1 core A moved with it
+  (0.50 -> 1.6). CH2 had flipped earlier the same day (24-code core A in the wizard).
+- **0x1537** (flashed 16:31). Static 200 MSa/s captures are clean (20/20). After a 0x0D write to divider 0, CH2 core A
+  read 32-34 codes in 35 of 40 trials from 99 or 1, and 11 of 40 from 3999. The bad state does not settle with time
+  (0 ms 0/20, 5 ms 7/20, 20 ms 18/20, 300 ms 16/20). A second capture right after a bad one is also bad, so the state
+  is set by some write between the rate write and the capture and persists until the next one; fpga-gen7 is analysing
+  the bitstream side. At divider 1 static, CH2 A read 55 codes and both B lanes were constant: probably a READ_RAW
+  layout difference of the 100 MSa/s mode, not chased.
+- **0x1537 wizard on 0.2.60.** CH1 passes; CH2 fails "the input is not at 0 V". That text is ACAL_E_CLIP: any sample
+  at code 0 or 255 in any measured point (the gated and full-rate slope points and the zero points; the coarse points
+  are excluded). The 0x1537 garbage (32-34 codes RMS) reaches the rails, and the clip check runs before the noise check.
+  The zero step never compares with the stored zeros: it reads raw codes through the scratch channel. A change of core
+  order or lane mapping (CH2 A-B now 128.7 / 132.0 against about 130 / 130 on 0x1535) cannot fail it. It makes the
+  stored per-lane zeros wrong until a new calibration, which the wizard then measures per lane.
+
+Built (fw 0.2.61):
+- `enc_heal.c/.h` (pure, test_enc_heal):
+  - `eh_residual16`: per channel, the RMS of core B against the mean of its two core A neighbours. It takes the
+    smaller of the two neighbour choices, so it does not depend on core order. Signal and offset cancel; noise leaves
+    about 1.3 codes; a garbled core leaves tens.
+  - `eh_run`: check, then retry up to `EH_MAX_TRIES` (16) above `EH_LIMIT16` (8 codes); `EH_WAIT_MS` (0) after each
+    retry. All three constants are in enc_heal.h only.
+  - `eh_affected` (0x1532..0x1536) only picks the amber Diagnostics line.
+- `enc_heal_hw.c`:
+  - The capture: one conversion, raw scratch channels for both channels, own buffers. Sample counts and trigger mode
+    are restored.
+  - The retry writes 0x0D = 1 and then 0.
+  - Counters 62-63 and event type 21.
+  - `fpga_encode_heal` runs only at divider 0, on every bitstream.
+  - `fpga_encode_check_dirty` runs the check when a 0x0D write happened since the last check (`fpga_rate_dirty`, set by
+    the write trace).
+- Call sites:
+  - the wizard before the full-rate zero points of each range and before each full-rate gain level (ACAL_E_TIMING 18);
+  - the UI acquisition before its decimation arm and conversion (scope_functions.c);
+  - `pc_hal_arm` first.
+- FPGA write trace (fpga_control.c): `fpga_write_cmd` remembers the command, and the next data write logs event 22
+  for 0x0D, 0x53, 0x56 and 0x01 = 1. The caller comes from `fpga_trace_who`: UI by default; host inside pc_poll
+  (all three contexts); CAL between cal_begin and cal_end; PROBE in probe_run; CHECK in the heal.
+- Protocol 1.18: GET_LINK_STATS has 64 counters; mcp protocol.py names them and event types 21/22.
+- Diagnostics: the amber FPGA line on AL3 0x1532..0x1536 (test_ui_diag).
+
+Open:
+- Core order on 0x1537 (fpga-gen6/7). The firmware's fixed lane convention is: tracebuffer odd = 0x20/0x22 ("A"),
+  even = 0x21/0x23 ("B").
+  - Order-independent: the zero step, the check, and the per-lane zeros and gains (a recalibration fixes a mapping
+    change).
+  - Assumes "B is the earlier sample of a pair" (PC_INTERLEAVE_ORDER 0): acal_track's A-B timing model and the
+    decimator's swap bit. Re-check both once fpga-gen7 reports the real order on 0x1538.
+- The UI check costs one extra conversion after each rate write: the class probe every 30 s, time-base changes, the
+  wizard's cal_end. It runs at divider 0 only.
+- Bench: read GET_LINK_STATS 62-63 and GET_EVENT_LOG types 21/22 after a wizard run and after toggling the time base
+  to 200 MSa/s a few times. Expect 21 entries with small `a` (recovered), and 22 entries showing who wrote what
+  before each.

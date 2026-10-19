@@ -2668,7 +2668,10 @@ LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     "restart_fault_status", "restart_fault_addr",
     # fw 0.2.49 (62 counters): USB resumes inferred without a RESUME interrupt (frame number moving, EP0 setup or EP2
     # OUT packet while suspended), soft reconnects of the suspend watch (protocol row 53)
-    "usb_inferred_resumes", "usb_soft_reconnects")
+    "usb_inferred_resumes", "usb_soft_reconnects",
+    # fw 0.2.61 (64 counters, protocol 1.18 row 57): full-rate capture checks after a rate change that found a garbled
+    # ADC core, and of those recovered by the retries
+    "adc_fullrate_bad", "adc_fullrate_recovered")
 
 #: restart_exc_type / event 15 a (fw 0.2.19)
 RESTART_EXC_TYPES = {0: "jump to entry", 1: "undefined", 2: "SWI", 3: "prefetch abort", 4: "data abort",
@@ -2687,7 +2690,8 @@ EVENT_LOG_REARM = 0x01
 EVENT_TYPES = {1: "bus_reset", 2: "suspend", 3: "resume", 4: "disconnect", 5: "ep0_setup", 6: "ep0_short_packet",
                7: "set_configuration", 8: "clear_halt", 9: "dtr", 10: "rx_ring_full", 11: "rx_release",
                12: "tx_flushed", 13: "tx_aborted", 14: "usb_irq_polled", 15: "restart", 16: "usb_init_state",
-               17: "tx_abort_txcsr", 18: "tx_abort_frame", 19: "usb_postinit_state", 20: "usb_soft_disconnect"}
+               17: "tx_abort_txcsr", 18: "tx_abort_frame", 19: "usb_postinit_state", 20: "usb_soft_disconnect",
+               21: "adc_fullrate_garbled", 22: "fpga_write"}
 #: event types the fw 0.2.24 bus-level ring keeps (PC_EVBUS_TYPES)
 BUS_EVENT_TYPES = frozenset({1, 2, 3, 4, 7, 8, 12, 13, 15, 16, 17, 18, 20})
 #: PHY tuning bits as fw 0.2.25 writes them (event 19 fields 4/5: bit 0 PHY 0x0C, bits 1-5 PHY 0x20-0x24, bits 6-7

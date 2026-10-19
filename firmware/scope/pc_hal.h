@@ -245,6 +245,9 @@ void     pc_hal_fault_info(uint32_t *v);
 //reconnects
 #define PC_USBW_COUNT     2
 void     pc_hal_usb_watch(uint32_t *v);
+//fw 0.2.61: full-rate capture check (enc_heal.h), GET_LINK_STATS 62-63: first checks above the limit, of those recovered
+#define PC_ENCH_COUNT     2
+void     pc_hal_enc_heal(uint32_t *v);
 uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total);
 int32_t  pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms, int rearm);   //-1 = none frozen; rearm clears it
 uint32_t pc_hal_event_bus(uint8_t *dst, uint32_t *total);      //fw 0.2.24: bus-level ring (<= 16 entries), *total since boot

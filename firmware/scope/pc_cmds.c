@@ -776,9 +776,9 @@ static int h_get_battery(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //-> first pass after battery check, acquisition, touch handler, RTC. The last six are ms + 1, 0 = not reached),
 //USB events (fw 0.2.5: bus resets, suspends, resumes, disconnects, EP0 setups, malformed EP0 setups), RX back-pressure
 //(fw 0.2.7: stalls from the ISR, releases, re-stalls inside a release, releases with no packet waiting, largest
-//RXCOUNT, RXCOUNT > 512), fw 0.2.12: USB interrupts served by the timer poll (lost IRQs), fw 0.2.17: boot splash ms + 1, fw 0.2.19: restart record (8), fw 0.2.20: USB IRQ races, fw 0.2.48: fault status + address, fw 0.2.49: USB inferred resumes, soft reconnects
+//RXCOUNT, RXCOUNT > 512), fw 0.2.12: USB interrupts served by the timer poll (lost IRQs), fw 0.2.17: boot splash ms + 1, fw 0.2.19: restart record (8), fw 0.2.20: USB IRQ races, fw 0.2.48: fault status + address, fw 0.2.49: USB inferred resumes, soft reconnects, fw 0.2.61: full-rate checks bad, recovered
 typedef char pc_link_counters_check[(PC_TSTAT_COUNT + 26 + PC_USBEV_COUNT + PC_RXDBG_COUNT + PC_RESTART_COUNT + 1 +
-                                     PC_FAULT_COUNT + PC_USBW_COUNT == PC_LINK_COUNTERS) ? 1 : -1];
+                                     PC_FAULT_COUNT + PC_USBW_COUNT + PC_ENCH_COUNT == PC_LINK_COUNTERS) ? 1 : -1];
 
 uint32_t pc_link_counters(pc_session *s, uint32_t *v)
 {
@@ -805,6 +805,8 @@ uint32_t pc_link_counters(pc_session *s, uint32_t *v)
   n += PC_FAULT_COUNT;     //58-59 (fw 0.2.48): fault status, fault address of the restart's abort
   pc_hal_usb_watch(v + n);
   n += PC_USBW_COUNT;      //60-61 (fw 0.2.49): USB resumes inferred, soft reconnects
+  pc_hal_enc_heal(v + n);
+  n += PC_ENCH_COUNT;      //62-63 (fw 0.2.61): full-rate checks bad, recovered (enc_heal.h)
   return n;
 }
 

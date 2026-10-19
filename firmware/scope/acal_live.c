@@ -154,6 +154,9 @@ static void probe_run(uint32 ch, PCHANNELSETTINGS s)
   uint32       sc  = scopesettings.samplecount;
   uint32       ns  = scopesettings.nofsamples;
   uint32       div = fpga_divider;
+  uint8        who = fpga_trace_who;
+
+  fpga_trace_who = FPGA_WHO_PROBE;
 
   probe_ch.adc1command = s->adc1command;
   probe_ch.adc2command = s->adc2command;
@@ -189,6 +192,7 @@ static void probe_run(uint32 ch, PCHANNELSETTINGS s)
 
   fpga_set_time_base(scopesettings.timeperdiv);
   fpga_set_trigger_mode();
+  fpga_trace_who = who;
 
   //The channel's v3 correction in each class (open loop: without v4), then the check and the update
   acal_correction(&adc_cal[ch], s->dc_calibration_offset, s->samplevoltperdiv, sample_rate_settings[ACAL_PROBE_RATE_GATED],

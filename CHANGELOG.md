@@ -31,12 +31,25 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.61 - 2026-10-19 (protocol 1.18, docs/protocol.md section 14 row 57)
+
+- Fixed: after a sample-rate change the FPGA can garble one ADC core's 200 MSa/s data. This happens randomly on AL3
+  0x1532..0x1536 and on CH2 core A on 0x1537 (fpga/al3/README.md "Findings" item 3). The wizard failed "too much
+  noise" or "the input is not at 0 V" because of it. The firmware now checks one full-rate capture after every rate
+  write: before the next UI conversion, before a host ARM, and before every full-rate point of the calibration wizard.
+  When a core is garbled it re-writes the rate and checks again, up to 16 times. If the capture never recovers, the
+  wizard says "ADC capture timing: the 200 MSa/s data stays garbled".
+- Added: GET_LINK_STATS counters 62-63 (checks that found a garbled capture, and those that recovered). The event log
+  has two new types: 21 (a garbled capture) and 22 (a trace of every 0x0D, 0x53, 0x56 and 0x01 write, with its
+  caller).
+- Changed: Diagnostics shows the FPGA line of AL3 0x1532..0x1536 in amber: "ADC capture timing race, fixed in 0x1537".
+
 #### 0.2.60 - 2026-10-19 (protocol 1.17 unchanged)
 
-- Fixed: the calibration wizard's Zero level step failed with "too much noise" on the owner's unit because a wire from
-  the calibration post to a breadboard was still connected, and the old instruction asked only for the probes and the
-  USB cable to be removed. The instruction now says to disconnect everything, including anything on the calibration
-  post. The measurement and the 3-code limit are the same as in 0.2.48 (`firmware/AGENTS.md` section 36).
+- Changed: the Zero level instruction asks to disconnect everything, including anything on the calibration post.
+- Known issue: on FPGA 0x1535 the Zero level step can fail with about 20 codes of noise on one ADC core per channel at
+  200 MSa/s. The likely cause is the bitstream's A/B encode-phase race, which 0x1537 fixes (`fpga/al3/README.md`,
+  `firmware/AGENTS.md` section 36). The measurement and the 3-code limit are the same as in 0.2.48.
 - Changed: a noise or drift failure in the Zero level step names the range, the sample rate and the ADC core with the
   measured values, e.g. "CH1: too much noise, range 6 at 2 MSa/s: core B 3.3 codes, 1.1 per capture". "Per capture" is
   the noise inside one capture. The difference from the total is what moved between captures (27556e8).

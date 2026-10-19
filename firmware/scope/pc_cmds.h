@@ -29,7 +29,7 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #else
 #define PC_FW_VERSION_MMU ""
 #endif
-#define PC_FW_VERSION     "0.2.60" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
+#define PC_FW_VERSION     "0.2.61" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
 #endif
 
 //The build identity record (build_id.c, pc_ident.h; host tests: mock_hal.c)
@@ -329,7 +329,7 @@ void     pc_ui_pass_mark(pc_session *s, int n);            //main loop stage n (
 //Diagnostics (fw 0.2.52, protocol row 55): the GET_LINK_STATS counters (returns n), the GET_HEALTH body (96 bytes),
 //one channel's GET_CAL body (PC_CAL_RESP_LEN bytes), the SD_INFO body (112 bytes; ident: identify the card image,
 //MAIN context; returns 0, or 1 without a card). The report: pc_report.h
-#define PC_LINK_COUNTERS  62
+#define PC_LINK_COUNTERS  64
 #define PC_HEALTH_LEN     96
 #define PC_CAL_RESP_LEN   356     //72 bytes up to 1.9, 248 in 1.10-1.11 (v2), 256 in 1.12-1.13 (v3), 288 in 1.14-1.15 (v4)
 #define PC_SD_INFO_LEN    112     //64 before 1.16

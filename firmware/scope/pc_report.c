@@ -234,7 +234,7 @@ static const char *pc_counter_names[PC_LINK_COUNTERS] =
   "rx_restalls", "rx_empty_releases", "rxcount_max", "rxcount_over_512", "retired_47", "boot_splash_ms+1", "restarts",
   "restart_exc_type", "restart_exc_lr", "restart_exc_spsr", "restart_exc_sp", "restart_reset_lr", "restart_reset_sp",
   "restart_reset_cpsr", "retired_57", "restart_fault_status", "restart_fault_address", "usb_resumes_inferred",
-  "usb_soft_reconnects"
+  "usb_soft_reconnects", "adc_fullrate_bad", "adc_fullrate_recovered"
 };
 
 static void sec_identity(pc_text *t, pc_session *s, const uint8_t *sd, int sd_ok, const uint8_t *h)
@@ -818,6 +818,26 @@ void pc_report_event(pc_text *t, const uint8_t *e)
       pc_text_udec(t, b);
       pc_text_str(t, " s");
       break;
+    case 21:
+      pc_text_str(t, (a & 0x80) ? "full-rate ADC capture garbled, not recovered after " :
+                                  "full-rate ADC capture garbled, recovered after ");
+      pc_text_udec(t, a & 0x7F);
+      pc_text_str(t, " retries, residual ");
+      pc_text_udec(t, ((uint32_t)b + 8) / 16);
+      pc_text_str(t, " codes");
+      break;
+    case 22:
+    {
+      static const char *who[5] = { "UI", "host", "calibration", "class probe", "full-rate check" };
+
+      pc_text_str(t, "FPGA write ");
+      pc_text_hex(t, a, 2);
+      pc_text_str(t, " = ");
+      pc_text_udec(t, b & 0xFFF);
+      pc_text_str(t, ((b & 0xFFF) == 0xFFF) ? "+ by " : " by ");
+      pc_text_str(t, ((b >> 12) < 5) ? who[b >> 12] : "?");
+      break;
+    }
     default:
       pc_text_str(t, "event type ");
       pc_text_udec(t, type);
