@@ -2154,3 +2154,113 @@ Open:
 - Bench: read GET_LINK_STATS 62-63 and GET_EVENT_LOG types 21/22 after a wizard run and after toggling the time base
   to 200 MSa/s a few times. Expect 21 entries with small `a` (recovered), and 22 entries showing who wrote what
   before each.
+
+## 38. fw-enc: every full-rate capture checked, FPGA 0x1538 read 0x33 (fw 0.2.62, protocol 1.19, row 58)
+
+Bench fact this answers (docs/hardware-status.md 2026-10-19 16:48): on 0x1537 one 0x0D write, then 1221 host captures in
+60 s with no other write: CH2 core A garbled in about 40 % of them, randomly interleaved. Chip 2's phase is re-resolved at
+every sampling reset (a marginal flop), so 0.2.61's check, which ran only after a 0x0D write, never fired. fpga-gen7's
+0x1538 (fpga/al3/README.md "Changes" section 8) drives the encodes statelessly from the write clock and reports a
+per-capture self-check, FPGA read 0x33.
+
+Branch `worktree-agent-a54ba9470daa9c8cd` from main 84ce79f (0.2.61), merged with origin/main a179408 (fpga-gen7's 0x1538,
+rel-gen1). Commits: 9e7e53d (firmware and host tests), 7cebed3 (protocol.md row 58, caps bit 18, vector), 8a5d6dd
+(CHANGELOG, firmware/README.md), the merge, 1b4f763 (protocol 5.1 reconciled with fpga-gen7's paragraph), then this
+handoff. **Nothing benched, nothing flashed.**
+
+**What was built**
+- `enc_heal.c/.h` (pure): `eh_mode` (DATA 0x1532..0x1537, FLAG 0x1538..0x153F, NONE otherwise), `eh_check` (FLAG: read
+  0x33, bit 0 = bad; DATA: 250 words per channel from the record start, 0.2.61's B-against-A-neighbours residual, bad
+  above 8 codes), `eh_cap_step` (re-arm while bad and fewer than EH_MAX_TRIES = 16 re-arms, then accept and flag), event
+  field packers. 0.2.61's `eh_run`, `fpga_encode_heal`, `fpga_encode_check_dirty`, `fpga_rate_dirty` and their extra
+  check conversion are gone.
+- `enc_heal_hw.c` (target): `fpga_encode_init` (pc_glue_init: mode; on 0x1538 one 0x33 read at boot, bits 3:2 must be
+  01, else GET_HEALTH 90 bit 1 and event 21 reason 3), `fpga_encode_after_capture` (called by `fpga_done_conversion` when
+  a conversion is done: check, and on bad `pc_hal_enc_retry` + `pc_glue_decim_rearm` + `fpga_do_conversion`, returning
+  "not done" so every caller's wait loop keeps waiting), `fpga_encode_new_conversion` (top of `fpga_do_conversion`: a new
+  capture unless it is the re-arm), `pc_hal_enc_status` / `_retry` / `_note` / `_state`, `fpga_enc_garbled` (wizard).
+- Host ARM (`pc_acq_service`, pc_cmds.c): `pc_enc_rearm` after `pc_hal_acq_finish`, before the trace build; re-arms with
+  the setting `h_arm` stored (`arm_dc`, `arm_seq`, `arm_auto`, `arm_prog`, `arm_normal`; `pc_arm_hw`), state back to
+  ARMED, `arm_ms` restarted (the firmware auto time-out counts again). A failed re-arm (0x05 never ready) ends ABORTED.
+- Who is checked: every conversion at divider 0 (always K = 0): UI, wizard, v4 class probe, 1.00o5 calibration and
+  auto setup (all through `fpga_done_conversion`), host ARM. Skipped: other dividers, NONE bitstreams, and on DATA
+  bitstreams sequencer runs (UI averaging: `pc_seq_ui_running`; host: `cap_next.seq_mode`); a host run STOP ended is
+  never restarted. FLAG covers a whole run (bit 0 is sticky until the next 0x01 = 1).
+- Re-arm writes: 0x1532..0x1536 re-write 0x0D = 1, 0 (caller CHECK in event 22) before the re-arm, since only a rate
+  write re-rolls their phase; 0x1537 and 0x1538 only re-arm (0x1537 re-resolves at every reset).
+- Wizard (cal_wiz_ui.c): clears `fpga_enc_garbled` before the full-rate points of a range and before each gain level,
+  fails ACAL_E_TIMING when it is set afterwards (a conversion accepted bad after 16 re-arms).
+- Protocol 1.19 (row 58): caps bit 18 ENC_CHECK (0x1538+), features bit 5 (0x0020); GET_HEALTH 104 bytes (88 mode, 89
+  last 0x33, 90 flags: 0 read, 1 convention bad, 2 last capture accepted bad, 3 core order differs (0x1537); 91 0x33 at
+  boot; 92 bad, 96 recovered, 100 checked); GET_LINK_STATS 62-63 now per capture; event 21 a = reason << 5 | re-arms
+  (bit 7 not recovered; reasons 1 data, 2 0x33, 3 boot convention), b = caller << 12 | first value. Vector
+  `resp_get_health_1_19`.
+- `PC_INTERLEAVE_ORDER` is fixed at 0 (no `#ifndef`); the two READ_RAW ternaries and the 0x53 swap default are
+  constants now. acal_track's A - B model and the decimator's swap bit assume B first, which 0x1538 guarantees: nothing
+  else changes. Caps bit 12 INTERLEAVE_UNVERIFIED stays set until T4 on 0x1538 (coordinator's call).
+- Diagnostics: 0x1532..0x1536 amber "ADC capture timing race, fixed in 0x1538"; 0x1537 amber "ADC core order differs:
+  recalibrate after flashing 0x1538"; 0x1538 from GET_HEALTH: "encode check OK" (+ ", N captures re-taken"), amber
+  "encode check failed on CH2 A, CH1 B" (pins with bit 0 in 0x33 bits 7:4), amber "unknown encode convention, 0x33 =
+  0x..", or "encode check, no 200 MSa/s capture yet". Report file: "Full-rate capture check: ..." line, event 21 in words.
+- Mock HAL (host_tests): `enc_bad_arms` (next arms garbled, -1 all), 0x33 per arm (`enc33_bad` 0x77 = CH2 A wrong), a
+  garbled arm fills core 2 (CH2 A) with noise; counters as the target counts. The mock ring is now a triangle (one code
+  per word) so the data check reads it clean; every existing test passed unchanged with it.
+- Tests: test_enc_heal 105 checks, test_session 69800 / 69798 (`test_enc_check`), test_ui_diag 5485, test_diag 471.
+  Warnings: GCC 10 and nommu 36 (sorted list identical to 0.2.61's), GCC 13 / PC_DEBUG 31.
+
+**Decided and why**
+- Data check from the ring, not from the trace buffers: the UI path checks before its readout, so a garbled capture
+  never reaches the screen, the measurements or the 50 % trigger; the cost is 1000 bus bytes (about 0.3 ms) per
+  full-rate capture on 0x1532..0x1537 only. Host READ_RAW reads later (and partially), so it needs the separate read
+  anyway. 0x1538 costs one bus byte.
+- Re-arm inside `fpga_done_conversion` rather than at each of the 12 call sites: the 1.00o5 calibration and auto setup
+  loops, the wizard, the probe and the UI all go through it; the UI keeps its previous trace while re-arming.
+- Normal / single trigger mode: a re-arm waits for the next trigger (a single-shot event caught garbled is lost; the
+  data was useless anyway). Bounded at 16; the 17th bad capture is accepted and flagged (GET_HEALTH 90 bit 2, event 21
+  bit 7, wizard ACAL_E_TIMING).
+- Counters: 62 counts captures whose first check failed (at that moment), 63 those recovered; 62 - 63 = accepted bad or
+  abandoned by a new conversion during the re-arms (no event for an abandoned one).
+
+**Bench check** (owner with the coordinator; FEL load only, nothing written):
+1. On 0x1537 first (it is in the flash): FEL-load 0.2.62, `#VER` fw=0.2.62 proto=1.19 fpga=0x1537. Diagnostics FPGA
+   line amber "ADC core order differs: recalibrate after flashing 0x1538". The 16:48 experiment again (divider 0 held,
+   1221 host captures in 60 s): no READ_RAW with a garbled core (per-core std under 5 codes), GET_HEALTH 92 grows about
+   0.4 per capture, 96 = 92 (all recovered), 100 = captures + re-arms; event 21 entries with a = 0x2N (reason 1, N
+   re-arms), caller host.
+2. Flash 0x1538 (fpga/al3/README.md section 8, the flash session plan in docs/hardware-status.md; padded image
+   `backups/al3_seg_0x1538_0c24ecf6_padded.bin`, sha256 2fc7ea5b...1087), power-cycle, FEL-load 0.2.62: `#VER`
+   fpga=0x1538; GET_INFO caps bit 18 (0x40000); GET_STATUS 44-45 = 0x003F; GET_HEALTH 88 = 2, 91 = 0xF6, 90 bit 1 clear.
+   Diagnostics: "encode check, no 200 MSa/s capture yet", then after one 200 MSa/s capture "encode check OK".
+3. Rate-toggle test on 0x1538: alternate SET_TIMEBASE raw divider 99 / 1 / 3999 <-> 0, 40 trials each, READ_RAW 1000
+   at divider 0 after each: zero garbled captures; GET_HEALTH 92 stays 0 (or 62 = 63 with an occasional async-write
+   miss), 89 = 0xF6.
+4. 60 s back-to-back captures on 0x1538 (divider 0 held, host ARM / WAIT / READ_RAW as fast as possible): zero garbled,
+   counters stable (92 unchanged, 100 = the capture count), no event 21.
+5. UI at 200 MSa/s for a minute, then the time base toggled a few times: the trace clean, GET_HEALTH 92 stable.
+6. Wizard zero step (probes and USB off): both channels pass ("CH1: zero level done", "CH2: zero level done"); then
+   the full calibration (the 0x1537 calibration must be redone), Save; GET_CAL CH2 A-B near 0 as on 0x1535.
+7. If 92 grows on 0x1538: the event 21 b values (0x33 bytes) say which pin; report to fpga-gen7.
+Rollback: FEL-load 0.2.61 (pinned backups/fw-0.2.61_4593c43f.bin); 0.2.62 runs on 0x1535 / 0x1537 as well.
+
+**For the mcp agent (do not edit mcp/ from this branch)**
+- protocol.py: `PROTO_MINOR = 19`; `Caps.ENC_CHECK = 1 << 18`; features bit 5 ENC_CHECK (0x0020) in GET_STATUS 44 /
+  GET_DECIM 32; HealthResp grows to 104 bytes: `enc_mode` (u8 88: 0 none, 1 data, 2 FPGA 0x33), `enc_last33` (u8 89),
+  `enc_flags` (u8 90: 0 read, 1 convention bad, 2 last accepted bad, 3 core order differs), `enc_boot33` (u8 91),
+  `enc_bad` (u32 92), `enc_recovered` (u32 96), `enc_checked` (u32 100); describe() with the 0x33 pins {CH2 A bit 7, CH2
+  B 6, CH1 A 5, CH1 B 4}, 1 = right, 0xF6 good. Event 21 decode: reason (a >> 5) & 3 (1 data, 2 0x33, 3 boot
+  convention), re-arms a & 0x1F, bit 7 not recovered, caller b >> 12 (as type 22), value b & 0xFFF (residual / 16 codes
+  or the 0x33 byte). Link counters 62/63 names unchanged ("captures bad / recovered").
+- Vector to decode: `resp_get_health_1_19`. The simulator should answer GET_HEALTH with 104 bytes.
+- scope_status / diagnostics tool: show the check mode, last 0x33, the three counts; a measurement taken while
+  `enc_flags` bit 2 is set deserves a caveat.
+
+**Open**
+- `docs/plans/task-queue.md` item "Full-rate encode check on every arm": done on this branch pending the bench above.
+- `docs/release-notes/0.3.0.md` (rel-gen1) does not mention 0x1538 or the per-capture check; the coordinator decides.
+- Caps bit 12 INTERLEAVE_UNVERIFIED: clear it for 0x1538 once T4 confirms B first on hardware (one line in
+  `pc_variant_from_version`).
+- 0x1532..0x1536 still re-roll only on rate writes, so their re-arm re-writes 0x0D first (two extra writes per re-arm;
+  0x1535 measured 50 % odds per write, so about one re-arm per bad capture on average).
+- A large signal above about 15 MHz raises the DATA residual (a 100-code 10 MHz sine stays under the limit,
+  test_enc_heal); on 0x1532..0x1537 such a signal could make every full-rate capture re-arm 16 times and be flagged.
+  0x1538 has no such limit.
