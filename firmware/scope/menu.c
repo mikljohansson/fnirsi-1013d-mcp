@@ -28,6 +28,8 @@
 #include "ui_ctrl.h"
 #include "ctrl_page.h"
 #include "ui_diag_view.h"
+#include "tb_view.h"
+#include "acq_view.h"
 
 //USB drive screen: the Exit button (fw 0.2.51)
 #define USB_EXIT_X     610
@@ -5198,15 +5200,16 @@ void scope_acquisition_timeperdiv_select(void)
     //Check if the current text is the selected on
     if(c != scopesettings.timeperdiv)
     {
-      //When not check if the current on is a viable candidate for full screen trace display
-      if(viable_time_per_div[scopesettings.samplerate][c])
+      //When not check if the current on is a viable candidate for full screen trace display (fw 0.2.64: derived from the
+      //record, acq_view.c; a grey one cannot be chosen)
+      if(acq_view_tb_ok(c))
       {
         //Available but viable not selected texts in white
         display_set_fg_color(WHITE_COLOR);
       }
       else
       {
-        //Not viable but available not selected texts in grey
+        //Not viable: unavailable, grey
         display_set_fg_color(0x00686868);
       }
     }
@@ -7411,16 +7414,23 @@ void scope_draw_grid(void)
   //display_draw_rect(2, 452, 726, 20);//46 404
   display_draw_rect(2, 452, 726, 20);//46 404
   
-  //if (disp_first_sample>2999)   disp_first_sample=2999;
-  if (disp_first_sample>scopesettings.samplecount)   disp_first_sample=scopesettings.samplecount;
-  
-  //kurzor_position = ((disp_first_sample*100)/554)+4;
-  kurzor_position = ((disp_first_sample*100)/3000)+4;
-  //if (kurzor_position > 686) kurzor_position = 686; //600 ma byt
-  //if (kurzor_position > 635) kurzor_position = 635; //600 ma byt
-  //Draw the edge
-  //display_draw_rect(kurzor_position, 455, 40, 14);
-  display_draw_rect(kurzor_position, 455, 181, 14);//181
+  //fw 0.2.64: the window shows the part of the record on screen, to scale (tb_view.c); 1.00o5 drew a fixed 181 px window
+  //at first sample / 30
+  if(!scopesettings.long_mode && (scopesettings.samplerate < 18) && (scopesettings.timeperdiv < 35))
+  {
+    int32 sx, sw;
+
+    tbv_slider(disp_first_sample, sample_rate[scopesettings.samplerate], frequency_per_div[scopesettings.timeperdiv],
+               fpgasettings.totalsamples, &sx, &sw);
+    display_draw_rect(sx, 455, sw, 14);
+  }
+  else
+  {
+    if (disp_first_sample>scopesettings.samplecount)   disp_first_sample=scopesettings.samplecount;
+
+    kurzor_position = ((disp_first_sample*100)/3000)+4;
+    display_draw_rect(kurzor_position, 455, 181, 14);//181
+  }
   
   /*
    

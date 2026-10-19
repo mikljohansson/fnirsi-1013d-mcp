@@ -22,6 +22,8 @@
 #include "variables.h"
 
 #include "sin_cos_math.h"
+#include "tb_view.h"
+#include "acq_view.h"
 #include "ref_and_math.h"
 /*
 //sinx
@@ -34,145 +36,82 @@
 #include <math.h>
 //----------------------------------------------------------------------------------------------------------------------------------
 
-//void scope_adjust_timebase(void)
+//fw 0.2.64: the first row the lower V/div tap band may not use on a half: the top of that half's measurement cards (as
+//scope_display_measurements draws them), else the grid's bottom
+static int32 scope_tap_bottom(int half)
+{
+  uint8  *m = scopesettings.measuresstate[half];
+  uint32  i, n = 0;
+  int     shown;
+
+  if(half == 0)
+    shown = (scopesettings.channel1.enable || scopesettings.ref1 || scopesettings.ref2 || scopesettings.ref3 || scopesettings.ref4) &&
+            !scopesettings.hide_values_CH1 && !scopesettings.long_mode;
+  else
+    shown = (scopesettings.channel2.enable || scopesettings.ref5 || scopesettings.ref6 || scopesettings.ref7 || scopesettings.ref8) &&
+            !scopesettings.hide_values_CH2 && !scopesettings.long_mode;
+
+  if(shown)
+    for(i = 0; i < 12; i++)
+      if(m[i])
+        n++;
+
+  return touch_cards_top(n);
+}
+
+//V/div one step on a tap band
+static void scope_tap_voltdiv(PCHANNELSETTINGS settings, int more)
+{
+  //Only if channel is enabled
+  if(!settings->enable)
+    return;
+
+  if(more && (settings->displayvoltperdiv < 6))
+    settings->displayvoltperdiv++;
+  else if(!more && (settings->displayvoltperdiv > 0))
+    settings->displayvoltperdiv--;
+  else
+    return;
+
+  //Show the change on the screen
+  scope_channel_settings(settings, 0);
+
+  //Only update the FPGA in run mode
+  //For waveform view mode the stop state is forced and can't be changed
+  if(scopesettings.runstate) match_volt_per_div_settings(settings);
+}
+
+//A tap on the empty plot (fw 0.2.64: the bands of touch_pick.h: 1.00o5's V/div and time base bands, kept by the owner,
+//off the record slider row and off the measurement cards)
 void scope_adjust_timebase_and_voltdiv (void)
 {
-  uint8 min;
-  uint8 max;
-    
-  //Check if touch within the trace display region
-  if((previousxtouch > 2) && (previousxtouch < 720) && (previousytouch > 50) && (previousytouch < 470))
+  uint8 min = 0;
+  uint8 max = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1);
+
+  if ((scopesettings.long_mode) && (scopesettings.waveviewmode)) {min = 0;   max = 10;}
+  if ((!scopesettings.long_mode) &&(scopesettings.waveviewmode)) {min = 11;  max = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1); }
+
+  switch(touch_tap_zone(previousxtouch, previousytouch, scope_tap_bottom(0), scope_tap_bottom(1)))
   {
+    case TAP_TB_SLOWER:
+      //Go up in time by taking one of the setting
+      if(scopesettings.timeperdiv > min)
+        scopesettings.timeperdiv--;
+      scope_set_timebase();
+      break;
 
-  
-    if ((scopesettings.long_mode) && (scopesettings.waveviewmode)) {min = 0;   max = 10;}
-    if ((!scopesettings.long_mode) &&(scopesettings.waveviewmode)) {min = 11;  max = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1); }
-    if(!scopesettings.waveviewmode) {min = 0;  max = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1); }
-      
-      //Check if touch on the left of the center line
-    //if(previousxtouch < 358)
-    if(previousxtouch < 358)
-    {   
-      if((previousytouch > 100)&&(previousytouch < 370))
-      {
-        //Short time base
-        //Check if not already on the highest setting (200mS/div)
-        //Long time base
-        //Check if not already on the highest setting (50s/div)
-        if(scopesettings.timeperdiv > min)
-        {
-          //Go up in time by taking one of the setting
-          scopesettings.timeperdiv--;
-        }
-        scope_set_timebase();
-      }
-      
-      if(previousytouch < 100)
-      { 
-        //Only if channel is enabled
-        if(scopesettings.channel1.enable)
-        {
-          //Check if setting not already on max
-          if(scopesettings.channel1.displayvoltperdiv < 6)
-          {
-              //Step up to the next setting. (Lowering the setting)
-              scopesettings.channel1.displayvoltperdiv++;
+    case TAP_TB_FASTER:
+      //Go down in time by adding one to the setting
+      if(scopesettings.timeperdiv < max)
+        scopesettings.timeperdiv++;
+      scope_set_timebase();
+      break;
 
-              //Show the change on the screen
-              scope_channel_settings(&scopesettings.channel1, 0);
-
-              //Only update the FPGA in run mode
-              //For waveform view mode the stop state is forced and can't be changed
-              if(scopesettings.runstate) match_volt_per_div_settings(&scopesettings.channel1);
-          }
-        }
-      }
-      
-      if(previousytouch > 370)
-      {
-       //Only if channel is enabled
-       if(scopesettings.channel1.enable)
-       {
-         //Check if setting not already on min
-         if(scopesettings.channel1.displayvoltperdiv > 0)
-         {
-             //Step down to the next setting. (Increasing the setting)
-             scopesettings.channel1.displayvoltperdiv--;
-
-             //Show the change on the screen
-             scope_channel_settings(&scopesettings.channel1, 0);
-
-             //Only update the FPGA in run mode
-             //For waveform view mode the stop state is forced and can't be changed
-             if(scopesettings.runstate) match_volt_per_div_settings(&scopesettings.channel1);
-         }
-       }
-      }
-
-    }
-    //Check if touch on the right of the center line
-    else if(previousxtouch > 362)
-    { 
-      if((previousytouch > 100)&&(previousytouch < 370))
-      { //Long time base
-        //Check if not already on the lowest setting (100ms/div)
-        //Short time base
-        //Check if not already on the lowest setting (5nS/div)
-        if(scopesettings.timeperdiv < max)
-        {
-          //Go down in time by adding one to the setting
-          scopesettings.timeperdiv++;
-        }    
-        scope_set_timebase();
-      }
-      
-      if(previousytouch < 100)
-      { 
-        //Only if channel is enabled
-        if(scopesettings.channel2.enable)
-        {
-          //Check if setting not already on max
-          if(scopesettings.channel2.displayvoltperdiv < 6)
-          {
-              //Step up to the next setting. (Lowering the setting)
-              scopesettings.channel2.displayvoltperdiv++;
-
-              //Show the change on the screen
-              scope_channel_settings(&scopesettings.channel2, 0);
-
-              //Only update the FPGA in run mode
-              //For waveform view mode the stop state is forced and can't be changed
-              if(scopesettings.runstate) match_volt_per_div_settings(&scopesettings.channel2);
-          }
-        }
-      }
-      
-      if(previousytouch > 370)
-      {
-       //Only if channel is enabled
-       if(scopesettings.channel2.enable)
-       {
-         //Check if setting not already on min
-         if(scopesettings.channel2.displayvoltperdiv > 0)
-         {
-             //Step down to the next setting. (Increasing the setting)
-             scopesettings.channel2.displayvoltperdiv--;
-
-             //Show the change on the screen
-             scope_channel_settings(&scopesettings.channel2, 0);
-
-             //Only update the FPGA in run mode
-             //For waveform view mode the stop state is forced and can't be changed
-             if(scopesettings.runstate) match_volt_per_div_settings(&scopesettings.channel2);
-         }
-       }
-      }
-    }
-  
-    //scope_set_timebase();
-    
+    case TAP_CH1_MORE: scope_tap_voltdiv(&scopesettings.channel1, 1); break;
+    case TAP_CH1_LESS: scope_tap_voltdiv(&scopesettings.channel1, 0); break;
+    case TAP_CH2_MORE: scope_tap_voltdiv(&scopesettings.channel2, 1); break;
+    case TAP_CH2_LESS: scope_tap_voltdiv(&scopesettings.channel2, 0); break;
   }
-  
 }
     
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -235,6 +174,11 @@ void scope_adjust_timebase_and_voltdiv (void)
     
     //if((scopesettings.triggermode == 1)) 
         //scope_display_trace_data();
+
+    //fw 0.2.64: a time/div kept at the record's rate (stopped, viewer) stops where the record no longer fills the trace
+    //area or a division holds less than one sample; the trigger point stays inside the record (acq_view.c)
+    if(!scopesettings.long_mode && acq_view_fit(1))
+      fpga_set_time_base(scopesettings.timeperdiv);
   
     //Show he new setting on the display
     scope_acqusition_settings(0);
@@ -2142,56 +2086,70 @@ void scope_display_trace_data(void)
   //This gives the step size for going through the samples. Is also the linear interleaving step for the y direction
   disp_sample_step = 1.0 / disp_xpos_per_sample;
 
-  //The displayable x range is based on the number of samples and the number of x positions needed per sample
-  //Halved to allow trigger position to be in the center
-  //double xrange = (scopesettings.samplecount * disp_xpos_per_sample);// / 2.0;
-  double xrange = (fpgasettings.totalsamples * disp_xpos_per_sample);// / 2.0;
-
-  //x range needs to be at least 1 pixel
-  if(xrange < 1.0)
+  //fw 0.2.64: in short mode the window comes from the record (tb_view.c): the first sample shown stays inside the record,
+  //and when the record is shorter than the trace area the trace starts at the left edge and ends where the record ends
+  //(1.00o5 clamped only the start, so the trace shifted against the trigger point and zeros were drawn past the end)
+  if(!scopesettings.long_mode && (scopesettings.samplerate < 18) && (scopesettings.timeperdiv < 35))
   {
-    xrange = 1.0;
+    tbv_window((int32)disp_trigger_index, triggerposition, sample_rate[scopesettings.samplerate],
+               frequency_per_div[scopesettings.timeperdiv], fpgasettings.totalsamples, &disp_first_sample, &disp_xend);
+    disp_xstart = TBV_X_FIRST;
   }
-  else if(xrange > fpgasettings.totalsamples)
-   // else if(xrange > 725.0)
+  else
   {
-    //Limit on max screen pixels to avoid disp_xend becoming 0x80000000 due to overflow
-    xrange = fpgasettings.totalsamples;// - fpgasettings.settriggerpoint;//725.0;//comment
-  }
 
-  //Calculate the start and end x coordinates
-  disp_xstart = triggerposition - xrange;
-  disp_xend = triggerposition + xrange;
-  //disp_xend = xrange - triggerposition;
-  //disp_xend = 1500;
+    //The displayable x range is based on the number of samples and the number of x positions needed per sample
+    //Halved to allow trigger position to be in the center
+    //double xrange = (scopesettings.samplecount * disp_xpos_per_sample);// / 2.0;
+    double xrange = (fpgasettings.totalsamples * disp_xpos_per_sample);// / 2.0;
+
+    //x range needs to be at least 1 pixel
+    if(xrange < 1.0)
+    {
+      xrange = 1.0;
+    }
+    else if(xrange > fpgasettings.totalsamples)
+     // else if(xrange > 725.0)
+    {
+      //Limit on max screen pixels to avoid disp_xend becoming 0x80000000 due to overflow
+      xrange = fpgasettings.totalsamples;// - fpgasettings.settriggerpoint;//725.0;//comment
+    }
+
+    //Calculate the start and end x coordinates
+    disp_xstart = triggerposition - xrange;
+    disp_xend = triggerposition + xrange;
+    //disp_xend = xrange - triggerposition;
+    //disp_xend = 1500;
   
-  //Limit on actual start of trace display
-  if(disp_xstart < 3)
-  {
-    disp_xstart = 3;
+    //Limit on actual start of trace display
+    if(disp_xstart < 3)
+    {
+      disp_xstart = 3;
+    }
+
+    //And limit on the actual end of the trace display
+    if(disp_xend > 727)//725
+    {
+      disp_xend = 727;
+    }
+  
+    //And limit for long view the trace display
+    if(disp_xend < 1)
+    {
+      disp_xend = 1;
+    }
+  
+    //Determine first sample to use based on a full screen worth of samples and the trigger position in relation to the number of pixels on the screen
+    disp_first_sample = disp_trigger_index - (((725.0 / disp_xpos_per_sample) * triggerposition) / 725.0) - 1;
+    //disp_first_sample = disp_trigger_index - (((727.0 / disp_xpos_per_sample) * triggerposition) / 727.0) - 1;
+
+    //If below the first sample limit it on the first sample
+    if(disp_first_sample < 0)
+    {
+      disp_first_sample = 0;
+    }
   }
 
-  //And limit on the actual end of the trace display
-  if(disp_xend > 727)//725
-  {
-    disp_xend = 727;
-  }
-  
-  //And limit for long view the trace display
-  if(disp_xend < 1)
-  {
-    disp_xend = 1;
-  }
-  
-  //Determine first sample to use based on a full screen worth of samples and the trigger position in relation to the number of pixels on the screen
-  disp_first_sample = disp_trigger_index - (((725.0 / disp_xpos_per_sample) * triggerposition) / 725.0) - 1;
-  //disp_first_sample = disp_trigger_index - (((727.0 / disp_xpos_per_sample) * triggerposition) / 727.0) - 1;
-
-  //If below the first sample limit it on the first sample
-  if(disp_first_sample < 0)
-  {
-    disp_first_sample = 0;
-  }
 /*
   //This makes sure no reading outside the buffer can occur
   if(disp_sample_step > ((scopesettings.samplecount) / 2))
@@ -2691,7 +2649,8 @@ void scope_display_channel_linear_trace_old(PCHANNELSETTINGS settings)  //povodn
   }
 
   //When step less then 1 the last pixel needs to be interpolated between current sample and next sample.
-  if(disp_sample_step < 1.0)
+  //fw 0.2.64: only when the trace runs to the right edge; a record that ends inside the trace area has no next sample
+  if((disp_sample_step < 1.0) && (disp_xend >= TBV_X_END))
   {
     //Calculate the scaler for the last y value based on the x distance from the last drawn position to the end of the screen
     //divided by the x distance it takes to where the next position should be drawn (Number of x steps per sample)
@@ -2782,7 +2741,8 @@ void scope_display_channel_dots_trace(PCHANNELSETTINGS settings)//1
   }
 
   //When step less then 1 the last pixel needs to be interpolated between current sample and next sample.
-  if(disp_sample_step < 1.0)
+  //fw 0.2.64: only when the trace runs to the right edge; a record that ends inside the trace area has no next sample
+  if((disp_sample_step < 1.0) && (disp_xend >= TBV_X_END))
   {
     //Calculate the scaler for the last y value based on the x distance from the last drawn position to the end of the screen
     //divided by the x distance it takes to where the next position should be drawn (Number of x steps per sample)
@@ -6287,7 +6247,7 @@ void scope_reset_config_data(void)
   //Load input calibration value 
   scope_load_input_calibration_data();
   //----------------------------------------------------------------------------  
-  //PC protocol build: acquisition Filter back to PC_DECIM_DEFAULT
+  //PC protocol build: acquisition Filter back to the per-mode defaults
   PC_SETTINGS_DEFAULTS();
 
   restore = 1;      //Flag - view restore text in display
@@ -6475,6 +6435,7 @@ void scope_save_config_data(void)
 
   //Acquisition Filter setting (decimation filter, 0x1534+) in a spare word of the FPGA block
   settingsworkbuffer[PC_SETTING_WORD_DECIM] = pc_glue_decim_setting_word();
+  settingsworkbuffer[PC_SETTING_WORD_DECIM_SPEC] = pc_glue_decim_spec_setting_word();
   //Spectrum view settings (FFT length, window, scale, ref level)
   settingsworkbuffer[PC_SETTING_WORD_SPEC0] = pc_glue_spectrum_setting_word(0);
   settingsworkbuffer[PC_SETTING_WORD_SPEC1] = pc_glue_spectrum_setting_word(1);

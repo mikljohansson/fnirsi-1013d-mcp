@@ -11,6 +11,7 @@
 // Integer only (no FPU): levels in centi-dB, frequencies in mHz (uint64).
 //----------------------------------------------------------------------------------------------------------------------------------
 
+#include "touch_pick.h"
 #include "spectrum.h"
 #include "fx_fft.h"
 #include "timer.h"
@@ -2041,21 +2042,22 @@ int spectrum_touch(void)
       {
         int32 dx = (int32)xtouch - x0, dy = (int32)ytouch - y0;
 
-        if(!moved && (((dx < 0) ? -dx : dx) > 2 || ((dy < 0) ? -dy : dy) > 2))
+        //fw 0.2.64: the plot's dead band (touch_pick.h), and Move slow divides the pan by 5 as every other drag
+        if(!moved && (((dx < 0) ? -dx : dx) > TOUCH_DEAD_BAND || ((dy < 0) ? -dy : dy) > TOUCH_DEAD_BAND))
           moved = 1;
 
         if(moved && spec.zoom)
         {
           uint32 before = spec.start;
 
-          spec_pan(start0, dx);
+          spec_pan(start0, scopesettings.movespeed ? dx / 5 : dx);
           if(spec.start != before)
             spectrum_display();
         }
       }
     }
 
-    if(!moved && ((timer0_get_ticks() - t0) < 200))
+    if(!moved && ((timer0_get_ticks() - t0) < TOUCH_TAP_MS))
       spec_zoom(x0 >= PLOT_X + PLOT_W / 2);
   }
 

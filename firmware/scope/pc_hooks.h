@@ -20,6 +20,7 @@
 #define PC_SETTING_WORD_SPEC1 209   //fw 0.2.39: spectrum view ref level, dBV (int16)
 #define PC_SETTING_WORD_PHOS  210   //fw 0.2.46: phosphor view persistence, palette (0x9A00 marker); 0.2.56: the switch
 #define PC_SETTING_WORD_UI    211   //fw 0.2.56: Grid, the spectrum's Display variant (0xC700 marker)
+#define PC_SETTING_WORD_DECIM_SPEC 212   //fw 0.2.64: the Spectrum's Filter (0xD500 marker; 207 is the Scope's)
 
 //PC_UI_MASK(m) items. Menus are compact (fw 0.2.8, owner: no gaps): what the 1013D lacks is not laid out at all.
 #define PC_MASK_TRIG_CHANNEL  2     //trigger menu: EXT source box (0x1533+)
@@ -69,7 +70,8 @@ void   pc_glue_decim_read(void *settings, uint32 start);   //fpga_read_sample_da
 void   pc_glue_decim_even(void);      //fpga_read_sample_data: second pass takes the even samples
 void   pc_glue_decim_tap(void);       //acquisition menu: Filter box touched
 void   pc_glue_settings_defaults(void); //fw 0.2.44: scope_reset_config_data (DEFAULT button, sector load failure)
-uint16 pc_glue_decim_setting_word(void);         //settings sector word (scope_save_config_data)
+uint16 pc_glue_decim_setting_word(void);         //settings sector word 207, the Scope Filter (scope_save_config_data)
+uint16 pc_glue_decim_spec_setting_word(void);    //fw 0.2.64: word 212, the Spectrum Filter
 uint16 pc_glue_spectrum_setting_word(int i);     //settings sector words 208, 209 (scope_save_config_data)
 uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (scope_save_config_data)
 uint16 pc_glue_ui_setting_word(void);            //settings sector word 211 (scope_save_config_data)
