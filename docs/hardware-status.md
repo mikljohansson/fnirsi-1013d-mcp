@@ -957,4 +957,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   nothing on the inputs ("No trigger" warning). Noted on the screenshot: the Scope's record slider already draws the whole record
   as a thumbnail in its track (stock behaviour), so the slider-overview design's Scope part exists in substance; the batch should
   align the two modes with it rather than add a second drawing.
+- 2026-10-19 21:12: GET_HEALTH on fw 0.2.70 / 0x1539 (the "1.19 / 1.20 on the unit" host item): encode check mode 2, boot and last
+  0x33 = 0xF6, 256 arms checked, 0 bad, 0 recovered; USB state 3 flags 0x1B, 14 power-ons, 105 minutes of life, no restart record.
+  Of that item: scope_health done, scope_cal_probe done 20:25, the device-vs-host Frequency response comparison is blocked by the
+  A-core capture fault until 0x153A (20:51 entry); the poll interval and elapsed_ms (445 ms per 20-point sweep, estimate 935 ms)
+  were checked at 20:44.
 
