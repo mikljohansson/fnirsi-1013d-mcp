@@ -6,6 +6,15 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **ACQ: sample rate vs time/div coupling** (owner 10-19 14:30, 1 kHz cal signal: after changing the sample rate in the ACQ menu
+  the old time/div stays selected although drawn grey; the trace is cut off, zeros show past the record end, the slider scrolls
+  before the trace, the shape changes). Cause: Atlan design, statemachine.c handle_acquisition_menu_touch sets the FPGA rate without
+  touching timeperdiv, the time/div tap in the menu sets only the display scale, viable_time_per_div[29][35] (variables.c:430) only
+  colours the boxes; only plot tap-zoom couples the two via time_per_div_sample_rate. Fix after UI step 2 (fw-ui2 edits the ACQ
+  menu now): snap timeperdiv to the nearest viable value when the rate changes and show the snap, make non-viable boxes
+  unavailable, clamp the record slider to the record, derive viability from the real record length (memory depth) instead of the
+  table, apply the same rule to SET_TIMEBASE / the protocol path, and check the resampling and zero-fill code for the exact
+  cut-off and scroll behaviour.
 - **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
