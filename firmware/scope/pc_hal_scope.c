@@ -1847,8 +1847,6 @@ void pc_glue_init(void)
 
 void pc_glue_poll_main(void)
 {
-  pc_usb_main_service();
-
   if(pc_ready)
     pc_poll(&pc_sess, PC_CTX_MAIN);
 
@@ -1865,6 +1863,9 @@ void pc_glue_poll_isr(void)
 {
   //Timer0 IRQ, every ms: PING/GET_INFO/GET_STATUS/GET_BATTERY/#VER/#RESET and the TX pump without waiting for the
   //UI loop. Skipped while a main-loop or BUSY poll is running (in_poll), so it never interleaves with one.
+  //fw 0.2.49: the USB suspend watch first, also before pc_ready and while a menu is modal
+  pc_usb_watch_tick();
+
   if(pc_ready)
   {
     pc_poll(&pc_sess, PC_CTX_ISR);

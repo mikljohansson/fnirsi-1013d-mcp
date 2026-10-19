@@ -914,20 +914,8 @@ void usb_device_CDC_irq_handler(void)
     return;
   }
 
-  //Check on a RESUME interrupt
-  if(usbirq & USBC_BP_INTUSB_RESUME)
-  {
-    //Clear the interrupt
-    *USBC_REG_INTUSB = USBC_BP_INTUSB_RESUME;
-    
-    //Back to connected state
-    usb_connect = 1;
-    usb_ep0_state = EP0_IDLE;
-
-    pc_usb_isr_resume();
-  }
-
-  //Check on a SUSPEND interrupt
+  //Check on a SUSPEND interrupt. fw 0.2.49: before RESUME, so that both pending (a resume can only follow its suspend)
+  //ends in the resumed state; 1.00o5 handled RESUME first and left the device marked suspended
   if(usbirq & USBC_BP_INTUSB_SUSPEND)
   {
     //Clear the interrupt
@@ -939,6 +927,19 @@ void usb_device_CDC_irq_handler(void)
 
     //fw 0.2.44: a state, not a link reset (pc_transport.c); the following RESUME or bus reset decides
     pc_usb_isr_suspend();
+  }
+
+  //Check on a RESUME interrupt
+  if(usbirq & USBC_BP_INTUSB_RESUME)
+  {
+    //Clear the interrupt
+    *USBC_REG_INTUSB = USBC_BP_INTUSB_RESUME;
+    
+    //Back to connected state
+    usb_connect = 1;
+    usb_ep0_state = EP0_IDLE;
+
+    pc_usb_isr_resume();
   }
 
   //Check on a DISCONNECT interrupt

@@ -103,7 +103,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   tip on the post?") and offers Retry; then CH2. Retry per step without redoing earlier steps; Skip keeps earlier values (flag bit 4).
   Step 3 Summary in plain words per channel (cores matched to x code, gains), date, Done; one success message at the end only. Consider
   detecting USB connected and warning instead of demanding the unplug. Next firmware generation (fw-cal3 together with v4 tracking).
-- [ ] **USB: device lost after a long idle on 0.2.48** (10-19 10:20): port closed from about 08:40 to 10:20, device vanished from the bus
+- [~] **USB: device lost after a long idle on 0.2.48** (fw-usb2 10-19: 0.2.49 merged with the suspend watch, inferred resume that acts,
+  soft reconnect after a retry storm or 15 min suspended, counters 60-61, event type 20, protocol 1.14; bench plan firmware/AGENTS.md
+  section 27; Windows selective suspend on this laptop: AC disabled, DC enabled) (10-19 10:20): port closed from about 08:40 to 10:20, device vanished from the bus
   (no 1209, no re-enumeration), GET_LINK_STATS after replug: suspends (36) = 17, resumes (37) = 0, no restart. The host suspended the idle
   device and it never resumed: RESUME interrupt never fires. Decode the event log (types 2/3 fields of row 50), check MUSB resume
   handling (INTRUSBE resume bit, POWER.Resume, PHY), and the F1C100s USB PHY suspend behaviour; bench with `fnirsi1013d-soak --mode reopen
@@ -152,7 +154,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Dispatched
 
-- fw-usb2 (worktree, Opus, started 10-19 10:35): USB resume after a long host suspend + soft-reconnect fallback; fw 0.2.49.
+- fw-usb2 (done 11:20, about 355k tokens, retired): 0.2.49 merged; bench pending (section 27).
 - fw-cal3 (worktree, Opus, started 10-19 10:35): calibration wizard + v4 background interleave-mismatch tracking; fw 0.2.50, protocol 1.14.
 - fpga-gen5 (done 03:50, retired): 0x1536 segmented capture + hardware averaging built, simulated, documented (bcccd92..66232a6); pinned
   backups/al3_seg_0x1536_4eaf6811.bin (+ padded 66866c84); not flashed; needs firmware support first.

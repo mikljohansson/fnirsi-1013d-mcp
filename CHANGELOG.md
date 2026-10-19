@@ -64,6 +64,24 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
 - Added: GET_LINK_STATS counters 58-59 (n = 60): fault status (DFSR / IFSR) and fault address (FAR) of the abort
   that caused the last restart (52fe65a).
 
+#### 0.2.49 - 2026-10-19 (protocol 1.14)
+
+- Fixed: the scope no longer stays lost to the PC after a long idle. On 2026-10-19 (0.2.48) the host suspended the
+  device 17 times over 1 h 40 min with the port closed, the device never saw a RESUME interrupt (it has not on any
+  build), and the host finally stopped listing it until the cable was replugged. A suspend watch in the 1 ms timer
+  interrupt (`pc_usbw.c`, host test `test_usbw`) now treats SOFs, an EP0 setup or an EP2 OUT packet while suspended
+  as a resume (0.2.44 only logged the SOF case, from the main loop), and re-enumerates a device the host abandoned:
+  D+ pull-up off for 1 s and on again (soft reconnect), after a host's retry storm went quiet for 10 s (doubling
+  back-off) or 15 min into a suspend, once per enumeration and doubling up to 8 h until an application opens the
+  port again (c20b657, 46d9817, 46f3db2, e77785c).
+- Added: GET_LINK_STATS counters 60-61 (n = 62): resumes inferred without a RESUME interrupt, soft reconnects;
+  event type 20 (soft disconnect: reason, back-off level, suspends, seconds suspended); type 3 a bits 6-5 = what
+  ended an inferred resume. Protocol 1.14, section 14 row 53 (3b50641); mcp decodes them (f3763cc).
+- Changed: the CDC interrupt handler handles SUSPEND before RESUME when both are pending (46d9817).
+- Fixed (docs): the USB selective suspend powercfg GUID in docs/agent-measurement-guide.md and the fnirsi-scope
+  skill was wrong (53bb50f7e206 instead of 53bb8f07e226), so the documented command never changed the setting
+  (46e473f).
+
 #### 0.2.46 - 2026-10-19 (protocol 1.13)
 
 - Added: digital phosphor view (main menu row 7 "Phosphor display"): the CH1 / CH2 traces are drawn from per-pixel

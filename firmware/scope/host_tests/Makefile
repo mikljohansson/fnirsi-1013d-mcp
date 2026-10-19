@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/adc_cal.c mock_hal.c
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/adc_cal.h $(SRC)/pc_protocol.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw
 
 $(OUT):
 	mkdir -p $@
@@ -54,6 +54,9 @@ $(OUT)/test_phosphor: test_phosphor.c test_util.h $(SRC)/phos_map.c $(SRC)/phos_
 $(OUT)/test_mmu: test_mmu.c test_util.h $(SRC)/pc_mmu.c $(SRC)/pc_mmu.h | $(OUT)
 	$(CC) $(CFLAGS) -DPC_HOST_TEST -o $@ test_mmu.c $(SRC)/pc_mmu.c
 
+$(OUT)/test_usbw: test_usbw.c test_util.h $(SRC)/pc_usbw.c $(SRC)/pc_usbw.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_usbw.c $(SRC)/pc_usbw.c
+
 $(OUT)/test_spec_fmt: test_spec_fmt.c test_util.h $(SRC)/spec_fmt.c $(SRC)/spec_fmt.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_spec_fmt.c $(SRC)/spec_fmt.c
 
@@ -89,6 +92,7 @@ test: all
 	$(OUT)/test_adc_cal
 	$(OUT)/test_phosphor
 	$(OUT)/test_mmu
+	$(OUT)/test_usbw
 	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --decim-checker $(OUT)/decim_check --adc-cal-checker $(OUT)/test_adc_cal --vectors $(VECTORS)
 	$(PYTHON) -I test_fft.py --cli $(OUT)/fft_cli --tables $(SRC)/fx_fft_tables.c --gen ../../tools/gen_fft_tables.py
 	@if command -v qemu-arm >/dev/null && command -v arm-none-eabi-gcc >/dev/null && [ -x $(ARM_CC10) ]; then \

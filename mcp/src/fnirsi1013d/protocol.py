@@ -31,8 +31,9 @@ PROTO_MAJOR = 1
 #: caps DECIM, 16-bit samples: READ_TRACE WIDE, READ_RAW layout 2, GET_CAPTURE_INFO 76 bytes); 1.8 was not used;
 #: 1.10 (fw 0.2.43): calibration data v2, GET_CAL 248 bytes; 1.11 (fw 0.2.44, FPGA 0x1535): CIC compensation FIR
 #: (caps FIR, SET_DECIM flags bit 3, 0x29 bits 6 / 5); 1.12 (fw 0.2.45): calibration data v3 (per-core, per-class
-#: gains), GET_CAL 256 bytes (v2 blocks are no longer used); 1.13 (fw 0.2.46): phosphor view, display_mode 4
-PROTO_MINOR = 13
+#: gains), GET_CAL 256 bytes (v2 blocks are no longer used); 1.13 (fw 0.2.46): phosphor view, display_mode 4; 1.14
+#: (fw 0.2.49): USB suspend watch, link counters 60-61, event type 20
+PROTO_MINOR = 14
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -1966,7 +1967,10 @@ LINK_STATS_NAMES_35 = LINK_STATS_NAMES[:29] + (
     "usb_irq_races",
     # fw 0.2.48 (60 counters): fault status (DFSR for a data abort, IFSR for a prefetch abort) and fault address (FAR,
     # data abort only) of the restart recorded in 49-56; 0 otherwise
-    "restart_fault_status", "restart_fault_addr")
+    "restart_fault_status", "restart_fault_addr",
+    # fw 0.2.49 (62 counters): USB resumes inferred without a RESUME interrupt (frame number moving, EP0 setup or EP2
+    # OUT packet while suspended), soft reconnects of the suspend watch (protocol row 53)
+    "usb_inferred_resumes", "usb_soft_reconnects")
 
 #: restart_exc_type / event 15 a (fw 0.2.19)
 RESTART_EXC_TYPES = {0: "jump to entry", 1: "undefined", 2: "SWI", 3: "prefetch abort", 4: "data abort",
@@ -1985,9 +1989,9 @@ EVENT_LOG_REARM = 0x01
 EVENT_TYPES = {1: "bus_reset", 2: "suspend", 3: "resume", 4: "disconnect", 5: "ep0_setup", 6: "ep0_short_packet",
                7: "set_configuration", 8: "clear_halt", 9: "dtr", 10: "rx_ring_full", 11: "rx_release",
                12: "tx_flushed", 13: "tx_aborted", 14: "usb_irq_polled", 15: "restart", 16: "usb_init_state",
-               17: "tx_abort_txcsr", 18: "tx_abort_frame", 19: "usb_postinit_state"}
+               17: "tx_abort_txcsr", 18: "tx_abort_frame", 19: "usb_postinit_state", 20: "usb_soft_disconnect"}
 #: event types the fw 0.2.24 bus-level ring keeps (PC_EVBUS_TYPES)
-BUS_EVENT_TYPES = frozenset({1, 2, 3, 4, 7, 8, 12, 13, 15, 16, 17, 18})
+BUS_EVENT_TYPES = frozenset({1, 2, 3, 4, 7, 8, 12, 13, 15, 16, 17, 18, 20})
 #: PHY tuning bits as fw 0.2.25 writes them (event 19 fields 4/5: bit 0 PHY 0x0C, bits 1-5 PHY 0x20-0x24, bits 6-7
 #: PHY 0x2A-0x2B)
 PHY_TUNING_WRITTEN = 0x00E9
@@ -2049,11 +2053,20 @@ class DeviceEvent:
             return f"{self.name} after suspend {'>= 65535' if b == 0xFFFF else b} ms"
         if t == 2:  # fw 0.2.44: a = POWER, b = frame number (both 0 before)
             return f"suspend POWER 0x{a:02X} frame {b & 0x7FF}" if a or b else self.name
-        if t == 3:  # fw 0.2.44: a = POWER (bit 7 = inferred from the frame counter), b = ms suspended
+        if t == 3:  # fw 0.2.44: a = POWER (bit 7 = inferred, no RESUME interrupt), b = ms suspended
             if not (a or b):
                 return self.name
-            how = "inferred from SOFs (no RESUME interrupt)" if a & 0x80 else "RESUME interrupt"
-            return f"resume after {b} ms suspended, {how}, POWER 0x{a & 0x7F:02X}"
+            if not a & 0x80:
+                return f"resume after {b} ms suspended, RESUME interrupt, POWER 0x{a & 0x7F:02X}"
+            cause = (a >> 5) & 3  # fw 0.2.49: bits 6-5 cause, bits 4-0 POWER; 3 = fw 0.2.44-0.2.48 (POWER bits 6-0)
+            if cause == 3:
+                return f"resume after {b} ms suspended, inferred from SOFs (no RESUME interrupt), POWER 0x{a & 0x7F:02X}"
+            how = ("SOFs", "an EP0 setup", "an EP2 OUT packet")[cause]
+            return f"resume after {b} ms suspended, inferred from {how} (no RESUME interrupt), POWER bits 0x{a & 0x1F:02X}"
+        if t == 20:  # fw 0.2.49: a = reason, storm level << 2, suspends since the last proof of life << 4; b = s
+            why = {1: "retry storm", 2: "long suspend"}.get(a & 3, f"reason {a & 3}")
+            return (f"usb_soft_disconnect ({why}) after {'>= 65535' if b == 0xFFFF else b} s suspended, "
+                    f"{a >> 4} suspends, back-off level {(a >> 2) & 3}")
         if t == 5:
             return f"ep0_setup bRequest 0x{a:02X} bmRequestType 0x{b >> 8:02X} wValue.lo 0x{b & 0xFF:02X}"
         if t == 6:

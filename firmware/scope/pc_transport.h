@@ -62,7 +62,7 @@ void pc_usb_dtr(uint8 dtr);                 //SET_CONTROL_LINE_STATE
 void pc_usb_isr_event(uint8 ev);            //PC_USB_EV_*: counted for GET_LINK_STATS (fw 0.2.5)
 void pc_usb_isr_resume(void);               //RESUME: the configuration is kept, re-enable the EP2 OUT interrupt
 void pc_usb_isr_suspend(void);              //SUSPEND (fw 0.2.44): a state, not a link reset; logged with POWER, frame
-void pc_usb_main_service(void);             //main loop: resume without a RESUME interrupt (fw 0.2.44)
+void pc_usb_watch_tick(void);               //timer interrupt, every ms: suspend watch (fw 0.2.49, pc_usbw.h)
 void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
 
 #define PC_USB_EV_BUS_RESET   0
@@ -77,13 +77,14 @@ void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
 #define PC_EVLOG_SIZE         128   //fw 0.2.15 (64 before)
 #define PC_EVSNAP_SIZE        16    //events frozen at a bus reset (fw 0.2.15)
 #define PC_EVBUS_SIZE         16    //fw 0.2.24: last bus-level events, a ring the EP0 / DTR chatter cannot evict
-//Types copied into it: 1-4 (reset, suspend, resume, disconnect), 7, 8, 12, 13, 15-18
+//Types copied into it: 1-4 (reset, suspend, resume, disconnect), 7, 8, 12, 13, 15-18, 20
 #define PC_EVBUS_TYPES        ((1u << 1) | (1u << 2) | (1u << 3) | (1u << 4) | (1u << 7) | (1u << 8) | (1u << 12) |\
-                               (1u << 13) | (1u << 15) | (1u << 16) | (1u << 17) | (1u << 18))
+                               (1u << 13) | (1u << 15) | (1u << 16) | (1u << 17) | (1u << 18) | (1u << 20))
 #define PC_SETUP_REPEAT_MS    1000  //fw 0.2.24: a setup identical to the last logged one is logged at most once per second
 #define PC_EVT_BUS_RESET      1     //fw 0.2.44: a = 1 if suspended before, b = ms since that suspend (65535 = longer)
 #define PC_EVT_SUSPEND        2     //fw 0.2.44: a = POWER, b = frame number
-#define PC_EVT_RESUME         3     //fw 0.2.44: a = POWER (bit 7: inferred, no RESUME interrupt), b = ms suspended
+#define PC_EVT_RESUME         3     //fw 0.2.44: a = POWER (bit 7: inferred, no RESUME interrupt; 0.2.49: bits 6-5 cause,
+                                    //bits 4-0 POWER), b = ms suspended
 #define PC_EVT_DISCONNECT     4     //fw 0.2.44: as type 1
 #define PC_EVT_SETUP          5     //a = bRequest, b = bmRequestType << 8 | wValue low byte
 #define PC_EVT_BAD_SETUP      6     //b = COUNT0
@@ -99,6 +100,8 @@ void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
 #define PC_EVT_TX_ABORT_CSR   17    //fw 0.2.22, after each type 13: a = POWER, b = EP2 TXCSR
 #define PC_EVT_TX_ABORT_FRM   18    //fw 0.2.22, after type 17: a = bit 0 EP2 TX interrupt enabled, bit 1 ZLP pending; b = frame number
 #define PC_EVT_USB_POST_INIT  19    //fw 0.2.25, end of usb_device_init, a = field, b = value (protocol section 14 row 43)
+#define PC_EVT_SOFT_DISCONNECT 20   //fw 0.2.49, suspend watch reconnect (row 53): a = reason | level << 2 | strikes << 4,
+                                    //b = s suspended
 #define PC_EVT_RESTART        15    //fw 0.2.19, at boot after a restart from RAM: a = exception type, b = low PC bits
 
 void pc_usb_log_restart(uint8 type, uint16 pc);

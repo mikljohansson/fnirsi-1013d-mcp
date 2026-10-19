@@ -1,11 +1,13 @@
 # firmware/ handoff for agents
 
-**Current state (2026-10-19): latest build fw 0.2.47** (fw-gen7, branch `fw-gen7`, **section 25**: dead-code purge,
+**Current state (2026-10-19): latest build fw 0.2.49** (fw-usb2, branch `fw-usb2`, **section 27**: USB suspend watch,
+inferred resume, soft reconnect after a host abandoned the device; protocol 1.14) on fw-mmu's 0.2.48 (MMU + D-cache,
+section 26) on 0.2.47 (fw-gen7, **section 25**: dead-code purge,
 reproducible images, 16-bit trigger level fix; protocol 1.13 unchanged) on 0.2.46 (protocol 1.13: digital phosphor view,
 section 24) on fw-cal2's 0.2.45 (protocol 1.12: calibration data v3, a gain per ADC core and clock class from a gain step at the
 calibration post, **section 23**) on fw-gen6's 0.2.44 (protocol 1.11: FPGA 0x1535 FIR support, spectrum strip repaint fix,
 Filter default CIC2, USB suspend as a state, section 22); see the ladder (section 8); section 20 (spectrum analyser, auto
-trigger mode) and 21 (calibration v2; its zero model and zero step still hold) still apply. The USB drop story: 0.2.25 PHYCTL fix closed the cold-boot drops; the reopen-after-idle reset is open (section 22). Sections 9-17 below are
+trigger mode) and 21 (calibration v2; its zero model and zero step still hold) still apply. The USB drop story: 0.2.25 PHYCTL fix closed the cold-boot drops; the device lost after a long host suspend (2026-10-19) is handled by 0.2.49's suspend watch, bench pending (section 27). Sections 9-17 below are
 older generations' notes, kept for history. Read the root `AGENTS.md` first, then this file. Details live in `firmware/README.md` (build, SD layout, FEL, memory budget, boot, bring-up
 checklist), `docs/protocol.md` (the spec; section 14 lists every deviation and addition, rows 28-42 are this
 generation's) and `docs/hardware-status.md` (bench log, newest at the bottom). This file does not repeat them.
@@ -237,6 +239,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.47 | 463b489 | b5098dc4 | dead-code purge (PC_PROTOCOL=0, check-reference / package, FFT switch, generator Wave/Ampl/Offset/Phase, Long memory, hold-off), reproducible image (identity = commit; same sha256 from any directory), 16-bit trigger level through gain16 / corr16 (fw-gen7, section 25) | built, host-tested; bench list in section 25 |
 | 0.2.46 | 1b6359f | cdba5b51 | digital phosphor view (main menu row 7; Persistence / Palette / Clear strip; XY), GET_STATUS byte 43 = 4 (protocol 1.13, row 52), settings word 210 (fw-phosphor, section 24) | built, host-tested (test_phosphor 95 checks); bench steps in section 24 |
 | 0.2.48 | b1922c3 | 2f768fd9 | MMU + D-cache on (flat map, DDR / SRAM write-back, framebuffer write-through, restart record and peripherals strongly ordered), clean + off at _reset and ENTER_FEL, GET_LINK_STATS 58-59 fault status / address (fw-mmu, section 26) | built, host-tested (test_mmu); A/B image `make gcc10-nommu` 0.2.48-nommu sha256 45e03f7f; bench sequence in section 26 |
+| 0.2.49 | c477faa | 90f460d6 | USB suspend watch in the 1 ms tick (pc_usbw.c): inferred resume (SOFs, EP0 setup, EP2 OUT while suspended) acts, soft reconnect (SoftConn off 1 s) after a retry storm or 15 min suspended, GET_LINK_STATS 60-61, event type 20, SUSPEND before RESUME in the ISR (protocol 1.14, row 53; fw-usb2, section 27) | built, host-tested (test_usbw 90 checks); A/B `make gcc10-nommu` sha256 f5f377ea; bench plan in section 27 |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -441,7 +444,8 @@ Authoritative text: protocol section 14 rows 28 and 38.
 | 57 | 0.2.19 | 49-56 restart record (section 10) |
 | 58 | 0.2.20 | 57 USB IRQ races (section 11) |
 | 58 | 0.2.21+ | same layout; 47 and 57 retired, always 0 |
-| 60 | 0.2.48+ | 58 fault status (DFSR / IFSR of the restart's abort), 59 fault address (FAR, data abort only) |
+| 60 | 0.2.48 | 58 fault status (DFSR / IFSR of the restart's abort), 59 fault address (FAR, data abort only) |
+| 62 | 0.2.49+ | 60 USB resumes inferred without a RESUME interrupt, 61 USB soft reconnects (row 53) |
 
 **GET_EVENT_LOG 0x0009** (protocol 1.5, any poll context). Request: empty, or since 0.2.18 u8 flags (bit 0 = re-arm
 the snapshot after this read; other bits E_BAD_ARG detail 0). Response: u16 n (<= 128; 64 before 0.2.15), u16 0,
@@ -452,7 +456,7 @@ entries (the events before the first bus reset since the snapshot was armed). 0.
 (a = bRequest, b = bmRequestType << 8 | wValue low), 6 EP0 packet not 8 bytes (b = COUNT0), 7 SET_CONFIGURATION,
 8 CLEAR_FEATURE(HALT) (a = endpoint), 9 DTR (a = new DTR), 10 RX ring full, 11 RX release, 12 TX flushed, 13 TX
 aborted, 14 retired since 0.2.21 (0.2.12-0.2.20: flags found by the tick, a = INTUSB, b = INTTX << 8 | INTRX; at most one per 100 ms; 0.2.20: low 7 bits each as read, bit 15 EP0 condition, bit 7 EP2 OUT condition), 15 restart
-(0.2.19, section 10).
+(0.2.19, section 10), 20 USB soft disconnect (0.2.49, section 27; a = reason | level << 2 | suspends << 4, b = s suspended). Type 3 since 0.2.49: a bit 7 = inferred, bits 6-5 = cause (0 SOFs, 1 EP0 setup, 2 EP2 OUT; 3 = the 0.2.44-0.2.48 encoding), bits 4-0 = POWER bits 4-0.
 
 ## 13. Boot, splash and SD package
 
@@ -1135,3 +1139,126 @@ pc_cmds.c link stats, pc_cmds.h version); expect conflicts only in pc_cmds.h (ve
 On any restart: GET_LINK_STATS 49-59 and `map_addr.py <0.2.48 ELF> --restart v49..v56`; 58 / 59 give the fault
 status and address of a data abort (FS 0x5 / 0x7 translation, 0x9 / 0xB domain, 0xD / 0xF permission: none can come
 from this table; 0x1 / 0x3 alignment; 0x8 / 0xA external abort).
+
+## 27. fw-usb2: USB suspend watch, inferred resume, soft reconnect (fw 0.2.49, protocol 1.14)
+
+Branch `fw-usb2` from main 603761d. Commits: 3b50641 (protocol row 53, written first), c20b657 (pc_usbw.c/.h state
+machine + host_tests/test_usbw.c), 46d9817 (wiring in pc_transport.c, 1 ms tick, counters 60-61, type 20, ISR order,
+0.2.49 / 1.14), f3763cc (mcp names and decoding), 46f3db2 (cause codes 0-2), 46e473f (powercfg GUID fix in the guide
+and the skill), e77785c (long-rule back-off), a1d5e8f / c477faa (CHANGELOG). Image from c477faa (GCC 10):
+`firmware/scope/build-gcc10-pc/fnirsi_1013d.bin`, 483,840 B, sha256
+90f460d6f8e419d04de499547c0292b0a3c96a3c7b35c2b43a36691d3d1f8588; A/B `build-gcc10-nommu` (`#VER fw=0.2.49-nommu`)
+sha256 f5f377ea5befe01794ca85114734da06cf172de7c92d691306574b0d93055f79. Not pinned in backups/ (worktree agent).
+**Nothing benched.** Host tests all green (test_usbw 90 checks, test_session 68937 / 68935, test-arm identical); mcp
+pytest 360 passed, ruff (CI selection) clean.
+
+**The case** (docs/hardware-status.md 2026-10-19, coordinator's brief): fw 0.2.48-nommu, port closed 08:40-10:20, at
+10:20 no 1209:0001, no re-enumeration, no FEL device, screen alive; replug fixed it; afterwards counters 36 / 37 / 49 =
+17 / 0 / 0. Overnight on 0.2.44 (backups/night_log_20261018.jsonl, decoded): 53 reopens after 10 min idle, counter 36
+stayed 1 (the boot suspend: type 2 a = 0x60 b = 0 at 712 ms, bus reset a = 1 b = 127 ms, SET_CONFIGURATION), so this
+host does not suspend an idle closed port within 10 min; fw-gen6's "Windows never suspends the device" (section 22)
+holds only for short idles. **Counter 37 has been 0 on every build and bench since 0.2.5** (docs/hardware-status.md
+0.2.5, 0.2.11, 0.2.43 entries): a RESUME interrupt has never been observed on this controller.
+
+**Audit** (facts from the code and the logs, inferences marked)
+- INTUSBE is written once, in `usb_device_enable`: SUSPEND | RESUME | RESET | DISCONNECT = 0x27 (type 19 field 1 at
+  boot reads b = 0x270F: INTUSBE 0x27, CCU flags 0x0F). Only `usb_device_disable` clears it (MSC switch, ENTER_FEL).
+  No other code reads INTUSB since the tick fallback went in 0.2.21, so nothing else can consume the RESUME flag; the
+  Allwinner INTUSB is write-1-to-clear (the ISR writes the bit back, like Linux `sunxi_musb_interrupt`; the Mentor guide
+  says read-to-clear). Neither the DTR state nor the 0.2.44 "suspend is a state" change masks anything: EP0 is served
+  entirely in the ISR, the main loop kept running; a missed RESUME only left `pc_usb_suspended` set, i.e. DTR read 0 to
+  the session until the main-loop frame check (every 20 ms, stopped while a menu is modal) logged the inferred resume.
+- POWER: EnableSuspendM (bit 0) cleared at enable, so SUSPENDM is never driven and the PHY is never put in suspend
+  (MUSB guide musbmhdrc_pspgUSB.pdf 8.4.4 / 10.1: SUSPENDM low only if enabled; POWERDWN "may be used to stop CLK",
+  nothing here does). No CCU or PHY register is touched on suspend. PHYCTL low 16 bits after init 0x2B80 (type 19 field
+  6; = the last tuning write's address 0x2B, data bit 7): the SIDDQ positions Linux phy-sun4i-usb uses on newer SoCs
+  (bit 3 A83T, bit 1 H3; from memory, not in research/notes) are 0 and nothing writes PHYCTL later. Same as Linux
+  musb + sunxi glue, which handle suspend / resume in software only (section 22).
+- MUSB guide, Power D1 SuspendMode: "In Peripheral mode, this bit is set on entry into Suspend mode. It is cleared when
+  the CPU reads the interrupt register"; IntrUSB D1 Resume: "Set when Resume signaling is detected on the bus while the
+  MUSBMHDRC is in Suspend mode". Type 2 logs POWER read after the ISR read INTUSB: a = 0x60 (bit 1 clear), consistent
+  with the first sentence. **Inference, unverified:** if on this core that read also ends the core's suspend state,
+  resume signalling never arrives "while in Suspend mode" and RESUME can never fire, which matches 37 = 0 everywhere.
+  Linux reads IntrUSB the same way on every MUSB platform and gets RESUME there, so it is not generic MUSB behaviour; an
+  Allwinner difference is possible. Only a bus trace or the log of a real resume (bench plan B / C below) decides.
+- The frame number (FRNUM, 11 bits) only changes with received SOFs: frozen while suspended, moving again once the host
+  resumes (or after a reset + enumeration). That makes it a safe resume detector.
+- What "17 suspends, 0 resumes" can mean: every suspend after the first needs the bus to have become active again, so
+  between them the host either (a) resumed and the core resumed silently (0.2.44+ logs type 3 with a bit 7: count them
+  in the 10:20 log), (b) resumed, the device failed to come back and Windows reset the port (type 1 a = 1, b = suspend
+  length, often 65535; counter 35 grows with 36), or (c) reset the port for another reason (type 1 a = 1 with b of a few
+  ms: the HS reset's SE0 is first seen as 3 ms idle). The end state (device not listed, not even unknown) means the host
+  stopped talking to the port; the only way back without a replug is a connect change, hence the soft reconnect. **The
+  decoded 10:20 GET_EVENT_LOG was not available when this was written**; read it against (a)-(c) and check whether
+  the watch's rules would have fired (below).
+
+**What 0.2.49 does** (pc_usbw.h has the full rationale; protocol row 53)
+- `pc_usbw` (pure C, no registers) holds the suspend state; `pc_transport.c` feeds it SUSPEND / RESUME / RESET /
+  DISCONNECT / SET_CONFIGURATION / EP0 setup / EP2 OUT / DTR up, and `pc_usb_watch_tick` runs it from the 1 ms timer
+  interrupt (`pc_glue_poll_isr`, before `pc_ready`, also during modal menus). IRQs do not nest, so the ISR-side state
+  needs no locking; the tick only touches POWER (byte RMW), FRNUM and, via `pc_usb_isr_link`, EP2 (EPIND saved).
+- Inferred resume: frame number != the one at the suspend, or an EP0 setup / EP2 OUT packet while suspended. Acts like
+  RESUME (EP2 OUT unmasked if configured, `usb_connect` = 1, DTR reads as stored again), counter 60, type 3 a = 0x80 |
+  cause << 5 | POWER bits 4-0. Cannot fire during a suspend: no SOF and no packet exists on a suspended bus.
+- Soft reconnect: POWER SoftConn off (D+ pull-up released, link reset like a bus reset, type 20), 1000 ms, on. Windows
+  then sees unplug + plug and enumerates afresh (same descriptors and serial, same COM port). Rules, both only while the
+  frame number stayed frozen since the last suspend:
+  - storm: >= 3 suspends since the last proof of life (SET_CONFIGURATION, RESUME, inferred resume), then 10 s quiet,
+    doubling per storm reconnect without a SET_CONFIGURATION (cap 640 s). A plug-in bounce (six suspends in 1 ms, then
+    the host enumerates) and the port-reset lead-in (one suspend, then RESET) never get there: SET_CONFIGURATION clears
+    the strikes. A charger-only cable costs one reconnect (the reconnect clears the strikes).
+  - long: suspended 15 min after a SET_CONFIGURATION; once per enumeration; 15 min x 2^n where n counts long
+    reconnects since the last DTR 0 -> 1 (cap 8 h). Cannot be told apart from a legitimate long suspend (PC asleep, or
+    Windows selective suspend of a closed idle port): then it costs one re-enumeration per period, with the port closed.
+    It cannot fire on an open port while the PC is awake (the host polls bulk IN, the bus is never idle).
+  - A SoftConn found clear without a watch disconnect (MSC switch, ENTER_FEL) stops the watch; `usb_device_init`
+    (`pc_transport_reset`) re-initialises it, keeping counters 60-61.
+- CDC ISR: SUSPEND is handled before RESUME when both are pending (1.00o5 did RESUME first and stayed suspended).
+
+**Risks** (inference): (1) a reconnect while the PC sleeps could wake it if Windows arms wake-on-connect for the root
+port (modern standby); signature: the PC wakes about 15 min after going to sleep with the port closed. Then raise
+PC_USBW_LONG_MS or drop the long rule and rely on the storm rule. (2) Windows' "device connected" sound at each
+reconnect while idle with selective suspend on (15, 30, 60 ... min). (3) The storm rule misses a host that gives up
+after fewer than 3 suspends without having enumerated the device since the last reconnect (long rule disarmed);
+lower PC_USBW_STORM_SUSPENDS if the log shows that.
+
+**Also found:** docs/agent-measurement-guide.md section 8 and the fnirsi-scope skill gave the selective-suspend
+setting as 48e6b7a6-50f5-4782-a5d4-53bb**50f7e206**; the right GUID is ...-53bb**8f07e226** (soak.py, section 11).
+If the owner used the guide's command on 2026-10-18, the setting never changed; `fnirsi1013d-soak` prints the real state.
+
+**Bench plan** (coordinator + owner; FEL load only; record `powercfg /query SCHEME_CURRENT
+2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226` before and restore it after)
+0. Load: `sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000` (sha256 90f460d6...). Expect
+   `#VER fw=0.2.49,proto=1.14`, GET_LINK_STATS n = 62 with 60 = 61 = 0, the boot events as on 0.2.44 (type 2, type 1
+   a = 1 b ~ 130 ms, type 7) and no type 20. One `fnirsi1013d-bench` pass: as 0.2.48 (no new tx_aborts, no resets).
+1. Selective suspend on, deliberately, PC kept awake (sleep timeout never; screen off allowed):
+   `powercfg /setacvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 1`,
+   the same with `/setdcvalueindex`, then `powercfg /setactive SCHEME_CURRENT`. Run
+   `fnirsi1013d-soak --mode reopen --idle 1800 --rounds 3`. Per round, expect one of:
+   A. no host suspend (36 unchanged, no type 2): selective suspend does not reach usbser's idle device; go to 2.
+   B. suspend then a silent resume at the reopen: type 2, then type 3 with a bit 7 and bits 6-5 = 0 (SOFs) or 1 (EP0),
+      counter 60 +1, 37 +0, 35 +0, reopen fine without a bus reset. Resume works electrically; only the interrupt is
+      missing (that is all 0.2.44 lacked, apart from the modal-menu gap).
+   B'. the same with a bit 7 clear and 37 +1: RESUME fires after all (contradicts every earlier bench; report it).
+   C. resume fails, Windows resets: type 2, type 1 a = 1 b = 65535 (or the suspend's ms), type 7, 35 +1, reopen fine
+      after 1-3 s. The core cannot come back from suspend; the watch then matters only when Windows gives up.
+   D. still suspended 15 min after the suspend: type 20 with a bits 1-0 = 2, b ~ 900 s, 61 +1, then within ~2 s type 1
+      a = 0 and type 7 (fresh enumeration), Windows' unplug / plug sound, COM10 back; the reopen at the round's end is
+      fine and resets the long back-off. At most one type 20 per 30-min round.
+2. Two hours idle, port closed, selective suspend still on, PC awake: `fnirsi1013d-soak --mode reopen --idle 7200
+   --rounds 1`. If the host suspends: type 20 (reason 2) about 15, 45 and 105 min after the first suspend (15 + 30 + 60),
+   each followed by type 1 a = 0 and type 7; reopen fine; 61 <= 3. Then (owner's call) once with the PC put to sleep
+   for >= 20 min with the port closed: on wake the device comes back by itself (type 1 / 7 after the wake; 61 +0 or +1
+   during the sleep). The PC waking by itself ~15 min into the sleep = risk (1).
+3. Restore the power setting recorded at the start.
+**Failure signatures:** port gone and 61 unchanged = no rule fired: look for a type 3 bit 7 right before (frames moved,
+so the host was alive and the loss is something else) or a reset with < 3 suspends and no SET_CONFIGURATION after it
+(risk 3). Type 20 reason 1 repeating = the host keeps failing enumeration: read the type 5 / 6 setups between them. A
+type 20 while a port was open, or counter 61 rising in a normal bench session = the frame check is wrong (report the
+type 2 / 3 / 20 sequence). Counter 49 > 0 = restart: map with the 0.2.49 ELF (section 10). After any failure: replug,
+then GET_EVENT_LOG (with the bus ring) and GET_LINK_STATS before anything else.
+
+**Next** (for whoever picks this up): decode the 10:20 log against (a)-(c) above and against the two rules; if it is
+(a) only, 0.2.49 already fixes the session side and the loss needs another explanation; if (b) / (c), the soft
+reconnect is the recovery, and the resume path itself remains a candidate for a bus trace (a USB analyser, or Linux
+usbmon on the host side with `echo auto > power/control` to force a selective suspend of the port).

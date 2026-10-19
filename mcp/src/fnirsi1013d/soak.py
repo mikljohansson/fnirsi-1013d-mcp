@@ -41,7 +41,7 @@ from .transport import (PIDCODES_TEST_PIDS, PIDCODES_VID, Link, Transport, Trans
 #: counters whose deltas tell what happened on the USB side
 WATCH = ("link_resets", "dtr_up", "dtr_down", "usb_bus_resets", "usb_suspends", "usb_resumes", "usb_disconnects",
          "ep0_setups", "ep0_bad_setups", "rx_stalls", "hdr_crc_errors", "payload_crc_errors", "rx_timeouts",
-         "restarts")
+         "restarts", "usb_inferred_resumes", "usb_soft_reconnects")
 #: counters 47 and 57, retired in fw 0.2.21 (always 0 there; kept so decoders by count work): a delta is reported
 #: as a firmware older than 0.2.21
 RETIRED = ("usb_irq_polled", "usb_irq_races")

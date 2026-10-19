@@ -223,6 +223,10 @@ void     pc_hal_restart_info(uint32_t *v);           //fw 0.2.17: ms spent on th
 //prefetch abort, else 0), fault address (FAR, data abort only, else 0)
 #define PC_FAULT_COUNT    2
 void     pc_hal_fault_info(uint32_t *v);
+//fw 0.2.49: USB suspend watch (pc_usbw.h), GET_LINK_STATS 60-61: resumes inferred without a RESUME interrupt, soft
+//reconnects
+#define PC_USBW_COUNT     2
+void     pc_hal_usb_watch(uint32_t *v);
 uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total);
 int32_t  pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms, int rearm);   //-1 = none frozen; rearm clears it
 uint32_t pc_hal_event_bus(uint8_t *dst, uint32_t *total);      //fw 0.2.24: bus-level ring (<= 16 entries), *total since boot
