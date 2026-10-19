@@ -188,6 +188,14 @@
       "h": 480,
       "title": "Spectrum, Display fold-out",
       "is_interactive": true
+    },
+    "ScopeOverview.dc.html": {
+      "x": 4400,
+      "y": 0,
+      "w": 800,
+      "h": 480,
+      "title": "Scope, deep record zoomed in: the slider overview (slider-overview.md)",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -242,6 +250,7 @@
     "ScopeCtrlDisplay.dc.html",
     "AcqMenu.dc.html",
     "Phosphor.dc.html",
+    "ScopeOverview.dc.html",
     "MainMenu.dc.html",
     "Spectrum.dc.html",
     "SpectrumCtrl.dc.html",

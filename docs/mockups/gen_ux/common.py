@@ -252,10 +252,86 @@ def scope_plot(warning="CH1 overrange: increase V/div"):
     return "\n".join(o)
 
 
-def slider_row():
-    """record-position slider under the grid (menu.c: rect 2,452,726,20; position box 181 x 14 at y 455)"""
-    return (box(2, 452, 726, 20, f"border: 1px solid {LG1}") +
-            box(275, 455, 181, 14, f"border: 1px solid {LG2}"))
+# ---------------------------------------------------------------- the slider row and its overview (docs/plans/slider-overview.md)
+# Frame rect 2, 452, 726 x 20 (x 2..727, y 452..471); track x 4..723 (720 columns, TBV_SLIDER_X / _W); the window a
+# 14 px rect at y 455..468. The overview takes the twelve rows y 456..467 inside the window's top and bottom lines, one
+# column per track pixel: dimmed outside the window, full colour inside it; the window is drawn last, over it.
+OV_X, OV_W, OV_Y, OV_ROWS = 4, 720, 456, 12
+WIN_Y, WIN_H = 455, 14
+DIM = {CH1: "#808000", CH2: "#008080"}     # the channel colours at half intensity (outside the window)
+OV_FLAG = "#707070"                         # bode_view.c FLAG_COLOR: a flagged Frequency response point
+
+
+def ov_row(frac):
+    """the overview row of a fraction 0 (top of the plot) .. 1 (bottom), clipped to the twelve rows"""
+    return max(OV_Y, min(OV_Y + OV_ROWS - 1, OV_Y + int(frac * OV_ROWS)))
+
+
+def ov_line_runs(pts):
+    """a line through (x, row) points as one vertical run per column (r0 <= r1), the way the firmware joins a trace:
+    each column from the previous column's row to its own"""
+    runs = {}
+    for (xa, ra), (xb, rb) in zip(pts, pts[1:]):
+        prev = ra
+        for x in range(xa, xb + 1):
+            r = round(ra + (rb - ra) * (x - xa) / (xb - xa)) if xb != xa else rb
+            lo, hi = min(prev, r), max(prev, r)
+            if x in runs:
+                lo, hi = min(lo, runs[x][0]), max(hi, runs[x][1])
+            runs[x] = (lo, hi)
+            prev = r
+    return sorted((x, a, b) for x, (a, b) in runs.items())
+
+
+def ov_svg(win_x, win_w, layers):
+    """layers drawn in order, each (full colour, dim colour, [(x, r0, r1), ...]): a column inside the window
+    (win_x <= x < win_x + win_w) in the full colour, outside it dimmed; equal neighbouring columns merge into one rect"""
+    rects = []
+    for full, dimc, runs in layers:
+        cur = None
+        for x, r0, r1 in sorted(runs) + [(None, None, None)]:
+            col = None if x is None else (full if win_x <= x < win_x + win_w else dimc)
+            key = (r0, r1, col)
+            if cur and x is not None and key == cur[1] and x == cur[0] + cur[2]:
+                cur[2] += 1
+                continue
+            if cur:
+                cx, (a, b, c), n = cur
+                rects.append(f'<rect x="{cx}" y="{a - 452}" width="{n}" height="{b - a + 1}" fill="{c}"></rect>')
+            cur = [x, key, 1] if x is not None else None
+    return ('<svg width="730" height="20" viewBox="0 0 730 20" aria-hidden="true" shape-rendering="crispEdges" '
+            f'style="position: absolute; left: 0; top: 452px">{"".join(rects)}</svg>')
+
+
+def slider_row(win_x=190, win_w=347, layers=()):
+    """the record-position slider under the grid (menu.c: rect 2,452,726,20; fw 0.2.64 tbv_slider window, 14 px at
+    y 455) with the overview in the track. The Scope boards' window: 3000 samples at 500 kSa/s, 200 us/div, the trigger
+    at the record's middle on the centre line: first sample 776 -> x 190, 1449 samples on screen -> 347 px"""
+    return (box(2, 452, 726, 20, f"border: 1px solid {LG1}") + (ov_svg(win_x, win_w, layers) if layers else "") +
+            box(win_x, WIN_Y, win_w, WIN_H, f"border: 1px solid {LG2}"))
+
+
+def scope_square_overview(chans, total=3000):
+    """the record's min / max envelope for the Scope boards' 1 kHz square (rising edges at record samples 500 k,
+    falling at 500 k + 250; on the plot x = (sample - 776) / 2, EDGES above). chans: [(colour, zero_y, px_per_v)] in
+    drawing order (CH2 first, CH1 over it, as the traces). Each column covers total / 720 samples plus the previous
+    column's last one (so the columns join); its min and max go
+    through the plot's own y mapping (screen y 49..448, clipped as scope_get_y_sample clips) to the twelve rows"""
+    layers = []
+    for colour, zero, ppv in chans:
+        hi, lo = max(1.0, zero - 1.87 * ppv), zero + 1.19 * ppv
+        runs = []
+        for c in range(OV_W):
+            s0, s1 = c * total / OV_W, (c + 1) * total / OV_W
+            # the previous column's last sample joins the columns: a step shows as a vertical
+            ys = {hi if (k % 500) < 250 else lo for k in range(int(s0) - 1, int(s1) + 1) if (s0 - 1 <= k < s1) and k >= 0}
+            r = [ov_row((v + GY - 49) / 400.0) for v in ys]
+            runs.append((OV_X + c, min(r), max(r)))
+        layers.append((colour, DIM[colour], runs))
+    return layers
+
+
+SCOPE_OVERVIEW = [(CH2, CH2_ZERO, 50.0), (CH1, CH1_ZERO, 100.0)]
 
 
 def cards(items, xstart, color, digit=None):
@@ -284,7 +360,8 @@ CH2_CARDS = [("Vpp", "3.06V"), ("Freq", "1.000kHz"), ("+Width", "500us")]
 
 def scope_view(warning="CH1 overrange: increase V/div", right=None, menu_active=False, acq_active=False):
     return "\n".join([topbar(menu_active=menu_active, acq_active=acq_active), scope_plot(warning),
-                      cards(CH1_CARDS, 5, CH1, "1"), cards(CH2_CARDS, 366, CH2, "2"), slider_row(),
+                      cards(CH1_CARDS, 5, CH1, "1"), cards(CH2_CARDS, 366, CH2, "2"),
+                      slider_row(layers=scope_square_overview(SCOPE_OVERVIEW)),
                       right if right else rightbar_actions()])
 
 

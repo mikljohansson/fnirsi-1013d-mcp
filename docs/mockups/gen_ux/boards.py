@@ -272,8 +272,62 @@ def phosphor_strip():
 if want("Phosphor"):
     body = "\n".join([topbar(ch1_vdiv="1V/div", ch2_on=False), phosphor_plot(),
                       cards([("Vpp", "3.06V"), ("Freq", "1.000kHz"), ("+Duty", "50.0%")], 5, CH1, "1"), cards([("wfm/s", "55")], 366, "#a0a0a0"),
-                      slider_row(), rightbar_actions()])
+                      slider_row(layers=scope_square_overview([(CH1, 201.0, 50.0)])), rightbar_actions()])
     write("Phosphor.dc.html", "Phosphor view", body)
+
+
+# ================================================================ ScopeOverview: a deep record zoomed in (slider-overview.md)
+def pi_board():
+    """a pulse-induction coil on CH1 (1 V/div), the TX gate on CH2 (2 V/div, the trigger: its falling edge at the
+    record's middle on the centre line). 15000 samples at 5 MSa/s = 3 ms, three TX pulses of 100 us at 1 kHz; 10 us/div
+    shows 725 samples, so the window is 35 px at x 347 and the overview shows the other two pulses"""
+    total, first, fs_us = 15000, 7138, 0.2
+    ends = [2500, 7500, 12500]            # TX off (the gate's falling edge); on 500 samples (100 us) before
+
+    def gate(s):
+        return 5.0 if any(e - 500 <= s < e for e in ends) else 0.0
+
+    def coil(s):
+        if any(e - 500 <= s < e for e in ends):
+            return -0.6
+        past = [e for e in ends if s >= e]
+        if not past:
+            return 0.0
+        t = (s - past[-1]) * fs_us
+        return 120.0 * math.exp(-t / 6.0) + 0.4 * math.exp(-t / 40.0)
+
+    chans = [(CH2, gate, 380.0, 25.0), (CH1, coil, 201.0, 50.0)]
+
+    def rel_y(fn, zero, ppv, s):
+        return max(1.0, min(GH - 3.0, zero - fn(s) * ppv))
+
+    extra = ""
+    for colour, fn, zero, ppv in chans:
+        pts = " ".join(f"{x},{rel_y(fn, zero, ppv, first + x):.1f}" for x in range(0, GW))
+        extra += f'<polyline points="{pts}" fill="none" stroke="{colour}" stroke-width="2"></polyline>'
+    extra += pointers(201, 380, 380 - 62)
+    plot = box(GX, GY, GW, GH, "", scope_grid_svg(extra))
+    layers = []
+    for colour, fn, zero, ppv in chans:
+        runs = []
+        for c in range(OV_W):
+            ys = [rel_y(fn, zero, ppv, k) for k in range(max(0, c * total // OV_W - 1), (c + 1) * total // OV_W)]
+            runs.append((OV_X + c, ov_row((min(ys) + GY - 49) / 400.0), ov_row((max(ys) + GY - 49) / 400.0)))
+        layers.append((colour, DIM[colour], runs))
+    win_x = OV_X + first * OV_W // total
+    win_w = round(725 * OV_W / total)
+    tb = topbar(rate="5MSa/s", tb="10us/div", ch1_vdiv="1V/div", ch2_vdiv="2V/div")
+    old_trig = box(35, 19, 28, 14, "background: #cccc00; border-radius: 2px", text(2, -1, "CH1", 13, "#000000"))
+    assert tb.count(old_trig) == 1
+    tb = tb.replace(old_trig, box(35, 19, 28, 14, "background: #00cccc; border-radius: 2px",
+                                  text(2, -1, "CH2", 13, "#000000")))
+    return "\n".join([tb, plot, warning_box("CH1 overrange: increase V/div"),
+                      cards([("Freq", "1.000kHz"), ("+Width", "100.0us")], 366, CH2, "2"),
+                      slider_row(win_x, win_w, layers), rightbar_actions()])
+
+
+if want("ScopeOverview"):
+    write("ScopeOverview.dc.html", "Scope view, deep record zoomed in", pi_board())
 
 # ================================================================ Spectrum (spectrum.c geometry)
 SX, SY, SW, SH = 6, 50, 720, 352   # 10 x 8 divisions of 72 x 44; the slider row under it (owner, 19:40)
@@ -342,10 +396,26 @@ def spectrum_slider(start_khz=0.0, span_khz=SPAN_KHZ, nyq_khz=NYQ_KHZ):
     """the Scope's slider row (menu.c: rect 2,452,726,20; the window box 14 px high at y 455) with the shown span as a
     window over 0..fs/2: left edge at start / (fs/2), width span / (fs/2) of the 720 px inside the track; dragging it
     pans the centre, the span stays (owner)"""
-    x0 = 5 + start_khz / nyq_khz * 720
-    w = max(span_khz / nyq_khz * 720, 12)
-    return (box(2, 452, 726, 20, f"border: 1px solid {LG1}") +
-            box(round(x0), 455, round(w), 14, f"border: 1px solid {LG2}"))
+    x0 = OV_X + start_khz / nyq_khz * OV_W
+    w = max(span_khz / nyq_khz * OV_W, 8)
+    return slider_row(round(x0), round(w), [(CH1, DIM[CH1], spectrum_overview(nyq_khz))])
+
+
+def spectrum_overview(nyq_khz):
+    """the overview (docs/plans/slider-overview.md): the spectrum the FFT already holds over the whole axis 0..fs/2,
+    one column per track pixel taking the highest bin it covers (spec_columns over all bins), on the plot's own
+    ref level and dB per division squeezed into the twelve rows; drawn as a line, as the trace"""
+    ref, scale = 10.0, 10.0
+    rnd = random.Random(11)
+    pts = []
+    for c in range(OV_W):
+        f0, f1 = c * nyq_khz / OV_W, (c + 1) * nyq_khz / OV_W
+        lv = -66.0 + rnd.uniform(-2.5, 2.5)
+        for n in range(0, int(nyq_khz), 1):
+            if (n == 0 or n % 2) and f0 <= n < f1:
+                lv = max(lv, -9.4 if n == 0 else 2.7 - 20 * math.log10(n))
+        pts.append((OV_X + c, ov_row((ref - lv) / (8 * scale))))
+    return ov_line_runs(pts)
 
 
 def spectrum_view(right):
@@ -604,7 +674,7 @@ if want("ScopeCtrlDisplay"):
             frow(8, 292, pw - 16, "Clear")]
     tb = topbar(ch1_vdiv="1V/div", ch2_on=False)
     body = "\n".join([tb, phosphor_plot(), cards([("Vpp", "3.06V"), ("Freq", "1.000kHz"), ("+Duty", "50.0%")], 5, CH1, "1"), cards([("wfm/s", "55")], 366, "#a0a0a0"),
-                      slider_row(), ctrl_scope(active="display", phosphor=True),
+                      slider_row(layers=scope_square_overview([(CH1, 201.0, 50.0)])), ctrl_scope(active="display", phosphor=True),
                       foldout_panel(px, py, pw, 344, "Display", "".join(rows))])
     write("ScopeCtrlDisplay.dc.html", "Scope controls, Display", body)
 
