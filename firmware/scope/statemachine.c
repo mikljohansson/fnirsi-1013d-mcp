@@ -990,12 +990,33 @@ void scan_for_touch(void)
 void handle_main_menu_touch(void)
 {
   int   row;                            //fw 0.2.51: main menu row under the touch (ui_menu.h), -1 outside
-  
+  int   drag = 0;                       //fw 0.2.63: the brightness slider a touch started on (1 screen, 2 grid), 0 none
   //Stay in the menu as long as there is no touch outside the menu
   while(1)
   {
     //Scan the touch panel for touch
     tp_i2c_read_status();
+
+    //fw 0.2.63 (owner): a drag that starts on a brightness slider stays with it until the finger lifts. Before, every
+    //touch sample was hit-tested afresh, so a finger drifting off the slider's box mid-drag counted as a tap outside
+    //(the fold-out closed) or on a main-menu or fold-out row
+    if(!havetouch)
+      drag = 0;
+    else if(drag == 1)
+    {
+      if(scope_move_slider(395, 46, &scopesettings.screenbrightness))
+      {
+        scope_system_settings_screen_brightness_value();
+        fpga_set_translated_brightness();
+      }
+      continue;
+    }
+    else if(drag == 2)
+    {
+      if(scope_move_slider(395, 104, &scopesettings.gridbrightness))
+        scope_system_settings_grid_brightness_value();
+      continue;
+    }
 
     //Check if there is touch
     if(havetouch)
@@ -1401,6 +1422,8 @@ void handle_main_menu_touch(void)
       //Check on screen brightness slider opened and being touched
       else if(screenbrightnessopen && (xtouch >= 395) && (xtouch <= 726) && (ytouch >= 46) && (ytouch <= 104))
       {
+        drag = 1;
+
         //Move the slider to a new position and check if there was a change in position
         if(scope_move_slider(395, 46, &scopesettings.screenbrightness))
         {
@@ -1414,6 +1437,8 @@ void handle_main_menu_touch(void)
       //Check on grid brightness slider opened and being touched
       else if(gridbrightnessopen && (xtouch >= 395) && (xtouch <= 726) && (ytouch >= 105) && (ytouch <= 163))
       {
+        drag = 2;
+
         //Move the slider to a new position and check if there was a change in position
         if(scope_move_slider(395, 104, &scopesettings.gridbrightness))
         {
