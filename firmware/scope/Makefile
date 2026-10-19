@@ -65,6 +65,8 @@ PC_MMU_SRAM  ?= 1
 SRCS += pc_protocol.c pc_cmds.c pc_transport.c pc_hal_scope.c fx_fft.c fx_fft_tables.c spectrum.c pc_decim.c phos_map.c phosphor.c pc_mmu.c
 # Calibration wizard: the steps (pure C, host_tests/test_cal_wizard.c) and the view with its measurements
 SRCS += cal_wiz.c cal_wiz_ui.c
+# Calibration v4: interleave tracking and the class probe (pure maths in acal_track.c, host_tests/test_acal_track.c)
+SRCS += acal_track.c acal_live.c
 # Last: the identity data (build_id.c), so its bytes are the only ones a new commit changes.
 SRCS += build_id.c
 PC_DEFS := -DPC_DEBUG=$(PC_DEBUG) -DPC_FORCE_CDC=$(PC_FORCE_CDC) -DPC_FIFO_MAP=$(PC_FIFO_MAP) \

@@ -5,6 +5,7 @@
 #include "timer.h"
 #include "variables.h"
 #include "pc_hooks.h"
+#include "acal_live.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -779,6 +780,9 @@ void fpga_channel_correction(PCHANNELSETTINGS settings, acal_corr *c)
 
   acal_correction(cal, settings->dc_calibration_offset, settings->samplevoltperdiv, fpga_divider, settings->dcoffset,
                   settings->dc_shift_value, settings->adc1compensation, settings->adc2compensation, c);
+
+  //Calibration v4 (CH1 / CH2, v3 bound): the full-class common mode and the tracked A - B split (acal_live.c)
+  acal_live_apply(settings, c);
 }
 
 void fpga_prepare_correction(PCHANNELSETTINGS settings)
@@ -786,6 +790,7 @@ void fpga_prepare_correction(PCHANNELSETTINGS settings)
   acal_corr c;
 
   fpga_channel_correction(settings, &c);
+  acal_live_prepared(settings, &c);
 
   settings->gain_a  = (int32)c.gain_a;
   settings->gain_b  = (int32)c.gain_b;
@@ -802,6 +807,7 @@ void fpga_prepare_correction(PCHANNELSETTINGS settings)
 void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
 {
   uint32 threshold;
+  uint32 wide;
   
   //Clear min and max and average for new calculations
   settings->min     = 0x7FFFFFFF;
@@ -819,6 +825,7 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
   //converted samples already carry the full correction (gain16, corr16), so unity gain, no offset, no dither (the
   //dither's top 16 bits never carry into a whole code) and no rail rule on top
   pc_glue_decim_read(settings, triggerpoint);
+  wide = (pc_decim_src != 0);
 
   if(pc_decim_src)
   {
@@ -937,6 +944,9 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
   
   //Calculate the signal center
   settings->center = (settings->max + settings->min) / 2;
+
+  //Calibration v4: an 8-bit full-class record of CH1 / CH2 to the A - B tracker
+  acal_live_record(settings, wide);
   
   //===================================
   /*

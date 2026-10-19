@@ -481,11 +481,13 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
   return 44;
 }
 
-//Correction for the channel's current settings (adc_cal.h): calibration data v3 when loaded and bound
+//Correction for the channel's current settings (adc_cal.h): calibration data v3 when loaded and bound, with the v4
+//tracking folded in exactly as the readout does it (acal_v4_apply; protocol row 53)
 static void pc_channel_corr(const pc_hw_channel *c, acal_corr *k)
 {
   acal_correction(c->cal2_loaded ? &c->cal2 : 0, c->cal_offset, c->range, c->divider, c->dcoffset, c->dc_shift_value,
                   c->adc_a_comp, c->adc_b_comp, k);
+  acal_v4_apply(&c->trk, &c->cm, k);
 }
 
 //uV per code x 256 at the BNC with a 1x probe, and the processed code of 0 V x 256 (P-8.5, protocol 1.10+: the v2 / v3
@@ -1770,7 +1772,7 @@ static int h_set_gen(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
   return PC_OK;
 }
 
-#define PC_CAL_RESP_LEN 256     //72 bytes up to 1.9, 248 in 1.10-1.11 (v2), the v3 export from 1.12
+#define PC_CAL_RESP_LEN 288     //72 bytes up to 1.9, 248 in 1.10-1.11 (v2), 256 in 1.12-1.13 (v3), v4 tracking from 1.14
 
 static int h_get_cal(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
@@ -1826,6 +1828,35 @@ static int h_get_cal(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
 
   if(c.cal2_loaded)
     acal_pack_channel(&c.cal2, resp + 112);
+
+  //1.14: calibration v4 tracking (row 53). Bytes 84 and 92..107 above already include it
+  {
+    pc_decim_cfg dc;
+    int          written;
+    uint32_t     now = pc_hal_ms();
+    uint8_t      f   = (uint8_t)(c.trk.flags & (ACAL_TRK_DATA | ACAL_TRK_GAIN | ACAL_TRK_BOW | ACAL_TRK_LAST));
+
+    pc_hal_decim_current(&dc, &written);
+
+    if((k.version == 3) && (k.cls == ACAL_FULL) && (!written || !dc.k))
+      f |= 0x10;
+    if(c.cm.flags & ACAL_CM_DATA)
+      f |= 0x20;
+    if(c.cm.flags & ACAL_CM_LAST)
+      f |= 0x40;
+
+    resp[256] = f;
+    pc_put_u16(resp + 258, (uint16_t)c.trk.d_q8);
+    pc_put_u32(resp + 260, (uint32_t)c.trk.e_q24);
+    pc_put_u32(resp + 264, (uint32_t)c.trk.q_q24);
+    pc_put_u32(resp + 268, (c.trk.flags & ACAL_TRK_DATA) ? now - c.trk.last_ms : 0xFFFFFFFFu);
+    pc_put_u32(resp + 272, c.trk.records);
+    pc_put_u16(resp + 276, c.trk.last_pairs);
+    pc_put_u16(resp + 278, c.trk.spread16);
+    pc_put_u16(resp + 280, (uint16_t)c.cm.cm_q8);
+    pc_put_u16(resp + 282, c.cm.probes);
+    pc_put_u32(resp + 284, (c.cm.flags & ACAL_CM_DATA) ? now - c.cm.last_ms : 0xFFFFFFFFu);
+  }
 
   *rl = PC_CAL_RESP_LEN;
   return PC_OK;

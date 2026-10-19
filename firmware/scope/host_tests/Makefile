@@ -12,8 +12,8 @@ CFLAGS  := -std=c99 -O2 -g -Wall -Wextra -Werror -Wno-unused-function -I$(SRC) -
 VECTORS := ../../../docs/protocol-vectors.json
 
 PROTO_SRCS := $(SRC)/pc_protocol.c
-CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/adc_cal.c mock_hal.c
-CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/adc_cal.h $(SRC)/pc_protocol.h mock_hal.h test_util.h
+CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/adc_cal.c $(SRC)/acal_track.c mock_hal.c
+CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
 all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_phosphor $(OUT)/test_mmu

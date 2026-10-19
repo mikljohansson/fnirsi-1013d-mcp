@@ -3,6 +3,7 @@
 #include "menu.h"
 #include "test.h"
 #include "scope_functions.h"
+#include "acal_live.h"
 #include "statemachine.h"
 #include "touchpanel.h"
 #include "timer.h"
@@ -962,14 +963,6 @@ void scope_process_trigger(uint32 count)
     //index--;
     index=index+2;
   }
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-//Calibration wizard (cal_wiz_ui.c): called once after Done wrote a new calibration (zeros and / or gains). Empty for
-//now: the calibration v4 tracker reset goes here (acal_track); weak so that module can define it instead.
-__attribute__((weak)) void cal_wizard_committed(void)
-{
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -6311,6 +6304,9 @@ void scope_load_input_calibration_data(void)
 
     //Calibration data v2 (bytes 128.., outside the checksum): used per channel while bound to the 709 PWM centres
     adc_cal_loaded = (acal_unpack((uint8 *)buffer + ACAL_SECTOR_OFFSET, adc_cal) == ACAL_OK);
+
+    //Calibration v4 tracking starts from the stored values
+    acal_live_reset();
     }
     else
     {   

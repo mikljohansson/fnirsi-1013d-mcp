@@ -32,6 +32,7 @@
 #include "spectrum.h"
 #include "phosphor.h"
 #include "spec_fmt.h"
+#include "acal_live.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -118,6 +119,8 @@ void pc_hal_channel_read(int ch, pc_hw_channel *c)
   c->cal2_loaded     = adc_cal_loaded;
   c->divider         = fpga_divider;
   c->cal2            = adc_cal[ch ? 1 : 0];
+  c->trk             = acal_trk[ch ? 1 : 0];
+  c->cm              = acal_cms[ch ? 1 : 0];
 }
 
 void pc_hal_channel_write(int ch, const pc_hw_channel *c, uint8_t mask)
@@ -1884,6 +1887,7 @@ void pc_glue_ui_service(void)
   //Roll mode or a viewer ends the spectrum view and the phosphor view
   spectrum_service();
   phosphor_service();
+
 }
 
 void pc_glue_pass_mark(int n)
