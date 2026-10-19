@@ -1106,8 +1106,15 @@ static void spec_autoset_button(void)
   DISPLAYDATA save = displaydata;
 
   auto_shown = spec.active && spec.autostage;
-  display_set_screen_buffer((uint16 *)maindisplaybuffer);
-  scope_auto_set_button(0);
+
+  //Only on page one: on the CTRL page the slot holds Analyse (fw 0.2.53), in the waveform viewer Next wave; page one
+  //redraws the label when it returns
+  if((scopesettings.rightmenustate == 0) && !scopesettings.waveviewmode)
+  {
+    display_set_screen_buffer((uint16 *)maindisplaybuffer);
+    scope_auto_set_button(0);
+  }
+
   displaydata = save;
 }
 
