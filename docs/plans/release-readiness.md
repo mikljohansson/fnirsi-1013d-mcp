@@ -5,6 +5,11 @@ Read-through of `docs/releasing.md`, `tools/make_release_sd_package.py`, `.githu
 README "Getting started", against main 9cc599c (firmware 0.2.51, protocol 1.15). Written 2026-10-19. Nothing here has been
 applied; it is a list for the coordinator. Findings are numbered F1..; the tick list in section 4 refers to them.
 
+Update 2026-10-19 (release prep): F1 fixed in `docs/releasing.md`; F2 and F5 resolved by separate user-facing release notes
+(`docs/release-notes/X.Y.Z.md`, read by `release_meta.py`); F3 implemented (bitstreams committed under `fpga/al3/dist/`,
+attached by `release.yml`, `BITSTREAMS.md`); F6 has a dry-run path (`vX.Y.Z-rcN` tags); the README follows section 5. The tick
+list the coordinator uses is now `docs/plans/release-checklist.md`.
+
 Verdict: the workflow chain is coherent and the checker works (run on this tree: `release_meta.py --check-changelog` passes,
 `--tag v0.3.0` fails with exactly the three expected errors: firmware version 0.2.51, mcp version 0.1.0, no `[0.3.0]` section).
 What is not ready is mostly what an outside user meets: no way to get the FPGA bitstreams, a README that still describes the

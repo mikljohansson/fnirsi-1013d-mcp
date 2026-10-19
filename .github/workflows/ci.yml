@@ -125,3 +125,5 @@ jobs:
             --checker firmware/scope/host_tests/build/vector_check --vectors docs/protocol-vectors.json
       - name: CHANGELOG.md structure
         run: python3 .github/scripts/release_meta.py --check-changelog
+      - name: Committed FPGA bitstreams (fpga/al3/dist) against manifest.json and BITSTREAMS.md
+        run: python3 -I tools/bitstreams.py check
