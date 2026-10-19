@@ -25,8 +25,11 @@ void fpga_init(void)
 
 //fw 0.2.61: trace of the writes that set the ADC capture state (0x0D rate, 0x53 decimation mode, 0x56 FIR, 0x01 = 1
 //sampling reset) into the event log, type 22, with the caller (fpga_trace_who): the bench correlates a garbled full-rate
-//capture with the writes before it (firmware/AGENTS.md section 37)
+//capture with the writes before it (firmware/AGENTS.md section 37). fw 0.2.70: counted always (fpga_bus_note_write,
+//GET_LINK_STATS 64-66), logged as events only at trace level 1 (GET_EVENT_LOG flags bits 2:1): with the UI running every
+//conversion's 0x01 entry flooded the 128-entry ring within seconds
 uint8        fpga_trace_who = FPGA_WHO_UI;
+uint8        fpga_trace_level;
 static uint8 fpga_trace_cmd;
 
 static void fpga_trace(uint32 value)
@@ -35,7 +38,7 @@ static void fpga_trace(uint32 value)
 
   fpga_trace_cmd = 0;
 
-  if((c == 0x0D) || (c == 0x53) || (c == 0x56) || ((c == 0x01) && (value == 1)))
+  if(fpga_bus_note_write(c, value) && fpga_trace_level)
     pc_usb_log_fpga_write(c, (uint16)(((uint32)fpga_trace_who << 12) | ((value > 0xFFF) ? 0xFFF : value)));
 }
 

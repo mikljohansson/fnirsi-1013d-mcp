@@ -494,6 +494,20 @@ def build():
         "capture accepted garbled), 91 0x33 at boot 0xF6 (convention 1), 92 u32 bad 3, 96 u32 recovered 2, 100 u32 "
         "checked 1200",
         [decoded(CMDS["GET_HEALTH"], 66, hb, flags=FLAG_RESPONSE)])
+    ls = [0] * 68
+    ls[62:68] = [3, 2, 41, 7, 5803, 112]
+    lb = struct.pack("<HH", 68, 0) + struct.pack("<68I", *ls)
+    f = frame(CMDS["GET_LINK_STATS"], 67, lb, flags=FLAG_RESPONSE)
+    add("resp_get_link_stats_1_22", f, [],
+        "1.22 GET_LINK_STATS response (68 counters; 0..61 zero here): 62 full-rate captures bad 3, 63 recovered 2, "
+        "64 FPGA 0x0D rate writes 41, 65 0x53 / 0x56 filter writes 7, 66 0x01 = 1 sampling resets 5803, 67 full-rate "
+        "captures on 0x1538+ judged by their data after such a write 112",
+        [decoded(CMDS["GET_LINK_STATS"], 67, lb, flags=FLAG_RESPONSE)])
+    f = frame(CMDS["GET_EVENT_LOG"], 68, b"\x04")
+    add("req_get_event_log_fpga_trace_on", f, [ev_frame(CMDS["GET_EVENT_LOG"], 68, b"\x04")],
+        "1.22 GET_EVENT_LOG flags 0x04: the FPGA write trace (event type 22) on, snapshot kept; 0x02 off; "
+        "bits 2:1 = 3 is E_BAD_ARG. The response's u16 at byte 2 bit 0 says the trace is on",
+        [decoded(CMDS["GET_EVENT_LOG"], 68, b"\x04")])
 
     # 6. ASCII probe (section 10)
     add("ascii_ver", b"#VER\n", [{"event": "ascii", "line": "VER"}], "#VER probe")

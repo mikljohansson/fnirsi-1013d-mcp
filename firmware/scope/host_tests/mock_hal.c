@@ -210,6 +210,10 @@ void pc_hal_timebase_write(const pc_hw_timebase *t, int raw)
 
   mock.tb_writes++;
   mock.fpga_ops++;
+
+  //0x0D: on 0x1538+ a capture in flight may now carry 0x33 bit 0 (fpga_bus.h)
+  mock.fpga_rate_writes++;
+  mock.enc_written = 1;
 }
 
 void pc_hal_trigger_read(pc_hw_trigger *t) { *t = mock.trg; }
@@ -287,6 +291,10 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
   mock.enc_cur_bad = (uint8_t)(mock.enc_bad_arms != 0);
   if(mock.enc_bad_arms > 0)
     mock.enc_bad_arms--;
+
+  //The sampling reset clears 0x33 bit 0 and the record of rate / filter writes since the last one (fpga_bus.h)
+  mock.enc_written = 0;
+  mock.fpga_resets++;
 
   mock.arms++;
   mock.arm_pre = pre_words; mock.arm_total = total_words; mock.arm_auto = auto_timeout;
@@ -701,12 +709,32 @@ void     pc_hal_usb_watch(uint32_t *v) { v[0] = 7000; v[1] = 7001; }
 //Full-rate capture check: 0x33 per the last arm, counted as enc_heal_hw.c counts
 void     pc_hal_enc_state(pc_hw_enc *e) { *e = mock.enc; }
 void     pc_hal_enc_retry(void)         { mock.fpga_ops++; mock.enc_retries++; }
+int      pc_hal_enc_written(void)       { return mock.enc_written; }
+
+void pc_hal_fpga_writes(uint32_t *v)
+{
+  v[0] = mock.fpga_rate_writes;
+  v[1] = mock.fpga_filter_writes;
+  v[2] = mock.fpga_resets;
+}
+
+uint8_t pc_hal_fpga_trace(int set)
+{
+  if(set >= 0)
+    mock.fpga_trace = (uint8_t)(set != 0);
+
+  return mock.fpga_trace;
+}
 
 uint8_t pc_hal_enc_status(void)
 {
   mock.fpga_ops++;
   mock.enc_status_reads++;
   mock.enc.last33 = mock.enc_cur_bad ? mock.enc33_bad : EH_33_GOOD;
+
+  //A rate / filter write since the sampling reset can make one prediction miss: bit 0 sticky (fpga/al3/README.md section 8)
+  if(mock.enc_written)
+    mock.enc.last33 |= EH_33_FAILED;
   mock.enc.flags |= PC_ENCF_READ;
   return mock.enc.last33;
 }
@@ -718,6 +746,9 @@ void pc_hal_enc_note(uint8_t why, const eh_note *n)
   mock.enc_last_note = *n;
   mock.enc.checked++;
   mock.enc.bad += n->first;
+
+  if((why == EH_WHY_DATA) && (mock.enc.mode == EH_MODE_FLAG))
+    mock.enc.replaced++;
 
   if(!n->bad)
     mock.enc.flags &= (uint8_t)~PC_ENCF_GARBLED;

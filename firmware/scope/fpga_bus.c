@@ -134,3 +134,24 @@ int fpga_arm_reset(const fpga_arm_cfg *c)
   fpga_write_byte(0x00);
   return 0;
 }
+
+fpga_bus_writes fpga_bus_wr;
+
+int fpga_bus_note_write(uint8_t cmd, uint32_t value)
+{
+  if(cmd == 0x0D)
+    fpga_bus_wr.rate++;
+  else if((cmd == 0x53) || (cmd == 0x56))
+    fpga_bus_wr.filter++;
+  else if((cmd == 0x01) && (value == 1))
+  {
+    fpga_bus_wr.resets++;
+    fpga_bus_wr.since_reset = 0;
+    return 1;
+  }
+  else
+    return 0;
+
+  fpga_bus_wr.since_reset = 1;
+  return 1;
+}

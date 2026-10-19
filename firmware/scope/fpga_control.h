@@ -98,6 +98,7 @@ void   fpga_prepare_correction(PCHANNELSETTINGS settings);                //the 
 #define FPGA_WHO_PROBE  3         //v4 class probe (acal_live.c)
 #define FPGA_WHO_CHECK  4         //full-rate check's 0x0D re-write (enc_heal_hw.c)
 extern uint8 fpga_trace_who;
+extern uint8 fpga_trace_level;  //fw 0.2.70: 1 = every traced write as event 22, 0 = counted only (GET_EVENT_LOG flags)
 
 extern uint32 fpga_divider;     //last 0x0D value written (clock class of the zero correction)
 //fw 0.2.67, CAL_PROBE A/B tests of the sample readout (fpga_read_adc_data), both 0 normally: extra reads of the data port

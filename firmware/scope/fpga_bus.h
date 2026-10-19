@@ -75,6 +75,26 @@ typedef struct
 int  fpga_arm_reset(const fpga_arm_cfg *c);
 
 //----------------------------------------------------------------------------------------------------------------------------------
+// Writes that set the capture state (fw 0.2.70): 0x0D rate, 0x53 / 0x56 filter, 0x01 = 1 sampling reset. Counted
+// (GET_LINK_STATS 64-66; the per-write event 22 is a debug level since 0.2.70, fpga_trace_level in fpga_control.c), and
+// a rate or filter write after the last sampling reset is remembered: FPGA 0x1538+ read 0x33 bit 0 is sticky until the
+// next 0x01 = 1, and such a write can make one encode prediction miss (fpga/al3/README.md section 8), so the capture in
+// flight cannot be judged by it (bench 0x1538, fw 0.2.64: 112 of 5798 captures re-taken after host rate writes).
+
+typedef struct
+{
+  uint32_t rate;            //0x0D writes
+  uint32_t filter;          //0x53 and 0x56 writes
+  uint32_t resets;          //0x01 = 1 writes
+  uint8_t  since_reset;     //a 0x0D / 0x53 / 0x56 write since the last 0x01 = 1
+} fpga_bus_writes;
+
+extern fpga_bus_writes fpga_bus_wr;
+
+//Called with every completed write (command, value). 1 = one of the writes above (event 22 material)
+int  fpga_bus_note_write(uint8_t cmd, uint32_t value);
+
+//----------------------------------------------------------------------------------------------------------------------------------
 // Bus primitives: fpga_control.c / fpga_control.h on the scope, fpga_model.c in the host test
 
 #ifdef PC_HOST_TEST

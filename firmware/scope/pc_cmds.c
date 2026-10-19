@@ -809,9 +809,11 @@ static int h_get_battery(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //-> first pass after battery check, acquisition, touch handler, RTC. The last six are ms + 1, 0 = not reached),
 //USB events (fw 0.2.5: bus resets, suspends, resumes, disconnects, EP0 setups, malformed EP0 setups), RX back-pressure
 //(fw 0.2.7: stalls from the ISR, releases, re-stalls inside a release, releases with no packet waiting, largest
-//RXCOUNT, RXCOUNT > 512), fw 0.2.12: USB interrupts served by the timer poll (lost IRQs), fw 0.2.17: boot splash ms + 1, fw 0.2.19: restart record (8), fw 0.2.20: USB IRQ races, fw 0.2.48: fault status + address, fw 0.2.49: USB inferred resumes, soft reconnects, fw 0.2.61: full-rate checks bad, recovered
+//RXCOUNT, RXCOUNT > 512), fw 0.2.12: USB interrupts served by the timer poll (lost IRQs), fw 0.2.17: boot splash ms + 1, fw 0.2.19: restart record (8), fw 0.2.20: USB IRQ races, fw 0.2.48: fault status + address, fw 0.2.49: USB inferred resumes, soft reconnects, fw 0.2.61: full-rate checks bad, recovered,
+//fw 0.2.70: FPGA rate writes, filter writes, sampling resets, full-rate captures on 0x1538+ judged by their data
 typedef char pc_link_counters_check[(PC_TSTAT_COUNT + 26 + PC_USBEV_COUNT + PC_RXDBG_COUNT + PC_RESTART_COUNT + 1 +
-                                     PC_FAULT_COUNT + PC_USBW_COUNT + PC_ENCH_COUNT == PC_LINK_COUNTERS) ? 1 : -1];
+                                     PC_FAULT_COUNT + PC_USBW_COUNT + PC_ENCH_COUNT + PC_FPGAW_COUNT + 1 ==
+                                     PC_LINK_COUNTERS) ? 1 : -1];
 
 uint32_t pc_link_counters(pc_session *s, uint32_t *v)
 {
@@ -844,6 +846,9 @@ uint32_t pc_link_counters(pc_session *s, uint32_t *v)
     pc_hal_enc_state(&e);
     v[n++] = e.bad;        //62-63 (fw 0.2.61; every full-rate capture since 0.2.62): captures bad, recovered (enc_heal.h)
     v[n++] = e.recovered;
+    pc_hal_fpga_writes(v + n);
+    n += PC_FPGAW_COUNT;   //64-66 (fw 0.2.70): 0x0D, 0x53 / 0x56, 0x01 = 1 writes (fpga_bus.h)
+    v[n++] = e.replaced;   //67: full-rate captures on 0x1538+ judged by their data after such a write (eh_capture_mode)
   }
   return n;
 }
@@ -981,12 +986,17 @@ static int h_get_event_log(pc_session *s, const uint8_t *req, uint32_t len, uint
 
   (void)len;
 
-  if(req[0] & ~0x01)
+  //Flags: bit 0 re-arm the reset snapshot; bits 2:1 (1.22) the FPGA write trace (event type 22): 0 unchanged, 1 off,
+  //2 on, 3 refused
+  if((req[0] & ~0x07) || ((req[0] & 0x06) == 0x06))
     return pc_error(s, PC_E_BAD_ARG, 0, "flags");
+
+  if(req[0] & 0x06)
+    pc_hal_fpga_trace((req[0] & 0x04) ? 1 : 0);
 
   n = pc_hal_event_log(resp + 12, 128, &total);
   pc_put_u16(resp, (uint16_t)n);
-  pc_put_u16(resp + 2, 0);
+  pc_put_u16(resp + 2, pc_hal_fpga_trace(-1));          //1.22: bit 0 the FPGA write trace is on
   pc_put_u32(resp + 4, total);
   pc_put_u32(resp + 8, pc_hal_ms());
 
@@ -3240,9 +3250,15 @@ static void pc_enc_read(void *ctx, uint8_t core, uint32_t start, uint32_t count,
 static int pc_enc_rearm(pc_session *s, uint32_t start)
 {
   eh_io    io = { s, pc_enc_status, pc_enc_read };
-  int      mode = eh_mode(s->var.version), bad, act;
+  int      mode, bad, act;
   uint32_t value;
   eh_note  n;
+  pc_hw_enc e;
+
+  //The running bitstream's check (enc_heal_hw.c), by the data when a rate / filter write came after this capture's
+  //sampling reset (eh_capture_mode, fw 0.2.70)
+  pc_hal_enc_state(&e);
+  mode = eh_capture_mode(e.mode, pc_hal_enc_written());
 
   if((mode == EH_MODE_NONE) || (s->cap_divider != 0) || s->cap_wide)
     return 0;

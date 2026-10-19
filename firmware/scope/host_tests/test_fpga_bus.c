@@ -313,9 +313,23 @@ static void test_ring_start(void)
   T_EQ(fpga_ring_start(8191, 8192, 8192), 8191);
 }
 
+//The write record behind GET_LINK_STATS 64-66 and the encode check's choice (eh_capture_mode)
+static void test_write_record(void)
+{
+  memset(&fpga_bus_wr, 0, sizeof(fpga_bus_wr));
+  T_EQ(fpga_bus_note_write(0x0D, 0), 1);  T_EQ(fpga_bus_wr.since_reset, 1);
+  T_EQ(fpga_bus_note_write(0x01, 1), 1);  T_EQ(fpga_bus_wr.since_reset, 0);   //the sampling reset clears 0x33 bit 0
+  T_EQ(fpga_bus_note_write(0x01, 0), 0);  T_EQ(fpga_bus_wr.since_reset, 0);   //the release does not
+  T_EQ(fpga_bus_note_write(0x53, 2), 1);  T_EQ(fpga_bus_wr.since_reset, 1);
+  T_EQ(fpga_bus_note_write(0x0B, 50), 0); T_EQ(fpga_bus_wr.since_reset, 1);
+  T_EQ(fpga_bus_note_write(0x56, 1), 1);
+  T_EQ(fpga_bus_wr.rate, 1); T_EQ(fpga_bus_wr.filter, 2); T_EQ(fpga_bus_wr.resets, 1);
+}
+
 int main(void)
 {
   test_contract();
+  test_write_record();
   test_ring_start();
   test_readout();
   test_arm_order();

@@ -249,6 +249,13 @@ void     pc_hal_usb_watch(uint32_t *v);
 //fw 0.2.61: full-rate capture check (enc_heal.h), GET_LINK_STATS 62-63: captures found bad, of those recovered by a
 //re-arm (fw 0.2.62: every full-rate capture; pc_hal_enc_state)
 #define PC_ENCH_COUNT     2
+//fw 0.2.70: FPGA writes that set the capture state (fpga_bus.h), GET_LINK_STATS 64-66: 0x0D rate writes, 0x53 / 0x56
+//filter writes, 0x01 = 1 sampling resets; 67: full-rate captures on 0x1538+ judged by their data because such a write
+//came after their sampling reset (pc_hw_enc.replaced)
+#define PC_FPGAW_COUNT    3
+void     pc_hal_fpga_writes(uint32_t *v);                  //PC_FPGAW_COUNT values, any context
+//Event type 22 (the writes one by one): set 0 = off (default), 1 = on, -1 = unchanged; returns the level now
+uint8_t  pc_hal_fpga_trace(int set);
 uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total);
 int32_t  pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms, int rearm);   //-1 = none frozen; rearm clears it
 uint32_t pc_hal_event_bus(uint8_t *dst, uint32_t *total);      //fw 0.2.24: bus-level ring (<= 16 entries), *total since boot
@@ -318,6 +325,7 @@ typedef struct
   uint32_t bad;             //captures found bad (GET_LINK_STATS 62)
   uint32_t recovered;       //of those, recovered by a re-arm (63)
   uint32_t checked;         //full-rate captures checked
+  uint32_t replaced;        //fw 0.2.70: of those, on a FLAG bitstream judged by the data (eh_capture_mode; GET_LINK_STATS 67)
 } pc_hw_enc;
 
 #define PC_ENCF_READ         0x01  //last33 holds a byte read after a capture
@@ -327,6 +335,7 @@ typedef struct
 
 void     pc_hal_enc_state(pc_hw_enc *e);                     //any context
 uint8_t  pc_hal_enc_status(void);                            //[FPGA] read 0x33 (0x1538+), remembered as last33
+int      pc_hal_enc_written(void);                           //a 0x0D / 0x53 / 0x56 write since the last 0x01 = 1
 void     pc_hal_enc_retry(void);                             //[FPGA] before a re-arm: 0x0D = 1, 0 on 0x1532..0x1536
 void     pc_hal_enc_note(uint8_t why, const eh_note *n);     //count a check, log event 21 when n->done
 

@@ -56,6 +56,29 @@ def test_ext_trigger_point_lags_the_pin(sim_factory):
         assert -7.5 <= min(offsets) and max(offsets) <= -3.0, offsets
 
 
+def test_legacy_ext_shift_puts_the_edge_at_the_pretrigger(sim_factory):
+    """1.22 (fw 0.2.70): in the legacy layout the ADC pipeline delays the data 4 words behind the EXT trigger; the
+    firmware writes that many fewer pretrigger words (2 at divider 0) and reports the shift in GET_CAPTURE_INFO 70
+    and GET_DECIM 31, so the pin edge lands at the pretrigger as it does at 200 MS/s."""
+    srv = ext_sim(sim_factory, noise_lsb=0.3)
+    with Scope.connect(srv.url) as s:
+        assert s.info.proto_minor >= 22
+        s.set_channel(0, range_index=1)
+        for div, shift in ((199, 8), (9, 8), (0, 4)):
+            s.set_timebase(divider=div)
+            s.set_trigger(source=2, edge=0, mode=1, pretrigger_samples=200, total_samples=1000)
+            cap = s.capture(["CH1"], 1.0)
+            assert cap is not None and cap.triggered
+            assert s.capture_info().ext_shift == shift
+            v = cap.channels["CH1"].volts
+            x = A.find_edge_near(v, 1.65, "rising", cap.pretrigger_samples, 24)
+            # the model's 22 ns EXT synchroniser is 4.4 samples at 200 MS/s, under a sample at the slower rates
+            assert x is not None and abs(x - cap.pretrigger_samples) <= (5 if div == 0 else 2), (div, x)
+        assert P.ext_shift_legacy(0) == 4 and P.ext_shift_legacy(1) == 8
+        s.set_trigger(source=0)
+        assert s.capture(["CH1"], 1.0) is not None and s.capture_info().ext_shift == 0
+
+
 @pytest.mark.anyio
 async def test_ext_and_generator_are_exclusive(sim_factory, tmp_path):
     async with client_for(ext_sim(sim_factory), tmp_path) as c:

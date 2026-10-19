@@ -162,7 +162,9 @@ def test_snapshot_survives_plain_reads_and_is_rearmed_after_saving(sim):
     with Scope.connect(sim.url) as sc:
         assert sc.event_log().frozen and sc.event_log().frozen  # plain reads do not consume it
         with pytest.raises(Exception):
-            sc.t.request(P.Cmd.GET_EVENT_LOG, b"\x02", retries=0)  # unknown flag bit: E_BAD_ARG
+            sc.t.request(P.Cmd.GET_EVENT_LOG, b"\x08", retries=0)  # unknown flag bit: E_BAD_ARG
+        with pytest.raises(Exception):
+            sc.t.request(P.Cmd.GET_EVENT_LOG, b"\x06", retries=0)  # 1.22: trace on and off at once: E_BAD_ARG
         assert sc.event_log(rearm=True).frozen and not sc.event_log().frozen
     sim.device.log_event(2)
     sim.device.log_event(1)

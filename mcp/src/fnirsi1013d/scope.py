@@ -439,12 +439,19 @@ class Scope:
             return None
         return P.parse_link_stats(self._req(P.Cmd.GET_LINK_STATS))
 
-    def event_log(self, rearm: bool = False) -> P.EventLog | None:
+    def event_log(self, rearm: bool = False, fpga_trace: bool | None = None) -> P.EventLog | None:
         """GET_EVENT_LOG (protocol >= 1.5): the last 64/128 USB/link events with device ms, or None on older
-        firmware. ``rearm`` (fw 0.2.18) clears the reset snapshot after this read; a plain read keeps it."""
+        firmware. ``rearm`` (fw 0.2.18) clears the reset snapshot after this read; a plain read keeps it.
+        ``fpga_trace`` (protocol 1.22, fw 0.2.70) switches the FPGA write trace (event type 22) on or off before the
+        read; None leaves it as it is. Older firmware refuses the flag (E_BAD_ARG), so it is only sent on 1.22+."""
+        flags = P.EVENT_LOG_REARM if rearm else 0
+        if fpga_trace is not None:
+            if self.info.proto_minor < 22:
+                raise ScopeError("the FPGA write trace switch needs protocol 1.22 (firmware >= 0.2.70)")
+            flags |= P.EVENT_LOG_FPGA_TRACE_ON if fpga_trace else P.EVENT_LOG_FPGA_TRACE_OFF
         if self.info.proto_minor < 5:
             return None
-        return P.parse_event_log(self._req(P.Cmd.GET_EVENT_LOG, bytes([P.EVENT_LOG_REARM]) if rearm else b""))
+        return P.parse_event_log(self._req(P.Cmd.GET_EVENT_LOG, bytes([flags]) if flags else b""))
 
     def health(self, clear_restart: bool = False) -> P.HealthResp | None:
         """GET_HEALTH (protocol 1.16; answers also while a menu is modal): USB state now, CP15, unit life, settings
