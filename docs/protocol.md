@@ -217,6 +217,24 @@ byte on the falling edge, the start of the strobe, so it is settled before the M
 read pointer, the dummy strobe after 0x1F and the 1.00o5 one-word lag are unchanged; asynchronous status reads are
 sampled at the start of the strobe instead of its end. Calibrations taken on 0x1537 / 0x1538 should be redone.
 
+**0x153A** (fpga/al3/README.md "Changes" section 10) is 0x1539 plus three features, all off at power-on (with 0x5E = 0,
+0x56 bit 1 = 0 and 0x61 = 0 it captures exactly as 0x1539, so a firmware that knows 0x1539 runs it unchanged). FPGA
+registers (the host protocol for them is the firmware's and MCP agents' to define):
+- Trigger types: write 0x5E (bits 1..0: 0 edge, 1 pulse width, 2 Nth edge, 3 timeout; bit 2: pulse width longer than
+  N), 0x5F (N, 24 bits), 0x60 (Nth edge idle time H, 24 bits); 0x16 is the polarity per type. N and H count samples
+  of the trigger stream for CH1 / CH2 (one per memory word: legacy core A, K >= 1 the output samples) and 5 ns clocks
+  for EXT. Pulse width fires on the trailing edge of a positive (0x16 = 0) or negative pulse shorter / longer than N;
+  Nth edge on the Nth rising / falling edge after the arm (H = 0) or of each burst after the level held for H samples;
+  timeout on the sample that makes a held high (0x16 = 0) / low level N + 1 samples long. CH1 / CH2 trigger positions
+  equal the edge trigger's; EXT qualified triggers decide 5 ns later than an EXT edge trigger. Status: read 0x34
+  (3 bytes).
+- Peak detect: 0x56 bit 1 with K >= 1: each 16-bit word is { max, min } of the raw samples of its window (low byte min,
+  high byte max), the FIR is off and the shift unused; the trigger compares the window max (rising) / min (falling) as
+  the high byte (0x55 = level << 8). 0x29 byte 1 bit 7 = active, bit 6 = enabled.
+- Counter: 0x61 (gate 10 ms / 100 ms / 1 s, source trigger / CH1 / CH2 / EXT), 0x62 (level, hysteresis for CH1 / CH2);
+  read 0x35 (14 bytes: flags with "new", sequence, E periods, T and W in 5 ns clocks): frequency = E / (T x 5 ns),
+  period = T x 5 ns / E, positive width = W x 5 ns / E, duty = W / T. Readable at any time, the capture is untouched.
+
 ## 6. Control model
 
 ### 6.1 LOCAL / REMOTE ownership [D]

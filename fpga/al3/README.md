@@ -1633,6 +1633,178 @@ showed the CH2 A fault of section 8; run these on 0x1538 together with section 8
 5. A slow edge through 128 (the calibration pin through an RC, or a DC sweep with the offset): the samples step by one
    code, no 0x?F / 0x?0 mixes.
 
+### 10. Trigger types, peak detect, hardware counter; version 0x153A (fpga-gen8, 2026-10-19)
+
+Roadmap section 8 items 2, 3 and 6. Owner decision: a minimal device UI (a Type row in the Trigger dropdown, a Peak box
+in ACQ, counter values in the measurement cards) and full MCP access. With the power-on values (0x5E = 0, 0x56 bit 1 = 0,
+0x61 = 0) the capture is cycle-identical to 0x1539: every equivalence step of `tb/run.sh` passes unchanged, and the
+contract transcript differs from 0x1539's only in the version byte and in the stale upper bits of the 0x05 reads that
+follow it (0x3B for 0x39).
+
+#### Register map
+
+Writes (all may be written in any order, like the other trigger settings, before 0x01 = 0):
+
+| Cmd | Bytes | Bits | Meaning |
+|---|---|---|---|
+| 0x16 | 1 | 0 | polarity, per type (below). Unchanged for the edge type |
+| 0x56 | 1 | 1 | **peak detect** (bit 0 stays the FIR enable) |
+| 0x5E | 1 | 1..0 | **trigger type**: 0 edge (power-on), 1 pulse width, 2 Nth edge, 3 timeout |
+| | | 2 | pulse width: 1 = longer than N, 0 = shorter than N |
+| 0x5F | 3 | 23..0 | **N**, high byte first: pulse width and timeout in samples (1 .. 2^24 - 1); Nth edge: bits 15..0 (1 .. 65535, 0 acts as 1) |
+| 0x60 | 3 | 23..0 | **idle time H** for the Nth edge, samples; 0 = count from the arm |
+| 0x61 | 1 | 1..0 | **counter gate**: 0 off (power-on), 1 = 10 ms, 2 = 100 ms, 3 = 1 s |
+| | | 3..2 | counter source: 0 the trigger source (0x15), 1 CH1, 2 CH2, 3 EXT |
+| 0x62 | 2 | | counter level (raw ADC code, power-on 128), then hysteresis (codes below the level, power-on 0) |
+
+Reads:
+
+| Cmd | Bytes | Content |
+|---|---|---|
+| 0x29 | 2 | byte 1 bit 7 = peak detect active (bit 1 of 0x56 and K >= 1), bit 6 = 0x56 bit 1 as written; bits 5..0 the shift as before |
+| 0x34 | 3 | trigger qualifier status: byte 0 = { 0, 0, counting (Nth edge: an idle gap was seen, or H = 0), a sample off the pulse side was seen since 0x01 = 0 (pulse width), source EXT, longer, type }; bytes 1..2 = edges still to count before the qualifying one (Nth edge). Asynchronous: read twice if it matters |
+| 0x35 | 14 | counter, from a snapshot taken at the 0x35 command byte: byte 0 = { new, 0, EXT, CH2, 0, 0, gate }, byte 1 = sequence number, then E, T, W, 32 bits each, high byte first |
+
+#### Trigger types
+
+**Streams and units.** Each source has its own qualifier (module `trig_qual`):
+- CH1 / CH2: the trigger stream the edge trigger compares, one sample per memory word. Legacy (K = 0): core A of the
+  channel, one sample per `10 (D + 1)` ns; K >= 1: the 16-bit output samples (or the peak words), one per `N_dec x 5`
+  ns. N and H count these samples.
+- EXT: the synchronised and filtered `ext_level`, one sample per 5 ns, at every sample rate. N and H count 5 ns clocks
+  (N up to 83.9 ms).
+- The level is the edge trigger's (0x17, or 0x55 with K >= 1), without hysteresis, as for the edge trigger.
+
+**Definitions** (the side of the level a sample is on decides everything; the trigger always fires on an edge the edge
+trigger could fire on, except the timeout):
+
+| Type | 0x16 = 0 | 0x16 = 1 | Fires on |
+|---|---|---|---|
+| Pulse width | positive pulse (high run) | negative pulse (low run) | its trailing edge, when its width w (samples on the pulse side) is w < N, or w > N with 0x5E bit 2. The pulse must have started after the release of the reset (0x01 = 0): a sample off the pulse side was seen first |
+| Nth edge | rising edges | falling edges | the Nth edge. H = 0: edges count from the arm (the pretrigger has filled). H > 0: the count restarts when the level has held for H samples (no edge of either direction), so the trigger is the Nth edge of each burst; H = 1 restarts on every edge |
+| Timeout | high after a rising edge | low after a falling edge | the sample that makes the run N + 1 samples long (the level has held for more than N samples since the edge, or since 0x01 = 0), no edge needed |
+
+**Trigger position.** For CH1 / CH2 the trigger position is exactly the edge trigger's for the qualifying edge (the
+timeout's for the qualifying sample): trigger_address = (memory word of the trigger sample) - 1, as for every edge trigger.
+For EXT the qualified types decide one clock (5 ns) after an edge trigger on the same edge would, then apply on the next
+write clock rise like any EXT trigger. The firmware's EXT latency correction stays the same within one 5 ns clock.
+
+**How it works** (fails fast and adds nothing to the timed trigger path):
+- The edge trigger's compare (`trigger_previous` against `trigger_data`, the half-cycle path) is unchanged. For a type
+  other than edge, `trigger_previous` is not loaded with the previous sample but with a value on the pre-detect side of
+  the level when the qualifier says the next edge is the trigger, else one on the other side. The qualifier only looks
+  at samples before the next one, so the compare fires exactly on the qualified edge, or on the sample after a held
+  level for the timeout (the compare itself checks that the data sample is on the post-detect side).
+- `trigger_edge` holds the detect direction: 0x16 for edge, Nth edge and timeout, its complement for the pulse width
+  (whose trailing edge is the opposite of its polarity). `trigger_ext` (the EXT edge path) is set only for the edge type.
+  Both are recomputed on writes of 0x15, 0x16 and 0x5E, so the edge type is bit-identical to 0x1539.
+- EXT: the qualifier runs on `ext_level_prev` / `ext_level` at 200 MHz, and its event (`ext_qev_r`) sets `ext_pending`.
+- Counters: 25-bit down counters with a frozen sign bit for the run lengths (no compare in the decision), a 16-bit down
+  counter for the edges with a registered "next is the Nth" flag.
+
+**Firmware, per type** (in the arm, with the other trigger writes):
+- Edge: write 0x5E = 0 (also restores the behaviour of 0x1539 at any time).
+- Pulse width: 0x5E = 1 (+ 4 for "longer than"), 0x5F = N, 0x16 = polarity. N = round(t / sample period) (CH1 / CH2:
+  the record's word period; EXT: 5 ns). The UI's "> t" / "< t" map to longer / shorter.
+- Nth edge: 0x5E = 2, 0x5F = N, 0x60 = idle time in samples (0: from the arm), 0x16 = counted edge.
+- Timeout: 0x5E = 3, 0x5F = N >= 1, 0x16 = 0 (stays high) or 1 (stays low).
+- Auto mode (0x1A = 0) and the auto time-out work as before for every type. Segments and averaging use the type for
+  every record (the qualifier restarts with each record).
+- Read 0x34 to show "waiting for edge k of N" or to check the configuration.
+
+#### Peak detect
+
+- 0x56 bit 1 with K >= 1 (0x53 bits 1..0 = 1..3; K only selects the 16-bit path, the window does not depend on it). The
+  ADCs run at 200 MSa/s as for every K >= 1 capture.
+- Each 16-bit word holds { max, min } of the raw samples of its window: low byte (0x20 / 0x22) = min, high byte (0x21 /
+  0x23) = max. The window is exactly the 2P = N samples that the K = 1 boxcar sums for the same word (tb_peak.v checks
+  every word), with the same latency (12 write clocks from the pins to the memory).
+- The FIR is off while peak detect is on (0x29 byte 0 bit 5 = 0 even with 0x56 bit 0 set), and the shift (0x54) is not
+  applied. Firmware: read the words through the existing 16-bit path, but take the two bytes as two 8-bit codes (no
+  gain16 / corr16; apply the 8-bit core calibration of the cores instead, B and A are mixed in a window).
+- Trigger: the 16-bit compare uses the window max for a rising detection and the window min for a falling one, in the
+  high byte: write 0x55 = level << 8 (code L: 0x55 = L x 256). Rising fires on the first window whose max reaches L,
+  falling on the first window whose min drops below L. All trigger types work on that stream.
+- Segments work as usual. Averaging of peak words is not meaningful (the sums mix max and min); the firmware must not
+  combine them.
+- Alias (tb_peak.v, 5 MSa/s, 6 ns spikes): sample skipping (K = 0) caught 31 of about 405 spikes, peak detect 202 of 204
+  (the two not counted fell outside the record).
+
+#### Hardware counter
+
+- Reciprocal counting on a 1-bit stream at 200 MHz. EXT: `ext_level`. CH1 / CH2: the raw pair of each write clock (the
+  decimator's capture) through a Schmitt trigger (high at code >= level, low below level - hysteresis), the earlier core
+  from the clock after the write clock's rise, the later one after its fall: 5 ns resolution at 200 MSa/s (divider 0 or
+  any K >= 1), each sample held for half a word at slower legacy rates.
+- Over a gate of exactly 2e6 / 2e7 / 2e8 clocks (10 ms, 100 ms, 1 s at the crystal's accuracy), from the first rising
+  edge in the gate to the last: E = periods, T = 5 ns clocks between those edges, W = clocks high in them. The next gate
+  starts at once, so a result comes every gate; the first one a full gate after the 0x61 write (a source or gate change
+  restarts the gate). E = 0: fewer than two rising edges (no signal).
+- Cards: frequency = E / (T x 5 ns), period = T x 5 ns / E, positive width = W x 5 ns / E, duty = W / T. Resolution one
+  clock over the measurement: 5 ns / 10 ms = 5e-7 relative at 200 MSa/s; at slow legacy rates the sample period
+  replaces the 5 ns. Up to 100 MHz input (one high and one low clock); T and W are 28 bits (1 s = 2e8 clocks).
+- The counter never touches the capture: it reads the decimator's capture registers and `ext_level` only. Reading 0x35
+  does not move the read pointer: a READ_RAW interrupted by a 0x35 read continues exactly as after any other read.
+- MCU: write 0x35 as a command, then read 14 bytes. The snapshot is taken at the command byte, so the bytes belong to
+  one result. Byte 0 bit 7 ("new") is set when the result was published after the previous 0x35 snapshot. Poll 0x35
+  once per gate; with gate 10 ms the cards update at 100 Hz.
+- Level: the raw code of the counter's source, independent of the trigger level. Hysteresis: about 4..8 codes for the
+  ADCs (2 LSB noise); with 0 a slow noisy signal counts its noise (tb_counter.v: 16,463 edges instead of 499).
+- Tests (tb_counter.v, 70 ms simulated): consecutive results 2,000,000 clocks apart; E, T, W equal to a reference model
+  of the input stream in every gate; EXT 810.044552 kHz to 5e-8, CH1 1.2858 MHz to 1.6e-7 at 200 MSa/s and 1.1e-6 at
+  10 MSa/s, duty to 1e-4.
+
+#### Resources and timing (TD 4.6.8 SP1, deterministic: two work dirs gave the same hash)
+
+| | 0x1539 | 0x153A |
+|---|---|---|
+| LUT / reg / LE | 4575 / 3833 / 5080 | 5690 / 4748 / 6398 (65.9 % of TD's 8640 LUT sites; about 2,950 left) |
+| BRAM9K / BRAM32K / M18x18 | 48 / 2 / 2 | 48 / 2 / 2 (one M18x18 free, no block RAM free) |
+| `clk_200MHz` | +0.260 ns | 0 errors, min period 4.762 ns (+0.238 ns, a carry chain of the sequencer) |
+| `sample_write_clock` | 9.560 ns | 0 errors, 9.416 ns |
+| `clkc[1]` / `i_mcu_clk` | 0 / 0 errors | 0 / 0 errors |
+| `clkc[0]` | 58 errors | 58 errors, the SDC artefact |
+
+Nothing was dropped: the timeout trigger and the counter's width accumulator both fit. The first build missed
+`clk_200MHz` by 0.54 ns in the EXT qualifier's decision into `ext_pending`; registering the event (`ext_qev_r`, the 5 ns
+above) and the Nth-edge flag (`rem1`) closed it.
+
+| File | Bytes | sha256 |
+|---|---|---|
+| `build/FPGA.bin` (= `backups/al3_feat_0x153A_e2ebcc4a.bin`) | 282,898 | `e2ebcc4a3a5a16d23b9d4a6de6e525b8f947babfa63ac560167f31050036b4e4` |
+| `backups/al3_feat_0x153A_e2ebcc4a_padded.bin` (flash image) | 1,048,576 | `a120b0d192ffc1e3db369ffc7a62ec26c9357b5917b7be1161d49f397a16a31d` |
+
+**Not flashed.** A firmware that knows 0x1539 runs 0x153A unchanged (AL3 0x153x decode) and sees no new behaviour until it
+writes 0x5E, 0x56 bit 1 or 0x61.
+
+#### Tests
+
+`tb/run.sh` steps 11..13:
+- `tb_trigtypes.v`: 7 cases (CH1 / CH2 legacy at 10 and 200 MSa/s, CH1 boxcar N = 20, CH2 CIC2 N = 2, EXT legacy and
+  K = 1), both polarities, every type: pulse width shorter / longer with clear widths (N +- 2.5..4) and random widths
+  around N (N +- 1.5), Nth edge 3 from the arm and 4 after an idle time of 20, both also with the train running across
+  the arm, Nth edge 1 against the edge type, the timeout. The FPGA's trigger sample must be the one a reference model
+  finds on the stream the FPGA saw (rebuilt from the sample memory and the arm flags, or for EXT from `ext_level`), at
+  the edge type's position; the clear cases also against the stimulus (within 1.5 samples of the intended edge). 1,122
+  checks per seed.
+- `tb_peak.v`: 29 checks (above).
+- `tb_counter.v`: 36 checks (above).
+- A capture-logic property the model had to learn: a trigger on the very first armed sample gets trigger_address = its
+  word, not the word before (`trigger_read_address` starts counting one word later). This is so for the edge type
+  since 0x1532.
+
+#### Bench checks (with the owner; never flash without the verified stock dump)
+
+1. 0x06 reads 0x153A; with 0x5E = 0, 0x56 = 0, 0x61 = 0, section 9's checks give the same results as on 0x1539.
+2. Pulse width: generator on the calibration pin looped to CH1 (and EXT with the generator in its EXT test setup), duty
+   20 % at 10 kHz (20 us high): "positive pulse longer than 15 us" triggers, "longer than 25 us" does not; "shorter than
+   25 us" triggers on the falling edge.
+3. Nth edge on a burst (the TX train): trigger on pulse 3 with an idle time shorter than the burst gap.
+4. Timeout: stop the generator (0x50 = 0) during a run: the trigger comes N samples after the last edge.
+5. Peak detect at 1 MSa/s on a fast square or a short pulse train: every spike visible, min / max envelope stable.
+6. Counter: the calibration pin at 1 kHz and 1 MHz on CH1 and on EXT: frequency within 1e-5 of the generator's value
+   (the DDS frequency is phase_inc x 50 MHz / 2^32), duty 50 %.
+
 ## Device facts from the datasheet
 
 Source: Anlogic "AL3 series FPGA datasheet" DS001 v1.3 (Sept 2017, Chinese, owner's download `AL3A10LG144.pdf`, 84 pages).

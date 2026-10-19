@@ -2,7 +2,7 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
-// fnirsi-1013d-mcp changes (version word 0x1539, see fpga/al3/README.md "Changes"):
+// fnirsi-1013d-mcp changes (version word 0x153A, see fpga/al3/README.md "Changes"):
 //  - 0x1533: external trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
 //    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
 //    Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
@@ -38,6 +38,12 @@
 //    which samples the bus after it raises the clock, always reads a settled byte; there is no
 //    same-edge path left on i_mcu_clk in the read path. Byte values, pointer advance and the dummy
 //    strobe are unchanged; zaklad.sdc constrains i_mcu_clk. Otherwise cycle-identical to 0x1538.
+//  - 0x153A: trigger types (0x5E type, 0x5F N, 0x60 idle time, read 0x34): pulse width shorter / longer than N,
+//    Nth edge after an idle time or the arm, timeout (the level held for more than N samples after an edge), on
+//    CH1 / CH2 (counted on the trigger stream: one sample per memory word) and EXT (counted in 5 ns clocks). Peak
+//    detect (0x56 bit 1): with K >= 1 each 16-bit word holds { max, min } of the raw samples of its window instead
+//    of the filter output. A 200 MSa/s frequency / period counter (0x61 gate and source, 0x62 level and hysteresis,
+//    read 0x35). With 0x5E = 0, 0x56 bit 1 = 0 (power-on) the capture is cycle-identical to 0x1539.
 //-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
@@ -142,6 +148,10 @@ module decim_chan
   input  wire        neg_b,       //1: capture core B on the falling edge of clk
   input  wire [5:0]  shift,
   input  wire [5:0]  sv,          //valid chain s0 .. s5
+  input  wire        peak,        //0x153A: out = { max, min } of the window's raw samples instead of the filter
+  input  wire        wstart,      //0x153A: dec_pc == 0, the window boundary (one edge before sv[0])
+  output wire [7:0]  pair_e,      //0x153A: the captured pair (earlier, later sample) for the counter
+  output wire [7:0]  pair_l,
   output reg  [15:0] out = 0
 );
 localparam W = 48;
@@ -157,6 +167,16 @@ reg [W-1:0] sh = 0;
 
 wire [7:0] xe = swap ? qa : qb;   //earlier sample of the pair
 wire [7:0] xl = swap ? qb : qa;   //later sample of the pair
+
+assign pair_e = xe;
+assign pair_l = xl;
+
+//0x153A peak detect. pmx / pmn are the pair's max and min, registered with f, pdx / pdn the same one clock later (the
+//integrator's alignment); rmx / rmn the running max and min of the window, restarted on the edge where dec_pc == 0
+//(wstart), which also hands the finished window to pkw. That edge is one before the sv[0] edge that latches the CIC's
+//d0, and the window is exactly the pairs the K = 1 boxcar sums for that output (tb_peak.v checks it). pk0..pk4 follow the comb pipeline (sv[0]..sv[4]) so the peak word reaches out on sv[5] like the filter.
+reg [7:0]  pmx = 0, pmn = 0, pdx = 0, pdn = 0, rmx = 0, rmn = 0;
+reg [15:0] pkw = 0, pk0 = 0, pk1 = 0, pk2 = 0, pk3 = 0, pk4 = 0;
 
 wire k2  = (order == 2'd2);
 wire k3  = (order == 2'd3);
@@ -184,6 +204,27 @@ wire [W-1:0] fine = sh >> shift[2:0];
       pe <= xe;
       pl <= xl;
       f  <= {3'b0, xl} + {1'b0, t_xe} + {1'b0, t_pl} + {3'b0, t_pe};
+
+      pmx <= (xe > xl) ? xe : xl;
+      pmn <= (xe < xl) ? xe : xl;
+      pdx <= pmx;
+      pdn <= pmn;
+      if(wstart)
+        begin
+          pkw <= { rmx, rmn };
+          rmx <= pdx;
+          rmn <= pdn;
+        end
+      else
+        begin
+          rmx <= (pdx > rmx) ? pdx : rmx;
+          rmn <= (pdn < rmn) ? pdn : rmn;
+        end
+      if(sv[0]) pk0 <= pkw;
+      if(sv[1]) pk1 <= pk0;
+      if(sv[2]) pk2 <= pk1;
+      if(sv[3]) pk3 <= pk2;
+      if(sv[4]) pk4 <= pk3;
 
       i1 <= i1 + f;
       i2 <= (k23 ? i2 : {W{1'b0}}) + i1;    //K = 1: i2 = i1 one clock later
@@ -214,7 +255,7 @@ wire [W-1:0] fine = sh >> shift[2:0];
         sh <= c3 >> {shift[5:3], 3'b000};
 
       if(sv[5])
-        out <= (|fine[W-1:16]) ? 16'hFFFF : fine[15:0];
+        out <= peak ? pk4 : (|fine[W-1:16]) ? 16'hFFFF : fine[15:0];
     end
 
 endmodule
@@ -350,6 +391,134 @@ endfunction
       if(m2l)
         out <= acc[36] ? 16'd0 : (|acc[35:33]) ? 16'hFFFF : acc[32:17];
       done <= m2l;
+    end
+
+endmodule
+
+//-------------------------------------------------------------------------------------
+//Trigger qualifier (0x153A), one per trigger stream: the ADC stream on the write clock (one sample per memory word,
+//ce = swc_adv) and EXT on clk_200MHz (one sample per 5 ns). Input a: the newest sample is on the pre-detect side of the
+//level, i.e. an edge in the trigger direction (0x16, see trigger_edge) can follow it. fire: if the next sample is on
+//the post-detect side (the trigger compare checks that itself), that edge, or for the timeout that sample, is the
+//trigger. The state covers the samples before a; nothing here looks at the next sample, so the trigger point is the
+//one an edge trigger on the same edge has.
+//  typ 1, pulse width: the pulse is the run of pre-detect samples before the edge (the edge is its trailing edge);
+//      d counts it down from rld_w (N - 1 for "longer than N", N - 2 for "shorter than N"), its sign bit says the run
+//      has reached the limit; vld: the pulse began after the reset (a post-detect sample was seen).
+//  typ 2, Nth edge: rem counts the edges in the trigger direction down from N - 1; rz: the next one is the Nth. With
+//      an idle time (h_zero = 0) the count restarts on the first edge after the level held for H samples (h, from
+//      rld_h = H - 2), and before the first such gap nothing counts; with H = 0 edges count from the arm (arm = the
+//      pretrigger has filled, the moment an edge trigger could first fire).
+//  typ 3, timeout: d counts the run of post-detect samples since the edge (or the reset) from N - 2; the trigger is the
+//      sample that makes the run N + 1 long (sign set, ov not yet).
+
+module trig_qual
+(
+  input  wire        clk,
+  input  wire        ce,
+  input  wire        rst,
+  input  wire [1:0]  typ,
+  input  wire        pw_long,
+  input  wire [24:0] rld_w,
+  input  wire [15:0] nm1,         //N - 1 (Nth edge)
+  input  wire        nm1_z,       //N - 1 == 0
+  input  wire        nm1_1,       //N - 1 == 1
+  input  wire [24:0] rld_h,
+  input  wire        h_zero,
+  input  wire        arm,
+  input  wire        a,
+  output wire        fire,
+  output wire        vld_o,
+  output wire        cv_o,
+  output wire [15:0] rem_o
+);
+
+reg        ap = 0;
+reg [24:0] d = 0;
+reg        ov = 0;
+reg        vld = 0;
+reg [24:0] h = 0;
+reg        cv = 0;
+reg [15:0] rem = 0;
+reg        rz = 0;
+reg        rem1 = 0;                      //rem == 1, registered: valid one sample after rem changes, and counted edges
+                                          //are at least two samples apart
+reg        past = 0;
+
+wire s    = (typ == 2'd3) ? ~a : a;       //the counted run: pulse (pre side) or the held level (post side)
+wire gap  = ~h_zero & h[24];              //the level held for H samples: the next edge is the first of a burst
+wire cv_e = cv | gap;
+wire rz_e = gap ? nm1_z : rz;
+wire e    = ap & ~a;                      //an edge in the trigger direction between the last two samples
+wire t    = ap ^ a;                       //any edge
+
+assign fire  = (typ == 2'd1) ? (a & vld & (pw_long ? d[24] : ~d[24])) :
+               (typ == 2'd2) ? (a & cv_e & rz_e) :
+               (typ == 2'd3) ? (~a & d[24] & ~ov) : 1'b0;
+assign vld_o = vld;
+assign cv_o  = cv_e;
+assign rem_o = rem;
+
+  always @(posedge clk)
+    begin
+      if(rst)
+        begin
+          ap   <= 0;
+          d    <= rld_w;
+          ov   <= 0;
+          vld  <= 0;
+          h    <= rld_h;
+          cv   <= h_zero;
+          rem  <= nm1;
+          rz   <= nm1_z;
+          rem1 <= nm1_1;
+          past <= 0;
+        end
+      else if(ce)
+        begin
+          ap   <= a;
+          rem1 <= (rem == 16'd1);
+
+          if(~s)
+            begin
+              d   <= rld_w;
+              ov  <= 0;
+              vld <= 1;
+            end
+          else if(d[24])
+            ov <= 1;
+          else
+            d <= d - 25'd1;
+
+          if(t)
+            h <= rld_h;
+          else if(~h[24])
+            h <= h - 25'd1;
+
+          if(e & cv_e & (h_zero ? arm : 1'b1))
+            begin
+              cv <= 1;
+              if(gap)
+                begin
+                  rem  <= nm1 - 16'd1;
+                  rz   <= nm1_1;
+                  past <= nm1_z;
+                end
+              else if(~past)
+                begin
+                  rem  <= rem - 16'd1;
+                  rz   <= rem1;
+                  past <= rz;
+                end
+            end
+          else if(gap)
+            begin
+              rem  <= nm1;
+              rz   <= nm1_z;
+              past <= 0;
+              cv   <= 1;
+            end
+        end
     end
 
 endmodule
@@ -615,6 +784,21 @@ module fnirsi_1013D
   reg [15:0] trigger_level16 = 0;          //Command 0x55: trigger level on the 16-bit samples (K >= 1)
 
   reg        fir_en = 0;                   //Command 0x56 bit 0: CIC compensation FIR (0x1535)
+  reg        peak_en = 0;                  //Command 0x56 bit 1: peak detect (0x153A), replaces the filter with K >= 1
+
+  //Trigger types (0x153A)
+  reg [1:0]  trig_type = 0;                //Command 0x5E bits 1..0: 0 edge, 1 pulse width, 2 Nth edge, 3 timeout
+  reg        trig_pw_long = 0;             //Command 0x5E bit 2: pulse width longer than N (0: shorter than N)
+  reg        trig_pol = 0;                 //Command 0x16 bit 0 as written (trigger_edge is the detect direction)
+  reg        trig_src_ext = 0;             //Command 0x15 bit 1 as written (trigger_ext is EXT for the edge type only)
+  reg [23:0] trig_n = 24'd1;               //Command 0x5F: N (pulse width / timeout in samples; Nth edge: bits 15..0)
+  reg [23:0] trig_h = 0;                   //Command 0x60: Nth edge idle time in samples, 0 = count from the arm
+
+  //Hardware counter (0x153A)
+  reg [1:0]  cnt_gate = 0;                 //Command 0x61 bits 1..0: 0 off, 1 10 ms, 2 100 ms, 3 1 s
+  reg [1:0]  cnt_src = 0;                  //Command 0x61 bits 3..2: 0 the trigger source, 1 CH1, 2 CH2, 3 EXT
+  reg [7:0]  cnt_lvl = 8'd128;             //Command 0x62 byte 0: level (raw ADC code)
+  reg [7:0]  cnt_hys = 0;                  //Command 0x62 byte 1: hysteresis (codes below the level)
 
   //Segmented capture and averaging (0x1536), written by the MCU while 0x01 = 1
   reg [1:0]  seq_mode = 0;                 //Command 0x57 bits 1..0: 0 off, 1 segments, 2 averaging, 3 off
@@ -729,6 +913,11 @@ freq_generator_dds_pwm u_freq
   //Selected edge per command 0x16 (0 = rising, 1 = falling), only when EXT is the source
   wire ext_edge = trigger_ext & (trigger_edge ? ext_fall : ext_rise);
 
+  //0x153A: EXT with a trigger type other than edge (trigger_ext is then 0): the qualifier's event (see trig_qual)
+  wire ext_qev;
+  wire q_on = (trig_type != 2'd0);         //0x153A: a trigger type other than edge
+  wire q_fire_adc;                         //0x153A: the ADC stream qualifier's decision (trig_qual qual_adc)
+
   //Rising edge of sample_write_clock (it toggles on the falling edge of clk_200MHz), for the clk_200MHz edge after it.
   //0x1539: predicted one clock ahead on the rising clk_200MHz edge before that falling edge, from the write clock copy
   //swc_sh and the enable look-ahead sce_q, exactly as enc_nxt predicts the write clock for the encodes (read 0x33 bit 1
@@ -760,7 +949,7 @@ freq_generator_dds_pwm u_freq
 
       if(cap_rst200 == 1)
         ext_pending <= 0;
-      else if(trigger_check_enable & ext_edge)
+      else if(trigger_check_enable & (ext_edge | ext_qev))
         ext_pending <= 1;
     end
 
@@ -953,11 +1142,13 @@ freq_generator_dds_pwm u_freq
   //N / 2, and the FIR decimates its output by 2. dec_t tags the strobes from dec_pc == 0: the
   //CIC sample they make is the newest one of an output pair. dec_wr then comes from the FIR,
   //still once per P write clocks. With fir_act = 0 every 0x1534 register and output is unchanged.
-  wire        fir_ok = fir_en & dec_on & sample_rate_divider[1] & (sample_rate_divider >= 32'd14);
+  wire        fir_ok = fir_en & ~peak_en & dec_on & sample_rate_divider[1] & (sample_rate_divider >= 32'd14);
+  wire        peak_act = peak_en & dec_on;   //0x153A: peak detect replaces the filter (CIC and FIR)
   reg         fir_act = 0;
   reg [30:0]  fir_hp = 0;
   reg [7:0]   dec_t = 0;
   wire [15:0] cic_out1, cic_out2, fir_out1, fir_out2;
+  wire [7:0]  pair_e1, pair_l1, pair_e2, pair_l2;
   wire        fir_done1, fir_done2;
 
   wire [30:0] dec_ph = sample_rate_divider[31:1];
@@ -993,6 +1184,10 @@ freq_generator_dds_pwm u_freq
     .neg_b (dec_neg_b),
     .shift (dec_shift),
     .sv    (dec_sv[5:0]),
+    .peak  (peak_act),
+    .wstart(dec_pc == 0),
+    .pair_e(pair_e1),
+    .pair_l(pair_l1),
     .out   (cic_out1)
   );
 
@@ -1007,6 +1202,10 @@ freq_generator_dds_pwm u_freq
     .neg_b (dec_neg_b),
     .shift (dec_shift),
     .sv    (dec_sv[5:0]),
+    .peak  (peak_act),
+    .wstart(dec_pc == 0),
+    .pair_e(pair_e2),
+    .pair_l(pair_l2),
     .out   (cic_out2)
   );
 
@@ -1035,7 +1234,10 @@ freq_generator_dds_pwm u_freq
   //Trigger on the 16-bit sample that is written on this edge (channel per 0x15): the result
   //of sample >= trigger_level16 goes into the 8-bit trigger_data register as 0xFF or 0x00 and
   //the 8-bit compare runs against 0x80, so the timed trigger path keeps its 0x1533 structure.
-  wire [15:0] dec_trig_sample = trigger_channel ? dec_out2 : dec_out1;
+  //0x153A peak detect: the compare takes the window max for a rising detection, the min for a falling one, as the high
+  //byte (level16 = level << 8 then compares that byte with the level)
+  wire [15:0] dec_trig_word   = trigger_channel ? dec_out2 : dec_out1;
+  wire [15:0] dec_trig_sample = peak_act ? { (trigger_edge ? dec_trig_word[7:0] : dec_trig_word[15:8]), 8'h00 } : dec_trig_word;
   wire        dec_trig_ge     = dec_trig_sample >= trigger_level16;
   wire [7:0]  trigger_level_eff = dec_on ? 8'h80 : trigger_level;
 
@@ -1142,13 +1344,85 @@ assign sampling_enable = ~(
        end 
     else if(swc_adv)
        begin
-         //sample from the previous cycle
-         trigger_previous <= trigger_data;
+         //sample from the previous cycle (0x153A: with a trigger type other than edge, the qualifier's decision: a value
+         //on the pre-detect side of the level when the edge into the next sample is the trigger, else one on the other
+         //side, so the unchanged compare fires exactly on the qualified edge; EXT source: never)
+         trigger_previous <= q_on ? {8{~((q_fire_adc & ~trig_src_ext) ^ trigger_edge)}} : trigger_data;
 
          //current sample (decimation filter on: 16-bit compare result, see dec_trig_ge)
 	     trigger_data <= dec_on ? {8{dec_trig_ge}} : trigger_channel ? i_adc2A_d : i_adc1A_d;
        end
   end
+
+//-------------------------------------------------------------------------------------
+//Trigger types (0x153A): qualifier configuration and the two qualifiers (module trig_qual)
+
+  wire [24:0] q_rld_w = { 1'b0, trig_n } - (((trig_type == 2'd1) & trig_pw_long) ? 25'd1 : 25'd2);
+  wire [15:0] q_n16   = (trig_n[15:0] == 16'd0) ? 16'd1 : trig_n[15:0];
+  wire [15:0] q_nm1   = q_n16 - 16'd1;
+  wire        q_nm1_z = (q_n16 == 16'd1);
+  wire        q_nm1_1 = (q_n16 == 16'd2);
+  wire [24:0] q_rld_h = { 1'b0, trig_h } - 25'd2;
+  wire        q_h_z   = (trig_h == 24'd0);
+
+  //ADC stream: the newest sample is trigger_data, compared like the edge trigger compares it
+  wire        q_a_adc = (trigger_data >= trigger_level_eff) ~^ trigger_edge;
+  wire        q_vld_adc, q_cv_adc;
+  wire [15:0] q_rem_adc;
+
+  trig_qual qual_adc
+  (
+    .clk    (sample_write_clock),
+    .ce     (swc_adv),
+    .rst    (cap_rst),
+    .typ    (trig_type),
+    .pw_long(trig_pw_long),
+    .rld_w  (q_rld_w),
+    .nm1    (q_nm1),
+    .nm1_z  (q_nm1_z),
+    .nm1_1  (q_nm1_1),
+    .rld_h  (q_rld_h),
+    .h_zero (q_h_z),
+    .arm    (sampling_half_way),
+    .a      (q_a_adc),
+    .fire   (q_fire_adc),
+    .vld_o  (q_vld_adc),
+    .cv_o   (q_cv_adc),
+    .rem_o  (q_rem_adc)
+  );
+
+  //EXT: the newest decided sample is ext_level_prev, the next one ext_level (as ext_rise / ext_fall see them)
+  wire        q_a_ext = ext_level_prev ~^ trigger_edge;
+  wire        q_fire_ext, q_vld_ext, q_cv_ext;
+  wire [15:0] q_rem_ext;
+
+  trig_qual qual_ext
+  (
+    .clk    (clk_200MHz),
+    .ce     (1'b1),
+    .rst    (cap_rst200),
+    .typ    (trig_type),
+    .pw_long(trig_pw_long),
+    .rld_w  (q_rld_w),
+    .nm1    (q_nm1),
+    .nm1_z  (q_nm1_z),
+    .nm1_1  (q_nm1_1),
+    .rld_h  (q_rld_h),
+    .h_zero (q_h_z),
+    .arm    (sampling_half_way),
+    .a      (q_a_ext),
+    .fire   (q_fire_ext),
+    .vld_o  (q_vld_ext),
+    .cv_o   (q_cv_ext),
+    .rem_o  (q_rem_ext)
+  );
+
+  //registered (one clock after the decision, 5 ns later than an edge trigger on the same edge): the qualifier's decision
+  //logic and the ext_pending enable do not fit one 200 MHz clock together
+  reg ext_qev_r = 0;
+  always @(posedge clk_200MHz)
+    ext_qev_r <= ~cap_rst200 & q_on & trig_src_ext & q_fire_ext & (ext_level ^ trigger_edge);
+  assign ext_qev = ext_qev_r;
 
 //-------------------------------------------------------------------------------------
 //Sampling half way detect
@@ -1596,6 +1870,118 @@ assign sampling_enable = ~(
   always @(posedge i_mcu_clk)
     seq_lat <= seq_view;
 
+//-------------------------------------------------------------------------------------
+//Hardware counter (0x153A), clk_200MHz. Input stream cs, one bit per 5 ns:
+//  EXT: ext_level (synchronised and majority filtered);
+//  CH1 / CH2: the raw pair of each write clock (the decimator's captured pair, earlier sample first) through a Schmitt
+//  trigger (high at >= level, low below level - hysteresis), the earlier sample's state from the clock after the write
+//  clock's rise snapshot, the later one's from the clock after its fall: at 200 MSa/s (divider 0, or any K >= 1) one
+//  sample per 5 ns, at slower legacy rates each sample held for half a word.
+//Reciprocal counting over a gate of exactly 2e6 / 2e7 / 2e8 clocks: from the first rising edge of cs in the gate to the
+//last one, E = the number of periods, T = clocks between those edges, W = clocks cs was high in them. At the end of each
+//gate E, T, W are published with a sequence number, and the next gate starts at once. Frequency = E / (T x 5 ns),
+//period = T x 5 ns / E, positive width = W x 5 ns / E, duty = W / T. E = 0: fewer than two rising edges in the gate.
+//The counter runs all the time (0x61 gate != 0) and touches nothing the capture uses.
+
+  wire       cnt_ext = (cnt_src == 2'd3) | ((cnt_src == 2'd0) & trig_src_ext);
+  wire       cnt_ch2 = (cnt_src == 2'd2) | ((cnt_src == 2'd0) & trigger_channel);
+  wire [7:0] cnt_lo  = (cnt_lvl > cnt_hys) ? cnt_lvl - cnt_hys : 8'd0;
+  wire [7:0] cnt_xe  = cnt_ch2 ? pair_e2 : pair_e1;
+  wire [7:0] cnt_xl  = cnt_ch2 ? pair_l2 : pair_l1;
+
+  reg c_hie = 0, c_loe = 0, c_hil = 0, c_lol = 0;         //write clock: the pair against the two thresholds
+  always @(posedge sample_write_clock)
+    begin
+      c_hie <= (cnt_xe >= cnt_lvl);
+      c_loe <= (cnt_xe <  cnt_lo);
+      c_hil <= (cnt_xl >= cnt_lvl);
+      c_lol <= (cnt_xl <  cnt_lo);
+    end
+
+  reg        swc_fall = 0, swc_fall_q = 0;                 //the write clock falls on the next falling edge (as swc_rose)
+  reg        k_hil = 0, k_lol = 0;                         //the later sample's thresholds, taken at the rise snapshot
+  reg        k_st = 0;                                     //Schmitt state = the ADC stream
+  reg [2:0]  k_cfg = 0;
+  reg        k_cs = 0, k_csp = 0;
+  reg        k_on = 0, k_run = 0;
+  reg [28:0] k_g = 0;                                      //gate count, 2e6 / 2e7 / 2e8 - 2 down to -1
+  reg [27:0] k_t = 0, k_w = 0, k_e = 0;                    //running: clocks and high clocks since the first edge, periods
+  reg [27:0] k_tl = 0, k_wl = 0, k_el = 0;                 //at the last rising edge
+  reg [27:0] k_rt = 0, k_rw = 0, k_re = 0;                 //published
+  reg [7:0]  k_seq = 0;
+  reg [3:0]  k_rcfg = 0;                                   //published with: source (ext, ch2) and gate
+
+  wire       k_rise = k_cs & ~k_csp;
+  wire [28:0] k_gl  = (cnt_gate == 2'd1) ? 29'd1999998 : (cnt_gate == 2'd2) ? 29'd19999998 : 29'd199999998;
+
+  always @(posedge clk_200MHz)
+    begin
+      swc_fall   <= swc_sh & sce_q;
+      swc_fall_q <= swc_fall;
+
+      if(swc_rise_q)
+        begin
+          k_st  <= c_hie ? 1'b1 : c_loe ? 1'b0 : k_st;
+          k_hil <= c_hil;
+          k_lol <= c_lol;
+        end
+      else if(swc_fall_q)
+        k_st <= k_hil ? 1'b1 : k_lol ? 1'b0 : k_st;
+
+      k_cs  <= cnt_ext ? ext_level : k_st;
+      k_csp <= k_cs;
+      k_cfg <= { cnt_ext, cnt_ch2, (cnt_gate != 2'd0) };
+      k_on  <= (cnt_gate != 2'd0) & (k_cfg == { cnt_ext, cnt_ch2, (cnt_gate != 2'd0) });
+
+      if(~k_on)
+        begin
+          k_g   <= k_gl;
+          k_run <= 0;
+          k_tl  <= 0; k_wl <= 0; k_el <= 0;
+        end
+      else if(k_g[28])
+        begin
+          k_rt   <= k_tl;
+          k_rw   <= k_wl;
+          k_re   <= k_el;
+          k_rcfg <= { cnt_ext, cnt_ch2, cnt_gate };
+          k_seq  <= k_seq + 8'd1;
+          k_g    <= k_gl;
+          k_run  <= 0;
+          k_tl   <= 0; k_wl <= 0; k_el <= 0;
+        end
+      else
+        begin
+          k_g <= k_g - 29'd1;
+          if(k_run)
+            begin
+              k_t <= k_t + 28'd1;
+              k_w <= k_w + { 27'd0, k_cs };
+              if(k_rise)
+                begin
+                  k_tl <= k_t;
+                  k_wl <= k_w;
+                  k_el <= k_e + 28'd1;
+                  k_e  <= k_e + 28'd1;
+                end
+            end
+          else if(k_rise)
+            begin
+              k_run <= 1;
+              k_t   <= 28'd1;
+              k_w   <= 28'd1;
+              k_e   <= 28'd0;
+            end
+        end
+    end
+
+  //MCU snapshot, taken when the command byte 0x35 is written: read 0x35 returns one consistent result. k_new: a result
+  //published since the previous 0x35 snapshot (its sequence number differs).
+  reg [27:0] m_t = 0, m_w = 0, m_e = 0;
+  reg [7:0]  m_seq = 0;
+  reg [3:0]  m_cfg = 0;
+  reg        m_new = 0;
+
 //=====================================================================================
 
   //Select the address and clock source based on the sample read enbale setting
@@ -1639,6 +2025,17 @@ assign sampling_enable = ~(
     begin
       if(i_mcu_dcs & i_mcu_rws)
         mcu_command <= io_mcu_data;
+
+      //0x153A: counter snapshot on the 0x35 command byte
+      if(i_mcu_dcs & i_mcu_rws & (io_mcu_data == 8'h35))
+        begin
+          m_t   <= k_rt;
+          m_w   <= k_rw;
+          m_e   <= k_re;
+          m_cfg <= k_rcfg;
+          m_seq <= k_seq;
+          m_new <= (k_seq != m_seq);
+        end
     end
 
 //-------------------------------------------------------------------------------------
@@ -1654,9 +2051,10 @@ assign sampling_enable = ~(
               | (mcu_command == 8'h1B) | (mcu_command == 8'h1F)
               | (mcu_command == 8'h32) | (mcu_command == 8'h35) | (mcu_command == 8'h38) | (mcu_command == 8'h3C)
               | (mcu_command == 8'h51) | (mcu_command == 8'h52) | (mcu_command == 8'h55)
-              | (mcu_command == 8'h58) | (mcu_command == 8'h5A) | (mcu_command == 8'h5C)) & i_mcu_rws) |
+              | (mcu_command == 8'h58) | (mcu_command == 8'h5A) | (mcu_command == 8'h5C)
+              | (mcu_command == 8'h5F) | (mcu_command == 8'h60) | (mcu_command == 8'h62)) & i_mcu_rws) |
               (((mcu_command == 8'h06) | (mcu_command == 8'h14) | (mcu_command == 8'h29) | (mcu_command == 8'h41)
-              | (mcu_command == 8'h2A)) & ~i_mcu_rws))
+              | (mcu_command == 8'h2A) | (mcu_command == 8'h34) | (mcu_command == 8'h35)) & ~i_mcu_rws))
         mcu_state <= mcu_state + 1;
     end
 
@@ -1759,12 +2157,16 @@ assign sampling_enable = ~(
             8'h15:
               begin
                 trigger_channel <= io_mcu_data[0];
-                trigger_ext     <= io_mcu_data[1];
+                trigger_ext     <= io_mcu_data[1] & (trig_type == 2'd0);   //0x153A: EXT edge path for the edge type only
+                trig_src_ext    <= io_mcu_data[1];
               end
 
             //Setting the trigger edge
             8'h16:
-              trigger_edge <= io_mcu_data[0];
+              begin
+                trig_pol     <= io_mcu_data[0];
+                trigger_edge <= io_mcu_data[0] ^ (trig_type == 2'd1);      //0x153A: pulse width detects the trailing edge
+              end
 
             //Setting the trigger level
             8'h17:
@@ -1912,7 +2314,10 @@ assign sampling_enable = ~(
 
             //CIC compensation FIR enable (0x1535), bit 0; bits 7..1 reserved
             8'h56:
-              fir_en <= io_mcu_data[0];
+              begin
+                fir_en  <= io_mcu_data[0];
+                peak_en <= io_mcu_data[1];                                 //0x153A
+              end
 
             //Loading of the two bytes of the 16-bit trigger level high byte first
             8'h55:
@@ -1982,6 +2387,59 @@ assign sampling_enable = ~(
             8'h5D:
               seq_stop <= io_mcu_data[0];
 
+            //Trigger type (0x153A): bits 1..0 type, bit 2 pulse width longer than N
+            8'h5E:
+              begin
+                trig_type    <= io_mcu_data[1:0];
+                trig_pw_long <= io_mcu_data[2];
+                trigger_ext  <= trig_src_ext & (io_mcu_data[1:0] == 2'd0);
+                trigger_edge <= trig_pol ^ (io_mcu_data[1:0] == 2'd1);
+              end
+
+            //Trigger N, three bytes high byte first
+            8'h5F:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    trig_n[23:16] <= io_mcu_data;
+                  4'h1:
+                    trig_n[15:8] <= io_mcu_data;
+                  4'h2:
+                    trig_n[7:0] <= io_mcu_data;
+                endcase
+              end
+
+            //Nth edge idle time, three bytes high byte first
+            8'h60:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    trig_h[23:16] <= io_mcu_data;
+                  4'h1:
+                    trig_h[15:8] <= io_mcu_data;
+                  4'h2:
+                    trig_h[7:0] <= io_mcu_data;
+                endcase
+              end
+
+            //Counter gate and source (0x153A)
+            8'h61:
+              begin
+                cnt_gate <= io_mcu_data[1:0];
+                cnt_src  <= io_mcu_data[3:2];
+              end
+
+            //Counter level and hysteresis, two bytes
+            8'h62:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    cnt_lvl <= io_mcu_data;
+                  4'h1:
+                    cnt_hys <= io_mcu_data;
+                endcase
+              end
+
           endcase
         end
     end
@@ -2012,7 +2470,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h39;
+                    o_mcu_data <= 8'h3A;
                 endcase
               end
 
@@ -2085,7 +2543,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= { dec_on, fir_en, fir_act, dec_neg_b, dec_neg_a, dec_swap, dec_order };
                   4'h1:
-                    o_mcu_data <= { 2'b0, dec_shift };
+                    o_mcu_data <= { peak_act, peak_en, dec_shift };
                 endcase
               end
 
@@ -2117,6 +2575,45 @@ assign sampling_enable = ~(
             //1.25 ns later, as 0x1535 normally ran); bits 7:4 the last pin check {CH2 A, CH2 B, CH1 A, CH1 B}, 1 = right
             8'h33:
               o_mcu_data <= { enc_ok, 2'b01, enc_pred_ok, enc_err };
+
+            //Trigger qualifier status (0x153A), 3 bytes: { 0, 0, counting, pulse began, EXT, longer, type }, then the
+            //edges still to count before the qualifying one (Nth edge), high byte first; of the EXT qualifier when the
+            //source is EXT, else of the ADC one. Asynchronous: read twice if it matters.
+            8'h34:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    o_mcu_data <= { 2'b00, (trig_src_ext ? q_cv_ext : q_cv_adc), (trig_src_ext ? q_vld_ext : q_vld_adc),
+                                    trig_src_ext, trig_pw_long, trig_type };
+                  4'h1:
+                    o_mcu_data <= trig_src_ext ? q_rem_ext[15:8] : q_rem_adc[15:8];
+                  4'h2:
+                    o_mcu_data <= trig_src_ext ? q_rem_ext[7:0] : q_rem_adc[7:0];
+                endcase
+              end
+
+            //Counter (0x153A), 14 bytes from the snapshot taken at the 0x35 command byte: { new, 0, ext, ch2, gate },
+            //sequence, E, T, W (32 bits each, high byte first)
+            8'h35:
+              begin
+                case(mcu_state)
+                  4'h0:  o_mcu_data <= { m_new, 1'b0, m_cfg[3:2], 2'b00, m_cfg[1:0] };
+                  4'h1:  o_mcu_data <= m_seq;
+                  4'h2:  o_mcu_data <= { 4'd0, m_e[27:24] };
+                  4'h3:  o_mcu_data <= m_e[23:16];
+                  4'h4:  o_mcu_data <= m_e[15:8];
+                  4'h5:  o_mcu_data <= m_e[7:0];
+                  4'h6:  o_mcu_data <= { 4'd0, m_t[27:24] };
+                  4'h7:  o_mcu_data <= m_t[23:16];
+                  4'h8:  o_mcu_data <= m_t[15:8];
+                  4'h9:  o_mcu_data <= m_t[7:0];
+                  4'hA:  o_mcu_data <= { 4'd0, m_w[27:24] };
+                  4'hB:  o_mcu_data <= m_w[23:16];
+                  4'hC:  o_mcu_data <= m_w[15:8];
+                  4'hD:  o_mcu_data <= m_w[7:0];
+                  default: o_mcu_data <= 8'h00;
+                endcase
+              end
 
             //Accumulator / segment table word at the read pointer, bytes 0..7 (0x1536)
             8'h2B:
