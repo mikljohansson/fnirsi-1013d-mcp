@@ -698,3 +698,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   cd8bf6fc27d1d5cf9cdd733f9d2721b024d6a73b0004d393166965c5132d65ef, nommu 372267eb7917580ce0274f381bb02245b503c8ee1f6076dcdb108d2c4a752e5f,
   pinned in backups/. Not loaded (soak still on COM10). Note for the owner before loading: from 0.2.52 the firmware writes SD sector 709
   (settings) once at every boot when the sector loaded valid; SD sectors 700-710 are backed up (backups/), the stock boot chain is untouched.
+- 2026-10-19 15:05: fw 0.2.54 (touch fixes batch 1 on 0.2.52; merge of fw-touch1) built with GCC 10, MMU image sha256
+  05a126f77cfb8750958959e50132252b6abc94fe5ccaa3efb946467b914c6ba6, nommu 572784ed5b6160f599682576a0fd5f8f0d014013f3b68eadd49e498edc50a419,
+  pinned in backups/. This is the image to load for the next owner session (steps 1 + readers + touch handles). Not loaded.

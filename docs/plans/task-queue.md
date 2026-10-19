@@ -197,6 +197,12 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   0x1537 if the FPGA is at fault), docs-gen3 (Sonnet: protocol tidy, README timings, roadmap.md, announcement draft,
   release-readiness.md). Queued behind them: fw-ui4 (step 4, needs fw-readers), Measurements v2 (needs step 2), touch batches 2-3,
   mcp 1.16/1.17, Bode device steps (after the owner's Bode bench), 0.3.0 release.
+- fw-touch1 (done 15:05, about 200k tokens, retired): merged as fw 0.2.54 (touch_pick.c handles column, first-touch pick, nearest
+  switched-on channel, shared clamped channel+trigger move, EXT fix, clamps 6..396; test_touch_pick 538 checks); images pinned
+  backups/fw-0.2.54_05a126f7.bin and fw-0.2.54-nommu_572784ed.bin; walk-through firmware/AGENTS.md section 32; not loaded.
+  Provisional numbers are kept as final (merge order differs from numeric order; 0.2.53 = fw-ui2 lands later).
+- docs-gen3 (done 15:00, about 230k tokens, retired): merged 6f1ea23 (protocol tidy, README MMU timings, roadmap.md rewrite,
+  announcement.md draft, release-readiness.md with 12 findings -> queued item).
 - fw-readers (done 14:45, about 465k tokens, retired): merged 72eacb3 as fw 0.2.52 / protocol 1.16 (row 55: GET_HEALTH 0x000A,
   SD_INFO image identity, GET_CAL 356 B with provenance, SAVE_REPORT 0x0504, power-on count in settings words 224..255, sector 709
   written once per boot); images pinned backups/fw-0.2.52_cd8bf6fc.bin and fw-0.2.52-nommu_372267eb.bin; host tests green;
