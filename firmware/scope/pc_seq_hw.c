@@ -150,7 +150,8 @@ void pc_hal_seq_read(uint8_t byte, uint32_t first, uint32_t count, uint8_t *dst,
 
 int pc_seq_ui_conversion(int ui, const pc_decim_cfg *c, uint32 divider)
 {
-  uint32 n, run_us, log2n;
+  uint32 n, log2n;
+  uint32_t run_us;
 
   ui_run     = 0;
   ui_stopped = 0;
@@ -298,7 +299,7 @@ int pc_seq_ui_feed(void *settings, int16 *feed, uint32 n)
   }
 
   for(w=words*2;w<n;w++)
-    feed[w] = feed[(words * 2) ? words * 2 - 1 : 0];
+    feed[w] = feed[words ? words * 2 - 1 : 0];
 
   return 1;
 }

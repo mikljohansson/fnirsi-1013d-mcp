@@ -549,7 +549,7 @@ triggered record (pretrigger included) into a 2048 x 64 accumulator. Writes 0x57
   and the latest run; READ_SEQ returns the table (u64 entries) or the averaged record (lane sums >> S, or u32 sums for
   16-bit records); READ_RAW addr_mode 3 reads segment s relative to its record start, wrapping at the slot end. A segment
   run builds no trace (READ_TRACE E_STATE 5); an averaging run's last record is a normal capture in the ring.
-- Memory: `ui_lane` 8 KiB .bss; the GCC 10 image grows by about 12 KiB (504,832 -> about 517,000 bytes).
+- Memory (GCC 10, against main at 0.2.55): .text +11,888 bytes, .bss +8,228 (`ui_lane` 8 KiB), image 536,576 -> 548,352 bytes.
 - Host tests: `test_seq.c` (fit limits from the README, every m, register bytes, entry bit positions, slot wrap, the
   plan at the table rates, `pc_seq_udiv` exact for every c 1..256 at all multiples below 2^24, `pc_seq_avg_code` equal
   to the per-sample correction for constant records), `test_session.c` `test_seq_older_bitstreams` / `test_seq_segments`
