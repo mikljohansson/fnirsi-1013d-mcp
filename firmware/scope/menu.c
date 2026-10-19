@@ -26,6 +26,8 @@
 #include "ui_menu.h"
 #include "ui_settings.h"
 #include "ui_ctrl.h"
+#include "ui_meas.h"
+#include "spectrum.h"
 #include "ctrl_page.h"
 
 //USB drive screen: the Exit button (fw 0.2.51)
@@ -342,14 +344,15 @@ void scope_setup_right_control_menu(void)
   //Check in which state the right menu is in
   if(scopesettings.rightmenustate == 0)
   {
-    //Main control state so draw the always used buttons; fw 0.2.56: the spectrum leaves the cursor and measurement
-    //slots empty (ui_p1_shown) until spectrum markers and its own measurement list exist
+    //Main control state so draw the always used buttons; fw 0.2.56: the spectrum leaves the cursor slots empty
+    //(ui_p1_shown) until spectrum markers exist; fw 0.2.65: MEASURES opens the spectrum's own list there
     if(ui_p1_shown(UI_P1_TCURSOR, ctrl_page_spectrum()))
     {
       scope_t_cursor_button(0);
       scope_v_cursor_button(0);
-      scope_measures_button(0);
     }
+
+    scope_measures_button(0);
 
     scope_save_picture_button(0);
 
@@ -6847,272 +6850,166 @@ void scope_open_v_cursor_menu(void)
 */
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//fw 0.2.65 (Measurements v2): the MEASURES menu of the current mode (ui_meas.h): a title band with the mode's name, then
+//44 px rows. Scope: the sources (the channel, its reference traces), Select All / Clear / Hide, the twelve items per
+//channel. Spectrum: the channel label, Select All / Clear, the four items per channel, the view's four items across the
+//whole width. Drawn in 1.00o5's look: dark grey, a white edge, black separators (the box is filled black, the cells over
+//it), a double white line between the channels, chosen names white and the others grey, the source and action cells in
+//the block's source colour with black text, Hide orange (the active colour) while the block is hidden. A chosen item
+//shows its place in the row at its top left.
+int scope_measures_mode(void)
+{
+  return ctrl_page_spectrum() ? UI_MS_SPECTRUM : UI_MS_SCOPE;
+}
+
+uint8 *scope_measures_ranks(int mode, int group)
+{
+  if(mode == UI_MS_SPECTRUM)
+    return spectrum_cards()->rank[(group < UI_MS_SP_GROUPS) ? group : 0];
+
+  return scopesettings.measuresstate[group & 1];
+}
+
+int scope_measures_list_len(int mode)
+{
+  return (mode == UI_MS_SPECTRUM) ? UI_MS_SP_PER_GROUP : UI_MEAS_COUNT;
+}
+
+//Colour of source src (0 the channel, 1..4 its reference traces) of channel block ch
+static uint32 scope_measures_color(int ch, int src)
+{
+  static PCHANNELSETTINGS const refs[2][4] =
+  {
+    { &scopesettings.ch_ref1, &scopesettings.ch_ref2, &scopesettings.ch_ref3, &scopesettings.ch_ref4 },
+    { &scopesettings.ch_ref5, &scopesettings.ch_ref6, &scopesettings.ch_ref7, &scopesettings.ch_ref8 }
+  };
+
+  if((src < 1) || (src > 4))
+    return ch ? CHANNEL2_COLOR : CHANNEL1_COLOR;
+
+  return refs[ch & 1][src - 1]->color;
+}
+
+static void scope_measures_cell_text(const ui_msm_cell *c, const FONTDATA *font, const char *text)
+{
+  display_set_font((PFONTDATA)font);
+  display_text(c->x + (c->w - ui_text_width(font, text)) / 2, c->y + (c->h - ((font == &font_3) ? 16 : 13)) / 2,
+               (int8 *)text);
+}
+
+void scope_measures_menu_cell(int mode, const ui_msm_cell *c)
+{
+  int    ch  = c->group & 1;
+  int    src = (mode == UI_MS_SCOPE) ? (ch ? scopesettings.source2_measures : scopesettings.source1_measures) : 0;
+  uint32 color = scope_measures_color(ch, src);
+  uint8 *rank;
+  char   num[4];
+
+  switch(c->what)
+  {
+    case UI_MSC_SOURCE:
+      if(c->index == src)
+      {
+        display_set_fg_color(color);
+        display_fill_rect(c->x, c->y, c->w, c->h);
+        display_set_fg_color(BLACK_COLOR);
+      }
+      else
+      {
+        display_set_fg_color(DARKGREY_COLOR);
+        display_fill_rect(c->x, c->y, c->w, c->h);
+        display_set_fg_color(GREY_COLOR);
+      }
+
+      scope_measures_cell_text(c, &font_2, ui_msm_text(mode, c));
+      break;
+
+    case UI_MSC_HIDE:
+      if(ch ? scopesettings.hide_values_CH2 : scopesettings.hide_values_CH1)
+        color = ITEM_ACTIVE_COLOR;
+      //fall through
+    case UI_MSC_ALL:
+    case UI_MSC_CLEAR:
+    case UI_MSC_LABEL:
+      display_set_fg_color(color);
+      display_fill_rect(c->x, c->y, c->w, c->h);
+      display_set_fg_color(BLACK_COLOR);
+      scope_measures_cell_text(c, &font_2, ui_msm_text(mode, c));
+      break;
+
+    case UI_MSC_ITEM:
+      rank = scope_measures_ranks(mode, c->group);
+
+      display_set_fg_color(DARKGREY_COLOR);
+      display_fill_rect(c->x, c->y, c->w, c->h);
+
+      display_set_fg_color(rank[c->index] ? WHITE_COLOR : GREY_COLOR);
+      scope_measures_cell_text(c, &font_3, ui_msm_text(mode, c));
+
+      if(rank[c->index])
+      {
+        num[0] = (rank[c->index] >= 10) ? (char)('0' + rank[c->index] / 10) : (char)('0' + rank[c->index]);
+        num[1] = (rank[c->index] >= 10) ? (char)('0' + rank[c->index] % 10) : 0;
+        num[2] = 0;
+
+        display_set_font(&font_2);
+        display_set_fg_color(LIGHTGREY2_COLOR);
+        display_text(c->x + 4, c->y + 2, (int8 *)num);
+      }
+      break;
+
+    default:
+      break;
+  }
+}
+
+//Draws the whole menu into the current screen buffer
+void scope_measures_menu_draw(int mode)
+{
+  ui_msm_cell cells[UI_MSM_CELLS_MAX];
+  uint32 top = ui_msm_top(mode), h = ui_msm_height(mode), chan_bottom;
+  int    n, i;
+
+  //Black under everything: what the cells and the title band leave free are the separators
+  display_set_fg_color(BLACK_COLOR);
+  display_fill_rect(UI_MSM_X, top, UI_MSM_W, h);
+
+  display_set_fg_color(DARKGREY_COLOR);
+  display_fill_rect(UI_MSM_X + 1, top + 1, UI_MSM_W - 2, UI_MSM_TITLE_H);
+
+  display_set_font(&font_3);
+  display_set_fg_color(WHITE_COLOR);
+  display_text(UI_MSM_X + (UI_MSM_W - ui_text_width(&font_3, ui_msm_title(mode))) / 2, top + 7, (int8 *)ui_msm_title(mode));
+
+  n = ui_msm_cells(mode, cells);
+
+  for(i = 0; i < n; i++)
+    scope_measures_menu_cell(mode, &cells[i]);
+
+  //The edge, and the double line between the channels down through their rows
+  chan_bottom = (mode == UI_MS_SPECTRUM) ? top + 1 + UI_MSM_TITLE_H + 2 * (UI_MSM_ROW_H + 1) : top + h - 1;
+
+  display_set_fg_color(WHITE_COLOR);
+  display_draw_rect(UI_MSM_X, top, UI_MSM_W, h);
+  display_draw_vert_line(480, top + 1 + UI_MSM_TITLE_H + 1, chan_bottom);
+  display_draw_vert_line(481, top + 1 + UI_MSM_TITLE_H + 1, chan_bottom);
+}
+
 void scope_open_measures_menu(void)
 {
-  int item;
-  int channel;
+  int mode = scope_measures_mode();
 
   //Setup the menu in a separate buffer to be able to slide it onto the screen
-  display_set_screen_buffer(displaybuffertmp);//1
+  display_set_screen_buffer(displaybuffertmp);
 
-  //Draw the background in dark grey
-  display_set_fg_color(DARKGREY_COLOR);
-  display_fill_rect(232, 232, 499, 246);//231-263-501-215 //499
-
-  //Draw the edge in black
-  //display_set_fg_color(BLACK_COLOR);
-  display_set_fg_color(WHITE_COLOR);
-  display_draw_rect(232, 232, 499, 246);//499
-
-  //Three horizontal black lines between the settings y, x, long
-  display_set_fg_color(BLACK_COLOR);
-  //display_set_fg_color(WHITE_COLOR);
-  display_draw_horz_line(264, 233, 728); 
-  display_draw_horz_line(296, 233, 728);
-  display_draw_horz_line(356, 233, 728);
-  display_draw_horz_line(416, 233, 728);
-  
-  scope_source1_measures_menu_item();
-  scope_source2_measures_menu_item();
-  
-  //If hide measures menu item is active change color Hide bar CH1 & CH2
-  //scopesettings.measures_color1 = CHANNEL1_COLOR;
-  //scope_hide_measures_menu_item();
-
-  //Vertical separator between the channel sections
-  //Draw the edge in white
-  //display_set_fg_color(ORANGE_COLOR);
-  display_set_fg_color(WHITE_COLOR);
-  display_draw_vert_line(480, 232, 476);
-  display_draw_vert_line(481, 232, 476);
-
-  //Vertical separators between the items
-  //Draw the edge in black
-  display_set_fg_color(BLACK_COLOR);
-  display_draw_vert_line(294, 233, 475);//294 289 476
-  display_draw_vert_line(356, 233, 475);
-  display_draw_vert_line(418, 233, 475);
-  display_draw_vert_line(544, 233, 475);
-  display_draw_vert_line(606, 233, 475);
-  display_draw_vert_line(668, 233, 475);
-
-
-  //Display the menu items
-  for(channel=0;channel<2;channel++)
-  {
-    //For each channel 12 items
-    for(item=0;item<12;item++)
-    {
-      //Draw the separate items
-      scope_measures_menu_item(channel, item);
-    }
-  }
+  scope_measures_menu_draw(mode);
 
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);
   display_set_screen_buffer((uint16 *)maindisplaybuffer);
 
   //Slide the image onto the actual screen. The speed factor makes it start fast and end slow, Smaller value makes it slower.
-  display_slide_right_rect_onto_screen(232, 232, 499, 246, 75646);//449
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_source1_measures_menu_item(void)
-{
-  //Draw the background in dark gray
-  display_set_fg_color(DARKGREY_COLOR);
-  display_fill_rect(233, 265, 61, 31); //Channel 1 item
-  display_fill_rect(233, 233, 61, 31);
-  display_fill_rect(295, 233, 61, 31);
-  display_fill_rect(357, 233, 61, 31);
-  display_fill_rect(419, 233, 61, 31);
-  
-switch (scopesettings.source1_measures)
-{
-  case 0:
-    scopesettings.measures_color1 = CHANNEL1_COLOR;
-    display_set_fg_color(scopesettings.measures_color1);
-    display_fill_rect(233, 265, 61, 31); //Channel 1 item
-    break;
-  case 1:
-    scopesettings.measures_color1 = scopesettings.ch_ref1.color;
-    display_set_fg_color(scopesettings.measures_color1);
-    display_fill_rect(233, 233, 61, 31);
-    break;
-  case 2:
-    scopesettings.measures_color1 = scopesettings.ch_ref2.color;
-    display_set_fg_color(scopesettings.measures_color1);
-    display_fill_rect(295, 233, 61, 31);
-    break;
-  case 3:
-    scopesettings.measures_color1 = scopesettings.ch_ref3.color;
-    display_set_fg_color(scopesettings.measures_color1);
-    display_fill_rect(357, 233, 61, 31);
-    break;
-  case 4:
-    scopesettings.measures_color1 = scopesettings.ch_ref4.color;
-    display_set_fg_color(scopesettings.measures_color1);
-    display_fill_rect(419, 233, 61, 31);
-    break;
-  default:
-    scopesettings.measures_color1 = CHANNEL1_COLOR;
-    display_set_fg_color(scopesettings.measures_color1);
-    display_fill_rect(233, 265, 61, 31); //Channel 1 item
-    break;
-}
-  //Select all_1 item 
-  display_fill_rect(295, 265, 61, 31);
-  //Clear_1 item
-  display_fill_rect(357, 265, 61, 31);
-   
-  display_set_font(&font_2);
-  display_set_fg_color(GREY_COLOR);
-  display_text(253, 273, "CH1");
-  display_text(250, 242, "Ref 1");
-  display_text(312, 242, "Ref 2");
-  display_text(374, 242, "Ref 3");
-  display_text(436, 242, "Ref 4");
-  
-  //Display the channel identifier text in black
-  display_set_fg_color(BLACK_COLOR);
-  display_text(300, 273, "Select All");
-  display_text(375, 273, "Clear");  
-  
-  if(scopesettings.source1_measures == 0) display_text(253, 273, "CH1");
-  if(scopesettings.source1_measures == 1) display_text(250, 242, "Ref 1");
-  if(scopesettings.source1_measures == 2) display_text(312, 242, "Ref 2"); 
-  if(scopesettings.source1_measures == 3) display_text(374, 242, "Ref 3");
-  if(scopesettings.source1_measures == 4) display_text(436, 242, "Ref 4");
-  
-  //If hide measures menu item is active change color Hide bar CH1 & CH2
-  scope_hide_measures_menu_item();  //change source color of button
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_source2_measures_menu_item(void)
-{
-  //Draw the background in dark grey
-  display_set_fg_color(DARKGREY_COLOR);
-  
-  display_fill_rect(482, 265, 62, 31);//246
-  display_fill_rect(482, 233, 62, 31);
-  display_fill_rect(545, 233, 61, 31);
-  display_fill_rect(607, 233, 61, 31);
-  display_fill_rect(669, 233, 61, 31);
-  
-switch (scopesettings.source2_measures)
-{
-  case 0:
-    scopesettings.measures_color2 = CHANNEL2_COLOR;
-    display_set_fg_color(scopesettings.measures_color2);
-    display_fill_rect(482, 265, 62, 31); //Channel 2 item
-    break;
-  case 1:
-    scopesettings.measures_color2 = scopesettings.ch_ref5.color;
-    display_set_fg_color(scopesettings.measures_color2);
-    display_fill_rect(482, 233, 62, 31);
-    break;
-  case 2:
-    scopesettings.measures_color2 = scopesettings.ch_ref6.color;
-    display_set_fg_color(scopesettings.measures_color2);
-    display_fill_rect(545, 233, 61, 31);
-    break;
-  case 3:
-    scopesettings.measures_color2 = scopesettings.ch_ref7.color;
-    display_set_fg_color(scopesettings.measures_color2);
-    display_fill_rect(607, 233, 61, 31);
-    break;
-  case 4:
-    scopesettings.measures_color2 = scopesettings.ch_ref8.color;
-    display_set_fg_color(scopesettings.measures_color2);
-    display_fill_rect(669, 233, 61, 31);
-    break;
-  default:
-    scopesettings.measures_color2 = CHANNEL2_COLOR;
-    display_set_fg_color(scopesettings.measures_color2);
-    display_fill_rect(482, 265, 62, 31); //Channel 1 item
-    break;
-}
-  //Select all_2
-  display_fill_rect(545, 265, 61, 31);
-  //Clear_2 item
-  display_fill_rect(607, 265, 61, 31);
-  
-  display_set_font(&font_2);
-  display_set_fg_color(GREY_COLOR);
-  display_text(503, 273, "CH2");
-  display_text(499, 242, "Ref 5");
-  display_text(562, 242, "Ref 6");
-  display_text(624, 242, "Ref 7");
-  display_text(686, 242, "Ref 8");
-    
-  //Display the channel identifier text in black
-  display_set_fg_color(BLACK_COLOR);
-  display_text(550, 273, "Select All");
-  display_text(625, 273, "Clear");  //623 
-
-  if(scopesettings.source2_measures == 0) display_text(503, 273, "CH2");
-  if(scopesettings.source2_measures == 1) display_text(499, 242, "Ref 5");
-  if(scopesettings.source2_measures == 2) display_text(562, 242, "Ref 6");
-  if(scopesettings.source2_measures == 3) display_text(624, 242, "Ref 7");
-  if(scopesettings.source2_measures == 4) display_text(686, 242, "Ref 8");
-  
-  //If hide measures menu item is active change color Hide bar CH1 & CH2
-  scope_hide_measures_menu_item();  //change source color of button
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_hide_measures_menu_item(void)
-{
-  //Channel 1 HIDE top bar
-  if( scopesettings.hide_values_CH1) display_set_fg_color(RED_COLOR); else display_set_fg_color(scopesettings.measures_color1);
-  display_fill_rect(419, 265, 61, 31);
-
-  //Channel 2 HIDE top bar
-  if( scopesettings.hide_values_CH2) display_set_fg_color(RED_COLOR); else display_set_fg_color(scopesettings.measures_color2);
-  display_fill_rect(669, 265, 61, 31);   
-  
-  //Display text Hide in black
-  display_set_fg_color(BLACK_COLOR);
-  display_set_font(&font_2);
-  display_text(438, 273, "Hide");  
-  display_text(690, 273, "Hide");     
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_measures_menu_item(int channel, int item)
-{
-  //fw 0.2.51: the names of the cards (ui_fmt.h measurement_names), centred in their 62 px cells: four per row, rows
-  //at y 316, 376 and 437, CH1 from x 232 and CH2 from x 482
-  static const uint16 row_y[3] = { 316, 376, 437 };
-  const char *text;
-  uint32 xc;
-
-  if((item < 0) || (item >= UI_MEAS_COUNT))
-    return;
-
-  text = measurement_names[item];
-  xc   = (channel ? 482 : 232) + 31 + 62 * (item & 3);
-
-  //Check if item is on or off
-  if(scopesettings.measuresstate[channel][item] == 0)
-  {
-    //Off so some dark grey text
-    display_set_fg_color(GREY_COLOR);
-  }
-  else
-  {
-    //On so white text
-    display_set_fg_color(WHITE_COLOR);
-  }
-
-  //Display the text
-  display_set_font(&font_3);
-  display_text(xc - ui_text_width(&font_3, text) / 2, row_y[item >> 2], (int8 *)text);
+  display_slide_right_rect_onto_screen(UI_MSM_X, ui_msm_top(mode), UI_MSM_W, ui_msm_height(mode), 75646);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

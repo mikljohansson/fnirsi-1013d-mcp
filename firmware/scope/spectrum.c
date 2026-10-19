@@ -6,7 +6,8 @@
 //   y  50       the waterfall's and density's colour legend at the right
 //   y  66..410  plot, 10 x 8 divisions of 72 x 43 px (x 6..726); warnings at its top middle
 //   y 413       frequency labels: start, centre, stop
-//   y 446..467  the cards (fw 0.2.56): peak and level per channel, RBW, the waterfall's time span
+//   y 446..467  the cards (fw 0.2.56; chosen through MEASURES since 0.2.65, ui_meas.h): peak, level, THD, noise per
+//               channel, RBW, span, centre, the waterfall's time span
 // The parameters are on the CTRL page (ctrl_page.c: Display, Analyse); the strip and the header line went in fw 0.2.56.
 // Integer only (no FPU): levels in centi-dB, frequencies in mHz (uint64).
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -26,6 +27,7 @@
 #include "pc_hooks.h"
 #include "ui_ctrl.h"
 #include "ui_fmt.h"
+#include "ui_meas.h"
 
 #include <string.h>
 
@@ -667,44 +669,82 @@ static uint32 spec_draw_trace(const SPECVIEW *v, const int16 *db, uint32 color)
   return peak;
 }
 
-//The cards in the bottom row (fw 0.2.56, owner; the one-line header before): per shown channel its peak frequency and
-//level in the channel colour, then the resolution bandwidth and, in the waterfall, the time its rows span, with a
-//neutral chip (ui_spec_cards). The decimation filter tag is not shown: the filter lives in the acquisition menu.
-static void spec_draw_cards(const uint32 *peak, int hch, uint64 bin_mhz)
+//The cards in the bottom row (fw 0.2.56, owner; the one-line header before). fw 0.2.65 (Measurements v2): the ones chosen
+//in the spectrum's MEASURES list in the chosen order (ui_ms_spec_cards): per shown channel Peak, Level, THD and Noise in
+//the channel colour, then RBW, Span, Center and, in the waterfall, the time its rows span with a neutral chip; six fit,
+//with more the last place reads "+N more". The decimation filter tag is not shown: the filter lives in the acquisition
+//menu.
+static ui_ms_spec spec_cards = { { { 1, 2, 3, 0 }, { 1, 2, 0, 0 }, { 1, 0, 0, 2 } } };   //ui_ms_spec_defaults
+
+ui_ms_spec *spectrum_cards(void)
 {
-  ui_spec_card c[UI_SC_MAX];
-  uint8        shown[2];
-  char         t[24];
-  int          n, i, ch;
+  return &spec_cards;
+}
+
+static void spec_draw_cards(const SPECVIEW *v, const uint32 *peak, int hch, uint64 bin_mhz)
+{
+  ui_ms_card  c[UI_MS_ROW_CARDS];
+  uint8       shown[2];
+  char        t[24], more[4];
+  const char *name;
+  int         n, i, ch;
+  int32       r;
 
   for(ch = 0; ch < 2; ch++)
     shown[ch] = spec.have[ch] && peak[ch] && ((spec.view == VIEW_SPECTRUM) || (ch == hch));
 
-  n = ui_spec_cards(shown, (spec.view == VIEW_WATERFALL) && (wf_count > 1), c);
+  n = ui_ms_spec_cards(&spec_cards, shown, (spec.view == VIEW_WATERFALL) && (wf_count > 1), c);
 
   for(i = 0; i < n; i++)
   {
     uint32 color = LIGHTGREY2_COLOR;
 
-    ch = c[i].ch;
+    ch   = c[i].ch;
+    name = (c[i].kind < UI_MS_SP_KINDS) ? ui_ms_sp_names[c[i].kind] : "";
+
+    if(c[i].kind <= UI_MS_SP_NOISE)
+      color = ch ? CHANNEL2_COLOR : CHANNEL1_COLOR;
 
     switch(c[i].kind)
     {
-      case UI_SC_PEAK:
+      case UI_MS_SP_PEAK:
         ui_fmt_mhz(t, bin_mhz * peak[ch]);
-        color = ch ? CHANNEL2_COLOR : CHANNEL1_COLOR;
         break;
 
-      case UI_SC_LEVEL:
+      case UI_MS_SP_LEVEL:
         ui_fmt_cdb(t, spec_db[ch][peak[ch]], spec_frame[ch].unit_amps ? "dBA" : "dBV");
-        color = ch ? CHANNEL2_COLOR : CHANNEL1_COLOR;
         break;
 
-      case UI_SC_RBW:
+      //Harmonics 2..10 of the peak over the whole axis (they may lie outside a zoomed span)
+      case UI_MS_SP_THD:
+        r = ui_ms_thd(spec_db[ch], v->half, peak[ch]);
+        if(r == UI_MS_THD_F0_LOW)
+          strcpy(t, "f0 too low");
+        else if(r == UI_MS_THD_F0_HIGH)
+          strcpy(t, "f0 too high");
+        else
+          ui_fmt_sig4_fixed(t, r, "%");
+        break;
+
+      //The latest record's median over the shown span (DC bins skipped), at the RBW
+      case UI_MS_SP_NOISE:
+        ui_fmt_cdb(t, ui_ms_noise_cdb(spec_raw[ch], (v->first < 2) ? 2 : v->first, v->first + v->span),
+                   spec_frame[ch].unit_amps ? "dBA" : "dBV");
+        break;
+
+      case UI_MS_SP_RBW:
         ui_fmt_mhz(t, (bin_mhz * fx_enbw_milli(spec.window) + 500) / 1000);
         break;
 
-      default:
+      case UI_MS_SP_SPAN:
+        ui_fmt_mhz(t, bin_mhz * v->span);
+        break;
+
+      case UI_MS_SP_CENTER:
+        ui_fmt_mhz(t, (bin_mhz * (2 * (uint64)v->first + v->span)) / 2);
+        break;
+
+      case UI_MS_SP_TIME:
       {
         uint32 oldest = (wf_head + HIST_H - wf_count) % HIST_H;
 
@@ -712,9 +752,14 @@ static void spec_draw_cards(const uint32 *peak, int hch, uint64 bin_mhz)
         ui_fmt_sig4(t, (int32)((timer0ticks - wf_ms[oldest]) / 10), 4, "s");
         break;
       }
+
+      default:
+        name = ui_ms_more_text(more, ch);
+        strcpy(t, "more");
+        break;
     }
 
-    scope_draw_card(ui_spec_card_x(i), UI_SC_Y, color, ui_sc_names[c[i].kind], t);
+    scope_draw_card(ui_ms_card_x(0, i), UI_MS_SPEC_Y, color, name, t);
   }
 }
 
@@ -1308,7 +1353,7 @@ static int spectrum_display_body(void)
     spec_draw_legend(&v, hch);
   }
 
-  spec_draw_cards(peak, hch, bin_mhz);
+  spec_draw_cards(&v, peak, hch, bin_mhz);
 
   display_set_source_buffer(displaybuffertmp);
   display_set_screen_buffer((uint16 *)maindisplaybuffer);

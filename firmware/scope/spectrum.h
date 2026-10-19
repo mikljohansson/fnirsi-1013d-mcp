@@ -10,6 +10,7 @@
 #define SPECTRUM_H
 
 #include "types.h"
+#include "ui_meas.h"
 
 //Display modes as GET_STATUS byte 43 reports them (protocol section 14 row 45)
 #define SPECTRUM_MODE_SCOPE       0
@@ -66,5 +67,8 @@ int32  spectrum_read(int ch, uint32 first, uint32 max_bins, uint8 *hdr, uint8 *l
 //Settings sector words (fw 0.2.39): FFT length, window, scale (word 0) and ref level (word 1)
 uint16 spectrum_settings_word(int i);
 void   spectrum_settings_restore(uint16 w0, uint16 w1);
+
+//fw 0.2.65: the spectrum's MEASURES list (the cards; saved in words 221..223 by scope_save_config_data, ui_meas.h)
+ui_ms_spec *spectrum_cards(void);
 
 #endif

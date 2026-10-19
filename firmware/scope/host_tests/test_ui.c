@@ -1,7 +1,8 @@
 // test_ui.c - the screens' pure parts (fw 0.2.51): card value formatting and card fit with the device's own font tables
 // (ui_fmt.c, font_2.c), the main menu row table, hit areas and mode rule (ui_menu.c), the Settings fold-out and screen
 // (ui_settings.c, fw 0.2.55): rows, hit areas against the drawn rectangles, values, text fit, start-up choice, dialog;
-// the CTRL page, fold-outs, warnings and spectrum cards (ui_ctrl.c, fw 0.2.56).
+// the CTRL page, fold-outs and warnings (ui_ctrl.c, fw 0.2.56); Measurements v2 (ui_meas.c, fw 0.2.65): the MEASURES
+// lists, display order, card fit, spectrum cards, THD / noise maths, card sources, the MEASURES menu geometry.
 // Run natively.
 
 #include <stdio.h>
@@ -11,6 +12,7 @@
 #include "ui_menu.h"
 #include "ui_settings.h"
 #include "ui_ctrl.h"
+#include "ui_meas.h"
 #include "test_util.h"
 
 extern FONTDATA font_2, font_3, font_5;
@@ -273,7 +275,7 @@ static void test_ctrl_page(void)
   for(item = UI_P1_CTRL; item <= UI_P1_SAVEWAVE; item++)
   {
     T_EQ(ui_p1_shown(item, 0), 1);
-    T_EQ(ui_p1_shown(item, 1), !((item == UI_P1_TCURSOR) || (item == UI_P1_VCURSOR) || (item == UI_P1_MEASURES)));
+    T_EQ(ui_p1_shown(item, 1), !((item == UI_P1_TCURSOR) || (item == UI_P1_VCURSOR)));   //fw 0.2.65: MEASURES too
   }
 
   //Button texts fit the 51 px buttons (2 px margins) in the 13 px font
@@ -445,40 +447,386 @@ static void test_warnings(void)
 
 static void test_spec_cards(void)
 {
-  static const char *values[] = { "25.00MHz", "999.9kHz", "-100.0dBV", "+60.0dBA", "12.21kHz", "999.9s" };
-  ui_spec_card c[UI_SC_MAX];
-  uint8        shown[2];
-  int          n, i;
-  unsigned     j;
+  static const char *values[] = { "25.00MHz", "999.9kHz", "-100.0dBV", "+60.0dBA", "12.21kHz", "999.9s", "100.0%",
+                                  "0.01%", "f0 too low", "f0 too high", "more" };
+  ui_ms_card c[UI_MS_ROW_CARDS];
+  ui_ms_spec s;
+  uint8      shown[2];
+  int        n, i;
+  unsigned   j;
 
+  //Defaults (plan section 3a): CH1 Peak, Level, THD; CH2 Peak, Level; RBW, Time; both channels fill the row exactly
+  ui_ms_spec_defaults(&s);
   shown[0] = 1; shown[1] = 1;
-  n = ui_spec_cards(shown, 1, c);
-  T_EQ(n, UI_SC_MAX);
-  T_EQ(c[0].kind, UI_SC_PEAK);  T_EQ(c[0].ch, 0);
-  T_EQ(c[1].kind, UI_SC_LEVEL); T_EQ(c[1].ch, 0);
-  T_EQ(c[2].kind, UI_SC_PEAK);  T_EQ(c[2].ch, 1);
-  T_EQ(c[3].kind, UI_SC_LEVEL); T_EQ(c[3].ch, 1);
-  T_EQ(c[4].kind, UI_SC_RBW);
-  T_EQ(c[5].kind, UI_SC_TIME);
+  n = ui_ms_spec_cards(&s, shown, 1, c);
+  T_EQ(n, UI_MS_ROW_CARDS);
+  T_EQ(c[0].kind, UI_MS_SP_PEAK);  T_EQ(c[0].ch, 0);
+  T_EQ(c[1].kind, UI_MS_SP_LEVEL); T_EQ(c[1].ch, 0);
+  T_EQ(c[2].kind, UI_MS_SP_THD);   T_EQ(c[2].ch, 0);
+  T_EQ(c[3].kind, UI_MS_SP_PEAK);  T_EQ(c[3].ch, 1);
+  T_EQ(c[4].kind, UI_MS_SP_LEVEL); T_EQ(c[4].ch, 1);
+  T_EQ(c[5].kind, UI_MS_SP_MORE);  T_EQ(c[5].ch, 2);       //RBW and Time cut: "+2"
+
+  //Without the waterfall Time drops and everything fits
+  n = ui_ms_spec_cards(&s, shown, 0, c);
+  T_EQ(n, 6);
+  T_EQ(c[5].kind, UI_MS_SP_RBW);
+
+  //The static default in spectrum.c is the same
+  {
+    ui_ms_spec d = { { { 1, 2, 3, 0 }, { 1, 2, 0, 0 }, { 1, 0, 0, 2 } } };
+    T_MEM(&d, &s, sizeof(s));
+  }
 
   //The last of six cards ends inside the 726 px plot (x 2..727)
-  T_TRUE(ui_spec_card_x(UI_SC_MAX - 1) + UI_CARD_W <= 728);
-  T_TRUE(UI_SC_Y + UI_CARD_H <= 480);
+  T_TRUE(ui_ms_card_x(0, UI_MS_ROW_CARDS - 1) + UI_CARD_W <= 728);
+  T_TRUE(UI_MS_SPEC_Y + UI_CARD_H <= 480);
 
   shown[0] = 0;
-  n = ui_spec_cards(shown, 0, c);
+  n = ui_ms_spec_cards(&s, shown, 0, c);
   T_EQ(n, 3);
   T_EQ(c[0].ch, 1);
-  T_EQ(c[2].kind, UI_SC_RBW);
+  T_EQ(c[2].kind, UI_MS_SP_RBW);
 
   shown[1] = 0;
-  n = ui_spec_cards(shown, 0, c);
+  n = ui_ms_spec_cards(&s, shown, 0, c);
   T_EQ(n, 1);
-  T_EQ(c[0].kind, UI_SC_RBW);
+  T_EQ(c[0].kind, UI_MS_SP_RBW);
 
-  for(i = 0; i < 4; i++)
+  //The user's order is kept: Noise, then Peak for CH1; Center before RBW
+  ui_ms_clear(s.rank[0], 4);
+  ui_ms_toggle(s.rank[0], 4, UI_MS_SP_NOISE);
+  ui_ms_toggle(s.rank[0], 4, UI_MS_SP_PEAK);
+  ui_ms_clear(s.rank[2], 4);
+  ui_ms_toggle(s.rank[2], 4, UI_MS_SP_CENTER - 4);
+  ui_ms_toggle(s.rank[2], 4, UI_MS_SP_RBW - 4);
+  shown[0] = 1;
+  n = ui_ms_spec_cards(&s, shown, 1, c);
+  T_EQ(n, 4);
+  T_EQ(c[0].kind, UI_MS_SP_NOISE);
+  T_EQ(c[1].kind, UI_MS_SP_PEAK);
+  T_EQ(c[2].kind, UI_MS_SP_CENTER);
+  T_EQ(c[3].kind, UI_MS_SP_RBW);
+
+  //Settings words: marker, round trip, bad words give the group's defaults
+  for(i = 0; i < UI_MS_SP_GROUPS; i++)
+  {
+    ui_ms_spec t;
+    uint16 w = ui_ms_spec_word(&s, i);
+
+    T_EQ(w & 0xF000, UI_MS_SPEC_MARKER);
+    ui_ms_spec_defaults(&t);
+    T_EQ(ui_ms_spec_restore(&t, i, w), 1);
+    T_MEM(t.rank[i], s.rank[i], 4);
+  }
+  {
+    ui_ms_spec t, d;
+
+    ui_ms_spec_defaults(&d);
+    memset(&t, 0, sizeof(t));
+    T_EQ(ui_ms_spec_restore(&t, 0, 0x0000), 0);           //an old sector: no marker
+    T_MEM(t.rank[0], d.rank[0], 4);
+    T_EQ(ui_ms_spec_restore(&t, 1, 0xA007), 0);           //rank 7 > 4
+    T_MEM(t.rank[1], d.rank[1], 4);
+    T_EQ(ui_ms_spec_restore(&t, 2, 0xA000), 1);           //valid: nothing chosen
+    T_EQ(t.rank[2][0] | t.rank[2][1] | t.rank[2][2] | t.rank[2][3], 0);
+    T_EQ(ui_ms_spec_restore(&t, 0, 0xA000 | (2 << 3) | (2 << 6)), 1);   //ties renumbered in item order
+    T_EQ(t.rank[0][1], 1);
+    T_EQ(t.rank[0][2], 2);
+  }
+  T_EQ(UI_MS_SPEC_WORD_CH1, 223);
+  T_EQ(UI_MS_SPEC_WORD_CH2, 222);
+  T_EQ(UI_MS_SPEC_WORD_VIEW, 221);
+
+  for(i = 0; i < UI_MS_SP_KINDS; i++)
     for(j = 0; j < sizeof(values) / sizeof(values[0]); j++)
-      T_TRUE(ui_card_fits(&font_2, ui_sc_names[i], values[j]));
+    {
+      int fits = ui_card_fits(&font_2, ui_ms_sp_names[i], values[j]);
+
+      if(!fits)
+        printf("does not fit: %s %s\n", ui_ms_sp_names[i], values[j]);
+      T_TRUE(fits);
+    }
+}
+
+//Selection model: ranks, order, toggle, select all, clear, Scope defaults
+static void test_meas_order(void)
+{
+  uint8 r[12], o[12];
+  int   n, i;
+
+  //Defaults show as Freq, Vpp, Vavg (plan 3a), not in table order
+  ui_ms_scope_defaults(r);
+  n = ui_ms_order(r, 12, o);
+  T_EQ(n, 3);
+  T_EQ(o[0], UI_MEAS_FREQ);
+  T_EQ(o[1], UI_MEAS_VPP);
+  T_EQ(o[2], UI_MEAS_VAVG);
+
+  //1.00o5 settings (every chosen byte 1): table order
+  memset(r, 0, sizeof(r));
+  r[6] = 1; r[2] = 1; r[4] = 1;
+  n = ui_ms_order(r, 12, o);
+  T_EQ(n, 3);
+  T_EQ(o[0], 2); T_EQ(o[1], 4); T_EQ(o[2], 6);
+
+  //Turning one on puts it last; turning one off closes the gap; turning it on again puts it last again
+  ui_ms_scope_defaults(r);
+  T_EQ(ui_ms_toggle(r, 12, 0), 1);                     //Vmax
+  n = ui_ms_order(r, 12, o);
+  T_EQ(n, 4); T_EQ(o[3], 0);
+  T_EQ(ui_ms_toggle(r, 12, UI_MEAS_VPP), 0);
+  n = ui_ms_order(r, 12, o);
+  T_EQ(n, 3);
+  T_EQ(o[0], UI_MEAS_FREQ); T_EQ(o[1], UI_MEAS_VAVG); T_EQ(o[2], 0);
+  T_EQ(r[UI_MEAS_FREQ], 1); T_EQ(r[UI_MEAS_VAVG], 2); T_EQ(r[0], 3); T_EQ(r[UI_MEAS_VPP], 0);
+  ui_ms_toggle(r, 12, UI_MEAS_VPP);
+  T_EQ(r[UI_MEAS_VPP], 4);
+
+  //Out of range items do nothing
+  T_EQ(ui_ms_toggle(r, 12, 12), 0);
+  T_EQ(ui_ms_toggle(r, 12, -1), 0);
+
+  //Select All keeps the chosen order and appends the rest in table order; ranks are a permutation of 1..12
+  ui_ms_select_all(r, 12);
+  n = ui_ms_order(r, 12, o);
+  T_EQ(n, 12);
+  T_EQ(o[0], UI_MEAS_FREQ); T_EQ(o[3], UI_MEAS_VPP);
+  T_EQ(o[4], 1); T_EQ(o[5], 3); T_EQ(o[11], 11);
+  {
+    int seen = 0;
+    for(i = 0; i < 12; i++)
+      seen |= 1 << (r[i] - 1);
+    T_EQ(seen, 0xFFF);
+  }
+
+  ui_ms_clear(r, 12);
+  T_EQ(ui_ms_order(r, 12, o), 0);
+
+  //Garbage ranks (a damaged sector) still give a working order and a clean renumbering on the next change
+  for(i = 0; i < 12; i++)
+    r[i] = (uint8)(255 - i * 7);
+  ui_ms_toggle(r, 12, 5);
+  n = ui_ms_order(r, 12, o);
+  T_EQ(n, 11);
+  for(i = 0; i < 11; i++)
+    T_EQ(r[o[i]], i + 1);
+  T_EQ(o[0], 11);                                      //the lowest garbage rank first
+}
+
+//Card fit: one row, CH1 three places (six without the CH2 block), CH2 three; overflow shows "+N" in the last place
+static void test_meas_fit(void)
+{
+  char t[8];
+  int  more, fit;
+
+  T_EQ(ui_ms_fit(3, 3, &more), 3); T_EQ(more, 0);
+  T_EQ(ui_ms_fit(2, 3, &more), 2); T_EQ(more, 0);
+  T_EQ(ui_ms_fit(0, 3, &more), 0); T_EQ(more, 0);
+  fit = ui_ms_fit(4, 3, &more);
+  T_EQ(fit, 2); T_EQ(more, 2);                         //two values and "+2": nothing cut silently
+  T_EQ(fit + more, 4);
+  fit = ui_ms_fit(12, 6, &more);
+  T_EQ(fit, 5); T_EQ(more, 7);
+  T_EQ(ui_ms_fit(5, 0, &more), 0); T_EQ(more, 0);
+
+  T_EQ(ui_ms_scope_cap(0, 1), 3);
+  T_EQ(ui_ms_scope_cap(0, 0), 6);
+  T_EQ(ui_ms_scope_cap(1, 1), 3);
+  T_EQ(ui_ms_scope_cap(1, 0), 3);
+
+  //The places: CH1 from x 5, CH2 from x 366, 120 px apart; no overlap between the blocks, all inside the plot
+  T_EQ(ui_ms_card_x(0, 0), 5);
+  T_EQ(ui_ms_card_x(1, 0), 366);
+  T_TRUE(ui_ms_card_x(0, 2) + UI_CARD_W < ui_ms_card_x(1, 0));
+  T_TRUE(ui_ms_card_x(1, 2) + UI_CARD_W <= 728);
+  T_TRUE(ui_ms_card_x(0, 5) + UI_CARD_W <= 728);
+  T_TRUE(UI_MS_SCOPE_Y + UI_CARD_H <= 452);            //above the record-position slider
+
+  T_STR(ui_ms_more_text(t, 2), "+2");
+  T_STR(ui_ms_more_text(t, 11), "+11");
+  T_TRUE(ui_card_fits(&font_2, "+11", "more"));
+}
+
+//THD and noise floor maths on synthetic level arrays
+static void test_meas_spectrum_maths(void)
+{
+  static int16 db[1025];
+  int32 thd;
+  int   k;
+
+  //pow: 0 dB = 1, -10 dB = 0.1, +10 dB = 10, -3 dB about 0.501, clamps
+  T_EQ(ui_ms_pow_q24(0), 1 << 24);
+  T_EQ(ui_ms_pow_q24(-1000), 1677721);
+  T_EQ(ui_ms_pow_q24(1000), 167772160);
+  T_TRUE(ui_ms_pow_q24(-300) > 8400000 && ui_ms_pow_q24(-300) < 8420000);
+  T_TRUE(ui_ms_pow_q24(-305) < ui_ms_pow_q24(-300));
+  T_EQ(ui_ms_pow_q24(-20000), ui_ms_pow_q24(-12000));
+  T_EQ(ui_ms_pow_q24(9000), ui_ms_pow_q24(2000));
+
+  //A tone at bin 20 (0 dBV over three bins), harmonic 2 at -20 dBc and 3 at -30 dBc on the same three-bin shape:
+  //THD = sqrt(0.01 + 0.001) = 10.49 %
+  for(k = 0; k <= 1024; k++)
+    db[k] = -12000;
+  db[19] = -600; db[20] = 0; db[21] = -600;
+  db[40] = -2000; db[39] = -2600; db[41] = -2600;
+  db[61] = -3000; db[60] = -3600; db[62] = -3600;      //one bin off: found by the search window
+  thd = ui_ms_thd(db, 1024, 20);
+  T_TRUE((thd >= 1045) && (thd <= 1053));
+
+  //No harmonics: below 0.01 %
+  db[40] = db[39] = db[41] = db[61] = db[60] = db[62] = -12000;
+  T_TRUE(ui_ms_thd(db, 1024, 20) <= 1);
+
+  //Limits: fundamental too close to DC, second harmonic past the axis
+  T_EQ(ui_ms_thd(db, 1024, 4), UI_MS_THD_F0_LOW);
+  T_EQ(ui_ms_thd(db, 1024, 600), UI_MS_THD_F0_HIGH);
+  T_EQ(ui_ms_thd(db, 40, 20), UI_MS_THD_F0_HIGH);
+  T_TRUE(ui_ms_thd(db, 41, 20) >= 0);
+
+  //Noise: median of the bins + 1.59 dB, unaffected by a few strong tones
+  for(k = 0; k <= 1024; k++)
+    db[k] = (int16)(-8000 + (k % 5) * 100);            //-80.0 .. -76.0 dB evenly: median -78.0
+  db[100] = 0; db[200] = 0; db[300] = 0;
+  T_EQ(ui_ms_noise_cdb(db, 2, 1024), -7800 + UI_MS_NOISE_MEDIAN_CDB);
+  T_EQ(ui_ms_noise_cdb(db, 5, 5), -8000 + UI_MS_NOISE_MEDIAN_CDB);
+  db[7] = -30000;                                      //clamped to the histogram's range
+  T_EQ(ui_ms_noise_cdb(db, 7, 7), -20000 + UI_MS_NOISE_MEDIAN_CDB);
+}
+
+//Card sources: none by default; a registered one is returned for its item only
+static void test_src_fn(int ch, char *text) { strcpy(text, ch ? "2" : "1"); }
+
+static void test_meas_sources(void)
+{
+  int i;
+
+  for(i = 0; i < UI_MEAS_COUNT; i++)
+    T_TRUE(ui_ms_get_source(i) == 0);
+
+  ui_ms_set_source(UI_MEAS_FREQ, test_src_fn);
+  T_TRUE(ui_ms_get_source(UI_MEAS_FREQ) == test_src_fn);
+  T_TRUE(ui_ms_get_source(7) == 0);
+  T_TRUE(ui_ms_get_source(-1) == 0);
+  T_TRUE(ui_ms_get_source(12) == 0);
+  ui_ms_set_source(99, test_src_fn);                   //ignored
+  ui_ms_set_source(UI_MEAS_FREQ, 0);
+  T_TRUE(ui_ms_get_source(UI_MEAS_FREQ) == 0);
+}
+
+//MEASURES menu: 44 px rows, cells inside the box and apart, every tap inside the box on a cell (title aside), texts
+//fit their cells, the per-mode title
+static void test_meas_menu(void)
+{
+  ui_msm_cell cells[UI_MSM_CELLS_MAX], c;
+  int mode, n, i, j, counts[8];
+  uint32 x, y, top;
+
+  T_STR(ui_msm_title(UI_MS_SCOPE), "Scope measurements");
+  T_STR(ui_msm_title(UI_MS_SPECTRUM), "Spectrum measurements");
+
+  for(mode = 0; mode < 2; mode++)
+  {
+    top = ui_msm_top(mode);
+    n   = ui_msm_cells(mode, cells);
+
+    T_EQ(top + ui_msm_height(mode), UI_MSM_BOTTOM);
+    T_TRUE(top >= 46);                                 //below the top bar
+    T_TRUE(ui_text_width(&font_3, ui_msm_title(mode)) + 8 <= UI_MSM_W);
+    T_EQ(n, (mode == UI_MS_SCOPE) ? 40 : 18);
+
+    memset(counts, 0, sizeof(counts));
+
+    for(i = 0; i < n; i++)
+    {
+      const char *t = ui_msm_text(mode, &cells[i]);
+      const FONTDATA *f = (cells[i].what == UI_MSC_ITEM) ? &font_3 : &font_2;
+
+      counts[cells[i].what]++;
+      T_EQ(cells[i].h, UI_MSM_ROW_H);
+      T_TRUE(cells[i].w >= 48);
+      T_TRUE(cells[i].x > UI_MSM_X);
+      T_TRUE(cells[i].x + cells[i].w <= UI_MSM_X + UI_MSM_W - 1);
+      T_TRUE(cells[i].y > top + UI_MSM_TITLE_H);
+      T_TRUE(cells[i].y + cells[i].h <= UI_MSM_BOTTOM - 1);
+      T_TRUE(t[0] != 0);
+      T_TRUE(ui_text_width(f, t) + 4 <= cells[i].w);
+
+      //The channels' cells stay in their half
+      if((cells[i].group < 2) && !((mode == UI_MS_SPECTRUM) && (cells[i].group == UI_MS_SP_VIEW)))
+      {
+        if(cells[i].group == 0)
+          T_TRUE(cells[i].x + cells[i].w <= 480);
+        else
+          T_TRUE(cells[i].x >= 482);
+      }
+
+      for(j = 0; j < i; j++)
+        T_TRUE((cells[i].x + cells[i].w <= cells[j].x) || (cells[j].x + cells[j].w <= cells[i].x) ||
+               (cells[i].y + cells[i].h <= cells[j].y) || (cells[j].y + cells[j].h <= cells[i].y));
+    }
+
+    if(mode == UI_MS_SCOPE)
+    {
+      T_EQ(counts[UI_MSC_SOURCE], 10);
+      T_EQ(counts[UI_MSC_ALL], 2); T_EQ(counts[UI_MSC_CLEAR], 2); T_EQ(counts[UI_MSC_HIDE], 2);
+      T_EQ(counts[UI_MSC_ITEM], 24);
+    }
+    else
+    {
+      T_EQ(counts[UI_MSC_LABEL], 2); T_EQ(counts[UI_MSC_ALL], 2); T_EQ(counts[UI_MSC_CLEAR], 2);
+      T_EQ(counts[UI_MSC_ITEM], 12); T_EQ(counts[UI_MSC_SOURCE], 0); T_EQ(counts[UI_MSC_HIDE], 0);
+    }
+
+    //Every point: outside the box -1, the title band 0, everything else a cell that contains it (separators go to the
+    //cell left of / above them)
+    for(y = 40; y < 480; y++)
+      for(x = 200; x < 760; x++)
+      {
+        int r = ui_msm_hit(mode, x, y, &c);
+        int inside = (x >= UI_MSM_X) && (x < UI_MSM_X + UI_MSM_W) && (y >= top) && (y < UI_MSM_BOTTOM);
+
+        if(!inside)
+        {
+          if(r != -1) T_EQ(r, -1);
+          continue;
+        }
+
+        if(y < top + 1 + UI_MSM_TITLE_H)
+        {
+          if(r != 0) T_EQ(r, 0);
+          continue;
+        }
+
+        if((x == UI_MSM_X) || (x >= UI_MSM_X + UI_MSM_W - 1) || (y >= UI_MSM_BOTTOM - 1))
+          continue;                                    //the edge itself
+
+        if(r != 1) { T_EQ(r, 1); printf("no cell at %u,%u mode %d\n", x, y, mode); continue; }
+        if(!((x + 1 >= c.x) && (x <= c.x + c.w) && (y + 1 >= c.y) && (y <= c.y + c.h)))
+          T_TRUE(0);
+      }
+  }
+
+  //Scope: the items in table order, four per row, CH1 left; Hide is the third action
+  n = ui_msm_cells(UI_MS_SCOPE, cells);
+  T_TRUE(ui_msm_hit(UI_MS_SCOPE, cells[8].x + 5, cells[8].y + 5, &c) == 1);
+  T_EQ(c.what, UI_MSC_ITEM); T_EQ(c.group, 0); T_EQ(c.index, 0);
+  T_STR(ui_msm_text(UI_MS_SCOPE, &c), "Vmax");
+  T_EQ(cells[7].what, UI_MSC_HIDE);
+  T_EQ(cells[0].what, UI_MSC_SOURCE); T_EQ(cells[0].index, 0);
+  T_STR(ui_msm_text(UI_MS_SCOPE, &cells[0]), "CH1");
+  T_STR(ui_msm_text(UI_MS_SCOPE, &cells[24]), "Ref 8");
+  T_STR(ui_msm_text(UI_MS_SCOPE, &cells[39]), "-Duty");
+  T_EQ(cells[39].group, 1);
+
+  //Spectrum: the view's row spans both halves
+  n = ui_msm_cells(UI_MS_SPECTRUM, cells);
+  T_EQ(cells[n - 4].group, UI_MS_SP_VIEW);
+  T_STR(ui_msm_text(UI_MS_SPECTRUM, &cells[n - 4]), "RBW");
+  T_STR(ui_msm_text(UI_MS_SPECTRUM, &cells[n - 2]), "Center");
+  T_TRUE(cells[n - 4].x < 480 && cells[n - 1].x > 482);
+  T_STR(ui_msm_text(UI_MS_SPECTRUM, &cells[0]), "CH1");
+  T_STR(ui_msm_text(UI_MS_SPECTRUM, &cells[6]), "Noise");
 }
 
 static int in_rect(uint32 x, uint32 y, uint32 x0, uint32 y0, uint32 w, uint32 h)
@@ -879,5 +1227,10 @@ int main(void)
   test_folds();
   test_warnings();
   test_spec_cards();
+  test_meas_order();
+  test_meas_fit();
+  test_meas_spectrum_maths();
+  test_meas_sources();
+  test_meas_menu();
   return t_report("test_ui");
 }

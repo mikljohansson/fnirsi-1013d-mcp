@@ -2,6 +2,7 @@
 
 #include "fnirsi_1013d_scope.h"
 #include "variables.h"
+#include "ui_meas.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 void scope_setup_display_lib(void);
@@ -191,11 +192,13 @@ void scope_show_Input_calibration_fail(void);
 //void scope_open_t_cursor_menu(void);
 //void scope_open_v_cursor_menu(void);
 
-void scope_open_measures_menu(void);
-void scope_source1_measures_menu_item(void);
-void scope_source2_measures_menu_item(void);
-void scope_hide_measures_menu_item(void);
-void scope_measures_menu_item(int channel, int item);
+//fw 0.2.65 (Measurements v2): the MEASURES menu of the current mode (ui_meas.h geometry; handle_measures_menu_touch)
+void   scope_open_measures_menu(void);
+int    scope_measures_mode(void);                      //UI_MS_SCOPE or UI_MS_SPECTRUM (the spectrum view shows)
+uint8 *scope_measures_ranks(int mode, int group);      //the list of a group: Scope measuresstate[ch], Spectrum ranks
+int    scope_measures_list_len(int mode);
+void   scope_measures_menu_cell(int mode, const ui_msm_cell *c);
+void   scope_measures_menu_draw(int mode);             //into the current screen buffer
 
 //----------------------------------------------------------------------------------------------------------------------------------
 

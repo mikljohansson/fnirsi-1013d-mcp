@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// ui_ctrl.h - the right bar's CTRL page, its fold-outs, the warning line and the spectrum's cards (fw 0.2.56, UX makeover
+// ui_ctrl.h - the right bar's CTRL page, its fold-outs, the warning line (fw 0.2.56, UX makeover
 // step 2, docs/plans/ux-makeover.md section 3, docs/ui-guidelines.md sections 2-3). Pure C, no globals, host-buildable
 // (host_tests/test_ui.c): geometry, hit areas, the name tables and the texts. ctrl_page.c draws with them and runs the
 // fold-outs' touch loops; spectrum.c and phosphor.c take their value names from here.
@@ -132,25 +132,5 @@ typedef struct
 } ui_warn_in;
 
 const char *ui_scope_warning(const ui_warn_in *w);
-
-//Spectrum cards (bottom row; plan section 3a): per shown channel Peak and Level in the channel colour, then RBW and, in
-//the waterfall, the time its rows span, both with a neutral chip. One row from x 5 at a 120 px pitch: six fit.
-#define UI_SC_PEAK            0
-#define UI_SC_LEVEL           1
-#define UI_SC_RBW             2
-#define UI_SC_TIME            3
-#define UI_SC_MAX             6
-#define UI_SC_Y               446
-
-typedef struct
-{
-  uint8 kind;
-  uint8 ch;
-} ui_spec_card;
-
-extern const char *const ui_sc_names[4];                         //Peak, Level, RBW, Time
-
-int    ui_spec_cards(const uint8 shown[2], int time_ok, ui_spec_card *out);
-uint32 ui_spec_card_x(int i);
 
 #endif
