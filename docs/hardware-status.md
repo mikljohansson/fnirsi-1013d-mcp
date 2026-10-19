@@ -1019,4 +1019,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   15 rail samples and 175 jumps > 40 codes among 1500 samples (values 254, 48, 246, 16, 252 inside a 118..137 stretch), CH2 core B
   none; CH1 (sitting at 142..159, above the band) clean on both cores. It is the 0x1539 A-core capture fault: the noise sits where
   the CH2 level crosses codes 128..145 on the pulse, so it is always at the same point. Not firmware; waits for 0x153A.
+- 2026-10-19 23:16: owner switched the scope off for the night (screen burn-in caution). State at power-off: FPGA 0x1539 in the
+  config flash, fw 0.2.76 in RAM (gone at power-on: the card boots 0.2.25, so tomorrow starts with a FEL load of the latest
+  pinned image through ENTER_FEL), calibration saved from the 20:30 wizard run, the RC low-pass still wired to the post. Tomorrow
+  first: FEL-load the newest firmware (0.2.77 if fw-spzoom has landed), then the walk-throughs of sections 47 (Frequency response
+  on a sound bitstream once 0x153A is flashed), 49 (overview), 50 (zoom ladder, owner: works), 52 (Spectrum ladder); the fpga-gen9
+  report and the 0x153A flash session (owner present, FT2232D, battery, USB unplugged); the hardware averaging default decision.
+  Agents still running overnight: fpga-gen9, fw-spzoom.
 
