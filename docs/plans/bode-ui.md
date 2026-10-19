@@ -26,8 +26,11 @@ Final decisions on this design **(owner, 2026-10-19 evening)**. Where an earlier
 - **The chart is variant 2's**: one pane with two y axes, magnitude on the left, phase on the right (section 9 E). It
   has **no legend**. The axes carry their units ("dB" on the left, "deg" on the right), and each curve has its axis
   label's colour (magnitude CH2 cyan, phase pink). Variant 1's two panes are superseded.
-- **Two frequency cursors, C1 and C2**, under T CURSOR. The readout sits in the data-free top division, variant 1's
-  placement, not in a box over the plot. It has a C2-C1 row (section 2).
+- **Two flagged frequency cursors, C1 and C2**, which T CURSOR shows and hides. Their readout box sits at the bottom
+  left of the pane with a C2-C1 row, exactly as variant 2 drew it. The box may cover part of the response; the owner
+  accepts that (section 2).
+- **Display fold-out: Overlaid (the default, the chosen chart), Magnitude only, Phase only.** The two-pane layout is
+  dropped from the design (section 4.1).
 - **Frequency axis Log / Linear**, default Log, as a row in the Display fold-out (section 4.1). Magnitude is always
   dB and phase always degrees; neither is configurable.
 - **The instruction before the first sweep** says "calibration post" (section 6).
@@ -48,11 +51,11 @@ at +17 px in the 35 px button). No 13 px line is needed. The main-menu artboard 
 | Main menu: the Frequency response row | fw 0.2.68's eight rows with the row renamed to two lines, "Frequency" over "response", and fw 0.2.68's icon |
 | Before the first sweep: one instruction | the empty pane on the default 100 Hz .. 1 MHz axis, both axes labelled, the two-line instruction top-middle, the cards' "no sweep" texts |
 | Action page (final) | a 50 kHz tank, Q 8.1, swept by hand over 5 kHz .. 500 kHz with 100 points and Settle Normal; one pane, dB left, deg right; markers; two unsettled points in grey with their warning (Normal settles Q <= 7, so the warning asks for a longer Settle, which AUTO SET would have chosen); the default cards; the right bar's first page |
-| Cursors C1 and C2 | the two flagged cursors, the readout in the top division with the C2-C1 row, and the warning centred right of it |
+| Cursors C1 and C2 | the two flagged cursors and the readout box at the bottom left with the C2-C1 row; the warning top-middle as always |
 | Single sweep in progress | point 37 of 100, the dotted line at the point being measured, the cards reading "sweeping", the generator chip showing the tone, chip RUN, button STOP |
 | AUTO SET: overview sweep running | the overview on 100 Hz .. 10 MHz (20 points) at 20 dB per division, AUTO SET reading "Auto...", the Sweep card "auto 12/20" |
 | CTRL page | CTRL, Display, Sweep, Thru, Grid; the stepper and 50 % TRIG slots empty |
-| CTRL: Display fold-out with Frequency axis | Mag + phase, Magnitude, Phase, each with an icon; a separator; Frequency axis Log |
+| CTRL: Display fold-out with Frequency axis | Overlaid, Magnitude only, Phase only, each with an icon; a separator; Frequency axis Log |
 | CTRL: Sweep fold-out | Start and Stop as - / + rows, Points, Settle, CH2 range, then Single sweep with the estimated duration |
 | CTRL: Thru fold-out | Measure thru, Apply (switch, with what the thru matches), Clear |
 | MEASURES: the mode's list | the stock MEASURES menu with the mode's ten items, six chosen, ranks shown |
@@ -72,7 +75,7 @@ The chart **(owner)**: one pane over the trace area, two y axes, no legend.
 - **Cards**: at y 446 (`UI_MS_SPEC_Y`), as in Spectrum. There is no record-position slider in this mode.
 
 **Scales and the top division.** Both axes are chosen from the data, and both keep the top division (y 60..118) free
-of data when they can. That division holds the warning line and the cursor readout without covering the curves.
+of data when they can. That division holds the warning line without covering the curves.
 
 - **Magnitude**: 5, 10 or 20 dB per division, the first that holds the data in six divisions. Then the top line rises
   by one division whenever the maximum is less than a division below it and the data still fits. This is a change to
@@ -82,8 +85,9 @@ of data when they can. That division holds the warning line and the cursor reado
   fits. On the tank it reads +135 .. -135 deg.
 - **The gridlines are shared.** Both axes divide the same six divisions, so a gridline carries one label on each side.
 
-**Display variants.** Mag + phase is the overlaid chart. Magnitude and Phase each draw one curve and only its axis,
-with the same scale rules.
+**Display variants (owner).** Overlaid is the chart above, both curves on both axes, and the default. Magnitude only
+and Phase only each draw one curve and only its axis, over the same pane with the same scale rules. There is no
+two-pane layout.
 
 **Markers** are unchanged. White triangles mark the -3 dB crossings and the resonance peak on the magnitude curve, and
 the phase crossings on the phase curve. The point being measured shows as a dotted grey line. Flagged points are grey,
@@ -101,19 +105,21 @@ with no joining line.
 - **Values**: cursors snap to measured points and never interpolate, although `bode_interp` exists. A reading is
   always a measurement.
 
-**Cursor readout (owner: in the top division, not over the plot).**
+**Cursor readout (owner: the box at the bottom left, as variant 2 drew it).**
 
-- **Box**: grey, x 44..282, y 62..114, in the top division, right of the "10 dB" label.
+- **Box**: grey, x 10..262, y 356..408, inside the pane's bottom left, the position of the DPOS350P's readout. It shows
+  while T CURSOR is on.
+- **Overlap**: it may cover part of the response, such as a low skirt or the lowest dB label. The owner accepts that,
+  and the cursors can be moved or switched off.
 - **Rows**: three 13 px rows at a 16 px pitch: C1, C2 and C2-C1. Each has the name in the cursor colour (the
   difference row in white), the frequency in white, the level in the magnitude colour and the phase in the phase
   colour.
-- **Example**: "C1 56.17kHz -7.45dB -60.8deg". The widest row, "C2-C1 33.27kHz -13.67dB -129.2deg", fits in 238 px.
+- **Example**: "C1 56.17kHz -7.45dB -60.8deg". The widest row, "C2-C1 33.27kHz -13.67dB -129.2deg", fits in 252 px.
 - **Flagged points**: when a cursor's point is flagged, its row shows the reason in grey instead of the phase, such as
   "unsettled", "near floor", "CH2 clipped" or "spliced". The C2-C1 row is grey too. A number from a flagged point never
   looks like a good one.
-- **The warning beside it**: while the readout shows, the warning line centres in the free width between the readout
-  and the right axis's top label (x 282..662, centre 472), still at y 70. A 50-character warning (about 355 px) then
-  spans x 295..650. Without the readout, the warning is top-middle as in every mode.
+- **Warnings**: the warning line stays top-middle at y 70 in every state. The readout is at the bottom, so they never
+  meet.
 
 **Before the first sweep** the empty pane shows one instruction of two lines, top-middle in the warning-line style,
 saying what to connect and what to press (section 6). The full wiring explanation (the 1 kOhm source, H = CH2 / CH1,
@@ -127,7 +133,7 @@ the post may be wired to anything. That keeps fw 0.2.66's rule.
 | CTRL | the CTRL page | as in every mode |
 | RUN/STOP | sweeping | RUN: sweeps repeat, each one overwriting the table point by point. STOP: the sweep ends after the point in progress; the points stay. The button shows the action and the chip the state (fw 0.2.68). |
 | AUTO SET | auto span and range | runs an overview sweep, then sets Start, Stop, Settle and CH2 range from it, then RUN (section 3.2). Reads "Auto..." while it runs; a second tap cancels and keeps the old settings. |
-| T CURSOR | frequency cursors C1 and C2 | shows or hides both cursors and their readout (section 2) |
+| T CURSOR | frequency cursors C1 and C2 | toggles both cursors and their readout box **(owner)** (section 2) |
 | V CURSOR | empty | there is no level cursor in this mode (section 9, A4) |
 | MEASURES | the mode's list | opens "Frequency response measurements" (section 5) |
 | SAVE PIC | screenshot | as in every mode |
@@ -202,7 +208,7 @@ The guideline order is Display, the mode's analysis controls, Grid, the steppers
 | Slot (y) | Button | Value shown | Opens |
 |---|---|---|---|
 | 5 | CTRL (highlighted) | | back to the first page |
-| 65 | Display | Mag+Ph, Mag, Phase | Display fold-out |
+| 65 | Display | Overlay, Mag, Phase | Display fold-out |
 | 125 | Sweep | the points ("100 pt") | Sweep fold-out |
 | 185 | Thru | None, On, Off, Stale, Meas. (as today) | Thru fold-out |
 | 245 | Grid | on / off (the toggle of every mode) | |
@@ -219,11 +225,12 @@ nothing. The Hold range belongs to the channel's own home, the CH2 chip's menu, 
 
 ### 4.1 Display fold-out
 
-Three variant rows with icons, the chosen one green, as in Scope and Spectrum:
+Three variant rows with icons, the chosen one green, as in Scope and Spectrum **(owner)**:
 
-- **Mag + phase** (two overlaid curves, one dotted): the default.
-- **Magnitude** (a flat line that rolls off).
-- **Phase** (a dotted falling S).
+- **Overlaid** (two curves in one box, one dotted): the default, the chosen chart. The button reads "Overlay": 7
+  characters, about 47 px in 13 px, in the 51 px button.
+- **Magnitude only** (a flat line that rolls off).
+- **Phase only** (a dotted falling S).
 
 Then a separator, and **Frequency axis**, Log or Linear, default Log **(owner)**. A tap toggles it. The row sits in
 Display because it is how the plot is shown, and the guideline puts a variant's own parameters inside the Display
@@ -295,14 +302,14 @@ items are white with their rank; the others are grey. The choice is saved in set
 - **Formats** as `ui_fmt` gives them: four significant digits and a unit ("47.29kHz", "-1.21dB"); Q with one decimal.
   The cards use 13 px text, which has no degree glyph (`font_2`), so phase reads "deg". The longest values fit the 118
   px card: "Sweep auto 12/20" is about 113 px and "-3dB not found" about 99 px.
-- **The cursor's values are not cards.** They are the cursor readout of section 2, as the Scope's cursor values are
-  its cursor box. fw 0.2.66's f, |H| and Phase cards go.
+- **The cursors' values are not cards.** They are the C1 / C2 readout box of section 2, as the Scope's cursor values
+  are its cursor box. fw 0.2.66's f, |H| and Phase cards go.
 
 ## 6. Texts
 
 Warnings are one line, top-middle, consequence then action, the most urgent first. Notes clear after 5 s. They are at
-most 50 characters: centred at x 366 in 16 px that spans at most x 188..544, clear of the cursor readout. In 13 px
-(`font_2`, what `bode_view.c` uses) it is narrower still.
+most 50 characters: centred at x 366 in 16 px that spans at most x 188..544, clear of the axis labels at both edges.
+In 13 px (`font_2`, what `bode_view.c` uses) it is narrower still.
 
 | Warning | When | fw 0.2.66 text, if different |
 |---|---|---|
@@ -372,12 +379,12 @@ The guidelines say that where a mode drives a top-bar control, the button shows 
 | Main menu row | opens the mode | `ui_mm_labels[UI_MM_BODE]` "Bode plot"; grey and inert when `bode_view_available()` is 0 | label "Frequency" / "response"; a tap on the grey row shows the reason (section 6); entry in roll mode shows the roll note |
 | RUN/STOP | continuous sweeps / stop after the point | `bode_view_service`: RUN starts `bv_start(0, 0)` and repeats; STOP gives `bode_stop(e, 0)` | none (the meaning stays; section 3.1) |
 | AUTO SET | auto span and range, then RUN | `bode_view_autoset` = one sweep (`bv_start(1, 0)`); `bode_view_auto_running` | overview plus `bode_auto_span` (section 3.2); "Auto..." and the cancel as now |
-| T CURSOR | cursors C1 and C2 on / off | hidden (`ui_p1_shown(slot, 2)`); a plot tap always places the one cursor (`bode_view_touch`) | `ui_p1_shown`: show T CURSOR and MEASURES in mode 2; `bv.cursor` becomes two indices plus `bv.cursor_on`, toggled by the button and saved in word 220 bit 5; flags as handles; plot taps move the nearer cursor only while they are on; the readout in the top division with the C2-C1 row; the warning's centre moves right while it shows (section 2) |
+| T CURSOR | cursors C1 and C2 on / off | hidden (`ui_p1_shown(slot, 2)`); a plot tap always places the one cursor (`bode_view_touch`) | `ui_p1_shown`: show T CURSOR and MEASURES in mode 2; `bv.cursor` becomes two indices plus `bv.cursor_on`, toggled by the button and saved in word 220 bit 5; flags as handles; plot taps move the nearer cursor only while they are on; the readout box at the bottom left with the C2-C1 row **(owner)** (section 2) |
 | V CURSOR | empty | hidden | none |
 | MEASURES | the mode's list | hidden; fixed cards in `draw_cards` | a third list in `ui_meas` (mode `UI_MS_BODE`): menu cells, ranks, word 213, `ui_ms_fit`; `draw_cards` from the list (section 5) |
 | SAVE PIC | screenshot | works | none |
 | SAVE WAVE | sweep table to CSV | saves the scope's waveform (`scope_save_view_item_file(VIEW_TYPE_WAVEFORM)`) | `bode_save_csv` in mode 2 (section 3.3) |
-| CTRL, Display | the variants, the frequency axis | the Display slot (y 65) is the Sweep button | new Display button and fold-out: Mag + phase (overlaid), Magnitude, Phase; Frequency axis Log / Linear (section 4.1) |
+| CTRL, Display | the variants, the frequency axis | the Display slot (y 65) is the Sweep button | new Display button and fold-out: Overlaid, Magnitude only, Phase only; Frequency axis Log / Linear **(owner)** (section 4.1) |
 | CTRL, Sweep | sweep parameters, Single sweep | at y 65; rows Start, Stop, Points, Settle, CH2 range, "Run sweep / Stop sweep" | moves to y 125; the action row becomes Single sweep with the estimate line (section 4.2) |
 | CTRL, Thru | thru calibration | at y 125 | moves to y 185; rows unchanged |
 | CTRL, Grid | grid toggle | at y 185 | moves to y 245; the hit table (`ui_ctrl_hit_top` equivalents in `bode_ctrl_touch`) follows |
@@ -416,7 +423,7 @@ Tests: `host_tests/test_ui.c` covers the new `ui_p1_shown(slot, 2)`, the Bode ME
    on the plot, and the cursor readout names the flag. Pass.
 7. **Fonts and widths.** Only 13 and 16 px are used. Every line is
    budgeted at 6.7 / 7.1 px per character. Warnings are capped at 50 characters (section 6). The cursor readout is
-   checked at its widest row, "C2-C1 33.27kHz -13.67dB -129.2deg", inside its 238 px box. The instruction's 69
+   checked at its widest row, "C2-C1 33.27kHz -13.67dB -129.2deg", inside its 252 px box. The instruction's 69
    characters (490 px) fit the 720 px pane. Pass.
 8. **Touch.** Fold-out rows are 44 px. The - / + keys are 30 px drawn, but a tap acts by row half, so each target is
    about 95 x 44 px. The cursor handle's hit area is 44 x 44. Pass.
@@ -464,8 +471,9 @@ Tests: `host_tests/test_ui.c` covers the new `ui_p1_shown(slot, 2)`, the Bode ME
 ### D. Contradictions found and resolved
 
 1. **Readout versus data.** A cursor box at the scope's 88 x 50 px position would have covered a low-pass passband,
-   which sits just under the top line. Placing the readout in the warning lane, with the 50-character cap, resolves
-   both. The first mockup render showed the conflict.
+   which sits just under the top line. The first mockup render showed the conflict. The final design **(owner)** puts
+   the C1 / C2 box at the bottom left as the DPOS350P does and accepts that it may cover part of the response. The
+   warning keeps the free top division to itself.
 2. **The single sweep's chip.** I first drew a separate "SNGL" chip. fw 0.2.68's `ui_run_view` has three states,
    STOP, RUN and WAIT, and a single sweep is acquiring, so it shows RUN. The once-only part is said where it is chosen.
 3. **AUTO SET versus the thru.** Auto changes Start and Stop, so a thru goes stale by its own rule. The amber card and
@@ -493,9 +501,10 @@ right bar, cards, MEASURES and CTRL page exactly as variant 1, and changes only 
 The phase axis scales from the data in 45 or 90 degrees per division, with the same headroom rule as the magnitude
 where it still fits. On the tank it reads +135 .. -135 deg.
 
-**Decided (owner, 2026-10-19 evening): variant 2's chart without the legend, with variant 1's readout placement.**
-The owner kept the concern below about a readout box over the data, and moved the readout into the top division. The
-legend went because the axes carry their units and the curves their axis colours. My recommendation before the decision
+**Decided (owner, 2026-10-19 evening): variant 2's chart without the legend, its cursors and its bottom-left readout
+box.** The legend went because the axes carry their units and the curves their axis colours. The readout box stays
+where variant 2 drew it, and the owner accepts that it covers part of the response. The Display fold-out offers
+Overlaid (default), Magnitude only and Phase only; the two-pane layout is dropped. My recommendation before the decision
 follows, for the record.
 
 **Recommendation (superseded): variant 1, two panes, as the default.**
@@ -525,5 +534,6 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
 3. Finer Start and Stop steps for tanks (a settings word), or a Center / Span pair?
 4. Default cards Level, -3dB, Peak, Q, Sweep, Thru, or Level, -3dB, Ph45, Sweep, Thru?
 5. Should Saved waveforms list the CSV tables? That needs a viewer for them.
-6. Answered **(owner)**: variant 2's chart without the legend, cursors C1 and C2 with the readout in the top division,
-   Frequency axis Log / Linear in the Display fold-out.
+6. Answered **(owner)**: variant 2's chart without the legend; cursors C1 and C2 with the readout box at the bottom
+   left, the overlap accepted; Display Overlaid / Magnitude only / Phase only, no two-pane layout; Frequency axis Log /
+   Linear in the Display fold-out.
