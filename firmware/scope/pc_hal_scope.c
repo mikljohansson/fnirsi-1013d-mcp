@@ -1888,6 +1888,12 @@ void pc_glue_ui_service(void)
   spectrum_service();
   phosphor_service();
 
+  //Calibration v4 class probe (acal_live.c): only in the scope and spectrum views (the phosphor view's record rate would
+  //see the gap), never while a host capture is armed or triggered (the probe resets the sample system) or the host
+  //holds the UI off the ring (READ_RAW hold)
+  acal_live_service((pc_hal_display_mode() < PHOSPHOR_DISPLAY_MODE) &&
+                    (!pc_ready || (!pc_sess.ui_hold && (pc_sess.acq_state != PC_ACQ_ARMED) &&
+                                   (pc_sess.acq_state != PC_ACQ_TRIGGERED))));
 }
 
 void pc_glue_pass_mark(int n)
