@@ -107,6 +107,84 @@ int acal_unpack(const uint8_t *block, acal_channel ch[2])
   return ACAL_OK;
 }
 
+void acal_prov_pack(const acal_prov *v, uint8_t *out)
+{
+  uint8_t *p = out;
+  uint32_t i;
+
+  p = put32(p, ACAL_PROV_MAGIC);
+  p = put16(p, ACAL_PROV_VERSION);
+  p = put16(p, ACAL_PROV_BYTES);
+  p = put32(p, v->build);
+  for(i=0;i<16;i++) *p++ = (uint8_t)v->version[i];
+  p = put16(p, v->fpga);
+  *p++ = v->what;
+  *p++ = v->rtc;
+  p = put32(p, v->uptime_ms);
+  p = put32(p, v->power_on);
+  p = put32(p, v->minutes);
+  for(i=0;i<6;i++) *p++ = v->time[i];
+  p = put16(p, 0);
+  put32(p, acal_crc32(out, ACAL_PROV_BYTES - 4));
+}
+
+int acal_prov_unpack(const uint8_t *in, acal_prov *v)
+{
+  const uint8_t *p = in + 8;
+  uint32_t i;
+
+  for(i=0;i<sizeof(*v);i++)
+    ((uint8_t *)v)[i] = 0;
+
+  if(get32(in) != ACAL_PROV_MAGIC)
+    return ACAL_PROV_NONE;
+
+  if((get16(in + 4) != ACAL_PROV_VERSION) || (get16(in + 6) != ACAL_PROV_BYTES) ||
+     (get32(in + ACAL_PROV_BYTES - 4) != acal_crc32(in, ACAL_PROV_BYTES - 4)))
+    return ACAL_PROV_BAD;
+
+  v->build = get32(p);              p += 4;
+  for(i=0;i<16;i++) v->version[i] = (char)*p++;
+  v->version[15] = 0;
+  v->fpga = (uint16_t)get16(p);     p += 2;
+  v->what = *p++;
+  v->rtc  = *p++;
+  v->uptime_ms = get32(p);          p += 4;
+  v->power_on  = get32(p);          p += 4;
+  v->minutes   = get32(p);          p += 4;
+  for(i=0;i<6;i++) v->time[i] = *p++;
+  return ACAL_PROV_VALID;
+}
+
+static int acal_bytes_differ(const uint8_t *a, const uint8_t *b, uint32_t n)
+{
+  while(n--)
+    if(*a++ != *b++)
+      return 1;
+
+  return 0;
+}
+
+uint8_t acal_prov_what(const acal_channel old[2], const acal_channel cur[2])
+{
+  //Zeros: pwm, zero, slope, noise (packed bytes 0..131 of a channel); gains: gain, range, flags, lever (132..143)
+  uint8_t a[ACAL_CH_BYTES], b[ACAL_CH_BYTES], what = 0;
+  uint32_t ch;
+
+  for(ch=0;ch<2;ch++)
+  {
+    acal_pack_channel(&old[ch], a);
+    acal_pack_channel(&cur[ch], b);
+
+    if(acal_bytes_differ(a, b, ACAL_CH_BYTES - 12))
+      what |= (uint8_t)(ACAL_PROV_CH1_ZERO << (2 * ch));
+    if(acal_bytes_differ(a + ACAL_CH_BYTES - 12, b + ACAL_CH_BYTES - 12, 12))
+      what |= (uint8_t)(ACAL_PROV_CH1_GAIN << (2 * ch));
+  }
+
+  return what;
+}
+
 int acal_bound(const acal_channel *c, const uint16_t *cal_offset)
 {
   uint32_t r;

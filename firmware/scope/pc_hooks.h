@@ -100,8 +100,21 @@ uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (sco
 #define PC_PHOSPHOR_STRIP()     pc_glue_phosphor_strip()
 
 
-//Protocol 1.3 has no snapshot to restore: the power-off save stores the live settings as 1.00o5 does
-#define PC_POWER_OFF()          do { } while(0)
+//Protocol 1.3 has no snapshot to restore: the power-off save stores the live settings as 1.00o5 does. fw 0.2.52: the
+//save that follows closes the session in the unit life record (pc_diag.c)
+void pc_glue_power_off(void);
+#define PC_POWER_OFF()          pc_glue_power_off()
+
+//fw 0.2.52 diagnostics readers (pc_diag.c, protocol row 55): the unit life record in settings words 224..255 is stored by
+//every settings save; in-session save results; the calibration provenance trailer in sector 708 bytes 432..487
+void pc_glue_settings_store(uint16 *w);
+void pc_glue_settings_saved(int32 rc);
+void pc_glue_cal_loaded(const uint8 *sector);
+void pc_glue_cal_save(uint8 *sector);
+#define PC_SETTINGS_STORE(w)    pc_glue_settings_store(w)
+#define PC_SETTINGS_SAVED(rc)   pc_glue_settings_saved(rc)
+#define PC_CAL_LOADED(b)        pc_glue_cal_loaded(b)
+#define PC_CAL_SAVE(b)          pc_glue_cal_save(b)
 
 //fw 0.2.48 (pc_mmu.h): main, right after 1.00o5's cache enables and before interrupts: flat page table, MMU on, so the
 //D-cache and the write buffer take effect

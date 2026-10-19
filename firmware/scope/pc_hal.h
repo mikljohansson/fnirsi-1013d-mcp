@@ -18,6 +18,7 @@
 #include "pc_decim.h"
 #include "adc_cal.h"
 #include "acal_track.h"
+#include "pc_life.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Front end channel state as the firmware keeps it (CHANNELSETTINGS subset)
@@ -233,6 +234,65 @@ void     pc_hal_usb_watch(uint32_t *v);
 uint32_t pc_hal_event_log(uint8_t *dst, uint32_t max, uint32_t *total);
 int32_t  pc_hal_event_snapshot(uint8_t *dst, uint32_t *reset_ms, int rearm);   //-1 = none frozen; rearm clears it
 uint32_t pc_hal_event_bus(uint8_t *dst, uint32_t *total);      //fw 0.2.24: bus-level ring (<= 16 entries), *total since boot
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Diagnostics readers (fw 0.2.52, protocol 1.16, docs/protocol.md section 14 row 55). Any context unless marked.
+
+//USB link state now (pc_transport.c)
+#define PC_USB_OFF          0     //switched off by other code (mass storage, ENTER_FEL)
+#define PC_USB_RECONNECTING 1     //suspend watch soft disconnect in progress
+#define PC_USB_UNCONFIGURED 2     //pull-up on, no SET_CONFIGURATION since the last bus reset / boot ("disconnected")
+#define PC_USB_CONFIGURED   3
+#define PC_USB_SUSPENDED    4     //configured, bus idle (host asleep, idle port, or cable pulled: VBUS is forced valid)
+#define PC_USBF_HIGH_SPEED  0x01
+#define PC_USBF_CONFIGURED  0x02
+#define PC_USBF_SUSPENDED   0x04
+#define PC_USBF_DTR         0x08
+#define PC_USBF_SOFTCONN    0x10
+
+typedef struct
+{
+  uint8_t  state;               //PC_USB_*
+  uint8_t  flags;               //PC_USBF_*
+  uint8_t  power;               //POWER register
+  uint8_t  faddr;               //FADDR
+  uint32_t suspended_ms;        //in the current suspend, 0 = not suspended
+  uint32_t since_config_ms;     //since the last SET_CONFIGURATION, 0xFFFFFFFF = none since boot
+} pc_hw_usb;
+
+void     pc_hal_usb_state(pc_hw_usb *u);
+
+uint32_t pc_hal_cp15_control(void);                     //CP15 c1 control register now
+
+//Unit life, settings save state and the stored restart record (pc_diag.c on the target, pc_life.h)
+typedef struct
+{
+  uint32_t power_on;            //0 = unknown
+  uint32_t minutes;             //operating minutes, all power-ons, now
+  uint8_t  life_flags;          //GET_HEALTH byte 32
+  uint8_t  last_end;            //PC_LIFE_END_*
+  uint8_t  settings_flags;      //bit 0 changed since load / last save, bit 1 last in-session save failed
+  uint8_t  saves;               //in-session saves since boot (capped 255)
+  int32_t  last_save;           //0 ok, < 0 driver error, 1 none since boot
+  uint32_t dirty_age_ms;        //since bit 0 of settings_flags was evaluated
+  pc_life_restart rst;          //stored restart record (rst.valid)
+} pc_hw_life;
+
+#define PC_LIFEF_FOUND       0x01  //a life record was on the card at boot
+#define PC_LIFEF_BOOT_WRITE  0x02  //the boot write of sector 709 succeeded
+#define PC_LIFEF_BOOT_FAIL   0x04  //it failed
+#define PC_LIFEF_VALID       0x08  //sector 709 was valid at boot
+#define PC_SETF_DIRTY        0x01
+#define PC_SETF_SAVE_FAILED  0x02
+
+void     pc_hal_life(pc_hw_life *l);
+void     pc_hal_life_clear_restart(void);              //the next settings save writes the record cleared
+
+//Calibration provenance (sector 708 bytes 432..487): ACAL_PROV_* state and the stored bytes (zeros when none)
+int      pc_hal_cal_prov(uint8_t *raw);
+
+//Report file (MAIN): write text to reports/report-PPPPP-NN.txt; returns 0 or the FatFs FRESULT (> 0), name NUL-terminated
+int      pc_hal_report_write(const char *text, uint32_t len, uint32_t power_on, char *name, uint32_t name_max);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // SD card (MAIN context only: the driver is not reentrant). Return 0 or the negative driver error.

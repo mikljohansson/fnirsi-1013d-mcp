@@ -12,6 +12,8 @@
 
 #include "pc_cmds.h"
 #include "pc_hal.h"
+#include "pc_report.h"
+#include "pc_ident.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Dispatch table
@@ -750,13 +752,13 @@ static int h_get_battery(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //USB events (fw 0.2.5: bus resets, suspends, resumes, disconnects, EP0 setups, malformed EP0 setups), RX back-pressure
 //(fw 0.2.7: stalls from the ISR, releases, re-stalls inside a release, releases with no packet waiting, largest
 //RXCOUNT, RXCOUNT > 512), fw 0.2.12: USB interrupts served by the timer poll (lost IRQs), fw 0.2.17: boot splash ms + 1, fw 0.2.19: restart record (8), fw 0.2.20: USB IRQ races, fw 0.2.48: fault status + address, fw 0.2.49: USB inferred resumes, soft reconnects
-static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
-{
-  uint32_t v[PC_TSTAT_COUNT + 26 + PC_USBEV_COUNT + PC_RXDBG_COUNT + PC_RESTART_COUNT + 1 + PC_FAULT_COUNT + PC_USBW_COUNT];
-  const pc_parser_stats *ps = &s->parser.stats;
-  uint32_t n = PC_TSTAT_COUNT, i;
+typedef char pc_link_counters_check[(PC_TSTAT_COUNT + 26 + PC_USBEV_COUNT + PC_RXDBG_COUNT + PC_RESTART_COUNT + 1 +
+                                     PC_FAULT_COUNT + PC_USBW_COUNT == PC_LINK_COUNTERS) ? 1 : -1];
 
-  (void)req; (void)len;
+uint32_t pc_link_counters(pc_session *s, uint32_t *v)
+{
+  const pc_parser_stats *ps = &s->parser.stats;
+  uint32_t n = PC_TSTAT_COUNT;
 
   pc_hal_link_stats(v);
   v[n++] = ps->frames;     v[n++] = ps->hdr_crc_errors; v[n++] = ps->payload_crc_errors; v[n++] = ps->oversize;
@@ -778,7 +780,17 @@ static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uin
   n += PC_FAULT_COUNT;     //58-59 (fw 0.2.48): fault status, fault address of the restart's abort
   pc_hal_usb_watch(v + n);
   n += PC_USBW_COUNT;      //60-61 (fw 0.2.49): USB resumes inferred, soft reconnects
+  return n;
+}
 
+static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint32_t v[PC_LINK_COUNTERS];
+  uint32_t n, i;
+
+  (void)req; (void)len;
+
+  n = pc_link_counters(s, v);
   pc_put_u16(resp, (uint16_t)n);
   pc_put_u16(resp + 2, 0);
 
@@ -786,6 +798,71 @@ static int h_get_link_stats(pc_session *s, const uint8_t *req, uint32_t len, uin
     pc_put_u32(resp + 4 + 4 * i, v[i]);
 
   *rl = 4 + 4 * n;
+  return PC_OK;
+}
+
+//GET_HEALTH (protocol 1.16, section 14 row 55): USB state now, CP15 control word, unit life, settings save state and
+//the stored restart record. Memory reads only: any poll context.
+void pc_health_body(uint8_t *p)
+{
+  pc_hw_usb  u;
+  pc_hw_life l;
+  const pc_life_restart *r = &l.rst;
+
+  pc_hal_usb_state(&u);
+  pc_hal_life(&l);
+
+  memset(p, 0, PC_HEALTH_LEN);
+  p[0] = 1;
+  pc_put_u16(p + 2, PC_HEALTH_LEN);
+  p[4] = u.state;
+  p[5] = u.flags;
+  p[6] = u.power;
+  p[7] = u.faddr;
+  pc_put_u32(p + 8,  u.suspended_ms);
+  pc_put_u32(p + 12, u.since_config_ms);
+  pc_put_u32(p + 16, pc_hal_cp15_control());
+  pc_put_u32(p + 20, l.power_on);
+  pc_put_u32(p + 24, l.minutes);
+  pc_put_u32(p + 28, pc_hal_ms());
+  p[32] = l.life_flags;
+  p[33] = l.last_end;
+  p[34] = l.settings_flags;
+  p[35] = l.saves;
+  pc_put_u32(p + 36, (uint32_t)l.last_save);
+  pc_put_u32(p + 40, l.dirty_age_ms);
+
+  if(r->valid)
+  {
+    p[44] = (uint8_t)(1 | ((l.power_on && (r->power_on == l.power_on)) ? 2 : 0));
+    p[45] = r->type;
+    pc_put_u16(p + 46, r->restarts);
+    pc_put_u32(p + 48, r->power_on);
+    pc_put_u32(p + 52, r->exc_lr);
+    pc_put_u32(p + 56, r->spsr);
+    pc_put_u32(p + 60, r->exc_sp);
+    pc_put_u32(p + 64, r->reset_lr);
+    pc_put_u32(p + 68, r->reset_sp);
+    pc_put_u32(p + 72, r->reset_cpsr);
+    pc_put_u32(p + 76, r->fsr);
+    pc_put_u32(p + 80, r->far);
+    pc_put_u32(p + 84, r->minutes);
+  }
+}
+
+static int h_get_health(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint8_t flags = len ? req[0] : 0;
+
+  if(flags & ~0x01)
+    return pc_error(s, PC_E_BAD_ARG, 0, "flags");
+
+  pc_health_body(resp);
+
+  if(flags & 0x01)
+    pc_hal_life_clear_restart();
+
+  *rl = PC_HEALTH_LEN;
   return PC_OK;
 }
 
@@ -1774,24 +1851,17 @@ static int h_set_gen(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
   return PC_OK;
 }
 
-#define PC_CAL_RESP_LEN 288     //72 bytes up to 1.9, 248 in 1.10-1.11 (v2), 256 in 1.12-1.13 (v3), v4 tracking from 1.14
-
-static int h_get_cal(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+void pc_cal_body(int ch, uint8_t *resp)
 {
   pc_hw_channel c;
   acal_corr k;
   uint32_t i;
   int bound;
 
-  (void)s; (void)len;
-
-  if(req[0] > 1)
-    return pc_error(s, PC_E_BAD_ARG, 0, "channel");
-
-  pc_hal_channel_read(req[0], &c);
+  pc_hal_channel_read(ch, &c);
 
   memset(resp, 0, 72);
-  resp[0] = req[0];
+  resp[0] = (uint8_t)ch;
 
   for(i=0;i<7;i++)
   {
@@ -1860,6 +1930,38 @@ static int h_get_cal(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
     pc_put_u32(resp + 284, (c.cm.flags & ACAL_CM_DATA) ? now - c.cm.last_ms : 0xFFFFFFFFu);
   }
 
+  //1.16: provenance (sector 708 bytes 432..487) and the age in power-ons and operating minutes (row 55)
+  {
+    acal_prov  pv;
+    pc_hw_life l;
+    int        st = pc_hal_cal_prov(resp + 292);
+    uint32_t   ons = 0xFFFFFFFFu, mins = 0xFFFFFFFFu;
+
+    resp[288] = (uint8_t)st;
+
+    if((st == ACAL_PROV_VALID) && (acal_prov_unpack(resp + 292, &pv) == ACAL_PROV_VALID))
+    {
+      pc_hal_life(&l);
+
+      if(pv.power_on && l.power_on && (l.power_on >= pv.power_on))
+        ons = l.power_on - pv.power_on;
+      if(pv.power_on && l.power_on && (l.minutes >= pv.minutes))
+        mins = l.minutes - pv.minutes;
+    }
+
+    pc_put_u32(resp + 348, ons);
+    pc_put_u32(resp + 352, mins);
+  }
+}
+
+static int h_get_cal(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  (void)len;
+
+  if(req[0] > 1)
+    return pc_error(s, PC_E_BAD_ARG, 0, "channel");
+
+  pc_cal_body(req[0], resp);
   *rl = PC_CAL_RESP_LEN;
   return PC_OK;
 }
@@ -1965,32 +2067,55 @@ static void pc_sd_egon(uint32_t sector, int check, uint32_t card, uint8_t *scrat
 }
 
 //SD_INFO: u8 flags (bit 0 VERIFY: recompute the eGON checksums), 3 reserved
-static int h_sd_info(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+//SD_INFO body: 112 bytes since 1.16 (row 55: card image identity at 64..111). scratch: 4-byte aligned, a multiple of
+//512 bytes, at least 64 KiB with verify (else 1 KiB). Returns 0, or 1 without a card.
+int pc_sd_info_body(pc_session *s, int verify, int ident, uint8_t *resp, uint8_t *scratch, uint32_t scratch_bytes)
 {
   static const uint32_t images[3] = { 16, 80, 750 };
-  uint8_t *scratch = resp + 64;                        //64 KiB inside the TX staging buffer, after the answer
   uint32_t card = pc_hal_sd_sectors(), part, i;
-
-  (void)len;
-
-  if(req[0] & ~0x01)
-    return pc_error(s, PC_E_BAD_ARG, 0, "flags");
+  const pc_card_id *id;
 
   if(card == 0)
-    return pc_error(s, PC_E_IO, 0, "no card");
+    return 1;
 
   part = pc_sd_part_start(scratch);
 
-  memset(resp, 0, 64);
+  memset(resp, 0, PC_SD_INFO_LEN);
   pc_put_u32(resp,      card);
   pc_put_u32(resp + 4,  part);
   pc_put_u32(resp + 8,  pc_sd_write_end(part));
   pc_put_u32(resp + 12, s->sd_stage_cap);
 
   for(i=0;i<3;i++)
-    pc_sd_egon(images[i], req[0] & 0x01, card, scratch, resp + 16 + 16 * i);
+    pc_sd_egon(images[i], verify, card, scratch, resp + 16 + 16 * i);
 
-  *rl = 64;
+  id = pc_ident_card(ident, scratch, scratch_bytes);
+  resp[64] = id->state;
+  resp[65] = id->same;
+  resp[66] = id->proto_major;
+  resp[67] = id->proto_minor;
+  memcpy(resp + 68, id->version, 16);
+  pc_put_u32(resp + 84, id->build);
+  memcpy(resp + 88, id->time, 6);
+  pc_put_u32(resp + 96, id->length);
+  pc_put_u32(resp + 100, id->read_ms);
+  return 0;
+}
+
+//SD_INFO: u8 flags (bit 0 VERIFY: recompute the eGON checksums; 1.16 bit 1 IDENT: identify the sector 750 image), 3
+//reserved
+static int h_sd_info(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  (void)len;
+
+  if(req[0] & ~0x03)
+    return pc_error(s, PC_E_BAD_ARG, 0, "flags");
+
+  //64 KiB scratch inside the TX staging buffer, after the answer
+  if(pc_sd_info_body(s, req[0] & 0x01, req[0] & 0x02, resp, resp + PC_SD_INFO_LEN, 65536))
+    return pc_error(s, PC_E_IO, 0, "no card");
+
+  *rl = PC_SD_INFO_LEN;
   return PC_OK;
 }
 
@@ -2077,6 +2202,10 @@ static int h_sd_write(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
 
   r = pc_hal_sd_write(sector, count, s->sd_stage);
 
+  //The card image may have changed: identify it afresh next time (1.16)
+  if(last >= PC_ID_SECTOR)
+    pc_ident_invalidate();
+
   if(r != 0)
     return pc_error(s, PC_E_IO, (uint16_t)(-r), "write");
 
@@ -2094,6 +2223,35 @@ static int h_sd_write(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   pc_put_u32(resp + 8, pc_crc32(back, count * 512));
   pc_put_u32(resp + 12, 0);
   *rl = 16;
+  return PC_OK;
+}
+
+//SAVE_REPORT (1.16, row 55): the diagnostics report as a text file on the card. The TX staging buffer after the answer
+//is the workspace.
+static int h_save_report(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  char     name[48];
+  uint32_t written, i;
+  int      r;
+
+  (void)req; (void)len;
+
+  if(pc_hal_sd_sectors() == 0)
+    return pc_error(s, PC_E_IO, 0, "no card");
+
+  r = pc_save_report(s, resp + 56, PC_MAX_RESPONSE_PAYLOAD - 56, &written, name, sizeof(name));
+
+  if(r)
+    return pc_error(s, PC_E_IO, (uint16_t)r, "report file");
+
+  memset(resp, 0, 56);
+  pc_put_u32(resp, written);
+
+  for(i=0;(i<sizeof(name)) && name[i];i++)
+    resp[8 + i] = (uint8_t)name[i];
+
+  pc_put_u16(resp + 6, (uint16_t)i);
+  *rl = 56;
   return PC_OK;
 }
 
@@ -2211,6 +2369,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_GET_LINK_STATS, F_BUSY | F_CONTROL | F_BASIC, 0, h_get_link_stats },
   { PC_CMD_GET_BAD_FRAME, F_BUSY | F_CONTROL | F_BASIC, 0, h_get_bad_frame },
   { PC_CMD_GET_EVENT_LOG, F_BUSY | F_CONTROL | F_BASIC, 0, h_get_event_log },
+  { PC_CMD_GET_HEALTH,   F_BUSY | F_CONTROL | F_BASIC, 0, h_get_health },
   { PC_CMD_GET_CHANNEL,  0,                            0, h_get_channel },
   { PC_CMD_SET_CHANNEL,  0,                            0, h_set_channel },
   { PC_CMD_GET_TIMEBASE, 0,                            0, h_get_timebase },
@@ -2234,6 +2393,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_SD_READ_SECTORS, F_BASIC,                   PC_CAP_SD_SECTORS, h_sd_read },
   { PC_CMD_SD_STAGE,     F_BUSY | F_BASIC,             PC_CAP_SD_SECTORS, h_sd_stage },   //memory copy only: timer poll
   { PC_CMD_SD_WRITE_SECTORS, F_BASIC,                  PC_CAP_SD_SECTORS, h_sd_write },
+  { PC_CMD_SAVE_REPORT,  F_BASIC,                      PC_CAP_SD_SECTORS, h_save_report },
   { PC_CMD_GET_GEN,      0,                            0, h_get_gen },
   { PC_CMD_SET_GEN,      0,                            PC_CAP_GENERATOR_DDS, h_set_gen },
   { PC_CMD_GET_CAL,      0,                            0, h_get_cal },
