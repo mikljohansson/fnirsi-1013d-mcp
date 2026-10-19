@@ -105,13 +105,19 @@ static void cp_analysis_button(int active)
     cp_value_button(UI_CTRL_ANALYSIS_Y, "Trace", "style", ui_trace_names[scopesettings.ACQ_trace % UI_TRACE_COUNT], active);
 }
 
-//Grid: a switch, as in the channel menus (colour carries the state, no "on" / "off")
+//Grid (fw 0.2.63, owner): the whole button is the toggle, green with black text while the grid is on, grey with white
+//text while it is off (colour carries the state, the word stays "Grid"); orange while touched
 static void cp_grid_button(int active)
 {
-  cp_button(UI_CTRL_GRID_Y, active);
-  display_set_fg_color(active ? BLACK_COLOR : WHITE_COLOR);
-  cp_text_c(&font_2, CP_XC, UI_CTRL_GRID_Y + 5, "Grid");
-  scope_display_slide_button(UI_BAR_X + 3, UI_CTRL_GRID_Y + 24, scopesettings.gridenable ? 1 : 0, GREEN_COLOR);
+  uint32 fill = active ? ITEM_ACTIVE_COLOR : scopesettings.gridenable ? GREEN_COLOR : GREY_COLOR;
+
+  display_set_fg_color(fill);
+  display_fill_rounded_rect(UI_BAR_X, UI_CTRL_GRID_Y, UI_BAR_W, UI_BTN_H, 2);
+  display_set_fg_color(CP_EDGE_COLOR);
+  display_draw_rounded_rect(UI_BAR_X, UI_CTRL_GRID_Y, UI_BAR_W, UI_BTN_H, 2);
+
+  display_set_fg_color((active || scopesettings.gridenable) ? BLACK_COLOR : WHITE_COLOR);
+  cp_text_c(&font_3, CP_XC, UI_CTRL_GRID_Y + 17, "Grid");
 }
 
 //Stepper (owner): a 28 px grey V+ bar, a 26 px centre in the channel colour (grey while the channel is off), a 28 px V-
