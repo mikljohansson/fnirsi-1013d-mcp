@@ -204,6 +204,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   0x1537 if the FPGA is at fault), docs-gen3 (Sonnet: protocol tidy, README timings, roadmap.md, announcement draft,
   release-readiness.md). Queued behind them: fw-ui4 (step 4, needs fw-readers), Measurements v2 (needs step 2), touch batches 2-3,
   mcp 1.16/1.17, Bode device steps (after the owner's Bode bench), 0.3.0 release.
+- fw-ui2 (done 14:19, about 510k tokens, retired): merged 68fc8a0 and renumbered to fw 0.2.56 (CTRL page with Display / Trace style or
+  Analyse / Grid / steppers / 50 % TRIG, fold-outs, strips and header gone, spectrum cards, chips, warnings in every variant,
+  ACQ acquisition only, settings word 210 bit 3 + word 211); images pinned backups/fw-0.2.56_35b2c2f6.bin and
+  fw-0.2.56-nommu_a406ed19.bin; walk-through firmware/AGENTS.md section 33; not loaded. fw-seg told to use 0.2.58.
 - fw-ui3 (done 14:07, about 370k tokens, retired): merged as fw 0.2.55 (settings fold-out trimmed, Settings screen with At power-on
   (three values, written on Back), Restore defaults keeps calibration/boot/CDC, shared delete dialog, old Other settings menu removed,
   interim Baseline calibration row + "Calibration (moves to Diagnostics)" group for fw-ui4 to delete); images pinned
@@ -213,7 +217,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - fw-touch1 (done 13:54, about 200k tokens, retired): merged as fw 0.2.54 (touch_pick.c handles column, first-touch pick, nearest
   switched-on channel, shared clamped channel+trigger move, EXT fix, clamps 6..396; test_touch_pick 538 checks); images pinned
   backups/fw-0.2.54_05a126f7.bin and fw-0.2.54-nommu_572784ed.bin; walk-through firmware/AGENTS.md section 32; not loaded.
-  Provisional numbers are kept as final (merge order differs from numeric order; 0.2.56 = fw-ui2 lands later).
+  Numbers: a branch that lands below main's current number is renumbered at merge (fw-ui2 0.2.53 -> 0.2.56).
 - docs-gen3 (done 13:54, about 230k tokens, retired): merged 6f1ea23 (protocol tidy, README MMU timings, roadmap.md rewrite,
   announcement.md draft, release-readiness.md with 12 findings -> queued item).
 - fw-readers (done 13:48, about 465k tokens, retired): merged 72eacb3 as fw 0.2.52 / protocol 1.16 (row 55: GET_HEALTH 0x000A,

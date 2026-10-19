@@ -710,3 +710,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   rail (wiring A), 1 kHz to 300 kHz 30 points, backups/bode/rc1_15n_clips.json: V1 1.36 Vrms at 1 kHz falling to 0.68 Vrms at 100 kHz
   (the RC loads the 1 kOhm source as expected, so the R and C are on the post correctly), but V2 only 25 mV rms falling to 9 mV,
   H about -33 to -37 dB flat: CH2 is not reading the R-C junction (floating tip or probe switch). Owner asked to put CH2 on the input.
+- 2026-10-19 14:21: fw 0.2.56 (UI step 2 on 0.2.55; merge of fw-ui2) built with GCC 10, MMU image sha256
+  35b2c2f6b1c35207673e164b45663e4b9489a0699c50304821c5025a98ac970f, nommu a406ed19c47a8db5bca57ca03aba1632fc57a41c69a7283c85f74061f90ec012,
+  pinned in backups/. Now the image to load next (steps 1-3, readers, touch handles). Not loaded.
