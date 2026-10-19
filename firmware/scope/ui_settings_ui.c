@@ -96,7 +96,6 @@ static void gather(void)
   st.filemsg_wait   = scopesettings.confirmationmode;
   st.cursors_locked = scopesettings.lockcursors;
   st.autoset_new    = scopesettings.new_autosetup;
-  st.dcshift        = dc_shift_cal;
   st.stamp          = tag_in_BMP;
   st.refs           = scopesettings.ref_on_startup;
   st.rtc_present    = pc_glue_ui_has(PC_FEAT_RTC) ? 1 : 0;
@@ -453,7 +452,6 @@ void ui_settings_run(void)
       case UI_SET_FILEMSG:  scopesettings.confirmationmode ^= 1; break;
       case UI_SET_CURSORS:  scopesettings.lockcursors ^= 1;      break;
       case UI_SET_AUTOSET:  scopesettings.new_autosetup ^= 1;    break;
-      case UI_SET_DCSHIFT:  dc_shift_cal ^= 1;                   break;
       case UI_SET_STAMP:    tag_in_BMP ^= 1;                     break;
       case UI_SET_REFS:     scopesettings.ref_on_startup ^= 1;   break;
       case UI_SET_CLOCK:    onoffRTC ^= 1;                       break;

@@ -38,6 +38,7 @@
 #include "ui_fmt.h"
 #include "ui_ctrl.h"
 #include "pc_seq_hw.h"
+#include "ui_diag_view.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -71,10 +72,11 @@ static uint8         pc_sd_stage_buf[65536] __attribute__((aligned(4)));
 // Drawing from the protocol (MAIN context, between UI passes). The UI loop keeps its own drawing state in displaydata
 //(buffer, colours, font); save it, draw on the visible screen, put it back.
 
+//fw 0.2.57: while Diagnostics shows, the scope screen it keeps (ui_diag_view.h), so Back returns to the current state
 static void pc_draw_begin(DISPLAYDATA *save)
 {
   *save = displaydata;
-  display_set_screen_buffer((uint16 *)maindisplaybuffer);
+  display_set_screen_buffer(ui_diag_scope_buffer());
 }
 
 static void pc_draw_end(const DISPLAYDATA *save)
@@ -1233,83 +1235,6 @@ void pc_glue_topbar_drawn(void)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Version text: the same PC_FW_VERSION / PC_PROTO_* as #VER and GET_INFO, so they can never disagree
-
-static char pc_ver[3][112];
-
-static char *pc_vcat(char *p, const char *s)
-{
-  while(*s)
-    *p++ = *s++;
-
-  *p = 0;
-  return p;
-}
-
-static char *pc_vdec2(char *p, uint32 v)
-{
-  *p++ = (char)('0' + (v / 10) % 10);
-  *p++ = (char)('0' + v % 10);
-  *p = 0;
-  return p;
-}
-
-static void pc_version_init(void)
-{
-  static const char hex[] = "0123456789abcdef";
-  char *p;
-  int   i;
-
-  p = pc_vcat(pc_ver[0], "v");
-  pc_vcat(p, PC_FW_VERSION);
-
-  p = pc_vcat(pc_ver[1], "fw ");
-  pc_vcat(p, PC_FW_VERSION);
-
-  p = pc_vcat(pc_ver[2], "FNIRSI-1013D-AI fw " PC_FW_VERSION ", proto ");
-  *p++ = (char)('0' + PC_PROTO_MAJOR);
-  *p++ = '.';
-  *p++ = (char)('0' + PC_PROTO_MINOR);
-  p = pc_vcat(p, ", base Atlan4 1.00o5, git ");
-
-  //Commit hash and commit time (build_id.c): data, not constants, so the identity cannot change the code
-  for(i=28;i>=0;i-=4)
-    *p++ = hex[(pc_fw_build >> i) & 0xF];
-
-  p = pc_vcat(p, " of 20");
-  p = pc_vdec2(p, pc_build_time[0]);
-  p = pc_vcat(p, "-");
-  p = pc_vdec2(p, pc_build_time[1]);
-  p = pc_vcat(p, "-");
-  p = pc_vdec2(p, pc_build_time[2]);
-  p = pc_vcat(p, " ");
-  p = pc_vdec2(p, pc_build_time[3]);
-  p = pc_vcat(p, ":");
-  pc_vdec2(p, pc_build_time[4]);
-}
-
-char *pc_glue_version(int form)
-{
-  if(!pc_ver[0][0])
-    pc_version_init();
-
-  return pc_ver[(form >= 0 && form < 3) ? form : 0];
-}
-
-//Diagnostics screen: the full identity in small type along the top edge (above the 1.00o5 layout, which starts at y 10)
-void pc_glue_diag_drawn(void)
-{
-  uint16 fg = displaydata.fg_color;
-  PFONTDATA font = displaydata.font;
-
-  display_set_fg_color(GREEN_COLOR);
-  display_set_font(&font_2);
-  display_text(20, 0, (int8 *)pc_glue_version(2));
-  displaydata.fg_color = fg;
-  displaydata.font     = font;
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
 // SD card (MAIN context). The driver's timeouts use timer0 ticks, so IRQs stay on.
 
 uint32_t pc_hal_sd_sectors(void)
@@ -1685,7 +1610,7 @@ static void pc_right_bar_follow(void)
 
   pc_bar_spectrum = sp;
   save = displaydata;
-  display_set_screen_buffer((uint16 *)maindisplaybuffer);
+  display_set_screen_buffer(ui_diag_scope_buffer());           //fw 0.2.57: the kept scope screen under Diagnostics
   scope_setup_right_control_menu();
   displaydata = save;
 }
@@ -1970,9 +1895,9 @@ void pc_glue_ui_service(void)
   pc_right_bar_follow();
 
   //Calibration v4 class probe (acal_live.c): only in the scope and spectrum views (the phosphor view's record rate would
-  //see the gap), never while a host capture is armed or triggered (the probe resets the sample system) or the host
+  //see the gap; not while Diagnostics shows), never while a host capture is armed or triggered (the probe resets the sample system) or the host
   //holds the UI off the ring (READ_RAW hold)
-  acal_live_service((pc_hal_display_mode() < PHOSPHOR_DISPLAY_MODE) &&
+  acal_live_service((pc_hal_display_mode() < PHOSPHOR_DISPLAY_MODE) && !ui_diag_active() &&
                     (!pc_ready || (!pc_sess.ui_hold && (pc_sess.acq_state != PC_ACQ_ARMED) &&
                                    (pc_sess.acq_state != PC_ACQ_TRIGGERED))));
 }
@@ -1987,10 +1912,11 @@ void pc_glue_pass_mark(int n)
     pc_ui_pass_mark(&pc_sess, n);
 }
 
-//The RTC clock shares the chip's slot: not drawn while the chip shows
+//The RTC clock shares the chip's slot: not drawn while the chip shows, nor over Diagnostics (fw 0.2.57: the pass that
+//opens it still reaches the clock)
 int pc_glue_rtc_allowed(void)
 {
-  return !pc_ready || !pc_ui_chip_shown(&pc_sess);
+  return !ui_diag_active() && (!pc_ready || !pc_ui_chip_shown(&pc_sess));
 }
 
 int pc_glue_ui_arm_allowed(void)

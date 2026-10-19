@@ -4,6 +4,8 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-ui4 (2026-10-19): fw 0.2.57 provisional, protocol unchanged: UX makeover step 4 (Diagnostics as a main-loop
+display mode with Status, Calibration, Log, Developer; the four-screen calibration wizard; the first-run screen), section 34.**
 **Branch fw-ui3 (2026-10-19): fw 0.2.55 provisional, protocol 1.16 unchanged: UX makeover step 3 (Settings fold-out
 trimmed, full Settings screen, confirmation dialog), section 31.**
 **Current state (coordinator merge, 2026-10-19 13:50): latest build fw 0.2.52, protocol 1.16** = main with fw-ui1 (UX makeover
@@ -51,7 +53,11 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
                            zero and gain step checks. Pure C, host-buildable (sections 21, 23)
   cal_wiz.c/.h             calibration wizard steps: state machine, actions, summary texts. Pure C, host-buildable
                            (host_tests/test_cal_wizard.c; section 27)
-  cal_wiz_ui.c             the wizard's full-screen view, touch loop and the zero / gain measurements (section 27)
+  cal_wiz_ui.c             the wizard's step dialog, touch loop and the zero / gain measurements (sections 28, 34)
+  ui_diag.c/.h             Diagnostics pages and the first-run screen as data from the protocol bodies. Pure C,
+                           host-buildable (host_tests/test_ui_diag.c; section 34)
+  ui_dlg.c/.h              drawing of those pages, the dimmed-background step dialog and the confirmation (section 34)
+  ui_diag_view.c/.h        Diagnostics as a main-loop display mode, its actions, the first-run screen (section 34)
   phos_map.c/.h            phosphor hit-count map: rasteriser, decay, render, palettes. Pure C, host-buildable (section 24)
   phosphor.c/.h            phosphor view (the Display fold-out's switch since 0.2.56; hooks in scope_display_trace_data;
                            section 24, 33)
@@ -1810,6 +1816,107 @@ Bug indicators: a stepper half acting on the other channel or the wrong directio
 the panel on the plot (stopped scope); AUTO SET painted over Analyse; the right bar showing Scope items in the spectrum
 or empty slots in the scope after a mode change; the warning line in the waveform viewer; cards overlapping the
 frequency labels; Phosphor switch on but no graded picture in the scope view outside roll mode.
+## 34. fw-ui4: UX makeover step 4, Diagnostics, wizard, first run (fw 0.2.57 provisional, protocol unchanged)
+
+Branch `fw-ui4` from main 72eacb3 (0.2.52), merged with main 508f0c5 (0.2.58, protocol 1.17) in 4c38068. Plan:
+`docs/plans/ux-makeover.md` sections 6, 6a-6c, 7 step 4; review `docs/plans/diagnostics-review.md`; user-facing
+description README section 5 "Screens: Diagnostics, calibration wizard, first run" and 6.4. Commits: f95dbee (`ui_diag.c/.h`,
+`host_tests/test_ui_diag.c`, `pc_report_event`), 95f440e (four-screen wizard: `cal_wiz.c/.h` rewritten, `cal_wiz_ui.c`
+dialog part rewritten, `ui_dlg.c/.h`, test_cal_wizard rewritten), 5e8a5db (display mode `ui_diag_view.c/.h`, hooks, old
+screens removed), 6897cf5 (0.2.57, README, CHANGELOG), 4c38068 (merge + the fw-ui3 interim rows out), then this handoff.
+Image from 4c38068 (GCC 10): `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin` in the worktree, 602,112 B, sha256
+7efaada392eb22c8a8b8531449d07d7054e4ea41e0593ae9cfdf31e56e06ec08, ELF a28c2705782f033656030cc3488486cacc7c21b215a661d0d7bf459c5d450fe6;
+nommu 6787f60ab1ebb8ecbfdacfbfe9efe065e16b345065f8405dd5a76f1b084a7169 (`#VER` fw=0.2.57, proto=1.17). A build of a later
+commit differs only in the identity. **Nothing benched.** Host tests all green (test_ui_diag 4862, test_cal_wizard 631,
+test_ui 1418549, test_session 69705 / 69703, check_vectors OK). Warnings GCC 10 36, GCC 13 31, sorted lists identical to
+main 508f0c5; the new files are clean with -Wall -Wextra -Werror (host). Version: kept 0.2.57 as briefed although main is
+0.2.58: the coordinator renumbers.
+
+**Files.** `ui_diag.c/.h` (pure: each page and the first-run screen as boxes, texts and buttons built from the protocol
+bodies GET_HEALTH, GET_CAL x 2, GET_LINK_STATS and the card identity; the verdict rules; `ud_hit`), `ui_dlg.c/.h` (target:
+draws a `ud_page`, the 3/8 dim of the screen behind a dialog, the step dialog used by the wizard and the volts
+calibration, `ui_dlg_confirm`), `ui_diag_view.c/.h` (target: the display mode, gathering the bodies, the actions, the
+volts calibration flow, Clear calibration, the first-run screen). Hooks: `fnirsi_1013d_scope.c` (main loop: `if(ui_diag_pass())
+continue;` after `pc_glue_ui_service`; `ui_first_run(restore)` before the loop, replacing `scope_setup_restore_screen`),
+`statemachine.c` (main menu Diagnostics row -> `ui_diag_open`), `pc_hal_scope.c` (`pc_draw_begin` and
+`pc_right_bar_follow` draw into `ui_diag_scope_buffer()`; the class probe and the RTC clock (`pc_glue_rtc_allowed`) are off
+while Diagnostics shows), `pc_report.c/.h` (`pc_report_event`: one event in words).
+
+**Decisions.**
+- Diagnostics replaces the scope's pass, it does not run beside it: no acquisition while it shows (as STOP), so the PC's
+  own captures work and nothing draws traces over the page. Full redraw once a second into `displaybuffertmp` and one
+  copy (about 50 ms, estimated, not measured). The scope screen is kept in `displaybuffer2` (as the 1.00o5 screen did) and
+  every background redraw goes there; Back copies it back.
+- The page model is pure so the host test checks every string against the real fonts at its widest (15-character
+  versions, 4-digit counters, a restart, the stock bitstream, no card): nothing is cut except the Log page's event lines
+  (`trim`; the saved report has them whole).
+- Status residuals: the firmware has no corrected A - B residual or corrected gain mismatch (they need the post check,
+  diagnostics-review section 4 item 7, not built), so the Status box shows what exists against the review's provisional
+  limits: class gain ratio full / gated (2 %) and the worst noise RMS over ranges, gated (0.3 code) and full (1.0 code),
+  from the v3 block; the verdict adds bound / gains measured / carried / FPGA word changed / under 5 min warm-up from the
+  flags and the provenance. "Limits are provisional" is printed under them.
+- Wizard: no Skip (owner); Cancel is live during a measurement (polled between points, `CW_RC_CANCELLED`). The zero step
+  re-measures both channels on every Calibrate. Save always writes zeros and gains (sectors 708 and 709); without the
+  generator the earlier gains are carried (flag KEPT). The fold-out caller is gone, so after Save with `calibrationfail`
+  the callers (Diagnostics, first run) run the new volts calibration flow.
+- Volts calibration wraps 1.00o5's `scope_input_calibration` (`calibrationopen` 3..8 per step; its own drawing goes to
+  `displaybuffer3` as a scratch screen) in a step dialog; it backs up and restores the channel, time base and trigger
+  settings (1.00o5 left the scope at 5 V/div, 20 us/div, AUTO) and on Cancel the factors and `calibrationfail`.
+- Clear calibration = 1.00o5 RESET without the volts reset: centres 860, compensations 0, `adc_cal_loaded = 0`, tracker
+  reset; nothing written (709 at the next power-off).
+- First run shows at every boot until both channels use a bound block (no settings word spent on "seen it").
+
+**Removed** (README section 5 lists where each value went): `scope_open_diagnostic_view`, `scope_diagnostic_adc_cal`,
+`scope_diagnostic_v4` and their fmt helpers, `handle_diagnostic_view_touch` (DEFAULT, RESTORE, RESET, EXIT, the hidden
+option hit areas), `scope_setup_restore_screen`, the DEFAULT / RESTORE / RESET / EXIT / OK button drawers,
+`pc_glue_diag_drawn`, `pc_glue_version` and `PC_UI_VERSION` / `PC_DIAG_DRAWN`; fw-ui3's interim fold-out row
+`UI_FO_CAL` with `scope_system_settings_calibration_item`, the 1.00o5 volts boxes (`calibrationopen` 2..9 in
+`handle_main_menu_touch`, `scope_show_Input_calibration`, `scope_show_calibrating_*_text`, `..._done`) and the Settings
+screen's Calibration group (`UI_SET_DCSHIFT`; the DC shift trim is on the Diagnostics Calibration page).
+`scope_show_Input_calibration_fail` stays (drawn by `scope_input_calibration` into the scratch screen).
+
+**Not done / for the next agent.**
+- Check on post and Undo last calibration (plan 6): need the post-based check and sector 711 (section 30 "Not done");
+  no placeholders drawn.
+- The DC shift trim still runs on the scope's CTRL page states 2-4 (1.00o5); the Calibration page only switches it.
+- GET_STATUS byte 43 does not say "Diagnostics" (the host cannot tell the page is up; the protocol works regardless).
+- The Firmware tile reads the card image once per Diagnostics session (cached by pc_ident); a pre-0.2.47 card image is a
+  full image scan (under a second, not measured on the device).
+- The pass time measured by GET_STATUS while Diagnostics shows is the page's pass.
+
+**Bench walk-through (owner, coordinator on COM10; FEL load, back up SD sectors 700-710 first: Save writes 708 and 709)**
+1. FEL-load, `#VER fw=0.2.57,proto=1.17`. On the owner's calibrated unit no first-run screen. Menu > Settings: the
+   fold-out has Screen brightness, Grid brightness, File message timeout, (Time and date), Other settings; no Baseline
+   calibration row. Other settings: no Calibration group.
+2. Menu > Diagnostics: the Status page; tile Firmware reads "Reading" for a moment, then Check "Running 0.2.57 from RAM.
+   A power cycle starts 0.2.25 from the card." (or what the card holds). The uptime line advances every second. With the
+   MCP connected: `scope_status` and a capture work while the page shows (no E_BUSY); the USB tile shows "PC connected,
+   high speed." Calibration box: verdict and the two rows, the provenance sentence.
+3. Tabs: Calibration (per-range table, gains, tracking lines, DC shift values), Log (events newest first; Older events
+   pages, then Newest events), Developer (Debug overlay toggles: Back shows "DEV mode" on the scope; Enter FEL now asks
+   first: Cancel returns). Back returns to the scope exactly as it was; a setting the PC changed meanwhile is shown.
+4. Save report to card: "Saved to the card: reports/report-NNNNN-00.txt" (Status or Log page); without a card the reason.
+5. Wizard, first time on the new screens (USB plugged in at first): Calibrate: screen 1 "Zero level" over the dimmed
+   page, the amber "USB is connected: unplug it before Calibrate"; unplug USB (and both probes, or short the inputs with
+   BNC caps): the line goes within a second. Calibrate: "Measuring..." greyed, "CH1: measuring range 1 of 6" .. "CH2:
+   measuring range 6 of 6" (about 8 s), two ticks, Continue. Screen 2 without the probe on the post: "No signal on CH1: tip
+   on the post?", Calibrate again with the CH1 probe at 1X on the post: "CH1 gain done", Continue; screen 3 the same for
+   CH2. Done: two lines "CHn calibrated: cores matched to x code, gain mismatch y %" in the channel colours; Save
+   calibration. Plug USB back in: GET_CAL flags bit 3 set, bit 4 clear, provenance of this power-on; the Status box OK or
+   Check with the reason.
+6. Cancel paths: a new run, Cancel during the zero step's measurement (stops within about a second), Cancel on screens 2-4:
+   GET_CAL unchanged each time. Taps off the two buttons do nothing.
+7. Clear calibration: the red button asks first ("Zeros and gains are cleared; the volts-per-range factors are kept."...);
+   Cancel keeps everything; Clear: the Status verdict Fault "Uncalibrated", GET_CAL byte 72 = 1. Then Calibrate again
+   (do not power off in between: the next power-off saves the 860 centres to 709, the old block then no longer binds).
+8. First run (optional, with Clear calibration then a power cycle, or a card without 708): the "First start" screen with
+   the checks; Later opens the scope; next boot Calibrate now runs the wizard.
+9. Volts calibration (only with an adjustable DC supply up to 15 V): six steps; Cancel restores the factors and the
+   scope's V/div and time base.
+Bug indicators: anything drawn over the Diagnostics page that stays longer than a second (MCP chip, clock, battery, a
+trace); Back showing a stale top bar; a wizard tap reacting outside its buttons; Cancel during a measurement taking more
+than about 2 s; GET_CAL changing after a Cancel.
+
 ## 35. fw-seq: FPGA 0x1536 segmented capture and hardware averaging (fw 0.2.58 provisional, protocol 1.17, row 56 provisional)
 
 Version 0.2.58 as assigned by the coordinator (main: 0.2.56 fw-ui2, 0.2.57 fw-ui4); protocol 1.17 with the row kept at

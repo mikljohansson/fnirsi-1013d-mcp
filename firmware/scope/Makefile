@@ -74,6 +74,9 @@ SRCS += acal_track.c acal_live.c
 SRCS += ui_fmt.c ui_menu.c ui_settings.c ui_settings_ui.c ui_ctrl.c ctrl_page.c
 # Plot touch geometry (fw 0.2.54): pointer position, handle and channel pick (pure C, host_tests/test_touch_pick.c)
 SRCS += touch_pick.c
+# fw 0.2.57: Diagnostics pages and the first-run screen (ui_diag.c pure, host_tests/test_ui.c), their drawing and dialogs
+# (ui_dlg.c) and the display mode (ui_diag_view.c)
+SRCS += ui_diag.c ui_dlg.c ui_diag_view.c
 # fw 0.2.52 diagnostics readers (protocol row 55)
 SRCS += pc_life.c pc_ident.c pc_report.c pc_diag.c
 # 0x1536 sequencer (fw 0.2.58): segmented capture and hardware averaging (maths in pc_seq.c, host_tests/test_seq.c)

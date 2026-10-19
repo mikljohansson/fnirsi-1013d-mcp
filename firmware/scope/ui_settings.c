@@ -19,7 +19,6 @@ int ui_fo_rows(int rtc, uint8 *ids)
   if(rtc)
     ids[n++] = UI_FO_TIME;
 
-  ids[n++] = UI_FO_CAL;
   ids[n++] = UI_FO_OTHER;
 
   return n;
@@ -60,20 +59,19 @@ int ui_fo_row_at(int rtc, uint32 x, uint32 y)
 
 #define G_DISPLAY     0
 #define G_CONTROLS    1
-#define G_CAL         2
-#define G_FILES       3
-#define G_CLOCK       4
-#define G_STARTUP     5
+#define G_FILES       2
+#define G_CLOCK       3
+#define G_STARTUP     4
 
 #define C0            UI_SET_COL0_X
 #define C1            UI_SET_COL1_X
 
-//Rows at y 74, 128 | 198, 252, 306 | 376: a group title 18 px above its first row, 6 px between rows
+//Rows at y 74, 128 | 198, 252, 306 | 376: a group title 18 px above its first row, 6 px between rows. fw 0.2.57: the
+//interim Calibration group (DC shift trim) went to the Diagnostics Calibration page
 const ui_set_group ui_set_groups[UI_SET_GROUPS] =
 {
   { "Display",                             C0,  56 },
   { "Controls",                            C0, 180 },
-  { "Calibration (moves to Diagnostics)",  C0, 358 },
   { "Files",                               C1,  56 },
   { "Clock",                               C1, 180 },
   { "Start-up",                            C1, 358 },
@@ -86,7 +84,6 @@ const ui_set_row ui_set_rows[UI_SET_ROWS] =
   { "File message timeout",         G_CONTROLS, UI_SET_K_TAP,  C0, 198 },
   { "Cursors",                      G_CONTROLS, UI_SET_K_TAP,  C0, 252 },
   { "Auto setup",                   G_CONTROLS, UI_SET_K_TAP,  C0, 306 },
-  { "DC shift trim",                G_CAL,      UI_SET_K_TAP,  C0, 376 },
   { "Stamp screenshots with",       G_FILES,    UI_SET_K_TAP,  C1,  74 },
   { "Reference traces at power-on", G_FILES,    UI_SET_K_TAP,  C1, 128 },
   { "Clock",                        G_CLOCK,    UI_SET_K_TAP,  C1, 198 },
@@ -212,9 +209,6 @@ int ui_set_value(int row, const ui_set_state *s, char *buf)
 
     case UI_SET_AUTOSET:
       return text(buf, s->autoset_new ? "improved" : "stock", UI_SET_T_ON);
-
-    case UI_SET_DCSHIFT:
-      return s->dcshift ? text(buf, "on the CTRL page", UI_SET_T_WARN) : text(buf, "not shown", UI_SET_T_OFF);
 
     case UI_SET_STAMP:
       if(!s->stamp)

@@ -31,6 +31,9 @@ void pc_text_hex(pc_text *t, uint32_t v, uint32_t digits);     //"0x" + digits
 void pc_text_fix(pc_text *t, int32_t v, uint32_t denom, uint32_t decimals);   //v / denom, rounded, sign kept
 void pc_text_nl(pc_text *t);                                                  //CR LF
 
+//One event log entry (8 bytes, GET_EVENT_LOG) in words, without its time and line end (Diagnostics Log page, the report)
+void pc_report_event(pc_text *t, const uint8_t *e);
+
 //Builds the report into workspace (>= PC_REPORT_WORKSPACE bytes, 4-byte aligned; its first PC_REPORT_SCRATCH bytes are
 //SD scratch while the card is read). Returns the text length; the text starts at workspace (MAIN context: reads the card).
 uint32_t pc_report_build(pc_session *s, uint8_t *workspace, uint32_t size);

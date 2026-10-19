@@ -493,23 +493,21 @@ static void test_foldout(void)
   int    rtc, n;
   uint32 x, y;
 
-  T_EQ(ui_fo_rows(1, ids), 6);
+  T_EQ(ui_fo_rows(1, ids), 5);
   T_EQ(ids[0], UI_FO_SCREEN);
   T_EQ(ids[1], UI_FO_GRID);
   T_EQ(ids[2], UI_FO_FILEMSG);
   T_EQ(ids[3], UI_FO_TIME);
-  T_EQ(ids[4], UI_FO_CAL);
-  T_EQ(ids[5], UI_FO_OTHER);
-  T_EQ(ui_fo_rows(0, ids), 5);
-  T_EQ(ids[3], UI_FO_CAL);
   T_EQ(ids[4], UI_FO_OTHER);
-  T_EQ(ui_fo_height(1), 354);
-  T_EQ(ui_fo_height(0), 295);
+  T_EQ(ui_fo_rows(0, ids), 4);
+  T_EQ(ids[3], UI_FO_OTHER);
+  T_EQ(ui_fo_height(1), 295);
+  T_EQ(ui_fo_height(0), 236);
   T_EQ(ui_fo_row_top(0, UI_FO_TIME), 0);
   T_EQ(ui_fo_row_top(1, UI_FO_SCREEN), 46);     //the brightness sliders open beside rows 0 and 1 (y 46, 104)
   T_EQ(ui_fo_row_top(1, UI_FO_GRID), 105);
-  T_EQ(ui_fo_row_top(1, UI_FO_OTHER), 341);
-  T_EQ(ui_fo_row_top(0, UI_FO_OTHER), 282);
+  T_EQ(ui_fo_row_top(1, UI_FO_OTHER), 282);
+  T_EQ(ui_fo_row_top(0, UI_FO_OTHER), 223);
 
   for(rtc = 0; rtc < 2; rtc++)
   {
@@ -658,10 +656,6 @@ static void test_settings_values(void)
   s.autoset_new = 1;
   T_STR(val(UI_SET_AUTOSET, &s, UI_SET_T_ON), "improved");
 
-  T_STR(val(UI_SET_DCSHIFT, &s, UI_SET_T_OFF), "not shown");
-  s.dcshift = 1;
-  T_STR(val(UI_SET_DCSHIFT, &s, UI_SET_T_WARN), "on the CTRL page");
-
   T_STR(val(UI_SET_STAMP, &s, UI_SET_T_OFF), "nothing");
   s.stamp = 1;
   T_STR(val(UI_SET_STAMP, &s, UI_SET_T_ON), "time");
@@ -759,7 +753,7 @@ static void test_settings_text(void)
           s = st0();
           s.rtc_present = rtc_cases[k][0];
           s.rtc_on = rtc_cases[k][1];
-          s.filemsg_wait = s.cursors_locked = s.autoset_new = s.dcshift = s.stamp = s.refs = (uint8)bit;
+          s.filemsg_wait = s.cursors_locked = s.autoset_new = s.stamp = s.refs = (uint8)bit;
           s.screen = s.grid = 100;
           s.boot = (uint8)boot;
           ui_set_value(i, &s, b);

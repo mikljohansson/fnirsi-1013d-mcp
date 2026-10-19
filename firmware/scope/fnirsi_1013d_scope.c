@@ -26,6 +26,7 @@
 #include "cdc_class.h"
 #include "PC_interface.h"
 #include "pc_hooks.h"
+#include "ui_diag_view.h"
 
 #include "arm32.h"
 
@@ -177,9 +178,6 @@ int main(void)
   pc_glue_boot_splash();
   //if (!dev_mode) timer0_delay(3000);//2000
   
-  //View message if load a default configuration in case of settings
-  if (restore) scope_setup_restore_screen();
-  
   //Set battery level to max for next calculations
   scopesettings.batterychargelevel = 20;    
   
@@ -249,6 +247,10 @@ int main(void)
   //scope_open_measures_menu();
   //while(1);
 
+  //fw 0.2.57: an uncalibrated unit starts with the first-run screen (what was found, Calibrate now or Later); the
+  //1.00o5 "Load default settings value" screen is gone
+  ui_first_run(restore);
+
   //scope_open_keyboard_menu();
   
   //Monitor the battery, process and display trace data and handle user input until power is switched off
@@ -258,6 +260,10 @@ int main(void)
     //control with the UI, so the UI loop below always runs; the MCP indicator follows the host's activity.
     pc_glue_poll_main();
     pc_glue_ui_service();
+
+    //fw 0.2.57: while Diagnostics shows (a display mode, ui_diag_view.c) it does this pass instead of the scope
+    if(ui_diag_pass())
+      continue;
 
     //Handle the touch panel input
     //touch_handler();

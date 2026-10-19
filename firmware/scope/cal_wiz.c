@@ -6,7 +6,7 @@
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void cw_init(cal_wiz *w, int prior, int al3)
+void cw_init(cal_wiz *w, int al3)
 {
   uint8_t *p = (uint8_t *)w;
   uint32_t i;
@@ -14,50 +14,64 @@ void cw_init(cal_wiz *w, int prior, int al3)
   for(i=0;i<sizeof(*w);i++)
     p[i] = 0;
 
-  w->state = CW_ZERO_PROMPT;
-  w->prior = prior ? 1 : 0;
+  w->state = CW_ZERO;
   w->al3   = al3 ? 1 : 0;
 }
 
-int cw_step(const cal_wiz *w)
+int cw_screen(const cal_wiz *w)
 {
-  if(w->state <= CW_ZERO_RESULT)
-    return 1;
+  switch(w->state)
+  {
+    case CW_ZERO:
+    case CW_ZERO_RUN:       return 1;
+    case CW_GAIN:
+    case CW_GAIN_LEVEL_RUN:
+    case CW_GAIN_MEAS_RUN:  return 2 + w->ch;
+    case CW_GAIN_NA:        return 2;
+    case CW_DONE:           return 4;
+    default:                return 0;
+  }
+}
 
-  if(w->state <= CW_GAIN_RESULT)
-    return 2;
+int cw_running(const cal_wiz *w)
+{
+  return (w->state == CW_ZERO_RUN) || (w->state == CW_GAIN_LEVEL_RUN) || (w->state == CW_GAIN_MEAS_RUN);
+}
 
-  return 3;
+int cw_action_button(const cal_wiz *w)
+{
+  switch(w->state)
+  {
+    case CW_ZERO:
+      return ((w->zero_st[0] == CW_Z_PASS) && (w->zero_st[1] == CW_Z_PASS)) ? CW_EV_CONTINUE : CW_EV_CALIBRATE;
+
+    case CW_GAIN:
+      return (w->gain_st[w->ch] == CW_G_PASS) ? CW_EV_CONTINUE : CW_EV_CALIBRATE;
+
+    case CW_GAIN_NA:
+      return CW_EV_CONTINUE;
+
+    case CW_DONE:
+      return CW_EV_SAVE;
+
+    case CW_END:
+      return -1;
+
+    default:
+      return CW_EV_MEASURING;
+  }
 }
 
 int cw_button(const cal_wiz *w, int ev)
 {
-  switch(w->state)
-  {
-    case CW_ZERO_PROMPT:
-      return (ev == CW_EV_START) || (ev == CW_EV_CANCEL) || ((ev == CW_EV_SKIP) && w->prior);
+  if(w->state == CW_END)
+    return 0;
 
-    case CW_ZERO_RESULT:
-      return (ev == CW_EV_RETRY) || (ev == CW_EV_CANCEL) || ((ev == CW_EV_SKIP) && w->prior) ||
-             ((ev == CW_EV_NEXT) && (w->zero_st[0] == CW_Z_PASS) && (w->zero_st[1] == CW_Z_PASS));
+  //Cancel stays on every screen, also while a measurement runs
+  if(ev == CW_EV_CANCEL)
+    return 1;
 
-    case CW_GAIN_NA:
-    case CW_GAIN_RESULT:
-      return (ev == CW_EV_NEXT) || (ev == CW_EV_CANCEL);
-
-    case CW_GAIN_PROMPT:
-      return (ev == CW_EV_MEASURE) || (ev == CW_EV_SKIP) || (ev == CW_EV_CANCEL);
-
-    case CW_GAIN_NOSIG:
-    case CW_GAIN_FAIL:
-      return (ev == CW_EV_RETRY) || (ev == CW_EV_SKIP) || (ev == CW_EV_CANCEL);
-
-    case CW_SUMMARY:
-      return (ev == CW_EV_DONE) || (ev == CW_EV_CANCEL);
-
-    default:
-      return 0;
-  }
+  return (ev >= 0) && (ev == cw_action_button(w));
 }
 
 static void cw_act(cal_wiz *w, uint8_t state, uint8_t action, uint8_t ch)
@@ -67,24 +81,10 @@ static void cw_act(cal_wiz *w, uint8_t state, uint8_t action, uint8_t ch)
   w->action_ch = ch;
 }
 
-//Into step 2 with the zeros of step 1 (zero_new) or the earlier ones
-static void cw_enter_gain(cal_wiz *w, uint8_t zero_new)
+static void cw_level(cal_wiz *w)
 {
-  w->zero_new   = zero_new;
-  w->gain_st[0] = CW_G_NONE;
-  w->gain_st[1] = CW_G_NONE;
-  w->ch         = 0;
-  w->auto2      = 0;
-
-  //Zeros exist here: new ones, or Skip, which step 1 offers only with a bound block (prior)
-  cw_act(w, w->al3 ? CW_GAIN_PROMPT : CW_GAIN_NA, CW_ACT_PREPARE, 0);
-}
-
-static void cw_level(cal_wiz *w, uint8_t ch, uint8_t silent)
-{
-  w->ch    = ch;
-  w->auto2 = silent;
-  cw_act(w, CW_GAIN_LEVEL_RUN, CW_ACT_GAIN_LEVEL, ch);
+  w->gain_st[w->ch] = CW_G_NONE;
+  cw_act(w, CW_GAIN_LEVEL_RUN, CW_ACT_GAIN_LEVEL, w->ch);
 }
 
 int cw_event(cal_wiz *w, int ev)
@@ -94,58 +94,45 @@ int cw_event(cal_wiz *w, int ev)
 
   if(ev == CW_EV_CANCEL)
   {
-    w->commit_zero = 0;
-    w->commit_gain = 0;
     cw_act(w, CW_END, CW_ACT_DISCARD, 0);
     return 1;
   }
 
   switch(w->state)
   {
-    case CW_ZERO_PROMPT:
-    case CW_ZERO_RESULT:
-      if((ev == CW_EV_START) || (ev == CW_EV_RETRY))
+    case CW_ZERO:
+      if(ev == CW_EV_CALIBRATE)
       {
+        //Both channels again, also after one of them passed (the two belong to one moment)
         w->zero_st[0] = CW_Z_NONE;
         w->zero_st[1] = CW_Z_NONE;
         cw_act(w, CW_ZERO_RUN, CW_ACT_ZERO, 0);
       }
       else
-        cw_enter_gain(w, ev == CW_EV_NEXT);   //Skip keeps the earlier zeros (a new result is dropped)
+      {
+        //Continue: the working copy from the new zeros, then the gain screens
+        w->ch = 0;
+        cw_act(w, w->al3 ? CW_GAIN : CW_GAIN_NA, CW_ACT_PREPARE, 0);
+      }
+      break;
+
+    case CW_GAIN:
+      if(ev == CW_EV_CALIBRATE)
+        cw_level(w);
+      else if(w->ch == 0)
+      {
+        w->ch = 1;
+        cw_act(w, CW_GAIN, CW_ACT_NONE, 0);
+      }
+      else
+        cw_act(w, CW_DONE, CW_ACT_NONE, 0);
       break;
 
     case CW_GAIN_NA:
-    case CW_GAIN_RESULT:
-      cw_act(w, CW_SUMMARY, CW_ACT_NONE, 0);
+      cw_act(w, CW_DONE, CW_ACT_NONE, 0);
       break;
 
-    case CW_GAIN_PROMPT:
-    case CW_GAIN_NOSIG:
-    case CW_GAIN_FAIL:
-      if(ev == CW_EV_SKIP)
-      {
-        w->gain_st[w->ch] = CW_G_SKIP;
-
-        //CH1 skipped: the CH2 prompt (its probe is not on the post yet); CH2 skipped: the summary
-        if(w->ch == 0)
-        {
-          w->ch = 1;
-          cw_act(w, CW_GAIN_PROMPT, CW_ACT_NONE, 0);
-        }
-        else
-          cw_act(w, CW_SUMMARY, CW_ACT_NONE, 0);
-      }
-      else
-      {
-        //Measure or Retry: the level check first, the measurement follows it
-        w->gain_st[w->ch] = CW_G_NONE;
-        cw_level(w, w->ch, 0);
-      }
-      break;
-
-    case CW_SUMMARY:
-      w->commit_zero = w->zero_new;
-      w->commit_gain = !w->zero_new && ((w->gain_st[0] == CW_G_PASS) || (w->gain_st[1] == CW_G_PASS));
+    case CW_DONE:
       cw_act(w, CW_END, CW_ACT_COMMIT, 0);
       break;
   }
@@ -178,7 +165,7 @@ void cw_zero_result(cal_wiz *w, const int rc[2], const uint32_t match16[2])
     w->match16[ch] = (uint16_t)((match16[ch] > 0xFFFF) ? 0xFFFF : match16[ch]);
   }
 
-  cw_act(w, CW_ZERO_RESULT, CW_ACT_NONE, 0);
+  cw_act(w, CW_ZERO, CW_ACT_NONE, 0);
 }
 
 void cw_level_result(cal_wiz *w, int32_t span16)
@@ -188,14 +175,11 @@ void cw_level_result(cal_wiz *w, int32_t span16)
 
   if(cw_level_ok(span16))
     cw_act(w, CW_GAIN_MEAS_RUN, CW_ACT_GAIN_MEASURE, w->ch);
-  else if(w->auto2)
-  {
-    //CH2 does not see the post yet: ask for its probe
-    w->auto2 = 0;
-    cw_act(w, CW_GAIN_PROMPT, CW_ACT_NONE, 0);
-  }
   else
-    cw_act(w, CW_GAIN_NOSIG, CW_ACT_NONE, 0);
+  {
+    w->gain_st[w->ch] = CW_G_NOSIG;
+    cw_act(w, CW_GAIN, CW_ACT_NONE, 0);
+  }
 }
 
 void cw_gain_result(cal_wiz *w, int rc)
@@ -203,23 +187,9 @@ void cw_gain_result(cal_wiz *w, int rc)
   if(w->state != CW_GAIN_MEAS_RUN)
     return;
 
-  w->auto2 = 0;
   w->gain_rc[w->ch] = (int16_t)rc;
-
-  if(rc != ACAL_OK)
-  {
-    w->gain_st[w->ch] = CW_G_FAIL;
-    cw_act(w, CW_GAIN_FAIL, CW_ACT_NONE, 0);
-    return;
-  }
-
-  w->gain_st[w->ch] = CW_G_PASS;
-
-  //CH1 passed: a second probe may already be on the post (one node), so look at CH2 silently
-  if(w->ch == 0)
-    cw_level(w, 1, 1);
-  else
-    cw_act(w, CW_GAIN_RESULT, CW_ACT_NONE, 0);
+  w->gain_st[w->ch] = (rc == ACAL_OK) ? CW_G_PASS : CW_G_FAIL;
+  cw_act(w, CW_GAIN, CW_ACT_NONE, 0);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -291,79 +261,142 @@ static char *cw_ch(char *p, uint32_t ch)
   return cw_str(p, ch ? "CH2" : "CH1");
 }
 
+const char *cw_title(const cal_wiz *w)
+{
+  switch(cw_screen(w))
+  {
+    case 1:  return "Zero level";
+    case 2:  return "CH1 gain";
+    case 3:  return "CH2 gain";
+    case 4:  return "Done";
+    default: return "";
+  }
+}
+
+//The owner's screens (plan 6a), broken by hand for the 16 px font
+const char *cw_instruction(const cal_wiz *w, int line)
+{
+  static const char *zero[2] = { "Fully disconnect both probes and the USB cable from the device.", "Tap Calibrate." };
+  static const char *ch1[2]  = { "Plug the CH1 probe back in and connect it to the calibration post.",
+                                 "Set it to 1X on the handle. Tap Calibrate." };
+  static const char *ch2[2]  = { "Plug the CH2 probe in and connect it to the calibration post.",
+                                 "Set it to 1X on the handle. Tap Calibrate." };
+  static const char *na[2]   = { "Gain calibration needs the open FPGA bitstream.",
+                                 "Continue keeps the gains and saves the zero level." };
+
+  if((line < 0) || (line > 1))
+    return "";
+
+  if(w->state == CW_GAIN_NA)
+    return na[line];
+
+  switch(cw_screen(w))
+  {
+    case 1:  return zero[line];
+    case 2:  return ch1[line];
+    case 3:  return ch2[line];
+    default: return "";
+  }
+}
+
+//The adc_cal reasons in plain words (acal_reason_text is the short form for the report and the protocol tools)
+const char *cw_reason_text(int rc)
+{
+  switch(rc)
+  {
+    case ACAL_E_RESPONSE:   return "the offset control does not move the zero level";
+    case ACAL_E_CLIP:       return "the input is not at 0 V: unplug the probe";
+    case ACAL_E_NOISE:      return "too much noise: unplug the probe and USB";
+    case ACAL_E_ZERO:       return "the zero level is out of range";
+    case ACAL_E_SPREAD:     return "the two ADC cores differ too much";
+    case ACAL_E_SLOPE:      return "the offset control is out of range";
+    case ACAL_E_DRIFT:      return "the zero level is still moving: let the scope warm up";
+    case ACAL_E_CLASS:      return "the zero level moves with the sample rate";
+    case ACAL_E_GAIN_CLIP:  return "the post signal clips: set the probe to 1X";
+    case ACAL_E_GAIN_DRIFT: return "the post signal moved: hold the tip still";
+    case ACAL_E_GAIN_LEVER: return "no signal: tip on the post?";
+    case ACAL_E_GAIN_SPLIT: return "the two ADC cores differ too much";
+    case ACAL_E_GAIN_CLASS: return "the gain differs between sample rates";
+    case ACAL_E_GAIN_NONE:  return "no generator in this FPGA bitstream";
+    case CW_RC_CANCELLED:   return "cancelled";
+    default:                return "measurement failed";
+  }
+}
+
 char *cw_progress(char *p, uint32_t ch, uint32_t range)
 {
   p = cw_ch(p, ch);
-  p = cw_str(p, " range ");
+  p = cw_str(p, ": measuring range ");
   p = cw_uint(p, range + 1);
   p = cw_str(p, " of ");
   return cw_uint(p, ACAL_RANGES);
 }
 
-static char *cw_matched(char *p, const cal_wiz *w, uint32_t ch)
-{
-  p = cw_str(p, "cores matched to ");
-  p = cw_fmt_tenths(p, cw_match_tenths(w->match16[ch]));
-  return cw_str(p, " code");
-}
-
 char *cw_zero_line(const cal_wiz *w, uint32_t ch, char *p)
-{
-  p = cw_ch(p, ch);
-  p = cw_str(p, ": ");
-
-  switch(w->zero_st[ch])
-  {
-    case CW_Z_PASS: return cw_matched(p, w, ch);
-    case CW_Z_FAIL: return cw_str(p, acal_reason_text(w->zero_rc[ch]));
-    default:        return cw_str(p, "not measured");
-  }
-}
-
-static char *cw_gain_kept(char *p, const acal_channel *c)
-{
-  return cw_str(p, (c->gain_range == ACAL_GAIN_NONE) ? "gain not measured" : "gain kept");
-}
-
-char *cw_gain_line(const cal_wiz *w, uint32_t ch, const acal_channel *c, char *p)
 {
   *p = 0;
 
-  if(w->gain_st[ch] == CW_G_NONE)
-    return p;
+  switch(w->zero_st[ch])
+  {
+    case CW_Z_PASS:
+      p = cw_ch(p, ch);
+      return cw_str(p, ": zero level done");
 
-  p = cw_ch(p, ch);
-  p = cw_str(p, ": ");
+    case CW_Z_FAIL:
+      p = cw_ch(p, ch);
+      p = cw_str(p, ": ");
+      return cw_str(p, cw_reason_text(w->zero_rc[ch]));
+
+    default:
+      return p;
+  }
+}
+
+char *cw_gain_line(const cal_wiz *w, char *p)
+{
+  uint32_t ch = w->ch;
+
+  *p = 0;
+
+  if(w->state != CW_GAIN)
+    return p;
 
   switch(w->gain_st[ch])
   {
     case CW_G_PASS:
-      p = cw_str(p, "core gains ");
-      p = cw_fmt_tenths(p, cw_gain_tenths(c));
-      return cw_str(p, " % apart, now matched");
+      p = cw_ch(p, ch);
+      return cw_str(p, " gain done");
+
+    case CW_G_NOSIG:
+      p = cw_str(p, "No signal on ");
+      p = cw_ch(p, ch);
+      return cw_str(p, ": tip on the post?");
 
     case CW_G_FAIL:
-      return cw_str(p, acal_reason_text(w->gain_rc[ch]));
+      p = cw_ch(p, ch);
+      p = cw_str(p, ": ");
+      return cw_str(p, cw_reason_text(w->gain_rc[ch]));
 
     default:
-      p = cw_str(p, "skipped, ");
-      return cw_gain_kept(p, c);
+      return p;
   }
 }
 
-char *cw_summary_line(const cal_wiz *w, uint32_t ch, const acal_channel *c, char *p)
+//"CH1 calibrated: cores matched to 0.1 code, gain mismatch 1.3 %". The gain mismatch is the full-rate difference of the
+//two cores the correction now removes; without a gain step the earlier gains are kept (or there are none)
+char *cw_done_line(const cal_wiz *w, uint32_t ch, const acal_channel *c, char *p)
 {
   p = cw_ch(p, ch);
-  p = cw_str(p, ": ");
-  p = w->zero_new ? cw_matched(p, w, ch) : cw_str(p, "zero kept");
-  p = cw_str(p, ", ");
+  p = cw_str(p, " calibrated: cores matched to ");
+  p = cw_fmt_tenths(p, cw_match_tenths(w->match16[ch]));
+  p = cw_str(p, " code, ");
 
   if(w->gain_st[ch] == CW_G_PASS)
   {
-    p = cw_str(p, "gain ");
+    p = cw_str(p, "gain mismatch ");
     p = cw_fmt_tenths(p, cw_gain_tenths(c));
     return cw_str(p, " %");
   }
 
-  return cw_gain_kept(p, c);
+  return cw_str(p, (c->gain_range == ACAL_GAIN_NONE) ? "gains not measured" : "earlier gains kept");
 }

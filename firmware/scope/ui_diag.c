@@ -1,0 +1,1456 @@
+//----------------------------------------------------------------------------------------------------------------------------------
+// ui_diag.c - the Diagnostics pages and the first-run screen as data (ui_diag.h). Pure C, no globals, no libc.
+// Host-tested: host_tests/test_ui.c (every text inside its box with the real font tables, the buttons, the verdicts).
+//----------------------------------------------------------------------------------------------------------------------------------
+
+#include "ui_diag.h"
+#include "ui_fmt.h"
+#include "pc_protocol.h"
+#include "adc_cal.h"
+
+extern FONTDATA font_2;
+extern FONTDATA font_3;
+extern FONTDATA font_5;
+
+//GET_CAL layout (docs/protocol.md 8.7, rows 51, 54, 55)
+#define C_OFFSET     4            //u16[7] PWM centres in use (sector 709)
+#define C_VOLTS     20            //u32[7] volts factors (input_calibration)
+#define C_COMP      48            //i16 A, B: 1.00o5 core compensations
+#define C_SHIFT     52            //u32 centre, i32 size, i32 value
+#define C_VERSION   72            //correction in use: 3 = v3
+#define C_FLAGS     73            //bit 0 block loaded, 1 bound, 2 gated now, 3 gains measured, 4 gains carried over
+#define C_BLOCK    112            //the v3 channel block (acal_pack_channel)
+#define B_ZERO      12            //i16 [class][core][range], 1/16 code
+#define B_NOISE    108            //u8 [class][core][range], 1/16 code
+#define B_GAIN     132            //u16 [class][core], Q15
+#define B_GRANGE   140            //u8 range the gains were measured on (0xFF never)
+#define C_TRK      256            //u8 flags (bit 0 data, bit 5 class probe data), d, e, q, age, records, ...
+#define C_PROV     288            //u8 state, then 292.. the 56 stored bytes
+#define C_ONS      348            //u32 power-ons since the calibration
+
+#define F_LOADED     0x01
+#define F_BOUND      0x02
+#define F_GAINS      0x08
+#define F_KEPT       0x10
+
+//GET_HEALTH layout (row 55)
+#define H_USB_STATE   4
+#define H_USB_FLAGS   5
+#define H_CP15       16
+#define H_POWER_ON   20
+#define H_MINUTES    24
+#define H_UPTIME     28
+#define H_LIFE       32
+#define H_LAST_END   33
+#define H_SETTINGS   34
+#define H_REC        44
+#define H_REC_TYPE   45
+#define H_REC_COUNT  46
+#define H_REC_PON    48
+#define H_REC_LR     52
+#define H_REC_FAR    80
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Small text writers (each returns the end, NUL-terminated)
+
+static uint32_t g16(const uint8_t *p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8); }
+static uint32_t g32(const uint8_t *p) { return g16(p) | (g16(p + 2) << 16); }
+
+static char *s_str(char *p, const char *s)
+{
+  while(*s)
+    *p++ = *s++;
+
+  *p = 0;
+  return p;
+}
+
+static char *s_uint(char *p, uint32_t v)
+{
+  char     t[10];
+  uint32_t n = 0;
+
+  do
+  {
+    t[n++] = (char)('0' + v % 10);
+    v /= 10;
+  } while(v);
+
+  while(n)
+    *p++ = t[--n];
+
+  *p = 0;
+  return p;
+}
+
+//v / denom with `decimals` decimals, rounded half away from zero; sign: 0 only "-", 1 also "+"
+static char *s_fix(char *p, int32_t v, uint32_t denom, uint32_t decimals, int plus)
+{
+  uint32_t scale = 1, i, a, ip, fp;
+  uint64_t q;
+
+  for(i=0;i<decimals;i++)
+    scale *= 10;
+
+  a = (v < 0) ? (uint32_t)(-(int64_t)v) : (uint32_t)v;
+  q = ((uint64_t)a * scale * 2 + denom) / (2 * (uint64_t)denom);
+  ip = (uint32_t)(q / scale);
+  fp = (uint32_t)(q % scale);
+
+  if(q && (v < 0))
+    *p++ = '-';
+  else if(plus && q)
+    *p++ = '+';
+
+  p = s_uint(p, ip);
+
+  if(decimals)
+  {
+    *p++ = '.';
+
+    for(i=scale/10;i;i/=10)
+      *p++ = (char)('0' + (fp / i) % 10);
+  }
+
+  *p = 0;
+  return p;
+}
+
+//digits hex digits, no prefix
+static char *s_hexd(char *p, uint32_t v, uint32_t digits)
+{
+  static const char h[] = "0123456789abcdef";
+
+  while(digits--)
+    *p++ = h[(v >> (4 * digits)) & 0xF];
+
+  *p = 0;
+  return p;
+}
+
+static char *s_hex(char *p, uint32_t v, uint32_t digits)
+{
+  *p++ = '0';
+  *p++ = 'x';
+  return s_hexd(p, v, digits);
+}
+
+static char *s_dec2(char *p, uint32_t v)
+{
+  *p++ = (char)('0' + (v / 10) % 10);
+  *p++ = (char)('0' + v % 10);
+  *p = 0;
+  return p;
+}
+
+static char *s_ver(char *p, const char *v16)
+{
+  uint32_t i;
+
+  for(i=0;(i<15) && v16[i];i++)
+    *p++ = v16[i];
+
+  if(i == 0)
+    *p++ = '?';
+
+  *p = 0;
+  return p;
+}
+
+//"1 h 42 min" / "12 min"
+static char *s_minutes(char *p, uint32_t m)
+{
+  if(m >= 60)
+  {
+    p = s_uint(p, m / 60);
+    p = s_str(p, " h ");
+  }
+
+  p = s_uint(p, m % 60);
+  return s_str(p, " min");
+}
+
+static char *s_plural(char *p, uint32_t n, const char *one, const char *many)
+{
+  p = s_uint(p, n);
+  *p++ = ' ';
+  return s_str(p, (n == 1) ? one : many);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Page items
+
+static const FONTDATA *ud_font(uint32_t f)
+{
+  return (f == UD_F_HEAD) ? &font_5 : ((f == UD_F_BODY) ? &font_3 : &font_2);
+}
+
+static ud_box *ud_boxa(ud_page *pg, int x, int y, int w, int h, int fill)
+{
+  ud_box *b;
+
+  if(pg->nbox >= UD_MAX_BOXES)
+    return 0;
+
+  b = &pg->box[pg->nbox++];
+  b->x = (int16_t)x;
+  b->y = (int16_t)y;
+  b->w = (int16_t)w;
+  b->h = (int16_t)h;
+  b->fill = (uint8_t)fill;
+  return b;
+}
+
+//A text item, cut at the end until it fits maxw
+static ud_text *ud_txt(ud_page *pg, int x, int y, int maxw, int font, int colour, const char *s)
+{
+  ud_text *t;
+  uint32_t n = 0;
+
+  if(pg->ntext >= UD_MAX_TEXTS)
+    return 0;
+
+  t = &pg->text[pg->ntext++];
+  t->x = (int16_t)x;
+  t->y = (int16_t)y;
+  t->maxw = (uint16_t)maxw;
+  t->font = (uint8_t)font;
+  t->colour = (uint8_t)colour;
+  t->right = 0;
+  t->cut = 0;
+  t->trim = 0;
+
+  while(s[n] && (n < UD_TEXT_LEN - 1))
+  {
+    t->text[n] = s[n];
+    n++;
+  }
+
+  t->text[n] = 0;
+
+  if(s[n])
+    t->cut = 1;
+
+  while(n && (ui_text_width(ud_font(font), t->text) > (uint32_t)maxw))
+  {
+    t->text[--n] = 0;
+    t->cut = 1;
+  }
+
+  return t;
+}
+
+static ud_text *ud_txt_r(ud_page *pg, int xr, int y, int maxw, int font, int colour, const char *s)
+{
+  ud_text *t = ud_txt(pg, xr, y, maxw, font, colour, s);
+
+  if(t)
+    t->right = 1;
+
+  return t;
+}
+
+static ud_button *ud_btn(ud_page *pg, int x, int y, int w, int h, int style, int id, const char *label)
+{
+  ud_button *b;
+
+  if(pg->nbtn >= UD_MAX_BUTTONS)
+    return 0;
+
+  b = &pg->btn[pg->nbtn++];
+  b->x = (int16_t)x;
+  b->y = (int16_t)y;
+  b->w = (int16_t)w;
+  b->h = (int16_t)h;
+  b->style = (uint8_t)style;
+  b->id = (uint8_t)id;
+  b->label = label;
+  b->note = 0;
+  b->note_colour = UD_C_DIM;
+  return b;
+}
+
+int ud_hit(const ud_page *pg, int x, int y)
+{
+  uint32_t i;
+
+  for(i=0;i<pg->nbtn;i++)
+  {
+    const ud_button *b = &pg->btn[i];
+
+    if((x >= b->x) && (x < b->x + b->w) && (y >= b->y) && (y < b->y + b->h))
+      return b->id;
+  }
+
+  return UD_ID_NONE;
+}
+
+static void ud_clear(ud_page *pg)
+{
+  pg->nbox = 0;
+  pg->ntext = 0;
+  pg->nbtn = 0;
+}
+
+static int ud_state_colour(int state)
+{
+  switch(state)
+  {
+    case UD_V_OK:    return UD_C_OK;
+    case UD_V_CHECK: return UD_C_WARN;
+    case UD_V_FAULT: return UD_C_FAULT;
+    default:         return UD_C_DIM;
+  }
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Header: title, the four page tabs, Back (all 44 px tall)
+
+#define UD_HDR_H     52
+#define UD_TAB_X     160
+#define UD_TAB_W     112
+#define UD_TAB_PITCH 120
+#define UD_BACK_X    696
+#define UD_BACK_W    96
+#define UD_BTN_Y     420          //bottom button row
+#define UD_BTN_H     44
+
+static void ud_header(ud_page *pg, int page)
+{
+  static const char *tabs[UD_PAGES] = { "Status", "Calibration", "Log", "Developer" };
+  int i;
+
+  ud_boxa(pg, 0, 0, 800, UD_HDR_H, 1);
+  ud_txt(pg, 12, 14, 140, UD_F_HEAD, UD_C_TITLE, "Diagnostics");
+
+  for(i=0;i<UD_PAGES;i++)
+    ud_btn(pg, UD_TAB_X + UD_TAB_PITCH * i, 4, UD_TAB_W, 44, (i == page) ? UD_B_TAB_ON : UD_B_TAB, UD_ID_TAB_STATUS + i,
+           tabs[i]);
+
+  ud_btn(pg, UD_BACK_X, 4, UD_BACK_W, 44, UD_B_NEUTRAL, UD_ID_BACK, "Back");
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Identity
+
+static char *s_cp15(char *p, uint32_t cp15)
+{
+  uint32_t mmu = cp15 & 1, d = (cp15 >> 2) & 1, i = (cp15 >> 12) & 1;
+
+  if(mmu && d && i)
+    return s_str(p, "MMU and caches on");
+
+  if(!mmu && !d && !i)
+    return s_str(p, "MMU and caches off");
+
+  p = s_str(p, mmu ? "MMU on, D-cache " : "MMU off, D-cache ");
+  p = s_str(p, d ? "on, I-cache " : "off, I-cache ");
+  return s_str(p, i ? "on" : "off");
+}
+
+//"fw 0.2.57, git 1234abcd, 2026-10-19 08:44 UTC, protocol 1.16, serial 1013D-0001, MMU and caches on"
+static void ud_identity_line(const ud_input *in, char *p)
+{
+  const pc_image_id *r = in->run;
+
+  p = s_str(p, "fw ");
+  p = s_ver(p, r->version);
+  p = s_str(p, ", git ");
+  p = s_hexd(p, r->build, 8);
+  p = s_str(p, ", 20");
+  p = s_dec2(p, r->time[0]);
+  *p++ = '-';
+  p = s_dec2(p, r->time[1]);
+  *p++ = '-';
+  p = s_dec2(p, r->time[2]);
+  *p++ = ' ';
+  p = s_dec2(p, r->time[3]);
+  *p++ = ':';
+  p = s_dec2(p, r->time[4]);
+  p = s_str(p, " UTC, protocol ");
+  p = s_uint(p, r->proto_major);
+  *p++ = '.';
+  p = s_uint(p, r->proto_minor);
+
+  if(in->serial && in->serial[0])
+  {
+    p = s_str(p, ", serial ");
+    p = s_str(p, in->serial);
+  }
+
+  p = s_str(p, ", ");
+  s_cp15(p, g32(in->health + H_CP15));
+}
+
+//The FPGA line; returns its colour (amber for the stock or an unknown bitstream: the stock-bitstream exception)
+static int ud_fpga_line(const ud_input *in, char *p)
+{
+  static const char *chip[5] = { "", "", "AL3A10", "EF2", "EP4" };
+  int first = 1;
+
+  if(in->variant == 1)
+  {
+    p = s_str(p, "FPGA stock bitstream ");
+    p = s_hex(p, in->fpga, 4);
+    s_str(p, ": no generator, no filter; gain calibration not possible");
+    return UD_C_WARN;
+  }
+
+  if((in->variant == 0) || (in->variant > 4))
+  {
+    p = s_str(p, "FPGA bitstream ");
+    p = s_hex(p, in->fpga, 4);
+    s_str(p, ": not recognised; the scope runs with the stock limits");
+    return UD_C_WARN;
+  }
+
+  p = s_str(p, "FPGA ");
+  p = s_str(p, chip[in->variant]);
+  p = s_str(p, " bitstream ");
+  p = s_hex(p, in->fpga, 4);
+
+  if(in->caps & PC_CAP_GENERATOR_DDS)
+  {
+    p = s_str(p, first ? ": generator" : ", generator");
+    first = 0;
+  }
+  if(in->caps & PC_CAP_EXT_TRIGGER)
+  {
+    p = s_str(p, first ? ": EXT trigger" : ", EXT trigger");
+    first = 0;
+  }
+  if(in->caps & PC_CAP_DECIM)
+  {
+    p = s_str(p, first ? ": decimation filter" : ", decimation filter");
+    first = 0;
+  }
+  if(in->caps & PC_CAP_FIR)
+    s_str(p, first ? ": CIC+FIR" : ", CIC+FIR");
+
+  return UD_C_SOFT;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Status tiles
+
+#define UD_TILE_Y     96
+#define UD_TILE_W     188
+#define UD_TILE_H     126
+#define UD_TILE_PITCH 196
+#define UD_TILE_IN    168         //text width inside a tile
+#define UD_TILE_LINES 4
+
+typedef struct
+{
+  uint8_t state;
+  char    word[16];
+  char    line[UD_TILE_LINES][40];
+} ud_tile;
+
+static void ud_tile_init(ud_tile *t, int state, const char *word)
+{
+  uint32_t k;
+
+  t->state = (uint8_t)state;
+  s_str(t->word, word);
+
+  for(k=0;k<UD_TILE_LINES;k++)
+    t->line[k][0] = 0;
+}
+
+static int ud_card_known(const pc_card_id *c)
+{
+  return c && ((c->state == PC_ID_RECORD) || (c->state == PC_ID_TAIL) || (c->state == PC_ID_VERSION_ONLY));
+}
+
+//Firmware: the running image against the one the card starts (a version can be 15 characters: its own line)
+static void ud_tile_firmware(const ud_input *in, ud_tile *t)
+{
+  const pc_card_id *c = in->card;
+  char *p;
+
+  if(in->sd_sectors == 0)
+  {
+    ud_tile_init(t, UD_V_CHECK, "Check");
+    p = s_str(t->line[0], "Running ");
+    s_ver(p, in->run->version);
+    s_str(t->line[1], "from RAM. No SD card:");
+    s_str(t->line[2], "settings will not be");
+    s_str(t->line[3], "saved.");
+    return;
+  }
+
+  if(!c || (c->state == PC_ID_NOT_READ))
+  {
+    ud_tile_init(t, UD_V_NA, "Reading");
+    s_str(t->line[0], "Reading the card image.");
+    return;
+  }
+
+  ud_tile_init(t, UD_V_CHECK, "Check");
+  p = s_str(t->line[0], "Running ");
+  s_ver(p, in->run->version);
+
+  if(ud_card_known(c) && c->same)
+  {
+    t->state = UD_V_OK;
+    s_str(t->word, "OK");
+    s_str(t->line[1], "the image the card");
+    s_str(t->line[2], "starts.");
+  }
+  else if(ud_card_known(c) && c->version[0])
+  {
+    s_str(t->line[1], "from RAM. A power cycle");
+    p = s_str(t->line[2], "starts ");
+    s_ver(p, c->version);
+    s_str(t->line[3], "from the card.");
+  }
+  else if(c->state == PC_ID_NO_IMAGE)
+  {
+    s_str(t->line[1], "from RAM. No open");
+    s_str(t->line[2], "firmware on the card.");
+  }
+  else
+  {
+    s_str(t->line[1], "from RAM. The card's");
+    s_str(t->line[2], "image is unknown.");
+  }
+}
+
+static const char *ud_exc_name(uint32_t type)
+{
+  static const char *n[7] = { "jump to the entry", "undefined instruction", "SWI", "prefetch abort", "data abort",
+                              "reserved vector", "FIQ" };
+
+  return (type < 7) ? n[type] : "unknown exception";
+}
+
+//The PC of an exception from its LR (row 38: data abort LR - 8, undefined and prefetch abort LR - 4)
+static uint32_t ud_exc_pc(uint32_t type, uint32_t lr)
+{
+  return lr - ((type == 4) ? 8 : (((type == 1) || (type == 3)) ? 4 : 0));
+}
+
+static char *s_exc_at(char *p, uint32_t type, uint32_t lr)
+{
+  p = s_str(p, ud_exc_name(type));
+  p = s_str(p, (type == 0) ? ", LR " : " at ");
+  return s_hex(p, (type == 0) ? lr : ud_exc_pc(type, lr), 8);
+}
+
+static uint32_t ud_link(const ud_input *in, uint32_t i)
+{
+  return (in->link && (i < in->nlink)) ? in->link[i] : 0;
+}
+
+static void ud_tile_restarts(const ud_input *in, ud_tile *t)
+{
+  const uint8_t *h = in->health;
+  uint32_t n = ud_link(in, 49), up = g32(h + H_UPTIME) / 60000, type = ud_link(in, 50);
+  char *p;
+
+  if(n)
+  {
+    ud_tile_init(t, UD_V_FAULT, "Fault");
+    p = s_str(t->line[0], "Restarted ");
+    p = s_plural(p, n, "time", "times");
+    s_str(p, ":");
+    p = s_str(t->line[1], ud_exc_name(type));
+    s_str(p, (type == 0) ? ", LR" : " at");
+    s_hex(t->line[2], (type == 0) ? ud_link(in, 51) : ud_exc_pc(type, ud_link(in, 51)), 8);
+    s_str(t->line[3], "Details on the Log page.");
+    return;
+  }
+
+  if((h[H_REC] & 1) && !(h[H_REC] & 2))
+  {
+    ud_tile_init(t, UD_V_CHECK, "Check");
+    p = s_str(t->line[0], "Power-on #");
+    p = s_uint(p, g32(h + H_REC_PON));
+    s_str(p, " restarted:");
+    p = s_str(t->line[1], ud_exc_name(h[H_REC_TYPE]));
+    s_str(p, ".");
+    s_str(t->line[2], "None since power-on.");
+    p = s_str(t->line[3], "Up ");
+    p = s_minutes(p, up);
+    s_str(p, ".");
+    return;
+  }
+
+  ud_tile_init(t, UD_V_OK, "OK");
+  s_str(t->line[0], "None since power-on.");
+  p = s_str(t->line[1], "Up ");
+  p = s_minutes(p, up);
+  s_str(p, ".");
+}
+
+static void ud_tile_usb(const ud_input *in, ud_tile *t)
+{
+  const uint8_t *h = in->health;
+  uint32_t bad = ud_link(in, 12) + ud_link(in, 13) + ud_link(in, 14) + ud_link(in, 15);
+  uint32_t susp = ud_link(in, 36), rec = ud_link(in, 61);
+
+  switch(h[H_USB_STATE])
+  {
+    case 3:
+      ud_tile_init(t, (bad || rec) ? UD_V_CHECK : UD_V_OK, (bad || rec) ? "Check" : "OK");
+      s_str(t->line[0], (h[H_USB_FLAGS] & 1) ? "PC connected, high speed." : "PC connected, full speed.");
+      break;
+    case 4:
+      ud_tile_init(t, UD_V_CHECK, "Suspended");
+      s_str(t->line[0], "Host asleep or cable out.");
+      break;
+    case 2:
+      ud_tile_init(t, UD_V_NA, "No PC");
+      s_str(t->line[0], "Not configured: no PC.");
+      break;
+    case 1:
+      ud_tile_init(t, UD_V_CHECK, "Reconnecting");
+      s_str(t->line[0], "Soft reconnect running.");
+      break;
+    default:
+      ud_tile_init(t, UD_V_NA, "Off");
+      s_str(t->line[0], "USB is switched off.");
+      break;
+  }
+
+  //Bad frames: the protocol's CRC, oversize and version errors (counters 12-15); reconnects: the suspend watch's (61)
+  s_plural(t->line[1], bad, "bad frame", "bad frames");
+  s_plural(t->line[2], susp, "suspend", "suspends");
+  s_plural(t->line[3], rec, "reconnect", "reconnects");
+}
+
+static void ud_tile_battery(const ud_input *in, ud_tile *t)
+{
+  char *p;
+  int   low = (in->battery < 4) && !in->charging;
+
+  ud_tile_init(t, low ? UD_V_CHECK : UD_V_OK, "");
+  p = s_uint(t->word, in->battery);
+  s_str(p, " of 20");
+
+  if(low)
+  {
+    s_str(t->line[0], "Low: readings and SD");
+    s_str(t->line[1], "writes may fail.");
+  }
+  else
+    s_str(t->line[0], in->charging ? "Charging." : "On battery.");
+
+  if(in->rtc)
+  {
+    p = s_str(t->line[low ? 2 : 1], "RTC module ");
+    p = s_fix(p, in->temp_c, 1, 0, 0);
+    s_str(p, " C.");
+  }
+}
+
+static void ud_tile_put(ud_page *pg, int i, const char *title, const ud_tile *t)
+{
+  int x = 12 + UD_TILE_PITCH * i, k;
+
+  ud_boxa(pg, x, UD_TILE_Y, UD_TILE_W, UD_TILE_H, 0);
+  ud_txt(pg, x + 10, UD_TILE_Y + 6, UD_TILE_IN, UD_F_SMALL, UD_C_DIM, title);
+  ud_txt(pg, x + 10, UD_TILE_Y + 22, UD_TILE_IN, UD_F_HEAD, ud_state_colour(t->state), t->word);
+
+  for(k=0;k<UD_TILE_LINES;k++)
+    if(t->line[k][0])
+      ud_txt(pg, x + 10, UD_TILE_Y + 52 + 17 * k, UD_TILE_IN, UD_F_SMALL, UD_C_SOFT, t->line[k]);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Calibration: verdict, the values against their limits, provenance
+
+int ud_cal_calibrated(const uint8_t *cal0, const uint8_t *cal1)
+{
+  return (cal0[C_VERSION] == 3) && (cal1[C_VERSION] == 3);
+}
+
+static const uint8_t *ud_prov(const ud_input *in)
+{
+  return (in->cal[0][C_PROV] == ACAL_PROV_VALID) ? in->cal[0] + 292 : 0;
+}
+
+//Class gain ratio full / gated, |ratio - 1| in tenths of a percent; -1 without measured gains
+static int32_t ud_class_tenths(const uint8_t *c)
+{
+  const uint8_t *b = c + C_BLOCK;
+  uint32_t full, gated, d;
+
+  if(!(c[C_FLAGS] & F_LOADED) || !(c[C_FLAGS] & F_GAINS))
+    return -1;
+
+  full  = g16(b + B_GAIN) + g16(b + B_GAIN + 2);
+  gated = g16(b + B_GAIN + 4) + g16(b + B_GAIN + 6);
+
+  if(!gated)
+    return -1;
+
+  d = (full > gated) ? full - gated : gated - full;
+  return (int32_t)((d * 1000 + gated / 2) / gated);
+}
+
+//Worst noise RMS of a class over both cores and all ranges, hundredths of a code; -1 without a block
+static int32_t ud_noise_hundredths(const uint8_t *c, uint32_t cls)
+{
+  const uint8_t *b = c + C_BLOCK + B_NOISE + 12 * cls;
+  uint32_t i, m = 0;
+
+  if(!(c[C_FLAGS] & F_LOADED))
+    return -1;
+
+  for(i=0;i<12;i++)
+    if(b[i] > m)
+      m = b[i];
+
+  return (int32_t)((m * 100 + 8) / 16);
+}
+
+
+static int ud_over_limits(const uint8_t *c)
+{
+  int32_t r = ud_class_tenths(c), g = ud_noise_hundredths(c, ACAL_GATED), f = ud_noise_hundredths(c, ACAL_FULL);
+
+  return (r > UD_LIM_CLASS_TENTHS) || (g > UD_LIM_NOISE_GATED) || (f > UD_LIM_NOISE_FULL);
+}
+
+void ud_cal_verdict(const ud_input *in, ud_verdict *v)
+{
+  const uint8_t *c0 = in->cal[0], *c1 = in->cal[1], *pv = ud_prov(in);
+  uint8_t all = c0[C_FLAGS] & c1[C_FLAGS];
+  char *p = v->reason;
+
+  v->state = UD_V_CHECK;
+  s_str(v->word, "Check");
+
+  if(!(all & F_LOADED))
+  {
+    v->state = UD_V_FAULT;
+    s_str(v->word, "Fault");
+    s_str(p, "Uncalibrated: readings may be several % off. Run Calibrate.");
+  }
+  else if(!(all & F_BOUND))
+    s_str(p, "Saved calibration does not match the current offsets: run Calibrate.");
+  else if(pv && (g16(pv + 28) != in->fpga))
+  {
+    p = s_str(p, "FPGA changed since calibration (");
+    p = s_hex(p, g16(pv + 28), 4);
+    p = s_str(p, " to ");
+    p = s_hex(p, in->fpga, 4);
+    s_str(p, "): recalibrate.");
+  }
+  else if(!(all & F_GAINS))
+  {
+    if(in->variant == 1)
+    {
+      p = s_str(p, "FPGA stock ");
+      p = s_hex(p, in->fpga, 4);
+      s_str(p, ": no generator, gain calibration not possible.");
+    }
+    else
+      s_str(p, "Gains not measured: run Calibrate with the probes on the post.");
+  }
+  else if((c0[C_FLAGS] | c1[C_FLAGS]) & F_KEPT)
+    s_str(p, "Gains carried over from an earlier calibration: run Calibrate.");
+  else if(pv && (g32(pv + 32) < UD_WARMUP_MS))
+  {
+    p = s_str(p, "Calibrated ");
+    p = s_uint(p, g32(pv + 32) / 60000);
+    s_str(p, " min after power-on: recalibrate after 5 minutes of warm-up.");
+  }
+  else if(ud_over_limits(c0) || ud_over_limits(c1))
+    s_str(p, "A value is over its limit (below): recalibrate with the inputs open.");
+  else
+  {
+    v->state = UD_V_OK;
+    s_str(v->word, "OK");
+    s_str(p, "Calibrated, every value within its limit.");
+  }
+}
+
+void ud_cal_provenance(const ud_input *in, char *p)
+{
+  const uint8_t *c = in->cal[0], *pv = ud_prov(in);
+  uint32_t up, ons;
+
+  if(!((c[C_FLAGS] | in->cal[1][C_FLAGS]) & F_LOADED))
+  {
+    s_str(p, "No calibration on the card: 1.00o5's defaults are in use.");
+    return;
+  }
+
+  if(c[C_PROV] == ACAL_PROV_BAD)
+  {
+    s_str(p, "The record of when it was calibrated is unreadable.");
+    return;
+  }
+
+  if(!pv)
+  {
+    s_str(p, "Calibrated before fw 0.2.52: no record of when.");
+    return;
+  }
+
+  up  = g32(pv + 32);
+  ons = g32(c + C_ONS);
+
+  p = s_str(p, "Calibrated on fw ");
+  p = s_ver(p, (const char *)pv + 12);
+  p = s_str(p, ", FPGA ");
+  p = s_hex(p, g16(pv + 28), 4);
+
+  if(pv[31])
+  {
+    p = s_str(p, ", 20");
+    p = s_dec2(p, pv[44]);
+    *p++ = '-';
+    p = s_dec2(p, pv[45]);
+    *p++ = '-';
+    p = s_dec2(p, pv[46]);
+  }
+
+  if(up < 60000)
+    p = s_str(p, ", under a minute after power-on");
+  else
+  {
+    p = s_str(p, ", ");
+    p = s_uint(p, up / 60000);
+    p = s_str(p, " min after power-on");
+  }
+
+  if(ons == 0)
+    p = s_str(p, ", this power-on");
+  else if(ons != 0xFFFFFFFFu)
+  {
+    p = s_str(p, ", ");
+    p = s_plural(p, ons, "power-on ago", "power-ons ago");
+  }
+
+  s_str(p, ".");
+}
+
+//One table cell: "1.1 % OK" (value, then the verdict word in its colour)
+static void ud_cell(ud_page *pg, int x, int y, int32_t v, uint32_t denom, uint32_t dec, const char *unit, int32_t limit,
+                    const char *na)
+{
+  char t[32], *p;
+  int  over;
+
+  if(v < 0)
+  {
+    ud_txt(pg, x, y, 210, UD_F_BODY, UD_C_DIM, na);
+    return;
+  }
+
+  over = v > limit;
+  p = s_fix(t, v, denom, dec, 0);
+  s_str(p, unit);
+  ud_txt(pg, x, y, 150, UD_F_BODY, UD_C_TEXT, t);
+  ud_txt(pg, x + 8 + (int)ui_text_width(&font_3, t), y, 60, UD_F_BODY, over ? UD_C_WARN : UD_C_OK, over ? "Check" : "OK");
+}
+
+#define UD_CAL_Y      230
+#define UD_CAL_H      182
+
+static void ud_status_cal(ud_page *pg, const ud_input *in)
+{
+  static const char *heads[3]  = { "Class gain ratio, full / gated", "Noise RMS, gated", "Noise RMS, full" };
+  static const char *limits[3] = { "limit 2 %", "limit 0.3 code", "limit 1.0 code" };
+  ud_verdict v;
+  char t[UD_TEXT_LEN];
+  uint32_t ch, i;
+  int x, y = UD_CAL_Y;
+
+  ud_boxa(pg, 12, y, 776, UD_CAL_H, 0);
+  ud_cal_verdict(in, &v);
+  ud_txt(pg, 22, y + 10, 80, UD_F_SMALL, UD_C_DIM, "Calibration");
+  ud_txt(pg, 104, y + 8, 60, UD_F_BODY, ud_state_colour(v.state), v.word);
+  ud_txt(pg, 170, y + 10, 608, UD_F_SMALL, UD_C_SOFT, v.reason);
+
+  for(i=0;i<3;i++)
+  {
+    x = 80 + 232 * (int)i;
+    ud_txt(pg, x, y + 36, 224, UD_F_SMALL, UD_C_DIM, heads[i]);
+    ud_txt(pg, x, y + 52, 224, UD_F_SMALL, UD_C_DIM, limits[i]);
+  }
+
+  for(ch=0;ch<2;ch++)
+  {
+    const uint8_t *c = in->cal[ch];
+    int yy = y + 76 + 28 * (int)ch;
+
+    ud_txt(pg, 22, yy, 50, UD_F_BODY, ch ? UD_C_CH2 : UD_C_CH1, ch ? "CH2" : "CH1");
+
+    if(!(c[C_FLAGS] & F_LOADED))
+    {
+      ud_txt(pg, 80, yy, 690, UD_F_BODY, UD_C_DIM, "not calibrated");
+      continue;
+    }
+
+    ud_cell(pg, 80, yy, ud_class_tenths(c), 10, 1, " %", UD_LIM_CLASS_TENTHS, "gains not measured");
+    ud_cell(pg, 312, yy, ud_noise_hundredths(c, ACAL_GATED), 100, 2, " code", UD_LIM_NOISE_GATED, "");
+    ud_cell(pg, 544, yy, ud_noise_hundredths(c, ACAL_FULL), 100, 2, " code", UD_LIM_NOISE_FULL, "");
+  }
+
+  ud_txt(pg, 22, y + 136, 756, UD_F_SMALL, UD_C_DIM, "Limits are provisional: set from one unit's bench values.");
+  ud_cal_provenance(in, t);
+  ud_txt(pg, 22, y + 156, 756, UD_F_SMALL, UD_C_SOFT, t);
+}
+
+static void ud_note_or_hint(ud_page *pg, const ud_note *note, int x, const char *hint)
+{
+  if(note && note->text[0])
+    ud_txt(pg, x, UD_BTN_Y + 14, 788 - x, UD_F_SMALL, note->colour, note->text);
+  else if(hint)
+    ud_txt_r(pg, 788, UD_BTN_Y + 14, 788 - x, UD_F_SMALL, UD_C_DIM, hint);
+}
+
+static void ud_page_status(ud_page *pg, const ud_input *in, const ud_note *note)
+{
+  static const char *titles[4] = { "Firmware", "Restarts", "USB", "Battery" };
+  char t[UD_TEXT_LEN];
+  ud_tile tile;
+  int i, colour;
+
+  ud_identity_line(in, t);
+  ud_txt(pg, 12, 58, 776, UD_F_SMALL, UD_C_SOFT, t);
+  colour = ud_fpga_line(in, t);
+  ud_txt(pg, 12, 75, 776, UD_F_SMALL, colour, t);
+
+  for(i=0;i<4;i++)
+  {
+    switch(i)
+    {
+      case 0:  ud_tile_firmware(in, &tile); break;
+      case 1:  ud_tile_restarts(in, &tile); break;
+      case 2:  ud_tile_usb(in, &tile); break;
+      default: ud_tile_battery(in, &tile); break;
+    }
+
+    ud_tile_put(pg, i, titles[i], &tile);
+  }
+
+  ud_status_cal(pg, in);
+
+  ud_btn(pg, 12, UD_BTN_Y, 140, UD_BTN_H, UD_B_PRIMARY, UD_ID_CALIBRATE, "Calibrate");
+  ud_btn(pg, 164, UD_BTN_Y, 196, UD_BTN_H, UD_B_NEUTRAL, UD_ID_REPORT, "Save report to card");
+  ud_note_or_hint(pg, note, 376, "Updates every second");
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Calibration page: the raw numbers per channel
+
+static const char *ud_range_names[ACAL_RANGES] = { "5 V", "2.5 V", "1 V", "500 mV", "200 mV", "100 mV" };
+
+#define UD_CB_Y   96
+#define UD_CB_W   382
+#define UD_CB_H   270
+
+static void ud_cal_channel(ud_page *pg, const ud_input *in, uint32_t ch)
+{
+  const uint8_t *c = in->cal[ch], *b = c + C_BLOCK;
+  int x = 12 + 394 * (int)ch, x0 = x + 10, y = UD_CB_Y, loaded = c[C_FLAGS] & F_LOADED, yy;
+  char t[UD_TEXT_LEN], *p;
+  uint32_t r, k, m, flags = c[C_TRK];
+
+  ud_boxa(pg, x, y, UD_CB_W, UD_CB_H, 0);
+  ud_txt(pg, x0, y + 6, 40, UD_F_BODY, ch ? UD_C_CH2 : UD_C_CH1, ch ? "CH2" : "CH1");
+  ud_txt(pg, x0 + 44, y + 8, 318, UD_F_SMALL, UD_C_DIM, "per hardware range (V/div); zeros in codes, core A / B");
+
+  yy = y + 30;
+  ud_txt(pg, x0, yy, 52, UD_F_SMALL, UD_C_DIM, "Range");
+  ud_txt_r(pg, x0 + 86, yy, 34, UD_F_SMALL, UD_C_DIM, "PWM");
+  ud_txt_r(pg, x0 + 144, yy, 52, UD_F_SMALL, UD_C_DIM, "Volts");
+  ud_txt(pg, x0 + 156, yy, 100, UD_F_SMALL, UD_C_DIM, "Zero gated");
+  ud_txt(pg, x0 + 260, yy, 100, UD_F_SMALL, UD_C_DIM, "Zero full");
+
+  for(r=0;r<ACAL_RANGES;r++)
+  {
+    int32_t pwm = (int32_t)g16(c + C_OFFSET + 2 * r), vf = (int32_t)g32(c + C_VOLTS + 4 * r), dv = 0, def;
+
+    yy = y + 46 + 15 * (int)r;
+    ud_txt(pg, x0, yy, 52, UD_F_SMALL, UD_C_SOFT, ud_range_names[r]);
+
+    s_uint(t, (uint32_t)pwm);
+    ud_txt_r(pg, x0 + 86, yy, 34, UD_F_SMALL, ((pwm < 860 - UD_LIM_PWM_DEV) || (pwm > 860 + UD_LIM_PWM_DEV)) ?
+             UD_C_WARN : UD_C_TEXT, t);
+
+    def = in->volts_default ? in->volts_default[r] : 0;
+
+    if(def > 0)
+    {
+      dv = (int32_t)(((int64_t)(vf - def) * 1000) / def);
+      p = s_fix(t, dv, 10, 1, 1);
+      s_str(p, " %");
+      ud_txt_r(pg, x0 + 144, yy, 56, UD_F_SMALL, ((dv > UD_LIM_VOLTS_TENTHS) || (dv < -UD_LIM_VOLTS_TENTHS)) ?
+               UD_C_WARN : UD_C_TEXT, t);
+    }
+
+    for(m=0;m<2;m++)
+    {
+      //columns: gated (class 1), then full (class 0)
+      uint32_t cls = m ? ACAL_FULL : ACAL_GATED;
+
+      if(loaded)
+      {
+        p = t;
+        for(k=0;k<2;k++)
+        {
+          p = s_fix(p, (int16_t)g16(b + B_ZERO + 2 * (12 * cls + 6 * k + r)), 16, 1, 0);
+          if(!k)
+            p = s_str(p, " / ");
+        }
+      }
+      else
+        s_str(t, "-");
+
+      ud_txt(pg, x0 + 156 + 104 * (int)m, yy, 100, UD_F_SMALL, loaded ? UD_C_TEXT : UD_C_DIM, t);
+    }
+  }
+
+  yy = y + 46 + 15 * ACAL_RANGES + 8;
+
+  if(!loaded)
+  {
+    ud_txt(pg, x0, yy, 362, UD_F_SMALL, UD_C_WARN, "No calibration block: run Calibrate.");
+    yy += 16;
+  }
+  else
+  {
+    //Gains per class and core (1.0000 = the gated mean of both cores)
+    for(m=0;m<2;m++)
+    {
+      uint32_t cls = m ? ACAL_GATED : ACAL_FULL;
+
+      p = s_str(t, m ? "Gains gated A " : "Gains full A ");
+      p = s_fix(p, (int32_t)g16(b + B_GAIN + 4 * cls), 32768, 4, 0);
+      p = s_str(p, ", B ");
+      p = s_fix(p, (int32_t)g16(b + B_GAIN + 4 * cls + 2), 32768, 4, 0);
+
+      if(m)
+      {
+        if(b[B_GRANGE] == ACAL_GAIN_NONE)
+          s_str(p, ", not measured");
+        else
+        {
+          p = s_str(p, ", range ");
+          p = s_str(p, ud_range_names[b[B_GRANGE] % ACAL_RANGES]);
+          s_str(p, (c[C_FLAGS] & F_KEPT) ? ", carried over" : "");
+        }
+      }
+
+      ud_txt(pg, x0, yy, 362, UD_F_SMALL, (c[C_FLAGS] & F_GAINS) ? UD_C_TEXT : UD_C_DIM, t);
+      yy += 16;
+    }
+
+    p = s_str(t, "Noise RMS gated ");
+    p = s_fix(p, ud_noise_hundredths(c, ACAL_GATED), 100, 2, 0);
+    p = s_str(p, ", full ");
+    p = s_fix(p, ud_noise_hundredths(c, ACAL_FULL), 100, 2, 0);
+    s_str(p, " code");
+    ud_txt(pg, x0, yy, 362, UD_F_SMALL, ud_over_limits(c) ? UD_C_WARN : UD_C_TEXT, t);
+    yy += 16;
+  }
+
+  //Calibration v4 tracking (acal_live.c): the full-rate A - B correction and the full-class offset against gated
+  if(flags & 0x01)
+  {
+    p = s_str(t, "Tracking A-B ");
+    p = s_fix(p, (int16_t)g16(c + C_TRK + 2), 256, 2, 1);
+    p = s_str(p, " code, slope ");
+    p = s_fix(p, (int32_t)g32(c + C_TRK + 4), 167772, 2, 1);      //e x 100 / 2^24
+    p = s_str(p, " %, ");
+    p = s_uint(p, g32(c + C_TRK + 12) / 1000);
+    s_str(p, " s ago");
+  }
+  else
+    s_str(t, "Tracking A-B: no full-rate record yet");
+
+  ud_txt(pg, x0, yy, 362, UD_F_SMALL, (flags & 0x01) ? UD_C_TEXT : UD_C_DIM, t);
+  yy += 16;
+
+  if(flags & 0x20)
+  {
+    p = s_str(t, "Full-rate offset ");
+    p = s_fix(p, (int16_t)g16(c + C_TRK + 24), 256, 2, 1);
+    p = s_str(p, " code, ");
+    p = s_plural(p, g16(c + C_TRK + 26), "probe, ", "probes, ");
+    p = s_uint(p, g32(c + C_TRK + 28) / 1000);
+    s_str(p, " s ago");
+  }
+  else
+    s_str(t, "Full-rate offset: not probed yet");
+
+  ud_txt(pg, x0, yy, 362, UD_F_SMALL, (flags & 0x20) ? UD_C_TEXT : UD_C_DIM, t);
+  yy += 16;
+
+  p = s_str(t, "DC shift: centre ");
+  p = s_uint(p, g32(c + C_SHIFT));
+  p = s_str(p, ", size ");
+  p = s_fix(p, (int32_t)g32(c + C_SHIFT + 4), 1, 0, 0);
+  p = s_str(p, ", value ");
+  s_fix(p, (int32_t)g32(c + C_SHIFT + 8), 1, 0, 0);
+  ud_txt(pg, x0, yy, 362, UD_F_SMALL, UD_C_TEXT, t);
+  yy += 16;
+
+  if(c[C_VERSION] == 3)
+    s_str(t, "1.00o5 core compensations: not used (v3 in use)");
+  else
+  {
+    p = s_str(t, "1.00o5 core compensations in use: A ");
+    p = s_fix(p, (int16_t)g16(c + C_COMP), 1, 0, 0);
+    p = s_str(p, ", B ");
+    s_fix(p, (int16_t)g16(c + C_COMP + 2), 1, 0, 0);
+  }
+
+  ud_txt(pg, x0, yy, 362, UD_F_SMALL, UD_C_SOFT, t);
+}
+
+static const char *ud_block_state(const uint8_t *c)
+{
+  if(c[C_VERSION] == 3)
+    return "in use";
+
+  return (c[C_FLAGS] & F_LOADED) ? "not bound to the offsets" : "none";
+}
+
+#define UD_CAL_ROW1   374
+
+static void ud_page_cal(ud_page *pg, const ud_input *in, const ud_note *note)
+{
+  char t[UD_TEXT_LEN], *p;
+  const uint8_t *pv = ud_prov(in);
+
+  p = s_str(t, "Calibration block (sector 708): CH1 ");
+  p = s_str(p, ud_block_state(in->cal[0]));
+  p = s_str(p, ", CH2 ");
+  p = s_str(p, ud_block_state(in->cal[1]));
+  s_str(p, ".");
+  ud_txt(pg, 12, 58, 776, UD_F_SMALL, UD_C_SOFT, t);
+
+  ud_cal_provenance(in, t);
+  ud_txt(pg, 12, 75, 776, UD_F_SMALL, (pv && (g16(pv + 28) != in->fpga)) ? UD_C_WARN : UD_C_SOFT, t);
+
+  ud_cal_channel(pg, in, 0);
+  ud_cal_channel(pg, in, 1);
+
+  //Two rows of service actions: Calibrate and the DC shift trim (1.00o5's manual trim of the trace scale, run on the
+  //scope's CTRL page while on), then the volts calibration and, apart at the right, Clear calibration
+  ud_btn(pg, 12, UD_CAL_ROW1, 140, UD_BTN_H, UD_B_PRIMARY, UD_ID_CALIBRATE, "Calibrate");
+  ud_btn(pg, 164, UD_CAL_ROW1, 180, UD_BTN_H, UD_B_NEUTRAL, UD_ID_DCSHIFT, "DC shift trim");
+  ud_txt(pg, 356, UD_CAL_ROW1 + 6, 432, UD_F_SMALL, in->dc_shift ? UD_C_WARN : UD_C_DIM, in->dc_shift ?
+         "DC shift trim on: CTRL on the scope opens it." : "DC shift trim off.");
+
+  if(note && note->text[0])
+    ud_txt(pg, 356, UD_CAL_ROW1 + 24, 432, UD_F_SMALL, note->colour, note->text);
+
+  ud_btn(pg, 12, UD_BTN_Y + 6, 180, UD_BTN_H, UD_B_NEUTRAL, UD_ID_VOLTS, "Volts calibration");
+  ud_txt(pg, 204, UD_BTN_Y + 20, 396, UD_F_SMALL, UD_C_DIM, "Needs a DC supply up to 15 V.");
+  ud_btn(pg, 612, UD_BTN_Y + 6, 176, UD_BTN_H, UD_B_DANGER, UD_ID_CLEAR, "Clear calibration");
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Log page
+
+#define UD_LOG_W     480
+#define UD_RCOL_X    500
+#define UD_RCOL_W    288
+
+static void ud_log_restart(ud_page *pg, const ud_input *in, int y)
+{
+  const uint8_t *h = in->health;
+  uint32_t n = ud_link(in, 49), type = ud_link(in, 50);
+  char t[UD_TEXT_LEN], *p;
+  int x = UD_RCOL_X + 10;
+
+  ud_boxa(pg, UD_RCOL_X, y, UD_RCOL_W, 100, 0);
+  ud_txt(pg, x, y + 8, 280, UD_F_SMALL, UD_C_DIM, "Last restart");
+
+  if(n)
+  {
+    p = s_str(t, "Restarted ");
+    s_plural(p, n, "time since power-on", "times since power-on");
+    ud_txt(pg, x, y + 26, 280, UD_F_BODY, UD_C_FAULT, t);
+    s_exc_at(t, type, ud_link(in, 51));
+    ud_txt(pg, x, y + 48, 280, UD_F_SMALL, UD_C_SOFT, t);
+
+    if((type == 3) || (type == 4))
+    {
+      p = s_str(t, "fault status ");
+      p = s_hex(p, ud_link(in, 58), 3);
+      if(type == 4)
+      {
+        p = s_str(p, ", address ");
+        s_hex(p, ud_link(in, 59), 8);
+      }
+    }
+    else
+    {
+      p = s_str(t, "at _reset LR ");
+      s_hex(p, ud_link(in, 54), 8);
+    }
+    ud_txt(pg, x, y + 64, 280, UD_F_SMALL, UD_C_SOFT, t);
+  }
+  else
+  {
+    ud_txt(pg, x, y + 26, 280, UD_F_BODY, UD_C_OK, "None since power-on");
+
+    if(h[H_REC] & 1)
+    {
+      p = s_str(t, "Stored from power-on #");
+      p = s_uint(p, g32(h + H_REC_PON));
+      s_str(p, ":");
+      ud_txt(pg, x, y + 48, 280, UD_F_SMALL, UD_C_WARN, t);
+      s_exc_at(t, h[H_REC_TYPE], g32(h + H_REC_LR));
+      ud_txt(pg, x, y + 64, 280, UD_F_SMALL, UD_C_WARN, t);
+    }
+    else
+    {
+      ud_txt(pg, x, y + 48, 280, UD_F_SMALL, UD_C_SOFT, "A restart records its cause, program");
+      ud_txt(pg, x, y + 64, 280, UD_F_SMALL, UD_C_SOFT, "address and fault address here.");
+    }
+  }
+}
+
+static void ud_log_sd(ud_page *pg, const ud_input *in, int y)
+{
+  const pc_card_id *c = in->card;
+  const uint8_t *h = in->health;
+  char t[UD_TEXT_LEN], *p;
+  int x = UD_RCOL_X + 10, colour = UD_C_WARN;
+
+  ud_boxa(pg, UD_RCOL_X, y, UD_RCOL_W, 100, 0);
+  ud_txt(pg, x, y + 8, 280, UD_F_SMALL, UD_C_DIM, "SD card");
+
+  if(in->sd_sectors == 0)
+    s_str(t, "No card: settings will not be saved");
+  else if(!c || (c->state == PC_ID_NOT_READ))
+  {
+    s_str(t, "Card image not read yet");
+    colour = UD_C_DIM;
+  }
+  else if(ud_card_known(c) && c->same)
+  {
+    s_str(t, "Card image is the running image");
+    colour = UD_C_OK;
+  }
+  else if(ud_card_known(c) && c->version[0])
+  {
+    p = s_str(t, "Card image ");
+    s_ver(p, c->version);
+  }
+  else
+    s_str(t, (c->state == PC_ID_NO_IMAGE) ? "No open firmware at sector 750" : "Card image unknown");
+
+  ud_txt(pg, x, y + 24, 280, UD_F_BODY, colour, t);
+
+  if(in->sd_sectors)
+  {
+    p = s_str(t, "Running ");
+    p = s_ver(p, in->run->version);
+    p = s_str(p, ", ");
+    p = s_fix(p, (int32_t)(in->sd_sectors / 1953), 1000, 1, 0);     //512-byte sectors -> GB
+    s_str(p, " GB card.");
+    ud_txt(pg, x, y + 46, 280, UD_F_SMALL, UD_C_SOFT, t);
+    ud_txt(pg, x, y + 62, 280, UD_F_SMALL, UD_C_SOFT, "Settings and calibration");
+    ud_txt(pg, x, y + 78, 280, UD_F_SMALL, UD_C_SOFT, (h[H_SETTINGS] & 1) ? "changed: saved at the next power-off." : "unchanged since the last save.");
+  }
+}
+
+static void ud_log_unit(ud_page *pg, const ud_input *in, int y)
+{
+  static const char *ends[3] = { "Previous power-on: no record yet.", "Previous power-on: saved at power-off.",
+                                 "Previous power-on: ended unsaved." };
+  const uint8_t *h = in->health;
+  char t[UD_TEXT_LEN], *p;
+  int x = UD_RCOL_X + 10;
+
+  ud_boxa(pg, UD_RCOL_X, y, UD_RCOL_W, 134, 0);
+  ud_txt(pg, x, y + 8, 280, UD_F_SMALL, UD_C_DIM, "Unit");
+
+  if(g32(h + H_POWER_ON))
+  {
+    p = s_str(t, "Power-on #");
+    p = s_uint(p, g32(h + H_POWER_ON));
+    p = s_str(p, ", up ");
+  }
+  else
+    p = s_str(t, "Power-on count unknown, up ");
+  p = s_minutes(p, g32(h + H_UPTIME) / 60000);
+  s_str(p, ".");
+  ud_txt(pg, x, y + 28, 280, UD_F_SMALL, UD_C_SOFT, t);
+
+  p = s_str(t, "Operating time ");
+  p = s_minutes(p, g32(h + H_MINUTES));
+  s_str(p, ".");
+  ud_txt(pg, x, y + 46, 280, UD_F_SMALL, UD_C_SOFT, t);
+
+  ud_txt(pg, x, y + 64, 280, UD_F_SMALL, (h[H_LAST_END] == 2) ? UD_C_WARN : UD_C_SOFT, ends[(h[H_LAST_END] < 3) ?
+         h[H_LAST_END] : 0]);
+  ud_txt(pg, x, y + 82, 280, UD_F_SMALL, (h[H_LIFE] & 0x08) ? UD_C_SOFT : UD_C_WARN, (h[H_LIFE] & 0x08) ?
+         "Settings sector valid at boot." : "Settings sector invalid: defaults.");
+}
+
+static void ud_page_log(ud_page *pg, const ud_input *in, const ud_note *note)
+{
+  char t[UD_TEXT_LEN], *p;
+  ud_text *ev;
+  uint32_t i;
+  int y;
+
+  ud_boxa(pg, 12, 60, UD_LOG_W, 350, 0);
+  ud_txt(pg, 22, 68, 140, UD_F_SMALL, UD_C_DIM, "USB and link events");
+  p = t;
+
+  if(in->nevents)
+  {
+    p = s_uint(p, in->events_first + 1);
+    p = s_str(p, "..");
+    p = s_uint(p, in->events_first + in->nevents);
+    p = s_str(p, " of ");
+  }
+
+  p = s_uint(p, in->events_total);
+  s_str(p, ", newest first");
+  ud_txt(pg, 162, 68, 300, UD_F_SMALL, UD_C_DIM, t);
+
+  for(i=0;(i<in->nevents) && (i<UD_LOG_LINES);i++)
+  {
+    y = 88 + 16 * (int)i;
+    p = s_fix(t, (int32_t)(in->event_ms[i] / 100), 10, 1, 0);
+    s_str(p, " s");
+    ud_txt_r(pg, 96, y, 74, UD_F_SMALL, UD_C_DIM, t);
+    ev = ud_txt(pg, 104, y, 366, UD_F_SMALL, UD_C_TEXT, in->event_text[i]);
+
+    if(ev)
+      ev->trim = 1;
+  }
+
+  if(!in->nevents)
+    ud_txt(pg, 22, 88, 448, UD_F_SMALL, UD_C_DIM, "No events logged since power-on.");
+
+  p = s_str(t, "Since power-on: ");
+  p = s_plural(p, ud_link(in, 36), "suspend, ", "suspends, ");
+  p = s_plural(p, ud_link(in, 37), "resume, ", "resumes, ");
+  s_plural(p, ud_link(in, 60), "inferred resume,", "inferred resumes,");
+  ud_txt(pg, 22, 372, 448, UD_F_SMALL, UD_C_SOFT, t);
+  p = s_plural(t, ud_link(in, 61), "reconnect, ", "reconnects, ");
+  s_plural(p, ud_link(in, 12) + ud_link(in, 13) + ud_link(in, 14) + ud_link(in, 15), "bad frame.", "bad frames.");
+  ud_txt(pg, 22, 388, 448, UD_F_SMALL, UD_C_SOFT, t);
+
+  ud_log_restart(pg, in, 60);
+  ud_log_sd(pg, in, 168);
+  ud_log_unit(pg, in, 276);
+
+  ud_btn(pg, 12, UD_BTN_Y, 196, UD_BTN_H, UD_B_NEUTRAL, UD_ID_REPORT, "Save report to card");
+  //Paging through the stored entries: Older while there are more, then back to the newest
+  if(in->events_more || in->events_first)
+    ud_btn(pg, 220, UD_BTN_Y, 160, UD_BTN_H, UD_B_NEUTRAL, UD_ID_OLDER, in->events_more ? "Older events" : "Newest events");
+  ud_note_or_hint(pg, note, 392, 0);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Developer page
+
+static void ud_page_dev(ud_page *pg, const ud_input *in)
+{
+  ud_button *b;
+
+  ud_txt(pg, 12, 62, 776, UD_F_SMALL, UD_C_SOFT, "For firmware work. Normal use needs none of this.");
+
+  b = ud_btn(pg, 12, 86, 776, 56, UD_B_ROW, UD_ID_OVERLAY, "Debug overlay");
+  if(b)
+  {
+    b->note = in->dev_mode ? "on" : "off";
+    b->note_colour = in->dev_mode ? UD_C_OK : UD_C_DIM;
+  }
+  ud_txt(pg, 24, 86 + 30, 640, UD_F_SMALL, UD_C_DIM, "Trigger address and touch coordinates over the top bar");
+
+  b = ud_btn(pg, 12, 150, 776, 56, UD_B_ROW, UD_ID_FEL, "Enter FEL now");
+  if(b)
+  {
+    b->note = "asks first";
+    b->note_colour = UD_C_WARN;
+  }
+  ud_txt(pg, 24, 150 + 30, 640, UD_F_SMALL, UD_C_DIM, "Restart into the USB boot loader (sunxi-fel); the card is not touched");
+}
+
+void ud_build(ud_page *pg, int page, const ud_input *in, const ud_note *note)
+{
+  ud_clear(pg);
+  ud_header(pg, page);
+
+  switch(page)
+  {
+    case UD_PAGE_CAL: ud_page_cal(pg, in, note); break;
+    case UD_PAGE_LOG: ud_page_log(pg, in, note); break;
+    case UD_PAGE_DEV: ud_page_dev(pg, in); break;
+    default:          ud_page_status(pg, in, note); break;
+  }
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// First run (plan section 6, FirstRun mockup): what the unit found, what to do, Later left, Calibrate now right
+
+void ud_build_first_run(ud_page *pg, const ud_input *in, int settings_defaults, int volts_due)
+{
+  const uint8_t *c0 = in->cal[0], *c1 = in->cal[1];
+  char t[UD_TEXT_LEN], f[UD_TEXT_LEN], *p;
+  int y = 104, colour;
+
+  ud_clear(pg);
+  ud_boxa(pg, 0, 0, 800, UD_HDR_H, 1);
+  ud_txt(pg, 14, 14, 300, UD_F_HEAD, UD_C_TITLE, "First start");
+
+  p = s_str(t, "Open firmware ");
+  p = s_ver(p, in->run->version);
+  p = s_str(p, ", protocol ");
+  p = s_uint(p, in->run->proto_major);
+  *p++ = '.';
+  p = s_uint(p, in->run->proto_minor);
+  p = s_str(p, ". FPGA bitstream ");
+  p = s_hex(p, in->fpga, 4);
+  s_str(p, ".");
+  ud_txt(pg, 24, 66, 752, UD_F_SMALL, UD_C_SOFT, t);
+
+  //Check lines: the first character picks the icon. The FPGA: "FPGA recognised: AL3A10 bitstream 0x1535: ..." or the
+  //stock-bitstream exception in amber
+  colour = ud_fpga_line(in, f);
+  if(colour == UD_C_WARN)
+    p = s_str(t, UD_ICON_WARN);
+  else
+    p = s_str(t, UD_ICON_OK "FPGA recognised: ");
+  s_str(p, (colour == UD_C_WARN) ? f : f + 5);
+  ud_txt(pg, 24, y, 752, UD_F_BODY, (colour == UD_C_WARN) ? UD_C_WARN : UD_C_TEXT, t);
+  y += 36;
+
+  ud_txt(pg, 24, y, 752, UD_F_BODY, UD_C_TEXT, settings_defaults ? UD_ICON_OK "No saved settings on the card: defaults used." :
+         UD_ICON_OK "Settings loaded from the card.");
+  y += 36;
+
+  if(((c0[C_FLAGS] & c1[C_FLAGS]) & F_LOADED) && !((c0[C_FLAGS] & c1[C_FLAGS]) & F_BOUND))
+    ud_txt(pg, 24, y, 752, UD_F_BODY, UD_C_WARN,
+           UD_ICON_WARN "Saved calibration does not match the current offsets: calibrate again.");
+  else
+    ud_txt(pg, 24, y, 752, UD_F_BODY, UD_C_WARN, UD_ICON_WARN "Calibration missing: readings may be several % off.");
+  y += 36;
+
+  if(volts_due)
+  {
+    ud_txt(pg, 24, y, 752, UD_F_BODY, UD_C_WARN,
+           UD_ICON_WARN "Volts calibration missing too: it needs a DC supply up to 15 V.");
+    y += 36;
+  }
+
+  ud_boxa(pg, 24, y + 10, 752, 1, 2);
+  y += 28;
+  ud_txt(pg, 24, y, 752, UD_F_BODY, UD_C_TEXT, "Calibrate after the scope has been on for 5 minutes.");
+  ud_txt(pg, 24, y + 24, 752, UD_F_BODY, UD_C_TEXT, "The zero step takes 8 seconds and needs no probes.");
+  ud_txt(pg, 24, y + 48, 752, UD_F_BODY, UD_C_TEXT, (in->variant == 1) ?
+         "The gain step needs the open FPGA bitstream: this one keeps the gains." :
+         "The gain step needs a probe on the calibration post, one channel at a time.");
+  ud_txt(pg, 24, y + 84, 752, UD_F_SMALL, UD_C_SOFT, "Later opens the scope. Calibrate is in Menu, Diagnostics.");
+
+  ud_btn(pg, 24, 404, 160, 52, UD_B_GREY, UD_ID_LATER, "Later");
+  ud_btn(pg, 576, 404, 200, 52, UD_B_PRIMARY, UD_ID_CAL_NOW, "Calibrate now");
+}

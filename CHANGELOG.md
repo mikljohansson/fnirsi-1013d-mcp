@@ -51,6 +51,31 @@ capture and hardware averaging". Nothing is benched.
 - Changed: on 0x1536 the arm writes 0x0B / 0x0C and the sequencer registers before the sampling reset, so the
   write-clock side loads them at every rate (65abebf).
 
+#### 0.2.57 - 2026-10-19 (protocol 1.16 unchanged; provisional number, renumbered at merge)
+
+UX makeover step 4 (`docs/plans/ux-makeover.md` sections 6-6c; `firmware/README.md` section 5 "Screens: Diagnostics,
+calibration wizard, first run" and 6.4).
+
+- Changed: Diagnostics (Menu > Diagnostics) is a display mode of the main loop with the pages Status, Calibration, Log
+  and Developer and a Back button. The PC protocol keeps working while it shows (the old screen was modal: main-loop
+  commands answered E_BUSY), and the values update once a second. Status: the identity line (fw, git, commit time,
+  protocol, serial, MMU and caches), the FPGA line, verdict tiles for Firmware (running image against the card's),
+  Restarts, USB and Battery, the calibration verdict with the class gain ratio and the noise against provisional
+  limits, and where the calibration came from; Calibrate and Save report to card. Calibration: the numbers per range
+  and channel, the gains, the v4 tracking; Calibrate, Volts calibration, Clear calibration (keeps the volts factors,
+  asks first). Log: the event log in words, restarts, SD card and unit counters. Developer: Debug overlay and Enter FEL
+  now (asks first, nothing written to the card) (f95dbee, 5e8a5db).
+- Changed: the calibration wizard is four screens (Zero level, CH1 gain, CH2 gain, Done) in one modal dialog over the
+  dimmed scope: Cancel left, Calibrate right turning into Continue after a pass, retry after a failure, no Skip, Save
+  calibration on the last screen; Cancel writes nothing, also during a measurement (95f440e).
+- Added: an uncalibrated unit starts with a first-run screen (what was found, what calibrating needs, Later or
+  Calibrate now) (5e8a5db).
+- Removed: 1.00o5's "Load default settings value" start-up screen and the old diagnostics screen with its DEFAULT,
+  RESTORE and RESET buttons and the hidden boot-mode touch areas; where each value went is listed in
+  `firmware/README.md` section 5 (5e8a5db).
+- Moved: the interim Baseline calibration row of the Settings fold-out (with 1.00o5's volts-calibration boxes beside
+  it) and the Settings screen's DC shift trim row (0.2.55) to the Diagnostics pages (Calibrate, Volts calibration, DC
+  shift trim); Dev mode is the Developer page's Debug overlay.
 #### 0.2.56 - 2026-10-19 (protocol 1.16, unchanged)
 
 The second step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 2; rules in `docs/ui-guidelines.md`;

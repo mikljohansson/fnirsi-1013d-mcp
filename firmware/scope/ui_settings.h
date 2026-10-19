@@ -11,7 +11,6 @@
 //   File message timeout     scopesettings.confirmationmode (1 = wait for a tap, 0 = 0.7 s)
 //   Cursors                  scopesettings.lockcursors (1 = move together, 0 = move freely)
 //   Auto setup               scopesettings.new_autosetup (1 = improved, 0 = stock 1.00o5)
-//   DC shift trim            dc_shift_cal (interim row until Diagnostics, step 4, takes it)
 //   Stamp screenshots with   tag_in_BMP (the clock time with the clock on, else the file name)
 //   Reference traces         scopesettings.ref_on_startup
 //   Clock                    onoffRTC (DS3231 module used: top-bar clock, file stamps, FAT times)
@@ -26,15 +25,15 @@
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //The fold-out beside the main menu: 1.00o5's column (x 150, 244 wide, from y 46, one row per 59 px), its rows top to
-//bottom. Time and date only with a clock module; Baseline calibration is interim until Diagnostics (step 4) has Calibrate.
+//bottom. Time and date only with a clock module. (fw 0.2.55-0.2.56 had an interim Baseline calibration row; fw 0.2.57
+//moved it to Diagnostics, Calibrate.)
 
 #define UI_FO_SCREEN          0
 #define UI_FO_GRID            1
 #define UI_FO_FILEMSG         2
 #define UI_FO_TIME            3
-#define UI_FO_CAL             4
-#define UI_FO_OTHER           5
-#define UI_FO_MAX_ROWS        6
+#define UI_FO_OTHER           4
+#define UI_FO_MAX_ROWS        5
 
 #define UI_FO_X               150
 #define UI_FO_TOP             46
@@ -42,7 +41,7 @@
 #define UI_FO_PITCH           59
 
 int    ui_fo_rows(int rtc, uint8 *ids);              //the shown rows' ids, top to bottom; returns the count
-uint32 ui_fo_height(int rtc);                        //rows x pitch (354 with the clock module, 295 without)
+uint32 ui_fo_height(int rtc);                        //rows x pitch (295 with the clock module, 236 without)
 uint32 ui_fo_row_top(int rtc, int id);               //first y of the row's hit area, 0 for a row not shown
 int    ui_fo_row_at(int rtc, uint32 x, uint32 y);    //the row id under a touch, -1 outside (rows are contiguous)
 
@@ -54,13 +53,12 @@ int    ui_fo_row_at(int rtc, uint32 x, uint32 y);    //the row id under a touch,
 #define UI_SET_FILEMSG        2
 #define UI_SET_CURSORS        3
 #define UI_SET_AUTOSET        4
-#define UI_SET_DCSHIFT        5
-#define UI_SET_STAMP          6
-#define UI_SET_REFS           7
-#define UI_SET_CLOCK          8
-#define UI_SET_TIME           9
-#define UI_SET_POWERON        10
-#define UI_SET_ROWS           11
+#define UI_SET_STAMP          5
+#define UI_SET_REFS           6
+#define UI_SET_CLOCK          7
+#define UI_SET_TIME           8
+#define UI_SET_POWERON        9
+#define UI_SET_ROWS           10
 
 //Targets that are not rows
 #define UI_SET_BACK           UI_SET_ROWS
@@ -111,7 +109,7 @@ typedef struct
   uint16      y;            //title line top (13 px font)
 } ui_set_group;
 
-#define UI_SET_GROUPS         6
+#define UI_SET_GROUPS         5
 extern const ui_set_row   ui_set_rows[UI_SET_ROWS];
 extern const ui_set_group ui_set_groups[UI_SET_GROUPS];
 
@@ -130,7 +128,6 @@ typedef struct
   uint8 filemsg_wait;       //confirmationmode
   uint8 cursors_locked;     //lockcursors
   uint8 autoset_new;        //new_autosetup
-  uint8 dcshift;            //dc_shift_cal
   uint8 stamp;              //tag_in_BMP
   uint8 refs;               //ref_on_startup
   uint8 rtc_present;        //a DS3231 answered at boot
