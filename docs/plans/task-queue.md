@@ -96,6 +96,18 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   them on top of the stored zeros/gains in the full-rate class only. Design first (fw-cal3): detection of valid records, convergence time,
   interaction with the 16-bit path and the spectrum view, a diagnostics readout of the tracked mismatch, host test with a drifting model.
   Owner decision needed on whether the one-time v3 gain step stays (it still fixes the class gain ratio and the gated class).
+- [ ] **Calibration wizard (owner approved 10-19)**: replace the fold-out calibration submenu and the two separate flows with one modal
+  wizard that owns the screen (only Cancel or completion leave it; stray touches do nothing); "Step n of 3" header. Step 1 Zero: "Unplug
+  both probes and the USB cable", Start, per-channel progress, result lines with a check mark or a one-line reason. Step 2 Gain, one channel
+  at a time: "Plug in the CH1 probe at x1, tip on the calibration post", Measure; the firmware checks the level first ("no signal on CH1:
+  tip on the post?") and offers Retry; then CH2. Retry per step without redoing earlier steps; Skip keeps earlier values (flag bit 4).
+  Step 3 Summary in plain words per channel (cores matched to x code, gains), date, Done; one success message at the end only. Consider
+  detecting USB connected and warning instead of demanding the unplug. Next firmware generation (fw-cal3 together with v4 tracking).
+- [ ] **USB: device lost after a long idle on 0.2.48** (10-19 10:20): port closed from about 08:40 to 10:20, device vanished from the bus
+  (no 1209, no re-enumeration), GET_LINK_STATS after replug: suspends (36) = 17, resumes (37) = 0, no restart. The host suspended the idle
+  device and it never resumed: RESUME interrupt never fires. Decode the event log (types 2/3 fields of row 50), check MUSB resume
+  handling (INTRUSBE resume bit, POWER.Resume, PHY), and the F1C100s USB PHY suspend behaviour; bench with `fnirsi1013d-soak --mode reopen
+  --idle 1800`. Overnight 10-minute idles never suspended (36 stayed 1); the long idle did.
 - [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s): deterministic test with
   GET_CAPTURE_INFO logging; likely decimation phase / word-to-sample mapping.
 - [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md
