@@ -50,7 +50,9 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   collapsed Save button to make room on the right bar: not worth a tap on every save).
 - **Right bar, first page** (both modes): CTRL, RUN/STOP, AUTO SET, T CURSOR, V CURSOR, MEASURES, SAVE PIC, SAVE WAVE
   in today's slots. In Spectrum, AUTO SET runs the spectrum's Auto; T CURSOR, V CURSOR, MEASURES and SAVE WAVE stay
-  empty until spectrum markers exist; SAVE WAVE stays, it saves the time record behind the spectrum, which works today.
+  empty until spectrum markers exist; SAVE WAVE stays (it saves the time record behind the spectrum, which works today);
+  MEASURES is not empty in Spectrum: it opens the spectrum's own measurement list (Peak, Level, RBW, and the spectrum set
+  of section 3a) the way it opens the scope's list in Scope.
   AUTO SET shows "Auto..." while the spectrum's Auto runs and a second tap cancels it (today's strip behaviour kept).
   The waveform viewer keeps its previous / next / delete substitutions. The CTRL button is highlighted while page two is
   shown, as today.
@@ -68,8 +70,14 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   slots exactly.
 - **Right bar, CTRL page, Spectrum** **(owner)**: CTRL; Display (fold-out: Spectrum, Waterfall, Density, each with an
   icon, the same button name and slot as in Scope); Analysis (fold-out: FFT
-  length, Window, Average, Reset); Axis (fold-out: Scale, Ref level); Grid; the CH1 and CH2 V/div steppers; 50 % TRIG. The
-  spectrum strip goes away; Span and Start keep their gestures. The one-line header goes away too **(owner)**: its
+  length, Window, Average, Reset, and first of all **Analyse: CH1 / CH2 / both**, today's strip channel selector that also
+  sets the dBV or dBA unit and which channel Auto analyses); Axis (fold-out: Scale, Ref level); Grid; the CH1 and CH2 V/div
+  steppers; 50 % TRIG. The spectrum strip goes away; Span and Start keep their gestures. The waterfall's and density's
+  colour legend is drawn at the top-right of the plot as a readout; the waterfall's time span and the phosphor's wfm/s
+  are cards. The record-position slider is hidden in Spectrum (it shows nothing useful there). Fold-outs open to the
+  left of the bar over the plot's right edge and close on a second tap of their button, a tap outside, or another
+  CTRL button; the waveform viewer's CTRL page stays as today. Display, Grid, persistence and palette are saved with the
+  settings and restored at power-on (Grid gets a spare settings word). The one-line header goes away too **(owner)**: its
   readouts become measurement cards in the bottom row like the scope's ("[1] Peak: 1.000kHz", "[1] Level: +2.7dBV",
   "RBW: 146Hz" with a grey chip), chosen through MEASURES like the scope's cards; the filter tag is not shown (it is a
   setting, visible in ACQ). Warnings keep the top-middle position.
@@ -91,14 +99,26 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   146Hz with a neutral grey block. The record-position slider row under the grid stays in every mode. Roadmap,
   not now: a spectrum card set (peak frequency and level per channel, THD) and the FPGA hardware measurements of
   docs/plans/roadmap.md section 8 item 6 feeding the same cards.
-- **Warnings**: top-middle of the plot in every mode (y 70, under the spectrum header), stating consequence and
+- **Warnings**: top-middle of the plot in every mode (y 70), stating consequence and
   action **(owner)**; readouts such as wfm/s go into the Display fold-out's phosphor section.
+
+## 3a. Measurements per mode (from the review's inventory, docs/plans/ux-review.md section 6)
+
+Today: twelve metrics per channel computed in the readout over the whole record (pecostm32's table and tiles; Atlan
+added the reference-trace sources, Hide and the y 426 position); Vrms includes DC; the timing metrics need three
+crossings; a new unit shows no cards because the defaults set none. The makeover gives each mode its own MEASURES list,
+stored in spare settings words, with default cards: Scope Freq, Vpp, Vavg (and CH2 Phase once it exists); Spectrum
+Peak, Level, THD (and RBW). Tiers for later firmware work (queued as "Measurements v2"): already computed (the twelve,
+AC RMS, spectrum peak / level / RBW, wfm/s); cheap on the device (top / base, rise and fall time, overshoot,
+whole-period mean and RMS, CH1-CH2 delay, phase and gain, cursor-gated statistics, a pulse-induction decay time
+constant; spectrum sub-bin peak, H2 / H3, THD, SFDR, noise floor, SNR, band power, occupied bandwidth; Bode f0, Q,
+-3 dB, margins, slope); FPGA (200 MHz counter, every-edge width and duty, running min / max, DVM).
 
 ## 4. Visible changes for an existing user
 
-The main menu order (section 2); the CTRL pages rebuilt around fold-outs (Display, Trace style, Grid, V/div per channel,
-and in Spectrum View, Analysis, Axis); the spectrum and phosphor strips gone; Trace style out of ACQ; AUTO SET
-running the spectrum's Auto in that mode; the version string gone from the top bar; Baseline calibration and X-Y gone
+The main menu order (section 2); the CTRL pages rebuilt (Display with icons, Trace style, Grid, the V+ / CH / V- steppers,
+50 % TRIG; in Spectrum Display, Analysis, Axis); the spectrum and phosphor strips and the spectrum header gone, their
+readouts as cards; Trace style out of ACQ; AUTO SET running the spectrum's Auto in that mode; the top bar chips rebuilt; the version string gone from the top bar; Baseline calibration and X-Y gone
 from the Settings fold-out; the measurement cards in the stock chip scheme; the new Diagnostics screens with Calibrate,
 Undo, Clear (zeros and gains only, volts factors kept) and the developer page; the new four-screen wizard; the full
 Settings screen; the USB drive screen text. Everything else keeps its place and its meaning.
@@ -162,9 +182,10 @@ power cycle boots the card as usual.
 ## 7. Implementation order
 
 1. Main menu rows and the USB drive screen text (small, no new data).
-2. The CTRL pages with fold-outs (Display with the phosphor parameters, Trace style, Grid, V/div per channel; View,
-   Analysis, Axis in Spectrum), the strips removed, Trace style out of ACQ, AUTO SET as the spectrum's Auto, hidden
-   right-bar slots in Spectrum, warnings top-middle in phosphor, the version string out of the top bar.
+2. The CTRL pages (Display fold-outs with icons and the phosphor parameters, Trace style, Grid, the steppers; Display,
+   Analysis with Analyse, Axis in Spectrum), the strips and the spectrum header removed with their readouts as cards,
+   Trace style out of ACQ, AUTO SET as the spectrum's Auto, hidden right-bar slots in Spectrum, warnings top-middle,
+   the version string out of the top bar, the top bar chips and the measurement cards rebuilt.
 3. Settings fold-out trim and the full Settings screen.
 4. Diagnostics as a display mode with the three pages and the firmware readers.
 
