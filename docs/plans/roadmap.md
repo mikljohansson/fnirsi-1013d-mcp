@@ -102,6 +102,14 @@ The announcement point. Gate, in order (details and the tick list in `docs/plans
 
 ## 6. After the announcement (not promised)
 
+**Where each feature lives (owner decision, 2026-10-19):** advanced capabilities are MCP features first: the agent drives them
+and presents the data (text, plots, HTML on demand); the screen gets a control only where one row in an existing menu makes
+the feature usable at the bench without a laptop. Device UI: trigger types (pulse width, Nth edge: a Type row in the Trigger
+dropdown), peak-detect acquisition (a box in ACQ), the hardware frequency / period counter (feeds the measurement cards), and
+the phosphor speed-up from segments (no new control). MCP only: segmented capture, streaming logger, pulse pattern generator
+and sweeps, PRBS / noise output, DVM, serial decode, mask testing, CSV export. Note: 0x1536+ uses all block RAM for segments
+and averaging, so "deeper plain memory" competes with them for the same RAM and is a choice, not an addition.
+
 Ideas that stay in the repository for later and are not part of the one-splash plan. Detail of each lives in the older roadmap text in git history (commit 9cc599c and earlier) and in
 `docs/plans/dpos350p-features.md`.
 

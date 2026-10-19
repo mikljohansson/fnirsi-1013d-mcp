@@ -164,17 +164,18 @@ loads `build-gcc10-pc/fnirsi_1013d.bin` into RAM hands-free (the protocol's ENTE
 
 ## Roadmap and community wishes
 
-Open items in this repo are tracked in the `AGENTS.md` TODO lists. Feature requests seen in the EEVblog
-thread and elsewhere that fit this hardware, in rough priority:
+The plan toward the first announced release is `docs/plans/roadmap.md`; the working queue is `docs/plans/task-queue.md`.
+Advanced capabilities (segmented capture, hardware averaging, streaming logger, pulse pattern generator, Bode sweeps,
+serial decode, mask testing, CSV export) are **MCP features**: an agent drives them over USB and presents the data; the
+scope's screen gets a control only where one row in an existing menu makes a feature usable at the bench (trigger types,
+peak detect, the hardware counter in the measurement cards). Community wishes seen in the EEVblog thread are listed in
+roadmap sections 6 and 8 with the owner's priority.
 
-- Deeper memory using the AL3's spare block RAM, and trigger on both ADC cores.
-- A frequency-response (Bode) analyser: host tool first, then on the scope (`docs/plans/bode-design.md`).
-- CSV export, a dot display mode, triggered sweeps slower than 10 ms/div.
-- The remaining queue is in `docs/plans/task-queue.md`.
-
-Done since the first version of this list: the external trigger on the calibration pin (bitstream 0x1533),
-FFT and averaging on the scope (spectrum view), the decimation filters, calibration v3 storing the per-core
-zeros and gains, screenshot over USB (`scope_screenshot`), and removing the options the hardware cannot do.
+Done since the first version of this list: the external trigger on the calibration pin (bitstream 0x1533), FFT and averaging
+on the scope (spectrum view), the decimation filters and the compensation FIR (0x1534, 0x1535), calibration v3/v4 storing
+the per-core zeros and gains with background tracking, segmented capture and hardware averaging in the FPGA (0x1536+),
+the host-side Bode analyser, the UX makeover with Diagnostics, screenshot over USB (`scope_screenshot`), and removing the
+options the hardware cannot do.
 
 ## Contributing
 
