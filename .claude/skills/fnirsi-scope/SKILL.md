@@ -93,3 +93,4 @@ referenced to USB ground, so -1.24 / +1.9 V against the probe ground). Keep the 
 | no device | check the COM port (`--port`), power, USB-storage mode, cable |
 | no trigger | `scope_get_config`; level inside the signal, right source/edge, or mode `auto` |
 | "capability ... not reported" | this firmware lacks the feature |
+| first command after a long idle fails (port error, Windows error 22, device re-enumerates) | fixed in fw 0.2.44 (USB suspend is a state, not a reset); on older firmware reopen the port once. If it persists on 0.2.44+, check Windows USB selective suspend (`fnirsi1013d-soak --mode reopen` prints its state; disable it with `powercfg /SETACVALUEINDEX SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb50f7e206 0` then `powercfg /SETACTIVE SCHEME_CURRENT`, or Device Manager > USB Root Hub > Power Management) and tell the person |
