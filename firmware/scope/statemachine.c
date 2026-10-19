@@ -71,13 +71,8 @@ void touch_handler(void)
       //Check if the trigger point position can be moved (fw 0.2.64: also by the record slider)
       if((touchstate & TOUCH_STATE_MOVE_TRIGGER_POINT) || ((touchstate & TOUCH_STATE_MASK) == TOUCH_STATE_MOVE_RECORD))
       {
-        //fw 0.2.73, tap to jump: a touch-down on the slider row outside the window centres the window there first; the
-        //drag goes on from the new place
-        if((touchstate & TOUCH_STATE_MASK) == TOUCH_STATE_MOVE_RECORD)
-          scopesettings.triggerhorizontalposition = acq_view_slider_jump(scopesettings.triggerhorizontalposition,
-                                                                         (int32)xtouch, (int32)ytouch);
-
-        //Save the current position for it
+        //Save the current position for it (fw 0.2.75: after the slider's tap to jump, done at touch-down in
+        //scan_for_touch)
         previous_trigger_point_position = scopesettings.triggerhorizontalposition;
       }
 
@@ -843,6 +838,14 @@ void scan_for_touch(void)
     //cursors; scan_plot_pick)
     pick = (scopesettings.xymodedisplay == 0) ? scan_plot_pick(previousxtouch, previousytouch, &handle) : 0;
     moved = 0;
+
+    //fw 0.2.75, tap to jump at touch-down (the owner's 0.2.73 tap in the track did nothing): 0.2.73 jumped in
+    //touch_handler, which runs only once the finger has moved past the dead band, so a still tap ended in the tap
+    //branch below, where the slider (a handle) takes no tap. The Spectrum jumps at touch-down; so does the Scope now,
+    //and a drag that follows goes on from the new place (touch_handler snapshots the position after this).
+    if(pick == TOUCH_STATE_MOVE_RECORD)
+      scopesettings.triggerhorizontalposition = acq_view_slider_jump(scopesettings.triggerhorizontalposition,
+                                                                     (int32)previousxtouch, (int32)previousytouch);
 
     //Wait for touch to end and detect movement within the trace display section (still a blocking loop: touch-review
     //batch 3 replaces it)
