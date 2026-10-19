@@ -111,12 +111,20 @@ static void cal_result(acal_acc acc[2][2], int32_t *mean16, int32_t *drift16, ui
 //One range of the zero step (inputs open or shorted), relay already set: the PWM centre where the mean of both cores
 //reads 128, the offset slope of each core from two PWM points 150 counts either side and its zero at that centre, each
 //with the ADC clock gated (2 MSa/s, every legacy time base but 200 MSa/s) and at full rate (200 MSa/s, every filtered
-//capture). Every point goes into pt (acal_point, ACAL_PT_*), *centre is the coarse centre (-1 when it failed). Returns
-//ACAL_E_RESPONSE, ACAL_E_TIMING or acal_range_check's result with *fail (point fields included). Shared by the wizard
-//and CAL_PROBE (fw 0.2.67), so the host sees exactly the wizard's measurement
-static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], int32_t *centre, acal_fail *fail)
+//capture). Every point goes into pt (acal_point, ACAL_PT_*), *centre is the coarse centre (-1 when it failed), *split
+//the zero split d (acal_zero_split; 0 when not reached). Returns ACAL_E_RESPONSE, ACAL_E_TIMING, ACAL_E_READOUT or
+//acal_range_check's result with *fail (point fields included). Shared by the wizard and CAL_PROBE (fw 0.2.67), so the
+//host sees exactly the wizard's measurement.
+//
+//fw 0.2.67: the zero of each class is the mean of two points split d counts either side of the centre, 12 codes off
+//128 (acal_zero_split, adc_cal.h): on FPGA 0x1538 the 200 MSa/s readout of some lanes mixes the bits of successive
+//samples straddling 0x7F / 0x80 (bench 2026-10-19), which failed every zero step parked at 128. The linear model makes
+//the mean of the two points the zero at the centre, so nothing stored changes meaning
+static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], int32_t *centre, int32_t *split,
+                     acal_fail *fail)
 {
-  acal_acc acc[2][2];
+  acal_acc acc[2][2], acc2[2][2];
+  int32_t  d;
   int32_t  mean[2], hi, lo, p;
   uint32_t unused = 0;
   int      rc;
@@ -126,6 +134,7 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
   memset(fail, 0, sizeof(*fail));
   fail->point = ACAL_PT_NONE;
   *centre = -1;
+  *split  = 0;
 
   cal_set_rate(CAL_RATE_GATED);
 
@@ -163,10 +172,14 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
   m->pwm = acal_interp_pwm(m->pwm_lo, (m->mean16_lo[ACAL_GATED][0] + m->mean16_lo[ACAL_GATED][1]) / 2, m->pwm_hi,
                            (m->mean16_hi[ACAL_GATED][0] + m->mean16_hi[ACAL_GATED][1]) / 2);
 
-  cal_measure(r, m->pwm, 60, 8, acc);
-  cal_result(acc, m->zero16[ACAL_GATED], m->drift16[ACAL_GATED], m->noise16[ACAL_GATED], m->within16[ACAL_GATED],
-             &m->clipped);
-  acal_point_set(&pt[ACAL_PT_G_ZERO], m->pwm, ACAL_GATED, 8, acc);
+  d = acal_zero_split(m);
+  *split = d;
+
+  cal_measure(r, m->pwm - d, 60, 8, acc);
+  cal_measure(r, m->pwm + d, 60, 8, acc2);
+  acal_zero_pair(acc, acc2, m->zero16[ACAL_GATED], m->drift16[ACAL_GATED], m->noise16[ACAL_GATED],
+                 m->within16[ACAL_GATED], &m->clipped);
+  acal_point_set_pair(&pt[ACAL_PT_G_ZERO], m->pwm, ACAL_GATED, 8, acc, acc2);
 
   //Full rate: a 1000-sample readout spans 5 us of the 40 us offset-PWM ripple period, so each conversion sees one
   //ripple phase; 64 conversions (about 70 ms) average it out (bench 0.2.43: 8 left 0.2-0.4 code). The full-rate
@@ -176,10 +189,11 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
   //Every full-rate conversion is checked and re-armed when garbled (fpga_done_conversion, enc_heal.h); one that stayed
   //garbled after the re-arms fails the range
   fpga_enc_garbled = 0;
-  cal_measure(r, m->pwm, 30, 64, acc);
-  cal_result(acc, m->zero16[ACAL_FULL], m->drift16[ACAL_FULL], m->noise16[ACAL_FULL], m->within16[ACAL_FULL],
-             &m->clipped);
-  acal_point_set(&pt[ACAL_PT_F_ZERO], m->pwm, ACAL_FULL, 64, acc);
+  cal_measure(r, m->pwm - d, 30, 64, acc);
+  cal_measure(r, m->pwm + d, 60, 64, acc2);
+  acal_zero_pair(acc, acc2, m->zero16[ACAL_FULL], m->drift16[ACAL_FULL], m->noise16[ACAL_FULL], m->within16[ACAL_FULL],
+                 &m->clipped);
+  acal_point_set_pair(&pt[ACAL_PT_F_ZERO], m->pwm, ACAL_FULL, 64, acc, acc2);
   cal_measure(r, m->pwm_hi, 60, 64, acc);
   cal_result(acc, m->mean16_hi[ACAL_FULL], 0, 0, 0, &m->clipped);
   acal_point_set(&pt[ACAL_PT_F_HI], m->pwm_hi, ACAL_FULL, 64, acc);
@@ -194,6 +208,11 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
   }
 
   rc = acal_range_check(m, fail);
+
+  //Samples at the rails only at full rate while the level is near 128: the readout fault, not the input
+  if((rc == ACAL_E_CLIP) && acal_readout_fault(pt))
+    rc = ACAL_E_READOUT;
+
   acal_fail_point(pt, rc, fail);
   return rc;
 }
@@ -201,7 +220,7 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
 //The last range cal_channel measured per channel, for CAL_PROBE in the wizard's context
 static acal_point cal_last_pt[2][ACAL_POINTS];
 static acal_fail  cal_last_fail[2];
-static int32_t    cal_last_centre[2], cal_last_pwm[2];
+static int32_t    cal_last_centre[2], cal_last_pwm[2], cal_last_split[2];
 static uint8      cal_last_r[2];
 static uint8      cal_last_garbled[2];
 
@@ -211,7 +230,7 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
 {
   acal_range_meas m;
   acal_point      pt[ACAL_POINTS];
-  int32_t         d, centre;
+  int32_t         d, centre, split;
   uint32_t        r, cl;
   int             rc;
 
@@ -230,12 +249,13 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
     fpga_set_channel_voltperdiv(&calibrationsettings);
     timer0_delay(60);
 
-    rc = cal_range(r, &m, pt, &centre, fail);
+    rc = cal_range(r, &m, pt, &centre, &split, fail);
 
     memcpy(cal_last_pt[ch], pt, sizeof(pt));
     cal_last_fail[ch]    = *fail;
     cal_last_centre[ch]  = centre;
     cal_last_pwm[ch]     = (centre < 0) ? -1 : m.pwm;
+    cal_last_split[ch]   = split;
     cal_last_r[ch]       = (uint8)r;
     cal_last_garbled[ch] = fpga_enc_garbled;
 
@@ -830,7 +850,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
   acal_point      pt[ACAL_POINTS];
   acal_fail       fail;
   pc_hw_enc       e0, e1;
-  int32_t         centre, pwm;
+  int32_t         centre, pwm, split;
   uint8           flags = 0;
   int             rc;
 
@@ -852,7 +872,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
     fpga_set_channel_voltperdiv(&calibrationsettings);
     timer0_delay(60);
 
-    rc  = cal_range(range, &m, pt, &centre, &fail);
+    rc  = cal_range(range, &m, pt, &centre, &split, &fail);
     pwm = (centre < 0) ? -1 : m.pwm;
 
     if(fpga_enc_garbled)
@@ -868,6 +888,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
     cal_last_fail[0].point = cal_last_fail[1].point = ACAL_PT_NONE;
     cal_last_centre[0] = cal_last_centre[1] = -1;
     cal_last_pwm[0] = cal_last_pwm[1] = -1;
+    cal_last_split[0] = cal_last_split[1] = 0;
     cal_last_r[0] = cal_last_r[1] = 0;
     cal_last_garbled[0] = cal_last_garbled[1] = 0;
 
@@ -894,6 +915,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
     fail   = cal_last_fail[ch];
     centre = cal_last_centre[ch];
     pwm    = cal_last_pwm[ch];
+    split  = cal_last_split[ch];
     range  = cal_last_r[ch];
 
     if(cal_last_garbled[ch])
@@ -914,5 +936,5 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
   pc_hal_enc_state(&e1);
 
   return (int32_t)acal_probe_pack(dst, ch, range, rc, flags, centre, pwm, e1.bad - e0.bad, e1.recovered - e0.recovered,
-                                  &fail, pt);
+                                  &fail, pt, split);
 }

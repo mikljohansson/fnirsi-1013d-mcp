@@ -1787,7 +1787,7 @@ static void test_cal_probe(void)
   //CH2, range 3, two bytes (settle and prestrobe 0): the packed measurement
   p[0] = 1; p[1] = 3;
   r = req(PC_CMD_CAL_PROBE, p, 2);
-  T_EQ(r.h.status, 0); T_EQ(r.len, ACAL_PROBE_BYTES); T_EQ(r.len, 248);
+  T_EQ(r.h.status, 0); T_EQ(r.len, ACAL_PROBE_BYTES); T_EQ(r.len, 252); T_EQ(pc_get_u16(r.p + 248), 27);
   T_EQ(mock_cal_probe_calls, 1); T_EQ(mock_cal_probe_ch, 1); T_EQ(mock_cal_probe_range, 3); T_EQ(mock_cal_probe_settle, 0); T_EQ(mock_cal_probe_pre, 0); T_EQ(mock_cal_probe_mode, 0);
   T_EQ(r.p[0], 1); T_EQ(r.p[1], 3); T_EQ(pc_get_u16(r.p + 2), 0); T_EQ(r.p[4], ACAL_PT_NONE);
   T_EQ(pc_get_u16(r.p + 16), 800); T_EQ(pc_get_u16(r.p + 18), 812);

@@ -11,6 +11,8 @@
 
 static uint32_t rng = 12345;
 
+static int32_t iabs_t(int32_t v) { return (v < 0) ? -v : v; }
+
 static uint32_t rnd(void)
 {
   rng = rng * 1103515245u + 12345u;
@@ -1114,8 +1116,8 @@ static void test_points(void)
   f.cls = ACAL_FULL; f.core = 1; f.value = 115; f.within16 = 113;
   acal_fail_point(pt, ACAL_E_NOISE, &f);
   memset(b, 0xAA, sizeof(b));
-  n = acal_probe_pack(b, 1, 4, ACAL_E_NOISE, ACAL_PROBE_GARBLED, 800, 812, 3, 2, &f, pt);
-  T_EQ(n, ACAL_PROBE_BYTES); T_EQ(n, 248); T_EQ(b[248], 0xAA);
+  n = acal_probe_pack(b, 1, 4, ACAL_E_NOISE, ACAL_PROBE_GARBLED, 800, 812, 3, 2, &f, pt, 27);
+  T_EQ(n, ACAL_PROBE_BYTES); T_EQ(n, 252); T_EQ(b[252], 0xAA); T_EQ(b[248], 27); T_EQ(b[249], 0); T_EQ(b[250], 0);
   T_EQ(b[0], 1); T_EQ(b[1], 4); T_EQ(b[2], ACAL_E_NOISE); T_EQ(b[3], 0);
   T_EQ(b[4], ACAL_PT_F_ZERO); T_EQ(b[5], ACAL_FULL); T_EQ(b[6], 1); T_EQ(b[7], ACAL_PROBE_GARBLED);
   T_EQ(b[8], 115); T_EQ(b[12], 113);
@@ -1130,6 +1132,142 @@ static void test_points(void)
     q = b + 24 + 28 * ACAL_PT_G_LO;
     T_EQ(q[3], 0);                                              //not measured
   }
+}
+
+//fw 0.2.67, bench 2026-10-19 on FPGA 0x1538 (fw-cal5): at 200 MSa/s some readout lanes mix the bits of successive samples
+//that straddle 0x7F / 0x80; READ_RAW showed outliers up to 255 only while a core's mean was 126..133. Model: bit 7 from
+//the new sample, bits 6..0 from the one before, whenever two successive codes lie on either side of 127.5
+static uint8_t rd_prev;
+
+static uint8_t readout_mixed(int32_t v)
+{
+  uint8_t c = (uint8_t)v, out = c;
+
+  if((c ^ rd_prev) & 0x80)
+    out = (uint8_t)((c & 0x80) | (rd_prev & 0x7F));
+
+  rd_prev = c;
+  return out;
+}
+
+//convs conversions of 500 samples per core at a true level (1/1024 code), noise 1 code, through the faulty readout
+//(mixed) or a clean one, into acc[half][core] as cal_measure fills it
+static void fault_measure(int32_t level1024, uint32_t convs, int mixed, acal_acc acc[2][2])
+{
+  uint8_t  buf[1000];
+  uint32_t i, j, k;
+
+  memset(acc, 0, 4 * sizeof(acal_acc));
+
+  for(i=0;i<convs;i++)
+  {
+    for(k=0;k<2;k++)
+    {
+      rd_prev = (uint8_t)(level1024 >> 10);
+
+      for(j=0;j<500;j++)
+      {
+        int32_t v = adc(level1024, 1024);
+
+        buf[2 * j + (k ? 0 : 1)] = mixed ? readout_mixed(v) : (uint8_t)v;
+      }
+    }
+
+    acal_acc_add(&acc[i >= convs / 2][ACAL_CORE_A], buf + 1, 500, 2);
+    acal_acc_add(&acc[i >= convs / 2][ACAL_CORE_B], buf, 500, 2);
+  }
+}
+
+static void test_readout_fault(void)
+{
+  //Range 0 of the bench: zero 127.6 codes at the centre PWM 860, -0.44 codes per count (the READ_RAW sweep)
+  const int32_t centre = 860, z1024 = 127 * 1024 + 614, slope1024 = -451;   //-0.44 code per count
+  acal_range_meas m;
+  acal_acc   acc[2][2], acc2[2][2];
+  acal_point pt[ACAL_POINTS];
+  int32_t    zero16[2], drift16[2], d, k;
+  uint32_t   noise16[2], within16[2], clipped = 0;
+
+#define LEVEL(pwm) (z1024 + slope1024 * ((pwm) - centre))
+  rng = 777;
+
+  //The wizard up to 0.2.66: the zero point parked at the centre, where the level straddles 127.5: rail samples and
+  //several codes of noise (the 17:55 failure lines), while a clean readout of the same level is fine
+  fault_measure(LEVEL(centre), 64, 1, acc);
+  clipped = acc[0][0].clipped + acc[1][0].clipped + acc[0][1].clipped + acc[1][1].clipped;
+  T_TRUE(clipped > 0);
+  {
+    acal_acc all = acc[0][1];
+
+    acal_acc_merge(&all, &acc[1][1]);
+    T_TRUE(acal_rms16(&all) > ACAL_MAX_NOISE16);
+    T_EQ(all.hi, 255);
+  }
+  fault_measure(LEVEL(centre), 64, 0, acc);
+  T_EQ(acc[0][0].clipped + acc[1][1].clipped, 0);
+
+  //The split: d from the gated slope points (centre -+ 150), 12 codes either side of 128
+  memset(&m, 0, sizeof(m));
+  m.pwm_lo = centre - 150;
+  m.pwm_hi = centre + 150;
+  m.pwm    = centre;
+  for(k=0;k<2;k++)
+  {
+    m.mean16_lo[ACAL_GATED][k] = LEVEL(m.pwm_lo) / 64;
+    m.mean16_hi[ACAL_GATED][k] = LEVEL(m.pwm_hi) / 64;
+  }
+  d = acal_zero_split(&m);
+  T_TRUE(d >= 26 && d <= 28);                                   //12 codes / 0.44 per count
+
+  //Through the faulty readout both split points are clean, and their mean is the zero at the centre within 1/8 code
+  fault_measure(LEVEL(centre - d), 64, 1, acc);
+  fault_measure(LEVEL(centre + d), 64, 1, acc2);
+  clipped = 0;
+  acal_zero_pair(acc, acc2, zero16, drift16, noise16, within16, &clipped);
+  T_EQ(clipped, 0);
+  for(k=0;k<2;k++)
+  {
+    T_TRUE(iabs_t(zero16[k] - z1024 / 64) <= 2);
+    T_TRUE(noise16[k] < 24);                                    //the 1-code noise and the rounding, not the step
+    T_TRUE(within16[k] < 24);
+    T_TRUE(iabs_t(drift16[k]) <= 2);                            //the step between the points cancels
+  }
+
+  //The point record: the centre's PWM, the pair's mean, extremes of both
+  acal_point_set_pair(&pt[0], centre, ACAL_FULL, 64, acc, acc2);
+  T_EQ(pt[0].pwm, centre); T_EQ(pt[0].mean16[0], zero16[0]); T_EQ(pt[0].rms16[1], noise16[1]);
+  T_TRUE(pt[0].lo[0] < 116 && pt[0].hi[0] > 139);
+
+  //Split limits
+  m.mean16_lo[ACAL_GATED][0] = m.mean16_lo[ACAL_GATED][1] = m.mean16_hi[ACAL_GATED][0];
+  T_EQ(acal_zero_split(&m), ACAL_ZERO_SPLIT_MIN);               //no response: the range check fails it anyway
+  m.mean16_lo[ACAL_GATED][0] = m.mean16_lo[ACAL_GATED][1] = m.mean16_hi[ACAL_GATED][0] + 16;
+  T_EQ(acal_zero_split(&m), ACAL_ZERO_SPLIT_MAX);
+
+  //Classification: rail samples only at full rate with the gated twin quiet and near 128 -> the readout fault
+  memset(pt, 0, sizeof(pt));
+  for(k=ACAL_PT_G_LO;k<ACAL_POINTS;k++)
+  {
+    pt[k].convs = 8;
+    pt[k].cls   = (k >= ACAL_PT_F_ZERO) ? ACAL_FULL : ACAL_GATED;
+    pt[k].mean16[0] = pt[k].mean16[1] = (k == ACAL_PT_G_ZERO || k == ACAL_PT_F_ZERO) ? 2050 :
+                                        ((k == ACAL_PT_G_LO || k == ACAL_PT_F_LO) ? 2048 + 640 : 2048 - 640);
+  }
+  T_EQ(acal_readout_fault(pt), 0);                              //nothing clipped
+  pt[ACAL_PT_F_ZERO].clipped[1] = 24;
+  T_EQ(acal_readout_fault(pt), 1);
+  pt[ACAL_PT_G_ZERO].clipped[0] = 1;                            //the gated twin clips too: the input
+  T_EQ(acal_readout_fault(pt), 0);
+  pt[ACAL_PT_G_ZERO].clipped[0] = 0;
+  pt[ACAL_PT_G_ZERO].mean16[0] = pt[ACAL_PT_G_ZERO].mean16[1] = 2048 + 9 * 16;   //not near 128
+  T_EQ(acal_readout_fault(pt), 0);
+  pt[ACAL_PT_G_ZERO].mean16[0] = pt[ACAL_PT_G_ZERO].mean16[1] = 2050;
+  pt[ACAL_PT_F_HI].clipped[0] = 3;                              //a full-rate slope point 40 codes off 128 clips
+  T_EQ(acal_readout_fault(pt), 0);
+  pt[ACAL_PT_F_HI].clipped[0] = 0;
+  pt[ACAL_PT_G_LO].clipped[1] = 2;                              //any gated clip: the input
+  T_EQ(acal_readout_fault(pt), 0);
+#undef LEVEL
 }
 
 int main(int argc, char **argv)
@@ -1147,5 +1285,6 @@ int main(int argc, char **argv)
   test_end_to_end();
   test_trigger_level16();
   test_points();
+  test_readout_fault();
   return t_report("test_adc_cal");
 }

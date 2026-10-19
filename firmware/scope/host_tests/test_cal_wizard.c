@@ -277,6 +277,15 @@ static void test_zero_fail_detail(void)
   T_STR(t, "CH1: ADC capture timing: the 200 MSa/s data stays garbled");
   T_TRUE(ui_text_width(&font_3, t) <= RESULT_W);
 
+  //fw 0.2.67: the readout fault near code 128 (FPGA 0x1538)
+  ev(&w, CW_EV_CALIBRATE);
+  take(&w);
+  rc[0] = ACAL_E_READOUT;
+  cw_zero_result(&w, rc, match_ok);
+  cw_zero_line(&w, 0, t);
+  T_STR(t, "CH1: ADC readout fault near code 128 (FPGA 0x1538): flash the fixed bitstream");
+  T_TRUE(ui_text_width(&font_3, t) <= RESULT_W);
+
   //Other reasons keep their words
   ev(&w, CW_EV_CALIBRATE);
   take(&w);

@@ -651,7 +651,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
   pt[ACAL_PT_F_ZERO].convs     = 64;
   pt[ACAL_PT_F_ZERO].mean16[0] = 130 * 16;
   pt[ACAL_PT_F_ZERO].mean16[1] = 126 * 16;
-  return (int32_t)acal_probe_pack(dst, ch, range, 0, (uint8_t)((settle << 4) | (prestrobe ? ACAL_PROBE_PRESTROBE : 0) | (mode ? ACAL_PROBE_WIZARD : 0)), 800, 812, 0, 0, &f, pt);
+  return (int32_t)acal_probe_pack(dst, ch, range, 0, (uint8_t)((settle << 4) | (prestrobe ? ACAL_PROBE_PRESTROBE : 0) | (mode ? ACAL_PROBE_WIZARD : 0)), 800, 812, 0, 0, &f, pt, 27);
 }
 
 //fw 0.2.66 Bode plot: the status BODE_CTRL answers, the request it saw; READ_BODE: a header and mock_bode_rows rows
