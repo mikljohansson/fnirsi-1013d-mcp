@@ -30,7 +30,7 @@ All of these are merged. The bench lists name the exact steps; most need the own
 |---|---|---|
 | Calibration v3 and v4 plus the wizard | v3 per-core, per-clock-class gain (0.2.45, GET_CAL 256 bytes); v4 background tracking of the full-rate A - B mismatch, class probe, the one-screen calibration wizard (0.2.50, protocol 1.15, GET_CAL 288 bytes) | `firmware/README.md` 6.3 (gain step: gains per class, the +-1.0045 V check against the DMM, fs/2 spur at least 15 dB down) and 6.4 / 6.5 (wizard flow, tracker convergence, diagnostics lines). Open questions behind it: gain per range (README 6.3 step 7, 80 bytes free to store per range), CH2 range-5 zero drift, CH2 +1.0..1.5 codes at range 6 after calibration, the overnight zero step at 03:48 |
 | Digital phosphor | 0.2.46, protocol 1.13 | visual steps (`firmware/AGENTS.md` section 24, README "Phosphor view"); pass time in and out of the view; with the MMU the scope view pass is 15 ms median |
-| Spectrum analyser with the compensation FIR | spectrum view 0.2.28 onward; decimation filter 0.2.30; FIR firmware support 0.2.44 (protocol 1.11); default Filter CIC2+FIR since 0.2.48 | flash FPGA 0x1535 (backup first, programmer needed), then GET_DECIM bytes 26-27 = 0xE2 0x01 at 10 MSa/s and the CIC2+FIR spectra against CIC2; the Auto redesign and the warnings need the owner's verdict |
+| Spectrum analyser with the compensation FIR | spectrum view 0.2.28 onward; decimation filter 0.2.30; FIR firmware support 0.2.44 (protocol 1.11); default Filter CIC2+FIR since 0.2.48 | FPGA 0x1535 is flashed on the owner's unit (2026-10-19 10:33, read-back verified) and benched: GET_DECIM bytes 26-27 = 0xE2 0x01 at 10 MSa/s, alias rejection with the FIR 78-83 dB below the fundamental against 19 / 37 / 56 dB without it. Left: the owner's verdict on the Auto redesign and the warnings, and the DEFAULT button check on the final build |
 | Generator menu | hit-area fix (0.2.44) | tap every row of the generator, trigger and acquisition menus; no removed action reachable |
 | MMU and D-cache | 0.2.48; benched 2026-10-19 08:10 (CP15 0x0005107D; FFT 4096 points 10.96 to 2.72 ms; scope view pass 30 to 15 ms) | owner's screen coherence verdict is in ("seems to work"); touch, soak, SD save and restore, ENTER_FEL round trips (section 26 steps 4-9) |
 | Bode analyser, host tool | steps H1-H3: `scope_bode_sweep`, `fnirsi1013d-bode` (mcp-gen4), simulator-tested | bench on the RC low-pass R 1.6 kOhm / C 10 nF (fc 9.95 kHz) with the DUT ground on the USB shell: floor, skew, coherence, wiring A/B; record in `docs/hardware-status.md` (procedure `mcp/AGENTS.md` "Bode bench") |
@@ -87,8 +87,8 @@ The announcement point. Gate, in order (details and the tick list in `docs/plans
 
 1. Every epic in sections 1-3 is merged and its bench list is ticked in `docs/hardware-status.md`, or the owner has
    explicitly removed the item.
-2. The FPGA bitstreams the release depends on (0x1534, 0x1535, 0x1536) are flashed on the owner's unit and
-   benched. Decide how users get them (open point in the readiness list: bitstream files are not in git and not
+2. The FPGA bitstreams the release depends on are flashed on the owner's unit and benched: 0x1534 and 0x1535 are
+   (0x1535 since 2026-10-19), 0x1536 is not yet. Decide how users get them (open point in the readiness list: bitstream files are not in git and not
    attached to releases today).
 3. Version bump to 0.3.0 in `firmware/scope/pc_cmds.h` and `mcp/pyproject.toml`, a curated `## [0.3.0]` section in
    `CHANGELOG.md` (the release notes), `release: v0.3.0` commit, CI green.
@@ -102,8 +102,7 @@ The announcement point. Gate, in order (details and the tick list in `docs/plans
 
 ## 6. After the announcement (not promised)
 
-Ideas that stay in the repository for later and are not part of the one-splash plan. The first three need FPGA
-work. Detail of each lives in the older roadmap text in git history (commit 9cc599c and earlier) and in
+Ideas that stay in the repository for later and are not part of the one-splash plan. Detail of each lives in the older roadmap text in git history (commit 9cc599c and earlier) and in
 `docs/plans/dpos350p-features.md`.
 
 - Deeper memory: use the AL3's spare block RAM for about 24,576 samples per channel, wider pretrigger and total
