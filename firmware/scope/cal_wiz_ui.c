@@ -413,6 +413,20 @@ static void wiz_build(void)
   uint32 ch;
 
   wiz_dlg.title    = cw_title(&wiz);
+
+  //fw 0.2.68 (owner): "Step M of N" at the right end of the title line, as the volts calibration. Four screens with the
+  //generator (zero, CH1 gain, CH2 gain, save); without it (CW_GAIN_NA) three, the save screen being step 3
+  {
+    static char st[] = "Step 1 of 4";
+    int         m = cw_screen(&wiz), n = wiz.al3 ? 4 : 3;
+
+    if(m > n)
+      m = n;
+
+    st[5]  = (char)('0' + m);
+    st[10] = (char)('0' + n);
+    wiz_dlg.step = m ? st : 0;
+  }
   wiz_dlg.line[0]  = cw_instruction(&wiz, 0);
   wiz_dlg.line[1]  = cw_instruction(&wiz, 1);
   wiz_dlg.warn     = (wiz_usb && (cw_screen(&wiz) == 1)) ? "USB is connected: unplug it before Calibrate" : "";
