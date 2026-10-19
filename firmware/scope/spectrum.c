@@ -731,6 +731,17 @@ static void spec_draw_header(const uint32 *peak, int hch, int k, uint64 bin_mhz)
   }
 }
 
+//fw 0.2.51: choosing the Spectrum analyser row in roll mode switched Roll off; the warning line says so for a while
+#define ROLL_NOTE_MS          5000
+static uint8  roll_note;
+static uint32 roll_note_ms;
+
+void spectrum_note_roll_off(void)
+{
+  roll_note    = 1;
+  roll_note_ms = timer0ticks;
+}
+
 //Warnings (owner, fw 0.2.42), only while they apply, centred over the top of the plot in the warning colour, each
 //saying the consequence and the action (README "Spectrum view" lists them)
 static void spec_draw_warnings(int k, uint64 fs_mhz, int hch)
@@ -739,6 +750,11 @@ static void spec_draw_warnings(int k, uint64 fs_mhz, int hch)
   int    ch;
 
   *p = 0;
+
+  if(roll_note && ((timer0ticks - roll_note_ms) < ROLL_NOTE_MS))
+    p = fmt_str(p, "Roll off for the spectrum   ");
+  else
+    roll_note = 0;
   for(ch = 0; ch < 2; ch++)
     if(spec_ch(ch)->enable && spec_ch(ch)->ADoverload &&
        ((spec.view == VIEW_SPECTRUM) ? ((spec.channel == SPEC_CH_BOTH) || (spec.channel == ch)) : (ch == hch)))
@@ -1040,14 +1056,12 @@ static void spec_draw_legend(const SPECVIEW *v, int ch)
 #define F_SCALE     3
 #define F_REF       4
 #define F_AVG       5
-#define F_AUTO      6
-#define F_RESET     7
-#define F_VIEW      8
-#define F_EXIT      9
-#define F_COUNT     10
+#define F_RESET     6
+#define F_VIEW      7
+#define F_COUNT     8               //fw 0.2.51: Auto is AUTO SET on the right bar, Scope the main menu's row
 
-static const char *spec_field_label[F_COUNT] = { "Channel", "FFT length", "Window", "Scale", "Ref level", "Average", "", "", "View", "" };
-static const uint8 spec_field_twoway[F_COUNT] = { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0 };
+static const char *spec_field_label[F_COUNT] = { "Channel", "FFT length", "Window", "Scale", "Ref level", "Average", "", "View" };
+static const uint8 spec_field_twoway[F_COUNT] = { 0, 0, 0, 0, 1, 0, 0, 0 };
 
 #define FIELD_W     (PLOT_W / F_COUNT)
 
@@ -1086,20 +1100,12 @@ static void spec_field_value(int f, char *t, int log2n, uint64 bin_mhz)
       fmt_str(t, spec.avg ? ((spec.avg == 4) ? "Max hold" : spec_avg_names[spec.avg] + 4) : "Off");
       break;
 
-    case F_AUTO:
-      fmt_str(t, spec.autostage ? "Auto..." : "Auto");
-      break;
-
     case F_RESET:
       fmt_str(t, "Reset");
       break;
 
-    case F_VIEW:
-      fmt_str(t, (spec.view == VIEW_WATERFALL) ? "Waterfall" : (spec.view == VIEW_DENSITY) ? "Density" : "Spectrum");
-      break;
-
     default:
-      fmt_str(t, "Scope");
+      fmt_str(t, (spec.view == VIEW_WATERFALL) ? "Waterfall" : (spec.view == VIEW_DENSITY) ? "Density" : "Spectrum");
       break;
   }
 }
@@ -1132,7 +1138,7 @@ static void spec_draw_strip(int log2n, uint64 bin_mhz)
 
     spec_field_value(f, t, log2n, bin_mhz);
     display_set_font(&font_3);
-    display_set_fg_color((f == F_EXIT) ? YELLOW_COLOR : WHITE_COLOR);
+    display_set_fg_color(WHITE_COLOR);
     text_center(x + FIELD_W / 2, STRIP_Y + (spec_field_label[f][0] ? 20 : 14), t);
   }
 }
@@ -1149,8 +1155,26 @@ int spectrum_available(void)
   return !scopesettings.long_mode && !scopesettings.waveviewmode;
 }
 
+//AUTO SET's label follows the view's Auto ("Auto..." while it runs); auto_shown is what the button shows
+static uint8 auto_shown;
+
+static void spec_autoset_button(void)
+{
+  DISPLAYDATA save = displaydata;
+
+  auto_shown = spec.active && spec.autostage;
+  display_set_screen_buffer((uint16 *)maindisplaybuffer);
+  scope_auto_set_button(0);
+  displaydata = save;
+}
+
 void spectrum_set_active(int on)
 {
+  //Leaving (or entering) ends a running Auto
+  spec.autostage = 0;
+  if(auto_shown)
+    spec_autoset_button();
+
   spec.active = (on && spectrum_available()) ? 1 : 0;
   spec.recompute = 1;
   spec.have[0] = spec.have[1] = 0;
@@ -1341,6 +1365,11 @@ static int spectrum_display_body(void)
   display_set_source_buffer(displaybuffertmp);
   display_set_screen_buffer((uint16 *)maindisplaybuffer);
   display_copy_rect_to_screen(2, 48, 728, 432);
+
+  //Auto started, finished or cancelled since the button was drawn
+  if((spec.autostage != 0) != auto_shown)
+    spec_autoset_button();
+
   return 1;
 }
 
@@ -1963,10 +1992,6 @@ static void spec_step_field(int f, int up)
       spec.recompute = 1;                    //restart the average now, also when stopped
       break;
 
-    case F_AUTO:
-      spec_auto_start();
-      break;
-
     case F_RESET:
       spec_defaults();
       break;
@@ -1974,11 +1999,31 @@ static void spec_step_field(int f, int up)
     case F_VIEW:
       spec.view = (spec.view + 1) % 3;
       break;
-
-    case F_EXIT:
-      spectrum_set_active(0);
-      break;
   }
+}
+
+//AUTO SET on the right bar while the view shows (fw 0.2.51; the strip's Auto field before): a tap starts the view's
+//Auto, a tap while it runs cancels it. The label change follows from the next pass (spectrum_display_body).
+int spectrum_autoset(void)
+{
+  if(!spec.active || !spectrum_available())
+    return 0;
+
+  if(spec.autostage)
+  {
+    spec.autostage = 0;
+    auto_refused = 0;
+  }
+  else
+    spec_auto_start();
+
+  spec_autoset_button();
+  return 1;
+}
+
+int spectrum_auto_running(void)
+{
+  return spec.active && spec.autostage;
 }
 
 //Touches in the trace area. Strip: one tap per field. Plot: the scope view's gestures (scan_for_touch in
@@ -1990,7 +2035,7 @@ int spectrum_touch(void)
   if(!spec.active || !spectrum_available())
     return 0;
 
-  //Any touch ends a running Auto (the Auto field starts a new one) and clears its refusal warning
+  //Any touch ends a running Auto (AUTO SET starts a new one) and clears its refusal warning
   spec.autostage = 0;
   auto_refused = 0;
 

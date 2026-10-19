@@ -22,6 +22,14 @@
 
 #include "sin_cos_math.h"
 #include "spec_fmt.h"
+#include "ui_fmt.h"
+#include "ui_menu.h"
+
+//USB drive screen: the Exit button (fw 0.2.51)
+#define USB_EXIT_X     610
+#define USB_EXIT_Y     412
+#define USB_EXIT_W     160
+#define USB_EXIT_H     52
 
 #include <string.h>
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -89,11 +97,6 @@ void scope_setup_main_screen(void)
 
   //Show the battery charge level and charging indicator
   scope_battery_status();
-  
-  //Show version information
-  display_set_fg_color(WHITE_COLOR);
-  display_set_font(&font_2);
-  display_text(VERSION_STRING_XPOS, VERSION_STRING_YPOS, PC_UI_VERSION(VERSION_STRING+1, 0));
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -243,55 +246,83 @@ void scope_setup_view_screen(void)
 
 void scope_setup_usb_screen(void)
 {
+  //fw 0.2.51, "USB drive" (docs/plans/ux-makeover.md section 2, design artboard UsbDrive): the scope and the PC as
+  //1.00o5 drew them, what is going on in three plain lines, and an Exit button
+  static const char *lines[3] =
+  {
+    "The SD card is now a USB drive on the PC.",
+    "PC control (MCP) is disconnected until you leave this screen.",
+    "Eject the drive on the PC before tapping Exit."
+  };
+  int i;
+
   //Clear the whole screen
   display_set_fg_color(BLACK_COLOR);
   display_fill_rect(0, 0, 800, 480);
+
+  //Header bar with the title
+  display_set_fg_color(0x000B1A33);
+  display_fill_rect(0, 0, 800, 52);
+  display_set_fg_color(0x001F3A66);
+  display_draw_horz_line(51, 0, 799);
+  display_set_font(&font_5);
+  display_set_fg_color(WHITE_COLOR);
+  display_text(14, 13, "USB drive");
 
   //Set the light color for the equipment borders
   display_set_fg_color(0x00AAAAAA);
 
   //Draw the computer screen
-  display_fill_rounded_rect(470, 115, 250, 190, 2);
-  display_fill_rect(580, 305, 30, 20);
-  display_fill_rounded_rect(550, 325, 90, 10, 2);
-  display_fill_rect(550, 331, 89, 4);
+  display_fill_rounded_rect(470, 110, 250, 180, 2);
+  display_fill_rect(580, 290, 30, 20);
+  display_fill_rounded_rect(550, 310, 90, 10, 2);
 
   //Draw the scope
-  display_fill_rounded_rect(80, 200, 180, 135, 2);
+  display_fill_rounded_rect(80, 190, 180, 130, 2);
 
   //Draw the cable
-  display_fill_rect(210, 188, 10, 12);
-  display_fill_rect(213, 154, 4, 36);
+  display_fill_rect(210, 178, 10, 12);
+  display_fill_rect(213, 150, 4, 30);
   display_fill_rect(213, 150, 152, 4);
-  display_fill_rect(361, 154, 4, 106);
-  display_fill_rect(361, 260, 98, 4);
-  display_fill_rect(458, 257, 12, 10);
+  display_fill_rect(361, 154, 4, 102);
+  display_fill_rect(361, 252, 98, 4);
+  display_fill_rect(458, 249, 12, 10);
 
   //Fill in the screens with a blue color
   display_set_fg_color(DARKBLUE_COLOR);
-  display_fill_rect(477, 125, 235, 163);
-  display_fill_rect(88, 210, 163, 112);
+  display_fill_rect(477, 119, 236, 162);
+  display_fill_rect(88, 200, 164, 110);
 
   //Draw a dark border around the blue screens
   display_set_fg_color(0x00111111);
-  display_draw_rect(477, 125, 235, 163);
-  display_draw_rect(88, 210, 163, 112);
+  display_draw_rect(477, 119, 236, 162);
+  display_draw_rect(88, 200, 164, 110);
 
-  //Display the text with font 5 and the light color
-  display_set_font(&font_5);
+  //What it means, in the 16 px font
+  display_set_font(&font_3);
   display_set_fg_color(WHITE_COLOR);
-  display_text(130, 254, "Off USB");    //130 bolo
+
+  for(i = 0; i < 3; i++)
+    display_text(40, 342 + 24 * i, (int8 *)lines[i]);
+
+  //The Exit button (USB_EXIT_*), the only control on the screen
+  display_set_fg_color(0x00333333);
+  display_fill_rounded_rect(USB_EXIT_X, USB_EXIT_Y, USB_EXIT_W, USB_EXIT_H, 4);
+  display_set_fg_color(0x00606060);
+  display_draw_rounded_rect(USB_EXIT_X, USB_EXIT_Y, USB_EXIT_W, USB_EXIT_H, 4);
+  display_set_fg_color(WHITE_COLOR);
+  display_text(USB_EXIT_X + (USB_EXIT_W - ui_text_width(&font_3, "Exit")) / 2, USB_EXIT_Y + 18, "Exit");
 
   //Stop the USB interface
   usb_device_disable();
-          
+
   USB_CH340 = 0;      //serial mode OFF, enable MSC
   usb_device_init();
-  
+
   //Start the USB interface
   usb_device_enable();
 
-  //Wait for the user to touch the scope Off USB section to quit
+  //Wait for the user to touch Exit to quit
   while(1)
   {
     //Scan the touch panel for touch
@@ -300,8 +331,8 @@ void scope_setup_usb_screen(void)
     //Check if there is touch
     if(havetouch)
     {
-      //Check if touch within the text field  //Check if touch within the USB OFF button
-      if((xtouch >= 90) && (xtouch <= 250) && (ytouch >= 210) && (ytouch <= 320))
+      //Check if touch within the Exit button
+      if((xtouch >= USB_EXIT_X) && (xtouch < USB_EXIT_X + USB_EXIT_W) && (ytouch >= USB_EXIT_Y) && (ytouch < USB_EXIT_Y + USB_EXIT_H))
       {
         if (mounted_to_PC)
         {
@@ -633,7 +664,14 @@ void scope_auto_set_button(int mode)
     display_set_fg_color(BLACK_COLOR);
   }
 
-  //Display the text
+  //Display the text; fw 0.2.51: "Auto..." while the spectrum view's Auto runs (a tap cancels it)
+  if(PC_AUTOSET_RUNNING())
+  {
+    display_set_font(&font_2);
+    display_text(739 + (51 - ui_text_width(&font_2, "Auto...")) / 2, 143, "Auto...");
+    return;
+  }
+
   display_set_font(&font_3);
   display_text(746, 135, "AUTO");
   display_text(753, 150, "SET");
@@ -2760,6 +2798,8 @@ void scope_battery_status(void)
 
 void scope_open_main_menu(void)
 {
+  int row;
+
   //Setup the menu in a separate buffer to be able to slide it onto the screen
   display_set_screen_buffer(displaybuffertmp);//1
 
@@ -2767,247 +2807,95 @@ void scope_open_main_menu(void)
   display_set_fg_color(DARKGREY_COLOR);
 
   //Fill the background
-  display_fill_rect(2, 46, 147, MAIN_MENU_HEIGHT);//0  149 233
+  display_fill_rect(MAIN_MENU_XPOS, MAIN_MENU_YPOS, MAIN_MENU_WIDTH, MAIN_MENU_HEIGHT);
 
   //Draw the edge in a lighter grey
   display_set_fg_color(LIGHTGREY_COLOR);
 
   //Draw the edge
-  display_draw_rect(2, 46, 147, MAIN_MENU_HEIGHT);//0  149 233
+  display_draw_rect(MAIN_MENU_XPOS, MAIN_MENU_YPOS, MAIN_MENU_WIDTH, MAIN_MENU_HEIGHT);
 
-  //Three black lines between the settings
+  //Black lines between the rows (104, 163, 222, ... as 1.00o5)
   display_set_fg_color(BLACK_COLOR);
-  display_draw_horz_line(104, 9, 140);//59
-  display_draw_horz_line(163, 9, 140);
-  display_draw_horz_line(222, 9, 140);
-  display_draw_horz_line(281, 9, 140);//222+59
 
-  //Display the menu items
-  scope_main_menu_system_settings(0);
-  scope_main_menu_picture_view(0);
-  scope_main_menu_waveform_view(0);
-  scope_main_menu_diagnostic_view(0);
-  scope_main_menu_usb_connection(0);
-  PC_MAIN_MENU_ITEMS();
+  for(row = 1; row < UI_MM_ROWS; row++)
+    display_draw_horz_line(ui_mm_row_top(row) - 1, 9, 140);
+
+  //Display the menu items (fw 0.2.51: the rows of ui_menu.h, modes first, USB drive last)
+  for(row = 0; row < UI_MM_ROWS; row++)
+    scope_main_menu_item(row, 0);
 
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1
   display_set_screen_buffer((uint16 *)maindisplaybuffer);
 
   //Slide the image onto the actual screen. The speed factor makes it start fast and end slow, Smaller value makes it slower.
-  display_slide_top_rect_onto_screen(2, 46, 147, MAIN_MENU_HEIGHT, 63039);//3  149 233
+  display_slide_top_rect_onto_screen(MAIN_MENU_XPOS, MAIN_MENU_YPOS, MAIN_MENU_WIDTH, MAIN_MENU_HEIGHT, 63039);//3  149 233
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
+//Main menu row icons without a bitmap, drawn in the current colour at the top of the row's button (y)
 
-void scope_main_menu_system_settings(int mode)
+//Scope: one period of a square wave
+static void scope_main_menu_wave_icon(uint32 y)
 {
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive so dark grey background
-    display_set_fg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so yellow background
-    display_set_fg_color(YELLOW_COLOR);
-  }
+  uint32 x = MAIN_MENU_XPOS + 15;
 
-  //Draw the background
-  display_fill_rounded_rect(9, 59 + MAIN_MENU_DY, 131, 35, 3);
-
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive so white foreground and grey background
-    display_set_fg_color(WHITE_COLOR);
-    display_set_bg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so black foreground and yellow background
-    display_set_fg_color(BLACK_COLOR);
-    display_set_bg_color(YELLOW_COLOR);
-  }
-
-  //Display the icon with the set colors
-  display_copy_icon_use_colors(system_settings_icon, MAIN_MENU_XPOS+19, 64 + MAIN_MENU_DY, 15, 25);//21
-  //display_copy_icon_use_colors(Right_drop_menu_icon, MAIN_MENU_XPOS+110, 65, 24, 24);//211
-
-  //Display the text
-  display_set_font(&font_3);
-  display_text(69, 60 + MAIN_MENU_DY, "System");
-  display_text(68, 76 + MAIN_MENU_DY, "settings");
+  display_draw_horz_line(y + 28, x, x + 6);
+  display_draw_vert_line(x + 6, y + 7, y + 28);
+  display_draw_horz_line(y + 7, x + 6, x + 18);
+  display_draw_vert_line(x + 18, y + 7, y + 28);
+  display_draw_horz_line(y + 28, x + 18, x + 25);
 }
 
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_main_menu_picture_view(int mode)
+//Spectrum analyser: a base line with spectral lines (fw 0.2.28)
+static void scope_main_menu_spectrum_icon(uint32 y)
 {
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive so dark grey background
-    display_set_fg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so white background
-    display_set_fg_color(0x00CCCCCC);
-  }
+  static const uint8 bars[] = { 4, 7, 22, 9, 5, 14, 4, 6, 10, 3, 5, 2 };
+  uint32 i;
 
-  //Draw the background
-  display_fill_rounded_rect(9, 116 + MAIN_MENU_DY, 131, 35, 3);
+  display_draw_horz_line(y + 30, MAIN_MENU_XPOS + 15, MAIN_MENU_XPOS + 40);
 
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive so white foreground and grey background
-    display_set_fg_color(WHITE_COLOR);
-    display_set_bg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so black foreground and white background
-    display_set_fg_color(BLACK_COLOR);
-    display_set_bg_color(0x00CCCCCC);
-  }
-
-  //Display the icon with the set colors
-  display_copy_icon_use_colors(picture_view_icon, MAIN_MENU_XPOS+15, 122 + MAIN_MENU_DY, 24, 24);
-
-  //Display the text
-  display_set_font(&font_3);
-  display_text(73, 119 + MAIN_MENU_DY, "Picture");
-  display_text(79, 135 + MAIN_MENU_DY, "view");
+  for(i = 0; i < sizeof(bars); i++)
+    display_draw_vert_line(MAIN_MENU_XPOS + 16 + 2 * i, y + 29 - bars[i], y + 29);
 }
 
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_main_menu_waveform_view(int mode)
+//One row of the main menu: mode 0 normal, 1 touched (Settings stays yellow while its fold-out is open, as 1.00o5)
+void scope_main_menu_item(int row, int mode)
 {
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive so dark grey background
-    display_set_fg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so white background
-    display_set_fg_color(0x00CCCCCC);
-  }
+  const ui_mm_label *l = &ui_mm_labels[row];
+  uint32 y  = ui_mm_row_top(row) + UI_MM_BTN_DY;
+  uint32 bg = !mode ? DARKGREY_COLOR : (row == UI_MM_SETTINGS) ? YELLOW_COLOR : 0x00CCCCCC;
+  uint32 xc = MAIN_MENU_XPOS + 93;
 
-  //Draw the background
-  display_fill_rounded_rect(9, 175 + MAIN_MENU_DY, 131, 35, 3);
+  display_set_fg_color(bg);
+  display_fill_rounded_rect(UI_MM_BTN_X, y, UI_MM_BTN_W, UI_MM_BTN_H, 3);
 
-  //Check if inactive or active
-  if(mode == 0)
+  //Icons with the set colors
+  display_set_fg_color(mode ? BLACK_COLOR : WHITE_COLOR);
+  display_set_bg_color(bg);
+
+  switch(row)
   {
-    //Inactive so white foreground and grey background
-    display_set_fg_color(WHITE_COLOR);
-    display_set_bg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so black foreground and white background
-    display_set_fg_color(BLACK_COLOR);
-    display_set_bg_color(0x00CCCCCC);
+    case UI_MM_SCOPE:       scope_main_menu_wave_icon(y); break;
+    case UI_MM_SPECTRUM:    scope_main_menu_spectrum_icon(y); break;
+    case UI_MM_PICTURES:    display_copy_icon_use_colors(picture_view_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
+    case UI_MM_WAVEFORMS:   display_copy_icon_use_colors(waveform_view_icon, MAIN_MENU_XPOS + 15, y + 6, 24, 24); break;
+    case UI_MM_SETTINGS:    display_copy_icon_use_colors(system_settings_icon, MAIN_MENU_XPOS + 19, y + 5, 15, 25); break;
+    case UI_MM_DIAGNOSTICS: display_copy_icon_use_colors(diagnostic_view_icon, MAIN_MENU_XPOS + 15, y + 4, 24, 24); break;
+    default:                display_copy_icon_use_colors(usb_icon, MAIN_MENU_XPOS + 18, y + 2, 18, 25); break;
   }
 
-  //Display the icon with the set colors
-  display_copy_icon_use_colors(waveform_view_icon, MAIN_MENU_XPOS+15, 181 + MAIN_MENU_DY, 24, 24);
-
-  //Display the text
+  //The label centred right of the icon: two lines, or one in the middle
   display_set_font(&font_3);
-  display_text(62, 178 + MAIN_MENU_DY, "Waveform");
-  display_text(79, 194 + MAIN_MENU_DY, "view");
-}
 
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_main_menu_diagnostic_view(int mode)
-{
-  //Check if inactive or active
-  if(mode == 0)
+  if(l->line2[0])
   {
-    //Inactive so dark grey background
-    display_set_fg_color(DARKGREY_COLOR);
+    display_text(xc - ui_text_width(&font_3, l->line1) / 2, y + 1, (int8 *)l->line1);
+    display_text(xc - ui_text_width(&font_3, l->line2) / 2, y + 17, (int8 *)l->line2);
   }
   else
-  {
-    //Active so white background
-    display_set_fg_color(0x00CCCCCC);
-  }
-
-  //Draw the background
-  display_fill_rounded_rect(9, 235 + MAIN_MENU_DY, 131, 35, 3);
-
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive so white foreground and grey background
-    display_set_fg_color(WHITE_COLOR);
-    display_set_bg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so black foreground and white background
-    display_set_fg_color(BLACK_COLOR);
-    display_set_bg_color(0x00CCCCCC);
-  }
-
-  //Display the icon with the set colors
-  display_copy_icon_use_colors(diagnostic_view_icon, MAIN_MENU_XPOS+15, 239 + MAIN_MENU_DY, 24, 24);
-
-  //diagnostic_view_icon
-  //Display the text
-  display_set_font(&font_3);
-  display_text(60, 237 + MAIN_MENU_DY, "Diagnostic");
-  display_text(79, 253 + MAIN_MENU_DY, "view");
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void scope_main_menu_usb_connection(int mode)
-{
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive so dark grey background
-    display_set_fg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so white background
-    display_set_fg_color(0x00CCCCCC);
-  }
-
-  //Draw the background
-  display_fill_rounded_rect(9, 295 + MAIN_MENU_DY, 131, 35, 3);
-
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Inactive so white foreground and grey background
-    display_set_fg_color(WHITE_COLOR);
-    display_set_bg_color(DARKGREY_COLOR);
-  }
-  else
-  {
-    //Active so black foreground and white background
-    display_set_fg_color(BLACK_COLOR);
-    display_set_bg_color(0x00CCCCCC);
-  }
-
-  //Display the icon with the set colors
-  display_copy_icon_use_colors(usb_icon, MAIN_MENU_XPOS+18, 297 + MAIN_MENU_DY, 18, 25);//20
-
-  //Display the text
-  display_set_font(&font_3);
-  display_text(80, 296 + MAIN_MENU_DY, "USB");
-  display_text(60, 312 + MAIN_MENU_DY, "connection");
+    display_text(xc - ui_text_width(&font_3, l->line1) / 2, y + 9, (int8 *)l->line1);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -5233,7 +5121,7 @@ void scope_open_acquisition_menu(void)
   //display_set_fg_color(BLACK_COLOR);
   display_draw_horz_line(ACQ_MENU_YPOS +  211, ACQ_MENU_XPOS + 8, ACQ_MENU_XPOS + ACQ_MENU_WIDTH - 8);//-84
   
-  display_draw_vert_line(ACQ_MENU_XPOS +  304, ACQ_MENU_YPOS + 8, ACQ_MENU_YPOS + ACQ_MENU_HEIGHT - 8);
+  display_draw_vert_line(ACQ_MENU_XPOS +  304, ACQ_MENU_YPOS + 8, ACQ_MENU_YPOS + ACQ_MENU_BODY_H - 8);
 
   //Main texts in white
   display_set_fg_color(WHITE_COLOR);
@@ -5293,6 +5181,7 @@ void scope_open_acquisition_menu(void)
 
   scope_acquisition_memory_deep_select();
   scope_acquisition_trace_select();
+  PC_ACQ_DISPLAY_DRAW();             //fw 0.2.51: Display row (Normal / Phosphor / X-Y) under 1.00o5's menu
 
   //Set source and target for getting it on the actual screen
   display_set_source_buffer(displaybuffertmp);//1
@@ -6490,7 +6379,7 @@ void scope_open_system_settings_menu(void)
 
   for(y=SYSTEM_MENU_YPOS+58;y<SYSTEM_MENU_HEIGHT;y+=59)//350
   {
-    display_draw_horz_line(y, SYSTEM_MENU_XPOS+9, SYSTEM_MENU_HEIGHT_FULL-28);
+    display_draw_horz_line(y, SYSTEM_MENU_XPOS+9, SYSTEM_MENU_XPOS+235);
   }
 
   //Display the menu items
@@ -6500,7 +6389,6 @@ void scope_open_system_settings_menu(void)
   scope_system_settings_other_settings_item(0);
   
   scope_system_settings_calibration_item(0);
-  scope_system_settings_x_y_mode_item(0);
   scope_system_settings_confirmation_item(0);
   if(1 PC_UI_HAS(PC_FEAT_RTC)) scope_system_settings_RTC_settings_item(0);
 
@@ -7012,30 +6900,6 @@ void scope_system_settings_calibration_item(int mode)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void scope_system_settings_x_y_mode_item(int mode)
-{
-  //Check if inactive or active
-  if(mode == 0)
-  {
-    //Set the colors for white foreground and grey background
-    display_set_fg_color(WHITE_COLOR);
-    display_set_bg_color(DARKGREY_COLOR);
-
-    //Display the icon with the set colors
-    display_copy_icon_use_colors(x_y_mode_display_icon, SYSTEM_MENU_XPOS+21, 299, 24, 24);//176//+21 299
-
-    //Display the text
-    display_set_font(&font_3);
-    display_text(SYSTEM_MENU_XPOS+147, 295, "X-Y mode");//100//223
-    display_text(SYSTEM_MENU_XPOS+155, 311, "display");//108//231
-  }
-
-  //Show the state
-  scope_display_slide_button(SYSTEM_MENU_XPOS+70, 300, scopesettings.xymodedisplay, MAGENTA_COLOR);//+21//+176//326 299
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
 void scope_system_settings_confirmation_item(int mode)
 {
   //Check if inactive or active
@@ -7046,16 +6910,16 @@ void scope_system_settings_confirmation_item(int mode)
     display_set_bg_color(DARKGREY_COLOR);
 
     //Display the icon with the set colors
-    display_copy_icon_use_colors(confirmation_icon, SYSTEM_MENU_XPOS+21, 358, 24, 24);//80//202 358
+    display_copy_icon_use_colors(confirmation_icon, SYSTEM_MENU_XPOS+21, 299, 24, 24);//fw 0.2.51: X-Y's row
 
     //Display the text
     display_set_font(&font_3);
-    display_text(SYSTEM_MENU_XPOS+142, 354, "Notification");//94//217
-    display_text(SYSTEM_MENU_XPOS+138, 370, "confirmation");//90//213
+    display_text(SYSTEM_MENU_XPOS+142, 295, "Notification");
+    display_text(SYSTEM_MENU_XPOS+138, 311, "confirmation");
   }
 
   //Show the state
-  scope_display_slide_button(SYSTEM_MENU_XPOS+70, 359, scopesettings.confirmationmode, GREEN_COLOR);//+15 358
+  scope_display_slide_button(SYSTEM_MENU_XPOS+70, 300, scopesettings.confirmationmode, GREEN_COLOR);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -7075,7 +6939,7 @@ void scope_system_settings_RTC_settings_item(int mode)//set
   }
 
   //Draw the background
-  display_fill_rounded_rect(SYSTEM_MENU_XPOS+9, 410, 226, 38, 3);//401 36
+  display_fill_rounded_rect(SYSTEM_MENU_XPOS+9, 351, 226, 38, 3);//fw 0.2.51: one row up (was 410)
 
   //Check if inactive or active
   if(mode == 0)
@@ -7092,14 +6956,14 @@ void scope_system_settings_RTC_settings_item(int mode)//set
   }
 
   //Display the icon with the set colors
-  display_copy_icon_use_colors(RTC_icon, SYSTEM_MENU_XPOS+21, 417, 24, 24);//171
-  display_copy_icon_use_colors(Right_drop_menu_icon, SYSTEM_MENU_XPOS+202, 417, 24, 24);//211
+  display_copy_icon_use_colors(RTC_icon, SYSTEM_MENU_XPOS+21, 358, 24, 24);
+  display_copy_icon_use_colors(Right_drop_menu_icon, SYSTEM_MENU_XPOS+202, 358, 24, 24);
   
 
   //Display the text
   display_set_font(&font_3);
-  display_text(241, 413, "RTC settings");       //250// 241 413
-  display_text(213, 429, "Time & Date settings");//222//220 429
+  display_text(241, 354, "RTC settings");
+  display_text(213, 370, "Time & Date settings");
   
   //Read time for RTC
   get_fattime();
@@ -8398,100 +8262,17 @@ void scope_hide_measures_menu_item(void)
 
 void scope_measures_menu_item(int channel, int item)
 {
-  uint16  xpos;
-  uint16  ypos;
-  char   *text;
+  //fw 0.2.51: the names of the cards (ui_fmt.h measurement_names), centred in their 62 px cells: four per row, rows
+  //at y 316, 376 and 437, CH1 from x 232 and CH2 from x 482
+  static const uint16 row_y[3] = { 316, 376, 437 };
+  const char *text;
+  uint32 xc;
 
-  //Set the x position offset for the given channel
-  if(channel == 0)
-  {
-    //Channel 1 is on the left side
-    xpos = 232;
-  }
-  else
-  {
-    //Channel 2 is on the right side
-    xpos = 482;
-  }
+  if((item < 0) || (item >= UI_MEAS_COUNT))
+    return;
 
-  //Set the text and the position for the given item
-  switch(item)
-  {
-    case 0:
-      text  = "Vmax";
-      xpos += 15;
-      ypos  = 316;
-      break;
-
-    case 1:
-      text  = "Vmin";
-      xpos += 79;
-      ypos  = 316;
-      break;
-
-    case 2:
-      text  = "Vavg";
-      xpos += 141;
-      ypos  = 316;
-      break;
-
-    case 3:
-      text  = "Vrms";
-      xpos += 203;
-      ypos  = 316;
-      break;
-
-    case 4:
-      text  = "Vpp";
-      xpos += 19;
-      ypos  = 376;
-      break;
-
-    case 5:
-      text  = "Vp";
-      xpos += 86;
-      ypos  = 376;
-      break;
-
-    case 6:
-      text  = "Freq";
-      xpos += 143;
-      ypos  = 376;
-      break;
-
-    case 7:
-      text  = "Cycle";
-      xpos += 201;
-      ypos  = 376;
-      break;
-
-    case 8:
-      text  = "Tim+";
-      xpos += 17;
-      ypos  = 437;
-      break;
-
-    case 9:
-      text  = "Tim-";
-      xpos += 80;
-      ypos  = 437;
-      break;
-
-    case 10:
-      text  = "Duty+";
-      xpos += 138;
-      ypos  = 437;
-      break;
-
-    case 11:
-      text  = "Duty-";
-      xpos += 202;
-      ypos  = 437;
-      break;
-
-    default:
-      return;
-  }
+  text = measurement_names[item];
+  xc   = (channel ? 482 : 232) + 31 + 62 * (item & 3);
 
   //Check if item is on or off
   if(scopesettings.measuresstate[channel][item] == 0)
@@ -8507,7 +8288,7 @@ void scope_measures_menu_item(int channel, int item)
 
   //Display the text
   display_set_font(&font_3);
-  display_text(xpos, ypos, text);
+  display_text(xc - ui_text_width(&font_3, text) / 2, row_y[item >> 2], (int8 *)text);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

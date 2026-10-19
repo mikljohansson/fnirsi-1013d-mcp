@@ -56,10 +56,13 @@ static uint8 phos_ramp[256] __attribute__((aligned(4)));      //codes 0..255, th
 #define F_PERSIST        0
 #define F_PALETTE        1
 #define F_CLEAR          2
-#define F_EXIT           3
-#define F_COUNT          4
+#define F_COUNT          3              //fw 0.2.51: no "Scope" field (the main menu is the way between modes)
 
-static const uint16 field_x[F_COUNT + 1] = { 6, 176, 296, 386, 476 };
+//Warnings: top-middle of the plot as in the spectrum view (fw 0.2.51; ux-makeover.md section 3)
+#define WARN_XC          366
+#define WARN_Y           69
+
+static const uint16 field_x[F_COUNT + 1] = { 6, 176, 296, 386 };
 static const char  *persist_names[PHOS_PERSIST_COUNT] = { "0.2 s", "1 s", "5 s", "Infinite" };
 
 static struct
@@ -314,8 +317,7 @@ static void phos_draw_strip(void)
     {
       case F_PERSIST: fmt_str(t, persist_names[phos.persist]); break;
       case F_PALETTE: fmt_str(t, phos.palette ? "Heat" : "Mono"); break;
-      case F_CLEAR:   fmt_str(t, "Clear"); break;
-      default:        fmt_str(t, "Scope"); break;
+      default:        fmt_str(t, "Clear"); break;
     }
 
     display_set_font(&font_3);
@@ -340,18 +342,12 @@ static void phos_draw_strip(void)
     }
     else
     {
-      display_set_fg_color((f == F_EXIT) ? YELLOW_COLOR : WHITE_COLOR);
+      display_set_fg_color(WHITE_COLOR);
       display_text(x + (w - text_width(t)) / 2, STRIP_Y + 6, (int8 *)t);
     }
   }
 
-  //Status: a warning (consequence and action), else the records added per second
-  phos_status(t);
-  display_set_font(&font_3);
-
-  if(t[0])
-    display_set_fg_color(ORANGE_COLOR);
-  else
+  //Readout: the records added per second (warnings are drawn over the plot, phos_draw_warning)
   {
     uint32 now = timer0ticks;
 
@@ -362,17 +358,34 @@ static void phos_draw_strip(void)
       phos.wfm_ms    = now;
     }
 
+    t[0] = 0;
     if(scopesettings.runstate && phos.drawn)
     {
       p = fmt_uint(t, phos.wfm_shown);
       fmt_str(p, " wfm/s");
     }
 
+    display_set_font(&font_3);
     display_set_fg_color(0x00A0A0A0);
-  }
 
-  if(t[0])
-    display_text(726 - text_width(t), STRIP_Y + 6, (int8 *)t);
+    if(t[0])
+      display_text(726 - text_width(t), STRIP_Y + 6, (int8 *)t);
+  }
+}
+
+//The warning line (consequence and action) at the top middle of the plot, in the trace area being drawn
+static void phos_draw_warning(void)
+{
+  char t[48];
+
+  phos_status(t);
+
+  if(!t[0])
+    return;
+
+  display_set_font(&font_2);
+  display_set_fg_color(ORANGE_COLOR);
+  display_text(WARN_XC - text_width(t) / 2, WARN_Y, (int8 *)t);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -476,6 +489,7 @@ void phosphor_draw(void)
     phos_render(&phos_m[1], scopesettings.channel1.enable ? &phos_m[0] : 0, &displaybuffertmp[PHOS_Y0 * 800 + PHOS_X0], 800,
                 PHOS_PAL(phos.palette ? PAL_HEAT : PAL_CH2), k16, phos.seed);
 
+  phos_draw_warning();
   phos_draw_strip();
 }
 
@@ -513,6 +527,7 @@ int phosphor_xy(uint32 index)
 
   phos_render(&phos_m[0], 0, &displaybuffertmp[PHOS_Y0 * 800 + PHOS_X0], 800, PHOS_PAL(phos.palette ? PAL_HEAT : PAL_XY),
               phos_pass_k16(), phos.seed);
+  phos_draw_warning();
   phos_draw_strip();
   return 1;
 }
@@ -548,10 +563,6 @@ int phosphor_touch(void)
 
     case F_CLEAR:
       phos_clear_all();
-      break;
-
-    case F_EXIT:
-      phosphor_set_active(0);
       break;
 
     default:
