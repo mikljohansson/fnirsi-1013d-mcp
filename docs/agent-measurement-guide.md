@@ -74,6 +74,28 @@ means another program has the port: ask the person, do not retry in a loop.
   talk about the same picture the person sees; use `scope_capture_and_fft` for averaging, other windows or the
   per-unit calibration. `cross_check=true` confirms both agree on the same capture.
 - `scope_measure`: vpp, rms, frequency, duty, rise time, CH1->CH2 delay on the last capture (or a fresh one).
+- **Decoding a serial bus**: `scope_decode(protocol='uart'|'spi'|'i2c')` on a saved capture (`source`), the last
+  capture, or a fresh one (`capture=true`). Put the lines on the channels it expects (UART: data on CH1; SPI: clock on
+  CH1, MOSI or MISO on CH2; I2C: SCL on CH1, SDA on CH2; or name them in `channels`), a range where the logic swing
+  fills a few divisions without clipping (1 V/div for 3.3 V logic), DC coupling, and a sample rate of at least 4
+  samples per bit (UART: 4 x baud; SPI: 4 x the clock; I2C: 8 x SCL) with a record long enough for the whole message.
+  Trigger on the first edge (UART: falling on the data line, idle high; I2C: falling on SDA, the START). Report the
+  frames with their times, the errors (parity, framing, NACK, incomplete words) and `applied` (baud or clock as
+  measured, samples per bit); the frames are in the `.npz` and `scope_report` plots them labelled. Without a chip
+  select SPI words are counted from the first clock after a gap: say so when the transfer starts before the record.
+- **Mask testing**: `scope_mask_test` builds a tolerance band around a reference capture (taken now, or a saved
+  `.npz`; `tolerance_div` or `tolerance_volts`, `tolerance_time`) and tests `n` captures against it, pass / fail per
+  capture with the first failing sample and the worst excursion; `mask_name` stores the mask for later runs
+  (`reference='<name>'`). Keep the settings (rate, record length, range) the same as when the mask was built: a
+  mismatch is refused, a change at the scope ends the run. Tolerances under 2 codes or 2 samples fail on noise and
+  trigger jitter alone; start at 0.2 div and 2 samples and report the tolerance with the verdict. `scope_report` on
+  the result shows the band and the outside samples.
+- **Voltmeter readings**: `scope_dvm` gives DC, AC RMS, true RMS, min / max / Vpp and the dominant frequency per
+  channel over several captures, with a `statement` of what the DC value resolves (range, volts per code, measured
+  noise, 1-sigma uncertainty, digits of full scale). Quote the statement, not just the number: the digits come from
+  the noise and the sample count, the absolute accuracy from the calibration (`scaling`), about one code.
+- **CSV**: `scope_export_csv(source=<file>)` writes any saved result as CSV with a `#` header (settings, scaling,
+  caveats) for spreadsheets and other tools.
 
 ## 3a. Choosing a decimation mode for decay curves
 
@@ -231,8 +253,12 @@ Every waveform is saved as `.npz` (path in `file`); load with `numpy.load(path)`
 | decay_fit | `t` (s after the edge), `data`, `fit`, `residual`, `fit_mask`, `excluded`, `std` |
 | capture_and_fft | `f` (Hz), `amplitude_vrms` |
 | bode_sweep | `f_actual` (Hz), complex `h` (after splice and thru cal), `h_raw`, `x1` / `x2` (volts peak), `mag_db`, `phase_deg`, `ch1_range` / `ch2_range`, `snr_db` (NaN for `where='device'`), `valid`; also `.csv` and `.json` (`files`) |
+| decode | `t`, `<CH>_volts` of the lines; the frames, `applied` and the preview in `meta_json` |
+| mask_test | `t`, `upper`, `lower`, `reference`, `<CH>_volts` (the first failing capture, else the last), `fail_mask`; per-capture results in `meta_json`; the mask file (`mask.file`) holds `t`, `upper`, `lower`, `reference` |
+| dvm | `capture_t_s`, `<CH>_mean`, `_ac_rms`, `_rms`, `_min`, `_max`, `_frequency` per capture; the combined readings in `meta_json` |
 
 Results with up to 2000 points also carry the samples inline; longer ones a 500-point min/max preview.
+`scope_export_csv` turns any of these files into CSV (header with the settings and caveats, one row per sample).
 
 ## 7. Reporting numbers
 

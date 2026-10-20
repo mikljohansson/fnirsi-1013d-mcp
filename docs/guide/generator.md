@@ -4,9 +4,6 @@ The scope has no DAC. Its only output is a logic-level square wave on the calibr
 inputs. A 32-bit DDS in the FPGA sets the frequency and the duty cycle. The post drives the signal through a 1 kOhm
 resistor, about 3.1 Vpp at the post with nothing connected.
 
-The open bitstreams (0x1532 and later) have the generator. On the stock bitstream (0x1432) the post carries a fixed
-1 kHz square wave and the generator button does nothing.
-
 !!! warning "Check the wiring first"
     The 1 kOhm resistor is the post's only protection. Connect the post only to passive circuits or buffered inputs.
     Never connect it to a node that something else drives, such as a coil in a running circuit or a MOSFET drain.
@@ -62,5 +59,5 @@ The server also caps the frequency at 1 MHz and the duty at 50 % unless you rais
   ([The screens](screens.md#frequency-response)). While a sweep runs, the generator button shows the tone being
   measured, and a tap on it says "Driven by the frequency response sweep". When no sweep runs, the post carries your
   own setting again.
-- **External trigger**: on bitstream 0x1533 and later the post can also be a trigger input. Choose EXT in the trigger
-  menu. That switches the generator off, because the input and the output share the pin.
+- **External trigger**: the post can also be a trigger input. Choose EXT in the trigger menu. That switches the
+  generator off, because the input and the output share the pin.

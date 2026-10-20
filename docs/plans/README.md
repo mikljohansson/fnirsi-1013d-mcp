@@ -14,6 +14,7 @@ reference, and `docs/articles/` tells the stories behind the designs.
 | `segmented-capture.md` | FPGA 0x1536 sequencer design; its bench is still open |
 | `phosphor-fast-capture.md` | design note for the phosphor capture loop, not built |
 | `bode-ui.md` | the Frequency response mode specification the firmware cites |
+| `ui-rows.md` | the trigger Type row and the ACQ Sample row (FPGA 0x153C): design note and mockups, not built |
 
 ## Finished designs, kept as the design record
 

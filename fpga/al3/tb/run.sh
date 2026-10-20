@@ -38,11 +38,15 @@
 #      TIMEOUT_RUNS forces per case (default 4), TIMEOUT_BENCH=0 skips case B (fpga-gen13: the host capture of the
 #      2026-10-20 19:52 bench on 0x153B, D 199 CIC3+FIR, pretrigger 3000, total 6000, untriggered with the force and
 #      triggered, read with READ_RAW's split at the ring end). Against the 0x153A source it reproduces the bench splice.
+#  14. tb_trigtypes.v (0x153C C1): pulse width, Nth edge and timeout triggers on CH1 / CH2 / EXT, legacy and decimated,
+#      against a reference model on the stream the FPGA saw, at the edge type's trigger position; the reserved types
+#      and the 0x34 / 0x37 read-back; the trigger hold-off (0x1B, 0x66) across sequencer restarts and MCU re-arms; the
+#      0x153B stop gate per type. TRIGTYPES_RUNS (default 2) runs per type, polarity and case.
 #  16. tb_counter.v (0x153C C3): the hardware counter (0x61, 0x62, read 0x35 with 16 bytes): gates exactly 2e6 clocks apart,
 #      E / T / W and min / max of every gate against a model of the input stream and of the captured pair, accuracy against
 #      the stimulus on EXT and CH1 (200 MSa/s, 10 MSa/s, K = 1), the source select (0x61 bits 3..2 and the 0x15 follow),
 #      the Schmitt thresholds at their boundaries, the hysteresis against noise, the "new" flag and the snapshot read.
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|counter runs one testbench.
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|trigtypes|counter runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -147,6 +151,11 @@ if [ "$ONLY" = all ] || [ "$ONLY" = timeout ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_timeout.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_timeout.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_timeout.vvp" +seed=$SEED +total=${TIMEOUT_TOTAL:-2048} +runs=${TIMEOUT_RUNS:-4} +bench=${TIMEOUT_BENCH:-1} | tee "$WORK/sim_timeout.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_timeout.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = trigtypes ]; then
+  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_trigtypes.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_trigtypes.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_trigtypes.vvp" +seed=$SEED +runs=${TRIGTYPES_RUNS:-2} +logfile="$WORK/trigtypes.log" | grep -v '^  intent' | tee "$WORK/sim_trigtypes.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_trigtypes.log" || RC=1
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = counter ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_counter.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_counter.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true

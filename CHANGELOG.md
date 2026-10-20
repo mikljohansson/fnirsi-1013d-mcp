@@ -1391,6 +1391,17 @@ was found (commit not identified).
 
 ### Host library and MCP server (`mcp/`, package version 0.1.0)
 
+- 2026-10-20 (mcp-soft, provisional): four host-side data tools (docs/mcp-tools.md 4.3b): `scope_decode` (UART with
+  auto-baud, SPI, I2C; from a saved capture, the last capture, the scope's latest or a fresh one; frames with times,
+  errors, a preview, the samples-per-bit caveats; `fnirsi1013d.decode`, 64f23f4, 19d6eea), `scope_mask_test` (a
+  tolerance band around a reference capture or a stored mask, n captures pass / fail with the first failing sample;
+  `analysis.mask_envelope` / `mask_check`), `scope_export_csv` (any saved result as CSV with a `#` header;
+  `fnirsi1013d.export`) and `scope_dvm` (DC, AC RMS, true RMS, min / max / Vpp, dominant frequency over n captures or
+  a duration, with a resolution statement from the measured noise; `analysis.dvm_summary` / `dvm_resolution`).
+  `scope_report` plots the three new kinds. The simulator gained the serial signals `uart`, `spi_clk` / `spi_data`,
+  `i2c_scl` / `i2c_sda` (`text=` message; 14503d6). Measured on the simulator: UART decodes down to 2.5 samples per
+  bit, SPI 3 per clock period, I2C 8 per SCL period.
+
 - 2026-10-20 (fw-sd): `fnirsi1013d-flash --persist` says which limit an image does not fit: the card's partition (its
   start, the start needed, 16384 recommended, how to recreate it), a running firmware with the old 2048 window (load
   0.2.101 first) or the 16384 cap (`sdcard.image_fit_problem`, `protocol.SD_WINDOW_LIMIT`); the simulator's card models

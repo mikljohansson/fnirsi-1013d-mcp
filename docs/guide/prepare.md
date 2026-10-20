@@ -1,9 +1,9 @@
 # Prepare and back up
 
 Do this before the steps on the [Install](install.md) page. It takes you through identifying your board, backing up
-what the install can overwrite, and, if you want the FPGA bitstream, the one piece of soldering and the backup of
-the FPGA's configuration flash. The open firmware itself never touches the stock firmware inside the scope: the only
-things you write are a micro SD card and, optionally, that small flash chip.
+what the install can overwrite, the one piece of soldering and the backup of the FPGA's configuration flash, which
+the firmware's bitstream goes into. The open firmware itself never touches the stock firmware inside the scope: the
+only things you write are a micro SD card and that small flash chip.
 
 Everything here was done on one unit, the maintainer's. Where this page says "on the maintainer's unit", that is
 what was measured there; your board can differ, so measure yours.
@@ -29,7 +29,8 @@ firmware and the bitstreams are made for.
 
 Other boards exist: an FPGA marked **Anlogic EF2L45** (it has no external flash chip) or **Altera EP4CE6**. The
 firmware for those is inherited from Atlan4's and untested here, and no bitstream exists for them. If you have one,
-the card may still work, at your own risk; do not flash the FPGA.
+this firmware is not for it: it runs only with its own bitstream, and none exists for those boards. Do not flash their
+FPGA.
 
 ## What you need
 
@@ -39,7 +40,7 @@ the card may still work, at your own risk; do not flash the FPGA.
 - A **PC with Linux, or Windows with WSL**. Writing the card is tested on Linux and on WSL with the reader attached
   through `usbipd` (below). Windows alone is enough for downloading, checking hashes and backing up a card with
   Win32DiskImager.
-- Only for the FPGA bitstream:
+- For the FPGA bitstream:
     - A **3.3 V SPI programmer**. The tested one is a Sipeed USB-JTAG/TTL debugger with an FTDI FT2232D, driven by
       the project's own tool on Windows; every bitstream on the maintainer's unit went in that way. Any 3.3 V SPI
       programmer that flashrom supports works in principle (the engineering page lists them).
@@ -111,10 +112,9 @@ Get-FileHash -Algorithm SHA256 fnirsi_1013d-fw-X.Y.Z.bin
 
 or, in any command prompt, `certutil -hashfile fnirsi_1013d-fw-X.Y.Z.bin SHA256`.
 
-## For the bitstream: the FPGA flash
+## The FPGA flash
 
-Skip this whole section if you only want the firmware on the card. The firmware runs on the stock bitstream, without
-the deep memory, the generator, the filters, the external trigger and the frequency-response mode.
+The firmware runs only with its own bitstream, so this section is part of every install.
 
 The bitstream lives in the 25Q80 flash chip, which is wired only to the FPGA: neither the firmware nor the USB boot
 mode can reach it, so it is written once through the 2x3 header with the programmer. The write itself is described on
@@ -224,9 +224,7 @@ the card and the stock firmware runs. The commands and the limits are in the eng
 
 ## Going back to stock
 
-The stock firmware never leaves the scope. Pick **FNIRSI** in the boot menu, or take the card out, and it runs.
-
-If you flashed a bitstream, write your backup of the FPGA flash back **first** and verify it, as
+The stock firmware never leaves the scope. Write your backup of the FPGA flash back **first** and verify it, as
 [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), "Rollback", describes:
 
 ```
@@ -234,5 +232,6 @@ python firmware/tools/spiflash_d2xx.py write -i backups/fpga-flash-before.bin --
 python firmware/tools/spiflash_d2xx.py verify -i backups/fpga-flash-before.bin
 ```
 
-The stock firmware with a custom bitstream is not a valid combination; the scope cannot restore its own FPGA flash.
+Then pick **FNIRSI** in the boot menu, or take the card out, and the stock firmware runs. The stock firmware with a
+custom bitstream is not a valid combination; the scope cannot restore its own FPGA flash.
 A card you imaged above goes back with `dd` or Win32DiskImager's Write, calibration included.

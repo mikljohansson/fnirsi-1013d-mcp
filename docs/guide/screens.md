@@ -14,9 +14,9 @@ program on the PC has the scope's serial port open or has sent it a request in t
 
 - Tap a channel chip for the input: V/div, coupling, probe factor, invert.
 - Tap ACQ for the acquisition: Sample Rate, Time per Division, Memory, roll mode (Long mode / Short mode), Average
-  mode and Filter. The menu also shows the pass time, how long one screen update takes.
-- Tap the trigger chip for the trigger: Auto, Single or Normal, the edge, the source (CH1, CH2, or EXT on bitstream
-  0x1533 and later), the position and Always 50 %.
+  mode ({{AVERAGE_TEXT}}) and Filter. The menu also shows the pass time, how long one screen update takes.
+- Tap the trigger chip for the trigger: Auto, Single or Normal, the edge, the source (CH1, CH2 or EXT), the position
+  and Always 50 %.
 - The run-state chip beside the trigger reads STOP, RUN or WAIT (a single shot waiting for its trigger).
 - The sun switches the screen to full brightness and back.
 
@@ -153,16 +153,14 @@ RBW, Span, Center, Time and Capture. Time is the history the waterfall shows. Ca
 the axis. The 8-bit ADC limits THD to about 0.3 %.
 
 **Warnings.** "CH1 overrange: increase V/div", "Aliasing possible: set Acquisition > Filter" (below 200 MSa/s with
-the filter off; "use a faster time base" on a bitstream without the filter), "Stopped: press RUN to fill the view",
+the filter off), "Stopped: press RUN to fill the view",
 "No trigger: check the trigger level".
 
 ## Frequency response
 
 Measures the frequency response of a passive two-port, such as a filter, a divider or an LC tank, with the scope
 alone. The calibration post drives the device under test (DUT), CH1 reads its input, CH2 its output. The view plots
-CH2 / CH1 as magnitude in dB (cyan, left axis) and phase in degrees (pink, right axis) against frequency. The row is
-grey on a bitstream without the decimation filter and the DDS generator; tapping it then says "Frequency response
-needs FPGA 0x1534 or later".
+CH2 / CH1 as magnitude in dB (cyan, left axis) and phase in degrees (pink, right axis) against frequency.
 
 !!! warning "Passive or buffered devices only"
     The post is a 3.1 Vpp square wave through 1 kOhm, and that resistor is its only protection. Never connect a coil
@@ -339,8 +337,10 @@ and does not count.
 
 The Log page keeps the details: the exception type, its address and the fault registers.
 
-- **Status**: the firmware identity (version, git hash, protocol, USB serial), the FPGA line with the bitstream and its
-  features, tiles for Firmware, Restarts, USB and Battery, and the calibration verdict with its reason. Buttons:
+- **Status**: the firmware identity (version, git hash, protocol, USB serial), the FPGA line with the bitstream it
+  found and its features (a bitstream other than the one this firmware is built for shows the banner instead, see
+  [First run](first-run.md)), tiles for Firmware, Restarts, USB and Battery, and the calibration verdict with its
+  reason. Buttons:
   Calibrate (the [wizard](calibration.md)) and Save report to card (a text file in `reports`).
 - **Calibration**: per channel and range the offset centre, the volts factor, the zeros and gains of both ADC cores,
   the noise with the inputs open against its limits and the background tracking. Buttons: Calibrate, DC shift trim,
