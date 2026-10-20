@@ -115,7 +115,6 @@ typedef struct
   uint32 cpr_q24;
   int32  zero_q8;       //code offset of the conversion (corr16 x 16); only the centre uses it
   int32  volt_mdb;
-  uint8  clipped;       //the readout saw a sample at 0 or 255 (ADoverload)
 } bode_scale;
 
 //20 log10 of the volts per code: uV per code x 256 (GET_CHANNEL's uv_q8) and the probe index (0.5x .. 1000x)
@@ -130,7 +129,7 @@ typedef struct
   int32  ac_c100;       //largest distance of a sample from the record mean, 1/100 code
   int32  centre_c100;   //record mean, 1/100 code
   int32  mean_uv;       //record mean in uV at the BNC (1x), relative to the channel's 0 V code (128 - offset)
-  uint8  clipped;
+  uint8  clipped;       //fw 0.2.83: a sample of this record at code 0 or 255 (the record's own min / max, nothing else)
 } bode_chm;
 
 typedef struct

@@ -3160,6 +3160,44 @@ overview's points or axis; the generator chip stuck on a tone after a sweep; the
 mode or the trigger menu's extra strip there; spectrum labels overlapping or a grid line without a label slot; the
 slider window off the track or changing width while dragged; Trace style not saved; a readout fault on a clean
 bitstream (the rule would be too tight: 5 V/div, clipped, fundamental under 20 codes).
+
+**Addendum (fw-bode2, fw 0.2.83 provisional, 2026-10-20; branch fw-bode2, commit 51ab2a4, then the docs commit).** Not
+benched, nothing flashed; PC_FW_VERSION not bumped. Bench 2026-10-20 10:52 (docs/hardware-status.md): on 0x153A / 0.2.82
+AUTO SET and every host-started sweep ended in the pre-scan with reason 8 while the self-check counted 0 flagged
+captures. Cause: `bh_read` set `cap->s[c].clipped` from `ADoverload`, which `fpga_read_adc_data` ORs per sample and only
+the Scope view's passes clear (scope_functions.c); one railed sample in any earlier readout made every engine capture
+"clipped", the pre-scan stepped down to 5 V/div and the rule above fired. What changed:
+- `bode_scale.clipped` is gone: `bode_measure` judges clipping from the record's own min / max (codes < 0.5 or > 254.5).
+- `pc_hal_trace_build` clears `ADoverload` of each channel it reads, so the host capture flags (`pc_capture_finish`),
+  READ_TRACE meta bits and GET_STATUS bits 6-7 describe the latest readout; the Scope view's red label and warning keep
+  their own clear-per-pass behaviour (they sample the flag at the start of a pass, as before).
+- `bode_cap.check` (BODE_CHK_NONE / CLEAN / FAULT, bode_sweep.h): pc_bode.c `bh_check` reads 0x36
+  (`pc_hal_cap_check`) after a legacy 200 MSa/s engine capture, as the host path does, and returns FAULT when that read
+  flagged a core or PC_CAPF_REPEAT is set; decimated captures have the repeat bit only (the counters were validated at
+  full rate). `bode_step` ends the sweep with reason 8 on FAULT in any phase. `readout_fault` (the 0.2.71 rule) runs
+  only with BODE_CHK_NONE (bitstreams before 0x153A), now on the record's rails. A clean check never gives reason 8.
+- test_bode_sweep (370 checks): clean check with rails in every capture (done, every point clipped, no reason 8); a clean
+  sweep after a railed one on the same engine (no flags, CH1 at 0.5 V/div); one railed capture inside the sweep (no point
+  clipped); FAULT on the first capture and on capture 12 (reason 8, generator off).
+- Noted, not changed: a railed pre-scan capture on CH1 (one saturated record) leaves CH1 on 2.5 V/div for the sweep
+  (ch1_low on the post), because the pre-scan ranges from that capture and the engine never ranges CH1 up (the host's
+  `_prescan` does the same). The intermittent whole-record saturation after a rate change (10:52) was not chased.
+- Not changed: mcp `BODE_REASONS[8]` still says "the pre-scan clipped at 5 V/div ..." (brief: keep the mcp text);
+  docs/protocol.md row 60 reason 8 describes both rules.
+
+Bench steps (owner present, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, 0x153A, RC 1 kOhm /
+15 nF on the post, wiring A, x1 probes):
+1. A deliberate clip first: Scope view, CH1 at 0.1 V/div on the post until the CH1 label turns red; then open Frequency
+   response, AUTO SET: the overview runs (no "ADC readout fault"), the span lands around the RC's corner (about 10 kHz).
+2. The same from the host after a clipped host capture (CH1 0.1 V/div, ARM + READ_TRACE showing the overload bit), then
+   BODE_CTRL action 1 with 100 Hz .. 1 MHz / 20: READ_BODE state 2 (not 4 / reason 8). A reason 8 now must come with
+   a flagged core or REPEAT in GET_HEALTH 106 / 107 (note the counts 108..115).
+3. A device sweep after the wizard (1 kHz .. 500 kHz, 20 points): the rows show CH1 at range 3 (0.5 V/div) and no
+   clipped flags (bits 0, 1) where the host sweep (`fnirsi1013d-bode --start 1kHz --stop 500kHz --points 20`) has none;
+   |H| within 0.05 dB of the host where both are valid.
+4. GET_STATUS bits 6-7 after a clean host capture read 0 even right after a clipped one (latest readout, not sticky).
+5. Optional fault path (needs the repeat bit): with REPEAT set (GET_HEALTH 106 bit 5, e.g. after section 54 addendum
+   step 5), any sweep ends at once with reason 8; after a saved training it sweeps.
 ## 48. fw-bus: FPGA bus contract fixes (fw 0.2.72, protocol 1.22, row 62)
 
 Branch `fw-bus` from origin/main 6c1e5bc (fw 0.2.69). Brief: the fpga-gen6 contract findings (section 35 "Open", fpga/al3

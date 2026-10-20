@@ -62,8 +62,16 @@
 #define BODE_ERR_HOST         5     //the PC armed its own capture during the sweep
 #define BODE_ERR_STOP         6     //stopped (STOP, leaving the view, BODE_CTRL stop)
 #define BODE_ERR_NO_HW        7     //no decimation filter or no DDS generator on this bitstream
-#define BODE_ERR_READOUT      8     //fw 0.2.71: the pre-scan ended at 5 V/div still clipping with a fundamental under 20
-                                    //codes: the ADC readout returns rail values (a capture fault, not the signal)
+#define BODE_ERR_READOUT      8     //the ADC readout returns garbage, not the signal. fw 0.2.83: the capture self-check
+                                    //flagged a capture of the sweep (BODE_CHK_FAULT); without a self-check (before FPGA
+                                    //0x153A) the 0.2.71 rule: the pre-scan at 5 V/div, the record at a rail, the
+                                    //fundamental under 20 codes. A clean self-check never gives it (a small signal is
+                                    //ch1_low / clipped on the points)
+
+//The capture self-check of one capture (bode_cap.check, fw 0.2.83)
+#define BODE_CHK_NONE         0     //the bitstream has none (before 0x153A): the record's own rails decide reason 8
+#define BODE_CHK_CLEAN        1     //checked: nothing flagged
+#define BODE_CHK_FAULT        2     //0x36 outliers flagged on this capture, or the repeat watch (PC_CAPF_REPEAT) is set
 
 //Thru calibration state
 #define BODE_THRU_NONE        0
@@ -79,6 +87,7 @@ typedef struct
   int32         zero_c100[2]; //the code of 0 V x 100 of each channel as captured
   uint32        uv_q8[2];     //uV per code x 256 at the BNC
   uint8         fir;          //the FIR was active in this capture
+  uint8         check;        //BODE_CHK_* of this capture (fw 0.2.83; no state of an earlier capture)
 } bode_cap;
 
 typedef struct
@@ -260,7 +269,7 @@ struct bode_eng
   uint8     range[2];
   int32     dcoffset[2];
   uint8     exhausted, bad_down, disturbed, gen_on, stop_req, hold_r2;
-  uint8     relay_pending, ms_coll, last_fir;
+  uint8     relay_pending, ms_coll, last_fir, last_check;
   uint32    relay_until;
   uint16    switches;
   int32     k_mdb, k_mdeg;                    //the splice factor applied to later points

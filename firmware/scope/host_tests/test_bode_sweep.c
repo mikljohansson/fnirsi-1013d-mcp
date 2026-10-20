@@ -24,6 +24,10 @@ typedef struct
   double window_v[6];         //DC beyond this pins the front end of a range (0 = no limit)
   int    thru;                //CH2 on the DUT input too
   int    rail[2];             //fw 0.2.71: a readout fault: every rail-th sample of the channel reads 255 (0: none)
+  int    rail_reads;          //fw 0.2.83: the rails only in the first rail_reads captures (0: every capture)
+  int    check;               //fw 0.2.83: bode_cap.check of every capture (BODE_CHK_*)
+  uint32 fault_at;            //fw 0.2.83: this capture (1 = the first) has BODE_CHK_FAULT (0: none)
+  uint32 reads;
 
   //State
   uint32 now;
@@ -215,9 +219,11 @@ static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
     }
   }
 
-  //A readout fault (FPGA 0x1539's A cores): rail values whatever the input
+  //A readout fault (FPGA 0x1539's A cores, or one saturated record): rail values whatever the input
+  d->reads++;
+
   for(c = 0; c < 2; c++)
-    if(d->rail[c])
+    if(d->rail[c] && (!d->rail_reads || (d->reads <= (uint32)d->rail_reads)))
       for(i = 0; i < total; i += (uint32)d->rail[c])
         d->buf[c][i] = 0xFF00;
 
@@ -227,12 +233,12 @@ static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
     cap->s[c].cpr_q24 = 65536;
     cap->s[c].zero_q8 = 0;
     cap->s[c].volt_mdb = bode_volt_mdb((uint32)(vpl(d->range[c]) * 1e6 * 256 + 0.5), 1);
-    cap->s[c].clipped = 0;
     cap->zero_c100[c] = 12800 - d->off[c] * 10;
     cap->uv_q8[c] = (uint32)(vpl(d->range[c]) * 1e6 * 256 + 0.5);
   }
 
   cap->fir = 1;
+  cap->check = (uint8)((d->fault_at && (d->reads == d->fault_at)) ? BODE_CHK_FAULT : d->check);
   return 0;
 }
 
@@ -496,6 +502,132 @@ static void test_readout_fault(void)
   T_EQ(bode_start(&eng, &c, 0, 3), 0);
   run(&eng, 600000);
   T_EQ(bode_state(&eng), BODE_ST_DONE);
+}
+
+//fw 0.2.83 (bench 2026-10-20 10:52): with the capture self-check (FPGA 0x153A+) its verdict decides reason 8, never the
+//clip. A clean check with rail samples at 5 V/div is a flagged table, not a fault; a flagged capture ends the sweep at
+//any phase; one railed capture (a real clip, a saturated record) leaves no trace in the later points.
+static void test_readout_check(void)
+{
+  bode_cfg c = cfg(1000, 100e3, 10, BODE_SETTLE_FAST, BODE_CH2_AUTO);
+  bode_point p;
+  int ch, i, n, flagged;
+
+  //Rails in every capture, the self-check clean: no reason 8; the sweep completes with the points flagged clipped
+  for(ch = 0; ch < 2; ch++)
+  {
+    dut_rc(&D);
+    D.rail[ch] = 97;
+    D.check = BODE_CHK_CLEAN;
+    bode_init(&eng, &HW);
+    T_EQ(bode_start(&eng, &c, 0, 3), 0);
+    run(&eng, 600000);
+    printf("  clean self-check, rails on CH%d: state %d, reason %d, %d points measured\n", ch + 1, bode_state(&eng),
+           bode_error(&eng), bode_done_count(&eng));
+    T_EQ(bode_state(&eng), BODE_ST_DONE);
+    T_EQ(bode_error(&eng), BODE_ERR_NONE);
+    n = bode_count(&eng);
+    T_EQ(bode_done_count(&eng), n);
+
+    for(i = 0, flagged = 0; i < n; i++)
+      if(bode_point_get(&eng, i, &p) && (p.flags & (ch ? BODE_F_CLIPPED : BODE_F_CH1_CLIPPED)))
+        flagged++;
+
+    T_EQ(flagged, n);
+  }
+
+  //A stale overload (bench 2026-10-20 10:52): before 0.2.83 the readout's sticky ADoverload of any earlier readout (a
+  //clip in the Scope view, an earlier sweep) marked every capture of the next sweep clipped. Here the earlier sweep
+  //railed on both channels; the next one, on the same engine with clean records, has no flagged point at all
+  dut_rc(&D);
+  D.rail[0] = D.rail[1] = 97;
+  D.check = BODE_CHK_CLEAN;
+  bode_init(&eng, &HW);
+  T_EQ(bode_start(&eng, &c, 0, 3), 0);
+  run(&eng, 600000);
+  T_EQ(bode_state(&eng), BODE_ST_DONE);
+  D.rail[0] = D.rail[1] = 0;
+  T_EQ(bode_start(&eng, &c, 0, 3), 0);
+  run(&eng, 600000);
+  T_EQ(bode_state(&eng), BODE_ST_DONE);
+  n = bode_count(&eng);
+
+  for(i = 0, flagged = 0; i < n; i++)
+  {
+    T_TRUE(bode_point_get(&eng, i, &p));
+
+    if(p.flags & BODE_F_BAD)
+      flagged++;
+    else
+      T_TRUE(fabs(p.h_mdb / 1000.0 - rc_db(bode_plans(&eng)[i].f_mhz / 1000.0)) < 0.1);
+  }
+
+  printf("  clean sweep after a railed one: CH1 range %d, %d of %d points flagged\n", D.range[0], flagged, n);
+  T_EQ(flagged, 0);
+  T_EQ(D.range[0], 3);
+
+  //One railed capture inside the sweep (the pre-scan's, as the saturated record after a rate change): no point clipped.
+  //The pre-scan ranges from that capture, so a railed CH1 pre-scan leaves CH1 on 2.5 V/div (ch1_low on the post's
+  //3.1 Vpp): the engine does not range CH1 up again (as the host's _prescan); noted, not changed
+  for(ch = 0; ch < 2; ch++)
+  {
+    dut_rc(&D);
+    D.rail[ch] = 97;
+    D.rail_reads = 1;
+    D.check = BODE_CHK_CLEAN;
+    bode_init(&eng, &HW);
+    T_EQ(bode_start(&eng, &c, 0, 3), 0);
+    run(&eng, 600000);
+    T_EQ(bode_state(&eng), BODE_ST_DONE);
+    n = bode_count(&eng);
+    T_EQ(bode_done_count(&eng), n);
+
+    for(i = 0, flagged = 0; i < n; i++)
+    {
+      T_TRUE(bode_point_get(&eng, i, &p));
+
+      if(p.flags & (BODE_F_CH1_CLIPPED | BODE_F_CLIPPED))
+        flagged++;
+
+      if(!(p.flags & BODE_F_BAD))
+        T_TRUE(fabs(p.h_mdb / 1000.0 - rc_db(bode_plans(&eng)[i].f_mhz / 1000.0)) < 0.1);
+    }
+
+    printf("  one railed capture on CH%d: ranges %d / %d at the end, %d of %d points clipped\n", ch + 1,
+           D.range[0], D.range[1], flagged, n);
+    T_EQ(flagged, 0);
+  }
+
+  //Without the self-check the same single railed capture is harmless too (the record decides, the next one is clean)
+  dut_rc(&D);
+  D.rail[0] = 97;
+  D.rail_reads = 1;
+  bode_init(&eng, &HW);
+  T_EQ(bode_start(&eng, &c, 0, 3), 0);
+  run(&eng, 600000);
+  T_EQ(bode_state(&eng), BODE_ST_DONE);
+
+  //A flagged capture ends the sweep with reason 8: in the pre-scan (the first capture) and in the middle of the points
+  for(i = 0; i < 2; i++)
+  {
+    dut_rc(&D);
+    D.check = BODE_CHK_CLEAN;
+    D.fault_at = i ? 12 : 1;
+    bode_init(&eng, &HW);
+    T_EQ(bode_start(&eng, &c, 0, 3), 0);
+    run(&eng, 600000);
+    printf("  self-check fault at capture %u: state %d, reason %d, %d points measured\n", (unsigned)D.fault_at,
+           bode_state(&eng), bode_error(&eng), bode_done_count(&eng));
+    T_EQ(bode_state(&eng), BODE_ST_ERROR);
+    T_EQ(bode_error(&eng), BODE_ERR_READOUT);
+    T_EQ(D.reads, D.fault_at);
+    T_EQ(D.gen, 0);
+
+    if(!i)
+      T_EQ(bode_done_count(&eng), 0);
+    else
+      T_TRUE(bode_done_count(&eng) > 0);
+  }
 }
 
 //fw 0.2.71: a cancelled AUTO SET gives the previous table back (bode_snap)
@@ -862,6 +994,7 @@ int main(void)
   test_wiring_b();
   test_stop_and_steps();
   test_readout_fault();
+  test_readout_check();
   test_snap();
   test_thru();
   test_divider_floor();
