@@ -10,6 +10,19 @@ posts.** The announcement draft is `docs/plans/announcement.md`; the tag-day che
 `docs/plans/release-readiness.md`. Nothing below is a "maybe later": an item either lands and is benched, or it is
 removed from the list by the owner.
 
+**Status 2026-10-20 evening** (added at the documentation review before the tag; the sections below stand as written that
+morning): firmware 0.2.102, protocol 1.24; FPGA 0x153B built, flashed 2026-10-20 19:31, benched good at 20:40 and now the
+recommended bitstream (`fpga/al3/dist/BITSTREAMS.md`); the maintainer's unit runs it. Release 0.3.0 is in preparation
+(`docs/release-notes/0.3.0.md`, `release-checklist.md`, `announcement.md`). Done since the morning: the three section 1
+epics (fw-cap2 as 0.2.81, fw-spzoom2 and fw-yield2 as 0.2.82); from section 3, the Frequency response engine batches
+(0.2.84-0.2.99: range plan, fail-fast AUTO SET that ends in STOP, the below-floor note), the ACQ memory chips and the
+Spectrum ladder follow-ups (0.2.85), the idle serial-port release and simulator reason 8 (mcp-gen7), the SD write window
+(0.2.101), the documentation site's guide text, screenshots and six articles, and the 0.3.0 release notes. Note that
+0x153B is not the features bitstream of section 3 item 1: it fixes the spliced time-out records of 0x1532..0x153A
+(`fpga/al3/README.md` section 11); trigger types, peak detect and the counter stay on the features branch (section 6).
+Still open: the hardware averaging decision, touch batch 3, the Measurements v2 remainder, the phosphor fast capture
+loop, the Bode follow-ups (harmonic and impedance modes), "1.17 on the unit", and the release steps of section 5.
+
 Status words: **done** (merged and benched), **built** (merged, host-tested, bench pending), **in flight** (an agent
 is working on it), **next** (designed or specified, not started), **owner** (needs the owner at the bench).
 
