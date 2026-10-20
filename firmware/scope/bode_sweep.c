@@ -17,6 +17,7 @@
 #define RELAY_MS            50
 #define MAX_SWITCHES        6
 #define FIRST_FACTOR        3
+#define PLAN_FLOOR_C100     3840        //fw 0.2.87: 30 % of 128 codes, the range plan's floor (bode_sweep.h)
 
 //Nominal V/div per hardware range in mV (the host's RANGE_VOLTS_PER_DIV ratios)
 static const uint16 vpd_mv[6] = { 5000, 2500, 1000, 500, 200, 100 };
@@ -260,6 +261,26 @@ static void result(bode_eng *e, int i, const bode_meas *m, int coll, int retries
   p->r2       = e->range[1];
   p->retries  = (uint8)retries;
   p->done     = 1;
+
+  //The range plan's entry (fw 0.2.87): the ranges, offsets and splice factor of this result. CH1 clipped or dead, or the
+  //first point's CH1 fitting a finer range under 60 % of full scale (a fooled pre-scan): the plan is not kept
+  if(e->rp_set && !e->thru_sweep)
+  {
+    bode_rplan *rp = &e->rplan[i];
+    int r1 = e->range[0];
+
+    if(m->c[0].clipped || bode_ch1_dead(m) ||
+       ((i == 0) && (r1 < 5) && ((int64)m->c[0].ac_c100 * vpd_mv[r1] < (int64)DOWNRANGE_C100 * vpd_mv[r1 + 1])))
+      e->rp_set = 0;
+
+    rp->have   = 1;
+    rp->r[0]   = e->range[0];
+    rp->r[1]   = e->range[1];
+    rp->off[0] = (int16)e->dcoffset[0];
+    rp->off[1] = (int16)e->dcoffset[1];
+    rp->k_mdb  = e->k_mdb;
+    rp->k_mdeg = e->k_mdeg;
+  }
 }
 
 static void splice(bode_eng *e, int32 old_mdb, int32 old_mdeg, const bode_meas *again)
@@ -331,9 +352,10 @@ static void auto_range(bode_eng *e, const bode_meas *m, int coll)
     return;
   }
 
-  //Down-range when the predicted peak on the next range stays under 60 % of full scale
+  //Down-range when the predicted peak on the next range stays under 60 % of full scale; from the range plan only under
+  //its floor, 30 % (fw 0.2.87)
   if((r >= 5) || (e->switches >= MAX_SWITCHES) || (e->bad_down & (1 << (r + 1))) ||
-     ((int64)m->c[1].ac_c100 * vpd_mv[r] > (int64)DOWNRANGE_C100 * vpd_mv[r + 1]))
+     ((int64)m->c[1].ac_c100 * vpd_mv[r] > (int64)(e->reuse ? PLAN_FLOOR_C100 : DOWNRANGE_C100) * vpd_mv[r + 1]))
   {
     next_point(e);
     return;
@@ -385,11 +407,40 @@ static int bg_has(bode_eng *e, uint32 key)
   return 0;
 }
 
+//The point's planned ranges, offsets and splice factor (fw 0.2.87); the front end's waits as set_range's
+static void plan_apply(bode_eng *e, int i)
+{
+  const bode_rplan *rp = &e->rplan[i];
+  int c;
+
+  for(c = 0; c < 2; c++)
+  {
+    if(rp->r[c] != e->range[c])
+    {
+      set_channel(e, c, rp->r[c], rp->off[c]);
+      relay_wait(e);
+      relay_wait(e);
+    }
+    else if(rp->off[c] != e->dcoffset[c])
+    {
+      set_channel(e, c, rp->r[c], rp->off[c]);
+      relay_wait(e);
+    }
+  }
+
+  e->k_mdb  = rp->k_mdb;
+  e->k_mdeg = rp->k_mdeg;
+}
+
 static void point_begin(bode_eng *e)
 {
   const bode_plan *pp = &e->plans[e->idx];
-  uint32 key = (pp->n << 3) | e->range[1];
+  uint32 key;
 
+  if(e->reuse)
+    plan_apply(e, e->idx);
+
+  key = (pp->n << 3) | e->range[1];
   e->retries = 0;
 
   //Background: generator off, one capture per rate and CH2 range, long enough for every point at this rate
@@ -650,6 +701,18 @@ static void on_measure(bode_eng *e, const bode_meas *m)
 
         splice(e, p->h_mdb, p->h_mdeg, m);
         p->flags |= BODE_F_SPLICED;
+
+        //From the plan: the point dropped below the floor, so it starts on the new range next time (the new factor
+        //scales that range onto the first)
+        if(e->reuse && e->rp_set)
+        {
+          bode_rplan *rp = &e->rplan[e->idx];
+
+          rp->r[1]   = e->range[1];
+          rp->off[1] = (int16)e->dcoffset[1];
+          rp->k_mdb  = e->k_mdb;
+          rp->k_mdeg = e->k_mdeg;
+        }
       }
 
       next_point(e);
@@ -679,6 +742,23 @@ void bode_init(bode_eng *e, const bode_hw *hw)
   e->cfg.settle     = BODE_SETTLE_NORMAL;
   e->cfg.ch2_mode   = BODE_CH2_AUTO;
   e->cfg.background = 1;
+}
+
+//The range plan matches these settings and is complete (fw 0.2.87)
+static int plan_matches(const bode_eng *e, const bode_cfg *c, uint8 hold, int n)
+{
+  int i;
+
+  if(!e->rp_set || (e->rp_cfg.start_mhz != c->start_mhz) || (e->rp_cfg.stop_mhz != c->stop_mhz) ||
+     (e->rp_cfg.points != c->points) || (e->rp_cfg.settle != c->settle) || (e->rp_cfg.ch2_mode != c->ch2_mode) ||
+     ((c->ch2_mode == BODE_CH2_HOLD) && (e->rp_hold != hold)))
+    return 0;
+
+  for(i = 0; i < n; i++)
+    if(!e->rplan[i].have)
+      return 0;
+
+  return 1;
 }
 
 int bode_start(bode_eng *e, const bode_cfg *cfg, int thru, int hold_r2)
@@ -731,7 +811,6 @@ int bode_start(bode_eng *e, const bode_cfg *cfg, int thru, int hold_r2)
   e->switches   = 0;
   e->k_mdb      = 0;
   e->k_mdeg     = 0;
-  e->have_ref2  = 0;
   e->nbg        = 0;
   e->retries    = 0;
   e->relay_pending = 0;
@@ -744,6 +823,32 @@ int bode_start(bode_eng *e, const bode_cfg *cfg, int thru, int hold_r2)
     e->thru.measured = 0;
     e->thru.applied  = 0;
   }
+
+  //The range plan (fw 0.2.87): the same settings start from it; other settings start a new one; a thru sweep drops it
+  e->reuse = (uint8)(!thru && plan_matches(e, &e->cfg, e->hold_r2, n));
+
+  if(thru)
+    e->rp_set = 0;
+  else if(!e->reuse)
+  {
+    for(i = 0; i < BODE_MAX_POINTS; i++)
+      e->rplan[i].have = 0;
+
+    e->rp_cfg  = e->cfg;
+    e->rp_hold = e->hold_r2;
+    e->rp_set  = 1;
+  }
+
+  if(e->reuse)
+  {
+    //No pre-scan: every point starts on its planned ranges (the first write goes out whatever the channel shows); the
+    //pre-scan's reference (ref2, v_dc2) of the sweep that made the plan stays
+    e->range[0] = e->range[1] = 0xFF;
+    point_begin(e);
+    return 0;
+  }
+
+  e->have_ref2 = 0;
 
   //Pre-scan: both channels on range 1 (+-11 V at 1x), offsets on 0 V, the first frequency with the first-point settle
   for(i = 0; i < 2; i++)
@@ -938,6 +1043,7 @@ uint32 bode_sweep_id(const bode_eng *e)    { return e->sweep_id; }
 int bode_count(const bode_eng *e)          { return e->np; }
 int bode_current(const bode_eng *e)        { return (e->state == BODE_ST_RUNNING) ? e->idx : -1; }
 uint16 bode_switches(const bode_eng *e)    { return e->switches; }
+int bode_plan_reused(const bode_eng *e)    { return e->reuse; }
 uint8 bode_exhausted(const bode_eng *e)    { return e->exhausted; }
 const bode_cfg *bode_last_cfg(const bode_eng *e)   { return &e->cfg; }
 const bode_plan *bode_plans(const bode_eng *e)     { return e->plans; }

@@ -242,6 +242,26 @@ typedef struct
 void   bode_snap_save(const bode_eng *e, bode_snap *s);
 void   bode_snap_restore(bode_eng *e, const bode_snap *s);
 
+//fw 0.2.87: the range plan (owner 2026-10-20 11:51 / 11:52, bode-ui.md section 10). With the table the engine keeps,
+//per point, the CH1 / CH2 range and offset the point's result was measured on and the splice factor in effect. A sweep
+//with the same span, points, Settle and CH2 mode (and, in Hold, the same CH2 range) as the plan's, however it was
+//started (RUN, Single sweep, AUTO SET's final sweep), skips the pre-scan and starts every point on its planned ranges;
+//CH2 switches only when the point clips (up) or its level drops below the floor (down: the predicted peak on the next
+//range under 30 % of full scale, half the fresh sweep's 60 %), and that point's entry follows. The first sweep after a
+//settings change, a sweep after a cancelled one that left the plan incomplete, and a thru sweep range from scratch. A
+//plan is not kept (the next sweep ranges from scratch) when CH1 clips, when CH1 is dead (flat or without a tone), or
+//when the first point's CH1 would fit a finer range under 60 % of full scale (the pre-scan was fooled, e.g. by the
+//0x153A first-record artefact: bench 2026-10-20 12:05, sweep 1). The header's switch count shows the effect.
+typedef struct
+{
+  uint8  have;                //measured with the plan's settings
+  uint8  r[2];
+  int16  off[2];
+  int32  k_mdb, k_mdeg;       //the splice factor applied to this point
+} bode_rplan;
+
+int    bode_plan_reused(const bode_eng *e);                   //the latest sweep started from the range plan
+
 //Sizes for the target's static instance
 struct bode_eng
 {
@@ -284,6 +304,14 @@ struct bode_eng
   uint32    msettle;                          //its settle time (ms), for the retake
 
   bode_thru thru;
+
+  //The range plan (fw 0.2.87)
+  bode_rplan rplan[BODE_MAX_POINTS];
+  bode_cfg  rp_cfg;                           //the settings it belongs to
+  uint8     rp_set;                           //rp_cfg holds a plan's settings (entries may be incomplete)
+  uint8     rp_hold;                          //CH2's range in Hold
+  uint8     reuse;                            //this sweep started from the plan
+
   int32     work[BODE_MAX_RECORD];
 };
 
