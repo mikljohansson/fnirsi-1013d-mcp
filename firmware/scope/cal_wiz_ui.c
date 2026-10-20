@@ -345,7 +345,7 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
   {
     cs_train t;
 
-    //fw 0.2.81: the band training takes about a second per channel (two with the reference pass): say so
+    //fw 0.2.81: the band training takes about half a second per channel (twice that with the reference pass): say so
     if(wiz_progress(ch, CW_PR_TRAIN))
       return CW_RC_CANCELLED;
 
