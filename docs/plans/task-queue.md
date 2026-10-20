@@ -270,7 +270,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   extra USPs (filters by name, Average mode, Bode plot, overview bar, calibration and capture checks, hands-free flashing),
   What's next from the roadmap, the fnirsi-install skill, runbook Windows fixes with the tool's real output lines; the
   owner's "MCP connection" wording re-applied to the pitch (bac990c).
-- hw-prep (Opus, dispatched 21:42): a user-facing "Prepare and back up" page from hardware-prep.md section 3 without the
+- Coordinator 21:26-21:57: the 30-minute soak passed (0 errors in 899 status polls, 15 health reads, 15 captures; bench
+  entry); the deep-memory screenshot taken (6e3513a); README and front page point the backup step at guide/prepare.md.
+- hw-prep (Opus, dispatched 21:42, done 21:56, merged 21:57 as 42bf65b): docs/guide/prepare.md (photos, card reader attach for
+  WSL, Windows hash commands, power during flashing = battery on and USB unplugged as benched), hardware-prep.md as the
+  engineering reference (maintainer paths and lead gates gone, measured pinout the expected column, 5.3 replaced), README-
+  spiflash and install.md consistent with the tool, release.yml footer names the install guide. Originally: a user-facing "Prepare and back up" page from hardware-prep.md section 3 without the
   maintainer's paths or "the lead's go" (dry-run findings: wrong expected pinout column, stale 5.3 procedure, scope power
   during flashing answered three ways, no usbipd recipe for a card reader, no Windows hash command, README-spiflash test
   status stale); hardware-prep.md demoted to engineering; install.md's partition sentence matches the tool; release.yml
