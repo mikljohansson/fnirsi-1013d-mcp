@@ -9,7 +9,11 @@
 //   - the bounded ready wait;
 //   - fw 0.2.87 (firmware/AGENTS.md section 57): the values the FPGA holds (0x0D, 0x53, 0x54, 0x56) follow every write, and
 //     fpga_decim_write writes 0x54 at every arm with the filter on, so the shift always matches the divider the FPGA holds
-//     (fpga/al3/AGENTS.md "First-record saturation": S 9 / 7 armed at D 4095 saturated every word).
+//     (fpga/al3/AGENTS.md "First-record saturation": S 9 / 7 armed at D 4095 saturated every word);
+//   - fw 0.2.97 (firmware/AGENTS.md section 64): records that end on the auto time-out or a forced stop, per bitstream
+//     (the model's capture logic, fpga/al3/README.md section 11): the forced stop splices on 0x153A and not on 0x153B,
+//     0x153A cuts a triggered FPGA-auto record that 0x153B completes, and the firmware's stop geometry on 0x153A
+//     (pc_auto_stop_word) gives contiguous untriggered records, with 0x14 = pretrigger telling a late edge apart.
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "test_util.h"
@@ -441,6 +445,231 @@ static void test_decim_write(void)
   }
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// fw 0.2.97: records that end on the auto time-out or a forced stop (fpga/al3/README.md section 11, the model's capture
+// logic). The words carry their write index, so a record is contiguous when its indices count up by one.
+
+#define TO_TOTAL  2048
+
+static uint32_t to_idx[TO_TOTAL];
+
+static void to_arm(uint16_t pre, uint32_t reg0e, int normal)
+{
+  fpga_arm_cfg c;
+
+  //As pc_hal_arm: the trigger mode, then the sampling reset with the geometry and 0x0E
+  fpga_write_cmd(0x1A);
+  fpga_write_byte(normal ? 0x01 : 0x00);
+
+  memset(&c, 0, sizeof(c));
+  c.geometry     = 1;
+  c.pre_words    = pre;
+  c.total_words  = TO_TOTAL;
+  c.write_0e     = 1;
+  c.auto_timeout = reg0e;
+  T_EQ(fpga_arm_reset(&c), 0);
+}
+
+static void to_force(void)
+{
+  fpga_write_cmd(0x1A);
+  fpga_write_byte(0x00);
+}
+
+static int to_done(void)
+{
+  fpga_write_cmd(0x0A);
+  return fpga_read_byte() & 1;
+}
+
+static int to_wait(uint32_t max_us)
+{
+  uint32_t us;
+
+  for(us = 0; us < max_us; us += 5)
+  {
+    if(to_done())
+      return 1;
+
+    fm_advance_ns(5000);
+  }
+
+  return to_done();
+}
+
+static int to_trig(void)
+{
+  fpga_write_cmd(0x18);
+  return fpga_read_byte() & 1;
+}
+
+static uint16_t to_addr(void)
+{
+  uint16_t hi, lo;
+
+  fpga_write_cmd(0x14);
+  hi = fpga_read_byte();
+  lo = fpga_read_byte();
+  return (uint16_t)(((hi << 8) | lo) & 0x1FFF);
+}
+
+//Read the record as the firmware does (start = 0x14 - pre); 1 = contiguous. *newest: it ends at the stop
+static int to_read(uint16_t pre, uint16_t addr, int *newest)
+{
+  static uint8_t b[4][TO_TOTAL];
+  uint32_t start = fpga_ring_start(addr, pre, fm.ring), i, l;
+  int ok = 1;
+
+  for(l = 0; l < 4; l++)
+    fpga_read_lane((uint8_t)(0x20 + l), start, TO_TOTAL, b[l], 1, fm.ring);
+
+  for(i = 0; i < TO_TOTAL; i++)
+  {
+    to_idx[i] = (uint32_t)b[0][i] | ((uint32_t)b[1][i] << 8) | ((uint32_t)b[2][i] << 16) | ((uint32_t)b[3][i] << 24);
+
+    if(i && (to_idx[i] != to_idx[i - 1] + 1))
+      ok = 0;
+  }
+
+  *newest = (to_idx[TO_TOTAL - 1] + 1 == fm.stop_n);
+  return ok;
+}
+
+static void to_reset(uint16_t version, uint32_t seed)
+{
+  fm_reset(version, 0, seed);
+  fm.capture = 1;
+  fm.trig_at = -1;
+  fm_fill(seed);                                  //stale words that are not write indices
+  fpga_bus_init(version);
+}
+
+static void test_timeout_records(void)
+{
+  static const uint16_t pres[] = { 0, 200 };
+  uint32_t p, run, spliced_old = 0, runs_old = 0;
+  int newest;
+
+  for(p = 0; p < 2; p++)
+  {
+    uint16_t pre = pres[p], addr;
+
+    //1. A forced stop after 1.12 rings (normal arm, 0x1A = 0 at the firmware's deadline): 0x153B reads the newest
+    //   total words; 0x153A reads ring words 0 .. total - 1 across the stop (W mod 8192 about 1000: spliced)
+    to_reset(0x153B, 31 + p);
+    to_arm(pre, 2 * TO_TOTAL, 1);
+    fm_advance_ns((8192 + 1000) * 10);
+    to_force();
+    T_TRUE(to_wait(100)); T_EQ(to_trig(), 0);
+    addr = to_addr();
+    T_EQ(addr, (uint16_t)((fm.stop_n + 2 * 8192 - TO_TOTAL + pre) % 8192));
+    T_TRUE(to_read(pre, addr, &newest)); T_TRUE(newest);
+
+    to_reset(0x153A, 31 + p);
+    to_arm(pre, 2 * TO_TOTAL, 1);
+    fm_advance_ns((8192 + 1000) * 10);
+    to_force();
+    T_TRUE(to_wait(100)); T_EQ(to_trig(), 0);
+    addr = to_addr();
+    T_EQ(addr, pre);
+    T_EQ(to_read(pre, addr, &newest), 0);                     //the bench fault
+    T_TRUE(fm.stop_n % 8192 < TO_TOTAL);
+
+    //2. FPGA auto with 0x0E = total and a trigger at word total / 2: 0x153B completes the post-trigger region,
+    //   0x153A cuts it at W = total + 2 (the engine's incoherent records on 0.2.89)
+    to_reset(0x153B, 41 + p);
+    fm.trig_at = TO_TOTAL / 2;
+    to_arm(pre, TO_TOTAL, 0);
+    T_TRUE(to_wait(200)); T_EQ(to_trig(), 1);
+    addr = to_addr();
+    T_EQ(addr, TO_TOTAL / 2);
+    T_TRUE(to_read(pre, addr, &newest)); T_EQ(to_idx[pre], TO_TOTAL / 2);
+
+    to_reset(0x153A, 41 + p);
+    fm.trig_at = TO_TOTAL / 2;
+    to_arm(pre, TO_TOTAL, 0);
+    T_TRUE(to_wait(200)); T_EQ(to_trig(), 1);
+    addr = to_addr();
+    T_EQ(addr, TO_TOTAL / 2);
+    T_EQ(to_read(pre, addr, &newest), 0);                     //cut: stale words after the stop
+    T_EQ(fm.stop_n, TO_TOTAL + 2);
+
+    //3. fw 0.2.97 on 0x153A: FPGA auto with 0x0E = W - 2, W from pc_auto_stop_word for a deadline whose ring word
+    //   falls inside the record (3 rings + 500): the FPGA stops at W, 0x14 = pretrigger, the record is the last pass's
+    //   words 0 .. total - 1
+    {
+      uint32_t w = pc_auto_stop_word(3 * 8192 + 500, TO_TOTAL, 8192);
+
+      T_TRUE(w % 8192 >= TO_TOTAL);
+
+      to_reset(0x153A, 51 + p);
+      to_arm(pre, w - PC_STOP_LAG, 0);
+      T_TRUE(to_wait(400)); T_EQ(fm.stop_n, w);
+      addr = to_addr();
+      T_EQ(addr, pre); T_EQ(to_trig(), 0);
+      T_TRUE(to_read(pre, addr, &newest)); T_EQ(to_idx[0], 3 * 8192);
+
+      //An edge 300 words after the stop sets 0x18 but leaves 0x14 at the pretrigger: the firmware reads it untriggered
+      to_reset(0x153A, 61 + p);
+      fm.trig_at = (int64_t)w + 300;
+      to_arm(pre, w - PC_STOP_LAG, 0);
+      T_TRUE(to_wait(400));
+      fm_advance_ns(10000);
+      T_EQ(to_trig(), 1);
+      addr = to_addr();
+      T_EQ(addr, pre);                                         //triggered := 0x18 && 0x14 != pretrigger -> 0
+      T_TRUE(to_read(pre, addr, &newest));
+
+      //A trigger well before W completes as in normal mode
+      to_reset(0x153A, 71 + p);
+      fm.trig_at = 5000;
+      to_arm(pre, w - PC_STOP_LAG, 0);
+      T_TRUE(to_wait(400)); T_EQ(to_trig(), 1);
+      addr = to_addr();
+      T_EQ(addr, 5000); T_TRUE(addr != pre);
+      T_TRUE(to_read(pre, addr, &newest)); T_TRUE(newest); T_EQ(to_idx[pre], 5000);
+      T_EQ(pc_auto_cut(addr, pre, TO_TOTAL, w, 8192), 0);
+
+      //A trigger the time-out cuts (in the last total - pre words before W): the firmware's check sees W inside it
+      to_reset(0x153A, 81 + p);
+      fm.trig_at = (int64_t)w - 100;
+      to_arm(pre, w - PC_STOP_LAG, 0);
+      T_TRUE(to_wait(400)); T_EQ(to_trig(), 1);
+      addr = to_addr();
+      T_EQ(to_read(pre, addr, &newest), 0);
+      T_EQ(pc_auto_cut(addr, pre, TO_TOTAL, w, 8192), 1);
+    }
+
+    //4. The forced stop at random times: always contiguous on 0x153B; on 0x153A spliced whenever W mod 8192 < total
+    for(run = 0; run < 24; run++)
+    {
+      uint32_t words = 8192 + (run * 2731u + p * 977u) % (3 * 8192);
+      int ok_old;
+
+      to_reset(0x153B, 100 + run + 50 * p);
+      to_arm(pre, 2 * TO_TOTAL, 1);
+      fm_advance_ns(words * 10);
+      to_force();
+      T_TRUE(to_wait(100));
+      T_TRUE(to_read(pre, to_addr(), &newest)); T_TRUE(newest);
+
+      to_reset(0x153A, 100 + run + 50 * p);
+      to_arm(pre, 2 * TO_TOTAL, 1);
+      fm_advance_ns(words * 10);
+      to_force();
+      T_TRUE(to_wait(100));
+      ok_old = to_read(pre, to_addr(), &newest);
+      T_EQ(ok_old, fm.stop_n % 8192 >= TO_TOTAL);
+      spliced_old += !ok_old;
+      runs_old++;
+    }
+  }
+
+  printf("  time-out records: the forced stop spliced %u of %u records on 0x153A (expected about %u), none on 0x153B\n",
+         (unsigned)spliced_old, (unsigned)runs_old, (unsigned)(runs_old * TO_TOTAL / 8192));
+  T_TRUE(spliced_old > 0);
+}
+
 int main(void)
 {
   test_contract();
@@ -451,5 +680,6 @@ int main(void)
   test_arm_trace();
   test_ready_bound();
   test_decim_write();
+  test_timeout_records();
   return t_report("test_fpga_bus");
 }

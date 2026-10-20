@@ -20,8 +20,56 @@ static uint64_t fm_period_ps(void)
   return (uint64_t)10000 * (fm.divider + 1);
 }
 
+//fw 0.2.97: one write clock edge of the capture logic (fpga_model.h)
+static void fm_capture_edge(void)
+{
+  int newest = fm.version >= 0x153B;
+  uint32_t pre = fm.pre_applied, total = fm.reg_0c;
+
+  if(!fm.released)
+    return;
+
+  if(fm.we)
+  {
+    uint32_t w = fm.n % fm.ring, l;
+
+    for(l=0;l<4;l++)
+      fm.mem[w][l] = (uint8_t)(fm.n >> (8 * l));
+
+    //The trigger compares the word written on this edge (after the pretrigger words, as sampling_half_way)
+    if(!fm.triggered && (fm.trig_at >= 0) && ((int64_t)fm.e == fm.trig_at) && (fm.n >= pre))
+    {
+      fm.triggered = 1;
+      fm.trig_word = fm.n;
+      fm.taddr     = (uint16_t)(fm.n % fm.ring);
+    }
+
+    fm.n++;
+
+    if(fm.triggered && (fm.n >= fm.trig_word - pre + total))
+      fm.we = 0;                                       //post-trigger region complete
+    else if(!fm.reg_1a && (fm.n - 1 > fm.reg_0e) && (!newest || !fm.triggered))
+    {
+      fm.we = 0;                                       //auto time-out (or the forced stop)
+
+      if(!fm.triggered)
+        fm.taddr = (uint16_t)(newest ? ((fm.n + 2 * fm.ring - total + pre) % fm.ring) : pre);
+    }
+
+    if(!fm.we)
+      fm.stop_n = fm.n;
+  }
+  else if(!newest && !fm.triggered && (fm.trig_at >= 0) && ((int64_t)fm.e == fm.trig_at))
+    fm.triggered = 1;                                  //0x1532..0x153A: an edge after the stop still sets 0x18
+
+  fm.e++;
+}
+
 static void fm_edge(void)
 {
+  if(fm.capture && !fm.in_reset)
+    fm_capture_edge();
+
   if(fm.in_reset)
   {
     fm.edges_in_reset++;
@@ -125,8 +173,18 @@ static void fm_apply(uint8_t cmd, uint32_t v)
       {
         fm.in_reset = 0;
         fm.load_after_release = (uint8_t)(fm.version >= 0x1537 && fm.version <= 0x153F);
+        fm.released  = 1;
+        fm.we        = 1;
+        fm.n         = 0;
+        fm.e         = 0;
+        fm.triggered = 0;
+        fm.taddr     = 0;
+        fm.stop_n    = 0;
       }
       break;
+
+    case 0x0E: fm.reg_0e  = v;           break;
+    case 0x1A: fm.reg_1a  = (uint8_t)v;  break;
 
     case 0x0B: fm.reg_0b  = (uint16_t)v; break;
     case 0x0C: fm.reg_0c  = (uint16_t)v; break;
@@ -203,6 +261,13 @@ uint8_t fpga_io_strobe_read(void)
 
     case 0x06:
       out = (uint8_t)((fm.nbytes++ == 0) ? (fm.version >> 8) : fm.version);
+      break;
+
+    case 0x0A: out = (uint8_t)(fm.released && !fm.we); break;
+    case 0x18: out = fm.triggered;                     break;
+
+    case 0x14:
+      out = (uint8_t)((fm.nbytes++ == 0) ? (fm.taddr >> 8) : fm.taddr);
       break;
   }
 

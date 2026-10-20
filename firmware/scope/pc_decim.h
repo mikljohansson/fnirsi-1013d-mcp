@@ -151,4 +151,37 @@ uint32_t pc_decim_rate(const pc_decim_cfg *c, uint32_t divider);
 //with the FIR (K + 10) N x 5 ns + 1 us
 uint32_t pc_decim_settle_us(const pc_decim_cfg *c);
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// Auto-mode stop geometry (fw 0.2.97, fpga/al3/README.md section 11, firmware/AGENTS.md section 64). On AL3 0x1532..0x153A
+// the FPGA's auto time-out (0x0E, 32 bit, counted in written words from the sampling reset at every K) stops the write
+// pointer after W = 0x0E + 2 words and latches 0x14 = pretrigger, so the record read is ring words 0 .. total - 1. That is
+// contiguous only when the stop lands at W mod ring >= total (the last pass wrote all of them). The firmware's forced stop
+// (0x1A = 0 at its own deadline) lands at a random W and splices the record whenever W mod ring < total; 0x153B latches
+// the newest total words on an untriggered stop, so a force is safe there.
+
+#define PC_STOP_NONE     0      //stock / unknown: the FPGA's own auto mode as 1.00o5 (fw auto mode not used)
+#define PC_STOP_SPLICE   1      //EF2 / EP4: Atlan4's time-out logic (inference), a forced record may be spliced: flagged
+#define PC_STOP_RING0    2      //AL3 0x1532..0x153A: the record of an untriggered stop is ring words 0 .. total - 1
+#define PC_STOP_NEWEST   3      //AL3 0x153B..0x153F: the record of an untriggered stop is the newest total words
+
+#define PC_STOP_LAG      2      //words written after 0x0E's count: W = 0x0E + 2 (fpga-gen11 tb_timeout A1)
+#define PC_STOP_MARGIN   4      //words kept between W mod ring and the edges of the allowed range (when they fit)
+
+uint8_t  pc_stop_kind(uint16_t version);
+
+//The stop word W (words written since the reset) for an FPGA time-out on PC_STOP_RING0: the smallest W >= min_words
+//(and >= total) with total + m <= W mod ring <= ring - 1 - m (m = PC_STOP_MARGIN when the range allows it, else 0), so the
+//record 0 .. total - 1 is the last pass's. Clamped to what 0x0E can count (0xFFFFFFFF + 2 words: 43 s at 100 MHz). The
+//value to write to 0x0E is W - PC_STOP_LAG. Overshoot against min_words: at most total + 2 m words.
+uint32_t pc_auto_stop_word(uint32_t min_words, uint32_t total_words, uint32_t ring_words);
+
+//A triggered record (0x14 = addr, record start addr - pre) that the stop at word W would cut: W mod ring lies inside
+//the record after its first word (the record crosses the write pointer's stop position). 1 = may be cut.
+int      pc_auto_cut(uint32_t addr, uint32_t pre_words, uint32_t total_words, uint32_t stop_word, uint32_t ring_words);
+
+//Words written in ms at divider D (a word is 10 (D + 1) ns in the legacy layout, 5 (D + 1) ns with K >= 1; clamped to
+//0xFFFFFFFF), and the ms that words take (rounded up)
+uint32_t pc_ms_to_words(uint32_t ms, uint32_t divider, int wide);
+uint32_t pc_words_to_ms(uint32_t words, uint32_t divider, int wide);
+
 #endif /* PC_DECIM_H */
