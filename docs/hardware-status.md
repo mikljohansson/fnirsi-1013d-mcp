@@ -1132,4 +1132,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   is being reset by the host about every 30 s since the last replug (13 bus resets in 6 minutes, pattern suspend then reset =
   a host port reset; the firmware keeps running, no restart record); owner asked to re-seat the cable. Scratchpad logs
   dco_sweep_153A_0x8e3_d0.log, _d1.log.
+- 2026-10-20 10:49: owner re-seated the USB cable (20 bus resets at that point, none during the two sweeps after). Band sweep with
+  the trained stages at 50 and 20 MSa/s: clean on every core (max std 0.5 / 0.7 / 1.2 / 1.8 and 0.5 / 0.5 / 0.7 / 1.7). Item 2 of
+  fpga/al3/README.md section 10 complete at all four rates; self-check 0 flagged of 18865 captures. 0x153A goes to "recommended"
+  in fpga/al3/dist (bench 10-20). Remaining section 10 items: 3 (RC + Frequency response, probes back on the filter), 6 (EXT
+  loopback, optional), 7 (warm-up, optional).
 
