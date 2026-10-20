@@ -1275,4 +1275,13 @@ Newest entries at the bottom. Format: date, who, what, result.
   bad record (the retake fires on a third of the points even with the engine's CH1 trigger) still makes a point step up to a
   coarser range and the plan churn; a bad pre-scan record can still leave a channel at 5 V/div for a sweep. Root: the spliced
   records (fpga-gen11); engine: a single bad record must never step a range up (confirm twice), queued for fw-eng.
+- 2026-10-20 13:28: fw 0.2.91 (fw-eng4: a range step up needs two clipping records, the engine's trigger level at CH1's expected
+  mid-level with a retake from the record's own mean, the FPGA time-out twice the record, a failed step down remembered with the
+  plan, per-sweep counters in the BODE_CTRL answer) pinned backups/fw-0.2.91_cbc95afd.bin (sha256
+  cbc95afdc32cd0e5855c205c7390e097c8fb1b33b07813fd7857fb8c492f6c73), loaded. **Clean.** First sweep 500 Hz..100 kHz / 20
+  points: r1 3 everywhere, r2 3..5 in order, 2 switches, 24 captures, 0 time-outs, 0 retakes, 2 spliced marks (the switch
+  points). Ten sweeps 100 Hz..1 MHz / 25 points: switches 2 then 0 x 9, identical ranges every sweep (r2 3 x16, 4, 4, 5 x7), 25
+  captures each, 0 time-outs, 0 retakes, 0 flagged points on sweeps 2..10, 10.0 kHz -2.85 / -2.86 dB on every sweep (host
+  -2.854), 2.14 s per sweep. The spliced records were time-out records: with the trigger level at the signal's mid-level the
+  time-out never fires and no record is bad. Owner walk-through next (AUTO SET, RUN, Single sweep on the screen).
 

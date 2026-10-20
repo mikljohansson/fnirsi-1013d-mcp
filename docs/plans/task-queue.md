@@ -490,6 +490,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
+- fw-eng3 / fw-eng4 (done 13:12 / 13:25, merged as fw 0.2.90 / 0.2.91, handoffs firmware/AGENTS.md sections 59 / 60): the post-pre-scan
+  check ranges both ways and drops a coarse-CH1 plan; a step up needs two clipping records; the trigger level at CH1's mid-level;
+  BODE_CTRL answer 48 bytes with captures / time-outs / leak retakes / other retakes. Benched 13:28: ten sweeps on the RC with 0
+  time-outs, 0 retakes, 0 flagged points, switches 2 then 0, 10 kHz within 0.01 dB of the host. Open: the time-out record splice
+  itself (fpga-gen11), the Scope's auto-mode traces.
+
 - fw-eng2 (done 12:38, about 390k tokens in total with fw-eng, merged 12:42 as fw 0.2.89, handoff firmware/AGENTS.md section 58):
   the engine arms on CH1 rising at 128 (restored on leaving), spliced records (CH1 leak > -40 dB) retaken, planned clips retaken
   before stepping up, below-floor points step down in one sweep; firmware/tools/bode_cells.py. Benched 12:42: plan settles by
