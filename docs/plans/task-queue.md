@@ -276,6 +276,15 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-spec measured update (done 23:27, merged 23:29 as bb2880b; 827 lines): TD-measured deltas on the 0x153B source: DDS -61
+  LUT, cruft (0x1B/0x3C/0x41/0x24-0x27 decoder entries, dec_neg, dec_swap, sample_read_enable, trigger_detect_enable, w_last
+  under SIM) -78, divider compare 32->20 bits -53; the two-step fractional pattern core +48 LUT / +231 reg (one 16-bit
+  accumulator per engine, cleared on burst start; the carry path is pipelined in the contract). Totals: 0x153C ~71 %, 0x153D
+  ~79 %, 0x153E ~85 % with ~1,300 LUT margin. Generator = two-step pattern (0x6C u32 + u16 fraction, double buffer 0x6D bit
+  5 / 0x39 bit 5), SET_GEN keeps its layout (P16 / H16 in 1/65536 clocks), Bode P = 4 M, 0x51/0x52 retired. Coordinator
+  plan change: the C0 cruft removal (contract: "first, on main") is folded into C4 integration (Fable) after C1-C3 merge,
+  so the three running RTL branches are not disturbed; fw-one told 23:29 to stop writing 0x53 bits 3/4 and to bound the
+  divider at 199,999.
 - ui-rows (Opus, dispatched 23:15): mockups and design note docs/plans/ui-rows.md for the two decided UI rows (Type in the
   trigger menu: Edge / Pulse width / Nth edge with parameters; Sample in ACQ: Normal / Peak, and the Peak-vs-Filter
   presentation), the trigger chip's text per type, a peak-detect trace mockup, the firmware checklist; adversarial review
