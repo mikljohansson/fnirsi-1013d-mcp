@@ -6,6 +6,16 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **First record after a configuration change is garbage on 0x153A** (bench 10-20 10:55-11:16): a decimated capture right after
+  the engine's (or the host's) rate / filter / range change can be a whole record of one saturated 16-bit value; the Bode
+  engine's pre-scan is always such a capture, so the first sweep after entering the mode ranges CH1 coarse (2.5 V/div,
+  ch1_low) and only the next sweep is right. Not seen on 0x1539. Two parts: (a) FPGA / firmware investigation (fpga-gen10 on
+  Fable with the firmware's write order from fpga_bus.c: the decimator's state after a mode or shift write on 0x153A, the extra
+  ADC latency of 0x153A vs the sampling reset; reproduce with the engine's exact sequence from a PC_DEBUG image); (b) engine
+  robustness: the pre-scan steps CH1 up again when its fundamental is under 20 codes and the record is not clipped, and a
+  flat / saturated pre-scan record is retaken once (named in the event log), fail fast after that. Also mcp: BODE_REASONS[8]
+  text still says "the pre-scan clipped at 5 V/div" (fw-bode2 open point).
+
 - [x] **ACQ: sample rate vs time/div coupling** (fw 0.2.64 viability from the record length, snap notice, grey boxes unavailable; 0.2.69 ten samples per division; 0.2.76 zoom ladder; benched 10-19 22:45 on 0.2.76: owner 'zoom ladder seems to work great'; the 0.2.68 snap-path fix: bench to confirm) (owner 10-19 13:44, 1 kHz cal signal: after changing the sample rate in the ACQ menu
   the old time/div stays selected although drawn grey; the trace is cut off, zeros show past the record end, the slider scrolls
   before the trace, the shape changes). Cause: Atlan design, statemachine.c handle_acquisition_menu_touch sets the FPGA rate without
