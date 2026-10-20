@@ -285,7 +285,15 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   plan change: the C0 cruft removal (contract: "first, on main") is folded into C4 integration (Fable) after C1-C3 merge,
   so the three running RTL branches are not disturbed; fw-one told 23:29 to stop writing 0x53 bits 3/4 and to bound the
   divider at 199,999.
-- ui-rows (Opus, dispatched 23:15): mockups and design note docs/plans/ui-rows.md for the two decided UI rows (Type in the
+- ui-rows-review (Opus, dispatched 23:40, read-only): adversarial review of the Type / Sample row mockups and note against
+  docs/ui-guidelines.md and the owner's taste; answers to the note's six open questions so the coordinator can decide
+  tonight and the owner veto in the morning.
+- ui-rows (Opus, dispatched 23:15, done 23:37, merged 23:38 as 1742743): eight mockups under docs/mockups/ui-rows/ (a
+  headless-Chrome PNG renderer added to gen_ux), docs/plans/ui-rows.md. Type as the trigger menu's sixth row with Width
+  / shorter-longer or N / Idle parameter rows (+/- ladder), the chip shows the type as a glyph in the edge slot, Peak greys
+  Filter and Average with a note, "Scope only" in Spectrum; six open questions (ladder-only values, glyph vs word, N
+  held-repeat, Peak with phosphor/X-Y, Sample in Spectrum, Idle on EXT).
+ mockups and design note docs/plans/ui-rows.md for the two decided UI rows (Type in the
   trigger menu: Edge / Pulse width / Nth edge with parameters; Sample in ACQ: Normal / Peak, and the Peak-vs-Filter
   presentation), the trigger chip's text per type, a peak-detect trace mockup, the firmware checklist; adversarial review
   follows, the owner sees the mockups with the morning batch.
