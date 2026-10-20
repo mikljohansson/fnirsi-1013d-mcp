@@ -316,7 +316,7 @@ static void test_pages(void)
   in.fpga = 0x1535;
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
   T_TRUE(has_text("Running 0.2.59"));
-  T_TRUE(has_text("the image the card"));
+  T_TRUE(!has_text("the image the card"));   //owner 2026-10-20: the OK tile says only "Running <version>"
   T_TRUE(has_text("No crashes."));
   T_TRUE(has_text("Up 1 h 42 min."));
   T_TRUE(has_text("PC connected, high speed."));

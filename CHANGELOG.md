@@ -31,6 +31,11 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.102 - 2026-10-20 (protocol 1.24, unchanged)
+
+- Diagnostics: the Firmware tile's OK case reads just "Running 0.2.102"; "the image the card starts" was clutter (owner
+  2026-10-20 19:33).
+
 #### 0.2.101 - 2026-10-20 (protocol 1.24, unchanged; rows 40 and 55 updated)
 
 - SD write window: writes end at the card's FAT32 partition, capped at sector 16384 (8 MiB; was 2048), so the image at
