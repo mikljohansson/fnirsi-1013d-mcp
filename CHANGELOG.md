@@ -38,6 +38,10 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   an inconsistent result still stops with its note. The AUTO SET button reads "Auto..." until that last sweep ends; a
   second tap, STOP or "Stop sweep" end it as a single sweep (the table keeps what it has). RUN stays the explicit
   repeat. READ_BODE's view bit 1 ("RUN repeats") reads 0 during and after AUTO SET.
+- Frequency response: the Single sweep row's red "Stop sweep" counts the sweep in progress, "0 / N" upwards (0fc2e88).
+  On 0.2.85 it sometimes stayed at "50 / 50" (bench 11:54): it counted the table's points, which a sweep on the same
+  span keeps from the previous sweep until it overwrites them. The Sweep card and the cards' "sweeping" state use the
+  same count.
 
 #### 0.2.85 - 2026-10-20 (protocol 1.24, unchanged)
 

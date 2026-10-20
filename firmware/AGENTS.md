@@ -4018,6 +4018,14 @@ bode_ui.c/h, test_ui.c), then docs. PC_FW_VERSION not bumped. Host tests green, 
   -> passes 2..4 if a sharp band -> verdict: fail = STOP with the warning; else span / Settle / CH2 Auto set, one
   sweep (cards "sweeping", "Auto..." still) -> STOP: button green "RUN", chip STOP, "AUTO SET", chart and cards
   standing. READ_BODE view bit 1 (`bu_view_bits`) is 0 throughout, since every AUTO SET sweep is single.
+- "Stop sweep" progress (owner bench 11:54 / 11:57 on 0.2.85: "50 / 50" static, intermittently): `bode_done_count`
+  counts the table's done flags, which `bode_start` keeps when the plan is the same (RUN overwrites point by point),
+  so a single sweep over a complete same-span table read N / N throughout; a new span cleared them (hence
+  intermittent). Commit 0fc2e88: `bu_sweep_measured(running, bode_current, done_count, count)` (bode_ui.c) is the
+  point in progress while running, else the done count; `sweep_measured()` feeds `single_state` (the fold-out row,
+  which `fold_service` already redraws whenever its text changes), the Sweep card and `table_state`'s single-sweep
+  "sweeping". test_ui drives 0, 1, N-1 over a complete table.
 - Bench: the RC AUTO SET walk-through above (step 4: one sweep then STOP, no further sweeps, relays quiet); a second tap
   during the final sweep (button "Auto..." until the capture in progress ends, then STOP with the partial table); RUN
-  after AUTO SET repeats at the found span; READ_BODE view bits = 1 (bit 1 clear) after AUTO SET.
+  after AUTO SET repeats at the found span; two Single sweeps in a row on the same span from the fold-out: the second
+  counts "0 / 50" upwards, as does the Sweep card; READ_BODE view bits = 1 (bit 1 clear) after AUTO SET.
