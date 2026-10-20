@@ -13,6 +13,12 @@ board); `frequency-response/SpectrumSlider.dc.html` is a copy of `makeover/Spect
 `bode_menu_part.py` write the menu icon and main-menu boards. The `patch_*.py` scripts are one-shot edits already applied
 to the generators; they record how the boards got here and do not run again.
 
+The two UI rows of `docs/plans/ui-rows.md` (the trigger menu's Type row, the ACQ menu's Sample row, the trigger chip's
+type glyphs, a peak-detect trace and a pulse-width trigger in use) are `ui-rows/`, drawn by `python gen_ux/rows.py ui-rows`
+(a board name as a second argument writes only that one) on top of `common.py` and `boards.py`. Their PNGs come from
+`python gen_ux/render.py ui-rows`, which screenshots every `.dc.html` of the directory at 800 x 480 with a headless Chrome or
+Edge; it works for the other directories too.
+
 The slider-track overview (`docs/plans/slider-overview.md`) is drawn by `common.py` (`slider_row`, `ov_svg`,
 `ov_line_runs`, `scope_square_overview`); `boards.py` adds the Spectrum's (`spectrum_overview`) and the board
 `makeover/ScopeOverview` (a pulse-induction record zoomed into one decay, `pi_board`), `bode_final.py` the Frequency
