@@ -235,7 +235,7 @@ def main(argv=None):
 
     def source_opts(p):
         p.add_argument("--local", help="Atlan's v1.00o5.zip or a directory with its extracted files (no download)")
-        p.add_argument("--url", help="download URL override (default: %s)" % zip_url())
+        p.add_argument("--url", help="download URL override (default: %s)" % zip_url().replace("%", "%%"))
 
     p = sub.add_parser("build", help="SD package (and optionally parts) with our scope image")
     p.add_argument("--scope", required=True, help="our scope image (eGON.EXE), e.g. fnirsi_1013d-fw-<ver>.bin")
