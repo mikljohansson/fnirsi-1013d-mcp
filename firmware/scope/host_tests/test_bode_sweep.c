@@ -19,6 +19,7 @@ typedef struct
 {
   //DUT: rs into r into c (c = 0: a divider r / (rs + r) ... modelled as r_load to ground at the output: H = rl / (r + rl))
   double rs, r, c, rl;
+  double l;                   //fw 0.2.92: an inductor in the shunt too (a parallel tank; 0 = none)
   double lo, hi;              //post levels against the probe reference
   double gain2;               //CH2 front-end gain mismatch
   double window_v[6];         //DC beyond this pins the front end of a range (0 = no limit)
@@ -148,7 +149,7 @@ static void dut_volts(dut *d, double f, double t, double dt, double band, double
     double zr = 0, zi = 0, hr, hi, ir, ii, den;
 
     //y = jwc + 1/rl
-    double yr = (d->rl > 0) ? 1 / d->rl : 0, yi = w * d->c;
+    double yr = (d->rl > 0) ? 1 / d->rl : 0, yi = w * d->c - ((d->l > 0) ? 1 / (w * d->l) : 0);
     double ymag = yr * yr + yi * yi;
 
     zr = yr / ymag;  zi = -yi / ymag;                //1 / y
@@ -175,6 +176,13 @@ static void dut_volts(dut *d, double f, double t, double dt, double band, double
   {
     double dc1 = (d->rl > 0) ? mean * d->rl / (d->rs + d->r + d->rl) : mean;
     double dc0 = (d->rl > 0) ? mean * (d->r + d->rl) / (d->rs + d->r + d->rl) : mean;
+
+    if(d->l > 0)
+    {
+      //The inductor shorts the output at DC
+      dc1 = 0;
+      dc0 = mean * d->r / (d->rs + d->r);
+    }
 
     *v0 = dc0 + a0;
     *v1 = dc1 + a1;
@@ -731,8 +739,10 @@ typedef struct
   uint8  r1[BODE_MAX_POINTS], r2[BODE_MAX_POINTS];
   int32  h[BODE_MAX_POINTS];
   uint16 switches;
+  uint16 planned;             //fw 0.2.92: planned CH2 range transitions
   uint32 reads;
   int    reused, n, bad;
+  int    small;               //fw 0.2.92: points flagged ch2_small
 } sweep_rec;
 
 static void sweep_once(const bode_cfg *c, int thru, int hold, sweep_rec *s)
@@ -747,8 +757,10 @@ static void sweep_once(const bode_cfg *c, int thru, int hold, sweep_rec *s)
   T_EQ(bode_state(&eng), BODE_ST_DONE);
   s->n = bode_count(&eng);
   s->switches = bode_switches(&eng);
+  s->planned = bode_planned_switches(&eng);
   s->reads = D.reads - r0;
   s->bad = 0;
+  s->small = 0;
 
   for(i = 0; i < s->n; i++)
   {
@@ -758,7 +770,21 @@ static void sweep_once(const bode_cfg *c, int thru, int hold, sweep_rec *s)
     s->h[i]  = p.h_mdb;
     if(p.flags & BODE_F_BAD)
       s->bad++;
+    if(p.flags & BODE_F_CH2_SMALL)
+      s->small++;
   }
+}
+
+//CH2 range transitions between neighbouring points of a sweep
+static int transitions(const sweep_rec *s)
+{
+  int i, t = 0;
+
+  for(i = 1; i < s->n; i++)
+    if(s->r2[i] != s->r2[i - 1])
+      t++;
+
+  return t;
 }
 
 static int same_ranges(const sweep_rec *a, const sweep_rec *b)
@@ -779,8 +805,8 @@ static void print_rec(const char *what, const sweep_rec *s)
 {
   int i;
 
-  printf("  plan %-22s reused %d, %u switches, %u captures, %d flagged, CH2 ranges", what, s->reused,
-         (unsigned)s->switches, (unsigned)s->reads, s->bad);
+  printf("  plan %-22s reused %d, %u unplanned + %u planned switches, %u captures, %d flagged, CH2 ranges", what,
+         s->reused, (unsigned)s->switches, (unsigned)s->planned, (unsigned)s->reads, s->bad);
   for(i = 0; i < s->n; i++)
     printf(" %d", s->r2[i]);
   printf("\n");
@@ -808,6 +834,7 @@ static void test_range_plan(void)
   print_rec("first", &a);
   T_EQ(a.reused, 0);
   T_TRUE(a.switches >= 1);
+  T_EQ(a.planned, 0);                     //fw 0.2.92: a fresh sweep has no plan: its steps are ranging (unplanned)
   T_EQ(a.bad, 0);
 
   for(i = 0; i < 2; i++)
@@ -818,6 +845,8 @@ static void test_range_plan(void)
     print_rec(i ? "third" : "second", &b);
     T_EQ(b.reused, 1);
     T_EQ(b.switches, 0);
+    T_EQ(b.planned, 2);                   //fw 0.2.92: the RC's 0.5 -> 0.2 -> 0.1 V/div: "2 planned, 0 unplanned"
+    T_EQ(b.planned, transitions(&a));
     T_TRUE(same_ranges(&a, &b));
     T_TRUE(b.reads < a.reads);
     T_EQ(b.bad, 0);
@@ -1572,6 +1601,127 @@ static void test_auto_span(void)
   T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_NO_RESPONSE);
   test_auto_span_absurd();
 }
+
+//fw 0.2.92 (owner 2026-10-20 13:33, bode-ui.md 3.2 step 3): AUTO SET's CH2 range mode. Hold on one range when the CH2
+//levels in the chosen span spread less than 20 dB, at the most sensitive range holding the largest with 1.5 x margin
+static void tbl_from_eng(uint64 *f, int32 *v2, uint8 *have, int *n)
+{
+  int i;
+
+  *n = bode_count(&eng);
+  for(i = 0; i < *n; i++)
+  {
+    bode_point p;
+
+    have[i] = (uint8)bode_point_get(&eng, i, &p);
+    f[i]  = bode_plans(&eng)[i].f_mhz;
+    v2[i] = p.v2_mdb;
+  }
+}
+
+static void test_auto_ch2(void)
+{
+  static uint64 f[BODE_MAX_POINTS], ft[BODE_MAX_POINTS];
+  static int32  m[BODE_MAX_POINTS], ph[BODE_MAX_POINTS], v2[BODE_MAX_POINTS];
+  static uint16 fl[BODE_MAX_POINTS];
+  static uint8  have[BODE_MAX_POINTS];
+  int32  fs[6];
+  uint8  hr = 0xFF;
+  bode_autospan a;
+  bode_cfg c;
+  sweep_rec x, y;
+  double f0;
+  int    n, i, r;
+
+  //The rule on a synthetic table (fs: 128 codes on the model's ranges, x1 probe)
+  bode_init(&eng, &HW);
+  bode_ch2_full_scale(&eng, 1, fs);
+  for(r = 0; r < 6; r++)
+    T_TRUE(abs(fs[r] - (int32)(20000 * log10(128 * vpl(r)))) < 5);
+
+  for(i = 0; i < 10; i++)
+  {
+    ft[i] = (uint64)(1000 + 100 * i) * 1000;
+    v2[i] = -10000 - 2000 * i;            //-10 .. -28 dBV: 18 dB
+    have[i] = 1;
+  }
+  T_EQ(bode_auto_ch2(ft, v2, have, 10, ft[0], ft[9], fs, &hr), BODE_CH2_HOLD);
+  //0.316 V x 1.5 = 0.47 V: 0.2 V/div holds 0.88 V, 0.1 V/div 0.44 V (too small)
+  T_EQ(hr, 4);
+  v2[9] = -30000;                         //20 dB: Auto
+  T_EQ(bode_auto_ch2(ft, v2, have, 10, ft[0], ft[9], fs, &hr), BODE_CH2_AUTO);
+  T_EQ(bode_auto_ch2(ft, v2, have, 10, ft[0], ft[8], fs, &hr), BODE_CH2_HOLD);   //that point outside the span
+  have[3] = 0;
+  T_EQ(bode_auto_ch2(ft, v2, have, 10, ft[8], ft[0], fs, &hr), BODE_CH2_HOLD);   //either order, a gap
+  v2[2] = BODE_MDB_FLOOR;                 //no tone: Auto
+  T_EQ(bode_auto_ch2(ft, v2, have, 10, ft[0], ft[8], fs, &hr), BODE_CH2_AUTO);
+  v2[2] = -14000;
+  T_EQ(bode_auto_ch2(ft, v2, have, 10, ft[0], ft[0], fs, &hr), BODE_CH2_AUTO);   //one point: Auto
+  for(i = 0; i < 10; i++)
+    v2[i] = 30000;                        //31.6 V: no range holds it with the margin
+  T_EQ(bode_auto_ch2(ft, v2, have, 10, ft[0], ft[9], fs, &hr), BODE_CH2_AUTO);
+
+  //The owner's RC (1 kOhm / 15 nF): AUTO SET's overview and span spread more than 20 dB: Auto; RUN at that span then
+  //switches only where the plan says (planned), never unplanned
+  dut_rc15(&D);
+  n = overview(f, m, ph, fl, have);
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_SPAN);
+  tbl_from_eng(f, v2, have, &n);
+  T_EQ(bode_auto_ch2(f, v2, have, n, bode_step_mhz(a.start_i), bode_step_mhz(a.stop_i), fs, &hr), BODE_CH2_AUTO);
+  c = cfg(bode_step_mhz(a.start_i) / 1000.0, bode_step_mhz(a.stop_i) / 1000.0, 50, a.settle, BODE_CH2_AUTO);
+  sweep_once(&c, 0, 3, &x);
+  print_rec("RC AUTO SET final", &x);
+  sweep_once(&c, 0, 3, &y);
+  print_rec("RC RUN after it", &y);
+  T_EQ(x.reused, 0);
+  T_EQ(y.reused, 1);
+  T_EQ(y.switches, 0);
+  T_TRUE(y.planned >= 1);
+  T_EQ(y.planned, transitions(&x));
+
+  //A parallel tank (1 mH || 100 nF, 10 kOhm load, fed through 2 kOhm: f0 15.9 kHz, Q about 17), a narrow span around
+  //its peak (f0 / 1.1 .. f0 x 1.1, the levels within about 10 dB): Hold, on 1 V/div (the peak's fundamental about 1.6 V
+  //x 1.5 = 2.5 V: 0.5 V/div holds 2.2 V, 1 V/div 4.4 V)
+  dut_rc(&D);
+  D.r = 1000; D.c = 100e-9; D.l = 1e-3; D.rl = 10000;
+  f0 = 1 / (2 * PI * sqrt(D.l * D.c));
+  bode_init(&eng, &HW);
+  c = cfg(f0 / 1.1, f0 * 1.1, 20, BODE_SETTLE_RESONANT, BODE_CH2_AUTO);
+  sweep_once(&c, 0, 3, &x);
+  print_rec("tank pass, Auto", &x);
+  T_EQ(x.bad, 0);
+  tbl_from_eng(f, v2, have, &n);
+  {
+    int32 lo = v2[0], hi = v2[0];
+
+    for(i = 1; i < n; i++)
+    {
+      if(v2[i] < lo) lo = v2[i];
+      if(v2[i] > hi) hi = v2[i];
+    }
+    printf("  tank: CH2 %.1f .. %.1f dBV peak in the span (%.1f dB)\n", lo / 1000.0, hi / 1000.0, (hi - lo) / 1000.0);
+    T_TRUE(hi - lo < BODE_HOLD_SPREAD_MDB);
+  }
+  hr = 0xFF;
+  T_EQ(bode_auto_ch2(f, v2, have, n, c.start_mhz, c.stop_mhz, fs, &hr), BODE_CH2_HOLD);
+  T_EQ(hr, 2);
+
+  //The held sweeps: the final one (fresh) and RUN's (from the plan): no switch of either kind, nothing flagged
+  c.ch2_mode = BODE_CH2_HOLD;
+  sweep_once(&c, 0, hr, &x);
+  print_rec("tank Hold final", &x);
+  sweep_once(&c, 0, hr, &y);
+  print_rec("tank Hold RUN", &y);
+  T_EQ(x.switches, 0);
+  T_EQ(x.planned, 0);
+  T_EQ(y.reused, 1);
+  T_EQ(y.switches, 0);
+  T_EQ(y.planned, 0);
+  T_EQ(x.bad + y.bad + x.small + y.small, 0);
+  for(i = 0; i < y.n; i++)
+    T_EQ(y.r2[i], 2);
+}
+
 int main(void)
 {
   test_rc_auto();
@@ -1586,5 +1736,6 @@ int main(void)
   test_thru();
   test_divider_floor();
   test_auto_span();
+  test_auto_ch2();
   return t_report("test_bode_sweep");
 }

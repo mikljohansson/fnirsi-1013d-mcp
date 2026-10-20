@@ -153,7 +153,8 @@ int    bode_done_count(const bode_eng *e);                    //measured so far 
 int    bode_current(const bode_eng *e);                       //index of the point being measured, -1 = none
 uint32 bode_elapsed_ms(const bode_eng *e);
 uint32 bode_estimate_ms(const bode_cfg *cfg);                 //duration estimate of a sweep (design 3.7, device overheads)
-uint16 bode_switches(const bode_eng *e);
+uint16 bode_switches(const bode_eng *e);                      //CH2 range steps taken (unplanned: ranging, a clip, a drop)
+uint16 bode_planned_switches(const bode_eng *e);              //fw 0.2.92: CH2 range transitions the range plan prescribed
 uint8  bode_exhausted(const bode_eng *e);                     //bit c: channel c's offset reached its limit
 const bode_cfg  *bode_last_cfg(const bode_eng *e);
 const bode_plan *bode_plans(const bode_eng *e);
@@ -237,7 +238,7 @@ typedef struct
   bode_point pts[BODE_MAX_POINTS];
   int        np;
   uint8      state, err, exhausted;
-  uint16     switches;
+  uint16     switches, planned;
   uint32     t0, t_end;
 } bode_snap;
 
@@ -268,6 +269,19 @@ int    bode_plan_reused(const bode_eng *e);                   //the latest sweep
 //for CH1 leak (a joined record) or for another reason (suspect, time-out); BODE_CTRL bytes 40..47
 void   bode_capture_stats(const bode_eng *e, uint16 *caps, uint16 *timeouts, uint16 *leak, uint16 *other);
 
+//fw 0.2.92 (owner 2026-10-20 13:33, bode-ui.md 3.2 step 3): AUTO SET's CH2 range mode. The CH2 levels (v2, dBV peak at
+//the tip) of the measured points inside lo..hi (the chosen span; the overview's and the passes' points) are compared:
+//when they spread less than BODE_HOLD_SPREAD_MDB (one range covers them) the result is BODE_CH2_HOLD on the most
+//sensitive range whose full scale (fs_mdb[r], range r's 128 codes peak at the tip in dBV) is at least 1.5 x the largest
+//level (*hold_r2); else BODE_CH2_AUTO. Fewer than two points in the span, a point without a tone (BODE_MDB_FLOOR) or a
+//largest level that no range holds with the margin: Auto.
+#define BODE_HOLD_SPREAD_MDB  20000
+#define BODE_HOLD_MARGIN_MDB  3522      //20 log10 1.5
+int    bode_auto_ch2(const uint64 *f_mhz, const int32 *v2_mdb, const uint8 *have, int n, uint64 lo_mhz, uint64 hi_mhz,
+                     const int32 *fs_mdb, uint8 *hold_r2);
+//CH2's full scale per range at the tip (dBV peak, 128 codes) with the probe index of bode_volt_mdb, for bode_auto_ch2
+void   bode_ch2_full_scale(const bode_eng *e, uint8 probe_index, int32 *fs_mdb);
+
 //Sizes for the target's static instance
 struct bode_eng
 {
@@ -290,7 +304,8 @@ struct bode_eng
   uint8     exhausted, bad_down, disturbed, gen_on, stop_req, hold_r2;
   uint8     relay_pending, ms_coll, last_fir, last_check;
   uint32    relay_until;
-  uint16    switches;
+  uint16    switches;                         //unplanned CH2 range steps (the header's count, MAX_SWITCHES)
+  uint16    planned;                          //fw 0.2.92: planned CH2 range transitions (plan_apply between points)
   int32     k_mdb, k_mdeg;                    //the splice factor applied to later points
   int32     v_dc[2], v_dc2;                   //DC at the BNC (uV) from the pre-scan on range 1
   uint8     have_ref2;
