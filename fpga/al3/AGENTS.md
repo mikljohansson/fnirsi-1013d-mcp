@@ -4,6 +4,9 @@ Anlogic AL3A10LG144C7 FPGA of the owner's FNIRSI 1013D (JTAG IDCODE 0x18006C31, 
 W25Q80DV, JEDEC `ef 40 14`). Read `CLAUDE.md` at the repo root first; its flashing rules override anything here.
 
 State on 2026-10-19 (fpga-gen9, branch `fpga-gen9`):
+- fpga-gen10 (2026-10-20, branch fpga-gen10): the bench's "first-record saturation" is not the decimator; the
+  firmware's host ARM takes N from the UI rate table once the session's raw divider is forgotten (section "First-record
+  saturation, fpga-gen10": cause, firmware prescription, bench reproduction, tb/tb_firstrec.v = run.sh step 12).
 - `src/` holds version word **0x153A**: 0x1539 with the ADC data captured in IOB DDR registers at a selectable 2.5 ns
   stage per core against the write clock edge the core is encoded on (A falling, B rising; B optionally against the A
   encode for the AD9288 data-align mode), B first by T/2 at every rate, outlier counters for a self-check (0x63, 0x64,
@@ -408,6 +411,135 @@ adccap 2274. The references for the equivalence steps get `dut.adc*_w` as pins 0
 4. Wanted: pipeline the 32-bit divider compare (`sample_clock_enable`) so `clk_200MHz` stops being a lottery; the
    encode flops into IOB ODDRs (fixed pad delay); zero the simulation-only initial values so the testbenches start as
    the hardware does (review item 6).
+
+## First-record saturation, fpga-gen10 (2026-10-20)
+
+Brief (coordinator): on 0x153A a decimated 16-bit capture that follows a change of the decimator mode, shift or sample rate
+sometimes comes back as a whole record of 0xFFFF on both channels (45 / 61 V on the host's volts scale); the next capture
+at the same settings is clean; 8-bit captures never do it (`docs/hardware-status.md` 2026-10-20 10:52 .. 11:22). Branch
+`fpga-gen10`, no bitstream change, no flash. Sources read: `src/zaklad.v` (decim_chan, fir_chan, the control block, the
+capture logic, the MCU decoder), `firmware/scope/pc_decim.c`, `pc_hal_scope.c` (`pc_dec_apply`, `pc_hal_arm`,
+`pc_glue_decim_read`, the readout), `fpga_bus.c`, `pc_bode.c`, `pc_cmds.c` (`pc_settings_track`, `pc_decim_next`,
+`h_set_timebase`, `h_arm`), `acq_view.c`, `fpga_control.c` (bus primitives), `timer.c`.
+
+**Verdict in one paragraph.** The Verilog cannot produce the symptom in steady state: with the registers the bench read back
+after a bad record (0x29 = 0xE2 / S 15, that is K 2, FIR active, N 4096) every stored word is the exact windowed sum shifted
+by S, at most 32,640 for a full-scale input (the firmware's "+ 1 with the FIR" rule keeps the CIC samples below 32,768 and
+the FIR's DC gain is 1), so a record of 0xFFFF needs a different configuration *in effect while it was written*: a shift
+too small by 6 or more, the FIR off (gain 2^K higher), or K 3 with the K 2 shift. Transients after a change (the combs
+carry stale differences for K + 1 strobes, the FIR delay line for 15 more) last about 200 us at N 4096 and are over long
+before the record (the firmware waits 2 timer ticks, 1 .. 2 ms); nothing in the sampling reset, the arm or the capture
+stage touches the decimator (it free-runs on `sample_write_clock`, `dec_pc` / `dec_sv` / `fir_act` included, and the MCU
+registers 0x53 / 0x54 / 0x56 / 0x0D are only written by the MCU). The bus primitives set the data before the clock's rising
+edge and hold it for tens of ns after it, the ISR-answered requests (F_BUSY) never touch the bus. So the fault is a
+configuration mismatch, and the one found in the firmware is: **the host ARM computes N (and so the shift) from the UI's
+rate table whenever the session's raw divider is forgotten, while the FPGA keeps the raw divider.** `pc_arm_geometry` /
+`pc_decim_next` take `s->tb_raw ? s->tb_divider : tb.divider`; `pc_settings_track` (every poll, UI arm and UI DONE) clears
+`tb_raw` as soon as `scopesettings.timeperdiv` or `samplerate` differ from the values at the raw write; and
+`acq_view_set` (reached from `acq_view_fit`, which `pc_hal_decim_set` = SET_DECIM calls after `pc_dec_fit_memory`, and from
+the UI's own passes) changes `timeperdiv` **without writing 0x0D**. The FPGA then runs N 4096 (the raw 4095) while the arm
+writes the shift of the UI's N (400: S 9 for CIC2+FIR, the `next_shift 9 / next_n 400` GET_DECIM showed at 10:57; N 200:
+S 7). CIC2+FIR at N 4096 with S 9 gives 255 x 2^22 >> 9 = 2^21 for any input above code 32: every word 0xFFFF, both
+channels, exactly the signature. The record after it is clean only if something rewrites the shift (a UI conversion with
+the Filter off resets `pc_dec_cur.k`, so the next host arm rewrites 0x54) or the host writes the raw divider again.
+The Bode engine's `bh_arm` computes its config from the divider it writes itself and is immune to this path, so the
+pre-scan failures (10:52, 11:10) are **not** explained by it; see "What is not explained" below. The firmware's write
+order is right on every path: 0x0D (`pc_hal_timebase_write`), then in `pc_dec_apply` 0x53, 0x56, 0x54, 0x55 and the
+settle wait, then 0x17, 0x0F, 0x1A, the sequencer, 0x0B / 0x0C, 0x01 = 1, the 0x05 wait, 0x0B / 0x0C, 0x0E, 0x01 = 0.
+Hypothesis 1 of the brief (a write inside the reset window) does not occur; hypotheses 2 and 3 (integrators not cleared,
+saturation latching) are not faults: the CIC is modular and exact after K + 1 strobes with any starting state (tb_long
+proves wrap independence), the saturation is a combinational compare on every output.
+
+**Evidence from the Verilog (line numbers of `src/zaklad.v` at a98a3ad).**
+- `decim_chan` 145-222: integrators `i1..i3` and combs `c1..c3` are 48-bit modular; K < 3 bypasses are plain registers;
+  `out <= (|fine[47:16]) ? 0xFFFF : fine[15:0]` on every `sv[5]`. A constant input v gives exactly v x G >> S once K + 1
+  strobes have passed with the final K, N and S.
+- Control 1060-1096: `dec_pc`, `dec_sv`, `fir_act`, `fir_hp`, `dec_t` run on every write clock edge, unconditionally;
+  no `cap_rst`, `sample_system_reset` or `sampling_enable` term. With `dec_on` the write clock is 100 MHz
+  (`sample_rate_divider_eff` = 0, 1044-1051), so the transient after any write is bounded by (K + 1) x P / 2 + 15 x P / 2
+  + 11 write clocks (about 195 us at D 4095 with the FIR), independent of what ran before.
+- `fir_chan` 240-357: `out = clamp(acc)`, `acc` restarted at every `load`; DC gain exactly 1 (taps sum to 2^17, rounding
+  2^16). Saturated inputs leave the 15-entry line after 15 CIC strobes.
+- Decoder 1830-2060: 0x53 / 0x54 / 0x56 are single-byte writes on `posedge i_mcu_clk` with `i_mcu_dcs = 0`; nothing else
+  writes `dec_order`, `dec_shift`, `fir_en`; the 0x0D value is only written by 0x0D (4 bytes, high first; the intermediate
+  values are below the final one for the bench's transitions, so `dec_pc` reloads at once).
+- Capture logic 1150-1330 reads the decimator (`dec_out*`, `dec_wr`) and never writes into it.
+- `fpga_control.c` 25-39: data on the bus before `FPGA_PULSE_CLK` (low, then high); the next byte's data changes only
+  after two more GPIO writes (tens of ns at the APB's pace) against a few ns of clock insertion: no hold hazard.
+
+**Evidence from the firmware.**
+- `pc_cmds.c` `pc_settings_track` (250-262): `if((tb.timeperdiv != s->tb_raw_tpd) || (tb.samplerate != s->tb_raw_sr))
+  s->tb_raw = 0;`. `pc_decim_next` (296-303) and `pc_arm_geometry` (1358-1363) then use `tb.divider` =
+  `sample_rate_settings[scopesettings.samplerate]`, not the divider the FPGA holds (`pc_dec_divider` in `pc_hal_scope.c`,
+  the last 0x0D value, which `pc_dec_div()` returns and the UI path uses).
+- `acq_view.c` 87-101 `acq_view_set` writes `scopesettings.timeperdiv` and the trigger position only; `acq_view_fit` (193)
+  calls it when the time/div does not fit `fpgasettings.totalsamples` at the UI's rate. `pc_hal_decim_set` (1043-1055)
+  calls `pc_dec_fit_memory()` (totalsamples above `PC_DECIM_MAX_TOTAL` snaps to 6000) then `acq_view_fit(1)`: a memory
+  depth above 8192 samples plus a time/div that no longer fits 6000 samples snaps the time/div on SET_DECIM. The UI's own
+  passes (`display_data_done`) can snap later for the same reason.
+- `pc_dec_apply` (644-700) writes only what differs from `pc_dec_cur`, so the stale-N shift stays in the FPGA until the
+  next change; a UI conversion with the Filter off (K 0) makes the next host arm rewrite 0x54 (`!pc_dec_cur.k`), which is
+  why the bench saw the fault on the capture after a mode change and a clean one at the same settings afterwards.
+- `pc_hal_timebase_write(raw)` (219-227) writes 0x0D and `pc_dec_divider` but leaves `scopesettings.samplerate` at the UI's
+  rate; GET_DECIM bytes 16-23 (divider, rate) follow `tb_raw` too, which is the "stale pending config" the coordinator saw.
+
+**What is not explained (needs the bench).** The Bode engine's pre-scan (`bh_arm` writes 0x0D = 4095 itself and configures
+from the same `div`) and the 11:15 round 0 third capture (host CIC2+FIR after two clean CIC3+FIR at the same raw divider,
+UI stopped since the first host ARM) cannot take the `tb_raw` path unless the UI's time/div changed between the captures
+(round 0 differed from rounds 1..3 exactly in that the UI had run after the sweep: GET_DECIM 0x29 = 0 / S 2 against 0xE3 /
+S 2). The FPGA write trace decides it: `s.event_log(fpga_trace=True)` logs 0x0D, 0x53, 0x56 and 0x01 = 1 with the writer
+(type 22) but **not 0x54**; the firmware agent should add 0x54 (and 0x55) to `fpga_bus_note_write` / the trace so a bad
+record can be matched to the shift written before it. With the trace, GET_DECIM before and after each capture (bytes 3 /
+25 / 27: next, written, FPGA shift) and the record, one bad capture settles whether the shift written to 0x54 was the one
+for N 4096.
+
+**Firmware fix (for the firmware agent; not implemented here).**
+1. `pc_decim_next` and `pc_arm_geometry` (and GET_DECIM bytes 16-23, 31) must take the divider the FPGA holds, not the UI
+   table: expose `pc_dec_div()` as `pc_hal_divider_now()` (the last 0x0D value, `pc_dec_divider`, falling back to the table
+   before any write) and use it in place of `s->tb_raw ? s->tb_divider : tb.divider`. `tb_raw` then only decides what
+   GET_TIMEBASE reports. Alternatively never clear `tb_raw` on a time/div snap that wrote no 0x0D; the first is robust
+   against every snap path.
+2. `pc_dec_apply`: before the shift decision, compare against the FPGA (`fpga_get_decim_state()` low byte) instead of
+   `pc_dec_cur.shift` when `pc_dec_dirty` is set by a rate write, or simply always write 0x54 when `c->k` (one byte, 0.6 us):
+   a stale shift can then never survive an arm.
+3. Trace: `fpga_bus_note_write` counts 0x54 / 0x55 as filter writes and logs them at trace level 1.
+4. Host test for `test_fpga_bus` (fpga_model): raw divider 4095 written, then `scopesettings.timeperdiv` changed with no
+   0x0D (the snap), then a host ARM with CIC2+FIR: the 0x54 value written must be 15 (N 4096), GET_DECIM bytes 4-7 must say
+   4096; today's code writes 9 (N 400) or 7 (N 200). A second case: `pc_dec_cur.shift` equal to the new shift while the
+   model's 0x54 register differs (a lost or foreign write): the arm must still write 0x54.
+
+**Bench reproduction (host, current image fw 0.2.83 / 0x153A; LOCAL or REMOTE, UI in RUN at a fast time base).**
+`from fnirsi1013d.scope import Scope; s = Scope.connect("COM10")`:
+1. `s.set_timebase(ui_index=<a 1 MSa/s index>)`; at the scope set the memory depth above 8k samples (12k or deeper) and the
+   longest time/div the ACQ menu allows at that depth; `s.set_decim("off")`.
+2. `s.set_timebase(divider=4095)`; `s.get_decim()` must show divider 4095 / next_n 4096.
+3. `s.set_decim("cic2+fir")` (the fit snaps the time/div: the scope shows "Time/div set to ..."), then `s.get_status()` or
+   any poll (runs `pc_settings_track`), then `s.get_decim()`: divider now 199 (or 399) and next_n 200 / next_shift 7 while
+   the FPGA still holds 4095 (its 0x29 low byte shows the last shift). This is the armed state.
+4. `cap = s.capture(["CH1", "CH2"])`: every word 0xFFFF (45 .. 61 V), GET_DECIM bytes 25 / 27 = 7. Repeating step 4 stays
+   bad until a UI conversion with the Filter off or a new raw `set_timebase` intervenes: that is the difference from the
+   bench's "next is clean" and tells the two mechanisms apart.
+If step 3 does not snap on this unit's settings, force the snap from the scope: with the raw divider written, tap the
+memory-depth or Filter box (any path through `acq_view_fit` that changes the time/div without a time-base tap); a time-base
+tap writes 0x0D and heals the state instead. For the Bode pre-scan: enable the trace (`s.event_log(fpga_trace=True)`),
+run `BODE_RUN` once from a cold scope view, read the log: if 0x53 = 3 and 0x56 = 1 precede 0x01 = 1 and the record is
+still 0xFFFF, the shift (not traced yet) is the suspect and the firmware agent adds 0x54 to the trace first.
+
+**Testbench** (`tb/tb_firstrec.v`, step 12 of `tb/run.sh`, `ONLY=firstrec`, `FIRSTREC_TOTAL` words per record, default
+40): the firmware's exact byte sequences on a constant input (CH1 100, CH2 155), at divider 4095, both arm orders
+(fw-bus: 0x0B / 0x0C before 0x01 = 1 too; 1.00o5: inside the window only), every word compared with v x G >> S:
+S1 legacy D 199 then CIC2+FIR (the 10:55 case) twice; S2 the sweep's end state (CIC3+FIR N 16, a K 0 conversion at D 15),
+then CIC3+FIR twice and CIC2+FIR twice at 4095 (11:15 round 0); S3 the pre-scan (legacy D 0, then CIC3+FIR, pretrigger 0,
+FPGA auto); S4 the same transitions without the settle wait (how far the transient reaches); S5 the fault model
+(CIC2+FIR armed with S 9). **Results** (seed 12345, 16-word records, 46 s; also 8 and 40 words): **38 checks, 0 errors, PASS**. S1, S2, S3 are exact
+from word 0 in both arm orders at every transition (D 199 legacy -> 4095 CIC2+FIR; CIC3+FIR N 16 -> K 0 at D 15 -> 4095
+CIC3+FIR -> CIC2+FIR; D 0 legacy -> 4095 CIC3+FIR pre-scan): every word 0x3200 / 0x4D80 = 100 x G >> S and 155 x G >> S,
+0x29 reads 0xE20F / 0xE31A as the firmware expects. S4 (no settle wait): the transient reaches words 0 .. 4 (K 0 -> 2) and
+0 .. 5 (K 3 -> 2) and is **not** 0xFFFF (first words 0x7395 / 0x8654, 0x2343 / 0x40BB), so a short or missing wait cannot
+make the bench's record either; the 16-bit trigger fires on those words (trigger_address 2 .. 3 with pretrigger 0). S5
+(the shift of N 400, S 9, at D 4095): **every word 0xFFFF, both channels, 0x29 = 0xE209**, the bench's signature. So the
+0x153A decimator is cleared of hypotheses 1 .. 3; the Verilog is unchanged (no 0x153B-pre). run.sh now has twelve
+steps; a run of the other eleven was not repeated here (no src/ change).
 
 ## 0x1539 status (fpga-gen8, 2026-10-19)
 
