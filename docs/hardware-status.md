@@ -1336,3 +1336,14 @@ Newest entries at the bottom. Format: date, who, what, result.
   ch2_small (CH2 about -55 dBV, under one code at 100 mV/div) and the magnitude climbs again from -69 dB to -34 dB at 10 MHz
   with the phase flipping: generator pickup into the CH2 probe and the breadboard, not the filter; only the 540 kHz point
   (low_snr) is grey, the ch2_small points are drawn as data. Queued: "below the floor" presentation.
+- 2026-10-20 16:15: fw 0.2.97 (fw-arm: on 0x1532..0x153A auto-mode arms FPGA auto with 0x0E = W - 2 so the FPGA's own stop
+  lands where ring words 0..total-1 are contiguous, triggered := 0x18 && 0x14 != pretrigger, the firmware force only a
+  safety net that flags the record; GET_CAPTURE_INFO bit 6 "may be spliced", mcp `Capture.maybe_spliced`; segments and the
+  UI auto mode the same; the engine's bh_arm moved to W) pinned backups/fw-0.2.97_3bfcb2c9.bin (sha256
+  3bfcb2c903b3f93ef1acddc3d73ed805ff89afaa8987a64a16cc69605f51d21f), loaded. 16:16 host auto captures with the trigger
+  level at 255 (untriggered): 50 at 1 MSa/s with the 1 kHz generator and 50 at 200 MSa/s with 1 MHz, all triggered=0,
+  maybe_spliced=0, no seam (x[n] vs x[n+period] residual <= 0.03 of the signal's std; 0.2.96 gave 15 of 32 spliced).
+  bode_cells.py on the two-pole RC (CH1 post, CH2 second node), scratchpad cells_0297.npz: every auto record leak -65..-83 dB
+  (12:35 on 0.2.89: 5 of 8 spliced at -40 dB). **Regression in the engine:** ten sweeps 100 Hz..1 MHz / 25: captures 33..40,
+  time-outs 10..22, other retakes 8..15 per sweep, 1 flagged point on 4 of 10, 2.4..3.6 s per sweep (0.2.91..0.2.96: 25
+  captures, 0 time-outs, 0 retakes, 1.5 s). Sent back to fw-arm.
