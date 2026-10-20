@@ -1124,12 +1124,26 @@ uint64 bode_step_mhz(int i)
   return f;
 }
 
+static int32 auto_abs(int32 d)
+{
+  return (d < 0) ? -d : d;
+}
+
+static int32 auto_med3(int32 a, int32 b, int32 c)
+{
+  if(a > b) { int32 t = a; a = b; b = t; }
+  if(b > c) b = c;
+  return (a > b) ? a : b;
+}
+
 int bode_auto_span(const uint64 *f, const int32 *m, const int32 *p, const uint16 *fl, const uint8 *have, int n,
                    int start_i, int stop_i, bode_autospan *o)
 {
-  uint8 ok[BODE_MAX_POINTS];
+  static int32 mm[BODE_MAX_POINTS];
+  static int   vi[BODE_MAX_POINTS];
+  uint8 ok[BODE_MAX_POINTS], absurd[BODE_MAX_POINTS];
   bode_markers mk;
-  int   i, good = 0, a = -1, b = -1, changing = 0, coarse = 0;
+  int   i, k, nv, good = 0, ch1low = 0, nabs = 0, abs_low = 0, a = -1, b = -1, changing = 0, coarse = 0;
   uint64 lo = 0, hi = 0, f0 = 0;
   uint32 q = 0;
 
@@ -1139,19 +1153,73 @@ int bode_auto_span(const uint64 *f, const int32 *m, const int32 *p, const uint16
   o->q_x100  = 0;
   o->f0_mhz  = 0;
   o->coarse  = 0;
+  o->ref_mdb = 0;
+  o->absurd  = 0;
 
   if(n > BODE_MAX_POINTS)
     n = BODE_MAX_POINTS;
 
-  for(i = 0; i < n; i++)
+  for(i = 0, nv = 0; i < n; i++)
   {
     ok[i] = (uint8)(have[i] && !(fl[i] & BODE_F_BAD));
+    absurd[i] = 0;
 
     if(have[i] && !(fl[i] & (BODE_F_NEAR_FLOOR | BODE_F_LOW_SNR)))
+    {
       good++;
+      if(fl[i] & BODE_F_CH1_LOW)
+        ch1low++;
+    }
+
+    if(ok[i])
+      vi[nv++] = i;
+  }
+
+  if(!good)
+    return BODE_AS_NO_RESPONSE;
+
+  //fw 0.2.84: CH1 too small on most points: the ratio means nothing (owner 2026-10-20 11:23)
+  if(2 * ch1low > good)
+    return BODE_AS_CH1_LOW;
+
+  //fw 0.2.84: absurd points (a bad record): more than 20 dB from both valid neighbours; an end point from both of the
+  //next two valid points. One is dropped; two or more, or one where the reference is taken, make the pass inconsistent.
+  for(k = 0; k < nv; k++)
+  {
+    int32 y = m[vi[k]];
+    int   ka, kb;
+
+    if((k > 0) && (k < nv - 1))           { ka = k - 1;  kb = k + 1; }
+    else if((nv >= 3) && (k == 0))        { ka = 1;      kb = 2; }
+    else if((nv >= 3) && (k == nv - 1))   { ka = nv - 2; kb = nv - 3; }
+    else
+      continue;
+
+    if((auto_abs(y - m[vi[ka]]) > BODE_AS_ABSURD_MDB) && (auto_abs(y - m[vi[kb]]) > BODE_AS_ABSURD_MDB))
+    {
+      absurd[vi[k]] = 1;
+      nabs++;
+      if(k < 3)
+        abs_low = 1;
+    }
+  }
+
+  o->absurd = (uint8)nabs;
+
+  if((nabs >= 2) || abs_low)
+    return BODE_AS_INCONSISTENT;
+
+  for(i = 0, nv = 0; i < n; i++)
+  {
+    if(absurd[i])
+      ok[i] = 0;
+
+    mm[i] = m[i];
 
     if(ok[i])
     {
+      vi[nv++] = i;
+
       if(a < 0)
         a = i;
       else if(b < 0)
@@ -1159,14 +1227,31 @@ int bode_auto_span(const uint64 *f, const int32 *m, const int32 *p, const uint16
     }
   }
 
-  if(!good)
-    return BODE_AS_NO_RESPONSE;
+  //The reference level: the median of the three lowest-frequency valid points (the markers take the first)
+  if(nv >= 3)
+    mm[vi[0]] = auto_med3(m[vi[0]], m[vi[1]], m[vi[2]]);
 
-  bode_markers_find(f, m, p, ok, n, &mk);
+  bode_markers_find(f, mm, p, ok, n, &mk);
+  o->ref_mdb = mk.ref_mdb;
 
+  //A resonance's peak counts only with a valid point on either side of it (two adjacent points confirm it)
+  if(mk.shape == BODE_SHAPE_RESONANT)
+  {
+    int pk = vi[0];
+
+    for(k = 1; k < nv; k++)
+      if(mm[vi[k]] > mm[pk])
+        pk = vi[k];
+
+    if((pk == 0) || (pk >= n - 1) || !ok[pk - 1] || !ok[pk + 1])
+      return BODE_AS_UNCONFIRMED;
+  }
+
+  //fw 0.2.84: the magnitude from the reference (the median) to the third valid point, so one bad first record does not
+  //read as a slope; the phase from the first two
   if((a >= 0) && (b >= 0))
   {
-    int32 dm = m[b] - m[a], dp = bode_wrap_mdeg(p[b] - p[a]);
+    int32 dm = (nv >= 3) ? m[vi[2]] - mm[a] : m[b] - m[a], dp = bode_wrap_mdeg(p[b] - p[a]);
 
     changing = (dm > 1000) || (dm < -1000) || (dp > 5000) || (dp < -5000);
   }

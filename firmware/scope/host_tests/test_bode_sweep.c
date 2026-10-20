@@ -779,6 +779,7 @@ static int overview(uint64 *f, int32 *m, int32 *ph, uint16 *fl, uint8 *have)
   run(&eng, 600000);
   T_EQ(bode_state(&eng), BODE_ST_DONE);
   n = bode_count(&eng);
+  printf("  overview: %d CH2 range switches\n", bode_switches(&eng));
 
   for(i = 0; i < n; i++)
   {
@@ -832,9 +833,105 @@ static int synth(double f0, double f1, int n, double fr, double q, double k, uin
   return n;
 }
 
+//fw 0.2.84 (bode-ui.md 3.2, owner 2026-10-20 11:23): absurd points, the median reference, the confirmed peak, CH1 low
+static void test_auto_span_absurd(void)
+{
+  static uint64 f[BODE_MAX_POINTS];
+  static int32  m[BODE_MAX_POINTS], ph[BODE_MAX_POINTS], m0[BODE_MAX_POINTS];
+  static uint16 fl[BODE_MAX_POINTS];
+  static uint8  have[BODE_MAX_POINTS];
+  bode_autospan a;
+  int n, i, pk;
+
+  //The owner's RC (1 kOhm / 15 nF): clean 1 kHz .. 200 kHz (steps 9..16)
+  dut_rc(&D);
+  D.r = 1000; D.c = 15e-9;
+  n = overview(f, m, ph, fl, have);
+  for(i = 0; i < n; i++)
+    m0[i] = m[i];
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_SPAN);
+  T_EQ(a.absurd, 0);
+  T_TRUE(a.ref_mdb > -1000);
+  T_TRUE(a.ref_mdb < 1000);
+
+  //A first point 6 dB low (a bad record, not absurd): the median of the three lowest gives the reference, same span
+  m[0] = m0[0] - 6000;
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_SPAN);
+  T_TRUE(a.ref_mdb > -1000);
+  T_EQ(a.start_i, 9);
+  T_EQ(a.stop_i, 16);
+
+  //A first point 35 dB low (the saturated first record): absurd where the reference is taken, inconsistent
+  m[0] = m0[0] - 35000;
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_INCONSISTENT);
+  m[0] = m0[0] + 30000;
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_INCONSISTENT);
+  m[0] = m0[0];
+
+  //One absurd point inside (30 dB up at point 15, 870 kHz): dropped, not a peak, the span as clean
+  m[15] = m0[15] + 30000;
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_SPAN);
+  T_EQ(a.absurd, 1);
+  T_EQ(a.q_x100, 0);
+  T_EQ(a.coarse, 0);
+  T_EQ(a.start_i, 9);
+  T_EQ(a.stop_i, 16);
+
+  //... and 30 dB down: the same
+  m[15] = m0[15] - 30000;
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_SPAN);
+  T_EQ(a.absurd, 1);
+  T_EQ(a.start_i, 9);
+  T_EQ(a.stop_i, 16);
+
+  //19 dB is not absurd (a real response can step that far): kept
+  m[15] = m0[15] + 19000;
+  bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a);
+  T_EQ(a.absurd, 0);
+
+  //Two absurd points: inconsistent
+  m[15] = m0[15] + 30000;
+  m[17] = m0[17] - 30000;
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_INCONSISTENT);
+  m[15] = m0[15];
+  m[17] = m0[17];
+
+  //CH1 under 20 codes on most good points: CH1 low; on a few: the span as clean
+  for(i = 0; i < n; i++)
+    fl[i] |= BODE_F_CH1_LOW;
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_CH1_LOW);
+  for(i = 3; i < n; i++)
+    fl[i] &= (uint16)~BODE_F_CH1_LOW;
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_SPAN);
+  T_EQ(a.start_i, 9);
+
+  //A tank (Q 8.1 at 50.3 kHz) whose peak lacks a valid neighbour: not confirmed
+  n = synth(100, 1e7, 20, 50300, 8.1, 0.87, f, m, ph, fl, have);
+  for(pk = 0, i = 1; i < n; i++)
+    if(m[i] > m[pk])
+      pk = i;
+  T_TRUE((pk > 0) && (pk < n - 1));
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_SPAN);
+  fl[pk + 1] = BODE_F_UNSETTLED;
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_UNCONFIRMED);
+  fl[pk + 1] = 0;
+  have[pk - 1] = 0;
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_UNCONFIRMED);
+  have[pk - 1] = 1;
+
+  //A lone spike 30 dB above a flat divider (an absurd point that would read as a sharp tank): dropped, flat, no pass
+  dut_rc(&D);
+  D.r = 991; D.c = 0; D.rl = 102;
+  n = overview(f, m, ph, fl, have);
+  m[10] += 30000;
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_FLAT);
+  T_EQ(a.coarse, 0);
+}
+
 //AUTO SET's passes on a synthetic tank: the overview, then bode_auto_zoom's passes until the span can be set
 static void auto_passes(double fr, double q, bode_autospan *a, int *passes)
 {
+  int32 prev_ref = 0;
   static uint64 f[BODE_MAX_POINTS];
   static int32  m[BODE_MAX_POINTS], ph[BODE_MAX_POINTS];
   static uint16 fl[BODE_MAX_POINTS];
@@ -849,6 +946,10 @@ static void auto_passes(double fr, double q, bode_autospan *a, int *passes)
     T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, a), BODE_AS_SPAN);
     printf("  tank Q %.1f at %.0f Hz, pass %d (%.0f .. %.0f Hz): f0 %.0f Hz, Q %.2f, coarse %d, steps %d..%d, settle %d\n",
            q, fr, *passes, lo, hi, a->f0_mhz / 1000.0, a->q_x100 / 100.0, a->coarse, a->start_i, a->stop_i, a->settle);
+    //fw 0.2.84: a finer pass never reads the peak more than 6 dB lower (bode_view's consistency check)
+    if(*passes > 1)
+      T_TRUE(a->ref_mdb >= prev_ref - 6000);
+    prev_ref = a->ref_mdb;
     if(!bode_auto_zoom(a, *passes, &zc))
       break;
     T_EQ(zc.points, 20);
@@ -986,6 +1087,7 @@ static void test_auto_span(void)
   for(i = 0; i < n; i++)
     have[i] = 0;
   T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_NO_RESPONSE);
+  test_auto_span_absurd();
 }
 int main(void)
 {

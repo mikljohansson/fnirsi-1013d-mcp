@@ -211,9 +211,19 @@ uint64 bode_step_mhz(int i);
 //  still changing at the low end (the first two valid points differ by more than 1 dB or 5 deg): Start 10 Hz
 //The span is snapped outwards to the steps. BODE_AS_FLAT: no corner, the span is kept; BODE_AS_NO_RESPONSE: every
 //measured point is near the floor or under the noise, the span is kept.
+//fw 0.2.84 (bode-ui.md 3.2): an absurd point (more than 20 dB from both its valid neighbours; an end point: from both of
+//the next two valid points) is dropped; the reference level is the median of the three lowest-frequency valid points.
+//Failures (AUTO SET ends in STOP, settings kept; owner 2026-10-20 11:23): BODE_AS_INCONSISTENT two or more absurd points,
+//or one among the three lowest-frequency valid points (where the reference is taken); BODE_AS_UNCONFIRMED a resonance
+//whose peak point lacks a valid point on either side (a peak needs its two adjacent points); BODE_AS_CH1_LOW CH1 under
+//20 codes on more than half of the good points.
 #define BODE_AS_SPAN          0
 #define BODE_AS_FLAT          1
 #define BODE_AS_NO_RESPONSE   2
+#define BODE_AS_INCONSISTENT  3
+#define BODE_AS_UNCONFIRMED   4
+#define BODE_AS_CH1_LOW       5
+#define BODE_AS_ABSURD_MDB    20000     //an absurd point: more than 20 dB from both neighbours
 
 typedef struct
 {
@@ -221,6 +231,8 @@ typedef struct
   uint32 q_x100;              //the Q used (0: none)
   uint64 f0_mhz;              //the corner or resonance found (0: none)
   uint8  coarse;              //fw 0.2.71: the band was narrower than two point spacings (Q a lower bound)
+  int32  ref_mdb;             //fw 0.2.84: the reference level (a resonance: its peak), for the passes' consistency check
+  uint8  absurd;              //fw 0.2.84: absurd points dropped
 } bode_autospan;
 
 //fw 0.2.71: an unresolved band (coarse) is measured again on finer passes around f0 before the span is set (pass 2
