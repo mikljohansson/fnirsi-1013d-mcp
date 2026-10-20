@@ -558,8 +558,8 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 - fpga-gen13 (Fable, dispatched 20:00): why every record on 0x153B is spliced on the unit (triggered and untriggered, the
   ring frozen after the capture, the seam fixed in the stored record) while tb_timeout and the 13-step run pass: the
   MCU-side read geometry (0x14, record start, the readout's latency words) vs fpga-gen11's capture-logic change; evidence
-  in backups/bench-153b/. 0x153B's dist status to "withdrawn (bench 2026-10-20 19:57)" until fixed; the unit goes back to
-  0x153A (rollback = the pre-write backup) unless the owner keeps it for debugging.
+  in backups/bench-153b/. 0x153B's dist status to "withdrawn (bench 2026-10-20 19:57)" until fixed; the unit keeps 0x153B
+  (owner 20:02: no rollback, roll forward when fixed; the scope is not needed for about two weeks).
 
 - fw-diag (Opus, dispatched 18:15, done 18:37, merged as fw 0.2.100 and loaded 18:43, Status page check pending; section 66; open: counter 49 counts deliberate restarts too, a deliberate restart after a crash overwrites the stored record): the Restarts tile per the owner's verdict meanings
   (OK = no crashes, deliberate restarts not mentioned; Check = an earlier run crashed; Fault = a crash in this run; no

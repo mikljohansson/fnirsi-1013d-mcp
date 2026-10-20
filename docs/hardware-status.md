@@ -1416,3 +1416,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   or the window the FPGA captured), for triggered captures as well, which fpga-gen11/12's testbench did not model. Evidence
   in backups/bench-153b/ (records_153b_2000.npz: three untriggered and three triggered records with the seam positions;
   reread_153b.npz; events_153b_capture.json: the FPGA-write events of one capture; cells_153b.npz). fpga-gen13 dispatched.
+- 2026-10-20 20:02 **(owner)**: 0x153B stays in the chip; no rollback. Roll forward to the fixed bitstream when it is proven;
+  the owner does not need the scope for about two weeks (until early November 2026). The unit on 0x153B is available for
+  firmware-side experiments over USB (the FEL loop and the host tools work; captures are spliced). The flash session for the
+  fix needs the owner present as always. Rollback image if ever needed: backups/fpga-flash_pre-0x153B_20261020-1931.bin
+  (= backups/20261020-193108-pre-write.bin, 77672b5a..).
