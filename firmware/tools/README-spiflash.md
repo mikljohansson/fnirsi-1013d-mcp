@@ -21,10 +21,12 @@ Only channel A has MPSSE on the FT2232D; the tool opens D2XX serial `A` (overrid
 | GND | GND | | 4 GND |
 
 Pins 3 (/WP) and 7 (/HOLD) must be high. Do not connect the adapter's power pins to the scope.
-**Uncertainty:** the TCK/TDI/TDO/TMS to ADBUS0..3 mapping is the standard FTDI JTAG convention. A web search
-did not find the Sipeed schematic, so the silkscreen is unconfirmed. `probe` prints the idle pin state
-(expected `0xfc` unconnected). A valid JEDEC ID confirms the wiring; if you read 00/FF, check the labels
-against ADBUS0..3 before suspecting the flash.
+The TCK/TDI/TDO/TMS to ADBUS0..3 mapping is the standard FTDI JTAG convention; the Sipeed schematic was never
+found, but the mapping is confirmed on the maintainer's adapter by the valid JEDEC ID it reads with this wiring.
+`probe` prints the idle pin state (expected `0xfc` unconnected). A valid JEDEC ID confirms the wiring; if you
+read 00/FF, check the labels against ADBUS0..3 before suspecting the flash. On the 1013D the header's own pin order
+is found by continuity first (`docs/guide/prepare.md`); on the maintainer's board it is 1 /CS, 2 DO, 3 CLK, 4 DI,
+5 VCC, 6 GND.
 
 ## Commands
 
@@ -43,7 +45,9 @@ and long files truncated, each with a warning.
 
 ## Backup procedure
 
-1. Power the scope off and remove the battery path if possible. Connect as above.
+1. On the 1013D: scope switched on and running from its battery, USB unplugged (no PC, no charger), the header's
+   VCC pin and the adapter's power pins unconnected. Connect as above. This is how every backup and every write on
+   the maintainer's unit was done, 2026-10-18 to 2026-10-20 (`docs/hardware-status.md`).
 2. `probe`: expect `ef 40 14` (or `5e 60 14` for a ZB25VQ80 clone, which the stock dump was taken from).
 3. `read -o backups/fpga-flash-orig.bin --twice` - fails if the two reads differ. Note the printed sha256.
 4. Check the header: 32 bytes of `ff`, then `cc 55 aa 33` at offset 32 (AL3 sync word, see
@@ -54,15 +58,16 @@ and long files truncated, each with a warning.
 ## Safety notes
 
 - 3.3 V only. A 5 V adapter level will destroy the flash and the FPGA.
-- The FPGA shares the SPI bus and, with the board off, is unpowered, so in-circuit reads usually work
-  (the flash is powered through the bus pins and the FPGA's input clamps; keep clock low). If reads are
-  unstable, first lower `--clock` (e.g. 500000). There is no way to hold the FPGA in reset from this adapter.
-- Alternatives: lift flash pin 1 (/CS) and wire the adapter to the lifted pin, or read with the board powered
-  (several forum reports say this worked, with the FPGA idle after its own configuration; the FPGA then must
-  not be reading the flash, which it only does at power-up). With the board powered, do not connect the
-  adapter's power pins and never write.
-- A powered board risks bus contention; prefer an unpowered target with the flash powered via the adapter's
-  3.3 V only if you accept that the FPGA also gets partially powered through its I/O.
+- Power state. On the 1013D this project reads and writes with the board powered from its battery and USB
+  unplugged (above): the FPGA shares the SPI bus but reads the flash only at power-up, so once it is configured
+  it leaves the bus alone, and every write on the maintainer's unit read back identical that way. The adapter's
+  power pins stay unconnected; the scope powers the flash. If reads are unstable, first lower `--clock` (e.g.
+  500000). There is no way to hold the FPGA in reset from this adapter.
+- General caution for other boards: a powered target can mean bus contention with whatever else drives the SPI
+  lines, and an unpowered target with the flash fed from the adapter's 3.3 V also powers the FPGA partially
+  through its I/O clamps. Writing the 1013D with the board off is untested here. The alternative that avoids
+  both is to lift flash pin 1 (/CS) and wire the adapter to the lifted pin.
 - Never write without a verified backup (AGENTS.md rule). `--no-backup` exists for chips already dumped.
-- The script has been tested against a simulated chip and on real hardware only up to `probe` with nothing
-  attached (MPSSE sync passes, idle pins 0xfc, ID ff ff ff).
+- Test status: tested against a simulated chip, and on the maintainer's unit for every FPGA flash backup and write
+  from 0x1532 (2026-10-18) to 0x153B (2026-10-20), each one read back and verified (`docs/hardware-status.md`;
+  the list of images is `fpga/al3/dist/BITSTREAMS.md`).
