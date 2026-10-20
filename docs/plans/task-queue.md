@@ -276,11 +276,49 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-spec measured update (done 23:27, merged 23:29 as bb2880b; 827 lines): TD-measured deltas on the 0x153B source: DDS -61
+  LUT, cruft (0x1B/0x3C/0x41/0x24-0x27 decoder entries, dec_neg, dec_swap, sample_read_enable, trigger_detect_enable, w_last
+  under SIM) -78, divider compare 32->20 bits -53; the two-step fractional pattern core +48 LUT / +231 reg (one 16-bit
+  accumulator per engine, cleared on burst start; the carry path is pipelined in the contract). Totals: 0x153C ~71 %, 0x153D
+  ~79 %, 0x153E ~85 % with ~1,300 LUT margin. Generator = two-step pattern (0x6C u32 + u16 fraction, double buffer 0x6D bit
+  5 / 0x39 bit 5), SET_GEN keeps its layout (P16 / H16 in 1/65536 clocks), Bode P = 4 M, 0x51/0x52 retired. Coordinator
+  plan change: the C0 cruft removal (contract: "first, on main") is folded into C4 integration (Fable) after C1-C3 merge,
+  so the three running RTL branches are not disturbed; fw-one told 23:29 to stop writing 0x53 bits 3/4 and to bound the
+  divider at 199,999.
+- ui-rows-review (Opus, dispatched 23:39, done before 23:48, read-only): adversarial review of the Type / Sample row mockups and note against
+  docs/ui-guidelines.md and the owner's taste; answers to the note's six open questions so the coordinator can decide
+  tonight and the owner veto in the morning.
+- ui-rows round 2 (done 23:55, merged 23:56 as e433ed2): all review items in the boards and the note (ACQ 478 px with five
+  chips and the real pass-time y, Pulse polarity row, pixel glyphs, viewer and Frequency response boards, "Bars", Idle
+  "Off", keypad for N, snap notices queued time/div first, marker 0xA000). Leftovers accepted by the coordinator: the
+  "not applied" note on four lines in the 66 px column; in Frequency response the parameter rows are not drawn (the sweep
+  does not use them) so the menu fits. The mockups are the acceptance reference for the C5/C6 UI items; owner veto pending.
+- Coordinator decisions on the ui-rows review (23:4x, as the owner's proxy, owner veto pending): ACQ menu widened to 478 px
+  with Sample as the fourth box (the mockup hid a collision with the five memory chips and drew the pass time at the
+  wrong y); no silent clamp: Width / Idle snap to the rate's range with the snap notice, +/- stop at the ends, Width
+  Shorter >= 2 words; no feature gating (one-bitstream rule); hints say only what the firmware knows; under Pulse the edge
+  row becomes Pulse polarity Positive / Negative; trace style "Peak" renamed "Bars"; Idle zero step "Off", values
+  capitalised; no Sample box in Spectrum, grey in roll; viewer and Frequency response boards; N by +/- and the generator
+  keypad on a tap, no held repeat; chip glyphs in firmware pixels; bars drawn with the integer step, overload from either
+  byte, phosphor accumulates, X-Y midpoints. ui-rows round 2 dispatched just before 23:48.
+- ui-rows (Opus, dispatched 23:15, done 23:37, merged 23:38 as 1742743): eight mockups under docs/mockups/ui-rows/ (a
+  headless-Chrome PNG renderer added to gen_ux), docs/plans/ui-rows.md. Type as the trigger menu's sixth row with Width
+  / shorter-longer or N / Idle parameter rows (+/- ladder), the chip shows the type as a glyph in the edge slot, Peak greys
+  Filter and Average with a note, "Scope only" in Spectrum; six open questions (ladder-only values, glyph vs word, N
+  held-repeat, Peak with phosphor/X-Y, Sample in Spectrum, Idle on EXT).
+ mockups and design note docs/plans/ui-rows.md for the two decided UI rows (Type in the
+  trigger menu: Edge / Pulse width / Nth edge with parameters; Sample in ACQ: Normal / Peak, and the Peak-vs-Filter
+  presentation), the trigger chip's text per type, a peak-detect trace mockup, the firmware checklist; adversarial review
+  follows, the owner sees the mockups with the morning batch.
 - mcp-soft (Opus, dispatched 22:06, done 22:45, merged 22:46 as 8eaf912; ruff clean, 496 tests): scope_decode (UART auto-baud,
   SPI, I2C; limits: UART >= 4 samples per bit advised, refused under 2; SPI 3 per clock; I2C 8 per SCL period), scope_mask_test
   (masks stored under the data dir, exact geometry only), scope_export_csv, scope_dvm (resolution statement); simulator
   serial signals; report kinds. README and release notes say 34 tools; release notes need a line on the four tools
   (release follow-up).
+- **Overnight autonomy** (owner 23:1x): continue the roadmap without the owner as far as 0x153E; the owner verifies
+  everything as one batch (or bisects by flashing 0x153C, 0x153D in turn if the batch fails). No hardware tonight: images
+  and bitstreams are built, simulated and pinned; every generation keeps its own dist entry and firmware image for the
+  bisect.
 - **0.3.0 scope** (owner 23:08): 0.3.0 ships when the chosen roadmap items are complete and benched, not the current
   feature set; realistically 2026-10-21 or 10-22. Contents: fw-one (one bitstream, banner, one averaging), mcp-soft tools,
   0x153C (triggers, hold-off, peak detect, counter) with its firmware and MCP 1.25 and the two UI rows, 0x153D (logger,
