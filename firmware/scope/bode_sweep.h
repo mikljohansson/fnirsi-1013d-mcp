@@ -302,6 +302,7 @@ struct bode_eng
   uint8     mbg, forced;
   uint8     retake;                           //fw 0.2.87: this capture is the retake of a suspect record
   uint32    msettle;                          //its settle time (ms), for the retake
+  uint8     clip_again;                       //fw 0.2.89: the planned point's clip was measured again
 
   bode_thru thru;
 

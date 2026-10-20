@@ -186,6 +186,8 @@ int    bode_flat1(const bode_meas *m);
 int    bode_ch1_dead(const bode_meas *m);
 int    bode_suspect(const bode_meas *m);
 int    bode_flat2(const bode_meas *m, int coll);
+//fw 0.2.89: CH1 energy beside the fundamental above LEAK_LIMIT_DB (the incoherent flag's test)
+int    bode_incoherent(const bode_meas *m);
 //BODE_F_CH1_CLIPPED .. BODE_F_UNSETTLED of a measurement (ch1_clipped, clipped, ch2_overload, ch1_low, ch2_small, low_snr,
 //incoherent, unsettled); the engine adds fir_off, near_floor, retried, spliced and the thru's flags
 uint16 bode_meas_flags(const bode_meas *m, int coll);
