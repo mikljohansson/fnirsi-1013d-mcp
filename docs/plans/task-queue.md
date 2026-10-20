@@ -281,6 +281,10 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   (masks stored under the data dir, exact geometry only), scope_export_csv, scope_dvm (resolution statement); simulator
   serial signals; report kinds. README and release notes say 34 tools; release notes need a line on the four tools
   (release follow-up).
+- **Overnight autonomy** (owner 23:1x): continue the roadmap without the owner as far as 0x153E; the owner verifies
+  everything as one batch (or bisects by flashing 0x153C, 0x153D in turn if the batch fails). No hardware tonight: images
+  and bitstreams are built, simulated and pinned; every generation keeps its own dist entry and firmware image for the
+  bisect.
 - **0.3.0 scope** (owner 23:08): 0.3.0 ships when the chosen roadmap items are complete and benched, not the current
   feature set; realistically 2026-10-21 or 10-22. Contents: fw-one (one bitstream, banner, one averaging), mcp-soft tools,
   0x153C (triggers, hold-off, peak detect, counter) with its firmware and MCP 1.25 and the two UI rows, 0x153D (logger,
