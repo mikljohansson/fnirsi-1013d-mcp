@@ -1188,4 +1188,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   its finer passes, each pass re-ranging CH2 (the relay clicks), and RUN then repeated on the wrong span. Same root cause as
   10:55 (fpga-gen10 running). Robustness follow-ups for the engine (queue item (b)): a single absurd point must not define the
   reference level; a retaken first record. The scope is left in the Frequency response view, STOP.
+- 2026-10-20 11:40: fw 0.2.84 (fw-fr3: Single sweep button states, generator restored after a sweep, CH1-low causes, AUTO SET fails
+  fast with a note, absurd overview points dropped) merged, pinned backups/fw-0.2.84_77d76fe6.bin (sha256
+  77d76fe65ebd9abae76df9f36241105c463eaa9f3ed1757357da4844739479e4), loaded 11:40. mcp-gen7 merged 11:40 (idle port close,
+  flat-record retakes; the running server process keeps the old code until the session restarts). Owner next: AUTO SET on the
+  RC (expected: 1 kHz .. 200 kHz in RUN, or a "no consistent response" stop if the first record is bad), Single sweep from the
+  fold-out (firmware/AGENTS.md section 55 steps 1..5).
 
