@@ -1061,4 +1061,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   code 128 on 0x1539 fails on both channels: CH1 "ADC readout fault", CH2 "too much noise" (the A-core garbage classified as noise
   there; both loud, as intended; minor: the noise classifier could name the readout fault when rail samples are present, queued
   later). Next: the 0x153A flash session.
+- **FPGA flash written with bitstream 0x153A** (2026-10-20 10:02-10:03, Sipeed FT2232D on J2, scope on battery, USB unplugged):
+  JEDEC ef 40 14; pre-write dump backups/20261020-100247-pre-0x153A.bin and the tool's double-read
+  backups/20261020-100301-pre-write.bin both sha256 22db7b91... = the pinned 0x1539 padded image; wrote
+  backups/al3_cap_0x153A_75e0ef21_padded.bin: 70 sectors erased, 1105 pages programmed, write verified sha256 77672b5a...
+  Rollback: the 0x1539 padded image. Next: power cycle, fw 0.2.79 FEL-load, `#VER fpga=0x153A`, caps bit 19, then
+  firmware/AGENTS.md section 54 / fpga/al3/README.md section 10 items 1..7.
 
