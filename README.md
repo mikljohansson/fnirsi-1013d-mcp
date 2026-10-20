@@ -105,12 +105,12 @@ when any check fails. In Claude Code the `fnirsi-install` skill picks the runboo
 
 ### By hand (a WSL or Linux shell; every command with its expected result: [`docs/guide/install.md`](docs/guide/install.md))
 
-1. **Back up** the SD card you will use and the FPGA flash, twice ([`docs/guide/prepare.md`](docs/guide/prepare.md)).
-2. **Flash the bitstream** (0x153B) with your SPI programmer as [`fpga/al3/dist/BITSTREAMS.md`](fpga/al3/dist/BITSTREAMS.md)
-   describes. The FPGA comes before the card: with the stock bitstream, this firmware only shows a banner.
-3. **Download** `fnirsi_1013d-fw-X.Y.Z.bin`, `fnirsi_1013d-sdtools-X.Y.Z.zip` and `SHA256SUMS` from the
+1. **Download** `fnirsi_1013d-fw-X.Y.Z.bin`, `fnirsi_1013d-sdtools-X.Y.Z.zip`, the bitstream file and `SHA256SUMS` from the
    [releases page](https://github.com/mikljohansson/fnirsi-1013d-mcp/releases) and check them with
    `sha256sum -c SHA256SUMS --ignore-missing`.
+2. **Back up** the SD card you will use and the FPGA flash, twice ([`docs/guide/prepare.md`](docs/guide/prepare.md)).
+3. **Flash the bitstream** (0x153B) with your SPI programmer as [`fpga/al3/dist/BITSTREAMS.md`](fpga/al3/dist/BITSTREAMS.md)
+   describes. The FPGA comes before the card: with the stock bitstream, this firmware only shows a banner.
 4. **Prepare the card** with one FAT32 partition that starts at 8 MiB (sector 16384) or later: the `parted` and
    `diskpart` commands are in [`docs/guide/install.md`](docs/guide/install.md), "Prepare the card".
 5. **Build the parts** from the tools zip. This downloads Atlan4's bootloader and updater from his repository and
