@@ -69,7 +69,14 @@ nav:
       - MCP tools and safety tiers: mcp-tools.md
       - Measurement guide: agent-measurement-guide.md
   - Engineering:
-      - Articles: articles/index.md
+      - Articles:
+          - Overview: articles/index.md
+          - The calibration story: articles/calibration.md
+          - ADC capture faults: articles/adc-capture-fault.md
+          - Decimation filters and the FIR: articles/decimation.md
+          - The MMU and the FFT: articles/mmu-fft.md
+          - Frequency response: articles/frequency-response.md
+          - The UX makeover: articles/ux-makeover.md
       - Protocol: protocol.md
       - UI guidelines: ui-guidelines.md
       - Flashing the FPGA from the MCU: fpga-flash-from-mcu.md
