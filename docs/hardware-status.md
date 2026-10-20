@@ -1246,4 +1246,16 @@ Newest entries at the bottom. Format: date, who, what, result.
   magnitude wandering by 0.6 dB; the bad records start at ordinary codes (no rails), so the record geometry relative to the
   filter warm-up is the cause, not garbage words. That is the knee instability and the spurious clips that jumbled the plan.
   fw-eng2 builds the fix (lead-in skip, triggered arm or a longer wait, planned clip retaken before stepping up).
+- 2026-10-20 12:40-12:42: fw 0.2.89 (fw-eng2: every sweep capture armed on CH1 rising at code 128, a record with CH1 leak above
+  -40 dB retaken once, a planned clip retaken before stepping up, below-floor points step down as far as needed) pinned
+  backups/fw-0.2.89_b3aa9510.bin (sha256 b3aa95102e9223ad68a2ad53d5cf8c92ed77e8d6fa1f20a210c6dcb16d01af70), loaded. Ten device
+  sweeps on the RC with the user's trigger marker set off the signal: switches 4, 3, 3, 0, 0, 0, 0, 0, 0, 0; CH2 ranges monotonic
+  3..5 from sweep 3; flagged points 4, 2, 3, 0, 5, 1, 0, 0, 0, 2 (incoherent / unsettled on sweeps 4, 5, 9; spliced marks on the
+  first three); retried 5..15 per sweep (the -40 dB leak retake fires often: time-out records are still spliced underneath);
+  10.0 kHz -2.85 / -2.86 dB every sweep, 21.6 kHz -6.74 in 7 of 10 (-6.86, -6.61, -6.77 the others; host -6.738); 2.5..3.5 s per
+  sweep. Leaving the mode gave the user's trigger back (level 240 for my 250 request: the level's own steps). fw-eng2's
+  finding from cells_1235: 15 of 32 time-out-started records are spliced from two captures (a phase jump at a random sample,
+  806 or 1774 of 2048), 64 of 64 triggered records clean; the C measurement matches the host's on all 96 real records. The
+  splice is an FPGA / readout geometry question (fpga-gen11): it also hits the Scope's own auto-mode records when no trigger
+  comes.
 

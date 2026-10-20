@@ -490,6 +490,14 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
+- fw-eng2 (done 12:38, about 390k tokens in total with fw-eng, merged 12:42 as fw 0.2.89, handoff firmware/AGENTS.md section 58):
+  the engine arms on CH1 rising at 128 (restored on leaving), spliced records (CH1 leak > -40 dB) retaken, planned clips retaken
+  before stepping up, below-floor points step down in one sweep; firmware/tools/bode_cells.py. Benched 12:42: plan settles by
+  sweep 3, zero switches after, four clean sweeps of seven; retries 5..15 per sweep remain (the spliced time-out record).
+- fpga-gen11 (Fable, dispatched 12:42): why a time-out-started record on 0x153A is spliced from two captures (phase jump at a
+  random sample; cells_1235.npz), with the readout geometry (record start from the trigger address, 0x153A's extra word of ADC
+  latency, the auto time-out path 0x0E / 0x18) in FPGA and firmware; also the Scope's auto-mode traces.
+
 - fw-decfix (done 12:22, about 210k tokens, merged 12:25 as fw 0.2.88, handoff firmware/AGENTS.md section 57): the last 0x0D /
   0x53 / 0x54 / 0x56 values are tracked in fpga_bus.c, `pc_hal_divider_now()` feeds pc_decim_next / pc_arm_geometry / GET_DECIM /
   GET_CAPTURE_INFO / READ_TRACE, 0x54 written at every arm with the filter on, 0x54 / 0x55 traced (event 22) and counted (link
