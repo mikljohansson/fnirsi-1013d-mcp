@@ -2098,10 +2098,21 @@ int pc_glue_ui_hold(int why)
 
 int pc_glue_ui_yield(void)
 {
-  if(!pc_ready || !pc_ui_yield_pending(&pc_sess))
+  if(!pc_ready)
     return 0;
 
-  return 1;
+  //fw 0.2.94: a read-only request (READ_SCREEN, GET_*) is answered here, between the modal loop's iterations, and the
+  //screen stays open; a state-changing one still asks it to close (1.23)
+  if(pc_ui_modal_pending(&pc_sess))
+  {
+    uint8 who = fpga_trace_who;
+
+    fpga_trace_who = FPGA_WHO_HOST;
+    pc_poll(&pc_sess, PC_CTX_MODAL);
+    fpga_trace_who = who;
+  }
+
+  return pc_ui_yield_pending(&pc_sess);
 }
 
 void pc_glue_ui_service(void)

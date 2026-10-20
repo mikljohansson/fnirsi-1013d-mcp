@@ -1095,11 +1095,11 @@ static void busy_with_hold(uint8_t why, const char *text)
   T_EQ(mock.ui_modal, 1); T_EQ(mock.ui_cancels, 0); T_EQ(mock.ch_writes, writes); T_FALSE(pc_ui_yield_pending(&S));
   T_EQ(link_counter(69), refused + 1);
 
-  //The step ends: the next request yields as usual
+  //The step ends: the next request yields as usual (fw 0.2.94: one outside the read-only set, TEST_PATTERN)
   mock.ui_hold = 0;
   mock_clear_resps();
   seq = next_seq++;
-  push_frame(PC_CMD_GET_CHANNEL, seq, "\0", 1);
+  push_frame(PC_CMD_TEST_PATTERN, seq, "\4\0\0\0\0", 5);
   ui_run_modal(50);
   T_EQ(mock.ui_modal, 0); T_EQ(mock.ui_cancels, 1); T_EQ(mock_nresps, 0);
   pc_poll(&S, PC_CTX_MAIN);
@@ -1202,6 +1202,114 @@ static void test_modal_yield(void)
   pc_poll(&S, PC_CTX_ISR);
   pc_poll(&S, PC_CTX_BUSY);
   T_FALSE(pc_ui_yield_pending(&S)); T_EQ(mock_nresps, 0);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0);
+  mock.ui_modal = 0;
+}
+
+//fw 0.2.94 (docs-guide 14:15: screenshots of Settings, menus, viewers came out as the screen after the menu closed):
+//read-only requests (F_MODAL: READ_SCREEN, GET_CHANNEL / TIMEBASE / TRIGGER / DECIM / SEQ / GEN / CAL, READ_BODE) are
+//answered at the modal loop's yield check and the screens stay open; state-changing ones still unwind them (1.23)
+static void test_modal_read_only(void)
+{
+  extern uint16_t mock_screen_pixel(uint32_t row, uint32_t x);
+  uint8_t  q[4];
+  resp_t   r;
+  uint16_t seq, seq2;
+  uint32_t t, refused;
+
+  setup(0x1532);
+  mock.ui_modal = 2;
+  mock.ui_cancels = 0;
+  ui_run_modal(PC_MODAL_MS + 5);
+  refused = link_counter(69);
+
+  //A screenshot of the open screens, 40 rows at a time: answered inside the modal loop, nothing closes, no MAIN poll
+  pc_put_u16(q, 0); pc_put_u16(q + 2, 40);
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_READ_SCREEN, seq, q, 4);
+  t = ui_run_modal(5);
+  T_EQ(t, 5); T_EQ(mock.ui_modal, 2); T_EQ(mock.ui_cancels, 0);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0); T_EQ(r.len, 8 + 40 * 800 * 2);
+  T_EQ(pc_get_u16(r.p + 8 + 2 * 7), mock_screen_pixel(0, 7));
+  T_FALSE(pc_ui_yield_pending(&S)); T_FALSE(pc_ui_modal_pending(&S));
+
+  //The GET_* that only read the settings: the same, one after the other
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_GET_CHANNEL, seq, "\1", 1);
+  seq2 = next_seq++;
+  push_frame(PC_CMD_GET_TRIGGER, seq2, 0, 0);
+  ui_run_modal(10);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0);
+  T_TRUE(find_resp(seq2, &r)); T_EQ(r.h.status, 0);
+  T_EQ(mock.ui_modal, 2); T_EQ(mock.ui_cancels, 0);
+
+  //Only the yield check answers them: the touch scan's BUSY poll and the timer poll leave them queued
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_READ_SCREEN, seq, q, 4);
+  pc_poll(&S, PC_CTX_ISR);
+  pc_poll(&S, PC_CTX_BUSY);
+  T_EQ(mock_nresps, 0); T_TRUE(pc_ui_modal_pending(&S)); T_FALSE(pc_ui_yield_pending(&S));
+  mock_ui_modal_pass(&S);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0); T_FALSE(pc_ui_modal_pending(&S));
+  T_EQ(mock.ui_modal, 2);
+
+  //A state-changing request behind a screenshot: the screenshot first (the menus open), then the screens unwind
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_READ_SCREEN, seq, q, 4);
+  seq2 = next_seq++;
+  push_frame(PC_CMD_SET_CHANNEL, seq2, "\0\0", 2);
+  mock.now++;
+  pc_poll(&S, PC_CTX_ISR);
+  mock_ui_modal_pass(&S);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0);
+  T_EQ(mock.ui_modal, 1);                 //the same yield check then asks the screens to close for SET_CHANNEL
+  ui_run_modal(10);
+  T_EQ(mock.ui_modal, 0); T_EQ(mock.ui_cancels, 2);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_TRUE(find_resp(seq2, &r)); T_EQ(r.h.status, 0);
+
+  //A hold (a calibration step): E_BUSY with its reason at once, as for a yield (row 63)
+  mock.ui_modal = 1;
+  mock.ui_cancels = 0;
+  mock.now += PC_MODAL_MS + 1;
+  ui_run_modal(2);
+  mock.ui_hold = PC_BUSY_CAL;
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_READ_SCREEN, seq, q, 4);
+  ui_run_modal(3);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, PC_E_BUSY); T_EQ(pc_get_u16(r.p), PC_BUSY_CAL);
+  T_EQ(mock.ui_modal, 1); T_EQ(link_counter(69), refused + 1);
+  mock.ui_hold = 0;
+
+  //A UI pass with no yield check (auto set): E_BUSY detail 2 after PC_YIELD_MS
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_READ_SCREEN, seq, q, 4);
+  for(t = 0; (t < PC_YIELD_MS + 10) && !mock_nresps; t++)
+  {
+    mock.now++;
+    pc_poll(&S, PC_CTX_ISR);
+    pc_poll(&S, PC_CTX_BUSY);
+    mock_tx_release();
+  }
+  T_TRUE(t >= PC_YIELD_MS); T_TRUE(t <= PC_YIELD_MS + 2);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, PC_E_BUSY); T_EQ(pc_get_u16(r.p), PC_BUSY_NO_YIELD);
+  T_FALSE(pc_ui_modal_pending(&S)); T_EQ(mock.ui_modal, 1);
+
+  //Not modal (the main loop runs): a screenshot waits for the main loop as before
+  pc_poll(&S, PC_CTX_MAIN);
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_READ_SCREEN, seq, q, 4);
+  pc_poll(&S, PC_CTX_ISR);
+  pc_poll(&S, PC_CTX_BUSY);
+  T_FALSE(pc_ui_modal_pending(&S)); T_EQ(mock_nresps, 0);
   pc_poll(&S, PC_CTX_MAIN);
   T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0);
   mock.ui_modal = 0;
@@ -3491,6 +3599,7 @@ int main(void)
   test_diag_wire();
   test_info();
   test_modal_yield();
+  test_modal_read_only();
   test_shared_basics();
   test_ascii_ver();
   test_channel();
