@@ -151,6 +151,39 @@ static void test_ui_plan(void)
   T_EQ(pc_seq_ui_plan(1500, 750, 199, &us), 8);
   //100 kSa/s (D 1999): 45 ms per record -> no hardware run
   T_EQ(pc_seq_ui_plan(1500, 750, 1999, &us), 0); T_EQ(us, 0);
+
+  //fw-one: the MCU path through the same rule, each record plus its readout (4 bytes x 0.3 us per word)
+  T_EQ(pc_seq_ui_plan_n(0, &us), 0);
+  T_EQ(pc_seq_ui_plan_n(30160, &us), 64); T_EQ(us, (64 * 30160 + 999) / 1000);
+  T_EQ(pc_seq_ui_plan_n(20000000, &us), 2); T_EQ(us, 40000);
+  T_EQ(pc_seq_ui_plan_n(20000001, &us), 0); T_EQ(us, 0);
+  //3000 16-bit samples at 1 MSa/s (D 199, 5 (D + 1) = 1 us per word): 3 ms record + dead + 3.6 ms readout -> 4 records
+  T_EQ(pc_seq_ui_plan_mcu(3000, 1500, 199, 1, &us), 4);
+  T_TRUE((us > 4 * 6600) && (us <= PC_SEQ_UI_BUDGET_US));
+  //6000 legacy samples (3000 words) at 200 MSa/s: 30 us + 3.6 ms readout -> 8
+  T_EQ(pc_seq_ui_plan_mcu(3000, 1500, 0, 0, &us), 8);
+  //3000 16-bit samples at 10 kSa/s (D 19999): 300 ms per record -> single records
+  T_EQ(pc_seq_ui_plan_mcu(3000, 1500, 19999, 1, &us), 0); T_EQ(us, 0);
+  //16382 legacy samples (8191 words) at 200 MSa/s: 82 us + 9.8 ms readout -> 4
+  T_EQ(pc_seq_ui_plan_mcu(8191, 4095, 0, 0, &us), 4);
+  T_EQ(pc_seq_ui_plan_mcu(1500, 1500, 0, 0, &us), 0);
+  T_EQ(pc_seq_ui_plan_mcu(0, 0, 0, 0, &us), 0);
+  //The hardware plan is the same rule without the readout: for a record both could take, the hardware averages more
+  T_TRUE(pc_seq_ui_plan(1500, 750, 0, &us) >= pc_seq_ui_plan_mcu(1500, 750, 0, 0, &us));
+  {
+    uint32_t d;
+
+    for(d=0;d<20000;d+=131)
+    {
+      uint32_t n = pc_seq_ui_plan_mcu(3000, 1500, d, 1, &us);
+
+      if(n)
+      {
+        T_TRUE((n & (n - 1)) == 0); T_TRUE(n >= 2); T_TRUE(n <= 64);
+        T_TRUE(us <= PC_SEQ_UI_BUDGET_US + 1);
+      }
+    }
+  }
   //Too long for the accumulator, or no pretrigger room
   T_EQ(pc_seq_ui_plan(3000, 750, 0, &us), 0);
   T_EQ(pc_seq_ui_plan(2047, 750, 0, &us), 0);

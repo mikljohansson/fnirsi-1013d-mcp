@@ -168,12 +168,10 @@ SCOPESETTINGS savedscopesettings1;
 SCOPESETTINGS savedscopesettings2;
 
 uint32 channel1tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
-uint32 channel1tracebufferAVG[MAX_SAMPLE_BUFFER_SIZE];
 
 DISPLAYPOINTS channel1pointsbuffer[TRACE_POINTS_MAX];      //Buffer to store the x,y positions of the trace on the display
 
 uint32 channel2tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
-uint32 channel2tracebufferAVG[MAX_SAMPLE_BUFFER_SIZE];
 
 DISPLAYPOINTS channel2pointsbuffer[TRACE_POINTS_MAX];      //Buffer to store the x,y positions of the trace on the display
 
@@ -210,8 +208,6 @@ double disp_sample_step;
 
 int32 disp_first_sample;
 
-//uint32 AVG_trigger=128;
-//uint32 AVG_trigger1=128;
 uint32 disp_have_trigger;
 uint32 disp_trigger_index;            //Trigger point in the sample buffers
 

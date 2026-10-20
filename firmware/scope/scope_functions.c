@@ -2188,16 +2188,7 @@ void scope_display_trace_data(void)
     //Check if channel1 is enabled
     if(scopesettings.channel1.enable)
     {          
-        //Average mode active only auto and normal mode, no waveview mode (PC protocol: not over a hardware average)
-        if((scopesettings.average_mode)&&(!scopesettings.waveviewmode)&&((scopesettings.triggermode==0)||(scopesettings.triggermode==2)) PC_SW_AVERAGE())
-        {  
-            for (size_t i = 0; i < MAX_SAMPLE_BUFFER_SIZE; i++) 
-            {  
-                //scopesettings.channel1.tracebuffer[i]=0;
-                scopesettings.channel1.tracebuffer[i] = ((scopesettings.channel1.tracebuffer[i]) + (channel1tracebufferAVG[i]))/2;
-                channel1tracebufferAVG[i]=scopesettings.channel1.tracebuffer[i];
-            }         
-        }
+      //Average (fw-one): the record already is the mean of N records (pc_seq_hw.c), both paths; nothing to do here
       //Set the trace color for the current channel if overload change to red
       if (scopesettings.channel1.ADoverload)display_set_fg_color(RED_COLOR); 
         else display_set_fg_color(CHANNEL1_COLOR);
@@ -2229,19 +2220,6 @@ void scope_display_trace_data(void)
     //Check if channel2 is enabled
     if(scopesettings.channel2.enable)
     {  
-        //Average mode active only auto and normal mode, no waveview mode (PC protocol: not over a hardware average)
-        if((scopesettings.average_mode)&&(!scopesettings.waveviewmode)&&((scopesettings.triggermode==0)||(scopesettings.triggermode==2)) PC_SW_AVERAGE())
-        {
-            for (size_t i = 0; i < MAX_SAMPLE_BUFFER_SIZE; i++) 
-            {  
-                //scopesettings.channel2.tracebuffer[i]=0;
-              
-                scopesettings.channel2.tracebuffer[i] = ((scopesettings.channel2.tracebuffer[i]) + (channel2tracebufferAVG[i]))/2;
-                channel2tracebufferAVG[i]=scopesettings.channel2.tracebuffer[i];
-                
-                //scopesettings.channel2.tracebuffer[i] = scopesettings.channel1.tracebuffer[i];
-            }
-        }    
         //This can be reduced in parameters by using the channel structure as input and add the color as item in the structure 
         //Go and do the actual trace drawing  
           //Set the trace color for the current channel if overload change to red

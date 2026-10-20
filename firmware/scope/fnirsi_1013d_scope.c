@@ -190,8 +190,6 @@ int main(void)
   //memset(channel1tracebuffer, 128, sizeof(channel1tracebuffer));
   //memset(channel2tracebuffer, 128, sizeof(channel2tracebuffer));
   
-  memset(channel1tracebufferAVG, 128, sizeof(channel1tracebufferAVG));
-  memset(channel2tracebufferAVG, 128, sizeof(channel2tracebufferAVG));
    
   //Set the number of samples in use
 //  scopesettings.nofsamples  = SAMPLES_PER_ADC;

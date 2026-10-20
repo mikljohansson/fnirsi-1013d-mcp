@@ -518,7 +518,6 @@ int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t
   //BENCH: T3, T4. Its interleave is B before A, so READ_TRACE follows the 1.00o5 convention.
   scopesettings.nofsamples  = total_samples / 2;
   scopesettings.samplecount = total_samples;
-  pc_seq_trace_replaced();
 
   //fw 0.2.83: ADoverload (sticky in fpga_read_adc_data) describes this readout only: the host capture's flags
   //(pc_capture_finish, READ_TRACE meta, GET_STATUS) and the Bode engine's readouts never carry an earlier one (bench
@@ -794,7 +793,8 @@ void pc_glue_decim_read(void *settings, uint32 start)
 
   pc_dec_raw_n[ch] = 0;
 
-  //0x1536 UI averaging run: the corrected codes of the mean, both passes from memory as for the 16-bit path
+  //UI averaging: the corrected codes of the mean (the hardware run's lane sums or the MCU's sums), both passes from
+  //memory as for the 16-bit path
   if(pc_seq_ui_feed(settings, pc_dec_feed, scopesettings.nofsamples * 2))
   {
     pc_decim_src    = &pc_dec_feed[1];
@@ -2156,8 +2156,9 @@ void pc_glue_ui_capture_addr(uint32 addr)
     if(pc_ui_forced)
       pc_sess.ui_trig = 0;
 
-    //An averaging run is triggered when it holds a record (0x18 is the last record's)
-    pc_seq_ui_done(&pc_sess.ui_trig);
+    //An averaging run is triggered when it holds a record (0x18 is the last record's); the MCU path's further records
+    //are armed and summed here (pc_seq_hw.c)
+    pc_seq_ui_done(&pc_sess.ui_trig, addr);
   }
 
   pc_scope_untrig = (!pc_ui_forced && (!pc_ready || pc_sess.ui_trig || scopesettings.triggermode)) ? 0 : 1;
