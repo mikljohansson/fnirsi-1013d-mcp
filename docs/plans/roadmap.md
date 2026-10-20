@@ -2,8 +2,8 @@
 
 Epic-level view of what is left before the first public release, v0.3.0. The task queue (`docs/plans/task-queue.md`)
 holds the individual items with their bench facts; this file groups them into epics, orders them and says what has to
-be true before the tag. Dates are 2026. State as of 2026-10-19 evening: firmware 0.2.51 (main 9cc599c), protocol 1.15,
-FPGA bitstreams up to 0x1536 built, the owner's unit runs 0x1534.
+be true before the tag. Dates are 2026. State as of 2026-10-20 (sections 1-3 reconciled against the changelog and the bench log): firmware 0.2.80,
+protocol 1.24, FPGA bitstreams up to 0x153A built, the owner's unit runs 0x153A (flashed 2026-10-20 10:03).
 
 **Owner decision 2026-10-19: everything on this list ships before the announcement. One big splash, no follow-up
 posts.** The announcement draft is `docs/plans/announcement.md`; the tag-day checks are
@@ -15,63 +15,67 @@ is working on it), **next** (designed or specified, not started), **owner** (nee
 
 ## 1. In flight
 
+Reconciled 2026-10-20 against `CHANGELOG.md` 0.2.51-0.2.80, `docs/hardware-status.md` and `docs/plans/task-queue.md`
+("Roadmap to 0.3.0" there points to every item). Three agents are working; nothing else is unmerged.
+
 | Epic | State | What is left | Where |
 |---|---|---|---|
-| UX makeover, steps 1-4 | step 1 done in code (fw 0.2.51: main menu rows, USB drive screen, Display row, measurement cards in the stock scheme, strips without Scope/Auto, AUTO SET = spectrum Auto); steps 2-4 next, one agent generation each | step 2 CTRL pages with fold-outs, strips and spectrum header gone, top bar chips rebuilt, warnings top-middle; step 3 Settings fold-out trim and full Settings screen; step 4 Diagnostics as a display mode (Status / Calibration / Log / Developer), first-run screen, ENTER_FEL from the menu. Open design questions: look of the new full-screen pages, short CTRL labels, main-menu row height once Bode ships | `docs/plans/ux-makeover.md`, `ux-review.md`, `docs/ui-guidelines.md`; mockups are the acceptance reference |
-| Diagnostics data readers | in flight (fw-readers, fw 0.2.52, protocol 1.16) | USB link state, card image identity, calibration provenance, power-on count and minutes, persisted restart record, save state, CP15 word, SAVE_REPORT; they feed the step 4 Diagnostics pages | `docs/plans/diagnostics-review.md` section 4 |
-| Touch fixes, batches 1-3 | batch 1 specified, starts after UI step 1 (now) | batch 1: channel pointers become drag handles ("handles shown on screen are draggable"), pick at first touch, no tap on a handle, clamp 6..396; batch 2 after UI step 2: trace grab by nearest object, dead band, tap zones that keep the V/div and time-base bands; batch 3: no blocking touch loop, needs an MCP soak | `docs/plans/touch-review.md` section c1 |
-| USB idle robustness | built (fw 0.2.49: suspend watch, inferred resume that acts, soft reconnect after a retry storm or 15 minutes suspended; protocol 1.14); bench pending | the long idle (port closed 30 min or more, see `fnirsi1013d-soak --mode reopen --idle 1800`) must end with the device still on the bus; plan in `firmware/AGENTS.md` section 27. The earlier failure: closed 08:40-10:20, device gone from the bus | `docs/hardware-status.md` 2026-10-19 10:20 |
+| Capture-stage training that probes the band (fw-cap2) | in flight; bench 2026-10-20 10:19 showed the wizard keeps stage 4 for CH1 A on 0x153A although the stage map shows it bad (a single code, a single capture can read 0) | probe several codes across 120..140 with two captures per point, sum the counts, pick the stage with the widest clean run, let a persistently flagged core ask for a calibration; then the wizard rerun and the 0x153A items of `fpga/al3/README.md` section 10 | `docs/hardware-status.md` 10-20 10:19, `firmware/AGENTS.md` section 54, task-queue "Capture-stage training must probe the band" |
+| Spectrum ladder, pans keep the rate (fw-spzoom2) | in flight (owner 10-20 10:27) | the rate is derived from span and centre at zoom steps only; pans clamp to the current axis 0..fs/2; the ladder follow-ups (capture time shown, real capture time for the 2 s limit, re-derive on FFT length or memory change) may ride along | task-queue "Spectrum ladder: pans never change the rate", "Spectrum ladder follow-ups"; `firmware/AGENTS.md` section 52 |
+| Remove the "Host command: menu closed" note (fw-yield2) | in flight (owner 10-20 10:31) | the modal screens still unwind silently; note text, timer and `pc_glue_yield_note` go, the yield counters stay | task-queue "Remove the 'Host command: menu closed' note"; section 53 |
 
 ## 2. Built, awaiting bench
 
-All of these are merged. The bench lists name the exact steps; most need the owner (probes, DMM, calibration post).
+Everything here is merged on main. Benched parts are named in the right column; the rest needs the owner (probes, DMM,
+calibration post, programmer) or a free serial port. The unit runs fw 0.2.80 on FPGA 0x153A.
 
 | Epic | Firmware / protocol | Bench still to do |
 |---|---|---|
-| Calibration v3 and v4 plus the wizard | v3 per-core, per-clock-class gain (0.2.45, GET_CAL 256 bytes); v4 background tracking of the full-rate A - B mismatch, class probe, the one-screen calibration wizard (0.2.50, protocol 1.15, GET_CAL 288 bytes) | `firmware/README.md` 6.3 (gain step: gains per class, the +-1.0045 V check against the DMM, fs/2 spur at least 15 dB down) and 6.4 / 6.5 (wizard flow, tracker convergence, diagnostics lines). Open questions behind it: gain per range (README 6.3 step 7, 80 bytes free to store per range), CH2 range-5 zero drift, CH2 +1.0..1.5 codes at range 6 after calibration, the overnight zero step at 03:48 |
-| Digital phosphor | 0.2.46, protocol 1.13 | visual steps (`firmware/AGENTS.md` section 24, README "Phosphor view"); pass time in and out of the view; with the MMU the scope view pass is 15 ms median |
-| Spectrum analyser with the compensation FIR | spectrum view 0.2.28 onward; decimation filter 0.2.30; FIR firmware support 0.2.44 (protocol 1.11); default Filter CIC2+FIR since 0.2.48 | FPGA 0x1535 is flashed on the owner's unit (2026-10-19 10:33, read-back verified) and benched: GET_DECIM bytes 26-27 = 0xE2 0x01 at 10 MSa/s, alias rejection with the FIR 78-83 dB below the fundamental against 19 / 37 / 56 dB without it. Left: the owner's verdict on the Auto redesign and the warnings, and the DEFAULT button check on the final build |
+| FPGA 0x153A capture path, training and self-check | fw 0.2.79 / 0.2.80, protocol 1.24 (row 64); wizard zero back at code 128 (fail-fast check passed on 0x1539 10-20 10:02); 0x153A flashed 2026-10-20 10:03, verified | capture fix confirmed by the stage map (10:08-10:14: only the power-on stage 4 is wrong for CH1 A); the trained stages still leave CH1 A garbled at two codes, so the wizard rerun waits for fw-cap2; `fpga/al3/README.md` section 10 items, EXT offsets, reference-bit test (raw 0x63 writes from a host script); the dist entry for 0x153A is still unbenched |
+| UX makeover steps 1-4 and the polish batches | fw 0.2.51 (menu, USB drive), 0.2.54-0.2.56 (touch handles, Settings, CTRL pages), 0.2.59 (Diagnostics, four-screen wizard, first-run), 0.2.63 and 0.2.68 (polish batches 1 and 2) | owner walk-through of 0.2.59 done 10-19 16:02 (menu, chips, handles, CTRL, spectrum, Settings, Diagnostics work; Saved pictures delete dialog 16:06; wizard passed 20:30 "the new wizard is great"); walk-through of the polish batches (`firmware/AGENTS.md` sections 29, 31-34, 39, 44) and the Undo-last-calibration / Check-on-post items that fw-ui4 did not do |
+| Scope time/div and sample rate coupling, zoom ladders, slider track | fw 0.2.64 (viability from the record, snap, per-mode filter default, touch batch 2), 0.2.69 (ten samples per division), 0.2.73-0.2.74 (slider overview, tap to jump, box geometry), 0.2.76 (Scope ladder), 0.2.77 (Spectrum ladder, not loaded) | Scope tap and ladder benched 10-19 22:45 ("seems to work great"); overview walk-through (`firmware/AGENTS.md` section 49), `pass_ms` with the overview (18 ms measured 22:07), Spectrum ladder on the unit (section 52), the 0.2.68 snap-path fix |
+| Frequency response on the device | fw 0.2.66 (first version), 0.2.69 (redesigned UI), 0.2.71 (Trace style, grid rule, slider, reason 8, header); protocol 1.20-1.21 | benched on 0x1539 10-19 20:43-21:28: mechanics right, every point flagged by the A-core capture fault; retest on 0x153A: AUTO SET, device vs host sweep on the RC and the divider (0.05 dB / 0.3 deg), reason 8; the small items (single sweep stays on the fold-out, generator chip, warning wording) are still open |
+| Host commands leave the modal screens | fw 0.2.78, protocol 1.23 (row 63) | menu case and nested Settings case benched 10-20 10:29 and 10:31; left: wizard mid-measurement refusal (detail 3), keypad half-typed, file-save refusal (detail 4) |
+| FPGA bus contract fixes | fw 0.2.72, protocol 1.22 (row 62): dummy strobe in every readout, EXT shift, arm order, encode check by data | B1 checked 10-19 22:07; B3, B4, B5, B7 and the trigger-position re-measure (`firmware/AGENTS.md` section 48) |
+| Segmented capture and hardware averaging | fw 0.2.58, protocol 1.17; mcp `scope_capture_segments`, `scope_averaged_capture(hardware=true)`; 0x1536 itself is superseded (0x1537 flashed 10-19 16:31, now 0x153A) | `firmware/AGENTS.md` section 35 checks and the host "1.17 on the unit" run (10 kHz generator, N = 1 equals READ_RAW); the hardware-averaging default with the CIC2+FIR filter needs the owner's decision |
+| Measurements v2 and the card scheme | fw 0.2.51 (chip scheme, standard names), 0.2.65 (per-mode MEASURES, THD, noise floor, RBW / Span / Center / Time) | walk-through (`firmware/AGENTS.md` section 41); remainder still to build: spectrum H2/H3, SFDR, band power, OBW, AC RMS, CH1-CH2 delay / phase / gain, PI decay tau |
+| Calibration v3 and v4 plus the wizard | v3 (0.2.45), v4 tracker, class probe, wizard (0.2.50), four-screen wizard (0.2.59), CAL_PROBE (0.2.67), protocol 1.15-1.21 | v3 benched 10-19 08:15 (gain step) and 10:26 (zeros exact at 0 V); left: `firmware/README.md` 6.5 tracker convergence, the +-1.0045 V check against the DMM, gain per range (README 6.3 step 7), CH2 range-5 zero drift, CH2 +1.0..1.5 codes at range 6, the overnight zero step |
+| Digital phosphor | 0.2.46, protocol 1.13 | owner 10-19 08:10 "seems to work"; visual steps (`firmware/AGENTS.md` section 24) and `pass_ms` in and out of the view |
+| USB idle robustness | fw 0.2.49 (suspend watch, inferred resume, soft reconnect), protocol 1.14 | reopen soak 3 x 30 min 10-19 11:34-13:04 clean; the two-hour idle (stopped at about 65 min 14:20) |
 | Generator menu | hit-area fix (0.2.44) | tap every row of the generator, trigger and acquisition menus; no removed action reachable |
-| MMU and D-cache | 0.2.48; benched 2026-10-19 08:10 (CP15 0x0005107D; FFT 4096 points 10.96 to 2.72 ms; scope view pass 30 to 15 ms) | owner's screen coherence verdict is in ("seems to work"); touch, soak, SD save and restore, ENTER_FEL round trips (section 26 steps 4-9) |
-| Bode analyser, host tool | steps H1-H3: `scope_bode_sweep`, `fnirsi1013d-bode` (mcp-gen4), simulator-tested | bench on the RC low-pass R 1.6 kOhm / C 10 nF (fc 9.95 kHz) with the DUT ground on the USB shell: floor, skew, coherence, wiring A/B; record in `docs/hardware-status.md` (procedure `mcp/AGENTS.md` "Bode bench") |
-| Reproducible builds, dead-code purge | done (fw 0.2.47: identity as data from git, hidden options removed, `PC_PROTOCOL` always on) | none; the release check in `docs/releasing.md` section 1 |
+
+Done and benched: MMU and D-cache (0.2.48, 10-19 08:10: FFT 4096 points 10.96 to 2.72 ms), FPGA 0x1535 flashed 10-19 10:33 and
+its FIR alias bench (78-83 dB, DEFAULT = CIC2+FIR verified 11:00), the Bode host tool (accepted 10-19 15:25, RC and divider),
+READ_SCREEN (0.2.70, T9 10-19 21:11), reproducible builds and the dead-code purge (0.2.47), MMU capture soak 17,908 requests
+clean (10-19 11:34).
 
 ## 3. Next epics
 
-Each is a coherent block for one agent generation (firmware plus MCP where noted). Order below is the suggested
-order; independent blocks can run in parallel in separate worktrees.
+Measurements v2, the 0x1536 firmware and the Bode device steps D1-D5 of the earlier list are merged (section 2). What is
+next; independent blocks can run in parallel in separate worktrees.
 
-1. **Measurements v2** (after the UI batch lands, `docs/plans/ux-makeover.md` section 3a, `ux-review.md` section 6).
-   Per-mode MEASURES lists with default cards (a new unit shows none today), the cheap on-device set (rise and
-   fall, overshoot, top and base, CH1-CH2 delay, phase and gain, cursor-gated statistics, PI decay tau; spectrum H2,
-   H3, THD, SFDR, noise floor, band power, OBW), AC RMS beside Vrms, the standard names (Period, +Width, -Width,
-   +Duty, -Duty) and the "Freg" fix. Acceptance: each measurement agrees with the host analysis of the same
-   capture within the stated tolerance.
-2. **FPGA 0x1536 firmware support and the flash session** (`fpga/al3/README.md` section 6,
-   `docs/plans/segmented-capture.md`). Commands 0x57-0x5D, reads 0x2B-0x32 through the 0x1F pointer, the segment
-   table (valid, triggered, trigger offset, 40-bit 5 ns timestamp), averaging with positions P and shift S;
-   capture modes "Segments" and "Average N", capture-info fields, READ_RAW layouts for a segment set and the
-   averaged record; MCP `scope_capture_segments` and `scope_capture_averaged`. The bitstream is pinned
-   (`backups/al3_seg_0x1536_4eaf6811.bin`, padded 66866c84) but not flashed; firmware support comes first because
-   the bench check 5 (an N = 1 average equals the memory's record) needs both. **Owner**: one flash session with
-   the programmer for 0x1535 and 0x1536 together (backup of the 25Q80 first, read-back verify), then the check
-   list of the two README sections.
-3. **Phosphor fast capture** (design study in `firmware/AGENTS.md` section 24). The view draws one record per pass
-   (about 30 waveforms per second at the old pass time); a capture loop that reads several records per pass
-   raises the rate. Measure `pass_ms` in the view first; with the MMU the pass is half as long, so the study
-   starts from the new numbers. Acceptance: waveforms per second with the view on, on the bench.
-4. **Bode, device steps D1-D5** (`docs/plans/bode-design.md`), only after the host version proves the numbers.
-   Display mode with magnitude and phase panes, BODE_CTRL / READ_BODE; entry from the generator menu (the main
-   menu has no eighth row). Host follow-ups from the bench: CH1 re-ranging when CH1 drops below 20 codes, the
-   harmonic fast mode, the impedance mode (coil L, Q and SRF for the detector), an optional PNG plot.
+1. **FPGA 0x153B** (`fpga/al3/AGENTS.md` "0x153A status"): trigger types (pulse width, Nth edge), peak detect and the hardware
+   frequency / period counter from the features branch gen8-features-wip, on top of the 0x153A design; wanted from the
+   review: pipelined divider compare, encodes into IOB ODDRs, simulation-only initial values zeroed (TD ignores them). Device
+   UI only for trigger types, peak detect and the counter (section 6). After the fw-cap2 bench closes 0x153A.
+2. **Remaining firmware batches** (task-queue "Roadmap to 0.3.0", "Firmware batches still open"): ACQ memory chips after
+   Filter -> Off, Spectrum ladder follow-ups, Frequency response small items, hardware averaging decision, touch batch 3,
+   Measurements v2 remainder.
+3. **Phosphor fast capture** (`docs/plans/phosphor-fast-capture.md`, `firmware/AGENTS.md` section 24). Design note exists; the
+   scope-view pass is 15 ms median with the MMU, 18 ms with the overview. Acceptance: waveforms per second with the view on.
+4. **MCP and host**: release the serial port when idle, Bode follow-ups (CH1 re-ranging, harmonic fast mode, impedance mode),
+   1.17 / 1.19 / 1.20 on the unit, simulator reason 8 and header rule.
+5. **Docs and release**: the documentation site remainder, `docs/release-notes/0.3.0.md` placeholders, CHANGELOG hygiene, then
+   `docs/plans/release-checklist.md` (the checklist still names 0x1538 as the recommended bitstream; 0x153A has superseded it).
 
 ## 4. Small items that ship with the above
 
 Listed so none is forgotten; each is one commit to one afternoon.
 
-- "Confirm to delete?" dialog: buttons 44 px high, 16 px apart, primary on the right (UI step 1 or 2).
+- [x] "Confirm to delete?" dialog: buttons 44 px high, 16 px apart, primary on the right (fw 0.2.55; benched 2026-10-19 16:06).
 - Trigger position varies by run at decimated rates (+11 us / -1 us at 1 MSa/s): deterministic test with
-  GET_CAPTURE_INFO logging.
+  GET_CAPTURE_INFO logging. FPGA side fixed in 0x1537, firmware items in fw 0.2.72; remains: the bench items B3, B4, B5, B7
+  (`firmware/AGENTS.md` section 48) on 0x153A.
 - Open-input and EXT bench tests 1-4 (`fpga/al3/README.md` "Changes" section 2): needs an external 3.3 V source
   referenced to the USB ground.
 - Owner verdicts outstanding from 0.2.40 / 0.2.41: Roll / Average / Filter box layout and the pass-time label, Max
@@ -131,7 +135,8 @@ connector), hardware FFT (the MCU does 4096 points in 2.7 ms).
 Resources free after 0x1535: about 7,000 LUTs, 200 kbit block RAM, one PLL, one M18x18. All of this is after the
 announcement, except item 1, which is the 0x1536 epic of section 3. D = metal-detector value, C = community value.
 
-1. Segmented capture and hardware averaging [D high, C high]: built as 0x1536, firmware support is section 3 item 2.
+1. Segmented capture and hardware averaging [D high, C high]: built as 0x1536 (now carried by 0x1537..0x153A), firmware support
+   merged in fw 0.2.58 (bench pending, section 2).
 2. Advanced triggers [D: Nth edge, pulse width on the TX train; C high]: a "Type" selector in the trigger menu.
 3. Peak-detect acquisition [C high: glitch capture at slow time bases]: min and max per decimation window.
 4. Streaming data logger [D high, C unique]: continuous 16-bit filtered samples up to about 1 MS/s into the 32 MB DDR.
