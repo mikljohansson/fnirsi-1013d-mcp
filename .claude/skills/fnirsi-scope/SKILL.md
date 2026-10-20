@@ -47,7 +47,7 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) (`.mcp
 - Frequency response of a passive DUT on the calibration post: `scope_bode_sweep` (guide section 3b). Wiring
   before anything: CH1 tip on the DUT input, CH2 on the output, DUT ground on the probe ground clips (wiring A;
   USB-shell ground only with `ch2_coupling='ac'`). Thru calibration first (`thru_cal='measure'`, both probes on the DUT input), then the DUT with that name.
-  Report f_actual, the markers, the calibration used, and leave flagged points (near_floor, clipped, unsettled) out.
+  Report f_actual, the markers, the calibration used, and leave flagged points (near_floor, clipped, unsettled, ch2_small) out.
   `where='device'` (fw 0.2.66+) lets the scope run the sweep and show the plot itself (same result structure; presets
   only, ch2_range auto/fixed, DC; the view stays open unless `close_view=true`).
 

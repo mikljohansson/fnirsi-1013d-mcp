@@ -1484,7 +1484,8 @@ int bode_auto_span(const uint64 *f, const int32 *m, const int32 *p, const uint16
     ok[i] = (uint8)(have[i] && !(fl[i] & BODE_F_BAD));
     absurd[i] = 0;
 
-    if(have[i] && !(fl[i] & (BODE_F_NEAR_FLOOR | BODE_F_LOW_SNR)))
+    //fw 0.2.99: a ch2_small point is under the floor as well (BODE_F_BAD)
+    if(have[i] && !(fl[i] & (BODE_F_NEAR_FLOOR | BODE_F_LOW_SNR | BODE_F_CH2_SMALL)))
     {
       good++;
       if(fl[i] & BODE_F_CH1_LOW)

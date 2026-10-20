@@ -162,8 +162,9 @@ networks, coil plus capacitor tanks fed through a resistor). It needs an AL3 bit
    the post. `ch2_range='auto'` (default) follows a falling response down to the 100 mV/div range (about -55 dB).
 5. **Report** f_actual (not the requested values), magnitude and phase with the markers (`minus_3db_hz`, or the
    peak, Q and bandwidth), the thru calibration used, and the flags: drop or grey out `near_floor`, `low_snr`,
-   `clipped` and `unsettled` points rather than quoting them; say `ch2_small` points are +-1 dB; say how many range
-   splices there were. Pass the caveats on.
+   `clipped`, `unsettled` and `ch2_small` points rather than quoting them (`ch2_small`: CH2 under 3 codes, under the
+   floor; at 100 mV/div often generator pickup, not the DUT: the caveat "CH2 too small above ... kHz" names where it
+   starts, so rerun with `stop` below it); say how many range splices there were. Pass the caveats on.
 
 6. **On the scope instead (firmware 0.2.66+, protocol 1.20):** `where='device'` lets the scope run the same plan
    and rules itself (about 2-3 x faster above 1 kHz, no USB round trip per point) and shows the Bode plot on its

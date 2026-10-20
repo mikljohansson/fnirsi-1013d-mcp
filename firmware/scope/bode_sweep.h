@@ -197,7 +197,7 @@ uint64 bode_step_mhz(int i);
 //  apart and at least 2, Settle one preset up (fw 0.2.71; AUTO SET measures such a band again, bode_auto_zoom)
 //  still changing at the low end (the first two valid points differ by more than 1 dB or 5 deg): Start 10 Hz
 //The span is snapped outwards to the steps. BODE_AS_FLAT: no corner, the span is kept; BODE_AS_NO_RESPONSE: every
-//measured point is near the floor or under the noise, the span is kept.
+//measured point is near the floor, under the noise or (fw 0.2.99) ch2_small, the span is kept.
 //fw 0.2.84 (bode-ui.md 3.2): an absurd point (more than 20 dB from both its valid neighbours; an end point: from both of
 //the next two valid points) is dropped; the reference level is the median of the three lowest-frequency valid points.
 //Failures (AUTO SET ends in STOP, settings kept; owner 2026-10-20 11:23): BODE_AS_INCONSISTENT two or more absurd points,

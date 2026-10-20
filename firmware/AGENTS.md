@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-floor (2026-10-20): fw 0.2.99, protocol 1.24 unchanged: Frequency response ch2_small points grey (BODE_F_BAD, mcp BAD_FLAGS) and the two-line "CH2 too small above ... kHz" note with its mcp caveat; section 65.**
 **Branch fw-arm2 (2026-10-20): fw 0.2.98, protocol 1.24 unchanged: the Frequency response engine reads its records as 0.2.96 did (0.2.97's 0x14 / cut rules counted half its captures as time-outs); section 64 addendum.**
 **Branch fw-arm (2026-10-20): fw 0.2.97, protocol 1.24 unchanged (GET_CAPTURE_INFO flags bit 6): auto mode on FPGA 0x1532..0x153A arms the FPGA's time-out with the stop geometry (no spliced records), the record flagged when the firmware still forces; section 64.**
 **Branch fw-yield3 (2026-10-20): fw 0.2.96, protocol 1.24 unchanged: a state-changing host request leaves Diagnostics (Back) before it runs, so the view no longer draws into it; section 63.**
@@ -4779,3 +4780,79 @@ model (pretrigger 0, total 2048 words, W = 8192 + 2052): triggers at word 0 and 
 **Bench (0x153A):** ten sweeps 100 Hz .. 1 MHz / 25 on the RC: BODE_CTRL 40..47 about 25 captures, 0 timeouts (0..1 on
 the first pre-scan), 0 leak retakes (0..1), 0 other retakes, no flagged point, about 1.5 s per sweep; the host checks of
 0.2.97 unchanged (50 untriggered auto captures each at 1 / 200 MSa/s, maybe_spliced 0, no seam).
+
+## 65. fw-floor: points below the floor say so and what to do (fw 0.2.99, protocol 1.24 unchanged)
+
+Branch `fw-floor` from main 54b0f32 (fw 0.2.97). Brief: the owner's decision of 2026-10-20 16:22 ("Frequency response:
+points below the floor say so and what to do") and the bench read behind it (hardware-status 2026-10-20 15:5x: a
+two-pole RC swept 10 kHz .. 10 MHz, every point above about 500 kHz ch2_small at 100 mV/div, CH2 about -55 dBV, the
+magnitude climbing back from -69 to -34 dB with the phase flipping: generator pickup; only the 540 kHz low_snr point was
+grey). Version 0.2.99 because fw-arm2 holds 0.2.98 in parallel (bh_arm / time-out / retake in bode_sweep.c; this
+branch touches one line of bode_sweep.c, in `bode_auto_span`'s "good" count, so the merge is clean apart from the
+PC_FW_VERSION and CHANGELOG lines). Commits: a590c1f (firmware + host tests), 434365c (version), 41cf0e5 (mcp), then
+docs and this handoff. Host tests green (`make test`: test_ui 1434277, test_bode_sweep 2285, test_session 70348 /
+70349, test_bode.py); mcp ruff selection clean and the full pytest 459 passed (in a scratch venv with matplotlib, so
+test_report ran too); `make gcc10` builds with no warning in the bode files (`#VER fw=0.2.99`). All files LF.
+**Nothing benched, nothing flashed.**
+
+**The grey set.** `BODE_F_BAD` (bode_dsp.h) gains `BODE_F_CH2_SMALL`. Everything that uses it follows: the view's
+`p_ok` (grey loose dots in magnitude and phase, the slider track's grey pixels, the axis scales from valid points),
+`bode_markers_find` (Level, -3dB, BW, Peak, Q, the phase crossings: so the cards ignore them; on main they counted
+ch2_small points, which the brief asked to check: they did, now they do not), the cursor box (grey, reason "CH2 small",
+after low SNR in `bu_flag_reason`), the thru's cal_flagged, and AUTO SET's `bode_auto_span` valid points. In
+`bode_auto_span` a ch2_small point also leaves the "good" count, so an overview with only floor / small points reads
+"Auto set: no response". `bode_auto_ch2` (CH2 Constant / Auto) is unchanged: it uses `BODE_CH2_JUNK`, where small
+levels count on purpose. READ_BODE rows are unchanged (bit 4 was always sent); docs/protocol.md row 60 now lists bit 4
+among the invalid ones. ch1_low, spliced, retried, fir_off still count.
+
+**The note** (bode_ui.c `bu_ch2_floor_f`, `bu_fmt_f3`, `bu_warn_ch2_floor`, `bu_ch2_floor_line2`; bode_view.c
+`warning()` now returns an optional second line, drawn 16 px under the first in 13 px, `BU_WARN_LINE`).
+- When: a measured ch2_small point with r2 = 5 (`BU_CH2_FINE_RANGE`, 100 mV/div), on Auto or Constant, not during AUTO
+  SET (`bv.autoset`: its overview to 10 MHz would always show it, and AUTO SET is what the note offers).
+- Text: "CH2 too small above 541 kHz to measure: set Stop below it or press AUTO SET." / "Less pickup: short ground lead
+  on CH2." Both lines fit (test_ui: every frequency 1 Hz .. 10 MHz, x 56..666 at 13 px, at most 77 characters, y 69 and
+  85 inside the free top division), so the one-line fallback of the brief was not needed.
+- The frequency: of the ch2_small points on range 5, the lowest of those above every other measured point (the run
+  that ends the span; unmeasured points do not break it, the point order does not matter); when the highest measured
+  point is not one (scattered points), the lowest of them. Three significant digits, a space, Hz / kHz / MHz
+  ("541 kHz", "54.1 kHz", "1.23 MHz"). Inference for the bench: if the 540 kHz point is low_snr without ch2_small, it
+  ends the run and the note names the next point up.
+- Precedence (bode-ui.md section 6 now lists it): errors, thru sweep, AUTO SET failure, tap notes, Constant
+  overrange, Constant "CH2 small: decrease V/div ..." (now only for small points on a range coarser than 100 mV/div:
+  on the finest range there is no finer V/div to choose), **this note**, CH1 low, unsettled, near the floor, thru
+  stale, offset, the other notes. No floor line is drawn (owner: the generator-off background does not see pickup).
+
+**mcp** (bode.py): `BAD_FLAGS` gains "ch2_small" (markers, ThruCal cal_flagged, report.py's valid mask); `CH2_FINE_RANGE`,
+`fmt_f3` (the same integer rounding as bu_fmt_f3), `ch2_floor_hz` (the same rule on `PointResult.ch2_range` and
+f_actual), `ch2_floor_text`; `result_caveats` puts the sentence first (so `scope_bode_sweep`'s caveats and the CLI
+show it); the per-flag ch2_small caveat says the points are left out. report.py's Bode plot joins valid points only
+(the line went through flagged ones). Tests: test_bode `test_ch2_small_is_grey_and_the_floor_caveat`, test_bode_device
+(the invalid bits 0, 1, 2, 4..8).
+
+Not done / for the next agent:
+- On Auto, ch2_small points on a coarser range (the ranging had not reached 100 mV/div, e.g. the six-switch budget
+  used up) are grey but get no note of their own (the floor count note covers only near_floor / low_snr).
+- The host-driven sweep (`where='host'`) ranges to 100 mV/div as well, so the caveat applies there; nothing on the
+  host draws the note's two lines (the caveat is the sentence).
+
+**Bench (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`; 0x153A; wiring A, x1)**
+1. `#VER fw=0.2.99`. Frequency response, the two-pole RC on the post, CTRL > Sweep 10 kHz .. 10 MHz, CH2 Auto, Single
+   sweep. Expect every point from about 500 kHz up grey (magnitude and phase, the slider track too), the curve joined
+   only below it, and the top-middle note in two orange 13 px lines: "CH2 too small above 5xx kHz to measure: set Stop
+   below it or press AUTO SET." / "Less pickup: short ground lead on CH2." READ_BODE: those rows have bit 4 and r2 5;
+   the note's frequency is the lowest of the run of such rows that reaches 10 MHz.
+2. The cards (Level, -3dB, Peak, Q): as on 0.2.97 for the passband; no Peak from the pickup tail. A cursor on a grey
+   point: the box row grey, reason "CH2 small" (or "low SNR" where both apply).
+3. The same span from the host: `scope_bode_sweep(where='device', start='10kHz', stop='10MHz', ...)`: the first caveat
+   is the same sentence with the same frequency; `scope_report` of it: the tail drawn as flagged markers, the line
+   only through valid points.
+4. Set Stop to 500 kHz (or below the named frequency), Single sweep: no note, no grey tail. AUTO SET from 10 kHz ..
+   10 MHz: during it no note; its result a span around the corner without the note (if its final sweep still reaches
+   the floor, the note shows after it).
+5. Constant at 100 mV/div (CH2 menu) over the full span: this note, not "CH2 small: decrease V/div ...". Constant at
+   0.5 V/div: "CH2 small: decrease V/div in CH2 menu or Auto" as on 0.2.94.
+6. A short ground lead on CH2 at the DUT output: the note's frequency moves up (less pickup), if the owner wants to see
+   it.
+Bug indicators: grey points with the curve drawn through them; the note during AUTO SET; the note naming a frequency
+below a measured non-small point at the top of the span; "CH2 small: decrease V/div" on Constant 100 mV/div; the
+second line overlapping data in the top division when the scale leaves it free.

@@ -401,7 +401,9 @@ def _plot(r: Result, title: str) -> bytes:
         ok = np.asarray(a.get("valid", np.ones(f.size, bool)), bool)
         ph_u = np.degrees(np.unwrap(np.radians(ph))) if ph.size else ph
         for axx, y, lab in ((ax, mag, "|H| (dB)"), (axes[1], ph_u, "phase (deg)")):
-            axx.plot(f, y, color=COLOURS[0], linewidth=1.2, zorder=2)
+            # the line joins valid points only, as on the scope (a flagged point is a loose grey dot; fw 0.2.99:
+            # ch2_small too, so a pickup tail under the floor no longer reads as the curve)
+            axx.plot(f, np.where(ok, y, np.nan), color=COLOURS[0], linewidth=1.2, zorder=2)
             axx.plot(f[ok], y[ok], "o", color=COLOURS[0], markersize=4, zorder=3,
                      label="valid" if axx is ax else None)
             if np.any(~ok):

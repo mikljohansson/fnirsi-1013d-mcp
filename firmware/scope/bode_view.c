@@ -1137,12 +1137,16 @@ static void draw_cursors(const bv_axes *a)
   }
 }
 
-//The warning line: consequence then action, the most urgent first; "" when nothing applies
-static const char *warning(char *buf)
+//The warning line: consequence then action, the most urgent first; "" when nothing applies. *second: a second line
+//under it (fw 0.2.99: CH2 under the floor), 0 for none
+static const char *warning(char *buf, const char **second)
 {
   bode_eng *e = bode_engine();
   int i, unsettled = 0, floor = 0, ch1low = 0, clip2 = 0, small2 = 0;
   uint8 st = bode_state(e);
+  uint64 f2;
+
+  *second = 0;
 
   if(st == BODE_ST_ERROR)
   {
@@ -1177,15 +1181,24 @@ static const char *warning(char *buf)
     if(p_flags[i] & (BODE_F_NEAR_FLOOR | BODE_F_LOW_SNR))   floor++;
     if(p_flags[i] & BODE_F_CH1_LOW)                         ch1low = 1;
     if(p_flags[i] & (BODE_F_CLIPPED | BODE_F_CH2_OVERLOAD)) clip2 = 1;
-    if(p_flags[i] & BODE_F_CH2_SMALL)                       small2 = 1;
+    if((p_flags[i] & BODE_F_CH2_SMALL) && (p_r2[i] < BU_CH2_FINE_RANGE)) small2 = 1;
   }
 
   //fw 0.2.94: on Constant the fix is the CH2 menu's V/div (or Auto)
   if(clip2 && (bv.ch2 == BODE_CH2_HOLD))
     return bu_warn[BU_W_CH2_OVER];
 
+  //on a range with a finer one below it (fw 0.2.99: on the finest the next note says what helps)
   if(small2 && (bv.ch2 == BODE_CH2_HOLD))
     return bu_warn[BU_W_CH2_SMALL];
+
+  //fw 0.2.99 (owner 2026-10-20 16:22): CH2 under 3 codes on its finest range, Auto or Constant: no range helps. Not
+  //during AUTO SET (its overview runs to 10 MHz; its result is what the note asks for)
+  if(!bv.autoset && ((f2 = bu_ch2_floor_f(p_f, p_flags, p_r2, p_have, n_pts)) != 0))
+  {
+    *second = bu_ch2_floor_line2;
+    return bu_warn_ch2_floor(buf, f2), buf;
+  }
 
   //fw 0.2.84: named by its cause (a coarse range, the DUT, the probe's roll-off above 2 MHz)
   if(ch1low && bu_warn_ch1_low(buf, p_r1, p_f, p_flags, p_have, n_pts))
@@ -1431,8 +1444,8 @@ static void draw_all_rect(uint32 rx, uint32 ry, uint32 rw, uint32 rh)
 {
   bode_eng *e = bode_engine();
   bv_axes a;
-  char    wb[80];
-  const char *w;
+  char    wb[BU_CH2_FLOOR_MAX + 16];
+  const char *w, *w2;
   int     table;
 
   gather();
@@ -1474,11 +1487,13 @@ static void draw_all_rect(uint32 rx, uint32 ry, uint32 rw, uint32 rh)
     }
   }
 
-  w = warning(wb);
+  w = warning(wb, &w2);
   if(*w)
   {
     display_set_fg_color(ORANGE_COLOR);
     text_c(&font_2, BU_WARN_XC, BU_WARN_Y, w);
+    if(w2)
+      text_c(&font_2, BU_WARN_XC, BU_WARN_Y + BU_WARN_LINE, w2);
   }
   else if((table == BU_TABLE_NONE) && (bode_state(e) != BODE_ST_RUNNING))
     draw_instruction();

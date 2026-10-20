@@ -333,6 +333,7 @@ const char *bu_flag_reason(uint16 f)
   if(f & BODE_F_UNSETTLED)    return "unsettled";
   if(f & BODE_F_NEAR_FLOOR)   return "near floor";
   if(f & BODE_F_LOW_SNR)      return "low SNR";
+  if(f & BODE_F_CH2_SMALL)    return "CH2 small";       //fw 0.2.99
   if(f & BODE_F_INCOHERENT)   return "incoherent";
   return "";
 }
@@ -707,6 +708,86 @@ int bu_warn_ch1_low(char *t, const uint8 *r1, const uint64 *f_mhz, const uint16 
     return 0;
 
   return 1;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//fw 0.2.99: CH2 under the floor on its finest range (owner 2026-10-20 16:22)
+
+const char *const bu_ch2_floor_line2 = "Less pickup: short ground lead on CH2.";
+
+static int bu_ch2_floor_pt(const uint16 *flags, const uint8 *r2, int i)
+{
+  return (flags[i] & BODE_F_CH2_SMALL) && (r2[i] >= BU_CH2_FINE_RANGE);
+}
+
+uint64 bu_ch2_floor_f(const uint64 *f_mhz, const uint16 *flags, const uint8 *r2, const uint8 *have, int n)
+{
+  uint64 above = 0, tail = 0, low = 0;
+  int i;
+
+  //The highest measured point that is not one
+  for(i = 0; i < n; i++)
+    if(have[i] && !bu_ch2_floor_pt(flags, r2, i) && (f_mhz[i] > above))
+      above = f_mhz[i];
+
+  for(i = 0; i < n; i++)
+  {
+    if(!have[i] || !bu_ch2_floor_pt(flags, r2, i))
+      continue;
+
+    if(!low || (f_mhz[i] < low))
+      low = f_mhz[i];
+
+    if((f_mhz[i] > above) && (!tail || (f_mhz[i] < tail)))
+      tail = f_mhz[i];
+  }
+
+  return tail ? tail : low;
+}
+
+char *bu_fmt_f3(char *t, uint64 f)
+{
+  static const char *const units[3] = { " Hz", " kHz", " MHz" };
+  uint64 sc = 1000ull;
+  uint32 v;
+  int    u = 0;
+
+  //The unit that keeps the value under 1000 after rounding to three digits
+  if(f >= 999500000ull)
+  {
+    sc = 1000000000ull;
+    u  = 2;
+  }
+  else if(f >= 999500ull)
+  {
+    sc = 1000000ull;
+    u  = 1;
+  }
+
+  if(f * 20 >= 1999 * sc)
+    t = bu_uint(t, (uint32)((f + sc / 2) / sc));
+  else if(f * 200 >= 1999 * sc)
+  {
+    v = (uint32)((f * 10 + sc / 2) / sc);
+    t = bu_uint(t, v / 10);
+    *t++ = '.';
+    *t++ = (char)('0' + v % 10);
+  }
+  else
+  {
+    v = (uint32)((f * 100 + sc / 2) / sc);
+    t = bu_uint(t, v / 100);
+    *t++ = '.';
+    *t++ = (char)('0' + (v / 10) % 10);
+    *t++ = (char)('0' + v % 10);
+  }
+
+  return bu_put(t, units[u]);
+}
+
+char *bu_warn_ch2_floor(char *t, uint64 f_mhz)
+{
+  return bu_put(bu_fmt_f3(bu_put(t, "CH2 too small above "), f_mhz), " to measure: set Stop below it or press AUTO SET.");
 }
 
 int bu_auto_bounce(const uint8 *r2, const uint8 *have, int n, int switches)

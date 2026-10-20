@@ -81,8 +81,13 @@ DOWNRANGE_FRACTION = 0.6  # down-range when the predicted peak on the next range
 CENTRE_TOLERANCE_CODES = 12.0  # re-centre the offset when the record's mean is further than this from 128
 MAX_RANGE_SWITCHES = 6  # CH2 auto-range budget per sweep (3 for a monotonic filter, 2 more for a resonance)
 
-#: flags that make a point unusable for markers (drawn grey by the on-device view)
-BAD_FLAGS = frozenset({"ch1_clipped", "clipped", "ch2_overload", "unsettled", "incoherent", "near_floor", "low_snr"})
+#: flags that make a point unusable for markers (drawn grey by the on-device view and in the report plot). fw 0.2.99
+#: (owner 2026-10-20 16:22): ch2_small too: CH2 under 3 codes is below what the ADC measures (bench: a two-pole RC's
+#: tail above 500 kHz was generator pickup at under one code, drawn as data)
+BAD_FLAGS = frozenset({"ch1_clipped", "clipped", "ch2_overload", "ch2_small", "unsettled", "incoherent", "near_floor",
+                       "low_snr"})
+#: CH2's finest hardware range (100 mV/div): a ch2_small point there is under the floor, no range helps
+CH2_FINE_RANGE = 5
 
 #: wiring the person must use (design 2.5); shown with the first sweep of a session
 CONNECTION_TEXT = (
@@ -1485,8 +1490,47 @@ def device_sweep(scope: Any, start: float, stop: float, points: int, *, settle: 
 # Caveats an engineer needs with the numbers
 
 
+def fmt_f3(hz: float) -> str:
+    """A frequency with three significant digits, a space and the unit, as the scope's note writes it (bode_ui.c
+    bu_fmt_f3, the same integer rounding on mHz): 541 kHz, 54.1 kHz, 1.23 MHz, 980 Hz."""
+    f = int(round(hz * 1000))
+    sc, unit = (10**9, "MHz") if f >= 999_500_000 else (10**6, "kHz") if f >= 999_500 else (10**3, "Hz")
+    if f * 20 >= 1999 * sc:
+        return f"{(f + sc // 2) // sc} {unit}"
+    if f * 200 >= 1999 * sc:
+        v = (f * 10 + sc // 2) // sc
+        return f"{v // 10}.{v % 10} {unit}"
+    v = (f * 100 + sc // 2) // sc
+    return f"{v // 100}.{v % 100:02d} {unit}"
+
+
+def ch2_floor_hz(points: list[PointResult]) -> float | None:
+    """The frequency above which CH2 is too small to measure (the scope's bu_ch2_floor_f): of the ch2_small points on
+    CH2's finest range (100 mV/div), the lowest of those above every other point (the run that ends the span); when
+    the highest point is not one of them, the lowest of them; None when there is none."""
+    def floor_pt(p: PointResult) -> bool:
+        return "ch2_small" in p.flags and p.ch2_range >= CH2_FINE_RANGE
+
+    small = [p.plan.f_actual for p in points if floor_pt(p)]
+    if not small:
+        return None
+    above = max((p.plan.f_actual for p in points if not floor_pt(p)), default=0.0)
+    tail = [f for f in small if f > above]
+    return min(tail) if tail else min(small)
+
+
+def ch2_floor_text(hz: float) -> str:
+    """The scope's two-line note as one sentence (fw 0.2.99, owner 2026-10-20 16:22)."""
+    return (f"CH2 too small above {fmt_f3(hz)} to measure: set Stop below it or press AUTO SET. "
+            "Less pickup: short ground lead on CH2.")
+
+
 def result_caveats(res: SweepResult) -> list[str]:
     out = []
+    # fw 0.2.99: CH2 under the floor on its finest range: what it means and what helps, first
+    fl_hz = ch2_floor_hz(res.points)
+    if fl_hz is not None:
+        out.append(ch2_floor_text(fl_hz))
     flagged: dict[str, int] = {}
     for p in res.points:
         for f in p.flags:
@@ -1497,8 +1541,8 @@ def result_caveats(res: SweepResult) -> list[str]:
         "ch2_overload": "CH2 saturated by the DUT's DC level (a flat record): wiring A (DUT ground on the probe clips), "
                         "ch2_coupling='ac' or a less sensitive CH2 range",
         "ch1_low": f"CH1 fundamental below {CH1_LOW_CODES:g} codes: the DUT input loads the 1 kOhm source",
-        "ch2_small": f"CH2 below {CH2_SMALL_CODES:g} codes peak: the ADC's linearity limits these to about +-1 dB / "
-                     "+-6 deg",
+        "ch2_small": f"CH2 below {CH2_SMALL_CODES:g} codes peak: under what the ADC measures (its linearity alone "
+                     "gives about +-1 dB / +-6 deg, and pickup can dominate); left out of the markers and drawn grey",
         "near_floor": f"CH2 less than {NEAR_FLOOR_DB:g} dB above the generator-off background in its bin (crosstalk, "
                       "offset-PWM ripple, pickup): treat as an upper bound",
         "low_snr": f"CH2 less than {LOW_SNR_DB:g} dB above the record's noise",
@@ -1619,5 +1663,6 @@ if __name__ == "__main__":
 
 
 __all__ = ["BodeError", "BodeRunner", "Measurement", "PointPlan", "PointResult", "SweepResult", "ThruCal",
-           "CONNECTION_TEXT", "SETTLE_PRESETS", "asdict", "estimate_duration", "markers", "measure_pair",
+           "CH2_FINE_RANGE", "CONNECTION_TEXT", "SETTLE_PRESETS", "asdict", "ch2_floor_hz", "ch2_floor_text",
+           "estimate_duration", "fmt_f3", "markers", "measure_pair",
            "parse_settle", "plan_point", "plan_sweep", "plan_vectors", "residual_noise", "result_caveats", "tone"]
