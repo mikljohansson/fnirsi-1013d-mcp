@@ -27,7 +27,7 @@ The screen lists what the firmware found, one line per check:
 | FPGA recognised: AL3A10 bitstream 0x153A: ... | The FPGA bitstream and the features it has |
 | FPGA stock bitstream 0x1432: no generator, no filter; gain calibration not possible (amber) | The stock bitstream. The scope works, but without the generator, the filters and the gain steps of the calibration |
 | FPGA bitstream ...: not recognised; the scope runs with the stock limits (amber) | An unknown bitstream. The firmware uses only what the stock bitstream has |
-| FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x1538 (amber) | An older bitstream with a known fault. The firmware works around it; flash the recommended bitstream |
+| FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x153B (amber) | An older bitstream with a known fault. The firmware works around it; flash the recommended bitstream |
 | Settings loaded from the card. | The saved settings were read |
 | No saved settings on the card: defaults used. | A new card, or the settings sector could not be read |
 | Calibration missing: readings may be several % off. (amber) | No calibration on the card |

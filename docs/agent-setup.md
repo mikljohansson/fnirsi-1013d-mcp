@@ -33,8 +33,4 @@ args = ["--port", "auto"]
   trigger", "set the generator to 5 kHz 25 % and show me the duty on CH2". Large results are saved as `.npz` files and
   the path is returned.
 
-!!! note "To be written after fw 0.2.70"
-    Worked examples with plots (each with the command that generated it) and a screenshot of the scope while a host
-    is connected.
-
 ![The scope with a host connected](screenshot:scope-mcp)
