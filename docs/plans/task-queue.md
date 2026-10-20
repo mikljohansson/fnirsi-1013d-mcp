@@ -490,6 +490,15 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
+- fpga-gen10 (Fable, done 12:18, about 305k tokens, merged 12:07; handoff fpga/al3/AGENTS.md "First-record saturation"): the
+  0x153A decimator cannot produce a 0xFFFF record with the registers read back; the firmware's host ARM computes N and the shift
+  from the UI time base after `acq_view_fit` snapped it without writing 0x0D, so the FPGA keeps the raw divider 4095 while 0x54
+  gets the shift for N 400 / 200 (S 9 / 7) and a full-scale input saturates every word; heals on a Filter-off UI conversion or
+  a new raw time base. Deterministic host repro in the handoff. Not yet explained by that path: the Bode pre-scan case (bh_arm
+  writes its own divider) and the 11:15 round-0 capture: the write trace must log 0x54 / 0x55 to settle them. tb_firstrec.v is
+  run.sh step 12 (38 checks). Prescription for the firmware: pc_decim_next / pc_arm_geometry / GET_DECIM take the divider the
+  FPGA holds (pc_hal_divider_now), pc_dec_apply always writes 0x54, the trace counts 0x54 / 0x55, test_fpga_bus cases.
+
 - fw-fr4 (done 11:55, about 120k tokens, merged 11:56 as fw 0.2.86): AUTO SET = overview, passes, one single sweep at the found
   settings, STOP (view bit 1 clear throughout; button red STOP / "Auto..." while it runs, chip RUN, then green RUN / chip STOP);
   "Stop sweep" and the Sweep card count the sweep in progress from the engine (the table's completion flags were reused on a
