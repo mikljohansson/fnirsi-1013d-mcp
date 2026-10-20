@@ -115,7 +115,7 @@ Deep design analysis (all variants, command tables, timing, limits): `research/n
 
 TD is installed at `~/anlogic/TD_4.6.8_SP1_116866_NL` (licence copied to its `license/Anlogic.lic`), stubs in
 `~/anlogic/shim`. To reinstall from scratch follow `TD_SETUP.md`. The installer zip is
-`C:\Users\miklj\Downloads\TD_4.6.8_SP1_116866_NL.zip`, sha256 `12f8c2b2...3f15`.
+`C:\Users\<you>\Downloads\TD_4.6.8_SP1_116866_NL.zip`, sha256 `12f8c2b2...3f15`.
 
 Run from Windows PowerShell. Git Bash mangles `/mnt` paths; put complex commands in a script file.
 
