@@ -6,6 +6,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **Device sweep flags stricter than the host's** (bench 10-20 11:14 / 12:02): on the same RC the device flags about half the
+  points incoherent / unsettled / ch2_small where the host flags none; compare bode_dsp.c's incoherence, settle and small-signal
+  tests with bode.py's on identical records (feed the host's captured records through the C DFT in a host test) and align the
+  thresholds; with the engine batch (range plan) after fpga-gen10.
+
 - **RUN stays continuous; repeated sweeps reuse the previous range plan** (owner 10-20 11:51 **(owner)**: "RUN stays continuous,
   but we reuse the previous plan so the relays don't click like crazy"): the use case is live tuning (the coil tank's trimmer
   while watching the peak). Engine change, after fpga-gen10's first-record work lands (bode_sweep.c): a repeated sweep starts
