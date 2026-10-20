@@ -152,7 +152,6 @@ const char *const ui_spec_avg_names[5]                   = { "Off", "4", "16", "
 const char *const ui_persist_names[UI_PERSIST_COUNT]     = { "0.2 s", "1 s", "5 s", "Infinite" };
 const char *const ui_palette_names[2]                    = { "Mono", "Heat" };
 const char *const ui_phos_note_roll                      = "Not in roll mode";
-const char *const ui_yield_note                          = "Host command: menu closed";
 
 const char *ui_display_value(int spectrum, int view, int phosphor)
 {

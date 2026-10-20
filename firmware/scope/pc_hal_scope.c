@@ -1786,13 +1786,10 @@ void pc_glue_scope_warning(void)
 
   t = ui_scope_warning(&w);
 
-  //fw 0.2.78: for a few seconds after a host request closed the menus the note takes the line (white), then the warning
-  //comes back; fw 0.2.64: no warning: the snap notice of acq_view.c ("Time/div set to 1us for this rate"), white
-  if(!*t || pc_glue_yield_note())
+  //fw 0.2.64: no warning: the snap notice of acq_view.c ("Time/div set to 1us for this rate"), white
+  if(!*t)
   {
-    t = pc_glue_yield_note();
-    if(!t)
-      t = acq_view_notice();
+    t = acq_view_notice();
     if(!t)
       return;
 
@@ -2097,8 +2094,6 @@ typedef char pc_hold_codes_check[((PC_HOLD_CAL == PC_BUSY_CAL) && (PC_HOLD_SAVE 
                                   (PC_HOLD_USB_DRIVE == PC_BUSY_USB_DRIVE)) ? 1 : -1];
 
 static volatile uint8 pc_ui_hold_why;   //PC_HOLD_* while a step that must not be cancelled runs, 0 none
-static uint8          pc_yield_note_on; //the note "Host command: menu closed" shows (UI_YIELD_NOTE_MS)
-static uint32         pc_yield_note_ms;
 
 uint8_t pc_hal_ui_hold(void)
 {
@@ -2118,18 +2113,7 @@ int pc_glue_ui_yield(void)
   if(!pc_ready || !pc_ui_yield_pending(&pc_sess))
     return 0;
 
-  pc_yield_note_on = 1;
-  pc_yield_note_ms = timer0ticks;
   return 1;
-}
-
-const char *pc_glue_yield_note(void)
-{
-  if(pc_yield_note_on && ((timer0ticks - pc_yield_note_ms) < UI_YIELD_NOTE_MS))
-    return ui_yield_note;
-
-  pc_yield_note_on = 0;
-  return 0;
 }
 
 void pc_glue_ui_service(void)

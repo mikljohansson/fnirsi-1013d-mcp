@@ -1008,11 +1008,6 @@ static const char *warning(char *buf)
   bode_eng *e = bode_engine();
   int i, unsettled = 0, floor = 0, ch1low = 0, clip2 = 0;
   uint8 st = bode_state(e);
-  const char *yn = pc_glue_yield_note();
-
-  //fw 0.2.78: for a few seconds after a host request closed the fold-outs and dialogs (protocol 1.23)
-  if(yn)
-    return yn;
 
   if(st == BODE_ST_ERROR)
   {
