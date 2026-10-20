@@ -33,6 +33,9 @@
 
 #define CS_PO             0x08E4      //0x63 at power-on: CH1 A 4, CH1 B 4, CH2 A 3, CH2 B 4, B by its own encode
 #define CS_THR_PO         8           //0x64 at power-on (codes)
+#define CS_THR_USE        32          //0x64 as the firmware writes it: CH2's analog noise at range 0 near code 128 is
+                                      //about 3 codes rms and saturates the counters at 8; 16..48 all read 0 on a clean
+                                      //stage and hundreds on a bad one (bench 2026-10-20 10:14)
 #define CS_REF_CH1B       0x1000      //0x63 bit 12
 #define CS_REF_CH2B       0x2000      //0x63 bit 13
 #define CS_MASK           0x3FFF

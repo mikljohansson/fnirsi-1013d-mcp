@@ -78,7 +78,7 @@ static void cap_apply(void)
   }
 
   fpga_write_cmd(0x64);
-  fpga_write_byte(CS_THR_PO);
+  fpga_write_byte(CS_THR_USE);
   fpga_capture_write(v);
 }
 

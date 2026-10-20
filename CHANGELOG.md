@@ -31,6 +31,13 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.80 - 2026-10-20 (protocol 1.24, unchanged)
+
+- Capture-stage training and self-check: the FPGA outlier threshold (0x64) is written as 32 codes instead of the power-on 8.
+  Bench 2026-10-20 on 0x153A: CH2's analog noise at 5 V/div near code 128 is about 3 codes rms, which saturated the 0x36
+  counters at 8 on every stage and made CH2's training fail; 16..48 read 0 on a clean stage set and hundreds on a bad one
+  (CS_THR_USE, cap_stage.h).
+
 #### 0.2.79 - 2026-10-20 (protocol 1.24, docs/protocol.md section 14 row 64)
 
 - FPGA 0x153A capture stages (firmware/AGENTS.md section 54, docs/protocol.md section 5.1): detected as caps bit 19

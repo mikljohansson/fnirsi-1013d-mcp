@@ -3757,3 +3757,9 @@ EXT edges 8 samples early (shift table not followed), the trained value lost aft
   branch (see the commit list); docs/hardware-status.md gets the bench results.
 - 0x153B (gen8-features on top of 0x153A): `cs_has` already covers it; add its own caps when it lands.
 - A per-core absolute check (both cores of a chip) would need a quiet-input moment outside the wizard; not built.
+
+**Addendum (coordinator, fw 0.2.80, 2026-10-20 10:15).** Bench on 0x153A: the training's clean criterion failed on CH2 because the
+0x64 threshold of 8 codes is under CH2's analog noise at range 0 (about 3 codes rms near code 128; the counters saturate at 65535
+on noise); the firmware now writes 32 (`CS_THR_USE`), with which a clean stage set reads 0 on every core and a bad stage reads
+hundreds (CH1 A4) or 65535 (CH2 B2). The stage map of this unit: CH1 A bad at 4 only, CH1 B bad at 2, CH2 A clean everywhere,
+CH2 B bad at 2, reference bit without effect; expected training result 0x08E3. docs/hardware-status.md 10:14.
