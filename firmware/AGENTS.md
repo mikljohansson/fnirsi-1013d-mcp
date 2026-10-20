@@ -4286,7 +4286,7 @@ Bug indicators: the trigger chip redrawn over the plot at every point; the trigg
 decaying over several sweeps; incoherent points with "retried" at fixed cells (then the CH1 trigger is not reaching
 the FPGA: check 0x15 / 0x16 / 0x17 in a bus trace before the 0x01).
 
-## 59. fw-eng3: the pre-scan's check ranges like a point (fw 0.2.90 provisional, protocol 1.24 unchanged)
+## 59. fw-eng3: the pre-scan's check ranges like a point (fw 0.2.90, protocol 1.24 unchanged)
 
 Branch `fw-eng3` from main a2b6929 (fw 0.2.89). Brief: the coordinator's 13:10 data
 (`device_rc_rows_1310.json` in the coordinator's scratchpad), from the owner's AUTO SET + RUN on the RC
