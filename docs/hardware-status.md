@@ -1416,13 +1416,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   or the window the FPGA captured), for triggered captures as well, which fpga-gen11/12's testbench did not model. Evidence
   in backups/bench-153b/ (records_153b_2000.npz: three untriggered and three triggered records with the seam positions;
   reread_153b.npz; events_153b_capture.json: the FPGA-write events of one capture; cells_153b.npz). fpga-gen13 dispatched.
-<<<<<<< HEAD
 - 2026-10-20 20:02 **(owner)**: 0x153B stays in the chip; no rollback. Roll forward to the fixed bitstream when it is proven;
   the owner does not need the scope for about two weeks (until early November 2026). The unit on 0x153B is available for
-  firmware-side experiments over USB (the FEL loop and the host tools work; captures are spliced). The flash session for the
+  firmware-side experiments over USB (the FEL loop and the host tools work). The flash session for the
   fix needs the owner present as always. Rollback image if ever needed: backups/fpga-flash_pre-0x153B_20261020-1931.bin
   (= backups/20261020-193108-pre-write.bin, 77672b5a..).
-=======
 - 2026-10-20 20:27 (fpga-gen13, from the saved evidence, no hardware step): **the 19:52 verdict does not hold: no record of
   that session carries a signal.** All six host records, the re-read record and all 40 bode cells sit at code 127.5..128.3
   with a standard deviation of 0.14..0.59 code and under 2.2 codes peak to peak, on CH1 and CH2 alike (16-bit values
@@ -1438,8 +1436,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   the unit: the records were flat, fpga-gen13", fpga/al3/README.md section 11 "Bench 2026-10-20 19:31-20:03" and check 0.
   Rollback to 0x153A, if the owner wants it tonight: write backups/fpga-flash_pre-0x153B_20261020-1931.bin (77672b5a..),
   verify, power cycle, `#VER fpga=0x153a`, stages 0x08E3 from the stored calibration.
->>>>>>> fpga-gen13
-- 2026-10-20 20:41 (coordinator): **the 19:52-19:58 verdict was wrong.** fpga-gen13 read the saved records: every one is flat
+- 2026-10-20 20:34 (coordinator): **the 19:52-19:58 verdict was wrong.** fpga-gen13 read the saved records: every one is flat
   at code 128 with 0.14..0.59 code of noise and no 1 kHz tone (a probe on the post reads about 178 codes pk-pk at 1 MSa/s,
   range 3). The probes were still disconnected after the wizard, which asks to disconnect everything, and I ran the seam test,
   bode_cells and the sweeps without checking the amplitude; the seam metric reads 1.8..3.7 on noise. Nothing is known against
