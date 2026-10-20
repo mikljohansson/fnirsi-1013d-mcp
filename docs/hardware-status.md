@@ -1395,3 +1395,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   within its limit" with the noise rows 0.50 / 0.38 against 1.0 gated and 1.19 / 2.75 against 3.0 full, "27 power-ons ago".
   Screenshot docs/screenshots/diagnostics.png replaced (the 15:0x one showed the dev-state Checks). 0x153B images pinned
   in backups/dist-0x153B (padded 1391978c.., the 0x153A padded 77672b5a.. for the pre-write check); flash session pending.
+- 2026-10-20 19:30-19:32: **FPGA flash 0x153A -> 0x153B** (owner present, Sipeed FT2232D on J2, scope on battery, USB
+  unplugged). probe: JEDEC ef 40 14 (W25Q80DV). Pre-write double read backups/fpga-flash_pre-0x153B_20261020-1931.bin
+  = 77672b5a38f2225e.. (the pinned 0x153A padded image, as required). write -i
+  backups/dist-0x153B/fnirsi_1013d-fpga-al3-0x153b-flash1m.bin --yes --confirm-id ef4014: the tool's own backup
+  backups/20261020-193108-pre-write.bin = 77672b5a.., 69 sectors erased, 1104 pages programmed, verified
+  1391978c33379271789a9405f7b0fb9395a85e223ecc69a0430b9f2859a23b88 (= the pinned padded image; raw fdc3c21b..). Rollback =
+  write the pre-write backup. Next: power cycle, `#VER fpga=0x153b`, wizard retrain of the capture stages, band sweep,
+  README section 11 bench checks 1-6.
