@@ -4489,7 +4489,7 @@ inside the span for almost every real filter or tank, so AUTO SET will choose Ho
 owner wants a silent RUN for a narrow band the user dragged to, the same rule could be applied at RUN's first sweep on
 the user's span (not built).
 
-## 62. fw-eng6: CH2 range Auto / Constant, read-only requests inside menus (fw 0.2.94 provisional, protocol 1.24)
+## 62. fw-eng6: CH2 range Auto / Constant, read-only requests inside menus (fw 0.2.94, protocol 1.24)
 
 Branch `fw-eng6` from main 81c9a19 (fw 0.2.93). Brief: the owner's decisions of 2026-10-20 14:16 (Auto / Constant)
 and 14:19 (the AUTO SET notes lose ": span kept"), the coordinator's bench read of 14:19 (a flat AUTO SET ended on
