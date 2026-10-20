@@ -1127,6 +1127,13 @@ was found (commit not identified).
 
 ### Host library and MCP server (`mcp/`, package version 0.1.0)
 
+- 2026-10-20 (mcp-gen7): the server closes the serial port (or the simulator's tcp link) after 30 s without a tool call
+  (`FNIRSI_MCP_IDLE_CLOSE_S`, 0 = hold) and reconnects on the next call, so the coordinator's scripts and `fnirsi1013d-flash`
+  can use the port between calls (275e273); the Bode runner retakes a flat or toneless record once and flags a dead CH1
+  point instead of dividing by zero (070a504); READ_BODE reason 8 text names both causes, the simulator gains reason 8
+  (`SimConfig.bode_readout_fault`), the flat-record hook (`Device.flat_next`) and the fw 0.2.71 header rule (104913a);
+  docs/mcp-tools.md lists the idle variables and `scope_event_log`'s `fpga_trace` (b305982).
+
 - Added: `CAPF_REPEAT` (GET_HEALTH 106 bit 5, fw 0.2.81): `describe_capture` reports `flagged_repeatedly` and says to
   run the calibration wizard (3f47d78).
 
