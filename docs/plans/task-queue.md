@@ -6,7 +6,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- **Device sweep flags stricter than the host's** (bench 10-20 11:14 / 12:02): on the same RC the device flags about half the
+- **Device sweep flags stricter than the host's** (bench 10-20 11:14 / 12:00): on the same RC the device flags about half the
   points incoherent / unsettled / ch2_small where the host flags none; compare bode_dsp.c's incoherence, settle and small-signal
   tests with bode.py's on identical records (feed the host's captured records through the C DFT in a host test) and align the
   thresholds; with the engine batch (range plan) after fpga-gen10.

@@ -1211,7 +1211,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   precise report on 0.2.85 matches the found cause: the first Single sweep from the fold-out counts, a second with the same
   parameters shows "50 / 50" (the same-span repeat kept the table's completion flags), changed parameters count again.
 - 2026-10-20 11:58: owner on 0.2.86: "sweep progress now works" (the Stop sweep counter on a same-span repeat).
-- 2026-10-20 12:02: owner on 0.2.86: AUTO SET "now runs once or twice and stops"; still many grey points; RUN still clicks the
+- 2026-10-20 12:00: owner on 0.2.86: AUTO SET "now runs once or twice and stops"; still many grey points; RUN still clicks the
   relays (the plan reuse is not built yet: engine batch after fpga-gen10). Grey = flagged: part the artefact (CH1 left coarse by
   a bad pre-scan record), part the device's own flags: the 0.2.83 clean sweep flagged 12 of 25 points incoherent / unsettled /
   ch2_small where the host sweep of the same filter flagged none, so bode_dsp.c's thresholds or its DFT differ from bode.py's
