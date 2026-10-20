@@ -1108,4 +1108,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   ui_yields 0 -> 1, ui_yield_refused 0. The screenshot shows the Spectrum view back on its CTRL page with the 1 kHz square's
   spectrum and the overview in the track; no "Host command: menu closed" note in this view (known: the Spectrum view does not
   draw it yet, queued).
+- 2026-10-20 10:31: section 53 nested case: Menu > Settings fold-out > Settings screen open; GET_CHANNEL answered in 0.02 s,
+  ui_busy 0, ui_yields 2; owner: "all the way to Spectrum with no menu open". The owner also decided to drop the
+  "Host command: menu closed" note (fw-yield2). Remaining section 53 checks: the wizard mid-measurement refusal (detail 3),
+  the generator keypad half-typed, the file-save refusal (detail 4): with the next walk-through.
 
