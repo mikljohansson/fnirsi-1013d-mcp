@@ -3379,6 +3379,13 @@ static int pc_dispatch(pc_session *s, int ctx)
   }
   else
   {
+    //fw 0.2.96 (bench 2026-10-20 15:25): Diagnostics is a main-loop screen, so the yield above never reaches it, and a
+    //state-changing request drew the view under it (the Spectrum's waterfall, the Frequency response's plot) into the
+    //Diagnostics frame. Such a request leaves it by Back first, as it leaves a menu (row 63); the F_BUSY set and the
+    //read-only F_MODAL set (READ_SCREEN, GET_*) are answered with it open
+    if((ctx == PC_CTX_MAIN) && !(e->flags & (F_BUSY | F_MODAL)) && pc_hal_ui_leave_screen())
+      s->yields++;
+
     //Zero extended copy of the request (missing trailing fields read as 0)
     memset(s->req, 0, sizeof(s->req));
     memcpy(s->req, s->parser.payload, h->len);

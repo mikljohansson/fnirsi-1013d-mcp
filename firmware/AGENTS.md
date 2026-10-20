@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-yield3 (2026-10-20): fw 0.2.96, protocol 1.24 unchanged: a state-changing host request leaves Diagnostics (Back) before it runs, so the view no longer draws into it; section 63.**
 **Branch fw-cap2 (2026-10-20): fw 0.2.81 provisional (version not bumped), protocol 1.24 + GET_HEALTH 106 bit 5: capture-stage training over codes 120..140, widest-run pick, repeat watch; section 54 addendum.**
 **Branch fw-cap (2026-10-20): fw 0.2.79, protocol 1.24 (row 64): FPGA 0x153A capture stages (training in the wizard's zero step, 0x36 self-check, stored with the calibration), EXT offsets, the wizard's zero back at code 128, section 54.**
 **Branch fw-yield (2026-10-19): fw 0.2.78, protocol 1.23 (row 63), both provisional: host commands close the modal screens (every modal loop leaves by its cancel path; E_BUSY only for a calibration measurement, a file save, USB drive mode or a 1.5 s time-out), section 53.**
@@ -3747,7 +3748,7 @@ WAVE / the Frequency response CSV, ui_diag_view.c `ud_save_report` (4); menu.c `
 **Not changed, and why:** the USB drive screen (exception; the serial port is gone there anyway); the touch-drag loops
 (`while(havetouch)` in scan_for_touch, bode_view.c, spectrum.c: the finger is on the glass, they end on release);
 `tp_i2c_wait_for_touch_release` waits; test.c (timed waits); Diagnostics, Spectrum, Frequency response (main-loop
-modes, the request is answered there without closing anything); auto set and slow UI captures (no modal loop: the
+modes, the request is answered there without closing anything; fw 0.2.96 leaves Diagnostics first, section 63); auto set and slow UI captures (no modal loop: the
 request waits for the main loop, E_BUSY detail 2 after 1.5 s). BODE_CTRL (every action, also status) and READ_BODE
 have no F_BUSY flag, so they close a menu like any main-loop command.
 
@@ -4575,3 +4576,69 @@ trace conversion inside a file viewer were not reviewed).
 Bug indicators: a CH2 relay click during a Constant sweep; CH2 back on the pre-mode V/div after leaving on Constant;
 the row reading "Constant" with a V/div the CH2 button does not show; READ_SCREEN answering E_BUSY detail 2 while a
 menu is simply open (a modal loop without a yield check); a menu closing on GET_CHANNEL.
+
+## 63. fw-yield3: host requests leave Diagnostics (fw 0.2.96, protocol 1.24 unchanged)
+
+Branch `fw-yield3` from main 6f0a273 (fw 0.2.95). Bench 2026-10-20 15:25 (fw 0.2.95, owner's unit): Diagnostics
+(Calibration tab) open while `tools/screenshots.py --port COM10 --generator` ran. Diagnostics never left, and the
+PNGs (docs/screenshots/scope.png, scope-mcp.png, frequency-response-sweep.png on main) show the Diagnostics frame
+with the Spectrum's waterfall rows, ACQ chip, cards and slider drawn into it, later the Frequency response's empty
+plot ("Set by the sweep", markers). Commits: e8750f5 (dispatcher, glue, test), then version, docs and this handoff.
+**Nothing benched, nothing flashed.** Host tests green (`make test`: test_session 70292 / 70290 with the new
+`test_main_screen_leave`), `make gcc10` clean in the changed files.
+
+**Cause.** Not fw-eng6's read-only classification: that is right (F_MODAL = READ_SCREEN, GET_CHANNEL / TIMEBASE /
+TRIGGER / DECIM / SEQ / GEN / CAL, READ_BODE; every modal loop still yields for anything else, checked: the
+loops all go through `PC_UI_YIELD()` = `pc_glue_ui_yield`, which answers F_MODAL at `PC_CTX_MODAL` and returns the
+yield flag for the rest; no loop-specific code was added by fw-eng6). Diagnostics is not a modal loop: it is a
+main-loop screen (`ui_diag_pass` instead of the scope's pass, section 34), so `ui_busy` stays 0 and the 1.23 yield
+never reaches it; section 53 listed it under "Not changed" ("main-loop modes, answered there without closing
+anything"). So every host request was served by the MAIN poll with Diagnostics open, since 0.2.59, not only since
+0.2.94. The handlers' redraws mostly go to the kept scope screen (`ui_diag_scope_buffer`, pc_draw_begin,
+pc_right_bar_follow, bode_view_close, the battery icon) but many view paths draw straight to `maindisplaybuffer`:
+the time base write redraws the view (`scope_preset_values` -> spectrum / waterfall), `spectrum_set_active`,
+`bode_view_open` (`bv_draw_acq_chip`), and (inference, not traced one by one) the channel / trigger writes' top-bar
+button redraws. That is the waterfall
+and the Frequency response inside the Diagnostics frame. (The owner's memory of 0.2.78 closing Diagnostics does not
+match the code; the screenshots tool before 0.2.94 closed menus only.)
+
+**Fix (the 0.2.78 rule extended to the main-loop screen).** `pc_dispatch` (MAIN context, right before the handler):
+a request outside F_BUSY and F_MODAL calls `pc_hal_ui_leave_screen()`; on the target (`pc_hal_scope.c`) that is
+`ui_diag_leave()` = Back (`ud_close`: the kept scope screen, which the background redraws kept current, is copied
+back). The request then runs and draws on the view; the next passes redraw it as after a Back tap. A leave counts in
+GET_LINK_STATS 68 (`yields`). F_BUSY (PING, GET_STATUS, GET_HEALTH, link stats, event log, SET_REMOTE, ...) and
+F_MODAL requests leave Diagnostics open, so `--only diagnostics` / `diagnostics-calibration` still capture it.
+The wizard and the volts calibration inside Diagnostics are modal loops: they cancel by the yield first (nothing
+written), then the MAIN poll leaves Diagnostics. Draws over a screen that owns the display: with Diagnostics left
+before any state-changing handler, no handler draws under it; background passes while it shows were already sent to
+the kept buffer; modal loops only answer read-only requests (no drawing) inside the loop. Not changed: the view
+paths that draw to `maindisplaybuffer` directly (no longer reachable with Diagnostics open by a host request; a
+UI path inside Diagnostics that reached them would be a separate bug).
+
+**Test** (test_session `test_main_screen_leave`, mock `ui_screen`, `ui_screen_leaves`, `under_screen` = setting
+writes / BODE_CTRL made while the screen showed, `screen_read_under`): Diagnostics over the Spectrum (display mode 1)
+and over the Frequency response (5): READ_SCREEN, GET_CHANNEL, GET_TIMEBASE, GET_STATUS, PING answered with it open
+(the screenshot of Diagnostics); then the screenshots.py "scope" sequence (SET_CHANNEL x2, SET_TIMEBASE, RUN,
+READ_SCREEN): the first request leaves it before writing, nothing written under it, READ_SCREEN after it reads the
+view, one count in 68; SET_TIMEBASE alone the same; the wizard over Diagnostics: the yield cancels the wizard, the
+MAIN poll leaves Diagnostics, then the write. BODE_CTRL open (9) and run (1) leave it first; READ_BODE does not.
+Without the fix 35 checks fail.
+
+**Bench (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`; `#VER` fw=0.2.96)**
+1. Scope view, Menu > Diagnostics (Calibration tab). `tools/screenshots.py --port COM10 --only scope`: Diagnostics
+   closes at the first SET_CHANNEL, the Scope view shows with both channels at 1 V/div, 200 us/div, RUN, and
+   docs/screenshots/scope.png is the Scope view (no Diagnostics chrome). The view under Diagnostics is the one it was
+   opened from: opened from the Spectrum analyser, the Spectrum shows (the tool does not change the display mode).
+2. Diagnostics open again, `--generator` (all automatic states): Diagnostics closes at the scope state's first
+   request; scope / scope-mcp as 1, frequency-response / -sweep show the Frequency response. BODE_CTRL alone: open
+   Diagnostics, `--only frequency-response`: Diagnostics closes, the PNG is the Frequency response just opened.
+3. Diagnostics open, `--only diagnostics-calibration`: the PNG is the Diagnostics Calibration tab and Diagnostics
+   stays open (READ_SCREEN is read-only). The MCP server's `scope_status` / `scope_health` leave it open too.
+4. Menu > Settings > Other settings, `--only settings`: the PNG shows Settings and Settings stays open (unchanged
+   from 0.2.94). `s.set_timebase(...)` closes it.
+5. Diagnostics > Calibrate, screen 1, a SET_TIMEBASE: the wizard closes (nothing written) and Diagnostics closes
+   too, the Scope view shows.
+6. GET_LINK_STATS 68 counts one per Diagnostics leave.
+Bug indicators: any view element (waterfall rows, cards, ACQ chip, markers, slider) drawn over Diagnostics;
+Diagnostics closing on READ_SCREEN, GET_* or GET_STATUS; the Scope view left half drawn after the leave (parts of the
+Diagnostics page still on screen).

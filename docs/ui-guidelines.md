@@ -146,7 +146,10 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   calibration Cancel between steps (nothing written). The yield never takes a path that writes something the user
   did not confirm (the generator keypad closes without the typed number); what the user already changed stays, as
   with the cancel path itself. The unwinding is silent: no note on the screen (fw 0.2.78-0.2.80 showed "Host
-  command: menu closed" for 4 s; removed in fw 0.2.81, owner 2026-10-20: not wanted).
+  command: menu closed" for 4 s; removed in fw 0.2.81, owner 2026-10-20: not wanted). Diagnostics, a main-loop
+  screen, goes Back the same way before such a request runs (fw 0.2.96); no view draws over a screen that owns the
+  display. Read-only requests (READ_SCREEN, the GET_* reads, READ_BODE) are answered with the screen left open
+  (fw 0.2.94), so a screenshot shows it.
 - **What does not yield** keeps E_BUSY with the reason as its detail and text, so the host can say why: a calibration
   measurement in progress (the wizard's steps and Save, a volts calibration step), a file save in progress (SAVE PIC,
   SAVE WAVE, the Frequency response CSV, the Diagnostics report), USB drive mode. A new modal loop adds the yield

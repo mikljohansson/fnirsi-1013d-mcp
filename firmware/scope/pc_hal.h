@@ -193,6 +193,10 @@ void     pc_hal_indicator(int state);            //[UI] MCP chip in the top bar:
 //1.23 (fw 0.2.78): what keeps the UI from yielding to a host request now: 0 nothing (the modal loops leave by their
 //cancel paths), else the E_BUSY detail PC_BUSY_CAL / PC_BUSY_SAVE / PC_BUSY_USB_DRIVE. A memory read: any context
 uint8_t  pc_hal_ui_hold(void);
+//fw 0.2.96: a screen the main loop shows over the view (Diagnostics) is left by its Back path before a request that is
+//neither F_BUSY nor read-only (F_MODAL) runs, so the request's redraws reach the view, not that screen. 1 when a
+//screen was left, 0 when none showed. [UI] MAIN only
+int      pc_hal_ui_leave_screen(void);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Transport (pc_transport.c on the target). Safe in every context.

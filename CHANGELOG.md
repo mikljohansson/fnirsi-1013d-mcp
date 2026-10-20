@@ -31,6 +31,13 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.96 - 2026-10-20 (protocol 1.24, unchanged)
+
+- A host command that changes something now closes Diagnostics (as Back does) before it runs, as it closes a menu
+  (e8750f5). Before, Diagnostics stayed open and the command drew the view under it into the Diagnostics screen
+  (bench 2026-10-20 15:25: the Spectrum's waterfall and later the Frequency response inside the Diagnostics frame
+  in the screenshots). READ_SCREEN, the GET_* reads, READ_BODE and the status requests leave Diagnostics open.
+
 #### 0.2.95 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: the Sweep fold-out's CH2 range row reads just "Constant", without the V/div, which the CH2 button
