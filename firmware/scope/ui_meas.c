@@ -154,7 +154,13 @@ const char *ui_ms_more_text(char *t, int more)
 //----------------------------------------------------------------------------------------------------------------------------------
 //Spectrum list
 
-const char *const ui_ms_sp_names[UI_MS_SP_KINDS] = { "Peak", "Level", "THD", "Noise", "RBW", "Span", "Center", "Time" };
+const char *const ui_ms_sp_names[UI_MS_SP_KINDS] = { "Peak", "Level", "THD", "Noise", "RBW", "Span", "Center", "Time",
+                                                     "Capture" };
+
+int ui_ms_sp_len(int group)
+{
+  return (group == UI_MS_SP_VIEW) ? UI_MS_SP_PER_GROUP : UI_MS_SP_CH_ITEMS;
+}
 
 static void ui_ms_spec_group_defaults(ui_ms_spec *s, int g)
 {
@@ -162,8 +168,9 @@ static void ui_ms_spec_group_defaults(ui_ms_spec *s, int g)
 
   if(g == UI_MS_SP_VIEW)
   {
-    s->rank[g][UI_MS_SP_RBW - 4]  = 1;
-    s->rank[g][UI_MS_SP_TIME - 4] = 2;
+    s->rank[g][UI_MS_SP_RBW - 4]     = 1;
+    s->rank[g][UI_MS_SP_TIME - 4]    = 2;
+    s->rank[g][UI_MS_SP_CAPTURE - 4] = 3;
     return;
   }
 
@@ -182,20 +189,46 @@ void ui_ms_spec_defaults(ui_ms_spec *s)
     ui_ms_spec_group_defaults(s, g);
 }
 
+//The first four ranks of a group (bits 12-15 hold the marker; the view's fifth is in its own word)
 uint16 ui_ms_spec_word(const ui_ms_spec *s, int group)
 {
   uint16 w = UI_MS_SPEC_MARKER;
   int    i;
 
-  for(i = 0; i < UI_MS_SP_PER_GROUP; i++)
+  for(i = 0; i < UI_MS_SP_CH_ITEMS; i++)
     w |= (uint16)((s->rank[group][i] & 7) << (3 * i));
 
   return w;
 }
 
+uint16 ui_ms_spec_capture_word(const ui_ms_spec *s)
+{
+  return (uint16)(UI_MS_SPEC_CAP_MARKER | (s->rank[UI_MS_SP_VIEW][UI_MS_SP_CAPTURE - 4] & 7));
+}
+
+int ui_ms_spec_capture_restore(ui_ms_spec *s, uint16 w)
+{
+  uint8 *rank = s->rank[UI_MS_SP_VIEW];
+  int    ok = ((w & 0xFFF8) == UI_MS_SPEC_CAP_MARKER) && ((w & 7) <= UI_MS_SP_PER_GROUP), i, k = 0;
+
+  if(ok)
+    rank[UI_MS_SP_CAPTURE - 4] = (uint8)(w & 7);
+  else
+  {
+    //Last in the row: after every chosen view item
+    for(i = 0; i < UI_MS_SP_CH_ITEMS; i++)
+      if(rank[i] > k)
+        k = rank[i];
+    rank[UI_MS_SP_CAPTURE - 4] = (uint8)(k + 1);
+  }
+
+  ui_ms_normalise(rank, UI_MS_SP_PER_GROUP);
+  return ok;
+}
+
 int ui_ms_spec_restore(ui_ms_spec *s, int group, uint16 w)
 {
-  int i;
+  int i, n = ui_ms_sp_len(group);
 
   if((w & 0xF000) != UI_MS_SPEC_MARKER)
   {
@@ -203,17 +236,22 @@ int ui_ms_spec_restore(ui_ms_spec *s, int group, uint16 w)
     return 0;
   }
 
-  for(i = 0; i < UI_MS_SP_PER_GROUP; i++)
-    if(((w >> (3 * i)) & 7) > UI_MS_SP_PER_GROUP)
+  for(i = 0; i < UI_MS_SP_CH_ITEMS; i++)
+    if(((w >> (3 * i)) & 7) > n)
     {
       ui_ms_spec_group_defaults(s, group);
       return 0;
     }
 
-  for(i = 0; i < UI_MS_SP_PER_GROUP; i++)
+  for(i = 0; i < UI_MS_SP_CH_ITEMS; i++)
     s->rank[group][i] = (uint8)((w >> (3 * i)) & 7);
 
-  ui_ms_normalise(s->rank[group], UI_MS_SP_PER_GROUP);
+  //The view's ranks stay as saved until ui_ms_spec_capture_restore adds the fifth (Capture) and renumbers
+  if(group == UI_MS_SP_VIEW)
+    s->rank[group][UI_MS_SP_CAPTURE - 4] = 0;
+  else
+    ui_ms_normalise(s->rank[group], n);
+
   return 1;
 }
 
@@ -233,7 +271,7 @@ int ui_ms_spec_cards(const ui_ms_spec *s, const uint8 shown[2], int time_ok, ui_
     if((g < 2) && !shown[g])
       continue;
 
-    k = ui_ms_order(s->rank[g], UI_MS_SP_PER_GROUP, order);
+    k = ui_ms_order(s->rank[g], ui_ms_sp_len(g), order);
 
     for(i = 0; i < k; i++)
     {
@@ -547,7 +585,8 @@ int ui_msm_cells(int mode, ui_msm_cell *out)
 
   //The spectrum's view items across the whole width
   if(mode == UI_MS_SPECTRUM)
-    c = ui_msm_row(c, UI_MSM_HX(0), 729 - UI_MSM_HX(0) + 1, y0 + 2 * (UI_MSM_ROW_H + 1), 4, UI_MSC_ITEM, UI_MS_SP_VIEW, 0, 0);
+    c = ui_msm_row(c, UI_MSM_HX(0), 729 - UI_MSM_HX(0) + 1, y0 + 2 * (UI_MSM_ROW_H + 1), UI_MS_SP_PER_GROUP, UI_MSC_ITEM,
+                   UI_MS_SP_VIEW, 0, 0);
 
   return (int)(c - out);
 }
@@ -568,7 +607,7 @@ const char *ui_msm_text(int mode, const ui_msm_cell *c)
       if(mode == UI_MS_BODE)
         return (c->index < BU_MS_COUNT) ? bu_ms_names[c->index] : "";
       if(mode == UI_MS_SPECTRUM)
-        return ui_ms_sp_names[ui_ms_spec_kind(c->group, c->index) & 7];
+        return (ui_ms_spec_kind(c->group, c->index) < UI_MS_SP_MORE) ? ui_ms_sp_names[ui_ms_spec_kind(c->group, c->index)] : "";
       return (c->index < UI_MEAS_COUNT) ? measurement_names[c->index] : "";
     default:             return "";
   }

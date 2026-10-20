@@ -6453,6 +6453,7 @@ void scope_save_config_data(void)
   settingsworkbuffer[UI_MS_SPEC_WORD_CH1]  = ui_ms_spec_word(spectrum_cards(), 0);
   settingsworkbuffer[UI_MS_SPEC_WORD_CH2]  = ui_ms_spec_word(spectrum_cards(), 1);
   settingsworkbuffer[UI_MS_SPEC_WORD_VIEW] = ui_ms_spec_word(spectrum_cards(), UI_MS_SP_VIEW);
+  settingsworkbuffer[UI_MS_SPEC_WORD_CAPTURE] = ui_ms_spec_capture_word(spectrum_cards());     //fw 0.2.84, word 217
   //Bode plot sweep settings (fw 0.2.66)
   settingsworkbuffer[PC_SETTING_WORD_BODE0] = pc_glue_bode_setting_word(0);
   settingsworkbuffer[PC_SETTING_WORD_BODE1] = pc_glue_bode_setting_word(1);
@@ -6626,6 +6627,7 @@ void scope_restore_config_data(void)
     ui_ms_spec_restore(spectrum_cards(), 0, settingsworkbuffer[UI_MS_SPEC_WORD_CH1]);
     ui_ms_spec_restore(spectrum_cards(), 1, settingsworkbuffer[UI_MS_SPEC_WORD_CH2]);
     ui_ms_spec_restore(spectrum_cards(), UI_MS_SP_VIEW, settingsworkbuffer[UI_MS_SPEC_WORD_VIEW]);
+    ui_ms_spec_capture_restore(spectrum_cards(), settingsworkbuffer[UI_MS_SPEC_WORD_CAPTURE]);    //fw 0.2.84, word 217
 
     //Load reference waveforms
     scope_load_ALLREF_file();

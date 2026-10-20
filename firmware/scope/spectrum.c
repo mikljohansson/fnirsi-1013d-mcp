@@ -796,10 +796,10 @@ static uint32 spec_draw_trace(const SPECVIEW *v, const int16 *db, uint32 color)
 
 //The cards in the bottom row (fw 0.2.56, owner; the one-line header before). fw 0.2.65 (Measurements v2): the ones chosen
 //in the spectrum's MEASURES list in the chosen order (ui_ms_spec_cards): per shown channel Peak, Level, THD and Noise in
-//the channel colour, then RBW, Span, Center and, in the waterfall, the time its rows span with a neutral chip; six fit,
-//with more the last place reads "+N more". The decimation filter tag is not shown: the filter lives in the acquisition
+//the channel colour, then RBW, Span, Center, in the waterfall the time its rows span, and the capture time of one
+//record (fw 0.2.84) with a neutral chip; six fit, with more the last place reads "+N more". The decimation filter tag is not shown: the filter lives in the acquisition
 //menu.
-static ui_ms_spec spec_cards = { { { 1, 2, 3, 0 }, { 1, 2, 0, 0 }, { 1, 0, 0, 2 } } };   //ui_ms_spec_defaults
+static ui_ms_spec spec_cards = { { { 1, 2, 3, 0, 0 }, { 1, 2, 0, 0, 0 }, { 1, 0, 0, 2, 3 } } };   //ui_ms_spec_defaults
 
 ui_ms_spec *spectrum_cards(void)
 {
@@ -877,6 +877,17 @@ static void spec_draw_cards(const SPECVIEW *v, const uint32 *peak, int hch, uint
 
         //Hundredths of a second: four significant digits ("12.30s")
         ui_fmt_sig4(t, (int32)((timer0ticks - wf_ms[oldest]) / 10), 4, "s");
+        break;
+      }
+
+      //fw 0.2.84: the time one record takes at the record's rate (memory depth / fs; the ladder keeps it within 2.048 s)
+      case UI_MS_SP_CAPTURE:
+      {
+        pc_decim_cfg dc;
+        int          written;
+
+        pc_hal_decim_current(&dc, &written);
+        ui_fmt_record_time(t, spec_cap(), spec_fs_mhz(spec_divider(), &dc));
         break;
       }
 

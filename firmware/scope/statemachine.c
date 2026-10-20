@@ -4068,7 +4068,7 @@ void handle_right_volts_div_menu_touch(void)
 void handle_measures_menu_touch(void)
 {
   ui_msm_cell cells[UI_MSM_CELLS_MAX], c;
-  int    mode = scope_measures_mode(), len = scope_measures_list_len(mode), n, i, r;
+  int    mode = scope_measures_mode(), len, n, i, r;
   uint8 *rank;
 
   n = ui_msm_cells(mode, cells);
@@ -4098,6 +4098,7 @@ void handle_measures_menu_touch(void)
     if(r > 0)
     {
       rank = scope_measures_ranks(mode, c.group);
+      len  = scope_measures_list_len(mode, c.group);
 
       switch(c.what)
       {

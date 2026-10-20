@@ -241,6 +241,17 @@ static void test_fmt_spectrum(void)
   ui_fmt_mhz(b, 100000000000ull);   T_STR(b, "100.0MHz");
   ui_fmt_mhz(b, 0);                 T_STR(b, "0Hz");
 
+  //fw 0.2.84, the Capture card: memory depth / fs (fs in mHz)
+  ui_fmt_record_time(b, 3000, 200000000000ull);   T_STR(b, "15.00us");
+  ui_fmt_record_time(b, 16382, 2000000ull);       T_STR(b, "8.191s");
+  ui_fmt_record_time(b, 4096, 2000000ull);        T_STR(b, "2.048s");
+  ui_fmt_record_time(b, 3000, 1000000ull);        T_STR(b, "3.000s");
+  ui_fmt_record_time(b, 16382, 500000ull);        T_STR(b, "32.76s");
+  ui_fmt_record_time(b, 6000, 50000000000ull);    T_STR(b, "120.0us");
+  ui_fmt_record_time(b, 8190, 24390243902ull);    T_STR(b, "335.8us");      //filter: 200 MHz / 8.2
+  ui_fmt_record_time(b, 3000, 5000000ull);        T_STR(b, "600.0ms");
+  ui_fmt_record_time(b, 3000, 0);                 T_STR(b, "--");
+
   ui_fmt_cdb(b, 270, "dBV");        T_STR(b, "+2.7dBV");
   ui_fmt_cdb(b, -10000, "dBV");     T_STR(b, "-100.0dBV");
   ui_fmt_cdb(b, 4, "dBV");          T_STR(b, "0.0dBV");
@@ -553,7 +564,8 @@ static void test_spec_cards(void)
   int        n, i;
   unsigned   j;
 
-  //Defaults (plan section 3a): CH1 Peak, Level, THD; CH2 Peak, Level; RBW, Time; both channels fill the row exactly
+  //Defaults (plan section 3a): CH1 Peak, Level, THD; CH2 Peak, Level; RBW, Time, Capture (fw 0.2.84); both channels
+  //overfill the row
   ui_ms_spec_defaults(&s);
   shown[0] = 1; shown[1] = 1;
   n = ui_ms_spec_cards(&s, shown, 1, c);
@@ -563,50 +575,73 @@ static void test_spec_cards(void)
   T_EQ(c[2].kind, UI_MS_SP_THD);   T_EQ(c[2].ch, 0);
   T_EQ(c[3].kind, UI_MS_SP_PEAK);  T_EQ(c[3].ch, 1);
   T_EQ(c[4].kind, UI_MS_SP_LEVEL); T_EQ(c[4].ch, 1);
-  T_EQ(c[5].kind, UI_MS_SP_MORE);  T_EQ(c[5].ch, 2);       //RBW and Time cut: "+2"
+  T_EQ(c[5].kind, UI_MS_SP_MORE);  T_EQ(c[5].ch, 3);       //RBW, Time and Capture cut: "+3"
 
-  //Without the waterfall Time drops and everything fits
+  //Without the waterfall Time drops: "+2"
   n = ui_ms_spec_cards(&s, shown, 0, c);
   T_EQ(n, 6);
-  T_EQ(c[5].kind, UI_MS_SP_RBW);
+  T_EQ(c[5].kind, UI_MS_SP_MORE);  T_EQ(c[5].ch, 2);
+
+  //One channel (the Spectrum's default): Peak, Level, THD, RBW, Capture fit
+  shown[1] = 0;
+  n = ui_ms_spec_cards(&s, shown, 0, c);
+  T_EQ(n, 5);
+  T_EQ(c[3].kind, UI_MS_SP_RBW);
+  T_EQ(c[4].kind, UI_MS_SP_CAPTURE);
+  n = ui_ms_spec_cards(&s, shown, 1, c);
+  T_EQ(n, 6);
+  T_EQ(c[4].kind, UI_MS_SP_TIME);
+  T_EQ(c[5].kind, UI_MS_SP_CAPTURE);
+  shown[1] = 1;
 
   //The static default in spectrum.c is the same
   {
-    ui_ms_spec d = { { { 1, 2, 3, 0 }, { 1, 2, 0, 0 }, { 1, 0, 0, 2 } } };
+    ui_ms_spec d = { { { 1, 2, 3, 0, 0 }, { 1, 2, 0, 0, 0 }, { 1, 0, 0, 2, 3 } } };
     T_MEM(&d, &s, sizeof(s));
   }
+  T_EQ(ui_ms_sp_len(0), 4);
+  T_EQ(ui_ms_sp_len(1), 4);
+  T_EQ(ui_ms_sp_len(UI_MS_SP_VIEW), 5);
+  T_EQ(ui_ms_spec_kind(UI_MS_SP_VIEW, 4), UI_MS_SP_CAPTURE);
+  T_STR(ui_ms_sp_names[UI_MS_SP_CAPTURE], "Capture");
+  ui_ms_clear(s.rank[2], 5);
 
   //The last of six cards ends inside the 726 px plot (x 2..727)
   T_TRUE(ui_ms_card_x(0, UI_MS_ROW_CARDS - 1) + UI_CARD_W <= 728);
   T_TRUE(UI_MS_SPEC_Y + UI_CARD_H <= 480);
 
   shown[0] = 0;
+  ui_ms_spec_defaults(&s);
   n = ui_ms_spec_cards(&s, shown, 0, c);
-  T_EQ(n, 3);
+  T_EQ(n, 4);
   T_EQ(c[0].ch, 1);
   T_EQ(c[2].kind, UI_MS_SP_RBW);
+  T_EQ(c[3].kind, UI_MS_SP_CAPTURE);
 
   shown[1] = 0;
   n = ui_ms_spec_cards(&s, shown, 0, c);
-  T_EQ(n, 1);
+  T_EQ(n, 2);
   T_EQ(c[0].kind, UI_MS_SP_RBW);
+  T_EQ(c[1].kind, UI_MS_SP_CAPTURE);
 
   //The user's order is kept: Noise, then Peak for CH1; Center before RBW
   ui_ms_clear(s.rank[0], 4);
   ui_ms_toggle(s.rank[0], 4, UI_MS_SP_NOISE);
   ui_ms_toggle(s.rank[0], 4, UI_MS_SP_PEAK);
-  ui_ms_clear(s.rank[2], 4);
-  ui_ms_toggle(s.rank[2], 4, UI_MS_SP_CENTER - 4);
-  ui_ms_toggle(s.rank[2], 4, UI_MS_SP_RBW - 4);
+  ui_ms_clear(s.rank[2], 5);
+  ui_ms_toggle(s.rank[2], 5, UI_MS_SP_CENTER - 4);
+  ui_ms_toggle(s.rank[2], 5, UI_MS_SP_CAPTURE - 4);
+  ui_ms_toggle(s.rank[2], 5, UI_MS_SP_RBW - 4);
   shown[0] = 1;
   n = ui_ms_spec_cards(&s, shown, 1, c);
-  T_EQ(n, 4);
+  T_EQ(n, 5);
   T_EQ(c[0].kind, UI_MS_SP_NOISE);
   T_EQ(c[1].kind, UI_MS_SP_PEAK);
   T_EQ(c[2].kind, UI_MS_SP_CENTER);
-  T_EQ(c[3].kind, UI_MS_SP_RBW);
+  T_EQ(c[3].kind, UI_MS_SP_CAPTURE);
+  T_EQ(c[4].kind, UI_MS_SP_RBW);
 
-  //Settings words: marker, round trip, bad words give the group's defaults
+  //Settings words: marker, round trip (the view's with word 217 for Capture), bad words give the group's defaults
   for(i = 0; i < UI_MS_SP_GROUPS; i++)
   {
     ui_ms_spec t;
@@ -615,8 +650,40 @@ static void test_spec_cards(void)
     T_EQ(w & 0xF000, UI_MS_SPEC_MARKER);
     ui_ms_spec_defaults(&t);
     T_EQ(ui_ms_spec_restore(&t, i, w), 1);
-    T_MEM(t.rank[i], s.rank[i], 4);
+    if(i == UI_MS_SP_VIEW)
+      T_EQ(ui_ms_spec_capture_restore(&t, ui_ms_spec_capture_word(&s)), 1);
+    T_MEM(t.rank[i], s.rank[i], 5);
   }
+  T_EQ(ui_ms_spec_capture_word(&s), 0xCA02);
+  {
+    ui_ms_spec t;
+
+    //Capture first, RBW last of five: rank 5 is valid in the view's word
+    ui_ms_clear(s.rank[2], 5);
+    for(i = 4; i >= 0; i--)
+      ui_ms_toggle(s.rank[2], 5, i);
+    T_EQ(s.rank[2][0], 5);
+    ui_ms_spec_defaults(&t);
+    T_EQ(ui_ms_spec_restore(&t, 2, ui_ms_spec_word(&s, 2)), 1);
+    T_EQ(ui_ms_spec_capture_restore(&t, ui_ms_spec_capture_word(&s)), 1);
+    T_MEM(t.rank[2], s.rank[2], 5);
+
+    //A sector from before fw 0.2.84 (no word 217): the view's saved order, Capture last
+    ui_ms_spec_defaults(&t);
+    T_EQ(ui_ms_spec_restore(&t, 2, 0xA000 | (1 << 6) | (2 << 0)), 1);   //Center, RBW
+    T_EQ(ui_ms_spec_capture_restore(&t, 0x0000), 0);
+    T_EQ(t.rank[2][UI_MS_SP_CENTER - 4], 1);
+    T_EQ(t.rank[2][UI_MS_SP_RBW - 4], 2);
+    T_EQ(t.rank[2][UI_MS_SP_CAPTURE - 4], 3);
+    T_EQ(t.rank[2][UI_MS_SP_TIME - 4], 0);
+    T_EQ(ui_ms_spec_capture_restore(&t, 0xCA07), 0);       //rank 7 > 5: last again
+    T_EQ(t.rank[2][UI_MS_SP_CAPTURE - 4], 3);
+    T_EQ(ui_ms_spec_capture_restore(&t, 0xCA00), 1);       //valid: not chosen
+    T_EQ(t.rank[2][UI_MS_SP_CAPTURE - 4], 0);
+    T_EQ(ui_ms_spec_restore(&t, 2, 0xA000 | (6 << 0)), 0); //rank 6 > 5: the view's defaults
+    T_EQ(ui_ms_spec_restore(&t, 0, 0xA000 | (5 << 0)), 0); //rank 5 > 4 in a channel's word
+  }
+  T_EQ(UI_MS_SPEC_WORD_CAPTURE, 217);
   {
     ui_ms_spec t, d;
 
@@ -636,7 +703,15 @@ static void test_spec_cards(void)
   T_EQ(UI_MS_SPEC_WORD_CH2, 222);
   T_EQ(UI_MS_SPEC_WORD_VIEW, 221);
 
-  for(i = 0; i < UI_MS_SP_KINDS; i++)
+  //Capture's values (fw 0.2.84): 3000 at 200 MSa/s .. 16382 at 500 Sa/s
+  {
+    static const char *times[] = { "15.00us", "999.9us", "999.9ms", "32.76s", "8.191s", "more" };
+
+    for(j = 0; j < sizeof(times) / sizeof(times[0]); j++)
+      T_TRUE(ui_card_fits(&font_2, ui_ms_sp_names[UI_MS_SP_CAPTURE], times[j]));
+  }
+
+  for(i = 0; i < UI_MS_SP_CAPTURE; i++)
     for(j = 0; j < sizeof(values) / sizeof(values[0]); j++)
     {
       int fits = ui_card_fits(&font_2, ui_ms_sp_names[i], values[j]);
@@ -832,7 +907,7 @@ static void test_meas_menu(void)
     T_EQ(top + ui_msm_height(mode), UI_MSM_BOTTOM);
     T_TRUE(top >= 46);                                 //below the top bar
     T_TRUE(ui_text_width(&font_3, ui_msm_title(mode)) + 8 <= UI_MSM_W);
-    T_EQ(n, (mode == UI_MS_SCOPE) ? 40 : (mode == UI_MS_SPECTRUM) ? 18 : 14);
+    T_EQ(n, (mode == UI_MS_SCOPE) ? 40 : (mode == UI_MS_SPECTRUM) ? 19 : 14);
 
     memset(counts, 0, sizeof(counts));
 
@@ -879,7 +954,7 @@ static void test_meas_menu(void)
     else
     {
       T_EQ(counts[UI_MSC_LABEL], 2); T_EQ(counts[UI_MSC_ALL], 2); T_EQ(counts[UI_MSC_CLEAR], 2);
-      T_EQ(counts[UI_MSC_ITEM], 12); T_EQ(counts[UI_MSC_SOURCE], 0); T_EQ(counts[UI_MSC_HIDE], 0);
+      T_EQ(counts[UI_MSC_ITEM], 13); T_EQ(counts[UI_MSC_SOURCE], 0); T_EQ(counts[UI_MSC_HIDE], 0);
     }
 
     //Every point: outside the box -1, the title band 0, everything else a cell that contains it (separators go to the
@@ -925,10 +1000,13 @@ static void test_meas_menu(void)
 
   //Spectrum: the view's row spans both halves
   n = ui_msm_cells(UI_MS_SPECTRUM, cells);
-  T_EQ(cells[n - 4].group, UI_MS_SP_VIEW);
-  T_STR(ui_msm_text(UI_MS_SPECTRUM, &cells[n - 4]), "RBW");
-  T_STR(ui_msm_text(UI_MS_SPECTRUM, &cells[n - 2]), "Center");
-  T_TRUE(cells[n - 4].x < 480 && cells[n - 1].x > 482);
+  T_EQ(cells[n - 5].group, UI_MS_SP_VIEW);
+  T_STR(ui_msm_text(UI_MS_SPECTRUM, &cells[n - 5]), "RBW");
+  T_STR(ui_msm_text(UI_MS_SPECTRUM, &cells[n - 3]), "Center");
+  T_STR(ui_msm_text(UI_MS_SPECTRUM, &cells[n - 1]), "Capture");
+  T_EQ(cells[n - 1].index, 4);
+  T_TRUE(cells[n - 1].w >= 80);
+  T_TRUE(cells[n - 5].x < 480 && cells[n - 1].x > 482);
   T_STR(ui_msm_text(UI_MS_SPECTRUM, &cells[0]), "CH1");
   T_STR(ui_msm_text(UI_MS_SPECTRUM, &cells[6]), "Noise");
 

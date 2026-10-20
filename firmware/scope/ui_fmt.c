@@ -147,6 +147,25 @@ char *ui_fmt_sig4_fixed(char *p, int32 value, const char *unit)
   return ui_sig4(p, value, 4, unit, 1);
 }
 
+char *ui_fmt_record_time(char *p, uint32 samples, uint64 fs_mhz)
+{
+  uint64 v;
+  uint32 scale = 1;
+
+  if(!fs_mhz)
+    return ui_put(p, "--");
+
+  //Hundredths of a nanosecond: samples x 1e14 / fs (samples < 2^16, so no overflow), coarser while over int32
+  v = ((uint64)samples * 100000000000000ull + fs_mhz / 2) / fs_mhz;
+  while(v > 0x7FFFFFFFull)
+  {
+    v = (v + 500) / 1000;
+    scale++;
+  }
+
+  return ui_sig4(p, (int32)v, scale, "s", 0);
+}
+
 char *ui_fmt_mhz(char *p, uint64 mhz)
 {
   if((mhz + 5) / 10 <= 0x7FFFFFFFull)

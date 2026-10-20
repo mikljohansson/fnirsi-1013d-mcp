@@ -26,6 +26,7 @@
                                     //cursors, frequency axis (bits 3..6)
 #define PC_SETTING_WORD_BODE_MS 213 //fw 0.2.69: Frequency response MEASURES list, words 213..215 (bode_ui.h)
 #define PC_SETTING_WORD_BODE2 216   //fw 0.2.71: Frequency response Trace style (0xB200 marker, bit 0)
+//217: fw 0.2.84, the Spectrum MEASURES Capture card's rank (ui_meas.h UI_MS_SPEC_WORD_CAPTURE, 0xCA00 marker)
 
 //PC_UI_MASK(m) items. Menus are compact (fw 0.2.8, owner: no gaps): what the 1013D lacks is not laid out at all.
 #define PC_MASK_TRIG_CHANNEL  2     //trigger menu: EXT source box (0x1533+)

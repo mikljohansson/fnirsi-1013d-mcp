@@ -22,6 +22,10 @@ char *ui_fmt_sig4(char *p, int32 value, uint32 scale, const char *unit);
 //The same without a prefix (scale 4 kept), for percentages: 5000 with "%" -> "50.00%"
 char *ui_fmt_sig4_fixed(char *p, int32 value, const char *unit);
 
+//fw 0.2.84: the time `samples` take at fs_mhz (mHz) with four significant digits, the Spectrum's Capture card:
+//3000 at 200 MSa/s -> "15.00us", 16382 at 2 kSa/s -> "8.191s"; "--" when fs is 0. samples < 2^16
+char *ui_fmt_record_time(char *p, uint32 samples, uint64 fs_mhz);
+
 //A frequency in mHz (the spectrum's unit) with four significant digits: 146484 -> "146.5Hz", 1000000 -> "1.000Hz"
 char *ui_fmt_mhz(char *p, uint64 mhz);
 
