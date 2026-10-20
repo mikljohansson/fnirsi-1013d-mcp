@@ -31,6 +31,24 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.97 - 2026-10-20 (protocol 1.24, unchanged; GET_CAPTURE_INFO flags bit 6)
+
+- Auto-mode records on FPGA 0x1532..0x153A are no longer spliced (fpga/al3/README.md section 11; 49d99bf, 13f88b1,
+  cd1df51). Since 0.2.41 the auto mode armed normal and forced the stop at its own deadline, after the ring had wrapped
+  many times, while these bitstreams report the time-out record as ring words 0 .. total - 1: whenever the stop
+  landed inside the record, its two parts were one ring apart (bench 15 of 32 untriggered host captures, about every
+  fifth untriggered Scope-view trace at fast time bases). Now the host's and the UI's auto mode and the Frequency
+  response engine arm the FPGA's own auto mode with 0x0E chosen so the FPGA stops where those words are the last
+  pass's (at or just after the same deadline), and read a record as triggered only when 0x14 differs from the
+  pretrigger (an edge after the stop no longer makes a flat record "triggered"). Calibration / auto setup
+  conversions and host segment runs in auto mode get the same 0x0E rule (a segment run with 120 words in 128-word
+  slots spliced every untriggered segment). On 0x153B and later the firmware keeps the forced stop, which is safe
+  there.
+- GET_CAPTURE_INFO flags bit 6: the record may be spliced. Set when the firmware still had to force a stop on
+  0x1532..0x153A (its safety net, or a host FORCE), on EF2 / EP4 forced records, and when a trigger came so close to
+  the FPGA's time-out that the stop may have cut it. The Frequency response engine takes such a record again. mcp:
+  `Capture.maybe_spliced`, a capture caveat and the `.npz` metadata (dc35b9f).
+
 #### FPGA bitstream 0x153B-pre - 2026-10-20 (fpga-gen11; fpga/al3/dist, not flashed)
 
 - Records that end on the auto time-out or on the firmware's forced stop are no longer spliced (fpga/al3/README.md
