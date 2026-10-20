@@ -31,7 +31,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.87 (provisional, not tagged in pc_cmds.h; protocol 1.24, unchanged)
+#### 0.2.87 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: repeated sweeps reuse the range plan, so the relays stay quiet on an unchanging circuit (owner
   2026-10-20 11:51 / 11:52; 53447c4). Every sweep at the same span, points, Settle and CH2 mode (RUN, Single sweep,

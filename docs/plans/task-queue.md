@@ -6,12 +6,12 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- **Device sweep flags stricter than the host's** (bench 10-20 11:14 / 12:00): on the same RC the device flags about half the
+- [x] **Device sweep flags stricter than the host's** (fw 0.2.87, bench pending) (bench 10-20 11:14 / 12:00): on the same RC the device flags about half the
   points incoherent / unsettled / ch2_small where the host flags none; compare bode_dsp.c's incoherence, settle and small-signal
   tests with bode.py's on identical records (feed the host's captured records through the C DFT in a host test) and align the
   thresholds; with the engine batch (range plan) after fpga-gen10.
 
-- **RUN stays continuous; repeated sweeps reuse the previous range plan** (owner 10-20 11:51 **(owner)**: "RUN stays continuous,
+- [x] **RUN stays continuous; repeated sweeps reuse the previous range plan** (fw 0.2.87, bench pending) (owner 10-20 11:51 **(owner)**: "RUN stays continuous,
   but we reuse the previous plan so the relays don't click like crazy"): the use case is live tuning (the coil tank's trimmer
   while watching the peak). Engine change, after fpga-gen10's first-record work lands (bode_sweep.c): a repeated sweep starts
   each point at the range the previous sweep ended with for that point (per-point range plan kept with the table), switches
@@ -489,6 +489,13 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 
 ## Dispatched
+
+- fw-eng (done 12:28, about 300k tokens, merged 12:21 as fw 0.2.87, handoff firmware/AGENTS.md section 56): per-point range plan
+  (ranges, offsets, correction kept with the table; a sweep at the same span / points / Settle / CH2 mode skips the pre-scan and
+  starts each point there, switching only on a clip or a drop below 30 % of the next range's full scale; plans from a clipped,
+  signal-less or coarse-CH1 sweep are thrown away); flags named after the host's constants (none differed) plus the host's flat
+  / no-signal rules; a suspect record retaken once; the waits after a range change now add up as the host's (100 ms). Not done:
+  the view shows nothing about the plan; the estimate still counts the pre-scan on reused sweeps.
 
 - fpga-gen10 (Fable, done 12:05, about 305k tokens, merged 12:07; handoff fpga/al3/AGENTS.md "First-record saturation"): the
   0x153A decimator cannot produce a 0xFFFF record with the registers read back; the firmware's host ARM computes N and the shift
