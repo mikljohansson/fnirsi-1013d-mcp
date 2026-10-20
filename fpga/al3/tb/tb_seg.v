@@ -587,7 +587,7 @@ module tb;
         wr1(8'h1A, {7'd0, rnd[2]});
         wr1(8'h0F, {7'd0, rnd[3]});
         wr4(8'h0D, dv);
-        wr1(8'h56, {rnd2[24:18], rnd[12]});
+        wr1(8'h56, {rnd2[24:19], 1'b0, rnd[12]});          // bit 1 = peak detect (0x153C), off
         pre_r = 13'd20 + (rnd[24:16] % 13'd200);
         tot_r = pre_r + 13'd20 + ($random(seed) & 13'h00FF);
         wr2(8'h0B, {3'd0, pre_r});
