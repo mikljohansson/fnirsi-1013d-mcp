@@ -1990,6 +1990,146 @@ after pinning the images in `backups/`):
 6. Segments in auto mode with a sparse trigger (section 6 step 7 with the generator off): the untriggered segments
    read as flat records without a seam.
 
+### 12. Hardware counter with min / max; version 0x153C, item C3 (fpga-c3, 2026-10-20)
+
+Contract: `docs/plans/fpga-0x153c.md` sections 2.1 (0x61, 0x62), 2.2 (0x35), 5 and 9.1; the gen8 design (branch
+`gen8-features-wip`, 9de82ca) rebased onto 0x153B with the min / max bytes added. The trigger types (C1) and peak detect
+(C2) of the same generation are documented by their own agents; C4 integrates them and sets the version byte 0x3C. With
+0x61 = 0 (power-on) nothing runs and the capture is cycle-identical to 0x153B (the equivalence steps of `tb/run.sh`).
+
+#### Register map
+
+| Cmd | Bytes | Bits | Meaning |
+|---|---|---|---|
+| 0x61 | 1 | 1..0 | **gate**: 0 off (power-on), 1 = 10 ms, 2 = 100 ms, 3 = 1 s (exactly 2e6 / 2e7 / 2e8 clocks of 200 MHz) |
+| | | 3..2 | **source**: 0 the trigger source (0x15 as written: 0 CH1, 1 CH2, 2 and 3 EXT), 1 CH1, 2 CH2, 3 EXT. A 0x61 write that changes the value restarts the gate |
+| 0x62 | 2 | | **level** (raw ADC code: high at code >= level), then **hysteresis** (low at code < level - hysteresis; hysteresis >= level never goes low). Power-on 0 / 0; the firmware writes 128 / 6 at boot and follows the trigger level |
+
+Read 0x35, 16 bytes, one consistent snapshot:
+
+| Byte | Content |
+|---|---|
+| 0 | { new, 0, EXT, CH2, 0, 0, gate[1:0] }: the source and gate the result was measured with; `new` = a gate ended since the previous 0x35 read |
+| 1 | sequence number of the result (8 bits, +1 per gate) |
+| 2..5 | E, u32 high byte first (28 bits used): periods between the first and the last rising edge in the gate; 0 = fewer than two edges |
+| 6..9 | T: 5 ns clocks between those edges |
+| 10..13 | W: 5 ns clocks the stream was high between them |
+| 14 | min: the smallest raw code of the source's captured pair over the gate (both cores); 255 when no sample (EXT source, or nothing published yet) |
+| 15 | max: the largest; 0 when no sample |
+
+Derived: frequency = E / (T x 5 ns), period = T x 5 ns / E, positive width = W x 5 ns / E, duty = W / T, Vmin / Vmax from
+min / max through the 8-bit per-core model (mean gain), Vpp = Vmax - Vmin. Resolution one clock over the gate (5e-7
+relative at 10 ms, 5e-9 at 1 s, the 50 MHz crystal dominates); range about 1 Hz (two edges in a 1 s gate) to the front
+end's 30 MHz (the logic takes 100 MHz: one high and one low clock); T and W are 28 bits (1 s = 2e8 clocks).
+
+#### Design (`zaklad.v`, block "Hardware counter with min / max" after `seq_lat`; decoder entries 0x61 / 0x62, read 0x35)
+
+- **Stream.** EXT: `ext_level` (the synchronised, majority-filtered pin), one bit per 5 ns. CH1 / CH2: the captured pair
+  of every write clock, `adc*_w` (core B the earlier sample, core A the later one, T/2 apart; the same registers the
+  memory, the trigger and the decimator take), through a Schmitt trigger evaluated on the write clock (`c_hie` /
+  `c_loe` for the earlier sample, `c_hil` / `c_lol` for the later one). The clk_200MHz side takes the earlier sample's
+  state on the clock after the write clock's rise (`swc_rise_q`, the sequencer's settled-rise flag) and the later
+  sample's on the clock after its fall (`swc_fall_q`, predicted from `swc_sh & sce_q` exactly as `swc_rose` predicts
+  the rise), so at 200 MSa/s (divider 0, or any K >= 1, where the decimator forces the full-rate write clock) the
+  stream `k_st` changes every 5 ns and at slower legacy rates each sample is held for half a word. No half-cycle path:
+  the write clock registers are consumed 1.5 clocks after their edge, and the next edge is >= 2 clocks away.
+- **Counting** (`k_*`, as gen8): the gate counter `k_g` counts 2e6 / 2e7 / 2e8 - 2 down to -1 (bit 28 = the publish
+  clock). From the first rising edge of `k_cs` in the gate `k_t` counts clocks, `k_w` high clocks, `k_e` edges; at
+  every rising edge their values are latched (`k_tl`, `k_wl`, `k_el`), so at the publish clock the latched values are
+  "first edge to last edge". The publish copies them into `k_rt` / `k_rw` / `k_re` with the configuration and
+  increments `k_seq`; the next gate starts at once. `k_on` compares the configuration (source, gate) with the one
+  registered a clock earlier, so a 0x61 write that changes it gives one clock of `k_on` = 0, which reloads the gate and
+  clears the running values: the first result comes one gate after the write. The sample at the publish clock itself
+  belongs to neither gate (one of 2e6).
+- **Min / max** (new): on the write clock `c_mn` / `c_mx` = min / max of the pair; on the clk_200MHz side the running
+  `k_mn` / `k_mx` fold them in on the same `swc_rise_q` clocks the Schmitt stage uses, except for the EXT source (no
+  codes). Reset to 255 / 0 at every gate start; published with E, T, W. The published min is stored inverted
+  (`k_rmn_n`; TD configures every flop to 0, `AGENTS.md` "0x153A review" item 6), so a unit that has published nothing
+  reads 255 / 0, the "no sample" value, without an initial value. Cost: two 8-bit compares and two 8-bit muxes on the
+  write clock, two 8-bit compares and 4 x 8 registers on clk_200MHz.
+- **Trigger-source follow.** Source 0 follows a private copy of 0x15 as written (`k_t15_ext`, `k_t15_ch2`, loaded by an
+  own always block on the 0x15 data strobe), not `trigger_ext` / `trigger_channel`: the trigger-type logic of C1 may
+  redefine what those mean for the qualified types (gen8 made `trigger_ext` the edge type's EXT only), and the counter
+  must follow the source the firmware named. 0x15 = 3 (the 0x153D pattern marker) reads as EXT here.
+- **Snapshot** (`m_*`). The 0x35 command byte toggles `m_req` on `i_mcu_clk`; a two-flop synchroniser on clk_200MHz
+  detects the toggle and copies `k_rt`, `k_rw`, `k_re`, `k_rmn_n`, `k_rmx`, `k_rcfg`, `k_seq` into `m_*` and sets
+  `m_new` = (`k_seq` != the previous `m_seq`), 3 .. 4 clocks (15 .. 20 ns) after the command strobe's rising edge. The
+  first data byte is loaded on the next strobe's falling edge, >= 50 ns later on any MCU timing (about 150 ns on the
+  firmware's bus), so the copy is complete before it and a gate ending during the read can never tear the snapshot
+  (gen8 copied on the `i_mcu_clk` edge itself, racing the 200 MHz publish once in about 2e6 reads). The 16 bytes are
+  static until the next 0x35 command byte. A write command 0x35 (CH2 offset) takes the same snapshot, harmlessly.
+- **Independence.** The counter reads `adc*_w`, `ext_level`, `swc_rise_q`, `swc_sh`, `sce_q` and the MCU bus; it writes
+  nothing the capture, the decimator, the sequencer or the readout use. Reading 0x35 does not touch
+  `sample_read_offset` (the pointer advances on 0x20..0x23 and 0x2B..0x32 only), so a READ_RAW interrupted by a 0x35
+  read continues as after a 0x06 read (tb check).
+- **Read cost.** One 0x35 read = the command strobe plus 16 data strobes = 17 bus strobes, about 5 us at 0.3 us per
+  strobe (`docs/protocol.md` section 11), once per screen pass (about 15 ms); a 0x61 / 0x62 configuration = 2 + 3 = 5
+  strobes.
+- **Rate changes.** A 0x0D or 0x53 write while a gate runs puts a few pairs of mixed age into the stream (the cores'
+  pipelines re-align at the new encode period; the AD9288 pipeline is 5.5 cycles), which adds or drops one edge in the
+  gate that spans the change: tb runs without a restart read -7.5e-5 (divider 0 -> 9) and +7.3e-5 (9 -> 0, K = 1) on a
+  1.29 MHz square, one of 12858 edges; on a 10-edge gate that is 10 % for one reading. The firmware should rewrite 0x61
+  after its settle wait on a time base or filter change (0 then the value: a value change restarts the gate; 4
+  strobes), or skip the first result after one (the sequence number). Not an RTL item: a restart pulse at the write
+  would end before the transient at slow rates (up to 5 words of 41 us at divider 4095).
+
+#### Deviations from the gen8 design and the contract
+
+- Byte 0 bit 4 (CH2) is 0 whenever the source is EXT (gen8 could report EXT and CH2 together when 0x15 = 3 named
+  channel 2 and EXT at once); the two source bits are exclusive.
+- The gate restarts on any 0x61 value change, a gate-length change included (gen8 restarted on a source or on / off
+  change only, so a 1 -> 2 change mid-gate published one result of a wrong length). A write of the same value does
+  not restart it.
+- The level and hysteresis power on at 0 / 0 (gen8's `cnt_lvl = 128` initial value was simulation-only; TD configures
+  0), as the contract says; the firmware writes 128 / 6.
+- The snapshot is copied on the 200 MHz side (above) instead of the `i_mcu_clk` edge: same bytes, no tear.
+- Min / max for the EXT source read 255 / 0 (the contract's "no sample" value): EXT has no codes. The firmware takes
+  Vmin / Vmax / Vpp from the counter only when the counter's source is the card's channel.
+
+#### Tests (`tb/tb_counter.v`, run.sh step 16, `ONLY=counter`)
+
+Thirteen 10 ms gates, 130 ms of simulated time, about 68 min of wall clock per seed (the 200 MHz design with every
+block RAM is the cost; run it in parallel with the fir / seg steps). The reference model runs at every clk_200MHz edge
+on the counter's input stream (`k_cs`) and, for min / max, on the pair the FPGA captured (`adc*_w` at every write clock
+edge), folded on the counter's own `swc_rise_q` clocks; publish times from the gate counter.
+1. Gate: consecutive results exactly 2,000,000 clocks apart; the 100 ms / 1 s reloads as constants.
+2. Bookkeeping: E, T, W and min, max of every gate equal the model.
+3. Accuracy: EXT 1234.5 ns square (810.044552 kHz) within 3e-6, duty 32.4 % within 0.2 %; CH1 777.7 ns square with
+   +-2 codes of noise at 200 MSa/s and with K = 1 within 3e-6, at 10 MSa/s within 2e-5; min / max within the noise of
+   the stimulus levels (60 / 200 on CH1, 55 / 195 on CH2).
+4. Source select: src 1 = CH1 although 0x15 names CH2; src 2 = CH2 with 0x15 = CH1; src 0 follows 0x15 (CH2, EXT); the
+   status byte names the source; EXT publishes min 255 / max 0.
+5. Schmitt boundaries with the noise off (codes exactly 60 and 200): level 201 counts nothing, level 200 with
+   hysteresis 139 counts, hysteresis 140 never goes low (code 60 is not below 60); a 20 us noisy triangle counts its
+   noise with hysteresis 0 and 50.000 kHz within 1e-4 with 12.
+6. MCU side: the power-on read (nothing published) gives 0 everywhere and min 255 / max 0; `new` set for a fresh
+   result, clear on the second read of the same result, set again after the next gate; a 0x35 read inside a READ_RAW
+   pass leaves the readout as a 0x06 read there does; 0x06 reads 0x153B (or 0x153C after C4).
+Results: seed 12345 **115 checks, 0 failed, PASS** (4057 s); seed 4242 **115 checks, 0 failed, PASS** (4049 s).
+Measured (seed 12345): EXT 810044.552 Hz exact and -4.5e-7 in the second gate, duty 0.3240; CH1 at 200 MSa/s +1.6e-7,
+at 10 MSa/s -1.1e-6, with K = 1 +1.6e-7, duty 0.3858, min 58 / max 202; CH2 min 53 / max 197; the triangle 15,984
+edges with hysteresis 0 (seed 4242: 15,924) against 499 with 12 (49999.9 Hz, -2e-6). The full `tb/run.sh` (16 steps)
+on this source: **ALL PASS** on seeds 12345 (9252 s) and 4242 (9057 s), every equivalence phase 0 mismatches, the
+contract transcript equal to `contract_0x153B.txt` (the counter adds no bus traffic to the firmware's sequences).
+
+#### Build (TD 4.6.8 SP1, `build.sh`, this branch alone on 0x153B's source; C4 builds the merged 0x153C)
+
+5337 LUT (61.8 %) / 4900 reg / 6095 LE, block RAM (48 + 2) and M18x18 (2) as 0x153B. 0x153B rebuilt with the same flow
+for the delta (`FPGA.bin` = `dist/al3-0x153B.bin`, `fdc3c21b...fc3d`): 4990 / 4405 / 5658, so the counter with min / max
+costs **+347 LUT, +495 reg, +437 LE** (the registers: 9 x 28-bit E / T / W stages, the 29-bit gate, the 3 x 28-bit
+snapshot, min / max and thresholds). `clk_200MHz` 0 errors, min period 4.931 ns (+0.069 ns on the sequencer's
+`q_untrig` saturating adder, zaklad.v 1478, not a counter path: the placement lottery of the 0x153A notes; 0x153B's
+build had 4.583 ns); `sample_write_clock` 9.594 ns, `i_mcu_clk` 20.37 ns, `clkc[1]` 2.376 ns, all 0 errors; `clkc[0]`
+58 errors (the SDC artefact). The contract's section 1.1 counts the counter inside gen8's +1115 LUT for three features
+plus about 50 LUT for min / max; 347 is the counter's share.
+
+#### Bench checks (C4's bench, item 7 of the contract's section 9.2)
+
+The generator's post at 1 kHz and 1 MHz on CH1 and on EXT: frequency within 1e-5 of phase_inc x 50 MHz / 2^32, duty
+50 %; min / max equal the record's min / max of the raw codes (a 16-bit record's high bytes at K >= 1, or the legacy
+samples); with the probe off the post, min / max read the noise band around 128 and E = 0 at a level outside it; a time
+base change during a 1 s gate shows the one-edge blip of "Rate changes" unless the firmware restarts the gate.
+
 ## Device facts from the datasheet
 
 Source: Anlogic "AL3 series FPGA datasheet" DS001 v1.3 (Sept 2017, Chinese, maintainer's download `AL3A10LG144.pdf`, 84 pages).
