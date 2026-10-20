@@ -284,7 +284,7 @@ static int cal_train(uint32 ch, cs_train *t, acal_fail *fail)
 
   for(i=ACAL_PT_G_LO;i<=ACAL_PT_G_HI;i++)
     for(k=0;k<2;k++)
-      if(pt[i].within16[k] > ACAL_MAX_NOISE16)
+      if(pt[i].within16[k] > ACAL_MAX_NOISE16_GATED)
       {
         fail->cls      = ACAL_GATED;
         fail->core     = (uint8_t)k;

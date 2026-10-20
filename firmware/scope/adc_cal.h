@@ -309,7 +309,14 @@ const char *acal_reason_text(int reason);                     //failure box text
 #define ACAL_MIN_RESPONSE    (100 * 16)   //coarse points: 700 PWM counts must move the mean by >= 100 codes (~185)
 #define ACAL_PWM_MIN         200
 #define ACAL_PWM_MAX         1800
-#define ACAL_MAX_NOISE16     (3 * 16)     //RMS per core at the zero point (bench 0.6..1.3 codes)
+//Noise RMS per core at the zero point with the inputs open, per class: the zero step's pass criterion and the Diagnostics
+//limit (ui_diag.c), one pair of constants (owner 2026-10-20 18:13, fw 0.2.100). Bench, the owner's unit, stored worst
+//range per core: full rate CH1 B 1.19, CH2 A 2.75 codes (5 V/div; the high-impedance ranges 5 V, 1 V, 200 mV the
+//worst; a low-impedance source gives 0.5..0.6); gated CH1 A 0.50, B 0.06, CH2 A 0.25, B 0.38. Gated was 3 codes too
+//up to fw 0.2.99
+#define ACAL_MAX_NOISE16_FULL  (3 * 16)
+#define ACAL_MAX_NOISE16_GATED (1 * 16)
+#define ACAL_MAX_NOISE16(cls)  (((cls) == ACAL_GATED) ? ACAL_MAX_NOISE16_GATED : ACAL_MAX_NOISE16_FULL)
 #define ACAL_MAX_ZERO_DEV16  (16 * 16)    //|zero - 128| per core and class at the centre PWM
 #define ACAL_MAX_SPREAD16    (20 * 16)    //|zero A - zero B| per class (1.00o5 FAIL 2 limit)
 #define ACAL_MAX_CLASS16     (12 * 16)    //|zero full - zero gated| per core (bench: 3.6)

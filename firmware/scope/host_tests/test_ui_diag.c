@@ -34,6 +34,17 @@ static const FONTDATA *font_of(int f)
   return (f == UD_F_HEAD) ? &font_5 : ((f == UD_F_BODY) ? &font_3 : &font_2);
 }
 
+//The lines of tile i (0 Firmware, 1 Restarts, 2 USB, 3 Battery), for the log
+static void dump_tile(int i)
+{
+  uint32_t k;
+  int x = 12 + 196 * i + 10;
+
+  for(k=0;k<pg.ntext;k++)
+    if((pg.text[k].x == x) && (pg.text[k].y >= 96) && (pg.text[k].y < 222))
+      printf("tile %d y %d: %s\n", i, pg.text[k].y, pg.text[k].text);
+}
+
 //A healthy, calibrated unit as the owner's: fw from RAM equal to the card, AL3 0x1535, USB configured
 static void healthy(ud_input *in)
 {
@@ -306,7 +317,7 @@ static void test_pages(void)
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
   T_TRUE(has_text("Running 0.2.59"));
   T_TRUE(has_text("the image the card"));
-  T_TRUE(has_text("None since power-on."));
+  T_TRUE(has_text("No crashes."));
   T_TRUE(has_text("Up 1 h 42 min."));
   T_TRUE(has_text("PC connected, high speed."));
   T_TRUE(has_text("0 bad frames"));
@@ -504,10 +515,9 @@ static void test_stress(void)
   T_TRUE(has_text("Running 0.2.59-m1-nommu"));
   T_TRUE(has_text("starts 0.2.50-nommu"));
   T_TRUE(has_text("Details on the Log page."));
-  T_TRUE(has_text("Restarted 3 times:"));
-  T_TRUE(has_text("data abort at"));
-  T_TRUE(has_text("0x8001234c"));
-  T_EQ(text_colour("Restarted 3 times:"), UD_C_SOFT);
+  T_TRUE(has_text("Crashed 3 times this run:"));
+  T_TRUE(has_text("data abort at 0x8001234c."));
+  T_EQ(text_colour("Crashed 3 times this run:"), UD_C_SOFT);
   T_EQ(text_colour("Fault"), UD_C_FAULT);
   T_TRUE(has_text("Low: readings and SD"));
   T_TRUE(has_text("RTC module -12 C."));
@@ -559,6 +569,9 @@ static void test_stress(void)
   T_EQ(ud_hit(&pg, 230, 430), UD_ID_NONE);                    //nothing to page through
 }
 
+#define OVER "A value is over its limit (below): move chargers and the USB cable away and calibrate again.\n" \
+             "If it stays, the input stage is noisy."
+
 static void verdict(ud_input *in, int state, const char *reason)
 {
   ud_verdict v;
@@ -579,17 +592,57 @@ static void test_verdicts(void)
   healthy(&in);
   verdict(&in, UD_V_OK, "Calibrated, every value within its limit.");
 
-  //Over a limit: the class ratio (2 %), the gated noise (0.30 code), the full noise (1.00 code)
+  //Over a limit: the class ratio (2 %), the noise with the inputs open: gated 1.0 code, full rate 3.0 codes, the zero
+  //step's own limits (fw 0.2.100, owner 2026-10-20 18:13; 0.30 / 1.00 up to 0.2.99)
+  T_EQ(UD_LIM_NOISE_GATED, 100);
+  T_EQ(UD_LIM_NOISE_FULL, 300);
   p16(cal[1] + 112 + 136, 31800);
-  verdict(&in, UD_V_CHECK, "A value is over its limit (below): recalibrate with the inputs open.");
+  verdict(&in, UD_V_CHECK, OVER);
   healthy(&in);
-  cal[0][112 + 108 + 12 + 3] = 5;                            //0.31 code gated
-  verdict(&in, UD_V_CHECK, "A value is over its limit (below): recalibrate with the inputs open.");
-  healthy(&in);
-  cal[0][112 + 108 + 7] = 16;                                //1.00 code full: on the limit
+  cal[0][112 + 108 + 12 + 3] = 16;                           //1.00 code gated: on the limit
   verdict(&in, UD_V_OK, "Calibrated, every value within its limit.");
-  cal[0][112 + 108 + 7] = 17;
-  verdict(&in, UD_V_CHECK, "A value is over its limit (below): recalibrate with the inputs open.");
+  cal[0][112 + 108 + 12 + 3] = 17;                           //1.06 code gated
+  verdict(&in, UD_V_CHECK, OVER);
+  healthy(&in);
+  cal[0][112 + 108 + 7] = 48;                                //3.00 codes full: on the limit
+  verdict(&in, UD_V_OK, "Calibrated, every value within its limit.");
+  cal[0][112 + 108 + 7] = 49;                                //3.06
+  verdict(&in, UD_V_CHECK, OVER);
+
+  //The owner's unit (bench 2026-10-20): stored open-input full rate CH1 core B 1.19, CH2 core A 2.75 codes (5 V/div),
+  //gated at most 0.50 / 0.38: OK on the Status page and the Calibration tab, in the wizard's own terms
+  healthy(&in);
+  cal[0][112 + 108 + 6 + 0] = 19;                            //CH1 full, core B, 5 V
+  cal[1][112 + 108 + 0 + 0] = 44;                            //CH2 full, core A, 5 V
+  cal[0][112 + 108 + 12 + 0] = 8;                            //CH1 gated 0.50
+  cal[1][112 + 108 + 12 + 6] = 6;                            //CH2 gated 0.38
+  verdict(&in, UD_V_OK, "Calibrated, every value within its limit.");
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  check_layout("bench noise", 0);
+  T_TRUE(has_text("Noise RMS, inputs open, gated"));
+  T_TRUE(has_text("Noise RMS, inputs open, full"));
+  T_TRUE(has_text("limit 1.0 code"));
+  T_TRUE(has_text("limit 3.0 code"));
+  T_TRUE(has_text("1.19 code"));
+  T_TRUE(has_text("2.75 code"));
+  T_TRUE(!has_text("provisional"));
+  T_EQ(text_colour("Check"), -1);
+  ud_build(&pg, UD_PAGE_CAL, &in, 0);
+  check_layout("bench noise cal", 0);
+  T_TRUE(has_text("Noise RMS, inputs open: gated 0.50, full 1.19 code"));
+  T_TRUE(has_text("Noise RMS, inputs open: gated 0.38, full 2.75 code"));
+  T_TRUE(has_text("Gated limit 1.0 code, full limit 3.0 code"));
+  T_EQ(text_colour("Noise RMS, inputs open: gated 0.38, full 2.75 code"), UD_C_TEXT);
+
+  //Over: the advice in two lines on the Status page
+  cal[1][112 + 108 + 0 + 0] = 49;
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  check_layout("noise over", 0);
+  T_TRUE(has_text("A value is over its limit (below): move chargers and the USB cable away and calibrate again."));
+  T_TRUE(has_text("If it stays, the input stage is noisy."));
+  T_EQ(text_colour("3.06 code"), UD_C_TEXT);
+  ud_build(&pg, UD_PAGE_CAL, &in, 0);
+  T_EQ(text_colour("Noise RMS, inputs open: gated 0.38, full 3.06 code"), UD_C_WARN);
 
   //Warm-up
   healthy(&in);
@@ -682,15 +735,105 @@ static void test_tiles(void)
   T_TRUE(has_text("Reading the card image."));
   T_EQ(text_colour("Reading"), UD_C_DIM);
 
-  //Restarts: a stored record from an earlier power-on
+  //Restarts (fw 0.2.100, owner 2026-10-20 18:12). Check: a stored record of a crash before this run
+  healthy(&in);
+  health[44] = 1;
+  health[45] = 4;
+  p16(health + 46, 1);
+  p32(health + 48, 11);
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  check_layout("restarts check", 0);
+  T_EQ(text_colour("Check"), UD_C_WARN);
+  T_TRUE(has_text("Crashed once before this run:"));
+  T_TRUE(has_text("data abort."));
+  T_TRUE(has_text("If it happens again,"));
+  T_TRUE(has_text("save a report."));
+  T_TRUE(has_text("Up 1 h 42 min."));
+  T_TRUE(!has_text("Power-on #"));
+  T_TRUE(!has_text("LR"));
+  p16(health + 46, 2);
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  T_TRUE(has_text("Crashed 2 times before this"));
+  T_TRUE(has_text("run: data abort."));
+
+  //Every exception name and the largest counts: the last line still fits the tile (five lines at most)
+  {
+    uint32_t type;
+
+    for(type=1;type<=6;type++)
+    {
+      healthy(&in);
+      health[44] = 1;
+      health[45] = (uint8_t)type;
+      p16(health + 46, 65535);
+      p32(health + 28, 0xFFFFFFFF);
+      ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+      check_layout("restarts check, every type", 0);
+      T_TRUE(has_text("save a report."));
+          T_TRUE(has_text("Up 1193 h 2 min."));
+      T_EQ(text_colour("Check"), UD_C_WARN);
+      healthy(&in);
+      link[49] = 0xFFFFFFFF;
+      link[50] = type;
+      link[51] = 0xFFFFFFFF;
+      ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+      check_layout("restarts fault, every type", 0);
+      T_TRUE(has_text("Details on the Log page."));
+      T_EQ(text_colour("Fault"), UD_C_FAULT);
+    }
+  }
+
+  //Fault: this run follows a crash (counter 49 > 0, a real exception); once
+  healthy(&in);
+  link[49] = 1;
+  link[50] = 4;
+  link[51] = 0x80014A34;
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  T_TRUE(has_text("Crashed once this run: data"));
+  T_TRUE(has_text("abort at 0x80014a2c."));
+  T_TRUE(has_text("Details on the Log page."));
+  T_TRUE(!has_text("Up 1 h 42 min."));
+  ud_build(&pg, UD_PAGE_LOG, &in, 0);
+  T_TRUE(has_text("Restarted 1 time since power-on"));         //the Log page keeps its words and details
+  T_TRUE(has_text("data abort at 0x80014a2c"));
+
+  //OK: a deliberate restart (type 0, a jump to the image entry: a FEL load, Enter FEL, an update) is normal, this run
+  //or stored; the Log page still shows it in full
+  healthy(&in);
+  link[49] = 1;
+  link[50] = 0;
+  link[54] = 0x80000010;
+  health[44] = 1 | 2;
+  health[45] = 0;
+  p16(health + 46, 1);
+  p32(health + 48, 12);
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  T_EQ(text_colour("OK"), UD_C_OK);
+  T_TRUE(has_text("No crashes."));
+  T_TRUE(has_text("Up 1 h 42 min."));
+  T_TRUE(!has_text("Crashed"));
+  T_TRUE(!has_text("jump to the entry"));
+  T_TRUE(!has_text("Check"));
+  ud_build(&pg, UD_PAGE_LOG, &in, 0);
+  T_TRUE(has_text("Restarted 1 time since power-on"));
+  T_TRUE(has_text("jump to the entry, LR 0x00000000"));
+  T_TRUE(has_text("at _reset LR 0x80000010"));
+  healthy(&in);
+  health[44] = 1;
+  health[45] = 0;
+  p32(health + 48, 11);
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  T_TRUE(has_text("No crashes."));
+  T_TRUE(!has_text("Check"));
+  ud_build(&pg, UD_PAGE_LOG, &in, 0);
+  T_TRUE(has_text("Stored from power-on #11:"));
+  T_TRUE(has_text("jump to the entry, LR 0x00000000"));
+
+  //The stored crash on the Log page as before
   healthy(&in);
   health[44] = 1;
   health[45] = 4;
   p32(health + 48, 11);
-  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  T_TRUE(has_text("Power-on #11 restarted:"));
-  T_TRUE(has_text("data abort."));
-  T_TRUE(has_text("None since power-on."));
   ud_build(&pg, UD_PAGE_LOG, &in, 0);
   check_layout("stored", 0);
   T_TRUE(has_text("Stored from power-on #11:"));

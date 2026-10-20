@@ -212,7 +212,7 @@ static void test_zero_fail_retry(void)
   cw_zero_line(&w, 0, t);
   T_STR(t, "CH1: zero level done");
   cw_zero_line(&w, 1, t);
-  T_STR(t, "CH2: too much noise: unplug the probe and USB");
+  T_STR(t, "CH2: too much noise: unplug the probes, move chargers and USB away");
 
   //Retry measures both channels again and clears the old results while it runs
   ev(&w, CW_EV_CALIBRATE);
@@ -246,6 +246,10 @@ static void test_zero_fail_detail(void)
   cw_zero_line(&w, 0, t);
   T_STR(t, "CH1: too much noise, range 6 at 2 MSa/s: core B 3.3 codes, 1.1 per capture");
   T_TRUE(ui_text_width(&font_3, t) <= RESULT_W);
+  //fw 0.2.100: the note names the limit of the rate (the Diagnostics limit) and what helps
+  cw_zero_note(&w, 0, t);
+  T_STR(t, "Noise RMS, inputs open, limit 1.0 code: move chargers and the USB cable away.");
+  T_TRUE(ui_text_width(&font_2, t) <= RESULT_W);
   cw_zero_line(&w, 1, t);
   T_STR(t, "CH2: zero still moving, range 1 at 200 MSa/s: core A 0.8 code");
   T_TRUE(ui_text_width(&font_3, t) <= RESULT_W);
@@ -259,10 +263,12 @@ static void test_zero_fail_detail(void)
   cw_zero_line(&w, 1, t);
   T_STR(t, "CH2: too much noise, range 6 at 200 MSa/s: core B 100.0 codes, 100.0 per capture");
   T_TRUE(ui_text_width(&font_3, t) <= RESULT_W);
+  cw_zero_note(&w, 1, t);
+  T_STR(t, "Noise RMS, inputs open, limit 3.0 code: move chargers and the USB cable away.");
 
   //CH1 got no detail in this run (a Calibrate clears it): the plain words
   cw_zero_line(&w, 0, t);
-  T_STR(t, "CH1: too much noise: unplug the probe and USB");
+  T_STR(t, "CH1: too much noise: unplug the probes, move chargers and USB away");
 
   //Details only outside a running zero step are ignored
   cw_zero_detail(&w, 0, 3, &f0);

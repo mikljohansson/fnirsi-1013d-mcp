@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include "font_structs.h"
 #include "pc_ident.h"
+#include "adc_cal.h"
 
 //Colours (the target maps them to RGB; docs/plans/ux-makeover.md 6c: black ground, outlined boxes, state words in colour)
 #define UD_C_TEXT        0        //normal text
@@ -176,10 +177,12 @@ void ud_cal_verdict(const ud_input *in, ud_verdict *v);
 void ud_cal_provenance(const ud_input *in, char *p);             //the provenance sentence
 int  ud_cal_calibrated(const uint8_t *cal0, const uint8_t *cal1); //both channels use a bound v3 block
 
-//The calibration limits (diagnostics-review.md finding 6; provisional until a second unit is measured)
+//The calibration limits (diagnostics-review.md finding 6). The noise rows measure the zero step's open-input condition,
+//so their limits are the zero step's own (adc_cal.h ACAL_MAX_NOISE16_*, owner 2026-10-20 18:13, fw 0.2.100), here in
+//hundredths of a code: gated 1.00, full rate 3.00
 #define UD_LIM_CLASS_TENTHS      20   //class gain ratio full / gated: |ratio - 1| <= 2.0 %
-#define UD_LIM_NOISE_GATED       30   //noise RMS gated <= 0.30 code (hundredths of a code)
-#define UD_LIM_NOISE_FULL       100   //noise RMS full <= 1.00 code
+#define UD_LIM_NOISE_GATED      (ACAL_MAX_NOISE16_GATED * 100 / 16)
+#define UD_LIM_NOISE_FULL       (ACAL_MAX_NOISE16_FULL * 100 / 16)
 #define UD_LIM_PWM_DEV          100   //PWM centre within 860 +- 100
 #define UD_LIM_VOLTS_TENTHS      30   //volts factor within 3.0 % of 1.00o5's default
 #define UD_WARMUP_MS         300000   //calibrated less than 5 minutes after power-on: amber
