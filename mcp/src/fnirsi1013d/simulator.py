@@ -418,6 +418,9 @@ class SimConfig:
     #: level beyond it pins the stage, and the noise (which the model puts in front of it) goes with the signal (bench
     #: 2026-10-19: -1.2 V DC saturates 0.1 and 0.2 V/div, the ADC then reads a noise-free constant); None: no limit
     frontend_window_v: tuple[float, float, float, float, float, float] | None = None
+    #: protocol 1.20 READ_BODE reason 8 (fw 0.2.71 / 0.2.83): the device sweep ends in an ADC readout fault after its
+    #: pre-scan (the self-check flagged a core on 0x153A+, or the pre-scan clipped at 5 V/div on older bitstreams)
+    bode_readout_fault: bool = False
 
 
 #: the simulated running build's commit time (yy mm dd hh mm ss, UTC) and hash (GET_INFO fw_build)
@@ -3413,6 +3416,10 @@ class _BodeStop(Exception):
     pass
 
 
+class _BodeReadoutFault(Exception):
+    """READ_BODE reason 8 (``SimConfig.bode_readout_fault``)."""
+
+
 class _LoopLink:
     """In-process link from the simulated firmware's Bode engine to its own command handlers."""
 
@@ -3466,6 +3473,9 @@ class SimBode:
         self.exhausted = 0
         #: settings in effect (the screen's, or the host's with BODE_CTRL flags bit 0)
         self.start_hz, self.stop_hz, self.points, self.settle, self.ch2_mode = 100.0, 1e6, 50, 1, 0
+        #: the latest sweep's (settle, ch2_mode, start, stop, points); READ_BODE's header shows them once a sweep ran,
+        #: and the settings in effect before the first one (fw 0.2.71)
+        self.swept: tuple[int, int, float, float, int] | None = None
         self.background = True
         self.plans: list = []
         self.results: dict[int, Any] = {}
@@ -3604,10 +3614,12 @@ class SimBode:
             elapsed = 0
         view = (1 if self.shown else 0) | (2 if self.repeat else 0) | (4 if self.thru_sweep else 0) | \
             ((self.exhausted & 3) << 3)
+        settle, ch2_mode, start, stop, points = self.swept if self.swept is not None else \
+            (self.settle, self.ch2_mode, self.start_hz, self.stop_hz, self.points)
         return P.BodeHeader(self.sweep_id, self.state, self.reason, view, thru | (0x80 if self.thru_applied else 0),
-                            len(self.plans), len(self.results), self.current if self.running else -1, self.settle,
-                            self.ch2_mode, int(round(self.start_hz * 100)), int(round(self.stop_hz * 100)),
-                            self.points, self.switches, int(elapsed)).pack()
+                            len(self.plans), len(self.results), self.current if self.running else -1, settle,
+                            ch2_mode, int(round(start * 100)), int(round(stop * 100)), points, self.switches,
+                            int(elapsed)).pack()
 
     def read(self, first: int, count: int) -> bytes:
         if count == 0 or count > P.BODE_MAX_ROWS:
@@ -3648,6 +3660,7 @@ class SimBode:
             self.state, self.reason = 4, 4
             raise _DevErr(P.Status.E_BAD_ARG, 3, "no frequency in the range") from None
         self.sweep_id += 1
+        self.swept = (self.settle, self.ch2_mode, self.start_hz, self.stop_hz, self.points)
         self.plans, self.results = plans, {}
         self.state, self.reason, self.current, self.switches, self.exhausted = 1, 0, 0, 0, 0
         self.thru_sweep = thru_measure
@@ -3679,6 +3692,11 @@ class SimBode:
                     eng.results[pp.m] = pr
                     return pr
 
+                def _prescan(self, pp: Any) -> None:
+                    super()._prescan(pp)
+                    if d.cfg.bode_readout_fault:
+                        raise _BodeReadoutFault()
+
             def progress(i: int, n: int, text: str) -> None:
                 eng.current = i
                 eng.switches = runner.switches if runner is not None else 0
@@ -3694,6 +3712,8 @@ class SimBode:
                 state, reason = 4, 2
         except _BodeStop:
             state, reason = 3, 6
+        except _BodeReadoutFault:
+            state, reason = 4, 8
         except _BodeAbort as e:
             state, reason = (4, 5) if e.reason == 5 else (3, 6)
         except BD.BodeError as e:

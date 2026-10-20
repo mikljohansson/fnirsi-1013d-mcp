@@ -28,10 +28,12 @@ def frame_payload(name: str) -> bytes:
 
 
 def test_reason_readout_fault():
-    # fw 0.2.71: reason 8 ends a sweep whose pre-scan clipped at 5 V/div with a small fundamental (a readout fault)
+    # fw 0.2.71: reason 8 ends a sweep whose pre-scan clipped at 5 V/div with a small fundamental (a readout fault);
+    # fw 0.2.83 on 0x153A+: the capture self-check flagged a core during the sweep
     h = P.BodeHeader(state=4, reason=8)
     assert h.state_name == "error"
-    assert h.reason_text.startswith("ADC readout fault")
+    assert h.reason_text.startswith("ADC readout fault") and "self-check" in h.reason_text
+    assert "older bitstreams" in h.reason_text
 
 
 def _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, **kw):
@@ -55,6 +57,35 @@ def _wait_done(s, timeout=60.0):
             return h, rows
         assert time.monotonic() - t0 < timeout
         time.sleep(0.01)
+
+
+def test_sim_reason_8_and_the_header_before_the_first_sweep(sim_factory):
+    """Simulator: SimConfig.bode_readout_fault ends a device sweep after the pre-scan with reason 8 (no rows); before
+    the first sweep the header's settings fields are the settings in effect (the ones the estimate describes), after
+    it the latest sweep's (fw 0.2.71)."""
+    srv = _sim(sim_factory)
+    with Scope.connect(srv.url) as s:
+        r = s.bode_ctrl(P.BodeCtrlReq.make(P.BODE_STATUS, 40e3, 400e3, 7, settle=2, ch2_mode=1))
+        h = r.hdr
+        assert h.sweep_id == 0 and (h.start_chz, h.stop_chz, h.points, h.settle, h.ch2_mode) == \
+            (4_000_000, 40_000_000, 7, 2, 1)
+        assert r.estimate_ms > 0
+        srv.device.cfg.bode_readout_fault = True
+        s.bode_ctrl(P.BodeCtrlReq.make(P.BODE_RUN, 30e3, 300e3, 3, settle=0))
+        h, rows = _wait_done(s)
+        assert (h.state_name, h.reason, h.measured) == ("error", 8, 0)
+        assert h.reason_text.startswith("ADC readout fault")
+        res = B.result_from_device(h, rows)
+        assert "ADC readout fault" in res.stopped_early and any("self-check" in c for c in res.caveats)
+        # new settings without a sweep: the estimate follows them, the header keeps the latest sweep's
+        r = s.bode_ctrl(P.BodeCtrlReq.make(P.BODE_STATUS, 50e3, 500e3, 9, settle=1))
+        assert (r.hdr.start_chz, r.hdr.stop_chz, r.hdr.points, r.hdr.settle) == (3_000_000, 30_000_000, 3, 0)
+        srv.device.cfg.bode_readout_fault = False
+        h = s.bode_ctrl(P.BODE_RUN).hdr
+        assert (h.start_chz, h.points, h.settle) == (5_000_000, 9, 1)
+        h, _ = _wait_done(s)
+        assert h.state_name == "done" and h.measured == h.planned
+        s.bode_ctrl(P.BODE_CLOSE)
 
 
 def test_codecs_match_the_firmware_vectors():
