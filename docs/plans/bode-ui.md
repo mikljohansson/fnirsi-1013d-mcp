@@ -299,7 +299,11 @@ Details that follow from the run-state rule:
      peak falls on one overview point) the user guide says so; the 50-character line names the likelier wiring
      cause. FLAT stays a result, not a failure: "No corner ...", one sweep at the kept span, STOP.
 3. **Settle** from Q for a resonance: Normal for Q <= 7, Resonant for Q <= 34, High Q above. Otherwise Normal.
-   **CH2 range** becomes Auto. **Points** stay the user's.
+   **CH2 range** (fw 0.2.92, owner 2026-10-20 13:33, section 10): Hold when the CH2 levels that the overview and the
+   passes measured inside the chosen span spread less than 20 dB (one range covers them), on the most sensitive range
+   whose full scale (128 codes) is at least 1.5 x the largest level (`bode_auto_ch2`); Auto otherwise, and also when
+   fewer than two points fall in the span or one has no tone. A held sweep's point that drops far below the range
+   reads ch2_small as before; the user switches to Auto by hand. **Points** stay the user's.
 4. **Then one sweep, then STOP** (fw 0.2.86, owner 2026-10-20 11:47, section 10; up to 0.2.85 AUTO SET ended in RUN as
    the Scope's auto setup does). AUTO SET runs one single sweep at the found span, Settle and CH2 range, with the thru
    applied as before, and returns to STOP with the chart and the cards standing; the table and the cards come from that
@@ -390,7 +394,7 @@ axis.
 | Stop (- / +) | 10 Hz .. 10 MHz (default 1 MHz) | the same; Start moves down if needed |
 | Points | 10, 20, 50, 100 (default 50) | next value |
 | Settle | Fast, Normal, Resonant, High Q (default Normal) | next value |
-| CH2 range | Auto, Hold | toggles |
+| CH2 range | Auto, or the held V/div (fw 0.2.92) | toggles; Hold keeps the range CH2 has at the tap |
 | *separator* | | |
 | Single sweep | see below (fw 0.2.84) | the panel stays open |
 
@@ -729,7 +733,7 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
   an unchanging circuit (engine item in the task queue).
 - 2026-10-20 11:52 **(owner)**: the range plan is reused by every sweep at the same span and settings (RUN, Single sweep, AUTO SET's
   final sweep); only a settings change or a point that clips / drops below the floor invalidates it.
-- 2026-10-20 13:35 **(owner)**: AUTO SET sets CH2 range Hold when the response inside the chosen span fits one range (about 20 dB
+- 2026-10-20 13:33 **(owner)**: AUTO SET sets CH2 range Hold when the response inside the chosen span fits one range (about 20 dB
   of spread) and Auto otherwise, so a narrow span around a peak runs silently; Hold stays the manual override. The two clicks
   per sweep on a 35 dB low-pass are the planned range transitions, not churn.
 

@@ -4398,3 +4398,90 @@ Bug indicators:
 - the trigger chip redrawn at every point (the level moving: CH1 offset changes);
 - timeouts equal to captures;
 - the switch count not 0 on plan sweeps of an unchanged RC.
+
+## 61. fw-eng5: AUTO SET chooses CH2 Hold or Auto, planned vs unplanned switches (fw 0.2.92 provisional, protocol 1.24)
+
+Branch `fw-eng5` from main 555e63a (fw 0.2.91). Brief: task-queue item "AUTO SET chooses CH2 Hold when the span fits
+one range" and the owner's decision of 2026-10-20 13:33 (bode-ui.md 3.2 step 3 and section 10). Commits: d51979d
+(engine + test_bode_sweep), 0842b95 (bode_view, pc_hal.h, test_session), 63b40a6 (protocol row 60, mcp
+`BodeCtrlResp` + test), then docs. PC_FW_VERSION not bumped. Protocol number unchanged; the BODE_CTRL answer grows
+from 48 to 50 bytes (a layout addition like 0.2.91's). Host tests green (test_bode_sweep 2068), mcp ruff (CI
+selection) and pytest test_bode_device / test_protocol green, GCC 10 build without warnings in the changed files.
+**Nothing benched, nothing flashed.**
+
+**The Hold rule** (`bode_auto_ch2`, bode_sweep.c; pure, host-tested).
+- Input: the CH2 levels (v2, dBV peak at the tip, with the splice) of every point the overview and the passes
+  measured, kept by the view in `as_f` / `as_v2` / `as_have` (up to 80, cleared at AUTO SET's start, appended in
+  `bv_auto_finish` after each pass), and the span AUTO SET chose (`bode_step_mhz(a.start_i)` .. `(a.stop_i)`).
+- Hold when the points inside the span spread less than 20 dB (BODE_HOLD_SPREAD_MDB). The held range is the most
+  sensitive range whose full scale (128 codes peak at the tip: `bode_ch2_full_scale`, from `chan_info`'s uv_q8 and
+  CH2's probe index) is at least 1.5 x the largest level (BODE_HOLD_MARGIN_MDB, 3.52 dB).
+- Auto otherwise, and also with fewer than two points in the span, a point without a tone (BODE_MDB_FLOOR), or a
+  largest level that no range holds with the margin.
+- The brief said "the coarsest range whose full scale is at least 1.5 x"; the coarsest always qualifies, so the
+  implementation takes the most sensitive (finest) one that does. Inference: that is what was meant.
+- The margin is on the fundamental. For a square-wave-like CH2 (a passband) the record's peak is about 2 dB below
+  the fundamental, so Hold can sit one range coarser than Auto would (the tank test: Auto 0.5 V/div, Hold 1 V/div).
+
+**The view.** `bv.hold_r2` is CH2's held range (0..5, or HOLD_CHANNEL: CH2's range when the sweep starts, the old and
+BODE_CTRL rule). AUTO SET's success path sets `bv.ch2` and `bv.hold_r2` from the rule; the final sweep and RUN use it
+(`bv_start_cfg`), so RUN reuses the final sweep's plan (`plan_matches` compares the held range). A tap on the Sweep
+fold-out's CH2 range row toggles: Hold takes the range CH2 has at the tap, Auto forgets it. The row reads "Auto" or the
+held V/div (`volt_div_texts[CH2's magnification][range]`, e.g. "1V/div"). A failed or cancelled AUTO SET keeps the
+user's mode and range. Settings restore, defaults and BODE_CTRL with settings set HOLD_CHANNEL (the settings word
+keeps only the mode bit, so a restored Hold holds the channel's range as before 0.2.92).
+
+**Planned and unplanned switches.**
+- `plan_apply` counts a CH2 range change at point i > 0 of a plan sweep as planned (`e->planned`,
+  `bode_planned_switches`). The first point's write is not counted: it only moves the channel from where the last
+  sweep left it (on the RC, 0.1 -> 0.5 V/div at the start of each RUN sweep; a third relay change per sweep).
+- `e->switches` (the READ_BODE header bytes 26..27, MAX_SWITCHES) is unchanged: the unplanned ones, i.e. every step
+  of `auto_range` / `up_step` / the plan's floor steps. A fresh sweep has no plan, so its ranging reads unplanned:
+  AUTO SET's final sweep on the RC reads 2 unplanned / 0 planned, the RUN sweeps after it 0 unplanned / 2 planned.
+- CH1 is not counted (its planned range does not change between points in practice).
+- BODE_CTRL bytes 48..49 = the planned count (PC_BODE_CTRL_RESP 50); mcp `BodeCtrlResp.planned_switches`.
+- `bode_snap` keeps `planned` with `switches`.
+
+**ch2_small.** The owner's wording was "a held sweep whose point drops more than 20 dB below the held range's full
+scale flags it ch2_small as today". Today's flag is CH2 under 3 codes (about 33 dB below 128 codes); it was not
+changed. With the 20 dB spread and the finest range chosen, the smallest point of a held AUTO SET span sits at about 3.4
+codes or more, so the held sweep itself is clean. A point that later drops further (the circuit changed during RUN)
+reads ch2_small and is drawn grey, and the user switches to Auto.
+
+**Host tests** (test_bode_sweep `test_auto_ch2`, and `test_range_plan`):
+- The rule on synthetic tables: 18 dB -> Hold on 0.2 V/div; 20 dB -> Auto; points outside the span ignored; either span
+  order; a toneless point, one point, or a level beyond 5 V/div -> Auto; `bode_ch2_full_scale` = 128 codes per range.
+- The RC (1 kOhm / 15 nF): the overview and AUTO SET's span give Auto; the final sweep ranges (2 unplanned); RUN
+  reuses the plan with 0 unplanned and as many planned as the plan's transitions. 100 Hz .. 1 MHz / 25: the plan
+  sweeps read exactly 2 planned, 0 unplanned (CH2 3 .. 3, 4, 4, 5 .. 5).
+- A parallel tank (1 mH || 100 nF, 10 kOhm load, f0 15.9 kHz, Q about 17; `dut.l` is new in the model) on f0 / 1.1 ..
+  f0 x 1.1: 10.4 dB of spread -> Hold on 1 V/div; the held final sweep and RUN: 0 planned, 0 unplanned, nothing
+  flagged, no ch2_small, CH2 on 1 V/div at every point.
+
+**Bench (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, no SD writes; 0x153A; wiring A,
+x1 probes; `#VER fw=0.2.91,...`, number not bumped)**
+1. RC 1 kOhm / 15 nF on the post. AUTO SET. Expect a span of about 500 Hz .. 200 kHz and "Auto" in the CTRL > Sweep
+   CH2 range row. BODE_CTRL action 0 after the final sweep: header switches 2 (the final sweep ranges from scratch),
+   bytes 48..49 = 0. Then RUN for five sweeps, BODE_CTRL after each: header switches 0, bytes 48..49 = 2 ("2 planned,
+   0 unplanned"). The relays click at the two planned transitions, and once at each sweep's start (back to the first
+   point's range).
+2. Narrow span with Hold. AUTO SET always chooses its own span from the overview, so on the RC it never gives a narrow
+   one (the brief's "slider to 5 kHz .. 20 kHz, then AUTO SET" ends as step 1). Ways to see Hold:
+   - Both tips on the post (the thru wiring) or a resistive divider: AUTO SET says "No corner ... span kept", and the
+     CTRL > Sweep CH2 range row reads a V/div. On the post itself expect 1V/div (inference from the model's volts per
+     code: a fundamental of about 2 V peak x 1.5 is more than 0.5 V/div's 2.2 V full scale). The final sweep and RUN:
+     header switches 0, bytes 48..49 = 0, no relay click during RUN.
+   - With a tank on the post (if at hand): AUTO SET on a Q above 10 gives a span f0 (1 -+ 4 / Q) snapped outwards,
+     which on a real tank usually spreads more than 20 dB (Auto); Hold needs a span that holds under 20 dB.
+   - The row by hand: CTRL > Sweep, tap CH2 range: it reads the V/div CH2 has now; tap again: "Auto".
+3. Bug indicators:
+   - CH2 range "Auto" after AUTO SET on the thru wiring;
+   - a held V/div that clips (the clipped flag, the "CH2 over range" warning) on the AUTO SET span;
+   - planned > 0 on a Hold sweep;
+   - header switches > 0 on RUN sweeps of an unchanged RC (the 0.2.91 bug list);
+   - a BODE_CTRL answer of 48 bytes (an old image).
+
+Owner question left open: AUTO SET's span rules (fc / 10 .. 10 fc, f0 (1 -+ 4 / Q) snapped out) put more than 20 dB
+inside the span for almost every real filter or tank, so AUTO SET will choose Hold mainly for flat responses. If the
+owner wants a silent RUN for a narrow band the user dragged to, the same rule could be applied at RUN's first sweep on
+the user's span (not built).

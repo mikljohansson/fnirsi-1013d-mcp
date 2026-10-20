@@ -31,6 +31,19 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.92 - 2026-10-20 (provisional, number not bumped; protocol 1.24; BODE_CTRL answer 50 bytes)
+
+- Frequency response: AUTO SET chooses CH2 range Hold when the response inside the span it found fits one range,
+  and Auto otherwise (owner 2026-10-20 13:33; d51979d, 0842b95). Hold is chosen when the CH2 levels measured in that
+  span spread less than 20 dB, on the most sensitive range whose full scale is at least 1.5 x the largest level. RUN at
+  such a span then switches no relay. The Sweep fold-out's CH2 range row reads the held V/div, or "Auto". A held
+  point that drops far below the range is flagged ch2_small as before; switch to Auto by hand then.
+- Frequency response: the sweep counts planned and unplanned CH2 range switches separately (d51979d, 63b40a6). A
+  planned switch is a range change between neighbouring points that the range plan prescribes; an unplanned one is a
+  step after a clip or a drop, or the ranging of a fresh sweep. READ_BODE's header count is the unplanned ones;
+  BODE_CTRL's answer grows to 50 bytes, with the planned count in bytes 48..49 (mcp `BodeCtrlResp.planned_switches`,
+  docs/protocol.md row 60). On the bench RC a RUN sweep should read 2 planned, 0 unplanned.
+
 #### 0.2.91 - 2026-10-20 (protocol 1.24; BODE_CTRL answer 48 bytes)
 
 - Frequency response: one bad record no longer moves a channel to a coarser range (3b363b2). CH2 steps up only when a
