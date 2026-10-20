@@ -300,6 +300,21 @@ uint8 bu_view_bits(int active, int run, int single);
 #define BU_PROBE_ROLLOFF_MHZ  2000000000ull       //2 MHz
 int bu_warn_ch1_low(char *t, const uint8 *r1, const uint64 *f_mhz, const uint16 *flags, const uint8 *have, int n);
 
+//fw 0.2.99 (owner 2026-10-20 16:22: "points below the floor say so and what to do"): CH2 under 3 codes (ch2_small) on
+//its finest range (5, 100 mV/div), where no finer range helps. bu_ch2_floor_f gives the frequency above which CH2 is too
+//small: the lowest of the ch2_small points on that range that lie above every other measured point (the run that ends
+//the span); when the highest measured point is not one of them (scattered points), the lowest of them; 0 when there
+//is none. Any point order. bu_warn_ch2_floor writes the note's first line into t (at most BU_CH2_FLOOR_MAX characters),
+//bu_ch2_floor_line2 is the second; both 13 px, BU_WARN_LINE apart, centred at BU_WARN_XC. bu_fmt_f3: a frequency in mHz
+//with three significant digits, a space and the unit: "541 kHz", "54.1 kHz", "1.23 MHz", "980 Hz".
+#define BU_CH2_FINE_RANGE     5                   //100 mV/div
+#define BU_CH2_FLOOR_MAX      80
+#define BU_WARN_LINE          16                  //the second warning line's pitch (13 px text)
+uint64 bu_ch2_floor_f(const uint64 *f_mhz, const uint16 *flags, const uint8 *r2, const uint8 *have, int n);
+char  *bu_fmt_f3(char *t, uint64 f_mhz);
+char  *bu_warn_ch2_floor(char *t, uint64 f_mhz);
+extern const char *const bu_ch2_floor_line2;      //"Less pickup: short ground lead on CH2."
+
 //fw 0.2.84, AUTO SET's verdict on a pass (owner 2026-10-20 11:23: never a busy loop; a failure ends AUTO SET in STOP
 //with the settings kept and one of these warnings). CH2 ranging bounces when its range changes direction twice
 //between the pass's points, or once with the engine's switch budget (BU_AUTO_SWITCHES) used up.

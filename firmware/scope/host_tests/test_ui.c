@@ -1540,7 +1540,7 @@ static void test_bode_readout(void)
 
   {
     static const uint16 fl[] = { BODE_F_CLIPPED, BODE_F_CH1_CLIPPED, BODE_F_UNSETTLED, BODE_F_NEAR_FLOOR, BODE_F_LOW_SNR,
-                                 BODE_F_INCOHERENT };
+                                 BODE_F_INCOHERENT, BODE_F_CH2_SMALL };
     unsigned k;
 
     for(k = 0; k < sizeof(fl) / sizeof(fl[0]); k++)
@@ -1551,6 +1551,13 @@ static void test_bode_readout(void)
       T_TRUE(ro_fits(&r[0]));
     }
   }
+
+  //fw 0.2.99: a ch2_small point is grey and says so; ch1_low alone stays valid (its warning names the cause)
+  bu_readout(1000, -60000, 0, BODE_F_CH2_SMALL, 2000, 0, 0, 0, r);
+  T_TRUE(r[0].flagged && r[0].grey && r[2].grey);
+  T_STR(r[0].ph, "CH2 small");
+  bu_readout(1000, 0, 0, BODE_F_CH1_LOW, 2000, 0, 0, 0, r);
+  T_EQ(r[0].flagged, 0);
 
   //A valid point that was spliced reads normally (spliced points are valid)
   bu_readout(1000, 0, 0, BODE_F_SPLICED, 2000, 0, 0, 0, r);
@@ -1664,6 +1671,100 @@ static void test_bode_cards(void)
       in.autoset = 0;
     }
   T_TRUE(ui_card_fits(&font_2, "-3dB", "not found"));
+}
+
+//fw 0.2.99 (owner 2026-10-20 16:22): CH2 under the floor on its finest range. The bench case: a two-pole RC swept
+//10 kHz .. 10 MHz, every point from 540 kHz up ch2_small at 100 mV/div (generator pickup at under one code)
+static void test_bode_ch2_floor(void)
+{
+  uint64 f[12];
+  uint16 fl[12];
+  uint8  r2[12], have[12];
+  char   t[BU_CH2_FLOOR_MAX + 16];
+  int    i, k;
+
+  //The grey set: ch2_small does not count (fw 0.2.99); ch1_low, spliced, retried still do
+  T_TRUE((BODE_F_BAD & BODE_F_CH2_SMALL) != 0);
+  T_EQ(BODE_F_BAD & (BODE_F_CH1_LOW | BODE_F_SPLICED | BODE_F_RETRIED | BODE_F_FIR_OFF), 0);
+
+  //Log spaced 10 kHz .. 10 MHz (12 points, about 1.87x apart): 10.0, 18.7, 35.1, 65.8, 123, 231, 433, 811 kHz, ...
+  for(i = 0; i < 12; i++)
+  {
+    f[i]    = (i == 0) ? 10000000000ull / 1000 : f[i - 1] * 1874 / 1000;
+    fl[i]   = 0;
+    r2[i]   = (uint8)((i < 3) ? 3 : (i < 5) ? 4 : 5);
+    have[i] = 1;
+  }
+
+  T_EQ(bu_ch2_floor_f(f, fl, r2, have, 12), 0);
+
+  //The run that ends the span: from point 6 (433 kHz) up; point 6 low_snr as well (the bench's 540 kHz point)
+  for(i = 6; i < 12; i++)
+    fl[i] = BODE_F_CH2_SMALL;
+  fl[6] |= BODE_F_LOW_SNR;
+  T_EQ(bu_ch2_floor_f(f, fl, r2, have, 12), f[6]);
+  bu_warn_ch2_floor(t, 540000000ull);
+  T_STR(t, "CH2 too small above 540 kHz to measure: set Stop below it or press AUTO SET.");
+  T_STR(bu_ch2_floor_line2, "Less pickup: short ground lead on CH2.");
+
+  //Any order (a sweep from Stop down to Start), unmeasured points do not break the run
+  for(i = 0; i < 6; i++)
+  {
+    uint64 tf = f[i]; uint16 tl = fl[i]; uint8 tr = r2[i];
+
+    f[i] = f[11 - i];  fl[i] = fl[11 - i];  r2[i] = r2[11 - i];
+    f[11 - i] = tf;    fl[11 - i] = tl;     r2[11 - i] = tr;
+  }
+  have[2] = 0;
+  T_EQ(bu_ch2_floor_f(f, fl, r2, have, 12), f[5]);          //433 kHz, now at index 5
+  have[2] = 1;
+
+  //A measured point above the run that is not small: the run that ends the span starts above it
+  fl[1] = 0;                                                //f[1] is the second highest
+  T_EQ(bu_ch2_floor_f(f, fl, r2, have, 12), f[0]);
+  //Scattered only (the highest point measures): the lowest small one
+  fl[0] = 0;
+  T_EQ(bu_ch2_floor_f(f, fl, r2, have, 12), f[5]);
+
+  //Not on the finest range (a finer range helps, the Constant note or Auto's ranging): none
+  for(i = 0; i < 12; i++)
+  {
+    fl[i] = BODE_F_CH2_SMALL;
+    r2[i] = 4;
+  }
+  T_EQ(bu_ch2_floor_f(f, fl, r2, have, 12), 0);
+  r2[3] = 5;
+  T_EQ(bu_ch2_floor_f(f, fl, r2, have, 12), f[3]);           //the only one on the finest range: scattered, itself
+  have[3] = 0;
+  T_EQ(bu_ch2_floor_f(f, fl, r2, have, 12), 0);
+
+  //Three significant digits, a space and the unit
+  T_STR((bu_fmt_f3(t, 540000000ull), t), "540 kHz");
+  T_STR((bu_fmt_f3(t, 541317000ull), t), "541 kHz");
+  T_STR((bu_fmt_f3(t, 54131700ull), t), "54.1 kHz");
+  T_STR((bu_fmt_f3(t, 5413170ull), t), "5.41 kHz");
+  T_STR((bu_fmt_f3(t, 999499000ull), t), "999 kHz");
+  T_STR((bu_fmt_f3(t, 999500000ull), t), "1.00 MHz");
+  T_STR((bu_fmt_f3(t, 1234567000ull), t), "1.23 MHz");
+  T_STR((bu_fmt_f3(t, 10000000000ull), t), "10.0 MHz");
+  T_STR((bu_fmt_f3(t, 980000ull), t), "980 Hz");
+  T_STR((bu_fmt_f3(t, 1000ull), t), "1.00 Hz");
+  T_STR((bu_fmt_f3(t, 9995000ull), t), "10.0 kHz");
+
+  //Both lines fit: 13 px, centred at x 366, clear of both axes' labels (the instruction's bounds), under the
+  //character cap, and both inside the free top division (y 60 .. 116)
+  for(k = 0; k < 2000; k++)
+  {
+    uint64 ff = 1000ull + (10000000000ull / 2000) * (uint64)k;
+    uint32 w;
+
+    bu_warn_ch2_floor(t, ff);
+    T_TRUE(strlen(t) <= BU_CH2_FLOOR_MAX);
+    w = ui_text_width(&font_2, t);
+    if((BU_WARN_XC - w / 2 < BU_PX + 50) || (BU_WARN_XC + w / 2 > BU_PX + BU_PW - 60)) { T_TRUE(0); printf("wide: %s\n", t); }
+  }
+  T_TRUE(ui_text_width(&font_2, bu_ch2_floor_line2) <= 355);
+  T_TRUE(BU_WARN_Y + BU_WARN_LINE + 13 <= BU_Y + BU_DIV);
 }
 
 //fw 0.2.84: CH1 level low by range and frequency (hardware-status 2026-10-20 11:16: a pre-scan artefact left CH1 at
@@ -1911,6 +2012,7 @@ static void test_bode_texts(void)
   //fw 0.2.84: CH1 low named by its cause; AUTO SET's failures
   test_bode_ch1_low();
   test_bode_auto_verdict();
+  test_bode_ch2_floor();
 
   //fw 0.2.71: the readout fault's warning (owner's fail-fast rule)
   T_STR(bu_warn[BU_W_READOUT], "ADC readout fault: see Diagnostics");

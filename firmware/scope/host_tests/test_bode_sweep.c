@@ -773,7 +773,8 @@ static void sweep_once(const bode_cfg *c, int thru, int hold, sweep_rec *s)
     s->r1[i] = p.r1;
     s->r2[i] = p.r2;
     s->h[i]  = p.h_mdb;
-    if(p.flags & BODE_F_BAD)
+    //bad records; ch2_small (in BODE_F_BAD since fw 0.2.99: the stopband under 3 codes) is counted on its own
+    if(p.flags & (BODE_F_BAD & ~BODE_F_CH2_SMALL))
       s->bad++;
     if(p.flags & BODE_F_CH2_SMALL)
       s->small++;
@@ -1385,8 +1386,9 @@ static void test_auto_span_absurd(void)
   T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_INCONSISTENT);
   m[0] = m0[0];
 
-  //One absurd point inside (30 dB up at point 15, 870 kHz): dropped, not a peak, the span as clean
-  m[15] = m0[15] + 30000;
+  //One absurd point inside (30 dB up at point 14, 485 kHz): dropped, not a peak, the span as clean. fw 0.2.99: points
+  //16..19 (1.6 .. 10 MHz) are ch2_small and do not count, so 15 is the last valid point (0.2.98 used points 15 and 17)
+  m[14] = m0[14] + 30000;
   T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_SPAN);
   T_EQ(a.absurd, 1);
   T_EQ(a.q_x100, 0);
@@ -1395,23 +1397,23 @@ static void test_auto_span_absurd(void)
   T_EQ(a.stop_i, 16);
 
   //... and 30 dB down: the same
-  m[15] = m0[15] - 30000;
+  m[14] = m0[14] - 30000;
   T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_SPAN);
   T_EQ(a.absurd, 1);
   T_EQ(a.start_i, 9);
   T_EQ(a.stop_i, 16);
 
   //19 dB is not absurd (a real response can step that far): kept
-  m[15] = m0[15] + 19000;
+  m[14] = m0[14] + 19000;
   bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a);
   T_EQ(a.absurd, 0);
 
   //Two absurd points: inconsistent
-  m[15] = m0[15] + 30000;
-  m[17] = m0[17] - 30000;
+  m[14] = m0[14] + 30000;
+  m[12] = m0[12] - 30000;
   T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_INCONSISTENT);
-  m[15] = m0[15];
-  m[17] = m0[17];
+  m[14] = m0[14];
+  m[12] = m0[12];
 
   //CH1 under 20 codes on most good points: CH1 low; on a few: the span as clean
   for(i = 0; i < n; i++)

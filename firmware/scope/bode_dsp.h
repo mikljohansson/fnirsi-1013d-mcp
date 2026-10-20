@@ -45,8 +45,11 @@
 #define BODE_F_CAL_RANGE      0x1000    //[cal_range] thru taken on other ranges
 #define BODE_F_CAL_FLAGGED    0x2000    //[cal_flagged] the thru point was itself flagged
 #define BODE_F_RETRIED        0x4000    //measured again (re-centred, settle retry or range change)
-#define BODE_F_BAD            (BODE_F_CH1_CLIPPED | BODE_F_CLIPPED | BODE_F_CH2_OVERLOAD | BODE_F_LOW_SNR | \
-                               BODE_F_NEAR_FLOOR | BODE_F_UNSETTLED | BODE_F_INCOHERENT)
+//The points that do not count: drawn grey, left out of the markers, the cards and AUTO SET's span. fw 0.2.99 (owner
+//2026-10-20 16:22): ch2_small too, CH2 under 3 codes is below what the ADC measures (bench: a two-pole RC's tail above
+//500 kHz was generator pickup at under one code, drawn as data)
+#define BODE_F_BAD            (BODE_F_CH1_CLIPPED | BODE_F_CLIPPED | BODE_F_CH2_OVERLOAD | BODE_F_CH2_SMALL | \
+                               BODE_F_LOW_SNR | BODE_F_NEAR_FLOOR | BODE_F_UNSETTLED | BODE_F_INCOHERENT)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Planner (bode-design 3.1-3.2; the host's plan_point / plan_sweep, identical integers)
