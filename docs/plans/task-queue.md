@@ -281,6 +281,13 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   (masks stored under the data dir, exact geometry only), scope_export_csv, scope_dvm (resolution statement); simulator
   serial signals; report kinds. README and release notes say 34 tools; release notes need a line on the four tools
   (release follow-up).
+- **0.3.0 scope** (owner 23:08): 0.3.0 ships when the chosen roadmap items are complete and benched, not the current
+  feature set; realistically 2026-10-21 or 10-22. Contents: fw-one (one bitstream, banner, one averaging), mcp-soft tools,
+  0x153C (triggers, hold-off, peak detect, counter) with its firmware and MCP 1.25 and the two UI rows, 0x153D (logger,
+  pattern generator with its trigger engine and fractional periods, no DDS, cruft removal) with firmware and MCP 1.26;
+  0x153E by the measured numbers. The release notes, announcement and checklist get one final refresh before the tag;
+  the version bump happens then. Reason (owner): see what is possible on commodity hardware, and have the detector
+  tooling ready in a couple of weeks.
 - Owner decision 23:0x: the pattern generator's durations get a fractional part (an accumulator per step, carry = one
   extra 5 ns clock) so any average frequency is exact and the edges stay within one clock; a few dozen cells. In the
   contract with the DDS removal.
