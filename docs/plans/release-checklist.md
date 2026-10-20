@@ -69,8 +69,8 @@ branch's commit; the maintainer's items and the hardware items are left open.
       the image ends at about 2261): fw 0.2.101 persisted 2026-10-20 19:22 and cold-booted 19:24, the first image over 776
       sectors through Atlan4's v0.8 bootloader; fw 0.2.102 persisted 19:27 and cold-booted 19:29 with every Diagnostics tile
       OK (`docs/hardware-status.md` 19:22, 19:24, 19:29). Repeat for the 0.3.0 image.
-- [ ] 30-minute soak with the MCP server polling (`fnirsi1013d-soak`) on the persisted candidate passes. The bench session's
-      attempt at 2026-10-20 20:5x ended when the scope was switched off (not in the bench log yet); still open.
+- [x] 30-minute soak with the host polling passes: 2026-10-20 21:26-21:56 on fw 0.2.102 / 0x153B, 899 status polls, 15 health
+      reads, 15 captures, 0 errors (bench log). To repeat on the 0.3.0 image if the release commit changes firmware code.
 - [ ] The long-idle check passes (roadmap section 5 item 4).
 - [ ] First-run screen and calibration wizard on the release candidate with the recommended bitstream (the wizard passed
       on fw 0.2.102 with 0x153B on 2026-10-20 19:52-19:58; the first-run screen and the 0.3.0 image remain).
