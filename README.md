@@ -25,20 +25,27 @@ single unit. Opening the case may void your warranty.
 - **Scope view**: six hardware ranges plus software zoom; **16,384 samples per capture and channel instead of
   3,000**, with the trigger placed anywhere in the capture by dragging (**FPGA**); trigger Auto, Normal or Single on
   a rising or falling edge of CH1, CH2 or an external signal on the calibration post (**FPGA**); sample rate, time
-  per division and memory depth; roll mode; averaging, in the FPGA on the newest bitstreams (**FPGA**); twelve
-  measurements per channel as cards; time and voltage cursors; digital phosphor with persistence and a heat palette; X-Y.
-- **Clean traces at every sweep speed** (**FPGA**): the FPGA filters the 200 MS/s stream (boxcar, CIC2 or CIC3, plus
-  a compensation FIR) before it slows it down, where the stock and Atlan firmware skip samples and show ghost signals
-  that are not there.
+  per division and memory depth; roll mode; twelve measurements per channel as cards; time and voltage cursors;
+  digital phosphor with persistence and a heat palette; X-Y; an overview bar under every plot that previews the whole
+  capture, spectrum or sweep, with a window you drag.
+- **Averaging of successive captures** (ACQ > Average): on bitstream 0x1536 and later the FPGA sums them at the fast
+  rates (**FPGA**); otherwise, and for filtered and slow captures, the MCU does.
+- **Clean traces at every sweep speed** (**FPGA**): Acquisition > Filter picks boxcar, CIC2 or CIC3, with or without
+  the compensation FIR, and the FPGA filters the 200 MS/s stream before it slows it down, where the stock and Atlan
+  firmware skip samples and show ghost signals that are not there.
 - **Spectrum analyser**: FFT of 1024 to 4096 points, Hann, flat-top or rectangular window, averaging and max hold,
   waterfall and density views, THD, tap to zoom, drag to pan, AUTO SET.
-- **Frequency response** (**FPGA**): magnitude and phase of a filter, divider or tank with the scope alone. The
-  calibration post (the square-wave output hook on the side of the scope) drives it, CH1 and CH2 read its input and
-  output; AUTO SET finds the span, cards give the corner frequency, peak and Q, the table saves as CSV.
+- **Frequency response analyser, a Bode plot** (**FPGA**): magnitude and phase against frequency of a filter, divider
+  or tank with the scope alone. The calibration post (the square-wave output hook on the side of the scope) drives
+  it, CH1 and CH2 read its input and output; AUTO SET finds the span, cards give the corner frequency, peak and Q,
+  the table saves as CSV.
 - **Generator** (**FPGA**): a square wave on the calibration post, frequency and duty of your choice.
-- **Calibration wizard** for both ADC cores of each channel (the gain steps need the bitstream), a first-run screen,
-  **Diagnostics** (status tiles, a calibration page, an event log, a report saved to the card), viewers for saved
-  pictures and waveforms, Settings, USB drive mode.
+- **The ADCs are calibrated core by core, and the firmware checks every fast capture.** Each channel is two
+  interleaved ADC cores; the wizard measures a zero and a gain per core and clock class (the gain steps need the
+  bitstream), a tracker follows the full-rate drift in the background, on 0x153A and later the wizard also trains
+  when the FPGA captures each core's data, the FPGA self-checks every 200 MS/s capture, and a garbled one is taken again.
+- A first-run screen, **Diagnostics** (status tiles, a calibration page, an event log, a report saved to the card),
+  viewers for saved pictures and waveforms, Settings, USB drive mode.
 
 **From your AI agent over USB** (30 tools in the default profile; raw FPGA access is off unless you enable it; no
 remote lock-out: you and the agent change the same live settings, and the screen follows)
@@ -53,10 +60,11 @@ remote lock-out: you and the agent change the same live settings, and the screen
 - **Drive**, each with a confirmation token: the generator, a loopback self-test, a Bode sweep. Every
   hardware-changing call goes to an audit log.
 
-**Host tools** in the same package: `fnirsi1013d-bode` (a sweep to CSV, JSON and NPZ), `fnirsi1013d-flash` (loads a
-firmware build over FEL), `fnirsi1013d-sd` (card sectors over USB), `fnirsi1013d-bench`, `fnirsi1013d-soak` and
-`fnirsi1013d-sim` (the simulator: every tool without a scope). Two Claude Code skills: `fnirsi-scope` (how to
-measure) and `fnirsi-install` (the install runbook).
+**Host tools** in the same package: **firmware updates from your PC over USB**, no card swapping
+(`fnirsi1013d-flash` reboots the scope into FEL, loads a new image into RAM and can write it to the card after a
+backup); `fnirsi1013d-bode` (a sweep to CSV, JSON and NPZ); `fnirsi1013d-sd` (card sectors over USB);
+`fnirsi1013d-bench`, `fnirsi1013d-soak`; `fnirsi1013d-sim` (the simulator: every tool without a scope). Two Claude
+Code skills: `fnirsi-scope` (how to measure) and `fnirsi-install` (the install runbook).
 
 | | |
 |---|---|
@@ -64,6 +72,15 @@ measure) and `fnirsi-install` (the install runbook).
 | A 16,384-sample capture with the trigger near the start | Spectrum analyser, waterfall view |
 | ![Frequency response of a two-pole RC ladder, magnitude and phase](docs/screenshots/frequency-response-sweep.png) | ![Diagnostics, all checks OK](docs/screenshots/diagnostics.png) |
 | Frequency response of an RC ladder, measured by the scope alone | Diagnostics, all checks OK |
+
+## What's next
+
+Ideas, not promises ([`docs/plans/roadmap.md`](docs/plans/roadmap.md), sections 6 and 8): more trigger types (pulse
+width, Nth edge, runt, window, timeout) behind a Type row in the trigger menu; peak-detect acquisition; a streaming
+data logger (continuous filtered samples at up to about 1 MS/s into the 32 MB RAM and on to the host); a pulse pattern
+generator with a trigger output; a hardware frequency and period counter feeding the measurement cards; deeper plain
+memory (about 24,576 samples per channel from the spare block RAM); a DVM readout, serial decode, mask testing and
+CSV export; and testers with EF2L45 and EP4CE6 units.
 
 ## What you need
 
@@ -88,10 +105,7 @@ measure) and `fnirsi-install` (the install runbook).
 my FNIRSI 1013D."* The agent prepares each command and checks its output, you do the physical steps, and it stops
 when any check fails. In Claude Code the `fnirsi-install` skill picks the runbook up by itself.
 
-### By hand
-
-Every command with its expected result: [`docs/guide/install.md`](docs/guide/install.md). The commands are for a
-WSL or Linux shell.
+### By hand (a WSL or Linux shell; every command with its expected result: [`docs/guide/install.md`](docs/guide/install.md))
 
 1. **Back up** the SD card you will use and, if you will flash a bitstream, the FPGA flash
    ([`docs/hardware-prep.md`](docs/hardware-prep.md), section 3).
@@ -121,12 +135,10 @@ WSL or Linux shell.
    [`fpga/al3/dist/BITSTREAMS.md`](fpga/al3/dist/BITSTREAMS.md) describes. Then boot, and run the calibration
    wizard when the first-run screen asks ([`docs/guide/first-run.md`](docs/guide/first-run.md)).
 
-## Risks and the way back
-
-- **Back up first** and keep the backups: the SD card, and the FPGA flash twice (the two reads must match).
-- **Never `dd` the whole SD package** to the card: that wipes the calibration, settings and boot-mode sectors.
-- **Use at your own risk.** A wrong programmer pin or 5 V logic can damage the board, and a failed write can leave
-  the scope unbootable until you restore a backup.
+**Risks and the way back.** Back up first and keep the backups: the SD card, and the FPGA flash twice (the two reads
+must match). Never `dd` the whole SD package to the card: that wipes the calibration, settings and boot-mode sectors.
+A wrong programmer pin or 5 V logic can damage the board, and a failed write can leave the scope unbootable until you
+restore a backup. Use at your own risk.
 
 ## Let your AI agent use the scope
 
