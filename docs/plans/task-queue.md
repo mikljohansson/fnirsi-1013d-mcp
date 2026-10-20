@@ -469,6 +469,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
+- fw-acq2 (done 11:45, about 290k tokens, merged 11:42 as fw 0.2.85, pinned backups/fw-0.2.85_7b224ade.bin, not yet loaded): memory
+  chips redrawn on every Filter change (acq_view_mem_chips), Spectrum "Capture" card (memory depth / fs, on by default after RBW
+  and Time; settings word 217), the zoom-in limit from the real capture time (narrowest span from 0 Hz: 1 kHz at 3000, 2 kHz at
+  6000..9000, 5 kHz at 12000+), the rate re-derived at once when the memory depth changes (the FFT length no longer matters to the
+  rate); bench steps at the end of firmware/AGENTS.md sections 40 and 52.
+
 - mcp-gen7 (done 11:38, about 240k tokens, merged 11:40): idle port close after 30 s (FNIRSI_MCP_IDLE_CLOSE_S), Bode flat-record
   retakes and the dead-CH1 guard, reason 8 text, simulator reason 8 / flat-record hook / header rule, docs/mcp-tools.md. The
   session's own MCP server process still runs the old code until the session restarts: the idle close is checked next session.
