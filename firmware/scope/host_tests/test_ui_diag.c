@@ -275,12 +275,12 @@ static void test_pages(void)
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
   T_TRUE(has_text("fw 0.2.59, git 1234abcd, 2026-10-19 08:44 UTC, protocol 1.16, serial 1013D-0001, MMU and caches on"));
   //fw 0.2.61: 0x1532..0x1536 have the ADC capture timing race (amber); fw 0.2.62: 0x1537 the other core order
-  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x1538"));
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x153B"));
   T_EQ(text_colour("FPGA AL3A10 bitstream 0x1535"), UD_C_WARN);
   in.fpga = 0x1537;
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
   check_layout("0x1537", 0);
-  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1537: ADC core order differs: recalibrate after flashing 0x1538"));
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1537: ADC core order differs: recalibrate after flashing 0x153B"));
   T_EQ(text_colour("FPGA AL3A10 bitstream 0x1537"), UD_C_WARN);
 
   //0x1538: the line reads GET_HEALTH 88..103 (the FPGA's 0x33 after the last full-rate capture)
@@ -875,7 +875,7 @@ static void test_first_run(void)
   ud_build_first_run(&pg, &in, 1, 0);
   check_layout("first run", 0);
   T_TRUE(has_text("Open firmware 0.2.59, protocol 1.16. FPGA bitstream 0x1535."));
-  T_TRUE(has_text(UD_ICON_WARN "FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x1538"));
+  T_TRUE(has_text(UD_ICON_WARN "FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x153B"));
   T_TRUE(has_text(UD_ICON_OK "No saved settings on the card: defaults used."));
   T_TRUE(has_text(UD_ICON_WARN "Calibration missing: readings may be several % off."));
   T_TRUE(!has_text("Volts calibration"));
