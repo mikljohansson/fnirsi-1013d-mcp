@@ -1147,7 +1147,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   fw 0.2.71 (before fw-bus) on 0x153A the device sweep ran once (20/20, CH1 ranged to 0.5 V/div, 0.07 dB) and failed with reason 8
   on the second run, so the fault is intermittent and not only fw-bus's write order; on 0x1539 / 0.2.71 four sweeps in a row
   ran yesterday. Statistics per filter mode and divider follow.
-- 2026-10-20 11:00-11:08: the saturated record could not be reproduced on demand: 80 CIC2+FIR captures after rate changes at
+- 2026-10-20 11:00-11:02: the saturated record could not be reproduced on demand: 80 CIC2+FIR captures after rate changes at
   five dividers, 72 captures over every order of filter / rate writes, relay toggles with 0 / 100 / 300 ms waits and offset
   jumps before the capture, all clean on fw 0.2.82; it was seen three times in sequences that followed a device sweep or a
   fresh range change. The deterministic part is the engine's own `clipped`: pc_bode.c `cap->s[c].clipped = (h.overload != 0)`
