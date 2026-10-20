@@ -184,6 +184,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   waterfall's history span); (b) make the 2 s zoom-in limit use the real capture time memory depth/fs, or cap the memory depth in
   the Spectrum; (c) re-derive the rate when the FFT length or memory depth changes, not only at the next zoom/pan step. With the
   next Spectrum batch.
+- **Capture-stage training must probe the band** (bench 10-20 10:19; fw-cap2 dispatched): see hardware-status 10:19.
 - **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
   SCREENSHOT bit 6, simulator has it, `Scope.read_screen` reads 40 rows per request) but the firmware handler is NULL
   (pc_cmds.c "BENCH: T9"). Implement it in all builds: rows of the live framebuffer as RGB565, the header per protocol.md, the

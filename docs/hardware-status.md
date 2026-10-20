@@ -1093,4 +1093,14 @@ Newest entries at the bottom. Format: date, who, what, result.
   0 on a good stage set and hundreds (CH1 A4) or 65535 (CH2 B2) on a bad one, three captures each. The counters do not run
   after the capture ends (stable over 1.2 s). Decision: training and self-check threshold 32 codes (firmware; 0x153B can move
   CAP_THR_PO too). Expected training result on this unit: CH1 A3 B4, CH2 A3 B4 = 0x08E3.
+- 2026-10-20 10:14-10:19: fw 0.2.80 (threshold 32, pinned backups/fw-0.2.80_6acd4eed.bin sha256
+  6acd4eed48c6f8a135af0adde581b6c9ecf7e065ece269b5032d2d6eaa9c2728) loaded; CAL_PROBE mode 1: CH1 OK, CH2 OK. Owner ran the
+  wizard (item 4): "Capture stages: CH1 A4 B4" / "CH2 A3 B4", saved; GET_CAL trailer 1, stored 0x08E4 on 0x153A, in effect
+  0x08E4. So the training kept the power-on stage 4 for CH1 A although the stage map shows it bad: the band sweep at 200 MSa/s
+  with the trained stages still has CH1 A garbled at means 128..132 (dco 12: std 20.7, 41 rails; dco 16: 17 rails), B cores
+  and CH2 clean (max std 2.8), and the in-operation self-check flagged 2 of 21 captures. Cause: the training probes one code
+  (the centre PWM) with one 8000-word capture per stage; the fault is intermittent and lives at a few codes of the band, so a
+  single capture can read 0. Fix (fw-cap2): probe several codes across 120..140 with two captures per point, sum the counts,
+  pick the stage with the widest clean run (here A3 with 2 and 5 clean), and let a persistently flagged core in operation
+  ask for a calibration. Until then the unit runs with CH1 A4 (bad at two codes at 200 MSa/s only).
 
