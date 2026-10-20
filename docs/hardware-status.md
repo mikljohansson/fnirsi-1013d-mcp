@@ -1390,3 +1390,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   977b321ba27d2affc887ef7f82e602642780fb4c6f69919d021caf8044557416), FEL-loaded, persisted (checksum 0x34784D04 verified;
   the tool refuses to persist an image that is not the running one, so the load came first). Power cycle next, then the
   all-green Status page screenshot.
+- 2026-10-20 19:29: cold boot of fw 0.2.102 from the card (owner), Diagnostics Status page all OK: Firmware "Running
+  0.2.102", Restarts "No crashes. Up 0 min.", USB OK (1 suspend), Battery 20 of 20 charging, Calibration OK "every value
+  within its limit" with the noise rows 0.50 / 0.38 against 1.0 gated and 1.19 / 2.75 against 3.0 full, "27 power-ons ago".
+  Screenshot docs/screenshots/diagnostics.png replaced (the 15:0x one showed the dev-state Checks). 0x153B images pinned
+  in backups/dist-0x153B (padded 1391978c.., the 0x153A padded 77672b5a.. for the pre-write check); flash session pending.
