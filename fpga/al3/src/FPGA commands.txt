@@ -57,12 +57,18 @@
                     //all averages, or stopped); otherwise ~sample_write_enable as before
 
             8'h14: //Reading of the trigger address needs loading of high byte first
+                   //Triggered: the word of the trigger (section below, +-1). Ended on the auto time-out or on 0x1A = 0
+                   //written while the capture ran: 0x1532..0x153A pretrigger (record = ring 0 .. total - 1, spliced
+                   //if the stop fell inside it); 0x153B W - total + pretrigger, W the address after the last word
+                   //written, so 0x14 - pretrigger is the newest total words. Frozen with the write (0x153B).
                   4'h0:
                     o_mcu_data <= trigger_address[12:8];
                   4'h1:
                     o_mcu_data <= trigger_address[7:0];
             
             //This is not used in the software and is basically the same as command 0x0A
+            //0x153B: no trigger is taken after the write has stopped, so bit0 describes the record (up to 0x153A an
+            //edge after the stop set it)
             8'h18: //Reading of the sampling triggered state
                     o_mcu_data[0] <= sampling_triggered;
               
@@ -206,6 +212,9 @@
                     sample_rate_divider[7:0] <= io_mcu_data;
             
             8'h0E: //Loading of the four bytes of the time base counter high byte first
+                   //Auto mode (0x1A = 0) time-out in memory words from the sampling reset: the write stops at word
+                   //0x0E + 2. 0x153B: it ends an untriggered capture only (a trigger before it completes its
+                   //post-trigger words) and must be >= total - 2 for a record without words from before the reset.
                   4'h0:
                     time_base_set[31:24] <= io_mcu_data;
                   4'h1:

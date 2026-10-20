@@ -420,6 +420,14 @@ the check on hardware). Layout 0 (per-core blocks) is unaffected.
   untriggered (`auto_timeout` set, GET_CAPTURE_INFO flags triggered clear) whatever 0x18 says afterwards. Stock
   bitstreams, calibration and auto setup keep the FPGA's own auto mode. The `auto_timeout` value is still written to
   0x0E (it no longer acts in normal mode).
+  - **The forced stop splices the record on 0x1532..0x153A** (bench 2026-10-20 12:32, fpga/al3/README.md section 11):
+    the FPGA's time-out branch latches 0x14 = pretrigger, so the record read is ring words 0 .. total - 1, while the
+    write pointer has gone round the ring for the whole deadline and stopped at a random word W; whenever W < total
+    the words after W are one ring older than the words before it (probability total / 8192 per record, 15 of 32 on the
+    bench). Bitstream 0x153B reports 0x14 = W - total + pretrigger on a time-out or forced stop (the record start is
+    then the newest total words), completes a triggered record instead of cutting it at the time-out, and takes no
+    trigger after the stop (0x18 is the record's). Firmware on 0x1532..0x153A should arm FPGA auto with 0x0E =
+    8192 k + total - 2 (the stop at ring word total) instead of forcing; details in that README section.
 - Normal mode has no timeout: the ring keeps wrapping until a trigger arrives.
 - Stock FPGA geometry: fixed 750 pre-trigger and 750 post-trigger words; the readout window is
   `T - 750 .. T + 749`. Fresh data extend roughly 910 words before and 1700-2500 words after the trigger;

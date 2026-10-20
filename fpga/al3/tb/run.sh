@@ -1,5 +1,5 @@
 #!/bin/bash
-# Simulate fpga/al3/src/zaklad.v with iverilog (in WSL). Eleven steps, all must pass:
+# Simulate fpga/al3/src/zaklad.v with iverilog (in WSL). Thirteen steps, all must pass:
 #   1. tb_ext_trigger.v against Atlan4's original (REF_REV, default a947e78 = 0x1532): CH1/CH2
 #      equivalence and the external trigger.
 #   2. tb_decim.v against our 0x1533 (REF1533_REV, default 2839258): K = 0 equivalence including
@@ -18,7 +18,7 @@
 #      byte sequences, shuffled cases (K = 0..3, FIR, dividers 0..399, CH1 / EXT) and random phases, then
 #      the configuration race at slow legacy rates. TRIGPOS_RUNS (default 6) runs per case.
 #   8. tb_seqcontract.v: the firmware's sequencer byte sequences (protocol 1.17) against the simulated FPGA; the
-#      transcript must equal tb/contract_0x153A.txt (the reference for the firmware's host tests).
+#      transcript must equal tb/contract_0x153B.txt (the reference for the firmware's host tests).
 #   9. encphase.sh MODE=check (0x1538): tb_encphase.v, the encode pins against the write clock after the firmware's
 #      UI and host arm sequences at swept write phases, plain and with delay-annotated encode flop inputs, and the
 #      0x33 self-check catching a late CH2 A flop.
@@ -31,7 +31,12 @@
 #  12. tb_firstrec.v (fpga-gen10): the first decimated record after a mode / shift / rate change at divider 4095 with the
 #      firmware's exact byte sequences (both arm orders), exact from word 0; the transient without the settle wait and
 #      the stale-shift fault model (whole record 0xFFFF) for comparison. FIRSTREC_TOTAL words per record (default 16).
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec runs one testbench.
+#  13. tb_timeout.v (0x153B, fpga-gen11): records that end on the auto time-out or the firmware's forced stop (0x1A = 0
+#      after the ring has wrapped), with the firmware's byte sequences, checked word by word against a mirror of the
+#      memory write port: equal to the words written, contiguous in write order, the newest total words (triggered: the
+#      post-trigger region complete), 0x18 true for the record. TIMEOUT_TOTAL words per record (default 2048),
+#      TIMEOUT_RUNS forces per case (default 4). Against the 0x153A source it reproduces the bench splice.
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -110,8 +115,8 @@ if [ "$ONLY" = all ] || [ "$ONLY" = contract ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_seqcontract.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_seqcontract.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_seqcontract.vvp" +transcript="$WORK/contract.txt" | tee "$WORK/sim_contract.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_contract.log" || RC=1
-  if cmp -s "$WORK/contract.txt" "$HERE/contract_0x153A.txt"; then echo "contract transcript = tb/contract_0x153A.txt"
-  else echo "contract transcript differs from tb/contract_0x153A.txt"; RC=1; fi
+  if cmp -s "$WORK/contract.txt" "$HERE/contract_0x153B.txt"; then echo "contract transcript = tb/contract_0x153B.txt"
+  else echo "contract transcript differs from tb/contract_0x153B.txt"; RC=1; fi
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = encphase ]; then
   MODE=check SIM_WORK="$WORK" DUT="$DUT" bash "$HERE/encphase.sh" "$SEED" | tee "$WORK/sim_encphase.log"
@@ -131,6 +136,11 @@ if [ "$ONLY" = all ] || [ "$ONLY" = firstrec ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_firstrec.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_firstrec.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_firstrec.vvp" +seed=$SEED +total=${FIRSTREC_TOTAL:-16} | tee "$WORK/sim_firstrec.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_firstrec.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = timeout ]; then
+  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_timeout.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_timeout.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_timeout.vvp" +seed=$SEED +total=${TIMEOUT_TOTAL:-2048} +runs=${TIMEOUT_RUNS:-4} | tee "$WORK/sim_timeout.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_timeout.log" || RC=1
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
 [ $RC -eq 0 ] && echo "ALL PASS (seed $SEED)" || echo "SOMETHING FAILED (seed $SEED)"

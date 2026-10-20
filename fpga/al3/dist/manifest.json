@@ -137,6 +137,25 @@
    ],
    "status": "recommended",
    "bench": "flashed 2026-10-20 10:03 (pre-write dump = 0x1539, verified); benched 10-20 10:04-10:49 on fw 0.2.79..0.2.82: the wizard trains the capture stages (this unit 0x08E3: CH1 A3 B4, CH2 A3 B4; the power-on 0x08E4 was bad for CH1 A at two codes), then the dcoffset sweep over codes 109..135 at 200 / 100 / 50 / 20 MSa/s is clean on every core (no rails, no jumps, max std 1.0 / 1.5 / 3.6 / 2.5 at 200 MSa/s) and the self-check flagged 0 of 18865 captures; the 0x64 threshold must be 32 (fw 0.2.80+: 8 sits under CH2's 3-code noise at 5 V/div); the fault of 0x1535..0x1539 is gone. Needs fw 0.2.81+ for the training (older firmware runs the power-on stages, which can be wrong per unit). Built 2026-10-19 22:19 (fpga-gen9); tb 11 steps pass incl. tb_adccap (AD9288 transition model, pad delay sweep, all rates); capture margins >= 1.33 ns at the power-on stages at TT (fpga/al3/README.md section 10); not flashed; bench checks 1..7 of section 10"
+  },
+  {
+   "version": "0x153B",
+   "file": "al3-0x153B.bin",
+   "size": 282898,
+   "sha256": "fdc3c21b57341b0774e8a5e58df04e38d1d223fb7c354b6ed49f5892f711fc3d",
+   "flash_image_sha256": "1391978c33379271789a9405f7b0fb9395a85e223ecc69a0430b9f2859a23b88",
+   "source_commit": "c173ed5efb749d3d624575451a017049edb61a8f",
+   "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
+   "min_firmware": "0.2.81",
+   "features": [
+    "as 0x153A",
+    "a record that ends on the auto time-out or on the firmware's forced stop (0x1A = 0 after the ring has wrapped) reports 0x14 = W - total + pretrigger, W the address after the last word written, so the record read from 0x14 - pretrigger is the newest total words, contiguous (0x1532..0x153A reported pretrigger: ring 0 .. total - 1, spliced when the stop fell inside)",
+    "the time-out ends only an untriggered capture: a trigger before it completes its post-trigger words (0x0E = total with a trigger gave a cut record)",
+    "no trigger is accepted after the stop: 0x18 describes the record",
+    "0x1A synchronised into the write clock domain; trigger_address and trigger_read_address frozen with the write enable"
+   ],
+   "status": "unbenched",
+   "bench": "built 2026-10-20 13:50 (fpga-gen11, build b2: clk_200MHz 0 errors, min period 4.583 ns; sample_write_clock 9.231 ns; capture margins >= 1.10 ns at the power-on stages at TT, train the stages after flashing as for 0x153A); tb: tb_timeout 75 checks 0 errors at 2048 words (the 0x153A source fails 30 of them: the bench splice), ext / decim / trigpos / firstrec / contract pass, the full 13-step run per fpga/al3/AGENTS.md 'Spliced time-out records'; not flashed; bench checks 1..6 of README section 11"
   }
  ]
 }

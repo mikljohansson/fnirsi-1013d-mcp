@@ -86,12 +86,21 @@ module tb;
   // (README "Changes" section 7). The ADC data here do not depend on the encodes; tb_trigpos.v checks the order.
   wire [14:0] out_cmp_mask = 15'h07FF;
 
-  wire [71:0] st_dut = {dut.trigger_address, dut.trigger_read_address, dut.sample_write_address,
-                        dut.sampling_triggered, dut.sample_write_enable, dut.sampling_half_way,
+  // 0x153B: after the stop the dut's trigger_address (time-out: W - total + pretrigger) and sampling_triggered (no late
+  // trigger) differ from the references by design, and trigger_read_address is frozen at the stop (the references run it on
+  // after a 0x0E or 0x1A write); the three are compared while the write runs (tb_timeout.v has the rest)
+  wire [12:0] ta_cmp_dut = dut.sample_write_enable ? dut.trigger_address : 13'd0;
+  wire [12:0] ta_cmp_ref = dut.sample_write_enable ? refd.trigger_address : 13'd0;
+  wire        tr_cmp_dut = dut.sample_write_enable ? dut.sampling_triggered : 1'b0;
+  wire        tr_cmp_ref = dut.sample_write_enable ? refd.sampling_triggered : 1'b0;
+  wire [12:0] ra_cmp_dut = dut.sample_write_enable ? dut.trigger_read_address : 13'd0;
+  wire [12:0] ra_cmp_ref = dut.sample_write_enable ? refd.trigger_read_address : 13'd0;
+  wire [71:0] st_dut = {ta_cmp_dut, ra_cmp_dut, dut.sample_write_address,
+                        tr_cmp_dut, dut.sample_write_enable, dut.sampling_half_way,
                         dut.sample_system_state, dut.sample_read_offset, dut.sample_write_clock,
                         dut.ext_activity, dut.ext_pending, dut.ext_level, 12'd0};
-  wire [71:0] st_ref = {refd.trigger_address, refd.trigger_read_address, refd.sample_write_address,
-                        refd.sampling_triggered, refd.sample_write_enable, refd.sampling_half_way,
+  wire [71:0] st_ref = {ta_cmp_ref, ra_cmp_ref, refd.sample_write_address,
+                        tr_cmp_ref, refd.sample_write_enable, refd.sampling_half_way,
                         refd.sample_system_state, refd.sample_read_offset, refd.sample_write_clock,
                         refd.ext_activity, refd.ext_pending, refd.ext_level, 12'd0};
   // decimator, memory write port (data, address, enable), trigger compare data
@@ -108,6 +117,11 @@ module tb;
   integer eq_mismatch = 0;
   integer eq_samples = 0;
   reg     eq_on = 0;
+  // 0x153B: a reference ends a triggered auto-mode capture at its time-out, the dut completes the post-trigger words
+  // (README section 11 change 2); from the edge the reference stops on while the dut still writes, that capture is
+  // not compared (state, outputs, bus reads). Counted per phase.
+  reg     cut_ref = 0;
+  integer cut_caps = 0;
 
   task check(input cond, input [8*100-1:0] what);
     begin
@@ -124,29 +138,49 @@ module tb;
     #0.37;
     forever begin
       #1;
-      if (eq_on) begin
+      if (eq_on && !cut_ref && dut.sampling_triggered && dut.sample_write_enable && !refd.sample_write_enable) begin
+        cut_ref  = 1;
+        cut_caps = cut_caps + 1;
+      end
+      // 0x153B: a 0x1A = 0 written while a capture runs (the testbench reconfigures after a capture that never triggered)
+      // stops the reference on the write and the dut two write clocks later (synchroniser): not compared in between
+      if (eq_on && !cut_ref && !(dut.sample_write_enable && !refd.sample_write_enable && !dut.sampling_triggered &&
+                                  dut.time_base_timeout && !dut.trigger_mode)) begin
         eq_samples = eq_samples + 1;
         if ((out_dut & out_cmp_mask) !== (out_ref & out_cmp_mask) || st_dut !== st_ref || pad_dut !== pad_ref || dc_dut !== dc_ref
             || dut.q_active !== 1'b0 || dut.seq_rst_c !== 1'b0) begin
           eq_mismatch = eq_mismatch + 1;
           if (eq_mismatch <= 10)
-            $display("MISMATCH t=%0t out %h/%h st %h/%h dc %h/%h pad %b/%b seq %b%b", $time, out_dut, out_ref,
-                     st_dut, st_ref, dc_dut, dc_ref, pad_dut, pad_ref, dut.q_active, dut.seq_rst_c);
+            $display("MISMATCH t=%0t out %h/%h st %h/%h dc %h/%h pad %b/%b seq %b%b  mode %b/%b mode_s %b tmo %b/%b cnt %0d/%0d set %0d/%0d trig %b/%b en %b/%b swe %b/%b ta %0d/%0d", $time, out_dut, out_ref,
+                     st_dut, st_ref, dc_dut, dc_ref, pad_dut, pad_ref, dut.q_active, dut.seq_rst_c,
+                     dut.trigger_mode, refd.trigger_mode, dut.trigger_mode_s, dut.time_base_timeout, refd.time_base_timeout, dut.time_base_cnt, refd.time_base_cnt,
+                     dut.time_base_set, refd.time_base_set, dut.sampling_triggered, refd.sampling_triggered, dut.sampling_enable, refd.sampling_enable,
+                     dut.sample_write_enable, refd.sample_write_enable, dut.trigger_address, refd.trigger_address);
         end
       end
     end
   end
 
+  // 0x153B: words the dut wrote while the reference had already stopped (a triggered auto-mode capture the reference
+  // cut at its time-out) differ until both write them again; they are skipped by the memory compare and counted
+  reg     mem_dirty [0:8191];
+  integer mdi, mem_dirty_n;
+  initial for (mdi = 0; mdi < 8192; mdi = mdi + 1) mem_dirty[mdi] = 0;
+  always @(posedge dut.sample_write_clock)
+    if (dut.sample_write_enable && dut.swc_adv)
+      mem_dirty[dut.sample_write_address_phys] <= !refd.sample_write_enable;
+
   integer mi, mem_diff;
   task compare_memory;
     begin
-      mem_diff = 0;
+      mem_diff = 0; mem_dirty_n = 0;
       for (mi = 0; mi < 8192; mi = mi + 1)
-        if (dut.samples.mem[mi] !== refd.samples.mem[mi]) mem_diff = mem_diff + 1;
+        if (mem_dirty[mi]) mem_dirty_n = mem_dirty_n + 1;
+        else if (dut.samples.mem[mi] !== refd.samples.mem[mi]) mem_diff = mem_diff + 1;
       eq_samples = eq_samples + 1;
       if (mem_diff != 0) begin
         eq_mismatch = eq_mismatch + 1;
-        if (eq_mismatch <= 10) $display("MISMATCH t=%0t sample memory: %0d words differ", $time, mem_diff);
+        if (eq_mismatch <= 10) $display("MISMATCH t=%0t sample memory: %0d words differ (%0d skipped as the dut's post-time-out words)", $time, mem_diff, mem_dirty_n);
       end
     end
   endtask
@@ -222,7 +256,7 @@ module tb;
       mcu_rws = 0; mcu_dcs = 0;
       mcu_strobe;
       rd_d = bus_dut; rd_r = bus_ref;
-      if (eq_on && bus_cmp_on) begin
+      if (eq_on && bus_cmp_on && !cut_ref) begin
         eq_samples = eq_samples + 1;
         if (rd_d !== rd_r) begin
           eq_mismatch = eq_mismatch + 1;
@@ -268,6 +302,7 @@ module tb;
   reg     seg_log_arm = 0;                              // start the segment write log once 0x01 = 1
   task start_capture;
     begin
+      cut_ref = 0;
       wr1(8'h01, 8'h01);
       if (seg_log_arm) begin
         @(posedge dut.sample_write_clock);              // the reset acts from this edge on
@@ -576,8 +611,15 @@ module tb;
         #((kr + 10) * ((dv / 2) + 1) * 10 + 500);
         start_capture;
         wait_done(100000);
+        // 0x153B: a capture that ended on the auto time-out reports W - total + pretrigger (reference: pretrigger) and
+        // never a trigger after the stop: these two reads are checked against the formula instead of the reference
+        bus_cmp_on = rnd[2];
         rd2(8'h14);
         rd1(8'h18);
+        if (!rnd[2] && !rd_d[0])
+          check(rd16_d[12:0] == ((dut.w_last - tot_r + pre_r) & 13'h1FFF), "auto time-out: 0x14 = W - total + pretrigger");
+        rd2(8'h41);                                       // refills the read register's stale bits identically in both
+        bus_cmp_on = 1;
         rd1(8'h28);
         rd2(8'h29);
         // 0x2A exists only in 0x1536: not compared, must not disturb anything
@@ -736,14 +778,14 @@ module tb;
     // Phase 1: equivalence with 0x1535, sequencer off
     mm0 = eq_mismatch;
     random_phase(p1n);
-    $display("phase 1: %0d equivalence samples, %0d mismatches", eq_samples, eq_mismatch);
+    $display("phase 1: %0d equivalence samples, %0d mismatches, %0d captures the reference cut at its time-out", eq_samples, eq_mismatch, cut_caps);
     check(eq_mismatch == mm0, "modes off: pins, decimator, bus reads, capture regs, memory identical to 0x1535");
 
     wr1(8'h50, 8'h00);
     ext_en = 0;
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h153A, "cmd 0x06 reads 0x153A");
+    check(rd16_d == 16'h153B, "cmd 0x06 reads 0x153B");
     check(rd16_r == 16'h1535, "reference cmd 0x06 reads 0x1535");
     wr1(8'h57, 8'h00);
     rd_status;
@@ -777,7 +819,8 @@ module tb;
     seg_ext_run(2'd1, 1'b0, 32'd0, 16, 5, 6, 28, 1'b0, 16, 800, 0, 1'b0);
     check(st_flags == 8'h91 && st_cnt == 16, "S9: boxcar N 2, 16 segments of 32 words");
 
-    // S10 auto time-out: no trigger, 4 untriggered segments, offset = pre
+    // S10 auto time-out: no trigger, 4 untriggered segments, offset = (W - total + pre) mod 2^m with W = 0x0E + 2
+    // (0x153B; 0x1536..0x153A: pre): (62 - 40 + 12) mod 64 = 34
     set_fir(2'd0, 1'b0, 6'd0, 32'd1, 1'b0);
     adc_mode = 3; flat_val = 8'd40;
     setup_capture(2'd0, 1'b0, 1'b0, 32'd1, 13'd12, 13'd40);
@@ -794,8 +837,8 @@ module tb;
     rd_acc(0, 4); log_table(4); log_slots(4 << 6);
     cnt_ok = 1;
     for (i = 0; i < 4; i = i + 1)
-      if (accw[i][63] !== 1'b1 || accw[i][53] !== 1'b0 || accw[i][52:40] !== 13'd12) cnt_ok = 0;
-    check(cnt_ok, "S10: entries valid, untriggered, offset = pre");
+      if (accw[i][63] !== 1'b1 || accw[i][53] !== 1'b0 || accw[i][52:40] !== 13'd34) cnt_ok = 0;
+    check(cnt_ok, "S10: entries valid, untriggered, offset = (W - total + pre) mod 2^m = 34");
 
     // S11 CH1 level trigger: per segment, the first sample past the level is at offset + delta0,
     // delta0 measured with a normal single capture (K = 0, D = 9)
@@ -944,7 +987,7 @@ module tb;
     mm0 = eq_mismatch;
     compare_memory;
     random_phase(6);
-    $display("phase 4: total %0d equivalence samples, %0d mismatches", eq_samples, eq_mismatch);
+    $display("phase 4: total %0d equivalence samples, %0d mismatches, %0d captures the reference cut at its time-out", eq_samples, eq_mismatch, cut_caps);
     check(eq_mismatch == mm0, "after segment and averaging runs, modes off again identical to 0x1535");
 
     $fclose(logf);

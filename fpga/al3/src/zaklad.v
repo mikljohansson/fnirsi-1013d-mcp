@@ -2,7 +2,7 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
-// fnirsi-1013d-mcp changes (version word 0x153A, see fpga/al3/README.md "Changes"):
+// fnirsi-1013d-mcp changes (version word 0x153B, see fpga/al3/README.md "Changes"):
 //  - 0x1533: external trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
 //    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
 //    Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
@@ -49,6 +49,14 @@
 //    Cores B stay the earlier sample of a word (by T/2, at every rate). The capture adds write clocks to the ADC data's
 //    latency (legacy data 4 words later than 0x1539 at 200 MSa/s, 3 words at divided rates; K >= 1: 40 ns). Outlier
 //    counters per core (read 0x36, threshold 0x64) let the firmware check every capture and train the steps.
+//  - 0x153B: records that end on the auto time-out. A capture in auto mode (0x1A = 0) that stops on the time-out
+//    0x0E, or on the firmware's forced stop (0x1A = 0 written after the ring has wrapped, its auto mode since fw
+//    0.2.41), reports in 0x14 the address W - total + pretrigger (W = the address after the last word written), so
+//    the firmware's record start 0x14 - pretrigger is the newest total words, contiguous. 0x1532..0x153A reported
+//    pretrigger, which spliced the record whenever the stop fell inside ring words 0 .. total - 1 (bench
+//    2026-10-20 12:32). The time-out no longer cuts a triggered record (the post-trigger words complete, as in
+//    normal mode) and no trigger is accepted after the stop (0x18 describes the record). Capture stages, decimator,
+//    readout, sequencer and every other register unchanged (cycle-identical to 0x153A until a time-out stop).
 //-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
@@ -1196,9 +1204,21 @@ freq_generator_dds_pwm u_freq
 // delta address (modulo 8192)
   assign  addr_delta = trigger_read_address - trigger_address;
 
+//0x153B: the trigger mode (0x1A) is synchronised into the write clock domain, so that the firmware's forced stop (0x1A = 0
+//written while the capture runs) reaches the write enable, the read counter and the trigger address on the same edge.
+  reg trigger_mode_s1 = 0, trigger_mode_s = 0;
+
+  always @(posedge sample_write_clock)
+    begin
+      trigger_mode_s1 <= trigger_mode;
+      trigger_mode_s  <= trigger_mode_s1;
+    end
+
+  wire [12:0] post_words = total_samples - pretrigger_samples;                      // words after the trigger (0x153B: shared below)
+
   assign sampling_enable = ~(
-    (sampling_triggered && (addr_delta >= total_samples - pretrigger_samples))//);  // post-trigger complete
-         || (~trigger_mode && time_base_timeout)                                    // auto mode timeout
+    (sampling_triggered && (addr_delta >= post_words))                             // post-trigger complete
+         || (~trigger_mode_s && time_base_timeout && ~sampling_triggered)           // auto mode timeout (0x153B: only while untriggered)
          				 );
 
 // For testing purposes for trigger control
@@ -1209,7 +1229,9 @@ assign sampling_enable = ~(
 );
 */
   //Half way the sampling buffer cycle the check for a trigger can be done
-  assign trigger_check_enable = ((~sampling_triggered & sampling_half_way));
+  //0x153B: no trigger is accepted once the write has stopped, so 0x18 describes the record (a trigger edge that lands
+  //on the stop edge's own evaluation is still taken: the record stays the newest total words, 0x18 then reads 1)
+  assign trigger_check_enable = ((~sampling_triggered & sampling_half_way & sample_write_enable));
 
 //--------------------------------------------------------------------------------------------
 //Sampling triggered detect
@@ -1310,21 +1332,36 @@ assign sampling_enable = ~(
 
       if((cap_rst == 1) || (ssr_d == 1))              //0x1537: also on the first edge after the release
         trigger_read_address <= pretrigger_samples;   //Starting point in memory
-      else if((sampling_half_way == 1)&&(sampling_enable == 1)&&swc_adv)
+      else if((sampling_half_way == 1)&&(sampling_enable == 1)&&swc_adv&&sample_write_enable)   //0x153B: frozen at the stop
         trigger_read_address <= trigger_read_address + 1;
     end
 
 //-------------------------------------------------------------------------------------
 //Capture of the trigger address
 
+//0x153B: a record that ends on the auto time-out (or the firmware's forced stop, 0x1A = 0 after the ring has wrapped)
+//reports trigger_address = W - total + pretrigger, W the address after the last word written: the firmware's record
+//start trigger_address - pretrigger is then the newest total words, contiguous, whatever the ring position of the
+//stop. 0x1532..0x153A reported pretrigger (the record = ring 0 .. total - 1), right only for a stop at W = total + 2.
+//The address is latched on the stop edge itself (sample_write_enable still 1, the last word written on this edge at
+//sample_write_address, so W = sample_write_address + 1) and frozen afterwards, like a triggered record's: a 0x0E or
+//0x1A write before the firmware reads 0x14 no longer moves it (0x1532..0x153A followed trigger_read_address again).
+//The write address counter runs on as before. w_last (the address after the last word written) is for the testbenches.
+
+  reg  [12:0] w_last = 0;
+
+  always @(posedge sample_write_clock)
+    if(swc_adv && sample_write_enable)
+      w_last <= sample_write_address + 13'd1;
+
   always @(posedge sample_write_clock)
     begin
       if(cap_rst == 1)
         trigger_address <= 0;
         
-     else if((sampling_triggered == 0) && swc_adv)
+     else if((sampling_triggered == 0) && swc_adv && sample_write_enable)
        begin
-        if (~trigger_mode && time_base_timeout) trigger_address <= pretrigger_samples;
+        if (~trigger_mode_s && time_base_timeout) trigger_address <= sample_write_address + 13'd1 - post_words;
         else trigger_address <= trigger_read_address;
        end
 
@@ -2168,7 +2205,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h3A;
+                    o_mcu_data <= 8'h3B;
                 endcase
               end
 

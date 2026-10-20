@@ -172,7 +172,7 @@ bus handshake; big-endian multi-byte writes; the meaning of 0x01, 0x0D, 0x0E, 0x
 | PLL | one output, clk0 200 MHz | clk0 200 MHz and clk1 200 MHz at 90 degrees (`clk_ADC`) | Atlan's ADC encode flops run on the 90-degree clock, 1.25 ns after the write clock; stock has no shift. Sampling-edge alignment differs. Known timing violation on clkc[1]. |
 | Pre/post-trigger | Fixed: read counter starts at 800, half-way when write address > 1600 | Programmable: cmd 0x0B pretrigger (default 750), 0x0C total (default 1500); half-way when write address >= pretrigger | New commands that stock firmware never sends. |
 | Trigger source | Samples read back from the RAM output (`o_adc1A_d` / `o_adc2A_d`), previous sample stored inverted | Raw ADC input pins (`i_adc1A_d` / `i_adc2A_d`), strict compare, explicit rise and fall | Trigger point may shift by a sample or two. |
-| Trigger stop | Stops when triggered; auto mode stops on time-out | Stops when triggered and `addr_delta >= total - pretrigger`; auto time-out forces the trigger address to pretrigger | Different amount of post-trigger data. |
+| Trigger stop | Stops when triggered; auto mode stops on time-out | Stops when triggered and `addr_delta >= total - pretrigger`; auto time-out (untriggered only since 0x153B) sets the trigger address to pretrigger (0x1532..0x153A) or to W - total + pretrigger, W the address after the last word (0x153B, section 11) | Different amount of post-trigger data. |
 | Hold-off cmd 0x1B | none | stored, never used | No functional change. |
 | Read address | `sample_read_enable` (cmd 0x0F) muxes RAM read clock and address between the live trigger counter and the MCU pointer | Mux is degenerate: MCU pointer and `i_mcu_clk` always | Stock firmware's 0x0F sequencing is a no-op in Atlan's design; Donwulff notes roll mode does not work there. |
 | Read pointer cmd 0x1F | high byte `[3:0]` into `[11:8]` | `[4:0]` into `[12:8]` | Width follows RAM depth. |
@@ -332,8 +332,8 @@ sample memory are behavioural models (`tb/sim_models.v`).
   ignored when falling is selected. At 200 MSa/s the address lands within the latency window (seen: +1 write
   address). A 3 ns glitch is rejected and a 12 ns pulse triggers. A 100 ns pulse at a 10 us write clock triggers
   with the right address. With source CH1 or CH2, EXT edges do not trigger. The same step through CH1 and through
-  EXT gives the same trigger_address. In auto mode the time-out gives trigger_address = pretrigger. Source 3 acts as
-  EXT.
+  EXT gives the same trigger_address. In auto mode the time-out gives trigger_address = pretrigger (0x153B: W - total +
+  pretrigger, section 11). Source 3 acts as EXT.
 - Phase 3: after the EXT tests, a resync capture and 10 more random captures. Again 0 mismatches.
 - Result: 38 checks, 0 failed, on seeds 12345, 1, 2, 3, 777, 4242, 99991 and 31337.
 - Mutation check: 4 deliberately broken variants all fail the testbench. They removed the source gate on EXT, the
@@ -984,7 +984,7 @@ they are latched there, together with 0x0B, 0x0C and 0x53.
 |---|---|
 | 39..0 | timestamp, 5 ns units: 2 (D + 1) per write clock edge (D = effective divider, 0 with K >= 1), from the first write clock edge after the release of 0x01 to the edge that latched trigger_address; 40 bit = 5,497 s |
 | 52..40 | trigger offset in the slot: trigger_address mod 2^m (convention of 0x14) |
-| 53 | 1 = triggered, 0 = the segment ended on the auto time-out (offset = pre mod 2^m) |
+| 53 | 1 = triggered, 0 = the segment ended on the auto time-out (offset = pre mod 2^m up to 0x153A; 0x153B: (W - total + pre) mod 2^m, W the slot write address after the last word, so offset - pre .. + total is the newest total words) |
 | 62..54 | 0 |
 | 63 | valid |
 
@@ -1792,6 +1792,157 @@ optional (the power-on stages are the computed ones).
 6. The legacy EXT offset at 200 MSa/s (calibration pin loopback): +14..15 samples; the 16-bit EXT lag +40 ns against
    the 0x1539 table.
 7. Warm the FPGA (hair dryer, a few seconds) and repeat 2: the margins must hold; the counters flag it if not.
+
+### 11. Records that end on the auto time-out; version 0x153B (fpga-gen11, 2026-10-20)
+
+**Bench** (`docs/hardware-status.md` 2026-10-20 12:32 to 12:42, fw 0.2.88 / 0.2.89 on 0x153A; the 96 records in
+`backups/bode/cells_1235.npz`, taken by `firmware/tools/bode_cells.py`): a host capture armed in auto mode with the
+trigger level off the signal (level 255, pretrigger 0, CIC3+FIR, 2320 .. 3408 words) came back spliced from two captures
+in 15 of 32 cases: the phase of the RC's sine jumps at one sample (806, 1774, 1464, 2012, 1889, 1980 of 2320 at
+21.6 kHz; 816, 1889, 3296, 113 of 3408 at 14.7 kHz; 227, 1236, 2161, 2487, 3122 of 3162 at 31.6 kHz; none of 8 at
+10 kHz), DFT leakage -3 .. -36 dB instead of below -60 dB, |H| off by up to 0.4 dB. Triggered records (CH1 rising at
+code 128) were clean 64 of 64. The device's Frequency response engine, which arms FPGA auto with 0x0E = total and (since
+fw 0.2.89) a CH1 trigger, still retook 5 .. 15 records per 25-point sweep as incoherent.
+
+**Evidence.** A two-segment least-squares fit (odd harmonics 1 .. 9 of the known frequency, every split point) locates
+each jump and gives the phase step across it: -82.8, -89.4 and +98.6 degrees at the three cells, equal within 0.1 ..
+0.3 degrees to 8192 words x f / fs modulo one period (82.8, 89.4, -98.6). The words after the jump are exactly one ring
+older than the words before it: the record is ring words 0 .. total - 1 read across the write pointer's stop
+position W, with 0 .. W - 1 from the last pass and W .. total - 1 from the pass before. The jump positions are W.
+
+**Cause (0x1532 .. 0x153A).** Atlan4's capture logic ends an auto-mode capture on the time-out (`time_base_cnt >
+time_base_set`, both counting words from the sampling reset) and latches `trigger_address <= pretrigger_samples`; the
+firmware's record start `0x14 - pretrigger` is then ring word 0. That is right only if the stop lands at W = 0x0E + 2
+with total - 2 <= 0x0E <= 8190, i.e. in Atlan's own firmware, which writes 0x0E = total and lets the FPGA time out.
+Our firmware's auto mode (fw 0.2.41, `pc_hal_scope.c` "Firmware auto mode", because 0x0E counts samples and 0x18 keeps
+watching after the stop) arms **normal** and writes 0x1A = 0 at its deadline, max(100 ms, two records): the same
+time-out branch then fires after the ring has wrapped 40 .. 300 times and W is wherever the force landed. The record is
+spliced whenever W falls inside 0 .. total - 1: probability total / 8192 (28 .. 42 % for the sweep's records; the bench's
+15 of 32 with the force timing quantised by the 1 ms poll). The UI's own auto mode (`pc_ui_auto_service`) and every host
+ARM with mode 0 take this path, so the Scope view's untriggered traces at fast time bases carry the same splice (18 %
+of them at 3000 legacy samples, 37 % at 3000 16-bit samples). Two more consequences of the convention: in FPGA auto mode
+(the Bode engine, `bh_arm`: 0x0E = total) a trigger at word t > 2 is cut by the time-out at W = total + 2 before its
+post-trigger words are complete, and the firmware reads t .. t + total - 1 across the stop (the engine's incoherent
+records on 0.2.89, now that every record triggers); and an edge after the stop sets 0x18 (the 0.2.40 "flat records
+flagged triggered"). The Verilog does what Atlan designed; the design is fragile because it encodes "the record is at
+ring 0" instead of "the record ends at the write pointer".
+
+**Change (0x153B).** Capture logic only; capture stages, decimator, FIR, readout, sequencer and the MCU decoder are
+untouched (cycle-identical to 0x153A until a time-out stop; tb equivalence phases 0 mismatches).
+1. On a time-out stop (auto mode, untriggered) `trigger_address <= sample_write_address + 1 - total_samples +
+   pretrigger_samples`, latched on the stop edge (the last word is written on it at `sample_write_address`, so W =
+   `sample_write_address` + 1) and frozen with the write enable. The firmware's record start `0x14 - pretrigger` is then
+   W - total: the newest total words, contiguous, for a stop anywhere in the ring. With 0x0E = total the record is
+   words 2 .. total + 1 of the capture (0x153A: 0 .. total - 1). Requirement: at least total words written since the
+   reset (0x0E >= total - 2, or a forced stop later than that), else the record reaches before the reset.
+2. The time-out ends only an untriggered capture (`~sampling_triggered` in the time-out term): a trigger before the
+   time-out completes its post-trigger words as in normal mode. 0x0E = total with a trigger therefore gives the
+   triggered record, not a cut one.
+3. No trigger is accepted after the stop (`trigger_check_enable` gated by `sample_write_enable`): 0x18 describes the
+   record. A trigger that lands on the stop edge's own clk_200MHz evaluation is still taken (one write clock window): the
+   record stays the newest total words and 0x18 reads 1 with the time-out address.
+4. `trigger_mode` (0x1A) is synchronised into the write clock domain (two flops), so the forced stop reaches the write
+   enable, the read counter and the trigger address on the same edge; `trigger_read_address` and the trigger address
+   freeze with the write enable, so a 0x0E or 0x1A write before the firmware reads 0x14 no longer moves them
+   (0x1532..0x153A: `trigger_address` followed `trigger_read_address` again once the time-out compare went false).
+5. The sequencer takes the new address through its `sn_ta` snapshot unchanged: an untriggered segment's table offset is
+   (W - total + pre) mod 2^m (row 53 of the table in section 6; 0x1536..0x153A: pre mod 2^m), and the averaging post-pass
+   start `sn_ta - q_pre` is the newest total words of the slot. Version word 0x153B.
+
+**Firmware (prescribed, not implemented here; firmware/AGENTS.md gets the handoff).**
+- On 0x153B+ the forced stop is safe: `pc_hal_force` / `pc_ui_auto_service` / the host poll can keep writing 0x1A = 0 at
+  the deadline; the record read from `0x14 - pre_words` is contiguous. 0x18 is now the record's truth, so "triggered"
+  no longer needs the `host_forced` override, and the firmware may go back to the FPGA time-out (0x0E = the deadline in
+  words, 32 bit: 2^32 words is 43 s at 100 MHz) instead of the force. The Bode engine's records (0x0E = total, CH1
+  trigger) are complete by change 2 without a firmware change.
+- On 0x1532..0x153A (what the unit runs until 0x153B is flashed) the forced stop cannot be made exact from the MCU (W
+  is not readable). Mitigation: arm FPGA auto (0x1A = 0) with 0x0E = 8192 k + total - 2 for the smallest k >= 1 that
+  reaches the deadline, so the stop lands at ring word total and the record 0 .. total - 1 is contiguous; triggered :=
+  0x18 and 0x14 != pretrigger (a late edge after the stop leaves 0x14 at pretrigger; a real trigger at exactly that ring
+  word, 1 in 8192, is then reported untriggered with a correct record); a trigger inside the last total - pre words
+  before the time-out is still cut (rare: it needs an edge that did not come in the k - 1 rings before). The deadline is
+  quantised to 8192 words (41 us at 200 MSa/s, 8 ms at 1 MSa/s, 8 s at 1 kSa/s). The engine should arm normal
+  (`pc_hal_arm(..., normal 1)`), since its CH1 trigger at 128 always fires on the generator's square wave, and keep its
+  deadline as the safety net.
+- Host test for `test_fpga_bus` (fpga_model): the model's time-out stop must latch 0x14 per bitstream version
+  (pretrigger up to 0x153A, W - total + pre from 0x153B) and let the ring wrap; a forced stop after 1.3 rings with total
+  2048 and pretrigger 0 / 200 must read a contiguous record (the model's words carry their write index) on 0x153B and a
+  spliced one on 0x153A; FPGA auto with 0x0E = total and a trigger at word total / 2 must read the complete post-trigger
+  region on 0x153B (cut on 0x153A).
+
+**Testbench** (`tb/tb_timeout.v`, run.sh step 13, `ONLY=timeout`; `TIMEOUT_TOTAL` 2048, `TIMEOUT_RUNS` 4): a mirror of
+the sample memory's write port (address, data, write order) and the firmware's exact byte sequences (arm as
+`fpga_arm_reset`, the force, `pc_hal_acq_finish`, `fpga_read_start` with its dummy strobe, 16-bit and legacy lanes).
+Every record is checked word by word: equal to the words written, contiguous in write order, the newest total words
+(triggered: the post-trigger region complete, the stop 0 .. 3 words after it), 0x18 true for the record.
+- F1: firmware auto mode, CIC3+FIR at divider 31 (N 32), pretrigger 0 and 200, forces landing at ring words total / 4,
+  total / 2 + 7, 3 total / 4 and total + 500 in the second pass. F2: legacy at divider 9, pretrigger 100 words.
+- A1: FPGA auto, 0x0E = total, no trigger. A2: FPGA auto, 0x0E = total, a CH1 step across the level at word total / 2:
+  record complete, 0x18 = 1, the crossing at the pretrigger. A3: the step 500 words after the stop: 0x18 = 0. A4: FPGA
+  auto with a 1.3-ring time-out whose stop lands at ring word 1000 + pretrigger.
+- Results (seed 12345, 2048-word records, 330 s): **75 checks, 0 errors, PASS**: every record equals the mirror, is
+  contiguous and ends at the stop (forces landing at ring words 517, 1553, 3093, 5646 of the F1 pre-0 runs: start = W -
+  2048 each time; A1 start 2 with 0x0E = total; A2 triggered at 1029 with the crossing at record word 201, 2880 words
+  written, the record complete; A3 0x18 = 0; A4 start = W - 2048 for the 1.3-ring time-out). The same testbench against
+  the 0x153A source (`DUT=` the a2b6929 file): 30 errors: splices at record words 511, 1030, 1535 (F1, both pretriggers)
+  and 255, 518, 767 (F2), the fourth force of each case (W outside the record) contiguous but 498 words short of the stop;
+  A1 two words short; A2 cut at word 1221 (2051 words written, the record needs 3077); A3 0x18 = 1; A4 spliced at 1000 /
+  1200: the bench fault, the engine's cut records and the late trigger flag, reproduced.
+- Other steps: tb_ext_trigger, tb_decim, tb_fir and tb_seg compare `trigger_address`, `trigger_read_address` and
+  `sampling_triggered` with their references only while the write runs (after the stop they differ by design) and check
+  the random auto-mode captures' 0x14 against W - total + pretrigger; their directed time-out checks and tb_seg S10 /
+  `seg_model.py` carry the new formula; `tb/contract_0x153B.txt` differs from the 0x153A transcript in the version byte
+  only. Steps run on the final source (seed 12345): ext 39 checks / 0 mismatches in both equivalence phases, decim 98 +
+  cic_model, trigpos 882, firstrec 38, contract 12 (= contract_0x153B.txt) all PASS; fir, seg and the full 13-step run:
+  fir and seg (the two long steps, about 25 min each) failed their random equivalence phases
+  twice on testbench artefacts of the changed stop semantics, each fixed in the tb (acae8b8): the reference cuts a triggered
+  auto capture at its time-out (change 2; now skipped from the reference's stop on), the dut's extra post-time-out words
+  stay in the memory until rewritten (skipped by the memory compare), the read register's stale bits after the uncompared
+  0x14 / 0x18 reads (a 0x41 refill), and a 0x1A = 0 written by the tb while a never-triggered normal capture still runs
+  (the reference stops on the write, the dut two write clocks later: masked while the forced stop is in flight). **Verdict
+  with all four masks (seed 12345): fir 161 checks / 2 failed (phase 1 random 2458 mismatch samples, phase 4 3011),
+  seg 53 / 2 failed (3223 / 6635); cic_model and seg_model PASS.** Two residual signatures, each a window of about 10 ns
+  with both instances stopped (`swe 0/0`), from the diagnostic MISMATCH lines (`~/g11/logs/fir.log`, `seg.log` in WSL):
+  fir t = 9536073000 `tmo 1/1 cnt 361 set 346 trig 0/0 ta 184/142` (an untriggered time-out stop; the trigger
+  address differs by design and is masked, so the differing field is in the `out` / `dc` / bus part of the line, which the
+  summary strips: read the full line); seg t = 27429130000 `tmo 0/0 cnt 343 set 594 trig 0/1 en 1/1 swe 0/0 ta
+  145/265` (the reference took a trigger after its stop, the dut did not, change 3; the `st` fields show the reference
+  in reset with half-way set while the dut is released: a one-write-clock skew at the next reset release, to be
+  understood before masking). Not yet green: the next agent reads the two full lines, decides whether each is a tb
+  artefact of changes 1-4 (mask it the same way) or a dut fault, and reruns. Finish with
+  `wsl -d Ubuntu -- bash <repo>/fpga/al3/tb/run.sh 12345` (`REF_SRC_DIR` as in "Commands"; about 1 h; `ONLY=fir` /
+  `ONLY=seg` for the two steps alone) and record the result here; a residual one-write-clock window around a reset
+  release (seg phase 4, 10 ns, state / half-way differing between dut and reference) was seen once before the last mask
+  and is to be read from the diagnostic MISMATCH line if it returns.
+
+**Build** (TD 4.6.8 SP1, `build.sh`, b2 of fpga-gen11; source commit c173ed5): 4990 LUT (57.8 %), all block RAM as
+0x153A. `clk_200MHz` 0 errors, min period 4.583 ns (the first build of the same source rolled 5.101 ns with 2 errors on
+the sequencer's 33-bit hold-off decrement, the placement lottery of the 0x153A notes; a functionally neutral rewrite
+sharing `total - pretrigger` between the stop compare and the time-out address re-rolled it); `sample_write_clock` 0 errors
+(9.231 ns); `i_mcu_clk` 0 errors (20.236 ns); `clkc[1]` 0 errors (2.397 ns); `clkc[0]` 58 errors (the SDC artefact).
+Capture margins (`tb/capture_report.sh`, TT): CH1 A 1.73 ns at stage 4 (stage 3 1.54), CH1 B 1.10 at stage 4 (stage 3
+2.17), CH2 A 1.89 at stage 3, CH2 B 1.94 at stage 4; the encode pads moved by up to 0.3 ns against the 0x153A build, so
+the wizard's training must be repeated after flashing (the unit's 0x153A value 0x08E3 may not be the best for this
+build). `dist/al3-0x153B.bin` sha256 `fdc3c21b57341b0774e8a5e58df04e38d1d223fb7c354b6ed49f5892f711fc3d`, flash image
+(`build/FPGA_padded.bin`, 1 MiB) `1391978c33379271789a9405f7b0fb9395a85e223ecc69a0430b9f2859a23b88`. **Not flashed**;
+the coordinator pins both in `backups/` first.
+
+**Bench checks** (owner with the coordinator; FEL load of a firmware that detects 0x153B, flash per "Flashing this unit"
+after pinning the images in `backups/`):
+1. Identity: `#VER` fpga=0x153B; the Scope view runs, triggers and averages as on 0x153A (the capture stages are the
+   same; 0x36 self-check 0 on a quiet trace).
+2. The bench fault: `python firmware/tools/bode_cells.py COM10` on the RC as on 2026-10-20 12:32, then the two-segment
+   fit (fpga-gen11's `splice.py` pattern, or the host's leak figure): every "auto" record clean (leak below -60 dB,
+   |H| within 0.01 dB of the "host" variant); on 0x153A 15 of 32 were spliced.
+3. Scope view, auto mode, trigger marker above the signal, generator 1 kHz on CH1 at 1 MSa/s: 50 untriggered traces
+   without a step in the waveform (on 0x153A about every fifth trace shows the two-pass seam at a random position; a
+   host `s.capture()` with `mode=0, level=255` and `splice.py` on the record make it exact).
+4. Frequency response, ten RUN sweeps on the RC as fw-eng2's walk-through: retried 0 .. 1 per sweep (0.2.89 on 0x153A:
+   5 .. 15), 21.6 kHz -6.74 dB in 10 of 10.
+5. Auto mode with a slow signal (0.5 Hz square from the generator, 10 MSa/s): the trace is untriggered until an edge
+   arrives, then triggered at the marker; no "triggered" flag on a flat record (`s.capture()` flags).
+6. Segments in auto mode with a sparse trigger (section 6 step 7 with the generator off): the untriggered segments
+   read as flat records without a seam.
 
 ## Device facts from the datasheet
 

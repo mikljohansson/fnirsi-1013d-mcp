@@ -78,11 +78,20 @@ module tb;
   wire [14:0] out_cmp_mask = 15'h07FF;
 
   // Capture state that must match while the trigger source is CH1/CH2
-  wire [63:0] st_dut = {dut.trigger_address, dut.trigger_read_address, dut.sample_write_address,
-                        dut.sampling_triggered, dut.sample_write_enable, dut.sampling_half_way,
+  // 0x153B: after the stop the dut's trigger_address (time-out: W - total + pretrigger) and sampling_triggered (no late
+  // trigger) differ from the references by design, and trigger_read_address is frozen at the stop (the references run it on
+  // after a 0x0E or 0x1A write); the three are compared while the write runs (tb_timeout.v has the rest)
+  wire [12:0] ta_cmp_dut = dut.sample_write_enable ? dut.trigger_address : 13'd0;
+  wire [12:0] ta_cmp_ref = dut.sample_write_enable ? refd.trigger_address : 13'd0;
+  wire        tr_cmp_dut = dut.sample_write_enable ? dut.sampling_triggered : 1'b0;
+  wire        tr_cmp_ref = dut.sample_write_enable ? refd.sampling_triggered : 1'b0;
+  wire [12:0] ra_cmp_dut = dut.sample_write_enable ? dut.trigger_read_address : 13'd0;
+  wire [12:0] ra_cmp_ref = dut.sample_write_enable ? refd.trigger_read_address : 13'd0;
+  wire [63:0] st_dut = {ta_cmp_dut, ra_cmp_dut, dut.sample_write_address,
+                        tr_cmp_dut, dut.sample_write_enable, dut.sampling_half_way,
                         dut.sample_system_state, dut.sample_read_offset, 8'd0};
-  wire [63:0] st_ref = {refd.trigger_address, refd.trigger_read_address, refd.sample_write_address,
-                        refd.sampling_triggered, refd.sample_write_enable, refd.sampling_half_way,
+  wire [63:0] st_ref = {ta_cmp_ref, ra_cmp_ref, refd.sample_write_address,
+                        tr_cmp_ref, refd.sample_write_enable, refd.sampling_half_way,
                         refd.sample_system_state, refd.sample_read_offset, 8'd0};
 
   //---------------------------------------------------------------------------------
@@ -93,6 +102,11 @@ module tb;
   integer eq_mismatch = 0;
   integer eq_samples = 0;
   reg     eq_on = 0;
+  // 0x153B: a reference ends a triggered auto-mode capture at its time-out, the dut completes the post-trigger words
+  // (README section 11 change 2); from the edge the reference stops on while the dut still writes, that capture is
+  // not compared (state, outputs, bus reads). Counted per phase.
+  reg     cut_ref = 0;
+  integer cut_caps = 0;
 
   task check(input cond, input [8*96-1:0] what);
     begin
@@ -111,12 +125,21 @@ module tb;
     #0.37;
     forever begin
       #1;
-      if (eq_on) begin
+      if (eq_on && !cut_ref && dut.sampling_triggered && dut.sample_write_enable && !refd.sample_write_enable) begin
+        cut_ref  = 1;
+        cut_caps = cut_caps + 1;
+      end
+      // 0x153B: a 0x1A = 0 written while a capture runs (the testbench reconfigures after a capture that never triggered)
+      // stops the reference on the write and the dut two write clocks later (synchroniser): not compared in between
+      if (eq_on && !cut_ref && !(dut.sample_write_enable && !refd.sample_write_enable && !dut.sampling_triggered &&
+                                  dut.time_base_timeout && !dut.trigger_mode)) begin
         eq_samples = eq_samples + 1;
         if ((out_dut & out_cmp_mask) !== (out_ref & out_cmp_mask) || st_dut !== st_ref || (!ext_en && pad_dut !== pad_ref)) begin
           eq_mismatch = eq_mismatch + 1;
           if (eq_mismatch <= 10)
-            $display("MISMATCH t=%0t out %h/%h st %h/%h pad %b/%b", $time, out_dut, out_ref, st_dut, st_ref, pad_dut, pad_ref);
+            $display("MISMATCH t=%0t out %h/%h st %h/%h pad %b/%b  trig %b/%b mode %b tmo %b/%b en %b/%b ta %0d/%0d tra %0d/%0d", $time, out_dut, out_ref, st_dut, st_ref, pad_dut, pad_ref,
+                     dut.sampling_triggered, refd.sampling_triggered, dut.trigger_mode, dut.time_base_timeout, refd.time_base_timeout,
+                     dut.sampling_enable, refd.sampling_enable, dut.trigger_address, refd.trigger_address, dut.trigger_read_address, refd.trigger_read_address);
         end
       end
     end
@@ -182,7 +205,7 @@ module tb;
       mcu_rws = 0; mcu_dcs = 0;
       mcu_strobe;
       rd_d = bus_dut; rd_r = bus_ref;
-      if (eq_on && bus_cmp_on) begin
+      if (eq_on && bus_cmp_on && !cut_ref) begin
         eq_samples = eq_samples + 1;
         if (rd_d !== rd_r) begin
           eq_mismatch = eq_mismatch + 1;
@@ -229,6 +252,7 @@ module tb;
   integer polls;
   task start_capture;
     begin
+      cut_ref = 0;
       wr1(8'h01, 8'h01);
       polls = 0;
       rd1(8'h05);
@@ -334,8 +358,15 @@ module tb;
           ext_en = 0;
         start_capture;
         wait_done(4000);
+        // 0x153B: a capture that ended on the auto time-out reports W - total + pretrigger (reference: pretrigger) and
+        // never a trigger after the stop: these two reads are checked against the formula instead of the reference
+        bus_cmp_on = rnd[2];
         rd2(8'h14);
         rd1(8'h18);
+        if (!rnd[2] && !rd_d[0])
+          check(rd16_d[12:0] == ((dut.w_last - tot_r + pre_r) & 13'h1FFF), "auto time-out: 0x14 = W - total + pretrigger");
+        rd2(8'h41);                                       // refills the read register's stale bits identically in both
+        bus_cmp_on = 1;
         rd2(8'h41);
         wr2(8'h1F, {3'd0, rd16_d[12:0]});
         nread = 4 + (rnd[31:30] * 4);
@@ -374,14 +405,14 @@ module tb;
     // Phase 1: equivalence with Atlan4's 0x1532 design for trigger sources 0/1
     mm0 = eq_mismatch;
     random_phase(60);
-    $display("phase 1: %0d equivalence samples, %0d mismatches", eq_samples, eq_mismatch);
+    $display("phase 1: %0d equivalence samples, %0d mismatches, %0d captures the reference cut at its time-out", eq_samples, eq_mismatch, cut_caps);
     check(eq_mismatch == mm0, "CH1/CH2 captures, outputs and bus reads identical to Atlan4 0x1532");
 
     //-------------------------------------------------------------------------------
     // Version word and status read
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h153A, "cmd 0x06 reads 0x153A");
+    check(rd16_d == 16'h153B, "cmd 0x06 reads 0x153B");
     check(rd16_r == 16'h1532, "reference cmd 0x06 reads 0x1532");
 
     //-------------------------------------------------------------------------------
@@ -575,14 +606,17 @@ module tb;
     step_mode = 0;
 
     //-------------------------------------------------------------------------------
-    // Auto mode with EXT and no edge: time-out still forces trigger_address = pretrigger
+    // Auto mode with EXT and no edge: the time-out stops the write at W = 0x0E + 2 words and reports
+    // trigger_address = W - total + pretrigger (0x153B; 0x1532..0x153A: pretrigger), so the record is the newest total words
     setup_capture(2'd2, 1'b0, 1'b0, 32'd9, 13'd100, 13'd200);
     wr4(8'h0E, 32'd1000);
     ext_val = 0;
     start_capture;
     wait_done(20000);
     rd2(8'h14);
-    check(done && rd16_d[12:0] == 13'd100, "auto mode time-out with EXT source: trigger_address = pretrigger");
+    $display("auto time-out EXT: trigger_address %0d, W %0d", rd16_d[12:0], dut.w_last);
+    check(done && dut.w_last == 13'd1002, "auto mode time-out with EXT source: the write stops at 0x0E + 2 words");
+    check(done && rd16_d[12:0] == dut.w_last - 13'd200 + 13'd100, "auto mode time-out with EXT source: trigger_address = W - total + pretrigger");
 
     //-------------------------------------------------------------------------------
     // Source 3 (reserved) acts as EXT
@@ -615,7 +649,7 @@ module tb;
     rd2(8'h41);
     mm0 = eq_mismatch;
     random_phase(10);
-    $display("phase 3: total %0d equivalence samples, %0d mismatches", eq_samples, eq_mismatch);
+    $display("phase 3: total %0d equivalence samples, %0d mismatches, %0d captures the reference cut at its time-out", eq_samples, eq_mismatch, cut_caps);
     check(eq_mismatch == mm0, "after EXT use, CH1/CH2 again identical to Atlan4 0x1532");
 
     $display("RESULT: %0d checks, %0d failed -> %0s", checks, errors, errors ? "FAIL" : "PASS");

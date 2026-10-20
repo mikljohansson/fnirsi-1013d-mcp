@@ -21,6 +21,20 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   flags it ch2_small as today (the user switches to Auto by hand). Also: the switch count in the header counts planned and
   unplanned switches separately so the bench can see "0 unplanned, 2 planned". Next engine batch (fw-eng5).
 
+- [~] **Auto-mode records on 0x1532..0x153A are spliced by the forced stop** (fw-arm dispatched 15:36; fpga-gen11, 10-20; fpga/al3/README.md section 11
+  "Firmware"): `pc_hal_force` / `pc_ui_auto_service` / the host poll write 0x1A = 0 after the ring has wrapped and the FPGA
+  reports 0x14 = pretrigger, so the record read is ring 0 .. total - 1 across the stop (15 of 32 untriggered host captures on
+  the bench, about every fifth Scope-view auto trace at fast time bases). Until 0x153B is flashed: arm FPGA auto (0x1A = 0) with
+  0x0E = 8192 k + total - 2 for the smallest k >= 1 reaching the deadline (the stop lands at ring word total), triggered :=
+  0x18 && 0x14 != pretrigger; on 0x153B+ the force is safe and 0x18 is the record's (the firmware may return to the FPGA
+  time-out with 0x0E = the deadline in words). Host test for test_fpga_bus: fpga_model's time-out stop per bitstream version
+  (pretrigger up to 0x153A, W - total + pretrigger from 0x153B), a forced stop after 1.3 rings reads contiguous / spliced
+  accordingly, FPGA auto with 0x0E = total and a trigger at total / 2 is complete on 0x153B and cut on 0x153A.
+- [~] **Frequency response engine arms normal** (fw-arm dispatched 15:36; fpga-gen11, 10-20): `bh_arm` arms FPGA auto with 0x0E = total, so on
+  0x1532..0x153A a record that triggers at word t > 2 (every record since 0.2.89's CH1 trigger) is cut by the time-out at
+  total + 2 and read across the stop (the 5 .. 15 "retried" per sweep on 0.2.89). Arm normal (`pc_hal_arm(..., normal 1)`),
+  keep the engine's deadline as the safety net; on 0x153B the time-out no longer cuts a triggered record either way.
+
 - [x] **Device sweep flags stricter than the host's** (fw 0.2.87, bench pending) (bench 10-20 11:14 / 12:00): on the same RC the device flags about half the
   points incoherent / unsettled / ch2_small where the host flags none; compare bode_dsp.c's incoherence, settle and small-signal
   tests with bode.py's on identical records (feed the host's captured records through the C DFT in a host test) and align the
@@ -458,6 +472,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## FPGA
 
+- [ ] **Pin and flash 0x153B** (fpga-gen11, 10-20): `fpga/al3/dist/al3-0x153B.bin` and its padded image into `backups/`, flash per
+  fpga/al3/AGENTS.md "Flashing this unit", then README section 11's bench checks 1-6 (bode_cells.py "auto" variant clean 32 of
+  32; Scope view auto-mode traces without the two-pass seam; Frequency response retried 0-1 per sweep). Needs a firmware that
+  detects 0x153B (any 0.2.8x does: the 0x153A..0x153F range) and, for the full benefit, the firmware items below.
 - [x] **Long free-running testbench** for the decimation filter: fpga-gen4's 0x1535 work (tb/run.sh, seeds 12345/1/77, 13 FIR
   mutations caught; fpga/al3/README.md section 5, commit 292a596).
 - [ ] **Open input / EXT bench tests 1-4** from fpga/al3/README.md "Changes" section 2 (needs an external 3.3 V source
