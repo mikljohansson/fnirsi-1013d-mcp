@@ -288,6 +288,11 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 - ui-rows-review (Opus, dispatched 23:39, done before 23:48, read-only): adversarial review of the Type / Sample row mockups and note against
   docs/ui-guidelines.md and the owner's taste; answers to the note's six open questions so the coordinator can decide
   tonight and the owner veto in the morning.
+- ui-rows round 2 (done 23:55, merged 23:56 as e433ed2): all review items in the boards and the note (ACQ 478 px with five
+  chips and the real pass-time y, Pulse polarity row, pixel glyphs, viewer and Frequency response boards, "Bars", Idle
+  "Off", keypad for N, snap notices queued time/div first, marker 0xA000). Leftovers accepted by the coordinator: the
+  "not applied" note on four lines in the 66 px column; in Frequency response the parameter rows are not drawn (the sweep
+  does not use them) so the menu fits. The mockups are the acceptance reference for the C5/C6 UI items; owner veto pending.
 - Coordinator decisions on the ui-rows review (23:4x, as the owner's proxy, owner veto pending): ACQ menu widened to 478 px
   with Sample as the fourth box (the mockup hid a collision with the five memory chips and drew the pass time at the
   wrong y); no silent clamp: Width / Idle snap to the rate's range with the snap notice, +/- stop at the ends, Width
