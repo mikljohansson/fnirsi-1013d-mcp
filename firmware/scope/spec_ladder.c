@@ -49,13 +49,13 @@ static int spl_covers(uint32 fs, uint64 stop)
   return (uint64)fs * 500 >= stop;
 }
 
-//N / fs <= SPL_TMAX_MS
-static int spl_time_ok(uint32 fs, int log2n)
+//cap / fs <= SPL_TMAX_MS
+static int spl_time_ok(uint32 fs, uint32 cap)
 {
-  return ((uint64)1000 << log2n) <= (uint64)fs * SPL_TMAX_MS;
+  return (uint64)cap * 1000 <= (uint64)fs * SPL_TMAX_MS;
 }
 
-int32 spl_rate(uint64 stop, int log2n, const uint32 *rates, int32 n)
+int32 spl_rate(uint64 stop, uint32 cap, const uint32 *rates, int32 n)
 {
   int32 i;
 
@@ -63,13 +63,13 @@ int32 spl_rate(uint64 stop, int log2n, const uint32 *rates, int32 n)
     return spl_covers(rates[0], stop) ? 0 : -1;
 
   for(i = n - 1; i >= 0; i--)
-    if(spl_covers(rates[i], stop) && spl_time_ok(rates[i], log2n))
+    if(spl_covers(rates[i], stop) && spl_time_ok(rates[i], cap))
       return i;
 
   return -1;
 }
 
-int spl_ok(const spl_cell *c, int log2n, const uint32 *rates, int32 n)
+int spl_ok(const spl_cell *c, int log2n, uint32 cap, const uint32 *rates, int32 n)
 {
   uint64 stop = spl_stop(c);
   int32  i;
@@ -80,7 +80,7 @@ int spl_ok(const spl_cell *c, int log2n, const uint32 *rates, int32 n)
   //The slowest rate that covers the stop: the rule's rate unless the capture time limit holds it faster
   for(i = n - 1; (i > 0) && !spl_covers(rates[i], stop); i--) {}
 
-  if(!spl_covers(rates[i], stop) || ((n > 1) && !spl_time_ok(rates[i], log2n)))
+  if(!spl_covers(rates[i], stop) || ((n > 1) && !spl_time_ok(rates[i], cap)))
     return 0;
 
   //span / (fs / N) >= SPL_MIN_BINS
@@ -99,7 +99,7 @@ void spl_fit(spl_cell *c, uint64 axis)
     c->centre = axis - s / 2;
 }
 
-int spl_zoom(spl_cell *c, int dir, int log2n, const uint32 *rates, int32 n)
+int spl_zoom(spl_cell *c, int dir, int log2n, uint32 cap, const uint32 *rates, int32 n)
 {
   uint64   axis = spl_axis_mhz(rates, n);
   spl_cell t = *c;
@@ -111,7 +111,7 @@ int spl_zoom(spl_cell *c, int dir, int log2n, const uint32 *rates, int32 n)
 
     t.span--;
     spl_fit(&t, axis);
-    if(!spl_ok(&t, log2n, rates, n))
+    if(!spl_ok(&t, log2n, cap, rates, n))
       return 0;
   }
   else
@@ -164,7 +164,7 @@ void spl_from_axis(spl_cell *c, uint64 axis)
   spl_fit(c, axis);
 }
 
-void spl_auto(spl_cell *c, uint64 f0, uint64 fhi, int log2n, const uint32 *rates, int32 n)
+void spl_auto(spl_cell *c, uint64 f0, uint64 fhi, int log2n, uint32 cap, const uint32 *rates, int32 n)
 {
   uint64   axis = spl_axis_mhz(rates, n), s = fhi + fhi / 4;
   spl_cell t;
@@ -184,7 +184,7 @@ void spl_auto(spl_cell *c, uint64 f0, uint64 fhi, int log2n, const uint32 *rates
   //Resolve the fundamental: RBW = 1.5 fs / N <= f0 / 4, i.e. 6000 fs <= f0 N (fs in Sa/s, f0 in mHz)
   while(f0 && c->span)
   {
-    int32 r = spl_rate(spl_stop(c), log2n, rates, n);
+    int32 r = spl_rate(spl_stop(c), cap, rates, n);
 
     if((r < 0) || ((uint64)6000 * rates[r] <= f0 * ((uint64)1 << log2n)))
       break;
@@ -192,13 +192,13 @@ void spl_auto(spl_cell *c, uint64 f0, uint64 fhi, int log2n, const uint32 *rates
     t.span = c->span - 1;
     t.centre = spl_span_mhz(t.span) / 2;
     spl_fit(&t, axis);
-    if(!spl_ok(&t, log2n, rates, n))
+    if(!spl_ok(&t, log2n, cap, rates, n))
       break;
     *c = t;
   }
 
   //Never past the zoom-in end
-  while(!spl_ok(c, log2n, rates, n) && (c->span < SPL_FULL))
+  while(!spl_ok(c, log2n, cap, rates, n) && (c->span < SPL_FULL))
   {
     c->span++;
     c->centre = spl_span_mhz(c->span) / 2;

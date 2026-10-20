@@ -198,6 +198,9 @@ typedef struct
   uint8  cell_set;      //cell holds a choice (else the next entry takes the current rate's whole axis)
   uint8  cell_rate;     //fw 0.2.81: the rate when the cell was last set (a pan leaves a cell the ladder would give
                         //another rate; entry keeps it while the rate is this one)
+  uint16 cell_cap;      //fw 0.2.84: the record length (memory depth) the pair was last derived or checked for
+  uint8  lad_rate;      //fw 0.2.84: the rate the ladder last set (zoom step, Auto, a depth change), 0xFF none; while
+                        //it is the current rate a depth change re-derives it (a pan keeps it, a hand-picked rate not)
 } SPECSTATE;
 
 #define VIEW_SPECTRUM         0
@@ -205,7 +208,7 @@ typedef struct
 #define VIEW_DENSITY          2
 
 static SPECSTATE spec = { .log2n = 11, .window = FX_WIN_HANN, .scale = 1, .view = VIEW_SPECTRUM, .avg = 1,
-                          .cell = { SPL_FULL, SPL_FMAX_MHZ / 2 } };
+                          .cell = { SPL_FULL, SPL_FMAX_MHZ / 2 }, .lad_rate = 0xFF };
 
 //What the last FFT used, per channel (READ_SPECTRUM reports these)
 typedef struct
@@ -221,6 +224,9 @@ typedef struct
 } SPECFRAME;
 
 static void      spec_cell_from_rate(void);
+static void      spec_lad_check(void);
+static void      spec_follow_cap(void);
+static uint32    spec_cap(void);
 
 static FX_FFT    spec_plan;
 static uint8     auto_refused;                          //Auto refused: 1 stopped, 2 single mode (spec_auto_start)
@@ -310,6 +316,12 @@ static int spec_log2n_max(void)
     l++;
 
   return l;
+}
+
+//fw 0.2.84: the record the FPGA takes per capture (the memory depth), whose capture time the ladder limits
+static uint32 spec_cap(void)
+{
+  return fpgasettings.totalsamples;
 }
 
 static int spec_log2n(void)
@@ -1307,8 +1319,13 @@ void spectrum_set_active(int on)
   //the one it had when the cell was last set, as after a pan); otherwise the current rate's whole axis (no rate change
   //on entering)
   if(spec.active && (!spec.cell_set || ((scopesettings.samplerate != spec.cell_rate) &&
-     (spl_rate(spl_stop(&spec.cell), spec_log2n(), sample_rate, ACQ_RATES) != (int32)scopesettings.samplerate))))
+     (spl_rate(spl_stop(&spec.cell), spec_cap(), sample_rate, ACQ_RATES) != (int32)scopesettings.samplerate))))
     spec_cell_from_rate();
+
+  //fw 0.2.84: no rate change on entering, also when the memory depth changed in another mode (the next zoom step
+  //takes the ladder's rate for it); a depth change from here on follows while the rate is the ladder's for the cell
+  if(spec.active)
+    spec_lad_check();
   spec.have[0] = spec.have[1] = 0;
   spec_hist_clear();
 }
@@ -1416,6 +1433,7 @@ static int spectrum_display_body(void)
   SPECVIEW v;
 
   spec_fix_channel();
+  spec_follow_cap();
 
   log2n = spec_log2n();
   fresh = spec.fresh;
@@ -1529,7 +1547,9 @@ static int spectrum_display_body(void)
 // Span drives the sample rate (fw 0.2.77, owner 2026-10-19 23:09; docs/ui-guidelines.md section 2): the view is a cell of
 // the span ladder (spec_ladder.h), a 1-2-5 span about a centre. After each zoom step with the rate free (running or
 // Single, acq_view_rate_free) and at the end of AUTO SET the rate is spl_rate of the cell's stop: the slowest whose
-// fs / 2 covers it with a capture N / fs of at most 2.048 s. fw 0.2.81 (owner 2026-10-20 10:24): a pan (plot drag,
+// fs / 2 covers it with a capture of the record, memory depth / fs (fw 0.2.84; N / fs before), of at most 2.048 s. A
+// memory depth change (ACQ menu, Filter, host) re-derives the rate at once while it is the cell's (spec_follow_cap);
+// the FFT length does not enter the rate, only the zoom-in end (16 bins). fw 0.2.81 (owner 2026-10-20 10:24): a pan (plot drag,
 // slider drag, tap to jump) never changes the rate; it is clamped to the current rate's axis 0 .. fs / 2 (the slider
 // track), so to look above it the user zooms out (the rate rises) and in again. It is the scope's own rate (same setting), written with the Scope ladder's time/div
 // for it (acq_view_tb_for_rate, so nothing snaps) through pc_hal_timebase_write, as SET_TIMEBASE. After a change the
@@ -1619,15 +1639,49 @@ static void spec_cell_done(void)
 {
   spec.cell_set = 1;
   spec.cell_rate = scopesettings.samplerate;
+  spec.cell_cap = (uint16)spec_cap();
 }
 
 //After a zoom step: the rule's rate for the cell, when the rate is free
 static void spec_cell_apply(void)
 {
   if(acq_view_rate_free())
-    spec_rate_set(spl_rate(spl_stop(&spec.cell), spec_log2n(), sample_rate, ACQ_RATES));
+  {
+    spec_rate_set(spl_rate(spl_stop(&spec.cell), spec_cap(), sample_rate, ACQ_RATES));
+    spec.lad_rate = scopesettings.samplerate;
+  }
 
   spec_cell_done();
+}
+
+//fw 0.2.84, the pair invariant after a memory depth change (ACQ menu depth or Filter, the host's SET_TRIGGER total or
+//SET_DECIM): the rule's rate for the cell at the new record length at once, not at the next zoom step. Only while the
+//rate is the one the ladder set (a rate picked by hand holds until the next zoom step) and free (stopped, the check
+//waits for RUN); Auto ends on its own pair. Called at the start of every view pass (the ACQ menu is modal: the change
+//shows when it closes). The rate write redraws the view from inside; the re-entry guard and cell_cap (set first) keep
+//that from coming back here.
+static void spec_follow_cap(void)
+{
+  uint32 cap = spec_cap();
+  int    ours;
+
+  if((cap == spec.cell_cap) || spec.autostage || !acq_view_rate_free())
+    return;
+
+  ours = spec.cell_set && (scopesettings.samplerate == spec.lad_rate);
+  spec.cell_cap = (uint16)cap;
+
+  if(ours)
+    spec_cell_apply();
+}
+
+//fw 0.2.84: the cell and rate taken as they are (entry, Reset): the depth is the one checked, and the rate counts as
+//the ladder's when it is the rule's for the cell at that depth
+static void spec_lad_check(void)
+{
+  spec.cell_cap = (uint16)spec_cap();
+  spec.lad_rate = (spl_rate(spl_stop(&spec.cell), spec_cap(), sample_rate, ACQ_RATES) == (int32)scopesettings.samplerate) ?
+                  scopesettings.samplerate : 0xFF;
 }
 
 //The cell that shows the current rate's whole axis (entry, Reset): no rate change, the rule gives this rate for it
@@ -1638,6 +1692,7 @@ static void spec_cell_from_rate(void)
 
   spl_from_axis(&spec.cell, spl_axis_mhz(&sample_rate[r], 1));
   spec_cell_done();
+  spec_lad_check();
 }
 
 //Span: one ladder step narrower (in) or wider (out) about the centre; at an end nothing changes
@@ -1648,13 +1703,13 @@ static void spec_zoom(int in)
   int             log2n = spec_log2n();
   spl_cell        c = spec.cell;
 
-  if(spl_zoom(&spec.cell, in ? 1 : -1, log2n, r, n))
+  if(spl_zoom(&spec.cell, in ? 1 : -1, log2n, spec_cap(), r, n))
   {
     spec_cell_apply();
     return;
   }
 
-  if((n == 1) && spl_zoom(&c, in ? 1 : -1, log2n, sample_rate, ACQ_RATES))
+  if((n == 1) && spl_zoom(&c, in ? 1 : -1, log2n, spec_cap(), sample_rate, ACQ_RATES))
   {
     stop_note = 1;
     stop_note_ms = timer0ticks;
@@ -1823,8 +1878,8 @@ static int32 spec_auto_derive(uint64 f0, uint64 fhi, spl_cell *c)
 {
   int log2n = spec_log2n();
 
-  spl_auto(c, f0, fhi, log2n, sample_rate, ACQ_RATES);
-  return spl_rate(spl_stop(c), log2n, sample_rate, ACQ_RATES);
+  spl_auto(c, f0, fhi, log2n, spec_cap(), sample_rate, ACQ_RATES);
+  return spl_rate(spl_stop(c), spec_cap(), sample_rate, ACQ_RATES);
 }
 
 //The level settings from the record at hand, then the cell and its rate (a change waits for a record at that rate)
@@ -1859,6 +1914,7 @@ static void spec_auto_finish(const spl_cell *c, int32 r)
 
   spec.cell = *c;
   spec_rate_set(r);
+  spec.lad_rate = scopesettings.samplerate;
   spec_cell_done();
 }
 
