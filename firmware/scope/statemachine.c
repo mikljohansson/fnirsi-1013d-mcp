@@ -1728,6 +1728,10 @@ void handle_channel_menu_touch(PCHANNELSETTINGS settings)
                   //For waveform view mode the stop state is forced and can't be changed
                   if(scopesettings.runstate) match_volt_per_div_settings(settings);//ok
 
+                  //fw 0.2.94: in Frequency response a CH2 V/div by hand sets CH2 range Constant
+                  if(settings == &scopesettings.channel2)
+                    bode_view_ch2_vdiv_by_hand();
+
                   //Display this
                   scope_channel_settings(settings, 0);
                   scope_channel_sensitivity_select(settings);

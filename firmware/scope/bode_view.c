@@ -785,6 +785,31 @@ int bode_view_auto_running(void)
   return bv.active && bu_auto_busy(bv.autoset, bv.as_final, bode_state(bode_engine()) == BODE_ST_RUNNING);
 }
 
+//fw 0.2.94 (coordinator's addition to the owner's decision of 2026-10-20 14:16, owner to confirm): a CH2 V/div chosen by
+//hand in the CH2 menu while the view shows sets CH2 range Constant, so a sweep never overrides that choice. A sweep in
+//progress (not AUTO SET's: its verdict decides the mode at its end) ends at once and starts again from its first point
+//on the new range, the same kind (single, RUN, thru): the menu has already written the range to the front end while
+//running, and the engine must not finish the sweep on ranges it does not know
+void bode_view_ch2_vdiv_by_hand(void)
+{
+  bode_eng *e = bode_engine();
+
+  if(!bv.active)
+    return;
+
+  bv.ch2 = BODE_CH2_HOLD;
+  host_cfg_valid = 0;
+  bv.dirty = 1;
+
+  if((bode_state(e) == BODE_ST_RUNNING) && !bv.autoset && !bv.as_final)
+  {
+    int thru = bode_is_thru_sweep(e), single = bv.single;
+
+    bode_stop(e, 1);
+    bv_start(single || thru, thru);
+  }
+}
+
 void bode_view_tcursor(void)
 {
   bv.cursor_on ^= 1;
