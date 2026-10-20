@@ -150,7 +150,7 @@ static uint8 bh_triggered;
 //up to about 2700 words (legacy) / 4090 (16-bit) only. The engine's 0x0E is moved to the first such W at or after it.
 //0x153B+ latches the newest total words and completes a triggered record: the 0.2.91 arm unchanged.
 static uint8  bh_geom, bh_forced;
-static uint32 bh_stop, bh_stop_ms, bh_t0, bh_total;
+static uint32 bh_total;
 
 static int bh_arm(void *ctx, const bode_plan *pp, uint32 total, uint8 level)
 {
@@ -194,13 +194,8 @@ static int bh_arm(void *ctx, const bode_plan *pp, uint32 total, uint8 level)
   ato       = 2 * total;
 
   if(bh_geom)
-  {
-    bh_stop    = pc_auto_stop_word(ato + PC_STOP_LAG, bh_total, pc_glue_ring_words());
-    bh_stop_ms = pc_words_to_ms(bh_stop, div, bh_wide);
-    ato        = bh_stop - PC_STOP_LAG;
-  }
+    ato = pc_auto_stop_word(ato + PC_STOP_LAG, bh_total, pc_glue_ring_words()) - PC_STOP_LAG;
 
-  bh_t0 = pc_hal_ms();
   return pc_hal_arm(0, (uint16)bh_total, ato, 1, 0, (caps & PC_CAP_DECIM) ? &dc : 0, (caps & PC_CAP_SEQ) ? &sq : 0);
 }
 
@@ -272,18 +267,9 @@ static int bh_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
   addr  = pc_hal_acq_finish();
   start = (addr + ring - bh_pre) % ring;
 
-  //fw 0.2.97: 0x18 counts an edge after a time-out stop too, which leaves 0x14 at the pretrigger (0x1532..0x153A); a
-  //trigger in the last total words before the stop W is cut by it (the stop inside the record, done near W's time)
-  cap->spliced = (uint8)(bh_forced && (pc_stop_kind(pc_hal_fpga_version()) != PC_STOP_NEWEST));
-
-  if(bh_geom && !bh_forced)
-  {
-    if(addr == bh_pre)
-      bh_triggered = 0;
-    else if(bh_triggered && pc_auto_cut(addr, bh_pre, bh_total, bh_stop, ring) &&
-            ((pc_hal_ms() - bh_t0) + 2 + pc_words_to_ms(bh_total, bh_divider, bh_wide) >= bh_stop_ms))
-      cap->spliced = 1;
-  }
+  //fw 0.2.98 (pc_engine_record): triggered = 0x18 seen, spliced only when forced; the 0.2.97 host rules misread the
+  //engine's records (bench 2026-10-20, 0.2.97: 10..22 time-outs and 8..15 other retakes per sweep)
+  cap->spliced = pc_engine_record(pc_stop_kind(pc_hal_fpga_version()), bh_triggered, bh_forced, &bh_triggered);
 
   pc_hal_trace_build(start, total, 0, 0x03);
   pc_hal_decim_current(&dc, &written);

@@ -289,6 +289,12 @@ static uint64_t pc_word_ns(uint32_t divider, int wide)
   return (uint64_t)5 * ((uint64_t)divider + 1) * (wide ? 1u : 2u);
 }
 
+uint8_t pc_engine_record(uint8_t stop_kind, int trig_seen, int forced, uint8_t *triggered)
+{
+  *triggered = (uint8_t)(trig_seen != 0);
+  return (uint8_t)(forced && (stop_kind != PC_STOP_NEWEST));
+}
+
 uint32_t pc_ms_to_words(uint32_t ms, uint32_t divider, int wide)
 {
   uint64_t w = ((uint64_t)ms * 1000000ull) / pc_word_ns(divider, wide);
