@@ -340,13 +340,13 @@ Not a reader but a prerequisite for findings 4 and 12: Diagnostics as a main-loo
 
 ## Owner decisions 2026-10-20 (Restarts tile, noise limits)
 
-- 18:20 **(owner)**: verdict meanings: OK = everything is normal; Check = a warning, something to fix at some point; Fault =
+- 18:12 **(owner)**: verdict meanings: OK = everything is normal; Check = a warning, something to fix at some point; Fault =
   something critically bad. A deliberate restart (a firmware load over FEL, Enter FEL, an update: exception type 0 "jump to
   the entry") is normal and must not give Check: the Restarts tile reads OK "No crashes. Up 27 min." and does not mention it.
   Check = an earlier run this power-on crashed: "Crashed once before this run: data abort. If it happens again, save a
   report. Up 27 min." Fault = a crash in this run: "Crashed 2 times this run: data abort at 0x80014A2C. Details on the Log
   page." No exception jargon ("jump to the entry", "LR") on the Status page; the Log page keeps the details.
-- 18:22 **(owner)**: the noise rows use the limits of the condition the wizard measures (inputs open): full rate 3.0 codes
+- 18:13 **(owner)**: the noise rows use the limits of the condition the wizard measures (inputs open): full rate 3.0 codes
   RMS (the wizard's own pass criterion), gated 1.0 code, labelled "Noise RMS, inputs open"; the same limits and words on the
   Status page, the Calibration tab and in the wizard's pass / fail text; the "limits are provisional" note goes. Bench
   2026-10-20 18:1x: the stored open-input full-rate noise is 1.19 (CH1 B, 5 V/div) and 2.75 (CH2 A, 5 V/div) codes, the
