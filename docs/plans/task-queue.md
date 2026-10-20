@@ -412,6 +412,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Roadmap to 0.3.0 (reconciled 2026-10-20)
 
+Update 10:45: fw-cap2 merged as 0.2.81 (band training, picks 0x08E3 on the unit), fw-spzoom2 and fw-yield2 merged as 0.2.82
+(pans keep the rate; note removed), pinned backups/fw-0.2.82_5ad6085e.bin and loaded. Open from their handoffs: Waterfall /
+Density still clear on a pan (agent's choice, rows fit their window; owner may want history kept); the training's two captures
+per point can still miss an intermittent stage (24 % at two bad codes), the repeat warning catches it afterwards.
+
 State: fw 0.2.80 (protocol 1.24) on the owner's unit, FPGA 0x153A flashed 10-20 10:03. Epic view: `docs/plans/roadmap.md`;
 tag-day list: `docs/plans/release-checklist.md`. Items below point to the entries above.
 

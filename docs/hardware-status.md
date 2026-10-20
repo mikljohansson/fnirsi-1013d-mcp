@@ -1120,4 +1120,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   predicted CH1 A3 B4 / CH2 A3 B4), then the zero step failed at range 4 (0.2 V/div) with RESPONSE at the coarse hi point on
   both channels: the probe tips are still on the RC filter, whose node floats with the generator off. Owner asked to take the
   probes off, then the probe again and the wizard.
+- 2026-10-20 10:41: fw 0.2.82 (fw-spzoom2 + fw-yield2 on 0.2.81) pinned backups/fw-0.2.82_5ad6085e.bin (sha256
+  5ad6085e9d9c5d7ac0c37c890442c17a5a8078948cb06f553131055a859d060b), loaded. CAL_PROBE mode 1 with the probes open on the BNCs:
+  training 0x08E3 again on both channels; the zero step then fails at range 4 with DRIFT at the gated zero pair (11 / 15 codes
+  of movement: the open 1x probe tips pick up hum at 0.2 V/div). The wizard needs the probes unplugged from the device.
 
