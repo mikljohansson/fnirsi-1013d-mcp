@@ -245,9 +245,14 @@ int main(void)
   //scope_open_measures_menu();
   //while(1);
 
-  //fw 0.2.59: an uncalibrated unit starts with the first-run screen (what was found, Calibrate now or Later); the
-  //1.00o5 "Load default settings value" screen is gone
-  ui_first_run(restore);
+  //fw-one: a scope whose FPGA runs another bitstream than this firmware is built for shows the notice instead of the
+  //scope (ui_fpga_mismatch_pass below takes every pass); the acquisition never starts. Else, fw 0.2.59: an uncalibrated
+  //unit starts with the first-run screen (what was found, Calibrate now or Later); the 1.00o5 "Load default settings
+  //value" screen is gone
+  if(pc_glue_fpga_mismatch())
+    ui_fpga_mismatch_open();
+  else
+    ui_first_run(restore);
 
   //scope_open_keyboard_menu();
   
@@ -259,8 +264,9 @@ int main(void)
     pc_glue_poll_main();
     pc_glue_ui_service();
 
-    //fw 0.2.59: while Diagnostics shows (a display mode, ui_diag_view.c) it does this pass instead of the scope
-    if(ui_diag_pass())
+    //fw 0.2.59: while Diagnostics shows (a display mode, ui_diag_view.c) it does this pass instead of the scope;
+    //fw-one: so does the FPGA mismatch notice, for good
+    if(ui_diag_pass() || ui_fpga_mismatch_pass())
       continue;
 
     //Handle the touch panel input

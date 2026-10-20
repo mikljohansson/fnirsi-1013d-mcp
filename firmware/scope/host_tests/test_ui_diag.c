@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "ui_diag.h"
+#include "pc_cmds.h"
 #include "pc_hal.h"
 #include "ui_fmt.h"
 #include "adc_cal.h"
@@ -880,6 +881,70 @@ static void test_first_run(void)
   T_EQ(ud_hit(&pg, 700, 450), UD_ID_CAL_NOW);
 }
 
+//fw-one: the notice shown instead of the scope when the FPGA runs another bitstream than the firmware is built for
+static void test_fpga_mismatch(void)
+{
+  ud_input in;
+  char     need[16];
+
+  sprintf(need, "0x%04X", PC_FW_FPGA_VERSION);
+  healthy(&in);
+  in.mismatch = 1;
+  in.fpga     = 0x1532;
+  ud_build_fpga_mismatch(&pg, &in);
+  check_layout("fpga mismatch", 0);
+  T_TRUE(has_text("FPGA bitstream"));
+  T_TRUE(has_text("This firmware needs FPGA bitstream 0x153B."));
+  T_TRUE(has_text("This scope has 0x1532."));
+  T_EQ(text_colour("This firmware needs"), UD_C_WARN);
+  T_EQ(text_colour("This scope has"), UD_C_WARN);
+  T_TRUE(has_text("Flash it as the guide says (docs/guide/prepare.md),"));
+  T_TRUE(has_text("or remove the card to run the stock firmware."));
+  T_TRUE(has_text("Open firmware 0.2.59, protocol 1.16. The scope, the spectrum analyser, the frequency response and the generator do not run"));
+  T_TRUE(has_text("Diagnostics shows the version word and saves a report to the card."));
+  T_TRUE(strstr(need, "0x153B") != NULL);                      //the constant the texts quote
+  T_EQ(pg.nbtn, 3);
+  T_EQ(ud_hit(&pg, 30, 410), UD_ID_DIAG);
+  T_EQ(ud_hit(&pg, 400, 450), UD_ID_SETTINGS);
+  T_EQ(ud_hit(&pg, 700, 450), UD_ID_USB);
+  T_EQ(ud_hit(&pg, 260, 430), UD_ID_NONE);
+
+  //A newer word is a mismatch too (the next bitstream ships with its own firmware)
+  in.fpga = 0x153C;
+  ud_build_fpga_mismatch(&pg, &in);
+  check_layout("fpga mismatch newer", 0);
+  T_TRUE(has_text("This scope has 0x153C."));
+
+  //On the Diagnostics pages of a mismatched scope nothing measures: no Calibrate, DC shift trim or Volts calibration;
+  //Save report, Clear calibration, the log and FEL stay
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  check_layout("mismatch status", 0);
+  T_EQ(ud_hit(&pg, 20, 430), UD_ID_NONE);
+  T_EQ(ud_hit(&pg, 200, 430), UD_ID_REPORT);
+  T_TRUE(has_text("FPGA bitstream 0x153c: this firmware needs 0x153b"));
+  ud_build(&pg, UD_PAGE_CAL, &in, 0);
+  check_layout("mismatch cal", 0);
+  {
+    uint32_t i, ids = 0;
+
+    for(i=0;i<pg.nbtn;i++)
+      ids |= 1u << pg.btn[i].id;
+
+    T_EQ(ids & ((1u << UD_ID_CALIBRATE) | (1u << UD_ID_DCSHIFT) | (1u << UD_ID_VOLTS)), 0);
+    T_EQ(ids & (1u << UD_ID_CLEAR), 1u << UD_ID_CLEAR);
+  }
+  ud_build(&pg, UD_PAGE_DEV, &in, 0);
+  check_layout("mismatch dev", 0);
+  {
+    uint32_t i, fel = 0;
+
+    for(i=0;i<pg.nbtn;i++)
+      fel |= (pg.btn[i].id == UD_ID_FEL);
+
+    T_EQ(fel, 1);
+  }
+}
+
 int main(void)
 {
   test_pages();
@@ -887,5 +952,6 @@ int main(void)
   test_verdicts();
   test_tiles();
   test_first_run();
+  test_fpga_mismatch();
   return t_report("test_ui_diag");
 }

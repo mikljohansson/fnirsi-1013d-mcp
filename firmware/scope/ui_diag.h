@@ -63,6 +63,9 @@
 #define UD_ID_LATER      13
 #define UD_ID_CAL_NOW    14
 #define UD_ID_DCSHIFT    15
+#define UD_ID_DIAG       16       //the FPGA mismatch screen's buttons (fw-one)
+#define UD_ID_SETTINGS   17
+#define UD_ID_USB        18
 
 //Pages
 #define UD_PAGE_STATUS    0
@@ -149,6 +152,9 @@ typedef struct
 //Page builders. note may be 0. Each starts with the common header (title, four tabs, Back).
 void ud_build(ud_page *pg, int page, const ud_input *in, const ud_note *note);
 void ud_build_first_run(ud_page *pg, const ud_input *in, int settings_defaults, int volts_due);
+//The notice shown instead of the scope when the FPGA runs another bitstream than the firmware is built for (fw-one;
+//in->fpga the word read, PC_FW_FPGA_VERSION the needed one): what to do, and the three screens that still work
+void ud_build_fpga_mismatch(ud_page *pg, const ud_input *in);
 
 //The button under a touch: its id, UD_ID_NONE when none (hit area = drawn area)
 int  ud_hit(const ud_page *pg, int x, int y);

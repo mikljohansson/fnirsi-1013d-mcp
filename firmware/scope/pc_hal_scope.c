@@ -1371,6 +1371,11 @@ static uint8 pc_probe_ds3231(void)
   return ack;
 }
 
+int pc_glue_fpga_mismatch(void)
+{
+  return pc_ready && pc_sess.var.mismatch;
+}
+
 int pc_glue_ui_has(int feature)
 {
   if(!pc_ready)

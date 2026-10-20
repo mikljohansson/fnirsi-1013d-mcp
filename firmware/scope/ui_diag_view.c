@@ -37,7 +37,9 @@
 
 #include <string.h>
 
-//pc_diag.c / pc_hal_scope.c (fw 0.2.52 readers, firmware/AGENTS.md section 30)
+//pc_diag.c / pc_hal_scope.c (fw 0.2.52 readers, firmware/AGENTS.md section 30); ui_settings_ui.c (its header's ui_dlg_text
+//type clashes with ui_dlg.h's function)
+void              ui_settings_run(void);
 const pc_card_id *pc_glue_card_ident(void);
 int               pc_glue_save_report(char *name, uint32 name_max);
 void              pc_glue_health(uint8 *body);
@@ -671,4 +673,101 @@ void ui_first_run(int settings_defaults)
   display_set_screen_buffer((uint16 *)maindisplaybuffer);
   display_set_source_buffer(displaybuffer2);
   display_copy_rect_to_screen(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// FPGA mismatch (fw-one): the notice instead of the scope. Not modal: the main loop keeps polling the PC (GET_INFO and
+// GET_HEALTH carry the flag, READ_SCREEN shows this page, the acquisition commands answer E_UNSUPPORTED) and this pass
+// draws the page and takes its three buttons. Diagnostics opens over it as from the main menu and its Back comes back
+// here; Settings and USB drive are the modal screens of the main menu, the page is redrawn when they return.
+
+static uint8 fm_open, fm_redraw;
+
+void ui_fpga_mismatch_open(void)
+{
+  fm_open   = 1;
+  fm_redraw = 1;
+}
+
+static void fm_draw(void)
+{
+  ud_input in;
+
+  ud_page_no = UD_PAGE_STATUS;
+  ud_gather(&in, 0);
+  ud_build_fpga_mismatch(&ud_pg, &in);
+
+  display_set_screen_buffer(displaybuffertmp);
+  ui_dlg_draw_page(&ud_pg);
+  display_set_screen_buffer((uint16 *)maindisplaybuffer);
+  display_set_source_buffer(displaybuffertmp);
+  display_copy_rect_to_screen(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  fm_redraw = 0;
+}
+
+int ui_fpga_mismatch_pass(void)
+{
+  uint32 i;
+  int    id;
+
+  //Diagnostics took the pass (ui_diag_pass runs first); its Back put this page back on the screen
+  if(!fm_open || ud_open)
+    return 0;
+
+  //The battery level, as Diagnostics does: its icon goes to a buffer nobody shows
+  display_set_screen_buffer(displaybuffer2);
+  battery_check_status();
+  display_set_screen_buffer((uint16 *)maindisplaybuffer);
+
+  if(fm_redraw)
+    fm_draw();
+
+  tp_i2c_read_status();
+
+  if(!havetouch)
+    return 1;
+
+  id = ud_hit(&ud_pg, xtouch, ytouch);
+
+  if(id == UD_ID_NONE)
+  {
+    ui_dlg_release();
+    return 1;
+  }
+
+  for(i=0;i<ud_pg.nbtn;i++)
+    if(ud_pg.btn[i].id == id)
+      ui_dlg_draw_button(&ud_pg.btn[i], 1);
+
+  ui_dlg_release();
+
+  switch(id)
+  {
+    case UD_ID_DIAG:
+      //Keeps this screen to return to (displaybuffer2), takes the passes until Back
+      ui_diag_open();
+      break;
+
+    case UD_ID_SETTINGS:
+      ui_settings_run();
+      fm_redraw = 1;
+      break;
+
+    case UD_ID_USB:
+      //As the main menu's USB drive row (statemachine.c): the screen is kept and put back
+      display_set_screen_buffer((uint16 *)maindisplaybuffer);
+      display_set_destination_buffer(displaybuffer2);
+      display_copy_rect_from_screen(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+      scope_setup_usb_screen();
+      display_set_source_buffer(displaybuffer2);
+      display_copy_rect_to_screen(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+      fm_redraw = 1;
+      break;
+
+    default:
+      fm_redraw = 1;
+      break;
+  }
+
+  return 1;
 }

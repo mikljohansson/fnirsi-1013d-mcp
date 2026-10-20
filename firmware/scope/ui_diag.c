@@ -145,6 +145,21 @@ static char *s_hex(char *p, uint32_t v, uint32_t digits)
   return s_hexd(p, v, digits);
 }
 
+//Upper-case hex, as the bitstreams are named in fpga/al3/dist and the guide (the notice screen quotes them)
+static char *s_hexu(char *p, uint32_t v, uint32_t digits)
+{
+  static const char h[] = "0123456789ABCDEF";
+
+  *p++ = '0';
+  *p++ = 'x';
+
+  while(digits--)
+    *p++ = h[(v >> (4 * digits)) & 0xF];
+
+  *p = 0;
+  return p;
+}
+
 static char *s_dec2(char *p, uint32_t v)
 {
   *p++ = (char)('0' + (v / 10) % 10);
@@ -1074,7 +1089,9 @@ static void ud_page_status(ud_page *pg, const ud_input *in, const ud_note *note)
 
   ud_status_cal(pg, in);
 
-  ud_btn(pg, 12, UD_BTN_Y, 140, UD_BTN_H, UD_B_PRIMARY, UD_ID_CALIBRATE, "Calibrate");
+  //No calibration on a bitstream the firmware is not built for (it would run the acquisition): the report still saves
+  if(!in->mismatch)
+    ud_btn(pg, 12, UD_BTN_Y, 140, UD_BTN_H, UD_B_PRIMARY, UD_ID_CALIBRATE, "Calibrate");
   ud_btn(pg, 164, UD_BTN_Y, 196, UD_BTN_H, UD_B_NEUTRAL, UD_ID_REPORT, "Save report to card");
   ud_note_or_hint(pg, note, 376, "Updates every second");
 }
@@ -1357,10 +1374,14 @@ static void ud_page_cal(ud_page *pg, const ud_input *in, const ud_note *note)
   //buttons 12 px apart across the page: Calibrate, the DC shift trim (1.00o5's manual trim of the trace scale, run on
   //the scope's CTRL page while on; green on, grey off), Volts calibration, and last Clear calibration. The trim's line
   //(only while on) and the page's note sit between the channel blocks and the row.
-  ud_btn(pg, UD_CAL_BTN_X(0), UD_BTN_Y, UD_CAL_BTN_W, UD_BTN_H, UD_B_PRIMARY, UD_ID_CALIBRATE, "Calibrate");
-  ud_btn(pg, UD_CAL_BTN_X(1), UD_BTN_Y, UD_CAL_BTN_W, UD_BTN_H, in->dc_shift ? UD_B_ON : UD_B_GREY, UD_ID_DCSHIFT,
-         "DC shift trim");
-  ud_btn(pg, UD_CAL_BTN_X(2), UD_BTN_Y, UD_CAL_BTN_W, UD_BTN_H, UD_B_NEUTRAL, UD_ID_VOLTS, "Volts calibration");
+  //fw-one: the measuring actions need the built-for bitstream; Clear calibration touches the card only
+  if(!in->mismatch)
+  {
+    ud_btn(pg, UD_CAL_BTN_X(0), UD_BTN_Y, UD_CAL_BTN_W, UD_BTN_H, UD_B_PRIMARY, UD_ID_CALIBRATE, "Calibrate");
+    ud_btn(pg, UD_CAL_BTN_X(1), UD_BTN_Y, UD_CAL_BTN_W, UD_BTN_H, in->dc_shift ? UD_B_ON : UD_B_GREY, UD_ID_DCSHIFT,
+           "DC shift trim");
+    ud_btn(pg, UD_CAL_BTN_X(2), UD_BTN_Y, UD_CAL_BTN_W, UD_BTN_H, UD_B_NEUTRAL, UD_ID_VOLTS, "Volts calibration");
+  }
   ud_btn(pg, UD_CAL_BTN_X(3), UD_BTN_Y, UD_CAL_BTN_W, UD_BTN_H, UD_B_DANGER, UD_ID_CLEAR, "Clear calibration");
 
   //fw 0.2.79: the 0x153A capture line first, then the trim's line and the note, 15 px apart (the row starts at 420)
@@ -1695,4 +1716,50 @@ void ud_build_first_run(ud_page *pg, const ud_input *in, int settings_defaults, 
 
   ud_btn(pg, 24, 404, 160, 52, UD_B_GREY, UD_ID_LATER, "Later");
   ud_btn(pg, 576, 404, 200, 52, UD_B_PRIMARY, UD_ID_CAL_NOW, "Calibrate now");
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// FPGA mismatch (fw-one; owner decision 2026-10-20: every firmware version supports the latest bitstream only, with a
+// loud notice otherwise). Shown instead of the scope at boot and after every screen it offers; the acquisition, the
+// Scope, Spectrum and Frequency response views and the generator never run. Diagnostics (the version word, the report),
+// Settings and the USB drive stay reachable from its three buttons.
+
+void ud_build_fpga_mismatch(ud_page *pg, const ud_input *in)
+{
+  char t[UD_TEXT_LEN], *p;
+
+  ud_clear(pg);
+  ud_boxa(pg, 0, 0, 800, UD_HDR_H, 1);
+  ud_txt(pg, 14, 14, 400, UD_F_HEAD, UD_C_TITLE, "FPGA bitstream");
+
+  p = s_str(t, "This firmware needs FPGA bitstream ");
+  p = s_hexu(p, PC_FW_FPGA_VERSION, 4);
+  s_str(p, ".");
+  ud_txt(pg, 24, 84, 752, UD_F_BODY, UD_C_WARN, t);
+
+  p = s_str(t, "This scope has ");
+  p = s_hexu(p, in->fpga, 4);
+  s_str(p, ".");
+  ud_txt(pg, 24, 112, 752, UD_F_BODY, UD_C_WARN, t);
+
+  ud_txt(pg, 24, 160, 752, UD_F_BODY, UD_C_TEXT, "Flash it as the guide says (docs/guide/prepare.md),");
+  ud_txt(pg, 24, 184, 752, UD_F_BODY, UD_C_TEXT, "or remove the card to run the stock firmware.");
+
+  ud_boxa(pg, 24, 230, 752, 1, 2);
+
+  p = s_str(t, "Open firmware ");
+  p = s_ver(p, in->run->version);
+  p = s_str(p, ", protocol ");
+  p = s_uint(p, in->run->proto_major);
+  *p++ = '.';
+  p = s_uint(p, in->run->proto_minor);
+  s_str(p, ". The scope, the spectrum analyser, the frequency response and the generator do not run");
+  ud_txt(pg, 24, 248, 752, UD_F_SMALL, UD_C_SOFT, t);
+  ud_txt(pg, 24, 266, 752, UD_F_SMALL, UD_C_SOFT, "until the bitstream matches. A PC gets the version word and the report over USB.");
+  ud_txt(pg, 24, 300, 752, UD_F_SMALL, UD_C_SOFT, "Diagnostics shows the version word and saves a report to the card.");
+  ud_txt(pg, 24, 318, 752, UD_F_SMALL, UD_C_SOFT, "USB drive opens the card on a PC, to change the firmware image.");
+
+  ud_btn(pg, 24, 404, 200, 52, UD_B_NEUTRAL, UD_ID_DIAG, "Diagnostics");
+  ud_btn(pg, 300, 404, 200, 52, UD_B_NEUTRAL, UD_ID_SETTINGS, "Settings");
+  ud_btn(pg, 576, 404, 200, 52, UD_B_NEUTRAL, UD_ID_USB, "USB drive");
 }

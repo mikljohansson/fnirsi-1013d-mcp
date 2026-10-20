@@ -58,6 +58,7 @@ void pc_glue_host_stop(void);         //fw 0.2.68: the RUN/STOP button's STOP du
 int  pc_glue_rtc_allowed(void);       //0 while the MCP chip occupies the RTC clock slot
 void pc_glue_pass_mark(int n);        //main loop stage reached (first-pass timing, GET_LINK_STATS)
 int  pc_glue_ui_has(int feature);     //PC_FEAT_*: 1 when the running hardware supports it
+int  pc_glue_fpga_mismatch(void);     //fw-one: the FPGA runs another bitstream than PC_FW_FPGA_VERSION (the notice screen)
 void pc_glue_topbar_drawn(void);      //the top bar / RUN-STOP chip was (re)drawn: put the MCP chip back with it
 void pc_glue_ext_selected(void);      //EXT trigger chosen in the trigger menu
 void pc_glue_roll_label(void);        //acquisition menu: the long (roll) time base box as a state toggle
