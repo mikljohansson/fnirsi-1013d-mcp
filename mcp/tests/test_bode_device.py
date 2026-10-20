@@ -132,8 +132,9 @@ def test_row_flags_are_the_host_names_and_f_comes_from_m():
     host_names = set(B.BAD_FLAGS) | {"ch1_low", "ch2_small", "spliced", "fir_off", "no_cal", "cal_range",
                                      "cal_flagged"}
     assert set(P.BODE_ROW_FLAGS) == host_names and len(P.BODE_ROW_FLAGS) == 14
-    # the bit order of row 60: bits 0, 1, 2, 5, 6, 7, 8 are the invalid ones (the host's BAD_FLAGS)
-    assert {P.BODE_ROW_FLAGS[i] for i in (0, 1, 2, 5, 6, 7, 8)} == set(B.BAD_FLAGS)
+    # the bit order of row 60: bits 0, 1, 2, 4, 5, 6, 7, 8 are the invalid ones (the host's BAD_FLAGS; bit 4
+    # ch2_small since fw 0.2.99)
+    assert {P.BODE_ROW_FLAGS[i] for i in (0, 1, 2, 4, 5, 6, 7, 8)} == set(B.BAD_FLAGS)
     assert P.bode_flags_from_names(["spliced", "low_snr", "x"], retried=True) == 0x0200 | 0x0020 | 0x4000
     for f in (1.0, 23.9, 1234.5, 99.5e3, 1.49e6, 10e6):
         pp = B.plan_point(f)

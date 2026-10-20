@@ -267,6 +267,52 @@ def test_markers_low_pass_and_flags():
     assert B.markers(pts)["flagged_points"] == 1
 
 
+def test_ch2_small_is_grey_and_the_floor_caveat():
+    """fw 0.2.99 (owner 2026-10-20 16:22): ch2_small points do not count, and a sweep with them on CH2's finest range
+    says what to do, in the scope's words (bench: a two-pole RC 10 kHz .. 10 MHz, CH2 under one code from 540 kHz)."""
+    assert "ch2_small" in B.BAD_FLAGS and "ch1_low" not in B.BAD_FLAGS and "spliced" not in B.BAD_FLAGS
+
+    def rc2(f):
+        return _rc(f) ** 2
+
+    fs = np.geomspace(10e3, 10e6, 12)
+    pts = [_result(f, rc2(B.plan_point(f).f_actual)) for f in fs]
+    for p in pts:
+        p.ch2_range = 5
+    assert B.ch2_floor_hz(pts) is None
+    assert not any(c.startswith("CH2 too small") for c in B.result_caveats(B.SweepResult(pts, 10.0, "auto")))
+    # the tail from point 6 (about 433 kHz) up: generator pickup climbing back, under 3 codes
+    for k, p in enumerate(pts[6:]):
+        p.flags.append("ch2_small")
+        p.h = p.h_raw = 10 ** ((-69 + 7 * k) / 20)
+    pts[6].flags.append("low_snr")
+    assert not any(p.valid for p in pts[6:]) and all(p.valid for p in pts[:6])
+    assert B.markers(pts)["valid_points"] == 6 and B.markers(pts)["flagged_points"] == 6
+    f6 = pts[6].plan.f_actual
+    assert B.ch2_floor_hz(pts) == f6
+    cav = B.result_caveats(B.SweepResult(pts, 10.0, "auto"))
+    assert cav[0] == (f"CH2 too small above {B.fmt_f3(f6)} to measure: set Stop below it or press AUTO SET. "
+                      "Less pickup: short ground lead on CH2.")
+    assert cav[0].startswith("CH2 too small above 43") and any(c.startswith("6 point(s) ch2_small") for c in cav)
+    assert B.ch2_floor_text(540e3).startswith("CH2 too small above 540 kHz to measure:")
+    # any order; a measured point above the run moves it up; scattered: the lowest
+    assert B.ch2_floor_hz(pts[::-1]) == f6
+    pts[10].flags.remove("ch2_small")
+    assert B.ch2_floor_hz(pts) == pts[11].plan.f_actual
+    pts[11].flags.remove("ch2_small")
+    assert B.ch2_floor_hz(pts) == f6
+    # on a coarser range a finer one helps: not this caveat (the per-flag one stays)
+    for p in pts:
+        p.ch2_range = 4
+    cav = B.result_caveats(B.SweepResult(pts, 10.0, "auto"))
+    assert B.ch2_floor_hz(pts) is None and not any(c.startswith("CH2 too small") for c in cav)
+    # the scope's rounding (bode_ui.c bu_fmt_f3)
+    for hz, t in ((540e3, "540 kHz"), (541.317e3, "541 kHz"), (54.1317e3, "54.1 kHz"), (5.41317e3, "5.41 kHz"),
+                  (999.499e3, "999 kHz"), (999.5e3, "1.00 MHz"), (1.234567e6, "1.23 MHz"), (10e6, "10.0 MHz"),
+                  (980.0, "980 Hz"), (1.0, "1.00 Hz"), (9.995e3, "10.0 kHz")):
+        assert B.fmt_f3(hz) == t, (hz, B.fmt_f3(hz))
+
+
 def test_markers_resonance_q():
     f0, q = 50e3, 10.0
 
