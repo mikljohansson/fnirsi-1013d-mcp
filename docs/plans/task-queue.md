@@ -185,7 +185,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   the Spectrum; (c) re-derive the rate when the FFT length or memory depth changes, not only at the next zoom/pan step. With the
   next Spectrum batch.
 - **Capture-stage training must probe the band** (bench 10-20 10:19; fw-cap2 dispatched): see hardware-status 10:19.
-- **Spectrum ladder: pans never change the rate** (owner 10-20 10:24 on fw 0.2.80 **(owner)**: "the spectrum should stay the same when
+- **Spectrum ladder: pans never change the rate** (owner 10-20 10:27 on fw 0.2.80 **(owner)**: "the spectrum should stay the same when
   scrolling, changes to sample rate and time/div should happen when zooming"; fw-spzoom2 dispatched): the rate is derived from
   span and centre only at zoom steps (and by AUTO SET); a pan (plot drag, slider drag, tap-to-jump) keeps the rate and is clamped
   to the current axis 0..fs/2 (the slider track is that axis); to look higher than the axis, zoom out (raises the rate) then zoom
