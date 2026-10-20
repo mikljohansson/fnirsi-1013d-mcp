@@ -1403,3 +1403,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   1391978c33379271789a9405f7b0fb9395a85e223ecc69a0430b9f2859a23b88 (= the pinned padded image; raw fdc3c21b..). Rollback =
   write the pre-write backup. Next: power cycle, `#VER fpga=0x153b`, wizard retrain of the capture stages, band sweep,
   README section 11 bench checks 1-6.
+- 2026-10-20 19:50: power cycle on 0x153B: fw 0.2.102 from the card, `fpga_version` 0x153B, caps 0xFEC4B, encode check OK
+  (enc_bad 0 of 128), capture stages at the power-on 0x08E4 with cap_flags 0x15 (trained on 0x153A: retrain), 0 flagged
+  of 128 reads. Wizard retrain next (owner, USB out, inputs open).
