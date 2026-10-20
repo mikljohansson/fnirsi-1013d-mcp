@@ -490,7 +490,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
-- fpga-gen10 (Fable, done 12:18, about 305k tokens, merged 12:07; handoff fpga/al3/AGENTS.md "First-record saturation"): the
+- fpga-gen10 (Fable, done 12:05, about 305k tokens, merged 12:07; handoff fpga/al3/AGENTS.md "First-record saturation"): the
   0x153A decimator cannot produce a 0xFFFF record with the registers read back; the firmware's host ARM computes N and the shift
   from the UI time base after `acq_view_fit` snapped it without writing 0x0D, so the FPGA keeps the raw divider 4095 while 0x54
   gets the shift for N 400 / 200 (S 9 / 7) and a full-scale input saturates every word; heals on a Filter-off UI conversion or
