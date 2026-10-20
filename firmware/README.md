@@ -153,13 +153,13 @@ verified on the scope image and on random data with a gap.
 
 | sector | content | limit | written by |
 |---|---|---|---|
-| 0 | MBR. The FAT32 partition must start at sector 2048 or later. | | |
+| 0 | MBR. The FAT32 partition must start at sector 16384 (8 MiB) or later (fw 0.2.101; 2048 before). | | |
 | 16 | bootloader `eGON.BT0` (Atlan "BOOT fw v0.8" in the v1.00o5 package) | 32 KiB, sectors 16-79 | BROM loads it to SRAM 0x0 |
 | 80 | updater `eGON.EXE` (v0.02v in the package) | up to sector 707 | boot mode 3 |
 | 708 | calibration data | 1 sector | scope / updater |
 | 709 | scope settings | 1 sector | scope |
 | 710 | display + touch config, boot-mode byte | 1 sector | loader tool / scope |
-| 750 | scope `eGON.EXE` (`build/fnirsi_1013d.bin`) | must end before the partition; 681 sectors now, ends at 1430 | boot mode 0 |
+| 750 | scope `eGON.EXE` (`build/fnirsi_1013d.bin`) | must end before the partition and below 16384 (the firmware's write window); 0.2.101 is 774,144 B = 1512 sectors, ends at 2261 | boot mode 0 |
 
 Sector 710 is loaded to DRAM 0x81BFFC00 by the bootloader:
 
@@ -192,9 +192,22 @@ Sources:
   readmes.
 - The `updater 0.02o` copy of `load_from_SDcard` is never called, because its call is commented
   out. The updater only writes files to these sectors (`statemachine.c:140-264`).
+- **No size limit in the boot path** (fw 0.2.101 check, firmware/AGENTS.md section 67). v0.7's
+  `load_from_SDcard` (`fnirsi_1013d_startup.c:348-400`) takes the length from the eGON header,
+  reads `(length + 511) / 512 - 1` sectors in one `sd_card_read` to 0x800001E0, and checks only
+  that they are on the card (`bl_sd_card_interface.c:311-381`). v0.8's copy (package offset
+  0x53A0, called with 750 = 0x2EE for boot mode 0) is the same code by disassembly. The data
+  phase's time-out grows with the transfer (`sd_send_data`, `bl_sd_card_interface.c:1082-1098`;
+  v0.8 offset 0x2C0C). The only bound is DRAM: the bootloader keeps sector 710 at 0x81BFFC00 and
+  its variables above 0x81C00000, about 28 MiB above the image's base, and our linker script stops
+  image + .bss at 0x81A00000. The firmware's window ends at 16384 (8 MiB) far below both.
+- The updater's "scope.bin to sector 750" (`update.c:559-700`) writes the file sector by sector with
+  no size or partition check, so on a card partitioned below the image's end it overwrites the
+  start of the FAT partition. The partition rule (16384 or later) protects that path too.
 
 **Warning about the upstream `dd` instructions.** `dd if=fnirsi_1013d.bin of=/dev/sdX bs=1024
-seek=8` writes the whole package from sector 16 through 1425. Atlan's package has zeros at
+seek=8` writes the whole package from sector 16 through the scope image's end (Atlan's own
+package ends at 1425, ours at 2261 for fw 0.2.101). Atlan's package has zeros at
 708-710, so this command wipes calibration, settings and the display/boot-mode sector. Use
 `make_sd_image.py write`, which writes only the parts you pass. A GPT card cannot be used,
 because the GPT entries occupy sectors 2-33.
@@ -212,12 +225,14 @@ python3 tools/make_sd_image.py pack -o pkg.bin -i scope.bin -l 0x5BC00   # = fla
 
 `write` behaves as follows:
 
-- It checks each part's magic, mksunxi checksum and region size, and that no part overlaps an
-  MBR partition.
+- It checks each part's magic, mksunxi checksum and region size (the scope image must end below
+  16384), and that no part runs into an MBR partition. It never writes the MBR: a card whose
+  partition starts too low is refused with the start it needs and the steps to recreate the
+  partition at 8 MiB. A partition below 16384 that still fits gets a note.
 - It refuses GPT cards, and refuses device-looking paths passed to `--image`.
 - It sets only byte 31 of sector 710 for `--boot-mode`.
 - It reads every write back to verify it.
-- `--create` makes a new zero-filled image, 1 MiB by default.
+- `--create` makes a new zero-filled image, 8 MiB (sectors 0-16383) by default.
 - A physical card needs `--device /dev/sdX`, or `\\.\PhysicalDriveN` on Windows (untested). The
   card must have an MBR. You must type the device path to confirm. Sectors 0 to the last written
   sector are always backed up to `backups/` before writing.

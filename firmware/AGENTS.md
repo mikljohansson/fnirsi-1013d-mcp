@@ -514,8 +514,8 @@ aborted, 14 retired since 0.2.21 (0.2.12-0.2.20: flags found by the tick, a = IN
 - Image placement: 740 sectors from 750, ends at 1489, below the FAT partition at 2048+. Persist path
   (SD_STAGE + SD_WRITE_SECTORS, 32 sectors per write, SD_STAGE served from the timer poll since 0.2.7): 0.2.7 5.3 s,
   0.2.11 5.7 s with read-back identical and the header verified. SD command design: protocol section 14 row 40;
-  writes need a valid MBR, window [16, min(first partition, 2048)), flag BOOT for 16-79 and CONFIG for 708-710,
-  power-key EINT masked during writes.
+  writes need a valid MBR, window [16, min(first partition, 2048)) (16384 from fw 0.2.101: section 67), flag BOOT for
+  16-79 and CONFIG for 708-710, power-key EINT masked during writes.
 
 ## 14. Owner's UI verdicts
 

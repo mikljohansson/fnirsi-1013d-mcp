@@ -45,10 +45,12 @@ afterwards (a new firmware commit invalidates every box from "Versions" down).
 
 ## SD package and bench
 
-- [ ] SD parts built from the CI image of the release commit with the tools zip, written to a spare card with
-      `make_sd_image.py write`, and the scope boots it: boot menu, PECO preselected, `#VER fw=0.3.0`, the Diagnostics
+- [ ] SD parts built from the CI image of the release commit with the tools zip, written to a spare card prepared as
+      `docs/guide/install.md` says (FAT32 partition at sector 16384, 8 MiB) with `make_sd_image.py write`; the same
+      command on a card partitioned at 2048 refuses and names the start it needs; the scope boots the prepared card: boot menu, PECO preselected, `#VER fw=0.3.0`, the Diagnostics
       identity line shows the release commit.
-- [ ] Release candidate persisted to the owner's card; 30-minute soak with the MCP server polling (`fnirsi1013d-soak`)
+- [ ] Release candidate persisted to the owner's card (partition at 8192; fw 0.2.101+ writes up to the partition, the
+      image ends at about 2261); 30-minute soak with the MCP server polling (`fnirsi1013d-soak`)
       passes; the long-idle check passes (roadmap section 5 item 4).
 - [ ] First-run screen and calibration wizard on the release candidate with the recommended bitstream.
 

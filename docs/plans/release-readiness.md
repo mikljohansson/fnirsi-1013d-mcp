@@ -127,7 +127,7 @@ Walked through as someone who owns a 1013D and found the announcement. Each item
 4. **Hardware identification.** "This supports AL3A10" is stated, but how to tell on the scope itself (open the case, read the FPGA marking, or look at the FPGA version on the
    diagnostics screen after the open firmware boots) is a link away. Say in the README that an EF2L45 or EP4CE6 board is untested and what to report.
 5. **SD card.** Writing "to a spare micro SD card" with `make_sd_image.py` is correct, but the `dd` trap (zeroes sectors 708-710) is only in `firmware/README.md` and `releasing.md`. One
-   warning sentence belongs in the README step. The FAT32 partition must start at sector 2048 or later, GPT cards are refused: also not in the README.
+   warning sentence belongs in the README step. The FAT32 partition must start at sector 2048 or later, GPT cards are refused: also not in the README. (16384, 8 MiB, since fw 0.2.101.)
 6. **First boot.** No description of what they should see (the boot menu with PECO / FEL / FNIRSI / Update buttons, boot mode 4), how to get back to stock, or that the base
    calibration is the first thing to do ("Calibrate" is section 4, after "Use it").
 7. **MCP install.** `python -m venv .venv && .venv/Scripts/activate` fails in PowerShell (it is `.venv\Scripts\Activate.ps1`) and in cmd it is `.venv\Scripts\activate`; the
