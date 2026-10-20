@@ -367,3 +367,74 @@ def test_resonance_steps_ch2_up_and_back_down(sim_factory):
     assert mk["peak"]["mag_db"] == pytest.approx(B.db(mag.max()), abs=0.1)
     band = f[mag >= mag.max() / math.sqrt(2)]
     assert mk["peak"]["q"] == pytest.approx(f[np.argmax(mag)] / (band[-1] - band[0]), rel=0.05)
+
+
+def test_flat_first_record_is_retaken_not_a_traceback(sim_factory):
+    """Bench 2026-10-20 11:16 (FPGA 0x153A): the first record after a configuration change was one saturated value;
+    measure_pair divided by CH1's zero tone. The runner retakes a flat record once: the pre-scan ranges as usual and
+    the sweep matches the analytic RC."""
+    srv = _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, noise_lsb=0.5)
+    plans = B.plan_sweep(30e3, 1e6, 5)
+    with Scope.connect(srv.url) as s:
+        clean = _run(s, plans, background=False)
+        srv.device.flat_next = 1  # the pre-scan's first capture
+        res = _run(s, plans, background=False)
+    assert res.meta["flat_retakes"] == 1 and srv.device.flat_next == 0
+    assert res.meta["start_ranges"] == clean.meta["start_ranges"]
+    for f, e_db, e_deg in _errors(res, _fast):
+        assert abs(e_db) < 0.03 and abs(e_deg) < 0.2, (f, e_db, e_deg)
+    assert not any(set(p.flags) & B.BAD_FLAGS for p in res.points)
+    assert not any("flat" in c for c in res.caveats)
+
+
+def test_flat_record_twice_flags_the_point(sim_factory):
+    """A point whose record stays flat after the retake: ch1_low + incoherent, no H (None in the table), a caveat
+    naming it, and the rest of the sweep measured."""
+    srv = _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, noise_lsb=0.5)
+    plans = B.plan_sweep(30e3, 1e6, 5)
+    done = []
+    with Scope.connect(srv.url) as s:
+        clean = _run(s, plans, background=False)
+
+        def hook(dev):  # the last point's capture and its retake are flat
+            if dev.settings.gen.phase_inc == plans[-1].phase_inc and not done:
+                done.append(1)
+                dev.flat_next = 2
+        srv.device.on_arm = hook
+        res = _run(s, plans, background=False)
+    assert len(res.points) == len(plans) and res.stopped_early is None
+    bad = res.points[-1]
+    assert {"ch1_low", "incoherent"} <= set(bad.flags) and not bad.valid
+    assert math.isnan(bad.mag_db) and bad.row()["mag_db"] is None and bad.row()["phase_deg"] is None
+    assert bad.retries >= 1
+    assert any("flat or had no tone even after a retake at 1 frequency" in c for c in res.caveats)
+    assert any(c.startswith("1 point(s) ch1_low") for c in B.result_caveats(res))
+    for p, q in zip(res.points[:-1], clean.points[:-1]):
+        assert abs(p.mag_db - q.mag_db) < 0.03
+    json.dumps(res.to_json())  # the table serialises (None, not NaN)
+    B._fmt_row(bad.row())
+
+
+def test_measure_pair_never_divides_by_a_flat_ch1():
+    pp = B.plan_point(100e3)
+    L = pp.record
+    flat = np.full(L, 2.5)
+    t = np.arange(L) / pp.sample_rate
+    v2 = 0.1 * np.cos(2 * math.pi * pp.f_actual * t)
+    ms = B.measure_pair(flat, v2, pp, vpl1=0.1, vpl2=0.004)
+    assert ms.flat1 and ms.ch1_dead and ms.suspect and math.isnan(ms.h.real)
+    assert ms.half_rel is None
+    ok = B.measure_pair(2.5 + 0.5 * np.cos(2 * math.pi * pp.f_actual * t), v2, pp, vpl1=0.01, vpl2=0.004)
+    assert not ok.suspect and abs(ok.h) == pytest.approx(0.2, rel=1e-6)
+
+
+def test_prescan_flat_twice_is_a_caveat(sim_factory):
+    """The pre-scan's record flat twice: CH1 stays on the pre-scan range with a caveat; the sweep still completes."""
+    srv = _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, noise_lsb=0.5)
+    plans = B.plan_sweep(30e3, 300e3, 3)
+    with Scope.connect(srv.url) as s:
+        srv.device.flat_next = 2
+        res = _run(s, plans, background=False)
+    assert res.meta["start_ranges"]["CH1"] == 1
+    assert any("pre-scan's CH1 record" in c for c in res.caveats)
+    assert len(res.points) == 3 and all(math.isfinite(p.mag_db) for p in res.points)

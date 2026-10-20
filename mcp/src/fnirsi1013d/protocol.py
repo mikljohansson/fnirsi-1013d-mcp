@@ -2130,7 +2130,8 @@ BODE_REASONS = {0: None, 1: "the FPGA did not become ready", 2: "no capture with
                 3: "CH2 saturated by a DC level with the CH2 range held", 4: "no frequency in the range",
                 5: "the PC armed its own capture during the sweep", 6: "stopped",
                 7: "no decimation filter or no DDS generator on this bitstream",
-                8: "ADC readout fault: the pre-scan clipped at 5 V/div with a fundamental under 20 codes"}
+                8: "ADC readout fault: the capture self-check flagged a core (0x153A+), or the pre-scan clipped at "
+                   "5 V/div (older bitstreams)"}
 #: READ_BODE header byte 7 bits 0-6
 BODE_THRU_STATES = ("none", "being measured", "valid", "stale")
 #: READ_BODE row flag bits in the host tool's flag names (bode.py); bit 14 "retried" is the host's retry count, bit 15

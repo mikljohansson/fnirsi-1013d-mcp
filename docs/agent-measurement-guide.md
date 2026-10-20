@@ -23,6 +23,11 @@ descriptions are authoritative. Server setup: `mcp/README.md`.
 4. `scope_get_config`: the live settings. Do not assume your last settings still hold: the person may have changed
    them.
 
+The port is free while no tool runs: the server closes the scope's serial port about 30 s after the last tool call
+(`FNIRSI_MCP_IDLE_CLOSE_S`, 0 = hold) and reopens it on the next one, so the person's own scripts and the flash tool
+can use it in between. A tool that fails with a port error (access denied, port busy) right after a pause usually
+means another program has the port: ask the person, do not retry in a loop.
+
 ## 2. Setting up for a signal
 
 - **Vertical range** (`scope_set_channel volts_per_div`): the screen is about 8 divisions, 256 codes. Aim for the

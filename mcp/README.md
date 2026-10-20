@@ -151,6 +151,7 @@ count when the `#VER` probe answers `#OK,FNIRSI-1013D-AI,...`.
 | `FNIRSI_MCP_HOME` | `~/.fnirsi1013d` | per-user directory holding `data/` and `logs/` (`--home`) |
 | `FNIRSI_MCP_DATA_DIR` | `<home>/data` | `.npz` output (one folder per day), `cal/`, `bode/thru/` (`--data-dir`) |
 | `FNIRSI_MCP_AUDIT_LOG` | `<home>/logs/audit.jsonl` | JSONL log of every tier 1+ call (`--audit-log`; empty string disables) |
+| `FNIRSI_MCP_IDLE_CLOSE_S` | 30 | close the scope's serial port (or `tcp://` link) after this many seconds without a tool running, so bench scripts and `fnirsi1013d-flash` can open it; the next tool call reopens it (calibration file reloaded). A long tool (averaging, a sweep) counts as activity until it returns. 0 = hold the port until exit |
 | `FNIRSI_MCP_LEGACY_IDLE_RELEASE_S` | 60 | legacy firmware only: release REMOTE (keeping the host settings) after this many seconds without a tool call; 0 = hold until exit |
 | `FNIRSI_MCP_CAL_FILE` | `<data dir>/cal/<serial>.json` | per-unit voltage calibration (`--cal-file`), loaded at connect if present, written by `scope_calibrate_volts` |
 | `FNIRSI_MCP_MAX_RESPONSE` | device limit | largest response payload requested at once (`--max-response`); READ_RAW, READ_TRACE and READ_SCREEN are split, and device averaging falls back to the host when its result would not fit |
@@ -269,6 +270,12 @@ saves a file or is a USB drive, with that reason. Older firmware fails with "mod
 when needed and says so in `caveats`, the touch UI is frozen while the host holds it, and a tap on the banner makes
 the next call fail with "scope released by user". There is no release tool any more: the server releases REMOTE,
 keeping the host's settings, after `FNIRSI_MCP_LEGACY_IDLE_RELEASE_S` (60 s) without tool calls and at exit.
+
+**The port is free while no tool runs**: the server opens the serial port on the first tool call and closes it
+again after `FNIRSI_MCP_IDLE_CLOSE_S` (30 s) without one; the next call reconnects by itself (about the cost of a
+first connect). Other programs (your own scripts, `fnirsi1013d-flash`, `fnirsi1013d-soak`) can use the port in
+between; a tool call while one of them holds it fails with the port error and works again once it is free. On
+legacy firmware the port stays open while the host holds REMOTE (the release above comes first).
 
 Confirmation tokens are bound to the exact
 arguments, single-use, and expire after 120 s. Waveforms of any length go to `.npz` (`t`, volts, codes, clip
