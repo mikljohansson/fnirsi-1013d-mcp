@@ -485,7 +485,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
-- fw-fr4 (done 12:02, about 120k tokens, merged 11:56 as fw 0.2.86): AUTO SET = overview, passes, one single sweep at the found
+- fw-fr4 (done 11:55, about 120k tokens, merged 11:56 as fw 0.2.86): AUTO SET = overview, passes, one single sweep at the found
   settings, STOP (view bit 1 clear throughout; button red STOP / "Auto..." while it runs, chip RUN, then green RUN / chip STOP);
   "Stop sweep" and the Sweep card count the sweep in progress from the engine (the table's completion flags were reused on a
   same-span repeat, hence "50 / 50"). Bench: section 55 addendum.

@@ -1206,4 +1206,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   the found settings, never RUN (fw-fr4); RUN stays continuous for live tuning; every sweep at the same span and settings
   reuses the previous per-point range plan so the relays stay quiet (engine item after fpga-gen10). Owner on 0.2.85: the "Stop
   sweep" button's progress line reads "50 / 50" throughout a single sweep instead of counting (sent to fw-fr4).
+- 2026-10-20 11:57: fw 0.2.86 (fw-fr4: AUTO SET ends in STOP after one sweep; the Stop sweep / Sweep card count from the engine)
+  pinned backups/fw-0.2.86_eb0b4b16.bin (sha256 eb0b4b16d5220ba5b97a1291c4f2e989a18e5b9d3a9ea424bafbbaa6c1d3a6ee), loaded. Owner's
+  precise report on 0.2.85 matches the found cause: the first Single sweep from the fold-out counts, a second with the same
+  parameters shows "50 / 50" (the same-span repeat kept the table's completion flags), changed parameters count again.
 
