@@ -31,6 +31,12 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.81 - provisional (protocol 1.24, unchanged)
+
+- The "Host command: menu closed" note is gone (owner 2026-10-20 10:31: not wanted): a host request still closes the
+  scope's menus, fold-outs and dialogs by their cancel paths, now silently; the yield counters (GET_LINK_STATS 68-69)
+  stay. The MCP menu caveat no longer quotes the note (ffc8221).
+
 #### 0.2.80 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Capture-stage training and self-check: the FPGA outlier threshold (0x64) is written as 32 codes instead of the power-on 8.

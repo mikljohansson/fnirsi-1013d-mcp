@@ -179,7 +179,7 @@ On collaborative firmware the person at the scope can change any setting at any 
 capture carries the `settings_seq` it was taken under. Long runs (averaging, decay fit, FFT) restart when a
 setting changes mid-run and say so in `restarts` / caveats: report it, and if it keeps happening, ask the person
 to leave the knobs alone (the tool gives up after 5 restarts). A menu open on the scope is closed by your next request on
-firmware 0.2.78+ (protocol 1.23; the caveat says so and the screen shows "Host command: menu closed"): tell the person
+firmware 0.2.78+ (protocol 1.23; the caveat says so, the scope shows no note): tell the person
 if they were using it. Older firmware fails with "modal screen" (E_BUSY): ask them to close it. Leave the scope as you found it where reasonable (RUN, the
 user's range) and say what you changed.
 

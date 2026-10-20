@@ -331,7 +331,7 @@ class DisplayMode(enum.IntEnum):
 
 
 #: Protocol 1.23 (fw 0.2.78, docs/protocol.md section 14 row 63): a request that needs the scope's main loop while a menu,
-#: fold-out, dialog or screen is open closes them by their cancel paths (the screen says "Host command: menu closed") and
+#: fold-out, dialog or screen is open closes them by their cancel paths (silently since fw 0.2.81) and
 #: is answered; E_BUSY only with one of the BusyDetail reasons. Older firmware answered E_BUSY detail 0 while any menu was
 #: open, and the person had to close it.
 YIELD_MINOR = 23

@@ -133,8 +133,8 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   Return, a file message is dismissed, the first-run screen answers Later, the calibration wizard and the volts
   calibration Cancel between steps (nothing written). The yield never takes a path that writes something the user
   did not confirm (the generator keypad closes without the typed number); what the user already changed stays, as
-  with the cancel path itself. The warning line at the top middle says "Host command: menu closed" for 4 s (white,
-  ahead of the warnings; Frequency response in its warning line).
+  with the cancel path itself. The unwinding is silent: no note on the screen (fw 0.2.78-0.2.80 showed "Host
+  command: menu closed" for 4 s; removed in fw 0.2.81, owner 2026-10-20: not wanted).
 - **What does not yield** keeps E_BUSY with the reason as its detail and text, so the host can say why: a calibration
   measurement in progress (the wizard's steps and Save, a volts calibration step), a file save in progress (SAVE PIC,
   SAVE WAVE, the Frequency response CSV, the Diagnostics report), USB drive mode. A new modal loop adds the yield

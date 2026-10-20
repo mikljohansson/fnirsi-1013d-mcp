@@ -596,7 +596,7 @@ async def test_menu_open_on_the_scope(sim_factory, tmp_path):
     async with client_for(srv, tmp_path) as c:
         r = await c.call("scope_set_timebase", divider=9)
         assert r["applied"]["divider"] == 9
-        assert any("Host command: menu closed" in x for x in r["caveats"])
+        assert any("closed it for this request" in x for x in r["caveats"])
     assert not srv.device.ui_busy and srv.device.ui_yields == 1
     old = sim_factory(proto_minor=22)
     old.device.ui_busy = True
