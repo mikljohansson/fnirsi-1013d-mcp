@@ -1990,6 +1990,144 @@ after pinning the images in `backups/`):
 6. Segments in auto mode with a sparse trigger (section 6 step 7 with the generator off): the untriggered segments
    read as flat records without a seam.
 
+### 12. Trigger types and hold-off; version 0x153C, item C1 (fpga-c1, 2026-10-20)
+
+Item C1 of `docs/plans/fpga-0x153c.md` (sections 2.1, 2.2, 2.4, 3, 9.1; the owner accepted the meaning change of 0x1B,
+contract question 1): the trigger-type design of branch `gen8-features-wip` (commit 9de82ca, built and simulated on 0x1539
+as "0x153A") rebased onto the 0x153B source, plus the trigger hold-off. Peak detect (C2) and the counter (C3) are separate
+items of the same generation; the version byte becomes 0x3C at integration (C4). With the power-on values (0x5E = 0,
+0x1B = 0) the capture is cycle-identical to 0x153B: every equivalence step of `tb/run.sh` passes unchanged.
+
+#### Register map
+
+Writes (latched like 0x15..0x17: any time before 0x01 = 0, also inside the 0x01 = 1 window after the 0x05 wait):
+
+| Cmd | Bytes | Bits | Meaning |
+|---|---|---|---|
+| 0x16 | 1 | 0 | polarity, per type (below). Unchanged for the edge type |
+| 0x1B | 4 | 31..0 | **trigger hold-off**, 5 ns units, 0 = off (power-on). Meaning change: Atlan4 stored it and never used it |
+| 0x5E | 1 | 2..0 | **trigger type**: 0 edge (power-on), 1 pulse width, 2 Nth edge, 3 timeout; 4 runt and 5 window are 0x153E and act as edge here, like 6 and 7 |
+| | | 3 | pulse width: 1 = longer than N, 0 = shorter than N (gen8 had this on bit 2) |
+| | | 7..4 | reserved, write 0 (0x153E: bit 4 range, bit 5 both cores) |
+| 0x5F | 3 | 23..0 | **N**, high byte first: pulse width and timeout in samples (1 .. 2^24 - 1); Nth edge: bits 15..0 (1 .. 65535, 0 acts as 1) |
+| 0x60 | 3 | 23..0 | **idle time H** for the Nth edge, samples; 0 = count from the arm |
+| 0x66 | 1 | 0 | 1: the next 0x01 = 1 also clears the hold-off timer (one-shot, consumed by that 0x01 = 1) |
+
+Reads:
+
+| Cmd | Bytes | Content |
+|---|---|---|
+| 0x34 | 3 | trigger qualifier status: byte 0 = { 0, 0, counting (Nth edge: an idle gap was seen, or H = 0), a sample off the pulse side was seen since the capture reset (pulse width), source EXT, longer, type bits 1..0 }; bytes 1..2 = edges still to count before the qualifying one (Nth edge). Asynchronous: read twice if it matters |
+| 0x37 | 1 | { 0, 0, 0, hold-off running, type bit 2, both cores (0x153E, 0), trigger core (0x153E, 0), 0 } |
+
+#### Trigger types
+
+**Streams and units.** Each source has its own qualifier (module `trig_qual`):
+- CH1 / CH2: the trigger stream the edge trigger compares, one sample per memory word. Legacy (K = 0): core A of the
+  channel (`adc*_w` since 0x153A), one sample per `10 (D + 1)` ns; K >= 1: the 16-bit output samples (or the peak words
+  of C2), one per `N_dec x 5` ns. N and H count these samples.
+- EXT: the synchronised and filtered `ext_level`, one sample per 5 ns, at every sample rate. N and H count 5 ns clocks
+  (N up to 83.9 ms).
+- The level is the edge trigger's (0x17, or 0x55 with K >= 1), without hysteresis, as for the edge trigger.
+
+**Definitions** (the side of the level a sample is on decides everything; the trigger always fires on an edge the edge
+trigger could fire on, except the timeout):
+
+| Type | 0x16 = 0 | 0x16 = 1 | Fires on |
+|---|---|---|---|
+| Pulse width | positive pulse (high run) | negative pulse (low run) | its trailing edge, when its width w (samples on the pulse side) is w < N, or w > N with 0x5E bit 3. The pulse must have begun after the capture reset: a sample off the pulse side was seen first |
+| Nth edge | rising edges | falling edges | the Nth edge. H = 0: edges count from the arm (the pretrigger has filled). H > 0: the count restarts when the level has held for H samples (no edge of either direction), so the trigger is the Nth edge of each burst; H = 1 restarts on every edge |
+| Timeout | high after a rising edge | low after a falling edge | the sample that makes the run N + 1 samples long (the level has held for more than N samples since the edge, or since the capture reset), no edge needed |
+
+**Trigger position.** For CH1 / CH2 the trigger position is exactly the edge trigger's for the qualifying edge (the
+timeout's for the qualifying sample): trigger_address = (memory word of the trigger sample) - 1, as for every edge trigger.
+For EXT the qualified types decide one clock (5 ns) after an edge trigger on the same edge would, then apply on the next
+write clock rise like any EXT trigger; the firmware's EXT latency correction stays the same within one 5 ns clock.
+
+**How it works** (adds nothing to the timed trigger path):
+- The edge trigger's compare (`trigger_previous` against `trigger_data`, the half-cycle path) is unchanged. For a type
+  other than edge, `trigger_previous` is not loaded with the previous sample but with a value on the pre-detect side of
+  the level when the qualifier says the next edge is the trigger, else one on the other side. The qualifier only looks
+  at samples before the next one, so the compare fires exactly on the qualified edge, or on the sample after a held
+  level for the timeout (the compare itself checks that the data sample is on the post-detect side).
+- `trigger_edge` holds the detect direction: 0x16 for edge, Nth edge and timeout, its complement for the pulse width
+  (whose trailing edge is the opposite of its polarity). `trigger_ext` (the EXT edge path) is set only for the edge type.
+  Both are recomputed on writes of 0x15, 0x16 and 0x5E, so the edge type is bit-identical to 0x153B.
+- EXT: the qualifier runs on `ext_level_prev` / `ext_level` at 200 MHz, and its registered event (`ext_qev_r`) sets
+  `ext_pending`.
+- Counters: 25-bit down counters with a frozen sign bit for the run lengths (no compare in the decision), a 16-bit down
+  counter for the edges with registered "next is the Nth" and "the level has held for H" flags (`rz`, `gap_r`).
+- Rebase changes against gen8 (contract 3.2): (1) the qualifier's `fire` into `trigger_previous` is gated with the
+  0x153B stop (`sample_write_enable`), so no qualified type can latch a trigger after the write has stopped; (2) the ADC
+  qualifier stays in reset until the first `swc_adv` edge after a capture reset (`q_hr_adc`: the edge that writes word 0
+  and loads it into `trigger_data`), so 0x5E / 0x5F / 0x60 written inside the 0x01 = 1 window apply at every rate (the
+  0x1537 rule for 0x0B; gen8's reset kept a stale N at slow rates) and the first sample it processes is word 0 of the
+  capture, legacy and K >= 1 alike (gen8 processed the reset value of `trigger_data` first; the two differ only for a
+  pulse that begins at word 0, before the pretrigger has filled, where no trigger can fire); (3) "longer" on 0x5E bit 3
+  and a 3-bit type with 4..7 acting as edge (bit 2 read in 0x37).
+
+**Firmware, per type** (in the arm, with the other trigger writes; contract 3.5):
+- Edge: write 0x5E = 0 (also restores the behaviour of 0x153B at any time).
+- Pulse width: 0x5E = 1 (+ 8 for "longer than"), 0x5F = N, 0x16 = polarity. N = round(t / sample period) (CH1 / CH2:
+  the record's word period; EXT: 5 ns). The UI's "> t" / "< t" map to longer / shorter. N = 0 is rejected by the firmware.
+- Nth edge: 0x5E = 2, 0x5F = N, 0x60 = idle time in samples (0: from the arm), 0x16 = counted edge.
+- Timeout: 0x5E = 3, 0x5F = N >= 1, 0x16 = 0 (stays high) or 1 (stays low).
+- Auto mode (0x1A = 0) and the auto time-out work as before for every type (0x153B's rules: no trigger after the stop,
+  time-out only while untriggered). Segments and averaging use the type for every record (the qualifier restarts with
+  each record).
+- Read 0x34 to show "waiting for edge k of N" or to check the configuration; 0x37 for the hold-off and type bit 2.
+
+#### Trigger hold-off (0x1B, contract 3.6)
+
+- From the rise of `sampling_triggered` (the trigger of a record) the trigger check (`trigger_check_enable`) is masked
+  for exactly 0x1B clocks of 200 MHz (5 ns .. 21.47 s): a 33-bit signed down counter loaded with 0x1B - 2, the mask ends
+  on the clock after its sign sets (the sequencer's `q_hc` pattern; the counter's sign bit, a register, feeds the mask
+  register, so the compare path is untouched and the only long path is the decrement chain).
+- The timer is not reset by `cap_rst` (sequencer restarts) nor by 0x01 = 1 alone, so a train's records keep their spacing
+  across segments and MCU re-arms. 0x66 bit 0 = 1 makes the next 0x01 = 1 clear it (a one-shot, consumed by that 0x01 =
+  1; a toggle handshake carries it from the MCU clock into clk_200MHz), and 0x1B = 0 releases the mask at once (a running
+  timer is ignored; the contract's "0 = off").
+- An auto capture whose time-out falls inside the hold-off ends untriggered (0x18 = 0, 0x14 = W - total + pretrigger as
+  on 0x153B); a normal capture waits for the first qualifying edge after the hold-off. The EXT path is masked the same
+  way (the `ext_pending` latch takes `trigger_check_enable`), and the qualifier keeps counting during the hold-off (an
+  Nth edge counts edges inside it).
+- Firmware: write 0x1B in the arm (any time before 0x01 = 0; 0 = off); write 0x66 = 1 before the first arm of a session
+  so a timer left by the previous session does not delay its first trigger; caps bit 2 HOLDOFF.
+
+#### Tests
+
+`tb/run.sh` step 14, `tb_trigtypes.v` (gen8's testbench rebased; `ONLY=trigtypes`, `TRIGTYPES_RUNS`): 7 cases (CH1 / CH2
+legacy at 10 and 200 MSa/s, CH1 boxcar N = 20, CH2 CIC2 N = 2, EXT legacy and K = 1), both polarities, every type: pulse
+width shorter / longer with clear widths (N +- 2.5..4) and random widths around N (N +- 1.5), Nth edge 3 from the arm and
+4 after an idle time of 20, both also with the train running across the arm, Nth edge 1 against the edge type, the
+timeout; the reserved types 4 and 7 against the edge calibration with 0x37 bit 3; the 0x34 / 0x37 read-back. The FPGA's
+trigger sample must be the one a reference model finds on the stream the FPGA saw (rebuilt from the sample memory and the
+arm flags, or for EXT from `ext_level`), at the edge type's position; the clear cases also against the stimulus (within
+1.5 samples of the intended edge). New cases: the late write (divider 999, 0x5E / 0x5F written after the 0x05 wait right
+before 0x01 = 0 after a stale N: the third edge, not the first), the hold-off on a 4 us square at 10 MSa/s (a 4-segment
+run and MCU re-armed single captures trigger every fifth edge with a 4.5-period hold-off against every second without;
+0x66 then 0x01 = 1 clears it and the one-shot is consumed; 0x1B = 0 releases it at once; an auto capture inside the
+hold-off ends untriggered at W - total + pretrigger; EXT and the pulse-width type held off alike; 0x37 bit 4 follows the
+timer), and the 0x153B stop gate for every type on CH1 and EXT (a time-out capture takes no trigger from a qualifying
+event afterwards: 0x18, 0x14, `sampling_triggered`, `ext_pending` unchanged). **1293 checks, 0 failed on seeds 12345
+and 4242** (about 200 s each). Mutants caught (`DUT=` runs): the hold-off mask removed (9 failures), the 0x66 clear not
+consumed (2), "longer" on bit 2 (45), gen8's qualifier reset (1: the late write).
+
+#### Build (TD 4.6.8 SP1, `build.sh`)
+
+A synthesis check of the C1 branch alone (the version byte still 0x3B; C4 integrates and pins): 5721 LUT (66.2 %) /
+4682 reg / 6314 LE, all block RAM and 2 M18x18 as 0x153B; `clk_200MHz` 0 errors, min period 4.739 ns (the worst path
++0.261 ns is the EXT qualifier's edge count `qual_ext/rem`, 5 levels); `sample_write_clock` 0 errors (9.576 ns);
+`clkc[1]` (2.568 ns) and `i_mcu_clk` (22.152 ns) 0 errors; `clkc[0]` 58 errors (the SDC artefact).
+Against 0x153B (4990 LUT, 4.583 ns): +731 LUT / +300 reg for the two qualifiers, the hold-off and the decoder entries
+(the contract's estimate was about 350 + 60). The placement lottery of the 0x153A notes is real at this size: the same
+logic rolled 5.218 ns (6 errors, the EXT qualifier's `gap` chain, fixed by registering `gap_r`), then 5.186 ns (2 errors on
+0x153B's own `sampling_triggered` half-cycle path into the write-clock `trigger_address` enable and on the sequencer's
+`pp_i` enable), 5.078 ns (1 error on the encode look-ahead `sce_q` into `enc_nxt_n`) and 6.247 ns for four order-only
+rewrites of the same source, before the fifth (the hold-off block placed ahead of the write address counter) met timing;
+the testbenches are indifferent to block order. `~/c1/b3` = `src/` as committed: `FPGA.bin` sha256 `95465a54...1730e`
+(not a release image; nothing in `dist/`).
+
 ## Device facts from the datasheet
 
 Source: Anlogic "AL3 series FPGA datasheet" DS001 v1.3 (Sept 2017, Chinese, maintainer's download `AL3A10LG144.pdf`, 84 pages).

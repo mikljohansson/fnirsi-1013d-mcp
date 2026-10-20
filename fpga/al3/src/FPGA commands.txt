@@ -26,6 +26,11 @@
 //    0x53 bits 3 / 4 read back but select nothing any more. Write 0x36 (CH2 relays) is unchanged. The legacy data
 //    reach the memory 4 words later than on 0x1539 at 200 MSa/s (3 words at divided rates, 40 ns with K >= 1); EXT
 //    is not delayed, so the EXT-to-data offset grows by that much (fpga/al3/README.md section 10).
+//  - 0x5E, 0x5F, 0x60, 0x66 (new writes), 0x34, 0x37 (new reads), 0x1B (meaning changes), 0x153C C1
+//    (docs/plans/fpga-0x153c.md sections 2, 3): trigger types pulse width / Nth edge / timeout on CH1, CH2 and EXT,
+//    and the trigger hold-off on 0x1B (u32, 5 ns units; Atlan4 stored it and never used it, 0x153B and before). With
+//    0x5E = 0 and 0x1B = 0 (power-on) the capture is cycle-identical to 0x153B. Write 0x34 / 0x37 (AC/DC relays)
+//    are unchanged.
 //  - 0x0B, 0x0C, 0x1F high bytes: zaklad.v takes io_mcu_data[5:0] into [12:8] (bit 5 is dropped by the
 //    13-bit register); this file showed [4:0].
 // Multi-byte values are high byte first. Details: fpga/al3/README.md, section "Changes".
@@ -175,6 +180,21 @@
                     //counted while the capture writes (saturating at 65535). With a quiet input (noise under the
                     //threshold) a well-captured core reads 0; a core captured inside its data transition reads
                     //about every word. Read after the capture (0x0A = 1).
+
+            8'h34: //Trigger qualifier status (0x153C), 3 bytes
+                  4'h0:
+                    o_mcu_data <= { 2'b00, counting, pulse_began, trig_src_ext, trig_pw_long, trig_type[1:0] };
+                    //bit5 Nth edge: counting (an idle gap was seen, or 0x60 = 0); bit4 pulse width: a sample off the
+                    //pulse side was seen since the capture reset; bit3 the source is EXT (0x15 bit 1 as written);
+                    //bit2 longer (0x5E bit 3); bits 1..0 = 0x5E bits 1..0 as written (bit 2 of the type is in 0x37)
+                  4'h1..4'h2:
+                    o_mcu_data <= rem[15:8], rem[7:0];   //Nth edge: edges still to count before the qualifying one,
+                    //of the EXT qualifier when the source is EXT, else of the CH1 / CH2 one; asynchronous (read twice)
+
+            8'h37: //Trigger extension status (0x153C), 1 byte
+                    o_mcu_data <= { 3'b000, holdoff_running, trig_type[2], both_cores, trigger_core, 1'b0 };
+                    //bit4 the trigger hold-off (0x1B) is running (no trigger is accepted); bit3 = 0x5E bit 2;
+                    //bits 2, 1 reserved for 0x153E (both cores on, trigger core), read 0 here
 //---------------------------------------------------------------------------------------
             8'h41: //Reading of the touch panel address needs loading of high byte first
                   4'h0:
@@ -229,13 +249,16 @@
 
             8'h15: //Setting the trigger source: 0 = CH1, 1 = CH2, 2 = EXT, 3 = reserved (acts as EXT)
                     trigger_channel <= io_mcu_data[0];
-                    trigger_ext     <= io_mcu_data[1];
+                    trigger_ext     <= io_mcu_data[1] & (0x5E type is edge);   //0x153C: the EXT edge path for the edge
+                    trig_src_ext    <= io_mcu_data[1];                         //type; a qualified type on EXT runs the
+                                                                               //EXT qualifier instead
                     //EXT: calibration pin P133, 3.3 V logic, generator must be off (cmd 0x50 = 0).
                     //Edge from cmd 0x16, mode/pretrigger/total/time-out unchanged, level (0x17) unused.
                     //trigger_address (cmd 0x14) = last sample written before the EXT edge, as for CH1/CH2.
-              
-            8'h16: //Setting the trigger edge
-                    trigger_edge <= io_mcu_data[0];
+
+            8'h16: //Setting the trigger edge (0x153C: the polarity per type, see 0x5E; edge type unchanged)
+                    trigger_edge <= io_mcu_data[0] ^ (0x5E type is pulse width);   //the detect direction: the
+                                                                                    //trailing edge of the pulse
             
             8'h17: //Setting the trigger level
                     trigger_level <= io_mcu_data;
@@ -243,15 +266,16 @@
             8'h1A: //Setting the trigger mode
                     trigger_mode <= io_mcu_data[0];
                            
-            8'h1B: //Loading of the four bytes of the hold on divider high byte first
-                  4'h0:
-                    hold_on_divider[31:24] <= io_mcu_data;
-                  4'h1:
-                    hold_on_divider[23:16] <= io_mcu_data;
-                  4'h2:
-                    hold_on_divider[15:8] <= io_mcu_data;
-                  4'h3:
-                    hold_on_divider[7:0] <= io_mcu_data;
+            8'h1B: //Trigger hold-off, 4 bytes high byte first, 5 ns units, 0 = off (0x153C; up to 0x153B Atlan4's
+                   //"hold on divider", stored and never used)
+                  4'h0..4'h3:
+                    trig_holdoff[31:24], [23:16], [15:8], [7:0] <= io_mcu_data;
+                    //From the trigger of a record (the rise of 0x18) no trigger is accepted until 0x1B clocks of
+                    //200 MHz have elapsed (exact, 5 ns .. 21.47 s). The timer is not reset by the sequencer's restarts
+                    //nor by 0x01 = 1 alone, so a train's records keep their spacing across segments and MCU re-arms;
+                    //0x66 bit 0 = 1 makes the next 0x01 = 1 clear it (a session restart), 0x1B = 0 releases the mask
+                    //at once. An auto capture (0x1A = 0) whose time-out falls inside the hold-off ends untriggered
+                    //(0x18 = 0, 0x14 = W - total + pretrigger). Read 0x37 bit 4 = running.
             
             8'h32: //Loading of the two bytes of the channel 1 DC offset high byte first
                   4'h0:
@@ -415,5 +439,41 @@
 
             8'h64: //Outlier threshold for the 0x36 counters, 1 byte, codes; power-on 8
                     cap_thr <= io_mcu_data;
+
+//---------------------------------------------------------------------------------------
+// Trigger types (0x153C C1). Details: fpga/al3/README.md "Changes" section 12, docs/plans/fpga-0x153c.md section 3.
+// Units of N and H: CH1 / CH2 = samples of the trigger stream (one per memory word: legacy core A of the channel,
+// K >= 1 the 16-bit output samples); EXT = 5 ns clocks. The level is the edge trigger's (0x17, or 0x55 with K >= 1).
+// The trigger position is the edge trigger's for the qualifying edge (0x14 = the word of the trigger sample - 1;
+// timeout: the qualifying sample); EXT qualified types decide 5 ns after an EXT edge trigger on the same edge.
+// 0x5E, 0x5F, 0x60 are latched like 0x15..0x17: written any time before 0x01 = 0 (also inside the 0x01 = 1 window
+// after the 0x05 wait, at every rate). The qualifier restarts with each record (sequencer restarts included).
+// Power-on 0x5E = 0 (edge): identical to 0x153B.
+
+            8'h5E: //Trigger type, 1 byte
+                    trig_type    <= io_mcu_data[2:0];  //0 edge, 1 pulse width, 2 Nth edge, 3 timeout; 4 runt and
+                                                       //5 window are 0x153E (here, like 6 and 7, they act as edge)
+                    trig_pw_long <= io_mcu_data[3];    //pulse width: 1 = longer than N, 0 = shorter than N
+                                                       //bits 7..4 reserved (0x153E: bit 4 range, bit 5 both cores), write 0
+                    //0x16 per type: edge = the edge; pulse width 0 = positive pulse (trigger on its falling edge),
+                    //1 = negative pulse; Nth edge = the counted edge; timeout 0 = held high after a rising edge,
+                    //1 = held low after a falling edge.
+                    //Pulse width: fires on the trailing edge of a pulse of w samples with w < N (shorter) or w > N
+                    //(longer); the pulse must have begun after the capture reset (a sample off the pulse side seen).
+                    //Nth edge: the Nth edge in the counted direction, counted from the arm (the pretrigger filled,
+                    //0x60 = 0) or from the start of each burst (the count restarts when the level has held for H
+                    //samples without any edge, 0x60 = H).
+                    //Timeout: the sample that makes the held run N + 1 samples long after the edge (or the arm), no
+                    //edge needed.
+
+            8'h5F: //N, 3 bytes high byte first: pulse width / timeout 1 .. 2^24 - 1 samples (N = 1 degenerates to the
+                   //edge type with one sample of context); Nth edge bits 15..0 (1 .. 65535, 0 acts as 1)
+
+            8'h60: //Nth edge idle time H, 3 bytes high byte first, samples: the count restarts when the level has held
+                   //for H samples (a burst); 0 = edges count from the arm (pretrigger filled)
+
+            8'h66: //Hold-off clear request, 1 byte
+                    ho_clr_req <= io_mcu_data[0];      //1: the next 0x01 = 1 also clears the hold-off timer of 0x1B
+                                                       //(one-shot, consumed by that 0x01 = 1)
 
 //=======================================================================================
