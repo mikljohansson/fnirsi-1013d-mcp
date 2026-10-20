@@ -285,17 +285,17 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   plan change: the C0 cruft removal (contract: "first, on main") is folded into C4 integration (Fable) after C1-C3 merge,
   so the three running RTL branches are not disturbed; fw-one told 23:29 to stop writing 0x53 bits 3/4 and to bound the
   divider at 199,999.
-- ui-rows-review (Opus, dispatched 23:39, done 23:52, read-only): adversarial review of the Type / Sample row mockups and note against
+- ui-rows-review (Opus, dispatched 23:39, done before 23:48, read-only): adversarial review of the Type / Sample row mockups and note against
   docs/ui-guidelines.md and the owner's taste; answers to the note's six open questions so the coordinator can decide
   tonight and the owner veto in the morning.
-- Coordinator decisions on the ui-rows review (23:5x, as the owner's proxy, owner veto pending): ACQ menu widened to 478 px
+- Coordinator decisions on the ui-rows review (23:4x, as the owner's proxy, owner veto pending): ACQ menu widened to 478 px
   with Sample as the fourth box (the mockup hid a collision with the five memory chips and drew the pass time at the
   wrong y); no silent clamp: Width / Idle snap to the rate's range with the snap notice, +/- stop at the ends, Width
   Shorter >= 2 words; no feature gating (one-bitstream rule); hints say only what the firmware knows; under Pulse the edge
   row becomes Pulse polarity Positive / Negative; trace style "Peak" renamed "Bars"; Idle zero step "Off", values
   capitalised; no Sample box in Spectrum, grey in roll; viewer and Frequency response boards; N by +/- and the generator
   keypad on a tap, no held repeat; chip glyphs in firmware pixels; bars drawn with the integer step, overload from either
-  byte, phosphor accumulates, X-Y midpoints. ui-rows round 2 dispatched 23:54.
+  byte, phosphor accumulates, X-Y midpoints. ui-rows round 2 dispatched just before 23:48.
 - ui-rows (Opus, dispatched 23:15, done 23:37, merged 23:38 as 1742743): eight mockups under docs/mockups/ui-rows/ (a
   headless-Chrome PNG renderer added to gen_ux), docs/plans/ui-rows.md. Type as the trigger menu's sixth row with Width
   / shorter-longer or N / Idle parameter rows (+/- ladder), the chip shows the type as a glyph in the edge slot, Peak greys
