@@ -1194,4 +1194,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   flat-record retakes; the running server process keeps the old code until the session restarts). Owner next: AUTO SET on the
   RC (expected: 1 kHz .. 200 kHz in RUN, or a "no consistent response" stop if the first record is bad), Single sweep from the
   fold-out (firmware/AGENTS.md section 55 steps 1..5).
+- 2026-10-20 11:44: owner on 0.2.84: "sometimes AUTO SET gives up after one attempt, sometimes it still loops with different
+  warning messages each time (CH1 level low, points not settling) for 10+ times". State after the owner's STOP: sweep id 27,
+  span 500 Hz .. 100 kHz / 50 points (a sound auto result for the RC), 34 of 50 points unflagged, but the table holds the first
+  20 points at CH1 2.5 V/div and the last 30 at 0.5 V/div: RUN was repeating and the sweep in progress had ranged CH1 coarse in
+  its pre-scan again (the first-record artefact hits the pre-scan of a repeated sweep too, about every other sweep), so the
+  warnings change from sweep to sweep. Two conclusions: the artefact is the dominant fault (fpga-gen10); and continuous RUN after
+  AUTO SET reads as "looping" with the relays clicking (2 CH2 switches per sweep): proposal to the owner: AUTO SET ends with
+  one sweep at the found span and STOP, RUN stays explicit.
 
