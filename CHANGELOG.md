@@ -31,6 +31,20 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.83 - 2026-10-20 (protocol 1.24, unchanged apart from the text of READ_BODE reason 8; provisional number)
+
+- Frequency response: AUTO SET and device sweeps no longer end in the pre-scan with "ADC readout fault" on a clean
+  readout (51ab2a4). The engine took its clip flag from the readout's `ADoverload`, which stays set from any earlier
+  readout (a clip in the Scope view, an earlier sweep, one saturated record) until the Scope view clears it: every later
+  capture counted as clipped, the pre-scan stepped both channels down to 5 V/div and the 0.2.71 rule fired (bench
+  2026-10-20 10:52 on 0x153A; the 10-19 20:51 sweeps with every point clipped fit the same flag). Clipping is now judged
+  from the measured record's own minimum and maximum only. Reason 8 comes from the capture self-check on 0x153A+ (0x36
+  outliers flagged on an engine capture at 200 MSa/s, or a core flagged 3 times within a minute), at any point of the
+  sweep; a clean self-check with a small signal gives flagged points (ch1_low, clipped), not a fault. Bitstreams
+  without the self-check keep the 0.2.71 rule on the record's own rail samples.
+- Host captures, READ_TRACE's per-channel overload bits and GET_STATUS bits 6-7 report the latest readout of the
+  channel instead of any readout since the Scope view last cleared the flag (51ab2a4).
+
 #### 0.2.82 - 2026-10-20 (protocol 1.24, unchanged)
 
 - The "Host command: menu closed" note is gone (owner 2026-10-20 10:31: not wanted): a host request still closes the
