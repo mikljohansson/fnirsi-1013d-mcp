@@ -1380,6 +1380,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   bootloader loads the image by its header length with no size limit of its own, v0.7 source fnirsi_1013d_startup.c:348-400
   and the v0.8 binary at 0x53A0; the open risk is its per-word read timeout above 1000 sectors) pinned
   backups/fw-0.2.101_c6ff261e.bin (sha256 c6ff261ea8b7432655e407410079e64f6469149c8826b2967ef7fb62b3d58bed), loaded, then
-  **persisted to the card** with `--persist-only`: window [16, 8192), backup backups\sd_750-2048_20261018-154957.bin (sectors 750..2261 read twice), 1512
+  **persisted to the card** with `--persist-only`: window [16, 8192), backup backups/sdcard/sd_750-2262_20261020-192228.bin (sectors 750..2261 read twice), 1512
   sectors written in 2.97 s, read back identical, eGON.EXE length 774144 checksum 0x5D198C86 verified. The card held 0.2.25
   (397,312 B) since 2026-10-18. Power cycle with the owner next: the first boot of an image over 776 sectors from the card.
