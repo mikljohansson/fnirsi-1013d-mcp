@@ -543,7 +543,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
-- fw-diag (Opus, dispatched 18:15, fw 0.2.100 provisional, section 66): the Restarts tile per the owner's verdict meanings
+- fw-diag (Opus, dispatched 18:15, done 18:37, merged as fw 0.2.100 and loaded 18:43, Status page check pending; section 66; open: counter 49 counts deliberate restarts too, a deliberate restart after a crash overwrites the stored record): the Restarts tile per the owner's verdict meanings
   (OK = no crashes, deliberate restarts not mentioned; Check = an earlier run crashed; Fault = a crash in this run; no
   exception jargon on the Status page), the noise rows with the open-input limits (3.0 full / 1.0 gated, labelled "inputs
   open", one constant with the wizard's pass criterion, the "provisional" note gone, a better advice line), the guide texts.

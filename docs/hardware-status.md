@@ -1364,3 +1364,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   ladder: every point from 128 kHz up grey (ch2_small, r2 5, -44..-71 dB then climbing to -28 dB at 10 MHz), the curve joined
   only below, the two-line note reads "above 128 kHz", the axes scale to the valid points, -3dB card 14.31 kHz (the ladder's
   corner differs from the first-stage 3.7 kHz read with CH1 on node A). Screenshot scratchpad fr_floor.png.
+- 2026-10-20 18:43: fw 0.2.100 (fw-diag: Restarts tile OK "No crashes." after a deliberate restart, Check only for an
+  earlier crash this power-on, Fault for a crash in this run, no exception jargon on the Status page; noise limits of the
+  open-input condition, full 3.0 / gated 1.0 codes, one pair of constants for the wizard, the training check and
+  Diagnostics, the "provisional" note gone, the advice line reworded) pinned backups/fw-0.2.100_f7b1bd8b.bin (sha256
+  f7b1bd8b5e867b6cb38383c60e9b6bf44c2faaa604b86e7675ffd134524125ff; the agent's own build read 67c31cdd.., the merge
+  commit changes the identity), loaded. Status page check with the owner pending (Restarts OK, noise rows 1.19 / 2.75
+  against 3.0 and 0.50 / 0.38 against 1.0 all OK).
