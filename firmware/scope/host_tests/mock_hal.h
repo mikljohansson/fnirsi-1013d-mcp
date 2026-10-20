@@ -62,6 +62,7 @@ typedef struct
   pc_hw_channel  ch[2];
   uint32_t       ch_writes;
   pc_hw_timebase tb;
+  uint32_t fpga_divider;          //0x0D the FPGA holds (pc_hal_divider_now): every timebase write; a UI snap is tb only
   uint32_t       tb_writes;
   pc_hw_trigger  trg;
   uint8_t        gen_en, gen_duty;

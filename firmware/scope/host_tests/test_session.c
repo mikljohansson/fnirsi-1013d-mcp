@@ -3024,6 +3024,44 @@ static resp_t enc_capture(void)
   return wait_done(1000);
 }
 
+//fw 0.2.87 (firmware/AGENTS.md section 57, fpga/al3/AGENTS.md "First-record saturation"): the host's raw divider 4095,
+//then a UI time/div snap that writes no 0x0D (acq_view_fit) and clears tb_raw at the next poll, then a host ARM with
+//CIC2 + FIR: the arm computes N and the shift from the divider the FPGA holds (N 4096, S 15), not from the UI table
+//(D 199: S 7, every word 0xFFFF on the bench). GET_DECIM and GET_CAPTURE_INFO report that divider.
+static void test_decim_held_divider(void)
+{
+  resp_t  r;
+  uint8_t p[8];
+
+  setup(0x153A);
+  set_trigger(0x30, 0, 0, 0, 0, 0, 4096, 0, 0, &r);
+  T_EQ(r.h.status, 0);
+  memset(p, 0, 4); p[0] = 2; p[1] = 0x08;
+  r = req(PC_CMD_SET_DECIM, p, 4);
+  T_EQ(r.h.status, 0);
+
+  enc_divider(4095);
+  r = req(PC_CMD_GET_DECIM, 0, 0);
+  T_EQ(pc_get_u32(r.p + 16), 4095); T_EQ(pc_get_u32(r.p + 4), 4096); T_EQ(r.p[3], 15);
+
+  //The snap: the UI's time/div and its table divider change, the FPGA keeps 4095
+  mock.tb.timeperdiv = (uint8_t)(mock.tb.timeperdiv + 1);
+  mock.tb.divider    = 199;
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  r = req(PC_CMD_GET_TIMEBASE, 0, 0);
+  T_TRUE(r.p[0] != 0xFF);                                       //tb_raw forgotten: GET_TIMEBASE shows the UI's index
+  r = req(PC_CMD_GET_DECIM, 0, 0);
+  T_EQ(pc_get_u32(r.p + 16), 4095); T_EQ(pc_get_u32(r.p + 4), 4096); T_EQ(r.p[3], 15);
+  T_EQ(pc_get_u32(r.p + 20), 200000000u / 4096);
+
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0);
+  T_EQ(mock.decim_cur.k, 2); T_EQ(mock.decim_cur.n, 4096); T_EQ(mock.decim_cur.shift, 15);
+  r = wait_done(1000);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 16), 4095); T_EQ(r.p[69], 15); T_EQ(pc_get_u32(r.p + 72), 4096);
+}
+
 //fw 0.2.79 (protocol 1.24): FPGA 0x153A capture stages: caps bit 19 and features bit 7 on 0x153A only, the EXT shifts
 //4 / 3 words later, 0x53 bits 3 / 4 kept 0, GET_HEALTH 104..123 (layout 2), GET_CAL 356..363, 0x36 read after full-rate
 //host captures
@@ -3489,6 +3527,7 @@ int main(void)
   test_seq_average();
   test_enc_check();
   test_capture_stages();
+  test_decim_held_divider();
   test_bode();
   mock_clear_resps();
   return t_report("test_session");

@@ -95,6 +95,7 @@ void mock_reset(uint16_t fpga_version)
   mock.tb.timeperdiv = 24;
   mock.tb.samplerate = tpd_sr[24];
   mock.tb.divider    = sr_div[tpd_sr[24]];
+  mock.fpga_divider  = mock.tb.divider;
 
   mock.trg.source     = 0;
   mock.trg.edge       = 0;
@@ -200,6 +201,8 @@ uint32_t pc_hal_mul_factor_1x(uint8_t range)
 
 void pc_hal_timebase_read(pc_hw_timebase *t) { *t = mock.tb; }
 
+uint32_t pc_hal_divider_now(void) { return mock.fpga_divider; }
+
 int pc_hal_timebase_lookup(uint8_t index, uint8_t *samplerate, uint32_t *divider)
 {
   if(index >= 35)
@@ -216,6 +219,8 @@ void pc_hal_timebase_write(const pc_hw_timebase *t, int raw)
     mock.tb.divider = t->divider;
   else
     mock.tb = *t;
+
+  mock.fpga_divider = t->divider;
 
   mock.tb_writes++;
   mock.fpga_ops++;
