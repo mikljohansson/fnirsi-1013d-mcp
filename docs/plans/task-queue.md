@@ -6,7 +6,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- **Frequency response: points below the floor say so and what to do** (owner 10-20 16:00 **(owner)**: "we're just saying the
+- [x] **Frequency response: points below the floor say so and what to do** (fw 0.2.99, bench pending; fw-floor,
+  firmware/AGENTS.md section 65) (owner 10-20 16:00 **(owner)**: "we're just saying the
   state, perhaps a bit cryptically, not saying it in simple terms or what the solution is"; bench 15:5x: the two-pole RC's tail
   above 500 kHz is generator pickup at under one code, drawn as data): (1) ch2_small points (CH2 under 3 codes) drawn grey on
   the device and in the mcp plot (bode.py BAD set), phase too; (2) the top-middle note in plain words with the action, e.g.
