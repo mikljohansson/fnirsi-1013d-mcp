@@ -25,7 +25,8 @@
 #define BODE_SETTLE_COUNT     4
 
 #define BODE_CH2_AUTO         0     //down-ranging with the splice, up-ranging on a clip
-#define BODE_CH2_HOLD         1     //the CH2 range the sweep starts with (the channel's V/div)
+#define BODE_CH2_HOLD         1     //the CH2 range the sweep starts with (the channel's V/div); the screen says Constant
+                                    //(fw 0.2.94): no CH2 range write during the sweep, a clip or a drop only flags the point
 
 //Sweep state
 #define BODE_ST_IDLE          0     //no sweep since the view opened (or cleared)
@@ -269,16 +270,36 @@ int    bode_plan_reused(const bode_eng *e);                   //the latest sweep
 //for CH1 leak (a joined record) or for another reason (suspect, time-out); BODE_CTRL bytes 40..47
 void   bode_capture_stats(const bode_eng *e, uint16 *caps, uint16 *timeouts, uint16 *leak, uint16 *other);
 
-//fw 0.2.93 (owner 2026-10-20 13:33, bode-ui.md 3.2 step 3): AUTO SET's CH2 range mode. The CH2 levels (v2, dBV peak at
-//the tip) of the measured points inside lo..hi (the chosen span; the overview's and the passes' points) are compared:
-//when they spread less than BODE_HOLD_SPREAD_MDB (one range covers them) the result is BODE_CH2_HOLD on the most
-//sensitive range whose full scale (fs_mdb[r], range r's 128 codes peak at the tip in dBV) is at least 1.5 x the largest
-//level (*hold_r2); else BODE_CH2_AUTO. Fewer than two points in the span, a point without a tone (BODE_MDB_FLOOR) or a
-//largest level that no range holds with the margin: Auto.
+//fw 0.2.93 (owner 2026-10-20 13:33, bode-ui.md 3.2 step 3; fw 0.2.94 Hold is "Constant" on the screen, owner 14:16):
+//AUTO SET's CH2 range mode. The CH2 levels (v2, dBV peak at the tip) of the measured points inside lo..hi (the chosen
+//span; the overview's and the passes' points) are compared: when they spread less than BODE_HOLD_SPREAD_MDB (one range
+//covers them) the result is BODE_CH2_HOLD on the most sensitive range whose full scale (fs_mdb[r], range r's 128 codes
+//peak at the tip in dBV) is at least 1.5 x the largest level (*hold_r2); else BODE_CH2_AUTO. Fewer than two points in
+//the span, a point without a tone (BODE_MDB_FLOOR) or a largest level that no range holds with the margin: Auto.
+//fw 0.2.94: a point whose record was bad (BODE_CH2_JUNK: clipped, saturated, unsettled, incoherent; the level is not the
+//circuit's) is left out; near_floor / low_snr / ch2_small points count (their level is small, which is the point).
+//st (may be 0) gets the inputs of the verdict for BODE_CTRL bytes 50..53.
 #define BODE_HOLD_SPREAD_MDB  20000
 #define BODE_HOLD_MARGIN_MDB  3522      //20 log10 1.5
-int    bode_auto_ch2(const uint64 *f_mhz, const int32 *v2_mdb, const uint8 *have, int n, uint64 lo_mhz, uint64 hi_mhz,
-                     const int32 *fs_mdb, uint8 *hold_r2);
+#define BODE_CH2_JUNK         (BODE_F_CH1_CLIPPED | BODE_F_CLIPPED | BODE_F_CH2_OVERLOAD | BODE_F_UNSETTLED | \
+                               BODE_F_INCOHERENT)
+typedef struct
+{
+  uint8  verdict;             //BODE_CH2_*, BODE_AC2_NONE before the first AUTO SET
+  uint8  reason;              //BODE_AC2_R_*
+  uint8  n;                   //points that counted
+  uint8  junk;                //points left out (a bad record)
+  int32  spread_mdb;          //largest - smallest level of the points that counted (0 for fewer than two)
+  int32  vmax_mdb;
+} bode_ac2;
+#define BODE_AC2_NONE         0xFF
+#define BODE_AC2_R_FITS       0     //Constant: one range holds the span
+#define BODE_AC2_R_SPREAD     1     //Auto: 20 dB or more
+#define BODE_AC2_R_FEW        2     //Auto: fewer than two points in the span
+#define BODE_AC2_R_NO_TONE    3     //Auto: a point without a tone
+#define BODE_AC2_R_TOO_BIG    4     //Auto: no range holds the largest level with the margin
+int    bode_auto_ch2(const uint64 *f_mhz, const int32 *v2_mdb, const uint16 *flags, const uint8 *have, int n,
+                     uint64 lo_mhz, uint64 hi_mhz, const int32 *fs_mdb, uint8 *hold_r2, bode_ac2 *st);
 //CH2's full scale per range at the tip (dBV peak, 128 codes) with the probe index of bode_volt_mdb, for bode_auto_ch2
 void   bode_ch2_full_scale(const bode_eng *e, uint8 probe_index, int32 *fs_mdb);
 

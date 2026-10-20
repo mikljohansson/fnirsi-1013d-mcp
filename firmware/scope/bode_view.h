@@ -39,6 +39,8 @@ int    bode_view_autoset(void);
 int    bode_view_auto_running(void);
 //T CURSOR in the view: C1 / C2 on or off
 void   bode_view_tcursor(void);
+//fw 0.2.94: CH2's V/div was chosen by hand in the CH2 menu (statemachine.c): CH2 range Constant (coordinator's addition)
+void   bode_view_ch2_vdiv_by_hand(void);
 //SAVE WAVE in the view: the sweep table as bode/FR00001.CSV (bode-ui.md 3.3)
 void   bode_view_save(void);
 //The MEASURES list's ranks (bode_ui.h BU_MS_*); the cards left of the open menu drawn again after a change

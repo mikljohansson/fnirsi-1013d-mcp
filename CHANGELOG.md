@@ -31,6 +31,25 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.94 - 2026-10-20 (provisional, number not bumped; protocol 1.24; BODE_CTRL answer 58 bytes)
+
+- Frequency response: the Sweep fold-out's CH2 range reads Auto or Constant, not Hold (owner 2026-10-20 14:16;
+  39213e7, 96eb3e5). Constant is the V/div of the CH2 menu, the channel's own setting, shown in the row as e.g.
+  "Constant 100mV". A sweep on Constant writes no other CH2 range, not even in its first capture; a clip or a drop
+  only flags the point, and the warning names the CH2 menu. When AUTO SET picks Constant it sets CH2's V/div, so the
+  CH2 button shows it; leaving the mode keeps CH2's V/div on Constant.
+- Frequency response: choosing a V/div in the CH2 menu while the view shows sets CH2 range Constant, and a sweep in
+  progress starts again on it (93a0c0f; the coordinator's addition, the owner to confirm).
+- Frequency response: AUTO SET's CH2 rule leaves out points whose record was bad, and BODE_CTRL's answer grows to 58
+  bytes with the latest AUTO SET's CH2 verdict, its reason, the points it counted and the spread (96eb3e5, 70e9a9b;
+  mcp `BodeCtrlResp.auto_ch2_*`, docs/protocol.md row 60). The flat path (no corner) runs the rule too; the bench
+  AUTO SET of 14:19 that ended on Auto can be read from these bytes.
+- Frequency response: the AUTO SET note reads "No corner from 100 Hz to 10 MHz" without ": span kept" (owner 14:19;
+  96eb3e5).
+- Screenshots of menus: READ_SCREEN and the GET_* commands that only read state are answered inside the open menu,
+  dialog or screen, which stays open; state-changing commands still close it as since 0.2.78 (ce78bc9;
+  docs/protocol.md row 63). A screenshot of Settings now shows Settings.
+
 #### 0.2.93 - 2026-10-20 (protocol 1.24; BODE_CTRL answer 50 bytes)
 
 - Frequency response: AUTO SET chooses CH2 range Hold when the response inside the span it found fits one range,

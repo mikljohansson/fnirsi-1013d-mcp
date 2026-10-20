@@ -270,7 +270,8 @@ Details that follow from the run-state rule:
      half a decade and Settle Resonant, so a Q 50 tank needed a manual narrower span).
    - Still changing at the overview's low end, meaning the first two valid points differ by more than 1 dB or 5 deg:
      Start becomes 10 Hz.
-   - FLAT or NONE: the span is kept. The note reads "No corner from 100 Hz to 10 MHz: span kept" for 5 s.
+   - FLAT or NONE: the span is kept. The note reads "No corner from 100 Hz to 10 MHz" for 5 s (fw 0.2.94, owner 14:19:
+     the ": span kept" suffix is gone).
    - Every point flagged near_floor or low_snr: the span is kept. The warning reads "Auto set: no response: CH2 tip
      on the DUT output?" (fw 0.2.84 adds the "Auto set: " prefix).
    - **Bad points and the reference (fw 0.2.84).** A point more than 20 dB from both its valid neighbours (an end point:
@@ -299,11 +300,15 @@ Details that follow from the run-state rule:
      peak falls on one overview point) the user guide says so; the 50-character line names the likelier wiring
      cause. FLAT stays a result, not a failure: "No corner ...", one sweep at the kept span, STOP.
 3. **Settle** from Q for a resonance: Normal for Q <= 7, Resonant for Q <= 34, High Q above. Otherwise Normal.
-   **CH2 range** (fw 0.2.93, owner 2026-10-20 13:33, section 10): Hold when the CH2 levels that the overview and the
-   passes measured inside the chosen span spread less than 20 dB (one range covers them), on the most sensitive range
-   whose full scale (128 codes) is at least 1.5 x the largest level (`bode_auto_ch2`); Auto otherwise, and also when
-   fewer than two points fall in the span or one has no tone. A held sweep's point that drops far below the range
-   reads ch2_small as before; the user switches to Auto by hand. **Points** stay the user's.
+   **CH2 range** (fw 0.2.93, owner 2026-10-20 13:33; fw 0.2.94 Constant, owner 14:16, section 10): Constant when the
+   CH2 levels that the overview and the passes measured inside the chosen span spread less than 20 dB (one range
+   covers them), on the most sensitive range whose full scale (128 codes) is at least 1.5 x the largest level
+   (`bode_auto_ch2`); Auto otherwise, and also when fewer than two points fall in the span or one has no tone. Points
+   whose record was bad (clipped, ch2_overload, unsettled, incoherent) do not count (fw 0.2.94). The rule runs on the
+   flat path too (no corner: the span the user had). On Constant AUTO SET writes the range into CH2's own setting, so
+   the CH2 button and its menu show it; on Auto the channel keeps what the final sweep leaves. A point on Constant that
+   clips or drops below 3 codes is flagged and the warning names the CH2 menu ("CH2 overrange: increase V/div in CH2
+   menu or Auto", "CH2 small: decrease V/div in CH2 menu or Auto"). **Points** stay the user's.
 4. **Then one sweep, then STOP** (fw 0.2.86, owner 2026-10-20 11:47, section 10; up to 0.2.85 AUTO SET ended in RUN as
    the Scope's auto setup does). AUTO SET runs one single sweep at the found span, Settle and CH2 range, with the thru
    applied as before, and returns to STOP with the chart and the cards standing; the table and the cards come from that
@@ -352,9 +357,9 @@ The guideline order is Display, the mode's analysis controls, Grid, the steppers
 | 425 | empty | | |
 
 **The steppers stay empty.** The sweep ranges CH1 itself at every sweep's pre-scan, and CH2 too in Auto. A CH1 stepper
-would change nothing, and a CH2 stepper would only matter with CH2 range Hold, and then only at the next sweep. A
+would change nothing, and a CH2 stepper would only matter with CH2 range Constant, and then only at the next sweep. A
 stepper whose effect depends on a fold-out setting, and shows only after a sweep, is a control that seems to do
-nothing. The Hold range belongs to the channel's own home, the CH2 chip's menu, which sets the same
+nothing. The Constant range belongs to the channel's own home, the CH2 chip's menu, which sets the same
 `displayvoltperdiv`. There are no volts on any axis here.
 
 **50 % TRIG stays empty.** A sweep's captures use the FPGA auto mode with no trigger level.
@@ -394,7 +399,7 @@ axis.
 | Stop (- / +) | 10 Hz .. 10 MHz (default 1 MHz) | the same; Start moves down if needed |
 | Points | 10, 20, 50, 100 (default 50) | next value |
 | Settle | Fast, Normal, Resonant, High Q (default Normal) | next value |
-| CH2 range | Auto, or the held V/div (fw 0.2.93) | toggles; Hold keeps the range CH2 has at the tap |
+| CH2 range | Auto, or Constant and the CH2 menu's V/div, e.g. "Constant 100mV" (fw 0.2.94, owner 14:16) | toggles; Constant sweeps on the CH2 menu's V/div and never changes it; a V/div chosen in the CH2 menu while the mode shows sets Constant (coordinator's addition, owner to confirm) |
 | *separator* | | |
 | Single sweep | see below (fw 0.2.84) | the panel stays open |
 
@@ -474,7 +479,8 @@ In 13 px (`font_2`, what `bode_view.c` uses) it is narrower still.
 | Sweep stopped: the PC took over | BODE_ERR_HOST | "... the acquisition" |
 | No frequency in this range: change Start or Stop | BODE_ERR_PLAN | |
 | Thru sweep: both probe tips on the DUT input | a thru sweep runs | |
-| CH2 overrange: set CH2 range Auto or raise V/div | a clipped point with Hold | "... raise its V/div" (51) |
+| CH2 overrange: increase V/div in CH2 menu or Auto | a clipped point on Constant (fw 0.2.94) | names the CH2 menu, where the user changes it |
+| CH2 small: decrease V/div in CH2 menu or Auto | a ch2_small point on Constant (fw 0.2.94) | new |
 | CH1 level low: the DUT loads the 1 kOhm source | BODE_F_CH1_LOW at 0.5 V/div or finer, at or below 2 MHz (fw 0.2.84; a coarse range comes first, then this, then the probe) | "... the DUT input loads ..." (52) |
 | N points not settled: choose a longer Settle | BODE_F_UNSETTLED | |
 | N points near the floor: shown grey | NEAR_FLOOR / LOW_SNR | |
@@ -488,7 +494,7 @@ In 13 px (`font_2`, what `bode_view.c` uses) it is narrower still.
 | CH1 level low above 2 MHz: the x1 probe rolls off | BODE_F_CH1_LOW only above 2 MHz at 0.5 V/div or finer | fw 0.2.84 |
 | Trigger was EXT (the generator's pin): now CH1 | on entry, note | "The trigger was EXT (the generator's pin): set to CH1" (53) |
 | Roll off for the frequency response | entered in roll mode, note | new: Spectrum says it, `ui_mm_choose`'s Bode branch does not set warn_roll |
-| No corner from 100 Hz to 10 MHz: span kept | AUTO SET, note | new |
+| No corner from 100 Hz to 10 MHz | AUTO SET, note | fw 0.2.94: ": span kept" dropped (owner 14:19) |
 | Auto set cancelled: settings kept | AUTO SET second tap, note | new |
 | Nothing to save: run a sweep first | SAVE WAVE without points | new |
 | Frequency response needs FPGA 0x1534 or later | tap on the grey main-menu row | new: fw 0.2.68's grey row is inert and says nothing |
@@ -525,7 +531,7 @@ warning that arrives before then replaces it, as warnings replace each other.
 The guidelines say that where a mode drives a top-bar control, the button shows the value and its menu says so.
 
 - **CH1 / CH2 chips** show the ranges the sweep set and DC coupling, which the mode forces. The CH2 menu's V/div is
-  the Hold range.
+  the Constant range; on Constant it survives leaving the mode (fw 0.2.94).
 - **ACQ chip** reads "Set by" over "the sweep". Its dropdown opens with one line, "The sweep sets the sample rate for
   each point", and no controls.
 - **Generator chip** shows the tone of the point being measured, updated with the redraw at most every 150 ms. The
@@ -746,3 +752,7 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
   10 MHz" stands alone, the no-response note likewise. (The owner had asked what "span kept" meant: AUTO SET found no corner,
   so Start and Stop stayed as they were.) Bench 14:19: that AUTO SET ended with CH2 Auto, not Hold; fw-eng6 checks the
   flat path.
+- fw 0.2.94 (fw-eng6, not benched): built as sections 3.2 step 3 and 4.2 now say. The flat path runs the CH2 rule (host
+  test: both tips on the post gives Constant 0.5 V/div); the rule now leaves out bad records, and BODE_CTRL bytes 50..57
+  report its verdict, reason, points and spread, so the next flat AUTO SET on the bench shows why it chose Auto if it
+  does again.

@@ -52,6 +52,8 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #define PC_CTX_MAIN       0     //top of the main loop, between UI passes: may touch the FPGA and the UI
 #define PC_CTX_BUSY       1     //inside a UI busy loop: answers the F_BUSY set only, no FPGA (1.23: the yield request)
 #define PC_CTX_ISR        2     //1 ms timer interrupt: same safe set and the TX pump (1.23: the yield request), never the UI/FPGA
+#define PC_CTX_MODAL      3     //fw 0.2.94: a modal loop's yield check (PC_UI_YIELD): the read-only F_MODAL set is answered
+                                //there, the screen stays open (READ_SCREEN shows the menu); anything else asks to yield
 
 //Time without a MAIN poll after which the UI counts as modal (LOCAL_BUSY). Before protocol 1.23 other requests then got
 //E_BUSY; since 1.23 (fw 0.2.78, docs/protocol.md section 14 row 63) such a request asks the UI to yield: every modal
@@ -332,6 +334,8 @@ typedef struct
   uint32_t   yield_ms;          //when it was set (PC_YIELD_MS)
   uint32_t   yields;            //requests that asked the UI to yield (GET_LINK_STATS 68)
   uint32_t   yield_refused;     //E_BUSY answers instead: a hold reason or the yield time-out (GET_LINK_STATS 69)
+  uint8_t    modal_req;         //fw 0.2.94: a read-only request waits for a modal loop's yield check (PC_CTX_MODAL)
+  uint32_t   modal_ms;          //when it was set (PC_YIELD_MS)
 
   //Last request with a payload CRC error, exactly as received (header + payload + CRC), for GET_BAD_FRAME
   uint32_t   bad_count;
@@ -355,6 +359,7 @@ void     pc_ui_capture_addr(pc_session *s, uint16_t addr);//0x14 read of the fin
 void     pc_ui_capture_done(pc_session *s);               //the UI read and processed it
 void     pc_ui_pass_mark(pc_session *s, int n);            //main loop stage n (0..3) reached, kept for the first pass
 int      pc_ui_yield_pending(const pc_session *s);        //1.23: 1 while a request waits for the modal UI to close
+int      pc_ui_modal_pending(const pc_session *s);        //fw 0.2.94: 1 while a read-only request waits for a yield check
                                                           //(and nothing holds it): modal loops leave by their cancel path
 
 //Diagnostics (fw 0.2.52, protocol row 55): the GET_LINK_STATS counters (returns n), the GET_HEALTH body (96 bytes),

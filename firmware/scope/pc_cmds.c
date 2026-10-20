@@ -22,6 +22,7 @@
 #define F_BUSY      0x02      //accepted from a BUSY or timer poll (no FPGA, no UI access)
 #define F_CONTROL   0x04      //accepted while a deferred request is pending
 #define F_BASIC     0x10      //works on an unknown FPGA variant
+#define F_MODAL     0x20      //fw 0.2.94: read-only, answered inside a modal loop (PC_CTX_MODAL) without closing it
 
 #define PC_DEFERRED 0x10000   //handler result: response comes later
 #define PC_HOLD     0x20000   //handler result: not yet, run the request again at the next MAIN poll
@@ -2983,7 +2984,8 @@ static int h_read_bode(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
 }
 
 //READ_SCREEN (fw 0.2.70): u16 row, u16 nrows. u16 width, u16 row, u16 nrows, u16 format 1 (RGB565 little-endian), then the
-//rows from the framebuffer the panel shows. MAIN only: a screenshot never sees a UI pass half drawn (a modal menu yields first, 1.23)
+//rows from the framebuffer the panel shows. MAIN, or (fw 0.2.94) a modal loop's yield check: never a UI pass half drawn;
+//a menu, dialog or screen that is open stays open and is what the screenshot shows (1.23-0.2.93: it closed first)
 static int h_read_screen(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   uint32_t row = pc_get_u16(req), n = pc_get_u16(req + 2);
@@ -3018,11 +3020,11 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_GET_BAD_FRAME, F_BUSY | F_CONTROL | F_BASIC, 0, h_get_bad_frame },
   { PC_CMD_GET_EVENT_LOG, F_BUSY | F_CONTROL | F_BASIC, 0, h_get_event_log },
   { PC_CMD_GET_HEALTH,   F_BUSY | F_CONTROL | F_BASIC, 0, h_get_health },
-  { PC_CMD_GET_CHANNEL,  0,                            0, h_get_channel },
+  { PC_CMD_GET_CHANNEL,  F_MODAL,                      0, h_get_channel },
   { PC_CMD_SET_CHANNEL,  0,                            0, h_set_channel },
-  { PC_CMD_GET_TIMEBASE, 0,                            0, h_get_timebase },
+  { PC_CMD_GET_TIMEBASE, F_MODAL,                      0, h_get_timebase },
   { PC_CMD_SET_TIMEBASE, 0,                            0, h_set_timebase },
-  { PC_CMD_GET_TRIGGER,  0,                            0, h_get_trigger },
+  { PC_CMD_GET_TRIGGER,  F_MODAL,                      0, h_get_trigger },
   { PC_CMD_SET_TRIGGER,  0,                            0, h_set_trigger },
   { PC_CMD_ARM,          0,                            0, h_arm },
   { PC_CMD_FORCE,        0,                            PC_CAP_FORCE_TRIGGER, h_force },
@@ -3035,22 +3037,22 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_SET_ACQ_STATE, F_CONTROL,                   0, h_set_acq_state },
   { PC_CMD_GET_CAPTURE_INFO, F_BUSY | F_CONTROL,       0, h_get_capture_info },
   { PC_CMD_READ_SPECTRUM, F_BASIC,                     0, h_read_spectrum },
-  { PC_CMD_GET_DECIM,    0,                            PC_CAP_DECIM, h_get_decim },
+  { PC_CMD_GET_DECIM,    F_MODAL,                      PC_CAP_DECIM, h_get_decim },
   { PC_CMD_SET_DECIM,    0,                            PC_CAP_DECIM, h_set_decim },
   { PC_CMD_SET_SEQ,      0,                            PC_CAP_SEQ, h_set_seq },
-  { PC_CMD_GET_SEQ,      0,                            PC_CAP_SEQ, h_get_seq },
+  { PC_CMD_GET_SEQ,      F_MODAL,                      PC_CAP_SEQ, h_get_seq },
   { PC_CMD_READ_SEQ,     0,                            PC_CAP_SEQ, h_read_seq },
   { PC_CMD_BODE_CTRL,    0,                            PC_CAP_DECIM, h_bode_ctrl },
-  { PC_CMD_READ_BODE,    0,                            PC_CAP_DECIM, h_read_bode },
+  { PC_CMD_READ_BODE,    F_MODAL,                      PC_CAP_DECIM, h_read_bode },
   { PC_CMD_SD_INFO,      F_BASIC,                      PC_CAP_SD_SECTORS, h_sd_info },
   { PC_CMD_SD_READ_SECTORS, F_BASIC,                   PC_CAP_SD_SECTORS, h_sd_read },
   { PC_CMD_SD_STAGE,     F_BUSY | F_BASIC,             PC_CAP_SD_SECTORS, h_sd_stage },   //memory copy only: timer poll
   { PC_CMD_SD_WRITE_SECTORS, F_BASIC,                  PC_CAP_SD_SECTORS, h_sd_write },
   { PC_CMD_SAVE_REPORT,  F_BASIC,                      PC_CAP_SD_SECTORS, h_save_report },
-  { PC_CMD_GET_GEN,      0,                            0, h_get_gen },
+  { PC_CMD_GET_GEN,      F_MODAL,                      0, h_get_gen },
   { PC_CMD_SET_GEN,      0,                            PC_CAP_GENERATOR_DDS, h_set_gen },
-  { PC_CMD_GET_CAL,      0,                            0, h_get_cal },
-  { PC_CMD_READ_SCREEN,  F_BASIC,                      PC_CAP_SCREENSHOT, h_read_screen },   //BENCH: T9
+  { PC_CMD_GET_CAL,      F_MODAL,                      0, h_get_cal },
+  { PC_CMD_READ_SCREEN,  F_BASIC | F_MODAL,            PC_CAP_SCREENSHOT, h_read_screen },   //BENCH: T9
   { PC_CMD_CAL_PROBE,    0,                            0, h_cal_probe },
   { PC_CMD_DEBUG_FPGA,   0,                            PC_CAP_DEBUG_RAW, h_debug_fpga },
   { PC_CMD_ENTER_FEL,    0,                            PC_CAP_ENTER_FEL, h_enter_fel },
@@ -3237,6 +3239,40 @@ static int pc_ui_yield(pc_session *s)
   return pc_error(s, PC_E_BUSY, why, pc_busy_text(why));
 }
 
+//fw 0.2.94: a read-only request (F_MODAL) while the UI is modal waits for the next yield check of a modal loop, which
+//answers it with the screen left open. A hold reason gives E_BUSY with it at once, as for a yield (row 63); no yield
+//check within PC_YIELD_MS (a UI pass without one: auto set, a slow capture) gives E_BUSY detail 2 as well
+static int pc_ui_modal_wait(pc_session *s)
+{
+  uint8_t  why = pc_hal_ui_hold();
+  uint32_t now = pc_hal_ms();
+
+  if(!why)
+  {
+    if(!s->modal_req)
+    {
+      s->modal_ms  = now;
+      s->modal_req = 1;
+      return 0;
+    }
+
+    if((now - s->modal_ms) < PC_YIELD_MS)
+      return 0;
+
+    why = PC_BUSY_NO_YIELD;
+  }
+
+  s->modal_req = 0;
+  s->yield_refused++;
+  return pc_error(s, PC_E_BUSY, why, pc_busy_text(why));
+}
+
+int pc_ui_modal_pending(const pc_session *s)
+{
+  //Set from the timer interrupt: read it from memory every time
+  return *(volatile const uint8_t *)&s->modal_req;
+}
+
 int pc_ui_yield_pending(const pc_session *s)
 {
   //Set from the timer interrupt: read it from memory every time
@@ -3324,14 +3360,15 @@ static int pc_dispatch(pc_session *s, int ctx)
   {
     st = pc_error(s, PC_E_UNSUPPORTED, 0, "capability");
   }
-  else if((ctx != PC_CTX_MAIN) && !(e->flags & F_BUSY))
+  else if((ctx != PC_CTX_MAIN) && !(e->flags & F_BUSY) && !((ctx == PC_CTX_MODAL) && (e->flags & F_MODAL)))
   {
     //The timer-tick and BUSY polls leave these for the main loop. While the UI is modal (no main-loop pass for
-    //PC_MODAL_MS) they ask it to yield (1.23; before, a BUSY poll answered E_BUSY "UI busy")
-    if(!s->ui_busy)
+    //PC_MODAL_MS) they ask it to yield (1.23; before, a BUSY poll answered E_BUSY "UI busy"); fw 0.2.94: a read-only
+    //one waits for the modal loop's yield check instead, which answers it with the screen open
+    if(!s->ui_busy && (ctx != PC_CTX_MODAL))
       return 0;
 
-    st = pc_ui_yield(s);
+    st = (e->flags & F_MODAL) ? pc_ui_modal_wait(s) : pc_ui_yield(s);
 
     if(st == 0)
       return 0;
@@ -3354,6 +3391,7 @@ static int pc_dispatch(pc_session *s, int ctx)
 
     s->ui_hold     = 0;
     s->hold_active = 0;
+    s->modal_req   = 0;
 
     if(st == PC_DEFERRED)
     {
@@ -3660,6 +3698,7 @@ void pc_poll(pc_session *s, int ctx)
     s->last_main_ms = now;
     s->ui_busy      = 0;
     s->yield_req    = 0;        //1.23: the UI is back at the base screen; the request waiting for it is answered below
+    s->modal_req    = 0;
 
     pc_settings_track(s);
 
@@ -3730,8 +3769,8 @@ void pc_poll(pc_session *s, int ctx)
     }
 
     if(ctx == PC_CTX_MAIN)      s->disp_main++;
-    else if(ctx == PC_CTX_BUSY) s->disp_busy++;
-    else                        s->disp_isr++;
+    else if(ctx == PC_CTX_ISR)  s->disp_isr++;
+    else                        s->disp_busy++;             //BUSY and (fw 0.2.94) MODAL
 
     s->pending_ev = PC_EV_NONE;
 

@@ -20,6 +20,7 @@ typedef struct
   //DUT: rs into r into c (c = 0: a divider r / (rs + r) ... modelled as r_load to ground at the output: H = rl / (r + rl))
   double rs, r, c, rl;
   double l;                   //fw 0.2.93: an inductor in the shunt too (a parallel tank; 0 = none)
+  uint32 r2_changes;          //fw 0.2.94: CH2 range writes that changed the range
   double lo, hi;              //post levels against the probe reference
   double gain2;               //CH2 front-end gain mismatch
   double window_v[6];         //DC beyond this pins the front end of a range (0 = no limit)
@@ -88,6 +89,8 @@ static void h_channel(void *ctx, int c, int r, int32 off)
 {
   dut *d = ctx;
 
+  if((c == 1) && (d->range[1] != r))
+    d->r2_changes++;
   d->range[c] = r;
   d->off[c] = off;
   d->ch_writes++;
@@ -1604,7 +1607,7 @@ static void test_auto_span(void)
 
 //fw 0.2.93 (owner 2026-10-20 13:33, bode-ui.md 3.2 step 3): AUTO SET's CH2 range mode. Hold on one range when the CH2
 //levels in the chosen span spread less than 20 dB, at the most sensitive range holding the largest with 1.5 x margin
-static void tbl_from_eng(uint64 *f, int32 *v2, uint8 *have, int *n)
+static void tbl_from_eng(uint64 *f, int32 *v2, uint16 *fl, uint8 *have, int *n)
 {
   int i;
 
@@ -1616,6 +1619,7 @@ static void tbl_from_eng(uint64 *f, int32 *v2, uint8 *have, int *n)
     have[i] = (uint8)bode_point_get(&eng, i, &p);
     f[i]  = bode_plans(&eng)[i].f_mhz;
     v2[i] = p.v2_mdb;
+    fl[i] = have[i] ? p.flags : 0;
   }
 }
 
@@ -1623,9 +1627,10 @@ static void test_auto_ch2(void)
 {
   static uint64 f[BODE_MAX_POINTS], ft[BODE_MAX_POINTS];
   static int32  m[BODE_MAX_POINTS], ph[BODE_MAX_POINTS], v2[BODE_MAX_POINTS];
-  static uint16 fl[BODE_MAX_POINTS];
+  static uint16 fl[BODE_MAX_POINTS], flt[BODE_MAX_POINTS];
   static uint8  have[BODE_MAX_POINTS];
   int32  fs[6];
+  bode_ac2 st;
   uint8  hr = 0xFF;
   bode_autospan a;
   bode_cfg c;
@@ -1645,29 +1650,29 @@ static void test_auto_ch2(void)
     v2[i] = -10000 - 2000 * i;            //-10 .. -28 dBV: 18 dB
     have[i] = 1;
   }
-  T_EQ(bode_auto_ch2(ft, v2, have, 10, ft[0], ft[9], fs, &hr), BODE_CH2_HOLD);
+  T_EQ(bode_auto_ch2(ft, v2, flt, have, 10, ft[0], ft[9], fs, &hr, 0), BODE_CH2_HOLD);
   //0.316 V x 1.5 = 0.47 V: 0.2 V/div holds 0.88 V, 0.1 V/div 0.44 V (too small)
   T_EQ(hr, 4);
   v2[9] = -30000;                         //20 dB: Auto
-  T_EQ(bode_auto_ch2(ft, v2, have, 10, ft[0], ft[9], fs, &hr), BODE_CH2_AUTO);
-  T_EQ(bode_auto_ch2(ft, v2, have, 10, ft[0], ft[8], fs, &hr), BODE_CH2_HOLD);   //that point outside the span
+  T_EQ(bode_auto_ch2(ft, v2, flt, have, 10, ft[0], ft[9], fs, &hr, 0), BODE_CH2_AUTO);
+  T_EQ(bode_auto_ch2(ft, v2, flt, have, 10, ft[0], ft[8], fs, &hr, 0), BODE_CH2_HOLD);   //that point outside the span
   have[3] = 0;
-  T_EQ(bode_auto_ch2(ft, v2, have, 10, ft[8], ft[0], fs, &hr), BODE_CH2_HOLD);   //either order, a gap
+  T_EQ(bode_auto_ch2(ft, v2, flt, have, 10, ft[8], ft[0], fs, &hr, 0), BODE_CH2_HOLD);   //either order, a gap
   v2[2] = BODE_MDB_FLOOR;                 //no tone: Auto
-  T_EQ(bode_auto_ch2(ft, v2, have, 10, ft[0], ft[8], fs, &hr), BODE_CH2_AUTO);
+  T_EQ(bode_auto_ch2(ft, v2, flt, have, 10, ft[0], ft[8], fs, &hr, 0), BODE_CH2_AUTO);
   v2[2] = -14000;
-  T_EQ(bode_auto_ch2(ft, v2, have, 10, ft[0], ft[0], fs, &hr), BODE_CH2_AUTO);   //one point: Auto
+  T_EQ(bode_auto_ch2(ft, v2, flt, have, 10, ft[0], ft[0], fs, &hr, 0), BODE_CH2_AUTO);   //one point: Auto
   for(i = 0; i < 10; i++)
     v2[i] = 30000;                        //31.6 V: no range holds it with the margin
-  T_EQ(bode_auto_ch2(ft, v2, have, 10, ft[0], ft[9], fs, &hr), BODE_CH2_AUTO);
+  T_EQ(bode_auto_ch2(ft, v2, flt, have, 10, ft[0], ft[9], fs, &hr, 0), BODE_CH2_AUTO);
 
   //The owner's RC (1 kOhm / 15 nF): AUTO SET's overview and span spread more than 20 dB: Auto; RUN at that span then
   //switches only where the plan says (planned), never unplanned
   dut_rc15(&D);
   n = overview(f, m, ph, fl, have);
   T_EQ(bode_auto_span(f, m, ph, fl, have, n, 6, 18, &a), BODE_AS_SPAN);
-  tbl_from_eng(f, v2, have, &n);
-  T_EQ(bode_auto_ch2(f, v2, have, n, bode_step_mhz(a.start_i), bode_step_mhz(a.stop_i), fs, &hr), BODE_CH2_AUTO);
+  tbl_from_eng(f, v2, fl, have, &n);
+  T_EQ(bode_auto_ch2(f, v2, fl, have, n, bode_step_mhz(a.start_i), bode_step_mhz(a.stop_i), fs, &hr, 0), BODE_CH2_AUTO);
   c = cfg(bode_step_mhz(a.start_i) / 1000.0, bode_step_mhz(a.stop_i) / 1000.0, 50, a.settle, BODE_CH2_AUTO);
   sweep_once(&c, 0, 3, &x);
   print_rec("RC AUTO SET final", &x);
@@ -1690,7 +1695,7 @@ static void test_auto_ch2(void)
   sweep_once(&c, 0, 3, &x);
   print_rec("tank pass, Auto", &x);
   T_EQ(x.bad, 0);
-  tbl_from_eng(f, v2, have, &n);
+  tbl_from_eng(f, v2, fl, have, &n);
   {
     int32 lo = v2[0], hi = v2[0];
 
@@ -1703,7 +1708,7 @@ static void test_auto_ch2(void)
     T_TRUE(hi - lo < BODE_HOLD_SPREAD_MDB);
   }
   hr = 0xFF;
-  T_EQ(bode_auto_ch2(f, v2, have, n, c.start_mhz, c.stop_mhz, fs, &hr), BODE_CH2_HOLD);
+  T_EQ(bode_auto_ch2(f, v2, fl, have, n, c.start_mhz, c.stop_mhz, fs, &hr, 0), BODE_CH2_HOLD);
   T_EQ(hr, 2);
 
   //The held sweeps: the final one (fresh) and RUN's (from the plan): no switch of either kind, nothing flagged
@@ -1720,6 +1725,94 @@ static void test_auto_ch2(void)
   T_EQ(x.bad + y.bad + x.small + y.small, 0);
   for(i = 0; i < y.n; i++)
     T_EQ(y.r2[i], 2);
+
+  //fw 0.2.94: a bad record (clipped, incoherent, ...) is left out of the rule; a near-floor point counts
+  for(i = 0; i < 10; i++)
+  {
+    v2[i] = -10000 - 1000 * i;
+    have[i] = 1;
+    flt[i] = 0;
+  }
+  v2[4] = -60000;
+  flt[4] = BODE_F_INCOHERENT;
+  T_EQ(bode_auto_ch2(ft, v2, flt, have, 10, ft[0], ft[9], fs, &hr, &st), BODE_CH2_HOLD);
+  T_EQ(st.junk, 1);
+  T_EQ(st.n, 9);
+  T_EQ(st.reason, BODE_AC2_R_FITS);
+  flt[4] = BODE_F_NEAR_FLOOR;
+  T_EQ(bode_auto_ch2(ft, v2, flt, have, 10, ft[0], ft[9], fs, &hr, &st), BODE_CH2_AUTO);
+  T_EQ(st.reason, BODE_AC2_R_SPREAD);
+  T_EQ(st.spread_mdb, 50000);
+  v2[4] = BODE_MDB_FLOOR;
+  T_EQ(bode_auto_ch2(ft, v2, flt, have, 10, ft[0], ft[9], fs, &hr, &st), BODE_CH2_AUTO);
+  T_EQ(st.reason, BODE_AC2_R_NO_TONE);
+
+  //fw 0.2.94 (bench 14:19): both tips on the post (a thru), AUTO SET: no corner, Start / Stop kept (20 kHz .. 5 MHz):
+  //the rule runs on the flat path too and gives Constant
+  dut_rc(&D);
+  D.thru = 1;
+  n = overview(f, m, ph, fl, have);
+  T_EQ(bode_auto_span(f, m, ph, fl, have, n, 13, 20, &a), BODE_AS_FLAT);
+  T_EQ(a.start_i, 13);
+  T_EQ(a.stop_i, 20);
+  tbl_from_eng(f, v2, fl, have, &n);
+  hr = 0xFF;
+  T_EQ(bode_auto_ch2(f, v2, fl, have, n, bode_step_mhz(a.start_i), bode_step_mhz(a.stop_i), fs, &hr, &st),
+       BODE_CH2_HOLD);
+  printf("  thru, flat: %d points in the span, %d left out, spread %.1f dB, largest %.1f dBV: Constant on range %d\n",
+         st.n, st.junk, st.spread_mdb / 1000.0, st.vmax_mdb / 1000.0, hr);
+  T_EQ(hr, 3);                            //the post through 1 kOhm: about 1.3 V peak x 1.5 fits 0.5 V/div
+  T_TRUE(st.n >= 8);
+}
+
+//fw 0.2.94 (owner 2026-10-20 14:16): CH2 on Constant (Hold) is never written to another range during a sweep, fresh or
+//from the plan, not in the pre-scan; a clip or a drop only flags the point
+static void test_constant_never_switches(void)
+{
+  bode_cfg c = cfg(100, 1e6, 25, BODE_SETTLE_NORMAL, BODE_CH2_HOLD);
+  sweep_rec x;
+  int i, clipped = 0, small = 0;
+
+  //The RC on 0.5 V/div: the stopband drops under 3 codes (ch2_small), never a range change
+  dut_rc15(&D);
+  D.range[1] = 3;
+  bode_init(&eng, &HW);
+  sweep_once(&c, 0, 3, &x);
+  print_rec("Constant 0.5 V/div fresh", &x);
+  T_EQ(D.r2_changes, 0);
+  T_EQ(x.switches, 0);
+  T_EQ(x.planned, 0);
+  T_TRUE(x.small >= 1);
+  sweep_once(&c, 0, 3, &x);
+  print_rec("Constant 0.5 V/div plan", &x);
+  T_EQ(x.reused, 1);
+  T_EQ(D.r2_changes, 0);
+  T_EQ(x.switches + x.planned, 0);
+  for(i = 0; i < x.n; i++)
+    T_EQ(x.r2[i], 3);
+
+  //On 0.1 V/div the passband clips: flagged, no step up
+  dut_rc15(&D);
+  D.range[1] = 5;
+  bode_init(&eng, &HW);
+  sweep_once(&c, 0, 5, &x);
+  print_rec("Constant 0.1 V/div", &x);
+  T_EQ(D.r2_changes, 0);
+  T_EQ(x.switches + x.planned, 0);
+  for(i = 0; i < x.n; i++)
+  {
+    bode_point p;
+
+    bode_point_get(&eng, i, &p);
+    T_EQ(p.r2, 5);
+    if(p.flags & BODE_F_CLIPPED)
+      clipped++;
+    if(p.flags & BODE_F_CH2_SMALL)
+      small++;
+  }
+  T_TRUE(clipped >= 1);
+  printf("  Constant 0.1 V/div: %d clipped, %d small, CH2 range writes that changed it: %u\n", clipped, small,
+         (unsigned)D.r2_changes);
 }
 
 int main(void)
@@ -1737,5 +1830,6 @@ int main(void)
   test_divider_floor();
   test_auto_span();
   test_auto_ch2();
+  test_constant_never_switches();
   return t_report("test_bode_sweep");
 }

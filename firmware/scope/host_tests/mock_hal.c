@@ -526,6 +526,10 @@ int mock_ui_modal_pass(void *session)
 
   pc_poll(s, PC_CTX_BUSY);
 
+  //The yield check (pc_glue_ui_yield): fw 0.2.94 answers a read-only request there first
+  if(mock.ui_modal && pc_ui_modal_pending(s))
+    pc_poll(s, PC_CTX_MODAL);
+
   if(mock.ui_modal && pc_ui_yield_pending(s))
   {
     mock.ui_modal--;

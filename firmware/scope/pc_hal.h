@@ -420,7 +420,7 @@ void     pc_hal_screen_rows(uint32_t row, uint32_t nrows, uint8_t *dst);
 // fills the 40-byte response. READ_BODE: the 32-byte header and up to max_rows 20-byte rows from row first; returns bytes.
 #define PC_BODE_HDR       32
 #define PC_BODE_ROW       20
-#define PC_BODE_CTRL_RESP 50         //fw 0.2.91: + the latest sweep's capture statistics (40 before); 0.2.93: + planned switches
+#define PC_BODE_CTRL_RESP 58         //row 60: 40, fw 0.2.91 48, 0.2.93 50 (planned switches), 0.2.94 58 (AUTO SET CH2)
 int      pc_hal_bode_ctrl(const uint8_t *req, uint8_t *resp, uint16_t *detail);
 uint32_t pc_hal_bode_read(uint32_t first, uint32_t max_rows, uint8_t *resp);
 

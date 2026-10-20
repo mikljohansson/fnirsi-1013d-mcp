@@ -2237,10 +2237,16 @@ class BodeCtrlResp(Payload):
     captures, those that ended on the auto time-out (no CH1 trigger), records taken again for CH1 leak (a joined
     record) and for another reason (suspect, time-out). fw 0.2.93: 50 bytes, then the latest sweep's planned CH2
     range switches (range changes between neighbouring points that the range plan prescribes; the header's
-    ``switches`` are the unplanned ones). Older firmware: all 0."""
+    ``switches`` are the unplanned ones). fw 0.2.94: 58 bytes, then the latest on-screen AUTO SET's CH2 range verdict
+    (0 Auto, 1 Constant (the host's 'fixed' / hold), 0xFF none since boot), its reason (0 one range holds the span, 1
+    a spread of 20 dB or more, 2 fewer than two points in the span, 3 a point without a tone, 4 no range holds the
+    largest level), the points that counted and those left out (a bad record), i16 the spread in centi-dB and i16 the
+    largest CH2 level in centi-dBV peak. Older firmware: all 0 (so ``auto_ch2_verdict`` 0 means nothing there)."""
 
     FIELDS = [("header", "32s"), ("estimate_ms", "I"), ("_r0", "4x"), ("captures", "H"), ("timeouts", "H"),
-              ("leak_retakes", "H"), ("other_retakes", "H"), ("planned_switches", "H")]
+              ("leak_retakes", "H"), ("other_retakes", "H"), ("planned_switches", "H"), ("auto_ch2_verdict", "B"),
+              ("auto_ch2_reason", "B"), ("auto_ch2_points", "B"), ("auto_ch2_left_out", "B"),
+              ("auto_ch2_spread_cdb", "h"), ("auto_ch2_vmax_cdbv", "h")]
     header: bytes = bytes(32)
     estimate_ms: int = 0
     captures: int = 0
@@ -2248,6 +2254,12 @@ class BodeCtrlResp(Payload):
     leak_retakes: int = 0
     other_retakes: int = 0
     planned_switches: int = 0
+    auto_ch2_verdict: int = 0
+    auto_ch2_reason: int = 0
+    auto_ch2_points: int = 0
+    auto_ch2_left_out: int = 0
+    auto_ch2_spread_cdb: int = 0
+    auto_ch2_vmax_cdbv: int = 0
 
     @property
     def hdr(self) -> BodeHeader:
