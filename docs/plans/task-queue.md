@@ -11,7 +11,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   above 500 kHz is generator pickup at under one code, drawn as data): (1) ch2_small points (CH2 under 3 codes) drawn grey on
   the device and in the mcp plot (bode.py BAD set), phase too; (2) the top-middle note in plain words with the action, e.g.
   "CH2 too small above 540 kHz to measure: set Stop below it or press AUTO SET. Less pickup: short ground lead on CH2" (the
-  frequency = the first ch2_small point at the finest range; wording to be confirmed by the owner); (3) the same sentence as
+  frequency = the first ch2_small point at the finest range; wording confirmed by the owner 16:22 **(owner)**, one-line
+  fallback "CH2 too small above 540 kHz: set Stop lower or AUTO SET"); (3) the same sentence as
   the mcp caveat; (4) the -3dB / Level cards ignore grey points as they ignore the other flagged ones. No floor line: the
   generator-off background does not see pickup. After fw-arm (both touch the engine's flags).
 

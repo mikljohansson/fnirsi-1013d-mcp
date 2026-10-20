@@ -758,3 +758,8 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
   does again.
 - 2026-10-20 14:51 **(owner)**: the row reads just "Constant", not "Constant 100mV": the V/div takes too much space and the CH2
   button above shows it. ("Preset" was considered; Constant stays.)
+- 2026-10-20 16:22 **(owner)**: points whose CH2 signal is under 3 codes (ch2_small) are drawn grey, magnitude and phase, on
+  the device and in the host plot; the top-middle note says in plain words what to do: "CH2 too small above 540 kHz to measure:
+  set Stop below it or press AUTO SET. Less pickup: short ground lead on CH2." (one-line fallback "CH2 too small above 540 kHz:
+  set Stop lower or AUTO SET"); the same sentence as the mcp caveat; the cards ignore grey points. No floor line. Bench: the
+  two-pole RC swept to 10 MHz, 15:5x, where the pickup tail above 500 kHz was drawn as data.
