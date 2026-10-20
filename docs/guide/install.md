@@ -7,23 +7,24 @@ your backup of the FPGA flash back first.
 ## What you need
 
 - An FNIRSI 1013D with the **Anlogic AL3A10** FPGA: an unmarked 144-pin chip next to a Winbond 25Q80 flash with an
-  unpopulated 2x3 header. [Hardware preparation](../hardware-prep.md) helps you identify your board. The EF2L45 and
+  unpopulated 2x3 header. [Prepare and back up](prepare.md) helps you identify your board. The EF2L45 and
   Altera EP4CE6 variants are untested.
 - A spare micro SD card with an MBR partition table and one FAT32 partition that starts at **8 MiB (sector 16384)**
   or later. The firmware sits in the raw sectors before the partition. A GPT card does not work. Most cards come
   with the partition at 1 MiB or 4 MiB, so you usually have to recreate it: see [Prepare the card](#prepare-the-card).
-- A PC with Python 3. Writing the card needs Linux, or WSL with the card reader attached through `usbipd`. The tool also
-  accepts a Windows drive (`\\.\PhysicalDriveN`), but that path is untested.
+- A PC with Python 3. Writing the card needs Linux, or WSL with the card reader attached through `usbipd`
+  ([Prepare and back up](prepare.md#attach-a-usb-card-reader-to-wsl) shows how). The tool also accepts a Windows
+  drive (`\\.\PhysicalDriveN`), but that path is untested.
 - For the FPGA bitstream only: a 3.3 V SPI programmer and a soldering iron.
 
 !!! warning "Back up first"
     Back up the SD card before you write it. Back up the FPGA config flash, twice, before you flash a bitstream.
-    [Hardware preparation](../hardware-prep.md), section 3, gives the steps.
+    [Prepare and back up](prepare.md) gives the steps.
 
 ## Prepare the card
 
-The firmware image needs the space before the FAT32 partition. Firmware 0.2.101 is about 0.8 MB and ends at sector
-2261; the 8 MiB start leaves room for later versions. Recreating the partition erases the files on the card, so copy
+The firmware image needs the space before the FAT32 partition. The image is about 0.8 MB and ends near sector 2260;
+the 8 MiB start leaves room for later versions. Recreating the partition erases the files on the card, so copy
 them off first. On Linux or WSL, with the card reader at `/dev/sdX`:
 
 ```
@@ -36,8 +37,10 @@ sudo fdisk -l /dev/sdX                                  # the partition now star
 On Windows, `diskpart` does the same: `select disk N`, `clean`, `create partition primary offset=8192` (the offset is
 in KB), `format fs=fat32 quick`, `assign`. Pick the disk number with care. `diskpart` formats FAT32 only up to 32 GB.
 
-`make_sd_image.py` never changes the partition table. It refuses a card whose partition starts too low, and the
-message names the start the image needs. Copy your files back after the card is written.
+`make_sd_image.py` never changes the partition table. It refuses to write when a part would overlap the partition,
+and the message names the start the image needs. A partition that starts below sector 16384 without overlapping is
+written, with a note that cards for this firmware should start it at 8 MiB so later images fit too; a new card gets
+the 8 MiB start. Copy your files back after the card is written.
 
 ## Steps
 
@@ -49,6 +52,9 @@ message names the start the image needs. Copy your files back after the card is 
     sha256sum -c SHA256SUMS --ignore-missing
     ```
 
+    On Windows, `Get-FileHash -Algorithm SHA256 <file>` in PowerShell (or `certutil -hashfile <file> SHA256`) prints
+    the hash to compare with the file's line in `SHA256SUMS`.
+
 2. Unzip the SD tools. Build the SD parts. The tool downloads Atlan4's package from his repository and takes the
    bootloader v0.8 and the updater from it. This project does not redistribute them, because they are binary-only.
    The tool checks their hashes:
@@ -59,7 +65,7 @@ message names the start the image needs. Copy your files back after the card is 
     ```
 
 3. Write the parts to the card, prepared as in [Prepare the card](#prepare-the-card). Replace `/dev/sdX` with your card
-   reader:
+   reader (on WSL, [attach it](prepare.md#attach-a-usb-card-reader-to-wsl) first):
 
     ```
     python3 make_sd_image.py write --device /dev/sdX --bootloader parts/bootloader.bin \
