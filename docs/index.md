@@ -13,7 +13,9 @@ repository is the [README](https://github.com/mikljohansson/fnirsi-1013d-mcp#rea
 **User guide.** For someone who owns the scope.
 Start with [Install](guide/install.md), then [Hardware preparation](hardware-prep.md) if you will flash the FPGA,
 [First run](guide/first-run.md) and [Calibration](guide/calibration.md). [The screens](guide/screens.md) walk through
-the main menu one entry at a time, [Generator](guide/generator.md) covers the calibration-pin square wave.
+the main menu one entry at a time: the Scope with its phosphor view, the Spectrum analyser with waterfall and density
+views, the Frequency response mode that measures a filter or tank with the scope alone, the file viewers, Settings,
+Diagnostics and the USB drive. [Generator](guide/generator.md) covers the square wave on the calibration post.
 
 **Agent guide.** For an AI agent, and for the person setting one up.
 [Setup](agent-setup.md), [MCP tools and safety tiers](mcp-tools.md) and the

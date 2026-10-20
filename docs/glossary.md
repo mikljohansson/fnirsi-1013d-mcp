@@ -30,9 +30,13 @@ Written for the owner on 2026-10-19 after a bench day; facts from `research/note
   differ between bitstreams (0x1535 vs 0x1537 on chip 2, bench 2026-10-19).
 - **Code, LSB**: one step of the 8-bit converter, 0..255; 0 V sits near 128 after the offset calibration. One division is
   32 codes, so one code is about 3 mV at 0.1 V/div and 156 mV at 5 V/div.
+- **Capture stage, capture self-check**: on bitstream 0x153A each core's data is taken in at one of several 2.5 ns
+  steps after its encode. The calibration wizard tries the steps and keeps a clean one per core ("Capture stages: CH1
+  A3 B4"). After every 200 MSa/s capture the FPGA counts outlier samples per core; a core flagged again and again asks
+  for a new calibration in Diagnostics.
 - **Zero level, gain, calibration**: per range and per core, the code at 0 V (zero) and the codes per volt (gain). The
-  calibration wizard measures them from the internal square wave. **Volts calibration** is the older 1.00o5 procedure for
-  the attenuator scale factors using an external DC source.
+  calibration wizard measures the zero with the inputs open and the gain from the calibration post's square wave.
+  **Volts calibration** is the older 1.00o5 procedure for the attenuator scale factors using an external DC source.
 - **Clock classes, full-rate and gated**: at 200 MS/s both cores run continuously (**full-rate**); at slower legacy rates the
   FPGA stores a sample only every N clocks (**gated**). The cores behave slightly differently in the two cases, so the
   calibration keeps values per class.
@@ -67,8 +71,9 @@ Written for the owner on 2026-10-19 after a bench day; facts from `research/note
 
 ## Instrument level
 
-- **Bitstream, version word**: the FPGA configuration, stored in the 1 MB flash beside the FPGA (W25Q80); the firmware
-  reads a 16-bit version word (0x1432 stock, 0x1532..0x1538 ours) to know the features.
+- **Bitstream, version word**: the FPGA configuration, stored in the 1 MB flash beside the FPGA (25Q80); the firmware
+  reads a 16-bit version word to know the features: 0x1432 stock, 0x1532 Atlan4's, 0x1533..0x153A this project's
+  (0x153A recommended).
 - **Firmware, FEL, SD card**: the scope program boots from the SD card. **FEL** is the SoC's USB boot mode that lets a
   firmware be loaded into RAM without touching the card; a power cycle returns to the card's version.
 - **Calibration post, generator, DDS**: the metal post outputs a logic-level square wave from the FPGA's DDS (a phase
@@ -76,10 +81,48 @@ Written for the owner on 2026-10-19 after a bench day; facts from `research/note
 - **Protocol, caps**: the USB command set between PC and firmware (versioned 1.x, `docs/protocol.md`); caps are the
   capability bits that say which features this firmware and bitstream have.
 - **Settings sector, calibration sector**: SD sectors 709 and 708 hold the saved settings and the calibration.
+- **Boot mode**: a byte in SD sector 710 that tells the bootloader what to start: the open firmware, the stock firmware,
+  or its menu first (Settings > Start-up > At power-on).
+- **MCP, MCP chip**: the Model Context Protocol, how an AI agent calls the scope's functions through the Python server.
+  The green MCP chip in the top bar shows while a program on the PC talks to the scope.
 
-## Bode terms
+## On the screen
+
+- **Mode**: what the scope measures: Scope, Spectrum analyser or Frequency response, chosen in the main menu.
+- **Variant**: how a mode shows its measurement, chosen under CTRL > Display: Normal, X-Y and the phosphor switch in
+  the Scope; Spectrum, Waterfall and Density in the Spectrum analyser; Overlaid, Magnitude only and Phase only in the
+  Frequency response.
+- **Fold-out**: the panel a CTRL button opens beside the right bar. A tap outside it closes it.
+- **Chip, card**: a chip is a top-bar button with a coloured block and its value (CH1, ACQ, trigger). A card is a
+  measurement in the bottom row, chosen with MEASURES.
+- **Slider row, overview**: the bar under the plot. Its track shows the whole record (Scope), the whole frequency axis
+  (Spectrum) or AUTO SET's overview (Frequency response); the window marks the part on screen.
+- **Zoom ladder**: the fixed steps a tap zoom moves through. In the Scope each time/div step also sets the sample rate;
+  in the Spectrum analyser each span step does.
+- **Span, centre**: the frequency range the Spectrum analyser shows and its middle.
+- **RBW**: resolution bandwidth, the frequency width one FFT bin stands for with the chosen window. Two tones closer
+  than about one RBW merge.
+- **Waterfall, density**: spectrum histories. The waterfall adds one coloured row per capture; the density view counts
+  how often each point of the plot is hit.
+- **wfm/s**: records drawn per second in the phosphor view.
+- **Pass time**: how long one screen update takes, shown in the ACQ menu.
+- **Roll mode**: the slow time bases (Long mode in the ACQ menu), where the trace scrolls across the screen without a
+  trigger.
+
+## Frequency response terms
 
 - **Thru**: both probes on the same node; records the channel-to-channel gain and phase to subtract from later sweeps.
 - **Floor**: CH2 on ground while CH1 is driven; the crosstalk and pickup level, the smallest response the tool trusts.
 - **Splice**: when CH2 changes range during a sweep, the ratio measured at the switch point stitches the ranges.
 - **Wiring A, wiring B**: the filter's ground on the probe clips (A, recommended) or on USB ground (B).
+- **DUT**: the device under test, the circuit the sweep measures.
+- **Settle**: how many periods of each new frequency the sweep waits before it records (Fast 3, Normal 10, Resonant
+  50, High Q 200).
+- **CH2 range Auto, Hold**: Auto lets the sweep switch CH2's range point by point; Hold keeps one range for the whole
+  sweep.
+- **Range plan, planned switch**: repeated sweeps at the same settings reuse the ranges of the previous sweep. A range
+  change the plan expects between two points is planned; one after a clip or a drop is unplanned.
+- **Flagged point**: a point that failed a check (unsettled, near floor, clipped, ...). It is drawn grey and not
+  joined to the curve.
+- **Bode plot**: the usual name for a magnitude and phase plot against frequency; the internal name of the Frequency
+  response mode and of the host tool `fnirsi1013d-bode`.

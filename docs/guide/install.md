@@ -1,54 +1,91 @@
 # Install
 
-The open firmware boots from a micro SD card through Atlan4's bootloader. The stock firmware in the scope's flash is
-never touched: remove the card and the scope is stock again (with a custom FPGA bitstream, write your backup of the
-FPGA flash first).
+The open firmware boots from a micro SD card, through Atlan4's bootloader. The stock firmware in the scope's flash is
+never touched. Remove the card and the scope runs the stock firmware again. If you also flash an FPGA bitstream, write
+your backup of the FPGA flash back first.
 
-!!! note "To be written after fw 0.2.70"
-    This page restates the README and [releasing](../releasing.md) section 3 in order. A tested, click-by-click
-    version follows after fw 0.2.70.
+## What you need
 
-## Before you start
+- An FNIRSI 1013D with the **Anlogic AL3A10** FPGA: an unmarked 144-pin chip next to a Winbond 25Q80 flash with an
+  unpopulated 2x3 header. [Hardware preparation](../hardware-prep.md) helps you identify your board. The EF2L45 and
+  Altera EP4CE6 variants are untested.
+- A spare micro SD card with an MBR partition table. A GPT card does not work. The FAT32 partition must start at
+  sector 2048 or later, which is the usual layout.
+- A PC with Python 3. Writing the card needs Linux, or WSL with the card reader attached through `usbipd`. The tool also
+  accepts a Windows drive (`\\.\PhysicalDriveN`), but that path is untested.
+- For the FPGA bitstream only: a 3.3 V SPI programmer and a soldering iron.
 
-1. **Check that you have the supported variant**: the Anlogic AL3A10 FPGA (an unmarked 144-pin LQFP next to a Winbond
-   25Q80 flash with an unpopulated 2x3 header). [Hardware preparation](../hardware-prep.md) helps you identify your
-   board. The EF2L45 and Altera EP4CE6 variants are untested.
-2. **Back up the SD card** you will use, and the FPGA config flash if you will flash a bitstream
-   ([Hardware preparation](../hardware-prep.md), section 3).
+!!! warning "Back up first"
+    Back up the SD card before you write it. Back up the FPGA config flash, twice, before you flash a bitstream.
+    [Hardware preparation](../hardware-prep.md), section 3, gives the steps.
 
 ## Steps
 
 1. Download from the [releases page](https://github.com/mikljohansson/fnirsi-1013d-mcp/releases):
-   `fnirsi_1013d-fw-X.Y.Z.bin`, `fnirsi_1013d-sdtools-X.Y.Z.zip`, `SHA256SUMS`, and the bitstream and wheel you want.
-   Check them with `sha256sum -c SHA256SUMS --ignore-missing`.
-2. Build the SD parts from the tools zip. This downloads Atlan4's bootloader v0.8 and updater from his repository and
-   checks their hashes (they are binary-only, so this project does not redistribute them):
+   `fnirsi_1013d-fw-X.Y.Z.bin` (the scope firmware), `fnirsi_1013d-sdtools-X.Y.Z.zip` (the SD tools) and `SHA256SUMS`.
+   Add the bitstream and the MCP wheel if you want them. Check the files:
 
     ```
-    python3 make_release_sd_package.py build --scope fnirsi_1013d-fw-X.Y.Z.bin --parts parts
+    sha256sum -c SHA256SUMS --ignore-missing
     ```
 
-3. Write the parts to a spare micro SD card (Linux, or WSL with the card reader attached through `usbipd`):
+2. Unzip the SD tools. Build the SD parts. The tool downloads Atlan4's package from his repository and takes the
+   bootloader v0.8 and the updater from it. This project does not redistribute them, because they are binary-only.
+   The tool checks their hashes:
+
+    ```
+    python3 make_release_sd_package.py build --scope fnirsi_1013d-fw-X.Y.Z.bin \
+            --scope-sha256 <hash from SHA256SUMS> --parts parts
+    ```
+
+3. Write the parts to the card. Replace `/dev/sdX` with your card reader:
 
     ```
     python3 make_sd_image.py write --device /dev/sdX --bootloader parts/bootloader.bin \
             --updater parts/updater.bin --scope parts/scope.bin --boot-mode 4
     ```
 
-    The tool backs up the card, writes only these parts and reads them back. Do not `dd` the whole package: that
-    zeroes the sectors holding calibration, settings and boot mode.
+    The tool asks you to type the device path again before it writes. It backs up the card, writes only these parts
+    and reads them back. Boot mode 4 shows the boot menu with the open firmware preselected.
 
-4. Optional, the FPGA bitstream: [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md) (also attached to each release)
-   names the image, the programmer wiring, the backup, the write, the verification and the rollback. The config flash
-   is wired only to the FPGA, so this needs an SPI programmer and soldering. A wrong pin or 5 V logic can damage the
-   board.
-5. Put the card in the scope and power on. Continue with [First run](first-run.md).
+    !!! warning "Do not `dd` the whole package"
+        `dd` of the SD package from sector 16 also overwrites sectors 708 to 710, which hold the calibration, the
+        settings and the boot mode.
+
+4. Optional, the FPGA bitstream. The recommended one is **0x153A**. It needs firmware 0.2.81 or later.
+   [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), also attached to each release, names the file, the programmer
+   wiring, the backup, the write, the check and the way back. The config flash is wired only to the FPGA, so this
+   needs the SPI programmer on the 2x3 header. A wrong pin or 5 V logic can damage the board.
+5. Put the card in the scope and switch it on. Continue with [First run](first-run.md).
+
+!!! note "After a new bitstream, calibrate again"
+    The calibration stores values per ADC core, and the core order can differ between bitstreams. Diagnostics shows
+    "FPGA changed since calibration" until you run the [wizard](calibration.md).
 
 ## Which features need which bitstream
 
-The firmware runs on every bitstream; a feature appears when the bitstream has it. The table is in the
-[README](../../README.md).
+The firmware runs on every bitstream. A feature appears when the bitstream has it.
+
+| Bitstream | What it adds |
+|---|---|
+| 0x1432 (stock) | The scope, the Spectrum analyser and the phosphor view. No generator, no gain calibration |
+| 0x1532 (Atlan4's) | 16,384 samples per channel, programmable trigger position, the generator on the calibration post |
+| 0x1533 | External trigger on the calibration post |
+| 0x1534 | Decimation filters (Acquisition > Filter) and the Frequency response mode |
+| 0x1535 | The compensation FIR after the filters |
+| 0x1536 | Hardware averaging (the ACQ menu's Average uses it at the fast rates) and segmented capture (over USB) |
+| 0x153A | Clean ADC data at every sample rate, with a capture self-check and the capture stages the wizard trains. **Recommended** |
+
+0x1537 to 0x1539 are withdrawn. 0x1532 to 0x1536 can garble one ADC core at 200 MSa/s after a rate change; the firmware
+checks every such capture and takes it again, and Diagnostics shows the FPGA line in amber. The full list with hashes
+is in [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md).
+
+## The MCP server (optional)
+
+To let an AI agent use the scope over USB, install the MCP server from the release's wheel. See
+[Agent setup](../agent-setup.md).
 
 ## Going back to stock
 
-Pick FNIRSI in the boot menu or remove the card.
+Pick FNIRSI in the boot menu, or remove the card. If you flashed a bitstream, write your backup of the FPGA flash back
+first ([`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), "Rollback").
