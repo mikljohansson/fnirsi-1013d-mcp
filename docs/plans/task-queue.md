@@ -185,6 +185,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   the Spectrum; (c) re-derive the rate when the FFT length or memory depth changes, not only at the next zoom/pan step. With the
   next Spectrum batch.
 - **Capture-stage training must probe the band** (bench 10-20 10:19; fw-cap2 dispatched): see hardware-status 10:19.
+- **Spectrum ladder: pans never change the rate** (owner 10-20 10:24 on fw 0.2.80 **(owner)**: "the spectrum should stay the same when
+  scrolling, changes to sample rate and time/div should happen when zooming"; fw-spzoom2 dispatched): the rate is derived from
+  span and centre only at zoom steps (and by AUTO SET); a pan (plot drag, slider drag, tap-to-jump) keeps the rate and is clamped
+  to the current axis 0..fs/2 (the slider track is that axis); to look higher than the axis, zoom out (raises the rate) then zoom
+  in. The 16-bin floor ends zoom-in at a high centre as before. Accepted consequence: a pan to a low centre at a wide span keeps
+  the coarse resolution until the next zoom step. Rule paragraph in ui-guidelines.md updated; test_spec_zoom: pans never change
+  the rate, the clamp, zoom after a pan re-derives.
 - **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
   SCREENSHOT bit 6, simulator has it, `Scope.read_screen` reads 40 rows per request) but the firmware handler is NULL
   (pc_cmds.c "BENCH: T9"). Implement it in all builds: rows of the live framebuffer as RGB565, the header per protocol.md, the
