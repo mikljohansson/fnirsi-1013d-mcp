@@ -145,9 +145,16 @@ static void bh_trigger(uint8 level)
 
 static uint8 bh_triggered;
 
+//fw 0.2.97 (pc_decim.h "Auto-mode stop geometry"): on AL3 0x1532..0x153A the FPGA's time-out record is ring words
+//0 .. total - 1, contiguous only when the stop lands at W mod 8192 >= total; 0x0E = 2 x total put it there for records
+//up to about 2700 words (legacy) / 4090 (16-bit) only. The engine's 0x0E is moved to the first such W at or after it.
+//0x153B+ latches the newest total words and completes a triggered record: the 0.2.91 arm unchanged.
+static uint8  bh_geom, bh_forced;
+static uint32 bh_stop, bh_stop_ms, bh_t0, bh_total;
+
 static int bh_arm(void *ctx, const bode_plan *pp, uint32 total, uint8 level)
 {
-  uint32 caps = pc_glue_caps(), div = bode_divider(pp);
+  uint32 caps = pc_glue_caps(), div = bode_divider(pp), ato;
   int    has = pc_decim_has_caps(caps);
   pc_decim_cfg dc;
   pc_seq_cfg   sq;
@@ -180,9 +187,21 @@ static int bh_arm(void *ctx, const bode_plan *pp, uint32 total, uint8 level)
   bh_triggered = 0;
 
   //FPGA auto: on CH1's trigger, else on the time-out (fw 0.2.91: twice the record, so a trigger has the time of the
-  //record's periods to arrive; a time-out record can be joined from two captures and is taken again by the engine)
-  return pc_hal_arm(0, (uint16)(bh_wide ? total : total / 2), 2 * total, 1, 0, (caps & PC_CAP_DECIM) ? &dc : 0,
-                    (caps & PC_CAP_SEQ) ? &sq : 0);
+  //record's periods to arrive). fw 0.2.97: on 0x1532..0x153A at the stop geometry's W, so the record is never spliced
+  bh_total  = bh_wide ? total : total / 2;
+  bh_forced = 0;
+  bh_geom   = (uint8)(pc_stop_kind(pc_hal_fpga_version()) == PC_STOP_RING0);
+  ato       = 2 * total;
+
+  if(bh_geom)
+  {
+    bh_stop    = pc_auto_stop_word(ato + PC_STOP_LAG, bh_total, pc_glue_ring_words());
+    bh_stop_ms = pc_words_to_ms(bh_stop, div, bh_wide);
+    ato        = bh_stop - PC_STOP_LAG;
+  }
+
+  bh_t0 = pc_hal_ms();
+  return pc_hal_arm(0, (uint16)bh_total, ato, 1, 0, (caps & PC_CAP_DECIM) ? &dc : 0, (caps & PC_CAP_SEQ) ? &sq : 0);
 }
 
 static int bh_poll(void *ctx)
@@ -202,10 +221,18 @@ static int bh_poll(void *ctx)
   return done;
 }
 
+//The engine's deadline passed without a stop: with the stop geometry the FPGA should have stopped at W, so this is the
+//last resort (0x0E = 0 as well); the record may be spliced except on 0x153B+ (newest total words)
 static void bh_force(void *ctx)
 {
   (void)ctx;
-  pc_hal_force();
+
+  if(bh_geom)
+    pc_hal_force_stop();
+  else
+    pc_hal_force();
+
+  bh_forced = 1;
 }
 
 //fw 0.2.83: the capture self-check of this capture (FPGA 0x153A+, cap_hw.c). 0x36 is read after a legacy 200 MSa/s
@@ -244,6 +271,20 @@ static int bh_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
 
   addr  = pc_hal_acq_finish();
   start = (addr + ring - bh_pre) % ring;
+
+  //fw 0.2.97: 0x18 counts an edge after a time-out stop too, which leaves 0x14 at the pretrigger (0x1532..0x153A); a
+  //trigger in the last total words before the stop W is cut by it (the stop inside the record, done near W's time)
+  cap->spliced = (uint8)(bh_forced && (pc_stop_kind(pc_hal_fpga_version()) != PC_STOP_NEWEST));
+
+  if(bh_geom && !bh_forced)
+  {
+    if(addr == bh_pre)
+      bh_triggered = 0;
+    else if(bh_triggered && pc_auto_cut(addr, bh_pre, bh_total, bh_stop, ring) &&
+            ((pc_hal_ms() - bh_t0) + 2 + pc_words_to_ms(bh_total, bh_divider, bh_wide) >= bh_stop_ms))
+      cap->spliced = 1;
+  }
+
   pc_hal_trace_build(start, total, 0, 0x03);
   pc_hal_decim_current(&dc, &written);
 
