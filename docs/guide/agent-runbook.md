@@ -28,22 +28,21 @@ Sources, which you should open when you need the detail: [Install](install.md) (
       [`docs/photos/board-al3a10-programmer.jpg`](../photos/board-al3a10-programmer.jpg); the header close-up is
       [`docs/photos/fpga-flash-header.jpg`](../photos/fpga-flash-header.jpg).
     - A marked FPGA, Anlogic EF2L45 (no external flash chip) or Altera EP4CE6, is another variant. The firmware
-      for those is inherited from Atlan4 and untested here, and no bitstream exists for them. Tell the person and
-      stop, unless they want to try the firmware at their own risk; never flash their FPGA.
+      for those is inherited from Atlan4 and untested here, and no bitstream exists for them, so this firmware does
+      not run on them. Tell the person and stop; never flash their FPGA.
     - Ask for a photo of the area around the flash chip and the header, and have them read the chip marking.
       [Hardware preparation](../hardware-prep.md), sections 1.2 and 3a, has the detail.
-3. **Do they want the FPGA bitstream, and do they have a 3.3 V SPI programmer?** The firmware runs without it (on the
-   stock bitstream the deep memory, the generator, the filters, the external trigger and the frequency-response mode
-   are missing). The bitstream needs six pins soldered to the 2x3 header from the back of the board, the pinout
-   found by continuity, and a 3.3 V programmer: the FT2232D route in `BITSTREAMS.md` is the tested one; a plain
-   CH341A can drive 5 V on the data lines and has killed a flash ([Hardware preparation](../hardware-prep.md),
-   section 2.2).
+3. **Which 3.3 V SPI programmer do they have?** The FPGA bitstream is required: the firmware runs only with the
+   bitstream of its release (0x153B) and shows a banner on any other. Flashing it needs six pins soldered to the 2x3
+   header from the back of the board, the pinout found by continuity, and a 3.3 V programmer: the FT2232D route in
+   `BITSTREAMS.md` is the tested one; a plain CH341A can drive 5 V on the data lines and has killed a flash
+   ([Hardware preparation](../hardware-prep.md), section 2.2).
 4. **Do they have a spare micro SD card?** The card's files are erased when its partition is recreated, and the
    card the scope used so far should be kept as it is.
 
 ## Safety gates, in this order, never skipped
 
-1. Identify the variant before anything else. No AL3A10, no bitstream.
+1. Identify the variant before anything else. No AL3A10, no bitstream, and so no install.
 2. Back up the card before writing it: a full image if it holds anything the person wants to keep or an earlier open
    firmware (its calibration and settings live in raw sectors 708 to 710), and in every case let
    `make_sd_image.py write` take its own backup, which it does before it writes; check that its output says so.
@@ -53,13 +52,13 @@ Sources, which you should open when you need the detail: [Install](install.md) (
 5. Never `dd` the whole SD package to the card. It zeroes sectors 708 to 710.
 6. When any check fails, stop and ask the person. Do not retry with a variation, do not skip ahead.
 
-## The card
+## The files
 
 ### 1. Download and verify
 
 From the [releases page](https://github.com/mikljohansson/fnirsi-1013d-mcp/releases) (v0 releases are marked
-pre-release): `fnirsi_1013d-fw-X.Y.Z.bin`, `fnirsi_1013d-sdtools-X.Y.Z.zip`, `SHA256SUMS`, plus the bitstream
-`fnirsi_1013d-fpga-al3-0x153b-flash1m.bin` and the MCP wheel if wanted. In the download directory, on Linux or WSL:
+pre-release): the bitstream `fnirsi_1013d-fpga-al3-0x153b-flash1m.bin`, `fnirsi_1013d-fw-X.Y.Z.bin`,
+`fnirsi_1013d-sdtools-X.Y.Z.zip`, `SHA256SUMS`, plus the MCP wheel if wanted. In the download directory, on Linux or WSL:
 
 ```
 sha256sum -c SHA256SUMS --ignore-missing
@@ -68,6 +67,46 @@ sha256sum -c SHA256SUMS --ignore-missing
 Good: one `: OK` line per downloaded file and nothing else. Any `FAILED` means a bad download: stop. On Windows
 without WSL at hand, `Get-FileHash -Algorithm SHA256 <file>` (PowerShell) or `certutil -hashfile <file> SHA256`
 prints the hash; compare it by eye with the line for that file in `SHA256SUMS`.
+
+## The bitstream
+
+Only on an AL3A10 board, only with a 3.3 V programmer. The firmware runs only with bitstream **0x153B** and shows a
+banner on any other, so the FPGA comes before the card. The config flash is wired only to the FPGA, so the scope
+cannot write it itself. Follow [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), "How to flash", step by step; in
+short, with the FT2232D tool from a checkout of the release tag (on Windows, with the FTDI driver that comes with the
+board):
+
+```
+git clone --branch vX.Y.Z https://github.com/mikljohansson/fnirsi-1013d-mcp
+cd fnirsi-1013d-mcp
+python -m pip install --user ftd2xx
+python firmware/tools/spiflash_d2xx.py wiring
+```
+
+1. **Pinout by continuity** before anything is connected ([Hardware preparation](../hardware-prep.md), section 1.3).
+   On the tested unit the header reads 1 /CS, 2 DO, 3 CLK, 4 DI, 5 VCC, 6 GND, which differs from the reconstructed
+   schematic: the person must measure theirs. **Power during flashing, the one benched answer: the scope on its
+   battery, USB unplugged**, the header's VCC and the programmer's power pins left unconnected, 3.3 V logic only.
+2. **Probe**: `python firmware/tools/spiflash_d2xx.py probe`. Good: JEDEC ID `ef 40 14` (W25Q80DV) or `5e 60 14`
+   (ZB25VQ80). `00` or `ff` means wiring: stop.
+3. **Back up twice**: `python firmware/tools/spiflash_d2xx.py read -o backups/fpga-flash-before.bin --twice`.
+   Good: the two reads agree, the file is 1,048,576 bytes, and bytes 32 to 35 are `cc 55 aa 33` (the stock payload
+   reports 0x1432). Two reads that differ: stop. Have the person copy the file somewhere safe.
+4. **Write and verify**:
+
+    ```
+    python firmware/tools/spiflash_d2xx.py write -i fnirsi_1013d-fpga-al3-0x153b-flash1m.bin --yes
+    python firmware/tools/spiflash_d2xx.py verify -i fnirsi_1013d-fpga-al3-0x153b-flash1m.bin
+    ```
+
+    The tool asks for the JEDEC ID to be typed and takes another double-read backup before it erases. Good: verify
+    reports the chip identical to the file. **On any error do not power-cycle the scope**: write the backup from
+    step 3 back first (Rollback below).
+5. Disconnect the programmer and switch the scope off. Do not start the stock firmware now: it needs the stock
+   bitstream. Go on with the card; after the first boot, Menu > Diagnostics, Status, shows FPGA 0x153B with its
+   features. A bootloader older than v0.8 hangs on any custom bitstream; the card from step 4 below carries v0.8.
+
+## The card
 
 ### 2. Attach the card reader and prepare the card
 
@@ -127,56 +166,18 @@ at the end `written and verified`. Anything else is a stop:
 
 Boot mode 4 shows the boot menu with the open firmware preselected, the safe choice for a first boot.
 
-## The bitstream (optional)
-
-Only on an AL3A10 board, only with a 3.3 V programmer, only after the card works. The recommended bitstream is
-**0x153B**; it needs firmware 0.2.97 or later, which every release from 0.3.0 has. The config flash is wired only to
-the FPGA, so the scope cannot write it itself. Follow [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), "How to
-flash", step by step; in short, with the FT2232D tool from a checkout of the release tag (on Windows, with the FTDI
-driver that comes with the board):
-
-```
-git clone --branch vX.Y.Z https://github.com/mikljohansson/fnirsi-1013d-mcp
-cd fnirsi-1013d-mcp
-python -m pip install --user ftd2xx
-python firmware/tools/spiflash_d2xx.py wiring
-```
-
-1. **Pinout by continuity** before anything is connected ([Hardware preparation](../hardware-prep.md), section 1.3).
-   On the tested unit the header reads 1 /CS, 2 DO, 3 CLK, 4 DI, 5 VCC, 6 GND, which differs from the reconstructed
-   schematic: the person must measure theirs. **Power during flashing, the one benched answer: the scope on its
-   battery, USB unplugged**, the header's VCC and the programmer's power pins left unconnected, 3.3 V logic only.
-2. **Probe**: `python firmware/tools/spiflash_d2xx.py probe`. Good: JEDEC ID `ef 40 14` (W25Q80DV) or `5e 60 14`
-   (ZB25VQ80). `00` or `ff` means wiring: stop.
-3. **Back up twice**: `python firmware/tools/spiflash_d2xx.py read -o backups/fpga-flash-before.bin --twice`.
-   Good: the two reads agree, the file is 1,048,576 bytes, and bytes 32 to 35 are `cc 55 aa 33` (the stock payload
-   reports 0x1432). Two reads that differ: stop. Have the person copy the file somewhere safe.
-4. **Write and verify**:
-
-    ```
-    python firmware/tools/spiflash_d2xx.py write -i fnirsi_1013d-fpga-al3-0x153b-flash1m.bin --yes
-    python firmware/tools/spiflash_d2xx.py verify -i fnirsi_1013d-fpga-al3-0x153b-flash1m.bin
-    ```
-
-    The tool asks for the JEDEC ID to be typed and takes another double-read backup before it erases. Good: verify
-    reports the chip identical to the file. **On any error do not power-cycle the scope**: write the backup from
-    step 3 back first (Rollback below).
-5. Disconnect the programmer and power-cycle. Good: the scope boots, and Menu > Diagnostics, Status, shows FPGA
-   0x153B with its features. A bootloader older than v0.8 hangs on any custom bitstream; the card from step 4 above
-   carries v0.8.
-6. Calibrate again (next section). The calibration is stored per ADC core and per bitstream.
-
 ## First boot and the wizard
 
 Put the card in and switch the scope on. Good: the boot menu with four buttons, PECO (the open firmware) preselected,
 FEL, FNIRSI (the stock firmware) and Update; after about 2 seconds the open firmware starts. An uncalibrated unit
 shows the First start screen with one line per check (the FPGA bitstream it found, the settings, the calibration).
+A banner that names another bitstream means the FPGA holds the wrong one: go back to the bitstream steps and verify
+the flash.
 
 Have the person let the scope warm up for 5 minutes, then tap **Calibrate now** (or later Menu > Diagnostics >
 Calibrate) and follow the four screens: zero level with both probes, anything on the calibration post and the USB
 cable disconnected; CH1 probe at 1X on the calibration post; CH2 the same; Save calibration. Good: screen 4 says
-"CH1 calibrated" and "CH2 calibrated" with the cores matched. On the stock bitstream the gain steps are skipped and
-the wizard says so; that is expected. [Calibration](calibration.md) lists every failure message and its remedy.
+"CH1 calibrated" and "CH2 calibrated" with the cores matched. [Calibration](calibration.md) lists every failure message and its remedy.
 
 Then, if wanted, connect the MCP server: [Agent setup](../agent-setup.md). Between releases it installs from main
 with `uv tool install "git+https://github.com/mikljohansson/fnirsi-1013d-mcp#subdirectory=mcp"`.

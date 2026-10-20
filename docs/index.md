@@ -6,7 +6,8 @@ place anywhere, clean traces at every time base because the FPGA filters before 
 waterfall and density views, a frequency-response mode that measures a filter with the scope and its calibration post
 alone, a calibration wizard, a digital phosphor view, an external trigger on the calibration post and a diagnostics
 screen. A USB protocol and a Python MCP server let an AI agent (Claude Code, Codex, any MCP client) configure the
-scope, capture and analyse while you keep using the touch screen. Pull the card and the scope is stock again.
+scope, capture and analyse while you keep using the touch screen. Write your FPGA backup back and pull the card, and
+the scope is stock again.
 
 This site is built from the `docs/` folder of the repository
 ([mikljohansson/fnirsi-1013d-mcp](https://github.com/mikljohansson/fnirsi-1013d-mcp)); the front page of the
@@ -16,8 +17,8 @@ repository is the [README](https://github.com/mikljohansson/fnirsi-1013d-mcp#rea
 
 **User guide.** For someone who owns the scope.
 Start with [Install](guide/install.md), or point your AI agent at a clone of the repository and ask it to guide you:
-it follows the [agent runbook](guide/agent-runbook.md). The card alone needs no soldering and is undone by removing
-it; the optional FPGA bitstream needs a soldered header and a 3.3 V programmer. Then [Prepare and back up](guide/prepare.md),
+it follows the [agent runbook](guide/agent-runbook.md). The install writes the FPGA's configuration flash, which
+needs a soldered 2x3 header and a 3.3 V SPI programmer, and then a micro SD card. Then [Prepare and back up](guide/prepare.md),
 [First run](guide/first-run.md) and [Calibration](guide/calibration.md). [The screens](guide/screens.md) walk
 through the main menu one entry at a time: the Scope with its phosphor view, the Spectrum analyser with waterfall and
 density views, the Frequency response mode that measures a filter or tank with the scope alone, the file viewers,
