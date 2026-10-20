@@ -793,3 +793,7 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
   set Stop below it or press AUTO SET. Less pickup: short ground lead on CH2." (one-line fallback "CH2 too small above 540 kHz:
   set Stop lower or AUTO SET"); the same sentence as the mcp caveat; the cards ignore grey points. No floor line. Bench: the
   two-pole RC swept to 10 MHz, 15:5x, where the pickup tail above 500 kHz was drawn as data.
+- 2026-10-20 18:14 **(owner)**: the generator chip stays live in this mode (the 0.2.84 rule: the user's generator is on the
+  pin and in the menu whenever no sweep runs, the sweep drives it while running). Considered and rejected: greying it like
+  ACQ with a silent pin while stopped. Reason: the user may be driving the circuit with the generator and measuring it with
+  other instruments between sweeps.
