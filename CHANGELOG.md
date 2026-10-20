@@ -1501,6 +1501,11 @@ was found (commit not identified).
 
 ### Tooling, FPGA and documentation
 
+- Changed: `firmware/tools/bode_cells.py` prints each record's CH1 fundamental in codes and `NO TONE` when there is
+  none, and counts the toneless records at the end (fpga-gen13: the 2026-10-20 19:52 bench on 0x153B read the leak of
+  toneless records as splices; fpga/al3/AGENTS.md "0x153B 'spliced' on the unit"). `fpga/al3/tb/tb_timeout.v` gets case B,
+  that bench's host capture byte for byte (D 199 CIC3+FIR, pretrigger 3000, total 6000, untriggered with the force and
+  triggered) with READ_RAW's split read at the ring end; `TIMEOUT_BENCH=0` skips it.
 - Changed: `make_sd_image.py` and `make_release_sd_package.py` accept a scope image up to sector 16383 (was 2047);
   `make_sd_image.py write` refuses a card whose partition starts before the image's end with the start it needs and the
   steps, notes a partition below 16384 that still fits, and `--create` makes an 8 MiB image (1563daf).
