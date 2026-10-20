@@ -276,6 +276,13 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- mcp-soft (Opus, dispatched 22:06, done 22:45, merged 22:46 as 8eaf912; ruff clean, 496 tests): scope_decode (UART auto-baud,
+  SPI, I2C; limits: UART >= 4 samples per bit advised, refused under 2; SPI 3 per clock; I2C 8 per SCL period), scope_mask_test
+  (masks stored under the data dir, exact geometry only), scope_export_csv, scope_dvm (resolution statement); simulator
+  serial signals; report kinds. README and release notes say 34 tools; release notes need a line on the four tools
+  (release follow-up). Owner decisions 22:38-22:4x: logger contract rates 500 / 250 / 125 kS/s documented now; no
+  soldering to any pin beyond the prepared flash header in this project; pattern generator with its own trigger engine
+  (pending the owner's yes on the two-engine interface, 22:4x).
 - docs-one (Opus, dispatched 22:04, done 22:22, merged 22:23 as 003924d): the card-only path gone from 15 files; README 175
   lines, 34/34 links; placeholders {{BANNER_TEXT}} / {{BANNER_REACHABLE}} (first-run.md) and {{AVERAGE_TEXT}} (screens.md)
   for fw-one's wording; README's manual steps reordered by the coordinator to download first (as install.md and the
