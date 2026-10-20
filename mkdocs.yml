@@ -58,7 +58,7 @@ nav:
   - User guide:
       - Install: guide/install.md
       - Runbook for the agent guiding an install: guide/agent-runbook.md
-      - Hardware preparation: hardware-prep.md
+      - Prepare and back up: guide/prepare.md
       - First run: guide/first-run.md
       - Calibration: guide/calibration.md
       - The screens: guide/screens.md
