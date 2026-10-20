@@ -2348,8 +2348,15 @@ CAL_PROBE_POINTS = ("coarse high (PWM 500)", "coarse low (PWM 1200)", "gated slo
 CAL_PROBE_BYTES = 252
 #: CAL_PROBE flags (byte 7)
 CALP_GARBLED, CALP_NO_CENTRE, CALP_PRESTROBE, CALP_MODE1 = 0x01, 0x02, 0x04, 0x08
-#: the wizard's noise limit (RMS about the mean of all conversions, 1/16 code)
-CAL_NOISE_LIMIT16 = 48
+#: the wizard's noise limit per class (RMS about the mean of all conversions, 1/16 code; firmware adc_cal.h
+#: ACAL_MAX_NOISE16_*, the Diagnostics limits too): full rate 3 codes, gated 1 code (fw 0.2.100; 3 codes up to 0.2.99)
+CAL_NOISE_LIMIT16_FULL = 48
+CAL_NOISE_LIMIT16_GATED = 16
+
+
+def cal_noise_limit16(gated: int | bool) -> int:
+    """The wizard's noise limit of a class (CAL_PROBE point class: 1 gated, 0 full rate), 1/16 code."""
+    return CAL_NOISE_LIMIT16_GATED if gated else CAL_NOISE_LIMIT16_FULL
 _CALP_HDR = struct.Struct("<BBhBBBBiIHHHH")
 _CALP_CORE = struct.Struct("<iHHBBH")
 
@@ -2460,7 +2467,7 @@ class CalProbeResp:
                         **{f"core_{'AB'[k]}": {"mean": round(c.mean, 3), "rms": round(c.rms, 3),
                                                 "rms_within": round(c.rms_within, 3), "lowest": c.lo,
                                                 "highest": c.hi, "clipped": c.clipped,
-                                                "noisy": round(c.rms * 16) > CAL_NOISE_LIMIT16}
+                                                "noisy": round(c.rms * 16) > cal_noise_limit16(p.cls)}
                            for k, c in enumerate(p.cores)}})
         return {"channel": f"CH{self.channel + 1}", "range": self.range,
                 "volts_per_div": RANGE_VOLTS_PER_DIV[self.range] if self.range < 6 else None,
