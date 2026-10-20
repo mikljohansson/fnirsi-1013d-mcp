@@ -572,6 +572,16 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
+- rel-gen2 (Opus, dispatched 20:59, done 21:15, merged 21:16 as 6f792a6): release notes 0.3.0 filled (screenshots as raw
+  URLs pinned to 876700a, 0x153B recommended, the sector-16384 card rule, tested-on, known issues), changelog-0.3.0-draft.md
+  (the condensed section for the release commit, 105 hashes checked), announcement.md final draft with the owner's open
+  decisions on top, release-checklist ticks with evidence, install/calibration guides name 0x153B. README left untouched
+  (the owner asked 21:0x for a hobbyist-first rewrite instead). Findings: CHANGELOG 0.2.46-0.2.50 out of order, 0.2.53/0.2.57
+  missing, protocol numbers contradict neighbours in 0.2.64/0.2.68/0.2.73, provisional markers left on 0.2.64-0.2.69 and
+  protocol.md rows 56, 61-63; BITSTREAMS.md 0x1538/0x1539 rows say unbenched while the manifest says withdrawn; roadmap stale
+  at 0.2.80/0x153A; ui_diag.c:473 tells 0x1532-0x1536 users "fixed in 0x1538" (withdrawn). Its list of finished-history
+  docs feeds the docs cleanup effort.
+
 - fpga-gen13 (Fable, dispatched 20:00, done 20:30, merged 20:34: the records had no signal, the probes were off after the wizard; tb_timeout case B models the host capture; bode_cells prints NO TONE; 0x153B benched good 20:40 with the probes on and set recommended 20:42; checks 3 and 6 passed 20:49 and the 3-of-50 observation did not reproduce; open: the firmware corner with an explicit auto_timeout on 0x153B+ it queued). Originally: why every record on 0x153B is spliced on the unit (triggered and untriggered, the
   ring frozen after the capture, the seam fixed in the stored record) while tb_timeout and the 13-step run pass: the
   MCU-side read geometry (0x14, record start, the readout's latency words) vs fpga-gen11's capture-logic change; evidence
