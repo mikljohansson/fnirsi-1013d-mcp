@@ -64,6 +64,18 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   total + 2 and read across the stop (the 5 .. 15 "retried" per sweep on 0.2.89). Arm normal (`pc_hal_arm(..., normal 1)`),
   keep the engine's deadline as the safety net; on 0x153B the time-out no longer cuts a triggered record either way.
 
+- [ ] **0x153B+: the deadline force must write 0x0E = 0 too** (fpga-gen13, 10-20 20:27, from the code, not benched): on
+  `PC_STOP_NEWEST` the host poll, `pc_ui_auto_service` and FORCE call `pc_hal_force` (0x1A = 0 alone); the FPGA stops only
+  when `~trigger_mode_s && time_base_timeout` (`time_base_cnt > 0x0E`, zaklad.v). With the default 0x0E = total samples and a
+  deadline of at least two records that is true. With an explicit SET_TRIGGER `auto_timeout` the firmware writes 0x0E = that
+  *sample* count as a *word* count (`pc_auto_timeout` -> `fpga_arm_reset`) and forces at about the time of that many samples
+  (`pc_host_auto_ms` = deadline(cfg) / 2): in the legacy layout (two samples per word) the force comes at half the FPGA's
+  count, nothing stops, the record ends on the FPGA's own time-out up to twice later (0x14 = W - total + pre, contiguous),
+  and a trigger in between is reported untriggered (`host_forced`). Fix: `pc_hal_force_stop` (0x0E = 0, then 0x1A = 0) on
+  0x153B+ too; change 4 of README section 11 makes the 0x0E write before the 0x14 read harmless there. test_fpga_bus: the
+  0x153B model with 0x0E = 2 x the deadline in words, force at the deadline, done within 2 write clocks. The same race
+  existed on every bitstream before fw 0.2.97 (fpga/al3/AGENTS.md "0x153B 'spliced' on the unit", hypothesis (c)).
+
 - [x] **Device sweep flags stricter than the host's** (fw 0.2.87, bench pending) (bench 10-20 11:14 / 12:00): on the same RC the device flags about half the
   points incoherent / unsettled / ch2_small where the host flags none; compare bode_dsp.c's incoherence, settle and small-signal
   tests with bode.py's on identical records (feed the host's captured records through the C DFT in a host test) and align the
@@ -508,6 +520,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   fpga-gen12 (10-20): **flash-ready**: tb 13 steps ALL PASS on seeds 12345 and 4242, source unchanged (the fir / seg residuals
   were testbench artefacts); the exact flash session (pin with `tools/bitstreams.py pack`, pre-write double read = the 0x153A
   image 77672b5a.., write, retrain the capture stages, bench checks 1-6) is fpga/al3/AGENTS.md "0x153B flash-ready".
+  **Flashed 10-20 19:31** (verified 1391978c..). The 19:52 bench read every record as spliced, but its records hold no signal
+  (probes off the post after the open-input wizard; fpga-gen13, fpga/al3/AGENTS.md "0x153B 'spliced' on the unit: the records
+  were flat"): nothing measured, status stays unbenched. Open: README section 11 checks **0**-6 with the probe on the post
+  (check 0 = the amplitude first; bode_cells.py now prints `NO TONE`); or the rollback to 0x153A (write
+  backups/fpga-flash_pre-0x153B_20261020-1931.bin) and the flash session again later.
 - [x] **Long free-running testbench** for the decimation filter: fpga-gen4's 0x1535 work (tb/run.sh, seeds 12345/1/77, 13 FIR
   mutations caught; fpga/al3/README.md section 5, commit 292a596).
 - [ ] **Open input / EXT bench tests 1-4** from fpga/al3/README.md "Changes" section 2 (needs an external 3.3 V source

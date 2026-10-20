@@ -40,6 +40,7 @@ with Scope.connect(PORT) as sc:
         sc.set_channel(c, enable=True, coupling=0, range_index=3, dcoffset=0)
     time.sleep(0.2)
     k = 0
+    toneless = 0
     try:
         for fc in CELLS:
             pp = min(plans.values(), key=lambda q: abs(q.f_actual - fc))
@@ -71,8 +72,12 @@ with Scope.connect(PORT) as sc:
                     ms = B.measure_pair(c1.volts, c2.volts, pp, vpl1=c1.volts_per_lsb, vpl2=c2.volts_per_lsb,
                                         clipped1=c1.clipped, clipped2=c2.clipped, codes1=c1.codes, codes2=c2.codes)
                     h = ms.h
+                    # fpga-gen13 (bench 2026-10-20 19:52): a record without a tone (probe off the post, generator off) reads
+                    # a leak of +10..+20 dB and an H of noise; say so instead of letting the leak be read as a splice
+                    toneless += int(ms.ch1_dead)
                     print(f"{pp.f_actual:10.2f} Hz {var:4s} {i}: {B.db(abs(h)):7.3f} dB "
                           f"{np.degrees(np.angle(h)):8.2f} deg leak {ms.leak_db:6.1f} unsettled {ms.unsettled} "
+                          f"ch1 {ms.codes1:6.1f} codes{' NO TONE' if ms.ch1_dead else ''} "
                           f"trig {int(cap.triggered)} first {np.round(c1.codes[:6], 1)}")
     finally:
         sc.set_gen(enable=False)
@@ -82,4 +87,5 @@ with Scope.connect(PORT) as sc:
         sc.set_trigger(source=saved_tr.source, edge=saved_tr.edge, level=saved_tr.level, mode=saved_tr.mode,
                        pretrigger_samples=saved_tr.pretrigger_samples, total_samples=saved_tr.total_samples)
         np.savez_compressed(OUT, **data)
-        print("saved", OUT, k, "captures; restore the time base and the Filter by hand if they matter")
+        print("saved", OUT, k, "captures,", toneless, "without a CH1 tone (NO TONE: probe off the post or generator off; "
+              "their leak and H mean nothing); restore the time base and the Filter by hand if they matter")

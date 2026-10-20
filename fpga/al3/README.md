@@ -1943,8 +1943,38 @@ build). `dist/al3-0x153B.bin` sha256 `fdc3c21b57341b0774e8a5e58df04e38d1d223fb7c
 (`build/FPGA_padded.bin`, 1 MiB) `1391978c33379271789a9405f7b0fb9395a85e223ecc69a0430b9f2859a23b88`. **Not flashed**;
 the coordinator pins both in `backups/` first.
 
+**Bench 2026-10-20 19:31-20:03 (fpga-gen13's reading of the evidence; `docs/hardware-status.md` 19:52).** 0x153B was flashed
+(verified `1391978c...3b88`), the wizard retrained the stages to 0x08E4 with the inputs open, and the host checks that followed
+were read as "every record spliced" (a seam ratio |x[n] - x[n + period]| / std of 1.8..3.7 in 100 of 100 captures, bode_cells
+leak +14..+16 dB, every sweep point flagged). The saved records (`backups/bench-153b/`, six host records at 1 MSa/s, 40
+bode cells, one record read three times) show something else: **no record carries a signal**. Every one sits at code
+127.5..128.3 with a standard deviation of 0.1..0.6 code and a peak-to-peak under 2.2 codes, on CH1 and CH2 alike, in the
+16-bit values (16540..16660 for code 128) as in the compensated codes; the 1 kHz fundamental is 0.005..0.08 code where the
+generator's 3.1 V square at CH1's 17.4 mV/code would give about 113 codes (178 peak to peak); the strongest bin of each record
+is the lowest one (a slow wander of 0.1..0.7 code). The seam ratio of white noise is 1.14 on average and 1.8 at its maximum by
+construction (a smoothed |difference| of two independent samples over the standard deviation), 2..3.7 with the wander, and 0.04
+at most for a clean square: the "seams" are the metric's reading of noise, at positions that mean nothing, and a ring splice
+cannot be seen or ruled out in a record without a signal. The leak figure likewise describes noise against an absent tone
+(`bode.py` flags that record `ch1_low` / `ch1_dead`; bode_cells.py printed only the leak until fpga-gen13). GET_CAPTURE_INFO
+flags bit 5 is set in both saved captures (0x28 bit 2, an edge on the calibration pad during the capture): the generator was
+toggling at the pin, and the records' DC level is 0 V within 0.1 V on both channels, where a probe on a *silent* post would
+read -1.23 V (code 59) or +1.87 V (code 237) against the probe ground (the DMM values of section 2). So the probes were not on
+the post during these captures (the wizard had just run with the inputs open), and nothing was measured about 0x153B's record
+geometry. Nothing in the 0x153B source touches the data, readout, generator or front-end paths (the diff against 0x153A is the
+capture logic of changes 1-4 and the version byte), the forced-stop and triggered paths of the host capture are what
+tb_timeout's F1 / A2 cases model, and case B (fpga-gen13) adds that capture byte for byte (D 199 CIC3+FIR, pretrigger 3000,
+total 6000, 16-bit, the force after 1.37 rings and a CH1 trigger, READ_RAW's split read at the ring end): contiguous, the
+newest 6000 words, the trigger crossing at the pretrigger (85 checks, 0 errors on seeds 12345 and 4242). **The bitstream is unchanged; 0x153B stays unbenched** until the
+checks below are run with the probe on the post. Check 0 below is the lesson.
+
 **Bench checks** (owner with the coordinator; FEL load of a firmware that detects 0x153B, flash per "Flashing this unit"
 after pinning the images in `backups/`):
+0. The signal is there before anything is judged: after the wizard (inputs open) put the probe back on the post, and for
+   every record check the amplitude first (a 1 kHz square from the generator on CH1 at range 3 spans about 178 codes peak
+   to peak; a record under 3 codes peak to peak holds no signal, whatever a seam, leak or phase metric says of it). Quick
+   confirmations: the Scope view shows the square; GET_STATUS `ext_flags` (byte 42, 0x28: bit 0 the live pin level, bit 2 an
+   edge since the arm) shows the generator toggling at the pin, but says nothing about the probe;
+   bode_cells.py prints `NO TONE` for a toneless record.
 1. Identity: `#VER` fpga=0x153B; the Scope view runs, triggers and averages as on 0x153A (the capture stages are the
    same; 0x36 self-check 0 on a quiet trace).
 2. The bench fault: `python firmware/tools/bode_cells.py COM10` on the RC as on 2026-10-20 12:32, then the two-segment

@@ -3,7 +3,13 @@
 Anlogic AL3A10LG144C7 FPGA of the owner's FNIRSI 1013D (JTAG IDCODE 0x18006C31, config flash Winbond
 W25Q80DV, JEDEC `ef 40 14`). Read `CLAUDE.md` at the repo root first; its flashing rules override anything here.
 
-State on 2026-10-20 (fpga-gen12, branch `fpga-gen12`):
+State on 2026-10-20 (fpga-gen13, branch `fpga-gen13`):
+- fpga-gen13 (2026-10-20 evening): 0x153B was **flashed at 19:31** (verified `1391978c...3b88`; rollback = the pre-write
+  backup `backups/fpga-flash_pre-0x153B_20261020-1931.bin` = the 0x153A padded image) and the bench of 19:52 read "every
+  record spliced". The saved records hold **no signal** (code 128 +- 1 on both channels, probes off the post after the
+  open-input wizard); the seam metric reads 1.1..3.7 on noise by construction. `src/` is **unchanged** (c173ed5, the
+  built source); 0x153B stays **unbenched**; tb_timeout gets case B (that host capture byte for byte). Section "0x153B
+  'spliced' on the unit: the records were flat, fpga-gen13" below has the numbers and the bench checklist.
 - fpga-gen12 (2026-10-20): 0x153B **flash-ready**. `src/` unchanged (c173ed5); the two tb steps fpga-gen11 left not green
   (tb_fir, tb_seg) were testbench artefacts of the new stop semantics, not dut faults (three signatures, each with its
   invariant in section "0x153B flash-ready, fpga-gen12"); the 13-step `tb/run.sh` is **ALL PASS on seeds 12345 and 4242** (every step). The flash session for the
@@ -342,6 +348,98 @@ Decimation filter (0x1534), open items:
 - Next design: 0x1535, a CIC compensation FIR as the intended default mode (owner direction): built, see below and
   `README.md` section 5. 0x1534 is accepted by the coordinator (2026-10-18) and is
   being flashed with fw 0.2.33.
+
+## 0x153B 'spliced' on the unit: the records were flat, fpga-gen13 (2026-10-20)
+
+Brief (coordinator, 20:03): 0x153B flashed at 19:31 and verified, fw 0.2.102, wizard rerun (0x08E4); "every record is
+spliced": 50 of 50 untriggered host captures at 1 MSa/s and at 200 MSa/s with a seam ratio up to 2.7, triggered captures
+spliced too (1.8..3.0, seams at 2288 / 2403 / 4142 / 2278 of 6000), bode_cells leak +14..+16 dB, every sweep point flagged,
+the same record read three times identical. Find the cause among four hypotheses about the 0x14 convention, the force path,
+the time-out and the readout latency; make tb_timeout fail the way the bench does; fix; rebuild; dist; handoff. Branch
+`fpga-gen13` from main 9d6a1f0.
+
+**Finding: none of the four. No record of the bench carries a signal; the "seams" are the metric's reading of noise.**
+`backups/bench-153b/` (gitignored, main checkout): `records_153b_2000.npz` (three untriggered + three triggered host records,
+1 MSa/s: divider 199, CIC3+FIR, N 200, 16-bit, pretrigger 3000, total 6000; `*_info` = GET_CAPTURE_INFO), `reread_153b.npz`,
+`cells_153b.npz` (40 bode cells, codes and 16-bit samples), `events_153b_capture.json`. Numbers (`python -I` with the mcp
+venv's numpy; the scripts were scratch, the figures are in README section 11 "Bench 2026-10-20 19:31-20:03"):
+- Every record: mean 127.5..128.3 codes, standard deviation 0.14..0.59 code, peak to peak 0.9..2.2 codes; the 16-bit values
+  16540..16660 (code 128 at this gain / shift 13) with a spread of 10..70; CH1 and CH2 alike, host records and bode cells
+  alike, the re-read record too. The 1 kHz fundamental is 0.005..0.08 code; the generator's 3.1 V square at CH1 range 3
+  (17.4 mV/code, `uv_per_lsb_q8` 4465117) would be about 113 codes (178 peak to peak). The strongest bin of each record is
+  the lowest non-DC bin: a slow wander of 0.1..0.7 code.
+- The seam metric (|x[n] - x[n + 1000]| smoothed over 25 samples / std): white noise gives 1.14 mean, 1.8 max; with the wander
+  2..3.7, exactly the bench's 1.8..3.7; a clean square with 2 LSB noise gives 0.04 max, the "0.01..0.05 on 0x153A". The
+  seam positions are where the wander happened to be steepest; they say nothing about the ring. A ring splice in a record
+  without a signal is invisible, so the records neither show nor exclude one.
+- bode_cells' leak +14..+16 dB is the same thing: noise against an absent tone (`bode.py` calls that record `ch1_dead` /
+  `ch1_low`; bode_cells.py printed only the leak until now). The engine's 12..32 time-outs and 25 of 25 flagged points per
+  sweep are its trigger at CH1's mean on noise and `ch1_low` on every point.
+- Why the probes were off, not the generator dead: GET_CAPTURE_INFO flags bit 5 is set in both saved infos (0x22 / 0x21 =
+  0x28 bit 2, an edge on the calibration pad during the capture), so the DDS toggled at the pin; the records sit at 0 V
+  within 0.1 V on both channels (CH1 zero code 130.0, mean 127.6), where a probe on a silent post would read -1.23 V (code 59)
+  or +1.87 V (code 237) against the probe ground (section 2's DMM values). The bench log says the wizard ran with "USB out,
+  inputs open" at 19:52 and the host checks followed in the same entry.
+- `events_153b_capture.json` holds USB events only (type 5 = EP0 setup, 9 DTR, 23 = adc_capture 0x08E4); FPGA writes are
+  type 22 and only logged at trace level 1, so the arm sequence is not in it. The firmware's arm on 0x153B is in the code:
+  `h_arm` with `arm_normal` = 1 and `arm_auto` = total samples (`pc_hal_auto_timeout_default`), `pc_hal_arm` writes 0x0F = 0,
+  0x1A = 1, then `fpga_arm_reset` (0x0B / 0x0C, 0x01 = 1, the 0x05 wait, 0x0B / 0x0C, 0x0E = total, 0x01 = 0); the force at
+  the deadline (max(100 ms, two records)) is `pc_hal_force` = 0x1A = 0 alone (`PC_STOP_NEWEST`); the record is read from
+  0x14 - pretrigger words by `pc_raw_core` / `fpga_read_lane` with the split at the ring end. That is tb_timeout's F1 (force)
+  and, for a trigger, the unchanged normal-mode path; case B (below) models this capture byte for byte.
+
+**Hypotheses of the brief, against the RTL and the records.** (a) The 0x14 convention: `git diff f735fae c173ed5 --
+fpga/al3/src/zaklad.v` is changes 1-4 of README section 11 and the version byte; a triggered record's `trigger_address`
+latch (`trigger_read_address` at the trigger) is as on 0x153A, the untriggered one is W - total + pretrigger; the tb reads
+0x14 - pre with the dummy strobe and checks every word against a write-port mirror with write indices, so the convention
+and the readout agree in simulation for both; the hardware records cannot be judged. (b) The "force is safe" path: that is
+the path (above); on 0x153B `0x1A = 0` after 2 write clocks (`trigger_mode_s`) stops the write and latches 0x14 on the same
+edge; F1 and B1 pass. (c) The time-out term: `~trigger_mode_s && time_base_timeout && ~sampling_triggered` needs
+`time_base_cnt > 0x0E`; with the default 0x0E = total samples and a deadline of at least two records that is long true at
+the force. **Corner found, not the bench's cause:** with an explicit `auto_timeout` (SET_TRIGGER) the firmware writes 0x0E
+= that sample count as a word count and forces at about the time of that many *samples*; in the legacy layout (two samples
+per word) the force then comes at half the FPGA's count, `0x1A = 0` alone does not stop the capture, the record ends on
+the FPGA's own time-out up to twice later, and a trigger in between is reported untriggered (`host_forced`). On 0x153B
+the 0x0E write before the 0x14 read no longer moves the address (change 4), so `pc_hal_force_stop` (0x0E = 0 then 0x1A =
+0) is safe there and should replace `pc_hal_force` at the deadline: queued in `docs/plans/task-queue.md` (Firmware). The
+same race existed on every bitstream before fw 0.2.97. (d) The readout latency: `read_lag` is 0 and the dummy strobe 1 on
+every AL3 bitstream (`fpga_bus_contract_for`); the readout RTL is unchanged; the tb's word-for-word compare covers it.
+
+**Testbench** (`tb/tb_timeout.v` case B, run.sh step 13, `TIMEOUT_BENCH=0` skips it): `configure(199, 3, 1)`, then B1 = the
+firmware's auto mode (normal arm, 0x0E = 6000, level 0xFFFF, 0x1A = 0 after 8192 + 3000 - 3 words so that W lands at ring
+word about 3000: the record wraps through the ring end) and B2 = the same arm with level 128 and a CH1 step 3500 words after
+the release (triggered, no force); both read with `read_lane_fw`, which restarts at ring word 0 with a new 0x1F, command and
+dummy strobe like `fpga_read_lane` (all cases use it now), and checked as the other cases: equal to the mirror, contiguous,
+the newest 6000 words / the post-trigger region complete, the crossing at the pretrigger. **Results: 85 checks, 0 errors, PASS on seeds 12345 and 4242** (B1: W after 11190 words, 0x14 = 8190,
+start 5190, the record wraps through the ring end, tail 0; B2: 0x14 = 3503, start 503, triggered, the crossing at record word
+3001, the stop 2 words after the post-trigger region). The
+brief's "make it fail the way the bench does" cannot be met: the bench did not fail on the record geometry.
+
+**No bitstream change, no rebuild.** `src/` = c173ed5, the images stand (`dist/al3-0x153B.bin` `fdc3c21b...fc3d`, flash
+image `1391978c...3b88`). dist: status **unbenched** (not withdrawn: nothing was measured against it), the bench field says
+flashed 19:31 and what the 19:52 evidence is; `tools/bitstreams.py check` passes. The firmware for the next session is
+the one on the card, **fw 0.2.102** (any 0.2.97+ reads 0x153B as `PC_STOP_NEWEST`); no new image is needed. If the owner
+rolls back to 0x153A tonight (write `backups/fpga-flash_pre-0x153B_20261020-1931.bin`, hash `77672b5a...19d0`, verify, power
+cycle, `#VER fpga=0x153a`, stages 0x08E3 from the stored calibration), the next 0x153B session repeats the flash procedure of
+the fpga-gen12 section with the checklist below.
+
+**Flash-session checklist for 0x153B (the fpga-gen12 steps 1-8 with the lesson of 19:52).**
+1. Pin, probe, pre-write read (must hash the 0x153A padded image), write, verify `1391978c...3b88`, power cycle, `#VER`
+   fpga=0x153b, caps bit 19 set (fpga-gen12 steps 1-6).
+2. Wizard with the inputs open (step 7), band sweep at 200 MSa/s, self-check 0 flagged.
+3. **Put the probe back on the post** (CH1 tip on the calibration post, probe ground on the scope's ground; the RC for the
+   bode checks). Confirm the signal before any metric: the Scope view shows the 1 kHz square; a host capture at 1 MSa/s spans
+   about 178 codes peak to peak on CH1 range 3 (under 3 codes = no signal, stop and reconnect); GET_STATUS `ext_flags` bit 0
+   toggles with the generator on (the pin, not the probe).
+4. README section 11 checks 1-6 as written; for every record the amplitude check of check 0 first, then the seam / leak /
+   phase metrics. bode_cells.py now prints `NO TONE` and counts toneless records; a sweep's flags must be read (`ch1_low`
+   means no tone, not a splice).
+5. Log each step in `docs/hardware-status.md`; set dist to `recommended` (0x153A `supported`) only on a clean 1-6.
+
+**Commands.** `wsl -d Ubuntu -- bash <launcher>` with `setsid nohup env SIM_WORK=$HOME/g13/sim-<seed> ONLY=timeout bash
+<repo>/fpga/al3/tb/run.sh <seed> > ~/g13/logs/timeout-<seed>.log &` (no reference files needed for step 13); the two seeds
+in parallel. vvp's output through tee is block-buffered: the log fills in 4 kB steps, so an empty log is not a stalled run
+(`pgrep -c vvp`).
 
 ## 0x153B flash-ready, fpga-gen12 (2026-10-20)
 
