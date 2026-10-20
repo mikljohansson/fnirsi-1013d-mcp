@@ -1067,4 +1067,18 @@ Newest entries at the bottom. Format: date, who, what, result.
   backups/al3_cap_0x153A_75e0ef21_padded.bin: 70 sectors erased, 1105 pages programmed, write verified sha256 77672b5a...
   Rollback: the 0x1539 padded image. Next: power cycle, fw 0.2.79 FEL-load, `#VER fpga=0x153A`, caps bit 19, then
   firmware/AGENTS.md section 54 / fpga/al3/README.md section 10 items 1..7.
+- 2026-10-20 10:04-10:08: power cycle, fw 0.2.79 FEL-loaded on 0x153A (`#VER fpga=0x153a`, caps 0xFEC4B with bit 19, health cap
+  value 0x08E4 = the power-on stages). A USB write failure (bus reset at 25.5 s after boot, Windows side; the firmware kept
+  running, no restart record) killed the first sweep; rerun: dcoffset sweep at range 0, means 113..141, at 200 / 100 / 50 /
+  20 MSa/s (scratchpad dco_sweep_153A.log): at 100, 50 and 20 MSa/s every core clean (max std 0.4..1.0, CH2 2.2..4.0 at
+  50 / 100 MSa/s in the band without rails or jumps); at 200 MSa/s CH1 core A still garbles at means 127..135 (dco 8: std
+  40.7, 130 rails, 279 jumps; dco 12: 7 rails, 14 jumps), CH1 B clean, CH2 A / B std up to 3.2 in the band, no rails. So the
+  power-on stage 4 is wrong for CH1 A on this unit, as the design allows, and the self-check saw it: GET_HEALTH counts
+  (1A 1842, 1B 0, 2A 233, 2B 69), 563 of 838 captures flagged. CAL_PROBE mode 1 (the zero step with training, both
+  channels): CH1 OK (a clean stage found), CH2 READOUT (no clean stage for CH2 A and B at stages 2..5, event 23 a = 0x1C
+  = 0x10 | cores 2A 2B, value left at 0x08E4). During the sweeps event 23 flagged CH2 A and CH2 B alternately with an excess of
+  9..61 outliers: the CH2 chip has mild outliers on both cores in the band (std 3 vs 0.5), which the relative self-check
+  reports as a flip-flop and which makes "count 0 = clean" unreachable for CH2. Next: a PC_DEBUG image with raw 0x63 / 0x64
+  writes to map the 0x36 counts per core, stage and reference bit across the band, before deciding whether 0x153A needs
+  another stage grid, a looser clean criterion, or whether CH2's chip has a different timing.
 
