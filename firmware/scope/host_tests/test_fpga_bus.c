@@ -665,6 +665,52 @@ static void test_timeout_records(void)
     }
   }
 
+  //fw 0.2.98: the Frequency response engine's arm on 0x153A (pc_bode.c bh_arm: pretrigger 0, FPGA auto, 0x0E = the
+  //stop geometry's W for two records, legacy 2 x total samples = 4 x total words). The trigger comes in the first
+  //period: at word 0 (the reset's trigger_previous = 0 against a first sample above the level) or a few words in.
+  {
+    uint32_t w = pc_auto_stop_word(4 * TO_TOTAL + PC_STOP_LAG, TO_TOTAL, 8192);
+    static const int64_t at[] = { 0, 37, -1 };
+    uint8_t trig;
+
+    T_EQ(w, 8192 + TO_TOTAL + 4);                              //two records exceed the ring: a later pass
+    for(run = 0; run < 3; run++)
+    {
+      uint16_t addr;
+      int seen = 0;
+
+      to_reset(0x153A, 200 + run);
+      fm.trig_at = at[run];
+      to_arm(0, w - PC_STOP_LAG, 0);
+
+      //The engine's poll: 0x18 seen at any poll (bh_poll), until 0x0A
+      while(!to_done())
+      {
+        seen |= to_trig();
+        fm_advance_ns(1000);
+      }
+      seen |= to_trig();
+      addr = to_addr();
+
+      T_TRUE(to_read(0, addr, &newest));                       //every one contiguous
+      T_EQ(pc_engine_record(PC_STOP_RING0, seen, 0, &trig), 0); //never spliced
+      T_EQ(trig, at[run] >= 0);                                 //triggered when it triggered
+
+      if(run == 0)
+        T_EQ(addr, 0);                                          //0.2.97 read "0x14 == pretrigger": a time-out
+      if(run == 1)
+        T_EQ(pc_auto_cut(addr, 0, TO_TOTAL, w, 8192), 1);       //0.2.97's cut check: "maybe spliced", retaken
+      if(run < 2)
+        T_TRUE(newest && (fm.stop_n == (uint32_t)at[run] + TO_TOTAL)); //complete long before W
+      else
+        T_EQ(fm.stop_n, w);
+    }
+
+    T_EQ(pc_engine_record(PC_STOP_RING0, 1, 1, &trig), 1);    //forced: flagged
+    T_EQ(pc_engine_record(PC_STOP_NEWEST, 0, 1, &trig), 0);   //0x153B: a forced record is the newest words
+    T_EQ(trig, 0);
+  }
+
   printf("  time-out records: the forced stop spliced %u of %u records on 0x153A (expected about %u), none on 0x153B\n",
          (unsigned)spliced_old, (unsigned)runs_old, (unsigned)(runs_old * TO_TOTAL / 8192));
   T_TRUE(spliced_old > 0);

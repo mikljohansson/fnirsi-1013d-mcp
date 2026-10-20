@@ -179,6 +179,18 @@ uint32_t pc_auto_stop_word(uint32_t min_words, uint32_t total_words, uint32_t ri
 //the record after its first word (the record crosses the write pointer's stop position). 1 = may be cut.
 int      pc_auto_cut(uint32_t addr, uint32_t pre_words, uint32_t total_words, uint32_t stop_word, uint32_t ring_words);
 
+//fw 0.2.98: the Frequency response engine's record (pc_bode.c bh_read) under any stop kind: *triggered = 0x18 seen in
+//a poll (as 0.2.91..0.2.96), returns "may be spliced" = forced on a bitstream whose forced record is not the newest
+//words. The 0.2.97 host rules do not apply to the engine (pretrigger 0, a two-record time-out):
+//  - 0x14 == pretrigger is no time-out sign there: with pretrigger 0 the trigger check runs from the first word, and
+//    the reset clears trigger_previous to 0 (zaklad.v), so a first sample at or above the level is a rising edge at
+//    ring word 0 = the pretrigger: about half the arms with the level at CH1's mean, each a complete, contiguous record;
+//  - the cut check flags every early trigger: the engine's W lands at ring word total + 4 of a later pass whenever two
+//    records exceed the ring (legacy above 2047 words), so W's ring word lies inside every record that starts after
+//    word 4, and the ms timing cannot tell a capture that lasts microseconds from one W cut.
+//A record without a trigger is contiguous under the stop geometry, so a late edge read as "triggered" costs nothing.
+uint8_t  pc_engine_record(uint8_t stop_kind, int trig_seen, int forced, uint8_t *triggered);
+
 //Words written in ms at divider D (a word is 10 (D + 1) ns in the legacy layout, 5 (D + 1) ns with K >= 1; clamped to
 //0xFFFFFFFF), and the ms that words take (rounded up)
 uint32_t pc_ms_to_words(uint32_t ms, uint32_t divider, int wide);

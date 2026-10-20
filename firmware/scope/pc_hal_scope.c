@@ -718,6 +718,7 @@ static uint32 pc_ui_auto_t0, pc_ui_auto_ms;
 //last ring pass (the firmware time-out above stays as the safety net after W). Every other FPGA-auto conversion there
 //(calibration, auto setup) gets its 0x0E moved to such a word as well. 0x153B+ keeps the firmware time-out.
 static uint8  pc_ui_geom;                             //this conversion runs FPGA auto with the stop geometry
+static uint8  pc_ui_rules;                            //fw 0.2.98: and is the auto mode's (the 0x14 / cut rules apply)
 static uint8  pc_ui_spliced;                          //its record may be spliced (forced on 0x1532..0x153A, EF2, EP4)
 static uint32 pc_ui_stop, pc_ui_stop_ms;              //its stop word W and the time W takes
 static uint32 pc_ui_pre, pc_ui_total;                 //the 0x0B / 0x0C words it wrote
@@ -747,6 +748,7 @@ void pc_glue_decim_conversion(void)
   pc_ui_auto    = 0;
   pc_ui_forced  = 0;
   pc_ui_geom    = 0;
+  pc_ui_rules   = 0;
   pc_ui_spliced = 0;
   fpga_conv_0e  = 0;
 
@@ -778,6 +780,7 @@ void pc_glue_decim_conversion(void)
       pc_ui_stop    = pc_auto_stop_word(min, pc_ui_total, PC_DEC_RING);
       pc_ui_stop_ms = pc_words_to_ms(pc_ui_stop, d, pc_ui_wide);
       pc_ui_geom    = 1;
+      pc_ui_rules   = (uint8)fw_auto;   //fw 0.2.98: calibration / auto setup keep 0.2.96's reading (pc_engine_record)
 
       if(pc_ui_stop - PC_STOP_LAG != scopesettings.samplecount)
         fpga_conv_0e = pc_ui_stop - PC_STOP_LAG;
@@ -2236,7 +2239,7 @@ void pc_glue_ui_capture_addr(uint32 addr)
 
     //fw 0.2.97, FPGA auto with the stop geometry: 0x18 also counts an edge after the stop, which leaves 0x14 at the
     //pretrigger; a trigger in the last total - pre words before the stop is cut by it (flagged, as pc_cmds.c's host path)
-    if(pc_ui_geom && !pc_ui_forced)
+    if(pc_ui_rules && !pc_ui_forced)
     {
       if((addr & 0x1FFF) == pc_ui_pre)
         pc_sess.ui_trig = 0;
@@ -2254,7 +2257,7 @@ void pc_glue_ui_capture_addr(uint32 addr)
   }
 
   pc_scope_untrig = (!pc_ui_forced && (!pc_ready || pc_sess.ui_trig || scopesettings.triggermode) &&
-                     !(pc_ui_geom && ((addr & 0x1FFF) == pc_ui_pre))) ? 0 : 1;
+                     !(pc_ui_rules && ((addr & 0x1FFF) == pc_ui_pre))) ? 0 : 1;
   spectrum_capture_info(!pc_scope_untrig);
   phosphor_capture_info(!pc_scope_untrig);
   pc_ui_auto = 0;
