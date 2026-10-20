@@ -1464,3 +1464,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   read_trace attempt returned the host's last capture, origin "host", a flat record: in collaborative mode READ_TRACE
   gives the latest capture of either side; with the UI in RUN it gives the UI's.) Capture_segments needs the record to fit
   the slots: 6000-sample records give "at most 0 segments"; 1024 samples with pretrigger 256 allow 4 of 2^11 words.
+- 2026-10-20 20:5x-21:57: 30-minute soak and the README screenshot. 20:5x attempt ended at once (the scope was switched
+  off); 21:11 attempt interrupted at about 21:24 by the owner's restart (killed, not counted). 21:26-21:56 clean: the host
+  polled GET_STATUS every 2 s, GET_HEALTH and a two-channel capture every 10 s (scratchpad soak.py 1800, mcp venv): 899
+  status, 15 health, 15 captures, 0 errors, no reconnect; READ_SPECTRUM answered E_STATE throughout because the Spectrum
+  view was not open (expected, not an error). fw 0.2.102 on 0x153B, generator 1 kHz on the post, CH1 on the ladder's first
+  node. 21:57: docs/screenshots/scope-deep-memory.png: 16,382 samples (max_total_samples), pretrigger 1300, 500 kSa/s,
+  200 us/div, filter off (it already was), STOP, READ_SCREEN; the overview bar shows the whole record with the window at
+  its start. Scope put back to RUN with the 6000 / 3000 geometry.
