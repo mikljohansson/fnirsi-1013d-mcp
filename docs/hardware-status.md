@@ -1258,4 +1258,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   806 or 1774 of 2048), 64 of 64 triggered records clean; the C measurement matches the host's on all 96 real records. The
   splice is an FPGA / readout geometry question (fpga-gen11): it also hits the Scope's own auto-mode records when no trigger
   comes.
+- 2026-10-20 13:06-13:12: owner on 0.2.89, AUTO SET then RUN on the RC: "1-2 grey points per sweep, 1-2 batches of relay clicks per
+  sweep, doesn't stabilize". The table (500 Hz..100 kHz, 20 points): switches 0 but CH2 ranges per point 1,2,0,2,2,2,2,2,2,2,3,3,
+  3,3,2,3,3,4,5,5 (a 5 V/div entry at 1 kHz), ch1_low on 13 points, 10 retried. Host sweeps at that span: a fresh plan (25 points)
+  ranged CH2 monotonic 2..5 but left CH1 at 2.5 V/div (ch1_low from 2.9 kHz: the pre-scan still ranges CH1 coarse); the next sweep
+  reusing that plan had CH1 right (r1 3) but CH2 at 2.5 V/div on every point (r2 1, ch2_small above 50 kHz): the plan applies
+  ranges that are not the measured ones (CH1 / CH2 swapped or offset). Rows in scratchpad device_rc_rows_1310.json; sent to
+  fw-eng (fw-eng3). The host-started ten-sweep test of 12:42 did not show it because its plan came from a correct first sweep.
 
