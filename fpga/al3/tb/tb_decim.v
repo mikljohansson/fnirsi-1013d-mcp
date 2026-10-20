@@ -84,21 +84,29 @@ module tb;
 
   // 0x153B: after the stop the dut's trigger_address (time-out: W - total + pretrigger) and sampling_triggered (no late
   // trigger) differ from the references by design, and trigger_read_address is frozen at the stop (the references run it on
-  // after a 0x0E or 0x1A write); the three are compared while the write runs (tb_timeout.v has the rest)
+  // after a 0x0E or 0x1A write); the three are compared while the write runs (tb_timeout.v has the rest).
+  // fpga-gen12: ext_pending too. The gate on trigger_check_enable also stops the EXT edge latch, so an EXT edge after the
+  // stop sets the reference's ext_pending (and then its sampling_triggered) and not the dut's, until the next capture
+  // reset clears both. Its only consumer is sampling_triggered (trigger_detect_enable feeds nothing that is used) and it
+  // is not on the bus (0x28 reads ext_activity, unchanged), so after the stop it has no effect that is not already covered.
   wire [12:0] ta_cmp_dut = dut.sample_write_enable ? dut.trigger_address : 13'd0;
   wire [12:0] ta_cmp_ref = dut.sample_write_enable ? refd.trigger_address : 13'd0;
-  wire        tr_cmp_dut = dut.sample_write_enable ? dut.sampling_triggered : 1'b0;
-  wire        tr_cmp_ref = dut.sample_write_enable ? refd.sampling_triggered : 1'b0;
+  // fpga-gen12: sampling_triggered (and ext_pending) also not during the reset: a post-stop trigger of the reference is
+  // cleared by cap_rst200 on the clk_200MHz edge after the write clock edge that raised sample_write_enable (2.5 ns)
+  wire        tr_cmp_dut = (dut.sample_write_enable & ~dut.cap_rst200) ? dut.sampling_triggered : 1'b0;
+  wire        tr_cmp_ref = (dut.sample_write_enable & ~dut.cap_rst200) ? refd.sampling_triggered : 1'b0;
   wire [12:0] ra_cmp_dut = dut.sample_write_enable ? dut.trigger_read_address : 13'd0;
   wire [12:0] ra_cmp_ref = dut.sample_write_enable ? refd.trigger_read_address : 13'd0;
+  wire        ep_cmp_dut = (dut.sample_write_enable & ~dut.cap_rst200) ? dut.ext_pending : 1'b0;
+  wire        ep_cmp_ref = (dut.sample_write_enable & ~dut.cap_rst200) ? refd.ext_pending : 1'b0;
   wire [71:0] st_dut = {ta_cmp_dut, ra_cmp_dut, dut.sample_write_address,
                         tr_cmp_dut, dut.sample_write_enable, dut.sampling_half_way,
                         dut.sample_system_state, dut.sample_read_offset, dut.sample_write_clock,
-                        dut.ext_activity, dut.ext_pending, dut.ext_level, 12'd0};
+                        dut.ext_activity, ep_cmp_dut, dut.ext_level, 12'd0};
   wire [71:0] st_ref = {ta_cmp_ref, ra_cmp_ref, refd.sample_write_address,
                         tr_cmp_ref, refd.sample_write_enable, refd.sampling_half_way,
                         refd.sample_system_state, refd.sample_read_offset, refd.sample_write_clock,
-                        refd.ext_activity, refd.ext_pending, refd.ext_level, 12'd0};
+                        refd.ext_activity, ep_cmp_ref, refd.ext_level, 12'd0};
 
   //---------------------------------------------------------------------------------
   // Bookkeeping
@@ -140,7 +148,7 @@ module tb;
         eq_samples = eq_samples + 1;
         if ((out_dut & out_cmp_mask) !== (out_ref & out_cmp_mask) || st_dut !== st_ref || pad_dut !== pad_ref) begin
           eq_mismatch = eq_mismatch + 1;
-          if (eq_mismatch <= 10)
+          if (eq_mismatch <= 30)
             $display("MISMATCH t=%0t out %h/%h st %h/%h pad %b/%b", $time, out_dut, out_ref, st_dut, st_ref, pad_dut, pad_ref);
         end
       end
@@ -157,7 +165,7 @@ module tb;
       eq_samples = eq_samples + 1;
       if (mem_diff != 0) begin
         eq_mismatch = eq_mismatch + 1;
-        if (eq_mismatch <= 10) $display("MISMATCH t=%0t sample memory: %0d words differ", $time, mem_diff);
+        if (eq_mismatch <= 30) $display("MISMATCH t=%0t sample memory: %0d words differ", $time, mem_diff);
       end
     end
   endtask
@@ -250,7 +258,7 @@ module tb;
         eq_samples = eq_samples + 1;
         if (rd_d !== rd_r) begin
           eq_mismatch = eq_mismatch + 1;
-          if (eq_mismatch <= 10) $display("MISMATCH t=%0t bus read %h/%h cmd %h/%h", $time, rd_d, rd_r, dut.mcu_command, refd.mcu_command);
+          if (eq_mismatch <= 30) $display("MISMATCH t=%0t bus read %h/%h cmd %h/%h", $time, rd_d, rd_r, dut.mcu_command, refd.mcu_command);
         end
       end
       mcu_rws = 1;

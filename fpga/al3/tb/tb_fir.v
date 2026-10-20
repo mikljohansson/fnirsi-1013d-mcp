@@ -87,21 +87,29 @@ module tb;
 
   // 0x153B: after the stop the dut's trigger_address (time-out: W - total + pretrigger) and sampling_triggered (no late
   // trigger) differ from the references by design, and trigger_read_address is frozen at the stop (the references run it on
-  // after a 0x0E or 0x1A write); the three are compared while the write runs (tb_timeout.v has the rest)
+  // after a 0x0E or 0x1A write); the three are compared while the write runs (tb_timeout.v has the rest).
+  // fpga-gen12: ext_pending too. The gate on trigger_check_enable also stops the EXT edge latch, so an EXT edge after the
+  // stop sets the reference's ext_pending (and then its sampling_triggered) and not the dut's, until the next capture
+  // reset clears both. Its only consumer is sampling_triggered (trigger_detect_enable feeds nothing that is used) and it
+  // is not on the bus (0x28 reads ext_activity, unchanged), so after the stop it has no effect that is not already covered.
   wire [12:0] ta_cmp_dut = dut.sample_write_enable ? dut.trigger_address : 13'd0;
   wire [12:0] ta_cmp_ref = dut.sample_write_enable ? refd.trigger_address : 13'd0;
-  wire        tr_cmp_dut = dut.sample_write_enable ? dut.sampling_triggered : 1'b0;
-  wire        tr_cmp_ref = dut.sample_write_enable ? refd.sampling_triggered : 1'b0;
+  // fpga-gen12: sampling_triggered (and ext_pending) also not during the reset: a post-stop trigger of the reference is
+  // cleared by cap_rst200 on the clk_200MHz edge after the write clock edge that raised sample_write_enable (2.5 ns)
+  wire        tr_cmp_dut = (dut.sample_write_enable & ~dut.cap_rst200) ? dut.sampling_triggered : 1'b0;
+  wire        tr_cmp_ref = (dut.sample_write_enable & ~dut.cap_rst200) ? refd.sampling_triggered : 1'b0;
   wire [12:0] ra_cmp_dut = dut.sample_write_enable ? dut.trigger_read_address : 13'd0;
   wire [12:0] ra_cmp_ref = dut.sample_write_enable ? refd.trigger_read_address : 13'd0;
+  wire        ep_cmp_dut = (dut.sample_write_enable & ~dut.cap_rst200) ? dut.ext_pending : 1'b0;
+  wire        ep_cmp_ref = (dut.sample_write_enable & ~dut.cap_rst200) ? refd.ext_pending : 1'b0;
   wire [71:0] st_dut = {ta_cmp_dut, ra_cmp_dut, dut.sample_write_address,
                         tr_cmp_dut, dut.sample_write_enable, dut.sampling_half_way,
                         dut.sample_system_state, dut.sample_read_offset, dut.sample_write_clock,
-                        dut.ext_activity, dut.ext_pending, dut.ext_level, 12'd0};
+                        dut.ext_activity, ep_cmp_dut, dut.ext_level, 12'd0};
   wire [71:0] st_ref = {ta_cmp_ref, ra_cmp_ref, refd.sample_write_address,
                         tr_cmp_ref, refd.sample_write_enable, refd.sampling_half_way,
                         refd.sample_system_state, refd.sample_read_offset, refd.sample_write_clock,
-                        refd.ext_activity, refd.ext_pending, refd.ext_level, 12'd0};
+                        refd.ext_activity, ep_cmp_ref, refd.ext_level, 12'd0};
   // decimator: memory data, write strobe, capture advance, trigger compare data
   wire [50:0] dc_dut = {dut.dec_out2, dut.dec_out1, dut.dec_wr, dut.swc_adv, dut.swc_adv_q, dut.trigger_data,
                         dut.samples.dia[7:0]};
@@ -148,7 +156,7 @@ module tb;
         eq_samples = eq_samples + 1;
         if ((out_dut & out_cmp_mask) !== (out_ref & out_cmp_mask) || st_dut !== st_ref || pad_dut !== pad_ref || dc_dut !== dc_ref) begin
           eq_mismatch = eq_mismatch + 1;
-          if (eq_mismatch <= 10)
+          if (eq_mismatch <= 30)
             $display("MISMATCH t=%0t out %h/%h st %h/%h dc %h/%h pad %b/%b  mode %b/%b mode_s %b tmo %b/%b cnt %0d/%0d set %0d/%0d trig %b/%b en %b/%b swe %b/%b ta %0d/%0d", $time, out_dut, out_ref, st_dut, st_ref,
                      dc_dut, dc_ref, pad_dut, pad_ref,
                      dut.trigger_mode, refd.trigger_mode, dut.trigger_mode_s, dut.time_base_timeout, refd.time_base_timeout, dut.time_base_cnt, refd.time_base_cnt,
@@ -178,7 +186,7 @@ module tb;
       eq_samples = eq_samples + 1;
       if (mem_diff != 0) begin
         eq_mismatch = eq_mismatch + 1;
-        if (eq_mismatch <= 10) $display("MISMATCH t=%0t sample memory: %0d words differ (%0d skipped as the dut's post-time-out words)", $time, mem_diff, mem_dirty_n);
+        if (eq_mismatch <= 30) $display("MISMATCH t=%0t sample memory: %0d words differ (%0d skipped as the dut's post-time-out words)", $time, mem_diff, mem_dirty_n);
       end
     end
   endtask
@@ -289,7 +297,7 @@ module tb;
         eq_samples = eq_samples + 1;
         if (rd_d !== rd_r) begin
           eq_mismatch = eq_mismatch + 1;
-          if (eq_mismatch <= 10) $display("MISMATCH t=%0t bus read %h/%h cmd %h/%h", $time, rd_d, rd_r, dut.mcu_command, refd.mcu_command);
+          if (eq_mismatch <= 30) $display("MISMATCH t=%0t bus read %h/%h cmd %h/%h", $time, rd_d, rd_r, dut.mcu_command, refd.mcu_command);
         end
       end
       mcu_rws = 1;
@@ -639,6 +647,19 @@ module tb;
   //---------------------------------------------------------------------------------
   // Main sequence
 
+  // +vcd_from=<ns> [+vcd_len=<ns>] dumps both instances to fir_win.vcd for a window (fpga-gen12: read a MISMATCH line)
+  integer vcd_from, vcd_len;
+  initial begin
+    if ($value$plusargs("vcd_from=%d", vcd_from)) begin
+      if (!$value$plusargs("vcd_len=%d", vcd_len)) vcd_len = 1000;
+      #(vcd_from);
+      $dumpfile("fir_win.vcd");
+      $dumpvars(0, tb);
+      #(vcd_len);
+      $dumpoff;
+    end
+  end
+
   initial begin
     if (!$value$plusargs("seed=%d", seed)) seed = 12345;
     if (!$value$plusargs("logfile=%s", logname)) logname = "fir_edges.log";
@@ -703,10 +724,7 @@ module tb;
     fir_run(2'd3, 1'b1, rec_shift_fir(3, 30),  32'd30,  13'd60);    // N = 32
     fir_run(2'd3, 1'b0, rec_shift_fir(3, 99),  32'd99,  13'd40);    // N = 100
     fir_run(2'd3, 1'b0, rec_shift_fir(3, 398), 32'd398, 13'd30);    // N = 400
-    negab = 2'b01; fir_run(2'd3, 1'b0, rec_shift_fir(3, 14), 32'd14, 13'd60);
-    negab = 2'b10; fir_run(2'd2, 1'b1, rec_shift_fir(2, 18), 32'd18, 13'd60);
-    negab = 2'b11; fir_run(2'd1, 1'b0, rec_shift_fir(1, 15), 32'd15, 13'd60);
-    negab = 2'b00;
+    // (the three runs with 0x53 bits 3 / 4 set are phase 5, after the last equivalence phase: see there)
     // telegraph 0 / 255: the step overshoot with the recommended shift (no + 1) saturates the CIC
     // samples and the FIR output, and the undershoot clamps at 0
     adc_mode = 4;
@@ -830,11 +848,28 @@ module tb;
     wait_done(40000);
     check(done && dut.sampling_triggered == 1'b0, "resync capture ran to the time-out");
     adc_mode = 0;
+    rd2(8'h41);                                          // fpga-gen12: the read register's stale bits equal again
+                                                         // (the last full-byte read was a 0x14 that differs by design)
     mm0 = eq_mismatch;
     compare_memory;
     random_phase(15);
     $display("phase 4: total %0d equivalence samples, %0d mismatches, %0d captures the reference cut at its time-out", eq_samples, eq_mismatch, cut_caps);
     check(eq_mismatch == mm0, "after FIR use, FIR off again identical to 0x1534");
+
+    //-------------------------------------------------------------------------------
+    // Phase 5 (fpga-gen12): the FIR runs with 0x53 bits 3 / 4 set, logged and checked by cic_model.py with neg = 0
+    // (the bits are inert in the dut since 0x153A). They come last because the 0x1534 reference does capture on the
+    // falling edge with them, so its CIC sees other samples than the dut's for these runs and its never-reset
+    // integrators keep an offset for the rest of the simulation (i1 differed by 653 after them in seed 12345). The
+    // offset is invisible in steady state (the combs cancel a polynomial state offset of degree < K) but shows for one
+    // output after a K change between captures, when the comb delay registers still hold the old K's values: a
+    // 3-LSB dec_out1 window of 210 ns in phase 4 at the first timing that made it visible. No equivalence phase
+    // follows these runs now.
+    adc_mode = 0;
+    negab = 2'b01; fir_run(2'd3, 1'b0, rec_shift_fir(3, 14), 32'd14, 13'd60);
+    negab = 2'b10; fir_run(2'd2, 1'b1, rec_shift_fir(2, 18), 32'd18, 13'd60);
+    negab = 2'b11; fir_run(2'd1, 1'b0, rec_shift_fir(1, 15), 32'd15, 13'd60);
+    negab = 2'b00;
 
     $fclose(logf);
     $display("RESULT: %0d checks, %0d failed -> %0s", checks, errors, errors ? "FAIL" : "PASS");

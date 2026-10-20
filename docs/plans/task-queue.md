@@ -505,6 +505,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   fpga/al3/AGENTS.md "Flashing this unit", then README section 11's bench checks 1-6 (bode_cells.py "auto" variant clean 32 of
   32; Scope view auto-mode traces without the two-pass seam; Frequency response retried 0-1 per sweep). Needs a firmware that
   detects 0x153B (any 0.2.8x does: the 0x153A..0x153F range) and, for the full benefit, the firmware items below.
+  fpga-gen12 (10-20): **flash-ready**: tb 13 steps ALL PASS on seeds 12345 and 4242, source unchanged (the fir / seg residuals
+  were testbench artefacts); the exact flash session (pin with `tools/bitstreams.py pack`, pre-write double read = the 0x153A
+  image 77672b5a.., write, retrain the capture stages, bench checks 1-6) is fpga/al3/AGENTS.md "0x153B flash-ready".
 - [x] **Long free-running testbench** for the decimation filter: fpga-gen4's 0x1535 work (tb/run.sh, seeds 12345/1/77, 13 FIR
   mutations caught; fpga/al3/README.md section 5, commit 292a596).
 - [ ] **Open input / EXT bench tests 1-4** from fpga/al3/README.md "Changes" section 2 (needs an external 3.3 V source

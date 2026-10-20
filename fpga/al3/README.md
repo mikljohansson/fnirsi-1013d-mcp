@@ -1893,27 +1893,43 @@ Every record is checked word by word: equal to the words written, contiguous in 
   the random auto-mode captures' 0x14 against W - total + pretrigger; their directed time-out checks and tb_seg S10 /
   `seg_model.py` carry the new formula; `tb/contract_0x153B.txt` differs from the 0x153A transcript in the version byte
   only. Steps run on the final source (seed 12345): ext 39 checks / 0 mismatches in both equivalence phases, decim 98 +
-  cic_model, trigpos 882, firstrec 38, contract 12 (= contract_0x153B.txt) all PASS; fir, seg and the full 13-step run:
-  fir and seg (the two long steps, about 25 min each) failed their random equivalence phases
-  twice on testbench artefacts of the changed stop semantics, each fixed in the tb (acae8b8): the reference cuts a triggered
-  auto capture at its time-out (change 2; now skipped from the reference's stop on), the dut's extra post-time-out words
-  stay in the memory until rewritten (skipped by the memory compare), the read register's stale bits after the uncompared
-  0x14 / 0x18 reads (a 0x41 refill), and a 0x1A = 0 written by the tb while a never-triggered normal capture still runs
-  (the reference stops on the write, the dut two write clocks later: masked while the forced stop is in flight). **Verdict
-  with all four masks (seed 12345): fir 161 checks / 2 failed (phase 1 random 2458 mismatch samples, phase 4 3011),
-  seg 53 / 2 failed (3223 / 6635); cic_model and seg_model PASS.** Two residual signatures, each a window of about 10 ns
-  with both instances stopped (`swe 0/0`), from the diagnostic MISMATCH lines (`~/g11/logs/fir.log`, `seg.log` in WSL):
-  fir t = 9536073000 `tmo 1/1 cnt 361 set 346 trig 0/0 ta 184/142` (an untriggered time-out stop; the trigger
-  address differs by design and is masked, so the differing field is in the `out` / `dc` / bus part of the line, which the
-  summary strips: read the full line); seg t = 27429130000 `tmo 0/0 cnt 343 set 594 trig 0/1 en 1/1 swe 0/0 ta
-  145/265` (the reference took a trigger after its stop, the dut did not, change 3; the `st` fields show the reference
-  in reset with half-way set while the dut is released: a one-write-clock skew at the next reset release, to be
-  understood before masking). Not yet green: the next agent reads the two full lines, decides whether each is a tb
-  artefact of changes 1-4 (mask it the same way) or a dut fault, and reruns. Finish with
-  `wsl -d Ubuntu -- bash <repo>/fpga/al3/tb/run.sh 12345` (`REF_SRC_DIR` as in "Commands"; about 1 h; `ONLY=fir` /
-  `ONLY=seg` for the two steps alone) and record the result here; a residual one-write-clock window around a reset
-  release (seg phase 4, 10 ns, state / half-way differing between dut and reference) was seen once before the last mask
-  and is to be read from the diagnostic MISMATCH line if it returns.
+  cic_model, trigpos 882, firstrec 38, contract 12 (= contract_0x153B.txt) all PASS. fir and seg (the two long steps,
+  about 25 min each) needed seven testbench adjustments for the changed stop semantics and one for an older reference
+  artefact, none a dut fault. fpga-gen11
+  (acae8b8): the reference cuts a triggered auto capture at its time-out (change 2; skipped from the reference's stop
+  on), the dut's extra post-time-out words stay in the memory until rewritten (skipped by the memory compare), the read
+  register's stale bits after the uncompared 0x14 / 0x18 reads (a 0x41 refill), and a 0x1A = 0 written by the tb while a
+  never-triggered normal capture still runs (the reference stops on the write, the dut two write clocks later: masked
+  while the forced stop is in flight); that left fir 2458 / 3011 and seg 3223 / 6635 mismatch samples (phase 1 / total).
+  fpga-gen12 (8edb754, 6285c19, 503c034) decoded the diagnostic lines: every one was `st` bit 13, `ext_pending` = 1 in the
+  reference and 0 in the dut after a time-out stop until the next capture reset (not 10 ns windows: the first ten lines
+  of a 2.4 us window; the "reference in reset with half-way set" reading of the seg line was a misdecode, its `st` has
+  the same write address, half-way and state in both). Change 3 gates `trigger_check_enable` with `sample_write_enable`,
+  which also gates the EXT edge latch, so an EXT edge after the stop no longer sets `ext_pending`. Benign: its only
+  consumer is `sampling_triggered` (`trigger_detect_enable` feeds `trigger_rise_enable` / `trigger_fall_enable`, which
+  drive nothing), it is not on the bus (0x28 reads `ext_activity`, unchanged), the dut's set condition is a subset of
+  the reference's and both clear on the same `cap_rst200`; it is compared while the write runs like the other three.
+  With that mask three signatures remained, none a dut fault: (a) 3 ns at a reset release (fir 3, seg 6
+  samples): the reference's post-stop `sampling_triggered` is still 1 for the 2.5 ns between the write clock edge that
+  raises `sample_write_enable` in the reset and the clk_200MHz edge on which `cap_rst200` clears it; no write clock
+  edge falls in that window, so nothing consumes it; `sampling_triggered` and `ext_pending` are compared with
+  `sample_write_enable & ~cap_rst200` now. (b) The 0x05 / 0x0A polls of phase 4 (fir 553, seg 292 bus reads): the
+  resync before phase 4 refilled the read register's stale bits 7..1 with a 0x14 read, which differs by design after a
+  time-out stop since 0x153B (tb_seg), or not at all after the FIR time-out check (tb_fir); both read 0x41 now. (c) Once
+  (b) had shifted phase 4's timing, tb_fir showed a 210 ns window with `dec_out1` off by 3 LSB for one output, both
+  instances stopped between captures, every decimator input, strobe and setting equal (read with the new
+  `+vcd_from=<ns>` VCD window of tb_fir): the reference's CIC integrator `i1` carried a constant offset of 653 from
+  phase 2's three FIR runs with 0x53 bits 3 / 4 set, which capture on the falling edge in the 0x1534 reference and are
+  inert in the dut since 0x153A, so the reference's CIC saw other samples for those runs and its never-reset
+  integrators remember it. The combs cancel a polynomial state offset of degree < K in steady state at every K; the
+  offset shows for exactly one output after a K change between captures, when the comb delay registers still hold the
+  old K's values with their other offset degree, and only when `c3 >> shift` resolves it (here after a long K = 3 run
+  at shift 30). Older than 0x153B, invisible until this timing. Those three runs are tb_fir's phase 5 now, after the
+  last equivalence phase (503c034); cic_model.py checks them as before. What
+  the equivalence steps prove is unchanged for everything the firmware can observe: pins, decimator, memory, every
+  compared bus read and every capture register equal the references while a capture writes; after the stop only the
+  registers of changes 1 and 3 differ (trigger address, read counter, triggered flag, EXT latch), and tb_timeout checks
+  those. **Results (fpga-gen12, source c173ed5 unchanged, tb 503c034): seed 12345: ext 39, decim 98 + cic_model 1876 samples, fir 163 + cic_model 1612, long 8, seg 53 + seg_model 22 runs, trigpos 882, contract 12 (transcript = contract_0x153B.txt), encphase PASS, mcuread PASS (70 + 26), adccap 2274, firstrec 38, timeout 75: **ALL PASS** (5107 s); seed 4242: 39, 98 + 1873, 165 + 1638, 8, 53 + 22, 882, 12, encphase, mcuread 70 + 26, 2274, 38, 75: **ALL PASS** (4926 s). Every equivalence phase 0 mismatches (the fir and seg check counts vary with the random phase's untriggered captures, which add a 0x14 check each). Four runs in parallel on the 24-core WSL; one full run alone is about 1 h.**
 
 **Build** (TD 4.6.8 SP1, `build.sh`, b2 of fpga-gen11; source commit c173ed5): 4990 LUT (57.8 %), all block RAM as
 0x153A. `clk_200MHz` 0 errors, min period 4.583 ns (the first build of the same source rolled 5.101 ns with 2 errors on
