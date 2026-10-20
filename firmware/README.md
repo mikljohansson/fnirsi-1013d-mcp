@@ -342,6 +342,36 @@ The scope speaks the binary protocol of `docs/protocol.md` on its USB port. The 
 `docs/plans/firmware-usb-protocol.md`. Deviations from the spec are listed in the "Implementation
 notes" section of `docs/protocol.md`.
 
+### One supported FPGA bitstream (fw-one, protocol 1.25)
+
+Every firmware version runs on exactly one FPGA bitstream, the project's latest (owner decision 2026-10-20: "every
+firmware version only supports the latest FPGA bitstream ... detect this and show a loud banner"). The constant is
+`PC_FW_FPGA_VERSION` in `pc_cmds.h` (0x153B, `fpga/al3/dist/manifest.json` "recommended"); the capability word, the ring
+geometry (8192 words, 16382 samples) and every feature decision derive from it, never from the version word the FPGA
+reports. That word is read once at boot (`pc_glue_init`) and compared:
+
+- **Match**: the firmware runs as before. The FPGA's own encode self-check (read 0x33 at boot and after every 200 MSa/s
+  capture, enc_heal.c) and the capture stages (0x63 / 0x36, cap_stage.c) stay: 0x153B needs them.
+- **Mismatch** (older or newer word): the scope boots into a full-screen notice instead of the scope
+  (`ui_diag.c ud_build_fpga_mismatch`, `ui_diag_view.c ui_fpga_mismatch_pass`): "This firmware needs FPGA bitstream
+  0x153B." / "This scope has 0x1532." / "Flash it as the guide says (docs/guide/prepare.md), or remove the card to run the
+  stock firmware.", with three buttons: Diagnostics (the version word, Save report, the log, Enter FEL; Back returns to
+  the notice; no Calibrate, DC shift trim or Volts calibration there), Settings and USB drive (the modal screens of the
+  main menu; the notice is redrawn after). The acquisition, the Scope, Spectrum and Frequency response views and the
+  generator never run; nothing is written to the FPGA's feature registers at boot. Over USB: GET_INFO 76 carries the
+  built-for word and 78 bit 0 the mismatch (GET_HEALTH 124 / 126 the same), every command outside the basic set answers
+  E_UNSUPPORTED detail 1 "FPGA bitstream mismatch: this firmware needs 0x153B", and PING, GET_INFO, GET_STATUS,
+  GET_HEALTH, GET_LINK_STATS, GET_EVENT_LOG, GET_CAL, the SD commands, SAVE_REPORT, READ_SCREEN and ENTER_FEL keep
+  working (`F_BASIC` in pc_cmds.c), so a host can read the version word, save the report and load another image.
+
+Gone with it (fw-one, after fw 0.2.102): the stock 0x1432 / Atlan 0x1532 / EF2 / EP4 arms (`pc_variant_from_version`,
+`fpgasettings.fw_FPGA`, `fpga_check_ready`), the 0x1532..0x1537 encode-heal and core-order workarounds (`eh_mode`,
+`eh_affected`, `eh_order_differs`, the 0x0D re-write before a re-arm, `PC_ENCF_ORDER`), the fw 0.2.97 stop geometry and the
+"may be spliced" flag (`pc_stop_kind`, `pc_auto_stop_word`, `pc_auto_cut`, `pc_engine_record`, `pc_hal_force_stop`), the
+per-bitstream bus contract (`fpga_bus_contract_for`; `FPGA_READ_DUMMY` is the one constant), `cs_has`, and every branch on
+the version word or on a capability bit that cannot be false on 0x153B (62 sites in 11 files). A new bitstream means a new
+firmware: change `PC_FW_FPGA_VERSION`, the bus contract constant if the readout changed, and the notice's text follows.
+
 ### Build options
 
 | make variable | default | effect |
@@ -372,7 +402,7 @@ Files:
 | `scope/pc_transport.c/.h` | USB RX ring, TX pump, ZLP, link events | no |
 | `scope/pc_rx_ring.h` | RX ring copies and the one-FIFO-read-per-packet store | yes (`test_rx_ring`) |
 | `scope/pc_hooks.h` | the hooks in the 1.00o5 files (macros that mark each place) | |
-| `scope/fpga_bus.c/.h` | fw 0.2.72: the bus contract per bitstream, the readout start (dummy strobe), the sampling reset order, the record of rate / filter writes | yes (`test_fpga_bus`, against `host_tests/fpga_model.c`) |
+| `scope/fpga_bus.c/.h` | fw 0.2.72: the bus contract (one dummy strobe, `FPGA_READ_DUMMY`), the readout start, the sampling reset order, the record of rate / filter writes | yes (`test_fpga_bus`, against `host_tests/fpga_model.c`) |
 | `scope/build_id.c` | the build identity as data: commit hash and commit time (section 1, "Reproducible images") | |
 | `scope/host_tests/` | `test_protocol`, `test_rx_ring`, `test_session` (mock FPGA and UI), `check_vectors.py` | |
 | `../docs/protocol-vectors.json` | shared frame vectors (`gen_vectors.py`; the MCP server merges its own) | |
@@ -427,11 +457,8 @@ screen save/restore and the touch area. What depends on the running hardware is 
 
 | item | where | hidden when | why |
 |---|---|---|---|
-| the generator menu itself (top-bar button does not open it) | top bar | stock bitstream 0x1432 (no DDS) | the stock core has a fixed 1 kHz square wave |
-| memory depth boxes above the bitstream's maximum | acquisition menu | 6000+ on stock (3000), 15000 on EF2/EP4 (12286) | the FPGA cannot capture more |
-| Filter selector (in 1.00o5's Long memory slot) | acquisition menu | bitstream without DECIM (all but AL3 0x1534+) | the decimation filter exists only in fpga/al3 0x1534 (fw 0.2.30, "Decimation filter" below) |
-| memory depth 9000, 12000, 15000 | acquisition menu | Filter on (0x1534+) | the 16-bit layout holds one sample per ring word: at most 8190 samples |
-| EXT trigger source | trigger menu | bitstream without EXT_TRIGGER (all but AL3 0x1533+) | the input exists only in fpga/al3 0x1533 (calibration pin, 3.3 V logic referenced to the scope's USB ground, not the probe ground, which sits ~1.24 V above it); selecting it switches the generator off |
+| memory depth 9000, 12000, 15000 | acquisition menu | Filter on | the 16-bit layout holds one sample per ring word: at most 8190 samples |
+| (history, fw 0.2.6..0.2.102) the generator menu, the memory depths above the bitstream's maximum, the Filter selector and the EXT trigger source | top bar, acquisition and trigger menus | the running bitstream lacked the feature | since fw-one the firmware runs on one bitstream that has them all; a mismatched scope shows the notice screen instead |
 | Time & Date settings (RTC submenu) | system settings | no DS3231 answers at boot | the clock, file stamps and FAT times would read garbage |
 | Temperature (Diagnostics Battery tile) | Diagnostics | no DS3231 answers at boot | it is the DS3231's temperature register; without the module it read "99" |
 
@@ -554,22 +581,35 @@ triggered record (pretrigger included) into a 2048 x 64 accumulator. Writes 0x57
   at 1 MSa/s) the reset window can pass without an edge. The 0x05 poll guarantees edges in reset. 0x57 = 0 is written
   for every capture that is not a run while the FPGA may hold another mode (always the first arm after boot: an MCU
   restart leaves the FPGA running). Bitstreams before 0x1536 keep the 0.2.51 order byte for byte.
-- **UI hardware averaging.** The acquisition menu's Average (1.00o5: auto or normal trigger mode, not the waveform viewer,
-  not roll) used to average every display pass, trace = (trace + previous) / 2, whether a new record came or not. On
-  0x1536 a UI conversion whose record is legacy (filter off, or 200 MSa/s) and fits the accumulator (the 3000-sample
-  depth = 1500 words; total <= 2046 words) is one averaging run of N records: the largest power of two in 2..64 with
-  N x (record + dead time) <= 40 ms (`pc_seq_ui_plan`; 64 at 200 MSa/s, 8 at 1 MSa/s, none at 100 kSa/s and slower).
-  The readout takes the four lane sums of the channel (S = 0, 4 bus passes of 1500 words, about 1.8 ms) and feeds
-  `fpga_read_adc_data` the corrected code of the mean per core (`pc_seq_avg_code`: mean in Q8 by an exact reciprocal,
-  then the core's gain / offset, rounded), so trace, measurements, software trigger, spectrum and phosphor take it as a
-  normal record; the software average is skipped for it (`pc_seq_sw_average`). 16-bit records (always 3000+ samples,
-  over the 2046-word accumulator) and slow rates keep the software average. GET_STATUS byte 46 tells which (0 off,
-  1 software, 2 hardware), byte 47 log2 N.
-- Deadline (`pc_seq_ui_service`, main loop): a run not done after max(100 ms, two records) + its run time is stopped
-  (0x5D = 1, then 0x1A = 0) once it holds a record, and shows the mean of what it has. Auto mode without any trigger:
-  the run is stopped empty, the record shown is the sample memory's (untriggered, as the firmware auto mode of 0.2.41
-  shows), and the next UI conversions are single records until one triggers. Normal mode with no record yet keeps
-  waiting, as a normal-mode capture does. The firmware auto time-out never runs during a UI run (it would end a record
+- **UI averaging: one behaviour (fw-one; owner 2026-10-20 "consistency matters").** The acquisition menu's Average
+  (1.00o5: auto or normal trigger mode, not the waveform viewer, not roll) used to average every display pass, trace =
+  (trace + previous) / 2, whether a new record came or not; fw 0.2.58 replaced that by a hardware run for legacy
+  records that fit the accumulator and kept the running average for the rest. Since fw-one every displayed record is the
+  mean of N records, N from one planner for both paths (`pc_seq_ui_plan_n`, pc_seq.c): the largest power of two in 2..64
+  whose N records fit the 40 ms budget, a record costed at its acquisition time plus the sequencer's dead time and, on
+  the MCU path, its readout (4 bus bytes per ring word at 0.3 us). A legacy record (filter off, or 200 MSa/s) that fits
+  the accumulator (total <= 2046 words: the 3000-sample depth = 1500 words) is one hardware averaging run of N records
+  (64 at 200 MSa/s, 8 at 1 MSa/s); the readout takes the four lane sums of the channel (S = 0, 4 bus passes of 1500
+  words, about 1.8 ms) and feeds `fpga_read_adc_data` the corrected code of the mean per core (`pc_seq_avg_code`: mean
+  in Q8 by an exact reciprocal, then the core's gain / offset, rounded). Every other record (16-bit, or deeper than 4092
+  samples) is averaged by the MCU (`pc_seq_hw.c` `ui_mcu_collect`): the main loop's conversion is record 1; once it is
+  done and triggered, `pc_seq_ui_done` arms the same conversion N - 1 times within the pass, reads each record's lanes
+  (`pc_hal_read_core` / `fpga_read_decim_data`) into 32-bit sums per sample and feeds the exact mean (legacy per core as
+  above; 16-bit the rounded mean through the readout's scale / corr16 conversion, as a single record). So trace,
+  measurements, software trigger, spectrum and phosphor take the mean as a normal record on either path. Numbers: 3000
+  16-bit samples at 1 MSa/s N = 4 (3 ms record + 3.6 ms readout each, about 27 ms per pass), 6000 legacy samples at 200
+  MSa/s N = 8, 16382 legacy N = 4, 10 kSa/s and slower N = 1 (single records: two do not fit the budget). GET_STATUS byte
+  46 tells the path (0 off, 1 the MCU's mean, 2 hardware), byte 47 log2 N (0 = single records). READ_RAW of a UI capture
+  reads the last of the N records (the ring), READ_TRACE the mean.
+- Deadline, both paths: a hardware run not done after max(100 ms, two records) + its run time is stopped
+  (`pc_seq_ui_service`, main loop: 0x5D = 1, then 0x1A = 0) once it holds a record, and shows the mean of what it has.
+  Auto mode without any trigger: the run is stopped empty, the record shown is the sample memory's (untriggered, as the
+  firmware auto mode of 0.2.41 shows), and the next UI conversions are single records until one triggers. Normal mode
+  with no record yet keeps waiting, as a normal-mode capture does. On the MCU path record 1 is the main loop's
+  conversion with exactly those semantics (the auto time-out ends it untriggered: shown alone, the next conversion tries
+  again; normal mode waits); records 2..N wait at most the same deadline from record 1's arrival, then 0x1A = 0 discards
+  the partial record and the pass shows the mean of the records it holds. The pass never stalls longer than the
+  planned run time plus that deadline. The firmware auto time-out never runs during a UI run (it would end a record
   between the records of a run).
 - Host (protocol row 56): SET_SEQ sets a run for the next host ARM (segments: m, count, circular, hold-off; averaging:
   positions, N, hold-off), checked against the trigger geometry at SET_SEQ and at ARM; DONE is the end of the run;
