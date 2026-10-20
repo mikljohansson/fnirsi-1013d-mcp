@@ -1147,4 +1147,14 @@ Newest entries at the bottom. Format: date, who, what, result.
   fw 0.2.71 (before fw-bus) on 0x153A the device sweep ran once (20/20, CH1 ranged to 0.5 V/div, 0.07 dB) and failed with reason 8
   on the second run, so the fault is intermittent and not only fw-bus's write order; on 0x1539 / 0.2.71 four sweeps in a row
   ran yesterday. Statistics per filter mode and divider follow.
+- 2026-10-20 11:00-11:08: the saturated record could not be reproduced on demand: 80 CIC2+FIR captures after rate changes at
+  five dividers, 72 captures over every order of filter / rate writes, relay toggles with 0 / 100 / 300 ms waits and offset
+  jumps before the capture, all clean on fw 0.2.82; it was seen three times in sequences that followed a device sweep or a
+  fresh range change. The deterministic part is the engine's own `clipped`: pc_bode.c `cap->s[c].clipped = (h.overload != 0)`
+  takes `scopesettings.channelN.ADoverload`, which fpga_control.c's readout sets sticky (|= 1 / 254 on a 0 or 255 sample) and
+  which is cleared only on paths the engine does not run; one railed sample anywhere (the fault captures of 0.2.79 / 0.2.80,
+  a saturated record, a real clip at a sensitive range) marks every later engine capture clipped, the pre-scan ranges down to
+  5 V/div and the 0.2.71 rule ends the sweep with reason 8. Yesterday's device sweeps (every point flagged clipped) fit the
+  same flag. Fix dispatched (fw-bode2): the engine judges clipping from the record's own min / max only, the sticky flag is
+  cleared per capture, and reason 8 is raised from the capture self-check (0x36) rather than from clipping.
 
