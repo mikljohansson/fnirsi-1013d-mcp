@@ -12,15 +12,21 @@ Sources, which you should open when you need the detail: [Install](install.md) (
 
 ## Ask first
 
-1. **Which operating system is the PC running?** Writing the card is tested on Linux and on WSL with the card reader
-   attached through `usbipd`. `make_sd_image.py` also accepts a Windows drive (`\\.\PhysicalDriveN`), but that path
-   is **untested**: do not take it unless the person accepts that. On Windows, ask them to install WSL or use a Linux
-   machine.
+1. **Which operating system is the PC running?** The card is written from Linux or from WSL. That is how the
+   maintainer's card was written (WSL, the reader attached with `usbipd`; the [bench log](../hardware-status.md)
+   has it). `make_sd_image.py` also accepts a Windows drive (`\\.\PhysicalDriveN`), but that path is **untested**:
+   do not take it unless the person accepts that. The proven route for the FPGA flash, `spiflash_d2xx.py` with the
+   FTDI D2XX driver, runs on Windows. A person on Windows therefore uses both: WSL for the card, Windows for the
+   programmer. Ask whether WSL is installed; if not, that is the first step
+   (`wsl --install` from an administrator PowerShell, then Ubuntu).
 2. **Have they identified the FPGA variant?** The firmware is verified on the Anlogic AL3A10 variant only, and the
-   bitstreams are for it only. If they have not looked, guide them (power off, battery disconnected, USB unplugged):
+   bitstreams are for it only. There is no way to tell from outside. Guide them (power off, battery disconnected,
+   USB unplugged):
     - Open the back. Find the FPGA: an unmarked 144-pin square chip. Next to it, an 8-pin flash chip marked
       **25Q80** (Winbond 25Q80DV on the tested unit; ZB25VQ80, 25VQ16 or 25VQ32 on other AL3 units) and an
-      unpopulated 2x3 header. That is the AL3A10 board.
+      unpopulated 2x3 header. That is the AL3A10 board. The labelled photo is
+      [`docs/photos/board-al3a10-programmer.jpg`](../photos/board-al3a10-programmer.jpg); the header close-up is
+      [`docs/photos/fpga-flash-header.jpg`](../photos/fpga-flash-header.jpg).
     - A marked FPGA, Anlogic EF2L45 (no external flash chip) or Altera EP4CE6, is another variant. The firmware
       for those is inherited from Atlan4 and untested here, and no bitstream exists for them. Tell the person and
       stop, unless they want to try the firmware at their own risk; never flash their FPGA.
@@ -28,9 +34,10 @@ Sources, which you should open when you need the detail: [Install](install.md) (
       [Hardware preparation](../hardware-prep.md), sections 1.2 and 3a, has the detail.
 3. **Do they want the FPGA bitstream, and do they have a 3.3 V SPI programmer?** The firmware runs without it (on the
    stock bitstream the deep memory, the generator, the filters, the external trigger and the frequency-response mode
-   are missing). The bitstream needs six pins soldered to the 2x3 header, the pinout found by continuity, and a 3.3 V
-   programmer: the FT2232D route in `BITSTREAMS.md` is the tested one; a CH341A needs a 3.3 V modification
-   ([Hardware preparation](../hardware-prep.md), section 2). 5 V logic can damage the board.
+   are missing). The bitstream needs six pins soldered to the 2x3 header from the back of the board, the pinout
+   found by continuity, and a 3.3 V programmer: the FT2232D route in `BITSTREAMS.md` is the tested one; a plain
+   CH341A can drive 5 V on the data lines and has killed a flash ([Hardware preparation](../hardware-prep.md),
+   section 2.2).
 4. **Do they have a spare micro SD card?** The card's files are erased when its partition is recreated, and the
    card the scope used so far should be kept as it is.
 
@@ -52,20 +59,26 @@ Sources, which you should open when you need the detail: [Install](install.md) (
 
 From the [releases page](https://github.com/mikljohansson/fnirsi-1013d-mcp/releases) (v0 releases are marked
 pre-release): `fnirsi_1013d-fw-X.Y.Z.bin`, `fnirsi_1013d-sdtools-X.Y.Z.zip`, `SHA256SUMS`, plus the bitstream
-`fnirsi_1013d-fpga-al3-0x153b-flash1m.bin` and the MCP wheel if wanted. In the download directory:
+`fnirsi_1013d-fpga-al3-0x153b-flash1m.bin` and the MCP wheel if wanted. In the download directory, on Linux or WSL:
 
 ```
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
-Good: one `: OK` line per downloaded file and nothing else. Any `FAILED` means a bad download: stop.
+Good: one `: OK` line per downloaded file and nothing else. Any `FAILED` means a bad download: stop. On Windows
+without WSL at hand, `Get-FileHash -Algorithm SHA256 <file>` (PowerShell) or `certutil -hashfile <file> SHA256`
+prints the hash; compare it by eye with the line for that file in `SHA256SUMS`.
 
-### 2. Prepare the card
+### 2. Attach the card reader and prepare the card
 
-The firmware sits in the raw sectors before the FAT32 partition, which must start at **8 MiB (sector 16384)** or
-later on an MBR card. Most cards come with the partition at 1 MiB or 4 MiB, so it usually has to be recreated. This
-erases the card's files. With the card reader at `/dev/sdX` (confirm the device with the person; a wrong device
-destroys a disk):
+On WSL the reader is handed over from Windows with [usbipd-win](https://github.com/dorssel/usbipd-win): in an
+administrator PowerShell `usbipd list` (find the reader's BUSID), `usbipd bind --busid <id>` once, then
+`usbipd attach --wsl --busid <id>`; in WSL, `lsblk` shows the card as `/dev/sdX`. Confirm the device with the person
+by its size: a wrong device destroys a disk.
+
+The firmware sits in the raw sectors before the FAT32 partition. For a new card the rule is an MBR with one FAT32
+partition that starts at **8 MiB (sector 16384)** or later, so later firmware images fit too. Most cards come with
+the partition at 1 MiB or 4 MiB, so it usually has to be recreated. This erases the card's files:
 
 ```
 sudo fdisk -l /dev/sdX
@@ -92,21 +105,35 @@ A hash mismatch or a download failure: stop. `--local <zip>` uses a copy the per
 
 ### 4. Write the parts
 
+By default the tool's backup goes to a `backups/` directory next to the script; pass `--backup-dir` with a directory
+the person knows and will keep:
+
 ```
-python3 make_sd_image.py write --device /dev/sdX --bootloader parts/bootloader.bin --updater parts/updater.bin --scope parts/scope.bin --boot-mode 4
+python3 make_sd_image.py write --device /dev/sdX --bootloader parts/bootloader.bin --updater parts/updater.bin --scope parts/scope.bin --boot-mode 4 --backup-dir ~/fnirsi-backups
 ```
 
-The tool asks the person to type the device path again. Good: it backs up sectors 0 to the last written sector
-into `backups/`, writes only these three parts and the boot-mode byte, reads everything back and reports success.
-It refuses a GPT card and a card whose partition starts too low, and names the start it needs: then go back to
-step 2. Boot mode 4 shows the boot menu with the open firmware preselected, the safe choice for a first boot.
+What a good run prints, in order: one line per part with its sectors (`bootloader -> sectors 16..`, `updater`,
+`display_config(boot mode 4) -> sectors 710..710`, `scope -> sectors 750..`), then `About to WRITE RAW SECTORS on physical device /dev/sdX.` and the prompt
+`Type the device path again to confirm:` (the person types it), then `backup of sectors 0..N saved to <file>`, and
+at the end `written and verified`. Anything else is a stop:
+
+- `GPT disk: GPT entries live in sectors 2..33 and clash with the bootloader at 16`: the card is GPT; recreate it
+  as in step 2.
+- `... runs into the FAT32 partition, which starts at sector N`: a part would overlap the partition; the tool
+  refuses and says what to do. Recreate the partition at 8 MiB.
+- `note: the partition starts at sector N. Firmware images up to M sectors fit; cards for this firmware should start
+  it at 16384`: a warning, not a refusal; the image fits but a later, larger one might not. Prefer recreating.
+- `READ-BACK MISMATCH`: the card did not take the write; do not boot from it, ask.
+
+Boot mode 4 shows the boot menu with the open firmware preselected, the safe choice for a first boot.
 
 ## The bitstream (optional)
 
 Only on an AL3A10 board, only with a 3.3 V programmer, only after the card works. The recommended bitstream is
 **0x153B**; it needs firmware 0.2.97 or later, which every release from 0.3.0 has. The config flash is wired only to
 the FPGA, so the scope cannot write it itself. Follow [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), "How to
-flash", step by step; in short, with the FT2232D tool from a checkout of the release tag:
+flash", step by step; in short, with the FT2232D tool from a checkout of the release tag (on Windows, with the FTDI
+driver that comes with the board):
 
 ```
 git clone --branch vX.Y.Z https://github.com/mikljohansson/fnirsi-1013d-mcp
@@ -117,8 +144,8 @@ python firmware/tools/spiflash_d2xx.py wiring
 
 1. **Pinout by continuity** before anything is connected ([Hardware preparation](../hardware-prep.md), section 1.3).
    On the tested unit the header reads 1 /CS, 2 DO, 3 CLK, 4 DI, 5 VCC, 6 GND, which differs from the reconstructed
-   schematic: the person must measure theirs. Scope on its battery, USB unplugged, the header's VCC and the
-   programmer's power pins left unconnected.
+   schematic: the person must measure theirs. **Power during flashing, the one benched answer: the scope on its
+   battery, USB unplugged**, the header's VCC and the programmer's power pins left unconnected, 3.3 V logic only.
 2. **Probe**: `python firmware/tools/spiflash_d2xx.py probe`. Good: JEDEC ID `ef 40 14` (W25Q80DV) or `5e 60 14`
    (ZB25VQ80). `00` or `ff` means wiring: stop.
 3. **Back up twice**: `python firmware/tools/spiflash_d2xx.py read -o backups/fpga-flash-before.bin --twice`.
@@ -151,7 +178,8 @@ cable disconnected; CH1 probe at 1X on the calibration post; CH2 the same; Save 
 "CH1 calibrated" and "CH2 calibrated" with the cores matched. On the stock bitstream the gain steps are skipped and
 the wizard says so; that is expected. [Calibration](calibration.md) lists every failure message and its remedy.
 
-Then, if wanted, connect the MCP server: [Agent setup](../agent-setup.md).
+Then, if wanted, connect the MCP server: [Agent setup](../agent-setup.md). Between releases it installs from main
+with `uv tool install "git+https://github.com/mikljohansson/fnirsi-1013d-mcp#subdirectory=mcp"`.
 
 ## When it goes wrong
 
