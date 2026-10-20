@@ -276,7 +276,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
-- fpga-c1 / fpga-c2 / fpga-c3 (Opus, dispatched 22:24-22:26, branches of the same names): 0x153C items C1 (trigger types
+- fpga-c1 / fpga-c2 / fpga-c3 (Opus, dispatched 22:21-22:22, branches of the same names): 0x153C items C1 (trigger types
   pulse width / Nth edge / timeout, 0x1B hold-off, 0x37, the fire gate; owns the capture and EXT blocks and the shared
   decim_trig_sample lines), C2 (peak detect as a one-register switch, 0x56 bit 1, 0x29; owns decim_chan and the decimator
   control; sends its two-line shared change via the coordinator), C3 (counter + min/max, 0x61/0x62/0x35 16 bytes; new block
