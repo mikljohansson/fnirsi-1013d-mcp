@@ -1231,7 +1231,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   -2.86 dB at 10.0 kHz every time. fw 0.2.88 (fw-decfix: decimation from the divider the FPGA holds, 0x54 at every arm) pinned
   backups/fw-0.2.88_cfe38ea3.bin (sha256 cfe38ea3230f189fb43cc849c92f6dd7bdbf1ebca22f47bd2b90c7639fab8207), loaded 12:25; the
   reproduction and ten traced sweeps follow.
-- 2026-10-20 12:26-12:30: fw 0.2.88 bench: fpga-gen10's deterministic reproduction is clean (raw divider 4095 kept through the
+- 2026-10-20 12:26-12:28: fw 0.2.88 bench: fpga-gen10's deterministic reproduction is clean (raw divider 4095 kept through the
   filter change and a poll: GET_DECIM divider 4095, N 4096, shift 15, 0 saturated records in 20), the FPGA write trace shows
   0x54 / 0x55 at every arm (41 of 128 entries in one sweep), and ten device sweeps on the RC all ranged CH1 to 0.5 V/div: the
   first-record saturation is fixed. Open on the same run: switches 6, 6, 6, 6, 6, 6, 4, 5, 1, 1 (the range plan converges over
