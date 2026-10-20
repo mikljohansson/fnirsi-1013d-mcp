@@ -1105,6 +1105,15 @@ static const char *warning(char *buf)
   return "";
 }
 
+//fw 0.2.86: the points this sweep has measured (bu_sweep_measured), for the Sweep card, the cards' "sweeping" and the
+//Single sweep row's "n / N"
+static int sweep_measured(void)
+{
+  bode_eng *e = bode_engine();
+
+  return bu_sweep_measured(bode_state(e) == BODE_ST_RUNNING, bode_current(e), bode_done_count(e), bode_count(e));
+}
+
 static int table_state(void)
 {
   int i, have = 0;
@@ -1115,7 +1124,7 @@ static int table_state(void)
   //fw 0.2.71: a single sweep fills its table anew (the cards read "sweeping" until it ends); RUN's repeats overwrite a
   //complete table point by point
   if(bode_state(bode_engine()) == BODE_ST_RUNNING)
-    return ((have < n_pts) || (bv.single && (bode_done_count(bode_engine()) < n_pts))) ? BU_TABLE_FILLING :
+    return ((have < n_pts) || (bv.single && (sweep_measured() < n_pts))) ? BU_TABLE_FILLING :
                                                                                          BU_TABLE_COMPLETE;
 
   return have ? BU_TABLE_COMPLETE : BU_TABLE_NONE;
@@ -1167,7 +1176,7 @@ static void draw_cards(int table)
   in.table   = (uint8)table;
   in.autoset = bv.autoset;
   in.thru    = (uint8)thru_card_state();
-  in.done    = bode_done_count(e);
+  in.done    = sweep_measured();
   in.count   = bode_count(e);
   in.mk      = &mk;
 
@@ -1928,7 +1937,7 @@ static int single_state(const char **label, char *value)
   bode_cfg c;
 
   cfg_now(&c);
-  return bu_single_button(bode_state(e) == BODE_ST_RUNNING, bv.single, bv.autoset, bode_done_count(e), bode_count(e),
+  return bu_single_button(bode_state(e) == BODE_ST_RUNNING, bv.single, bv.autoset, sweep_measured(), bode_count(e),
                           bode_estimate_ms(&c), label, value);
 }
 

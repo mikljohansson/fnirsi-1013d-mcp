@@ -651,6 +651,13 @@ int bu_single_button(int running, int single, int autoset, int done, int count, 
   return BU_SINGLE_START;
 }
 
+int bu_sweep_measured(int running, int current, int done_count, int count)
+{
+  int n = running ? current : done_count;
+
+  return (n < 0) ? 0 : (n > count) ? count : n;
+}
+
 int bu_auto_busy(int autoset, int final, int running)
 {
   return (autoset || final) && running;

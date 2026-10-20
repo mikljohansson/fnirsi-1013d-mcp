@@ -282,6 +282,12 @@ int bu_single_button(int running, int single, int autoset, int done, int count, 
 //(done); a single or thru sweep, AUTO SET's final sweep (single), a stopped or failed sweep return to STOP. The READ_BODE
 //header's view bits: bit 0 the view shows, bit 1 RUN repeats sweeps (0 during and after AUTO SET).
 int   bu_auto_busy(int autoset, int final, int running);
+
+//fw 0.2.86 (bench 2026-10-20 11:54: "Stop sweep" read "50 / 50" throughout): the points measured so far. While a sweep
+//runs it is the engine's point in progress (bode_current: the points before it are this sweep's); the table's done
+//count is not, as a sweep on the same plan keeps the previous sweep's points until it overwrites them. Stopped: the
+//table's done count. Clamped to 0 .. count.
+int   bu_sweep_measured(int running, int current, int done_count, int count);
 int   bu_after_sweep(int run, int single, int done);
 uint8 bu_view_bits(int active, int run, int single);
 
