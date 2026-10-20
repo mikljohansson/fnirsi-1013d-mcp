@@ -65,7 +65,7 @@ probe". **Calibrate** stays, so you can try again. There is no Skip.
 | No signal on CH1: tip on the post? | Put the probe tip on the calibration post |
 | the post signal clips: set the probe to 1X | Switch the probe to 1X |
 | the post signal moved: hold the tip still | Retry without moving the probe |
-| ADC readout fault near code 128: check the FPGA bitstream | The bitstream garbles one core; flash the recommended bitstream (0x153A) |
+| ADC readout fault near code 128: check the FPGA bitstream | The bitstream garbles one core; flash the recommended bitstream (0x153B) |
 
 A failed zero step also shows a small second line with the measurement point and the raw values. It is meant for a bug
 report.
