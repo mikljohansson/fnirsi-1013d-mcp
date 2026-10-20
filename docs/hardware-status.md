@@ -1202,4 +1202,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   warnings change from sweep to sweep. Two conclusions: the artefact is the dominant fault (fpga-gen10); and continuous RUN after
   AUTO SET reads as "looping" with the relays clicking (2 CH2 switches per sweep): proposal to the owner: AUTO SET ends with
   one sweep at the found span and STOP, RUN stays explicit.
+- 2026-10-20 11:45-11:54: fw 0.2.85 (fw-acq2) loaded 11:45. Owner decisions 11:47-11:52: AUTO SET ends in STOP after one sweep at
+  the found settings, never RUN (fw-fr4); RUN stays continuous for live tuning; every sweep at the same span and settings
+  reuses the previous per-point range plan so the relays stay quiet (engine item after fpga-gen10). Owner on 0.2.85: the "Stop
+  sweep" button's progress line reads "50 / 50" throughout a single sweep instead of counting (sent to fw-fr4).
 
