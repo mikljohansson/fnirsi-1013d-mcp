@@ -6,6 +6,15 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **One supported FPGA configuration** (owner decision 2026-10-20 21:52: "our firmware doesn't need to be compatible with
+  anything besides our own FPGA bitstream"): the firmware targets the project's current bitstream (0x153B) only. Implied
+  removals, to be scheduled (before or after the 0.3.0 tag: owner's call): the stock-0x1432 and Atlan-0x1532 paths, the
+  0x1532..0x1537 encode-heal and core-order workarounds (enc_heal.c/h, 287 lines), the <= 0x153A legacy capture geometry of
+  fw 0.2.97 (0x0E = W-2), the capability branches on the FPGA version word (62 sites in 11 files), the MCU average fallback
+  once the accumulator fits every record, the EF2L45 / EP4CE6 variant code inherited from Atlan4 (14 files). User-facing
+  consequence: the FPGA flash (soldering + programmer) is step 1 of the install, the "SD card alone" path and the
+  per-bitstream feature table go. Diagnostics keeps one check: the version word must be the one this firmware was built
+  for, with a plain message otherwise.
 - [~] **The firmware image no longer fits the SD write window** (fw-sd dispatched 18:53) (bench 10-20 18:51: `--persist-only`
   of fw 0.2.100 (773,120 B = 1510 sectors at 750, end 2260) FAILED "does not fit below sector 2048"; the card's partition
   starts at 8192 but the firmware caps writes at PC_SD_LIMIT = 2048 (pc_cmds.c `pc_sd_write_end`, protocol row 40
