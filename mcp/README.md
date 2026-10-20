@@ -10,7 +10,9 @@ Python tooling for the FNIRSI 1013D open firmware's USB control protocol
 | `fnirsi1013d.transport` | pyserial / TCP links, request engine (one request in flight, control requests during WAIT, retries through the duplicate cache, recovery), `#VER` probe, port auto-detect |
 | `fnirsi1013d.simulator` | Device simulator speaking the exact protocol over TCP (`fnirsi1013d-sim`) |
 | `fnirsi1013d.scope` | High-level client: numpy arrays, volts and seconds |
-| `fnirsi1013d.analysis` | Statistics, edges, edge-aligned averaging, spectra, decay fits |
+| `fnirsi1013d.analysis` | Statistics, edges, edge-aligned averaging, spectra, decay fits, mask envelopes, DVM resolution |
+| `fnirsi1013d.decode` | Serial decoders on captured lines: UART (auto-baud), SPI, I2C |
+| `fnirsi1013d.export` | CSV export of any saved result with a `#` header |
 | `fnirsi1013d.server` | FastMCP server (`fnirsi1013d-mcp`) |
 | `fnirsi1013d.vectors` | Checks and extends the shared `docs/protocol-vectors.json` |
 
@@ -108,8 +110,11 @@ Signal specs are `kind:key=value,...` with SI units, at the BNC in volts:
 | `square` | `freq`, `amp` (+-amp around offset), `duty` (0.5), `offset` |
 | `decay` | PI-style: `period` (1 ms), `width` TX on-time (200 us), `tau` (80 us), `amp` (0.5), `tau2`, `amp2`, `flyback` spike volts with `flyback_tau` (0.5 us), `offset`, `tx` level during TX |
 | `gate` | TX gate: `period`, `width`, `high` (3.3), `low` (0); high while TX is on, falling edge at turn-off |
-| `dc` | `v` |
+| `dc` | `v` (a DC level with the `--noise` on top: the `scope_dvm` scenario) |
 | `gen` | the calibration-pin square wave from the generator state (loopback for `scope_self_test_loopback`) |
+| `uart` | one frame per byte of `text` ("Hi!") at `baud` (115200): `bits` (8), `parity` 0 none / 1 even / 2 odd, `stop` (1), `idle` 1 high / 0 inverted, `high` (3.3) / `low` (0), `gap` between frames, repeated every `period` (1 ms) from `start` |
+| `spi_clk`, `spi_data` | an SPI exchange of `text` as `bits`-bit words (8) at `freq` (1 MHz), `cpol` / `cpha` (0 / 0), `msb` (1), `gap` of idle clock between words; `--signal spi_clk:...` puts the data line on CH2 |
+| `i2c_scl`, `i2c_sda` | an I2C transaction at `freq` (100 kHz): START, `addr` (0x50) with `rw` (0 write / 1 read), ACK (`nack` 1 = no slave), the `text` bytes ACKed (a read NACKs the last), STOP; `--signal i2c_scl:...` puts SDA on CH2 |
 | `zero` | noise only |
 
 What the simulator models, all observable through the protocol: four 8-bit cores per capture with a core B
@@ -250,6 +255,10 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_self_test_loopback` | 3 | generator into CH1: frequency, duty, swing (the output is not ground-referenced), bench tests T4, T5, T7; token |
 | `scope_bode_sweep` | 3 | frequency response CH2 / CH1 of a passive DUT on the calibration post: stepped clean-edge tones, coherent 16-bit records, single-bin DFT; magnitude, phase, markers, thru calibration, CH2 auto-ranging; `where='device'` (fw >= 0.2.66) lets the scope run it and show the plot; token (below) |
 | `scope_report` | 0 | a saved result (`.npz` / Bode `.json`, or `latest`) as a PNG plot (matplotlib, extra `plot`) and a self-contained HTML page (plot, table, caveats, command) under `<home>/reports/<date>/`; touches no scope (below) |
+| `scope_decode` | 0 / 1 with `capture=true` | UART (auto-baud, parity, framing), SPI (CPOL / CPHA, word size, no chip select) or I2C (START, address, R/W, ACKs, data, STOP) frames from a saved capture, the last capture, the scope's latest capture or a fresh one; frames with times, errors and a preview; says when the sample rate is too low |
+| `scope_mask_test` | 1 | a tolerance band (volts or divisions, time) around a reference capture or a stored mask, then `n` captures tested: pass / fail, first failing sample, worst excursion; the mask file is reusable (`mask_name`) |
+| `scope_export_csv` | 0 | any saved result as CSV with a `#` header (tool, settings, channels, trigger, scaling, caveats); segments in long format; `raw` adds the codes |
+| `scope_dvm` | 1 | DC, AC RMS, true RMS, min / max / Vpp and the dominant frequency per channel over `n` captures or a duration, with a resolution statement (range, volts per code, measured noise, 1-sigma uncertainty, digits of full scale) |
 | `scope_raw_fpga` | 4 | raw FPGA bus operations (DEBUG_RAW builds); needs `FNIRSI_MCP_ENABLE_RAW=1` and a token |
 | `scope_enter_fel` | 4 | reboot into FEL; needs `FNIRSI_MCP_ENABLE_RAW=1` and a token |
 
@@ -390,7 +399,8 @@ captures averaged), every caveat the tool recorded plus `caveats`, and the gener
 and the arguments recorded in the file). No scripts, fonts or CDNs: it opens offline, follows the light / dark
 preference and can be published as is (in Claude Code with the Artifact tool). Without matplotlib the page says why
 there is no plot and carries the numbers. Kinds: capture / fetch, averaged capture, decay fit (with the residual),
-segments (overlaid), host FFT, the scope's spectrum, Bode (host or device).
+segments (overlaid), host FFT, the scope's spectrum, Bode (host or device), a serial decode (the lines with the frames
+labelled), a mask test (the band with the outside samples marked), DVM readings (DC per capture with min .. max).
 
 ```bash
 python -m fnirsi1013d.report latest                      # newest result under ~/.fnirsi1013d/data

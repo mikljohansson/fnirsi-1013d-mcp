@@ -1,4 +1,4 @@
-# mcp/ handoff for agents (mcp-gen7, 2026-10-20: idle port close, Bode flat-record guard, reason 8; mcp-gen6: 1.19-1.20, reports)
+# mcp/ handoff for agents (mcp-soft, 2026-10-20: decode / mask / CSV / DVM tools; mcp-gen7: idle port close, Bode flat-record guard, reason 8)
 
 Python host library, device simulator, MCP server and bench CLIs for the FNIRSI 1013D open firmware's USB protocol.
 Read first: `../AGENTS.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec; **section 14 is how
@@ -50,9 +50,11 @@ a mirror of `firmware/scope/pc_decim.c`, checked against the `decim` vectors), `
 `_read_capture16` (READ_RAW layout 2) and `read_trace(wide=True)`; `CaptureContext.decim` keeps the fast host-capture
 path. |
 | `calibration.py` | Per-unit, per-core volts model (T8): `UnitCalibration` (points, least-squares zero / 1/gain / PWM slope per channel-range-core, channel model `zero = Z + slope x dcoffset`), `channel_scale`, T8 importer CLI. |
-| `analysis.py` | Stats, frequency, edges, Welford averager, FFT, decay fits, sample points, `scope_fft_db` (float model of the on-scope FFT), `compare_spectra`, `decim_noise_n` / `decim_bits`. |
-| `simulator.py` | `Device` (protocol state machine, FPGA ring, shared mode, legacy mode, SD card, EXT trigger, event log) + `SimServer` (TCP) with test hooks. CLI `fnirsi1013d-sim`. |
-| `server.py` | FastMCP server `fnirsi1013d-mcp`, 30 tools up to tier 3, 32 with tier 4 (`scope_report`, `scope_cal_probe` added) (list with tiers in README.md); `--list-tools` prints them with the data dir and audit log without opening a port. |
+| `analysis.py` | Stats, frequency, edges, Welford averager, FFT, decay fits, sample points, `scope_fft_db` (float model of the on-scope FFT), `compare_spectra`, `decim_noise_n` / `decim_bits`; mcp-soft: `mask_envelope` / `mask_check` (scope_mask_test), `dominant_frequency`, `dvm_summary` / `dvm_resolution` (scope_dvm). |
+| `decode.py` | mcp-soft: serial decoders on volts arrays: `to_logic` (mid-level threshold, 5 % hysteresis, interpolated edges; levels = the record's extremes so a 1 % duty line still counts), `decode_uart` (`auto_baud` from the shortest pulse snapped to `STANDARD_BAUDS`), `decode_spi` (CPOL / CPHA, gap framing, no chip select), `decode_i2c` (a bit sampled in the SCL-high phase of a START / STOP is dropped). Limits: `MIN_SAMPLES_PER_BIT` 4 (caveat), `HARD_MIN_SAMPLES_PER_BIT` 2 (refuse), I2C 8 / 6 per SCL period. Loops are per frame / event, never per sample. |
+| `export.py` | mcp-soft: `write_csv` (scope_export_csv): the x axis (`t` / `f` / `f_actual` / `capture_t_s`) plus every 1-D array of its length as columns, 2-D arrays long with a `segment` column, `#` header from `meta_json` (`header_lines`), units by name / suffix (`unit_of`). Half-length per-core raw arrays are left out. |
+| `simulator.py` | `Device` (protocol state machine, FPGA ring, shared mode, legacy mode, SD card, EXT trigger, event log) + `SimServer` (TCP) with test hooks. CLI `fnirsi1013d-sim`. mcp-soft: serial signal kinds `uart`, `spi_clk` / `spi_data`, `i2c_scl` / `i2c_sda` (`SERIAL_KINDS`, `serial_timeline`: a cached piecewise-constant timeline per period; `parse_signal` keeps `text=` as a string; `companion_signal` gives the data line for a clock on CH1). |
+| `server.py` | FastMCP server `fnirsi1013d-mcp`, 34 tools up to tier 3, 36 with tier 4 (mcp-soft added `scope_decode`, `scope_mask_test`, `scope_export_csv`, `scope_dvm`; the shared capture-source helper is `_capture_for_analysis`, the file-source helpers `_resolve_source` / `_load_waveforms`) (list with tiers in README.md); `--list-tools` prints them with the data dir and audit log without opening a port. |
 | `paths.py` | Per-user home (`FNIRSI_MCP_HOME`, default `~/.fnirsi1013d`: `data/`, `logs/audit.jsonl`) and the checkout detection (`checkout()`, `checkout_path()` only when the file exists, `checkout_dir()`): the CLIs default to repository files only when run from a checkout, else the argument is required. |
 | `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 attempts, FEL-device check between), usbipd, sunxi-fel RAM load, `#VER`; `--persist` / `--persist-only` / `--restore` (SD sector 750 via the firmware). |
 | `sdcard.py` | SD access (`SdCard`: checked reads, verified backups, staged 32-sector writes, compare), `plan_write`, `check_image`, `image_version`. |
@@ -61,7 +63,7 @@ path. |
 | `bench.py` | `fnirsi1013d-bench`: wraps `../firmware/scope/host_tests/bench_link.py` (fw-gen2's), plus uptime before/after; `--fft` runs FFT_BENCH (`Scope.fft_bench`) itself. |
 | `vectors.py` | Host vectors in `../docs/protocol-vectors.json` (`--check`, `--merge`). |
 | `units.py` | `parse_quantity`, `fmt_si`. |
-| `report.py` | Result presentation: `load_result` (any `.npz` the tools save, or a Bode `.json`; kind from `meta_json["kind"]` / the arrays), `build_report` -> PNG (matplotlib, optional extra `plot`, in `dev`) + one self-contained HTML page (base64 PNG, table, summary, caveats, command; no scripts / external URLs, tested), `latest_result`, CLI `python -m fnirsi1013d.report`. Tool `scope_report` (tier 0) writes under `<home>/reports/<date>/`. |
+| `report.py` | Result presentation: `load_result` (any `.npz` the tools save, or a Bode `.json`; kind from `meta_json["kind"]` / the arrays), `build_report` -> PNG (matplotlib, optional extra `plot`, in `dev`) + one self-contained HTML page (base64 PNG, table, summary, caveats, command; no scripts / external URLs, tested), `latest_result`, CLI `python -m fnirsi1013d.report`. Tool `scope_report` (tier 0) writes under `<home>/reports/<date>/`. Kinds added by mcp-soft: `decode` (frames labelled on the lines), `mask` / `mask_test` (the band, outside samples marked), `dvm` (DC per capture with min .. max). |
 | `bode.py` | Host-driven Bode sweep (docs/plans/bode-design.md H1-H3): `plan_point` / `plan_sweep` (M, N, p / q, record, settle; `plan_vectors` = `../docs/bode-plan-vectors.json`), `tone` (rect / Hann), `residual_noise`, `measure_pair` (H, SNR, leakage, half-record check), `markers`, `PointResult` / `SweepResult` (table, CSV, JSON, arrays), `ThruCal`, `BodeRunner` (drives a `Scope`: pre-scan, centring, background, CH2 auto-range with the splice, E_BUSY, restore), `result_caveats`, CLI `fnirsi1013d-bode`. Device sweep (1.20): `device_sweep` (BODE_CTRL, READ_BODE poll, rows -> `SweepResult`), `result_from_device`, `point_from_row`, `device_settle_code` / `device_ch2_code`. |
 
 ## State of each tool / CLI
@@ -234,7 +236,13 @@ range-independent; 0 V at dcoffset 0: CH1 A 132.47 / B 127.14, CH2 A 128.80 / B 
 firmware gains). The firmware formula assumes 128 on the compensated mean. Grounds: the probe ground is VRF1,
 +1.24 V over the USB ground (fpga/al3/README.md); the calibration output reads -1.24 / +1.9 V against it by design.
 
-## Tests (`tests/`, 455, about 130 s)
+## Tests (`tests/`, 496 with test_report, about 160 s)
+
+mcp-soft (2026-10-20): `test_decode` (the decoders on synthetic lines and the simulator's serial signals, the
+samples-per-bit limits, the timelines), `test_data_tools` (the four tools end to end: decode from a capture / file /
+the scope's latest, mask pass / fail / reuse / settings change, CSV columns and header, DVM readings and the
+resolution statement, scope_report on the new kinds). The main checkout's venv has matplotlib since 2026-10-20
+(it is in `dev`), so `test_report` runs there too.
 
 `test_protocol` (codec, structs, vectors, link stats/event log), `test_transport` (incl. the scripted-link deferred
 cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `test_shared_mode` (1.3),

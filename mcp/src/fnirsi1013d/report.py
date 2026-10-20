@@ -43,6 +43,10 @@ KINDS = {
     "fft": ("Spectrum (host FFT)", "scope_capture_and_fft"),
     "spectrum": ("Spectrum (the scope's view)", "scope_spectrum"),
     "bode": ("Frequency response", "scope_bode_sweep"),
+    "decode": ("Serial decode", "scope_decode"),
+    "mask": ("Mask", "scope_mask_test"),
+    "mask_test": ("Mask test", "scope_mask_test"),
+    "dvm": ("DVM readings", "scope_dvm"),
 }
 #: series colours (validated categorical palette slots 1-2; channel identity is also named in the legend)
 COLOURS = ("#2a78d6", "#eb6834", "#1baf7a", "#6250d6")
@@ -290,6 +294,61 @@ def _rows(r: Result) -> tuple[list[dict[str, Any]], list[str]]:
         if where == "device":
             summ.append("measured by the scope's own Bode engine (where='device')")
         return rows, summ
+    if r.kind == "decode":
+        frames = m.get("frames") or []
+        proto = m.get("protocol", "?")
+        rows = []
+        for f in frames[:200]:
+            row: dict[str, Any] = {"t": _si(f.get("t"), "s", 6)}
+            if proto == "i2c":
+                row.update({"address": f.get("address"), "rw": f.get("rw"), "ack": f.get("ack"),
+                            "data": " ".join(f"{d['hex']}{'' if d['ack'] else '!'}" for d in f.get("data") or []),
+                            "stop": "P" if f.get("stop") else ("Sr" if f.get("repeated_start") else "")})
+            else:
+                row.update({"value": f.get("hex"), "char": f.get("char", "")})
+                if proto == "spi":
+                    row["transfer"] = f.get("transfer")
+            row["errors"] = ", ".join(f.get("errors") or [])
+            rows.append(row)
+        ap = m.get("applied") or {}
+        what = {"uart": f"{ap.get('baud', 0):.6g} baud, {ap.get('data_bits')} data bits, parity {ap.get('parity')}, "
+                        f"{ap.get('samples_per_bit', 0):.1f} samples per bit",
+                "spi": f"clock {_si(ap.get('clock_hz'), 'Hz')}, {ap.get('word_bits')} bits per word, CPOL {ap.get('cpol')} "
+                       f"CPHA {ap.get('cpha')}, {ap.get('samples_per_clock', 0):.1f} samples per clock",
+                "i2c": f"SCL {_si(ap.get('scl_hz'), 'Hz')}, {ap.get('samples_per_scl_period', 0):.1f} samples per period"
+                }.get(proto, "")
+        summ.append(f"{proto.upper()}: {len(frames)} frame(s), {m.get('n_errors', 0)} with errors; {what}"
+                    + (" (table: the first 200)" if len(frames) > 200 else ""))
+        return rows, summ
+    if r.kind in ("mask", "mask_test"):
+        rows = []
+        for res in m.get("results") or []:
+            row = {"capture": res.get("capture_id"), "passed": res.get("passed"), "fail samples": res.get("fail_samples")}
+            ff = res.get("first_fail")
+            if ff:
+                row["first fail at"] = _si(ff.get("t"), "s", 6)
+                row["volts"] = _si(ff.get("volts"), "V")
+                row["bound"] = f"{ff.get('bound')} {_si(ff.get('limit'), 'V')}"
+            rows.append(row)
+        tol = m.get("tolerance") or {}
+        summ.append(f"mask: +-{_si(tol.get('volts'), 'V')} and +-{tol.get('samples', '?')} sample(s) "
+                    f"({_si(tol.get('time_s'), 's')}) around the reference on {m.get('channel', '?')}")
+        if r.kind == "mask_test":
+            summ.append(f"{m.get('passed', 0)} passed, {m.get('failed', 0)} failed of {m.get('n_tested', 0)} captures"
+                        + (f", {m['dropped']} dropped" if m.get("dropped") else ""))
+        return rows, summ
+    if r.kind == "dvm":
+        rows = []
+        for c, s in (m.get("readings") or {}).items():
+            res = s.get("resolution") or {}
+            rows.append({"channel": c, "DC": _si(s.get("dc_mean"), "V", 5), "AC rms": _si(s.get("ac_rms"), "V"),
+                         "true rms": _si(s.get("rms"), "V"), "min": _si(s.get("min"), "V"), "max": _si(s.get("max"), "V"),
+                         "Vpp": _si(s.get("vpp"), "V"), "frequency": _si(s.get("frequency"), "Hz"),
+                         "+-1 sigma": _si(res.get("uncertainty_volts"), "V", 2),
+                         "digits": round(res["digits"], 1) if res.get("digits") is not None else None})
+        summ.append(f"{m.get('n_captures', '?')} captures, {m.get('n_samples_total', '?')} samples in all over "
+                    f"{m.get('elapsed_s', 0):.1f} s")
+        return rows, summ
     return [], summ
 
 
@@ -346,9 +405,29 @@ def _plot(r: Result, title: str) -> bytes:
                              else None)
     ax = axes[0] if two else axes
     ax.set_title(title, loc="left", fontsize=10.5, color="#0b0b0b")
-    if r.kind in ("capture", "averaged_capture", "segments"):
+    if r.kind in ("capture", "averaged_capture", "segments", "decode", "mask", "mask_test"):
         t, unit = _time_axis(np.asarray(a["t"], np.float64))
-        suffix = {"capture": "_volts", "averaged_capture": "_mean", "segments": "_volts"}[r.kind]
+        suffix = {"capture": "_volts", "averaged_capture": "_mean", "segments": "_volts", "decode": "_volts",
+                  "mask": "_volts", "mask_test": "_volts"}[r.kind]
+        if r.kind in ("mask", "mask_test"):
+            up, lo = np.asarray(a["upper"], np.float64), np.asarray(a["lower"], np.float64)
+            ax.fill_between(t[: up.size], lo, up, color=COLOURS[2], alpha=0.22, linewidth=0, label="mask")
+            if "reference" in a and r.kind == "mask":
+                ax.plot(t[: up.size], a["reference"], color=GREY, linewidth=0.9, label="reference")
+            fm = a.get("fail_mask")
+            if fm is not None and np.any(fm):
+                for c in _channels(a, suffix):
+                    idx = np.flatnonzero(fm)[:2000]
+                    ax.plot(t[idx], a[f"{c}{suffix}"][idx], "x", color="#e34948", markersize=4, label="outside the mask")
+        if r.kind == "decode":
+            raw_t = np.asarray(a["t"], np.float64)
+            scale = float(t[-1] / raw_t[-1]) if raw_t.size and raw_t[-1] else 1.0
+            for f in (m.get("frames") or [])[:120]:
+                tf = float(f.get("t", 0.0)) * scale
+                label = f.get("hex") if m.get("protocol") != "i2c" else f"S {f.get('address')} {f.get('rw', '')[:1].upper()}"
+                ax.axvline(tf, color=GREY, linewidth=0.6, alpha=0.6)
+                ax.annotate(label, (tf, 1.0), xycoords=("data", "axes fraction"), xytext=(2, -10),
+                            textcoords="offset points", fontsize=7, color="#33332f", rotation=90, va="top")
         for i, c in enumerate(_channels(a, suffix)):
             col = COLOURS[i]
             v = a[f"{c}{suffix}"]
@@ -369,6 +448,17 @@ def _plot(r: Result, title: str) -> bytes:
                 idx = np.flatnonzero(cl)[:2000]
                 ax.plot(t[idx], v[idx], "x", color="#e34948", markersize=4, label=f"{c} clipped")
         ax.set_xlabel(f"time ({unit})")
+        ax.set_ylabel("volts at the probe tip")
+    elif r.kind == "dvm":
+        tc = np.asarray(a["capture_t_s"], np.float64)
+        for i, c in enumerate(_channels(a, "_mean")):
+            col = COLOURS[i]
+            mean = np.asarray(a[f"{c}_mean"], np.float64)
+            ax.plot(tc, mean, "o-", color=col, markersize=3, linewidth=0.9, label=f"{c} DC per capture")
+            if f"{c}_min" in a and f"{c}_max" in a:
+                ax.fill_between(tc, a[f"{c}_min"], a[f"{c}_max"], color=col, alpha=0.12, linewidth=0,
+                                label=f"{c} min .. max")
+        ax.set_xlabel("time since the first capture (s)")
         ax.set_ylabel("volts at the probe tip")
     elif r.kind == "decay_fit":
         t, unit = _time_axis(np.asarray(a["t"], np.float64))
