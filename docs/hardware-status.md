@@ -1314,3 +1314,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   4 a CH2 menu tap on Auto turns the row Constant: confirmed (the coordinator's addition stays). 5 READ_SCREEN inside menus:
   `tools/screenshots.py --only settings` with Settings open gives docs/screenshots/settings.png showing Settings (first
   screenshot committed for the site). Manual screenshots of the other screens next, one by one with the owner.
+- 2026-10-20 15:25: screenshots on 0.2.95 with the owner: Settings, the generator menu, phosphor (RC node, generator stepped
+  800 Hz..1.3 kHz over 5 s at 200 us/div: a fan of exponential edges), Spectrum (50 kSa/s, 1 kHz comb, THD 42 %), waterfall
+  (two-tone FM of the generator from the host, captured while running), Diagnostics Status and Calibration tab, the wizard's
+  screen 1. The automatic run (`tools/screenshots.py --generator`) with Diagnostics still open found a regression: the host's
+  settings commands no longer close Diagnostics, the Spectrum waterfall and then the Frequency response plot were painted into
+  its frame (fw-yield3 dispatched). The Diagnostics verdicts read Check (RAM firmware, FEL restart, noise with the RC attached):
+  retake the Status page at release time with the firmware persisted and the inputs open.

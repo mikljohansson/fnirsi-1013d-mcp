@@ -505,6 +505,13 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
+- fw-yield3 (Opus, dispatched 15:28): regression from fw 0.2.94's "read-only requests inside the modal loops": with
+  Diagnostics open on 0.2.95, the host's SET_CHANNEL / SET_TIMEBASE / SET_GEN / BODE_CTRL (tools/screenshots.py --generator,
+  15:25) did not close Diagnostics; the Spectrum waterfall, the ACQ chip, the cards and later the Frequency response plot were
+  drawn into the Diagnostics frame (docs/screenshots/scope.png, scope-mcp.png, frequency-response-sweep.png of commit 6f0a273
+  show it; to be retaken). Wanted: state-changing requests unwind the modal as in 0.2.78 and the view redraws before READ_SCREEN
+  answers; no view drawing while a modal owns the display; tests per modal loop. Provisional fw 0.2.96, section 63.
+
 - fw-eng6 (the fw-eng5 agent continued, dispatched 14:17): CH2 range **Auto / Constant** (owner 14:16, bode-ui.md section 10):
   Constant = the CH2 popover's V/div, never changed by a sweep; a popover change by hand while the mode shows sets Constant
   (coordinator's addition, owner to confirm); AUTO SET writes its chosen range into the popover when it picks Constant; the
