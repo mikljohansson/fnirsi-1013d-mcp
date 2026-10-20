@@ -177,9 +177,6 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   host test with the mock UI, mcp client/server: drop the "close it on the scope and retry" advice where the firmware yields
   (keep it for older firmware by version). Built on branch fw-yield (fw 0.2.78 / protocol 1.23,
   firmware/AGENTS.md section 53); bench list there.
-- **Spectrum: the "Host command: menu closed" note** (fw-yield follow-up, after fw-spzoom lands): spectrum.c
-  `spec_draw_warnings` gains `if(pc_glue_yield_note()) p = fmt_str(p, ...)` first, so the note shows in the Spectrum
-  view as it does in Scope and Frequency response (firmware/AGENTS.md section 53).
 - **Spectrum ladder follow-ups** (fw-spzoom handoff, section 52): (a) show the capture time N/fs somewhere (the Time card is the
   waterfall's history span); (b) make the 2 s zoom-in limit use the real capture time memory depth/fs, or cap the memory depth in
   the Spectrum; (c) re-derive the rate when the FFT length or memory depth changes, not only at the next zoom/pan step. With the
@@ -192,6 +189,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   in. The 16-bin floor ends zoom-in at a high centre as before. Accepted consequence: a pan to a low centre at a wide span keeps
   the coarse resolution until the next zoom step. Rule paragraph in ui-guidelines.md updated; test_spec_zoom: pans never change
   the rate, the clamp, zoom after a pan re-derives.
+- **Remove the "Host command: menu closed" note** (owner 10-20 10:31 **(owner)**: "we don't need the note at all"; fw-yield2
+  dispatched): the modal screens still unwind on a host command, silently; the note text, its timer, `pc_glue_yield_note` and the
+  Spectrum follow-up item go; the yield counters stay.
 - **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
   SCREENSHOT bit 6, simulator has it, `Scope.read_screen` reads 40 rows per request) but the firmware handler is NULL
   (pc_cmds.c "BENCH: T9"). Implement it in all builds: rows of the live framebuffer as RGB565, the header per protocol.md, the
