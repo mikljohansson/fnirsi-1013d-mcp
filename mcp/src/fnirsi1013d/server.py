@@ -450,7 +450,7 @@ PHOSPHOR_VIEW_NOTE = ("the scope's screen shows its phosphor view: the person se
                       "captures (a host single is added once); the data returned here are unaffected")
 #: Protocol 1.23 (fw 0.2.78): a menu, fold-out or dialog was open; the request closed it by its cancel path
 MENU_CLOSED_NOTE = ("a menu or dialog was open on the scope: the firmware closed it for this request without applying "
-                    "anything in it (the screen says 'Host command: menu closed'); tell the person if they were using it")
+                    "anything in it; tell the person if they were using it")
 SPECTRUM_VIEW_NOTE = ("the scope's screen shows its spectrum view: the person at the scope sees the spectrum of each "
                       "capture, not the trace (the data returned here are unaffected; scope_spectrum reads what the "
                       "screen shows)")

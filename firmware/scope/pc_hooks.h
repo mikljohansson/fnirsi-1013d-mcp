@@ -49,7 +49,6 @@ void pc_glue_poll_isr(void);          //1 ms timer interrupt: safe commands and 
 #define PC_HOLD_USB_DRIVE     5     //the USB drive screen (the serial port is gone anyway)
 int  pc_glue_ui_yield(void);          //1: a host request waits for the base screen: leave by the cancel path
 int  pc_glue_ui_hold(int why);        //set the hold reason (0 none), returns the previous one
-const char *pc_glue_yield_note(void); //"Host command: menu closed" for UI_YIELD_NOTE_MS after a yield, else 0
 #define PC_UI_YIELD()           pc_glue_ui_yield()
 void pc_glue_ui_service(void);        //main loop, after the MAIN poll: MCP indicator
 int  pc_glue_ui_arm_allowed(void);    //0 while a host READ_RAW waits for the UI capture in flight

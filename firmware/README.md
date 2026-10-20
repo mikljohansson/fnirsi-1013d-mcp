@@ -381,7 +381,7 @@ Hooks in the 1.00o5 code (up to 0.2.46 all under `#if PC_PROTOCOL`, since 0.2.47
   loop while the UI is modal sets the session's yield flag (timer poll or BUSY poll, `pc_cmds.c` `pc_ui_yield`); each
   loop then leaves by its own cancel path (a menu or fold-out closes, a dialog answers Cancel / No, a screen Back /
   Exit / Later, the wizard between steps Cancel) down to the base screen, where the MAIN poll answers the request and
-  the warning line shows "Host command: menu closed" for 4 s. Steps that must finish set a hold reason
+  nothing is shown (fw 0.2.81; 0.2.78-0.2.80 showed a 4 s note). Steps that must finish set a hold reason
   (`pc_glue_ui_hold(PC_HOLD_CAL / _SAVE / _USB_DRIVE)`): the request then gets E_BUSY with it (details 3, 4, 5); a
   UI pass with no yield check that outlasts 1.5 s gives E_BUSY detail 2 (`docs/ui-guidelines.md` section 4,
   `docs/protocol.md` section 14 row 63).
@@ -1680,7 +1680,7 @@ sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000
    and GET_CHANNEL / TIMEBASE / TRIGGER / CAL, and compare with the screen. The UI keeps running, and
    the green MCP chip shows directly above the RUN/STOP chip while the port is open (steady, no
    pulse; the RTC clock is hidden meanwhile). Open a menu: GET_STATUS must
-   answer with `ui_busy` = 1; SET_CHANNEL closes the menu ("Host command: menu closed") and is answered (fw 0.2.78;
+   answer with `ui_busy` = 1; SET_CHANNEL closes the menu (silently, no note) and is answered (fw 0.2.78;
    E_BUSY before).
 5. **Link tests T1, T2.** TEST_PATTERN lengths 492, 495, 496, 1008 and 4076, 1000 times each,
    with no timeouts (ZLP). Then 65,536 bytes x 200: record MB/s in `docs/hardware-status.md`.

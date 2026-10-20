@@ -33,6 +33,9 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
 
 #### 0.2.82 - 2026-10-20 (protocol 1.24, unchanged)
 
+- The "Host command: menu closed" note is gone (owner 2026-10-20 10:31: not wanted): a host request still closes the
+  scope's menus, fold-outs and dialogs by their cancel paths, now silently; the yield counters (GET_LINK_STATS 68-69)
+  stay. The MCP menu caveat no longer quotes the note (ffc8221).
 - Spectrum ladder: a pan (plot drag, slider drag, tap to jump in the track) never changes the sample rate or time/div;
   it is clamped to the current axis 0 .. fs/2, which the slider track shows. The rate is derived from span and centre
   only at zoom steps and by AUTO SET; to look above the axis, zoom out and in again (owner 2026-10-20 10:24, bench on

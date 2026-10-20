@@ -155,9 +155,4 @@ typedef struct
 
 const char *ui_scope_warning(const ui_warn_in *w);
 
-//fw 0.2.78 (protocol 1.23): a host request closed the menus, fold-outs and dialogs; the note shows top middle in every
-//mode for UI_YIELD_NOTE_MS (docs/ui-guidelines.md section 4)
-#define UI_YIELD_NOTE_MS  4000
-extern const char *const ui_yield_note;                     //"Host command: menu closed"
-
 #endif

@@ -3697,6 +3697,8 @@ Bug indicators: a dialog that took its action (a deletion, a cleared calibration
 typed number applied; a menu that stays open while the command times out; a screen left half drawn (a fold-out's
 panel or a menu's background not restored); the note stuck on screen; a second menu opened later closing at once
 without a host command.
+Addendum fw 0.2.81 (fw-yield2, owner 2026-10-20 10:31): the note is removed (`ui_yield_note`, `UI_YIELD_NOTE_MS`,
+`pc_glue_yield_note` and its Scope / Frequency response callers, the test_ui check); the yield unwinds silently, items 1-8 above minus the note.
 
 ## 54. fw-cap: FPGA 0x153A capture stages, the wizard's zero back at 128 (fw 0.2.79, protocol 1.24, row 64)
 
