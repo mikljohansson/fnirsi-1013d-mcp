@@ -300,11 +300,11 @@ static void ui_mcu_collect(uint32 addr)
   {
     int done;
 
-    //The same conversion again (the UI's filter setting; the plan kept by ui_rearm)
-    pc_glue_decim_rearm();
+    //The same conversion again (the UI's filter setting). ui_rearm keeps the plan through every fpga_do_conversion of
+    //this record, including the full-rate check's own re-arm inside fpga_done_conversion (enc_heal_hw.c)
     ui_rearm = 1;
+    pc_glue_decim_rearm();
     fpga_do_conversion();
-    ui_rearm = 0;
 
     //Its record, or the deadline: no trigger in time ends the pass with the mean of the records it holds (auto and
     //normal mode alike: this record never waits beyond the deadline)
@@ -322,9 +322,11 @@ static void ui_mcu_collect(uint32 addr)
         PC_BUSY_POLL();
 
       (void)fpga_prepare_for_transfer();
+      ui_rearm = 0;
       break;
     }
 
+    ui_rearm = 0;
     ui_mcu_add(pc_glue_ui_read_start(fpga_prepare_for_transfer()));
     ui_count++;
   }
