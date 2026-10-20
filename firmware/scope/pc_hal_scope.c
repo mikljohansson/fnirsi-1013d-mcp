@@ -11,6 +11,7 @@
 #include "types.h"
 #include "fnirsi_1013d_scope.h"
 #include "fpga_control.h"
+#include "fpga_bus.h"
 #include "scope_functions.h"
 #include "power_and_battery.h"
 #include "display_lib.h"
@@ -223,7 +224,6 @@ void pc_hal_timebase_write(const pc_hw_timebase *t, int raw)
     fpga_write_cmd(0x0D);
     fpga_write_int(t->divider);
     fpga_divider = t->divider;
-    pc_glue_divider_written(t->divider);
     return;
   }
 
@@ -608,8 +608,6 @@ static uint8         pc_dec_ui_arm;                   //the next fpga_do_convers
 static uint8         pc_dec_last_ui;                  //the last one was (the full-rate check's re-arm repeats it)
 static pc_decim_cfg  pc_dec_cur;                      //what the FPGA runs (k = 0 until written)
 static uint8         pc_dec_written;                  //pc_dec_cur was written at least once
-static uint8         pc_dec_dirty;                    //0x0D changed since the last write
-static uint32        pc_dec_divider = 0xFFFFFFFF;     //last 0x0D value written
 static uint16        pc_dec_raw[2][PC_DEC_RING];      //16-bit samples of the last readout per channel
 static uint32        pc_dec_raw_n[2];                 //their count, 0 = that readout was 8-bit
 static int16         pc_dec_feed[PC_DEC_RING + 2];    //converted samples for fpga_read_adc_data
@@ -625,10 +623,13 @@ static int pc_dec_has(void)
   return (pc_sess.var.caps & PC_CAP_FIR) ? PC_DECIM_HAS_FIR : PC_DECIM_HAS_CIC;
 }
 
-static uint32 pc_dec_div(void)
+//fw 0.2.87: the divider the FPGA holds (the last 0x0D anyone wrote, tracked by fpga_bus_note_write), the UI table's
+//before the first write. Every decimation configuration is computed from it: the UI time/div can be snapped without a
+//0x0D write (acq_view_fit) and the session can forget a host's raw divider, the FPGA does neither (section 57).
+uint32_t pc_hal_divider_now(void)
 {
-  if(pc_dec_divider != 0xFFFFFFFF)
-    return pc_dec_divider;
+  if(fpga_bus_wr.held & FPGA_HELD_DIVIDER)
+    return fpga_bus_wr.divider;
 
   return (scopesettings.samplerate < (sizeof(sample_rate_settings) / sizeof(uint32))) ? sample_rate_settings[scopesettings.samplerate] : 0;
 }
@@ -636,39 +637,25 @@ static uint32 pc_dec_div(void)
 //set: bits 1:0 K, PC_DECIM_SET_FIR (pc_dec_setting, or 0 for the legacy path)
 static void pc_dec_config(pc_decim_cfg *c, uint8 set)
 {
-  pc_decim_config(set & 3, (uint8)(pc_dec_flags | (set & PC_DECIM_SET_FIR)), pc_dec_div(), fpgasettings.totalsamples,
+  pc_decim_config(set & 3, (uint8)(pc_dec_flags | (set & PC_DECIM_SET_FIR)), pc_hal_divider_now(), fpgasettings.totalsamples,
                   pc_dec_has() | ((pc_sess.var.caps & PC_CAP_CAPTURE_STAGES) ? PC_DECIM_HAS_CAPSTAGES : 0), c);
 }
 
-//Write c to the FPGA (only what changed, the 16-bit level always) and wait for the filter to settle
+//Write c to the FPGA and wait for the filter to settle: 0x53 / 0x56 where they differ from what the FPGA holds, 0x54 and
+//the 16-bit level at every arm with K >= 1 (fw 0.2.87, fpga_decim_write: a shift written for another divider cannot
+//survive an arm)
 static void pc_dec_apply(const pc_decim_cfg *c)
 {
-  uint8 mode = pc_decim_mode(c);
+  int   settle;
   int32 level;
 
   if(!pc_dec_has())
     return;
 
-  if(!pc_dec_written || (mode != pc_decim_mode(&pc_dec_cur)))
-  {
-    fpga_set_decim_mode(mode);
-    pc_dec_dirty = 1;
-  }
-
-  //0x1535+: FIR enable (0x56); older bitstreams never get the command
-  if((pc_dec_has() >= PC_DECIM_HAS_FIR) && (!pc_dec_written || (c->fir_en != pc_dec_cur.fir_en)))
-  {
-    fpga_set_decim_fir(c->fir_en);
-    pc_dec_dirty = 1;
-  }
+  settle = fpga_decim_write(pc_decim_mode(c), pc_dec_has() >= PC_DECIM_HAS_FIR, c->fir_en, c->shift);
 
   if(c->k)
   {
-    if(!pc_dec_written || !pc_dec_cur.k || (c->shift != pc_dec_cur.shift))
-    {
-      fpga_set_decim_shift(c->shift);
-      pc_dec_dirty = 1;
-    }
 
     //0x17 is ignored while K >= 1: the UI level (8-bit code in the trace domain, as fpga_set_trigger_level computed it)
     //mapped back through the readout's 16-bit transform (fw 0.2.47): the trigger channel's gain16 folded into the
@@ -688,22 +675,12 @@ static void pc_dec_apply(const pc_decim_cfg *c)
       fpga_set_decim_level(pc_decim_level16((uint8)level, c->gain, c->shift));
 
     //(K + 2) output periods, (K + 10) N x 5 ns + 1 us with the FIR; timer0 ticks are 1 ms, + 1 for the partial tick
-    if(pc_dec_dirty)
+    if(settle)
       timer0_delay((pc_decim_settle_us(c) + 999) / 1000 + 1);
   }
 
-  pc_dec_dirty   = 0;
   pc_dec_cur     = *c;
   pc_dec_written = 1;
-}
-
-void pc_glue_divider_written(uint32 divider)
-{
-  if(divider != pc_dec_divider)
-  {
-    pc_dec_divider = divider;
-    pc_dec_dirty   = 1;
-  }
 }
 
 void pc_glue_ui_decim_arm(void)
@@ -767,7 +744,7 @@ void pc_glue_decim_conversion(void)
 
   //Average on a 0x1536 bitstream: this UI conversion may be a hardware averaging run, which has its own deadline
   //(pc_seq_ui_service; the firmware time-out must never end a record between the records of a run)
-  if(pc_seq_ui_conversion(ui, &c, pc_dec_div()))
+  if(pc_seq_ui_conversion(ui, &c, pc_hal_divider_now()))
     pc_ui_auto = 0;
 }
 
@@ -802,7 +779,7 @@ uint32 pc_glue_decim_words(uint32 samples)
 //settriggerpoint of the capture (GET_CAPTURE_INFO byte 70 reports the shift; pc_decim_ext_shift_at).
 static uint32 pc_dec_ext_shift(void)
 {
-  return (scopesettings.triggerchannel == 2) ? pc_decim_ext_shift_at(&pc_dec_cur, pc_dec_div()) : 0;
+  return (scopesettings.triggerchannel == 2) ? pc_decim_ext_shift_at(&pc_dec_cur, pc_hal_divider_now()) : 0;
 }
 
 uint32 pc_glue_decim_pre_words(uint32 samples)

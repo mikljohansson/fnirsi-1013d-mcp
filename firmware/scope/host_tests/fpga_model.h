@@ -9,7 +9,8 @@
 //     write clock edges while in reset (0x1532..0x1536), plus on the first edge after the release (0x1537+, `ssr_d`)
 //     (finding 2);
 //   - every bus strobe takes a random 41..298 ns (the testbench's strobe periods), so each arm starts at a random phase.
-// Every completed write is recorded in a trace (command, value) for the order checks.
+// Every completed write is recorded in a trace (command, value) for the order checks, and passed to fpga_bus_note_write
+// as fpga_control.c's trace does on the scope (fw 0.2.87: the values the FPGA holds, fpga_bus_wr.held).
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #ifndef FPGA_MODEL_H
@@ -48,6 +49,7 @@ typedef struct
   uint8_t  load_after_release;      //0x1537+: load 0x0B on the first edge after the release
   uint32_t edges_in_reset;
   uint16_t reg_0b, reg_0c;          //MCU-side registers
+  uint8_t  reg_53, reg_54, reg_56;  //decimation mode, shift, FIR enable (fw 0.2.87 tests)
   uint16_t pre_applied;             //trigger read address preload actually used by the capture
   uint8_t  ready_never;             //0x05 never reads 1 (a hung FPGA)
   uint32_t ready_polls;

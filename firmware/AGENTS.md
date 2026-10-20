@@ -4135,3 +4135,77 @@ Bug indicators:
 - a plan sweep right after a Points / Settle / CH2 mode change (switches 0 right after a change)
 - CH1 left on 2.5 V/div for more than one sweep
 - the header's switch count above 6
+## 57. fw-decfix: decimation from the divider the FPGA holds, 0x54 at every arm (fw 0.2.88, protocol 1.24 unchanged)
+
+Branch `fw-decfix` from main 369537f (fw 0.2.86, fpga-gen10's handoff merged). Brief: fpga/al3/AGENTS.md "First-record
+saturation, fpga-gen10" (cause, prescription, reproduction). Commits: 1299f7a (fpga_bus: held values, `fpga_decim_write`,
+trace / counters, test_fpga_bus), 61af5dd (pc_cmds: `pc_hal_divider_now` everywhere the arm and GET_DECIM need the
+divider, test_session), 2ba6566 (pc_bode.c `bh_arm`, one line), then docs. PC_FW_VERSION not bumped. Host tests green,
+GCC 10 / GCC 13 / PC_DEBUG builds clean. **Not benched.**
+
+**What the arm computes from now.** The divider is the one the FPGA holds: `fpga_bus_note_write` (every completed bus
+write, `fpga_trace` on the scope, `fm_apply` in the host model) records the last 0x0D, 0x53, 0x54 and 0x56 values in
+`fpga_bus_wr` (`held` bits `FPGA_HELD_*`). `pc_hal_divider_now()` (pc_hal_scope.c) returns the held 0x0D, or the UI
+table's divider before the first 0x0D. It replaces `pc_dec_div()` / `pc_dec_divider` (UI conversions, the sequencer, the
+EXT shift) and, in pc_cmds.c, every `s->tb_raw ? s->tb_divider : tb.divider`: `pc_decim_next` (the next arm's K, N, S,
+gain), `pc_arm_geometry`'s EXT shift, GET_DECIM bytes 16..23 and 31, the capture's divider (GET_CAPTURE_INFO 16) and
+READ_TRACE's divider for a UI record. `tb_raw` / `tb_divider` now only decide what GET_TIMEBASE reports and feed the
+settings fingerprint. A UI time/div snap that writes no 0x0D (`acq_view_fit`, `acq_view_set`) therefore changes nothing
+the arm computes. `fpga_divider` (fpga_control.c, the zero correction's clock class, acal and enc_heal) is still a second
+record of the same value, kept by its writers; it differs from the held value only inside `pc_hal_enc_retry`'s 1 / 0
+pair (0x1532..0x1536 at divider 0, which ends where it started).
+
+**What the arm writes.** `pc_dec_apply` -> `fpga_decim_write(mode, has_fir, fir_en, shift)` (fpga_bus.c): 0x53 when it
+differs from the held mode, 0x56 (0x1535+) when it differs from the held FIR bit, and **0x54 at every call with K >= 1**,
+whatever the firmware thinks the FPGA has (one byte, 0.6 us). It returns "settle" when any written value differs from
+the held one or the held divider changed since the previous call; `pc_dec_apply` then waits `pc_decim_settle_us` as
+before, and writes the 16-bit level 0x55 at every arm with K >= 1 (unchanged). The order is unchanged: 0x0D (by its
+writer), 0x53, 0x56, 0x54, 0x55, the settle wait, then the arm. `pc_dec_dirty`, `pc_dec_divider`,
+`pc_glue_divider_written` (and its four call sites) and `fpga_set_decim_mode` / `_shift` / `_fir` are gone.
+`pc_dec_cur` remains the record of the last configuration (GET_DECIM 24 / 25, the readout's scale, word counts).
+
+**Trace and counters.** 0x54 and 0x55 return 1 from `fpga_bus_note_write`, so they are event 22 at trace level 1
+(`s.event_log(fpga_trace=True)`; b = caller << 12 | value, 0x55 saturates at 0xFFF) and counted in GET_LINK_STATS 65
+with 0x53 / 0x56. They do not set `since_reset` (no effect on the encode clocks; they come before 0x01 = 1 anyway).
+
+**The Bode pre-scan.** `bh_arm` computes its configuration from the divider it means to run at (`bode_divider`) and
+wrote 0x0D only when its own record `bh_divider` differed. Two ways that could leave the shift inconsistent with the
+FPGA: (a) a 0x0D from anyone else between two engine steps while `bh_divider` still matched (the engine then configured
+the decimator for its divider while the FPGA ran another): fixed in `bh_arm` with one line, it also rewrites 0x0D when
+`pc_hal_divider_now()` differs; (b) a 0x54 that `pc_dec_apply` skipped because `pc_dec_cur.shift` matched while the FPGA
+had another (lost or foreign write): covered by the shared code, 0x54 is written at every arm. From the code neither
+path is shown to happen in the pre-scan (the device Bode view runs the engine in its own loop; nothing else writes 0x0D
+or 0x54 there), so if the pre-scan still ranges CH1 coarse, the trace decides: 0x0D = 4095, 0x53 = 3, 0x56 = 1,
+0x54 = the shift for N 4096 with CIC3 + FIR, then 0x01 = 1, followed by a record of 0xFFFF clears the decimator
+configuration and puts the cause elsewhere (the input really over range at the pre-scan's first range, or the range
+relay / offset still settling after the pre-scan's range change); hand that to the Bode owner (fw-eng) with the log.
+
+**Host tests.** test_fpga_bus `test_decim_write` (the model now holds 0x53 / 0x54 / 0x56 and calls
+`fpga_bus_note_write`): D 4095 CIC2 + FIR gives N 4096, S 15 (the UI table's 199 / 399 give 7 / 9); an unchanged arm
+writes only 0x54; a lost 0x54 (model register poked, firmware record unchanged) is rewritten; a foreign 0x54 through the
+bus is rewritten and settles; a divider change settles once; Filter off writes no 0x54; a Bode-engine-like sequence
+(rate, mode, arm per step, D 4095 / 1023 / 255 / 15 / 0 / 65535, a UI rate write between steps) leaves the model's 0x54
+equal to the shift for the model's divider, written after the 0x0D and before 0x01 = 1. test_write_record: 0x54 / 0x55
+counted, since_reset kept, held values. test_session `test_decim_held_divider`: raw 4095, the snap (UI time/div and
+table divider change, no write), a poll, GET_DECIM 16 = 4095 / N 4096 / S 15, ARM CIC2 + FIR writes S 15,
+GET_CAPTURE_INFO divider 4095; with the old expression it fails with S 7 / N 200 (checked by swapping the mock's
+`pc_hal_divider_now` for the UI divider).
+
+**Bench (fw 0.2.87 image from this branch, 0x153A; host `from fnirsi1013d.scope import Scope; s = Scope.connect("COM10")`).**
+1. fpga-gen10's deterministic reproduction (fpga/al3/AGENTS.md, steps 1..4): UI at a 1 MSa/s index, memory depth 12k or
+   deeper, the longest time/div that depth allows, `s.set_decim("off")`; `s.set_timebase(divider=4095)`;
+   `s.set_decim("cic2+fir")` (the fit snaps the time/div), `s.get_status()`, then `s.get_decim()`: **divider 4095,
+   next_n 4096, next_shift 15** (0.2.86: 199 / 200 / 7). `s.capture(["CH1", "CH2"])` ten times: no record of 0xFFFF
+   (0.2.86: every one), GET_DECIM bytes 25 / 27 = 15. If the fit does not snap on this unit, force it from the scope
+   (memory depth or Filter box with the raw divider written), as fpga-gen10 describes.
+2. GET_DECIM after a UI time/div snap with a raw divider in place shows the FPGA's divider (the raw one) until a
+   time-base tap writes 0x0D; then it shows the new one.
+3. `s.event_log(fpga_trace=True)`, one host capture with the filter on and one UI conversion: the log shows 0x54 (and
+   0x55) at every arm with the filter on, after the 0x0D / 0x53 / 0x56 writes and before 0x01 = 1; GET_LINK_STATS 65
+   grows by 2 per decimated arm (0x54, 0x55) besides any 0x53 / 0x56.
+4. The Bode pre-scan: from a cold Scope view, a device sweep (or `BODE_RUN`) twenty times in a row; every pre-scan
+   should range CH1 to 0.5 V/div on the bench RC (0.2.86: coarse in about every other sweep). With the trace on for at
+   least one sweep, check the sequence above before the first pre-scan capture. A coarse pre-scan with a correct 0x54 in
+   front of it is not this fault (see "The Bode pre-scan").
+Bug indicators: any whole record of 0xFFFF with the filter on; GET_DECIM's divider differing from the last 0x0D in the
+trace; an arm with K >= 1 and no 0x54 in the trace before its 0x01 = 1.

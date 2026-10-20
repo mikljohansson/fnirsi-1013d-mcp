@@ -127,7 +127,7 @@ static int bh_arm(void *ctx, const bode_plan *pp, uint32 total)
 
   (void)ctx;
 
-  if(div != bh_divider)
+  if((div != bh_divider) || (div != pc_hal_divider_now()))       //fw 0.2.87: or someone else wrote 0x0D since
   {
     pc_hw_timebase tb;
 

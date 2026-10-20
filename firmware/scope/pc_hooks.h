@@ -80,7 +80,6 @@ void pc_glue_scope_warning(void);     //fw 0.2.56: scope_display_trace_data ends
 
 //Decimation filter (bitstream 0x1534+, pc_decim.h). With it off or absent every call is a no-op and the 1.00o5 paths run.
 extern int16 *pc_decim_src;           //fpga_read_adc_data: converted samples to take instead of bus reads (0 = bus)
-void   pc_glue_divider_written(uint32 divider);   //fpga_set_sample_rate wrote 0x0D
 void   pc_glue_ui_decim_arm(void);    //scope_acquire_trace_data: the next fpga_do_conversion uses the UI filter setting
 void   pc_glue_decim_conversion(void);//fpga_do_conversion, before the sampling reset: write the mode, settle
 void   pc_glue_decim_rearm(void);     //the full-rate check re-arms the last conversion: its filter setting again

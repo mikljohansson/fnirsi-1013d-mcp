@@ -6,12 +6,16 @@
 //   - the arm order: on 0x1532..0x1536 at slow legacy rates the 1.00o5 order (0x0B only inside the reset window) loses a
 //     changed pretrigger in the model, fpga_arm_reset never does, on any bitstream, rate or strobe timing; the write trace
 //     shows 0x0B / 0x0C before 0x01 = 1 and again inside the window;
-//   - the bounded ready wait.
+//   - the bounded ready wait;
+//   - fw 0.2.87 (firmware/AGENTS.md section 57): the values the FPGA holds (0x0D, 0x53, 0x54, 0x56) follow every write, and
+//     fpga_decim_write writes 0x54 at every arm with the filter on, so the shift always matches the divider the FPGA holds
+//     (fpga/al3/AGENTS.md "First-record saturation": S 9 / 7 armed at D 4095 saturated every word).
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "test_util.h"
 #include "fpga_bus.h"
 #include "fpga_model.h"
+#include "pc_decim.h"
 
 static const uint16_t versions[] = { 0x1432, 0x1532, 0x1533, 0x1534, 0x1535, 0x1536, 0x1537, 0x1538, 0x1539, 0x153F,
                                      0x1632, 0x1732, 0x0000 };
@@ -324,6 +328,117 @@ static void test_write_record(void)
   T_EQ(fpga_bus_note_write(0x0B, 50), 0); T_EQ(fpga_bus_wr.since_reset, 1);
   T_EQ(fpga_bus_note_write(0x56, 1), 1);
   T_EQ(fpga_bus_wr.rate, 1); T_EQ(fpga_bus_wr.filter, 2); T_EQ(fpga_bus_wr.resets, 1);
+
+  //fw 0.2.87: 0x54 / 0x55 are traced and counted as filter writes but leave since_reset alone; the held values
+  T_EQ(fpga_bus_note_write(0x01, 1), 1);  T_EQ(fpga_bus_wr.since_reset, 0);
+  T_EQ(fpga_bus_note_write(0x54, 15), 1); T_EQ(fpga_bus_wr.since_reset, 0);
+  T_EQ(fpga_bus_note_write(0x55, 0x1234), 1); T_EQ(fpga_bus_wr.since_reset, 0);
+  T_EQ(fpga_bus_wr.filter, 4);
+  T_EQ(fpga_bus_wr.held, FPGA_HELD_DIVIDER | FPGA_HELD_MODE | FPGA_HELD_SHIFT | FPGA_HELD_FIR);
+  T_EQ(fpga_bus_wr.divider, 0); T_EQ(fpga_bus_wr.mode, 2); T_EQ(fpga_bus_wr.shift, 15); T_EQ(fpga_bus_wr.fir, 1);
+  T_EQ(fpga_bus_note_write(0x0D, 4095), 1); T_EQ(fpga_bus_wr.divider, 4095);
+}
+
+//An arm's decimation writes as pc_dec_apply makes them, at the divider the FPGA holds (pc_hal_divider_now)
+static int decim_arm(uint8_t k_req, int fir, pc_decim_cfg *c)
+{
+  T_TRUE(fpga_bus_wr.held & FPGA_HELD_DIVIDER);
+  pc_decim_config(k_req, fir ? PC_DECIM_SET_FIR : 0, fpga_bus_wr.divider, 4096, PC_DECIM_HAS_FIR, c);
+  return fpga_decim_write(pc_decim_mode(c), 1, c->fir_en, c->shift);
+}
+
+static void write_0d(uint32_t d)
+{
+  fpga_write_cmd(0x0D);
+  fpga_write_int(d);
+}
+
+//fw 0.2.87: fpga_decim_write against the model's registers
+static void test_decim_write(void)
+{
+  pc_decim_cfg c, ref;
+  int i;
+
+  fm_reset(0x153A, 199, 21);
+  fpga_bus_init(0x153A);
+  T_EQ(fpga_bus_wr.held, 0);
+
+  //The bench case: the host's raw 4095, then a UI time/div snap (no 0x0D: nothing reaches the bus), then CIC2 + FIR.
+  //The divider the FPGA holds gives N 4096 and S 15; the UI table's 199 / 399 gave S 7 / 9 (every word 0xFFFF)
+  write_0d(4095);
+  T_EQ(fpga_bus_wr.divider, 4095); T_EQ(fm.divider, 4095);
+  fm.ntrace = 0;
+  T_EQ(decim_arm(PC_DECIM_CIC2, 1, &c), 1);
+  T_EQ(c.n, 4096); T_EQ(c.k, 2); T_EQ(c.shift, 15);
+  T_EQ(fm.reg_53, 0x02); T_EQ(fm.reg_56, 1); T_EQ(fm.reg_54, 15);
+  T_TRUE(fm_trace_find(0x53, 0x02, 0) < fm_trace_find(0x54, 15, 0));
+  pc_decim_config(PC_DECIM_CIC2, PC_DECIM_SET_FIR, 199, 4096, PC_DECIM_HAS_FIR, &ref);
+  T_EQ(ref.shift, 7);
+  pc_decim_config(PC_DECIM_CIC2, PC_DECIM_SET_FIR, 399, 4096, PC_DECIM_HAS_FIR, &ref);
+  T_EQ(ref.shift, 9);
+
+  //Unchanged: no settle, no 0x53 / 0x56, but 0x54 again
+  fm.ntrace = 0;
+  T_EQ(decim_arm(PC_DECIM_CIC2, 1, &c), 0);
+  T_EQ(fm.ntrace, 1); T_EQ(fm.trace[0].cmd, 0x54); T_EQ(fm.trace[0].value, 15);
+
+  //The firmware's record of the shift matches, the FPGA's register does not (a lost or foreign write): the arm fixes it
+  fm.reg_54 = 9;
+  T_EQ(decim_arm(PC_DECIM_CIC2, 1, &c), 0);
+  T_EQ(fm.reg_54, 15);
+
+  //A foreign 0x54 through the bus: tracked, so the arm rewrites it and settles
+  fpga_write_cmd(0x54);
+  fpga_write_byte(9);
+  T_EQ(fpga_bus_wr.shift, 9);
+  T_EQ(decim_arm(PC_DECIM_CIC2, 1, &c), 1);
+  T_EQ(fm.reg_54, 15);
+
+  //A divider change settles once, even with the same mode and shift
+  write_0d(4094);
+  T_EQ(decim_arm(PC_DECIM_CIC2, 1, &c), 1);
+  T_EQ(decim_arm(PC_DECIM_CIC2, 1, &c), 0);
+
+  //Filter off: 0x53 = 0, no 0x54
+  fm.ntrace = 0;
+  T_EQ(decim_arm(PC_DECIM_OFF, 0, &c), 1);
+  T_EQ(fm.reg_53, 0); T_EQ(fm_trace_find(0x54, 15, 0), -1);
+
+  //Bode-engine-like sequence (pc_bode.c bh_arm): a UI legacy conversion at D 19, then per step the engine's rate write,
+  //its mode (CIC3 + FIR at N = 16 x 2^k, legacy at D 0) and the arm; between the steps the UI writes its own rate.
+  //After each arm the model's 0x54 is the shift for the model's divider, written after the 0x0D and before 0x01 = 1.
+  {
+    static const uint32_t divs[] = { 4095, 4095, 1023, 255, 15, 0, 65535, 4095 };
+
+    write_0d(19);
+    (void)decim_arm(PC_DECIM_OFF, 0, &c);
+
+    for(i=0;i<(int)(sizeof(divs) / sizeof(divs[0]));i++)
+    {
+      int i0d, i54, i01;
+
+      fm.ntrace = 0;
+      write_0d(divs[i]);
+      (void)decim_arm(divs[i] ? PC_DECIM_CIC3 : PC_DECIM_OFF, divs[i] != 0, &c);
+      arm_once(0, 4096);
+
+      pc_decim_config(divs[i] ? PC_DECIM_CIC3 : PC_DECIM_OFF, divs[i] ? PC_DECIM_SET_FIR : 0, fm.divider, 4096,
+                      PC_DECIM_HAS_FIR, &ref);
+      T_EQ(fm.reg_53, pc_decim_mode(&ref));
+      i0d = fm_trace_find(0x0D, divs[i], 0);
+      i01 = fm_trace_find(0x01, 1, 0);
+
+      if(ref.k)
+      {
+        i54 = fm_trace_find(0x54, ref.shift, 0);
+        T_EQ(fm.reg_54, ref.shift); T_EQ(fm.reg_56, ref.fir_en);
+        T_TRUE((i0d >= 0) && (i54 > i0d) && (i01 > i54));
+      }
+
+      //The UI writes its rate between two engine steps (a UI conversion's fpga_set_sample_rate)
+      write_0d(199);
+    }
+  }
 }
 
 int main(void)
@@ -335,5 +450,6 @@ int main(void)
   test_arm_order();
   test_arm_trace();
   test_ready_bound();
+  test_decim_write();
   return t_report("test_fpga_bus");
 }

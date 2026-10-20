@@ -292,14 +292,15 @@ static uint32_t pc_cap_words(const pc_capture *c, uint32_t samples)
   return (c->decim & PC_DECIM_WIDE) ? samples : samples / 2;
 }
 
-//Decimation filter configuration an arm with the current settings and total samples writes (k = 0 without the cap)
+//Decimation filter configuration an arm with the current settings and total samples writes (k = 0 without the cap).
+//fw 0.2.87: at the divider the FPGA holds, not the session's raw divider or the UI table: a UI time/div snap writes no
+//0x0D and clears tb_raw (pc_settings_track), and an N (shift) for the UI's rate on a raw 4095 saturated every word
+//(fpga/al3/AGENTS.md "First-record saturation"). tb_raw only decides what GET_TIMEBASE reports.
 static void pc_decim_next(pc_session *s, uint32_t total, pc_decim_cfg *c)
 {
-  pc_hw_timebase tb;
   uint8_t set = pc_hal_decim_setting();
 
-  pc_hal_timebase_read(&tb);
-  pc_decim_config(set & 3, set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR), s->tb_raw ? s->tb_divider : tb.divider, total,
+  pc_decim_config(set & 3, set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR), pc_hal_divider_now(), total,
                   pc_decim_has_caps(s->var.caps), c);
 }
 
@@ -342,7 +343,7 @@ static void pc_capture_latch(pc_session *s, pc_capture *c, uint8_t origin, uint3
   c->origin     = origin;
   c->seq        = s->settings_seq;
   c->timeperdiv = s->tb_raw ? 0xFF : tb.timeperdiv;
-  c->divider    = s->tb_raw ? s->tb_divider : tb.divider;
+  c->divider    = pc_hal_divider_now();       //fw 0.2.87: the one the capture ran at
   c->source     = t.source;
   c->edge       = t.edge;
   c->level      = t.level;
@@ -884,7 +885,7 @@ uint32_t pc_link_counters(pc_session *s, uint32_t *v)
     v[n++] = e.bad;        //62-63 (fw 0.2.61; every full-rate capture since 0.2.62): captures bad, recovered (enc_heal.h)
     v[n++] = e.recovered;
     pc_hal_fpga_writes(v + n);
-    n += PC_FPGAW_COUNT;   //64-66 (fw 0.2.72): 0x0D, 0x53 / 0x56, 0x01 = 1 writes (fpga_bus.h)
+    n += PC_FPGAW_COUNT;   //64-66 (fw 0.2.72): 0x0D, 0x53 / 0x56 (0.2.87: + 0x54 / 0x55), 0x01 = 1 writes (fpga_bus.h)
     v[n++] = e.replaced;   //67: full-rate captures on 0x1538+ judged by their data after such a write (eh_capture_mode)
   }
   v[n++] = s->yields;      //68-69 (fw 0.2.78, 1.23): requests that asked the modal UI to yield, E_BUSY answers instead
@@ -1343,7 +1344,6 @@ static void pc_arm_geometry(pc_session *s, pc_hw_trigger *t, pc_decim_cfg *dc, u
                             uint16_t *ext_shift)
 {
   int wide;
-  pc_hw_timebase tb;
 
   pc_hal_trigger_read(t);
 
@@ -1359,8 +1359,7 @@ static void pc_arm_geometry(pc_session *s, pc_hw_trigger *t, pc_decim_cfg *dc, u
   wide = dc->k != 0;
 
   //EXT trigger: the stored data lag the edge, so fewer pretrigger words put the edge back at sample `pretrigger`
-  pc_hal_timebase_read(&tb);
-  *ext_shift = pc_ext_shift(t->source, dc, s->tb_raw ? s->tb_divider : tb.divider, t->pretrigger);
+  *ext_shift = pc_ext_shift(t->source, dc, pc_hal_divider_now(), t->pretrigger);
 
   *pre_w = wide ? (uint16_t)(t->pretrigger - *ext_shift) : (uint16_t)((t->pretrigger - *ext_shift) / 2);
   *tot_w = wide ? t->total : t->total / 2;
@@ -1896,11 +1895,8 @@ static int h_read_trace(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
   }
   else
   {
-    pc_hw_timebase tb;
-
-    pc_hal_timebase_read(&tb);
     origin  = PC_ORIGIN_UI_RUN;
-    divider = tb.divider;
+    divider = pc_hal_divider_now();                     //fw 0.2.87: the one the UI record ran at
   }
 
   if(start > samples)
@@ -2019,14 +2015,12 @@ static int h_read_trace(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
 static uint32_t pc_decim_body(pc_session *s, uint8_t *p)
 {
   pc_hw_trigger t;
-  pc_hw_timebase tb;
   pc_decim_cfg next, cur;
   uint8_t  set = pc_hal_decim_setting();
   uint16_t rb  = pc_hal_decim_readback();
   int      written;
 
   pc_hal_trigger_read(&t);
-  pc_hal_timebase_read(&tb);
   pc_decim_next(s, t.total, &next);
   pc_hal_decim_current(&cur, &written);
 
@@ -2038,15 +2032,15 @@ static uint32_t pc_decim_body(pc_session *s, uint8_t *p)
   p[3] = next.shift;
   pc_put_u32(p + 4, next.n);
   pc_put_u64(p + 8, next.gain);
-  pc_put_u32(p + 16, s->tb_raw ? s->tb_divider : tb.divider);
-  pc_put_u32(p + 20, pc_decim_rate(&next, s->tb_raw ? s->tb_divider : tb.divider));
+  pc_put_u32(p + 16, pc_hal_divider_now());            //fw 0.2.87: the divider the FPGA holds
+  pc_put_u32(p + 20, pc_decim_rate(&next, pc_hal_divider_now()));
   p[24] = written ? pc_decim_status(&cur) : 0xFF;       //written at the last arm (0xFF: not yet)
   p[25] = cur.shift;
   p[26] = (uint8_t)(rb >> 8);                           //FPGA 0x29 now
   p[27] = (uint8_t)rb;
   pc_put_u16(p + 28, PC_DECIM_MAX_TOTAL);
   p[30] = next.why;                                     //why the effective K is lower than requested
-  p[31] = (uint8_t)pc_ext_shift(t.source, &next, s->tb_raw ? s->tb_divider : tb.divider, t.pretrigger);   //EXT shift the next arm applies
+  p[31] = (uint8_t)pc_ext_shift(t.source, &next, pc_hal_divider_now(), t.pretrigger);   //EXT shift the next arm applies
   pc_features_body(s, p + 32);                          //1.17: as GET_STATUS 44..47
   return 36;
 }

@@ -187,7 +187,6 @@ static void probe_run(uint32 ch, PCHANNELSETTINGS s)
     fpga_write_cmd(0x0D);
     fpga_write_int(div);
     fpga_divider = div;
-    pc_glue_divider_written(div);
   }
 
   fpga_set_time_base(scopesettings.timeperdiv);

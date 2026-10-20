@@ -74,6 +74,8 @@ typedef struct
 void     pc_hal_timebase_read(pc_hw_timebase *t);
 int      pc_hal_timebase_lookup(uint8_t index, uint8_t *samplerate, uint32_t *divider);   //0 ok, -1 index out of range
 void     pc_hal_timebase_write(const pc_hw_timebase *t, int raw);                      //[UI][FPGA] raw: only divider is valid
+uint32_t pc_hal_divider_now(void);      //fw 0.2.87: the 0x0D value the FPGA holds (the last one anyone wrote; the UI
+                                        //table's before the first): every decimation configuration is computed from it
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Trigger
@@ -253,7 +255,7 @@ void     pc_hal_usb_watch(uint32_t *v);
 //re-arm (fw 0.2.62: every full-rate capture; pc_hal_enc_state)
 #define PC_ENCH_COUNT     2
 //fw 0.2.72: FPGA writes that set the capture state (fpga_bus.h), GET_LINK_STATS 64-66: 0x0D rate writes, 0x53 / 0x56
-//filter writes, 0x01 = 1 sampling resets; 67: full-rate captures on 0x1538+ judged by their data because such a write
+//filter writes (fw 0.2.87: 0x54 / 0x55 too), 0x01 = 1 sampling resets; 67: full-rate captures on 0x1538+ judged by their data because such a write
 //came after their sampling reset (pc_hw_enc.replaced)
 #define PC_FPGAW_COUNT    3
 void     pc_hal_fpga_writes(uint32_t *v);                  //PC_FPGAW_COUNT values, any context
