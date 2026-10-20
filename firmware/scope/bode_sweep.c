@@ -424,7 +424,7 @@ static int ref_check(bode_eng *e, const bode_plan *pp, const bode_meas *m, int *
 
   *stop = 0;
 
-  if(e->have_ref2 && (pp->m == e->plans[0].m) && (e->range[1] != 1))
+  if(e->have_ref2 && (pp->m == e->plans[0].m) && (e->range[1] != 1) && (e->cfg.ch2_mode == BODE_CH2_AUTO))
     coll = collapsed(&e->ref2, m);
 
   if(flat2(m, coll) && (e->cfg.ch2_mode == BODE_CH2_HOLD))
@@ -587,7 +587,8 @@ static int finer_range(const bode_meas *m, int c, int r, uint8 bad)
 
 static void on_verify(bode_eng *e, const bode_meas *m)
 {
-  int over = (e->range[1] != 1) && flat2(m, collapsed(&e->ref2, m));
+  int hold = (e->cfg.ch2_mode == BODE_CH2_HOLD);
+  int over = (hold || (e->range[1] != 1)) && flat2(m, hold ? 0 : collapsed(&e->ref2, m));
   int changed = 0, again = 0, c;
 
   e->iter++;
@@ -992,11 +993,12 @@ int bode_start(bode_eng *e, const bode_cfg *cfg, int thru, int hold_r2)
 
   e->have_ref2 = 0;
 
-  //Pre-scan: both channels on range 1 (+-11 V at 1x), offsets on 0 V, the first frequency with the first-point settle
+  //Pre-scan: both channels on range 1 (+-11 V at 1x), offsets on 0 V, the first frequency with the first-point settle.
+  //fw 0.2.94: CH2 on Constant (Hold) stays on its range: the sweep never writes another (owner 2026-10-20 14:16)
   for(i = 0; i < 2; i++)
   {
     e->range[i] = 0xFF;
-    set_range(e, i, 1, 0);
+    set_range(e, i, ((i == 1) && (e->cfg.ch2_mode == BODE_CH2_HOLD)) ? e->hold_r2 : 1, 0);
   }
 
   gen_set(e, &e->plans[0], 1);
@@ -1720,11 +1722,29 @@ void bode_ch2_full_scale(const bode_eng *e, uint8 probe_index, int32 *fs_mdb)
   }
 }
 
-int bode_auto_ch2(const uint64 *f, const int32 *v2, const uint8 *have, int n, uint64 lo, uint64 hi, const int32 *fs,
-                  uint8 *hold_r2)
+static int ac2_end(bode_ac2 *st, int verdict, int reason)
 {
+  if(st)
+  {
+    st->verdict = (uint8)verdict;
+    st->reason  = (uint8)reason;
+  }
+
+  return verdict;
+}
+
+int bode_auto_ch2(const uint64 *f, const int32 *v2, const uint16 *fl, const uint8 *have, int n, uint64 lo, uint64 hi,
+                  const int32 *fs, uint8 *hold_r2, bode_ac2 *st)
+{
+  bode_ac2 dummy;
   int32 vmax = 0, vmin = 0;
-  int   i, r, cnt = 0;
+  int   i, r, cnt = 0, notone = 0;
+
+  if(!st)
+    st = &dummy;
+
+  st->n = st->junk = 0;
+  st->spread_mdb = st->vmax_mdb = 0;
 
   if(lo > hi)
   {
@@ -1739,25 +1759,46 @@ int bode_auto_ch2(const uint64 *f, const int32 *v2, const uint8 *have, int n, ui
     if(!have[i] || (f[i] < lo) || (f[i] > hi))
       continue;
 
+    //A bad record's level is not the circuit's
+    if(fl[i] & BODE_CH2_JUNK)
+    {
+      if(st->junk < 255)
+        st->junk++;
+      continue;
+    }
+
     //A point without a tone: no level to hold
     if(v2[i] <= BODE_MDB_FLOOR)
-      return BODE_CH2_AUTO;
+    {
+      notone = 1;
+      continue;
+    }
 
     if(!cnt || (v2[i] > vmax)) vmax = v2[i];
     if(!cnt || (v2[i] < vmin)) vmin = v2[i];
     cnt++;
   }
 
-  if((cnt < 2) || (vmax - vmin >= BODE_HOLD_SPREAD_MDB))
-    return BODE_CH2_AUTO;
+  st->n          = (uint8)((cnt < 255) ? cnt : 255);
+  st->spread_mdb = cnt ? vmax - vmin : 0;
+  st->vmax_mdb   = vmax;
+
+  if(notone)
+    return ac2_end(st, BODE_CH2_AUTO, BODE_AC2_R_NO_TONE);
+
+  if(cnt < 2)
+    return ac2_end(st, BODE_CH2_AUTO, BODE_AC2_R_FEW);
+
+  if(vmax - vmin >= BODE_HOLD_SPREAD_MDB)
+    return ac2_end(st, BODE_CH2_AUTO, BODE_AC2_R_SPREAD);
 
   //The most sensitive range that holds the largest level with the margin
   for(r = 5; r >= 0; r--)
     if((fs[r] > BODE_MDB_FLOOR) && (vmax + BODE_HOLD_MARGIN_MDB <= fs[r]))
     {
       *hold_r2 = (uint8)r;
-      return BODE_CH2_HOLD;
+      return ac2_end(st, BODE_CH2_HOLD, BODE_AC2_R_FITS);
     }
 
-  return BODE_CH2_AUTO;
+  return ac2_end(st, BODE_CH2_AUTO, BODE_AC2_R_TOO_BIG);
 }
