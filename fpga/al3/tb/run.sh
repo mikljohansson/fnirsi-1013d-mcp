@@ -38,7 +38,11 @@
 #      TIMEOUT_RUNS forces per case (default 4), TIMEOUT_BENCH=0 skips case B (fpga-gen13: the host capture of the
 #      2026-10-20 19:52 bench on 0x153B, D 199 CIC3+FIR, pretrigger 3000, total 6000, untriggered with the force and
 #      triggered, read with READ_RAW's split at the ring end). Against the 0x153A source it reproduces the bench splice.
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout runs one testbench.
+#  15. tb_peak.v (0x153C, fpga-c2): peak detect (0x56 bit 1): every 16-bit word { max, min } of exactly the K = 1 boxcar's
+#      window of raw samples (adc*_w), at K = 1..3 with the FIR enabled (it stays off) and at K = 0 (the one-register
+#      switch forces the 16-bit path, the full-rate ADCs and the window from 0x0D; 0x56 = 0 gives the legacy path back),
+#      the 0x29 read-back, READ_RAW bytes, the alias demonstration (6 ns spikes at 5 MSa/s) and the window max / min trigger.
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|peak runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -143,6 +147,11 @@ if [ "$ONLY" = all ] || [ "$ONLY" = timeout ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_timeout.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_timeout.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_timeout.vvp" +seed=$SEED +total=${TIMEOUT_TOTAL:-2048} +runs=${TIMEOUT_RUNS:-4} +bench=${TIMEOUT_BENCH:-1} | tee "$WORK/sim_timeout.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_timeout.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = peak ]; then
+  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_peak.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_peak.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_peak.vvp" +seed=$SEED | tee "$WORK/sim_peak.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_peak.log" || RC=1
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
 [ $RC -eq 0 ] && echo "ALL PASS (seed $SEED)" || echo "SOMETHING FAILED (seed $SEED)"
