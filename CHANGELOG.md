@@ -31,6 +31,15 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.98 - 2026-10-20 (protocol 1.24, unchanged)
+
+- Frequency response: 0.2.97 counted about half of the engine's captures as time-outs and retook others as maybe
+  spliced (bench: 33..40 captures, 10..22 time-outs, 8..15 other retakes per sweep, 2.4..3.6 s instead of 25, 0, 0,
+  1.5 s). The engine's records start with pretrigger 0, where a trigger on the first word reports the same address as
+  a time-out, and its short time-out made the cut check fire on every early trigger. The engine reads its records as
+  0.2.96 did again, with 0.2.97's contiguous time-out records kept; the UI applies the 0.2.97 rules to its auto mode
+  only. Host captures unchanged (d1f4e6b).
+
 #### 0.2.97 - 2026-10-20 (protocol 1.24, unchanged; GET_CAPTURE_INFO flags bit 6)
 
 - Auto-mode records on FPGA 0x1532..0x153A are no longer spliced (fpga/al3/README.md section 11; 49d99bf, 13f88b1,

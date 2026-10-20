@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-arm2 (2026-10-20): fw 0.2.98, protocol 1.24 unchanged: the Frequency response engine reads its records as 0.2.96 did (0.2.97's 0x14 / cut rules counted half its captures as time-outs); section 64 addendum.**
 **Branch fw-arm (2026-10-20): fw 0.2.97, protocol 1.24 unchanged (GET_CAPTURE_INFO flags bit 6): auto mode on FPGA 0x1532..0x153A arms the FPGA's time-out with the stop geometry (no spliced records), the record flagged when the firmware still forces; section 64.**
 **Branch fw-yield3 (2026-10-20): fw 0.2.96, protocol 1.24 unchanged: a state-changing host request leaves Diagnostics (Back) before it runs, so the view no longer draws into it; section 63.**
 **Branch fw-cap2 (2026-10-20): fw 0.2.81 provisional (version not bumped), protocol 1.24 + GET_HEALTH 106 bit 5: capture-stage training over codes 120..140, widest-run pick, repeat watch; section 54 addendum.**
@@ -4752,3 +4753,29 @@ On 0x153B (after the owner flashes it; the fpga-gen11 tb verdict is still open, 
 Bug indicators: bit 6 on ordinary auto captures (the FPGA did not stop at W: 0x0E not taken; trace the arm); a seam in
 an untriggered record on 0x153A (W's rule or `PC_STOP_LAG` wrong: compare capture_start and W mod 8192); the UI's
 auto traces refreshing much slower than on 0.2.96 (the deadline moved too far); "triggered" on a flat record.
+
+**Addendum, fw-arm2 (fw 0.2.98, 2026-10-20, branch `fw-arm2` from main 54b0f32).** Bench on 0.2.97 / 0x153A (54b0f32):
+host captures clean (100 untriggered, no seam, bode_cells auto leak -65..-83 dB), but the Frequency response engine
+regressed: per sweep 33..40 captures, 10..22 timeouts, 8..15 other retakes, 1 flagged point on 4 of 10, 2.4..3.6 s
+(0.2.91..0.2.96: 25, 0, 0, 0, 1.5 s). **Cause: the two host rules applied in `bh_read` misread the engine's records**,
+which have pretrigger 0 and a two-record time-out:
+- "0x14 == pretrigger -> untriggered" (the timeouts): with pretrigger 0 the trigger check runs from the first word,
+  and the sampling reset clears `trigger_previous` to 0 (zaklad.v), so a first sample at or above the level is a rising
+  edge at ring word 0 = the pretrigger. The engine's level is CH1's mean, so that happens in about half the arms: a
+  complete, contiguous record (0.2.91..0.2.96 counted it triggered from 0x18), now counted a time-out and retaken.
+- The cut check (the other retakes): two records exceed the ring above 2047 legacy words (0x0E = 2 x total samples =
+  4 x total words), so the stop geometry puts W at ring word total + 4 of the second pass; W's ring word then lies
+  inside every record that starts after word 4, i.e. every early trigger, and the "DONE within the window + 2 ms of W's
+  time" test is always true for a capture that lasts microseconds (W's time rounds to 1 ms).
+**Fix** (d1f4e6b): `pc_engine_record` (pc_decim.c): the engine's record is triggered when 0x18 was seen in
+a poll (0.2.91..0.2.96's reading) and maybe spliced only when forced (not on 0x153B+). The stop geometry stays (a record
+without a trigger is contiguous, so a late edge read as "triggered" costs nothing). The UI applies the 0x14 / cut rules
+only to its auto mode (`pc_ui_rules`), not to calibration / auto-setup FPGA-auto conversions, whose pretrigger may be
+small too. The host path is unchanged: its deadline is at least 100 ms, so the timing test excludes early triggers,
+and its pretrigger is normally well above 0; a host auto capture armed with pretrigger 0 can still read a word-0
+trigger as untriggered (record correct, `auto_timeout` set). test_fpga_bus reproduces the engine's arm on the 0x153A
+model (pretrigger 0, total 2048 words, W = 8192 + 2052): triggers at word 0 and 37 and none, every record contiguous;
+0.2.97's rules read the first as a time-out and flag the second, `pc_engine_record` reads both triggered, none spliced.
+**Bench (0x153A):** ten sweeps 100 Hz .. 1 MHz / 25 on the RC: BODE_CTRL 40..47 about 25 captures, 0 timeouts (0..1 on
+the first pre-scan), 0 leak retakes (0..1), 0 other retakes, no flagged point, about 1.5 s per sweep; the host checks of
+0.2.97 unchanged (50 untriggered auto captures each at 1 / 200 MSa/s, maybe_spliced 0, no seam).
