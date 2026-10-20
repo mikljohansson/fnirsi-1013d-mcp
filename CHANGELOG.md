@@ -31,6 +31,21 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.99 - 2026-10-20 (protocol 1.24, unchanged; row 60's invalid flag bits gain bit 4)
+
+- Frequency response: points where CH2 is under 3 codes (ch2_small) are grey, in magnitude and phase, and the
+  markers and cards (Level, -3dB, Peak, Q, the phase crossings) leave them out like the other flagged points; the
+  cursor box says "CH2 small" (owner 2026-10-20 16:22; a590c1f). On the bench a two-pole RC swept to 10 MHz read CH2
+  under one code above 500 kHz at 100 mV/div, and the magnitude climbed back from -69 to -34 dB: generator pickup,
+  drawn as data until now.
+- Frequency response: when such points are on CH2's finest range (100 mV/div), the warning line says where and what
+  helps, in two lines: "CH2 too small above 541 kHz to measure: set Stop below it or press AUTO SET." / "Less
+  pickup: short ground lead on CH2." On Constant with a finer range left, "CH2 small: decrease V/div in CH2 menu or
+  Auto" stays (a590c1f). AUTO SET reads an overview with only such points as no response.
+- mcp: `ch2_small` is in `BAD_FLAGS` (left out of the markers, grey in `scope_report`'s plot, whose line now joins
+  valid points only), and a sweep with such points on 100 mV/div gets the same sentence as its first caveat
+  (`scope_bode_sweep`, `fnirsi1013d-bode`; 41cf0e5).
+
 #### 0.2.97 - 2026-10-20 (protocol 1.24, unchanged; GET_CAPTURE_INFO flags bit 6)
 
 - Auto-mode records on FPGA 0x1532..0x153A are no longer spliced (fpga/al3/README.md section 11; 49d99bf, 13f88b1,

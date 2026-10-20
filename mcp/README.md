@@ -327,11 +327,16 @@ under 60 % of full scale, measures that point on both ranges and scales the rest
 `fixed` keeps CH2's range (or give a V/div).
 
 **Quality flags** per point: `clipped` / `ch1_clipped`, `ch1_low` (CH1 under 20 codes: the DUT input loads the
-source), `ch2_small` (under 3 codes: +-1 dB), `near_floor` (CH2 under 20 dB above a generator-off capture in the
-same bin), `low_snr`, `unsettled` (the record halves disagree by > 0.1 dB / 1 deg after a retry with twice the
-settle), `incoherent` (energy beside the fundamental on CH1), `fir_off`, `spliced`, `no_cal` / `cal_range` (thru
-calibration). Points with a flag from the first group are left out of the markers (-3 dB crossings relative to the
-higher end, or peak, -3 dB points and Q for an interior peak; phase crossings).
+source), `ch2_small` (under 3 codes: under the floor, +-1 dB at best), `near_floor` (CH2 under 20 dB above a
+generator-off capture in the same bin), `low_snr`, `unsettled` (the record halves disagree by > 0.1 dB / 1 deg after a
+retry with twice the settle), `incoherent` (energy beside the fundamental on CH1), `fir_off`, `spliced`, `no_cal` /
+`cal_range` (thru calibration). Points with a flag from the first group (`BAD_FLAGS`: the clip flags, `ch2_small`
+since fw 0.2.99, `near_floor`, `low_snr`, `unsettled`, `incoherent`) are left out of the markers (-3 dB crossings
+relative to the higher end, or peak, -3 dB points and Q for an interior peak; phase crossings) and drawn grey on the
+scope and in `scope_report`'s plot. When `ch2_small` points sit on CH2's finest range (100 mV/div) the first caveat
+is the scope's note: "CH2 too small above 541 kHz to measure: set Stop below it or press AUTO SET. Less pickup:
+short ground lead on CH2." (the frequency where the unmeasurable tail of the span begins); for an agent that means a
+lower `stop`, or the scope's AUTO SET.
 
 **Thru calibration.** Both probes on the DUT input, `thru_cal='measure'` (stored under `thru_name` in
 `<data_dir>/bode/thru/`), then `thru_cal='<name>'` with the same start, stop and points divides it out (CH1 / CH2

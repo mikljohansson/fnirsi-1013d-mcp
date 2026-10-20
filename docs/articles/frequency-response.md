@@ -51,7 +51,11 @@ periods to settle to -40 dB.
 is taken again with twice the settle time, then flagged unsettled. CH1's level one bin beside the fundamental, above
 -40 dB, means the record was not coherent. Once per rate and CH2 range a capture with the generator off measures the
 background; a point less than 20 dB above it is near_floor. Other flags: ch1_low (CH1 under 20 codes), ch2_small
-(CH2 under 3 codes, where the ADC's linearity limits the result to about 1 dB), clipped, spliced.
+(CH2 under 3 codes, where the ADC's linearity limits the result to about 1 dB), clipped, spliced. Since fw 0.2.99
+ch2_small points are grey and left out of the markers like the others: on the bench a two-pole RC above 500 kHz read
+CH2 under one code at 100 mV/div, and what climbed back up the plot was generator pickup in the CH2 probe. The screen
+then says where that begins and what helps ("CH2 too small above 541 kHz to measure: set Stop below it or press AUTO
+SET").
 
 **Ranging.** A pre-scan at the first frequency picks both ranges at 85 % of full scale. With CH2 on Auto the sweep
 steps CH2 to a more sensitive range when the next point would fit, and measures that point on both ranges, so the

@@ -272,8 +272,9 @@ Details that follow from the run-state rule:
      Start becomes 10 Hz.
    - FLAT or NONE: the span is kept. The note reads "No corner from 100 Hz to 10 MHz" for 5 s (fw 0.2.94, owner 14:19:
      the ": span kept" suffix is gone).
-   - Every point flagged near_floor or low_snr: the span is kept. The warning reads "Auto set: no response: CH2 tip
-     on the DUT output?" (fw 0.2.84 adds the "Auto set: " prefix).
+   - Every point flagged near_floor, low_snr or (fw 0.2.99) ch2_small: the span is kept. The warning reads "Auto set:
+     no response: CH2 tip on the DUT output?" (fw 0.2.84 adds the "Auto set: " prefix). fw 0.2.99: ch2_small points
+     are grey (section 5), so they set no marker of the overview either.
    - **Bad points and the reference (fw 0.2.84).** A point more than 20 dB from both its valid neighbours (an end point:
      from both of the next two valid points) is absurd: a bad record, not the circuit. One is dropped and never sets the
      reference or counts as a peak. The reference level is the median of the three lowest-frequency valid points, and
@@ -290,7 +291,7 @@ Details that follow from the run-state rule:
      | two or more absurd points in a pass, or one among the three lowest-frequency points (where the reference is taken) | Auto set: no consistent response. Check wiring |
      | CH2 ranging bounced: its range changed direction twice between the pass's points, or once with the engine's six switches used up | the same |
      | a finer pass finds no band, or reads the peak more than 6 dB lower than the pass before | the same |
-     | every point near the floor or under the noise | Auto set: no response: CH2 tip on the DUT output? |
+     | every point near the floor, under the noise or under 3 codes (ch2_small, fw 0.2.99) | Auto set: no response: CH2 tip on the DUT output? |
      | CH1 under 20 codes on more than half of the good points | Auto set: CH1 level low: CH1 tip on the DUT input? |
      | a resonance whose peak is not confirmed by two adjacent points, or the band still unresolved after the last pass | Auto set: peak not confirmed: sweep by hand |
 
@@ -464,12 +465,40 @@ items are white with their rank; the others are grey. The choice is saved in set
   px card: "Sweep auto 12/20" is about 113 px and "-3dB not found" about 99 px.
 - **The cursors' values are not cards.** They are the C1 / C2 readout box of section 2, as the Scope's cursor values
   are its cursor box. fw 0.2.66's f, |H| and Phase cards go.
+- **Grey points do not count** (`BODE_F_BAD`, the host's `BAD_FLAGS`): ch1_clipped, clipped, ch2_overload, ch2_small,
+  low_snr, near_floor, unsettled, incoherent. They are loose grey dots in both curves and on the slider track, the
+  cursor box names the reason, and the markers, so Level, -3dB, BW, Peak, Q and the phase crossings, and the axis
+  scales leave them out. fw 0.2.99 (owner 2026-10-20 16:22) adds ch2_small (CH2 under 3 codes): on the bench a
+  two-pole RC swept to 10 MHz read CH2 at about -55 dBV above 500 kHz, under one code at 100 mV/div, and the
+  magnitude climbed back from -69 to -34 dB with the phase flipping. That was generator pickup into the CH2 probe,
+  drawn as data. ch1_low, spliced, retried and fir_off points still count.
 
 ## 6. Texts
 
 Warnings are one line, top-middle, consequence then action, the most urgent first. Notes clear after 5 s. They are at
 most 50 characters: centred at x 366 in 16 px that spans at most x 188..544, clear of the axis labels at both edges.
-In 13 px (`font_2`, what `bode_view.c` uses) it is narrower still.
+In 13 px (`font_2`, what `bode_view.c` uses) it is narrower still. One warning has two lines (fw 0.2.99): CH2 under
+the floor, 13 px at y 69 and y 85, both inside the free top division (y 60..116). Its first line is up to 77
+characters, centred at x 366 inside x 56..666 in 13 px, clear of both axes' labels (the instruction's
+bounds; test_ui checks the frequencies from 1 Hz to 10 MHz).
+
+**Precedence** (`bode_view.c` `warning()`, the first that applies is shown):
+
+1. The sweep's error (BODE_ERR_*: CH2 overloaded by DC, no capture started / arrived, the PC took over, no
+   frequency in the range, ADC readout fault).
+2. A thru sweep runs.
+3. AUTO SET's failure (`bu_auto_verdict`), until the next sweep.
+4. What a tap just did: Auto set cancelled, nothing to save, the file not written, no corner.
+5. Constant: CH2 overrange (a clipped point).
+6. Constant on a range with a finer one below it: CH2 small (a ch2_small point).
+7. CH2 under the floor (fw 0.2.99): a ch2_small point on CH2's finest range (100 mV/div), on Auto or Constant;
+   not during AUTO SET (its overview runs to 10 MHz, and AUTO SET is what the note offers). Two lines.
+8. CH1 level low, named by its cause (coarse range, the DUT, the probe above 2 MHz).
+9. N points not settled.
+10. N points near the floor (not during AUTO SET).
+11. Thru does not match this sweep.
+12. DC level beyond the offset range.
+13. The other notes (trigger was EXT, roll off).
 
 | Warning | When | fw 0.2.66 text, if different |
 |---|---|---|
@@ -480,7 +509,8 @@ In 13 px (`font_2`, what `bode_view.c` uses) it is narrower still.
 | No frequency in this range: change Start or Stop | BODE_ERR_PLAN | |
 | Thru sweep: both probe tips on the DUT input | a thru sweep runs | |
 | CH2 overrange: increase V/div in CH2 menu or Auto | a clipped point on Constant (fw 0.2.94) | names the CH2 menu, where the user changes it |
-| CH2 small: decrease V/div in CH2 menu or Auto | a ch2_small point on Constant (fw 0.2.94) | new |
+| CH2 small: decrease V/div in CH2 menu or Auto | a ch2_small point on Constant, on a range coarser than 100 mV/div (fw 0.2.94; fw 0.2.99: not on the finest range, where the next row applies) | new |
+| CH2 too small above 541 kHz to measure: set Stop below it or press AUTO SET. / Less pickup: short ground lead on CH2. | fw 0.2.99 (owner 2026-10-20 16:22): a ch2_small point on CH2's finest range (100 mV/div), Auto or Constant, not during AUTO SET. Two 13 px lines. The frequency (`bu_ch2_floor_f`, three significant digits, `bu_fmt_f3`) is the lowest of the ch2_small points on that range above every other measured point, the run that ends the span; when the highest point measures, the lowest such point (scattered points). The mcp caveat is the same sentence | new; no floor line is drawn (owner: the generator-off background does not see pickup) |
 | CH1 level low: the DUT loads the 1 kOhm source | BODE_F_CH1_LOW at 0.5 V/div or finer, at or below 2 MHz (fw 0.2.84; a coarse range comes first, then this, then the probe) | "... the DUT input loads ..." (52) |
 | N points not settled: choose a longer Settle | BODE_F_UNSETTLED | |
 | N points near the floor: shown grey | NEAR_FLOOR / LOW_SNR | |

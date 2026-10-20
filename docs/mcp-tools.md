@@ -373,7 +373,11 @@ scope's settings). While the view shows (`display_mode` `bode`) the capture tool
 with READ_BODE reason 8 (ADC readout fault: the capture self-check flagged a core on 0x153A+, fw 0.2.83; the pre-scan
 clipped at 5 V/div on older bitstreams) returns no table and a caveat pointing at `scope_health` and the calibration
 wizard. Host sweeps retake a flat or toneless record once (the 0x153A first record after a configuration change);
-a point still flat is flagged `ch1_low` + `incoherent` with no H, and a caveat names its frequencies.
+a point still flat is flagged `ch1_low` + `incoherent` with no H, and a caveat names its frequencies. fw 0.2.99:
+`ch2_small` is one of the flags that leave a point out of the markers (BAD_FLAGS, grey on the scope and in
+`scope_report`'s plot); when such points sit on CH2's finest range (100 mV/div) the first caveat is the scope's note,
+"CH2 too small above 541 kHz to measure: set Stop below it or press AUTO SET. Less pickup: short ground lead on
+CH2." with the frequency where that tail begins (`bode.ch2_floor_hz`).
 
 ### 4.4a Presenting results (tier 0)
 

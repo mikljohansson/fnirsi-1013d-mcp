@@ -243,8 +243,10 @@ When the result does not add up, AUTO SET stops, keeps your settings and says wh
 
 ![Frequency response after a sweep](screenshot:frequency-response-sweep)
 
-**Points shown grey** did not pass a check, for example "unsettled", "near floor" or "CH2 clipped". The cursor box
-names the reason. They are never joined to the curve.
+**Points shown grey** did not pass a check, for example "unsettled", "near floor", "CH2 small" or "CH2 clipped". The
+cursor box names the reason. They are never joined to the curve, and the measurement cards (Level, -3dB, Peak, Q and
+the others) leave them out. "CH2 small" means CH2 saw less than 3 ADC codes: too little to measure. At the finest range
+(100 mV/div) what CH2 shows there is often pickup from the generator, not the circuit.
 
 **Slider row.** The track spans 1 Hz to 10 MHz on a log scale, and the window is Start to Stop. After AUTO SET the track
 shows its overview. Drag the window to move Start and Stop together. On release a running sweep restarts at the new
@@ -256,10 +258,21 @@ sweep". When no sweep runs, the post carries your own generator setting again. T
 sweep".
 
 **Warnings while sweeping.** Among others: "CH2 overrange: increase V/div in CH2 menu or Auto", "CH2 small: decrease
-V/div in CH2 menu or Auto", "N points not settled:
-choose a longer Settle", "CH1 level low: the DUT loads the 1 kOhm source", "CH1 level low above 2 MHz: the x1 probe
-rolls off", "Thru does not match this sweep: measure again", "DC level beyond the offset range: AC-couple DUT",
-"Sweep stopped: the PC took over", "ADC readout fault: see Diagnostics".
+V/div in CH2 menu or Auto", "N points not settled: choose a longer Settle", "CH1 level low: the DUT loads the 1 kOhm
+source", "CH1 level low above 2 MHz: the x1 probe rolls off", "Thru does not match this sweep: measure again", "DC
+level beyond the offset range: AC-couple DUT", "Sweep stopped: the PC took over", "ADC readout fault: see
+Diagnostics".
+
+When CH2 is already at its finest range and still too small, two lines say where and what helps:
+
+```
+CH2 too small above 541 kHz to measure: set Stop below it or press AUTO SET.
+Less pickup: short ground lead on CH2.
+```
+
+The frequency is where the points that cannot be measured begin. Above it the response is below what the scope can
+see. Set Stop below that frequency, or let AUTO SET choose the span. A short ground lead on the CH2 probe, close to
+the DUT output, picks up less of the generator.
 
 The same measurement from a PC: `scope_bode_sweep` and `fnirsi1013d-bode` ([mcp README](../../mcp/README.md), "Bode
 sweep").
