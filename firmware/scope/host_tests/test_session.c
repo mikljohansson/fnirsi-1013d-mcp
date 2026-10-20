@@ -3456,6 +3456,7 @@ static void test_bode(void)
   mock_bode_status = PC_OK;
   r = req(PC_CMD_BODE_CTRL, p, 16);
   T_EQ(r.h.status, 0); T_EQ(r.len, PC_BODE_CTRL_RESP); T_EQ(pc_get_u32(r.p + 32), 1234);
+  T_EQ(PC_BODE_CTRL_RESP, 50);                  //fw 0.2.93: bytes 48..49 the planned CH2 range switches
   T_MEM(mock_bode_req, p, 16);
 
   //A short request is zero-extended (action only)

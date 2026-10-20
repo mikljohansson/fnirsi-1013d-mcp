@@ -6,12 +6,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- **Frequency response track overview follows the Display variant** (owner 10-20 13:35 **(owner)**: "if the chart shows both the
+- [x] **Frequency response track overview follows the Display variant** (fw 0.2.92, bench pending; fw-ov3, firmware/AGENTS.md
+  section 49 addendum) (owner 10-20 13:35 **(owner)**: "if the chart shows both the
   scrollbar should too"): in Overlaid the track draws the magnitude in cyan and the phase in pink over each other, as the Scope's
   track overlays its channels; Magnitude only / Phase only draw the one curve. slider_ov_draw.c + bode_view.c, the design doc
   slider-overview.md section 5 and the board. Small; with fw-eng5's batch or a one-off.
 
-- **AUTO SET chooses CH2 Hold when the span fits one range** (owner 10-20 13:33 **(owner)**: RUN on the RC still clicks twice per
+- [x] **AUTO SET chooses CH2 Hold when the span fits one range** (fw 0.2.93, bench pending; fw-eng5, firmware/AGENTS.md
+  section 61) (owner 10-20 13:33 **(owner)**: RUN on the RC still clicks twice per
   sweep; those are the planned 0.5 / 0.2 / 0.1 V/div transitions a 35 dB span needs, so they are the floor; for live tuning of a
   narrow band one range suffices): after the overview and the passes, AUTO SET sets CH2 range Hold at the range that holds the
   span's largest CH2 level with margin when the CH2 level spread inside the chosen span is under about 20 dB, and Auto otherwise;

@@ -447,7 +447,9 @@ static int bg_has(bode_eng *e, uint32 key)
   return 0;
 }
 
-//The point's planned ranges, offsets and splice factor (fw 0.2.87); the front end's waits as set_range's
+//The point's planned ranges, offsets and splice factor (fw 0.2.87); the front end's waits as set_range's. fw 0.2.93: a
+//CH2 range change between two points of the sweep is a planned switch (the first point's write is not: it only moves
+//the channel from wherever the last sweep left it)
 static void plan_apply(bode_eng *e, int i)
 {
   const bode_rplan *rp = &e->rplan[i];
@@ -457,6 +459,9 @@ static void plan_apply(bode_eng *e, int i)
   {
     if(rp->r[c] != e->range[c])
     {
+      if((c == 1) && (i > 0))
+        e->planned++;
+
       set_channel(e, c, rp->r[c], rp->off[c]);
       relay_wait(e);
       relay_wait(e);
@@ -938,6 +943,7 @@ int bode_start(bode_eng *e, const bode_cfg *cfg, int thru, int hold_r2)
   e->bad_down   = 0;
   e->stop_req   = 0;
   e->switches   = 0;
+  e->planned    = 0;
   e->k_mdb      = 0;
   e->k_mdeg     = 0;
   e->nbg        = 0;
@@ -1166,6 +1172,7 @@ void bode_snap_save(const bode_eng *e, bode_snap *s)
   s->err       = e->err;
   s->exhausted = e->exhausted;
   s->switches  = e->switches;
+  s->planned   = e->planned;
   s->t0        = e->t0;
   s->t_end     = e->t_end;
 }
@@ -1190,6 +1197,7 @@ void bode_snap_restore(bode_eng *e, const bode_snap *s)
   e->err       = s->err;
   e->exhausted = s->exhausted;
   e->switches  = s->switches;
+  e->planned   = s->planned;
   e->t0        = s->t0;
   e->t_end     = s->t_end;
   e->idx       = -1;
@@ -1201,6 +1209,7 @@ uint32 bode_sweep_id(const bode_eng *e)    { return e->sweep_id; }
 int bode_count(const bode_eng *e)          { return e->np; }
 int bode_current(const bode_eng *e)        { return (e->state == BODE_ST_RUNNING) ? e->idx : -1; }
 uint16 bode_switches(const bode_eng *e)    { return e->switches; }
+uint16 bode_planned_switches(const bode_eng *e) { return e->planned; }
 int bode_plan_reused(const bode_eng *e)    { return e->reuse; }
 
 void bode_capture_stats(const bode_eng *e, uint16 *caps, uint16 *timeouts, uint16 *leak, uint16 *other)
@@ -1692,4 +1701,63 @@ int bode_auto_zoom(const bode_autospan *a, int passes, bode_cfg *c)
   c->ch2_mode   = BODE_CH2_AUTO;
   c->background = 1;
   return 1;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// AUTO SET's CH2 range mode (fw 0.2.93, owner 2026-10-20 13:33; bode_sweep.h)
+
+#define CODES128_MDB        42144       //20 log10 128: a channel's full scale in codes peak
+
+void bode_ch2_full_scale(const bode_eng *e, uint8 probe_index, int32 *fs_mdb)
+{
+  bode_chinfo ci;
+  int r;
+
+  for(r = 0; r < 6; r++)
+  {
+    e->hw->chan_info(e->hw->ctx, 1, r, &ci);
+    fs_mdb[r] = ci.uv_q8 ? CODES128_MDB + bode_volt_mdb(ci.uv_q8, probe_index) : BODE_MDB_FLOOR;
+  }
+}
+
+int bode_auto_ch2(const uint64 *f, const int32 *v2, const uint8 *have, int n, uint64 lo, uint64 hi, const int32 *fs,
+                  uint8 *hold_r2)
+{
+  int32 vmax = 0, vmin = 0;
+  int   i, r, cnt = 0;
+
+  if(lo > hi)
+  {
+    uint64 t = lo;
+
+    lo = hi;
+    hi = t;
+  }
+
+  for(i = 0; i < n; i++)
+  {
+    if(!have[i] || (f[i] < lo) || (f[i] > hi))
+      continue;
+
+    //A point without a tone: no level to hold
+    if(v2[i] <= BODE_MDB_FLOOR)
+      return BODE_CH2_AUTO;
+
+    if(!cnt || (v2[i] > vmax)) vmax = v2[i];
+    if(!cnt || (v2[i] < vmin)) vmin = v2[i];
+    cnt++;
+  }
+
+  if((cnt < 2) || (vmax - vmin >= BODE_HOLD_SPREAD_MDB))
+    return BODE_CH2_AUTO;
+
+  //The most sensitive range that holds the largest level with the margin
+  for(r = 5; r >= 0; r--)
+    if((fs[r] > BODE_MDB_FLOOR) && (vmax + BODE_HOLD_MARGIN_MDB <= fs[r]))
+    {
+      *hold_r2 = (uint8)r;
+      return BODE_CH2_HOLD;
+    }
+
+  return BODE_CH2_AUTO;
 }
