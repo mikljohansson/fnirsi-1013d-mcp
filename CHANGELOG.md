@@ -31,7 +31,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.89 (provisional, not tagged in pc_cmds.h; protocol 1.24, unchanged)
+#### 0.2.89 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: the sweep's captures trigger on CH1 rising at mid-scale, as the host tool's do (1d4c268).
   Before, the sweep used the Scope view's trigger level. When that level was off the signal, a capture could start on

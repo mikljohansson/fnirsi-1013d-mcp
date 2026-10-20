@@ -4210,7 +4210,7 @@ GET_CAPTURE_INFO divider 4095; with the old expression it fails with S 7 / N 200
 Bug indicators: any whole record of 0xFFFF with the filter on; GET_DECIM's divider differing from the last 0x0D in the
 trace; an arm with K >= 1 and no 0x54 in the trace before its 0x01 = 1.
 
-## 58. fw-eng2: the engine's trigger, the plan settling in one sweep (fw 0.2.89 provisional, protocol 1.24 unchanged)
+## 58. fw-eng2: the engine's trigger, the plan settling in one sweep (fw 0.2.89, protocol 1.24 unchanged)
 
 Branch `fw-eng2` from main 3cc0b10 (fw 0.2.88). Brief from the coordinator after the 0.2.87 / 0.2.88 bench
 (hardware-status 12:30). Two problems on the RC, 100 Hz .. 1 MHz / 25, CH2 Auto:
