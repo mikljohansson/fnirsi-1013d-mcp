@@ -1265,4 +1265,14 @@ Newest entries at the bottom. Format: date, who, what, result.
   reusing that plan had CH1 right (r1 3) but CH2 at 2.5 V/div on every point (r2 1, ch2_small above 50 kHz): the plan applies
   ranges that are not the measured ones (CH1 / CH2 swapped or offset). Rows in scratchpad device_rc_rows_1310.json; sent to
   fw-eng (fw-eng3). The host-started ten-sweep test of 12:42 did not show it because its plan came from a correct first sweep.
+- 2026-10-20 13:14-13:17: fw 0.2.90 (fw-eng3: the post-pre-scan check ranges both ways, a plan with a coarse CH1 is dropped)
+  pinned backups/fw-0.2.90_da483681.bin (sha256 da483681c203b0a8cf352170213aaad373d9ca489d8bdaa851983a5c87088042), loaded. A..D at
+  500 Hz..100 kHz: A (first sweep after the load) ended with BOTH channels at 5 V/div on every point (ch1_low 20, one
+  ch1_clipped / clipped point, 13 retried); B (plan dropped, fresh) right: r1 3, r2 3..5, switches 2; C (25 points) r1 3 but
+  r2 2,2,0,0,1,2,2.. (5 V/div entries at 780 Hz..1.2 kHz), switches 6; D r2 3,3,2,2..3,4,4,4,4,5,4, switches 5. Eight sweeps at
+  100 Hz..1 MHz: r1 3 everywhere, r2 monotonic except a 2 between 4s (points 17..19) on three sweeps, switches 2, 6, 0, 2, 0, 2, 0,
+  0, flagged 1..6, retried 7..11 per sweep, 10 kHz -2.83..-2.85. So the plan now stores and applies the measured ranges, but a
+  bad record (the retake fires on a third of the points even with the engine's CH1 trigger) still makes a point step up to a
+  coarser range and the plan churn; a bad pre-scan record can still leave a channel at 5 V/div for a sweep. Root: the spliced
+  records (fpga-gen11); engine: a single bad record must never step a range up (confirm twice), queued for fw-eng.
 
