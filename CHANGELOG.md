@@ -31,6 +31,20 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### FPGA bitstream 0x153B-pre - 2026-10-20 (fpga-gen11; fpga/al3/dist, not flashed)
+
+- Records that end on the auto time-out or on the firmware's forced stop are no longer spliced (fpga/al3/README.md
+  "Changes" section 11). Up to 0x153A the FPGA reported the trigger address `pretrigger` on a time-out, so the firmware
+  read ring words 0 .. total - 1 while the write pointer had stopped at a random word after the firmware's auto-mode
+  force (0x1A = 0 after max(100 ms, two records)): whenever that word fell inside the record, the words after it were
+  one ring (8192 words) older than the words before it (bench 2026-10-20 12:32: 15 of 32 untriggered host captures,
+  the phase jump equal to 8192 words at every splice; the Scope view's untriggered traces at fast time bases carry the
+  same seam). 0x153B reports W - total + pretrigger (W the address after the last word written), so the record read
+  from `0x14 - pretrigger` is the newest total words; a trigger before the time-out now completes its post-trigger
+  words (the Frequency response engine's records with 0x0E = total were cut at the time-out); no trigger is taken
+  after the stop, so 0x18 describes the record. Cycle-identical to 0x153A otherwise. Firmware notes for 0x1532..0x153A
+  (the forced stop cannot be made exact there) are in the same README section.
+
 #### 0.2.89 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: the sweep's captures trigger on CH1 rising at mid-scale, as the host tool's do (1d4c268).
