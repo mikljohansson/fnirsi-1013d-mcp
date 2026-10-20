@@ -31,6 +31,18 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.87 - 2026-10-20 (protocol 1.24, unchanged layout; provisional number)
+
+- Decimated captures no longer come back as a whole record of 0xFFFF after a configuration change (fpga-gen10's
+  "First-record saturation", bench 2026-10-20 10:52 .. 12:08). The arm computed N and the decimator shift from the UI's
+  rate table whenever the session had forgotten a host's raw divider (a UI time/div snap without a 0x0D write clears
+  it), while the FPGA kept the raw divider: S 7 or 9 at D 4095 saturates every word. The decimation configuration is now
+  derived from the divider the FPGA holds, tracked at the bus (61af5dd), and every arm with the filter on writes the
+  shift 0x54, so a stale shift cannot survive an arm (1299f7a). GET_DECIM bytes 16..23 and 31, GET_CAPTURE_INFO's
+  divider and READ_TRACE's UI divider report that divider. The FPGA write trace (event 22) logs 0x54 and 0x55, and
+  GET_LINK_STATS 65 counts them with the filter writes (1299f7a). The Bode engine rewrites 0x0D when the FPGA holds
+  another divider than its own record (2ba6566).
+
 #### 0.2.86 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: AUTO SET never ends in RUN (owner 2026-10-20 11:47; a119035). After the overview and its finer passes
