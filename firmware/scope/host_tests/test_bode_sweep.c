@@ -944,21 +944,82 @@ static void test_range_plan(void)
   D.rail_reads = 0;
   D.rail_from = 0;
 
-  //A fooled pre-scan (flat twice: CH1 stays on 2.5 V/div): the plan is not kept, the next sweep ranges again
+  //A flat pre-scan (twice: CH1 dead there, range 1): fw 0.2.90 the check's clean captures range CH1 to 0.5 V/div in
+  //the same sweep (0.2.89: the sweep ran on 2.5 V/div and only the next one ranged again); the plan is kept
   dut_rc15(&D);
   D.flat_from = 1;
   D.flat_n = 2;
   bode_init(&eng, &HW);
   sweep_once(&c, 0, 3, &b);
-  print_rec("fooled pre-scan", &b);
-  T_EQ(b.r1[0], 1);
-  sweep_once(&c, 0, 3, &b);
-  print_rec("after it", &b);
-  T_EQ(b.reused, 0);
-  T_EQ(b.r1[0], 3);
+  print_rec("flat pre-scan", &b);
+  for(i = 0; i < b.n; i++)
+    T_EQ(b.r1[i], 3);
+  T_EQ(b.bad, 0);
+  sweep_once(&c, 0, 3, &x);
+  T_EQ(x.reused, 1);
+  T_EQ(x.switches, 0);
+  T_TRUE(same_ranges(&b, &x));
+  D.flat_n = 0;
+
+  //fw 0.2.90: a rail sample in the pre-scan's CH1 record (its peak reads 128 codes on 2.5 V/div: the pre-scan picks
+  //5 V/div): the check steps CH1 to 0.5 V/div; a rail sample in the check's first record: measured again, CH1 stays
+  for(i = 0; i < 2; i++)
+  {
+    dut_rc15(&D);
+    D.rail[0] = 100000;
+    D.rail_from = (uint32)(i + 1);
+    D.rail_reads = i + 1;
+    bode_init(&eng, &HW);
+    sweep_once(&c, 0, 3, &b);
+    print_rec(i ? "rail in the check" : "rail in the pre-scan", &b);
+    T_EQ(b.r1[0], 3);
+    T_EQ(b.bad, 0);
+    sweep_once(&c, 0, 3, &x);
+    T_EQ(x.reused, 1);
+    T_EQ(x.switches, 0);
+  }
+  D.rail[0] = 0;
+  D.rail_from = 0;
+  D.rail_reads = 0;
+
+  //fw 0.2.90 (bench 13:10, item a): the plan sweep's rows carry the first sweep's r1 / r2 point by point, on a divider
+  //where CH1 and CH2 sit on different ranges (a swap of the channels' entries would show)
+  dut_rc(&D);
+  D.c = 0;
+  D.r = 991;
+  D.rl = 102;
+  bode_init(&eng, &HW);
+  sweep_once(&c, 0, 3, &a);
+  print_rec("divider", &a);
   sweep_once(&c, 0, 3, &b);
   T_EQ(b.reused, 1);
-  T_EQ(b.switches, 0);
+  for(i = 0; i < a.n; i++)
+  {
+    T_EQ(b.r1[i], a.r1[i]);
+    T_EQ(b.r2[i], a.r2[i]);
+  }
+  T_TRUE(a.r1[0] != a.r2[0]);
+
+  //fw 0.2.90 (item c): AUTO SET's overview (100 Hz .. 10 MHz, 20 points, Fast) does not lend its plan to the final
+  //sweep (500 Hz .. 100 kHz, 20 points, Normal); the final sweep's plan serves the RUN after it
+  {
+    bode_cfg ov = cfg(100, 10e6, 20, BODE_SETTLE_FAST, BODE_CH2_AUTO), fin = cfg(500, 100e3, 20, BODE_SETTLE_NORMAL,
+                                                                                BODE_CH2_AUTO);
+
+    dut_rc15(&D);
+    bode_init(&eng, &HW);
+    sweep_once(&ov, 0, 3, &x);
+    sweep_once(&fin, 0, 3, &a);
+    print_rec("AUTO SET final", &a);
+    T_EQ(a.reused, 0);
+    sweep_once(&fin, 0, 3, &b);
+    print_rec("RUN after it", &b);
+    T_EQ(b.reused, 1);
+    T_EQ(b.switches, 0);
+    T_TRUE(same_ranges(&a, &b));
+    for(i = 0; i < b.n; i++)
+      T_EQ(b.r1[i], 3);
+  }
 }
 
 //fw 0.2.71: a cancelled AUTO SET gives the previous table back (bode_snap)

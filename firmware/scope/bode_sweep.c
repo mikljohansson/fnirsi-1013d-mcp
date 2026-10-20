@@ -17,7 +17,9 @@
 #define RELAY_MS            50
 #define MAX_SWITCHES        6
 #define FIRST_FACTOR        3
+#define VERIFY_MAX          6           //fw 0.2.90: captures of the pre-scan's check (4 up to 0.2.89)
 #define PLAN_FLOOR_C100     3840        //fw 0.2.87: 30 % of 128 codes, the range plan's floor (bode_sweep.h)
+#define PLAN_CH1_FMAX_MHZ   2000000000ull   //fw 0.2.90: ch1_low below 2 MHz (above, the x1 probe rolls off) drops a plan
 
 //Nominal V/div per hardware range in mV (the host's RANGE_VOLTS_PER_DIV ratios)
 static const uint16 vpd_mv[6] = { 5000, 2500, 1000, 500, 200, 100 };
@@ -271,7 +273,8 @@ static void result(bode_eng *e, int i, const bode_meas *m, int coll, int retries
     int r1 = e->range[0];
 
     if(m->c[0].clipped || bode_ch1_dead(m) ||
-       ((i == 0) && (r1 < 5) && ((int64)m->c[0].ac_c100 * vpd_mv[r1] < (int64)DOWNRANGE_C100 * vpd_mv[r1 + 1])))
+       ((i == 0) && (r1 < 5) && ((int64)m->c[0].ac_c100 * vpd_mv[r1] < (int64)DOWNRANGE_C100 * vpd_mv[r1 + 1])) ||
+       ((m->c[0].code_mdb < CH1_LOW_MDB) && (r1 < 5) && (e->plans[i].f_mhz < PLAN_CH1_FMAX_MHZ)))
       e->rp_set = 0;
 
     rp->have   = 1;
@@ -514,7 +517,9 @@ static void on_prescan(bode_eng *e, const bode_meas *m)
   for(c = 0; c < 2; c++)
     set_range(e, c, t[c], e->v_dc[c]);
 
-  e->iter = 0;
+  e->iter    = 0;
+  e->vclip   = 0;
+  e->vbad[0] = e->vbad[1] = 0;
   measure(e, PH_VERIFY, pp, settle_periods[e->cfg.settle] * 10);
 }
 
@@ -536,17 +541,30 @@ static int readout_fault(bode_eng *e, const bode_meas *m)
   return 0;
 }
 
+//fw 0.2.90: the most sensitive range from r on where the record's peak (ac, measured on r) stays inside 85 % of full
+//scale, stopping before a range that clipped in this check
+static int finer_range(const bode_meas *m, int c, int r, uint8 bad)
+{
+  int32 ac = (m->c[c].ac_c100 > 100) ? m->c[c].ac_c100 : 100;
+  int   t = r;
+
+  while((t < 5) && !(bad & (1 << (t + 1))) && ((int64)ac * vpd_mv[r] <= (int64)FULL_SCALE_C100 * vpd_mv[t + 1]))
+    t++;
+
+  return t;
+}
+
 static void on_verify(bode_eng *e, const bode_meas *m)
 {
   int over = (e->range[1] != 1) && flat2(m, collapsed(&e->ref2, m));
-  int changed = 0, c;
+  int changed = 0, again = 0, c;
 
   e->iter++;
 
   //host _prescan: CH1 flat even after the retake: nothing to range on, keep the ranges
   if(bode_ch1_dead(m))
   {
-    e->iter = 4;
+    e->iter = VERIFY_MAX;
     over = 0;
   }
 
@@ -565,24 +583,53 @@ static void on_verify(bode_eng *e, const bode_meas *m)
     return;
   }
 
+  //fw 0.2.90 (bench 2026-10-20 13:10: CH1 left on 2.5 V/div, CH2 on 2.5 V/div for a whole sweep): the check judges
+  //each channel like a point does. A clip (CH2: or a saturated record) is measured again on the same range before
+  //the channel steps up, and that range is not tried again in this check; an unclipped channel steps to the finest
+  //range its peak fits (85 % of full scale), so one bad pre-scan record no longer leaves a channel coarse
   for(c = 0; (c < 2) && !bode_ch1_dead(m); c++)
   {
-    int cl = c ? (m->c[1].clipped || over) : m->c[0].clipped;
+    int    cl = c ? (m->c[1].clipped || over) : m->c[0].clipped;
+    uint8 *bad = &e->vbad[c];
+    int    r = e->range[c], t;
 
-    if(cl && (e->range[c] > 0) && !((c == 1) && (e->cfg.ch2_mode == BODE_CH2_HOLD)))
+    if((c == 1) && (e->cfg.ch2_mode == BODE_CH2_HOLD))
+      continue;
+
+    if(cl)
     {
-      if((c == 1) && over)
-        e->bad_down |= (uint8)(1 << e->range[1]);
+      if(!(e->vclip & (1 << c)))
+      {
+        e->vclip |= (uint8)(1 << c);
+        again = 1;
+      }
+      else if(r > 0)
+      {
+        *bad |= (uint8)(1 << r);
+        if((c == 1) && over)
+          e->bad_down |= (uint8)(1 << r);       //a saturated range is not tried again on the way down either
+        e->vclip &= (uint8)~(1 << c);
+        set_range(e, c, r - 1, c ? (over ? e->v_dc2 : m->c[1].mean_uv) : m->c[0].mean_uv);
+        changed = 1;
+      }
 
-      set_range(e, c, e->range[c] - 1, c ? (over ? e->v_dc2 : m->c[1].mean_uv) : m->c[0].mean_uv);
+      continue;
+    }
+
+    e->vclip &= (uint8)~(1 << c);
+    t = finer_range(m, c, r, *bad);
+
+    if(t != r)
+    {
+      set_range(e, c, t, c ? m->c[1].mean_uv : m->c[0].mean_uv);
       changed = 1;
     }
   }
 
-  if(!changed && !bode_ch1_dead(m))
+  if(!changed && !again && !bode_ch1_dead(m))
     changed = recentre(e, m);
 
-  if(changed && (e->iter < 4) && !e->stop_req)
+  if((changed || again) && (e->iter < VERIFY_MAX) && !e->stop_req)
   {
     measure(e, PH_VERIFY, &e->plans[0], settle_periods[e->cfg.settle] * 10);
     return;

@@ -249,9 +249,10 @@ void   bode_snap_restore(bode_eng *e, const bode_snap *s);
 //CH2 switches only when the point clips (up) or its level drops below the floor (down: the predicted peak on the next
 //range under 30 % of full scale, half the fresh sweep's 60 %), and that point's entry follows. The first sweep after a
 //settings change, a sweep after a cancelled one that left the plan incomplete, and a thru sweep range from scratch. A
-//plan is not kept (the next sweep ranges from scratch) when CH1 clips, when CH1 is dead (flat or without a tone), or
-//when the first point's CH1 would fit a finer range under 60 % of full scale (the pre-scan was fooled, e.g. by the
-//0x153A first-record artefact: bench 2026-10-20 12:05, sweep 1). The header's switch count shows the effect.
+//plan is not kept (the next sweep ranges from scratch) when CH1 clips, when CH1 is dead (flat or without a tone), when
+//the first point's CH1 would fit a finer range under 60 % of full scale (the pre-scan was fooled, e.g. by the 0x153A
+//first-record artefact: bench 2026-10-20 12:05, sweep 1), or (fw 0.2.90) when a point below 2 MHz has CH1 under 20
+//codes on a range with a finer one left. The header's switch count shows the effect.
 typedef struct
 {
   uint8  have;                //measured with the plan's settings
@@ -303,6 +304,8 @@ struct bode_eng
   uint8     retake;                           //fw 0.2.87: this capture is the retake of a suspect record
   uint32    msettle;                          //its settle time (ms), for the retake
   uint8     clip_again;                       //fw 0.2.89: the planned point's clip was measured again
+  uint8     vclip;                            //fw 0.2.90: the pre-scan check: bit c, channel c's clip measured again
+  uint8     vbad[2];                          //fw 0.2.90: per channel, the ranges that clipped in the check
 
   bode_thru thru;
 
