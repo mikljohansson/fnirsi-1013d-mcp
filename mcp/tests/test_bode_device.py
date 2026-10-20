@@ -97,7 +97,7 @@ def test_codecs_match_the_firmware_vectors():
     assert P.ReadBodeReq().pack() == frame_payload("req_read_bode")
     assert P.REQUEST_SIZES[P.Cmd.BODE_CTRL] == 16 and P.REQUEST_SIZES[P.Cmd.READ_BODE] == 8
     assert P.CMD_CAP[P.Cmd.BODE_CTRL] == P.CMD_CAP[P.Cmd.READ_BODE] == P.Caps.DECIM
-    assert P.BodeHeader.size() == 32 and P.BodeRow.size() == 20 and P.BodeCtrlResp.size() == 40
+    assert P.BodeHeader.size() == 32 and P.BodeRow.size() == 20 and P.BodeCtrlResp.size() == 48
     assert P.BODE_MAX_ROWS == 3326 and P.Features.BODE == 0x40 and P.DisplayMode.BODE == 5
     assert P.BodeCtrlReq.make(P.BODE_RUN, background=False).flags == P.BODE_F_NO_BACKGROUND
 

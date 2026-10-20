@@ -69,6 +69,7 @@ typedef struct
   uint32        uv_q8[2];     //uV per code x 256 at the BNC
   uint8         fir;          //the FIR was active in this capture
   uint8         check;        //BODE_CHK_* of this capture (fw 0.2.83; no state of an earlier capture)
+  uint8         triggered;    //fw 0.2.91: the capture started on a trigger (0: on the FPGA's auto time-out or FORCE)
 } bode_cap;
 
 typedef struct
@@ -85,7 +86,8 @@ typedef struct
   void   (*gen)(void *ctx, uint32 phase_inc, int on);                      //generator on at the increment (duty 50 %) or off
   void   (*channel)(void *ctx, int c, int range, int32 dcoffset);          //enable, DC, range 0..5, offset
   void   (*chan_info)(void *ctx, int c, int range, bode_chinfo *ci);
-  int    (*arm)(void *ctx, const bode_plan *pp, uint32 total);             //0 ok, else the FPGA was not ready
+  int    (*arm)(void *ctx, const bode_plan *pp, uint32 total, uint8 level);  //0 ok, else the FPGA was not ready;
+                                                                           //fw 0.2.91: CH1 rising at this code
   int    (*poll)(void *ctx);                                               //1 done, 0 running, < 0 the host took over
   void   (*force)(void *ctx);
   int    (*read)(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap);  //0 ok
@@ -262,6 +264,9 @@ typedef struct
 } bode_rplan;
 
 int    bode_plan_reused(const bode_eng *e);                   //the latest sweep started from the range plan
+//fw 0.2.91: the latest sweep's captures, those that ended on the time-out (no trigger), and the records taken again
+//for CH1 leak (a joined record) or for another reason (suspect, time-out); BODE_CTRL bytes 40..47
+void   bode_capture_stats(const bode_eng *e, uint16 *caps, uint16 *timeouts, uint16 *leak, uint16 *other);
 
 //Sizes for the target's static instance
 struct bode_eng
@@ -306,6 +311,9 @@ struct bode_eng
   uint8     clip_again;                       //fw 0.2.89: the planned point's clip was measured again
   uint8     vclip;                            //fw 0.2.90: the pre-scan check: bit c, channel c's clip measured again
   uint8     vbad[2];                          //fw 0.2.90: per channel, the ranges that clipped in the check
+  int32     v1_uv;                            //fw 0.2.91: CH1's DC level as last measured (the trigger level)
+  uint8     have_v1;
+  uint16    n_caps, n_timeout, n_leak, n_retake;   //fw 0.2.91: the latest sweep's capture statistics
 
   bode_thru thru;
 
@@ -315,6 +323,7 @@ struct bode_eng
   uint8     rp_set;                           //rp_cfg holds a plan's settings (entries may be incomplete)
   uint8     rp_hold;                          //CH2's range in Hold
   uint8     reuse;                            //this sweep started from the plan
+  uint8     rp_bad_down;                      //fw 0.2.91: CH2 ranges a step down failed into in the plan's sweeps
 
   int32     work[BODE_MAX_RECORD];
 };
