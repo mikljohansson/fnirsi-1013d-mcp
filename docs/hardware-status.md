@@ -1112,4 +1112,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   ui_busy 0, ui_yields 2; owner: "all the way to Spectrum with no menu open". The owner also decided to drop the
   "Host command: menu closed" note (fw-yield2). Remaining section 53 checks: the wizard mid-measurement refusal (detail 3),
   the generator keypad half-typed, the file-save refusal (detail 4): with the next walk-through.
+- 2026-10-20 10:33-10:38: fw 0.2.81 (fw-cap2: band training at codes 120..140, two captures per stage and point, widest clean
+  run; repeat warning GET_HEALTH 106 bit 5) merged, pinned backups/fw-0.2.81_50f983bf.bin (sha256
+  50f983bf0ee636249a13641b0f6d5f4f3c0ef98bc600dab08ce24ab656a8b363), loaded 10:36. First CAL_PROBE mode 1: NOISE on both
+  channels before any measurement: the generator was on (the owner's Spectrum AUTO SET at about 10:25 had switched it on) with
+  CH1 on the post. Generator off, second probe: the training ran and chose 0x08E3 (event 23 b = 0x08E3 for both channels, the
+  predicted CH1 A3 B4 / CH2 A3 B4), then the zero step failed at range 4 (0.2 V/div) with RESPONSE at the coarse hi point on
+  both channels: the probe tips are still on the RC filter, whose node floats with the generator off. Owner asked to take the
+  probes off, then the probe again and the wizard.
 
