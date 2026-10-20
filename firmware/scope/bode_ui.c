@@ -565,7 +565,7 @@ const char *const bu_warn[BU_W_COUNT] =
   "CH1 level low: the DUT loads the 1 kOhm source",
   "Thru does not match this sweep: measure again",
   "DC level beyond the offset range: AC-couple DUT",
-  "No response: CH2 tip on the DUT output?",
+  "Auto set: no response: CH2 tip on the DUT output?",
   "Trigger was EXT (the generator's pin): now CH1",
   "Roll off for the frequency response",
   "No corner from 100 Hz to 10 MHz: span kept",
@@ -575,6 +575,10 @@ const char *const bu_warn[BU_W_COUNT] =
   "Leave the waveform viewer first",
   "Sweep table not saved: check the SD card",
   "ADC readout fault: see Diagnostics",
+  "Auto set: no consistent response. Check wiring",
+  "Auto set: CH1 level low: CH1 tip on the DUT input?",
+  "Auto set: peak not confirmed: sweep by hand",
+  "CH1 level low above 2 MHz: the x1 probe rolls off",
 };
 
 const char *const bu_instruction[2] =
@@ -594,7 +598,6 @@ char *bu_warn_floor(char *t, int n)
   return bu_put(bu_uint(t, (uint32)n), (n > 1) ? " points near the floor: shown grey" : " point near the floor: shown grey");
 }
 
-const char *const bu_single_running = "running, then STOP";
 
 const char *const bu_acq_chip[2] = { "Set by", "the sweep" };
 const char *const bu_acq_note    = "The sweep sets the sample rate for each point";
@@ -614,4 +617,130 @@ char *bu_estimate_text(char *t, uint32 ms)
     return bu_put(bu_uint(t, s), " s");
 
   return bu_put(bu_uint(t, (s + 30) / 60), " min");
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//fw 0.2.84: the Single sweep button, CH1 low's cause, AUTO SET's verdict
+
+int bu_single_button(int running, int single, int autoset, int done, int count, uint32 est_ms, const char **label,
+                     char *value)
+{
+  if(running && autoset)
+  {
+    *label = "Single sweep";
+    bu_put(value, "during AUTO SET");
+    return BU_SINGLE_GREY;
+  }
+
+  if(running && single)
+  {
+    *label = "Stop sweep";
+    bu_put(bu_uint(bu_put(bu_uint(value, (uint32)((done < 0) ? 0 : done)), " / "), (uint32)((count < 0) ? 0 : count)), "");
+    return BU_SINGLE_STOP;
+  }
+
+  *label = "Single sweep";
+
+  if(running)
+  {
+    bu_put(value, "STOP after this sweep");
+    return BU_SINGLE_LAST;
+  }
+
+  bu_estimate_text(value, est_ms);
+  return BU_SINGLE_START;
+}
+
+int bu_warn_ch1_low(char *t, const uint8 *r1, const uint64 *f_mhz, const uint16 *flags, const uint8 *have, int n)
+{
+  static const char *const vpd[BU_CH1_FINE_RANGE] = { "5", "2.5", "1" };
+  int i, coarse = BU_CH1_FINE_RANGE, dut = 0, probe = 0;
+
+  for(i = 0; i < n; i++)
+  {
+    if(!have[i] || !(flags[i] & BODE_F_CH1_LOW))
+      continue;
+
+    if(r1[i] < BU_CH1_FINE_RANGE)
+    {
+      if(r1[i] < coarse)
+        coarse = r1[i];
+    }
+    else if(f_mhz[i] > BU_PROBE_ROLLOFF_MHZ)
+      probe = 1;
+    else
+      dut = 1;
+  }
+
+  *t = 0;
+
+  if(coarse < BU_CH1_FINE_RANGE)
+    bu_put(bu_put(bu_put(t, "CH1 level low at "), vpd[coarse]), " V/div: sweep again");
+  else if(dut)
+    bu_put(t, bu_warn[BU_W_CH1_LOW]);
+  else if(probe)
+    bu_put(t, bu_warn[BU_W_CH1_LOW_HF]);
+  else
+    return 0;
+
+  return 1;
+}
+
+int bu_auto_bounce(const uint8 *r2, const uint8 *have, int n, int switches)
+{
+  int i, last = -1, dir = 0, rev = 0;
+
+  for(i = 0; i < n; i++)
+  {
+    int d;
+
+    if(!have[i])
+      continue;
+
+    if(last >= 0)
+    {
+      d = (r2[i] > r2[last]) ? 1 : (r2[i] < r2[last]) ? -1 : 0;
+
+      if(d)
+      {
+        if(dir && (d != dir))
+          rev++;
+        dir = d;
+      }
+    }
+
+    last = i;
+  }
+
+  return (rev >= 2) || (rev && (switches >= BU_AUTO_SWITCHES));
+}
+
+int bu_auto_verdict(int r, const bode_autospan *a, int pass, int32 prev_ref, int bounce)
+{
+  if(bounce)
+    return BU_W_AUTO_INCONSISTENT;
+
+  switch(r)
+  {
+    case BODE_AS_NO_RESPONSE: return BU_W_NO_RESPONSE;
+    case BODE_AS_CH1_LOW:     return BU_W_AUTO_CH1;
+    case BODE_AS_INCONSISTENT: return BU_W_AUTO_INCONSISTENT;
+    case BODE_AS_UNCONFIRMED: return BU_W_AUTO_PEAK;
+    default:                  break;
+  }
+
+  //A finer pass around the band the previous one found: no band there, or its peak read much lower, is inconsistent
+  if(pass > 1)
+  {
+    if(r != BODE_AS_SPAN)
+      return BU_W_AUTO_INCONSISTENT;
+    if(a->ref_mdb < prev_ref - BU_AUTO_REF_DROP_MDB)
+      return BU_W_AUTO_INCONSISTENT;
+  }
+
+  //The passes' budget used up without the band resolving
+  if((r == BODE_AS_SPAN) && a->coarse && (pass >= BODE_AUTO_PASSES))
+    return BU_W_AUTO_PEAK;
+
+  return -1;
 }

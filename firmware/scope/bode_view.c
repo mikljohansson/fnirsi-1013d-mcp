@@ -82,9 +82,11 @@ typedef struct
   uint32 drawn_ms;
   uint8  note;                      //BU_W_* of a note, NOTE_NONE
   uint32 note_ms;
-  uint8  no_response;               //AUTO SET found only the floor (until the next sweep)
+  uint8  auto_fail;                 //fw 0.2.84: AUTO SET's failure warning (BU_W_*, NOTE_NONE), until the next sweep
+  int32  as_ref;                    //fw 0.2.84: the previous pass's reference level (bode_autospan.ref_mdb)
 
   uint32 gen_shown;                 //fw 0.2.71: the tone the generator chip shows (Hz), 0 = the user's generator
+  uint8  gen_taken;                 //fw 0.2.84: a sweep has driven the pin since the user's generator was last on it
 
   //AUTO SET
   uint8  autoset;                   //the pass running: 1 the overview, 2..BODE_AUTO_PASSES the sharp-tank passes; 0 none
@@ -269,11 +271,12 @@ void bode_view_open(void)
 
   bv.active      = 1;
   bv.gen_shown   = 0;
+  bv.gen_taken   = 0;
   bv.single      = 0;
   bv.autoset     = 0;
   bv.was_running = 0;
   bv.last_run    = 0;
-  bv.no_response = 0;
+  bv.auto_fail   = NOTE_NONE;
   bv.cur[0] = bv.cur[1] = -1;
   bv.dirty       = 1;
   bv.drawn_ms    = timer0ticks - 1000;
@@ -360,7 +363,7 @@ static void bv_start_cfg(const bode_cfg *c, int single, int thru)
     pc_hal_ui_set_run(1);
 
   bv.last_run    = 1;
-  bv.no_response = 0;
+  bv.auto_fail   = NOTE_NONE;
 
   if(bode_start(e, c, thru, (r2 > 5) ? 5 : r2))
   {
@@ -368,7 +371,10 @@ static void bv_start_cfg(const bode_cfg *c, int single, int thru)
     bv.last_run = 0;
   }
   else
+  {
     bv.was_running = 1;
+    bv.gen_taken   = 1;
+  }
 
   bv.single = (uint8)(single || thru);
   bv.dirty  = 1;
@@ -439,6 +445,7 @@ static uint64   p_f[BODE_MAX_POINTS];
 static int32    p_m[BODE_MAX_POINTS], p_p[BODE_MAX_POINTS], p_x[BODE_MAX_POINTS];
 static uint8    p_ok[BODE_MAX_POINTS], p_have[BODE_MAX_POINTS], p_vis[BODE_MAX_POINTS];
 static uint16   p_flags[BODE_MAX_POINTS];
+static uint8    p_r1[BODE_MAX_POINTS], p_r2[BODE_MAX_POINTS];
 
 static void gather(void);
 
@@ -485,6 +492,8 @@ static void gather(void)
     p_m[i] = p_have[i] ? p.h_mdb : 0;
     p_p[i] = p_have[i] ? p.h_mdeg : 0;
     p_flags[i] = p_have[i] ? p.flags : 0;
+    p_r1[i] = p_have[i] ? p.r1 : 0;
+    p_r2[i] = p_have[i] ? p.r2 : 0;
     p_ok[i] = (uint8)(p_have[i] && !(p.flags & BODE_F_BAD));
   }
 }
@@ -495,7 +504,7 @@ static void bv_auto_finish(void)
   bode_eng *e = bode_engine();
   bode_autospan a;
   bode_cfg zc;
-  int r;
+  int r, fail;
 
   //Stopped (STOP, the host): cancelled, the previous table back. Failed: the settings are kept, the pass's points and
   //its error's warning show.
@@ -521,9 +530,15 @@ static void bv_auto_finish(void)
     ov_take();
   r = bode_auto_span(p_f, p_m, p_p, p_flags, p_have, n_pts, bv.start_i, bv.stop_i, &a);
 
+  //fw 0.2.84 (owner 2026-10-20 11:23): a pass that is not consistent (CH2 ranging bounced, absurd points, a peak not
+  //confirmed, a finer pass that contradicts the one before, the passes used up) ends AUTO SET in STOP with the
+  //settings kept and a warning that says what to check; never a loop of sweeps
+  fail = bu_auto_verdict(r, &a, bv.autoset, bv.as_ref, bu_auto_bounce(p_r2, p_have, n_pts, bode_switches(e)));
+  bv.as_ref = a.ref_mdb;
+
   //fw 0.2.71, the sharp-tank rule: a band narrower than two point spacings is measured again around f0 (at most
   //BODE_AUTO_PASSES passes) before the span is set
-  if((r == BODE_AS_SPAN) && bode_auto_zoom(&a, bv.autoset, &zc))
+  if((fail < 0) && (r == BODE_AS_SPAN) && bode_auto_zoom(&a, bv.autoset, &zc))
   {
     bv.autoset++;
     bv_start_cfg(&zc, 1, 0);
@@ -535,9 +550,9 @@ static void bv_auto_finish(void)
   ov_commit();
   bode_thru_apply(e, bv.as_thru);
 
-  if(r == BODE_AS_NO_RESPONSE)
+  if(fail >= 0)
   {
-    bv.no_response = 1;
+    bv.auto_fail = (uint8)fail;
     if(scopesettings.runstate)
       pc_hal_ui_set_run(0);
     return;
@@ -557,6 +572,14 @@ static void bv_auto_finish(void)
   if(!scopesettings.runstate)
     pc_hal_ui_set_run(1);
   bv_start(0, 0);
+}
+
+//fw 0.2.84: the user's generator (fpgasettings, which the engine never writes) back on the calibration pin
+static void bv_gen_restore(void)
+{
+  bv.gen_taken = 0;
+  fpga_on_off_generator();          //frequency, duty and on, or off
+  bv.dirty = 1;
 }
 
 void bode_view_service(void)
@@ -630,6 +653,11 @@ void bode_view_service(void)
   }
 
   bv.last_run = scopesettings.runstate;
+
+  //fw 0.2.84 (bode-ui.md 7): no sweep runs any more (done, stopped, failed, AUTO SET ended or cancelled): the user's
+  //generator goes back on the pin, so the pin does what the generator chip shows (the engine leaves it off)
+  if(bv.gen_taken && (bode_state(e) != BODE_ST_RUNNING))
+    bv_gen_restore();
 
   if(bv.auto_shown != (uint8)bode_view_auto_running())
     bv_draw_bar_button();
@@ -1026,8 +1054,8 @@ static const char *warning(char *buf)
   if(bode_is_thru_sweep(e) && (st == BODE_ST_RUNNING))
     return bu_warn[BU_W_THRU_SWEEP];
 
-  if(bv.no_response)
-    return bu_warn[BU_W_NO_RESPONSE];
+  if(bv.auto_fail != NOTE_NONE)
+    return bu_warn[bv.auto_fail];
 
   //What a tap just did (Auto set cancelled, nothing to save, the file not written, no corner found)
   if((bv.note == BU_W_AUTO_CANCEL) || (bv.note == BU_W_NOTHING_SAVED) || (bv.note == BU_W_SAVE_FAILED) ||
@@ -1047,8 +1075,9 @@ static const char *warning(char *buf)
   if(clip2 && (bv.ch2 == BODE_CH2_HOLD))
     return bu_warn[BU_W_CH2_OVER];
 
-  if(ch1low)
-    return bu_warn[BU_W_CH1_LOW];
+  //fw 0.2.84: named by its cause (a coarse range, the DUT, the probe's roll-off above 2 MHz)
+  if(ch1low && bu_warn_ch1_low(buf, p_r1, p_f, p_flags, p_have, n_pts))
+    return buf;
 
   if(unsettled)
     return bu_warn_unsettled(buf, unsettled), buf;
@@ -1780,6 +1809,7 @@ void bode_view_save(void)
 #define ROW_VALUE2        3
 #define ROW_ACTION        4
 #define ROW_ACTION2       5           //an action with a grey second line
+#define ROW_SINGLE        6           //fw 0.2.84: Single sweep, in the RUN/STOP colours (state BU_SINGLE_* in `on`)
 
 #define FOLD_DISPLAY      0
 #define FOLD_SWEEP        1
@@ -1883,6 +1913,17 @@ void bode_ctrl_draw(void)
   grid_button(0);
 }
 
+//fw 0.2.84: the Single sweep button's state, label and second line (bode_ui.h bu_single_button)
+static int single_state(const char **label, char *value)
+{
+  bode_eng *e = bode_engine();
+  bode_cfg c;
+
+  cfg_now(&c);
+  return bu_single_button(bode_state(e) == BODE_ST_RUNNING, bv.single, bv.autoset, bode_done_count(e), bode_count(e),
+                          bode_estimate_ms(&c), label, value);
+}
+
 static bv_row *add(bv_fold *d, int kind, const char *label)
 {
   bv_row *r = &d->r[d->n++];
@@ -1928,17 +1969,8 @@ static void build(bv_fold *d)
     fmt_str(add(d, ROW_VALUE, "Settle")->value, settle_names[bv.settle % BODE_SETTLE_COUNT]);
     fmt_str(add(d, ROW_VALUE, "CH2 range")->value, ch2_names[bv.ch2 & 1]);
     sep = d->n;
-    r = add(d, ROW_ACTION2, "Single sweep");
-
-    if((bode_state(e) == BODE_ST_RUNNING) && bv.single && !bv.autoset)
-      fmt_str(r->value, bu_single_running);
-    else
-    {
-      bode_cfg c;
-
-      cfg_now(&c);
-      bu_estimate_text(r->value, bode_estimate_ms(&c));
-    }
+    r = add(d, ROW_SINGLE, "");
+    r->on = (uint8)single_state(&r->label, r->value);
   }
   else if(d->id == FOLD_TRACE)
   {
@@ -2029,6 +2061,18 @@ static void row_draw(const bv_row *r, uint32 rx, uint32 ry, uint32 rw)
       text_at(&font_3, rx + UI_FOLD_TWOWAY_IN, ty, r->label);
       display_set_fg_color(PALEYELLOW_COLOR);
       text_r(&font_3, rx + rw - UI_FOLD_TWOWAY_IN, ty, r->value);
+      break;
+
+    case ROW_SINGLE:
+      //Green while a tap starts (or ends after) a sweep, red while a tap stops one, grey during AUTO SET (RUN/STOP's rule)
+      if(r->on != BU_SINGLE_GREY)
+      {
+        display_set_fg_color((r->on == BU_SINGLE_STOP) ? RED_COLOR : GREEN_COLOR);
+        display_fill_rounded_rect(rx, ry, rw, UI_FOLD_ROW_H, 3);
+      }
+      display_set_fg_color((r->on == BU_SINGLE_STOP) ? WHITE_COLOR : (r->on == BU_SINGLE_GREY) ? NOTE_COLOR : BLACK_COLOR);
+      text_c(&font_3, rx + rw / 2, ry + 5, r->label);
+      text_c(&font_2, rx + rw / 2, ry + 25, r->value);
       break;
 
     case ROW_ACTION2:
@@ -2124,14 +2168,34 @@ static int fold_tap(bv_fold *d, int row, int dir)
       case 4: bv.ch2 ^= 1;                                                 return 0;
 
       default:
-        //Single sweep: when stopped one sweep; while RUN repeats, the sweep in progress becomes the last one
-        if(bv.autoset)
-          return 1;
-        if(bode_state(e) == BODE_ST_RUNNING)
-          bv.single = 1;
-        else
-          bv_start(1, 0);
-        return 1;
+        //Single sweep (fw 0.2.84, owner 2026-10-19 21:32): the fold-out stays open. Stopped: one sweep; while RUN
+        //repeats the sweep in progress becomes the last one; during a single sweep STOP (it ends after the capture in
+        //progress, bode_view_service); during AUTO SET nothing
+        {
+          const char *l;
+          char v[24];
+
+          switch(single_state(&l, v))
+          {
+            case BU_SINGLE_START:
+              bv_start(1, 0);
+              break;
+
+            case BU_SINGLE_LAST:
+              bv.single = 1;
+              break;
+
+            case BU_SINGLE_STOP:
+              bv.single = 1;
+              if(scopesettings.runstate)
+                pc_hal_ui_set_run(0);
+              break;
+
+            default:
+              break;
+          }
+        }
+        return 0;
     }
   }
 
@@ -2151,6 +2215,67 @@ static int fold_tap(bv_fold *d, int row, int dir)
       bode_thru_clear(e);
       return 1;
   }
+}
+
+//fw 0.2.84: while a fold-out is open the sweep goes on: the engine steps, the plot redraws around the panel (at most
+//every REDRAW_MS) and the Single sweep row follows the sweep. Returns 0 when the view has closed.
+static int str_same(const char *a, const char *b)
+{
+  while(*a && (*a == *b))
+    a++, b++;
+  return *a == *b;
+}
+
+static void copy_tmp(uint32 x, uint32 y, uint32 w, uint32 h)
+{
+  if(w && h)
+    display_copy_rect_to_screen(x, y, w, h);
+}
+
+static int fold_service(bv_fold *d)
+{
+  DISPLAYDATA save;
+  const ui_fold *f = &d->f;
+  uint32 right = f->x + f->w;
+
+  bode_view_service();
+
+  if(!bv.active)
+    return 0;
+
+  if(bv.dirty && ((timer0ticks - bv.drawn_ms) >= REDRAW_MS))
+  {
+    save = displaydata;
+
+    //Left of the panel, then above, below and right of it (the trace area is x 2..729, y 48..479)
+    draw_all_rect(2, 48, f->x - 2, 432);
+    display_set_source_buffer(displaybuffertmp);
+    copy_tmp(f->x, 48, 730 - f->x, f->y - 48);
+    copy_tmp(f->x, f->y + f->h, 730 - f->x, 480 - (f->y + f->h));
+    if(right < 730)
+      copy_tmp(right, f->y, 730 - right, f->h);
+
+    displaydata = save;
+    display_set_screen_buffer((uint16 *)maindisplaybuffer);
+  }
+
+  if(d->id == FOLD_SWEEP)
+  {
+    bv_row *r = &d->r[d->n - 1];
+    const char *l;
+    char v[24];
+    int  st = single_state(&l, v);
+
+    if((st != r->on) || (l != r->label) || !str_same(v, r->value))
+    {
+      r->on    = (uint8)st;
+      r->label = l;
+      fmt_str(r->value, v);
+      row_draw(r, ui_fold_row_x(f), ui_fold_row_y(f, d->n - 1), ui_fold_row_w(f));
+    }
+  }
+
+  return 1;
 }
 
 static void fold_run(int id, void (*button)(int))
@@ -2181,7 +2306,11 @@ static void fold_run(int id, void (*button)(int))
       break;
 
     if(!havetouch)
+    {
+      if(!fold_service(&d))
+        break;
       continue;
+    }
 
     hit = ui_fold_hit(&d.f, xtouch, ytouch);
 
