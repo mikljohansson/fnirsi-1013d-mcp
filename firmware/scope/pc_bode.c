@@ -174,6 +174,31 @@ static void bh_force(void *ctx)
   pc_hal_force();
 }
 
+//fw 0.2.83: the capture self-check of this capture (FPGA 0x153A+, cap_hw.c). 0x36 is read after a legacy 200 MSa/s
+//capture only, as after the host's (pc_cmds.c pc_enc_rearm: the counters compare a core's successive words, the
+//full-rate case fw-cap validated); a decimated capture has the repeat watch only. Never a flag of an earlier capture.
+static uint8 bh_check(void)
+{
+  pc_hw_cap cs;
+  int now = 0;
+
+  if(!(pc_glue_caps() & PC_CAP_CAPTURE_STAGES))
+    return BODE_CHK_NONE;
+
+  if(!bh_wide && (bh_divider == 0))
+  {
+    pc_hal_cap_check();
+    now = 1;
+  }
+
+  pc_hal_cap_state(&cs);
+
+  if((cs.flags & PC_CAPF_REPEAT) || (now && (cs.flags & PC_CAPF_FLAGGED)))
+    return BODE_CHK_FAULT;
+
+  return BODE_CHK_CLEAN;
+}
+
 static int bh_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
 {
   uint32 ring = pc_glue_ring_words(), addr, start, i;
@@ -223,11 +248,11 @@ static int bh_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
 
     cap->uv_q8[c]      = bh_uv_q8(&h, h.range);
     cap->s[c].volt_mdb = bode_volt_mdb(cap->uv_q8[c], h.probe);
-    cap->s[c].clipped  = (uint8)(h.overload != 0);
     cap->zero_c100[c]  = 12800 - (int32)(((int64)h.dcoffset * 10000) / dcsv);
   }
 
-  cap->fir = dc.fir;
+  cap->fir   = dc.fir;
+  cap->check = bh_check();
   return 0;
 }
 

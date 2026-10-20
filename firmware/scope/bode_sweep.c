@@ -458,11 +458,16 @@ static void on_prescan(bode_eng *e, const bode_meas *m)
   measure(e, PH_VERIFY, pp, settle_periods[e->cfg.settle] * 10);
 }
 
-//Range 0 (5 V/div) and still clipped, the fundamental under CH1_LOW (20 codes); CH2 only when it is not a flat record (a
-//DC overload has its own rule)
+//Without a capture self-check (BODE_CHK_NONE): range 0 (5 V/div) and the record still at a rail, the fundamental under
+//CH1_LOW (20 codes); CH2 only when it is not a flat record (a DC overload has its own rule). With a self-check its
+//verdict decides (bode_step), never the clip: a clean check with a small signal is ch1_low, not a fault (bench
+//2026-10-20 10:52)
 static int readout_fault(bode_eng *e, const bode_meas *m)
 {
   int c;
+
+  if(e->last_check != BODE_CHK_NONE)
+    return 0;
 
   for(c = 0; c < 2; c++)
     if((e->range[c] == 0) && m->c[c].clipped && (m->c[c].code_mdb < CH1_LOW_MDB) && !((c == 1) && flat2(m, 0)))
@@ -484,9 +489,9 @@ static void on_verify(bode_eng *e, const bode_meas *m)
     return;
   }
 
-  //fw 0.2.71 (owner's fail-fast rule): 5 V/div (the last range down) still clipping with a fundamental under 20 codes
-  //cannot be the post's 3.1 Vpp (about 10 codes there): the readout returns rail values. The sweep ends rather than
-  //producing a flagged table (bench 2026-10-19 20:51, FPGA 0x1539's A-core fault).
+  //fw 0.2.71 (owner's fail-fast rule), bitstreams without the self-check: 5 V/div (the last range down) still clipping
+  //with a fundamental under 20 codes cannot be the post's 3.1 Vpp (about 10 codes there): the readout returns rail
+  //values. The sweep ends rather than producing a flagged table (bench 2026-10-19 20:51, FPGA 0x1539's A-core fault).
   if(readout_fault(e, m))
   {
     finish(e, BODE_ST_ERROR, BODE_ERR_READOUT);
@@ -824,7 +829,16 @@ int bode_step(bode_eng *e)
       return 1;
     }
 
-    e->last_fir = cap.fir;
+    e->last_fir   = cap.fir;
+    e->last_check = cap.check;
+
+    //fw 0.2.83: the capture self-check flagged this capture (or a core keeps failing): the data is not the signal,
+    //whatever the phase (fail fast, as the 0.2.71 rule)
+    if(cap.check == BODE_CHK_FAULT)
+    {
+      finish(e, BODE_ST_ERROR, BODE_ERR_READOUT);
+      return 1;
+    }
 
     if(e->mbg)
       on_bg(e, &cap);

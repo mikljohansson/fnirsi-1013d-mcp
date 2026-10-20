@@ -715,7 +715,8 @@ void bode_measure(const bode_plan *pp, const bode_dft *d, const bode_scale s[2],
 
     o->centre_c100 = cen;
     o->ac_c100     = ((hi - cen) > (cen - lo)) ? hi - cen : cen - lo;
-    o->clipped     = (uint8)(s[c].clipped || (lo < 50) || (hi > 25450));
+    //fw 0.2.83: from this record only (bench 2026-10-20 10:52: the readout's sticky ADoverload leaked earlier captures in)
+    o->clipped     = (uint8)((lo < 50) || (hi > 25450));
     o->mean_uv     = (int32)(((int64)(cen - zero_code_c100[c]) * (int64)uv_q8[c]) / (256 * 100));
 
     //Halves

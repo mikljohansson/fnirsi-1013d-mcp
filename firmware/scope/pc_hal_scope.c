@@ -529,11 +529,20 @@ int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t
   scopesettings.samplecount = total_samples;
   pc_seq_trace_replaced();
 
+  //fw 0.2.83: ADoverload (sticky in fpga_read_adc_data) describes this readout only: the host capture's flags
+  //(pc_capture_finish, READ_TRACE meta, GET_STATUS) and the Bode engine's readouts never carry an earlier one (bench
+  //2026-10-20 10:52). The Scope view clears it in its own passes as before.
   if(ch_mask & 0x01)
+  {
+    scopesettings.channel1.ADoverload = 0;
     fpga_read_sample_data(&scopesettings.channel1, start_word);
+  }
 
   if(ch_mask & 0x02)
+  {
+    scopesettings.channel2.ADoverload = 0;
     fpga_read_sample_data(&scopesettings.channel2, start_word);
+  }
 
   //The spectrum view shows host captures too (never dropped as untriggered)
   spectrum_capture_info(1);
