@@ -1239,4 +1239,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   unsettled 1..3, spliced 3..6, ch2_small 1..8, falling as the plan converges; the host flags 1 spliced), magnitude at 10.0 kHz
   -2.84 .. -2.86 dB (one -2.69) every time. Per-point rows of three further sweeps in scratchpad device_rc_rows_1230.json for
   fw-eng.
+- 2026-10-20 12:32: fw-eng2's raw-cell script (firmware/tools/bode_cells.py, 9ca907e) on the RC, fw 0.2.88: 4 cells x 3 trigger
+  variants x 8 captures, backups/bode/cells_1235.npz. The host-style and the immediate-arm variants (a real trigger) are stable
+  at every cell (21.55 kHz -6.731..-6.744 dB, leak -62..-73 dB; 31.6 kHz -9.233..-9.250 dB), the auto-time-out variant, which is
+  how the engine arms, is unstable: 6 of 8 captures at 21.55 kHz and 5 of 8 at 31.6 kHz with leakage -3..-36 dB, unsettled, the
+  magnitude wandering by 0.6 dB; the bad records start at ordinary codes (no rails), so the record geometry relative to the
+  filter warm-up is the cause, not garbage words. That is the knee instability and the spurious clips that jumbled the plan.
+  fw-eng2 builds the fix (lead-in skip, triggered arm or a longer wait, planned clip retaken before stepping up).
 
