@@ -24,10 +24,8 @@ The screen lists what the firmware found, one line per check:
 
 | Line | What it means |
 |---|---|
-| FPGA recognised: AL3A10 bitstream 0x153A: ... | The FPGA bitstream and the features it has |
-| FPGA stock bitstream 0x1432: no generator, no filter; gain calibration not possible (amber) | The stock bitstream. The scope works, but without the generator, the filters and the gain steps of the calibration |
-| FPGA bitstream ...: not recognised; the scope runs with the stock limits (amber) | An unknown bitstream. The firmware uses only what the stock bitstream has |
-| FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x153B (amber) | An older bitstream with a known fault. The firmware works around it; flash the recommended bitstream |
+| FPGA recognised: AL3A10 bitstream 0x153B: ... | The FPGA bitstream and the features it has |
+| {{BANNER_TEXT}} | The FPGA holds another bitstream than the one this firmware is built for, older or newer. The banner names the one needed; flash it as the [install page](install.md) says. {{BANNER_REACHABLE}} |
 | Settings loaded from the card. | The saved settings were read |
 | No saved settings on the card: defaults used. | A new card, or the settings sector could not be read |
 | Calibration missing: readings may be several % off. (amber) | No calibration on the card |
@@ -38,8 +36,7 @@ Below the checks the screen says what calibrating needs:
 
 - Calibrate after the scope has been on for 5 minutes.
 - The zero step takes 8 seconds and needs no probes.
-- The gain step needs a probe on the calibration post, one channel at a time. On the stock bitstream it says instead
-  that this bitstream keeps the gains.
+- The gain step needs a probe on the calibration post, one channel at a time.
 
 Two buttons:
 
