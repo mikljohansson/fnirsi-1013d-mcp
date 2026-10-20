@@ -1383,3 +1383,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   **persisted to the card** with `--persist-only`: window [16, 8192), backup backups/sdcard/sd_750-2262_20261020-192228.bin (sectors 750..2261 read twice), 1512
   sectors written in 2.97 s, read back identical, eGON.EXE length 774144 checksum 0x5D198C86 verified. The card held 0.2.25
   (397,312 B) since 2026-10-18. Power cycle with the owner next: the first boot of an image over 776 sectors from the card.
+- 2026-10-20 19:24: **cold boot of fw 0.2.101 from the card works** (owner): the first image over 776 sectors (1512) loaded
+  by Atlan4's v0.8 bootloader on this unit; the read-timeout risk of section 67 did not bite. Owner: the Firmware tile's
+  "Running 0.2.101, the image the card starts" is clutter; fw 0.2.102 says just "Running 0.2.102" in the OK case (my
+  edit, test_ui_diag updated). 19:27: 0.2.102 pinned backups/fw-0.2.102_977b321b.bin (sha256
+  977b321ba27d2affc887ef7f82e602642780fb4c6f69919d021caf8044557416), FEL-loaded, persisted (checksum 0x34784D04 verified;
+  the tool refuses to persist an image that is not the running one, so the load came first). Power cycle next, then the
+  all-green Status page screenshot.
