@@ -2,8 +2,9 @@
 // test_spec_zoom.c - the Spectrum's zoom ladder (spec_ladder.c, fw 0.2.77; docs/ui-guidelines.md section 2, "Span
 // drives the sample rate"), mirroring test_acq_view.c for the Scope: a model of the view (cell, rate, run state) driven
 // by taps and pans as spectrum.c drives it. At every FFT length: walks to both ends and back from every span and many
-// centres, random tap / pan sequences and hand-picked rates, asserting after every step that the rate is the one the
-// rule gives for the cell (an independent reference written here), that the ends are plain stops the other direction
+// centres, random tap / pan sequences and hand-picked rates, asserting after every zoom step that the rate is the one
+// the rule gives for the cell (an independent reference written here), after every pan that the rate is unchanged and
+// the cell inside the current axis (fw 0.2.81, owner 2026-10-20), that the ends are plain stops the other direction
 // leaves at once, and that a stopped record keeps its rate. Plus the bins that draw a cell, Auto's cell and the numbers
 // of the ends that firmware/AGENTS.md section 52 quotes.
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -59,7 +60,7 @@ typedef struct
   int      log2n;
 } model;
 
-//After a zoom or pan step with the rate free: the ladder's rate for the cell (spectrum.c spec_cell_apply)
+//After a zoom step with the rate free: the ladder's rate for the cell (spectrum.c spec_cell_apply)
 static void apply(model *m)
 {
   if(m->running)
@@ -88,15 +89,10 @@ static int tap(model *m, int dir)
   return ch;
 }
 
+//A pan keeps the rate and stays on its axis (spectrum.c spec_pan_by)
 static int pan(model *m, int64 d)
 {
-  int32 n;
-  const uint32 *r = m_rates(m, &n);
-  int   ch = spl_pan(&m->c, d, spl_axis_mhz(r, n));
-
-  if(ch)
-    apply(m);
-  return ch;
+  return spl_pan(&m->c, d, spl_axis_mhz(&rates[m->rate], 1));
 }
 
 //The pair is the rule's, and the cell is a sane one
@@ -120,6 +116,23 @@ static void check_pair(const model *m, int line)
   if(t_failures != fails)
     printf("  (line %d: N %d span %d centre %llu mHz rate %d running %d)\n", line, 1 << m->log2n, m->c.span,
            (unsigned long long)m->c.centre, m->rate, m->running);
+}
+
+//After a pan: the rate as before it, the cell inside the current axis (centred on it when wider)
+static void check_pan(const model *m, int rate0, int line)
+{
+  uint64 axis = spl_axis_mhz(&rates[m->rate], 1), s = spl_span_mhz(m->c.span);
+  int    fails = t_failures;
+
+  T_EQ(m->rate, rate0);
+  T_TRUE(spl_stop(&m->c) - spl_start(&m->c) == s);
+  if(s < axis)
+    T_TRUE(spl_stop(&m->c) <= axis);
+  else
+    T_EQ(m->c.centre, axis / 2);
+  if(t_failures != fails)
+    printf("  (line %d: N %d span %d centre %llu mHz rate %d)\n", line, 1 << m->log2n, m->c.span,
+           (unsigned long long)m->c.centre, m->rate);
 }
 
 static void start_at(model *m, int log2n, int span, uint64 centre)
@@ -307,7 +320,8 @@ static uint32 lcg(void)
   return lcg_s >> 8;
 }
 
-//Random taps, pans (plot and slider sized) and hand-picked rates; the pair is the rule's after every zoom or pan step
+//Random taps, pans (plot and slider sized) and hand-picked rates; the pair is the rule's after every zoom step, a pan
+//keeps the rate
 static void test_random(void)
 {
   int l, i, run;
@@ -316,67 +330,128 @@ static void test_random(void)
     for(run = 0; run < 300; run++)
     {
       model m;
-      int   hand = 0;
 
       start_at(&m, l, (int)(lcg() % (SPL_FULL + 1)), (uint64)(lcg() % 25000000) * 1000);
 
       for(i = 0; i < 60; i++)
       {
         uint32 a = lcg() % 10;
-        int    ch;
 
         if(a < 3)
-          ch = tap(&m, (a == 0) ? -1 : 1);
+        {
+          if(tap(&m, (a == 0) ? -1 : 1))
+            check_pair(&m, __LINE__);
+        }
         else if(a < 8)
         {
           //A drag: a fraction of the span, or a slider move over the whole axis
           int64 d = (a < 6) ? ((int64)(lcg() % 1441) - 720) * (int64)spl_span_mhz(m.c.span) / 720 :
                               ((int64)(lcg() % 1453) - 726) * (int64)(rates[m.rate] / 2) * 1000 / 726;
-          ch = pan(&m, d);
+          int   r0 = m.rate;
+
+          pan(&m, d);
+          check_pan(&m, r0, __LINE__);
         }
         else
         {
-          //A rate picked by hand in the ACQ menu: it holds until the next step
+          //A rate picked by hand in the ACQ menu: it holds until the next zoom step
           m.rate = (int)(lcg() % RATES);
-          hand = 1;
-          continue;
         }
-
-        if(ch)
-          hand = 0;
-        if(!hand)
-          check_pair(&m, __LINE__);
       }
     }
 }
 
-//A pan that moves the stop across a rate boundary moves the rate
-static void test_pan_boundary(void)
+//fw 0.2.81 (owner 2026-10-20 10:24): a pan never changes the rate and is clamped to the current axis 0 .. fs / 2; a
+//zoom step after it re-derives the rate from the new centre
+static void test_pan_keeps_rate(void)
 {
   model m;
+  int   l, sp, k, r0;
 
-  start_at(&m, 11, 9, HZ(2000));              //1 kHz span, 1.5 .. 2.5 kHz
+  start_at(&m, 11, 9, HZ(2000));              //1 kHz span, 1.5 .. 2.5 kHz: 5 kSa/s, axis 2.5 kHz
   T_EQ(rates[m.rate], 5000u);
-  T_EQ(pan(&m, HZ(100)), 1);                  //stop 2.6 kHz
-  T_EQ(rates[m.rate], 10000u);
+  T_EQ(pan(&m, HZ(100)), 0);                  //against the axis end: clamped, nothing moves
+  T_EQ(spl_stop(&m.c), HZ(2500));
+  T_EQ(rates[m.rate], 5000u);
   T_EQ(pan(&m, -HZ(100)), 1);
   T_EQ(rates[m.rate], 5000u);
-  T_EQ(pan(&m, -HZ(10000)), 1);               //to 0 .. 1 kHz
+  T_EQ(pan(&m, -HZ(10000)), 1);               //to 0 .. 1 kHz: still 5 kSa/s (the coarse resolution is kept)
   T_EQ(spl_start(&m.c), 0);
-  T_EQ(rates[m.rate], 2000u);
+  T_EQ(rates[m.rate], 5000u);
   T_EQ(pan(&m, -HZ(10)), 0);                  //at 0 Hz: nothing moves
-  T_EQ(pan(&m, HZ(30000000)), 1);             //to the top of the axis
-  T_EQ(spl_stop(&m.c), HZ(25000000));
+  T_EQ(tap(&m, 1), 1);                        //zoom in there: 500 Hz about 500 Hz, stop 750 Hz: 2 kSa/s
+  T_EQ(spl_span_mhz(m.c.span), HZ(500));
+  T_EQ(m.c.centre, HZ(500));
+  T_EQ(rates[m.rate], 2000u);
+  check_pair(&m, __LINE__);
+  T_EQ(pan(&m, HZ(30000000)), 1);             //up to the end of the 2 kSa/s axis, not past it
+  T_EQ(spl_stop(&m.c), HZ(1000));
+  T_EQ(rates[m.rate], 2000u);
+  T_EQ(tap(&m, -1), 1);                       //zoom out: 1 kHz about 750 Hz, 250 Hz .. 1.25 kHz: 5 kSa/s
+  check_pair(&m, __LINE__);
+  T_EQ(rates[m.rate], 5000u);
+
+  //A wide span panned low keeps the rate; the next zoom in takes the rate of the new centre
+  start_at(&m, 11, 21, HZ(12500000));         //10 MHz about 12.5 MHz: stop 17.5 MHz, 50 MSa/s
   T_EQ(rates[m.rate], 50000000u);
-  T_EQ(pan(&m, HZ(1)), 0);
+  T_EQ(pan(&m, -(int64)SPL_FMAX_MHZ), 1);     //0 .. 10 MHz, still 50 MSa/s
+  T_EQ(spl_start(&m.c), 0);
+  T_EQ(rates[m.rate], 50000000u);
+  T_EQ(tap(&m, 1), 1);                        //5 MHz about 5 MHz, stop 7.5 MHz: 20 MSa/s
+  T_EQ(rates[m.rate], 20000000u);
+  check_pair(&m, __LINE__);
 
   //The whole axis cannot pan
   start_at(&m, 11, SPL_FULL, 0);
   T_EQ(pan(&m, HZ(1000)), 0);
   T_EQ(pan(&m, -HZ(1000)), 0);
+
+  //From every starting cell at every FFT length: pans of any size keep the rate and clamp at both ends of the axis, and
+  //a zoom step after the pan is the rule's pair for the new centre
+  for(l = 10; l <= 12; l++)
+    for(sp = 0; sp <= SPL_FULL; sp++)
+      for(k = 0; k < 64; k++)
+      {
+        uint64 axis, s;
+        model  e;
+        int    j;
+
+        start_at(&m, l, sp, (uint64)k * (SPL_FMAX_MHZ / 63));
+        r0 = m.rate;
+        T_TRUE(r0 >= 0);
+        if(r0 < 0)
+          continue;
+        axis = spl_axis_mhz(&rates[r0], 1);
+        s = spl_span_mhz(m.c.span);
+
+        for(j = 0; j < 8; j++)
+        {
+          pan(&m, ((int64)(lcg() % 2001) - 1000) * (int64)(axis / 500));
+          check_pan(&m, r0, __LINE__);
+        }
+
+        pan(&m, (int64)SPL_FMAX_MHZ);
+        check_pan(&m, r0, __LINE__);
+        if(s < axis)
+          T_EQ(spl_stop(&m.c), axis);
+        T_EQ(pan(&m, HZ(1)), 0);
+
+        pan(&m, -(int64)SPL_FMAX_MHZ);
+        check_pan(&m, r0, __LINE__);
+        if(s < axis)
+          T_EQ(spl_start(&m.c), 0);
+        T_EQ(pan(&m, -HZ(1)), 0);
+
+        for(j = -1; j <= 1; j += 2)
+        {
+          e = m;
+          if(tap(&e, j))
+            check_pair(&e, __LINE__);
+        }
+      }
 }
 
-//A hand-picked rate holds until the next zoom or pan step, which takes the rule's rate
+//A hand-picked rate holds until the next zoom step, which takes the rule's rate; a pan keeps it
 static void test_hand_rate(void)
 {
   model m;
@@ -389,8 +464,12 @@ static void test_hand_rate(void)
   T_EQ(rates[m.rate], 20000u);                //5 kHz span about 5 kHz: stop 7.5 kHz
 
   m.rate = 17;                                //500 Sa/s by hand: does not cover the cell
-  T_EQ(pan(&m, HZ(1)), 1);
+  T_EQ(pan(&m, HZ(1)), 1);                    //the cell is centred on the 250 Hz axis, the rate kept
+  T_EQ(m.rate, 17);
+  T_EQ(m.c.centre, HZ(125));
+  T_EQ(tap(&m, 1), 1);                        //2 kHz from 0: 5 kSa/s
   check_pair(&m, __LINE__);
+  T_EQ(rates[m.rate], 5000u);
 }
 
 //Stopped: the record's rate is kept, zoom out ends at the widest span its axis holds, zoom in at 16 bins
@@ -529,7 +608,7 @@ int main(void)
   test_walks();
   test_end_numbers();
   test_random();
-  test_pan_boundary();
+  test_pan_keeps_rate();
   test_hand_rate();
   test_stopped();
   test_bins();

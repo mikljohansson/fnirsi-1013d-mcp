@@ -2,10 +2,11 @@
 // spec_ladder.h - the Spectrum's zoom ladder (fw 0.2.77; docs/ui-guidelines.md section 2, "Span drives the sample rate").
 //
 // The view is a cell: a span from a 1-2-5 ladder (1 Hz .. 20 MHz, then the whole axis 0 .. 25 MHz) and a centre. The
-// sample rate is a function of the cell: the slowest rate whose fs / 2 covers the stop frequency (centre + span / 2)
-// and whose capture of N samples takes at most SPL_TMAX_MS. A tap zooms the span one step about the centre, a drag
-// pans the centre; after each step the caller sets spl_rate() of the new cell, so any sequence of steps ends on the
-// pair the rule gives. Zooming in stops where the narrower span would need a rate whose capture N / fs exceeds
+// sample rate is a function of the cell at zoom steps: the slowest rate whose fs / 2 covers the stop frequency (centre
+// + span / 2) and whose capture of N samples takes at most SPL_TMAX_MS. A tap zooms the span one step about the centre
+// and the caller then sets spl_rate() of the new cell, so every zoom step ends on the pair the rule gives. A drag pans
+// the centre and never changes the rate (fw 0.2.81, owner): the caller passes the current rate's axis to spl_pan, so
+// the cell stays inside 0 .. fs / 2; looking higher takes a zoom out and in again. Zooming in stops where the narrower span would need a rate whose capture N / fs exceeds
 // SPL_TMAX_MS, or would hold fewer than SPL_MIN_BINS bins; zooming out stops at the whole axis.
 //
 // Rates are passed as a table of samples per second, fastest first (sample_rate[0..ACQ_RATES - 1]). A table of one rate
@@ -55,7 +56,8 @@ void spl_fit(spl_cell *c, uint64 axis);
 //changed, 0 at an end (nothing changed)
 int spl_zoom(spl_cell *c, int dir, int log2n, const uint32 *rates, int32 n);
 
-//Pan: the centre moved by d mHz, kept inside 0 .. axis. Returns 1 when the cell changed
+//Pan: the centre moved by d mHz, kept inside 0 .. axis (the current rate's: a pan keeps the rate). Returns 1 when the
+//cell changed
 int spl_pan(spl_cell *c, int64 d, uint64 axis);
 
 //The cell that shows a whole axis 0 .. axis: the widest span that fits, from 0 (the whole axis at SPL_FMAX_MHZ)
