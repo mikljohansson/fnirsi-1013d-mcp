@@ -178,7 +178,7 @@ def run_measure(cli, tmp, pp, raw1, raw2, cpr, vpl1, vpl2):
         return None
     k = [int(x) for x in out.split()]
     names = ("h_mdb h_mdeg lvl1 lvl2 noise1 noise2 leak snr2 half_ok half_mdb half_mdeg half_rel_ppm unsettled ac1 ac2 "
-             "cen1 cen2 clip1 clip2 code1 code2 ph1").split()
+             "cen1 cen2 clip1 clip2 code1 code2 ph1 std1 std2 flags suspect").split()
     return dict(zip(names, k))
 
 
@@ -350,6 +350,148 @@ def test_markers(cli):
               f"RLC peak C {k['peak_mhz'] / 1000:.1f} host {hm['peak']['f_hz']:.1f} Hz")
 
 
+# --- flags (fw 0.2.87) -----------------------------------------------------------------------------------------------
+# The measurement's own flags of the C (bode_meas_flags) against the host's BodeRunner._result on the same records: the
+# bench of 2026-10-20 12:00 saw the device flag points the host did not. Records as the simulator's DUT makes them
+# (dut_response: the post's square through 1 kOhm into the RC), quantised to 8-bit codes (legacy) or 16-bit words
+# (decimated), plus the disturbances each flag exists for. A flag is compared where the host's number is not within the
+# estimators' own spread of its threshold (low_snr and the settle verdict use the device's period-difference noise,
+# bode_dsp.h: equal for white noise within 1 dB).
+
+FLAG_BITS = {"ch1_clipped": 0x0001, "clipped": 0x0002, "ch2_overload": 0x0004, "ch1_low": 0x0008, "ch2_small": 0x0010,
+             "low_snr": 0x0020, "unsettled": 0x0080, "incoherent": 0x0100}
+
+
+def host_flags(ms):
+    """bode.py BodeRunner._result's flags of the measurement (fir_off, near_floor and spliced need the runner)."""
+    f = set()
+    if ms.clipped1:
+        f.add("ch1_clipped")
+    if ms.clipped2:
+        f.add("clipped")
+    if ms.flat2:
+        f.add("ch2_overload")
+    if not ms.codes1 >= B.CH1_LOW_CODES:
+        f.add("ch1_low")
+    if ms.codes2 < B.CH2_SMALL_CODES:
+        f.add("ch2_small")
+    if ms.snr2_db < B.LOW_SNR_DB:
+        f.add("low_snr")
+    if ms.leak_db > B.LEAK_LIMIT_DB or ms.ch1_dead:
+        f.add("incoherent")
+    if ms.unsettled:
+        f.add("unsettled")
+    return f
+
+
+def near_threshold(ms):
+    """Flags whose host number sits within the estimators' spread of the threshold (not compared)."""
+    skip = set()
+    if abs(ms.codes1 / B.CH1_LOW_CODES - 1) < 0.01:
+        skip.add("ch1_low")
+    if abs(ms.codes2 / B.CH2_SMALL_CODES - 1) < 0.01:
+        skip.add("ch2_small")
+    if abs(ms.snr2_db - B.LOW_SNR_DB) < 3.0:
+        skip.add("low_snr")
+    if not ms.ch1_dead and abs(ms.leak_db - B.LEAK_LIMIT_DB) < 3.0:
+        skip.add("incoherent")
+    if ms.half_rel is not None and ms.x1 and ms.x2:
+        nr = math.sqrt(2) * math.hypot(ms.noise1 / abs(ms.x1), ms.noise2 / abs(ms.x2))
+        ratio = ms.half_rel / (4 * math.sqrt(2) * nr) if nr > 0 else math.inf
+        if (0.5 < ratio < 2.0 or abs(abs(ms.half_db) - B.SETTLE_DB) < 0.02 or
+                abs(abs(ms.half_deg) - B.SETTLE_DEG) < 0.2):
+            skip.add("unsettled")
+    return skip
+
+
+def flag_case(cli, tmp, rnd, pp, a, b, r1, r2, wide, label, flat=(False, False)):
+    """a, b: volts at the tips (None: that channel's record is one constant code). Returns (host set, C set)."""
+    L = pp.record
+    vpl1, vpl2 = VPL[r1], VPL[r2]
+    codes = []
+    for v, vpl, fl in ((a, vpl1, flat[0]), (b, vpl2, flat[1])):
+        if fl:
+            c = np.full(L, 255.0)
+        elif wide:
+            sig = 0.7 / math.sqrt(max(1, pp.n))
+            c = np.clip(v / vpl + 128 + rnd.normal(0, sig, L), 0, 255)
+            c = np.round(c * 256) / 256
+        else:
+            c = codes_of(v, vpl, rnd)
+        codes.append(c)
+    c1, c2 = codes
+    vv1, vv2 = (c1 - 128) * vpl1, (c2 - 128) * vpl2
+    ms = B.measure_pair(vv1, vv2, pp, vpl1=vpl1, vpl2=vpl2, clipped1=(c1 <= 0) | (c1 >= 255),
+                        clipped2=(c2 <= 0) | (c2 >= 255), codes1=c1, codes2=c2)
+    k = run_measure(cli, tmp, pp, np.round(c1 * 256), np.round(c2 * 256), 65536, vpl1, vpl2)
+    if k is None:
+        check(False, f"flags {label}: C measurement refused")
+        return set(), set()
+    hf = host_flags(ms)
+    cf = {n for n, bit in FLAG_BITS.items() if k["flags"] & bit}
+    skip = near_threshold(ms)
+    tag = (f"flags {label} {pp.f_actual:.6g} Hz (N {pp.n}, {pp.window}, r1 {r1} r2 {r2}): host {sorted(hf)} C {sorted(cf)}"
+           f" (codes1 {ms.codes1:.1f} codes2 {ms.codes2:.2f} snr {ms.snr2_db:.1f}/{k['snr2'] / 1000:.1f} leak "
+           f"{ms.leak_db:.1f}/{k['leak'] / 1000:.1f} dB)")
+    check((hf ^ cf) <= skip, tag)
+    check(bool(k["suspect"]) == ms.suspect, f"{label} {pp.f_actual:.6g} Hz: suspect C {k['suspect']} host {ms.suspect}")
+    if not flat[0] and not flat[1]:
+        for c, sd in ((1, ms.std1), (2, ms.std2)):
+            got = 10 ** (k[f"std{c}"] / 20000)
+            check(abs(got / sd - 1) < 0.005, f"{label} {pp.f_actual:.6g} Hz: std{c} C {got:.4f} host {sd:.4f} codes")
+    if verbose:
+        print("     ", tag)
+    return hf, cf
+
+
+def rc_volts(pp, rc_r=1000.0, rc_c=15e-9):
+    """The owner's RC (post, 1 kOhm, 15 nF; CH1 on the post side of the 1 kOhm as the DUT input) at the plan's rate."""
+    t = np.arange(pp.record) / pp.sample_rate
+    a = dut_response(t, pp.f_actual, 0.5, 3.1, RS, rc_r, 0.0, rc_c, node=0)
+    b = dut_response(t, pp.f_actual, 0.5, 3.1, RS, rc_r, 0.0, rc_c, node=1)
+    return t, a - a.mean() + 0.3, b - b.mean() + 0.3
+
+
+def test_flags(cli):
+    rnd = np.random.default_rng(1205)
+    counts = {"host": 0, "c": 0, "points": 0}
+    with tempfile.TemporaryDirectory() as tmp:
+        # the bench sweep of 2026-10-20 12:05: 100 Hz .. 1 MHz, 25 points; CH1 on 0.5 V/div, CH2 on the host's choice
+        # and one range coarser (the device's sweep had CH2 one range up below 10 kHz)
+        for pp in B.plan_sweep(100.0, 1e6, 25):
+            t, a, b = rc_volts(pp)
+            wide = pp.n > 1
+            r2 = best_range(np.max(np.abs(b - b.mean())))
+            for rr in sorted({r2, max(1, r2 - 1)}):
+                hf, cf = flag_case(cli, tmp, rnd, pp, a, b, 3, rr, wide, "RC")
+                counts["host"] += bool(hf)
+                counts["c"] += bool(cf)
+                counts["points"] += 1
+        # deep stopband on coarse CH2 ranges: ch2_small / low_snr territory (a smaller C moves the corner down)
+        for f in (30e3, 100e3, 300e3, 1e6):
+            pp = B.plan_point(f)
+            t, a, b = rc_volts(pp, rc_c=150e-9)
+            for rr in (2, 3, 4):
+                flag_case(cli, tmp, rnd, pp, a, b, 3, rr, pp.n > 1, "stopband")
+        # disturbances: an interfering tone beside CH1's fundamental (incoherent), a CH2 transient (unsettled), a DC
+        # step in CH1 half way (a front-end transient), clipping, flat records (the 0x153A first-record artefact)
+        for f in (1000.0, 10e3, 100e3):
+            pp = B.plan_point(f)
+            t, a, b = rc_volts(pp)
+            df = pp.sample_rate / pp.record * 2.5
+            flag_case(cli, tmp, rnd, pp, a + 0.05 * np.cos(2 * math.pi * (pp.f_actual + df) * t), b, 3, 3, pp.n > 1,
+                      "beside")
+            flag_case(cli, tmp, rnd, pp, a, b + 0.3 * np.exp(-t * pp.f_actual / 3.0) *
+                      np.cos(2 * math.pi * pp.f_actual * 1.37 * t), 3, 3, pp.n > 1, "ringing")
+            flag_case(cli, tmp, rnd, pp, a + 0.4 * (t > t[-1] / 2), b, 3, 3, pp.n > 1, "CH1 step")
+            flag_case(cli, tmp, rnd, pp, a, b, 3, 5, pp.n > 1, "CH2 clipped")
+            flag_case(cli, tmp, rnd, pp, a, b, 5, 3, pp.n > 1, "CH1 clipped")
+            flag_case(cli, tmp, rnd, pp, a, b, 3, 3, pp.n > 1, "CH1 flat", flat=(True, False))
+            flag_case(cli, tmp, rnd, pp, a, b, 3, 3, pp.n > 1, "CH2 flat", flat=(False, True))
+            flag_case(cli, tmp, rnd, pp, a * 0.02, b * 0.02, 1, 1, pp.n > 1, "CH1 small")
+    print(f"  flags: {counts['points']} RC records, flagged by the host {counts['host']}, by the C {counts['c']}")
+
+
 def main():
     global verbose
     ap = argparse.ArgumentParser()
@@ -365,6 +507,7 @@ def main():
         test_log_exp(cli)
         test_measure(cli)
         test_markers(cli)
+        test_flags(cli)
     finally:
         cli.close()
     print(f"test_bode.py: {len(fails)} failures")

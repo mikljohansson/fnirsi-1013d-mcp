@@ -6,14 +6,11 @@
 
 #include "bode_sweep.h"
 
-//Quality gates (bode.py; mdB of code levels and of ratios)
-#define CH1_LOW_MDB         26021       //20 codes
-#define CH2_SMALL_MDB       9542        //3 codes
-#define LOW_SNR_MDB         20000
-#define NEAR_FLOOR_MDB      20000
-#define LEAK_LIMIT_MDB      (-40000)
-#define FLAT_C100           5           //0.05 code
-#define COLLAPSE_MDB        20000       //a tone below 1/10 of the reference
+//Quality gates (bode.py; mdB of code levels and of ratios). The measurement's own flags and their thresholds are in
+//bode_dsp.c (bode_meas_flags, fw 0.2.87)
+#define CH1_LOW_MDB         26021       //CH1_LOW_CODES 20 (the 0.2.71 readout rule)
+#define NEAR_FLOOR_MDB      20000       //NEAR_FLOOR_DB 20
+#define COLLAPSE_MDB        20000       //COLLAPSE_RATIO 0.1: a tone below 1/10 of the reference
 #define CENTRE_TOL_C100     1200        //re-centre beyond 12 codes from 128
 #define FULL_SCALE_C100     10880       //85 % of 128 codes
 #define DOWNRANGE_C100      7680        //60 % of 128 codes
@@ -57,7 +54,7 @@ static int after(uint32 now, uint32 t)
 
 static int flat2(const bode_meas *m, int collapsed)
 {
-  return collapsed || ((m->c[1].ac_c100 < FLAT_C100) && (m->c[1].code_mdb < CH2_SMALL_MDB));
+  return bode_flat2(m, collapsed);
 }
 
 //CH2's tone vanished on the new range at the same frequency: ref measured it clearly on the previous one
@@ -238,16 +235,8 @@ static void result(bode_eng *e, int i, const bode_meas *m, int coll, int retries
   bode_point *p = &e->pts[i];
   const bode_plan *pp = &e->plans[i];
   int32 bg = e->bg_mdb[i][e->range[1] % 6];
-  uint16 f = 0;
+  uint16 f = bode_meas_flags(m, coll);
 
-  if(m->c[0].clipped)                         f |= BODE_F_CH1_CLIPPED;
-  if(m->c[1].clipped)                         f |= BODE_F_CLIPPED;
-  if(flat2(m, coll))                          f |= BODE_F_CH2_OVERLOAD;
-  if(m->c[0].code_mdb < CH1_LOW_MDB)          f |= BODE_F_CH1_LOW;
-  if(m->c[1].code_mdb < CH2_SMALL_MDB)        f |= BODE_F_CH2_SMALL;
-  if(m->snr2_mdb < LOW_SNR_MDB)               f |= BODE_F_LOW_SNR;
-  if(m->leak_mdb > LEAK_LIMIT_MDB)            f |= BODE_F_INCOHERENT;
-  if(bode_unsettled(m))                       f |= BODE_F_UNSETTLED;
   if((pp->n >= 16) && !(pp->n & 3) && e->hw->has_fir && !e->last_fir)
                                               f |= BODE_F_FIR_OFF;
   if((bg > BODE_MDB_FLOOR) && (m->c[1].lvl_mdb < bg + NEAR_FLOOR_MDB))

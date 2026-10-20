@@ -27,25 +27,6 @@
 #define BODE_CH2_AUTO         0     //down-ranging with the splice, up-ranging on a clip
 #define BODE_CH2_HOLD         1     //the CH2 range the sweep starts with (the channel's V/div)
 
-//Point flags (READ_BODE u16; the host tool's flag names in brackets)
-#define BODE_F_CH1_CLIPPED    0x0001    //[ch1_clipped]
-#define BODE_F_CLIPPED        0x0002    //[clipped] CH2
-#define BODE_F_CH2_OVERLOAD   0x0004    //[ch2_overload] CH2's front end saturated by a DC level (a flat record)
-#define BODE_F_CH1_LOW        0x0008    //[ch1_low] CH1 fundamental below 20 codes
-#define BODE_F_CH2_SMALL      0x0010    //[ch2_small] CH2 below 3 codes: +-1 dB
-#define BODE_F_LOW_SNR        0x0020    //[low_snr] CH2 less than 20 dB above its noise
-#define BODE_F_NEAR_FLOOR     0x0040    //[near_floor] CH2 less than 20 dB above the generator-off background
-#define BODE_F_UNSETTLED      0x0080    //[unsettled]
-#define BODE_F_INCOHERENT     0x0100    //[incoherent] CH1 energy beside the fundamental
-#define BODE_F_SPLICED        0x0200    //[spliced] CH2 changed range at this point
-#define BODE_F_FIR_OFF        0x0400    //[fir_off]
-#define BODE_F_NO_CAL         0x0800    //[no_cal] thru applied, no thru point with this (M, N)
-#define BODE_F_CAL_RANGE      0x1000    //[cal_range] thru taken on other ranges
-#define BODE_F_CAL_FLAGGED    0x2000    //[cal_flagged] the thru point was itself flagged
-#define BODE_F_RETRIED        0x4000    //measured again (re-centred, settle retry or range change)
-#define BODE_F_BAD            (BODE_F_CH1_CLIPPED | BODE_F_CLIPPED | BODE_F_CH2_OVERLOAD | BODE_F_LOW_SNR | \
-                               BODE_F_NEAR_FLOOR | BODE_F_UNSETTLED | BODE_F_INCOHERENT)
-
 //Sweep state
 #define BODE_ST_IDLE          0     //no sweep since the view opened (or cleared)
 #define BODE_ST_RUNNING       1
