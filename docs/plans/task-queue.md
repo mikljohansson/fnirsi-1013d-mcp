@@ -281,6 +281,10 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   (masks stored under the data dir, exact geometry only), scope_export_csv, scope_dvm (resolution statement); simulator
   serial signals; report kinds. README and release notes say 34 tools; release notes need a line on the four tools
   (release follow-up).
+- fpga-spec addendum (done 22:54, merged 22:55 as 4d35cb3): section 7.5 pattern trigger engine (registers 0x76-0x7D mirroring
+  the capture trigger's, status 0x42, burst start source in 0x6D bits 6..5, caps bit 27, SET_PATTERN_TRIGGER 0x021A), fallback
+  = the capture qualifier routed; 0x153D now ~7,350 LUT (85 %), 0x153E ~91 % and gated on 0x153D's measured count; logger
+  rates are the spec; trigger-out wire removed; DDS sweep kept, first to cut (owner 22:53).
 - Owner decisions from the evening Q&A (22:38-22:49): (1) logger contract rates 500 / 250 / 125 kS/s documented now, higher
   after the bench; (2) no soldering to FPGA or other pins in this project, the prepared flash header is the only one
   (the trigger-out wire option is closed); (3) the pattern generator gets its own trigger engine with the capture
