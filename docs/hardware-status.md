@@ -1169,7 +1169,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   after entering the mode may run at a coarse CH1 range until the next sweep; queued: find the first-record artefact (FPGA
   decimator or the firmware's write order on 0x153A) and make the pre-scan step CH1 up when its fundamental is low. Host
   sweep at 11:16 for the comparison follows.
-- 2026-10-20 11:16-11:22: the host tool hit the same artefact: fnirsi1013d-bode on the RC right after the device sweeps died with
+- 2026-10-20 11:14-11:16: the host tool hit the same artefact: fnirsi1013d-bode on the RC right after the device sweeps died with
   ZeroDivisionError in measure_pair (CH1 tone 0: a flat record; guard queued). Repro statistics: four rounds of (device sweep
   100 Hz..1 MHz 10 points, BODE_CLOSE, host captures): round 0 left GET_DECIM at fpga_mode 0 / fpga_shift 2 after the sweep and
   the host's third capture (CIC2+FIR at divider 4095, range 1, right after two clean CIC3+FIR captures at the same divider)
