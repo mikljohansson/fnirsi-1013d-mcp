@@ -4,7 +4,7 @@ Sources (abbrev):
 - `R` = `/d/src/Fnirsi1013D/Verzia 1.xxx/FPGA for 1.xxx/`
 - `AL3` = `R/FPGA AL3/FPGA AL3S10/` (Anlogic AL3A10LG144C7, TD 4.6.116866)
 - `EF2` = `R/FPGA EF2/FPGA EF2L45/` (Anlogic EF2L45LG144B, TD 4.6.116866)
-- `EP4` = Altera_EP4CE06_v2.zip extracted to `C:\Users\miklj\AppData\Local\Temp\claude\D--src-fnirsi-1013d-ai\3a8475b7-e03d-45ca-991c-1dea2be98d3c\scratchpad\ep4\Altera_EP4CE06_v2\` (Cyclone IV E EP4CE6E22C8, Quartus 22.1std Lite)
+- `EP4` = Altera_EP4CE06_v2.zip extracted to a scratch directory (`<scratch>\ep4\Altera_EP4CE06_v2\`) (Cyclone IV E EP4CE6E22C8, Quartus 22.1std Lite)
 - `OLD` = `/d/src/fnirsi-1013d-ai/research/atlan4-extracted/FPGA/FPGA/` (= repo-root `FPGA.zip`; zip member md5s of zaklad.v a43616cf and FPGA.bin 87812090 equal the extracted copy; older AL3 build, 4096 deep)
 - Top module: `fnirsi_1013D` (EP4: `fnirsi_1013D_EP4CE6`). Header: "Code for FNIRSI 1013D oscilloscope, Atlan and PECO" (derived from pecostm32 reverse engineered FNIRSI logic; comments such as "The original uses 16 bits" refer to the FNIRSI original).
 - Line refs are `zaklad.v` of AL3 unless stated; differences in section 8.

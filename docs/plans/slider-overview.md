@@ -1,11 +1,11 @@
 # Slider-track overview: the whole record, spectrum or response under the window
 
-Owner request (2026-10-19 20:00): draw a mini overview inside the slider track under the plot, where the data exists, so
+Maintainer request (2026-10-19 20:00): draw a mini overview inside the slider track under the plot, where the data exists, so
 the window shows where the view sits in the whole. In Scope it is the record's min / max envelope over the full record,
 and the window is the part on screen. In Spectrum it is the spectrum over 0..fs/2, and the window is the shown span. In
 Frequency response it is AUTO SET's overview sweep over 100 Hz .. 10 MHz, and the window is Start..Stop.
 
-This is the design (ux-overview, 2026-10-19); fw 0.2.73 (fw-over) built it with the owner's decisions of section 10 F,
+This is the design (ux-overview, 2026-10-19); fw 0.2.73 (fw-over) built it with the maintainer's decisions of section 10 F,
 which override the drafts below where they differ (sections 2 and 9 are updated to the build; handoff and bench
 walk-through: `firmware/AGENTS.md` section 49). The mockups are the acceptance reference (section 9). They
 follow `docs/ui-guidelines.md`, the slider paragraphs of `docs/plans/ux-makeover.md` and `docs/plans/bode-ui.md`
@@ -24,7 +24,7 @@ over it exactly as today, and touch does not change.
 
 ## 2. Geometry and colours (all three modes)
 
-**As built in fw 0.2.74** (owner decision 10 F item 7, 2026-10-19 22:15, over items 5 and 6; firmware `slider_ov.h`).
+**As built in fw 0.2.74** (maintainer decision 10 F item 7, 2026-10-19 22:15, over items 5 and 6; firmware `slider_ov.h`).
 The row has no frame or line of its own (the plot pane's outline above is the separation); all of it is track, and the
 window is a box again:
 
@@ -123,7 +123,7 @@ cleared. An example is a time base change, after which the buffers still hold th
 - **Measurement.** The batch measures it with GET_STATUS `pass_ms`, on and off, at 3000 and 16382 samples.
 
 **Recommendation: build it.** The cost is small, the data is on hand, and it is the one place on screen that shows what
-the record holds outside the window. That is the owner's case for a deep record zoomed into one decay (board
+the record holds outside the window. That is the maintainer's case for a deep record zoomed into one decay (board
 ScopeOverview).
 
 ## 4. Spectrum
@@ -197,14 +197,14 @@ leaves open: what is outside the span.
 
 It is not saved to the settings sector. 400 bytes do not fit the three free words, 216..218, and an overview of a
 circuit that may since have been unplugged should not survive a power cycle. Whether a later sweep that contradicts it
-should drop it is owner question 3.
+should drop it is maintainer question 3.
 
 **What is drawn.**
 
-- **Curve.** The curves the plot shows, following the Display variant (decision 8, owner 2026-10-20 13:35): in
+- **Curve.** The curves the plot shows, following the Display variant (decision 8, maintainer 2026-10-20 13:35): in
   Overlaid the magnitude (cyan) and the phase (pink) over each other, in Magnitude only the magnitude, in Phase only the
   phase. Each curve is fitted to the track's 20 rows on its own, dimmed outside the window and full inside it; flagged
-  points are grey pixels for both. Draw order (owner 13:36): the phase first and the magnitude over it, so where they
+  points are grey pixels for both. Draw order (maintainer 13:36): the phase first and the magnitude over it, so where they
   overlap the magnitude is the one seen. Built in fw 0.2.92 (`sov_curve`, `sov_draw_curves`; the overview copy already
   kept both values). This replaces the earlier "never both" rule.
 - **Columns.** A point's column is its log position on the track. The track is 1 Hz .. 10 MHz over x 4..723, about 103
@@ -235,7 +235,7 @@ shows where the resonance sits against the span chosen by hand, and that is the 
   - The plot follows as today: the Scope's trace, the Spectrum's span, the Frequency response axis with the old
     points inside the new span.
   - Nothing is recomputed; only the row is redrawn.
-- **A tap on the overview** outside the window: in fw 0.2.73 (owner, 10 F item 2) a touch-down on the row (y 450
+- **A tap on the overview** outside the window: in fw 0.2.73 (maintainer, 10 F item 2) a touch-down on the row (y 450
   down) outside the window centres the window on it, kept on the track (`sov_jump`), and the drag goes on from there;
   the release ends as a drag release (Scope scrolled, Spectrum panned, Frequency response re-sweeps or runs one sweep).
   The Scope's extended drag area above the row (y 436..449, beside the cards) never jumps.
@@ -313,7 +313,7 @@ The frequency-response and Spectrum tracks start at x 2 as `BU_SL_X` does (host 
    draws a measurement the engine made and today discards; the batch keeps it. Nothing is interpolated: the FR line joins
    measured points as the chart does, and flagged points stay grey. Pass.
 4. **Every unavailable state has defined text.** The empty track has no text. Section 7 argues that the overview is not
-   a value, the plot states the reason, and 12 rows cannot hold a 13 px line. Accepted, for the owner to veto.
+   a value, the plot states the reason, and 12 rows cannot hold a 13 px line. Accepted, for the maintainer to veto.
 5. **No placeholder for a feature not built.** Before AUTO SET the Frequency response track is empty, with no outline
    or hint where the overview will come. Pass.
 6. **Touch.** Unchanged. The overview adds no target that looks tappable but is not: it lies under the existing 44 px
@@ -331,7 +331,7 @@ The frequency-response and Spectrum tracks start at x 2 as `BU_SL_X` does (host 
    - On the PI board the coil's -0.6 V during TX and its 0 V rest fall in the same row, so the TX phase is visible only
      through CH2's gate.
 
-   This is the honest picture at the plot's scale. Option: split the rows per channel (owner question 4).
+   This is the honest picture at the plot's scale. Option: split the rows per channel (maintainer question 4).
 3. **One column is a lot of record.** At 16382 samples a column is about 23 samples, 4.6 us at 5 MSa/s. A spike shorter
    than that still shows, because the envelope keeps the min and max. Its shape does not.
 4. **The window's vertical edges** cover one overview column each. At the 8 px minimum width that is a quarter of the
@@ -370,7 +370,7 @@ The frequency-response and Spectrum tracks start at x 2 as `BU_SL_X` does (host 
 3. On the 0x1539 bitstream the capture fault flags every Frequency response point (hardware-status, 20:51). The
    overview is then a row of grey pixels: honest, and it matches the chart.
 
-### E. Questions for the owner
+### E. Questions for the maintainer
 
 1. **Colours.** Dimmed channel colour outside the window and full colour inside it, or dimmed everywhere, or grey
    everywhere? **Recommendation: dimmed outside, full inside.** The bright part repeats the window. Grey means
@@ -387,37 +387,37 @@ The frequency-response and Spectrum tracks start at x 2 as `BU_SL_X` does (host 
    halves the resolution of both.
 5. **Window height.** Keep the 14 px window with a 12-row overview inside its lines (as drawn), or make the window as
    tall as the frame's inside (18 px) for a 14-row overview? **Recommendation: keep 14 px.** The Scope's construction
-   stays as the owner has used it since fw 0.2.64, and the window's lines never cross the data.
+   stays as the maintainer has used it since fw 0.2.64, and the window's lines never cross the data.
 
-### F. Owner decisions (2026-10-19 21:20, walked through one by one)
+### F. Maintainer decisions (2026-10-19 21:20, walked through one by one)
 
-1. Colours: dimmed channel colour outside the window, full colour inside **(owner)**. The Scope's existing full-yellow
+1. Colours: dimmed channel colour outside the window, full colour inside **(maintainer)**. The Scope's existing full-yellow
    thumbnail changes to this so the three modes look the same.
 2. Tap to jump: yes, as a fast follow right after the overview batch (a tap outside the window centres it on the tap)
-   **(owner)**.
+   **(maintainer)**.
 3. Frequency response overview lifetime: the simple rule, kept until the next AUTO SET or power-off; no disagreement check
-   **(owner)**.
-4. Scope channels: overlaid on the plot's own scale, enabled channels only; the owner will look at it on the bench and may
-   change it **(owner)**.
+   **(maintainer)**.
+4. Scope channels: overlaid on the plot's own scale, enabled channels only; the maintainer will look at it on the bench and may
+   change it **(maintainer)**.
 5. Window height: not 14 px. Use the whole inside of the frame (18 px window, 14 overview rows): "backwards compat doesn't
-   matter, maximize the available space; it'll be difficult enough to cram both traces in there" **(owner)**. Sections 2 and
+   matter, maximize the available space; it'll be difficult enough to cram both traces in there" **(maintainer)**. Sections 2 and
    9 and the boards are to be regenerated to 18 px by the firmware batch's designer pass (the geometry in section 2 is now
    superseded on this point). Superseded in turn by item 6.
 6. Track geometry (2026-10-19 21:28): give the traces every pixel row of the track. The row loses the frame's bottom,
    left and right lines and keeps only the line at y 452 that parts it from the plot; the window is no longer a box but
    its left and right edges, 1 px each in full colour over the track's full height, with no top or bottom line and no
    margin between the row and the window; the overview is full colour between the edges and dimmed outside them; the
-   drag hit areas stay as they were **(owner)**. Built in fw 0.2.73: the track x 2..727 (726 columns) by y 453..471 (19
+   drag hit areas stay as they were **(maintainer)**. Built in fw 0.2.73: the track x 2..727 (726 columns) by y 453..471 (19
    rows), section 2.
-7. Track geometry, second look on the unit (owner, 2026-10-19 22:11, fw 0.2.73 on screen): decision 6 does not work well; put the
+7. Track geometry, second look on the unit (maintainer, 2026-10-19 22:11, fw 0.2.73 on screen): decision 6 does not work well; put the
    window box back as a box with all four 1 px borders and the 1 px margin around it, with the overview inside the box in full
    colour and outside it dimmed. The track's own top border line goes: the plot pane's outline is the separation. The overview
-   keeps every other row the removed container borders freed **(owner)**. Built in fw 0.2.74 (fw-over2): the track x 2..727
+   keeps every other row the removed container borders freed **(maintainer)**. Built in fw 0.2.74 (fw-over2): the track x 2..727
    by y 452..471 (20 rows, the overview mapped on all of them and drawn on all of them outside the box); the box's lines
    at y 453 and 470 and at x and x + w - 1, its 1 px margin at y 452, y 471, x - 1 and x + w; the overview in full
    colour inside the lines, y 454..469 (16 rows); hit areas unchanged (section 2).
-8. Frequency response overview and the Display variant (owner, 2026-10-20 13:35): Overlaid draws magnitude (cyan) and phase (pink)
-   over each other in the track; Magnitude only / Phase only draw that one curve **(owner)**. Draw order (owner,
+8. Frequency response overview and the Display variant (maintainer, 2026-10-20 13:35): Overlaid draws magnitude (cyan) and phase (pink)
+   over each other in the track; Magnitude only / Phase only draw that one curve **(maintainer)**. Draw order (maintainer,
    2026-10-20 13:36): the phase first and the magnitude over it, so where they overlap the magnitude is seen. Built in
    fw 0.2.92 (fw-ov3), section 5.
 

@@ -8,13 +8,13 @@ should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those
 
 ## Working rules (learned the hard way)
 
-- **COM10 is exclusive and belongs to the lead.** Never open it, not even for LOCAL-safe reads, without an explicit
+- **The scope's serial port (`<port>`; COM10 on the maintainer's bench) is exclusive and belongs to the lead.** Never open it, not even for LOCAL-safe reads, without an explicit
   "port free" from the lead in a message after you asked. (mcp-gen2 once opened it "while free" during a bench
   calibration; it happened not to collide.) Develop and test against the simulator.
 - **Stage files by name** (`git add mcp/src/... mcp/tests/...`), never `git add mcp`: other agents edit files in the
   tree concurrently, and a directory add sweeps their uncommitted work into your commit (happened once, 4f17414).
 - Pushing to main is allowed for mcp work and CI fixes (no tags). This checkout's main is shared with the
-  coordinator, who merges branches locally: **never `git pull --rebase`** (it flattens their merge commits and
+  bench session, who merges branches locally: **never `git pull --rebase`** (it flattens their merge commits and
   conflicts); update with `git fetch && git merge --ff-only origin/main` (`git pull --ff-only` still rebases here because
   `pull.rebase` is set) and tell the lead if it refuses. When local main holds other agents' unpushed
   commits under yours, ask the lead before pushing. Leave others' uncommitted files alone. Before a push run ruff,
@@ -29,12 +29,12 @@ should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those
   EOF"). Files are LF except `../docs/plans/task-queue.md` (CRLF: keep it, or the commit rewrites every line); on Windows write with `write_bytes(... .encode())`. Windows Python does not resolve
   `/c/Users/...` paths: pass `C:/Users/...`. The session scratchpad is shared with other agents: prefix your files.
 - **Worktrees have no venv**: an agent worktree (`.claude/worktrees/...`) needs its own `uv venv mcp/.venv` and
-  `uv pip install --python mcp/.venv -e "mcp[dev]"` (gitignored); the tracked `.mcp.json` is gone (owner's local file,
+  `uv pip install --python mcp/.venv -e "mcp[dev]"` (gitignored); the tracked `.mcp.json` is gone (maintainer's local file,
   `.mcp.json.example` is the template), so worktrees have no MCP servers either.
 - Writing patch scripts: never pass the environment on a command line or print it (it holds API keys); the wheel
   smoke script hands the env to its client through the process environment for that reason.
 - **Venv reinstall gotcha**: `uv pip install --python .venv -e ".[dev]"` fails ("Access denied") while any
-  `fnirsi1013d-*.exe` is running (the owner's MCP session, the lead's bench), and uv may already have removed
+  `fnirsi1013d-*.exe` is running (the maintainer's MCP session, the lead's bench), and uv may already have removed
   other .exe files. Rerun when nothing runs; meanwhile `python -m fnirsi1013d.<module>` works for every CLI.
   As of this handoff `fnirsi1013d-soak.exe` was not yet created (use `python -m fnirsi1013d.soak`).
 
@@ -76,7 +76,7 @@ path. |
   waveform. Read-only extras: `scope_calibration_info`, `scope_sd_info`, `scope_event_log`, `scope_spectrum`
   (with `cross_check`; the capture tools' caveat while the screen shows the spectrum view comes from
   `Session.ensure_control`). No SD write tool by
-  design. Verified on the unit by the owner on fw 0.1.7 (capture/measure); collaborative mode, EXT and SD on
+  design. Verified on the unit by the maintainer on fw 0.1.7 (capture/measure); collaborative mode, EXT and SD on
   hardware are the lead's bench items.
 - **`fnirsi1013d-flash`**: FEL dev loop verified on the unit. `--persist-only` verified on fw 0.2.7 (5.3 s total,
   write 111 KiB/s with 32-sector SD_WRITEs, no resends). Resume after a USB drop, version check vs `#VER`
@@ -110,7 +110,7 @@ path. |
 - **Packaging** (mcp-gen5): the wheel works outside a checkout; `.github/scripts/wheel_smoke.py` (CI job `wheel`, Linux and
   Windows) builds it, installs it into a fresh venv in a temp dir, runs `--list-tools` and an MCP stdio session on
   `--sim` with a capture, and checks that files land under `FNIRSI_MCP_HOME` and nothing inside the venv. The server's
-  data dir / audit log default to `~/.fnirsi1013d`; the owner's local `.mcp.json` sets `FNIRSI_MCP_DATA_DIR=mcp/data`
+  data dir / audit log default to `~/.fnirsi1013d`; the maintainer's local `.mcp.json` sets `FNIRSI_MCP_DATA_DIR=mcp/data`
   (calibration file there). `vectors --file`, `fnirsi1013d-flash --image / --backup-dir`, `fnirsi1013d-sd write
   --backup-dir`, `fnirsi1013d-bench --bench-link` are required outside a checkout and refuse with a message.
 - **Sequencer** (protocol 1.17, mcp-gen5): `scope_capture_segments` and `scope_averaged_capture(hardware=true)` (opt-in until
@@ -222,10 +222,10 @@ measured from that truth.
 
 ## Calibration file
 
-Per unit at `<data_dir>/cal/<serial>.json` (default data dir `~/.fnirsi1013d/data`; the owner's `.mcp.json` points it at
+Per unit at `<data_dir>/cal/<serial>.json` (default data dir `~/.fnirsi1013d/data`; the maintainer's `.mcp.json` points it at
 `mcp/data`, gitignored), loaded at connect,
 `--cal-file` / `FNIRSI_MCP_CAL_FILE` override, written by `scope_calibrate_volts`, shown by
-`scope_calibration_info`. The owner's `mcp/data/cal/1013D-0001.json` (69 points) is rebuilt with
+`scope_calibration_info`. The maintainer's `mcp/data/cal/1013D-0001.json` (69 points) is rebuilt with
 `python -m fnirsi1013d.calibration --unit 1013D-0001 --out data/cal/1013D-0001.json --import
 ../backups/t8_CH1_0.010V.json ../backups/t8_CH1_0.308V.json ../backups/t8_ch1_1.000V.json
 ../backups/t8off_CH1_0.000V.json ../backups/t8off_CH2_0.000V.json` (delete it first; `--import` appends). Facts
@@ -261,30 +261,30 @@ SimConfig `cal_v3` (a bound v3 block measured from the model: zeros, slopes, gai
 (relative gain per channel, class and core) and `gated_zero_shift` (per-core zero moves while the encode clock is
 gated). Known flake: `test_sdcard::test_slow_write_answers_are_retried_without_reopening` (0.2 s write
 timeout) can fail once under a loaded full run; it passes alone.
-Run: `.venv/Scripts/python -m pytest -q`; WSL: `wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/mcp &&
+Run: `.venv/Scripts/python -m pytest -q`; WSL: `wsl -d <distro> -- bash -lc "cd /mnt/d/path/to/fnirsi-1013d-mcp/mcp &&
 ~/.venvs/fnirsi1013d-mcp/bin/python -m pytest -q -p no:cacheprovider"`; lint: `.venv/Scripts/ruff check --select
 F,E9,B023 --line-length 120 src tests`; vectors: `python -m fnirsi1013d.vectors --check` (the C checker:
 `make -C ../firmware/scope/host_tests test` in WSL).
 
-## Bode bench (for the coordinator; design 6.3)
+## Bode bench (for the bench session; design 6.3)
 
 **Done 2026-10-19 (docs/hardware-status.md):** wiring A and B agree within 0.4 dB, floor -80 dB, thru +0.3 dB, divider
 flat; wiring A (clips on the DUT ground) is the default now. Wiring B's 1.24 V DC saturated CH2 on 0.1 / 0.2 V/div with a
 flat record the offset loop had centred: `ch2_overload` (flat record, or a tone collapse against the range-1 prescan
 / the previous range at the same frequency), auto steps up, fixed stops, `ch2_coupling='ac'`, offset exhaustion is a
 caveat (simulator: `SimConfig.frontend_window_v`, pinned samples lose their noise). Open: the 15 nF RC reads an
-apparent C falling 14.7 -> 9.8 nF and tan delta rising to 0.29 by 200 kHz while the divider is flat; the coordinator's
+apparent C falling 14.7 -> 9.8 nF and tan delta rising to 0.29 by 200 kHz while the divider is flat; the bench session's
 high-pass with the same parts decides dielectric vs measurement. The procedure below is the original plan.
 
 DUT: RC low-pass, R = 1.60 kOhm 1 %, C = 10.0 nF film or C0G (fc 9.95 kHz). CH1 x1 on the RC input (the post), CH2 x1
-on the output. Generator off before wiring. `--port COM10` (or the MCP tool with the same arguments; it asks for a
+on the output. Generator off before wiring. `--port <port>` (or the MCP tool with the same arguments; it asks for a
 token). Every run prints the table, the markers and the caveats; keep the `--json` files in `backups/bode/`.
 Expected magnitude / phase of the RC (no probe load): 1 kHz -0.04 dB / -5.7 deg, 3 kHz -0.38 / -16.8, 10 kHz
 -3.03 / -45.2, 30 kHz -10.0 / -71.7, 100 kHz -20.1 / -84.3, 300 kHz -29.6 / -88.1; CH2's ~100 pF adds about 1 % to C.
 
 ```bash
 cd mcp && mkdir -p ../backups/bode
-B=".venv/Scripts/python -m fnirsi1013d.bode --port COM10 --yes"   # or fnirsi1013d-bode after a venv reinstall
+B=".venv/Scripts/python -m fnirsi1013d.bode --port <port> --yes"   # or fnirsi1013d-bode after a venv reinstall
 # 0. plan and time (no scope)
 $B --plan-only --start 1kHz --stop 300kHz --points 30
 # 1. ground wiring. A: DUT ground on the CH1 / CH2 ground clips. B: DUT ground on the USB shell, clips open.
@@ -327,22 +327,22 @@ there, `--merge --check`, never change an existing vector's bytes.
 
 ## Open items (priority order)
 
-Pending work for every agent lives in `../docs/plans/task-queue.md` (section "MCP / host"); the coordinator dispatches
+Pending work for every agent lives in `../docs/plans/task-queue.md` (section "MCP / host"); the bench session dispatches
 from there and moves items to "Dispatched". Add host items you discover there, not only here.
 
-0. **1.17 on the unit** (task queue "1.17 on the unit, host side"): after the owner flashes 0x1536 and the firmware checks
+0. **1.17 on the unit** (task queue "1.17 on the unit, host side"): after the maintainer flashes 0x1536 and the firmware checks
    7-9 of `../firmware/AGENTS.md` section 35 pass, run `scope_capture_segments` and `scope_averaged_capture(hardware=true)`
-   on the bench (coordinator holds COM10), then default `hardware` to auto where the record fits, add it to
+   on the bench (bench session holds <port>), then default `hardware` to auto where the record fits, add it to
    `scope_decay_fit`, and drop the "not yet verified" caveats. The release-readiness items of the wheel are done
-   (8ea8886 paths, 0e1d36b wheel smoke + CI job, ef8aa30 docs + `.mcp.json.example`; the coordinator untracked the owner's
+   (8ea8886 paths, 0e1d36b wheel smoke + CI job, ef8aa30 docs + `.mcp.json.example`; the bench session untracked the maintainer's
    `.mcp.json` in 508f0c5).
-0a. **1.19 / 1.20 on the unit** (coordinator holds COM10): `scope_health` on 0x1538 (`encode_check` mode 2, last 0x33
+0a. **1.19 / 1.20 on the unit** (bench session holds <port>): `scope_health` on 0x1538 (`encode_check` mode 2, last 0x33
    0xF6, counts), then `scope_bode_sweep(where='device')` on the divider and the RC of firmware/AGENTS.md 42 steps 3-4
    next to the same `where='host'` sweep: expect within 0.05 dB / 0.3 deg where both are valid; check the poll
    interval (0.2 s) and the device's `elapsed_ms` against its estimate; `scope_cal_probe` on both channels at range 0
    with nothing connected (the bench's 0.2.67 numbers are in docs/hardware-status.md 18:20).
 1. **Bode: bench results in, then the follow-ups.** Host steps H1-H3 are done (1d46cf8 simulator DUT, f0940ee H1,
-   363f676 runner and CLI, d3a16bb tool, docs commit after). Read the coordinator's bench numbers (procedure below)
+   363f676 runner and CLI, d3a16bb tool, docs commit after). Read the bench session's numbers (procedure below)
    against the design's expectations; if the wiring verdict (section 2.5) or the floor changes the advice, fix
    `bode.CONNECTION_TEXT`, README "Bode sweep" and guide 3b. Then the task queue's "Bode follow-ups": CH1
    re-ranging, the harmonic fast mode (design 1.3, same planner and DFT, harmonics as extra bins), the impedance mode
@@ -363,7 +363,7 @@ from there and moves items to "Dispatched". Add host items you discover there, n
    in firmware (fw 0.2.70, branch fw-screen, firmware/AGENTS.md section 46), bench pending (T9);
    `scope_screenshot` needs no change, tests/test_read_screen.py checks the wire format against the vectors.
 7. GET_BAD_FRAME (0x0008) decode and dump on E_BAD_CRC (the cmd id is in `Cmd`, no client method yet).
-8. **mcp-gen7 batch (branch mcp-gen7) on the bench**: the coordinator checks that COM10 is free about 30 s after the
+8. **mcp-gen7 batch (branch mcp-gen7) on the bench**: the bench session checks that <port> is free about 30 s after the
    last tool call (`fnirsi1013d-flash` / a script opens it) and that the next tool call reconnects; a host Bode sweep
    right after entering decimation on 0x153A should show `flat_retakes` >= 1 and correct ranges. CHANGELOG lines for
    the three commits are owed (the batch's brief kept mcp-gen7 out of CHANGELOG.md); the skill's troubleshooting row

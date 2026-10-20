@@ -1,6 +1,6 @@
 # fpga/al3 - handoff for agents and humans
 
-Anlogic AL3A10LG144C7 FPGA of the owner's FNIRSI 1013D (JTAG IDCODE 0x18006C31, config flash Winbond
+Anlogic AL3A10LG144C7 FPGA of the maintainer's FNIRSI 1013D (JTAG IDCODE 0x18006C31, config flash Winbond
 W25Q80DV, JEDEC `ef 40 14`). Read `AGENTS.md` at the repo root first; its flashing rules override anything here.
 
 State on 2026-10-20 (fpga-gen13, branch `fpga-gen13`):
@@ -13,7 +13,7 @@ State on 2026-10-20 (fpga-gen13, branch `fpga-gen13`):
 - fpga-gen12 (2026-10-20): 0x153B **flash-ready**. `src/` unchanged (c173ed5); the two tb steps fpga-gen11 left not green
   (tb_fir, tb_seg) were testbench artefacts of the new stop semantics, not dut faults (three signatures, each with its
   invariant in section "0x153B flash-ready, fpga-gen12"); the 13-step `tb/run.sh` is **ALL PASS on seeds 12345 and 4242** (every step). The flash session for the
-  coordinator is in that section. **Not flashed.**
+  bench session is in that section. **Not flashed.**
 - fpga-gen11 (2026-10-20): `src/` holds version word **0x153B** (0x153B-pre until benched): 0x153A with records that end on the
   auto time-out or the firmware's forced stop reported at the write pointer (0x14 = W - total + pretrigger), the time-out no
   longer cutting a triggered record, no trigger after the stop. Section "Spliced time-out records, fpga-gen11" below;
@@ -71,7 +71,7 @@ State on 2026-10-20 (fpga-gen13, branch `fpga-gen13`):
     padded flash image `backups/al3_decim_0x1534_83140510_padded.bin`, sha256 `c387a15e...c0a0`.
   - Meets timing (with the new `sample_write_clock` constraint) and passes `tb/run.sh`.
   - Interface, design, gain/alias table and bench checks: `README.md` "Changes" section 3. The firmware spec went to
-    the coordinator on 2026-10-18.
+    the bench session on 2026-10-18.
   - **Not flashed.** It needs firmware that knows 0x1534. A 0x153x-aware firmware that does not use 0x53 sees 0x1533
     behaviour.
 - The FPGA in the unit has not changed: it still holds 0x1532, not the 0x1533 design described below.
@@ -79,11 +79,11 @@ State on 2026-10-20 (fpga-gen13, branch `fpga-gen13`):
   - Pinned copy: `backups/al3_ext-trigger_0x1533_a9656703.bin`.
   - **Not flashed.** It needs fw 0.2.9 or later on the MCU first. 0.2.9 (commit bebf901) decodes 0x153x as AL3,
     sets caps EXT_TRIGGER and reports 0x28 in GET_STATUS byte 42.
-  - Flashing waits for the owner at the bench with the FT2232D programmer, following "Flashing this unit" below.
+  - Flashing waits for the maintainer at the bench with the FT2232D programmer, following "Flashing this unit" below.
     The verified stock dump `backups/2026-10-18_fpga-25q80-stock.bin` must be at hand; never flash without it.
-- Calibration pin: the owner's DMM confirmed -1.23 / +1.87 V on the post against the probe ground (2026-10-18). That
+- Calibration pin: the maintainer's DMM confirmed -1.23 / +1.87 V on the post against the probe ground (2026-10-18). That
   matches VRF1, the probe ground, sitting about +1.24 V above FPGA/USB ground (`README.md` "Changes" section 2).
-- Pending with the owner: bench tests 1 to 4 of that section.
+- Pending with the maintainer: bench tests 1 to 4 of that section.
   1. EXT referenced to USB ground.
   2. EXT on the probe ground, without and with a series LED.
   3. Ground-loop check.
@@ -104,7 +104,7 @@ State on 2026-10-20 (fpga-gen13, branch `fpga-gen13`):
 | `td/td_install.sh` | Headless TD install into `~/anlogic` with listing check, licence copy and GUI-lib stubs. |
 | `td/td_fetch.sh` | Captcha download helper for TD 5.0.3 from Sipeed (needs a human). |
 | `td/compare_bin.py` | Size, hash, header words and byte diff of two `.bin` files. |
-| `license/Anlogic.lic` | Owner's licence, gitignored. FEATURE TD, expires 2027-09-30, HOST_ID ANY. Renew before then. |
+| `license/Anlogic.lic` | Maintainer's licence, gitignored. FEATURE TD, expires 2027-09-30, HOST_ID ANY. Renew before then. |
 | `build/` | Build outputs, gitignored. |
 | `TD_SETUP.md` | Full install steps, installer hashes, install log, alternative routes. |
 | `README.md` | Toolchain survey, zaklad.v vs stock table, pin map, rebuild results. |
@@ -115,13 +115,13 @@ Deep design analysis (all variants, command tables, timing, limits): `research/n
 
 TD is installed at `~/anlogic/TD_4.6.8_SP1_116866_NL` (licence copied to its `license/Anlogic.lic`), stubs in
 `~/anlogic/shim`. To reinstall from scratch follow `TD_SETUP.md`. The installer zip is
-`C:\Users\miklj\Downloads\TD_4.6.8_SP1_116866_NL.zip`, sha256 `12f8c2b2...3f15`.
+`C:\Users\<you>\Downloads\TD_4.6.8_SP1_116866_NL.zip`, sha256 `12f8c2b2...3f15`.
 
 Run from Windows PowerShell. Git Bash mangles `/mnt` paths; put complex commands in a script file.
 
 ```powershell
-wsl -d Ubuntu -- bash /mnt/d/src/fnirsi-1013d-ai/fpga/al3/build.sh
-wsl -d Ubuntu -- python3 -I /mnt/d/src/fnirsi-1013d-ai/fpga/al3/td/compare_bin.py /mnt/d/src/fnirsi-1013d-ai/fpga/al3/build/FPGA.bin /mnt/d/src/fnirsi-1013d-ai/fpga/al3/bitstreams/atlan4-FPGA-0x1532.bin
+wsl -d <distro> -- bash /mnt/d/path/to/fnirsi-1013d-mcp/fpga/al3/build.sh
+wsl -d <distro> -- python3 -I /mnt/d/path/to/fnirsi-1013d-mcp/fpga/al3/td/compare_bin.py /mnt/d/path/to/fnirsi-1013d-mcp/fpga/al3/build/FPGA.bin /mnt/d/path/to/fnirsi-1013d-mcp/fpga/al3/bitstreams/atlan4-FPGA-0x1532.bin
 ```
 
 - `build.sh` copies `src/` to `~/al3-build` (WSL-local, fast), fills `build.tcl` with the TD path and the user
@@ -134,15 +134,15 @@ wsl -d Ubuntu -- python3 -I /mnt/d/src/fnirsi-1013d-ai/fpga/al3/td/compare_bin.p
   (two builds in different work dirs, same hash; about 60 s). 0x1536 (`SRC_REV=27c0c75`) gave `4eaf6811814c58e1f00e648b97e7a608bb5ca387fb036f21714e91667959b48b`. 0x1535 (`SRC_REV=e2aec2e`) gave
   `5040a2aeede071019bca0ffee47d765b87d980e1e47ca01ac32cb875c839aa96`. 0x1534 (`SRC_REV=6d4c8ad`) gave `83140510dfbfef56cc5ed15d70866e6bc52c407a41fd0ea480e8993df5b820c1`.
   0x1533 (`SRC_REV=2839258`) gave `a96567031872ae99bd40f0722a111a08da0f6381b6c710b70998af784a341216`.
-- Testbench: install iverilog once as root (`wsl -d Ubuntu -u root -- apt-get install -y iverilog`, done 2026-10-18),
-  then run `wsl -d Ubuntu -- bash /mnt/d/src/fnirsi-1013d-ai/fpga/al3/tb/run.sh [seed]`. It takes about 17 minutes with step 6 (seed 12345: 1038 s)
+- Testbench: install iverilog once as root (`wsl -d <distro> -u root -- apt-get install -y iverilog`, done 2026-10-18),
+  then run `wsl -d <distro> -- bash /mnt/d/path/to/fnirsi-1013d-mcp/fpga/al3/tb/run.sh [seed]`. It takes about 17 minutes with step 6 (seed 12345: 1038 s)
   (the first three steps about 25 s, `tb_fir.v` the rest) and ends with `ALL PASS (seed N)`: 38 checks (tb_ext_trigger),
   98 checks (tb_decim), about 1,870 samples in `cic_model: ... -> PASS`, 154 checks (tb_fir) and about 1,540 FIR
   samples in the second `cic_model` line, then 8 checks (tb_long, about 5 minutes more), then `tb_seg.v` (50 checks,
   5 to 7 minutes) and `seg_model: 22 runs, 0 failures -> PASS`. `ONLY=fir` runs only the FIR step, `ONLY=seg` only the
   0x1536 step (`SEG_P1=2` for a quick run, about 2 to 5 minutes). Any change to `zaklad.v` must keep it passing. The equivalence phases prove that CH1/CH2
   match 0x1532 and that K = 0 (including EXT) matches 0x1533.
-- Run testbench work from PowerShell (`wsl -d Ubuntu -- bash <script>`). Git Bash rewrites `/mnt/...` arguments.
+- Run testbench work from PowerShell (`wsl -d <distro> -- bash <script>`). Git Bash rewrites `/mnt/...` arguments.
   Concurrent runs need different `SIM_WORK` directories.
 
 Expected output for Atlan4's original (`SRC_REV=a947e78`; before 2026-10-18 this was plain `src/`):
@@ -239,17 +239,17 @@ Tool docs are in `firmware/tools/README-spiflash.md`. The measured J2 pinout and
    ```
 4. Run `python firmware/tools/spiflash_d2xx.py probe` and expect `ef 40 14`. Then run
    `python firmware/tools/spiflash_d2xx.py write -i backups/NAME_padded.bin --yes`. It asks for the JEDEC ID to be
-   typed, so it runs only with the owner present. It erases and programs only changed sectors and verifies by read-back.
+   typed, so it runs only with the maintainer present. It erases and programs only changed sectors and verifies by read-back.
 5. Power-cycle. The diagnostics screen shows the FPGA version word. Log hashes and the result in `docs/hardware-status.md`.
 6. Recovery: write `backups/2026-10-18_fpga-25q80-stock.bin` back the same way. The scope CPU cannot reach this
    flash, so a bad bitstream cannot brick the MCU side; the scope just has no working FPGA until the flash is rewritten.
 
-Agents do not flash on their own. Flashing needs the owner at the bench and an explicit request.
+Agents do not flash on their own. Flashing needs the maintainer at the bench and an explicit request.
 
 ## MCU-FPGA protocol and design structure
 
 References:
-- `D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\FPGA commands.txt`: Atlan4's command table (read and write
+- `D:\path\to\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\FPGA commands.txt`: Atlan4's command table (read and write
   commands, byte order). Its 0x06 entry still shows 0x14/0x32; this design returns 0x15/0x32.
 - `research/notes/fpga-verilog-analysis.md`: command tables for all variants, bus timing, limits.
 - `README.md` here: zaklad.v vs stock table, pin map. `docs/protocol.md`: the PC-side protocol of our firmware.
@@ -331,7 +331,7 @@ Do not edit `src/` in place without keeping Atlan4's original reproducible (the 
 4. **I/O and clock constraints.** Add generated clocks for `clk_50MHz` and `sample_write_clock`, declare
    `i_mcu_clk` asynchronous, add `set_input_delay` on the ADC buses relative to the encode outputs, de-duplicate
    `clk_200MHz` vs `clkc[0]`, fix the 40 % `-waveform {0 2}`. Do this before judging any timing change.
-   Starter block: `D:\src\FNIRSI_1014D_Firmware\fpga\README.md`; analysis in `FPGA_NOTES.md` there.
+   Starter block: `D:\path\to\FNIRSI_1014D_Firmware\fpga\README.md`; analysis in `FPGA_NOTES.md` there.
 5. **200 MHz DDS clock.** Clock `freq_generator_dds_pwm` from `clk_200MHz` instead of 50 MHz for 4x frequency
    resolution and lower jitter. The phase increment scale changes by 4, so the firmware's 0x51 computation must
    follow. Pipeline the 32-bit compare to meet 200 MHz.
@@ -345,13 +345,13 @@ Decimation filter (0x1534), open items:
   for N > 10,334 with Hogenauer pruning or wider registers.
 - Mutation runs made for 0x1534 (`DUT=` override): the list is in commit 65417a8. A tenth (K = 2 comb bypass
   broken) was still running at hand-over.
-- Next design: 0x1535, a CIC compensation FIR as the intended default mode (owner direction): built, see below and
-  `README.md` section 5. 0x1534 is accepted by the coordinator (2026-10-18) and is
+- Next design: 0x1535, a CIC compensation FIR as the intended default mode (maintainer direction): built, see below and
+  `README.md` section 5. 0x1534 is accepted by the bench session (2026-10-18) and is
   being flashed with fw 0.2.33.
 
 ## 0x153B 'spliced' on the unit: the records were flat, fpga-gen13 (2026-10-20)
 
-Brief (coordinator, 20:03): 0x153B flashed at 19:31 and verified, fw 0.2.102, wizard rerun (0x08E4); "every record is
+Brief (bench session, 20:03): 0x153B flashed at 19:31 and verified, fw 0.2.102, wizard rerun (0x08E4); "every record is
 spliced": 50 of 50 untriggered host captures at 1 MSa/s and at 200 MSa/s with a seam ratio up to 2.7, triggered captures
 spliced too (1.8..3.0, seams at 2288 / 2403 / 4142 / 2278 of 6000), bode_cells leak +14..+16 dB, every sweep point flagged,
 the same record read three times identical. Find the cause among four hypotheses about the 0x14 convention, the force path,
@@ -418,7 +418,7 @@ brief's "make it fail the way the bench does" cannot be met: the bench did not f
 **No bitstream change, no rebuild.** `src/` = c173ed5, the images stand (`dist/al3-0x153B.bin` `fdc3c21b...fc3d`, flash
 image `1391978c...3b88`). dist: status **unbenched** (not withdrawn: nothing was measured against it), the bench field says
 flashed 19:31 and what the 19:52 evidence is; `tools/bitstreams.py check` passes. The firmware for the next session is
-the one on the card, **fw 0.2.102** (any 0.2.97+ reads 0x153B as `PC_STOP_NEWEST`); no new image is needed. If the owner
+the one on the card, **fw 0.2.102** (any 0.2.97+ reads 0x153B as `PC_STOP_NEWEST`); no new image is needed. If the maintainer
 rolls back to 0x153A tonight (write `backups/fpga-flash_pre-0x153B_20261020-1931.bin`, hash `77672b5a...19d0`, verify, power
 cycle, `#VER fpga=0x153a`, stages 0x08E3 from the stored calibration), the next 0x153B session repeats the flash procedure of
 the fpga-gen12 section with the checklist below.
@@ -436,14 +436,14 @@ the fpga-gen12 section with the checklist below.
    means no tone, not a splice).
 5. Log each step in `docs/hardware-status.md`; set dist to `recommended` (0x153A `supported`) only on a clean 1-6.
 
-**Commands.** `wsl -d Ubuntu -- bash <launcher>` with `setsid nohup env SIM_WORK=$HOME/g13/sim-<seed> ONLY=timeout bash
+**Commands.** `wsl -d <distro> -- bash <launcher>` with `setsid nohup env SIM_WORK=$HOME/g13/sim-<seed> ONLY=timeout bash
 <repo>/fpga/al3/tb/run.sh <seed> > ~/g13/logs/timeout-<seed>.log &` (no reference files needed for step 13); the two seeds
 in parallel. vvp's output through tee is block-buffered: the log fills in 4 kB steps, so an empty log is not a stalled run
 (`pgrep -c vvp`).
 
 ## 0x153B flash-ready, fpga-gen12 (2026-10-20)
 
-Brief (coordinator): make 0x153B flash-ready. fpga-gen11 left tb_fir and tb_seg not green (2 failed checks each after
+Brief (bench session): make 0x153B flash-ready. fpga-gen11 left tb_fir and tb_seg not green (2 failed checks each after
 four masks for the changed stop semantics, "two residual mismatch windows of about 10 ns"); decide for each whether it is
 a testbench artefact (mask with a stated invariant) or a dut fault (fix zaklad.v), run the 13 steps on two seeds, write
 the flash session. Branch `fpga-gen12` from main ac1f2ab. `src/zaklad.v` is **unchanged** (c173ed5 = the built source):
@@ -481,7 +481,7 @@ the images stand (`dist/al3-0x153B.bin` `fdc3c21b...fc3d`, flash image `1391978c
 
 **Results** (tb at 503c034, source c173ed5). seed 12345: ext 39, decim 98 + cic_model 1876 samples, fir 163 + cic_model 1612, long 8, seg 53 + seg_model 22 runs, trigpos 882, contract 12 (transcript = contract_0x153B.txt), encphase PASS, mcuread PASS (70 + 26), adccap 2274, firstrec 38, timeout 75: **ALL PASS** (5107 s); seed 4242: 39, 98 + 1873, 165 + 1638, 8, 53 + 22, 882, 12, encphase, mcuread 70 + 26, 2274, 38, 75: **ALL PASS** (4926 s). Every equivalence phase 0 mismatches (the fir and seg check counts vary with the random phase's untriggered captures, which add a 0x14 check each). Four runs in parallel on the 24-core WSL; one full run alone is about 1 h.
 
-**Flash session for the coordinator** (owner at the bench; the procedure of "Flashing this unit" above and
+**Flash session for the bench session** (maintainer at the bench; the procedure of "Flashing this unit" above and
 `firmware/tools/README-spiflash.md`; the bench log entries of 2026-10-20 09:59-10:08 for 0x153A are the template;
 `docs/fpga-flash-from-mcu.md` only says why the programmer, not the MCU, does this):
 1. Pin the images first: `python -I tools/bitstreams.py pack --out backups/dist-0x153B` writes
@@ -523,9 +523,9 @@ is an alternative; the Bode engine's records with 0x0E = total and a trigger are
 0x14 != pretrigger. Nothing else changed: capture stages, decimator, FIR, readout, sequencer and the MCU decoder are
 cycle-identical to 0x153A (the equivalence steps), so a firmware that runs 0x153A runs 0x153B.
 
-**Commands used.** `wsl -d Ubuntu -- bash <launcher>` with the launcher doing `setsid nohup env
-REF_SRC_DIR=/home/mikl/g11/refs SIM_WORK=/home/mikl/g12/sim-<name> ONLY=<step> bash <repo>/fpga/al3/tb/run.sh <seed>
-> /home/mikl/g12/logs/<name>.log &` (the five reference files in `/home/mikl/g11/refs` hash-checked against `git show
+**Commands used.** `wsl -d <distro> -- bash <launcher>` with the launcher doing `setsid nohup env
+REF_SRC_DIR=~/g11/refs SIM_WORK=~/g12/sim-<name> ONLY=<step> bash <repo>/fpga/al3/tb/run.sh <seed>
+> ~/g12/logs/<name>.log &` (the five reference files in `~/g11/refs` hash-checked against `git show
 <rev>:fpga/al3/src/zaklad.v` of this checkout); four runs in parallel on the 24-core WSL (fir and seg alone, two full
 runs) take the same wall clock as one. The MISMATCH lines are the way in (the tbs print the first 30 now): decode `st`
 as {ta 13, ra 13, write address 13, triggered 1, write enable 1, half-way 1, state 1, read offset 13, write clock 1,
@@ -538,7 +538,7 @@ from the first stop on, so it cannot reproduce a timing-dependent window one to 
 
 ## Spliced time-out records, fpga-gen11 (2026-10-20)
 
-Brief (coordinator): a record whose capture ended by the auto time-out (no trigger edge: the Frequency response engine
+Brief (bench session): a record whose capture ended by the auto time-out (no trigger edge: the Frequency response engine
 armed with the Scope view's level off the signal; the host script's "auto" variant with level 255, pretrigger 0, CIC3+FIR)
 is spliced from two captures in about half the cases (phase jump at a random sample, DFT leakage -3 .. -36 dB); triggered
 records are clean 64 of 64 (`backups/bode/cells_1235.npz`, 96 captures, fw 0.2.88 on 0x153A; hardware-status 12:32 ..
@@ -627,17 +627,17 @@ padded `1391978c33379271789a9405f7b0fb9395a85e223ecc69a0430b9f2859a23b88`; manif
 with every "auto" record clean; 50 untriggered Scope-view auto traces without a seam; ten Frequency response sweeps with
 retried 0 .. 1; a slow-signal auto mode without a "triggered" flag on a flat record; segments in auto mode.
 
-**Commands.** `wsl -d Ubuntu -- bash <repo>/fpga/al3/tb/run.sh 12345` with `REF_SRC_DIR` = a directory holding
+**Commands.** `wsl -d <distro> -- bash <repo>/fpga/al3/tb/run.sh 12345` with `REF_SRC_DIR` = a directory holding
 `a947e78.v 2839258.v 6d4c8ad.v e2aec2e.v ce943bf.v` exported by Windows git (`git show <rev>:fpga/al3/src/zaklad.v`);
 `ONLY=timeout` for step 13 (about 10 min at 2048 words; `TIMEOUT_TOTAL=512 TIMEOUT_RUNS=2` for a 3-minute smoke run);
-`DUT=<the a2b6929 zaklad.v> ONLY=timeout` shows the 0x153A fault. Build: `bash <repo>/fpga/al3/build.sh /home/mikl/g11/bN`,
-then `tb/capture_report.sh /home/mikl/g11/bN` (the capture stages are unchanged, the report is per build). Long jobs from
+`DUT=<the a2b6929 zaklad.v> ONLY=timeout` shows the 0x153A fault. Build: `bash <repo>/fpga/al3/build.sh ~/g11/bN`,
+then `tb/capture_report.sh ~/g11/bN` (the capture stages are unchanged, the report is per build). Long jobs from
 a Windows session: launch them from a script file with `setsid nohup ... &` (a `wsl bash -c` background job dies with the
 session), and never edit `run.sh` while a bash instance is reading it.
 
 ## 0x153A status (fpga-gen9, 2026-10-19)
 
-Brief (coordinator): review fpga-gen8's unfinished 0x153A capture-window fix adversarially, decide, finish it. The review
+Brief (bench session): review fpga-gen8's unfinished 0x153A capture-window fix adversarially, decide, finish it. The review
 is the section "0x153A review, fpga-gen9" at the end of this file; the design, numbers, tests and bench checks are in
 `README.md` "Changes" section 10; the registers in `src/FPGA commands.txt` and `docs/protocol.md` 5.1.
 
@@ -665,7 +665,7 @@ lottery since 0x1532; a miss shows in 0x33 bit 1); `sample_write_clock` 0 errors
 (2.202 ns); `i_mcu_clk` 0 errors (21.09 ns); `clkc[0]` 58 errors (the SDC artefact). `build/FPGA.bin` =
 `dist/al3-0x153A.bin` sha256 `75e0ef21526248ecc2a7a47231abddf59b77d8075917c460a9630ee97cf3ddde`; `build/FPGA_padded.bin`
 (1 MiB flash image) `77672b5a38f2225e98cdecd7de012850121b6343525392d973e41d39b42719d0`. Source commit f735fae. The
-coordinator pins both in `backups/` before any flash. **Not flashed.** Three builds of the design (the XOR constant
+bench session pins both in `backups/` before any flash. **Not flashed.** Three builds of the design (the XOR constant
 changes the placement) gave 4.659 / 5.065 (2 errors, fixed by the `pp_xa*` retiming) / 4.949 ns on `clk_200MHz`: the
 divider-compare lottery is real; rebuild after any source change and read the summary before pinning.
 
@@ -690,22 +690,22 @@ adccap 2274. The references for the equivalence steps get `dut.adc*_w` as pins 0
   Take the clean stage whose neighbour is also clean (the middle of the clean run), else the clean one; if no stage of
   {2..5} is clean for a B core, set its reference bit (0x63 bit 12 CH1 / 13 CH2) and repeat. Store the result with the
   calibration (per unit) and write it at boot. After any full-rate capture, a non-zero 0x36 count on a quiet trace
-  marks a bad core (fail loudly, as 0x33 does for the encodes). Expected on the owner's unit: 0x08E4 or a neighbour,
+  marks a bad core (fail loudly, as 0x33 does for the encodes). Expected on the maintainer's unit: 0x08E4 or a neighbour,
   reference bits 0. The firmware should also expose 0x36 in GET_HEALTH / Diagnostics.
 - Reads 0x24..0x27 are the IOB register (liveness only). 0x33 unchanged (0xF6 good).
 - Calibration taken on 0x1539 holds for the per-core zeros (the same cores, the same order); redo it if the trained
   stages differ from the power-on ones.
 
 **Commands.**
-- Build: `wsl -d Ubuntu -- bash <repo>/fpga/al3/build.sh /home/mikl/g9/bN`, then
-  `wsl -d Ubuntu -- bash <repo>/fpga/al3/tb/capture_report.sh /home/mikl/g9/bN` (exit 1 below 1 ns at a power-on stage).
+- Build: `wsl -d <distro> -- bash <repo>/fpga/al3/build.sh ~/g9/bN`, then
+  `wsl -d <distro> -- bash <repo>/fpga/al3/tb/capture_report.sh ~/g9/bN` (exit 1 below 1 ns at a power-on stage).
 - Tests: `tb/run.sh <seed>` with `REF_SRC_DIR=<dir with a947e78.v 2839258.v 6d4c8ad.v e2aec2e.v ce943bf.v>` exported by
   Windows git; `ONLY=adccap` for the new step (20 s; `+quick=1` by hand for 10 s).
 - Old-design capture instants: re-time a placed build with the two `set_*_delay 0` lines of `tb/capture_io.sdc` and
   run the `oldcap.py` pattern (gen9 scratch; the numbers are in README section 10).
 
 **Open / next steps.**
-1. Coordinator: pin the images in `backups/`, flash with the owner, run README section 10 checks 1..7, update
+1. Bench session: pin the images in `backups/`, flash with the maintainer, run README section 10 checks 1..7, update
    `docs/hardware-status.md` and the dist status; redo the calibration if the trained stages differ.
 2. Firmware: the EXT offsets, the 0x36 check, the training (above); the wizard's zero point back at 128.
 3. 0x153B: rebase `gen8-features-wip` (trigger types, peak detect, hardware counter; 0x5E..0x62, reads 0x34 / 0x35) onto
@@ -716,7 +716,7 @@ adccap 2274. The references for the equivalence steps get `dut.adc*_w` as pins 0
 
 ## First-record saturation, fpga-gen10 (2026-10-20)
 
-Brief (coordinator): on 0x153A a decimated 16-bit capture that follows a change of the decimator mode, shift or sample rate
+Brief (bench session): on 0x153A a decimated 16-bit capture that follows a change of the decimator mode, shift or sample rate
 sometimes comes back as a whole record of 0xFFFF on both channels (45 / 61 V on the host's volts scale); the next capture
 at the same settings is clean; 8-bit captures never do it (`docs/hardware-status.md` 2026-10-20 10:52 .. 11:22). Branch
 `fpga-gen10`, no bitstream change, no flash. Sources read: `src/zaklad.v` (decim_chan, fir_chan, the control block, the
@@ -783,7 +783,7 @@ proves wrap independence), the saturation is a combinational compare on every ou
   next change; a UI conversion with the Filter off (K 0) makes the next host arm rewrite 0x54 (`!pc_dec_cur.k`), which is
   why the bench saw the fault on the capture after a mode change and a clean one at the same settings afterwards.
 - `pc_hal_timebase_write(raw)` (219-227) writes 0x0D and `pc_dec_divider` but leaves `scopesettings.samplerate` at the UI's
-  rate; GET_DECIM bytes 16-23 (divider, rate) follow `tb_raw` too, which is the "stale pending config" the coordinator saw.
+  rate; GET_DECIM bytes 16-23 (divider, rate) follow `tb_raw` too, which is the "stale pending config" the bench session saw.
 
 **What is not explained (needs the bench).** The Bode engine's pre-scan (`bh_arm` writes 0x0D = 4095 itself and configures
 from the same `div`) and the 11:15 round 0 third capture (host CIC2+FIR after two clean CIC3+FIR at the same raw divider,
@@ -811,7 +811,7 @@ for N 4096.
    model's 0x54 register differs (a lost or foreign write): the arm must still write 0x54.
 
 **Bench reproduction (host, current image fw 0.2.83 / 0x153A; LOCAL or REMOTE, UI in RUN at a fast time base).**
-`from fnirsi1013d.scope import Scope; s = Scope.connect("COM10")`:
+`from fnirsi1013d.scope import Scope; s = Scope.connect("<port>")`:
 1. `s.set_timebase(ui_index=<a 1 MSa/s index>)`; at the scope set the memory depth above 8k samples (12k or deeper) and the
    longest time/div the ACQ menu allows at that depth; `s.set_decim("off")`.
 2. `s.set_timebase(divider=4095)`; `s.get_decim()` must show divider 4095 / next_n 4096.
@@ -845,7 +845,7 @@ steps; a run of the other eleven was not repeated here (no src/ change).
 
 ## 0x1539 status (fpga-gen8, 2026-10-19)
 
-Brief (coordinator, priority change): the bench readout fault on 0x1538 (fw 0.2.67 diagnostics): bytes read near code 128,
+Brief (bench session, priority change): the bench readout fault on 0x1538 (fw 0.2.67 diagnostics): bytes read near code 128,
 and across any boundary where several bits flip (0x8F / 0x90, 0x77 / 0x78), came back as mixes of two successive bytes on
 CH1 A and CH2 B. Fix it first and ship it alone; the trigger / peak / counter features follow as 0x153A. Everything is in
 `README.md` "Changes" section 9.
@@ -875,7 +875,7 @@ all 256 codes; 0x1539 clean everywhere, the 0x1538 reference mixed whenever read
 steps' references get the falling-edge read block (`mkref`, `REF_READ_EDGE`). Contract `tb/contract_0x1539.txt` = 0x1538's
 except the version byte. All ten steps pass on seeds 12345 (2317 s) and 3 (1622 s): 38 + 98 + 154 + 8 + 50 checks, both cic_model checks, seg_model 22 runs, tb_trigpos 882, contract 12 (transcript equal), encphase (plain and 3.5 ns 400 each, the late-A variant caught), mcuread 70 + 26.
 
-**Manifest entry for `fpga/al3/dist`** (the coordinator adds it):
+**Manifest entry for `fpga/al3/dist`** (the bench session adds it):
 
 ```json
 {
@@ -922,7 +922,7 @@ the captures, with chip 2's A-B mean shifted by -3 codes. Everything is in `READ
 - 0x1535's encode CE arrived about 2 ns late (the "structural" clkc[1] error), so it toggled one `clk_ADC` edge after the
   write clock: encB = write clock, core B earlier, as 1.00o5 assumes.
 
-**It was not a write race.** The coordinator's 60 s run without writes (fw 0.2.61 event log) was bad in about 40 % of the
+**It was not a write race.** The bench session's 60 s run without writes (fw 0.2.61 event log) was bad in about 40 % of the
 captures throughout. The brief's "0 ms clean / 50 ms bad" was chance at 20 trials.
 
 **Fix in 0x1538**:
@@ -1021,7 +1021,7 @@ fix, build, bench checks), section 6 "Firmware contract", and section 4 after th
 
 **Edge study** (`tb/edge_phase.py`, numpy):
 - +FIR overshoot is 0.45..6.9 % depending on the edge phase; the CIC alone has none.
-- The 1 kHz DDS square (inc 85,899, 999.995973 Hz) sweeps the 1 MSa/s grid at 4.03 Hz: the owner's 3-4 Hz horns.
+- The 1 kHz DDS square (inc 85,899, 999.995973 Hz) sweeps the 1 MSa/s grid at 4.03 Hz: the maintainer's 3-4 Hz horns.
 - It is pure sampled Gibbs ringing of the composite filter.
 - The spectrum's bin beat above fo/4 comes from the odd-harmonic images, and it is larger with the CIC alone than with
   +FIR.
@@ -1035,7 +1035,7 @@ fix, build, bench checks), section 6 "Firmware contract", and section 4 after th
   - keep EXT in `fpga_swap_trigger_channel`;
   - the arm order on 0x1532..0x1535 (0x0B / 0x0C before 0x01 = 1 on every bitstream);
   - a dummy strobe in the 16-bit / UI readouts (every readout goes through `fpga_read_start`).
-- Filter defaults per mode, a coordinator decision with the edge study as input.
+- Filter defaults per mode, a bench session decision with the edge study as input.
 
 **Tool notes.**
 - WSL git cannot read a worktree created by Windows git (`.git` points at `D:/...`). `run.sh` takes `REF_SRC_DIR=<dir>`
@@ -1174,7 +1174,7 @@ Testbench notes (things that cost time in 0x1534):
 
 Tool gotchas:
 - Git Bash mangles `/mnt/...` arguments and breaks heredocs that contain some quote patterns. Run WSL from PowerShell
-  (`wsl -d Ubuntu -- bash /mnt/c/.../script.sh`) and write scripts with the Write tool.
+  (`wsl -d <distro> -- bash /mnt/c/.../script.sh`) and write scripts with the Write tool.
 - Line endings: `README.md` and `tb/tb_ext_trigger.v` are CRLF (`README.md` has 22 LF lines from b146da5);
   `zaklad.v`, `AGENTS.md` and the other tb files are LF. Python `open(...).read()` then `write(newline='')` silently
   converts CRLF files to LF.
@@ -1274,15 +1274,15 @@ with the capture fix's 0x63, 0x64 and 0x36).
   change with the new sampling); run.sh still points at `contract_0x1539.txt`.
 - not run: tb_fir, tb_long, tb_seg (adapted the same way as tb_decim: the reference's ADC pins are `dut.adc*_w` 1 ns
   after each write edge, the live reads are not compared).
-- missing: `tb_adccap.v`, the coordinator's item (3): drive the ADC data pins as X during [encode pad + tV_min,
+- missing: `tb_adccap.v`, the bench session's item (3): drive the ADC data pins as X during [encode pad + tV_min,
   encode pad + tPD_max] with the encode pad delays from TD (and +-1 ns), sweep the stages, and check that no X reaches
   `adc*_w` / the memory at the defaults at D = 0, 1, 9 (and that 0x1539's raw capture does catch X: the bench
   mechanism). Add it as run.sh step 11.
 
 ### Commands
-- Build: `wsl -d Ubuntu -- bash /mnt/d/src/fnirsi-1013d-ai/fpga/al3/build.sh` (from the worktree path), then
-  `wsl -d Ubuntu -- bash <repo>/fpga/al3/tb/capture_report.sh ~/al3-build` (exit 1 if a power-on stage has < 1 ns).
-- Testbench: `wsl -d Ubuntu -- bash <repo>/fpga/al3/tb/run.sh 12345` and `... 3`, with
+- Build: `wsl -d <distro> -- bash /mnt/d/path/to/fnirsi-1013d-mcp/fpga/al3/build.sh` (from the worktree path), then
+  `wsl -d <distro> -- bash <repo>/fpga/al3/tb/capture_report.sh ~/al3-build` (exit 1 if a power-on stage has < 1 ns).
+- Testbench: `wsl -d <distro> -- bash <repo>/fpga/al3/tb/run.sh 12345` and `... 3`, with
   `REF_SRC_DIR=<dir with a947e78.v 2839258.v 6d4c8ad.v e2aec2e.v ce943bf.v>` from a Windows worktree (export them with
   `git show <rev>:fpga/al3/src/zaklad.v`).
 - One step: `ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread`.
@@ -1314,7 +1314,7 @@ commands.txt, protocol.md) are **not written yet** for the capture fix.
    run.sh on seeds 12345 and 3.
 3. Docs: README "Changes" section 10 (this analysis, the margins table, the bench checks: the dcoffset sweep and the RC
    test must be clean on every core at every range; 0x36 counts 0 on a quiet input at 128), FPGA commands.txt,
-   protocol.md 5.1, the firmware spec above to the coordinator; pin the build in backups/.
+   protocol.md 5.1, the firmware spec above to the bench session; pin the build in backups/.
 4. Consider making the encode pads fixed (ODDR in the IOB) so the margins no longer depend on placement.
 5. Rebase `gen8-features-wip` onto it as 0x153B (its tests: tb_trigtypes, tb_peak, tb_counter; its README section 10
    becomes 11).
@@ -1323,7 +1323,7 @@ commands.txt, protocol.md) are **not written yet** for the capture fix.
 
 Review of the capture path as left in 19d9a5c (line numbers of `src/zaklad.v` at that commit), the clocking, the
 constraints, the MCU side and the power-on values, before the design was changed. Sources: the AD9288 datasheet
-(`D:\src\FNIRSI-1013D-1014D-Hack\IC's\AD9288.pdf`, table 1 and figures 2-4), pecostm32's 1013D schematic (the
+(`D:\path\to\FNIRSI-1013D-1014D-Hack\IC's\AD9288.pdf`, table 1 and figures 2-4), pecostm32's 1013D schematic (the
 AD9288 note "The data align mode is enabled (S1, S2 inputs high)"), TD re-timings of the placed 0x1538 and 0x1539
 builds with zero I/O delays (`~/al3-gen7-1538`, `~/g8/final`; script pattern `tb/capture_report.sh`), gen8's 0x153A
 build `~/g8/w/cE`, and the bench entries of 2026-10-19 16:25 to 20:51 in `docs/hardware-status.md`.

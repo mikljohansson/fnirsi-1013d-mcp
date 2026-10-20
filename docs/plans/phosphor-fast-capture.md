@@ -101,7 +101,7 @@ pass time.
    handles any record rate). The wfm/s field counts segments.
 5. **Trace for the rest of the UI**: feed the last segment's window through `fpga_read_adc_data` (as the averaging
    feed does) so measurements, cursors and the trigger refinement still see a record; mark the measurements as
-   "last waveform" since they no longer cover the full depth [I: UX decision for the owner].
+   "last waveform" since they no longer cover the full depth [I: UX decision for the maintainer].
 6. **Pipeline** (optional, after the bench): read all segments into RAM, re-arm at once, then rasterise while the
    FPGA captures the next run (the readout must finish before the re-arm, the sample memory is overwritten).
 

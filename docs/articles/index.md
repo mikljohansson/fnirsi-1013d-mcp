@@ -2,7 +2,7 @@
 
 Longer write-ups of the hard parts of this project, for people who want to know why the scope behaves as it does, or
 who want to build on it. Each article tells one story in the order it happened, with the numbers from the bench log
-and the bitstream and firmware versions involved. Every measurement is from the owner's unit, the only one tested.
+and the bitstream and firmware versions involved. Every measurement is from the maintainer's unit, the only one tested.
 
 - [The calibration story](calibration.md): two ADC cores per channel, each with its own zero and gain. From Atlan4's
   1.00o5 compensations through per-core zeros in two clock classes, per-core gains from the calibration post and the

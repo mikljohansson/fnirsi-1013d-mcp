@@ -68,7 +68,7 @@ FFT_BENCH on 0.2.31: 4096 points in 10.9 ms (from 24.3), 2048 points 4.9 ms in D
 was about twice as fast as DDR, so fw 0.2.33 ran the spectrum view's FFTs of up to 2048 points from SRAM A at
 address 0x1000.
 
-The spectrum view worked. On 2026-10-18 the owner said "wow, the spectrum analyser works". With the 1 kHz square from
+The spectrum view worked. On 2026-10-18 the maintainer said "wow, the spectrum analyser works". With the 1 kHz square from
 the post at 1 MSa/s the fundamental read +2.71 dBV against +2.9 dBV in theory for a 3.1 Vpp square, and the levels
 and harmonic ratios came within 0.4 dB of theory.
 
@@ -132,7 +132,7 @@ change; the gain is the cache.
 The main-loop pass in the scope view fell to 14-18 ms, median 15 ms, from 30 ms. The FPGA readout at about 0.3 us per
 byte did not change: it is bound by the GPIO bus.
 
-The owner then checked the screen, every menu, the spectrum and phosphor views and touch on the MMU image: "seems to
+The maintainer then checked the screen, every menu, the spectrum and phosphor views and touch on the MMU image: "seems to
 work afaikt". No leftover pixels or stale text were reported. A 30-minute capture soak on the 0.2.49 MMU image
 (11:04-11:34) passed 17,908 content-checked requests with no failures, drops or restarts.
 

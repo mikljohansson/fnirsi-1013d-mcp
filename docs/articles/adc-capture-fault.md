@@ -1,8 +1,8 @@
 # The ADC encode-phase and capture-window faults
 
-On 2026-10-19 the new calibration wizard failed on the owner's unit, while the same measurement taken from the PC looked
+On 2026-10-19 the new calibration wizard failed on the maintainer's unit, while the same measurement taken from the PC looked
 clean. The cause was in the FPGA: three faults, each hidden behind the one before. This article tells the hunt in
-order, over about 19 hours and four bitstreams, on the owner's unit, the only one tested.
+order, over about 19 hours and four bitstreams, on the maintainer's unit, the only one tested.
 
 Sources: the [bench log](../hardware-status.md) (2026-10-19 15:35 to 2026-10-20 10:49), [fpga/al3/README.md](../../fpga/al3/README.md)
 "Changes" sections 7 to 10, [fpga/al3/AGENTS.md](../../fpga/al3/AGENTS.md) (the 0x1538, 0x1539 and 0x153A sections and
@@ -17,7 +17,7 @@ instant the FPGA latches each core's data, and the moment the MCU reads the bus.
 
 ## The symptom
 
-fw 0.2.59, with the four-screen wizard, was loaded at 15:35 on bitstream 0x1535. At 16:02 the owner reported that the
+fw 0.2.59, with the four-screen wizard, was loaded at 15:35 on bitstream 0x1535. At 16:02 the maintainer reported that the
 Zero level step failed with "too much noise" on both channels in most runs, with probes and USB unplugged. A host
 READ_RAW at 200 MSa/s at the same time showed 0.5 to 1.1 codes RMS per core. The limit is 3 codes.
 
@@ -134,7 +134,7 @@ fw 0.2.80's training still kept stage 4 for CH1 A. It probed one code with one c
 intermittent and lived at a few codes. fw 0.2.81 trains over a band: the input parked at six codes from 120 to 140, two
 8000-word captures per stage and point, the counts summed, and the stage picked from the widest clean run.
 
-At 10:42-10:48, with the probes unplugged, the owner ran the wizard. It picked "CH1 A3 B4" and "CH2 A3 B4", the
+At 10:42-10:48, with the probes unplugged, the maintainer ran the wizard. It picked "CH1 A3 B4" and "CH2 A3 B4", the
 expected 0x08E3, and saved them with the calibration. The band sweep at 200 MSa/s was then clean on every core over
 means 109..135, with CH1 A at a maximum standard deviation of 0.98 code, no rail samples and no jumps. 100, 50 and
 20 MSa/s were clean too. 0x153A became the recommended bitstream.

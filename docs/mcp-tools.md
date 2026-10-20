@@ -1,6 +1,7 @@
 # MCP tool surface for the FNIRSI 1013D
 
-Status: design draft, 2026-10-18. Wire protocol: `docs/protocol.md` (cited as P-section). Firmware side:
+Status: the design of 2026-10-18 as implemented, updated with each mcp generation (server 0.3.0 in preparation, protocol
+1.24). Where this text and the server differ, the tool docstrings (`fnirsi1013d-mcp --list-tools`) are current. Wire protocol: `docs/protocol.md` (cited as P-section). Firmware side:
 `docs/plans/firmware-usb-protocol.md`. Markers [V]/[M]/[U]/[D] as in the protocol document.
 
 ## 1. Design principles

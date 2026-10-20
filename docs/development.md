@@ -36,10 +36,10 @@ and [`fpga/al3/TD_SETUP.md`](../fpga/al3/TD_SETUP.md) (the headless Anlogic TD f
 ### Firmware (C, bare-metal F1C100s)
 
 The cross toolchain lives in WSL Ubuntu, or any Linux: `arm-none-eabi-gcc`, `make`, python3. From WSL with the repo
-at `/mnt/d/src/fnirsi-1013d-ai`:
+at `/mnt/d/path/to/fnirsi-1013d-mcp`:
 
 ```
-wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/firmware/scope && make -j"
+wsl -d <distro> -- bash -lc "cd /mnt/d/path/to/fnirsi-1013d-mcp/firmware/scope && make -j"
 ```
 
 | Target | What it gives |
@@ -96,7 +96,7 @@ Build with `make gcc10` in `firmware/scope`, then load the image into the scope'
 
 ```
 fnirsi1013d-flash                                   # default image build-gcc10-pc/fnirsi_1013d.bin
-fnirsi1013d-flash --image firmware/scope/build/fnirsi_1013d.bin --port COM10
+fnirsi1013d-flash --image firmware/scope/build/fnirsi_1013d.bin --port <port>
 fnirsi1013d-flash --no-fel                          # the scope is already in FEL (boot menu)
 ```
 

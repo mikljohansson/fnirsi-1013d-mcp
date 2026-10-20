@@ -13,16 +13,16 @@ programmer on the config-flash header and a verified backup first.
 
 | Version | Status | Adds (on top of the row above) | Firmware that uses it | Bench |
 |---|---|---|---|---|
-| 0x1532 | Atlan4's, not ours | 16,384 samples per channel, programmable pretrigger, the 32-bit DDS square-wave generator on the calibration pin | every version | Atlan4's release; on the owner's unit 2026-10-18 |
+| 0x1532 | Atlan4's, not ours | 16,384 samples per channel, programmable pretrigger, the 32-bit DDS square-wave generator on the calibration pin | every version | Atlan4's release; on the maintainer's unit 2026-10-18 |
 | 0x1533 | supported | external trigger input on the calibration pin | 0.2.9 and later | flashed 2026-10-18; EXT loopback 10 of 10 captures triggered |
 | 0x1534 | supported | decimation filter before the decimator: boxcar, CIC2, CIC3; 16-bit samples | 0.2.30 and later | flashed 2026-10-18; decimation bench |
 | 0x1535 | supported | compensation FIR after the CIC (boxcar+FIR, CIC2+FIR, CIC3+FIR at 10 MSa/s and slower) | 0.2.44 and later | flashed 2026-10-19; alias of a 892.857 kHz square at 1 MSa/s -76.1 dBV with CIC2+FIR |
 | 0x1536 | unbenched | segmented capture and hardware averaging (sequencer in front of the 0x1535 capture logic) | 0.2.58 and later | built and simulated, never flashed |
 | 0x1537 | withdrawn, not attached | deterministic record start and A/B order at divided rates | 0.2.58 and later | flashed 2026-10-19: CH2 core A garbled in about 40 % of full-rate captures |
-| 0x153B | **recommended** (built 2026-10-20, fpga-gen11; tb 13 steps green on two seeds, fpga-gen12; flashed 2026-10-20 19:31, benched 20:40 with the probes on: 0 of 100 untriggered captures spliced, RC auto records clean, ten sweeps without retakes; the 19:52 bench was on signal-less records, fpga-gen13; needs fw 0.2.97+) | records that end on the auto time-out or the firmware's forced stop report 0x14 at the write pointer (W - total + pretrigger), so untriggered records are the newest total words instead of ring 0 .. total - 1 spliced at the stop; the time-out no longer cuts a triggered record; no trigger after the stop (0x18 is the record's) | 0.2.81 and later detect it (the 0x153A..0x153F range); the firmware notes in README section 11 for the full benefit | built and simulated (tb_timeout 75 checks + case B, the 19:52 host capture byte for byte; the 0x153A source fails 30; the full 13-step run ALL PASS on seeds 12345 and 4242); flashed 19:31 and verified; the 19:52 host checks read every record as spliced, but every saved record is flat at code 128 +- 1 on both channels (probes off the post after the open-input wizard; README section 11 "Bench 2026-10-20 19:31-20:03"): nothing measured; README section 11 bench checks 0-6 with the probe on the post |
+| 0x153B | **recommended** since 2026-10-20: benched on the maintainer's unit with the firmware's capture checks (needs fw 0.2.97+) | records that end on the auto time-out or the firmware's forced stop report 0x14 at the write pointer (W - total + pretrigger), so untriggered records are the newest total words instead of ring 0 .. total - 1 spliced at the stop; the time-out no longer cuts a triggered record; no trigger after the stop (0x18 is the record's) | 0.2.81 and later detect it (the 0x153A..0x153F range); the firmware notes in README section 11 for the full benefit | built and simulated (tb_timeout 75 checks + case B, the 19:52 host capture byte for byte; the 0x153A source fails 30; the full 13-step run ALL PASS on seeds 12345 and 4242); flashed 19:31 and verified; the 19:52 host checks read every record as spliced, but every saved record is flat at code 128 +- 1 on both channels (probes off the post after the open-input wizard; README section 11 "Bench 2026-10-20 19:31-20:03"): nothing measured; README section 11 bench checks 0-6 with the probe on the post |
 | 0x153A | supported (flashed and benched 2026-10-20 10:03..18:00; superseded by 0x153B at 20:42: untriggered auto-mode records could be spliced, fw 0.2.97+ works around it) | ADC data captured in IOB registers at a selectable stage per core against the edge the core is encoded on, B first by T/2 at every rate; capture self-check (read 0x36) and training registers 0x63 / 0x64; fixes the garbled cores near codes 128..145 of 0x1537-0x1539 | 0.2.81 (the wizard trains the capture stages; the power-on stages can be wrong per unit) | 2026-10-20: wizard trained 0x08E3, band sweep clean at all four rates, self-check 0 flagged of 18865 captures (docs/hardware-status.md 10:04-10:49) |
-| 0x1539 | withdrawn (flashed 2026-10-19, A cores garbled at codes 128..145) | MCU readout byte loaded on the strobe start and held; fixes the bit mixing of 0x1537/0x1538 near multi-bit code boundaries; i_mcu_clk constrained | 0.2.62 | not yet; checks in fpga/al3/README.md section 9 |
-| 0x1538 | unbenched (flash session pending) | stateless ADC encode: core order B-first guaranteed at every rate and after any write; self-check read 0x33 (0xF6 = good); fixes the encode-phase race of 0x1532-0x1536 and the marginal flop of 0x1537 | 0.2.58 (0.2.62 reads 0x33) | not yet; checks in fpga/al3/README.md section 8 |
+| 0x1539 | withdrawn (flashed 2026-10-19, A cores garbled at codes 128..145) | MCU readout byte loaded on the strobe start and held; fixes the bit mixing of 0x1537/0x1538 near multi-bit code boundaries; i_mcu_clk constrained | 0.2.62 | flashed 2026-10-19 20:06: CAL_PROBE passes, but both A cores still garbled at means 128..145 at 200 MS/s (the ADC data capture window, not the readout); superseded by 0x153A |
+| 0x1538 | withdrawn (flashed 2026-10-19, MCU readout mixed bytes near code boundaries) | stateless ADC encode: core order B-first guaranteed at every rate and after any write; self-check read 0x33 (0xF6 = good); fixes the encode-phase race of 0x1532-0x1536 and the marginal flop of 0x1537 | 0.2.58 (0.2.62 reads 0x33) | flashed 2026-10-19 17:46: encode clean, but the MCU readout mixes bytes near multi-bit code boundaries; superseded by 0x1539 |
 
 **Use the recommended image**, which is the newest one. The older images are attached for comparison and for
 going back to a state someone reported against. 0x1532 to 0x1536 share an ADC encode-phase race: after a sample-rate
@@ -44,7 +44,7 @@ Release assets, per version (0x1537 is not attached):
 
 - `fnirsi_1013d-fpga-al3-<version>.bin`: the bitstream as TD's bitgen wrote it, 282,898 bytes.
 - `fnirsi_1013d-fpga-al3-<version>-flash1m.bin`: the same, padded with 0xFF to 1,048,576 bytes, the size of the
-  25Q80. Write this one; it is what the owner's unit was flashed with.
+  25Q80. Write this one; it is what the maintainer's unit was flashed with.
 
 | Version | `.bin` sha256 | `-flash1m.bin` sha256 | Source commit |
 |---|---|---|---|
@@ -82,7 +82,7 @@ section "Changes".
 
 ## How to flash (Sipeed FT2232D and `spiflash_d2xx.py`)
 
-This is the route used on the owner's unit for every write above (`docs/hardware-status.md`). Any 3.3 V SPI
+This is the route used on the maintainer's unit for every write above (`docs/hardware-status.md`). Any 3.3 V SPI
 programmer works; `docs/hardware-prep.md` section 2 covers the CH341A (needs a 3.3 V mod), flashrom and the pyftdi
 script. Run the tool from a checkout of the release tag: it writes its backups to `backups/` in that checkout.
 
@@ -94,10 +94,12 @@ python firmware/tools/spiflash_d2xx.py wiring
 ```
 
 1. **Find the header pinout on your board by continuity** before you connect anything (`docs/hardware-prep.md`
-   section 1.3). On the owner's unit, numbering pin 1 top-left: 1 /CS, 2 DO (about 34 ohm in series), 3 CLK, 4 DI,
+   section 1.3). On the maintainer's unit, numbering pin 1 top-left: 1 /CS, 2 DO (about 34 ohm in series), 3 CLK, 4 DI,
    5 VCC, 6 GND. That differs from the reconstructed schematic, so measure yours.
 2. **Wire** (3.3 V logic only): TMS to /CS, TDO to DO, TCK to CLK, TDI to DI, GND to GND. Leave the header's VCC
-   and the debugger's 3.3 V and 5 V pins unconnected. Scope on its battery, USB unplugged.
+   and the debugger's 3.3 V and 5 V pins unconnected. Scope on its battery, USB unplugged. The header comes without
+   pins; [this photo](../../../docs/photos/fpga-flash-header.jpg) shows it with pins fitted, soldered from the back of
+   the board, beside the 8-pin flash chip.
 3. **Probe**: `python firmware/tools/spiflash_d2xx.py probe` must print the JEDEC ID `ef 40 14` (W25Q80DV;
    `5e 60 14` for a ZB25VQ80). 00 or FF means wiring: stop.
 4. **Back up, twice**, and keep the file somewhere safe. This is your only way back:

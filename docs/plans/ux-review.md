@@ -1,6 +1,6 @@
 # Adversarial review: UX makeover mockups against today's firmware
 
-Reviewer brief (coordinator, 2026-10-19): an independent review of every artboard of the "1013D UX Makeover Screens"
+Reviewer brief (bench session, 2026-10-19): an independent review of every artboard of the "1013D UX Makeover Screens"
 design (Scope, ScopeCtrl, ScopeCtrlPhosphor, MainMenu, Spectrum, SpectrumCtrl, SettingsFoldout, UsbDrive, Wizard1-3,
 Confirm, FirstRun, Main = Diagnostics Status, Calibration, Log, Settings) against `docs/plans/ux-makeover.md` (the
 plan), `docs/plans/diagnostics-review.md` (the previous review, not repeated here unless a board ignores it) and the
@@ -21,7 +21,7 @@ factors, and nothing in the new flow restores them.
 
 ## 0. Status after the plan correction (2026-10-19 afternoon)
 
-The owner rewrote `ux-makeover.md` sections 3-4 and added 6a while this review was written: the top bar (minus the
+The maintainer rewrote `ux-makeover.md` sections 3-4 and added 6a while this review was written: the top bar (minus the
 version string), the right bar and both CTRL pages stay as today in Scope; the strips stay in the slider row without
 their Scope field and the spectrum's Auto (AUTO SET runs it); measurement cards stay; Phosphor and X-Y become a Display
 box in the ACQ dropdown; the wizard becomes four screens without Skip. Findings about the first boards' right bar,
@@ -121,7 +121,7 @@ drop the rule; with dev mode removed (plan section 5) the rule alone decides it.
 | Log, "Power-on, cold boot" | No event type marks power-on; cold vs warm is counter 49 (row 38); the first entries are type 16 / 19 init states | Synthesize the line from counter 49 and the first type 16, and say so in the decoder |
 | Log, "FFT 4096 points 2.7 ms" | Only FFT_BENCH builds measure FFT time; README "Spectrum view" Costs: 10.9 ms for 4096 points (2.3 ms is 2048 points from SRAM) | Drop; the number is also wrong |
 | Log, "Readout 0.3 us per byte" | A documentation constant (AGENTS.md hardware facts), not measured | Drop |
-| Log and ScopeCtrlPhosphor, "Screen pass 15 ms", "66 wfm/s" at 3000 samples | README "Phosphor view": "about 30 per second at the default 3000 samples" on "the scope view's 30 ms pass" | Realistic sample data, or the owner will hold the firmware to 66 |
+| Log and ScopeCtrlPhosphor, "Screen pass 15 ms", "66 wfm/s" at 3000 samples | README "Phosphor view": "about 30 per second at the default 3000 samples" on "the scope view's 30 ms pass" | Realistic sample data, or the maintainer will hold the firmware to 66 |
 | Status, "MMU and caches on"; "PC connected"; Firmware tile "starts 0.2.25 from the card"; "Calibrated on fw 0.2.48, FPGA 0x1534, 12 min after power-on, 1 power-on ago"; "FPGA changed since calibration" | Need readers 10, 1, 2, 3 and 4 of `diagnostics-review.md` section 4; none is on main | Mark each in the board as "needs reader N" so the implementation order is honest |
 | Status, "Cores agree 0.2 code at 0 V", updating once a second | The wizard computes the zero step's worst A-B at calibration time (README 6.4); the docs do not say the block stores it; nothing measures it live at 0 V | Label it "at calibration" and store it, or show the v4 tracker's d with its age |
 | Calibration, Undo last calibration and Check on post; Status and Log, Save report to card; Log, restart record "keeps them on the card through a power cycle" | Readers 8, 7, an SD text writer and reader 5; none exists | Mark as new work |
@@ -257,7 +257,7 @@ sees or gets.
 | "Notification confirmation" renamed "Confirmation prompts" | Users switch it off to silence messages and believe they switched off safety prompts, or the reverse | **No**, rename (I4) |
 | **Superseded** by the corrected plan. Measurements from in-plot tiles to a one-line bottom row | CH2 and REF measurements and anything beyond about 6 values disappear | **No** (L4) |
 
-## 4. Open decisions for the owner
+## 4. Open decisions for the maintainer
 
 1. **Superseded** by the corrected plan. **D1 Right bar geometry.** Recommendation: keep today's eight slots at a 60 px pitch with CTRL on top and today's
    order (CTRL, RUN/STOP, AUTO, T cursor, V cursor, Measures, Save picture, Save waveform), drop the live Grid button,
@@ -293,7 +293,7 @@ sees or gets.
 Boards checked: Scope, ScopeCtrl, AcqMenu, Phosphor, Spectrum, SpectrumCtrl, Wizard1-4, Developer, ConfirmFel, against
 `ux-makeover.md` sections 3, 4, 5 and 6a as of f6230f0, against today's firmware, against each other and for text
 width. Not re-checked: MainMenu, SettingsFoldout, Settings, Confirm, FirstRun, UsbDrive and the three Diagnostics
-pages. Skipped on request: where the Display box lives (owner decision).
+pages. Skipped on request: where the Display box lives (maintainer decision).
 
 ### 5.1 What revision 3 and the plan now get right
 
@@ -566,7 +566,7 @@ control what is restored, and give Grid a word in 108..119 or 211..255.
 - **The fold-out has one row more than the plan lists.** The plan's fold-out list has five rows; the board adds the
   RTC row (six rows, 349 px).
 - **No board for the X-Y display or for Phosphor in X-Y.** Today phosphor works in X-Y (README); the exclusive Display
-  values lose it (L10, N2). The owner holds the Display question, but the combination is a function to decide on, not
+  values lose it (L10, N2). The maintainer holds the Display question, but the combination is a function to decide on, not
   a placement detail.
 - **The Spectrum row in roll mode (D10).** Today it is hidden in roll mode (README "Removed and hidden menu
   options"). The plan's fixed menu order does not say what happens then.
@@ -618,7 +618,7 @@ the longest about 480 px in a 582 px box), Confirm, ConfirmFel, Developer, First
 
 **Whose implementation.** The 12-metric table, the tile drawing (name in a coloured box, value at x+55, `font_0`), the
 row stacking, the "Freg" typo and the computation in the readout loop are pecostm32's. His tree has them at y 456
-(`D:\src\FNIRSI_1013D_Firmware`, `scope_functions.c` `scope_display_channel_measurements`, `variables.c`
+(`D:\path\to\FNIRSI_1013D_Firmware`, `scope_functions.c` `scope_display_channel_measurements`, `variables.c`
 `measurement_names`). Atlan's 1.00o5 added:
 - the cards' move to y 426, above the record-position slider (comment "456 move up - long base");
 - the reference-trace sources and Hide per channel;
@@ -631,7 +631,7 @@ cannot be told from the sources (inference: the same 12 names suggest the same r
 
 #### B2. Proposed measurement set per mode
 
-The basis: the owner's use is a VLF and pulse-induction metal detector (AGENTS.md). Its time-domain questions are the
+The basis: the maintainer's use is a VLF and pulse-induction metal detector (AGENTS.md). Its time-domain questions are the
 TX pulse (width, repetition, amplitude, flyback peak), the RX decay (level at a delay after the pulse end, time
 constant) and the phase between the TX and RX channels (VLF ground balance). Its frequency-domain questions are the
 tone, its harmonics and the noise floor. The proposal keeps the card scheme and the Measures menu, and adds per-mode

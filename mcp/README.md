@@ -190,9 +190,9 @@ Or per project: copy [`.mcp.json.example`](../.mcp.json.example) to `.mcp.json` 
 `--port auto` finds the scope (below); name the port when more than one serial device answers. Add
 `"FNIRSI_MCP_HOME": "<dir>"` to `env` to keep the data and audit log somewhere other than `~/.fnirsi1013d`.
 
-**Claude Code, checkout (the owner's workflow).** `.mcp.json` is not tracked: copy `.mcp.json.example` and point
+**Claude Code, checkout (the maintainer's workflow).** `.mcp.json` is not tracked: copy `.mcp.json.example` and point
 `command` at the checkout's venv (`mcp/.venv/Scripts/fnirsi1013d-mcp.exe` on Windows, relative paths are resolved
-from the repository root), the port at the scope's (COM10 on the owner's bench), and keep
+from the repository root), the port at the scope's (COM10 on the maintainer's bench), and keep
 `"FNIRSI_MCP_DATA_DIR": "mcp/data"`, `"FNIRSI_MCP_AUDIT_LOG": "mcp/logs/audit.jsonl"` in `env` if the per-unit
 calibration lives in `mcp/data/cal/`. In WSL use the Linux venv, e.g. `~/.venvs/fnirsi1013d-mcp/bin/fnirsi1013d-mcp
 --port /dev/ttyACM0`.
@@ -293,7 +293,7 @@ Calibration v2 (firmware 0.2.43-0.2.44) is refused: update the firmware and re-r
 `raw_code = zero + slope x (offset_pwm - pwm_ref) + volts / gain` per core (fitted by `scope_calibrate_volts`,
 or imported from bench data with `python -m fnirsi1013d.calibration --import <t8 json...> --out <file>`); otherwise
 the firmware's `uv_per_lsb_q8` and `zero_code_q8` (the same for both cores, after the stored compensation).
-Results say which one was used (`scaling`). T8 on the owner's unit (fw 0.1.7): gains within ~1 %, but the
+Results say which one was used (`scaling`). T8 on the maintainer's unit (fw 0.1.7): gains within ~1 %, but the
 firmware zero was ~2 codes off (cores 5 codes apart, compensation corrects 4) and follows the trace offset with a
 different slope. Time is
 `(i - pretrigger_samples) x dt` relative to the hardware trigger, which is +-2 samples until T5 is run.
@@ -353,8 +353,8 @@ setting (generator words, filter, channels, time base, trigger incl. EXT, RUN) i
 
 ```bash
 fnirsi1013d-bode --plan-only --start 1kHz --stop 1MHz --points 50     # the frequency plan and the time estimate
-fnirsi1013d-bode --port COM10 --start 1kHz --stop 300kHz --points 30 --yes --thru measure --thru-out thru.json
-fnirsi1013d-bode --port COM10 --start 1kHz --stop 300kHz --points 30 --yes --thru thru.json --csv rc.csv
+fnirsi1013d-bode --port <port> --start 1kHz --stop 300kHz --points 30 --yes --thru measure --thru-out thru.json
+fnirsi1013d-bode --port <port> --start 1kHz --stop 300kHz --points 30 --yes --thru thru.json --csv rc.csv
 fnirsi1013d-sim --variant al3f --ch1 dut_in:r=1.6k,c=10n --ch2 dut_out:r=1.6k,c=10n   # an RC on the simulator
 ```
 
@@ -399,7 +399,7 @@ python -m fnirsi1013d.report path/to/123456_789_decay.npz --title "Coil A, 8 mm 
 
 ## Firmware dev loop: `fnirsi1013d-flash`
 
-`fnirsi1013d-flash [--image PATH] [--port COM10] [--no-fel] [--distro Ubuntu]` reboots the running scope into
+`fnirsi1013d-flash [--image PATH] [--port <port>] [--no-fel] [--distro Ubuntu]` reboots the running scope into
 FEL with ENTER_FEL, hands the boot ROM device (1f3a:efe8) to WSL with usbipd, loads the image into RAM with
 `sunxi-fel -p write 0x7FFFFFE0 <image> exe 0x80000000`, and waits for the serial port and `#VER`. Details and exit
 codes: firmware/README.md section 4. It changes what the scope runs: announce it at the bench first.
@@ -461,7 +461,7 @@ fnirsi1013d-sd write file.bin --sector 1000 --yes     # type "WRITE <n>@<sector>
 ## Link soak: `fnirsi1013d-soak`
 
 ```
-fnirsi1013d-soak --port COM10                                # 30 min GET_STATUS at 10 Hz (the v0.3.0 soak)
+fnirsi1013d-soak --port <port>                                # 30 min GET_STATUS at 10 Hz (the v0.3.0 soak)
 fnirsi1013d-soak --mode capture --duration 600 --log soak.log   # 4 KiB TEST_PATTERN, content-checked
 fnirsi1013d-soak --mode ping --interval 0.02
 fnirsi1013d-soak --mode reopen --duration 10 --idle 180 --rounds 10   # suspend / resume bench (fw 0.2.44)
@@ -511,7 +511,7 @@ followed by the protocol's recovery; a write/read error or a vanished port is a 
 
 ## Bench link check: `fnirsi1013d-bench`
 
-`fnirsi1013d-bench [--port COM10] [--census 2000] [--n 200]` runs the firmware's
+`fnirsi1013d-bench [--port <port>] [--census 2000] [--n 200]` runs the firmware's
 `firmware/scope/host_tests/bench_link.py` from the venv: `#RESET`, `#VER`, GET_INFO, PING latency, TEST_PATTERN
 sizes up to 64 KiB, throughput, then the no-retry acceptance census (random 1..200 B PINGs, every E_BAD_CRC diffed
 against the request with GET_BAD_FRAME, plus 100 x 64 KiB) and GET_LINK_STATS. LOCAL-safe; `--census 0` skips the

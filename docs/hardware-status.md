@@ -1,5 +1,9 @@
 # Hardware status log (owner's FNIRSI 1013D)
 
+This is the maintainer's bench log for the one unit the project was developed on: what was flashed, backed up, loaded
+and measured, in the order it happened, newest entries at the bottom. It is kept as engineering history, so port names,
+paths and this unit's numbers stay as written; the reference documents are `docs/hardware-prep.md` and the user guide.
+
 Living document. Update after every hardware step (AGENTS.md). Procedures are in `docs/hardware-prep.md`.
 Hash entries use sha256 of files in `backups/` (gitignored).
 

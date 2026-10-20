@@ -1,6 +1,6 @@
 # firmware/ handoff for agents
 
-**Current state (coordinator merge, 2026-10-19 14:35): latest build fw 0.2.58, protocol 1.17** = main with fw-ui2 (UX makeover
+**Current state (bench session merge, 2026-10-19 14:35): latest build fw 0.2.58, protocol 1.17** = main with fw-ui2 (UX makeover
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
@@ -15,16 +15,16 @@ section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, 
 **Branch fw-screen (2026-10-19): fw 0.2.70, protocol 1.21 unchanged: READ_SCREEN built (cap SCREENSHOT), section 46.**
 **Branch fw-bus (2026-10-19): fw 0.2.72, protocol 1.22 (row 62): FPGA bus contract (dummy strobe in every readout, geometry before the reset, legacy EXT shift, encode check after async writes, type 22 trace level, core order from 0x33), section 48.**
 **Branch fw-bode (2026-10-19): fw 0.2.66, protocol 1.20 (row 60): the Bode plot on the device (bode_dsp / bode_sweep / bode_view / pc_bode, BODE_CTRL / READ_BODE), section 42.**
-**Branch fw-polish1 (2026-10-19): fw 0.2.63 provisional, protocol unchanged: UI polish batch 1 (owner's walk-through of 0.2.59, items a-q), section 39.**
+**Branch fw-polish1 (2026-10-19): fw 0.2.63 provisional, protocol unchanged: UI polish batch 1 (maintainer's walk-through of 0.2.59, items a-q), section 39.**
 **Branch fw-ui4 (2026-10-19): fw 0.2.59 provisional, protocol unchanged: UX makeover step 4 (Diagnostics as a main-loop
 display mode with Status, Calibration, Log, Developer; the four-screen calibration wizard; the first-run screen), section 34.**
 **Branch fw-ui3 (2026-10-19): fw 0.2.55 provisional, protocol 1.16 unchanged: UX makeover step 3 (Settings fold-out
 trimmed, full Settings screen, confirmation dialog), section 31.**
-**Current state (coordinator merge, 2026-10-19 13:50): latest build fw 0.2.52, protocol 1.16** = main with fw-ui1 (UX makeover
+**Current state (bench session merge, 2026-10-19 13:50): latest build fw 0.2.52, protocol 1.16** = main with fw-ui1 (UX makeover
 step 1: main menu, USB drive screen, top bar, Display row, strips, measurement cards; section 29) and fw-readers (diagnostics
 readers: GET_HEALTH, card image identity, calibration provenance, unit life record, SAVE_REPORT; section 30) merged. Running in
 parallel: fw-ui2 (step 2), fw-ui3 (step 3), fw-touch1, fw-seg (0x1536, protocol 1.17). 
-**Previous state (coordinator merge, 2026-10-19): latest build fw 0.2.50, protocol 1.15** (fw-cal3's calibration wizard, interleave
+**Previous state (bench session merge, 2026-10-19): latest build fw 0.2.50, protocol 1.15** (fw-cal3's calibration wizard, interleave
 tracking and class probe, **section 28**, merged on fw-usb2's 0.2.49 USB suspend watch, **section 27**; the merge renumbered fw-cal3's
 protocol change from 1.14 / row 53 to 1.15 / row 54 because fw-usb2 took 1.14 / row 53) on fw-mmu's 0.2.48 (MMU + D-cache, section 26) on fw-gen7's 0.2.47 (dead-code purge,
 reproducible images, 16-bit trigger level fix; protocol 1.13 unchanged) on 0.2.46 (protocol 1.13: digital phosphor view,
@@ -96,8 +96,8 @@ now passes $(PC_DEFS) to the assembler). Later UI work also touched `menu.c`, `s
 
 ## 2. Build and test
 
-All builds run in WSL Ubuntu (`wsl -d Ubuntu`); from PowerShell use
-`wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/firmware/scope && make -j8"`. Git Bash mangles quoting
+All builds run in WSL Ubuntu (`wsl -d <distro>`); from PowerShell use
+`wsl -d <distro> -- bash -lc "cd /mnt/d/path/to/fnirsi-1013d-mcp/firmware/scope && make -j8"`. Git Bash mangles quoting
 in long WSL command lines and Windows Python heredocs halve backslashes: put multi-step commands in a script file.
 
 | command | result |
@@ -107,9 +107,9 @@ in long WSL command lines and Windows Python heredocs halve backslashes: put mul
 | `make PC_DEBUG=1 BUILD=build-dbg` | adds DEBUG_FPGA + FORCE (caps 0x120) for bench tests T3/T7 |
 | `make PC_FIFO_MAP=1 ...` | alternative USB FIFO layout (version string `-m1`) |
 | `make -C host_tests test` | host gcc: test_protocol, test_rx_ring (all 2048 ring phases), test_session + mock_hal (release + PC_DEBUG; 762 / 760 checks on 0.2.19), check_vectors.py (79 vectors). None of them models usb_interface.c, the IRQ dispatcher or the timer-tick USB path |
-| `python host_tests/bench_link.py COM10 [--census 2000] [--fel]` | on the bench PC, needs pyserial |
+| `python host_tests/bench_link.py <port> [--census 2000] [--fel]` | on the bench PC, needs pyserial |
 
-Since 0.2.47 there is no PC_PROTOCOL=0 build and no `make check-reference` (owner dropped the byte-identical rule on
+Since 0.2.47 there is no PC_PROTOCOL=0 build and no `make check-reference` (maintainer dropped the byte-identical rule on
 2026-10-18; the proof up to then is in the CI logs). Images are reproducible: the identity comes from the commit, so a
 change that only removes dead code can be checked by building both commits with a fixed `PC_FW_BUILD=11111111
 SOURCE_DATE_EPOCH=<any>` and comparing sha256 (section 25). Warning policy: no new warning under GCC 13 or GCC 10
@@ -119,12 +119,12 @@ SOURCE_DATE_EPOCH=<any>` and comparing sha256 (section 25). Warning policy: no n
 ## 3. Dev loop (no SD writes)
 
 1. Scope runs a protocol build: host sends ENTER_FEL (cmd 0x0F01, u32 0x4C45465F). Fallback: boot menu, "FEL".
-2. `usbipd attach --wsl --busid 9-3` (owner's machine; FEL id 1f3a:efe8 is bound) or `--hardware-id 1f3a:efe8`.
+2. `usbipd attach --wsl --busid <busid>` (`usbipd list` shows it; FEL id 1f3a:efe8) or `--hardware-id 1f3a:efe8`.
 3. `sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000` (~2 s, run as root in WSL).
-4. The scope enumerates as COM10 on Windows (VID:PID 1209:0001, serial 1013D-0001), or attach it to WSL as
-   /dev/ttyACM0 for Linux cdc_acm.
+4. The scope enumerates as a USB serial port, `<port>` below (Windows: a COMn port, VID:PID 1209:0001, serial
+   1013D-0001; the maintainer's unit is COM10), or attach it to WSL as /dev/ttyACM0 for Linux cdc_acm.
 
-The SD card boots our 0.2.11 from sector 750 (persisted with SD_STAGE + SD_WRITE_SECTORS, see section 13). One serial user at a time; ask the owner to keep hands off
+The SD card boots our 0.2.11 from sector 750 (persisted with SD_STAGE + SD_WRITE_SECTORS, see section 13). One serial user at a time; ask the maintainer to keep hands off
 the screen during tests (menus are modal and defer commands). The power-off ISR still writes settings to sector 709
 (1.00o5 behaviour); with PC_FORCE_CDC=1 that save stores "USB CH340 mode" = on.
 
@@ -194,13 +194,13 @@ Plan: `docs/plans/collaborative-mode.md`; wire format agreed with the MCP agent 
   gate holds (conversion_done stays set).
 - MCP chip (`pc_ui_service`, `pc_hal_indicator`): rendered once into a pixel array (via the top-bar corner of
   displaybuffertmp), then drawn as one blit of final pixel values, so the 100 ms refresh and the PC_TOPBAR_DRAWN hooks
-  cannot flicker (0.2.3-0.2.9 cleared the slot and redrew it every 100 ms on the screen; owner saw flicker while the
+  cannot flicker (0.2.3-0.2.9 cleared the slot and redrew it every 100 ms on the screen; maintainer saw flicker while the
   main loop ran). The slot is cleared only on on/off transitions. 0.2.3 steady green, 38 x 17 at x 127 y 3, directly
   above the RUN/STOP chip, in the RTC clock's slot (the main-loop RTC draw is gated by PC_RTC_ALLOWED while the chip shows);
-  on while DTR or a frame in the last 2 s, redrawn every 100 ms. Owner rejected the 0.2.1 spot (x 697 y 22 under the
+  on while DTR or a frame in the last 2 s, redrawn every 100 ms. Maintainer rejected the 0.2.1 spot (x 697 y 22 under the
   battery) and the pulse.
 - SET_TIMEBASE mode 0 (0.2.3): sets index + rate + short mode, FPGA, then one scope_preset_values +
-  scope_acqusition_settings. 0.2.1 called scope_set_timebase and the owner saw flicker through time/div values; the
+  scope_acqusition_settings. 0.2.1 called scope_set_timebase and the maintainer saw flicker through time/div values; the
   exact mechanism was not identified (host requests never use the UI's one-index step routine). Bench: confirm.
 - Unverified on the bench (acceptance list in README section 5, step 6): screen redraws after host SET_*, marker
   search for the trigger level on every range, the UI showing a host capture, the chip position and colours.
@@ -209,7 +209,7 @@ Plan: `docs/plans/collaborative-mode.md`; wire format agreed with the MCP agent 
 
 Variant table from the 0x06 word in `pc_variant_from_version` (0x1432 stock: ring 4096, fixed 1500/3000;
 0x1532 AL3: ring 8192, max 16382; 0x1533..0x153F AL3 family, same geometry, 0x1533+ adds EXT_TRIGGER (cmd 0x15 = 2,
-status cmd 0x28; `fpga_get_version` maps the family to fw_FPGA 2 under PC_PROTOCOL); 0x1632 EF2 / 0x1732 EP4: ring 6144, max 12286; unknown: caps 0). The owner's
+status cmd 0x28; `fpga_get_version` maps the family to fw_FPGA 2 under PC_PROTOCOL); 0x1632 EF2 / 0x1732 EP4: ring 6144, max 12286; unknown: caps 0). The maintainer's
 unit runs AL3 0x1532. Host ARM uses its own sequence (`pc_hal_arm`: 0x0F=0, 0x1A=mode, 0x01=1, bounded 0x05
 wait, 0x0B/0x0C/0x0E in reset, 0x01=0); DONE latches 0x14 and writes 0x0F=1; capture start =
 (trigger_addr - pretrigger_words) mod ring (the UI keeps 1.00o5's `T + 7441` math). READ_RAW reads per core with
@@ -236,11 +236,11 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 |---|---|---|---|---|
 | 0.2.11 | 1594918 | af4b7f30 | a request sent right after the port opens is kept (DTR-up no longer resets a pending request) | accepted: census clean, 20/20 open-then-request; **on the SD card**; one USB drop during 10 Hz polling |
 | 0.2.12 | e797f25 | c9270dd3 | timer tick runs the whole CDC IRQ handler (lost-IRQ fallback), counter 47, GET_EVENT_LOG, protocol 1.5 | counter 47 = 46k in 3 min (race with the real IRQ), 1/100 64 KiB lost, soak: 2 drops; the "restart" reported earlier was retracted by the lead (timeline fits no restart) |
-| 0.2.13 | 7ebda04 | 691d0d28 | System settings compacted without a DS3231; battery level averaged with hysteresis while charging | not benched alone; owner verdicts pending |
+| 0.2.13 | 7ebda04 | 691d0d28 | System settings compacted without a DS3231; battery level averaged with hysteresis while charging | not benched alone; maintainer verdicts pending |
 | 0.2.14 | d6a6b37 | aa4a142c | fallback only after two quiet ticks; EXT ground note | counter 47 = 11.8k in 2 min (SOF defeats the gate), 1/100 64 KiB lost |
 | 0.2.15 | c4989e5 | b0cec01f | SOF ignored for counter 47 / type 14, event log 128, frozen pre-reset snapshot | superseded unbenched, not pinned |
 | 0.2.16 | 079f648 | 5f25b9e7 | CDC handler split into entry + body; the tick reads the flags and runs the body only for non-SOF flags | 300 x 64 KiB clean, counter 47 = 16 in 7 min (real lost RX IRQs), **self-restarts** under bench traffic |
-| 0.2.17 | 0c13045 | 02aa445a | quiet boot: no "Failed to open file" box without scope.bmp, counter 48 | built, host-tested; owner verdict pending |
+| 0.2.17 | 0c13045 | 02aa445a | quiet boot: no "Failed to open file" box without scope.bmp, counter 48 | built, host-tested; maintainer verdict pending |
 | 0.2.18 | 50c9802 | ed117dc5 | event-log snapshot re-armed only with request flag bit 0 | built, host-tested, not benched |
 | 0.2.19 | 55d5c5b | 9b94c9a8 | restart record at 0x81A00000, exception vectors record and restart, counters 49-56, event type 15 | built, host-tested, disassembly checked; **ELF kept at backups/fw-0.2.19-9b94c9a8.elf** |
 
@@ -252,15 +252,15 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.23 | 25e90fc | 545126ff | 0.2.22 plus EP2 IN state after every TX abort: type 17 (POWER, TXCSR), type 18 (EP2 TX int enabled / ZLP pending, frame number) | FEL: replug test clean (400 x 64 KiB); FEL init state 0x4000 / 0x070f / 0x2000 / 0x0000 / 0x2fc0; persisted to the card |
 | 0.2.24 | 7e5a2e3 | 9de2caad | 0.2.23 plus GET_EVENT_LOG bus-level ring tail (16, types 1-4, 7, 8, 12, 13, 15-18), identical EP0 setups logged at most once per second | built, host-tested; ELF backups/fw-0.2.24-9de2caad.elf |
 | 0.2.25 | 85a113d | c71935f9 | 0.2.24 plus PHY tuning writes to PHYCTL 0x01C13404 (Linux suniv) instead of 1.00o5's 0x01C13410; type 19 post-init state incl. PHY tuning read-back | built, host-tested, disassembly checked; ELF backups/fw-0.2.25-c71935f9.elf |
-| 0.2.26 | bf0651b | 6a7049bf | channel-menu FFT switch hidden, Invert/Coupling/V/A one row up (`PC_CH_DY`) | built, host-tested; owner verdict pending |
+| 0.2.26 | bf0651b | 6a7049bf | channel-menu FFT switch hidden, Invert/Coupling/V/A one row up (`PC_CH_DY`) | built, host-tested; maintainer verdict pending |
 | 0.2.27 | efc5170 | 29db9cd4 | fx_fft.c FFT core (6edb719) + FFT_BENCH 0x0F02 (protocol 1.6, row 44) | bench clean; FFT_BENCH 4096 points 24.3 ms (4x the estimate, section 20); channel menus accepted |
-| 0.2.28 | e6a7c4c | b7109d34 | spectrum view (main menu row 6), READ_SPECTRUM 0x020A, GET_STATUS byte 43 (protocol 1.7, row 45); spec_fmt.c (bed2dd4) | owner: works; harmonics within 0.4 dB of theory |
+| 0.2.28 | e6a7c4c | b7109d34 | spectrum view (main menu row 6), READ_SPECTRUM 0x020A, GET_STATUS byte 43 (protocol 1.7, row 45); spec_fmt.c (bed2dd4) | maintainer: works; harmonics within 0.4 dB of theory |
 | 0.2.29-0.2.30 | (fw-decim) | | decimation filter for FPGA 0x1534 (protocol 1.9, row 47, section 19) | merged, not benched alone |
 | 0.2.31 | 0930c72 | b5685268 | FFT hot loops in ARM assembly (LDRD/STRD, no spills, twiddle table), qemu-arm host test; includes 0.2.30 | bench clean on 0x1533; FFT_BENCH 2.2-2.5x faster (4096: 10.9 ms; SRAM 2048: 2.3 ms); spectrum as before |
-| 0.2.32 | 83aa5b5 | ed9fb0f8 | spectrum view: Waterfall and Density sub-views (View field), GET_STATUS byte 43 = 2 / 3; trace area cleared with memset | built, host-tested; owner verdict pending |
+| 0.2.32 | 83aa5b5 | ed9fb0f8 | spectrum view: Waterfall and Density sub-views (View field), GET_STATUS byte 43 = 2 / 3; trace area cleared with memset | built, host-tested; maintainer verdict pending |
 | 0.2.33 | d125a41 | e002ab21 | 0.2.32 plus the view's FFT from SRAM A for N <= 2048 | built, host-tested; bench with 0.2.32's items |
 | 0.2.34 | 1a9a773 | 00847286 | spectrum view on the 0x1534 16-bit records (fx_fft_run_u16, filter rate 200 MHz / N, scale_q24 levels) | built, host-tested; on 0x1533 identical in behaviour to 0.2.33 |
-| 0.2.35 | 36149d1 | b1be459d | owner's UX: tap left/right on the plot = zoom out/in, drag = pan, Auto and Reset replace Span/Start; FFT length capped at 4096, default 2048; density with per-cell age (no band) and intensity ramp | built, host-tested |
+| 0.2.35 | 36149d1 | b1be459d | maintainer's UX: tap left/right on the plot = zoom out/in, drag = pan, Auto and Reset replace Span/Start; FFT length capped at 4096, default 2048; density with per-cell age (no band) and intensity ramp | built, host-tested |
 | 0.2.36 | 8e1a946 | 6060514b | view axis capped at 25 MHz (PC_SPECTRUM_FMAX_HZ) | built |
 | 0.2.37 | 0f3e743 | 9fde228a | dB conversion in ARM assembly (3 accesses per bin, byte-identical to C) | built, host-tested incl. qemu |
 | 0.2.38 | 6ce82d9 | a6f50f6c | pass time under the acquisition menu's Memory header | built, host-tested |
@@ -380,8 +380,8 @@ Caveat (inference): DDR keeps its contents through a short power cycle and throu
 not into the image. Mapping an address to code:
 
 ```
-wsl -d Ubuntu -- arm-none-eabi-addr2line -f -e /mnt/d/src/fnirsi-1013d-ai/backups/fw-0.2.19-9b94c9a8.elf 0x800xxxxx
-wsl -d Ubuntu -- bash -lc "arm-none-eabi-objdump -d /mnt/d/src/fnirsi-1013d-ai/backups/fw-0.2.19-9b94c9a8.elf > /tmp/fw.dis"
+wsl -d <distro> -- arm-none-eabi-addr2line -f -e /mnt/d/path/to/fnirsi-1013d-mcp/backups/fw-0.2.19-9b94c9a8.elf 0x800xxxxx
+wsl -d <distro> -- bash -lc "arm-none-eabi-objdump -d /mnt/d/path/to/fnirsi-1013d-mcp/backups/fw-0.2.19-9b94c9a8.elf > /tmp/fw.dis"
 ```
 
 `firmware/tools/map_addr.py` (fw-gen3) does both and decodes the record: `python3 firmware/tools/map_addr.py ELF
@@ -458,13 +458,13 @@ are the history of 0.2.12-0.2.20, kept for reading old logs.
   20 ms later 0x22 with DTR 1; close = 0x22 with DTR 0; no reconfiguration while open. In the snapshot, a setup
   (type 5) with bRequest 0x20/0x22 or a bad setup (type 6) right before the suspend + reset pair points at an
   unfinished open/close request; a suspend with no EP0 traffic before it, or a resume then a reset, points at
-  selective suspend. On the owner's PC selective suspend is off on AC, on on battery (turning it off on battery is the
+  selective suspend. On the maintainer's PC selective suspend is off on AC, on on battery (turning it off on battery is the
   lead's call: `powercfg /setdcvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3
   48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0`, then `powercfg /setactive SCHEME_CURRENT`). The mcp soak saves the
   frozen snapshot before re-arming it (mcp commits 2c6a4c5, 56bf8ad); no session-open path reads the log.
 - **Drops seen** (Windows WriteFile error 22, device re-enumerates): 0.2.2 idle with the port closed, 0.2.3 during an
   SD write under back-pressure, 0.2.11 during 10 Hz GET_STATUS polling, 0.2.12 soak (two drops 7 s apart, the first
-  with three suspend+reset pairs). The owner turned Windows USB selective suspend off before the 0.2.12 soak.
+  with three suspend+reset pairs). The maintainer turned Windows USB selective suspend off before the 0.2.12 soak.
 - **"Error state" incident** (0.2.2, port closed ~10 min, device present but CreateFile failed, cable replug
   recovered): not reproduced. 0.2.5 fixed EP2 OUT staying masked in INTRXE after suspend/resume. Other candidates
   (selective suspend + failed resume; 1.00o5's bus-reset handler writing CSRs with EPIND 0) unverified.
@@ -505,9 +505,9 @@ aborted, 14 retired since 0.2.21 (0.2.12-0.2.20: flags found by the tick, a = IN
 
 - Boot gap: about 1.5 s from session init to the first main-loop poll (counter 27 = 1515-1517 ms up to 0.2.16), first
   pass 31 ms. Almost all of it is 1.00o5's splash step `load_picture("scope.bmp")`. Without the file (the normal
-  case) it showed "Failed to open file" for 700 ms: the brief error the owner saw at every boot.
+  case) it showed "Failed to open file" for 700 ms: the brief error the maintainer saw at every boot.
 - 0.2.17 (quiet boot): `pc_glue_boot_splash` probes the file silently with `f_open` and skips the splash without a
-  message; with the file present it shows as in 1.00o5 (3 s). Counter 48 = ms spent + 1. Owner verdict pending.
+  message; with the file present it shows as in 1.00o5 (3 s). Counter 48 = ms spent + 1. Maintainer verdict pending.
 - `scope.bmp` must be the scope's own screenshot format: 800x480 RGB565 BMP, 768,070 bytes, 1.00o5's 70-byte header.
   It adds about 4 s per boot, so the release package leaves it out. The FAT partition needs nothing at boot; picture
   and waveform folders are created on the first save. README section 4 ("Boot", "SD card FAT partition").
@@ -517,14 +517,14 @@ aborted, 14 retired since 0.2.21 (0.2.12-0.2.20: flags found by the tick, a = IN
   writes need a valid MBR, window [16, min(first partition, 2048)) (16384 from fw 0.2.101: section 67), flag BOOT for
   16-79 and CONFIG for 708-710, power-key EINT masked during writes.
 
-## 14. Owner's UI verdicts
+## 14. Maintainer's UI verdicts
 
 Accepted: MCP chip (38 x 17 at x 127 y 3, above RUN/STOP, steady, one idempotent blit, stable while free-running on
 0.2.11), compacted generator and trigger menus (0.2.8), acquisition "Roll mode on/off" box (0.2.10), menus hiding
 what the hardware lacks (0.2.6), battery indicator stable on 0.2.11
 (battery likely full). Pending on 0.2.13+: System settings without the empty row (compacted when no DS3231 answers),
 battery hysteresis while charging from a lower level. Pending on 0.2.17+: quiet boot. Pending with fpga-gen2's 0x1533
-bitstream: EXT trigger (caps bit 3, trigger menu EXT, GET_STATUS byte 42). Owner policy: hide unsupported options;
+bitstream: EXT trigger (caps bit 3, trigger menu EXT, GET_STATUS byte 42). Maintainer policy: hide unsupported options;
 compact menus rather than painting over gaps.
 
 ## 15. Other known issues and closed items
@@ -545,8 +545,8 @@ compact menus rather than painting over gaps.
 
 - No libc (`-nostdlib`): memcpy/memset/memcmp/memmove come from the .s files. No `double` or float in acquisition or
   protocol paths. 64-bit integer math is fine (libgcc).
-- (Until 0.2.46: PC_PROTOCOL=0 byte-identical to Atlan's image. Dropped by the owner; the switch is gone in 0.2.47.)
-  Hidden features are removed in code, not masked (owner, 2026-10-18); keep settings sector / file slots stable.
+- (Until 0.2.46: PC_PROTOCOL=0 byte-identical to Atlan's image. Dropped by the maintainer; the switch is gone in 0.2.47.)
+  Hidden features are removed in code, not masked (maintainer, 2026-10-18); keep settings sector / file slots stable.
 - No new warnings under GCC 13 or GCC 10 (compare sorted, line-number-free warning lists against the parent commit).
 - Small commits, one topic each, touching only firmware/ (plus docs/protocol.md section 14 and
   docs/protocol-vectors.json for wire changes), message ending with the Co-Authored-By line.
@@ -557,8 +557,8 @@ compact menus rather than painting over gaps.
   (pc_protocol.h), get a row in protocol section 14 and a message to mcp-gen2 (owns mcp/ and the simulator).
 - Report every bench image with path, commit hash copied from git output, and sha256 of
   `build-gcc10-pc/fnirsi_1013d.bin`; pin the .bin and the ELF in backups/.
-- Bench: the agent never touches hardware. The coordinator (team-lead) owns COM10, FEL loads and SD writes. Never
-  flash anything without a verified backup; the stock firmware must stay bootable. Only the coordinator persists an
+- Bench: the agent never touches hardware. The bench session (team lead) owns the serial port `<port>`, FEL loads and SD writes. Never
+  flash anything without a verified backup; the stock firmware must stay bootable. Only the bench session persists an
   image to the card; 0.2.11 stays there until the crash is fixed.
 
 ## 17. TODO, in priority order
@@ -603,7 +603,7 @@ compact menus rather than painting over gaps.
    gives a marginal HS eye. Counter-evidence to weigh: since 0.2.22 the PHY reset at init wipes whatever the
    boot ROM's FEL tuned, yet the 0.2.23 FEL runs (500 x 64 KiB) were clean; the cold-boot failure rate is
    about 1 per 500 transfers, so small samples cannot separate the paths. Judge 0.2.25 on long runs.
-1c. Host-capture trigger position varies between runs at decimated rates (lead, 0x1533 / 0.2.21, lower priority; owner
+1c. Host-capture trigger position varies between runs at decimated rates (lead, 0x1533 / 0.2.21, lower priority; maintainer
    of the fix TBD, firmware or host geometry). Capture.pretrigger_samples vs the measured CH1 edge is stable within a
    run but differs between runs: 1 MS/s (divider 199) EXT +11/+12 us in the first 10 captures after selecting EXT,
    then -1.0 us in 17 captures over five setting orders; CH1 source +2/+3 us in one run, -1.0 us in another; 20 MS/s
@@ -612,7 +612,7 @@ compact menus rather than painting over gaps.
    when UI and host disagree. Test: alternate CH1/EXT and timebases, log GET_CAPTURE_INFO (trigger_addr,
    capture_start_word, divider) next to the measured edge index (method in docs/hardware-status.md).
 2. Read the 0.2.18+ frozen snapshot after sessions to explain the two suspend+reset pairs per session (section 11).
-3. Owner verdicts on 0.2.13+ System settings and battery, 0.2.17+ quiet boot; EXT trigger bench with 0x1533.
+3. Maintainer verdicts on 0.2.13+ System settings and battery, 0.2.17+ quiet boot; EXT trigger bench with 0x1533.
 4. Bench tests T3-T8 and T10 (section 7), then clear the UNVERIFIED caps and set FORCE_TRIGGER in release builds.
 5. Phase 2/3 commands: READ_LIVE, READ_SCREEN (T9), ACQUIRE_AVG (128 KiB accumulators), full-speed fallback.
 6. Per-unit USB serial (SID/eFuse) and a real pid.codes PID before anyone else flashes this.
@@ -621,7 +621,7 @@ compact menus rather than painting over gaps.
 ## 18. Handoff from fw-gen4 (retired at about 280k tokens, 2026-10-18)
 
 State: 0.2.21-0.2.25 built, host-tested, pinned in backups/ with ELFs (ladder, section 8). **0.2.25 (c71935f9) is
-on the card.** Nothing is uncommitted. The coordinator is running the deciding test: cold boot with the cable in,
+on the card.** Nothing is uncommitted. The bench session is running the deciding test: cold boot with the cable in,
 then the 30-minute capture soak (~35,000 requests).
 
 What fw-gen4 did:
@@ -665,7 +665,7 @@ Open, for fw-gen5 (in this order):
 
 Gotchas from this session: Python heredocs via Git Bash turn `\0`-style C escapes into raw bytes; check with
 `cat -A` or build escapes with `bytes([92])`. Bash variables inside `wsl ... bash -lc "..."` from Git Bash get
-eaten; put WSL steps in a script and run it through PowerShell `wsl -d Ubuntu -- bash /mnt/c/...`. Every rebuild
+eaten; put WSL steps in a script and run it through PowerShell `wsl -d <distro> -- bash /mnt/c/...`. Every rebuild
 changes the sha256 (build time is embedded): pin from the same build you report. Of the init entries, type 16 is
 copied into the bus ring and type 19 is not (only the main ring and the snapshot hold it).
 
@@ -723,7 +723,7 @@ section 14 rows 44 (FFT_BENCH) and 45 (READ_SPECTRUM, GET_STATUS byte 43).
   Average field (`spec_acc`, keyed restart); waterfall rows RGB565, density count + last-hit capture index (no fading
   pass). Persisted at power-off: FFT length, window, scale (word 208), ref + averaging (word 209); not the mode.
   A host capture with a raw divider is labelled with the UI rate (row 45).
-- Owner verdicts so far: spectrum view works, harmonics within 0.4 dB; waterfall "very nice"; density band fixed in
+- Maintainer verdicts so far: spectrum view works, harmonics within 0.4 dB; waterfall "very nice"; density band fixed in
   0.2.35 (verdict pending); 0.2.35-0.2.40 UX items pending on the screen (header layout, gestures, Auto, averaging).
 - Firmware auto trigger mode (0.2.41): README section 5 "Firmware auto trigger mode", protocol section 7.5. The
   FPGA's 0x0E time-out counts samples and 0x18 is not gated by the stop, so auto records at fast rates were untriggered
@@ -732,7 +732,7 @@ section 14 rows 44 (FFT_BENCH) and 45 (READ_SPECTRUM, GET_STATUS byte 43).
   (`pc_glue_decim_conversion` writes 0x1A per conversion). Bench: the 10 MS/s / 1 kHz square case from the lead's
   host captures (2 of 6 flat "triggered" records on 0.2.40) should give 6 of 6 single-edge records in auto mode, and
   the spectrum view's comb must not flicker.
-- Owner verdicts open: 0.2.41 auto mode and zoom-in rate stepping; 0.2.42 Auto procedure (README "Auto"), warnings.
+- Maintainer verdicts open: 0.2.41 auto mode and zoom-in rate stepping; 0.2.42 Auto procedure (README "Auto"), warnings.
   0.2.40 header and averaging accepted (Avg tag removed from the header in 0.2.42). Accepted so far: spectrum view, waterfall, the CIC3 floor; the "wagging tail" was
   window-leakage variation, fixed by averaging (default 4).
 - Next for fw-gen6: FPGA 0x1535 FIR support, once the lead confirms fpga-gen4's testbench numbers. Interface delta
@@ -761,7 +761,7 @@ section 14 rows 44 (FFT_BENCH) and 45 (READ_SPECTRUM, GET_STATUS byte 43).
 
 ## 21. Calibration data v2 (fw-cal, fw 0.2.43, protocol 1.10) and the v3 gain handoff (for fw-cal2)
 
-fw-cal retired at about 500k tokens, 2026-10-18. Branch `fw-cal` = main 0.2.42 + the calibration work; the owner ran
+fw-cal retired at about 500k tokens, 2026-10-18. Branch `fw-cal` = main 0.2.42 + the calibration work; the maintainer ran
 0.2.43 (80ab45d, sha256 7d2ea871c6f9bca8cc2442eb9122205d9903399abb07dcfecf1e1580bed8be73). 3bfc892 (64 full-rate
 conversions) is committed after it and in no image yet. Detail: README section 6 (6.1 what 1.00o5 does, 6.2 v2 design,
 formulas, bench list), protocol section 14 row 48, `adc_cal` section of docs/protocol-vectors.json.
@@ -791,7 +791,7 @@ formulas, bench list), protocol section 14 row 48, `adc_cal` section of docs/pro
   per channel u16 pwm[6], i16 zero[class][core][range], i32 slope[core][range] (Q16), u16 noise[class][core][range];
   u32 zlib CRC of the 324 bytes before. Used per channel only while pwm[0..5] == dc_calibration_offset[0..5] (709).
 
-**Bench results (coordinator, 2026-10-18, 0.2.43)**
+**Bench results (bench session, 2026-10-18, 0.2.43)**
 - Base calibration ran clean; GET_CAL version 2, flags 0x07 both channels. CH1 PWM centres 867 863 870 866 871 865;
   full zeros A 2105 2102 2105 2099 2102 2109, B 2069 2050 2049 2051 2044 2050; gated A 2096 2096 2098 2096 2096 2098,
   B 2006 2001 2007 2001 2002 2005. CH2 centres 854 849 857 852 857 853; full A 2077 2076 2078 2073 2077 2069, B 2084
@@ -812,7 +812,7 @@ formulas, bench list), protocol section 14 row 48, `adc_cal` section of docs/pro
   higher); gated A +28.15, B +28.64 (B 1.7 % higher). The sign of the gain mismatch flips between the classes, and
   the class means differ too, so the filtered (full-rate) and legacy (gated) volts disagree away from 0 V. At the
   calibration post with the generator off (about -1.24 V, -34 codes) the gated A/B ratio was about 0.994 vs 0.983 at
-  +1 V: possibly non-linear (core INL); the owner offers a second point (-1 V or 2 V): ask for -1 V on CH1 range 2
+  +1 V: possibly non-linear (core INL); the maintainer offers a second point (-1 V or 2 V): ask for -1 V on CH1 range 2
   (200 MSa/s, 1 MSa/s legacy, CIC2) before choosing one gain or two (above / below zero). The PWM slope ratio (CH1
   gated A/B about 0.992) has the right sign but half the size: a weak gain estimator, do not use it.
 
@@ -835,7 +835,7 @@ formulas, bench list), protocol section 14 row 48, `adc_cal` section of docs/pro
   24 = 180 bytes, block 12 + 360 + 4 = 376 bytes at 708 byte 128 (ends at 504), plus the gain table if stored
   separately (re-check the 512-byte budget: gains per class/core/range as u16 Q15 add 48 per channel, too much: store
   gains per class and core only if they prove range-independent, 8 bytes). Version 3; v2 blocks are then not used
-  (the owner re-runs base calibration, and the voltage calibration if the gain comes from it). GET_CAL bytes 92+
+  (the maintainer re-runs base calibration, and the voltage calibration if the gain comes from it). GET_CAL bytes 92+
   change with it: new row (protocol 1.11), vectors (`adc_cal` section), mcp-gen3 told.
 
 **Remaining bench (README 6.2 list)**: offset sweep -600..600 on ranges 0/3/5; AC vs DC on all ranges; Nyquist bin
@@ -874,10 +874,10 @@ Commits 2e0cd10 (FIR), 9591d83 (repaint), e09b25a (default), 45b9b9a (USB suspen
 - Filter box on 0x1535+: off, boxcar, boxcar+FIR, CIC2, CIC2+FIR, CIC3, CIC3+FIR (`pc_glue_decim_tap`). The box shows
   the setting; the spectrum header tag shows the effective state (FIR only where active).
 - Default: `PC_DECIM_DEFAULT` (pc_decim.h) = CIC2, for sectors without a valid word 207 and the DEFAULT button
-  (`PC_SETTINGS_DEFAULTS` in scope_reset_config_data). Owner: CIC2 | PC_DECIM_SET_FIR once 0x1535 is benched.
+  (`PC_SETTINGS_DEFAULTS` in scope_reset_config_data). Maintainer: CIC2 | PC_DECIM_SET_FIR once 0x1535 is benched.
 - Spectrum repaint (README "Redraws in the spectrum view"): `scope_preset_values` starts with `PC_SPECTRUM_DISPLAY()`;
   `spectrum_display` has a re-entry guard (spec_tb_set -> pc_hal_timebase_write -> preset -> display). Audit: no other
-  host-driven redraw reaches the trace area. If the owner still sees the strip flicker on SET_TRIGGER / SET_GEN alone,
+  host-driven redraw reaches the trace area. If the maintainer still sees the strip flicker on SET_TRIGGER / SET_GEN alone,
   look at what the host sent around it (MCP configure calls SET_TIMEBASE too) before searching the drawing code again.
 - USB suspend (protocol row 50): suspend no longer runs `pc_usb_isr_link` (no flush, no DTR clear, no session reset);
   RESUME ends it, reset / disconnect reset the link. `pc_hal_dtr` reads 0 while suspended. `pc_usb_main_service`
@@ -924,10 +924,10 @@ procedure: README 6.3; wire: protocol row 51.
 - Readout: (raw x gain + off + top 16 dither bits) >> 16; the 1.00o5 v1 arithmetic is the special case gain 65536,
   off = comp << 16 (dither never carries). Rail rule rewritten on both cores' corrected limits (clip_lo / clip_hi),
   identical to 1.00o5 with unity gains. 16-bit readouts run the loop at unity (the feed carries gain16 and corr16).
-- v2 blocks are not read (no conversion): the owner re-runs the base calibration.
+- v2 blocks are not read (no conversion): the maintainer re-runs the base calibration.
 
 **Host tests**: test_adc_cal 8590 checks: block, correction identities (v1 exact, unity-gain v3 = v2), every gain
-check, and a model of the owner's CH1 from the gain bench (v2 reproduces A - B 0.91 code at +-1 V full rate and the
+check, and a model of the maintainer's CH1 from the gain bench (v2 reproduces A - B 0.91 code at +-1 V full rate and the
 1.1 % class gap; v3 leaves A - B under 0.03 and both classes plus CIC2 within 0.05 code of the gated codes per volt).
 test_session 68933 / 68931 (GET_CAL 256 bytes, flags, gains, offsets, block offsets), vectors `adc_cal_v3`
 (check_vectors.py against `acal_pack`); the v2 `adc_cal` section stays because mcp/tests/test_cal_v2.py reads it.
@@ -976,7 +976,7 @@ row 52. Points a successor needs:
   TRIGGERED (so READ_TRACE re-reads do not add), `phosphor_capture_info` beside the spectrum's, `phosphor_service`,
   `phosphor_settings_restore` in `pc_ui_fix_settings`, `pc_hal_display_mode` = 4. PC_PROTOCOL=0 build verified
   byte-identical to 854ed2a's PC_PROTOCOL=0 build (GCC 10, fixed epoch); warnings 32 = 32 on GCC 10 and 13; the new files
-  are clean with -Wextra. (`make check-reference` against Atlan's binary no longer matches on main since the owner
+  are clean with -Wextra. (`make check-reference` against Atlan's binary no longer matches on main since the maintainer
   dropped that rule; compare against the base commit instead, script idea: git archive the base into the scratchpad.)
 - Clearing: per channel when `phos_inputs` changes (enable, coupling, V/div display + sample, input_calibration of the
   sample range, trace position, dcoffset, dc_shift_size): the LUT is rebuilt from `scope_get_y_sample` with the trace
@@ -988,7 +988,7 @@ row 52. Points a successor needs:
   tracepoints; the Trace selector does not apply; per-pass costs are estimates (the bench must measure `pass_ms`);
   `mcp/` `DisplayMode` lacks 2 / 3 / 4 (server falls back to the number; tell mcp-gen3).
 
-**Bench steps (owner, with the coordinator on COM10)**
+**Bench steps (maintainer, with the bench session on <port>)**
 1. FEL-load the image (`sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`), check #VER
    fw=0.2.46 proto=1.13. CH1 probe (x1) on the calibration pin, generator on, 1 kHz, duty 50 %; CH1 1 V/div DC, 200
    us/div, trigger CH1 rising, Auto.
@@ -996,7 +996,7 @@ row 52. Points a successor needs:
    scope screen unchanged except the bottom line: `Persistence 1 s | Palette Mono | Clear | Scope` boxes and "NN wfm/s"
    in grey at the right (about 25-33). The trace is yellow, sharp, both edges drawn, grid visible around it; pointers,
    measurement tiles and cursors (switch them on) where they always are. The main menu row now reads "Scope view".
-3. Generator duty: toggle 30 % / 70 % (generator menu, or the coordinator loops SET_GEN every 0.25 s): both falling
+3. Generator duty: toggle 30 % / 70 % (generator menu, or the bench session loops SET_GEN every 0.25 s): both falling
    edges visible at about equal brightness; stop toggling and the old edge fades within about 1 s.
 4. Persistence: tap through 5 s (slow fade), Infinite (no fade; rare paths stay), 0.2 s (almost the normal trace),
    back to 1 s; each tap clears. Palette: Heat (frequent white / red, rare blue), Mono. Clear: the picture empties and
@@ -1087,11 +1087,11 @@ static copies, so grep every name before deleting. Files never built: font_6.c, 
 1014D remnants are comments only (display_control.c 187-188, spi_control.c 27). Remove in topic commits and check
 with a fixed identity that only the expected functions change.
 
-**Bench checks (coordinator)**
+**Bench checks (bench session)**
 1. FEL-load the image, `#VER` fw=0.2.47 proto=1.13; GET_INFO byte 52 = 0x463b4895 (or the hash of the built
    commit); diagnostics screen identity line "git 463b4895 of 2026-10-18 23:04" (UTC).
 2. Census (bench_link.py --census 2000) and the mcp soak for 10 minutes: clean as 0.2.46.
-3. Owner taps: channel menus CH1 / CH2 (Open CH, Invert, Coupling, V/A, Probe, V/div; no FFT row); generator
+3. Maintainer taps: channel menus CH1 / CH2 (Open CH, Invert, Coupling, V/A, Probe, V/div; no FFT row); generator
    (Power, Freq, Duty, the keyboard for Freq and Duty, nothing below Duty reacts); trigger menu (mode, edge,
    channel incl. EXT on 0x1533+, position, Always 50 %; no hold-off); acquisition menu (Roll, Average, Filter box on
    0x1534+ / empty slot on older, memory depths, time/div); system settings and RTC row; DEFAULT button; power off
@@ -1152,7 +1152,7 @@ pc_cmds.c link stats, pc_cmds.h version); expect conflicts only in pc_cmds.h (ve
 5. Record words 10-12 are written only by 0.2.48+ vectors; they are reported only for exception types 3 / 4 with
    the exception magic, which the same image wrote.
 
-**Bench sequence** (coordinator + owner; FEL loads only, nothing written to the card unless the coordinator decides)
+**Bench sequence** (bench session + maintainer; FEL loads only, nothing written to the card unless the bench session decides)
 1. FEL-load `build-gcc10-pc/fnirsi_1013d.bin` (`sunxi-fel -p write 0x7FFFFFE0 ... exe 0x80000000`). Expect the
    normal boot within the usual time, USB enumerates, `#VER` `fw=0.2.48,proto=1.13`. Black screen / no enumeration =
    the enable path (a power cycle boots the card's image; then try -nommu to separate the MMU from the rest).
@@ -1173,7 +1173,7 @@ pc_cmds.c link stats, pc_cmds.h version); expect conflicts only in pc_cmds.h (ve
 6. `fnirsi1013d-soak --mode capture --duration 1800`: 0 restarts (GET_LINK_STATS 49), tx_aborts as on 0.2.46, no drops.
 7. SD: save a picture and a waveform, view them back on the scope; power off / on keeps the settings (sector 709
    written by the power-off ISR); `fnirsi1013d-sd info --verify` and `fnirsi1013d-sd read 708 3 -o ...` equal to a
-   -nommu read. The persist path (SD_STAGE + SD_WRITE_SECTORS) only if the coordinator wants this image on the card;
+   -nommu read. The persist path (SD_STAGE + SD_WRITE_SECTORS) only if the bench session wants this image on the card;
    read-back identical is the check.
 8. ENTER_FEL round trip x3 from 0.2.48: FEL device appears, reload, it boots, counter 49 (restarts) = 0; once load
    -nommu after 0.2.48 and once 0.2.48 after -nommu. FEL device missing = the jump; a reloaded image misbehaving or
@@ -1195,7 +1195,7 @@ sha256 f5f377ea5befe01794ca85114734da06cf172de7c92d691306574b0d93055f79. Not pin
 **Nothing benched.** Host tests all green (test_usbw 90 checks, test_session 68937 / 68935, test-arm identical); mcp
 pytest 360 passed, ruff (CI selection) clean.
 
-**The case** (docs/hardware-status.md 2026-10-19, coordinator's brief): fw 0.2.48-nommu, port closed 08:40-10:20, at
+**The case** (docs/hardware-status.md 2026-10-19, bench session's brief): fw 0.2.48-nommu, port closed 08:40-10:20, at
 10:20 no 1209:0001, no re-enumeration, no FEL device, screen alive; replug fixed it; afterwards counters 36 / 37 / 49 =
 17 / 0 / 0. Overnight on 0.2.44 (backups/night_log_20261018.jsonl, decoded): 53 reopens after 10 min idle, counter 36
 stayed 1 (the boot suspend: type 2 a = 0x60 b = 0 at 712 ms, bus reset a = 1 b = 127 ms, SET_CONFIGURATION), so this
@@ -1267,9 +1267,9 @@ lower PC_USBW_STORM_SUSPENDS if the log shows that.
 
 **Also found:** docs/agent-measurement-guide.md section 8 and the fnirsi-scope skill gave the selective-suspend
 setting as 48e6b7a6-50f5-4782-a5d4-53bb**50f7e206**; the right GUID is ...-53bb**8f07e226** (soak.py, section 11).
-If the owner used the guide's command on 2026-10-18, the setting never changed; `fnirsi1013d-soak` prints the real state.
+If the maintainer used the guide's command on 2026-10-18, the setting never changed; `fnirsi1013d-soak` prints the real state.
 
-**Bench plan** (coordinator + owner; FEL load only; record `powercfg /query SCHEME_CURRENT
+**Bench plan** (bench session + maintainer; FEL load only; record `powercfg /query SCHEME_CURRENT
 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226` before and restore it after)
 0. Load: `sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000` (sha256 90f460d6...). Expect
    `#VER fw=0.2.49,proto=1.14`, GET_LINK_STATS n = 62 with 60 = 61 = 0, the boot events as on 0.2.44 (type 2, type 1
@@ -1286,11 +1286,11 @@ If the owner used the guide's command on 2026-10-18, the setting never changed; 
    C. resume fails, Windows resets: type 2, type 1 a = 1 b = 65535 (or the suspend's ms), type 7, 35 +1, reopen fine
       after 1-3 s. The core cannot come back from suspend; the watch then matters only when Windows gives up.
    D. still suspended 15 min after the suspend: type 20 with a bits 1-0 = 2, b ~ 900 s, 61 +1, then within ~2 s type 1
-      a = 0 and type 7 (fresh enumeration), Windows' unplug / plug sound, COM10 back; the reopen at the round's end is
+      a = 0 and type 7 (fresh enumeration), Windows' unplug / plug sound, <port> back; the reopen at the round's end is
       fine and resets the long back-off. At most one type 20 per 30-min round.
 2. Two hours idle, port closed, selective suspend still on, PC awake: `fnirsi1013d-soak --mode reopen --idle 7200
    --rounds 1`. If the host suspends: type 20 (reason 2) about 15, 45 and 105 min after the first suspend (15 + 30 + 60),
-   each followed by type 1 a = 0 and type 7; reopen fine; 61 <= 3. Then (owner's call) once with the PC put to sleep
+   each followed by type 1 a = 0 and type 7; reopen fine; 61 <= 3. Then (maintainer's call) once with the PC put to sleep
    for >= 20 min with the port closed: on wake the device comes back by itself (type 1 / 7 after the wake; 61 +0 or +1
    during the sleep). The PC waking by itself ~15 min into the sleep = risk (1).
 3. Restore the power setting recorded at the start.
@@ -1362,7 +1362,7 @@ GCC 10 36, GCC 13 31, PC_DEBUG 31; acal_track.c / acal_live.c clean with -Wextra
   volts model (bytes 92..107 / 84 already include v4, so a host that uses them needs nothing else); README 6.5 bench.
   GET_CAL is now 288 bytes, above the 256-byte duplicate-cache limit (protocol row 5): a retried GET_CAL runs again
   (harmless, it only reads).
-- Coordinator's bench facts this rests on (docs/hardware-status.md 2026-10-19): full-class common mode +0.7-0.8 code in
+- Bench session's bench facts this rests on (docs/hardware-status.md 2026-10-19): full-class common mode +0.7-0.8 code in
   2 h while the gated class stays (design section 8); the FIR path benched at 78-83 dB alias rejection and CIC2+FIR
   becomes the default, so gain16 / corr16 must keep working with the FIR gain (N/2)^K: they do, cm enters corr16 as an
   additive 1/16-code term after `pc_decim_to_code` (code = out x scale / 2^24 + corr16 / 16), independent of N, K and
@@ -1371,7 +1371,7 @@ GCC 10 36, GCC 13 31, PC_DEBUG 31; acal_track.c / acal_live.c clean with -Wextra
   **and** w >= v^2 / 4 (the first draft's 256 codes^4 let the noise inside the post square's two levels pull q to 0
   and bias e; test_acal_track (c)).
 - Gotchas: the main menu reorder 7c62586 put Spectrum / Phosphor first; the system settings fold-out stays anchored at
-  y 46 while its row moved to y 164 (owner to judge). Pre-existing, unfixed: in `fpga_read_adc_data` the core-B rail
+  y 46 while its row moved to y 164 (maintainer to judge). Pre-existing, unfixed: in `fpga_read_adc_data` the core-B rail
   rule reads `settings->buffer[1]` (core A's code) after it was stored as 255 - code on an inverted channel, so on
   inverted channels the rule compares mirrored codes near the rails (fix: un-invert `first` or apply invert after the
   pair). The tracker un-inverts the buffer itself. Diagnostics CH2 block moved from y 205 to 225 for the two v4 lines.
@@ -1415,7 +1415,7 @@ Points for a successor:
   row, restore ACQ_MENU_HEIGHT 386, keep `pc_phos_wanted` / `pc_display_variant` as the fold-out's model.
 - **System settings fold-out**: X-Y row removed, Notification confirmation and RTC settings one row up (draw y and
   touch ranges in menu.c / statemachine.c), SYSTEM_MENU_HEIGHT_FULL 354; the fold-out's touch area now ends at its
-  box (was y 470). The fold-out stays anchored at y 46 while its main-menu row is the fifth (owner to judge; step 3
+  box (was y 470). The fold-out stays anchored at y 46 while its main-menu row is the fifth (maintainer to judge; step 3
   rebuilds it).
 - **Strips**: phosphor F_COUNT 3 (no Scope), warnings via `phos_draw_warning` at (366 centre, y 69) in font_2 orange,
   wfm/s stays at the strip's right end until step 2 moves it. Spectrum F_COUNT 8 (no Auto, no Scope; FIELD_W 90).
@@ -1434,11 +1434,11 @@ Points for a successor:
   the saved index (later, with the per-mode lists of plan section 3a).
 - Edit tooling that worked here: the worktree isolation refuses shell heredocs and compound commands, so edits go
   through a Python script in the scratchpad (`ed.py <file> <spec.py>`, latin-1, newline='', unique-match EDITS and
-  RANGES) run from PowerShell, and builds through scripts run with `wsl -d Ubuntu -- bash <script>` (WSL /tmp did not
+  RANGES) run from PowerShell, and builds through scripts run with `wsl -d <distro> -- bash <script>` (WSL /tmp did not
   survive between calls; keep logs and the base build under $HOME). The Write tool strips trailing blanks, so never
   anchor an edit on a 1.00o5 blank line.
 
-**Bench walk-through (owner, coordinator on COM10)**
+**Bench walk-through (maintainer, bench session on <port>)**
 1. FEL-load the image, `#VER` fw=0.2.51 proto=1.15. Top bar: no "v0.2.51" text at the right (the diagnostics view
    still shows the identity line).
 2. Menu: seven rows Scope, Spectrum analyser, Saved pictures, Saved waveforms, Settings, Diagnostics, USB drive, each
@@ -1448,7 +1448,7 @@ Points for a successor:
 3. Settings fold-out: no X-Y row; Notification confirmation toggles in the fourth slot, RTC settings (with a DS3231)
    in the fifth; the box ends under them.
 4. USB drive: title "USB drive", the scope and PC picture, the three lines, an Exit button bottom right. With the PC
-   showing the drive, Exit gives "Not allowed!"; eject on the PC, Exit returns to the scope and COM10 comes back.
+   showing the drive, Exit gives "Not allowed!"; eject on the PC, Exit returns to the scope and <port> comes back.
 5. Spectrum: Menu > Spectrum analyser shows the spectrum (strip: Channel, FFT length, Window, Scale, Ref level,
    Average, Reset, View; no Auto, no Scope). AUTO SET: reads "Auto..." while running, the view settles; tap AUTO SET
    during a run: it stops and reads AUTO SET again. Menu > Scope returns to the traces.
@@ -1495,7 +1495,7 @@ PC_POWER_OFF now `pc_glue_power_off`. pc_hal_scope.c: `pc_diag_boot` after `pc_r
 - One new command for the live state (GET_HEALTH, 96 bytes, F_BUSY: works while Diagnostics is modal) instead of slots
   spread over GET_INFO / GET_STATUS / GET_LINK_STATS; GET_LINK_STATS stays n = 62.
 - Provenance is a separate trailer after the v3 block, not a v3 -> v4 block bump: 0.2.45-0.2.51 keep reading the card
-  (a bump would have made the owner's fallback images uncalibrated). Stamped by comparing the block on save with the
+  (a bump would have made the maintainer's fallback images uncalibrated). Stamped by comparing the block on save with the
   one loaded / last saved (`acal_prov_what`), so cal_wiz_ui.c needed no change and a DC-shift trim or volts calibration
   keeps the provenance. Per block, not per channel; `what` says which parts the last calibration wrote.
 - Power-on count = cold boots (power-on or FEL load); a warm restart is the same power-on. Operating minutes = stored
@@ -1528,7 +1528,7 @@ calibration page incl. provenance. Firmware tile: `pc_image_ident` (running) vs 
 - mcp: parse GET_HEALTH, SD_INFO 64..111 (+ flag 0x02), GET_CAL 288..355, SAVE_REPORT; MCP tool returning the report
   as JSON (review finding 8).
 
-**Bench checks** (coordinator + owner; FEL load, the card keeps 0.2.25)
+**Bench checks** (bench session + maintainer; FEL load, the card keeps 0.2.25)
 1. Load, `#VER fw=0.2.52,proto=1.16`. GET_HEALTH: byte 4 = 3 (configured), byte 5 bit 0 = 1 (high speed), bit 3 = 1
    with the port open; 16 = 0x0005107D; 32 bit 3 (709 valid) and bit 1 (boot write ok); 20 power_on = 1 on the first
    boot with 0.2.52 (no life record yet), 33 last_end = 0. SD_INFO flags 0x02: 64 = 3, version "0.2.25", proto 1.5,
@@ -1620,7 +1620,7 @@ Not done / for a successor:
 - The full-screen colours (0x0D0D0D rows, 0x0F2447 / 0x1F3A66 buttons, 0x35C26A values) are local defines in
   `ui_settings_ui.c`; fw-ui4's Diagnostics pages should move them to a shared header when they reuse them.
 
-**Bench walk-through (owner, coordinator on COM10)**
+**Bench walk-through (maintainer, bench session on <port>)**
 1. FEL-load the image, `#VER` fw=0.2.55 proto=1.16.
 2. Menu > Settings: the fold-out shows Screen brightness, Grid brightness, File message timeout (chip "0.7 s" or "tap"),
    Time and date (only with a DS3231), Baseline calibration, Other settings; the box ends under Other settings. Tap
@@ -1644,7 +1644,7 @@ Not done / for a successor:
 8. Restore default settings: the dialog "Restore default settings?" with three lines, Cancel left, Restore right in red;
    taps outside the two buttons do nothing. Cancel: back to the page, nothing changed. Restore: the page shows the
    defaults (brightness 20 %, grid 25 %, clock not used); Back: the scope screen rebuilt (CH1 on, defaults), the boot
-   menu choice unchanged at the next power-on, calibration unchanged (diagnostics lines), COM10 still there (CDC), and
+   menu choice unchanged at the next power-on, calibration unchanged (diagnostics lines), <port> still there (CDC), and
    USB drive > Exit still returns to CDC.
 9. Saved pictures: select a file, Delete: "Delete from the SD card?", "This cannot be undone.", Cancel left, Delete
    right (red), both 44 px tall and 16 px apart; Cancel keeps the file and the browser redraws cleanly; Delete removes
@@ -1652,7 +1652,7 @@ Not done / for a successor:
 Bug indicators: a fold-out tap opening the neighbouring row; the Settings screen leaving parts of itself on the scope
 after Back; the main-menu area showing an old picture after Restore; a row's value overflowing into its label; the
 boot menu appearing (or not) against the At power-on value; a tap between rows or outside the dialog buttons acting;
-COM10 disappearing after Restore default settings; the delete dialog leaving a box behind in the browser.
+<port> disappearing after Restore default settings; the delete dialog leaving a box behind in the browser.
 
 ## 32. fw-touch1: touch fix batch 1 (fw 0.2.54 provisional, protocol 1.16 unchanged)
 
@@ -1694,14 +1694,14 @@ What changed, by defect number of the review:
   `scope_restore_setup_from_file` clamp CH1 / CH2 `traceposition`. Not done (not in c1): `scope_do_auto_setup_old`
   still writes 0 / 399, and the new auto setup's two-channel spread (+100 / -100 after the DC block) can leave 398 or
   1..5; both are grabbable now (the pick uses the clamped drawn position) and jump into range on the first drag step.
-- Left for batch 2 / 3 as briefed: trace-body grab and radius 40, 8 px dead band, tap zones (the owner keeps the hidden
+- Left for batch 2 / 3 as briefed: trace-body grab and radius 40, 8 px dead band, tap zones (the maintainer keeps the hidden
   V/div bands), hidden objects (the trigger level hit while its pointer is hidden, X-Y moving disabled channels),
   locked cursors, the blocking loop, the second GT911 reader, long-mode presets per step, spectrum pan.
 - Merge note: fw-ui2 edits the right-bar handlers in statemachine.c and fw-ui3 the settings fold-out; this branch only
   touches `touch_handler`, `scan_for_touch`'s plot branch, the three `change_*` functions, `scope_draw_pointers`, the new
   auto setup's DC blocks and the two loaders. Both Makefiles gained one SRCS / test line each.
 
-**Bench walk-through (owner, coordinator on COM10)** - FEL-load the image, `#VER` fw=0.2.54 proto=1.16. Normal
+**Bench walk-through (maintainer, bench session on <port>)** - FEL-load the image, `#VER` fw=0.2.54 proto=1.16. Normal
 display, both channels on, CH1 trigger, Move fast (not slow) unless noted.
 1. Defect 1, pointer is not a handle. Old repro: drag the yellow "1" pointer up: nothing moved. Now: touch the "1"
    pointer and drag up and down: CH1 follows the finger; the same for "2". A touch up to about 20 px above or below the
@@ -1709,7 +1709,7 @@ display, both channels on, CH1 trigger, Move fast (not slow) unless noted.
 2. Defect 3, nearest enabled. Old repro: drag CH2 to about 10 px below CH1, switch CH2 off in its menu, touch 5-10 px
    below CH1's line and drag: nothing moved. Now: CH1 moves (both from its pointer and from the line on the plot). With
    CH2 on and parked exactly on CH1: the drag moves CH2 (drawn on top); move it away and CH1 is reachable again.
-3. Owner's report (CH2 at the bottom, CH1 only from its zero line): CH1 now drags from its pointer at any height; on the
+3. Maintainer's report (CH2 at the bottom, CH1 only from its zero line): CH1 now drags from its pointer at any height; on the
    plot the zero-line grab is unchanged (the trace body follows in batch 2).
 4. Defect 5, pick after the move. Old repro: a quick upward flick starting on a channel's zero line often moved the
    trigger point. Now: the flick moves the channel.
@@ -1784,17 +1784,17 @@ Points for a successor:
 - **Right bar follows the mode**: `pc_right_bar_follow` in `pc_glue_ui_service` redraws the bar when the spectrum view
   starts or ends (main menu, roll mode, viewer, Auto), in `maindisplaybuffer`.
 - **Deviations from the brief / mockups, on purpose**: Scale and Ref level are below a separator in the Analyse
-  fold-out (the plan's owner text and the SpectrumCtrlAnalysis board; there is no free slot for an Axis button, and the
+  fold-out (the plan's maintainer text and the SpectrumCtrlAnalysis board; there is no free slot for an Axis button, and the
   spectrum's 50 % slot stays empty). Grid shows a slide switch, not "on" (guidelines: a toggle never reads on / off).
   MEASURES is an empty slot in Spectrum (the spectrum's own list is Measurements v2; the cards are a fixed set). The
   Display button values are abbreviations that fit 47 px ("Phos", "XY Ph", "Spec", "Wfall"; test_ui checks the widths).
 - **Lost or open until later steps**: the spectrum's MEASURES list and THD card (Measurements v2); one-tap phosphor
-  Clear (now CTRL, Display, Clear, accepted by the owner); a live wfm/s while working (it shows only in the fold-out;
+  Clear (now CTRL, Display, Clear, accepted by the maintainer); a live wfm/s while working (it shows only in the fold-out;
   a card is the review's suggestion A8); the viewer's and DC shift pages keep 1.00o5's look; the Settings fold-out and
   screen are step 3 (fw-ui3, 0.2.55, merged here); fold-outs pause the trace and the PC (E_BUSY after 250 ms)
   like every dropdown.
 
-**Bench walk-through (owner, coordinator on COM10)**
+**Bench walk-through (maintainer, bench session on <port>)**
 1. FEL-load the image, `#VER` fw=0.2.56 proto=1.16. Top bar: CH1, CH2, ACQ and the trigger chip each a grey box with
    the coloured block on the left, no dark notch at the join; touch each chip: white box, menu opens as before.
 2. CTRL: page two reads Display (Normal), Trace style (Linear), Grid (switch, green), the CH1 stepper (grey V+, yellow
@@ -1843,7 +1843,7 @@ nommu 6787f60ab1ebb8ecbfdacfbfe9efe065e16b345065f8405dd5a76f1b084a7169 (`#VER` f
 commit differs only in the identity. **Nothing benched.** Host tests all green (test_ui_diag 4862, test_cal_wizard 631,
 test_ui 1418549, test_session 69705 / 69703, check_vectors OK). Warnings GCC 10 36, GCC 13 31, sorted lists identical to
 main 508f0c5; the new files are clean with -Wall -Wextra -Werror (host). Version: kept 0.2.59 as briefed although main is
-0.2.58: the coordinator renumbers.
+0.2.58: the bench session renumbers.
 
 **Files.** `ui_diag.c/.h` (pure: each page and the first-run screen as boxes, texts and buttons built from the protocol
 bodies GET_HEALTH, GET_CAL x 2, GET_LINK_STATS and the card identity; the verdict rules; `ud_hit`), `ui_dlg.c/.h` (target:
@@ -1868,7 +1868,7 @@ while Diagnostics shows), `pc_report.c/.h` (`pc_report_event`: one event in word
   limits: class gain ratio full / gated (2 %) and the worst noise RMS over ranges, gated (0.3 code) and full (1.0 code),
   from the v3 block; the verdict adds bound / gains measured / carried / FPGA word changed / under 5 min warm-up from the
   flags and the provenance. "Limits are provisional" is printed under them.
-- Wizard: no Skip (owner); Cancel is live during a measurement (polled between points, `CW_RC_CANCELLED`). The zero step
+- Wizard: no Skip (maintainer); Cancel is live during a measurement (polled between points, `CW_RC_CANCELLED`). The zero step
   re-measures both channels on every Calibrate. Save always writes zeros and gains (sectors 708 and 709); without the
   generator the earlier gains are carried (flag KEPT). The fold-out caller is gone, so after Save with `calibrationfail`
   the callers (Diagnostics, first run) run the new volts calibration flow.
@@ -1897,8 +1897,8 @@ screen's Calibration group (`UI_SET_DCSHIFT`; the DC shift trim is on the Diagno
   full image scan (under a second, not measured on the device).
 - The pass time measured by GET_STATUS while Diagnostics shows is the page's pass.
 
-**Bench walk-through (owner, coordinator on COM10; FEL load, back up SD sectors 700-710 first: Save writes 708 and 709)**
-1. FEL-load, `#VER fw=0.2.59,proto=1.17`. On the owner's calibrated unit no first-run screen. Menu > Settings: the
+**Bench walk-through (maintainer, bench session on <port>; FEL load, back up SD sectors 700-710 first: Save writes 708 and 709)**
+1. FEL-load, `#VER fw=0.2.59,proto=1.17`. On the maintainer's calibrated unit no first-run screen. Menu > Settings: the
    fold-out has Screen brightness, Grid brightness, File message timeout, (Time and date), Other settings; no Baseline
    calibration row. Other settings: no Calibration group.
 2. Menu > Diagnostics: the Status page; tile Firmware reads "Reading" for a moment, then Check "Running 0.2.59 from RAM.
@@ -1932,7 +1932,7 @@ than about 2 s; GET_CAL changing after a Cancel.
 
 ## 35. fw-seq: FPGA 0x1536 segmented capture and hardware averaging (fw 0.2.58 provisional, protocol 1.17, row 56 provisional)
 
-Version 0.2.58 as assigned by the coordinator (main: 0.2.56 fw-ui2, 0.2.59 fw-ui4); protocol 1.17 with the row kept at
+Version 0.2.58 as assigned by the bench session (main: 0.2.56 fw-ui2, 0.2.59 fw-ui4); protocol 1.17 with the row kept at
 **70** as briefed (main's last row is 55; renumber to 56 at the merge if preferred). Branch
 `worktree-agent-adad2198a41835255` from main 9cc599c (0.2.51), merged with origin/main 57924e0 (0.2.55, protocol
 1.16). Commits: e6bbc10 (pc_seq.c maths + test_seq + seq_check), 65abebf (HAL, UI averaging, protocol 1.17, mock,
@@ -1979,7 +1979,7 @@ hardware averaging"; FPGA: fpga/al3/README.md section 6 (+ "Firmware support"), 
 - The firmware auto time-out must never run during a run (it writes 0x1A = 0 between records): host runs use the FPGA's
   0x0E in auto mode, UI runs have their own deadline (`pc_seq_ui_service`).
 
-**Flash session plan (owner with the coordinator; agents never flash)**
+**Flash session plan (maintainer with the bench session; agents never flash)**
 1. Backups: the stock FPGA flash dump exists (`backups/2026-10-18_fpga-25q80-stock.bin`, sha256 90f65f08...0d253).
    Before writing, dump the flash as it is now (0x1535): `python firmware/tools/spiflash_d2xx.py read -o
    backups/<date>_fpga-25q80-0x1535-before-1536.bin --twice`; its sha256 must equal the 0x1535 padded image
@@ -2035,7 +2035,7 @@ runs on 0x1535 unchanged (step 2), so no firmware rollback is needed.
   sum / N then the row 47 / 49 conversion), both refusing with the GET_SEQ fit code; `scope_status` gains `hardware_averaging`
   (byte 46 == 2), the log2 N, and the features list. The simulator needs SET_SEQ / GET_SEQ / READ_SEQ and addr_mode 3.
 
-**Open / for the coordinator**
+**Open / for the bench session**
 - fpga-gen6 findings that hold for 0x1532-0x1536 (fixed in their 0x1537, not built yet): (1) the A/B order inside a word can
   flip after a 0x0D or 0x53 write and stays flipped until the next such write, so PC_INTERLEAVE_ORDER and the swap bit are
   right by chance (bench T4); (2) the 1.00o5 readout and `fpga_read_decim_data` are one word late (see above); (3) on
@@ -2043,15 +2043,15 @@ runs on 0x1535 unchanged (step 2), so no firmware rollback is needed.
   asked): moving 0x0B / 0x0C before 0x01 = 1 there too is a one-line change in `pc_hal_arm` / `fpga_do_conversion`; queue it.
 - 0x1537 will need the version rule only (`pc_variant_from_version` already maps 0x1537..0x153F to SEQ).
 - Phosphor fast capture: design in docs/plans/phosphor-fast-capture.md (hundreds of wfm/s at fast time bases), not built.
-- UI 16-bit hardware averaging (see "decided" above) and an Average count setting are UX decisions for the owner.
+- UI 16-bit hardware averaging (see "decided" above) and an Average count setting are UX decisions for the maintainer.
 
 ## 36. fw-calnoise: the wizard's "too much noise" on 0.2.59 (fw 0.2.60, protocol unchanged)
 
-Bench fact (owner, 2026-10-19 15:45, 0.2.59 in RAM, FPGA 0x1535): the Zero level step failed with "too much noise" on
+Bench fact (maintainer, 2026-10-19 15:45, 0.2.59 in RAM, FPGA 0x1535): the Zero level step failed with "too much noise" on
 both channels in most runs, with probes and USB unplugged. 0.2.48's base calibration had passed in the morning (stored
 noise 0.6-1.3 codes).
 
-**Correction (coordinator, after 16:15).** The step also fails with nothing connected, and with USB connected, on
+**Correction (bench session, after 16:15).** The step also fails with nothing connected, and with USB connected, on
 0.2.59 and on 0.2.60. The 0.2.60 line reads "CH1: range 4 at 200 MSa/s: core B, 21.1 codes, 21.0 per capture" and
 "CH2: range 1 at 200 MSa/s: core A, 24.4 codes, 24.3 per capture". One core per channel returns about 21-24 codes RMS
 inside a single full-rate capture, while host READ_RAW at 200 MSa/s legacy gives 0.5-2 codes on the same cores most of
@@ -2112,7 +2112,7 @@ carried noise; a quiet wire would pass with a shifted zero.
 
 ## 37. fw-calnoise: full-rate capture check and FPGA write trace (fw 0.2.61, protocol 1.18, row 57)
 
-Confirmed on the bench (coordinator, 2026-10-19 16:20-16:45):
+Confirmed on the bench (bench session, 2026-10-19 16:20-16:45):
 - **0x1535.** A 0x0D write re-rolls the encode phase at random. CH1 core B was garbled (15-29 codes RMS within a
   capture) after 15 of 30 changes 99 -> 0 and 12 of 30 changes 1 -> 0; otherwise 1.1. CH1 core A moved with it
   (0.50 -> 1.6). CH2 had flipped earlier the same day (24-code core A in the wizard).
@@ -2210,7 +2210,7 @@ handoff. **Nothing benched, nothing flashed.**
   `resp_get_health_1_19`.
 - `PC_INTERLEAVE_ORDER` is fixed at 0 (no `#ifndef`); the two READ_RAW ternaries and the 0x53 swap default are
   constants now. acal_track's A - B model and the decimator's swap bit assume B first, which 0x1538 guarantees: nothing
-  else changes. Caps bit 12 INTERLEAVE_UNVERIFIED stays set until T4 on 0x1538 (coordinator's call).
+  else changes. Caps bit 12 INTERLEAVE_UNVERIFIED stays set until T4 on 0x1538 (bench session's call).
 - Diagnostics: 0x1532..0x1536 amber "ADC capture timing race, fixed in 0x1538"; 0x1537 amber "ADC core order differs:
   recalibrate after flashing 0x1538"; 0x1538 from GET_HEALTH: "encode check OK" (+ ", N captures re-taken"), amber
   "encode check failed on CH2 A, CH1 B" (pins with bit 0 in 0x33 bits 7:4), amber "unknown encode convention, 0x33 =
@@ -2234,7 +2234,7 @@ handoff. **Nothing benched, nothing flashed.**
 - Counters: 62 counts captures whose first check failed (at that moment), 63 those recovered; 62 - 63 = accepted bad or
   abandoned by a new conversion during the re-arms (no event for an abandoned one).
 
-**Bench check** (owner with the coordinator; FEL load only, nothing written):
+**Bench check** (maintainer with the bench session; FEL load only, nothing written):
 1. On 0x1537 first (it is in the flash): FEL-load 0.2.62, `#VER` fw=0.2.62 proto=1.19 fpga=0x1537. Diagnostics FPGA
    line amber "ADC core order differs: recalibrate after flashing 0x1538". The 16:48 experiment again (divider 0 held,
    1221 host captures in 60 s): no READ_RAW with a garbled core (per-core std under 5 codes), GET_HEALTH 92 grows about
@@ -2269,7 +2269,7 @@ Rollback: FEL-load 0.2.61 (pinned backups/fw-0.2.61_4593c43f.bin); 0.2.62 runs o
 
 **Open**
 - `docs/plans/task-queue.md` item "Full-rate encode check on every arm": done on this branch pending the bench above.
-- `docs/release-notes/0.3.0.md` (rel-gen1) does not mention 0x1538 or the per-capture check; the coordinator decides.
+- `docs/release-notes/0.3.0.md` (rel-gen1) does not mention 0x1538 or the per-capture check; the bench session decides.
 - Caps bit 12 INTERLEAVE_UNVERIFIED: clear it for 0x1538 once T4 confirms B first on hardware (one line in
   `pc_variant_from_version`).
 - 0x1532..0x1536 still re-roll only on rate writes, so their re-arm re-writes 0x0D first (two extra writes per re-arm;
@@ -2280,7 +2280,7 @@ Rollback: FEL-load 0.2.61 (pinned backups/fw-0.2.61_4593c43f.bin); 0.2.62 runs o
 ## 39. fw-polish1: UI polish batch 1 (fw 0.2.63 provisional, protocol unchanged)
 
 Branch from main 8f8687a (fw 0.2.61), merged with origin/main a179408 in bc32b8b. Brief: `docs/plans/task-queue.md` "UI
-polish batch 1" items a-p plus the coordinator's item q; rules `docs/ui-guidelines.md`; user-facing description README
+polish batch 1" items a-p plus the bench session's item q; rules `docs/ui-guidelines.md`; user-facing description README
 section 5 "Screens: UI polish batch 1 (fw 0.2.63)" (and the older Screens sections corrected where they changed). One
 commit per item: f58ff29 (a), 70da62a (q), bcb3007 (b), f71ede6 (c), d513498 (d), 8d508cd (e), cf37f5d (f), 1fb05fd (g),
 2830fc2 (h), 1ecaef3 (i), ba116cf (j), d4345e8 (k), eb51787 (l), 6c82e0c (m), 32d17a9 (n), b1fe1fc (p), then the version /
@@ -2291,9 +2291,9 @@ fnirsi_1013d.bin` in the worktree, 606,720 B, sha256 28b15dcdda21112caa49aee81b6
 commit differs only in the identity. **Nothing benched.** Host tests all green (test_ui 1,418,459, test_ui_diag 4880,
 test_cal_wizard 648, test_session 69707 / 69705, check_vectors OK). GCC 10 warnings 36 (gcc10 and gcc10-nommu), sorted
 line-number-free list identical to 8f8687a. No settings words, no protocol change. Version: 0.2.63 as briefed (0.2.62 is
-fw-enc's); the coordinator renumbers if needed.
+fw-enc's); the bench session renumbers if needed.
 
-Decisions (owner may veto each):
+Decisions (maintainer may veto each):
 - (e) **Pro removed.** `scope_display_channel_pro_trace` drew, per screen column, the minimum and the maximum of the
   samples in that column as two separate polylines (min to previous min, max to previous max), with no vertical fill
   between them. Zoomed in (fewer samples than pixels) min = max and it is Linear with held samples; on a clean signal the
@@ -2342,7 +2342,7 @@ Not touched (other agents' areas): enc_heal / fpga_control arm paths, the ACQ dr
 `handle_acquisition_menu_touch`, `scan_for_touch` and the drag handlers, `spectrum_touch`, the measurement cards and the
 spectrum card set, the bode view.
 
-**Bench walk-through (owner, coordinator on COM10; FEL load, no SD writes needed)**
+**Bench walk-through (maintainer, bench session on <port>; FEL load, no SD writes needed)**
 1. FEL-load, `#VER fw=0.2.63`. Menu: the Scope row shows one period of a sine wave, the Settings row a cogwheel; both
    in white, black while touched (Settings yellow while its fold-out is open).
 2. CTRL page: Grid is a green button reading "Grid"; tap: grey, the grid lines go; tap: green, back. No slide switch.
@@ -2377,7 +2377,7 @@ time overlapping a chip; text past the edge of the RUN/STOP or Grid button.
 ## 40. fw-acqtouch: ACQ time/div coupling, Filter per mode, touch batch 2 (fw 0.2.64 provisional, protocol unchanged)
 
 Branch from main 8f8687a (fw 0.2.61). Briefs: docs/plans/task-queue.md "ACQ: sample rate vs time/div coupling", "FIR
-step overshoot pulsing" (owner decision: Filter per mode) and "Touch fixes batch 2"; docs/plans/touch-review.md (b), (c),
+step overshoot pulsing" (maintainer decision: Filter per mode) and "Touch fixes batch 2"; docs/plans/touch-review.md (b), (c),
 (d). Commits: 5718015 (tb_view / acq_view, ACQ menu, display window, slider drawing, host paths), 5818b5b (Filter per
 mode, word 212), 29d61f1 (trace point buffers), b620113 (touch batch 2), f690e42 (spectrum pan, fold-outs on release),
 d1f303f (trigger point drag limits), then docs and this handoff. Images from merge e626b1b (main a179408 merged, no firmware conflicts): `firmware/scope/build-gcc10-pc/fnirsi_1013d.bin`
@@ -2425,9 +2425,9 @@ Points for a successor:
 - Peak / Pro overflow: those styles store two points per column (up to 1448) and the buffers had 730 entries;
   `TRACE_POINTS_MAX` 1460 now (inference: this corrupted the neighbouring point buffers whenever Peak or Pro was on).
 
-**Bench walk-through (owner, coordinator on COM10)** - FEL-load, `#VER fw=0.2.64,proto=1.18`. CH1 on the 1 kHz
+**Bench walk-through (maintainer, bench session on <port>)** - FEL-load, `#VER fw=0.2.64,proto=1.18`. CH1 on the 1 kHz
 calibration square, 1X, DC, 1 V/div, Auto trigger, memory 3000, Scope view.
-1. ACQ menu, owner's repro: 500 us/div at 500 KSa/s, then tap 200 MSa/s. The time/div box jumps to 1 us (green); the
+1. ACQ menu, maintainer's repro: 500 us/div at 500 KSa/s, then tap 200 MSa/s. The time/div box jumps to 1 us (green); the
    boxes 2 us .. 200 ms read grey and do nothing when tapped; close the menu: "Time/div set to 1us for this rate" in
    white at the top middle for about 4 s; the trace fills the screen, no flat zero line at the right, the slider window
    spans almost the whole bar.
@@ -2513,7 +2513,7 @@ Points for a successor:
 - Names: "Center" (scope makers' spelling, as the guidelines ask for measurement names); the frequency labels under the
   plot keep their own wording.
 
-**Bench walk-through (owner, coordinator on COM10)**
+**Bench walk-through (maintainer, bench session on <port>)**
 1. FEL-load the image, `#VER` fw=0.2.65 proto unchanged (1.18). Scope with the 1 kHz calibration signal on CH1, CH2 on.
 2. Settings > Restore default settings (or DEFAULT): the cards read Freq, Vpp, Vavg left to right on CH1 (x 5) and on
    CH2 (x 366), one row at y 426, nothing above it.
@@ -2621,7 +2621,7 @@ settings words 219-220 (213..218 stay free; 212 fw-acq, 221..223 fw-meas).
 - Measured numbers the estimate assumes (15 ms per capture) and the 20 ms engine budget per pass: measure `pass_ms` and a
   sweep's duration (READ_BODE header bytes 28..31) on the bench.
 
-**Bench walk-through (owner, coordinator on COM10; FEL load only, no SD writes; parts on the bench: the RC 1 kOhm / 15 nF
+**Bench walk-through (maintainer, bench session on <port>; FEL load only, no SD writes; parts on the bench: the RC 1 kOhm / 15 nF
 ceramic and the 991 / 102 Ohm divider; wiring A: DUT ground on both probe ground clips; x1 probes)**
 1. FEL-load (`sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`), `#VER fw=0.2.66,proto=1.20`.
    GET_STATUS bytes 44-45 (features) = 0x7F on 0x1538.
@@ -2632,7 +2632,7 @@ ceramic and the 991 / 102 Ohm divider; wiring A: DUT ground on both probe ground
 3. Divider 991 / 102 (post -> 991 -> node -> 102 -> ground clips; CH1 on the post side of the 991, CH2 on the node): AUTO SET.
    Expect about 4 s, the Sweep card counting to 50/50, |H| flat at -20.6 dB (+-0.2 dB to 300 kHz; the host read -20.62 to
    -20.43), phase 0 +-1.5 deg, no grey points except possibly near 1 MHz; a tap on the plot shows f / |H| / Phase cards.
-   Host: `fnirsi1013d-bode --port COM10 --yes --start 100Hz --stop 1MHz --points 50` (close the view first: Menu > Scope)
+   Host: `fnirsi1013d-bode --port <port> --yes --start 100Hz --stop 1MHz --points 50` (close the view first: Menu > Scope)
    and compare point by point (expect within 0.05 dB / 0.3 deg where both are valid).
 4. RC 1 kOhm / 15 nF (CH2 on the R-C junction): CTRL > Sweep: Start 1kHz, Stop 500kHz (+ / -), Points 20, Run sweep.
    Expect the low-pass shape, the -3dB card near 11 kHz (the host read 11.3 kHz on this capacitor; the ideal 10.6 kHz:
@@ -2655,7 +2655,7 @@ ceramic and the 991 / 102 Ohm divider; wiring A: DUT ground on both probe ground
    ```python
    import struct, time
    from fnirsi1013d.scope import Scope
-   with Scope.connect("COM10") as s:
+   with Scope.connect("<port>") as s:
        r = s.t.request(0x0211, struct.pack("<BBBBIIHH", 1, 1, 1, 0, 100000, 50000000, 20, 0)).payload  # 1 kHz-500 kHz/20
        print("estimate ms", struct.unpack_from("<I", r, 32)[0])
        while True:
@@ -2680,7 +2680,7 @@ only what changed); MEASURES or the cursors reacting in the view; the view drawi
 
 ## 43. fw-cal5: the wizard's zero step on FPGA 0x1538, CAL_PROBE (fw 0.2.67, protocol 1.21 provisional, row 61)
 
-Bench fact (coordinator, docs/hardware-status.md 2026-10-19 17:55-18:40). On fw 0.2.64 / FPGA 0x1538 with nothing
+Bench fact (bench session, docs/hardware-status.md 2026-10-19 17:55-18:40). On fw 0.2.64 / FPGA 0x1538 with nothing
 connected, the Zero level step failed every time: "CH1: too much noise, range 1 at 200 MSa/s: core B 7.2 codes, 7.2 per
 capture" and "CH2: the input is not at 0 V". At the same moment host READ_RAW on range 0 at 200 MSa/s was clean.
 
@@ -2718,7 +2718,7 @@ Commits:
   either side of it:
   - Conversions: 8 per point gated, 64 per point at 200 MSa/s.
   - d comes from the range's gated slope points, so each point sits 12 codes off 128 (`acal_zero_split`: 8..120 counts;
-    about 27 counts on range 0 of the owner's unit).
+    about 27 counts on range 0 of the maintainer's unit).
   - In the linear model the mean of the two points is exactly the zero at the centre (`acal_zero_pair`). So the stored
     zeros, slopes, PWM centres, `acal_correction` (v3), the v4 tracker and GET_CAL mean what they meant. Nothing in the
     block or the protocol changes for this.
@@ -2773,18 +2773,18 @@ Commits:
 - `#VER fw=0.2.67,proto=1.21`.
 - WSL cannot resolve the worktree's gitdir, so the identity carries no hash; a build on main differs in the identity only.
 - Diagnostic images loaded on the bench before the fix: f17e2d70 (cf3f9e2) and 7b881451 (b67219c), pinned by the
-  coordinator.
+  bench session.
 
 **Bench check** (FEL-load only, nothing written before Save; back up SD 700-710 first because Save writes 708 / 709):
-1. `#VER fw=0.2.67,proto=1.21`. Run `python firmware/tools/cal_probe.py COM10 both all` with probes, post and generator
+1. `#VER fw=0.2.67,proto=1.21`. Run `python firmware/tools/cal_probe.py <port> both all` with probes, post and generator
    off.
    - Every range OK on both channels.
    - The "gated zero pair" and "full zero pair" rows print the two points' average as the mean (near 128), with "+- d"
      about 20-45 counts in the header line, and lowest..highest about 112..144 (both points together).
    - No clip at any point after the coarse ones.
-2. Mode 1 on both channels: `python firmware/tools/cal_probe.py COM10 CH2 0 1 0 0 1`. CH2 ends at range 5 (index 5) with
+2. Mode 1 on both channels: `python firmware/tools/cal_probe.py <port> CH2 0 1 0 0 1`. CH2 ends at range 5 (index 5) with
    OK.
-3. The owner runs the wizard: Zero level gives two ticks, then the gain screens and Save. GET_CAL then shows CH2 A - B
+3. The maintainer runs the wizard: Zero level gives two ticks, then the gain screens and Save. GET_CAL then shows CH2 A - B
    near the READ_RAW means' difference.
 4. Optional regression check of the classification: none needed on hardware. If a unit still shows "ADC readout fault
    near code 128", the fault reaches 12 codes off 128: report the note's numbers to fpga-gen8.
@@ -2802,7 +2802,7 @@ Commits:
 ## 44. fw-polish2: UI polish batch 2 (fw 0.2.68 provisional, protocol 1.20 unchanged)
 
 Branch from main b5698c4 (fw 0.2.65), merged with origin/main twice (f2a0ca2: fw-bode 0.2.66 / protocol 1.20; 15c5e56).
-Brief: the owner's walk-through of 0.2.65 (2026-10-19 18:00), items 1-5, plus the coordinator's item 6 (owner decision
+Brief: the maintainer's walk-through of 0.2.65 (2026-10-19 18:00), items 1-5, plus the bench session's item 6 (maintainer decision
 18:45: Bode plot as a main-menu mode row). User-facing description: firmware/README.md "Screens: UI polish batch 2 (fw
 0.2.68)". Commits: 95c1033 (1 RUN/STOP), ec9f319 (2 icons), a9daba6 (3 time/div snap), d51dcb7 + ee754c7 (4 brightness),
 3dc0ed9 (5 wizard step, Calibration row), 67d5204 (version, CHANGELOG, README), 1972245 (6 Bode row), the merges, this
@@ -2813,7 +2813,7 @@ screen's STOP during a host single aborts it). **Settings sector:** 1.00o5's max
 new_autosetup) now holds `0x80 | brightback` (item 4); no new words.
 
 Points for a successor:
-- **1 RUN/STOP.** The owner's picture (chip red STOP, button amber "Stopped", trace updating) is what 0.2.65 showed while
+- **1 RUN/STOP.** The maintainer's picture (chip red STOP, button amber "Stopped", trace updating) is what 0.2.65 showed while
   the PC captured with ARM: a host single stops the UI (`pc_hal_ui_set_run(0)`, row 34) and the screen shows each host
   capture, so the scope looked running with both controls saying stopped (`pc_hal_ui_set_run` already redrew both on
   SET_ACQ_STATE / STOP). Now `ui_run_view(runstate, single_wait, host_busy)` (ui_ctrl.c, pure) is the one state;
@@ -2822,7 +2822,7 @@ Points for a successor:
   draw from `scope_run_view()` and record what they drew (`scope_run_chip_shown`, `scope_run_button_shown`);
   `pc_run_follow` (pc_glue_ui_service, every pass) redraws a stale one (not in the file viewer; the button only on page
   one and not in the waveform viewer), so every writer is covered without a hook at each. The button shows the action:
-  green "RUN" (black text) while stopped, red "STOP" (white text) otherwise, 16 px font; owner exception recorded in
+  green "RUN" (black text) while stopped, red "STOP" (white text) otherwise, 16 px font; maintainer exception recorded in
   docs/ui-guidelines.md section 3. The tap does what it reads: STOP clears runstate and `pc_glue_host_stop` aborts a host
   single (`pc_ui_host_stop` -> `pc_host_abort`: ABORTED, a pending WAIT answers E_ABORTED); before, a tap during a host
   single started the UI's RUN. Chip text is centred (equals 1.00o5's offsets 1 / 5 / 2; test_ui checks it). Known: at a
@@ -2836,7 +2836,7 @@ Points for a successor:
   fresh conversion instead of reading the one armed with the old geometry), used by both `acq_view_set_tb` (the ACQ
   box) and `acq_view_fit`. test_tb_view `test_snap_is_manual_set` sweeps every rate x depth x trigger sample x start
   time/div x trigger point: fit == set, the result viable and inside the limits, a second fit / set a no-op (nothing in
-  this state can cycle). **Inference to check on the bench:** if the owner's "by hand" was a plot tap,
+  this state can cycle). **Inference to check on the bench:** if the maintainer's "by hand" was a plot tap,
   `scope_set_timebase` in RUN also sets the sample rate from `time_per_div_sample_rate` (10 us/div -> 10 MSa/s), so the
   "fix" was a rate change, and the cycling belongs to the high rate with deep memory (candidates: the full-rate capture
   check's discard / re-arm, enc_heal; the firmware auto deadline with an untriggered window), not to the snap.
@@ -2848,7 +2848,7 @@ Points for a successor:
   `ui_bright_byte` / `ui_bright_load` (0x80 | back; an old byte 1 = max light on loads as 100 % with back = the old slider
   value; > 100 heals to 20). `scope_set_brightness(v, sun)` (menu.c) writes the backlight and redraws the sun (not from
   the full-screen Settings page, which redraws it on exit when the value changed). Sun yellow at 100 %, white below. The
-  owner's "two fixed values" read as 1.00o5's pair: maximum and the slider's value.
+  maintainer's "two fixed values" read as 1.00o5's pair: maximum and the slider's value.
 - **5** `wiz_dlg.step` ("Step M of N": 4 with the generator, 3 without, the save screen then being step 3) is set next to
   the title in `wiz_build` (cal_wiz_ui.c title line only; fw-cal5's measurement code untouched). Calibration tab:
   `UD_CAL_BTN_X(i)` / `UD_CAL_BTN_W` 185, row at `UD_BTN_Y` 420, trim line and note at `UD_CAL_TEXT_Y` 374 / 394.
@@ -2857,11 +2857,11 @@ Points for a successor:
   roll mode, no roll note (the note is the spectrum view's). `pc_glue_main_menu_mode` closes the view on any other mode
   row and opens it after the spectrum / phosphor / roll changes. Grey icon and label, tap ignored (the menu stays open)
   while `bode_view_available()` is 0. Removed: the generator menu's fourth row (`GEN_MENU_HEIGHT` back to 169,
-  `bode_gen_row_*`, `PC_GEN_BODE_*`, `bode_view_request` and `bv.req`). Per the coordinator the Bode view's right bar and
+  `bode_gen_row_*`, `PC_GEN_BODE_*`, `bode_view_request` and `bv.req`). Per the bench session the Bode view's right bar and
   CTRL page are untouched (ux-bode mockup, separate batch). Section 42's walk-through enters the view with Menu > Bode
   plot now.
 
-Answers for the owner:
+Answers for the maintainer:
 - **1.00o5's "Pro" trace style was not Linear.** `scope_display_channel_pro_trace` (removed in 8d508cd, polish batch 1
   item e) took, per screen column, the minimum and the maximum of all samples falling in that column and drew two
   polylines: max to the previous column's max, min to the previous column's min, with no vertical line between them.
@@ -2897,7 +2897,7 @@ Answers for the owner:
   Nothing of the two menus is lost except USB-Serial mode (no effect in this build) and the Dev mode switch (by the
   0.2.63 decision).
 
-**Bench walk-through (owner, coordinator on COM10; FEL load, no SD writes)** - `#VER fw=0.2.68,proto=1.20`. CH1 on the
+**Bench walk-through (maintainer, bench session on <port>; FEL load, no SD writes)** - `#VER fw=0.2.68,proto=1.20`. CH1 on the
 1 kHz calibration square, 1X, DC, Auto trigger, Scope view.
 1. RUN/STOP: running, the chip reads green RUN and the right-bar button red "STOP" (white text). Tap: chip red STOP,
    button green "RUN". Tap: back. Trigger mode Single: chip orange WAIT, button red "STOP"; after the capture both show
@@ -2918,7 +2918,7 @@ Answers for the owner:
    100 %. Drag to 40 %: the sun turns white as the value leaves 100. Close; sun: 100 %; sun again: 40 %. Other settings
    page: Screen brightness - / + changes the same value; Back: the sun matches (yellow only at 100). Power-cycle at 100 %
    set by the sun: comes up at 100 %, the next sun tap returns to 40 %.
-6. Time/div snap (owner's repro): ACQ menu, a slow time/div at a low rate with deep memory, then a high rate: the
+6. Time/div snap (maintainer's repro): ACQ menu, a slow time/div at a low rate with deep memory, then a high rate: the
    notice "Time/div set to X for this rate"; close the menu, watch 10 s: expected stable. If it still cycles: note the
    ACQ menu's rate, then set time/div by hand in the **ACQ menu** (5 us, then 10 us). If that does not settle it but a
    **plot tap** does, read the rate after the tap (plot taps in RUN couple the rate to the time/div): the cause is then
@@ -2933,7 +2933,7 @@ generator menu; the sun yellow below 100 % or the slider not at 100 % after the 
 ## 45. fw-fr: Frequency response mode UI, ten samples per division (fw 0.2.69 provisional, protocol 1.21 unchanged)
 
 Branch from main 71b026e (fw 0.2.68), merged with origin/main several times (bode-ui.md's final decisions e4452d9, 4b86769,
-the icon de14622, the slider be0c93e / 6d849f6). Brief: implement docs/plans/bode-ui.md with the owner's decisions of
+the icon de14622, the slider be0c93e / 6d849f6). Brief: implement docs/plans/bode-ui.md with the maintainer's decisions of
 2026-10-19 evening (they override the document's earlier drafts; the document now records them), plus the tb_view
 viability rule. User-facing description: firmware/README.md "Frequency response". Commits: 070e250 (ten samples per
 division), 7772b64 (`bode_auto_span`), bbf12f1 (`bode_ui.c`, MEASURES list, ui_p1_shown, menu row name), 5d262b7 (the
@@ -2982,7 +2982,7 @@ Points for a successor:
   time bases 32..34 share 200 MSa/s with 31, so its rate never depended on them. test_tb_view: 74 cells now differ from
   1.00o5's table (71 below ten samples).
 
-**Bench walk-through (owner, coordinator on COM10; FEL load only, no SD writes; parts: the RC 1 kOhm / 15 nF ceramic and
+**Bench walk-through (maintainer, bench session on <port>; FEL load only, no SD writes; parts: the RC 1 kOhm / 15 nF ceramic and
 the 991 / 102 Ohm divider; wiring A, DUT ground on both probe ground clips; x1 probes)** - FEL-load
 (`sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`), `#VER fw=0.2.69,proto=1.21`.
 1. Ten samples per division: Scope, ACQ menu, 100 kSa/s: the time/div boxes below 100 us are grey; from 10 us/div the
@@ -3034,7 +3034,7 @@ the scope's cursors / waveform files in this mode; a time/div under ten samples 
 
 Branch `fw-screen` from main 6c1e5bc. Commits: 350823e (handler, HAL, cap, host test, vectors on both sides,
 mcp/tests/test_read_screen.py), 59d93d8 (scope_screenshot description), then docs and this section. PC_FW_VERSION not
-bumped (the coordinator numbers it). Host tests green (test_session 69,896 / 69,894 checks, check_vectors 98 vectors,
+bumped (the bench session numbers it). Host tests green (test_session 69,896 / 69,894 checks, check_vectors 98 vectors,
 Python vector check ok, mcp pytest green apart from test_report, which needs matplotlib, absent from the local venv).
 GCC 13, GCC 10 and PC_DEBUG builds: no warning outside the upstream list. **Nothing benched.**
 
@@ -3054,7 +3054,7 @@ GCC 13, GCC 10 and PC_DEBUG builds: no warning outside the upstream list. **Noth
   ASCII path (a large response frame with "#" in it gives ascii_overflow events in C and none in Python: a known
   divergence for response frames the device never receives, left alone).
 
-**Bench step (coordinator + owner; FEL load only, no SD writes):** FEL-load `build-gcc10-pc/fnirsi_1013d.bin`, then
+**Bench step (bench session + maintainer; FEL load only, no SD writes):** FEL-load `build-gcc10-pc/fnirsi_1013d.bin`, then
 `scope_info`: caps include SCREENSHOT (bit 6). `scope_screenshot` with the scope view running (calibration square on
 CH1): the PNG must match the panel (grid, trace colours: CH1 yellow, CH2 cyan, top bar text, the MCP chip) - compare
 with a photo of the screen; that is **T9**. Wrong colours (red and blue swapped, or a byte-swapped mess) = the format
@@ -3062,7 +3062,7 @@ assumption; a shifted or torn picture = row stride. Repeat in the spectrum view,
 and Diagnostics. With a menu open: E_BUSY (expected). Time a full screenshot (about 1 s expected on Windows).
 ## 47. fw-freq2: Frequency response follow-ups, Spectrum slider, the grid rule (fw 0.2.71, protocol 1.21 unchanged, row 60 reason 8)
 
-Branch `fw-freq2` from main 6c1e5bc (fw 0.2.69). Brief: the fw-freq follow-ups (section 45 "Not done" 1-6), the owner's
+Branch `fw-freq2` from main 6c1e5bc (fw 0.2.69). Brief: the fw-freq follow-ups (section 45 "Not done" 1-6), the maintainer's
 10-19 20:00 single-sweep report, the queue item "Frequency response chart follow-ups" (a)-(e) and the Spectrum slider.
 Commits: 92821ad (engine), 84a2d65 (bode_ui: grid rule, texts), 4d6c0e6 (the view and its wiring), 3d76e14 (Spectrum),
 92ed2b9 (mcp reason 8), 02a9f1b (version, CHANGELOG, docs), then this handoff. Image of 02a9f1b (GCC 10):
@@ -3085,7 +3085,7 @@ What landed (by brief item):
    `scope_run_view` ignores the trigger there), a single sweep's cards read "sweeping" until its table is complete
    (`table_state`: `bv.single` and `bode_done_count < n`), and STOP ends the sweep after the capture in progress (the
    point keeps that capture's result; a STOP in the pre-scan, the verify loop or a background capture ends there). The
-   root cause was not reproduced: if the owner still sees STOP ignored, note whether the chip read WAIT and whether
+   root cause was not reproduced: if the maintainer still sees STOP ignored, note whether the chip read WAIT and whether
    the Sweep card kept counting.
 2. **Spectrum slider** (spectrum.c): plot y 50..402 (8 x 44 px), labels y 406, cards y 426 (`UI_MS_SPEC_Y`), the slider
    at y 452..471 as the Scope's. The track is the displayed axis 0 .. min(fs/2, 25 MHz), not fs/2: the view caps its
@@ -3123,16 +3123,16 @@ What landed (by brief item):
    was already `cfg_now`; now the header matches it.
 
 Not done / for the next agent (queue them):
-- The mini overview drawn in the slider tracks (owner 20:00, "design first"): not designed, not built.
+- The mini overview drawn in the slider tracks (maintainer 20:00, "design first"): not designed, not built.
 - The mcp simulator's SimBode: reason 8 and the header-before-first-sweep rule (only if a test needs them).
 - A Single sweep started from the CTRL page leaves the bar on the CTRL page, where RUN/STOP is not visible (the chip
-  shows RUN); the owner may want the bar to return to page one. Ask before changing.
+  shows RUN); the maintainer may want the bar to return to page one. Ask before changing.
 - The generator chip after a sweep shows the user's generator although the engine left the pin off (as 0.2.69); the
   view gives the generator back only on leaving.
 - Spectrum: the slider has no Move-fast scaling (as the Scope's); touches at y 426..449 (the cards) do nothing (from
   y 436 before), y 450 down take the slider.
 
-**Bench walk-through (owner, coordinator on COM10; FEL load only, no SD writes; parts: the RC 1 kOhm / 15 nF ceramic,
+**Bench walk-through (maintainer, bench session on <port>; FEL load only, no SD writes; parts: the RC 1 kOhm / 15 nF ceramic,
 the 991 / 102 Ohm divider, a tank if one is at hand; wiring A; x1 probes; on 0x1539 expect item 9's fault)** - FEL-load
 (`sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`), `#VER fw=0.2.71,proto=1.21`.
 1. Spectrum analyser: the plot ends at y 402, frequency labels under vertical grid lines at round frequencies
@@ -3197,7 +3197,7 @@ the Scope view's passes clear (scope_functions.c); one railed sample in any earl
 - Not changed: mcp `BODE_REASONS[8]` still says "the pre-scan clipped at 5 V/div ..." (brief: keep the mcp text);
   docs/protocol.md row 60 reason 8 describes both rules.
 
-Bench steps (owner present, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, 0x153A, RC 1 kOhm /
+Bench steps (maintainer present, bench session on <port>; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, 0x153A, RC 1 kOhm /
 15 nF on the post, wiring A, x1 probes):
 1. A deliberate clip first: Scope view, CH1 at 0.1 V/div on the post until the CH1 label turns red; then open Frequency
    response, AUTO SET: the overview runs (no "ADC readout fault"), the span lands around the RC's corner (about 10 kHz).
@@ -3257,9 +3257,9 @@ identical to origin/main 6c1e5bc.
   data only for large MHz signals at 200 MSa/s); bit 12 stays set and the Diagnostics amber line says why. The
   convention itself (PC_INTERLEAVE_ORDER 0, swap bit clear) did not change.
 
-**Bench list** (owner with the coordinator; FEL load only, nothing flashed; unit on 0x1539). Build from the branch head
+**Bench list** (maintainer with the bench session; FEL load only, nothing flashed; unit on 0x1539). Build from the branch head
 (`make gcc10`, the image hash follows the commit). Python: `from fnirsi1013d.scope import Scope; from fnirsi1013d import
-analysis as A; s = Scope.connect("COM10")`.
+analysis as A; s = Scope.connect("<port>")`.
 - B1 identity: `#VER` fw=0.2.72 proto=1.22 fpga=0x1539. `s.info.caps`: bit 12 (0x1000) clear, bit 11 (0x0800) set.
   `s.health()`: enc_mode 2, enc_boot33 0xF6, enc_flags bit 1 clear. `s.link_stats()` has 68 entries.
   Regression sign: bit 12 set on 0x1539 (boot 0x33 read or init order wrong).
@@ -3294,7 +3294,7 @@ analysis as A; s = Scope.connect("COM10")`.
   segments run (section 35 step 7, short) and UI averaging work (the sequencer pre-reset lost its own 0x0B / 0x0C
   writes to `fpga_arm_reset`); a host Bode sweep of the RC as at 20:51.
 
-**Open / for the coordinator**
+**Open / for the bench session**
 - D 1..8 legacy EXT shift values are extrapolated (B5 measures them); 200 MSa/s uses 2 words from the 0x1538 model.
 - Caps bit 11 READ_LAG_UNVERIFIED stays set until B2 is accepted (then clear it for AL3 in `pc_variant_from_version`).
 - `pc_hal_seq_read` keeps its own strobe loop after `fpga_read_start` (same contract); fpga_read_adc_data's loop too
@@ -3306,7 +3306,7 @@ analysis as A; s = Scope.connect("COM10")`.
 
 Branch `fw-over` from main 113ec80 (fw 0.2.71; not merged with main since: fw-bus took 0.2.72 / protocol 1.22 and
 section 48 there, so this branch renumbered itself to 0.2.73 and this section is 49). Brief: docs/plans/slider-overview.md
-with the owner's decisions of section 10 F (items 1-5, 21:20) and item 6 (21:36: the track takes the whole row, the
+with the maintainer's decisions of section 10 F (items 1-5, 21:20) and item 6 (21:36: the track takes the whole row, the
 window is two edge lines), then tap to jump. Commits: a5c875e (slider_ov module, track geometry, tests), 5aa5093
 (Scope), 2044a49 (Spectrum), 2b9dad9 (Frequency response), b3fa8d2 (tap to jump, batch 2), 9f51633 (version, CHANGELOG,
 README), d12e414 (mockups regenerated), 2e51d53 (renumbered to 0.2.73), 07b9459 (plans), then this section. Image of
@@ -3331,7 +3331,7 @@ What landed:
 1. **The "stock thumbnail" was not data.** hardware-status 21:09 read the Scope's track as a record thumbnail. It is
    1.00o5's decoration: `scope_draw_grid` printed "~" in yellow every 5 px along y 453 (`display_text(i, 453, "~")`),
    identical with no signal. It is gone, replaced by the overview (no second drawing).
-2. **Geometry** (slider_ov.h; owner item 6): a white line at y 452 over x 2..727, the track x 2..727 (726 columns) by
+2. **Geometry** (slider_ov.h; maintainer item 6): a white line at y 452 over x 2..727, the track x 2..727 (726 columns) by
    y 453..471 (19 rows: the old frame's 18 inside rows plus its bottom row), the window two 1 px white lines at x and
    x + w - 1 over the track's height. The window maps on the 726 px track in all three modes (`TBV_SLIDER_X/W`,
    `BU_SL_X/W`), so a drag moves 726 / 720 of what it did (10 px at 25 MSa/s, 1 ms/div, 3000 samples: 82 samples, was
@@ -3379,7 +3379,7 @@ Not done / for the next agent:
   `scope_get_y_sample`'s arithmetic (same expressions, the code passed in instead of read by index).
 - The mockups draw the line and the window edges grey (LG1 / LG2), the firmware white, as before.
 
-**Bench walk-through (owner, coordinator on COM10; FEL load only, no SD writes; CH1 on the calibration post, CH2 free;
+**Bench walk-through (maintainer, bench session on <port>; FEL load only, no SD writes; CH1 on the calibration post, CH2 free;
 for step 6 the RC 1 kOhm / 15 nF or a tank)** - FEL-load (`sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin
 exe 0x80000000`), `#VER fw=0.2.73,...`.
 1. Scope, 1 kHz square on CH1, 500 kSa/s, 200 us/div, 3000 samples: under the plot a white line at y 452 and the track
@@ -3419,7 +3419,7 @@ track after a jump at the ends; a jump from the area beside the cards; a Spectru
 time base change; a Frequency response overview before the first AUTO SET or after Restore defaults; pass_ms up by more
 than about 1 ms at 16,382 samples.
 
-**Addendum: decision 7, fw-over2 (fw 0.2.74, branch fw-over2).** The owner looked at 0.2.73 on the unit
+**Addendum: decision 7, fw-over2 (fw 0.2.74, branch fw-over2).** The maintainer looked at 0.2.73 on the unit
 (2026-10-19 22:15) and revised the geometry (slider-overview.md 10 F item 7, section 2 as built): the track's line at
 y 452 is gone and the row is all track, x 2..727 by y 452..471 (`SOV_Y` 452, `SOV_H` 20; `SOV_LINE_Y` removed). The
 window is a box again: `sov_draw_window` draws, last, a 1 px black margin (y 452 and y 471 over x - 1..x + w, columns
@@ -3433,13 +3433,13 @@ geometry and the 20-row values. Bench: as step 1 above but no line at y 452, the
 around it, the overview over y 452..471 outside the box; a trace at the plot's top or bottom edge is visible only
 outside the window. Not benched.
 
-**Addendum: decision 8, fw-ov3 (fw 0.2.93).** Overlaid draws the overview's magnitude and phase (`sov_curve`, each fitted on its own; `sov_draw_curves` phase first, magnitude over it, owner 2026-10-20 13:35 / 13:36), Magnitude only / Phase only one curve;
+**Addendum: decision 8, fw-ov3 (fw 0.2.93).** Overlaid draws the overview's magnitude and phase (`sov_curve`, each fitted on its own; `sov_draw_curves` phase first, magnitude over it, maintainer 2026-10-20 13:35 / 13:36), Magnitude only / Phase only one curve;
 the curve walk moved from bode_view.c `draw_overview` to slider_ov.c / slider_ov_draw.c, and test_slider_ov checks the fit, joins and order on a stub screen. Not benched.
 
 ## 50. fw-zoom: Scope tap to jump at touch-down, the zoom ladder (fw 0.2.76, protocol 1.22 unchanged)
 
 Branch `fw-zoom` from main 1173abd (fw 0.2.74). Brief: docs/plans/task-queue.md "Scope tap-to-jump and zoom stepping"
-(owner 10-19 22:20 on 0.2.73) with the owner's additions relayed at 22:22 (zooming to either end and back must never
+(maintainer 10-19 22:20 on 0.2.73) with the maintainer's additions relayed at 22:22 (zooming to either end and back must never
 leave a weird state; the ends plain stops) and 22:24 (the invariant is on the pair: after any taps the rate is the
 ladder's for the time/div, unless set by hand in the ACQ menu, until the next zoom step). Commits: 4eab9cc (the rule,
 docs/ui-guidelines.md section 2 "Time/div drives the sample rate"), ccddf2e (tap to jump at touch-down), da24d91 (the
@@ -3479,18 +3479,18 @@ test_acq_view 1,895,407 checks). **Nothing benched. No protocol change, no setti
    writes 0x0E, the rate when it changed, and calls `scope_preset_values` as before. 1.00o5's `time_per_div_sample_rate`
    table (100 samples a division) is no longer used by taps. Roll: taps step 0..8 (50 s .. 100 ms/div; 0..10 in the
    viewer) through `scope_set_timebase` as before but never cross into short mode, and short mode never zooms out into
-   roll (the ACQ menu's mode button is the way). **The owner may want this differently** (0.2.74 stepped from
+   roll (the ACQ menu's mode button is the way). **The maintainer may want this differently** (0.2.74 stepped from
    200 ms/div into roll and back).
 5. **statemachine.c** ACQ time/div box: on ACQ_SET_RATE writes `fpga_set_sample_rate` and redraws the rate boxes.
 6. **SET_TIMEBASE mode 0 left alone** (docs/protocol.md note): it already picks a rate for every index (the documented
    table, 100 samples a division down to 500 ns, viable for records of 1450 samples and more) and the simulator mirrors
    it. Moving it to the ladder changes the rate a host gets for an index: it needs the simulator (`mcp` simulator.py
-   `TIME_PER_DIV_SAMPLE_RATE`) and a protocol note; queue it if the owner wants it.
+   `TIME_PER_DIV_SAMPLE_RATE`) and a protocol note; queue it if the maintainer wants it.
 7. **test_acq_view.c** builds acq_view.c + tb_view.c + slider_ov.c on the host with the firmware's tables and stub
    globals (variables.h compiles on the host). It checks every (rate, time/div) cell at depths 250..16382 in both
    directions; five-leg walks (fast end, slow end, fast, slow, fast) from every cell, asserting the pair equals the
    ladder's after every step and at the ends, that an end is a plain stop and the opposite tap works at once; hand
-   rates; the boxes; the stopped mode and its notice; the snap notice text; the owner's tap (y 460 left of the window,
+   rates; the boxes; the stopped mode and its notice; the snap notice text; the maintainer's tap (y 460 left of the window,
    five Scope states: the window centres on the finger or stops at the track's start; inside the window, y 440 and
    y 449 never jump) and the Spectrum's (sov_jump on a Spectrum-shaped window). It tests the function the new
    touch-down call uses; the control-flow move in `scan_for_touch` itself is target code and needs the bench.
@@ -3499,9 +3499,9 @@ Not done / for the next agent: the jump is not drawn until the finger lifts or m
 handle pointer at the plot's bottom can still win a touch at x < 44 on the track (the handle column comes first, as in
 0.2.73); X-Y and roll have no jump.
 
-**Bench walk-through (owner, coordinator on COM10; FEL load only)** - FEL-load (`sunxi-fel -p write 0x7FFFFFE0
+**Bench walk-through (maintainer, bench session on <port>; FEL load only)** - FEL-load (`sunxi-fel -p write 0x7FFFFFE0
 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`), `#VER fw=0.2.76,proto=1.22`. CH1 on the 1 kHz calibration post.
-1. The owner's tap: Scope, 16k memory, 5 MSa/s at 2 us/div (window narrow), RUN or STOP. Tap the track at y about 460
+1. The maintainer's tap: Scope, 16k memory, 5 MSa/s at 2 us/div (window narrow), RUN or STOP. Tap the track at y about 460
    far left of the window, finger still: on lift the window centres there and the trace shows that part. Tap far
    right: the window goes to the track's end. Tap inside the window: nothing moves. Tap at y about 440 beside the
    cards: nothing jumps. Touch outside the window and drag: the window jumps, then follows the finger. Spectrum: the
@@ -3531,13 +3531,13 @@ the Scope's track that does not jump; a jump from y 436..449.
 
 ## 51. fw-spec: legends removed (fw 0.2.75, protocol 1.22 unchanged)
 
-Owner 2026-10-19 22:28: spectrum.c lost `spec_draw_legend` and `INFO_Y1` (Waterfall and Density colour legends); the
+Maintainer 2026-10-19 22:28: spectrum.c lost `spec_draw_legend` and `INFO_Y1` (Waterfall and Density colour legends); the
 warning line at the plot's top middle and the rest of both variants are unchanged. No test checked the legend texts.
 
 ## 52. fw-spzoom: the Spectrum's zoom ladder, span drives the sample rate (fw 0.2.77, protocol 1.22 unchanged)
 
-Branch `fw-spzoom` from main 25fa3e6 (fw 0.2.76). Brief: docs/plans/task-queue.md "Spectrum zoom ladder" (owner 10-19
-23:09, "let's try your recommendation"); coordinator 23:2x: option (a), the plain rule (the full axis runs at 50 MSa/s,
+Branch `fw-spzoom` from main 25fa3e6 (fw 0.2.76). Brief: docs/plans/task-queue.md "Spectrum zoom ladder" (maintainer 10-19
+23:09, "let's try your recommendation"); bench session 23:2x: option (a), the plain rule (the full axis runs at 50 MSa/s,
 not 200 MSa/s as the queue item said; fixed there). Commits: 4a85e8a (the rule, docs/ui-guidelines.md section 2 "Span
 drives the sample rate", queue wording), 3ec9e17 (spec_ladder.c/.h, acq_view_tb_for_rate, host_tests/test_spec_zoom.c,
 test_acq_view.c test_tb_for_rate), 52c1c76 (spectrum.c), d49f9b6 (README "Spectrum view", CHANGELOG), then this
@@ -3545,7 +3545,7 @@ section. Image of d49f9b6 (GCC 10): `firmware/scope/build-gcc10-pc/fnirsi_1013d.
 91946f1598b9b0489606072588c6385b89a419ce34385883aeeca4af86ba316f (a later commit differs only in the identity).
 Warnings GCC 10 36, GCC 13 31, as on main; none in the changed files; gcc10-nommu builds. Host tests all green (new
 test_spec_zoom 685,416 checks; test_acq_view 1,900,576). **Nothing benched. No protocol change, no settings word,
-PC_FW_VERSION not bumped** (the coordinator bumps at merge).
+PC_FW_VERSION not bumped** (the bench session bumps at merge).
 
 1. **The rule** (spec_ladder.c, pure, no globals): a cell = span index 0..23 (1, 2, 5 Hz .. 10, 20 MHz; 23 = the whole
    axis 0 .. 25 MHz, `SPL_FULL`) + centre in mHz, kept inside 0 .. axis (`spl_fit`). `spl_rate(stop, log2n, rates, n)`
@@ -3559,7 +3559,7 @@ PC_FW_VERSION not bumped** (the coordinator bumps at merge).
 2. **Ends in numbers** (test_end_numbers): zoom out ends at the whole axis, centre 12.5 MHz, 50 MSa/s. From there zoom
    in keeps 12.5 MHz and 50 MSa/s and ends at 1 MHz (N 1024), 500 kHz (2048), 200 kHz (4096): 16 bins of 50 MHz / N.
    At 0 Hz the narrowest cell is 10 Hz at 500 Sa/s (N 1024: the slowest rate already takes 2.048 s, then 16 bins end
-   it), 500 Hz at 1 kSa/s (N 2048), 1 kHz at 2 kSa/s (N 4096): there the 2.048 s capture ends it, as the owner asked.
+   it), 500 Hz at 1 kSa/s (N 2048), 1 kHz at 2 kSa/s (N 4096): there the 2.048 s capture ends it, as the maintainer asked.
    A cell from 0 Hz holds 40-50 % of the N bins (1-2-5 spans on 1-2.5-5 Nyquist steps; tested, "a quarter to a half").
    A pan can reach a cell narrower than the zoom-in end (zoomed in at a high centre, then panned down): `spl_rate`
    holds the rate at the 2.048 s floor there, so no capture ever exceeds 2.048 s at N.
@@ -3585,13 +3585,13 @@ PC_FW_VERSION not bumped** (the coordinator bumps at merge).
    0.2.71); its ACQ menu is the Scope's, rate boxes included. A rate set there or by the host holds; the view draws the
    cell on that axis as far as it reaches; the next zoom or pan step takes `spl_rate`. Kept as is.
 
-Decisions to confirm with the owner / not done:
-- **Option (b)**, the one-line alternative the coordinator named: the whole axis (or any stop at 25 MHz) at 200 MSa/s
+Decisions to confirm with the maintainer / not done:
+- **Option (b)**, the one-line alternative the bench session named: the whole axis (or any stop at 25 MHz) at 200 MSa/s
   instead of 50 MSa/s: in `spl_rate`, `if((n > 1) && (stop >= SPL_FMAX_MHZ)) return 0;` (and test_spec_zoom's 50 MSa/s
   expectations, test_rate / test_walks / test_end_numbers, move to index 0).
 - **The Time card is the waterfall's history span**, not the capture time the brief mentioned; nothing shows N / fs.
-  If the owner wants it, a card "Capture" = N / fs (ui_meas.h kinds) is the place.
-- **Capture time is N / fs as the owner put it; the record actually takes depth / fs.** At 16k memory and 2 kSa/s
+  If the maintainer wants it, a card "Capture" = N / fs (ui_meas.h kinds) is the place.
+- **Capture time is N / fs as the maintainer put it; the record actually takes depth / fs.** At 16k memory and 2 kSa/s
   (N 4096) a record takes 8 s although N / fs = 2.048 s. Using `fpgasettings.totalsamples` instead of N in
   `spl_time_ok` is the fix if the bench shows long waits.
 - Changing the FFT length (or the memory depth) does not change the rate; the next step uses the new N.
@@ -3602,7 +3602,7 @@ Decisions to confirm with the owner / not done:
 - Section 20's "span drives the time base past the ends (`spec_zoom`, `spec_tb_set`)" is history; this section is
   current.
 
-**Bench walk-through (owner, coordinator on COM10; FEL load only)** - FEL-load (`sunxi-fel -p write 0x7FFFFFE0
+**Bench walk-through (maintainer, bench session on <port>; FEL load only)** - FEL-load (`sunxi-fel -p write 0x7FFFFFE0
 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`), `#VER fw=0.2.76,...` (version not bumped). CH1 on the 1 kHz
 calibration post; Spectrum analyser, RUN, trigger Auto; MEASURES with Span, Center, RBW on the cards.
 1. Whole range at N 2048 (memory 3000): Reset (whole axis of the current rate), tap left until nothing changes: Span
@@ -3633,7 +3633,7 @@ running; a tap at an end that changes anything; an end the other direction canno
 stopped; Span / Center off the 1-2-5 values while the rate covers the span; the slider window off the track; a time/div
 snap notice in the Scope after using the Spectrum.
 
-**Addendum, fw-spzoom2 (fw 0.2.81 provisional, protocol unchanged): pans never change the rate.** Owner 2026-10-20
+**Addendum, fw-spzoom2 (fw 0.2.81 provisional, protocol unchanged): pans never change the rate.** Maintainer 2026-10-20
 10:24 on the 0.2.80 bench (task queue "Spectrum ladder: pans never change the rate"): the rate changing mid-scroll felt
 janky. Branch `fw-spzoom2` from main 58c17a3, commit 9294f9e (code + test) and the docs commit after it. The rate is
 derived (`spec_cell_apply` -> `spl_rate`) only in `spec_zoom` and in Auto's finish; `spec_pan_by` (plot drag, slider
@@ -3701,7 +3701,7 @@ Bug indicators: a running capture over about 2.1 s (Capture card); a rate change
 the view; a hand-picked rate replaced by a depth change; Capture missing from the MEASURES view row (five cells).
 ## 53. fw-yield: host commands leave the modal screens (fw 0.2.78, protocol 1.23, row 63)
 
-Branch `fw-yield` from main dd46518 (fw 0.2.76). Owner 2026-10-19 23:27 (task queue "Host commands leave the modal
+Branch `fw-yield` from main dd46518 (fw 0.2.76). Maintainer 2026-10-19 23:27 (task queue "Host commands leave the modal
 menus"): "if the agent sends commands it just exits all modals, since that wouldn't be destructive; just exiting to
 the base screen". Rule: `docs/ui-guidelines.md` section 4 (two bullets); wire: `docs/protocol.md` section 14 row 63,
 the LOCAL_BUSY row of 6.1, the 8.1 E_BUSY line, section 9. Commits: 0493025 (session, glue, hooks, note string, host
@@ -3761,7 +3761,7 @@ E_BUSY hint), link names 68-69; `server.py` `ensure_control` proceeds with `MENU
 old "close it on the scope" error below it; the simulator's `cfg.proto_minor` (below 23 = old behaviour), `ui_hold`,
 `ui_yields`, `ui_yield_refused` (its GET_LINK_STATS stays the 31-counter 1.2 layout, as before).
 
-**Bench list** (owner present, coordinator on COM10; `fnirsi1013d-bench` or the MCP tools; `#VER` fw=0.2.78
+**Bench list** (maintainer present, bench session on <port>; `fnirsi1013d-bench` or the MCP tools; `#VER` fw=0.2.78
 proto=1.23):
 1. Main menu open, idle 1 s: `scope_status` shows ui_busy 1 and the menu stays. `scope_set_timebase`: the menu closes,
    "Host command: menu closed" white at the top middle for about 4 s, the tool answers with the menu caveat, the
@@ -3789,13 +3789,13 @@ Bug indicators: a dialog that took its action (a deletion, a cleared calibration
 typed number applied; a menu that stays open while the command times out; a screen left half drawn (a fold-out's
 panel or a menu's background not restored); the note stuck on screen; a second menu opened later closing at once
 without a host command.
-Addendum fw 0.2.81 (fw-yield2, owner 2026-10-20 10:31): the note is removed (`ui_yield_note`, `UI_YIELD_NOTE_MS`,
+Addendum fw 0.2.81 (fw-yield2, maintainer 2026-10-20 10:31): the note is removed (`ui_yield_note`, `UI_YIELD_NOTE_MS`,
 `pc_glue_yield_note` and its Scope / Frequency response callers, the test_ui check); the yield unwinds silently, items 1-8 above minus the note.
 
 ## 54. fw-cap: FPGA 0x153A capture stages, the wizard's zero back at 128 (fw 0.2.79, protocol 1.24, row 64)
 
 Branch `fw-cap` from origin/main 6125aee (fw 0.2.78, 0x153A merged). Brief: firmware for bitstream 0x153A (fpga/al3/AGENTS.md
-"0x153A status" firmware notes, README section 10) and the owner's fail-fast decision of 2026-10-19 20:30 (task queue
+"0x153A status" firmware notes, README section 10) and the maintainer's fail-fast decision of 2026-10-19 20:30 (task queue
 "Wizard zero point back at code 128"). Commits: 381dd8a (firmware and host tests), then the docs / mcp / vectors commits
 of the helper agent and this handoff. **Nothing benched, nothing flashed** (the scope was off). Host tests all green
 (new test_cap_stage 85, test_session 70133 with `test_capture_stages`, test_ui_diag 6644, test_cal_wizard 672,
@@ -3847,7 +3847,7 @@ test_adc_cal 59843, check_vectors OK); GCC 13 31 warnings (as main), GCC 10 buil
 - The training runs at range 0 only; the stages do not depend on the range (the capture is digital), the input level does.
 - cal_probe.py still prints "+- 0" for the zero split.
 
-**Bench list** (owner present, coordinator on COM10; fw 0.2.79 FEL-loaded on the unit with 0x153A flashed per
+**Bench list** (maintainer present, bench session on <port>; fw 0.2.79 FEL-loaded on the unit with 0x153A flashed per
 fpga/al3/README.md section 10 and docs/hardware-status.md 00:30; back up SD 700-710 before the wizard's Save):
 1. Identity (README 10 item 1): `#VER fw=0.2.79,proto=1.24,fpga=0x153A`; GET_INFO caps bit 19 (0x80000) and bit 18;
    GET_STATUS 44 = 0x00FF; `s.health()`: layout 2, 104 = 0x08E4, 106 = 0x01 (HAS, not trained); FPGA 0x36 via
@@ -3857,10 +3857,10 @@ fpga/al3/README.md section 10 and docs/hardware-status.md 00:30; back up SD 700-
    GET_HEALTH 120 (flagged) stays 0 at the quiet points.
 3. RC low-pass with the 1 kHz square (item 3): no rails, no jumps; Frequency response unflagged; GET_HEALTH flagged
    captures 0 (both cores of a chip see the edges alike).
-4. The owner runs the wizard (item 4, on the screen): Zero level shows "Capture stages: CH1 A4 B4" / "CH2 A3 B4" (or a
+4. The maintainer runs the wizard (item 4, on the screen): Zero level shows "Capture stages: CH1 A4 B4" / "CH2 A3 B4" (or a
    neighbour) under the two ticks, then the gain screens and Save. Then GET_CAL 356 = 1, 358 = the value, 360 = 0x153A,
    357 bits 0-1; Calibration page "(trained): capture clean"; power-cycle (FEL-load again): 104 = the trained value.
-5. Training cross-check (item 5, coordinator over USB): CAL_PROBE mode 1 on CH1 then CH2 runs the zero step with the
+5. Training cross-check (item 5, bench session over USB): CAL_PROBE mode 1 on CH1 then CH2 runs the zero step with the
    training (about 15 s each, nothing stored, 0x63 back afterwards); GET_EVENT_LOG type 23 entries a = 0x10, b = the
    trained value. The reference-bit test (bit 12 / 13 with each B stage) needs raw 0x63 writes: a PC_DEBUG image or a
    short host script with DEBUG_FPGA; expected: every B stage counts about every word with the A-encode reference.
@@ -3871,17 +3871,17 @@ fpga/al3/README.md section 10 and docs/hardware-status.md 00:30; back up SD 700-
    and event 23 names it; then re-run the wizard (the training should move that core's stage).
 8. Fail-fast check (optional, needs 0x1539 back in the flash, so only if it is reflashed anyway): fw 0.2.79 on 0x1539
    has no stages; the wizard measures at 128 and is expected to fail CH1 / CH2 with "ADC readout fault near code 128"
-   (the A cores at 128..145): that is the owner's intended behaviour.
+   (the A cores at 128..145): that is the maintainer's intended behaviour.
 Regression signs: the wizard passing on 0x153A with no "Capture stages" note (cs_has / init order), GET_HEALTH layout 1,
 EXT edges 8 samples early (shift table not followed), the trained value lost after a power cycle (trailer not saved).
 
 **Open**
-- Coordinator: protocol row 64 and the version numbers are provisional; the mcp, vector and doc commits are on this
+- Bench session: protocol row 64 and the version numbers are provisional; the mcp, vector and doc commits are on this
   branch (see the commit list); docs/hardware-status.md gets the bench results.
 - 0x153B (gen8-features on top of 0x153A): `cs_has` already covers it; add its own caps when it lands.
 - A per-core absolute check (both cores of a chip) would need a quiet-input moment outside the wizard; not built.
 
-**Addendum (coordinator, fw 0.2.80, 2026-10-20 10:15).** Bench on 0x153A: the training's clean criterion failed on CH2 because the
+**Addendum (bench session, fw 0.2.80, 2026-10-20 10:15).** Bench on 0x153A: the training's clean criterion failed on CH2 because the
 0x64 threshold of 8 codes is under CH2's analog noise at range 0 (about 3 codes rms near code 128; the counters saturate at 65535
 on noise); the firmware now writes 32 (`CS_THR_USE`), with which a clean stage set reads 0 on every core and a bad stage reads
 hundreds (CH1 A4) or 65535 (CH2 B2). The stage map of this unit: CH1 A bad at 4 only, CH1 B bad at 2, CH2 A clean everywhere,
@@ -3911,13 +3911,13 @@ only at codes 127..135 and not in every capture, which one capture at the centre
   page line "...: last capture clean, flagged 3 times in a minute: calibrate" or "...; calibrate"; pc_report.c says it.
   mcp: `CAPF_REPEAT`, `describe_capture()["flagged_repeatedly"]`. docs/protocol.md row 64 updated (bit 5, event 23 timing,
   the band training).
-- Host tests: test_cap_stage 147 (the owner's unit as a mock: CH1 A4 bad at points 2, 3 in 30 % of captures,
+- Host tests: test_cap_stage 147 (the maintainer's unit as a mock: CH1 A4 bad at points 2, 3 in 30 % of captures,
   deterministic; the band picks 0x08E3, the 0.2.79 single-capture training on the same mock keeps A4; `cs_band_pwm`,
   `cs_watch` incl. tick wrap), test_cal_wizard 677, test_ui_diag 7213; all `make -s test` green, GCC 10 clean.
 
-**Bench steps (fw 0.2.81, 0x153A, owner present, coordinator on COM10; back up SD 700-710 before Save):**
+**Bench steps (fw 0.2.81, 0x153A, maintainer present, bench session on <port>; back up SD 700-710 before Save):**
 1. `#VER fw=0.2.80...` (version not bumped) and GET_HEALTH 106 bit 5 = 0 after boot.
-2. CAL_PROBE mode 1 on CH1, then on CH2 (`python firmware/tools/cal_probe.py COM10 both all 1 0 0 1` or the MCP tool): the
+2. CAL_PROBE mode 1 on CH1, then on CH2 (`python firmware/tools/cal_probe.py <port> both all 1 0 0 1` or the MCP tool): the
    screen shows "CH1: training capture stages..." for about half a second before "measuring range 1 of 6"; GET_EVENT_LOG
    type 23 entries a = 0x10, b = 0x08E3 for both channels (CH2's power-on A3 B4 already equals its expected result);
    0x63 back to the value before afterwards (GET_HEALTH 104).
@@ -3933,7 +3933,7 @@ only at codes 127..135 and not in every capture, which one capture at the centre
 ## 55. fw-fr3: Frequency response small items, AUTO SET never loops (fw 0.2.84, protocol 1.24 unchanged)
 
 Branch `fw-fr3` from main 83e3b32 (fw 0.2.83). Brief: task-queue "Frequency response small items" (a)-(c), the AUTO SET
-absurd-point rule (d) and the owner's decision of 2026-10-20 11:23 (AUTO SET fails fast, never loops). Commits: 9079725
+absurd-point rule (d) and the maintainer's decision of 2026-10-20 11:23 (AUTO SET fails fast, never loops). Commits: 9079725
 (`bode_auto_span`, the only change in bode_sweep.c; bode_sweep.h gains the BODE_AS_* failures and two `bode_autospan`
 fields), 071c206 (bode_ui + bode_view), then docs. PC_FW_VERSION not bumped. Host tests all green (test_ui incl.
 test_bode_ch1_low / test_bode_auto_verdict and the Single sweep states, test_bode_sweep 412 incl.
@@ -3941,7 +3941,7 @@ test_auto_span_absurd); GCC 10 build clean in the changed files (bode_view.c als
 nothing flashed.**
 
 What landed:
-- **(a) Single sweep stays in the fold-out** (owner 10-19 21:32). `fold_tap` returns 0 for the Single sweep row; the
+- **(a) Single sweep stays in the fold-out** (maintainer 10-19 21:32). `fold_tap` returns 0 for the Single sweep row; the
   fold-out loop calls `fold_service` while no finger is down: `bode_view_service` (the engine steps, up to 20 ms), the
   plot redrawn around the panel at most every REDRAW_MS (`draw_all_rect` for the part left of the panel, then the
   strips above, below and right of it copied from displaybuffertmp), and the Single sweep row redrawn when its state
@@ -3971,19 +3971,19 @@ What landed:
   pass's points, STOP. FLAT is still a result ("No corner ...", RUN).
 
 Notes for a successor:
-- Inference: the 41-sweep "loop" the owner saw on 0.2.83 was AUTO SET ending in RUN on a span set from a bad overview,
+- Inference: the 41-sweep "loop" the maintainer saw on 0.2.83 was AUTO SET ending in RUN on a span set from a bad overview,
   then RUN repeating (each sweep re-ranging CH1 / CH2). The engine itself caps CH2 switches at six per sweep. A
   *successful* AUTO SET still ends in RUN by design (bode-ui.md 3.2 step 4). Superseded by fw 0.2.86 (addendum below):
   one sweep at the found settings, then STOP.
 - A real tank whose overview point lands exactly on f0 (Q above about 30) reads as absurd: the point is dropped, its
   neighbour becomes the peak without a valid index neighbour on that side and AUTO SET says "peak not confirmed: sweep
-  by hand". Accepted per the owner's rule; the guide text (docs/guide/screens.md) names it.
+  by hand". Accepted per the maintainer's rule; the guide text (docs/guide/screens.md) names it.
 - The first-record artefact itself (0x153A) is fpga-gen10's; with it fixed, the absurd-first-point case should not
   arise. `bode_auto_span` is pure; `bu_auto_verdict` / `bu_auto_bounce` / `bu_single_button` / `bu_warn_ch1_low` are in
   bode_ui.c, all host-tested; `fold_service` and the generator restore are not host-tested (drawing / FPGA writes).
 - mcp: the simulator's warnings are not affected (READ_BODE unchanged); no mcp text names the changed warnings.
 
-**Bench walk-through (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, no SD writes; 0x153A;
+**Bench walk-through (maintainer, bench session on <port>; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, no SD writes; 0x153A;
 RC 1 kOhm / 15 nF on the post, wiring A, x1 probes)** - `#VER fw=0.2.83,...` (number not bumped).
 1. Single sweep from the fold-out: CTRL > Sweep > Single sweep. The panel stays open; the button turns red "Stop sweep"
    with "1 / 50", "2 / 50", ... counting; the plot left of the panel fills; the generator chip steps through the tones.
@@ -4011,7 +4011,7 @@ Bug indicators: the plot drawn over the open panel; the panel's row not followin
 sweep ended; a sweep that pauses while a panel is open; the generator chip and the pin disagreeing after a sweep;
 AUTO SET ending in RUN after a failure warning; any AUTO SET running more than four passes.
 
-**Addendum, fw-fr4 (fw 0.2.86 provisional, protocol 1.24 unchanged): AUTO SET ends in STOP, never RUN** (owner
+**Addendum, fw-fr4 (fw 0.2.86 provisional, protocol 1.24 unchanged): AUTO SET ends in STOP, never RUN** (maintainer
 2026-10-20 11:47, bode-ui.md 3.2 step 4 and section 10). Branch `fw-fr4` from main ec619c4; commit a119035 (bode_view.c,
 bode_ui.c/h, test_ui.c), then docs. PC_FW_VERSION not bumped. Host tests green, GCC 10 build clean. **Not benched.**
 - `bv_auto_finish`'s success path (span, FLAT) ends with `bv_start(1, 0)`, a single sweep at the found settings with the
@@ -4026,7 +4026,7 @@ bode_ui.c/h, test_ui.c), then docs. PC_FW_VERSION not bumped. Host tests green, 
   -> passes 2..4 if a sharp band -> verdict: fail = STOP with the warning; else span / Settle / CH2 Auto set, one
   sweep (cards "sweeping", "Auto..." still) -> STOP: button green "RUN", chip STOP, "AUTO SET", chart and cards
   standing. READ_BODE view bit 1 (`bu_view_bits`) is 0 throughout, since every AUTO SET sweep is single.
-- "Stop sweep" progress (owner bench 11:54 / 11:57 on 0.2.85: "50 / 50" static, intermittently): `bode_done_count`
+- "Stop sweep" progress (maintainer bench 11:54 / 11:57 on 0.2.85: "50 / 50" static, intermittently): `bode_done_count`
   counts the table's done flags, which `bode_start` keeps when the plan is the same (RUN overwrites point by point),
   so a single sweep over a complete same-span table read N / N throughout; a new span cleared them (hence
   intermittent). Commit 0fc2e88: `bu_sweep_measured(running, bode_current, done_count, count)` (bode_ui.c) is the
@@ -4041,8 +4041,8 @@ bode_ui.c/h, test_ui.c), then docs. PC_FW_VERSION not bumped. Host tests green, 
 ## 56. fw-eng: the range plan, the device's flags aligned with the host's (fw 0.2.87, protocol 1.24 unchanged)
 
 Branch `fw-eng` from main cbff758 (fw 0.2.86). Brief: task-queue items "RUN stays continuous; repeated sweeps reuse the
-previous range plan" (owner 10-20 11:51 / 11:52, bode-ui.md section 10) and "Device sweep flags stricter than the
-host's" (bench 11:14 / 12:00). The coordinator's bench data of 12:05 (fw 0.2.86, RC 1 kOhm / 15 nF, 100 Hz .. 1 MHz / 25)
+previous range plan" (maintainer 10-20 11:51 / 11:52, bode-ui.md section 10) and "Device sweep flags stricter than the
+host's" (bench 11:14 / 12:00). The bench session's data of 12:05 (fw 0.2.86, RC 1 kOhm / 15 nF, 100 Hz .. 1 MHz / 25)
 had two device sweeps. Sweep 0 was good except for unsettled / incoherent / retried points at the CH2 switches, with 6
 switches. Sweep 1 had a fooled pre-scan that left CH1 on 2.5 V/div. The host sweep flagged 1 point. Commits: 1094c77
 (bode_dsp flags + test_flags), 8bf9a9f (engine retake and settle sequence + test_flat_retake), 53447c4 (range plan +
@@ -4108,12 +4108,12 @@ warnings in the changed files. **Nothing benched, nothing flashed.**
 
 Not done / for the next agent:
 - The view shows nothing about the plan (the brief allowed it only if needed). `bode_plan_reused` is there for a card or
-  a READ_BODE bit if the owner wants one.
+  a READ_BODE bit if the maintainer wants one.
 - `bode_estimate_ms` still counts the pre-scan on a plan sweep, so the estimate is a few hundred ms high.
 - The device's noise estimate (period differences) still differs from the host's FFT median on a transient (documented
   in section 42). It only moves low_snr / unsettled near their thresholds.
 
-**Bench walk-through (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, no SD writes; 0x153A;
+**Bench walk-through (maintainer, bench session on <port>; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, no SD writes; 0x153A;
 RC 1 kOhm / 15 nF on the post, wiring A, x1 probes; `#VER fw=0.2.86,...`, number not bumped)**
 1. Frequency response, CTRL > Sweep 100 Hz .. 1 MHz, 25 points, Settle Normal, CH2 Auto; RUN.
    - Sweep 1: READ_BODE header switches 2 (6 on 0.2.86 at 12:05), CH1 at range 3.
@@ -4124,7 +4124,7 @@ RC 1 kOhm / 15 nF on the post, wiring A, x1 probes; `#VER fw=0.2.86,...`, number
    switches again (2), the one after reports 0.
 3. AUTO SET, then RUN. AUTO SET's final sweep ranges (switches as a first sweep, because the settings are new). RUN's
    first sweep reports 0 switches.
-4. Flags against the host. Run the same span on the host (`fnirsi1013d-bode --port COM10 --yes --start 100Hz --stop 1MHz
+4. Flags against the host. Run the same span on the host (`fnirsi1013d-bode --port <port> --yes --start 100Hz --stop 1MHz
    --points 25`, view closed first) and on the device (sweep 2 of step 1).
    - The device flags no more points than the host (12:05: host 1 flagged; device 0.2.86 unsettled / incoherent at
      46.4 and 100 kHz).
@@ -4186,7 +4186,7 @@ path is shown to happen in the pre-scan (the device Bode view runs the engine in
 or 0x54 there), so if the pre-scan still ranges CH1 coarse, the trace decides: 0x0D = 4095, 0x53 = 3, 0x56 = 1,
 0x54 = the shift for N 4096 with CIC3 + FIR, then 0x01 = 1, followed by a record of 0xFFFF clears the decimator
 configuration and puts the cause elsewhere (the input really over range at the pre-scan's first range, or the range
-relay / offset still settling after the pre-scan's range change); hand that to the Bode owner (fw-eng) with the log.
+relay / offset still settling after the pre-scan's range change); hand that to the Bode maintainer (fw-eng) with the log.
 
 **Host tests.** test_fpga_bus `test_decim_write` (the model now holds 0x53 / 0x54 / 0x56 and calls
 `fpga_bus_note_write`): D 4095 CIC2 + FIR gives N 4096, S 15 (the UI table's 199 / 399 give 7 / 9); an unchanged arm
@@ -4199,7 +4199,7 @@ table divider change, no write), a poll, GET_DECIM 16 = 4095 / N 4096 / S 15, AR
 GET_CAPTURE_INFO divider 4095; with the old expression it fails with S 7 / N 200 (checked by swapping the mock's
 `pc_hal_divider_now` for the UI divider).
 
-**Bench (fw 0.2.87 image from this branch, 0x153A; host `from fnirsi1013d.scope import Scope; s = Scope.connect("COM10")`).**
+**Bench (fw 0.2.87 image from this branch, 0x153A; host `from fnirsi1013d.scope import Scope; s = Scope.connect("<port>")`).**
 1. fpga-gen10's deterministic reproduction (fpga/al3/AGENTS.md, steps 1..4): UI at a 1 MSa/s index, memory depth 12k or
    deeper, the longest time/div that depth allows, `s.set_decim("off")`; `s.set_timebase(divider=4095)`;
    `s.set_decim("cic2+fir")` (the fit snaps the time/div), `s.get_status()`, then `s.get_decim()`: **divider 4095,
@@ -4220,7 +4220,7 @@ trace; an arm with K >= 1 and no 0x54 in the trace before its 0x01 = 1.
 
 ## 58. fw-eng2: the engine's trigger, the plan settling in one sweep (fw 0.2.89, protocol 1.24 unchanged)
 
-Branch `fw-eng2` from main 3cc0b10 (fw 0.2.88). Brief from the coordinator after the 0.2.87 / 0.2.88 bench
+Branch `fw-eng2` from main 3cc0b10 (fw 0.2.88). Brief from the bench session after the 0.2.87 / 0.2.88 bench
 (hardware-status 12:30). Two problems on the RC, 100 Hz .. 1 MHz / 25, CH2 Auto:
 - The plan converged over many sweeps: switches 6, 6, 6, 6, 6, 6, 4, 5, 1, 1, with jumbled CH2 ranges such as 146.6 kHz
   on r2 2.
@@ -4231,8 +4231,8 @@ Commits: 9ca907e (`firmware/tools/bode_cells.py`), 1d4c268 (pc_bode.c trigger, b
 + tests), then docs. PC_FW_VERSION not bumped. Host tests green (test_bode_sweep 1310), GCC 10 build without warnings
 in the changed files. **Not benched.**
 
-**Cause, measured.** `bode_cells.py` (run by the coordinator 12:32, `backups/bode/cells_1235.npz`, log in the
-coordinator's scratchpad) captured the cells 10.0, 14.7, 21.6 and 31.6 kHz on the RC in three variants, eight
+**Cause, measured.** `bode_cells.py` (run by the bench session 12:32, `backups/bode/cells_1235.npz`, log in the
+bench session's scratchpad) captured the cells 10.0, 14.7, 21.6 and 31.6 kHz on the RC in three variants, eight
 captures each.
 - With the CH1 trigger at 128 ("host", and "imm" = no settle at all): 64 of 64 clean.
 - With the level off the signal, the record starting on the FPGA auto time-out ("auto"): 15 of 32 broken (4 at 14.7 kHz, 6 at 21.6, 5 at 31.6; none at 10.0). Leak -3 ..
@@ -4278,7 +4278,7 @@ Not done:
 - A per-point "why it switched" in READ_BODE: the 20-byte row has no spare bit. The flags show RETRIED, and a
   CH2 step up leaves the point on a coarser r2.
 
-**Bench walk-through (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, 0x153A, RC on the
+**Bench walk-through (maintainer, bench session on <port>; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, 0x153A, RC on the
 post, wiring A, x1 probes)**
 1. Scope view first: set the trigger level marker well off the signal (e.g. top of the screen) and note source / edge.
    Open Frequency response, RUN, ten sweeps (100 Hz .. 1 MHz, 25, Normal, Auto).
@@ -4296,12 +4296,12 @@ the FPGA: check 0x15 / 0x16 / 0x17 in a bus trace before the 0x01).
 
 ## 59. fw-eng3: the pre-scan's check ranges like a point (fw 0.2.90, protocol 1.24 unchanged)
 
-Branch `fw-eng3` from main a2b6929 (fw 0.2.89). Brief: the coordinator's 13:10 data
-(`device_rc_rows_1310.json` in the coordinator's scratchpad), from the owner's AUTO SET + RUN on the RC
+Branch `fw-eng3` from main a2b6929 (fw 0.2.89). Brief: the bench session's 13:10 data
+(`device_rc_rows_1310.json` in the bench session's scratchpad), from the maintainer's AUTO SET + RUN on the RC
 (500 Hz .. 100 kHz) and host sweeps A..D:
-- CH1 left on 2.5 V/div with ch1_low on most points (C, the owner's table).
+- CH1 left on 2.5 V/div with ch1_low on most points (C, the maintainer's table).
 - CH2 on 2.5 V/div for a whole sweep (D).
-- Jumbled CH2 ranges per point in the owner's table.
+- Jumbled CH2 ranges per point in the maintainer's table.
 
 Commits: 802cc4a (engine + tests), then docs. Host tests green (test_bode_sweep 1619), GCC 10 clean. **Not benched.**
 
@@ -4316,7 +4316,7 @@ Commits: 802cc4a (engine + tests), then docs. Host tests green (test_bode_sweep 
   bad record in the check (or a pre-scan record whose peak reads high) therefore left the channel coarse for the whole
   sweep: CH1 on r1 1 in C, CH2 on r2 1 with bad_down in D. Inference: the bad records are still the time-out / spliced
   kind or a front end not settled; the leak retake catches CH1-incoherent ones only.
-- **The owner's table** mixes points of several sweeps (RUN overwrites point by point, the header's switch count is
+- **The maintainer's table** mixes points of several sweeps (RUN overwrites point by point, the header's switch count is
   the sweep in progress). The jumbled r2 with r1 1 is the coarse-CH1 sweeps' points next to newer ones. Inference: not
   a plan that carried those ranges.
 
@@ -4333,7 +4333,7 @@ Commits: 802cc4a (engine + tests), then docs. Host tests green (test_bode_sweep 
   `plan_matches` never lends its plan. Test: overview, final (fresh), RUN (reused, 0 switches, the final sweep's ranges,
   CH1 on 0.5 V/div).
 
-**Bench (owner, coordinator on COM10; FEL load, 0x153A, RC on the post, wiring A, x1)**
+**Bench (maintainer, bench session on <port>; FEL load, 0x153A, RC on the post, wiring A, x1)**
 1. AUTO SET, then RUN for ten sweeps. Every sweep's rows: r1 3 on every point; r2 monotonic (2/3 .. 5).
    Switches: the first RUN sweep 0 (the final sweep's plan), then 0. No ch1_low below 2 MHz.
 2. The host's A..D sequence again (20 points twice, then 25 points twice):
@@ -4346,7 +4346,7 @@ Commits: 802cc4a (engine + tests), then docs. Host tests green (test_bode_sweep 
 
 ## 60. fw-eng4: steps up confirmed, the trigger at CH1's mean, capture statistics (fw 0.2.91, protocol 1.24)
 
-Branch `fw-eng4` from main 312c49f (fw 0.2.90). Brief: the coordinator's 0.2.90 bench (hardware-status 13:14):
+Branch `fw-eng4` from main 312c49f (fw 0.2.90). Brief: the bench session's 0.2.90 bench (hardware-status 13:14):
 - the first sweep after the load ended with both channels on 5 V/div;
 - a fresh sweep put CH2 on 5 V/div at 780 Hz..1.2 kHz;
 - a 2 between 4s at points 17..19;
@@ -4391,7 +4391,7 @@ test_bode_device / test_protocol and the CI ruff selection green, GCC 10 clean. 
   its bottom edge, so most pre-scan records ended on the time-out, i.e. the joined kind.
 - The first pre-scan after boot still uses 0 V (code 128 at offset 0); its retake corrects the level.
 
-**Bench (owner, coordinator on COM10; FEL load, 0x153A, RC on the post, wiring A, x1)**
+**Bench (maintainer, bench session on <port>; FEL load, 0x153A, RC on the post, wiring A, x1)**
 1. Right after the load: one sweep 500 Hz .. 100 kHz / 20, then BODE_CTRL action 0.
    - Bytes 40..47: captures about 25..35, timeouts 0..1 (the first pre-scan), leak retakes 0..2.
    - Rows: r1 3 everywhere, r2 monotonic; no 5 V/div anywhere.
@@ -4410,7 +4410,7 @@ Bug indicators:
 ## 61. fw-eng5: AUTO SET chooses CH2 Hold or Auto, planned vs unplanned switches (fw 0.2.93, protocol 1.24)
 
 Branch `fw-eng5` from main 555e63a (fw 0.2.91). Brief: task-queue item "AUTO SET chooses CH2 Hold when the span fits
-one range" and the owner's decision of 2026-10-20 13:33 (bode-ui.md 3.2 step 3 and section 10). Commits: d51979d
+one range" and the maintainer's decision of 2026-10-20 13:33 (bode-ui.md 3.2 step 3 and section 10). Commits: d51979d
 (engine + test_bode_sweep), 0842b95 (bode_view, pc_hal.h, test_session), 63b40a6 (protocol row 60, mcp
 `BodeCtrlResp` + test), then docs. PC_FW_VERSION not bumped. Protocol number unchanged; the BODE_CTRL answer grows
 from 48 to 50 bytes (a layout addition like 0.2.91's). Host tests green (test_bode_sweep 2068), mcp ruff (CI
@@ -4450,7 +4450,7 @@ keeps only the mode bit, so a restored Hold holds the channel's range as before 
 - BODE_CTRL bytes 48..49 = the planned count (PC_BODE_CTRL_RESP 50); mcp `BodeCtrlResp.planned_switches`.
 - `bode_snap` keeps `planned` with `switches`.
 
-**ch2_small.** The owner's wording was "a held sweep whose point drops more than 20 dB below the held range's full
+**ch2_small.** The maintainer's wording was "a held sweep whose point drops more than 20 dB below the held range's full
 scale flags it ch2_small as today". Today's flag is CH2 under 3 codes (about 33 dB below 128 codes); it was not
 changed. With the 20 dB spread and the finest range chosen, the smallest point of a held AUTO SET span sits at about 3.4
 codes or more, so the held sweep itself is clean. A point that later drops further (the circuit changed during RUN)
@@ -4466,7 +4466,7 @@ reads ch2_small and is drawn grey, and the user switches to Auto.
   f0 x 1.1: 10.4 dB of spread -> Hold on 1 V/div; the held final sweep and RUN: 0 planned, 0 unplanned, nothing
   flagged, no ch2_small, CH2 on 1 V/div at every point.
 
-**Bench (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, no SD writes; 0x153A; wiring A,
+**Bench (maintainer, bench session on <port>; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, no SD writes; 0x153A; wiring A,
 x1 probes; `#VER fw=0.2.91,...`, number not bumped)**
 1. RC 1 kOhm / 15 nF on the post. AUTO SET. Expect a span of about 1 kHz .. 200 kHz and "Auto" in the CTRL > Sweep
    CH2 range row. BODE_CTRL action 0 after the final sweep: header switches 2 (the final sweep ranges from scratch),
@@ -4489,15 +4489,15 @@ x1 probes; `#VER fw=0.2.91,...`, number not bumped)**
    - header switches > 0 on RUN sweeps of an unchanged RC (the 0.2.91 bug list);
    - a BODE_CTRL answer of 48 bytes (an old image).
 
-Owner question left open: AUTO SET's span rules (fc / 10 .. 10 fc, f0 (1 -+ 4 / Q) snapped out) put more than 20 dB
+Maintainer question left open: AUTO SET's span rules (fc / 10 .. 10 fc, f0 (1 -+ 4 / Q) snapped out) put more than 20 dB
 inside the span for almost every real filter or tank, so AUTO SET will choose Hold mainly for flat responses. If the
-owner wants a silent RUN for a narrow band the user dragged to, the same rule could be applied at RUN's first sweep on
+maintainer wants a silent RUN for a narrow band the user dragged to, the same rule could be applied at RUN's first sweep on
 the user's span (not built).
 
 ## 62. fw-eng6: CH2 range Auto / Constant, read-only requests inside menus (fw 0.2.94, protocol 1.24)
 
-Branch `fw-eng6` from main 81c9a19 (fw 0.2.93). Brief: the owner's decisions of 2026-10-20 14:16 (Auto / Constant)
-and 14:19 (the AUTO SET notes lose ": span kept"), the coordinator's bench read of 14:19 (a flat AUTO SET ended on
+Branch `fw-eng6` from main 81c9a19 (fw 0.2.93). Brief: the maintainer's decisions of 2026-10-20 14:16 (Auto / Constant)
+and 14:19 (the AUTO SET notes lose ": span kept"), the bench session's read of 14:19 (a flat AUTO SET ended on
 Auto), and the task-queue Dispatched entry "fw-eng6" (READ_SCREEN must not unwind menus). Commits: 39213e7 (engine +
 test_bode_sweep), 96eb3e5 (view, texts, BODE_CTRL 58 bytes), 93a0c0f (the CH2 menu sets Constant, alone so it can
 be reverted), 70e9a9b (protocol row 60, mcp `BodeCtrlResp`), ce78bc9 (read-only requests inside menus, row 63), then
@@ -4516,7 +4516,7 @@ All files LF (`git diff --check`). **Nothing benched, nothing flashed.**
   saturation check in the pre-scan's check runs on the held range. A clip or a drop only flags the point
   (`auto_range` returned early already). Test `test_constant_never_switches`: no CH2 range change in the DUT model,
   fresh and plan sweeps, 0.5 V/div (ch2_small in the stopband) and 0.1 V/div (15 clipped points, no step up).
-- The row reads "Auto" or "Constant" (owner 14:51: no V/div in the row; up to the merge it read "Constant 100mV" from `volt_div_texts[magnification][display]` without "/div"; the width
+- The row reads "Auto" or "Constant" (maintainer 14:51: no V/div in the row; up to the merge it read "Constant 100mV" from `volt_div_texts[magnification][display]` without "/div"; the width
   check is in test_ui). A tap toggles; nothing else is stored.
 - AUTO SET's Constant writes the chosen range into CH2 (`pc_hal_channel_write(1, .., PC_CH_RANGE)`: the top-bar
   button and its menu show it). On Auto the channel keeps what the final sweep leaves.
@@ -4526,15 +4526,15 @@ All files LF (`git diff --check`). **Nothing benched, nothing flashed.**
   "CH2 small: decrease V/div in CH2 menu or Auto" (a ch2_small point). The flat note is "No corner from 100 Hz to
   10 MHz". The CSV header writes `ch2_range=Constant`.
 
-**The CH2 menu sets Constant (93a0c0f, the coordinator's addition, owner to confirm).** statemachine.c's channel
+**The CH2 menu sets Constant (93a0c0f, the bench session's addition, maintainer to confirm).** statemachine.c's channel
 menu V/div handler calls `bode_view_ch2_vdiv_by_hand()` for CH2 (the menu's own buttons only; the scope's V+/V-
 page does not show in this mode). With the view open it sets Constant and drops the host's exact settings
 (host_cfg_valid, like every screen change). A sweep in progress (not AUTO SET's) ends at once and starts again from
 its first point on the new range, the same kind (single, RUN, thru). Reason: while running, the menu has already
 written the range to the front end (match_volt_per_div_settings), so the engine would finish the sweep on a range it
-does not know, and an Auto sweep's later channel writes would overwrite the user's V/div (the owner's complaint).
+does not know, and an Auto sweep's later channel writes would overwrite the user's V/div (the maintainer's complaint).
 During AUTO SET the change only sets the row; AUTO SET's verdict at its end decides the mode (it writes its range on
-Constant). Doubt for the owner: a V/div tap in the CH2 menu now also restarts a running RUN sweep (one sweep's
+Constant). Doubt for the maintainer: a V/div tap in the CH2 menu now also restarts a running RUN sweep (one sweep's
 points re-measured).
 
 **The flat path.** `bv_auto_finish` runs the rule on BODE_AS_FLAT too (it always did: the note, then the span kept,
@@ -4561,7 +4561,7 @@ count as BUSY (GET_LINK_STATS disp_busy). test_session `test_modal_read_only`; t
 case now uses TEST_PATTERN (GET_CHANNEL no longer yields). Not done: SD_INFO / READ_TRACE stay MAIN-only (SD access and
 trace conversion inside a file viewer were not reviewed).
 
-**Bench (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`; 0x153A; wiring A, x1)**
+**Bench (maintainer, bench session on <port>; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`; 0x153A; wiring A, x1)**
 1. Both tips on the post, Start / Stop 20 kHz .. 5 MHz, AUTO SET: "No corner from 100 Hz to 10 MHz" (no suffix).
    BODE_CTRL action 0: bytes 50..57. Expect verdict 1 (Constant), reason 0, about 9 points, spread a few dB; the CH2
    button reads the chosen V/div (0.5 or 1 V/div), the Sweep row "Constant". If verdict 0, the reason
@@ -4572,8 +4572,8 @@ trace conversion inside a file viewer were not reviewed).
    on 200 mV/div, the row still "Constant".
 3. On Auto (tap the row), RUN on the RC: two planned clicks per sweep as 0.2.93; leaving the mode restores CH2's
    pre-mode V/div.
-4. Pick a CH2 V/div in the CH2 menu while on Auto: the row turns "Constant". (The coordinator's addition; the
-   owner confirms or 93a0c0f is reverted.)
+4. Pick a CH2 V/div in the CH2 menu while on Auto: the row turns "Constant". (The bench session's addition; the
+   maintainer confirms or 93a0c0f is reverted.)
 5. Screenshots: open Menu > Settings (and, separately, the generator menu, a file viewer) and run
    `tools/screenshots.py --only settings`: the PNG shows Settings, and Settings is still open afterwards. A
    state-changing command (e.g. `s.set_timebase(...)`) still closes it.
@@ -4583,8 +4583,8 @@ menu is simply open (a modal loop without a yield check); a menu closing on GET_
 
 ## 63. fw-yield3: host requests leave Diagnostics (fw 0.2.96, protocol 1.24 unchanged)
 
-Branch `fw-yield3` from main 6f0a273 (fw 0.2.95). Bench 2026-10-20 15:25 (fw 0.2.95, owner's unit): Diagnostics
-(Calibration tab) open while `tools/screenshots.py --port COM10 --generator` ran. Diagnostics never left, and the
+Branch `fw-yield3` from main 6f0a273 (fw 0.2.95). Bench 2026-10-20 15:25 (fw 0.2.95, maintainer's unit): Diagnostics
+(Calibration tab) open while `tools/screenshots.py --port <port> --generator` ran. Diagnostics never left, and the
 PNGs (docs/screenshots/scope.png, scope-mcp.png, frequency-response-sweep.png on main) show the Diagnostics frame
 with the Spectrum's waterfall rows, ACQ chip, cards and slider drawn into it, later the Frequency response's empty
 plot ("Set by the sweep", markers). Commits: e8750f5 (dispatcher, glue, test), then version, docs and this handoff.
@@ -4603,7 +4603,7 @@ pc_right_bar_follow, bode_view_close, the battery icon) but many view paths draw
 the time base write redraws the view (`scope_preset_values` -> spectrum / waterfall), `spectrum_set_active`,
 `bode_view_open` (`bv_draw_acq_chip`), and (inference, not traced one by one) the channel / trigger writes' top-bar
 button redraws. That is the waterfall
-and the Frequency response inside the Diagnostics frame. (The owner's memory of 0.2.78 closing Diagnostics does not
+and the Frequency response inside the Diagnostics frame. (The maintainer's memory of 0.2.78 closing Diagnostics does not
 match the code; the screenshots tool before 0.2.94 closed menus only.)
 
 **Fix (the 0.2.78 rule extended to the main-loop screen).** `pc_dispatch` (MAIN context, right before the handler):
@@ -4628,8 +4628,8 @@ view, one count in 68; SET_TIMEBASE alone the same; the wizard over Diagnostics:
 MAIN poll leaves Diagnostics, then the write. BODE_CTRL open (9) and run (1) leave it first; READ_BODE does not.
 Without the fix 35 checks fail.
 
-**Bench (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`; `#VER` fw=0.2.96)**
-1. Scope view, Menu > Diagnostics (Calibration tab). `tools/screenshots.py --port COM10 --only scope`: Diagnostics
+**Bench (maintainer, bench session on <port>; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`; `#VER` fw=0.2.96)**
+1. Scope view, Menu > Diagnostics (Calibration tab). `tools/screenshots.py --port <port> --only scope`: Diagnostics
    closes at the first SET_CHANNEL, the Scope view shows with both channels at 1 V/div, 200 us/div, RUN, and
    docs/screenshots/scope.png is the Scope view (no Diagnostics chrome). The view under Diagnostics is the one it was
    opened from: opened from the Spectrum analyser, the Spectrum shows (the tool does not change the display mode).
@@ -4731,14 +4731,14 @@ triggers, the safety net with `force_stops`, FORCE in the debug build, normal mo
   read late. The Scope view does nothing with the flag (GET_CAPTURE_INFO only).
 - Segments: the slot rule is an inference (above). EF2 / EP4 not modelled.
 
-**Bench (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, fw 0.2.97).**
+**Bench (maintainer, bench session on <port>; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, fw 0.2.97).**
 On 0x153A (today's unit):
 1. `#VER` fw=0.2.97. `s.event_log(fpga_trace=True)` around one host auto capture at 200 MSa/s, 3000 samples, level 255
    (`s.set_trigger(mode="auto", level_code=255)`): 0x1A = 0 before the reset, 0x0E = 0x0098967E inside it, no 0x1A / 0x0E
    write after the release (no force). At 1 MSa/s: 0x0E = 0xC5DE.
 2. 50 host captures as fpga-gen11's bench (RC on the post, generator 21.6 kHz, CIC3+FIR 2320 .. 3408 words, level 255):
    GET_CAPTURE_INFO flags bit 1 set, bit 6 clear, capture_start 0; the two-segment fit (`splice.py` pattern) finds no
-   seam in any (0.2.96: 15 of 32). `python firmware/tools/bode_cells.py COM10`: every "auto" record leak below -60 dB and
+   seam in any (0.2.96: 15 of 32). `python firmware/tools/bode_cells.py <port>`: every "auto" record leak below -60 dB and
    |H| within 0.01 dB of "host".
 3. Scope view, auto mode, marker above the signal, 1 kHz on CH1 at 1 MSa/s: 50 untriggered traces without a step
    (READ_TRACE each, or screenshots); then at 200 MSa/s the same. Refresh rate as on 0.2.96 (one trace per about 100 ms).
@@ -4748,7 +4748,7 @@ On 0x153A (today's unit):
    the marker; no flat record flagged triggered (`s.capture()` flags; GET_CAPTURE_INFO bit 0 only with a crossing).
 6. Segments in auto mode with the generator off (README section 6 step 7, m 7, total 240): every untriggered segment
    flat without a seam; the trace shows 0x0E = 246.
-On 0x153B (after the owner flashes it; the fpga-gen11 tb verdict is still open, see fpga/al3/AGENTS.md):
+On 0x153B (after the maintainer flashes it; the fpga-gen11 tb verdict is still open, see fpga/al3/AGENTS.md):
 7. `#VER` fpga=0x153B; the trace of step 1 shows the 0.2.41 arm (0x1A = 1, then 0x1A = 0 at about 100 ms), records
    contiguous (the newest total words, capture_start = W - total), bit 6 never set.
 8. Steps 2 .. 6 again: no seam, the sweeps' retries 0 .. 1.
@@ -4784,7 +4784,7 @@ the first pre-scan), 0 leak retakes (0..1), 0 other retakes, no flagged point, a
 
 ## 65. fw-floor: points below the floor say so and what to do (fw 0.2.99, protocol 1.24 unchanged)
 
-Branch `fw-floor` from main 54b0f32 (fw 0.2.97). Brief: the owner's decision of 2026-10-20 16:22 ("Frequency response:
+Branch `fw-floor` from main 54b0f32 (fw 0.2.97). Brief: the maintainer's decision of 2026-10-20 16:22 ("Frequency response:
 points below the floor say so and what to do") and the bench read behind it (hardware-status 2026-10-20 15:5x: a
 two-pole RC swept 10 kHz .. 10 MHz, every point above about 500 kHz ch2_small at 100 mV/div, CH2 about -55 dBV, the
 magnitude climbing back from -69 to -34 dB with the phase flipping: generator pickup; only the 540 kHz low_snr point was
@@ -4821,7 +4821,7 @@ among the invalid ones. ch1_low, spliced, retried, fir_off still count.
 - Precedence (bode-ui.md section 6 now lists it): errors, thru sweep, AUTO SET failure, tap notes, Constant
   overrange, Constant "CH2 small: decrease V/div ..." (now only for small points on a range coarser than 100 mV/div:
   on the finest range there is no finer V/div to choose), **this note**, CH1 low, unsettled, near the floor, thru
-  stale, offset, the other notes. No floor line is drawn (owner: the generator-off background does not see pickup).
+  stale, offset, the other notes. No floor line is drawn (maintainer: the generator-off background does not see pickup).
 
 **mcp** (bode.py): `BAD_FLAGS` gains "ch2_small" (markers, ThruCal cal_flagged, report.py's valid mask); `CH2_FINE_RANGE`,
 `fmt_f3` (the same integer rounding as bu_fmt_f3), `ch2_floor_hz` (the same rule on `PointResult.ch2_range` and
@@ -4836,7 +4836,7 @@ Not done / for the next agent:
 - The host-driven sweep (`where='host'`) ranges to 100 mV/div as well, so the caveat applies there; nothing on the
   host draws the note's two lines (the caveat is the sentence).
 
-**Bench (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`; 0x153A; wiring A, x1)**
+**Bench (maintainer, bench session on <port>; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`; 0x153A; wiring A, x1)**
 1. `#VER fw=0.2.99`. Frequency response, the two-pole RC on the post, CTRL > Sweep 10 kHz .. 10 MHz, CH2 Auto, Single
    sweep. Expect every point from about 500 kHz up grey (magnitude and phase, the slider track too), the curve joined
    only below it, and the top-middle note in two orange 13 px lines: "CH2 too small above 5xx kHz to measure: set Stop
@@ -4852,7 +4852,7 @@ Not done / for the next agent:
    the floor, the note shows after it).
 5. Constant at 100 mV/div (CH2 menu) over the full span: this note, not "CH2 small: decrease V/div ...". Constant at
    0.5 V/div: "CH2 small: decrease V/div in CH2 menu or Auto" as on 0.2.94.
-6. A short ground lead on CH2 at the DUT output: the note's frequency moves up (less pickup), if the owner wants to see
+6. A short ground lead on CH2 at the DUT output: the note's frequency moves up (less pickup), if the maintainer wants to see
    it.
 Bug indicators: grey points with the curve drawn through them; the note during AUTO SET; the note naming a frequency
 below a measured non-small point at the top of the span; "CH2 small: decrease V/div" on Constant 100 mV/div; the
@@ -4860,13 +4860,13 @@ second line overlapping data in the top division when the scale leaves it free.
 
 ## 66. fw-diag: Restarts verdicts and the open-input noise limits (fw 0.2.100, protocol 1.24 unchanged)
 
-Branch `fw-diag` from main 7d883e5 (fw 0.2.99). Brief: the owner's decisions of 2026-10-20 18:12 (verdict meanings,
+Branch `fw-diag` from main 7d883e5 (fw 0.2.99). Brief: the maintainer's decisions of 2026-10-20 18:12 (verdict meanings,
 the Restarts tile) and 18:13 (the noise rows' limits are the calibration's open-input condition). Commits: 5879193
 (firmware + host tests), 53f37e1 (version), then mcp, docs and this handoff. Host tests green (`make test`: test_ui_diag
 12516, test_cal_wizard 680, test_adc_cal 59851, the rest unchanged); mcp ruff selection clean, pytest green; `make
 gcc10` builds (`#VER fw=0.2.100`). All files LF. **Nothing benched, nothing flashed.**
 
-**Verdict words** (owner): OK = everything normal; Check = something to fix at some point; Fault = something critically
+**Verdict words** (maintainer): OK = everything normal; Check = something to fix at some point; Fault = something critically
 bad. Written into docs/guide/screens.md.
 
 **Restarts tile** (`ui_diag.c` `ud_tile_restarts`, `ud_exc_crash`, `ud_tile_say`, `ud_tile_up`). A crash is an
@@ -4895,7 +4895,7 @@ exception of type 1..6; type 0 (jump to the image entry: a FEL load, Enter FEL, 
 `ACAL_MAX_NOISE16` without a class is gone). Used by `acal_range_check` (the stored noise per class), `cal_train`'s
 quiet-input check (gated within-capture RMS, now 1 code) and Diagnostics (`UD_LIM_NOISE_GATED` / `_FULL` = 100 / 300
 hundredths, derived from them). **The wizard's gated criterion tightened from 3.0 to 1.0 code**, backed by the stored
-values on the owner's unit (coordinator, GET_CAL 2026-10-20 18:1x, worst range per core): gated CH1 A 0.50, B 0.06,
+values on the maintainer's unit (bench session, GET_CAL 2026-10-20 18:1x, worst range per core): gated CH1 A 0.50, B 0.06,
 CH2 A 0.25, B 0.38; full CH1 B 1.19, CH2 A 2.75 (5 V/div; the high-impedance ranges 5 V, 1 V, 200 mV the worst; a
 low-impedance source reads 0.5..0.6 at 200 MSa/s). The class gain ratio limit (2 %) is unchanged.
 - Status page: headings "Noise RMS, inputs open, gated" / "..., full", limits "limit 1.0 code" / "limit 3.0 code"
@@ -4919,7 +4919,7 @@ real limit: `pc_image_id.version` is 16 bytes and C accepts a 16-character initi
 "0.2.100-m1-nommu" (both A/B suffixes) is 16, so `build_id.c` now has a compile-time check that the version is at most
 15 characters (that combination no longer builds; the default, `-m1` and `-nommu` builds do).
 
-**Bench (coordinator; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`; never during a calibration)**
+**Bench (bench session; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`; never during a calibration)**
 1. `#VER fw=0.2.100`. Menu > Diagnostics > Status. Restarts tile: green "OK", "No crashes.", "Up N min." after the
    FEL load (ENTER_FEL clears the record; a stored type-0 record no longer gives Check). Log page: as on 0.2.99.
 2. Calibration box: "OK Calibrated, every value within its limit." Headings "Noise RMS, inputs open, gated" / "...,
@@ -4937,7 +4937,7 @@ advice's second line overlapping the column headings; a tile line cut.
 
 Branch `fw-sd` from main 6322e98 (fw 0.2.100). Brief: release blocker of the bench 2026-10-20 18:51:
 `fnirsi1013d-flash --persist-only` of fw 0.2.100 (773,120 B = 1510 sectors, 750..2259) refused, because the window
-was [16, min(partition, 2048)) and the image ends at 2260, on the owner's card partitioned at 8192. A card made per the
+was [16, min(partition, 2048)) and the image ends at 2260, on the maintainer's card partitioned at 8192. A card made per the
 install guide (FAT32 from 2048) could not hold the image at all. Commits: f2c53e7 (firmware + host tests), 1563daf (SD
 tools), a7c5727 (mcp), f758b51 (docs), then CHANGELOG and this handoff. Host tests green (`make test`: test_session
 72125 checks with the new `test_sd_window`, test_diag 473); `make gcc10` builds (`#VER fw=0.2.101`, 774,144 B = 1512
@@ -5012,7 +5012,7 @@ before any backup. `protocol.SD_WINDOW_LIMIT`; `SimCard(limit=...)` models old f
 firmware's texts. Tests in `tests/test_sdcard.py` (1510 sectors at 8192 persisted, backup `sd_750-2260_*`; at 2048
 refused, no backup; old window; cap and SD_INFO check 3).
 
-**Bench (coordinator; owner present; card in the scope, partition at 8192, boot mode 4 per docs/hardware-status.md)**
+**Bench (bench session; maintainer present; card in the scope, partition at 8192, boot mode 4 per docs/hardware-status.md)**
 1. `make gcc10` on the merged main, note the sha256 `<h>` of `build-gcc10-pc/fnirsi_1013d.bin` (f2c53e7 built here:
    774,144 B; the merge changes the identity). `fnirsi1013d-flash --image <bin> --sha256 <h>`: `#VER fw=0.2.101`.
 2. `fnirsi1013d-flash --persist-only --image <bin> --sha256 <h>`. Expected lines: "card ... sectors, partition at 8192,

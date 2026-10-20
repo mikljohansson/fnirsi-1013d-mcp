@@ -4,7 +4,7 @@ Each channel of the FNIRSI 1013D has one AD9288 with two 8-bit converters, core 
 a period apart, so together they give 200 MSa/s. Each core has its own zero and its own gain. When they disagree, a
 200 MSa/s trace alternates sample by sample between two levels, and the spectrum shows a tone at half the sample rate.
 This article follows how that mismatch was measured and corrected, from Atlan4's 1.00o5 firmware to a background
-tracker. All numbers come from the owner's unit, the only one tested.
+tracker. All numbers come from the maintainer's unit, the only one tested.
 
 Sources: [firmware README section 6](../../firmware/README.md), the
 [interleave tracking plan](../plans/interleave-tracking.md), [firmware/AGENTS.md](../../firmware/AGENTS.md) sections 21,
@@ -20,7 +20,7 @@ compensations, one per core.
 A separate volts calibration uses an external DC source at 300 mV to 15 V and fits one scale factor per range. It
 assumes the zero sits at exactly code 128, so any zero error goes into the gain.
 
-The owner ran both on 2026-10-18 on the stock bitstream 0x1432. The first volts attempt failed because the probes were
+The maintainer ran both on 2026-10-18 on the stock bitstream 0x1432. The first volts attempt failed because the probes were
 on 10x; the routine needs 1x.
 
 ## The first measurements
@@ -61,7 +61,7 @@ sixteenths of a code: a whole-code offset plus one more code with a probability 
 dither), so the mean is right to 1/16 code without tones. The block sits in sector 708 outside Atlan4's checksummed
 area, so an older firmware ignores it.
 
-The owner ran it the same evening. With both probes shorted, the firmware's own traces read:
+The maintainer ran it the same evening. With both probes shorted, the firmware's own traces read:
 
 | Rate | CH1 corrected A - B | Mean |
 |---|---|---|
@@ -77,7 +77,7 @@ dropped from 44-58 ms to 30 ms, because the per-sample division of 1.00o5 was go
 
 ## A gain mismatch
 
-A zero-only model cannot remove an error that grows with the signal. The owner set 1.0045 V and then -1.0045 V
+A zero-only model cannot remove an error that grows with the signal. The maintainer set 1.0045 V and then -1.0045 V
 (measured with a DMM) on CH1, range 2. The endpoint gains over 2.009 V were:
 
 | Class | Core A | Core B | A/B |
@@ -100,7 +100,7 @@ The two levels sat at -35 and +53 codes on range 2, where core A's bow would giv
 the offset PWM to centre the levels about the zero code (0.07 % in the host test), then measures low, high and low
 again so linear drift cancels.
 
-The owner ran the new zero and gain steps at 08:15 on 2026-10-19 on fw 0.2.48. Both channels reported version 3, flags
+The maintainer ran the new zero and gain steps at 08:15 on 2026-10-19 on fw 0.2.48. Both channels reported version 3, flags
 0x0F and a lever of 88.0 and 88.6 codes. The CH1 full-rate gains came out at A 0.9993 and B 1.0126, a ratio of 1.013.
 The DMM bench the evening before had given 1.033.
 
@@ -156,12 +156,12 @@ finding I1).
 
 On the bench the Zero level step failed every time. The cause was in the FPGA, and it took four bitstreams to find and
 fix: that hunt is the [capture-fault article](adc-capture-fault.md). The wizard first passed at 20:30 on 2026-10-19,
-on bitstream 0x1539 and fw 0.2.69. The owner's words: "the new wizard is great". It passed with a workaround that
-measured the zero 12 codes either side of 128, outside the band where the capture was still wrong. The owner removed the
+on bitstream 0x1539 and fw 0.2.69. The maintainer's words: "the new wizard is great". It passed with a workaround that
+measured the zero 12 codes either side of 128, outside the band where the capture was still wrong. The maintainer removed the
 workaround so that a bad bitstream fails loudly (fail fast). fw 0.2.79 measures at code 128 again, and the next
 morning it failed on 0x1539 on both channels, as intended.
 
-On bitstream 0x153A the zero step starts by training each core's capture stage over codes 120..140. The owner ran the
+On bitstream 0x153A the zero step starts by training each core's capture stage over codes 120..140. The maintainer ran the
 wizard there on 2026-10-20 between 10:42 and 10:48. It picked "CH1 A3 B4" and "CH2 A3 B4" and saved them with the
 calibration. The self-check then read 18,424 captures with none flagged.
 

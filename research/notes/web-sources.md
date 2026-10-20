@@ -124,7 +124,7 @@ URL: https://www.eevblog.com/forum/projects/reverse-engineering-the-fnirsi-1014d
 - Gotcha: arm-none-eabi-gcc `char` is unsigned, broke signed compares. Test build fnirsi_1014d_V_A0.001 (Jun 22 2024).
 
 ## 3. Datasheets / manuals (URLs)
-- F1C100s Datasheet V1.0 (2015-11-10, 21 pp) [F, PDF resolves]: https://linux-sunxi.org/images/b/ba/F1C100s_Datasheet_V1.0.pdf . Per search snippet: USB OTG with descriptor-based internal DMA, 128-byte FIFO, Normal/Dedicated DMA. Text not extracted (compressed streams); run pdftotext locally. Cached copy: C:\Users\miklj\.claude\projects\D--src-fnirsi-1013d-ai\3a8475b7-e03d-45ca-991c-1dea2be98d3c\tool-results\webfetch-1792314747783-vpwmo8.pdf
+- F1C100s Datasheet V1.0 (2015-11-10, 21 pp) [F, PDF resolves]: https://linux-sunxi.org/images/b/ba/F1C100s_Datasheet_V1.0.pdf . Per search snippet: USB OTG with descriptor-based internal DMA, 128-byte FIFO, Normal/Dedicated DMA. Text not extracted (compressed streams); run pdftotext locally.
 - linux-sunxi F1C100s wiki https://linux-sunxi.org/F1C100s [S, fetch 403]: lists datasheet V1.0; no F1C100s user manual; points to F1C600 User Manual V1.0 (357 pp, 2015-11-10) "alleged identical to F1C100s"; also F1C200s User Manual V1.0 (352 pp, 2017-04-18) and F1C200s Datasheet V1.1 (may differ).
 - thirtythreeforty https://thirtythreeforty.net/posts/trying-the-f1c200s/ [F]: F1C200s is drop-in for F1C100s (64 MB vs 32 MB DRAM); `sunxi-fel version` reports soc=00001663 (F1C100s) for both; mentions F1C200s User Manual v1.1 (register definitions); link is in the post's resources section.
 - F1C800 Datasheet V1.0 https://linux-sunxi.org/images/4/49/F1C800_Datasheet_V1.0.pdf [F, PDF resolves] (related family).

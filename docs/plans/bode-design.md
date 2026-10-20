@@ -402,7 +402,7 @@ source, sets the trigger to CH1 if it was EXT (protocol row 41 interlock), switc
 and restores everything on exit.
 
 **Entry.** The main menu has no room for an eighth row (rows 6 and 7 fill y 343..459, `pc_hal_scope.c`). Recommended:
-a "Bode sweep" row in the generator menu, since Bode is a use of the generator. Alternative for the owner to decide:
+a "Bode sweep" row in the generator menu, since Bode is a use of the generator. Alternative for the maintainer to decide:
 main-menu row 6 becomes "Analyzer" with a Spectrum / Phosphor / Bode choice.
 
 **Screen** (trace area 728 x 432 at (2, 48), as the spectrum view, `firmware/README.md` "Spectrum view"):
@@ -515,19 +515,19 @@ protocol minor version, a section 14 row and vectors for the planner, so Python 
 
 | Step | What | Who / effort | Acceptance |
 |---|---|---|---|
-| H0 | Bench items 1-4 below with existing tools (a scratch script over READ_RAW and SET_GEN) | coordinator + owner, 1 h | wiring rule confirmed or replaced; floor and skew recorded in `docs/hardware-status.md` |
+| H0 | Bench items 1-4 below with existing tools (a scratch script over READ_RAW and SET_GEN) | bench session + maintainer, 1 h | wiring rule confirmed or replaced; floor and skew recorded in `docs/hardware-status.md` |
 | H1 | `mcp/src/fnirsi1013d/bode.py`: planner (M, N, p / q, L, settle), DFT, H, markers, flags; pure numpy; unit tests with synthetic squares through RC / RLC models, folded harmonics and non-coherent low f included | Opus agent, 1 day | plan vectors; < 0.01 dB / 0.05 deg on a synthetic RC with 8-bit quantisation and noise |
 | H2 | Simulator: a DUT model (RC, RLC, tank) between the generator and CH2 in `simulator.py` | same agent, 0.5 day | the tool runs in CI against the simulator |
 | H3 | `scope_bode_sweep` with fixed range, thru cal, CSV / NPZ / PNG, caveats and the guide section; then auto range with the splice | same agent, 1 + 0.5 day | bench item 5 |
 | D1 | `bode_dsp.c/.h`: fixed-point planner and phasor DFT, host-buildable, a C twin for any assembly, vectors shared with H1 | Opus agent, 1 day | host tests equal to the vectors; `make -C host_tests test-arm` |
 | D2 | Sweep engine in the main loop: a state machine that drives the generator, raw divider and filter through the existing pc_hal paths, sets `pc_glue_ui_decim_arm` for its captures (`firmware/AGENTS.md` 19) and reads `pc_hal_trace16` | Opus agent, 2 days | the bench-5 RC sweep within 0.05 dB of H3 |
-| D3 | Bode view: panes, header, strip, markers, warnings, connection text, entry row | Opus agent, 2-3 days | owner UI verdict |
+| D3 | Bode view: panes, header, strip, markers, warnings, connection text, entry row | Opus agent, 2-3 days | maintainer UI verdict |
 | D4 | BODE_CTRL / READ_BODE, protocol row, mcp `where="device"` | 1 day | host and device tables agree |
 | D5 | Fast (harmonic) mode on both sides, impedance mode on the device, thru cal on the card | 1-2 days | fast-mode points within 0.3 dB of the tone sweep where valid |
 
 **Status 2026-10-19 (fw-bode, fw 0.2.66, protocol 1.20 provisional; not benched):** D1-D4 are built: `bode_dsp.c`
 (planner and DFT, host-tested against H1's plan vectors and `measure_pair`), `bode_sweep.c` (the runner as a main-loop state
-machine), `bode_view.c` (the view; entry from the generator menu, owner), `pc_bode.c`, BODE_CTRL / READ_BODE (protocol row
+machine), `bode_view.c` (the view; entry from the generator menu, maintainer), `pc_bode.c`, BODE_CTRL / READ_BODE (protocol row
 60; rows of 20 bytes with the DDS period M and f in cHz, since 10 MHz does not fit a u32 in mHz). Deviations from section 4:
 the strip became the CTRL page's Sweep and Thru fold-outs and the header the cards (UX makeover); AUTO SET runs one sweep;
 no Mode field (the fast mode is D5). The mcp side (`where="device"`) is open. Handoff and bench procedure:
@@ -542,11 +542,11 @@ no Mode field (the fast mode is D5). The mcp side (`where="device"`) is open. Ha
 | Clock coherence assumption wrong | leakage, harmonic contamination | bench item 4; fall back to a Hann window and C >= 16 |
 | DUT back-drives the post (active circuit, PI detector) | FPGA pad damage: R21 is the only protection (`fpga/al3/README.md` "Changes" 2 (b)) | UI and tool text: passive DUTs or buffered inputs only; never the coil or the MOSFET drain |
 | Stimulus too large for active DUTs (3.1 Vpp, +1.55 V mean) | clipping, slewing: H invalid | external divider and coupling capacitor before the CH1 point; the half-record check |
-| Host E_BUSY when the owner opens a menu | the sweep aborts | the tool retries a point once, then stops with the partial table |
+| Host E_BUSY when the maintainer opens a menu | the sweep aborts | the tool retries a point once, then stops with the partial table |
 | Long low-frequency sweeps | tool timeouts | the tool estimates the duration first and refuses above 120 s unless asked |
 | Range-dependent front-end response | steps at range switches above ~1 MHz | splice at the switch point; thru cal per range pair if the bench shows it matters |
 
-### 6.3 Bench first (owner with the coordinator, after H1-H3 or with a scratch script)
+### 6.3 Bench first (maintainer with the bench session, after H1-H3 or with a scratch script)
 
 DUT: RC low-pass, R = 1.60 kOhm 1 %, C = 10.0 nF film or C0G: fc = 9.95 kHz. CH1 x1 on the RC input (the post), CH2 x1
 on the output (its ~100 pF adds about 1 %: fit C_total from the -45 deg point). DC coupling, generator on.

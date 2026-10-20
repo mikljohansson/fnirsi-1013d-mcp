@@ -1,8 +1,8 @@
-# UX makeover plan (owner decisions of 2026-10-19)
+# UX makeover plan (maintainer decisions of 2026-10-19)
 
 A reorganisation of the FNIRSI 1013D open firmware's screens, not a visual redesign: colours, fonts, button shapes and
 the positions of the top bar, right bar and plot stay as stock users know them. Things move to where they belong.
-Owner decisions are marked **(owner)**. The diagnostics and settings screens come from the design review in
+Maintainer decisions are marked **(maintainer)**. The diagnostics and settings screens come from the design review in
 `docs/plans/diagnostics-review.md`; the mockups of every new screen live in the Design artifact linked from
 `docs/plans/task-queue.md` ("Diagnostics view redesign").
 
@@ -10,7 +10,7 @@ Owner decisions are marked **(owner)**. The diagnostics and settings screens com
 current session; the Frequency response mode boards, the main-menu icon candidates and the Spectrum board with the slider row are
 on the artifact "1013D Bode mode" https://claude.ai/artifact/DfydC8HJgnemUw3EHenTGP (design: `docs/plans/bode-ui.md`). The
 artboard HTML and the generators (gen_ux: common.py, boards.py, bode.py, bode_v2.py, bode_final.py, bode_icon.py,
-patch_spectrum_slider.py) live in the coordinator session's scratchpad; copy them into docs/mockups/ before that session ends.
+patch_spectrum_slider.py) live in the bench session session's scratchpad; copy them into docs/mockups/ before that session ends.
 
 ## 1. Vocabulary
 
@@ -21,13 +21,13 @@ patch_spectrum_slider.py) live in the coordinator session's scratchpad; copy the
 - **Setting**: a device preference that holds across modes (brightness, confirmation prompts).
 - **Utility**: a screen that is not a measurement (saved files, diagnostics, USB drive).
 
-## 2. Main menu **(owner)**
+## 2. Main menu **(maintainer)**
 
 Same column, same rows, same style. Top to bottom:
 
 1. Scope
 2. Spectrum analyser
-3. Bode plot (owner decision 2026-10-19 18:45, fw 0.2.68: the third mode row; it left the generator menu. Eight
+3. Bode plot (maintainer decision 2026-10-19 18:45, fw 0.2.68: the third mode row; it left the generator menu. Eight
    rows at a 52 px pitch. Grey and inert only on bitstreams without the filter and DDS, or in the viewers)
 4. Saved pictures
 5. Saved waveforms
@@ -36,26 +36,26 @@ Same column, same rows, same style. Top to bottom:
 8. USB drive
 
 The Spectrum row is always shown, also in roll mode; choosing it switches Roll off and says so once in the top-middle
-warning line ("Roll off for the spectrum"); leaving Spectrum does not switch Roll back on **(owner)**. Rows never move or
+warning line ("Roll off for the spectrum"); leaving Spectrum does not switch Roll back on **(maintainer)**. Rows never move or
 disappear. Rules: modes first, utilities below, the row that takes the scope off-line (USB drive) last. No "current mode" marker:
-the screen shows the mode **(owner)**. The "Scope" fields in the spectrum and phosphor strips go away: the menu is the
-only way between modes **(owner)**. "USB connection" becomes "USB drive"; its screen says in plain words that the SD
+the screen shows the mode **(maintainer)**. The "Scope" fields in the spectrum and phosphor strips go away: the menu is the
+only way between modes **(maintainer)**. "USB connection" becomes "USB drive"; its screen says in plain words that the SD
 card is shown to the PC as a drive, that PC control through the protocol stops until the screen is left, and to eject
 the drive on the PC first.
 
-## 3. The bars and dropdowns **(owner, final 2026-10-19: consistent and logical over muscle memory)**
+## 3. The bars and dropdowns **(maintainer, final 2026-10-19: consistent and logical over muscle memory)**
 
 The rule: the ACQ and Trigger dropdowns hold what the hardware acquires; the right bar's first page holds what you do
 to the plot; its CTRL page holds how the plot is shown and computed; the bottom row holds readouts (the measurement
 cards and the record-position slider). Every mode reads the same way and no parameter has two homes. Fold-outs make
 the space: a CTRL button that holds a value opens a small panel beside the bar with the value and its choices or + / -.
 
-- **Top bar chips** (owner, 2026-10-19): one construction for CH1, CH2, ACQ and the trigger: a coloured icon block with
+- **Top bar chips** (maintainer, 2026-10-19): one construction for CH1, CH2, ACQ and the trigger: a coloured icon block with
   rounded outer corners (CH1 yellow, CH2 cyan, ACQ and trigger green) and a grey parameter box to its right that is drawn
   behind the icon block, so the join has no notch and only the chip's outer corners are rounded. Today the trigger's
   grey box has its own rounded corners and the channel and ACQ chips differ from it.
-- **Top bar**: unchanged except the version string goes (it lives in Diagnostics) **(owner)**. Move fast stays in its
-  slot: it is a modifier for dragging on the plot in every mode, a global tool by the rule above (owner, after weighing a
+- **Top bar**: unchanged except the version string goes (it lives in Diagnostics) **(maintainer)**. Move fast stays in its
+  slot: it is a modifier for dragging on the plot in every mode, a global tool by the rule above (maintainer, after weighing a
   collapsed Save button to make room on the right bar: not worth a tap on every save).
 - **Right bar, first page** (both modes): CTRL, RUN/STOP, AUTO SET, T CURSOR, V CURSOR, MEASURES, SAVE PIC, SAVE WAVE
   in today's slots. In Spectrum, AUTO SET runs the spectrum's Auto; T CURSOR, V CURSOR, MEASURES and SAVE WAVE stay
@@ -65,25 +65,25 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   AUTO SET shows "Auto..." while the spectrum's Auto runs and a second tap cancels it (today's strip behaviour kept).
   The waveform viewer keeps its previous / next / delete substitutions. The CTRL button is highlighted while page two is
   shown, as today.
-- **Right bar, CTRL page, Scope** **(owner)**, top to bottom: CTRL; Display (fold-out: the view, Normal or X-Y, each
+- **Right bar, CTRL page, Scope** **(maintainer)**, top to bottom: CTRL; Display (fold-out: the view, Normal or X-Y, each
   with an icon; below it a **Phosphor** switch, the same slide toggle as in the channel menus, and while it is on the
-  rows Persistence, Palette, Clear; so phosphor drawing combines with either view as the firmware allows today); Clear stays in that section at three taps (it matters only with Infinite persistence) **(owner)**; Trace style
+  rows Persistence, Palette, Clear; so phosphor drawing combines with either view as the firmware allows today); Clear stays in that section at three taps (it matters only with Infinite persistence) **(maintainer)**; Trace style
   (fold-out: Linear, Dots, Peak, Pro; moved out of ACQ); Grid (toggle, in every mode); the CH1 and CH2 V/div
-  Display fold-out rows carry a small icon each (owner): a clean trace line for Normal, a Lissajous loop for X-Y; the
+  Display fold-out rows carry a small icon each (maintainer): a clean trace line for Normal, a Lissajous loop for X-Y; the
   Phosphor switch row carries a soft graded trace icon; the
-  **steppers** (owner): about 82 px each: a 28 px grey bar reading "V+", a 26 px centre in the channel colour reading
+  **steppers** (maintainer): about 82 px each: a 28 px grey bar reading "V+", a 26 px centre in the channel colour reading
   "CH1" or "CH2" (one text line; the value is in the top bar chip), a 28 px grey bar reading "V-": the stock V+ CH1 V-
   controls, compact; each bar's hit area runs to the middle of the centre (about 41 px); the + and - hit areas extend into their half of the
   centre so each gets about 45 px of touch; they step `displayvoltperdiv` exactly as the channel menu's chips do (same
   setting, the stepper is the quick way while watching the trace); 50 % TRIG (action, as today). That fills the eight
   slots exactly.
-- **Right bar, CTRL page, Spectrum** **(owner)**: CTRL; Display (fold-out: Spectrum, Waterfall, Density, each with an
+- **Right bar, CTRL page, Spectrum** **(maintainer)**: CTRL; Display (fold-out: Spectrum, Waterfall, Density, each with an
   icon, the same button name and slot as in Scope); Analysis (fold-out: FFT
   length, Window, Average, Reset, and first of all **Analyse: CH1 / CH2 / both**, today's strip channel selector that also
   sets the dBV or dBA unit and which channel Auto analyses, then Scale and Ref level, folded in from the former Axis
-  button so both CTRL pages share one geometry **(owner)**); Grid; the CH1 and CH2 V/div steppers; 50 % TRIG. The spectrum strip goes away; Span and Start keep their gestures. The waterfall's and density's
-  colour legend was drawn at the top-right of the plot as a readout (removed, owner 2026-10-19 22:28: the blue -> red -> white scale is understood and nobody measures from Waterfall or Density); the waterfall's time span and the phosphor's wfm/s
-  are cards. **Spectrum slider (owner, 2026-10-19 19:40)**: the Scope's slider row stays under the plot in Spectrum
+  button so both CTRL pages share one geometry **(maintainer)**); Grid; the CH1 and CH2 V/div steppers; 50 % TRIG. The spectrum strip goes away; Span and Start keep their gestures. The waterfall's and density's
+  colour legend was drawn at the top-right of the plot as a readout (removed, maintainer 2026-10-19 22:28: the blue -> red -> white scale is understood and nobody measures from Waterfall or Density); the waterfall's time span and the phosphor's wfm/s
+  are cards. **Spectrum slider (maintainer, 2026-10-19 19:40)**: the Scope's slider row stays under the plot in Spectrum
   too, with the same construction and the same drag as the Scope (fw 0.2.64: the window follows the finger). It shows
   the shown span as a window over 0..fs/2 at the current sample rate: the left edge at start / (fs/2), the width
   span / (fs/2) of the track. Dragging pans the centre and keeps the span, the same pan as dragging the plot. At full
@@ -92,33 +92,33 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   The Frequency response mode gets the same row for Start..Stop (`docs/plans/bode-ui.md` section 2). This replaces
   "the record-position slider is hidden in Spectrum". **Built in fw 0.2.71** (spectrum.c): the track is the displayed
   axis, 0 .. min(fs/2, 25 MHz) (the view caps its axis at 25 MHz, so at 200 MSa/s the window spans that, not 100 MHz);
-  the colour legend of Waterfall and Density moved inside the plot's top right (y 72), and fw 0.2.75 removed it (owner,
+  the colour legend of Waterfall and Density moved inside the plot's top right (y 72), and fw 0.2.75 removed it (maintainer,
   2026-10-19 22:28); the frequency labels became the
   grid rule's (docs/ui-guidelines.md section 3). Fold-outs open to the
   left of the bar over the plot's right edge and close on a second tap of their button, a tap outside, or another
   CTRL button; the waveform viewer's CTRL page stays as today. Display, Grid, persistence and palette are saved with the
-  settings and restored at power-on (Grid gets a spare settings word). The one-line header goes away too **(owner)**: its
+  settings and restored at power-on (Grid gets a spare settings word). The one-line header goes away too **(maintainer)**: its
   readouts become measurement cards in the bottom row like the scope's ("[1] Peak: 1.000kHz", "[1] Level: +2.7dBV",
   "RBW: 146Hz" with a grey chip), chosen through MEASURES like the scope's cards; the filter tag is not shown (it is a
   setting, visible in ACQ). Warnings keep the top-middle position.
-- **Slider-track overview (owner, 2026-10-19 20:00; design `docs/plans/slider-overview.md`, built in fw 0.2.73)**: the
-  slider row in all three modes draws the whole in its track, which takes the whole row (owner 21:36: a line at y 452,
+- **Slider-track overview (maintainer, 2026-10-19 20:00; design `docs/plans/slider-overview.md`, built in fw 0.2.73)**: the
+  slider row in all three modes draws the whole in its track, which takes the whole row (maintainer 21:36: a line at y 452,
   the track x 2..727 by y 453..471, 19 rows; the window is its two 1 px edge lines, no box).
   Scope: the record's min / max envelope. Spectrum: the spectrum over 0..fs/2 that the FFT already computes. Frequency
   response: AUTO SET's 20-point overview, nothing before the first AUTO SET. It is dimmed outside the window and in full
   colour inside it, the window's edges are drawn over it, and a tap on the row outside the window centres the window
-  there (tap to jump, owner 21:20). Boards: the Scope, Spectrum and
-  Frequency response boards, plus makeover/ScopeOverview (a deep record zoomed into one decay). The owner's decisions
+  there (tap to jump, maintainer 21:20). Boards: the Scope, Spectrum and
+  Frequency response boards, plus makeover/ScopeOverview (a deep record zoomed into one decay). The maintainer's decisions
   are in the design's section 10 F.
-- **ACQ dropdown** **(owner)**: Sample rate, Time per division, Memory, Roll, Average, Filter. Acquisition only: Trace
+- **ACQ dropdown** **(maintainer)**: Sample rate, Time per division, Memory, Roll, Average, Filter. Acquisition only: Trace
   style leaves it. With the Filter on, depths above 6000 are not offered (filtered records hold at most 8190 samples).
 - **Trigger dropdown**: unchanged (mode, edge, channel, position, Always 50 %). 50 % TRIG on the CTRL page sets the
   level once; Always 50 % keeps it.
-- **Bottom row**: the measurement cards as the stock firmware draws them (owner, from the FNIRSI product photos): the
+- **Bottom row**: the measurement cards as the stock firmware draws them (maintainer, from the FNIRSI product photos): the
   Measures button opens the list of up to twelve measurements per channel (Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq,
   Cycle, Time+, Time-, Duty+, Duty-; `scopesettings.measuresstate`, drawn by `scope_display_measurements`); the
   ticked ones appear as cards, CH1's from the left and CH2's from the middle (x 366), stacking upward over the plot.
-  Card scheme **(owner, final)**: Atlan's layout kept (it looks better than stock's): a dark grey rounded card with a
+  Card scheme **(maintainer, final)**: Atlan's layout kept (it looks better than stock's): a dark grey rounded card with a
   block in the channel colour at its left holding the measurement name in black, then the value in white; the block is
   built like the top bar chips, full card height, rounded only on its outer left corners, the grey card drawn behind it
   with no notch; the block is as wide as the name (no padding space after it). Names as scope makers spell them:
@@ -130,7 +130,7 @@ the space: a CTRL button that holds a value opens a small panel beside the bar w
   not now: a spectrum card set (peak frequency and level per channel, THD) and the FPGA hardware measurements of
   docs/plans/roadmap.md section 8 item 6 feeding the same cards.
 - **Warnings**: top-middle of the plot in every mode (y 70), stating consequence and
-  action **(owner)**; readouts such as wfm/s go into the Display fold-out's phosphor section.
+  action **(maintainer)**; readouts such as wfm/s go into the Display fold-out's phosphor section.
 
 ## 3a. Measurements per mode (from the review's inventory, docs/plans/ux-review.md section 6)
 
@@ -153,7 +153,7 @@ from the Settings fold-out; the measurement cards in the stock chip scheme; the 
 Undo, Clear (zeros and gains only, volts factors kept) and the developer page; the new four-screen wizard; the full
 Settings screen; the USB drive screen text. Everything else keeps its place and its meaning.
 
-## 5. Settings **(owner)**
+## 5. Settings **(maintainer)**
 
 - The **Settings fold-out** keeps its shape and its most common rows: screen brightness, grid brightness, confirmation
   prompts, time and date (RTC module only), Other settings. Baseline calibration leaves it (to Diagnostics); X-Y leaves it
@@ -179,7 +179,7 @@ on post, Undo last calibration, DC shift trim, Clear calibration (confirmed). Lo
 SD state, timing. Details and the readers it needs: `docs/plans/diagnostics-review.md`. The calibration wizard (fw
 0.2.50, README 6.4) is launched from Calibrate.
 
-## 6a. Calibration wizard **(owner, 2026-10-19 afternoon)**
+## 6a. Calibration wizard **(maintainer, 2026-10-19 afternoon)**
 
 Four screens, one modal flow, the same two buttons on every screen, nothing saved before the last one. No extra
 sentences: each screen is a title, one instruction, a progress or result line, and two buttons.
@@ -202,14 +202,14 @@ to Done, so the zero level can still be saved; and the stock volts-per-range cal
 since Clear never touches the volts factors and a unit that lost them needs that procedure. Firmware: fw 0.2.50's wizard (README 6.4) has the steps
 and checks; its copy, its two-probe gain step and its Skip go, the per-channel gain screens and the final Save come.
 
-## 6b. Buttons in dialogs **(owner)**
+## 6b. Buttons in dialogs **(maintainer)**
 
 The default or primary action sits on the right, the secondary or dismissing one on the left, in every dialog: the
 wizard (Cancel left, Calibrate / Continue / Save calibration right), confirmations (Cancel left, the action right) and
 the first-run screen (Later left, Calibrate now right). Red is reserved for destructive actions (Clear calibration); Enter FEL is green, since a
 power cycle boots the card as usual.
 
-## 6c. How to read the mockups **(owner, 2026-10-19, implementation go)**
+## 6c. How to read the mockups **(maintainer, 2026-10-19, implementation go)**
 
 The mockups are the UX and the design-language vision, not a pixel specification: implement the flows, the placement
 and the behaviour they show with the device's existing drawing language (its fonts, button shapes, colours), and do not
@@ -227,5 +227,5 @@ calibration wizard is tested in its redesigned four-screen form, not in the fw 0
 3. Settings fold-out trim and the full Settings screen.
 4. Diagnostics as a display mode with the three pages and the firmware readers.
 
-Each step is one firmware generation's batch with its own bench walk-through by the owner; the mockups are the
+Each step is one firmware generation's batch with its own bench walk-through by the maintainer; the mockups are the
 acceptance reference, and `docs/plans/diagnostics-review.md` section 1 lists what must not be lost from today's screens.

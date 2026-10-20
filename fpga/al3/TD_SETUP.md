@@ -42,7 +42,7 @@ needed only the two GTK stubs.
 ## 3. Install
 
 ```powershell
-wsl -d Ubuntu -- bash -c "mkdir -p ~/downloads/anlogic && cp /mnt/c/Users/miklj/Downloads/TD_4.6.8_SP1_116866_NL.zip ~/downloads/anlogic/"
+wsl -d Ubuntu -- bash -c "mkdir -p ~/downloads/anlogic && cp /mnt/c/Users/<you>/Downloads/TD_4.6.8_SP1_116866_NL.zip ~/downloads/anlogic/"
 wsl -d Ubuntu -- bash /mnt/d/src/fnirsi-1013d-ai/fpga/al3/td/td_install.sh ~/downloads/anlogic/TD_4.6.8_SP1_116866_NL.zip
 ```
 

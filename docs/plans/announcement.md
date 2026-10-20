@@ -1,12 +1,12 @@
 # Announcement draft (release 0.3.0)
 
-Final draft for the owner, rewritten 2026-10-20 (rel-gen2) from the README, `docs/release-notes/0.3.0.md`,
+Final draft for the maintainer, rewritten 2026-10-20 (rel-gen2) from the README, `docs/release-notes/0.3.0.md`,
 `CHANGELOG.md`, `docs/hardware-status.md` and `fpga/al3/dist/BITSTREAMS.md`. Every number names its bench source. Two
 placeholders stay until the tag exists: `{{VERSION}}` (0.3.0; firmware and MCP package share it) and `{{RELEASE_URL}}`
 (https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v{{VERSION}}, the tag URL, not `/latest`: v0 releases are
 pre-releases).
 
-## Owner decisions before posting
+## Maintainer decisions before posting
 
 - [ ] Credits and AI attribution wording: the credits below and README "Credits" (F12 in
       `docs/plans/release-readiness.md`). The AI sentence is README's, word for word, including the model name
@@ -23,7 +23,7 @@ pre-releases).
 
 ## Where it goes
 
-All on the same day (owner decision 2026-10-19: one announcement, no follow-up posts):
+All on the same day (maintainer decision 2026-10-19: one announcement, no follow-up posts):
 
 1. EEVblog forum, the FNIRSI 1013D thread (testgear subforum): the long version below.
 2. The repository: the same text as a pinned GitHub Discussion (if Discussions are on).

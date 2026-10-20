@@ -2,7 +2,7 @@
 
 The open firmware started from Atlan4's 1.00o5 interface, which grew feature by feature on top of the stock FNIRSI
 screens. By 2026-10-19 the project had added a spectrum analyser, a phosphor view, a new calibration and many
-diagnostics, each placed where there was room. That day the owner and the agents rebuilt the interface as one
+diagnostics, each placed where there was room. That day the maintainer and the agents rebuilt the interface as one
 system. This article explains how: mockups first, adversarial reviews, and one rule above habit, consistency over
 muscle memory. It ends with the rules that came out of it.
 
@@ -12,11 +12,11 @@ Sources: the [UI guidelines](../ui-guidelines.md), the [UX makeover plan](../pla
 
 ## Before the makeover
 
-The first UI rule came early, on 2026-10-18, from the owner: hide what the hardware cannot do, and compact the menus
+The first UI rule came early, on 2026-10-18, from the maintainer: hide what the hardware cannot do, and compact the menus
 rather than paint over gaps. The generator menu hid its Wave, Amplitude, Offset and Phase rows (the 1013D has no DAC)
 and shrank from 393 to 169 px; the trigger menu went from 336 to 280 px (fw 0.2.6 to 0.2.8).
 
-The trigger for the makeover was the diagnostics screen. On 2026-10-19 at 11:00 the owner pointed out that it showed
+The trigger for the makeover was the diagnostics screen. On 2026-10-19 at 11:00 the maintainer pointed out that it showed
 the unused stock compensation tables and "fw: PECO" as the FPGA. A redesign proposal was drawn as a design artifact.
 
 ## The first review: Diagnostics
@@ -54,14 +54,14 @@ functions, each with where it lived in the code and where it should go. Among th
 It also checked every text against the device's bitmap fonts. Several lines did not fit; the Log page's bottom row
 needed about 920 px of the 776 available.
 
-The owner rewrote the plan that afternoon and in the passes after it. The top bar and the right bar kept their stock
+The maintainer rewrote the plan that afternoon and in the passes after it. The top bar and the right bar kept their stock
 positions, and the CTRL page kept its V+ / V- controls; Clear calibration keeps the volts factors; the volts
 calibration became a service action. The review's findings were marked "Superseded" rather than deleted, so the
 reasoning stays visible. Further passes checked revision 3 of the boards and the final plan.
 
 ## Consistency over muscle memory
 
-The final plan settles one question explicitly: "consistent and logical over muscle memory" (owner, 2026-10-19). The
+The final plan settles one question explicitly: "consistent and logical over muscle memory" (maintainer, 2026-10-19). The
 rule for placement:
 
 - the ACQ and Trigger dropdowns hold what the hardware acquires;
@@ -82,7 +82,7 @@ every placement question has an answer.
 
 ## The build, in four steps
 
-Each step was one firmware batch with its own walk-through by the owner, with the mockups as the acceptance reference.
+Each step was one firmware batch with its own walk-through by the maintainer, with the mockups as the acceptance reference.
 
 | Step | Firmware | What |
 |---|---|---|
@@ -104,28 +104,28 @@ Some details from these steps:
 - **Wizard.** Four screens, a title, one instruction, a result line and two buttons each; nothing written before Save
   calibration.
 
-On 2026-10-19 at 16:02 the owner walked through fw 0.2.59: the menu, chips, handles, CTRL page, spectrum, Settings and
+On 2026-10-19 at 16:02 the maintainer walked through fw 0.2.59: the menu, chips, handles, CTRL page, spectrum, Settings and
 Diagnostics all worked, and a polish list was queued. The wizard's zero step failed, which turned out to be an FPGA
 fault (see the [capture-fault article](adc-capture-fault.md)).
 
 ## Rules that came later
 
-The guidelines kept growing as the owner used the result.
+The guidelines kept growing as the maintainer used the result.
 
 - **RUN/STOP shows the action** (fw 0.2.68). The general rule puts the confirming action on the right and keeps red for
-  destructive actions. The owner made one exception, as on bench scopes: the button reads green "RUN" while stopped and
+  destructive actions. The maintainer made one exception, as on bench scopes: the button reads green "RUN" while stopped and
   red "STOP" while running. The chip beside the trigger shows the state.
 - **Grid lines mean something** (fw 0.2.71). A grid line sits at a value its axis names. Log frequency axes get a line
   at every decade, with 2 and 5 lines when the span is under three decades. One function draws the rule for both
   frequency views and is host-tested.
 - **Time/div drives the sample rate** (fw 0.2.76). A tap zoom picks the time/div, and the rate follows from one ladder:
-  the fastest rate whose record covers the ten divisions with at least ten samples per division. The owner's verdict:
+  the fastest rate whose record covers the ten divisions with at least ten samples per division. The maintainer's verdict:
   the zoom ladder "seems to work great". The Spectrum got the same idea with its span (fw 0.2.77), and a pan never
   changes the rate (fw 0.2.81).
 - **The slider track shows the whole** (fw 0.2.73). The row under the plot draws the whole record, spectrum or overview
-  sweep, with the window over it, and a tap jumps there. The owner found the first window drawing "doesn't work quite
+  sweep, with the window over it, and a tap jumps there. The maintainer found the first window drawing "doesn't work quite
   well"; fw 0.2.74 brought back a box with a margin.
-- **Host commands leave the modal screens** (fw 0.2.78). The owner: "if the agent sends commands it just exits all
+- **Host commands leave the modal screens** (fw 0.2.78). The maintainer: "if the agent sends commands it just exits all
   modals, since that wouldn't be destructive; just exiting to the base screen". Every modal loop leaves by its own cancel path when the host needs the
   main loop. Only a calibration measurement, a file save or USB drive mode still answer E_BUSY, with the reason.
 

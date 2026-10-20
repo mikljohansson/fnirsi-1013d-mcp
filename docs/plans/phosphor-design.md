@@ -1,6 +1,6 @@
 # Digital phosphor view: design (fw-phosphor, fw 0.2.46, protocol 1.13)
 
-Owner priority 2 after the spectrum analyser. Study: `docs/plans/dpos350p-features.md` section 4. This file is the
+Maintainer priority 2 after the spectrum analyser. Study: `docs/plans/dpos350p-features.md` section 4. This file is the
 design as built; user-facing description in `firmware/README.md` "Phosphor view", handoff in `firmware/AGENTS.md`
 section 24. [F] = fact from source or a bench note, [I] = inference, [E] = estimate.
 
@@ -130,7 +130,7 @@ the lit runs only).
   restored only when the marker matches and the fields are in range (the spectrum's rule). The mode itself is not
   restored (boot into the scope view).
 
-## 8. Bench acceptance (owner)
+## 8. Bench acceptance (maintainer)
 
 - Generator 1 kHz square into CH1, 200 us/div: sharp steady trace, edges drawn; Persistence steps fade as stated.
 - Duty toggled 30 / 70 % from the host every 0.25 s: both falling edges at about equal intensity.

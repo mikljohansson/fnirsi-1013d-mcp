@@ -58,7 +58,7 @@ the better fit (section 1.2). And the D-cache is off: the MMU is never enabled, 
 - UI: menus are modal loops; while one is open the protocol answers E_BUSY [F: AGENTS.md "Bench coordination"].
   New analyser screens must be **main-loop display modes**, not modal menus, so MCP polling keeps working.
 - Rules carried over: `PC_PROTOCOL=0` must stay byte-identical to Atlan's image [F: firmware/AGENTS.md section 16],
-  so feature code lives in new files and behind the existing hook/`#if` pattern; owner policy "hide unsupported
+  so feature code lives in new files and behind the existing hook/`#if` pattern; maintainer policy "hide unsupported
   options; compact menus" [F: firmware/AGENTS.md section 14].
 
 ### 1.2 Fixed-point FFT core and its cost
@@ -112,21 +112,21 @@ settings, Picture view, Waveform view, Diagnostic view, USB connection; the 147 
 - Visualisation modes shown as stacked layers: filled spectrum, a 2D waterfall (time downwards, rainbow palette
   with a colour bar, swept signal visible), and a "3D waterfall" rendered as a shaded perspective spectrogram
   [F: photo]. Strings: "FFT display", "FFT length", "Waterfall display", "3D display" (digest 4.1); FFT 4K-32K and
-  RBW are claimed in the review (web-sources.md:145). The "energy" mode the owner mentions is not labelled in the
+  RBW are claimed in the review (web-sources.md:145). The "energy" mode the maintainer mentions is not labelled in the
   photos or the strings I have; it is probably the filled/gradient spectrum or a density view [I].
 
 ### 2b. Adapted design for the 1013D
 
 - Screen: one channel at a time (CH1/CH2 field), or both overlaid in channel colours. Plot 728 columns; each column
   shows the max of the bins it covers (peak-preserving, so a 2048-bin spectrum keeps narrow lines). Y in **dBV**
-  (high-impedance input, so dBm into 50 Ohm would be wrong; dBmV = dBV + 60 is a one-word option if the owner wants
+  (high-impedance input, so dBm into 50 Ohm would be wrong; dBmV = dBV + 60 is a one-word option if the maintainer wants
   DPOS parity). Peak marker readout at the top (frequency, dBV, Vrms), two frequency cursors via the existing cursor
   buttons.
 - Strip fields (hidden when not applicable): **Start / Stop** (tap the label to flip to Center / Span), **RBW**,
   **Ref** (dBV at top), **Scale** (5/10/20 dB/div), **Avg** (Off, 4, 16, Peak hold), **View** (Spectrum, Waterfall,
   Density). Not exposed: FFT length (derived from RBW and shown as a readout), "Attenuation" as such (the channel
   V/div relay is the real input attenuator and stays in the channel menu), window (Hann default; flat-top only when
-  Avg = peak hold or behind a long press [I: owner to decide]).
+  Avg = peak hold or behind a long press [I: maintainer to decide]).
 - Mapping: Stop sets fs = 200 MHz/(D+1) with fs >= 2.5 x Stop; RBW picks N in {1024, 2048, 4096} (live) or 16384
   (single/averaged) using RBW = 1.5 fs / N for Hann. Start > 0 with a narrow span uses the same full FFT and shows a
   slice; a true zoom (digital down-conversion with an NCO table, then FFT) is a later step S6.
@@ -137,7 +137,7 @@ settings, Picture view, Waveform view, Diagnostic view, USB connection; the 147 
 - 3D waterfall: host only (MCP returns a PNG). On the scope it would need hidden-line removal over ~32 stacked traces;
   feasible (~10-20 ms [E]) but it adds a mode without adding information.
 - The channel menu already has an "FFT" switch that stores `fftenable` but draws nothing [F: menu.c:3107, 3176;
-  statemachine.c:1883-1893; the placeholder `scope_functions.c:2798`]. Hide it now (owner policy); once the spectrum
+  statemachine.c:1883-1893; the placeholder `scope_functions.c:2798`]. Hide it now (maintainer policy); once the spectrum
   exists it can open the analyser on that channel instead of adding a split view.
 
 ### 2c. Feasibility and numbers
@@ -173,7 +173,7 @@ fingerprint already flags it, firmware/AGENTS.md section 6); a 16k FFT adds ~30 
 
 | Step | Work | Bench acceptance |
 |---|---|---|
-| C0 | Hide the channel-menu FFT switch (menu draw + touch condition, `#if PC_PROTOCOL`) | Owner: switch gone, menu compact; `make check-reference` IDENTICAL |
+| C0 | Hide the channel-menu FFT switch (menu draw + touch condition, `#if PC_PROTOCOL`) | Maintainer: switch gone, menu compact; `make check-reference` IDENTICAL |
 | C1 | `fx_fft.c/.h` + table generator + host tests vs numpy | Host: bin error < 0.05 dB above -60 dBFS, roundoff noise < -100 dBFS for N = 1k-16k |
 | C2 | On-target benchmark (timer0 ms ticks or a cycle loop) in DDR and, if available, SRAM; result in a debug counter | Table of measured ms for 1k-16k replaces the [E] column above, logged in hardware-status.md |
 | S1 | Analyzer > Spectrum screen: one channel, Hann, 0..fs/2 at the current fs, Ref, Scale, peak marker | Generator 1 kHz 50% on CH1: peaks at 1/3/5 kHz, 3rd at -9.5 dB and 5th at -14.0 dB vs the fundamental within 0.5 dB; same capture via `scope_capture_and_fft` within 1 dB for peaks > -40 dBc; `pass_ms` recorded |
@@ -211,7 +211,7 @@ during sampling (update log); forum reports erratic phase at first (web-sources.
   sweeps show H / H_cal. Removes inter-channel gain/phase mismatch and probe differences.
 - **Source = Internal / External**. External: the scope follows whatever CH1 sees. It estimates f from CH1 (zero
   crossings, refined by the DFT peak), measures H at that f and adds a point when f has moved by more than one
-  plot pixel. The owner sweeps a sine generator by hand or with its sweep function. From the host, the MCP can also
+  plot pixel. The maintainer sweeps a sine generator by hand or with its sweep function. From the host, the MCP can also
   step an external SCPI generator.
 - Screen: log-f axis over 728 px, dB on the left in CH2 colour, degrees on the right in a second colour, grid by
   decades; points drawn as they arrive with "37/50" progress; Single / Loop in the right column (RUN/STOP = start/
@@ -264,7 +264,7 @@ Optional READ_BODE returns the on-scope table for acceptance.
 | B2 | Fixed-point single-bin DFT in `fx_fft.c` (host-tested) | Host: amplitude error < 0.05 dB, phase < 0.2 deg for 8-bit synthetic tones vs numpy |
 | B3 | Analyzer > Bode screen, internal source, Single/Loop, log axis, progress, cursor | Same RC as B1: on-scope values within 0.5 dB / 3 deg of B1; RUN/STOP aborts within one pass; MCP PING/GET_STATUS answered during the sweep |
 | B4 | Thru calibration, harmonics option, auto-range of CH2 | Thru on one node after cal: 0 +/- 0.2 dB, 0 +/- 2 deg across the sweep; harmonics points lie on the B1 curve within 1 dB |
-| B5 | External source "follow" mode | Owner sweeps an external sine by hand over the RC: points on the B1 curve within 1 dB |
+| B5 | External source "follow" mode | Maintainer sweeps an external sine by hand over the RC: points on the B1 curve within 1 dB |
 | B6 | Detector check: TX tank through R21 | Resonance within 1% of 1/(2 pi sqrt(LC)) from LCR values; Q readout recorded |
 
 ## 4. Digital phosphor (intensity-graded persistence)

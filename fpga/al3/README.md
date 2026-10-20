@@ -10,7 +10,7 @@ has been flashed from this folder.
 
 | Path | What |
 |---|---|
-| `src/` | Atlan4's AL3 TD project, sources only: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc`, `zaklad.sdc`, `FPGA.al`, `al_ip/` (PLL and sample-memory IP: `.v`, `.ipc`, sim models), plus `FPGA commands.txt` (Atlan4's command table, updated). Copied from `D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\FPGA AL3\FPGA AL3S10\` (unmodified at commit a947e78, version 0x1532). `zaklad.v` and `zaklad.adc` now carry the changes listed in "Changes" (version 0x1533). Build outputs (`*.db`, `*.area`, `*.timing`, `*.bit`, `*.bin`) were left out. |
+| `src/` | Atlan4's AL3 TD project, sources only: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc`, `zaklad.sdc`, `FPGA.al`, `al_ip/` (PLL and sample-memory IP: `.v`, `.ipc`, sim models), plus `FPGA commands.txt` (Atlan4's command table, updated). Copied from `D:\path\to\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\FPGA AL3\FPGA AL3S10\` (unmodified at commit a947e78, version 0x1532). `zaklad.v` and `zaklad.adc` now carry the changes listed in "Changes" (version 0x1533). Build outputs (`*.db`, `*.area`, `*.timing`, `*.bit`, `*.bin`) were left out. |
 | `tb/` | iverilog testbenches and reference models: `run.sh` (nine steps, `ONLY=ext/decim/fir/long/seg/trigpos/contract/encphase`), `tb_ext_trigger.v`, `tb_decim.v`, `tb_fir.v`, `tb_long.v`, `tb_seg.v`, `tb_trigpos.v`, `tb_seqcontract.v` (+ its transcript `contract_0x1538.txt`), `tb_encphase.v` + `encphase.sh`, `edge_phase.py`, `cic_model.py`, `seg_model.py`, `mutate_seg.py`, `sim_models.v` (behavioural PLL, sample memory, `AL_LOGIC_BRAM`). See "Changes". |
 | `out/` | Named bitstreams for the bench, gitignored (`*.bin`). Hashes are recorded in "Changes". |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the **stock** FNIRSI design (version 0x1432), TD 5.0.28716 project. Sources only (`source/`, `al_ip/`, `Original_1013D.al`); his prebuilt `.bit` was left out. Licence GPL-3.0 (`LICENSE-GPL3`, repo `pecostm32/Anlogic_AL3-10_Analyzing`). |
@@ -31,7 +31,7 @@ has been flashed from this folder.
 
 What I verified online (2026-10-18):
 
-- **Verified route (owner, 2026-10-18, took a few minutes):** create an account at anlogic.com, then
+- **Verified route (maintainer, 2026-10-18, took a few minutes):** create an account at anlogic.com, then
   Service Support -> Tools & Materials Download -> Software Tools -> **Licence** (download `license.zip`, it contains
   `Anlogic.lic`, valid about a year, `HOST_ID=ANY`), and Software Tools -> **TD Linux -> TD_4.6 ->
   `TD_4.6.8_SP1_116866_NL.zip`** (the exact version Atlan4's project was made with; the newer 5.x/6.x builds sat
@@ -92,7 +92,7 @@ bench notes, not ours). The `.bin` from TD's `bitgen -bin` is the raw flash imag
 - Its documented Anlogic support is the Lichee Tang board (bit file to SRAM or SPI flash). "Anlogic cable" support is on
   its to-do list. Raw writes at a flash offset exist (`-o`), but only through cables it supports.
 - TD's own JTAG programmer works (Donwulff: capped at 400 kbit/s) but needs an Anlogic-compatible USB-JTAG adapter.
-  Atlan4 ships an STM32F103 clone of `anlogic-usbjtag` for EF2. The owner's unit reads JTAG IDCODE 0x18006C31.
+  Atlan4 ships an STM32F103 clone of `anlogic-usbjtag` for EF2. The maintainer's unit reads JTAG IDCODE 0x18006C31.
 
 ### Recommendation
 
@@ -106,10 +106,10 @@ Both options need a valid licence file, which is the only real blocker. Atlan4's
 Donwulff's TD 5.0.3 rebuild met timing on `clk_200MHz` where Atlan4's shipped 4.6.8 report did not, and produced a
 same-size 282,898-byte `.bin`. Expect the `.bit` to differ by a few bytes, and the ADC encode skew to be build-dependent.
 
-### What the owner must do personally (licence)
+### What the maintainer must do personally (licence)
 
 1. Register a personal account at `https://www.anlogic.com` (English site, Support -> Tools & Downloads) and complete the
-   profile. Registration uses the owner's own contact details, so agents must not do it.
+   profile. Registration uses the maintainer's own contact details, so agents must not do it.
 2. In Tools & Downloads open the "TD License" entry and download `license.zip`. Read the expiry date in the `.lic`
    text (the `FEATURE` line) and the `HOST_ID` line.
 3. If the licence or the TD 5.x/6.x downloads show "permission is insufficient", email `web@anlogic.com` with the use case
@@ -122,7 +122,7 @@ Open question to settle with Anlogic: whether the licence covers AL3 devices, an
 
 ## Headless build flow (TD 5.0.3 draft; the working 4.6.8 flow is in TD_SETUP.md)
 
-One-time setup in WSL Ubuntu (`wsl -d Ubuntu`), following Donwulff's recipe in `D:\src\FNIRSI_1014D_Firmware\FPGA_NOTES.md`:
+One-time setup in WSL Ubuntu (`wsl -d <distro>`), following Donwulff's recipe in `D:\path\to\FNIRSI_1014D_Firmware\FPGA_NOTES.md`:
 
 ```bash
 mkdir -p ~/tools/anlogic-td && cd ~/tools/anlogic-td
@@ -138,7 +138,7 @@ done
 ldd ~/tools/anlogic-td/TD_5.0.3_28716_NL/bin/td | grep -i 'not found'
 ```
 
-Build, from `/mnt/d/src/fnirsi-1013d-ai/fpga/al3` (use a WSL-local build directory, `/mnt/d` is slow):
+Build, from `/mnt/d/path/to/fnirsi-1013d-mcp/fpga/al3` (use a WSL-local build directory, `/mnt/d` is slow):
 
 ```bash
 TD_HOME=~/tools/anlogic-td/TD_5.0.3_28716_NL TD_SHIM=~/tools/anlogic-td/shim ./build.sh ~/al3-build
@@ -220,11 +220,11 @@ Atlan4's EF2 variant uses a different pin map and is not in this folder.
 - `https://github.com/sipeed/sipeed_wiki/issues/690` (TD License route, six-month validity, stale Sipeed file)
 - `https://github.com/mmicko/prjtang` (`devices.json`, README), `https://github.com/YosysHQ/nextpnr` (himbaechel list), `https://github.com/YosysHQ/yosys` (`techlibs/anlogic`)
 - `https://trabucayre.github.io/openFPGALoader/vendors/anlogic.html` and `src/part.hpp` in `trabucayre/openFPGALoader`
-- Local: `research/notes/fpga-verilog-analysis.md`, `research/notes/repo-donwulff.md`, `D:\src\FNIRSI_1014D_Firmware\FPGA_NOTES.md` (TD rebuild sections), `D:\src\FNIRSI_1014D_Firmware\fpga\AL3_1014D\build.sh` and `build.tcl`
+- Local: `research/notes/fpga-verilog-analysis.md`, `research/notes/repo-donwulff.md`, `D:\path\to\FNIRSI_1014D_Firmware\FPGA_NOTES.md` (TD rebuild sections), `D:\path\to\FNIRSI_1014D_Firmware\fpga\AL3_1014D\build.sh` and `build.tcl`
 
 ## Rebuild results (2026-10-18, TD 4.6.8 SP1 V4.6.116866, WSL Ubuntu 24.04)
 
-Command: `wsl -d Ubuntu -- bash /mnt/d/src/fnirsi-1013d-ai/fpga/al3/build.sh`. Sources unchanged.
+Command: `wsl -d <distro> -- bash /mnt/d/path/to/fnirsi-1013d-mcp/fpga/al3/build.sh`. Sources unchanged.
 Synthesis, place and route, timing analysis and bitgen all succeed. Wall clock is 11 to 16 s for the whole flow.
 
 | Output | Bytes | sha256 | vs Atlan4's shipped file |
@@ -340,7 +340,7 @@ sample memory are behavioural models (`tb/sim_models.v`).
   EXT gate on the ADC trigger, the write-clock alignment, and the glitch filter. A fifth changed the ADC channel bit
   only for sources 2 and 3. It is behaviourally equivalent and passes.
 
-**Bench checks** (owner/coordinator; flash only with firmware that accepts 0x1533):
+**Bench checks** (maintainer / bench session; flash only with firmware that accepts 0x1533):
 1. Measure the input impedance at the probe-comp terminal with the generator off (0x50 = 0): resistance to GND
    and to 3V3, and the series resistance to P133 if reachable. This tells how strongly an external source must
    drive the pin and whether a 5 V source needs a divider.
@@ -358,7 +358,7 @@ sits on the front end's virtual ground VRF1, about +1.24 V above it. An EXT sour
 scope's digital ground, or shifted down by about 1.2 V. This section replaces an earlier inference of a series coupling
 capacitor, which the 0.1 Hz measurement disproved.
 
-**Measured** (coordinator, 2026-10-18; fw 0.2.11, FPGA 0x1532, CH1 x1 probe on the post, DC coupling, generator on):
+**Measured** (bench session, 2026-10-18; fw 0.2.11, FPGA 0x1532, CH1 x1 probe on the post, DC coupling, generator on):
 
 | Setting | Result |
 |---|---|
@@ -369,7 +369,7 @@ capacitor, which the 0.1 Hz measurement disproved.
 No series capacitor: anything below about 1000 µF into the 1 MΩ input would droop visibly in 4 s. The swing is the full
 logic swing, offset by about -1.1 V relative to the probe ground.
 
-**Schematic** (pecostm32 EasyEDA file `D:\src\FNIRSI-1013D-1014D-Hack\Schematics\1013D\EASYEDA\SCH_Scope 1013D_2023-01-07.json`,
+**Schematic** (pecostm32 EasyEDA file `D:\path\to\FNIRSI-1013D-1014D-Hack\Schematics\1013D\EASYEDA\SCH_Scope 1013D_2023-01-07.json`,
 traced with a netlist script):
 - **Calibration path** (sheet Scope_Data_Acquisition): FPGA U3 pin 133, then R21 (1 kΩ, 0805), then the net port
   `1KHZ_CALIB_SIG`. The port occurs once, so the run from R21 to the front-panel post is not drawn. The 0.1 Hz result
@@ -447,7 +447,7 @@ pull-down, value not documented, probably tens of kΩ. The path from the post to
   wiring connected before power-up. For regular use, put a TVS or a BAT54S clamp on the source side.
 
 **(c) Recommended bench tests**
-0. **Owner's DMM tests** (already requested; predictions from the schematic):
+0. **Maintainer's DMM tests** (already requested; predictions from the schematic):
    - BNC shell to USB shell, scope on, on battery, USB unplugged: **+1.2 to +1.25 V** (VRF1, forum 1.233 V).
    - Post to BNC shell with the generator at 0.5 Hz: alternating about -1.24 V and about +1.9 to +2.0 V. Post to USB
      shell: about 0 and about 3.1 V.
@@ -634,7 +634,7 @@ Header words as before: `cc55aa33 f0000006 18006c31`, user code 0x0056.
 Seeds 1 to 10, 77, 1234 and 99999 all pass. Mutation runs (`DUT=` override) fail as they should; the list of variants
 is in `AGENTS.md`.
 
-**Bench checks** (owner/coordinator; needs firmware that knows 0x1534, and never flash without the verified stock dump):
+**Bench checks** (maintainer / bench session; needs firmware that knows 0x1534, and never flash without the verified stock dump):
 1. K = 0 regression: as for 0x1533, including EXT. The ADC capture path now has a 2-input mux in front of the BRAM, and
    the netlist was re-placed. Look for glitches on a 10 to 30 MHz sine at 200 MSa/s.
 2. Capture window: K = 1, D = 1 (N = 2, 100 MSa/s) on a slow ramp or a 100 kHz sine. Compare out / 2 with the K = 0 A
@@ -654,7 +654,7 @@ is in `AGENTS.md`.
 
 ### 4. Design study: CIC compensation FIR (built as 0x1535, section 5)
 
-Owner direction: the default acquisition mode should become CIC plus a compensation FIR. 0x1534 stays frozen; this
+Maintainer direction: the default acquisition mode should become CIC plus a compensation FIR. 0x1534 stays frozen; this
 section is a design study (`tb/fir_design.py report`, numpy only, 18-bit quantised taps).
 
 **Where the FIR goes decides what it can do.**
@@ -913,7 +913,7 @@ Deterministic: two builds in different work dirs gave the same hash. Header word
 | 12 | delay line shifts one clock early (`dec_sv[5]`) | model, EXT lag |
 | 13 | half strobe gated by `fir_en` instead of `fir_act` | phase 1 and 4 equivalence |
 
-**Bench checks** (owner/coordinator; needs firmware that knows 0x1535 and 0x56; never flash without the verified stock
+**Bench checks** (maintainer / bench session; needs firmware that knows 0x1535 and 0x56; never flash without the verified stock
 dump):
 1. FIR off: repeat the 0x1534 checks 1 and 4 (section 3), plus 0x29 bits 6/5 = 0.
 2. Passband: K = 3, N = 100 (2 MSa/s), FIR on. Sweep a sine from 50 kHz to 500 kHz (fo/4) and compare the amplitude
@@ -1163,7 +1163,7 @@ EXT paths alike), so the last untriggered edge before a trigger is always an out
 documentation of the intent. Mutants 7 and 8 do not fail a check directly; they hang their run until the poll limit,
 which costs about 5 minutes each.
 
-**Bench checks** (coordinator with the owner; needs firmware that knows 0x1536; never flash without the verified
+**Bench checks** (bench session with the maintainer; needs firmware that knows 0x1536; never flash without the verified
 stock dump):
 1. **Modes off.** Repeat the 0x1535 checks (sections 3 and 5): legacy at 200 MSa/s, CIC, FIR, EXT, plus
    0x2A byte 0 = 0. The sample memory address now goes through the remap LUT.
@@ -1392,7 +1392,7 @@ change by under 0.1 sample.
 Header words as before (`cc55aa33 f0000006 18006c31`), user code 0x0056. **Not flashed.** A firmware that knows 0x1536
 runs it unchanged (AL3 family decode, protocol.md section 5.1).
 
-**Bench checks** (with the owner; never flash without the verified stock dump). 0x1537 was flashed on 2026-10-19 and
+**Bench checks** (with the maintainer; never flash without the verified stock dump). 0x1537 was flashed on 2026-10-19 and
 showed the CH2 A fault of section 8; run these on 0x1538 together with section 8's checks:
 1. T3 / T4 / T5:
    - the dummy-strobe lag;
@@ -1529,7 +1529,7 @@ showed the CH2 A fault of section 8; run these on 0x1538 together with section 8
 
 **Not flashed.** A firmware that knows 0x1536/0x1537 runs it unchanged (AL3 family decode). Reading 0x33 is optional.
 
-**Bench checks** (with the owner; never flash without the verified stock dump):
+**Bench checks** (with the maintainer; never flash without the verified stock dump):
 1. 0x06 reads 0x1538; 0x33 reads 0xF6 after a capture at 200 MSa/s.
 2. The bench run above (divider 0, 1000+ back-to-back captures, no writes): no capture with any core's std above 5,
    and 0x33 = 0xF6 after each one.
@@ -1624,7 +1624,7 @@ showed the CH2 A fault of section 8; run these on 0x1538 together with section 8
 **Firmware**: none needed. fw 0.2.62 and later decode 0x1539 as AL3 with the features of 0x1538 (`pc_cmds.c`,
 `enc_heal.c`). Calibration taken on 0x1537 / 0x1538 with outliers in it should be redone on 0x1539.
 
-**Bench checks** (with the owner; never flash without the verified stock dump):
+**Bench checks** (with the maintainer; never flash without the verified stock dump):
 1. 0x06 reads 0x1539; 0x33 reads 0xF6 after a 200 MSa/s capture.
 2. The fw 0.2.67 diagnostics run that failed: means near 128 and at the two-point zero (about 116 / 140), every core,
    ranges 0..5: no outliers, RMS as the clean cores (0.5..1.4).
@@ -1777,14 +1777,14 @@ The firmware's `pc_decim_ext_shift` (lag4) and the legacy EXT table must follow 
 **Not flashed.** A firmware that knows 0x1539 runs it unchanged apart from the EXT offsets; the capture registers are
 optional (the power-on stages are the computed ones).
 
-**Bench checks** (with the owner; never flash without the verified stock dump; fw 0.2.69 or later):
+**Bench checks** (with the maintainer; never flash without the verified stock dump; fw 0.2.69 or later):
 1. 0x06 reads 0x153A; 0x33 reads 0xF6 after a 200 MSa/s capture; 0x36 reads 0x08E4 then four zero counters after a
    capture with nothing connected.
 2. The dcoffset sweep at 200 MSa/s, range 0 (the 20:25 test): every core clean at every mean, in particular 126..146
    (no 0 / 255, std about 1); the same at 100, 50 (D = 3) and 20 MSa/s.
 3. The RC low-pass with the 1 kHz square (the 20:43 test): no rails, no jumps over 40 codes on any core; the on-device
    Frequency response sweep unflagged.
-4. The calibration wizard with the zero point back at 128 (the owner's fail-fast decision) passes on both channels.
+4. The calibration wizard with the zero point back at 128 (the maintainer's fail-fast decision) passes on both channels.
 5. Training: at a quiet input at 128, for each core stages 3 and 4 give zero counters, 2 or 5 may, 0 and 1 give about
    every word; the trained value equals or neighbours 0x08E4. Also try bit 12 / 13: both B cores must count about
    every word with the A-encode reference (align-off confirmed) or be clean (align-on: then the schematic note was
@@ -1941,7 +1941,7 @@ Capture margins (`tb/capture_report.sh`, TT): CH1 A 1.73 ns at stage 4 (stage 3 
 the wizard's training must be repeated after flashing (the unit's 0x153A value 0x08E3 may not be the best for this
 build). `dist/al3-0x153B.bin` sha256 `fdc3c21b57341b0774e8a5e58df04e38d1d223fb7c354b6ed49f5892f711fc3d`, flash image
 (`build/FPGA_padded.bin`, 1 MiB) `1391978c33379271789a9405f7b0fb9395a85e223ecc69a0430b9f2859a23b88`. **Not flashed**;
-the coordinator pins both in `backups/` first.
+the bench session pins both in `backups/` first.
 
 **Bench 2026-10-20 19:31-20:03 (fpga-gen13's reading of the evidence; `docs/hardware-status.md` 19:52).** 0x153B was flashed
 (verified `1391978c...3b88`), the wizard retrained the stages to 0x08E4 with the inputs open, and the host checks that followed
@@ -1967,7 +1967,7 @@ total 6000, 16-bit, the force after 1.37 rings and a CH1 trigger, READ_RAW's spl
 newest 6000 words, the trigger crossing at the pretrigger (85 checks, 0 errors on seeds 12345 and 4242). **The bitstream is unchanged; 0x153B stays unbenched** until the
 checks below are run with the probe on the post. Check 0 below is the lesson.
 
-**Bench checks** (owner with the coordinator; FEL load of a firmware that detects 0x153B, flash per "Flashing this unit"
+**Bench checks** (maintainer with the bench session; FEL load of a firmware that detects 0x153B, flash per "Flashing this unit"
 after pinning the images in `backups/`):
 0. The signal is there before anything is judged: after the wizard (inputs open) put the probe back on the post, and for
    every record check the amplitude first (a 1 kHz square from the generator on CH1 at range 3 spans about 178 codes peak
@@ -1977,7 +1977,7 @@ after pinning the images in `backups/`):
    bode_cells.py prints `NO TONE` for a toneless record.
 1. Identity: `#VER` fpga=0x153B; the Scope view runs, triggers and averages as on 0x153A (the capture stages are the
    same; 0x36 self-check 0 on a quiet trace).
-2. The bench fault: `python firmware/tools/bode_cells.py COM10` on the RC as on 2026-10-20 12:32, then the two-segment
+2. The bench fault: `python firmware/tools/bode_cells.py <port>` on the RC as on 2026-10-20 12:32, then the two-segment
    fit (fpga-gen11's `splice.py` pattern, or the host's leak figure): every "auto" record clean (leak below -60 dB,
    |H| within 0.01 dB of the "host" variant); on 0x153A 15 of 32 were spliced.
 3. Scope view, auto mode, trigger marker above the signal, generator 1 kHz on CH1 at 1 MSa/s: 50 untriggered traces
@@ -1992,7 +1992,7 @@ after pinning the images in `backups/`):
 
 ## Device facts from the datasheet
 
-Source: Anlogic "AL3 series FPGA datasheet" DS001 v1.3 (Sept 2017, Chinese, owner's download `AL3A10LG144.pdf`, 84 pages).
+Source: Anlogic "AL3 series FPGA datasheet" DS001 v1.3 (Sept 2017, Chinese, maintainer's download `AL3A10LG144.pdf`, 84 pages).
 Page numbers are PDF pages. Details and the configuration-pin analysis: `docs/fpga-flash-from-mcu.md`, "Datasheet check".
 
 | Item | AL3A10 (TQFP144 `LG144`) |
@@ -2003,7 +2003,7 @@ Page numbers are PDF pages. Details and the configuration-pin analysis: `docs/fp
 | Multipliers | 3 x M18x18 (simple multiplier only, no full DSP) |
 | PLLs / global clocks / I/O banks | 2 / 16 / 8 |
 | User I/O on TQFP144 | 91, with 32 LVDS pairs (p.7); the 184 figure in table 1-1 is the BGA256 |
-| IDCODE | not given in the datasheet; 0x18006C31 comes from prjtang and the owner's JTAG read |
+| IDCODE | not given in the datasheet; 0x18006C31 comes from prjtang and the maintainer's JTAG read |
 | LVCMOS33 / LVTTL33 input | VIL max 0.8 V, VIH min 1.9 V, up to VCCIO+0.3 V (p.63); optional hysteresis 250 or 450 mV (p.62) |
 | Overvoltage | absolute maximum input 3.75 V, recommended maximum 3.6 V; clamp figure only "PCI-clamp 25 mA" (p.59-60) |
 | Weak pull-up / pull-down | 35 to 250 uA, so about 13 to 94 kOhm at 3.3 V [inference] (p.62) |

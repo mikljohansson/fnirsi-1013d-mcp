@@ -6,9 +6,9 @@ Thread URL: https://www.eevblog.com/forum/testgear/fnirsi-1013d-100mhz-tablet-os
 Naming used by posters: "PECO"/"Peco" = pcprogrammer's open-source firmware lineage; "Atlan & PECO" = the community firmware Atlan continues. "FNIRSI/OEM" = stock.
 
 ## 1. Main actors and state of the project
-- pcprogrammer (Netherlands): wrote the original open-source firmware and did the hardware RE. Only occasional hardware advice in this slice [p123, p137, p140-p142, p148, p150, p154].
-- Atlan (Slovakia): sole active firmware plus FPGA developer in this slice. Maintains GitHub Atlan4/Fnirsi1013D. Firmware lines: 0.26x (to Aug 2025), 0.27x (Nov 2025), then 1.00x with custom FPGA (Dec 2025 onward).
-- ObsoleteDIY (Slovakia): from Jan 2026 modifies the EF2L45 FPGA Verilog (zaklad.v) and tests trigger logic. Atlan said he has worked on the FPGA about a year and a collaborator recently joined [p146, Atlan #3646]; "one person works on the FPGA" [p153, Atlan #3808].
+- pcprogrammer: wrote the original open-source firmware and did the hardware RE. Only occasional hardware advice in this slice [p123, p137, p140-p142, p148, p150, p154].
+- Atlan: sole active firmware plus FPGA developer in this slice. Maintains GitHub Atlan4/Fnirsi1013D. Firmware lines: 0.26x (to Aug 2025), 0.27x (Nov 2025), then 1.00x with custom FPGA (Dec 2025 onward).
+- ObsoleteDIY: from Jan 2026 modifies the EF2L45 FPGA Verilog (zaklad.v) and tests trigger logic. Atlan said he has worked on the FPGA about a year and a collaborator recently joined [p146, Atlan #3646]; "one person works on the FPGA" [p153, Atlan #3808].
 - End state (p155, Oct 2026): DSO firmware v1.00q2 (May 2026) is the latest documented; FPGA versions 2014/2015 (EF2), 3014/3015 (AL3), 2017/3017 mentioned for dual-channel trigger. Hold-off, FFT (disabled in 1.00 line), roll mode not implemented.
 
 ## 2. Hardware

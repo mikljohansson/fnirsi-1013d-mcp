@@ -1,12 +1,12 @@
 # Collaborative mode: shared control between the scope UI and the MCP host
 
-Status: approved by the owner 2026-10-18. Replaces the exclusive LOCAL/REMOTE model entirely: there is one
+Status: approved by the maintainer 2026-10-18. Replaces the exclusive LOCAL/REMOTE model entirely: there is one
 behaviour, no modes. Host connected = shared control.
 Implement after the request-corruption bug (firmware/AGENTS.md known issues) is fixed.
 
 ## Goal
 
-The owner and the agent use the scope at the same time. Either side may change settings; the other side
+The maintainer and the agent use the scope at the same time. Either side may change settings; the other side
 sees the change. The agent reads what is on the screen or asks for its own single capture, which the screen
 then shows. A small indicator shows that a host is connected. There is no lock and no banner.
 
@@ -27,7 +27,7 @@ then shows. A small indicator shows that a host is connected. There is no lock a
      presses RUN again (host: a RUN/STOP control in SET_ACQ_STATE or an existing command).
    - WAIT and the DONE/trigger_addr semantics are unchanged.
 4. **Indicator.** A green "MCP" chip drawn over/next to the RUN/STOP chip in the top bar while a host session
-   is active (DTR up, or traffic within the last 2 s). Steady, no pulsing or blinking on traffic (owner decision
+   is active (DTR up, or traffic within the last 2 s). Steady, no pulsing or blinking on traffic (maintainer decision
    2026-10-18). Use the existing chip drawing helpers in menu.c; keep it under 60 px wide.
 5. **No lock.** Long scripted runs (e.g. averaging) tag every capture with the settings it was taken under
    (timebase index/divider, ranges, trigger). If a capture's settings differ from the run's, the server
@@ -55,9 +55,9 @@ then shows. A small indicator shows that a host is connected. There is no lock a
 
 ## Acceptance (bench)
 
-- Owner changes timebase on the touch screen; GET_TIMEBASE reflects it within one UI pass.
+- Maintainer changes timebase on the touch screen; GET_TIMEBASE reflects it within one UI pass.
 - Host SET_CHANNEL range; screen shows the new V/div, relay clicks once.
 - RUN mode: READ_TRACE returns the displayed trace (compare with a screenshot or the on-screen measurements).
 - Host single capture appears on screen; UI shows STOP; RUN resumes from either side.
-- Owner changes the range during an averaged_capture run: the tool reports the restart.
+- Maintainer changes the range during an averaged_capture run: the tool reports the restart.
 - MCP chip visible while the server is connected, gone 2 s after disconnect.

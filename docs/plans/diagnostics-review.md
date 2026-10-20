@@ -1,8 +1,8 @@
 # Adversarial review: diagnostics redesign, settings placement and the menu tree
 
-Reviewer brief (coordinator, 2026-10-19): an independent, sceptical electrical-engineering review of the diagnostics
+Reviewer brief (bench session, 2026-10-19): an independent, sceptical electrical-engineering review of the diagnostics
 redesign proposal (artboards "Diagnostics", "Calibration detail" and "Current" of the design artifact linked from
-`docs/plans/task-queue.md`, item "Diagnostics view redesign"), the owner's settings question and the device's menu tree.
+`docs/plans/task-queue.md`, item "Diagnostics view redesign"), the maintainer's settings question and the device's menu tree.
 Every claim about what the firmware can report cites the file or protocol row that was checked. Inferences are marked.
 
 Sources read: the three artboards; `docs/hardware-status.md` 2026-10-18 late evening to 2026-10-19 11:25;
@@ -87,7 +87,7 @@ warnings). Rules:
 | Calibration | v3, bound, gains measured, FPGA word unchanged since calibration | not bound, gains missing, FPGA word changed, calibrated before 5 minutes of warm-up | no calibration (v1): "Uncalibrated: readings may be several % off; run Calibrate" |
 | Battery | level >= 4 of 20 or charging | level < 4: "Low battery: readings and SD writes may fail" (inference: the 1.00o5 code treats the bottom of the scale as end of operation) | |
 
-Owner decision 2026-10-20 18:12 (fw 0.2.100), superseding the Restarts row: OK = everything normal, Check = something to
+Maintainer decision 2026-10-20 18:12 (fw 0.2.100), superseding the Restarts row: OK = everything normal, Check = something to
 fix at some point, Fault = something critically bad. Only a real exception (types 1..6) is a crash; a deliberate restart
 (type 0, a jump to the image entry: a FEL load, Enter FEL, an update, a self-restart) is normal. OK "No crashes." "Up 27
 min."; Check, a stored record of a crash before this run: "Crashed once before this run: data abort." "If it happens
@@ -115,7 +115,7 @@ a second unit has been measured.
 | Class gain ratio, full / gated | % from 1 | <= 2 % | > 2 % | firmware rejects outside 0.9..1.1 (row 51); measured 1.1 % |
 | Noise RMS, gated / full | code | <= 0.3 / <= 1.0 | above | stored 0.13 / 0.75 on CH1; the mockup's CH2 2.1 would be "Check" |
 
-Owner decision 2026-10-20 18:13 (fw 0.2.100), superseding the noise row: the noise rows measure the calibration's
+Maintainer decision 2026-10-20 18:13 (fw 0.2.100), superseding the noise row: the noise rows measure the calibration's
 open-input condition, so their limits are the zero step's own, "Noise RMS, inputs open", gated 1.0 code, full rate 3.0
 codes (`adc_cal.h` `ACAL_MAX_NOISE16_*`, used by the wizard and Diagnostics). Bench, stored worst range per core: full
 CH1 B 1.19, CH2 A 2.75 codes (5 V/div, the high-impedance ranges the worst; 0.5..0.6 from a low-impedance source),
@@ -316,7 +316,7 @@ with its features; settings loaded from the card or defaults used; calibration m
 after the scope has been on for 5 minutes. It takes about two minutes and needs both probes and the calibration
 post."; and two buttons, "Calibrate now" and "Later". "Later" goes to the scope view, where an amber "Uncalibrated"
 chip stays in the top bar until a calibration is bound. Its tap opens Diagnostics. Nothing else is asked at first run:
-the defaults (CIC2 plus FIR where available, owner-verified 11:00) are the right ones for a new user.
+the defaults (CIC2 plus FIR where available, maintainer-verified 11:00) are the right ones for a new user.
 
 ## 4. Firmware readers the redesign needs that do not exist
 
@@ -351,15 +351,15 @@ checks (SD_INFO, row 40), caps. Missing, verified against the rows and sources a
 
 Not a reader but a prerequisite for findings 4 and 12: Diagnostics as a main-loop display mode instead of a modal loop.
 
-## Owner decisions 2026-10-20 (Restarts tile, noise limits)
+## Maintainer decisions 2026-10-20 (Restarts tile, noise limits)
 
-- 18:12 **(owner)**: verdict meanings: OK = everything is normal; Check = a warning, something to fix at some point; Fault =
+- 18:12 **(maintainer)**: verdict meanings: OK = everything is normal; Check = a warning, something to fix at some point; Fault =
   something critically bad. A deliberate restart (a firmware load over FEL, Enter FEL, an update: exception type 0 "jump to
   the entry") is normal and must not give Check: the Restarts tile reads OK "No crashes. Up 27 min." and does not mention it.
   Check = an earlier run this power-on crashed: "Crashed once before this run: data abort. If it happens again, save a
   report. Up 27 min." Fault = a crash in this run: "Crashed 2 times this run: data abort at 0x80014A2C. Details on the Log
   page." No exception jargon ("jump to the entry", "LR") on the Status page; the Log page keeps the details.
-- 18:13 **(owner)**: the noise rows use the limits of the condition the wizard measures (inputs open): full rate 3.0 codes
+- 18:13 **(maintainer)**: the noise rows use the limits of the condition the wizard measures (inputs open): full rate 3.0 codes
   RMS (the wizard's own pass criterion), gated 1.0 code, labelled "Noise RMS, inputs open"; the same limits and words on the
   Status page, the Calibration tab and in the wizard's pass / fail text; the "limits are provisional" note goes. Bench
   2026-10-20 18:1x: the stored open-input full-rate noise is 1.19 (CH1 B, 5 V/div) and 2.75 (CH2 A, 5 V/div) codes, the

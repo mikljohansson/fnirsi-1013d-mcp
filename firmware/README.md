@@ -19,7 +19,7 @@ Toolchain in WSL Ubuntu 24.04 (installed 2026-10-18):
 | Atlan's toolchain for v1.00o5 (ELF `.comment`) | GCC 10.3.1 `15:10.3-2021.07-4` (Ubuntu 22.04 package) |
 
 ```
-wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/firmware/scope && make -j"
+wsl -d <distro> -- bash -lc "cd /mnt/d/path/to/fnirsi-1013d-mcp/firmware/scope && make -j"
 ```
 
 Outputs in `firmware/scope/build/`:
@@ -92,7 +92,7 @@ bug, and GCC 14 makes it an error by default.
 
 - **Byte-identical with Atlan's toolchain (history, up to 0.2.46).** `make check-reference` built with
   `PC_PROTOCOL=0` (section 5), which proved that the protocol hooks left the base untouched when disabled.
-  The owner dropped that rule on 2026-10-18 and 0.2.47 removed the target and the switch; the CI logs up to
+  The maintainer dropped that rule on 2026-10-18 and 0.2.47 removed the target and the switch; the CI logs up to
   that date hold the proof. It built with GCC 10.3.1 from
   `tools/fetch_gcc10.sh`. That script downloads the jammy `.deb`s over https, checks each against a
   pinned sha256, and unpacks them into `~/opt/gcc10` without installing them: binutils 2.38 and newlib
@@ -298,13 +298,13 @@ loads a new image into RAM and waits for it to come back on the serial port:
 
 ```
 mcp/.venv/Scripts/fnirsi1013d-flash.exe                                   # default image build-gcc10-pc/fnirsi_1013d.bin
-mcp/.venv/Scripts/fnirsi1013d-flash.exe --image firmware/scope/build/fnirsi_1013d.bin --port COM10
+mcp/.venv/Scripts/fnirsi1013d-flash.exe --image firmware/scope/build/fnirsi_1013d.bin --port <port>
 mcp/.venv/Scripts/fnirsi1013d-flash.exe --no-fel                          # already in FEL (boot menu)
 ```
 
 It runs `#VER` and GET_INFO, sends ENTER_FEL (without the capability it asks for the boot menu instead), polls
 `usbipd list` for `1f3a:efe8`, attaches it with `usbipd attach --wsl --busid <id>`, runs
-`wsl -d Ubuntu -u root -- sunxi-fel version` and the `-p write 0x7FFFFFE0 <image> exe 0x80000000` load (the
+`wsl -d <distro> -u root -- sunxi-fel version` and the `-p write 0x7FFFFFE0 <image> exe 0x80000000` load (the
 image path converted to `/mnt/d/...`), then waits for 1209:0001 and prints its `#VER`. Each step is printed with
 its time; the exit code is non-zero on failure (2 image, 3 scope port, 4 FEL device / usbipd, 5 sunxi-fel,
 6 the port did not come back). The FEL device must have been shared once from an admin shell
@@ -321,8 +321,8 @@ its time; the exit code is non-zero on failure (2 image, 3 scope port, 4 FEL dev
   usbipd list                                   # find 1f3a:efe8 and its BUSID
   usbipd bind --busid <BUSID>                   # once
   usbipd attach --wsl --busid <BUSID> --auto-attach
-  wsl -d Ubuntu -u root -- sunxi-fel version
-  wsl -d Ubuntu -u root -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/firmware/scope && make fel"
+  wsl -d <distro> -u root -- sunxi-fel version
+  wsl -d <distro> -u root -- bash -lc "cd /mnt/d/path/to/fnirsi-1013d-mcp/firmware/scope && make fel"
   ```
 
   Run as root, or use `make fel SUNXI_FEL="sudo sunxi-fel"`, because WSL normally does not apply
@@ -332,9 +332,9 @@ its time; the exit code is non-zero on failure (2 image, 3 scope port, 4 FEL dev
   build of sunxi-fel or xfel. Do not mix the two approaches on the same device, because a bound
   usbipd device is not visible to Windows tools.
 
-On the owner's unit, FEL entry from the boot menu, `sunxi-fel version` through usbipd, and a FEL
+On the maintainer's unit, FEL entry from the boot menu, `sunxi-fel version` through usbipd, and a FEL
 RAM load of the v1.00o5 scope image (`sunxi-fel -p write 0x7FFFFFE0 scope.bin exe 0x80000000`)
-were verified on 2026-10-18 (`docs/hardware-status.md`). Hardware steps are done by the owner.
+were verified on 2026-10-18 (`docs/hardware-status.md`). Hardware steps are done by the maintainer.
 
 ## 5. PC control protocol (USB CDC)
 
@@ -414,12 +414,12 @@ Hooks in the 1.00o5 code (up to 0.2.46 all under `#if PC_PROTOCOL`, since 0.2.47
 
 ### Removed and hidden menu options (fw 0.2.6, removal fw 0.2.47)
 
-Owner policy: the UI offers only what the running hardware can do, and what the 1013D can never do is removed in
-code, not hidden (owner, 2026-10-18). Removed in 0.2.47 (settings sector and waveform file slots stay, written 0):
+Maintainer policy: the UI offers only what the running hardware can do, and what the 1013D can never do is removed in
+code, not hidden (maintainer, 2026-10-18). Removed in 0.2.47 (settings sector and waveform file slots stay, written 0):
 the generator's Wave (SQUR / SINE / TRGL), Ampl, Offset and Phase rows (no DAC: the generator is the FPGA's DDS
 square wave on the calibration pin; 1.00o5 never sent them anywhere), the trigger Hold off row (never sent to the
 FPGA), Long memory (1.00o5 forced it off; its main-loop branch was empty) and the channel menus' FFT switch
-(1.00o5 stored `fftenable` and drew nothing). The menus are compact (owner: no gaps; generator 3 rows, 169 px:
+(1.00o5 stored `fftenable` and drew nothing). The menus are compact (maintainer: no gaps; generator 3 rows, 169 px:
 Power, Freq, Duty; trigger 5 rows, 280 px; channel menus: Invert, Coupling and V/A one row up, the empty slot above
 Probe mode, the box keeps its height for the V/div column); `*_MENU_HEIGHT` in `variables.h` also sizes the
 screen save/restore and the touch area. What depends on the running hardware is hidden per item (touches ignored;
@@ -465,7 +465,7 @@ read 0x29. Latency 120 ns pin to memory for every K and N, the sample centred K 
 divider D, so the odd dividers of `sample_rate_settings` give the same rates as before; the FPGA stores
 min(65535, y >> S), y = filter output with gain N^K. On 0x1532/0x1533 none of this is written (caps bit 15 DECIM).
 
-Filter per mode (fw 0.2.64, owner): the Scope view defaults to CIC2 without the FIR (the FIR's 6-9 % step overshoot
+Filter per mode (fw 0.2.64, maintainer): the Scope view defaults to CIC2 without the FIR (the FIR's 6-9 % step overshoot
 pulses on a square wave), the Spectrum view to CIC2+FIR. Each mode keeps its own setting (`pc_dec_set_mode[2]`,
 `PC_DECIM_DEFAULT_SCOPE` / `_SPEC` in pc_decim.h): settings word 207 the Scope's, word 212 (0xD500 marker) the
 Spectrum's. The Filter box, the arm and SET_DECIM / GET_DECIM act on the mode on screen. A 0.2.30..0.2.63 sector with
@@ -656,7 +656,7 @@ conversion between DC and Nyquist is assembly too: one LDRD per bin, the log2 ta
 the window norm, shift and dBV offset folded into one 64-bit constant, so 3 accesses per bin instead of about 9
 (byte-identical to the C twin, including the clamps; DC and Nyquist stay in C).
 
-**With the MMU and D-cache on (fw 0.2.48, `pc_mmu.c`).** FFT_BENCH on the owner's unit, 2026-10-19 08:10 (CP15
+**With the MMU and D-cache on (fw 0.2.48, `pc_mmu.c`).** FFT_BENCH on the maintainer's unit, 2026-10-19 08:10 (CP15
 control word 0x0005107D: MMU, D-cache and I-cache on; `docs/hardware-status.md`), MMU off -> on, buffers in DDR:
 
 | Points | MMU off | MMU on |
@@ -758,7 +758,7 @@ Settings screen has it; x 696 before 0.2.63).
   calibration not possible" on the stock bitstream), four tiles with a verdict word and up to five lines (13 px, 15 px
   apart, fw 0.2.100): Firmware (OK
   when the card starts the running image, Check "Running X from RAM. A power cycle starts Y from the card.", no open
-  firmware at sector 750, no card), Restarts (fw 0.2.100, owner 2026-10-20: crashes only, exception types 1..6; a
+  firmware at sector 750, no card), Restarts (fw 0.2.100, maintainer 2026-10-20: crashes only, exception types 1..6; a
   deliberate restart, type 0 "jump to the entry" (a FEL load, Enter FEL, an update, a self-restart), is normal. OK "No
   crashes." "Up 1 h 42 min."; Check, a stored record of a crash before this run: "Crashed once before this run: data
   abort." "If it happens again, save a report." "Up ..."; red Fault, counter 49 > 0 with a real exception in 50:
@@ -1001,13 +1001,13 @@ Where the controls of 1.00o5's Other settings menu went (the menu is gone):
 
 ### Screens: UI polish batch 2 (fw 0.2.68)
 
-The owner's walk-through of 0.2.65 (2026-10-19 18:00). What changed:
+The maintainer's walk-through of 0.2.65 (2026-10-19 18:00). What changed:
 
 - RUN/STOP: one run state (`ui_run_view`, ui_ctrl.h) for the top bar chip and the right bar button. It is the UI's
   run state, its single-shot wait, and a host acquisition in progress: a host ARM armed or triggered, or one that
   finished less than 1 s ago, so a burst of host captures (averaging, a Bode sweep) reads RUN instead of flickering.
   The chip shows the state (green RUN, orange WAIT for an armed single, red STOP). The button shows the action a tap
-  does (owner, reverses 0.2.63): green "RUN" while stopped, red "STOP" with white text while running or waiting (an owner
+  does (maintainer, reverses 0.2.63): green "RUN" while stopped, red "STOP" with white text while running or waiting (an maintainer
   exception to red-is-destructive, `docs/ui-guidelines.md` section 3). Every main-loop pass redraws whichever of the two
   shows a stale state (`pc_run_follow`), whoever changed it: the screen, a finished single shot, the host's RUN, STOP or
   ARM. STOP during a host acquisition aborts the host single (its WAIT answers E_ABORTED) and the UI stays stopped
@@ -1032,7 +1032,7 @@ The owner's walk-through of 0.2.65 (2026-10-19 18:00). What changed:
 
 ### Screens: UI polish batch 1 (fw 0.2.63)
 
-The owner's walk-through of 0.2.59 (`docs/plans/task-queue.md` "UI polish batch 1", items a-q). The sections above say
+The maintainer's walk-through of 0.2.59 (`docs/plans/task-queue.md` "UI polish batch 1", items a-q). The sections above say
 what each screen does; this is what changed:
 
 - Main menu icons: Settings was a drawn cogwheel (replaced by the Other settings spanner in 0.2.68), Scope one period of
@@ -1082,7 +1082,7 @@ what each screen does; this is what changed:
 
 A touch becomes a drag after 6 px (`TOUCH_DEAD_BAND`); a lift inside that within 250 ms is a tap. Handles (pointers,
 slider, trigger level) never tap; on a trace or cursor a tap counts only when the finger moved 2 px or less. Taps on
-the empty plot keep 1.00o5's bands (owner), contiguous now (`touch_tap_zone`): left / right half (x < 358 / > 362),
+the empty plot keep 1.00o5's bands (maintainer), contiguous now (`touch_tap_zone`): left / right half (x < 358 / > 362),
 y 50..99 V/div one step more sensitive, y 100 up to the lower band time/div slower / faster, the lower band (80 rows)
 V/div less sensitive. The lower band ends at the grid's bottom (449) or at the top of that half's measurement cards
 (rows of three from y 426, 24 px pitch); on the slider row only the jump above. A channel drag moves the trigger level on that
@@ -1099,7 +1099,7 @@ The trace is a window onto the record: 50 px per division over columns 3..726, t
 `host_tests/test_tb_view.c`) derives from the real record length (`fpgasettings.totalsamples` x sample period):
 
 - a time/div is **viable** at a rate when the record spans the 724 px trace area and a division holds at least ten
-  samples (fw 0.2.69, owner: one sample per division drew a wobbling interpolated edge; 200 MSa/s now reaches 50 ns/div,
+  samples (fw 0.2.69, maintainer: one sample per division drew a wobbling interpolated edge; 200 MSa/s now reaches 50 ns/div,
   and 20, 10 and 5 ns/div snap to 50 ns/div; at 3000 samples: up to 207 samples/div, so 200 MSa/s reaches 1 us/div;
   15000 samples reach 5 us/div);
   1.00o5's hand-written `viable_time_per_div` table is gone (it offered 250 samples/div, a record shorter than the
@@ -1186,7 +1186,7 @@ start, ref, scale, sample rate, channel), so a view never mixes axes; in STOP th
 rows are stored as RGB565 (drawn with memcpy bursts) and the counts as words with zero words skipped, since before the
 MMU (0.2.48) every uncached pixel access cost about 90 cycles. Memory: 484 KB waterfall + 726 KB density (.bss).
 
-Axis cap (fw 0.2.36, owner): the view shows at most `PC_SPECTRUM_FMAX_HZ` = 25 MHz (spectrum.h), or fs/2 when that
+Axis cap (fw 0.2.36, maintainer): the view shows at most `PC_SPECTRUM_FMAX_HZ` = 25 MHz (spectrum.h), or fs/2 when that
 is lower; the span ladder's whole axis is 0-25 MHz (at 50 MSa/s since fw 0.2.77) and zoom, pan and Auto stay inside it. The front end rolls off near
 30 MHz, so above 25 MHz there would only be artefacts. The info line still states the sample rate, and READ_SPECTRUM
 still returns every bin up to fs/2.
@@ -1197,7 +1197,7 @@ narrows it, keeping the centre, like the time/div taps in the scope view. A touc
 the spectrum follows the finger horizontally (the centre moves, in mHz) and is redrawn while dragging; at the whole
 axis there is nothing to pan. Each tap and each drag move is a step of the span ladder below.
 
-Header and averaging (fw 0.2.40-0.2.42, owner; since 0.2.56 the header's readouts are cards, see "Screens"): per
+Header and averaging (fw 0.2.40-0.2.42, maintainer; since 0.2.56 the header's readouts are cards, see "Screens"): per
 shown channel its peak frequency and level, the RBW and, in the waterfall, the time its rows span. No fs or N (they are
 the time base and the FFT length). Warnings appear centred over the top of
 the plot in orange only while they apply: "CHn overrange", "no anti-alias filter below 200 MS/s" (decimated without
@@ -1211,7 +1211,7 @@ power: on noise it reads about 2.5 dB low (log of the mean vs mean of the log), 
 display; use the host for calibrated noise power. The waterfall and density views take the unaveraged records. The
 averaging mode persists with the other settings (word 209 bits 12-14; ref in bits 0-11).
 
-Span and sample rate, the zoom ladder (fw 0.2.77, owner 2026-10-19 23:09; the rule is docs/ui-guidelines.md section 2
+Span and sample rate, the zoom ladder (fw 0.2.77, maintainer 2026-10-19 23:09; the rule is docs/ui-guidelines.md section 2
 "Span drives the sample rate"; `spec_ladder.c`, host-tested by `host_tests/test_spec_zoom.c`). The view is a cell: a
 span from the ladder 1, 2, 5 Hz .. 10, 20 MHz, then the whole axis 0 .. 25 MHz, about a centre kept inside 0 .. 25 MHz.
 A tap steps the span one cell about the centre, a drag (plot or slider) or a tap in the slider's track moves the centre.
@@ -1220,7 +1220,7 @@ from the stop frequency (centre + span / 2): the slowest UI rate (200 MSa/s .. 5
 whose capture of the record (memory depth samples; fw 0.2.84, N samples before) takes at most 2.048 s (`spl_rate`). The rate is the scope's own
 setting, written with the time/div the Scope's ladder pairs with it (`acq_view_tb_for_rate`), so going back to the Scope
 shows a ladder pair. After a zoom step the pair is a function of the cell, whatever led there; a cell from 0 Hz holds
-between a quarter and a half of the N bins. A pan never changes the rate (fw 0.2.81, owner 2026-10-20): it is clamped to
+between a quarter and a half of the N bins. A pan never changes the rate (fw 0.2.81, maintainer 2026-10-20): it is clamped to
 the current axis 0 .. fs / 2 (the slider track), so to look above it zoom out (the rate rises) and in again; a pan to a
 low centre at a wide span keeps the coarse resolution until the next zoom step. Ends, plain stops (a tap there changes
 nothing, the other direction works at once): zooming out ends at the whole axis at 50 MSa/s; zooming in ends where the
@@ -1250,7 +1250,7 @@ place 1.00o5 writes the settings sector, apart from a failed load; not in the pi
 ENTER_FEL or a battery that dies). Not restored: the display mode (the scope boots into the scope view), channel,
 span and centre; the variant (Spectrum / Waterfall / Density) is restored since fw 0.2.56 (word 211). The Filter choice (fw-decim, word 207) is saved the same way.
 
-Auto (fw 0.2.42, owner: deterministic, identical presses give identical settings): a fixed probe procedure that
+Auto (fw 0.2.42, maintainer: deterministic, identical presses give identical settings): a fixed probe procedure that
 does not depend on the state it starts from, about 1-2 s, "Auto..." on AUTO SET and the plot meanwhile, any touch
 cancels, gives up after 4 s with what it has. It needs RUN and trigger mode Auto or Normal (otherwise a warning says
 so). Steps:
@@ -1275,7 +1275,7 @@ Expected for the 1 kHz square at depth 3000 (N = 2048), derived from the rules (
 the search finds 1 kHz at 500 kSa/s, the RBW rule (<= 250 Hz) narrows to 100 kHz from 0 at 200 kSa/s (half the axis
 of bins): the comb fills the plot. At depth 6000 (N = 4096) 200 kHz at 500 kSa/s.
 
-Warnings (fw 0.2.42, owner: consequence and action, one short line each, centred over the top of the plot in orange,
+Warnings (fw 0.2.42, maintainer: consequence and action, one short line each, centred over the top of the plot in orange,
 only while they apply; "MSa/s" everywhere as in the top bar):
 
 | warning | when |
@@ -1317,7 +1317,7 @@ must never show grid or pointers.
 
 ### Slider track overview (`slider_ov.c`, fw 0.2.73)
 
-The slider row under the plot of the Scope, the Spectrum and the Frequency response (design and owner decisions:
+The slider row under the plot of the Scope, the Spectrum and the Frequency response (design and maintainer decisions:
 `docs/plans/slider-overview.md`): a line at y 452 parts it from the plot; the track below is x 2..727 (726 columns, the
 window's mapping) and y 453..471 (19 rows); the window is its two 1 px white edge lines over the track's height. The
 track shows the whole of what the plot shows a part of, in the full colour between the edge lines and at half intensity
@@ -1418,7 +1418,7 @@ post's DDS square drives the DUT, CH1 reads its input, CH2 its output, and the v
 phase over a frequency axis. The same measurement the host tool `scope_bode_sweep` / `fnirsi1013d-bode` makes
 (accepted on the bench 2026-10-19, docs/hardware-status.md 14:35-15:25), with the same frequency plan and the same
 per-point steps, here as a main-loop state machine. Design: `docs/plans/bode-design.md` (the engine, steps D1-D4) and
-`docs/plans/bode-ui.md` (the screen, owner's decisions of 2026-10-19 evening; its mockups are the acceptance reference);
+`docs/plans/bode-ui.md` (the screen, maintainer's decisions of 2026-10-19 evening; its mockups are the acceptance reference);
 protocol: `docs/protocol.md` section 14 row 60. "Bode" stays the internal name (files, BODE_CTRL, READ_BODE).
 
 **Wiring** (the user guide's part; the screen says only what to connect and what to press): calibration post to the DUT
@@ -1459,15 +1459,15 @@ dotted grey line marks the point being measured. Cards at y 426, chosen through 
 | slot | here |
 |---|---|
 | RUN/STOP | RUN: sweeps repeat, each overwriting the table point by point. STOP: the sweep ends after the capture in progress (fw 0.2.71; after the whole point before), the points stay. A single sweep (Single sweep, a host BODE_CTRL run) shows STOP on the button and RUN on the chip while it runs (never WAIT, whatever the trigger mode) and its cards read "sweeping" until it ends; a tap on STOP ends it the same way |
-| AUTO SET | an overview sweep (100 Hz .. 10 MHz, 20 points, Settle Fast, CH2 Auto, the thru off for it; "Auto..." and the Sweep card "auto n/20"), then Start / Stop / Settle / CH2 range Auto from it (`bode_auto_span`), then one single sweep at them and STOP (fw 0.2.86, owner: AUTO SET never ends in RUN; "Auto..." until that sweep ends, a second tap, STOP or "Stop sweep" end it as a single sweep and the table keeps what it has; RUN is the user's explicit repeat). A band the overview cannot resolve (fw 0.2.71, the sharp-tank rule) is measured again around f0 first: f0 / sqrt(10) .. f0 sqrt(10) (Settle Resonant), f0 / 1.1 .. f0 x 1.1 and f0 / 1.03 .. f0 x 1.03 (High Q), 20 points each, until resolved (`bode_auto_zoom`). A second tap, or STOP, cancels: the previous table comes back (fw 0.2.71), "Auto set cancelled: settings kept". Flat: "No corner from 100 Hz to 10 MHz: span kept", one sweep at the kept span, STOP. fw 0.2.84: AUTO SET never loops (owner): an absurd point (more than 20 dB from both neighbours, a bad record) is dropped and the reference is the median of the three lowest points; an inconsistent pass ends it in STOP with the settings kept and "Auto set: no consistent response. Check wiring", "Auto set: no response: CH2 tip on the DUT output?", "Auto set: CH1 level low: CH1 tip on the DUT input?" or "Auto set: peak not confirmed: sweep by hand" (docs/plans/bode-ui.md 3.2) |
-| T CURSOR | cursors C1 and C2: dotted lines with flags above the pane, placed at a third and two thirds of the axis, snapped to measured points (never interpolated). Drag a flag to move its cursor; a tap or drag in the plot moves the nearer one. Move fast sets the drag step (fw 0.2.71): fast, the cursor follows the finger; slow, it moves a fifth of the finger's travel. The readout box at the bottom left (x 10..261, y 342..393, over the response, owner): C1, C2 and C2-C1, f white, level cyan, phase pink; a flagged point shows its reason (unsettled, near floor, CH2 clipped, overload, ...) instead of the phase and its row and the difference turn grey |
+| AUTO SET | an overview sweep (100 Hz .. 10 MHz, 20 points, Settle Fast, CH2 Auto, the thru off for it; "Auto..." and the Sweep card "auto n/20"), then Start / Stop / Settle / CH2 range Auto from it (`bode_auto_span`), then one single sweep at them and STOP (fw 0.2.86, maintainer: AUTO SET never ends in RUN; "Auto..." until that sweep ends, a second tap, STOP or "Stop sweep" end it as a single sweep and the table keeps what it has; RUN is the user's explicit repeat). A band the overview cannot resolve (fw 0.2.71, the sharp-tank rule) is measured again around f0 first: f0 / sqrt(10) .. f0 sqrt(10) (Settle Resonant), f0 / 1.1 .. f0 x 1.1 and f0 / 1.03 .. f0 x 1.03 (High Q), 20 points each, until resolved (`bode_auto_zoom`). A second tap, or STOP, cancels: the previous table comes back (fw 0.2.71), "Auto set cancelled: settings kept". Flat: "No corner from 100 Hz to 10 MHz: span kept", one sweep at the kept span, STOP. fw 0.2.84: AUTO SET never loops (maintainer): an absurd point (more than 20 dB from both neighbours, a bad record) is dropped and the reference is the median of the three lowest points; an inconsistent pass ends it in STOP with the settings kept and "Auto set: no consistent response. Check wiring", "Auto set: no response: CH2 tip on the DUT output?", "Auto set: CH1 level low: CH1 tip on the DUT input?" or "Auto set: peak not confirmed: sweep by hand" (docs/plans/bode-ui.md 3.2) |
+| T CURSOR | cursors C1 and C2: dotted lines with flags above the pane, placed at a third and two thirds of the axis, snapped to measured points (never interpolated). Drag a flag to move its cursor; a tap or drag in the plot moves the nearer one. Move fast sets the drag step (fw 0.2.71): fast, the cursor follows the finger; slow, it moves a fifth of the finger's travel. The readout box at the bottom left (x 10..261, y 342..393, over the response, maintainer): C1, C2 and C2-C1, f white, level cyan, phase pink; a flagged point shows its reason (unsettled, near floor, CH2 clipped, overload, ...) instead of the phase and its row and the difference turn grey |
 | V CURSOR | empty (no level cursor in this mode) |
-| MEASURES | "Frequency response measurements": Select All, Clear, Level, -3dB, BW, Peak, Q, Ph45, Ph90, Ph180, Sweep, Thru. Defaults -3dB, Peak, Q, Level (owner). A change shows at once (fw 0.2.71: the cards left of the open menu follow each tap, all of them when it closes). Magnitude cards on a cyan block, phase cards pink, Sweep and Thru neutral grey. "no sweep" before any, "sweeping" while a new table fills, "not found" when the marker is not there; Thru "applied" green, "stale" amber, "off" / "none" grey. More than six chosen: "+N more" in the sixth place |
+| MEASURES | "Frequency response measurements": Select All, Clear, Level, -3dB, BW, Peak, Q, Ph45, Ph90, Ph180, Sweep, Thru. Defaults -3dB, Peak, Q, Level (maintainer). A change shows at once (fw 0.2.71: the cards left of the open menu follow each tap, all of them when it closes). Magnitude cards on a cyan block, phase cards pink, Sweep and Thru neutral grey. "no sweep" before any, "sweeping" while a new table fills, "not found" when the marker is not there; Thru "applied" green, "stale" amber, "off" / "none" grey. More than six chosen: "+N more" in the sixth place |
 | SAVE PIC | screenshot |
 | SAVE WAVE | the sweep table as `bode/FR00001.CSV` (the next free number): `#` lines with the firmware, the bitstream, Start, Stop, Points, Settle, CH2 range, thru, elapsed ms, then `f_hz,mag_db,phase_deg,v1_db,v2_db,range1,range2,flags` per measured point (READ_BODE's fields, flags as the host's names joined by `|`). Without points: "Nothing to save: run a sweep first". Saved waveforms does not list these files; read them on a PC (USB drive) |
 
 **CTRL page**: Display (y 65), Sweep (y 125), Thru (y 185), Trace style (y 245, fw 0.2.71), Grid (y 305; lower than in
-the other modes, accepted by the owner); the rest of the stepper and the 50 % TRIG slots stay empty (the sweep ranges both
+the other modes, accepted by the maintainer); the rest of the stepper and the 50 % TRIG slots stay empty (the sweep ranges both
 channels itself).
 
 | button | fold-out rows | values |
@@ -1486,7 +1486,7 @@ channels itself).
 | Trace style ("Lines", "Dots"; the Scope's construction) | Lines, Dots | Lines (default): the valid points of each curve joined; Dots: loose. Flagged points are grey loose dots in both |
 | Grid | | the grid dots, as in the other modes |
 
-**Slider row** (owner, the Scope's construction at y 452..471): the track is 1 Hz .. 10 MHz on a log scale, the window
+**Slider row** (maintainer, the Scope's construction at y 452..471): the track is 1 Hz .. 10 MHz on a log scale, the window
 Start..Stop (the span of AUTO SET's pass while it runs). Dragging moves Start and Stop together by whole 1-2-5 steps, both kept
 on the track; the axis follows and points inside the new span stay drawn. On release a sweep in progress restarts at the
 new span (the point in progress dropped, the table cleared; RUN keeps repeating), and while stopped one sweep runs there.
@@ -1500,7 +1500,7 @@ the DUT input", AUTO SET's results, "CH2 overrange: set CH2 range Auto or raise 
 DUT loads the 1 kOhm source" at or below 2 MHz, "CH1 level low above 2 MHz: the x1 probe rolls off"), "N points not settled: choose a longer Settle", "N points near the floor: shown grey", "Thru does not
 match this sweep: measure again", "DC level beyond the offset range: AC-couple DUT", "ADC readout fault: see
 Diagnostics" (fw 0.2.71, READ_BODE reason 8: the pre-scan reached 5 V/div with a channel still clipping and its
-fundamental under 20 codes, which the post's 3.1 Vpp cannot do; the owner's fail-fast rule, so a capture fault ends the
+fundamental under 20 codes, which the post's 3.1 Vpp cannot do; the maintainer's fail-fast rule, so a capture fault ends the
 sweep instead of producing a table of flagged points), and the 5 s notes (EXT, roll).
 
 **Top bar in this mode** (fw 0.2.71, bode-ui.md section 7): the ACQ chip reads "Set by" over "the sweep" and its dropdown
@@ -1529,7 +1529,7 @@ above; a band narrower than two point spacings is not resolved (its Q reads low)
 (fw 0.2.71, `bode_auto_zoom`: f0 / sqrt(10) .. f0 sqrt(10), f0 / 1.1 .. f0 x 1.1, f0 / 1.03 .. f0 x 1.03, 20 points each;
 on the model a Q 50 tank at 15.3 kHz is resolved on the third pass as Q 46 -> 10 kHz .. 20 kHz, High Q; Q 120 on the
 fourth); a response still changing at 100 Hz moves Start to 10 Hz. The span is snapped outwards to
-the 1-2-5 steps. On the DUT model: RC 1600 Ohm / 10 nF -> 500 Hz .. 100 kHz; the owner's 1 kOhm / 15 nF -> 1 kHz ..
+the 1-2-5 steps. On the DUT model: RC 1600 Ohm / 10 nF -> 500 Hz .. 100 kHz; the maintainer's 1 kOhm / 15 nF -> 1 kHz ..
 200 kHz; the 991 / 102 Ohm divider: flat, span kept; a Q 8.1 tank at 50.3 kHz -> 10 kHz .. 200 kHz, Settle Resonant.
 
 **Flags** (READ_BODE bits; grey on the screen when invalid): ch1_clipped, clipped (CH2), ch2_overload, low_snr,
@@ -1582,7 +1582,7 @@ occasional miss) and otherwise shows it with the warning "untriggered (auto time
 
 ### Pass time in the acquisition menu (fw 0.2.38)
 
-Owner: the cost of a longer record shows where it is chosen. In the acquisition menu's Memory column, under its rule
+Maintainer: the cost of a longer record shows where it is chosen. In the acquisition menu's Memory column, under its rule
 (since 0.2.63; between the "Memory" header and the first depth chip before, where it collided with both), the menu
 shows "Pass time" and "NN ms", the main-loop pass time (GET_STATUS `pass_ms`) of the last pass before the menu opened. The menu
 is modal and nothing captures while it is open, so a newly chosen depth shows its cost the next time the menu opens.
@@ -1647,7 +1647,7 @@ automatically, and reopening the port (DTR 0 -> 1) discards an old frame.
 Boot: USB enumerates about 1.5 s before the main loop starts (GET_LINK_STATS counter 27: 1515-1517 ms on the
 bench up to 0.2.16, first pass 31 ms). Up to 0.2.16 a card without `scope.bmp` (the normal case) made 1.00o5's
 `load_picture` show "Failed to open file" in a box for 700 ms (or until a touch, with the confirmation setting on):
-the brief error the owner saw at every boot. Since 0.2.17 the protocol build probes for the file silently and
+the brief error the maintainer saw at every boot. Since 0.2.17 the protocol build probes for the file silently and
 skips the splash without a message; with the file present it is shown as in 1.00o5, for 3 s (counter 48 = the
 time this step took + 1). The rest of the gap is the 1.00o5 init after USB (FPGA settings, main screen setup).
 Meanwhile the timer poll answers PING, GET_INFO, GET_STATUS (`ui_busy` = 2 STARTING) and the other fast-path
@@ -1683,10 +1683,10 @@ the image runs from DDR and the scope image on the SD card is untouched. One wri
 the power-off ISR saves settings to sector 709, as 1.00o5 always does. With `PC_FORCE_CDC=1` that
 save stores "USB CH340 mode" = on.
 
-The owner's 25Q80 now holds Atlan's AL3 bitstream (0x1532, variant 2; written and read back
+The maintainer's 25Q80 now holds Atlan's AL3 bitstream (0x1532, variant 2; written and read back
 2026-10-18, power-cycle check of the diagnostics screen pending). The expected values below are
 for 0x1532. The stock bitstream (0x1432, variant 1) gives `fpga=0x1432`, ring 4096, caps 0x7C00,
-and E_UNSUPPORTED for the generator and for geometry other than 1500/3000. The owner also saw
+and E_UNSUPPORTED for the generator and for geometry other than 1500/3000. The maintainer also saw
 "Cannot recognize device" from the updater's MSC mode on Windows (cable suspected): rule that out
 with a known-good cable before step 2.
 
@@ -1819,7 +1819,7 @@ The decimation path (0x1534, K >= 1) adds `(adc1compensation + adc2compensation)
 converted to a code (`pc_glue_decim_read`). `fpga_average_trace_data(_long)` (test.c only) adds core A's value.
 READ_RAW is raw.
 
-**Why the per-core spread survives on the owner's unit.** CH1's raw core zeros differ by 5.35 codes (A 130.93,
+**Why the per-core spread survives on the maintainer's unit.** CH1's raw core zeros differ by 5.35 codes (A 130.93,
 B 125.58, live capture 2026-10-18; T8: Z_A 132.5 / Z_B 127.0 at dcoffset 0); the stored compensation is -2/+2, so
 4 codes are corrected and 1.35 remain. The arithmetic loses up to about 2 codes: core means are truncated to
 integers (each core loses 0..1 code, independently); the 6-range mean of B - A is truncated toward zero (a true
@@ -1839,7 +1839,7 @@ same mean compensation, (adc_a_comp + adc_b_comp) / 2 = 0 here. The cause is in 
 (K = 0) `zaklad.v` gates the ADC encode clocks with the sample-rate divider (`sample_clock_enable` drives
 `adc*_encA/B`), so at divider D each core is clocked at 100 MHz / (D + 1); with the filter on,
 `sample_rate_divider_eff` is 0 and the ADCs always run at 100 MHz. The cores' zeros depend on the encode rate. The
-coordinator's READ_RAW sweep: 200 MSa/s A 87.80 / B 85.09; 20 MSa/s A 87.06 / B 81.84; 2 MSa/s to 1 kSa/s flat
+bench session's READ_RAW sweep: 200 MSa/s A 87.80 / B 85.09; 20 MSa/s A 87.06 / B 81.84; 2 MSa/s to 1 kSa/s flat
 (A 86.98-86.99, B 81.45-81.51). Core B drops 3.6 codes as soon as the clock is gated, core A 0.8, so the gated mean is
 1.8-2.2 codes below the full-rate mean, and the filtered captures read the full-rate mean. The mechanism inside the
 AD9288 is not known. Inference: it is not the datasheet minimum of 1 MSPS (research/notes/hack-repo-hardware-fpga.md),
@@ -1871,7 +1871,7 @@ where the mean of both cores reads 128; at P, 8 conversions gated (2 MSa/s) and 
 zeros (1/16 code), the RMS noise and the drift between the first and the second 4 conversions. About 0.4 s per range,
 5 s in all. Checks per range (`acal_range_store`, first failure wins, shown as "CH1: <reason>" in the failure box;
 nothing changes unless both channels pass): no sample at 0 or 255; noise <= 3 codes RMS at full rate, <= 1 code gated
-(fw 0.2.100, owner 2026-10-20; 3 codes for both before; the Diagnostics limits); drift <= 0.5 code; slopes
+(fw 0.2.100, maintainer 2026-10-20; 3 codes for both before; the Diagnostics limits); drift <= 0.5 code; slopes
 -0.20..-0.33 codes per count and within 0.02 of each other; zeros within 16 codes of 128 and within 20 codes of
 each other per class; full and gated zero of a core within 12 codes. On success: `dc_calibration_offset[r] = P`
 ([6] = [5]); `adc1/adc2compensation` = whole-code split (|A - B| and the mean error at most half a code) of the gated
@@ -1916,16 +1916,16 @@ the compensation are gone; added are 7 register instructions (xorshift 3, shift,
 uncached data accesses at about 90 cycles (README "FFT core") the pass should get faster, not slower; measured on the
 bench with GET_STATUS pass times (list below).
 
-**Bench checklist** (coordinator and owner; FEL load of the 0.2.43 image, no SD write needed except the base
+**Bench checklist** (bench session and maintainer; FEL load of the 0.2.43 image, no SD write needed except the base
 calibration's own 708/709 write: back up sectors 700-710 first):
 
 1. Before: GET_CAL ch 0 and 1 give byte 72 = 1, flags 0; diagnostics show "Calibration data: v1". Note GET_STATUS
    pass times at 3000 samples, 20 us/div and 1 ms/div (30 s each).
-2. Owner: probes and USB unplugged, System settings, Base calibration, OK. Expected "Ch1.... OK", "Ch2.... OK",
+2. Maintainer: probes and USB unplugged, System settings, Base calibration, OK. Expected "Ch1.... OK", "Ch2.... OK",
    "Calibration successful" after about 5 s. Reconnect USB.
 3. GET_CAL: byte 72 = 2, flags 3 (7 on a gated time base), the stored block, and the diagnostics view
-   (calibration data: v2, zeros, d, noise, slopes about -2640 / -2600 e-4 per count). Expected on the owner's CH1
-   (shorted, dcoffset 0): gated A ~130.9 / B ~125.6 (T8, live capture), full rate higher by the coordinator's
+   (calibration data: v2, zeros, d, noise, slopes about -2640 / -2600 e-4 per count). Expected on the maintainer's CH1
+   (shorted, dcoffset 0): gated A ~130.9 / B ~125.6 (T8, live capture), full rate higher by the bench session's
    READ_RAW sweep deltas (2026-10-18, steady level on the calibration post: 200 MSa/s A 87.80 / B 85.09, gated
    20 MSa/s..1 kSa/s A 86.98-87.06 / B 81.45-81.84, so full - gated = A +0.8, B +3.6): full A ~131.7 / B ~129.2;
    d gated ~5.3, full ~2.5. CH2: gated A ~128.4 / B ~128.9 (T8, within 0.5); its full-rate values are unmeasured.
@@ -2007,14 +2007,14 @@ CRC-32. v2 blocks are not read (version check): after loading 0.2.45 the scope r
 until the base calibration is run again. GET_CAL 256 bytes: protocol section 14 row 51. Sector 708 bytes 432..487 hold
 the provenance trailer (fw 0.2.52, row 55) and bytes 488..503 the FPGA 0x153A capture stages (fw 0.2.79, section 6.4).
 
-**Bench procedure** (coordinator and owner; back up SD sectors 700-710 first, the calibration writes 708 and 709):
+**Bench procedure** (bench session and maintainer; back up SD sectors 700-710 first, the calibration writes 708 and 709):
 
 1. FEL-load 0.2.45. GET_CAL ch 0 / 1: 256 bytes, byte 72 = 1, flags bit 0 clear (the v2 block on the card is not
    read). Diagnostics: "Calibration data: v1". Let the scope warm up 10 minutes.
-2. Owner: probes and USB unplugged, System settings, Base calibration, OK: "Ch1.... OK", "Ch2.... OK" (about 7 s,
+2. Maintainer: probes and USB unplugged, System settings, Base calibration, OK: "Ch1.... OK", "Ch2.... OK" (about 7 s,
    2 s more than 0.2.43 for the full-rate slopes), "Calibration successful", then the yellow prompt "Gain: put both
    probes on the cal post, OK".
-3. Owner: both probes switched to x1 (x10 works too: the firmware picks range 2 for x1 and range 5 for x10, step 1 of the
+3. Maintainer: both probes switched to x1 (x10 works too: the firmware picks range 2 for x1 and range 5 for x10, step 1 of the
    gain step above; the bench used x1), both tips on the calibration post (ground clips not needed), OK: "Ch1.... OK",
    "Ch2.... OK", "Gain calibration successful". Reconnect USB.
 4. GET_CAL both channels: byte 72 = 3, flags bit 3 set, bit 4 clear; block gain_range 2, gain_lever about 88 codes
@@ -2075,7 +2075,7 @@ The level check (both post levels at range 2, gated, 2 conversions each) and the
 (`cw_level_ok`: a x1 probe gives 88 codes at range 2, a x10 probe 88 at range 5; README 6.3); the silent CH2 check after
 CH1 and the Skip button are gone with the per-channel screens.
 
-**Bench** (owner; back up SD sectors 700-710 first, Save writes 708 and 709):
+**Bench** (maintainer; back up SD sectors 700-710 first, Save writes 708 and 709):
 
 1. Menu > Diagnostics > Calibrate with USB connected: screen 1 with the amber USB line; unplug USB: it goes within a
    second. Cancel: the Diagnostics page comes back, GET_CAL unchanged (after USB is plugged in again).
@@ -2101,7 +2101,7 @@ points (`acal_point`, ACAL_PT_*: coarse 500 / 1200, gated centre -150 / +150 / c
 **Zero at the centre (fw 0.2.79).** The zero of each class is measured at the refined centre PWM, where the level sits
 at code 128 (8 conversions gated, 64 at 200 MSa/s). 0.2.67-0.2.78 measured it as the mean of two points 12 codes either
 side (`acal_zero_split`, CAL_PROBE byte 248) so the step passed on FPGA 0x1538 / 0x1539, whose 200 MSa/s capture garbled
-cores near 0x7F / 0x80; the owner removed that workaround (2026-10-19 20:30, fail fast), so CAL_PROBE byte 248 is always
+cores near 0x7F / 0x80; the maintainer removed that workaround (2026-10-19 20:30, fail fast), so CAL_PROBE byte 248 is always
 0. A clip found only at 200 MSa/s while the gated point at the same PWM is quiet and within 8 codes of 128 reports "ADC
 readout fault near code 128: check the FPGA bitstream" (ACAL_E_READOUT, `acal_readout_fault`): such a bitstream fails
 the step instead of being calibrated around the fault.
@@ -2123,7 +2123,7 @@ was trained on the running bitstream, else the power-on 0x08E4. After every acce
 firmware/AGENTS.md section 54.
 
 **Band training (fw 0.2.81).** Bench 2026-10-20 on 0x153A (threshold 32 codes since 0.2.80): a bad stage can garble only
-at some codes and in some captures (CH1 A4 on the owner's unit: rail samples and jumps only while the samples sit at codes
+at some codes and in some captures (CH1 A4 on the maintainer's unit: rail samples and jumps only while the samples sit at codes
 127..135), so one capture at the centre read it clean and the wizard kept A4. The training now parks the quiet input at
 six codes, 120, 124, .. 140 (`cs_band_pwm`: the offset PWM interpolated from the centre search's two gated slope points),
 and at each point takes two 8000-word captures per stage 2..5; the 0x36 counts are summed per core and stage over the
@@ -2139,7 +2139,7 @@ the Calibration page line adds "calibrate", and event 23 is logged once per core
 changes). It clears when a training is saved; nothing retrains outside the wizard.
 CAL_PROBE runs it from the host with the UI stopped (mode 0, about 1 s), or runs the whole zero step exactly as a
 Calibrate tap does, over the dimmed screen with the dialog, progress and Cancel polls (mode 1, about 15 s);
-`python firmware/tools/cal_probe.py COM10 both all` prints every point (arguments: port, CH1 / CH2 / both, ranges, repeats,
+`python firmware/tools/cal_probe.py <port> both all` prints every point (arguments: port, CH1 / CH2 / both, ranges, repeats,
 settle, prestrobe, mode). Nothing is stored.
 
 **Full-rate capture check (fw 0.2.61, per capture since fw 0.2.62, `enc_heal.h`).** Every 200 MSa/s conversion of the
@@ -2212,7 +2212,7 @@ Diagnostics Calibration page (fw 0.2.59), per channel: "Tracking A-B +0.12 code,
 A - B offset and slope, age of the last accepted record) and "Full-rate offset +0.70 code, 4 probes, 12 s ago" (common
 mode subtracted, valid probes, age); grey until they ran. The bow q is in GET_CAL and the saved report.
 
-**Bench** (owner with the coordinator on COM10; FEL load only, nothing written to the card):
+**Bench** (maintainer with the bench session on <port>; FEL load only, nothing written to the card):
 
 1. Wizard: the walk-through of section 6.4 (steps 1-5). After Save calibration, GET_CAL bytes 256..287 are reset
    (flags 0, ages 0xFFFFFFFF) and the Calibration page's tracking lines are grey.
