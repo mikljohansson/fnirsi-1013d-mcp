@@ -27,6 +27,10 @@ typedef struct
   int    rail_reads;          //fw 0.2.83: the rails only in the first rail_reads captures (0: every capture)
   int    check;               //fw 0.2.83: bode_cap.check of every capture (BODE_CHK_*)
   uint32 fault_at;            //fw 0.2.83: this capture (1 = the first) has BODE_CHK_FAULT (0: none)
+  uint32 flat_from, flat_n;   //fw 0.2.87: captures flat_from .. flat_from + flat_n - 1 are one saturated value on both
+                              //channels (the 0x153A first-record artefact)
+  double scale2;              //fw 0.2.87: CH2's signal x this between scale2_lo and scale2_hi Hz (0 = 1; the DUT's
+  double scale2_lo, scale2_hi;//output changing between sweeps)
   uint32 reads;
 
   //State
@@ -189,7 +193,8 @@ static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
 
     for(c = 0; c < 2; c++)
     {
-      double vv = v[c] * ((c == 1) ? d->gain2 : 1.0), code;
+      double s2 = (d->scale2 && (f >= d->scale2_lo) && (f <= d->scale2_hi)) ? d->scale2 : 1.0;
+      double vv = v[c] * ((c == 1) ? d->gain2 * s2 : 1.0), code;
       double win = d->window_v[d->range[c]];
 
       code = 128.0 - d->off[c] / 10.0 + vv / vpl(d->range[c]);
@@ -221,6 +226,11 @@ static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
 
   //A readout fault (FPGA 0x1539's A cores, or one saturated record): rail values whatever the input
   d->reads++;
+
+  if(d->flat_n && (d->reads >= d->flat_from) && (d->reads < d->flat_from + d->flat_n))
+    for(c = 0; c < 2; c++)
+      for(i = 0; i < total; i++)
+        d->buf[c][i] = 0xFF00;
 
   for(c = 0; c < 2; c++)
     if(d->rail[c] && (!d->rail_reads || (d->reads <= (uint32)d->rail_reads)))
@@ -628,6 +638,266 @@ static void test_readout_check(void)
     else
       T_TRUE(bode_done_count(&eng) > 0);
   }
+}
+
+//fw 0.2.87: a flat record (the 0x153A first-record artefact) is taken once more, as the host's _measure does: a flat
+//pre-scan no longer leaves CH1 on 2.5 V/div, a flat point record no longer becomes a flagged point
+static void test_flat_retake(void)
+{
+  bode_cfg c = cfg(1000, 100e3, 10, BODE_SETTLE_FAST, BODE_CH2_AUTO);
+  bode_point p;
+  uint32 base, at;
+  int i, n, flagged;
+
+  dut_rc(&D);
+  bode_init(&eng, &HW);
+  T_EQ(bode_start(&eng, &c, 0, 3), 0);
+  run(&eng, 600000);
+  T_EQ(bode_state(&eng), BODE_ST_DONE);
+  base = D.reads;
+
+  for(at = 1; at <= 12; at += 11)
+  {
+    dut_rc(&D);
+    D.flat_from = at;
+    D.flat_n = 1;
+    bode_init(&eng, &HW);
+    T_EQ(bode_start(&eng, &c, 0, 3), 0);
+    run(&eng, 600000);
+    T_EQ(bode_state(&eng), BODE_ST_DONE);
+    n = bode_count(&eng);
+
+    for(i = 0, flagged = 0; i < n; i++)
+      if(bode_point_get(&eng, i, &p) && (p.flags & (BODE_F_BAD | BODE_F_CH1_LOW)))
+        flagged++;
+
+    printf("  flat capture %u: CH1 range %d, %d of %d points flagged, %u captures (clean sweep %u)\n", (unsigned)at,
+           D.range[0], flagged, n, (unsigned)D.reads, (unsigned)base);
+    T_EQ(flagged, 0);
+    T_EQ(D.range[0], 3);
+    T_EQ(D.reads, base + 1);
+  }
+
+  //Flat twice (a stuck readout): the pre-scan keeps CH1 on range 1, the points are ch1_low + incoherent (host)
+  dut_rc(&D);
+  D.flat_from = 1;
+  D.flat_n = 1000;
+  bode_init(&eng, &HW);
+  T_EQ(bode_start(&eng, &c, 0, 3), 0);
+  run(&eng, 600000);
+  T_EQ(bode_state(&eng), BODE_ST_DONE);
+  T_TRUE(bode_point_get(&eng, 0, &p));
+  T_TRUE((p.flags & (BODE_F_INCOHERENT | BODE_F_CH1_LOW)) == (BODE_F_INCOHERENT | BODE_F_CH1_LOW));
+  T_TRUE(!(p.flags & BODE_F_CH2_OVERLOAD));
+  T_EQ(p.r1, 1);
+  T_EQ(bode_switches(&eng), 0);
+}
+
+//fw 0.2.87: the range plan (bode_sweep.h). Sweeps over the owner's RC (1 kOhm / 15 nF, 100 Hz .. 1 MHz, 25 points)
+typedef struct
+{
+  uint8  r1[BODE_MAX_POINTS], r2[BODE_MAX_POINTS];
+  int32  h[BODE_MAX_POINTS];
+  uint16 switches;
+  uint32 reads;
+  int    reused, n, bad;
+} sweep_rec;
+
+static void sweep_once(const bode_cfg *c, int thru, int hold, sweep_rec *s)
+{
+  uint32 r0 = D.reads;
+  bode_point p;
+  int i;
+
+  T_EQ(bode_start(&eng, c, thru, hold), 0);
+  s->reused = bode_plan_reused(&eng);
+  run(&eng, 600000);
+  T_EQ(bode_state(&eng), BODE_ST_DONE);
+  s->n = bode_count(&eng);
+  s->switches = bode_switches(&eng);
+  s->reads = D.reads - r0;
+  s->bad = 0;
+
+  for(i = 0; i < s->n; i++)
+  {
+    T_TRUE(bode_point_get(&eng, i, &p));
+    s->r1[i] = p.r1;
+    s->r2[i] = p.r2;
+    s->h[i]  = p.h_mdb;
+    if(p.flags & BODE_F_BAD)
+      s->bad++;
+  }
+}
+
+static int same_ranges(const sweep_rec *a, const sweep_rec *b)
+{
+  int i;
+
+  if(a->n != b->n)
+    return 0;
+
+  for(i = 0; i < a->n; i++)
+    if((a->r1[i] != b->r1[i]) || (a->r2[i] != b->r2[i]))
+      return 0;
+
+  return 1;
+}
+
+static void print_rec(const char *what, const sweep_rec *s)
+{
+  int i;
+
+  printf("  plan %-22s reused %d, %u switches, %u captures, %d flagged, CH2 ranges", what, s->reused,
+         (unsigned)s->switches, (unsigned)s->reads, s->bad);
+  for(i = 0; i < s->n; i++)
+    printf(" %d", s->r2[i]);
+  printf("\n");
+}
+
+static void dut_rc15(dut *d)
+{
+  dut_rc(d);
+  d->r = 1000;
+  d->c = 15e-9;
+}
+
+static void test_range_plan(void)
+{
+  bode_cfg c = cfg(100, 1e6, 25, BODE_SETTLE_NORMAL, BODE_CH2_AUTO), c2;
+  sweep_rec a, b, x;
+  double worst = 0;
+  int i, mid;
+
+  dut_rc15(&D);
+  bode_init(&eng, &HW);
+
+  //First sweep: from scratch; second and third: from the plan, no switch, the same ranges and H, no pre-scan
+  sweep_once(&c, 0, 3, &a);
+  print_rec("first", &a);
+  T_EQ(a.reused, 0);
+  T_TRUE(a.switches >= 1);
+  T_EQ(a.bad, 0);
+
+  for(i = 0; i < 2; i++)
+  {
+    int k;
+
+    sweep_once(&c, 0, 3, &b);
+    print_rec(i ? "third" : "second", &b);
+    T_EQ(b.reused, 1);
+    T_EQ(b.switches, 0);
+    T_TRUE(same_ranges(&a, &b));
+    T_TRUE(b.reads < a.reads);
+    T_EQ(b.bad, 0);
+
+    for(k = 0; k < a.n; k++)
+      if(abs(a.h[k] - b.h[k]) > worst)
+        worst = abs(a.h[k] - b.h[k]);
+  }
+
+  printf("  plan: H of the plan sweeps within %.3f dB of the first\n", worst / 1000.0);
+  T_TRUE(worst < 50);
+
+  //The DUT's output drops 10 dB at one point (a stopband point, CH2 on a range with room below): one switch down; the
+  //entry follows, so the next sweep is quiet again
+  for(mid = a.n - 1; (mid > 0) && (a.r2[mid] >= 5); mid--)
+    ;
+  T_TRUE(mid > 0);
+  D.scale2 = 0.3;
+  D.scale2_lo = bode_plans(&eng)[mid].f_mhz / 1000.0 * 0.999;
+  D.scale2_hi = bode_plans(&eng)[mid].f_mhz / 1000.0 * 1.001;
+  sweep_once(&c, 0, 3, &b);
+  print_rec("output -10 dB at one pt", &b);
+  T_EQ(b.reused, 1);
+  T_EQ(b.switches, 1);
+  sweep_once(&c, 0, 3, &x);
+  print_rec("again", &x);
+  T_EQ(x.reused, 1);
+  T_EQ(x.switches, 0);
+  T_EQ(x.r2[mid], a.r2[mid] + 1);
+
+  //Back up 10 dB: it fits the finer range (no switch, the point valid there)
+  D.scale2 = 0;
+  sweep_once(&c, 0, 3, &b);
+  print_rec("output back", &b);
+  T_EQ(b.reused, 1);
+  T_EQ(b.switches, 0);
+  T_EQ(b.bad, 0);
+
+  //Up 12 dB more at that point: it clips: CH2 one range up there (the splice on the previous point), valid again
+  D.scale2 = 4.0;
+  sweep_once(&c, 0, 3, &b);
+  print_rec("output +12 dB at one pt", &b);
+  T_EQ(b.reused, 1);
+  T_TRUE(b.switches >= 1);
+  T_TRUE(b.r2[mid] <= a.r2[mid]);
+  T_EQ(b.bad, 0);
+  D.scale2 = 0;
+
+  //A settings change ranges from scratch (Points, Settle, CH2 mode, Hold's range)
+  c2 = c;
+  c2.points = 24;
+  sweep_once(&c2, 0, 3, &b);
+  T_EQ(b.reused, 0);
+  T_TRUE(b.switches >= 1);
+  c2 = c;
+  c2.settle = BODE_SETTLE_FAST;
+  sweep_once(&c2, 0, 3, &b);
+  T_EQ(b.reused, 0);
+  sweep_once(&c2, 0, 3, &b);
+  T_EQ(b.reused, 1);
+  c2.ch2_mode = BODE_CH2_HOLD;
+  sweep_once(&c2, 0, 3, &b);
+  T_EQ(b.reused, 0);
+  sweep_once(&c2, 0, 3, &b);
+  T_EQ(b.reused, 1);
+  sweep_once(&c2, 0, 4, &b);
+  T_EQ(b.reused, 0);
+
+  //A cancelled first sweep leaves an incomplete plan: the next one ranges from scratch, the one after reuses
+  T_EQ(bode_start(&eng, &c, 0, 3), 0);
+  run(&eng, 300);
+  bode_stop(&eng, 0);
+  run(&eng, 600000);
+  T_EQ(bode_state(&eng), BODE_ST_STOPPED);
+  sweep_once(&c, 0, 3, &b);
+  T_EQ(b.reused, 0);
+  sweep_once(&c, 0, 3, &b);
+  T_EQ(b.reused, 1);
+
+  //A cancelled sweep from a complete plan keeps it
+  T_EQ(bode_start(&eng, &c, 0, 3), 0);
+  run(&eng, 300);
+  bode_stop(&eng, 0);
+  run(&eng, 600000);
+  sweep_once(&c, 0, 3, &b);
+  T_EQ(b.reused, 1);
+  T_EQ(b.switches, 0);
+
+  //The thru sweep ranges from scratch and drops the plan
+  D.thru = 1;
+  sweep_once(&c, 1, 3, &b);
+  T_EQ(b.reused, 0);
+  D.thru = 0;
+  sweep_once(&c, 0, 3, &b);
+  T_EQ(b.reused, 0);
+  T_TRUE(same_ranges(&a, &b));
+
+  //A fooled pre-scan (flat twice: CH1 stays on 2.5 V/div): the plan is not kept, the next sweep ranges again
+  dut_rc15(&D);
+  D.flat_from = 1;
+  D.flat_n = 2;
+  bode_init(&eng, &HW);
+  sweep_once(&c, 0, 3, &b);
+  print_rec("fooled pre-scan", &b);
+  T_EQ(b.r1[0], 1);
+  sweep_once(&c, 0, 3, &b);
+  print_rec("after it", &b);
+  T_EQ(b.reused, 0);
+  T_EQ(b.r1[0], 3);
+  sweep_once(&c, 0, 3, &b);
+  T_EQ(b.reused, 1);
+  T_EQ(b.switches, 0);
 }
 
 //fw 0.2.71: a cancelled AUTO SET gives the previous table back (bode_snap)
@@ -1097,6 +1367,8 @@ int main(void)
   test_stop_and_steps();
   test_readout_fault();
   test_readout_check();
+  test_flat_retake();
+  test_range_plan();
   test_snap();
   test_thru();
   test_divider_floor();

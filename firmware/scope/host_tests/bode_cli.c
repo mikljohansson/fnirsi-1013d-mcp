@@ -97,10 +97,11 @@ int main(void)
       bode_dft_run(&pp, rec1, rec2, work, &d);
       bode_measure(&pp, &d, s, zc, uv, &m);
 
-      printf("%d %d %d %d %d %d %d %d %d %d %d %u %d %d %d %d %d %d %d %d %d %d\n", m.h_mdb, m.h_mdeg, m.c[0].lvl_mdb,
-             m.c[1].lvl_mdb, m.c[0].noise_mdb, m.c[1].noise_mdb, m.leak_mdb, m.snr2_mdb, m.half_ok, m.half_mdb,
-             m.half_mdeg, m.half_rel_ppm, bode_unsettled(&m), m.c[0].ac_c100, m.c[1].ac_c100, m.c[0].centre_c100,
-             m.c[1].centre_c100, m.c[0].clipped, m.c[1].clipped, m.c[0].code_mdb, m.c[1].code_mdb, m.c[0].ph_mdeg);
+      printf("%d %d %d %d %d %d %d %d %d %d %d %u %d %d %d %d %d %d %d %d %d %d %d %d %u %d\n", m.h_mdb, m.h_mdeg,
+             m.c[0].lvl_mdb, m.c[1].lvl_mdb, m.c[0].noise_mdb, m.c[1].noise_mdb, m.leak_mdb, m.snr2_mdb, m.half_ok,
+             m.half_mdb, m.half_mdeg, m.half_rel_ppm, bode_unsettled(&m), m.c[0].ac_c100, m.c[1].ac_c100,
+             m.c[0].centre_c100, m.c[1].centre_c100, m.c[0].clipped, m.c[1].clipped, m.c[0].code_mdb, m.c[1].code_mdb,
+             m.c[0].ph_mdeg, m.c[0].std_mdb, m.c[1].std_mdb, bode_meas_flags(&m, 0), bode_suspect(&m));
     }
     else if(cmd == 'B')
     {

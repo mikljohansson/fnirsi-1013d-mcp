@@ -29,6 +29,25 @@
 
 #define BODE_MDB_FLOOR        (-300000)     //level of a zero amplitude
 
+//Point flags (READ_BODE u16; the host tool's flag names in brackets)
+#define BODE_F_CH1_CLIPPED    0x0001    //[ch1_clipped]
+#define BODE_F_CLIPPED        0x0002    //[clipped] CH2
+#define BODE_F_CH2_OVERLOAD   0x0004    //[ch2_overload] CH2's front end saturated by a DC level (a flat record)
+#define BODE_F_CH1_LOW        0x0008    //[ch1_low] CH1 fundamental below 20 codes
+#define BODE_F_CH2_SMALL      0x0010    //[ch2_small] CH2 below 3 codes: +-1 dB
+#define BODE_F_LOW_SNR        0x0020    //[low_snr] CH2 less than 20 dB above its noise
+#define BODE_F_NEAR_FLOOR     0x0040    //[near_floor] CH2 less than 20 dB above the generator-off background
+#define BODE_F_UNSETTLED      0x0080    //[unsettled]
+#define BODE_F_INCOHERENT     0x0100    //[incoherent] CH1 energy beside the fundamental
+#define BODE_F_SPLICED        0x0200    //[spliced] CH2 changed range at this point
+#define BODE_F_FIR_OFF        0x0400    //[fir_off]
+#define BODE_F_NO_CAL         0x0800    //[no_cal] thru applied, no thru point with this (M, N)
+#define BODE_F_CAL_RANGE      0x1000    //[cal_range] thru taken on other ranges
+#define BODE_F_CAL_FLAGGED    0x2000    //[cal_flagged] the thru point was itself flagged
+#define BODE_F_RETRIED        0x4000    //measured again (re-centred, settle retry or range change)
+#define BODE_F_BAD            (BODE_F_CH1_CLIPPED | BODE_F_CLIPPED | BODE_F_CH2_OVERLOAD | BODE_F_LOW_SNR | \
+                               BODE_F_NEAR_FLOOR | BODE_F_UNSETTLED | BODE_F_INCOHERENT)
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // Planner (bode-design 3.1-3.2; the host's plan_point / plan_sweep, identical integers)
 
@@ -87,6 +106,8 @@ typedef struct
   int32  x0;            //the offset taken off every sample (the first pass's rounded mean)
   uint16 xmin, xmax;    //extremes of the raw samples
   int64  li[2], lq[2];  //CH1 only: the tones one bin below and above the fundamental (leakage)
+  int64  su;            //fw 0.2.87: sum (x - x0) and sum (x - x0)^2 over the record, unwindowed (the record's spread)
+  uint64 sxx;
 } bode_dft_ch;
 
 typedef struct
@@ -130,6 +151,7 @@ typedef struct
   int32  centre_c100;   //record mean, 1/100 code
   int32  mean_uv;       //record mean in uV at the BNC (1x), relative to the channel's 0 V code (128 - offset)
   uint8  clipped;       //fw 0.2.83: a sample of this record at code 0 or 255 (the record's own min / max, nothing else)
+  int32  std_mdb;       //fw 0.2.87: the record's standard deviation in codes, dB re 1 code (host Measurement.std1 / std2)
 } bode_chm;
 
 typedef struct
@@ -152,6 +174,21 @@ void   bode_measure(const bode_plan *pp, const bode_dft *d, const bode_scale s[2
 //The half-record settle verdict (host Measurement.unsettled): the halves differ by more than 0.1 dB or 1 deg and by more
 //than 4 sqrt(2) x the noise's own spread
 int    bode_unsettled(const bode_meas *m);
+
+//fw 0.2.87: the host's Measurement properties and the measurement's own flags (bode.py _result), the same definitions and
+//thresholds (bode_dsp.c names each host constant):
+//  flat1     CH1's record has a standard deviation under 1 code (FLAT_STD_CODES): a stuck or saturated readout, no stimulus
+//  ch1_dead  flat1, or CH1's fundamental under 0.5 code (CH1_MIN_CODES): nothing to divide by
+//  suspect   ch1_dead, or CH2 flat (std under 1 code and excursion under 0.05 code): worth one retake
+//  flat2     CH2 saturated (coll: its tone collapsed after a range change, or the record flat with a tone under 3
+//            codes); never while CH1 is flat (both flat = a stuck readout, not a CH2 overload)
+int    bode_flat1(const bode_meas *m);
+int    bode_ch1_dead(const bode_meas *m);
+int    bode_suspect(const bode_meas *m);
+int    bode_flat2(const bode_meas *m, int coll);
+//BODE_F_CH1_CLIPPED .. BODE_F_UNSETTLED of a measurement (ch1_clipped, clipped, ch2_overload, ch1_low, ch2_small, low_snr,
+//incoherent, unsettled); the engine adds fir_off, near_floor, retried, spliced and the thru's flags
+uint16 bode_meas_flags(const bode_meas *m, int coll);
 
 //Helpers exposed for the engine and the tests
 int32  bode_mdb_iq(int64 i, int64 q);                     //20 log10 sqrt(i^2 + q^2)

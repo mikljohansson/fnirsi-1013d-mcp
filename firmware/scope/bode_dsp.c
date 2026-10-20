@@ -10,6 +10,20 @@
 #define MDB_PER_Q16_X32   394566036ll     //20 log10(2) x 1000 / 65536 x 2^32: mdB per Q16 log2 unit of an amplitude
 #define LOG2_10_PER_MDB   713379ll        //log2(10) / 20000 x 2^32: Q32 log2 per mdB of an amplitude ratio
 
+//Quality thresholds: the host tool's constants (mcp/src/fnirsi1013d/bode.py, the validated reference: hardware-status
+//2026-10-19 Bode bench), in mdB of a code level or of a ratio, 1/100 code for an excursion. fw 0.2.87 checks every one of
+//them against bode.py on identical records (host_tests/test_bode.py test_flags).
+#define CH1_LOW_MDB       26021           //CH1_LOW_CODES 20: CH1 fundamental below 20 codes peak -> ch1_low
+#define CH1_MIN_MDB       (-6021)         //CH1_MIN_CODES 0.5: below it (or flat1) CH1 is dead -> incoherent, no H; also
+                                          //the floor of each CH1 half in the settle check (measure_pair's `floor`)
+#define FLAT_STD_MDB      0               //FLAT_STD_CODES 1.0: a record with a standard deviation under 1 code is flat
+#define FLAT_C100         5               //FLAT_CODES 0.05: CH2's largest distance from its mean under it: no tone
+#define CH2_SMALL_MDB     9542            //CH2_SMALL_CODES 3: CH2 fundamental below 3 codes -> ch2_small
+#define LOW_SNR_MDB       20000           //LOW_SNR_DB 20: CH2 fundamental less than 20 dB above its noise -> low_snr
+#define LEAK_LIMIT_MDB    (-40000)        //LEAK_LIMIT_DB -40: CH1 one bin beside the fundamental above it -> incoherent
+#define SETTLE_MDB        100             //SETTLE_DB 0.1 and SETTLE_DEG 1: the halves' limits (bode_unsettled)
+#define SETTLE_MDEG       1000
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // 64-bit helpers
 
@@ -406,6 +420,8 @@ static void dft_core(const bode_plan *pp, const uint16 *x1, const uint16 *x2, in
     ch->rk = 0;
     ch->hi[0] = ch->hi[1] = ch->hq[0] = ch->hq[1] = ch->hx[0] = ch->hx[1] = 0;
     ch->li[0] = ch->li[1] = ch->lq[0] = ch->lq[1] = 0;
+    ch->su = 0;
+    ch->sxx = 0;
     ch->x0 = x0[c];
     ch->xmin = 0xFFFF;
     ch->xmax = 0;
@@ -421,7 +437,8 @@ static void dft_core(const bode_plan *pp, const uint16 *x1, const uint16 *x2, in
   {
     const uint16 *x = c ? x2 : x1;
     bode_dft_ch  *ch = &d->ch[c];
-    int64 si = 0, sq = 0, sx = 0, li0 = 0, lq0 = 0, li1 = 0, lq1 = 0;
+    int64 si = 0, sq = 0, sx = 0, li0 = 0, lq0 = 0, li1 = 0, lq1 = 0, su = 0;
+    uint64 sxx = 0;
     int64 hi0 = 0, hq0 = 0, hx0 = 0;
     int64 wsum = 0, wc = 0, ws = 0, hwsum0 = 0, hwc0 = 0, hws0 = 0, lwc0 = 0, lws0 = 0, lwc1 = 0, lws1 = 0;
     uint16 mn = 0xFFFF, mx = 0;
@@ -451,6 +468,8 @@ static void dft_core(const bode_plan *pp, const uint16 *x1, const uint16 *x2, in
       si += (int64)xw * co;
       sq -= (int64)xw * si_;
       sx += xw;
+      su += xr;
+      sxx += (uint64)((int64)xr * xr);
 
       if(c == 0)
       {
@@ -488,6 +507,8 @@ static void dft_core(const bode_plan *pp, const uint16 *x1, const uint16 *x2, in
     ch->si = si;
     ch->sq = sq;
     ch->sx = sx;
+    ch->su = su;
+    ch->sxx = sxx;
     ch->hi[0] = hi0;       ch->hq[0] = hq0;       ch->hx[0] = hx0;
     ch->hi[1] = si - hi0;  ch->hq[1] = sq - hq0;  ch->hx[1] = sx - hx0;
     ch->xmin = mn;
@@ -717,6 +738,13 @@ void bode_measure(const bode_plan *pp, const bode_dft *d, const bode_scale s[2],
     o->ac_c100     = ((hi - cen) > (cen - lo)) ? hi - cen : cen - lo;
     //fw 0.2.83: from this record only (bench 2026-10-20 10:52: the readout's sticky ADoverload leaked earlier captures in)
     o->clipped     = (uint8)((lo < 50) || (hi > 25450));
+
+    //Standard deviation (host Measurement.std1 / std2): L^2 var = L sum x^2 - (sum x)^2 in raw units squared
+    {
+      uint64 a = ch->sxx * L, b = (uint64)(ch->su < 0 ? -ch->su : ch->su), b2 = b * b;
+
+      o->std_mdb = (a <= b2) ? BODE_MDB_FLOOR : bode_mdb_u64(a - b2) / 2 - bode_mdb_u64(L) + cpr_mdb[c];
+    }
     o->mean_uv     = (int32)(((int64)(cen - zero_code_c100[c]) * (int64)uv_q8[c]) / (256 * 100));
 
     //Halves
@@ -743,10 +771,20 @@ void bode_measure(const bode_plan *pp, const bode_dft *d, const bode_scale s[2],
 
   //Halves: Hb / Ha = (Xb2 Xa1) / (Xb1 Xa2); the relative difference |Hb / Ha - 1| = |Xb2 Xa1 - Xb1 Xa2| / |Xb1 Xa2|
   m->half_ok = d->halves;
+
+  //measure_pair's floor: each CH1 half at least CH1_MIN_CODES (0.5 code), else the halves are not compared
+  if(d->halves)
+  {
+    int k;
+
+    for(k = 0; k < 2; k++)
+      if(bode_mdb_iq(ih[0][k], qh[0][k]) + norm_mdb(d->hwsum[k]) + cpr_mdb[0] < CH1_MIN_MDB)
+        m->half_ok = 0;
+  }
   m->half_mdb = m->half_mdeg = 0;
   m->half_rel_ppm = 0;
 
-  if(d->halves)
+  if(m->half_ok)
   {
     int32 la[2], lb[2], pa[2], pb[2], num_mdb, den_mdb;
     int64 ar, ai, br, bi, cr, ci, dr, di, nr, ni;
@@ -805,7 +843,8 @@ int bode_unsettled(const bode_meas *m)
   if(!m->half_ok)
     return 0;
 
-  if((m->half_mdb <= 100) && (m->half_mdb >= -100) && (m->half_mdeg <= 1000) && (m->half_mdeg >= -1000))
+  if((m->half_mdb <= SETTLE_MDB) && (m->half_mdb >= -SETTLE_MDB) && (m->half_mdeg <= SETTLE_MDEG) &&
+     (m->half_mdeg >= -SETTLE_MDEG))
     return 0;
 
   //noise_rel = sqrt(2) hypot(n1 / |X1|, n2 / |X2|); unsettled when half_rel > 4 sqrt(2) noise_rel, i.e.
@@ -817,6 +856,47 @@ int bode_unsettled(const bode_meas *m)
   rel2 = (uint64)m->half_rel_ppm * m->half_rel_ppm;
 
   return rel2 > lim;
+}
+
+//The host's Measurement properties (bode.py), fw 0.2.87
+int bode_flat1(const bode_meas *m)
+{
+  return m->c[0].std_mdb < FLAT_STD_MDB;
+}
+
+int bode_ch1_dead(const bode_meas *m)
+{
+  return bode_flat1(m) || (m->c[0].code_mdb < CH1_MIN_MDB);
+}
+
+int bode_suspect(const bode_meas *m)
+{
+  return bode_ch1_dead(m) || ((m->c[1].std_mdb < FLAT_STD_MDB) && (m->c[1].ac_c100 < FLAT_C100));
+}
+
+int bode_flat2(const bode_meas *m, int coll)
+{
+  if(bode_flat1(m))
+    return 0;
+
+  return coll || ((m->c[1].ac_c100 < FLAT_C100) && (m->c[1].code_mdb < CH2_SMALL_MDB));
+}
+
+//bode.py BodeRunner._result, the flags of the measurement itself
+uint16 bode_meas_flags(const bode_meas *m, int coll)
+{
+  uint16 f = 0;
+
+  if(m->c[0].clipped)                                   f |= BODE_F_CH1_CLIPPED;
+  if(m->c[1].clipped)                                   f |= BODE_F_CLIPPED;
+  if(bode_flat2(m, coll))                               f |= BODE_F_CH2_OVERLOAD;
+  if(m->c[0].code_mdb < CH1_LOW_MDB)                    f |= BODE_F_CH1_LOW;
+  if(m->c[1].code_mdb < CH2_SMALL_MDB)                  f |= BODE_F_CH2_SMALL;
+  if(m->snr2_mdb < LOW_SNR_MDB)                         f |= BODE_F_LOW_SNR;
+  if((m->leak_mdb > LEAK_LIMIT_MDB) || bode_ch1_dead(m)) f |= BODE_F_INCOHERENT;
+  if(bode_unsettled(m))                                 f |= BODE_F_UNSETTLED;
+
+  return f;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

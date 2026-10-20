@@ -6,20 +6,18 @@
 
 #include "bode_sweep.h"
 
-//Quality gates (bode.py; mdB of code levels and of ratios)
-#define CH1_LOW_MDB         26021       //20 codes
-#define CH2_SMALL_MDB       9542        //3 codes
-#define LOW_SNR_MDB         20000
-#define NEAR_FLOOR_MDB      20000
-#define LEAK_LIMIT_MDB      (-40000)
-#define FLAT_C100           5           //0.05 code
-#define COLLAPSE_MDB        20000       //a tone below 1/10 of the reference
+//Quality gates (bode.py; mdB of code levels and of ratios). The measurement's own flags and their thresholds are in
+//bode_dsp.c (bode_meas_flags, fw 0.2.87)
+#define CH1_LOW_MDB         26021       //CH1_LOW_CODES 20 (the 0.2.71 readout rule)
+#define NEAR_FLOOR_MDB      20000       //NEAR_FLOOR_DB 20
+#define COLLAPSE_MDB        20000       //COLLAPSE_RATIO 0.1: a tone below 1/10 of the reference
 #define CENTRE_TOL_C100     1200        //re-centre beyond 12 codes from 128
 #define FULL_SCALE_C100     10880       //85 % of 128 codes
 #define DOWNRANGE_C100      7680        //60 % of 128 codes
 #define RELAY_MS            50
 #define MAX_SWITCHES        6
 #define FIRST_FACTOR        3
+#define PLAN_FLOOR_C100     3840        //fw 0.2.87: 30 % of 128 codes, the range plan's floor (bode_sweep.h)
 
 //Nominal V/div per hardware range in mV (the host's RANGE_VOLTS_PER_DIV ratios)
 static const uint16 vpd_mv[6] = { 5000, 2500, 1000, 500, 200, 100 };
@@ -57,7 +55,7 @@ static int after(uint32 now, uint32 t)
 
 static int flat2(const bode_meas *m, int collapsed)
 {
-  return collapsed || ((m->c[1].ac_c100 < FLAT_C100) && (m->c[1].code_mdb < CH2_SMALL_MDB));
+  return bode_flat2(m, collapsed);
 }
 
 //CH2's tone vanished on the new range at the same frequency: ref measured it clearly on the previous one
@@ -69,12 +67,19 @@ static int collapsed(const bode_meas *ref, const bode_meas *now)
 //----------------------------------------------------------------------------------------------------------------------------------
 // Hardware steps
 
+//A front-end write's settling (RELAY_SETTLE_S): fw 0.2.87 the waits add up as the host's sleeps do (bode.py _set_range
+//sleeps after the offset write and again at its end: 100 ms after a range change with the offset centred, 50 ms after
+//an offset move). Up to 0.2.86 they overlapped into one 50 ms; the bench sweep of 2026-10-20 12:05 flagged unsettled /
+//incoherent exactly on the points after a CH2 range change, where the host, waiting longer, flagged none (inference:
+//the offset PWM's filter still settling in the record)
 static void relay_wait(bode_eng *e)
 {
-  uint32 t = now_ms(e) + RELAY_MS;
+  uint32 now = now_ms(e);
 
-  if(!e->relay_pending || after(t, e->relay_until))
-    e->relay_until = t;
+  if(e->relay_pending && !after(now, e->relay_until))
+    e->relay_until += RELAY_MS;
+  else
+    e->relay_until = now + RELAY_MS;
 
   e->relay_pending = 1;
 }
@@ -114,13 +119,11 @@ static int shift_offset(bode_eng *e, int c, int32 codes_c100)
   return ok;
 }
 
-//Range r with the offset centred on a DC level of v_uv microvolts at the BNC (host _set_range: offset 0, then centre)
+//Range r with the offset centred on a DC level of v_uv microvolts at the BNC (host _set_range: offset 0, then centre;
+//the offset write's wait, then RELAY_SETTLE_S at the end)
 static void set_range(bode_eng *e, int c, int r, int32 v_uv)
 {
   bode_chinfo ci;
-
-  if(r != e->range[c])
-    relay_wait(e);
 
   set_channel(e, c, r, 0);
   e->hw->chan_info(e->hw->ctx, c, r, &ci);
@@ -156,6 +159,7 @@ static void request(bode_eng *e, int phase, const bode_plan *pp, uint32 settle_m
   uint32 start = (e->relay_pending && !after(now, e->relay_until)) ? e->relay_until : now;
 
   e->relay_pending = 0;
+  e->msettle  = settle_ms;
   e->phase    = (uint8)phase;
   e->mp       = pp;
   e->mtotal   = total;
@@ -238,16 +242,8 @@ static void result(bode_eng *e, int i, const bode_meas *m, int coll, int retries
   bode_point *p = &e->pts[i];
   const bode_plan *pp = &e->plans[i];
   int32 bg = e->bg_mdb[i][e->range[1] % 6];
-  uint16 f = 0;
+  uint16 f = bode_meas_flags(m, coll);
 
-  if(m->c[0].clipped)                         f |= BODE_F_CH1_CLIPPED;
-  if(m->c[1].clipped)                         f |= BODE_F_CLIPPED;
-  if(flat2(m, coll))                          f |= BODE_F_CH2_OVERLOAD;
-  if(m->c[0].code_mdb < CH1_LOW_MDB)          f |= BODE_F_CH1_LOW;
-  if(m->c[1].code_mdb < CH2_SMALL_MDB)        f |= BODE_F_CH2_SMALL;
-  if(m->snr2_mdb < LOW_SNR_MDB)               f |= BODE_F_LOW_SNR;
-  if(m->leak_mdb > LEAK_LIMIT_MDB)            f |= BODE_F_INCOHERENT;
-  if(bode_unsettled(m))                       f |= BODE_F_UNSETTLED;
   if((pp->n >= 16) && !(pp->n & 3) && e->hw->has_fir && !e->last_fir)
                                               f |= BODE_F_FIR_OFF;
   if((bg > BODE_MDB_FLOOR) && (m->c[1].lvl_mdb < bg + NEAR_FLOOR_MDB))
@@ -265,6 +261,26 @@ static void result(bode_eng *e, int i, const bode_meas *m, int coll, int retries
   p->r2       = e->range[1];
   p->retries  = (uint8)retries;
   p->done     = 1;
+
+  //The range plan's entry (fw 0.2.87): the ranges, offsets and splice factor of this result. CH1 clipped or dead, or the
+  //first point's CH1 fitting a finer range under 60 % of full scale (a fooled pre-scan): the plan is not kept
+  if(e->rp_set && !e->thru_sweep)
+  {
+    bode_rplan *rp = &e->rplan[i];
+    int r1 = e->range[0];
+
+    if(m->c[0].clipped || bode_ch1_dead(m) ||
+       ((i == 0) && (r1 < 5) && ((int64)m->c[0].ac_c100 * vpd_mv[r1] < (int64)DOWNRANGE_C100 * vpd_mv[r1 + 1])))
+      e->rp_set = 0;
+
+    rp->have   = 1;
+    rp->r[0]   = e->range[0];
+    rp->r[1]   = e->range[1];
+    rp->off[0] = (int16)e->dcoffset[0];
+    rp->off[1] = (int16)e->dcoffset[1];
+    rp->k_mdb  = e->k_mdb;
+    rp->k_mdeg = e->k_mdeg;
+  }
 }
 
 static void splice(bode_eng *e, int32 old_mdb, int32 old_mdeg, const bode_meas *again)
@@ -317,8 +333,8 @@ static void auto_range(bode_eng *e, const bode_meas *m, int coll)
 {
   int r = e->range[1];
 
-  //STOP: the point keeps this result, no range change follows
-  if((e->cfg.ch2_mode != BODE_CH2_AUTO) || e->stop_req)
+  //STOP: the point keeps this result, no range change follows; nor on a record without a stimulus (host _auto_range)
+  if((e->cfg.ch2_mode != BODE_CH2_AUTO) || e->stop_req || bode_ch1_dead(m))
   {
     next_point(e);
     return;
@@ -336,9 +352,10 @@ static void auto_range(bode_eng *e, const bode_meas *m, int coll)
     return;
   }
 
-  //Down-range when the predicted peak on the next range stays under 60 % of full scale
+  //Down-range when the predicted peak on the next range stays under 60 % of full scale; from the range plan only under
+  //its floor, 30 % (fw 0.2.87)
   if((r >= 5) || (e->switches >= MAX_SWITCHES) || (e->bad_down & (1 << (r + 1))) ||
-     ((int64)m->c[1].ac_c100 * vpd_mv[r] > (int64)DOWNRANGE_C100 * vpd_mv[r + 1]))
+     ((int64)m->c[1].ac_c100 * vpd_mv[r] > (int64)(e->reuse ? PLAN_FLOOR_C100 : DOWNRANGE_C100) * vpd_mv[r + 1]))
   {
     next_point(e);
     return;
@@ -390,11 +407,40 @@ static int bg_has(bode_eng *e, uint32 key)
   return 0;
 }
 
+//The point's planned ranges, offsets and splice factor (fw 0.2.87); the front end's waits as set_range's
+static void plan_apply(bode_eng *e, int i)
+{
+  const bode_rplan *rp = &e->rplan[i];
+  int c;
+
+  for(c = 0; c < 2; c++)
+  {
+    if(rp->r[c] != e->range[c])
+    {
+      set_channel(e, c, rp->r[c], rp->off[c]);
+      relay_wait(e);
+      relay_wait(e);
+    }
+    else if(rp->off[c] != e->dcoffset[c])
+    {
+      set_channel(e, c, rp->r[c], rp->off[c]);
+      relay_wait(e);
+    }
+  }
+
+  e->k_mdb  = rp->k_mdb;
+  e->k_mdeg = rp->k_mdeg;
+}
+
 static void point_begin(bode_eng *e)
 {
   const bode_plan *pp = &e->plans[e->idx];
-  uint32 key = (pp->n << 3) | e->range[1];
+  uint32 key;
 
+  if(e->reuse)
+    plan_apply(e, e->idx);
+
+  key = (pp->n << 3) | e->range[1];
   e->retries = 0;
 
   //Background: generator off, one capture per rate and CH2 range, long enough for every point at this rate
@@ -443,6 +489,8 @@ static void on_prescan(bode_eng *e, const bode_meas *m)
 
     if((c == 1) && (e->cfg.ch2_mode == BODE_CH2_HOLD))
       r = e->hold_r2;
+    else if((c == 0) && bode_ch1_dead(m))
+      r = 1;            //nothing to range on (flat even after the retake, or no tone): host _prescan
     else
       for(cand = 1; cand < 6; cand++)
         if((int64)ac * vpd_mv[1] <= (int64)FULL_SCALE_C100 * vpd_mv[cand])
@@ -483,6 +531,13 @@ static void on_verify(bode_eng *e, const bode_meas *m)
 
   e->iter++;
 
+  //host _prescan: CH1 flat even after the retake: nothing to range on, keep the ranges
+  if(bode_ch1_dead(m))
+  {
+    e->iter = 4;
+    over = 0;
+  }
+
   if(over && (e->cfg.ch2_mode == BODE_CH2_HOLD))
   {
     finish(e, BODE_ST_ERROR, BODE_ERR_OVERLOAD);
@@ -498,7 +553,7 @@ static void on_verify(bode_eng *e, const bode_meas *m)
     return;
   }
 
-  for(c = 0; c < 2; c++)
+  for(c = 0; (c < 2) && !bode_ch1_dead(m); c++)
   {
     int cl = c ? (m->c[1].clipped || over) : m->c[0].clipped;
 
@@ -512,7 +567,7 @@ static void on_verify(bode_eng *e, const bode_meas *m)
     }
   }
 
-  if(!changed)
+  if(!changed && !bode_ch1_dead(m))
     changed = recentre(e, m);
 
   if(changed && (e->iter < 4) && !e->stop_req)
@@ -580,7 +635,7 @@ static void on_measure(bode_eng *e, const bode_meas *m)
       if(stop)
         return;
 
-      if((e->phase == PH_POINT) && !e->stop_req && recentre(e, m))
+      if((e->phase == PH_POINT) && !e->stop_req && !bode_ch1_dead(m) && recentre(e, m))
       {
         e->retries++;
         measure(e, PH_RECENTRE, pp, point_settle(e));
@@ -646,6 +701,18 @@ static void on_measure(bode_eng *e, const bode_meas *m)
 
         splice(e, p->h_mdb, p->h_mdeg, m);
         p->flags |= BODE_F_SPLICED;
+
+        //From the plan: the point dropped below the floor, so it starts on the new range next time (the new factor
+        //scales that range onto the first)
+        if(e->reuse && e->rp_set)
+        {
+          bode_rplan *rp = &e->rplan[e->idx];
+
+          rp->r[1]   = e->range[1];
+          rp->off[1] = (int16)e->dcoffset[1];
+          rp->k_mdb  = e->k_mdb;
+          rp->k_mdeg = e->k_mdeg;
+        }
       }
 
       next_point(e);
@@ -675,6 +742,23 @@ void bode_init(bode_eng *e, const bode_hw *hw)
   e->cfg.settle     = BODE_SETTLE_NORMAL;
   e->cfg.ch2_mode   = BODE_CH2_AUTO;
   e->cfg.background = 1;
+}
+
+//The range plan matches these settings and is complete (fw 0.2.87)
+static int plan_matches(const bode_eng *e, const bode_cfg *c, uint8 hold, int n)
+{
+  int i;
+
+  if(!e->rp_set || (e->rp_cfg.start_mhz != c->start_mhz) || (e->rp_cfg.stop_mhz != c->stop_mhz) ||
+     (e->rp_cfg.points != c->points) || (e->rp_cfg.settle != c->settle) || (e->rp_cfg.ch2_mode != c->ch2_mode) ||
+     ((c->ch2_mode == BODE_CH2_HOLD) && (e->rp_hold != hold)))
+    return 0;
+
+  for(i = 0; i < n; i++)
+    if(!e->rplan[i].have)
+      return 0;
+
+  return 1;
 }
 
 int bode_start(bode_eng *e, const bode_cfg *cfg, int thru, int hold_r2)
@@ -727,10 +811,10 @@ int bode_start(bode_eng *e, const bode_cfg *cfg, int thru, int hold_r2)
   e->switches   = 0;
   e->k_mdb      = 0;
   e->k_mdeg     = 0;
-  e->have_ref2  = 0;
   e->nbg        = 0;
   e->retries    = 0;
   e->relay_pending = 0;
+  e->retake     = 0;
   e->gen_on     = 0;
   e->disturbed  = 1;
 
@@ -739,6 +823,32 @@ int bode_start(bode_eng *e, const bode_cfg *cfg, int thru, int hold_r2)
     e->thru.measured = 0;
     e->thru.applied  = 0;
   }
+
+  //The range plan (fw 0.2.87): the same settings start from it; other settings start a new one; a thru sweep drops it
+  e->reuse = (uint8)(!thru && plan_matches(e, &e->cfg, e->hold_r2, n));
+
+  if(thru)
+    e->rp_set = 0;
+  else if(!e->reuse)
+  {
+    for(i = 0; i < BODE_MAX_POINTS; i++)
+      e->rplan[i].have = 0;
+
+    e->rp_cfg  = e->cfg;
+    e->rp_hold = e->hold_r2;
+    e->rp_set  = 1;
+  }
+
+  if(e->reuse)
+  {
+    //No pre-scan: every point starts on its planned ranges (the first write goes out whatever the channel shows); the
+    //pre-scan's reference (ref2, v_dc2) of the sweep that made the plan stays
+    e->range[0] = e->range[1] = 0xFF;
+    point_begin(e);
+    return 0;
+  }
+
+  e->have_ref2 = 0;
 
   //Pre-scan: both channels on range 1 (+-11 V at 1x), offsets on 0 V, the first frequency with the first-point settle
   for(i = 0; i < 2; i++)
@@ -840,12 +950,40 @@ int bode_step(bode_eng *e)
       return 1;
     }
 
+    //fw 0.2.87 (host _measure / _background): a suspect record (CH1 flat or without a tone, CH2 constant; a constant
+    //background record) is taken once more with the same settle time, as the 0x153A first-record artefact looks so
     if(e->mbg)
+    {
+      uint32 i;
+      int    flat = 1;
+
+      for(i = 1; flat && (i < e->mtotal); i++)
+        flat = (cap.x[1][i] == cap.x[1][0]);
+
+      if(flat && !e->retake)
+      {
+        e->retake = 1;
+        request(e, e->phase, e->mp, e->msettle, e->mtotal, 1);
+        return 1;
+      }
+
+      e->retake = 0;
       on_bg(e, &cap);
+    }
     else
     {
       bode_dft_run(e->mp, cap.x[0], cap.x[1], e->work, &d);
       bode_measure(e->mp, &d, cap.s, cap.zero_c100, cap.uv_q8, &m);
+
+      if(bode_suspect(&m) && !e->retake && !e->stop_req)
+      {
+        e->retake = 1;
+        e->retries++;
+        request(e, e->phase, e->mp, e->msettle, e->mtotal, 0);
+        return 1;
+      }
+
+      e->retake = 0;
       on_measure(e, &m);
     }
   }
@@ -905,6 +1043,7 @@ uint32 bode_sweep_id(const bode_eng *e)    { return e->sweep_id; }
 int bode_count(const bode_eng *e)          { return e->np; }
 int bode_current(const bode_eng *e)        { return (e->state == BODE_ST_RUNNING) ? e->idx : -1; }
 uint16 bode_switches(const bode_eng *e)    { return e->switches; }
+int bode_plan_reused(const bode_eng *e)    { return e->reuse; }
 uint8 bode_exhausted(const bode_eng *e)    { return e->exhausted; }
 const bode_cfg *bode_last_cfg(const bode_eng *e)   { return &e->cfg; }
 const bode_plan *bode_plans(const bode_eng *e)     { return e->plans; }

@@ -4029,3 +4029,109 @@ bode_ui.c/h, test_ui.c), then docs. PC_FW_VERSION not bumped. Host tests green, 
   during the final sweep (button "Auto..." until the capture in progress ends, then STOP with the partial table); RUN
   after AUTO SET repeats at the found span; two Single sweeps in a row on the same span from the fold-out: the second
   counts "0 / 50" upwards, as does the Sweep card; READ_BODE view bits = 1 (bit 1 clear) after AUTO SET.
+
+## 56. fw-eng: the range plan, the device's flags aligned with the host's (fw 0.2.87 provisional, protocol 1.24 unchanged)
+
+Branch `fw-eng` from main cbff758 (fw 0.2.86). Brief: task-queue items "RUN stays continuous; repeated sweeps reuse the
+previous range plan" (owner 10-20 11:51 / 11:52, bode-ui.md section 10) and "Device sweep flags stricter than the
+host's" (bench 11:14 / 12:00). The coordinator's bench data of 12:05 (fw 0.2.86, RC 1 kOhm / 15 nF, 100 Hz .. 1 MHz / 25)
+had two device sweeps. Sweep 0 was good except for unsettled / incoherent / retried points at the CH2 switches, with 6
+switches. Sweep 1 had a fooled pre-scan that left CH1 on 2.5 V/div. The host sweep flagged 1 point. Commits: 1094c77
+(bode_dsp flags + test_flags), 8bf9a9f (engine retake and settle sequence + test_flat_retake), 53447c4 (range plan +
+test_range_plan), then docs. PC_FW_VERSION not bumped, no protocol change (READ_BODE's switch count already existed).
+Files: bode_dsp.c/.h, bode_sweep.c/.h, host_tests (bode_cli.c, test_bode.py, test_bode_sweep.c). Not touched: pc_bode.c
+(the plan lives in the engine), bode_view.c (nothing new to show), fpga_bus.c / pc_hal_scope.c / the FPGA tree
+(fpga-gen10). Host tests all green (test_bode_sweep 1046 checks, test_bode.py incl. test_flags). The GCC 10 build has no
+warnings in the changed files. **Nothing benched, nothing flashed.**
+
+**The range plan** (the bode_sweep.h comment above `bode_rplan`).
+- **What is kept.** For each point the engine keeps the CH1 / CH2 range, both offsets and the splice factor that the
+  point's result was measured on. `result()` writes the entry. A floor switch in a plan sweep moves the entry to the new
+  range and factor.
+- **When a sweep reuses it.** `bode_start` compares the sweep's settings with the plan's (`plan_matches`: start, stop,
+  points, Settle, CH2 mode, Hold's CH2 range, and every entry present). When they are equal there is no pre-scan, and
+  `point_begin` applies the point's entry (`plan_apply`: a range write costs two RELAY_MS waits, an offset write one).
+- **When CH2 switches during reuse.** `auto_range` steps CH2 down only below PLAN_FLOOR_C100: 30 % of full scale
+  predicted on the next range, half the fresh sweep's 60 %. That gives 6 dB of hysteresis, so an unchanged circuit never
+  switches. A clip still steps up at once.
+- **When it starts over or is dropped.** Different settings start a new plan (entries cleared), and a thru sweep drops
+  it. The plan is also dropped (`rp_set = 0`, so the next sweep ranges from scratch) when a result has CH1 clipped or
+  dead, or when the first point's CH1 would fit the next finer range under 60 % of full scale. That last case means the
+  pre-scan was fooled (bench 12:05 sweep 1).
+- **Cancelled sweeps.** A cancelled sweep leaves the entries it wrote. If it ranged from scratch, the plan is incomplete
+  and the next sweep ranges again. If it started from a complete plan, the plan stays complete.
+- **Results.** `bode_plan_reused()` tells whether the latest sweep started from the plan. Splice factors are kept per
+  point, so H on a plan sweep equals the first sweep's (test: within 0.015 dB).
+- **Relays.** The relays still click where consecutive points' planned ranges differ (on the RC: 0.5 -> 0.2 -> 0.1 V/div,
+  and back at the next sweep's start). What stops is the ranging: the pre-scan, the verify and the extra captures of
+  each switch. On the RC model the first sweep takes 40 captures and 2 switches, later sweeps 36 and 0.
+
+**The flags against the host** (item 2).
+- **Thresholds.** The thresholds in bode_dsp.c were already the host's. They are now named after bode.py's constants:
+  CH1_LOW_CODES, CH1_MIN_CODES, FLAT_STD_CODES, FLAT_CODES, CH2_SMALL_CODES, LOW_SNR_DB, LEAK_LIMIT_DB, SETTLE_DB /
+  SETTLE_DEG; NEAR_FLOOR_DB and COLLAPSE_RATIO are in bode_sweep.c.
+- **The comparison test.** test_bode.py `test_flags` runs `bode_meas_flags` and the host's `_result` flags on the same
+  records. The records come from the simulator's `dut_response` of the bench RC, in 8-bit and 16-bit form, with:
+  - CH2 on the host's range and one range coarser
+  - a deep stopband
+  - an off-bin tone beside CH1
+  - a ringing CH2
+  - a DC step in CH1
+  - clipped and flat records
+  - a toneless CH1
+
+  The flags are identical everywhere. The test skips only flags whose host number sits within the estimators' spread of
+  the threshold (low_snr / unsettled use the device's period-difference noise).
+- **What differed.** The host's newer rules (mcp-gen7, written for the first-record artefact) are now in the C:
+  - `bode_flat1`: CH1 standard deviation under 1 code
+  - `bode_ch1_dead`: flat1, or CH1 under 0.5 code; such a point reads incoherent
+  - `bode_suspect`: the record is retaken once
+  - `bode_flat2` is never true while CH1 is flat
+  - the settle check skips halves whose CH1 tone is under 0.5 code
+  - in the engine: the retake (point, pre-scan, verify, and a constant CH2 background record); a dead CH1 keeps range 1
+    in the pre-scan, ends the verify, and skips re-centring and CH2 ranging
+- **Conclusion: the 12:05 excess is not the DSP.** The same records give the same flags. The device's extra flags sat on
+  the first records after a CH2 range change (31.6, 46.4 and 100 kHz) and on retried points.
+- **The one real sequence difference.** After `set_range` the host sleeps 50 ms after the offset write and 50 ms at the
+  end (100 ms, plus USB time). The device's waits overlapped into 50 ms; `relay_wait` now adds them up. Inference: the
+  offset PWM's filter was still settling in the record. The "CH1 step" case of test_flags shows that such a step reads
+  incoherent + unsettled.
+- **Remaining candidate.** The 0x153A first-record artefact (fpga-gen10). The retake covers its flat form.
+
+Not done / for the next agent:
+- The view shows nothing about the plan (the brief allowed it only if needed). `bode_plan_reused` is there for a card or
+  a READ_BODE bit if the owner wants one.
+- `bode_estimate_ms` still counts the pre-scan on a plan sweep, so the estimate is a few hundred ms high.
+- The device's noise estimate (period differences) still differs from the host's FFT median on a transient (documented
+  in section 42). It only moves low_snr / unsettled near their thresholds.
+
+**Bench walk-through (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, no SD writes; 0x153A;
+RC 1 kOhm / 15 nF on the post, wiring A, x1 probes; `#VER fw=0.2.86,...`, number not bumped)**
+1. Frequency response, CTRL > Sweep 100 Hz .. 1 MHz, 25 points, Settle Normal, CH2 Auto; RUN.
+   - Sweep 1: READ_BODE header switches 2 (6 on 0.2.86 at 12:05), CH1 at range 3.
+   - Sweeps 2, 3, ...: switches 0, the same r1 / r2 per row as sweep 1, |H| within 0.05 dB of sweep 1.
+   - The relays click only where the planned range changes (two or three clicks per sweep, none of the
+     switch-and-remeasure pairs). The sweep is a little shorter (READ_BODE elapsed ms). STOP.
+2. Single sweep twice from the fold-out at the same settings: switches 0 both times. Change Points to 24: the next sweep
+   switches again (2), the one after reports 0.
+3. AUTO SET, then RUN. AUTO SET's final sweep ranges (switches as a first sweep, because the settings are new). RUN's
+   first sweep reports 0 switches.
+4. Flags against the host. Run the same span on the host (`fnirsi1013d-bode --port COM10 --yes --start 100Hz --stop 1MHz
+   --points 25`, view closed first) and on the device (sweep 2 of step 1).
+   - The device flags no more points than the host (12:05: host 1 flagged; device 0.2.86 unsettled / incoherent at
+     46.4 and 100 kHz).
+   - Expect no unsettled / incoherent points on the device. Spliced / retried are not "flagged" (grey) flags.
+5. Plan with a changing circuit, during RUN.
+   - Short the 15 nF briefly or swap it (e.g. 1.5 nF): a point that clips steps CH2 up (switches > 0 on that sweep), and
+     later sweeps settle back to 0.
+   - Probe off the post (CH1 clipped or dead): the next sweep ranges from scratch (switches as a first sweep).
+6. If the first sweep after entering the mode shows CH1 on 2.5 V/div (a fooled pre-scan, ch1_low rows), the next sweep
+   must range again (not 0 switches, CH1 back on 0.5 V/div), and the one after that reuses the plan.
+
+Bug indicators:
+- switches > 0 on every RUN sweep of an unchanged RC
+- r1 / r2 differing between plan sweeps
+- |H| steps at the planned range changes (the splice factor not reused)
+- a plan sweep right after a Points / Settle / CH2 mode change (switches 0 right after a change)
+- CH1 left on 2.5 V/div for more than one sweep
+- the header's switch count above 6
