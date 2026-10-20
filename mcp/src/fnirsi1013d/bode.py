@@ -1316,7 +1316,8 @@ def device_settle_code(settle: str | float | int | None) -> int:
 
 
 def device_ch2_code(ch2_range: str | float | int) -> int:
-    """BODE_CTRL byte 3: 'auto' 0, 'fixed' 1 (hold: CH2's range when the sweep starts)."""
+    """BODE_CTRL byte 3: 'auto' 0, 'fixed' 1 (hold: CH2's range when the sweep starts; the screen says Constant, the
+    V/div of the CH2 menu, fw 0.2.94)."""
     v = str(ch2_range).strip().lower()
     if v not in P.BODE_CH2_MODES:
         raise ValueError(f"ch2_range {ch2_range!r}: the device sweep takes 'auto' or 'fixed' (set CH2's V/div first "

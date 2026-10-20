@@ -98,7 +98,7 @@ def test_codecs_match_the_firmware_vectors():
     assert P.ReadBodeReq().pack() == frame_payload("req_read_bode")
     assert P.REQUEST_SIZES[P.Cmd.BODE_CTRL] == 16 and P.REQUEST_SIZES[P.Cmd.READ_BODE] == 8
     assert P.CMD_CAP[P.Cmd.BODE_CTRL] == P.CMD_CAP[P.Cmd.READ_BODE] == P.Caps.DECIM
-    assert P.BodeHeader.size() == 32 and P.BodeRow.size() == 20 and P.BodeCtrlResp.size() == 50
+    assert P.BodeHeader.size() == 32 and P.BodeRow.size() == 20 and P.BodeCtrlResp.size() == 58
     assert P.BODE_MAX_ROWS == 3326 and P.Features.BODE == 0x40 and P.DisplayMode.BODE == 5
     assert P.BodeCtrlReq.make(P.BODE_RUN, background=False).flags == P.BODE_F_NO_BACKGROUND
 
@@ -113,6 +113,18 @@ def test_ctrl_resp_planned_switches():
     assert (r.estimate_ms, r.captures, r.timeouts, r.leak_retakes, r.other_retakes) == (4321, 40, 0, 1, 2)
     assert r.planned_switches == 2 and r.hdr.switches == 0
     assert P.BodeCtrlResp.unpack(raw[:48]).planned_switches == 0
+
+
+def test_ctrl_resp_auto_ch2_verdict():
+    """fw 0.2.94: BODE_CTRL bytes 50..57, the latest AUTO SET's CH2 verdict (Constant on a flat thru: 9 points, 0.5 dB,
+    2.1 dBV) and its inputs; 50-byte answers read 0."""
+    raw = bytes(32) + struct.pack("<II", 0, 0) + struct.pack("<HHHHH", 0, 0, 0, 0, 0) +         struct.pack("<BBBBhh", 1, 0, 9, 1, 50, 210)
+    r = P.BodeCtrlResp.unpack(raw)
+    assert (r.auto_ch2_verdict, r.auto_ch2_reason, r.auto_ch2_points, r.auto_ch2_left_out) == (1, 0, 9, 1)
+    assert (r.auto_ch2_spread_cdb, r.auto_ch2_vmax_cdbv) == (50, 210)
+    neg = P.BodeCtrlResp.unpack(raw[:54] + struct.pack("<hh", 2500, -1234))
+    assert (neg.auto_ch2_spread_cdb, neg.auto_ch2_vmax_cdbv) == (2500, -1234)
+    assert P.BodeCtrlResp.unpack(raw[:50]).auto_ch2_points == 0
     assert P.BodeCtrlResp.unpack(raw[:40]).captures == 0
 
 
