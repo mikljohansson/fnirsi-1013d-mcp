@@ -6,7 +6,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- **One supported FPGA configuration** (owner decision 2026-10-20 21:52: "our firmware doesn't need to be compatible with
+- **ACQ Average as one behaviour** (owner decision 2026-10-20 21:59, "consistency matters"): the MCU path becomes a true
+  mean of N records like the FPGA path (N by the 40 ms budget, about 2 ms per record read), Atlan's running (trace + previous)
+  / 2 average goes; same picture whatever the filter and time base. After the 0.3.0 tag unless the owner says otherwise.
+- **One supported FPGA configuration** (owner decision 2026-10-20 21:52, reaffirmed 21:59: "every firmware version only
+  supports the latest FPGA bitstream ... detect this and show a loud banner"; the banner is part of the work: "our firmware doesn't need to be compatible with
   anything besides our own FPGA bitstream"): the firmware targets the project's current bitstream (0x153B) only. Implied
   removals, to be scheduled (before or after the 0.3.0 tag: owner's call): the stock-0x1432 and Atlan-0x1532 paths, the
   0x1532..0x1537 encode-heal and core-order workarounds (enc_heal.c/h, 287 lines), the <= 0x153A legacy capture geometry of
