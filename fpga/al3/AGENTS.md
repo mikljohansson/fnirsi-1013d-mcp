@@ -3,7 +3,11 @@
 Anlogic AL3A10LG144C7 FPGA of the owner's FNIRSI 1013D (JTAG IDCODE 0x18006C31, config flash Winbond
 W25Q80DV, JEDEC `ef 40 14`). Read `CLAUDE.md` at the repo root first; its flashing rules override anything here.
 
-State on 2026-10-20 (fpga-gen11, branch `fpga-gen11`):
+State on 2026-10-20 (fpga-gen12, branch `fpga-gen12`):
+- fpga-gen12 (2026-10-20): 0x153B **flash-ready**. `src/` unchanged (c173ed5); the two tb steps fpga-gen11 left not green
+  (tb_fir, tb_seg) were testbench artefacts of the new stop semantics, not dut faults (three signatures, each with its
+  invariant in section "0x153B flash-ready, fpga-gen12"); the 13-step `tb/run.sh` is **ALL PASS on seeds 12345 and 4242** (every step). The flash session for the
+  coordinator is in that section. **Not flashed.**
 - fpga-gen11 (2026-10-20): `src/` holds version word **0x153B** (0x153B-pre until benched): 0x153A with records that end on the
   auto time-out or the firmware's forced stop reported at the write pointer (0x14 = W - total + pretrigger), the time-out no
   longer cutting a triggered record, no trigger after the stop. Section "Spliced time-out records, fpga-gen11" below;
@@ -85,7 +89,7 @@ State on 2026-10-20 (fpga-gen11, branch `fpga-gen11`):
 | Path | What |
 |---|---|
 | `src/` | Atlan4's AL3 TD project with our changes: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc` (pins), `zaklad.sdc` (clocks), `FPGA.al` (TD project, holds `<UCode>`), `al_ip/` (PLL and sample-memory IP), `FPGA commands.txt` (command table, current). Upstream material, licence unstated, attributed to Atlan4. Unmodified original: git a947e78. |
-| `tb/` | iverilog testbench, `run.sh [seed]`, eleven steps (11: `tb_adccap.v`, the ADC capture stages against an AD9288 transition model, 0x153A; 10: `mcuread.sh`; 7: `tb_trigpos.v`, trigger position determinism with an AD9288 pipeline model; 8: `tb_seqcontract.v`, the firmware's sequencer byte sequences, transcript `contract_0x1538.txt`; 9: `encphase.sh` with `tb_encphase.v`, the encode pins against the write clock after the firmware's arm sequences, with delay-annotated variants; `edge_phase.py`: FIR overshoot / DDS beat / spectrum versus edge phase; `REF_SRC_DIR` for worktrees; the sixth: `tb_seg.v` against our 0x1535, `REF1535_REV`, checked by `seg_model.py`; `mutate_seg.py` runs its 21 mutants), first four: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir`, `long` or `seg` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs, `tb_seg.v` the same through `SEG_P1`. |
+| `tb/` | iverilog testbench, `run.sh [seed]`, thirteen steps (13: `tb_timeout.v`, records that end on the time-out or the forced stop, 0x153B; 12: `tb_firstrec.v`; 11: `tb_adccap.v`, the ADC capture stages against an AD9288 transition model, 0x153A; 10: `mcuread.sh`; 7: `tb_trigpos.v`, trigger position determinism with an AD9288 pipeline model; 8: `tb_seqcontract.v`, the firmware's sequencer byte sequences, transcript `contract_0x1538.txt`; 9: `encphase.sh` with `tb_encphase.v`, the encode pins against the write clock after the firmware's arm sequences, with delay-annotated variants; `edge_phase.py`: FIR overshoot / DDS beat / spectrum versus edge phase; `REF_SRC_DIR` for worktrees; the sixth: `tb_seg.v` against our 0x1535, `REF1535_REV`, checked by `seg_model.py`; `mutate_seg.py` runs its 21 mutants), first four: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir`, `long` or `seg` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs, `tb_seg.v` the same through `SEG_P1`. |
 | `out/` | Named bitstreams for the bench (gitignored `*.bin`): `FPGA-ext-trigger.bin` (0x1533), `FPGA-decim.bin` (0x1534), `FPGA-fir.bin` (0x1535), `FPGA-seg.bin` (0x1536). |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the stock FNIRSI design (0x1432), GPL-3.0. Same pin map. Use it for "what did stock do" questions. |
 | `bitstreams/` | Prebuilt images, gitignored except `README.md` (provenance and sha256). |
@@ -339,6 +343,101 @@ Decimation filter (0x1534), open items:
   `README.md` section 5. 0x1534 is accepted by the coordinator (2026-10-18) and is
   being flashed with fw 0.2.33.
 
+## 0x153B flash-ready, fpga-gen12 (2026-10-20)
+
+Brief (coordinator): make 0x153B flash-ready. fpga-gen11 left tb_fir and tb_seg not green (2 failed checks each after
+four masks for the changed stop semantics, "two residual mismatch windows of about 10 ns"); decide for each whether it is
+a testbench artefact (mask with a stated invariant) or a dut fault (fix zaklad.v), run the 13 steps on two seeds, write
+the flash session. Branch `fpga-gen12` from main ac1f2ab. `src/zaklad.v` is **unchanged** (c173ed5 = the built source):
+the images stand (`dist/al3-0x153B.bin` `fdc3c21b...fc3d`, flash image `1391978c...3b88`, version word 0x3B).
+
+**Verdicts.** Both residuals, and three more that only showed once they were masked, are testbench artefacts: three of
+0x153B's changes 1 and 3, one older than 0x153B (README section 11 "Other steps" has the full reasoning and numbers):
+1. The two gen11 windows were one signature: `st` bit 13 = `ext_pending`, 1 in the reference and 0 in the dut from a
+   time-out stop until the next capture reset (2.4 us, not 10 ns: the tb prints the first ten lines only; the seg line's
+   "reference in reset with half-way set" was a misdecode of the `st` vector, which carries the same write address and
+   state in both). Change 3 gates `trigger_check_enable` with `sample_write_enable`, and that gate also stops the EXT
+   edge latch. Invariant: `ext_pending`'s only consumer is `sampling_triggered` (`trigger_detect_enable` drives
+   `trigger_rise_enable` / `trigger_fall_enable`, which nothing uses), it is not on the bus (0x28 reads `ext_activity`),
+   the dut's set condition is a subset of the reference's and both clear on the same `cap_rst200`. Mask: compared while
+   the write runs, like `trigger_address`, `trigger_read_address` and `sampling_triggered` (8edb754, also in tb_decim).
+2. A 2.5 ns window at a reset release (fir 3 and seg 6 samples): the reference's post-stop `sampling_triggered` (and
+   `ext_pending`) is still 1 between the write clock edge that raises `sample_write_enable` in the reset and the
+   clk_200MHz edge on which `cap_rst200` clears it, when the MCU's 0x01 lands in the half cycle before the write clock
+   edge. Invariant: no write clock edge falls in that window, so no capture register consumes the value, and both are 0
+   at the first edge after the release. Mask: the two compared with `sample_write_enable & ~cap_rst200` (6285c19).
+3. The 0x05 / 0x0A polls of phase 4 (fir 553, seg 292 bus-read mismatches): those reads set bit 0 only, and the
+   resync before phase 4 had last filled bits 7..1 from a 0x14 read, which differs by design after a time-out stop
+   (tb_seg; tb_fir had no refill after its FIR time-out check). Fix: a 0x41 read there, as the random phases already do.
+   Not a dut difference at all: the bytes compared were stale bits of an uncompared read.
+4. With phase 4's timing shifted by that read, tb_fir showed a 210 ns window: `dec_out1` off by 3 LSB for one output,
+   both instances stopped between captures, every decimator input, strobe and setting equal (seen with the new
+   `+vcd_from=<ns> +vcd_len=<ns>` VCD window of tb_fir and the CIC internals). The 0x1534 reference's integrator `i1`
+   carried a constant offset of 653 since phase 2's three FIR runs with 0x53 bits 3 / 4 set: the reference captures on
+   the falling edge with them, the dut ignores them since 0x153A, so the reference's CIC saw other samples for those
+   runs and its never-reset integrators remember it. Invariant: the combs cancel a state offset of degree < K in
+   steady state at every K, so no record and no compared output differs; the offset shows for exactly one output after
+   a K change between captures (stale comb delay registers) when `c3 >> shift` resolves it. Older than 0x153B. Fix: those
+   three runs are tb_fir's phase 5, after the last equivalence phase (503c034); cic_model.py checks them as before.
+   tb_seg never sets the bits; tb_decim's reference (0x1533) has no decimator.
+
+**Results** (tb at 503c034, source c173ed5). seed 12345: ext 39, decim 98 + cic_model 1876 samples, fir 163 + cic_model 1612, long 8, seg 53 + seg_model 22 runs, trigpos 882, contract 12 (transcript = contract_0x153B.txt), encphase PASS, mcuread PASS (70 + 26), adccap 2274, firstrec 38, timeout 75: **ALL PASS** (5107 s); seed 4242: 39, 98 + 1873, 165 + 1638, 8, 53 + 22, 882, 12, encphase, mcuread 70 + 26, 2274, 38, 75: **ALL PASS** (4926 s). Every equivalence phase 0 mismatches (the fir and seg check counts vary with the random phase's untriggered captures, which add a 0x14 check each). Four runs in parallel on the 24-core WSL; one full run alone is about 1 h.
+
+**Flash session for the coordinator** (owner at the bench; the procedure of "Flashing this unit" above and
+`firmware/tools/README-spiflash.md`; the bench log entries of 2026-10-20 09:59-10:08 for 0x153A are the template;
+`docs/fpga-flash-from-mcu.md` only says why the programmer, not the MCU, does this):
+1. Pin the images first: `python -I tools/bitstreams.py pack --out backups/dist-0x153B` writes
+   `fnirsi_1013d-fpga-al3-0x153b.bin` (sha256 `fdc3c21b57341b0774e8a5e58df04e38d1d223fb7c354b6ed49f5892f711fc3d`) and
+   `fnirsi_1013d-fpga-al3-0x153b-flash1m.bin` (`1391978c33379271789a9405f7b0fb9395a85e223ecc69a0430b9f2859a23b88`) after
+   checking both hashes against the manifest; `sha256sum` them once more and log the names in `docs/hardware-status.md`.
+2. Load a firmware that detects 0x153B by FEL (any 0.2.8x: the 0x153A..0x153F range; fw-arm's build with the forced
+   stop kept and 0x18 trusted on 0x153B+ for the full benefit) and read `#VER` on 0x153A first, so the session starts from
+   a known state. Then scope on battery, USB unplugged, Sipeed FT2232D channel A on J2 (3.3 V, wiring in
+   `docs/hardware-status.md` 2026-10-18 and `README-spiflash.md`).
+3. `python firmware/tools/spiflash_d2xx.py probe`: expect `ef 40 14`.
+4. `python firmware/tools/spiflash_d2xx.py read -o backups/<date>-pre-0x153B.bin --twice`: the two reads must agree and
+   the sha256 must be `77672b5a38f2225e98cdecd7de012850121b6343525392d973e41d39b42719d0`, the pinned 0x153A padded image
+   (`backups/al3_cap_0x153A_75e0ef21_padded.bin`); anything else means the flash is not in the logged state: stop and
+   find out why before writing.
+5. `python firmware/tools/spiflash_d2xx.py write -i backups/dist-0x153B/fnirsi_1013d-fpga-al3-0x153b-flash1m.bin --yes
+   --confirm-id ef4014` (or type `ef4014` at the prompt without `--confirm-id`). The tool takes its own double-read
+   pre-write backup (`backups/<timestamp>-pre-write.bin`, must again hash `77672b5a...`), erases and programs only the
+   changed sectors (expect about 70 sectors / 1100 pages as for 0x153A) and verifies by read-back: the verified read must
+   hash `1391978c...3b88`. Rollback is the 0x153A padded image written the same way.
+6. Power-cycle, FEL-load the firmware, `#VER` must say `fpga=0x153b`, caps bit 19 (CAPTURE_STAGES) still set.
+7. Retrain the capture stages: the encode pads moved by up to 0.3 ns against the 0x153A build (README section 11
+   "Build"), so the unit's 0x153A training 0x08E3 may not be the best for this build. Diagnostics shows the stored value
+   as amber "(trained on 0x153a: calibrate)" until the wizard is run (firmware/AGENTS.md "Detection" of the capture
+   stages). Probes unplugged, run the calibration wizard on both channels (or host `CAL_PROBE` mode 1), note the new
+   stages ("CH1 Ax By / CH2 Ax By") and the stored value, then the dcoffset band sweep at 200 MSa/s as on 10-20 10:42:
+   every core clean, self-check 0 flagged.
+8. README section 11 "Bench checks" 1-6: identity and a normal Scope-view check; `bode_cells.py` on the RC with every
+   "auto" record clean (the two-segment fit, leak below -60 dB; 15 of 32 were spliced on 0x153A); 50 untriggered
+   Scope-view auto traces without a seam; ten Frequency response sweeps with retried 0 .. 1; a slow-signal auto mode
+   without a "triggered" flag on a flat record; segments in auto mode. Log each in `docs/hardware-status.md`, then
+   set the dist entry to `recommended` (0x153A to `supported`) with the bench text, and `tools/bitstreams.py check`.
+
+**Firmware expectations on 0x153B+** (README section 11 "Firmware"; fw-arm builds this in parallel): the forced stop
+(0x1A = 0 at the deadline) is safe, the record read from `0x14 - pre_words` is contiguous for a stop anywhere in the
+ring; 0x18 is the record's truth (no `host_forced` override needed); the FPGA time-out with 0x0E = the deadline in words
+is an alternative; the Bode engine's records with 0x0E = total and a trigger are complete without a firmware change
+(change 2). On 0x1532..0x153A the mitigation is 0x0E = 8192 k + total - 2 in FPGA auto mode with triggered := 0x18 &&
+0x14 != pretrigger. Nothing else changed: capture stages, decimator, FIR, readout, sequencer and the MCU decoder are
+cycle-identical to 0x153A (the equivalence steps), so a firmware that runs 0x153A runs 0x153B.
+
+**Commands used.** `wsl -d Ubuntu -- bash <launcher>` with the launcher doing `setsid nohup env
+REF_SRC_DIR=/home/mikl/g11/refs SIM_WORK=/home/mikl/g12/sim-<name> ONLY=<step> bash <repo>/fpga/al3/tb/run.sh <seed>
+> /home/mikl/g12/logs/<name>.log &` (the five reference files in `/home/mikl/g11/refs` hash-checked against `git show
+<rev>:fpga/al3/src/zaklad.v` of this checkout); four runs in parallel on the 24-core WSL (fir and seg alone, two full
+runs) take the same wall clock as one. The MISMATCH lines are the way in (the tbs print the first 30 now): decode `st`
+as {ta 13, ra 13, write address 13, triggered 1, write enable 1, half-way 1, state 1, read offset 13, write clock 1,
+ext_activity, ext_pending, ext_level, 12 zero bits} from the top, `dc` as {dec_out2 16, dec_out1 16, dec_wr, swc_adv,
+swc_adv_q, trigger_data 8, dia 8}, and read the `cnt / set / swe / trig` fields for the capture's phase. For a window
+that the fields do not explain, rerun tb_fir's vvp by hand with `+vcd_from=<ns> +vcd_len=<ns>` (the `t=` of the line is
+in ps) and grep the VCD for both instances' signals; a 2 us window of everything is about 1 MB. A DUT= run of the
+0x153A source needs `w_last` and `trigger_mode_s` added to it (inert), and its timing differs from the 0x153B run's
+from the first stop on, so it cannot reproduce a timing-dependent window one to one.
+
 ## Spliced time-out records, fpga-gen11 (2026-10-20)
 
 Brief (coordinator): a record whose capture ended by the auto time-out (no trigger edge: the Frequency response engine
@@ -414,26 +513,9 @@ numbers.
 `sampling_triggered` with the references only while the write runs and check the random auto captures' 0x14 against
 W - total + pretrigger (`dut.w_last`); directed time-out checks and tb_seg S10 / seg_model updated; `contract_0x153B.txt`
 (version byte only) replaces 0x153A's in run.sh; tb_mcuread accepts 0x3B. Final source, seed 12345: ext (0 mismatches in
-both phases), decim + cic_model, trigpos 882, firstrec 38, contract PASS; fir, seg and the full run: fir and seg (the two long steps, about 25 min each) failed their random equivalence phases
-  twice on testbench artefacts of the changed stop semantics, each fixed in the tb (acae8b8): the reference cuts a triggered
-  auto capture at its time-out (change 2; now skipped from the reference's stop on), the dut's extra post-time-out words
-  stay in the memory until rewritten (skipped by the memory compare), the read register's stale bits after the uncompared
-  0x14 / 0x18 reads (a 0x41 refill), and a 0x1A = 0 written by the tb while a never-triggered normal capture still runs
-  (the reference stops on the write, the dut two write clocks later: masked while the forced stop is in flight). **Verdict
-  with all four masks (seed 12345): fir 161 checks / 2 failed (phase 1 random 2458 mismatch samples, phase 4 3011),
-  seg 53 / 2 failed (3223 / 6635); cic_model and seg_model PASS.** Two residual signatures, each a window of about 10 ns
-  with both instances stopped (`swe 0/0`), from the diagnostic MISMATCH lines (`~/g11/logs/fir.log`, `seg.log` in WSL):
-  fir t = 9536073000 `tmo 1/1 cnt 361 set 346 trig 0/0 ta 184/142` (an untriggered time-out stop; the trigger
-  address differs by design and is masked, so the differing field is in the `out` / `dc` / bus part of the line, which the
-  summary strips: read the full line); seg t = 27429130000 `tmo 0/0 cnt 343 set 594 trig 0/1 en 1/1 swe 0/0 ta
-  145/265` (the reference took a trigger after its stop, the dut did not, change 3; the `st` fields show the reference
-  in reset with half-way set while the dut is released: a one-write-clock skew at the next reset release, to be
-  understood before masking). Not yet green: the next agent reads the two full lines, decides whether each is a tb
-  artefact of changes 1-4 (mask it the same way) or a dut fault, and reruns. Finish with
-  `wsl -d Ubuntu -- bash <repo>/fpga/al3/tb/run.sh 12345` (`REF_SRC_DIR` as in "Commands"; about 1 h; `ONLY=fir` /
-  `ONLY=seg` for the two steps alone) and record the result here; a residual one-write-clock window around a reset
-  release (seg phase 4, 10 ns, state / half-way differing between dut and reference) was seen once before the last mask
-  and is to be read from the diagnostic MISMATCH line if it returns.
+both phases), decim + cic_model, trigpos 882, firstrec 38, contract PASS; fir and seg: not green at hand-over (two residual mismatch windows after four masks, acae8b8). Resolved by
+  fpga-gen12: three further testbench artefacts of the stop semantics, no dut fault, the 13 steps green on two seeds
+  (section "0x153B flash-ready, fpga-gen12" above; the verdicts and the numbers in `README.md` section 11 "Other steps").
 
 **Build.** b2 (`~/g11/b2`, TD 4.6.8 SP1): clk_200MHz 0 errors / 4.583 ns, sample_write_clock 9.231 ns, i_mcu_clk 20.236 ns,
 clkc[1] 2.397 ns, clkc[0] 58 (SDC artefact); 4990 LUT. b1 of the same logic rolled 5.101 ns with 2 errors on the sequencer's
