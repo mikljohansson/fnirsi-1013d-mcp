@@ -1,7 +1,9 @@
 # Hardware preparation and backup guide (FNIRSI 1013D, AL3A10 variant)
 
-Status: DRAFT for owner review (updated 2026-10-18 with the firmware bootstrap findings). Nothing in this guide has been executed on the owner's unit yet.
-Date written: 2026-10-18. Log every executed step in `docs/hardware-status.md`.
+Status: executed on the maintainer's unit on 2026-10-18 and 2026-10-19 (pinout verified, the three backups taken, FPGA
+bitstreams 0x1532 and later flashed, the FEL loop of section 6 in daily use); the results are logged in
+`docs/hardware-status.md`. Kept as the procedure for a new unit. Written 2026-10-18; log every executed step in
+`docs/hardware-status.md`.
 
 Citation style: `(file.md §x)` points to `research/notes/`. `[checked locally]` means the author ran a
 command on the reference trees under `D:\src` while writing; it is not from a note. `[general knowledge]` is
@@ -516,3 +518,20 @@ How the stock firmware can always be restored:
 3. Behaviour of the FPGA and its configuration bus when the flash is read or written with the board powered. Only reads are bench-proven (2.3).
 4. Whether the unit has an SD card holding open firmware now, and which stock firmware date it runs. The stock UI offers no documented version display.
 5. Whether the owner's board has the MCU-flash header J1 (3b alternatives).
+
+## 9. FAQ
+
+### Do I need an SPI programmer?
+
+For the firmware, no. The open firmware runs from the SD card and the development loop loads images over USB in FEL
+mode (section 6); the stock firmware in the MCU flash is never touched. For the FPGA, yes: on an unmodified board the
+Winbond 25Q80 configuration flash is wired only to the FPGA's configuration pins, so neither the firmware nor FEL can
+reach it, and a custom bitstream (0x1533 and later, `fpga/al3/dist/BITSTREAMS.md`) goes in once through the 2x3 header
+beside the flash with a 3.3 V programmer (section 2) after a verified backup (section 3a). The firmware runs without
+any of them, on the stock bitstream or Atlan4's 0x1532, with the legacy feature set.
+
+The alternatives are analysed in `docs/fpga-flash-from-mcu.md`: Atlan4's updater reflashes the FPGA from the scope,
+but only after a board modification that wires the FPGA flash to the MCU's SPI pads at the cost of the MCU flash (and
+with it the stock firmware), and an FPGA-side SPI bridge is possible on paper but unproven on the AL3A10, with every
+failure mode ending in a programmer anyway. If you only want to use the firmware, skip the programmer; if you want the
+features the table in `BITSTREAMS.md` lists, budget for one.
