@@ -1347,3 +1347,13 @@ Newest entries at the bottom. Format: date, who, what, result.
   (12:35 on 0.2.89: 5 of 8 spliced at -40 dB). **Regression in the engine:** ten sweeps 100 Hz..1 MHz / 25: captures 33..40,
   time-outs 10..22, other retakes 8..15 per sweep, 1 flagged point on 4 of 10, 2.4..3.6 s per sweep (0.2.91..0.2.96: 25
   captures, 0 time-outs, 0 retakes, 1.5 s). Sent back to fw-arm.
+- 2026-10-20 16:26: fw 0.2.98 (fw-arm2: the engine reads its records as 0.2.91..0.2.96 did, triggered = 0x18 seen, spliced
+  only on a firmware force; the 0.2.97 reading rules apply to the UI's auto mode only. Cause of the 0.2.97 regression: with
+  pretrigger 0 the sampling reset makes a first sample at or above the level a rising edge at ring word 0 = pretrigger, so the
+  "0x14 == pretrigger means time-out" rule read half the engine's complete records as untriggered; and above 2047 legacy words
+  the stop lands inside every early-trigger record while the ms-resolution timing check could not rule it out) pinned
+  backups/fw-0.2.98_5923635a.bin (sha256 5923635a649392c501a0bcda5c9760e014111b48a8680ae7a52766478c57c5e1), loaded. Ten
+  sweeps 100 Hz..1 MHz / 25 on the two-pole ladder: 25 captures (29 on the first, 27 once), 0 time-outs, 0 retakes, 2.1 s;
+  the grey points (0..2 per sweep) are ch2_small / low_snr at 147 kHz..1 MHz where the ladder's output is under 3 codes
+  (-47..-74 dBV at 100 mV/div): the floor, which fw-floor will present. Host untriggered captures 30 + 30 at 1 and 200 MSa/s:
+  0 seams, maybe_spliced 0. The firmware side of the splice fix is complete on 0x153A.
