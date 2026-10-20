@@ -9,6 +9,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - **ACQ Average as one behaviour** (owner decision 2026-10-20 21:59, "consistency matters"): the MCU path becomes a true
   mean of N records like the FPGA path (N by the 40 ms budget, about 2 ms per record read), Atlan's running (trace + previous)
   / 2 average goes; same picture whatever the filter and time base. After the 0.3.0 tag unless the owner says otherwise.
+- **The card-only path is dropped** (owner 22:02: "if people want this firmware they also need to flash the FPGA"): the
+  FPGA flash is a mandatory install step; docs-one carries it through the guides and the README.
+- **UI selection for the epics** (owner between 22:07 and 22:12, "Sounds great!" to the coordinator's proposal): the device UI grows by two
+  rows only: a Type row in the trigger menu (Edge, Pulse width, Nth edge, with their parameters) and a Sample row in ACQ
+  (Normal, Peak); the hardware counter feeds the measurement cards with no new control. Runt, window and timeout triggers,
+  the streaming logger, the pulse pattern generator and trigger output, DVM, serial decode, mask test and CSV are MCP-only.
+  UI design for the two rows (mockups first, docs/ui-guidelines.md) starts after the FPGA contract (fpga-spec) is in.
 - **One supported FPGA configuration** (owner decision 2026-10-20 21:52, reaffirmed 21:59: "every firmware version only
   supports the latest FPGA bitstream ... detect this and show a loud banner"; the banner is part of the work: "our firmware doesn't need to be compatible with
   anything besides our own FPGA bitstream"): the firmware targets the project's current bitstream (0x153B) only. Implied
@@ -268,6 +275,43 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   in `pc_cmds.h` and `mcp/pyproject.toml`, release commit with CI green, SD package, release candidate persisted plus the
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
+
+- docs-one (Opus, dispatched 22:04, done 22:22, merged 22:23 as 003924d): the card-only path gone from 15 files; README 175
+  lines, 34/34 links; placeholders {{BANNER_TEXT}} / {{BANNER_REACHABLE}} (first-run.md) and {{AVERAGE_TEXT}} (screens.md)
+  for fw-one's wording; README's manual steps reordered by the coordinator to download first (as install.md and the
+  runbook). Follow-ups: docs/mcp-tools.md capability rows and agent-measurement-guide.md line ~58 still say "on 0x1534 /
+  0x1536" (fix with fw-one's merge, when the caps become fixed per firmware); calibration.md's "ADC readout fault near
+  code 128" row removed although the firmware message may still exist (fw-one removes or keeps the message; align then).
+- fpga-c1 / fpga-c2 / fpga-c3 (Opus, dispatched 22:21-22:22, branches of the same names): 0x153C items C1 (trigger types
+  pulse width / Nth edge / timeout, 0x1B hold-off, 0x37, the fire gate; owns the capture and EXT blocks and the shared
+  decim_trig_sample lines), C2 (peak detect as a one-register switch, 0x56 bit 1, 0x29; owns decim_chan and the decimator
+  control; sends its two-line shared change via the coordinator), C3 (counter + min/max, 0x61/0x62/0x35 16 bytes; new block
+  after seq_lat). Each rebased from gen8-features-wip 9de82ca onto 0x153B, testbenches + run.sh steps 14-16, TD numbers; the
+  version byte, contract file and dist entry are C4's (integration, after the three merge). Coordinator decision on contract
+  question 1: 0x1B's meaning change accepted (one bitstream per firmware).
+- fpga-spec (Opus, dispatched 22:01, done 22:20, merged 22:21 as 4b29d01): docs/plans/fpga-0x153c.md, 608 lines. Generations
+  0x153C (triggers, hold-off, peak detect, counter; protocol 1.25), 0x153D (logger with the sample ring as the FIFO, pattern
+  generator with marker as trigger source, DDS sweep; 1.26), 0x153E (both-core trigger, runt, window, width range; 1.27).
+  Budget correction: 0x153B uses 4990 of 8640 LUTs and no block RAM is free (the roadmap's 7,000 / 200 kbit was stale);
+  0x153C ~72 %, 0x153D ~81 %, 0x153E ~87 %. Logger ceiling is the MCU + USB: 1 ch 8-bit 0.58-1.0 MS/s, 1 ch 16-bit or 2 ch
+  8-bit 290-510 kS/s, 2 ch 16-bit 145-260 kS/s; proposed contract 500 / 250 / 125 kS/s. Owner questions for the morning in
+  section 12 (logger contract rates now or after the bench; pattern marker as internal trigger vs a trigger-out wire mod;
+  DDS sweep in or out; build 0x153E at 87 % or stop at 0x153D; C9 timing).
+
+- fpga-spec (Opus, dispatched 22:01): docs/plans/fpga-0x153c.md, the design and register contract for the roadmap epics
+  the owner chose at 22:00 (advanced triggers, peak detect, streaming logger, pulse pattern generator with trigger output,
+  hardware measurements, software on new data; no deeper memory; testers later): generations, register map with ranges per
+  feature, caps bits, resource budget, the logger's sustainable rate from the bus and USB arithmetic, simulation and bench
+  plan, parallel implementation briefs. 22:05 addendum: UI-agnostic; UI candidates as a list for the owner's decision.
+- fw-one (Opus, dispatched 22:02): the two owner decisions in firmware: one built-for bitstream constant (0x153B), the
+  mismatch banner with Diagnostics/Settings/USB drive reachable, compat code removed (stock, Atlan, enc_heal workarounds,
+  legacy geometry, version-word branches, EF2/EP4 arms, simulator variants), one averaging behaviour (true N-record mean on
+  the MCU path too). 22:03: first-run.md and screens.md left to docs-one.
+- docs-one (Opus, dispatched 22:04): the owner's 22:02 decision "drop the SD card alone path": README, front page, install,
+  prepare, runbook, first-run (banner placeholders), screens, calibration, release notes, announcement, BITSTREAMS.md rule,
+  install skill, roadmap status paragraph with the decisions and chosen epics.
+- mcp-soft (Opus, dispatched 22:06): host-side tools on captured data, no firmware: scope_decode (UART/SPI/I2C), scope_mask_test,
+  scope_export_csv, scope_dvm; simulator scenarios; docs and skill line.
 
 - readme-gen rounds 2 and 3 (21:41 / 21:52 briefs, done 21:48 / 21:55, merged 21:51 as ac4c6a5; README 181 lines, 21/22 links,
   docs/screenshots/scope-deep-memory.png pending from the bench): the visitor review and the dry run folded in, the owner's
