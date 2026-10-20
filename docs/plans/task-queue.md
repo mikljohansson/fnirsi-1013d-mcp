@@ -276,6 +276,58 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- mcp-soft (Opus, dispatched 22:06, done 22:45, merged 22:46 as 8eaf912; ruff clean, 496 tests): scope_decode (UART auto-baud,
+  SPI, I2C; limits: UART >= 4 samples per bit advised, refused under 2; SPI 3 per clock; I2C 8 per SCL period), scope_mask_test
+  (masks stored under the data dir, exact geometry only), scope_export_csv, scope_dvm (resolution statement); simulator
+  serial signals; report kinds. README and release notes say 34 tools; release notes need a line on the four tools
+  (release follow-up).
+- **0.3.0 scope** (owner 23:08): 0.3.0 ships when the chosen roadmap items are complete and benched, not the current
+  feature set; realistically 2026-10-21 or 10-22. Contents: fw-one (one bitstream, banner, one averaging), mcp-soft tools,
+  0x153C (triggers, hold-off, peak detect, counter) with its firmware and MCP 1.25 and the two UI rows, 0x153D (logger,
+  pattern generator with its trigger engine and fractional periods, no DDS, cruft removal) with firmware and MCP 1.26;
+  0x153E by the measured numbers. The release notes, announcement and checklist get one final refresh before the tag;
+  the version bump happens then. Reason (owner): see what is possible on commodity hardware, and have the detector
+  tooling ready in a couple of weeks.
+- Owner decision 23:0x: the pattern generator's durations get a fractional part (an accumulator per step, carry = one
+  extra 5 ns clock) so any average frequency is exact and the edges stay within one clock; a few dozen cells. In the
+  contract with the DDS removal.
+- Owner decisions 23:0x (LUT savings): (1) the pattern generator absorbs the square-wave generator (a two-step continuous
+  pattern with double-buffered durations; the DDS and its sweep logic go; firmware generator menu, wizard 1 kHz and the device
+  Bode sweep program the pattern); (2) chirps are MCU-stepped patterns (one period write per step); (3) an FPGA cruft audit
+  under the one-bitstream rule: register paths our firmware never writes are removed. fpga-spec measures the deltas by
+  synthesis and updates the contract and the D2 brief; 0x153E's question is answered by the measured numbers.
+- fpga-spec addendum (done 22:54, merged 22:55 as 4d35cb3): section 7.5 pattern trigger engine (registers 0x76-0x7D mirroring
+  the capture trigger's, status 0x42, burst start source in 0x6D bits 6..5, caps bit 27, SET_PATTERN_TRIGGER 0x021A), fallback
+  = the capture qualifier routed; 0x153D now ~7,350 LUT (85 %), 0x153E ~91 % and gated on 0x153D's measured count; logger
+  rates are the spec; trigger-out wire removed; DDS sweep kept, first to cut (owner 22:53).
+- Owner decisions from the evening Q&A (22:38-22:49): (1) logger contract rates 500 / 250 / 125 kS/s documented now, higher
+  after the bench; (2) no soldering to FPGA or other pins in this project, the prepared flash header is the only one
+  (the trigger-out wire option is closed); (3) the pattern generator gets its own trigger engine with the capture
+  trigger's vocabulary (two orthogonal engines, same register layout with a base offset; a burst starts from the MCU or
+  from its engine); the marker stays a capture trigger source for MCU-started patterns; no "pattern starts on the capture
+  trigger" link. fpga-spec is updating the contract (section 7.5, D2 brief, the 0x153D estimate).
+- docs-one (Opus, dispatched 22:04, done 22:22, merged 22:23 as 003924d): the card-only path gone from 15 files; README 175
+  lines, 34/34 links; placeholders {{BANNER_TEXT}} / {{BANNER_REACHABLE}} (first-run.md) and {{AVERAGE_TEXT}} (screens.md)
+  for fw-one's wording; README's manual steps reordered by the coordinator to download first (as install.md and the
+  runbook). Follow-ups: docs/mcp-tools.md capability rows and agent-measurement-guide.md line ~58 still say "on 0x1534 /
+  0x1536" (fix with fw-one's merge, when the caps become fixed per firmware); calibration.md's "ADC readout fault near
+  code 128" row removed although the firmware message may still exist (fw-one removes or keeps the message; align then).
+- fpga-c1 / fpga-c2 / fpga-c3 (Opus, dispatched 22:21-22:22, branches of the same names): 0x153C items C1 (trigger types
+  pulse width / Nth edge / timeout, 0x1B hold-off, 0x37, the fire gate; owns the capture and EXT blocks and the shared
+  decim_trig_sample lines), C2 (peak detect as a one-register switch, 0x56 bit 1, 0x29; owns decim_chan and the decimator
+  control; sends its two-line shared change via the coordinator), C3 (counter + min/max, 0x61/0x62/0x35 16 bytes; new block
+  after seq_lat). Each rebased from gen8-features-wip 9de82ca onto 0x153B, testbenches + run.sh steps 14-16, TD numbers; the
+  version byte, contract file and dist entry are C4's (integration, after the three merge). Coordinator decision on contract
+  question 1: 0x1B's meaning change accepted (one bitstream per firmware).
+- fpga-spec (Opus, dispatched 22:01, done 22:20, merged 22:21 as 4b29d01): docs/plans/fpga-0x153c.md, 608 lines. Generations
+  0x153C (triggers, hold-off, peak detect, counter; protocol 1.25), 0x153D (logger with the sample ring as the FIFO, pattern
+  generator with marker as trigger source, DDS sweep; 1.26), 0x153E (both-core trigger, runt, window, width range; 1.27).
+  Budget correction: 0x153B uses 4990 of 8640 LUTs and no block RAM is free (the roadmap's 7,000 / 200 kbit was stale);
+  0x153C ~72 %, 0x153D ~81 %, 0x153E ~87 %. Logger ceiling is the MCU + USB: 1 ch 8-bit 0.58-1.0 MS/s, 1 ch 16-bit or 2 ch
+  8-bit 290-510 kS/s, 2 ch 16-bit 145-260 kS/s; proposed contract 500 / 250 / 125 kS/s. Owner questions for the morning in
+  section 12 (logger contract rates now or after the bench; pattern marker as internal trigger vs a trigger-out wire mod;
+  DDS sweep in or out; build 0x153E at 87 % or stop at 0x153D; C9 timing).
+
 - fpga-spec (Opus, dispatched 22:01): docs/plans/fpga-0x153c.md, the design and register contract for the roadmap epics
   the owner chose at 22:00 (advanced triggers, peak detect, streaming logger, pulse pattern generator with trigger output,
   hardware measurements, software on new data; no deeper memory; testers later): generations, register map with ranges per

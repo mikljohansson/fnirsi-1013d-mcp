@@ -53,17 +53,19 @@ Ordered so that each is buildable, simulatable and benchable with its own firmwa
 | Generation | Features | LUT / reg estimate | Running LUT total | Firmware / protocol |
 |---|---|---|---|---|
 | **0x153C** | trigger types pulse width (shorter / longer), Nth edge, timeout, on CH1 / CH2 / EXT (gen8 design rebased); peak-detect acquisition; hardware counter with min / max; trigger hold-off (0x1B gets its meaning) | +1115 / +915 (gen8, measured) + hold-off about 60 / 40 + min / max about 50 / 20 [E] | **about 6,200 (72 %)** | protocol 1.25: SET_TRIGGER2, GET_COUNTER, peak format in GET_CAPTURE_INFO / READ_RAW; caps 2, 20, 21, 22 |
-| **0x153D** | streaming logger (free-running ring with a readable write pointer, lap detection, word counter); pulse pattern generator with a marker that is an internal trigger source; DDS frequency sweep | logger about 150 / 90; pattern about 450 / 520; sweep about 200 / 140 [E] | **about 7,000 (81 %)** | protocol 1.26: LOG_START / LOG_READ / LOG_STOP, SET_PATTERN, SET_SWEEP; caps 23, 24, 25 |
-| **0x153E** | trigger on both ADC cores (legacy D = 0, 5 ns trigger resolution); runt and window types (second level); pulse width inside / outside a range | both cores about 200 / 60; runt / window about 250 / 80; range about 60 / 30 [E] | **about 7,500 (87 %)** | protocol 1.27: SET_TRIGGER2 fields already reserved; caps 4, 26 |
+| **0x153D** | streaming logger (free-running ring with a readable write pointer, lap detection, word counter); pulse pattern generator with a marker that is an internal trigger source and **its own trigger engine** (7.5); DDS frequency sweep | logger about 150 / 90; pattern about 450 / 520; pattern trigger engine about 350 / 200; sweep about 200 / 140 [E] | **about 7,350 (85 %)** | protocol 1.26: LOG_START / LOG_READ / LOG_STOP, SET_PATTERN, SET_PATTERN_TRIGGER, SET_SWEEP; caps 23, 24, 25, 27 |
+| **0x153E** | trigger on both ADC cores (legacy D = 0, 5 ns trigger resolution); runt and window types (second level); pulse width inside / outside a range | both cores about 200 / 60; runt / window about 250 / 80; range about 60 / 30 [E] | **about 7,850 (91 %)** | protocol 1.27: SET_TRIGGER2 fields already reserved; caps 4, 26 |
 
 Estimates [E] are scaled from measured neighbours in this design: the gen8 `trig_qual` instance pair cost about 350 LUT
 for two qualifiers (the rest of the +1115 is the counter and peak detect); the sequencer's 33-bit hold-off counter and
 state cost about 120 LUT (0x1536 +1363 for the whole sequencer); a 24-bit down counter with sign is about 30 LUT.
 
-**Cut order if the budget or timing does not hold** (decide per build, never silently): 0x153E window trigger first,
-then the DDS sweep (the host can step the DDS, as `scope_bode_sweep` does today), then the pulse-width range (two
-single-sided captures give the same answer), then both-core triggering. Nothing in 0x153C is cut: it is built and
-simulated already. Deeper memory is out (owner).
+**Cut order if the budget or timing does not hold** (decide per build, never silently). 0x153D: the DDS sweep first (the
+host can step the DDS, as `scope_bode_sweep` does today), then the pattern trigger engine's own qualifier instance (the
+fallback of 7.5: one engine routed to capture, pattern or both; registers unchanged). 0x153E: the window trigger first,
+then the pulse-width range (two single-sided captures give the same answer), then both-core triggering; at the 91 %
+paper estimate 0x153E is only started once 0x153D's measured LUT count is known. Nothing in 0x153C is cut: it is built
+and simulated already. Deeper memory is out (owner).
 
 ### 1.3 Why this order
 
@@ -94,8 +96,9 @@ Allocation per feature, with spares (writes 0x65-0x7F and reads 0x37-0x40, 0x42-
 | Counter | 0x61, 0x62 | 0x35 | write 0x68, read 0x3F |
 | Logger | 0x69, 0x6A | 0x38 | write 0x6B, read 0x40 |
 | Pattern generator | 0x6C, 0x6D, 0x6E, 0x6F | 0x39 | write 0x70 |
+| Pattern trigger engine (7.5) | 0x76-0x7D (the capture trigger's layouts in a contiguous block) | 0x42 | write 0x7E |
 | DDS sweep | 0x71, 0x72, 0x73 | 0x3A | write 0x74 |
-| Reserved for 0x153F+ | 0x75-0x7F | 0x42-0x4F | |
+| Reserved for 0x153F+ | 0x75, 0x7F | 0x43-0x4F | |
 
 ### 2.1 Writes
 
@@ -118,9 +121,17 @@ sees 0x153B behaviour; the equivalence steps of `tb/run.sh` keep proving that.
 | 0x69 | 1 | D | bit 0 stream on; bit 1 clear the lap flag (self-clearing) | logger: with bit 0 the capture never stops and never triggers (section 6) |
 | 0x6A | 2 | D | u13 reader position (ring word) | logger: the MCU's consumed boundary; the FPGA flags a lap when the write address reaches it |
 | 0x6C | 4 | D | byte 0 = { end, mark, level, index[4:0] }, bytes 1..3 u24 duration in 5 ns clocks (>= 2) | pattern step `index` (0..15) |
-| 0x6D | 1 | D | bits 1..0 mode: 0 off (pin per 0x50 as today), 1 single burst, 2 repeat R bursts, 3 continuous; bit 2 idle level between bursts and when off-in-pattern; bit 3 marker is a trigger source (0x15 = 3); bit 4 start (self-clearing: the burst starts at the next clock) | pattern control |
+| 0x6D | 1 | D | bits 1..0 mode: 0 off (pin per 0x50 as today), 1 single burst, 2 repeat R bursts, 3 continuous; bit 2 idle level between bursts and when off-in-pattern; bit 3 marker is a trigger source (0x15 = 3); bit 4 start now (self-clearing: the burst starts at the next clock); **bits 6..5 start source**: 0 the MCU only (bit 4), 1 the pattern trigger engine (7.5), 2 both (either starts a burst), 3 reserved | pattern control |
 | 0x6E | 2 | D | u16 R, 0 = 65536 | bursts per start in mode 2 |
 | 0x6F | 4 | D | u32 gap between bursts, 5 ns clocks | 0 .. 21.47 s |
+| 0x76 | 1 | D | as 0x15: bits 1..0 source 0 CH1, 1 CH2, 2 EXT (3 reserved, acts as EXT) | pattern trigger source |
+| 0x77 | 1 | D | as 0x16 | pattern trigger polarity, per type |
+| 0x78 | 1 | D | as 0x17 | pattern trigger level, 8-bit (legacy) |
+| 0x79 | 2 | D | as 0x55 | pattern trigger level, 16-bit (K >= 1 or peak) |
+| 0x7A | 1 | D | as 0x5E (types 0..3; 4, 5 and bits 4, 5 reserved: the pattern engine never gets runt / window / both cores) | pattern trigger type |
+| 0x7B | 3 | D | as 0x5F | pattern trigger N |
+| 0x7C | 3 | D | as 0x60 | pattern trigger H |
+| 0x7D | 1 | D | bit 0 armed (1 = the engine watches; writing 1 restarts its state, as 0x01 = 1 / 0 does for the capture's qualifier); bit 1 re-arm after each burst (0 = one shot: the first event starts a burst, then disarmed); bit 2 clear the event flag (self-clearing) | pattern trigger engine control |
 | 0x71 | 1 | D | bit 0 sweep on; bit 1 direction after the stop increment: 0 restart at the start increment, 1 reverse (triangle); bit 2 single (stop at the end) | DDS sweep |
 | 0x72 | 4 | D | u32 stop phase increment | the start increment is 0x51 as written |
 | 0x73 | 4 | D | u32 step: bits 31..8 u24 increment delta per step, bits 7..0 u8 log2 of the step interval in 20 ns DDS clocks (interval = 2^n clocks, n = 0..31) | sweep rate |
@@ -136,6 +147,7 @@ sees 0x153B behaviour; the equivalence steps of `tb/run.sh` keep proving that.
 | 0x38 | 8 | D | snapshot at the command byte: byte 0 = { streaming, lap, 0, 0, 0, W[12:8] }, 1 W[7:0] (the write address: the next word to be written), 2..5 u32 words written since 0x01 = 0, 6..7 u16 words written since the reader position (W - reader, modulo 8192; 8192 or more = lap) |
 | 0x39 | 4 | D | pattern status: byte 0 = { running, in gap, 0, 0, step[3:0] }, 1..2 u16 bursts done, 3 = { 0, 0, 0, 0, 0, 0, marker seen since 0x01 = 1, mode active } |
 | 0x3A | 4 | D | current DDS phase increment (the sweep's position) |
+| 0x42 | 3 | D | pattern trigger status, laid out as 0x34: byte 0 = { own engine (1 = a second qualifier instance, 0 = the shared fallback of 7.5), event seen since 0x7D bit 2, counting, pulse began, source EXT, longer, type[1:0] }, bytes 1..2 edges still to count. Asynchronous |
 
 ### 2.3 Capability bits and version words
 
@@ -153,10 +165,11 @@ built for. Since a firmware supports one bitstream, the bits are constants per r
 | 24 | PATTERN_GEN | 0x153D | 0x6C-0x6F, read 0x39, trigger source 3; SET_PATTERN |
 | 25 | DDS_SWEEP | 0x153D | 0x71-0x73, read 0x3A; SET_SWEEP |
 | 26 | TRIG_RUNT_WINDOW | 0x153E | 0x5E types 4, 5, bit 4 range; 0x65 |
+| 27 | PATTERN_TRIGGER | 0x153D | 0x76-0x7D, read 0x42, 0x6D bits 6..5; SET_PATTERN_TRIGGER. Own engine or the shared fallback: read 0x42 byte 0 bit 7 |
 
 Version words: 0x06 reads 0x15 0x3C / 0x3D / 0x3E. The GET_STATUS `features` word (protocol row 56, bits 5-15 free)
-gets bits 5 TRIG_TYPES, 6 PEAK, 7 COUNTER, 8 LOGGER, 9 PATTERN, 10 SWEEP, 11 RUNT_WINDOW for hosts that read features
-instead of caps.
+gets bits 5 TRIG_TYPES, 6 PEAK, 7 COUNTER, 8 LOGGER, 9 PATTERN, 10 SWEEP, 11 RUNT_WINDOW, 12 PATTERN_TRIGGER for hosts
+that read features instead of caps.
 
 ### 2.4 Existing registers whose meaning changes
 
@@ -356,10 +369,10 @@ Measured inputs:
 | 2 ch, 16-bit | 4 | 4 | 2.92 .. 5.20 | 345 .. 190 kS/s | **260 .. 145 kS/s** |
 
 So "1 MS/s forever" is true only for one 8-bit channel on a Windows host at the measured REMOTE rate with nothing else
-running on the MCU. **The contract: 500 kS/s for one 8-bit channel, 250 kS/s for one 16-bit or two 8-bit channels,
-125 kS/s for two 16-bit channels, guaranteed on both hosts; the next tier up is offered after the bench measures it.**
-The firmware's LOG_START validates the requested rate against this table (E_BAD_ARG detail 1 "rate") and the host tool
-says what it accepted. The 8-bit filtered variant (high byte of the CIC word, 0x21 / 0x23 only) gives the filter's
+running on the MCU. **The documented specification (owner, 2026-10-20 22:38): 500 kS/s for one 8-bit channel, 250 kS/s
+for one 16-bit or two 8-bit channels, 125 kS/s for two 16-bit channels, on both hosts; a higher tier is documented only
+after the bench measures it (check 8 of 9.2).** The firmware's LOG_START validates the requested rate against this table
+(E_BAD_ARG detail 1 "rate") and the host tool says what it accepted. The 8-bit filtered variant (high byte of the CIC word, 0x21 / 0x23 only) gives the filter's
 anti-alias benefit at 8-bit cost: the default for one channel.
 
 Ring timing: 8192 words at 500 kwords/s (1 MS/s legacy, or 500 kS/s 16-bit) is 16.4 ms; the MCU drains 2048-word chunks
@@ -405,23 +418,27 @@ before the transport fix).
 ### 7.1 Pins: there is one
 
 P133 (`o_1khz_calib`) is the only FPGA signal that reaches the outside (README "Pin map"; `SYNTHESIS.md` section 2: about
-24 unused pads, none routed to a connector) [F]. The DDS output and the EXT input already share it (`gen_out_enable`
-selects, `zaklad.v` 713). So a "trigger output" pin does not exist, and the pattern's marker is realised as an **internal
-trigger source** instead: 0x15 = 3 PATTERN makes the capture trigger at the start of the step flagged `mark`, through the
-EXT apply path (`ext_pending`, applied on the next write clock rise, so the trigger position convention is EXT's). For an
-external device the pattern itself is the sync (it is the TX drive); the scope triggers on its own marker with the
-pretrigger set to see the RX decay after the pulse. Output level is the logic level: about -1.23 V low / +1.87 V high on
-the post against the probe ground (README "Changes" section 2, `hardware-status.md` 2026-10-18) [F]; no DAC.
+24 unused pads, none routed to a connector) [F], and it stays the only one: the owner's standing rule is no soldering to
+FPGA or other pins in this project, the prepared flash header is the only one (owner, 2026-10-20 22:4x). The DDS output
+and the EXT input already share it (`gen_out_enable` selects, `zaklad.v` 713). So a "trigger output" pin does not exist,
+and the pattern's marker is realised as an **internal trigger source** instead: 0x15 = 3 PATTERN makes the capture
+trigger at the start of the step flagged `mark`, through the EXT apply path (`ext_pending`, applied on the next write
+clock rise, so the trigger position convention is EXT's). Its use is a pattern started from the MCU with no external
+event: the pattern is the TX drive and the scope triggers on its own marker with the pretrigger set to see the RX decay
+after the pulse. Patterns that must follow an external event use the pattern trigger engine (7.5). Output level is the
+logic level: about -1.23 V low / +1.87 V high on the post against the probe ground (README "Changes" section 2,
+`hardware-status.md` 2026-10-18) [F]; no DAC.
 
 ### 7.2 Design [E, about 450 LUT / 520 reg]
 
 - A 16-entry step table in registers (0x6C): level, 24-bit duration in 5 ns clocks (10 ns .. 83.9 ms per step), `mark`,
   `end`. Runs on `clk_200MHz` with a 25-bit down counter (sign = step done), the next step's values preloaded.
 - Burst = steps 0 .. the first `end`; mode 1 one burst per start, mode 2 R bursts (0x6E) with the gap 0x6F between them,
-  mode 3 continuous (gap included); idle level 0x6D bit 2 between bursts and while stopped. Start = 0x6D bit 4, also
-  taken at 0x01 = 0 when bit 5 (reserved for "start with the capture") is set: not in this generation, the host starts
-  the pattern after the arm (the pretrigger must have filled: `sampling_half_way`, which the marker respects through
-  `trigger_check_enable`).
+  mode 3 continuous (gap included); idle level 0x6D bit 2 between bursts and while stopped. A start comes from the MCU
+  (0x6D bit 4), from the pattern trigger engine's event (7.5), or from either (0x6D bits 6..5); a start during a burst is
+  ignored. The marker respects the capture's `trigger_check_enable` (the pretrigger must have filled), so a host that
+  wants the marker in a capture arms first and starts the pattern after 0x01 = 0; nothing starts a pattern from the
+  capture trigger (owner: not needed).
 - Pin mux: when the mode is not 0 the pattern drives the pin instead of the DDS (`gen_out_enable` still enables the
   driver; 0x50 = 0 keeps it hi-Z for EXT). EXT input is unavailable while the pin is driven, as today.
 - Marker: a 1-clock pulse at the first clock of a `mark` step; 0x39 byte 3 bit 1 reports it since 0x01 = 1.
@@ -438,18 +455,71 @@ a linear frequency sweep; the host gets a chirp for impulse / swept Bode measure
 
 ### 7.4 Host
 
-- **SET_PATTERN 0x0217** (REMOTE, cap PATTERN_GEN, tier 3): u8 mode, u8 flags (idle level, marker as trigger), u16 R,
-  u32 gap_ns, u8 steps n (1..16), then n x { u8 flags (level, mark), u8 0, u16 0, u32 duration_ns }; the firmware rounds
-  to 5 ns, writes 0x6C x n, 0x6E, 0x6F, 0x6D and starts when u8 start = 1. Response: the plan as written (ns) and the
-  burst length.
+- **SET_PATTERN 0x0217** (REMOTE, cap PATTERN_GEN, tier 3): u8 mode, u8 flags (idle level, marker as trigger, start
+  source bits 6..5 as 0x6D), u16 R, u32 gap_ns, u8 steps n (1..16), then n x { u8 flags (level, mark), u8 0, u16 0, u32
+  duration_ns }; the firmware rounds to 5 ns, writes 0x6C x n, 0x6E, 0x6F, 0x6D and starts when u8 start = 1. Response:
+  the plan as written (ns) and the burst length.
+- **SET_PATTERN_TRIGGER 0x021A** (REMOTE, cap PATTERN_TRIGGER, tier 3): the SET_TRIGGER2 body (24 bytes, same layout and
+  validation) followed by u8 armed, u8 rearm, u16 0; the firmware's SET_TRIGGER2 writer runs with the pattern engine's
+  code table (7.5) and then writes 0x7D. Response: the GET_TRIGGER-style echo plus the 0x42 status. In the shared fallback
+  (0x42 bit 7 = 0) a configuration that differs from the capture trigger's while the capture also uses a qualified type
+  answers E_STATE detail 8 "shared trigger engine".
 - **SET_SWEEP 0x0218** (REMOTE, cap DDS_SWEEP, tier 3): u32 f_start_mHz, u32 f_stop_mHz, u32 time_ms, u8 mode (restart /
   triangle / single), u8 on; the firmware computes the increments and n, delta.
 - **MCP** `scope_pattern(steps=[{"level":1,"width_us":50,"mark":True},{"level":0,"width_us":950}], repeat=10,
-  gap_us=0, mode="repeat", idle_level=0, trigger_on_marker=True, confirm_token=None)` (tier 3, the generator's
-  confirmation token: it drives the pin, as `scope_generator`, `server.py` `confirm_token` flow) and
+  gap_us=0, mode="repeat", idle_level=0, trigger_on_marker=True, start="mcu", trigger=None, rearm=True,
+  confirm_token=None)` (tier 3, the generator's confirmation token: it drives the pin, as `scope_generator`, `server.py`
+  `confirm_token` flow); `start` is "mcu", "trigger" or "both" and `trigger` takes the same dictionary as
+  `scope_set_trigger` (source, type, edge / polarity, level, width, n, idle) for the pattern engine; and
   `scope_sweep(start_hz, stop_hz, time_s, mode="triangle", confirm_token=None)` (tier 3). Both restore the generator
   state they found (as `scope_bode_sweep` does, `docs/plans/bode-design.md` section 5.1). `scope_set_trigger(source=
-  "pattern")` arms on the marker.
+  "pattern")` arms the capture on the marker.
+
+### 7.5 Pattern trigger engine (owner, 2026-10-20 22:4x: "yes on the implementation")
+
+The pattern generator gets its own trigger engine, orthogonal to the capture trigger and with the same vocabulary:
+source CH1 / CH2 / EXT, types edge, pulse width, Nth edge, timeout, level, polarity, N, H. A detector's RX event or
+its own TX sync can then start a burst without the MCU in the loop, while the capture triggers on whatever it likes
+(the marker, the same event, or something else).
+
+**Registers**: 0x76-0x7D, one contiguous block mirroring the capture trigger's byte layouts field for field (0x15, 0x16,
+0x17, 0x55, 0x5E, 0x5F, 0x60 in that order, then the engine control 0x7D); status read 0x42 laid out as 0x34. The capture
+trigger's registers are scattered, so "the same driver with a base offset" is literally a 7-entry table of command codes
+per engine (`{0x15, 0x16, 0x17, 0x55, 0x5E, 0x5F, 0x60}` and `{0x76 .. 0x7C}`) feeding one byte builder; the field
+layouts, units and validation are identical, and so is the MCP dictionary. The layout is the same whether the FPGA has
+its own engine or the fallback below, so the MCP interface does not change.
+
+**Stream and units**: the engine watches the same streams as the capture's qualifier: the ADC trigger stream (one
+sample per memory word, legacy core A or the 16-bit / peak word, compared against its own level 0x78 / 0x79) and
+`ext_level` at 5 ns. N and H have the capture engine's units (words for CH1 / CH2, 5 ns for EXT). The ADC stream exists
+whenever the write clock runs (`trigger_data` loads on every `swc_adv`, `zaklad.v` 1268-1282, independent of the
+capture's state) [F], so the pattern engine works with the capture idle, armed or streaming; its sample period follows
+the capture's divider and filter, which the host sets anyway.
+
+**Design** (own engine, the intended build) [E, about 350 LUT / 200 reg]: one `trig_qual` instance on `clk_200MHz`
+(gen8's EXT instance measured about 175 LUT [I: half of the two-instance pair's share of the +1115]) with `ce` = 1 for
+EXT or the write-clock snapshot strobe (`swc_rise_q & adv_d`, the sequencer's existing crossing, `zaklad.v` 1515-1529)
+for CH1 / CH2, its `a` from a registered compare of `trigger_data` / `dec_trig_word` against 0x78 / 0x79 (8-bit: 10 LUT;
+16-bit: about 40), `arm` = 0x7D bit 0, `rst` = the write of 0x7D bit 0 = 1 or the re-arm after a burst. Event: type 0 the
+edge in the polarity's direction (`ap & ~a`), types 1 and 2 the registered `fire` with the next sample on the post side
+(what `trigger_previous` does for the capture), type 3 `fire` itself. The event starts a burst (0x6D bits 6..5 = 1 or
+2), sets the 0x42 flag and, with re-arm off, clears 0x7D bit 0. Latency event to pin: one write clock plus 3 to 4
+`clk_200MHz` cycles for CH1 / CH2 (so the burst start jitters by one word against the signal), 4 cycles (20 ns) for EXT.
+The engine never touches the capture's timed path.
+
+**Does the second instance fit on paper?** 0x153D with the own engine: about 7,350 LUT of 8,640 (85 %), no block RAM,
+one M18x18 free; it fits in sites. The risk is the `clk_200MHz` placement lottery, not the count, so the D2 agent
+builds the own engine first and reads the timing summary; the actual LUT cost of C1's two qualifier instances
+(measured in the 0x153C build report) replaces the 175 LUT estimate before D2 starts.
+
+**Fallback** (if the 0x153D build does not close timing or exceeds the budget): one qualifier engine, the capture's,
+**routed** to the capture, the pattern or both by 0x7D bit 3 (0 = capture, 1 = pattern; 0x6D bits 6..5 = 2 with bit 3 =
+1 gives both from the same event). Registers 0x76-0x7D exist unchanged; with bit 3 = 1 the FPGA takes the engine's
+configuration from 0x76-0x7C and the capture's qualified types are unavailable (the capture still triggers on edges,
+EXT and the marker), with bit 3 = 0 the pattern engine is off. Read 0x42 byte 0 bit 7 = 0 tells the firmware, which
+then refuses a conflicting pair (SET_PATTERN_TRIGGER E_STATE detail 8). **Visible limitation**: pattern and capture
+cannot use two different qualified triggers at the same time; "both" means both start on one event, which is the
+detector's common case anyway (TX fires and the capture starts on the same RX edge). The MCP tools are the same.
 
 ## 8. Software on the new data (host side, no FPGA)
 
@@ -481,7 +551,7 @@ a linear frequency sweep; the host gets a chirp for impulse / swept Bode measure
 | C | 16 | `tb_counter.v` (gen8, 36 checks) extended for 0x35 bytes 14, 15 | E, T, W, min, max equal to the stream model in every gate; consecutive results 2e6 clocks apart |
 | C | 1-13 | the existing steps | unchanged behaviour with the new registers at 0 (equivalence phases 0 mismatches); `contract_0x153C.txt` replaces 0x153B's (version byte, then the new firmware sequences of 9.3) |
 | D | 17 | `tb_stream.v` | streaming: the write never stops, 0x38 W and the counter match a mirror of the write port, the lap flag sets exactly when W reaches 0x6A, chunks read with the firmware's byte sequences are contiguous across laps; with 0x69 = 0 equivalence |
-| D | 18 | `tb_pattern.v` | step durations and levels on the pin to the clock against the table, bursts, gap, R, continuous, idle level; the marker triggers a capture at the EXT convention's position; DDS sweep increments against a model; with 0x6D = 0 and 0x71 = 0 the pin equals the DDS reference |
+| D | 18 | `tb_pattern.v` | step durations and levels on the pin to the clock against the table, bursts, gap, R, continuous, idle level; the marker triggers a capture at the EXT convention's position; the pattern trigger engine: every type on CH1 (legacy and K = 2), CH2 and EXT against the `tb_trigtypes.v` reference model, the burst starting one word (CH) / 20 ns (EXT) after the qualifying sample, re-arm and one-shot, the capture triggering on a different type at the same time (own engine) or the routed fallback's refusal path; DDS sweep increments against a model; with 0x6D = 0, 0x7D = 0 and 0x71 = 0 the pin equals the DDS reference |
 | E | 19 | `tb_trig2.v` | both-core crossings at 5 ns against a model of the interleaved stream, 0x37 bit 1; runt and window against a model with two levels; pulse-width range |
 
 Mutation runs as for 0x1534 / 0x1536 (`DUT=` override, `mutate_seg.py` pattern). Each generation keeps `tb/run.sh` ALL
@@ -508,6 +578,9 @@ PASS on two seeds before a build is pinned (the 0x153B rule, `AGENTS.md` fpga-ge
 9. Logger with 2 x 16-bit at 125 kS/s for 10 min while the owner opens a menu: E_BUSY on the host, the log continues.
 10. Pattern: a 50 us pulse every 1 ms, 10 bursts, marker trigger: 10 segments with timestamps 1 ms apart and the RX
     (a probe on the post) at the pretrigger point; DDS sweep 1 kHz .. 100 kHz in 1 s seen on the Spectrum view.
+10b. Pattern trigger engine: the generator's 1 kHz square from a second scope or the RC ladder's node on CH2, the pattern
+    engine on CH2 Nth edge 3 starting a 20 us pulse on the post, the capture on CH1 edge: the pulse sits one word after
+    every third CH2 edge in 100 segments; then EXT as the engine's source with the generator off.
 
 0x153E:
 11. Both cores: 1 MHz square at 200 MSa/s, 1000 captures: the trigger core bit splits about 50 / 50 and the trace
@@ -520,10 +593,10 @@ PASS on two seeds before a build is pinned (the 0x153B rule, `AGENTS.md` fpga-ge
 | Gen | Firmware (files in `firmware/scope/`) | Protocol | MCP (`mcp/src/fnirsi1013d/`) |
 |---|---|---|---|
 | C | `fpga_control.c` / `fpga_bus.c` writers for 0x5E-0x62, 0x65, 0x66, 0x1B, readers 0x34, 0x35, 0x37; `pc_hal_scope.c` arm sequence (type registers inside the 0x01 window after 0x0B / 0x0C, as 0x57..0x5C); `pc_decim.c` peak mode (K = 1, 0x56 bit 1, level << 8, no shift); `pc_cmds.c` SET_TRIGGER2 / GET_COUNTER / READ_RAW layout 3 / GET_CAPTURE_INFO 79 / SET_DECIM mode 4; `ui_meas.c` counter-fed cards; `host_tests/fpga_model.c` + `test_fpga_bus.c` (every new register, the arm order), `test_protocol.c`; `pc_cmds.h` caps; the mismatch banner (`pc_ident.c`, Diagnostics) for one version word | 1.25: **SET_TRIGGER2 0x0219** (REMOTE): u8 type, u8 polarity, u8 flags (longer, range, both cores), u8 source, u32 N, u32 N2_or_H, u16 level, u16 level2, u32 holdoff_ns, u32 0 (24 bytes; SET_TRIGGER stays for the edge type and its fields); GET_TRIGGER appends the same; GET_COUNTER 0x0213; READ_RAW layout 3; vectors in `docs/protocol-vectors.json` | `protocol.py` structs and vectors, `scope.py` `set_trigger(type=..., width=..., n=..., idle=..., level2=..., holdoff=...)`, `measure(source="counter")`, `capture(acquisition="peak")`; `server.py` tool arguments; `simulator.py` qualifier model (reuse `tb_trigtypes`'s reference model, ported to Python) and the counter; `tests/` |
-| D | `pc_hal_scope.c` log loop and DDR ring (`fnirsi_1013d.ld` section), `pc_cmds.c` LOG_* / SET_PATTERN / SET_SWEEP, `generator.c` pattern and sweep writers (0x6C-0x6F, 0x71-0x73), `pc_usbw.c` for 64 KiB LOG_READ frames; `test_fpga_bus.c` stream chunking and lap; `test_protocol.c` | 1.26: LOG_START 0x0214, LOG_READ 0x0215, LOG_STOP 0x0216, SET_PATTERN 0x0217, SET_SWEEP 0x0218, acq_state 5 | `scope_log_*`, `scope_pattern`, `scope_sweep`, `report.py` log rendering, simulator streaming and pattern |
+| D | `pc_hal_scope.c` log loop and DDR ring (`fnirsi_1013d.ld` section), `pc_cmds.c` LOG_* / SET_PATTERN / SET_PATTERN_TRIGGER / SET_SWEEP, `generator.c` pattern and sweep writers (0x6C-0x6F, 0x71-0x73), the SET_TRIGGER2 writer parameterised by the code table (0x76-0x7D), `pc_usbw.c` for 64 KiB LOG_READ frames; `test_fpga_bus.c` stream chunking and lap, the pattern engine's registers; `test_protocol.c` | 1.26: LOG_START 0x0214, LOG_READ 0x0215, LOG_STOP 0x0216, SET_PATTERN 0x0217, SET_SWEEP 0x0218, SET_PATTERN_TRIGGER 0x021A, acq_state 5 | `scope_log_*`, `scope_pattern` (with `start`, `trigger`, `rearm`), `scope_sweep`, `report.py` log rendering, simulator streaming, pattern and its engine (the qualifier model shared with the capture's) |
 | E | SET_TRIGGER2 flags both cores / range, type 4, 5; `pc_hal_scope.c` half-sample offset from 0x37 | 1.27: no new command (the fields are reserved in 1.25) | `set_trigger(type="runt" / "window", both_cores=True)`, simulator |
 
-Command numbers 0x0213-0x0219 are the next free after READ_BODE 0x0212 (`pc_protocol.h` 110-111) [F]; 0x020B is unused
+Command numbers 0x0213-0x021A are the next free after READ_BODE 0x0212 (`pc_protocol.h` 110-111) [F]; 0x020B is unused
 (`bode-design.md` 5.2 says check why before using it) and stays unused.
 
 ## 10. Implementation briefs
@@ -552,10 +625,10 @@ map is merged (the map is this document, so they can start now against `fpga_mod
 | Item | Touches | Same block as |
 |---|---|---|
 | D1 **Logger RTL** (Opus): 0x69 / 0x6A / 0x38, `stream` gating, word counter, lap; `tb_stream.v`; README section 13 | `zaklad.v`: capture logic (`sampling_enable`, `trigger_check_enable` 1219-1234), write address block 1163-1169, decoder, read mux; step 17 | D2 shares the decoder / read mux only (append-only entries, no conflict if each adds its own case lines) |
-| D2 **Pattern generator + DDS sweep RTL** (Opus): new module `pat_gen`, the pin mux, marker into `ext_pending`, 0x15 = 3, `freq_generator_dds_pwm` sweep ports, 0x6C-0x6F, 0x71-0x73, 0x39, 0x3A; `tb_pattern.v`; README section 13 | `zaklad.v`: generator 121-135 and 704-716, EXT block (`ext_edge` 744, `ext_pending` 775-778), decoder, read mux; step 18 | D1 (both append to the decoder; D2 also edits the EXT block, which C1 edited: D2 starts from the merged 0x153C) |
+| D2 **Pattern generator + pattern trigger engine + DDS sweep RTL** (Opus): new module `pat_gen` (table, bursts, gap, start sources 0x6D bits 6..5), the pin mux, marker into `ext_pending`, 0x15 = 3; the **pattern trigger engine** (7.5): a third `trig_qual` instance on `clk_200MHz` with its own level compares, 0x76-0x7D, read 0x42, re-arm, event to `pat_gen`; build the own engine first, read the timing summary, fall back to the routed shared engine only if it does not close, and report the measured LUT delta per block; `freq_generator_dds_pwm` sweep ports, 0x6C-0x6F, 0x71-0x73, 0x39, 0x3A; `tb_pattern.v` incl. the engine cases; README section 13 | `zaklad.v`: generator 121-135 and 704-716, EXT block (`ext_edge` 744, `ext_pending` 775-778), the `trig_qual` instances block (C1's, read-only here: a third instance is added beside them; the shared fallback alone edits C1's `trigger_previous` load), decoder, read mux; step 18 | D1 (both append to the decoder; D2 also edits the EXT block, which C1 edited: D2 starts from the merged 0x153C). If the fallback is needed, D2 owns the capture-logic block for that change and D1 rebases |
 | D3 **Integration, build, contract** (Opus) | as C4, version 0x3D | - |
 | D4 **Firmware logger** (Opus): LOG_*, the log loop, the DDR ring, acq_state 5, USB framing | `pc_hal_scope.c`, `pc_cmds.c`, `pc_usbw.c`, `pc_transport.c`, `fnirsi_1013d.ld`, host tests | D5 shares `pc_cmds.c`: D4 first |
-| D5 **Firmware pattern + sweep** (Opus): SET_PATTERN / SET_SWEEP, writers, trigger source 3 in SET_TRIGGER / SET_TRIGGER2, generator state restore | `generator.c`, `pc_cmds.c`, `fpga_control.c`, host tests | D4 |
+| D5 **Firmware pattern + pattern trigger + sweep** (Opus): SET_PATTERN / SET_PATTERN_TRIGGER / SET_SWEEP, writers, the SET_TRIGGER2 writer with the per-engine code table, the shared-fallback refusal (0x42 bit 7), trigger source 3 in SET_TRIGGER / SET_TRIGGER2, generator state restore | `generator.c`, `pc_cmds.c`, `fpga_control.c`, host tests | D4; shares C5's SET_TRIGGER2 writer (D5 rebases on it) |
 | D6 **MCP 1.26** (Opus): `scope_log_*`, `scope_pattern`, `scope_sweep`, report rendering, simulator | mcp as C8 | - |
 
 ### 0x153E
@@ -581,8 +654,8 @@ Owner decision, 2026-10-20 22:13 (coordinator). The device UI gets exactly two r
 | Measurement cards (Freq, Period, +Width, +Duty, Vmin, Vmax, Vpp) fed by the counter, no new control | read 0x35 | one 16-byte read per screen pass, about 5 us (section 5); the counter runs always |
 
 MCP-only (no device control): runt, window and timeout triggers, hold-off, the streaming logger, the pulse pattern
-generator and its marker trigger, the DDS sweep, both-core triggering (always on where it applies), and all host-side
-software of section 8. Screen and menu design are out of this document.
+generator with its marker trigger and its own trigger engine, the DDS sweep, both-core triggering (always on where it
+applies), and all host-side software of section 8. Screen and menu design are out of this document.
 
 ### 11.1 The former proposal (for the record)
 
@@ -596,13 +669,14 @@ consistent with the FPGA side: peak is a one-register switch independent of the 
 
 1. 0x1B as the trigger hold-off: accept the meaning change (the register was dead) or allocate a new code and keep 0x1B
    dead.
-2. Logger: accept the contract rates (500 / 250 / 125 kS/s) as the documented spec, with the higher tier added only after
-   the bench, or wait for the bench before documenting any rate.
-3. Pattern marker as an internal trigger source instead of a trigger-out pin (no pin exists): is that enough for the
-   detector work, or is a hardware mod (a wire to a spare pad) worth a soldering session later.
-4. DDS sweep in 0x153D or cut (the host can step the DDS today).
-5. 0x153E at all, given the 87 % LUT estimate and the timing lottery: build it and cut by the order of 1.2, or stop at
-   0x153D.
-6. When the one-bitstream cleanup (C9) lands relative to the 0.3.0 tag.
-7. The Sample row with Peak and the Filter box both change the record format; whether Peak greys the Filter box or the
+2. DDS sweep in 0x153D or cut (the host can step the DDS today); with the pattern trigger engine in, the sweep is the
+   first cut of 1.2.
+3. 0x153E at all, given the 91 % paper estimate after the pattern trigger engine and the timing lottery: build it and
+   cut by the order of 1.2 once 0x153D's measured count is known, or stop at 0x153D.
+4. When the one-bitstream cleanup (C9) lands relative to the 0.3.0 tag.
+5. The Sample row with Peak and the Filter box both change the record format; whether Peak greys the Filter box or the
    two are shown as one state is for the mockup round (not a contract question, listed so it is not lost).
+
+Closed by the owner's Q&A of 22:38-22:50: the logger rates are the documented spec (section 6.2); the trigger-out pin is
+closed by the no-soldering rule (7.1); the pattern trigger engine is in (7.5); "pattern starts on the capture trigger"
+is dropped.

@@ -259,6 +259,94 @@ def decim_bits(k: int, n: int, gain: int, shift: int, noise_lsb: float = 1.0, fi
 
 
 # ---------------------------------------------------------------------------------------------------------
+# Mask testing (scope_mask_test)
+
+
+def mask_envelope(ref: np.ndarray, dv: float, k: int) -> tuple[np.ndarray, np.ndarray]:
+    """Upper and lower limit around a reference record: the running max / min over +-k samples (the time tolerance)
+    widened by dv volts (the amplitude tolerance). Edge samples are held."""
+    ref = np.asarray(ref, dtype=np.float64)
+    if k > 0:
+        pad = np.pad(ref, k, mode="edge")
+        win = np.lib.stride_tricks.sliding_window_view(pad, 2 * k + 1)
+        hi, lo = win.max(axis=1), win.min(axis=1)
+    else:
+        hi = lo = ref
+    return hi + dv, lo - dv
+
+
+def mask_check(v: np.ndarray, upper: np.ndarray, lower: np.ndarray) -> dict[str, Any]:
+    """Compare one record with the mask: the failing samples, the first one and the worst excursion in volts."""
+    v = np.asarray(v, dtype=np.float64)
+    over = v - upper
+    under = lower - v
+    exc = np.maximum(over, under)
+    fail = exc > 0
+    n = int(fail.sum())
+    out: dict[str, Any] = {"passed": n == 0, "fail_samples": n, "fail_mask": fail}
+    if n:
+        first = int(np.argmax(fail))
+        worst = int(np.argmax(exc))
+        out["first_fail"] = {"index": first, "volts": float(v[first]),
+                             "bound": "upper" if over[first] > 0 else "lower",
+                             "limit": float(upper[first] if over[first] > 0 else lower[first])}
+        out["worst_excursion_volts"] = float(exc[worst])
+        out["worst_index"] = worst
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------------
+# DVM readout (scope_dvm)
+
+
+def dominant_frequency(v: np.ndarray, dt: float) -> float | None:
+    """Frequency of the strongest spectral component (Hann window, parabolic peak), None when nothing stands 6x
+    (about 16 dB) above the median bin: the largest of 16k noise bins reaches about 3.6x the median."""
+    v = np.asarray(v, dtype=np.float64)
+    if v.size < 16:
+        return None
+    f, amp, _ = amplitude_spectrum(v, dt, "hann", detrend=True)
+    floor = float(np.median(amp[1:]))
+    pk = peaks(f, amp, 1, floor=floor * 6 if floor > 0 else None)
+    return pk[0][0] if pk else None
+
+
+def dvm_summary(readings: dict[str, list[float]]) -> dict[str, float | None]:
+    """Combine per-capture statistics into one reading: DC = mean of the means (and their spread), AC / true RMS as
+    power means, the extremes, Vpp from them, the median dominant frequency."""
+    means = np.asarray(readings["mean"], dtype=np.float64)
+    n = means.size
+    ac = np.asarray(readings["ac_rms"], dtype=np.float64)
+    rms = np.asarray(readings["rms"], dtype=np.float64)
+    freqs = [f for f in readings.get("frequency", []) if f is not None and math.isfinite(f)]
+    vmin, vmax = float(np.min(readings["min"])), float(np.max(readings["max"]))
+    return {"dc_mean": float(means.mean()), "dc_std_between_captures": float(means.std(ddof=1)) if n > 1 else None,
+            "ac_rms": float(np.sqrt(np.mean(ac * ac))), "rms": float(np.sqrt(np.mean(rms * rms))),
+            "min": vmin, "max": vmax, "vpp": vmax - vmin,
+            "frequency": float(np.median(freqs)) if freqs else None, "n_captures": n}
+
+
+def dvm_resolution(step_volts: float, full_scale_volts: float, noise_codes: float, n_samples: int,
+                   dc_std_between: float | None, n_captures: int) -> dict[str, Any]:
+    """What the DC reading resolves: the 1-sigma uncertainty of the mean from the sample noise (needs dither: below
+    0.5 code rms the mean cannot resolve below one code, so the step bounds it), from the spread between captures
+    when there are several, and the quantisation floor; ``digits`` = log10(full scale / uncertainty)."""
+    if noise_codes < 0.5:
+        u_noise = step_volts / 2
+        dither = False
+    else:
+        u_noise = noise_codes * step_volts / math.sqrt(max(n_samples, 1))
+        dither = True
+    u_q = step_volts / math.sqrt(12 * max(n_samples, 1))
+    u = max(u_noise, u_q)
+    if dc_std_between is not None and n_captures > 1:
+        u = max(u, dc_std_between / math.sqrt(n_captures))
+    digits = math.log10(full_scale_volts / u) if u > 0 and full_scale_volts > 0 else 0.0
+    return {"uncertainty_volts": u, "digits": digits, "dither": dither, "step_volts": step_volts,
+            "full_scale_volts": full_scale_volts, "noise_codes": noise_codes, "n_samples": n_samples}
+
+
+# ---------------------------------------------------------------------------------------------------------
 # Spectrum
 
 
