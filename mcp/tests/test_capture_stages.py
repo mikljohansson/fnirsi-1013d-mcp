@@ -63,6 +63,13 @@ def test_health_capture_words():
     assert clean["stored_for_other_bitstream"]
     new = P.HealthResp(cap_value=0x08E3, cap_flags=P.CAPF_HAS).describe_capture()
     assert new["source"] == "not stored (a training not saved yet)"
+    assert not new["flagged_repeatedly"]
+    # fw 0.2.81: GET_HEALTH 106 bit 5, a core flagged in 3 captures within a minute (the last capture may be clean)
+    rep = P.HealthResp(cap_value=0x08E3, cap_flags=P.CAPF_HAS | P.CAPF_TRAINED | P.CAPF_READ | P.CAPF_REPEAT,
+                       cap_reads=9).describe_capture()
+    assert rep["flagged_repeatedly"]
+    assert rep["text"] == ("capture stages CH1 A3 B4, CH2 A3 B4 (trained); capture clean; a core was flagged in 3 "
+                           "captures within a minute: run the calibration wizard")
     assert P.HealthResp(cap_flags=0).describe_capture() == {
         "has_stages": False, "text": "no ADC capture stages on this bitstream (FPGA 0x153A and later)"}
 

@@ -3012,6 +3012,7 @@ CAPF_TRAINED = 0x02  # the stored value for this bitstream is in effect (else th
 CAPF_READ = 0x04  # outlier counts were read after a full-rate capture since boot
 CAPF_FLAGGED = 0x08  # the last read flagged a core
 CAPF_OTHER = 0x10  # a stored value exists for another bitstream (not applied: recalibrate)
+CAPF_REPEAT = 0x20  # fw 0.2.81 (GET_HEALTH 106 only): a core flagged in 3 captures within a minute: recalibrate
 #: 0x63 at power-on: CH1 A 4, CH1 B 4, CH2 A 3, CH2 B 4, B cores by their own encode
 CAP_POWER_ON = 0x08E4
 #: the 0x36 order of the cores; flag masks use bit i = core i
@@ -3175,7 +3176,8 @@ class HealthResp(Payload):
         out: dict[str, Any] = {
             "has_stages": True, "value": f"0x{v:04X}", "stages": cap_stages_text(v), "source": source,
             "stored_for_other_bitstream": bool(f & CAPF_OTHER), "last_counts": counts, "flagged_cores": flagged,
-            "captures_read": self.cap_reads, "captures_flagged": self.cap_flagged_n}
+            "captures_read": self.cap_reads, "captures_flagged": self.cap_flagged_n,
+            "flagged_repeatedly": bool(f & CAPF_REPEAT)}
         if not read:
             state = "no 200 MSa/s capture read yet"
         elif f & CAPF_FLAGGED:
@@ -3187,6 +3189,8 @@ class HealthResp(Payload):
             text += f"; {self.cap_flagged_n} of {self.cap_reads} full-rate captures flagged since boot"
         if f & CAPF_OTHER:
             text += "; a value stored for another bitstream is not applied: run the calibration wizard"
+        if f & CAPF_REPEAT:
+            text += "; a core was flagged in 3 captures within a minute: run the calibration wizard"
         out["text"] = text
         return out
 
@@ -3517,6 +3521,8 @@ class DeviceEvent:
             if a & 0x10:
                 end = f"no clean stage for {cores}, kept" if a & 0x0F else "now"
                 return f"adc_capture training ended: {end} {cap_stages_text(b)} (0x{b:04X})"
+            # fw 0.2.81: logged once per core when it was flagged in 3 captures within a minute (0.2.79-0.2.80: when
+            # the set of flagged cores changed)
             return f"adc_capture self-check flagged {cores or 'no core'}: {b} outliers beyond the chip partner"
         return self.name
 
