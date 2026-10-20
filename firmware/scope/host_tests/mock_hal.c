@@ -183,6 +183,8 @@ void pc_hal_channel_write(int ch, const pc_hw_channel *c, uint8_t mask)
 {
   pc_hw_channel *d = &mock.ch[ch];
 
+  mock.under_screen += mock.ui_screen;
+
   if(mask & PC_CH_ENABLE)   d->enable = c->enable;
   if(mask & PC_CH_RANGE)    d->range = c->range;
   if(mask & PC_CH_COUPLING) d->coupling = c->coupling;
@@ -224,6 +226,7 @@ void pc_hal_timebase_write(const pc_hw_timebase *t, int raw)
 
   mock.tb_writes++;
   mock.fpga_ops++;
+  mock.under_screen += mock.ui_screen;
 
   //0x0D: on 0x1538+ a capture in flight may now carry 0x33 bit 0 (fpga_bus.h)
   mock.fpga_rate_writes++;
@@ -235,6 +238,7 @@ void pc_hal_trigger_read(pc_hw_trigger *t) { *t = mock.trg; }
 void pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask)
 {
   mock.fpga_ops++;
+  mock.under_screen += mock.ui_screen;
 
   if(mask & PC_TRG_SOURCE)
   {
@@ -262,6 +266,7 @@ void pc_hal_gen_read_ui(uint8_t *enable, uint32_t *freq_hz, uint8_t *duty_pct)
 
 void pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable)
 {
+  mock.under_screen += mock.ui_screen;
   mock.gen_phase = phase_inc; mock.gen_thr = threshold; mock.gen_hw_en = enable; mock.gen_writes++; mock.fpga_ops++;
 
   //UI copy, rounded as pc_hal_scope.c does
@@ -489,6 +494,7 @@ void pc_hal_ui_read(pc_hw_ui *u)
 
 void pc_hal_ui_set_run(int run)
 {
+  mock.under_screen += mock.ui_screen;
   mock.ui_run = run ? 1 : 0;
   mock.ui_armed = 0;
   mock.run_sets++;
@@ -519,6 +525,16 @@ uint32_t pc_hal_settings_fingerprint(void)
 
 void pc_hal_indicator(int state) { mock.indicator = state; mock.indicator_draws++; }
 uint8_t pc_hal_ui_hold(void) { return mock.ui_hold; }
+
+int pc_hal_ui_leave_screen(void)
+{
+  if(!mock.ui_screen)
+    return 0;
+
+  mock.ui_screen = 0;
+  mock.ui_screen_leaves++;
+  return 1;
+}
 
 int mock_ui_modal_pass(void *session)
 {
@@ -655,6 +671,7 @@ void pc_hal_screen_rows(uint32_t row, uint32_t nrows, uint8_t *dst)
   uint32_t r, x;
 
   mock_screen_calls++;
+  mock.screen_read_under = mock.ui_screen;
 
   for(r=row;r<row + nrows;r++)
     for(x=0;x<PC_SCREEN_WIDTH;x++, dst += 2)
@@ -723,6 +740,7 @@ uint32_t mock_bode_rows, mock_bode_first, mock_bode_max;
 int pc_hal_bode_ctrl(const uint8_t *req, uint8_t *resp, uint16_t *detail)
 {
   memcpy(mock_bode_req, req, 16);
+  mock.under_screen += mock.ui_screen;      //BODE_CTRL open draws the Frequency response, run sweeps on it
   *detail = mock_bode_detail;
   memset(resp, 0, PC_BODE_CTRL_RESP);
   resp[4] = 1;                                  //state running

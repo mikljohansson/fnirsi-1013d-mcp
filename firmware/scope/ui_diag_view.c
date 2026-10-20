@@ -205,6 +205,15 @@ static void ud_close(void)
   display_copy_rect_to_screen(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 }
 
+int ui_diag_leave(void)
+{
+  if(!ud_open)
+    return 0;
+
+  ud_close();
+  return 1;
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // Actions
 

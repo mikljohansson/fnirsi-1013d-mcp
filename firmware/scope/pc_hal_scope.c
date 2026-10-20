@@ -2088,6 +2088,13 @@ uint8_t pc_hal_ui_hold(void)
   return pc_ui_hold_why;
 }
 
+//fw 0.2.96: Diagnostics (a main-loop screen) goes Back before a state-changing request runs (pc_cmds.c pc_dispatch);
+//the restored scope screen is the one the background redraws kept up to date, the request's redraws follow on it
+int pc_hal_ui_leave_screen(void)
+{
+  return ui_diag_leave();
+}
+
 int pc_glue_ui_hold(int why)
 {
   int prev = pc_ui_hold_why;

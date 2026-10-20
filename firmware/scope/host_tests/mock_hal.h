@@ -91,6 +91,13 @@ typedef struct
   //iteration of the innermost one as every firmware modal loop does: the touch scan (a BUSY poll), then PC_UI_YIELD
   uint8_t  ui_modal;              //modal screens open (0 = the base screen, the main loop runs)
   uint32_t ui_cancels;            //screens left by their cancel path because a host request waited
+  //fw 0.2.96: a main-loop screen over the view (Diagnostics): left by Back before a state-changing request runs
+  //(pc_hal_ui_leave_screen). under_screen counts setting writes / view redraws made while it showed (must stay 0),
+  //screen_read_under is ui_screen at the last READ_SCREEN rows read
+  uint8_t  ui_screen;
+  uint32_t ui_screen_leaves;
+  uint32_t under_screen;
+  uint8_t  screen_read_under;
 
   //SD card
   uint8_t  *sd;                     //MOCK_SD_SECTORS x 512

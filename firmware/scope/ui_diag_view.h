@@ -18,6 +18,10 @@ int     ui_diag_pass(void);
 
 int     ui_diag_active(void);
 
+//fw 0.2.96: a host request that changes state leaves Diagnostics as Back does (pc_hal_ui_leave_screen, MAIN context);
+//1 when it showed
+int     ui_diag_leave(void);
+
 //The buffer the background redraws of the scope screen go to (pc_hal_scope.c): the kept scope screen while
 //Diagnostics shows, so the PC's changes are there when Back returns to it
 uint16 *ui_diag_scope_buffer(void);

@@ -1315,6 +1315,112 @@ static void test_modal_read_only(void)
   mock.ui_modal = 0;
 }
 
+//fw 0.2.96 (bench 2026-10-20 15:25, fw 0.2.95: tools/screenshots.py with Diagnostics open drew the Spectrum's waterfall
+//and later the Frequency response into the Diagnostics frame and never left it). Diagnostics is a main-loop screen over
+//the view, so the modal yield never reached it: a state-changing request now leaves it by Back before its handler
+//runs (pc_hal_ui_leave_screen), a read-only one (and the F_BUSY set) is answered with it open
+static void diag_screen_seq(uint8_t view)
+{
+  extern uint8_t mock_display_mode;
+  uint8_t  q[4], tb[8], run[4] = { 1, 0, 0, 0 };
+  resp_t   r;
+  uint32_t yields = link_counter(68);
+
+  mock_display_mode = view;
+  mock.ui_screen = 1;
+  mock.ui_screen_leaves = 0;
+  mock.under_screen = 0;
+  pc_put_u16(q, 0); pc_put_u16(q + 2, 40);
+
+  //Read-only and F_BUSY requests: answered, Diagnostics stays, the screenshot is of Diagnostics
+  r = req(PC_CMD_READ_SCREEN, q, 4);
+  T_EQ(r.h.status, 0); T_EQ(mock.screen_read_under, 1);
+  r = req(PC_CMD_GET_CHANNEL, "\0", 1);
+  T_EQ(r.h.status, 0);
+  r = req(PC_CMD_GET_TIMEBASE, 0, 0);
+  T_EQ(r.h.status, 0);
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  T_EQ(r.h.status, 0);
+  r = req(PC_CMD_PING, "d", 1);
+  T_EQ(r.h.status, 0);
+  T_EQ(mock.ui_screen, 1); T_EQ(mock.ui_screen_leaves, 0); T_EQ(link_counter(68), yields);
+
+  //tools/screenshots.py "scope": SET_CHANNEL x2, SET_TIMEBASE, RUN, then READ_SCREEN. The first one leaves Diagnostics
+  //before it writes anything; nothing is drawn under the screen; the screenshot is of the view
+  r = req(PC_CMD_SET_CHANNEL, "\0\x01\0\x03", 4);
+  T_EQ(r.h.status, 0);
+  T_EQ(mock.ui_screen, 0); T_EQ(mock.ui_screen_leaves, 1); T_EQ(mock.under_screen, 0);
+  T_EQ(link_counter(68), yields + 1);
+  r = req(PC_CMD_SET_CHANNEL, "\1\x01\0\x03", 4);
+  T_EQ(r.h.status, 0);
+  memset(tb, 0, 8); pc_put_u32(tb + 4, 21);
+  r = req(PC_CMD_SET_TIMEBASE, tb, 8);
+  T_EQ(r.h.status, 0);
+  r = req(PC_CMD_SET_ACQ_STATE, run, 4);
+  T_EQ(r.h.status, 0);
+  r = req(PC_CMD_READ_SCREEN, q, 4);
+  T_EQ(r.h.status, 0); T_EQ(mock.screen_read_under, 0);
+  T_EQ(mock.ui_screen_leaves, 1); T_EQ(link_counter(68), yields + 1);
+
+  //SET_TIMEBASE alone, Diagnostics opened again: the same
+  mock.ui_screen = 1;
+  r = req(PC_CMD_SET_TIMEBASE, tb, 8);
+  T_EQ(r.h.status, 0); T_EQ(mock.ui_screen, 0); T_EQ(mock.ui_screen_leaves, 2); T_EQ(mock.under_screen, 0);
+  r = req(PC_CMD_READ_SCREEN, q, 4);
+  T_EQ(r.h.status, 0); T_EQ(mock.screen_read_under, 0);
+
+  //The calibration wizard open over Diagnostics (a modal loop inside it): the wizard cancels by the yield, then the
+  //main loop leaves Diagnostics before the request runs
+  mock.ui_screen = 1;
+  mock.ui_modal = 1;
+  mock.ui_cancels = 0;
+  mock.now += PC_MODAL_MS + 1;
+  ui_run_modal(2);
+  mock_clear_resps();
+  {
+    uint16_t seq = next_seq++;
+
+    push_frame(PC_CMD_SET_TIMEBASE, seq, tb, 8);
+    ui_run_modal(20);
+    T_EQ(mock.ui_modal, 0); T_EQ(mock.ui_cancels, 1); T_EQ(mock.ui_screen, 1); T_EQ(mock_nresps, 0);
+    pc_poll(&S, PC_CTX_MAIN);
+    T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0);
+  }
+  T_EQ(mock.ui_screen, 0); T_EQ(mock.ui_screen_leaves, 3); T_EQ(mock.under_screen, 0);
+
+  mock_display_mode = 0;
+}
+
+static void test_main_screen_leave(void)
+{
+  uint8_t  p[16];
+  resp_t   r;
+
+  //Diagnostics over the Spectrum analyser (display mode 1), then over the Frequency response (5)
+  setup(0x1532);
+  diag_screen_seq(1);
+  setup(0x1535);
+  diag_screen_seq(5);
+
+  //tools/screenshots.py "frequency-response": BODE_CTRL open, then run, with Diagnostics open: it leaves first
+  setup(0x1535);
+  mock.ui_screen = 1;
+  memset(p, 0, sizeof(p));
+  p[0] = 9;
+  r = req(PC_CMD_BODE_CTRL, p, 16);
+  T_EQ(r.h.status, 0); T_EQ(mock.ui_screen, 0); T_EQ(mock.ui_screen_leaves, 1); T_EQ(mock.under_screen, 0);
+  mock.ui_screen = 1;
+  p[0] = 1; pc_put_u32(p + 4, 10000); pc_put_u32(p + 8, 10000000); pc_put_u16(p + 12, 40);
+  r = req(PC_CMD_BODE_CTRL, p, 16);
+  T_EQ(r.h.status, 0); T_EQ(mock.ui_screen, 0); T_EQ(mock.ui_screen_leaves, 2); T_EQ(mock.under_screen, 0);
+  //READ_BODE is read-only: answered with Diagnostics open
+  mock.ui_screen = 1;
+  memset(p, 0, 8);
+  r = req(PC_CMD_READ_BODE, p, 8);
+  T_EQ(r.h.status, 0); T_EQ(mock.ui_screen, 1); T_EQ(mock.ui_screen_leaves, 2);
+  mock.ui_screen = 0;
+}
+
 static void test_isr_context(void)
 {
   resp_t r;
@@ -3600,6 +3706,7 @@ int main(void)
   test_info();
   test_modal_yield();
   test_modal_read_only();
+  test_main_screen_leave();
   test_shared_basics();
   test_ascii_ver();
   test_channel();
