@@ -35,6 +35,7 @@ static const uint16 settle_periods[BODE_SETTLE_COUNT] = { 3, 10, 50, 200 };
 #define PH_UP_PREV          7           //CH2 one range up: the previous point again, for the splice
 #define PH_UP_POINT         8           //CH2 one range up: this point again
 #define PH_DOWN             9           //CH2 one range down: this point again, for the splice
+#define PH_CLIP_AGAIN       10          //fw 0.2.89: a planned point clipped: once more on the same range
 
 #define M_IDLE              0
 #define M_SETTLE            1
@@ -342,6 +343,16 @@ static void auto_range(bode_eng *e, const bode_meas *m, int coll)
 
   if(m->c[1].clipped || flat2(m, coll))
   {
+    //fw 0.2.89: on its planned range a point clipped once is measured again before the plan changes (a glitch is not a
+    //changed circuit; bench 2026-10-20 12:30 had planned points stepping to coarser ranges sweep after sweep)
+    if(e->reuse && m->c[1].clipped && !flat2(m, coll) && !e->clip_again)
+    {
+      e->clip_again = 1;
+      e->retries++;
+      measure(e, PH_CLIP_AGAIN, &e->plans[e->idx], settle_periods[e->cfg.settle] * 10);
+      return;
+    }
+
     if((r > 0) && (e->switches < MAX_SWITCHES))
     {
       up_step(e, m, coll);
@@ -442,6 +453,7 @@ static void point_begin(bode_eng *e)
 
   key = (pp->n << 3) | e->range[1];
   e->retries = 0;
+  e->clip_again = 0;
 
   //Background: generator off, one capture per rate and CH2 range, long enough for every point at this rate
   if(e->cfg.background && !bg_has(e, key) && (e->nbg < (int)(sizeof(e->bg_done) / sizeof(e->bg_done[0]))))
@@ -653,6 +665,7 @@ static void on_measure(bode_eng *e, const bode_meas *m)
       return;
 
     case PH_RETRY:
+    case PH_CLIP_AGAIN:
       point_final(e, m, 0);
       return;
 
@@ -707,11 +720,25 @@ static void on_measure(bode_eng *e, const bode_meas *m)
         if(e->reuse && e->rp_set)
         {
           bode_rplan *rp = &e->rplan[e->idx];
+          int r = e->range[1];
 
           rp->r[1]   = e->range[1];
           rp->off[1] = (int16)e->dcoffset[1];
           rp->k_mdb  = e->k_mdb;
           rp->k_mdeg = e->k_mdeg;
+
+          //fw 0.2.89: still under the floor: on down in this sweep (up to 0.2.88 one range per sweep, so a point that
+          //had stepped up twice took two more sweeps to come back)
+          if(!e->stop_req && (r < 5) && (e->switches < MAX_SWITCHES) && !(e->bad_down & (1 << (r + 1))) &&
+             ((int64)m->c[1].ac_c100 * vpd_mv[r] <= (int64)PLAN_FLOOR_C100 * vpd_mv[r + 1]))
+          {
+            e->ms = *m;
+            set_range(e, 1, r + 1, m->c[1].mean_uv);
+            e->switches++;
+            e->up_r = r;
+            measure(e, PH_DOWN, &e->plans[e->idx], point_settle(e));
+            return;
+          }
         }
       }
 
@@ -975,7 +1002,10 @@ int bode_step(bode_eng *e)
       bode_dft_run(e->mp, cap.x[0], cap.x[1], e->work, &d);
       bode_measure(e->mp, &d, cap.s, cap.zero_c100, cap.uv_q8, &m);
 
-      if(bode_suspect(&m) && !e->retake && !e->stop_req)
+      //fw 0.2.89: an incoherent CH1 too. On the device that is a record joined from two captures (an FPGA-auto record
+      //that started on the time-out, bench 2026-10-20 cells_1235: leak -3 .. -36 dB in 5 of 8 such records, none
+      //with the CH1 trigger the engine now arms with, pc_bode.c); the host's triggered captures never show it
+      if((bode_suspect(&m) || bode_incoherent(&m)) && !e->retake && !e->stop_req)
       {
         e->retake = 1;
         e->retries++;

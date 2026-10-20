@@ -31,6 +31,9 @@ typedef struct
                               //channels (the 0x153A first-record artefact)
   double scale2;              //fw 0.2.87: CH2's signal x this between scale2_lo and scale2_hi Hz (0 = 1; the DUT's
   double scale2_lo, scale2_hi;//output changing between sweeps)
+  uint32 brk_from, brk_n;     //fw 0.2.89: captures brk_from .. + brk_n - 1 are broken: the samples before brk_at are
+  uint32 brk_at;              //0.37 period off in phase (the FPGA-auto record joined from two, bench cells_1235)
+  uint32 rail_from;           //fw 0.2.89: the rails only from this capture on (0: from the first)
   uint32 reads;
 
   //State
@@ -187,7 +190,10 @@ static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
   {
     double v[2];
 
-    dut_volts(d, f, i / fs, dt, band, &v[0], &v[1]);
+    int    brk = d->brk_n && ((d->reads + 1) >= d->brk_from) && ((d->reads + 1) < d->brk_from + d->brk_n) &&
+                 (i < d->brk_at);
+
+    dut_volts(d, f, i / fs + (brk ? 0.37 / f : 0.0), dt, band, &v[0], &v[1]);
     if(d->thru)
       v[1] = v[0];
 
@@ -233,7 +239,7 @@ static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
         d->buf[c][i] = 0xFF00;
 
   for(c = 0; c < 2; c++)
-    if(d->rail[c] && (!d->rail_reads || (d->reads <= (uint32)d->rail_reads)))
+    if(d->rail[c] && (!d->rail_reads || (d->reads <= (uint32)d->rail_reads)) && (d->reads >= d->rail_from))
       for(i = 0; i < total; i += (uint32)d->rail[c])
         d->buf[c][i] = 0xFF00;
 
@@ -882,6 +888,61 @@ static void test_range_plan(void)
   sweep_once(&c, 0, 3, &b);
   T_EQ(b.reused, 0);
   T_TRUE(same_ranges(&a, &b));
+
+  //fw 0.2.89: the output 20 dB down at a point on 0.5 V/div: from the plan it steps down twice in the same sweep (up
+  //to 0.2.88 one range per sweep), and the sweep after is quiet
+  dut_rc15(&D);
+  bode_init(&eng, &HW);
+  sweep_once(&c, 0, 3, &a);
+  for(mid = a.n - 1; (mid > 0) && (a.r2[mid] != 3); mid--)
+    ;
+  T_TRUE(mid > 0);
+  D.scale2 = 0.1;
+  D.scale2_lo = bode_plans(&eng)[mid].f_mhz / 1000.0 * 0.999;
+  D.scale2_hi = bode_plans(&eng)[mid].f_mhz / 1000.0 * 1.001;
+  sweep_once(&c, 0, 3, &b);
+  print_rec("output -20 dB at one pt", &b);
+  T_EQ(b.reused, 1);
+  T_EQ(b.switches, 2);
+  sweep_once(&c, 0, 3, &x);
+  print_rec("again", &x);
+  T_EQ(x.switches, 0);
+  T_EQ(x.r2[mid], 5);
+  T_EQ(x.bad, 0);
+  D.scale2 = 0;
+
+  //fw 0.2.89: broken records (a phase jump a third of the way in) on several captures of a plan sweep: each is taken
+  //again, no point flagged, no switch, the ranges unchanged
+  dut_rc15(&D);
+  bode_init(&eng, &HW);
+  sweep_once(&c, 0, 3, &a);
+  for(i = 0; i < 3; i++)
+  {
+    D.brk_from = D.reads + 3 + 9 * i;
+    D.brk_n = 1;
+    D.brk_at = 900;
+    sweep_once(&c, 0, 3, &b);
+    print_rec("one broken record", &b);
+    T_EQ(b.reused, 1);
+    T_EQ(b.switches, 0);
+    T_EQ(b.bad, 0);
+    T_TRUE(same_ranges(&a, &b));
+  }
+  D.brk_n = 0;
+
+  //fw 0.2.89: one CH2 glitch at the rail on a planned point: measured again on its range, no step up
+  sweep_once(&c, 0, 3, &a);
+  D.rail[1] = 100000;
+  D.rail_from = D.reads + 5;
+  D.rail_reads = (int)D.rail_from;
+  sweep_once(&c, 0, 3, &b);
+  print_rec("one CH2 glitch", &b);
+  T_EQ(b.reused, 1);
+  T_EQ(b.switches, 0);
+  T_TRUE(same_ranges(&a, &b));
+  D.rail[1] = 0;
+  D.rail_reads = 0;
+  D.rail_from = 0;
 
   //A fooled pre-scan (flat twice: CH1 stays on 2.5 V/div): the plan is not kept, the next sweep ranges again
   dut_rc15(&D);

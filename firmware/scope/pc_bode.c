@@ -23,6 +23,7 @@
 #include "adc_cal.h"
 #include "types.h"
 #include "variables.h"
+#include "fpga_control.h"
 
 //pc_hal_scope.c (fw 0.2.66)
 uint32 pc_glue_caps(void);
@@ -118,6 +119,28 @@ static void bh_info(void *ctx, int c, int r, bode_chinfo *ci)
   ci->uv_q8          = bh_uv_q8(&h, r);
 }
 
+//fw 0.2.89: the trigger the host's captures use: CH1, rising, code 128 (the engine centres CH1's mean there). The engine
+//arms FPGA auto; with the UI's trigger level off the signal the record started on the time-out, and such a record is
+//joined from two captures at a random point (bench 2026-10-20 cells_1235: 5 of 8 at 21.6 and 31.6 kHz, leak -3 .. -36
+//dB, |H| off by up to 0.4 dB; 0 of 16 with the CH1 trigger). The level follows CH1's range and offset (the UI derives
+//it from the marker at every arm), so it is checked before each arm and the marker placed again when it moved; the
+//view gives the user's source, edge and marker back on leaving (bode_view_close).
+static void bh_trigger(void)
+{
+  pc_hw_trigger t;
+
+  fpga_set_trigger_level();
+  pc_hal_trigger_read(&t);
+
+  if((t.source != 0) || (t.edge != 0) || (t.level < 124) || (t.level > 132))
+  {
+    t.source = 0;
+    t.edge   = 0;
+    t.level  = 128;
+    pc_hal_trigger_write(&t, PC_TRG_SOURCE | PC_TRG_EDGE | PC_TRG_LEVEL);
+  }
+}
+
 static int bh_arm(void *ctx, const bode_plan *pp, uint32 total)
 {
   uint32 caps = pc_glue_caps(), div = bode_divider(pp);
@@ -149,6 +172,7 @@ static int bh_arm(void *ctx, const bode_plan *pp, uint32 total)
 
   //The PC's last capture is no longer in the ring
   pc_glue_ring_taken();
+  bh_trigger();
 
   //FPGA auto (time-out = the record): the record starts at once, triggered or not
   return pc_hal_arm(0, (uint16)(bh_wide ? total : total / 2), total, 1, 0, (caps & PC_CAP_DECIM) ? &dc : 0,

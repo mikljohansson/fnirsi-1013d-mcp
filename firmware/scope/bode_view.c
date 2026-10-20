@@ -95,6 +95,8 @@ typedef struct
 
   //What the view gives back
   uint8  s_run, s_trig, s_gen_en, s_gen_duty, s_disp[2];
+  uint8  s_edge;                    //fw 0.2.89: the trigger edge and marker (the engine arms on CH1 rising at 128)
+  uint16 s_tvp;
   uint32 s_gen_freq;
   pc_hw_channel  s_ch[2];
   pc_hw_timebase s_tb;
@@ -250,6 +252,8 @@ void bode_view_open(void)
   pc_hal_timebase_read(&bv.s_tb);
   pc_hal_trigger_read(&t);
   bv.s_trig = t.source;
+  bv.s_edge = t.edge;
+  bv.s_tvp  = scopesettings.triggerverticalposition;
 
   for(c = 0; c < 2; c++)
   {
@@ -323,13 +327,13 @@ void bode_view_close(void)
   pc_hal_timebase_write(&bv.s_tb, 0);
   bv_draw_acq_chip();
 
-  //EXT back (it switches the generator off: it was off with EXT anyway)
+  //EXT back (it switches the generator off: it was off with EXT anyway); fw 0.2.89 the edge and the marker too (the
+  //source write derives the level from the marker and the channels given back above)
   pc_hal_trigger_read(&t);
-  if(t.source != bv.s_trig)
-  {
-    t.source = bv.s_trig;
-    pc_hal_trigger_write(&t, PC_TRG_SOURCE);
-  }
+  scopesettings.triggerverticalposition = bv.s_tvp;
+  t.source = bv.s_trig;
+  t.edge   = bv.s_edge;
+  pc_hal_trigger_write(&t, PC_TRG_SOURCE | PC_TRG_EDGE);
 
   fpgasettings.gen_freq   = bv.s_gen_freq;
   fpgasettings.gen_duty   = bv.s_gen_duty;

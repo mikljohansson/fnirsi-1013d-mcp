@@ -882,6 +882,11 @@ int bode_flat2(const bode_meas *m, int coll)
   return coll || ((m->c[1].ac_c100 < FLAT_C100) && (m->c[1].code_mdb < CH2_SMALL_MDB));
 }
 
+int bode_incoherent(const bode_meas *m)
+{
+  return m->leak_mdb > LEAK_LIMIT_MDB;
+}
+
 //bode.py BodeRunner._result, the flags of the measurement itself
 uint16 bode_meas_flags(const bode_meas *m, int coll)
 {

@@ -31,6 +31,18 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.89 (provisional, not tagged in pc_cmds.h; protocol 1.24, unchanged)
+
+- Frequency response: the sweep's captures trigger on CH1 rising at mid-scale, as the host tool's do (1d4c268).
+  Before, the sweep used the Scope view's trigger level. When that level was off the signal, a capture could start on
+  the auto time-out, and such a record was spliced from two captures (bench 2026-10-20 12:35: 5 of 8 at 21.6 and
+  31.6 kHz). That gave the points read unsettled / incoherent and |H| varying by up to 0.4 dB from sweep to sweep. The
+  Scope view's trigger source, edge and level come back on leaving the mode.
+- Frequency response: the range plan settles after one sweep (4e3f8ff). A point measured on its planned range that
+  clips is measured once more before CH2 steps up. A point under the floor steps down as far as it needs in the same
+  sweep; up to 0.2.88 it stepped one range per sweep, so ten RUN sweeps read 6, 6, ..., 1, 1 switches on the bench. An
+  incoherent record is taken once more.
+
 #### 0.2.88 - 2026-10-20 (protocol 1.24, unchanged; GET_DECIM divider = the FPGA's)
 
 - Decimated captures no longer come back as a whole record of 0xFFFF after a configuration change (fpga-gen10's
