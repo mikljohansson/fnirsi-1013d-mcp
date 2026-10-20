@@ -1357,3 +1357,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   the grey points (0..2 per sweep) are ch2_small / low_snr at 147 kHz..1 MHz where the ladder's output is under 3 codes
   (-47..-74 dBV at 100 mV/div): the floor, which fw-floor will present. Host untriggered captures 30 + 30 at 1 and 200 MSa/s:
   0 seams, maybe_spliced 0. The firmware side of the splice fix is complete on 0x153A.
+- 2026-10-20 16:59: fw 0.2.99 (fw-floor: ch2_small points grey on the device and in the mcp plot, the note "CH2 too small
+  above N kHz to measure: set Stop below it or press AUTO SET." / "Less pickup: short ground lead on CH2." at the finest range,
+  the mcp caveat, the cards ignore grey points) pinned backups/fw-0.2.99_f4fa3d1c.bin (sha256
+  f4fa3d1c33cfa1ee4e42e4603c9b3a0ff8c2efc56fb9a917486493919e33ebdc), loaded. Host sweep 10 kHz..10 MHz / 20 on the two-pole
+  ladder: every point from 128 kHz up grey (ch2_small, r2 5, -44..-71 dB then climbing to -28 dB at 10 MHz), the curve joined
+  only below, the two-line note reads "above 128 kHz", the axes scale to the valid points, -3dB card 14.31 kHz (the ladder's
+  corner differs from the first-stage 3.7 kHz read with CH1 on node A). Screenshot scratchpad fr_floor.png.

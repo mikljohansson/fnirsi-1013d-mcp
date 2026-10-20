@@ -556,7 +556,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   total words on an untriggered stop, the time-out ends only untriggered captures, 0x18 is the record's own, 0x1A synchronised;
   tb_timeout 75 checks 0 errors (0x153A source fails 30). Not flashed: owner session needed (pin, probe, double read = the
   pinned 0x153A padded image 77672b5a.., write, retrain the stages, bench README section 11 checks 1-6).
-- fw-floor (Opus, dispatched 16:25, fw 0.2.99 provisional, section 65): ch2_small points grey on the device and in the mcp
+- fw-floor (Opus, dispatched 16:25, done 16:50, merged as fw 0.2.99, benched 16:59: grey tail from 128 kHz with the note; section 65; open: Auto on a coarser range gives grey points without a note): ch2_small points grey on the device and in the mcp
   plot, the plain-words note with the action ("CH2 too small above 540 kHz to measure: set Stop below it or press AUTO SET.
   Less pickup: short ground lead on CH2."), the mcp caveat, the cards ignore grey points.
 - fw-arm / fw-arm2 (done 16:10 / 16:24, merged as fw 0.2.97 / 0.2.98, section 64 + addendum; the agent retired at 399k
