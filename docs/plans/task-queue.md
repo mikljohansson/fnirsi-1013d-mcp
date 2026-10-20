@@ -240,14 +240,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   the Spectrum; (c) re-derive the rate when the FFT length or memory depth changes, not only at the next zoom/pan step. With the
   next Spectrum batch.
 - [x] **Capture-stage training must probe the band** (fw 0.2.81; benched 10-20 10:48: wizard stores 0x08E3, the 200 MSa/s band sweep clean on every core) (bench 10-20 10:19): see hardware-status 10:19 and 10:48.
-- **Spectrum ladder: pans never change the rate** (owner 10-20 10:27 on fw 0.2.80 **(owner)**: "the spectrum should stay the same when
+- [x] **Spectrum ladder: pans never change the rate** (fw 0.2.82, owner walk-through pending) (owner 10-20 10:27 on fw 0.2.80 **(owner)**: "the spectrum should stay the same when
   scrolling, changes to sample rate and time/div should happen when zooming"; fw-spzoom2 dispatched): the rate is derived from
   span and centre only at zoom steps (and by AUTO SET); a pan (plot drag, slider drag, tap-to-jump) keeps the rate and is clamped
   to the current axis 0..fs/2 (the slider track is that axis); to look higher than the axis, zoom out (raises the rate) then zoom
   in. The 16-bin floor ends zoom-in at a high centre as before. Accepted consequence: a pan to a low centre at a wide span keeps
   the coarse resolution until the next zoom step. Rule paragraph in ui-guidelines.md updated; test_spec_zoom: pans never change
   the rate, the clamp, zoom after a pan re-derives.
-- **Remove the "Host command: menu closed" note** (owner 10-20 10:31 **(owner)**: "we don't need the note at all"; fw-yield2
+- [x] **Remove the "Host command: menu closed" note** (fw 0.2.82) (owner 10-20 10:31 **(owner)**: "we don't need the note at all"; fw-yield2
   dispatched): the modal screens still unwind on a host command, silently; the note text, its timer, `pc_glue_yield_note` and the
   Spectrum follow-up item go; the yield counters stay.
 - [x] **READ_SCREEN handler** (fw 0.2.70, benched: T9 passed 10-19 21:11, 800x480 in 0.22 s) (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
@@ -504,6 +504,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 
 ## Dispatched
+
+- docs-guide / docs-articles (Opus, dispatched 14:04): the user guide text per screen on fw 0.2.93 (docs/guide/*.md, the
+  "to be written" notes gone, screenshot placeholders kept, new states named for tools/screenshots.py) plus the release-notes
+  placeholders (0x153A entry, tested-on list, known issues); and the six engineering articles of docs/articles/index.md from
+  research/notes, the FPGA README / handoffs, the bench log and the plans. Screenshots on the unit: coordinator with
+  tools/screenshots.py once the text names the states.
 
 - fw-ov3 / fw-eng5 (done 13:41 / 13:50, merged 13:46 / 13:52 as fw 0.2.92 / 0.2.93, handoffs firmware/AGENTS.md section 49
   addendum / section 61): the Frequency response track overlays magnitude (cyan, drawn last) and phase (pink) in Overlaid
