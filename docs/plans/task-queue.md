@@ -11,7 +11,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   while watching the peak). Engine change, after fpga-gen10's first-record work lands (bode_sweep.c): a repeated sweep starts
   each point at the range the previous sweep ended with for that point (per-point range plan kept with the table), switches
   only when the point clips or drops below the floor, and the pre-scan is skipped when a plan exists for the same span and
-  settings; the first sweep after a settings change ranges as today. The switch count in the header shows the effect.
+  settings; the first sweep after a settings change ranges as today. The switch count in the header shows the effect. Owner
+  10-20 11:53 **(owner)**: the same for Single sweep and for AUTO SET's final sweep: the plan belongs to the span and settings,
+  not to the way the sweep was started; only the first sweep after a settings change, or after a point invalidated the plan
+  (clipped or dropped below the floor), ranges from scratch.
 
 - **AUTO SET ends in STOP, never RUN** (owner 10-20 11:47 **(owner)**: "Why should AUTO SET automatically transition to RUN? auto
   set should make an automatic scan and then stop, inferring parameters and trying a few different param sets, then either

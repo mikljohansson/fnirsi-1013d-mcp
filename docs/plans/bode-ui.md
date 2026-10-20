@@ -721,4 +721,6 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
 - 2026-10-20 11:51 **(owner)**: RUN stays continuous (live tuning of a circuit, e.g. the coil tank's trimmer), the RUN/STOP button
   keeps its meaning across modes; repeated sweeps reuse the previous sweep's per-point range plan so the relays stay quiet on
   an unchanging circuit (engine item in the task queue).
+- 2026-10-20 11:53 **(owner)**: the range plan is reused by every sweep at the same span and settings (RUN, Single sweep, AUTO SET's
+  final sweep); only a settings change or a point that clips / drops below the floor invalidates it.
 
