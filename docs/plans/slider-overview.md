@@ -412,4 +412,6 @@ The frequency-response and Spectrum tracks start at x 2 as `BU_SL_X` does (host 
    by y 452..471 (20 rows, the overview mapped on all of them and drawn on all of them outside the box); the box's lines
    at y 453 and 470 and at x and x + w - 1, its 1 px margin at y 452, y 471, x - 1 and x + w; the overview in full
    colour inside the lines, y 454..469 (16 rows); hit areas unchanged (section 2).
+8. Frequency response overview and the Display variant (owner, 2026-10-20 13:37): Overlaid draws magnitude (cyan) and phase (pink)
+   over each other in the track; Magnitude only / Phase only draw that one curve **(owner)**.
 
