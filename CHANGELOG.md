@@ -31,6 +31,15 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.90 (provisional, not tagged in pc_cmds.h; protocol 1.24, unchanged)
+
+- Frequency response: one bad record at the start of a sweep no longer leaves a channel on too coarse a range for the
+  whole sweep (802cc4a). Bench 2026-10-20 13:10: CH1 ran on 2.5 V/div with ch1_low on most points, or CH2 on 2.5 V/div
+  everywhere. The check after the pre-scan now measures a clipped or saturated channel again before stepping it up. A
+  channel that is not clipped moves to the finest range its signal fits, so CH1 lands on 0.5 V/div on the RC.
+- A range plan where CH1 is below 20 codes under 2 MHz, while a more sensitive range was still free, is not kept; the
+  next sweep ranges again.
+
 #### 0.2.89 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: the sweep's captures trigger on CH1 rising at mid-scale, as the host tool's do (1d4c268).

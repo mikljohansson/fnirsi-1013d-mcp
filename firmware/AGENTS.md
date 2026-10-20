@@ -4285,3 +4285,53 @@ post, wiring A, x1 probes)**
 Bug indicators: the trigger chip redrawn over the plot at every point; the trigger marker not restored; switches still
 decaying over several sweeps; incoherent points with "retried" at fixed cells (then the CH1 trigger is not reaching
 the FPGA: check 0x15 / 0x16 / 0x17 in a bus trace before the 0x01).
+
+## 59. fw-eng3: the pre-scan's check ranges like a point (fw 0.2.90 provisional, protocol 1.24 unchanged)
+
+Branch `fw-eng3` from main a2b6929 (fw 0.2.89). Brief: the coordinator's 13:10 data
+(`device_rc_rows_1310.json` in the coordinator's scratchpad), from the owner's AUTO SET + RUN on the RC
+(500 Hz .. 100 kHz) and host sweeps A..D:
+- CH1 left on 2.5 V/div with ch1_low on most points (C, the owner's table).
+- CH2 on 2.5 V/div for a whole sweep (D).
+- Jumbled CH2 ranges per point in the owner's table.
+
+Commits: 802cc4a (engine + tests), then docs. Host tests green (test_bode_sweep 1619), GCC 10 clean. **Not benched.**
+
+**Findings.**
+- **(a) The plan's index space.** The plan stores `e->range[0]` / `e->range[1]` at `result()` and `plan_apply` writes
+  the same indices back through `set_channel`, so there is no swap. The new divider test (CH1 and CH2 on different
+  ranges) checks the second sweep's rows against the first's, point by point.
+- **D was not a plan sweep.** C's plan was dropped by the 0.2.87 first-point rule: CH1 on 2.5 V/div with about 18 codes
+  of peak. D then ranged from scratch, and its own pre-scan check went wrong for CH2.
+- **The real fault is the check after the pre-scan.** Up to 0.2.89 it only ever stepped a channel UP, on a clip or (CH2)
+  a saturated / collapsed record, and marked that range bad for the sweep (CH2). It never stepped a channel finer. One
+  bad record in the check (or a pre-scan record whose peak reads high) therefore left the channel coarse for the whole
+  sweep: CH1 on r1 1 in C, CH2 on r2 1 with bad_down in D. Inference: the bad records are still the time-out / spliced
+  kind or a front end not settled; the leak retake catches CH1-incoherent ones only.
+- **The owner's table** mixes points of several sweeps (RUN overwrites point by point, the header's switch count is
+  the sweep in progress). The jumbled r2 with r1 1 is the coarse-CH1 sweeps' points next to newer ones. Inference: not
+  a plan that carried those ranges.
+
+**What changed (bode_sweep.c on_verify).**
+- **Clip or saturation.** A clip (CH2: or a saturated / collapsed record) is measured again on the same range (`vclip`)
+  before the channel steps up. The range that clipped twice is not tried again in this check (`vbad[c]`); a saturated
+  CH2 range also goes into `bad_down` as before.
+- **Unclipped channels.** An unclipped channel steps to the finest range its record's peak fits (85 % of full scale,
+  `finer_range`), so CH1 lands on 0.5 V/div for the post's signal whatever the pre-scan read.
+- **Limit.** Up to VERIFY_MAX = 6 captures (4 before).
+- **Plan drop.** A result below 2 MHz with CH1 under 20 codes and a finer CH1 range left drops the plan (with the 0.2.87
+  rules).
+- **(c) AUTO SET.** The overview (100 Hz .. 10 MHz, 20, Fast) has other settings than the final sweep, so
+  `plan_matches` never lends its plan. Test: overview, final (fresh), RUN (reused, 0 switches, the final sweep's ranges,
+  CH1 on 0.5 V/div).
+
+**Bench (owner, coordinator on COM10; FEL load, 0x153A, RC on the post, wiring A, x1)**
+1. AUTO SET, then RUN for ten sweeps. Every sweep's rows: r1 3 on every point; r2 monotonic (2/3 .. 5).
+   Switches: the first RUN sweep 0 (the final sweep's plan), then 0. No ch1_low below 2 MHz.
+2. The host's A..D sequence again (20 points twice, then 25 points twice):
+   - C and D both have r1 3.
+   - D's r1 / r2 per point equal C's, with 0 switches.
+3. Bug indicators:
+   - any sweep with r1 1 or 2 on the RC;
+   - r2 constant on a coarse range over the whole span;
+   - a plan sweep (0 switches) whose rows differ from the previous sweep's r1 / r2.
