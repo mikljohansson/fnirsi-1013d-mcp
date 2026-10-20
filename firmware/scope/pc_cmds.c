@@ -677,6 +677,28 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider)
   return (2 * rec > PC_AUTO_MIN_MS) ? (uint32_t)(2 * rec) : PC_AUTO_MIN_MS;
 }
 
+uint32_t pc_auto_net_ms(uint32_t stop_ms)
+{
+  return stop_ms + PC_AUTO_NET_MS + stop_ms / 8;
+}
+
+//The host's auto-mode deadline: max(100 ms, two records) at divider, or an explicit auto_timeout (samples) converted to
+//time when it is longer
+static uint32_t pc_host_auto_ms(pc_session *s, uint32_t total, uint32_t divider)
+{
+  uint32_t ms = pc_auto_deadline_ms(total, divider);
+
+  if(s->auto_timeout_cfg)
+  {
+    uint32_t cfg_ms = pc_auto_deadline_ms(s->auto_timeout_cfg, divider) / 2;
+
+    if(cfg_ms > ms)
+      ms = cfg_ms;
+  }
+
+  return ms;
+}
+
 static uint32_t pc_auto_timeout(pc_session *s, uint32_t total)
 {
   if(s->auto_timeout_cfg)
@@ -1433,7 +1455,32 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   s->arm_auto   = pc_auto_timeout(s, t.total);
   s->arm_prog   = (uint8_t)prog;
   s->arm_normal = (uint8_t)((t.ui_mode != 0) || (prog && !seq));
+  s->auto_geom   = 0;
+  s->cap_spliced = 0;
   eh_cap_reset(&s->enc_cap);
+
+  //fw 0.2.97 (pc_decim.h "Auto-mode stop geometry"): on AL3 0x1532..0x153A auto mode arms the FPGA's own time-out with
+  //0x0E = W - 2, W the first word at or after the deadline whose stop leaves ring words 0 .. total - 1 to the last pass:
+  //an untriggered record is never spliced, and the firmware's own time-out is only a safety net after W. 0x153B+ keeps
+  //the firmware time-out (a forced stop there reads the newest total words). A segment run's untriggered segments stop on
+  //0x0E in their 2^m slot the same way: its 0x0E is moved to the next such word.
+  if(prog && (t.ui_mode == 0) && (pc_stop_kind(s->var.version) == PC_STOP_RING0))
+  {
+    uint32_t div  = pc_hal_divider_now();
+    int      wide = dc.k != 0;
+
+    if(!seq)
+    {
+      s->auto_stop    = pc_auto_stop_word(pc_ms_to_words(pc_host_auto_ms(s, t.total, div), div, wide), tot_w,
+                                          s->var.ring_words);
+      s->auto_stop_ms = pc_words_to_ms(s->auto_stop, div, wide);
+      s->arm_auto     = s->auto_stop - PC_STOP_LAG;
+      s->arm_normal   = 0;
+      s->auto_geom    = 1;
+    }
+    else if(s->seq.mode == PC_SEQ_SEGMENTS)
+      s->arm_auto = pc_auto_stop_word(s->arm_auto + PC_STOP_LAG, tot_w, 1u << s->seq.m) - PC_STOP_LAG;
+  }
 
   if(pc_arm_hw(s, pre_w, tot_w))
   {
@@ -1469,17 +1516,11 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   s->cap_total_words  = tot_w;
   s->cap_divider      = s->cap_next.divider;
 
-  //Auto mode in firmware on Atlan bitstreams (armed normal above): an explicit host time-out (samples) counts too
+  //Auto mode in firmware on Atlan bitstreams (armed normal above): an explicit host time-out (samples) counts too.
+  //fw 0.2.97: with the stop geometry the FPGA ends it at auto_stop; the firmware's time-out is the safety net after it
   s->fw_auto     = (uint8_t)(prog && (t.ui_mode == 0) && !seq);
   s->host_forced = 0;
-  s->auto_ms     = pc_auto_deadline_ms(t.total, s->cap_divider);
-  if(s->auto_timeout_cfg)
-  {
-    uint32_t cfg_ms = pc_auto_deadline_ms(s->auto_timeout_cfg, s->cap_divider) / 2;
-
-    if(cfg_ms > s->auto_ms)
-      s->auto_ms = cfg_ms;
-  }
+  s->auto_ms     = s->auto_geom ? pc_auto_net_ms(s->auto_stop_ms) : pc_host_auto_ms(s, t.total, s->cap_divider);
 
   *rl = pc_status_body(s, resp);
   return PC_OK;
@@ -1492,7 +1533,17 @@ static int h_force(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *res
   if(s->acq_state != PC_ACQ_ARMED)
     return pc_error(s, PC_E_STATE, 0, "not armed");
 
-  pc_hal_force();                                                                    //BENCH: T7
+  //fw 0.2.97: an FPGA-auto arm (the stop geometry) stops on 0x0E = 0; on bitstreams whose stop latches 0x14 = pretrigger
+  //(and EF2 / EP4) the forced record is ring words 0 .. total - 1 across a random stop: flagged as maybe spliced
+  if(s->auto_geom)
+    pc_hal_force_stop();
+  else
+    pc_hal_force();                                                                  //BENCH: T7
+
+  if(!s->cap_next.seq_mode && ((pc_stop_kind(s->var.version) == PC_STOP_RING0) ||
+                               (pc_stop_kind(s->var.version) == PC_STOP_SPLICE)))
+    s->cap_spliced = 1;
+
   *rl = pc_status_body(s, resp);
   return PC_OK;
 }
@@ -3477,6 +3528,7 @@ static int pc_enc_rearm(pc_session *s, uint32_t start)
   s->fpga_done      = 0;
   s->fpga_triggered = 0;
   s->host_forced    = 0;
+  s->cap_spliced    = 0;
   s->arm_ms         = pc_hal_ms();
   return 1;
 }
@@ -3506,7 +3558,16 @@ static void pc_acq_service(pc_session *s)
   if(s->fw_auto && !s->host_forced && !done && !trig && (s->acq_state == PC_ACQ_ARMED) &&
      ((pc_hal_ms() - s->arm_ms) >= s->auto_ms))
   {
-    pc_hal_force();
+    //fw 0.2.97: with the stop geometry the FPGA should have stopped at auto_stop: this is the last resort (0x0E = 0)
+    //and the record, ring words 0 .. total - 1 across a random stop, may be spliced. 0x153B+ reads the newest words.
+    if(s->auto_geom)
+      pc_hal_force_stop();
+    else
+      pc_hal_force();
+
+    if(pc_stop_kind(s->var.version) != PC_STOP_NEWEST)
+      s->cap_spliced = 1;
+
     s->host_forced = 1;
     pc_hal_acq_poll(&done, &trig);
   }
@@ -3550,8 +3611,28 @@ static void pc_acq_service(pc_session *s)
     uint32_t pre_samples = (s->cap_wide ? (uint32_t)s->cap_pre_words : (uint32_t)s->cap_pre_words * 2) + s->cap_ext_shift;
     uint8_t  mask;
 
+    //fw 0.2.97, FPGA auto with the stop geometry (0x1532..0x153A): 0x18 also counts an edge after the stop, which
+    //leaves 0x14 at the pretrigger, so a record is triggered only with 0x14 != pretrigger (a real trigger on exactly that
+    //ring word, 1 in 8192, reads untriggered with a correct record). A trigger in the last total - pre words before
+    //the stop is cut by it: such a record (the stop inside it, done near the stop's time) is flagged
+    if(s->auto_geom && !s->cap_next.seq_mode)
+    {
+      if(addr == s->cap_pre_words)
+        trig = 0;
+      else if(trig && !s->host_forced &&
+              pc_auto_cut(addr, s->cap_pre_words, s->cap_total_words, s->auto_stop, s->var.ring_words) &&
+              ((pc_hal_ms() - s->arm_ms) + 2 + pc_words_to_ms(s->cap_total_words - s->cap_pre_words, s->cap_divider,
+                                                            s->cap_wide) >= s->auto_stop_ms))
+        s->cap_spliced = 1;
+
+      s->fpga_triggered = (uint8_t)trig;
+    }
+
     if(pc_enc_rearm(s, start))
       return;
+
+    if(s->cap_spliced)
+      s->cap_next.flags |= PC_CAPTURE_F_SPLICED;
 
     //Into the trace buffers for the enabled channels, so the UI shows the capture (it redraws every pass). An averaging
     //run leaves its last record in the ring as a normal capture; a segment run has none (the screen keeps its traces)

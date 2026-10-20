@@ -31,6 +31,7 @@ typedef struct
   int      polls_to_done;         //acq_poll calls until 0x0A reads 1
   uint16_t trigger_addr;
   uint32_t forces;
+  uint32_t force_stops;           //fw 0.2.97: pc_hal_force_stop (0x0E = 0, then the force: counted in forces too)
   uint8_t  ext_status;            //FPGA 0x28
   uint32_t ext_reads;
   uint32_t read_calls;

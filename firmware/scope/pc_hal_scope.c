@@ -507,6 +507,14 @@ void pc_hal_force(void)
   fpga_write_byte(0x00);
 }
 
+void pc_hal_force_stop(void)
+{
+  //fw 0.2.97: an FPGA-auto capture armed with the stop geometry has 0x0E far ahead: 0x0E = 0 makes the time-out true now
+  fpga_write_cmd(0x0E);
+  fpga_write_int(0);
+  pc_hal_force();
+}
+
 void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,
                       uint32_t ring_words, uint8_t read_lag)
 {
@@ -705,6 +713,17 @@ static uint8  pc_ui_auto;                             //a UI conversion runs in 
 static uint8  pc_ui_forced;                           //it was ended by the firmware time-out (untriggered)
 static uint32 pc_ui_auto_t0, pc_ui_auto_ms;
 
+//fw 0.2.97 (pc_decim.h "Auto-mode stop geometry"): on AL3 0x1532..0x153A the UI's auto mode arms the FPGA's own auto
+//mode with 0x0E = W - 2, W the first word after the deadline at which the stop leaves the record 0 .. total - 1 to the
+//last ring pass (the firmware time-out above stays as the safety net after W). Every other FPGA-auto conversion there
+//(calibration, auto setup) gets its 0x0E moved to such a word as well. 0x153B+ keeps the firmware time-out.
+static uint8  pc_ui_geom;                             //this conversion runs FPGA auto with the stop geometry
+static uint8  pc_ui_spliced;                          //its record may be spliced (forced on 0x1532..0x153A, EF2, EP4)
+static uint32 pc_ui_stop, pc_ui_stop_ms;              //its stop word W and the time W takes
+static uint32 pc_ui_pre, pc_ui_total;                 //the 0x0B / 0x0C words it wrote
+static uint8  pc_ui_wide;
+static uint32 pc_ui_div;
+
 static int pc_fw_auto_possible(void)
 {
   return (fpgasettings.fw_FPGA != 1) && !scopesettings.long_mode;
@@ -713,39 +732,60 @@ static int pc_fw_auto_possible(void)
 void pc_glue_decim_conversion(void)
 {
   pc_decim_cfg c;
-  int          ui = pc_dec_ui_arm;
+  int          ui = pc_dec_ui_arm, seq_run;
 
   pc_dec_config(&c, pc_dec_ui_arm ? pc_dec_setting : 0);
   pc_dec_last_ui = pc_dec_ui_arm;
   pc_dec_ui_arm  = 0;
   pc_dec_apply(&c);
 
+  //Average on a 0x1536 bitstream: this UI conversion may be a hardware averaging run, which has its own deadline
+  //(pc_seq_ui_service; the firmware time-out must never end a record between the records of a run). No bus access.
+  seq_run = pc_seq_ui_conversion(ui, &c, pc_hal_divider_now());
+
   //Trigger mode for this conversion, written before the sampling reset
-  pc_ui_auto   = 0;
-  pc_ui_forced = 0;
+  pc_ui_auto    = 0;
+  pc_ui_forced  = 0;
+  pc_ui_geom    = 0;
+  pc_ui_spliced = 0;
+  fpga_conv_0e  = 0;
 
   if(pc_fw_auto_possible())
   {
-    int fw_auto = ui && (scopesettings.triggermode == 0);
+    int    fw_auto = ui && (scopesettings.triggermode == 0);
+    int    ring0   = (pc_stop_kind(pc_hal_fpga_version()) == PC_STOP_RING0);
+    uint32 d       = pc_hal_divider_now();          //fw 0.2.97: the divider the FPGA holds (was the UI table's)
+
+    pc_ui_wide  = (uint8)(c.k != 0);
+    pc_ui_div   = d;
+    pc_ui_pre   = pc_glue_decim_pre_words(fpgasettings.settriggerpoint);
+    pc_ui_total = pc_glue_decim_words(fpgasettings.totalsamples);
 
     fpga_write_cmd(0x1A);
-    fpga_write_byte((scopesettings.triggermode || fw_auto) ? 0x01 : 0x00);
+    fpga_write_byte((scopesettings.triggermode || (fw_auto && (!ring0 || seq_run))) ? 0x01 : 0x00);
 
-    if(fw_auto)
+    if(fw_auto && !seq_run)
     {
-      uint32 d = (scopesettings.samplerate < (sizeof(sample_rate_settings) / sizeof(uint32))) ?
-                 sample_rate_settings[scopesettings.samplerate] : 0;
-
       pc_ui_auto    = 1;
       pc_ui_auto_t0 = timer0ticks;
       pc_ui_auto_ms = pc_auto_deadline_ms(scopesettings.samplecount, d);
     }
-  }
 
-  //Average on a 0x1536 bitstream: this UI conversion may be a hardware averaging run, which has its own deadline
-  //(pc_seq_ui_service; the firmware time-out must never end a record between the records of a run)
-  if(pc_seq_ui_conversion(ui, &c, pc_hal_divider_now()))
-    pc_ui_auto = 0;
+    if(ring0 && !seq_run && (scopesettings.triggermode == 0) && (fpgasettings.fw_FPGA == 2))
+    {
+      uint32 min = fw_auto ? pc_ms_to_words(pc_ui_auto_ms, d, pc_ui_wide) : scopesettings.samplecount + PC_STOP_LAG;
+
+      pc_ui_stop    = pc_auto_stop_word(min, pc_ui_total, PC_DEC_RING);
+      pc_ui_stop_ms = pc_words_to_ms(pc_ui_stop, d, pc_ui_wide);
+      pc_ui_geom    = 1;
+
+      if(pc_ui_stop - PC_STOP_LAG != scopesettings.samplecount)
+        fpga_conv_0e = pc_ui_stop - PC_STOP_LAG;
+
+      if(fw_auto)
+        pc_ui_auto_ms = pc_auto_net_ms(pc_ui_stop_ms);
+    }
+  }
 }
 
 //Main loop: give up on a trigger that did not come in time
@@ -760,8 +800,16 @@ static void pc_ui_auto_service(void)
 
   if(!done && !trig)
   {
-    fpga_write_cmd(0x1A);
-    fpga_write_byte(0x00);
+    //fw 0.2.97: with the stop geometry the FPGA should have stopped at W already: the last resort, and the record
+    //(ring words 0 .. total - 1 across a random stop) may be spliced; 0x153B+ reads the newest total words
+    if(pc_ui_geom)
+      pc_hal_force_stop();
+    else
+      pc_hal_force();
+
+    if(pc_stop_kind(pc_hal_fpga_version()) != PC_STOP_NEWEST)
+      pc_ui_spliced = 1;
+
     pc_ui_forced = 1;
   }
   else
@@ -2186,11 +2234,27 @@ void pc_glue_ui_capture_addr(uint32 addr)
     if(pc_ui_forced)
       pc_sess.ui_trig = 0;
 
+    //fw 0.2.97, FPGA auto with the stop geometry: 0x18 also counts an edge after the stop, which leaves 0x14 at the
+    //pretrigger; a trigger in the last total - pre words before the stop is cut by it (flagged, as pc_cmds.c's host path)
+    if(pc_ui_geom && !pc_ui_forced)
+    {
+      if((addr & 0x1FFF) == pc_ui_pre)
+        pc_sess.ui_trig = 0;
+      else if(pc_sess.ui_trig && pc_auto_cut(addr, pc_ui_pre, pc_ui_total, pc_ui_stop, PC_DEC_RING) &&
+              ((timer0ticks - pc_ui_auto_t0) + 2 + pc_words_to_ms(pc_ui_total - pc_ui_pre, pc_ui_div, pc_ui_wide) >=
+               pc_ui_stop_ms))
+        pc_ui_spliced = 1;
+    }
+
+    if(pc_ui_spliced)
+      pc_sess.cap_next.flags |= PC_CAPTURE_F_SPLICED;
+
     //An averaging run is triggered when it holds a record (0x18 is the last record's)
     pc_seq_ui_done(&pc_sess.ui_trig);
   }
 
-  pc_scope_untrig = (!pc_ui_forced && (!pc_ready || pc_sess.ui_trig || scopesettings.triggermode)) ? 0 : 1;
+  pc_scope_untrig = (!pc_ui_forced && (!pc_ready || pc_sess.ui_trig || scopesettings.triggermode) &&
+                     !(pc_ui_geom && ((addr & 0x1FFF) == pc_ui_pre))) ? 0 : 1;
   spectrum_capture_info(!pc_scope_untrig);
   phosphor_capture_info(!pc_scope_untrig);
   pc_ui_auto = 0;

@@ -703,7 +703,7 @@ void fpga_do_conversion(void)
   arm.pre_words    = (uint16_t)pc_glue_decim_pre_words(fpgasettings.settriggerpoint);
   arm.total_words  = (uint16_t)pc_glue_decim_words(fpgasettings.totalsamples);
   arm.write_0e     = (uint8_t)((fpgasettings.fw_FPGA > 1) && (scopesettings.timeperdiv < (sizeof(timebase_settings) / sizeof(uint32))));
-  arm.auto_timeout = scopesettings.samplecount;
+  arm.auto_timeout = fpga_conv_0e ? fpga_conv_0e : scopesettings.samplecount;
   arm.max_polls    = 0;
   arm.idle         = fpga_arm_idle;
   fpga_arm_reset(&arm);
@@ -789,6 +789,7 @@ uint32 isqrt(uint32 n) {
 //----------------------------------------------------------------------------------------------------------------------------------
 
 uint32 fpga_divider;
+uint32 fpga_conv_0e;
 uint8  fpga_read_settle;
 uint8  fpga_read_prestrobe;
 static uint32 fpga_dither = 1;
