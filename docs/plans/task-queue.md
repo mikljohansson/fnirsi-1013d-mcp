@@ -560,7 +560,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   exception jargon on the Status page), the noise rows with the open-input limits (3.0 full / 1.0 gated, labelled "inputs
   open", one constant with the wizard's pass criterion, the "provisional" note gone, a better advice line), the guide texts.
 
-- fpga-gen12 (Fable, dispatched 15:58): make 0x153B flash-ready: the two residual tb_fir / tb_seg mismatch windows (artefact
+- fpga-gen12 (Fable, done 19:27, merged 19:28; the four residual windows were testbench artefacts: ext_pending gating, the 2.5 ns reset-release window, stale read-register bits in the phase-4 polls, and a pre-0x153B CIC integrator offset from the 0x53 bits 3/4 runs; full 13-step run ALL PASS on seeds 12345 and 4242, zaklad.v and the images unchanged, flash-session checklist in fpga/al3/AGENTS.md "0x153B flash-ready, fpga-gen12"). Originally: make 0x153B flash-ready: the two residual tb_fir / tb_seg mismatch windows (artefact
   or real), the full 13-step run on two seeds, a rebuild only if zaklad.v changes, the handoff "0x153B flash-ready" with the
   flash-session checklist. fpga-gen11 retired at 522k tokens (merged ac1f2ab).
 
