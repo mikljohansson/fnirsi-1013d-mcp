@@ -1371,3 +1371,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   f7b1bd8b5e867b6cb38383c60e9b6bf44c2faaa604b86e7675ffd134524125ff; the agent's own build read 67c31cdd.., the merge
   commit changes the identity), loaded. Status page check with the owner pending (Restarts OK, noise rows 1.19 / 2.75
   against 3.0 and 0.50 / 0.38 against 1.0 all OK).
+- 2026-10-20 18:51: `fnirsi1013d-flash --persist-only` of fw 0.2.100 refused: the image (773,120 B, 1510 sectors from 750)
+  ends at 2260, past the firmware's write window [16, 2048) (PC_SD_LIMIT; the card's partition is at 8192). The card keeps
+  0.2.25. Owner's Status page check on 0.2.100 (18:50): looks good. Queued as a release blocker (fw-sd).

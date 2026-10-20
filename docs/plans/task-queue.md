@@ -6,6 +6,15 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- [~] **The firmware image no longer fits the SD write window** (fw-sd dispatched 18:58) (bench 10-20 18:51: `--persist-only`
+  of fw 0.2.100 (773,120 B = 1510 sectors at 750, end 2260) FAILED "does not fit below sector 2048"; the card's partition
+  starts at 8192 but the firmware caps writes at PC_SD_LIMIT = 2048 (pc_cmds.c `pc_sd_write_end`, protocol row 40
+  write_end = min(part_start, 2048), SD_INFO check code 3 "over 2048 sectors"); the 0.2.25 image was 397,312 B). Release
+  blocker: a card made per the install guide (FAT32 from sector 2048) cannot hold the image at all. Fix: the window ends at the
+  partition start (cap at a value with headroom, e.g. 8192 or 16384), the SD layout docs / make_sd_image.py /
+  make_release_sd_package.py / docs/guide/install.md require the partition at >= 8192, the SD package covers the image,
+  the bootloader's loadable size checked from the research notes, tests; then persist 0.2.10x and power-cycle.
+
 - [x] **Frequency response: points below the floor say so and what to do** (fw 0.2.99, bench pending; fw-floor,
   firmware/AGENTS.md section 65) (owner 10-20 16:00 **(owner)**: "we're just saying the
   state, perhaps a bit cryptically, not saying it in simple terms or what the solution is"; bench 15:5x: the two-pole RC's tail
