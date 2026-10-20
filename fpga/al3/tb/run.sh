@@ -28,7 +28,10 @@
 #  11. tb_adccap.v (0x153A): the ADC capture stages against a behavioural AD9288 whose buses are in transition from tV
 #      to tPD after the encode (own encode, or the A encode in data-align mode), encode pad delay swept: clean exactly
 #      where the window formula says, outlier counters exact, B first by T/2 at every rate with the matching reference.
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap runs one testbench.
+#  12. tb_firstrec.v (fpga-gen10): the first decimated record after a mode / shift / rate change at divider 4095 with the
+#      firmware's exact byte sequences (both arm orders), exact from word 0; the transient without the settle wait and
+#      the stale-shift fault model (whole record 0xFFFF) for comparison. FIRSTREC_TOTAL words per record (default 16).
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -123,6 +126,11 @@ if [ "$ONLY" = all ] || [ "$ONLY" = adccap ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_adccap.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_adccap.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_adccap.vvp" +seed=$SEED | tee "$WORK/sim_adccap.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_adccap.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = firstrec ]; then
+  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_firstrec.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_firstrec.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_firstrec.vvp" +seed=$SEED +total=${FIRSTREC_TOTAL:-16} | tee "$WORK/sim_firstrec.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_firstrec.log" || RC=1
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
 [ $RC -eq 0 ] && echo "ALL PASS (seed $SEED)" || echo "SOMETHING FAILED (seed $SEED)"
