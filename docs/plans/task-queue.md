@@ -281,6 +281,9 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   (masks stored under the data dir, exact geometry only), scope_export_csv, scope_dvm (resolution statement); simulator
   serial signals; report kinds. README and release notes say 34 tools; release notes need a line on the four tools
   (release follow-up).
+- Owner decision 23:0x: the pattern generator's durations get a fractional part (an accumulator per step, carry = one
+  extra 5 ns clock) so any average frequency is exact and the edges stay within one clock; a few dozen cells. In the
+  contract with the DDS removal.
 - Owner decisions 23:0x (LUT savings): (1) the pattern generator absorbs the square-wave generator (a two-step continuous
   pattern with double-buffered durations; the DDS and its sweep logic go; firmware generator menu, wizard 1 kHz and the device
   Bode sweep program the pattern); (2) chirps are MCU-stepped patterns (one period write per step); (3) an FPGA cruft audit
