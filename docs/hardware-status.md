@@ -1406,7 +1406,7 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 2026-10-20 19:50: power cycle on 0x153B: fw 0.2.102 from the card, `fpga_version` 0x153B, caps 0xFEC4B, encode check OK
   (enc_bad 0 of 128), capture stages at the power-on 0x08E4 with cap_flags 0x15 (trained on 0x153A: retrain), 0 flagged
   of 128 reads. Wizard retrain next (owner, USB out, inputs open).
-- 2026-10-20 19:52-20:03: wizard on 0x153B (USB out, inputs open): passed, stages CH1 A4 B4, CH2 A3 B4 (= 0x08E4, the
+- 2026-10-20 19:52-19:58: wizard on 0x153B (USB out, inputs open): passed, stages CH1 A4 B4, CH2 A3 B4 (= 0x08E4, the
   power-on value). **0x153B fails on the unit** with fw 0.2.102: encode check and capture self-check clean (enc_bad 0,
   cap_flagged_n 0 of 8588 reads), but every host capture is spliced: 50 of 50 untriggered at 1 MSa/s (seam ratio up to 2.7)
   and 50 of 50 at 200 MSa/s with 1 MHz; triggered captures (level 128) spliced too (ratios 1.8..3.0, seams at 2288, 2403,
