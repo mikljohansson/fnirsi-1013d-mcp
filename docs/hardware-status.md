@@ -1178,4 +1178,14 @@ Newest entries at the bottom. Format: date, who, what, result.
   twice after a device sweep (10:55). So the saturated record follows a decimator mode change at a slow rate under some prior
   state, about one in ten of the transitions tried; never with the filter off. Handed to fpga-gen10 (Fable) with the
   firmware's write order.
+- 2026-10-20 11:19: owner's AUTO SET on the RC with fw 0.2.83: "ran for a while, relays clicking like crazy, didn't stabilize",
+  then STOP. State afterwards: sweep id 41 since boot (the overview, the sharp-tank passes and the repeated runs), the table
+  10 points over 20 kHz .. 5 MHz with CH1 at 0.5 V/div and CH2 at 0.2 / 0.1 V/div, -6.5 dB at 20 kHz to -45 dB at 5 MHz, 5 of
+  10 points unflagged, "-3dB 31.53 kHz" (the host: 10.3 kHz), "CH1 level low: the DUT loads the 1 kOhm source" (the x1 probe on
+  the post rolls off above 2 MHz), the slider track holding the overview. Reading: the overview's first record (100 Hz, the
+  slowest rate, the first capture after the engine's configuration) was the saturated artefact, so the low-frequency points
+  were flagged or absurd, the auto-span logic took its reference level from 20 kHz, treated the shape as a sharp tank and ran
+  its finer passes, each pass re-ranging CH2 (the relay clicks), and RUN then repeated on the wrong span. Same root cause as
+  10:55 (fpga-gen10 running). Robustness follow-ups for the engine (queue item (b)): a single absurd point must not define the
+  reference level; a retaken first record. The scope is left in the Frequency response view, STOP.
 
