@@ -3875,3 +3875,83 @@ only at codes 127..135 and not in every capture, which one capture at the centre
 5. Repeat watch (optional, needs a PC_DEBUG image for a raw DEBUG_FPGA write of 0x63 = 0x08E4) with the input parked at
    code 128..132 by the offset, 200 MSa/s captures for a minute: the Status page Calibration verdict turns amber with
    "run Calibrate", one event 23 entry for CH1 A only.
+
+## 55. fw-fr3: Frequency response small items, AUTO SET never loops (fw 0.2.84 provisional, protocol 1.24 unchanged)
+
+Branch `fw-fr3` from main 83e3b32 (fw 0.2.83). Brief: task-queue "Frequency response small items" (a)-(c), the AUTO SET
+absurd-point rule (d) and the owner's decision of 2026-10-20 11:23 (AUTO SET fails fast, never loops). Commits: 9079725
+(`bode_auto_span`, the only change in bode_sweep.c; bode_sweep.h gains the BODE_AS_* failures and two `bode_autospan`
+fields), 071c206 (bode_ui + bode_view), then docs. PC_FW_VERSION not bumped. Host tests all green (test_ui incl.
+test_bode_ch1_low / test_bode_auto_verdict and the Single sweep states, test_bode_sweep 412 incl.
+test_auto_span_absurd); GCC 10 build clean in the changed files (bode_view.c also with -Wall -Wextra). **Nothing benched,
+nothing flashed.**
+
+What landed:
+- **(a) Single sweep stays in the fold-out** (owner 10-19 21:32). `fold_tap` returns 0 for the Single sweep row; the
+  fold-out loop calls `fold_service` while no finger is down: `bode_view_service` (the engine steps, up to 20 ms), the
+  plot redrawn around the panel at most every REDRAW_MS (`draw_all_rect` for the part left of the panel, then the
+  strips above, below and right of it copied from displaybuffertmp), and the Single sweep row redrawn when its state
+  or text changes. `bu_single_button` (bode_ui.c) gives the state: START green "Single sweep" / "about N s", LAST green
+  "STOP after this sweep" (RUN repeats; a tap sets `bv.single`), STOP red "Stop sweep" / "n / N" (single or thru sweep;
+  a tap sets RUN off, the service then stops after the capture in progress), GREY "during AUTO SET" (a tap does nothing).
+  `bu_single_running` ("running, then STOP") is gone. Every fold-out (Display, Thru, Trace style too) now lets the
+  sweep run; up to 0.2.83 the engine paused while one was open.
+- **(b) Generator after a sweep**: decision "restore the user's generator on the pin" (matches what the chip and its
+  menu show while stopped; written in bode-ui.md section 7). `bv.gen_taken` is set when `bv_start_cfg` starts a sweep;
+  at the end of `bode_view_service`, with no sweep running, `bv_gen_restore` calls `fpga_on_off_generator()` with the
+  untouched `fpgasettings`. RUN repeats and AUTO SET passes restart inside the same service call, so the pin does not
+  change between them. Diagnostics' early return in the service skips the restore (the view gives it back on leaving).
+- **(c) CH1 low by cause**: `bu_warn_ch1_low` over the shown points (`gather` now keeps r1 / r2 per point): a point
+  flagged ch1_low on a range coarser than 0.5 V/div gives "CH1 level low at <5|2.5|1> V/div: sweep again" (the coarsest),
+  else one at or below 2 MHz the DUT-loads text, else "CH1 level low above 2 MHz: the x1 probe rolls off".
+- **(d) AUTO SET**: `bode_auto_span` drops an absurd point (more than 20 dB from both valid neighbours; an end point from
+  both of the next two valid points), returns BODE_AS_INCONSISTENT for two of them or one among the three lowest valid
+  points, takes the reference as the median of the three lowest valid points (written over the first point in a local
+  copy before `bode_markers_find`; the low-end slope rule compares the median with the third point, the phase still the
+  first two), BODE_AS_UNCONFIRMED when a resonance's peak point lacks a valid index neighbour on either side,
+  BODE_AS_CH1_LOW when more than half the good points are ch1_low. `bv_auto_finish` asks `bu_auto_verdict` (bode_ui.c)
+  after every pass: a bounce (`bu_auto_bounce`: CH2's range changes direction twice between the pass's points, or once
+  with the engine's six switches used), the failures above, a finer pass that is FLAT / NO_RESPONSE or whose peak
+  (`ref_mdb`) is more than 6 dB below the previous pass's, or the band still coarse after pass 4. A failure sets
+  `bv.auto_fail` (the warning, shown until the next sweep; `no_response` folded into it), keeps the settings and the
+  pass's points, STOP. FLAT is still a result ("No corner ...", RUN).
+
+Notes for a successor:
+- Inference: the 41-sweep "loop" the owner saw on 0.2.83 was AUTO SET ending in RUN on a span set from a bad overview,
+  then RUN repeating (each sweep re-ranging CH1 / CH2). The engine itself caps CH2 switches at six per sweep. A
+  *successful* AUTO SET still ends in RUN by design (bode-ui.md 3.2 step 4).
+- A real tank whose overview point lands exactly on f0 (Q above about 30) reads as absurd: the point is dropped, its
+  neighbour becomes the peak without a valid index neighbour on that side and AUTO SET says "peak not confirmed: sweep
+  by hand". Accepted per the owner's rule; the guide text (docs/guide/screens.md) names it.
+- The first-record artefact itself (0x153A) is fpga-gen10's; with it fixed, the absurd-first-point case should not
+  arise. `bode_auto_span` is pure; `bu_auto_verdict` / `bu_auto_bounce` / `bu_single_button` / `bu_warn_ch1_low` are in
+  bode_ui.c, all host-tested; `fold_service` and the generator restore are not host-tested (drawing / FPGA writes).
+- mcp: the simulator's warnings are not affected (READ_BODE unchanged); no mcp text names the changed warnings.
+
+**Bench walk-through (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, no SD writes; 0x153A;
+RC 1 kOhm / 15 nF on the post, wiring A, x1 probes)** - `#VER fw=0.2.83,...` (number not bumped).
+1. Single sweep from the fold-out: CTRL > Sweep > Single sweep. The panel stays open; the button turns red "Stop sweep"
+   with "1 / 50", "2 / 50", ... counting; the plot left of the panel fills; the generator chip steps through the tones.
+   Change nothing; at the end the button reads green "Single sweep" / "about N s", the cards show values, chip STOP.
+   Close the panel and go to page one: RUN (green). Again Single sweep, then tap "Stop sweep" mid-way: it stops within
+   one capture (well under a second above 1 kHz), the measured points stay, the button green again. Change Points to
+   20 and tap Single sweep without leaving the panel: a 20-point sweep runs. With RUN repeating (page one RUN, then CTRL >
+   Sweep): the button reads green "Single sweep" / "STOP after this sweep"; a tap turns it red "Stop sweep" with the
+   progress and the repeats end after this sweep. During AUTO SET the button is grey "during AUTO SET" and does nothing.
+2. Generator chip after a sweep: set the generator to 1 kHz 50 % on before entering the mode (or from its menu while
+   stopped); run a Single sweep; at the end the chip shows 1 kHz and the post carries 1 kHz (a counter or a second
+   scope on the post, if one is at hand). Generator off beforehand: off after the sweep.
+3. Warnings: on the RC with a clean sweep no CH1 warning. If the pre-scan artefact leaves CH1 at 2.5 V/div (the CH1
+   chip shows it; hardware-status 10-20 11:16), the warning reads "CH1 level low at 2.5 V/div: sweep again" (not the
+   DUT text). Stop 10 MHz with the x1 probe: points above 2 MHz flagged ch1_low show "CH1 level low above 2 MHz: the x1
+   probe rolls off".
+4. AUTO SET on the RC: ends on about 1 kHz .. 200 kHz in RUN as before. If a bad first record is provoked (AUTO SET right
+   after entering the mode, or after changing CH1's range in the Scope view), AUTO SET ends in STOP with "Auto set: no
+   consistent response. Check wiring" (or lands on the right span if only a moderate error), never RUN on a wrong span
+   and never repeated sweeps. If not provoked, the host test `test_auto_span_absurd` covers it.
+5. AUTO SET failures: CH2 tip on the ground clip: "Auto set: no response: CH2 tip on the DUT output?" and STOP; CH1 tip
+   off the post (on the clip): "Auto set: CH1 level low: CH1 tip on the DUT input?" (or no response), STOP, settings
+   unchanged in CTRL > Sweep. Divider: "No corner ..." and RUN, as before.
+Bug indicators: the plot drawn over the open panel; the panel's row not following the sweep; the button red after the
+sweep ended; a sweep that pauses while a panel is open; the generator chip and the pin disagreeing after a sweep;
+AUTO SET ending in RUN after a failure warning; any AUTO SET running more than four passes.

@@ -271,8 +271,33 @@ Details that follow from the run-state rule:
    - Still changing at the overview's low end, meaning the first two valid points differ by more than 1 dB or 5 deg:
      Start becomes 10 Hz.
    - FLAT or NONE: the span is kept. The note reads "No corner from 100 Hz to 10 MHz: span kept" for 5 s.
-   - Every point flagged near_floor or low_snr: the span is kept. The warning reads "No response: CH2 tip on the DUT
-     output?".
+   - Every point flagged near_floor or low_snr: the span is kept. The warning reads "Auto set: no response: CH2 tip
+     on the DUT output?" (fw 0.2.84 adds the "Auto set: " prefix).
+   - **Bad points and the reference (fw 0.2.84).** A point more than 20 dB from both its valid neighbours (an end point:
+     from both of the next two valid points) is absurd: a bad record, not the circuit. One is dropped and never sets the
+     reference or counts as a peak. The reference level is the median of the three lowest-frequency valid points, and
+     the low-end "still changing" rule compares that median with the third valid point (the phase with the first two),
+     so one bad first record does not read as a slope. A resonance's peak counts only with a valid point on either side
+     of it (two adjacent points confirm it); the sharp-tank passes start only from a confirmed peak.
+   - **AUTO SET never loops (owner, 2026-10-20 11:23).** "Just looping forever and relays clicking like crazy is a
+     surprising result." When a pass does not give a consistent result, AUTO SET ends after at most the overview and
+     its three passes, in STOP with the settings kept (not in RUN), the pass's points on screen and a warning that
+     helps (`bu_auto_verdict`, shown until the next sweep):
+
+     | Case | Warning |
+     |---|---|
+     | two or more absurd points in a pass, or one among the three lowest-frequency points (where the reference is taken) | Auto set: no consistent response. Check wiring |
+     | CH2 ranging bounced: its range changed direction twice between the pass's points, or once with the engine's six switches used up | the same |
+     | a finer pass finds no band, or reads the peak more than 6 dB lower than the pass before | the same |
+     | every point near the floor or under the noise | Auto set: no response: CH2 tip on the DUT output? |
+     | CH1 under 20 codes on more than half of the good points | Auto set: CH1 level low: CH1 tip on the DUT input? |
+     | a resonance whose peak is not confirmed by two adjacent points, or the band still unresolved after the last pass | Auto set: peak not confirmed: sweep by hand |
+
+     The engine already caps CH2 relay switches at six per sweep (`MAX_SWITCHES`), so one pass cannot click without
+     end; the rule above turns a bouncing pass into a stop instead of a RUN on a span taken from it. Where the fault
+     could be the circuit itself (a DUT that oscillates, a notch deeper than 20 dB between two points, a tank whose
+     peak falls on one overview point) the user guide says so; the 50-character line names the likelier wiring
+     cause. FLAT stays a result, not a failure: "No corner ..." and RUN at the kept span.
 3. **Settle** from Q for a resonance: Normal for Q <= 7, Resonant for Q <= 34, High Q above. Otherwise Normal.
    **CH2 range** becomes Auto. **Points** stay the user's.
 4. **Then RUN**, as the Scope's auto setup ends in RUN (`scope_do_auto_setup_*` sets `runstate = 1`). The table and the
@@ -361,10 +386,24 @@ axis.
 | Settle | Fast, Normal, Resonant, High Q (default Normal) | next value |
 | CH2 range | Auto, Hold | toggles |
 | *separator* | | |
-| Single sweep | second line: "about 3 s" from `bode_estimate_ms`, or "running, then STOP" during a single sweep | when stopped, starts one sweep and closes the panel; while RUN repeats, the sweep in progress becomes the last one |
+| Single sweep | see below (fw 0.2.84) | the panel stays open |
 
 These are fw 0.2.66's rows and values with two changes. The action is renamed from "Run sweep / Stop sweep" to Single
 sweep, since stopping is RUN/STOP's job. Its second line now shows the estimate, which already exists for BODE_CTRL.
+
+**fw 0.2.84 (owner, 2026-10-19 21:32): Single sweep stays on the CTRL page.** The panel stays open while the sweep
+runs, so the user changes parameters and sweeps again without leaving it; the plot keeps updating around the panel.
+The button follows RUN/STOP's colour and word rule: it reads what a tap does (`bu_single_button`):
+
+| State | Button | A tap |
+|---|---|---|
+| stopped | green, "Single sweep" / "about 3 s" | one sweep |
+| RUN repeats | green, "Single sweep" / "STOP after this sweep" | the sweep in progress becomes the last |
+| a single sweep (or a thru sweep) runs | red, "Stop sweep" / "n / N" (points measured / planned) | STOP: the sweep ends after the capture in progress |
+| AUTO SET runs | grey, "Single sweep" / "during AUTO SET" | nothing |
+
+Page one's RUN/STOP shows STOP (red) meanwhile, the chip RUN. When the sweep ends the button reads "Single sweep" /
+"about N s" again.
 
 ### 4.3 Thru fold-out
 
@@ -426,12 +465,17 @@ In 13 px (`font_2`, what `bode_view.c` uses) it is narrower still.
 | No frequency in this range: change Start or Stop | BODE_ERR_PLAN | |
 | Thru sweep: both probe tips on the DUT input | a thru sweep runs | |
 | CH2 overrange: set CH2 range Auto or raise V/div | a clipped point with Hold | "... raise its V/div" (51) |
-| CH1 level low: the DUT loads the 1 kOhm source | BODE_F_CH1_LOW | "... the DUT input loads ..." (52) |
+| CH1 level low: the DUT loads the 1 kOhm source | BODE_F_CH1_LOW at 0.5 V/div or finer, at or below 2 MHz (fw 0.2.84; a coarse range comes first, then this, then the probe) | "... the DUT input loads ..." (52) |
 | N points not settled: choose a longer Settle | BODE_F_UNSETTLED | |
 | N points near the floor: shown grey | NEAR_FLOOR / LOW_SNR | |
 | Thru does not match this sweep: measure again | thru applied and stale | "... measure Thru again" (51) |
 | DC level beyond the offset range: AC-couple DUT | `bode_exhausted` | "Offset limit reached: the DUT's DC level is beyond the range" (60) |
-| No response: CH2 tip on the DUT output? | AUTO SET found only floor | new |
+| Auto set: no response: CH2 tip on the DUT output? | AUTO SET found only floor | new; "Auto set: " prefix fw 0.2.84 |
+| Auto set: no consistent response. Check wiring | AUTO SET: an inconsistent pass (3.2) | fw 0.2.84 (owner) |
+| Auto set: CH1 level low: CH1 tip on the DUT input? | AUTO SET: CH1 low on most points | fw 0.2.84 (owner) |
+| Auto set: peak not confirmed: sweep by hand | AUTO SET: unconfirmed peak, passes used up | fw 0.2.84 (owner) |
+| CH1 level low at 2.5 V/div: sweep again | BODE_F_CH1_LOW on a point with CH1 coarser than 0.5 V/div (the coarsest range is named: 5, 2.5 or 1 V/div) | fw 0.2.84: a pre-scan artefact left CH1 there (hardware-status 2026-10-20 11:16) |
+| CH1 level low above 2 MHz: the x1 probe rolls off | BODE_F_CH1_LOW only above 2 MHz at 0.5 V/div or finer | fw 0.2.84 |
 | Trigger was EXT (the generator's pin): now CH1 | on entry, note | "The trigger was EXT (the generator's pin): set to CH1" (53) |
 | Roll off for the frequency response | entered in roll mode, note | new: Spectrum says it, `ui_mm_choose`'s Bode branch does not set warn_roll |
 | No corner from 100 Hz to 10 MHz: span kept | AUTO SET, note | new |
@@ -485,6 +529,15 @@ in 16 px, which any tap closes. The generator chip follows the point being measu
 green edge); while a sweep runs a tap on it opens the same kind of box, right-aligned at x 728, with "Driven by the
 frequency response sweep"; stopped, the chip and the menu are the user's generator, as before the first sweep. The
 trigger menu is 24 px taller in this mode, with "Not used by the sweep" in grey 13 px at its bottom.
+
+**The generator after a sweep (fw 0.2.84).** The rule: the generator chip shows what the pin does. The engine switches
+the generator off when a sweep ends, and up to 0.2.83 the chip showed the user's generator over a silent pin. Of the
+two ways to make them agree (show "off" until the user sets it, or put the user's setting back on the pin) the view
+takes the second, because the chip and its menu already are the user's generator whenever no sweep runs (before the
+first sweep the pin carries it too). So whenever no sweep runs any more (done, STOP, an error, AUTO SET ended,
+failed or cancelled) the view writes the user's generator (`fpgasettings`, which the engine never touches) back on the
+pin: on with its frequency and duty, or off. RUN's repeats and AUTO SET's passes follow each other without a gap, so
+the pin does not change between them. The DUT sees the user's generator while stopped, as it does on entering the mode.
 
 ## 8. Control map: what the implementation batch changes in fw 0.2.68
 
