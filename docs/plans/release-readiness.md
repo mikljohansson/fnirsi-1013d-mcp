@@ -3,12 +3,12 @@
 Read-through of `docs/releasing.md`, `tools/make_release_sd_package.py`, `.github/workflows/release.yml`,
 `.github/workflows/ci.yml`, `.github/actions/firmware-build/action.yml`, `.github/scripts/release_meta.py` and the
 README "Getting started", against main 9cc599c (firmware 0.2.51, protocol 1.15). Written 2026-10-19. Nothing here has been
-applied; it is a list for the coordinator. Findings are numbered F1..; the tick list in section 4 refers to them.
+applied; it is a list for the bench session. Findings are numbered F1..; the tick list in section 4 refers to them.
 
 Update 2026-10-19 (release prep): F1 fixed in `docs/releasing.md`; F2 and F5 resolved by separate user-facing release notes
 (`docs/release-notes/X.Y.Z.md`, read by `release_meta.py`); F3 implemented (bitstreams committed under `fpga/al3/dist/`,
 attached by `release.yml`, `BITSTREAMS.md`); F6 has a dry-run path (`vX.Y.Z-rcN` tags); the README follows section 5. The tick
-list the coordinator uses is now `docs/plans/release-checklist.md`.
+list the bench session uses is now `docs/plans/release-checklist.md`.
 
 Verdict: the workflow chain is coherent and the checker works (run on this tree: `release_meta.py --check-changelog` passes,
 `--tag v0.3.0` fails with exactly the three expected errors: firmware version 0.2.51, mcp version 0.1.0, no `[0.3.0]` section).
@@ -17,21 +17,21 @@ project as it was on 2026-10-18, and an MCP package that only works from a check
 
 ## 1. Every manual step, in order
 
-From `docs/releasing.md` section 2 and the workflow files. "Owner" means it needs the scope or the owner's decision.
+From `docs/releasing.md` section 2 and the workflow files. "Maintainer" means it needs the scope or the maintainer's decision.
 
 | # | Step | Who | Notes |
 |---|---|---|---|
-| 1 | Version bump: `PC_FW_VERSION` in `firmware/scope/pc_cmds.h` and `version` in `mcp/pyproject.toml`, both `0.3.0` | coordinator | F1: the doc describes two lines, there is one |
-| 2 | `CHANGELOG.md`: new `## [0.3.0] - YYYY-MM-DD`, leave an empty `## [Unreleased]` | coordinator | F2: write it, do not move the dev diary |
-| 3 | Local checks: `make gcc10`, `make`, `make -C host_tests test` (WSL), `pytest -q` in `mcp`, `python .github/scripts/release_meta.py --tag v0.3.0 --notes notes.md` | coordinator | exit 0 means the tag is accepted |
-| 4 | Local dry run of the SD tools against the real download: `python tools/make_release_sd_package.py build --scope <image> --parts parts` | coordinator | F7: needs network, tests the pin |
-| 5 | Commit `release: v0.3.0` on main, push, wait for CI | coordinator | the tag run repeats the whole CI |
-| 6 | `git tag -a v0.3.0 -m "fnirsi-1013d-mcp 0.3.0"`, `git push origin v0.3.0` | coordinator | one-way: a published release is never re-tagged |
-| 7 | Watch `release.yml`: check, ci, publish | coordinator | F6: first run of this workflow ever |
-| 8 | Download the assets, `sha256sum -c SHA256SUMS`, FEL-load the image, compare read-back, check `#VER` and the build hash (`docs/releasing.md` section 4) | owner | bench step |
-| 9 | Note the result in `docs/hardware-status.md` | coordinator | release, image sha256, FEL read-back identical, `#VER` |
-| 10 | Tick the two open boxes in `docs/releasing.md` section 7 (artifact download, `contents: write`) | coordinator | |
-| 11 | Update README "Status", post the announcement (`docs/plans/announcement.md`), enable Discussions if the draft uses them | owner | F11, F12 |
+| 1 | Version bump: `PC_FW_VERSION` in `firmware/scope/pc_cmds.h` and `version` in `mcp/pyproject.toml`, both `0.3.0` | bench session | F1: the doc describes two lines, there is one |
+| 2 | `CHANGELOG.md`: new `## [0.3.0] - YYYY-MM-DD`, leave an empty `## [Unreleased]` | bench session | F2: write it, do not move the dev diary |
+| 3 | Local checks: `make gcc10`, `make`, `make -C host_tests test` (WSL), `pytest -q` in `mcp`, `python .github/scripts/release_meta.py --tag v0.3.0 --notes notes.md` | bench session | exit 0 means the tag is accepted |
+| 4 | Local dry run of the SD tools against the real download: `python tools/make_release_sd_package.py build --scope <image> --parts parts` | bench session | F7: needs network, tests the pin |
+| 5 | Commit `release: v0.3.0` on main, push, wait for CI | bench session | the tag run repeats the whole CI |
+| 6 | `git tag -a v0.3.0 -m "fnirsi-1013d-mcp 0.3.0"`, `git push origin v0.3.0` | bench session | one-way: a published release is never re-tagged |
+| 7 | Watch `release.yml`: check, ci, publish | bench session | F6: first run of this workflow ever |
+| 8 | Download the assets, `sha256sum -c SHA256SUMS`, FEL-load the image, compare read-back, check `#VER` and the build hash (`docs/releasing.md` section 4) | maintainer | bench step |
+| 9 | Note the result in `docs/hardware-status.md` | bench session | release, image sha256, FEL read-back identical, `#VER` |
+| 10 | Tick the two open boxes in `docs/releasing.md` section 7 (artifact download, `contents: write`) | bench session | |
+| 11 | Update README "Status", post the announcement (`docs/plans/announcement.md`), enable Discussions if the draft uses them | maintainer | F11, F12 |
 
 ## 2. Mismatches and risks found
 
@@ -52,8 +52,8 @@ heading further down in the same section or in `docs/changelog-dev-builds.md` (k
 
 **F3 (blocker) FPGA bitstreams are not obtainable.** `fpga/al3/bitstreams/` holds only a README; `*.bin` is gitignored; the release attaches the scope image, the SD
 tools zip, the wheel/sdist and `SHA256SUMS` and nothing else. Atlan4's 0x1532 is available from his repository, but the EXT trigger (0x1533), the
-decimation filters (0x1534), the FIR (0x1535) and segmented capture (0x1536) exist only on the owner's disk and as TD sources that need a vendor tool and a
-licence. A reader of the announcement cannot use half the headline features. Decision for the owner: attach the pinned padded 1 MiB images (and
+decimation filters (0x1534), the FIR (0x1535) and segmented capture (0x1536) exist only on the maintainer's disk and as TD sources that need a vendor tool and a
+licence. A reader of the announcement cannot use half the headline features. Decision for the maintainer: attach the pinned padded 1 MiB images (and
 their sha256) to the release. The source is GPL in the repository and the build is documented as deterministic (`fpga/al3/README.md`, byte-identical
 rebuild of 0x1532), so the GPL reasoning in `docs/releasing.md` section 5 does not apply to them as it does to Atlan's bootloader. If yes, add them to
 `release.yml` (the artifact would have to come from a committed file or a CI build; TD is not available in CI, so commit the `.bin` files under
@@ -81,7 +81,7 @@ branch, tag `v0.2.99`, watch `release.yml`, delete the release and the tag. Do t
 **F7 (note) the SD tools depend on a download of a pinned Atlan4 commit.** `make_release_sd_package.py` fetches
 `raw.githubusercontent.com/Atlan4/Fnirsi1013D/<commit>/Verzia 1.xxx/DSO 1.xxx/backup dso/v1.00o5.zip`, checks the two inner files by sha256 and refuses
 anything else. The release job runs this on every release, so a vanished or renamed file fails the release job after the tag. Run step 4 of section 1 the
-day before. Keep a copy of the zip (the owner has one, `research/atlan4-extracted/`); `--local` accepts it. The script and the zip's member paths are
+day before. Keep a copy of the zip (the maintainer has one, `research/atlan4-extracted/`); `--local` accepts it. The script and the zip's member paths are
 otherwise consistent with what the workflow does (`--scope`, `--parts`, `-I`).
 
 **F8 (note) all v0 tags are pre-releases**, so the repository's "Latest release" slot on GitHub stays empty and `/releases/latest` returns 404. That is
@@ -95,7 +95,7 @@ or link it from the release notes (F5).
 
 - `firmware/README.md` section 3, end: "Tested here only on image files ... No physical card has been written." False since Tier 1 (`docs/hardware-status.md`
   checklist, 2026-10-18). Also "`\\.\PhysicalDriveN` on Windows (untested)": check what was used and update.
-- `docs/hardware-prep.md` header: "Status: DRAFT for owner review ... Nothing in this guide has been executed on the owner's unit yet." The guide was executed.
+- `docs/hardware-prep.md` header: "Status: DRAFT for maintainer review ... Nothing in this guide has been executed on the maintainer's unit yet." The guide was executed.
 - `CLAUDE.md` is cited as the rules file in `docs/hardware-prep.md`, `docs/hardware-status.md`, `firmware/README.md`, `firmware/tools/README-spiflash.md`, `fpga/al3/*`, and
   `mcp/src/fnirsi1013d/flash.py`; the file is `AGENTS.md` and `CLAUDE.md` does not exist in the tree. Either add a one-line `CLAUDE.md` that points to `AGENTS.md`
   (Claude Code reads `CLAUDE.md`, and the skill and `.mcp.json` assume the repo is opened in Claude Code) or replace the references.
@@ -108,7 +108,7 @@ or link it from the release notes (F5).
 "bench report" and "bug" (firmware version, FPGA version, variant, steps), and a screenshot or two in the README (section 3). `LICENSE` exists. The repository
 contains a vendored 7 MB `capstone.dll` (releasing.md section 6 already asks to check its licence notice); confirm that before a lot of people clone it.
 
-**F12 (note) credits line.** README "Credits" names the model as "Claude (Fable 5.1, via Claude Code agents)". Confirm the exact wording the owner wants for AI
+**F12 (note) credits line.** README "Credits" names the model as "Claude (Fable 5.1, via Claude Code agents)". Confirm the exact wording the maintainer wants for AI
 attribution before the announcement links to it.
 
 ## 3. README "Getting started" through an outsider's eyes
@@ -131,14 +131,14 @@ Walked through as someone who owns a 1013D and found the announcement. Each item
 6. **First boot.** No description of what they should see (the boot menu with PECO / FEL / FNIRSI / Update buttons, boot mode 4), how to get back to stock, or that the base
    calibration is the first thing to do ("Calibrate" is section 4, after "Use it").
 7. **MCP install.** `python -m venv .venv && .venv/Scripts/activate` fails in PowerShell (it is `.venv\Scripts\Activate.ps1`) and in cmd it is `.venv\Scripts\activate`; the
-   forward-slash form works in Git Bash only. `--port COM10` is the owner's port, `auto` finds the scope. `pip install -e .` needs the checkout (F4). "No driver needed on Windows, Linux
+   forward-slash form works in Git Bash only. `--port COM10` is the maintainer's port, `auto` finds the scope. `pip install -e .` needs the checkout (F4). "No driver needed on Windows, Linux
    or macOS": only Windows and Linux (WSL) have been run against the hardware; macOS is a claim from the USB class, not a test. Say so or drop macOS.
 8. **The repository's `.mcp.json`** names a Windows venv path and COM10. On Linux Claude Code will show the `fnirsi1013d` server as failed. The simulator entry works only on Windows for
-   the same reason. Document the edit, or ship `.mcp.json.example` and keep the owner's file out of the tree.
+   the same reason. Document the edit, or ship `.mcp.json.example` and keep the maintainer's file out of the tree.
 9. **Firmware updates and the dev loop** (`fnirsi1013d-flash`) need WSL, usbipd and sunxi-fel on Windows (`mcp/README.md`, `firmware/README.md` section 4). The README's one-line
    mention suggests it is a plain command. It is the developer path, not the install path; move it below "Development".
 10. **Dead or stale statements.** "Status" says firmware 0.2.48, protocol 1.13, nothing tagged, unit boots 0.2.25, "0.2.48 MMU image had not been run" (it was, 2026-10-19). The feature
-    list says "MCP server with 20+ tools" (27 in `server.py`), "protocol 1.13", "owner's unit runs 0x1534" (it runs 0x1535 since 2026-10-19 10:33). "Verified lineage ... rebuilding his
+    list says "MCP server with 20+ tools" (27 in `server.py`), "protocol 1.13", "maintainer's unit runs 0x1534" (it runs 0x1535 since 2026-10-19 10:33). "Verified lineage ... rebuilding his
     released binary byte for byte" sits next to "the byte-identical check ... gone". "Roadmap and community wishes" lists Bode as future and deeper memory first; the new roadmap is
     `docs/plans/roadmap.md`. The calibration text still describes the pre-wizard flow (two steps, both probes, box), the wizard replaced it in 0.2.50.
 11. **Safety framing.** The README has no sentence about the risk of flashing, the ownership of the damage, or the generator pin driving real hardware (tier 3). The MCP safety tiers are a
@@ -151,7 +151,7 @@ Order is roughly the order of work. IDs refer to section 2.
 
 Content freeze and docs
 
-- [ ] All epics of `docs/plans/roadmap.md` sections 1-3 merged, or removed from the list by the owner.
+- [ ] All epics of `docs/plans/roadmap.md` sections 1-3 merged, or removed from the list by the maintainer.
 - [ ] Bench lists for the built items ticked in `docs/hardware-status.md` (calibration 6.3-6.5, phosphor, generator rows, USB 2-hour idle, UI steps).
 - [ ] FPGA 0x1536 flashed and benched (check 5), or dropped from the release scope and from the announcement text.
 - [ ] Decision on bitstream distribution made and implemented (F3), `fpga/al3/bitstreams/README.md` updated.
@@ -209,7 +209,7 @@ second shows it, install is a numbered path, and everything about how the projec
 9. **Status and roadmap.** Three lines: version, what was benched on what hardware, link to `docs/plans/roadmap.md` and the CHANGELOG. Replaces the current "Status" and "Roadmap and community wishes".
 10. **Development.** The existing "Development" text, shortened: build in WSL/Linux, host tests, the FEL dev loop (this is where `fnirsi1013d-flash` belongs), `AGENTS.md`.
 11. **Contributing and bench reports.** What to send (version, variant, steps, GET_CAL dump), link to the issue templates.
-12. **Credits.** As today: pecostm32, Atlan4, Donwulff, the EEVblog thread, and the Claude/owner attribution line.
+12. **Credits.** As today: pecostm32, Atlan4, Donwulff, the EEVblog thread, and the Claude/maintainer attribution line.
 13. **Licence.** GPL-3.0, one line on why (inherited).
 
 Items to drop from the README: "Removed options", "Link robustness fixes", "Verified lineage", the byte-identical history, the MMU A/B build note, the long calibration paragraph (replace with a link to the wizard

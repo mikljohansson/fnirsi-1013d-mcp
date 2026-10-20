@@ -5,7 +5,7 @@ Status: design, 2026-10-19. Implementation: `firmware/scope/acal_track.c/.h` (pu
 
 ## 1. Why
 
-Bench facts (docs/hardware-status.md 2026-10-19 04:00, 08:15, 08:30, and the coordinator's shorted-input run the same
+Bench facts (docs/hardware-status.md 2026-10-19 04:00, 08:15, 08:30, and the bench session's shorted-input run the same
 morning):
 
 - Gated class (legacy divider >= 1): per-core zeros within 0.3 code over 9 hours, gains within 0.4 %. A one-time
@@ -131,7 +131,7 @@ sine at 1 MHz, the post square (-35 / +53) and mixes. Checks: a 1.7-code step an
 0.1 code (A - B split and fs/2 amplitude) within 3 tau; the bow does not bias e; a quiet input holds e; a 40 MHz signal
 is rejected; the noise floor; the 16-bit numbers unchanged.
 
-Bench (owner): firmware/README.md section 6.4.
+Bench (maintainer): firmware/README.md section 6.4.
 
 ## 8. Common-mode drift of the full-rate class (bench 2026-10-19 10:26-10:50)
 

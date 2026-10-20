@@ -329,7 +329,7 @@ Recommendation [D]:
 [V `hack-repo-software.md` 4.1]. They cannot exercise the protocol. Use them only to capture FPGA command
 traces of the stock firmware if a question about stock FPGA behaviour comes up (e.g. test T10).
 
-### 11.3 On hardware (owner present; agents prepare commands)
+### 11.3 On hardware (maintainer present; agents prepare commands)
 
 Load path: FEL, so nothing is written to SD or flash during iteration: `xfel` / `sunxi-fel` write the image
 to DRAM and execute it (procedure in `docs/flashing.md` when written). The firmware must wait ~200 ms before
@@ -377,8 +377,8 @@ Each phase is one or more small commits on `main` touching `firmware/scope/` and
 | Modal UI loops not polling USB | host timeouts while the user is in a menu | BUSY polls at the known sites; host treats `E_BUSY`/timeouts in LOCAL as "UI busy" |
 | Power-off ISR saves settings from interrupt context | host settings persisted, or SD race | snapshot restore in the handler (6.4); SD race unchanged from 1.00o5 |
 | `read_lag`, interleave order, trigger alignment, FORCE, voltage formula all [U] | wrong sample timing or volts | capability bits marked unverified until tests T3-T8 pass; MCP surfaces this in caveats |
-| EP4 bitstream has no ring wrap | corrupted captures on EP4 units | not the owner's variant; cap max total at 12286 and flag in `scope_profile` |
+| EP4 bitstream has no ring wrap | corrupted captures on EP4 units | not the maintainer's variant; cap max total at 12286 and flag in `scope_profile` |
 | Host settings for long/roll mode | not supported | `E_UNSUPPORTED` for timebase indices 0..10 |
 | Linux ModemManager probing the port | AT bytes on the wire, port busy | parser ignores them; udev rule |
-| pid.codes eligibility needs a licence | cannot get a PID | choose a licence for the repo (owner decision) |
+| pid.codes eligibility needs a licence | cannot get a PID | choose a licence for the repo (maintainer decision) |
 | Atlan4 code quality (giant `menu.c`/`statemachine.c`, duplicated blocks) | merge pain with the parallel bootstrap | keep protocol code in new files; touch existing files only at the hooks listed in section 4 |

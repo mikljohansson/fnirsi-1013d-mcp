@@ -110,7 +110,7 @@ Below 200 MSa/s that is free resolution and anti-aliasing; the cost is a total o
 - Every capture tool reads the 16-bit samples themselves (READ_RAW layout 2, the same u16 values READ_TRACE WIDE
   returns), so host spectra are not limited by the 8-bit trace the screen uses.
 
-Bench, owner's unit, FPGA 0x1534 with fw 0.2.34, 1 MSa/s (N = 200; S = 0 / 8 / 15 as row 47 says):
+Bench, maintainer's unit, FPGA 0x1534 with fw 0.2.34, 1 MSa/s (N = 200; S = 0 / 8 / 15 as row 47 says):
 
 | | legacy | boxcar | CIC2 | CIC3 |
 |---|---|---|---|---|

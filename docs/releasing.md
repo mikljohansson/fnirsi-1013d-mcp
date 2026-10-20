@@ -29,7 +29,7 @@ The job uploads `build-gcc10-pc/fnirsi_1013d.bin` and its `.sha256` as the `firm
 The step summary lists the size and sha256 of each of the three builds.
 
 Until 2026-10-18 the job also fetched Atlan4's v1.00o5 binary and compared it with a build of this tree,
-which proved the two byte-identical. The owner dropped that rule to allow dead-code removal. Fw 0.2.47
+which proved the two byte-identical. The maintainer dropped that rule to allow dead-code removal. Fw 0.2.47
 removed the comparison, the `PC_PROTOCOL=0` build, `make package` and the download; the CI logs up to that date
 hold the proof. SD packages are made only by `tools/make_release_sd_package.py build` (section 3).
 
@@ -64,7 +64,7 @@ across checkout paths (the 0.2.44 images in `docs/hardware-status.md`). The rele
 ## 2. Cutting a release
 
 The firmware and the mcp package share one version. The first tag is planned as v0.3.0
-(`CHANGELOG.md`, `docs/plans/roadmap.md` section 5). The coordinator ticks `docs/plans/release-checklist.md`
+(`CHANGELOG.md`, `docs/plans/roadmap.md` section 5). The bench session ticks `docs/plans/release-checklist.md`
 on the way.
 
 1. Bump the version in two places:
@@ -86,7 +86,7 @@ on the way.
    (`fpga/al3/dist/BITSTREAMS.md`, "Provenance", says why they are committed and not built in CI). For a new
    bitstream version, before the release commit:
    - build it from a committed `fpga/al3/src` (`SRC_REV=<commit> ./build.sh`, `fpga/al3/TD_SETUP.md`), flash it
-     on the owner's unit and bench it (`docs/hardware-status.md`);
+     on the maintainer's unit and bench it (`docs/hardware-status.md`);
    - copy the raw `FPGA.bin` to `fpga/al3/dist/al3-0x15xx.bin` and add an entry to `manifest.json`: size,
      sha256, the sha256 of the image padded with 0xFF to 1 MiB, the full source commit, the first firmware that
      uses it, status and the bench record. Exactly one entry is `recommended`; one that must not be used is
@@ -98,7 +98,7 @@ on the way.
 5. Before committing, run the same checks as CI:
 
    ```
-   wsl -d Ubuntu -- bash -lc "cd /mnt/d/src/fnirsi-1013d-ai/firmware/scope && make gcc10 && make && make -C host_tests test"
+   wsl -d <distro> -- bash -lc "cd /mnt/d/path/to/fnirsi-1013d-mcp/firmware/scope && make gcc10 && make && make -C host_tests test"
    cd mcp && .venv/Scripts/python -m pytest -q
    python .github/scripts/wheel_smoke.py
    python -I tools/bitstreams.py check --release
@@ -217,7 +217,7 @@ Do not move a tag after a release has been published from it. Bump the patch ver
 
 ## 4. Checking the attached hashes against a FEL load
 
-This is done once per release, on the bench, by the owner or with the owner present (`AGENTS.md` rules).
+This is done once per release, on the bench, by the maintainer or with the maintainer present (`AGENTS.md` rules).
 
 1. Download the image and `SHA256SUMS` from the release, then run `sha256sum -c SHA256SUMS --ignore-missing`.
 2. Put the scope in FEL. A running protocol firmware takes ENTER_FEL, which `fnirsi1013d-flash` sends.
@@ -303,7 +303,7 @@ The repository contains a vendored third-party binary,
 by `.github/workflows/docs.yml` on every push to main that touches `docs/`, `mkdocs.yml` or the docs tooling. It uses
 the official `actions/upload-pages-artifact` and `actions/deploy-pages`, which need no secret and no deploy branch.
 
-**One-time setup by the owner** (a repository admin; the workflow cannot do it): GitHub repository Settings > Pages >
+**One-time setup by the maintainer** (a repository admin; the workflow cannot do it): GitHub repository Settings > Pages >
 Build and deployment > Source: **GitHub Actions**. Until that is set the Docs workflow's deploy job fails with
 "Pages not enabled" while its build job still passes; after setting it, run the workflow once from the Actions tab
 (Docs > Run workflow) or push any change under `docs/`. The site URL appears in the deploy job and under Settings >

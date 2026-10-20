@@ -17,7 +17,7 @@ verified against an Anlogic document (none exists in the research trees).
 
 - **FPGA flash is on dedicated config nets.** The EasyEDA schematic nets are `FPGA_Conf_nCE`, `FPGA_Conf_CLK`,
   `FPGA_Conf_Data`, `FPGA_Conf_ASDO`. Each name occurs only twice in the file (flash side and FPGA side), and none of them
-  appears next to `SPI0_*` or `FLASH_*` (`D:\src\FNIRSI-1013D-1014D-Hack\Schematics\1013D\EASYEDA\SCH_Scope 1013D_2023-01-07.json`,
+  appears next to `SPI0_*` or `FLASH_*` (`D:\path\to\FNIRSI-1013D-1014D-Hack\Schematics\1013D\EASYEDA\SCH_Scope 1013D_2023-01-07.json`,
   grep checked locally). The schematic is a reconstruction (`research/notes/hack-repo-hardware-fpga.md:146`), so treat as strong
   evidence, not proof.
 - **MCU flash is a separate chip** on SPI0 PC0 CLK, PC1 CS, PC2 MISO, PC3 MOSI with its own header J1
@@ -30,7 +30,7 @@ verified against an Anlogic document (none exists in the research trees).
 - **Config pins on the 1013D FPGA:** ASDO pin 6, nCE pin 8, DATA0 pin 13 (`hack-repo-hardware-fpga.md:155`, naming borrowed
   from the Altera variant, since AL3 and EP4 share a pinout, `SYNTHESIS.md:14-15`). The clock pin is not listed.
 - **Pin reuse after configuration.**
-  - Neither the stock re-implementation (`D:\src\Anlogic_AL3-10_Analyzing\FNIRSI-1013D_FPGA\Original_1013D\source\Original_1013D.adc`)
+  - Neither the stock re-implementation (`D:\path\to\Anlogic_AL3-10_Analyzing\FNIRSI-1013D_FPGA\Original_1013D\source\Original_1013D.adc`)
     nor ours (`fpga/al3/src/zaklad.adc`) constrains any config pin. Both use only the CPU bus (P1-3, P135-144), ADC, relay,
     offset, backlight and calibration pins. The stock design therefore never touches the flash lines after configuration.
   - Whether the AL3A10 lets CCLK/nCE/ASDO/DATA0 become user I/O is **not documented in any file here**. No Anlogic
@@ -45,12 +45,12 @@ verified against an Anlogic document (none exists in the research trees).
   separate flash that FNIRSI factory-programs; no FPGA command that writes flash is known. The FPGA command set
   (`fpga/al3/src/FPGA commands.txt`, `research/notes/fpga-verilog-analysis.md`) has no flash or SPI function, and the stock
   bitstream has no pins for one.
-- **The owner's "FPGA flash" option is almost certainly Atlan's.** The updater menu text is `FPGA Flash - Fnirsi FPGA.bin
+- **The maintainer's "FPGA flash" option is almost certainly Atlan's.** The updater menu text is `FPGA Flash - Fnirsi FPGA.bin
   ( Hardware modification required )` (`research/atlan4-extracted/updater 0.02o decrese spi speed/.../fnirsi_1013d_updater/update.c:191`)
   alongside `FPGA firmware - FPGA.bin ( Hardware modification required )` (`update.c:185`). Sleo's PC Loader handles SD
   sectors and the firmware image, not the FPGA flash (`thread-pages-061-090.md:78`).
 - **Not found:** any FNIRSI-original PC tool, "DSO upgrader/uploader" or "DSO 1023", with an FPGA flash function. The notes
-  never mention it. If the owner has that tool, identify it (file name, screenshot) before assuming it is the same thing.
+  never mention it. If the maintainer has that tool, identify it (file name, screenshot) before assuming it is the same thing.
 
 ## 3. Atlan's updater
 
@@ -99,7 +99,7 @@ verified against an Anlogic document (none exists in the research trees).
    design runs does not disturb it. The danger is only a bad or interrupted image.
 5. **Bricking.** A failed or partial write leaves a flash that fails configuration at the next power cycle. The FPGA then has
    no bus, no ADC and no backlight PWM. The MCU (SD boot) still runs, but it can no longer reach the bridge, so nothing on
-   board can repair it. Recovery needs an external programmer on J2 (what the owner is setting up now), or JTAG on the pads
+   board can repair it. Recovery needs an external programmer on J2 (what the maintainer is setting up now), or JTAG on the pads
    (2.5 V level, `hack-repo-hardware-fpga.md:146`; needs an Anlogic-compatible adapter, which Atlan lists for EF2 only,
    `repo-donwulff.md:213`).
 6. **Mitigations.** Write to a staging area (the 1 MB flash holds the ~283 KB image three times), verify a CRC in the
@@ -119,13 +119,13 @@ verified against an Anlogic document (none exists in the research trees).
    - Read the stock image and keep the dump (already planned).
    - Search the Tang Dynasty manual / install tree for dual-purpose or `CCLK` user-I/O options. If it is absent, the bridge
      idea is dead and this document is closed.
-4. **If the owner still wants iteration without clipping:** the faster route is JTAG SRAM loading of test bitstreams (no
+4. **If the maintainer still wants iteration without clipping:** the faster route is JTAG SRAM loading of test bitstreams (no
    flash write, so no brick risk). That needs an Anlogic-compatible JTAG adapter and is a separate question.
-5. **Ask the owner** which tool showed the "FPGA flash" option. If it is not Atlan's updater, send its name or a screenshot.
+5. **Ask the maintainer** which tool showed the "FPGA flash" option. If it is not Atlan's updater, send its name or a screenshot.
 
 ## Datasheet check (AL3A10LG144.pdf)
 
-Checked 2026-10-18 from a text extract of the owner's download (untrusted file, copied to scratch, read with `pdftotext`).
+Checked 2026-10-18 from a text extract of the maintainer's download (untrusted file, copied to scratch, read with `pdftotext`).
 Page numbers below are PDF pages (printed page number + 1). [D] = stated in the datasheet, [I] = my inference.
 
 **1. What the document is.** [D] Anlogic "AL3 series FPGA datasheet", DS001 v1.3, September 2017, Chinese, 84 pages (PDF p.1,

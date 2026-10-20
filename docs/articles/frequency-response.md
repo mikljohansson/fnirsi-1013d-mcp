@@ -3,7 +3,7 @@
 The 1013D has no signal generator in the usual sense. Its only output is a logic-level square wave from the FPGA's DDS
 on the calibration post, through a 1 kOhm resistor. This article explains how the project measures the magnitude and
 phase of a filter with that square wave and two 8-bit channels: the plan, the host tool, the on-device engine, and how
-both were benched on an RC low-pass on the owner's unit.
+both were benched on an RC low-pass on the maintainer's unit.
 
 Sources: the [Bode design study](../plans/bode-design.md), the [Bode UI plan](../plans/bode-ui.md),
 [firmware/README.md](../../firmware/README.md) "Frequency response", [firmware/AGENTS.md](../../firmware/AGENTS.md)
@@ -71,8 +71,8 @@ check on the bench first.
 
 ## The host tool on the bench (2026-10-19)
 
-The host tool came first (`scope_bode_sweep`, `fnirsi1013d-bode`): no firmware change, the existing commands. The owner
-wired an RC low-pass, 1 kOhm and 15 nF (fc 10.6 kHz), and the coordinator swept 1 kHz to 300 kHz in 30 points.
+The host tool came first (`scope_bode_sweep`, `fnirsi1013d-bode`): no firmware change, the existing commands. The maintainer
+wired an RC low-pass, 1 kOhm and 15 nF (fc 10.6 kHz), and the bench session swept 1 kHz to 300 kHz in 30 points.
 
 - **14:20.** V2 was 25 mV flat: CH2 was not on the R-C junction. Rewired.
 - **14:35.** 30 of 30 valid, +0.08 dB at 1 kHz, -3 dB at 11.3 kHz. Above 30 kHz the slope was shallower than one pole:
@@ -89,7 +89,7 @@ wired an RC low-pass, 1 kOhm and 15 nF (fc 10.6 kHz), and the coordinator swept 
   matched 1 - H of the low-pass within 0.14 dB and 1.0 degree at every point.
 
 The conclusion: the deviation was the capacitor. Its effective value fell from 14.7 nF at 1 kHz to 9.8 nF at 200 kHz,
-with a loss tangent rising from 0.03 to 0.29: a lossy, dispersive ceramic (owner: AliExpress parts, likely Y5V class).
+with a loss tangent rising from 0.03 to 0.29: a lossy, dispersive ceramic (maintainer: AliExpress parts, likely Y5V class).
 The tool was accepted.
 
 One more finding came out of it. In wiring B, CH2 read almost nothing on 0.1 V/div. A test at 15:20 showed why: with
@@ -143,9 +143,9 @@ Earlier, at 12:05, a clean device sweep and a host sweep of the same RC taken ri
 ## AUTO SET and repeated sweeps
 
 AUTO SET runs a 20-point overview from 100 Hz to 10 MHz, then picks the span from it: fc / 10 to 10 fc for a low- or
-high-pass, around f0 by Q for a resonance, with finer passes when the overview cannot resolve a sharp tank. Two owner
+high-pass, around f0 by Q for a resonance, with finer passes when the overview cannot resolve a sharp tank. Two maintainer
 decisions of 2026-10-20 (11:47-11:52) shaped it. AUTO SET ends with one sweep at the found settings and STOP, never in
-RUN; the owner had reported that AUTO SET "still loops", and the bench read that as RUN repeating with the relays
+RUN; the maintainer had reported that AUTO SET "still loops", and the bench read that as RUN repeating with the relays
 clicking. And repeated sweeps at the same settings reuse
 the previous point-by-point range plan, so the relays stay quiet. fw 0.2.93 adds a choice between CH2 Hold and Auto: Hold when the CH2 levels inside the span spread less than
 20 dB.

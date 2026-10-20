@@ -2,7 +2,7 @@
 
 At slow time bases the stock design does not filter. It runs the ADC encodes slower and stores every sample, so a
 signal above half the sample rate folds into the band and looks real. This article follows the two bitstreams that
-changed that on the owner's unit: 0x1534 with boxcar and CIC filters, and 0x1535 with a compensation FIR after the CIC.
+changed that on the maintainer's unit: 0x1534 with boxcar and CIC filters, and 0x1535 with a compensation FIR after the CIC.
 It ends with what the 16-bit samples required of the firmware and the protocol.
 
 Sources: [fpga/al3/README.md](../../fpga/al3/README.md) "Changes" sections 3 to 5, [firmware/README.md](../../firmware/README.md)
@@ -55,7 +55,7 @@ The noise-bits column is the gain for white noise. The README notes that the ADC
 limit it at some point, and that this limit has not been measured.
 
 The build grew from 635 to 2304 LUTs. The testbench proved K = 0 cycle-identical to 0x1533 and recomputed every stored
-sample of 18 decimated captures with a direct-form model. The owner's unit got 0x1534 at 21:46 on 2026-10-18.
+sample of 18 decimated captures with a direct-form model. The maintainer's unit got 0x1534 at 21:46 on 2026-10-18.
 
 ## The first bench
 
@@ -77,7 +77,7 @@ the filter, and led to the two clock classes of the calibration.
 
 ## Where a FIR can help
 
-The owner wanted CIC plus a compensation FIR as the default. fpga-gen3's study (`tb/fir_design.py`) compared two
+The maintainer wanted CIC plus a compensation FIR as the default. fpga-gen3's study (`tb/fir_design.py`) compared two
 places for it:
 
 - **A FIR at the output rate**, after the CIC. It flattens the droop below 0.02 dB with 15 taps. It cannot remove
@@ -99,7 +99,7 @@ testbench were caught.
 
 ## The FIR on the bench
 
-0x1535 was flashed at 10:33-10:40 on 2026-10-19. At 11:05 the coordinator ran the alias bench. CH1 sat on the post,
+0x1535 was flashed at 10:33-10:40 on 2026-10-19. At 11:05 the bench session ran the alias bench. CH1 sat on the post,
 range 3, with the generator at 892.857 kHz (50 MHz / 56, a clean-edge square, fundamental +1.8 dBV). At 1 MSa/s (N 200)
 the alias lands at 107.1 kHz. Hann FFTs of 3000 host samples, three captures:
 
@@ -117,11 +117,11 @@ measurement limited by the floor. With the FIR the alias sits 78 to 83 dB below 
 19, 37 and 56 dB without it. The noise on a shorted input at 1 MSa/s was 0.054 codes with CIC2 and 0.075 with
 CIC2 + FIR.
 
-At 11:00 the owner pressed DEFAULT and the Filter box read CIC2+FIR.
+At 11:00 the maintainer pressed DEFAULT and the Filter box read CIC2+FIR.
 
 ## Ringing on a square wave
 
-The owner then saw "horns" on the 1 kHz calibration square with any +FIR setting, growing and snapping back at 3 to
+The maintainer then saw "horns" on the 1 kHz calibration square with any +FIR setting, growing and snapping back at 3 to
 4 Hz. fpga-gen6's edge study traced it. The FIR is a sharp linear-phase filter, so a step overshoots by up to about 7 %
 before and after the edge: Gibbs ringing. What a capture shows is that response sampled where the edge falls on the
 output grid. The 1 kHz DDS square is really 999.995973 Hz; each period its edge moves 4.027 ns along the 1 us grid of

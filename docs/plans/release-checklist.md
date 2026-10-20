@@ -1,18 +1,18 @@
 # Pre-tag checklist, v0.3.0
 
-The coordinator ticks this before `git tag -a v0.3.0`. Procedure and commands: `docs/releasing.md` section 2;
+The bench session ticks this before `git tag -a v0.3.0`. Procedure and commands: `docs/releasing.md` section 2;
 background and the findings F1-F12: `docs/plans/release-readiness.md`; gate: `docs/plans/roadmap.md` section 5.
 Record each tick with the date and the commit or log line that proves it. Untick a box if its input changes
 afterwards (a new firmware commit invalidates every box from "Versions" down).
 
 Paperwork pass by rel-gen2 on 2026-10-20 (branch `rel-gen2` from 876700a): the boxes below that it ticked name that
-branch's commit; the owner's items and the hardware items are left open.
+branch's commit; the maintainer's items and the hardware items are left open.
 
 ## Content
 
-- [ ] Every epic of `docs/plans/roadmap.md` sections 1-3 merged and benched, or removed from the list by the owner.
+- [ ] Every epic of `docs/plans/roadmap.md` sections 1-3 merged and benched, or removed from the list by the maintainer.
       (The roadmap's state line still reads fw 0.2.80 / 0x153A; it needs reconciling first.)
-- [ ] Owner verdicts in `docs/hardware-status.md` for the built-but-unbenched items (calibration, phosphor, generator rows,
+- [ ] Maintainer verdicts in `docs/hardware-status.md` for the built-but-unbenched items (calibration, phosphor, generator rows,
       USB long idle, UI steps), or the item named under "Known issues" in the release notes.
 
 ## FPGA bitstreams
@@ -20,7 +20,7 @@ branch's commit; the owner's items and the hardware items are left open.
 - [x] 0x153B pinned by fpga-gen11 / fpga-gen12 (2026-10-20; 0x153A by fpga-gen9 before it): built from a committed
       `fpga/al3/src` (source c173ed5), testbench 13 steps ALL PASS on seeds 12345 and 4242, hashes in
       `fpga/al3/dist/BITSTREAMS.md` and `manifest.json`.
-- [x] 0x153B flashed on the owner's unit 2026-10-20 19:30-19:32 (verified 1391978c..) and benched 20:40-20:49 on fw 0.2.102
+- [x] 0x153B flashed on the maintainer's unit 2026-10-20 19:30-19:32 (verified 1391978c..) and benched 20:40-20:49 on fw 0.2.102
       (`docs/hardware-status.md` "0x153B benched good" and "the remaining 0x153B checks": 0 of 100 untriggered captures
       spliced, ten sweeps without retakes, checks 3 and 6 contiguous); the wizard passed on it at 19:52-19:58. 0x153A was
       flashed and benched 10:03-10:49 (wizard trains 0x08E3, band sweep clean) and stays supported.
@@ -30,10 +30,10 @@ branch's commit; the owner's items and the hardware items are left open.
       The manifest has 0x1533-0x1535 `supported`, 0x1536 `unbenched`, 0x1537-0x1539 `withdrawn`, 0x153A `supported`, and
       the paragraph is true (0x153B is the newest). Left open: the 0x1538 row of `BITSTREAMS.md` still reads "unbenched
       (flash session pending)" and the 0x1538 / 0x1539 Bench cells "not yet", against the manifest's `withdrawn` and its
-      flash records of 2026-10-19 (coordinator: fix the two rows).
+      flash records of 2026-10-19 (bench session: fix the two rows).
 - [x] `python3 -I tools/bitstreams.py check --release` exits 0 (2026-10-20 on 876700a, rel-gen2: "9 bitstreams
       consistent"). Run again at the release commit.
-- [ ] Owner decision recorded: bitstreams are committed under `fpga/al3/dist/` and attached to releases
+- [ ] Maintainer decision recorded: bitstreams are committed under `fpga/al3/dist/` and attached to releases
       (`docs/releasing.md` section 5).
 
 ## Versions and notes
@@ -65,11 +65,11 @@ branch's commit; the owner's items and the hardware items are left open.
       `docs/guide/install.md` says (FAT32 partition at sector 16384, 8 MiB) with `make_sd_image.py write`; the same
       command on a card partitioned at 2048 refuses and names the start it needs; the scope boots the prepared card: boot menu, PECO preselected, `#VER fw=0.3.0`, the Diagnostics
       identity line shows the release commit.
-- [x] A persisted release candidate boots from the owner's card (partition at 8192; fw 0.2.101+ writes up to the partition,
+- [x] A persisted release candidate boots from the maintainer's card (partition at 8192; fw 0.2.101+ writes up to the partition,
       the image ends at about 2261): fw 0.2.101 persisted 2026-10-20 19:22 and cold-booted 19:24, the first image over 776
       sectors through Atlan4's v0.8 bootloader; fw 0.2.102 persisted 19:27 and cold-booted 19:29 with every Diagnostics tile
       OK (`docs/hardware-status.md` 19:22, 19:24, 19:29). Repeat for the 0.3.0 image.
-- [ ] 30-minute soak with the MCP server polling (`fnirsi1013d-soak`) on the persisted candidate passes. The coordinator's
+- [ ] 30-minute soak with the MCP server polling (`fnirsi1013d-soak`) on the persisted candidate passes. The bench session's
       attempt at 2026-10-20 20:5x ended when the scope was switched off (not in the bench log yet); still open.
 - [ ] The long-idle check passes (roadmap section 5 item 4).
 - [ ] First-run screen and calibration wizard on the release candidate with the recommended bitstream (the wizard passed
@@ -90,17 +90,17 @@ branch's commit; the owner's items and the hardware items are left open.
       `spectrum.png` (eb645ec), `diagnostics.png` (Status page all OK on fw 0.2.102 from the card, 49c295f, 19:29), and in place of a
       host `bode.png` the on-device `frequency-response-sweep.png` (edd6f85). The same images in the release notes
       (rel-gen2, c0ea0c1).
-- [ ] README screenshot block un-commented (it still points at `docs/img/`; moved to the README rewrite, owner
+- [ ] README screenshot block un-commented (it still points at `docs/img/`; moved to the README rewrite, maintainer
       2026-10-20: use `docs/screenshots/*.png`).
 - [ ] README links checked (every relative link resolves on GitHub). Checked 2026-10-20 on 876700a: 39 relative links,
       all resolve to tracked files except the four `docs/img/*.png` inside the commented-out screenshot block; re-check
       after the README rewrite.
-- [ ] Credits and AI attribution wording confirmed by the owner (README "Credits", F12).
+- [ ] Credits and AI attribution wording confirmed by the maintainer (README "Credits", F12).
 - [ ] GitHub repository description, topics, Discussions on if the announcement uses them, issue templates (F11).
 - [ ] Vendored `research/tools/vendor/capstone/lib/capstone.dll` licence notice checked (F11).
 - [x] `docs/plans/announcement.md` final draft (2026-10-20, rel-gen2, 203933c): `{{VERSION}}` and `{{RELEASE_URL}}` kept
       for the tag, screenshots, the bitstream note (attached with `BITSTREAMS.md`) and the tested-on line filled; the clip
-      and the other owner decisions are the checklist at the top of that file.
+      and the other maintainer decisions are the checklist at the top of that file.
 
 ## Tag and after
 

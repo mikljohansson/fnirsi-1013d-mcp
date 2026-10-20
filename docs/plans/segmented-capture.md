@@ -1,6 +1,6 @@
 # Segmented capture and hardware averaging (FPGA 0x1536)
 
-Roadmap section 8 item 1. Owner case: a pulse-induction metal detector. Each TX pulse is one trigger, and the receive
+Roadmap section 8 item 1. Maintainer case: a pulse-induction metal detector. Each TX pulse is one trigger, and the receive
 decay after it (tens to hundreds of microseconds) is the signal. Dead time between pulses wastes memory today, and
 coherent averaging of many decays at full rate is what buys sensitivity. Community case: multi-event capture with
 per-event timestamps, and noise reduction by averaging.

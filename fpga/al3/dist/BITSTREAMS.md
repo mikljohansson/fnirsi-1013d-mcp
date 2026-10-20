@@ -13,7 +13,7 @@ programmer on the config-flash header and a verified backup first.
 
 | Version | Status | Adds (on top of the row above) | Firmware that uses it | Bench |
 |---|---|---|---|---|
-| 0x1532 | Atlan4's, not ours | 16,384 samples per channel, programmable pretrigger, the 32-bit DDS square-wave generator on the calibration pin | every version | Atlan4's release; on the owner's unit 2026-10-18 |
+| 0x1532 | Atlan4's, not ours | 16,384 samples per channel, programmable pretrigger, the 32-bit DDS square-wave generator on the calibration pin | every version | Atlan4's release; on the maintainer's unit 2026-10-18 |
 | 0x1533 | supported | external trigger input on the calibration pin | 0.2.9 and later | flashed 2026-10-18; EXT loopback 10 of 10 captures triggered |
 | 0x1534 | supported | decimation filter before the decimator: boxcar, CIC2, CIC3; 16-bit samples | 0.2.30 and later | flashed 2026-10-18; decimation bench |
 | 0x1535 | supported | compensation FIR after the CIC (boxcar+FIR, CIC2+FIR, CIC3+FIR at 10 MSa/s and slower) | 0.2.44 and later | flashed 2026-10-19; alias of a 892.857 kHz square at 1 MSa/s -76.1 dBV with CIC2+FIR |
@@ -44,7 +44,7 @@ Release assets, per version (0x1537 is not attached):
 
 - `fnirsi_1013d-fpga-al3-<version>.bin`: the bitstream as TD's bitgen wrote it, 282,898 bytes.
 - `fnirsi_1013d-fpga-al3-<version>-flash1m.bin`: the same, padded with 0xFF to 1,048,576 bytes, the size of the
-  25Q80. Write this one; it is what the owner's unit was flashed with.
+  25Q80. Write this one; it is what the maintainer's unit was flashed with.
 
 | Version | `.bin` sha256 | `-flash1m.bin` sha256 | Source commit |
 |---|---|---|---|
@@ -82,7 +82,7 @@ section "Changes".
 
 ## How to flash (Sipeed FT2232D and `spiflash_d2xx.py`)
 
-This is the route used on the owner's unit for every write above (`docs/hardware-status.md`). Any 3.3 V SPI
+This is the route used on the maintainer's unit for every write above (`docs/hardware-status.md`). Any 3.3 V SPI
 programmer works; `docs/hardware-prep.md` section 2 covers the CH341A (needs a 3.3 V mod), flashrom and the pyftdi
 script. Run the tool from a checkout of the release tag: it writes its backups to `backups/` in that checkout.
 
@@ -94,7 +94,7 @@ python firmware/tools/spiflash_d2xx.py wiring
 ```
 
 1. **Find the header pinout on your board by continuity** before you connect anything (`docs/hardware-prep.md`
-   section 1.3). On the owner's unit, numbering pin 1 top-left: 1 /CS, 2 DO (about 34 ohm in series), 3 CLK, 4 DI,
+   section 1.3). On the maintainer's unit, numbering pin 1 top-left: 1 /CS, 2 DO (about 34 ohm in series), 3 CLK, 4 DI,
    5 VCC, 6 GND. That differs from the reconstructed schematic, so measure yours.
 2. **Wire** (3.3 V logic only): TMS to /CS, TDO to DO, TCK to CLK, TDI to DI, GND to GND. Leave the header's VCC
    and the debugger's 3.3 V and 5 V pins unconnected. Scope on its battery, USB unplugged. The header comes without

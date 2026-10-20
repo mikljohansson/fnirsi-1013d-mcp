@@ -1,6 +1,6 @@
 # Glossary: the 1013D signal chain as this project names it
 
-Written for the owner on 2026-10-19 after a bench day; facts from `research/notes/SYNTHESIS.md`, `firmware/README.md`,
+Written for the maintainer on 2026-10-19 after a bench day; facts from `research/notes/SYNTHESIS.md`, `firmware/README.md`,
 `fpga/al3/README.md` and `docs/plans/bode-design.md`. One line per term, grouped from the probe tip to the screen.
 
 ## Analog front end

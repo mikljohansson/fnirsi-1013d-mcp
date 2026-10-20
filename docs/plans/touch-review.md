@@ -1,15 +1,15 @@
 # Touch review: Scope and Spectrum plot interactions (2026-10-19)
 
-An adversarial code review of the touch gestures on the plot, done because of the owner's report: dragging a channel
+An adversarial code review of the touch gestures on the plot, done because of the maintainer's report: dragging a channel
 up or down is unreliable, CH1 could not be moved while CH2 could, and the CH1 / CH2 pointers at the left edge of the
 grid cannot be grabbed. Base: `main` at 84fa444 (fw 0.2.50). Review only; no firmware was changed. Line numbers refer
 to that commit. Rules applied: `docs/ui-guidelines.md` (44 px targets, hit area = drawn area, thin controls extend
 their hit area, no parameter with two homes). "Inference" marks what was reasoned from the code and not seen on the
 device.
 
-Owner confirmation (2026-10-19, relayed by the coordinator): with CH2 dragged to the bottom, CH1 can be picked up
+Maintainer confirmation (2026-10-19, relayed by the bench session): with CH2 dragged to the bottom, CH1 can be picked up
 again, but only when the drag starts on its zero line; a miss does nothing. This matches defects 1, 2 and 3 below.
-Owner decision: **the pointers drawn at the left edge become real drag handles; anything drawn as a handle must be
+Maintainer decision: **the pointers drawn at the left edge become real drag handles; anything drawn as a handle must be
 draggable.** Section (c) makes that the primary design and section (c1) gives the fix batch ready to dispatch.
 
 A correction to the briefing: the 30 px grab zone is not centred 7 px below the drawn line. `display_left_pointer`
@@ -122,7 +122,7 @@ Severity: **B** blocks use, **A** annoying, **C** cosmetic.
    whose signal sits away from its zero line (any DC level, the calibration square, a large amplitude) can only be
    grabbed at the zero line's height. Repro: CH1 on the calibration pin, DC coupling, 1 V/div; touch the top of the
    square and drag: nothing; touch at the pointer's height in the middle of the grid and drag: CH1 moves. This is the
-   owner's confirmed symptom. **B.** Fix: handles first (defect 1), trace body as a secondary candidate with the
+   maintainer's confirmed symptom. **B.** Fix: handles first (defect 1), trace body as a secondary candidate with the
    nearest-object rule (section c1, step 2).
 3. **The CH1 / CH2 choice is not "nearest eligible".** `statemachine.c:751-768`: CH1 needs `d1 < d2` even when CH2
    is disabled, and a tie goes to CH2. With CH2 disabled and its hidden zero line nearer than CH1's, neither moves;
@@ -151,7 +151,7 @@ Severity: **B** blocks use, **A** annoying, **C** cosmetic.
 7. **Hidden tap zones overlap visible things.** `scope_functions.c:41-166`: the V/div bands (y < 100, y > 370) cover
    the trigger point marker, the cursor readouts, the measurement cards and the record slider row (y 452-469); the
    time base bands cover the trigger level pointer column (x 660-720). Repro: tap the record slider: CH1 or CH2 V/div
-   changes. **A.** Fix: no tap action below y 449 or on any handle; the owner decides whether the V/div bands stay at
+   changes. **A.** Fix: no tap action below y 449 or on any handle; the maintainer decides whether the V/div bands stay at
    all now that the CTRL steppers exist (they are a second, invisible home of `displayvoltperdiv`).
 8. **A channel drag also moves the trigger point.** `statemachine.c:754, 763` add `MOVE_TRIGGER_POINT`; `:160-164`
    applies the x component. Repro: drag CH1 up with a slightly diagonal stroke: the H marker shifts. **A.** Fix: drop
@@ -290,7 +290,7 @@ All in `firmware/scope`. No protocol change. Host-testable if the pick helper is
 - `scope_functions.c:1977, 1996, 2036, 2055` and the loaders `:4212, 4238, 6768, 6784`: compute in `int32` and clamp
   `traceposition` to 6..396 (defect 4, and the 0 / 399 jumps of defect 19).
 
-Bench check for the owner after the batch: each pointer (CH1, CH2, a ref) drags from its icon; with CH2 parked on CH1
+Bench check for the maintainer after the batch: each pointer (CH1, CH2, a ref) drags from its icon; with CH2 parked on CH1
 the CH2 pointer moves first, then CH1 is reachable; with CH2 off, CH1 drags from anywhere within 22 px of its pointer;
 a brisk tap on a pointer changes nothing; a diagonal CH1 drag leaves the H marker in place.
 
@@ -299,6 +299,6 @@ a brisk tap on a pointer changes nothing; a diagonal CH1 drag leaves the H marke
 | Batch | Defects | Files and functions | Overlap with `docs/plans/ux-makeover.md` |
 |---|---|---|---|
 | 1. Handles and pick fixes (c1) | 1, 3, 4, 5, 8, 9, 10, part of 19 | `statemachine.c` `scan_for_touch` plot branch, `touch_handler`, `change_*`; `scope_functions.c` `scope_draw_pointers`, auto setup, loaders | Same files as UX step 1 (menu rows), different functions (inference: step 1 edits `handle_main_menu_touch` and menu drawing). Merge after step 1 lands; expect textual conflicts only. |
-| 2. Trace body and proximity pick, dead band, tap zones | 2, 6, 7, 11, 12, 13 | `scan_for_touch` pick rewritten as one `touch_pick()` (rules 3-8), `scope_adjust_timebase_and_voltdiv` | UX step 2 puts fold-outs over the plot's right edge and cards in the bottom row: the pick must ask the open fold-out first and must not fire taps on cards. Do after step 2, or coordinate one owner of the plot's touch order. Owner decision needed on the V/div tap bands. |
+| 2. Trace body and proximity pick, dead band, tap zones | 2, 6, 7, 11, 12, 13 | `scan_for_touch` pick rewritten as one `touch_pick()` (rules 3-8), `scope_adjust_timebase_and_voltdiv` | UX step 2 puts fold-outs over the plot's right edge and cards in the bottom row: the pick must ask the open fold-out first and must not fire taps on cards. Do after step 2, or coordinate one maintainer of the plot's touch order. Maintainer decision needed on the V/div tap bands. |
 | 3. Non-blocking touch and one GT911 reader | 14, 15, 16, 17, 18 | `touchpanel.c`, `fpga_control.c:719`, `statemachine.c` `touch_handler`/`scan_for_touch`, `scope_functions.c:736, 760`, the viewer loop | Touches the main loop and every modal loop's use of `havetouch`; needs a bench soak with an MCP session (PC link while dragging). |
 | 4. Spectrum | 20 | `spectrum.c` `spectrum_touch`, `spec_pan` | UX step 2 removes the spectrum and phosphor strips: do this after step 2 and only for the pan and tap parts. |

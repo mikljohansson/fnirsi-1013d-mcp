@@ -1,6 +1,6 @@
 # UI guidelines for the FNIRSI 1013D open firmware
 
-The rules every screen follows. They were settled with the owner on 2026-10-19 while designing the UX makeover
+The rules every screen follows. They were settled with the maintainer on 2026-10-19 while designing the UX makeover
 (`docs/plans/ux-makeover.md` is the change list; the mockups are the Design artifact linked from
 `docs/plans/task-queue.md`; the adversarial reviews that shaped them are `docs/plans/diagnostics-review.md` and
 `docs/plans/ux-review.md`). An agent touching `firmware/scope/menu.c`, `statemachine.c`, a view or a dialog reads this
@@ -46,8 +46,8 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
 - **One setting, several homes is fine when each home earns its place.** A value reachable from two places is the same
   setting (the V/div chips in the channel menu, the steppers on the CTRL page and the tap bands at the top and bottom of the plot
   all set `displayvoltperdiv`). The rule is good UX, not strictness: a quick path that helps while watching the trace stays;
-  a duplicate that only adds clutter goes (owner, 2026-10-19).
-- **Time/div drives the sample rate** (owner, 2026-10-19 22:20-22:24; fw 0.2.76). The Scope's tap zoom (left half of
+  a duplicate that only adds clutter goes (maintainer, 2026-10-19).
+- **Time/div drives the sample rate** (maintainer, 2026-10-19 22:20-22:24; fw 0.2.76). The Scope's tap zoom (left half of
   the plot one time/div slower, right half one faster) and the ACQ menu's time/div boxes choose a time/div, and while
   the scope can take a new record (running, or Single, where the tap re-arms the shot) the rate comes from one ladder:
   for every time/div the fastest rate whose record, at the memory depth kept, covers the ten divisions with at least
@@ -63,7 +63,7 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   is fixed and keeps its rate: the zoom steps through the time/divs that record can show, and where the ladder would go
   on but the record cannot, the tap says "Stopped: press RUN to zoom further"; the time/div boxes it cannot show are
   grey. The host's SET_TIMEBASE by UI index keeps its documented index-to-rate table (`docs/protocol.md`).
-- **Span drives the sample rate** (owner, 2026-10-19 23:09; fw 0.2.77), the Spectrum's counterpart. The view is a span
+- **Span drives the sample rate** (maintainer, 2026-10-19 23:09; fw 0.2.77), the Spectrum's counterpart. The view is a span
   from a 1-2-5 ladder (1 Hz .. 20 MHz, then the whole axis 0 .. 25 MHz) around a centre: a tap in the right half of the
   plot narrows the span one step, the left half widens it, both about the centre (kept inside 0 .. 25 MHz); a drag in
   the plot or on the slider pans the centre, and a tap in the slider's track jumps the window there. While a new record
@@ -77,7 +77,7 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   N change needs nothing. Capping the memory depth to N while in the Spectrum was the other option; it was not taken,
   because it would make one setting mean two things per mode and change the record the Scope and the host see. The
   Capture card (MEASURES) shows memory depth / fs. A cell from 0 Hz holds between a quarter and a half of the N bins
-  where neither the capture time nor the slowest rate holds the rate. **A pan never changes the rate** (owner, 2026-10-20 10:24; fw 0.2.81: "the spectrum should stay the
+  where neither the capture time nor the slowest rate holds the rate. **A pan never changes the rate** (maintainer, 2026-10-20 10:24; fw 0.2.81: "the spectrum should stay the
   same when scrolling, changes to sample rate and time/div should happen when zooming"): plot drag, slider drag and
   tap-to-jump keep the rate and are clamped to the current axis 0 .. fs / 2, which is what the slider track shows, so
   the clamp is visible. To look above the axis, zoom out (the rate rises) and zoom in again; the zoom step re-derives
@@ -108,14 +108,14 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   out to fit its box at 6.7 px per character (13 px) and 7.1 px (16 px); long sentences are broken by hand.
 - **Touch**: new controls are at least 44 px tall and 80 px wide, hit area equal to the drawn area; stock controls keep
   their stock sizes. Pages are reached by visible buttons, never by a swipe. Thin stepper bars extend their hit area
-  into the neighbouring block. Everything drawn as a handle (the channel and reference pointers at the left edge, the trigger pointers, the cursors) is draggable from the handle itself; grabbing the trace is the secondary way (owner, 2026-10-19).
+  into the neighbouring block. Everything drawn as a handle (the channel and reference pointers at the left edge, the trigger pointers, the cursors) is draggable from the handle itself; grabbing the trace is the secondary way (maintainer, 2026-10-19).
 - **Dialogs**: a title, one instruction, a progress or result line, two buttons. Primary or confirming action on the
   right, dismissing one on the left. Red only for destructive actions (Clear calibration); everything else green or
-  blue. **Owner exception (2026-10-19, fw 0.2.68): the RUN/STOP button** shows the action a tap does, as on bench
+  blue. **Maintainer exception (2026-10-19, fw 0.2.68): the RUN/STOP button** shows the action a tap does, as on bench
   scopes: green "RUN" while stopped, red "STOP" while running or waiting. The top bar chip beside the trigger shows the
   state (STOP / RUN / WAIT); both follow one run state, whoever changed it (the screen, a single shot, the host). A destructive action always confirms with a sentence that states the consequence. A modal dialog owns the
   screen: taps outside it do nothing, only its buttons leave it.
-- **Grid lines mean something** (owner, 2026-10-19 20:50; fw 0.2.71). A grid line sits at a value its axis names.
+- **Grid lines mean something** (maintainer, 2026-10-19 20:50; fw 0.2.71). A grid line sits at a value its axis names.
   Level axes: a horizontal line at every labelled division (dB, deg, V). Frequency axes, Linear: a vertical line at every
   1-2-5 step of the span (at most ten), each labelled, or every other one when there are more than six. Log: a line at
   every decade (dense dots, labelled); the 2 and 5 lines (sparse dots) when the span is under three decades, labelled
@@ -136,7 +136,7 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
 - No start-up messages that lower trust; the first-run screen says what to do and offers Later.
 - Long-running screens (Diagnostics) run in the main loop so the PC protocol keeps working; only calibration and
   confirmations are modal.
-- **Host commands leave the modal screens** (owner, 2026-10-19 23:27: "if the agent sends commands it just exits all
+- **Host commands leave the modal screens** (maintainer, 2026-10-19 23:27: "if the agent sends commands it just exits all
   modals, since that wouldn't be destructive; just exiting to the base screen"; fw 0.2.78, protocol 1.23). A host
   request that needs the main loop while a menu, fold-out, dialog or screen is open does not get E_BUSY: every modal
   loop checks `PC_UI_YIELD()` once per iteration and leaves by its own cancel path, nested ones one after the other,
@@ -146,7 +146,7 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   calibration Cancel between steps (nothing written). The yield never takes a path that writes something the user
   did not confirm (the generator keypad closes without the typed number); what the user already changed stays, as
   with the cancel path itself. The unwinding is silent: no note on the screen (fw 0.2.78-0.2.80 showed "Host
-  command: menu closed" for 4 s; removed in fw 0.2.81, owner 2026-10-20: not wanted). Diagnostics, a main-loop
+  command: menu closed" for 4 s; removed in fw 0.2.81, maintainer 2026-10-20: not wanted). Diagnostics, a main-loop
   screen, goes Back the same way before such a request runs (fw 0.2.96); no view draws over a screen that owns the
   display. Read-only requests (READ_SCREEN, the GET_* reads, READ_BODE) are answered with the screen left open
   (fw 0.2.94), so a screenshot shows it.
@@ -162,6 +162,6 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
 
 - Mockups first, at 800x480 with the real fonts and sizes, then an adversarial review against today's firmware for
   lost functions, infeasible values and contradictions, then the firmware batch. The mockups are the acceptance
-  reference for the bench walk-through with the owner.
+  reference for the bench walk-through with the maintainer.
 - Consistency and logic outrank muscle memory, but nothing moves without a reason that the plan states.
 - Every removed control is listed with where its function went or why it can go.
