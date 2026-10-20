@@ -402,8 +402,15 @@ the combinational chain).
 12345 and 4242; mutants caught: hold-off mask removed (9 failures), 0x66 clear not consumed (2), "longer" on bit 2
 (45), gen8's qualifier reset (1, the late-write case). The hold-off cases measure the trigger spacing on a 4 us square:
 8000 ns per segment without the hold-off, 20000 ns with 4.5 periods of it (segments, MCU re-arms, EXT, pulse width),
-12000 ns after the 0x66 clear and after 0x1B = 0. Full run.sh on both seeds: see the results line at the end of this
-section (the equivalence steps prove that a firmware writing none of the new registers sees 0x153B).
+12000 ns after the 0x66 clear and after 0x1B = 0. **Full `tb/run.sh`, 14 steps, ALL PASS on seeds 12345 (7538 s) and
+4242 (7355 s)**, finished 2026-10-21 00:35: ext 39, decim 98 + cic_model 1876 / 1873 samples, fir 163 / 165 + cic_model
+1612 / 1638, long 8, seg 53 + seg_model 22 runs, trigpos 882, contract 12 (transcript = contract_0x153B.txt), encphase
+PASS, mcuread 70 + 26, adccap 2274, firstrec 38, timeout 85, trigtypes 1293; every equivalence phase 0 mismatches, so a
+firmware writing none of the new registers sees 0x153B. One caveat, stated rather than hidden: the two runs started
+after the `gap_r` change but before the hold-off block was moved for timing; `run.sh` compiles `src/zaklad.v` at the
+start of each step, so steps 1-3 ran the pre-move text and the later steps the committed one. The two texts differ only
+in the position of one `always` block (Verilog block order has no semantic effect; iverilog compiled both), so the
+results hold for the committed source; C4's integration run repeats all 14 steps on the merged source anyway.
 
 **Build** (TD 4.6.8 SP1, synthesis check only, `~/c1/b3` = `src/` as committed): 5721 LUT (66.2 %) / 4682 reg / 6314 LE,
 all block RAM, 2 M18x18; `clk_200MHz` 0 errors 4.739 ns (worst path +0.261 ns: the EXT qualifier's `qual_ext/rem`),
@@ -416,6 +423,13 @@ enable), 5.078 ns (1 error, `sce_q` into `enc_nxt_n`) and 6.247 ns across four o
 pattern: move a block, rebuild in a copy of `fpga/al3` under `~/c1/v<N>`) before the fifth met timing. C4 should expect
 to roll again after merging C2 and C3 (about 6,200 LUT) and may need a real retiming of one of those three paths
 (`sampling_triggered` into the write clock domain is Atlan's; `pp_i` and `sce_q` are 0x1536 / 0x1538 paths).
+
+**For D2 (the pattern trigger engine, contract 7.5, a third `trig_qual` instance)**: C1 costs +731 LUT / +300 reg over
+0x153B in total; the hold-off block is about 70 LUT (a 33-bit decrement, the toggle sync and the mask) and the decoder /
+read-mux entries about 60, so the two qualifier instances with their configuration wires are about 600 LUT, about 300
+per instance (the EXT one on `clk_200MHz` is the timing-critical one: its `gap_r` is registered for that reason and its
+`rem` update is the design's worst `clk_200MHz` path at +0.26 ns). Reuse the module as is; give a third instance its own
+level compare and expect to roll the placement again.
 
 **For the firmware (C5)**: write 0x5E / 0x5F / 0x60 and 0x1B in the arm, any time before 0x01 = 0; 0x66 = 1 before the
 first arm of a session; N = 0 rejected for pulse width / timeout; caps bits 2 (HOLDOFF) and 20 (TRIG_TYPES); the
