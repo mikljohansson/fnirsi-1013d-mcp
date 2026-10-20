@@ -4209,3 +4209,79 @@ GET_CAPTURE_INFO divider 4095; with the old expression it fails with S 7 / N 200
    front of it is not this fault (see "The Bode pre-scan").
 Bug indicators: any whole record of 0xFFFF with the filter on; GET_DECIM's divider differing from the last 0x0D in the
 trace; an arm with K >= 1 and no 0x54 in the trace before its 0x01 = 1.
+
+## 58. fw-eng2: the engine's trigger, the plan settling in one sweep (fw 0.2.89 provisional, protocol 1.24 unchanged)
+
+Branch `fw-eng2` from main 3cc0b10 (fw 0.2.88). Brief from the coordinator after the 0.2.87 / 0.2.88 bench
+(hardware-status 12:30). Two problems on the RC, 100 Hz .. 1 MHz / 25, CH2 Auto:
+- The plan converged over many sweeps: switches 6, 6, 6, 6, 6, 6, 4, 5, 1, 1, with jumbled CH2 ranges such as 146.6 kHz
+  on r2 2.
+- 2..4 points per sweep at the knee and above read unsettled / incoherent + retried, with |H| and phase varying sweep to
+  sweep.
+
+Commits: 9ca907e (`firmware/tools/bode_cells.py`), 1d4c268 (pc_bode.c trigger, bode_view.c restore), 4e3f8ff (engine
++ tests), then docs. PC_FW_VERSION not bumped. Host tests green (test_bode_sweep 1310), GCC 10 build without warnings
+in the changed files. **Not benched.**
+
+**Cause, measured.** `bode_cells.py` (run by the coordinator 12:32, `backups/bode/cells_1235.npz`, log in the
+coordinator's scratchpad) captured the cells 10.0, 14.7, 21.6 and 31.6 kHz on the RC in three variants, eight
+captures each.
+- With the CH1 trigger at 128 ("host", and "imm" = no settle at all): 64 of 64 clean.
+- With the level off the signal, the record starting on the FPGA auto time-out ("auto"): 15 of 32 broken (4 at 14.7 kHz, 6 at 21.6, 5 at 31.6; none at 10.0). Leak -3 ..
+  -36 dB, |H| off by up to 0.4 dB, phase by 4 deg.
+- In each broken record the period differences show a phase jump at a random sample (e.g. 806, 1774). The record is
+  joined from two captures; it is not a filter warm-up. The first samples are ordinary codes.
+- Settle time and plan N / rate are not involved: "imm" (no settle) was clean, and the plans are the host's (test_bode.py
+  vectors).
+- The C measurement equals the host's on these real records (leak to 0.1 dB, the same flags): checked with
+  bode_cli on all 96 captures.
+- The engine arms FPGA auto (`pc_hal_arm(..., normal 0)`) with the UI's trigger (source, edge, the marker's level).
+  That level is often off the bench signal, so its records started on the time-out. Inference: the time-out
+  record's start address on 0x153A does not match the samples written (a readout / FPGA matter for fpga-gen*, not
+  chased here; the host's set-up never hits it).
+
+**What changed.**
+- **The trigger.** pc_bode.c `bh_trigger` before each arm: CH1, rising, level 128 (the engine centres CH1's mean
+  there). The level is derived from the marker and CH1's range / offset at every arm (fpga_set_trigger_level), so it
+  is computed first and the marker placed again when the level is outside 124..132.
+  - bode_view open saves the trigger edge and marker (`s_edge`, `s_tvp`) besides the source.
+  - Close writes source and edge back with the marker after the channels, so the UI's level comes back.
+  - `pc_hal_trigger_write` redraws the trigger chip when the marker moves (only after a CH1 range / offset change);
+    watch for it drawing over the plot.
+- **Retake.** An incoherent measurement (`bode_incoherent`, CH1 leak above -40 dB) is taken once more, like a suspect
+  one, in every phase. On the device it is the signature of a joined record; a CH1 that really has energy beside the
+  fundamental still reads incoherent after the retake.
+- **Plan, clip.** From the plan, a CH2 clip on the planned range is measured again on the same range (PH_CLIP_AGAIN,
+  RETRIED) before CH2 steps up. The jumbled ranges were planned points stepping UP on a clip in a bad record (146.6 kHz
+  to r2 2, ch2_small).
+- **Plan, floor.** From the plan, a point under the floor steps down repeatedly in the same sweep (PH_DOWN again while
+  still under 30 %), within the six switches. Up to 0.2.88 it went one range per sweep, so a point that had stepped up
+  twice needed two more sweeps (the 6, 6, ..., 1 sequence).
+- **What the plan stores.** The plan already stored the range of the accepted measurement: `result()` writes the
+  entry and a step up rewrites it with the repeated measurement. No change was needed there.
+- **Rejected.** "A plan entry coarser than both neighbours" was not added as a rule: a resonance's peak is
+  legitimately coarser than both neighbours.
+- **Tried and taken out.** A record lead-in skip (the warm-up hypothesis, before the bench data), and a phase-jump
+  detector on the period differences (it missed records whose jump covers most of the period-difference window,
+  where the median itself is inflated: 5 of 15 on the bench records). The leak test catches all 15.
+
+Not done:
+- Why the time-out record is joined (fpga / readout): queue for the FPGA side with cells_1235 as evidence.
+- A per-point "why it switched" in READ_BODE: the 20-byte row has no spare bit. The flags show RETRIED, and a
+  CH2 step up leaves the point on a coarser r2.
+
+**Bench walk-through (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, 0x153A, RC on the
+post, wiring A, x1 probes)**
+1. Scope view first: set the trigger level marker well off the signal (e.g. top of the screen) and note source / edge.
+   Open Frequency response, RUN, ten sweeps (100 Hz .. 1 MHz, 25, Normal, Auto).
+   - Expect switches 2 (or the first sweep's count), then 0 on sweeps 2..10.
+   - CH2 ranges monotonic (3 .. 3, 4, 4, 5 .. 5 as the host's 0.5 / 0.2 / 0.1 V/div).
+   - No unsettled / incoherent points; |H| at 10.0 / 21.6 kHz within 0.05 dB of the host (-2.854 / -6.738) every sweep.
+   - "retried" rare (0..1 per sweep).
+2. Leave the mode: the trigger marker, edge and source are as set in step 1.
+3. Host comparison as section 56 step 4: the device flags no more points than the host.
+4. Changing circuit as section 56 step 5: a 15 nF -> 1.5 nF swap during RUN re-plans within one sweep (switches > 0
+   once, then 0).
+Bug indicators: the trigger chip redrawn over the plot at every point; the trigger marker not restored; switches still
+decaying over several sweeps; incoherent points with "retried" at fixed cells (then the CH1 trigger is not reaching
+the FPGA: check 0x15 / 0x16 / 0x17 in a bus trace before the 0x01).
