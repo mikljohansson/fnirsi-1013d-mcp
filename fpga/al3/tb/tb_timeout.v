@@ -25,9 +25,16 @@
 //   A3  FPGA auto, 0x0E = total, the CH1 step 500 words after the stop: 0x18 must stay 0 (0x153A reads 1)
 //   A4  FPGA auto with a time-out of about 1.3 rings whose stop lands at ring word 1000 + pretrigger (0x153A: start 0,
 //       spliced at 1000), no trigger
-// PASS on 0x153B: every record equals the mirror, is contiguous and ends at the stop; A2 triggered at the crossing, A3
-// untriggered. Against the 0x153A source (DUT= the a2b6929 file) the F1 / F2 forces whose W lands inside the record,
-// A2, A3 and A4 fail: that is the bench fault reproduced.
+//   B   (fpga-gen13) the host capture of the bench of 2026-10-20 19:52 on 0x153B, byte for byte: fw 0.2.102's host ARM at
+//       the UI's 1 MSa/s index (divider 199, CIC3+FIR, N 200, 16-bit words), pretrigger 3000, total 6000, 0x0E = total,
+//       normal arm; B1 untriggered (level 255 = 0xFFFF), the firmware's force 0x1A = 0 after 1.37 rings so that W lands at
+//       ring word about 3000 (inside the record's ring words: the 0x153A splice position); B2 triggered: a CH1 step across
+//       level 128 after 3500 words, no force. The record is read as READ_RAW reads it (pc_raw_core / fpga_read_lane: the
+//       read restarts at ring word 0 with a new 0x1F, command and dummy strobe when it reaches the ring end). +bench=0 skips
+//       it (about 20 ms of simulated time).
+// PASS on 0x153B: every record equals the mirror, is contiguous and ends at the stop; A2 and B2 triggered at the crossing,
+// A3 untriggered. Against the 0x153A source (DUT= the a2b6929 file) the F1 / F2 forces whose W lands inside the record,
+// A2, A3, A4 and B1 fail: that is the bench fault reproduced.
 `timescale 1ns / 1ps
 
 module tb;
@@ -160,6 +167,24 @@ module tb;
     end
   endtask
 
+  // pc_raw_core / fpga_read_lane (fpga_bus.c): the firmware reads at most ring_words - start words per 0x1F, then
+  // starts again at ring word 0 (a second 0x1F, command and dummy strobe) instead of relying on the 13-bit pointer wrap
+  reg [7:0] rb2 [0:8191];
+  integer   rj, rn1;
+  task read_lane_fw(input [7:0] cmd, input integer start, input integer n);
+    begin
+      rn1 = 8192 - (start & 8191);
+      if (rn1 > n) rn1 = n;
+      read_lane(cmd, start, rn1);
+      if (n > rn1) begin
+        for (rj = 0; rj < rn1; rj = rj + 1) rb2[rj] = rb[rj];
+        read_lane(cmd, 0, n - rn1);
+        for (rj = 0; rj < n - rn1; rj = rj + 1) rb2[rn1 + rj] = rb[rj];
+        for (rj = 0; rj < n; rj = rj + 1) rb[rj] = rb2[rj];
+      end
+    end
+  endtask
+
   //---------------------------------------------------------------------------------
   // Filter helpers (pc_decim.c), as tb_firstrec.v
 
@@ -259,17 +284,11 @@ module tb;
       ta = rd16 & 8191;
       start = (ta - pre_w) & 8191;
       wstop = wcount;                                   // the mirror index after the last word written
-      if (cur_k != 0) begin
-        read_lane(8'h20, start, tot_w); for (i = 0; i < tot_w; i = i + 1) y[i][7:0]   = rb[i];
-        read_lane(8'h21, start, tot_w); for (i = 0; i < tot_w; i = i + 1) y[i][15:8]  = rb[i];
-        read_lane(8'h22, start, tot_w); for (i = 0; i < tot_w; i = i + 1) y[i][23:16] = rb[i];
-        read_lane(8'h23, start, tot_w); for (i = 0; i < tot_w; i = i + 1) y[i][31:24] = rb[i];
-      end else begin
-        read_lane(8'h20, start, tot_w); for (i = 0; i < tot_w; i = i + 1) y[i][7:0]   = rb[i];
-        read_lane(8'h21, start, tot_w); for (i = 0; i < tot_w; i = i + 1) y[i][15:8]  = rb[i];
-        read_lane(8'h22, start, tot_w); for (i = 0; i < tot_w; i = i + 1) y[i][23:16] = rb[i];
-        read_lane(8'h23, start, tot_w); for (i = 0; i < tot_w; i = i + 1) y[i][31:24] = rb[i];
-      end
+      // the four lanes as READ_RAW reads them (16-bit: 0x20 / 0x21 are the low / high byte of CH1's sample, 0x22 / 0x23 CH2's)
+      read_lane_fw(8'h20, start, tot_w); for (i = 0; i < tot_w; i = i + 1) y[i][7:0]   = rb[i];
+      read_lane_fw(8'h21, start, tot_w); for (i = 0; i < tot_w; i = i + 1) y[i][15:8]  = rb[i];
+      read_lane_fw(8'h22, start, tot_w); for (i = 0; i < tot_w; i = i + 1) y[i][23:16] = rb[i];
+      read_lane_fw(8'h23, start, tot_w); for (i = 0; i < tot_w; i = i + 1) y[i][31:24] = rb[i];
       nmir = 0; splice = -1;
       for (i = 0; i < tot_w; i = i + 1) begin
         if (y[i] !== mir[(start + i) & 8191]) nmir = nmir + 1;
@@ -294,6 +313,7 @@ module tb;
 
   integer r, pre, wait_words, target, cross_i, lvl16;
   integer run_no = 0;
+  integer bench = 1;                                    // +bench=0 skips case B
   real    t_force;
 
   // the firmware's auto mode: normal arm, then 0x1A = 0 after wait_words output words (>= 1.1 rings)
@@ -310,6 +330,7 @@ module tb;
     if (!$value$plusargs("seed=%d", seed)) seed = 12345;
     if (!$value$plusargs("total=%d", total)) total = 2048;
     if (!$value$plusargs("runs=%d", runs)) runs = 4;
+    if (!$value$plusargs("bench=%d", bench)) bench = 1;
     #2000;
     wr1(8'h01, 8'h00);
     wr1(8'h15, 8'h00);
@@ -378,6 +399,33 @@ module tb;
     for (pre = 0; pre <= 200; pre = pre + 200) begin
       arm(pre, total, 0, 8192 + 1000 + pre - 2, 8'd255);  // W = set + 2 = 8192 + 1000 + pre
       finish_and_read(pre, total, pre ? "A4 long pre 200 " : "A4 long pre 0   ");
+    end
+
+    if (bench) begin
+      $display("---- B: the host capture of the bench 2026-10-20 19:52 (fw 0.2.102 on 0x153B): D 199 CIC3+FIR N 200, pretrigger 3000, total 6000, 16-bit");
+      // B1: untriggered, the firmware's auto mode on 0x153B+ (pc_cmds.c h_arm: arm_normal 1, 0x0E = total samples,
+      // pc_hal_force at the deadline); the force after 1.37 rings puts W at ring word about 3000, inside the record's
+      // ring words 0 .. 5999 on 0x153A; the record then wraps through the ring end, so the firmware's split read is exercised
+      configure(199, 3, 1, 16'hFFFF);
+      force_case("B1 bench untrig ", 3000, 6000, 8192 + 3000 - 3);
+      // B2: triggered, the same arm with level 128: a CH1 step 500 words after the pretrigger has filled, no force
+      tri_on = 0;
+      adc1A = 60; adc1B = 60;
+      lvl16 = out16(8'd128, 3, 1, 199, fw_shift(3, 1, 199));
+      configure(199, 3, 1, lvl16[15:0]);
+      #(40 * word_ns * 1.0);
+      arm(3000, 6000, 1, 6000, 8'd128);
+      #(3500 * word_ns * 1.0);
+      adc1A = 200; adc1B = 200;
+      finish_and_read(3000, 6000, "B2 bench trig   ");
+      check(trig == 1, "B2: 0x18 reads triggered");
+      cross_i = -1;
+      for (i = 1; i < 6000; i = i + 1)
+        if (cross_i < 0 && y[i - 1][15:0] < lvl16 && y[i][15:0] >= lvl16) cross_i = i;
+      $display("B2: level16 %0d, crossing at record word %0d (pretrigger 3000)", lvl16, cross_i);
+      check(cross_i >= 2999 && cross_i <= 3003, "B2: the crossing lies at the pretrigger (-1 .. +3 words)");
+      adc1A = 60; adc1B = 60;
+      tri_on = 1;
     end
 
     $display("RESULT: %0d checks, %0d errors -> %0s", checks, errors, errors ? "FAIL" : "PASS");

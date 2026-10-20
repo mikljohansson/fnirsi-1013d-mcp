@@ -35,7 +35,9 @@
 #      after the ring has wrapped), with the firmware's byte sequences, checked word by word against a mirror of the
 #      memory write port: equal to the words written, contiguous in write order, the newest total words (triggered: the
 #      post-trigger region complete), 0x18 true for the record. TIMEOUT_TOTAL words per record (default 2048),
-#      TIMEOUT_RUNS forces per case (default 4). Against the 0x153A source it reproduces the bench splice.
+#      TIMEOUT_RUNS forces per case (default 4), TIMEOUT_BENCH=0 skips case B (fpga-gen13: the host capture of the
+#      2026-10-20 19:52 bench on 0x153B, D 199 CIC3+FIR, pretrigger 3000, total 6000, untriggered with the force and
+#      triggered, read with READ_RAW's split at the ring end). Against the 0x153A source it reproduces the bench splice.
 # Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
@@ -139,7 +141,7 @@ if [ "$ONLY" = all ] || [ "$ONLY" = firstrec ]; then
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = timeout ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_timeout.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_timeout.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
-  vvp -n "$WORK/tb_timeout.vvp" +seed=$SEED +total=${TIMEOUT_TOTAL:-2048} +runs=${TIMEOUT_RUNS:-4} | tee "$WORK/sim_timeout.log"
+  vvp -n "$WORK/tb_timeout.vvp" +seed=$SEED +total=${TIMEOUT_TOTAL:-2048} +runs=${TIMEOUT_RUNS:-4} +bench=${TIMEOUT_BENCH:-1} | tee "$WORK/sim_timeout.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_timeout.log" || RC=1
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
