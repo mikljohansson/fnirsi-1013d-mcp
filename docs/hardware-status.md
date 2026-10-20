@@ -1056,4 +1056,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   7188c5cf84670fbde11da2f4790cd84ba1b952df45afeb475a4fb3ba90bb42ad); firmware host tests, vectors, mcp ruff and 443 pytest green.
   Morning order: FEL-load 0.2.79 on 0x1539 first (the wizard must now fail loudly there: readout fault near 128, the fail-fast
   check), then the 0x153A flash session, then firmware/AGENTS.md section 54 / fpga/al3/README.md section 10 items 1..7.
+- 2026-10-20 09:59-10:02: scope on (card boots 0.2.25), fw 0.2.79 FEL-loaded by ENTER_FEL (`#VER fw=0.2.79,proto=1.24,fpga=0x1539`),
+  caps 0x7EC4B (no CAPTURE_STAGES on 0x1539, right), GET_HEALTH layout 2, 124 bytes. Fail-fast check: the wizard's zero step at
+  code 128 on 0x1539 fails on both channels: CH1 "ADC readout fault", CH2 "too much noise" (the A-core garbage classified as noise
+  there; both loud, as intended; minor: the noise classifier could name the readout fault when rail samples are present, queued
+  later). Next: the 0x153A flash session.
 
