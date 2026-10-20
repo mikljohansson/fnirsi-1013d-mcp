@@ -5,8 +5,8 @@
 [![Licence: GPL-3.0](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
 
 Open firmware for the FNIRSI 1013D tablet oscilloscope that boots from a micro SD card and gets far more out of the
-hardware than the stock firmware does. It also lets an AI coding agent use the scope over USB, with you at the touch
-screen the whole time.
+hardware than the stock firmware does. It also lets an AI coding agent use the scope through an MCP connection over
+USB, with you at the touch screen the whole time.
 
 Most of it was written by AI agents coordinated by the maintainer, and everything was verified on the maintainer's
 single unit. Opening the case may void your warranty.
