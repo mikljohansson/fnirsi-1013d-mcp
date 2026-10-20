@@ -512,7 +512,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   command closes the open menu first, so screenshots of Settings, the generator menu, the file viewers, First start and the
   wizard come out as the screen after the menu closed): a read-only command (READ_SCREEN, GET_*) is answered from inside the
   modal loop without leaving it. Separate agent fw-shot if fw-eng6 declines it.
-  **Result (branch fw-eng6, fw 0.2.94, merged 14:37, bench pending; firmware/AGENTS.md section 62):** both items built.
+  **Result (branch fw-eng6, fw 0.2.94, merged 14:37, pinned 10d3fb2a and loaded 14:38, host sweeps on the RC 0 unplanned / 2 planned, owner walk-through pending; the fw-eng5/6 agent retired at 408k tokens, section 62 is its handoff; firmware/AGENTS.md section 62):** both items built.
   Constant: the CH2 menu's display V/div is the one source; the engine writes no other CH2 range (pre-scan included);
   AUTO SET writes its Constant range into CH2; leaving the mode keeps it; the warnings name the CH2 menu; the flat note
   drops ": span kept". The popover hook is commit 93a0c0f alone (revertable). The flat path does run the rule (host

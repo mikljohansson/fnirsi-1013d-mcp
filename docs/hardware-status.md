@@ -1298,3 +1298,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   the magnitude's flat passband sits on the track's top rows, under the window's top line and margin, so inside the window the
   cyan curve shows from the knee down (decision 7 geometry, same as a Scope trace at the top). Hold case (both tips on the
   generator) and the fold-out's CH2 range row: owner walk-through pending.
+- 2026-10-20 14:38: fw 0.2.94 (fw-eng6: CH2 range Auto / Constant, Constant = the CH2 menu's V/div and a sweep never
+  changes it, a V/div chosen in the CH2 menu while the mode shows sets Constant (coordinator's addition, owner to confirm),
+  AUTO SET writes its range into CH2 when it picks Constant, the "span kept" suffix gone, BODE_CTRL 58 B with AUTO SET's CH2
+  verdict in bytes 50..57; read-only host requests answered inside the modal loops so READ_SCREEN shows an open menu) pinned
+  backups/fw-0.2.94_10d3fb2a.bin (sha256 10d3fb2a5c7e0c03bc035073465fc721c36008dea0b8e706fb9057c797dd6acc), loaded. RC on the
+  probes again (0.13 dB at 100 Hz, -2.84 dB at 10 kHz, -34.7 dB at 1 MHz). Three host sweeps 100 Hz..1 MHz / 25 after the
+  boot: sweep 1 ranged (2 unplanned, 29 captures), sweeps 2 and 3 0 unplanned / 2 planned, 25 captures, 0 time-outs, 0 flagged.
+  Owner walk-through pending: section 62 steps 1-5 (flat AUTO SET -> Constant with the verdict bytes, the CH2 menu on
+  Constant, Auto on the RC, the menu tap on Auto, `tools/screenshots.py --only settings` with Settings open).
