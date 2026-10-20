@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-arm (2026-10-20): fw 0.2.97, protocol 1.24 unchanged (GET_CAPTURE_INFO flags bit 6): auto mode on FPGA 0x1532..0x153A arms the FPGA's time-out with the stop geometry (no spliced records), the record flagged when the firmware still forces; section 64.**
 **Branch fw-yield3 (2026-10-20): fw 0.2.96, protocol 1.24 unchanged: a state-changing host request leaves Diagnostics (Back) before it runs, so the view no longer draws into it; section 63.**
 **Branch fw-cap2 (2026-10-20): fw 0.2.81 provisional (version not bumped), protocol 1.24 + GET_HEALTH 106 bit 5: capture-stage training over codes 120..140, widest-run pick, repeat watch; section 54 addendum.**
 **Branch fw-cap (2026-10-20): fw 0.2.79, protocol 1.24 (row 64): FPGA 0x153A capture stages (training in the wizard's zero step, 0x36 self-check, stored with the calibration), EXT offsets, the wizard's zero back at code 128, section 54.**
@@ -4642,3 +4643,112 @@ Without the fix 35 checks fail.
 Bug indicators: any view element (waterfall rows, cards, ACQ chip, markers, slider) drawn over Diagnostics;
 Diagnostics closing on READ_SCREEN, GET_* or GET_STATUS; the Scope view left half drawn after the leave (parts of the
 Diagnostics page still on screen).
+
+## 64. fw-arm: auto-mode records without the splice, the stop geometry on 0x1532..0x153A (fw 0.2.97, protocol 1.24)
+
+Branch `fw-arm` from main 6f0a273 (fw 0.2.95), rebased on ac1f2ab (fw-yield3's 0.2.96 and fpga-gen11 merged). Brief:
+fpga-gen11's finding and prescription (fpga/al3/README.md "Changes" section 11, fpga/al3/AGENTS.md "Spliced time-out
+records, fpga-gen11", protocol.md 7.5). Commits: 49d99bf (pc_decim helpers, fpga_model capture logic, test_fpga_bus),
+13f88b1 (host ARM, UI auto mode, segments, the flag), cd1df51 (Frequency response engine), dc35b9f (mcp), then version,
+docs and this handoff. **Nothing benched, nothing flashed.** Host tests green (`make test`: test_session 70348 /
+70349, test_fpga_bus 11792, test_bode_sweep 2285), mcp pytest green except test_report (matplotlib missing in the
+local venv, unrelated), ruff selection clean, `make gcc10` clean in the changed files. Protocol: 1.24 unchanged
+(GET_CAPTURE_INFO flags bit 6 is a spare bit; no caps bit: 0x153B is told by the version word).
+
+**The rule** (`pc_decim.h` "Auto-mode stop geometry"). 0x0E is 32 bit and counts written words at every K
+(`time_base_cnt` advances on `swc_adv`, zaklad.v; 2^32 words = 43 s at 100 MHz words, so 0x0E reaches every deadline
+the firmware uses); the stop comes after W = 0x0E + 2 words (`PC_STOP_LAG`, fpga-gen11 tb A1). On 0x1532..0x153A the
+record of an untriggered stop is ring words 0 .. total - 1, contiguous iff W mod 8192 >= total. `pc_auto_stop_word(min,
+total, ring)` returns the first W >= max(min, total + m) with total + m <= W mod ring <= ring - 1 - m (m =
+`PC_STOP_MARGIN` 4 when it fits, else 0); 0x0E = W - 2. This generalises the brief's 0x0E = 8192 k + total - 2: W
+need not sit at ring word total, any ring word from total on works, so the deadline is kept exactly whenever its own
+ring word is allowed and moved by at most total + 8 words otherwise (the brief's rule could add a whole ring: 16 s at
+1 kSa/s). Examples: 200 MSa/s, 3000 samples: deadline 100 ms = 10,000,000 words, ring word 5760: W = 10,000,000,
+0x0E = 0x0098967E (no move). 1 MSa/s, 3000 samples: 50,000 words, ring word 848 < 1504: W = 50,656, 0x0E = 0xC5DE (1.3
+ms later). Records up to about 4090 words never move at slow rates (2 x total stays in the first pass); deeper records
+at slow rates move by up to 8192 - total words (less than one record). `pc_stop_kind(version)`: NONE (stock,
+unknown), SPLICE (EF2 / EP4: Atlan4's logic by inference, not modelled: they keep the force, forced records flagged),
+RING0 (0x1532..0x153A), NEWEST (0x153B..0x153F).
+
+**Per arm path.**
+- Host ARM (pc_cmds.c `h_arm`, UI mode 0, AL3 RING0, no sequencer): `arm_normal = 0`, `arm_auto = W - 2` with W from the
+  0.2.41 deadline (`pc_host_auto_ms`: max(100 ms, two records, the explicit auto_timeout) at `pc_hal_divider_now()`,
+  `pc_ms_to_words` in the arm's layout). `auto_geom`, `auto_stop`, `auto_stop_ms` in the session. The firmware time-out
+  is the safety net at `pc_auto_net_ms(W's ms)` = + 50 ms + 1/8: if it fires, `pc_hal_force_stop` (0x0E = 0, 0x1A = 0,
+  since 0x1A is already 0) and `cap_spliced`. At DONE: `addr == cap_pre_words` -> untriggered (the late edge after the
+  stop); a triggered record with W's ring word inside it (`pc_auto_cut`) and DONE within (total - pre) words + 2 ms of
+  W's time -> `cap_spliced`. `cap_spliced` is per arm (reset by the enc re-arm too) and goes into the capture's flags as
+  `PC_CAPTURE_F_SPLICED` (0x40) just before `pc_capture_finish`. A host FORCE (PC_DEBUG builds) writes 0x0E = 0 under the
+  geometry and flags the record on RING0 / SPLICE bitstreams (normal mode too: its 0x0E is long past). 0x153B+: the 0.2.41
+  path unchanged (normal arm, `pc_hal_force` at the deadline, `host_forced` keeps "untriggered"), never flagged.
+- Host segment runs (SEGMENTS, auto mode, RING0): `arm_auto` (default the total samples) moved to `pc_auto_stop_word(arm_auto
+  + 2, tot_w, 2^m) - 2`. README section 6's bench check 2 (120 words in 128-word slots, 0x0E 240) stopped every untriggered
+  segment at slot word 114 and spliced it; now 0x0E = 246 (test_session). Inference: the per-segment `cap_rst` resets
+  `sample_write_address` and `time_base_cnt` together, and the slot address is the write address mod 2^m; not
+  benched, no tb. Averaging runs (host or UI) are unchanged: they skip untriggered records.
+- UI (pc_hal_scope.c `pc_glue_decim_conversion`, every conversion): the averaging-run check moved before the 0x1A write
+  (`pc_seq_ui_conversion`, no bus access). Auto mode on RING0 (fw_FPGA 2, not an averaging run): 0x1A = 0, `fpga_conv_0e`
+  = W - 2 (fpga_control.c's `fpga_do_conversion` writes it instead of `samplecount` when non-zero), `pc_ui_auto_ms` = the
+  net. Other FPGA-auto conversions (calibration, auto setup, triggermode 0 without `ui`): W from `samplecount + 2`, 0x0E
+  written only when it moves. The deadline now uses `pc_hal_divider_now()` (was the UI table's divider). `pc_ui_auto_service`
+  forces with `pc_hal_force_stop` under the geometry and sets `pc_ui_spliced` unless NEWEST. `pc_glue_ui_capture_addr`:
+  0x14 == the 0x0B words -> `ui_trig = 0` and `pc_scope_untrig`; the cut check as the host's; the flag into
+  `pc_sess.cap_next.flags`.
+- Frequency response (pc_bode.c `bh_arm`): still FPGA auto with the CH1 trigger and 0.2.91's 0x0E = 2 x total; on RING0
+  moved to W (records above about 2700 legacy / 4090 16-bit words wrapped before). The brief's "arm normal" was not
+  taken: with the geometry a missing trigger gives a contiguous record (normal + force would splice), and a trigger
+  completes whenever it comes more than total words before W (the engine's 2 x total gives it the first record's
+  length; the generator's period is far shorter). `bh_read`: 0x14 == pre -> untriggered; `bode_cap.spliced` for a
+  forced record (`bh_force` after the engine's deadline, not on NEWEST) or a cut trigger; `bode_step` memsets the cap
+  and retakes a spliced record like an untriggered one (counted as "other" in BODE_CTRL 46). 0x153B+: unchanged arm.
+
+**Flag and host.** GET_CAPTURE_INFO byte 9 bit 6 (protocol.md row 37, 7.5 "the stop geometry"); mcp
+`CaptureInfoHeader.F_MAYBE_SPLICED`, `Capture.maybe_spliced` (False when read without GET_CAPTURE_INFO: the `ctx` fast
+path of long runs reads only WAIT's status, whose flags byte has no spare bit; not changed), caveat "record may be
+spliced ... capture again", `.npz` meta.
+
+**Tests.** test_fpga_bus `test_timeout_records` (fpga_model capture logic with write-index words, per bitstream, pre 0 /
+200, total 2048): forced stop after 1.12 rings spliced on 0x153A / newest on 0x153B (the brief's 1.3 rings lands at ring
+word 2458 > 2048, contiguous by luck: 1.12 used); FPGA auto 0x0E = total + trigger at 1024 cut at W = 2050 on 0x153A,
+complete on 0x153B; the geometry for 3 rings + 500: stop exactly at W, 0x14 = pre, contiguous last pass; late edge
+(0x18 = 1, 0x14 = pre); early trigger complete; cut trigger seen by `pc_auto_cut`; 24 random force times per pretrigger:
+0x153B always contiguous, 0x153A spliced exactly when W mod 8192 < total (16 of 48). test_session
+`test_auto_stop_geometry` (the rule, a 20000-case sweep, cut, conversions, kinds; 0x153A's arm, late edge, early and cut
+triggers, the safety net with `force_stops`, FORCE in the debug build, normal mode unchanged, EF2 flagged),
+`test_fw_auto_timeout` now on 0x153B (unflagged), the segment 0x0E. test_bode_sweep `test_spliced_retake`.
+
+**Not done / limits.**
+- A forced stop on 0x1532..0x153A cannot be made exact (W is not readable): flagged instead. Only the safety net and a
+  host FORCE force there now.
+- A trigger in the last total - pre words before W is still cut on 0x1532..0x153A; flagged by a timing check (DONE seen
+  within that window + 2 ms of W's time with W inside the record). At fast rates the window is microseconds, so a
+  trigger that comes near the 100 ms deadline and completes normally, with W's ring word inside its record, is flagged
+  too (over-flagging, rare: about total / 8192 of the triggers that arrive in the last ms).
+- The UI's elapsed time is measured at the 0x14 read, after its done poll; the cut check can over-flag a UI record
+  read late. The Scope view does nothing with the flag (GET_CAPTURE_INFO only).
+- Segments: the slot rule is an inference (above). EF2 / EP4 not modelled.
+
+**Bench (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, fw 0.2.97).**
+On 0x153A (today's unit):
+1. `#VER` fw=0.2.97. `s.event_log(fpga_trace=True)` around one host auto capture at 200 MSa/s, 3000 samples, level 255
+   (`s.set_trigger(mode="auto", level_code=255)`): 0x1A = 0 before the reset, 0x0E = 0x0098967E inside it, no 0x1A / 0x0E
+   write after the release (no force). At 1 MSa/s: 0x0E = 0xC5DE.
+2. 50 host captures as fpga-gen11's bench (RC on the post, generator 21.6 kHz, CIC3+FIR 2320 .. 3408 words, level 255):
+   GET_CAPTURE_INFO flags bit 1 set, bit 6 clear, capture_start 0; the two-segment fit (`splice.py` pattern) finds no
+   seam in any (0.2.96: 15 of 32). `python firmware/tools/bode_cells.py COM10`: every "auto" record leak below -60 dB and
+   |H| within 0.01 dB of "host".
+3. Scope view, auto mode, marker above the signal, 1 kHz on CH1 at 1 MSa/s: 50 untriggered traces without a step
+   (READ_TRACE each, or screenshots); then at 200 MSa/s the same. Refresh rate as on 0.2.96 (one trace per about 100 ms).
+4. Frequency response, ten RUN sweeps 100 Hz .. 1 MHz / 25 on the RC: retried 0 .. 1 per sweep (0.2.89 .. 0.2.96:
+   5 .. 15), BODE_CTRL 40..47 timeouts 0 .. 1, other retakes 0 .. 1, 21.6 kHz -6.74 dB in 10 of 10.
+5. Slow signal (0.5 Hz square from the generator, 10 MSa/s, auto): untriggered traces until an edge, then triggered at
+   the marker; no flat record flagged triggered (`s.capture()` flags; GET_CAPTURE_INFO bit 0 only with a crossing).
+6. Segments in auto mode with the generator off (README section 6 step 7, m 7, total 240): every untriggered segment
+   flat without a seam; the trace shows 0x0E = 246.
+On 0x153B (after the owner flashes it; the fpga-gen11 tb verdict is still open, see fpga/al3/AGENTS.md):
+7. `#VER` fpga=0x153B; the trace of step 1 shows the 0.2.41 arm (0x1A = 1, then 0x1A = 0 at about 100 ms), records
+   contiguous (the newest total words, capture_start = W - total), bit 6 never set.
+8. Steps 2 .. 6 again: no seam, the sweeps' retries 0 .. 1.
+Bug indicators: bit 6 on ordinary auto captures (the FPGA did not stop at W: 0x0E not taken; trace the arm); a seam in
+an untriggered record on 0x153A (W's rule or `PC_STOP_LAG` wrong: compare capture_start and W mod 8192); the UI's
+auto traces refreshing much slower than on 0.2.96 (the deadline moved too far); "triggered" on a flat record.
