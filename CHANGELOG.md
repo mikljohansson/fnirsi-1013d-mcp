@@ -31,6 +31,21 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.87 (provisional, not tagged in pc_cmds.h; protocol 1.24, unchanged)
+
+- Frequency response: repeated sweeps reuse the range plan, so the relays stay quiet on an unchanging circuit (owner
+  2026-10-20 11:51 / 11:52; 53447c4). Every sweep at the same span, points, Settle and CH2 mode (RUN, Single sweep,
+  AUTO SET's final sweep) skips the pre-scan and starts each point on the ranges its previous result used. CH2 switches
+  only when a point clips or drops below the floor (30 % of full scale on the next range), and that point's plan
+  follows. The first sweep after a settings change, after a cancelled sweep that left the plan incomplete, or a thru
+  sweep ranges from scratch, as does any sweep after one where CH1 clipped or the pre-scan left CH1 on too coarse a
+  range. READ_BODE's switch count shows it: on the RC, 2 on the first sweep, 0 afterwards.
+- Frequency response: the device flags points as the host tool does (1094c77, 8bf9a9f). The thresholds were already the
+  host's; the device now also has the host's rules for a flat or toneless record. A suspect record (the 0x153A
+  first-record artefact) is taken once more, a dead CH1 reads incoherent, and the settle check skips record halves
+  without a CH1 tone. After a range change the front end now gets the host's settling time (100 ms; 50 ms up to
+  0.2.86). The bench sweep of 12:05 had flagged unsettled / incoherent points exactly after the CH2 range changes.
+
 #### 0.2.86 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: AUTO SET never ends in RUN (owner 2026-10-20 11:47; a119035). After the overview and its finer passes
