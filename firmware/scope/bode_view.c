@@ -91,6 +91,7 @@ typedef struct
   //AUTO SET
   uint8  autoset;                   //the pass running: 1 the overview, 2..BODE_AUTO_PASSES the sharp-tank passes; 0 none
   uint8  as_thru;                   //the thru's Apply before the overview
+  uint8  as_final;                  //fw 0.2.86: AUTO SET's last step, one single sweep at the found settings, is running
 
   //What the view gives back
   uint8  s_run, s_trig, s_gen_en, s_gen_duty, s_disp[2];
@@ -274,6 +275,7 @@ void bode_view_open(void)
   bv.gen_taken   = 0;
   bv.single      = 0;
   bv.autoset     = 0;
+  bv.as_final    = 0;
   bv.was_running = 0;
   bv.last_run    = 0;
   bv.auto_fail   = NOTE_NONE;
@@ -302,8 +304,9 @@ void bode_view_close(void)
     bode_snap_restore(bode_engine(), &as_snap);
   }
 
-  bv.autoset = 0;
-  bv.active  = 0;
+  bv.autoset  = 0;
+  bv.as_final = 0;
+  bv.active   = 0;
   display_set_screen_buffer(ui_diag_scope_buffer());
 
   //Channels (range, offset, coupling, enable), the display V/div (software zoom), the time base, the trigger source,
@@ -498,7 +501,7 @@ static void gather(void)
   }
 }
 
-//The overview has ended: span, Settle and CH2 range from it, then RUN (bode-ui.md 3.2)
+//The overview has ended: span, Settle and CH2 range from it, then one sweep at them and STOP (bode-ui.md 3.2)
 static void bv_auto_finish(void)
 {
   bode_eng *e = bode_engine();
@@ -568,10 +571,10 @@ static void bv_auto_finish(void)
   bv.settle  = a.settle;
   bv.ch2     = BODE_CH2_AUTO;
 
-  //Then RUN, as the Scope's auto setup ends in RUN; the table and the cards come from the first real sweep
-  if(!scopesettings.runstate)
-    pc_hal_ui_set_run(1);
-  bv_start(0, 0);
+  //fw 0.2.86 (owner 2026-10-20 11:47): never RUN. One single sweep at the found settings gives the table and the cards,
+  //then STOP as any single sweep; RUN stays the user's explicit repeat. AUTO SET's button reads "Auto..." until it ends.
+  bv_start(1, 0);
+  bv.as_final = (uint8)(bode_state(e) == BODE_ST_RUNNING);
 }
 
 //fw 0.2.84: the user's generator (fpgasettings, which the engine never writes) back on the calibration pin
@@ -637,15 +640,13 @@ void bode_view_service(void)
       }
       else
       {
-        if(bv.single || (st != BODE_ST_DONE))
-        {
-          if(scopesettings.runstate)
-            pc_hal_ui_set_run(0);
-        }
-        else if(scopesettings.runstate)
+        if(bu_after_sweep(scopesettings.runstate, bv.single, st == BODE_ST_DONE))
           bv_start(0, 0);                     //RUN: the next sweep overwrites point by point
+        else if(scopesettings.runstate)
+          pc_hal_ui_set_run(0);
 
-        bv.single = 0;
+        bv.single   = 0;
+        bv.as_final = 0;
       }
     }
     else if(scopesettings.runstate && !bv.last_run)
@@ -674,9 +675,16 @@ int bode_view_autoset(void)
   if(!bv.active)
     return 0;
 
-  //A second tap cancels: the overview ends at once, the settings were not changed, the previous table comes back
+  //A second tap cancels: the overview ends at once, the settings were not changed, the previous table comes back.
+  //fw 0.2.86: during the final sweep it ends as a single sweep's STOP does (after the capture in progress, the table
+  //keeps what it has); the service clears as_final when the sweep has ended
   if(bv.autoset)
     bv_auto_cancel();
+  else if(bv.as_final)
+  {
+    if(scopesettings.runstate)
+      pc_hal_ui_set_run(0);
+  }
   else
     bv_auto_start();
 
@@ -687,7 +695,7 @@ int bode_view_autoset(void)
 
 int bode_view_auto_running(void)
 {
-  return bv.active && bv.autoset && (bode_state(bode_engine()) == BODE_ST_RUNNING);
+  return bv.active && bu_auto_busy(bv.autoset, bv.as_final, bode_state(bode_engine()) == BODE_ST_RUNNING);
 }
 
 void bode_view_tcursor(void)
@@ -1097,6 +1105,15 @@ static const char *warning(char *buf)
   return "";
 }
 
+//fw 0.2.86: the points this sweep has measured (bu_sweep_measured), for the Sweep card, the cards' "sweeping" and the
+//Single sweep row's "n / N"
+static int sweep_measured(void)
+{
+  bode_eng *e = bode_engine();
+
+  return bu_sweep_measured(bode_state(e) == BODE_ST_RUNNING, bode_current(e), bode_done_count(e), bode_count(e));
+}
+
 static int table_state(void)
 {
   int i, have = 0;
@@ -1107,7 +1124,7 @@ static int table_state(void)
   //fw 0.2.71: a single sweep fills its table anew (the cards read "sweeping" until it ends); RUN's repeats overwrite a
   //complete table point by point
   if(bode_state(bode_engine()) == BODE_ST_RUNNING)
-    return ((have < n_pts) || (bv.single && (bode_done_count(bode_engine()) < n_pts))) ? BU_TABLE_FILLING :
+    return ((have < n_pts) || (bv.single && (sweep_measured() < n_pts))) ? BU_TABLE_FILLING :
                                                                                          BU_TABLE_COMPLETE;
 
   return have ? BU_TABLE_COMPLETE : BU_TABLE_NONE;
@@ -1159,7 +1176,7 @@ static void draw_cards(int table)
   in.table   = (uint8)table;
   in.autoset = bv.autoset;
   in.thru    = (uint8)thru_card_state();
-  in.done    = bode_done_count(e);
+  in.done    = sweep_measured();
   in.count   = bode_count(e);
   in.mk      = &mk;
 
@@ -1920,7 +1937,7 @@ static int single_state(const char **label, char *value)
   bode_cfg c;
 
   cfg_now(&c);
-  return bu_single_button(bode_state(e) == BODE_ST_RUNNING, bv.single, bv.autoset, bode_done_count(e), bode_count(e),
+  return bu_single_button(bode_state(e) == BODE_ST_RUNNING, bv.single, bv.autoset, sweep_measured(), bode_count(e),
                           bode_estimate_ms(&c), label, value);
 }
 
@@ -2498,6 +2515,7 @@ static uint8 step_of(uint64 mhz)
 //The host takes over: an AUTO SET overview in progress ends, the thru's Apply given back
 static void bv_auto_drop(void)
 {
+  bv.as_final = 0;
   if(bv.autoset)
   {
     bv.autoset = 0;
@@ -2513,7 +2531,7 @@ static void bv_header(uint8 *p)
 {
   bode_eng *e = bode_engine();
 
-  bode_proto_header(e, (uint8)((bv.active ? 1 : 0) | ((scopesettings.runstate && !bv.single) ? 2 : 0)), p);
+  bode_proto_header(e, bu_view_bits(bv.active, scopesettings.runstate, bv.single), p);
 
   if(!bode_sweep_id(e))
   {

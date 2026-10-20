@@ -31,6 +31,18 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.86 - 2026-10-20 (provisional, protocol 1.24, unchanged)
+
+- Frequency response: AUTO SET never ends in RUN (owner 2026-10-20 11:47; a119035). After the overview and its finer passes
+  it runs one sweep at the found span, Settle and CH2 range and returns to STOP with the chart and the cards standing;
+  an inconsistent result still stops with its note. The AUTO SET button reads "Auto..." until that last sweep ends; a
+  second tap, STOP or "Stop sweep" end it as a single sweep (the table keeps what it has). RUN stays the explicit
+  repeat. READ_BODE's view bit 1 ("RUN repeats") reads 0 during and after AUTO SET.
+- Frequency response: the Single sweep row's red "Stop sweep" counts the sweep in progress, "0 / N" upwards (0fc2e88).
+  On 0.2.85 it sometimes stayed at "50 / 50" (bench 11:54): it counted the table's points, which a sweep on the same
+  span keeps from the previous sweep until it overwrites them. The Sweep card and the cards' "sweeping" state use the
+  same count.
+
 #### 0.2.85 - 2026-10-20 (protocol 1.24, unchanged)
 
 - ACQ menu: switching the Filter back to Off brings the memory depths above 6000 back at once (e125cf2). A filter hides

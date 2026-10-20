@@ -1859,6 +1859,40 @@ static void test_bode_texts(void)
       T_TRUE(ui_text_width(&font_2, t) + 8 <= ui_fold_row_w(&f));
     }
   }
+  {
+    const char *l;
+
+    //fw 0.2.86 (owner 2026-10-20 11:47): AUTO SET never ends in RUN. Its button reads "Auto..." through the overview,
+    //the passes and the final sweep; the final sweep is single: STOP after it, never a repeat, view bit 1 reads 0
+    //fw 0.2.86 (bench 11:54/11:57): a single sweep started over a complete table on the same span reads 0 / N, then
+    //climbs: "Stop sweep" counts the sweep in progress, not the table kept from the last sweep on the
+    //same plan (done count N throughout)
+    T_EQ(bu_single_button(1, 1, 0, bu_sweep_measured(1, 0, 50, 50), 50, 2600, &l, t), BU_SINGLE_STOP);
+    T_STR(t, "0 / 50");
+    T_EQ(bu_single_button(1, 1, 0, bu_sweep_measured(1, 1, 50, 50), 50, 2600, &l, t), BU_SINGLE_STOP);
+    T_STR(t, "1 / 50");
+    T_EQ(bu_single_button(1, 1, 0, bu_sweep_measured(1, 49, 50, 50), 50, 2600, &l, t), BU_SINGLE_STOP);
+    T_STR(t, "49 / 50");
+    T_EQ(bu_single_button(1, 1, 0, bu_sweep_measured(1, 99, 100, 100), 100, 2600, &l, t), BU_SINGLE_STOP);
+    T_STR(t, "99 / 100");
+    T_EQ(bu_sweep_measured(1, -1, 50, 50), 0);
+    T_EQ(bu_sweep_measured(1, 60, 50, 50), 50);
+    T_EQ(bu_sweep_measured(0, -1, 37, 50), 37);       //stopped: the table's count
+    T_TRUE(bu_auto_busy(1, 0, 1));
+    T_TRUE(bu_auto_busy(3, 0, 1));
+    T_TRUE(bu_auto_busy(0, 1, 1));
+    T_FALSE(bu_auto_busy(0, 1, 0));
+    T_FALSE(bu_auto_busy(0, 0, 1));
+    T_FALSE(bu_after_sweep(1, 1, 1));               //AUTO SET's final sweep (or a Single sweep) done: STOP
+    T_FALSE(bu_after_sweep(1, 1, 0));               //cancelled or failed: STOP
+    T_FALSE(bu_after_sweep(0, 0, 1));               //RUN off during the sweep: STOP
+    T_FALSE(bu_after_sweep(1, 0, 0));               //RUN, the sweep failed: STOP
+    T_TRUE(bu_after_sweep(1, 0, 1));                //RUN repeats: the next sweep
+    T_EQ(bu_view_bits(1, 1, 1), 1);                 //during AUTO SET (single passes and the final sweep)
+    T_EQ(bu_view_bits(1, 0, 0), 1);                 //after it: STOP
+    T_EQ(bu_view_bits(1, 1, 0), 3);                 //RUN pressed by the user: repeats
+    T_EQ(bu_view_bits(0, 0, 0), 0);
+  }
   T_STR((bu_estimate_text(t, 2600), t), "about 3 s");
   T_STR((bu_estimate_text(t, 120), t), "about 1 s");
   T_STR((bu_estimate_text(t, 45000), t), "about 45 s");
