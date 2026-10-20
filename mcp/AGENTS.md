@@ -1,4 +1,4 @@
-# mcp/ handoff for agents (mcp-gen6, 2026-10-19: protocol 1.19-1.20, reports; mcp-gen5 retired after 1.17)
+# mcp/ handoff for agents (mcp-gen7, 2026-10-20: idle port close, Bode flat-record guard, reason 8; mcp-gen6: 1.19-1.20, reports)
 
 Python host library, device simulator, MCP server and bench CLIs for the FNIRSI 1013D open firmware's USB protocol.
 Read first: `../AGENTS.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec; **section 14 is how
@@ -69,7 +69,10 @@ path. |
 - **`fnirsi1013d-mcp`** (server): collaborative mode (shared settings, last change wins, host captures are singles
   that leave the scope in STOP, `scope_acquisition_control(action='run')` resumes; long runs pin a settings_seq and
   restart on a change, `max_restarts` 5); legacy exclusive model on firmware without SHARED_MODE (implicit REMOTE,
-  idle release after 60 s keeping settings). Tiers 0-4, tokens for 3/4, relay rate limit, audit log, `.npz` per
+  idle release after 60 s keeping settings). **Idle close** (mcp-gen7): `Session.idle_close_check` (keepalive
+  thread, 1 s tick) closes the port after `FNIRSI_MCP_IDLE_CLOSE_S` (30 s, 0 = hold) without a tool running and not
+  while legacy REMOTE is held; `get_scope` reconnects lazily (calibration file reloaded). Activity = `Session.touch()`
+  at the end of every `run()` and `_Held.release()`; a running tool holds the lock, so it is never cut off. Tiers 0-4, tokens for 3/4, relay rate limit, audit log, `.npz` per
   waveform. Read-only extras: `scope_calibration_info`, `scope_sd_info`, `scope_event_log`, `scope_spectrum`
   (with `cross_check`; the capture tools' caveat while the screen shows the spectrum view comes from
   `Session.ensure_control`). No SD write tool by
@@ -95,6 +98,13 @@ path. |
   `scope_report`. **`where='device'`** (mcp-gen6, protocol 1.20): `bode.device_sweep`; same result structure plus
   `device`; presets only, ch2 auto / fixed, DC; thru 'measure' / 'device' / a stored name (host-applied);
   `close_view`. Rows carry no SNR / leak / codes (NaN, `snr_db` / `ch2_codes` null in the table). Simulator only.
+  **Flat records** (mcp-gen7, bench 2026-10-20 11:16, 0x153A's saturated first record after a configuration change):
+  `BodeRunner._measure` retakes once a record that is `Measurement.suspect` (CH1 std under `FLAT_STD_CODES` 1 code or
+  tone under `CH1_MIN_CODES` 0.5 code, or CH2 constant); still dead, the point gets ch1_low + incoherent, H = NaN
+  (`mag_db` / `phase_deg` null in the table), no ranging / splice / re-centring on it, and a caveat with the
+  frequencies; a pre-scan dead twice keeps CH1 on range 1 with a caveat; `flat2` (ch2_overload) is false while CH1 is
+  flat too. `meta.flat_retakes` counts retakes. Device reason 8 caveat names both causes (self-check on 0x153A+,
+  pre-scan clip on older bitstreams).
 - **`scope_report`** (mcp-gen6): see the layout table; README "Reports", guide 7a, skill "Presenting results". The
   Bode `.npz` meta records `kind`, `args` and the `.json` path (the two files have different timestamps).
 - **Packaging** (mcp-gen5): the wheel works outside a checkout; `.github/scripts/wheel_smoke.py` (CI job `wheel`, Linux and
@@ -224,7 +234,7 @@ range-independent; 0 V at dcoffset 0: CH1 A 132.47 / B 127.14, CH2 A 128.80 / B 
 firmware gains). The firmware formula assumes 128 on the compensated mean. Grounds: the probe ground is VRF1,
 +1.24 V over the USB ground (fpga/al3/README.md); the calibration output reads -1.24 / +1.9 V against it by design.
 
-## Tests (`tests/`, 446, about 110 s)
+## Tests (`tests/`, 455, about 130 s)
 
 `test_protocol` (codec, structs, vectors, link stats/event log), `test_transport` (incl. the scripted-link deferred
 cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `test_shared_mode` (1.3),
@@ -243,7 +253,10 @@ Fixtures: `sim`/`transport`/`scope` are collaborative with UI captures on demand
 `legacy_sim` / `sim_factory(legacy=True)` give the 1.2 model. Simulator hooks: `SimServer.corrupt_next`,
 `garbage_next`, `drop_next`, `bad_crc_next`, `lose_next`/`lose_cmd`, `drop_link_on`; `Device.ui_set_*`,
 `ui_press_run/stop`, `ui_run_capture`, `ui_set_spectrum` (display mode, window, FFT length, channel), `ui_set_display` (any display mode), `on_arm`,
-`user_tap` (legacy), `log_event` (also feeds the bus-level ring), `self_restart`, `ui_set_decim`, `sd.*` faults.
+`user_tap` (legacy), `log_event` (also feeds the bus-level ring), `self_restart`, `ui_set_decim`, `sd.*` faults,
+`flat_next` (the next n host captures are one saturated value on every core: the 0x153A first-record artefact).
+SimConfig `bode_readout_fault` (the device sweep ends after its pre-scan with READ_BODE reason 8); `SimBode.swept`
+(the header shows the settings in effect before the first sweep, the latest sweep's after it: fw 0.2.71).
 SimConfig `cal_v3` (a bound v3 block measured from the model: zeros, slopes, gains G = g_ref / g), `core_gain`
 (relative gain per channel, class and core) and `gated_zero_shift` (per-core zero moves while the encode clock is
 gated). Known flake: `test_sdcard::test_slow_write_answers_are_retried_without_reopening` (0.2 s write
@@ -350,3 +363,9 @@ from there and moves items to "Dispatched". Add host items you discover there, n
    in firmware (fw 0.2.70, branch fw-screen, firmware/AGENTS.md section 46), bench pending (T9);
    `scope_screenshot` needs no change, tests/test_read_screen.py checks the wire format against the vectors.
 7. GET_BAD_FRAME (0x0008) decode and dump on E_BAD_CRC (the cmd id is in `Cmd`, no client method yet).
+8. **mcp-gen7 batch (branch mcp-gen7) on the bench**: the coordinator checks that COM10 is free about 30 s after the
+   last tool call (`fnirsi1013d-flash` / a script opens it) and that the next tool call reconnects; a host Bode sweep
+   right after entering decimation on 0x153A should show `flat_retakes` >= 1 and correct ranges. CHANGELOG lines for
+   the three commits are owed (the batch's brief kept mcp-gen7 out of CHANGELOG.md); the skill's troubleshooting row
+   "cannot connect / port busy" could mention the idle close (`.claude/skills/`, outside the brief). docs/protocol.md
+   row 60 already describes reason 8 for both bitstream families; nothing to sync in the vectors (no reason texts).

@@ -53,6 +53,8 @@ Configuration (environment variables of the server process):
 | `FNIRSI_MCP_HOME` | `~/.fnirsi1013d` | per-user directory for `data/` and `logs/` |
 | `FNIRSI_MCP_DATA_DIR` | `<home>/data` | where `.npz` files, per-unit calibrations and Bode thru files go |
 | `FNIRSI_MCP_AUDIT_LOG` | `<home>/logs/audit.jsonl` | every tier 1+ call: time, tool, args, applied values, result status |
+| `FNIRSI_MCP_IDLE_CLOSE_S` | 30 | close the serial port after this many seconds without a tool running (a long run counts until it returns) and reopen it on the next call, so other programs can use the port meanwhile; 0 = hold it until exit |
+| `FNIRSI_MCP_LEGACY_IDLE_RELEASE_S` | 60 | legacy firmware: release REMOTE (keeping the host settings) after this many idle seconds; 0 = hold |
 
 Confirmation tokens: a tier 3/4 call without `confirm_token` does nothing and returns
 `{"confirmation_required": true, "token": "<8 hex>", "summary": "<what will happen>"}`. The token is bound to
@@ -104,6 +106,8 @@ on its own (user tap, watchdog, port closed).
 is shared: no ownership to take or release, the last change wins, host captures appear on screen, and long runs
 restart (and say so) when a setting is changed at the scope. On legacy firmware without the SHARED_MODE capability
 the server takes REMOTE implicitly and releases it (keeping the host settings) after 60 s idle and at exit.
+The port itself is closed after 30 s without a tool running (`FNIRSI_MCP_IDLE_CLOSE_S`; on legacy firmware only once
+REMOTE is released) and reopened on the next call, which reloads the per-unit calibration file as a first connect does.
 `scope_status` reports `mode`, `run_state` and `settings_seq`; `acquisition_control` gained `run`.
 Protocol 1.7 adds `display_mode` (`scope`, or `spectrum` while the screen shows the spectrum view); while it is
 `spectrum`, every tool that checks the scope first (captures, setters) adds the caveat that the person sees the
@@ -124,6 +128,13 @@ re-taken clean, and one line in `in_words`. Every tool that checks the scope fir
 full-rate capture was accepted garbled after 16 re-arms (or the boot convention check failed). Event types 21
 (`adc_fullrate_garbled`: reason, re-arms, caller, residual or 0x33 byte) and 22 (`fpga_write`) are decoded in words by
 `scope_event_log`.
+
+**`event_log`** (`scope_event_log`, tier 0, protocol 1.5, fw 0.2.12+). GET_EVENT_LOG read plainly: `last` (1..128,
+default 64) newest events with device ms, age and the detail in words; `reset_snapshot` (fw 0.2.15+, the events
+before the first bus reset since it was armed) and `bus_events` (fw 0.2.24+, the 16-entry bus-level ring). `fpga_trace`
+(protocol 1.22, fw 0.2.72): true / false switches the FPGA write trace (event type 22: every rate / filter write and
+sampling reset with its caller) before reading, omitted leaves it; it is off after boot because it floods the ring
+(the writes are always counted in GET_LINK_STATS 64-66). The result carries `fpga_write_trace` from 1.22.
 
 **`save_report`** (`scope_save_report`, tier 1, 1.16, cap SD_SECTORS). SAVE_REPORT: the scope writes
 `reports/report-PPPPP-NN.txt` on its card's FAT partition (identity, life, USB, battery, counters, event log, both
@@ -358,7 +369,11 @@ passive DUT on the calibration post; parameters and returns in mcp/README.md "Bo
 and returns the same structure as the host sweep (plus `device`: sweep id, state, reason, thru state, view), so the
 two compare point by point. Presets only, `ch2_range` auto / fixed, DC; `thru_cal` 'device' applies the scope's stored
 thru, a stored name is applied on the host; `close_view` closes the scope's Bode view afterwards (it restores the
-scope's settings). While the view shows (`display_mode` `bode`) the capture tools add a caveat.
+scope's settings). While the view shows (`display_mode` `bode`) the capture tools add a caveat. A device sweep ended
+with READ_BODE reason 8 (ADC readout fault: the capture self-check flagged a core on 0x153A+, fw 0.2.83; the pre-scan
+clipped at 5 V/div on older bitstreams) returns no table and a caveat pointing at `scope_health` and the calibration
+wizard. Host sweeps retake a flat or toneless record once (the 0x153A first record after a configuration change);
+a point still flat is flagged `ch1_low` + `incoherent` with no H, and a caveat names its frequencies.
 
 ### 4.4a Presenting results (tier 0)
 
