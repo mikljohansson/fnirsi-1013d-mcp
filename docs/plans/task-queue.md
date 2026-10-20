@@ -6,6 +6,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **AUTO SET must fail fast with a helpful message, never loop** (owner 10-20 11:27 **(owner)**, after the RC AUTO SET on
+  0.2.83 ran 41 sweeps with the relays clicking: "present the user with a failure message that helps them somehow, e.g. the
+  connections to the circuit or the circuit itself"; sent to fw-fr3 as part of item (d)): when the overview or a sharp-tank
+  pass is inconsistent (peak unconfirmed, reference level drifting between passes, the pass budget exhausted, an absurd point
+  at the reference, CH2 ranging bouncing more than six times in a pass) AUTO SET ends after at most the overview plus its passes
+  with a note naming the likely cause (wiring: CH1 tip on the DUT input, CH2 tip on the output; the DUT), in STOP with the
+  settings kept, never in RUN.
+
 - **First record after a configuration change is garbage on 0x153A** (bench 10-20 10:55-11:16): a decimated capture right after
   the engine's (or the host's) rate / filter / range change can be a whole record of one saturated 16-bit value; the Bode
   engine's pre-scan is always such a capture, so the first sweep after entering the mode ranges CH1 coarse (2.5 V/div,
