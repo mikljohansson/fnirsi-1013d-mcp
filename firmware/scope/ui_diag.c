@@ -470,14 +470,14 @@ static int ud_fpga_line(const ud_input *in, char *p)
   //fpga/al3/README.md "Findings" item 3); each such capture is checked and re-taken since 0.2.62
   if((in->variant == 2) && eh_affected(in->fpga))
   {
-    s_str(p, ": ADC capture timing race, fixed in 0x1538");
+    s_str(p, ": ADC capture timing race, fixed in 0x153B");
     return UD_C_WARN;
   }
 
-  //fw 0.2.62: 0x1537 has chip 1's cores in the other order: a calibration taken on it must be redone on 0x1538
+  //fw 0.2.62: 0x1537 has chip 1's cores in the other order: a calibration taken on it must be redone on 0x1538 or later
   if((in->variant == 2) && eh_order_differs(in->fpga))
   {
-    s_str(p, ": ADC core order differs: recalibrate after flashing 0x1538");
+    s_str(p, ": ADC core order differs: recalibrate after flashing 0x153B");
     return UD_C_WARN;
   }
 

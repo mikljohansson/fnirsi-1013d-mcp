@@ -256,6 +256,22 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- visitor-review and dryrun-agent (Opus, dispatched 21:30, read-only): a Reddit visitor's review of README, install guide,
+  runbook and screenshots; a context-free agent asked "guide me through hacking my scope" in the checkout, reporting the path
+  it took, the questions it would ask, the steps and commands, the safety gates, the Windows gaps and contradictions.
+- readme-gen (Opus, dispatched 21:21, done 21:28, merged 21:29 as 28fde67; README 133 lines, 17/17 links resolve): README rewritten for the hobbyist visitor (owner 21:0x: USPs first, install step 1 =
+  "point your AI agent at this repository", manual path second, development content out, credits without the model name);
+  docs/development.md takes the development material; docs/guide/agent-runbook.md for the visitor's agent (questions to ask,
+  safety gates, exact commands, recovery); root AGENTS.md split into a visitor's-agent top section, development, and "The
+  maintainer's bench"; docs/index.md aligned. Owns README.md, docs/index.md, AGENTS.md, mkdocs.yml, the two new pages.
+- docs-clean (Opus, dispatched 21:22): finished design docs leave docs/plans (git rm after a citation check; docs/plans/README.md
+  points at git history), task-queue Dispatched log collapsed before 2026-10-20, wording pass (owner -> maintainer, coordinator
+  -> bench session, COM10 / D:\src placeholders outside the bench log), stale status headers (hardware-prep, mcp-tools,
+  protocol rows, BITSTREAMS.md 0x1538/0x1539, roadmap status paragraph), bench-log intro, "Do I need an SPI programmer?" FAQ,
+  research-notes personal-detail check, secrets and personal-path scan.
+- Coordinator 21:11: 30-minute soak started (soak.py 1800, status every 2 s, capture every 10 s, spectrum every 30 s);
+  CLAUDE.md removed 21:19 (owner 21:18: Claude Code reads AGENTS.md when no CLAUDE.md exists), references repointed.
+
 - rel-gen2 (Opus, dispatched 20:59, done 21:15, merged 21:16 as 6f792a6): release notes 0.3.0 filled (screenshots as raw
   URLs pinned to 876700a, 0x153B recommended, the sector-16384 card rule, tested-on, known issues), changelog-0.3.0-draft.md
   (the condensed section for the release commit, 105 hashes checked), announcement.md final draft with the owner's open

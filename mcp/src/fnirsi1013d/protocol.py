@@ -3033,7 +3033,7 @@ ENC_MODE_TEXT = {0: "no check (stock, EF2 or EP4 bitstream)",
 ENC_READ = 0x01  # a 0x33 byte was read since boot
 ENC_CONVENTION_BAD = 0x02  # 0x33 bits 3:2 at boot were not 01
 ENC_LAST_BAD = 0x04  # the last checked capture was accepted garbled after 16 re-arms
-ENC_ORDER_DIFFERS = 0x08  # core order differs from the convention (0x1537: recalibrate after flashing 0x1538)
+ENC_ORDER_DIFFERS = 0x08  # core order differs from the convention (0x1537: recalibrate after flashing 0x153B)
 #: FPGA read 0x33 bits 7..4: the last pin check {CH2 A, CH2 B, CH1 A, CH1 B}, 1 = right; a good capture reads 0xF6
 ENC33_PINS = ((7, "CH2 A"), (6, "CH2 B"), (5, "CH1 A"), (4, "CH1 B"))
 ENC33_GOOD = 0xF6
@@ -3264,7 +3264,7 @@ class HealthResp(Payload):
         else:
             text = "encode check OK" + (f", {self.enc_bad} captures re-taken" if self.enc_bad else "")
         if f & ENC_ORDER_DIFFERS:
-            text += "; ADC core order differs from the convention: recalibrate after flashing 0x1538"
+            text += "; ADC core order differs from the convention: recalibrate after flashing 0x153B"
         out["text"] = text
         return out
 
