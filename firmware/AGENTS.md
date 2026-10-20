@@ -4460,7 +4460,7 @@ reads ch2_small and is drawn grey, and the user switches to Auto.
 
 **Bench (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`, no SD writes; 0x153A; wiring A,
 x1 probes; `#VER fw=0.2.91,...`, number not bumped)**
-1. RC 1 kOhm / 15 nF on the post. AUTO SET. Expect a span of about 500 Hz .. 200 kHz and "Auto" in the CTRL > Sweep
+1. RC 1 kOhm / 15 nF on the post. AUTO SET. Expect a span of about 1 kHz .. 200 kHz and "Auto" in the CTRL > Sweep
    CH2 range row. BODE_CTRL action 0 after the final sweep: header switches 2 (the final sweep ranges from scratch),
    bytes 48..49 = 0. Then RUN for five sweeps, BODE_CTRL after each: header switches 0, bytes 48..49 = 2 ("2 planned,
    0 unplanned"). The relays click at the two planned transitions, and once at each sweep's start (back to the first
