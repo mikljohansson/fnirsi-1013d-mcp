@@ -1307,3 +1307,5 @@ Newest entries at the bottom. Format: date, who, what, result.
   boot: sweep 1 ranged (2 unplanned, 29 captures), sweeps 2 and 3 0 unplanned / 2 planned, 25 captures, 0 time-outs, 0 flagged.
   Owner walk-through pending: section 62 steps 1-5 (flat AUTO SET -> Constant with the verdict bytes, the CH2 menu on
   Constant, Auto on the RC, the menu tap on Auto, `tools/screenshots.py --only settings` with Settings open).
+- 2026-10-20 14:53: fw 0.2.95 (the CH2 range row reads just "Constant", owner 14:51) pinned backups/fw-0.2.95_23a85e71.bin
+  (sha256 23a85e71b411041dbacf0b9ec9fa689e777ab22dcaf89f320babe6af95b7591a), loaded. Section 62 walk-through still pending.
