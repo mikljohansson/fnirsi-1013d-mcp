@@ -154,12 +154,32 @@ def plan_write(info: P.SdInfo, sector: int, nbytes: int, flags: int = 0,
     if not info.write_end:
         plan.refusals.append("the card has no valid partition table: the firmware refuses writes")
     elif sector < 16 or last >= info.write_end:
-        plan.refusals.append(f"sectors {sector}..{last} are outside the write window [16, {info.write_end})")
+        plan.refusals.append(f"sectors {sector}..{last} are outside the write window [16, {info.write_end})" +
+                             (f": the partition starts at {info.part_start}" if last >= info.part_start else ""))
     if sector < 80 and not flags & P.SD_WR_BOOT:
         plan.refusals.append("sectors 16-79 (bootloader) need the BOOT flag")
     if sector <= 710 and last >= 708 and not flags & P.SD_WR_CONFIG:
         plan.refusals.append("sectors 708-710 (calibration, settings, boot mode) need the CONFIG flag")
     return plan
+
+
+def image_fit_problem(info: P.SdInfo, sectors: int) -> str | None:
+    """Why an image of ``sectors`` sectors cannot go to sector 750 on this card, with what to do; None when it fits.
+    The window is [16, min(partition start, the firmware's cap)): 2048 up to fw 0.2.100, P.SD_WINDOW_LIMIT since."""
+    end = IMAGE_SECTOR + sectors  # the first sector after the image
+    if end <= info.write_end:
+        return None
+    what = f"the image ({sectors} sectors, {IMAGE_SECTOR}..{end - 1})"
+    if info.part_start < end:
+        return (f"{what} runs into the card's FAT32 partition, which starts at sector {info.part_start}. The "
+                f"partition must start at sector {end} or later; cards for this firmware start it at "
+                f"{P.SD_WINDOW_LIMIT} (8 MiB). Copy the card's files off, recreate the FAT32 partition at 8 MiB "
+                "(docs/guide/install.md, \"Prepare the card\"), copy the files back and run this again")
+    if info.write_end < P.SD_WINDOW_LIMIT:
+        return (f"{what} ends past sector {info.write_end - 1}, where the running firmware's write window ends "
+                f"(firmware 0.2.100 and older stop at 2048; the partition at {info.part_start} leaves room). Load "
+                "firmware 0.2.101 or later into RAM first (fnirsi1013d-flash --image <bin> --persist), then persist")
+    return f"{what} ends past sector {info.write_end - 1}, the end of the firmware's write window"
 
 
 def timed(timings: dict[str, float], name: str):

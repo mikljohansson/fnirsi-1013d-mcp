@@ -13,7 +13,10 @@ Steps (each printed with its duration; non-zero exit on the first failure):
 4. ``sunxi-fel version``, then ``sunxi-fel -p write 0x7FFFFFE0 <image> exe 0x80000000`` (RAM only: SD card and
    SPI flash are untouched; a power cycle returns to whatever the SD card boots);
 5. wait for the serial port to come back and print ``#VER``;
-6. with ``--persist`` (firmware >= 0.2.2, cap SD_SECTORS): back up SD sectors 750..write_end to
+6. with ``--persist`` (firmware >= 0.2.2, cap SD_SECTORS): check that the image fits the firmware's write window
+   [16, min(partition start, 16384)) (2048 up to fw 0.2.100; a card for this firmware has its FAT32 partition at
+   16384 or later, and a refusal names the partition start and the start the image needs), back up the SD sectors the
+   write covers (750 to the end of the longer of the new and the old image) to
    ``backups/sd_<first>-<end>_<time>.bin`` (read twice, saved, re-read), write the image to sector 750 in 64 KiB
    pieces (stage, write, read-back CRC per piece), then SD_INFO VERIFY (eGON checksum on the card). The next
    power cycle boots it from the card. ``--persist-only`` skips steps 2-5 (the running firmware writes the card).
@@ -21,7 +24,7 @@ Steps (each printed with its duration; non-zero exit on the first failure):
 
     fnirsi1013d-flash --image <bin> --sha256 <hash> --persist      # RAM load, then make it permanent
     fnirsi1013d-flash --image <bin> --persist-only                 # just write the card
-    fnirsi1013d-flash --restore backups/sd_750-2048_20261018-120000.bin
+    fnirsi1013d-flash --restore backups/sd_750-2262_20261020-120000.bin
 
 This changes what the scope runs. Announce it to whoever is at the bench before running it (CLAUDE.md bench rules).
 """
@@ -42,7 +45,7 @@ from typing import Callable, Sequence
 
 from . import protocol as P
 from .paths import checkout_dir, checkout_path
-from .sdcard import IMAGE_SECTOR, WRITE_SECTORS, SdCard, SdError, check_image, image_version
+from .sdcard import IMAGE_SECTOR, WRITE_SECTORS, SdCard, SdError, check_image, image_fit_problem, image_version
 from .transport import (PIDCODES_TEST_PIDS, PIDCODES_VID, DeviceError, Transport, TransportError, list_candidates,
                         open_link, parse_ver)
 
@@ -454,8 +457,9 @@ class Flasher:
                       f"[16, {info.write_end}); image {length} B = {n} sectors at {IMAGE_SECTOR}")
             if not info.write_end:
                 raise FlashError("the card has no valid partition table, so the firmware refuses writes", 7)
-            if IMAGE_SECTOR + n > info.write_end:
-                raise FlashError(f"the image ({n} sectors) does not fit below sector {info.write_end}", 7)
+            problem = image_fit_problem(info, n)
+            if problem:
+                raise FlashError(f"{problem}. Nothing was written", 7)
             old = info.header(IMAGE_SECTOR)
             old_n = 0
             if old is not None and old.magic:

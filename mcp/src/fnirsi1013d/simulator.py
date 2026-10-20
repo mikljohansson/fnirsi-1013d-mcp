@@ -455,10 +455,12 @@ def make_egon_image(size: int, kind: bytes = b"eGON.EXE", fill: int = 0, version
 class SimCard:
     """SD card behind the SD sector commands (fw 0.2.2): sparse 512-byte sectors, an MBR whose first partition
     starts at ``part_start``, the Atlan bootloader at 16 and a scope image at 750. Test hooks: ``present``,
-    ``fail_next_write`` (read-back mismatch), ``io_error_next`` (driver error, e.g. -2 timeout)."""
+    ``fail_next_write`` (read-back mismatch), ``io_error_next`` (driver error, e.g. -2 timeout). ``limit``: the
+    firmware's window cap (PC_SD_LIMIT: 16384 from fw 0.2.101, 2048 up to 0.2.100)."""
 
-    def __init__(self, card_sectors: int = 131072, part_start: int = 8192):
+    def __init__(self, card_sectors: int = 131072, part_start: int = 8192, limit: int = P.SD_WINDOW_LIMIT):
         self.card_sectors = card_sectors
+        self.limit = limit
         self.sectors: dict[int, bytes] = {}
         self.present = True
         self.fail_next_write = 0
@@ -491,14 +493,14 @@ class SimCard:
     @property
     def write_end(self) -> int:
         ps = self.part_start
-        return min(ps, 2048) if ps else 0
+        return min(ps, self.limit) if ps else 0
 
     def header(self, sector: int, verify: bool) -> P.SdHeaderInfo:
         head = self.read(sector, 1)
         magic, length, stored = P.egon_info(head)
         h = P.SdHeaderInfo(sector, magic, P.SD_CHECK_NOT, length if magic else 0, stored if magic else 0)
         if magic and verify:
-            if length == 0 or length % 4 or length > 2048 * 512:
+            if length == 0 or length % 4 or sector + (length + 511) // 512 > self.limit:
                 h.check = P.SD_CHECK_LENGTH
             else:
                 body = self.read(sector, (length + 511) // 512)
@@ -2940,7 +2942,7 @@ class Device:
         images have no 0.2.47-0.2.51 build tail), else unknown (4); 5 without an eGON.EXE at 750."""
         head = self.sd.read(750, 1)
         magic, length, _ = P.egon_info(head)
-        if magic != 2 or not 0 < length <= 2048 * 512:
+        if magic != 2 or not 0 < length <= (self.sd.limit - 750) * 512:
             return P.SdIdent(state=5, ident_ms=3)
         img = self.sd.read(750, (length + 511) // 512)[:length]
         tail = img[-1024:]
@@ -3043,8 +3045,12 @@ class Device:
         if not sd.write_end:
             raise _DevErr(P.Status.E_STATE, 0, "no valid partition table: writes off")
         last = r.sector + r.count - 1
-        if r.sector < 16 or last >= sd.write_end:
-            raise _DevErr(P.Status.E_BAD_ARG, 0, f"outside the write window [16, {sd.write_end})")
+        if r.sector < 16 or last >= sd.card_sectors:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "outside the write window")
+        if last >= sd.write_end:  # pc_sd_past_end_text (fw 0.2.101)
+            raise _DevErr(P.Status.E_BAD_ARG, 0, f"past sector {sd.limit - 1}, the end of the write window"
+                          if sd.part_start >= sd.limit else
+                          f"partition starts at {sd.part_start}: it must start at {last + 1} or later")
         if r.sector < 80 and not r.flags & P.SD_WR_BOOT:
             raise _DevErr(P.Status.E_BAD_ARG, 0, "sectors 16-79 need BOOT")
         if r.sector <= 710 and last >= 708 and not r.flags & P.SD_WR_CONFIG:
