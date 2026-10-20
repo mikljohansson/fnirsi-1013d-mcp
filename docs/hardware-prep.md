@@ -27,6 +27,14 @@ standard tool behaviour that no note covers; verify it. Where sources conflict o
 
 ## 1. Identify and verify the 2x3 header pinout
 
+![The AL3A10 board with the programmer attached](photos/board-al3a10-programmer.jpg)
+
+*The maintainer's board, the AL3A10 variant, with the Sipeed FT2232D programmer's jumper wires on the 2x3 header.
+What to look for on yours: the unmarked 144-pin FPGA (the large square package), the small 8-pin flash chip beside
+the 2x3 header (the FPGA configuration flash, a Winbond 25Q80 here), the two AD9288 ADCs between the FPGA and the
+front end, and the F1C100s MCU with its own W25Q32 flash. A board whose FPGA carries an Efinix or Altera marking is
+another variant and configures differently (section 3a).*
+
 ### 1.1 What the sources say
 
 There is no single authoritative pinout. Candidates, in order of trust:
@@ -122,6 +130,12 @@ Recommended procedure (an inference from the above):
 3. Use short leads. Use a low SPI speed where the programmer allows it.
 4. Read twice and compare before any write. Reads cannot damage the flash contents.
 5. If the board must be off during a write, tell the lead first: no source covers that mode.
+
+![The 2x3 FPGA flash header with pins soldered](photos/fpga-flash-header.jpg)
+
+*The 2x3 header on the maintainer's board with pins fitted. The footprint comes empty; the pins are soldered from
+the other side of the board (the back), so the board comes out of the case once for that. Find pin 1 by
+continuity to the flash chip (section 1.3) before wiring the programmer.*
 
 ### 2.4 Options for the owner's adapters
 
