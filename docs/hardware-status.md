@@ -1450,3 +1450,13 @@ Newest entries at the bottom. Format: date, who, what, result.
   owner), check 6 (segments in auto mode). Observation: 3 of 50 untriggered captures at 1 MSa/s with the level at 255 read
   triggered=1 although the square peaks near code 217 (noted for the FPGA handoff). dist: 0x153B recommended (min firmware
   0.2.97), 0x153A supported.
+- 2026-10-20 20:50-21:05: the remaining 0x153B checks. Check 3: the UI's own auto-mode traces in RUN with the trigger level at
+  255 (1 MSa/s, 1 kHz on CH1 through the ladder): 50 READ_TRACE reads = 50 distinct ui_run captures, 0 seams, worst ratio
+  0.01; a READ_SCREEN taken while running shows torn bands (the framebuffer is read over 0.2 s while about 30 untriggered
+  frames at random phase are drawn: a screenshot artefact, not a capture fault); a frame frozen with STOP is clean. Check 6:
+  segments in auto mode, 4 slots of 1024 samples at 10 kHz: untriggered (level 255) and triggered (128) all contiguous, seam
+  ratio 0.00..0.01. The 20:40 observation (3 of 50 untriggered captures read triggered=1) did not reproduce: 0 of 160 at
+  levels 255 and 240, generator on and off; most likely the first captures right after the probes went back on. (A first
+  read_trace attempt returned the host's last capture, origin "host", a flat record: in collaborative mode READ_TRACE
+  gives the latest capture of either side; with the UI in RUN it gives the UI's.) Capture_segments needs the record to fit
+  the slots: 6000-sample records give "at most 0 segments"; 1024 samples with pretrigger 256 allow 4 of 2^11 words.
