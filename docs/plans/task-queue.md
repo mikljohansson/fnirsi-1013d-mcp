@@ -6,7 +6,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- [~] **The firmware image no longer fits the SD write window** (fw-sd dispatched 18:58) (bench 10-20 18:51: `--persist-only`
+- [~] **The firmware image no longer fits the SD write window** (fw-sd dispatched 18:53) (bench 10-20 18:51: `--persist-only`
   of fw 0.2.100 (773,120 B = 1510 sectors at 750, end 2260) FAILED "does not fit below sector 2048"; the card's partition
   starts at 8192 but the firmware caps writes at PC_SD_LIMIT = 2048 (pc_cmds.c `pc_sd_write_end`, protocol row 40
   write_end = min(part_start, 2048), SD_INFO check code 3 "over 2048 sectors"); the 0.2.25 image was 397,312 B). Release
