@@ -31,6 +31,14 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.81 (provisional, not yet bumped) (protocol 1.24, unchanged)
+
+- Spectrum ladder: a pan (plot drag, slider drag, tap to jump in the track) never changes the sample rate or time/div;
+  it is clamped to the current axis 0 .. fs/2, which the slider track shows. The rate is derived from span and centre
+  only at zoom steps and by AUTO SET; to look above the axis, zoom out and in again (owner 2026-10-20 10:24, bench on
+  0.2.80: the rate changing mid-scroll felt janky). Entering the view keeps a panned cell while the rate is unchanged.
+  test_spec_zoom covers pans from every starting cell, the clamp at both ends and a zoom after a pan (9294f9e).
+
 #### 0.2.80 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Capture-stage training and self-check: the FPGA outlier threshold (0x64) is written as 32 codes instead of the power-on 8.

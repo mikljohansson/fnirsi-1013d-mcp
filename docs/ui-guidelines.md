@@ -67,16 +67,21 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   from a 1-2-5 ladder (1 Hz .. 20 MHz, then the whole axis 0 .. 25 MHz) around a centre: a tap in the right half of the
   plot narrows the span one step, the left half widens it, both about the centre (kept inside 0 .. 25 MHz); a drag in
   the plot or on the slider pans the centre, and a tap in the slider's track jumps the window there. While a new record
-  can be taken (running, or Single) every zoom or pan step sets the rate from the stop frequency (centre + span / 2):
-  the slowest UI rate whose fs / 2 covers it and whose capture of N samples (the FFT length) takes at most 2.048 s
-  (`spec_ladder.c` `spl_rate`). The rate is therefore one function of the span and the centre, whatever taps and pans led
-  there; a cell from 0 Hz holds between a quarter and a half of the N bins. The ends are plain stops: zooming out ends
+  can be taken (running, or Single) every zoom step sets the rate from the stop frequency (centre + span / 2): the
+  slowest UI rate whose fs / 2 covers it and whose capture of N samples (the FFT length) takes at most 2.048 s
+  (`spec_ladder.c` `spl_rate`), and AUTO SET ends on the same pair. A cell from 0 Hz holds between a quarter and a half
+  of the N bins. **A pan never changes the rate** (owner, 2026-10-20 10:24; fw 0.2.81: "the spectrum should stay the
+  same when scrolling, changes to sample rate and time/div should happen when zooming"): plot drag, slider drag and
+  tap-to-jump keep the rate and are clamped to the current axis 0 .. fs / 2, which is what the slider track shows, so
+  the clamp is visible. To look above the axis, zoom out (the rate rises) and zoom in again; the zoom step re-derives
+  the rate from the new centre. Accepted consequence: a pan to a low centre at a wide span keeps the coarse resolution
+  until the next zoom step. The ends are plain stops: zooming out ends
   at the whole axis at 50 MSa/s; zooming in ends where the next span would need a rate whose capture exceeds 2.048 s,
   or would hold fewer than 16 bins (at a high centre the rate stays high, so that limit ends it first). A tap at an end
-  changes nothing and the other direction works at once. A pan that moves the stop across a rate boundary moves the
-  rate, and the view waits for a capture at the new rate. FFT length stays the user's (CTRL > Analyse, default 2048,
-  limited by the record, which the fold-out then says). A rate picked by hand in the ACQ menu holds until the next zoom
-  or pan step, as in the Scope; the view shows the span on that rate's axis as far as it reaches. Stopped, the record
+  changes nothing and the other direction works at once. After a rate change the view waits for a capture at the new
+  rate. FFT length stays the user's (CTRL > Analyse, default 2048, limited by the record, which the fold-out then says).
+  A rate picked by hand in the ACQ menu holds until the next zoom step, as in the Scope; the view shows the span on that
+  rate's axis as far as it reaches, and a pan clamps the span into that axis. Stopped, the record
   keeps its rate: zoom and pan stay inside its axis and the warning says "Stopped: press RUN to zoom further" where the
   ladder would go on. AUTO SET picks its span by the same ladder, from 0 Hz, so its result is a ladder cell.
 

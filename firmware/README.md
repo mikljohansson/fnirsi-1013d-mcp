@@ -1187,27 +1187,33 @@ averaging mode persists with the other settings (word 209 bits 12-14; ref in bit
 Span and sample rate, the zoom ladder (fw 0.2.77, owner 2026-10-19 23:09; the rule is docs/ui-guidelines.md section 2
 "Span drives the sample rate"; `spec_ladder.c`, host-tested by `host_tests/test_spec_zoom.c`). The view is a cell: a
 span from the ladder 1, 2, 5 Hz .. 10, 20 MHz, then the whole axis 0 .. 25 MHz, about a centre kept inside 0 .. 25 MHz.
-A tap steps the span one cell about the centre, a drag (plot or slider) or a tap in the slider's track moves the
-centre. After every such step, while a new record can be taken (running, or Single), the rate is set from the stop
-frequency (centre + span / 2): the slowest UI rate (200 MSa/s .. 500 Sa/s) whose fs / 2 covers it and whose capture of
-N samples (the FFT length in use) takes at most 2.048 s (`spl_rate`). The rate is the scope's own setting, written with
-the time/div the Scope's ladder pairs with it (`acq_view_tb_for_rate`), so going back to the Scope shows a ladder pair.
-The pair is a function of the cell, whatever taps and pans led there; a cell from 0 Hz holds between a quarter and a
-half of the N bins. Ends, plain stops (a tap there changes nothing, the other direction works at once): zooming out
-ends at the whole axis at 50 MSa/s; zooming in ends where the next span would need a rate whose capture exceeds
-2.048 s or would hold fewer than 16 bins. In numbers: from the whole axis (centre 12.5 MHz, 50 MSa/s) the narrowest
-span is 1 MHz at N 1024, 500 kHz at 2048, 200 kHz at 4096; at 0 Hz it is 10 Hz at 500 Sa/s (N 1024: the slowest rate
-takes 2.048 s, then 16 bins end it), 500 Hz at 1 kSa/s (N 2048), 1 kHz at 2 kSa/s (N 4096). A pan that moves the stop
-across a rate boundary moves the rate (1 kHz span at 1.5 .. 2.5 kHz runs at 5 kSa/s; 100 Hz up, 10 kSa/s). After a
-rate change the view waits for the first capture at the new rate ("Waiting for a capture at the new rate") and the
-histories clear. A rate picked in the ACQ menu (or by the host) holds until the next zoom or pan step; the view then
-shows the cell on that rate's axis as far as it reaches (the Span and Center cards show what is drawn), and the next
-step takes the ladder's rate. Changing the FFT length does not change the rate; the next step uses the new N. Stopped
-(the record on screen is fixed), zoom and pan stay on the record's rate and axis, and where the ladder would go on the
-warning line says "Stopped: press RUN to zoom further" for 4 s. Entering the view keeps the last cell if the rate is
-still the ladder's for it, else shows the current rate's whole axis without changing the rate (at 100 and 200 MSa/s
-the whole axis's rate is 50 MSa/s, taken at the first step). Before 0.2.77 (fw 0.2.39-0.2.76) zoom in halved the span
-on the same rate and changed the rate only below N/16 bins, and zoom out changed it only past the whole axis.
+A tap steps the span one cell about the centre, a drag (plot or slider) or a tap in the slider's track moves the centre.
+After every zoom step, while a new record can be taken (running, or Single), and at the end of AUTO SET, the rate is set
+from the stop frequency (centre + span / 2): the slowest UI rate (200 MSa/s .. 500 Sa/s) whose fs / 2 covers it and
+whose capture of N samples (the FFT length in use) takes at most 2.048 s (`spl_rate`). The rate is the scope's own
+setting, written with the time/div the Scope's ladder pairs with it (`acq_view_tb_for_rate`), so going back to the Scope
+shows a ladder pair. After a zoom step the pair is a function of the cell, whatever led there; a cell from 0 Hz holds
+between a quarter and a half of the N bins. A pan never changes the rate (fw 0.2.81, owner 2026-10-20): it is clamped to
+the current axis 0 .. fs / 2 (the slider track), so to look above it zoom out (the rate rises) and in again; a pan to a
+low centre at a wide span keeps the coarse resolution until the next zoom step. Ends, plain stops (a tap there changes
+nothing, the other direction works at once): zooming out ends at the whole axis at 50 MSa/s; zooming in ends where the
+next span would need a rate whose capture exceeds 2.048 s or would hold fewer than 16 bins. In numbers: from the whole
+axis (centre 12.5 MHz, 50 MSa/s) the narrowest span is 1 MHz at N 1024, 500 kHz at 2048, 200 kHz at 4096; at 0 Hz it is
+10 Hz at 500 Sa/s (N 1024: the slowest rate takes 2.048 s, then 16 bins end it), 500 Hz at 1 kSa/s (N 2048), 1 kHz at 2
+kSa/s (N 4096). A pan stops at the axis end (1 kHz span at 1.5 .. 2.5 kHz runs at 5 kSa/s, whose axis ends at 2.5 kHz: a
+pan up changes nothing; panned to 0 .. 1 kHz it stays at 5 kSa/s, and a tap right there gives 500 Hz at 2 kSa/s). After
+a rate change the view waits for the first capture at the new rate ("Waiting for a capture at the new rate") and the
+histories clear (as they do whenever the drawn window moves, a pan included: their rows are bins of that window). A rate
+picked in the ACQ menu (or by the host) holds until the next zoom step; the view then shows the cell on that rate's axis
+as far as it reaches (the Span and Center cards show what is drawn), a pan clamps the cell into that axis, and the next
+zoom step takes the ladder's rate. Changing the FFT length does not change the rate; the next zoom step uses the new N.
+Stopped (the record on screen is fixed), zoom and pan stay on the record's rate and axis, and where the ladder would go
+on the warning line says "Stopped: press RUN to zoom further" for 4 s. Entering the view keeps the last cell if the rate
+is still the ladder's for it or the one the cell was last set at (after a pan), else shows the current rate's whole axis
+without changing the rate (at 100 and 200 MSa/s the whole axis's rate is 50 MSa/s, taken at the first step). Before
+0.2.77 (fw 0.2.39-0.2.76) zoom in halved the span on the same rate and changed the rate only below N/16 bins, and zoom
+out changed it only past the whole axis; in 0.2.77-0.2.80 a pan also re-derived the rate (janky mid-scroll on the
+bench).
 
 Persistence (fw 0.2.39): FFT length, window, scale and ref level are saved in settings-sector words 208 (0x5E00
 marker, window, scale, length) and 209 (ref, int16), with everything else, by 1.00o5's power-off interrupt (the only

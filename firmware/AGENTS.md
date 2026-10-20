@@ -3578,6 +3578,34 @@ Bug indicators: a rate that is not the slowest covering the stop after a step; a
 running; a tap at an end that changes anything; an end the other direction cannot leave; the chip changing while
 stopped; Span / Center off the 1-2-5 values while the rate covers the span; the slider window off the track; a time/div
 snap notice in the Scope after using the Spectrum.
+
+**Addendum, fw-spzoom2 (fw 0.2.81 provisional, protocol unchanged): pans never change the rate.** Owner 2026-10-20
+10:24 on the 0.2.80 bench (task queue "Spectrum ladder: pans never change the rate"): the rate changing mid-scroll felt
+janky. Branch `fw-spzoom2` from main 58c17a3, commit 9294f9e (code + test) and the docs commit after it. The rate is
+derived (`spec_cell_apply` -> `spl_rate`) only in `spec_zoom` and in Auto's finish; `spec_pan_by` (plot drag, slider
+drag, tap to jump) calls `spl_pan` with the *current* rate's axis (`spl_axis_mhz(&sample_rate[cur], 1)`, the slider
+track) and only marks the cell set. New `spec.cell_rate` (rate when the cell was last set): entry keeps the cell when
+the rate is that one or the ladder's for the cell, so a panned cell survives leaving and re-entering. This supersedes
+item 3's "slider drag ... axis at touch-down" note, item 2's "a pan can reach a cell narrower than the zoom-in end"
+(a pan keeps span and rate, so the bin count is unchanged) and bench step 3 above. Waterfall / Density still clear
+when the drawn window moves (`spec_hist_key` holds first / span), a pan included: their rows are bins of that window;
+not changed. test_spec_zoom: `test_pan_keeps_rate` (every span x 64 centres x N 1024..4096: random pans keep the rate
+and stay inside the axis, +/-25 MHz pans clamp to stop = axis / start = 0 with a further 1 Hz doing nothing, a tap
+either way afterwards is the rule's pair), `test_random` checks the rate after every pan, `test_hand_rate` (a pan on a
+hand rate whose axis is narrower than the span centres it, the rate kept). GCC 10 36 / GCC 13 31 warnings as on main;
+GCC 10 image 746,496 B. **Not benched.** Bench steps (CH1 on the 1 kHz post, RUN, MEASURES Span / Center / RBW):
+1. Tap left until nothing changes: whole axis, 50 MSa/s. Tap right twice (10 MHz about 12.5 MHz, 50 MSa/s), drag the
+   slider window (or the plot) to the left end: 0 .. 10 MHz, the ACQ chip stays 50 MSa/s and time/div does not move;
+   no "Waiting for a capture" while dragging.
+2. Tap right there: 5 MHz about 5 MHz, the rate drops to 20 MSa/s (the zoom re-derives from the new centre). Keep
+   tapping right at 0 Hz: each step takes the ladder's rate, ending as before (500 Hz at 1 kSa/s for N 2048).
+3. Pan up against the axis end (plot drag left, or slider window to the right end, or a tap at the track's right end):
+   the window stops with its right edge on the track end (stop = fs / 2), the rate unchanged; further dragging does
+   nothing. Tap left to widen (the rate rises), then pan further up.
+4. AUTO SET on the 1 kHz square: a ladder cell from 0 Hz with the ladder's rate (as 0.2.80); a pan afterwards keeps it.
+5. Leave to the Scope and come back without touching the rate: the panned cell is still shown.
+Bug indicators: any rate or time/div change during a drag or tap-to-jump; the slider window past the track end; a zoom
+step after a pan that is not the slowest rate covering the new stop.
 ## 53. fw-yield: host commands leave the modal screens (fw 0.2.78, protocol 1.23, row 63)
 
 Branch `fw-yield` from main dd46518 (fw 0.2.76). Owner 2026-10-19 23:27 (task queue "Host commands leave the modal
