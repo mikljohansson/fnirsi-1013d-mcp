@@ -2196,7 +2196,8 @@ class BodeHeader(Payload):
     start_chz: int = 0
     stop_chz: int = 0
     points: int = 0
-    #: CH2 range switches in this sweep
+    #: CH2 range switches in this sweep; fw 0.2.92: the unplanned ones (ranging, a clip, a drop below the floor), the
+    #: planned ones are ``BodeCtrlResp.planned_switches``
     switches: int = 0
     #: ms since the sweep started (its duration once it ended)
     elapsed_ms: int = 0
@@ -2234,16 +2235,19 @@ class BodeCtrlResp(Payload):
     """BODE_CTRL response, 40 bytes: the READ_BODE header, u32 the estimated duration of a sweep with the settings in
     effect (ms), u32 0. fw 0.2.91: 48 bytes, then the latest sweep's capture statistics (u16 each): generator-on
     captures, those that ended on the auto time-out (no CH1 trigger), records taken again for CH1 leak (a joined
-    record) and for another reason (suspect, time-out). Older firmware: all 0."""
+    record) and for another reason (suspect, time-out). fw 0.2.92: 50 bytes, then the latest sweep's planned CH2
+    range switches (range changes between neighbouring points that the range plan prescribes; the header's
+    ``switches`` are the unplanned ones). Older firmware: all 0."""
 
     FIELDS = [("header", "32s"), ("estimate_ms", "I"), ("_r0", "4x"), ("captures", "H"), ("timeouts", "H"),
-              ("leak_retakes", "H"), ("other_retakes", "H")]
+              ("leak_retakes", "H"), ("other_retakes", "H"), ("planned_switches", "H")]
     header: bytes = bytes(32)
     estimate_ms: int = 0
     captures: int = 0
     timeouts: int = 0
     leak_retakes: int = 0
     other_retakes: int = 0
+    planned_switches: int = 0
 
     @property
     def hdr(self) -> BodeHeader:
