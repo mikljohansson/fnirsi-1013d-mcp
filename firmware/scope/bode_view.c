@@ -2671,6 +2671,19 @@ int bode_view_ctrl(const uint8 *req, uint8 *resp, uint16 *detail)
     resp[32] = (uint8)est; resp[33] = (uint8)(est >> 8); resp[34] = (uint8)(est >> 16); resp[35] = (uint8)(est >> 24);
   }
   resp[36] = resp[37] = resp[38] = resp[39] = 0;
+
+  //fw 0.2.91: the latest sweep's capture statistics (protocol row 60)
+  {
+    uint16 st[4];
+    int k;
+
+    bode_capture_stats(bode_engine(), &st[0], &st[1], &st[2], &st[3]);
+    for(k = 0; k < 4; k++)
+    {
+      resp[40 + 2 * k] = (uint8)st[k];
+      resp[41 + 2 * k] = (uint8)(st[k] >> 8);
+    }
+  }
   return PC_OK;
 }
 

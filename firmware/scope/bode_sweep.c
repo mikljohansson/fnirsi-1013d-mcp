@@ -17,7 +17,8 @@
 #define RELAY_MS            50
 #define MAX_SWITCHES        6
 #define FIRST_FACTOR        3
-#define VERIFY_MAX          6           //fw 0.2.90: captures of the pre-scan's check (4 up to 0.2.89)
+#define REAL_CLIP_MDB       30103       //fw 0.2.91: 32 codes peak (a quarter of full scale)
+#define VERIFY_MAX          8           //captures of the pre-scan's check (4 up to 0.2.89, 6 in 0.2.90)
 #define PLAN_FLOOR_C100     3840        //fw 0.2.87: 30 % of 128 codes, the range plan's floor (bode_sweep.h)
 #define PLAN_CH1_FMAX_MHZ   2000000000ull   //fw 0.2.90: ch1_low below 2 MHz (above, the x1 probe rolls off) drops a plan
 
@@ -154,6 +155,26 @@ static uint32 point_settle(bode_eng *e)
 
   e->disturbed = 0;
   return settle_periods[e->cfg.settle] * k * 10;
+}
+
+//fw 0.2.91: the trigger level for the next capture, CH1's expected record mean in codes: the code of 0 V on CH1's range
+//and offset plus CH1's DC level as last measured (0 V before the first measurement)
+static uint8 trig_code(bode_eng *e)
+{
+  bode_chinfo ci;
+  int32 code_c100;
+
+  if(e->range[0] > 5)
+    return 128;
+
+  e->hw->chan_info(e->hw->ctx, 0, e->range[0], &ci);
+  code_c100 = 12800 - (int32)(((int64)e->dcoffset[0] * 10000) / ci.dc_shift_value);
+
+  if(e->have_v1 && ci.uv_q8)
+    code_c100 += (int32)(((int64)e->v1_uv * 25600) / (int64)ci.uv_q8);
+
+  code_c100 = (code_c100 + 50) / 100;
+  return (uint8)((code_c100 < 2) ? 2 : (code_c100 > 253) ? 253 : code_c100);
 }
 
 static void request(bode_eng *e, int phase, const bode_plan *pp, uint32 settle_ms, uint32 total, int bg)
@@ -314,11 +335,16 @@ static void up_step(bode_eng *e, const bode_meas *from, int coll)
   int r = e->range[1];      //> 0 and within the switch budget (the callers check)
 
   if(flat2(from, coll))
+  {
     e->bad_down |= (uint8)(1 << r);       //a saturated range is not tried again on the way down
+    if(e->rp_set && !e->thru_sweep)
+      e->rp_bad_down |= (uint8)(1 << r);  //fw 0.2.91: nor by the plan's later sweeps
+  }
 
   set_range(e, 1, r - 1, flat2(from, coll) ? e->v_dc2 : from->c[1].mean_uv);
   e->switches++;
   e->up_r = r;
+  e->clip_again = 0;
 
   if(e->prev >= 0)
   {
@@ -346,9 +372,9 @@ static void auto_range(bode_eng *e, const bode_meas *m, int coll)
 
   if(m->c[1].clipped || flat2(m, coll))
   {
-    //fw 0.2.89: on its planned range a point clipped once is measured again before the plan changes (a glitch is not a
-    //changed circuit; bench 2026-10-20 12:30 had planned points stepping to coarser ranges sweep after sweep)
-    if(e->reuse && m->c[1].clipped && !flat2(m, coll) && !e->clip_again)
+    //fw 0.2.91: a step up needs a second record on the same range that clips (or is saturated) too; one such record is
+    //a bad record, measured again (0.2.89: from the plan only; bench 13:14 still had fresh sweeps stepping up on one)
+    if(!e->clip_again)
     {
       e->clip_again = 1;
       e->retries++;
@@ -596,6 +622,18 @@ static void on_verify(bode_eng *e, const bode_meas *m)
     if((c == 1) && (e->cfg.ch2_mode == BODE_CH2_HOLD))
       continue;
 
+    //fw 0.2.91: a record that clips because it sits off centre is re-centred, not stepped up
+    if(cl && !over && (e->range[c] > 0) &&
+       ((m->c[c].centre_c100 - 12800 > CENTRE_TOL_C100) || (m->c[c].centre_c100 - 12800 < -CENTRE_TOL_C100)) &&
+       !(e->exhausted & (1 << c)) && ((int64)m->c[c].ac_c100 <= (int64)FULL_SCALE_C100))
+    {
+      if(shift_offset(e, c, m->c[c].centre_c100 - 12800))
+      {
+        changed = 1;
+        continue;
+      }
+    }
+
     if(cl)
     {
       if(!(e->vclip & (1 << c)))
@@ -605,7 +643,10 @@ static void on_verify(bode_eng *e, const bode_meas *m)
       }
       else if(r > 0)
       {
-        *bad |= (uint8)(1 << r);
+        //fw 0.2.91: a range is barred only by a clip with a signal of at least a quarter of full scale behind it (32
+        //codes peak); a rail sample on a small tone, twice, still steps up but the range stays open for the way back
+        if(over || (m->c[c].code_mdb >= REAL_CLIP_MDB))
+          *bad |= (uint8)(1 << r);
         if((c == 1) && over)
           e->bad_down |= (uint8)(1 << r);       //a saturated range is not tried again on the way down either
         e->vclip &= (uint8)~(1 << c);
@@ -737,9 +778,18 @@ static void on_measure(bode_eng *e, const bode_meas *m)
       return;
 
     case PH_UP_POINT:
-      //Still clipped or saturated: one more range up while there is one; else this is the point's result
+      //Still clipped or saturated: one more range up while there is one (fw 0.2.91: confirmed by a second record on
+      //this range); else this is the point's result
       if((m->c[1].clipped || flat2(m, 0)) && (e->range[1] > 0) && (e->switches < MAX_SWITCHES) && !e->stop_req)
       {
+        if(!e->clip_again)
+        {
+          e->clip_again = 1;
+          e->retries++;
+          measure(e, PH_UP_POINT, &e->plans[e->idx], settle_periods[e->cfg.settle] * 10);
+          return;
+        }
+
         up_step(e, m, 0);
         return;
       }
@@ -754,6 +804,11 @@ static void on_measure(bode_eng *e, const bode_meas *m)
       {
         set_range(e, 1, e->up_r, e->ms.c[1].mean_uv);
         e->bad_down |= (uint8)(1 << (e->up_r + 1));
+
+        //fw 0.2.91: the plan remembers it, so its sweeps do not try that range again (a down step that fails every
+        //sweep churned the relays: e.g. the offset cannot centre a large DC level on the finer range)
+        if(e->rp_set && !e->thru_sweep)
+          e->rp_bad_down |= (uint8)(1 << (e->up_r + 1));
       }
       else if(m->c[1].lvl_mdb > BODE_MDB_FLOOR)
       {
@@ -889,6 +944,10 @@ int bode_start(bode_eng *e, const bode_cfg *cfg, int thru, int hold_r2)
   e->retries    = 0;
   e->relay_pending = 0;
   e->retake     = 0;
+  e->n_caps     = 0;
+  e->n_timeout  = 0;
+  e->n_leak     = 0;
+  e->n_retake   = 0;
   e->gen_on     = 0;
   e->disturbed  = 1;
 
@@ -908,6 +967,8 @@ int bode_start(bode_eng *e, const bode_cfg *cfg, int thru, int hold_r2)
     for(i = 0; i < BODE_MAX_POINTS; i++)
       e->rplan[i].have = 0;
 
+    e->rp_bad_down = 0;
+
     e->rp_cfg  = e->cfg;
     e->rp_hold = e->hold_r2;
     e->rp_set  = 1;
@@ -918,6 +979,7 @@ int bode_start(bode_eng *e, const bode_cfg *cfg, int thru, int hold_r2)
     //No pre-scan: every point starts on its planned ranges (the first write goes out whatever the channel shows); the
     //pre-scan's reference (ref2, v_dc2) of the sweep that made the plan stays
     e->range[0] = e->range[1] = 0xFF;
+    e->bad_down = e->rp_bad_down;
     point_begin(e);
     return 0;
   }
@@ -962,7 +1024,7 @@ int bode_step(bode_eng *e)
     if(!after(now, e->deadline))
       return 0;
 
-    if(e->hw->arm(e->hw->ctx, e->mp, e->mtotal))
+    if(e->hw->arm(e->hw->ctx, e->mp, e->mtotal, trig_code(e)))
     {
       finish(e, BODE_ST_ERROR, BODE_ERR_ARM);
       return 1;
@@ -1016,6 +1078,12 @@ int bode_step(bode_eng *e)
     e->last_fir   = cap.fir;
     e->last_check = cap.check;
 
+    //Statistics of the generator-on captures (a background capture has no signal to trigger on)
+    if(!e->mbg && (e->n_caps < 0xFFFF))
+      e->n_caps++;
+    if(!e->mbg && !cap.triggered && (e->n_timeout < 0xFFFF))
+      e->n_timeout++;
+
     //fw 0.2.83: the capture self-check flagged this capture (or a core keeps failing): the data is not the signal,
     //whatever the phase (fail fast, as the 0.2.71 rule)
     if(cap.check == BODE_CHK_FAULT)
@@ -1049,11 +1117,24 @@ int bode_step(bode_eng *e)
       bode_dft_run(e->mp, cap.x[0], cap.x[1], e->work, &d);
       bode_measure(e->mp, &d, cap.s, cap.zero_c100, cap.uv_q8, &m);
 
+      //CH1's DC level for the next trigger level (fw 0.2.91)
+      if(!bode_ch1_dead(&m))
+      {
+        e->v1_uv   = m.c[0].mean_uv;
+        e->have_v1 = 1;
+      }
+
       //fw 0.2.89: an incoherent CH1 too. On the device that is a record joined from two captures (an FPGA-auto record
       //that started on the time-out, bench 2026-10-20 cells_1235: leak -3 .. -36 dB in 5 of 8 such records, none
-      //with the CH1 trigger the engine now arms with, pc_bode.c); the host's triggered captures never show it
-      if((bode_suspect(&m) || bode_incoherent(&m)) && !e->retake && !e->stop_req)
+      //with the CH1 trigger the engine now arms with, pc_bode.c); the host's triggered captures never show it. fw 0.2.91:
+      //and a record that ended on the time-out (no trigger: the kind that is joined), with the level from its own mean
+      if((bode_suspect(&m) || bode_incoherent(&m) || !cap.triggered) && !e->retake && !e->stop_req)
       {
+        if(bode_incoherent(&m) && (e->n_leak < 0xFFFF))
+          e->n_leak++;
+        else if(e->n_retake < 0xFFFF)
+          e->n_retake++;
+
         e->retake = 1;
         e->retries++;
         request(e, e->phase, e->mp, e->msettle, e->mtotal, 0);
@@ -1121,6 +1202,14 @@ int bode_count(const bode_eng *e)          { return e->np; }
 int bode_current(const bode_eng *e)        { return (e->state == BODE_ST_RUNNING) ? e->idx : -1; }
 uint16 bode_switches(const bode_eng *e)    { return e->switches; }
 int bode_plan_reused(const bode_eng *e)    { return e->reuse; }
+
+void bode_capture_stats(const bode_eng *e, uint16 *caps, uint16 *timeouts, uint16 *leak, uint16 *other)
+{
+  *caps     = e->n_caps;
+  *timeouts = e->n_timeout;
+  *leak     = e->n_leak;
+  *other    = e->n_retake;
+}
 uint8 bode_exhausted(const bode_eng *e)    { return e->exhausted; }
 const bode_cfg *bode_last_cfg(const bode_eng *e)   { return &e->cfg; }
 const bode_plan *bode_plans(const bode_eng *e)     { return e->plans; }

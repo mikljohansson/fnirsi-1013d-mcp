@@ -34,6 +34,10 @@ typedef struct
   uint32 brk_from, brk_n;     //fw 0.2.89: captures brk_from .. + brk_n - 1 are broken: the samples before brk_at are
   uint32 brk_at;              //0.37 period off in phase (the FPGA-auto record joined from two, bench cells_1235)
   uint32 rail_from;           //fw 0.2.89: the rails only from this capture on (0: from the first)
+  uint8  level;               //fw 0.2.91: the trigger level of the arm (CH1 rising)
+  int    splice_untrig;       //fw 0.2.91: a capture whose CH1 does not cross the level ends on the time-out and is
+                              //joined from two captures (the samples before total / 3 a 0.37 period off)
+  uint32 untrig;              //captures that ended on the time-out
   uint32 reads;
 
   //State
@@ -96,9 +100,11 @@ static void h_info(void *ctx, int c, int r, bode_chinfo *ci)
   ci->uv_q8 = (uint32)(vpl(r) * 1e6 * 256 + 0.5);
 }
 
-static int h_arm(void *ctx, const bode_plan *pp, uint32 total)
+static int h_arm(void *ctx, const bode_plan *pp, uint32 total, uint8 level)
 {
   dut *d = ctx;
+
+  d->level = level;
 
   if(d->fail_arm)
     return -1;
@@ -184,14 +190,20 @@ static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
   uint32 i;
   int    c;
 
+  int    pass, trig = 0;
+
   d->armed = 0;
+
+  for(pass = 0; pass < 2; pass++)
+  {
+  uint16 lo = 0xFFFF, hi = 0;
 
   for(i = 0; i < total; i++)
   {
     double v[2];
 
-    int    brk = d->brk_n && ((d->reads + 1) >= d->brk_from) && ((d->reads + 1) < d->brk_from + d->brk_n) &&
-                 (i < d->brk_at);
+    int    brk = (d->brk_n && ((d->reads + 1) >= d->brk_from) && ((d->reads + 1) < d->brk_from + d->brk_n) &&
+                  (i < d->brk_at)) || ((pass == 1) && (i < total / 3));
 
     dut_volts(d, f, i / fs + (brk ? 0.37 / f : 0.0), dt, band, &v[0], &v[1]);
     if(d->thru)
@@ -228,7 +240,20 @@ static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
         d->buf[c][i] = (uint16)floor(code * 256 + 0.5);
       }
     }
+
+    if(d->buf[0][i] < lo) lo = d->buf[0][i];
+    if(d->buf[0][i] > hi) hi = d->buf[0][i];
   }
+
+  //CH1 rising through the level somewhere in the record (the generator on)
+  trig = d->gen && (lo < (uint32)d->level * 256) && (hi > (uint32)d->level * 256);
+
+  if(trig || !d->splice_untrig || pass)
+    break;
+  }
+
+  if(!trig)
+    d->untrig++;
 
   //A readout fault (FPGA 0x1539's A cores, or one saturated record): rail values whatever the input
   d->reads++;
@@ -255,6 +280,7 @@ static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
 
   cap->fir = 1;
   cap->check = (uint8)((d->fault_at && (d->reads == d->fault_at)) ? BODE_CHK_FAULT : d->check);
+  cap->triggered = (uint8)trig;
   return 0;
 }
 
@@ -981,6 +1007,71 @@ static void test_range_plan(void)
   D.rail[0] = 0;
   D.rail_from = 0;
   D.rail_reads = 0;
+
+  //fw 0.2.91: a rail sample in a point's CH2 record of a fresh sweep: measured again, no step up (0.2.90 stepped up on
+  //one record outside the plan)
+  dut_rc15(&D);
+  bode_init(&eng, &HW);
+  c2 = c;
+  c2.points = 24;
+  sweep_once(&c2, 0, 3, &b);
+  sweep_once(&c, 0, 3, &a);
+  D.rail[1] = 100000;
+  D.rail_from = D.reads + 14;
+  D.rail_reads = (int)D.rail_from;
+  sweep_once(&c2, 0, 3, &x);
+  D.rail[1] = 0;
+  D.rail_from = 0;
+  D.rail_reads = 0;
+  print_rec("fresh, one CH2 rail", &x);
+  T_EQ(x.reused, 0);
+  T_EQ(x.switches, b.switches);
+  T_TRUE(same_ranges(&x, &b));
+  T_EQ(x.bad, 0);
+
+  //fw 0.2.91: CH1 rails in the pre-scan and the check's first two records: CH1 ends on 0.5 V/div all the same (never
+  //5 V/div on records that clip once each)
+  dut_rc15(&D);
+  D.rail[0] = 100000;
+  D.rail_from = 1;
+  D.rail_reads = 3;
+  bode_init(&eng, &HW);
+  sweep_once(&c, 0, 3, &b);
+  print_rec("CH1 rails in 3 records", &b);
+  for(i = 0; i < b.n; i++)
+    T_EQ(b.r1[i], 3);
+  T_EQ(b.bad, 0);
+  D.rail[0] = 0;
+  D.rail_from = 0;
+  D.rail_reads = 0;
+
+  //fw 0.2.91 (bench 13:14, item c): the post's signal on 0 .. +3 V (the pre-scan's 2.5 V/div, offset 0: codes about
+  //129 .. 163, the level 128 under it). An untriggered capture is joined from two (the bench's time-out records); the
+  //engine takes it again with the level at the record's own mean, then every capture triggers on CH1's mean
+  {
+    uint16 nc, nt, nl, no;
+
+    dut_rc15(&D);
+    D.lo = 0.1;
+    D.hi = 3.1;
+    D.splice_untrig = 1;
+    bode_init(&eng, &HW);
+    sweep_once(&c, 0, 3, &b);
+    bode_capture_stats(&eng, &nc, &nt, &nl, &no);
+    printf("  plan post 0..3 V: %u captures, %u on the time-out, %u leak retakes, %u other retakes, model %u untriggered\n",
+           nc, nt, nl, no, (unsigned)D.untrig);
+    print_rec("post 0..3 V", &b);
+    for(i = 0; i < b.n; i++)
+      T_EQ(b.r1[i], 3);
+    T_EQ(b.bad, 0);
+    T_TRUE(nt <= 1);
+    T_TRUE(nc >= (uint16)b.n);
+    sweep_once(&c, 0, 3, &x);
+    bode_capture_stats(&eng, &nc, &nt, &nl, &no);
+    T_EQ(nt, 0);
+    T_EQ(x.reused, 1);
+    T_EQ(x.switches, 0);
+  }
 
   //fw 0.2.90 (bench 13:10, item a): the plan sweep's rows carry the first sweep's r1 / r2 point by point, on a divider
   //where CH1 and CH2 sit on different ranges (a swap of the channels' entries would show)

@@ -124,24 +124,28 @@ static void bh_info(void *ctx, int c, int r, bode_chinfo *ci)
 //joined from two captures at a random point (bench 2026-10-20 cells_1235: 5 of 8 at 21.6 and 31.6 kHz, leak -3 .. -36
 //dB, |H| off by up to 0.4 dB; 0 of 16 with the CH1 trigger). The level follows CH1's range and offset (the UI derives
 //it from the marker at every arm), so it is checked before each arm and the marker placed again when it moved; the
-//view gives the user's source, edge and marker back on leaving (bode_view_close).
-static void bh_trigger(void)
+//view gives the user's source, edge and marker back on leaving (bode_view_close). fw 0.2.91: the level is the engine's
+//(CH1's expected mean code, bode_sweep.c trig_code), not 128: on the pre-scan's 2.5 V/div with offset 0 the post's
+//signal sat at codes about 128..143, so 128 was its bottom edge (bench 13:14)
+static void bh_trigger(uint8 level)
 {
   pc_hw_trigger t;
 
   fpga_set_trigger_level();
   pc_hal_trigger_read(&t);
 
-  if((t.source != 0) || (t.edge != 0) || (t.level < 124) || (t.level > 132))
+  if((t.source != 0) || (t.edge != 0) || (t.level + 3 < level) || (t.level > level + 3))
   {
     t.source = 0;
     t.edge   = 0;
-    t.level  = 128;
+    t.level  = level;
     pc_hal_trigger_write(&t, PC_TRG_SOURCE | PC_TRG_EDGE | PC_TRG_LEVEL);
   }
 }
 
-static int bh_arm(void *ctx, const bode_plan *pp, uint32 total)
+static uint8 bh_triggered;
+
+static int bh_arm(void *ctx, const bode_plan *pp, uint32 total, uint8 level)
 {
   uint32 caps = pc_glue_caps(), div = bode_divider(pp);
   int    has = pc_decim_has_caps(caps);
@@ -172,10 +176,12 @@ static int bh_arm(void *ctx, const bode_plan *pp, uint32 total)
 
   //The PC's last capture is no longer in the ring
   pc_glue_ring_taken();
-  bh_trigger();
+  bh_trigger(level);
+  bh_triggered = 0;
 
-  //FPGA auto (time-out = the record): the record starts at once, triggered or not
-  return pc_hal_arm(0, (uint16)(bh_wide ? total : total / 2), total, 1, 0, (caps & PC_CAP_DECIM) ? &dc : 0,
+  //FPGA auto: on CH1's trigger, else on the time-out (fw 0.2.91: twice the record, so a trigger has the time of the
+  //record's periods to arrive; a time-out record can be joined from two captures and is taken again by the engine)
+  return pc_hal_arm(0, (uint16)(bh_wide ? total : total / 2), 2 * total, 1, 0, (caps & PC_CAP_DECIM) ? &dc : 0,
                     (caps & PC_CAP_SEQ) ? &sq : 0);
 }
 
@@ -189,6 +195,10 @@ static int bh_poll(void *ctx)
     return -1;
 
   pc_hal_acq_poll(&done, &trig);
+
+  if(trig)
+    bh_triggered = 1;
+
   return done;
 }
 
@@ -277,6 +287,7 @@ static int bh_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
 
   cap->fir   = dc.fir;
   cap->check = bh_check();
+  cap->triggered = bh_triggered;
   return 0;
 }
 
