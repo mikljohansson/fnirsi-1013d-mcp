@@ -3428,6 +3428,9 @@ geometry and the 20-row values. Bench: as step 1 above but no line at y 452, the
 around it, the overview over y 452..471 outside the box; a trace at the plot's top or bottom edge is visible only
 outside the window. Not benched.
 
+**Addendum: decision 8, fw-ov3 (fw 0.2.92 provisional).** Overlaid draws the overview's magnitude and phase (`sov_curve`, each fitted on its own; `sov_draw_curves` phase first, magnitude over it, owner 2026-10-20 13:35 / 13:36), Magnitude only / Phase only one curve;
+the curve walk moved from bode_view.c `draw_overview` to slider_ov.c / slider_ov_draw.c, and test_slider_ov checks the fit, joins and order on a stub screen. Not benched.
+
 ## 50. fw-zoom: Scope tap to jump at touch-down, the zoom ladder (fw 0.2.76, protocol 1.22 unchanged)
 
 Branch `fw-zoom` from main 1173abd (fw 0.2.74). Brief: docs/plans/task-queue.md "Scope tap-to-jump and zoom stepping"
