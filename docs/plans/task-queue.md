@@ -572,7 +572,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
-- fpga-gen13 (Fable, dispatched 20:00, done 20:30, merged 20:34: the records had no signal, the probes were off after the wizard; tb_timeout case B models the host capture; bode_cells prints NO TONE; 0x153B benched good 20:40 with the probes on and set recommended 20:42; checks 3 and 6 passed 21:0x and the 3-of-50 observation did not reproduce; open: the firmware corner with an explicit auto_timeout on 0x153B+ it queued). Originally: why every record on 0x153B is spliced on the unit (triggered and untriggered, the
+- fpga-gen13 (Fable, dispatched 20:00, done 20:30, merged 20:34: the records had no signal, the probes were off after the wizard; tb_timeout case B models the host capture; bode_cells prints NO TONE; 0x153B benched good 20:40 with the probes on and set recommended 20:42; checks 3 and 6 passed 20:49 and the 3-of-50 observation did not reproduce; open: the firmware corner with an explicit auto_timeout on 0x153B+ it queued). Originally: why every record on 0x153B is spliced on the unit (triggered and untriggered, the
   ring frozen after the capture, the seam fixed in the stored record) while tb_timeout and the 13-step run pass: the
   MCU-side read geometry (0x14, record start, the readout's latency words) vs fpga-gen11's capture-logic change; evidence
   in backups/bench-153b/. 0x153B's dist status to "withdrawn (bench 2026-10-20 19:57)" until fixed; the unit keeps 0x153B
