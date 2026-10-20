@@ -154,6 +154,7 @@ typedef struct
 extern mock_state mock;
 
 void mock_reset(uint16_t fpga_version);
+uint32_t mock_sr_div(uint32_t i);        //the mock's copy of variables.c's sample_rate_settings[i]
 void mock_rx_push(const uint8_t *data, uint32_t len);
 
 //1.23: one iteration of the innermost modal loop (see ui_modal): BUSY poll, then leave by the cancel path when a host

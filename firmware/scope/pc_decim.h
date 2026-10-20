@@ -36,9 +36,13 @@
 #define PC_DECIM_CIC3         3
 
 #define PC_DECIM_SWAP         0x04      //0x53 / 0x29 bit 2: core A is the earlier sample of each pair
-#define PC_DECIM_NEG_A        0x08      //0x53 / 0x29 bit 3: A cores captured on the falling write-clock edge
-#define PC_DECIM_NEG_B        0x10      //0x53 / 0x29 bit 4: B cores captured on the falling write-clock edge
-#define PC_DECIM_FLAGS        (PC_DECIM_SWAP | PC_DECIM_NEG_A | PC_DECIM_NEG_B)
+//0x53 bits 3 / 4 (the falling-edge capture of the A / B cores up to 0x1539) select nothing since 0x153A and are written 0
+//(fw-one; the 0x153C cruft audit removes them from the FPGA); SET_DECIM flags bits 1 / 2 are accepted and dropped
+#define PC_DECIM_FLAGS        PC_DECIM_SWAP
+
+//The largest divider (0x0D) the firmware writes: the FPGA compares 20 bits (0x153C cruft audit, docs/plans/fpga-0x153c.md
+//section 13). The UI's table reaches 399,999 (500 Sa/s), a host raw divider above this is E_BAD_ARG
+#define PC_DIVIDER_MAX        0xFFFFFu
 #define PC_DECIM_WIDE         0x80      //0x29 bit 7: 16-bit layout active (K >= 1)
 #define PC_DECIM_FIR_EN       0x40      //0x29 bit 6: 0x56 FIR enable as written (0x1535+)
 #define PC_DECIM_FIR_ACT      0x20      //0x29 bit 5: FIR active now (enable, K >= 1, N >= 16, N % 4 == 0)
@@ -84,7 +88,7 @@
 typedef struct
 {
   uint8_t  k;                 //effective order: 0 legacy, 1..3
-  uint8_t  flags;             //0x53 bits 2-4: PC_DECIM_SWAP, PC_DECIM_NEG_A, PC_DECIM_NEG_B (written for every K)
+  uint8_t  flags;             //0x53 bit 2: PC_DECIM_SWAP (written for every K); bits 3 / 4 always 0
   uint8_t  shift;             //S (0 when k = 0)
   uint8_t  why;               //PC_DECIM_WHY_*
   uint8_t  fir_en;            //0x56 bit 0 as written: FIR requested on a 0x1535+ bitstream (any K)

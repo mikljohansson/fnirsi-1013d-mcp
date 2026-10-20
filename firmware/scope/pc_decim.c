@@ -84,12 +84,8 @@ void pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t to
     return;
   }
 
-  //Swap and capture edges are written with every mode, the legacy one included
+  //The swap bit is written with every mode, the legacy one included; 0x53 bits 3 / 4 are always 0 (pc_decim.h)
   c->flags = flags & PC_DECIM_FLAGS;
-
-  //0x153A: the decimator gets registered data, bits 3 / 4 select nothing (they read back in 0x29): kept 0
-  if(c->cap)
-    c->flags &= (uint8_t)~(PC_DECIM_NEG_A | PC_DECIM_NEG_B);
 
   //0x56 is written as requested; the FPGA engages the FIR only where it is eligible
   c->fir_en = (has >= PC_DECIM_HAS_FIR) && (flags & PC_DECIM_SET_FIR);

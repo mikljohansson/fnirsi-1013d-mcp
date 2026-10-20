@@ -12,6 +12,7 @@
 
 #include "test_util.h"
 #include "bode_sweep.h"
+#include "pc_decim.h"
 
 #define PI 3.14159265358979323846
 
@@ -1817,8 +1818,19 @@ static void test_constant_never_switches(void)
          (unsigned)D.r2_changes);
 }
 
+//fw-one: the planner's largest divider (1 Hz) stays within the 20 bits the FPGA compares (pc_decim.h PC_DIVIDER_MAX)
+static void test_divider_bound(void)
+{
+  bode_plan pp;
+
+  T_TRUE(bode_plan_point(BODE_FMIN_MHZ, &pp) >= 0);
+  T_TRUE(bode_divider(&pp) <= PC_DIVIDER_MAX);
+  T_EQ(bode_divider(&pp), 524287);
+}
+
 int main(void)
 {
+  test_divider_bound();
   test_rc_auto();
   test_hold();
   test_wiring_b();

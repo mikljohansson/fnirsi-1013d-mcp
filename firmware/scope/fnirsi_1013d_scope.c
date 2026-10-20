@@ -167,9 +167,6 @@ int main(void)
   //fpga_set_generator_freq(103456);  //in Hz
   //fpga_set_generator_duty(70);
 
-  //Some initialization of the FPGA??. Data written with command 0x3C
-  //fpga_set_battery_level();      //Only called here and in hardware check
-  
   //Set screen brightness
   fpga_set_translated_brightness();
   

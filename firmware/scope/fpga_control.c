@@ -1539,18 +1539,6 @@ uint16 fpga_average_trace_data_long(PCHANNELSETTINGS settings)
 }
 
 
-//----------------------------------------------------------------------------------------------------------------------------------
-/*
-void fpga_set_battery_level(void)
-{
-  //Send the command for setting the battery level to the FPGA??
-  fpga_write_cmd(0x3C);
-  
-  //Write the data
-  fpga_write_short(32431);
-}
-*/
-//----------------------------------------------------------------------------------------------------------------------------------
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Decimation filter, bitstream 0x1534+ only (pc_decim.h). Callers check the bitstream: older ones do not decode 0x29,

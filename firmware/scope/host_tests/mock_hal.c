@@ -60,6 +60,11 @@ void mock_clear_resps(void)
   mock_nresps = 0;
 }
 
+uint32_t mock_sr_div(uint32_t i)
+{
+  return (i < 29) ? sr_div[i] : 0;
+}
+
 void mock_reset(uint16_t fpga_version)
 {
   int i;

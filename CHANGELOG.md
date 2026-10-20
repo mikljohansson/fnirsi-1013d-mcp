@@ -51,6 +51,11 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   summed by the MCU within the pass (3000 16-bit samples at 1 MSa/s: N 4, about 27 ms; 6000 legacy at 200 MSa/s: N 8;
   10 kSa/s: single records). Atlan's running (trace + previous) / 2 average is gone. GET_STATUS 46: 0 off, 1 the MCU's
   mean, 2 hardware; 47 log2 N.
+- FPGA cruft audit (coordinator 23:29, docs/plans/fpga-0x153c.md section 13): 0x53 bits 3 / 4 (dead since 0x153A) are
+  written 0 (`PC_DECIM_FLAGS` is the swap bit only; SET_DECIM still accepts flags bits 1 / 2), the commented-out 0x3C
+  writer (`fpga_set_battery_level`) is deleted (no 0x41 reader exists), and a raw divider above 2^20 - 1 is E_BAD_ARG
+  detail 4 (`PC_DIVIDER_MAX`; the UI table's largest is 399,999 at 500 Sa/s, the Bode planner's 524,287 at 1 Hz; host
+  tests assert both).
 - Host tests: the tests of the removed paths are gone (test_auto_stop_geometry, test_seq_older_bitstreams, test_contract,
   the per-bitstream halves of test_info / test_enc_check / test_capture_stages / test_decim_*, test_spliced_retake);
   test_info covers the fixed caps and the mismatch on six other words, test_ui_diag the notice screen, test_seq the

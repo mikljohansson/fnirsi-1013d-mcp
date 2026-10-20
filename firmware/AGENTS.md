@@ -5128,6 +5128,16 @@ Regression signs: 46 = 1 with 47 = 0 at 1 MSa/s (the plan not reaching the MCU p
 present (the deadline wait instead of the record), a shifted edge between Average on / off (the mean built from a wrong
 record start), GET_INFO 76 bytes.
 
+**Cruft audit addendum (coordinator 23:29, docs/plans/fpga-0x153c.md section 13).** 0x53 bits 3 / 4 are written 0
+(`PC_DECIM_FLAGS` = `PC_DECIM_SWAP`; the NEG defines, the settings-word bits and `pc_decim_config`'s per-bitstream mask are
+gone; SET_DECIM accepts flags bits 1 / 2 and drops them). The 0x3C writer was only a commented-out `fpga_set_battery_level`
+(and its commented call and prototype): deleted; no 0x41 reader exists in the tree (touchpanel.c's 0x3C / 0x41 are GT911
+configuration bytes). Dividers: the UI table's largest is **399,999** (500 Sa/s, indices 17..28; the audit's 199,999 is the
+short time bases' maximum), the Bode planner's largest is 524,287 (1 Hz), the auto-setup table smaller; all within the 20
+bits the FPGA compares. `PC_DIVIDER_MAX` 0xFFFFF (pc_decim.h): SET_TIMEBASE mode 1 refuses more with E_BAD_ARG detail 4
+(the one path that took any u32); test_session `test_timebase` asserts the bound, the refusal and the mock's copy of the
+UI table, test_bode_sweep `test_divider_bound` the planner.
+
 **Open**
 - Queue item "0x153B+: the deadline force must write 0x0E = 0 too" (fpga-gen13): `pc_hal_force` is still 0x1A = 0 alone;
   `pc_hal_force_stop` was removed with the geometry, so the fix is now two lines in `pc_hal_force` (0x0E = 0 first) plus

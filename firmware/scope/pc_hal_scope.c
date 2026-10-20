@@ -843,9 +843,9 @@ uint16 pc_glue_phosphor_setting_word(void)
 
 uint16 pc_glue_decim_setting_word(void)
 {
-  //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (the defaults). Bits
-  //3-4: the hidden falling-edge capture settings (SET_DECIM only); bit 5: FIR (fw 0.2.44)
-  return (uint16)(0xDE00 | (pc_dec_flags & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)) | (pc_dec_set_mode[0] & (PC_DECIM_SET_FIR | 3)));
+  //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (the defaults). Bits 3-4
+  //held the falling-edge capture settings up to fw 0.2.102 (written 0 now, read back ignored); bit 5: FIR (fw 0.2.44)
+  return (uint16)(0xDE00 | (pc_dec_set_mode[0] & (PC_DECIM_SET_FIR | 3)));
 }
 
 //Word 212 (fw 0.2.64): the Spectrum's Filter, 0xD500 marker (word 207 holds the Scope's)
@@ -1899,8 +1899,6 @@ static void pc_ui_fix_settings(void)
   if((settingsworkbuffer[PC_SETTING_WORD_DECIM] & 0xFFC4) == 0xDE00)
   {
     uint8 old = (uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_SET_FIR | 3));
-
-    pc_dec_flags = (uint8)((pc_dec_flags & PC_DECIM_SWAP) | (settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)));
 
     if((settingsworkbuffer[PC_SETTING_WORD_DECIM_SPEC] & 0xFFDC) == 0xD500)
     {

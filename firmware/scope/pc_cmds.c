@@ -1148,6 +1148,10 @@ static int h_set_timebase(pc_session *s, const uint8_t *req, uint32_t len, uint8
   }
   else if(mode == 1)
   {
+    //The FPGA compares 20 bits of 0x0D (pc_decim.h PC_DIVIDER_MAX)
+    if(value > PC_DIVIDER_MAX)
+      return pc_error(s, PC_E_BAD_ARG, 4, "divider > 1048575");
+
     t.divider = value;
     pc_hal_timebase_write(&t, 1);
     s->tb_raw     = 1;
@@ -1931,7 +1935,7 @@ static uint32_t pc_decim_body(pc_session *s, uint8_t *p)
 
   memset(p, 0, 36);
   p[0] = set & 3;                                       //UI Filter: 0 off, 1 boxcar, 2 CIC2, 3 CIC3
-  p[1] = (uint8_t)((set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR)) >> 2);   //flags: bit 0 core-order swap, bits 1 / 2
+  p[1] = (uint8_t)((set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR)) >> 2);   //flags: bit 0 core-order swap, bits 1 / 2 always 0 (fw-one),
                                                         //falling-edge A / B, bit 3 FIR (1.11)
   p[2] = pc_decim_status(&next);                        //what the next arm writes (0x29 byte 0 layout)
   p[3] = next.shift;

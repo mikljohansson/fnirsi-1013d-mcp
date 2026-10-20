@@ -112,8 +112,6 @@ void   fpga_read_adc_data(PCHANNELSETTINGS settings);
 uint16 fpga_average_trace_data(PCHANNELSETTINGS settings);  //For long time base
 uint16 fpga_average_trace_data_long(PCHANNELSETTINGS settings);
 
-//void   fpga_set_battery_level(void);
-
 void   fpga_delay(uint32 usec);
 
 //Decimation filter, bitstream 0x1534+ (pc_decim.h)
