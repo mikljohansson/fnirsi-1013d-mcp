@@ -718,4 +718,7 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
   if I want it to loop continuously I would press RUN myself. But if the filter is not changing, why would I ever want to use
   RUN?" AUTO SET = overview, the passes, one sweep at the found settings, STOP; or give up with the note. Supersedes section 3.2's
   "then RUN".
+- 2026-10-20 11:52 **(owner)**: RUN stays continuous (live tuning of a circuit, e.g. the coil tank's trimmer), the RUN/STOP button
+  keeps its meaning across modes; repeated sweeps reuse the previous sweep's per-point range plan so the relays stay quiet on
+  an unchanging circuit (engine item in the task queue).
 

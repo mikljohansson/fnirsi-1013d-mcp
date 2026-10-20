@@ -6,6 +6,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **RUN stays continuous; repeated sweeps reuse the previous range plan** (owner 10-20 11:52 **(owner)**: "RUN stays continuous,
+  but we reuse the previous plan so the relays don't click like crazy"): the use case is live tuning (the coil tank's trimmer
+  while watching the peak). Engine change, after fpga-gen10's first-record work lands (bode_sweep.c): a repeated sweep starts
+  each point at the range the previous sweep ended with for that point (per-point range plan kept with the table), switches
+  only when the point clips or drops below the floor, and the pre-scan is skipped when a plan exists for the same span and
+  settings; the first sweep after a settings change ranges as today. The switch count in the header shows the effect.
+
 - **AUTO SET ends in STOP, never RUN** (owner 10-20 11:47 **(owner)**: "Why should AUTO SET automatically transition to RUN? auto
   set should make an automatic scan and then stop, inferring parameters and trying a few different param sets, then either
   stopping or giving up. If I want it to loop continuously I would press RUN myself"; fw-fr4 dispatched): after the overview and
