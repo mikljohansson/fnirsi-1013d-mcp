@@ -276,6 +276,10 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- ui-rows (Opus, dispatched 23:15): mockups and design note docs/plans/ui-rows.md for the two decided UI rows (Type in the
+  trigger menu: Edge / Pulse width / Nth edge with parameters; Sample in ACQ: Normal / Peak, and the Peak-vs-Filter
+  presentation), the trigger chip's text per type, a peak-detect trace mockup, the firmware checklist; adversarial review
+  follows, the owner sees the mockups with the morning batch.
 - mcp-soft (Opus, dispatched 22:06, done 22:45, merged 22:46 as 8eaf912; ruff clean, 496 tests): scope_decode (UART auto-baud,
   SPI, I2C; limits: UART >= 4 samples per bit advised, refused under 2; SPI 3 per clock; I2C 8 per SCL period), scope_mask_test
   (masks stored under the data dir, exact geometry only), scope_export_csv, scope_dvm (resolution statement); simulator
