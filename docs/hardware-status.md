@@ -1137,4 +1137,14 @@ Newest entries at the bottom. Format: date, who, what, result.
   fpga/al3/README.md section 10 complete at all four rates; self-check 0 flagged of 18865 captures. 0x153A goes to "recommended"
   in fpga/al3/dist (bench 10-20). Remaining section 10 items: 3 (RC + Frequency response, probes back on the filter), 6 (EXT
   loopback, optional), 7 (warm-up, optional).
+- 2026-10-20 10:52-10:59: owner: Frequency response AUTO SET on the RC ends with "ADC readout fault: see Diagnostics" (reason 8)
+  on 0x153A / fw 0.2.82, although the self-check sees 0 flagged captures. Reproduced from the host: BODE_RUN 100 Hz..1 MHz ends
+  in the pre-scan with reason 8 every time (0 of 20 measured). Cause found one layer down: the first decimated capture after a
+  sample-rate change can come back as a whole record of one saturated value (45.4 V / 61.2 V at 2.5 V/div = 16-bit full scale)
+  on both READ_RAW and READ_TRACE, e.g. CIC2+FIR at divider 4095 (48.8 kSa/s) right after 1 MSa/s; the next capture at the same
+  rate is fine; plain (filter off) records are fine at every divider. The pre-scan is exactly such a first capture at the sweep's
+  slowest rate, so it reads "clipped" at every range and ends at 5 V/div with reason 8 (the reason text is misleading here). On
+  fw 0.2.71 (before fw-bus) on 0x153A the device sweep ran once (20/20, CH1 ranged to 0.5 V/div, 0.07 dB) and failed with reason 8
+  on the second run, so the fault is intermittent and not only fw-bus's write order; on 0x1539 / 0.2.71 four sweeps in a row
+  ran yesterday. Statistics per filter mode and divider follow.
 
