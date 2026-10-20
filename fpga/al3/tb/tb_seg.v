@@ -88,21 +88,27 @@ module tb;
 
   // 0x153B: after the stop the dut's trigger_address (time-out: W - total + pretrigger) and sampling_triggered (no late
   // trigger) differ from the references by design, and trigger_read_address is frozen at the stop (the references run it on
-  // after a 0x0E or 0x1A write); the three are compared while the write runs (tb_timeout.v has the rest)
+  // after a 0x0E or 0x1A write); the three are compared while the write runs (tb_timeout.v has the rest).
+  // fpga-gen12: ext_pending too. The gate on trigger_check_enable also stops the EXT edge latch, so an EXT edge after the
+  // stop sets the reference's ext_pending (and then its sampling_triggered) and not the dut's, until the next capture
+  // reset clears both. Its only consumer is sampling_triggered (trigger_detect_enable feeds nothing that is used) and it
+  // is not on the bus (0x28 reads ext_activity, unchanged), so after the stop it has no effect that is not already covered.
   wire [12:0] ta_cmp_dut = dut.sample_write_enable ? dut.trigger_address : 13'd0;
   wire [12:0] ta_cmp_ref = dut.sample_write_enable ? refd.trigger_address : 13'd0;
   wire        tr_cmp_dut = dut.sample_write_enable ? dut.sampling_triggered : 1'b0;
   wire        tr_cmp_ref = dut.sample_write_enable ? refd.sampling_triggered : 1'b0;
   wire [12:0] ra_cmp_dut = dut.sample_write_enable ? dut.trigger_read_address : 13'd0;
   wire [12:0] ra_cmp_ref = dut.sample_write_enable ? refd.trigger_read_address : 13'd0;
+  wire        ep_cmp_dut = dut.sample_write_enable ? dut.ext_pending : 1'b0;
+  wire        ep_cmp_ref = dut.sample_write_enable ? refd.ext_pending : 1'b0;
   wire [71:0] st_dut = {ta_cmp_dut, ra_cmp_dut, dut.sample_write_address,
                         tr_cmp_dut, dut.sample_write_enable, dut.sampling_half_way,
                         dut.sample_system_state, dut.sample_read_offset, dut.sample_write_clock,
-                        dut.ext_activity, dut.ext_pending, dut.ext_level, 12'd0};
+                        dut.ext_activity, ep_cmp_dut, dut.ext_level, 12'd0};
   wire [71:0] st_ref = {ta_cmp_ref, ra_cmp_ref, refd.sample_write_address,
                         tr_cmp_ref, refd.sample_write_enable, refd.sampling_half_way,
                         refd.sample_system_state, refd.sample_read_offset, refd.sample_write_clock,
-                        refd.ext_activity, refd.ext_pending, refd.ext_level, 12'd0};
+                        refd.ext_activity, ep_cmp_ref, refd.ext_level, 12'd0};
   // decimator, memory write port (data, address, enable), trigger compare data
   wire [65:0] dc_dut = {dut.dec_out2, dut.dec_out1, dut.dec_wr, dut.swc_adv, dut.swc_adv_q, dut.trigger_data,
                         dut.samples.dia[7:0], dut.samples.addra, dut.samples.cea};
