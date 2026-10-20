@@ -1103,4 +1103,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   single capture can read 0. Fix (fw-cap2): probe several codes across 120..140 with two captures per point, sum the counts,
   pick the stage with the widest clean run (here A3 with 2 and 5 clean), and let a persistently flagged core in operation
   ask for a calibration. Until then the unit runs with CH1 A4 (bad at two codes at 200 MSa/s only).
+- 2026-10-20 10:29: section 53 (host commands leave the modal screens) first check on fw 0.2.80: owner opened a menu in the
+  Spectrum view (ui_busy 1); GET_CHANNEL from the host was answered at once (0.00 s wait), ui_busy 0 afterwards, link stats
+  ui_yields 0 -> 1, ui_yield_refused 0. The screenshot shows the Spectrum view back on its CTRL page with the 1 kHz square's
+  spectrum and the overview in the track; no "Host command: menu closed" note in this view (known: the Spectrum view does not
+  draw it yet, queued).
 
