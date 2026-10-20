@@ -113,7 +113,8 @@ jobs:
             echo "  and padded to the 1 MiB config flash. Which one to use, how to flash it and how to roll back:"
             echo "  \`BITSTREAMS.md\` (attached)."
             echo ""
-            echo "Install and verification: docs/releasing.md and firmware/README.md in the repository."
+            echo "Install: docs/guide/install.md in the repository (https://mikljohansson.github.io/fnirsi-1013d-mcp/guide/install/),"
+            echo "with the backups in docs/guide/prepare.md. Verification of the hashes against a FEL load: docs/releasing.md."
             echo ""
             echo '```'
             cat SHA256SUMS
