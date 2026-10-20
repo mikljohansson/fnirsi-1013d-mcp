@@ -350,6 +350,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   runbook). Follow-ups: docs/mcp-tools.md capability rows and agent-measurement-guide.md line ~58 still say "on 0x1534 /
   0x1536" (fix with fw-one's merge, when the caps become fixed per firmware); calibration.md's "ADC readout fault near
   code 128" row removed although the firmware message may still exist (fw-one removes or keeps the message; align then).
+- fpga-c1 (done 2026-10-21 00:xx, merged 01:07 as da4dc6e): C1 trigger types + hold-off; tb_trigtypes 1293 checks on two
+  seeds, full run.sh ALL PASS on 12345 and 4242; TD 5721 LUT (+731 over 0x153B) / 4.739 ns met after four timing re-rolls;
+  deviations: 0x1B = 0 releases a running hold-off at once, the qualifier is held in reset until the first swc_adv edge after
+  a capture reset (type registers written in the 0x01 window apply at every rate). Notes for C4: keep the 0x1B decoder entry
+  when applying the C0 cruft list; expect to re-roll timing after merging C2/C3. Qualifier cost about 300 LUT per instance
+  (the pattern trigger engine's estimate in the contract rises from 175 to about 300).
 - fpga-c1 / fpga-c2 / fpga-c3 (Opus, dispatched 22:21-22:22, branches of the same names): 0x153C items C1 (trigger types
   pulse width / Nth edge / timeout, 0x1B hold-off, 0x37, the fire gate; owns the capture and EXT blocks and the shared
   decim_trig_sample lines), C2 (peak detect as a one-register switch, 0x56 bit 1, 0x29; owns decim_chan and the decimator
