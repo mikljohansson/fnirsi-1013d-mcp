@@ -647,6 +647,19 @@ module tb;
   //---------------------------------------------------------------------------------
   // Main sequence
 
+  // +vcd_from=<ns> [+vcd_len=<ns>] dumps both instances to fir_win.vcd for a window (fpga-gen12: read a MISMATCH line)
+  integer vcd_from, vcd_len;
+  initial begin
+    if ($value$plusargs("vcd_from=%d", vcd_from)) begin
+      if (!$value$plusargs("vcd_len=%d", vcd_len)) vcd_len = 1000;
+      #(vcd_from);
+      $dumpfile("fir_win.vcd");
+      $dumpvars(0, tb);
+      #(vcd_len);
+      $dumpoff;
+    end
+  end
+
   initial begin
     if (!$value$plusargs("seed=%d", seed)) seed = 12345;
     if (!$value$plusargs("logfile=%s", logname)) logname = "fir_edges.log";
@@ -711,10 +724,7 @@ module tb;
     fir_run(2'd3, 1'b1, rec_shift_fir(3, 30),  32'd30,  13'd60);    // N = 32
     fir_run(2'd3, 1'b0, rec_shift_fir(3, 99),  32'd99,  13'd40);    // N = 100
     fir_run(2'd3, 1'b0, rec_shift_fir(3, 398), 32'd398, 13'd30);    // N = 400
-    negab = 2'b01; fir_run(2'd3, 1'b0, rec_shift_fir(3, 14), 32'd14, 13'd60);
-    negab = 2'b10; fir_run(2'd2, 1'b1, rec_shift_fir(2, 18), 32'd18, 13'd60);
-    negab = 2'b11; fir_run(2'd1, 1'b0, rec_shift_fir(1, 15), 32'd15, 13'd60);
-    negab = 2'b00;
+    // (the three runs with 0x53 bits 3 / 4 set are phase 5, after the last equivalence phase: see there)
     // telegraph 0 / 255: the step overshoot with the recommended shift (no + 1) saturates the CIC
     // samples and the FIR output, and the undershoot clamps at 0
     adc_mode = 4;
@@ -845,6 +855,21 @@ module tb;
     random_phase(15);
     $display("phase 4: total %0d equivalence samples, %0d mismatches, %0d captures the reference cut at its time-out", eq_samples, eq_mismatch, cut_caps);
     check(eq_mismatch == mm0, "after FIR use, FIR off again identical to 0x1534");
+
+    //-------------------------------------------------------------------------------
+    // Phase 5 (fpga-gen12): the FIR runs with 0x53 bits 3 / 4 set, logged and checked by cic_model.py with neg = 0
+    // (the bits are inert in the dut since 0x153A). They come last because the 0x1534 reference does capture on the
+    // falling edge with them, so its CIC sees other samples than the dut's for these runs and its never-reset
+    // integrators keep an offset for the rest of the simulation (i1 differed by 653 after them in seed 12345). The
+    // offset is invisible in steady state (the combs cancel a polynomial state offset of degree < K) but shows for one
+    // output after a K change between captures, when the comb delay registers still hold the old K's values: a
+    // 3-LSB dec_out1 window of 210 ns in phase 4 at the first timing that made it visible. No equivalence phase
+    // follows these runs now.
+    adc_mode = 0;
+    negab = 2'b01; fir_run(2'd3, 1'b0, rec_shift_fir(3, 14), 32'd14, 13'd60);
+    negab = 2'b10; fir_run(2'd2, 1'b1, rec_shift_fir(2, 18), 32'd18, 13'd60);
+    negab = 2'b11; fir_run(2'd1, 1'b0, rec_shift_fir(1, 15), 32'd15, 13'd60);
+    negab = 2'b00;
 
     $fclose(logf);
     $display("RESULT: %0d checks, %0d failed -> %0s", checks, errors, errors ? "FAIL" : "PASS");
