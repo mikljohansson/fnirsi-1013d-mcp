@@ -97,7 +97,7 @@ The firmware runs on every bitstream; a feature appears when the bitstream has i
   Atlan4's bootloader, whose menu also starts the stock firmware and FEL mode. Remove the card and the scope is stock
   again, except that a custom bitstream must be restored to the stock one first.
 - **The SD card holds the open firmware**, its calibration, settings and boot-mode byte in raw sectors before the
-  FAT32 partition, which must start at sector 2048 or later on an MBR card (GPT cards are refused).
+  FAT32 partition, which must start at sector 16384 (8 MiB) or later on an MBR card (GPT cards are refused).
 - **Real limits** that no firmware changes: 200 MS/s per channel, 8 bit, about 30 MHz analog bandwidth, two
   interleaved ADC cores per channel, no DAC (the generator is a logic-level square wave on the calibration pin).
 - **Use at your own risk.** Flashing the FPGA flash or the SD sectors can leave the scope unbootable until you restore

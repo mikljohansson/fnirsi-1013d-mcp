@@ -236,7 +236,7 @@ const pc_card_id *pc_ident_card(int read, uint8_t *scratch, uint32_t scratch_byt
   c->length = rd32(scratch + 16);
   sectors   = c->length / 512;
 
-  if((c->length < 1024) || (c->length % 512) || (sectors > PC_ID_MAX_SECTORS) ||
+  if((c->length < 1024) || (c->length % 512) || (sectors > PC_ID_END - PC_ID_SECTOR) ||
      (PC_ID_SECTOR + sectors > pc_hal_sd_sectors()))
     goto out;
 

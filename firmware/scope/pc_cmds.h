@@ -39,7 +39,7 @@ uint32_t pc_auto_net_ms(uint32_t stop_ms);
 #else
 #define PC_FW_VERSION_MMU ""
 #endif
-#define PC_FW_VERSION     "0.2.100" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
+#define PC_FW_VERSION     "0.2.101" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
 #endif
 
 //The build identity record (build_id.c, pc_ident.h; host tests: mock_hal.c)
@@ -136,8 +136,12 @@ uint32_t pc_auto_net_ms(uint32_t stop_ms);
 #define PC_SD_BOOT_END    80            //16..79 bootloader: needs SD_WF_BOOT
 #define PC_SD_CFG_FIRST   708           //708 calibration, 709 settings, 710 display/boot byte: need SD_WF_CONFIG
 #define PC_SD_CFG_LAST    710
-#define PC_SD_LIMIT       2048          //never at or above, whatever the partition table says
-#define PC_SD_VERIFY_MAX  2048          //eGON images longer than this many sectors are not checksummed
+//Writes end at the first partition, and never at or above PC_SD_LIMIT whatever the partition table says (fw 0.2.101:
+//16384 sectors = 8 MiB, was 2048). The scope image at 750 may end there: 15634 sectors, about 7.6 MiB (0.2.100 is 1510
+//sectors). The bootloader loads the image by its eGON length with no size limit of its own (firmware/AGENTS.md section
+//67), so the cap only bounds what a host may write. Cards for this firmware have their FAT32 partition at 16384 or later
+//(firmware/README.md section 3). SD_INFO's check 3 and the card image identity use the same bound.
+#define PC_SD_LIMIT       16384
 #define PC_SD_WF_CONFIG   0x01
 #define PC_SD_WF_BOOT     0x02
 

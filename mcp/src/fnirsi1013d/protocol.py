@@ -1328,6 +1328,10 @@ SD_WR_CONFIG = 0x01  # allow sectors 708-710
 SD_WR_BOOT = 0x02  # allow sectors 16-79
 SD_EGON_NONE, SD_EGON_BT0, SD_EGON_EXE = 0, 1, 2
 SD_CHECK_NOT, SD_CHECK_OK, SD_CHECK_BAD, SD_CHECK_LENGTH = 0, 1, 2, 3
+#: the firmware writes the card only below the first partition and below this sector (PC_SD_LIMIT; 2048 up to fw
+#: 0.2.100, 16384 = 8 MiB from 0.2.101); SD_INFO check 3 means the image ends past it. Cards for this firmware have
+#: their FAT32 partition at this sector or later (firmware/README.md section 3)
+SD_WINDOW_LIMIT = 16384
 
 
 @dataclass

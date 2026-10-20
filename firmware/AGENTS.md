@@ -514,8 +514,8 @@ aborted, 14 retired since 0.2.21 (0.2.12-0.2.20: flags found by the tick, a = IN
 - Image placement: 740 sectors from 750, ends at 1489, below the FAT partition at 2048+. Persist path
   (SD_STAGE + SD_WRITE_SECTORS, 32 sectors per write, SD_STAGE served from the timer poll since 0.2.7): 0.2.7 5.3 s,
   0.2.11 5.7 s with read-back identical and the header verified. SD command design: protocol section 14 row 40;
-  writes need a valid MBR, window [16, min(first partition, 2048)), flag BOOT for 16-79 and CONFIG for 708-710,
-  power-key EINT masked during writes.
+  writes need a valid MBR, window [16, min(first partition, 2048)) (16384 from fw 0.2.101: section 67), flag BOOT for
+  16-79 and CONFIG for 708-710, power-key EINT masked during writes.
 
 ## 14. Owner's UI verdicts
 
@@ -4932,3 +4932,101 @@ real limit: `pc_image_id.version` is 16 bytes and C accepts a 16-character initi
    on an input near a charger a noise failure shows the new second line with the limit.
 Bug indicators: Check or Fault on Restarts right after a FEL load; any noise value under its limit drawn amber; the
 advice's second line overlapping the column headings; a tile line cut.
+
+## 67. fw-sd: the SD write window ends at the partition, capped at 16384 (fw 0.2.101, protocol 1.24 unchanged)
+
+Branch `fw-sd` from main 6322e98 (fw 0.2.100). Brief: release blocker of the bench 2026-10-20 18:51:
+`fnirsi1013d-flash --persist-only` of fw 0.2.100 (773,120 B = 1510 sectors, 750..2259) refused, because the window
+was [16, min(partition, 2048)) and the image ends at 2260, on the owner's card partitioned at 8192. A card made per the
+install guide (FAT32 from 2048) could not hold the image at all. Commits: f2c53e7 (firmware + host tests), 1563daf (SD
+tools), a7c5727 (mcp), f758b51 (docs), then CHANGELOG and this handoff. Host tests green (`make test`: test_session
+72125 checks with the new `test_sd_window`, test_diag 473); `make gcc10` builds (`#VER fw=0.2.101`, 774,144 B = 1512
+sectors, ends at 2261; text 652,433, data 121,460, bss 8,148,216); mcp ruff selection clean, pytest green apart from
+`test_report.py::test_reports_for_every_kind`, which fails the same way on main here (local renderer, not this
+change). All files LF (docs/hardware-prep.md was CRLF already and stays so). **Nothing benched, nothing flashed.**
+
+**The cap: PC_SD_LIMIT = 16384 sectors (8 MiB).** `pc_sd_write_end` = min(partition start, 16384), 0 without a valid
+MBR. The image at 750 may end at 16384: 15,634 sectors, about 7.6 MiB, ten times 0.2.101. Why 16384:
+- headroom: the image doubled between 0.2.25 (397,312 B) and 0.2.100 in two days of features; 8 MiB is ten times
+  today's image and costs nothing on a card of 1 GB or more;
+- it stays far below every other bound: the bootloader's DRAM (28 MiB, below) and our linker's
+  `ASSERT(BSS_END <= 0x81A00000)` (image + 8.1 MB .bss must end 26 MiB above 0x80000000, so the image could reach
+  about 17.9 MB before RAM runs out);
+- one power of two in MiB that partitioning tools take directly (`parted ... 8MiB`, `diskpart offset=8192` KB).
+- Considered: 8192 (4 MiB), the start the SD Association formatter uses on SDHC cards, so most cards would work
+  without repartitioning. Rejected as the rule because it leaves only 3.8 MB and a card at 1 MiB still needs
+  repartitioning; such a card still works today (the window ends at its partition; `make_sd_image.py` notes it).
+The window still ends at the partition: the cap only bounds what a host may write, never past the partition. SD_INFO
+check 3 (`pc_sd_egon`) is now "the length is invalid or the image ends past 16384" for each of 16/80/750 (was
+"longer than 2048 sectors", PC_SD_VERIFY_MAX, removed), and the card identity (`pc_ident.c`, PC_ID_END = 16384, a
+compile-time check ties it to PC_SD_LIMIT) refuses an image ending past it (state 5). A write past `write_end` answers
+E_BAD_ARG 0 with a text built in a static buffer (`pc_sd_past_end_text`, SD_WRITE is main-loop only): "partition
+starts at 2048: it must start at 2260 or later" (the write's last sector + 1), or "past sector 16383, the end of the
+write window" when the cap ends it. The other checks and their order are unchanged: 16-79 need BOOT, 708-710 need
+CONFIG, below 16 / past the card "outside the write window". Mock: `MOCK_SD_MAX_SECTORS` 20480 behind the 4096-sector
+default card, reads and writes bounded by `mock.sd_sectors`.
+
+**Bootloader: no size limit of its own** (inference from source and disassembly; the bench proves it for 1512).
+- v0.7 source (newest published): `research/atlan4-extracted/updater 0.02l/updater 0.02l/fnirsi_1013d_startup/`
+  `fnirsi_1013d_startup.c:348-400` `load_from_SDcard`: reads sector N, checks "eGON.EXE", length from +16, `blocks =
+  (length + 511) / 512`, copies the first 480 bytes to 0x80000000, then one `sd_card_read(N + 1, blocks - 1,
+  0x800001E0)`. `bl_sd_card_interface.c:311-381` `sd_card_read` checks only that the sectors are on the card; the
+  controller's byte count is `blocks * 512` in 32 bits (`:961-962`); `sd_send_data` (`:1082-1098`) sets its poll
+  budget to max(words / 64, 2000) x 100, so it grows with the transfer. Choice 0 loads 750, choice 3 loads 80
+  (`fnirsi_1013d_startup.c:298-308`).
+- v0.8 binary (Atlan's v1.00o5 package, sha256 eccd2f6e.., offset 0 = sector 16 = SRAM 0; disassembled with capstone
+  under `python -I`): `load_from_SDcard` at 0x53A0 is the same code (eGON.EXE compare against the string at 0x7878,
+  length bytes 16..19, `(length + 0x1FF) >> 9`, memcpy 0x1E0 bytes to 0x80000000, `sd_card_read` at 0x19E4 to
+  0x800001E0, the "Failed reading program sector" screen with error and block count); the caller passes 0x2EE = 750
+  (literal at 0x5388). `sd_card_read` at 0x19E4: only `sector + blocks - 1 > cardsectors`. The data loop at
+  0x2C0C..0x2C80: words = blocks x 512 / 4, budget = max(words >> 6, 0x7D0) x 100, as v0.7. The bootloader's own
+  variables are in DRAM at 0x81CBB800.. and sector 710 at 0x81BFFC00, so an image longer than about 28 MiB would
+  overwrite them; 8 MiB is far below.
+- **Risk to watch on the first boot (inference):** the poll budget is a total of polls while the FIFO is empty: 2.0 per
+  word for the 776-sector 0.2.25 (budget floor 200,000 polls), a fixed 1.56 per word from 1000 sectors up (so larger
+  images are no worse than 1512 sectors). The bootloader is built -O0; at 48 MHz 4-bit the card supplies a word in
+  about 167 ns, so this should hold, but no image over 776 sectors has booted from a card on this unit yet. A
+  time-out shows "SD card, Failed reading program sector", "Error: -2" (SD_ERROR_TIMEOUT) and "Sector: 1511" and
+  hangs.
+- Updater (sector 80, boot mode 3): it never loads the scope (`statemachine.c:423` commented out). Its "scope.bin to
+  sector 750" (`research/atlan4-extracted/updater 0.02o .../fnirsi_1013d_updater/update.c:559-700`,
+  `write_file_to_sdcard_with_progress`) writes the file one sector at a time with no size or partition check: on a card
+  partitioned below the image's end it overwrites the FAT partition's start. The 16384 rule protects that path.
+- The boot menu's "open firmware from sector 750" is choice 0 above; there is no second path.
+
+**Tools and the MBR.** `make_sd_image.py write` never writes sector 0 (it reads the MBR, refuses GPT and a device
+without an MBR), so the partition position is the user's job: the install guide's new "Prepare the card" section
+(`parted ... mklabel msdos mkpart primary fat32 8MiB 100%`, `mkfs.vfat -F 32`, or `diskpart ... offset=8192`). The
+tool refuses a part that runs into a partition with "scope (sectors 750..2261) runs into the FAT32 partition, which
+starts at sector 2048. The partition must start at sector 2262 or later; cards for this firmware start it at 16384 (8
+MiB). Copy the card's files off, ... run this again. Nothing was written.", notes a partition below 16384 that fits,
+and `--create` makes an 8 MiB image. The region table bounds the scope at 16383. `make_release_sd_package.py`
+produces a package from sector 16 (no MBR either); it refuses a scope ending past 16383 and prints the start the card
+needs. Checked on scratch images (partition at 2048 refused, 8192 note + written, 16384 written) and with `--local` on
+Atlan's zip (package 1,150,024 B, scope 750..2261, checksums OK).
+
+**mcp.** `sdcard.image_fit_problem(info, sectors)`: None, or which limit: the partition (start, start needed, 16384,
+how to fix), a running firmware with the old window (write_end < 16384 below the partition: "firmware 0.2.100 and
+older stop at 2048 ... load 0.2.101 or later into RAM first"), or the cap. `fnirsi1013d-flash --persist` raises it
+before any backup. `protocol.SD_WINDOW_LIMIT`; `SimCard(limit=...)` models old firmware; the simulator answers the
+firmware's texts. Tests in `tests/test_sdcard.py` (1510 sectors at 8192 persisted, backup `sd_750-2260_*`; at 2048
+refused, no backup; old window; cap and SD_INFO check 3).
+
+**Bench (coordinator; owner present; card in the scope, partition at 8192, boot mode 4 per docs/hardware-status.md)**
+1. `make gcc10` on the merged main, note the sha256 `<h>` of `build-gcc10-pc/fnirsi_1013d.bin` (f2c53e7 built here:
+   774,144 B; the merge changes the identity). `fnirsi1013d-flash --image <bin> --sha256 <h>`: `#VER fw=0.2.101`.
+2. `fnirsi1013d-flash --persist-only --image <bin> --sha256 <h>`. Expected lines: "card ... sectors, partition at 8192,
+   write window [16, 8192); image 774144 B = 1512 sectors at 750"; "sector 750 now holds eGON magic 2, length 397312"
+   (0.2.25); "backup of sectors 750..2261 verified" (read twice, saved as `backups/sd_750-2262_<time>.bin`, sha256
+   printed); write about 7 s at ~110 KiB/s, resends none; "SD_READ compare of all 1512 sectors ... identical"; "sector
+   750 verified on the card: eGON.EXE, length 774144". (A 0.2.100-sized image backs up 750..2259.)
+3. `fnirsi1013d-sd info --verify` (or `scope_sd_info`): write window [16, 8192), sector 750 eGON.EXE checksum ok,
+   card image fw 0.2.101 = the running image. Diagnostics > Status, Firmware tile: OK "Running 0.2.101, the image the
+   card starts."
+4. Power cycle: boot menu, PECO preselected, the scope starts 0.2.101 from the card (`#VER fw=0.2.101` after it
+   enumerates); Diagnostics Firmware tile OK as in 3; calibration and settings as before.
+If step 4 shows "SD card, Failed reading program sector" (the time-out above): power off, on again, pick "Start FEL
+mode" in the menu, FEL-load 0.2.101, and either report the error and sector numbers shown, or put 0.2.25 back with
+`fnirsi1013d-flash --restore backups/sd_750-2262_<time>.bin`. Removing the card starts the stock firmware.
+Bug indicators: a refusal on the 8192 card; a backup range other than 750..2261; SD_INFO check 3 on the new image; the
+Firmware tile not OK after step 2.

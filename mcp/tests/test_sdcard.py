@@ -10,7 +10,7 @@ import pytest
 from fnirsi1013d import flash as F
 from fnirsi1013d import protocol as P
 from fnirsi1013d.sdcard import SdCard, SdError, check_image
-from fnirsi1013d.simulator import make_egon_image
+from fnirsi1013d.simulator import SimCard, make_egon_image
 from fnirsi1013d.transport import DeviceError, Transport, open_link
 
 from test_flash import FakeHost
@@ -21,7 +21,7 @@ SIM_FW = "0.1.4-sim"  # SimConfig.fw_version
 def test_sd_info_read_and_stage(sim, transport):
     sd = SdCard(transport)
     info = sd.info(verify=True)
-    assert info.card_sectors == 131072 and info.part_start == 8192 and info.write_end == 2048
+    assert info.card_sectors == 131072 and info.part_start == 8192 and info.write_end == 8192
     assert [(h.sector, h.magic, h.check) for h in info.headers] == [(16, 1, 1), (80, 2, 1), (750, 2, 1)]
     assert sd.info().header(750).check == P.SD_CHECK_NOT
     assert sd.read(750, 300)[:12] == make_egon_image(300 * 1024, b"eGON.EXE", 0x75)[:12]
@@ -43,7 +43,7 @@ def test_sd_info_read_and_stage(sim, transport):
     (750, 1, 0x04, True, None, (P.Status.E_BAD_ARG, 6)),
     (750, 0, 0, True, None, (P.Status.E_BAD_ARG, 4)),
     (15, 1, P.SD_WR_BOOT, True, None, (P.Status.E_BAD_ARG, 0)),
-    (2047, 2, 0, True, None, (P.Status.E_BAD_ARG, 0)),
+    (8191, 2, 0, True, None, (P.Status.E_BAD_ARG, 0)),  # runs into the partition at 8192
     (40, 1, 0, True, None, (P.Status.E_BAD_ARG, 0)),  # 16-79 need BOOT
     (700, 16, 0, True, None, (P.Status.E_BAD_ARG, 0)),  # covers 708-710: needs CONFIG
     (750, 1, 0, False, None, (P.Status.E_BAD_ARG, 8)),
@@ -172,9 +172,10 @@ def test_persist_refusals(sim_factory, tmp_path):
     legacy = sim_factory(legacy=True)
     f, lines = persister(legacy, tmp_path, make_egon_image(4096, version=SIM_FW))
     assert f.run_all() == 7 and any("no SD sector commands" in ln for ln in lines)
-    big = make_egon_image(700 * 1024, version=SIM_FW)  # 1400 sectors: 750 + 1400 > 2048
-    f, lines = persister(srv, tmp_path, big)
-    assert f.run_all() == 7 and any("does not fit" in ln for ln in lines) and srv.device.sd.writes == []
+    srv.device.sd = SimCard(part_start=2048)
+    f, lines = persister(srv, tmp_path, make_egon_image(1510 * 512, version=SIM_FW))
+    assert f.run_all() == 7 and any("runs into the card's FAT32 partition" in ln for ln in lines)
+    assert srv.device.sd.writes == []
     assert not list((tmp_path / "backups").glob("*.bin"))  # nothing backed up for refused runs
     r, lines = persister(srv, tmp_path, b"", restore=Path(tmp_path / "x.bin"))
     assert r.run_all() == 2
@@ -192,7 +193,7 @@ def test_persist_refuses_a_different_firmware_version_unless_forced(sim, tmp_pat
 
 def test_scope_sd_api_and_dry_run(sim, scope):
     info = scope.sd_info()
-    assert info.write_end == 2048
+    assert info.write_end == 8192
     plan = scope.sd_write(bytes(1000), 750, dry_run=True)
     assert plan.ok and plan.sectors == 2 and sim.device.sd.writes == []
     plan = scope.sd_write(bytes(512), 709, dry_run=True)
@@ -237,7 +238,7 @@ def test_scope_sd_info_tool(sim_factory, tmp_path):
     async def main():
         async with client_for(sim_factory(), tmp_path) as c:
             r = await c.call("scope_sd_info", verify=True)
-            assert r["write_window"] == [16, 2048] and r["headers"][2]["magic"] == "eGON.EXE"
+            assert r["write_window"] == [16, 8192] and r["headers"][2]["magic"] == "eGON.EXE"
             assert r["headers"][2]["check"] == "ok"
         async with client_for(sim_factory(legacy=True), tmp_path) as c:
             assert "SD_SECTORS" in await c.fails("scope_sd_info")
@@ -308,3 +309,59 @@ def test_slow_write_answers_are_retried_without_reopening(sim, tmp_path, monkeyp
     assert "still answers PING: resending on the same connection" in text and "link lost" not in text
     assert sim.device.link["dtr_down"] == 0  # the port was never reopened during the write
     assert sim.device.sd.read(750, len(image) // 512) == image
+
+
+# fw 0.2.101: the write window ends at the partition, capped at 16384 (2048 up to 0.2.100, which refused fw 0.2.100's
+# own 1510-sector image on the owner's card partitioned at 8192; bench 2026-10-20 18:51)
+FW_0_2_100_SECTORS = 1510
+
+
+def test_persist_0_2_100_sized_image_on_a_card_partitioned_at_8192(sim, tmp_path):
+    image = make_egon_image(FW_0_2_100_SECTORS * 512, fill=0x44, version=SIM_FW)
+    f, lines = persister(sim, tmp_path, image)
+    assert f.run_all() == 0, "\n".join(lines)
+    assert sim.device.sd.read(750, FW_0_2_100_SECTORS) == image
+    assert list((tmp_path / "backups").glob("sd_750-2260_*.bin"))  # 750..2259 backed up before the write
+    assert any("write window [16, 8192)" in ln for ln in lines)
+
+
+def test_persist_refusal_names_the_partition_start_and_the_start_needed(sim, tmp_path):
+    sim.device.sd = SimCard(part_start=2048)
+    f, lines = persister(sim, tmp_path, make_egon_image(FW_0_2_100_SECTORS * 512, version=SIM_FW))
+    assert f.run_all() == 7
+    msg = next(ln for ln in lines if "FAILED" in ln)
+    assert "starts at sector 2048" in msg and "must start at sector 2260 or later" in msg and "16384 (8 MiB)" in msg
+    assert "Nothing was written" in msg and sim.device.sd.writes == []
+    assert not list((tmp_path / "backups").glob("*.bin"))
+
+
+def test_persist_refusal_on_firmware_with_the_old_window(sim, tmp_path):
+    sim.device.sd = SimCard(part_start=8192, limit=2048)  # fw 0.2.100 and older
+    f, lines = persister(sim, tmp_path, make_egon_image(FW_0_2_100_SECTORS * 512, version=SIM_FW))
+    assert f.run_all() == 7
+    msg = next(ln for ln in lines if "FAILED" in ln)
+    assert "past sector 2047" in msg and "0.2.101 or later" in msg and sim.device.sd.writes == []
+
+
+def test_window_cap_and_the_device_texts(sim, transport):
+    from fnirsi1013d.sdcard import image_fit_problem
+
+    sim.device.sd = SimCard(card_sectors=40000, part_start=20000)
+    sd = SdCard(transport)
+    info = sd.info()
+    assert (info.part_start, info.write_end) == (20000, P.SD_WINDOW_LIMIT) and P.SD_WINDOW_LIMIT == 16384
+    assert image_fit_problem(info, P.SD_WINDOW_LIMIT - 750) is None
+    assert "end of the firmware's write window" in image_fit_problem(info, P.SD_WINDOW_LIMIT - 750 + 1)
+    with pytest.raises(DeviceError) as e:
+        sd.write(16383, bytes(1024))
+    assert "past sector 16383, the end of the write window" in str(e.value)
+    sim.device.sd = SimCard(part_start=2048)
+    with pytest.raises(DeviceError) as e:
+        sd.write(2040, bytes(10 * 512))
+    assert "partition starts at 2048: it must start at 2050 or later" in str(e.value)
+    # SD_INFO's length check: an image may end at the cap, not past it
+    sim.device.sd = SimCard(card_sectors=40000, part_start=20000)
+    sim.device.sd.put(750, make_egon_image((P.SD_WINDOW_LIMIT - 750) * 512, b"eGON.EXE", 0x75))
+    assert sd.info(verify=True).header(750).check == P.SD_CHECK_OK
+    sim.device.sd.put(750, make_egon_image((P.SD_WINDOW_LIMIT - 750 + 1) * 512, b"eGON.EXE", 0x75))
+    assert sd.info(verify=True).header(750).check == P.SD_CHECK_LENGTH

@@ -9,8 +9,9 @@ your backup of the FPGA flash back first.
 - An FNIRSI 1013D with the **Anlogic AL3A10** FPGA: an unmarked 144-pin chip next to a Winbond 25Q80 flash with an
   unpopulated 2x3 header. [Hardware preparation](../hardware-prep.md) helps you identify your board. The EF2L45 and
   Altera EP4CE6 variants are untested.
-- A spare micro SD card with an MBR partition table. A GPT card does not work. The FAT32 partition must start at
-  sector 2048 or later, which is the usual layout.
+- A spare micro SD card with an MBR partition table and one FAT32 partition that starts at **8 MiB (sector 16384)**
+  or later. The firmware sits in the raw sectors before the partition. A GPT card does not work. Most cards come
+  with the partition at 1 MiB or 4 MiB, so you usually have to recreate it: see [Prepare the card](#prepare-the-card).
 - A PC with Python 3. Writing the card needs Linux, or WSL with the card reader attached through `usbipd`. The tool also
   accepts a Windows drive (`\\.\PhysicalDriveN`), but that path is untested.
 - For the FPGA bitstream only: a 3.3 V SPI programmer and a soldering iron.
@@ -18,6 +19,25 @@ your backup of the FPGA flash back first.
 !!! warning "Back up first"
     Back up the SD card before you write it. Back up the FPGA config flash, twice, before you flash a bitstream.
     [Hardware preparation](../hardware-prep.md), section 3, gives the steps.
+
+## Prepare the card
+
+The firmware image needs the space before the FAT32 partition. Firmware 0.2.101 is about 0.8 MB and ends at sector
+2261; the 8 MiB start leaves room for later versions. Recreating the partition erases the files on the card, so copy
+them off first. On Linux or WSL, with the card reader at `/dev/sdX`:
+
+```
+sudo fdisk -l /dev/sdX                                  # check the device and the current start
+sudo parted /dev/sdX --script mklabel msdos mkpart primary fat32 8MiB 100%
+sudo mkfs.vfat -F 32 /dev/sdX1
+sudo fdisk -l /dev/sdX                                  # the partition now starts at 16384
+```
+
+On Windows, `diskpart` does the same: `select disk N`, `clean`, `create partition primary offset=8192` (the offset is
+in KB), `format fs=fat32 quick`, `assign`. Pick the disk number with care. `diskpart` formats FAT32 only up to 32 GB.
+
+`make_sd_image.py` never changes the partition table. It refuses a card whose partition starts too low, and the
+message names the start the image needs. Copy your files back after the card is written.
 
 ## Steps
 
@@ -38,7 +58,8 @@ your backup of the FPGA flash back first.
             --scope-sha256 <hash from SHA256SUMS> --parts parts
     ```
 
-3. Write the parts to the card. Replace `/dev/sdX` with your card reader:
+3. Write the parts to the card, prepared as in [Prepare the card](#prepare-the-card). Replace `/dev/sdX` with your card
+   reader:
 
     ```
     python3 make_sd_image.py write --device /dev/sdX --bootloader parts/bootloader.bin \

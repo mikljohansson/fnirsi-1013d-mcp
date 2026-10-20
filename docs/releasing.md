@@ -187,9 +187,13 @@ Do not move a tag after a release has been published from it. Bump the patch ver
   `fnirsi1013d-flash --image fnirsi_1013d-fw-X.Y.Z.bin --sha256 <hash from SHA256SUMS>`. Or use sunxi-fel
   directly, as in section 4.
 - **Persist to the card** from a running protocol firmware: `fnirsi1013d-flash ... --persist` writes
-  only sector 750 onwards, after a verified backup (`mcp/README.md`).
+  only sector 750 onwards, after a verified backup (`mcp/README.md`). The image must end before the
+  card's FAT32 partition and below sector 16384, the end of the firmware's write window (fw 0.2.101;
+  2048 before). A refusal names the partition start and the start the image needs.
 - **A new card, or one without the open bootloader**, needs Atlan4's bootloader v0.8 and updater as
-  well. Unzip the SD tools and run:
+  well, and its FAT32 partition must start at sector 16384 (8 MiB) or later
+  (`docs/guide/install.md`, "Prepare the card"). The tools never change the partition table. Unzip the
+  SD tools and run:
 
   ```
   python3 make_release_sd_package.py build --scope fnirsi_1013d-fw-X.Y.Z.bin --scope-sha256 <hash> --parts parts
@@ -204,7 +208,8 @@ Do not move a tag after a release has been published from it. Bump the patch ver
   `--local <zip or directory>` it uses files you already have.
 
   `make_sd_image.py write` touches only the sectors of the parts you pass, and it backs up the card
-  before writing a device. Do not `dd` the whole package from sector 16. That also zeroes sectors
+  before writing a device. It refuses a card whose partition starts before the end of the scope
+  image, and says which start it needs. Do not `dd` the whole package from sector 16. That also zeroes sectors
   708-710, which hold calibration, settings and the display/boot-mode byte. Take a full card backup first.
 - **FPGA bitstream** (AL3A10 only, needs a 3.3 V SPI programmer): the attached `BITSTREAMS.md` says which
   image to use, how to back up and write the config flash with `firmware/tools/spiflash_d2xx.py`, and how

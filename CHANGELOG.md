@@ -31,6 +31,19 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.101 - 2026-10-20 (protocol 1.24, unchanged; rows 40 and 55 updated)
+
+- SD write window: writes end at the card's FAT32 partition, capped at sector 16384 (8 MiB; was 2048), so the image at
+  sector 750 may grow to about 7.6 MiB (f2c53e7). Up to 0.2.100 the window stopped at 2048 whatever the partition said,
+  and `fnirsi1013d-flash --persist` refused 0.2.100's own image (1510 sectors, 750..2259) on the owner's card
+  partitioned at 8192 (bench 2026-10-20 18:51). SD_INFO's check 3 and the card image identity use the same bound (an
+  image ending past 16384) instead of the old 2048-sector length limit. A write past the end now answers "partition
+  starts at P: it must start at L or later" or "past sector 16383, the end of the write window". BOOT (16-79) and
+  CONFIG (708-710) protection unchanged. Atlan4's bootloader loads the image by its eGON length with no size limit of
+  its own (firmware/AGENTS.md section 67).
+- Cards for this firmware have their FAT32 partition at sector 16384 (8 MiB) or later; the install guide's "sector 2048
+  or later" could not hold the image (f758b51).
+
 #### 0.2.100 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Diagnostics, Restarts tile: only a crash counts (owner 2026-10-20 18:12; 5879193). A deliberate restart (a firmware
@@ -1364,6 +1377,11 @@ was found (commit not identified).
 
 ### Host library and MCP server (`mcp/`, package version 0.1.0)
 
+- 2026-10-20 (fw-sd): `fnirsi1013d-flash --persist` says which limit an image does not fit: the card's partition (its
+  start, the start needed, 16384 recommended, how to recreate it), a running firmware with the old 2048 window (load
+  0.2.101 first) or the 16384 cap (`sdcard.image_fit_problem`, `protocol.SD_WINDOW_LIMIT`); the simulator's card models
+  the cap and the firmware's new texts (a7c5727).
+
 - 2026-10-20 (mcp-gen7): the server closes the serial port (or the simulator's tcp link) after 30 s without a tool call
   (`FNIRSI_MCP_IDLE_CLOSE_S`, 0 = hold) and reconnects on the next call, so the coordinator's scripts and `fnirsi1013d-flash`
   can use the port between calls (275e273); the Bode runner retakes a flat or toneless record once and flags a dead CH1
@@ -1477,6 +1495,10 @@ was found (commit not identified).
   clipped samples; the simulator models the wizard's points with the CLIP and NOISE checks.
 
 ### Tooling, FPGA and documentation
+
+- Changed: `make_sd_image.py` and `make_release_sd_package.py` accept a scope image up to sector 16383 (was 2047);
+  `make_sd_image.py write` refuses a card whose partition starts before the image's end with the start it needs and the
+  steps, notes a partition below 16384 that still fits, and `--create` makes an 8 MiB image (1563daf).
 
 - Added: `firmware/tools/make_sd_image.py` and `mksunxi.py` (2633b3f). They write only the parts you pass
   and never zero sectors 708-710.

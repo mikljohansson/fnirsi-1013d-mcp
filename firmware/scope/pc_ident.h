@@ -34,7 +34,7 @@ extern const pc_image_id pc_image_ident;  //the running image's (build_id.c; hos
 #define PC_ID_TAIL           2            //0.2.47-0.2.51 build tail + version string
 #define PC_ID_VERSION_ONLY   3            //older protocol images: version string only
 #define PC_ID_UNKNOWN        4
-#define PC_ID_NO_IMAGE       5            //no eGON.EXE, length invalid, or a read error
+#define PC_ID_NO_IMAGE       5            //no eGON.EXE, length invalid or ending past PC_ID_END, or a read error
 
 typedef struct
 {
@@ -49,7 +49,7 @@ typedef struct
 } pc_card_id;
 
 #define PC_ID_SECTOR         750          //the open firmware image (firmware/README.md section 3)
-#define PC_ID_MAX_SECTORS    2048
+#define PC_ID_END            16384        //the image must end below this sector: PC_SD_LIMIT (pc_cmds.h), fw 0.2.101
 
 //Pure parts (buffers in memory)
 int  pc_ident_find_record(const uint8_t *tail, uint32_t n, pc_image_id *out);   //tail = the image's last n bytes; 1 found

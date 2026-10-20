@@ -23,6 +23,10 @@ WARNING: writing a whole SD package from sector 16 (Atlan's `dd ... bs=1024 seek
 708-710: calibration, settings and the display/boot-mode sector. Prefer `make_sd_image.py write` with the
 parts from --parts, which touches only the sectors of the parts you pass, and back up the card first.
 
+The card's FAT32 partition must start after the scope image (sector 750 + its length); cards for this firmware start
+it at sector 16384 (8 MiB), the end of the firmware's SD write window. `make_sd_image.py write` refuses a card whose
+partition starts too low and says what to do.
+
 Needs make_sd_image.py and mksunxi.py next to this script (release zip) or in ../firmware/tools (checkout).
 The downloaded zip is treated as untrusted data: only the two named members are read, nothing is extracted.
 """
@@ -60,7 +64,9 @@ PACKAGE_BASE_SECTOR = 16
 UPDATER_SECTOR = 80
 SCOPE_SECTOR = 750
 SCOPE_LOCATION = (SCOPE_SECTOR - PACKAGE_BASE_SECTOR) * SECTOR      # 0x5BC00, as in the Makefile
-LAST_SECTOR = 2047                                                   # FAT32 must start at 2048 or later
+# The firmware writes the card only below sector 16384 (PC_SD_LIMIT, fw 0.2.101), so the image must end below it, and
+# cards for this firmware have their FAT32 partition at 16384 (8 MiB) or later (firmware/README.md section 3).
+SD_LIMIT = 16384
 VER_RX = re.compile(rb"#OK,FNIRSI-1013D-AI,fw=([^,\x00]*),proto=")
 
 
@@ -169,9 +175,9 @@ def check_scope(msi, data, path):
     if problems:
         raise SystemExit("%s: %s" % (path, "; ".join(problems)))
     end = SCOPE_SECTOR + (len(data) + SECTOR - 1) // SECTOR - 1
-    if end > LAST_SECTOR:
-        raise SystemExit("%s: ends at sector %d, past %d (the FAT32 partition may start at 2048)"
-                         % (path, end, LAST_SECTOR))
+    if end >= SD_LIMIT:
+        raise SystemExit("%s: ends at sector %d, past %d: the firmware writes the card only below sector %d"
+                         % (path, end, SD_LIMIT - 1, SD_LIMIT))
     m = VER_RX.search(data)
     return m.group(1).decode("ascii", "replace") if m else None
 
@@ -213,8 +219,12 @@ def cmd_build(args):
         print("\nwrite only these parts (after a full card backup):\n"
               "  python3 make_sd_image.py write --device /dev/sdX --bootloader %s/bootloader.bin "
               "--updater %s/updater.bin --scope %s/scope.bin --boot-mode 4" % (p, p, p))
-    print("\nNOTE: dd-ing the whole package from sector 16 zeroes sectors 708-710 "
-          "(calibration, settings, display config). See the script header.")
+    end = SCOPE_SECTOR + (len(scope) + SECTOR - 1) // SECTOR
+    print("\nThe card's FAT32 partition must start at sector %d or later; %d (8 MiB) leaves room for later images. "
+          "make_sd_image.py write refuses a card whose partition starts too low." % (end, SD_LIMIT))
+    print("NOTE: dd-ing the whole package from sector 16 zeroes sectors 708-710 "
+          "(calibration, settings, display config) and overwrites a partition that starts below sector %d. "
+          "See the script header." % end)
     return 0
 
 

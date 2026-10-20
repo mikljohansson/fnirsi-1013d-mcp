@@ -323,7 +323,7 @@ sudo dd if=/dev/sdX of=/mnt/d/src/fnirsi-1013d-ai/backups/2026-10-18_sd_full.img
 
 ```bash
 cd /mnt/d/src/fnirsi-1013d-ai/backups
-dd if=2026-10-18_sd_full.img of=2026-10-18_sd_sectors-0-2047.bin bs=512 count=2048
+dd if=2026-10-18_sd_full.img of=2026-10-18_sd_sectors-0-16383.bin bs=512 count=16384
 dd if=2026-10-18_sd_full.img of=2026-10-18_sd_sector-708.bin bs=512 skip=708 count=1
 dd if=2026-10-18_sd_full.img of=2026-10-18_sd_sector-709.bin bs=512 skip=709 count=1
 dd if=2026-10-18_sd_full.img of=2026-10-18_sd_sector-710.bin bs=512 skip=710 count=1

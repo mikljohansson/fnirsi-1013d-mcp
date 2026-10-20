@@ -12,6 +12,7 @@
 
 #define MOCK_RING_MAX 8192
 #define MOCK_SD_SECTORS 4096                //2 MiB card model, partition at 2048 unless a test changes the MBR
+#define MOCK_SD_MAX_SECTORS 20480           //the array behind it: a test may report up to 10 MiB (mock.sd_sectors)
 
 typedef struct
 {
@@ -101,7 +102,7 @@ typedef struct
   uint8_t  screen_read_under;
 
   //SD card
-  uint8_t  *sd;                     //MOCK_SD_SECTORS x 512
+  uint8_t  *sd;                     //MOCK_SD_MAX_SECTORS x 512
   uint32_t  sd_sectors;             //reported size (0 = no card)
   uint32_t  sd_reads, sd_writes;
   int       sd_fail_write;          //driver error to return from writes (0 = ok)

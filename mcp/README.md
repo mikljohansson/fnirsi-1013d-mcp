@@ -423,7 +423,9 @@ fnirsi1013d-flash --restore backups/sdcard/sd_750-<end>_<time>.bin  # put a back
 ```
 
 `--persist` refuses images whose eGON header length or checksum is wrong (run `firmware/tools/mksunxi.py`), cards
-without a partition table, images that do not fit below `write_end` (min(partition start, 2048)), and images
+without a partition table, images that do not fit below `write_end` (min(partition start, 16384) from fw 0.2.101,
+min(partition start, 2048) before; the refusal names the card's partition start and the start the image needs, or
+asks for firmware 0.2.101 when the running firmware has the old window), and images
 whose version (the `#VER` literal in the binary) differs from what the running firmware answers to `#VER`
 (persist what is running and tested; `--force` overrides). It first backs up sectors 750..750+n (n = the larger
 of the new and the old image) to `backups/sdcard/sd_750-<end>_<time>.bin` (read twice and compared, saved,

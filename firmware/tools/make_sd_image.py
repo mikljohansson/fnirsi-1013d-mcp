@@ -11,7 +11,9 @@ see firmware/README.md for the sources this is confirmed from):
   sector 709       scope settings
   sector 710       display/touch config; byte 28/29 TP X/Y swap; byte 31 boot mode
   sector 750..     scope,      eGON.EXE (boot mode 0); must end before the
-                   first partition (FAT32 normally starts at sector 2048)
+                   first partition and below sector 16384 (SD_LIMIT)
+  sector 16384..   FAT32 partition: for this firmware it must start at
+                   16384 (8 MiB) or later, so the scope image can grow
 
 Boot mode byte (sector 710 offset 31): 0 = PECO/Atlan scope from sector 750,
 1 = stock FNIRSI firmware from SPI flash, 2 = FEL, 3 = updater from sector 80,
@@ -50,6 +52,9 @@ CALIBRATION_SECTOR = 708
 SETTINGS_SECTOR = 709
 DISPLAY_CONFIG_SECTOR = 710
 SCOPE_SECTOR = 750
+# The firmware writes the card only below the partition and below this sector (PC_SD_LIMIT, fw 0.2.101), so the
+# scope image must end below it and the FAT32 partition should start here or later (firmware/README.md section 3).
+SD_LIMIT = 16384
 BOOT_MODE_OFFSET = 31            # inside sector 710 (DRAM 0x81BFFC1F)
 
 BOOT_MODES = {0: "PECO/Atlan scope (SD sector 750)", 1: "FNIRSI stock (SPI flash 0x27000)",
@@ -62,7 +67,7 @@ REGIONS = [
     ("calibration", CALIBRATION_SECTOR, CALIBRATION_SECTOR, None),
     ("settings", SETTINGS_SECTOR, SETTINGS_SECTOR, None),
     ("display_config", DISPLAY_CONFIG_SECTOR, DISPLAY_CONFIG_SECTOR, None),
-    ("scope", SCOPE_SECTOR, None, b"eGON.EXE"),
+    ("scope", SCOPE_SECTOR, SD_LIMIT - 1, b"eGON.EXE"),
 ]
 REGION = {r[0]: r for r in REGIONS}
 
@@ -184,6 +189,15 @@ def mbr_partitions(t):
     return parts
 
 
+def partition_too_low(name, first, end, part_start):
+    """Refusal text for a part [first, end) that runs into the partition at part_start: what to do about it."""
+    return ("%s (sectors %d..%d) runs into the FAT32 partition, which starts at sector %d. The partition must start "
+            "at sector %d or later; cards for this firmware start it at %d (8 MiB). Copy the card's files off, delete "
+            "the partition, create a new FAT32 partition starting at 8 MiB (docs/guide/install.md, \"Prepare the "
+            "card\"), copy the files back and run this again. Nothing was written."
+            % (name, first, end - 1, part_start, end, SD_LIMIT))
+
+
 def sector_name(sector):
     for name, first, last, _ in REGIONS:
         if sector >= first and (last is None or sector <= last):
@@ -219,7 +233,8 @@ def cmd_info(args):
             if parts and name == "scope":
                 for ptype, pfirst, count in parts:
                     if pfirst <= end and pfirst + count > first:
-                        print("    WARNING: scope overlaps partition at sector %d" % pfirst)
+                        print("    WARNING: the scope image runs into the partition at sector %d (it must start at %d "
+                              "or later)" % (pfirst, end + 1))
         else:
             data = t.read_sectors(first, 1)
             if not any(data):
@@ -345,8 +360,11 @@ def cmd_write(args):
         for ptype, pfirst, count in parts:
             for s, (name, d) in writes.items():
                 if s < pfirst + count and s + len(d) // SECTOR > pfirst:
-                    raise SystemExit("%s (sectors %d..%d) overlaps partition at sector %d"
-                                     % (name, s, s + len(d) // SECTOR - 1, pfirst))
+                    raise SystemExit(partition_too_low(name, s, s + len(d) // SECTOR, pfirst))
+        low = min(p[1] for p in parts)
+        if low < SD_LIMIT:
+            print("note: the partition starts at sector %d. Firmware images up to %d sectors fit; cards for this "
+                  "firmware should start it at %d (8 MiB) so later images fit too" % (low, low - SCOPE_SECTOR, SD_LIMIT))
     elif args.device:
         raise SystemExit("%s has no MBR partition table; refusing to write a device without one" % path)
 
@@ -425,8 +443,8 @@ def main(argv=None):
     p.add_argument("--image", help="card image or SD package file")
     p.add_argument("--device", help="PHYSICAL device (/dev/sdX, \\\\.\\PhysicalDriveN); asks for confirmation")
     p.add_argument("--create", action="store_true", help="create --image if missing")
-    p.add_argument("--create-size", type=parse_int, default=2048 * SECTOR,
-                   help="size for --create (default 1 MiB = sectors 0..2047)")
+    p.add_argument("--create-size", type=parse_int, default=SD_LIMIT * SECTOR,
+                   help="size for --create (default 8 MiB = sectors 0..16383, all below the partition)")
     p.add_argument("--bootloader", help="eGON.BT0 image for sector 16")
     p.add_argument("--updater", help="eGON.EXE image for sector 80")
     p.add_argument("--scope", help="eGON.EXE image for sector 750 (build/fnirsi_1013d.bin)")

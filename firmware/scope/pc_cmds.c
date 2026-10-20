@@ -2588,6 +2588,42 @@ static uint32_t pc_sd_write_end(uint32_t part_start)
   return (part_start < PC_SD_LIMIT) ? part_start : PC_SD_LIMIT;
 }
 
+//The card image identity (pc_ident.c) checks the same window
+typedef char pc_sd_limit_matches_ident[(PC_ID_END == PC_SD_LIMIT) ? 1 : -1];
+
+//Error text for a write past the window's end (fw 0.2.101): names the partition start and the start the write needs,
+//so a card partitioned too low says what to change. One static buffer: SD_WRITE runs on the main loop only.
+static char pc_sd_err[64];
+
+static char *pc_sd_put_dec(char *p, uint32_t v)
+{
+  char     t[10];
+  uint32_t n = 0;
+
+  do { t[n++] = (char)('0' + v % 10); v /= 10; } while(v);
+  while(n) *p++ = t[--n];
+  return p;
+}
+
+static const char *pc_sd_past_end_text(uint32_t part_start, uint32_t last)
+{
+  static const char a[] = "partition starts at ", b[] = ": it must start at ", c[] = " or later";
+  static const char d[] = "past sector ", e[] = ", the end of the write window";
+  char *p = pc_sd_err;
+
+  if(part_start >= PC_SD_LIMIT)
+  {
+    memcpy(p, d, sizeof(d) - 1); p = pc_sd_put_dec(p + sizeof(d) - 1, PC_SD_LIMIT - 1);
+    memcpy(p, e, sizeof(e));
+    return pc_sd_err;
+  }
+
+  memcpy(p, a, sizeof(a) - 1); p = pc_sd_put_dec(p + sizeof(a) - 1, part_start);
+  memcpy(p, b, sizeof(b) - 1); p = pc_sd_put_dec(p + sizeof(b) - 1, last + 1);
+  memcpy(p, c, sizeof(c));
+  return pc_sd_err;
+}
+
 //eGON header at a sector: magic, stored length and checksum; with check, the checksum of `length` bytes on the card
 static void pc_sd_egon(uint32_t sector, int check, uint32_t card, uint8_t *scratch, uint8_t *out)
 {
@@ -2611,7 +2647,7 @@ static void pc_sd_egon(uint32_t sector, int check, uint32_t card, uint8_t *scrat
   if(status && check)
   {
     //Sum of u32 words over length bytes with the checksum field read as the stamp (firmware/tools/mksunxi.py)
-    if((length < 512) || (length % 512) || ((length / 512) > PC_SD_VERIFY_MAX) || (sector + length / 512 > card))
+    if((length < 512) || (length % 512) || (length / 512 > PC_SD_LIMIT - sector) || (sector + length / 512 > card))
       result = 3;
     else
     {
@@ -2759,23 +2795,25 @@ static int h_sd_write(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   uint32_t crc    = pc_get_u32(req + 8);
   uint32_t card   = pc_hal_sd_sectors();
   uint8_t *back   = resp + 16;                         //read-back lands in the TX staging buffer
-  uint32_t end, last;
+  uint32_t part, end, last;
   int      r;
 
   (void)len;
 
-  if(pc_get_u32(req + 12) != PC_SD_WRITE_MAGIC)        return pc_error(s, PC_E_BAD_ARG, 12, "magic");
+  if(pc_get_u32(req + 12) != PC_SD_WRITE_MAGIC)       return pc_error(s, PC_E_BAD_ARG, 12, "magic");
   if(flags & ~(PC_SD_WF_CONFIG | PC_SD_WF_BOOT))       return pc_error(s, PC_E_BAD_ARG, 6, "flags");
   if((count == 0) || (count > PC_SD_MAX_COUNT) || (count * 512 > s->sd_stage_cap))
                                                        return pc_error(s, PC_E_BAD_ARG, 4, "count 1..128");
   if(card == 0)                                        return pc_error(s, PC_E_IO, 0, "no card");
 
-  end  = pc_sd_write_end(pc_sd_part_start(back));
+  part = pc_sd_part_start(back);
+  end  = pc_sd_write_end(part);
   last = sector + count - 1;
 
   if(end == 0)                                         return pc_error(s, PC_E_STATE, 0, "no partition table: writes off");
-  if((sector < PC_SD_FIRST) || (last >= end) || (last >= card) || (last < sector))
+  if((sector < PC_SD_FIRST) || (last >= card) || (last < sector))
                                                        return pc_error(s, PC_E_BAD_ARG, 0, "outside the write window");
+  if(last >= end)                                      return pc_error(s, PC_E_BAD_ARG, 0, pc_sd_past_end_text(part, last));
   if((sector < PC_SD_BOOT_END) && !(flags & PC_SD_WF_BOOT))
                                                        return pc_error(s, PC_E_BAD_ARG, 0, "16..79 bootloader: flag BOOT");
   if((sector <= PC_SD_CFG_LAST) && (last >= PC_SD_CFG_FIRST) && !(flags & PC_SD_WF_CONFIG))

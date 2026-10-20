@@ -332,8 +332,13 @@ static void test_ident_card(void)
   mock.sd[PC_ID_SECTOR * 512 + 4] = 'x';
   pc_ident_invalidate();
   T_EQ(pc_ident_card(1, scratch, sizeof(scratch))->state, PC_ID_NO_IMAGE);
-  card_image(3000, NULL, 0, NULL, 0, 1000);
+  card_image(MOCK_SD_SECTORS - PC_ID_SECTOR + 1, NULL, 0, NULL, 0, 1000);          //ends past the card
   T_EQ(pc_ident_card(1, scratch, sizeof(scratch))->state, PC_ID_NO_IMAGE);
+  mock.sd_sectors = MOCK_SD_MAX_SECTORS;
+  card_image(PC_ID_END - PC_ID_SECTOR + 1, NULL, 0, NULL, 0, 1000);              //ends past sector 16384 (fw 0.2.101)
+  T_EQ(pc_ident_card(1, scratch, sizeof(scratch))->state, PC_ID_NO_IMAGE);
+  card_image(PC_ID_END - PC_ID_SECTOR, NULL, 0, NULL, 0, 1000);                  //ends at 16384: read
+  T_EQ(pc_ident_card(1, scratch, sizeof(scratch))->state, PC_ID_UNKNOWN);
   pc_ident_invalidate();
   mock.sd_sectors = 0;
   T_EQ(pc_ident_card(1, scratch, sizeof(scratch))->state, PC_ID_NO_IMAGE);
