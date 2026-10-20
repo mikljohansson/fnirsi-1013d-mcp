@@ -572,7 +572,10 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
-- readme-gen (Opus, dispatched 21:21): README rewritten for the hobbyist visitor (owner 21:0x: USPs first, install step 1 =
+- visitor-review and dryrun-agent (Opus, dispatched 21:30, read-only): a Reddit visitor's review of README, install guide,
+  runbook and screenshots; a context-free agent asked "guide me through hacking my scope" in the checkout, reporting the path
+  it took, the questions it would ask, the steps and commands, the safety gates, the Windows gaps and contradictions.
+- readme-gen (Opus, dispatched 21:21, done 21:28, merged 21:29 as 28fde67; README 133 lines, 17/17 links resolve): README rewritten for the hobbyist visitor (owner 21:0x: USPs first, install step 1 =
   "point your AI agent at this repository", manual path second, development content out, credits without the model name);
   docs/development.md takes the development material; docs/guide/agent-runbook.md for the visitor's agent (questions to ask,
   safety gates, exact commands, recovery); root AGENTS.md split into a visitor's-agent top section, development, and "The
