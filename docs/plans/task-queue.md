@@ -6,7 +6,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- **Frequency response track overview follows the Display variant** (owner 10-20 13:37 **(owner)**: "if the chart shows both the
+- **Frequency response track overview follows the Display variant** (owner 10-20 13:35 **(owner)**: "if the chart shows both the
   scrollbar should too"): in Overlaid the track draws the magnitude in cyan and the phase in pink over each other, as the Scope's
   track overlays its channels; Magnitude only / Phase only draw the one curve. slider_ov_draw.c + bode_view.c, the design doc
   slider-overview.md section 5 and the board. Small; with fw-eng5's batch or a one-off.
