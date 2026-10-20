@@ -11,7 +11,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   / 2 average goes; same picture whatever the filter and time base. After the 0.3.0 tag unless the owner says otherwise.
 - **The card-only path is dropped** (owner 22:02: "if people want this firmware they also need to flash the FPGA"): the
   FPGA flash is a mandatory install step; docs-one carries it through the guides and the README.
-- **UI selection for the epics** (owner 22:09, "Sounds great!" to the coordinator's proposal): the device UI grows by two
+- **UI selection for the epics** (owner between 22:07 and 22:12, "Sounds great!" to the coordinator's proposal): the device UI grows by two
   rows only: a Type row in the trigger menu (Edge, Pulse width, Nth edge, with their parameters) and a Sample row in ACQ
   (Normal, Peak); the hardware counter feeds the measurement cards with no new control. Runt, window and timeout triggers,
   the streaming logger, the pulse pattern generator and trigger output, DVM, serial decode, mask test and CSV are MCP-only.
