@@ -198,9 +198,9 @@ cards show that sweep. It never starts RUN; press RUN yourself to repeat. The bu
 sweep ends. A second tap or STOP ends that sweep early and keeps the points measured so far. A tap during the overview
 cancels AUTO SET and says "Auto set cancelled: settings kept".
 
-AUTO SET chooses CH2 range Hold when the response inside its span stays within 20 dB, so RUN then switches no relay.
-Otherwise it chooses Auto, and the relays click where CH2 needs a different range. A flat response gives "No corner
-from 100 Hz to 10 MHz: span kept" and one sweep at the span you had.
+AUTO SET chooses CH2 range Constant when the response inside its span stays within 20 dB, and sets CH2's V/div (the
+CH2 button shows it), so RUN then switches no relay. Otherwise it chooses Auto, and the relays click where CH2 needs a
+different range. A flat response gives "No corner from 100 Hz to 10 MHz" and one sweep at the span you had.
 
 When the result does not add up, AUTO SET stops, keeps your settings and says why on the top line:
 
@@ -216,7 +216,7 @@ When the result does not add up, AUTO SET stops, keeps your settings and says wh
 | Button | Fold-out rows |
 |---|---|
 | Display ("Overlay", "Mag", "Phase") | Overlaid, Magnitude only, Phase only; Frequency axis Log (default) or Linear. Linear changes only the drawing: the points stay log spaced |
-| Sweep ("50 pt") | Start (1 Hz to 5 MHz, default 100 Hz), Stop (10 Hz to 10 MHz, default 1 MHz), Points (10, 20, 50, 100), Settle (Fast, Normal, Resonant, High Q), CH2 range (Auto, or the held V/div), Single sweep |
+| Sweep ("50 pt") | Start (1 Hz to 5 MHz, default 100 Hz), Stop (10 Hz to 10 MHz, default 1 MHz), Points (10, 20, 50, 100), Settle (Fast, Normal, Resonant, High Q), CH2 range (Auto, or Constant and the CH2 V/div), Single sweep |
 | Thru ("None", "On", "Off", "Stale", "Meas.") | Measure thru, Apply, Clear |
 | Trace style | Lines (default) or Dots |
 | Grid | The grid on or off |
@@ -224,8 +224,9 @@ When the result does not add up, AUTO SET stops, keeps your settings and says wh
 - Start and Stop step in 1-2-5 steps; tap the left half of the row to go down, the right half to go up.
 - Settle is how many periods each point waits before it is recorded: Fast 3, Normal 10, Resonant 50, High Q 200. Use
   a longer Settle for a sharp resonance.
-- CH2 range: a tap switches between Auto and Hold. Hold keeps the range CH2 has at the tap; set it first in the CH2
-  menu.
+- CH2 range: a tap switches between Auto and Constant. Constant sweeps every point on the V/div of the CH2 menu (the
+  CH2 button in the top bar) and never changes it; the row shows it, e.g. "Constant 100mV". Choosing a V/div in the
+  CH2 menu while this view shows sets Constant; a sweep in progress starts again on the new V/div.
 - Single sweep keeps the panel open and shows what a tap does. Stopped, green "Single sweep" with the estimated time
   ("about 3 s") runs one sweep. While RUN repeats, green "STOP after this sweep" makes the current sweep the last.
   During a single sweep, red "Stop sweep" with the progress ("12 / 50") stops it. It is grey during AUTO SET.
@@ -247,7 +248,8 @@ a sweep runs, the generator button shows the tone being measured, and a tap on i
 sweep". When no sweep runs, the post carries your own generator setting again. The trigger menu says "Not used by the
 sweep".
 
-**Warnings while sweeping.** Among others: "CH2 overrange: set CH2 range Auto or raise V/div", "N points not settled:
+**Warnings while sweeping.** Among others: "CH2 overrange: increase V/div in CH2 menu or Auto", "CH2 small: decrease
+V/div in CH2 menu or Auto", "N points not settled:
 choose a longer Settle", "CH1 level low: the DUT loads the 1 kOhm source", "CH1 level low above 2 MHz: the x1 probe
 rolls off", "Thru does not match this sweep: measure again", "DC level beyond the offset range: AC-couple DUT",
 "Sweep stopped: the PC took over", "ADC readout fault: see Diagnostics".

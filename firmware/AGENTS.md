@@ -4488,3 +4488,90 @@ Owner question left open: AUTO SET's span rules (fc / 10 .. 10 fc, f0 (1 -+ 4 / 
 inside the span for almost every real filter or tank, so AUTO SET will choose Hold mainly for flat responses. If the
 owner wants a silent RUN for a narrow band the user dragged to, the same rule could be applied at RUN's first sweep on
 the user's span (not built).
+
+## 62. fw-eng6: CH2 range Auto / Constant, read-only requests inside menus (fw 0.2.94 provisional, protocol 1.24)
+
+Branch `fw-eng6` from main 81c9a19 (fw 0.2.93). Brief: the owner's decisions of 2026-10-20 14:16 (Auto / Constant)
+and 14:19 (the AUTO SET notes lose ": span kept"), the coordinator's bench read of 14:19 (a flat AUTO SET ended on
+Auto), and the task-queue Dispatched entry "fw-eng6" (READ_SCREEN must not unwind menus). Commits: 39213e7 (engine +
+test_bode_sweep), 96eb3e5 (view, texts, BODE_CTRL 58 bytes), 93a0c0f (the CH2 menu sets Constant, alone so it can
+be reverted), 70e9a9b (protocol row 60, mcp `BodeCtrlResp`), ce78bc9 (read-only requests inside menus, row 63), then
+docs. PC_FW_VERSION not bumped. Host tests green (test_bode_sweep 2226, test_session 70201, test_ui incl. the
+fold-out row width), mcp ruff and test_bode_device / test_protocol green, GCC 10 build clean in the changed files.
+All files LF (`git diff --check`). **Nothing benched, nothing flashed.**
+
+**Constant (the screen's name for BODE_CH2_HOLD).**
+- One source: the CH2 menu's V/div, `scopesettings.channel2.displayvoltperdiv`. The menu sets it at once and copies
+  it to `samplevoltperdiv` (the hardware range) only while running, so the view reads the display value
+  (`ch2_constant_range`); 50 mV/div (software zoom) sweeps on the 100 mV/div range, and the engine's channel write
+  then sets the display to 100 mV/div. `hold_r2` / HOLD_CHANNEL are gone; the engine keeps `bode_start`'s hold_r2
+  parameter and the view passes the channel's range.
+- The engine writes no other CH2 range on Constant: the pre-scan starts CH2 on the held range (it went to range 1
+  before), the collapse test against the pre-scan's reference is off (the reference is on the same range), the
+  saturation check in the pre-scan's check runs on the held range. A clip or a drop only flags the point
+  (`auto_range` returned early already). Test `test_constant_never_switches`: no CH2 range change in the DUT model,
+  fresh and plan sweeps, 0.5 V/div (ch2_small in the stopband) and 0.1 V/div (15 clipped points, no step up).
+- The row reads "Auto" or "Constant 100mV" (`volt_div_texts[magnification][display]` without "/div"; the width
+  check is in test_ui). A tap toggles; nothing else is stored.
+- AUTO SET's Constant writes the chosen range into CH2 (`pc_hal_channel_write(1, .., PC_CH_RANGE)`: the top-bar
+  button and its menu show it). On Auto the channel keeps what the final sweep leaves.
+- Leaving the mode on Constant restores CH2's enable, coupling and offset but not its V/div: CH2 gets the range of
+  the CH2 menu's V/div and keeps that V/div. On Auto it is restored as before.
+- Warnings on Constant: "CH2 overrange: increase V/div in CH2 menu or Auto" (a clipped point), new BU_W_CH2_SMALL
+  "CH2 small: decrease V/div in CH2 menu or Auto" (a ch2_small point). The flat note is "No corner from 100 Hz to
+  10 MHz". The CSV header writes `ch2_range=Constant`.
+
+**The CH2 menu sets Constant (93a0c0f, the coordinator's addition, owner to confirm).** statemachine.c's channel
+menu V/div handler calls `bode_view_ch2_vdiv_by_hand()` for CH2 (the menu's own buttons only; the scope's V+/V-
+page does not show in this mode). With the view open it sets Constant and drops the host's exact settings
+(host_cfg_valid, like every screen change). A sweep in progress (not AUTO SET's) ends at once and starts again from
+its first point on the new range, the same kind (single, RUN, thru). Reason: while running, the menu has already
+written the range to the front end (match_volt_per_div_settings), so the engine would finish the sweep on a range it
+does not know, and an Auto sweep's later channel writes would overwrite the user's V/div (the owner's complaint).
+During AUTO SET the change only sets the row; AUTO SET's verdict at its end decides the mode (it writes its range on
+Constant). Doubt for the owner: a V/div tap in the CH2 menu now also restarts a running RUN sweep (one sweep's
+points re-measured).
+
+**The flat path.** `bv_auto_finish` runs the rule on BODE_AS_FLAT too (it always did: the note, then the span kept,
+then the rule). Host test: both tips on the post (DUT model `thru`), Start / Stop 20 kHz .. 5 MHz kept: 9 points,
+0.5 dB spread, 2.1 dBV -> Constant on 0.5 V/div. So the bench's Auto at 14:19 came from the inputs: a point without
+a tone, a spread over 20 dB (e.g. the x1 probes above 2 MHz, inference), or a bad record. Bad records (clipped,
+ch2_overload, unsettled, incoherent) no longer count. BODE_CTRL bytes 50..57 now say which it was:
+- 50 u8 verdict (0 Auto, 1 Constant, 0xFF none since boot);
+- 51 u8 reason (0 one range holds the span, 1 spread >= 20 dB, 2 fewer than two points in the span, 3 a point without
+  a tone, 4 too large for 5 V/div);
+- 52 u8 points counted, 53 u8 points left out;
+- 54..55 i16 spread, centi-dB; 56..57 i16 largest level, centi-dBV peak.
+mcp `BodeCtrlResp.auto_ch2_*`.
+
+**Read-only requests inside menus (ce78bc9).** New poll context PC_CTX_MODAL and command flag F_MODAL (READ_SCREEN,
+GET_CHANNEL, GET_TIMEBASE, GET_TRIGGER, GET_DECIM, GET_SEQ, GET_GEN, GET_CAL, READ_BODE: their handlers only build a
+body from settings / held state). While the UI is modal such a request is not a yield request: `pc_ui_modal_wait`
+sets `modal_req`, and `pc_glue_ui_yield` (every modal loop's check, once per iteration after its touch scan, so the
+screen is drawn and no FPGA transaction is in flight) runs `pc_poll(PC_CTX_MODAL)`, which answers it; the menu stays
+open. A state-changing request reached in that poll asks to yield as before, so a READ_SCREEN queued in front of a
+SET_* is answered first, then the screens unwind. A hold reason gives E_BUSY with it at once, no yield check within
+PC_YIELD_MS gives detail 2 (both count in GET_LINK_STATS 69). The MAIN poll clears `modal_req`. Dispatches in MODAL
+count as BUSY (GET_LINK_STATS disp_busy). test_session `test_modal_read_only`; the 1.23 test's "yields as usual"
+case now uses TEST_PATTERN (GET_CHANNEL no longer yields). Not done: SD_INFO / READ_TRACE stay MAIN-only (SD access and
+trace conversion inside a file viewer were not reviewed).
+
+**Bench (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`; 0x153A; wiring A, x1)**
+1. Both tips on the post, Start / Stop 20 kHz .. 5 MHz, AUTO SET: "No corner from 100 Hz to 10 MHz" (no suffix).
+   BODE_CTRL action 0: bytes 50..57. Expect verdict 1 (Constant), reason 0, about 9 points, spread a few dB; the CH2
+   button reads the chosen V/div (0.5 or 1 V/div), the Sweep row "Constant 500mV" (or 1V). If verdict 0, the reason
+   and spread say why (report them). RUN: header switches 0, planned 0, no relay click.
+2. On Constant, open the CH2 menu and pick 200 mV/div: the row reads "Constant 200mV", the next sweep runs on it
+   (READ_BODE r2 4 on every row), the warning "CH2 overrange: increase V/div in CH2 menu or Auto" if it clips. Pick a
+   V/div while RUN sweeps: the sweep starts again on it. Leave the mode (main menu Scope) and come back: CH2 still
+   on 200 mV/div, the row still "Constant 200mV".
+3. On Auto (tap the row), RUN on the RC: two planned clicks per sweep as 0.2.93; leaving the mode restores CH2's
+   pre-mode V/div.
+4. Pick a CH2 V/div in the CH2 menu while on Auto: the row turns "Constant ...". (The coordinator's addition; the
+   owner confirms or 93a0c0f is reverted.)
+5. Screenshots: open Menu > Settings (and, separately, the generator menu, a file viewer) and run
+   `tools/screenshots.py --only settings`: the PNG shows Settings, and Settings is still open afterwards. A
+   state-changing command (e.g. `s.set_timebase(...)`) still closes it.
+Bug indicators: a CH2 relay click during a Constant sweep; CH2 back on the pre-mode V/div after leaving on Constant;
+the row reading "Constant" with a V/div the CH2 button does not show; READ_SCREEN answering E_BUSY detail 2 while a
+menu is simply open (a modal loop without a yield check); a menu closing on GET_CHANNEL.

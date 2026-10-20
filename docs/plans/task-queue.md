@@ -512,6 +512,13 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   command closes the open menu first, so screenshots of Settings, the generator menu, the file viewers, First start and the
   wizard come out as the screen after the menu closed): a read-only command (READ_SCREEN, GET_*) is answered from inside the
   modal loop without leaving it. Separate agent fw-shot if fw-eng6 declines it.
+  **Result (branch fw-eng6, fw 0.2.94 provisional, not benched; firmware/AGENTS.md section 62):** both items built.
+  Constant: the CH2 menu's display V/div is the one source; the engine writes no other CH2 range (pre-scan included);
+  AUTO SET writes its Constant range into CH2; leaving the mode keeps it; the warnings name the CH2 menu; the flat note
+  drops ": span kept". The popover hook is commit 93a0c0f alone (revertable). The flat path does run the rule (host
+  test: a thru gives Constant on 0.5 V/div); the 14:19 Auto is not explained from the code, so BODE_CTRL bytes 50..57
+  now carry AUTO SET's CH2 verdict, reason, points and spread for the bench. READ_SCREEN and the read-only GET_* are
+  answered at the modal loops' yield check with the screen open (ce78bc9, protocol row 63 note).
 
 - docs-guide / docs-articles (Opus, dispatched 14:04, done 14:15 / 14:16, merged 14:18, `mkdocs build --strict` green; stale lines they found in ui-guidelines.md, bode-ui.md section 5, firmware/README.md fixed at the merge; the fpga/al3/AGENTS.md header still says 0x153A "Not flashed": fpga-gen11 to fix with its handoff; screenshots of modal screens need the READ_SCREEN change given to fw-eng6): the user guide text per screen on fw 0.2.93 (docs/guide/*.md, the
   "to be written" notes gone, screenshot placeholders kept, new states named for tools/screenshots.py) plus the release-notes
