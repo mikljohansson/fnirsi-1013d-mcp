@@ -1309,3 +1309,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   Constant, Auto on the RC, the menu tap on Auto, `tools/screenshots.py --only settings` with Settings open).
 - 2026-10-20 14:53: fw 0.2.95 (the CH2 range row reads just "Constant", owner 14:51) pinned backups/fw-0.2.95_23a85e71.bin
   (sha256 23a85e71b411041dbacf0b9ec9fa689e777ab22dcaf89f320babe6af95b7591a), loaded. Section 62 walk-through still pending.
+- 2026-10-20 14:57: section 62 walk-through on fw 0.2.95 (owner): 1 flat AUTO SET -> Constant, RUN silent: confirmed; 2 the
+  CH2 menu on Constant (row, restart during RUN, survives leaving): works; 3 Auto on the RC, two planned clicks: confirmed;
+  4 a CH2 menu tap on Auto turns the row Constant: confirmed (the coordinator's addition stays). 5 READ_SCREEN inside menus:
+  `tools/screenshots.py --only settings` with Settings open gives docs/screenshots/settings.png showing Settings (first
+  screenshot committed for the site). Manual screenshots of the other screens next, one by one with the owner.
