@@ -2454,6 +2454,13 @@ calibration square, 1X, DC, 1 V/div, Auto trigger, memory 3000, Scope view.
 Bug indicators: a grey time/div box that can be chosen; zeros or a flat line at the right edge at a white time/div; the
 trace jumping against the H marker when the rate changes; the slider window moving the wrong way or past the bar; a tap
 on the cards changing V/div; the Spectrum's Filter changing the Scope's.
+
+**fw-acq2 (fw 0.2.84 provisional), the Memory column after Filter -> Off** (e125cf2): `pc_glue_decim_tap` redraws the
+column on every Filter change (it did only when a filter went on), the chip set from `acq_view_mem_chips` (acq_view.c,
+test_acq_view `test_mem_chips`). Bench: AL3 bitstream with the Filter (0x1534+), ACQ menu, memory 15000, tap Filter
+until it reads a filter: the memory jumps to 6000 and 9000 .. 15000 disappear at once; tap on through the filters to
+"off": 9000 .. 15000 reappear at once (white, tappable) with the menu still open; pick 15000, close and reopen: kept.
+Bug indicators: a depth chip missing with Filter off, or shown and tappable with a filter on.
 ## 41. fw-meas: Measurements v2 (fw 0.2.65 provisional, protocol unchanged)
 
 Branch from main 8f8687a (fw 0.2.61), merged with main a179408 in 37714c3 (no firmware changes on main in between).
@@ -3645,6 +3652,45 @@ GCC 10 image 746,496 B. **Not benched.** Bench steps (CH1 on the 1 kHz post, RUN
 5. Leave to the Scope and come back without touching the rate: the panned cell is still shown.
 Bug indicators: any rate or time/div change during a drag or tap-to-jump; the slider window past the track end; a zoom
 step after a pan that is not the slowest rate covering the new stop.
+
+**Addendum, fw-acq2 (fw 0.2.84 provisional, protocol unchanged, settings word 217): the follow-ups (a)-(c).** Branch
+`fw-acq2` from main 83e3b32 (fw 0.2.83). Commits 5bfe097 (ladder, (b) and (c)), c449a5c (Capture card, (a)), then docs.
+GCC 10 image of c449a5c 751,616 B, sha256 209176c35d12ae180c261af81a62eea65f68f74581366c26b25ebb9fc8ff50af; warnings GCC
+10 36, GCC 13 31 as on main. Host tests green (test_spec_zoom 1,671,057 checks, test_ui 1,432,148). **Not benched.**
+- **(b) The capture time is the record's, memory depth / fs** (`fpgasettings.totalsamples`, `spec_cap()`), chosen over
+  capping the memory to N in the Spectrum: the pair stays a function of (cell, depth) with no per-mode meaning of the
+  memory setting and no change to the record the Scope and the host see. `spl_rate(stop, cap, rates, n)` no longer
+  takes N; `spl_ok` / `spl_zoom` / `spl_auto` take both (N for the 16-bin end, cap for the time). The 0 Hz end is now
+  set by the depth: 1 kHz at 2 kSa/s (3000), 2 kHz at 5 kSa/s (6000, 8190, 9000), 5 kHz at 10 kSa/s (12000 .. 16382);
+  item 2's "500 Hz at 1 kSa/s (N 2048)" and "10 Hz at 500 Sa/s (N 1024)" are history (they assumed a record of N).
+- **(c)** `spec_follow_cap` at the start of `spectrum_display_body`: a depth change (ACQ menu depth or Filter, host
+  SET_TRIGGER total / SET_DECIM) re-derives the rate at once when the rate is `spec.lad_rate` (set by a zoom step, Auto's
+  finish, and at entry / Reset when the rule gives the current rate); a hand-picked rate holds, a pan keeps the ladder's
+  (so the re-derivation uses the panned stop, as a zoom step would); stopped or during Auto it waits. The ACQ menu is
+  modal, so the change lands when it closes. An FFT length change needs nothing: N is not in the rate. Entry still
+  never changes the rate. Inference to watch: a host that sets the rate with SET_TIMEBASE to the value the ladder set
+  and then changes SET_TRIGGER total in the Spectrum view gets the ladder's rate for the new depth (protocol.md does
+  not promise otherwise; no host flow does this today).
+- **(a)** Capture card (`UI_MS_SP_CAPTURE`, the view group's fifth item; `UI_MS_SP_PER_GROUP` 5, `UI_MS_SP_CH_ITEMS` 4,
+  `ui_ms_sp_len`), value `ui_fmt_record_time(depth, fs)` at the record's rate (decimation included). Default on after
+  RBW and Time; with both channels shown the default row overflows ("+2" outside the waterfall; it was exactly six).
+  Its rank is word 217 (0xCA00 | rank); `ui_ms_spec_restore` of the view leaves the ranks raw and
+  `ui_ms_spec_capture_restore` must follow it (scope_functions.c does). The Time card is unchanged.
+- test_spec_zoom's "quarter to half of the bins" check never ran (its reference was asked for N 2^30); it runs now,
+  excluding the slowest rate's floor.
+Bench steps (CH1 on the 1 kHz post, Spectrum, RUN, MEASURES with Span, Center, RBW, Capture):
+1. Capture card: memory 3000 at the whole axis (50 MSa/s): "60.00us"; memory 15000: "300.0us". ACQ rate 1 kSa/s by
+   hand at 3000: "3.000s".
+2. Zoom in to the end at 0 Hz (tap right, drag the window to the left end after each tap) at 16k memory (15000), N
+   4096: it ends at 5 kHz from 0 at 10 kSa/s, Capture "1.500s"; no capture takes longer than about 2 s (0.2.83 went
+   to 2 kSa/s, 8 s). At 3000: 1 kHz at 2 kSa/s, "1.500s".
+3. Depth follows: at the 3000 end (1 kHz, 2 kSa/s), ACQ menu, memory 15000, close: the chip goes to 10 kSa/s at once
+   ("Waiting for a capture at the new rate"), Span still 1 kHz; back to 3000: 2 kSa/s. Filter on at 15000: the depth
+   drops to 6000 and the rate to 5 kSa/s at once. A rate picked by hand first, then a depth change: the rate stays.
+4. N change: Analyse > FFT length 1024 / 2048 / 4096: the ACQ chip never changes; at the whole-axis end (500 kHz at N
+   2048) going to N 1024 leaves the span, tap right does nothing, tap left works.
+Bug indicators: a running capture over about 2.1 s (Capture card); a rate change on an FFT length change or on entering
+the view; a hand-picked rate replaced by a depth change; Capture missing from the MEASURES view row (five cells).
 ## 53. fw-yield: host commands leave the modal screens (fw 0.2.78, protocol 1.23, row 63)
 
 Branch `fw-yield` from main dd46518 (fw 0.2.76). Owner 2026-10-19 23:27 (task queue "Host commands leave the modal

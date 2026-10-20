@@ -68,9 +68,16 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   plot narrows the span one step, the left half widens it, both about the centre (kept inside 0 .. 25 MHz); a drag in
   the plot or on the slider pans the centre, and a tap in the slider's track jumps the window there. While a new record
   can be taken (running, or Single) every zoom step sets the rate from the stop frequency (centre + span / 2): the
-  slowest UI rate whose fs / 2 covers it and whose capture of N samples (the FFT length) takes at most 2.048 s
-  (`spec_ladder.c` `spl_rate`), and AUTO SET ends on the same pair. A cell from 0 Hz holds between a quarter and a half
-  of the N bins. **A pan never changes the rate** (owner, 2026-10-20 10:24; fw 0.2.81: "the spectrum should stay the
+  slowest UI rate whose fs / 2 covers it and whose capture of the record takes at most 2.048 s
+  (`spec_ladder.c` `spl_rate`), and AUTO SET ends on the same pair. **The capture time is the record's, memory depth /
+  fs** (fw 0.2.84; 0.2.77-0.2.83 counted the FFT's N samples, so 16k memory at 2 kSa/s took 8 s): the pair is a
+  function of the cell and the memory depth only, the FFT length N sets just where zooming in ends (16 bins). The
+  invariant holds after every change of its inputs: a memory depth change (ACQ menu depth or Filter, the host) takes the
+  rule's rate for the cell at once while the rate is the one the ladder set (a hand-picked rate holds as below), and an
+  N change needs nothing. Capping the memory depth to N while in the Spectrum was the other option; it was not taken,
+  because it would make one setting mean two things per mode and change the record the Scope and the host see. The
+  Capture card (MEASURES) shows memory depth / fs. A cell from 0 Hz holds between a quarter and a half of the N bins
+  where neither the capture time nor the slowest rate holds the rate. **A pan never changes the rate** (owner, 2026-10-20 10:24; fw 0.2.81: "the spectrum should stay the
   same when scrolling, changes to sample rate and time/div should happen when zooming"): plot drag, slider drag and
   tap-to-jump keep the rate and are clamped to the current axis 0 .. fs / 2, which is what the slider track shows, so
   the clamp is visible. To look above the axis, zoom out (the rate rises) and zoom in again; the zoom step re-derives
@@ -95,7 +102,7 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   corners, drawn over a grey box that holds the parameters or the value, so the join has no notch. The block is as wide
   as its text.
 - **Measurement names** as scope makers spell them: Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq, Period, +Width, -Width,
-  +Duty, -Duty, Peak, Level, RBW, THD, Noise, Span, Center (fw 0.2.65). Values with four significant digits and a unit, formatted to fit the card.
+  +Duty, -Duty, Peak, Level, RBW, THD, Noise, Span, Center (fw 0.2.65), Time, Capture (fw 0.2.84: one record's capture time). Values with four significant digits and a unit, formatted to fit the card.
 - **Fonts**: the device has bitmap fonts of 13, 16 and 24 px only (`font_2`, `font_3`, `font_5`), no anti-aliasing,
   no word wrap. 13 px for units and secondary text, 16 px for values and rows, 24 px for headlines. Every line is laid
   out to fit its box at 6.7 px per character (13 px) and 7.1 px (16 px); long sentences are broken by hand.
