@@ -1442,7 +1442,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   bode_cells and the sweeps without checking the amplitude; the seam metric reads 1.8..3.7 on noise. Nothing is known against
   0x153B yet. Lesson (also in the bitstream README section 11 as check 0 and in bode_cells.py's new NO TONE line): confirm the
   signal amplitude before any metric. Next: probes back on (CH1 post, CH2 the ladder's second node), then the checks again.
-- 2026-10-20 20:40-20:45: **0x153B benched good** (probes on: CH1 post, CH2 the ladder's second node; check 0 amplitude 181 /
+- 2026-10-20 20:40-20:42: **0x153B benched good** (probes on: CH1 post, CH2 the ladder's second node; check 0 amplitude 181 /
   168 codes pk-pk at range 3, 1 MSa/s). Seam test 0 of 50 untriggered captures at 1 MSa/s (worst ratio 0.02) and 0 of 50 at
   200 MSa/s with 1 MHz (0.07); bode_cells auto records leak -58..-62 dB worst (one NO TONE record in a first run, none in the
   second); ten sweeps 100 Hz..1 MHz / 25: 25 captures (29 on the first), 0 time-outs, 0 retakes, 0 flagged, 2.1 s; check 5
