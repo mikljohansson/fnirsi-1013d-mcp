@@ -69,6 +69,8 @@ static const char *const ch2_names[2] = { "Auto", "Hold" };
 #define AUTO_STOP_I       21
 #define AUTO_POINTS       20
 
+#define HOLD_CHANNEL      0xFF              //Hold on the channel's range when the sweep starts (BODE_CTRL's rule)
+
 typedef struct
 {
   uint8  active;
@@ -92,6 +94,7 @@ typedef struct
   uint8  autoset;                   //the pass running: 1 the overview, 2..BODE_AUTO_PASSES the sharp-tank passes; 0 none
   uint8  as_thru;                   //the thru's Apply before the overview
   uint8  as_final;                  //fw 0.2.86: AUTO SET's last step, one single sweep at the found settings, is running
+  uint8  hold_r2;                   //fw 0.2.92: CH2's range in Hold (0..5; HOLD_CHANNEL: the channel's when a sweep starts)
 
   //What the view gives back
   uint8  s_run, s_trig, s_gen_en, s_gen_duty, s_disp[2];
@@ -104,7 +107,15 @@ typedef struct
 
 //Defaults: 100 Hz .. 1 MHz, 50 points, Normal settle, CH2 Auto, Overlaid, Log, cursors off
 static bv_state bv = { .start_i = 6, .stop_i = 18, .points_i = 2, .settle = BODE_SETTLE_NORMAL, .ch2 = BODE_CH2_AUTO,
-                       .cur = { -1, -1 }, .note = NOTE_NONE };
+                       .hold_r2 = HOLD_CHANNEL, .cur = { -1, -1 }, .note = NOTE_NONE };
+
+//fw 0.2.92 (owner 2026-10-20 13:33): the CH2 levels AUTO SET has measured (the overview and its passes), for the CH2
+//range mode it sets (bode_auto_ch2)
+#define AS_LEVELS         (AUTO_POINTS * BODE_AUTO_PASSES)
+static int    as_n;
+static uint64 as_f[AS_LEVELS];
+static int32  as_v2[AS_LEVELS];
+static uint8  as_have[AS_LEVELS];
 
 //fw 0.2.71: the table before AUTO SET's overview, given back when it is cancelled (bode-ui.md 3.2 step 6)
 static bode_snap as_snap;
@@ -125,6 +136,18 @@ static uint8       ov_new_ok;
 
 //The MEASURES list (bu_ms_defaults: -3dB, Peak, Q, Level)
 static uint8 bv_ms[BU_MS_COUNT] = { 4, 1, 0, 2, 3, 0, 0, 0, 0, 0 };
+
+//fw 0.2.92: the Sweep fold-out's CH2 range row: "Auto", or the V/div Hold keeps (with CH2's probe factor)
+static const char *ch2_range_text(void)
+{
+  int r = (bv.hold_r2 < 6) ? bv.hold_r2 : scopesettings.channel2.samplevoltperdiv;
+  int m = scopesettings.channel2.magnification;
+
+  if(bv.ch2 != BODE_CH2_HOLD)
+    return ch2_names[BODE_CH2_AUTO];
+
+  return (const char *)volt_div_texts[(m < 7) ? m : 1][(r < 6) ? r : 5];
+}
 
 static void f_step_text(char *t, int i)
 {
@@ -359,7 +382,7 @@ static void bv_start_cfg(const bode_cfg *c, int single, int thru)
 {
   bode_eng *e = bode_engine();
   const bode_cfg *l = bode_last_cfg(e);
-  int r2 = scopesettings.channel2.samplevoltperdiv;
+  int r2 = (bv.hold_r2 < 6) ? bv.hold_r2 : scopesettings.channel2.samplevoltperdiv;
 
   //Another plan: the cursors are placed again
   if((l->start_mhz != c->start_mhz) || (l->stop_mhz != c->stop_mhz) || (l->points != c->points))
@@ -419,6 +442,7 @@ static void bv_auto_start(void)
   c.background = 1;
 
   bv.autoset = 1;
+  as_n = 0;
   bv_start_cfg(&c, 1, 0);
 
   if(bode_state(e) != BODE_ST_RUNNING)
@@ -453,6 +477,7 @@ static int32    p_m[BODE_MAX_POINTS], p_p[BODE_MAX_POINTS], p_x[BODE_MAX_POINTS]
 static uint8    p_ok[BODE_MAX_POINTS], p_have[BODE_MAX_POINTS], p_vis[BODE_MAX_POINTS];
 static uint16   p_flags[BODE_MAX_POINTS];
 static uint8    p_r1[BODE_MAX_POINTS], p_r2[BODE_MAX_POINTS];
+static int32    p_v2[BODE_MAX_POINTS];
 
 static void gather(void);
 
@@ -501,6 +526,7 @@ static void gather(void)
     p_flags[i] = p_have[i] ? p.flags : 0;
     p_r1[i] = p_have[i] ? p.r1 : 0;
     p_r2[i] = p_have[i] ? p.r2 : 0;
+    p_v2[i] = p_have[i] ? p.v2_mdb : 0;
     p_ok[i] = (uint8)(p_have[i] && !(p.flags & BODE_F_BAD));
   }
 }
@@ -511,7 +537,7 @@ static void bv_auto_finish(void)
   bode_eng *e = bode_engine();
   bode_autospan a;
   bode_cfg zc;
-  int r, fail;
+  int r, fail, i;
 
   //Stopped (STOP, the host): cancelled, the previous table back. Failed: the settings are kept, the pass's points and
   //its error's warning show.
@@ -535,6 +561,16 @@ static void bv_auto_finish(void)
   gather();
   if(bv.autoset == 1)
     ov_take();
+
+  //The pass's CH2 levels join the overview's and the earlier passes' (fw 0.2.92)
+  for(i = 0; (i < n_pts) && (as_n < AS_LEVELS); i++)
+  {
+    as_f[as_n]    = p_f[i];
+    as_v2[as_n]   = p_v2[i];
+    as_have[as_n] = p_have[i];
+    as_n++;
+  }
+
   r = bode_auto_span(p_f, p_m, p_p, p_flags, p_have, n_pts, bv.start_i, bv.stop_i, &a);
 
   //fw 0.2.84 (owner 2026-10-20 11:23): a pass that is not consistent (CH2 ranging bounced, absurd points, a peak not
@@ -573,7 +609,21 @@ static void bv_auto_finish(void)
   bv.start_i = a.start_i;
   bv.stop_i  = a.stop_i;
   bv.settle  = a.settle;
-  bv.ch2     = BODE_CH2_AUTO;
+
+  //fw 0.2.92 (owner 2026-10-20 13:33): CH2 Hold when the levels inside the span fit one range (under 20 dB of spread),
+  //on the most sensitive range holding the largest with 1.5 x margin; else Auto. RUN at a span one range covers then
+  //switches no relay; a held point that drops far below the range reads ch2_small and the user chooses Auto
+  {
+    pc_hw_channel h;
+    int32 fs[6];
+    uint8 hr = HOLD_CHANNEL;
+
+    pc_hal_channel_read(1, &h);
+    bode_ch2_full_scale(e, h.probe, fs);
+    bv.ch2 = (uint8)bode_auto_ch2(as_f, as_v2, as_have, as_n, bode_step_mhz(a.start_i), bode_step_mhz(a.stop_i), fs,
+                                  &hr);
+    bv.hold_r2 = (bv.ch2 == BODE_CH2_HOLD) ? hr : HOLD_CHANNEL;
+  }
 
   //fw 0.2.86 (owner 2026-10-20 11:47): never RUN. One single sweep at the found settings gives the table and the cards,
   //then STOP as any single sweep; RUN stays the user's explicit repeat. AUTO SET's button reads "Auto..." until it ends.
@@ -1988,7 +2038,7 @@ static void build(bv_fold *d)
     f_step_text(add(d, ROW_VALUE2, "Stop")->value, bv.stop_i);
     fmt_uint(add(d, ROW_VALUE, "Points")->value, pts_tab[bv.points_i & 3]);
     fmt_str(add(d, ROW_VALUE, "Settle")->value, settle_names[bv.settle % BODE_SETTLE_COUNT]);
-    fmt_str(add(d, ROW_VALUE, "CH2 range")->value, ch2_names[bv.ch2 & 1]);
+    fmt_str(add(d, ROW_VALUE, "CH2 range")->value, ch2_range_text());
     sep = d->n;
     r = add(d, ROW_SINGLE, "");
     r->on = (uint8)single_state(&r->label, r->value);
@@ -2186,7 +2236,12 @@ static int fold_tap(bv_fold *d, int row, int dir)
 
       case 2: bv.points_i = (uint8)((bv.points_i + 1) & 3);                return 0;
       case 3: bv.settle = (uint8)((bv.settle + 1) % BODE_SETTLE_COUNT);    return 0;
-      case 4: bv.ch2 ^= 1;                                                 return 0;
+      case 4:
+        //fw 0.2.92: Hold keeps the range CH2 has now (the row shows it); Auto forgets it
+        bv.ch2 ^= 1;
+        bv.hold_r2 = (bv.ch2 == BODE_CH2_HOLD) ? (uint8)((scopesettings.channel2.samplevoltperdiv < 6) ?
+                                                         scopesettings.channel2.samplevoltperdiv : 5) : HOLD_CHANNEL;
+        return 0;
 
       default:
         //Single sweep (fw 0.2.84, owner 2026-10-19 21:32): the fold-out stays open. Stopped: one sweep; while RUN
@@ -2439,6 +2494,7 @@ void bode_view_settings_restore(uint16 w0, uint16 w1, uint16 w2)
   {
     bv.settle    = (uint8)(w1 & 3);
     bv.ch2       = (uint8)((w1 >> 2) & 1);
+    bv.hold_r2   = HOLD_CHANNEL;
     bv.show      = (uint8)((w1 >> 3) & 3);
     bv.cursor_on = (uint8)((w1 >> 5) & 1);
     bv.axis      = (uint8)((w1 >> 6) & 1);
@@ -2466,6 +2522,7 @@ void bode_view_defaults(void)
   bv.points_i  = 2;
   bv.settle    = BODE_SETTLE_NORMAL;
   bv.ch2       = BODE_CH2_AUTO;
+  bv.hold_r2   = HOLD_CHANNEL;
   bv.show      = BU_SHOW_OVERLAY;
   bv.axis      = BU_AXIS_LOG;
   bv.cursor_on = 0;
@@ -2586,6 +2643,7 @@ int bode_view_ctrl(const uint8 *req, uint8 *resp, uint16 *detail)
         bv.points_i = (uint8)i;
     bv.settle = c.settle;
     bv.ch2    = c.ch2_mode;
+    bv.hold_r2 = HOLD_CHANNEL;          //Hold: CH2's range when the sweep starts (row 60)
     host_cfg  = c;
     host_cfg_valid = 1;
   }
@@ -2672,13 +2730,15 @@ int bode_view_ctrl(const uint8 *req, uint8 *resp, uint16 *detail)
   }
   resp[36] = resp[37] = resp[38] = resp[39] = 0;
 
-  //fw 0.2.91: the latest sweep's capture statistics (protocol row 60)
+  //fw 0.2.91: the latest sweep's capture statistics (protocol row 60); fw 0.2.92: then its planned CH2 range switches
+  //(the header's count, bytes 26..27, is the unplanned ones)
   {
-    uint16 st[4];
+    uint16 st[5];
     int k;
 
     bode_capture_stats(bode_engine(), &st[0], &st[1], &st[2], &st[3]);
-    for(k = 0; k < 4; k++)
+    st[4] = bode_planned_switches(bode_engine());
+    for(k = 0; k < 5; k++)
     {
       resp[40 + 2 * k] = (uint8)st[k];
       resp[41 + 2 * k] = (uint8)(st[k] >> 8);
