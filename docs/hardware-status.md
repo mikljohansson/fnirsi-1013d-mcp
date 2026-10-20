@@ -1157,4 +1157,16 @@ Newest entries at the bottom. Format: date, who, what, result.
   5 V/div and the 0.2.71 rule ends the sweep with reason 8. Yesterday's device sweeps (every point flagged clipped) fit the
   same flag. Fix dispatched (fw-bode2): the engine judges clipping from the record's own min / max only, the sticky flag is
   cleared per capture, and reason 8 is raised from the capture self-check (0x36) rather than from clipping.
+- 2026-10-20 11:10-11:16: fw 0.2.83 (fw-bode2: engine clipping from the record only, ADoverload cleared per readout, reason 8
+  from the 0x36 self-check) merged, pinned backups/fw-0.2.83_e63e0e02.bin (sha256
+  e63e0e024735dab131be6430ba4151a645a1e49ea30df10503b01120a3c77866), loaded 11:14. Two host-started device sweeps on the RC
+  (100 Hz .. 1 MHz, 25 points, Settle Normal): both complete (25/25, 3.0 s, reason 0), GET_STATUS overload bits 0 afterwards.
+  Sweep 1 is the clean one: CH1 ranged to 0.5 V/div (range 3), CH2 0.5 .. 0.2, 13 of 25 points unflagged, the rest incoherent /
+  spliced / ch2_small as the host flags them: -2.86 dB / -40 deg at 10.0 kHz, -17.6 dB at 100 kHz, -36.1 dB at 1 MHz. Sweep 0,
+  the first after the engine's configuration change, left CH1 at 2.5 V/div (range 1) for the whole sweep with ch1_low on 15
+  points: its pre-scan capture was a bad first record (the "saturated first decimated capture after a change" of 10:55, which
+  is systematic in the engine's own sequence, not rare) and the engine never steps CH1 up again. So AUTO SET / the first sweep
+  after entering the mode may run at a coarse CH1 range until the next sweep; queued: find the first-record artefact (FPGA
+  decimator or the firmware's write order on 0x153A) and make the pre-scan step CH1 up when its fundamental is low. Host
+  sweep at 11:16 for the comparison follows.
 
