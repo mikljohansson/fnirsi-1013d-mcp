@@ -1216,4 +1216,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   a bad pre-scan record), part the device's own flags: the 0.2.83 clean sweep flagged 12 of 25 points incoherent / unsettled /
   ch2_small where the host sweep of the same filter flagged none, so bode_dsp.c's thresholds or its DFT differ from bode.py's
   (queued for the engine batch: compare both on the same records).
+- 2026-10-20 12:05-12:08: device vs host on the RC (fw 0.2.86, 0x153A trained; 100 Hz .. 1 MHz, 25 points, Settle Normal): device
+  sweep 0 (pre-scan ranged CH1 to 0.5 V/div) agrees with the host sweep taken right after within 0.05 dB and 0.5 deg at every
+  point (10.0 kHz -2.85 / -2.854 dB, -40.2 / -40.2 deg; 100 kHz -17.51 / -17.69; 1 MHz -34.85), 6 CH2 switches, 3.1 s. Flags:
+  device 4 of 25 (unsettled / incoherent at the points right after a CH2 range switch, 46 kHz and 100 kHz, plus spliced and
+  retried marks), host 1 (spliced): the device's excess is the first record after a relay switch, not the low-frequency noise
+  estimate (handed to fw-eng with the rows: scratchpad device_rc_rows_1205.json, host_rc_1205.*). Device sweep 1 hit the
+  pre-scan artefact again (CH1 at 2.5 V/div, ch1_low from 4.6 kHz). The "1.19 / 1.20 on the unit" comparison item is met
+  where both sides are valid. Host tool with the mcp-gen7 retakes: 24 valid, 1 flagged, no crash.
 
