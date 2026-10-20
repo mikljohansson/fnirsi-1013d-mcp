@@ -110,24 +110,21 @@ void     pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable
 //----------------------------------------------------------------------------------------------------------------------------------
 // Acquisition [FPGA]
 
-//Reset the sample system, write the geometry while in reset (prog != 0: 0x0B/0x0C; always 0x0E), release.
+//Reset the sample system, write the geometry (0x0B / 0x0C) before and inside the reset and 0x0E inside it, release.
 //normal: trigger mode written to 0x1A (1 normal/single, 0 auto). dc: decimation filter configuration for this capture
-//(bitstream 0x1534+, written and settled before the reset, 16-bit trigger level from the UI level), NULL on bitstreams
-//without the filter (nothing written). sq: sequencer setting for this arm (bitstream 0x1536+, pc_seq.h; written with
-//0x0B / 0x0C before the reset, mode 0 = a single capture), NULL on bitstreams without the sequencer (nothing written).
-//Returns 0, or -1 when 0x05 never became ready.
-int      pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal,
+//(written and settled before the reset, 16-bit trigger level from the UI level). sq: sequencer setting for this arm
+//(pc_seq.h; written with 0x0B / 0x0C before the reset, mode 0 = a single capture). Returns 0, or -1 when 0x05 never
+//became ready.
+int      pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int normal,
                     const pc_decim_cfg *dc, const pc_seq_cfg *sq);
 void     pc_hal_acq_poll(int *done, int *triggered);                                   //0x0A bit 0, 0x18 bit 0
 uint16_t pc_hal_acq_finish(void);                                                      //post-done writes, returns 0x14 & 0x1FFF
 void     pc_hal_force(void);                                                           //0x1A = 0
-void     pc_hal_force_stop(void);                    //fw 0.2.97: 0x0E = 0, 0x1A = 0 (ends an FPGA-auto capture at once)
-uint8_t  pc_hal_ext_status(void);                                                      //0x28 (0x1533+): bit0 level, bit1 gen on, bit2 edge seen
+uint8_t  pc_hal_ext_status(void);                                                      //0x28: bit0 level, bit1 gen on, bit2 edge seen
 
 //Read count bytes of one core (0..3 = FPGA 0x20..0x23) from ring word start, splitting at the ring end, one dummy read
-//after every 0x1F write, read_lag added to the address written. dst advances by stride per byte.
-void     pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,
-                          uint32_t ring_words, uint8_t read_lag);
+//after every 0x1F write. dst advances by stride per byte.
+void     pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride, uint32_t ring_words);
 
 //Decimation filter (bitstream 0x1534+, pc_decim.h). The setting is the UI's acquisition "Filter" selector (saved with
 //the settings): bits 1:0 requested K (0 off, 1 boxcar, 2 CIC2, 3 CIC3), PC_DECIM_SET_FIR (0x1535+), the falling-edge
@@ -328,10 +325,10 @@ void     pc_hal_restart_test(void);                    //PC_DEBUG builds: jump t
 //conversions are checked on the target (enc_heal_hw.c), host ARM captures by the session (pc_acq_service); both count here
 typedef struct
 {
-  uint8_t  mode;            //EH_MODE_* of the running bitstream
+  uint8_t  mode;            //EH_MODE_FLAG, or EH_MODE_DATA when the boot 0x33 reported an unknown encode convention
   uint8_t  last33;          //last FPGA 0x33 byte read (PC_ENCF_READ)
   uint8_t  flags;           //PC_ENCF_*
-  uint8_t  boot33;          //0x33 at boot (0x1538+)
+  uint8_t  boot33;          //0x33 at boot
   uint32_t bad;             //captures found bad (GET_LINK_STATS 62)
   uint32_t recovered;       //of those, recovered by a re-arm (63)
   uint32_t checked;         //full-rate captures checked
@@ -341,12 +338,11 @@ typedef struct
 #define PC_ENCF_READ         0x01  //last33 holds a byte read after a capture
 #define PC_ENCF_CONV_BAD     0x02  //boot: 0x33 bits 3:2 were not 01 (encode convention unknown)
 #define PC_ENCF_GARBLED      0x04  //the last checked capture was accepted bad after EH_MAX_TRIES re-arms
-#define PC_ENCF_ORDER        0x08  //AL3 0x1537: core order differs from the convention (recalibrate after 0x1538)
+                                   //(0x08 was PC_ENCF_ORDER, AL3 0x1537's core order, up to fw 0.2.102)
 
 void     pc_hal_enc_state(pc_hw_enc *e);                     //any context
-uint8_t  pc_hal_enc_status(void);                            //[FPGA] read 0x33 (0x1538+), remembered as last33
+uint8_t  pc_hal_enc_status(void);                            //[FPGA] read 0x33, remembered as last33
 int      pc_hal_enc_written(void);                           //a 0x0D / 0x53 / 0x56 write since the last 0x01 = 1
-void     pc_hal_enc_retry(void);                             //[FPGA] before a re-arm: 0x0D = 1, 0 on 0x1532..0x1536
 void     pc_hal_enc_note(uint8_t why, const eh_note *n);     //count a check, log event 21 when n->done
 
 //fw 0.2.79 (protocol 1.24): FPGA 0x153A capture stages (cap_stage.h, cap_hw.c): GET_HEALTH 104..123, GET_CAL 356..363

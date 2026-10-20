@@ -10,8 +10,6 @@
 #include "pc_seq.h"
 #include "pc_decim.h"
 
-void   pc_seq_hw_init(int has);                 //pc_glue_init: the bitstream has the sequencer (caps SEQ)
-
 //Before 0x01 = 1 (pc_hal_arm, fpga_do_conversion): the sequencer registers, so that the write-clock side loads them during
 //the reset at every rate (0x0B / 0x0C: fpga_arm_reset); c = NULL or mode 0: 0x57 = 0 when the FPGA may still hold another mode
 void   pc_seq_hw_pre_reset(const pc_seq_cfg *c);

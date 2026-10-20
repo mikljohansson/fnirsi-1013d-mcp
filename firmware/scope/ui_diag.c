@@ -10,6 +10,7 @@
 #include "adc_cal.h"
 #include "enc_heal.h"
 #include "pc_hal.h"
+#include "pc_cmds.h"
 
 extern FONTDATA font_2;
 extern FONTDATA font_3;
@@ -392,7 +393,7 @@ static void ud_identity_line(const ud_input *in, char *p)
   s_cp15(p, g32(in->health + H_CP15));
 }
 
-//0x1538+: the FPGA's own encode check (read 0x33 after each full-rate capture, GET_HEALTH 88..103)
+//The FPGA's own encode check (read 0x33 after each full-rate capture, GET_HEALTH 88..103)
 static int ud_enc_line(const ud_input *in, char *p)
 {
   static const uint8_t pin[4]  = { EH_33_PIN_CH1B, EH_33_PIN_CH1A, EH_33_PIN_CH2B, EH_33_PIN_CH2A };
@@ -439,70 +440,22 @@ static int ud_enc_line(const ud_input *in, char *p)
   return UD_C_SOFT;
 }
 
-//The FPGA line; returns its colour (amber for the stock or an unknown bitstream: the stock-bitstream exception)
+//The FPGA line; returns its colour: amber when the scope does not run the bitstream this firmware is built for
+//(PC_FW_FPGA_VERSION; the notice screen says what to do), else the AL3A10 line with the FPGA's own encode check
 static int ud_fpga_line(const ud_input *in, char *p)
 {
-  static const char *chip[5] = { "", "", "AL3A10", "EF2", "EP4" };
-  int first = 1;
-
-  if(in->variant == 1)
-  {
-    p = s_str(p, "FPGA stock bitstream ");
-    p = s_hex(p, in->fpga, 4);
-    s_str(p, ": no generator, no filter; gain calibration not possible");
-    return UD_C_WARN;
-  }
-
-  if((in->variant == 0) || (in->variant > 4))
+  if(in->mismatch)
   {
     p = s_str(p, "FPGA bitstream ");
     p = s_hex(p, in->fpga, 4);
-    s_str(p, ": not recognised; the scope runs with the stock limits");
+    p = s_str(p, ": this firmware needs ");
+    s_hex(p, PC_FW_FPGA_VERSION, 4);
     return UD_C_WARN;
   }
 
-  p = s_str(p, "FPGA ");
-  p = s_str(p, chip[in->variant]);
-  p = s_str(p, " bitstream ");
+  p = s_str(p, "FPGA AL3A10 bitstream ");
   p = s_hex(p, in->fpga, 4);
-
-  //fw 0.2.61: AL3 0x1532..0x1536 can garble one ADC core at 200 MSa/s after a rate change (enc_heal.h,
-  //fpga/al3/README.md "Findings" item 3); each such capture is checked and re-taken since 0.2.62
-  if((in->variant == 2) && eh_affected(in->fpga))
-  {
-    s_str(p, ": ADC capture timing race, fixed in 0x153B");
-    return UD_C_WARN;
-  }
-
-  //fw 0.2.62: 0x1537 has chip 1's cores in the other order: a calibration taken on it must be redone on 0x1538 or later
-  if((in->variant == 2) && eh_order_differs(in->fpga))
-  {
-    s_str(p, ": ADC core order differs: recalibrate after flashing 0x153B");
-    return UD_C_WARN;
-  }
-
-  if((in->variant == 2) && (eh_mode(in->fpga) == EH_MODE_FLAG))
-    return ud_enc_line(in, p);
-
-  if(in->caps & PC_CAP_GENERATOR_DDS)
-  {
-    p = s_str(p, first ? ": generator" : ", generator");
-    first = 0;
-  }
-  if(in->caps & PC_CAP_EXT_TRIGGER)
-  {
-    p = s_str(p, first ? ": EXT trigger" : ", EXT trigger");
-    first = 0;
-  }
-  if(in->caps & PC_CAP_DECIM)
-  {
-    p = s_str(p, first ? ": decimation filter" : ", decimation filter");
-    first = 0;
-  }
-  if(in->caps & PC_CAP_FIR)
-    s_str(p, first ? ": CIC+FIR" : ", CIC+FIR");
-
-  return UD_C_SOFT;
+  return ud_enc_line(in, p);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -912,16 +865,7 @@ void ud_cal_verdict(const ud_input *in, ud_verdict *v)
   else if(in->health[H_CAP + 2] & PC_CAPF_REPEAT)
     s_str(p, "ADC capture flagged 3 times within a minute: run Calibrate.");
   else if(!(all & F_GAINS))
-  {
-    if(in->variant == 1)
-    {
-      p = s_str(p, "FPGA stock ");
-      p = s_hex(p, in->fpga, 4);
-      s_str(p, ": no generator, gain calibration not possible.");
-    }
-    else
-      s_str(p, "Gains not measured: run Calibrate with the probes on the post.");
-  }
+    s_str(p, "Gains not measured: run Calibrate with the probes on the post.");
   else if((c0[C_FLAGS] | c1[C_FLAGS]) & F_KEPT)
     s_str(p, "Gains carried over from an earlier calibration: run Calibrate.");
   else if(pv && (g32(pv + 32) < UD_WARMUP_MS))
@@ -1713,8 +1657,8 @@ void ud_build_first_run(ud_page *pg, const ud_input *in, int settings_defaults, 
   s_str(p, ".");
   ud_txt(pg, 24, 66, 752, UD_F_SMALL, UD_C_SOFT, t);
 
-  //Check lines: the first character picks the icon. The FPGA: "FPGA recognised: AL3A10 bitstream 0x1535: ..." or the
-  //stock-bitstream exception in amber
+  //Check lines: the first character picks the icon. The FPGA: "FPGA recognised: AL3A10 bitstream 0x153b: ..." (a
+  //mismatch never reaches this screen: the notice screen comes first, ui_fpga_mismatch_pass)
   colour = ud_fpga_line(in, f);
   if(colour == UD_C_WARN)
     p = s_str(t, UD_ICON_WARN);
@@ -1746,9 +1690,7 @@ void ud_build_first_run(ud_page *pg, const ud_input *in, int settings_defaults, 
   y += 28;
   ud_txt(pg, 24, y, 752, UD_F_BODY, UD_C_TEXT, "Calibrate after the scope has been on for 5 minutes.");
   ud_txt(pg, 24, y + 24, 752, UD_F_BODY, UD_C_TEXT, "The zero step takes 8 seconds and needs no probes.");
-  ud_txt(pg, 24, y + 48, 752, UD_F_BODY, UD_C_TEXT, (in->variant == 1) ?
-         "The gain step needs the open FPGA bitstream: this one keeps the gains." :
-         "The gain step needs a probe on the calibration post, one channel at a time.");
+  ud_txt(pg, 24, y + 48, 752, UD_F_BODY, UD_C_TEXT, "The gain step needs a probe on the calibration post, one channel at a time.");
   ud_txt(pg, 24, y + 84, 752, UD_F_SMALL, UD_C_SOFT, "Later opens the scope. Calibrate is in Menu, Diagnostics.");
 
   ud_btn(pg, 24, 404, 160, 52, UD_B_GREY, UD_ID_LATER, "Later");

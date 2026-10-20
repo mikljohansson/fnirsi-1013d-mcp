@@ -86,10 +86,6 @@ static void cap_apply(void)
 void fpga_capture_init(uint16_t fpga_version)
 {
   cap_fpga = fpga_version;
-
-  if(!cs_has(fpga_version))
-    return;
-
   cap_st.flags |= PC_CAPF_HAS;
   cap_apply();
 }

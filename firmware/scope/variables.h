@@ -678,7 +678,6 @@ struct tagFPGASettings
   uint16    settriggerpoint;        //Set start triger point in FPGA
   
   
-  uint8     fw_FPGA;              //1- firmware in fpga is fnirsi, 2 is AL3-PECO, 3 is EF2-PECO
 
 };
 

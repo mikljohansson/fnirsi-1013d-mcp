@@ -4,27 +4,6 @@
 
 #include "enc_heal.h"
 
-int eh_mode(uint16_t fpga_version)
-{
-  if((fpga_version >= 0x1532) && (fpga_version <= 0x1537))
-    return EH_MODE_DATA;
-
-  if((fpga_version >= 0x1538) && (fpga_version <= 0x153F))
-    return EH_MODE_FLAG;
-
-  return EH_MODE_NONE;
-}
-
-int eh_affected(uint16_t fpga_version)
-{
-  return (fpga_version >= 0x1532) && (fpga_version <= 0x1536);
-}
-
-int eh_order_differs(uint16_t fpga_version)
-{
-  return fpga_version == 0x1537;
-}
-
 int eh_conv_ok(uint8_t s33)
 {
   return (s33 & EH_33_CONV_MASK) == EH_33_CONV_1;

@@ -28,7 +28,6 @@
 #include "pc_seq_hw.h"
 #include "fpga_bus.h"
 
-static uint8  seq_has;                  //bitstream with the sequencer
 static uint8  seq_57 = 0xFF;            //0x57 as last written; 0xFF unknown (an MCU restart leaves the FPGA running)
 
 //UI hardware averaging
@@ -54,16 +53,8 @@ static void seq_w8(uint8 cmd, uint8 v)
   fpga_write_byte(v);
 }
 
-void pc_seq_hw_init(int has)
-{
-  seq_has = (uint8)(has != 0);
-}
-
 void pc_seq_hw_pre_reset(const pc_seq_cfg *c)
 {
-  if(!seq_has)
-    return;
-
   //The slot mask (0x57 / 0x59) loads only on write-clock edges while 0x01 = 1 on 0x1536 (fpga-gen6): written before the
   //reset, as the geometry is on every bitstream since fw 0.2.72 (fpga_arm_reset, fpga_bus.h)
   if(c && c->mode)
@@ -158,7 +149,7 @@ int pc_seq_ui_conversion(int ui, const pc_decim_cfg *c, uint32 divider)
 
   ui_state = 1;
 
-  if(!seq_has || c->k || (fpgasettings.fw_FPGA != 2) || ui_fallback)
+  if(c->k || ui_fallback)
     return 0;
 
   ui_total = fpgasettings.totalsamples / 2;
@@ -185,9 +176,6 @@ int pc_seq_ui_conversion(int ui, const pc_decim_cfg *c, uint32 divider)
 void pc_seq_ui_pre_reset(void)
 {
   pc_seq_cfg c;
-
-  if(!seq_has || (fpgasettings.fw_FPGA < 2))
-    return;
 
   c.mode       = ui_run ? PC_SEQ_AVERAGE : PC_SEQ_OFF;
   c.flags      = 0;

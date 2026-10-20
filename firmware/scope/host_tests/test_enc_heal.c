@@ -54,28 +54,6 @@ static void fill(uint8_t *buf, uint32_t n, double amp, double f_hz, double sd, i
 
 static void test_modes(void)
 {
-  T_EQ(eh_affected(0x1432), 0);
-  T_EQ(eh_affected(0x1531), 0);
-  T_EQ(eh_affected(0x1532), 1);
-  T_EQ(eh_affected(0x1535), 1);
-  T_EQ(eh_affected(0x1536), 1);
-  T_EQ(eh_affected(0x1537), 0);
-  T_EQ(eh_affected(0x1538), 0);
-
-  T_EQ(eh_mode(0x1432), EH_MODE_NONE);
-  T_EQ(eh_mode(0x1531), EH_MODE_NONE);
-  T_EQ(eh_mode(0x1532), EH_MODE_DATA);
-  T_EQ(eh_mode(0x1535), EH_MODE_DATA);
-  T_EQ(eh_mode(0x1537), EH_MODE_DATA);
-  T_EQ(eh_mode(0x1538), EH_MODE_FLAG);
-  T_EQ(eh_mode(0x153F), EH_MODE_FLAG);
-  T_EQ(eh_mode(0x1632), EH_MODE_NONE);
-  T_EQ(eh_mode(0x1732), EH_MODE_NONE);
-
-  T_EQ(eh_order_differs(0x1536), 0);
-  T_EQ(eh_order_differs(0x1537), 1);
-  T_EQ(eh_order_differs(0x1538), 0);
-
   //0x33 bits 3:2 = 01: convention 1 (B first)
   T_EQ(eh_conv_ok(EH_33_GOOD), 1);
   T_EQ(eh_conv_ok(0x77), 1);

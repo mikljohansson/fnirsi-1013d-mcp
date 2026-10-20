@@ -120,8 +120,9 @@ typedef struct
   const pc_image_id *run;             //the running image
   const pc_card_id  *card;            //the card image (SD_INFO 64..), 0 = not read yet
   uint32_t           sd_sectors;      //0: no card
-  uint16_t           fpga;            //FPGA version word (command 0x06)
-  uint8_t            variant;         //protocol variant: 0 unknown, 1 stock 0x1432, 2 AL3, 3 EF2, 4 EP4
+  uint16_t           fpga;            //FPGA version word (command 0x06), as read
+  uint8_t            variant;         //protocol variant byte (2, AL3; the wire encoding of P-5.1)
+  uint8_t            mismatch;        //fpga != PC_FW_FPGA_VERSION: the firmware does not run on it (pc_cmds.h)
   uint32_t           caps;            //GET_INFO caps (PC_CAP_*)
   uint8_t            battery;         //0..20
   uint8_t            charging;

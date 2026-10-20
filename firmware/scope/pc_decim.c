@@ -228,71 +228,10 @@ uint32_t pc_decim_settle_us(const pc_decim_cfg *c)
   return (t > 0xFFFFFFFFull) ? 0xFFFFFFFFu : (uint32_t)t;
 }
 
-//----------------------------------------------------------------------------------------------------------------------------------
-// Auto-mode stop geometry (fw 0.2.97, pc_decim.h)
-
-uint8_t pc_stop_kind(uint16_t version)
-{
-  if(((version & 0xFFF0) == 0x1530) && (version >= 0x1532))
-    return (version >= 0x153B) ? PC_STOP_NEWEST : PC_STOP_RING0;
-
-  if((version == 0x1632) || (version == 0x1732))
-    return PC_STOP_SPLICE;
-
-  return PC_STOP_NONE;
-}
-
-uint32_t pc_auto_stop_word(uint32_t min_words, uint32_t total_words, uint32_t ring_words)
-{
-  uint64_t m = 0, lo, hi, d, r, w;
-
-  if((ring_words == 0) || (total_words >= ring_words))
-    return (min_words > total_words) ? min_words : total_words;
-
-  if(ring_words - total_words >= 2 * PC_STOP_MARGIN + 1)
-    m = PC_STOP_MARGIN;
-
-  lo = total_words + m;
-  hi = ring_words - 1 - m;
-  d  = (min_words > lo) ? min_words : lo;
-  r  = d % ring_words;
-
-  if(r < lo)
-    w = d - r + lo;
-  else if(r > hi)
-    w = d - r + ring_words + lo;
-  else
-    w = d;
-
-  //0x0E is 32 bit: step back by whole rings to the largest W it can count
-  while(w > 0xFFFFFFFFull)
-    w -= ring_words;
-
-  return (uint32_t)w;
-}
-
-int pc_auto_cut(uint32_t addr, uint32_t pre_words, uint32_t total_words, uint32_t stop_word, uint32_t ring_words)
-{
-  uint32_t start, off;
-
-  if(ring_words == 0)
-    return 0;
-
-  start = (addr % ring_words + ring_words - pre_words % ring_words) % ring_words;
-  off   = (stop_word % ring_words + ring_words - start) % ring_words;
-  return (off != 0) && (off < total_words);
-}
-
 //ns per word: 10 (D + 1) in the legacy layout (two samples per word), 5 (D + 1) with K >= 1; at most 2^34
 static uint64_t pc_word_ns(uint32_t divider, int wide)
 {
   return (uint64_t)5 * ((uint64_t)divider + 1) * (wide ? 1u : 2u);
-}
-
-uint8_t pc_engine_record(uint8_t stop_kind, int trig_seen, int forced, uint8_t *triggered)
-{
-  *triggered = (uint8_t)(trig_seen != 0);
-  return (uint8_t)(forced && (stop_kind != PC_STOP_NEWEST));
 }
 
 uint32_t pc_ms_to_words(uint32_t ms, uint32_t divider, int wide)

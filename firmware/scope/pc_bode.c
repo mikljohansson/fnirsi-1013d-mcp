@@ -145,17 +145,13 @@ static void bh_trigger(uint8 level)
 
 static uint8 bh_triggered;
 
-//fw 0.2.97 (pc_decim.h "Auto-mode stop geometry"): on AL3 0x1532..0x153A the FPGA's time-out record is ring words
-//0 .. total - 1, contiguous only when the stop lands at W mod 8192 >= total; 0x0E = 2 x total put it there for records
-//up to about 2700 words (legacy) / 4090 (16-bit) only. The engine's 0x0E is moved to the first such W at or after it.
-//0x153B+ latches the newest total words and completes a triggered record: the 0.2.91 arm unchanged.
-static uint8  bh_geom, bh_forced;
+//0x153B latches the newest total words on a time-out and completes a triggered record, so the engine's FPGA auto arm
+//(0x0E = 2 x total, fw 0.2.91) reads a contiguous record whether a trigger came or not
 static uint32 bh_total;
 
 static int bh_arm(void *ctx, const bode_plan *pp, uint32 total, uint8 level)
 {
-  uint32 caps = pc_glue_caps(), div = bode_divider(pp), ato;
-  int    has = pc_decim_has_caps(caps);
+  uint32 div = bode_divider(pp);
   pc_decim_cfg dc;
   pc_seq_cfg   sq;
 
@@ -175,7 +171,7 @@ static int bh_arm(void *ctx, const bode_plan *pp, uint32 total, uint8 level)
   //divider 0; the swap and falling-edge bits as the Filter setting has them
   pc_decim_config((pp->n > 1) ? PC_DECIM_CIC3 : PC_DECIM_OFF,
                   (uint8)((pc_hal_decim_setting() & PC_DECIM_FLAGS) | ((pp->n > 1) ? PC_DECIM_SET_FIR : 0)), div, total,
-                  has, &dc);
+                  pc_decim_has(), &dc);
 
   memset(&sq, 0, sizeof(sq));
   bh_wide = (uint8)(dc.k != 0);
@@ -187,16 +183,10 @@ static int bh_arm(void *ctx, const bode_plan *pp, uint32 total, uint8 level)
   bh_triggered = 0;
 
   //FPGA auto: on CH1's trigger, else on the time-out (fw 0.2.91: twice the record, so a trigger has the time of the
-  //record's periods to arrive). fw 0.2.97: on 0x1532..0x153A at the stop geometry's W, so the record is never spliced
-  bh_total  = bh_wide ? total : total / 2;
-  bh_forced = 0;
-  bh_geom   = (uint8)(pc_stop_kind(pc_hal_fpga_version()) == PC_STOP_RING0);
-  ato       = 2 * total;
+  //record's periods to arrive)
+  bh_total = bh_wide ? total : total / 2;
 
-  if(bh_geom)
-    ato = pc_auto_stop_word(ato + PC_STOP_LAG, bh_total, pc_glue_ring_words()) - PC_STOP_LAG;
-
-  return pc_hal_arm(0, (uint16)bh_total, ato, 1, 0, (caps & PC_CAP_DECIM) ? &dc : 0, (caps & PC_CAP_SEQ) ? &sq : 0);
+  return pc_hal_arm(0, (uint16)bh_total, 2 * total, 0, &dc, &sq);
 }
 
 static int bh_poll(void *ctx)
@@ -216,18 +206,11 @@ static int bh_poll(void *ctx)
   return done;
 }
 
-//The engine's deadline passed without a stop: with the stop geometry the FPGA should have stopped at W, so this is the
-//last resort (0x0E = 0 as well); the record may be spliced except on 0x153B+ (newest total words)
+//The engine's deadline passed without a stop: 0x1A = 0 ends the capture (0x153B reads the newest total words)
 static void bh_force(void *ctx)
 {
   (void)ctx;
-
-  if(bh_geom)
-    pc_hal_force_stop();
-  else
-    pc_hal_force();
-
-  bh_forced = 1;
+  pc_hal_force();
 }
 
 //fw 0.2.83: the capture self-check of this capture (FPGA 0x153A+, cap_hw.c). 0x36 is read after a legacy 200 MSa/s
@@ -237,9 +220,6 @@ static uint8 bh_check(void)
 {
   pc_hw_cap cs;
   int now = 0;
-
-  if(!(pc_glue_caps() & PC_CAP_CAPTURE_STAGES))
-    return BODE_CHK_NONE;
 
   if(!bh_wide && (bh_divider == 0))
   {
@@ -267,10 +247,9 @@ static int bh_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
   addr  = pc_hal_acq_finish();
   start = (addr + ring - bh_pre) % ring;
 
-  //fw 0.2.98 (pc_engine_record): triggered = 0x18 seen, spliced only when forced; the 0.2.97 host rules misread the
-  //engine's records (bench 2026-10-20, 0.2.97: 10..22 time-outs and 8..15 other retakes per sweep)
-  cap->spliced = pc_engine_record(pc_stop_kind(pc_hal_fpga_version()), bh_triggered, bh_forced, &bh_triggered);
-
+  //fw 0.2.98: triggered = 0x18 seen in a poll (as 0.2.91..0.2.96; the 0.2.97 host rules misread the engine's records,
+  //bench 2026-10-20: 10..22 time-outs and 8..15 other retakes per sweep). A forced record on 0x153B is the newest total
+  //words: never spliced
   pc_hal_trace_build(start, total, 0, 0x03);
   pc_hal_decim_current(&dc, &written);
 

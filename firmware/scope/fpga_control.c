@@ -231,39 +231,11 @@ void fpga_set_translated_brightness(void)
 uint16 fpga_get_version(void)
 {
   uint16  fw_version;
-  fpgasettings.fw_FPGA = 0;
-  
+
   fpga_write_cmd(0x06);
   fw_version = fpga_read_short();
-  
-  if(fw_version == 0x1432) fpgasettings.fw_FPGA = 1;  //fnirsi fw in FPGA
-  if(fw_version == 0x1532) fpgasettings.fw_FPGA = 2;  //PECO fw in FPGA AL3
-  if(fw_version == 0x1632) fpgasettings.fw_FPGA = 3;  //PECO fw in FPGA EF2
-  //AL3 family: 0x1532 and later minors (0x1533 adds the EXT trigger, fpga/al3/README.md); same geometry
-  if(((fw_version & 0xFFF0) == 0x1530) && (fw_version >= 0x1532)) fpgasettings.fw_FPGA = 2;
-
-  //fw 0.2.72: the bus contract of this bitstream (readout dummy strobe, geometry before the reset; fpga_bus.h)
-  fpga_bus_init(fw_version);
 
   return(fw_version);
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-void fpga_check_ready(void)
-{
-  int i;
-  
-  //Check if the FPGA is up and running by reading the version number
-  while(fpga_get_version() != 0x1432)
-  {
-    //if not just wait a bit and try it again
-    //At 600MHz CPU_CLK 1000 = ~200uS
-    for(i=0;i<1000;i++)
-    {
-      __asm__ ("nop");
-    }
-  }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -611,15 +583,9 @@ void fpga_set_time_base(uint32 timebase) //len pre rezim auto, urcuje max cas po
   //Make sure setting is in range
   if(timebase < (sizeof(timebase_settings) / sizeof(uint32)))
   {
-    //Write the command to set the short time base data to the FPGA
+    //Write the command to set the short time base data to the FPGA: the sample count (Atlan4 bitstreams count samples)
     fpga_write_cmd(0x0E);
-    
-    //Table settings ranges from setting 0 (200mS/div) to 23 (5nS/div)
-    if(fpgasettings.fw_FPGA == 1)
-    {
-    fpga_write_int(timebase_settings[timebase]);
-    }
-      else fpga_write_int(scopesettings.samplecount);
+    fpga_write_int(scopesettings.samplecount);
   }
 }
 
@@ -698,12 +664,12 @@ void fpga_do_conversion(void)
   PC_SEQ_PRE_RESET();
 
   //Sampling reset (fpga_bus.h): pretrigger and total words (16-bit layout: one sample per word) before the reset and
-  //again inside it, the time-out for auto mode (fpga_set_time_base's value), unbounded ready wait as 1.00o5
-  arm.geometry     = (uint8_t)(fpgasettings.fw_FPGA > 1);
+  //again inside it, the time-out for auto mode (the sample count, fpga_set_time_base's value), unbounded ready wait as
+  //1.00o5
   arm.pre_words    = (uint16_t)pc_glue_decim_pre_words(fpgasettings.settriggerpoint);
   arm.total_words  = (uint16_t)pc_glue_decim_words(fpgasettings.totalsamples);
-  arm.write_0e     = (uint8_t)((fpgasettings.fw_FPGA > 1) && (scopesettings.timeperdiv < (sizeof(timebase_settings) / sizeof(uint32))));
-  arm.auto_timeout = fpga_conv_0e ? fpga_conv_0e : scopesettings.samplecount;
+  arm.write_0e     = (uint8_t)(scopesettings.timeperdiv < (sizeof(timebase_settings) / sizeof(uint32)));
+  arm.auto_timeout = scopesettings.samplecount;
   arm.max_polls    = 0;
   arm.idle         = fpga_arm_idle;
   fpga_arm_reset(&arm);
@@ -789,7 +755,6 @@ uint32 isqrt(uint32 n) {
 //----------------------------------------------------------------------------------------------------------------------------------
 
 uint32 fpga_divider;
-uint32 fpga_conv_0e;
 uint8  fpga_read_settle;
 uint8  fpga_read_prestrobe;
 static uint32 fpga_dither = 1;

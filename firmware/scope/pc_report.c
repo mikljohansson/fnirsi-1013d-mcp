@@ -309,6 +309,12 @@ static void sec_identity(pc_text *t, pc_session *s, const uint8_t *sd, int sd_ok
   pc_text_udec(t, s->var.ring_words);
   pc_text_str(t, " words, caps ");
   pc_text_hex(t, s->var.caps, 8);
+  pc_text_str(t, "; firmware built for ");
+  pc_text_hex(t, PC_FW_FPGA_VERSION, 4);
+
+  if(s->var.mismatch)
+    pc_text_str(t, ": MISMATCH, the acquisition does not run");
+
   pc_text_nl(t);
 
   //1.24: FPGA 0x153A capture stages (GET_HEALTH 104..123, cap_stage.h)
@@ -341,8 +347,7 @@ static void sec_identity(pc_text *t, pc_session *s, const uint8_t *sd, int sd_ok
 
   //1.19: the full-rate capture check (GET_HEALTH 88..103, enc_heal.h)
   {
-    static const char *mode[3] = { "none (not an AL3 0x1532+ bitstream)", "record data (B against A neighbours)",
-                                   "FPGA read 0x33" };
+    static const char *mode[3] = { "none", "record data (B against A neighbours)", "FPGA read 0x33" };
 
     pc_text_str(t, "Full-rate capture check: ");
     pc_text_str(t, mode[(h[88] < 3) ? h[88] : 0]);
@@ -361,9 +366,6 @@ static void sec_identity(pc_text *t, pc_session *s, const uint8_t *sd, int sd_ok
       else
         pc_text_str(t, "none");
     }
-
-    if(h[90] & PC_ENCF_ORDER)
-      pc_text_str(t, ", core order differs from the convention (recalibrate after 0x1538)");
 
     pc_text_str(t, "; ");
     pc_text_udec(t, g32(h + 100));
