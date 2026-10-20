@@ -513,7 +513,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## FPGA
 
-- [ ] **Pin and flash 0x153B** (fpga-gen11, 10-20): `fpga/al3/dist/al3-0x153B.bin` and its padded image into `backups/`, flash per
+- [x] **Pin and flash 0x153B** (flashed 10-20 19:31, benched good 20:40-20:49, recommended) (fpga-gen11, 10-20): `fpga/al3/dist/al3-0x153B.bin` and its padded image into `backups/`, flash per
   fpga/al3/AGENTS.md "Flashing this unit", then README section 11's bench checks 1-6 (bode_cells.py "auto" variant clean 32 of
   32; Scope view auto-mode traces without the two-pass seam; Frequency response retried 0-1 per sweep). Needs a firmware that
   detects 0x153B (any 0.2.8x does: the 0x153A..0x153F range) and, for the full benefit, the firmware items below.
