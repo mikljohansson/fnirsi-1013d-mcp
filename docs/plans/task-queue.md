@@ -6,7 +6,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- **AUTO SET must fail fast with a helpful message, never loop** (owner 10-20 11:23 **(owner)**, after the RC AUTO SET on
+- [x] **AUTO SET must fail fast with a helpful message, never loop** (merged 10-20 11:42, bench pending) (owner 10-20 11:23 **(owner)**, after the RC AUTO SET on
   0.2.83 ran 41 sweeps with the relays clicking: "present the user with a failure message that helps them somehow, e.g. the
   connections to the circuit or the circuit itself"; sent to fw-fr3 as part of item (d)): when the overview or a sharp-tank
   pass is inconsistent (peak unconfirmed, reference level drifting between passes, the pass budget exhausted, an absurd point
@@ -140,7 +140,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   mind: either leave it (0x153A removes the cause) or stop the sweep with a "readout fault" reason when the pre-scan clips at
   5 V/div with a fundamental under 20 codes, instead of producing a flagged table. (e) The estimate text of Single sweep must
   use the same settings as (c).
-- **Frequency response small items** (next bode_view.c batch after fw-over lands, so the two do not collide): (a) owner decision
+- [x] **Frequency response small items** (merged 10-20 11:42, bench pending) (next bode_view.c batch after fw-over lands, so the two do not collide): (a) owner decision
   10-19 21:32 **(owner)**: a single sweep started from the Sweep fold-out stays on the CTRL page; the Single sweep button changes
   state to show the sweep running (the same colour/word rule as RUN/STOP: it reads what a tap does, e.g. "Stop sweep" in red with
   the progress on its second line) and another tap stops it, so the user changes parameters and triggers again without leaving
@@ -389,11 +389,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## MCP / host
 
-- **fnirsi1013d-bode crashes on a flat CH1 record** (bench 10-20 11:16): `measure_pair` divides by `tone(a)` = 0 when the CH1
+- [x] **fnirsi1013d-bode crashes on a flat CH1 record** (merged 10-20 11:42, bench pending) (bench 10-20 11:16): `measure_pair` divides by `tone(a)` = 0 when the CH1
   record is constant (the 0x153A first-record artefact gave a saturated record): ZeroDivisionError ends the sweep. Guard it:
   a zero or near-zero CH1 tone flags the point ch1_low / incoherent and retries once like a clipped point; never a traceback.
 
-- **Server releases the serial port when idle** (coordinator 10-19 22:08): on collaborative firmware the MCP server keeps COM10 open
+- [x] **Server releases the serial port when idle** (merged 10-20 11:42, bench pending) (coordinator 10-19 22:08): on collaborative firmware the MCP server keeps COM10 open
   from the first tool call until the server exits (`Server.scope`, `drop_connection` only on a transport error), so the coordinator's
   own scripts and `fnirsi1013d-flash` get PermissionError on COM10 after any MCP tool call in the same session, and a FEL reload needs
   the device to vanish first. Close the port after N s without tool calls (default 30 s, env FNIRSI_MCP_IDLE_CLOSE_S, 0 = hold) and
@@ -468,6 +468,16 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 
 ## Dispatched
+
+- mcp-gen7 (done 11:38, about 240k tokens, merged 11:40): idle port close after 30 s (FNIRSI_MCP_IDLE_CLOSE_S), Bode flat-record
+  retakes and the dead-CH1 guard, reason 8 text, simulator reason 8 / flat-record hook / header rule, docs/mcp-tools.md. The
+  session's own MCP server process still runs the old code until the session restarts: the idle close is checked next session.
+- fw-fr3 (done 11:40, about 245k tokens, merged 11:42 as fw 0.2.84, handoff firmware/AGENTS.md section 55): Single sweep button
+  states on the fold-out (owner 10-19 21:32), the generator setting restored on the pin after a sweep (bode-ui.md 7), CH1-low
+  warnings by cause (range, probe roll-off, DUT), AUTO SET fails fast (owner 10-20 11:23): absurd points dropped, reference =
+  median of the three lowest valid points, peaks need two neighbours, inconsistent passes end in STOP with one of four texts;
+  side effects: a sweep keeps running while a fold-out is open; a Q > 30 tank whose overview point lands on the resonance is
+  reported "peak not confirmed: sweep by hand".
 
 - Batch of 2026-10-19 20:58 (owner: "continue working off the roadmap with agents"), all in worktrees, all push their own branch:
   fw-freq2 (Opus, branch fw-freq2, fw 0.2.70 provisional): single sweep visible and STOP cancels, Spectrum slider, top bar in the
