@@ -1,7 +1,8 @@
 # Agent setup
 
-Connect an AI agent (Claude Code, Codex, any MCP client) to the scope over USB. The full setup, environment variables
-and install from a checkout are in the [mcp README](../mcp/README.md).
+Connect an AI agent (Claude Code, Codex, any MCP client) to the scope over USB. The scope runs the open firmware with
+the one FPGA bitstream its release names ([Install](guide/install.md)). The full setup, environment variables and
+install from a checkout are in the [mcp README](../mcp/README.md).
 
 ## Install and register
 

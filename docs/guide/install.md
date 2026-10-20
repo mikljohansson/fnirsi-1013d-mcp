@@ -1,8 +1,8 @@
 # Install
 
-The open firmware boots from a micro SD card, through Atlan4's bootloader. The stock firmware in the scope's flash is
-never touched. Remove the card and the scope runs the stock firmware again. If you also flash an FPGA bitstream, write
-your backup of the FPGA flash back first.
+The open firmware boots from a micro SD card, through Atlan4's bootloader, and runs with its own FPGA bitstream, which
+you flash into the FPGA's configuration flash. The stock firmware in the scope's flash is never touched. To run it
+again, write your backup of the FPGA flash back and remove the card.
 
 ## What you need
 
@@ -15,10 +15,10 @@ your backup of the FPGA flash back first.
 - A PC with Python 3. Writing the card needs Linux, or WSL with the card reader attached through `usbipd`
   ([Prepare and back up](prepare.md#attach-a-usb-card-reader-to-wsl) shows how). The tool also accepts a Windows
   drive (`\\.\PhysicalDriveN`), but that path is untested.
-- For the FPGA bitstream only: a 3.3 V SPI programmer and a soldering iron.
+- A 3.3 V SPI programmer and a soldering iron, for the FPGA bitstream.
 
 !!! warning "Back up first"
-    Back up the SD card before you write it. Back up the FPGA config flash, twice, before you flash a bitstream.
+    Back up the SD card before you write it. Back up the FPGA config flash, twice, before you flash the bitstream.
     [Prepare and back up](prepare.md) gives the steps.
 
 ## Prepare the card
@@ -45,8 +45,8 @@ the 8 MiB start. Copy your files back after the card is written.
 ## Steps
 
 1. Download from the [releases page](https://github.com/mikljohansson/fnirsi-1013d-mcp/releases):
-   `fnirsi_1013d-fw-X.Y.Z.bin` (the scope firmware), `fnirsi_1013d-sdtools-X.Y.Z.zip` (the SD tools) and `SHA256SUMS`.
-   Add the bitstream and the MCP wheel if you want them. Check the files:
+   `fnirsi_1013d-fpga-al3-0x153b-flash1m.bin` (the FPGA bitstream), `fnirsi_1013d-fw-X.Y.Z.bin` (the scope firmware),
+   `fnirsi_1013d-sdtools-X.Y.Z.zip` (the SD tools) and `SHA256SUMS`. Add the MCP wheel if you want it. Check the files:
 
     ```
     sha256sum -c SHA256SUMS --ignore-missing
@@ -55,7 +55,11 @@ the 8 MiB start. Copy your files back after the card is written.
     On Windows, `Get-FileHash -Algorithm SHA256 <file>` in PowerShell (or `certutil -hashfile <file> SHA256`) prints
     the hash to compare with the file's line in `SHA256SUMS`.
 
-2. Unzip the SD tools. Build the SD parts. The tool downloads Atlan4's package from his repository and takes the
+2. Flash the FPGA bitstream, **0x153B**. [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), also attached to each
+   release, names the file, the programmer wiring, the backup, the write, the check and the way back. The config flash
+   is wired only to the FPGA, so this needs the SPI programmer on the 2x3 header. A wrong pin or 5 V logic can damage
+   the board. The FPGA comes before the card: with any other bitstream in it, this firmware only shows a banner.
+3. Unzip the SD tools. Build the SD parts. The tool downloads Atlan4's package from his repository and takes the
    bootloader v0.8 and the updater from it. This project does not redistribute them, because they are binary-only.
    The tool checks their hashes:
 
@@ -64,7 +68,7 @@ the 8 MiB start. Copy your files back after the card is written.
             --scope-sha256 <hash from SHA256SUMS> --parts parts
     ```
 
-3. Write the parts to the card, prepared as in [Prepare the card](#prepare-the-card). Replace `/dev/sdX` with your card
+4. Write the parts to the card, prepared as in [Prepare the card](#prepare-the-card). Replace `/dev/sdX` with your card
    reader (on WSL, [attach it](prepare.md#attach-a-usb-card-reader-to-wsl) first):
 
     ```
@@ -79,34 +83,16 @@ the 8 MiB start. Copy your files back after the card is written.
         `dd` of the SD package from sector 16 also overwrites sectors 708 to 710, which hold the calibration, the
         settings and the boot mode.
 
-4. Optional, the FPGA bitstream. The recommended one is **0x153B**. It needs firmware 0.2.97 or later.
-   [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), also attached to each release, names the file, the programmer
-   wiring, the backup, the write, the check and the way back. The config flash is wired only to the FPGA, so this
-   needs the SPI programmer on the 2x3 header. A wrong pin or 5 V logic can damage the board.
 5. Put the card in the scope and switch it on. Continue with [First run](first-run.md).
 
 !!! note "After a new bitstream, calibrate again"
     The calibration stores values per ADC core, and the core order can differ between bitstreams. Diagnostics shows
     "FPGA changed since calibration" until you run the [wizard](calibration.md).
 
-## Which features need which bitstream
+## Which bitstream
 
-The firmware runs on every bitstream. A feature appears when the bitstream has it.
-
-| Bitstream | What it adds |
-|---|---|
-| 0x1432 (stock) | The scope, the Spectrum analyser and the phosphor view. No generator, no gain calibration |
-| 0x1532 (Atlan4's) | 16,384 samples per channel, programmable trigger position, the generator on the calibration post |
-| 0x1533 | External trigger on the calibration post |
-| 0x1534 | Decimation filters (Acquisition > Filter) and the Frequency response mode |
-| 0x1535 | The compensation FIR after the filters |
-| 0x1536 | Hardware averaging (the ACQ menu's Average uses it at the fast rates) and segmented capture (over USB) |
-| 0x153A | Clean ADC data at every sample rate, with a capture self-check and the capture stages the wizard trains |
-| 0x153B | Records that end on the auto time-out are never joined from two passes of the memory. **Recommended** |
-
-0x1537 to 0x1539 are withdrawn. 0x1532 to 0x1536 can garble one ADC core at 200 MSa/s after a rate change; the firmware
-checks every such capture and takes it again, and Diagnostics shows the FPGA line in amber. The full list with hashes
-is in [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md).
+This release runs with bitstream 0x153B only. An older or newer bitstream shows a banner that names the one needed
+([First run](first-run.md)). The hashes are in [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md).
 
 ## The MCP server (optional)
 
@@ -115,5 +101,5 @@ To let an AI agent use the scope over USB, install the MCP server from the relea
 
 ## Going back to stock
 
-Pick FNIRSI in the boot menu, or remove the card. If you flashed a bitstream, write your backup of the FPGA flash back
-first ([`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), "Rollback").
+Write your backup of the FPGA flash back first ([`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), "Rollback"),
+then pick FNIRSI in the boot menu, or remove the card.
