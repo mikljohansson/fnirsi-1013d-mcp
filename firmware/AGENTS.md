@@ -4511,7 +4511,7 @@ All files LF (`git diff --check`). **Nothing benched, nothing flashed.**
   saturation check in the pre-scan's check runs on the held range. A clip or a drop only flags the point
   (`auto_range` returned early already). Test `test_constant_never_switches`: no CH2 range change in the DUT model,
   fresh and plan sweeps, 0.5 V/div (ch2_small in the stopband) and 0.1 V/div (15 clipped points, no step up).
-- The row reads "Auto" or "Constant 100mV" (`volt_div_texts[magnification][display]` without "/div"; the width
+- The row reads "Auto" or "Constant" (owner 14:51: no V/div in the row; up to the merge it read "Constant 100mV" from `volt_div_texts[magnification][display]` without "/div"; the width
   check is in test_ui). A tap toggles; nothing else is stored.
 - AUTO SET's Constant writes the chosen range into CH2 (`pc_hal_channel_write(1, .., PC_CH_RANGE)`: the top-bar
   button and its menu show it). On Auto the channel keeps what the final sweep leaves.
@@ -4559,15 +4559,15 @@ trace conversion inside a file viewer were not reviewed).
 **Bench (owner, coordinator on COM10; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`; 0x153A; wiring A, x1)**
 1. Both tips on the post, Start / Stop 20 kHz .. 5 MHz, AUTO SET: "No corner from 100 Hz to 10 MHz" (no suffix).
    BODE_CTRL action 0: bytes 50..57. Expect verdict 1 (Constant), reason 0, about 9 points, spread a few dB; the CH2
-   button reads the chosen V/div (0.5 or 1 V/div), the Sweep row "Constant 500mV" (or 1V). If verdict 0, the reason
+   button reads the chosen V/div (0.5 or 1 V/div), the Sweep row "Constant". If verdict 0, the reason
    and spread say why (report them). RUN: header switches 0, planned 0, no relay click.
-2. On Constant, open the CH2 menu and pick 200 mV/div: the row reads "Constant 200mV", the next sweep runs on it
+2. On Constant, open the CH2 menu and pick 200 mV/div: the row reads "Constant", the next sweep runs on it
    (READ_BODE r2 4 on every row), the warning "CH2 overrange: increase V/div in CH2 menu or Auto" if it clips. Pick a
    V/div while RUN sweeps: the sweep starts again on it. Leave the mode (main menu Scope) and come back: CH2 still
-   on 200 mV/div, the row still "Constant 200mV".
+   on 200 mV/div, the row still "Constant".
 3. On Auto (tap the row), RUN on the RC: two planned clicks per sweep as 0.2.93; leaving the mode restores CH2's
    pre-mode V/div.
-4. Pick a CH2 V/div in the CH2 menu while on Auto: the row turns "Constant ...". (The coordinator's addition; the
+4. Pick a CH2 V/div in the CH2 menu while on Auto: the row turns "Constant". (The coordinator's addition; the
    owner confirms or 93a0c0f is reverted.)
 5. Screenshots: open Menu > Settings (and, separately, the generator menu, a file viewer) and run
    `tools/screenshots.py --only settings`: the PNG shows Settings, and Settings is still open afterwards. A

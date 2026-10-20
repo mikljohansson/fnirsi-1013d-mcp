@@ -1792,10 +1792,9 @@ static void test_bode_texts(void)
     if(strlen(bu_warn[i]) > BU_WARN_MAX) { T_TRUE(0); printf("long warning: %s\n", bu_warn[i]); }
     T_TRUE(ui_text_width(&font_2, bu_warn[i]) <= 355);
   }
-  //fw 0.2.94: the Sweep fold-out's CH2 range row (206 px wide) holds "CH2 range" and the longest "Constant <V/div>"
-  //(x1000 probe), each 10 px in from its edge, with a 12 px gap
-  T_TRUE(ui_text_width(&font_3, "CH2 range") + ui_text_width(&font_3, "Constant 2.5kV") + 2 * UI_FOLD_VALUE_IN + 12 <= 206);
-  T_TRUE(ui_text_width(&font_3, "CH2 range") + ui_text_width(&font_3, "Constant 500mV") + 2 * UI_FOLD_VALUE_IN + 12 <= 206);
+  //fw 0.2.94: the Sweep fold-out's CH2 range row (206 px wide) holds "CH2 range" and "Constant" (owner 14:51: no V/div),
+  //each 10 px in from its edge, with a 12 px gap
+  T_TRUE(ui_text_width(&font_3, "CH2 range") + ui_text_width(&font_3, "Constant") + 2 * UI_FOLD_VALUE_IN + 12 <= 206);
   for(i = 1; i <= 200; i++)
   {
     T_TRUE(strlen((bu_warn_unsettled(t, i), t)) <= BU_WARN_MAX);

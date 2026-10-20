@@ -147,24 +147,11 @@ static int ch2_constant_range(void)
   return (r < 6) ? r : 5;
 }
 
-//The Sweep fold-out's CH2 range row: "Auto", or "Constant" and the CH2 menu's V/div without "/div" ("Constant 100mV")
+//The Sweep fold-out's CH2 range row: "Auto" or "Constant" (owner 2026-10-20 14:51: without the V/div, which the CH2 button
+//above shows)
 static char *ch2_range_text(char *t)
 {
-  int r = scopesettings.channel2.displayvoltperdiv;
-  int m = scopesettings.channel2.magnification;
-  const char *v;
-  char *p;
-
-  if(bv.ch2 != BODE_CH2_HOLD)
-    return fmt_str(t, ch2_names[BODE_CH2_AUTO]);
-
-  v = (const char *)volt_div_texts[(m < 7) ? m : 1][(r < 7) ? r : 6];
-  p = fmt_str(t, ch2_names[BODE_CH2_HOLD]);
-  *p++ = ' ';
-  while(*v && (*v != '/'))
-    *p++ = *v++;
-  *p = 0;
-  return p;
+  return fmt_str(t, ch2_names[(bv.ch2 == BODE_CH2_HOLD) ? BODE_CH2_HOLD : BODE_CH2_AUTO]);
 }
 
 static void f_step_text(char *t, int i)

@@ -399,7 +399,7 @@ axis.
 | Stop (- / +) | 10 Hz .. 10 MHz (default 1 MHz) | the same; Start moves down if needed |
 | Points | 10, 20, 50, 100 (default 50) | next value |
 | Settle | Fast, Normal, Resonant, High Q (default Normal) | next value |
-| CH2 range | Auto, or Constant and the CH2 menu's V/div, e.g. "Constant 100mV" (fw 0.2.94, owner 14:16) | toggles; Constant sweeps on the CH2 menu's V/div and never changes it; a V/div chosen in the CH2 menu while the mode shows sets Constant (coordinator's addition, owner to confirm) |
+| CH2 range | Auto or Constant (fw 0.2.94, owner 14:16; no V/div in the row, owner 14:51: the CH2 button shows it) | toggles; Constant sweeps on the CH2 menu's V/div and never changes it; a V/div chosen in the CH2 menu while the mode shows sets Constant (coordinator's addition, owner to confirm) |
 | *separator* | | |
 | Single sweep | see below (fw 0.2.84) | the panel stays open |
 
@@ -756,3 +756,5 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
   test: both tips on the post gives Constant 0.5 V/div); the rule now leaves out bad records, and BODE_CTRL bytes 50..57
   report its verdict, reason, points and spread, so the next flat AUTO SET on the bench shows why it chose Auto if it
   does again.
+- 2026-10-20 14:51 **(owner)**: the row reads just "Constant", not "Constant 100mV": the V/div takes too much space and the CH2
+  button above shows it. ("Preset" was considered; Constant stays.)

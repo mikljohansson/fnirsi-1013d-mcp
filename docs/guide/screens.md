@@ -225,7 +225,7 @@ When the result does not add up, AUTO SET stops, keeps your settings and says wh
 - Settle is how many periods each point waits before it is recorded: Fast 3, Normal 10, Resonant 50, High Q 200. Use
   a longer Settle for a sharp resonance.
 - CH2 range: a tap switches between Auto and Constant. Constant sweeps every point on the V/div of the CH2 menu (the
-  CH2 button in the top bar) and never changes it; the row shows it, e.g. "Constant 100mV". Choosing a V/div in the
+  CH2 button in the top bar) and never changes it; the CH2 button shows the V/div. Choosing a V/div in the
   CH2 menu while this view shows sets Constant; a sweep in progress starts again on the new V/div.
 - Single sweep keeps the panel open and shows what a tap does. Stopped, green "Single sweep" with the estimated time
   ("about 3 s") runs one sweep. While RUN repeats, green "STOP after this sweep" makes the current sweep the last.

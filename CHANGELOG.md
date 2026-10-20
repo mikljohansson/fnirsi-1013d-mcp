@@ -31,11 +31,16 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.95 - 2026-10-20 (protocol 1.24, unchanged)
+
+- Frequency response: the Sweep fold-out's CH2 range row reads just "Constant", without the V/div, which the CH2 button
+  shows (owner 2026-10-20 14:51).
+
 #### 0.2.94 - 2026-10-20 (protocol 1.24; BODE_CTRL answer 58 bytes)
 
 - Frequency response: the Sweep fold-out's CH2 range reads Auto or Constant, not Hold (owner 2026-10-20 14:16;
-  39213e7, 96eb3e5). Constant is the V/div of the CH2 menu, the channel's own setting, shown in the row as e.g.
-  "Constant 100mV". A sweep on Constant writes no other CH2 range, not even in its first capture; a clip or a drop
+  39213e7, 96eb3e5). Constant is the V/div of the CH2 menu, the channel's own setting, which the CH2 button
+  shows (the row says just "Constant", owner 14:51). A sweep on Constant writes no other CH2 range, not even in its first capture; a clip or a drop
   only flags the point, and the warning names the CH2 menu. When AUTO SET picks Constant it sets CH2's V/div, so the
   CH2 button shows it; leaving the mode keeps CH2's V/div on Constant.
 - Frequency response: choosing a V/div in the CH2 menu while the view shows sets CH2 range Constant, and a sweep in
