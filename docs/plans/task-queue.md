@@ -6,6 +6,15 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **Frequency response: points below the floor say so and what to do** (owner 10-20 16:00 **(owner)**: "we're just saying the
+  state, perhaps a bit cryptically, not saying it in simple terms or what the solution is"; bench 15:5x: the two-pole RC's tail
+  above 500 kHz is generator pickup at under one code, drawn as data): (1) ch2_small points (CH2 under 3 codes) drawn grey on
+  the device and in the mcp plot (bode.py BAD set), phase too; (2) the top-middle note in plain words with the action, e.g.
+  "CH2 too small above 540 kHz to measure: set Stop below it or press AUTO SET. Less pickup: short ground lead on CH2" (the
+  frequency = the first ch2_small point at the finest range; wording to be confirmed by the owner); (3) the same sentence as
+  the mcp caveat; (4) the -3dB / Level cards ignore grey points as they ignore the other flagged ones. No floor line: the
+  generator-off background does not see pickup. After fw-arm (both touch the engine's flags).
+
 - [x] **Frequency response track overview follows the Display variant** (fw 0.2.92, bench pending; fw-ov3, firmware/AGENTS.md
   section 49 addendum) (owner 10-20 13:35 **(owner)**: "if the chart shows both the
   scrollbar should too"): in Overlaid the track draws the magnitude in cyan and the phase in pink over each other, as the Scope's

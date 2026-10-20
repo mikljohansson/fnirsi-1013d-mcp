@@ -1329,3 +1329,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   frequency-response-sweep.png the A-to-B low-pass with the "CH1 level low: the DUT loads the 1 kOhm source" line, since
   CH1 sits behind the first stage). X-Y phosphor picture (Mono, generator swept 1..15 kHz from the host): a leaf of nested
   loops, docs/screenshots/phosphor-xy.png. Section 63 bench steps 1-5 pending (Diagnostics open + `--only scope`).
+- 2026-10-20 16:05: fw 0.2.96 section 63 step 1 (owner opened Diagnostics from the Scope view, `tools/screenshots.py --only
+  scope`): Diagnostics closed on the first SET_CHANNEL and the capture shows the Scope view, nothing of Diagnostics left.
+  Steps 3 and 4 (Diagnostics / Settings stay open for a read) were shown on 0.2.95 (14:57, 15:0x) and are covered by
+  test_main_screen_leave. 15:5x, two-pole RC ladder swept 10 kHz..10 MHz by the owner: above about 500 kHz every point reads
+  ch2_small (CH2 about -55 dBV, under one code at 100 mV/div) and the magnitude climbs again from -69 dB to -34 dB at 10 MHz
+  with the phase flipping: generator pickup into the CH2 probe and the breadboard, not the filter; only the 540 kHz point
+  (low_snr) is grey, the ch2_small points are drawn as data. Queued: "below the floor" presentation.
