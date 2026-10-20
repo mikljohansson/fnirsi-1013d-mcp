@@ -381,6 +381,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## MCP / host
 
+- **fnirsi1013d-bode crashes on a flat CH1 record** (bench 10-20 11:16): `measure_pair` divides by `tone(a)` = 0 when the CH1
+  record is constant (the 0x153A first-record artefact gave a saturated record): ZeroDivisionError ends the sweep. Guard it:
+  a zero or near-zero CH1 tone flags the point ch1_low / incoherent and retries once like a clipped point; never a traceback.
+
 - **Server releases the serial port when idle** (coordinator 10-19 22:08): on collaborative firmware the MCP server keeps COM10 open
   from the first tool call until the server exits (`Server.scope`, `drop_connection` only on a transport error), so the coordinator's
   own scripts and `fnirsi1013d-flash` get PermissionError on COM10 after any MCP tool call in the same session, and a FEL reload needs
