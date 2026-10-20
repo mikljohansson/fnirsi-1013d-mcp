@@ -363,7 +363,7 @@ static void test_measurement(void)
   m.mean16_lo[ACAL_FULL][1]  = 2067 + 607; m.mean16_hi[ACAL_FULL][1]  = 2067 - 607;
   m.zero16[ACAL_GATED][0] = 2095; m.zero16[ACAL_GATED][1] = 2010;
   m.zero16[ACAL_FULL][0]  = 2107; m.zero16[ACAL_FULL][1]  = 2067;
-  m.noise16[ACAL_GATED][0] = 10; m.noise16[ACAL_GATED][1] = 21;
+  m.noise16[ACAL_GATED][0] = 10; m.noise16[ACAL_GATED][1] = 15;   //gated limit 1.0 code (fw 0.2.100)
   m.noise16[ACAL_FULL][0]  = 9;  m.noise16[ACAL_FULL][1]  = 18;
   T_EQ(acal_range_store(&m, &c, 3), ACAL_OK);
   T_EQ(c.pwm[3], 903);
@@ -372,7 +372,7 @@ static void test_measurement(void)
   T_EQ(c.slope[ACAL_FULL][0][3], -17258);
   T_EQ(c.slope[ACAL_FULL][1][3], -16575);
   T_EQ(c.zero[ACAL_FULL][1][3], 2067);
-  T_EQ(c.noise[ACAL_GATED][1][3], 21);
+  T_EQ(c.noise[ACAL_GATED][1][3], 15);
   T_EQ(c.noise[ACAL_FULL][0][3], 9);
 
   {
@@ -476,7 +476,7 @@ static void test_zero_noise_bench(void)
 
     for(k=0;k<2;k++)
     {
-      T_TRUE(z.noise16[k] < ACAL_MAX_NOISE16);
+      T_TRUE(z.noise16[k] < ACAL_MAX_NOISE16_FULL);
       T_TRUE(z.noise16[k] - z.within16[k] <= 1);
       T_TRUE(z.drift16[k] >= 3 && z.drift16[k] <= 7);
     }
@@ -484,13 +484,13 @@ static void test_zero_noise_bench(void)
     z = zero_sim(convs, ch2_lvl, ch2_sd, 5, 0, 0);
     T_TRUE(z.noise16[0] >= 26 && z.noise16[0] <= 30);
     T_TRUE(z.noise16[1] >= 33 && z.noise16[1] <= 37);
-    T_TRUE(z.noise16[1] < ACAL_MAX_NOISE16);
+    T_TRUE(z.noise16[1] < ACAL_MAX_NOISE16_FULL);
   }
 
   //What does trip the limit: +-3 codes moving between conversions (pickup on the open input, ripple). The total
   //reads 3.2 codes, inside a capture it is still the bench's 1.1: the result line shows both
   z = zero_sim(64, ch1_lvl, ch1_sd, 0, 48, 0);
-  T_TRUE(z.noise16[1] > ACAL_MAX_NOISE16);
+  T_TRUE(z.noise16[1] > ACAL_MAX_NOISE16_FULL);
   T_TRUE(z.within16[1] >= 17 && z.within16[1] <= 20);
 
   //A bus glitch of 64 codes on one sample in 500 per conversion: 2.9 codes RMS, inside the captures as well
@@ -506,7 +506,8 @@ static void test_zero_noise_bench(void)
     m.mean16_lo[ACAL_GATED][k] = m.mean16_lo[ACAL_FULL][k] = 2048 + 634;
     m.mean16_hi[ACAL_GATED][k] = m.mean16_hi[ACAL_FULL][k] = 2048 - 634;
     m.zero16[ACAL_GATED][k] = m.zero16[ACAL_FULL][k] = 2048;
-    m.noise16[ACAL_GATED][k] = m.noise16[ACAL_FULL][k] = 18;
+    m.noise16[ACAL_GATED][k] = 12;
+    m.noise16[ACAL_FULL][k] = 18;
     m.within16[ACAL_GATED][k] = m.within16[ACAL_FULL][k] = 17;
   }
   T_EQ(acal_range_check(&m, &f), ACAL_OK);
@@ -515,6 +516,21 @@ static void test_zero_noise_bench(void)
   T_EQ(acal_range_check(&m, &f), ACAL_E_NOISE);
   T_EQ(f.cls, ACAL_FULL); T_EQ(f.core, 1); T_EQ(f.value, 52); T_EQ(f.within16, 17);
   m.noise16[ACAL_FULL][1] = 18;
+  //fw 0.2.100 (owner 2026-10-20 18:13): the limits per class, the ones Diagnostics shows: full rate 3.0 codes, gated
+  //1.0 (it was 3.0 too). The owner's unit: stored full 1.19 / 2.75, gated 0.50 / 0.38 at the worst range per channel
+  T_EQ(ACAL_MAX_NOISE16(ACAL_FULL), 48);
+  T_EQ(ACAL_MAX_NOISE16(ACAL_GATED), 16);
+  m.noise16[ACAL_FULL][0] = 19; m.noise16[ACAL_FULL][1] = 44;
+  m.noise16[ACAL_GATED][0] = 8; m.noise16[ACAL_GATED][1] = 6;
+  T_EQ(acal_range_check(&m, &f), ACAL_OK);
+  m.noise16[ACAL_FULL][1] = 48;
+  m.noise16[ACAL_GATED][0] = 16;
+  T_EQ(acal_range_check(&m, &f), ACAL_OK);
+  m.noise16[ACAL_GATED][0] = 17;
+  T_EQ(acal_range_check(&m, &f), ACAL_E_NOISE);
+  T_EQ(f.cls, ACAL_GATED); T_EQ(f.core, 0); T_EQ(f.value, 17);
+  m.noise16[ACAL_GATED][0] = 12;
+  m.noise16[ACAL_FULL][0] = m.noise16[ACAL_FULL][1] = 18;
   m.drift16[ACAL_GATED][0] = -11;
   T_EQ(acal_range_check(&m, &f), ACAL_E_DRIFT);
   T_EQ(f.cls, ACAL_GATED); T_EQ(f.core, 0); T_EQ(f.value, -11);
@@ -1200,7 +1216,7 @@ static void test_readout_fault(void)
     acal_acc all = acc[0][1];
 
     acal_acc_merge(&all, &acc[1][1]);
-    T_TRUE(acal_rms16(&all) > ACAL_MAX_NOISE16);
+    T_TRUE(acal_rms16(&all) > ACAL_MAX_NOISE16_FULL);
     T_EQ(all.hi, 255);
   }
   fault_measure(LEVEL(centre), 64, 0, acc);

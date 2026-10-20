@@ -500,7 +500,7 @@ int acal_range_check(const acal_range_meas *m, acal_fail *f)
   {
     for(k=0;k<2;k++)
     {
-      if(m->noise16[cl][k] > ACAL_MAX_NOISE16)
+      if(m->noise16[cl][k] > ACAL_MAX_NOISE16(cl))
       {
         acal_fail_at(f, cl, k, (int32_t)m->noise16[cl][k], m->within16[cl][k]);
         return ACAL_E_NOISE;

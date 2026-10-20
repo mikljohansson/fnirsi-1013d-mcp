@@ -31,6 +31,29 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.100 - 2026-10-20 (protocol 1.24, unchanged)
+
+- Diagnostics, Restarts tile: only a crash counts (owner 2026-10-20 18:12; 5879193). A deliberate restart (a firmware
+  load over FEL, Enter FEL, an update, a self-restart: exception type 0) is normal and reads OK "No crashes." with the
+  time up. Check: an earlier run crashed ("Crashed once before this run: data abort." "If it happens again, save a
+  report."). Fault: this run follows a crash since power-on ("Crashed 2 times this run: data abort at 0x...", "Details
+  on the Log page."). No exception jargon on the Status page; the Log page and event 15 are unchanged. The tile lines
+  wrap to the tile (five 13 px lines).
+- Diagnostics, calibration noise: the rows are labelled "Noise RMS, inputs open" and use the calibration's own limits,
+  gated 1.0 code and full rate 3.0 codes, on the Status page and the Calibration tab (owner 2026-10-20 18:13;
+  5879193). Up to 0.2.99 they were 0.3 / 1.0 code, marked provisional, so a unit that had just passed calibration
+  could read Check (the owner's CH2 full rate 2.75 codes). One pair of constants in `adc_cal.h` serves the wizard and
+  Diagnostics. Over a limit the advice is "move chargers and the USB cable away and calibrate again. If it stays, the
+  input stage is noisy."
+- Calibration wizard: the gated noise limit tightened from 3 codes to 1 code RMS, the full-rate one stays 3 codes
+  (5879193). The owner's unit reads 0.06..0.50 gated. A noise failure's second line names the limit ("Noise RMS,
+  inputs open, limit 1.0 code: move chargers and the USB cable away."); the short reason reads "too much noise: unplug
+  the probes, move chargers and USB away".
+- mcp: `scope_cal_probe` marks a point `noisy` against its class's limit (`protocol.cal_noise_limit16`); the simulator
+  keeps the full-rate limit for every point, since its noise model has one level for both rates.
+- Version 0.2.100: the first three-digit patch. Nothing assumed two digits; `build_id.c` now refuses a version longer
+  than the 15 characters its field holds (53f37e1).
+
 #### 0.2.99 - 2026-10-20 (protocol 1.24, unchanged; row 60's invalid flag bits gain bit 4)
 
 - Frequency response: points where CH2 is under 3 codes (ch2_small) are grey, in magnitude and phase, and the

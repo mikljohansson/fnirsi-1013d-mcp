@@ -16,6 +16,11 @@
 #include "pc_ident.h"
 #include "pc_cmds.h"
 
+//fw 0.2.100: a three-digit patch makes the version longer. pc_image_id.version holds 15 characters and its NUL (the
+//readers stop at 15: ui_diag.c s_ver, the card scan); C accepts a 16-character initializer without the NUL, so check
+//it here ("0.2.100-m1-nommu", both A/B suffixes at once, is 16 and does not build)
+typedef char pc_fw_version_fits[(sizeof(PC_FW_VERSION) <= sizeof(((pc_image_id *)0)->version)) ? 1 : -1];
+
 const pc_image_id pc_image_ident =
 {
   PC_ID_MAGIC0, PC_ID_MAGIC1,

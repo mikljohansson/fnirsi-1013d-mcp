@@ -513,7 +513,9 @@ static int ud_fpga_line(const ud_input *in, char *p)
 #define UD_TILE_H     126
 #define UD_TILE_PITCH 196
 #define UD_TILE_IN    168         //text width inside a tile
-#define UD_TILE_LINES 4
+#define UD_TILE_LINES 5           //fw 0.2.100: five 13 px lines 15 px apart (y + 50 .. y + 123 of 126)
+#define UD_TILE_LY    50
+#define UD_TILE_LP    15
 
 typedef struct
 {
@@ -521,6 +523,57 @@ typedef struct
   char    word[16];
   char    line[UD_TILE_LINES][40];
 } ud_tile;
+
+//fw 0.2.100: a sentence on the next free lines of a tile, broken at spaces to fit UD_TILE_IN in the 13 px font (a word
+//that does not fit a line on its own is cut by ud_txt and the layout test fails). Returns 0 when it did not fit
+static int ud_tile_say(ud_tile *t, const char *s)
+{
+  uint32_t k = 0, n, best, i;
+
+  while((k < UD_TILE_LINES) && t->line[k][0])
+    k++;
+
+  while(*s)
+  {
+    if(k >= UD_TILE_LINES)
+      return 0;
+
+    //the longest prefix ending before a space (or at the end) that fits
+    best = 0;
+
+    for(n=0;s[n] && (n < sizeof(t->line[0]) - 1);n++)
+    {
+      if((s[n + 1] == ' ') || !s[n + 1])
+      {
+        for(i=0;i<=n;i++)
+          t->line[k][i] = s[i];
+
+        t->line[k][n + 1] = 0;
+
+        if(ui_text_width(&font_2, t->line[k]) > UD_TILE_IN)
+          break;
+
+        best = n + 1;
+      }
+    }
+
+    if(!best)
+      best = n;
+
+    for(i=0;i<best;i++)
+      t->line[k][i] = s[i];
+
+    t->line[k][best] = 0;
+    s += best;
+
+    while(*s == ' ')
+      s++;
+
+    k++;
+  }
+
+  return 1;
+}
 
 static void ud_tile_init(ud_tile *t, int state, const char *word)
 {
@@ -618,45 +671,89 @@ static uint32_t ud_link(const ud_input *in, uint32_t i)
   return (in->link && (i < in->nlink)) ? in->link[i] : 0;
 }
 
+//"Up 27 min."
+static int ud_tile_up(ud_tile *t, uint32_t minutes)
+{
+  char s[24], *p;
+
+  p = s_str(s, "Up ");
+  p = s_minutes(p, minutes);
+  s_str(p, ".");
+  return ud_tile_say(t, s);
+}
+
+//"once", "2 times"
+static char *s_times(char *p, uint32_t n)
+{
+  if(n == 1)
+    return s_str(p, "once");
+
+  p = s_uint(p, n);
+  return s_str(p, " times");
+}
+
+//A real exception (types 1..6): a crash. Type 0, a jump to the image entry, is a deliberate restart (a firmware load
+//over FEL, Enter FEL, an update, a self-restart): normal, never a crash (owner 2026-10-20 18:12)
+static int ud_exc_crash(uint32_t type)
+{
+  return (type >= 1) && (type <= 6);
+}
+
+//fw 0.2.100 (owner 2026-10-20 18:12): OK = no crash; Check = a stored record of a crash before this run, Fault = this
+//run follows a crash since the power-on (counter 49 > 0 with a real exception in counter 50). Plain words only: the Log
+//page has the exception type, LR, PC and fault registers
 static void ud_tile_restarts(const ud_input *in, ud_tile *t)
 {
   const uint8_t *h = in->health;
   uint32_t n = ud_link(in, 49), up = g32(h + H_UPTIME) / 60000, type = ud_link(in, 50);
-  char *p;
+  char s[UD_TEXT_LEN], *p;
 
-  if(n)
+  if(n && ud_exc_crash(type))
   {
     ud_tile_init(t, UD_V_FAULT, "Fault");
-    p = s_str(t->line[0], "Restarted ");
-    p = s_plural(p, n, "time", "times");
-    s_str(p, ":");
-    p = s_str(t->line[1], ud_exc_name(type));
-    s_str(p, (type == 0) ? ", LR" : " at");
-    s_hex(t->line[2], (type == 0) ? ud_link(in, 51) : ud_exc_pc(type, ud_link(in, 51)), 8);
-    s_str(t->line[3], "Details on the Log page.");
+    p = s_str(s, "Crashed ");
+    p = s_times(p, n);
+    p = s_str(p, " this run: ");
+    p = s_str(p, ud_exc_name(type));
+    p = s_str(p, " at ");
+    p = s_hex(p, ud_exc_pc(type, ud_link(in, 51)), 8);
+    s_str(p, ".");
+    ud_tile_say(t, s);
+    ud_tile_say(t, "Details on the Log page.");
     return;
   }
 
-  if((h[H_REC] & 1) && !(h[H_REC] & 2))
+  if(!n && (h[H_REC] & 1) && ud_exc_crash(h[H_REC_TYPE]))
   {
-    ud_tile_init(t, UD_V_CHECK, "Check");
-    p = s_str(t->line[0], "Power-on #");
-    p = s_uint(p, g32(h + H_REC_PON));
-    s_str(p, " restarted:");
-    p = s_str(t->line[1], ud_exc_name(h[H_REC_TYPE]));
-    s_str(p, ".");
-    s_str(t->line[2], "None since power-on.");
-    p = s_str(t->line[3], "Up ");
-    p = s_minutes(p, up);
-    s_str(p, ".");
+    uint32_t pass, fits = 0;
+
+    //A large count with a long exception name takes three lines: then without the count, so "Up" keeps its line
+    for(pass=0;(pass<2) && !fits;pass++)
+    {
+      ud_tile_init(t, UD_V_CHECK, "Check");
+      p = s_str(s, "Crashed ");
+
+      if(!pass)
+      {
+        p = s_times(p, g16(h + H_REC_COUNT) ? g16(h + H_REC_COUNT) : 1);
+        p = s_str(p, " ");
+      }
+
+      p = s_str(p, "before this run: ");
+      p = s_str(p, ud_exc_name(h[H_REC_TYPE]));
+      s_str(p, ".");
+      fits = ud_tile_say(t, s);
+      fits &= ud_tile_say(t, "If it happens again,");       //broken by hand: "save a" / "report." otherwise
+      fits &= ud_tile_say(t, "save a report.");
+      fits &= ud_tile_up(t, up);
+    }
+
     return;
   }
 
   ud_tile_init(t, UD_V_OK, "OK");
-  s_str(t->line[0], "None since power-on.");
-  p = s_str(t->line[1], "Up ");
-  p = s_minutes(p, up);
-  s_str(p, ".");
+  ud_tile_say(t, "No crashes.");
+  ud_tile_up(t, up);
 }
 
 static void ud_tile_usb(const ud_input *in, ud_tile *t)
@@ -730,7 +827,7 @@ static void ud_tile_put(ud_page *pg, int i, const char *title, const ud_tile *t)
 
   for(k=0;k<UD_TILE_LINES;k++)
     if(t->line[k][0])
-      ud_txt(pg, x + 10, UD_TILE_Y + 52 + 17 * k, UD_TILE_IN, UD_F_SMALL, UD_C_SOFT, t->line[k]);
+      ud_txt(pg, x + 10, UD_TILE_Y + UD_TILE_LY + UD_TILE_LP * k, UD_TILE_IN, UD_F_SMALL, UD_C_SOFT, t->line[k]);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -836,7 +933,8 @@ void ud_cal_verdict(const ud_input *in, ud_verdict *v)
     s_str(p, " min after power-on: recalibrate after 5 minutes of warm-up.");
   }
   else if(ud_over_limits(c0) || ud_over_limits(c1))
-    s_str(p, "A value is over its limit (below): recalibrate with the inputs open.");
+    s_str(p, "A value is over its limit (below): move chargers and the USB cable away and calibrate again.\n"
+             "If it stays, the input stage is noisy.");
   else
   {
     v->state = UD_V_OK;
@@ -929,12 +1027,21 @@ static void ud_cell(ud_page *pg, int x, int y, int32_t v, uint32_t denom, uint32
 #define UD_CAL_Y      230
 #define UD_CAL_H      182
 
+//"limit 1.0 code" from a limit in hundredths of a code
+static char *s_limit_code(char *p, int32_t hundredths)
+{
+  p = s_str(p, "limit ");
+  p = s_fix(p, hundredths, 100, 1, 0);
+  return s_str(p, " code");
+}
+
 static void ud_status_cal(ud_page *pg, const ud_input *in)
 {
-  static const char *heads[3]  = { "Class gain ratio, full / gated", "Noise RMS, gated", "Noise RMS, full" };
-  static const char *limits[3] = { "limit 2 %", "limit 0.3 code", "limit 1.0 code" };
+  //fw 0.2.100 (owner 2026-10-20 18:13): the noise rows are the zero step's open-input condition, with its limits
+  static const char *heads[3] = { "Class gain ratio, full / gated", "Noise RMS, inputs open, gated",
+                                  "Noise RMS, inputs open, full" };
   ud_verdict v;
-  char t[UD_TEXT_LEN];
+  char t[UD_TEXT_LEN], *nl;
   uint32_t ch, i;
   int x, y = UD_CAL_Y;
 
@@ -942,19 +1049,36 @@ static void ud_status_cal(ud_page *pg, const ud_input *in)
   ud_cal_verdict(in, &v);
   ud_txt(pg, 22, y + 10, 80, UD_F_SMALL, UD_C_DIM, "Calibration");
   ud_txt(pg, 104, y + 8, 60, UD_F_BODY, ud_state_colour(v.state), v.word);
+
+  //The reason, one line or two (broken by hand at a newline)
+  for(nl=v.reason;*nl && (*nl != '\n');nl++)
+    ;
+
+  if(*nl)
+  {
+    *nl = 0;
+    ud_txt(pg, 170, y + 25, 608, UD_F_SMALL, UD_C_SOFT, nl + 1);
+  }
+
   ud_txt(pg, 170, y + 10, 608, UD_F_SMALL, UD_C_SOFT, v.reason);
 
   for(i=0;i<3;i++)
   {
     x = 80 + 232 * (int)i;
-    ud_txt(pg, x, y + 36, 224, UD_F_SMALL, UD_C_DIM, heads[i]);
-    ud_txt(pg, x, y + 52, 224, UD_F_SMALL, UD_C_DIM, limits[i]);
+    ud_txt(pg, x, y + 46, 224, UD_F_SMALL, UD_C_DIM, heads[i]);
+
+    if(i == 0)
+      s_str(t, "limit 2 %");
+    else
+      s_limit_code(t, (i == 1) ? UD_LIM_NOISE_GATED : UD_LIM_NOISE_FULL);
+
+    ud_txt(pg, x, y + 62, 224, UD_F_SMALL, UD_C_DIM, t);
   }
 
   for(ch=0;ch<2;ch++)
   {
     const uint8_t *c = in->cal[ch];
-    int yy = y + 76 + 28 * (int)ch;
+    int yy = y + 86 + 28 * (int)ch;
 
     ud_txt(pg, 22, yy, 50, UD_F_BODY, ch ? UD_C_CH2 : UD_C_CH1, ch ? "CH2" : "CH1");
 
@@ -969,9 +1093,8 @@ static void ud_status_cal(ud_page *pg, const ud_input *in)
     ud_cell(pg, 544, yy, ud_noise_hundredths(c, ACAL_FULL), 100, 2, " code", UD_LIM_NOISE_FULL, "");
   }
 
-  ud_txt(pg, 22, y + 136, 756, UD_F_SMALL, UD_C_DIM, "Limits are provisional: set from one unit's bench values.");
   ud_cal_provenance(in, t);
-  ud_txt(pg, 22, y + 156, 756, UD_F_SMALL, UD_C_SOFT, t);
+  ud_txt(pg, 22, y + 152, 756, UD_F_SMALL, UD_C_SOFT, t);
 }
 
 static void ud_note_or_hint(ud_page *pg, const ud_note *note, int x, const char *hint)
@@ -1120,12 +1243,19 @@ static void ud_cal_channel(ud_page *pg, const ud_input *in, uint32_t ch)
       yy += 16;
     }
 
-    p = s_str(t, "Noise RMS gated ");
+    //fw 0.2.100: the zero step's open-input condition and its limits, as on the Status page
+    p = s_str(t, "Noise RMS, inputs open: gated ");
     p = s_fix(p, ud_noise_hundredths(c, ACAL_GATED), 100, 2, 0);
     p = s_str(p, ", full ");
     p = s_fix(p, ud_noise_hundredths(c, ACAL_FULL), 100, 2, 0);
     s_str(p, " code");
     ud_txt(pg, x0, yy, 362, UD_F_SMALL, ud_over_limits(c) ? UD_C_WARN : UD_C_TEXT, t);
+    yy += 16;
+    p = s_str(t, "Gated ");
+    p = s_limit_code(p, UD_LIM_NOISE_GATED);
+    p = s_str(p, ", full ");
+    s_limit_code(p, UD_LIM_NOISE_FULL);
+    ud_txt(pg, x0, yy, 362, UD_F_SMALL, UD_C_DIM, t);
     yy += 16;
   }
 

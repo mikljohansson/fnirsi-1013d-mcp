@@ -325,13 +325,26 @@ back to their defaults. Calibration and start-up are kept."
 Four pages, chosen with the tabs at the top: Status, Calibration, Log and Developer. They update every second. A PC
 can keep working with the scope while Diagnostics shows. Back returns to the scope.
 
-A state is a word and a colour: OK green, Check amber, Fault red, grey not available.
+A state is a word and a colour: OK green, Check amber, Fault red, grey not available. OK means everything is normal,
+Check means something to fix at some point, Fault means something is badly wrong.
+
+The Restarts tile counts crashes only. A deliberate restart (a firmware load over FEL, Enter FEL, an update) is normal
+and does not count.
+
+| Restarts | Tile text |
+|---|---|
+| OK | "No crashes." and the time since power-on, for example "Up 27 min." |
+| Check | An earlier run crashed: "Crashed once before this run: data abort.", "If it happens again, save a report." and the time since power-on |
+| Fault | This run follows a crash since power-on: "Crashed 2 times this run: data abort at 0x80014a2c." and "Details on the Log page." |
+
+The Log page keeps the details: the exception type, its address and the fault registers.
 
 - **Status**: the firmware identity (version, git hash, protocol, USB serial), the FPGA line with the bitstream and its
   features, tiles for Firmware, Restarts, USB and Battery, and the calibration verdict with its reason. Buttons:
   Calibrate (the [wizard](calibration.md)) and Save report to card (a text file in `reports`).
 - **Calibration**: per channel and range the offset centre, the volts factor, the zeros and gains of both ADC cores,
-  the noise and the background tracking. Buttons: Calibrate, DC shift trim, Volts calibration, Clear calibration.
+  the noise with the inputs open against its limits and the background tracking. Buttons: Calibrate, DC shift trim,
+  Volts calibration, Clear calibration.
 - **Log**: the event log in words, newest first, with Older events and Newest events to page through it. Also the
   counters since power-on, the last restart and the SD card state.
 - **Developer**: "For firmware work. Normal use needs none of this." Enter FEL now restarts the scope into the USB

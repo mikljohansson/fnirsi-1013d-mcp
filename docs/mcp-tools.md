@@ -403,9 +403,9 @@ runs the calibration wizard's zero measurement of one channel and hardware range
 zero step on the screen) and returns the verdict (OK, CLIP, NOISE, ZERO, SPREAD, SLOPE, DRIFT, CLASS, TIMING,
 READOUT) in words, the failing point / class / core / value, the centre and zero PWM, the zero split, the encode-check
 counts during the probe and per point (coarse, gated slope and zero pair, full-rate zero pair and slope) per core the
-mean, RMS about the mean (`noisy` above the wizard's 3-code limit), RMS within a conversion, extremes and clipped
-samples. Nothing is stored; the tool stops the UI acquisition for it and sets RUN again. A/B switches for the bus
-readout: `settle_reads`, `prestrobe`.
+mean, RMS about the mean (`noisy` above the wizard's limit of the point's class: 3 codes full rate, 1 code gated
+since fw 0.2.100, 3 codes before), RMS within a conversion, extremes and clipped samples. Nothing is stored; the tool
+stops the UI acquisition for it and sets RUN again. A/B switches for the bus readout: `settle_reads`, `prestrobe`.
 
 **`calibration_info`** (`scope_calibration_info`, tier 0): the conversion in use per channel, the scope's calibration
 (v3 block, current correction), from 1.15 `tracking` per channel (the v4 tracker: tracking / frozen / idle, d, e, q,

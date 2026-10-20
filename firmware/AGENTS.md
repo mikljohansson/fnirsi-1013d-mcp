@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-diag (2026-10-20): fw 0.2.100, protocol 1.24 unchanged: Diagnostics Restarts tile counts crashes only (type 0 = deliberate), the noise rows use the zero step's limits (gated 1.0, full 3.0 codes, one pair of constants in adc_cal.h; the wizard's gated limit tightened from 3.0); section 66.**
 **Branch fw-floor (2026-10-20): fw 0.2.99, protocol 1.24 unchanged: Frequency response ch2_small points grey (BODE_F_BAD, mcp BAD_FLAGS) and the two-line "CH2 too small above ... kHz" note with its mcp caveat; section 65.**
 **Branch fw-arm2 (2026-10-20): fw 0.2.98, protocol 1.24 unchanged: the Frequency response engine reads its records as 0.2.96 did (0.2.97's 0x14 / cut rules counted half its captures as time-outs); section 64 addendum.**
 **Branch fw-arm (2026-10-20): fw 0.2.97, protocol 1.24 unchanged (GET_CAPTURE_INFO flags bit 6): auto mode on FPGA 0x1532..0x153A arms the FPGA's time-out with the stop geometry (no spliced records), the record flagged when the firmware still forces; section 64.**
@@ -4856,3 +4857,78 @@ Not done / for the next agent:
 Bug indicators: grey points with the curve drawn through them; the note during AUTO SET; the note naming a frequency
 below a measured non-small point at the top of the span; "CH2 small: decrease V/div" on Constant 100 mV/div; the
 second line overlapping data in the top division when the scale leaves it free.
+
+## 66. fw-diag: Restarts verdicts and the open-input noise limits (fw 0.2.100, protocol 1.24 unchanged)
+
+Branch `fw-diag` from main 7d883e5 (fw 0.2.99). Brief: the owner's decisions of 2026-10-20 18:12 (verdict meanings,
+the Restarts tile) and 18:13 (the noise rows' limits are the calibration's open-input condition). Commits: 5879193
+(firmware + host tests), 53f37e1 (version), then mcp, docs and this handoff. Host tests green (`make test`: test_ui_diag
+12516, test_cal_wizard 680, test_adc_cal 59851, the rest unchanged); mcp ruff selection clean, pytest green; `make
+gcc10` builds (`#VER fw=0.2.100`). All files LF. **Nothing benched, nothing flashed.**
+
+**Verdict words** (owner): OK = everything normal; Check = something to fix at some point; Fault = something critically
+bad. Written into docs/guide/screens.md.
+
+**Restarts tile** (`ui_diag.c` `ud_tile_restarts`, `ud_exc_crash`, `ud_tile_say`, `ud_tile_up`). A crash is an
+exception of type 1..6; type 0 (jump to the image entry: a FEL load, Enter FEL, an update, a self-restart) is normal.
+- OK: no crash this run and no stored crash record: "No crashes." / "Up 27 min.". Also after a deliberate restart this
+  run (counter 49 > 0, counter 50 = 0) and with a stored type-0 record.
+- Check: counter 49 = 0 and a stored record (GET_HEALTH 44 bit 0) of a real exception: "Crashed once before this run:"
+  / "data abort." / "If it happens again," / "save a report." / "Up 27 min." (the count is the record's restarts, 46;
+  a large count with a long exception name drops the count so "Up" keeps its line). The stored-record condition no
+  longer looks at bit 1 (record of this power-on): with counter 49 = 0 such a record cannot be a crash of this run.
+- Fault: counter 49 > 0 with a real exception in counter 50: "Crashed 2 times this run:" / "data abort at 0x80014a2c."
+  / "Details on the Log page." (hex in lower case as on the Log page; the PC is LR - 8 / - 4 as there).
+- Lines are wrapped at spaces to the tile's 168 px in the 13 px font (`ud_tile_say`); the tiles have five lines now,
+  15 px apart from y + 50 (the last ends at y + 123 of 126; 17 px from y + 52 for four lines before). The Check case
+  needs five. Every exception name with counts 65535 / 0xFFFFFFFF and the longest uptime fits (test_ui_diag).
+- The Log page ("Last restart", type, LR, PC, fault registers, the stored record) and event 15 are unchanged.
+- Known limits, not changed: counter 49 counts every warm restart since the cold boot / ENTER_FEL, so "Crashed N
+  times" counts the deliberate ones in the same chain too when the latest was a crash; and a deliberate restart after a
+  crash overwrites the stored record (`pc_life_boot` stores every warm restart), so that crash then reads OK. A crash
+  count of its own (DDR record word, a new link counter) would fix both; not built.
+- Firmware tile: unchanged. Its Check states are things a user can fix: no SD card (settings not saved), a card image
+  of another version ("from RAM. A power cycle starts 0.2.25 from the card." already says it in those words), no open
+  firmware on the card, an unknown card image.
+
+**Noise limits** (`adc_cal.h` `ACAL_MAX_NOISE16_FULL` 3 x 16, `ACAL_MAX_NOISE16_GATED` 1 x 16, `ACAL_MAX_NOISE16(cls)`;
+`ACAL_MAX_NOISE16` without a class is gone). Used by `acal_range_check` (the stored noise per class), `cal_train`'s
+quiet-input check (gated within-capture RMS, now 1 code) and Diagnostics (`UD_LIM_NOISE_GATED` / `_FULL` = 100 / 300
+hundredths, derived from them). **The wizard's gated criterion tightened from 3.0 to 1.0 code**, backed by the stored
+values on the owner's unit (coordinator, GET_CAL 2026-10-20 18:1x, worst range per core): gated CH1 A 0.50, B 0.06,
+CH2 A 0.25, B 0.38; full CH1 B 1.19, CH2 A 2.75 (5 V/div; the high-impedance ranges 5 V, 1 V, 200 mV the worst; a
+low-impedance source reads 0.5..0.6 at 200 MSa/s). The class gain ratio limit (2 %) is unchanged.
+- Status page: headings "Noise RMS, inputs open, gated" / "..., full", limits "limit 1.0 code" / "limit 3.0 code"
+  (`s_limit_code` from the constants); the "Limits are provisional" note is gone; the box moved down 8..10 px to give
+  the reason two lines. Over a limit: "A value is over its limit (below): move chargers and the USB cable away and
+  calibrate again." / "If it stays, the input stage is noisy." (`ud_cal_verdict` puts a newline in the reason;
+  `ud_status_cal` draws the second line at y + 25).
+- Calibration tab: "Noise RMS, inputs open: gated 0.50, full 1.19 code" (amber over a limit), then "Gated limit 1.0
+  code, full limit 3.0 code" (the channel block's last line now ends at y + 269 of 270).
+- Wizard: `cw_reason_text` "too much noise: unplug the probes, move chargers and USB away"; a noise failure of the stored
+  value (no measured point) gets the note "Noise RMS, inputs open, limit 1.0 code: move chargers and the USB cable
+  away." (or 3.0 at 200 MSa/s). Pass texts unchanged ("CH1: zero level done").
+- mcp: `protocol.CAL_NOISE_LIMIT16_FULL` / `_GATED`, `cal_noise_limit16(cls)`; CAL_PROBE's `noisy` per point class.
+  The simulator's probe keeps the full-rate limit for every point (its noise model has one level, 1 LSB, for both
+  rates; real units read gated far lower).
+
+**Version 0.2.100**, the first three-digit patch. Checked: `release_meta.py` (`\d+` in the tag, the PC_FW_VERSION and
+the CHANGELOG regexes), release.yml's `#VER` grep (`fw=[^,]*`), `pc_ident_version_at_least` (numeric), the card scan
+(up to 15 characters), the mcp (no version string compares; gates use the protocol). Nothing assumed two digits. The one
+real limit: `pc_image_id.version` is 16 bytes and C accepts a 16-character initializer without its NUL;
+"0.2.100-m1-nommu" (both A/B suffixes) is 16, so `build_id.c` now has a compile-time check that the version is at most
+15 characters (that combination no longer builds; the default, `-m1` and `-nommu` builds do).
+
+**Bench (coordinator; FEL load of `build-gcc10-pc/fnirsi_1013d.bin`; never during a calibration)**
+1. `#VER fw=0.2.100`. Menu > Diagnostics > Status. Restarts tile: green "OK", "No crashes.", "Up N min." after the
+   FEL load (ENTER_FEL clears the record; a stored type-0 record no longer gives Check). Log page: as on 0.2.99.
+2. Calibration box: "OK Calibrated, every value within its limit." Headings "Noise RMS, inputs open, gated" / "...,
+   full", limits "limit 1.0 code" / "limit 3.0 code"; CH1 full 1.19 code OK, CH2 full 2.75 code OK, gated 0.50 / 0.38
+   (the worst per channel) OK. No "provisional" line; the provenance line at the bottom of the box.
+3. Calibration tab: per channel "Noise RMS, inputs open: gated 0.50, full 1.19 code" (CH2 "gated 0.38, full 2.75
+   code") in white, then "Gated limit 1.0 code, full limit 3.0 code"; the last line (1.00o5 core compensations) still
+   inside the block.
+4. Optional: run Calibrate with the inputs open: the zero step passes as before (gated well under 1.0). With a probe
+   on an input near a charger a noise failure shows the new second line with the limit.
+Bug indicators: Check or Fault on Restarts right after a FEL load; any noise value under its limit drawn amber; the
+advice's second line overlapping the column headings; a tile line cut.

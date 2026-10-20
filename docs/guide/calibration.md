@@ -60,7 +60,7 @@ probe". **Calibrate** stays, so you can try again. There is no Skip.
 | Message | What to do |
 |---|---|
 | the input is not at 0 V: unplug the probe | Remove the probe from the input, then retry |
-| too much noise, range 3 at 200 MSa/s: ... (or "too much noise: unplug the probe and USB") | Remove everything from the inputs and unplug USB |
+| too much noise, range 3 at 200 MSa/s: ... (or "too much noise: unplug the probes, move chargers and USB away") | Remove everything from the inputs, unplug USB and move chargers away. The second line names the limit: 1.0 code RMS at 2 MSa/s, 3.0 codes at 200 MSa/s |
 | zero still moving, range 3 at 2 MSa/s: ... | Let the scope warm up for a few minutes, then retry |
 | No signal on CH1: tip on the post? | Put the probe tip on the calibration post |
 | the post signal clips: set the probe to 1X | Switch the probe to 1X |
@@ -98,13 +98,14 @@ Diagnostics > Status shows one calibration verdict with its reason:
 | Check | ADC capture flagged 3 times within a minute: run Calibrate. | Run Calibrate; it trains the capture stages again (0x153A) |
 | Check | Gains not measured: run Calibrate with the probes on the post. | Run the wizard with the gain steps |
 | Check | Gains carried over from an earlier calibration: run Calibrate. | Run the wizard with the gain steps |
-| Check | A value is over its limit (below): recalibrate with the inputs open. | Run Calibrate with nothing on the inputs |
+| Check | A value is over its limit (below): move chargers and the USB cable away and calibrate again. If it stays, the input stage is noisy. | Run Calibrate with nothing on the inputs, chargers and the USB cable away. If the noise stays over its limit, the input stage is noisy |
 | Check | Saved calibration does not match the current offsets: run Calibrate. | Run Calibrate |
 | Fault | Uncalibrated: readings may be several % off. Run Calibrate. | Run Calibrate |
 
-Below the verdict, the Status page shows per channel the gain ratio between the rates and the worst noise, each with OK
-or Check. The limits are provisional. The provenance line says when the calibration was taken, for example
-"Calibrated on fw 0.2.59, FPGA 0x1535, 12 min after power-on, 1 power-on ago."
+Below the verdict, the Status page shows per channel the gain ratio between the rates (limit 2 %) and the worst noise
+RMS with the inputs open, gated (limit 1.0 code) and at full rate (limit 3.0 code), each with OK or Check. The noise
+limits are the wizard's own pass criterion, so a calibration that passed shows OK. The provenance line says when the
+calibration was taken, for example "Calibrated on fw 0.2.59, FPGA 0x1535, 12 min after power-on, 1 power-on ago."
 
 Diagnostics > Calibration shows the values per range: the offset centre, the volts factor, the zeros and gains of both
 cores, the noise and the background tracking. A value outside its limit is amber.

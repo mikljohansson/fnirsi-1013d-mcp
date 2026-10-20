@@ -2342,7 +2342,9 @@ class Device:
                     break
                 if c.clipped:
                     rc, val = 5, c.clipped
-                elif c.rms * 16 > P.CAL_NOISE_LIMIT16:
+                # One noise level for both rates (cfg.noise_lsb, 1 LSB by default, on the gated limit): the model checks
+                # the full-rate limit for every point. Real units read gated far lower (bench 0.06..0.50 against 1.19..2.75)
+                elif c.rms * 16 > P.CAL_NOISE_LIMIT16_FULL:
                     rc, val = 6, int(round(c.rms * 16))
                 if rc:
                     fp, fcls, fcore, within = i, p.cls, k, int(round(c.rms_within * 16))

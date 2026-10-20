@@ -330,7 +330,7 @@ const char *cw_reason_text(int rc)
   {
     case ACAL_E_RESPONSE:   return "the offset control does not move the zero level";
     case ACAL_E_CLIP:       return "the input is not at 0 V: unplug the probe";
-    case ACAL_E_NOISE:      return "too much noise: unplug the probe and USB";
+    case ACAL_E_NOISE:      return "too much noise: unplug the probes, move chargers and USB away";
     case ACAL_E_ZERO:       return "the zero level is out of range";
     case ACAL_E_SPREAD:     return "the two ADC cores differ too much";
     case ACAL_E_SLOPE:      return "the offset control is out of range";
@@ -474,7 +474,19 @@ char *cw_zero_note(const cal_wiz *w, uint32_t ch, char *p)
     return p;
   }
 
-  if((ch > 1) || (w->zero_st[ch] != CW_Z_FAIL) || !w->zero_det[ch] || (f->point >= ACAL_POINTS))
+  if((ch > 1) || (w->zero_st[ch] != CW_Z_FAIL) || !w->zero_det[ch])
+    return p;
+
+  //fw 0.2.100 (owner 2026-10-20 18:13): the stored noise over its limit names the limit of its rate (the one Diagnostics
+  //shows, adc_cal.h ACAL_MAX_NOISE16_*) and what helps
+  if((w->zero_rc[ch] == ACAL_E_NOISE) && (f->point >= ACAL_POINTS))
+  {
+    p = cw_str(p, "Noise RMS, inputs open, limit ");
+    p = cw_fmt_tenths(p, cw_tenths16(ACAL_MAX_NOISE16(f->cls)));
+    return cw_str(p, " code: move chargers and the USB cable away.");
+  }
+
+  if(f->point >= ACAL_POINTS)
     return p;
 
   p = cw_str(p, "Range ");
