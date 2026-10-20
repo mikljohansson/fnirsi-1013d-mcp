@@ -6,6 +6,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **AUTO SET chooses CH2 Hold when the span fits one range** (owner 10-20 13:35 **(owner)**: RUN on the RC still clicks twice per
+  sweep; those are the planned 0.5 / 0.2 / 0.1 V/div transitions a 35 dB span needs, so they are the floor; for live tuning of a
+  narrow band one range suffices): after the overview and the passes, AUTO SET sets CH2 range Hold at the range that holds the
+  span's largest CH2 level with margin when the CH2 level spread inside the chosen span is under about 20 dB, and Auto otherwise;
+  the Sweep fold-out shows the choice; a held sweep that sees a point drop more than 20 dB below the held range's full scale
+  flags it ch2_small as today (the user switches to Auto by hand). Also: the switch count in the header counts planned and
+  unplanned switches separately so the bench can see "0 unplanned, 2 planned". Next engine batch (fw-eng5).
+
 - [x] **Device sweep flags stricter than the host's** (fw 0.2.87, bench pending) (bench 10-20 11:14 / 12:00): on the same RC the device flags about half the
   points incoherent / unsettled / ch2_small where the host flags none; compare bode_dsp.c's incoherence, settle and small-signal
   tests with bode.py's on identical records (feed the host's captured records through the C DFT in a host test) and align the

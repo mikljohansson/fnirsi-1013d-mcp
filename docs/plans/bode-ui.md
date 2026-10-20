@@ -729,4 +729,7 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
   an unchanging circuit (engine item in the task queue).
 - 2026-10-20 11:52 **(owner)**: the range plan is reused by every sweep at the same span and settings (RUN, Single sweep, AUTO SET's
   final sweep); only a settings change or a point that clips / drops below the floor invalidates it.
+- 2026-10-20 13:35 **(owner)**: AUTO SET sets CH2 range Hold when the response inside the chosen span fits one range (about 20 dB
+  of spread) and Auto otherwise, so a narrow span around a peak runs silently; Hold stays the manual override. The two clicks
+  per sweep on a 35 dB low-pass are the planned range transitions, not churn.
 
