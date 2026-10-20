@@ -281,6 +281,11 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   (masks stored under the data dir, exact geometry only), scope_export_csv, scope_dvm (resolution statement); simulator
   serial signals; report kinds. README and release notes say 34 tools; release notes need a line on the four tools
   (release follow-up).
+- Owner decisions 23:0x (LUT savings): (1) the pattern generator absorbs the square-wave generator (a two-step continuous
+  pattern with double-buffered durations; the DDS and its sweep logic go; firmware generator menu, wizard 1 kHz and the device
+  Bode sweep program the pattern); (2) chirps are MCU-stepped patterns (one period write per step); (3) an FPGA cruft audit
+  under the one-bitstream rule: register paths our firmware never writes are removed. fpga-spec measures the deltas by
+  synthesis and updates the contract and the D2 brief; 0x153E's question is answered by the measured numbers.
 - fpga-spec addendum (done 22:54, merged 22:55 as 4d35cb3): section 7.5 pattern trigger engine (registers 0x76-0x7D mirroring
   the capture trigger's, status 0x42, burst start source in 0x6D bits 6..5, caps bit 27, SET_PATTERN_TRIGGER 0x021A), fallback
   = the capture qualifier routed; 0x153D now ~7,350 LUT (85 %), 0x153E ~91 % and gated on 0x153D's measured count; logger
