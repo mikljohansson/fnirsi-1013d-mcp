@@ -129,7 +129,10 @@ module tb;
         cut_ref  = 1;
         cut_caps = cut_caps + 1;
       end
-      if (eq_on && !cut_ref) begin
+      // 0x153B: a 0x1A = 0 written while a capture runs (the testbench reconfigures after a capture that never triggered)
+      // stops the reference on the write and the dut two write clocks later (synchroniser): not compared in between
+      if (eq_on && !cut_ref && !(dut.sample_write_enable && !refd.sample_write_enable && !dut.sampling_triggered &&
+                                  dut.time_base_timeout && !dut.trigger_mode)) begin
         eq_samples = eq_samples + 1;
         if ((out_dut & out_cmp_mask) !== (out_ref & out_cmp_mask) || st_dut !== st_ref || (!ext_en && pad_dut !== pad_ref)) begin
           eq_mismatch = eq_mismatch + 1;
@@ -362,6 +365,7 @@ module tb;
         rd1(8'h18);
         if (!rnd[2] && !rd_d[0])
           check(rd16_d[12:0] == ((dut.w_last - tot_r + pre_r) & 13'h1FFF), "auto time-out: 0x14 = W - total + pretrigger");
+        rd2(8'h41);                                       // refills the read register's stale bits identically in both
         bus_cmp_on = 1;
         rd2(8'h41);
         wr2(8'h1F, {3'd0, rd16_d[12:0]});

@@ -12,14 +12,15 @@ State on 2026-10-20 (fpga-gen11, branch `fpga-gen11`):
 - fpga-gen10 (2026-10-20, branch fpga-gen10): the bench's "first-record saturation" is not the decimator; the
   firmware's host ARM takes N from the UI rate table once the session's raw divider is forgotten (section "First-record
   saturation, fpga-gen10": cause, firmware prescription, bench reproduction, tb/tb_firstrec.v = run.sh step 12).
-- `src/` holds version word **0x153A**: 0x1539 with the ADC data captured in IOB DDR registers at a selectable 2.5 ns
+- 0x153A (fpga-gen9, the `src/` before 0x153B): 0x1539 with the ADC data captured in IOB DDR registers at a selectable 2.5 ns
   stage per core against the write clock edge the core is encoded on (A falling, B rising; B optionally against the A
   encode for the AD9288 data-align mode), B first by T/2 at every rate, outlier counters for a self-check (0x63, 0x64,
   0x36). Sections "0x153A status" and "0x153A review" below; `README.md` "Changes" section 10. Built as `build/FPGA.bin`
-  = `dist/al3-0x153A.bin` sha256 `75e0ef21...ddde`, flash image `build/FPGA_padded.bin` `77672b5a...19d0`. **Not
-  flashed**; the coordinator pins both in `backups/` first.
-- The unit's FPGA flash holds **0x1539** since 2026-10-19 20:06 (`docs/hardware-status.md`): readout fixed, but both A
-  cores garble samples in codes 128..145 at 200 MSa/s (the capture window; fixed in 0x153A).
+  = `dist/al3-0x153A.bin` sha256 `75e0ef21...ddde`, flash image `77672b5a...19d0`. **Flashed 2026-10-20 10:03** and
+  benched (`docs/hardware-status.md` 10:04-10:49: wizard-trained stages 0x08E3, band sweep clean at all four rates,
+  self-check 0 flagged): the **recommended** bitstream, what the unit runs now.
+- The unit's FPGA flash held **0x1539** from 2026-10-19 20:06 to 2026-10-20 10:03 (readout fixed, but both A cores
+  garbled samples in codes 128..145 at 200 MSa/s: the capture window, fixed in 0x153A).
 - 0x1539 (fpga-gen8, the previous `src/`): 0x1538 with the MCU read byte loaded on the falling edge of
   `i_mcu_clk` (the bench's mixed-byte readout fault), `i_mcu_clk` constrained, two timing refactors. Section "0x1539
   status" below; `README.md` "Changes" section 9. Built as `build/FPGA.bin` sha256 `f36c1f7a...ea64`, pinned in
