@@ -45,7 +45,7 @@ Full details: `research/notes/SYNTHESIS.md`, then the per-source digests in `res
 ## Repository layout
 
 ```
-AGENTS.md (project rules; CLAUDE.md is the same file for Claude Code), README.md
+AGENTS.md (project rules), CLAUDE.md (points Claude Code at AGENTS.md), README.md
 research/notes/        agent research digests (SYNTHESIS.md first)
 research/tools/        analysis scripts (DPOS350P image parsing)
 research/atlan4-extracted/, research/dpos350p/   extracted archives (gitignored, untrusted data)
