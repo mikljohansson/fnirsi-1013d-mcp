@@ -82,12 +82,21 @@ module tb;
   // (README "Changes" section 7). The ADC data here do not depend on the encodes; tb_trigpos.v checks the order.
   wire [14:0] out_cmp_mask = 15'h07FF;
 
-  wire [71:0] st_dut = {dut.trigger_address, dut.trigger_read_address, dut.sample_write_address,
-                        dut.sampling_triggered, dut.sample_write_enable, dut.sampling_half_way,
+  // 0x153B: after the stop the dut's trigger_address (time-out: W - total + pretrigger) and sampling_triggered (no late
+  // trigger) differ from the references by design, and trigger_read_address is frozen at the stop (the references run it on
+  // after a 0x0E or 0x1A write); the three are compared while the write runs (tb_timeout.v has the rest)
+  wire [12:0] ta_cmp_dut = dut.sample_write_enable ? dut.trigger_address : 13'd0;
+  wire [12:0] ta_cmp_ref = dut.sample_write_enable ? refd.trigger_address : 13'd0;
+  wire        tr_cmp_dut = dut.sample_write_enable ? dut.sampling_triggered : 1'b0;
+  wire        tr_cmp_ref = dut.sample_write_enable ? refd.sampling_triggered : 1'b0;
+  wire [12:0] ra_cmp_dut = dut.sample_write_enable ? dut.trigger_read_address : 13'd0;
+  wire [12:0] ra_cmp_ref = dut.sample_write_enable ? refd.trigger_read_address : 13'd0;
+  wire [71:0] st_dut = {ta_cmp_dut, ra_cmp_dut, dut.sample_write_address,
+                        tr_cmp_dut, dut.sample_write_enable, dut.sampling_half_way,
                         dut.sample_system_state, dut.sample_read_offset, dut.sample_write_clock,
                         dut.ext_activity, dut.ext_pending, dut.ext_level, 12'd0};
-  wire [71:0] st_ref = {refd.trigger_address, refd.trigger_read_address, refd.sample_write_address,
-                        refd.sampling_triggered, refd.sample_write_enable, refd.sampling_half_way,
+  wire [71:0] st_ref = {ta_cmp_ref, ra_cmp_ref, refd.sample_write_address,
+                        tr_cmp_ref, refd.sample_write_enable, refd.sampling_half_way,
                         refd.sample_system_state, refd.sample_read_offset, refd.sample_write_clock,
                         refd.ext_activity, refd.ext_pending, refd.ext_level, 12'd0};
 
@@ -403,8 +412,14 @@ module tb;
           ext_en = 0;
         start_capture;
         wait_done(4000);
+        // 0x153B: a capture that ended on the auto time-out reports W - total + pretrigger (reference: pretrigger) and
+        // never a trigger after the stop: these two reads are checked against the formula instead of the reference
+        bus_cmp_on = rnd[2];
         rd2(8'h14);
         rd1(8'h18);
+        if (!rnd[2] && !rd_d[0])
+          check(rd16_d[12:0] == ((dut.w_last - tot_r + pre_r) & 13'h1FFF), "auto time-out: 0x14 = W - total + pretrigger");
+        bus_cmp_on = 1;
         rd1(8'h28);
         rd2(8'h41);
         wr2(8'h1F, {3'd0, rd16_d[12:0]});
@@ -482,7 +497,7 @@ module tb;
     // Version word and geometry register
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h153A, "cmd 0x06 reads 0x153A");
+    check(rd16_d == 16'h153B, "cmd 0x06 reads 0x153B");
     check(rd16_r == 16'h1533, "reference cmd 0x06 reads 0x1533");
     wr1(8'h53, 8'h00); wr1(8'h54, 8'h00);
     rd2(8'h29);
@@ -630,7 +645,7 @@ module tb;
     ext_en = 0; ext_val = 0;
 
     //-------------------------------------------------------------------------------
-    // Auto mode time-out with K >= 1 counts output samples: total and trigger_address = pretrigger
+    // Auto mode time-out with K >= 1 counts output samples: total and trigger_address = W - total + pretrigger
     set_decim(2'd2, 1'b0, rec_shift(2, 99), 32'd99);
     adc_mode = 3; flat_val = 8'd20;
     wr2(8'h55, 16'hFFFF);
@@ -641,7 +656,7 @@ module tb;
     rd2(8'h14);
     total_w = dut.sample_write_address;
     $display("auto time-out K 2 N 100: trigger_address %0d, write address at stop %0d", rd16_d[12:0], total_w);
-    check(done && rd16_d[12:0] == 13'd40, "K >= 1 auto time-out: trigger_address = pretrigger");
+    check(done && rd16_d[12:0] == dut.w_last - 13'd80 + 13'd40, "K >= 1 auto time-out: trigger_address = W - total + pretrigger (0x153B)");
     check(total_w >= 100 && total_w <= 104, "K >= 1 auto time-out after time_base_set output samples");
 
     //-------------------------------------------------------------------------------

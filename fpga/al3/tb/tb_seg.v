@@ -86,12 +86,21 @@ module tb;
   // (README "Changes" section 7). The ADC data here do not depend on the encodes; tb_trigpos.v checks the order.
   wire [14:0] out_cmp_mask = 15'h07FF;
 
-  wire [71:0] st_dut = {dut.trigger_address, dut.trigger_read_address, dut.sample_write_address,
-                        dut.sampling_triggered, dut.sample_write_enable, dut.sampling_half_way,
+  // 0x153B: after the stop the dut's trigger_address (time-out: W - total + pretrigger) and sampling_triggered (no late
+  // trigger) differ from the references by design, and trigger_read_address is frozen at the stop (the references run it on
+  // after a 0x0E or 0x1A write); the three are compared while the write runs (tb_timeout.v has the rest)
+  wire [12:0] ta_cmp_dut = dut.sample_write_enable ? dut.trigger_address : 13'd0;
+  wire [12:0] ta_cmp_ref = dut.sample_write_enable ? refd.trigger_address : 13'd0;
+  wire        tr_cmp_dut = dut.sample_write_enable ? dut.sampling_triggered : 1'b0;
+  wire        tr_cmp_ref = dut.sample_write_enable ? refd.sampling_triggered : 1'b0;
+  wire [12:0] ra_cmp_dut = dut.sample_write_enable ? dut.trigger_read_address : 13'd0;
+  wire [12:0] ra_cmp_ref = dut.sample_write_enable ? refd.trigger_read_address : 13'd0;
+  wire [71:0] st_dut = {ta_cmp_dut, ra_cmp_dut, dut.sample_write_address,
+                        tr_cmp_dut, dut.sample_write_enable, dut.sampling_half_way,
                         dut.sample_system_state, dut.sample_read_offset, dut.sample_write_clock,
                         dut.ext_activity, dut.ext_pending, dut.ext_level, 12'd0};
-  wire [71:0] st_ref = {refd.trigger_address, refd.trigger_read_address, refd.sample_write_address,
-                        refd.sampling_triggered, refd.sample_write_enable, refd.sampling_half_way,
+  wire [71:0] st_ref = {ta_cmp_ref, ra_cmp_ref, refd.sample_write_address,
+                        tr_cmp_ref, refd.sample_write_enable, refd.sampling_half_way,
                         refd.sample_system_state, refd.sample_read_offset, refd.sample_write_clock,
                         refd.ext_activity, refd.ext_pending, refd.ext_level, 12'd0};
   // decimator, memory write port (data, address, enable), trigger compare data
@@ -576,8 +585,14 @@ module tb;
         #((kr + 10) * ((dv / 2) + 1) * 10 + 500);
         start_capture;
         wait_done(100000);
+        // 0x153B: a capture that ended on the auto time-out reports W - total + pretrigger (reference: pretrigger) and
+        // never a trigger after the stop: these two reads are checked against the formula instead of the reference
+        bus_cmp_on = rnd[2];
         rd2(8'h14);
         rd1(8'h18);
+        if (!rnd[2] && !rd_d[0])
+          check(rd16_d[12:0] == ((dut.w_last - tot_r + pre_r) & 13'h1FFF), "auto time-out: 0x14 = W - total + pretrigger");
+        bus_cmp_on = 1;
         rd1(8'h28);
         rd2(8'h29);
         // 0x2A exists only in 0x1536: not compared, must not disturb anything
@@ -777,7 +792,8 @@ module tb;
     seg_ext_run(2'd1, 1'b0, 32'd0, 16, 5, 6, 28, 1'b0, 16, 800, 0, 1'b0);
     check(st_flags == 8'h91 && st_cnt == 16, "S9: boxcar N 2, 16 segments of 32 words");
 
-    // S10 auto time-out: no trigger, 4 untriggered segments, offset = pre
+    // S10 auto time-out: no trigger, 4 untriggered segments, offset = (W - total + pre) mod 2^m with W = 0x0E + 2
+    // (0x153B; 0x1536..0x153A: pre): (62 - 40 + 12) mod 64 = 34
     set_fir(2'd0, 1'b0, 6'd0, 32'd1, 1'b0);
     adc_mode = 3; flat_val = 8'd40;
     setup_capture(2'd0, 1'b0, 1'b0, 32'd1, 13'd12, 13'd40);
@@ -794,8 +810,8 @@ module tb;
     rd_acc(0, 4); log_table(4); log_slots(4 << 6);
     cnt_ok = 1;
     for (i = 0; i < 4; i = i + 1)
-      if (accw[i][63] !== 1'b1 || accw[i][53] !== 1'b0 || accw[i][52:40] !== 13'd12) cnt_ok = 0;
-    check(cnt_ok, "S10: entries valid, untriggered, offset = pre");
+      if (accw[i][63] !== 1'b1 || accw[i][53] !== 1'b0 || accw[i][52:40] !== 13'd34) cnt_ok = 0;
+    check(cnt_ok, "S10: entries valid, untriggered, offset = (W - total + pre) mod 2^m = 34");
 
     // S11 CH1 level trigger: per segment, the first sample past the level is at offset + delta0,
     // delta0 measured with a normal single capture (K = 0, D = 9)

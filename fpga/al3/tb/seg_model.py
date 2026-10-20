@@ -207,8 +207,12 @@ def check_seg(r, fails, stats):
                 fails.append("run %d: segment %d re-armed %.1f ns after the previous end, hold-off %d ns" %
                              (rid, k, dead, r["hold"] * 5))
         if not trig:
-            if (ta & mask) != (r["pre"] & mask):
-                fails.append("run %d: untriggered segment %d offset %d, pre %d" % (rid, k, ta & mask, r["pre"]))
+            # 0x153B: an untriggered segment reports W - total + pre, W the write address after its last word (0x1536..
+            # 0x153A: pre), so the reader's offset - pre .. + total is the newest total words of the slot
+            exp = (vmax.get(k, -1) + 1 - r["total"] + r["pre"]) & mask
+            if (ta & mask) != exp:
+                fails.append("run %d: untriggered segment %d offset %d, expected %d (last write %d, total %d, pre %d)" %
+                             (rid, k, ta & mask, exp, vmax.get(k, -1), r["total"], r["pre"]))
             continue
         # window: written inside segment k, not overwritten by the slot wrap
         lo = ta - r["pre"]

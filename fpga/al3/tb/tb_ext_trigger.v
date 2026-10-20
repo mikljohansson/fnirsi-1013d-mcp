@@ -78,11 +78,20 @@ module tb;
   wire [14:0] out_cmp_mask = 15'h07FF;
 
   // Capture state that must match while the trigger source is CH1/CH2
-  wire [63:0] st_dut = {dut.trigger_address, dut.trigger_read_address, dut.sample_write_address,
-                        dut.sampling_triggered, dut.sample_write_enable, dut.sampling_half_way,
+  // 0x153B: after the stop the dut's trigger_address (time-out: W - total + pretrigger) and sampling_triggered (no late
+  // trigger) differ from the references by design, and trigger_read_address is frozen at the stop (the references run it on
+  // after a 0x0E or 0x1A write); the three are compared while the write runs (tb_timeout.v has the rest)
+  wire [12:0] ta_cmp_dut = dut.sample_write_enable ? dut.trigger_address : 13'd0;
+  wire [12:0] ta_cmp_ref = dut.sample_write_enable ? refd.trigger_address : 13'd0;
+  wire        tr_cmp_dut = dut.sample_write_enable ? dut.sampling_triggered : 1'b0;
+  wire        tr_cmp_ref = dut.sample_write_enable ? refd.sampling_triggered : 1'b0;
+  wire [12:0] ra_cmp_dut = dut.sample_write_enable ? dut.trigger_read_address : 13'd0;
+  wire [12:0] ra_cmp_ref = dut.sample_write_enable ? refd.trigger_read_address : 13'd0;
+  wire [63:0] st_dut = {ta_cmp_dut, ra_cmp_dut, dut.sample_write_address,
+                        tr_cmp_dut, dut.sample_write_enable, dut.sampling_half_way,
                         dut.sample_system_state, dut.sample_read_offset, 8'd0};
-  wire [63:0] st_ref = {refd.trigger_address, refd.trigger_read_address, refd.sample_write_address,
-                        refd.sampling_triggered, refd.sample_write_enable, refd.sampling_half_way,
+  wire [63:0] st_ref = {ta_cmp_ref, ra_cmp_ref, refd.sample_write_address,
+                        tr_cmp_ref, refd.sample_write_enable, refd.sampling_half_way,
                         refd.sample_system_state, refd.sample_read_offset, 8'd0};
 
   //---------------------------------------------------------------------------------
@@ -116,7 +125,9 @@ module tb;
         if ((out_dut & out_cmp_mask) !== (out_ref & out_cmp_mask) || st_dut !== st_ref || (!ext_en && pad_dut !== pad_ref)) begin
           eq_mismatch = eq_mismatch + 1;
           if (eq_mismatch <= 10)
-            $display("MISMATCH t=%0t out %h/%h st %h/%h pad %b/%b", $time, out_dut, out_ref, st_dut, st_ref, pad_dut, pad_ref);
+            $display("MISMATCH t=%0t out %h/%h st %h/%h pad %b/%b  trig %b/%b mode %b tmo %b/%b en %b/%b ta %0d/%0d tra %0d/%0d", $time, out_dut, out_ref, st_dut, st_ref, pad_dut, pad_ref,
+                     dut.sampling_triggered, refd.sampling_triggered, dut.trigger_mode, dut.time_base_timeout, refd.time_base_timeout,
+                     dut.sampling_enable, refd.sampling_enable, dut.trigger_address, refd.trigger_address, dut.trigger_read_address, refd.trigger_read_address);
         end
       end
     end
@@ -334,8 +345,14 @@ module tb;
           ext_en = 0;
         start_capture;
         wait_done(4000);
+        // 0x153B: a capture that ended on the auto time-out reports W - total + pretrigger (reference: pretrigger) and
+        // never a trigger after the stop: these two reads are checked against the formula instead of the reference
+        bus_cmp_on = rnd[2];
         rd2(8'h14);
         rd1(8'h18);
+        if (!rnd[2] && !rd_d[0])
+          check(rd16_d[12:0] == ((dut.w_last - tot_r + pre_r) & 13'h1FFF), "auto time-out: 0x14 = W - total + pretrigger");
+        bus_cmp_on = 1;
         rd2(8'h41);
         wr2(8'h1F, {3'd0, rd16_d[12:0]});
         nread = 4 + (rnd[31:30] * 4);
@@ -381,7 +398,7 @@ module tb;
     // Version word and status read
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h153A, "cmd 0x06 reads 0x153A");
+    check(rd16_d == 16'h153B, "cmd 0x06 reads 0x153B");
     check(rd16_r == 16'h1532, "reference cmd 0x06 reads 0x1532");
 
     //-------------------------------------------------------------------------------
@@ -575,14 +592,17 @@ module tb;
     step_mode = 0;
 
     //-------------------------------------------------------------------------------
-    // Auto mode with EXT and no edge: time-out still forces trigger_address = pretrigger
+    // Auto mode with EXT and no edge: the time-out stops the write at W = 0x0E + 2 words and reports
+    // trigger_address = W - total + pretrigger (0x153B; 0x1532..0x153A: pretrigger), so the record is the newest total words
     setup_capture(2'd2, 1'b0, 1'b0, 32'd9, 13'd100, 13'd200);
     wr4(8'h0E, 32'd1000);
     ext_val = 0;
     start_capture;
     wait_done(20000);
     rd2(8'h14);
-    check(done && rd16_d[12:0] == 13'd100, "auto mode time-out with EXT source: trigger_address = pretrigger");
+    $display("auto time-out EXT: trigger_address %0d, W %0d", rd16_d[12:0], dut.w_last);
+    check(done && dut.w_last == 13'd1002, "auto mode time-out with EXT source: the write stops at 0x0E + 2 words");
+    check(done && rd16_d[12:0] == dut.w_last - 13'd200 + 13'd100, "auto mode time-out with EXT source: trigger_address = W - total + pretrigger");
 
     //-------------------------------------------------------------------------------
     // Source 3 (reserved) acts as EXT
