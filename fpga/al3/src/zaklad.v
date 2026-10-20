@@ -420,9 +420,12 @@ reg        rz = 0;
 reg        rem1 = 0;                      //rem == 1, registered: valid one sample after rem changes, and counted edges
                                           //are at least two samples apart
 reg        past = 0;
+reg        gap_r = 0;                     //~h_zero & h[24], registered from the next value of h (0x153C build b1: the
+                                          //combinational gap from h[24] into rem missed clk_200MHz by 0.22 ns at 5 levels)
 
 wire s    = (typ == 2'd3) ? ~a : a;       //the counted run: pulse (pre side) or the held level (post side)
-wire gap  = ~h_zero & h[24];              //the level held for H samples: the next edge is the first of a burst
+wire gap  = gap_r;                        //the level held for H samples: the next edge is the first of a burst
+wire h_is0 = (h == 25'd0);                //h - 1 goes negative on this clock
 wire cv_e = cv | gap;
 wire rz_e = gap ? nm1_z : rz;
 wire e    = ap & ~a;                      //an edge in the trigger direction between the last two samples
@@ -449,11 +452,13 @@ assign rem_o = rem;
           rz   <= nm1_z;
           rem1 <= nm1_1;
           past <= 0;
+          gap_r <= ~h_zero & rld_h[24];
         end
       else if(ce)
         begin
           ap   <= a;
           rem1 <= (rem == 16'd1);
+          gap_r <= ~h_zero & (t ? rld_h[24] : (h[24] | h_is0));   //= ~h_zero & h[24] after this clock's update of h
 
           if(~s)
             begin
@@ -1312,6 +1317,45 @@ freq_generator_dds_pwm u_freq
   wire [7:0]  trigger_level_eff = dec_on ? 8'h80 : trigger_level;
 
 //-------------------------------------------------------------------------------------
+//Trigger hold-off (0x153C, command 0x1B in 5 ns units, 0 = off; docs/plans/fpga-0x153c.md section 3.6). From the rise
+//of sampling_triggered (the trigger of a record) the trigger check is masked (ho_act into trigger_check_enable) for
+//0x1B clocks of clk_200MHz. The timer is not reset by cap_rst (sequencer restarts) nor by 0x01 = 1 alone, so the records
+//of a train keep their spacing across sequencer restarts and MCU re-arms; 0x01 = 1 clears it when 0x66 bit 0 was
+//written before (ho_clr_t, a toggle from the MCU clock domain), and 0x1B = 0 turns the mask off at once. 33-bit signed
+//down counter as the sequencer's hold-off (q_hc): loaded with 0x1B - 2, the mask ends on the clock after its sign sets,
+//exactly 0x1B clocks after the trigger for every 0x1B >= 1.
+
+  reg        ho_st_q = 0;
+  reg [32:0] ho_cnt = 0;
+  reg        ho_run = 0;
+  reg        ho_en = 0;                    //0x1B != 0, registered
+  reg [1:0]  ho_ct_s = 0;
+  reg        ho_ct_d = 0;
+  assign     ho_act = ho_run & ho_en;
+
+  always @(posedge clk_200MHz)
+    begin
+      ho_st_q <= sampling_triggered;
+      ho_en   <= (trig_holdoff != 32'd0);
+      ho_ct_s <= { ho_ct_s[0], ho_clr_t };
+      ho_ct_d <= ho_ct_s[1];
+
+      if(ho_ct_s[1] ^ ho_ct_d)
+        ho_run <= 0;
+      else if(sampling_triggered & ~ho_st_q)
+        begin
+          ho_cnt <= { 1'b0, trig_holdoff } - 33'd2;
+          ho_run <= 1;
+        end
+      else
+        begin
+          ho_cnt <= ho_cnt - 33'd1;
+          if(ho_cnt[32])
+            ho_run <= 0;
+        end
+    end
+
+//-------------------------------------------------------------------------------------
 //Sampling write address counter
 //This counter is reset when the reset is activated by the MCU
 
@@ -1441,10 +1485,20 @@ assign sampling_enable = ~(
   end
 
 //-------------------------------------------------------------------------------------
-//Trigger types (0x153C): qualifier configuration and the two qualifiers (module trig_qual). The ADC qualifier is also
-//reset on the first write clock edge after the release of 0x01 (ssr_d, the 0x1537 rule for 0x0B), so 0x5E / 0x5F / 0x60
-//written inside the 0x01 = 1 window apply at every rate; it then processes word 0 of the capture first. The EXT
-//qualifier is reset on clk_200MHz for as long as 0x01 = 1, which covers the same writes.
+//Trigger types (0x153C): qualifier configuration and the two qualifiers (module trig_qual). The ADC qualifier stays in
+//reset until the first swc_adv edge after a capture reset (q_hr_adc, the edge that writes word 0 and loads it into
+//trigger_data), so 0x5E / 0x5F / 0x60 written inside the 0x01 = 1 window apply at every rate (the 0x1537 rule for 0x0B)
+//and the first sample it processes is word 0 of the capture, legacy and K >= 1 alike (gen8 processed the reset value of
+//trigger_data first). The EXT qualifier is reset on clk_200MHz for as long as 0x01 = 1, which covers the same writes.
+
+  reg q_hr_adc = 0;
+  always @(posedge sample_write_clock)
+    begin
+      if(cap_rst)
+        q_hr_adc <= 1;
+      else if(swc_adv)
+        q_hr_adc <= 0;
+    end
 
   wire [24:0] q_rld_w = { 1'b0, trig_n } - (((trig_typ2 == 2'd1) & trig_pw_long) ? 25'd1 : 25'd2);
   wire [15:0] q_n16   = (trig_n[15:0] == 16'd0) ? 16'd1 : trig_n[15:0];
@@ -1463,7 +1517,7 @@ assign sampling_enable = ~(
   (
     .clk    (sample_write_clock),
     .ce     (swc_adv),
-    .rst    (cap_rst | ssr_d),
+    .rst    (cap_rst | q_hr_adc),
     .typ    (trig_typ2),
     .pw_long(trig_pw_long),
     .rld_w  (q_rld_w),
@@ -1512,45 +1566,6 @@ assign sampling_enable = ~(
   always @(posedge clk_200MHz)
     ext_qev_r <= ~cap_rst200 & q_on & trig_src_ext & q_fire_ext & (ext_level ^ trigger_edge);
   assign ext_qev = ext_qev_r;
-
-//-------------------------------------------------------------------------------------
-//Trigger hold-off (0x153C, command 0x1B in 5 ns units, 0 = off; docs/plans/fpga-0x153c.md section 3.6). From the rise
-//of sampling_triggered (the trigger of a record) the trigger check is masked (ho_act into trigger_check_enable) for
-//0x1B clocks of clk_200MHz. The timer is not reset by cap_rst (sequencer restarts) nor by 0x01 = 1 alone, so the records
-//of a train keep their spacing across sequencer restarts and MCU re-arms; 0x01 = 1 clears it when 0x66 bit 0 was
-//written before (ho_clr_t, a toggle from the MCU clock domain), and 0x1B = 0 turns the mask off at once. 33-bit signed
-//down counter as the sequencer's hold-off (q_hc): loaded with 0x1B - 2, the mask ends on the clock after its sign sets,
-//exactly 0x1B clocks after the trigger for every 0x1B >= 1.
-
-  reg        ho_st_q = 0;
-  reg [32:0] ho_cnt = 0;
-  reg        ho_run = 0;
-  reg        ho_en = 0;                    //0x1B != 0, registered
-  reg [1:0]  ho_ct_s = 0;
-  reg        ho_ct_d = 0;
-  assign     ho_act = ho_run & ho_en;
-
-  always @(posedge clk_200MHz)
-    begin
-      ho_st_q <= sampling_triggered;
-      ho_en   <= (trig_holdoff != 32'd0);
-      ho_ct_s <= { ho_ct_s[0], ho_clr_t };
-      ho_ct_d <= ho_ct_s[1];
-
-      if(ho_ct_s[1] ^ ho_ct_d)
-        ho_run <= 0;
-      else if(sampling_triggered & ~ho_st_q)
-        begin
-          ho_cnt <= { 1'b0, trig_holdoff } - 33'd2;
-          ho_run <= 1;
-        end
-      else
-        begin
-          ho_cnt <= ho_cnt - 33'd1;
-          if(ho_cnt[32])
-            ho_run <= 0;
-        end
-    end
 
 //-------------------------------------------------------------------------------------
 //Outlier counters (0x153A, read 0x36): per core, the sample of each write clock edge (adc*_w) against the one of the
