@@ -256,7 +256,18 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
-- visitor-review and dryrun-agent (Opus, dispatched 21:30, read-only): a Reddit visitor's review of README, install guide,
+- hw-prep (Opus, dispatched 21:45): a user-facing "Prepare and back up" page from hardware-prep.md section 3 without the
+  maintainer's paths or "the lead's go" (dry-run findings: wrong expected pinout column, stale 5.3 procedure, scope power
+  during flashing answered three ways, no usbipd recipe for a card reader, no Windows hash command, README-spiflash test
+  status stale); hardware-prep.md demoted to engineering; install.md's partition sentence matches the tool; release.yml
+  footer points at the install guide.
+- docs-clean (Opus, dispatched 21:22, done 21:41, merged 21:42 as a075dbf): no plans deleted (every candidate is cited by
+  section from code comments; docs/plans/README.md names the live papers and the design record); task-queue 954 -> 465
+  lines; protocol.md at 1.24 with row 59 "not used"; hardware-prep status from the bench log; BITSTREAMS 0x1538/0x1539
+  withdrawn; roadmap status paragraph; bench-log intro; programmer FAQ; photos placed; forum members' countries and the
+  maintainer's paths removed; no secrets found.
+- visitor-review and dryrun-agent (Opus, dispatched 21:30, done 21:32 / 21:38, read-only; their findings drive readme-gen
+  round 2 and hw-prep): a Reddit visitor's review of README, install guide,
   runbook and screenshots; a context-free agent asked "guide me through hacking my scope" in the checkout, reporting the path
   it took, the questions it would ask, the steps and commands, the safety gates, the Windows gaps and contradictions.
 - readme-gen (Opus, dispatched 21:21, done 21:28, merged 21:29 as 28fde67; README 133 lines, 17/17 links resolve): README rewritten for the hobbyist visitor (owner 21:0x: USPs first, install step 1 =
