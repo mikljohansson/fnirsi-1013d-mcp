@@ -6,7 +6,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- **ACQ: sample rate vs time/div coupling** (owner 10-19 13:44, 1 kHz cal signal: after changing the sample rate in the ACQ menu
+- [x] **ACQ: sample rate vs time/div coupling** (fw 0.2.64 viability from the record length, snap notice, grey boxes unavailable; 0.2.69 ten samples per division; 0.2.76 zoom ladder; benched 10-19 22:45 on 0.2.76: owner 'zoom ladder seems to work great'; the 0.2.68 snap-path fix: bench to confirm) (owner 10-19 13:44, 1 kHz cal signal: after changing the sample rate in the ACQ menu
   the old time/div stays selected although drawn grey; the trace is cut off, zeros show past the record end, the slider scrolls
   before the trace, the shape changes). Cause: Atlan design, statemachine.c handle_acquisition_menu_touch sets the FPGA rate without
   touching timeperdiv, the time/div tap in the menu sets only the display scale, viable_time_per_div[29][35] (variables.c:430) only
@@ -20,7 +20,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   outside a checkout (data/log dirs, .mcp.json example without the Windows venv path and COM10), write release notes separate from
   the CHANGELOG dev diary, fix docs/releasing.md step 1, dry-run release.yml on a scratch tag or fork, refresh README.md (Status, tool
   count, FPGA state, Getting started gaps, the proposed outline). Dispatch when an mcp/docs agent is free; before tagging.
-- **FIR step overshoot pulsing on the scope trace** (owner 10-19 14:05, 1 kHz cal square, any +FIR filter: overshoot "horns" at
+- [x] **FIR step overshoot pulsing on the scope trace** (fw 0.2.64: Scope filter defaults to CIC2 without the FIR, Spectrum to CIC2+FIR, per-mode word 212; fpga-gen6 quantified it: overshoot 0.45-6.9 % vs edge phase, 4.03 Hz beat of the 1 kHz DDS at 1 MS/s, spectrum wag = image beating, see Dispatched; bench pending) (owner 10-19 14:05, 1 kHz cal square, any +FIR filter: overshoot "horns" at
   the edges grow and snap back at 3-4 Hz; CIC alone shows a clean square). Known property: fpga/al3/README.md section 4 gives
   6-9 % step overshoot for the CIC + half-band FIR chain (flat to fo/4, sharp cut-off = Gibbs ringing on a non-band-limited edge);
   the pulsing is the edge sliding across the decimated sample grid (DDS 1 kHz vs the decimated rate), inference until simulated.
@@ -30,6 +30,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - **Hardware averaging with the default filter** (fw-seg, owner decision): with CIC2+FIR every slower time base falls back to the
   software average because the smallest memory depth (3000) does not fit the FPGA averaging memory; a 2000-sample depth while
   Average is on would make it work. Decide after the 0x1536 flash session.
+  (check: CHANGELOG 0.2.58 / 0.2.64 and hardware-status 10-19 / 10-20: no decision on a 2000-sample depth while Average is on is recorded.)
 - [x] **FPGA bus contract fixes on 0x1532-0x1536** (fw-bus, branch fw-bus, fw 0.2.72 provisional / protocol 1.22, firmware/AGENTS.md section 48; bench list there, not benched: dummy strobe in every readout, arm order on every bitstream, legacy EXT shift, EXT kept on channel toggles, core order from 0x33) (was: fpga-gen6 findings via fw-seg, section 35 open items): the A/B core order within a
   word can flip after a sample-rate or filter change (interleave right by chance until bench test T4), the screen readout returns
   data one word late (averaged trace sits 2 samples earlier), writes inside the sampling-reset window can be lost at slow rates on
@@ -39,7 +40,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   switch is right too. Suspects: the initial SET_CHANNEL sequence for range 0.1 (relay / offset / trace position not applied, or the
   software-zoom boundary), or the host picking the wrong range index. mcp-gen5 to find the sequence difference; coordinator
   reproduces on the device with READ_RAW at 0.1 V/div. Also check the scope screen at 100 mV/div.
-- **UI polish batch 1** (owner walk-through of fw 0.2.59, 10-19 15:30-, items as reported; dispatch one Opus agent when the
+- [x] **UI polish batch 1** (fw 0.2.63 items a-n and q, o in 0.2.60, p redone in 0.2.68 as the two-state RUN/STOP button with the spanner Settings icon and the shorter sine; bench pending: hardware-status records the 0.2.59 walk-through only, images 0.2.63 / 0.2.68 loaded since) (owner walk-through of fw 0.2.59, 10-19 15:30-, items as reported; dispatch one Opus agent when the
   walk-through ends): (a) main menu Settings icon = a cogwheel; (b) CTRL Grid: the whole button is the toggle (grey off, green on),
   no slide switch inside; (c) X-Y icon = a tilted figure 8, not an oval; (d) Trace style disabled (grey) in X-Y where it does not
   apply; (e) explain or rename "Pro" trace style (looks like Linear); (f) ACQ menu Memory column: "memory pass .." text collides
@@ -61,7 +62,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   200 MS/s and re-arm when it is set (no data check needed); on 0x1532-0x1537 run the data check on every full-rate arm instead of
   only after 0x0D. Fix the stored core-order convention (interleave tracker A-B model, 0x53 swap bit) to what 0x1538 guarantees.
   fw-cal4 retired at 400k (handoff section 37); new agent.
-- [~] **Documentation site and write-ups** (owner 10-19 17:30): docs/ stays the single source, published with MkDocs Material via a
+- [~] **Documentation site and write-ups** (READ_SCREEN landed in fw 0.2.70, T9 passed 10-19 21:11) (owner 10-19 17:30): docs/ stays the single source, published with MkDocs Material via a
   GitHub Pages workflow; three shelves: user guide (install, first run, calibration, each screen with a screenshot, generator),
   agent guide (MCP setup, measurement guide, worked examples with plots), engineering articles (calibration story, the ADC
   encode-phase fault, decimation filters and FIR, MMU and FFT, Bode design and bench, UX makeover). Tooling: tools/screenshots.py
@@ -78,6 +79,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   screen after fw 0.2.70 (every page carries a "to be written after fw 0.2.70" note); (3) the six articles in
   docs/articles/index.md; (4) agent guide worked examples with plots and the command that made each; (5) README screenshot block
   can point at docs/screenshots/*.png.
+  Remains: screenshots taken on the unit, the user guide text per screen, the six articles, agent worked examples with plots, the README screenshot block.
 - [x] **FPGA ADC data capture window (was: MCU-readout bit mixing)** (0x153A merged 10-20 00:30, flash pending) (0x1539 flashed 20:06: readout fixed, capture window still wrong on the A cores; 0x153A = programmable capture phase + training, fpga-gen8) (root cause of the wizard failure, bench 18:35; 0x1539 fix by fpga-gen8 first, features after; fw-cal5 workaround: zero measured off-centre; a flash session follows). Was: **Wizard measurement setup fault** (fw-cal5 running, 10-19 18:00): zero step fails on 0x1538 with clean host data; see
   hardware-status 17:55. Deliverable includes a host-triggerable dry run so the coordinator can verify without the owner.
 - [x] **Frequency response mode UI** (0.2.69, bench pending; follow-ups above) (design docs/plans/bode-ui.md + artifact DfydC8HJgnemUw3EHenTGP; owner 19:15: variant 2 one pane two y axes without legend, "calibration post" in the instruction, frequency axis Log/Linear in the Display fold-out, two flagged cursors C1/C2 with the bottom-left readout box and delta row kept (19:25), Display variants Overlaid / Magnitude / Phase; questions 1-5 per the coordinator's recommendations; fw-freq dispatched as 0.2.69 together with the 10 samples/div viability minimum). Was: **Bode mode UI redesign** (owner 10-19 18:50: fw-bode remapped RUN/STOP and AUTO SET to sweep control, which breaks the fixed
@@ -90,11 +92,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   so the interpolated trace wobbles at about 1 Hz; no trigger jitter: the edge index is stable). fw-acq's rule allows one sample
   per division; raise the minimum to about 10 samples per division (10 px per sample) so such zooms are unavailable and the snap
   picks a viable time/div; one constant in tb_view.c plus the host test. Next firmware batch.
-- **Bottom scroll bar in Spectrum and Frequency response** (owner 10-19 19:40): the Scope's record slider construction under the
+- [x] **Bottom scroll bar in Spectrum and Frequency response** (Frequency response slider row fw 0.2.69, Spectrum slider fw 0.2.71; bench pending) (owner 10-19 19:40): the Scope's record slider construction under the
   plot of both modes; Spectrum: the span as a window over 0..fs/2, drag pans the centre; Frequency response: Start..Stop as a window
   over 100 Hz..10 MHz on the log axis, drag pans both and re-sweeps. Designer (ux-bode) updates the boards and bode-ui.md /
   ux-makeover.md first; firmware batch after fw-freq lands (spectrum.c and bode_view.c).
-  - **Slider-track overview, firmware batch after the design is approved** (owner 10-19 20:00; design
+  - [x] **Slider-track overview, firmware batch after the design is approved** (fw 0.2.73 overview in Scope, Spectrum and Frequency response with tap-to-jump, 0.2.74 box geometry; pass_ms 18 measured 10-19 22:07; owner walk-through of firmware/AGENTS.md section 49 pending) (owner 10-19 20:00; design
     `docs/plans/slider-overview.md` by ux-overview, boards in docs/mockups): a mini overview in the twelve rows y 456..467
     of the slider track, dimmed outside the window, full colour inside, the window and touch unchanged. Scope: per-record
     min / max envelope of the whole record (2880 B, about 0.33 ms at 16382 samples, estimate; `scope_code_to_y` factored
@@ -106,7 +108,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   batch right after; simple lifetime rule for the Frequency response overview; Scope overlaid, enabled channels only; the window
   takes the frame's whole inside (18 px, 14 overview rows), not 14 px. The Scope's stock thumbnail becomes this drawing (no second
   one). Dispatch after fw-freq2 merges (same files: bode_view.c, spectrum.c); regenerate the boards to 18 px in the same batch.
-- **Frequency response chart follow-ups** (owner 10-19 20:50, after the bench of the device sweep on the RC low-pass; batch
+- [x] **Frequency response chart follow-ups** (fw 0.2.71: (a) Trace style Lines/Dots, (b) grid rule in both modes with ui-guidelines.md section 3, (c) header and (e) estimate from the settings in effect, (d) readout-fault stop reason 8; benched 10-19 21:28: header and estimate agree, reason 8 not triggered because the pre-scan stayed below 5 V/div; full check needs 0x153A) (owner 10-19 20:50, after the bench of the device sweep on the RC low-pass; batch
   fw-freq2 together with the follow-ups listed under fw-freq): (a) a Trace style button on the mode's CTRL page like the Scope's,
   Lines (default) / Dots, same fold-out construction; today valid points are joined and coloured per axis and flagged points are
   grey loose dots, which is what the owner saw because the 0x1539 capture fault flagged every point (hardware-status 20:51); keep
@@ -128,7 +130,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   generator although the pin is off (fw-freq2 open item): show "off" or the user's setting as the engine leaves it. (c) The
   warning "CH1 level low: the DUT loads the 1 kOhm source" also appears when the pre-scan ranged CH1 too coarse (0x1539 fault):
   name both causes or pick by range. mcp: the simulator lacks reason 8 and the header-before-first-sweep rule.
-- **Slider track geometry revision** (owner 10-19 22:11 after seeing 0.2.73, slider-overview.md decision 7): the window is a box
+- [x] **Slider track geometry revision** (fw 0.2.74, loaded 10-19 22:19; the owner's verdict on the box geometry is not recorded) (owner 10-19 22:11 after seeing 0.2.73, slider-overview.md decision 7): the window is a box
   again (four 1 px borders, 1 px margin), overview full colour inside and dimmed outside; the track's top border line removed (the
   plot pane's outline is the separation); all three modes; boards regenerated. Dispatch fw-over2 at once (small).
 - [x] **Scope tap-to-jump and zoom stepping** (fw 0.2.76, bench pending) (owner 10-19 22:20 on 0.2.73): (a) a tap in the Scope's slider
@@ -148,6 +150,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   division), a hand-picked ACQ rate holds only until the next zoom step; the test asserts the pair after every sequence.
 - **AUTO SET in Frequency response fails about 60 % on 0x1539** (owner 22:20): expected from the capture fault (pre-scan clips at
   5 V/div); re-test on 0x153A before any engine change.
+  (check: hardware-status 10-20 holds no Frequency response AUTO SET retest on 0x153A.)
 - [x] **Spectrum: remove the colour legends** (fw 0.2.75) (owner 10-19 22:28 **(owner)**): the Density legend (blue -> red ->
   white is understood) and the Waterfall legend with its dB marks go (spectrum.c spec_draw_legend, ux-makeover.md "colour legend
   inside the plot's top right"); nobody measures from those views. Boards and ux-makeover.md updated; the warning line keeps its
@@ -156,6 +159,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   depths above 6000 are hidden (the 16-bit record halves the memory, correct); switching back to Filter Off leaves them hidden until
   something else redraws. Recompute the memory chips' availability from the filter state on every Filter change and redraw the
   column; host test. Next ACQ-menu batch.
+  (check: CHANGELOG 0.2.64-0.2.80 has no fix for the memory chips after Filter -> Off.)
 - [x] **Spectrum zoom ladder** (fw 0.2.77, bench pending) (owner 10-19 23:09 **(owner)**: "let's try your recommendation"; fw-spzoom dispatched): span is the
   parameter in 1-2-5 steps around the centre (tap right narrows, tap left widens, drag pans); the sample rate is derived from the
   stop frequency as the slowest rate whose fs/2 covers it (best RBW for free; the (span, rate) pair is a function of the span, so
@@ -164,7 +168,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   axis at 50 MSa/s (coordinator 10-19: plain rule, the stop's rate; 200 MSa/s was a slip), and zooming in stops where the capture time N/fs would exceed about 2 s; a pan that moves the stop across a
   rate boundary moves the rate too. Owner observation on 0.2.76: zoom in never changes the rate today, only zoom out does. Rule
   written into ui-guidelines.md first; host test walks the ladder both ways from both ends at every FFT length, asserting the pair.
-- **Host commands leave the modal menus** (owner 10-19 23:27: "avoid locking up the device from the perspective of the MCP server
+- [x] **Host commands leave the modal menus** (fw 0.2.78 / protocol 1.23; benched 10-20 10:29 menu case and 10:31 nested Settings case: answered at once, ui_yields counted; the note itself goes in fw-yield2; other section 53 checks pending) (owner 10-19 23:27: "avoid locking up the device from the perspective of the MCP server
   when it's in menus; if the agent sends commands it just exits all modals, since that wouldn't be destructive; just exiting to
   the base screen"; fw-yield dispatched): today every menu, fold-out and dialog is a modal loop and a host command that needs
   the main loop answers E_BUSY (protocol.md LOCAL_BUSY). New rule: such a command sets a yield flag from the ISR-side receiver;
@@ -192,11 +196,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - **Remove the "Host command: menu closed" note** (owner 10-20 10:31 **(owner)**: "we don't need the note at all"; fw-yield2
   dispatched): the modal screens still unwind on a host command, silently; the note text, its timer, `pc_glue_yield_note` and the
   Spectrum follow-up item go; the yield counters stay.
-- **READ_SCREEN handler** (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
+- [x] **READ_SCREEN handler** (fw 0.2.70, benched: T9 passed 10-19 21:11, 800x480 in 0.22 s) (needed by the docs screenshots, 10-19 20:55): the protocol row 0x0401 exists (docs/protocol.md, cap
   SCREENSHOT bit 6, simulator has it, `Scope.read_screen` reads 40 rows per request) but the firmware handler is NULL
   (pc_cmds.c "BENCH: T9"). Implement it in all builds: rows of the live framebuffer as RGB565, the header per protocol.md, the
   capability bit set; host test against the vectors; bench: `scope_screenshot` on the unit equals the screen (T9).
-- **FPGA review on a Fable agent** (owner 10-19 20:55: "might want to use a Fable agent to review and fix the FPGA code"):
+- [x] **FPGA review on a Fable agent** (fpga-gen9 on Fable: 0x153A merged 10-20 00:30, flashed 10-20 10:03; capture fix confirmed by the stage map 10:08-10:14, the CH1 A training pick is fw-cap2's) (owner 10-19 20:55: "might want to use a Fable agent to review and fix the FPGA code"):
   fpga-gen8 retires at 810k tokens with its 0x153A handoff; fpga-gen9 runs on Fable: review the AL3 design end to end (ADC
   capture path, clocking, constraints) against the bench record, then finish 0x153A.
 - [x] **Preserve the mockup sources** (docs/mockups/ committed 19:50): copy the gen_ux generators and the artboard HTML from the coordinator's scratchpad into
@@ -205,13 +209,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   centre PWM so a bitstream with the capture fault fails the wizard loudly; keep the "ADC readout fault near code 128" wording and
   the CAL_PROBE command; host test updated. Do it in the firmware batch that follows 0x153A (so the wizard keeps passing on the
   owner's unit).
-- **Touch fixes batch 1** (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
+- [~] **Touch fixes batch 1** (batch 1 fw 0.2.54, benched 10-19 16:02 handles work; batch 2 fw 0.2.64 trace grab, dead band, draggable slider, tap bands, bench pending) (after UI step 1 lands; spec = docs/plans/touch-review.md section c1, merged c179c49: pick_left_handle()
   helper with a host test, shared scope_pointer_top(), pick at first touch, no tap on a handle, no trigger-point move during a
   channel drag, triggerchannel == 1 fix, clamp 6..396 in auto-setup and settings load; batch 2 = trace grab by nearest object,
   dead band, record-position slider under the grid draggable (owner 10-19 14:05: dragging the window right scrolls the trace left, the window follows the finger; today the slider has no touch handler, only the trace drag moves the trigger point), tap zones that keep the V/div and time-base tap bands but avoid the slider and cards (owner 10-19: keep the tap bands), after UI step 2; batch 3 = no blocking touch loop, needs an MCP soak). Owner decision
   2026-10-19 13:20 **(owner)**: the channel pointers at the left edge of the grid become drag handles, "handles shown on screen are
   draggable"; the on-trace grab stays as a secondary path with a nearest-enabled-object rule. Owner reproduced: with CH2 dragged to
   the bottom CH1 can be picked up again, but only when the drag starts exactly on the invisible zero line.
+  Remains: batch 3 (no blocking touch loop, needs an MCP soak) (check: CHANGELOG 0.2.54-0.2.80 lists no such change).
 - [x] **Spectrum Auto redesign** (owner, 10-18): deterministic probe procedure independent of the current state: probe
   at 50 MSa/s in normal trigger mode (2-3 captures, skip untriggered), measure f0 (time-domain period) and the band top
   f_hi (bins above max(peak - 40 dB, median + 10 dB)); span = max(1.25 f_hi, 20 f0) clamped to 25 MHz; rate = slowest
@@ -256,23 +261,26 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [ ] **Calibration v2 bench** (when fw-cal delivers): shorted inputs, per-core means equal within 0.3 codes after
   correction at full-rate and gated rates, T8-style PWM sweep, Nyquist spur gone in legacy mode, volts at 1.000 V /
   0.010 V match the host model within 1 %; owner reruns base calibration.
+  (check: CHANGELOG 0.2.45 says calibration v2 is superseded by v3; hardware-status 10-19 10:26 shows v3 zeros exact at 0 V, but the PWM sweep and the 1.000 V / 0.010 V volts points are not recorded.)
 - [x] **Reproducible firmware builds** (fw-gen7, fw 0.2.47: identity as data from the commit; .bin and .elf identical
   across directories): the same source with the same GCC 10.3.1 gives different images from main and from a worktree
   (0.2.44: d4c0b716 vs 08f9a5ed, 172,941 differing bytes). Likely __FILE__/path strings; add `-ffile-prefix-map=$(abspath .)=.` (and
   `-fdebug-prefix-map`), check for __DATE__/__TIME__, and make CI's image hash match a local main build. Fold into the dead-code purge.
 - [ ] **CH2 reads +1.0..1.5 codes at range 6 with shorted input right after calibration** (10-18 late): channel offset with the cores
   agreeing; see docs/hardware-status.md late evening and the overnight log. Decide after the log: PWM/relay drift at hw range 5 vs probe.
-- [~] **Morning bench with the owner** (10-19 morning: calibration v3 run 08:15, 0x1535 flashed 10:40 and benched; the +-1 V and phosphor checks still open; load the latest pinned image, not 0.2.46): (1) back up SD 700-710; base calibration
+- [~] **Morning bench with the owner** (done: SD backup and base calibration with the gain step 08:15; 0x1535 flashed 10:40 and benched 11:05; DEFAULT = CIC2+FIR verified 11:00; owner: MMU image screen, spectrum and phosphor 'seems to work') (10-19 morning: calibration v3 run 08:15, 0x1535 flashed 10:40 and benched; the +-1 V and phosphor checks still open; load the latest pinned image, not 0.2.46): (1) back up SD 700-710; base calibration
   with probes + USB unplugged, then the new gain step with both x1 probes on the post ("Gain calibration successful"); GET_CAL version 3,
   gains about full A 0.995 / B 1.028, gated 0.998 / 1.002; (2) +-1.0045 V on CH1 range 2: |A-B| <= 0.15 at 200 MSa/s, codes/V equal
   within 0.2 % across 200 MSa/s / 1 MSa/s / 10 kSa/s / CIC2, volts within 0.5 % of the DMM; fs/2 spur down >= 15 dB; (3) phosphor view
   visual steps (firmware/AGENTS.md section 24 / README "Phosphor view"), pass_ms in and out of the view; (4) 0.2.44 items: spectrum
   strip repaint loops, generator menu rows, Filter box steps + DEFAULT = CIC2; (5) flash FPGA 0x1535 (backup first) and bench CIC2+FIR
   (GET_DECIM bytes 26-27 = 0xE2 0x01 at 10 MSa/s); (6) persist a release candidate to the SD card after a soak.
+  Remains: the +-1.0045 V check, phosphor visual steps with pass_ms in and out of the view, spectrum strip repaint and generator rows, persisting a release candidate to the SD card after a soak.
 - [x] **16-bit trigger level ignores corr16 and the class gain** (fw-gen7, fw 0.2.47, 04619ca; bench pending) (fw-cal2 handoff, section 23): about 1 % level error at full
   rate in filtered captures. Small firmware fix; add a host test.
 - [ ] **Phosphor fast capture loop** (design study, fw-phosphor section 24): the view draws one record per pass (about 30 wfm/s);
   a capture loop that reads several records per pass would raise the waveform rate. Measure pass_ms in the view first.
+  Remains: the capture loop itself; the design note docs/plans/phosphor-fast-capture.md landed with fw 0.2.58 and the scope-view pass is 15 ms median with the MMU (hardware-status 10-19 08:10).
 - [ ] **Gain-per-range check** (fw-cal2 assumption 1, README 6.3 step 7): gains measured on one range are applied to all six; bench
   CH1 at ranges 1/2/3 with the generator static on the post; if spans disagree beyond 0.3 %, store gains per range (80 bytes free).
 - [x] **Bode analyser, host steps H1-H3** (docs/plans/bode-design.md fe5780b; done by mcp-gen4: 1d46cf8, f0940ee, 363f676,
@@ -281,11 +289,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   first, then down-ranging; bench first on an RC low-pass R 1.6 kOhm / C 10 nF (fc 9.95 kHz) with DUT ground on the USB shell.
 - [x] **Bode analyser, device steps D1-D5** (fw-bode 0.2.66 merged 18:20; owner 18:45: Bode plot is a main-menu mode row after Spectrum analyser at a 52 px pitch, eight rows, removed from the generator pop-over -> fw-polish2 item 6; the earlier "entry from the generator menu" note is superseded). Was: after the host version proves the numbers: display mode with magnitude/phase panes,
   BODE_CTRL / READ_BODE. Owner decision: entry from the generator menu (the main menu has no eighth row).
-- [ ] **docs/protocol.md tidy** (docs-gen1 findings): row 32 says GET_STATUS bytes 42-43 are zero while rows 41/45 define ext_flags and
+- [x] **docs/protocol.md tidy** (docs-gen3, merged 6f1ea23 on 10-19) (docs-gen1 findings): row 32 says GET_STATUS bytes 42-43 are zero while rows 41/45 define ext_flags and
   display_mode there (add a "superseded" note); row 49 calls CIC+FIR the eventual default while CIC2 is the default since 0.2.44; row 51
   says x1 or x10 probes for the gain step while README 6.3 says x1 (fw-cal2: range 2 for x1, range 5 for x10, so both are supported:
   align the README). Next firmware agent.
-- [ ] **FPGA 0x1536 firmware + MCP support** (after fpga-gen5; fpga/al3/README.md section 6, docs/plans/segmented-capture.md, fpga/al3/AGENTS.md):
+- [x] **FPGA 0x1536 firmware + MCP support** (fw 0.2.58 / protocol 1.17 and mcp-gen5 4699593; bench pending, see the '1.17 on the unit' item; 0x1536 itself was superseded by 0x1537 flashed 10-19 16:31) (after fpga-gen5; fpga/al3/README.md section 6, docs/plans/segmented-capture.md, fpga/al3/AGENTS.md):
   commands 0x57-0x5D, reads 0x2B-0x32 via the 0x1F pointer, segment table (64-bit entries: valid, triggered, trigger offset, 40-bit
   5 ns timestamp), averaging with positions P and shift S at readout; firmware capture modes "Segments" and "Average N" with capture-info
   fields, READ_RAW layouts for a segment set and the averaged record; MCP `scope_capture_segments` / `scope_capture_averaged`; bench check 5
@@ -310,13 +318,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   tip on the post?") and offers Retry; then CH2. Retry per step without redoing earlier steps; Skip keeps earlier values (flag bit 4).
   Step 3 Summary in plain words per channel (cores matched to x code, gains), date, Done; one success message at the end only. Consider
   detecting USB connected and warning instead of demanding the unplug. Next firmware generation (fw-cal3 together with v4 tracking).
-- [~] **USB: device lost after a long idle on 0.2.48** (fw-usb2 10-19: 0.2.49 merged with the suspend watch, inferred resume that acts,
+- [~] **USB: device lost after a long idle on 0.2.48** (0.2.49 merged; reopen soak 3 x 30 min idle 10-19 11:34-13:04 clean, counters 36/37 stayed 1/0) (fw-usb2 10-19: 0.2.49 merged with the suspend watch, inferred resume that acts,
   soft reconnect after a retry storm or 15 min suspended, counters 60-61, event type 20, protocol 1.14; bench plan firmware/AGENTS.md
   section 27; Windows selective suspend on this laptop: AC disabled, DC enabled) (10-19 10:20): port closed from about 08:40 to 10:20, device vanished from the bus
   (no 1209, no re-enumeration), GET_LINK_STATS after replug: suspends (36) = 17, resumes (37) = 0, no restart. The host suspended the idle
   device and it never resumed: RESUME interrupt never fires. Decode the event log (types 2/3 fields of row 50), check MUSB resume
   handling (INTRUSBE resume bit, POWER.Resume, PHY), and the F1C100s USB PHY suspend behaviour; bench with `fnirsi1013d-soak --mode reopen
   --idle 1800`. Overnight 10-minute idles never suspended (36 stayed 1); the long idle did.
+  Remains: the long idle (about 2 h with the port closed) ending with the device still on the bus; the two-hour run was stopped after about 65 min at 14:20.
 - [x] **UI makeover batch** (all four steps merged 10-19 by 14:42 as fw 0.2.51/0.2.55/0.2.56/0.2.59, bench pending) (owner 10-19; plan docs/plans/ux-makeover.md, mockups https://claude.ai/artifact/M3udheReCiHLQmASaY5qZr revision 4,
   reviews docs/plans/diagnostics-review.md and ux-review.md): step 1 main menu rows + USB drive screen; step 2 CTRL pages with fold-outs
   (Display Normal/Phosphor/X-Y with the phosphor parameters, Trace style, Grid, V/div per channel; Spectrum View/Analysis/Axis), strips
@@ -330,18 +339,19 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   readouts as cards in Atlan's card layout, top bar chips rebuilt, Spectrum row always shown and switching Roll off. Open: look of the
   new full-screen pages (stock palette vs the navy style), short CTRL labels vs wider buttons, main-menu row height when Bode ships.
   Next firmware generations (one step each).
-- [ ] **Measurement cards in the stock scheme** (owner 10-19): chip with the channel digit in the channel colour + "Metric: value" in
+- [x] **Measurement cards in the stock scheme** (fw 0.2.51 chip scheme, standard names, Freq fix; card layout again in 0.2.65; bench pending) (owner 10-19): chip with the channel digit in the channel colour + "Metric: value" in
   white, dark grey rounded card; fix the "Freg" label; scope_functions.c scope_display_channel_measurements. Part of the UI batch
   (docs/plans/ux-makeover.md section 3).
-- [ ] **Measurements v2** (ux-review section 6, plan section 3a): per-mode MEASURES lists in spare settings words with default cards
+- [~] **Measurements v2** (fw 0.2.65: per-mode MEASURES lists, order, defaults Freq / Vpp / Vavg, spectrum THD, noise floor, RBW, Span, Center, Time, words 221-223; bench pending) (ux-review section 6, plan section 3a): per-mode MEASURES lists in spare settings words with default cards
   (a new unit shows none today: scope_reset_config_data sets no cards despite its comment); the cheap on-device set (rise/fall, overshoot,
   top/base, CH1-CH2 delay/phase/gain, cursor-gated statistics, PI decay tau; spectrum H2/H3, THD, SFDR, noise floor, band power, OBW);
   AC RMS beside Vrms; the standard names (Period, +Width, -Width, +Duty, -Duty) and the "Freg" fix. After the UI batch.
-- [ ] **README timing fix**: firmware/README.md still quotes the pre-MMU FFT times (4096 points 10.9 ms); the MMU bench measured 2.72 ms
+  Remains: spectrum H2/H3, SFDR, band power, OBW; AC RMS; CH1-CH2 delay / phase / gain; PI decay tau (check: CHANGELOG 0.2.65 names none of these).
+- [x] **README timing fix** (docs-gen3, merged 6f1ea23 on 10-19): firmware/README.md still quotes the pre-MMU FFT times (4096 points 10.9 ms); the MMU bench measured 2.72 ms
   on 0.2.48 (docs/hardware-status.md 08:10). Update the spectrum section's numbers. Next firmware agent.
-- [ ] **"Confirm to delete?" dialog**: its two buttons sit 11 px apart (ux-review); apply the dialog rule (44 px, 16 px apart, primary right).
+- [x] **"Confirm to delete?" dialog** (fw 0.2.55, 24743a7: 160 x 44 px buttons 16 px apart; benched 10-19 16:06 select, save and delete work): its two buttons sit 11 px apart (ux-review); apply the dialog rule (44 px, 16 px apart, primary right).
   UI batch step 1.
-- [ ] **Trigger position varies by run at decimated rates** (10-18, +11 us / -1 us at 1 MS/s). FPGA side done (fpga-gen6,
+- [~] **Trigger position varies by run at decimated rates** (the three firmware items are in fw 0.2.72, fw-bus; 0x1537 was flashed 10-19 16:31, the unit now runs 0x153A; B1 checked 10-19 22:07) (10-18, +11 us / -1 us at 1 MS/s). FPGA side done (fpga-gen6,
   tb/tb_trigpos.v, fpga/al3/README.md "Changes" section 7). The trigger detector, decimator and FIR are deterministic: an
   ADC trigger lands at the same record index in every run, and EXT within one output sample. Two FPGA faults of
   0x1532..0x1536 are fixed in 0x1537 (backups/al3_seg_0x1537_426a3784*.bin, not flashed): (a) a 0x0B (or 0x57/0x59)
@@ -354,6 +364,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   - fpga_read_decim_data and the 1.00o5 readout have no dummy strobe and read one word late.
   Remaining: bench re-measure on 0x1537 with GET_CAPTURE_INFO and 0x15 writes logged. The three firmware items are built on
   branch fw-bus (fw 0.2.72; firmware/AGENTS.md section 48 bench items B2, B4, B5); re-measure on 0x1539 with that image.
+  Remains: firmware/AGENTS.md section 48 bench items B3, B4, B5, B7 and the trigger-position re-measure with GET_CAPTURE_INFO on 0x153A.
 - [x] **Digital phosphor** (fw-phosphor, fw 0.2.46 merged 2e73d28; visual bench pending): design in docs/plans/dpos350p-features.md
   section 4; XY mode could get intensity grading from the same map.
 - [x] **Bode / frequency response** (owner priority 3): design docs/plans/bode-design.md; host tool done (H1-H3 above); device steps D1-D5 queued.
@@ -372,8 +383,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   1.6 kOhm / 10 nF RC; record the floor, skew and the wiring verdict in docs/hardware-status.md.
 - [ ] **Bode follow-ups** (after the bench): CH1 re-ranging when CH1 drops below 20 codes (resonant input nodes), the harmonic fast
   mode (design 1.3), the impedance mode z_series_ohm (design 2.4, coil L / Q / SRF for the detector); the PNG plot is done (scope_report, mcp-gen6).
-- [ ] **1.19 / 1.20 on the unit, host side** (mcp-gen6 hand-off, mcp/AGENTS.md open item 0a): scope_health encode_check
+- [~] **1.19 / 1.20 on the unit, host side** (scope_health on 0x1539 10-19 21:12 and scope_cal_probe 20:25 done) (mcp-gen6 hand-off, mcp/AGENTS.md open item 0a): scope_health encode_check
   on 0x1538; scope_bode_sweep(where='device') on the divider and the RC next to where='host' (within 0.05 dB / 0.3 deg).
+  Remains: device vs host Frequency response sweep on the RC and the divider, blocked by the A-core fault until 0x153A (now flashed 10-20 10:03).
 - [x] **CAL_PROBE (1.21) host decoder** (mcp-gen6, b3b9c51): `scope_cal_probe`, `CalProbeResp`, simulator model.
 - [ ] **1.17 on the unit, host side** (mcp-gen5, after the owner's 0x1536 flash and firmware/AGENTS.md section 35 checks 7-9): run
   `scope_capture_segments` (10 kHz generator: intervals 100 us +- 10 ns, every segment crossing at the pretrigger point) and
@@ -397,6 +409,36 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 - [ ] 0.2.40/0.2.41 layout: Roll/Average/Filter boxes and the pass-time label alignment; Max hold behaviour; overrange
   warning. (Auto mode verified by the coordinator on 0.2.41: 6/6 triggered records at 10 MS/s, untriggered flagged truthfully.)
+
+## Roadmap to 0.3.0 (reconciled 2026-10-20)
+
+State: fw 0.2.80 (protocol 1.24) on the owner's unit, FPGA 0x153A flashed 10-20 10:03. Epic view: `docs/plans/roadmap.md`;
+tag-day list: `docs/plans/release-checklist.md`. Items below point to the entries above.
+
+- **In flight (dispatched, not merged)**: fw-cap2 ("Capture-stage training must probe the band": several codes across 120..140,
+  widest clean run, a persistently flagged core asks for a calibration; hardware-status 10-20 10:19); fw-spzoom2 ("Spectrum
+  ladder: pans never change the rate"); fw-yield2 ("Remove the 'Host command: menu closed' note").
+- **Bench with the owner**: re-run the wizard after fw-cap2 (CH1 A is trained to the bad stage 4 on 0.2.80); firmware/AGENTS.md
+  section 53 rest (wizard mid-measurement detail 3, keypad half-typed, file-save detail 4), section 48 B3/B4/B5/B7 ("Trigger
+  position varies by run"), section 49 overview walk-through, the UI walk-throughs of 0.2.63-0.2.77 (polish batch, zoom ladders,
+  Measurements v2, Frequency response); "Morning bench with the owner" remains (+-1.0045 V, phosphor visual steps, persist a
+  release candidate after a soak); the two-hour idle ("USB: device lost after a long idle"); "AUTO SET in Frequency response"
+  retest on 0x153A; open-input / EXT tests 1-4; the outstanding 0.2.40 / 0.2.41 verdicts; CH2 zero checks ("CH2 range-5 zero
+  drift", "CH2 reads +1.0..1.5 codes at range 6", "Overnight zero step", "Gain-per-range check", "Calibration v2 bench").
+- **Firmware batches still open**: ACQ memory chips after Filter -> Off; "Spectrum ladder follow-ups" (a)-(c); "Frequency
+  response small items" (a)-(c) (single sweep stays on the fold-out, generator chip after a sweep, the CH1-level warning
+  wording); "Hardware averaging with the default filter" (needs the owner's decision); touch batch 3 (no blocking touch loop);
+  Measurements v2 remainder (H2/H3, SFDR, band power, OBW, AC RMS, delay / phase / gain, PI tau); "Phosphor fast capture loop".
+- **MCP items**: "Server releases the serial port when idle"; "Bode follow-ups"; "1.17 on the unit" (segments, hardware
+  averaging) then `hardware` default auto; "1.19 / 1.20 on the unit" device-vs-host sweep on 0x153A; simulator lacks Frequency
+  response reason 8 and the header-before-first-sweep rule (see "Frequency response small items"); version bump to 0.3.0.
+- **Docs items**: "Documentation site and write-ups" remains (screenshots on the unit, per-screen guide text, six articles,
+  agent worked examples, README screenshot block); `docs/release-notes/0.3.0.md` placeholders (0x153A entry, screenshots,
+  tested-on list, known issues); CHANGELOG hygiene before the tag; the checklist still names 0x1538 as the recommended
+  bitstream, 0x153A (dist entry unbenched) has superseded it.
+- **Release steps** (`docs/plans/release-checklist.md`): bitstream pins and `tools/bitstreams.py check --release`, version bump
+  in `pc_cmds.h` and `mcp/pyproject.toml`, release commit with CI green, SD package, release candidate persisted plus the
+  30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 
 ## Dispatched
 
