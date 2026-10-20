@@ -736,4 +736,9 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
 - 2026-10-20 13:33 **(owner)**: AUTO SET sets CH2 range Hold when the response inside the chosen span fits one range (about 20 dB
   of spread) and Auto otherwise, so a narrow span around a peak runs silently; Hold stays the manual override. The two clicks
   per sweep on a 35 dB low-pass are the planned range transitions, not churn.
-
+- 2026-10-20 14:16 **(owner)**: the CH2 range row reads **Auto or Constant**, not Hold. Constant means the V/div selected in the
+  CH2 channel popover, the same setting as everywhere else; a sweep on Constant never changes it. Today the warning tells the
+  user to change the range, the intuitive response is to change it in the channel popover, and the next sweep resets it to
+  AUTO SET's held 100 mV/div. Coordinator's addition to be confirmed: a CH2 range change made by hand in the popover while the
+  mode shows sets the row to Constant, so the choice is never overridden silently; AUTO SET sets the popover's range when it
+  picks Constant, and leaves it on Auto otherwise.

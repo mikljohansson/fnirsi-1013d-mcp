@@ -505,6 +505,14 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
+- fw-eng6 (the fw-eng5 agent continued, dispatched 14:20): CH2 range **Auto / Constant** (owner 14:16, bode-ui.md section 10):
+  Constant = the CH2 popover's V/div, never changed by a sweep; a popover change by hand while the mode shows sets Constant
+  (coordinator's addition, owner to confirm); AUTO SET writes its chosen range into the popover when it picks Constant; the
+  warning text names the popover. Also READ_SCREEN must not unwind menus (docs-guide 14:15: since 0.2.78 every main-loop host
+  command closes the open menu first, so screenshots of Settings, the generator menu, the file viewers, First start and the
+  wizard come out as the screen after the menu closed): a read-only command (READ_SCREEN, GET_*) is answered from inside the
+  modal loop without leaving it. Separate agent fw-shot if fw-eng6 declines it.
+
 - docs-guide / docs-articles (Opus, dispatched 14:04): the user guide text per screen on fw 0.2.93 (docs/guide/*.md, the
   "to be written" notes gone, screenshot placeholders kept, new states named for tools/screenshots.py) plus the release-notes
   placeholders (0x153A entry, tested-on list, known issues); and the six engineering articles of docs/articles/index.md from
