@@ -256,6 +256,11 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- readme-gen rounds 2 and 3 (21:41 / 21:52 briefs, done 21:48 / 21:55, merged 21:51 as ac4c6a5; README 181 lines, 21/22 links,
+  docs/screenshots/scope-deep-memory.png pending from the bench): the visitor review and the dry run folded in, the owner's
+  extra USPs (filters by name, Average mode, Bode plot, overview bar, calibration and capture checks, hands-free flashing),
+  What's next from the roadmap, the fnirsi-install skill, runbook Windows fixes with the tool's real output lines; the
+  owner's "MCP connection" wording re-applied to the pitch (bac990c).
 - hw-prep (Opus, dispatched 21:42): a user-facing "Prepare and back up" page from hardware-prep.md section 3 without the
   maintainer's paths or "the lead's go" (dry-run findings: wrong expected pinout column, stale 5.3 procedure, scope power
   during flashing answered three ways, no usbipd recipe for a card reader, no Windows hash command, README-spiflash test
