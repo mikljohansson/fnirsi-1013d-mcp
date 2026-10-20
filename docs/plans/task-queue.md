@@ -12,7 +12,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   each point at the range the previous sweep ended with for that point (per-point range plan kept with the table), switches
   only when the point clips or drops below the floor, and the pre-scan is skipped when a plan exists for the same span and
   settings; the first sweep after a settings change ranges as today. The switch count in the header shows the effect. Owner
-  10-20 11:53 **(owner)**: the same for Single sweep and for AUTO SET's final sweep: the plan belongs to the span and settings,
+  10-20 11:52 **(owner)**: the same for Single sweep and for AUTO SET's final sweep: the plan belongs to the span and settings,
   not to the way the sweep was started; only the first sweep after a settings change, or after a point invalidated the plan
   (clipped or dropped below the floor), ranges from scratch.
 
