@@ -414,7 +414,17 @@ numbers.
 `sampling_triggered` with the references only while the write runs and check the random auto captures' 0x14 against
 W - total + pretrigger (`dut.w_last`); directed time-out checks and tb_seg S10 / seg_model updated; `contract_0x153B.txt`
 (version byte only) replaces 0x153A's in run.sh; tb_mcuread accepts 0x3B. Final source, seed 12345: ext (0 mismatches in
-both phases), decim + cic_model, trigpos 882, firstrec 38, contract PASS; fir, seg and the full run: __RUN_SH_FULL__
+both phases), decim + cic_model, trigpos 882, firstrec 38, contract PASS; fir, seg and the full run: fir and seg (the two long steps, about 25 min each) failed their random equivalence phases
+  twice on testbench artefacts of the changed stop semantics, each fixed in the tb (acae8b8): the reference cuts a triggered
+  auto capture at its time-out (change 2; now skipped from the reference's stop on), the dut's extra post-time-out words
+  stay in the memory until rewritten (skipped by the memory compare), the read register's stale bits after the uncompared
+  0x14 / 0x18 reads (a 0x41 refill), and a 0x1A = 0 written by the tb while a never-triggered normal capture still runs
+  (the reference stops on the write, the dut two write clocks later: masked while the forced stop is in flight). The run
+  with all four masks was in progress at the handoff: **verdict pending**. Finish it with
+  `wsl -d Ubuntu -- bash <repo>/fpga/al3/tb/run.sh 12345` (`REF_SRC_DIR` as in "Commands"; about 1 h; `ONLY=fir` /
+  `ONLY=seg` for the two steps alone) and record the result here; a residual one-write-clock window around a reset
+  release (seg phase 4, 10 ns, state / half-way differing between dut and reference) was seen once before the last mask
+  and is to be read from the diagnostic MISMATCH line if it returns.
 
 **Build.** b2 (`~/g11/b2`, TD 4.6.8 SP1): clk_200MHz 0 errors / 4.583 ns, sample_write_clock 9.231 ns, i_mcu_clk 20.236 ns,
 clkc[1] 2.397 ns, clkc[0] 58 (SDC artefact); 4990 LUT. b1 of the same logic rolled 5.101 ns with 2 errors on the sequencer's

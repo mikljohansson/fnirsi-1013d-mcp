@@ -1894,7 +1894,17 @@ Every record is checked word by word: equal to the words written, contiguous in 
   `seg_model.py` carry the new formula; `tb/contract_0x153B.txt` differs from the 0x153A transcript in the version byte
   only. Steps run on the final source (seed 12345): ext 39 checks / 0 mismatches in both equivalence phases, decim 98 +
   cic_model, trigpos 882, firstrec 38, contract 12 (= contract_0x153B.txt) all PASS; fir, seg and the full 13-step run:
-  __RUN_SH_FULL__
+  fir and seg (the two long steps, about 25 min each) failed their random equivalence phases
+  twice on testbench artefacts of the changed stop semantics, each fixed in the tb (acae8b8): the reference cuts a triggered
+  auto capture at its time-out (change 2; now skipped from the reference's stop on), the dut's extra post-time-out words
+  stay in the memory until rewritten (skipped by the memory compare), the read register's stale bits after the uncompared
+  0x14 / 0x18 reads (a 0x41 refill), and a 0x1A = 0 written by the tb while a never-triggered normal capture still runs
+  (the reference stops on the write, the dut two write clocks later: masked while the forced stop is in flight). The run
+  with all four masks was in progress at the handoff: **verdict pending**. Finish it with
+  `wsl -d Ubuntu -- bash <repo>/fpga/al3/tb/run.sh 12345` (`REF_SRC_DIR` as in "Commands"; about 1 h; `ONLY=fir` /
+  `ONLY=seg` for the two steps alone) and record the result here; a residual one-write-clock window around a reset
+  release (seg phase 4, 10 ns, state / half-way differing between dut and reference) was seen once before the last mask
+  and is to be read from the diagnostic MISMATCH line if it returns.
 
 **Build** (TD 4.6.8 SP1, `build.sh`, b2 of fpga-gen11; source commit c173ed5): 4990 LUT (57.8 %), all block RAM as
 0x153A. `clk_200MHz` 0 errors, min period 4.583 ns (the first build of the same source rolled 5.101 ns with 2 errors on
