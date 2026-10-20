@@ -742,3 +742,7 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
   AUTO SET's held 100 mV/div. Coordinator's addition to be confirmed: a CH2 range change made by hand in the popover while the
   mode shows sets the row to Constant, so the choice is never overridden silently; AUTO SET sets the popover's range when it
   picks Constant, and leaves it on Auto otherwise.
+- 2026-10-20 14:29 **(owner)**: the AUTO SET notes lose their "span kept" suffix; it is redundant. "No corner from 100 Hz to
+  10 MHz" stands alone, the no-response note likewise. (The owner had asked what "span kept" meant: AUTO SET found no corner,
+  so Start and Stop stayed as they were.) Bench 14:27: that AUTO SET ended with CH2 Auto, not Hold; fw-eng6 checks the
+  flat path.
