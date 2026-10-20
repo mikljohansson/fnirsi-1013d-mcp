@@ -543,6 +543,11 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
+- fw-diag (Opus, dispatched 18:15, fw 0.2.100 provisional, section 66): the Restarts tile per the owner's verdict meanings
+  (OK = no crashes, deliberate restarts not mentioned; Check = an earlier run crashed; Fault = a crash in this run; no
+  exception jargon on the Status page), the noise rows with the open-input limits (3.0 full / 1.0 gated, labelled "inputs
+  open", one constant with the wizard's pass criterion, the "provisional" note gone, a better advice line), the guide texts.
+
 - fpga-gen12 (Fable, dispatched 15:58): make 0x153B flash-ready: the two residual tb_fir / tb_seg mismatch windows (artefact
   or real), the full 13-step run on two seeds, a rebuild only if zaklad.v changes, the handoff "0x153B flash-ready" with the
   flash-session checklist. fpga-gen11 retired at 522k tokens (merged ac1f2ab).
