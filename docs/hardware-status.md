@@ -1124,4 +1124,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   5ad6085e9d9c5d7ac0c37c890442c17a5a8078948cb06f553131055a859d060b), loaded. CAL_PROBE mode 1 with the probes open on the BNCs:
   training 0x08E3 again on both channels; the zero step then fails at range 4 with DRIFT at the gated zero pair (11 / 15 codes
   of movement: the open 1x probe tips pick up hum at 0.2 V/div). The wizard needs the probes unplugged from the device.
+- 2026-10-20 10:42-10:48: probes unplugged: CAL_PROBE mode 1 both channels all ranges OK, training 0x08E3. Owner ran the wizard
+  (item 4): "CH1 A3 B4" / "CH2 A3 B4", saved: GET_CAL trailer 1, stored 0x08E3 on 0x153A, in effect 0x08E3; the self-check since
+  the load: 18424 captures read, 0 flagged. **Band sweep with the trained stages (item 2): 200 MSa/s every core clean over means
+  109..135 (CH1 A max std 0.98, 0 rails, 0 jumps; CH1 B 1.5; CH2 A 3.6; CH2 B 2.5), 100 MSa/s clean (0.5 / 0.8 / 1.6 / 2.0).**
+  The A-core capture fault of 0x1535..0x1539 is gone on this unit with 0x153A trained. 50 and 20 MSa/s not re-run: the USB link
+  is being reset by the host about every 30 s since the last replug (13 bus resets in 6 minutes, pattern suspend then reset =
+  a host port reset; the firmware keeps running, no restart record); owner asked to re-seat the cable. Scratchpad logs
+  dco_sweep_153A_0x8e3_d0.log, _d1.log.
 

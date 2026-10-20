@@ -185,7 +185,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   waterfall's history span); (b) make the 2 s zoom-in limit use the real capture time memory depth/fs, or cap the memory depth in
   the Spectrum; (c) re-derive the rate when the FFT length or memory depth changes, not only at the next zoom/pan step. With the
   next Spectrum batch.
-- **Capture-stage training must probe the band** (bench 10-20 10:19; fw-cap2 dispatched): see hardware-status 10:19.
+- [x] **Capture-stage training must probe the band** (fw 0.2.81; benched 10-20 10:48: wizard stores 0x08E3, the 200 MSa/s band sweep clean on every core) (bench 10-20 10:19): see hardware-status 10:19 and 10:48.
 - **Spectrum ladder: pans never change the rate** (owner 10-20 10:27 on fw 0.2.80 **(owner)**: "the spectrum should stay the same when
   scrolling, changes to sample rate and time/div should happen when zooming"; fw-spzoom2 dispatched): the rate is derived from
   span and centre only at zoom steps (and by AUTO SET); a pan (plot drag, slider drag, tap-to-jump) keeps the rate and is clamped
