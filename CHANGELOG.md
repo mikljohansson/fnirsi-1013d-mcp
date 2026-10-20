@@ -31,7 +31,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.83 - 2026-10-20 (protocol 1.24, unchanged apart from the text of READ_BODE reason 8; provisional number)
+#### 0.2.83 - 2026-10-20 (protocol 1.24, unchanged; reason 8 text)
 
 - Frequency response: AUTO SET and device sweeps no longer end in the pre-scan with "ADC readout fault" on a clean
   readout (51ab2a4). The engine took its clip flag from the readout's `ADoverload`, which stays set from any earlier
