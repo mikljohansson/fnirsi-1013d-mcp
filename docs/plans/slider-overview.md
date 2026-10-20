@@ -414,5 +414,5 @@ The frequency-response and Spectrum tracks start at x 2 as `BU_SL_X` does (host 
    colour inside the lines, y 454..469 (16 rows); hit areas unchanged (section 2).
 8. Frequency response overview and the Display variant (owner, 2026-10-20 13:35): Overlaid draws magnitude (cyan) and phase (pink)
    over each other in the track; Magnitude only / Phase only draw that one curve **(owner)**.
-   The magnitude is drawn over the phase, so where they overlap the magnitude shows (owner, 13:38).
+   The magnitude is drawn over the phase, so where they overlap the magnitude shows (owner, 13:36).
 
