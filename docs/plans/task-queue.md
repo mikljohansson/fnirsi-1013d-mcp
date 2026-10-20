@@ -11,9 +11,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   / 2 average goes; same picture whatever the filter and time base. After the 0.3.0 tag unless the owner says otherwise.
 - **The card-only path is dropped** (owner 22:02: "if people want this firmware they also need to flash the FPGA"): the
   FPGA flash is a mandatory install step; docs-one carries it through the guides and the README.
-- **UI additions need the owner's selection first** (owner 22:05): most epics may be MCP-only; the candidates for a device
-  control are listed for discussion before any UI design (fpga-spec reports them; the coordinator's proposal is in the
-  22:0x reply: Type row for pulse width and Nth edge, a peak-detect row in ACQ, the counter feeding the cards only).
+- **UI selection for the epics** (owner 22:09, "Sounds great!" to the coordinator's proposal): the device UI grows by two
+  rows only: a Type row in the trigger menu (Edge, Pulse width, Nth edge, with their parameters) and a Sample row in ACQ
+  (Normal, Peak); the hardware counter feeds the measurement cards with no new control. Runt, window and timeout triggers,
+  the streaming logger, the pulse pattern generator and trigger output, DVM, serial decode, mask test and CSV are MCP-only.
+  UI design for the two rows (mockups first, docs/ui-guidelines.md) starts after the FPGA contract (fpga-spec) is in.
 - **One supported FPGA configuration** (owner decision 2026-10-20 21:52, reaffirmed 21:59: "every firmware version only
   supports the latest FPGA bitstream ... detect this and show a loud banner"; the banner is part of the work: "our firmware doesn't need to be compatible with
   anything besides our own FPGA bitstream"): the firmware targets the project's current bitstream (0x153B) only. Implied
