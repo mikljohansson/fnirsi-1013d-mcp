@@ -872,6 +872,10 @@ def _capture_caveats(cap: Capture, freq: dict[str, float | None]) -> list[str]:
     cav = []
     if cap.auto_timeout:
         cav.append("auto trigger fired: data not synchronised to the signal")
+    if cap.maybe_spliced:
+        cav.append("record may be spliced: the scope had to force this capture's stop (or the FPGA's auto time-out cut "
+                   "a late trigger), so part of the record can come from an earlier pass of the sample ring (a phase "
+                   "jump at one sample); capture again (FPGA 0x153A and older)")
     if cap.decim is not None:
         d = cap.decim
         cav.append(f"decimated capture ({d.filter_name}, N = {d.n}): each sample is the filter output over "
@@ -920,7 +924,8 @@ def _save_capture(sess: Session, cap: Capture, kind: str, extra_meta: dict[str, 
             arrays[f"{name}_samples16"] = ch.samples16
     meta = {"capture_id": cap.capture_id, "dt": cap.dt, "divider": cap.divider, "start_sample": cap.start_sample,
             "pretrigger_samples": cap.pretrigger_samples, "total_samples": cap.total_samples,
-            "triggered": cap.triggered, "auto_timeout": cap.auto_timeout, "origin": cap.origin,
+            "triggered": cap.triggered, "auto_timeout": cap.auto_timeout, "maybe_spliced": cap.maybe_spliced,
+            "origin": cap.origin,
             "channels": {n: c.config.to_dict() for n, c in cap.channels.items()},
             "trigger": cap.trigger.to_dict(), "scaling": SCALING_CAVEAT}
     if cap.decim is not None:

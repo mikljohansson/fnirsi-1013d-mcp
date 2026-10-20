@@ -173,6 +173,25 @@ def test_capture_info_roundtrip_and_views():
     assert back.settings_key()["CH2.coupling"] == 1
 
 
+def test_capture_info_maybe_spliced_flag():
+    """fw 0.2.97: GET_CAPTURE_INFO flags bit 6, the record may be spliced; Capture.maybe_spliced and its caveat."""
+    from fnirsi1013d.scope import Capture
+    from fnirsi1013d.server import _capture_caveats
+
+    H = P.CaptureInfoHeader
+    ci = P.CaptureInfo(H(capture_id=1, flags=H.F_AUTO_TIMEOUT | H.F_MAYBE_SPLICED, total_samples=3000),
+                       [P.CaptureChannelInfo(), P.CaptureChannelInfo()])
+    back = P.CaptureInfo.unpack(ci.pack())
+    assert back.header.flags & H.F_MAYBE_SPLICED
+    cap = Capture(1, 1e-8, 0, 0, 0, 3000, False, True, {}, back.trigger(), capture_info=back)
+    assert cap.maybe_spliced
+    assert any("spliced" in c for c in _capture_caveats(cap, {}))
+    clean = P.CaptureInfo(H(capture_id=2, flags=H.F_AUTO_TIMEOUT, total_samples=3000), ci.channels)
+    cap = Capture(2, 1e-8, 0, 0, 0, 3000, False, True, {}, clean.trigger(), capture_info=clean)
+    assert not cap.maybe_spliced and not any("spliced" in c for c in _capture_caveats(cap, {}))
+    assert not Capture(3, 1e-8, 0, 0, 0, 3000, False, True, {}, clean.trigger()).maybe_spliced
+
+
 def test_link_stats_fw_0_2_4_sample():
     """Lead's raw GET_LINK_STATS on fw 0.2.4: 36 u32 words, word 0 = the count (35), counters follow."""
     import struct as st

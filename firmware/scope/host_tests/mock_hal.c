@@ -334,6 +334,7 @@ void pc_hal_acq_poll(int *done, int *triggered)
 uint16_t pc_hal_acq_finish(void) { mock.fpga_ops++; return mock.trigger_addr; }
 uint8_t  pc_hal_ext_status(void) { mock.fpga_ops++; mock.ext_reads++; return mock.ext_status; }
 void     pc_hal_force(void)      { mock.fpga_ops++; mock.forces++; mock_polls = 1000000; mock.polls_to_trigger = -1; mock.polls_to_done = 0; }
+void     pc_hal_force_stop(void) { mock.force_stops++; pc_hal_force(); }
 
 void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,
                       uint32_t ring_words, uint8_t read_lag)

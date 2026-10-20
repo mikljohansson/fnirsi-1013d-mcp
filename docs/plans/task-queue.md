@@ -30,7 +30,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   flags it ch2_small as today (the user switches to Auto by hand). Also: the switch count in the header counts planned and
   unplanned switches separately so the bench can see "0 unplanned, 2 planned". Next engine batch (fw-eng5).
 
-- [~] **Auto-mode records on 0x1532..0x153A are spliced by the forced stop** (fw-arm dispatched 15:36; fpga-gen11, 10-20; fpga/al3/README.md section 11
+- [x] **Auto-mode records on 0x1532..0x153A are spliced by the forced stop** (fw 0.2.97, branch fw-arm, bench pending: firmware/AGENTS.md
+  section 64). Host ARM, UI auto mode, calibration / auto-setup FPGA-auto conversions, host segment runs and the
+  Frequency response engine arm the FPGA's own time-out with 0x0E = W - 2, W the first word at or after the deadline
+  with W mod 8192 >= total + 4 (a generalisation of 8192 k + total - 2: the deadline kept or moved by at most total + 8
+  words); triggered := 0x18 && 0x14 != pretrigger; the firmware force is only the safety net and flags the record
+  (GET_CAPTURE_INFO flags bit 6, mcp caveat), as does a trigger the time-out may have cut. 0x153B+: the 0.2.41 force
+  unchanged. Was: (fw-arm dispatched 15:36; fpga-gen11, 10-20; fpga/al3/README.md section 11
   "Firmware"): `pc_hal_force` / `pc_ui_auto_service` / the host poll write 0x1A = 0 after the ring has wrapped and the FPGA
   reports 0x14 = pretrigger, so the record read is ring 0 .. total - 1 across the stop (15 of 32 untriggered host captures on
   the bench, about every fifth Scope-view auto trace at fast time bases). Until 0x153B is flashed: arm FPGA auto (0x1A = 0) with
@@ -39,7 +45,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   time-out with 0x0E = the deadline in words). Host test for test_fpga_bus: fpga_model's time-out stop per bitstream version
   (pretrigger up to 0x153A, W - total + pretrigger from 0x153B), a forced stop after 1.3 rings reads contiguous / spliced
   accordingly, FPGA auto with 0x0E = total and a trigger at total / 2 is complete on 0x153B and cut on 0x153A.
-- [~] **Frequency response engine arms normal** (fw-arm dispatched 15:36; fpga-gen11, 10-20): `bh_arm` arms FPGA auto with 0x0E = total, so on
+- [x] **Frequency response engine arms normal** (fw 0.2.97, fw-arm, section 64: not taken as written. The engine keeps
+  FPGA auto with its CH1 trigger, 0x0E moved to the stop geometry's W, so a missing trigger gives a contiguous record
+  instead of a forced, spliced one; a trigger more than total words before W completes; spliced / cut records are
+  retaken.) Was: (fw-arm dispatched 15:36; fpga-gen11, 10-20): `bh_arm` arms FPGA auto with 0x0E = total, so on
   0x1532..0x153A a record that triggers at word t > 2 (every record since 0.2.89's CH1 trigger) is cut by the time-out at
   total + 2 and read across the stop (the 5 .. 15 "retried" per sweep on 0.2.89). Arm normal (`pc_hal_arm(..., normal 1)`),
   keep the engine's deadline as the safety net; on 0x153B the time-out no longer cuts a triggered record either way.

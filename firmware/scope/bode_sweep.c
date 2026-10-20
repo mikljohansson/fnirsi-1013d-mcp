@@ -4,6 +4,8 @@
 // its result is the handler of that request's phase. Host-tested: host_tests/test_bode_sweep.c (a DUT model behind bode_hw).
 //----------------------------------------------------------------------------------------------------------------------------------
 
+#include <string.h>
+
 #include "bode_sweep.h"
 
 //Quality gates (bode.py; mdB of code levels and of ratios). The measurement's own flags and their thresholds are in
@@ -1076,6 +1078,7 @@ int bode_step(bode_eng *e)
     bode_meas m;
 
     e->mstate = M_IDLE;
+    memset(&cap, 0, sizeof(cap));
 
     if(e->hw->read(e->hw->ctx, e->mp, e->mtotal, &cap))
     {
@@ -1136,7 +1139,8 @@ int bode_step(bode_eng *e)
       //that started on the time-out, bench 2026-10-20 cells_1235: leak -3 .. -36 dB in 5 of 8 such records, none
       //with the CH1 trigger the engine now arms with, pc_bode.c); the host's triggered captures never show it. fw 0.2.91:
       //and a record that ended on the time-out (no trigger: the kind that is joined), with the level from its own mean
-      if((bode_suspect(&m) || bode_incoherent(&m) || !cap.triggered) && !e->retake && !e->stop_req)
+      //fw 0.2.97: and a record the hardware layer marks as maybe spliced (a forced stop, a trigger cut by the time-out)
+      if((bode_suspect(&m) || bode_incoherent(&m) || !cap.triggered || cap.spliced) && !e->retake && !e->stop_req)
       {
         if(bode_incoherent(&m) && (e->n_leak < 0xFFFF))
           e->n_leak++;

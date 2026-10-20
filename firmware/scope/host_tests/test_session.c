@@ -521,10 +521,10 @@ static void test_auto_timeout_and_stop(void)
   setup(0x1532);
 
   //Auto mode with no trigger: DONE with 0x18 = 0 -> auto_timeout flag. Since fw 0.2.41 auto arms normal on Atlan
-  //bitstreams (the firmware keeps the time-out)
+  //bitstreams (the firmware keeps the time-out); fw 0.2.97: FPGA auto with the stop geometry on 0x1532..0x153A
   mock.polls_to_trigger = -1; mock.polls_to_done = 2;
   r = req(PC_CMD_ARM, 0, 0);
-  T_EQ(mock.arm_normal, 1);
+  T_EQ(mock.arm_normal, 0);
   r = wait_done(500);
   T_EQ(r.p[1], PC_ACQ_DONE); T_EQ(r.p[2] & 0x04, 0x04);
   r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
@@ -2350,7 +2350,8 @@ static void test_spectrum(void)
 }
 
 //Firmware auto mode (fw 0.2.41): no trigger and no FPGA DONE within max(100 ms, two record lengths) -> the firmware
-//forces the capture and reports it untriggered, even if 0x18 reads 1 afterwards
+//forces the capture and reports it untriggered, even if 0x18 reads 1 afterwards. fw 0.2.97: what 0x153B+ does; on
+//0x1532..0x153A see test_auto_stop_geometry
 static void test_fw_auto_timeout(void)
 {
   resp_t r;
@@ -2359,7 +2360,7 @@ static void test_fw_auto_timeout(void)
   T_EQ(pc_auto_deadline_ms(3000, 19), 100);            //10 MS/s, 0.3 ms record: the 100 ms floor
   T_EQ(pc_auto_deadline_ms(3000, 199999), 6000);       //1 kS/s, 3 s record: two records
 
-  setup(0x1532);
+  setup(0x153B);
   mock.polls_to_trigger = -1; mock.polls_to_done = -1;
   r = req(PC_CMD_ARM, 0, 0);
   T_EQ(r.h.status, 0); T_EQ(mock.arm_normal, 1);
@@ -2381,6 +2382,8 @@ static void test_fw_auto_timeout(void)
   T_EQ(r.p[1], PC_ACQ_DONE); T_EQ(r.p[2] & 0x05, 0x04);
   r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
   T_EQ(r.p[9] & 0x03, 0x02);
+  T_EQ(r.p[9] & PC_CAPTURE_F_SPLICED, 0);                     //0x153B: a forced stop reads the newest total words
+  T_EQ(mock.force_stops, 0);
 
   //A trigger in time: no force, triggered
   mock.forces = 0;
@@ -2390,6 +2393,147 @@ static void test_fw_auto_timeout(void)
   T_EQ(mock.forces, 0);
   r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
   T_EQ(r.p[9] & 0x03, 0x01);
+}
+
+//fw 0.2.97 (pc_decim.h "Auto-mode stop geometry", fpga/al3/README.md section 11): the stop word rule, and the host's
+//auto mode per bitstream
+static void test_auto_stop_geometry(void)
+{
+  resp_t r;
+  int k, forced = 0, sweep_ok = 1;
+  uint32_t w, min;
+
+  //The rule: the first W >= min with total + 4 <= W mod 8192 <= 8187
+  T_EQ(pc_auto_stop_word(3000, 1500, 8192), 3000);                         //no wrap yet, past the record: as asked
+  T_EQ(pc_auto_stop_word(100, 1500, 8192), 1504);                          //at least the record (+ margin)
+  T_EQ(pc_auto_stop_word(8192 * 3 + 100, 1500, 8192), 8192 * 3 + 1504);    //inside the record: to its end
+  T_EQ(pc_auto_stop_word(8192 * 3 + 8190, 1500, 8192), 8192 * 4 + 1504);   //at the ring end: into the next pass
+  T_EQ(pc_auto_stop_word(8192 * 3 + 8187, 1500, 8192), 8192 * 3 + 8187);
+  T_EQ(pc_auto_stop_word(10, 8190, 8192), 8190);                           //no room for a margin: 8190..8191
+  T_EQ(pc_auto_stop_word(8192 + 5, 8190, 8192), 8192 + 8190);
+  T_TRUE(pc_auto_stop_word(0xFFFFFFF0u, 1500, 8192) % 8192 >= 1504);       //within 0x0E's 32 bits
+  T_TRUE(pc_auto_stop_word(0xFFFFFFF0u, 1500, 8192) > 0xFFFFFFF0u - 8192);
+  T_EQ(pc_auto_stop_word(3000, 1000, 1024), 3052);                         //a 2^m segment slot: 952 < 1004
+
+  //A sweep: every W leaves 0 .. total - 1 to the last pass and overshoots by at most total + 8
+  for(k = 0; k < 20000; k++)
+  {
+    uint32_t tot = 80 + (uint32_t)(k * 37) % 8100;
+
+    min = (uint32_t)k * 4099u;
+    w   = pc_auto_stop_word(min, tot, 8192);
+
+    if((w < min) || (w % 8192 < tot) || (w - min > tot + 8))
+      sweep_ok = 0;
+  }
+  T_TRUE(sweep_ok);
+
+  //The cut check: the stop inside a triggered record (start = addr - pre) after its first word
+  T_EQ(pc_auto_cut(1000, 100, 2000, 8192 * 5 + 1500, 8192), 1);
+  T_EQ(pc_auto_cut(1000, 100, 2000, 8192 * 5 + 900, 8192), 0);             //at its start
+  T_EQ(pc_auto_cut(1000, 100, 2000, 8192 * 5 + 2900, 8192), 0);            //at its end
+  T_EQ(pc_auto_cut(50, 100, 2000, 8192 * 2 + 10, 8192), 1);                //the record wraps the ring end
+
+  T_EQ(pc_ms_to_words(100, 0, 0), 10000000u);                              //10 ns words at 200 MSa/s legacy
+  T_EQ(pc_ms_to_words(100, 199, 1), 100000u);                              //1 us samples at N 200
+  T_EQ(pc_words_to_ms(10000001, 0, 0), 101);                               //rounded up
+  T_EQ(pc_words_to_ms(0xFFFFFFFFu, 399999, 0), 0xFFFFFFFFu);               //clamped
+
+  T_EQ(pc_stop_kind(0x1432), PC_STOP_NONE);
+  T_EQ(pc_stop_kind(0x1532), PC_STOP_RING0); T_EQ(pc_stop_kind(0x153A), PC_STOP_RING0);
+  T_EQ(pc_stop_kind(0x153B), PC_STOP_NEWEST); T_EQ(pc_stop_kind(0x153F), PC_STOP_NEWEST);
+  T_EQ(pc_stop_kind(0x1632), PC_STOP_SPLICE); T_EQ(pc_stop_kind(0x1732), PC_STOP_SPLICE);
+  T_EQ(pc_stop_kind(0x9999), PC_STOP_NONE);
+
+  //0x153A, auto mode: FPGA auto (no normal arm), 0x0E = W - 2 with W at or after the 100 ms deadline and the record
+  //0 .. total - 1 in the last pass; no firmware force while the FPGA's time-out is ahead
+  setup(0x153A);
+  mock.polls_to_trigger = -1; mock.polls_to_done = -1;
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.arm_normal, 0);
+  w   = mock.arm_auto + PC_STOP_LAG;
+  min = pc_ms_to_words(pc_auto_deadline_ms(2 * (uint32_t)mock.arm_total, mock.fpga_divider), mock.fpga_divider, 0);
+  T_TRUE(w >= min); T_TRUE(w - min <= (uint32_t)mock.arm_total + 8); T_TRUE(w % 8192 >= mock.arm_total);
+
+  //The FPGA stops at W (0x14 = pretrigger) with an edge after the stop (0x18 = 1): untriggered, not spliced
+  mock.now += 10; pc_poll(&S, PC_CTX_MAIN);
+  mock.polls_to_trigger = 0; mock.polls_to_done = 0; mock.trigger_addr = mock.arm_pre;
+  mock.now += 1; pc_poll(&S, PC_CTX_MAIN);
+  T_EQ(mock.forces, 0);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[9] & 0x03, 0x02); T_EQ(r.p[9] & PC_CAPTURE_F_SPLICED, 0);
+  T_EQ(pc_get_u16(r.p + 12), 0);                                           //record start: ring word 0
+
+  //A real trigger (0x14 elsewhere) early in the capture: triggered, not spliced
+  mock.polls_to_trigger = 1; mock.polls_to_done = 3; mock.trigger_addr = (uint16_t)(mock.arm_pre + 777);
+  r = req(PC_CMD_ARM, 0, 0);
+  for(k = 0; k < 10; k++) { mock.now += 1; pc_poll(&S, PC_CTX_MAIN); }
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[9] & 0x03, 0x01); T_EQ(r.p[9] & PC_CAPTURE_F_SPLICED, 0);
+
+  //A trigger the time-out may have cut: done at W's time with W's position inside the record
+  mock.polls_to_trigger = -1; mock.polls_to_done = -1;
+  r = req(PC_CMD_ARM, 0, 0);
+  w = mock.arm_auto + PC_STOP_LAG;
+  mock.now += pc_words_to_ms(w, mock.fpga_divider, 0);
+  mock.polls_to_trigger = 0; mock.polls_to_done = 0;
+  mock.trigger_addr = (uint16_t)((w % 8192 + 8192 - 10 + mock.arm_pre) % 8192);   //record start 10 words before W
+  pc_poll(&S, PC_CTX_MAIN);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[9] & 0x03, 0x01); T_EQ(r.p[9] & PC_CAPTURE_F_SPLICED, PC_CAPTURE_F_SPLICED);
+
+  //The FPGA never stops (0x0E lost): the firmware's safety net after W writes 0x0E = 0 and flags the record
+  mock.polls_to_trigger = -1; mock.polls_to_done = -1; mock.trigger_addr = mock.arm_pre;
+  mock.forces = 0; mock.force_stops = 0;
+  r = req(PC_CMD_ARM, 0, 0);
+  w = mock.arm_auto + PC_STOP_LAG;
+  for(k = 0; k < 400 && !forced; k++)
+  {
+    mock.now += 1;
+    pc_poll(&S, PC_CTX_MAIN);
+    forced = mock.forces > 0;
+    if(forced) T_TRUE((uint32_t)k + 1 >= pc_auto_net_ms(pc_words_to_ms(w, mock.fpga_divider, 0)));
+  }
+  T_TRUE(forced); T_EQ(mock.force_stops, 1);
+  mock.now += 1; pc_poll(&S, PC_CTX_MAIN);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[9] & 0x03, 0x02); T_EQ(r.p[9] & PC_CAPTURE_F_SPLICED, PC_CAPTURE_F_SPLICED);
+
+#if PC_DEBUG
+  //A host FORCE (PC_DEBUG builds) on 0x153A: 0x0E = 0 too, and the record is flagged
+  mock.polls_to_trigger = -1; mock.polls_to_done = -1; mock.force_stops = 0;
+  r = req(PC_CMD_ARM, 0, 0);
+  r = req(PC_CMD_FORCE, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.force_stops, 1);
+  mock.now += 1; pc_poll(&S, PC_CTX_MAIN);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[9] & PC_CAPTURE_F_SPLICED, PC_CAPTURE_F_SPLICED);
+#endif
+
+  //The next clean capture is not flagged (the flag is per record)
+  mock.polls_to_trigger = 1; mock.polls_to_done = 3; mock.trigger_addr = (uint16_t)(mock.arm_pre + 777);
+  r = req(PC_CMD_ARM, 0, 0);
+  for(k = 0; k < 10; k++) { mock.now += 1; pc_poll(&S, PC_CTX_MAIN); }
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[9] & PC_CAPTURE_F_SPLICED, 0);
+
+  //Normal mode keeps its arm (0x0E is not moved)
+  set_trigger(0x08, 0, 0, 0, 1, 0, 0, 0, 0, &r);
+  T_EQ(r.h.status, 0);
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(mock.arm_normal, 1); T_EQ(mock.arm_auto, 2 * (uint32_t)mock.arm_total);
+  r = req(PC_CMD_STOP, 0, 0);
+
+  //EF2 keeps the firmware force, with the record flagged
+  setup(0x1632);
+  mock.polls_to_trigger = -1; mock.polls_to_done = -1; forced = 0;
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(mock.arm_normal, 1);
+  for(k = 0; k < 400 && !forced; k++) { mock.now += 1; pc_poll(&S, PC_CTX_MAIN); forced = mock.forces > 0; }
+  T_TRUE(forced); T_EQ(mock.force_stops, 0);
+  mock.now += 1; pc_poll(&S, PC_CTX_MAIN);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[9] & PC_CAPTURE_F_SPLICED, PC_CAPTURE_F_SPLICED);
 }
 
 static void test_fel_reset_stall(void)
@@ -3096,6 +3240,9 @@ static void test_seq_segments(void)
   T_EQ(r.h.status, 0); T_EQ(mock.seq_arms, 1); T_EQ(mock.seq_cfg.mode, 1); T_EQ(mock.seq_cfg.count, 32);
   T_EQ(mock.seq_cfg.m, 7); T_EQ(mock.seq_cfg.holdoff_ns, 1001); T_EQ(mock.arm_pre, 16); T_EQ(mock.arm_total, 120);
   T_EQ(mock.arm_normal, 0);
+  //fw 0.2.97: 0x0E = 240 (the total samples) stops an untriggered segment at slot word 242 mod 128 = 114 < 120, so
+  //its record 0 .. 119 would be spliced; moved to W = 248 (slot word 120): 0x0E = 246
+  T_EQ(mock.arm_auto, 246);
 
   //Table: segment s triggered at s x 100 us (20000 x 5 ns), offset 7 s mod 128; segment 5 untriggered, 10 never written
   for(s=0;s<32;s++)
@@ -3205,7 +3352,7 @@ static void test_seq_segments(void)
   T_EQ(r.h.status, 0); T_EQ(r.p[0], 0);
   mock.polls_to_done = 3; mock.polls_to_trigger = 2;
   r = req(PC_CMD_ARM, 0, 0);
-  T_EQ(r.h.status, 0); T_EQ(mock.seq_cfg.mode, 0); T_EQ(mock.arm_normal, 1);
+  T_EQ(r.h.status, 0); T_EQ(mock.seq_cfg.mode, 0); T_EQ(mock.arm_normal, 0);    //fw 0.2.97: FPGA auto, the stop geometry
   r = wait_done(100);
   T_EQ(mock.trace_builds, 1);
   r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
@@ -3734,6 +3881,7 @@ int main(void)
   test_read_screen();
   test_cal_probe();
   test_fw_auto_timeout();
+  test_auto_stop_geometry();
   test_spectrum();
   test_decim_math();
   test_decim_protocol();

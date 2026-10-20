@@ -18,6 +18,16 @@
 #define PC_AUTO_MIN_MS    100
 uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 
+//fw 0.2.97 (pc_decim.h "Auto-mode stop geometry"): on AL3 0x1532..0x153A an auto capture arms the FPGA's own auto mode
+//with 0x0E = W - 2 (pc_auto_stop_word for the deadline), and the firmware's own time-out is a safety net this much after
+//the FPGA's stop (plus an eighth of it); a record it has to force is flagged "may be spliced"
+#define PC_AUTO_NET_MS    50
+uint32_t pc_auto_net_ms(uint32_t stop_ms);
+
+//GET_CAPTURE_INFO flags bit 6 (fw 0.2.97): the record may be joined from two passes of the ring (a stop the firmware
+//forced on a bitstream that latches 0x14 = pretrigger, or a trigger the FPGA's auto time-out may have cut)
+#define PC_CAPTURE_F_SPLICED  0x40
+
 #ifndef PC_FW_VERSION
 #if PC_FIFO_MAP == 1
 #define PC_FW_VERSION_MAP "-m1"         //alternative USB FIFO layout (pc_transport.h)
@@ -29,7 +39,7 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #else
 #define PC_FW_VERSION_MMU ""
 #endif
-#define PC_FW_VERSION     "0.2.96" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
+#define PC_FW_VERSION     "0.2.97" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
 #endif
 
 //The build identity record (build_id.c, pc_ident.h; host tests: mock_hal.c)
@@ -157,7 +167,8 @@ typedef struct
   uint32_t   capture_id;
   uint32_t   seq;               //settings_seq at arm, PC_SEQ_INVALID when it changed before DONE
   uint8_t    origin;
-  uint8_t    flags;             //bit0 triggered, bit1 auto timeout, bit2/3 overload CH1/CH2, bit4 settings changed
+  uint8_t    flags;             //bit0 triggered, bit1 auto timeout, bit2/3 overload CH1/CH2, bit4 settings changed,
+                                //bit5 EXT edge, bit6 may be spliced (PC_CAPTURE_F_SPLICED)
   uint16_t   trigger_addr;
   uint16_t   capture_start;
   uint8_t    timeperdiv;        //0xFF: raw divider
@@ -251,6 +262,10 @@ typedef struct
   uint8_t    fw_auto;           //fw 0.2.41: host auto mode armed normal, firmware time-out at auto_ms
   uint8_t    host_forced;       //the firmware time-out ended it (untriggered)
   uint32_t   auto_ms;
+  uint8_t    auto_geom;         //fw 0.2.97: armed FPGA auto with the stop geometry (PC_STOP_RING0), stop at auto_stop
+  uint32_t   auto_stop;         //  words written at the FPGA's time-out stop (W = 0x0E + 2)
+  uint32_t   auto_stop_ms;      //  the time W takes
+  uint8_t    cap_spliced;       //fw 0.2.97: this record may be spliced (GET_CAPTURE_INFO flags bit 6)
   uint8_t    armed_once;
   uint32_t   capture_id;
   uint32_t   arm_ms;

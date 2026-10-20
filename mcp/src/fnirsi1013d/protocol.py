@@ -926,6 +926,9 @@ class CaptureInfoHeader(Payload):
     F_SETTINGS_CHANGED: ClassVar[int] = 0x10
     #: 1.4: an EXT edge was seen during this capture
     F_EXT_EDGE: ClassVar[int] = 0x20
+    #: fw 0.2.97 (protocol 1.24, spare bit): the record may be joined from two passes of the ring (a stop the firmware
+    #: forced on FPGA 0x1532..0x153A / EF2 / EP4, or a trigger the FPGA's auto time-out may have cut)
+    F_MAYBE_SPLICED: ClassVar[int] = 0x40
 
 
 @dataclass

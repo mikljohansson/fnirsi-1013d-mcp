@@ -8,7 +8,14 @@
 //     read 0x05 ready once an edge has passed in reset, and the trigger read address loaded from the 0x0B register only on
 //     write clock edges while in reset (0x1532..0x1536), plus on the first edge after the release (0x1537+, `ssr_d`)
 //     (finding 2);
-//   - every bus strobe takes a random 41..298 ns (the testbench's strobe periods), so each arm starts at a random phase.
+//   - every bus strobe takes a random 41..298 ns (the testbench's strobe periods), so each arm starts at a random phase;
+//   - fw 0.2.97, with `capture` set: the capture logic of fpga/al3/README.md section 11 (legacy layout, one word per write
+//     clock edge after the release): each word written carries its write index (lanes 0x20..0x23 = bytes 0..3 of it), the
+//     ring wraps, a trigger at edge `trig_at` (after the pretrigger), the stop when the post-trigger region is complete
+//     or, in auto mode (0x1A = 0), when the words written exceed 0x0E + 1 (W = 0x0E + 2: the forced stop too, since
+//     0x0E is long past then). 0x14 per bitstream: 0x1532..0x153A latch the pretrigger on a time-out stop and let it cut
+//     a triggered capture, and an edge after the stop still sets 0x18; 0x153B+ latch W - total + pretrigger, end only
+//     untriggered captures and take no trigger after the stop. Reads 0x0A (done), 0x18 (triggered), 0x14 (13 bit).
 // Every completed write is recorded in a trace (command, value) for the order checks, and passed to fpga_bus_note_write
 // as fpga_control.c's trace does on the scope (fw 0.2.87: the values the FPGA holds, fpga_bus_wr.held).
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -53,6 +60,20 @@ typedef struct
   uint16_t pre_applied;             //trigger read address preload actually used by the capture
   uint8_t  ready_never;             //0x05 never reads 1 (a hung FPGA)
   uint32_t ready_polls;
+
+  //fw 0.2.97 capture logic (capture = 1 enables it)
+  uint8_t  capture;
+  uint32_t reg_0e;                  //auto time-out (words)
+  uint8_t  reg_1a;                  //1 normal, 0 auto
+  uint8_t  released;                //a capture runs or ran since the last release
+  uint8_t  we;                      //write enable
+  uint32_t n;                       //words written since the release
+  uint32_t e;                       //write clock edges since the release
+  int64_t  trig_at;                 //edge index of the trigger crossing (-1 none)
+  uint8_t  triggered;               //0x18
+  uint32_t trig_word;               //write index of the trigger (when it was taken while writing)
+  uint16_t taddr;                   //0x14
+  uint32_t stop_n;                  //W, words written at the stop
 
   fm_write trace[FM_TRACE_MAX];
   uint32_t ntrace;
