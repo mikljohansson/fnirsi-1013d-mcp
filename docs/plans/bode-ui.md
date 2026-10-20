@@ -297,13 +297,19 @@ Details that follow from the run-state rule:
      end; the rule above turns a bouncing pass into a stop instead of a RUN on a span taken from it. Where the fault
      could be the circuit itself (a DUT that oscillates, a notch deeper than 20 dB between two points, a tank whose
      peak falls on one overview point) the user guide says so; the 50-character line names the likelier wiring
-     cause. FLAT stays a result, not a failure: "No corner ..." and RUN at the kept span.
+     cause. FLAT stays a result, not a failure: "No corner ...", one sweep at the kept span, STOP.
 3. **Settle** from Q for a resonance: Normal for Q <= 7, Resonant for Q <= 34, High Q above. Otherwise Normal.
    **CH2 range** becomes Auto. **Points** stay the user's.
-4. **Then RUN**, as the Scope's auto setup ends in RUN (`scope_do_auto_setup_*` sets `runstate = 1`). The table and the
-   cards come from the first real sweep.
+4. **Then one sweep, then STOP** (fw 0.2.86, owner 2026-10-20 11:47, section 10; up to 0.2.85 AUTO SET ended in RUN as
+   the Scope's auto setup does). AUTO SET runs one single sweep at the found span, Settle and CH2 range, with the thru
+   applied as before, and returns to STOP with the chart and the cards standing; the table and the cards come from that
+   sweep. The RUN/STOP button stays red "STOP" (running) through the overview, the passes and this sweep, then green
+   "RUN" with the chip STOP; the AUTO SET button reads "Auto..." until the sweep ends. A second tap, STOP or the
+   Single sweep row's "Stop sweep" during it end it as a single sweep: after the capture in progress, the table keeps
+   what it has. RUN stays the user's explicit continuous mode; Single sweep repeats one sweep. READ_BODE's view bit 1
+   ("RUN repeats") reads 0 throughout.
 5. Changed Start or Stop makes a thru stale. Its card turns amber and the Thru warning appears.
-6. **Cancel**: a second tap during the overview aborts it with `bode_stop(e, 1)`, restores the previous table and
+6. **Cancel**: a second tap during the overview (or a pass) aborts it with `bode_stop(e, 1)`, restores the previous table and
    settings, and returns to STOP. The note reads "Auto set cancelled: settings kept". **fw 0.2.71**: the previous table
    is a copy taken when AUTO SET starts (`bode_snap`: plan, points, settings, state; about 25 KB); STOP, a second tap and
    leaving the mode all give it back; an error during a pass (a timeout, the readout fault) keeps the pass's points

@@ -42,7 +42,9 @@ time base and RUN/STOP as they were. While no sweep runs, the post carries your 
 generator chip shows); a sweep takes it over and gives it back when it ends.
 
 AUTO SET runs an overview from 100 Hz to 10 MHz and, for a sharp resonance, up to three finer passes, then sets the
-span and starts RUN. If the result is not consistent it stops instead, keeps your settings and says why on the top
+span, runs one sweep at it and stops, with the chart and the cards showing that sweep (it never starts RUN: press RUN
+yourself to repeat sweeps). The AUTO SET button reads "Auto..." until that sweep ends; a second tap or STOP ends it
+early and keeps the points measured so far. If the result is not consistent it stops instead, keeps your settings and says why on the top
 line. "Auto set: no consistent response. Check wiring" usually means a loose probe or ground clip, but the circuit
 itself can cause it: a device that oscillates, a notch deeper than 20 dB that falls on one point, or a response that
 changes between passes. "Auto set: peak not confirmed: sweep by hand" means a resonance too sharp or too isolated for

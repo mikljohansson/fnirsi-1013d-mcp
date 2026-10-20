@@ -3965,7 +3965,8 @@ What landed:
 Notes for a successor:
 - Inference: the 41-sweep "loop" the owner saw on 0.2.83 was AUTO SET ending in RUN on a span set from a bad overview,
   then RUN repeating (each sweep re-ranging CH1 / CH2). The engine itself caps CH2 switches at six per sweep. A
-  *successful* AUTO SET still ends in RUN by design (bode-ui.md 3.2 step 4).
+  *successful* AUTO SET still ends in RUN by design (bode-ui.md 3.2 step 4). Superseded by fw 0.2.86 (addendum below):
+  one sweep at the found settings, then STOP.
 - A real tank whose overview point lands exactly on f0 (Q above about 30) reads as absurd: the point is dropped, its
   neighbour becomes the peak without a valid index neighbour on that side and AUTO SET says "peak not confirmed: sweep
   by hand". Accepted per the owner's rule; the guide text (docs/guide/screens.md) names it.
@@ -3991,13 +3992,32 @@ RC 1 kOhm / 15 nF on the post, wiring A, x1 probes)** - `#VER fw=0.2.83,...` (nu
    chip shows it; hardware-status 10-20 11:16), the warning reads "CH1 level low at 2.5 V/div: sweep again" (not the
    DUT text). Stop 10 MHz with the x1 probe: points above 2 MHz flagged ch1_low show "CH1 level low above 2 MHz: the x1
    probe rolls off".
-4. AUTO SET on the RC: ends on about 1 kHz .. 200 kHz in RUN as before. If a bad first record is provoked (AUTO SET right
+4. AUTO SET on the RC: ends on about 1 kHz .. 200 kHz after one sweep at that span, in STOP (fw 0.2.86, addendum). If a bad first record is provoked (AUTO SET right
    after entering the mode, or after changing CH1's range in the Scope view), AUTO SET ends in STOP with "Auto set: no
    consistent response. Check wiring" (or lands on the right span if only a moderate error), never RUN on a wrong span
    and never repeated sweeps. If not provoked, the host test `test_auto_span_absurd` covers it.
 5. AUTO SET failures: CH2 tip on the ground clip: "Auto set: no response: CH2 tip on the DUT output?" and STOP; CH1 tip
    off the post (on the clip): "Auto set: CH1 level low: CH1 tip on the DUT input?" (or no response), STOP, settings
-   unchanged in CTRL > Sweep. Divider: "No corner ..." and RUN, as before.
+   unchanged in CTRL > Sweep. Divider: "No corner ...", one sweep at the kept span, STOP (fw 0.2.86).
 Bug indicators: the plot drawn over the open panel; the panel's row not following the sweep; the button red after the
 sweep ended; a sweep that pauses while a panel is open; the generator chip and the pin disagreeing after a sweep;
 AUTO SET ending in RUN after a failure warning; any AUTO SET running more than four passes.
+
+**Addendum, fw-fr4 (fw 0.2.86 provisional, protocol 1.24 unchanged): AUTO SET ends in STOP, never RUN** (owner
+2026-10-20 11:47, bode-ui.md 3.2 step 4 and section 10). Branch `fw-fr4` from main ec619c4; commit a119035 (bode_view.c,
+bode_ui.c/h, test_ui.c), then docs. PC_FW_VERSION not bumped. Host tests green, GCC 10 build clean. **Not benched.**
+- `bv_auto_finish`'s success path (span, FLAT) ends with `bv_start(1, 0)`, a single sweep at the found settings with the
+  thru's Apply back, and sets `bv.as_final` while it runs; `bv.autoset` is 0 for it, so the cards, the thru and the
+  Single sweep row treat it as an ordinary single sweep (red "Stop sweep" / "n / N"). `bode_view_auto_running` (the
+  "Auto..." label, `pc_glue_autoset_running`) is `bu_auto_busy(autoset, as_final, running)`. The service's sweep end
+  goes through `bu_after_sweep(run, single, done)`: single, so STOP; it clears `as_final`.
+- Cancelling the final sweep (second AUTO SET tap, RUN/STOP, "Stop sweep") sets RUN off; the service stops after the
+  capture in progress and the table keeps what it has, no snapshot restore (that stays for the overview and passes).
+  Leaving the mode or a host BODE_CTRL (`bv_auto_drop`) clears `as_final`.
+- State sequence: tap AUTO SET -> RUN/STOP button red "STOP", chip RUN, "Auto...", overview (Sweep card "auto n/20")
+  -> passes 2..4 if a sharp band -> verdict: fail = STOP with the warning; else span / Settle / CH2 Auto set, one
+  sweep (cards "sweeping", "Auto..." still) -> STOP: button green "RUN", chip STOP, "AUTO SET", chart and cards
+  standing. READ_BODE view bit 1 (`bu_view_bits`) is 0 throughout, since every AUTO SET sweep is single.
+- Bench: the RC AUTO SET walk-through above (step 4: one sweep then STOP, no further sweeps, relays quiet); a second tap
+  during the final sweep (button "Auto..." until the capture in progress ends, then STOP with the partial table); RUN
+  after AUTO SET repeats at the found span; READ_BODE view bits = 1 (bit 1 clear) after AUTO SET.
