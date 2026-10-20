@@ -523,6 +523,10 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
+- fpga-gen12 (Fable, dispatched 15:58): make 0x153B flash-ready: the two residual tb_fir / tb_seg mismatch windows (artefact
+  or real), the full 13-step run on two seeds, a rebuild only if zaklad.v changes, the handoff "0x153B flash-ready" with the
+  flash-session checklist. fpga-gen11 retired at 522k tokens (merged ac1f2ab).
+
 - fpga-gen11 (Fable, reported 15:35, branch fpga-gen11 pushed, merge after its last testbench run): **cause of the spliced
   time-out records found.** 0x1532..0x153A latch 0x14 = pretrigger on an untriggered time-out stop (record = ring words
   0..total-1), contiguous only when the stop lands in the first ring pass (Atlan's 0x0E = total); our auto mode forces 0x1A = 0
