@@ -31,6 +31,20 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.91 (provisional, not tagged in pc_cmds.h; protocol 1.24, BODE_CTRL answer 48 bytes)
+
+- Frequency response: one bad record no longer moves a channel to a coarser range (3b363b2). CH2 steps up only when a
+  second record on the same range clips too. In the check after the pre-scan, a clip on an off-centre record moves the
+  offset instead of the range. Rail samples on a small signal never leave a channel at 5 V/div; on the bench, the first
+  sweep after loading had ended with both channels on 5 V/div. A step down that failed is remembered with the range
+  plan and not tried again on the plan's later sweeps.
+- Frequency response: captures trigger at CH1's expected mid-level instead of code 128, where the post's signal could
+  sit below the trigger level during the pre-scan (3b363b2). A capture that ends on the auto time-out is taken again
+  with the trigger at that record's own mid-level.
+- BODE_CTRL's answer grows to 48 bytes with the latest sweep's capture statistics (3b363b2, b52ca2a). It counts the
+  captures, how many ended on the time-out, and how many were taken again for leak or another reason; mcp
+  `BodeCtrlResp`, docs/protocol.md row 60.
+
 #### 0.2.90 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: one bad record at the start of a sweep no longer leaves a channel on too coarse a range for the

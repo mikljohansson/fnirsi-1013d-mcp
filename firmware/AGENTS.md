@@ -4335,3 +4335,66 @@ Commits: 802cc4a (engine + tests), then docs. Host tests green (test_bode_sweep 
    - any sweep with r1 1 or 2 on the RC;
    - r2 constant on a coarse range over the whole span;
    - a plan sweep (0 switches) whose rows differ from the previous sweep's r1 / r2.
+
+## 60. fw-eng4: steps up confirmed, the trigger at CH1's mean, capture statistics (fw 0.2.91 provisional)
+
+Branch `fw-eng4` from main 312c49f (fw 0.2.90). Brief: the coordinator's 0.2.90 bench (hardware-status 13:14):
+- the first sweep after the load ended with both channels on 5 V/div;
+- a fresh sweep put CH2 on 5 V/div at 780 Hz..1.2 kHz;
+- a 2 between 4s at points 17..19;
+- 7..14 retakes per sweep although the engine arms on CH1.
+
+Commits: 3b363b2 (engine, pc_bode, view, tests), b52ca2a (protocol row 60, mcp `BodeCtrlResp`), then docs.
+PC_FW_VERSION not bumped. Protocol: no number change, and the BODE_CTRL answer grows from 40 to 48 bytes (a layout
+addition; hosts and older firmware tolerate both). Host tests green (test_bode_sweep 1840), mcp pytest
+test_bode_device / test_protocol and the CI ruff selection green, GCC 10 clean. **Not benched.**
+
+**(a) No range change on one record.**
+- Points: a CH2 clip or saturated record is measured again on the same range (PH_CLIP_AGAIN, also in fresh sweeps
+  now), and a repeated up step (PH_UP_POINT) is confirmed the same way. `clip_again` resets at every step up.
+- The pre-scan's check, clip on an off-centre record: the record is re-centred instead of stepped up (its peak fits 85 %
+  once centred).
+- The pre-scan's check, a clip twice: steps up. Only a clip with at least 32 codes of tone behind it (REAL_CLIP_MDB)
+  bars the range for the way back, so rail samples on a small tone, even twice, cannot leave a channel at 5 V/div; the
+  next clean record steps it back (`finer_range`).
+- VERIFY_MAX 8, so the last range is judged.
+- A failed step down (a clip on the finer range) and a saturated range go into the plan's `rp_bad_down`. Plan sweeps
+  start with it as `bad_down` and do not retry the step every sweep: the test with the post at 0..3 V showed one switch
+  per plan sweep before.
+
+**(b) Diagnostics.**
+- The engine counts per sweep (from `bode_start`) its generator-on captures, those that ended without a trigger
+  (`bode_cap.triggered`, set by pc_bode from `pc_hal_acq_poll`'s trigger flag seen during the capture; FORCE counts as
+  untriggered), the records taken again for CH1 leak, and those taken again for another reason (suspect or time-out).
+- BODE_CTRL answer bytes 40..47 (u16 each; `bode_capture_stats`); mcp `BodeCtrlResp.captures / timeouts /
+  leak_retakes / other_retakes`.
+- If `timeouts` stays near `captures`, the engine's CH1 trigger does not reach the FPGA (look at 0x15 / 0x16 / 0x17 in
+  a bus trace).
+- GET_STATUS's fpga_triggered describes the host's capture state, not the engine's.
+
+**(c) The trigger level.**
+- `trig_code` (bode_sweep.c) is CH1's expected record mean: the code of 0 V on CH1's range and offset (128 - dcoffset x
+  100 / dc_shift_value) plus CH1's last measured DC (`v1_uv`, kept across sweeps; 0 V before the first measurement
+  since boot). `bode_hw.arm` takes it; `bh_trigger(level)` places the marker when the derived level is more than 3
+  codes off.
+- A generator-on record that ended on the time-out is taken again (the level by then comes from that record's own mean).
+- The FPGA auto time-out is twice the record (it was one record), so a trigger has the record's periods to arrive.
+- Inference: on the bench pre-scan (2.5 V/div, offset 0) the post's signal sat at codes 128..143. A level of 128 was
+  its bottom edge, so most pre-scan records ended on the time-out, i.e. the joined kind.
+- The first pre-scan after boot still uses 0 V (code 128 at offset 0); its retake corrects the level.
+
+**Bench (owner, coordinator on COM10; FEL load, 0x153A, RC on the post, wiring A, x1)**
+1. Right after the load: one sweep 500 Hz .. 100 kHz / 20, then BODE_CTRL action 0.
+   - Bytes 40..47: captures about 25..35, timeouts 0..1 (the first pre-scan), leak retakes 0..2.
+   - Rows: r1 3 everywhere, r2 monotonic; no 5 V/div anywhere.
+2. RUN ten sweeps at 100 Hz .. 1 MHz / 25. Read BODE_CTRL after each.
+   - Switches 2 then 0.
+   - Timeouts 0, leak retakes 0..1 per sweep, retried 0..2 per sweep.
+   - No 2 between 4s.
+3. If timeouts stay high: report the counts and a bus trace of one arm (the trigger registers); the engine's trigger
+   is then not effective and fpga-gen11's time-out record fix decides.
+Bug indicators:
+- r1 / r2 0 (5 V/div) on the RC;
+- the trigger chip redrawn at every point (the level moving: CH1 offset changes);
+- timeouts equal to captures;
+- the switch count not 0 on plan sweeps of an unchanged RC.
