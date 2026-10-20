@@ -96,6 +96,11 @@ def detect_kind(arrays: dict[str, np.ndarray], meta: dict[str, Any]) -> str:
     raise ReportError(f"unknown result (arrays {sorted(arrays)[:8]}): not a file saved by the scope tools")
 
 
+def _num(x: Any) -> float:
+    """A table number; None (a point without H, e.g. a dead CH1) is NaN."""
+    return math.nan if x is None else float(x)
+
+
 def load_result(path: str | Path) -> Result:
     """Load an ``.npz`` written by the server (``allow_pickle`` off: safe for files of unknown origin)."""
     p = Path(path)
@@ -137,8 +142,8 @@ def _load_bode_json(p: Path) -> Result:
     from .bode import BAD_FLAGS
 
     arrays = {"f_actual": np.array([float(t["f_actual"]) for t in table]),
-              "mag_db": np.array([float(t["mag_db"]) for t in table]),
-              "phase_deg": np.array([float(t["phase_deg"]) for t in table]),
+              "mag_db": np.array([_num(t["mag_db"]) for t in table]),
+              "phase_deg": np.array([_num(t["phase_deg"]) for t in table]),
               "valid": np.array([not set(t.get("flags") or []) & BAD_FLAGS for t in table])}
     return Result(p, "bode", arrays, d, d)
 

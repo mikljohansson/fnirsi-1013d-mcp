@@ -63,6 +63,13 @@ RELAY_SETTLE_S = 0.05
 
 # quality gates (design 3.3, 3.5, 3.6, section 4 warnings)
 CH1_LOW_CODES = 20.0  # CH1 fundamental below this (codes peak): "ch1_low"
+#: CH1 fundamental below this (codes peak) or a CH1 record flatter than FLAT_STD_CODES: no stimulus to divide by;
+#: the point is retaken once, then flagged ch1_low + incoherent with H = NaN
+CH1_MIN_CODES = 0.5
+#: a record whose standard deviation is under this (codes) holds no tone worth measuring: a stuck or saturated ADC
+#: record (bench 2026-10-20: the first decimated record after a rate / range change on FPGA 0x153A was one saturated
+#: value), retaken once
+FLAT_STD_CODES = 1.0
 CH2_SMALL_CODES = 3.0  # CH2 fundamental below this: INL dominates (+-1 dB): "ch2_small"
 NEAR_FLOOR_DB = 20.0  # CH2 less than this above the background in its bin: "near_floor"
 LOW_SNR_DB = 20.0  # CH2 fundamental less than this above the record's noise per bin: "low_snr"
@@ -348,6 +355,8 @@ def residual_noise(x: np.ndarray, periods: float) -> float:
 
 
 def db(x: float) -> float:
+    if math.isnan(x):
+        return math.nan
     return 20.0 * math.log10(x) if x > 0 else -math.inf
 
 
@@ -387,16 +396,40 @@ class Measurement:
     fir: bool = False
     #: set by the runner: CH2's tone vanished after a range change at the same frequency (COLLAPSE_RATIO)
     collapsed: bool = False
+    #: standard deviation of the records in codes (inf: not computed)
+    std1: float = math.inf
+    std2: float = math.inf
+    #: set by the runner: this is the retake of a flat / dead record (``BodeRunner._measure``)
+    retaken: bool = False
+
+    @property
+    def flat1(self) -> bool:
+        """CH1's record is (nearly) constant: a stuck or saturated ADC record, or no stimulus at all."""
+        return self.std1 < FLAT_STD_CODES
+
+    @property
+    def ch1_dead(self) -> bool:
+        """No usable CH1 tone to divide by (H is NaN)."""
+        return self.flat1 or not self.codes1 >= CH1_MIN_CODES
+
+    @property
+    def suspect(self) -> bool:
+        """Worth one retake: CH1 flat or without a tone, or CH2 constant (the 0x153A first-record artefact looks
+        like either; a real CH2 overload stays flat on the retake)."""
+        return self.ch1_dead or self.std2 < FLAT_STD_CODES and self.ac2 < FLAT_CODES
 
     @property
     def flat2(self) -> bool:
         """CH2 saturated: a constant record with no tone, or a tone that vanished on this range (the front end in
-        front of the offset injection pinned by a DC level beyond the range's window)."""
+        front of the offset injection pinned by a DC level beyond the range's window). Not while CH1 is flat too:
+        both records constant is a stuck readout (the 0x153A first-record artefact), not a CH2 overload."""
+        if self.flat1:
+            return False
         return self.collapsed or (self.ac2 < FLAT_CODES and self.codes2 < CH2_SMALL_CODES)
 
     @property
     def h(self) -> complex:
-        return self.x2 / self.x1 if self.x1 else complex("nan")
+        return complex("nan") if self.ch1_dead or not self.x1 else self.x2 / self.x1
 
     @property
     def snr2_db(self) -> float:
@@ -438,26 +471,28 @@ def measure_pair(v1: np.ndarray, v2: np.ndarray, pp: PointPlan, *, vpl1: float, 
     half_rel = half_db = half_deg = None
     if pp.halves and L >= 2 * pp.p:
         h2 = L // 2
-        ha = tone(b[:h2], f, fs, win) / tone(a[:h2], f, fs, win)
-        hb = tone(b[h2:], f, fs, win) / tone(a[h2:], f, fs, win)
+        ta, tb = tone(a[:h2], f, fs, win), tone(a[h2:], f, fs, win)
+        floor = CH1_MIN_CODES * vpl1  # a flat or dead CH1 half has nothing to divide by (bench 2026-10-20)
+        ha = tone(b[:h2], f, fs, win) / ta if abs(ta) >= floor else 0j
+        hb = tone(b[h2:], f, fs, win) / tb if abs(tb) >= floor else 0j
         if ha and hb:
             half_rel = abs(hb / ha - 1)
             half_db = db(abs(hb) / abs(ha))
             half_deg = wrap_deg(math.degrees(np.angle(hb / ha)))
 
-    def exc(codes: np.ndarray | None, v: np.ndarray, vpl: float) -> tuple[float, float]:
+    def exc(codes: np.ndarray | None, v: np.ndarray, vpl: float) -> tuple[float, float, float]:
         if codes is None:
             c = 128.0 + (v - v.mean()) / vpl
         else:
             c = np.asarray(codes[:L], np.float64)
-        return float(np.max(np.abs(c - c.mean()))), float(c.mean())
+        return float(np.max(np.abs(c - c.mean()))), float(c.mean()), float(c.std())
 
-    e1, c1 = exc(codes1, a, vpl1)
-    e2, c2 = exc(codes2, b, vpl2)
+    e1, c1, sd1 = exc(codes1, a, vpl1)
+    e2, c2, sd2 = exc(codes2, b, vpl2)
     cl1 = bool(np.any(np.asarray(clipped1)[:L])) if np.ndim(clipped1) else bool(clipped1)
     cl2 = bool(np.any(np.asarray(clipped2)[:L])) if np.ndim(clipped2) else bool(clipped2)
     return Measurement(x1, x2, n1, n2, leak, half_rel, half_db, half_deg, cl1, cl2, abs(x1) / vpl1, abs(x2) / vpl2,
-                       float(a.mean()), float(b.mean()), e1, e2, c1, c2, filter_effective, fir)
+                       float(a.mean()), float(b.mean()), e1, e2, c1, c2, filter_effective, fir, std1=sd1, std2=sd2)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -503,8 +538,10 @@ class PointResult:
 
     def row(self) -> dict[str, Any]:
         pp = self.plan
+        mag, ph = self.mag_db, self.phase_deg
         return {"f_requested": round(pp.f_requested, 6), "f_actual": round(pp.f_actual, 6),
-                "mag_db": round(self.mag_db, 4), "phase_deg": round(self.phase_deg, 3),
+                "mag_db": round(mag, 4) if math.isfinite(mag) else None,
+                "phase_deg": round(ph, 3) if math.isfinite(ph) else None,
                 "v1_vrms": round(abs(self.x1) / math.sqrt(2), 6), "v2_vrms": round(abs(self.x2) / math.sqrt(2), 6),
                 "ch1_volts_per_div": self.ch1_volts_per_div, "ch2_volts_per_div": self.ch2_volts_per_div,
                 "sample_rate": pp.sample_rate, "filter": self.filter_effective, "fir": self.fir,
@@ -717,6 +754,10 @@ class ThruCal:
             p.flags.append("cal_flagged")
 
 
+def _usable(h: complex) -> bool:
+    return bool(h) and math.isfinite(abs(h))
+
+
 # ---------------------------------------------------------------------------------------------------------
 # Hardware runner
 
@@ -775,6 +816,9 @@ class BodeRunner:
         self._ref2: tuple[float, Measurement] | None = None
         #: the generator went off or on: the DUT's DC state changed, the next point gets the first-point settle
         self._disturbed = True
+        #: records retaken because they were flat / had no CH1 tone, and the frequencies still flat after the retake
+        self.flat_retakes = 0
+        self._flat_twice: list[float] = []
 
     @staticmethod
     def _parse_ch2(v: str | float | int) -> tuple[str, float | None]:
@@ -949,6 +993,20 @@ class BodeRunner:
             return cap
 
     def _measure(self, pp: PointPlan, settle_periods: float) -> Measurement:
+        """One analysed capture. A flat record or one without a CH1 tone (``Measurement.suspect``: the 0x153A
+        first-record artefact, a stuck readout) is retaken once; a CH1 still dead after that is recorded for the
+        caveat (``_flat_twice``) and its point carries ch1_low + incoherent and H = NaN, never a traceback."""
+        ms = self._measure_once(pp, settle_periods)
+        if not ms.suspect:
+            return ms
+        self.flat_retakes += 1
+        ms = self._measure_once(pp, settle_periods)
+        ms.retaken = True
+        if ms.ch1_dead and pp.f_actual not in self._flat_twice:
+            self._flat_twice.append(pp.f_actual)
+        return ms
+
+    def _measure_once(self, pp: PointPlan, settle_periods: float) -> Measurement:
         self.sleep(pp.settle_s(settle_periods) + pp.filter_settle_s())
         cap = self._capture(pp)
         c1, c2 = cap.channels["CH1"], cap.channels["CH2"]
@@ -997,6 +1055,11 @@ class BodeRunner:
             v_pk = max((ms.ac1, ms.ac2)[c], 1.0) * vpl  # peak distance from the record mean, volts
             if c == 1 and self.ch2_mode == "fixed":
                 r = self._fixed_ch2_range()
+            elif c == 0 and ms.ch1_dead:
+                r = 1  # nothing to range on (flat twice or no tone): stay on the pre-scan's range, caveat below
+                self.caveats.append(f"the pre-scan's CH1 record at {pp.f_actual:.6g} Hz was flat or had no tone twice "
+                                    "(a stuck or saturated ADC record, or no stimulus on CH1): CH1 stays on 2.5 V/div "
+                                    "x probe; check the CH1 probe on the DUT input and scope_health")
             else:
                 r = 1
                 for cand in range(1, 6):
@@ -1009,6 +1072,8 @@ class BodeRunner:
         # verify: a clip steps back one range, an off-centre record re-centres
         for _ in range(4):
             ms = self._measure(pp, self.settle_periods)
+            if ms.ch1_dead:
+                break  # flat even after the retake: nothing to range on, keep the ranges
             changed = False
             over = self.range[1] != 1 and self._check(ref, ms).flat2
             if over and self.ch2_mode == "fixed":
@@ -1061,8 +1126,11 @@ class BodeRunner:
             self.s.set_trigger(pretrigger_samples=0, total_samples=rec)
             self._cur_total = rec
         self.sleep(pp.filter_settle_s() + MIN_SETTLE_S)
-        cap = self._capture(pp)
-        self._bg[key] = np.asarray(cap.channels["CH2"].volts, np.float64)
+        v = np.asarray(self._capture(pp).channels["CH2"].volts, np.float64)
+        if not np.ptp(v):  # a constant record (the 0x153A first-record artefact) has no background level: once more
+            self.flat_retakes += 1
+            v = np.asarray(self._capture(pp).channels["CH2"].volts, np.float64)
+        self._bg[key] = v
 
     def _bg_level(self, pp: PointPlan, ch2_range: int) -> float | None:
         v = self._bg.get((pp.n, ch2_range))
@@ -1076,13 +1144,13 @@ class BodeRunner:
         self._gen(True, pp)
         ms = self._ref_check(pp, self._measure(pp, self._point_settle()))
         retries = 0
-        if self._recentre_if_needed(ms):
+        if not ms.ch1_dead and self._recentre_if_needed(ms):
             ms = self._ref_check(pp, self._measure(pp, self._point_settle()))
             retries += 1
         if ms.unsettled:
             ms = self._measure(pp, 2 * self.settle_periods)
             retries += 1
-        return ms, retries
+        return ms, retries + int(ms.retaken)
 
     def _result(self, pp: PointPlan, ms: Measurement, retries: int) -> PointResult:
         s = self.s
@@ -1094,13 +1162,13 @@ class BodeRunner:
             flags.append("clipped")
         if ms.flat2:
             flags.append("ch2_overload")
-        if ms.codes1 < CH1_LOW_CODES:
+        if not ms.codes1 >= CH1_LOW_CODES:
             flags.append("ch1_low")
         if ms.codes2 < CH2_SMALL_CODES:
             flags.append("ch2_small")
         if ms.snr2_db < LOW_SNR_DB:
             flags.append("low_snr")
-        if ms.leak_db > LEAK_LIMIT_DB:
+        if ms.leak_db > LEAK_LIMIT_DB or ms.ch1_dead:
             flags.append("incoherent")
         if ms.unsettled:
             flags.append("unsettled")
@@ -1122,8 +1190,8 @@ class BodeRunner:
         this point (the clipped one is discarded). A small CH2 (the predicted peak on the next more sensitive range
         under 60 % of full scale) steps down after this point; the point is measured on both ranges and the ratio
         scales every later point onto the sweep's first range ('spliced')."""
-        if self.ch2_mode != "auto":
-            return None
+        if self.ch2_mode != "auto" or ms.ch1_dead:
+            return None  # no ranging on a record without a stimulus (flat twice: stuck readout or no CH1)
         r = self.range[1]
         if ms.clipped2 or ms.flat2:
             new = None
@@ -1138,7 +1206,7 @@ class BodeRunner:
                     self._set_rate(ppp)
                     self._gen(True, ppp)
                     again = self._measure(ppp, self._point_settle())
-                    if not (again.clipped1 or again.clipped2) and again.h:
+                    if not (again.clipped1 or again.clipped2) and _usable(again.h) and _usable(pres.h_raw):
                         self._record_splice(ppp, r, r - 1, pres.h_raw / again.h)
                         if "spliced" not in pres.flags:
                             pres.flags.append("spliced")
@@ -1157,7 +1225,7 @@ class BodeRunner:
             self._switch(r, ms.mean2)  # the prediction failed: back, and do not try that range again
             self._bad_down.add(r + 1)
             return None
-        if self.splice_on and again.h:
+        if self.splice_on and _usable(again.h) and _usable(res.h_raw):
             self._record_splice(pp, r, r + 1, res.h_raw / again.h)
             res.flags.append("spliced")
         return None
@@ -1218,6 +1286,12 @@ class BodeRunner:
         if thru is not None:
             for p in res.points:
                 thru.apply(p)
+        if self._flat_twice:
+            fl = ", ".join(f"{f:.6g}" for f in self._flat_twice[:6]) + (" ..." if len(self._flat_twice) > 6 else "")
+            self.caveats.append(f"CH1's record was flat or had no tone even after a retake at {len(self._flat_twice)} "
+                                f"frequency(ies) ({fl} Hz): a stuck or saturated ADC record or no stimulus on CH1; "
+                                "those points are flagged ch1_low + incoherent and have no H")
+        res.meta["flat_retakes"] = self.flat_retakes
         res.duration_s = time.monotonic() - t0
         res.range_switches = self.switches
         res.splices = self.splices
@@ -1456,7 +1530,9 @@ def result_caveats(res: SweepResult) -> list[str]:
 
 def _fmt_row(r: dict[str, Any]) -> str:
     fl = ",".join(r["flags"])
-    return (f"{r['f_actual']:>12.4f} {r['mag_db']:>9.3f} {r['phase_deg']:>9.2f} {r['ch2_volts_per_div']:>7g} "
+    mag = math.nan if r["mag_db"] is None else r["mag_db"]
+    ph = math.nan if r["phase_deg"] is None else r["phase_deg"]
+    return (f"{r['f_actual']:>12.4f} {mag:>9.3f} {ph:>9.2f} {r['ch2_volts_per_div']:>7g} "
             f"{r['sample_rate']:>11.6g} {r['filter']:>9} {fl}")
 
 

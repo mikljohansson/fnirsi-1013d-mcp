@@ -600,6 +600,9 @@ class Device:
         self.ring_valid = False
         #: test hook: called as on_arm(device) at the start of every host ARM (e.g. a UI change mid-run)
         self.on_arm: Callable[["Device"], None] | None = None
+        #: test hook: the next n host captures are one saturated value on every core (the FPGA 0x153A first record
+        #: after a rate / filter / range change, bench 2026-10-20)
+        self.flat_next = 0
         #: GET_EVENT_LOG ring (fw 0.2.12)
         self.events: list[P.DeviceEvent] = []
         self.event_total = 0
@@ -1670,6 +1673,9 @@ class Device:
             self._start_run(self.settings.copy(), self.seq_setting)
         else:
             self._pending_capture = self.simulate_capture(self.settings)
+            if self.flat_next and self._pending_capture.get("ring") is not None:
+                self.flat_next -= 1
+                self._pending_capture["ring"] = np.full_like(self._pending_capture["ring"], 0xFF)
         if self.spec.decim:
             self.decim_written = self.decim_config()
         self.tick()
