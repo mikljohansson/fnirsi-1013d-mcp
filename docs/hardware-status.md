@@ -1081,4 +1081,16 @@ Newest entries at the bottom. Format: date, who, what, result.
   reports as a flip-flop and which makes "count 0 = clean" unreachable for CH2. Next: a PC_DEBUG image with raw 0x63 / 0x64
   writes to map the 0x36 counts per core, stage and reference bit across the band, before deciding whether 0x153A needs
   another stage grid, a looser clean criterion, or whether CH2's chip has a different timing.
+- 2026-10-20 10:08-10:14: PC_DEBUG build of 0.2.79 (backups/fw-0.2.79-debug_2c91aa72.bin, apt GCC 13 toolchain, DEBUG_RAW) loaded
+  for raw 0x63 / 0x64 / 0x36 access. Stage map at 200 MSa/s, range 0, means 116..140, all four cores at stages 2..5 with and
+  without the reference bit (scratchpad stage_map_153A.log): CH1 A clean at 2, 3, 5 and bad only at 4 (the power-on stage:
+  counts 346, std 29.5, rails); CH1 B bad at 2, clean at 3, 4, 5; CH2 A clean at every stage; CH2 B bad at 2 (std 57), clean
+  at 3, 4, 5; the reference bit changes nothing on this unit (B from its own encode is right, as fpga-gen9 inferred from the
+  lane pattern). So the capture fix works and the power-on stages are wrong only for CH1 A on this unit, which is what the
+  training is for. The CH2 "no clean stage" of 10:06 was the outlier threshold: the 0x36 counters compare a core's sample
+  with its previous word against 0x64 = 8 codes, and CH2's analog noise at range 0 near code 128 is about 3 codes rms (CH1:
+  0.5..1.2), so CH2's counters saturate at 65535 on noise alone at every stage, while thresholds 16, 24, 32, 40 and 48 all read
+  0 on a good stage set and hundreds (CH1 A4) or 65535 (CH2 B2) on a bad one, three captures each. The counters do not run
+  after the capture ends (stable over 1.2 s). Decision: training and self-check threshold 32 codes (firmware; 0x153B can move
+  CAP_THR_PO too). Expected training result on this unit: CH1 A3 B4, CH2 A3 B4 = 0x08E3.
 
