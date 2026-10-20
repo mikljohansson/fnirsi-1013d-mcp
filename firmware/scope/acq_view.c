@@ -263,3 +263,16 @@ const char *acq_view_notice(void)
 
   return acq_notice_text;
 }
+
+//----------------------------------------------------------------------------------------------------------------------------------
+
+uint32 acq_view_mem_chips(uint32 max_total, int filter_on, uint32 filter_max)
+{
+  uint32 limit = (filter_on && (filter_max < max_total)) ? filter_max : max_total, m = 0, i;
+
+  for(i = 0; i < ACQ_MEM_CHIPS; i++)
+    if(3000 * (i + 1) <= limit)
+      m |= 1u << i;
+
+  return m;
+}
