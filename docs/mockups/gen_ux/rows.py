@@ -99,7 +99,7 @@ def twoway(x, y, w, label, value):
 
 
 def trigger_menu(ttype="Edge", mode="Auto", edge="Rising", chan="CH1", pos="50%", always50=False,
-                 width="2.00us", longer=False, n="5", idle="50us"):
+                 width="2us", longer=False, n="5", idle="50us"):
     h = 336 if ttype == "Edge" else 430
     p = [box(0, 0, TW, h, f"background: {DARKGREY}; border: 1px solid {LIGHTGREY}")]
     for ly in (54, 110, 166, 222, 278):
@@ -153,7 +153,7 @@ if want("TrigMenuEdge"):
     trigger_board("TrigMenuEdge.dc.html", "Trigger menu, type Edge", ttype="Edge")
 if want("TrigMenuPulse"):
     trigger_board("TrigMenuPulse.dc.html", "Trigger menu, type Pulse width", ttype="Pulse", mode="Normal",
-                  width="2.00us", longer=False)
+                  width="2us", longer=False)
 if want("TrigMenuNth"):
     trigger_board("TrigMenuNth.dc.html", "Trigger menu, type Nth edge", ttype="Nth", mode="Normal", n="5", idle="50us")
 if want("TrigMenuNthArm"):
