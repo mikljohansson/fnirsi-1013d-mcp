@@ -116,10 +116,7 @@ uint16 fpga_average_trace_data_long(PCHANNELSETTINGS settings);
 void   fpga_delay(uint32 usec);
 
 //Decimation filter, bitstream 0x1534+ (pc_decim.h)
-void   fpga_set_decim_mode(uint8 mode);
-void   fpga_set_decim_shift(uint8 shift);
 void   fpga_set_decim_level(uint16 level);
-void   fpga_set_decim_fir(uint8 enable);
 uint16 fpga_get_decim_state(void);
 
 //----------------------------------------------------------------------------------------------------------------------------------

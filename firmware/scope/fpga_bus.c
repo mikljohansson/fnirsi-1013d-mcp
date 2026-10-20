@@ -139,19 +139,90 @@ fpga_bus_writes fpga_bus_wr;
 
 int fpga_bus_note_write(uint8_t cmd, uint32_t value)
 {
-  if(cmd == 0x0D)
-    fpga_bus_wr.rate++;
-  else if((cmd == 0x53) || (cmd == 0x56))
-    fpga_bus_wr.filter++;
-  else if((cmd == 0x01) && (value == 1))
+  switch(cmd)
   {
-    fpga_bus_wr.resets++;
-    fpga_bus_wr.since_reset = 0;
-    return 1;
+    case 0x0D:
+      fpga_bus_wr.rate++;
+      fpga_bus_wr.divider = value;
+      fpga_bus_wr.held   |= FPGA_HELD_DIVIDER;
+      break;
+
+    case 0x53:
+      fpga_bus_wr.filter++;
+      fpga_bus_wr.mode  = (uint8_t)value;
+      fpga_bus_wr.held |= FPGA_HELD_MODE;
+      break;
+
+    case 0x56:
+      fpga_bus_wr.filter++;
+      fpga_bus_wr.fir   = (uint8_t)value;
+      fpga_bus_wr.held |= FPGA_HELD_FIR;
+      break;
+
+    //Shift and level: no effect on the encode clocks (since_reset unchanged)
+    case 0x54:
+      fpga_bus_wr.filter++;
+      fpga_bus_wr.shift = (uint8_t)value;
+      fpga_bus_wr.held |= FPGA_HELD_SHIFT;
+      return 1;
+
+    case 0x55:
+      fpga_bus_wr.filter++;
+      return 1;
+
+    case 0x01:
+      if(value != 1)
+        return 0;
+
+      fpga_bus_wr.resets++;
+      fpga_bus_wr.since_reset = 0;
+      return 1;
+
+    default:
+      return 0;
   }
-  else
-    return 0;
 
   fpga_bus_wr.since_reset = 1;
   return 1;
+}
+
+//The divider at the previous fpga_decim_write (0xFFFFFFFF: none yet, or no 0x0D written then)
+static uint32_t fpga_decim_div = 0xFFFFFFFF;
+
+int fpga_decim_write(uint8_t mode, int has_fir, uint8_t fir_en, uint8_t shift)
+{
+  uint32_t div = (fpga_bus_wr.held & FPGA_HELD_DIVIDER) ? fpga_bus_wr.divider : 0xFFFFFFFF;
+  int      settle = (div != fpga_decim_div);
+
+  fpga_decim_div = div;
+  mode &= 0x1F;
+  fir_en = fir_en ? 1 : 0;
+  shift &= 0x3F;
+
+  if(!(fpga_bus_wr.held & FPGA_HELD_MODE) || (fpga_bus_wr.mode != mode))
+  {
+    fpga_write_cmd(0x53);
+    fpga_write_byte(mode);
+    settle = 1;
+  }
+
+  //0x1535+: FIR enable; older bitstreams never get the command
+  if(has_fir && (!(fpga_bus_wr.held & FPGA_HELD_FIR) || (fpga_bus_wr.fir != fir_en)))
+  {
+    fpga_write_cmd(0x56);
+    fpga_write_byte(fir_en);
+    settle = 1;
+  }
+
+  //The shift at every arm with the filter on: one byte, 0.6 us
+  if(mode & 3)
+  {
+    if(!(fpga_bus_wr.held & FPGA_HELD_SHIFT) || (fpga_bus_wr.shift != shift))
+      settle = 1;
+
+    fpga_write_cmd(0x54);
+    fpga_write_byte(shift);
+  }
+
+  return settle;
 }

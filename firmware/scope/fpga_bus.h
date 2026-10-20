@@ -80,19 +80,42 @@ int  fpga_arm_reset(const fpga_arm_cfg *c);
 // a rate or filter write after the last sampling reset is remembered: FPGA 0x1538+ read 0x33 bit 0 is sticky until the
 // next 0x01 = 1, and such a write can make one encode prediction miss (fpga/al3/README.md section 8), so the capture in
 // flight cannot be judged by it (bench 0x1538, fw 0.2.64: 112 of 5798 captures re-taken after host rate writes).
+//
+// fw 0.2.87 (fw-decfix, firmware/AGENTS.md section 57): also the decimator shift 0x54 and the 16-bit level 0x55 (counted
+// with the filter writes and traced as event 22; they do not touch the encode clocks, so since_reset stays as it was), and
+// the values the FPGA holds: the last 0x0D, 0x53, 0x54 and 0x56 written by anyone. This is the one place the firmware
+// knows the divider the FPGA runs at (pc_hal_divider_now): a UI time/div snap that writes no 0x0D cannot change it.
+
+#define FPGA_HELD_DIVIDER  0x01    //held.divider is valid (a 0x0D was written since boot)
+#define FPGA_HELD_MODE     0x02    //0x53
+#define FPGA_HELD_SHIFT    0x04    //0x54
+#define FPGA_HELD_FIR      0x08    //0x56
 
 typedef struct
 {
   uint32_t rate;            //0x0D writes
-  uint32_t filter;          //0x53 and 0x56 writes
+  uint32_t filter;          //0x53, 0x54, 0x55 and 0x56 writes (0x54 / 0x55 since fw 0.2.87)
   uint32_t resets;          //0x01 = 1 writes
   uint8_t  since_reset;     //a 0x0D / 0x53 / 0x56 write since the last 0x01 = 1
+
+  //What the FPGA holds (fw 0.2.87): the last value written to each register, valid per FPGA_HELD_* bit
+  uint8_t  held;
+  uint8_t  mode;            //0x53
+  uint8_t  shift;           //0x54
+  uint8_t  fir;             //0x56
+  uint32_t divider;         //0x0D
 } fpga_bus_writes;
 
 extern fpga_bus_writes fpga_bus_wr;
 
 //Called with every completed write (command, value). 1 = one of the writes above (event 22 material)
 int  fpga_bus_note_write(uint8_t cmd, uint32_t value);
+
+//Decimation registers before a sampling reset (fw 0.2.87, from pc_dec_apply): 0x53 = mode and, with has_fir, 0x56 =
+//fir_en when they differ from what the FPGA holds; with K = mode bits 1:0 >= 1, 0x54 = shift at every call, so a shift
+//written for another divider (or lost, or written by someone else) cannot survive an arm. 1 = the filter must settle:
+//a value differs from what the FPGA held, or the divider changed since the previous call.
+int  fpga_decim_write(uint8_t mode, int has_fir, uint8_t fir_en, uint8_t shift);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Bus primitives: fpga_control.c / fpga_control.h on the scope, fpga_model.c in the host test

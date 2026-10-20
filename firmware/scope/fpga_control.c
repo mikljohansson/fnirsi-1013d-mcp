@@ -24,7 +24,7 @@ void fpga_init(void)
 //----------------------------------------------------------------------------------------------------------------------------------
 
 //fw 0.2.61: trace of the writes that set the ADC capture state (0x0D rate, 0x53 decimation mode, 0x56 FIR, 0x01 = 1
-//sampling reset) into the event log, type 22, with the caller (fpga_trace_who): the bench correlates a garbled full-rate
+//sampling reset; fw 0.2.87: 0x54 shift, 0x55 16-bit level) into the event log, type 22, with the caller (fpga_trace_who): the bench correlates a garbled full-rate
 //capture with the writes before it (firmware/AGENTS.md section 37). fw 0.2.72: counted always (fpga_bus_note_write,
 //GET_LINK_STATS 64-66), logged as events only at trace level 1 (GET_EVENT_LOG flags bits 2:1): with the UI running every
 //conversion's 0x01 entry flooded the 128-entry ring within seconds
@@ -432,9 +432,6 @@ void fpga_set_sample_rate(uint32 samplerate)
     //Write the time base clock setting to the FPGA
     fpga_write_int(sample_rate_settings[samplerate]);
     fpga_divider = sample_rate_settings[samplerate];
-
-    //Decimation filter (0x1534+): N follows the divider, and a change needs the filter to settle
-    pc_glue_divider_written(sample_rate_settings[samplerate]);
   }
 }
 
@@ -1591,33 +1588,13 @@ void fpga_set_battery_level(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Decimation filter, bitstream 0x1534+ only (pc_decim.h). Callers check the bitstream: older ones do not decode 0x29,
-//0x53-0x55.
-
-void fpga_set_decim_mode(uint8 mode)
-{
-  //bits 1:0 K (0 legacy, 1 boxcar, 2 CIC2, 3 CIC3), bit 2 core-order swap, bits 3 / 4 A / B cores on the falling edge
-  fpga_write_cmd(0x53);
-  fpga_write_byte(mode & 0x1F);
-}
-
-void fpga_set_decim_shift(uint8 shift)
-{
-  fpga_write_cmd(0x54);
-  fpga_write_byte(shift & 0x3F);
-}
+//0x53-0x55. 0x53, 0x54 and 0x56: fpga_decim_write (fpga_bus.c, fw 0.2.87).
 
 void fpga_set_decim_level(uint16 level)
 {
   //16-bit trigger level, used instead of 0x17 while K >= 1
   fpga_write_cmd(0x55);
   fpga_write_short(level);
-}
-
-void fpga_set_decim_fir(uint8 enable)
-{
-  //0x1535+: CIC compensation FIR, active where K >= 1, N >= 16 and N % 4 == 0
-  fpga_write_cmd(0x56);
-  fpga_write_byte(enable ? 0x01 : 0x00);
 }
 
 uint16 fpga_get_decim_state(void)

@@ -559,7 +559,6 @@ static void cal_end(uint32 gen)
     fpga_write_cmd(0x0D);
     fpga_write_int(cal_backup_divider);
     fpga_divider = cal_backup_divider;
-    pc_glue_divider_written(cal_backup_divider);
   }
 
   fpga_set_time_base(scopesettings.timeperdiv);

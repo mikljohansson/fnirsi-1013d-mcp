@@ -4,6 +4,7 @@
 
 #include <string.h>
 
+#include "fpga_bus.h"
 #include "fpga_model.h"
 
 fpga_model fm;
@@ -62,6 +63,7 @@ void fm_advance_ns(uint32_t ns)
 void fm_reset(uint16_t version, uint32_t divider, uint32_t seed)
 {
   memset(&fm, 0, sizeof(fm));
+  memset(&fpga_bus_wr, 0, sizeof(fpga_bus_wr));      //a fresh FPGA holds nothing the firmware wrote
   fm.version = version;
   fm.divider = divider;
   fm.seed    = seed;
@@ -102,6 +104,8 @@ static uint32_t fm_len(uint8_t cmd)
 //A completed write
 static void fm_apply(uint8_t cmd, uint32_t v)
 {
+  (void)fpga_bus_note_write(cmd, v);
+
   if(fm.ntrace < FM_TRACE_MAX)
   {
     fm.trace[fm.ntrace].cmd   = cmd;
@@ -127,6 +131,9 @@ static void fm_apply(uint8_t cmd, uint32_t v)
     case 0x0B: fm.reg_0b  = (uint16_t)v; break;
     case 0x0C: fm.reg_0c  = (uint16_t)v; break;
     case 0x0D: fm.divider = v;           break;
+    case 0x53: fm.reg_53  = (uint8_t)v;  break;
+    case 0x54: fm.reg_54  = (uint8_t)v;  break;
+    case 0x56: fm.reg_56  = (uint8_t)v;  break;
 
     case 0x1F:
       fm.rd_ptr = v % fm.ring;

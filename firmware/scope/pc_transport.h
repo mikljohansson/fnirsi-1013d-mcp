@@ -104,8 +104,9 @@ void pc_usb_isr_configured(void);           //SET_CONFIGURATION set up EP2
                                     //b = s suspended
 #define PC_EVT_FPGA_HEAL      21    //fw 0.2.61, full-rate capture garbled after a rate change (enc_heal.h, row 57): a =
                                     //retries, bit 7 not recovered; b = the larger residual of the first check, 1/16 code
-#define PC_EVT_FPGA_WRITE     22    //fw 0.2.61, an FPGA write of 0x0D, 0x53, 0x56 or 0x01 = 1: a = command, b = caller
-                                    //(FPGA_WHO_*) << 12 | value (saturated at 0xFFF)
+#define PC_EVT_FPGA_WRITE     22    //fw 0.2.61, an FPGA write of 0x0D, 0x53, 0x56 or 0x01 = 1 (fw 0.2.87: 0x54 shift and
+                                    //0x55 16-bit level too): a = command, b = caller (FPGA_WHO_*) << 12 | value
+                                    //(saturated at 0xFFF)
 #define PC_EVT_FPGA_CAPTURE   23    //fw 0.2.79, FPGA 0x153A capture stages (cap_hw.c): a bits 3:0 cores flagged by the
                                     //self-check (bit 0 CH1 A .. 3 CH2 B), b = the largest excess; a bit 4 set: a
                                     //training ended, bits 3:0 the cores without a clean stage, b = the 0x63 value in effect
