@@ -108,7 +108,7 @@ when any check fails. In Claude Code the `fnirsi-install` skill picks the runboo
 ### By hand (a WSL or Linux shell; every command with its expected result: [`docs/guide/install.md`](docs/guide/install.md))
 
 1. **Back up** the SD card you will use and, if you will flash a bitstream, the FPGA flash
-   ([`docs/hardware-prep.md`](docs/hardware-prep.md), section 3).
+   ([`docs/guide/prepare.md`](docs/guide/prepare.md)).
 2. **Download** `fnirsi_1013d-fw-X.Y.Z.bin`, `fnirsi_1013d-sdtools-X.Y.Z.zip` and `SHA256SUMS` from the
    [releases page](https://github.com/mikljohansson/fnirsi-1013d-mcp/releases) and check them:
 

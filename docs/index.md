@@ -17,8 +17,8 @@ repository is the [README](https://github.com/mikljohansson/fnirsi-1013d-mcp#rea
 **User guide.** For someone who owns the scope.
 Start with [Install](guide/install.md), or point your AI agent at a clone of the repository and ask it to guide you:
 it follows the [agent runbook](guide/agent-runbook.md). The card alone needs no soldering and is undone by removing
-it; the optional FPGA bitstream needs a soldered header and a 3.3 V programmer. Then [Hardware preparation](hardware-prep.md) if you will flash the
-FPGA, [First run](guide/first-run.md) and [Calibration](guide/calibration.md). [The screens](guide/screens.md) walk
+it; the optional FPGA bitstream needs a soldered header and a 3.3 V programmer. Then [Prepare and back up](guide/prepare.md),
+[First run](guide/first-run.md) and [Calibration](guide/calibration.md). [The screens](guide/screens.md) walk
 through the main menu one entry at a time: the Scope with its phosphor view, the Spectrum analyser with waterfall and
 density views, the Frequency response mode that measures a filter or tank with the scope alone, the file viewers,
 Settings, Diagnostics and the USB drive. [Generator](guide/generator.md) covers the square wave on the calibration
@@ -35,5 +35,5 @@ hard parts), the [protocol](protocol.md), the [UI guidelines](ui-guidelines.md),
 
 !!! warning "Use at your own risk"
     Flashing the FPGA configuration flash or the SD card sectors can leave the scope unbootable until you restore a
-    backup. Back up first ([Hardware preparation](hardware-prep.md), section 3). The real limits of the hardware are
+    backup. Back up first ([Prepare and back up](guide/prepare.md)). The real limits of the hardware are
     200 MS/s per channel, 8 bit and about 30 MHz of analog bandwidth. Everything was verified on one unit.
