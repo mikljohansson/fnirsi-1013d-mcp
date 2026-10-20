@@ -31,7 +31,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.91 (provisional, not tagged in pc_cmds.h; protocol 1.24, BODE_CTRL answer 48 bytes)
+#### 0.2.91 - 2026-10-20 (protocol 1.24; BODE_CTRL answer 48 bytes)
 
 - Frequency response: one bad record no longer moves a channel to a coarser range (3b363b2). CH2 steps up only when a
   second record on the same range clips too. In the check after the pre-scan, a clip on an off-centre record moves the

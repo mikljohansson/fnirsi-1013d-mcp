@@ -4336,7 +4336,7 @@ Commits: 802cc4a (engine + tests), then docs. Host tests green (test_bode_sweep 
    - r2 constant on a coarse range over the whole span;
    - a plan sweep (0 switches) whose rows differ from the previous sweep's r1 / r2.
 
-## 60. fw-eng4: steps up confirmed, the trigger at CH1's mean, capture statistics (fw 0.2.91 provisional)
+## 60. fw-eng4: steps up confirmed, the trigger at CH1's mean, capture statistics (fw 0.2.91, protocol 1.24)
 
 Branch `fw-eng4` from main 312c49f (fw 0.2.90). Brief: the coordinator's 0.2.90 bench (hardware-status 13:14):
 - the first sweep after the load ended with both channels on 5 V/div;
