@@ -12,13 +12,17 @@
 // keeps its value over sampling resets, so it is written at boot (a FEL load leaves the FPGA as it was) and after a
 // training only.
 //
-// Training (the calibration wizard's zero step, input parked at code 128 where the most bits flip): every trained core at
-// stage s = 2, 3, 4, 5 in turn, one 200 MSa/s capture of CS_TRAIN_WORDS words each, read 0x36: a clean stage reads 0 for
-// that core, a stage inside the AD9288 data transition counts about every word. Per core cs_pick takes the clean stage of
-// {3, 4} whose outer neighbour (2 or 5) is clean too (the middle of the clean run), else the clean one of {3, 4}, else a
-// clean reserve (2, 5). A B core with no clean stage is measured again with its chip's reference bit set (A-encode
-// timing); a core with no clean stage at all fails the training (fail fast: the wizard says "ADC readout fault near code
-// 128" and nothing is stored).
+// Training (the calibration wizard's zero step; fw 0.2.81 band training): the quiet input is parked by the offset PWM at
+// CS_BAND_POINTS codes across the band where the most bits flip (120, 124, .. 140; cs_band_pwm from the zero step's
+// gated slope points), and at every point every trained core is captured at stage s = 2, 3, 4, 5 in turn, CS_BAND_REPS
+// 200 MSa/s captures of CS_TRAIN_WORDS words each; the 0x36 counts are summed per core and stage over all points and
+// captures. A stage is clean when its sum is 0: a stage inside the AD9288 data transition counts at once, one at its edge
+// garbles only at some codes and in some captures (bench 2026-10-20: CH1 A4 at codes 127..135 only), which 0.2.79's one
+// capture at one code missed. Per core cs_pick takes the clean stage inside the widest run of clean stages with the most
+// clean stages on both sides, 3 or 4 before a reserve (2, 5), the power-on stage only as the tie-break inside that run.
+// A B core with no clean stage is measured again with its chip's reference bit set (A-encode timing); a core with no
+// clean stage at all fails the training (fail fast: the wizard says "ADC readout fault near code 128" and nothing is
+// stored).
 //
 // Self-check after full-rate captures: a signal moves both cores of a chip alike (they sample the same input 5 ns apart),
 // a core captured inside its transition counts alone. cs_excess = a core's count minus its chip partner's; above
@@ -44,6 +48,11 @@
 #define CS_STAGE_MAX      5
 #define CS_NONE           0xFF        //cs_pick: no clean stage
 #define CS_TRAIN_WORDS    8000        //words per training capture (200 MSa/s: 40 us)
+#define CS_BAND_POINTS    6           //training: offset PWM points (cs_band_code)
+#define CS_BAND_REPS      2           //training: captures per stage and point
+#define CS_BAND_FIRST     120         //training: the first point's code, then every CS_BAND_STEP codes (120 .. 140)
+#define CS_BAND_STEP      4
+#define CS_STAGES         (CS_STAGE_MAX - CS_STAGE_MIN + 1)
 #define CS_EXCESS_LIMIT   8           //self-check: outliers a core may have more than its chip partner
 
 //1 for bitstreams with the capture stage registers (AL3 0x153A..0x153F)
@@ -55,15 +64,28 @@ uint16_t cs_with(uint16_t v, uint32_t core, uint8_t stage);
 //The reference bit of a B core (1 CH1 B, 3 CH2 B), 0 for an A core
 uint16_t cs_ref_bit(uint32_t core);
 
-//The stage for one core from its clean stages (bit s = stage s read 0 outliers) and its power-on stage
+//The stage for one core from its clean stages (bit s = stage s summed 0 outliers) and its power-on stage: inside the
+//widest run of clean stages (2..5; of equal runs the one holding 3 or 4), the stage with the most clean stages on its
+//narrower side, 3 or 4 before a reserve, then the power-on stage, then the reserve next to it. CS_NONE without a clean
+//stage
 uint8_t  cs_pick(uint8_t clean, uint8_t po);
 
-//What a training needs from the target (or a host mock): write 0x63 = v, one capture, read 0x36's four counts.
-//0 = done, else the capture did not complete
+//Training band: the code of point i (CS_BAND_FIRST + i CS_BAND_STEP) and the offset PWM that parks the input there,
+//interpolated from two gated points (pwm_lo reads mean16_lo, pwm_hi reads mean16_hi, 1/16 code; a lower PWM reads a
+//higher code). -1 when the points do not respond (mean16_lo <= mean16_hi or pwm_hi <= pwm_lo)
+uint32_t cs_band_code(uint32_t i);
+int32_t  cs_band_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t mean16_hi, uint32_t code);
+
+//What a training needs from the target (or a host mock): park the input at band point p (0 .. points - 1: the offset
+//PWM and its settling), and one capture: write 0x63 = v, capture, read 0x36's four counts. 0 = done, else the step did
+//not complete
 typedef struct
 {
-  void *ctx;
-  int  (*measure)(void *ctx, uint16_t v, uint16_t cnt[CS_CORES]);
+  void     *ctx;
+  uint32_t points;                    //band points (CS_BAND_POINTS)
+  uint32_t reps;                      //captures per stage and point (CS_BAND_REPS)
+  int      (*park)(void *ctx, uint32_t p);
+  int      (*measure)(void *ctx, uint16_t v, uint16_t cnt[CS_CORES]);
 } cs_io;
 
 #define CS_OK             0
@@ -78,7 +100,9 @@ typedef struct
   uint8_t  clean[CS_CORES];           //bit s: stage s clean with the own-encode timing
   uint8_t  clean_ref[CS_CORES];       //B cores measured again with the reference bit: bit s clean
   uint8_t  bad;                       //cores without a clean stage
-  uint8_t  captures;                  //captures taken
+  uint16_t captures;                  //captures taken
+  uint32_t sum[CS_CORES][CS_STAGES];      //0x36 counts summed over the band, own-encode timing (index s - CS_STAGE_MIN)
+  uint32_t sum_ref[CS_CORES][CS_STAGES];  //the same for the reference pass (its B cores only)
 } cs_train;
 
 //Train the cores in mask cores (the parked channel: 0x03 CH1, 0x0C CH2); the others keep their value in start
@@ -87,6 +111,23 @@ int      cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *
 //Self-check: per core the count minus its chip partner's (0 when below); the cores above CS_EXCESS_LIMIT as a mask
 void     cs_excess(const uint16_t cnt[CS_CORES], uint16_t ex[CS_CORES]);
 uint8_t  cs_flagged(const uint16_t cnt[CS_CORES]);
+
+//In operation (fw 0.2.81): a core the self-check flags in CS_REPEAT_N captures within CS_REPEAT_MS keeps failing at its
+//trained stage (the Diagnostics Calibration verdict asks for Calibrate, event 23 once). cs_watch_add takes the flagged
+//mask of one capture and the ms tick and returns the cores that reached it with this capture (each once, until
+//cs_watch_clear: a new trained value saved)
+#define CS_REPEAT_N       3
+#define CS_REPEAT_MS      60000u
+
+typedef struct
+{
+  uint32_t t[CS_CORES][CS_REPEAT_N - 1];   //ms ticks of the core's last flags, oldest first
+  uint8_t  n[CS_CORES];                    //of them valid
+  uint8_t  repeat;                         //cores that reached it
+} cs_watch;
+
+void     cs_watch_clear(cs_watch *w);
+uint8_t  cs_watch_add(cs_watch *w, uint8_t flagged, uint32_t now_ms);
 
 //Texts (no libc), each returns the pointer to its NUL: "CH1 A4 B4" (ch 0 / 1; "B4 A-clk" with the reference bit),
 //"CH1 A4 B4, CH2 A3 B4", the core name "CH2 A"

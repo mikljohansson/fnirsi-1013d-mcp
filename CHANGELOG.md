@@ -31,6 +31,19 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.81 - provisional (branch fw-cap2; PC_FW_VERSION not bumped; protocol 1.24, GET_HEALTH 106 bit 5 added)
+
+- Capture-stage training over a band of codes (3e5a2a1): the wizard's zero step parks the quiet input at codes 120, 124,
+  .. 140 by the offset PWM and takes two 8000-word captures per stage 2..5 at each point; the 0x36 counts are summed per
+  core and stage, clean = sum 0. Bench 2026-10-20 on 0x153A: CH1 A4 garbles only at codes 127..135 and not in every
+  capture, so 0.2.79's single capture at the centre kept A4. The pick takes, per core, the clean stage inside the widest
+  clean run with margin on both sides (3 or 4 before a reserve, the power-on stage only as the tie-break): expected on
+  the owner's unit "CH1 A3 B4, CH2 A3 B4" (0x08E3). The wizard shows "CH1: training capture stages..." (about half a
+  second longer per channel).
+- In operation (3e5a2a1): a core the self-check flags in 3 captures within a minute sets GET_HEALTH 106 bit 5 (REPEAT);
+  the Diagnostics Calibration verdict turns amber with "run Calibrate", the Calibration page line and the report say
+  so, and event 23 is logged once per core instead of whenever the flagged set changes. Cleared by a saved training.
+
 #### 0.2.80 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Capture-stage training and self-check: the FPGA outlier threshold (0x64) is written as 32 codes instead of the power-on 8.
@@ -1089,6 +1102,9 @@ was found (commit not identified).
   passed on hardware (0b9c783, a7579d5, a4577f3, f7bd2bf, f9f9349).
 
 ### Host library and MCP server (`mcp/`, package version 0.1.0)
+
+- Added: `CAPF_REPEAT` (GET_HEALTH 106 bit 5, fw 0.2.81): `describe_capture` reports `flagged_repeatedly` and says to
+  run the calibration wizard (3f47d78).
 
 - Added: protocol 1.24 (fw 0.2.79, FPGA 0x153A capture stages): `Caps.CAPTURE_STAGES`, `Features.CAPTURE_STAGES`,
   `HealthResp` layout 2 (124 bytes: `cap_*`, `has_capture`, `describe_capture`), `CalResp` 364 bytes (the stored

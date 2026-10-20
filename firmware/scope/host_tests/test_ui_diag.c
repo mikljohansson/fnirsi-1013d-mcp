@@ -405,6 +405,14 @@ static void test_pages(void)
   health[106] |= PC_CAPF_FLAGGED; health[107] = 0x04; health[112] = 37;
   ud_build(&pg, UD_PAGE_CAL, &in, 0);
   T_EQ(text_colour("ADC capture stages CH1 A4 B4, CH2 A3 B4 (trained): CH2 A: 37 outliers"), UD_C_WARN);
+  health[106] |= PC_CAPF_REPEAT;
+  ud_build(&pg, UD_PAGE_CAL, &in, 0);
+  T_EQ(text_colour("ADC capture stages CH1 A4 B4, CH2 A3 B4 (trained): CH2 A: 37 outliers; calibrate"), UD_C_WARN);
+  health[106] &= (uint8_t)~PC_CAPF_FLAGGED;
+  ud_build(&pg, UD_PAGE_CAL, &in, &note);
+  check_layout("cal capture repeat", 0);
+  T_EQ(text_colour("ADC capture stages CH1 A4 B4, CH2 A3 B4 (trained): last capture clean, flagged 3 times in a minute: "
+                   "calibrate"), UD_C_WARN);
   health[106] = PC_CAPF_HAS | PC_CAPF_OTHER; cal[0][360] = 0x3B; cal[0][361] = 0x15;
   ud_build(&pg, UD_PAGE_CAL, &in, &note);
   check_layout("cal capture other", 0);
@@ -599,6 +607,15 @@ static void test_verdicts(void)
   verdict(&in, UD_V_CHECK, "FPGA changed since calibration (0x1535 to 0x1432): recalibrate.");
   p16(cal[0] + 292 + 28, 0x1432);
   verdict(&in, UD_V_CHECK, "FPGA stock 0x1432: no generator, gain calibration not possible.");
+
+  //fw 0.2.81: a 0x153A core flagged 3 times within a minute: amber, calibrate (the last capture may be clean)
+  healthy(&in);
+  health[106] = PC_CAPF_HAS | PC_CAPF_TRAINED | PC_CAPF_READ;
+  verdict(&in, UD_V_OK, "Calibrated, every value within its limit.");
+  health[106] |= PC_CAPF_REPEAT;
+  verdict(&in, UD_V_CHECK, "ADC capture flagged 3 times within a minute: run Calibrate.");
+  in.fpga = 0x1536;
+  verdict(&in, UD_V_CHECK, "FPGA changed since calibration (0x1535 to 0x1536): recalibrate.");
 
   //FPGA changed
   healthy(&in);

@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-cap2 (2026-10-20): fw 0.2.81 provisional (version not bumped), protocol 1.24 + GET_HEALTH 106 bit 5: capture-stage training over codes 120..140, widest-run pick, repeat watch; section 54 addendum.**
 **Branch fw-cap (2026-10-20): fw 0.2.79, protocol 1.24 (row 64): FPGA 0x153A capture stages (training in the wizard's zero step, 0x36 self-check, stored with the calibration), EXT offsets, the wizard's zero back at code 128, section 54.**
 **Branch fw-yield (2026-10-19): fw 0.2.78, protocol 1.23 (row 63), both provisional: host commands close the modal screens (every modal loop leaves by its cancel path; E_BUSY only for a calibration measurement, a file save, USB drive mode or a 1.5 s time-out), section 53.**
 **Branch fw-screen (2026-10-19): fw 0.2.70, protocol 1.21 unchanged: READ_SCREEN built (cap SCREENSHOT), section 46.**
@@ -3763,3 +3764,46 @@ EXT edges 8 samples early (shift table not followed), the trained value lost aft
 on noise); the firmware now writes 32 (`CS_THR_USE`), with which a clean stage set reads 0 on every core and a bad stage reads
 hundreds (CH1 A4) or 65535 (CH2 B2). The stage map of this unit: CH1 A bad at 4 only, CH1 B bad at 2, CH2 A clean everywhere,
 CH2 B bad at 2, reference bit without effect; expected training result 0x08E3. docs/hardware-status.md 10:14.
+
+**Addendum (fw-cap2, fw 0.2.81 provisional, 2026-10-20; branch fw-cap2, commits 3e5a2a1 firmware + host tests, 3f47d78 mcp,
+then docs).** Not benched, nothing flashed; PC_FW_VERSION not bumped. The 0.2.80 wizard still kept CH1 A4 (0x08E4): A4 garbles
+only at codes 127..135 and not in every capture, which one capture at the centre missed.
+- **Band training** (`cap_stage.c` `cs_train_run` / `cs_pass`, `cs_io` now has `points`, `reps`, `park`): per point
+  (`cs_band_code` 120, 124, .. 140; `cal_wiz_ui.c` `cal_cap_park` sets `cal_band_pwm[p]` = `cs_band_pwm` from `cal_centre`'s
+  gated slope points, mean of both cores, 60 ms settle) every stage 2..5 with `CS_BAND_REPS` = 2 captures; `cs_train.sum` /
+  `sum_ref` hold the summed counts, clean = sum 0. A band PWM outside ACAL_PWM_MIN..MAX fails as ACAL_E_RESPONSE.
+- **Pick** (`cs_pick`): score = run width, then 3 / 4 over 2 / 5, then the distance to the nearer end of the run, then the
+  power-on stage, then its neighbour. {2,3,5} -> 3, {3,4,5} -> 4, {2,3,4} -> 3, {2..5} / {3,4} -> power-on, {2,5} -> next
+  to power-on.
+- **Time**: 6 x 60 ms settling + 48 captures (8000 words, about 80 us of acquisition plus about 0.3-0.5 ms of bus work each)
+  is about 0.4 s per pass, a second pass only for a B core with no clean stage; plus the centre search as before. A
+  channel's zero step grows by about 0.4 s (0.8 s with the reference pass). The wizard shows "CHn: training capture
+  stages..." (`cw_progress(.., CW_PR_TRAIN)`).
+- **Limit** (inference): a stage that garbles at only one band point in 30 % of the captures is missed with probability
+  0.7^2 = 49 %; at two points (the A4 case) 0.7^4 = 24 %. If the bench shows the miss, raise `CS_BAND_REPS` (each step adds
+  24 captures, about 15 ms) before touching the pick. The in-operation watch catches what the training misses.
+- **Repeat watch** (`cs_watch`, `cap_hw.c` `fpga_capture_check`): a core flagged in 3 captures within 60 s sets
+  PC_CAPF_REPEAT (GET_HEALTH 106 bit 5) and logs event 23 once per core (a = the cores that reached it); the old "event 23
+  when the flagged set changes" is gone. `fpga_capture_commit` (the wizard's Save) clears it. ui_diag.c: the Status
+  verdict "ADC capture flagged 3 times within a minute: run Calibrate." (after the FPGA-changed check), the Calibration
+  page line "...: last capture clean, flagged 3 times in a minute: calibrate" or "...; calibrate"; pc_report.c says it.
+  mcp: `CAPF_REPEAT`, `describe_capture()["flagged_repeatedly"]`. docs/protocol.md row 64 updated (bit 5, event 23 timing,
+  the band training).
+- Host tests: test_cap_stage 147 (the owner's unit as a mock: CH1 A4 bad at points 2, 3 in 30 % of captures,
+  deterministic; the band picks 0x08E3, the 0.2.79 single-capture training on the same mock keeps A4; `cs_band_pwm`,
+  `cs_watch` incl. tick wrap), test_cal_wizard 677, test_ui_diag 7213; all `make -s test` green, GCC 10 clean.
+
+**Bench steps (fw 0.2.81, 0x153A, owner present, coordinator on COM10; back up SD 700-710 before Save):**
+1. `#VER fw=0.2.80...` (version not bumped) and GET_HEALTH 106 bit 5 = 0 after boot.
+2. CAL_PROBE mode 1 on CH1, then on CH2 (`python firmware/tools/cal_probe.py COM10 both all 1 0 0 1` or the MCP tool): the
+   screen shows "CH1: training capture stages..." for about half a second before "measuring range 1 of 6"; GET_EVENT_LOG
+   type 23 entries a = 0x10, b = 0x08E3 for both channels (CH2's power-on A3 B4 already equals its expected result);
+   0x63 back to the value before afterwards (GET_HEALTH 104).
+3. The wizard on the screen: Zero level notes "Capture stages: CH1 A3 B4" and "Capture stages: CH2 A3 B4"; Save; GET_CAL
+   358 = 0x08E3, 360 = 0x153A; GET_HEALTH 104 = 0x08E3 with TRAINED.
+4. The 200 MSa/s band sweep (dcoffset sweep, range 0, codes about 110..150 in steps of 2, 20 captures per point; README 10
+   item 2): every core 0 outliers (GET_HEALTH 108..115) and no rail samples at any point, GET_HEALTH 120 stays 0, 106 bit 5
+   stays 0. If CH1 A3 garbles at some code, record which; the next step would be CS_BAND_REPS or a wider band.
+5. Repeat watch (optional, needs a PC_DEBUG image for a raw DEBUG_FPGA write of 0x63 = 0x08E4) with the input parked at
+   code 128..132 by the offset, 200 MSa/s captures for a minute: the Status page Calibration verdict turns amber with
+   "run Calibrate", one event 23 entry for CH1 A only.

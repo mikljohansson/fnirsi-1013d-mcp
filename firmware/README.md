@@ -2084,6 +2084,22 @@ CAL_PROBE put the previous 0x63 back. At boot (and after a calibration load) 0x6
 was trained on the running bitstream, else the power-on 0x08E4. After every accepted full-rate capture the firmware reads
 0x36 and flags a core whose count exceeds its chip partner's by more than 8 (GET_HEALTH 104..123, event 23). Bench list:
 firmware/AGENTS.md section 54.
+
+**Band training (fw 0.2.81).** Bench 2026-10-20 on 0x153A (threshold 32 codes since 0.2.80): a bad stage can garble only
+at some codes and in some captures (CH1 A4 on the owner's unit: rail samples and jumps only while the samples sit at codes
+127..135), so one capture at the centre read it clean and the wizard kept A4. The training now parks the quiet input at
+six codes, 120, 124, .. 140 (`cs_band_pwm`: the offset PWM interpolated from the centre search's two gated slope points),
+and at each point takes two 8000-word captures per stage 2..5; the 0x36 counts are summed per core and stage over the
+band (threshold 32 codes) and a stage is clean when its sum is 0. `cs_pick` then takes, per core, the clean stage inside
+the widest run of clean stages with the most clean stages on both sides, 3 or 4 before a reserve 2 / 5, the power-on
+stage only as the tie-break inside that run (CH1 A clean at 2, 3, 5 gives 3; clean at 3, 4, 5 gives 4; clean at 2..5
+keeps the power-on stage). The B reference-bit retry and the fail-fast "ADC readout fault near code 128" are as before.
+The wizard shows "CH1: training capture stages..." while it runs: 6 PWM points of 60 ms settling plus 48 captures,
+about 0.4 s per pass (twice with the reference pass), so a channel's zero step grows by about half a second.
+In operation a core the self-check flags in 3 captures within a minute (`cs_watch`) sets GET_HEALTH 106 bit 5
+(REPEAT): the Diagnostics Status verdict turns amber with "ADC capture flagged 3 times within a minute: run Calibrate.",
+the Calibration page line adds "calibrate", and event 23 is logged once per core (no longer whenever the flagged set
+changes). It clears when a training is saved; nothing retrains outside the wizard.
 CAL_PROBE runs it from the host with the UI stopped (mode 0, about 1 s), or runs the whole zero step exactly as a
 Calibrate tap does, over the dimmed screen with the dialog, progress and Cancel polls (mode 1, about 15 s);
 `python firmware/tools/cal_probe.py COM10 both all` prints every point (arguments: port, CH1 / CH2 / both, ranges, repeats,

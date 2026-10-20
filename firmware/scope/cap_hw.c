@@ -17,6 +17,7 @@
 static uint16    cap_fpga;                  //running bitstream (fpga_capture_init)
 static pc_hw_cap cap_st;                    //GET_HEALTH / GET_CAL
 static uint8     cap_training;              //the self-check is off while the wizard trains
+static cs_watch  cap_watch;                 //fw 0.2.81: cores flagged 3 times in a minute (PC_CAPF_REPEAT)
 
 void pc_hal_cap_state(pc_hw_cap *c)
 {
@@ -116,12 +117,15 @@ void fpga_capture_commit(void)
   cap_st.trailer     = CS_T_VALID;
   cap_st.stored      = cap_st.value;
   cap_st.stored_fpga = cap_fpga;
-  cap_st.flags       = (uint8)((cap_st.flags & ~PC_CAPF_OTHER) | PC_CAPF_TRAINED);
+  cap_st.flags       = (uint8)((cap_st.flags & ~(PC_CAPF_OTHER | PC_CAPF_REPEAT)) | PC_CAPF_TRAINED);
+
+  //A new trained value: the repeat watch starts again
+  cs_watch_clear(&cap_watch);
 }
 
 void fpga_capture_check(void)
 {
-  uint8 was = cap_st.flagged;
+  uint8 reached;
   uint16 ex[CS_CORES], worst = 0;
   uint32 k;
 
@@ -142,16 +146,21 @@ void fpga_capture_check(void)
   cap_st.flags |= PC_CAPF_FLAGGED;
   cap_st.flagged_n++;
 
-  //Event 23 when the set of flagged cores changes (a = the cores, b = the largest excess), not for every capture
-  if(cap_st.flagged != was)
+  //fw 0.2.81: an intermittent stage flags now and then (bench 2026-10-20, CH1 A4); a core flagged in 3 captures within a
+  //minute keeps failing at its stage: REPEAT (the Diagnostics Calibration verdict asks for Calibrate) and event 23 once
+  //per core (a = the cores that reached it, b = the largest excess of this capture), until a training is saved
+  reached = cs_watch_add(&cap_watch, cap_st.flagged, pc_hal_ms());
+
+  if(reached)
   {
+    cap_st.flags |= PC_CAPF_REPEAT;
     cs_excess(cap_st.cnt, ex);
 
     for(k=0;k<CS_CORES;k++)
       if(ex[k] > worst)
         worst = ex[k];
 
-    pc_usb_log_fpga_capture(cap_st.flagged, worst);
+    pc_usb_log_fpga_capture(reached, worst);
   }
 }
 
@@ -160,16 +169,12 @@ void pc_hal_cap_check(void)
   fpga_capture_check();
 }
 
-int fpga_capture_train(uint8_t cores, int (*measure)(void *ctx, uint16_t v, uint16_t cnt[4]), cs_train *t)
+int fpga_capture_train(uint8_t cores, const cs_io *io, cs_train *t)
 {
-  cs_io io;
-  int   rc;
-
-  io.ctx     = 0;
-  io.measure = measure;
+  int rc;
 
   cap_training = 1;
-  rc = cs_train_run(&io, cap_st.value, cores, t);
+  rc = cs_train_run(io, cap_st.value, cores, t);
   cap_training = 0;
 
   //The result, or back to the value before; event 23 with bit 4 set: a = 0x10 | cores without a clean stage, b = 0x63
