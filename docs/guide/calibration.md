@@ -48,8 +48,6 @@ says in amber "USB is connected: unplug it before Calibrate". **Continue** appea
 "Cores matched" is how close the two cores' zero levels came. "Gain mismatch" is the gain difference between the cores
 that the correction now removes. Save calibration writes the result to the card and closes the wizard.
 
-![Calibration wizard, done](screenshot:calibration-done)
-
 On the stock bitstream screen 2 says "Gain calibration needs the open FPGA bitstream." and "Continue keeps the gains and
 saves the zero level." Continue then goes to Done, and the result line says "earlier gains kept" or "gains not
 measured".

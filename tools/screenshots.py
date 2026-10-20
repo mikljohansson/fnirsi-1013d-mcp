@@ -17,12 +17,11 @@ menu, the Spectrum analyser or phosphor view, the Settings screen, Diagnostics, 
 and waveform viewers or the USB drive screen. Those are "manual" states: put the scope into the state by hand, then
 run ``--only <name>``; the screen is captured as it is. Manual states are skipped in a run without ``--only``.
 
-READ_SCREEN runs in the main loop, and since fw 0.2.78 (protocol 1.23) a main-loop request first makes every open
-modal screen leave by its cancel path. So a manual state works only for the main-loop screens (Scope and its phosphor
-view, Spectrum analyser and its variants, Frequency response, Diagnostics): close any menu or fold-out before the
-capture. The states marked "modal" (a menu, the generator menu, the Settings screen, the calibration wizard, the
-First start screen, the file viewers) close before READ_SCREEN reads the screen, and the USB drive screen has no
-serial port at all; those pictures need another route (a photo of the panel, or a READ_SCREEN that does not yield).
+READ_SCREEN is answered inside an open menu, fold-out or dialog since fw 0.2.94 (read-only requests do not make the
+modal screens leave; fw 0.2.78 .. 0.2.93 closed them first), so a manual state may be a menu (the generator menu, the
+Settings screen, the calibration wizard's screens) as well as a main-loop screen (Scope and its phosphor view, Spectrum
+analyser and its variants, Frequency response, Diagnostics). Close any fold-out you do not want in the picture. The USB
+drive screen has no serial port and cannot be captured.
 
 The generator drives the calibration pin. The ``--generator`` flag is needed for states that enable it (1 kHz,
 50 %, with a probe tip on the calibration post as the documentation shows); without it the states leave the generator
@@ -136,15 +135,10 @@ STATES: list[State] = [
           "CH1; close the fold-out", None),
     State("diagnostics", "manual: Menu > Diagnostics, Status page", None),
     State("diagnostics-calibration", "manual: Menu > Diagnostics, Calibration tab", None),
-    # modal: these close before READ_SCREEN reads the screen (fw 0.2.78+), see the module docstring
-    State("saved-pictures", "manual, modal: Menu > Saved pictures", None),
-    State("saved-waveforms", "manual, modal: Menu > Saved waveforms", None),
-    State("settings", "manual, modal: Menu > Settings > Other settings", None),
-    State("usb-drive", "manual, modal: Menu > USB drive (PC control is disconnected while it shows)", None),
-    State("generator", "manual, modal: the generator menu open (top bar generator button)", None),
-    State("first-start", "manual, modal: the First start screen (boot an uncalibrated unit)", None),
-    State("calibration-zero", "manual, modal: Diagnostics > Calibrate, screen 1 (Zero level)", None),
-    State("calibration-done", "manual, modal: Diagnostics > Calibrate, screen 4 (Done) after both gain steps", None),
+    # menus: captured as they are since fw 0.2.94 (READ_SCREEN is served inside the modal loops)
+    State("settings", "manual: Menu > Settings > Other settings", None),
+    State("generator", "manual: the generator menu open (top bar generator button)", None),
+    State("calibration-zero", "manual: Diagnostics > Calibrate, screen 1 (Zero level)", None),
 ]
 BY_NAME = {s.name: s for s in STATES}
 

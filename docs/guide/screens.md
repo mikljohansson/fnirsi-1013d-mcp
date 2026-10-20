@@ -263,15 +263,11 @@ The file browser for the screenshots that SAVE PIC writes to the card (BMP files
 open the picture. A delete asks "Delete from the SD card?" with Cancel and Delete. Files carry the time when a clock
 module is fitted and switched on, else the file name (Settings > Files > Stamp screenshots with).
 
-![Saved pictures](screenshot:saved-pictures)
-
 ## Saved waveforms
 
 The file browser for the waveforms that SAVE WAVE writes (files in `waveforms`). Open one to see it on the scope
 screen, with its measurement cards. The Frequency response CSV files are not listed here. Reference
 traces can be loaded at power-on (Settings > Files > Reference traces at power-on).
-
-![Saved waveforms](screenshot:saved-waveforms)
 
 ## Settings
 
@@ -333,8 +329,6 @@ defaults until you calibrate again.
 Makes the SD card a USB drive on the PC. The screen says "The SD card is now a USB drive on the PC." PC control (MCP)
 is disconnected while it shows. Eject the drive on the PC before you tap Exit. Exit with the drive still mounted shows
 "Not allowed!".
-
-![USB drive](screenshot:usb-drive)
 
 ## About the screenshots
 

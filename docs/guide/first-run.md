@@ -20,8 +20,6 @@ You can change this later in Menu > Settings > Other settings > **At power-on**:
 The open firmware checks its calibration at every start. While either channel is not calibrated, a full screen
 "First start" appears before the scope. A calibrated unit starts with no screen at all, also after a settings reset.
 
-![First start screen](screenshot:first-start)
-
 The screen lists what the firmware found, one line per check:
 
 | Line | What it means |
