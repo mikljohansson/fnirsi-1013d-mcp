@@ -9,7 +9,8 @@ file when no `CLAUDE.md` exists. Subdirectories carry their own `AGENTS.md` hand
 ## If a person asked you to help install or use the scope
 
 - **Installing the firmware, the card or the FPGA bitstream**: follow `docs/guide/agent-runbook.md`. It has the
-  questions to ask first, the safety gates you may never skip, the commands in order and the recovery paths.
+  questions to ask first, the safety gates you may never skip, the commands in order and the recovery paths. Claude
+  Code loads it as the skill `.claude/skills/fnirsi-install/`.
 - **Setting up the MCP server** so you can use the scope over USB: `docs/agent-setup.md`.
 - **Measuring with the scope**: `docs/agent-measurement-guide.md` (Claude Code loads it as the skill
   `.claude/skills/fnirsi-scope/`); the tools and their safety tiers are in `docs/mcp-tools.md`.

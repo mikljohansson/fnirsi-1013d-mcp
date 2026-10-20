@@ -8,46 +8,104 @@ Open firmware for the FNIRSI 1013D tablet oscilloscope that boots from a micro S
 hardware than the stock firmware does. It also lets an AI coding agent use the scope over USB, with you at the touch
 screen the whole time.
 
-## What you get that the stock scope cannot do
+Most of it was written by AI agents coordinated by the maintainer, and everything was verified on the maintainer's
+single unit. Opening the case may void your warranty.
 
-- **16,384 samples per channel instead of 3,000**, with a trigger you can place anywhere in the record.
-- **Clean traces at every time base.** The FPGA filters the signal before it decimates, where the stock and Atlan
-  firmware skip samples and alias.
-- **A spectrum analyser** on the scope, with waterfall and density views.
-- **A frequency-response mode** that measures a filter or tank with nothing but the scope and its calibration post.
-- **A calibration wizard** that measures each ADC core of each channel.
-- **Digital phosphor view**, also in X-Y.
-- **External trigger** on the calibration post.
-- **A diagnostics screen**: identity, FPGA features, calibration state, USB link, battery, an event log, a report
-  saved to the card.
-- **Your AI coding agent can drive the scope over USB** (Claude Code, Codex, any MCP client) while you keep using the
-  touch screen: no remote lock-out, the screen follows the agent and the agent sees your changes.
-- **Everything is reversible.** The stock firmware stays in the scope's flash. Pull the card and it is stock again.
+## What it costs
+
+- **With the SD card alone**: no soldering, about half an hour, and reversible by removing the card. The stock firmware
+  stays in the scope's own flash, and the boot menu at power-on offers the open firmware, the stock firmware and FEL
+  (the chip's USB recovery mode) side by side.
+- **With the optional FPGA bitstream** (the FPGA's configuration file, which adds the items marked **FPGA** below):
+  solder a 2x3 header, a 3.3 V SPI programmer such as an FT2232 or FT232H board, and an evening. Reversible only
+  with your backup of the FPGA flash, because the stock firmware does not run on a custom bitstream.
+
+## What you get
+**On the scope**
+- **Scope view**: six hardware ranges plus software zoom; **16,384 samples per capture and channel instead of
+  3,000**, with the trigger placed anywhere in the capture by dragging (**FPGA**); trigger Auto, Normal or Single on
+  a rising or falling edge of CH1, CH2 or an external signal on the calibration post (**FPGA**); sample rate, time
+  per division and memory depth; roll mode; twelve measurements per channel as cards; time and voltage cursors;
+  digital phosphor with persistence and a heat palette; X-Y; an overview bar under every plot that previews the whole
+  capture, spectrum or sweep, with a window you drag.
+- **Averaging of successive captures** (ACQ > Average): on bitstream 0x1536 and later the FPGA sums them at the fast
+  rates (**FPGA**); otherwise, and for filtered and slow captures, the MCU does.
+- **Clean traces at every sweep speed** (**FPGA**): Acquisition > Filter picks boxcar, CIC2 or CIC3, with or without
+  the compensation FIR, and the FPGA filters the 200 MS/s stream before it slows it down, where the stock and Atlan
+  firmware skip samples and show ghost signals that are not there.
+- **Spectrum analyser**: FFT of 1024 to 4096 points, Hann, flat-top or rectangular window, averaging and max hold,
+  waterfall and density views, THD, tap to zoom, drag to pan, AUTO SET.
+- **Frequency response analyser, a Bode plot** (**FPGA**): magnitude and phase against frequency of a filter, divider
+  or tank with the scope alone. The calibration post (the square-wave output hook on the side of the scope) drives
+  it, CH1 and CH2 read its input and output; AUTO SET finds the span, cards give the corner frequency, peak and Q,
+  the table saves as CSV.
+- **Generator** (**FPGA**): a square wave on the calibration post, frequency and duty of your choice.
+- **The ADCs are calibrated core by core, and the firmware checks every fast capture.** Each channel is two
+  interleaved ADC cores; the wizard measures a zero and a gain per core and clock class (the gain steps need the
+  bitstream), a tracker follows the full-rate drift in the background, on 0x153A and later the wizard also trains
+  when the FPGA captures each core's data, the FPGA self-checks every 200 MS/s capture, and a garbled one is taken again.
+- A first-run screen, **Diagnostics** (status tiles, a calibration page, an event log, a report saved to the card),
+  viewers for saved pictures and waveforms, Settings, USB drive mode.
+
+**From your AI agent over USB** (30 tools in the default profile; raw FPGA access is off unless you enable it; no
+remote lock-out: you and the agent change the same live settings, and the screen follows)
+- **Read**: identity, capabilities, status, settings, calibration and voltage scaling, event log, the scope's own
+  spectrum, card info, health, a screenshot; a report with a plot and an HTML page of any result.
+- **Set**: channel range, coupling, probe factor and offset; sample rate; decimation filter (**FPGA**); trigger
+  source, edge, level in volts, mode, position before the trigger, capture length and auto time-out.
+- **Capture**: one capture, or a time window of it, with the raw ADC codes per core; the trace on the screen;
+  arm, wait, force and stop; averaged captures aligned on an edge, or summed in the FPGA (**FPGA**); a burst of
+  triggers captured back to back (**FPGA**; built and simulator-tested, not yet benched); capture and FFT; a
+  pulse-induction decay fit; measurements; calibrate volts against a known DC voltage.
+- **Drive**, each with a confirmation token: the generator, a loopback self-test, a Bode sweep. Every
+  hardware-changing call goes to an audit log.
+
+**Host tools** in the same package: **firmware updates from your PC over USB**, no card swapping
+(`fnirsi1013d-flash` reboots the scope into FEL, loads a new image into RAM and can write it to the card after a
+backup); `fnirsi1013d-bode` (a sweep to CSV, JSON and NPZ); `fnirsi1013d-sd` (card sectors over USB);
+`fnirsi1013d-bench`, `fnirsi1013d-soak`; `fnirsi1013d-sim` (the simulator: every tool without a scope). Two Claude
+Code skills: `fnirsi-scope` (how to measure) and `fnirsi-install` (the install runbook).
 
 | | |
 |---|---|
-| ![Scope view, CH1 and CH2 on an RC network, a host connected](docs/screenshots/scope.png) | ![Spectrum analyser, waterfall view](docs/screenshots/spectrum-waterfall.png) |
-| Scope view, two channels, an AI agent connected (the MCP chip) | Spectrum analyser, waterfall view |
-| ![Frequency response of a two-pole RC ladder, magnitude and phase](docs/screenshots/frequency-response-sweep.png) | ![Phosphor view in X-Y](docs/screenshots/phosphor-xy.png) |
-| Frequency response of an RC ladder, measured by the scope alone | Digital phosphor view in X-Y |
+| ![A 16,384-sample capture with the trigger near the start](docs/screenshots/scope-deep-memory.png) | ![Spectrum analyser, waterfall view](docs/screenshots/spectrum-waterfall.png) |
+| A 16,384-sample capture with the trigger near the start | Spectrum analyser, waterfall view |
+| ![Frequency response of a two-pole RC ladder, magnitude and phase](docs/screenshots/frequency-response-sweep.png) | ![Diagnostics, all checks OK](docs/screenshots/diagnostics.png) |
+| Frequency response of an RC ladder, measured by the scope alone | Diagnostics, all checks OK |
+
+## What's next
+
+Ideas, not promises ([`docs/plans/roadmap.md`](docs/plans/roadmap.md), sections 6 and 8): more trigger types (pulse
+width, Nth edge, runt, window, timeout) behind a Type row in the trigger menu; peak-detect acquisition; a streaming
+data logger (continuous filtered samples at up to about 1 MS/s into the 32 MB RAM and on to the host); a pulse pattern
+generator with a trigger output; a hardware frequency and period counter feeding the measurement cards; deeper plain
+memory (about 24,576 samples per channel from the spare block RAM); a DVM readout, serial decode, mask testing and
+CSV export; and testers with EF2L45 and EP4CE6 units.
 
 ## What you need
 
-- An FNIRSI 1013D with the **Anlogic AL3A10** FPGA: an unmarked 144-pin chip next to a small Winbond 25Q80 flash
-  with an unpopulated 2x3 header. [`docs/hardware-prep.md`](docs/hardware-prep.md) helps you identify your board.
-- A spare micro SD card and a PC. Writing the card is tested on Linux and on WSL; the Windows path is untested.
-- Only for the optional FPGA bitstream (the FPGA's configuration file, which adds the deep memory, the filters, the
-  generator and the external trigger): a 3.3 V SPI programmer and a soldering iron for the six header pins.
-- Everything was verified on one unit. The EF2L45 and Altera EP4CE6 variants are inherited from Atlan4's firmware
-  and untested here; the bitstreams are for the AL3A10 only.
+- [ ] **An FNIRSI 1013D with the Anlogic AL3A10 FPGA.** There is no way to tell from outside: open the back and
+  compare with the photo. The FPGA is the unmarked 144-pin chip; next to it sits a small 8-pin flash chip marked
+  25Q80 with an empty 2x3 header. A chip marked EF2L45 or EP4CE6 is another variant, inherited from Atlan4's firmware
+  and untested here ([`docs/hardware-prep.md`](docs/hardware-prep.md)).
+  ![The AL3A10 board: MCU, FPGA, FPGA flash chip, ADCs, with the programmer's wires on the header](docs/photos/board-al3a10-programmer.jpg)
+- [ ] **A spare micro SD card** (up to 32 GB if you format it on Windows).
+- [ ] **A PC.** Every command runs in a WSL Ubuntu terminal or on Linux; a card reader is attached to WSL with
+  `usbipd` ([`docs/guide/install.md`](docs/guide/install.md)).
+- [ ] **For the FPGA bitstream only: a 3.3 V SPI programmer.** The FT2232D route is the tested one. A plain CH341A
+  can drive 5 V on the data lines and has killed a flash ([`docs/hardware-prep.md`](docs/hardware-prep.md),
+  section 2.2). Six pins go on the header, soldered from the back:
+  ![The 2x3 header beside the FPGA flash chip, pins soldered from the other side of the board](docs/photos/fpga-flash-header.jpg)
 
 ## Install
 
-1. **Point your AI agent** (Claude Code, Codex, any MCP client) at a clone of this repository and ask it to guide
-   you through hacking your scope. It will read [`docs/guide/agent-runbook.md`](docs/guide/agent-runbook.md) and
-   walk you through the backups, the card and the bitstream.
+**Let your AI agent guide you.** Install [Claude Code](https://claude.com/claude-code) or Codex, run
+`git clone https://github.com/mikljohansson/fnirsi-1013d-mcp`, open a terminal in that folder, start the agent
+(`claude` or `codex`) and type: *"Read docs/guide/agent-runbook.md and guide me through installing this firmware on
+my FNIRSI 1013D."* The agent prepares each command and checks its output, you do the physical steps, and it stops
+when any check fails. In Claude Code the `fnirsi-install` skill picks the runbook up by itself.
 
-Or by hand (every command and its expected result: [`docs/guide/install.md`](docs/guide/install.md)):
+### By hand (a WSL or Linux shell; every command with its expected result: [`docs/guide/install.md`](docs/guide/install.md))
 
 1. **Back up** the SD card you will use and, if you will flash a bitstream, the FPGA flash
    ([`docs/hardware-prep.md`](docs/hardware-prep.md), section 3).
@@ -58,35 +116,29 @@ Or by hand (every command and its expected result: [`docs/guide/install.md`](doc
    sha256sum -c SHA256SUMS --ignore-missing
    ```
 
-3. **Prepare the card** with one FAT32 partition that starts at 8 MiB (sector 16384) or later, then build the SD
-   parts from the tools zip. This downloads Atlan4's bootloader and updater from his repository and checks their
+3. **Prepare the card** with one FAT32 partition that starts at 8 MiB (sector 16384) or later: the `parted` and
+   `diskpart` commands are in [`docs/guide/install.md`](docs/guide/install.md), "Prepare the card". Then build the
+   SD parts from the tools zip. This downloads Atlan4's bootloader and updater from his repository and checks their
    hashes:
 
    ```
    python3 make_release_sd_package.py build --scope fnirsi_1013d-fw-X.Y.Z.bin --scope-sha256 <hash from SHA256SUMS> --parts parts
    ```
 
-4. **Write the parts** to the card (Linux, or WSL with the card reader attached):
+4. **Write the parts** to the card:
 
    ```
    python3 make_sd_image.py write --device /dev/sdX --bootloader parts/bootloader.bin --updater parts/updater.bin --scope parts/scope.bin --boot-mode 4
    ```
 
-5. **Optional, the bitstream**: flash 0x153B with your SPI programmer as
+5. **Optional, the bitstream**: flash the recommended bitstream (0x153B) with your SPI programmer as
    [`fpga/al3/dist/BITSTREAMS.md`](fpga/al3/dist/BITSTREAMS.md) describes. Then boot, and run the calibration
    wizard when the first-run screen asks ([`docs/guide/first-run.md`](docs/guide/first-run.md)).
 
-## Risks and the way back
-
-- **Back up first**, and keep the backups: the SD card, and the FPGA flash twice (the two reads must match).
-- **Never `dd` the whole SD package** to the card. That wipes the calibration, settings and boot-mode sectors. The
-  card tool writes only the parts you give it.
-- **The boot menu** at power-on offers the open firmware, the stock firmware and FEL (the chip's USB recovery mode,
-  through which a PC can load firmware into RAM). Remove the card and the stock firmware runs.
-- **FPGA rollback**: write your backup of the FPGA flash back with the same programmer. Do this before you go back to
-  the stock firmware for good: the stock firmware does not run on a custom bitstream.
-- **Use at your own risk.** A wrong programmer pin or 5 V logic can damage the board, and a failed write can leave
-  the scope unbootable until you restore a backup.
+**Risks and the way back.** Back up first and keep the backups: the SD card, and the FPGA flash twice (the two reads
+must match). Never `dd` the whole SD package to the card: that wipes the calibration, settings and boot-mode sectors.
+A wrong programmer pin or 5 V logic can damage the board, and a failed write can leave the scope unbootable until you
+restore a backup. Use at your own risk.
 
 ## Let your AI agent use the scope
 
@@ -96,37 +148,33 @@ fnirsi1013d-mcp --list-tools
 claude mcp add --scope user fnirsi1013d -- fnirsi1013d-mcp --port auto
 ```
 
-Then ask, for example: "average 32 captures at 1 MS/s and fit the decay after the trigger". Codex setup, the
-simulator for trying it without a scope, and what an agent should know before it measures:
-[`docs/agent-setup.md`](docs/agent-setup.md).
+Then ask, for example: "measure the ripple on my power supply and tell me its frequency", or "average 32 captures at
+1 MS/s and fit the decay after the trigger". Codex, the simulator for trying it without a scope, and what an agent
+should know before it measures: [`docs/agent-setup.md`](docs/agent-setup.md).
 
 ## Documentation
 
-Site: <https://mikljohansson.github.io/fnirsi-1013d-mcp/>
-
-| Shelf | Start here |
+| Shelf (all on the [documentation site](https://mikljohansson.github.io/fnirsi-1013d-mcp/)) | Start here |
 |---|---|
 | User guide: install, first run, calibration, every screen, the generator | [`docs/guide/install.md`](docs/guide/install.md) |
 | Agent guide: setup, the MCP tools and their safety tiers, the measurement guide | [`docs/agent-setup.md`](docs/agent-setup.md) |
-| Engineering: building, the protocol, the articles on the hard parts, the bench log | [`docs/development.md`](docs/development.md) |
+| Engineering: building, the protocol, articles on how each feature was built, what was measured on the unit | [`docs/development.md`](docs/development.md) |
 
 ## Contributing and reports from other units
 
-Issues and pull requests are welcome, from people and from agents. The most useful contribution is a report from
-another unit: the FPGA variant and the bitstream version shown in Diagnostics, the firmware version, what you did,
-what you saw, and whether the calibration wizard passes. How to build and test: [`docs/development.md`](docs/development.md).
+Issues and pull requests are welcome, from people and from agents ([`docs/development.md`](docs/development.md) says
+how to build and test). The most useful contribution is a report from another unit: the FPGA variant and bitstream
+version shown in Diagnostics, the firmware version, what you did and saw, and whether the calibration wizard passes.
 
 ## Credits
 
-- [pecostm32](https://github.com/pecostm32): the reverse engineering (schematics, FPGA bus traces, emulator) and the
-  original open firmware.
-- [Atlan4](https://github.com/Atlan4/Fnirsi1013D): years of firmware development, calibration, the custom FPGA
-  bitstreams for all three variants, the bootloader and updater.
-- [Donwulff](https://github.com/Donwulff/FNIRSI_1014D_Firmware): audited fixes, a test harness and the headless
-  Anlogic TD flow.
-- The EEVblog "FNIRSI-1013D 100MHz tablet oscilloscope" thread community.
-- Research, firmware, MCP server and bench work were done by Claude through Claude Code agents, coordinated by
-  [@mikljohansson](https://github.com/mikljohansson), who owns the scope, the soldering iron and the decisions.
+Built on the work of [pecostm32](https://github.com/pecostm32) (the reverse engineering: schematics, FPGA bus traces,
+emulator, and the original open firmware), [Atlan4](https://github.com/Atlan4/Fnirsi1013D) (years of firmware
+development, calibration, the custom FPGA bitstreams for all three variants, the bootloader and updater),
+[Donwulff](https://github.com/Donwulff/FNIRSI_1014D_Firmware) (audited fixes, a test harness and the headless Anlogic
+TD flow) and the EEVblog "FNIRSI-1013D 100MHz tablet oscilloscope" thread community. Research, firmware, MCP server
+and bench work were done by Claude through Claude Code agents, coordinated by
+[@mikljohansson](https://github.com/mikljohansson), who owns the scope, the soldering iron and the decisions.
 
 ## Licence
 
