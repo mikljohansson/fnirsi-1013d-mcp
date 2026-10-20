@@ -814,6 +814,8 @@ void ud_cal_verdict(const ud_input *in, ud_verdict *v)
     p = s_hex(p, in->fpga, 4);
     s_str(p, "): recalibrate.");
   }
+  else if(in->health[H_CAP + 2] & PC_CAPF_REPEAT)
+    s_str(p, "ADC capture flagged 3 times within a minute: run Calibrate.");
   else if(!(all & F_GAINS))
   {
     if(in->variant == 1)
@@ -1215,8 +1217,15 @@ static int ud_cap_line(const ud_input *in, char *p)
     return colour;
   }
 
+  //fw 0.2.81: flagged 3 times in a minute (since the last saved training) asks for Calibrate even after a clean capture
   if(!(h[2] & PC_CAPF_FLAGGED))
   {
+    if(h[2] & PC_CAPF_REPEAT)
+    {
+      s_str(p, "last capture clean, flagged 3 times in a minute: calibrate");
+      return UD_C_WARN;
+    }
+
     s_str(p, "capture clean");
     return colour;
   }
@@ -1235,6 +1244,9 @@ static int ud_cap_line(const ud_input *in, char *p)
       p = s_str(p, ": ");
       p = s_plural(p, ex[k], "outlier", "outliers");
     }
+
+  if(h[2] & PC_CAPF_REPEAT)
+    s_str(p, "; calibrate");
 
   return UD_C_WARN;
 }

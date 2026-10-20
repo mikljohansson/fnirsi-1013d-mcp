@@ -240,15 +240,35 @@ static int cal_cap_measure(void *ctx, uint16_t v, uint16_t cnt[4])
   return 0;
 }
 
+//fw 0.2.81: the training band's offset PWM per point (cs_band_pwm from the gated slope points of cal_centre)
+#define CAL_BAND_SETTLE_MS  60      //per point: 4 codes (about 15 PWM counts) from the last, as cal_measure's steps
+
+static int32_t cal_band_pwm[CS_BAND_POINTS];
+
+static int cal_cap_park(void *ctx, uint32_t p)
+{
+  (void)ctx;
+
+  if(p >= CS_BAND_POINTS)
+    return -1;
+
+  calibrationsettings.dc_calibration_offset[0] = (uint16)cal_band_pwm[p];
+  fpga_set_channel_offset(&calibrationsettings);
+  timer0_delay(CAL_BAND_SETTLE_MS);
+  return 0;
+}
+
 //fw 0.2.79: FPGA 0x153A capture stage training of channel ch's two cores, the first thing of its zero step: range 0, the
-//input parked at code 128 by the gated centre search (the code where most bits flip, so a stage inside the AD9288
-//data transition counts at once), a quiet input checked (a signal would count at every stage), then cs_train_run.
+//gated centre search, a quiet input checked (a signal would count at every stage), then cs_train_run. fw 0.2.81: over
+//the band of codes 120..140 around the centre (cs_band_pwm, CS_BAND_REPS captures per stage and point), since a stage at
+//the edge of the AD9288 data transition garbles only at some codes and in some captures (bench 2026-10-20, CH1 A4).
 //ACAL_OK, ACAL_E_RESPONSE / ACAL_E_NOISE (the input), ACAL_E_READOUT (a core without a clean stage: fail fast)
 static int cal_train(uint32 ch, cs_train *t, acal_fail *fail)
 {
+  static const cs_io io = { 0, CS_BAND_POINTS, CS_BAND_REPS, cal_cap_park, cal_cap_measure };
   acal_range_meas m;
   acal_point      pt[ACAL_POINTS];
-  int32_t         centre;
+  int32_t         centre, mlo, mhi;
   uint32          k, i;
   int             rc;
 
@@ -273,12 +293,25 @@ static int cal_train(uint32 ch, cs_train *t, acal_fail *fail)
         return ACAL_E_NOISE;
       }
 
-  calibrationsettings.dc_calibration_offset[0] = (uint16)m.pwm;
-  fpga_set_channel_offset(&calibrationsettings);
-  timer0_delay(60);
+  //The band's PWM points from the gated slope points (both cores' mean); every one inside the PWM range, else the
+  //offset control cannot reach the band (fail fast as a centre that does not respond)
+  mlo = (m.mean16_lo[ACAL_GATED][0] + m.mean16_lo[ACAL_GATED][1]) / 2;
+  mhi = (m.mean16_hi[ACAL_GATED][0] + m.mean16_hi[ACAL_GATED][1]) / 2;
+
+  for(i=0;i<CS_BAND_POINTS;i++)
+  {
+    cal_band_pwm[i] = cs_band_pwm(m.pwm_lo, mlo, m.pwm_hi, mhi, cs_band_code(i));
+
+    if((cal_band_pwm[i] < ACAL_PWM_MIN) || (cal_band_pwm[i] > ACAL_PWM_MAX))
+    {
+      acal_fail_point(pt, ACAL_E_RESPONSE, fail);
+      return ACAL_E_RESPONSE;
+    }
+  }
+
   cal_set_rate(CAL_RATE_FULL);
 
-  rc = fpga_capture_train((uint8_t)(ch ? 0x0C : 0x03), cal_cap_measure, t);
+  rc = fpga_capture_train((uint8_t)(ch ? 0x0C : 0x03), &io, t);
   return (rc == CS_OK) ? ACAL_OK : ACAL_E_READOUT;
 }
 
@@ -312,7 +345,8 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
   {
     cs_train t;
 
-    if(wiz_progress(ch, 0))
+    //fw 0.2.81: the band training takes about a second per channel (two with the reference pass): say so
+    if(wiz_progress(ch, CW_PR_TRAIN))
       return CW_RC_CANCELLED;
 
     rc = cal_train(ch, &t, fail);

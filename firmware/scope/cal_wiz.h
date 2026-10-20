@@ -129,6 +129,8 @@ const char *cw_instruction(const cal_wiz *w, int line);                         
 const char *cw_reason_text(int rc);                                                //plain words for an ACAL_E_*
 char *cw_fmt_tenths(char *p, uint32_t v);                                          //13 -> "1.3"
 char *cw_progress(char *p, uint32_t ch, uint32_t range);                           //"CH1: measuring range 3 of 6"
+#define CW_PR_TRAIN        0xFFu  //cw_progress range: the 0x153A capture stage training (fw 0.2.81), "CH1: training
+                                  //capture stages..."
 char *cw_zero_line(const cal_wiz *w, uint32_t ch, char *p);                        //screen 1 result ("" when none)
 //fw 0.2.67: the small line under a failed channel's result: where (range, rate, point), the PWM and the raw per-core
 //means with their extremes and clipped samples, e.g. "Range 1, 200 MSa/s, zero point, PWM 812: A 130.1 (126..135),

@@ -384,6 +384,19 @@ static void test_zero_fail_note(void)
   T_STR(t, "");
   cw_zero_note(&w, 1, t);
   T_STR(t, "Capture stages: CH2 A3 B4 A-clk");
+
+  //fw 0.2.81: the band training's result on the owner's unit (CH1 A4 garbles at codes 127..135): 0x08E3
+  rc[0] = rc[1] = ACAL_OK;
+  cw_init(&w, 1);
+  ev(&w, CW_EV_CALIBRATE);
+  take(&w);
+  cw_cap_result(&w, 0, CW_C_DONE, 0x08E3, 0);
+  cw_cap_result(&w, 1, CW_C_DONE, 0x08E3, 0);
+  cw_zero_result(&w, rc, match_ok);
+  cw_zero_note(&w, 0, t);
+  T_STR(t, "Capture stages: CH1 A3 B4");
+  cw_zero_note(&w, 1, t);
+  T_STR(t, "Capture stages: CH2 A3 B4");
 }
 
 static void test_gain_nosignal_and_fail(void)
@@ -586,6 +599,10 @@ static void test_texts(void)
 
   cw_progress(t, 0, 2);
   T_STR(t, "CH1: measuring range 3 of 6");
+  cw_progress(t, 0, CW_PR_TRAIN);
+  T_STR(t, "CH1: training capture stages...");
+  cw_progress(t, 1, CW_PR_TRAIN);
+  T_STR(t, "CH2: training capture stages...");
   cw_progress(t, 1, 5);
   T_STR(t, "CH2: measuring range 6 of 6");
 

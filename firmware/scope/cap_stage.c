@@ -27,63 +27,97 @@ uint16_t cs_ref_bit(uint32_t core)
 
 #define CLEAN(c, s)  (((c) >> (s)) & 1)
 
+//fw 0.2.81 (bench 2026-10-20: CH1 A clean at 2, 3, 5, bad at 4 picked 3): every clean stage scored by the width of its
+//clean run, being 3 or 4, its distance to the nearer end of the run, being the power-on stage or next to it, in that
+//order. 0.2.79 kept the power-on stage whenever 3 and 4 were both clean
 uint8_t cs_pick(uint8_t clean, uint8_t po)
 {
-  int c2 = CLEAN(clean, 2), c3 = CLEAN(clean, 3), c4 = CLEAN(clean, 4), c5 = CLEAN(clean, 5);
+  int     s, lo, hi, margin, score, best_score = -1;
+  uint8_t best = CS_NONE;
 
   if((po != 3) && (po != 4))
     po = 4;
 
-  //Both allowed stages clean: the one in the middle of the clean run, the power-on one when the run is symmetric
-  if(c3 && c4)
-  {
-    if(c2 && !c5)
-      return 3;
-    if(c5 && !c2)
-      return 4;
-    return po;
-  }
-
-  if(c3)
-    return 3;
-  if(c4)
-    return 4;
-
-  //Only a reserve: the one next to the power-on stage when both are clean
-  if(c2 && c5)
-    return (po == 3) ? 2 : 5;
-  if(c2)
-    return 2;
-  if(c5)
-    return 5;
-
-  return CS_NONE;
-}
-
-//One pass: every core in mask at stage s (with ref set as given), s = CS_STAGE_MIN..MAX; clean bits per core
-static int cs_pass(const cs_io *io, cs_train *t, uint16_t base, uint8_t mask, uint8_t clean[CS_CORES])
-{
-  uint16_t cnt[CS_CORES], v;
-  uint32_t k;
-  uint8_t  s;
-
   for(s=CS_STAGE_MIN;s<=CS_STAGE_MAX;s++)
   {
-    v = base;
+    if(!CLEAN(clean, s))
+      continue;
 
-    for(k=0;k<CS_CORES;k++)
-      if(mask & (1u << k))
-        v = cs_with(v, k, s);
+    for(lo=s;(lo > CS_STAGE_MIN) && CLEAN(clean, lo - 1);lo--);
+    for(hi=s;(hi < CS_STAGE_MAX) && CLEAN(clean, hi + 1);hi++);
 
-    t->captures++;
+    margin = ((s - lo) < (hi - s)) ? (s - lo) : (hi - s);
+    score  = (hi - lo + 1) * 64 + (((s == 3) || (s == 4)) ? 16 : 0) + margin * 4 +
+             ((s == po) ? 2 : (((s == po - 1) || (s == po + 1)) ? 1 : 0));
 
-    if(io->measure(io->ctx, v, cnt))
+    if(score > best_score)
+    {
+      best_score = score;
+      best       = (uint8_t)s;
+    }
+  }
+
+  return best;
+}
+
+uint32_t cs_band_code(uint32_t i)
+{
+  return CS_BAND_FIRST + i * CS_BAND_STEP;
+}
+
+int32_t cs_band_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t mean16_hi, uint32_t code)
+{
+  int32_t resp = mean16_lo - mean16_hi, n;
+
+  if((resp <= 0) || (pwm_hi <= pwm_lo))
+    return -1;
+
+  //Rounded to the nearest count, either sign
+  n = (mean16_lo - (int32_t)(code * 16)) * (pwm_hi - pwm_lo);
+  return pwm_lo + ((n >= 0) ? (n + resp / 2) / resp : -((-n + resp / 2) / resp));
+}
+
+//One pass over the band: at every point, every core in mask at stage s (with ref set as given), s = CS_STAGE_MIN..MAX,
+//io->reps captures each; the counts summed per core and stage, a stage clean when its sum is 0
+static int cs_pass(const cs_io *io, cs_train *t, uint16_t base, uint8_t mask, uint32_t sum[CS_CORES][CS_STAGES],
+                   uint8_t clean[CS_CORES])
+{
+  uint16_t cnt[CS_CORES], v;
+  uint32_t k, p, r;
+  uint8_t  s;
+
+  for(p=0;p<io->points;p++)
+  {
+    if(io->park(io->ctx, p))
       return CS_E_IO;
 
-    for(k=0;k<CS_CORES;k++)
-      if((mask & (1u << k)) && (cnt[k] == 0))
-        clean[k] |= (uint8_t)(1u << s);
+    for(s=CS_STAGE_MIN;s<=CS_STAGE_MAX;s++)
+    {
+      v = base;
+
+      for(k=0;k<CS_CORES;k++)
+        if(mask & (1u << k))
+          v = cs_with(v, k, s);
+
+      for(r=0;r<io->reps;r++)
+      {
+        t->captures++;
+
+        if(io->measure(io->ctx, v, cnt))
+          return CS_E_IO;
+
+        for(k=0;k<CS_CORES;k++)
+          if(mask & (1u << k))
+            sum[k][s - CS_STAGE_MIN] += cnt[k];
+      }
+    }
   }
+
+  for(k=0;k<CS_CORES;k++)
+    if(mask & (1u << k))
+      for(s=CS_STAGE_MIN;s<=CS_STAGE_MAX;s++)
+        if(sum[k][s - CS_STAGE_MIN] == 0)
+          clean[k] |= (uint8_t)(1u << s);
 
   return CS_OK;
 }
@@ -103,6 +137,10 @@ int cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t)
   t->value   = start;
   t->cores   = (uint8_t)(cores & 0x0F);
 
+  //No band, no captures: nothing would be measured (fail fast, not "all clean")
+  if(!io->points || !io->reps)
+    return CS_E_IO;
+
   //Own-encode timing for the trained B cores first
   base = start;
 
@@ -110,7 +148,7 @@ int cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t)
     if(t->cores & (1u << k))
       base = (uint16_t)(base & ~cs_ref_bit(k));
 
-  rc = cs_pass(io, t, base, t->cores, t->clean);
+  rc = cs_pass(io, t, base, t->cores, t->sum, t->clean);
 
   if(rc != CS_OK)
     return rc;
@@ -139,7 +177,7 @@ int cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t)
       if(refmask & (1u << k))
         rbase = (uint16_t)(rbase | cs_ref_bit(k));
 
-    rc = cs_pass(io, t, rbase, refmask, t->clean_ref);
+    rc = cs_pass(io, t, rbase, refmask, t->sum_ref, t->clean_ref);
 
     if(rc != CS_OK)
       return rc;
@@ -198,6 +236,48 @@ uint8_t cs_flagged(const uint16_t cnt[CS_CORES])
       m |= (uint8_t)(1u << k);
 
   return m;
+}
+
+void cs_watch_clear(cs_watch *w)
+{
+  uint32_t i;
+
+  for(i=0;i<sizeof(*w);i++)
+    ((uint8_t *)w)[i] = 0;
+}
+
+uint8_t cs_watch_add(cs_watch *w, uint8_t flagged, uint32_t now_ms)
+{
+  uint32_t k, i;
+  uint8_t  bit, reached = 0;
+
+  for(k=0;k<CS_CORES;k++)
+  {
+    bit = (uint8_t)(1u << k);
+
+    if(!(flagged & bit))
+      continue;
+
+    if(w->n[k] < CS_REPEAT_N - 1)
+    {
+      w->t[k][w->n[k]++] = now_ms;
+      continue;
+    }
+
+    //The oldest of the last CS_REPEAT_N - 1 flags within the window (unsigned: the tick wraps)
+    if(((uint32_t)(now_ms - w->t[k][0]) <= CS_REPEAT_MS) && !(w->repeat & bit))
+    {
+      w->repeat |= bit;
+      reached   |= bit;
+    }
+
+    for(i=0;i+1<CS_REPEAT_N - 1;i++)
+      w->t[k][i] = w->t[k][i + 1];
+
+    w->t[k][CS_REPEAT_N - 2] = now_ms;
+  }
+
+  return reached;
 }
 
 static char *cs_str(char *p, const char *s)

@@ -361,6 +361,8 @@ typedef struct
 #define PC_CAPF_READ         0x04  //counts were read after a full-rate capture since boot
 #define PC_CAPF_FLAGGED      0x08  //the last read flagged a core
 #define PC_CAPF_OTHER        0x10  //a stored value exists for another bitstream (not applied: recalibrate)
+#define PC_CAPF_REPEAT       0x20  //fw 0.2.81: a core was flagged in 3 captures within a minute since the last saved
+                                   //training (cap_stage.h cs_watch): recalibrate
 
 void     pc_hal_cap_state(pc_hw_cap *c);                     //any context
 void     pc_hal_cap_check(void);                             //[FPGA] after a full-rate host capture: read 0x36

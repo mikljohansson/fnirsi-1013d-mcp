@@ -335,6 +335,7 @@ static void sec_identity(pc_text *t, pc_session *s, const uint8_t *sd, int sd_ok
     pc_text_udec(t, (uint32_t)(h[116] | (h[117] << 8) | (h[118] << 16) | ((uint32_t)h[119] << 24)));
     pc_text_str(t, ", flagged ");
     pc_text_udec(t, (uint32_t)(h[120] | (h[121] << 8) | (h[122] << 16) | ((uint32_t)h[123] << 24)));
+    pc_text_str(t, (h[106] & PC_CAPF_REPEAT) ? "; a core flagged 3 times within a minute: recalibrate" : "");
     pc_text_nl(t);
   }
 

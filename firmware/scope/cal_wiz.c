@@ -352,6 +352,10 @@ const char *cw_reason_text(int rc)
 char *cw_progress(char *p, uint32_t ch, uint32_t range)
 {
   p = cw_ch(p, ch);
+
+  if(range == CW_PR_TRAIN)
+    return cw_str(p, ": training capture stages...");
+
   p = cw_str(p, ": measuring range ");
   p = cw_uint(p, range + 1);
   p = cw_str(p, " of ");
