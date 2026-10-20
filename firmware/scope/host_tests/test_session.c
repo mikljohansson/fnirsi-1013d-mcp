@@ -1881,6 +1881,81 @@ static void test_sd(void)
   r = req(PC_CMD_SD_INFO, "\0", 1);           T_EQ(r.h.status, PC_E_UNSUPPORTED);
 }
 
+static void t_err_text(resp_t r, const char *text)
+{
+  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
+  T_EQ(r.len, 2 + strlen(text)); T_MEM(r.p + 2, text, strlen(text));
+}
+
+static void mbr_part(uint32_t start)
+{
+  pc_put_u32(mock.sd + 0x1BE + 8, start);
+  pc_ident_invalidate();
+}
+
+//fw 0.2.101: the write window ends at the partition, capped at PC_SD_LIMIT = 16384 (was 2048). fw 0.2.100's image is
+//1510 sectors, 750..2259: it fits a card partitioned at 8192 and not one partitioned at 2048.
+static void test_sd_window(void)
+{
+  static uint8_t img[1510 * 512];
+  uint32_t off, n, w;
+  resp_t r;
+
+  setup(0x1532);
+  mock.sd_sectors = MOCK_SD_MAX_SECTORS;
+  mock_sd_image(750, "eGON.EXE", 1510);
+  memcpy(img, mock.sd + 750 * 512, sizeof(img));
+  memset(mock.sd + 750 * 512, 0, sizeof(img));
+  T_EQ(PC_SD_LIMIT, 16384);
+
+  //Partition at 8192 (the owner's card): window [16, 8192), the whole image goes in and verifies
+  mbr_part(8192);
+  r = req(PC_CMD_SD_INFO, "\x01", 1);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p + 4), 8192); T_EQ(pc_get_u32(r.p + 8), 8192);
+  for(off=0;off<1510;off+=n)
+  {
+    n = (1510 - off > 128) ? 128 : 1510 - off;
+    sd_stage_all(img + off * 512, n * 512);
+    r = sd_write(750 + off, (uint16_t)n, 0, pc_crc32(img + off * 512, n * 512), PC_SD_WRITE_MAGIC);
+    T_EQ(r.h.status, 0);
+  }
+  T_MEM(mock.sd + 750 * 512, img, sizeof(img));
+  r = req(PC_CMD_SD_INFO, "\x03", 1);
+  T_EQ(pc_get_u32(r.p + 48), 750); T_EQ(r.p[52], 2); T_EQ(r.p[53], 1); T_EQ(pc_get_u32(r.p + 56), 1510 * 512);
+  T_EQ(r.p[64], PC_ID_UNKNOWN); T_EQ(pc_get_u32(r.p + 96), 1510 * 512);   //read to its end (no identity record)
+
+  //Partition at 2048 (the install guide up to 0.2.100): the last piece is refused, the text names both starts
+  mbr_part(2048);
+  r = req(PC_CMD_SD_INFO, "\0", 1);           T_EQ(pc_get_u32(r.p + 4), 2048); T_EQ(pc_get_u32(r.p + 8), 2048);
+  w = mock.sd_writes;
+  sd_stage_all(img + 1408 * 512, 102 * 512);
+  r = sd_write(750 + 1408, 102, 0, pc_crc32(img + 1408 * 512, 102 * 512), PC_SD_WRITE_MAGIC);
+  t_err_text(r, "partition starts at 2048: it must start at 2260 or later");
+  T_EQ(mock.sd_writes, w);
+  sd_stage_all(img, 512);
+  r = sd_write(2047, 1, 0, pc_crc32(img, 512), PC_SD_WRITE_MAGIC);                T_EQ(r.h.status, 0);
+  r = sd_write(2048, 1, 0, pc_crc32(img, 512), PC_SD_WRITE_MAGIC);
+  t_err_text(r, "partition starts at 2048: it must start at 2049 or later");
+
+  //The cap: a partition at 20000 still ends the window at 16384
+  mbr_part(20000);
+  r = req(PC_CMD_SD_INFO, "\0", 1);           T_EQ(pc_get_u32(r.p + 4), 20000); T_EQ(pc_get_u32(r.p + 8), 16384);
+  r = sd_write(16383, 1, 0, pc_crc32(img, 512), PC_SD_WRITE_MAGIC);               T_EQ(r.h.status, 0);
+  sd_stage_all(img, 1024);
+  r = sd_write(16383, 2, 0, pc_crc32(img, 1024), PC_SD_WRITE_MAGIC);
+  t_err_text(r, "past sector 16383, the end of the write window");
+
+  //SD_INFO's length check and the card image identity use the same bound: an image may end at 16384, not past it
+  mock_sd_image(750, "eGON.EXE", PC_SD_LIMIT - 750);
+  pc_ident_invalidate();
+  r = req(PC_CMD_SD_INFO, "\x03", 1);
+  T_EQ(r.p[53], 1); T_EQ(pc_get_u32(r.p + 56), (PC_SD_LIMIT - 750) * 512); T_EQ(r.p[64], PC_ID_UNKNOWN);
+  mock_sd_image(750, "eGON.EXE", PC_SD_LIMIT - 750 + 1);
+  pc_ident_invalidate();
+  r = req(PC_CMD_SD_INFO, "\x03", 1);
+  T_EQ(r.p[53], 3); T_EQ(r.p[64], PC_ID_NO_IMAGE);
+}
+
 //EXT trigger (FPGA 0x1533, protocol 1.4)
 static void test_ext_trigger(void)
 {
@@ -3872,6 +3947,7 @@ int main(void)
   test_read_raw_hold();
   test_indicator();
   test_sd();
+  test_sd_window();
   test_ext_trigger();
   test_fast_path_no_fpga();
   test_dtr_up_keeps_request();

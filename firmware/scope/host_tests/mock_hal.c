@@ -16,7 +16,7 @@ uint32_t   mock_nresps;
 const pc_image_id pc_image_ident = { PC_ID_MAGIC0, PC_ID_MAGIC1, "0.0.0-host", 0, { 26, 10, 19, 12, 0, 0 }, 1, 16 };   //build_id.c on the target
 
 static uint8_t mock_tx[PC_MAX_RESPONSE_FRAME + 16] __attribute__((aligned(4)));
-static uint8_t mock_sd[MOCK_SD_SECTORS * 512] __attribute__((aligned(4)));
+static uint8_t mock_sd[MOCK_SD_MAX_SECTORS * 512] __attribute__((aligned(4)));
 static uint8_t mock_stage[65536] __attribute__((aligned(4)));
 
 //1.00o5 tables (variables.c): time_per_div_sample_rate[35] and sample_rate_settings[0..17]
@@ -885,7 +885,9 @@ int pc_hal_sd_read(uint32_t sector, uint32_t count, uint8_t *dst)
 {
   assert(((uintptr_t)dst & 3) == 0);
 
-  if(sector + count > MOCK_SD_SECTORS)
+  assert(mock.sd_sectors <= MOCK_SD_MAX_SECTORS);
+
+  if((sector > mock.sd_sectors) || (count > mock.sd_sectors - sector))
     return -4;
 
   memcpy(dst, mock_sd + sector * 512, count * 512);
@@ -898,7 +900,9 @@ int pc_hal_sd_write(uint32_t sector, uint32_t count, const uint8_t *src)
   if(mock.sd_fail_write)
     return mock.sd_fail_write;
 
-  if(sector + count > MOCK_SD_SECTORS)
+  assert(mock.sd_sectors <= MOCK_SD_MAX_SECTORS);
+
+  if((sector > mock.sd_sectors) || (count > mock.sd_sectors - sector))
     return -4;
 
   memcpy(mock_sd + sector * 512, src, count * 512);
