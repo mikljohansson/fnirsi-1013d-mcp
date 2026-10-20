@@ -31,7 +31,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.81 - provisional (branch fw-cap2; PC_FW_VERSION not bumped; protocol 1.24, GET_HEALTH 106 bit 5 added)
+#### 0.2.81 - 2026-10-20 (protocol 1.24, GET_HEALTH byte 106 bit 5 added)
 
 - Capture-stage training over a band of codes (3e5a2a1): the wizard's zero step parks the quiet input at codes 120, 124,
   .. 140 by the offset PWM and takes two 8000-word captures per stage 2..5 at each point; the 0x36 counts are summed per
