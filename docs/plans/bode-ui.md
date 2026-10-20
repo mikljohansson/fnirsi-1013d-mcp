@@ -448,7 +448,7 @@ items are white with their rank; the others are grey. The choice is saved in set
 | Sweep | measured / planned ("37/100"), "auto 12/20" during AUTO SET | `bode_done_count / bode_count` | neutral grey | "not run" |
 | Thru | "applied" green, "stale" amber, "off" grey, "none" grey | `bode_thru_state`, `thru.applied` | neutral grey | "none" |
 
-- **Defaults**: Level, -3dB, Peak, Q, Sweep, Thru, which fill the six places. More chosen show "+N" in the sixth
+- **Defaults**: -3dB, Peak, Q, Level (as built, `bu_ms_defaults`; the draft listed six with Sweep and Thru). More chosen show "+N" in the sixth
   place (`ui_ms_fit`).
 - **Before any sweep** the marker cards read "no sweep". **While a sweep fills a new table** they read "sweeping",
   until every planned point has been measured once. Markers from half a table mislead: a tank's rising skirt reads as

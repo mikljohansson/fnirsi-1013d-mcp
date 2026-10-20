@@ -37,7 +37,7 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   nothing. AUTO SET means the mode's own auto (the spectrum's Auto in Spectrum).
 - **Right bar, CTRL page**: how the plot is shown and computed, the same order in every mode: Display (the variants,
   each with an icon, plus the variant's own parameters inside the fold-out), the mode's analysis controls (Trace style
-  in Scope; Analysis and Axis in Spectrum), Grid, the V+ / CH / V- steppers for both channels, 50 % TRIG. A CTRL button
+  in Scope; Analyse in Spectrum), Grid, the V+ / CH / V- steppers for both channels, 50 % TRIG. A CTRL button
   that holds a value shows it on the button and opens a fold-out beside the bar with the choices or + / -.
 - **Bottom row**: readouts only, as measurement cards chosen through MEASURES, per mode (Scope: the record
   measurements; Spectrum: peak, level, RBW and the spectrum set). The record-position slider row under the grid stays.

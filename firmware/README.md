@@ -1538,8 +1538,7 @@ call `bode_view_tcursor` / `bode_view_save`, menu.c's MEASURES menu takes `UI_MS
 no harmonic fast mode and no impedance mode (bode-design D5); the screen's markers interpolate linearly in log f (the
 host: a monotone cubic; they agree within the point spacing); the noise estimate is the median of period differences (the
 host: the median over FFT bins), so a transient lasting most of the record reads low_snr rather than unsettled; Diagnostics
-stops a running sweep. Not yet: the top bar in this mode (bode-ui.md section 7: the ACQ chip "Set by the sweep", the
-generator chip showing the tone being measured, the menus' notes); a cancelled AUTO SET leaves the partial overview on
+stops a running sweep. Not yet: a cancelled AUTO SET leaves the partial overview on
 the screen (the settings are kept; the previous table is not restored); Move fast does not change the cursors' drag step
 (they snap to measured points).
 
