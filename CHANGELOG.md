@@ -5,9 +5,10 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 The firmware (`PC_FW_VERSION` in `firmware/scope/pc_cmds.h`) and the mcp package (`mcp/pyproject.toml`)
-share one version from the first tag on. A release tag `vX.Y.Z` requires both to read `X.Y.Z` and a
-`## [X.Y.Z] - YYYY-MM-DD` section in this file, whose text becomes the release notes. See Since the 0.3.0 release engineering (rel-gen1) the user-facing release notes are written separately in `docs/release-notes/X.Y.Z.md`; this file stays the development log.
-`docs/releasing.md`. Tags below 1.0.0 are published as pre-releases.
+share one version from the first tag on. A release tag `vX.Y.Z` requires both to read `X.Y.Z` and a non-empty
+`## [X.Y.Z] - YYYY-MM-DD` section in this file. The user-facing release notes are written separately in
+`docs/release-notes/X.Y.Z.md`; this file stays the development log. See `docs/releasing.md`. Tags below 1.0.0 are
+published as pre-releases.
 
 ## [Unreleased]
 
@@ -224,6 +225,7 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   divider and READ_TRACE's UI divider report that divider. The FPGA write trace (event 22) logs 0x54 and 0x55, and
   GET_LINK_STATS 65 counts them with the filter writes (1299f7a). The Bode engine rewrites 0x0D when the FPGA holds
   another divider than its own record (2ba6566).
+
 #### 0.2.87 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: repeated sweeps reuse the range plan, so the relays stay quiet on an unchanging circuit (owner
@@ -263,6 +265,7 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   The FFT length is not in the rate and changes only where zooming in ends.
 - Spectrum MEASURES: new Capture card, the time one record takes (memory depth / fs, e.g. "15.00us", "1.500s"), on by
   default after RBW (c449a5c). Its place in the row is kept in settings word 217; older settings put it last.
+
 #### 0.2.84 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response, AUTO SET never loops (owner 2026-10-20 11:23, after an RC AUTO SET on 0.2.83 ran 41 sweeps with
@@ -310,6 +313,7 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   only at zoom steps and by AUTO SET; to look above the axis, zoom out and in again (owner 2026-10-20 10:24, bench on
   0.2.80: the rate changing mid-scroll felt janky). Entering the view keeps a panned cell while the rate is unchanged.
   test_spec_zoom covers pans from every starting cell, the clamp at both ends and a zoom after a pan (9294f9e).
+
 #### 0.2.81 - 2026-10-20 (protocol 1.24, GET_HEALTH byte 106 bit 5 added)
 
 - Capture-stage training over a band of codes (3e5a2a1): the wizard's zero step parks the quiet input at codes 120, 124,
@@ -375,6 +379,7 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   A rate picked in the ACQ menu holds until the next step. Stopped, the record keeps its rate ("Stopped: press RUN to
   zoom further"). AUTO SET picks a ladder cell from 0 Hz. The Span and Center cards show the cell; the FFT length row
   reads "(record)" when the record limits it (52c1c76, ladder and tests 3ec9e17, rule 4a85e8a).
+
 #### 0.2.76 - 2026-10-19 (protocol 1.22, unchanged)
 
 - Scope slider: a still tap in the track outside the window now jumps the window there, as in the Spectrum. 0.2.73 ran
@@ -388,6 +393,7 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   stays. Stopped, the record keeps its rate and the zoom steps through what it can show ("Stopped: press RUN to zoom
   further" at its limit). A tap no longer enters or leaves roll mode. The host's SET_TIMEBASE by UI index is unchanged
   (da24d91, rule 4eab9cc).
+
 #### 0.2.75 - 2026-10-19 (protocol 1.22, unchanged)
 
 - Spectrum: the colour legends of the Waterfall and Density variants are gone (owner, 2026-10-19 22:28: the blue ->
@@ -440,6 +446,7 @@ FPGA bus contract fixes (fw-bus, firmware/AGENTS.md section 48; not benched).
   GET_EVENT_LOG, and the writes are counted in GET_LINK_STATS 64-67 (d6de414).
 - The ADC core order counts as verified (GET_INFO caps bit 12 clear) only on 0x1538+ that report it at boot; a bitstream
   reporting another convention is flagged and checked by its data (267c1be).
+
 #### 0.2.71 - 2026-10-19 (protocol 1.21, unchanged; READ_BODE reason 8)
 
 - Frequency response: a single sweep shows RUN on the chip (never WAIT, whatever the trigger mode) and STOP on the
@@ -464,6 +471,7 @@ FPGA bus contract fixes (fw-bus, firmware/AGENTS.md section 48; not benched).
   centre), plot y 50..402 in 8 divisions of 44 px, labels at y 406, cards at the Scope's y 426 (3d76e14).
 - Frequency response: Move fast sets the cursor drag step; MEASURES changes show at once; before the first sweep the
   READ_BODE header's settings fields are the settings in effect, the ones the estimate describes (4d6c0e6).
+
 #### 0.2.70 - 2026-10-19 (protocol 1.21, unchanged)
 
 - READ_SCREEN (0x0401) is built: the SCREENSHOT capability is set and `scope_screenshot` returns the panel's 800 x 480
@@ -681,6 +689,7 @@ calibration wizard, first run" and 6.4).
 - Moved: the interim Baseline calibration row of the Settings fold-out (with 1.00o5's volts-calibration boxes beside
   it) and the Settings screen's DC shift trim row (0.2.55) to the Diagnostics pages (Calibrate, Volts calibration, DC
   shift trim); Dev mode is the Developer page's Debug overlay.
+
 #### 0.2.58 - 2026-10-19 (protocol 1.17, docs/protocol.md section 14 row 56)
 
 Support for the AL3 bitstream 0x1536 (segmented capture and hardware averaging, fpga-gen5; not flashed yet).
