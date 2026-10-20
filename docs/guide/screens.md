@@ -38,7 +38,18 @@ The view plots the ratio CH2 / CH1 as magnitude (dB) and phase (degrees) against
 markers and two cursors. Passive or buffered devices only: the post is a 3.1 Vpp square through 1 kOhm and nothing
 else protects it, so never connect a coil, a MOSFET drain or anything that can drive the post. The row is grey when the
 bitstream lacks the filter and DDS (needs FPGA 0x1534 or later). Leaving the view gives back the generator, channels,
-time base and RUN/STOP as they were.
+time base and RUN/STOP as they were. While no sweep runs, the post carries your generator setting (the one the
+generator chip shows); a sweep takes it over and gives it back when it ends.
+
+AUTO SET runs an overview from 100 Hz to 10 MHz and, for a sharp resonance, up to three finer passes, then sets the
+span and starts RUN. If the result is not consistent it stops instead, keeps your settings and says why on the top
+line. "Auto set: no consistent response. Check wiring" usually means a loose probe or ground clip, but the circuit
+itself can cause it: a device that oscillates, a notch deeper than 20 dB that falls on one point, or a response that
+changes between passes. "Auto set: peak not confirmed: sweep by hand" means a resonance too sharp or too isolated for
+the overview's points; set Start and Stop around it in CTRL > Sweep and use Single sweep. "Auto set: CH1 level low:
+CH1 tip on the DUT input?" and "Auto set: no response: CH2 tip on the DUT output?" point at the probe that reads too
+little. Single sweep keeps the Sweep panel open: its button turns red ("Stop sweep", with the points done) while the
+sweep runs, and a tap stops it.
 
 ![Frequency response](screenshot:frequency-response)
 

@@ -31,6 +31,29 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.84 - 2026-10-20 (protocol 1.24, unchanged; provisional number, PC_FW_VERSION not bumped)
+
+- Frequency response, AUTO SET never loops (owner 2026-10-20 11:23, after an RC AUTO SET on 0.2.83 ran 41 sweeps with
+  the relays clicking; 9079725, 071c206). `bode_auto_span` drops an absurd point (more than 20 dB from both valid
+  neighbours: a bad record), takes the reference level from the median of the three lowest-frequency valid points and
+  counts a resonance's peak only with a valid point on either side. A pass that is not consistent ends AUTO SET in STOP
+  with the settings kept (not RUN) and a warning: "Auto set: no consistent response. Check wiring" (two absurd points,
+  one where the reference is taken, CH2 ranging that bounced, a finer pass that finds no band or reads the peak more
+  than 6 dB lower), "Auto set: no response: CH2 tip on the DUT output?" (the old text with the prefix), "Auto set: CH1
+  level low: CH1 tip on the DUT input?", "Auto set: peak not confirmed: sweep by hand" (also when the three sharp-tank
+  passes do not resolve the band).
+- Frequency response, Single sweep stays on the CTRL page (owner 2026-10-19 21:32; 071c206): the Sweep panel stays
+  open while the sweep runs and the plot updates around it; the button reads what a tap does in the RUN/STOP colours:
+  green "Single sweep" / "about N s", green "STOP after this sweep" while RUN repeats, red "Stop sweep" / "n / N" during a
+  single sweep (a tap stops it after the capture in progress), grey "during AUTO SET". Page one's RUN/STOP shows STOP
+  meanwhile.
+- Frequency response, the generator after a sweep (071c206): the engine leaves the pin off at the end of a sweep while
+  the chip showed the user's generator; the view now puts the user's generator back on the pin whenever no sweep runs
+  any more, so the pin does what the chip shows (bode-ui.md section 7).
+- Frequency response, "CH1 level low" names its cause (071c206): "CH1 level low at 2.5 V/div: sweep again" when CH1 was
+  ranged coarser than 0.5 V/div (the pre-scan artefact of hardware-status 2026-10-20 11:16), the DUT-loads text only at
+  0.5 V/div or finer at or below 2 MHz, "CH1 level low above 2 MHz: the x1 probe rolls off" above.
+
 #### 0.2.83 - 2026-10-20 (protocol 1.24, unchanged; reason 8 text)
 
 - Frequency response: AUTO SET and device sweeps no longer end in the pre-scan with "ADC readout fault" on a clean

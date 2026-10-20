@@ -1588,6 +1588,120 @@ static void test_bode_cards(void)
   T_TRUE(ui_card_fits(&font_2, "-3dB", "not found"));
 }
 
+//fw 0.2.84: CH1 level low by range and frequency (hardware-status 2026-10-20 11:16: a pre-scan artefact left CH1 at
+//2.5 V/div; the x1 probe on the post rolls off above 2 MHz)
+static void test_bode_ch1_low(void)
+{
+  uint64 f[4] = { 1000000ull, 100000000ull, 1000000000ull, 5000000000ull };    //1 kHz, 100 kHz, 1 MHz, 5 MHz
+  uint8  r1[4] = { 3, 3, 3, 3 }, have[4] = { 1, 1, 1, 1 };
+  uint16 fl[4] = { 0, 0, 0, 0 };
+  char   t[64];
+  int    i;
+
+  T_EQ(bu_warn_ch1_low(t, r1, f, fl, have, 4), 0);
+  T_STR(t, "");
+
+  //Above 2 MHz at 0.5 V/div: the probe
+  fl[3] = BODE_F_CH1_LOW;
+  T_EQ(bu_warn_ch1_low(t, r1, f, fl, have, 4), 1);
+  T_STR(t, "CH1 level low above 2 MHz: the x1 probe rolls off");
+
+  //At or below 2 MHz, 0.5 V/div or finer: the DUT loads the source (before the probe)
+  fl[1] = BODE_F_CH1_LOW;
+  r1[1] = 5;
+  T_EQ(bu_warn_ch1_low(t, r1, f, fl, have, 4), 1);
+  T_STR(t, "CH1 level low: the DUT loads the 1 kOhm source");
+
+  //Exactly 2 MHz counts as below
+  fl[1] = 0;
+  f[3] = BU_PROBE_ROLLOFF_MHZ;
+  T_EQ(bu_warn_ch1_low(t, r1, f, fl, have, 4), 1);
+  T_STR(t, "CH1 level low: the DUT loads the 1 kOhm source");
+
+  //A coarse range first, named (the coarsest), at any frequency
+  fl[0] = BODE_F_CH1_LOW;
+  r1[0] = 1;
+  T_EQ(bu_warn_ch1_low(t, r1, f, fl, have, 4), 1);
+  T_STR(t, "CH1 level low at 2.5 V/div: sweep again");
+  fl[2] = BODE_F_CH1_LOW;
+  r1[2] = 0;
+  bu_warn_ch1_low(t, r1, f, fl, have, 4);
+  T_STR(t, "CH1 level low at 5 V/div: sweep again");
+  r1[2] = 2;
+  bu_warn_ch1_low(t, r1, f, fl, have, 4);
+  T_STR(t, "CH1 level low at 2.5 V/div: sweep again");
+
+  //Unmeasured points do not count
+  for(i = 0; i < 4; i++)
+    have[i] = 0;
+  T_EQ(bu_warn_ch1_low(t, r1, f, fl, have, 4), 0);
+
+  //Every text inside the warning's budget
+  for(i = 0; i < BU_CH1_FINE_RANGE; i++)
+  {
+    uint8 r = (uint8)i, h = 1;
+    uint16 g = BODE_F_CH1_LOW;
+
+    bu_warn_ch1_low(t, &r, f, &g, &h, 1);
+    T_TRUE(strlen(t) <= BU_WARN_MAX);
+    T_TRUE(ui_text_width(&font_2, t) <= 355);
+  }
+}
+
+//fw 0.2.84 (owner 2026-10-20 11:23): AUTO SET never loops; a pass that is not consistent ends it with a warning
+static void test_bode_auto_verdict(void)
+{
+  bode_autospan a;
+  uint8 r2[8] = { 3, 3, 4, 4, 5, 5, 5, 5 }, h[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };
+
+  memset(&a, 0, sizeof(a));
+
+  //CH2 ranging: steps one way (an RC's falling response) are fine; down-up-down bounces; one reversal with the
+  //switch budget used up bounces
+  T_EQ(bu_auto_bounce(r2, h, 8, 2), 0);
+  T_EQ(bu_auto_bounce(r2, h, 8, BU_AUTO_SWITCHES), 0);
+  r2[3] = 3;
+  T_EQ(bu_auto_bounce(r2, h, 8, 3), 1);           //3 3 4 3 5: up, down, up
+  r2[3] = 4;
+  r2[5] = 4;                                      //3 3 4 4 5 4 5 5: up, down, up
+  T_EQ(bu_auto_bounce(r2, h, 8, 4), 1);
+  r2[5] = 5;
+  r2[7] = 4;                                      //one reversal at the end
+  T_EQ(bu_auto_bounce(r2, h, 8, 3), 0);
+  T_EQ(bu_auto_bounce(r2, h, 8, BU_AUTO_SWITCHES), 1);
+  h[7] = 0;                                       //unmeasured: ignored
+  T_EQ(bu_auto_bounce(r2, h, 8, BU_AUTO_SWITCHES), 0);
+
+  //The verdicts
+  T_EQ(bu_auto_verdict(BODE_AS_SPAN, &a, 1, 0, 0), -1);
+  T_EQ(bu_auto_verdict(BODE_AS_FLAT, &a, 1, 0, 0), -1);
+  T_EQ(bu_auto_verdict(BODE_AS_SPAN, &a, 1, 0, 1), BU_W_AUTO_INCONSISTENT);
+  T_EQ(bu_auto_verdict(BODE_AS_NO_RESPONSE, &a, 1, 0, 0), BU_W_NO_RESPONSE);
+  T_EQ(bu_auto_verdict(BODE_AS_CH1_LOW, &a, 1, 0, 0), BU_W_AUTO_CH1);
+  T_EQ(bu_auto_verdict(BODE_AS_INCONSISTENT, &a, 1, 0, 0), BU_W_AUTO_INCONSISTENT);
+  T_EQ(bu_auto_verdict(BODE_AS_UNCONFIRMED, &a, 1, 0, 0), BU_W_AUTO_PEAK);
+
+  //A finer pass: no band, or the peak more than 6 dB lower than the pass before
+  T_EQ(bu_auto_verdict(BODE_AS_FLAT, &a, 2, 0, 0), BU_W_AUTO_INCONSISTENT);
+  a.ref_mdb = -25000;
+  T_EQ(bu_auto_verdict(BODE_AS_SPAN, &a, 2, -30000, 0), -1);       //higher: resolving
+  T_EQ(bu_auto_verdict(BODE_AS_SPAN, &a, 2, -20000, 0), -1);       //5 dB lower
+  T_EQ(bu_auto_verdict(BODE_AS_SPAN, &a, 3, -18000, 0), BU_W_AUTO_INCONSISTENT);
+
+  //The budget: the overview and three passes; still unresolved after the last one: peak not confirmed
+  a.coarse = 1;
+  T_EQ(bu_auto_verdict(BODE_AS_SPAN, &a, BODE_AUTO_PASSES - 1, -25000, 0), -1);
+  T_EQ(bu_auto_verdict(BODE_AS_SPAN, &a, BODE_AUTO_PASSES, -25000, 0), BU_W_AUTO_PEAK);
+  a.coarse = 0;
+  T_EQ(bu_auto_verdict(BODE_AS_SPAN, &a, BODE_AUTO_PASSES, -25000, 0), -1);
+
+  //The owner's texts
+  T_STR(bu_warn[BU_W_AUTO_INCONSISTENT], "Auto set: no consistent response. Check wiring");
+  T_STR(bu_warn[BU_W_NO_RESPONSE], "Auto set: no response: CH2 tip on the DUT output?");
+  T_STR(bu_warn[BU_W_AUTO_CH1], "Auto set: CH1 level low: CH1 tip on the DUT input?");
+  T_STR(bu_warn[BU_W_AUTO_PEAK], "Auto set: peak not confirmed: sweep by hand");
+}
+
 static void test_bode_texts(void)
 {
   ui_fold f;
@@ -1637,7 +1751,36 @@ static void test_bode_texts(void)
   T_TRUE(row_fits(&f, "Stop", "10MHz", 1));
   T_TRUE(row_fits(&f, "Settle", "Resonant", 0));
   T_TRUE(row_fits(&f, "CH2 range", "Auto", 0));
-  T_TRUE(ui_text_width(&font_2, bu_single_running) + 8 <= ui_fold_row_w(&f));
+  {
+    //fw 0.2.84: the Single sweep button's states (label 16 px, second line 13 px, centred in the row)
+    const char *l;
+    int k;
+
+    T_EQ(bu_single_button(0, 0, 0, 0, 0, 2600, &l, t), BU_SINGLE_START);
+    T_STR(l, "Single sweep");
+    T_STR(t, "about 3 s");
+    T_EQ(bu_single_button(1, 1, 0, 7, 50, 2600, &l, t), BU_SINGLE_STOP);
+    T_STR(l, "Stop sweep");
+    T_STR(t, "7 / 50");
+    T_EQ(bu_single_button(1, 1, 0, 0, 100, 2600, &l, t), BU_SINGLE_STOP);
+    T_STR(t, "0 / 100");
+    T_EQ(bu_single_button(1, 0, 0, 3, 50, 2600, &l, t), BU_SINGLE_LAST);
+    T_STR(l, "Single sweep");
+    T_STR(t, "STOP after this sweep");
+    T_EQ(bu_single_button(1, 1, 1, 3, 20, 2600, &l, t), BU_SINGLE_GREY);
+    T_STR(t, "during AUTO SET");
+    //A single sweep that has ended (stopped, done or an error): the start state again, single or not
+    T_EQ(bu_single_button(0, 1, 0, 50, 50, 45000, &l, t), BU_SINGLE_START);
+    T_STR(t, "about 45 s");
+    T_EQ(bu_single_button(0, 1, 1, 5, 20, 2600, &l, t), BU_SINGLE_START);
+
+    for(k = 0; k < 4; k++)
+    {
+      bu_single_button(k != 0, k >= 2, k == 3, 100, 100, 150000, &l, t);
+      T_TRUE(ui_text_width(&font_3, l) + 8 <= ui_fold_row_w(&f));
+      T_TRUE(ui_text_width(&font_2, t) + 8 <= ui_fold_row_w(&f));
+    }
+  }
   T_STR((bu_estimate_text(t, 2600), t), "about 3 s");
   T_STR((bu_estimate_text(t, 120), t), "about 1 s");
   T_STR((bu_estimate_text(t, 45000), t), "about 45 s");
@@ -1649,6 +1792,10 @@ static void test_bode_texts(void)
   //Its switch row draws the texts from x 60 (bode_view.c)
   T_TRUE(60 + ui_text_width(&font_2, "other sweep settings") + 4 <= ui_fold_row_w(&f));
   T_TRUE(ui_text_width(&font_2, "Thru: both tips on the input") + 20 <= f.w);
+
+  //fw 0.2.84: CH1 low named by its cause; AUTO SET's failures
+  test_bode_ch1_low();
+  test_bode_auto_verdict();
 
   //fw 0.2.71: the readout fault's warning (owner's fail-fast rule)
   T_STR(bu_warn[BU_W_READOUT], "ADC readout fault: see Diagnostics");

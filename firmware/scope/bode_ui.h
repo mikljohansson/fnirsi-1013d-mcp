@@ -230,7 +230,11 @@ int bu_card_text(int item, const bu_card_in *in, char *t);
 #define BU_W_NOT_IN_VIEWER    17
 #define BU_W_SAVE_FAILED      18
 #define BU_W_READOUT          19      //fw 0.2.71: BODE_ERR_READOUT
-#define BU_W_COUNT            20
+#define BU_W_AUTO_INCONSISTENT 20     //fw 0.2.84: AUTO SET failures (owner 2026-10-20 11:23), STOP, settings kept
+#define BU_W_AUTO_CH1         21
+#define BU_W_AUTO_PEAK        22
+#define BU_W_CH1_LOW_HF       23      //fw 0.2.84: CH1 low above 2 MHz, the x1 probe's roll-off
+#define BU_W_COUNT            24
 
 extern const char *const bu_warn[BU_W_COUNT];
 extern const char *const bu_instruction[2];
@@ -256,8 +260,38 @@ extern const char *const bu_trig_note;                    //"Not used by the swe
 #define BU_NOTE_PAD           12
 #define BU_TRIG_NOTE_H        24          //added to the trigger menu's height in this mode
 
-//Single sweep's second line: "about 3 s", "about 45 s", "about 2 min", or the running text
-extern const char *const bu_single_running;               //"running, then STOP"
+//Single sweep's second line when idle: "about 3 s", "about 45 s", "about 2 min"
 char *bu_estimate_text(char *t, uint32 ms);
+
+//fw 0.2.84 (owner 2026-10-19 21:32): the Sweep fold-out's Single sweep button reads what a tap does, in the RUN/STOP
+//colours, and the fold-out stays open while the sweep runs:
+//  BU_SINGLE_START   green, "Single sweep" / "about N s": stopped, a tap starts one sweep
+//  BU_SINGLE_LAST    green, "Single sweep" / "STOP after this sweep": RUN repeats, a tap makes this sweep the last
+//  BU_SINGLE_STOP    red,   "Stop sweep" / "n / N": a single sweep runs, a tap stops it after the capture in progress
+//  BU_SINGLE_GREY    grey,  "Single sweep" / "during AUTO SET": AUTO SET runs, a tap does nothing
+#define BU_SINGLE_START       0
+#define BU_SINGLE_LAST        1
+#define BU_SINGLE_STOP        2
+#define BU_SINGLE_GREY        3
+int bu_single_button(int running, int single, int autoset, int done, int count, uint32 est_ms, const char **label,
+                     char *value);
+
+//fw 0.2.84: why CH1 reads low (BODE_F_CH1_LOW), by the range and the frequency of the flagged points: a range coarser
+//than 0.5 V/div (a pre-scan artefact: sweep again) before a DUT that loads the 1 kOhm source (0.5 V/div or finer, at or
+//below 2 MHz) before the x1 probe's roll-off (above 2 MHz). The text into t (at most BU_WARN_MAX characters); returns
+//0 when no point is flagged. r1: hardware ranges (0 = 5 V/div .. 5 = 0.1 V/div), f in mHz.
+#define BU_CH1_FINE_RANGE     3                   //0.5 V/div
+#define BU_PROBE_ROLLOFF_MHZ  2000000000ull       //2 MHz
+int bu_warn_ch1_low(char *t, const uint8 *r1, const uint64 *f_mhz, const uint16 *flags, const uint8 *have, int n);
+
+//fw 0.2.84, AUTO SET's verdict on a pass (owner 2026-10-20 11:23: never a busy loop; a failure ends AUTO SET in STOP
+//with the settings kept and one of these warnings). CH2 ranging bounces when its range changes direction twice
+//between the pass's points, or once with the engine's switch budget (BU_AUTO_SWITCHES) used up.
+#define BU_AUTO_SWITCHES      6
+#define BU_AUTO_REF_DROP_MDB  6000                //a finer pass reads the peak more than 6 dB lower: inconsistent
+int bu_auto_bounce(const uint8 *r2, const uint8 *have, int n, int switches);
+//r: bode_auto_span's result of pass `pass` (1 = the overview), prev_ref the previous pass's a->ref_mdb; returns a BU_W_*
+//warning, or -1 when the pass is consistent (then BODE_AS_SPAN goes on to bode_auto_zoom, BODE_AS_FLAT keeps the span)
+int bu_auto_verdict(int r, const bode_autospan *a, int pass, int32 prev_ref, int bounce);
 
 #endif
