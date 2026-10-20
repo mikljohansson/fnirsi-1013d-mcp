@@ -125,6 +125,13 @@ class Capture:
     def sample_rate(self) -> float:
         return 1.0 / self.dt
 
+    @property
+    def maybe_spliced(self) -> bool:
+        """fw 0.2.97: GET_CAPTURE_INFO flags bit 6, the record may be joined from two passes of the ring (False when
+        the capture was read without GET_CAPTURE_INFO, or from older firmware, which never sets the bit)."""
+        ci = self.capture_info
+        return ci is not None and bool(ci.header.flags & ci.header.F_MAYBE_SPLICED)
+
 
 @dataclass
 class Spectrum:
