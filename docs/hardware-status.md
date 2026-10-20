@@ -1416,3 +1416,18 @@ Newest entries at the bottom. Format: date, who, what, result.
   or the window the FPGA captured), for triggered captures as well, which fpga-gen11/12's testbench did not model. Evidence
   in backups/bench-153b/ (records_153b_2000.npz: three untriggered and three triggered records with the seam positions;
   reread_153b.npz; events_153b_capture.json: the FPGA-write events of one capture; cells_153b.npz). fpga-gen13 dispatched.
+- 2026-10-20 20:27 (fpga-gen13, from the saved evidence, no hardware step): **the 19:52 verdict does not hold: no record of
+  that session carries a signal.** All six host records, the re-read record and all 40 bode cells sit at code 127.5..128.3
+  with a standard deviation of 0.14..0.59 code and under 2.2 codes peak to peak, on CH1 and CH2 alike (16-bit values
+  16540..16660); the 1 kHz fundamental is 0.005..0.08 code where the generator's square at CH1 range 3 gives about 113 codes.
+  The seam ratio of white noise is 1.14 mean / 1.8 max by construction (2..3.7 with the records' slow wander), a clean square
+  0.04: the "seams" are noise, the leak +14..+16 dB is noise against an absent tone (bode.py's `ch1_low`), and a splice can
+  neither be seen nor excluded in such a record. GET_CAPTURE_INFO flags bit 5 (an edge on the calibration pad) is set in
+  both saved infos, so the generator toggled at the pin; the records read 0 V within 0.1 V, where a probe on a silent post
+  would read -1.23 / +1.87 V: the probes were off the post (the wizard had just run with the inputs open). Nothing was
+  measured about 0x153B's record geometry; the bitstream is unchanged and stays unbenched; events_153b_capture.json holds
+  USB events only (FPGA writes are type 22 at trace level 1). Analysis, the firmware corner found on the way (an explicit
+  auto_timeout and `pc_hal_force` on 0x153B+) and the checklist for the next session: fpga/al3/AGENTS.md "0x153B 'spliced' on
+  the unit: the records were flat, fpga-gen13", fpga/al3/README.md section 11 "Bench 2026-10-20 19:31-20:03" and check 0.
+  Rollback to 0x153A, if the owner wants it tonight: write backups/fpga-flash_pre-0x153B_20261020-1931.bin (77672b5a..),
+  verify, power cycle, `#VER fpga=0x153a`, stages 0x08E3 from the stored calibration.
