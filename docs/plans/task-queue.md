@@ -256,7 +256,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
-- hw-prep (Opus, dispatched 21:45): a user-facing "Prepare and back up" page from hardware-prep.md section 3 without the
+- hw-prep (Opus, dispatched 21:42): a user-facing "Prepare and back up" page from hardware-prep.md section 3 without the
   maintainer's paths or "the lead's go" (dry-run findings: wrong expected pinout column, stale 5.3 procedure, scope power
   during flashing answered three ways, no usbipd recipe for a card reader, no Windows hash command, README-spiflash test
   status stale); hardware-prep.md demoted to engineering; install.md's partition sentence matches the tool; release.yml
