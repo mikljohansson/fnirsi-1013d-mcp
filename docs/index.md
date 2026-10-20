@@ -15,8 +15,9 @@ repository is the [README](https://github.com/mikljohansson/fnirsi-1013d-mcp#rea
 ## Three shelves
 
 **User guide.** For someone who owns the scope.
-Start with [Install](guide/install.md), or point your AI agent at the repository and ask it to guide you: it follows
-the [agent runbook](guide/agent-runbook.md). Then [Hardware preparation](hardware-prep.md) if you will flash the
+Start with [Install](guide/install.md), or point your AI agent at a clone of the repository and ask it to guide you:
+it follows the [agent runbook](guide/agent-runbook.md). The card alone needs no soldering and is undone by removing
+it; the optional FPGA bitstream needs a soldered header and a 3.3 V programmer. Then [Hardware preparation](hardware-prep.md) if you will flash the
 FPGA, [First run](guide/first-run.md) and [Calibration](guide/calibration.md). [The screens](guide/screens.md) walk
 through the main menu one entry at a time: the Scope with its phosphor view, the Spectrum analyser with waterfall and
 density views, the Frequency response mode that measures a filter or tank with the scope alone, the file viewers,
