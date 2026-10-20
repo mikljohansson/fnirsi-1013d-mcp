@@ -1406,3 +1406,13 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 2026-10-20 19:50: power cycle on 0x153B: fw 0.2.102 from the card, `fpga_version` 0x153B, caps 0xFEC4B, encode check OK
   (enc_bad 0 of 128), capture stages at the power-on 0x08E4 with cap_flags 0x15 (trained on 0x153A: retrain), 0 flagged
   of 128 reads. Wizard retrain next (owner, USB out, inputs open).
+- 2026-10-20 19:52-20:03: wizard on 0x153B (USB out, inputs open): passed, stages CH1 A4 B4, CH2 A3 B4 (= 0x08E4, the
+  power-on value). **0x153B fails on the unit** with fw 0.2.102: encode check and capture self-check clean (enc_bad 0,
+  cap_flagged_n 0 of 8588 reads), but every host capture is spliced: 50 of 50 untriggered at 1 MSa/s (seam ratio up to 2.7)
+  and 50 of 50 at 200 MSa/s with 1 MHz; triggered captures (level 128) spliced too (ratios 1.8..3.0, seams at 2288, 2403,
+  4142 of 6000 samples); bode_cells auto records leak +14..+16 dB; ten sweeps 100 Hz..1 MHz / 25: 54 captures, 12..32
+  time-outs, 27 leak retakes, 25 of 25 flagged, 5 s. The same record read three times without re-arming is identical, so
+  the ring is frozen after the capture: the seam is in the stored record (the start address the firmware reads from 0x14,
+  or the window the FPGA captured), for triggered captures as well, which fpga-gen11/12's testbench did not model. Evidence
+  in backups/bench-153b/ (records_153b_2000.npz: three untriggered and three triggered records with the seam positions;
+  reread_153b.npz; events_153b_capture.json: the FPGA-write events of one capture; cells_153b.npz). fpga-gen13 dispatched.
