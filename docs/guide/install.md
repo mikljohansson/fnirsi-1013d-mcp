@@ -73,7 +73,7 @@ message names the start the image needs. Copy your files back after the card is 
         `dd` of the SD package from sector 16 also overwrites sectors 708 to 710, which hold the calibration, the
         settings and the boot mode.
 
-4. Optional, the FPGA bitstream. The recommended one is **0x153A**. It needs firmware 0.2.81 or later.
+4. Optional, the FPGA bitstream. The recommended one is **0x153B**. It needs firmware 0.2.97 or later.
    [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), also attached to each release, names the file, the programmer
    wiring, the backup, the write, the check and the way back. The config flash is wired only to the FPGA, so this
    needs the SPI programmer on the 2x3 header. A wrong pin or 5 V logic can damage the board.
@@ -95,7 +95,8 @@ The firmware runs on every bitstream. A feature appears when the bitstream has i
 | 0x1534 | Decimation filters (Acquisition > Filter) and the Frequency response mode |
 | 0x1535 | The compensation FIR after the filters |
 | 0x1536 | Hardware averaging (the ACQ menu's Average uses it at the fast rates) and segmented capture (over USB) |
-| 0x153A | Clean ADC data at every sample rate, with a capture self-check and the capture stages the wizard trains. **Recommended** |
+| 0x153A | Clean ADC data at every sample rate, with a capture self-check and the capture stages the wizard trains |
+| 0x153B | Records that end on the auto time-out are never joined from two passes of the memory. **Recommended** |
 
 0x1537 to 0x1539 are withdrawn. 0x1532 to 0x1536 can garble one ADC core at 200 MSa/s after a rate change; the firmware
 checks every such capture and takes it again, and Diagnostics shows the FPGA line in amber. The full list with hashes
