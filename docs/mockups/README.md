@@ -16,4 +16,4 @@ to the generators; they record how the boards got here and do not run again.
 The slider-track overview (`docs/plans/slider-overview.md`) is drawn by `common.py` (`slider_row`, `ov_svg`,
 `ov_line_runs`, `scope_square_overview`); `boards.py` adds the Spectrum's (`spectrum_overview`) and the board
 `makeover/ScopeOverview` (a pulse-induction record zoomed into one decay, `pi_board`), `bode_final.py` the Frequency
-response's (`track_x`, `fr_overview`).
+response's (`track_x`, `fr_curve`, `fr_overview`: in Overlaid the phase and the magnitude over it, decision 8).

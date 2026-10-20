@@ -201,8 +201,12 @@ should drop it is owner question 3.
 
 **What is drawn.**
 
-- **Curve.** The magnitude in Overlaid and Magnitude only; the phase in Phase only, which follows the Display variant
-  so the track shows what the plot shows. Never both: two curves in 12 rows cannot be told apart.
+- **Curve.** The curves the plot shows, following the Display variant (decision 8, owner 2026-10-20 13:35): in
+  Overlaid the magnitude (cyan) and the phase (pink) over each other, in Magnitude only the magnitude, in Phase only the
+  phase. Each curve is fitted to the track's 20 rows on its own, dimmed outside the window and full inside it; flagged
+  points are grey pixels for both. Draw order (owner 13:36): the phase first and the magnitude over it, so where they
+  overlap the magnitude is the one seen. Built in fw 0.2.92 (`sov_curve`, `sov_draw_curves`; the overview copy already
+  kept both values). This replaces the earlier "never both" rule.
 - **Columns.** A point's column is its log position on the track. The track is 1 Hz .. 10 MHz over x 4..723, about 103
   px per decade, so the overview covers x 210..723. The new function `bu_track_x(mhz)` uses the same log mapping as
   `bu_slider_x`, for any frequency rather than a 1-2-5 step index. The left 206 px (1 Hz .. 100 Hz) stay empty because
@@ -413,6 +417,7 @@ The frequency-response and Spectrum tracks start at x 2 as `BU_SL_X` does (host 
    at y 453 and 470 and at x and x + w - 1, its 1 px margin at y 452, y 471, x - 1 and x + w; the overview in full
    colour inside the lines, y 454..469 (16 rows); hit areas unchanged (section 2).
 8. Frequency response overview and the Display variant (owner, 2026-10-20 13:35): Overlaid draws magnitude (cyan) and phase (pink)
-   over each other in the track; Magnitude only / Phase only draw that one curve **(owner)**.
-   The magnitude is drawn over the phase, so where they overlap the magnitude shows (owner, 13:36).
+   over each other in the track; Magnitude only / Phase only draw that one curve **(owner)**. Draw order (owner,
+   2026-10-20 13:36): the phase first and the magnitude over it, so where they overlap the magnitude is seen. Built in
+   fw 0.2.92 (fw-ov3), section 5.
 

@@ -32,32 +32,54 @@ OVERVIEW_F = B.log_points(100, 1e7, 20)
 OVERVIEW = [(f, *B.h_bp(f), B.h_bp(f)[0] > -58) for f in OVERVIEW_F]
 
 
-def fr_overview(pts):
-    """docs/plans/slider-overview.md: the overview AUTO SET kept, its magnitude only, fitted to the 20 rows (the
-    highest valid point on the top row, the lowest on the bottom row; the track has no labels, so only the shape
-    counts); valid points joined by a line in the magnitude colour, a flagged point a single grey pixel without a
-    joining line (as on the chart), clipped to the rows"""
-    valid = [p[1] for p in pts if p[3]] or [0.0]
+PHASE_DIM = "#804080"   # slider_ov.h SOV_PHASE_DIM: the phase colour at half intensity (outside the window)
+
+
+def fr_curve(pts, i, full, dim, wrap=None):
+    """one curve of the overview (slider_ov.c sov_curve, slider_ov_draw.c sov_draw_curve): value i of each point
+    (1 the magnitude, 2 the phase) fitted to the 20 rows on its own (the highest valid point on the top row, the lowest
+    on the bottom row; the flagged ones when none is valid; the track has no labels, so only the shape counts); valid
+    points joined by a line, not across a flagged point nor, for the phase, across a wrap (wrap degrees or more apart);
+    a flagged point a single grey pixel without a joining line (as on the chart), clipped to the rows"""
+    valid = [p[i] for p in pts if p[3]] or [p[i] for p in pts] or [0.0]
     mx, mn = max(valid), min(valid)
 
-    def row(db):
-        return max(OV_Y, min(OV_Y + OV_ROWS - 1, OV_Y + round((mx - db) / max(mx - mn, 1.0) * (OV_ROWS - 1))))
+    def row(v):
+        if mx == mn:
+            return OV_Y + OV_ROWS // 2
+        return max(OV_Y, min(OV_Y + OV_ROWS - 1, OV_Y + round((mx - v) / (mx - mn) * (OV_ROWS - 1))))
 
-    layers, seg = [], []
-    flags = []
-    for f, db, ph, ok in pts:
-        if ok:
-            seg.append((min(round(track_x(f)), OV_X + OV_W - 1), row(db)))
-        else:
-            if len(seg) > 1:
-                layers.append((CH2, DIM[CH2], ov_line_runs(seg)))
+    layers, seg, flags, prev = [], [], [], None
+
+    def flush():
+        if seg:
+            layers.append((full, dim, ov_line_runs(seg) if len(seg) > 1 else [(x, r, r) for x, r in seg]))
+
+    for p in pts:
+        x, v = min(round(track_x(p[0])), OV_X + OV_W - 1), p[i]
+        if not p[3]:
+            flags.append((x, row(v), row(v)))
+            flush()
+            seg, prev = [], None
+            continue
+        if prev is not None and wrap is not None and abs(v - prev) >= wrap:
+            flush()
             seg = []
-            x = min(round(track_x(f)), OV_X + OV_W - 1)
-            flags.append((x, row(db), row(db)))
-    if len(seg) > 1:
-        layers.append((CH2, DIM[CH2], ov_line_runs(seg)))
-    if flags:
-        layers.append((OV_FLAG, OV_FLAG, flags))
+        seg.append((x, row(v)))
+        prev = v
+    flush()
+    return layers + ([(OV_FLAG, OV_FLAG, flags)] if flags else [])
+
+
+def fr_overview(pts, show="Overlaid"):
+    """docs/plans/slider-overview.md section 5, decision 8 (owner 2026-10-20 13:35, 13:36): the overview AUTO SET kept,
+    the curves the plot shows: Overlaid both, the phase (pink) drawn first and the magnitude (cyan) over it, each
+    fitted to the track's rows on its own; Magnitude only / Phase only that one curve. Flagged points grey for both"""
+    layers = []
+    if show != "Magnitude only":
+        layers += fr_curve(pts, 2, B.PHASE, PHASE_DIM, wrap=180.0)
+    if show != "Phase only":
+        layers += fr_curve(pts, 1, CH2, DIM[CH2])
     return layers
 
 
