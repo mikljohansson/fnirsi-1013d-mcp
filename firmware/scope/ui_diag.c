@@ -622,7 +622,7 @@ static void ud_tile_firmware(const ud_input *in, ud_tile *t)
   if(ud_card_known(c) && c->same)
   {
     t->state = UD_V_OK;
-    s_str(t->word, "OK");             //owner 2026-10-20 19:33: just the version; "the image the card starts" was clutter
+    s_str(t->word, "OK");             //owner 2026-10-20 19:24: just the version; "the image the card starts" was clutter
   }
   else if(ud_card_known(c) && c->version[0])
   {

@@ -34,7 +34,7 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
 #### 0.2.102 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Diagnostics: the Firmware tile's OK case reads just "Running 0.2.102"; "the image the card starts" was clutter (owner
-  2026-10-20 19:33).
+  2026-10-20 19:24).
 
 #### 0.2.101 - 2026-10-20 (protocol 1.24, unchanged; rows 40 and 55 updated)
 
