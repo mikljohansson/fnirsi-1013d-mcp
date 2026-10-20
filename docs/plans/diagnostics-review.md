@@ -87,6 +87,13 @@ warnings). Rules:
 | Calibration | v3, bound, gains measured, FPGA word unchanged since calibration | not bound, gains missing, FPGA word changed, calibrated before 5 minutes of warm-up | no calibration (v1): "Uncalibrated: readings may be several % off; run Calibrate" |
 | Battery | level >= 4 of 20 or charging | level < 4: "Low battery: readings and SD writes may fail" (inference: the 1.00o5 code treats the bottom of the scale as end of operation) | |
 
+Owner decision 2026-10-20 18:12 (fw 0.2.100), superseding the Restarts row: OK = everything normal, Check = something to
+fix at some point, Fault = something critically bad. Only a real exception (types 1..6) is a crash; a deliberate restart
+(type 0, a jump to the image entry: a FEL load, Enter FEL, an update, a self-restart) is normal. OK "No crashes." "Up 27
+min."; Check, a stored record of a crash before this run: "Crashed once before this run: data abort." "If it happens
+again, save a report." "Up 27 min."; Fault, counter 49 > 0 with a real exception: "Crashed 2 times this run: data abort
+at 0x80014a2c." "Details on the Log page." No exception jargon on the Status page; the Log page keeps the details.
+
 Colour-blind safety: the green and amber chosen (#35c26a, #ffd262) are hard to tell apart for protan and deutan
 viewers at an 8 px dot. The word ("OK", "Check", "Fault") carries the state and the colour repeats it. Drop the dots.
 The value text itself takes the state colour, as the project's boxes do ("box labels show the value and colour shows
@@ -107,6 +114,12 @@ a second unit has been measured.
 | Core gain mismatch per class, after correction | % | <= 1 % | > 1 % | firmware rejects at 8 % (row 51 "cores differ"); uncorrected full class was 3.3 % (hardware-status 10-18) |
 | Class gain ratio, full / gated | % from 1 | <= 2 % | > 2 % | firmware rejects outside 0.9..1.1 (row 51); measured 1.1 % |
 | Noise RMS, gated / full | code | <= 0.3 / <= 1.0 | above | stored 0.13 / 0.75 on CH1; the mockup's CH2 2.1 would be "Check" |
+
+Owner decision 2026-10-20 18:13 (fw 0.2.100), superseding the noise row: the noise rows measure the calibration's
+open-input condition, so their limits are the zero step's own, "Noise RMS, inputs open", gated 1.0 code, full rate 3.0
+codes (`adc_cal.h` `ACAL_MAX_NOISE16_*`, used by the wizard and Diagnostics). Bench, stored worst range per core: full
+CH1 B 1.19, CH2 A 2.75 codes (5 V/div, the high-impedance ranges the worst; 0.5..0.6 from a low-impedance source),
+gated at most 0.50 / 0.38. The "provisional" note is gone; the class gain ratio limit (2 %) is unchanged.
 | PWM centre per range | counts | within 860 +- 100 | outside | 860 is the 1.00o5 default (`statemachine.c` RESET); range is inference |
 | Volts factor per range | % from the 1.00o5 default for that range | <= 3 % | > 3 % | defaults `signal_adjusters`; 3 % is inference |
 

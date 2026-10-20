@@ -740,23 +740,33 @@ Settings screen has it; x 696 before 0.2.63).
 
 - **Status**: the identity line (fw, git hash, commit time, protocol, USB serial, MMU and caches from the CP15 word), the
   FPGA line (chip, bitstream word and features; amber "FPGA stock bitstream 0x1432: no generator, no filter; gain
-  calibration not possible" on the stock bitstream), four tiles with a verdict word and up to four lines: Firmware (OK
+  calibration not possible" on the stock bitstream), four tiles with a verdict word and up to five lines (13 px, 15 px
+  apart, fw 0.2.100): Firmware (OK
   when the card starts the running image, Check "Running X from RAM. A power cycle starts Y from the card.", no open
-  firmware at sector 750, no card), Restarts (OK "None since power-on. Up 1 h 42 min.", red Fault with the exception and
-  its PC, Check for a record stored by an earlier power-on), USB (configured: OK, or Check with bad frames (counters
+  firmware at sector 750, no card), Restarts (fw 0.2.100, owner 2026-10-20: crashes only, exception types 1..6; a
+  deliberate restart, type 0 "jump to the entry" (a FEL load, Enter FEL, an update, a self-restart), is normal. OK "No
+  crashes." "Up 1 h 42 min."; Check, a stored record of a crash before this run: "Crashed once before this run: data
+  abort." "If it happens again, save a report." "Up ..."; red Fault, counter 49 > 0 with a real exception in 50:
+  "Crashed 2 times this run: data abort at 0x80014a2c." "Details on the Log page."; no LR or exception jargon there,
+  the Log page keeps type, LR, PC and fault registers), USB (configured: OK, or Check with bad frames (counters
   12-15) or reconnects (61); Suspended; No PC; then bad frames, suspends, reconnects), Battery ("18 of 20", charging,
   amber "Low: readings and SD writes may fail" below 4 of 20 off the charger, the DS3231 temperature with the module).
   Calibration box: one verdict (Fault: no calibration block; Check: block not bound to the offsets, FPGA changed since
   calibration, gains not measured (stock: not possible), gains carried over, calibrated under 5 minutes after power-on,
-  a value over its limit; OK otherwise), per channel the class gain ratio full / gated (limit 2 %) and the worst noise
-  RMS over the ranges gated (0.3 code) and full (1.0 code), each with OK or Check; the note that the limits are
-  provisional; the provenance sentence ("Calibrated on fw 0.2.59, FPGA 0x1535, 12 min after power-on, 1 power-on ago.",
+  a value over its limit, in two lines: "A value is over its limit (below): move chargers and the USB cable away and
+  calibrate again." "If it stays, the input stage is noisy."; OK otherwise), per channel the class gain ratio full /
+  gated (limit 2 %) and the worst noise RMS over the ranges, "Noise RMS, inputs open", gated ("limit 1.0 code") and
+  full ("limit 3.0 code"), each with OK or Check. The noise rows measure the zero step's open-input condition, so their
+  limits are the zero step's pass criterion, one pair of constants (`adc_cal.h` `ACAL_MAX_NOISE16_FULL` / `_GATED`,
+  fw 0.2.100; 0.3 / 1.0 code and a "provisional" note before); the provenance sentence ("Calibrated on fw 0.2.59,
+  FPGA 0x1535, 12 min after power-on, 1 power-on ago.",
   or why there is none). Buttons: Calibrate (green), Save report to card (the file name, or "Report not saved: no card",
   ... in place of the hint).
 - **Calibration**: the block state per channel and the provenance; per channel the table per hardware range (PWM centre
   in use, amber outside 860 +- 100; volts factor in % from 1.00o5's default, amber beyond 3 %; zeros of core A / B gated
   and full), the gains per class and core with the range they were measured on (or "carried over", "not measured"), the
-  noise, the v4 tracking ("Tracking A-B +0.12 code, slope +0.31 %, 3 s ago", "Full-rate offset +0.70 code, 4 probes,
+  noise ("Noise RMS, inputs open: gated 0.50, full 1.19 code", amber over a limit, then "Gated limit 1.0 code, full
+  limit 3.0 code"), the v4 tracking ("Tracking A-B +0.12 code, slope +0.31 %, 3 s ago", "Full-rate offset +0.70 code, 4 probes,
   12 s ago", grey until they ran), the DC shift values and whether the 1.00o5 core compensations are in use. Buttons:
   Calibrate, DC shift trim (1.00o5's manual trim of the trace scale, `dc_shift_cal`, not saved: while on, CTRL on the
   scope opens the trim pages; was in Settings 0.2.55-0.2.56 and Other settings before; since 0.2.63 the button is green
@@ -1844,7 +1854,8 @@ where the mean of both cores reads 128; at P, 8 conversions gated (2 MSa/s) and 
 40 us PWM ripple period, so it takes many to average the ripple phase) give the
 zeros (1/16 code), the RMS noise and the drift between the first and the second 4 conversions. About 0.4 s per range,
 5 s in all. Checks per range (`acal_range_store`, first failure wins, shown as "CH1: <reason>" in the failure box;
-nothing changes unless both channels pass): no sample at 0 or 255; noise <= 3 codes RMS; drift <= 0.5 code; slopes
+nothing changes unless both channels pass): no sample at 0 or 255; noise <= 3 codes RMS at full rate, <= 1 code gated
+(fw 0.2.100, owner 2026-10-20; 3 codes for both before; the Diagnostics limits); drift <= 0.5 code; slopes
 -0.20..-0.33 codes per count and within 0.02 of each other; zeros within 16 codes of 128 and within 20 codes of
 each other per class; full and gated zero of a core within 12 codes. On success: `dc_calibration_offset[r] = P`
 ([6] = [5]); `adc1/adc2compensation` = whole-code split (|A - B| and the mean error at most half a code) of the gated
@@ -2081,8 +2092,8 @@ the step instead of being calibrated around the fault.
 
 **Capture stage training (fw 0.2.79, FPGA 0x153A, protocol 1.24, row 64; `cap_stage.c`, `cap_hw.c`).** On 0x153A each
 channel's zero step starts with the training of its two cores' capture stages (`cal_train`): range 0, the input parked at
-code 128 by the gated centre search, a quiet input required (gated within-capture RMS at most 3 codes, else "too much
-noise"). Each core is tried at stages 2..5 (0x63), one 8000-word 200 MSa/s capture each with the 0x36 outlier counts read
+code 128 by the gated centre search, a quiet input required (gated within-capture RMS at most 1 code since fw 0.2.100,
+3 codes before, else "too much noise"). Each core is tried at stages 2..5 (0x63), one 8000-word 200 MSa/s capture each with the 0x36 outlier counts read
 (threshold 0x64 = 8 codes; a clean stage reads 0). Per core the clean stage of {3, 4} whose outer neighbour is clean too
 is taken (the power-on one when the clean run is symmetric), else the clean one of {3, 4}, else a clean reserve 2 / 5; a
 B core with no clean stage is tried again with its reference bit (0x63 bit 12 / 13, timed by the chip's A encode). A core
