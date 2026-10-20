@@ -1618,8 +1618,9 @@ by default; a buffer that another bus master reads (only the display engine's `m
 own mapping in `pc_mmu_build`.
 
 The next fixed DDR user above `.bss` is the bootloader's copy of SD sector 710 at 0x81BFFC00,
-22.4 MiB above the new end of `.bss`. The image needs 740 SD sectors from sector 750, so it ends
-at sector 1489, well below the FAT partition start at 2048 or later.
+22.4 MiB above the new end of `.bss`. The image needed 740 SD sectors from sector 750 then (1512 on
+0.2.101, ending at 2261); it must end below the FAT partition, which starts at 16384 or later
+(section 3).
 
 ### Bench loop without the boot menu (ENTER_FEL)
 
