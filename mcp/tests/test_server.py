@@ -180,6 +180,83 @@ async def test_legacy_firmware_takes_remote_and_releases_when_idle(sim_factory, 
         assert any("remote_acquired" in x for x in r["caveats"])
 
 
+async def test_idle_close_frees_the_port_and_reconnects(sim_factory, tmp_path):
+    """Collaborative firmware: the server closes the link after idle_close_s without tool calls and reopens it on
+    the next call, reloading the unit calibration file as on the first connect."""
+    import time
+
+    import anyio
+
+    from fnirsi1013d.calibration import UnitCalibration
+
+    srv = sim_factory(signal="dc:v=0.05")
+    async with client_for(srv, tmp_path, idle_close_s=30) as c:
+        await c.call("scope_info")
+        assert c.sess.scope is not None
+        connects = srv.device.link["dtr_up"]
+        UnitCalibration.load_or_new(c.sess.cal_path(), c.sess.scope.info.serial_str).save(c.sess.cal_path())
+        assert not c.sess.idle_close_check(now=time.monotonic() + 10)  # not idle long enough
+        assert c.sess.idle_close_check(now=time.monotonic() + 31)
+        assert c.sess.scope is None and c.sess.idle_closes == 1
+        for _ in range(200):  # the simulator sees the host go away
+            if not srv.device.dtr:
+                break
+            await anyio.sleep(0.01)
+        r = await c.call("scope_status")
+        assert r["control"] == "SHARED"
+        assert srv.device.link["dtr_up"] == connects + 1
+        assert c.sess.scope.unit_cal is not None  # the calibration file was loaded again
+
+        # a long tool counts as activity for its whole duration: no close while it runs, the clock restarts after
+        await c.call("scope_set_trigger", mode="auto", total_samples=4000, pretrigger_fraction=0.5)
+        async with anyio.create_task_group() as tg:
+            done = {}
+
+            async def run_avg():
+                done["r"] = await c.call("scope_averaged_capture", n=128, channels=["CH1"], on_device=False)
+            tg.start_soon(run_avg)
+            for _ in range(500):
+                if c.sess.lock.locked():
+                    break
+                await anyio.sleep(0.005)
+            assert c.sess.lock.locked()
+            assert not c.sess.idle_close_check(now=time.monotonic() + 3600)
+        t_end = time.monotonic()
+        assert done["r"]["n_used"] == 128 and c.sess.scope is not None
+        assert t_end - c.sess.last_tool < 5
+        assert not c.sess.idle_close_check(now=c.sess.last_tool + 29)
+        assert c.sess.idle_close_check(now=c.sess.last_tool + 31)
+
+
+async def test_idle_close_zero_holds_the_port(sim, tmp_path):
+    import time
+    async with client_for(sim, tmp_path, idle_close_s=0) as c:
+        await c.call("scope_info")
+        assert not c.sess.idle_close_check(now=time.monotonic() + 3600)
+        assert c.sess.scope is not None
+
+
+def test_idle_close_env(monkeypatch):
+    monkeypatch.setenv("FNIRSI_MCP_IDLE_CLOSE_S", "0")
+    assert ServerConfig.from_env().idle_close_s == 0
+    monkeypatch.delenv("FNIRSI_MCP_IDLE_CLOSE_S")
+    assert ServerConfig.from_env().idle_close_s == 30
+
+
+async def test_legacy_idle_close_waits_for_the_remote_release(sim_factory, tmp_path):
+    """Legacy firmware: the port is not closed while REMOTE is held; the legacy rule releases it first."""
+    import time
+    async with client_for(sim_factory(legacy=True), tmp_path, idle_close_s=30, legacy_idle_release_s=60) as c:
+        await c.call("scope_set_timebase", divider=9)
+        assert c.sess.scope.remote
+        assert not c.sess.idle_close_check(now=time.monotonic() + 45)
+        c.sess.legacy_idle_check(now=time.monotonic() + 61)
+        assert not c.sess.scope.remote
+        assert c.sess.idle_close_check(now=time.monotonic() + 61)
+        r = await c.call("scope_set_timebase", divider=19)
+        assert any("remote_acquired" in x for x in r["caveats"])
+
+
 async def test_set_channel_snaps_and_reports(client):
     r = await client.call("scope_set_channel", channel="CH1", volts_per_div="9", probe=10, coupling="AC",
                           offset_div=1.0)

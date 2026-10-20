@@ -76,6 +76,9 @@ class ServerConfig:
     #: legacy firmware (no SHARED_MODE): release REMOTE, keeping the host settings, after this many idle seconds
     #: (0 = hold it until the server exits)
     legacy_idle_release_s: float = 60.0
+    #: close the serial port (or tcp:// link) after this many seconds without a tool running, so other programs
+    #: (bench scripts, fnirsi1013d-flash) can open it; the next tool call reconnects (0 = hold it until exit)
+    idle_close_s: float = 30.0
     #: collaborative firmware: restarts of a long run after settings changes at the scope before giving up
     max_restarts: int = 5
     #: collaborative firmware reports ui_busy 2 (STARTING) until its first main-loop pass; wait this long
@@ -108,6 +111,8 @@ class ServerConfig:
             cfg.cal_file = Path(e["FNIRSI_MCP_CAL_FILE"])
         if e.get("FNIRSI_MCP_LEGACY_IDLE_RELEASE_S"):
             cfg.legacy_idle_release_s = float(e["FNIRSI_MCP_LEGACY_IDLE_RELEASE_S"])
+        if e.get("FNIRSI_MCP_IDLE_CLOSE_S"):
+            cfg.idle_close_s = float(e["FNIRSI_MCP_IDLE_CLOSE_S"])
         if "FNIRSI_MCP_AUDIT_LOG" in e:
             cfg.audit_log = Path(e["FNIRSI_MCP_AUDIT_LOG"]) if e["FNIRSI_MCP_AUDIT_LOG"] else None
         for k, v in override.items():
@@ -192,7 +197,10 @@ class Session:
         self.last_capture_file: str | None = None
         #: the Bode tool shows its wiring text with the first sweep of a session
         self.bode_wiring_shown = False
+        #: end of the last tool's device work (its start while one runs); the idle rules count from here
         self.last_tool = time.monotonic()
+        #: times the idle rule closed the port (diagnostics, tests)
+        self.idle_closes = 0
         self._stop = threading.Event()
         self._ka = threading.Thread(target=self._keepalive, name="fnirsi-keepalive", daemon=True)
         self._ka.start()
@@ -204,7 +212,8 @@ class Session:
             try:
                 self.scope = Scope.connect(self.cfg.port, max_response=self.cfg.max_response)
             except TransportError as e:
-                raise ToolError(f"cannot connect to the scope at {self.cfg.port!r}: {e}") from e
+                raise ToolError(f"cannot connect to the scope at {self.cfg.port!r}: {e} (if another program holds "
+                                "the port, close it and retry)") from e
             p = self.cal_path()
             if p.is_file():
                 try:
@@ -219,6 +228,10 @@ class Session:
         serial = self.scope.info.serial_str if self.scope is not None else "unit"
         safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in serial) or "unit"
         return Path(self.cfg.data_dir) / "cal" / f"{safe}.json"
+
+    def touch(self) -> None:
+        """A tool's device work ended (called while it still holds the lock): restart the idle clocks."""
+        self.last_tool = time.monotonic()
 
     def drop_connection(self) -> None:
         if self.scope is not None:
@@ -239,11 +252,35 @@ class Session:
             self.drop_connection()
 
     def _keepalive(self) -> None:
-        """Legacy firmware only (collaborative firmware has no REMOTE): send GET_STATUS while REMOTE and idle so
-        the firmware watchdog does not expire, and release REMOTE (keeping the host settings) once no tool has
-        run for ``legacy_idle_release_s``."""
+        """Legacy firmware: send GET_STATUS while REMOTE and idle so the firmware watchdog does not expire, and
+        release REMOTE (keeping the host settings) once no tool has run for ``legacy_idle_release_s``. Any
+        firmware: close the port once no tool has run for ``idle_close_s`` (``idle_close_check``)."""
         while not self._stop.wait(min(self.cfg.keepalive_s / 2, 1.0)):
             self.legacy_idle_check()
+            self.idle_close_check()
+
+    def idle_close_check(self, now: float | None = None) -> bool:
+        """Close the connection when no tool has run for ``idle_close_s`` (0 = never) and the scope is not held in
+        REMOTE (legacy firmware releases REMOTE first by its own rule). A running tool holds the session lock for
+        its whole duration (averaged runs and sweeps included) and touches ``last_tool`` at its end, so it is never
+        cut off. The next tool call reconnects through ``get_scope`` (calibration file reloaded). Returns True
+        when it closed."""
+        limit = self.cfg.idle_close_s
+        s = self.scope
+        if not limit or s is None or s.remote:
+            return False
+        now = time.monotonic() if now is None else now
+        if now - self.last_tool <= limit or not self.lock.acquire(blocking=False):
+            return False
+        try:
+            if self.scope is not s or s.remote or now - self.last_tool <= limit:
+                return False  # a tool ran between the test and the lock
+            self.drop_connection()
+            self.idle_closes += 1
+            log.info("closed the scope connection after %.0f s without tool calls (reopens on the next call)", limit)
+            return True
+        finally:
+            self.lock.release()
 
     def legacy_idle_check(self, now: float | None = None) -> None:
         s = self.scope
@@ -426,18 +463,21 @@ class _SettingsChanged(Exception):
 
 
 class _Held:
-    def __init__(self, lock: threading.Lock):
-        self.lock = lock
+    """The session lock held across a long run's awaits; releasing it counts as tool activity (idle clocks)."""
+
+    def __init__(self, sess: Session):
+        self.sess = sess
         self.got = False
 
     def acquire(self) -> None:
-        self.lock.acquire()
+        self.sess.lock.acquire()
         self.got = True
 
     def release(self) -> None:
         if self.got:
             self.got = False
-            self.lock.release()
+            self.sess.touch()
+            self.sess.lock.release()
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -998,6 +1038,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 except TransportError:
                     sess.drop_connection()
                     raise
+                finally:
+                    sess.touch()
         try:
             result = await anyio.to_thread.run_sync(locked)
         except ToolError as e:
@@ -1961,7 +2003,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         A capture taken under another settings_seq means someone changed a setting at the scope: the run starts
         over with the new settings (``restarts`` in the result says when and what changed), at most
         ``max_restarts`` times."""
-        held = _Held(sess.lock)
+        held = _Held(sess)
         try:
             await anyio.to_thread.run_sync(held.acquire)
             notes = await anyio.to_thread.run_sync(sess.ensure_control)
@@ -2420,7 +2462,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             changed = s.shared and cap.settings_seq != cctx.settings_seq
             return ch.volts, cap.dt, cap.capture_id, cap.auto_timeout, int(ch.clipped.sum()), changed
 
-        held = _Held(sess.lock)
+        held = _Held(sess)
         try:
             try:
                 await anyio.to_thread.run_sync(held.acquire)
