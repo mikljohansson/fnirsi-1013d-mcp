@@ -1,7 +1,7 @@
 # fpga/al3 - handoff for agents and humans
 
 Anlogic AL3A10LG144C7 FPGA of the owner's FNIRSI 1013D (JTAG IDCODE 0x18006C31, config flash Winbond
-W25Q80DV, JEDEC `ef 40 14`). Read `CLAUDE.md` at the repo root first; its flashing rules override anything here.
+W25Q80DV, JEDEC `ef 40 14`). Read `AGENTS.md` at the repo root first; its flashing rules override anything here.
 
 State on 2026-10-20 (fpga-gen13, branch `fpga-gen13`):
 - fpga-gen13 (2026-10-20 evening): 0x153B was **flashed at 19:31** (verified `1391978c...3b88`; rollback = the pre-write

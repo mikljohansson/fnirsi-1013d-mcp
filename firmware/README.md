@@ -237,7 +237,7 @@ python3 tools/make_sd_image.py pack -o pkg.bin -i scope.bin -l 0x5BC00   # = fla
   card must have an MBR. You must type the device path to confirm. Sectors 0 to the last written
   sector are always backed up to `backups/` before writing.
 
-Take and verify a full card backup before any of this, as CLAUDE.md requires. During
+Take and verify a full card backup before any of this, as AGENTS.md requires. During
 development, boot mode 4 (menu, preselect scope) is the safest choice. A crashing scope image can
 then still be bypassed at power-on through FEL or FNIRSI.
 
@@ -310,7 +310,7 @@ its time; the exit code is non-zero on failure (2 image, 3 scope port, 4 FEL dev
 6 the port did not come back). The FEL device must have been shared once from an admin shell
 (`usbipd bind --hardware-id 1f3a:efe8`). On a Linux host the same command calls sunxi-fel directly
 (`--sunxi-fel "sudo sunxi-fel"` if the udev rule is missing). Options: `--distro`, `--fel-timeout`,
-`--port-timeout`. Only RAM is written; announce the reload at the bench first (CLAUDE.md).
+`--port-timeout`. Only RAM is written; announce the reload at the bench first (AGENTS.md).
 
 ### USB from Windows
 

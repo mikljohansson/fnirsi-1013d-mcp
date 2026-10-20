@@ -91,7 +91,7 @@ Compare with the reference:
 wsl -d Ubuntu -- python3 -I /mnt/d/src/fnirsi-1013d-ai/fpga/al3/td/compare_bin.py /mnt/d/src/fnirsi-1013d-ai/fpga/al3/build/FPGA.bin /mnt/d/src/fnirsi-1013d-ai/fpga/al3/bitstreams/atlan4-FPGA-0x1532.bin
 ```
 
-Never flash a build from here without the gates in `CLAUDE.md`.
+Never flash a build from here without the gates in `AGENTS.md`.
 
 ## Other routes (not used)
 

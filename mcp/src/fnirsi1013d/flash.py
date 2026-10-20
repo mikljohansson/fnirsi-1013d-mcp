@@ -26,7 +26,7 @@ Steps (each printed with its duration; non-zero exit on the first failure):
     fnirsi1013d-flash --image <bin> --persist-only                 # just write the card
     fnirsi1013d-flash --restore backups/sd_750-2262_20261020-120000.bin
 
-This changes what the scope runs. Announce it to whoever is at the bench before running it (CLAUDE.md bench rules).
+This changes what the scope runs. Announce it to whoever is at the bench before running it (AGENTS.md bench rules).
 """
 
 from __future__ import annotations

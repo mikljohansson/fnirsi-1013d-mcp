@@ -9,7 +9,7 @@ standard tool behaviour that no note covers; verify it. Where sources conflict o
 
 ## 0. Ground rules
 
-1. Nothing is written to any flash chip, FPGA or SD sector until section 3 is complete and the checksums are in `docs/hardware-status.md` (CLAUDE.md "Rules").
+1. Nothing is written to any flash chip, FPGA or SD sector until section 3 is complete and the checksums are in `docs/hardware-status.md` (AGENTS.md "Rules").
 2. Sections 1 to 4 are read-only. Section 5 changes hardware state. FEL (section 6) is RAM-only unless you use `spiflash-write`.
 3. Three separate memories exist and must not be confused:
 
@@ -184,7 +184,7 @@ flashrom -p serprog:dev=/dev/ttyACM0:115200,spispeed=4M -r 2026-10-18_fpga-25q80
 
 ## 3. Backups (mandatory)
 
-Directory and naming. `backups/` is gitignored (CLAUDE.md). Layout:
+Directory and naming. `backups/` is gitignored (AGENTS.md). Layout:
 
 ```
 backups/

@@ -1,6 +1,6 @@
 # Hardware status log (owner's FNIRSI 1013D)
 
-Living document. Update after every hardware step (CLAUDE.md). Procedures are in `docs/hardware-prep.md`.
+Living document. Update after every hardware step (AGENTS.md). Procedures are in `docs/hardware-prep.md`.
 Hash entries use sha256 of files in `backups/` (gitignored).
 
 ## Unit identification
@@ -10,12 +10,12 @@ Hash entries use sha256 of files in `backups/` (gitignored).
 | Model | FNIRSI 1013D | owner |
 | MCU | Allwinner F1C100s | board |
 | FPGA | Anlogic AL3A10, unmarked LQFP144 | inferred: external 25Q80 beside it; not yet confirmed by a bitstream header or JTAG read |
-| FPGA JTAG IDCODE | 0x18006C31 expected | taken from other AL3 units (CLAUDE.md); will appear at offset 40 of the 25Q80 dump |
+| FPGA JTAG IDCODE | 0x18006C31 expected | taken from other AL3 units (AGENTS.md); will appear at offset 40 of the 25Q80 dump |
 | FPGA config flash | Winbond 25Q80DVNIG, 1 MB | owner |
 | FPGA flash header | unpopulated 2x3, owner is soldering pins | owner |
 | MCU flash | W25Q32JVSIQ, 4 MB, near the F1C100s | owner |
 | Charger | TP4056 | owner |
-| Parts on back side | none | CLAUDE.md |
+| Parts on back side | none | AGENTS.md |
 | Stock FPGA version word | 0x1432 expected | not read on this unit |
 | Firmware / bootloader now | unknown | owner to determine (hardware-prep.md section 4) |
 | Programmers available | generic ARM JTAG debuggers (J-Link / ST-Link / CMSIS-DAP class); CH341A can be bought; WSL Ubuntu with flashrom | owner |

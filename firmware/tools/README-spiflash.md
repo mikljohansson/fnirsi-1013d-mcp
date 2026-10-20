@@ -63,6 +63,6 @@ and long files truncated, each with a warning.
   adapter's power pins and never write.
 - A powered board risks bus contention; prefer an unpowered target with the flash powered via the adapter's
   3.3 V only if you accept that the FPGA also gets partially powered through its I/O.
-- Never write without a verified backup (CLAUDE.md rule). `--no-backup` exists for chips already dumped.
+- Never write without a verified backup (AGENTS.md rule). `--no-backup` exists for chips already dumped.
 - The script has been tested against a simulated chip and on real hardware only up to `probe` with nothing
   attached (MPSSE sync passes, idle pins 0xfc, ID ff ff ff).

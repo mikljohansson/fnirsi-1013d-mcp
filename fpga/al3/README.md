@@ -153,7 +153,7 @@ concatenated; the AL primitive models come in through `-lib`; `import_device` wi
 Expected on a first build (Donwulff's numbers for the same project): about 600 LUT, 460 registers, 32 BRAM9K, 60 IO;
 `.bin` of 282,898 bytes starting with 32 bytes of 0xFF then `cc55aa33 f0000006 18006c31`; `clk_200MHz` timing met;
 `clkc[1]` slightly negative (known, structural). Do not flash a first build. Compare it with
-`bitstreams/atlan4-FPGA-0x1532.bin` and follow the flashing gates in `CLAUDE.md`.
+`bitstreams/atlan4-FPGA-0x1532.bin` and follow the flashing gates in `AGENTS.md`.
 
 ## Atlan4 `zaklad.v` vs pcprogrammer stock re-implementation
 
