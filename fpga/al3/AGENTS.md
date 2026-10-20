@@ -290,6 +290,11 @@ References:
   `fir_act`, `dec_sv[0]` also fires at `dec_pc == fir_hp` (P/2), `dec_t` tags the `dec_pc == 0` strobes, the FIR loads
   on `dec_t[7]`, `dec_wr` = `fir_done1` and `dec_out1/2` = the FIR outputs. With `fir_act` = 0 all of these reduce to
   0x1534.
+- Peak detect (0x153C, branch fpga-c2), same block and `decim_chan`: `peak_en` (0x56 bit 1) is part of `dec_on`, so it
+  forces the 16-bit path by itself; `peak_act` drives `decim_chan.peak` (out = `pk4`, the { max, min } of the K = 1
+  window, pipeline `pmx/pmn -> pdx/pdn -> rmx/rmn -> pkw -> pk0..pk4` on `wstart` = `dec_pc == 0` and `sv[0..4]`),
+  `fir_ok` carries `~peak_en`, `dec_trig_sample` takes max / min as the high byte, 0x29 byte 1 = `{ peak_act, peak_en,
+  shift }`. `pair_e1/l1/e2/l2` are the captured pairs for the counter (C3).
 - Sequencer (0x1536), blocks "Segmented capture and averaging" after the trigger-address capture:
   - write-clock side: the restart pulse `seq_rst_c` (in `cap_rst`, which replaced `sample_system_reset` in every
     capture register), the segment slot remap `sample_write_address_phys`, the 40-bit timestamp `ts_cnt` / `ts_cap`;
