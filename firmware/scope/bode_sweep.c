@@ -66,12 +66,19 @@ static int collapsed(const bode_meas *ref, const bode_meas *now)
 //----------------------------------------------------------------------------------------------------------------------------------
 // Hardware steps
 
+//A front-end write's settling (RELAY_SETTLE_S): fw 0.2.87 the waits add up as the host's sleeps do (bode.py _set_range
+//sleeps after the offset write and again at its end: 100 ms after a range change with the offset centred, 50 ms after
+//an offset move). Up to 0.2.86 they overlapped into one 50 ms; the bench sweep of 2026-10-20 12:05 flagged unsettled /
+//incoherent exactly on the points after a CH2 range change, where the host, waiting longer, flagged none (inference:
+//the offset PWM's filter still settling in the record)
 static void relay_wait(bode_eng *e)
 {
-  uint32 t = now_ms(e) + RELAY_MS;
+  uint32 now = now_ms(e);
 
-  if(!e->relay_pending || after(t, e->relay_until))
-    e->relay_until = t;
+  if(e->relay_pending && !after(now, e->relay_until))
+    e->relay_until += RELAY_MS;
+  else
+    e->relay_until = now + RELAY_MS;
 
   e->relay_pending = 1;
 }
@@ -111,13 +118,11 @@ static int shift_offset(bode_eng *e, int c, int32 codes_c100)
   return ok;
 }
 
-//Range r with the offset centred on a DC level of v_uv microvolts at the BNC (host _set_range: offset 0, then centre)
+//Range r with the offset centred on a DC level of v_uv microvolts at the BNC (host _set_range: offset 0, then centre;
+//the offset write's wait, then RELAY_SETTLE_S at the end)
 static void set_range(bode_eng *e, int c, int r, int32 v_uv)
 {
   bode_chinfo ci;
-
-  if(r != e->range[c])
-    relay_wait(e);
 
   set_channel(e, c, r, 0);
   e->hw->chan_info(e->hw->ctx, c, r, &ci);
@@ -153,6 +158,7 @@ static void request(bode_eng *e, int phase, const bode_plan *pp, uint32 settle_m
   uint32 start = (e->relay_pending && !after(now, e->relay_until)) ? e->relay_until : now;
 
   e->relay_pending = 0;
+  e->msettle  = settle_ms;
   e->phase    = (uint8)phase;
   e->mp       = pp;
   e->mtotal   = total;
@@ -306,8 +312,8 @@ static void auto_range(bode_eng *e, const bode_meas *m, int coll)
 {
   int r = e->range[1];
 
-  //STOP: the point keeps this result, no range change follows
-  if((e->cfg.ch2_mode != BODE_CH2_AUTO) || e->stop_req)
+  //STOP: the point keeps this result, no range change follows; nor on a record without a stimulus (host _auto_range)
+  if((e->cfg.ch2_mode != BODE_CH2_AUTO) || e->stop_req || bode_ch1_dead(m))
   {
     next_point(e);
     return;
@@ -432,6 +438,8 @@ static void on_prescan(bode_eng *e, const bode_meas *m)
 
     if((c == 1) && (e->cfg.ch2_mode == BODE_CH2_HOLD))
       r = e->hold_r2;
+    else if((c == 0) && bode_ch1_dead(m))
+      r = 1;            //nothing to range on (flat even after the retake, or no tone): host _prescan
     else
       for(cand = 1; cand < 6; cand++)
         if((int64)ac * vpd_mv[1] <= (int64)FULL_SCALE_C100 * vpd_mv[cand])
@@ -472,6 +480,13 @@ static void on_verify(bode_eng *e, const bode_meas *m)
 
   e->iter++;
 
+  //host _prescan: CH1 flat even after the retake: nothing to range on, keep the ranges
+  if(bode_ch1_dead(m))
+  {
+    e->iter = 4;
+    over = 0;
+  }
+
   if(over && (e->cfg.ch2_mode == BODE_CH2_HOLD))
   {
     finish(e, BODE_ST_ERROR, BODE_ERR_OVERLOAD);
@@ -487,7 +502,7 @@ static void on_verify(bode_eng *e, const bode_meas *m)
     return;
   }
 
-  for(c = 0; c < 2; c++)
+  for(c = 0; (c < 2) && !bode_ch1_dead(m); c++)
   {
     int cl = c ? (m->c[1].clipped || over) : m->c[0].clipped;
 
@@ -501,7 +516,7 @@ static void on_verify(bode_eng *e, const bode_meas *m)
     }
   }
 
-  if(!changed)
+  if(!changed && !bode_ch1_dead(m))
     changed = recentre(e, m);
 
   if(changed && (e->iter < 4) && !e->stop_req)
@@ -569,7 +584,7 @@ static void on_measure(bode_eng *e, const bode_meas *m)
       if(stop)
         return;
 
-      if((e->phase == PH_POINT) && !e->stop_req && recentre(e, m))
+      if((e->phase == PH_POINT) && !e->stop_req && !bode_ch1_dead(m) && recentre(e, m))
       {
         e->retries++;
         measure(e, PH_RECENTRE, pp, point_settle(e));
@@ -720,6 +735,7 @@ int bode_start(bode_eng *e, const bode_cfg *cfg, int thru, int hold_r2)
   e->nbg        = 0;
   e->retries    = 0;
   e->relay_pending = 0;
+  e->retake     = 0;
   e->gen_on     = 0;
   e->disturbed  = 1;
 
@@ -829,12 +845,40 @@ int bode_step(bode_eng *e)
       return 1;
     }
 
+    //fw 0.2.87 (host _measure / _background): a suspect record (CH1 flat or without a tone, CH2 constant; a constant
+    //background record) is taken once more with the same settle time, as the 0x153A first-record artefact looks so
     if(e->mbg)
+    {
+      uint32 i;
+      int    flat = 1;
+
+      for(i = 1; flat && (i < e->mtotal); i++)
+        flat = (cap.x[1][i] == cap.x[1][0]);
+
+      if(flat && !e->retake)
+      {
+        e->retake = 1;
+        request(e, e->phase, e->mp, e->msettle, e->mtotal, 1);
+        return 1;
+      }
+
+      e->retake = 0;
       on_bg(e, &cap);
+    }
     else
     {
       bode_dft_run(e->mp, cap.x[0], cap.x[1], e->work, &d);
       bode_measure(e->mp, &d, cap.s, cap.zero_c100, cap.uv_q8, &m);
+
+      if(bode_suspect(&m) && !e->retake && !e->stop_req)
+      {
+        e->retake = 1;
+        e->retries++;
+        request(e, e->phase, e->mp, e->msettle, e->mtotal, 0);
+        return 1;
+      }
+
+      e->retake = 0;
       on_measure(e, &m);
     }
   }

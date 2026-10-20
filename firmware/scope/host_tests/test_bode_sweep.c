@@ -27,6 +27,9 @@ typedef struct
   int    rail_reads;          //fw 0.2.83: the rails only in the first rail_reads captures (0: every capture)
   int    check;               //fw 0.2.83: bode_cap.check of every capture (BODE_CHK_*)
   uint32 fault_at;            //fw 0.2.83: this capture (1 = the first) has BODE_CHK_FAULT (0: none)
+  uint32 flat_from, flat_n;   //fw 0.2.87: captures flat_from .. flat_from + flat_n - 1 are one saturated value on both
+                              //channels (the 0x153A first-record artefact)
+  double scale2;              //fw 0.2.87: CH2's signal x this (0 = 1; the DUT's output changing between sweeps)
   uint32 reads;
 
   //State
@@ -189,7 +192,7 @@ static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
 
     for(c = 0; c < 2; c++)
     {
-      double vv = v[c] * ((c == 1) ? d->gain2 : 1.0), code;
+      double vv = v[c] * ((c == 1) ? d->gain2 * (d->scale2 ? d->scale2 : 1.0) : 1.0), code;
       double win = d->window_v[d->range[c]];
 
       code = 128.0 - d->off[c] / 10.0 + vv / vpl(d->range[c]);
@@ -221,6 +224,11 @@ static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
 
   //A readout fault (FPGA 0x1539's A cores, or one saturated record): rail values whatever the input
   d->reads++;
+
+  if(d->flat_n && (d->reads >= d->flat_from) && (d->reads < d->flat_from + d->flat_n))
+    for(c = 0; c < 2; c++)
+      for(i = 0; i < total; i++)
+        d->buf[c][i] = 0xFF00;
 
   for(c = 0; c < 2; c++)
     if(d->rail[c] && (!d->rail_reads || (d->reads <= (uint32)d->rail_reads)))
@@ -628,6 +636,59 @@ static void test_readout_check(void)
     else
       T_TRUE(bode_done_count(&eng) > 0);
   }
+}
+
+//fw 0.2.87: a flat record (the 0x153A first-record artefact) is taken once more, as the host's _measure does: a flat
+//pre-scan no longer leaves CH1 on 2.5 V/div, a flat point record no longer becomes a flagged point
+static void test_flat_retake(void)
+{
+  bode_cfg c = cfg(1000, 100e3, 10, BODE_SETTLE_FAST, BODE_CH2_AUTO);
+  bode_point p;
+  uint32 base, at;
+  int i, n, flagged;
+
+  dut_rc(&D);
+  bode_init(&eng, &HW);
+  T_EQ(bode_start(&eng, &c, 0, 3), 0);
+  run(&eng, 600000);
+  T_EQ(bode_state(&eng), BODE_ST_DONE);
+  base = D.reads;
+
+  for(at = 1; at <= 12; at += 11)
+  {
+    dut_rc(&D);
+    D.flat_from = at;
+    D.flat_n = 1;
+    bode_init(&eng, &HW);
+    T_EQ(bode_start(&eng, &c, 0, 3), 0);
+    run(&eng, 600000);
+    T_EQ(bode_state(&eng), BODE_ST_DONE);
+    n = bode_count(&eng);
+
+    for(i = 0, flagged = 0; i < n; i++)
+      if(bode_point_get(&eng, i, &p) && (p.flags & (BODE_F_BAD | BODE_F_CH1_LOW)))
+        flagged++;
+
+    printf("  flat capture %u: CH1 range %d, %d of %d points flagged, %u captures (clean sweep %u)\n", (unsigned)at,
+           D.range[0], flagged, n, (unsigned)D.reads, (unsigned)base);
+    T_EQ(flagged, 0);
+    T_EQ(D.range[0], 3);
+    T_EQ(D.reads, base + 1);
+  }
+
+  //Flat twice (a stuck readout): the pre-scan keeps CH1 on range 1, the points are ch1_low + incoherent (host)
+  dut_rc(&D);
+  D.flat_from = 1;
+  D.flat_n = 1000;
+  bode_init(&eng, &HW);
+  T_EQ(bode_start(&eng, &c, 0, 3), 0);
+  run(&eng, 600000);
+  T_EQ(bode_state(&eng), BODE_ST_DONE);
+  T_TRUE(bode_point_get(&eng, 0, &p));
+  T_TRUE((p.flags & (BODE_F_INCOHERENT | BODE_F_CH1_LOW)) == (BODE_F_INCOHERENT | BODE_F_CH1_LOW));
+  T_TRUE(!(p.flags & BODE_F_CH2_OVERLOAD));
+  T_EQ(p.r1, 1);
+  T_EQ(bode_switches(&eng), 0);
 }
 
 //fw 0.2.71: a cancelled AUTO SET gives the previous table back (bode_snap)
@@ -1097,6 +1158,7 @@ int main(void)
   test_stop_and_steps();
   test_readout_fault();
   test_readout_check();
+  test_flat_retake();
   test_snap();
   test_thru();
   test_divider_floor();

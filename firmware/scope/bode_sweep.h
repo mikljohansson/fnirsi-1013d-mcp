@@ -280,6 +280,8 @@ struct bode_eng
   uint32    mtotal;
   uint32    deadline;
   uint8     mbg, forced;
+  uint8     retake;                           //fw 0.2.87: this capture is the retake of a suspect record
+  uint32    msettle;                          //its settle time (ms), for the retake
 
   bode_thru thru;
   int32     work[BODE_MAX_RECORD];
