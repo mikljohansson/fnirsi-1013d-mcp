@@ -16,7 +16,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   not to the way the sweep was started; only the first sweep after a settings change, or after a point invalidated the plan
   (clipped or dropped below the floor), ranges from scratch.
 
-- **AUTO SET ends in STOP, never RUN** (owner 10-20 11:47 **(owner)**: "Why should AUTO SET automatically transition to RUN? auto
+- [x] **AUTO SET ends in STOP, never RUN** (fw 0.2.86, bench pending) (owner 10-20 11:47 **(owner)**: "Why should AUTO SET automatically transition to RUN? auto
   set should make an automatic scan and then stop, inferring parameters and trying a few different param sets, then either
   stopping or giving up. If I want it to loop continuously I would press RUN myself"; fw-fr4 dispatched): after the overview and
   its passes AUTO SET runs one sweep at the found settings and returns to STOP with the chart and cards standing; on failure it
@@ -484,6 +484,11 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 
 ## Dispatched
+
+- fw-fr4 (done 12:02, about 120k tokens, merged 11:56 as fw 0.2.86): AUTO SET = overview, passes, one single sweep at the found
+  settings, STOP (view bit 1 clear throughout; button red STOP / "Auto..." while it runs, chip RUN, then green RUN / chip STOP);
+  "Stop sweep" and the Sweep card count the sweep in progress from the engine (the table's completion flags were reused on a
+  same-span repeat, hence "50 / 50"). Bench: section 55 addendum.
 
 - fw-acq2 (done 11:45, about 290k tokens, merged 11:42 as fw 0.2.85, pinned backups/fw-0.2.85_7b224ade.bin, not yet loaded): memory
   chips redrawn on every Filter change (acq_view_mem_chips), Spectrum "Capture" card (memory depth / fs, on by default after RBW

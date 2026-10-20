@@ -31,7 +31,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.86 - 2026-10-20 (provisional, protocol 1.24, unchanged)
+#### 0.2.86 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: AUTO SET never ends in RUN (owner 2026-10-20 11:47; a119035). After the overview and its finer passes
   it runs one sweep at the found span, Settle and CH2 range and returns to STOP with the chart and the cards standing;
