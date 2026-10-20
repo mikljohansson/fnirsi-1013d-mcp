@@ -1772,6 +1772,180 @@ assign sampling_enable = ~(
   always @(posedge i_mcu_clk)
     seq_lat <= seq_view;
 
+//-------------------------------------------------------------------------------------
+//Hardware counter with min / max (0x153C, C3; from the gen8 design), clk_200MHz. Input stream k_cs, one bit per 5 ns:
+//  EXT: ext_level (synchronised and majority filtered);
+//  CH1 / CH2: the captured pair of each write clock (adc*_w: core B the earlier sample, core A the later one, T/2 apart)
+//  through a Schmitt trigger (high at code >= level, low below level - hysteresis, 0x62), the earlier sample's state
+//  from the clock after the write clock's rise, the later one's from the clock after its fall: at 200 MSa/s (divider 0,
+//  or any K >= 1, which forces the full-rate write clock) one sample per 5 ns, at slower legacy rates each sample held
+//  for half a word.
+//Reciprocal counting over a gate of exactly 2e6 / 2e7 / 2e8 clocks (10 ms / 100 ms / 1 s, 0x61): from the first rising
+//edge of k_cs in the gate to the last one, E = the number of periods, T = clocks between those edges, W = clocks k_cs was
+//high in them; plus the minimum and maximum raw code of the source's pair over the gate (both cores, every write clock;
+//255 / 0 when no sample was taken: EXT source, or before the first gate). At the end of each gate E, T, W, min, max are
+//published with a sequence number and the next gate starts at once; a 0x61 write (gate or source) restarts the gate.
+//Frequency = E / (T x 5 ns), period = T x 5 ns / E, positive width = W x 5 ns / E, duty = W / T. E = 0: fewer than two
+//rising edges in the gate. The counter runs whenever 0x61 gate != 0 and touches nothing the capture uses; it reads
+//adc*_w and ext_level only. Power-on: everything 0 (gate off, level 0, hysteresis 0; the firmware writes 128 / 6).
+
+  reg [1:0]  cnt_gate = 0;                 //Command 0x61 bits 1..0: 0 off, 1 = 10 ms, 2 = 100 ms, 3 = 1 s
+  reg [1:0]  cnt_src  = 0;                 //Command 0x61 bits 3..2: 0 the trigger source (0x15), 1 CH1, 2 CH2, 3 EXT
+  reg [7:0]  cnt_lvl  = 0;                 //Command 0x62 byte 0: level (raw ADC code), high at >= level
+  reg [7:0]  cnt_hys  = 0;                 //Command 0x62 byte 1: hysteresis, low below level - hysteresis
+
+  //The counter's own copy of 0x15 as written (bit 1 EXT, bit 0 CH2), so that source 0 follows the trigger source
+  //whatever the trigger logic makes of trigger_ext / trigger_channel for the other trigger types.
+  reg        k_t15_ext = 0, k_t15_ch2 = 0;
+  always @(posedge i_mcu_clk)
+    if((i_mcu_dcs == 0) & i_mcu_rws & (mcu_command == 8'h15))
+      begin
+        k_t15_ch2 <= io_mcu_data[0];
+        k_t15_ext <= io_mcu_data[1];
+      end
+
+  wire       cnt_ext = (cnt_src == 2'd3) | ((cnt_src == 2'd0) & k_t15_ext);
+  wire       cnt_ch2 = (cnt_src == 2'd2) | ((cnt_src == 2'd0) & ~k_t15_ext & k_t15_ch2);
+  wire [7:0] cnt_lo  = (cnt_lvl > cnt_hys) ? cnt_lvl - cnt_hys : 8'd0;
+  wire [7:0] cnt_xe  = cnt_ch2 ? adc2B_w : adc1B_w;        //earlier sample of the pair (core B)
+  wire [7:0] cnt_xl  = cnt_ch2 ? adc2A_w : adc1A_w;        //later sample (core A)
+
+  //Write clock side: the pair against the two thresholds, and its min / max. Consumed on clk_200MHz 1.5 clocks after
+  //the rise (c_*) and, through k_hil / k_lol, after the fall; the next rise is at least 2 clocks after this one.
+  reg        c_hie = 0, c_loe = 0, c_hil = 0, c_lol = 0;
+  reg [7:0]  c_mn = 0, c_mx = 0;
+  always @(posedge sample_write_clock)
+    begin
+      c_hie <= (cnt_xe >= cnt_lvl);
+      c_loe <= (cnt_xe <  cnt_lo);
+      c_hil <= (cnt_xl >= cnt_lvl);
+      c_lol <= (cnt_xl <  cnt_lo);
+      c_mn  <= (cnt_xe < cnt_xl) ? cnt_xe : cnt_xl;
+      c_mx  <= (cnt_xe > cnt_xl) ? cnt_xe : cnt_xl;
+    end
+
+  reg        swc_fall = 0, swc_fall_q = 0;                 //the write clock falls on the next falling edge (as swc_rose)
+  reg        k_hil = 0, k_lol = 0;                         //the later sample's thresholds, taken at the rise snapshot
+  reg        k_st = 0;                                     //Schmitt state = the ADC stream
+  reg [3:0]  k_cfg = 0;                                    //the configuration the gate runs with
+  reg        k_cs = 0, k_csp = 0;
+  reg        k_on = 0, k_run = 0;
+  reg [28:0] k_g = 0;                                      //gate count, 2e6 / 2e7 / 2e8 - 2 down to -1
+  reg [27:0] k_t = 0, k_w = 0, k_e = 0;                    //running: clocks and high clocks since the first edge, periods
+  reg [27:0] k_tl = 0, k_wl = 0, k_el = 0;                 //at the last rising edge
+  reg [7:0]  k_mn = 8'hFF, k_mx = 0;                       //running min / max of the gate
+  reg [27:0] k_rt = 0, k_rw = 0, k_re = 0;                 //published
+  reg [7:0]  k_rmn_n = 0, k_rmx = 0;                       //published min (stored inverted: power-on reads 255) and max
+  reg [7:0]  k_seq = 0;
+  reg [3:0]  k_rcfg = 0;                                   //published with: source (ext, ch2) and gate
+
+  wire        k_rise = k_cs & ~k_csp;
+  wire [28:0] k_gl   = (cnt_gate == 2'd1) ? 29'd1999998 : (cnt_gate == 2'd2) ? 29'd19999998 : 29'd199999998;
+  wire [3:0]  k_cfg_now = { cnt_ext, cnt_ch2, cnt_gate };
+
+  always @(posedge clk_200MHz)
+    begin
+      swc_fall   <= swc_sh & sce_q;
+      swc_fall_q <= swc_fall;
+
+      if(swc_rise_q)
+        begin
+          k_st  <= c_hie ? 1'b1 : c_loe ? 1'b0 : k_st;
+          k_hil <= c_hil;
+          k_lol <= c_lol;
+        end
+      else if(swc_fall_q)
+        k_st <= k_hil ? 1'b1 : k_lol ? 1'b0 : k_st;
+
+      k_cs  <= cnt_ext ? ext_level : k_st;
+      k_csp <= k_cs;
+      k_cfg <= k_cfg_now;
+      k_on  <= (cnt_gate != 2'd0) & (k_cfg == k_cfg_now);
+
+      if(~k_on)
+        begin
+          k_g   <= k_gl;
+          k_run <= 0;
+          k_tl  <= 0; k_wl <= 0; k_el <= 0;
+          k_mn  <= 8'hFF; k_mx <= 8'h00;
+        end
+      else if(k_g[28])
+        begin
+          k_rt    <= k_tl;
+          k_rw    <= k_wl;
+          k_re    <= k_el;
+          k_rmn_n <= ~k_mn;
+          k_rmx   <= k_mx;
+          k_rcfg  <= k_cfg;
+          k_seq   <= k_seq + 8'd1;
+          k_g     <= k_gl;
+          k_run   <= 0;
+          k_tl    <= 0; k_wl <= 0; k_el <= 0;
+          k_mn    <= 8'hFF; k_mx <= 8'h00;
+        end
+      else
+        begin
+          k_g <= k_g - 29'd1;
+          if(swc_rise_q & ~cnt_ext)
+            begin
+              k_mn <= (c_mn < k_mn) ? c_mn : k_mn;
+              k_mx <= (c_mx > k_mx) ? c_mx : k_mx;
+            end
+          if(k_run)
+            begin
+              k_t <= k_t + 28'd1;
+              k_w <= k_w + { 27'd0, k_cs };
+              if(k_rise)
+                begin
+                  k_tl <= k_t;
+                  k_wl <= k_w;
+                  k_el <= k_e + 28'd1;
+                  k_e  <= k_e + 28'd1;
+                end
+            end
+          else if(k_rise)
+            begin
+              k_run <= 1;
+              k_t   <= 28'd1;
+              k_w   <= 28'd1;
+              k_e   <= 28'd0;
+            end
+        end
+    end
+
+  //MCU snapshot for read 0x35 (16 bytes): one consistent result. The command byte 0x35 toggles m_req on i_mcu_clk; the
+  //clk_200MHz side synchronises it and copies the published registers 3 .. 4 clocks (15 .. 20 ns) after the command
+  //strobe's rising edge, long before the first data byte is loaded (the next strobe's falling edge, >= 50 ns later on
+  //any MCU timing, about 150 ns on the firmware's), so a publish can never tear the snapshot and the 16 bytes are static
+  //for the whole read. m_new: a result was published since the previous snapshot (the sequence number differs).
+  reg        m_req = 0;
+  reg [2:0]  m_rq = 0;
+  reg [27:0] m_t = 0, m_w = 0, m_e = 0;
+  reg [7:0]  m_mn_n = 0, m_mx = 0;
+  reg [7:0]  m_seq = 0;
+  reg [3:0]  m_cfg = 0;
+  reg        m_new = 0;
+
+  always @(posedge i_mcu_clk)
+    if(i_mcu_dcs & i_mcu_rws & (io_mcu_data == 8'h35))
+      m_req <= ~m_req;
+
+  always @(posedge clk_200MHz)
+    begin
+      m_rq <= { m_rq[1:0], m_req };
+      if(m_rq[2] != m_rq[1])
+        begin
+          m_t    <= k_rt;
+          m_w    <= k_rw;
+          m_e    <= k_re;
+          m_mn_n <= k_rmn_n;
+          m_mx   <= k_rmx;
+          m_cfg  <= k_rcfg;
+          m_seq  <= k_seq;
+          m_new  <= (k_seq != m_seq);
+        end
+    end
+
 //=====================================================================================
 
   //Select the address and clock source based on the sample read enbale setting
@@ -1830,9 +2004,13 @@ assign sampling_enable = ~(
               | (mcu_command == 8'h1B) | (mcu_command == 8'h1F)
               | (mcu_command == 8'h32) | (mcu_command == 8'h35) | (mcu_command == 8'h38) | (mcu_command == 8'h3C)
               | (mcu_command == 8'h51) | (mcu_command == 8'h52) | (mcu_command == 8'h55)
-              | (mcu_command == 8'h58) | (mcu_command == 8'h5A) | (mcu_command == 8'h5C) | (mcu_command == 8'h63)) & i_mcu_rws) |
+              | (mcu_command == 8'h58) | (mcu_command == 8'h5A) | (mcu_command == 8'h5C) | (mcu_command == 8'h63)
+              | (mcu_command == 8'h62)                                                   //0x153C: counter thresholds
+              ) & i_mcu_rws) |
               (((mcu_command == 8'h06) | (mcu_command == 8'h14) | (mcu_command == 8'h29) | (mcu_command == 8'h41)
-              | (mcu_command == 8'h2A) | (mcu_command == 8'h36)) & ~i_mcu_rws))
+              | (mcu_command == 8'h2A) | (mcu_command == 8'h36)
+              | (mcu_command == 8'h35)                                                   //0x153C: counter read
+              ) & ~i_mcu_rws))
         mcu_state <= mcu_state + 1;
     end
 
@@ -2175,6 +2353,24 @@ assign sampling_enable = ~(
             8'h64:
               cap_thr_x <= io_mcu_data ^ CAP_THR_PO;
 
+            //Counter gate and source (0x153C)
+            8'h61:
+              begin
+                cnt_gate <= io_mcu_data[1:0];
+                cnt_src  <= io_mcu_data[3:2];
+              end
+
+            //Counter level and hysteresis (0x153C), two bytes
+            8'h62:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    cnt_lvl <= io_mcu_data;
+                  4'h1:
+                    cnt_hys <= io_mcu_data;
+                endcase
+              end
+
           endcase
         end
     end
@@ -2327,6 +2523,30 @@ assign sampling_enable = ~(
                   4'h8: o_mcu_data <= oc_2B[15:8];
                   4'h9: o_mcu_data <= oc_2B[7:0];
                   default: o_mcu_data <= 8'h00;
+                endcase
+              end
+
+            //Counter (0x153C), 16 bytes from the snapshot taken at the 0x35 command byte: { new, 0, EXT, CH2, 0, 0, gate },
+            //sequence, E, T, W (32 bits each, high byte first, 28 bits used), min, max of the source's raw codes
+            8'h35:
+              begin
+                case(mcu_state)
+                  4'h0:  o_mcu_data <= { m_new, 1'b0, m_cfg[3:2], 2'b00, m_cfg[1:0] };
+                  4'h1:  o_mcu_data <= m_seq;
+                  4'h2:  o_mcu_data <= { 4'd0, m_e[27:24] };
+                  4'h3:  o_mcu_data <= m_e[23:16];
+                  4'h4:  o_mcu_data <= m_e[15:8];
+                  4'h5:  o_mcu_data <= m_e[7:0];
+                  4'h6:  o_mcu_data <= { 4'd0, m_t[27:24] };
+                  4'h7:  o_mcu_data <= m_t[23:16];
+                  4'h8:  o_mcu_data <= m_t[15:8];
+                  4'h9:  o_mcu_data <= m_t[7:0];
+                  4'hA:  o_mcu_data <= { 4'd0, m_w[27:24] };
+                  4'hB:  o_mcu_data <= m_w[23:16];
+                  4'hC:  o_mcu_data <= m_w[15:8];
+                  4'hD:  o_mcu_data <= m_w[7:0];
+                  4'hE:  o_mcu_data <= ~m_mn_n;
+                  4'hF:  o_mcu_data <= m_mx;
                 endcase
               end
 
