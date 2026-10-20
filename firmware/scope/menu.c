@@ -6898,12 +6898,13 @@ uint8 *scope_measures_ranks(int mode, int group)
   return scopesettings.measuresstate[group & 1];
 }
 
-int scope_measures_list_len(int mode)
+int scope_measures_list_len(int mode, int group)
 {
   if(mode == UI_MS_BODE)
     return BU_MS_COUNT;
 
-  return (mode == UI_MS_SPECTRUM) ? UI_MS_SP_PER_GROUP : UI_MEAS_COUNT;
+  //fw 0.2.84: the Spectrum's view group has five items (Capture), a channel's four
+  return (mode == UI_MS_SPECTRUM) ? ui_ms_sp_len(group) : UI_MEAS_COUNT;
 }
 
 //Colour of source src (0 the channel, 1..4 its reference traces) of channel block ch

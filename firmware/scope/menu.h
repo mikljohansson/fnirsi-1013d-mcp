@@ -199,7 +199,7 @@ void scope_show_Input_calibration_fail(void);
 void   scope_open_measures_menu(void);
 int    scope_measures_mode(void);                      //UI_MS_SCOPE or UI_MS_SPECTRUM (the spectrum view shows)
 uint8 *scope_measures_ranks(int mode, int group);      //the list of a group: Scope measuresstate[ch], Spectrum ranks
-int    scope_measures_list_len(int mode);
+int    scope_measures_list_len(int mode, int group);
 void   scope_measures_menu_cell(int mode, const ui_msm_cell *c);
 void   scope_measures_menu_draw(int mode);             //into the current screen buffer
 

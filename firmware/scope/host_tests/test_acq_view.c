@@ -442,8 +442,43 @@ static void test_tb_for_rate(void)
   T_EQ(acq_view_tb_for_rate(ACQ_RATES), -1);
 }
 
+//fw 0.2.84 (owner, 0.2.76): the ACQ menu's Memory column. A filter hides the depths the 16-bit layout cannot hold; Off
+//offers every depth the bitstream holds again. The menu redraws the column from this on every Filter tap
+//(pc_glue_decim_tap), so a cycle through the filters ends where it began.
+static void test_mem_chips(void)
+{
+  static const uint32 maxes[] = { 3000, 6000, 8190, 16382, 16384 };
+  uint32 k, i, f;
+
+  T_EQ(acq_view_mem_chips(16382, 0, 8190), 0x1Fu);          //Atlan's AL3 record: 3000 .. 15000
+  T_EQ(acq_view_mem_chips(16382, 1, 8190), 0x03u);          //a filter: 3000, 6000
+  T_EQ(acq_view_mem_chips(3000, 0, 8190), 0x01u);           //stock bitstream: 3000 only
+  T_EQ(acq_view_mem_chips(16382, 0, 0), 0x1Fu);             //the filter limit only counts with a filter on
+
+  for(k = 0; k < sizeof(maxes) / sizeof(maxes[0]); k++)
+  {
+    uint32 off = acq_view_mem_chips(maxes[k], 0, 8190);
+
+    for(i = 0; i < ACQ_MEM_CHIPS; i++)
+      T_EQ((off >> i) & 1, (3000 * (i + 1) <= maxes[k]) ? 1u : 0u);
+    T_EQ(off >> ACQ_MEM_CHIPS, 0u);
+
+    //Off, a filter, the next ones, Off again (the Filter box's cycle): on is a subset, Off restores the whole set
+    for(f = 0; f < 8; f++)
+    {
+      uint32 on = acq_view_mem_chips(maxes[k], (int)(f & 3), 8190);
+
+      T_EQ(on & ~off, 0u);
+      T_EQ(acq_view_mem_chips(maxes[k], 0, 8190), off);
+      if(f & 3)
+        T_EQ(on, acq_view_mem_chips((maxes[k] < 8190) ? maxes[k] : 8190, 0, 8190));
+    }
+  }
+}
+
 int main(void)
 {
+  test_mem_chips();
   test_ladder();
   test_step_every_cell();
   test_walks();

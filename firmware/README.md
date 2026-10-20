@@ -875,8 +875,10 @@ The model is pure C in `ui_meas.c` (host-tested in `host_tests/test_ui.c`); `sco
 
 - **One list per mode.** MEASURES opens the list of the mode on screen: in the Scope (and the waveform viewer) the twelve
   measurements per channel, in the Spectrum analyser (where the slot is no longer empty) Peak, Level, THD and Noise per
-  channel and RBW, Span, Center and Time for the view. The Scope's choice is kept where 1.00o5 kept it (the
-  `measuresstate` bytes of the settings sector); the spectrum's in settings words 221..223.
+  channel and RBW, Span, Center, Time (the waterfall's history span) and Capture (fw 0.2.84: the time one record takes,
+  memory depth / fs) for the view. The Scope's choice is kept where 1.00o5 kept it (the `measuresstate` bytes of the
+  settings sector); the spectrum's in settings words 221..223, Capture's rank in word 217 (a sector without it puts
+  Capture last).
 - **Order.** The cards show in the order they were chosen: a measurement turned on goes last in its row, one turned off
   closes its gap. Each chosen item shows its place at the top left of its cell in the menu. Select All keeps the chosen
   ones first and adds the rest in table order. The defaults (a new unit, DEFAULT, Restore default settings) are Freq,
@@ -1190,7 +1192,7 @@ span from the ladder 1, 2, 5 Hz .. 10, 20 MHz, then the whole axis 0 .. 25 MHz, 
 A tap steps the span one cell about the centre, a drag (plot or slider) or a tap in the slider's track moves the centre.
 After every zoom step, while a new record can be taken (running, or Single), and at the end of AUTO SET, the rate is set
 from the stop frequency (centre + span / 2): the slowest UI rate (200 MSa/s .. 500 Sa/s) whose fs / 2 covers it and
-whose capture of N samples (the FFT length in use) takes at most 2.048 s (`spl_rate`). The rate is the scope's own
+whose capture of the record (memory depth samples; fw 0.2.84, N samples before) takes at most 2.048 s (`spl_rate`). The rate is the scope's own
 setting, written with the time/div the Scope's ladder pairs with it (`acq_view_tb_for_rate`), so going back to the Scope
 shows a ladder pair. After a zoom step the pair is a function of the cell, whatever led there; a cell from 0 Hz holds
 between a quarter and a half of the N bins. A pan never changes the rate (fw 0.2.81, owner 2026-10-20): it is clamped to
@@ -1198,15 +1200,17 @@ the current axis 0 .. fs / 2 (the slider track), so to look above it zoom out (t
 low centre at a wide span keeps the coarse resolution until the next zoom step. Ends, plain stops (a tap there changes
 nothing, the other direction works at once): zooming out ends at the whole axis at 50 MSa/s; zooming in ends where the
 next span would need a rate whose capture exceeds 2.048 s or would hold fewer than 16 bins. In numbers: from the whole
-axis (centre 12.5 MHz, 50 MSa/s) the narrowest span is 1 MHz at N 1024, 500 kHz at 2048, 200 kHz at 4096; at 0 Hz it is
-10 Hz at 500 Sa/s (N 1024: the slowest rate takes 2.048 s, then 16 bins end it), 500 Hz at 1 kSa/s (N 2048), 1 kHz at 2
-kSa/s (N 4096). A pan stops at the axis end (1 kHz span at 1.5 .. 2.5 kHz runs at 5 kSa/s, whose axis ends at 2.5 kHz: a
+axis (centre 12.5 MHz, 50 MSa/s) the narrowest span is 1 MHz at N 1024, 500 kHz at 2048, 200 kHz at 4096; at 0 Hz the
+memory depth ends it (fw 0.2.84): 1 kHz at 2 kSa/s with 3000 samples (1.5 s), 2 kHz at 5 kSa/s with 6000 or 9000, 5
+kHz at 10 kSa/s with 12000 .. 16382 (16k at 2 kSa/s took 8 s per record before). A pan stops at the axis end (1 kHz span at 1.5 .. 2.5 kHz runs at 5 kSa/s, whose axis ends at 2.5 kHz: a
 pan up changes nothing; panned to 0 .. 1 kHz it stays at 5 kSa/s, and a tap right there gives 500 Hz at 2 kSa/s). After
 a rate change the view waits for the first capture at the new rate ("Waiting for a capture at the new rate") and the
 histories clear (as they do whenever the drawn window moves, a pan included: their rows are bins of that window). A rate
 picked in the ACQ menu (or by the host) holds until the next zoom step; the view then shows the cell on that rate's axis
 as far as it reaches (the Span and Center cards show what is drawn), a pan clamps the cell into that axis, and the next
-zoom step takes the ladder's rate. Changing the FFT length does not change the rate; the next zoom step uses the new N.
+zoom step takes the ladder's rate. Changing the memory depth (ACQ menu depth or Filter, the host) sets the ladder's rate
+for the cell at the new depth at once while the rate is the one the ladder set (fw 0.2.84); a hand-picked rate holds.
+Changing the FFT length does not change the rate (N is not in it); it moves the zoom-in end.
 Stopped (the record on screen is fixed), zoom and pan stay on the record's rate and axis, and where the ladder would go
 on the warning line says "Stopped: press RUN to zoom further" for 4 s. Entering the view keeps the last cell if the rate
 is still the ladder's for it or the one the cell was last set at (after a pan), else shows the current rate's whole axis

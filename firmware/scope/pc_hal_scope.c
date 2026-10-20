@@ -1026,10 +1026,11 @@ void pc_glue_decim_tap(void)
   pc_dec_setting = (uint8)(k | (fir ? PC_DECIM_SET_FIR : 0));
 
   if(k)
-  {
     pc_dec_fit_memory();
-    scope_acquisition_memory_deep_select();
-  }
+
+  //fw 0.2.84: the Memory column again on every change (acq_view_mem_chips): Off brings back the depths a filter hid
+  //(owner, 0.2.76: they stayed masked until something else redrew the menu)
+  scope_acquisition_memory_deep_select();
 
   pc_dec_draw_box();
   scopesettings.display_data_done = 1;
@@ -1445,9 +1446,10 @@ int pc_glue_ui_has(int feature)
       return pc_dec_has();
 
     default:
-      //With the Filter on, the 16-bit layout holds one sample per word: at most PC_DECIM_MAX_TOTAL
-      if((feature >= PC_FEAT_MEM_BASE) && (feature < PC_FEAT_MEM_BASE + 8))
-        return (uint32)(3000 * (feature - PC_FEAT_MEM_BASE + 1)) <= ((pc_dec_has() && (pc_dec_setting & 3)) ? PC_DECIM_MAX_TOTAL : pc_sess.var.max_total);
+      //With the Filter on, the 16-bit layout holds one sample per word: at most PC_DECIM_MAX_TOTAL (acq_view.h)
+      if((feature >= PC_FEAT_MEM_BASE) && (feature < PC_FEAT_MEM_BASE + ACQ_MEM_CHIPS))
+        return (acq_view_mem_chips(pc_sess.var.max_total, pc_dec_has() && (pc_dec_setting & 3), PC_DECIM_MAX_TOTAL) >>
+                (feature - PC_FEAT_MEM_BASE)) & 1;
 
       return 1;
   }

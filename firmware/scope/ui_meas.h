@@ -49,9 +49,12 @@ uint32 ui_ms_card_x(int ch, int slot);              //Scope: x of a channel bloc
 const char *ui_ms_more_text(char *t, int more);     //"+N"
 
 //----------------------------------------------------------------------------------------------------------------------------------
-//Spectrum list: per channel Peak, Level, THD, Noise (channel colour); for the view RBW, Span, Center, Time (neutral chip;
-//Time only in the waterfall). Saved in settings words 223 (CH1), 222 (CH2), 221 (view): 0xA000 marker in bits 12-15,
-//the four ranks 3 bits each from bit 0. A word without the marker or with a rank above 4 gives that group's defaults.
+//Spectrum list: per channel Peak, Level, THD, Noise (channel colour); for the view RBW, Span, Center, Time, Capture
+//(neutral chip; Time, the waterfall's history span, only in the waterfall; fw 0.2.84: Capture, the time one record
+//takes, memory depth / fs, which the zoom ladder keeps at most 2.048 s). Saved in settings words 223 (CH1), 222 (CH2),
+//221 (view): 0xA000 marker in bits 12-15, the first four ranks 3 bits each from bit 0; a word without the marker or
+//with a rank above the group's length gives that group's defaults. Capture's rank is word 217 (0xCA00 marker, rank in
+//bits 0-2); an older sector without it puts Capture last in the view's row.
 
 #define UI_MS_SP_PEAK         0
 #define UI_MS_SP_LEVEL        1
@@ -61,17 +64,21 @@ const char *ui_ms_more_text(char *t, int more);     //"+N"
 #define UI_MS_SP_SPAN         5
 #define UI_MS_SP_CENTER       6
 #define UI_MS_SP_TIME         7
-#define UI_MS_SP_MORE         8                     //the "+N" place
-#define UI_MS_SP_KINDS        8
+#define UI_MS_SP_CAPTURE      8                     //fw 0.2.84
+#define UI_MS_SP_MORE         9                     //the "+N" place
+#define UI_MS_SP_KINDS        9
 
 #define UI_MS_SP_GROUPS       3                     //CH1, CH2, the view
-#define UI_MS_SP_PER_GROUP    4
-#define UI_MS_SP_VIEW         2                     //group index of RBW, Span, Center, Time
+#define UI_MS_SP_PER_GROUP    5                     //the longest group (the view's); a channel's has UI_MS_SP_CH_ITEMS
+#define UI_MS_SP_CH_ITEMS     4
+#define UI_MS_SP_VIEW         2                     //group index of RBW, Span, Center, Time, Capture
 
 #define UI_MS_SPEC_WORD_CH1   223
 #define UI_MS_SPEC_WORD_CH2   222
 #define UI_MS_SPEC_WORD_VIEW  221
 #define UI_MS_SPEC_MARKER     0xA000
+#define UI_MS_SPEC_WORD_CAPTURE 217                 //fw 0.2.84: the view's fifth rank (Capture)
+#define UI_MS_SPEC_CAP_MARKER 0xCA00
 
 typedef struct
 {
@@ -86,9 +93,16 @@ typedef struct
 
 extern const char *const ui_ms_sp_names[UI_MS_SP_KINDS];
 
-void   ui_ms_spec_defaults(ui_ms_spec *s);          //CH1 Peak, Level, THD; CH2 Peak, Level; RBW, Time
+void   ui_ms_spec_defaults(ui_ms_spec *s);          //CH1 Peak, Level, THD; CH2 Peak, Level; RBW, Time, Capture
+int    ui_ms_sp_len(int group);                     //items in a group: UI_MS_SP_CH_ITEMS, the view UI_MS_SP_PER_GROUP
 uint16 ui_ms_spec_word(const ui_ms_spec *s, int group);
-int    ui_ms_spec_restore(ui_ms_spec *s, int group, uint16 w);   //0: the word was not valid, the group has its defaults
+//0: the word was not valid, the group has its defaults. The view's ranks are renumbered by ui_ms_spec_capture_restore,
+//which must follow it
+int    ui_ms_spec_restore(ui_ms_spec *s, int group, uint16 w);
+uint16 ui_ms_spec_capture_word(const ui_ms_spec *s);
+//After the view's word (ui_ms_spec_restore): Capture's rank from word 217; 0 when the word is not valid (an older
+//sector), and Capture goes last in the row
+int    ui_ms_spec_capture_restore(ui_ms_spec *s, uint16 w);
 int    ui_ms_spec_kind(int group, int index);       //UI_MS_SP_* of a list place
 
 //The spectrum's row: the shown channels' cards in their order, then the view's; Time only with time_ok. Fitted to
@@ -134,7 +148,7 @@ ui_ms_source ui_ms_get_source(int item);
 //MEASURES menu (stock look: dark grey box, white edge, black separators, white names when chosen, grey when not;
 //1.00o5's box widened to 44 px rows). A title band with the mode's name, then rows of 44 px:
 //  Scope:    sources (CH1 / CH2 and Ref 1-4 / Ref 5-8), actions (Select All, Clear, Hide), three rows of four items
-//  Spectrum: actions (the channel label, Select All, Clear), the four channel items, the view's four items (whole width)
+//  Spectrum: actions (the channel label, Select All, Clear), the four channel items, the view's five items (whole width)
 //  Frequency response (fw 0.2.69): Select All, Clear (neutral grey), then its ten items four per row, whole width
 //The left half belongs to CH1, the right to CH2, split by a double white line at x 480. The box ends at y 477.
 

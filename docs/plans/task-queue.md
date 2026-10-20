@@ -173,7 +173,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   white is understood) and the Waterfall legend with its dB marks go (spectrum.c spec_draw_legend, ux-makeover.md "colour legend
   inside the plot's top right"); nobody measures from those views. Boards and ux-makeover.md updated; the warning line keeps its
   place.
-- **ACQ menu: memory depths above 6000 do not come back after Filter -> Off** (owner 10-19 22:45 on 0.2.76): with a filter on the
+- [x] **ACQ menu: memory depths above 6000 do not come back after Filter -> Off** (fw 0.2.84 provisional, branch fw-acq2 e125cf2, bench pending: firmware/AGENTS.md section 40 end) (owner 10-19 22:45 on 0.2.76): with a filter on the
   depths above 6000 are hidden (the 16-bit record halves the memory, correct); switching back to Filter Off leaves them hidden until
   something else redraws. Recompute the memory chips' availability from the filter state on every Filter change and redraw the
   column; host test. Next ACQ-menu batch.
@@ -199,7 +199,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   host test with the mock UI, mcp client/server: drop the "close it on the scope and retry" advice where the firmware yields
   (keep it for older firmware by version). Built on branch fw-yield (fw 0.2.78 / protocol 1.23,
   firmware/AGENTS.md section 53); bench list there.
-- **Spectrum ladder follow-ups** (fw-spzoom handoff, section 52): (a) show the capture time N/fs somewhere (the Time card is the
+- [x] **Spectrum ladder follow-ups** (fw 0.2.84 provisional, branch fw-acq2 5bfe097 + c449a5c, bench pending: section 52 addendum fw-acq2; (a) a Capture card, (b) the limit uses memory depth / fs, (c) a depth change re-derives, N is not in the rate) (fw-spzoom handoff, section 52): (a) show the capture time N/fs somewhere (the Time card is the
   waterfall's history span); (b) make the 2 s zoom-in limit use the real capture time memory depth/fs, or cap the memory depth in
   the Spectrum; (c) re-derive the rate when the FFT length or memory depth changes, not only at the next zoom/pan step. With the
   next Spectrum batch.
@@ -452,7 +452,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   release candidate after a soak); the two-hour idle ("USB: device lost after a long idle"); "AUTO SET in Frequency response"
   retest on 0x153A; open-input / EXT tests 1-4; the outstanding 0.2.40 / 0.2.41 verdicts; CH2 zero checks ("CH2 range-5 zero
   drift", "CH2 reads +1.0..1.5 codes at range 6", "Overnight zero step", "Gain-per-range check", "Calibration v2 bench").
-- **Firmware batches still open**: ACQ memory chips after Filter -> Off; "Spectrum ladder follow-ups" (a)-(c); "Frequency
+- **Firmware batches still open**: "Frequency
   response small items" (a)-(c) (single sweep stays on the fold-out, generator chip after a sweep, the CH1-level warning
   wording); "Hardware averaging with the default filter" (needs the owner's decision); touch batch 3 (no blocking touch loop);
   Measurements v2 remainder (H2/H3, SFDR, band power, OBW, AC RMS, delay / phase / gain, PI tau); "Phosphor fast capture loop".

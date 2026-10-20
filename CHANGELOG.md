@@ -31,6 +31,18 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.85 - 2026-10-20 (protocol 1.24, unchanged)
+
+- ACQ menu: switching the Filter back to Off brings the memory depths above 6000 back at once (e125cf2). A filter hides
+  them (the 16-bit record halves the memory); since 0.2.64 they stayed hidden after Off until something else redrew
+  the menu (owner, 0.2.76). The Memory column is redrawn on every Filter change.
+- Spectrum zoom ladder: the 2.048 s capture limit counts the whole record, memory depth / fs, not the FFT's N samples
+  (5bfe097). At 16k memory the ladder took 2 kSa/s, 8 s per record; it now stops at 10 kSa/s there (at 0 Hz the
+  narrowest span is 1 kHz with 3000 samples, 2 kHz with 6000 or 9000, 5 kHz from 12000). A memory depth change sets
+  the ladder's rate for the shown span at once (it waited for the next zoom step); a rate picked by hand still holds.
+  The FFT length is not in the rate and changes only where zooming in ends.
+- Spectrum MEASURES: new Capture card, the time one record takes (memory depth / fs, e.g. "15.00us", "1.500s"), on by
+  default after RBW (c449a5c). Its place in the row is kept in settings word 217; older settings put it last.
 #### 0.2.84 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response, AUTO SET never loops (owner 2026-10-20 11:23, after an RC AUTO SET on 0.2.83 ran 41 sweeps with
