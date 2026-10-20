@@ -2232,11 +2232,18 @@ class BodeHeader(Payload):
 @dataclass
 class BodeCtrlResp(Payload):
     """BODE_CTRL response, 40 bytes: the READ_BODE header, u32 the estimated duration of a sweep with the settings in
-    effect (ms), u32 0."""
+    effect (ms), u32 0. fw 0.2.91: 48 bytes, then the latest sweep's capture statistics (u16 each): generator-on
+    captures, those that ended on the auto time-out (no CH1 trigger), records taken again for CH1 leak (a joined
+    record) and for another reason (suspect, time-out). Older firmware: all 0."""
 
-    FIELDS = [("header", "32s"), ("estimate_ms", "I"), ("_r0", "4x")]
+    FIELDS = [("header", "32s"), ("estimate_ms", "I"), ("_r0", "4x"), ("captures", "H"), ("timeouts", "H"),
+              ("leak_retakes", "H"), ("other_retakes", "H")]
     header: bytes = bytes(32)
     estimate_ms: int = 0
+    captures: int = 0
+    timeouts: int = 0
+    leak_retakes: int = 0
+    other_retakes: int = 0
 
     @property
     def hdr(self) -> BodeHeader:
