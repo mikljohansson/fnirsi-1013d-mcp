@@ -714,4 +714,8 @@ under the magnitude peak. Two of its ideas are worth taking later, in either var
   during it and returns to RUN afterwards): "keep the automatic filling of points as it is today; let's keep it for now and see".
   The coordinator had offered the Scope-consistent alternative (stopped = nothing runs, "Stopped: press RUN to sweep this span");
   not taken.
+- 2026-10-20 11:47, fw 0.2.85 **(owner)**: AUTO SET never ends in RUN. "Why should AUTO SET automatically transition to RUN? ...
+  if I want it to loop continuously I would press RUN myself. But if the filter is not changing, why would I ever want to use
+  RUN?" AUTO SET = overview, the passes, one sweep at the found settings, STOP; or give up with the note. Supersedes section 3.2's
+  "then RUN".
 

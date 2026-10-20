@@ -6,6 +6,12 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **AUTO SET ends in STOP, never RUN** (owner 10-20 11:47 **(owner)**: "Why should AUTO SET automatically transition to RUN? auto
+  set should make an automatic scan and then stop, inferring parameters and trying a few different param sets, then either
+  stopping or giving up. If I want it to loop continuously I would press RUN myself"; fw-fr4 dispatched): after the overview and
+  its passes AUTO SET runs one sweep at the found settings and returns to STOP with the chart and cards standing; on failure it
+  stops with the note (10-20 11:23). RUN stays the explicit continuous mode; Single sweep repeats one. bode-ui.md 3.2 updated.
+
 - [x] **AUTO SET must fail fast with a helpful message, never loop** (merged 10-20 11:40, bench pending) (owner 10-20 11:23 **(owner)**, after the RC AUTO SET on
   0.2.83 ran 41 sweeps with the relays clicking: "present the user with a failure message that helps them somehow, e.g. the
   connections to the circuit or the circuit itself"; sent to fw-fr3 as part of item (d)): when the overview or a sharp-tank
