@@ -1899,8 +1899,17 @@ Every record is checked word by word: equal to the words written, contiguous in 
   auto capture at its time-out (change 2; now skipped from the reference's stop on), the dut's extra post-time-out words
   stay in the memory until rewritten (skipped by the memory compare), the read register's stale bits after the uncompared
   0x14 / 0x18 reads (a 0x41 refill), and a 0x1A = 0 written by the tb while a never-triggered normal capture still runs
-  (the reference stops on the write, the dut two write clocks later: masked while the forced stop is in flight). The run
-  with all four masks was in progress at the handoff: **verdict pending**. Finish it with
+  (the reference stops on the write, the dut two write clocks later: masked while the forced stop is in flight). **Verdict
+  with all four masks (seed 12345): fir 161 checks / 2 failed (phase 1 random 2458 mismatch samples, phase 4 3011),
+  seg 53 / 2 failed (3223 / 6635); cic_model and seg_model PASS.** Two residual signatures, each a window of about 10 ns
+  with both instances stopped (`swe 0/0`), from the diagnostic MISMATCH lines (`~/g11/logs/fir.log`, `seg.log` in WSL):
+  fir t = 9536073000 `tmo 1/1 cnt 361 set 346 trig 0/0 ta 184/142` (an untriggered time-out stop; the trigger
+  address differs by design and is masked, so the differing field is in the `out` / `dc` / bus part of the line, which the
+  summary strips: read the full line); seg t = 27429130000 `tmo 0/0 cnt 343 set 594 trig 0/1 en 1/1 swe 0/0 ta
+  145/265` (the reference took a trigger after its stop, the dut did not, change 3; the `st` fields show the reference
+  in reset with half-way set while the dut is released: a one-write-clock skew at the next reset release, to be
+  understood before masking). Not yet green: the next agent reads the two full lines, decides whether each is a tb
+  artefact of changes 1-4 (mask it the same way) or a dut fault, and reruns. Finish with
   `wsl -d Ubuntu -- bash <repo>/fpga/al3/tb/run.sh 12345` (`REF_SRC_DIR` as in "Commands"; about 1 h; `ONLY=fir` /
   `ONLY=seg` for the two steps alone) and record the result here; a residual one-write-clock window around a reset
   release (seg phase 4, 10 ns, state / half-way differing between dut and reference) was seen once before the last mask
