@@ -1210,5 +1210,5 @@ Newest entries at the bottom. Format: date, who, what, result.
   pinned backups/fw-0.2.86_eb0b4b16.bin (sha256 eb0b4b16d5220ba5b97a1291c4f2e989a18e5b9d3a9ea424bafbbaa6c1d3a6ee), loaded. Owner's
   precise report on 0.2.85 matches the found cause: the first Single sweep from the fold-out counts, a second with the same
   parameters shows "50 / 50" (the same-span repeat kept the table's completion flags), changed parameters count again.
-- 2026-10-20 12:00: owner on 0.2.86: "sweep progress now works" (the Stop sweep counter on a same-span repeat).
+- 2026-10-20 11:58: owner on 0.2.86: "sweep progress now works" (the Stop sweep counter on a same-span repeat).
 
