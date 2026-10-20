@@ -1284,4 +1284,17 @@ Newest entries at the bottom. Format: date, who, what, result.
   captures each, 0 time-outs, 0 retakes, 0 flagged points on sweeps 2..10, 10.0 kHz -2.85 / -2.86 dB on every sweep (host
   -2.854), 2.14 s per sweep. The spliced records were time-out records: with the trigger level at the signal's mid-level the
   time-out never fires and no record is bad. Owner walk-through next (AUTO SET, RUN, Single sweep on the screen).
-
+- 2026-10-20 13:49: fw 0.2.92 (fw-ov3: the Frequency response track overlays magnitude and phase in Overlaid, magnitude drawn
+  over the phase) pinned backups/fw-0.2.92_a4dac0ee.bin (sha256
+  a4dac0ee18068b52a06e953898e89347564e496a2f2a33fc8d24e169c6bda1f0), loaded. The first 0.2.92 build (7b514729..) still said
+  fw=0.2.91 (the version bump had gone to the wrong header) and was discarded.
+- 2026-10-20 13:54: fw 0.2.93 (fw-eng5: AUTO SET sets CH2 Hold when the CH2 levels inside its span spread under 20 dB, else
+  Auto; the Sweep fold-out's CH2 range row shows the held V/div; BODE_CTRL answer 50 B with the planned CH2 switches in bytes
+  48..49, the header's count is the unplanned ones) pinned backups/fw-0.2.93_c9222e3a.bin (sha256
+  c9222e3a88c4fbbca864894f56feea3ec537673a31f08cd24e52ba5e9d5be7f6), loaded. The owner pressed AUTO SET on the RC (BODE_CTRL
+  answered E_BUSY detail 2 meanwhile): it ended in STOP with CH2 Auto, span 100 Hz..1 MHz / 25 points. 13:57, five host-started
+  sweeps at that span: each 0 unplanned, 2 planned switches, 25 captures, 0 time-outs, 0 retakes, 0 flagged, 1.5 s. 13:58
+  screenshot: the track draws the overview's magnitude in cyan over the phase in pink, dim right of the window (1 MHz..10 MHz);
+  the magnitude's flat passband sits on the track's top rows, under the window's top line and margin, so inside the window the
+  cyan curve shows from the knee down (decision 7 geometry, same as a Scope trace at the top). Hold case (both tips on the
+  generator) and the fold-out's CH2 range row: owner walk-through pending.

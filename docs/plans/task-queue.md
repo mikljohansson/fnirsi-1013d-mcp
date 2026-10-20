@@ -505,6 +505,15 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
+- fw-ov3 / fw-eng5 (done 13:41 / 13:50, merged 13:46 / 13:52 as fw 0.2.92 / 0.2.93, handoffs firmware/AGENTS.md section 49
+  addendum / section 61): the Frequency response track overlays magnitude (cyan, drawn last) and phase (pink) in Overlaid
+  (`slider_ov_draw.c`); AUTO SET chooses CH2 Hold when the levels inside its span spread under 20 dB, else Auto; planned CH2
+  switches in BODE_CTRL bytes 48..49 (50 B), the header counts the unplanned ones. Benched 13:57 on the RC: five sweeps 100 Hz..
+  1 MHz / 25 points each 0 unplanned, 2 planned, 25 captures, 0 time-outs, 0 retakes, 0 flagged; AUTO SET (owner) left CH2 Auto;
+  the track shows both curves, cyan over pink, dim outside the window (screenshot 13:58). fw-eng5 committed ten files with CRLF
+  endings (whole-file conflicts; normalised at the merge). Open: the Hold case needs both tips on the generator (owner), section
+  61's owner question (apply the Hold rule when RUN starts on a dragged span).
+
 - fw-eng3 / fw-eng4 (done 13:12 / 13:25, merged as fw 0.2.90 / 0.2.91, handoffs firmware/AGENTS.md sections 59 / 60): the post-pre-scan
   check ranges both ways and drops a coarse-CH1 plan; a step up needs two clipping records; the trigger level at CH1's mid-level;
   BODE_CTRL answer 48 bytes with captures / time-outs / leak retakes / other retakes. Benched 13:28: ten sweeps on the RC with 0
