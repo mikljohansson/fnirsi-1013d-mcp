@@ -193,8 +193,11 @@ typedef struct
   uint8  wait;          //the time base changed: ignore the trace buffers until a new capture
   uint8  autostage;     //Auto in progress: 1 at the full-axis rate, 2 at the chosen rate
   uint8  avg;           //trace averaging: 0 off, 1..3 over 4 / 16 / 64 captures, 4 max-hold
-  spl_cell cell;        //fw 0.2.77: the span and centre shown (spec_ladder.h); the rate follows it at each zoom / pan step
+  spl_cell cell;        //fw 0.2.77: the span and centre shown (spec_ladder.h); fw 0.2.81: the rate follows it at each
+                        //zoom step and AUTO SET only, a pan keeps the rate
   uint8  cell_set;      //cell holds a choice (else the next entry takes the current rate's whole axis)
+  uint8  cell_rate;     //fw 0.2.81: the rate when the cell was last set (a pan leaves a cell the ladder would give
+                        //another rate; entry keeps it while the rate is this one)
 } SPECSTATE;
 
 #define VIEW_SPECTRUM         0
@@ -1300,10 +1303,11 @@ void spectrum_set_active(int on)
   spec.active = (on && spectrum_available()) ? 1 : 0;
   spec.recompute = 1;
 
-  //fw 0.2.77: the cell kept from the last visit while the rate is still the one the ladder gives it; otherwise the
-  //current rate's whole axis (no rate change on entering)
-  if(spec.active && (!spec.cell_set ||
-     (spl_rate(spl_stop(&spec.cell), spec_log2n(), sample_rate, ACQ_RATES) != (int32)scopesettings.samplerate)))
+  //fw 0.2.77: the cell kept from the last visit while the rate is still the one the ladder gives it (fw 0.2.81: or
+  //the one it had when the cell was last set, as after a pan); otherwise the current rate's whole axis (no rate change
+  //on entering)
+  if(spec.active && (!spec.cell_set || ((scopesettings.samplerate != spec.cell_rate) &&
+     (spl_rate(spl_stop(&spec.cell), spec_log2n(), sample_rate, ACQ_RATES) != (int32)scopesettings.samplerate))))
     spec_cell_from_rate();
   spec.have[0] = spec.have[1] = 0;
   spec_hist_clear();
@@ -1523,12 +1527,15 @@ static int spectrum_display_body(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Span drives the sample rate (fw 0.2.77, owner 2026-10-19 23:09; docs/ui-guidelines.md section 2): the view is a cell of
-// the span ladder (spec_ladder.h), a 1-2-5 span about a centre. After each zoom or pan step with the rate free (running
-// or Single, acq_view_rate_free) the rate is spl_rate of the cell's stop: the slowest whose fs / 2 covers it with a
-// capture N / fs of at most 2.048 s. It is the scope's own rate (same setting), written with the Scope ladder's time/div
+// the span ladder (spec_ladder.h), a 1-2-5 span about a centre. After each zoom step with the rate free (running or
+// Single, acq_view_rate_free) and at the end of AUTO SET the rate is spl_rate of the cell's stop: the slowest whose
+// fs / 2 covers it with a capture N / fs of at most 2.048 s. fw 0.2.81 (owner 2026-10-20 10:24): a pan (plot drag,
+// slider drag, tap to jump) never changes the rate; it is clamped to the current rate's axis 0 .. fs / 2 (the slider
+// track), so to look above it the user zooms out (the rate rises) and in again. It is the scope's own rate (same setting), written with the Scope ladder's time/div
 // for it (acq_view_tb_for_rate, so nothing snaps) through pc_hal_timebase_write, as SET_TIMEBASE. After a change the
 // trace buffers still hold the old rate's record, so the view waits for the first new capture. A rate set elsewhere (the
-// ACQ menu, the host) holds until the next step; the view shows the cell on that rate's axis as far as it reaches.
+// ACQ menu, the host) holds until the next zoom step; the view shows the cell on that rate's axis as far as it reaches,
+// and a pan clamps the cell into that axis.
 // Stopped, zoom and pan stay on the record's rate and axis.
 
 #define TB_FIRST              11          //short time bases (Auto's probes; the roll-mode ones would leave the view)
@@ -1607,13 +1614,20 @@ static const uint32 *spec_rates(int32 *n)
   return &sample_rate[r];
 }
 
-//After a zoom or pan step: the rule's rate for the cell, when the rate is free
-static void spec_cell_apply(void)
+//The cell holds a choice made at the current rate (after the rate write, if any)
+static void spec_cell_done(void)
 {
   spec.cell_set = 1;
+  spec.cell_rate = scopesettings.samplerate;
+}
 
+//After a zoom step: the rule's rate for the cell, when the rate is free
+static void spec_cell_apply(void)
+{
   if(acq_view_rate_free())
     spec_rate_set(spl_rate(spl_stop(&spec.cell), spec_log2n(), sample_rate, ACQ_RATES));
+
+  spec_cell_done();
 }
 
 //The cell that shows the current rate's whole axis (entry, Reset): no rate change, the rule gives this rate for it
@@ -1623,7 +1637,7 @@ static void spec_cell_from_rate(void)
   uint32 r = (scopesettings.samplerate < ACQ_RATES) ? scopesettings.samplerate : 0;
 
   spl_from_axis(&spec.cell, spl_axis_mhz(&sample_rate[r], 1));
-  spec.cell_set = 1;
+  spec_cell_done();
 }
 
 //Span: one ladder step narrower (in) or wider (out) about the centre; at an end nothing changes
@@ -1647,19 +1661,19 @@ static void spec_zoom(int in)
   }
 }
 
-//Pan: the cell c0 (where the drag began) with its centre moved by d mHz; 1 when the view changed
+//Pan: the cell c0 (where the drag began) with its centre moved by d mHz, clamped to the current rate's axis; the rate
+//never changes (fw 0.2.81). 1 when the view changed
 static int spec_pan_by(const spl_cell *c0, int64 d)
 {
-  int32         n;
-  const uint32 *r = spec_rates(&n);
-  spl_cell      c = *c0;
+  uint32   r = (scopesettings.samplerate < ACQ_RATES) ? scopesettings.samplerate : 0;
+  spl_cell c = *c0;
 
-  spl_pan(&c, d, spl_axis_mhz(r, n));
+  spl_pan(&c, d, spl_axis_mhz(&sample_rate[r], 1));
   if((c.span == spec.cell.span) && (c.centre == spec.cell.centre))
     return 0;
 
   spec.cell = c;
-  spec_cell_apply();
+  spec_cell_done();
   return 1;
 }
 
@@ -1844,8 +1858,8 @@ static void spec_auto_finish(const spl_cell *c, int32 r)
   }
 
   spec.cell = *c;
-  spec.cell_set = 1;
   spec_rate_set(r);
+  spec_cell_done();
 }
 
 static void spec_auto_start(void)
@@ -2135,9 +2149,9 @@ int spectrum_touch(void)
 
   //fw 0.2.71: the slider row; the window follows the finger (the span kept, the centre panned), as the Scope's record
   //slider. At the whole axis there is nothing to pan. fw 0.2.73, tap to jump: a touch-down outside the window centres
-  //the window there first (the window as drawn, sov_jump), then the drag goes on from the new place. fw 0.2.77: a move
-  //is a pan step (the rate follows the stop); the track's scale is the axis at touch-down, so the finger's travel stays
-  //the same frequency step when a pan changes the rate and the track with it.
+  //the window there first (the window as drawn, sov_jump), then the drag goes on from the new place. fw 0.2.81: a move
+  //is a pan, which keeps the rate (the track is the current axis, its scale fixed during the drag) and is clamped to the
+  //track's ends.
   if(ytouch >= BU_SL_HIT_Y)
   {
     spl_cell c0 = spec.cell;
