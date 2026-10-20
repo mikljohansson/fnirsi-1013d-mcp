@@ -133,6 +133,8 @@ STATES: list[State] = [
           "a few seconds; close the fold-out", None),
     State("phosphor", "manual: Scope, CTRL > Display > Phosphor on (Persistence 1 s, Palette Heat), 1 kHz square on "
           "CH1; close the fold-out", None),
+    State("phosphor-xy", "manual: Scope, CTRL > Display > X-Y and Phosphor on (Mono), a two-stage RC ladder on the post "
+          "(CH1 first node, CH2 second), the generator swept 1..15 kHz from the host while the picture is taken", None),
     State("diagnostics", "manual: Menu > Diagnostics, Status page", None),
     State("diagnostics-calibration", "manual: Menu > Diagnostics, Calibration tab", None),
     # menus: captured as they are since fw 0.2.94 (READ_SCREEN is served inside the modal loops)

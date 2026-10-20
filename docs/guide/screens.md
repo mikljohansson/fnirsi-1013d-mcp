@@ -90,6 +90,13 @@ show.
 
 ![Phosphor view](screenshot:phosphor)
 
+Phosphor also works with Display X-Y: the figure of CH1 against CH2 accumulates instead of the traces. The picture below
+is a two-stage RC ladder on the calibration post (1 kOhm, 15 nF, 1 kOhm, 15 nF; CH1 on the first node, CH2 on the second)
+while a host script sweeps the generator from 1 kHz to 15 kHz: each frequency draws its own loop, and the persistence stacks
+them.
+
+![Phosphor view in X-Y](screenshot:phosphor-xy)
+
 **Warnings.** "No channel enabled: switch on CH1 or CH2", "X-Y needs both channels: switch on CH1 and CH2", "CH1
 overrange: increase V/div" (or CH2), "No trigger: check the trigger level".
 

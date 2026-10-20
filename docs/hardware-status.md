@@ -1321,3 +1321,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   settings commands no longer close Diagnostics, the Spectrum waterfall and then the Frequency response plot were painted into
   its frame (fw-yield3 dispatched). The Diagnostics verdicts read Check (RAM firmware, FEL restart, noise with the RC attached):
   retake the Status page at release time with the firmware persisted and the inputs open.
+- 2026-10-20 15:43: fw 0.2.96 (fw-yield3: a state-changing host request closes Diagnostics first, as Back does; status and
+  read-only requests leave it open; link stats 68 counts the closes. Not a 0.2.94 regression: Diagnostics is a main-loop
+  screen and host requests never closed it since 0.2.59, the requests' own redraws painted the view into it) pinned
+  backups/fw-0.2.96_3239d9ad.bin (sha256 3239d9ad075d2e998c51678074e004caa21b77a58eb09a325ece6fd94907e20b), loaded. The
+  automatic screenshots retaken from the Scope view (two-stage RC ladder on the probes: scope.png two rounded squares,
+  frequency-response-sweep.png the A-to-B low-pass with the "CH1 level low: the DUT loads the 1 kOhm source" line, since
+  CH1 sits behind the first stage). X-Y phosphor picture (Mono, generator swept 1..15 kHz from the host): a leaf of nested
+  loops, docs/screenshots/phosphor-xy.png. Section 63 bench steps 1-5 pending (Diagnostics open + `--only scope`).
