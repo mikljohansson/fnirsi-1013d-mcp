@@ -45,7 +45,7 @@ Full details: `research/notes/SYNTHESIS.md`, then the per-source digests in `res
 ## Repository layout
 
 ```
-CLAUDE.md, README.md
+AGENTS.md (project rules; CLAUDE.md is the same file for Claude Code), README.md
 research/notes/        agent research digests (SYNTHESIS.md first)
 research/tools/        analysis scripts (DPOS350P image parsing)
 research/atlan4-extracted/, research/dpos350p/   extracted archives (gitignored, untrusted data)
@@ -112,7 +112,10 @@ Reference checkouts (read-only, outside this repo, never build inside them):
   `docs/plans/ux-makeover.md` and its mockups are the acceptance reference.
 - Shared `main`: update with `git fetch && git merge --ff-only origin/main` (the repo config sets `pull.ff=only`); never
   rebase main (it carries merge commits from agent branches); agents push only their own commits unless the coordinator says so.
-- Small, reviewable commits; one topic per commit. Keep this file and the subdirectory `AGENTS.md` files current when layout or facts change. Agents with very
+- Small, reviewable commits; one topic per commit. **Push once per effort** (a feature, a bugfix, a merge with its bench
+  entries, a batch of screenshots), not after every commit, and open one pull request per effort: every push to main and
+  every PR update runs the full CI workflow, which costs the owner's GitHub Actions minutes (owner, 2026-10-20). Accumulate
+  commits locally and push when the effort is done, or when another agent needs them on `origin/main`. Keep this file and the subdirectory `AGENTS.md` files current when layout or facts change. Agents with very
   large contexts are rotated: before retiring, an agent updates the `AGENTS.md` of the directory it worked in.
 
 ## Using the scope from an agent
