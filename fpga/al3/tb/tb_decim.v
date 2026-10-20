@@ -108,6 +108,11 @@ module tb;
   integer eq_mismatch = 0;
   integer eq_samples = 0;
   reg     eq_on = 0;
+  // 0x153B: a reference ends a triggered auto-mode capture at its time-out, the dut completes the post-trigger words
+  // (README section 11 change 2); from the edge the reference stops on while the dut still writes, that capture is
+  // not compared (state, outputs, bus reads). Counted per phase.
+  reg     cut_ref = 0;
+  integer cut_caps = 0;
 
   task check(input cond, input [8*100-1:0] what);
     begin
@@ -124,7 +129,11 @@ module tb;
     #0.37;
     forever begin
       #1;
-      if (eq_on) begin
+      if (eq_on && !cut_ref && dut.sampling_triggered && dut.sample_write_enable && !refd.sample_write_enable) begin
+        cut_ref  = 1;
+        cut_caps = cut_caps + 1;
+      end
+      if (eq_on && !cut_ref) begin
         eq_samples = eq_samples + 1;
         if ((out_dut & out_cmp_mask) !== (out_ref & out_cmp_mask) || st_dut !== st_ref || pad_dut !== pad_ref) begin
           eq_mismatch = eq_mismatch + 1;
@@ -234,7 +243,7 @@ module tb;
       mcu_rws = 0; mcu_dcs = 0;
       mcu_strobe;
       rd_d = bus_dut; rd_r = bus_ref;
-      if (eq_on && bus_cmp_on) begin
+      if (eq_on && bus_cmp_on && !cut_ref) begin
         eq_samples = eq_samples + 1;
         if (rd_d !== rd_r) begin
           eq_mismatch = eq_mismatch + 1;
@@ -278,6 +287,7 @@ module tb;
   integer polls;
   task start_capture;
     begin
+      cut_ref = 0;
       wr1(8'h01, 8'h01);
       polls = 0;
       rd1(8'h05);
@@ -485,7 +495,7 @@ module tb;
     // Phase 1: K = 0 equivalence with 0x1533
     mm0 = eq_mismatch;
     random_phase(50);
-    $display("phase 1: %0d equivalence samples, %0d mismatches", eq_samples, eq_mismatch);
+    $display("phase 1: %0d equivalence samples, %0d mismatches, %0d captures the reference cut at its time-out", eq_samples, eq_mismatch, cut_caps);
     check(eq_mismatch == mm0, "K = 0: pins, bus reads, capture registers and memory identical to 0x1533");
 
     // Generator off and pin released for the rest of the run (EXT tests drive the pin)
@@ -686,7 +696,7 @@ module tb;
     rd2(8'h41);
     mm0 = eq_mismatch;
     random_phase(10);
-    $display("phase 4: total %0d equivalence samples, %0d mismatches", eq_samples, eq_mismatch);
+    $display("phase 4: total %0d equivalence samples, %0d mismatches, %0d captures the reference cut at its time-out", eq_samples, eq_mismatch, cut_caps);
     check(eq_mismatch == mm0, "after K >= 1 use, K = 0 again identical to 0x1533");
 
     $fclose(logf);

@@ -117,6 +117,11 @@ module tb;
   integer eq_mismatch = 0;
   integer eq_samples = 0;
   reg     eq_on = 0;
+  // 0x153B: a reference ends a triggered auto-mode capture at its time-out, the dut completes the post-trigger words
+  // (README section 11 change 2); from the edge the reference stops on while the dut still writes, that capture is
+  // not compared (state, outputs, bus reads). Counted per phase.
+  reg     cut_ref = 0;
+  integer cut_caps = 0;
 
   task check(input cond, input [8*100-1:0] what);
     begin
@@ -133,7 +138,11 @@ module tb;
     #0.37;
     forever begin
       #1;
-      if (eq_on) begin
+      if (eq_on && !cut_ref && dut.sampling_triggered && dut.sample_write_enable && !refd.sample_write_enable) begin
+        cut_ref  = 1;
+        cut_caps = cut_caps + 1;
+      end
+      if (eq_on && !cut_ref) begin
         eq_samples = eq_samples + 1;
         if ((out_dut & out_cmp_mask) !== (out_ref & out_cmp_mask) || st_dut !== st_ref || pad_dut !== pad_ref || dc_dut !== dc_ref
             || dut.q_active !== 1'b0 || dut.seq_rst_c !== 1'b0) begin
@@ -231,7 +240,7 @@ module tb;
       mcu_rws = 0; mcu_dcs = 0;
       mcu_strobe;
       rd_d = bus_dut; rd_r = bus_ref;
-      if (eq_on && bus_cmp_on) begin
+      if (eq_on && bus_cmp_on && !cut_ref) begin
         eq_samples = eq_samples + 1;
         if (rd_d !== rd_r) begin
           eq_mismatch = eq_mismatch + 1;
@@ -277,6 +286,7 @@ module tb;
   reg     seg_log_arm = 0;                              // start the segment write log once 0x01 = 1
   task start_capture;
     begin
+      cut_ref = 0;
       wr1(8'h01, 8'h01);
       if (seg_log_arm) begin
         @(posedge dut.sample_write_clock);              // the reset acts from this edge on
@@ -751,14 +761,14 @@ module tb;
     // Phase 1: equivalence with 0x1535, sequencer off
     mm0 = eq_mismatch;
     random_phase(p1n);
-    $display("phase 1: %0d equivalence samples, %0d mismatches", eq_samples, eq_mismatch);
+    $display("phase 1: %0d equivalence samples, %0d mismatches, %0d captures the reference cut at its time-out", eq_samples, eq_mismatch, cut_caps);
     check(eq_mismatch == mm0, "modes off: pins, decimator, bus reads, capture regs, memory identical to 0x1535");
 
     wr1(8'h50, 8'h00);
     ext_en = 0;
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h153A, "cmd 0x06 reads 0x153A");
+    check(rd16_d == 16'h153B, "cmd 0x06 reads 0x153B");
     check(rd16_r == 16'h1535, "reference cmd 0x06 reads 0x1535");
     wr1(8'h57, 8'h00);
     rd_status;
@@ -960,7 +970,7 @@ module tb;
     mm0 = eq_mismatch;
     compare_memory;
     random_phase(6);
-    $display("phase 4: total %0d equivalence samples, %0d mismatches", eq_samples, eq_mismatch);
+    $display("phase 4: total %0d equivalence samples, %0d mismatches, %0d captures the reference cut at its time-out", eq_samples, eq_mismatch, cut_caps);
     check(eq_mismatch == mm0, "after segment and averaging runs, modes off again identical to 0x1535");
 
     $fclose(logf);
