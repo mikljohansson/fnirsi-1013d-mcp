@@ -7,6 +7,23 @@
 #include "slider_ov.h"
 #include "tb_view.h"
 #include "bode_ui.h"
+#include "slider_ov_draw.h"
+#include "display_lib.h"
+#include "fnirsi_1013d_scope.h"
+
+//fw 0.2.92: the display calls slider_ov_draw.c makes, into a screen the tests read back
+static uint32 scr[480][800], fg;
+
+void display_set_fg_color(uint32 color) { fg = color; }
+void display_draw_horz_line(uint32 y, uint32 xs, uint32 xe) { uint32 x; for(x = xs; x <= xe; x++) scr[y][x] = fg; }
+void display_draw_vert_line(uint32 x, uint32 ys, uint32 ye) { uint32 y; for(y = ys; y <= ye; y++) scr[y][x] = fg; }
+void display_fill_rect(uint32 x, uint32 y, uint32 w, uint32 h)
+{
+  uint32 i;
+
+  for(i = 0; i < h; i++)
+    display_draw_horz_line(y + i, x, x + w - 1);
+}
 
 //The three modes map the same track (owner 10-19 22:15, decision 7: the whole row, no frame or line; the window a box
 //with a 1 px margin)
@@ -311,6 +328,134 @@ static void test_jump_fr(void)
   T_TRUE(jumps > 200);
 }
 
+//fw 0.2.92 (decision 8, owner 2026-10-20 13:35 and 13:36): in Overlaid the Frequency response track draws the magnitude
+//and the phase, each fitted to the track's height on its own, flagged points grey for both, the phase first and the
+//magnitude over it
+#define T_PHASE      0x00FF80FF
+#define T_FLAG       0x00707070
+
+static void test_two_curves(void)
+{
+  static const int32 col[5]  = { 100, 200, 300, 400, 500 };
+  static const int32 mv[5]   = { -40000, -20000, 0, -20000, -40000 };   //mdB: a hump, 40 dB high
+  static const int32 pv[5]   = { 90000, 45000, 0, -45000, -90000 };    //millidegrees: a falling line, 180 degrees
+  static const int32 pw[5]   = { 0, 170000, -170000, 0, 0 };           //a wrap between points 1 and 2
+  static const int32 same[2] = { 100, 100 };
+  static const uint8 ok[5]   = { 1, 1, 1, 1, 1 }, have[5] = { 1, 1, 1, 1, 1 };
+  static const uint8 okf[5]  = { 1, 1, 1, 0, 1 };                      //point 3 flagged
+  static const uint8 none[5] = { 0, 0, 0, 0, 0 };
+  static uint8 on_ph[SOV_H][SOV_W], on_mag[SOV_H][SOV_W];
+  sov_curve mag = { 5, col, mv, ok, have, 0, CHANNEL2_COLOR, SOV_CH2_DIM };
+  sov_curve ph  = { 5, col, pv, ok, have, 180000, T_PHASE, SOV_PHASE_DIM };
+  sov_curve c;
+  int32 vmax, vmin, x, y, wx = 50, ww = 600;
+  int   both = 0;
+
+  //Each fitted on its own: both use all 20 rows although their scales differ
+  T_TRUE(sov_curve_fit(&mag, &vmax, &vmin));
+  T_EQ(vmax, 0); T_EQ(vmin, -40000);
+  T_EQ(sov_curve_row(&mag, 2, vmax, vmin), 0);
+  T_EQ(sov_curve_row(&mag, 0, vmax, vmin), SOV_H - 1);
+  T_TRUE(sov_curve_fit(&ph, &vmax, &vmin));
+  T_EQ(vmax, 90000); T_EQ(vmin, -90000);
+  T_EQ(sov_curve_row(&ph, 0, vmax, vmin), 0);
+  T_EQ(sov_curve_row(&ph, 4, vmax, vmin), SOV_H - 1);
+
+  //The fit skips a flagged point, takes the flagged ones when none is valid; nothing measured, no fit
+  c = mag;
+  c.v = mv;
+  c.ok = okf;
+  {
+    static const int32 spike[5] = { -40000, -20000, 0, 50000, -40000 };   //the flagged point would set the top
+
+    c.v = spike;
+    T_TRUE(sov_curve_fit(&c, &vmax, &vmin));
+    T_EQ(vmax, 0); T_EQ(vmin, -40000);
+    c.ok = none;
+    T_TRUE(sov_curve_fit(&c, &vmax, &vmin));
+    T_EQ(vmax, 50000); T_EQ(vmin, -40000);
+  }
+  c.have = none;
+  T_FALSE(sov_curve_fit(&c, &vmax, &vmin));
+
+  //Joins: the magnitude always, the phase not across a wrap, never back to the same column
+  T_TRUE(sov_curve_joins(&mag, 0, 1));
+  c = ph;
+  c.v = pw;
+  T_TRUE(sov_curve_joins(&c, 0, 1));
+  T_FALSE(sov_curve_joins(&c, 1, 2));
+  c = mag;
+  c.n = 2;
+  c.col = same;
+  T_FALSE(sov_curve_joins(&c, 0, 1));
+
+  //Overlaid: both drawn, full inside the window, dimmed outside
+  sov_draw_row();
+  sov_draw_curves(&mag, &ph, T_FLAG, wx, ww);
+  T_EQ(scr[SOV_Y + 0][300], CHANNEL2_COLOR);         //the magnitude's peak
+  T_EQ(scr[SOV_Y + 0][100], T_PHASE);                //the phase's top
+  T_EQ(scr[SOV_Y + SOV_H - 1][500], CHANNEL2_COLOR); //both end on the bottom row: the magnitude over the phase
+  sov_draw_row();
+  sov_draw_curves(&mag, &ph, T_FLAG, 350, 300);      //the window right of the peak
+  T_EQ(scr[SOV_Y + 0][300], SOV_CH2_DIM);
+  T_EQ(scr[SOV_Y + 0][100], SOV_PHASE_DIM);
+  T_EQ(scr[SOV_Y + SOV_H - 1][500], CHANNEL2_COLOR);
+
+  //The order (owner 13:36): each curve alone, then the pair; every pixel of the magnitude is cyan in the pair, also those
+  //the phase lands on, the phase's others pink, the rest black
+  sov_draw_row();
+  sov_draw_curve(&ph, T_FLAG, wx, ww);
+  for(y = 0; y < SOV_H; y++)
+    for(x = 0; x < SOV_W; x++)
+      on_ph[y][x] = (scr[SOV_Y + y][SOV_X + x] == T_PHASE);
+  sov_draw_row();
+  sov_draw_curve(&mag, T_FLAG, wx, ww);
+  for(y = 0; y < SOV_H; y++)
+    for(x = 0; x < SOV_W; x++)
+      on_mag[y][x] = (scr[SOV_Y + y][SOV_X + x] == CHANNEL2_COLOR);
+  sov_draw_row();
+  sov_draw_curves(&mag, &ph, T_FLAG, wx, ww);
+  for(y = 0; y < SOV_H; y++)
+    for(x = 0; x < SOV_W; x++)
+    {
+      uint32 px = scr[SOV_Y + y][SOV_X + x];
+
+      if(on_mag[y][x])
+      {
+        T_EQ(px, CHANNEL2_COLOR);
+        both += on_ph[y][x];
+      }
+      else if(on_ph[y][x])
+        T_EQ(px, T_PHASE);
+      else
+        T_EQ(px, BLACK_COLOR);
+    }
+  T_TRUE(both >= 2);
+
+  //Magnitude only / Phase only: that one curve
+  sov_draw_row();
+  sov_draw_curves(&mag, 0, T_FLAG, wx, ww);
+  T_EQ(scr[SOV_Y + 0][100], BLACK_COLOR);
+  T_EQ(scr[SOV_Y + 0][300], CHANNEL2_COLOR);
+  sov_draw_row();
+  sov_draw_curves(0, &ph, T_FLAG, wx, ww);
+  T_EQ(scr[SOV_Y + 0][300], BLACK_COLOR);
+  T_EQ(scr[SOV_Y + SOV_H - 1][500], T_PHASE);        //no magnitude over it now
+
+  //A flagged point: a grey pixel in each curve, no line to or from it
+  mag.ok = okf;
+  ph.ok = okf;
+  sov_draw_row();
+  sov_draw_curves(&mag, &ph, T_FLAG, wx, ww);
+  T_EQ(scr[SOV_Y + 10][400], T_FLAG);                //the magnitude's -20000 on 0..-40000: row 10
+  T_EQ(scr[SOV_Y + 14][400], T_FLAG);                //the phase's -45000 on 90000..-90000: row 14
+  for(y = 0; y < SOV_H; y++)
+  {
+    T_EQ(scr[SOV_Y + y][350], BLACK_COLOR);          //nothing joins 2 to 3
+    T_EQ(scr[SOV_Y + y][450], BLACK_COLOR);          //nor 3 to 4
+  }
+}
+
 int main(void)
 {
   test_geometry();
@@ -321,5 +466,6 @@ int main(void)
   test_jump();
   test_jump_scope();
   test_jump_fr();
+  test_two_curves();
   return t_report("test_slider_ov");
 }

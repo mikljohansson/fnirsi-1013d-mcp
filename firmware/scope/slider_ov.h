@@ -77,4 +77,29 @@ int32 sov_col(int32 x);
 //touch is above the row
 int32 sov_jump(int32 x, int32 y, int32 wx, int32 ww);
 
+//fw 0.2.92 (slider-overview.md section 5, decision 8): a curve of the Frequency response's AUTO SET overview. n points
+//with their track columns (in order), values, `have` (measured) and `ok` (not flagged); `wrap` > 0: no line between two
+//points `wrap` or more apart (the phase, millidegrees: not across a wrap); `full` / `dim` its colours inside / outside the
+//window. Each curve is fitted to the track's height on its own, so in Overlaid the magnitude and the phase both use all
+//20 rows
+typedef struct
+{
+  int32         n;
+  const int32  *col;
+  const int32  *v;
+  const uint8  *ok;
+  const uint8  *have;
+  int32         wrap;
+  uint32        full, dim;
+} sov_curve;
+
+//The fit: vmax and vmin over the valid points, or over the flagged ones when none is valid; 0 when no point is measured
+int   sov_curve_fit(const sov_curve *cv, int32 *vmax, int32 *vmin);
+
+//The row of point i on the fit vmax, vmin
+int32 sov_curve_row(const sov_curve *cv, int32 i, int32 vmax, int32 vmin);
+
+//1 when valid points a and b are joined by a line (b after a, a later column, not across a wrap)
+int   sov_curve_joins(const sov_curve *cv, int32 a, int32 b);
+
 #endif

@@ -161,3 +161,38 @@ int32 sov_jump(int32 x, int32 y, int32 wx, int32 ww)
 
   return t - wx;
 }
+
+int sov_curve_fit(const sov_curve *cv, int32 *vmax, int32 *vmin)
+{
+  int   pass, any = 0;
+  int32 i;
+
+  *vmax = *vmin = 0;
+
+  //Pass 0 the valid points, pass 1 the flagged ones when none is valid
+  for(pass = 0; (pass < 2) && !any; pass++)
+    for(i = 0; i < cv->n; i++)
+      if(cv->have[i] && (pass || cv->ok[i]))
+      {
+        if(!any || (cv->v[i] > *vmax)) *vmax = cv->v[i];
+        if(!any || (cv->v[i] < *vmin)) *vmin = cv->v[i];
+        any = 1;
+      }
+
+  return any;
+}
+
+int32 sov_curve_row(const sov_curve *cv, int32 i, int32 vmax, int32 vmin)
+{
+  return sov_row_fit(cv->v[i], vmax, vmin);
+}
+
+int sov_curve_joins(const sov_curve *cv, int32 a, int32 b)
+{
+  int64 d = (int64)cv->v[b] - cv->v[a];
+
+  if(cv->col[b] <= cv->col[a])
+    return 0;
+
+  return (cv->wrap <= 0) || ((d < cv->wrap) && (-d < cv->wrap));
+}
