@@ -1224,4 +1224,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   estimate (handed to fw-eng with the rows: scratchpad device_rc_rows_1205.json, host_rc_1205.*). Device sweep 1 hit the
   pre-scan artefact again (CH1 at 2.5 V/div, ch1_low from 4.6 kHz). The "1.19 / 1.20 on the unit" comparison item is met
   where both sides are valid. Host tool with the mcp-gen7 retakes: 24 valid, 1 flagged, no crash.
+- 2026-10-20 12:20-12:25: fw 0.2.87 (fw-eng: range plan, flags per the host's rules, suspect records retaken) pinned
+  backups/fw-0.2.87_a6dcbb20.bin, loaded 12:24: four device sweeps on the RC, every pre-scan ranged CH1 to 0.5 V/div (the
+  retaken suspect record covers the bad first record), switches 6 / 3 / 4 / 3 (the first sweep ranges, the next ones switch
+  only at the three planned CH2 range boundaries), flagged points 8 / 8 / 4 / 4 (incoherent / unsettled / spliced; the host: 1),
+  -2.86 dB at 10.0 kHz every time. fw 0.2.88 (fw-decfix: decimation from the divider the FPGA holds, 0x54 at every arm) pinned
+  backups/fw-0.2.88_cfe38ea3.bin (sha256 cfe38ea3230f189fb43cc849c92f6dd7bdbf1ebca22f47bd2b90c7639fab8207), loaded 12:25; the
+  reproduction and ten traced sweeps follow.
 

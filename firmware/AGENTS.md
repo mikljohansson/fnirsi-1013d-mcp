@@ -3922,7 +3922,7 @@ only at codes 127..135 and not in every capture, which one capture at the centre
    code 128..132 by the offset, 200 MSa/s captures for a minute: the Status page Calibration verdict turns amber with
    "run Calibrate", one event 23 entry for CH1 A only.
 
-## 55. fw-fr3: Frequency response small items, AUTO SET never loops (fw 0.2.84 provisional, protocol 1.24 unchanged)
+## 55. fw-fr3: Frequency response small items, AUTO SET never loops (fw 0.2.84, protocol 1.24 unchanged)
 
 Branch `fw-fr3` from main 83e3b32 (fw 0.2.83). Brief: task-queue "Frequency response small items" (a)-(c), the AUTO SET
 absurd-point rule (d) and the owner's decision of 2026-10-20 11:23 (AUTO SET fails fast, never loops). Commits: 9079725
@@ -4030,7 +4030,7 @@ bode_ui.c/h, test_ui.c), then docs. PC_FW_VERSION not bumped. Host tests green, 
   after AUTO SET repeats at the found span; two Single sweeps in a row on the same span from the fold-out: the second
   counts "0 / 50" upwards, as does the Sweep card; READ_BODE view bits = 1 (bit 1 clear) after AUTO SET.
 
-## 56. fw-eng: the range plan, the device's flags aligned with the host's (fw 0.2.87 provisional, protocol 1.24 unchanged)
+## 56. fw-eng: the range plan, the device's flags aligned with the host's (fw 0.2.87, protocol 1.24 unchanged)
 
 Branch `fw-eng` from main cbff758 (fw 0.2.86). Brief: task-queue items "RUN stays continuous; repeated sweeps reuse the
 previous range plan" (owner 10-20 11:51 / 11:52, bode-ui.md section 10) and "Device sweep flags stricter than the

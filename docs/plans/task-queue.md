@@ -35,7 +35,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   with a note naming the likely cause (wiring: CH1 tip on the DUT input, CH2 tip on the output; the DUT), in STOP with the
   settings kept, never in RUN.
 
-- **First record after a configuration change is garbage on 0x153A** (bench 10-20 10:55-11:16): a decimated capture right after
+- [x] **First record after a configuration change is garbage on 0x153A** (cause: a stale 0x54 shift from the UI table while the FPGA held the raw divider, fpga-gen10; fix fw 0.2.88 fw-decfix, bench pending) (bench 10-20 10:55-11:16): a decimated capture right after
   the engine's (or the host's) rate / filter / range change can be a whole record of one saturated 16-bit value; the Bode
   engine's pre-scan is always such a capture, so the first sweep after entering the mode ranges CH1 coarse (2.5 V/div,
   ch1_low) and only the next sweep is right. Not seen on 0x1539. Two parts: (a) FPGA / firmware investigation (fpga-gen10 on
@@ -489,6 +489,13 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 
 ## Dispatched
+
+- fw-decfix (done 12:22, about 210k tokens, merged 12:25 as fw 0.2.88, handoff firmware/AGENTS.md section 57): the last 0x0D /
+  0x53 / 0x54 / 0x56 values are tracked in fpga_bus.c, `pc_hal_divider_now()` feeds pc_decim_next / pc_arm_geometry / GET_DECIM /
+  GET_CAPTURE_INFO / READ_TRACE, 0x54 written at every arm with the filter on, 0x54 / 0x55 traced (event 22) and counted (link
+  stats 65), `bh_arm` rewrites 0x0D when the FPGA holds another divider; tb_raw only affects GET_TIMEBASE; dead code removed.
+  Bench: section 57 (the deterministic reproduction clean, GET_DECIM = the FPGA's divider, 0x54 in the trace at every arm,
+  twenty device sweeps with the pre-scan ranging CH1 right).
 
 - fw-eng (done 12:28, about 300k tokens, merged 12:21 as fw 0.2.87, handoff firmware/AGENTS.md section 56): per-point range plan
   (ranges, offsets, correction kept with the table; a sweep at the same span / points / Settle / CH2 mode skips the pre-scan and
