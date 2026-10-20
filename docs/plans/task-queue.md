@@ -505,7 +505,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
 
 ## Dispatched
 
-- fpga-gen11 (Fable, reported 15:40, branch fpga-gen11 pushed, merge after its last testbench run): **cause of the spliced
+- fpga-gen11 (Fable, reported 15:35, branch fpga-gen11 pushed, merge after its last testbench run): **cause of the spliced
   time-out records found.** 0x1532..0x153A latch 0x14 = pretrigger on an untriggered time-out stop (record = ring words
   0..total-1), contiguous only when the stop lands in the first ring pass (Atlan's 0x0E = total); our auto mode forces 0x1A = 0
   after many ring passes, so the record is spliced at the write pointer whenever it is inside 0..total-1 (28..42 % of the sweep's
@@ -514,7 +514,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   total words on an untriggered stop, the time-out ends only untriggered captures, 0x18 is the record's own, 0x1A synchronised;
   tb_timeout 75 checks 0 errors (0x153A source fails 30). Not flashed: owner session needed (pin, probe, double read = the
   pinned 0x153A padded image 77672b5a.., write, retrain the stages, bench README section 11 checks 1-6).
-- fw-arm (Opus, dispatched 15:41, fw 0.2.97 provisional, section 64): the firmware side of fpga-gen11's section 11: on
+- fw-arm (Opus, dispatched 15:36, fw 0.2.97 provisional, section 64): the firmware side of fpga-gen11's section 11: on
   <= 0x153A arm FPGA auto with 0x0E = 8192k + total - 2 and triggered := 0x18 && 0x14 != pretrigger instead of the forced
   stop; on 0x153B+ the force is safe; every arm path (UI auto, host ACQ, segments, bh_arm); test_fpga_bus; a "may be spliced"
   flag where the force remains.
