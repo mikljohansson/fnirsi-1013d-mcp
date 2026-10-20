@@ -2,9 +2,20 @@
 
 Repository: **fnirsi-1013d-mcp** (local checkout directory may still be named `fnirsi-1013d-ai`).
 
-Guidance for AI agents (Claude Code, Codex, others) and humans working in this repository. Read fully before
-touching code. Subdirectories carry their own `AGENTS.md` handoffs: `firmware/AGENTS.md`, `mcp/AGENTS.md`,
-`fpga/al3/AGENTS.md`.
+Guidance for AI agents (Claude Code, Codex, others) and humans working in this repository. Claude Code reads this
+file when no `CLAUDE.md` exists. Subdirectories carry their own `AGENTS.md` handoffs: `firmware/AGENTS.md`,
+`mcp/AGENTS.md`, `fpga/al3/AGENTS.md`.
+
+## If a person asked you to help install or use the scope
+
+- **Installing the firmware, the card or the FPGA bitstream**: follow `docs/guide/agent-runbook.md`. It has the
+  questions to ask first, the safety gates you may never skip, the commands in order and the recovery paths.
+- **Setting up the MCP server** so you can use the scope over USB: `docs/agent-setup.md`.
+- **Measuring with the scope**: `docs/agent-measurement-guide.md` (Claude Code loads it as the skill
+  `.claude/skills/fnirsi-scope/`); the tools and their safety tiers are in `docs/mcp-tools.md`.
+
+The rest of this file is for developing the firmware, the FPGA design and the host tools. Read it fully before
+touching code.
 
 ## What this project is
 
@@ -17,8 +28,8 @@ Open firmware, FPGA and PC tooling for the **FNIRSI 1013D** tablet oscilloscope,
 2. **Performance**: get the most out of the stock hardware (deeper memory, better trigger, external trigger,
    faster readback, averaging/FFT), building on Atlan4's and pecostm32's work.
 
-Owner's unit: **Anlogic AL3A10 FPGA variant** (unmarked 144-pin LQFP, Winbond 25Q80 config flash with a 2x3
-header beside it, W25Q32 MCU flash, no parts on the back). JTAG IDCODE 0x18006C31.
+The verified hardware is the **Anlogic AL3A10 FPGA variant** (unmarked 144-pin LQFP, Winbond 25Q80 config flash
+with a 2x3 header beside it, W25Q32 MCU flash, no parts on the back). JTAG IDCODE 0x18006C31.
 
 ## Hardware truth (verified from source and measurements; ignore FNIRSI marketing)
 
@@ -56,27 +67,18 @@ fpga/al3/              Anlogic TD project for the AL3A10 (base: Atlan4 zaklad.v)
                        bitstreams with manifest.json and BITSTREAMS.md (checked by tools/bitstreams.py)
 mcp/                   Python MCP server + serial client library + host-side analysis
 docs/                  hardware-prep.md, protocol.md, mcp-tools.md, agent-measurement-guide.md, releasing.md,
-                       fpga-flash-from-mcu.md, hardware-status.md (bench log), plans/ (task-queue.md first),
-                       release-notes/ (user-facing notes per release)
+                       development.md, fpga-flash-from-mcu.md, hardware-status.md (bench log), guide/ (user
+                       guide, agent-runbook.md), plans/ (task-queue.md first), release-notes/ (user-facing
+                       notes per release)
 ```
 
-Reference checkouts (read-only, outside this repo, never build inside them):
-
-- `D:\src\Fnirsi1013D` - Atlan4 fork (zips; extracted copies under `research/atlan4-extracted/`).
-  `Verzia 1.xxx/FPGA for 1.xxx/` has the Verilog for AL3/EF2/EP4 and `FPGA commands.txt`.
-- `D:\src\FNIRSI_1013D_Firmware` - pecostm32 open firmware (clean base, V0.005).
-- `D:\src\FNIRSI-1013D-1014D-Hack` - pecostm32 RE: schematics, IC datasheets, `FPGA explained/` bus traces,
-  emulator, `Test code/f1c100s_ch340` (USB serial on MUSB), flash backup/restore tools, Linux buildroot.
-- `D:\src\FNIRSI_1014D_Firmware` - Donwulff: Atlan 1.00o5 + 1014D port, PORT_AUDIT.md fixes, acqprobe tooling,
-  headless Anlogic TD flow. Mine for fixes; not our base.
-- `D:\src\Anlogic_AL3-10_Analyzing` - pecostm32 bitstream RE; `FNIRSI-1013D_FPGA/Original_1013D` is a
-  buildable TD re-implementation of the stock design with the correct pinout.
+Reference checkouts of the upstream projects (Atlan4, pecostm32, Donwulff) are read-only and live outside this
+repository; the maintainer's paths are in the last section. Never build inside them.
 
 ## Building
 
-- Cross toolchain lives in **WSL Ubuntu** (`wsl -d Ubuntu`): `arm-none-eabi-gcc`, `make`, `flashrom`,
-  python3. Run builds from WSL with the repo at `/mnt/d/src/fnirsi-1013d-ai`. Root in WSL is available
-  without a password via `wsl -d Ubuntu -u root` for installing packages.
+- Cross toolchain lives in **WSL Ubuntu** (or any Linux): `arm-none-eabi-gcc`, `make`, `flashrom`,
+  python3. Run builds from WSL with the repo mounted under `/mnt/`.
 - Firmware: `cd firmware/scope && make -j` produces `build/fnirsi_1013d.bin` (eGON.EXE image for SD sector
   750 / FEL). apt toolchain is GCC 13.2.1; release and bench images use GCC 10.3.1 (`firmware/tools/fetch_gcc10.sh`,
   `make gcc10` gives `build-gcc10-pc/`; `make gcc10-nommu` builds the same code with the MMU off, version suffix
@@ -86,7 +88,7 @@ Reference checkouts (read-only, outside this repo, never build inside them):
   the commit (identity = commit hash and commit time read from git), so the same commit gives the same sha256 in any
   checkout and in CI (`firmware/README.md` "Reproducible images", check in `docs/releasing.md`). SD layout, image
   format, `make_sd_image.py` and FEL commands: `firmware/README.md`; SD packages for a release:
-  `tools/make_release_sd_package.py`.
+  `tools/make_release_sd_package.py`. The developer overview, with the mcp and FPGA builds: `docs/development.md`.
 - Compiler flags are inherited from Atlan4 (`-mcpu=arm926ej-s -O3 -nostdlib`, custom `mem*.s`, tiny malloc,
   no libc). Keep it that way; do not introduce libc or floating point in acquisition paths.
 - Python host tools: `python -I` for anything that reads downloaded/untrusted files; venv under `mcp/.venv`.
@@ -101,13 +103,13 @@ Reference checkouts (read-only, outside this repo, never build inside them):
 - Hardware access (programmer, FEL, serial) is done by the owner or with the owner present; agents prepare
   exact commands and expected outputs.
 - Cite facts to `research/notes/` files when making design decisions; mark inferences as such.
-- Bench coordination: the scope's serial port (COM10 on Windows, /dev/ttyACM0 when attached to WSL with
-  `usbipd attach --wsl --busid <id>`) is exclusive. Only the coordinating session takes REMOTE or sends
-  hardware-changing commands; agents may use PING/TEST_PATTERN/GET_* in LOCAL and must close the port when
-  asked. Expect E_BUSY whenever the owner is in a scope menu (every menu is a modal loop).
+- Bench coordination: the scope's serial port is exclusive (the maintainer's port names are in the last section).
+  Only the coordinating session takes REMOTE or sends hardware-changing commands; agents may use
+  PING/TEST_PATTERN/GET_* in LOCAL and must close the port when asked. Expect E_BUSY whenever the owner is in a
+  scope menu (every menu is a modal loop).
 - Dev loop: `make gcc10` in firmware/scope, boot menu -> FEL (or ENTER_FEL once available), attach the FEL
-  device to WSL, `sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`. The SD card
-  image is only rewritten for releases.
+  device to WSL, `sunxi-fel -p write 0x7FFFFFE0 build-gcc10-pc/fnirsi_1013d.bin exe 0x80000000`
+  (`fnirsi1013d-flash` does all of it; `docs/development.md`). The SD card image is only rewritten for releases.
 - UI work (menus, views, dialogs, the bars) follows `docs/ui-guidelines.md`; the current change list is
   `docs/plans/ux-makeover.md` and its mockups are the acceptance reference.
 - Shared `main`: update with `git fetch && git merge --ff-only origin/main` (the repo config sets `pull.ff=only`); never
@@ -120,8 +122,8 @@ Reference checkouts (read-only, outside this repo, never build inside them):
 
 ## Using the scope from an agent
 
-Measurement sessions through the `fnirsi1013d` MCP server (setup: `mcp/README.md`, also for Codex): follow
-`docs/agent-measurement-guide.md`. Claude Code loads it as the skill `.claude/skills/fnirsi-scope/`.
+Measurement sessions through the `fnirsi1013d` MCP server (setup: `docs/agent-setup.md` and `mcp/README.md`, also
+for Codex): follow `docs/agent-measurement-guide.md`. Claude Code loads it as the skill `.claude/skills/fnirsi-scope/`.
 
 ## CI and releases
 
@@ -141,3 +143,26 @@ The coordinating session dispatches Opus agents for design/implementation and So
 docs and mechanical ports. Each agent writes its output to the paths named in its brief and reports a short
 summary. Plans live in `docs/plans/`. Status of the hardware (what is flashed, what is backed up) is kept in
 `docs/hardware-status.md` and must be updated after every hardware step.
+
+## The maintainer's bench
+
+Facts specific to the maintainer's machine and unit. Another contributor substitutes their own.
+
+- **The unit**: the owner's FNIRSI 1013D is the Anlogic AL3A10 variant described above; its bench history is
+  `docs/hardware-status.md`.
+- **Serial port**: COM10 on Windows, `/dev/ttyACM0` when attached to WSL with `usbipd attach --wsl --busid <id>`.
+  The FEL device (`1f3a:efe8`) must be shared once from an admin shell (`usbipd bind --hardware-id 1f3a:efe8`);
+  `fnirsi1013d-flash` attaches it to WSL by itself.
+- **WSL**: the distro is `Ubuntu` (`wsl -d Ubuntu`), the repo is at `/mnt/d/src/fnirsi-1013d-ai`, and root is
+  available without a password via `wsl -d Ubuntu -u root` for installing packages. `mcp/.venv` is the Windows venv;
+  the WSL one is kept on the Linux side.
+- **Reference checkouts** (read-only, outside this repo, never build inside them):
+    - `D:\src\Fnirsi1013D` - Atlan4 fork (zips; extracted copies under `research/atlan4-extracted/`).
+      `Verzia 1.xxx/FPGA for 1.xxx/` has the Verilog for AL3/EF2/EP4 and `FPGA commands.txt`.
+    - `D:\src\FNIRSI_1013D_Firmware` - pecostm32 open firmware (clean base, V0.005).
+    - `D:\src\FNIRSI-1013D-1014D-Hack` - pecostm32 RE: schematics, IC datasheets, `FPGA explained/` bus traces,
+      emulator, `Test code/f1c100s_ch340` (USB serial on MUSB), flash backup/restore tools, Linux buildroot.
+    - `D:\src\FNIRSI_1014D_Firmware` - Donwulff: Atlan 1.00o5 + 1014D port, PORT_AUDIT.md fixes, acqprobe tooling,
+      headless Anlogic TD flow. Mine for fixes; not our base.
+    - `D:\src\Anlogic_AL3-10_Analyzing` - pecostm32 bitstream RE; `FNIRSI-1013D_FPGA/Original_1013D` is a
+      buildable TD re-implementation of the stock design with the correct pinout.

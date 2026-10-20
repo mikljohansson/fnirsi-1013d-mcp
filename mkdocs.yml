@@ -57,6 +57,7 @@ nav:
   - Home: index.md
   - User guide:
       - Install: guide/install.md
+      - Runbook for the agent guiding an install: guide/agent-runbook.md
       - Hardware preparation: hardware-prep.md
       - First run: guide/first-run.md
       - Calibration: guide/calibration.md
@@ -69,6 +70,7 @@ nav:
       - MCP tools and safety tiers: mcp-tools.md
       - Measurement guide: agent-measurement-guide.md
   - Engineering:
+      - Development: development.md
       - Articles:
           - Overview: articles/index.md
           - The calibration story: articles/calibration.md
