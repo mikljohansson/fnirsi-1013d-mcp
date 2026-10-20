@@ -276,6 +276,15 @@ char *bu_estimate_text(char *t, uint32 ms);
 int bu_single_button(int running, int single, int autoset, int done, int count, uint32 est_ms, const char **label,
                      char *value);
 
+//fw 0.2.86 (owner 2026-10-20 11:47, AUTO SET never ends in RUN): AUTO SET runs the overview, its finer passes (autoset
+//1..BODE_AUTO_PASSES) and then one single sweep at the found settings (final); its button reads "Auto..." while any of
+//them runs. A sweep that has ended is followed by the next one only when RUN repeats (run, not single) and it completed
+//(done); a single or thru sweep, AUTO SET's final sweep (single), a stopped or failed sweep return to STOP. The READ_BODE
+//header's view bits: bit 0 the view shows, bit 1 RUN repeats sweeps (0 during and after AUTO SET).
+int   bu_auto_busy(int autoset, int final, int running);
+int   bu_after_sweep(int run, int single, int done);
+uint8 bu_view_bits(int active, int run, int single);
+
 //fw 0.2.84: why CH1 reads low (BODE_F_CH1_LOW), by the range and the frequency of the flagged points: a range coarser
 //than 0.5 V/div (a pre-scan artefact: sweep again) before a DUT that loads the 1 kOhm source (0.5 V/div or finer, at or
 //below 2 MHz) before the x1 probe's roll-off (above 2 MHz). The text into t (at most BU_WARN_MAX characters); returns

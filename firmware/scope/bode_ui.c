@@ -651,6 +651,21 @@ int bu_single_button(int running, int single, int autoset, int done, int count, 
   return BU_SINGLE_START;
 }
 
+int bu_auto_busy(int autoset, int final, int running)
+{
+  return (autoset || final) && running;
+}
+
+int bu_after_sweep(int run, int single, int done)
+{
+  return run && !single && done;
+}
+
+uint8 bu_view_bits(int active, int run, int single)
+{
+  return (uint8)((active ? 1 : 0) | ((run && !single) ? 2 : 0));
+}
+
 int bu_warn_ch1_low(char *t, const uint8 *r1, const uint64 *f_mhz, const uint16 *flags, const uint8 *have, int n)
 {
   static const char *const vpd[BU_CH1_FINE_RANGE] = { "5", "2.5", "1" };
