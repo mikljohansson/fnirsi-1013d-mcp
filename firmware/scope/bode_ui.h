@@ -234,7 +234,8 @@ int bu_card_text(int item, const bu_card_in *in, char *t);
 #define BU_W_AUTO_CH1         21
 #define BU_W_AUTO_PEAK        22
 #define BU_W_CH1_LOW_HF       23      //fw 0.2.84: CH1 low above 2 MHz, the x1 probe's roll-off
-#define BU_W_COUNT            24
+#define BU_W_CH2_SMALL        24      //fw 0.2.94: ch2_small on Constant: the CH2 menu's V/div (owner 14:16)
+#define BU_W_COUNT            25
 
 extern const char *const bu_warn[BU_W_COUNT];
 extern const char *const bu_instruction[2];

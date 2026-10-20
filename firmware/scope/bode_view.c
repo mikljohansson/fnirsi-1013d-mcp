@@ -62,14 +62,13 @@ uint32 pc_glue_caps(void);
 
 static const uint8  pts_tab[4] = { 10, 20, 50, 100 };
 static const char *const settle_names[BODE_SETTLE_COUNT] = { "Fast", "Normal", "Resonant", "High Q" };
-static const char *const ch2_names[2] = { "Auto", "Hold" };
+static const char *const ch2_names[2] = { "Auto", "Constant" };   //fw 0.2.94 (owner 14:16): Hold is "Constant"
 
 //AUTO SET's overview (bode-ui.md 3.2): 100 Hz .. 10 MHz, 20 points, Settle Fast, CH2 Auto, background on
 #define AUTO_START_I      6
 #define AUTO_STOP_I       21
 #define AUTO_POINTS       20
 
-#define HOLD_CHANNEL      0xFF              //Hold on the channel's range when the sweep starts (BODE_CTRL's rule)
 
 typedef struct
 {
@@ -94,7 +93,7 @@ typedef struct
   uint8  autoset;                   //the pass running: 1 the overview, 2..BODE_AUTO_PASSES the sharp-tank passes; 0 none
   uint8  as_thru;                   //the thru's Apply before the overview
   uint8  as_final;                  //fw 0.2.86: AUTO SET's last step, one single sweep at the found settings, is running
-  uint8  hold_r2;                   //fw 0.2.93: CH2's range in Hold (0..5; HOLD_CHANNEL: the channel's when a sweep starts)
+  bode_ac2 ac2;                     //fw 0.2.94: the latest AUTO SET's CH2 verdict and its inputs (BODE_CTRL 50..57)
 
   //What the view gives back
   uint8  s_run, s_trig, s_gen_en, s_gen_duty, s_disp[2];
@@ -107,7 +106,7 @@ typedef struct
 
 //Defaults: 100 Hz .. 1 MHz, 50 points, Normal settle, CH2 Auto, Overlaid, Log, cursors off
 static bv_state bv = { .start_i = 6, .stop_i = 18, .points_i = 2, .settle = BODE_SETTLE_NORMAL, .ch2 = BODE_CH2_AUTO,
-                       .hold_r2 = HOLD_CHANNEL, .cur = { -1, -1 }, .note = NOTE_NONE };
+                       .ac2 = { .verdict = BODE_AC2_NONE }, .cur = { -1, -1 }, .note = NOTE_NONE };
 
 //fw 0.2.93 (owner 2026-10-20 13:33): the CH2 levels AUTO SET has measured (the overview and its passes), for the CH2
 //range mode it sets (bode_auto_ch2)
@@ -115,6 +114,7 @@ static bv_state bv = { .start_i = 6, .stop_i = 18, .points_i = 2, .settle = BODE
 static int    as_n;
 static uint64 as_f[AS_LEVELS];
 static int32  as_v2[AS_LEVELS];
+static uint16 as_fl[AS_LEVELS];
 static uint8  as_have[AS_LEVELS];
 
 //fw 0.2.71: the table before AUTO SET's overview, given back when it is cancelled (bode-ui.md 3.2 step 6)
@@ -137,16 +137,34 @@ static uint8       ov_new_ok;
 //The MEASURES list (bu_ms_defaults: -3dB, Peak, Q, Level)
 static uint8 bv_ms[BU_MS_COUNT] = { 4, 1, 0, 2, 3, 0, 0, 0, 0, 0 };
 
-//fw 0.2.93: the Sweep fold-out's CH2 range row: "Auto", or the V/div Hold keeps (with CH2's probe factor)
-static const char *ch2_range_text(void)
+//fw 0.2.94 (owner 2026-10-20 14:16): CH2 on Constant sweeps on the V/div of the CH2 menu (the top-bar CH2 button), the
+//channel's own setting: its display V/div, which the menu sets at once (the hardware range follows it only while
+//running). 50 mV/div is software zoom on the 100 mV/div range: the sweep runs on that range
+static int ch2_constant_range(void)
 {
-  int r = (bv.hold_r2 < 6) ? bv.hold_r2 : scopesettings.channel2.samplevoltperdiv;
+  int r = scopesettings.channel2.displayvoltperdiv;
+
+  return (r < 6) ? r : 5;
+}
+
+//The Sweep fold-out's CH2 range row: "Auto", or "Constant" and the CH2 menu's V/div without "/div" ("Constant 100mV")
+static char *ch2_range_text(char *t)
+{
+  int r = scopesettings.channel2.displayvoltperdiv;
   int m = scopesettings.channel2.magnification;
+  const char *v;
+  char *p;
 
   if(bv.ch2 != BODE_CH2_HOLD)
-    return ch2_names[BODE_CH2_AUTO];
+    return fmt_str(t, ch2_names[BODE_CH2_AUTO]);
 
-  return (const char *)volt_div_texts[(m < 7) ? m : 1][(r < 6) ? r : 5];
+  v = (const char *)volt_div_texts[(m < 7) ? m : 1][(r < 7) ? r : 6];
+  p = fmt_str(t, ch2_names[BODE_CH2_HOLD]);
+  *p++ = ' ';
+  while(*v && (*v != '/'))
+    *p++ = *v++;
+  *p = 0;
+  return p;
 }
 
 static void f_step_text(char *t, int i)
@@ -337,13 +355,21 @@ void bode_view_close(void)
   display_set_screen_buffer(ui_diag_scope_buffer());
 
   //Channels (range, offset, coupling, enable), the display V/div (software zoom), the time base, the trigger source,
-  //the generator, RUN / STOP
+  //the generator, RUN / STOP. fw 0.2.94 (owner 2026-10-20 14:16): CH2 on Constant keeps its V/div, the CH2 menu's
+  //setting the sweeps used (the user may have chosen it here); only its offset, coupling and enable come back
   for(c = 0; c < 2; c++)
   {
     PCHANNELSETTINGS s = c ? &scopesettings.channel2 : &scopesettings.channel1;
+    int keep = (c == 1) && (bv.ch2 == BODE_CH2_HOLD);
+    uint8 disp = keep ? s->displayvoltperdiv : bv.s_disp[c];
+    pc_hw_channel h = bv.s_ch[c];
 
-    pc_hal_channel_write(c, &bv.s_ch[c], PC_CH_ENABLE | PC_CH_RANGE | PC_CH_COUPLING | PC_CH_OFFSET);
-    s->displayvoltperdiv = bv.s_disp[c];
+    //Constant: the hardware range the CH2 menu's V/div asks for (it may have been chosen while stopped)
+    if(keep)
+      h.range = (uint8)ch2_constant_range();
+
+    pc_hal_channel_write(c, &h, PC_CH_ENABLE | PC_CH_RANGE | PC_CH_COUPLING | PC_CH_OFFSET);
+    s->displayvoltperdiv = disp;
     scope_channel_settings(s, 0);
   }
 
@@ -382,7 +408,7 @@ static void bv_start_cfg(const bode_cfg *c, int single, int thru)
 {
   bode_eng *e = bode_engine();
   const bode_cfg *l = bode_last_cfg(e);
-  int r2 = (bv.hold_r2 < 6) ? bv.hold_r2 : scopesettings.channel2.samplevoltperdiv;
+  int r2 = ch2_constant_range();
 
   //Another plan: the cursors are placed again
   if((l->start_mhz != c->start_mhz) || (l->stop_mhz != c->stop_mhz) || (l->points != c->points))
@@ -567,6 +593,7 @@ static void bv_auto_finish(void)
   {
     as_f[as_n]    = p_f[i];
     as_v2[as_n]   = p_v2[i];
+    as_fl[as_n]   = p_flags[i];
     as_have[as_n] = p_have[i];
     as_n++;
   }
@@ -610,19 +637,25 @@ static void bv_auto_finish(void)
   bv.stop_i  = a.stop_i;
   bv.settle  = a.settle;
 
-  //fw 0.2.93 (owner 2026-10-20 13:33): CH2 Hold when the levels inside the span fit one range (under 20 dB of spread),
-  //on the most sensitive range holding the largest with 1.5 x margin; else Auto. RUN at a span one range covers then
-  //switches no relay; a held point that drops far below the range reads ch2_small and the user chooses Auto
+  //fw 0.2.93 (owner 2026-10-20 13:33): CH2 Constant when the levels inside the span fit one range (under 20 dB of
+  //spread), on the most sensitive range holding the largest with 1.5 x margin; else Auto. Also on the flat path (no
+  //corner: Start / Stop as they were). fw 0.2.94 (owner 14:16): Constant is the CH2 menu's V/div, so AUTO SET writes
+  //its range into the channel (the top-bar CH2 button shows it); on Auto the channel keeps what the final sweep leaves
   {
     pc_hw_channel h;
     int32 fs[6];
-    uint8 hr = HOLD_CHANNEL;
+    uint8 hr = 5;
 
     pc_hal_channel_read(1, &h);
     bode_ch2_full_scale(e, h.probe, fs);
-    bv.ch2 = (uint8)bode_auto_ch2(as_f, as_v2, as_have, as_n, bode_step_mhz(a.start_i), bode_step_mhz(a.stop_i), fs,
-                                  &hr);
-    bv.hold_r2 = (bv.ch2 == BODE_CH2_HOLD) ? hr : HOLD_CHANNEL;
+    bv.ch2 = (uint8)bode_auto_ch2(as_f, as_v2, as_fl, as_have, as_n, bode_step_mhz(a.start_i), bode_step_mhz(a.stop_i),
+                                  fs, &hr, &bv.ac2);
+
+    if(bv.ch2 == BODE_CH2_HOLD)
+    {
+      h.range = hr;
+      pc_hal_channel_write(1, &h, PC_CH_RANGE);
+    }
   }
 
   //fw 0.2.86 (owner 2026-10-20 11:47): never RUN. One single sweep at the found settings gives the table and the cards,
@@ -1096,7 +1129,7 @@ static void draw_cursors(const bv_axes *a)
 static const char *warning(char *buf)
 {
   bode_eng *e = bode_engine();
-  int i, unsettled = 0, floor = 0, ch1low = 0, clip2 = 0;
+  int i, unsettled = 0, floor = 0, ch1low = 0, clip2 = 0, small2 = 0;
   uint8 st = bode_state(e);
 
   if(st == BODE_ST_ERROR)
@@ -1132,10 +1165,15 @@ static const char *warning(char *buf)
     if(p_flags[i] & (BODE_F_NEAR_FLOOR | BODE_F_LOW_SNR))   floor++;
     if(p_flags[i] & BODE_F_CH1_LOW)                         ch1low = 1;
     if(p_flags[i] & (BODE_F_CLIPPED | BODE_F_CH2_OVERLOAD)) clip2 = 1;
+    if(p_flags[i] & BODE_F_CH2_SMALL)                       small2 = 1;
   }
 
+  //fw 0.2.94: on Constant the fix is the CH2 menu's V/div (or Auto)
   if(clip2 && (bv.ch2 == BODE_CH2_HOLD))
     return bu_warn[BU_W_CH2_OVER];
+
+  if(small2 && (bv.ch2 == BODE_CH2_HOLD))
+    return bu_warn[BU_W_CH2_SMALL];
 
   //fw 0.2.84: named by its cause (a coarse range, the DUT, the probe's roll-off above 2 MHz)
   if(ch1low && bu_warn_ch1_low(buf, p_r1, p_f, p_flags, p_have, n_pts))
@@ -1817,7 +1855,7 @@ void bode_view_save(void)
 //----------------------------------------------------------------------------------------------------------------------------------
 // CTRL page (bode-ui.md 4): Display (y 65), Sweep (y 125), Thru (y 185), Trace style (y 245, fw 0.2.71), Grid (y 305);
 // the rest of the stepper and the 50 % slots stay
-// empty (the sweep ranges both channels itself; CH2's Hold range is the CH2 menu's V/div)
+// empty (the sweep ranges both channels itself; CH2's Constant range is the CH2 menu's V/div)
 
 #define CP_XC             (UI_BAR_X + UI_BAR_W / 2)
 #define CP_EDGE_COLOR     0x00505050
@@ -1993,7 +2031,7 @@ static void build(bv_fold *d)
     f_step_text(add(d, ROW_VALUE2, "Stop")->value, bv.stop_i);
     fmt_uint(add(d, ROW_VALUE, "Points")->value, pts_tab[bv.points_i & 3]);
     fmt_str(add(d, ROW_VALUE, "Settle")->value, settle_names[bv.settle % BODE_SETTLE_COUNT]);
-    fmt_str(add(d, ROW_VALUE, "CH2 range")->value, ch2_range_text());
+    ch2_range_text(add(d, ROW_VALUE, "CH2 range")->value);
     sep = d->n;
     r = add(d, ROW_SINGLE, "");
     r->on = (uint8)single_state(&r->label, r->value);
@@ -2192,10 +2230,8 @@ static int fold_tap(bv_fold *d, int row, int dir)
       case 2: bv.points_i = (uint8)((bv.points_i + 1) & 3);                return 0;
       case 3: bv.settle = (uint8)((bv.settle + 1) % BODE_SETTLE_COUNT);    return 0;
       case 4:
-        //fw 0.2.93: Hold keeps the range CH2 has now (the row shows it); Auto forgets it
+        //fw 0.2.94: Constant sweeps on the CH2 menu's V/div (the row shows it); Auto ranges CH2 per point
         bv.ch2 ^= 1;
-        bv.hold_r2 = (bv.ch2 == BODE_CH2_HOLD) ? (uint8)((scopesettings.channel2.samplevoltperdiv < 6) ?
-                                                         scopesettings.channel2.samplevoltperdiv : 5) : HOLD_CHANNEL;
         return 0;
 
       default:
@@ -2449,7 +2485,6 @@ void bode_view_settings_restore(uint16 w0, uint16 w1, uint16 w2)
   {
     bv.settle    = (uint8)(w1 & 3);
     bv.ch2       = (uint8)((w1 >> 2) & 1);
-    bv.hold_r2   = HOLD_CHANNEL;
     bv.show      = (uint8)((w1 >> 3) & 3);
     bv.cursor_on = (uint8)((w1 >> 5) & 1);
     bv.axis      = (uint8)((w1 >> 6) & 1);
@@ -2477,7 +2512,6 @@ void bode_view_defaults(void)
   bv.points_i  = 2;
   bv.settle    = BODE_SETTLE_NORMAL;
   bv.ch2       = BODE_CH2_AUTO;
-  bv.hold_r2   = HOLD_CHANNEL;
   bv.show      = BU_SHOW_OVERLAY;
   bv.axis      = BU_AXIS_LOG;
   bv.cursor_on = 0;
@@ -2598,7 +2632,6 @@ int bode_view_ctrl(const uint8 *req, uint8 *resp, uint16 *detail)
         bv.points_i = (uint8)i;
     bv.settle = c.settle;
     bv.ch2    = c.ch2_mode;
-    bv.hold_r2 = HOLD_CHANNEL;          //Hold: CH2's range when the sweep starts (row 60)
     host_cfg  = c;
     host_cfg_valid = 1;
   }
@@ -2698,6 +2731,21 @@ int bode_view_ctrl(const uint8 *req, uint8 *resp, uint16 *detail)
       resp[40 + 2 * k] = (uint8)st[k];
       resp[41 + 2 * k] = (uint8)(st[k] >> 8);
     }
+  }
+
+  //fw 0.2.94: the latest AUTO SET's CH2 verdict (0 Auto, 1 Constant, 0xFF none since boot), its reason, the points that
+  //counted and those left out, then the spread and the largest level (i16 centi-dB / centi-dBV)
+  {
+    int32 sp = bv.ac2.spread_mdb / 10, vm = bv.ac2.vmax_mdb / 10;
+
+    sp = (sp > 32767) ? 32767 : sp;
+    vm = (vm > 32767) ? 32767 : (vm < -32768) ? -32768 : vm;
+    resp[50] = bv.ac2.verdict;
+    resp[51] = bv.ac2.reason;
+    resp[52] = bv.ac2.n;
+    resp[53] = bv.ac2.junk;
+    resp[54] = (uint8)sp; resp[55] = (uint8)((uint32)sp >> 8);
+    resp[56] = (uint8)vm; resp[57] = (uint8)((uint32)vm >> 8);
   }
   return PC_OK;
 }

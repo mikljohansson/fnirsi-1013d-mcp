@@ -561,14 +561,14 @@ const char *const bu_warn[BU_W_COUNT] =
   "Sweep stopped: the PC took over",
   "No frequency in this range: change Start or Stop",
   "Thru sweep: both probe tips on the DUT input",
-  "CH2 overrange: set CH2 range Auto or raise V/div",
+  "CH2 overrange: increase V/div in CH2 menu or Auto",
   "CH1 level low: the DUT loads the 1 kOhm source",
   "Thru does not match this sweep: measure again",
   "DC level beyond the offset range: AC-couple DUT",
   "Auto set: no response: CH2 tip on the DUT output?",
   "Trigger was EXT (the generator's pin): now CH1",
   "Roll off for the frequency response",
-  "No corner from 100 Hz to 10 MHz: span kept",
+  "No corner from 100 Hz to 10 MHz",
   "Auto set cancelled: settings kept",
   "Nothing to save: run a sweep first",
   "Frequency response needs FPGA 0x1534 or later",
@@ -579,6 +579,7 @@ const char *const bu_warn[BU_W_COUNT] =
   "Auto set: CH1 level low: CH1 tip on the DUT input?",
   "Auto set: peak not confirmed: sweep by hand",
   "CH1 level low above 2 MHz: the x1 probe rolls off",
+  "CH2 small: decrease V/div in CH2 menu or Auto",
 };
 
 const char *const bu_instruction[2] =
