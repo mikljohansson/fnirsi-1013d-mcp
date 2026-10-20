@@ -9,6 +9,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - **ACQ Average as one behaviour** (owner decision 2026-10-20 21:59, "consistency matters"): the MCU path becomes a true
   mean of N records like the FPGA path (N by the 40 ms budget, about 2 ms per record read), Atlan's running (trace + previous)
   / 2 average goes; same picture whatever the filter and time base. After the 0.3.0 tag unless the owner says otherwise.
+- **The card-only path is dropped** (owner 22:02: "if people want this firmware they also need to flash the FPGA"): the
+  FPGA flash is a mandatory install step; docs-one carries it through the guides and the README.
+- **UI additions need the owner's selection first** (owner 22:05): most epics may be MCP-only; the candidates for a device
+  control are listed for discussion before any UI design (fpga-spec reports them; the coordinator's proposal is in the
+  22:0x reply: Type row for pulse width and Nth edge, a peak-detect row in ACQ, the counter feeding the cards only).
 - **One supported FPGA configuration** (owner decision 2026-10-20 21:52, reaffirmed 21:59: "every firmware version only
   supports the latest FPGA bitstream ... detect this and show a loud banner"; the banner is part of the work: "our firmware doesn't need to be compatible with
   anything besides our own FPGA bitstream"): the firmware targets the project's current bitstream (0x153B) only. Implied
@@ -268,6 +273,21 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   in `pc_cmds.h` and `mcp/pyproject.toml`, release commit with CI green, SD package, release candidate persisted plus the
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
+
+- fpga-spec (Opus, dispatched 22:01): docs/plans/fpga-0x153c.md, the design and register contract for the roadmap epics
+  the owner chose at 22:00 (advanced triggers, peak detect, streaming logger, pulse pattern generator with trigger output,
+  hardware measurements, software on new data; no deeper memory; testers later): generations, register map with ranges per
+  feature, caps bits, resource budget, the logger's sustainable rate from the bus and USB arithmetic, simulation and bench
+  plan, parallel implementation briefs. 22:05 addendum: UI-agnostic; UI candidates as a list for the owner's decision.
+- fw-one (Opus, dispatched 22:02): the two owner decisions in firmware: one built-for bitstream constant (0x153B), the
+  mismatch banner with Diagnostics/Settings/USB drive reachable, compat code removed (stock, Atlan, enc_heal workarounds,
+  legacy geometry, version-word branches, EF2/EP4 arms, simulator variants), one averaging behaviour (true N-record mean on
+  the MCU path too). 22:03: first-run.md and screens.md left to docs-one.
+- docs-one (Opus, dispatched 22:04): the owner's 22:02 decision "drop the SD card alone path": README, front page, install,
+  prepare, runbook, first-run (banner placeholders), screens, calibration, release notes, announcement, BITSTREAMS.md rule,
+  install skill, roadmap status paragraph with the decisions and chosen epics.
+- mcp-soft (Opus, dispatched 22:06): host-side tools on captured data, no firmware: scope_decode (UART/SPI/I2C), scope_mask_test,
+  scope_export_csv, scope_dvm; simulator scenarios; docs and skill line.
 
 - readme-gen rounds 2 and 3 (21:41 / 21:52 briefs, done 21:48 / 21:55, merged 21:51 as ac4c6a5; README 181 lines, 21/22 links,
   docs/screenshots/scope-deep-memory.png pending from the bench): the visitor review and the dry run folded in, the owner's
