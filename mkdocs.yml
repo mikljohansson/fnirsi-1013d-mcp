@@ -82,5 +82,6 @@ nav:
       - Protocol: protocol.md
       - UI guidelines: ui-guidelines.md
       - Flashing the FPGA from the MCU: fpga-flash-from-mcu.md
+      - Hardware preparation (engineering reference): hardware-prep.md
       - Releasing: releasing.md
       - Bench log: hardware-status.md
