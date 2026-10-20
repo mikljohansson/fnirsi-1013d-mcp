@@ -13,11 +13,11 @@ afterwards (a new firmware commit invalidates every box from "Versions" down).
 
 ## FPGA bitstreams
 
-- [ ] 0x1538 pinned by fpga-gen7: built from a committed `fpga/al3/src` (`SRC_REV=<commit> ./build.sh`), testbench run, hashes
+- [x] 0x153A pinned by fpga-gen9 (2026-10-20; was 0x1538 by fpga-gen7): built from a committed `fpga/al3/src` (`SRC_REV=<commit> ./build.sh`), testbench run, hashes
       in `fpga/al3/README.md`.
-- [ ] 0x1538 flashed on the owner's unit and benched: `#VER fpga=0x1538`, the full-rate encode check clean, the calibration
+- [x] 0x153A flashed on the owner's unit and benched 2026-10-20 (`#VER fpga=0x153a`, wizard trains 0x08E3, band sweep clean; was 0x1538): the full-rate encode check clean, the calibration
       wizard passes, the release candidate firmware runs on it (`docs/hardware-status.md` line).
-- [ ] `fpga/al3/dist/al3-0x1538.bin` added; its `manifest.json` entry (size, sha256, padded sha256, full source commit,
+- [x] `fpga/al3/dist/al3-0x153A.bin` added (2026-10-20 recommended); its `manifest.json` entry (size, sha256, padded sha256, full source commit,
       `min_firmware`, `status: recommended`, bench record); the 0x1538 rows of `BITSTREAMS.md` filled.
 - [ ] Status of the older images decided (0x1533-0x1536 `supported` / `unbenched`, 0x1537 `withdrawn`), and the
       "Use the recommended image" paragraph of `BITSTREAMS.md` still true.

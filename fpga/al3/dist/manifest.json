@@ -127,7 +127,7 @@
    "flash_image_sha256": "77672b5a38f2225e98cdecd7de012850121b6343525392d973e41d39b42719d0",
    "source_commit": "f735fae6db36e30d410e2fd2187f5fe927a38ad8",
    "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
-   "min_firmware": "0.2.62",
+   "min_firmware": "0.2.81",
    "features": [
     "as 0x1539",
     "ADC data captured through IOB DDR registers at a selectable 2.5 ns stage per core, against the write clock edge the core is encoded on (fixes the garbled A/B cores near multi-bit code boundaries of 0x1537..0x1539, at every sample rate)",
@@ -135,8 +135,8 @@
     "capture self-check: outlier counters per core (read 0x36), stage and B-reference register 0x63, threshold 0x64",
     "0x53 bits 3/4 inert; legacy data 4 words (200 MSa/s) / 3 words later than 0x1539, EXT not delayed"
    ],
-   "status": "unbenched",
-   "bench": "built 2026-10-19 22:19 (fpga-gen9); tb 11 steps pass incl. tb_adccap (AD9288 transition model, pad delay sweep, all rates); capture margins >= 1.33 ns at the power-on stages at TT (fpga/al3/README.md section 10); not flashed; bench checks 1..7 of section 10"
+   "status": "recommended",
+   "bench": "flashed 2026-10-20 10:03 (pre-write dump = 0x1539, verified); benched 10-20 10:04-10:49 on fw 0.2.79..0.2.82: the wizard trains the capture stages (this unit 0x08E3: CH1 A3 B4, CH2 A3 B4; the power-on 0x08E4 was bad for CH1 A at two codes), then the dcoffset sweep over codes 109..135 at 200 / 100 / 50 / 20 MSa/s is clean on every core (no rails, no jumps, max std 1.0 / 1.5 / 3.6 / 2.5 at 200 MSa/s) and the self-check flagged 0 of 18865 captures; the 0x64 threshold must be 32 (fw 0.2.80+: 8 sits under CH2's 3-code noise at 5 V/div); the fault of 0x1535..0x1539 is gone. Needs fw 0.2.81+ for the training (older firmware runs the power-on stages, which can be wrong per unit). Built 2026-10-19 22:19 (fpga-gen9); tb 11 steps pass incl. tb_adccap (AD9288 transition model, pad delay sweep, all rates); capture margins >= 1.33 ns at the power-on stages at TT (fpga/al3/README.md section 10); not flashed; bench checks 1..7 of section 10"
   }
  ]
 }
