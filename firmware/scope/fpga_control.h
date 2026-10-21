@@ -95,7 +95,7 @@ void   fpga_prepare_correction(PCHANNELSETTINGS settings);                //the 
 #define FPGA_WHO_UI     0         //UI acquisition and menus (default)
 #define FPGA_WHO_HOST   1         //PC protocol commands (pc_poll)
 #define FPGA_WHO_CAL    2         //calibration wizard measurements
-#define FPGA_WHO_PROBE  3         //v4 class probe (acal_live.c)
+                                  //3: the v4 class probe (fw 0.2.50-0.2.104), retired
 #define FPGA_WHO_CHECK  4         //full-rate check's 0x0D re-write (enc_heal_hw.c)
 extern uint8 fpga_trace_who;
 extern uint8 fpga_trace_level;  //fw 0.2.72: 1 = every traced write as event 22, 0 = counted only (GET_EVENT_LOG flags)

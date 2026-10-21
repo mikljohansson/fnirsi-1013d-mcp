@@ -225,7 +225,7 @@ static void restart_words(pc_text *t, const uint32_t *v)
 // Sections
 
 //Callers of events 21 and 22 (FPGA_WHO_*)
-static const char *pc_who[5] = { "UI", "host", "calibration", "class probe", "full-rate check" };
+static const char *pc_who[5] = { "UI", "host", "calibration", "retired 3", "full-rate check" };
 
 static const char *pc_counter_names[PC_LINK_COUNTERS] =
 {
@@ -720,11 +720,6 @@ static void sec_cal_channel(pc_text *t, const uint8_t *c)
   pc_text_str(t, ", records ");
   pc_text_udec(t, g32(c + 272));
   pc_text_str(t, (c[256] & 0x10) ? " (applied now)" : " (not applied now)");
-  pc_text_str(t, "; full-class common mode ");
-  pc_text_fix(t, (int16_t)g16(c + 280), 256, 3);
-  pc_text_str(t, " codes from ");
-  pc_text_udec(t, g16(c + 282));
-  pc_text_str(t, " probes");
   pc_text_nl(t);
 
   if(c[0] == 0)

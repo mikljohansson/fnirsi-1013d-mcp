@@ -141,7 +141,6 @@ void pc_hal_channel_read(int ch, pc_hw_channel *c)
   c->divider         = fpga_divider;
   c->cal2            = adc_cal[ch ? 1 : 0];
   c->trk             = acal_trk[ch ? 1 : 0];
-  c->cm              = acal_cms[ch ? 1 : 0];
 }
 
 void pc_hal_channel_write(int ch, const pc_hw_channel *c, uint8_t mask)
@@ -2790,14 +2789,6 @@ void pc_glue_ui_service(void)
   pc_right_bar_follow();
   pc_dec_follow_mode();
   pc_run_follow();
-
-  //Calibration v4 class probe (acal_live.c): only in the scope and spectrum views (the phosphor view's record rate would
-  //see the gap; not while Diagnostics shows), never while a host capture is armed or triggered (the probe resets the sample system) or the host
-  //holds the UI off the ring (READ_RAW hold). Never on a mismatched bitstream (fw-diag): the notice screen runs instead
-  //of the scope and the probe's arms wait on the FPGA without a bound
-  acal_live_service((pc_hal_display_mode() < PHOSPHOR_DISPLAY_MODE) && !ui_diag_active() && !pc_glue_fpga_mismatch() &&
-                    (!pc_ready || (!pc_sess.ui_hold && (pc_sess.acq_state != PC_ACQ_ARMED) &&
-                                   (pc_sess.acq_state != PC_ACQ_TRIGGERED))));
 }
 
 //fw 0.2.52 (pc_diag.c): the session for the report, the DS3231 for the calibration provenance

@@ -493,12 +493,12 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
 }
 
 //Correction for the channel's current settings (adc_cal.h): calibration data v3 when loaded and bound, with the v4
-//tracking folded in exactly as the readout does it (acal_v4_apply; protocol row 54)
+//tracking folded in exactly as the readout does it (acal_track_apply; protocol row 54)
 static void pc_channel_corr(const pc_hw_channel *c, acal_corr *k)
 {
   acal_correction(c->cal2_loaded ? &c->cal2 : 0, c->cal_offset, c->range, c->divider, c->dcoffset, c->dc_shift_value,
                   c->adc_a_comp, c->adc_b_comp, k);
-  acal_v4_apply(&c->trk, &c->cm, k);
+  acal_track_apply(&c->trk, k);
 }
 
 //uV per code x 256 at the BNC with a 1x probe, and the processed code of 0 V x 256 (P-8.5, protocol 1.10+: the v2 / v3
@@ -2654,10 +2654,6 @@ void pc_cal_body(int ch, uint8_t *resp)
 
     if((k.version == 3) && (k.cls == ACAL_FULL) && (!written || !dc.k))
       f |= 0x10;
-    if(c.cm.flags & ACAL_CM_DATA)
-      f |= 0x20;
-    if(c.cm.flags & ACAL_CM_LAST)
-      f |= 0x40;
 
     resp[256] = f;
     pc_put_u16(resp + 258, (uint16_t)c.trk.d_q8);
@@ -2667,9 +2663,7 @@ void pc_cal_body(int ch, uint8_t *resp)
     pc_put_u32(resp + 272, c.trk.records);
     pc_put_u16(resp + 276, c.trk.last_pairs);
     pc_put_u16(resp + 278, c.trk.spread16);
-    pc_put_u16(resp + 280, (uint16_t)c.cm.cm_q8);
-    pc_put_u16(resp + 282, c.cm.probes);
-    pc_put_u32(resp + 284, (c.cm.flags & ACAL_CM_DATA) ? now - c.cm.last_ms : 0xFFFFFFFFu);
+    //280..287: the class probe's common mode (fw 0.2.50-0.2.104), 0 since the probe went with the gated class (0.2.105)
   }
 
   //1.16: provenance (sector 708 bytes 432..487) and the age in power-ons and operating minutes (row 55)

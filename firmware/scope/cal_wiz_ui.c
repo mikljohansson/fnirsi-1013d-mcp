@@ -549,7 +549,7 @@ static void cal_end(uint32 gen)
 
   fpga_set_sample_rate(scopesettings.samplerate);
 
-  //A raw divider a host wrote (SET_TIMEBASE raw) is not in the rate table: written back as it was (as the class probe)
+  //A raw divider a host wrote (SET_TIMEBASE raw) is not in the rate table: written back as it was
   if(fpga_divider != cal_backup_divider)
   {
     fpga_write_cmd(0x0D);
