@@ -32,7 +32,13 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.103 + fw-c6 + ui-sample (provisional, the coordinator numbers it) - 2026-10-21 (protocol 1.26 unchanged)
+#### 0.2.104 - 2026-10-21 (protocol 1.26, row 66): built for FPGA 0x153C
+
+One firmware for bitstream 0x153C: trigger types (pulse width, Nth edge, timeout) with hold-off, peak detect, the
+hardware counter, and the two device rows (Type in the trigger menu, Sample in ACQ). Merged from fw-c5, fw-c6, fw-c7,
+ui-type and ui-sample on 2026-10-21; numbered at the merge.
+
+**The ACQ Sample row and the peak bars (ui-sample).**
 
 - **ACQ Sample row** (`docs/plans/ui-rows.md` section 3; commits 7098449, 4a93304, acc1884, 09dac96): the ACQ menu is 478 px
   wide with the Memory column moved right by 98 px and **Sample** ("Normal" / "Peak") as the fourth box of the Roll /
@@ -44,7 +50,7 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   `peak_bars.c`), red when either byte is at 0 or 255; phosphor accumulates the bars; X-Y and the cards use the midpoints.
   Trace style greys while Peak; its value "Peak" is renamed **"Bars"**.
 
-#### 0.2.103 + fw-c6 (version provisional, the coordinator numbers it) - 2026-10-21 (protocol 1.26, row 66 "Peak detect", provisional)
+**Peak detect (fw-c6).**
 
 - **Peak detect** on FPGA 0x153C (`docs/plans/fpga-0x153c.md` section 4, item C6): **SET_DECIM filter 4** sets Sample Peak
   (the Filter's K / FIR kept behind it for the way back; the FIR flag with it is E_BAD_ARG 1), filter 0..3 sets Normal. The
@@ -63,7 +69,7 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
 - Host tests: `test_fpga_bus` test_peak (the bus model writes { max, min } words of synthetic windows), `test_session`
   test_peak_math / test_peak_protocol, `test_seq`; vectors: three refusals and the `decim_peak` maths section (134 total).
 
-#### 0.2.103 + fw-c7 (version provisional, the coordinator numbers it) - 2026-10-21 (protocol 1.26 provisional, row 66 addition)
+**The hardware counter (fw-c7).**
 
 - **Hardware counter** (FPGA 0x153C, item C7): the firmware configures the counter at boot (0x62 = level 128 / hysteresis 6,
   0x61 = gate 100 ms on the trigger source) and reads its 16-byte snapshot once per screen pass (17 bus strobes, about
@@ -80,7 +86,7 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   `host_` vectors (mcp-c8).
 - Host tests: `test_fpga_bus` test_counter / test_counter_derive on the bus model's synthetic square waves,
   `test_session` test_counter, `test_ui` test_counter_cards; six 1.26 counter vectors (137 total).
-#### 0.2.103 + ui-type (version provisional, the coordinator numbers it) - 2026-10-21 (protocol 1.26 unchanged)
+**The trigger menu's Type row (ui-type).**
 
 - **Trigger type in the trigger menu** (`docs/plans/ui-rows.md` section 2; FPGA 0x153C): a sixth row "Trigger" / "type"
   with Edge, Pulse, Nth. Under Pulse the edge row reads "Pulse" / "polarity" (Positive / Negative) and two rows follow:
@@ -105,7 +111,7 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   settings words, the glyphs as pixels), `test_acq_view` the notice queue, `test_ui` the hints; `test_ui_diag` follows
   the 0x153C built-for word (four 0x153B literals left by fw-c5).
 
-#### 0.2.103 + fw-c5 (version provisional, the coordinator numbers it) - 2026-10-21 (protocol 1.26 provisional, row 66)
+**Trigger types and hold-off (fw-c5).**
 
 - Built for FPGA bitstream **0x153C** (`PC_FW_FPGA_VERSION`; the mismatch text follows the constant): a scope on 0x153B shows
   the notice until fpga-c4's bitstream is flashed. Caps bits 2 HOLDOFF (0x1B is the trigger hold-off in 5 ns units) and
