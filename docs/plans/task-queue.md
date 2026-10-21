@@ -350,6 +350,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   runbook). Follow-ups: docs/mcp-tools.md capability rows and agent-measurement-guide.md line ~58 still say "on 0x1534 /
   0x1536" (fix with fw-one's merge, when the caps become fixed per firmware); calibration.md's "ADC readout fault near
   code 128" row removed although the firmware message may still exist (fw-one removes or keeps the message; align then).
+- fpga-c3 (done 03:3x, merged 03:34 as f629cec): C3 counter with min/max (0x61, 0x62, read 0x35 = 16 bytes, 17 strobes per
+  read); tb_counter 115 checks both seeds; full run.sh 16 steps ALL PASS on the merged C1+C3 source both seeds; TD +347 LUT
+  alone, merged C1+C3 6079 LUT (70 %) with 8 setup errors (-0.763 ns) on the sequencer's q_pass adder: placement spread, C4
+  re-rolls or pipelines it. Firmware note: a 0x0D/0x53 write mid-gate adds or drops one edge; rewrite 0x61 after the settle
+  wait or skip the first result after a rate change. Tool note: long WSL jobs need setsid nohup (a 22-min PowerShell
+  background task was killed).
 - fpga-c1 (done 2026-10-21 00:xx, merged 01:07 as da4dc6e): C1 trigger types + hold-off; tb_trigtypes 1293 checks on two
   seeds, full run.sh ALL PASS on 12345 and 4242; TD 5721 LUT (+731 over 0x153B) / 4.739 ns met after four timing re-rolls;
   deviations: 0x1B = 0 releases a running hold-off at once, the qualifier is held in reset until the first swc_adv edge after
